@@ -1,0 +1,8 @@
+{
+  "id": "auth",
+  "title": "Auth",
+  "deps": [],
+  "routes": [],
+  "ssr": "",
+  "be": "mods/auth/auth.so"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "poem",
+  "title": "Poem",
+  "deps": ["ssr", "mpfd"],
+  "routes": ["/poem", "/poem/add", "/poem/:id"],
+  "ssr": "mods/poem/ssr/index.tsx",
+  "be": "mods/poem/poem.so"
+}

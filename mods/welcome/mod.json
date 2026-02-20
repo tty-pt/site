@@ -1,0 +1,8 @@
+{
+  "id": "welcome",
+  "title": "Welcome",
+  "deps": [],
+  "routes": [],
+  "ssr": "",
+  "be": "mods/welcome/welcome.so"
+}

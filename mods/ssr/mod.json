@@ -1,0 +1,8 @@
+{
+  "id": "ssr",
+  "title": "SSR",
+  "deps": [],
+  "routes": [],
+  "ssr": "",
+  "be": "mods/ssr/ssr.so"
+}
