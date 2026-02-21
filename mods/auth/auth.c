@@ -7,8 +7,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <crypt.h>
-#include <fcntl.h>
-#include <sys/mman.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
@@ -17,41 +15,59 @@
 #include "papi.h"
 #include "auth.h"
 
+#define SESSIONS_DIR "./sessions"
+
 ndx_t ndx;
-
-uint32_t auth_sessions_hd;
-
-#define MAX_COOKIE_LEN 128
+static uint32_t sessions_hd;
 
 static void
 rand_token(char *buf, size_t len)
 {
-	snprintf(buf, len, "%llx.%llx.%llx", 
-		(unsigned long long)time(NULL),
-		(unsigned long long)rand(),
-		(unsigned long long)getpid());
+	static const char hex[] = "0123456789abcdef";
+	FILE *fp = fopen("/dev/urandom", "r");
+	if (!fp) {
+		snprintf(buf, len, "%08llx%08llx",
+			(unsigned long long)time(NULL),
+			(unsigned long long)rand());
+		return;
+	}
+	size_t i = 0;
+	while (i + 1 < len) {
+		int c = fgetc(fp);
+		if (c == EOF) break;
+		buf[i++] = hex[(c >> 4) & 0xf];
+		buf[i++] = hex[c & 0xf];
+	}
+	buf[i] = '\0';
+	fclose(fp);
 }
 
 static void
-get_query_param(char *qs, const char *key, char *out, size_t outlen)
+get_param(char *qs, const char *key, char *out, size_t outlen)
 {
+	if (!outlen) return;
 	out[0] = '\0';
-	if (!qs || !*qs || !key)
-		return;
-	size_t keylen = strlen(key);
-	char *p = qs;
-	while (*p) {
+	if (!qs || !key) return;
+	size_t klen = strlen(key);
+	for (char *p = qs; *p; ) {
 		while (*p == '&') p++;
-		if (!strncmp(p, key, keylen) && p[keylen] == '=') {
-			char *amp = strchr(p, '&');
-			size_t len;
-			if (amp)
-				len = amp - p - keylen - 1;
-			else
-				len = strlen(p) - keylen - 1;
+		if (!strncmp(p, key, klen) && p[klen] == '=') {
+			char *val = p + klen + 1;
+			size_t len = 0;
+			while (val[len] && val[len] != '&') len++;
 			if (len >= outlen) len = outlen - 1;
-			strncpy(out, p + keylen + 1, len);
+			memcpy(out, val, len);
 			out[len] = '\0';
+			for (size_t i = 0; i < len; i++) {
+				if (out[i] == '+') out[i] = ' ';
+				else if (out[i] == '%' && i + 2 < len) {
+					int c;
+					sscanf(out + i + 1, "%2x", &c);
+					out[i] = c;
+					memmove(out + i + 1, out + i + 3, len - i - 2);
+					len -= 2;
+				}
+			}
 			return;
 		}
 		while (*p && *p != '&') p++;
@@ -59,122 +75,70 @@ get_query_param(char *qs, const char *key, char *out, size_t outlen)
 }
 
 static void
-url_decode(const char *src, char *dst, size_t dstlen)
+get_cookie(char *cookie, const char *name, char *out, size_t outlen)
 {
-	size_t j = 0;
-	while (*src && j < dstlen - 1) {
-		if (*src == '%' && src[1] && src[2]) {
-			int c;
-			sscanf(src + 1, "%2x", &c);
-			dst[j++] = c;
-			src += 3;
-		} else if (*src == '+') {
-			dst[j++] = ' ';
-			src++;
-		} else {
-			dst[j++] = *src++;
+	if (!outlen) return;
+	out[0] = '\0';
+	if (!cookie) return;
+	size_t nlen = strlen(name);
+	for (char *p = cookie; *p; ) {
+		while (*p == ' ') p++;
+		if (!strncmp(p, name, nlen) && p[nlen] == '=') {
+			char *val = p + nlen + 1;
+			size_t len = 0;
+			while (val[len] && val[len] != '&' && val[len] != ';' && val[len] != ' ') len++;
+			if (len >= outlen) len = outlen - 1;
+			memcpy(out, val, len);
+			out[len] = '\0';
+			return;
 		}
+		while (*p && *p != ';') p++;
+		if (*p) p++;
 	}
-	dst[j] = '\0';
-}
-
-static int
-verify_password(const char *password, const char *hash)
-{
-	if (!password || !hash || !*password || !*hash)
-		return 0;
-	char *result = crypt(password, hash);
-	if (!result)
-		return 0;
-	return strncmp(result, hash, 60) == 0;
-}
-
-static int
-find_hash_in_file(const char *filename, const char *username, char *hash_out, size_t hash_size)
-{
-	int fd = open(filename, O_RDONLY);
-	if (fd < 0)
-		return 0;
-
-	struct stat sb;
-	if (fstat(fd, &sb) == -1 || sb.st_size == 0) {
-		close(fd);
-		return 0;
-	}
-
-	char *mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (mapped == MAP_FAILED) {
-		close(fd);
-		return 0;
-	}
-
-	char copy[sb.st_size + 1];
-	memcpy(copy, mapped, sb.st_size);
-	copy[sb.st_size] = '\0';
-	munmap(mapped, sb.st_size);
-	close(fd);
-
-	char *p = copy;
-	size_t userlen = strlen(username);
-	int found = 0;
-
-	while (*p) {
-		char *colon = strchr(p, ':');
-		if (!colon)
-			break;
-		if (colon - p == (int)userlen && strncmp(p, username, userlen) == 0) {
-			char *eol = strchr(colon + 1, '\n');
-			size_t hashlen = eol ? (size_t)(eol - colon - 1) : strlen(colon + 1);
-			if (hashlen >= hash_size)
-				hashlen = hash_size - 1;
-			strncpy(hash_out, colon + 1, hashlen);
-			hash_out[hashlen] = '\0';
-			found = 1;
-			break;
-		}
-		p = strchr(p, '\n');
-		if (!p)
-			break;
-		p++;
-	}
-
-	return found;
 }
 
 static void
-auth_init_internal(void)
+respond(int fd, int status, const char *headers, const char *body)
 {
-	static int initialized;
-	if (initialized)
-		return;
-	initialized = 1;
-
-	auth_sessions_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	const char *msg = "Error";
+	if (status == 200) msg = "OK";
+	else if (status == 303) msg = "See Other";
+	else if (status == 400) msg = "Bad Request";
+	else if (status == 401) msg = "Unauthorized";
+	ndc_writef(fd, "HTTP/1.1 %d %s\r\n%s\r\n%s", status, msg,
+		headers ? headers : "", body ? body : "");
+	ndc_close(fd);
 }
 
-MODULE_API void
-auth_init(void)
+static int
+valid_id(const char *s)
 {
-	auth_init_internal();
+	if (!s || strlen(s) < 2 || strlen(s) > 32) return 0;
+	for (; *s; s++)
+		if (!((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+		      (*s >= '0' && *s <= '9') || *s == '_' || *s == '-'))
+			return 0;
+	return 1;
 }
 
-MODULE_API const char *
+static int
+check_password(const char *pass, const char *hash)
+{
+	char *result = crypt(pass, hash);
+	return result && strncmp(result, hash, 60) == 0;
+}
+
+const char *
 auth_session_get(const char *token)
 {
-	auth_init_internal();
-	if (!token || !*token)
-		return NULL;
-
+	if (!token || !*token) return NULL;
 	static char user[64];
 	char path[256];
-	snprintf(path, sizeof(path), "./sessions/%s", token);
+	snprintf(path, sizeof(path), "%s/%s", SESSIONS_DIR, token);
 	FILE *fp = fopen(path, "r");
-	if (!fp)
-		return NULL;
+	if (!fp) return NULL;
 	if (fgets(user, sizeof(user), fp)) {
-		size_t len = strlen(user);
-		if (len > 0 && user[len-1] == '\n')
-			user[len-1] = '\0';
+		user[strcspn(user, "\n")] = '\0';
 		fclose(fp);
 		return user;
 	}
@@ -182,192 +146,280 @@ auth_session_get(const char *token)
 	return NULL;
 }
 
-MODULE_API int
-auth_session_set(const char *token, const char *username)
+int
+auth_session_set(const char *token, const char *user)
 {
-	auth_init_internal();
-	if (!token || !*token || !username || !*username)
-		return -1;
-	return qmap_put(auth_sessions_hd, token, username);
+	if (!token || !user) return -1;
+	if (!sessions_hd) sessions_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	char path[256];
+	snprintf(path, sizeof(path), "%s/%s", SESSIONS_DIR, token);
+	FILE *fp = fopen(path, "w");
+	if (!fp) return -1;
+	fprintf(fp, "%s", user);
+	fclose(fp);
+	return qmap_put(sessions_hd, token, user);
 }
 
-MODULE_API void
+void
 auth_session_delete(const char *token)
 {
-	auth_init_internal();
-	if (!token || !*token)
-		return;
-	qmap_del(auth_sessions_hd, token);
+	if (!token) return;
+	if (sessions_hd) qmap_del(sessions_hd, token);
+	char path[256];
+	snprintf(path, sizeof(path), "%s/%s", SESSIONS_DIR, token);
+	unlink(path);
 }
 
 static void
-session_handler(int fd, char *body)
+h_session(int fd, char *body)
 {
-	(void) body;
-	char cookie[256] = { 0 };
+	(void)body;
+	char cookie[256] = {0}, token[128] = {0};
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	get_cookie(cookie, "QSESSION", token, sizeof(token));
+	const char *user = *token ? auth_session_get(token) : NULL;
+	respond(fd, 200, "Content-Type: text/plain\r\n", user ? user : "");
+}
 
-	char *token = NULL;
-	char *p = cookie;
-	while (*p) {
-		while (*p == ' ' || *p == '\t') p++;
-		if (!strncmp(p, "QSESSION=", 9)) {
-			token = p + 9;
-			char *amp = strchr(token, '&');
-			if (amp) *amp = '\0';
+static void
+h_login(int fd, char *body)
+{
+	char method[8] = {0}, doc_root[256] = {0};
+	ndc_env_get(fd, method, "REQUEST_METHOD");
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	if (strcmp(method, "POST") != 0) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Method not allowed");
+		return;
+	}
+
+	const char *root = *doc_root ? doc_root : ".";
+
+	char user[64] = {0}, pass[64] = {0}, ret[256] = {0};
+	get_param(body, "username", user, sizeof(user));
+	get_param(body, "password", pass, sizeof(pass));
+	get_param(body, "ret", ret, sizeof(ret));
+
+	if (!*user || !*pass) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Missing username or password");
+		return;
+	}
+
+	char shadow_path[512];
+	snprintf(shadow_path, sizeof(shadow_path), "%s/etc/shadow", root);
+	FILE *fp = fopen(shadow_path, "r");
+	if (!fp) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "No such user");
+		return;
+	}
+
+	char line[256], *hash = NULL;
+	size_t ulen = strlen(user);
+	while (fgets(line, sizeof(line), fp)) {
+		if (!strncmp(line, user, ulen) && line[ulen] == ':') {
+			static char h[128];
+			strncpy(h, line + ulen + 1, sizeof(h) - 1);
+			h[strcspn(h, "\n")] = '\0';
+			hash = h;
 			break;
 		}
-		while (*p && *p != '&') p++;
-		if (*p == '&') p++;
 	}
+	fclose(fp);
 
-	const char *user = NULL;
-	if (token && *token) {
-		user = auth_session_get(token);
-	}
-
-	if (user) {
-		ndc_writef(fd, "HTTP/1.1 200 OK\r\n");
-		ndc_writef(fd, "Content-Type: text/plain\r\n\r\n");
-		ndc_writef(fd, "%s", user);
-	} else {
-		ndc_writef(fd, "HTTP/1.1 200 OK\r\n");
-		ndc_writef(fd, "Content-Type: text/plain\r\n\r\n");
-	}
-	ndc_close(fd);
-}
-
-static void
-send_redirect(int fd, const char *location)
-{
-	ndc_writef(fd, "HTTP/1.1 303 See Other\r\n");
-	ndc_writef(fd, "Location: %s\r\n", location);
-	ndc_writef(fd, "\r\n");
-	ndc_close(fd);
-}
-
-static void
-authenticate(int fd, char *body, char *doc_root)
-{
-	char username[64] = { 0 };
-	char password[64] = { 0 };
-	char ret[256] = { 0 };
-
-	get_query_param(body, "username", username, sizeof(username));
-	get_query_param(body, "password", password, sizeof(password));
-	get_query_param(body, "ret", ret, sizeof(ret));
-
-	url_decode(username, username, sizeof(username));
-	url_decode(password, password, sizeof(password));
-	url_decode(ret, ret, sizeof(ret));
-
-	if (!*username || !*password) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Missing username or password");
-		ndc_close(fd);
+	if (!hash) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "No such user");
 		return;
 	}
 
-	char htpasswd_path[512];
-	snprintf(htpasswd_path, sizeof(htpasswd_path),
-		"%s/etc/shadow", doc_root[0] ? doc_root : ".");
-
-	char found_hash[128] = { 0 };
-	int found = find_hash_in_file(htpasswd_path, username, found_hash, sizeof(found_hash));
-
-	if (!found) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"No such user");
-		ndc_close(fd);
+	if (!check_password(pass, hash)) {
+		respond(fd, 401, "Content-Type: text/plain\r\n", "Invalid password");
 		return;
 	}
 
-	size_t hash_len = strlen(found_hash);
-	if (hash_len > 0 && found_hash[hash_len - 1] == '\n')
-		found_hash[hash_len - 1] = '\0';
-
-	if (!verify_password(password, found_hash)) {
-		ndc_writef(fd,
-			"HTTP/1.1 401 Unauthorized\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Invalid password");
-		ndc_close(fd);
-		return;
-	}
-
-	char user_dir[512];
-	snprintf(user_dir, sizeof(user_dir),
-		"%s/users/%s", doc_root[0] ? doc_root : ".", username);
+	char udir[512];
+	snprintf(udir, sizeof(udir), "%s/users/%s", root, user);
 	struct stat st;
-	if (stat(user_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Account not activated");
-		ndc_close(fd);
+	if (stat(udir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Account not activated");
 		return;
 	}
 
-	char token[MAX_COOKIE_LEN];
+	char token[64];
 	rand_token(token, sizeof(token));
+	auth_session_set(token, user);
 
-	auth_session_set(token, username);
-
-	char session_path[512];
-	snprintf(session_path, sizeof(session_path), "./sessions/%s", token);
-	FILE *sfp = fopen(session_path, "w");
-	if (sfp) {
-		fprintf(sfp, "%s", username);
-		fclose(sfp);
-	}
-
-	char redirect[300];
-	if (*ret) {
-		snprintf(redirect, sizeof(redirect), "%s", ret);
-	} else {
-		snprintf(redirect, sizeof(redirect), "/");
-	}
-
-	ndc_writef(fd, "HTTP/1.1 303 See Other\r\n");
-	ndc_writef(fd, "Set-Cookie: QSESSION=%s; SameSite=Lax\r\n", token);
-	ndc_writef(fd, "Location: %s\r\n\r\n", redirect);
-	ndc_close(fd);
+	char hdr[256];
+	snprintf(hdr, sizeof(hdr), "Set-Cookie: QSESSION=%s; SameSite=Lax\r\nLocation: %s\r\n",
+		token, *ret ? ret : "/");
+	respond(fd, 303, hdr, NULL);
 }
 
 static void
-login_handler(int fd, char *body)
+h_logout(int fd, char *body)
 {
-	char method[16] = { 0 };
-	char qs[512] = { 0 };
-	char doc_root[256] = { 0 };
+	(void)body;
+	char cookie[256] = {0}, qs[256] = {0}, token[128] = {0}, ret[256] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	ndc_env_get(fd, qs, "QUERY_STRING");
+	get_cookie(cookie, "QSESSION", token, sizeof(token));
+	get_param(qs, "ret", ret, sizeof(ret));
 
+	if (*token) auth_session_delete(token);
+
+	char hdr[256];
+	snprintf(hdr, sizeof(hdr), "Set-Cookie: QSESSION=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\nLocation: %s\r\n",
+		*ret ? ret : "/");
+	respond(fd, 303, hdr, NULL);
+}
+
+static void
+h_register(int fd, char *body)
+{
+	char method[8] = {0}, doc_root[256] = {0};
 	ndc_env_get(fd, method, "REQUEST_METHOD");
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	if (strcmp(method, "POST") != 0) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Method not allowed");
+		return;
+	}
+
+	const char *root = *doc_root ? doc_root : ".";
+
+	char user[64] = {0}, pass[64] = {0}, pass2[64] = {0}, email[128] = {0};
+	get_param(body, "username", user, sizeof(user));
+	get_param(body, "password", pass, sizeof(pass));
+	get_param(body, "password2", pass2, sizeof(pass2));
+	get_param(body, "email", email, sizeof(email));
+
+	if (!valid_id(user)) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Invalid username");
+		return;
+	}
+	if (strlen(pass) < 4) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Password too short");
+		return;
+	}
+	if (strcmp(pass, pass2) != 0) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Passwords don't match");
+		return;
+	}
+
+	char shadow_path[512], udir[512];
+	snprintf(shadow_path, sizeof(shadow_path), "%s/etc/shadow", root);
+	snprintf(udir, sizeof(udir), "%s/users/%s", root, user);
+
+	FILE *fp = fopen(shadow_path, "r");
+	if (fp) {
+		char line[256];
+		size_t ulen = strlen(user);
+		while (fgets(line, sizeof(line), fp)) {
+			if (!strncmp(line, user, ulen) && line[ulen] == ':') {
+				fclose(fp);
+				respond(fd, 400, "Content-Type: text/plain\r\n", "User exists");
+				return;
+			}
+		}
+		fclose(fp);
+	}
+
+	if (mkdir(udir, 0755) != 0) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Failed to create user");
+		return;
+	}
+
+	char path[512];
+	if (*email) {
+		snprintf(path, sizeof(path), "%s/email", udir);
+		fp = fopen(path, "w");
+		if (fp) { fprintf(fp, "%s", email); fclose(fp); }
+	}
+
+	char cmd[512], hash[128] = {0};
+	snprintf(cmd, sizeof(cmd), "%s/src/htpasswd/htpasswd %s %s", root, user, pass);
+	fp = popen(cmd, "r");
+	if (fp && fgets(hash, sizeof(hash), fp)) {
+		hash[strcspn(hash, "\n")] = '\0';
+		pclose(fp);
+		fp = fopen(shadow_path, "a");
+		if (fp) { fprintf(fp, "%s\n", hash); fclose(fp); }
+	} else if (fp) {
+		pclose(fp);
+	}
+
+	char rcode[32];
+	rand_token(rcode, sizeof(rcode));
+	snprintf(path, sizeof(path), "%s/rcode", udir);
+	fp = fopen(path, "w");
+	if (fp) { fprintf(fp, "%s", rcode); fclose(fp); }
+
+	fprintf(stderr, "Register: %s -> /confirm?username=%s&rcode=%s\n",
+		*email ? email : "no email", user, rcode);
+	respond(fd, 303, "Location: /welcome\r\n", NULL);
+}
+
+static void
+h_confirm(int fd, char *body)
+{
+	(void)body;
+	char qs[256] = {0}, doc_root[256] = {0}, user[64] = {0}, rcode[64] = {0};
 	ndc_env_get(fd, qs, "QUERY_STRING");
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	get_param(qs, "username", user, sizeof(user));
+	get_param(qs, "rcode", rcode, sizeof(rcode));
 
-	if (!strcmp(method, "POST")) {
-		authenticate(fd, body, doc_root);
+	if (!*user || !*rcode) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Missing parameters");
 		return;
 	}
+
+	const char *root = *doc_root ? doc_root : ".";
+
+	char path[512];
+	snprintf(path, sizeof(path), "%s/users/%s/rcode", root, user);
+	FILE *fp = fopen(path, "r");
+	if (!fp) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Invalid or expired code");
+		return;
+	}
+
+	char stored[64] = {0};
+	fgets(stored, sizeof(stored), fp);
+	fclose(fp);
+	stored[strcspn(stored, "\n")] = '\0';
+
+	if (strcmp(rcode, stored) != 0) {
+		respond(fd, 400, "Content-Type: text/plain\r\n", "Invalid code");
+		return;
+	}
+
+	unlink(path);
+
+	char token[64];
+	rand_token(token, sizeof(token));
+	auth_session_set(token, user);
+
+	char hdr[256];
+	snprintf(hdr, sizeof(hdr), "Set-Cookie: QSESSION=%s; SameSite=Lax\r\nLocation: /\r\n", token);
+	respond(fd, 303, hdr, NULL);
 }
 
 MODULE_API void
 ndx_install(void)
 {
-	auth_init_internal();
-	ndc_register_handler("/api/session", session_handler);
-	ndc_register_handler("POST:/login", login_handler);
+	if (!sessions_hd) sessions_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	ndc_register_handler("/api/session", h_session);
+	ndc_register_handler("POST:/login", h_login);
+	ndc_register_handler("/logout", h_logout);
+	ndc_register_handler("POST:/register", h_register);
+	ndc_register_handler("/confirm", h_confirm);
 }
 
 MODULE_API void
 ndx_open(void)
 {
-	auth_init_internal();
-	ndc_register_handler("/api/session", session_handler);
+	if (!sessions_hd) sessions_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	ndc_register_handler("/api/session", h_session);
+	ndc_register_handler("/logout", h_logout);
+	ndc_register_handler("/confirm", h_confirm);
 }
 
 MODULE_API ndx_t *

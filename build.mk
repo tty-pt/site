@@ -26,7 +26,10 @@ LDFLAGS += -L$(NDC_PREFIX)/lib -L$(QMAP_PREFIX)/lib \
 LDLIBS ?= -lndc -lqmap
 LDLIBS += $(EXTRA_LDLIBS)
 
-all: $(TARGET)
+all: dirs $(TARGET)
+
+dirs:
+	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)

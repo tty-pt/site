@@ -1,8 +1,0 @@
-{
-  "id": "login",
-  "title": "Login",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/login/login.so"
-}

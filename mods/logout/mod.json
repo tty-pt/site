@@ -1,8 +1,0 @@
-{
-  "id": "logout",
-  "title": "Logout",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/logout/logout.so"
-}

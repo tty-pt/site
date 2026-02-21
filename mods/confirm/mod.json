@@ -1,8 +1,0 @@
-{
-  "id": "confirm",
-  "title": "Confirm",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/confirm/confirm.so"
-}

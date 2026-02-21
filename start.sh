@@ -12,9 +12,13 @@ cleanup() {
 
 trap cleanup INT TERM
 
-cd /home/quirinpa/tty.pt/ssr
-/home/quirinpa/.deno/bin/deno run --allow-read --allow-net server.ts &
-deno_pid=$!
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-cd /home/quirinpa/tty.pt
-exec /home/quirinpa/ndc/bin/ndc -C /home/quirinpa/tty.pt -p 8080 -d
+if [ -f "$SCRIPT_DIR/ssr/server.ts" ]; then
+    cd "$SCRIPT_DIR/ssr"
+    /home/quirinpa/.deno/bin/deno run --allow-read --allow-net server.ts &
+    deno_pid=$!
+fi
+
+cd "$SCRIPT_DIR"
+exec /home/quirinpa/ndc/bin/ndc -C "$SCRIPT_DIR" -p 8080 -d

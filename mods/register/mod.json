@@ -1,8 +1,0 @@
-{
-  "id": "register",
-  "title": "Register",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/register/register.so"
-}
