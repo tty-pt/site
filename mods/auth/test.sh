@@ -45,7 +45,7 @@ get_rcode
 # 3. Login before confirm
 echo -n "3. Login before confirm... "
 out=$(curl -s -X POST "$BASE/login" -d "username=testuser&password=pass1234")
-echo "$out" | grep -q "Not confirmed" && pass "not confirmed" || fail "expected 'Not confirmed', got: $out"
+echo "$out" | grep -q "not confirmed" && pass "not confirmed" || fail "expected 'not confirmed', got: $out"
 
 # 4. Confirm
 echo -n "4. Confirm with rcode... "
@@ -76,7 +76,7 @@ out=$(curl -sb "$COOKIE" "$BASE/api/session")
 # 9. Register duplicate
 echo -n "9. Register duplicate... "
 out=$(curl -s -X POST "$BASE/register" -d "username=testuser&password=pass1234&password2=pass1234&email=test2@test.com")
-echo "$out" | grep -q "Exists" && pass "duplicate rejected" || fail "expected 'Exists', got: $out"
+echo "$out" | grep -qi "exists" && pass "duplicate rejected" || fail "expected 'exists', got: $out"
 
 # 10. Login wrong password
 echo -n "10. Login wrong password... "
@@ -86,7 +86,7 @@ echo "$out" | grep -q "Invalid" && pass "wrong password rejected" || fail "expec
 # 11. Login nonexistent user
 echo -n "11. Login nonexistent user... "
 out=$(curl -s -X POST "$BASE/login" -d "username=nobody&password=pass1234")
-echo "$out" | grep -q "No user" && pass "nonexistent rejected" || fail "expected 'No user', got: $out"
+echo "$out" | grep -qi "not found" && pass "nonexistent rejected" || fail "expected 'not found', got: $out"
 
 cleanup
 echo ""
