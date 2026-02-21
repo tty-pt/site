@@ -81,7 +81,7 @@ handle_poem_add(int fd, char *body, char *doc_root)
 		doc_root[0] ? doc_root : ".", POEM_ITEMS_PATH, id);
 	mkdir(item_path, 0755);
 
-	char dst_path[512];
+	char dst_path[1024];
 	snprintf(dst_path, sizeof(dst_path), "%s/pt_PT.html", item_path);
 
 	FILE *dfp = fopen(dst_path, "w");
@@ -90,7 +90,7 @@ handle_poem_add(int fd, char *body, char *doc_root)
 		fclose(dfp);
 	}
 
-	char comment_path[512];
+	char comment_path[1024];
 	snprintf(comment_path, sizeof(comment_path), "%s/comments.txt", item_path);
 	FILE *cfp = fopen(comment_path, "w");
 	if (cfp) fclose(cfp);
