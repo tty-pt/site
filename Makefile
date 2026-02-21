@@ -23,8 +23,16 @@ module.db: $(MOD_JSONS) scripts/gen_mods.py
 run:
 	./start.sh
 
+TEST_DIRS := $(sort $(dir $(wildcard mods/*/test.sh)))
+
+test:
+	@for d in $(TEST_DIRS); do \
+		echo "=== Running tests in $$d ==="; \
+		(cd $$d && ./test.sh) || exit 1; \
+	done
+
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 	rm -f core.so module.db mods.load
 
-.PHONY: all mods modules run clean
+.PHONY: all mods modules run clean test

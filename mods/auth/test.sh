@@ -18,9 +18,10 @@ cleanup() {
 
 start_server() {
 	cleanup
+	sleep 1
 	rm -f auth.qmap
 	/home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
-	sleep 2
+	sleep 3
 }
 
 get_rcode() {

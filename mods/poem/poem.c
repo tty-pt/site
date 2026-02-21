@@ -126,6 +126,7 @@ MODULE_API void
 ndx_install(void)
 {
 	ndc_register_handler("POST:/poem/add", poem_handler);
+	ndc_register_handler("GET:/poem/add", poem_handler);
 }
 
 MODULE_API void
