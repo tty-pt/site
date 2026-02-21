@@ -21,18 +21,16 @@ api_index_handler(int fd, char *body)
 	
 	uint32_t hd = qmap_open(db_path, "hd", QM_STR, QM_STR, 0xFF, QM_MIRROR);
 	if (!hd) {
-		ndc_writef(fd, "HTTP/1.1 500 Internal Server Error\r\n"
-			"Content-Type: application/json\r\n\r\n"
-			"{\"error\":\"Failed to open db\"}");
-		ndc_close(fd);
+		ndc_head(fd, 500);
+		ndc_header(fd, "Content-Type", "application/json");
+		ndc_body(fd, "{\"error\":\"Failed to open db\"}");
 		return;
 	}
-	
-	ndc_writef(fd, "HTTP/1.1 200 OK\r\n"
-		"Content-Type: application/json\r\n"
-		"Access-Control-Allow-Origin: *\r\n"
-		"\r\n"
-		"[");
+
+	ndc_head(fd, 200);
+	ndc_header(fd, "Content-Type", "application/json");
+	ndc_header(fd, "Access-Control-Allow-Origin", "*");
+	ndc_write(fd, "[", 1);
 	
 	uint32_t cur = qmap_iter(hd, NULL, 0);
 	const void *key, *value;

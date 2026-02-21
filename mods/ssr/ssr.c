@@ -226,10 +226,9 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
 {
     int proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (proxy_fd < 0) {
-        ndc_writef(client_fd, "HTTP/1.1 502 Bad Gateway\r\n"
-            "Content-Type: text/plain\r\n\r\n"
-            "Proxy error");
-        ndc_close(client_fd);
+        ndc_head(client_fd, 502);
+        ndc_header(client_fd, "Content-Type", "text/plain");
+        ndc_body(client_fd, "Proxy error");
         return 1;
     }
 
@@ -240,9 +239,9 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
     inet_pton(AF_INET, PROXY_HOST, &serv_addr.sin_addr);
 
     if (connect(proxy_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        ndc_writef(client_fd, "HTTP/1.1 502 Bad Gateway\r\n"
-            "Content-Type: text/plain\r\n\r\n"
-            "Could not connect to Deno");
+        ndc_head(client_fd, 502);
+        ndc_header(client_fd, "Content-Type", "text/plain");
+        ndc_body(client_fd, "Could not connect to Deno");
         close(proxy_fd);
         ndc_close(client_fd);
         return 1;
@@ -280,16 +279,15 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
             if (body) {
                 headers_done = 1;
                 size_t body_len = n - (body + 4 - buf);
-                ndc_writef(client_fd, "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/html\r\n"
-                    "Connection: close\r\n"
-                    "\r\n");
+                ndc_head(client_fd, 200);
+                ndc_header(client_fd, "Content-Type", "text/html");
+                ndc_header(client_fd, "Connection", "close");
                 if (body_len > 0) {
-                    write(client_fd, body + 4, body_len);
+                    ndc_write(client_fd, body + 4, body_len);
                 }
             }
         } else {
-            write(client_fd, buf, n);
+            ndc_write(client_fd, buf, n);
         }
     }
 
@@ -367,21 +365,19 @@ api_modules_handler(int fd, char *body)
 	char doc_root[256] = { 0 };
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
-	uint32_t hd = hd = open_modules_db(doc_root);
+	uint32_t hd = open_modules_db(doc_root);
 
 	if (!hd) {
-		ndc_writef(fd, "HTTP/1.1 500 Internal Server Error\r\n"
-			"Content-Type: application/json\r\n\r\n"
-			"[]");
-		ndc_close(fd);
+		ndc_head(fd, 500);
+		ndc_header(fd, "Content-Type", "application/json");
+		ndc_body(fd, "[]");
 		return;
 	}
 
-	ndc_writef(fd, "HTTP/1.1 200 OK\r\n"
-		"Content-Type: application/json\r\n"
-		"Access-Control-Allow-Origin: *\r\n"
-		"\r\n"
-		"[");
+	ndc_head(fd, 200);
+	ndc_header(fd, "Content-Type", "application/json");
+	ndc_header(fd, "Access-Control-Allow-Origin", "*");
+	ndc_write(fd, "[", 1);
 
 	uint32_t cur = qmap_iter(hd, NULL, 0);
 	const void *key;

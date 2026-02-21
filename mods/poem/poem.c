@@ -21,11 +21,9 @@ handle_poem_add(int fd, char *body, char *doc_root)
 	ndc_env_get(fd, content_type, "CONTENT_TYPE");
 
 	if (!strstr(content_type, "multipart/form-data")) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Expected multipart/form-data");
-		ndc_close(fd);
+		ndc_head(fd, 400);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_body(fd, "Expected multipart/form-data");
 		return;
 	}
 
@@ -45,21 +43,17 @@ handle_poem_add(int fd, char *body, char *doc_root)
 
 	char *file_part = strstr(body_start, "name=\"file\"");
 	if (!file_part) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"No file field");
-		ndc_close(fd);
+		ndc_head(fd, 400);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_body(fd, "No file field");
 		return;
 	}
 
 	char *file_content = strstr(file_part, "\r\n\r\n");
 	if (!file_content) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"No file content");
-		ndc_close(fd);
+		ndc_head(fd, 400);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_body(fd, "No file content");
 		return;
 	}
 	file_content += 4;
@@ -68,11 +62,9 @@ handle_poem_add(int fd, char *body, char *doc_root)
 	if (file_end) *file_end = 0;
 
 	if (!*id || !*file_content) {
-		ndc_writef(fd,
-			"HTTP/1.1 400 Bad Request\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Missing id or file");
-		ndc_close(fd);
+		ndc_head(fd, 400);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_body(fd, "Missing id or file");
 		return;
 	}
 
@@ -95,8 +87,8 @@ handle_poem_add(int fd, char *body, char *doc_root)
 	FILE *cfp = fopen(comment_path, "w");
 	if (cfp) fclose(cfp);
 
-	ndc_writef(fd, "HTTP/1.1 303 See Other\r\n"
-		"Location: /poem/\r\n\r\n");
+	ndc_head(fd, 303);
+	ndc_header(fd, "Location", "/poem/");
 	ndc_close(fd);
 }
 
@@ -119,19 +111,15 @@ poem_handler(int fd, char *body)
 	}
 
 	if (strcmp(method, "GET") == 0) {
-		ndc_writef(fd,
-			"HTTP/1.1 405 Method Not Allowed\r\n"
-			"Content-Type: text/plain\r\n\r\n"
-			"Method not allowed");
-		ndc_close(fd);
+		ndc_head(fd, 405);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_body(fd, "Method not allowed");
 		return;
 	}
 
-	ndc_writef(fd,
-		"HTTP/1.1 404 Not Found\r\n"
-		"Content-Type: text/plain\r\n\r\n"
-		"Not found");
-	ndc_close(fd);
+	ndc_head(fd, 404);
+	ndc_header(fd, "Content-Type", "text/plain");
+	ndc_body(fd, "Not found");
 }
 
 MODULE_API void
