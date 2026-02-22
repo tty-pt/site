@@ -1,3 +1,16 @@
 *.so
 *.db
 mods.load
+
+# Editor swap/temp files
+.start.sh.swo
+.start.sh.swp
+*.swo
+*.swp
+
+# Qmap / runtime artifacts
+*.qmap
+
+# Deno / node artifacts
+/node_modules/
+.deno/
