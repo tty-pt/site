@@ -12,3 +12,7 @@ mods.load
 # Deno / node artifacts
 /node_modules/
 .deno/
+
+# Local SSR dev files (optional)
+mods/ssr/server.ts
+ssr/ui.tsx
