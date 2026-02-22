@@ -1,3 +1,18 @@
 *.so
 *.db
 mods.load
+
+# Editor swap/temp files (only track the project-specific start.sh swaps)
+.start.sh.swo
+.start.sh.swp
+
+# Qmap / runtime artifacts
+*.qmap
+
+# Deno / node artifacts
+/node_modules/
+.deno/
+
+# Local SSR dev files (optional)
+mods/ssr/server.ts
+ssr/ui.tsx

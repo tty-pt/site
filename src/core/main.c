@@ -3,12 +3,6 @@
 #include <string.h>
 #include <stdio.h>
 
-void
-test_handler(int cfd, char *body) {
-	fprintf(stderr, "huh?\n");
-	/* ndc_writef(cfd, "Status: 200 OK\n\nOK"); */
-}
-
 static int
 load_modules_from_file(const char *path)
 {
@@ -34,11 +28,9 @@ load_modules_from_file(const char *path)
 
 void ndx_open(void)
 {
-	ndc_register_handler("/test", test_handler);
 	load_modules_from_file("./mods.load");
 }
 
 void ndx_install(void) {
-	ndc_register_handler("/test", test_handler);
 	load_modules_from_file("./mods.load");
 }
