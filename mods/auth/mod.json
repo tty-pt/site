@@ -2,7 +2,7 @@
   "id": "auth",
   "title": "Auth",
   "deps": [],
-  "routes": [],
-  "ssr": "",
+  "routes": ["/login", "/register", "/confirm-page", "/confirm"],
+  "ssr": "mods/auth/ssr/index.tsx",
   "be": "mods/auth/auth.so"
 }
