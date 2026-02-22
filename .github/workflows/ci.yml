@@ -18,4 +18,4 @@ jobs:
       - name: Build and run module tests
         run: make test
       - name: Run pages smoke tests
-        run: make pages-test || true
+        run: make pages-test

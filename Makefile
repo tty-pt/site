@@ -31,10 +31,16 @@ test: all
 		(cd $$d && ./test.sh) || exit 1; \
 	done
 
-pages-test: run
-	@echo "Waiting for site to become ready..."
+pages-test:
+	@echo "Starting site in background for pages smoke tests..."
+	@./start.sh > /tmp/start_sh.log 2>&1 &
+	@sleep 1
+	@echo "Running pages smoke tests against ${NDC_HOST:=127.0.0.1}:${NDC_PORT:=8080}"
 	@NDC_HOST=${NDC_HOST:=127.0.0.1} NDC_PORT=${NDC_PORT:=8080} \
 		sh tests/pages/10-pages-render.sh
+	@echo "Stopping background services"
+	@pkill -f "ndc -C" || true
+	@pkill -f "deno" || true
 
 integration-tests: all
 	@sh tests/integration/run_all.sh
