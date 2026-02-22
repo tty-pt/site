@@ -1,5 +1,5 @@
 import React from "https://esm.sh/react@18";
-import { Layout } from "../../ssr/ui.tsx";
+import { Layout } from "../ui.tsx";
 
 export default function ConfirmUI({ user, path, params }: { user: string | null; path: string; params: Record<string,string> }) {
   const u = params.u || "";
