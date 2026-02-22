@@ -1,5 +1,7 @@
 import React from "https://esm.sh/react@18";
-import { Layout } from "../../../ssr/ui.tsx";
+import PoemList from "./components/PoemList.tsx";
+import PoemAdd from "./components/PoemAdd.tsx";
+import PoemDetail from "./components/PoemDetail.tsx";
 import { dirname, fromFileUrl, resolve } from "https://deno.land/std@0.208.0/path/mod.ts";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
@@ -29,45 +31,7 @@ async function getPoemContent(id: string): Promise<string | null> {
   }
 }
 
-function PoemList({ user, path, poems }: { user: string | null; path: string; poems: string[] }) {
-  const buttons = poems.map((poem) =>
-    React.createElement("a", {
-      key: poem,
-      href: `/poem/${poem}/`,
-      className: "btn wsnw h"
-    }, poem)
-  );
-
-  return React.createElement(Layout, { user, title: "poem", path },
-    React.createElement("div", { className: "v f fic" },
-      buttons.length > 0 ? buttons : React.createElement("p", null, "No poems yet."),
-      React.createElement("a", { className: "btn", href: "/poem/add" }, "Add Poem")
-    )
-  );
-}
-
-function PoemAdd({ user, path }: { user: string | null; path: string }) {
-  return React.createElement(Layout, { user, title: "Add Poem", path },
-    React.createElement("form", {
-      action: "/poem/add",
-      method: "POST",
-      encType: "multipart/form-data",
-      className: "v f fic"
-    },
-      React.createElement("label", null, "ID: ", React.createElement("input", { required: true, name: "id" })),
-      React.createElement("label", null, "File: ", React.createElement("input", { required: true, type: "file", name: "file" })),
-      React.createElement("button", null, "Upload")
-    )
-  );
-}
-
-function PoemDetail({ user, path, id, html }: { user: string | null; path: string; id: string; html: string }) {
-  return React.createElement(Layout, { user, title: `poem: ${id}`, path },
-    React.createElement("div", { className: "v f fic" },
-      React.createElement("div", { dangerouslySetInnerHTML: { __html: html } })
-    )
-  );
-}
+// Components moved to separate TSX files under ./components
 
 export const routes = ["/poem", "/poem/add", "/poem/:id"];
 
