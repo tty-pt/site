@@ -1,0 +1,30 @@
+#!/bin/sh
+# Repository pre-commit hook template. It runs the test suite and blocks commits
+# if tests fail. To enable pages (end-to-end) smoke tests, set RUN_PAGES_TEST=1.
+
+set -eu
+
+echo "pre-commit: running quick test suite (make test)"
+
+if command -v make >/dev/null 2>&1; then
+  echo "pre-commit: running 'make test' (fast module tests)"
+  if ! make test >/dev/null; then
+    echo "pre-commit: make test failed — aborting commit"
+    # show failing test output for debugging
+    make test || true
+    exit 1
+  fi
+else
+  echo "pre-commit: make not found; skipping tests"
+fi
+
+if [ "${RUN_PAGES_TEST:-0}" = "1" ]; then
+  echo "pre-commit: running pages smoke tests (this may start services)"
+  if ! make pages-test; then
+    echo "pre-commit: pages smoke tests failed — aborting commit"
+    exit 1
+  fi
+fi
+
+echo "pre-commit: tests passed"
+exit 0
