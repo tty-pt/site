@@ -2,11 +2,9 @@
 *.db
 mods.load
 
-# Editor swap/temp files
+# Editor swap/temp files (only track the project-specific start.sh swaps)
 .start.sh.swo
 .start.sh.swp
-*.swo
-*.swp
 
 # Qmap / runtime artifacts
 *.qmap
