@@ -21,10 +21,10 @@ cleanup() {
 
 start_server() {
 	cleanup
-	sleep 1
+    sleep 2
 	mkdir -p "$POEM_DIR"
-	/home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
-	sleep 3
+    /home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
+    sleep 2
 }
 
 echo "=== Poem Module Tests ==="
@@ -35,24 +35,28 @@ echo -n "1. POST wrong content-type... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-d "id=test&file=content")
 [ "$code" = "400" ] && pass "400 for wrong content-type" || fail "expected 400, got $code"
+sleep 1
 
 # 2. POST missing id field (file has content but no id)
 echo -n "2. POST missing id field... "
 echo "test content" > "$TMPFILE"
 out=$(curl -s -X POST "$BASE/poem/add" -F "file=@$TMPFILE")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
+sleep 1
 
 # 3. POST missing file field
 echo -n "3. POST missing file field... "
 out=$(curl -s -X POST "$BASE/poem/add" \
 	-F "id=testpoem")
 echo "$out" | grep -q "No file field" && pass "missing file field detected" || fail "expected 'No file field', got: $out"
+sleep 1
 
 # 4. POST empty file (id provided but file is empty - same as missing)
 echo -n "4. POST empty file... "
 > "$TMPFILE2"
 out=$(curl -s -X POST "$BASE/poem/add" -F "id=testpoem2" -F "file=@$TMPFILE2")
 echo "$out" | grep -q "Missing id or file" && pass "empty file detected" || fail "expected 'Missing id or file', got: $out"
+sleep 1
 
 # 5. POST valid multipart
 echo -n "5. POST valid multipart... "
@@ -61,6 +65,7 @@ With multiple lines." > "$TMPFILE"
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-F "id=testpoem" -F "file=@$TMPFILE")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
+    
 
 # 6. Verify poem file was created
 echo -n "6. Poem file created... "
