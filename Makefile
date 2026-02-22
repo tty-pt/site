@@ -25,11 +25,19 @@ run:
 
 TEST_DIRS := $(sort $(dir $(wildcard mods/*/test.sh)))
 
-test:
+test: all
 	@for d in $(TEST_DIRS); do \
 		echo "=== Running tests in $$d ==="; \
 		(cd $$d && ./test.sh) || exit 1; \
 	done
+
+pages-test: run
+	@echo "Waiting for site to become ready..."
+	@NDC_HOST=${NDC_HOST:=127.0.0.1} NDC_PORT=${NDC_PORT:=8080} \
+		sh tests/pages/10-pages-render.sh
+
+integration-tests: all
+	@sh tests/integration/run_all.sh
 
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
