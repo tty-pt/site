@@ -152,23 +152,23 @@ mpfd_handler(int fd, char *body)
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
 	if (strcmp(method, "POST") != 0) {
-		ndc_head(fd, 405);
 		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 405);
 		ndc_body(fd, "Method not allowed");
 		return;
 	}
 
 	if (!strstr(content_type, "multipart/form-data")) {
-		ndc_head(fd, 415);
 		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 415);
 		ndc_body(fd, "Expected multipart/form-data");
 		return;
 	}
 
 	parse_multipart(body, content_type, doc_root);
 
-	ndc_head(fd, 200);
 	ndc_header(fd, "Content-Type", "text/plain");
+	ndc_head(fd, 200);
 	ndc_body(fd, "Parsed");
 }
 

@@ -17,7 +17,7 @@ modules:
 
 module.db: $(MOD_JSONS) scripts/gen_mods.py
 	@rm -f $@ mods.load
-	@python3 scripts/gen_mods.py --mods-dir mods --mods-load mods.load | \
+	@python3 scripts/gen_mods.py --mods-dir mods --mods-load mods.load --roots "auth,poem" | \
 		while read -r line; do qmap -p "$$line" $@; done
 
 run:
@@ -25,13 +25,13 @@ run:
 
 TEST_DIRS := $(sort $(dir $(wildcard mods/*/test.sh)))
 
-test: all
+unit-tests: all
 	@for d in $(TEST_DIRS); do \
 		echo "=== Running tests in $$d ==="; \
 		(cd $$d && ./test.sh) || exit 1; \
 	done
 
-pages-test:
+pages-test: all
 	@echo "Starting site in background for pages smoke tests..."
 	@./start.sh > /tmp/start_sh.log 2>&1 &
 	@sleep 1
@@ -42,6 +42,8 @@ pages-test:
 	@pkill -f "ndc -C" || true
 	@pkill -f "deno" || true
 
+test: unit-tests pages-test
+
 integration-tests: all
 	@sh tests/integration/run_all.sh
 
@@ -49,4 +51,4 @@ clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 	rm -f core.so module.db mods.load
 
-.PHONY: all mods modules run clean test
+.PHONY: all mods modules run clean test unit-tests pages-test integration-tests

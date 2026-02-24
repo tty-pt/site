@@ -19,17 +19,17 @@ api_index_handler(int fd, char *body)
 	char db_path[512];
 	snprintf(db_path, sizeof(db_path), "%s/items/index-en.db", doc_root[0] ? doc_root : ".");
 	
-	uint32_t hd = qmap_open(db_path, "hd", QM_STR, QM_STR, 0xFF, QM_MIRROR);
+	uint32_t hd = qmap_open(db_path, "hd", QM_STR, QM_STR, 0xFF, 0);
 	if (!hd) {
-		ndc_head(fd, 500);
 		ndc_header(fd, "Content-Type", "application/json");
+		ndc_head(fd, 500);
 		ndc_body(fd, "{\"error\":\"Failed to open db\"}");
 		return;
 	}
 
-	ndc_head(fd, 200);
 	ndc_header(fd, "Content-Type", "application/json");
 	ndc_header(fd, "Access-Control-Allow-Origin", "*");
+	ndc_head(fd, 200);
 	ndc_write(fd, "[", 1);
 	
 	uint32_t cur = qmap_iter(hd, NULL, 0);

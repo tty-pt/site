@@ -1,6 +1,14 @@
 # NDC Site (ndc + Deno SSR)
 
+> For developers, see [AGENTS.md](./AGENTS.md) for development guidelines.
+
 Small web site built as an ndc application with a Deno-based SSR backend. The repository contains the ndc core, several modules (auth, poem, mpfd, index_api) and an SSR proxy module that forwards requests to a Deno SSR server.
+
+## Architecture
+
+This site uses ndc as the HTTP server, with ndx for module loading and qmap for data storage. SSR pages are rendered via a Deno SSR backend.
+
+Request flow: Client → ndc (8080) → ssr.so → Deno SSR (3000) → React
 
 Quick start
 - Build native modules and run module tests: `make test`
@@ -12,12 +20,17 @@ Requirements
 - `deno` installed at the path used by `start.sh` (or edit `start.sh` to point to your deno)
 - `ndc` and `qmap` libs available on your system (the Makefile expects them under `/home/quirinpa` in this tree; adapt `Makefile`/env as needed)
 
+Library dependencies
+- **qmap** v0.6.0 — Key-value map library with file persistence
+- **ndx** v0.2.0 — Plugin/module system with dependency loading
+- **ndc** v1.0.0 — HTTP(S) + WebSocket server framework
+
 Repository layout
 - `mods/` — ndc modules (each has a `mod.json` and C/Makefile)
 - `mods/ssr/ssr.c` — SSR proxy implementation (parses upstream response and forwards via ndc APIs)
 - `mods/ssr/server.ts` — Deno SSR server (optional local file; not tracked by default)
 - `tests/pages/` — small page smoke tests and helpers
-- `AGENT_TESTING.md` — guidelines for agents to run tests on each change
+- `AGENTS.md` — guidelines for agents to run tests on each change
 - `.githooks/pre-commit` — sample pre-commit hook that runs `make test` (not installed automatically)
 
 Testing rules (agents and humans)

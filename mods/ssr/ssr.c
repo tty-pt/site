@@ -117,7 +117,7 @@ static uint32_t
 open_modules_db(const char *doc_root)
 {
 	(void) doc_root;
-	return qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, QM_MIRROR);
+	return qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, 0);
 }
 
 static int
@@ -274,8 +274,8 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
 {
     int proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (proxy_fd < 0) {
-        ndc_head(client_fd, 502);
         ndc_header(client_fd, "Content-Type", "text/plain");
+        ndc_head(client_fd, 502);
         ndc_body(client_fd, "Proxy error");
         return 1;
     }
@@ -287,8 +287,8 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
     inet_pton(AF_INET, PROXY_HOST, &serv_addr.sin_addr);
 
     if (connect(proxy_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/html");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "<html><body><h1>Could not connect to Deno</h1></body></html>");
                 close(proxy_fd);
                 ndc_close(client_fd);
@@ -299,43 +299,43 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
             size_t req_len = 0;
             if (proxy_req_init(req, sizeof(req), &req_len, "GET", path, PROXY_HOST, PROXY_PORT) != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
             if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Remote-User", remote_user) != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
             if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Modules", modules_header) != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
             if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Error", error_msg) != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
             if (proxy_req_add_header(req, sizeof(req), &req_len, "Connection", "close") != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
             if (proxy_req_finish(req, sizeof(req), &req_len) != 0) {
                 close(proxy_fd);
-                ndc_head(client_fd, 502);
                 ndc_header(client_fd, "Content-Type", "text/plain");
+                ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
@@ -370,8 +370,8 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
                 /* if we truncated because headbuf filled, bail out */
                 if (head_used == sizeof(headbuf) - 1) {
                     /* header too large */
-                    ndc_head(client_fd, 502);
                     ndc_header(client_fd, "Content-Type", "text/plain");
+                    ndc_head(client_fd, 502);
                     ndc_body(client_fd, "Upstream header too large");
                     close(proxy_fd);
                     ndc_close(client_fd);
@@ -386,6 +386,9 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
             size_t header_len = (size_t)(sep + 4 - headbuf);
 
             /* parse status line and headers */
+            /* Save the byte at header_len before null-terminating for parsing,
+               so we can restore it before writing the body. */
+            char saved_byte = headbuf[header_len];
             headbuf[header_len] = '\0';
             char *save = NULL;
             char *line = strtok_r(headbuf, "\r\n", &save);
@@ -396,8 +399,6 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
                     status = 200;
                 }
             }
-
-            ndc_head(client_fd, status);
 
             /* iterate remaining header lines */
             while ((line = strtok_r(NULL, "\r\n", &save)) != NULL) {
@@ -416,6 +417,13 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
                 }
                 ndc_header(client_fd, key, val);
             }
+
+            /* Send status line and accumulated response headers.
+               ndc_head() now sends all headers immediately. */
+            ndc_head(client_fd, status);
+
+            /* Restore the saved byte before writing body */
+            headbuf[header_len] = saved_byte;
 
             headers_done = 1;
 
@@ -554,15 +562,15 @@ api_modules_handler(int fd, char *body)
     uint32_t hd = open_modules_db(doc_root);
 
     if (!hd) {
-        ndc_head(fd, 500);
         ndc_header(fd, "Content-Type", "application/json");
+        ndc_head(fd, 500);
         ndc_body(fd, "[]");
         return;
     }
 
-    ndc_head(fd, 200);
     ndc_header(fd, "Content-Type", "application/json");
     ndc_header(fd, "Access-Control-Allow-Origin", "*");
+    ndc_head(fd, 200);
     ndc_write(fd, "[", 1);
 
     uint32_t cur = qmap_iter(hd, NULL, 0);
