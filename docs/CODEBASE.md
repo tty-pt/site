@@ -137,7 +137,7 @@ poem -> ssr, mpfd
 | `/` | server.ts - index page |
 | `/login` | auth/ssr/index.tsx |
 | `/register` | auth/ssr/index.tsx |
-| `/confirm-page` | auth/ssr/index.tsx |
+| `/confirm` | auth/ssr/index.tsx |
 | `/poem` | poem/ssr/index.tsx |
 | `/poem/add` | poem/ssr/index.tsx |
 | `/poem/:id` | poem/ssr/index.tsx |

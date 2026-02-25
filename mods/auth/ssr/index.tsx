@@ -3,7 +3,7 @@ import Login from "./components/Login.tsx";
 import Register from "./components/Register.tsx";
 import ConfirmUI from "./components/ConfirmUI.tsx";
 
-export const routes = ["/login", "/register", "/confirm-page"];
+export const routes = ["/login", "/register", "/confirm"];
 
 export async function render({ user, path, params }: { user: string | null; path: string; params: Record<string,string> }) {
   if (path === "/login") {
@@ -14,7 +14,7 @@ export async function render({ user, path, params }: { user: string | null; path
     return Register({ user, path });
   }
 
-  if (path === "/confirm-page") {
+  if (path === "/confirm") {
     return ConfirmUI({ user, path, params });
   }
 
