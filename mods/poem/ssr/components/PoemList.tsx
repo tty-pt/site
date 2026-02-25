@@ -3,20 +3,20 @@ import { Layout } from "../../../ssr/ui.tsx";
 
 export default function PoemList({ user, path, poems }: { user: string | null; path: string; poems: string[] }) {
   const buttons = poems.map((poem) => (
-    <a key={poem} href={`/poem/${poem}/`} className="no-underline px-4 py-2 border border-gray-200 rounded shadow-sm bg-gray-50 hover:brightness-105">
+    <a key={poem} href={`/poem/${poem}/`} className="btn">
       {poem}
     </a>
   ));
 
   return (
     <Layout user={user} title="poem" path={path}>
-      <div className="flex flex-col items-center gap-2">
+      <div className="center">
         {buttons.length > 0 ? (
-          <div className="flex flex-wrap justify-center gap-2">{buttons}</div>
+          <div className="btn-row">{buttons}</div>
         ) : (
           <p>No poems yet.</p>
         )}
-        <a href="/poem/add" className="no-underline px-4 py-2 border border-gray-200 rounded shadow-sm bg-gray-50 hover:brightness-105">
+        <a href="/poem/add" className="btn">
           Add Poem
         </a>
       </div>

@@ -15,109 +15,55 @@
 #include <ttypt/ndx.h>
 
 #include "papi.h"
+#include "../common/common.h"
+
+const char *ndx_deps[] = { "./mods/auth/auth.so", "./mods/common/common.so", NULL };
+
+extern const char *get_session_user(const char *token);
 
 ndx_t ndx;
 
 #define PROXY_HOST "127.0.0.1"
 #define PROXY_PORT 3000
 
-static void
-get_cookie(const char *cookie, char *token, size_t len)
-{
-	token[0] = '\0';
-	if (!cookie || !*cookie)
-		return;
-	const char *p = cookie;
-	while (*p) {
-		while (*p == ' ' || *p == '\t') p++;
-		if (!strncmp(p, "QSESSION=", 9)) {
-			p += 9;
-			const char *amp = strchr(p, '&');
-			size_t tlen = amp ? (amp - p) : strlen(p);
-			if (tlen >= len) tlen = len - 1;
-			strncpy(token, p, tlen);
-			token[tlen] = '\0';
-			return;
-		}
-		while (*p && *p != '&') p++;
-		if (*p == '&') p++;
-	}
-}
-
-static void
-url_encode(const char *in, char *out, size_t outlen)
-{
-    size_t j = 0;
-    for (size_t i = 0; in[i] && j + 4 < outlen; i++) {
-        unsigned char c = (unsigned char)in[i];
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            out[j++] = c;
-        } else {
-            j += snprintf(out + j, outlen - j, "%%%02X", c);
-        }
-    }
-    out[j] = '\0';
-}
-
-static void
-json_escape(const char *in, char *out, size_t outlen)
-{
-    size_t j = 0;
-    for (size_t i = 0; in[i] && j + 2 < outlen; i++) {
-        unsigned char c = (unsigned char)in[i];
-        if (c == '"' || c == '\\') {
-            if (j + 2 >= outlen) break;
-            out[j++] = '\\';
-            out[j++] = c;
-        } else if (c == '\n') {
-            if (j + 2 >= outlen) break;
-            out[j++] = '\\';
-            out[j++] = 'n';
-        } else if (c == '\r') {
-            if (j + 2 >= outlen) break;
-            out[j++] = '\\';
-            out[j++] = 'r';
-        } else if (c == '\t') {
-            if (j + 2 >= outlen) break;
-            out[j++] = '\\';
-            out[j++] = 't';
-        } else if (c < 0x20) {
-            if (j + 6 >= outlen) break;
-            j += snprintf(out + j, outlen - j, "\\u%04x", c);
-        } else {
-            out[j++] = c;
-        }
-    }
-    out[j] = '\0';
-}
-
 static int
 get_field(const char *value, const char *key, char *out, size_t outlen)
 {
-    size_t keylen = strlen(key);
-    const char *p = value;
-    while (p && *p) {
-        while (*p == ' ') p++;
-        if (!strncmp(p, key, keylen) && p[keylen] == '=') {
-            p += keylen + 1;
-            const char *end = strchr(p, ';');
-            size_t len = end ? (size_t)(end - p) : strlen(p);
-            if (len >= outlen) len = outlen - 1;
-            strncpy(out, p, len);
-            out[len] = '\0';
-            return 0;
-        }
-        p = strchr(p, ';');
-        if (p) p++;
-    }
-    return -1;
+	size_t keylen = strlen(key);
+	const char *p = value;
+	while (p && *p) {
+		while (*p == ' ') p++;
+		if (!strncmp(p, key, keylen) && p[keylen] == '=') {
+			p += keylen + 1;
+			const char *end = strchr(p, ';');
+			size_t len = end ? (size_t)(end - p) : strlen(p);
+			if (len >= outlen) len = outlen - 1;
+			strncpy(out, p, len);
+			out[len] = '\0';
+			return 0;
+		}
+		p = strchr(p, ';');
+		if (p) p++;
+	}
+	return -1;
+}
+
+static uint32_t modules_db_hd = 0;
+
+static uint32_t
+get_modules_db(void)
+{
+	if (!modules_db_hd) {
+		modules_db_hd = qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, QM_MIRROR);
+	}
+	return modules_db_hd;
 }
 
 static uint32_t
 open_modules_db(const char *doc_root)
 {
 	(void) doc_root;
-	return qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, 0);
+	return get_modules_db();
 }
 
 static int
@@ -172,7 +118,6 @@ build_modules_json(char *doc_root, char *out, size_t outlen)
         if (used + 4 >= outlen)
             break;
     }
-	qmap_close(hd);
 
     used += snprintf(out + used, outlen - used, "]");
     return 0;
@@ -185,15 +130,24 @@ static void
 register_module_routes(void)
 {
 	uint32_t hd = open_modules_db(NULL);
+	if (!hd) {
+		fprintf(stderr, "register_module_routes: failed to open module.db\n");
+		return;
+	}
 
     uint32_t cur = qmap_iter(hd, NULL, 0);
     const void *key;
     const void *value;
     while (qmap_next(&key, &value, cur)) {
+        const char *k = (const char *)key;
         const char *v = (const char *)value;
+        fprintf(stderr, "register_module_routes: key=%s, value=%s\n", k, v);
         char routes[512] = { 0 };
-        if (get_field(v, "routes", routes, sizeof(routes)) != 0)
+        if (get_field(v, "routes", routes, sizeof(routes)) != 0) {
+            fprintf(stderr, "register_module_routes: no routes field for %s\n", k);
             continue;
+        }
+        fprintf(stderr, "register_module_routes: %s has routes=%s\n", k, routes);
 
         char *save = NULL;
         char *tok = strtok_r(routes, ",", &save);
@@ -219,7 +173,6 @@ register_module_routes(void)
             tok = strtok_r(NULL, ",", &save);
         }
     }
-	qmap_close(hd);
 }
 
 /* Helpers to safely build an outgoing HTTP request into a buffer. */
@@ -456,32 +409,6 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
     return 0;
 }
 
-static const char *
-get_session_user(const char *token)
-{
-    static char user[64];
-    if (!token || !*token)
-        return NULL;
-    
-    char path[256];
-    snprintf(path, sizeof(path), "./sessions/%s", token);
-    
-    FILE *fp = fopen(path, "r");
-    if (!fp)
-        return NULL;
-    
-    if (fgets(user, sizeof(user), fp)) {
-        size_t len = strlen(user);
-        if (len > 0 && user[len-1] == '\n')
-            user[len-1] = '\0';
-        fclose(fp);
-        if (*user)
-            return user;
-    }
-    fclose(fp);
-    return NULL;
-}
-
 /* Forward declarations */
 static void ssr_handler(int fd, char *body);
 
@@ -521,6 +448,12 @@ static void
 ssr_handler(int fd, char *body)
 {
     (void)body;
+    char path[1024] = {0};
+    ndc_env_get(fd, path, "DOCUMENT_URI");
+    if (!path[0]) ndc_env_get(fd, path, "PATH_INFO");
+    if (!path[0]) strcpy(path, "/");
+    fprintf(stderr, "ssr_handler: path=%s\n", path);
+    
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
@@ -543,7 +476,6 @@ ssr_handler(int fd, char *body)
     }
 
     /* Obtain path from ndc env */
-    char path[1024] = {0};
     ndc_env_get(fd, path, "DOCUMENT_URI");
     if (!path[0]) ndc_env_get(fd, path, "PATH_INFO");
     if (!path[0]) strcpy(path, "/");

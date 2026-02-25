@@ -1,7 +1,7 @@
 {
   "id": "ssr",
   "title": "SSR",
-  "deps": [],
+  "deps": ["auth", "common"],
   "routes": [],
   "ssr": "",
   "be": "mods/ssr/ssr.so"

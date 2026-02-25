@@ -1,0 +1,8 @@
+{
+  "id": "common",
+  "title": "Common",
+  "deps": [],
+  "routes": [],
+  "ssr": "",
+  "be": "mods/common/common.so"
+}

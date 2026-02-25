@@ -9,8 +9,9 @@
 #include <ttypt/qmap.h>
 
 #include "papi.h"
+#include "../common/common.h"
 
-const char *ndx_deps[] = { "./mods/ssr/ssr.so", NULL };
+const char *ndx_deps[] = { "./mods/common/common.so", NULL };
 
 ndx_t ndx;
 static uint32_t users_map;
@@ -22,6 +23,25 @@ struct user {
 	char email[128];
 	char confirm_code[64];
 };
+
+static uint32_t auth_db_hd = 0;
+
+static uint32_t
+get_auth_db(void)
+{
+	if (!auth_db_hd) {
+		auth_db_hd = qmap_open("auth.qmap", "hd", QM_STR, QM_STR, 0xFF, 0);
+	}
+	return auth_db_hd;
+}
+
+const char *
+get_session_user(const char *token)
+{
+	if (!token || !*token)
+		return NULL;
+	return qmap_get(sessions_map, token);
+}
 
 static void
 generate_token(char *buf, size_t len)
@@ -40,50 +60,6 @@ generate_token(char *buf, size_t len)
 	}
 	buf[len - 1] = 0;
 	fclose(f);
-}
-
-static void
-query_param(char *query, const char *key, char *out, size_t out_len)
-{
-	if (!out || !out_len)
-		return;
-	out[0] = 0;
-	if (!query)
-		return;
-
-	size_t key_len = strlen(key);
-	for (char *p = query; *p; ) {
-		while (*p == '&')
-			p++;
-		if (!strncmp(p, key, key_len) && p[key_len] == '=') {
-			char *val = p + key_len + 1;
-			size_t n = 0;
-			while (val[n] && val[n] != '&')
-				n++;
-			if (n >= out_len)
-				n = out_len - 1;
-			memcpy(out, val, n);
-			out[n] = 0;
-
-			size_t j = 0;
-			for (size_t i = 0; out[i]; i++) {
-				if (out[i] == '+') {
-					out[j++] = ' ';
-				} else if (out[i] == '%' && out[i+1] && out[i+2]) {
-					int c;
-					sscanf(out + i + 1, "%2x", &c);
-					out[j++] = c;
-					i += 2;
-				} else {
-					out[j++] = out[i];
-				}
-			}
-			out[j] = 0;
-			return;
-		}
-		while (*p && *p != '&')
-			p++;
-	}
 }
 
 static void

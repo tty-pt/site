@@ -8,10 +8,10 @@ export default function ConfirmUI({ user, path, params }: { user: string | null;
 
   return (
     <Layout user={user} title="Confirm" path={path}>
-      <div className="flex flex-col items-center gap-2">
+      <div className="center">
         {u && r ? (
           <p>
-            Click to confirm your account: <a href={href} className="text-[#6e5f8a] hover:text-[#877cb3]">Link</a>
+            Click to confirm your account: <a href={href}>Link</a>
           </p>
         ) : (
           <p>Follow the link sent to your email to confirm your account.</p>

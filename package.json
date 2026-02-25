@@ -1,0 +1,10 @@
+{
+  "name": "site",
+  "type": "module",
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  },
+  "scripts": {
+    "build:css": "tailwindcss -i ./mods/ssr/input.css -o ./htdocs/styles.css"
+  }
+}
