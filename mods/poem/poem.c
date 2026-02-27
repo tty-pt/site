@@ -11,12 +11,6 @@
 
 #define POEM_ITEMS_PATH "items/poem/items"
 
-const char *ndx_deps[] = {
-	"./mods/ssr/ssr.so",
-	"./mods/mpfd/mpfd.so",
-	NULL
-};
-
 
 static void
 handle_poem_add(int fd, char *body, char *doc_root)
@@ -131,6 +125,8 @@ poem_handler(int fd, char *body)
 MODULE_API void
 ndx_install(void)
 {
+	ndx_load("./mods/ssr/ssr.so");
+	ndx_load("./mods/mpfd/mpfd.so");
 	ndc_register_handler("POST:/poem/add", poem_handler);
 	ndc_register_handler("GET:/poem/add", poem_handler);
 }

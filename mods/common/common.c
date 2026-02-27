@@ -8,15 +8,20 @@
 
 #include "common.h"
 
+NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t, out_len);
+NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen);
+NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen);
+NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len);
+
 struct ndx_ctx { int x; };
 static struct ndx_ctx ndx;
 
-void
+int
 get_cookie(const char *cookie, char *token, size_t len)
 {
 	token[0] = '\0';
 	if (!cookie || !*cookie)
-		return;
+		return -1;
 	const char *p = cookie;
 	while (*p) {
 		while (*p == ' ' || *p == '\t') p++;
@@ -27,21 +32,23 @@ get_cookie(const char *cookie, char *token, size_t len)
 			if (tlen >= len) tlen = len - 1;
 			strncpy(token, p, tlen);
 			token[tlen] = '\0';
-			return;
+			return 0;
 		}
 		while (*p && *p != '&') p++;
 		if (*p == '&') p++;
 	}
+	
+	return 0;
 }
 
-void
+int
 query_param(char *query, const char *key, char *out, size_t out_len)
 {
 	if (!out || !out_len)
-		return;
+		return -1;
 	out[0] = 0;
 	if (!query)
-		return;
+		return -1;
 
 	size_t key_len = strlen(key);
 	for (char *p = query; *p; ) {
@@ -71,14 +78,16 @@ query_param(char *query, const char *key, char *out, size_t out_len)
 				}
 			}
 			out[j] = 0;
-			return;
+			return 0;
 		}
 		while (*p && *p != '&')
 			p++;
 	}
+
+	return -1;
 }
 
-void
+int
 json_escape(const char *in, char *out, size_t outlen)
 {
 	size_t j = 0;
@@ -108,9 +117,10 @@ json_escape(const char *in, char *out, size_t outlen)
 		}
 	}
 	out[j] = '\0';
+	return 0;
 }
 
-void
+int
 url_encode(const char *in, char *out, size_t outlen)
 {
 	size_t j = 0;
@@ -123,6 +133,7 @@ url_encode(const char *in, char *out, size_t outlen)
 		}
 	}
 	out[j] = '\0';
+	return 0;
 }
 
 MODULE_API void

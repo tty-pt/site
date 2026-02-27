@@ -1,8 +1,0 @@
-{
-  "id": "mpfd",
-  "title": "MPFD",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/mpfd/mpfd.so"
-}

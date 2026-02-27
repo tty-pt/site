@@ -118,32 +118,19 @@ export async function render({ user, path, params }: { user: string | null; path
 
 ## Module System
 
-### mod.json Structure
+### Adding a Module
 
-```json
-{
-  "id": "modulename",
-  "title": "Display Title",
-  "deps": ["dependency_module"],
-  "routes": ["/route1", "/route2/:param"],
-  "ssr": "mods/modulename/ssr/index.tsx",
-  "be": "mods/modulename/modulename.so"
-}
+Use `scripts/mod_add` to add a module:
+
+```sh
+./scripts/mod_add <modulename>
 ```
 
-Fields:
-- `id` - unique module identifier
-- `title` - display title for UI
-- `deps` - array of module IDs this module depends on
-- `routes` - array of HTTP routes this module handles
-- `ssr` - path to SSR TypeScript component (relative to repo root)
-- `be` - path to backend .so file
+This:
+- Appends the module's `.so` path to `mods.load`
+- Adds an entry to `module.db` with title and SSR path (if SSR exists)
 
-### Module Loading
-
-- `scripts/gen_mods.py` generates `module.db` and `mods.load`
-- Run `make module.db` to regenerate after changes
-- Dependencies resolved via topological sort
+Module must be located at `mods/<modulename>/<modulename>.so`
 
 ### Building Modules
 
@@ -169,10 +156,9 @@ Available variables:
    - `routes` array listing handled routes
    - `render()` function returning React element
 
-2. Add routes to `mod.json`
-
-3. Ensure module is in dependency chain:
-   - ssr → your module (directly or via deps)
+2. Add module to system:
+   - Ensure module .so is built
+   - Add to `mods.load` and `module.db` using `./scripts/mod_add <modname>`
 
 ### SSR Component Pattern
 
@@ -227,9 +213,9 @@ Reference implementation: see `../tty.pt/ssr/server.ts` and `../tty.pt/ssr/ui.ts
        return &ndx;
    }
    ```
-3. Create `mod.json` with module metadata
-4. Create `Makefile`: `include ../../build.mk`
-5. Run `make module.db` to regenerate
+3. Create `Makefile`: `include ../../build.mk`
+4. Build: `make -C mods/newmod`
+5. Add to system: `./scripts/mod_add newmod`
 6. Add test in `test.sh`
 
 ### Modifying SSR Pages
@@ -336,8 +322,8 @@ make all
 # Build and run all tests
 make test
 
-# Generate module database
-make module.db
+# Add a module to the system
+./scripts/mod_add <modulename>
 
 # Start site
 ./start.sh
@@ -371,11 +357,10 @@ qmap -l module.db
 | Path | Purpose |
 |------|---------|
 | `mods/*/` | Module directories |
-| `mods/*/mod.json` | Module metadata |
 | `mods/*/*.c` | C module source |
 | `mods/*/ssr/*.tsx` | SSR React components |
 | `module.db` | Module metadata database |
 | `mods.load` | List of .so files to load |
-| `scripts/gen_mods.py` | Generates module.db and mods.load |
+| `scripts/mod_add` | Adds module to system |
 | `build.mk` | Common build rules |
 | `start.sh` | Starts ndc + Deno SSR |

@@ -11,9 +11,10 @@
 #include "papi.h"
 #include "../common/common.h"
 
-const char *ndx_deps[] = { "./mods/common/common.so", NULL };
-
 ndx_t ndx;
+
+NDX_DEF(const char *, get_session_user, const char *, token);
+
 static uint32_t users_map;
 static uint32_t sessions_map;
 
@@ -291,10 +292,12 @@ handle_confirm(int fd, char *body)
 MODULE_API void
 ndx_install(void)
 {
+	ndx_load("./mods/common/common.so");
 	users_map = qmap_open("auth.qmap", "users", QM_STR,
 			      qmap_reg(sizeof(struct user)), 0xFF, 0);
 	sessions_map = qmap_open("auth.qmap", "sess", QM_STR,
 				 QM_STR, 0xFF, 0);
+	get_session_user_adapter_reg();
 	ndc_register_handler("/api/session", handle_session);
 	ndc_register_handler("POST:/login", handle_login);
 	ndc_register_handler("/logout", handle_logout);

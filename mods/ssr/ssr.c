@@ -10,16 +10,13 @@
 #include <ctype.h>
 
 #include <ttypt/qmap.h>
+#include <ttypt/ndx.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
 
 #include "papi.h"
 #include "../common/common.h"
-
-const char *ndx_deps[] = { "./mods/auth/auth.so", "./mods/common/common.so", NULL };
-
-extern const char *get_session_user(const char *token);
 
 ndx_t ndx;
 
@@ -90,7 +87,7 @@ build_modules_json(char *doc_root, char *out, size_t outlen)
         get_field(v, "ssr", ssr, sizeof(ssr));
 
         char title_esc[256];
-        json_escape(title, title_esc, sizeof(title_esc));
+        call_json_escape(title, title_esc, sizeof(title_esc));
 
         if (!first) {
             used += snprintf(out + used, outlen - used, ",");
@@ -423,10 +420,10 @@ int ssr_render_error(int fd, char *template, char *error_msg)
     char token[128] = { 0 };
 
     ndc_env_get(fd, cookie, "HTTP_COOKIE");
-    get_cookie(cookie, token, sizeof(token));
+    call_get_cookie(cookie, token, sizeof(token));
 
     if (*token) {
-        remote_user = get_session_user(token);
+        remote_user = call_get_session_user(token);
     }
 
     char modules_json[4096] = { 0 };
@@ -436,7 +433,7 @@ int ssr_render_error(int fd, char *template, char *error_msg)
 
     if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0
         && strcmp(modules_json, "[]") != 0) {
-        url_encode(modules_json, modules_header, sizeof(modules_header));
+        call_url_encode(modules_json, modules_header, sizeof(modules_header));
     }
 
     proxy_request(fd, template, remote_user, modules_header, error_msg);
@@ -461,18 +458,18 @@ ssr_handler(int fd, char *body)
     ndc_env_get(fd, cookie, "HTTP_COOKIE");
 
     char token[128] = { 0 };
-    get_cookie(cookie, token, sizeof(token));
+    call_get_cookie(cookie, token, sizeof(token));
 
     const char *remote_user = NULL;
     if (*token) {
-        remote_user = get_session_user(token);
+        remote_user = call_get_session_user(token);
     }
 
     char modules_json[4096] = { 0 };
     char modules_header[8192] = { 0 };
     if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0
         && strcmp(modules_json, "[]") != 0) {
-        url_encode(modules_json, modules_header, sizeof(modules_header));
+        call_url_encode(modules_json, modules_header, sizeof(modules_header));
     }
 
     /* Obtain path from ndc env */
@@ -526,7 +523,7 @@ api_modules_handler(int fd, char *body)
         first = 0;
 
         char title_esc[256];
-        json_escape(title, title_esc, sizeof(title_esc));
+        call_json_escape(title, title_esc, sizeof(title_esc));
 
         ndc_writef(fd, "{\"id\":\"%s\",\"title\":\"%s\",\"routes\":[", k, title_esc);
         int rf = 1;
@@ -549,7 +546,9 @@ api_modules_handler(int fd, char *body)
 MODULE_API void
 ndx_install(void)
 {
-    ndc_config.default_handler = ssr_handler;
+	ndx_load("./mods/common/common.so");
+	ndx_load("./mods/auth/auth.so");
+	ndc_config.default_handler = ssr_handler;
     ndc_register_handler("GET:/", ssr_handler);
     ndc_register_handler("GET:/login", ssr_handler);
     ndc_register_handler("GET:/register", ssr_handler);
@@ -561,7 +560,6 @@ ndx_install(void)
 MODULE_API void
 ndx_open(void)
 {
-    ndx_install();
 }
 
 MODULE_API ndx_t *

@@ -1,8 +1,0 @@
-{
-  "id": "index_api",
-  "title": "Index API",
-  "deps": [],
-  "routes": [],
-  "ssr": "",
-  "be": "mods/index_api/index_api.so"
-}

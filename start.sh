@@ -24,4 +24,4 @@ if [ -f "$SSR_SERVER_PATH" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-exec /home/quirinpa/ndc/bin/ndc -C "$SCRIPT_DIR" -p 8080 -d
+exec ndc -C "$SCRIPT_DIR" -p 8080 -d

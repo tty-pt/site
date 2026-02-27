@@ -1,8 +1,0 @@
-{
-  "id": "auth",
-  "title": "Auth",
-  "deps": ["common"],
-  "routes": ["/login", "/register"],
-  "ssr": "mods/auth/ssr/index.tsx",
-  "be": "mods/auth/auth.so"
-}
