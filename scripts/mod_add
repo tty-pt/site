@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: $0 <modulename>" >&2
+  exit 1
+fi
+
+mod_id="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+
+title="$(tr '[:lower:]' '[:upper:]' <<< "${mod_id:0:1}")${mod_id:1}"
+
+ssr_path=""
+if [[ -f "mods/${mod_id}/ssr/index.tsx" ]]; then
+  ssr_path="mods/${mod_id}/ssr/index.tsx"
+fi
+
+be_path="mods/${mod_id}/${mod_id}"
+
+echo $be_path >> mods.load
+
+qmap -p "${mod_id}:title=${title}; routes=; ssr=${ssr_path}; be=${be_path}" "${script_dir}/module.db"

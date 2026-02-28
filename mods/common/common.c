@@ -8,17 +8,10 @@
 
 #include "common.h"
 
-NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t, out_len);
-NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen);
-NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen);
-NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len);
-
 struct ndx_ctx { int x; };
 static struct ndx_ctx ndx;
 
-int
-get_cookie(const char *cookie, char *token, size_t len)
-{
+NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
 	token[0] = '\0';
 	if (!cookie || !*cookie)
 		return -1;
@@ -41,9 +34,7 @@ get_cookie(const char *cookie, char *token, size_t len)
 	return 0;
 }
 
-int
-query_param(char *query, const char *key, char *out, size_t out_len)
-{
+NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t, out_len) {
 	if (!out || !out_len)
 		return -1;
 	out[0] = 0;
@@ -87,9 +78,7 @@ query_param(char *query, const char *key, char *out, size_t out_len)
 	return -1;
 }
 
-int
-json_escape(const char *in, char *out, size_t outlen)
-{
+NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen) {
 	size_t j = 0;
 	for (size_t i = 0; in[i] && j + 2 < outlen; i++) {
 		unsigned char c = (unsigned char)in[i];
@@ -120,9 +109,7 @@ json_escape(const char *in, char *out, size_t outlen)
 	return 0;
 }
 
-int
-url_encode(const char *in, char *out, size_t outlen)
-{
+NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 	size_t j = 0;
 	for (size_t i = 0; in[i] && j + 4 < outlen; i++) {
 		unsigned char c = (unsigned char)in[i];

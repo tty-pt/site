@@ -17,6 +17,7 @@
 
 #include "papi.h"
 #include "../common/common.h"
+#include "../auth/auth.h"
 
 ndx_t ndx;
 
@@ -546,15 +547,15 @@ api_modules_handler(int fd, char *body)
 MODULE_API void
 ndx_install(void)
 {
-	ndx_load("./mods/common/common.so");
-	ndx_load("./mods/auth/auth.so");
+	ndx_load("./mods/common/common");
+	ndx_load("./mods/auth/auth");
 	ndc_config.default_handler = ssr_handler;
-    ndc_register_handler("GET:/", ssr_handler);
-    ndc_register_handler("GET:/login", ssr_handler);
-    ndc_register_handler("GET:/register", ssr_handler);
-    ndc_register_handler("GET:/welcome", ssr_handler);
-    ndc_register_handler("GET:/api/modules", api_modules_handler);
-    register_module_routes();
+	ndc_register_handler("GET:/", ssr_handler);
+	ndc_register_handler("GET:/login", ssr_handler);
+	ndc_register_handler("GET:/register", ssr_handler);
+	ndc_register_handler("GET:/welcome", ssr_handler);
+	ndc_register_handler("GET:/api/modules", api_modules_handler);
+	register_module_routes();
 }
 
 MODULE_API void
