@@ -1,3 +1,7 @@
+#include "common.h"
+
+#include <ttypt/ndx-mod.h>
+
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
@@ -5,11 +9,6 @@
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
 #include <ttypt/qmap.h>
-
-#include "common.h"
-
-struct ndx_ctx { int x; };
-static struct ndx_ctx ndx;
 
 NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
 	token[0] = '\0';
@@ -131,12 +130,4 @@ ndx_install(void)
 MODULE_API void
 ndx_open(void)
 {
-}
-
-struct ndx_ctx;
-
-MODULE_API struct ndx_ctx *
-get_ndx_ptr(void)
-{
-	return &ndx;
 }

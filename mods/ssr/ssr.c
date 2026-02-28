@@ -1,3 +1,5 @@
+#include <ttypt/ndx-mod.h>
+
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -7,7 +9,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
-#include <ctype.h>
 
 #include <ttypt/qmap.h>
 #include <ttypt/ndx.h>
@@ -15,11 +16,8 @@
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
 
-#include "papi.h"
 #include "../common/common.h"
 #include "../auth/auth.h"
-
-ndx_t ndx;
 
 #define PROXY_HOST "127.0.0.1"
 #define PROXY_PORT 3000
@@ -561,10 +559,4 @@ ndx_install(void)
 MODULE_API void
 ndx_open(void)
 {
-}
-
-MODULE_API ndx_t *
-get_ndx_ptr(void)
-{
-    return &ndx;
 }

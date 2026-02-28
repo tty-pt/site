@@ -1,5 +1,7 @@
 #include "./auth.h"
 
+#include <ttypt/ndx-mod.h>
+
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,10 +11,7 @@
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
 
-#include "papi.h"
 #include "../common/common.h"
-
-ndx_t ndx;
 
 static uint32_t users_map;
 static uint32_t sessions_map;
@@ -308,10 +307,4 @@ ndx_open(void)
 	ndc_register_handler("/api/session", handle_session);
 	ndc_register_handler("/logout", handle_logout);
 	ndc_register_handler("/confirm", handle_confirm);
-}
-
-MODULE_API ndx_t *
-get_ndx_ptr(void)
-{
-	return &ndx;
 }

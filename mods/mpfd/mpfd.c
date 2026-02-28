@@ -1,18 +1,15 @@
+#include <ttypt/ndx-mod.h>
+
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <unistd.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
 
-#include "papi.h"
-
 #define CD "Content-Disposition: form-data; name=\""
-
-ndx_t ndx;
 
 static void
 parse_multipart(char *body, char *content_type, char *doc_root)
@@ -181,10 +178,4 @@ ndx_install(void)
 MODULE_API void
 ndx_open(void)
 {
-}
-
-MODULE_API ndx_t *
-get_ndx_ptr(void)
-{
-	return &ndx;
 }
