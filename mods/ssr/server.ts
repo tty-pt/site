@@ -11,68 +11,22 @@ interface ModuleEntry {
   be?: string;
 }
 
-async function loadModulesFromModsLoad(): Promise<ModuleEntry[]> {
-  try {
-    const modsLoadUrl = new URL("../../mods.load", import.meta.url);
-    const contents = await Deno.readTextFile(modsLoadUrl);
-    const lines = contents.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-
-    const seen = new Set<string>();
-    const modules: ModuleEntry[] = [];
-
-    for (const line of lines) {
-      const match = line.match(/\/mods\/([^/]+)\//);
-      if (!match) continue;
-      const id = match[1];
-      if (seen.has(id)) continue;
-      seen.add(id);
-
-      const modJsonUrl = new URL(`../../mods/${id}/mod.json`, import.meta.url);
-      let data: any;
-      try {
-        data = JSON.parse(await Deno.readTextFile(modJsonUrl));
-      } catch {
-        continue;
-      }
-
-      let routes: string[] = [];
-      if (typeof data?.routes === "string") {
-        routes = [data.routes];
-      } else if (Array.isArray(data?.routes)) {
-        routes = data.routes.filter((route: unknown) => typeof route === "string");
-      }
-
-      if (routes.length === 0) continue;
-
-      modules.push({
-        id: data?.id || id,
-        title: data?.title || id,
-        routes,
-        ssr: data?.ssr || "",
-        be: data?.be,
-      });
-    }
-
-    return modules;
-  } catch {
-    return [];
-  }
-}
-
 async function getModules(req: Request): Promise<ModuleEntry[]> {
   const header = req.headers.get("X-Modules");
-  if (header) {
-    try {
-      const json = decodeURIComponent(header);
-      const parsed = JSON.parse(json) as ModuleEntry[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    } catch (e) {
-      console.error("Failed to parse modules header:", e);
-    }
+  if (!header) {
+    throw new Error("Missing X-Modules header");
   }
-  return await loadModulesFromModsLoad();
+  try {
+    const json = decodeURIComponent(header);
+    const parsed = JSON.parse(json) as ModuleEntry[];
+    if (!Array.isArray(parsed)) {
+      throw new Error("X-Modules header is not an array");
+    }
+    return parsed;
+  } catch (e) {
+    console.error("Failed to parse modules header:", e);
+    throw e;
+  }
 }
 
 function IndexPage({ modules, user, path }: { modules: ModuleEntry[]; user: string | null; path: string }) {
