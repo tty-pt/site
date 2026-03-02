@@ -426,6 +426,14 @@ int ssr_handler(int fd, char *body) {
     if (!path[0]) ndc_env_get(fd, path, "PATH_INFO");
     if (!path[0]) strcpy(path, "/");
 
+    /* Append query string if present */
+    char query_string[512] = {0};
+    ndc_env_get(fd, query_string, "QUERY_STRING");
+    if (query_string[0]) {
+        size_t path_len = strlen(path);
+        snprintf(path + path_len, sizeof(path) - path_len, "?%s", query_string);
+    }
+
     proxy_request(fd, path, modules_header, NULL);
     return 0;
 }

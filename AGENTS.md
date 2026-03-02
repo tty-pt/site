@@ -116,7 +116,268 @@ export async function render({ user, path, params }: { user: string | null; path
 
 ---
 
+## Error Handling Best Practices
+
+All C modules must follow these patterns to avoid silent failures and provide meaningful error messages.
+
+### System Call Error Checking
+
+**Always check return values** from system calls and handle errors appropriately.
+
+#### mkdir() - Directory Creation
+
+```c
+#include <errno.h>
+
+if (mkdir(path, 0755) == -1 && errno != EEXIST) {
+    // Clean up any allocated resources first
+    free(allocated_memory);
+    
+    // Return descriptive HTTP error
+    ndc_header(fd, "Content-Type", "text/plain");
+    ndc_head(fd, 500);
+    ndc_body(fd, "Failed to create directory");
+    return 1;
+}
+```
+
+**Key points:**
+- Check for `-1` return value
+- Allow `EEXIST` (directory already exists is OK)
+- Free allocated memory before returning
+- Return HTTP 500 with descriptive message
+
+#### fopen() - File Operations
+
+```c
+FILE *fp = fopen(path, "w");
+if (!fp) {
+    free(allocated_memory);  // Clean up first
+    ndc_header(fd, "Content-Type", "text/plain");
+    ndc_head(fd, 500);
+    ndc_body(fd, "Failed to write file");
+    return 1;
+}
+
+// Use file...
+fwrite(data, 1, len, fp);
+fclose(fp);
+```
+
+**Key points:**
+- Check for NULL return
+- Clean up resources before returning
+- Always `fclose()` when done
+
+### Memory Management with qmap
+
+**Critical rules** for using qmap:
+
+#### Rule 1: Never free() qmap-managed values
+
+```c
+// ✅ CORRECT
+const char *value = qmap_get(db, "key");
+// Use value, but DON'T free it - qmap owns this memory
+
+// ❌ WRONG - causes use-after-free crashes
+const char *value = qmap_get(db, "key");
+free((void*)value);  // NEVER DO THIS
+```
+
+#### Rule 2: Use custom types for variable-size data
+
+For structures with variable-size data, register a custom type:
+
+```c
+struct my_val {
+    uint32_t len;
+    char data[];  // Variable-size
+};
+
+// Measurement function
+static size_t
+my_val_measure(const void *data)
+{
+    const struct my_val *val = data;
+    return sizeof(struct my_val) + val->len;
+}
+
+// In ndx_install():
+uint32_t my_type = qmap_mreg(my_val_measure);
+db = qmap_open("my.db", "rw", QM_STR, my_type, 0xFF, 0);
+```
+
+#### Rule 3: Free temporary structs after qmap_put()
+
+```c
+// Allocate temporary struct
+struct my_val *val = malloc(sizeof(*val) + data_len);
+val->len = data_len;
+memcpy(val->data, data, data_len);
+
+// qmap makes a copy
+qmap_put(db, key, val);
+
+// ✅ Free your temporary struct (qmap has its own copy)
+free(val);
+```
+
+### Error Handling Pattern
+
+Standard error handling flow:
+
+```c
+static int
+my_handler(int fd, char *body)
+{
+    char *buffer = NULL;
+    
+    // Validate input
+    if (!body || !*body) {
+        ndc_header(fd, "Content-Type", "text/plain");
+        ndc_head(fd, 400);
+        ndc_body(fd, "Missing request body");
+        return 1;
+    }
+    
+    // Allocate resources
+    buffer = malloc(1024);
+    if (!buffer) {
+        ndc_header(fd, "Content-Type", "text/plain");
+        ndc_head(fd, 500);
+        ndc_body(fd, "Memory allocation failed");
+        return 1;
+    }
+    
+    // Perform operations
+    if (mkdir(path, 0755) == -1 && errno != EEXIST) {
+        free(buffer);  // Clean up
+        ndc_header(fd, "Content-Type", "text/plain");
+        ndc_head(fd, 500);
+        ndc_body(fd, "Failed to create directory");
+        return 1;
+    }
+    
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        free(buffer);  // Clean up
+        ndc_header(fd, "Content-Type", "text/plain");
+        ndc_head(fd, 500);
+        ndc_body(fd, "Failed to write file");
+        return 1;
+    }
+    
+    // Success path
+    fwrite(buffer, 1, 1024, fp);
+    fclose(fp);
+    free(buffer);
+    
+    ndc_header(fd, "Location", "/success");
+    ndc_head(fd, 303);
+    ndc_close(fd);
+    return 0;
+}
+```
+
+### HTTP Response Codes
+
+Use appropriate HTTP status codes:
+
+| Code | Meaning | When to Use |
+|------|---------|-------------|
+| 200 | OK | Successful GET/POST with response body |
+| 303 | See Other | Successful POST, redirect to result page |
+| 400 | Bad Request | Invalid input (missing fields, malformed data) |
+| 401 | Unauthorized | Authentication required or failed |
+| 405 | Method Not Allowed | Wrong HTTP method (e.g., GET on POST-only endpoint) |
+| 415 | Unsupported Media Type | Wrong Content-Type (e.g., expected multipart/form-data) |
+| 500 | Internal Server Error | System errors (mkdir, fopen, malloc failures) |
+
+### Examples from Recent Bug Fixes
+
+#### mpfd Module (March 2026)
+
+**Problem:** Use-after-free bug from calling `free()` on qmap values.
+
+**Fix:** See `mods/mpfd/mpfd.c`
+- Lines 34-39: Added `mpfd_val_measure()` function
+- Line 315: Registered custom type with `qmap_mreg()`
+- Removed all manual `free()` calls on retrieved values
+
+#### poem Module (March 2026)
+
+**Problem:** Silent failures when directory didn't exist or file writes failed.
+
+**Fix:** See `mods/poem/poem.c`
+- Line 6: Added `#include <errno.h>`
+- Lines 66-72: Check `mkdir()` return, return HTTP 500 on error
+- Lines 74-82: Check `fopen()` return, return HTTP 500 on error
+- Clean up allocated memory before all error returns
+
+### Debugging Tips
+
+**Check return values:**
+```c
+int ret = system_call();
+fprintf(stderr, "system_call returned: %d, errno: %d (%s)\n", 
+        ret, errno, strerror(errno));
+```
+
+**Log errors to stderr:**
+```c
+fprintf(stderr, "[ERROR] Failed to create %s: %s\n", path, strerror(errno));
+```
+
+**Use descriptive error messages:**
+```c
+// ❌ Bad
+ndc_body(fd, "Error");
+
+// ✅ Good
+ndc_body(fd, "Failed to create poem directory");
+```
+
+---
+
 ## Module System
+
+### Module Documentation
+
+Each module should have a `README.md` documenting:
+- Purpose and functionality
+- API/endpoints with parameters and responses
+- SSR routes (if applicable)
+- Dependencies on other modules
+- Storage requirements (directories, databases)
+- Testing approach and test file location
+- Usage examples with code snippets
+
+See existing module READMEs for examples:
+- [mods/auth/README.md](mods/auth/README.md)
+- [mods/chords/README.md](mods/chords/README.md)
+- [mods/poem/README.md](mods/poem/README.md)
+- [mods/mpfd/README.md](mods/mpfd/README.md)
+- [mods/ssr/README.md](mods/ssr/README.md)
+- [mods/common/README.md](mods/common/README.md)
+
+### Directory Requirements
+
+Some modules require specific directories to exist before they can function:
+
+| Module | Required Directory | Purpose | Failure Mode |
+|--------|-------------------|---------|--------------|
+| poem | `items/poem/items/` | Store uploaded poems | HTTP 500 on upload |
+| chords | `items/chords/items/` | Store uploaded chord charts | HTTP 500 on upload |
+
+**Setup:**
+```sh
+mkdir -p items/poem/items items/chords/items
+```
+
+**Important:** Tests may delete these directories during cleanup. Always recreate them after running tests, or use separate test directories.
+
+**Future improvement:** Add module init hooks or setup script to create required directories automatically.
 
 ### Adding a Module
 

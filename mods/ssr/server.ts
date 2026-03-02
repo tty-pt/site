@@ -106,7 +106,7 @@ async function handleRequest(req: Request): Promise<Response> {
         if (match.matched) {
           if (modEntry?.render) {
             try {
-              const rendered = await modEntry.render({ user, path, params: match.params });
+              const rendered = await modEntry.render({ user, path, params: match.params, searchParams: url.searchParams });
               if (rendered) {
                 content = rendered;
                 handled = true;
