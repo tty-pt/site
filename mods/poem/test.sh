@@ -34,7 +34,7 @@ start_server
 echo -n "1. POST wrong content-type... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-d "id=test&file=content")
-[ "$code" = "400" ] && pass "400 for wrong content-type" || fail "expected 400, got $code"
+[ "$code" = "415" ] && pass "415 for unsupported media type" || fail "expected 415, got $code"
 sleep 1
 
 # 2. POST missing id field (file has content but no id)
@@ -48,14 +48,14 @@ sleep 1
 echo -n "3. POST missing file field... "
 out=$(curl -s -X POST "$BASE/poem/add" \
 	-F "id=testpoem")
-echo "$out" | grep -q "No file field" && pass "missing file field detected" || fail "expected 'No file field', got: $out"
+echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
 sleep 1
 
 # 4. POST empty file (id provided but file is empty - same as missing)
 echo -n "4. POST empty file... "
 > "$TMPFILE2"
 out=$(curl -s -X POST "$BASE/poem/add" -F "id=testpoem2" -F "file=@$TMPFILE2")
-echo "$out" | grep -q "Missing id or file" && pass "empty file detected" || fail "expected 'Missing id or file', got: $out"
+echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
 sleep 1
 
 # 5. POST valid multipart

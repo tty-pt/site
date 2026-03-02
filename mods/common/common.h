@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#include <ttypt/ndx.h>
+#include <ttypt/ndx-mod.h>
 
 NDX_DECL(int, json_escape, const char *, in, char *, out, size_t, outlen);
 NDX_DECL(int, url_encode, const char *, in, char *, out, size_t, outlen);

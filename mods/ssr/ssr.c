@@ -1,5 +1,3 @@
-#include <ttypt/ndx-mod.h>
-
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -11,13 +9,9 @@
 #include <netdb.h>
 
 #include <ttypt/qmap.h>
-#include <ttypt/ndx.h>
-
 #include <ttypt/ndc.h>
-#include <ttypt/ndx.h>
 
 #include "../common/common.h"
-#include "../auth/auth.h"
 
 #define PROXY_HOST "127.0.0.1"
 #define PROXY_PORT 3000
@@ -46,26 +40,10 @@ get_field(const char *value, const char *key, char *out, size_t outlen)
 
 static uint32_t modules_db_hd = 0;
 
-static uint32_t
-get_modules_db(void)
-{
-	if (!modules_db_hd) {
-		modules_db_hd = qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, QM_MIRROR);
-	}
-	return modules_db_hd;
-}
-
-static uint32_t
-open_modules_db(const char *doc_root)
-{
-	(void) doc_root;
-	return get_modules_db();
-}
-
 static int
 build_modules_json(char *doc_root, char *out, size_t outlen)
 {
-	uint32_t hd = open_modules_db(doc_root);
+	uint32_t hd = modules_db_hd;
 
     size_t used = 0;
     used += snprintf(out + used, outlen - used, "[");
@@ -119,13 +97,13 @@ build_modules_json(char *doc_root, char *out, size_t outlen)
     return 0;
 }
 
-static void
-ssr_handler(int fd, char *body);
+/* Forward declarations */
+int ssr_handler(int fd, char *body);
 
 static void
 register_module_routes(void)
 {
-	uint32_t hd = open_modules_db(NULL);
+	uint32_t hd = modules_db_hd;
 	if (!hd) {
 		fprintf(stderr, "register_module_routes: failed to open module.db\n");
 		return;
@@ -219,7 +197,7 @@ proxy_req_finish(char *buf, size_t bufcap, size_t *len)
 }
 
 static int
-proxy_request(int client_fd, const char *path, const char *remote_user, const char *modules_header, const char *error_msg)
+proxy_request(int client_fd, const char *path, const char *modules_header, const char *error_msg)
 {
     int proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (proxy_fd < 0) {
@@ -253,13 +231,13 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
-            if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Remote-User", remote_user) != 0) {
-                close(proxy_fd);
-                ndc_header(client_fd, "Content-Type", "text/plain");
-                ndc_head(client_fd, 502);
-                ndc_body(client_fd, "Proxy error");
-                return 1;
-            }
+            /* if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Remote-User", remote_user) != 0) { */
+            /*     close(proxy_fd); */
+            /*     ndc_header(client_fd, "Content-Type", "text/plain"); */
+            /*     ndc_head(client_fd, 502); */
+            /*     ndc_body(client_fd, "Proxy error"); */
+            /*     return 1; */
+            /* } */
             if (proxy_req_add_header(req, sizeof(req), &req_len, "X-Modules", modules_header) != 0) {
                 close(proxy_fd);
                 ndc_header(client_fd, "Content-Type", "text/plain");
@@ -405,44 +383,28 @@ proxy_request(int client_fd, const char *path, const char *remote_user, const ch
     return 0;
 }
 
-/* Forward declarations */
-static void ssr_handler(int fd, char *body);
 
 /* Adapter: render an error template via the Deno SSR proxy */
-NDX_DECL(int, ssr_render_error, int, fd, char *, template, char *, error_msg);
-NDX_DEF(int, ssr_render_error, int, fd, char *, template, char *, error_msg);
-
 int ssr_render_error(int fd, char *template, char *error_msg)
 {
-    const char *remote_user = NULL;
-    char cookie[256] = { 0 };
+    /* const char *remote_user = NULL; */
     char token[128] = { 0 };
-
-    ndc_env_get(fd, cookie, "HTTP_COOKIE");
-    call_get_cookie(cookie, token, sizeof(token));
-
-    if (*token) {
-        remote_user = call_get_session_user(token);
-    }
 
     char modules_json[4096] = { 0 };
     char modules_header[8192] = { 0 };
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0
-        && strcmp(modules_json, "[]") != 0) {
+    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
         call_url_encode(modules_json, modules_header, sizeof(modules_header));
     }
 
-    proxy_request(fd, template, remote_user, modules_header, error_msg);
+    proxy_request(fd, template, modules_header, error_msg);
     return 0;
 }
 
 /* Main SSR handler: proxy request path to the Deno SSR server */
-static void
-ssr_handler(int fd, char *body)
-{
+int ssr_handler(int fd, char *body) {
     (void)body;
     char path[1024] = {0};
     ndc_env_get(fd, path, "DOCUMENT_URI");
@@ -453,21 +415,9 @@ ssr_handler(int fd, char *body)
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
-    char cookie[256] = { 0 };
-    ndc_env_get(fd, cookie, "HTTP_COOKIE");
-
-    char token[128] = { 0 };
-    call_get_cookie(cookie, token, sizeof(token));
-
-    const char *remote_user = NULL;
-    if (*token) {
-        remote_user = call_get_session_user(token);
-    }
-
     char modules_json[4096] = { 0 };
     char modules_header[8192] = { 0 };
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0
-        && strcmp(modules_json, "[]") != 0) {
+    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
         call_url_encode(modules_json, modules_header, sizeof(modules_header));
     }
 
@@ -476,24 +426,25 @@ ssr_handler(int fd, char *body)
     if (!path[0]) ndc_env_get(fd, path, "PATH_INFO");
     if (!path[0]) strcpy(path, "/");
 
-    proxy_request(fd, path, remote_user, modules_header, NULL);
+    proxy_request(fd, path, modules_header, NULL);
+    return 0;
 }
 
 /* JSON list of modules API handler */
-static void
+static int
 api_modules_handler(int fd, char *body)
 {
     (void)body;
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
-    uint32_t hd = open_modules_db(doc_root);
+    uint32_t hd = modules_db_hd;
 
     if (!hd) {
         ndc_header(fd, "Content-Type", "application/json");
         ndc_head(fd, 500);
         ndc_body(fd, "[]");
-        return;
+        return 0;
     }
 
     ndc_header(fd, "Content-Type", "application/json");
@@ -540,20 +491,18 @@ api_modules_handler(int fd, char *body)
 
     ndc_writef(fd, "]");
     ndc_close(fd);
+    return 0;
 }
 
 MODULE_API void
 ndx_install(void)
 {
+	modules_db_hd = qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, QM_MIRROR);
 	ndx_load("./mods/common/common");
-	ndx_load("./mods/auth/auth");
 	ndc_config.default_handler = ssr_handler;
-	ndc_register_handler("GET:/", ssr_handler);
-	ndc_register_handler("GET:/login", ssr_handler);
-	ndc_register_handler("GET:/register", ssr_handler);
-	ndc_register_handler("GET:/welcome", ssr_handler);
+	/* ndc_register_handler("GET:/", ssr_handler); */
 	ndc_register_handler("GET:/api/modules", api_modules_handler);
-	register_module_routes();
+	/* register_module_routes(); */
 }
 
 MODULE_API void

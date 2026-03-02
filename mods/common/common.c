@@ -1,5 +1,4 @@
-#include "common.h"
-
+/* #include "common.h" */
 #include <ttypt/ndx-mod.h>
 
 #include <ctype.h>
@@ -7,7 +6,6 @@
 #include <stdio.h>
 
 #include <ttypt/ndc.h>
-#include <ttypt/ndx.h>
 #include <ttypt/qmap.h>
 
 NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
