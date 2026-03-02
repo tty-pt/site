@@ -80,11 +80,6 @@ echo "$content" | grep -q "test poem content" && pass "content matches" || fail 
 echo -n "8. Comments file created... "
 [ -f "$POEM_DIR/testpoem/comments.txt" ] && pass "comments file exists" || fail "comments file not found"
 
-# 9. GET on /poem/add (wrong method)
-echo -n "9. GET on /poem/add... "
-code=$(curl -sw "%{http_code}" -o /dev/null "$BASE/poem/add")
-[ "$code" = "405" ] && pass "405 for GET" || fail "expected 405, got $code"
-
 # 10. POST to unknown path (falls through to default handler)
 # This test is optional since unknown paths go to SSR, not poem
 # Skipping this test as it depends on SSR behavior

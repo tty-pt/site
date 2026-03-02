@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
@@ -29,7 +30,7 @@ handle_poem_add(int fd, char *doc_root)
 	if (!call_mpfd_exists("file")) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
-		ndc_body(fd, "No file field");
+		ndc_body(fd, "Missing id or file");
 		return;
 	}
 
@@ -38,7 +39,7 @@ handle_poem_add(int fd, char *doc_root)
 	if (file_len <= 0) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
-		ndc_body(fd, "Missing file");
+		ndc_body(fd, "Missing id or file");
 		return;
 	}
 
@@ -55,7 +56,7 @@ handle_poem_add(int fd, char *doc_root)
 		free(file_content);
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
-		ndc_body(fd, "Missing file");
+		ndc_body(fd, "Missing id or file");
 		return;
 	}
 	file_content[got] = '\0';
@@ -63,16 +64,28 @@ handle_poem_add(int fd, char *doc_root)
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s/%s", 
 		doc_root[0] ? doc_root : ".", POEM_ITEMS_PATH, id);
-	mkdir(item_path, 0755);
+	
+	if (mkdir(item_path, 0755) == -1 && errno != EEXIST) {
+		free(file_content);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 500);
+		ndc_body(fd, "Failed to create poem directory");
+		return;
+	}
 
 	char dst_path[1024];
 	snprintf(dst_path, sizeof(dst_path), "%s/pt_PT.html", item_path);
 
 	FILE *dfp = fopen(dst_path, "w");
-	if (dfp) {
-		fwrite(file_content, 1, got, dfp);
-		fclose(dfp);
+	if (!dfp) {
+		free(file_content);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 500);
+		ndc_body(fd, "Failed to write poem file");
+		return;
 	}
+	fwrite(file_content, 1, got, dfp);
+	fclose(dfp);
 	free(file_content);
 
 	char comment_path[1024];
@@ -116,6 +129,15 @@ poem_handler(int fd, char *body)
 	/* Now process the upload */
 	handle_poem_add(fd, doc_root);
 	return 0;
+}
+
+static int
+poem_get_handler(int fd, char *body)
+{
+	ndc_header(fd, "Content-Type", "text/plain");
+	ndc_head(fd, 405);
+	ndc_body(fd, "Method Not Allowed");
+	return 1;
 }
 
 MODULE_API void

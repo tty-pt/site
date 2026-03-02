@@ -15,6 +15,7 @@
 #define CD "Content-Disposition: form-data; name=\""
 
 static uint32_t mpfd_db;
+static uint32_t mpfd_val_type;
 
 /* Configuration limits */
 static size_t mpfd_max_field_size = 10 * 1024 * 1024;   /* 10 MB */
@@ -29,6 +30,13 @@ struct mpfd_val {
 	uint32_t filename_len;
 	char data[];
 };
+
+static size_t
+mpfd_val_measure(const void *data)
+{
+	const struct mpfd_val *val = data;
+	return sizeof(struct mpfd_val) + val->len + val->filename_len;
+}
 
 static void
 set_error(const char *fmt, ...)
@@ -121,17 +129,17 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		cd += sizeof(CD) - 1;
 
 		/* Extract name="..." */
+		/* cd points to first char after 'name="', find closing quote within headers */
 		char key[256] = {0};
-		char *q1 = strchr(cd, '"');
-		if (!q1)
+		char *q_end = cd;
+		while (q_end < headers_end && *q_end != '"')
+			q_end++;
+		if (q_end >= headers_end)
 			goto next_part;
-		char *q2 = strchr(q1 + 1, '"');
-		if (!q2)
-			goto next_part;
-		size_t klen = q2 - q1 - 1;
+		size_t klen = q_end - cd;
 		if (klen >= sizeof(key))
 			klen = sizeof(key) - 1;
-		strncpy(key, q1 + 1, klen);
+		strncpy(key, cd, klen);
 		key[klen] = '\0';
 
 		/* Extract filename if present */
@@ -140,9 +148,11 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		char *fstart = strstr(cd, "filename=\"");
 		if (fstart && fstart < headers_end) {
 			fstart += 10;
-			char *fq2 = strchr(fstart, '"');
-			if (fq2) {
-				fname_len = fq2 - fstart;
+			char *fq_end = fstart;
+			while (fq_end < headers_end && *fq_end != '"')
+				fq_end++;
+			if (fq_end < headers_end) {
+				fname_len = fq_end - fstart;
 				if (fname_len >= sizeof(filename))
 					fname_len = sizeof(filename) - 1;
 				strncpy(filename, fstart, fname_len);
@@ -187,22 +197,20 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 			return -2;
 		}
 
-		val->len = (uint32_t)data_len;
-		val->filename_len = (uint32_t)fname_len;
+	val->len = (uint32_t)data_len;
+	val->filename_len = (uint32_t)fname_len;
 
-		if (fname_len)
-			memcpy(val->data, filename, fname_len);
-		if (data_len)
-			memcpy(val->data + fname_len, data_start, data_len);
+	if (fname_len)
+		memcpy(val->data, filename, fname_len);
+	if (data_len)
+		memcpy(val->data + fname_len, data_start, data_len);
 
-		/* Free old value if key exists (O(1) memory management) */
-		struct mpfd_val *old_val = (struct mpfd_val *)qmap_get(mpfd_db, key);
-		if (old_val) {
-			free(old_val);
-		}
-
-		qmap_put(mpfd_db, key, val);
-		field_count++;
+	/* Store value in qmap - qmap handles memory management */
+	qmap_put(mpfd_db, key, val);
+	
+	/* Free our temporary allocation - qmap has made its own copy */
+	free(val);
+	field_count++;
 
 next_part:
 		pos = next_sep ? next_sep : (body + body_len);
@@ -304,7 +312,8 @@ NDX_DEF(int, mpfd_set_limits, size_t, max_field_size, size_t, max_total_size)
 MODULE_API void
 ndx_install(void)
 {
-	mpfd_db = qmap_open(NULL, NULL, QM_STR, QM_PTR, 0xFF, 0);
+	mpfd_val_type = qmap_mreg(mpfd_val_measure);
+	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
 }
 
 MODULE_API void

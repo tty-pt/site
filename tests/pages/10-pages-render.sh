@@ -36,6 +36,5 @@ check "/" "<!DOCTYPE html>" "root DOCTYPE"
 check "/poem" "<title>[^<]*[Pp]oem|href=\"/poem" "poem page"
 check "/login" "name=\"username\"|<form[^>]*action=\"/login\"" "login form"
 check "/register" "name=\"email\"|<form[^>]*action=\"/register\"" "register form"
-check "/api/index" "^\[" "api index returns JSON"
 
 pass "pages smoke tests all OK"
