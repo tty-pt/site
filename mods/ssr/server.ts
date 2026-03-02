@@ -85,12 +85,18 @@ async function handleRequest(req: Request): Promise<Response> {
   const user = req.headers.get("X-Remote-User");
   const modules = await getModules(req);
 
+  // Read POST body if present
+  let requestBody: string | null = null;
+  if (req.method === "POST") {
+    requestBody = await req.text();
+  }
+
   let content: React.ReactElement;
   let status = 200;
 
   if (path === "/" || path === "") {
     content = React.createElement(IndexPage, { modules, user, path });
-  } else if (req.method === "GET") {
+  } else if (req.method === "GET" || req.method === "POST") {
     let handled = false;
     for (const mod of modules) {
       const modUrl = new URL(`../../mods/${mod.id}/ssr/index.tsx`, import.meta.url).href;
@@ -106,7 +112,13 @@ async function handleRequest(req: Request): Promise<Response> {
         if (match.matched) {
           if (modEntry?.render) {
             try {
-              const rendered = await modEntry.render({ user, path, params: match.params, searchParams: url.searchParams });
+              const rendered = await modEntry.render({
+                user,
+                path,
+                params: match.params,
+                searchParams: url.searchParams,
+                body: requestBody
+              });
               if (rendered) {
                 content = rendered;
                 handled = true;

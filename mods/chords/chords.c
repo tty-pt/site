@@ -17,6 +17,10 @@
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
 
+/* NDX declarations for ssr module functions */
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
+NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, const char *, body_data, size_t, body_len);
+
 /* 
  * NDX API: Transpose chord chart text
  */
@@ -313,6 +317,145 @@ chords_get_handler(int fd, char *body)
 	return 0;
 }
 
+/* SSR handler for /chords/* routes
+ * Handles transposition when query params present, delegates to Deno
+ */
+static int
+chords_ssr_handler(int fd, char *body)
+{
+	(void)body;  /* SSR is GET requests, body unused */
+	
+	char doc_root[256] = { 0 };
+	char path[512] = { 0 };
+	char query[1024] = { 0 };
+	char id[128] = { 0 };
+	
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	ndc_env_get(fd, path, "DOCUMENT_URI");
+	ndc_env_get(fd, query, "QUERY_STRING");
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+	
+	/* If no ID pattern match, this is /chords/ list page - proxy GET */
+	if (!id[0]) {
+		/* Append query string if present */
+		if (query[0]) {
+			size_t path_len = strlen(path);
+			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
+		}
+		return call_ssr_proxy_get(fd, path);
+	}
+	
+	/* Have ID - check if transposition requested */
+	int transpose = 0;
+	int flags = 0;
+	int needs_transpose = 0;
+	
+	if (query[0]) {
+		/* Parse query params */
+		char *saveptr;
+		char *query_copy = strdup(query);
+		if (!query_copy) {
+			return call_ssr_proxy_get(fd, path);
+		}
+		
+		char *param = strtok_r(query_copy, "&", &saveptr);
+		
+		while (param) {
+			char *eq = strchr(param, '=');
+			if (eq) {
+				*eq = '\0';
+				char *key = param;
+				char *value = eq + 1;
+				
+				if (strcmp(key, "t") == 0) {
+					transpose = atoi(value);
+					needs_transpose = 1;
+				} else if (strcmp(key, "b") == 0 && strcmp(value, "1") == 0) {
+					flags |= TRANSP_BEMOL;
+					needs_transpose = 1;
+				} else if (strcmp(key, "l") == 0 && strcmp(value, "1") == 0) {
+					flags |= TRANSP_LATIN;
+					needs_transpose = 1;
+				} else if (strcmp(key, "C") == 0 && strcmp(value, "1") == 0) {
+					flags |= TRANSP_HIDE_CHORDS;
+					needs_transpose = 1;
+				} else if (strcmp(key, "L") == 0 && strcmp(value, "1") == 0) {
+					flags |= TRANSP_HIDE_LYRICS;
+					needs_transpose = 1;
+				}
+			}
+			param = strtok_r(NULL, "&", &saveptr);
+		}
+		free(query_copy);
+	}
+	
+	/* No transposition needed - just proxy GET */
+	if (!needs_transpose) {
+		/* Append query string for Deno */
+		if (query[0]) {
+			size_t path_len = strlen(path);
+			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
+		}
+		return call_ssr_proxy_get(fd, path);
+	}
+	
+	/* Read chord file */
+	char filepath[512];
+	snprintf(filepath, sizeof(filepath), "%s/%s/%s/data.txt",
+			doc_root, CHORDS_ITEMS_PATH, id);
+	
+	FILE *fp = fopen(filepath, "r");
+	if (!fp) {
+		/* File not found - let Deno handle 404 */
+		if (query[0]) {
+			size_t path_len = strlen(path);
+			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
+		}
+		return call_ssr_proxy_get(fd, path);
+	}
+	
+	fseek(fp, 0, SEEK_END);
+	long fsize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	
+	char *content = malloc(fsize + 1);
+	if (!content) {
+		fclose(fp);
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 500);
+		ndc_body(fd, "Memory allocation failed");
+		return 1;
+	}
+	
+	fread(content, 1, fsize, fp);
+	fclose(fp);
+	content[fsize] = '\0';
+	
+	/* Transpose */
+	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
+	free(content);
+	
+	if (!transposed) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 500);
+		ndc_body(fd, "Transposition failed");
+		return 1;
+	}
+	
+	/* Append query string to path for Deno */
+	if (query[0]) {
+		size_t path_len = strlen(path);
+		snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
+	}
+	
+	/* Proxy POST with transposed data */
+	size_t transposed_len = strlen(transposed);
+	int result = call_ssr_proxy_post(fd, path, transposed, transposed_len);
+	
+	free(transposed);
+	return result;
+}
+
 MODULE_API void
 ndx_install(void)
 {
@@ -324,8 +467,14 @@ ndx_install(void)
 	
 	ndx_load("./mods/ssr/ssr");
 	ndx_load("./mods/mpfd/mpfd");
+	
+	/* Register API handlers */
 	ndc_register_handler("POST:/chords/add", chords_handler);
 	ndc_register_handler("GET:/api/chords/transpose", chords_get_handler);
+	
+	/* Register SSR handlers with pattern matching */
+	ndc_register_handler("GET:/chords/", chords_ssr_handler);       /* List page */
+	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);    /* Detail page with :id pattern */
 }
 
 MODULE_API void

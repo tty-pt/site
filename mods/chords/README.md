@@ -22,9 +22,11 @@ The chords module follows the same pattern as the poem module:
 **Phase 2 - Transposition (✓ Complete)**
 
 Chord transposition to different keys:
-- libtransp.so shared library (UTF-8 complete rewrite from tty.pt)
-- API endpoint: `/api/chords/transpose`
-- Client-side JavaScript for live transposition
+- libtransp.so C library (UTF-8 complete rewrite from tty.pt)
+- Server-side processing: C handler transposes data, sends to SSR via POST
+- API endpoint: `/api/chords/transpose` (for programmatic access)
+- SSR routes: `GET /chords/:id?t=N&b=1&l=1` (user-facing pages)
+- Client-side JavaScript for live transposition controls
 - Support for flats (♭), Latin notation (Do-Ré-Mi), and transpose range -11 to +11
 
 **Future Phases:**
@@ -151,11 +153,49 @@ Communion
 
 ## SSR Routes
 
-The module provides these SSR routes:
+The module provides these SSR routes via two mechanisms:
 
+### Pattern Handlers (C → SSR)
+
+**GET /chords/:id** - Displays individual chord with optional transposition
+
+Registered in `chords.c` as pattern handlers:
+- `GET:/chords/` - List view (proxies to SSR)
+- `GET:/chords/:id` - Detail view with server-side transposition
+
+**Query Parameters:**
+- `t=N` - Transpose by N semitones (-11 to +11, default: 0)
+- `b=1` - Use flats (♭) notation
+- `l=1` - Use Latin notation (Do-Ré-Mi)
+- `C=1` - Hide chords (lyrics only)
+- `L=1` - Hide lyrics (chords only)
+
+**Server-Side Processing Flow:**
+1. C handler extracts `:id` from URL pattern
+2. Reads query parameters (t, b, l, C, L)
+3. If transposition needed:
+   - Reads chord file from filesystem
+   - Calls `transp_buffer()` from libtransp.so
+   - Sends transposed data to Deno SSR via POST
+4. If no transposition (no query params):
+   - Proxies GET request to Deno SSR
+   - SSR reads file directly
+5. SSR component receives either:
+   - `body` parameter (pre-transposed data from C)
+   - No body (reads file normally)
+
+**Benefits:**
+- Performant C-based transposition
+- No FFI complexity in Deno
+- Clean memory management (C frees after POST)
+- SSR focuses on rendering only
+
+### Direct SSR Routes
+
+The module's SSR component also registers routes in `ssr/index.tsx`:
 - `GET /chords/` - List all chords
 - `GET /chords/add` - Upload form
-- `GET /chords/:id/` - Display individual chord
+- `GET /chords/:id` - Display individual chord (fallback if no query params)
 
 ### Components
 
@@ -181,11 +221,13 @@ The module provides these SSR routes:
 ## Dependencies
 
 ### C Module Dependencies
-- `mods/ssr/ssr.so` - SSR rendering
+- `mods/ssr/ssr.so` - SSR rendering and proxy APIs
+  - `call_ssr_proxy_get(fd, path)` - Proxy GET to Deno
+  - `call_ssr_proxy_post(fd, path, body, len)` - Proxy POST with processed data
 - `mods/mpfd/mpfd.so` - Multipart form data parsing
-- `lib/transp/libtransp.so` - Chord transposition library
+- `lib/transp/libtransp.so` - Chord transposition library (C linkage)
 
-Loaded via `ndx_load()` in `ndx_install()` (chords.c:185-186)
+Loaded via `ndx_load()` and NDX_DEF declarations in `chords.c`
 
 ### SSR Dependencies
 - React 18

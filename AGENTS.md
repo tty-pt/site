@@ -53,6 +53,96 @@ Client → ndc (port 8080) → ssr.so (C proxy) → Deno SSR (port 3000) → Rea
 6. React rendered to string, returned to ssr.so
 7. ssr.so parses HTTP response and forwards to client
 
+### Server-Side Processing Pattern (POST Body)
+
+For modules that need to pre-process data before SSR (e.g., chord transposition), use this pattern:
+
+**Architecture:**
+```
+Client → ndc → C handler → process data → POST to Deno SSR → React render → HTML
+```
+
+**Pattern:**
+1. C module registers URL pattern handler (e.g., `GET:/chords/:id`)
+2. Handler extracts parameters using `getenv("PATTERN_PARAM_NAME")`
+3. Handler processes data (e.g., file I/O, transformation)
+4. Handler calls `call_ssr_proxy_post(fd, path, body_data, body_len)` with processed data
+5. Deno SSR receives POST with processed data in request body
+6. SSR component checks for `body` parameter in `render()` function
+7. If body present, use it; otherwise read/fetch data normally
+
+**Benefits:**
+- Clean memory management (C frees after POST)
+- No FFI complexity or permissions needed
+- Server-side processing in performant C code
+- Deno focuses on rendering, not data processing
+
+**Example (chords module):**
+
+C handler (`mods/chords/chords.c`):
+```c
+const char *ndx_deps[] = { "./mods/ssr/ssr.so", NULL };
+
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
+NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, const char *, body_data, size_t, body_len);
+
+static int
+chords_ssr_handler(int fd, char *body)
+{
+    const char *id = getenv("PATTERN_PARAM_ID");
+
+    // Read and process file
+    char *data = read_file(id);
+    char *transposed = transpose_data(data, semitones);
+
+    // Send processed data to Deno SSR via POST
+    call_ssr_proxy_post(fd, path, transposed, strlen(transposed));
+
+    free(data);
+    free(transposed);
+    return 0;
+}
+
+MODULE_API void
+ndx_install(void)
+{
+    ndc_register_handler("GET:/chords/:id", chords_ssr_handler);
+}
+```
+
+SSR component (`mods/chords/ssr/index.tsx`):
+```tsx
+export async function render({ user, path, params, body }: { 
+  user: string | null; 
+  path: string; 
+  params: Record<string, string>;
+  body?: string | null;
+}) {
+  let content;
+
+  if (body) {
+    // Use pre-processed data from C handler
+    content = body;
+  } else {
+    // No processing needed, read directly
+    content = await Deno.readTextFile(filepath);
+  }
+
+  return React.createElement("div", null, content);
+}
+```
+
+**When to use this pattern:**
+- Data transformation (transposition, formatting)
+- Performance-critical operations (large file processing)
+- Integration with C libraries
+- Avoid FFI complexity in Deno
+
+**When NOT to use:**
+- Simple file serving (use proxy GET)
+- No processing needed (use proxy GET)
+- Pure UI logic (keep in React)
+
 ---
 
 ## Code Style

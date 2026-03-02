@@ -181,6 +181,155 @@ export async function render({ user, path, params }: {
 }
 ```
 
+## NDX Proxy APIs
+
+The ssr module exports two NDX APIs that other C modules can use to forward requests to Deno SSR.
+
+### call_ssr_proxy_get()
+
+**Purpose:** Proxy a GET request to Deno SSR without modifications.
+
+**Signature:**
+```c
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
+```
+
+**Parameters:**
+- `fd` - Client socket file descriptor
+- `path` - Request path to forward (e.g., `/chords/test-transpose`)
+
+**Returns:** 0 on success, -1 on error
+
+**Usage:**
+```c
+const char *ndx_deps[] = { "./mods/ssr/ssr.so", NULL };
+
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
+
+static int
+my_handler(int fd, char *body)
+{
+    const char *id = getenv("PATTERN_PARAM_ID");
+    char path[256];
+    snprintf(path, sizeof(path), "/mymodule/%s%s", id, 
+             getenv("QUERY_STRING") ?: "");
+
+    return call_ssr_proxy_get(fd, path);
+}
+```
+
+**When to use:**
+- Simple pass-through to SSR rendering
+- No data processing needed in C
+- Dynamic routing based on parameters
+
+### call_ssr_proxy_post()
+
+**Purpose:** Proxy a POST request to Deno SSR with pre-processed data in the request body.
+
+**Signature:**
+```c
+NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, 
+        const char *, body_data, size_t, body_len);
+```
+
+**Parameters:**
+- `fd` - Client socket file descriptor
+- `path` - Request path to forward
+- `body_data` - Request body data (processed content)
+- `body_len` - Length of body data in bytes
+
+**Returns:** 0 on success, -1 on error
+
+**Usage:**
+```c
+const char *ndx_deps[] = { "./mods/ssr/ssr.so", NULL };
+
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
+NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, 
+        const char *, body_data, size_t, body_len);
+
+static int
+chords_ssr_handler(int fd, char *body)
+{
+    const char *id = getenv("PATTERN_PARAM_ID");
+
+    // Read file from filesystem
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "items/chords/items/%s/data.txt", id);
+
+    FILE *fp = fopen(filepath, "r");
+    if (!fp) {
+        // File not found - let Deno handle 404
+        char path[256];
+        snprintf(path, sizeof(path), "/chords/%s", id);
+        return call_ssr_proxy_get(fd, path);
+    }
+
+    // Read and process data
+    fseek(fp, 0, SEEK_END);
+    long len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    char *data = malloc(len + 1);
+    fread(data, 1, len, fp);
+    data[len] = '\0';
+    fclose(fp);
+
+    // Transform data (e.g., transpose chords)
+    char *processed = transform_data(data, params);
+    free(data);
+
+    // Send processed data to Deno via POST
+    char path[256];
+    snprintf(path, sizeof(path), "/chords/%s", id);
+    int ret = call_ssr_proxy_post(fd, path, processed, strlen(processed));
+
+    free(processed);
+    return ret;
+}
+```
+
+**When to use:**
+- Data transformation before rendering (e.g., chord transposition)
+- Performance-critical operations in C
+- Integration with C libraries
+- Avoid FFI complexity in Deno
+
+**Module receives body in render():**
+```typescript
+export async function render({ user, path, params, body }: {
+  user: string | null;
+  path: string;
+  params: Record<string, string>;
+  body?: string | null;  // POST body if sent from C handler
+}) {
+  let content;
+
+  if (body) {
+    // Use pre-processed data from C
+    content = body;
+  } else {
+    // No processing, read file directly
+    content = await Deno.readTextFile(filepath);
+  }
+
+  return React.createElement("div", null, content);
+}
+```
+
+**Memory Management:**
+- C module allocates and processes data
+- `call_ssr_proxy_post()` sends data to Deno
+- C module frees data after call returns
+- No FFI, no shared memory, no deadlock risk
+
+**Implementation Notes:**
+- POST method used (not GET) to send body
+- `Content-Length` header set automatically
+- No `Content-Type` header added (module can add if needed)
+- Request buffer size: 8192 bytes (headers + partial body)
+- Body sent separately after headers
+
 ## Dependencies
 
 - `mods/auth/auth` - For `get_session_user()` to check authentication

@@ -18,12 +18,11 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 SSR_SERVER_PATH="$SCRIPT_DIR/mods/ssr/server.ts"
 if [ -f "$SSR_SERVER_PATH" ]; then
     cd "$SCRIPT_DIR/mods/ssr"
-    /home/quirinpa/.deno/bin/deno run --allow-read --allow-net --allow-env --allow-ffi --unstable-ffi server.ts &
+    /home/quirinpa/.deno/bin/deno run --allow-read --allow-net --allow-env server.ts &
     deno_pid=$!
     cd "$SCRIPT_DIR"
 fi
 
 cd "$SCRIPT_DIR"
-export LD_LIBRARY_PATH="$SCRIPT_DIR/lib/transp:$LD_LIBRARY_PATH"
 exec ndc -C "$SCRIPT_DIR" -p 8080 -d
 

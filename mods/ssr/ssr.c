@@ -197,7 +197,8 @@ proxy_req_finish(char *buf, size_t bufcap, size_t *len)
 }
 
 static int
-proxy_request(int client_fd, const char *path, const char *modules_header, const char *error_msg)
+proxy_request(int client_fd, const char *path, const char *method, const char *modules_header,
+              const char *body_data, size_t body_len, const char *error_msg)
 {
     int proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (proxy_fd < 0) {
@@ -222,9 +223,9 @@ proxy_request(int client_fd, const char *path, const char *modules_header, const
                 return 1;
             }
 
-            char req[2048];
+            char req[8192];
             size_t req_len = 0;
-            if (proxy_req_init(req, sizeof(req), &req_len, "GET", path, PROXY_HOST, PROXY_PORT) != 0) {
+            if (proxy_req_init(req, sizeof(req), &req_len, method, path, PROXY_HOST, PROXY_PORT) != 0) {
                 close(proxy_fd);
                 ndc_header(client_fd, "Content-Type", "text/plain");
                 ndc_head(client_fd, 502);
@@ -259,12 +260,37 @@ proxy_request(int client_fd, const char *path, const char *modules_header, const
                 ndc_body(client_fd, "Proxy error");
                 return 1;
             }
+            /* Add Content-Length if body present */
+            if (body_data && body_len > 0) {
+                char content_length[64];
+                snprintf(content_length, sizeof(content_length), "%zu", body_len);
+                if (proxy_req_add_header(req, sizeof(req), &req_len, "Content-Length", content_length) != 0) {
+                    close(proxy_fd);
+                    ndc_header(client_fd, "Content-Type", "text/plain");
+                    ndc_head(client_fd, 502);
+                    ndc_body(client_fd, "Proxy error");
+                    return 1;
+                }
+            }
             if (proxy_req_finish(req, sizeof(req), &req_len) != 0) {
                 close(proxy_fd);
                 ndc_header(client_fd, "Content-Type", "text/plain");
                 ndc_head(client_fd, 502);
                 ndc_body(client_fd, "Proxy error");
                 return 1;
+            }
+
+            /* Append body data if present */
+            if (body_data && body_len > 0) {
+                if (req_len + body_len >= sizeof(req)) {
+                    close(proxy_fd);
+                    ndc_header(client_fd, "Content-Type", "text/plain");
+                    ndc_head(client_fd, 502);
+                    ndc_body(client_fd, "Request body too large");
+                    return 1;
+                }
+                memcpy(req + req_len, body_data, body_len);
+                req_len += body_len;
             }
 
             write(proxy_fd, req, req_len);
@@ -383,6 +409,45 @@ proxy_request(int client_fd, const char *path, const char *modules_header, const
     return 0;
 }
 
+/*
+ * NDX API: Proxy GET request to Deno SSR
+ * Called by modules that want to delegate rendering to Deno
+ */
+NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path)
+{
+    char doc_root[256] = { 0 };
+    ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+
+    char modules_json[4096] = { 0 };
+    char modules_header[8192] = { 0 };
+
+    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
+        call_url_encode(modules_json, modules_header, sizeof(modules_header));
+    }
+
+    return proxy_request(fd, path, "GET", modules_header, NULL, 0, NULL);
+}
+
+/*
+ * NDX API: Proxy POST request with body to Deno SSR
+ * Used when module has pre-processed data to send to Deno
+ * Note: Does NOT add Content-Type header (modules can add if needed)
+ */
+NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, const char *, body_data, size_t, body_len)
+{
+    char doc_root[256] = { 0 };
+    ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+
+    char modules_json[4096] = { 0 };
+    char modules_header[8192] = { 0 };
+
+    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
+        call_url_encode(modules_json, modules_header, sizeof(modules_header));
+    }
+
+    return proxy_request(fd, path, "POST", modules_header, body_data, body_len, NULL);
+}
+
 
 /* Adapter: render an error template via the Deno SSR proxy */
 int ssr_render_error(int fd, char *template, char *error_msg)
@@ -399,7 +464,7 @@ int ssr_render_error(int fd, char *template, char *error_msg)
         call_url_encode(modules_json, modules_header, sizeof(modules_header));
     }
 
-    proxy_request(fd, template, modules_header, error_msg);
+    proxy_request(fd, template, "GET", modules_header, NULL, 0, error_msg);
     return 0;
 }
 
@@ -434,7 +499,7 @@ int ssr_handler(int fd, char *body) {
         snprintf(path + path_len, sizeof(path) - path_len, "?%s", query_string);
     }
 
-    proxy_request(fd, path, modules_header, NULL);
+    proxy_request(fd, path, "GET", modules_header, NULL, 0, NULL);
     return 0;
 }
 
