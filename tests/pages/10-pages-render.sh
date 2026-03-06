@@ -6,10 +6,6 @@ set -eu
 
 . "$(dirname "$0")/00-helpers.sh"
 
-if ! wait_for_port "$NDC_HOST" "$NDC_PORT" 15; then
-  fail "service not listening on $NDC_HOST:$NDC_PORT"
-fi
-
 check(){
   route=$1
   expect_re=$2

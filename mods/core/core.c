@@ -1,11 +1,12 @@
-#include <ndc.h>
-#include <ndc-ndx.h>
+#include <ttypt/ndc.h>
+#include <ttypt/ndc-ndx.h>
 #include <string.h>
 #include <stdio.h>
 
 static int
 load_modules_from_file(const char *path)
 {
+	char mod_line[1030];
 	FILE *fp = fopen(path, "r");
 	if (!fp)
 		return 0;
@@ -19,7 +20,8 @@ load_modules_from_file(const char *path)
 		}
 		if (len == 0 || line[0] == '#')
 			continue;
-		ndx_load(line);
+		snprintf(mod_line, sizeof(mod_line), "mods/%s/%s", line, line);
+		ndx_load(mod_line);
 	}
 
 	fclose(fp);

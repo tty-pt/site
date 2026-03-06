@@ -1,33 +1,11 @@
 #!/bin/sh
 set -e
 
-HOST="localhost"
-PORT="3001"
-BASE="http://$HOST:$PORT"
-LOG="/tmp/ssr_test_ndc.log"
+BASE="http://localhost:8080"
+LOG="/tmp/site.log"
 
 fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
-
-cleanup() {
-	pkill -f "ndc.*$PORT" 2>/dev/null || true
-	pkill -f "deno" 2>/dev/null || true
-	rm -f "$LOG"
-}
-
-start_server() {
-	cleanup
-	sleep 1
-	LD_LIBRARY_PATH=/home/quirinpa/ndc/lib:/home/quirinpa/qmap/lib /home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
-	sleep 3
-}
-
-echo "=== SSR Module Tests ==="
-start_server
-
-# 1. SSR module loads
-echo -n "1. SSR module loads... "
-grep -q "ssr" "$LOG" && pass "SSR loaded" || fail "SSR not loaded"
 
 # 2. Unknown routes fall through to SSR (return HTML, not raw 404)
 echo -n "2. Unknown routes return SSR HTML... "

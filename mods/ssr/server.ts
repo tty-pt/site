@@ -17,7 +17,7 @@ async function getModules(req: Request): Promise<ModuleEntry[]> {
     throw new Error("Missing X-Modules header");
   }
   try {
-    const json = decodeURIComponent(header);
+    const json = atob(header);
     const parsed = JSON.parse(json) as ModuleEntry[];
     if (!Array.isArray(parsed)) {
       throw new Error("X-Modules header is not an array");

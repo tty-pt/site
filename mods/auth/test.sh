@@ -1,35 +1,17 @@
 #!/bin/sh
 set -e
 
-HOST="localhost"
-PORT="3001"
-BASE="http://$HOST:$PORT"
+BASE="http://localhost:8080"
 COOKIE="/tmp/auth_test_cookie"
-LOG="/tmp/auth_test_ndc.log"
+LOG="/tmp/site.log"
 RCODE=""
 
 fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
 
-cleanup() {
-	pkill -f "ndc.*$PORT" 2>/dev/null || true
-	rm -f "$COOKIE" "$LOG" auth.qmap
-}
-
-start_server() {
-	cleanup
-	sleep 1
-	rm -f auth.qmap
-	/home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
-	sleep 3
-}
-
 get_rcode() {
 	RCODE=$(grep "Register" "$LOG" | tail -1 | sed 's/.*r=\([a-f0-9]*\).*/\1/')
 }
-
-echo "=== Auth Module Tests ==="
-start_server
 
 # 1. Empty session
 echo -n "1. Empty session... "
@@ -88,7 +70,3 @@ echo "$out" | grep -q "Invalid" && pass "wrong password rejected" || fail "expec
 echo -n "11. Login nonexistent user... "
 out=$(curl -s -X POST "$BASE/login" -d "username=nobody&password=pass1234")
 echo "$out" | grep -qi "not found" && pass "nonexistent rejected" || fail "expected 'not found', got: $out"
-
-cleanup
-echo ""
-echo "All tests passed!"

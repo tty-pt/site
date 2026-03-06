@@ -11,6 +11,7 @@
 #include <ttypt/qmap.h>
 
 #include "../common/common.h"
+#include "../ssr/ssr.h"
 
 static uint32_t users_map;
 static uint32_t sessions_map;
@@ -144,6 +145,7 @@ handle_logout(int fd, char *body)
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	ndc_env_get(fd, query, "QUERY_STRING");
+	
 	call_query_param(cookie, "QSESSION", token, sizeof(token));
 	call_query_param(query, "ret", redirect, sizeof(redirect));
 
@@ -247,6 +249,7 @@ handle_confirm(int fd, char *body)
 	char code[64] = {0};
 
 	ndc_env_get(fd, query, "QUERY_STRING");
+	
 	call_query_param(query, "u", username, sizeof(username));
 	call_query_param(query, "r", code, sizeof(code));
 
@@ -305,6 +308,8 @@ ndx_install(void)
 	ndc_register_handler("/api/session", handle_session);
 	ndc_register_handler("/logout", handle_logout);
 	ndc_register_handler("/confirm", handle_confirm);
+
+	call_ssr_register_module("auth", "Auth");
 }
 
 MODULE_API void

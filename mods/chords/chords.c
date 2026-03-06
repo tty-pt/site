@@ -9,17 +9,13 @@
 
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
+#include "../ssr/ssr.h"
 #include "../../lib/transp/transp.h"
-/* #include "chords_api.h" */
 
 #define CHORDS_ITEMS_PATH "items/chords/items"
 
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
-
-/* NDX declarations for ssr module functions */
-NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path);
-NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, const char *, body_data, size_t, body_len);
 
 /* 
  * NDX API: Transpose chord chart text
@@ -468,13 +464,12 @@ ndx_install(void)
 	ndx_load("./mods/ssr/ssr");
 	ndx_load("./mods/mpfd/mpfd");
 	
-	/* Register API handlers */
 	ndc_register_handler("POST:/chords/add", chords_handler);
 	ndc_register_handler("GET:/api/chords/transpose", chords_get_handler);
-	
-	/* Register SSR handlers with pattern matching */
 	ndc_register_handler("GET:/chords/", chords_ssr_handler);       /* List page */
 	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);    /* Detail page with :id pattern */
+
+	call_ssr_register_module("chords", "Chords");
 }
 
 MODULE_API void

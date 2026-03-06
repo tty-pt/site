@@ -1,13 +1,13 @@
 #include <ttypt/ndx-mod.h>
 
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
 
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
+#include "../ssr/ssr.h"
 
 #define POEM_ITEMS_PATH "items/poem/items"
 
@@ -146,6 +146,8 @@ ndx_install(void)
 	ndx_load("./mods/ssr/ssr");
 	ndx_load("./mods/mpfd/mpfd");
 	ndc_register_handler("POST:/poem/add", poem_handler);
+
+	call_ssr_register_module("poem", "Poem");
 }
 
 MODULE_API void

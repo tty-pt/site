@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
+#include <openssl/evp.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
@@ -40,7 +41,7 @@ NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t,
 
 	size_t key_len = strlen(key);
 	for (char *p = query; *p; ) {
-		while (*p == '&')
+		while (*p && (*p == '&' || *p == ';' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
 			p++;
 		if (!strncmp(p, key, key_len) && p[key_len] == '=') {
 			char *val = p + key_len + 1;
@@ -117,6 +118,11 @@ NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 		}
 	}
 	out[j] = '\0';
+	return 0;
+}
+
+NDX_DEF(int, b64_encode, const char *, in, char *, out, size_t, outlen) {
+	EVP_EncodeBlock(out, in, strlen(in));
 	return 0;
 }
 

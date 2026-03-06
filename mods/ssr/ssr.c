@@ -8,145 +8,50 @@
 #include <unistd.h>
 #include <netdb.h>
 
-#include <ttypt/qmap.h>
 #include <ttypt/ndc.h>
+#include <ttypt/qmap.h>
 
 #include "../common/common.h"
 
 #define PROXY_HOST "127.0.0.1"
 #define PROXY_PORT 3000
+#define MAX_MODULES 64
 
-static int
-get_field(const char *value, const char *key, char *out, size_t outlen)
+static unsigned module_hd = -1;
+char modules_json[256 * MAX_MODULES];
+char modules_header[2 * 256 * MAX_MODULES];
+
+NDX_DEF(int, ssr_register_module, const char *, id, const char *, title)
 {
-	size_t keylen = strlen(key);
-	const char *p = value;
-	while (p && *p) {
-		while (*p == ' ') p++;
-		if (!strncmp(p, key, keylen) && p[keylen] == '=') {
-			p += keylen + 1;
-			const char *end = strchr(p, ';');
-			size_t len = end ? (size_t)(end - p) : strlen(p);
-			if (len >= outlen) len = outlen - 1;
-			strncpy(out, p, len);
-			out[len] = '\0';
-			return 0;
+	char module_json[256];
+	snprintf(module_json, sizeof(module_json), "{\"id\":\"%s\",\"title\":\"%s\"}", id, title);
+	qmap_put(module_hd, id, title);
+
+	char *s = modules_json;
+	unsigned cur = qmap_iter(module_hd, NULL, 0);
+	const void *key, *value;
+	size_t rem = sizeof(modules_json);
+
+	memset(modules_json, 0, sizeof(modules_json));
+	*s ++ = '[';
+
+	while (qmap_next(&key, &value, cur)) {
+		if (s > modules_json + 1) {
+			*s ++ = ',';
+			rem --;
 		}
-		p = strchr(p, ';');
-		if (p) p++;
-	}
-	return -1;
-}
 
-static uint32_t modules_db_hd = 0;
-
-static int
-build_modules_json(char *doc_root, char *out, size_t outlen)
-{
-	uint32_t hd = modules_db_hd;
-
-    size_t used = 0;
-    used += snprintf(out + used, outlen - used, "[");
-
-    uint32_t cur = qmap_iter(hd, NULL, 0);
-    const void *key;
-    const void *value;
-    int first = 1;
-    while (qmap_next(&key, &value, cur)) {
-        const char *k = (const char *)key;
-        const char *v = (const char *)value;
-        char title[256] = { 0 };
-        char routes[512] = { 0 };
-        char ssr[256] = { 0 };
-
-        get_field(v, "title", title, sizeof(title));
-        get_field(v, "routes", routes, sizeof(routes));
-        get_field(v, "ssr", ssr, sizeof(ssr));
-
-        char title_esc[256];
-        call_json_escape(title, title_esc, sizeof(title_esc));
-
-        if (!first) {
-            used += snprintf(out + used, outlen - used, ",");
-        }
-        first = 0;
-
-        used += snprintf(out + used, outlen - used,
-            "{\"id\":\"%s\",\"title\":\"%s\",\"routes\":[", k, title_esc);
-
-        int route_first = 1;
-        char *save = NULL;
-        char *tok = strtok_r(routes, ",", &save);
-        while (tok) {
-            if (!route_first) {
-                used += snprintf(out + used, outlen - used, ",");
-            }
-            route_first = 0;
-            used += snprintf(out + used, outlen - used, "\"%s\"", tok);
-            tok = strtok_r(NULL, ",", &save);
-        }
-
-        used += snprintf(out + used, outlen - used,
-            "],\"ssr\":\"%s\"}", ssr);
-
-        if (used + 4 >= outlen)
-            break;
-    }
-
-    used += snprintf(out + used, outlen - used, "]");
-    return 0;
-}
-
-/* Forward declarations */
-int ssr_handler(int fd, char *body);
-
-static void
-register_module_routes(void)
-{
-	uint32_t hd = modules_db_hd;
-	if (!hd) {
-		fprintf(stderr, "register_module_routes: failed to open module.db\n");
-		return;
+		size_t diff = snprintf(s, rem, "{\"id\":\"%s\",\"title\":\"%s\"}", (char *) key, (char *) value);
+		s += diff;
+		rem -= diff;
 	}
 
-    uint32_t cur = qmap_iter(hd, NULL, 0);
-    const void *key;
-    const void *value;
-    while (qmap_next(&key, &value, cur)) {
-        const char *k = (const char *)key;
-        const char *v = (const char *)value;
-        fprintf(stderr, "register_module_routes: key=%s, value=%s\n", k, v);
-        char routes[512] = { 0 };
-        if (get_field(v, "routes", routes, sizeof(routes)) != 0) {
-            fprintf(stderr, "register_module_routes: no routes field for %s\n", k);
-            continue;
-        }
-        fprintf(stderr, "register_module_routes: %s has routes=%s\n", k, routes);
+	*s = ']';
 
-        char *save = NULL;
-        char *tok = strtok_r(routes, ",", &save);
-        while (tok) {
-            char route_buf[300];
-            snprintf(route_buf, sizeof(route_buf), "GET:%s", tok);
-            ndc_register_handler(route_buf, ssr_handler);
+	memset(modules_header, 0, sizeof(modules_header));
+	call_b64_encode(modules_json, modules_header, sizeof(modules_header));
 
-            size_t tok_len = strlen(tok);
-            if (tok_len > 1 && tok[tok_len - 1] != '/' && !strchr(tok, ':')) {
-                snprintf(route_buf, sizeof(route_buf), "GET:%s/", tok);
-                ndc_register_handler(route_buf, ssr_handler);
-            }
-
-            if (strchr(tok, ':')) {
-                char *slash = strchr(tok, ':');
-                if (slash) {
-                    *slash = '\0';
-                    snprintf(route_buf, sizeof(route_buf), "GET:%s", tok);
-                    ndc_register_handler(route_buf, ssr_handler);
-                }
-            }
-            tok = strtok_r(NULL, ",", &save);
-        }
-    }
+	return 0;
 }
 
 /* Helpers to safely build an outgoing HTTP request into a buffer. */
@@ -418,13 +323,6 @@ NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path)
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 
-    char modules_json[4096] = { 0 };
-    char modules_header[8192] = { 0 };
-
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
-        call_url_encode(modules_json, modules_header, sizeof(modules_header));
-    }
-
     return proxy_request(fd, path, "GET", modules_header, NULL, 0, NULL);
 }
 
@@ -435,38 +333,9 @@ NDX_DEF(int, ssr_proxy_get, int, fd, const char *, path)
  */
 NDX_DEF(int, ssr_proxy_post, int, fd, const char *, path, const char *, body_data, size_t, body_len)
 {
-    char doc_root[256] = { 0 };
-    ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-
-    char modules_json[4096] = { 0 };
-    char modules_header[8192] = { 0 };
-
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
-        call_url_encode(modules_json, modules_header, sizeof(modules_header));
-    }
-
     return proxy_request(fd, path, "POST", modules_header, body_data, body_len, NULL);
 }
 
-
-/* Adapter: render an error template via the Deno SSR proxy */
-int ssr_render_error(int fd, char *template, char *error_msg)
-{
-    /* const char *remote_user = NULL; */
-    char token[128] = { 0 };
-
-    char modules_json[4096] = { 0 };
-    char modules_header[8192] = { 0 };
-    char doc_root[256] = { 0 };
-    ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
-        call_url_encode(modules_json, modules_header, sizeof(modules_header));
-    }
-
-    proxy_request(fd, template, "GET", modules_header, NULL, 0, error_msg);
-    return 0;
-}
 
 /* Main SSR handler: proxy request path to the Deno SSR server */
 int ssr_handler(int fd, char *body) {
@@ -479,12 +348,6 @@ int ssr_handler(int fd, char *body) {
     
     char doc_root[256] = { 0 };
     ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-
-    char modules_json[4096] = { 0 };
-    char modules_header[8192] = { 0 };
-    if (build_modules_json(doc_root, modules_json, sizeof(modules_json)) == 0) {
-        call_url_encode(modules_json, modules_header, sizeof(modules_header));
-    }
 
     /* Obtain path from ndc env */
     ndc_env_get(fd, path, "DOCUMENT_URI");
@@ -503,79 +366,12 @@ int ssr_handler(int fd, char *body) {
     return 0;
 }
 
-/* JSON list of modules API handler */
-static int
-api_modules_handler(int fd, char *body)
-{
-    (void)body;
-    char doc_root[256] = { 0 };
-    ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-
-    uint32_t hd = modules_db_hd;
-
-    if (!hd) {
-        ndc_header(fd, "Content-Type", "application/json");
-        ndc_head(fd, 500);
-        ndc_body(fd, "[]");
-        return 0;
-    }
-
-    ndc_header(fd, "Content-Type", "application/json");
-    ndc_header(fd, "Access-Control-Allow-Origin", "*");
-    ndc_head(fd, 200);
-    ndc_write(fd, "[", 1);
-
-    uint32_t cur = qmap_iter(hd, NULL, 0);
-    const void *key;
-    const void *value;
-    int first = 1;
-    while (qmap_next(&key, &value, cur)) {
-        const char *k = (const char *)key;
-        const char *v = (const char *)value;
-        char title[256] = { 0 };
-        char routes[512] = { 0 };
-        char ssr[256] = { 0 };
-        char be[256] = { 0 };
-
-        get_field(v, "title", title, sizeof(title));
-        get_field(v, "routes", routes, sizeof(routes));
-        get_field(v, "ssr", ssr, sizeof(ssr));
-        get_field(v, "be", be, sizeof(be));
-
-        if (!first) ndc_writef(fd, ",");
-        first = 0;
-
-        char title_esc[256];
-        call_json_escape(title, title_esc, sizeof(title_esc));
-
-        ndc_writef(fd, "{\"id\":\"%s\",\"title\":\"%s\",\"routes\":[", k, title_esc);
-        int rf = 1;
-        char *save = NULL;
-        char *tok = strtok_r(routes, ",", &save);
-        while (tok) {
-            if (!rf) ndc_writef(fd, ",");
-            rf = 0;
-            ndc_writef(fd, "\"%s\"", tok);
-            tok = strtok_r(NULL, ",", &save);
-        }
-        ndc_writef(fd, "],\"ssr\":\"%s\",\"be\":\"%s\"}", ssr, be);
-    }
-    qmap_close(hd);
-
-    ndc_writef(fd, "]");
-    ndc_close(fd);
-    return 0;
-}
-
 MODULE_API void
 ndx_install(void)
 {
-	modules_db_hd = qmap_open("./module.db", "hd", QM_STR, QM_STR, 0x7FFF, QM_MIRROR);
+	module_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
 	ndx_load("./mods/common/common");
 	ndc_config.default_handler = ssr_handler;
-	/* ndc_register_handler("GET:/", ssr_handler); */
-	ndc_register_handler("GET:/api/modules", api_modules_handler);
-	/* register_module_routes(); */
 }
 
 MODULE_API void

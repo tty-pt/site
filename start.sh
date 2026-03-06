@@ -23,6 +23,4 @@ if [ -f "$SSR_SERVER_PATH" ]; then
     cd "$SCRIPT_DIR"
 fi
 
-cd "$SCRIPT_DIR"
-exec ndc -C "$SCRIPT_DIR" -p 8080 -d
-
+ndc -C "$SCRIPT_DIR" -p 8080 -d 2>&1 | tee /tmp/site.log

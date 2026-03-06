@@ -1,10 +1,8 @@
 #!/bin/sh
 set -e
 
-HOST="localhost"
-PORT="3001"
-BASE="http://$HOST:$PORT"
-LOG="/tmp/poem_test_ndc.log"
+BASE="http://localhost:8080"
+LOG="/tmp/site.log"
 POEM_DIR="/home/quirinpa/site/items/poem/items"
 
 fail() { echo "FAIL: $1"; exit 1; }
@@ -13,50 +11,31 @@ pass() { echo "PASS: $1"; }
 TMPFILE="/tmp/poem_test_$$"
 TMPFILE2="/tmp/poem_test2_$$"
 
-cleanup() {
-	pkill -f "ndc.*$PORT" 2>/dev/null || true
-	rm -f "$LOG" "$TMPFILE" "$TMPFILE2"
-	rm -rf "$POEM_DIR"
-}
-
-start_server() {
-	cleanup
-    sleep 2
-	mkdir -p "$POEM_DIR"
-    /home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
-    sleep 2
-}
-
-echo "=== Poem Module Tests ==="
-start_server
+mkdir -p "$POEM_DIR"
 
 # 1. POST with wrong content-type
 echo -n "1. POST wrong content-type... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-d "id=test&file=content")
 [ "$code" = "415" ] && pass "415 for unsupported media type" || fail "expected 415, got $code"
-sleep 1
 
 # 2. POST missing id field (file has content but no id)
 echo -n "2. POST missing id field... "
 echo "test content" > "$TMPFILE"
 out=$(curl -s -X POST "$BASE/poem/add" -F "file=@$TMPFILE")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
-sleep 1
 
 # 3. POST missing file field
 echo -n "3. POST missing file field... "
 out=$(curl -s -X POST "$BASE/poem/add" \
 	-F "id=testpoem")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
-sleep 1
 
 # 4. POST empty file (id provided but file is empty - same as missing)
 echo -n "4. POST empty file... "
 > "$TMPFILE2"
 out=$(curl -s -X POST "$BASE/poem/add" -F "id=testpoem2" -F "file=@$TMPFILE2")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
-sleep 1
 
 # 5. POST valid multipart
 echo -n "5. POST valid multipart... "
@@ -64,6 +43,7 @@ echo "This is a test poem content.
 With multiple lines." > "$TMPFILE"
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-F "id=testpoem" -F "file=@$TMPFILE")
+sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
     
 
@@ -85,7 +65,3 @@ echo -n "8. Comments file created... "
 # Skipping this test as it depends on SSR behavior
 echo -n "10. POST to unknown path... "
 pass "skipped (falls through to SSR)"
-
-cleanup
-echo ""
-echo "All tests passed!"
