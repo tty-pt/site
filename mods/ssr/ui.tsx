@@ -48,12 +48,11 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
 export function Layout({ children, user, title, path }: { children: React.ReactNode; user: string | null; title: string; path: string }) {
   return (
     <label className="menu">
-      <input type="checkbox" style={{ display: "none" }} />
+      <input name="functions" type="checkbox" style={{ display: "none" }} />
       <span className="fixed top-0 right-0 z-10 p-2 flex items-center gap-4">
-        <span className="menu-toggle bg-gray-50 border border-gray-200 flex items-center justify-center cursor-pointer text-base">☰</span>
+        <a className="menu-toggle bg-gray-50 border border-gray-200 flex items-center justify-center cursor-pointer text-base btn">🔘</a>
       </span>
       <span className="functions flex-1 fixed right-0 z-20 h-full overflow-y-auto bg-gray-50 text-sm capitalize flex flex-col gap-2 p-4">
-        <h2 className="p-4">Menu</h2>
         <Menu user={user} path={path} />
       </span>
       <div className="main">

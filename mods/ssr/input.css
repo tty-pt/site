@@ -111,21 +111,25 @@ a.btn {
 
 /* Menu */
 .menu input[type="checkbox"] { display: none; }
-.menu input:checked ~ .functions { max-width: 300px; }
-.menu input:not(:checked) ~ .functions { max-width: 0px; }
+.menu input:checked ~ .functions {
+	transform: translateX(0px);
+}
 
 .functions {
-  transition: max-width 0.3s ease;
+  transition: transform 0.3s ease;
   overflow-x: hidden;
   display: flex !important;
   flex-direction: column;
   background-color: #fefefe;
+  transform: translateX(202px);
+  width: 170px;
 }
 
-.functions > button {
+.functions > button, .functions > a.btn {
   white-space: nowrap !important;
   padding: 12px 16px;
   display: flex;
+  justify-content: space-between;
   gap: 8px;
   align-items: center;
 }
@@ -135,7 +139,6 @@ a.btn {
   background: whitesmoke !important;
   border: 1px solid gainsboro !important;
   border-radius: 4px !important;
-  display: inline-block !important;
 }
 
 .menu-toggle {
@@ -144,6 +147,8 @@ a.btn {
   background: whitesmoke;
   border: 1px solid gainsboro;
   border-radius: 50%;
+  width: 2.3rem;
+  height: 2.3rem;
 }
 
 @media (prefers-color-scheme: dark) {

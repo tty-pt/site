@@ -3,7 +3,10 @@ CC ?= clang
 MOD_DIRS := $(sort $(dir $(wildcard mods/*/Makefile)))
 MODULE_DIRS := $(sort $(dir $(wildcard modules/*/Makefile)))
 
-all: mods modules
+all: mods modules htdocs/styles.css
+
+htdocs/styles.css:
+	npm run build:css
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -34,6 +37,6 @@ integration-tests: all
 
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
-	rm -f core.so module.db mods.load
+	rm -f core.so module.db
 
 .PHONY: all mods modules run clean test unit-tests pages-test integration-tests
