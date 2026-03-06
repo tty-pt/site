@@ -33,6 +33,9 @@ NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
 }
 
 NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t, out_len) {
+	fprintf(stderr, "QUERY_PARAM DEBUG: query=%p query_str='%s' key='%s'\n", 
+		(void*)query, query ? query : "(null)", key);
+	
 	if (!out || !out_len)
 		return -1;
 	out[0] = 0;

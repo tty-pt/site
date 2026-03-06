@@ -19,7 +19,3 @@ echo "$out" | grep -qi "deno" && pass "Deno error shown" || fail "unexpected res
 # 4. SSR response includes body tag
 echo -n "4. SSR includes body tag... "
 echo "$out" | grep -q "<body>" && pass "body tag present" || fail "no body tag"
-
-cleanup
-echo ""
-echo "All tests passed!"

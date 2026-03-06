@@ -466,8 +466,8 @@ ndx_install(void)
 	
 	ndc_register_handler("POST:/chords/add", chords_handler);
 	ndc_register_handler("GET:/api/chords/transpose", chords_get_handler);
-	ndc_register_handler("GET:/chords/", chords_ssr_handler);       /* List page */
-	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);    /* Detail page with :id pattern */
+	ndc_register_handler("GET:/chords/", chords_ssr_handler);
+	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);
 
 	call_ssr_register_module("chords", "Chords");
 }

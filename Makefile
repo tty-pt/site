@@ -3,7 +3,7 @@ CC ?= clang
 MOD_DIRS := $(sort $(dir $(wildcard mods/*/Makefile)))
 MODULE_DIRS := $(sort $(dir $(wildcard modules/*/Makefile)))
 
-all: core.so mods modules
+all: mods modules
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done

@@ -29,7 +29,7 @@ static uint32_t
 get_auth_db(void)
 {
 	if (!auth_db_hd) {
-		auth_db_hd = qmap_open("auth.qmap", "hd", QM_STR, QM_STR, 0xFF, 0);
+		auth_db_hd = qmap_open(NULL, "hd", QM_STR, QM_STR, 0xFF, 0);
 	}
 	return auth_db_hd;
 }
@@ -84,7 +84,11 @@ handle_login(int fd, char *body)
 	char password[64] = {0};
 	char redirect[256] = {0};
 
+	fprintf(stderr, "AUTH DEBUG handle_login: body=%p body_str='%s' len=%lu\n", 
+		(void*)body, body ? body : "(null)", body ? strlen(body) : 0);
+	
 	call_query_param(body, "username", username, sizeof(username));
+	fprintf(stderr, "AUTH DEBUG: After query_param, username='%s'\n", username);
 	call_query_param(body, "password", password, sizeof(password));
 	call_query_param(body, "ret", redirect, sizeof(redirect));
 
@@ -173,6 +177,9 @@ handle_register(int fd, char *body)
 	char password[64] = {0};
 	char password_confirm[64] = {0};
 	char email[128] = {0};
+
+	fprintf(stderr, "AUTH DEBUG handle_register: body=%p body_str='%s' len=%lu\n", 
+		(void*)body, body ? body : "(null)", body ? strlen(body) : 0);
 
 	call_query_param(body, "username", username, sizeof(username));
 	call_query_param(body, "password", password, sizeof(password));
@@ -298,9 +305,9 @@ ndx_install(void)
 {
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/ssr/ssr");
-	users_map = qmap_open("auth.qmap", "users", QM_STR,
+	users_map = qmap_open(NULL, "users", QM_STR,
 			      qmap_reg(sizeof(struct user)), 0xFF, 0);
-	sessions_map = qmap_open("auth.qmap", "sess", QM_STR,
+	sessions_map = qmap_open(NULL, "sess", QM_STR,
 				 QM_STR, 0xFF, 0);
 
 	ndc_register_handler("POST:/login", handle_login);
