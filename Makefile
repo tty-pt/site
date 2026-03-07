@@ -5,7 +5,7 @@ MODULE_DIRS := $(sort $(dir $(wildcard modules/*/Makefile)))
 
 all: mods modules htdocs/styles.css
 
-htdocs/styles.css:
+htdocs/styles.css: mods/ssr/input.css
 	npm run build:css
 
 mods:

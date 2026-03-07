@@ -22,7 +22,10 @@ body {
 }
 
 /* Layout */
-.menu { display: flex; flex-direction: column; height: 100vh; margin: 0; }
+.menu {
+  display: flex; flex-direction: column; height: 100vh; margin: 0;
+  position: fixed;
+}
 .main { flex: 1; padding: 16px; display: flex; flex-direction: column; align-items: center; }
 h1 { text-transform: capitalize; text-align: center; margin-bottom: 16px; font-size: 1.5em; font-weight: 600; }
 
@@ -117,7 +120,7 @@ a.btn {
 
 .functions {
   transition: transform 0.3s ease;
-  overflow-x: hidden;
+  overflow-x: visible;
   display: flex !important;
   flex-direction: column;
   background-color: #fefefe;
