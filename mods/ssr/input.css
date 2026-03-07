@@ -203,3 +203,66 @@ label > input,
 label > textarea {
   display: block;
 }
+
+/* Menu separator and module menu */
+.menu-separator {
+  border-top: 1px solid #e5e7eb;
+  margin: 0.75rem 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .menu-separator {
+    border-top-color: #444;
+  }
+}
+
+.module-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.module-menu form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.functions form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  text-transform: none;
+}
+
+.functions form select,
+.functions form input[type="number"] {
+  padding: 6px 8px;
+  font-size: 0.875rem;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+}
+
+.functions form input[type="checkbox"] {
+  width: auto;
+  margin-right: 0.25rem;
+}
+
+.functions form label:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+
+.functions form button[type="submit"] {
+  margin-top: 0.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .functions form select,
+  .functions form input[type="number"] {
+    background: var(--c0);
+    color: #c1c3da;
+    border-color: #555;
+  }
+}

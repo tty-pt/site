@@ -30,35 +30,37 @@ export default function ChordDetail({
     );
   }
   
+  // Transpose controls form for the menu
+  const transposeControls = (
+    <form id="transpose-form" method="get" action={`/song/${id}`}>
+      <label>
+        Transpose:
+        <select name="t">
+          {transposeOptions}
+        </select>
+      </label>
+      
+      <label>
+        <input type="checkbox" name="b" value="1" checked={useBemol} />
+        <span>Flats (♭)</span>
+      </label>
+      
+      <label>
+        <input type="checkbox" name="l" value="1" checked={useLatin} />
+        <span>Latin</span>
+      </label>
+      
+      <button type="submit" className="btn">Apply</button>
+    </form>
+  );
+  
   return (
-    <Layout user={user} title={`song: ${displayTitle}`} path={path}>
+    <Layout user={user} title={`song: ${displayTitle}`} path={path} menuItems={transposeControls}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
         <h2>{displayTitle}</h2>
         
-        {/* Transpose Controls */}
-        <form method="get" action={`/song/${id}`} className="horizontal">
-          <label>
-            Transpose:
-            <select name="t" style={{ marginLeft: "0.5rem" }}>
-              {transposeOptions}
-            </select>
-          </label>
-          
-          <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-            <input type="checkbox" name="b" value="1" checked={useBemol} />
-            <span>Flats (♭)</span>
-          </label>
-          
-          <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-            <input type="checkbox" name="l" value="1" checked={useLatin} />
-            <span>Latin</span>
-          </label>
-          
-          <button type="submit" className="btn">Apply</button>
-        </form>
-        
         {/* Chord Chart */}
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", padding: "1rem", background: "#f5f5f5", borderRadius: "4px", width: "100%", maxWidth: "600px" }}>
+        <pre id="chord-data" style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", padding: "1rem", background: "#f5f5f5", borderRadius: "4px", width: "100%", maxWidth: "600px" }}>
           {data}
         </pre>
         

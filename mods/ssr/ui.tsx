@@ -41,11 +41,12 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
   );
 }
 
-export function Layout({ children, user, title, path }: {
+export function Layout({ children, user, title, path, menuItems }: {
   children: React.ReactNode;
   user: string | null;
   title: string;
   path: string;
+  menuItems?: React.ReactNode;
 }) {
   return (<div>
     <label className="menu">
@@ -61,6 +62,14 @@ export function Layout({ children, user, title, path }: {
 
       <span className="functions flex-1 fixed right-0 z-20 h-full overflow-y-auto bg-gray-50 text-sm capitalize flex flex-col gap-2 p-4">
         <Menu user={user} path={path} />
+        {menuItems && (
+          <>
+            <div className="menu-separator"></div>
+            <div className="module-menu">
+              {menuItems}
+            </div>
+          </>
+        )}
       </span>
     </label>
 
@@ -68,5 +77,6 @@ export function Layout({ children, user, title, path }: {
       <h1>{title}</h1>
       {children}
     </div>
+    <script src="/app.js" defer></script>
   </div>);
 }
