@@ -1,5 +1,4 @@
-import React from 'react';
-import ReactDOMServer from "react-dom/server";
+import { renderToString } from "preact-render-to-string";
 import { Layout } from "./ui.tsx";
 
 interface ModuleEntry {
@@ -32,19 +31,23 @@ function IndexPage({ modules, user, path }: {
   path: string;
 }) {
   const buttons = modules.filter(item => Number(item.flags))
-    .map((item) => React.createElement("a", {
-      key: item.id,
-      href: `/${item.id}/`,
-      className: "btn"
-    }, item.title || item.id));
+    .map((item) => (
+      <a
+        key={item.id}
+        href={`/${item.id}/`}
+        className="btn"
+      >
+        {item.title || item.id}
+      </a>
+    ));
 
-  return React.createElement(Layout, {
-    user,
-    title: "tty.pt",
-    path
-  }, React.createElement("div", {
-    className: "center"
-  }, buttons));
+  return (
+    <Layout user={user} title="tty.pt" path={path}>
+      <div className="center">
+        {buttons}
+      </div>
+    </Layout>
+  );
 }
 
 function matchRoute(path: string, route: string): {
@@ -75,8 +78,8 @@ function matchRoute(path: string, route: string): {
   return { matched: true, params };
 }
 
-function renderPage(content: React.ReactElement): string {
-  const html = ReactDOMServer.renderToString(content);
+function renderPage(content: JSX.Element): string {
+  const html = renderToString(content);
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -103,15 +106,11 @@ async function handleRequest(req: Request): Promise<Response> {
     requestBody = await req.text();
   }
 
-  let content: React.ReactElement;
+  let content: JSX.Element;
   let status = 200;
 
   if (path === "/" || path === "")
-    content = React.createElement(IndexPage, {
-      modules,
-      user,
-      path,
-    });
+    content = <IndexPage modules={modules} user={user} path={path} />;
   else if (req.method === "GET" || req.method === "POST") {
     let handled = false;
 
@@ -156,19 +155,19 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (!handled) {
       status = 404;
-      content = React.createElement(Layout, {
-        user,
-        title: "Not Found",
-        path
-      }, React.createElement("p", null, "Page not found"));
+      content = (
+        <Layout user={user} title="Not Found" path={path}>
+          <p>Page not found</p>
+        </Layout>
+      );
     }
   } else {
     status = 404;
-    content = React.createElement(Layout, {
-      user,
-      title: "Not Found",
-      path
-    }, React.createElement("p", null, "Page not found"));
+    content = (
+      <Layout user={user} title="Not Found" path={path}>
+        <p>Page not found</p>
+      </Layout>
+    );
   }
 
   return new Response(renderPage(content), {

@@ -1,14 +1,13 @@
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "jsxImportSource": "preact"
   },
   "imports": {
     "@std/path": "jsr:@std/path@^1.1.4",
-    "react": "npm:react@19",
-    "react-dom": "npm:react-dom@19",
-    "react-dom/server": "npm:react-dom@19/server",
-    "@types/react": "npm:@types/react",
+    "preact": "npm:preact@10",
+    "preact/": "npm:/preact@10/",
+    "preact-render-to-string": "npm:preact-render-to-string@6",
     "@/": "./mods/"
   }
 }

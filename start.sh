@@ -15,10 +15,10 @@ trap cleanup INT TERM
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Start SSR server if it exists
-SSR_SERVER_PATH="$SCRIPT_DIR/mods/ssr/server.ts"
+SSR_SERVER_PATH="$SCRIPT_DIR/mods/ssr/server.tsx"
 if [ -f "$SSR_SERVER_PATH" ]; then
     cd "$SCRIPT_DIR/mods/ssr"
-    /home/quirinpa/.deno/bin/deno run --allow-read --allow-net --allow-env server.ts &
+    /home/quirinpa/.deno/bin/deno run --allow-read --allow-net --allow-env server.tsx &
     deno_pid=$!
     cd "$SCRIPT_DIR"
 fi

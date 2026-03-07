@@ -42,11 +42,11 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
 }
 
 export function Layout({ children, user, title, path, menuItems }: {
-  children: React.ReactNode;
+  children: any;
   user: string | null;
   title: string;
   path: string;
-  menuItems?: React.ReactNode;
+  menuItems?: any;
 }) {
   return (<div>
     <label className="menu">

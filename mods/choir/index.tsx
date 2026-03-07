@@ -78,50 +78,60 @@ export async function render({ user, path, params, body }: {
     const choir = await getChoir(params.id);
     
     if (!choir) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Choir Not Found")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Choir Not Found</h1>
+        </div>
       );
     }
     
     const isOwner = user === choir.owner;
     
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, choir.title),
-      React.createElement("p", { style: { color: "#666" } }, `Choir ID: ${choir.id}`),
-      React.createElement("p", { style: { color: "#666" } }, `Owner: ${choir.owner || "Unknown"}`),
-      React.createElement("p", { style: { color: "#666" } }, `Songbooks: ${choir.counter}`),
-      
-      isOwner ? React.createElement("div", { style: { marginTop: "1rem", marginBottom: "1rem", display: "flex", gap: "0.5rem" } },
-        React.createElement("a", {
-          href: `/choir/${choir.id}/edit`,
-          style: {
-            padding: "0.5rem 1rem",
-            backgroundColor: "#ffc107",
-            color: "black",
-            textDecoration: "none",
-            borderRadius: "4px"
-          }
-        }, "Edit Choir"),
-        React.createElement("a", {
-          href: `/sb/new?choir=${choir.id}`,
-          style: {
-            padding: "0.5rem 1rem",
-            backgroundColor: "#007bff",
-            color: "white",
-            textDecoration: "none",
-            borderRadius: "4px"
-          }
-        }, "Create Songbook")
-      ) : null,
-      
-      React.createElement("h3", { style: { marginTop: "2rem" } }, "Song Formats"),
-      React.createElement("pre", { style: { backgroundColor: "#f5f5f5", padding: "1rem", borderRadius: "4px" } },
-        choir.formats.join("\n")
-      ),
-      
-      React.createElement("div", { style: { marginTop: "2rem" } },
-        React.createElement("a", { href: "/choir" }, "← Back to Choirs")
-      )
+    return (
+      <div style={{ padding: "2rem" }}>
+        <h1>{choir.title}</h1>
+        <p style={{ color: "#666" }}>Choir ID: {choir.id}</p>
+        <p style={{ color: "#666" }}>Owner: {choir.owner || "Unknown"}</p>
+        <p style={{ color: "#666" }}>Songbooks: {choir.counter}</p>
+        
+        {isOwner ? (
+          <div style={{ marginTop: "1rem", marginBottom: "1rem", display: "flex", gap: "0.5rem" }}>
+            <a
+              href={`/choir/${choir.id}/edit`}
+              style={{
+                padding: "0.5rem 1rem",
+                backgroundColor: "#ffc107",
+                color: "black",
+                textDecoration: "none",
+                borderRadius: "4px"
+              }}
+            >
+              Edit Choir
+            </a>
+            <a
+              href={`/sb/new?choir=${choir.id}`}
+              style={{
+                padding: "0.5rem 1rem",
+                backgroundColor: "#007bff",
+                color: "white",
+                textDecoration: "none",
+                borderRadius: "4px"
+              }}
+            >
+              Create Songbook
+            </a>
+          </div>
+        ) : null}
+        
+        <h3 style={{ marginTop: "2rem" }}>Song Formats</h3>
+        <pre style={{ backgroundColor: "#f5f5f5", padding: "1rem", borderRadius: "4px" }}>
+          {choir.formats.join("\n")}
+        </pre>
+        
+        <div style={{ marginTop: "2rem" }}>
+          <a href="/choir">← Back to Choirs</a>
+        </div>
+      </div>
     );
   }
   
@@ -130,56 +140,66 @@ export async function render({ user, path, params, body }: {
     const choir = await getChoir(params.id);
     
     if (!choir) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Choir Not Found")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Choir Not Found</h1>
+        </div>
       );
     }
     
     if (user !== choir.owner) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Permission Denied"),
-        React.createElement("p", null, "You don't own this choir.")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Permission Denied</h1>
+          <p>You don't own this choir.</p>
+        </div>
       );
     }
     
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, `Edit ${choir.title}`),
-      React.createElement("form", {
-        method: "POST",
-        action: `/api/choir/${choir.id}/edit`,
-        encType: "multipart/form-data",
-        style: { display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }
-      },
-        React.createElement("label", null,
-          "Choir Name:",
-          React.createElement("input", {
-            type: "text",
-            name: "title",
-            defaultValue: choir.title,
-            required: true,
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          })
-        ),
-        React.createElement("label", null,
-          "Song Formats (one per line):",
-          React.createElement("textarea", {
-            name: "format",
-            rows: 10,
-            defaultValue: choir.formats.join("\n"),
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem", fontFamily: "monospace" }
-          })
-        ),
-        React.createElement("div", { style: { display: "flex", gap: "0.5rem" } },
-          React.createElement("button", {
-            type: "submit",
-            style: { padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }
-          }, "Save Changes"),
-          React.createElement("a", {
-            href: `/choir/${choir.id}`,
-            style: { padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }
-          }, "Cancel")
-        )
-      )
+    return (
+      <div style={{ padding: "2rem" }}>
+        <h1>Edit {choir.title}</h1>
+        <form
+          method="POST"
+          action={`/api/choir/${choir.id}/edit`}
+          encType="multipart/form-data"
+          style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }}
+        >
+          <label>
+            Choir Name:
+            <input
+              type="text"
+              name="title"
+              defaultValue={choir.title}
+              required
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+            />
+          </label>
+          <label>
+            Song Formats (one per line):
+            <textarea
+              name="format"
+              rows={10}
+              defaultValue={choir.formats.join("\n")}
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem", fontFamily: "monospace" }}
+            />
+          </label>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="submit"
+              style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+            >
+              Save Changes
+            </button>
+            <a
+              href={`/choir/${choir.id}`}
+              style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
+            >
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
     );
   }
   

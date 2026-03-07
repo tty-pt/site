@@ -170,48 +170,58 @@ export async function render({ user, path, params }: {
   if (path === "/sb") {
     const songbooks = await getSongbooks();
     
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, "Songbooks"),
-      user ? React.createElement("div", { style: { marginBottom: "1rem" } },
-        React.createElement("a", {
-          href: "/sb/new",
-          style: {
-            padding: "0.5rem 1rem",
-            backgroundColor: "#007bff",
-            color: "white",
-            textDecoration: "none",
-            borderRadius: "4px",
-            display: "inline-block"
-          }
-        }, "Create New Songbook")
-      ) : null,
-      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" } },
-        songbooks.length === 0
-          ? React.createElement("p", null, "No songbooks yet.")
-          : songbooks.map(sb =>
-              React.createElement("div", {
-                key: sb.id,
-                style: {
+    return (
+      <div style={{ padding: "2rem" }}>
+        <h1>Songbooks</h1>
+        {user ? (
+          <div style={{ marginBottom: "1rem" }}>
+            <a
+              href="/sb/new"
+              style={{
+                padding: "0.5rem 1rem",
+                backgroundColor: "#007bff",
+                color: "white",
+                textDecoration: "none",
+                borderRadius: "4px",
+                display: "inline-block"
+              }}
+            >
+              Create New Songbook
+            </a>
+          </div>
+        ) : null}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" }}>
+          {songbooks.length === 0 ? (
+            <p>No songbooks yet.</p>
+          ) : (
+            songbooks.map(sb => (
+              <div
+                key={sb.id}
+                style={{
                   border: "1px solid #ccc",
                   padding: "1rem",
                   borderRadius: "4px"
-                }
-              },
-                React.createElement("h3", null,
-                  React.createElement("a", { href: `/sb/${sb.id}` }, sb.title)
-                )
-              )
-            )
-      )
+                }}
+              >
+                <h3>
+                  <a href={`/sb/${sb.id}`}>{sb.title}</a>
+                </h3>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     );
   }
   
   // Create new songbook form
   if (path === "/sb/new") {
     if (!user) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Login Required"),
-        React.createElement("p", null, "You must be logged in to create a songbook.")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Login Required</h1>
+          <p>You must be logged in to create a songbook.</p>
+        </div>
       );
     }
     
@@ -219,57 +229,63 @@ export async function render({ user, path, params }: {
     const userChoirs = choirs; // TODO: filter by ownership when we have that info
     
     if (userChoirs.length === 0) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "No Choirs"),
-        React.createElement("p", null, "You need to create a choir first."),
-        React.createElement("a", { href: "/choir/new" }, "Create Choir")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>No Choirs</h1>
+          <p>You need to create a choir first.</p>
+          <a href="/choir/new">Create Choir</a>
+        </div>
       );
     }
     
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, "Create New Songbook"),
-      React.createElement("form", {
-        method: "POST",
-        action: "/api/sb/create",
-        encType: "multipart/form-data",
-        style: { display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }
-      },
-        React.createElement("label", null,
-          "Songbook ID (no spaces):",
-          React.createElement("input", {
-            type: "text",
-            name: "id",
-            required: true,
-            pattern: "[a-z0-9_-]+",
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          })
-        ),
-        React.createElement("label", null,
-          "Songbook Name:",
-          React.createElement("input", {
-            type: "text",
-            name: "title",
-            required: true,
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          })
-        ),
-        React.createElement("label", null,
-          "Choir:",
-          React.createElement("select", {
-            name: "choir",
-            required: true,
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          },
-            userChoirs.map(choir =>
-              React.createElement("option", { key: choir.id, value: choir.id }, choir.title)
-            )
-          )
-        ),
-        React.createElement("button", {
-          type: "submit",
-          style: { padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }
-        }, "Create Songbook")
-      )
+    return (
+      <div style={{ padding: "2rem" }}>
+        <h1>Create New Songbook</h1>
+        <form
+          method="POST"
+          action="/api/sb/create"
+          encType="multipart/form-data"
+          style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }}
+        >
+          <label>
+            Songbook ID (no spaces):
+            <input
+              type="text"
+              name="id"
+              required
+              pattern="[a-z0-9_-]+"
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+            />
+          </label>
+          <label>
+            Songbook Name:
+            <input
+              type="text"
+              name="title"
+              required
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+            />
+          </label>
+          <label>
+            Choir:
+            <select
+              name="choir"
+              required
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+            >
+              {userChoirs.map(choir => (
+                <option key={choir.id} value={choir.id}>{choir.title}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+          >
+            Create Songbook
+          </button>
+        </form>
+      </div>
     );
   }
   
@@ -278,8 +294,10 @@ export async function render({ user, path, params }: {
     const sb = await getSongbook(params.id);
     
     if (!sb) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Songbook Not Found")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Songbook Not Found</h1>
+        </div>
       );
     }
     
@@ -293,13 +311,13 @@ export async function render({ user, path, params }: {
       if (!song.chordId) {
         // Empty slot - show format header only
         songElements.push(
-          React.createElement("div", {
-            key: i,
-            id: `${i}`,
-            style: { marginTop: "2rem", padding: "1rem", backgroundColor: "#f5f5f5", borderRadius: "4px" }
-          },
-            React.createElement("h3", null, song.format.toUpperCase())
-          )
+          <div
+            key={i}
+            id={`${i}`}
+            style={{ marginTop: "2rem", padding: "1rem", backgroundColor: "#f5f5f5", borderRadius: "4px" }}
+          >
+            <h3>{song.format.toUpperCase()}</h3>
+          </div>
         );
         continue;
       }
@@ -316,52 +334,54 @@ export async function render({ user, path, params }: {
       const transposedData = await transposeChord(song.chordId, song.transpose);
       
       songElements.push(
-        React.createElement("div", {
-          key: i,
-          id: `${i}`,
-          style: { marginTop: "2rem", borderTop: "2px solid #ddd", paddingTop: "1rem" }
-        },
-          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-            React.createElement("div", null,
-              React.createElement("h4", { style: { margin: 0 } },
-                React.createElement("a", { href: `/chords/${song.chordId}`, target: "_blank" }, chordTitle)
-              ),
-              React.createElement("p", { style: { margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" } },
-                `${song.format} • Transpose: ${song.transpose > 0 ? '+' : ''}${song.transpose}`
-              )
-            ),
-            isOwner ? React.createElement("div", { style: { display: "flex", gap: "0.5rem" } },
-              React.createElement("form", {
-                method: "POST",
-                action: `/api/sb/${sb.id}/transpose`,
-                encType: "multipart/form-data",
-                style: { display: "inline" }
-              },
-                React.createElement("input", { type: "hidden", name: "n", value: `${i}` }),
-                React.createElement("select", {
-                  name: "t",
-                  onChange: "this.form.submit()",
-                  defaultValue: `${song.transpose}`,
-                  style: { padding: "0.25rem" }
-                },
-                  ...[-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(t =>
-                    React.createElement("option", { key: t, value: `${t}` }, `${t > 0 ? '+' : ''}${t}`)
-                  )
-                )
-              ),
-              React.createElement("form", {
-                method: "POST",
-                action: `/api/sb/${sb.id}/randomize`,
-                encType: "multipart/form-data",
-                style: { display: "inline" }
-              },
-                React.createElement("input", { type: "hidden", name: "n", value: `${i}` }),
-                React.createElement("button", { type: "submit", style: { padding: "0.25rem 0.5rem" } }, "🎲")
-              )
-            ) : null
-          ),
-          React.createElement("pre", {
-            style: {
+        <div
+          key={i}
+          id={`${i}`}
+          style={{ marginTop: "2rem", borderTop: "2px solid #ddd", paddingTop: "1rem" }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h4 style={{ margin: 0 }}>
+                <a href={`/chords/${song.chordId}`} target="_blank">{chordTitle}</a>
+              </h4>
+              <p style={{ margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" }}>
+                {song.format} • Transpose: {song.transpose > 0 ? '+' : ''}{song.transpose}
+              </p>
+            </div>
+            {isOwner ? (
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <form
+                  method="POST"
+                  action={`/api/sb/${sb.id}/transpose`}
+                  encType="multipart/form-data"
+                  style={{ display: "inline" }}
+                >
+                  <input type="hidden" name="n" value={`${i}`} />
+                  <select
+                    name="t"
+                    onChange="this.form.submit()"
+                    defaultValue={`${song.transpose}`}
+                    style={{ padding: "0.25rem" }}
+                  >
+                    {[-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(t => (
+                      <option key={t} value={`${t}`}>{t > 0 ? '+' : ''}{t}</option>
+                    ))}
+                  </select>
+                </form>
+                <form
+                  method="POST"
+                  action={`/api/sb/${sb.id}/randomize`}
+                  encType="multipart/form-data"
+                  style={{ display: "inline" }}
+                >
+                  <input type="hidden" name="n" value={`${i}`} />
+                  <button type="submit" style={{ padding: "0.25rem 0.5rem" }}>🎲</button>
+                </form>
+              </div>
+            ) : null}
+          </div>
+          <pre
+            style={{
               fontFamily: "monospace",
               fontSize: "0.9rem",
               whiteSpace: "pre-wrap",
@@ -369,35 +389,43 @@ export async function render({ user, path, params }: {
               padding: "1rem",
               borderRadius: "4px",
               marginTop: "0.5rem"
-            }
-          }, transposedData || "(No chord data)")
-        )
+            }}
+          >
+            {transposedData || "(No chord data)"}
+          </pre>
+        </div>
       );
     }
     
-    return React.createElement("div", { style: { padding: "2rem", maxWidth: "900px" } },
-      React.createElement("h1", null, sb.title),
-      React.createElement("p", { style: { color: "#666" } }, `Choir: ${sb.choir}`),
-      
-      isOwner ? React.createElement("div", { style: { marginTop: "1rem", marginBottom: "2rem" } },
-        React.createElement("a", {
-          href: `/sb/${sb.id}/edit`,
-          style: {
-            padding: "0.5rem 1rem",
-            backgroundColor: "#ffc107",
-            color: "black",
-            textDecoration: "none",
-            borderRadius: "4px",
-            marginRight: "0.5rem"
-          }
-        }, "Edit Songbook")
-      ) : null,
-      
-      ...songElements,
-      
-      React.createElement("div", { style: { marginTop: "2rem" } },
-        React.createElement("a", { href: "/sb" }, "← Back to Songbooks")
-      )
+    return (
+      <div style={{ padding: "2rem", maxWidth: "900px" }}>
+        <h1>{sb.title}</h1>
+        <p style={{ color: "#666" }}>Choir: {sb.choir}</p>
+        
+        {isOwner ? (
+          <div style={{ marginTop: "1rem", marginBottom: "2rem" }}>
+            <a
+              href={`/sb/${sb.id}/edit`}
+              style={{
+                padding: "0.5rem 1rem",
+                backgroundColor: "#ffc107",
+                color: "black",
+                textDecoration: "none",
+                borderRadius: "4px",
+                marginRight: "0.5rem"
+              }}
+            >
+              Edit Songbook
+            </a>
+          </div>
+        ) : null}
+        
+        {songElements}
+        
+        <div style={{ marginTop: "2rem" }}>
+          <a href="/sb">← Back to Songbooks</a>
+        </div>
+      </div>
     );
   }
   
@@ -406,88 +434,98 @@ export async function render({ user, path, params }: {
     const sb = await getSongbook(params.id);
     
     if (!sb) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Songbook Not Found")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Songbook Not Found</h1>
+        </div>
       );
     }
     
     if (user !== sb.owner) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Permission Denied")
+      return (
+        <div style={{ padding: "2rem" }}>
+          <h1>Permission Denied</h1>
+        </div>
       );
     }
     
     const allChords = await getAllChords();
     
-    const formRows = sb.songs.map((song, i) => 
-      React.createElement("div", {
-        key: i,
-        style: { display: "flex", gap: "0.5rem", alignItems: "center" }
-      },
-        React.createElement("label", { style: { flex: "0 0 150px" } },
-          `${i + 1}. Format:`,
-          React.createElement("input", {
-            type: "text",
-            name: `fmt_${i}`,
-            defaultValue: song.format,
-            style: { width: "100%", padding: "0.25rem", marginTop: "0.25rem" }
-          })
-        ),
-        React.createElement("label", { style: { flex: 1 } },
-          "Song:",
-          React.createElement("select", {
-            name: `song_${i}`,
-            defaultValue: song.chordId,
-            style: { width: "100%", padding: "0.25rem", marginTop: "0.25rem" }
-          },
-            React.createElement("option", { value: "" }, "(Empty)"),
-            ...allChords.map(chord =>
-              React.createElement("option", { key: chord.id, value: chord.id },
-                `${chord.title}${chord.type ? ` [${chord.type}]` : ''}`
-              )
-            )
-          )
-        ),
-        React.createElement("label", { style: { flex: "0 0 80px" } },
-          "Transpose:",
-          React.createElement("select", {
-            name: `t_${i}`,
-            defaultValue: `${song.transpose}`,
-            style: { width: "100%", padding: "0.25rem", marginTop: "0.25rem" }
-          },
-            ...[-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(t =>
-              React.createElement("option", { key: t, value: `${t}` }, `${t > 0 ? '+' : ''}${t}`)
-            )
-          )
-        )
-      )
-    );
+    const formRows = sb.songs.map((song, i) => (
+      <div
+        key={i}
+        style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
+      >
+        <label style={{ flex: "0 0 150px" }}>
+          {i + 1}. Format:
+          <input
+            type="text"
+            name={`fmt_${i}`}
+            defaultValue={song.format}
+            style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          />
+        </label>
+        <label style={{ flex: 1 }}>
+          Song:
+          <select
+            name={`song_${i}`}
+            defaultValue={song.chordId}
+            style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          >
+            <option value="">(Empty)</option>
+            {allChords.map(chord => (
+              <option key={chord.id} value={chord.id}>
+                {chord.title}{chord.type ? ` [${chord.type}]` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ flex: "0 0 80px" }}>
+          Transpose:
+          <select
+            name={`t_${i}`}
+            defaultValue={`${song.transpose}`}
+            style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          >
+            {[-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(t => (
+              <option key={t} value={`${t}`}>{t > 0 ? '+' : ''}{t}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    ));
     
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, `Edit ${sb.title}`),
-      React.createElement("form", {
-        method: "POST",
-        action: `/api/sb/${sb.id}/edit`,
-        encType: "multipart/form-data",
-        style: { display: "flex", flexDirection: "column", gap: "0.5rem" }
-      },
-        ...formRows,
-        React.createElement("input", {
-          type: "hidden",
-          name: "amount",
-          value: `${sb.songs.length}`
-        }),
-        React.createElement("div", { style: { marginTop: "1rem", display: "flex", gap: "0.5rem" } },
-          React.createElement("button", {
-            type: "submit",
-            style: { padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }
-          }, "Save Changes"),
-          React.createElement("a", {
-            href: `/sb/${sb.id}`,
-            style: { padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }
-          }, "Cancel")
-        )
-      )
+    return (
+      <div style={{ padding: "2rem" }}>
+        <h1>Edit {sb.title}</h1>
+        <form
+          method="POST"
+          action={`/api/sb/${sb.id}/edit`}
+          encType="multipart/form-data"
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+        >
+          {formRows}
+          <input
+            type="hidden"
+            name="amount"
+            value={`${sb.songs.length}`}
+          />
+          <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
+            <button
+              type="submit"
+              style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+            >
+              Save Changes
+            </button>
+            <a
+              href={`/sb/${sb.id}`}
+              style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
+            >
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
     );
   }
   
