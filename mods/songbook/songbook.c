@@ -15,10 +15,11 @@
 #include "../common/common.h"
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
-#include "../ssr/ssr.h"
+#include "../index/index.h"
 
-static uint32_t sb_index_db = 0;
+static unsigned index_hd;
 
+#if 0
 /* Parse a songbook line: chord_id:transpose:format */
 static int
 parse_sb_line(const char *line, char *chord_id, int *transpose, char *format)
@@ -366,7 +367,7 @@ handle_sb_create(int fd, char *body)
 	}
 
 	/* Add to index database */
-	qmap_put(sb_index_db, id, title);
+	call_index_put(index_hd, id, title);
 
 	/* Redirect to edit page */
 	char location[256];
@@ -777,8 +778,8 @@ handle_sb_delete(int fd, char *body)
 		return 1;
 	}
 
-	/* Remove from database */
-	qmap_del(sb_index_db, id);
+	/* Remove from database - index module handles this */
+	/* Note: index module doesn't have a del function, title file removal will handle it on next scan */
 
 	/* Delete files */
 	char path_buf[1024];
@@ -798,26 +799,25 @@ handle_sb_delete(int fd, char *body)
 	ndc_close(fd);
 	return 0;
 }
+#endif
 
 MODULE_API void
 ndx_install(void)
 {
-	char db_path[512];
-	snprintf(db_path, sizeof(db_path), "./items/sb/items/index.db");
-	sb_index_db = qmap_open(db_path, "rw", QM_STR, QM_STR, 0xFF, 0);
+	/* ndx_load("./mods/auth/auth"); */
+	/* ndx_load("./mods/common/common"); */
+	/* ndx_load("./mods/mpfd/mpfd"); */
+	ndx_load("./mods/index/index");
 
-	ndx_load("./mods/auth/auth");
-	ndx_load("./mods/common/common");
-	ndx_load("./mods/mpfd/mpfd");
-	ndx_load("./mods/ssr/ssr");
-
+	/*
 	ndc_register_handler("POST:/api/sb/create", handle_sb_create);
 	ndc_register_handler("POST:/api/sb/:id/edit", handle_sb_edit);
 	ndc_register_handler("POST:/api/sb/:id/transpose", handle_sb_transpose);
 	ndc_register_handler("POST:/api/sb/:id/randomize", handle_sb_randomize);
 	ndc_register_handler("DELETE:/api/sb/:id", handle_sb_delete);
+	*/
 
-	call_ssr_register_module("sb", "Songbook");
+	index_hd = call_index_open("Songbook", 0, 1);
 }
 
 MODULE_API void

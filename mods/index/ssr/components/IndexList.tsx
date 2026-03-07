@@ -45,7 +45,7 @@ export default function IndexList({
     <Layout user={null} title={title || module} path={`/${module}`}>
       <div className="center">
         {buttons.length > 0 ? (
-          <div className="btn-row">{buttons}</div>
+          buttons
         ) : (
           <p>No items yet.</p>
         )}

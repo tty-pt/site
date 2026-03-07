@@ -1,25 +1,10 @@
-import PoemList from "./components/PoemList.tsx";
+import IndexList from "../../index/ssr/components/IndexList.tsx";
 import PoemAdd from "./components/PoemAdd.tsx";
 import PoemDetail from "./components/PoemDetail.tsx";
 import { dirname, fromFileUrl, resolve } from "jsr:@std/path";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = resolve(moduleDir, "../../../");
-
-async function getPoems(): Promise<string[]> {
-  try {
-    const dir = Deno.readDir(`${repoRoot}/items/poem/items`);
-    const poems: string[] = [];
-    for await (const entry of dir) {
-      if (entry.isDirectory && !entry.name.startsWith(".")) {
-        poems.push(entry.name);
-      }
-    }
-    return poems.sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  }
-}
 
 async function getPoemContent(id: string): Promise<string | null> {
   try {
@@ -30,27 +15,41 @@ async function getPoemContent(id: string): Promise<string | null> {
   }
 }
 
-// Components moved to separate TSX files under ./components
+async function poemExists(id: string): Promise<boolean> {
+  try {
+    const path = `${repoRoot}/items/poem/items/${id}`;
+    const stat = await Deno.stat(path);
+    return stat.isDirectory;
+  } catch {
+    return false;
+  }
+}
 
 export const routes = ["/poem", "/poem/add", "/poem/:id"];
 
-export async function render({ user, path, params }: { user: string | null; path: string; params: Record<string, string> }) {
+export async function render({ user, path, params, body }: {
+  user: string | null;
+  path: string;
+  params: Record<string, string>;
+  body?: string | null;
+}) {
   if (path === "/poem/add") {
     return PoemAdd({ user, path });
   }
 
   if (path === "/poem" || path === "/poem/") {
-    const poems = await getPoems();
-    return PoemList({ user, path, poems });
+    return IndexList({ module: "poem", body: body || null });
   }
 
   const id = params.id;
-  if (id) {
-    const html = await getPoemContent(id);
-    if (html) {
-      return PoemDetail({ user, path, id, html });
-    }
+  if (!id)
+    return null;
+
+  const exists = await poemExists(id);
+  if (!exists) {
+    return null;
   }
 
-  return null;
+  const html = (await getPoemContent(id)) ?? "";
+  return PoemDetail({ user, path, id, html });
 }

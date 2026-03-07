@@ -8,6 +8,7 @@
     "react": "npm:react@19",
     "react-dom": "npm:react-dom@19",
     "react-dom/server": "npm:react-dom@19/server",
-    "@types/react": "npm:@types/react"
+    "@types/react": "npm:@types/react",
+    "@/": "./mods/"
   }
 }

@@ -1,25 +1,27 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <unistd.h>
+/* #include <stdio.h> */
+/* #include <stdlib.h> */
+/* #include <string.h> */
+/* #include <errno.h> */
+/* #include <sys/stat.h> */
+/* #include <sys/types.h> */
+/* #include <dirent.h> */
+/* #include <unistd.h> */
 
-#include <ttypt/ndc.h>
-#include <ttypt/ndx.h>
-#include <ttypt/ndx-mod.h>
-#include <ttypt/qmap.h>
+/* #include <ttypt/ndc.h> */
+/* #include <ttypt/ndx.h> */
+/* #include <ttypt/ndx-mod.h> */
+/* #include <ttypt/qmap.h> */
 
-#include "../common/common.h"
-#include "../auth/auth.h"
-#include "../mpfd/mpfd.h"
-#include "../ssr/ssr.h"
+#include "../index/index.h"
+/* #include "../common/common.h" */
+/* #include "../auth/auth.h" */
+/* #include "../mpfd/mpfd.h" */
+/* #include "../ssr/ssr.h" */
 
 
-static uint32_t choir_index_db = 0;
+static unsigned index_hd = 0;
 
+#if 0
 /* Default format types if choir doesn't define custom ones */
 static const char *default_formats[] = {
 	"entrada",
@@ -321,13 +323,13 @@ handle_choir_delete(int fd, char *body)
 	return 0;
 }
 
+#endif
+
 MODULE_API void
 ndx_install(void)
 {
+	/*
 	char db_path[512];
-	snprintf(db_path, sizeof(db_path), "./items/choir/items/index.db");
-	choir_index_db = qmap_open(db_path, "rw", QM_STR, QM_STR, 0xFF, 0);
-
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/mpfd/mpfd");
@@ -335,11 +337,10 @@ ndx_install(void)
 	ndc_register_handler("POST:/api/choir/create", handle_choir_create);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 	ndc_register_handler("DELETE:/api/choir/:id", handle_choir_delete);
+	*/
 
-	call_ssr_register_module("choir", "Choirs");
+	ndx_load("./mods/index/index");
+	index_hd = call_index_open("Choir", 0, 1);
 }
 
-MODULE_API void
-ndx_open(void)
-{
-}
+void ndx_open(void) {}

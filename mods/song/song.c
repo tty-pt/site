@@ -9,11 +9,10 @@
 
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
-#include "../ssr/ssr.h"
 #include "../index/index.h"
 #include "../../lib/transp/transp.h"
 
-#define CHORDS_ITEMS_PATH "items/chords/items"
+#define CHORDS_ITEMS_PATH "items/song/items"
 
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
@@ -22,7 +21,7 @@ static unsigned index_hd;
 /* 
  * NDX API: Transpose chord chart text
  */
-NDX_DEF(int, chords_transpose, const char *, input, int, semitones, int, flags, char **, output)
+NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, char **, output)
 {
 	if (!g_transp_ctx || !input || !output) {
 		return -1;
@@ -38,7 +37,7 @@ NDX_DEF(int, chords_transpose, const char *, input, int, semitones, int, flags, 
 }
 
 static void
-handle_chords_add(int fd, char *doc_root)
+handle_song_add(int fd, char *doc_root)
 {
 	char id[64] = { 0 };
 	char title[256] = { 0 };
@@ -151,13 +150,13 @@ handle_chords_add(int fd, char *doc_root)
 		}
 	}
 
-	ndc_header(fd, "Location", "/chords/");
+	ndc_header(fd, "Location", "/song/");
 	ndc_head(fd, 303);
 	ndc_close(fd);
 }
 
 static int
-chords_handler(int fd, char *body)
+song_handler(int fd, char *body)
 {
 	char method[16] = { 0 };
 	char uri[256] = { 0 };
@@ -185,141 +184,15 @@ chords_handler(int fd, char *body)
 	}
 
 	/* Now process the upload */
-	handle_chords_add(fd, doc_root);
+	handle_song_add(fd, doc_root);
 	return 0;
 }
 
-static int
-chords_get_handler(int fd, char *body)
-{
-	char query[1024] = { 0 };
-	char doc_root[256] = { 0 };
-	char id[128] = { 0 };
-	
-	/* Get QUERY_STRING */
-	int ret = ndc_env_get(fd, query, "QUERY_STRING");
-	if (ret != 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to get QUERY_STRING");
-		return 1;
-	}
-	
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	
-	/* Parse query parameters: ?id=<id>&t=<semitones>&... */
-	if (strlen(query) == 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing query parameters");
-		return 1;
-	}
-	
-	int transpose = 0;
-	int flags = 0;
-	int found_id = 0;
-	
-	char *saveptr;
-	char *query_copy = strdup(query);
-	char *param = strtok_r(query_copy, "&", &saveptr);
-	
-	while (param) {
-		char *eq = strchr(param, '=');
-		if (eq) {
-			*eq = '\0';
-			char *key = param;
-			char *value = eq + 1;
-			
-			if (strcmp(key, "id") == 0) {
-				strncpy(id, value, sizeof(id) - 1);
-				found_id = 1;
-			} else if (strcmp(key, "t") == 0) {
-				transpose = atoi(value);
-			} else if (strcmp(key, "b") == 0 && strcmp(value, "1") == 0) {
-				flags |= TRANSP_BEMOL;
-			} else if (strcmp(key, "l") == 0 && strcmp(value, "1") == 0) {
-				flags |= TRANSP_LATIN;
-			} else if (strcmp(key, "C") == 0 && strcmp(value, "1") == 0) {
-				flags |= TRANSP_HIDE_CHORDS;
-			} else if (strcmp(key, "L") == 0 && strcmp(value, "1") == 0) {
-				flags |= TRANSP_HIDE_LYRICS;
-			}
-		}
-		param = strtok_r(NULL, "&", &saveptr);
-	}
-	free(query_copy);
-	
-	if (!found_id) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing id parameter");
-		return 1;
-	}
-	
-	/* Read chord data from file */
-	char filepath[512];
-	snprintf(filepath, sizeof(filepath), "%s/%s/%s/data.txt",
-			doc_root, CHORDS_ITEMS_PATH, id);
-	
-	FILE *fp = fopen(filepath, "r");
-	if (!fp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Chord not found");
-		return 1;
-	}
-	
-	/* Read entire file */
-	fseek(fp, 0, SEEK_END);
-	long fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	
-	char *content = malloc(fsize + 1);
-	if (!content) {
-		fclose(fp);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Memory allocation failed");
-		return 1;
-	}
-	
-	fread(content, 1, fsize, fp);
-	fclose(fp);
-	content[fsize] = '\0';
-	
-	/* Apply transposition if requested */
-	char *result;
-	if (transpose != 0 || flags != 0) {
-		result = transp_buffer(g_transp_ctx, content, transpose, flags);
-		if (!result) {
-			free(content);
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 500);
-			ndc_body(fd, "Transposition failed");
-			return 1;
-		}
-		free(content);
-	} else {
-		result = content;
-	}
-	
-	/* Return result */
-	ndc_header(fd, "Content-Type", "text/plain; charset=utf-8");
-	ndc_head(fd, 200);
-	ndc_body(fd, result);
-	
-	if (result != content) {
-		free(result);
-	}
-	
-	return 0;
-}
-
-/* SSR handler for /chords/* routes
+/* SSR handler for /song/* routes
  * Handles transposition when query params present, delegates to Deno
  */
 static int
-chords_ssr_handler(int fd, char *body)
+song_details_handler(int fd, char *body)
 {
 	(void)body;  /* SSR is GET requests, body unused */
 	
@@ -333,11 +206,6 @@ chords_ssr_handler(int fd, char *body)
 	ndc_env_get(fd, query, "QUERY_STRING");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	
-	/* If no ID pattern match, this is /chords/ list page - use index_page */
-	if (!id[0]) {
-		return call_index_page(fd, index_hd, "/chords", "Chords");
-	}
-	
 	/* Have ID - check if transposition requested */
 	int transpose = 0;
 	int flags = 0;
@@ -347,9 +215,8 @@ chords_ssr_handler(int fd, char *body)
 		/* Parse query params */
 		char *saveptr;
 		char *query_copy = strdup(query);
-		if (!query_copy) {
-			return call_ssr_proxy_get(fd, path);
-		}
+		if (!query_copy)
+			return call_core_get(fd, path);
 		
 		char *param = strtok_r(query_copy, "&", &saveptr);
 		
@@ -389,7 +256,7 @@ chords_ssr_handler(int fd, char *body)
 			size_t path_len = strlen(path);
 			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
 		}
-		return call_ssr_proxy_get(fd, path);
+		return call_core_get(fd, path);
 	}
 	
 	/* Read chord file */
@@ -404,7 +271,8 @@ chords_ssr_handler(int fd, char *body)
 			size_t path_len = strlen(path);
 			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
 		}
-		return call_ssr_proxy_get(fd, path);
+
+		return call_core_get(fd, path);
 	}
 	
 	fseek(fp, 0, SEEK_END);
@@ -443,37 +311,27 @@ chords_ssr_handler(int fd, char *body)
 	
 	/* Proxy POST with transposed data */
 	size_t transposed_len = strlen(transposed);
-	int result = call_ssr_proxy_post(fd, path, transposed, transposed_len);
+	int result = call_core_post(fd, transposed, transposed_len);
 	
 	free(transposed);
 	return result;
 }
 
-MODULE_API void
-ndx_install(void)
+void ndx_install(void)
 {
 	/* Initialize transpose context */
 	g_transp_ctx = transp_init();
-	if (!g_transp_ctx) {
-		fprintf(stderr, "[chords] Failed to initialize transp context\n");
-	}
-	
-	ndx_load("./mods/ssr/ssr");
+	if (!g_transp_ctx)
+		fprintf(stderr, "[song] Failed to initialize"
+				" transp context\n");
+
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
-	
-	ndc_register_handler("POST:/chords/add", chords_handler);
-	ndc_register_handler("GET:/api/chords/transpose", chords_get_handler);
-	ndc_register_handler("GET:/chords/", chords_ssr_handler);
-	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);
 
-	call_ssr_register_module("chords", "Chords");
+	ndc_register_handler("GET:/song/:id",
+			song_details_handler);
 
-	index_hd = call_index_open("./items/chords/items", 0);
-
+	index_hd = call_index_open("Song", 0, 1);
 }
 
-MODULE_API void
-ndx_open(void)
-{
-}
+void ndx_open(void) {}

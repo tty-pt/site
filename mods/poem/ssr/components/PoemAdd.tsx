@@ -8,6 +8,9 @@ export default function PoemAdd({ user, path }: { user: string | null; path: str
           ID: <input required name="id" />
         </label>
         <label>
+          Title: <input name="title" />
+        </label>
+        <label>
           File: <input required type="file" name="file" />
         </label>
         <button type="submit">Upload</button>
