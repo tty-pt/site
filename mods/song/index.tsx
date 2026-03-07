@@ -1,20 +1,28 @@
-import ChordList from "./components/ChordList.tsx";
-import ChordAdd from "./components/ChordAdd.tsx";
-import ChordDetail from "./components/ChordDetail.tsx";
-import IndexList from "../../index/ssr/components/IndexList.tsx";
-import { dirname, fromFileUrl, resolve } from "https://deno.land/std@0.208.0/path/mod.ts";
+import ChordDetail from "./ChordDetail.tsx";
+import IndexAdd from "@/index/IndexAdd.tsx";
+import IndexList from "@/index/IndexList.tsx";
+import {
+  dirname,
+  fromFileUrl,
+  resolve,
+} from "https://deno.land/std@0.208.0/path/mod.ts";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
-const repoRoot = resolve(moduleDir, "../../../");
+const repoRoot = resolve(moduleDir, "../..");
 
-async function getChordData(id: string): Promise<{ data: string; title: string | null } | null> {
+async function getChordData(id: string): Promise<{
+  data: string;
+  title: string | null
+} | null> {
+  const base = `${repoRoot}/items/song/items/${id}`;
+
   try {
-    const dataPath = `${repoRoot}/items/chords/items/${id}/data.txt`;
+    const dataPath = `${base}/data.txt`;
     const data = await Deno.readTextFile(dataPath);
 
     let title: string | null = null;
     try {
-      const titlePath = `${repoRoot}/items/chords/items/${id}/title`;
+      const titlePath = `${base}/title`;
       title = await Deno.readTextFile(titlePath);
     } catch {
       // title file is optional
@@ -26,7 +34,12 @@ async function getChordData(id: string): Promise<{ data: string; title: string |
   }
 }
 
-export const routes = ["/chords", "/chords/add", "/chords/:id"];
+export const routes = [
+  "/song",
+  "/song/add",
+  "/song/:id",
+  "/song/:id/edit",
+];
 
 export async function render({ user, path, params, searchParams, body }: {
   user: string | null;
@@ -35,12 +48,12 @@ export async function render({ user, path, params, searchParams, body }: {
   searchParams: URLSearchParams;
   body?: string | null;
 }) {
-  if (path === "/chords/add") {
-    return ChordAdd({ user, path });
+  if (path === "/song/add") {
+    return IndexAdd({ user, module: "song" });
   }
 
-  if (path === "/chords" || path === "/chords/") {
-    return IndexList({ module: "chords", body: body || null });
+  if (path === "/song" || path === "/song/") {
+    return IndexList({ module: "song", body: body || null });
   }
 
   const id = params.id;
@@ -59,7 +72,7 @@ export async function render({ user, path, params, searchParams, body }: {
       data = body;
       // Still need to fetch title
       try {
-        const titlePath = `${repoRoot}/items/chords/items/${id}/title`;
+        const titlePath = `${repoRoot}/items/song/items/${id}/title`;
         title = await Deno.readTextFile(titlePath);
       } catch {
         // title file is optional

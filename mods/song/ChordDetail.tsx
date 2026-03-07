@@ -1,4 +1,4 @@
-import { Layout } from "../../../ssr/ui.tsx";
+import { Layout } from "../ssr/ui.tsx";
 
 export default function ChordDetail({ 
   user, 
@@ -31,12 +31,12 @@ export default function ChordDetail({
   }
   
   return (
-    <Layout user={user} title={`chords: ${displayTitle}`} path={path}>
+    <Layout user={user} title={`song: ${displayTitle}`} path={path}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
         <h2>{displayTitle}</h2>
         
         {/* Transpose Controls */}
-        <form method="get" action={`/chords/${id}`} className="horizontal">
+        <form method="get" action={`/song/${id}`} className="horizontal">
           <label>
             Transpose:
             <select name="t" style={{ marginLeft: "0.5rem" }}>
@@ -62,7 +62,7 @@ export default function ChordDetail({
           {data}
         </pre>
         
-        <a href="/chords/" className="btn">
+        <a href="/song/" className="btn">
           Back to Chords
         </a>
       </div>

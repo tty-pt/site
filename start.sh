@@ -23,4 +23,7 @@ if [ -f "$SSR_SERVER_PATH" ]; then
     cd "$SCRIPT_DIR"
 fi
 
+sleep 1
 ndc -C "$SCRIPT_DIR" -p 8080 -d 2>&1 | tee /tmp/site.log
+# echo ndc -C "$SCRIPT_DIR" -p 8080 -d
+# gdb `which ndc`

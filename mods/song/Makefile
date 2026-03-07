@@ -1,7 +1,7 @@
 EXTRA_CFLAGS += -I./lib/transp
 EXTRA_LDLIBS += -L./lib/transp -ltransp -Wl,-rpath,'$$ORIGIN/lib/transp'
 
-all: transp.so chords.so
+all: transp.so song.so
 
 include ../../build.mk
 

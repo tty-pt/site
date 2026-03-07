@@ -442,6 +442,7 @@
     }
   },
   "redirects": {
+    "https://esm.sh/@types/react@~18.3.26/index.d.ts": "https://esm.sh/@types/react@18.3.28/index.d.ts",
     "https://esm.sh/react-dom@18/server": "https://esm.sh/react-dom@18.3.1/server",
     "https://esm.sh/react@18": "https://esm.sh/react@18.3.1"
   },

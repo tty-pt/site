@@ -5,9 +5,7 @@ import { Layout } from "./ui.tsx";
 interface ModuleEntry {
   id: string;
   title: string;
-  routes: string[];
-  ssr: string;
-  be?: string;
+  flags: number;
 }
 
 async function getModules(req: Request): Promise<ModuleEntry[]> {
@@ -28,37 +26,52 @@ async function getModules(req: Request): Promise<ModuleEntry[]> {
   }
 }
 
-function IndexPage({ modules, user, path }: { modules: ModuleEntry[]; user: string | null; path: string }) {
-  const buttons = modules.map((item) =>
-    React.createElement("a", {
+function IndexPage({ modules, user, path }: {
+  modules: ModuleEntry[];
+  user: string | null;
+  path: string;
+}) {
+  const buttons = modules.filter(item => Number(item.flags))
+    .map((item) => React.createElement("a", {
       key: item.id,
       href: `/${item.id}/`,
       className: "btn"
-    }, item.title || item.id)
-  );
+    }, item.title || item.id));
 
-  return React.createElement(Layout, { user, title: "tty.pt", path },
-    React.createElement("div", { className: "center" }, buttons)
-  );
+  return React.createElement(Layout, {
+    user,
+    title: "tty.pt",
+    path
+  }, React.createElement("div", {
+    className: "center"
+  }, buttons));
 }
 
-function matchRoute(path: string, route: string): { matched: boolean; params: Record<string, string> } {
+function matchRoute(path: string, route: string): {
+  matched: boolean;
+  params: Record<string, string>;
+} {
   const cleanPath = path.replace(/\/$/, "");
   const cleanRoute = route.replace(/\/$/, "");
-  if (cleanPath === cleanRoute) return { matched: true, params: {} };
+
+  if (cleanPath === cleanRoute)
+    return { matched: true, params: {} };
 
   const p = cleanPath.split("/").filter(Boolean);
   const r = cleanRoute.split("/").filter(Boolean);
-  if (p.length !== r.length) return { matched: false, params: {} };
+
+  if (p.length !== r.length)
+    return { matched: false, params: {} };
 
   const params: Record<string, string> = {};
-  for (let i = 0; i < r.length; i++) {
-    if (r[i].startsWith(":")) {
+
+  for (let i = 0; i < r.length; i++)
+    if (r[i].startsWith(":"))
       params[r[i].slice(1)] = p[i];
-    } else if (r[i] !== p[i]) {
+
+    else if (r[i] !== p[i])
       return { matched: false, params: {} };
-    }
-  }
+
   return { matched: true, params };
 }
 
@@ -93,21 +106,29 @@ async function handleRequest(req: Request): Promise<Response> {
   let content: React.ReactElement;
   let status = 200;
 
-  if (path === "/" || path === "") {
-    content = React.createElement(IndexPage, { modules, user, path });
-  } else if (req.method === "GET" || req.method === "POST") {
+  if (path === "/" || path === "")
+    content = React.createElement(IndexPage, {
+      modules,
+      user,
+      path,
+    });
+  else if (req.method === "GET" || req.method === "POST") {
     let handled = false;
+
     for (const mod of modules) {
-      const modUrl = new URL(`../../mods/${mod.id}/ssr/index.tsx`, import.meta.url).href;
+      const modUrl = new URL(`../../mods/${mod.id}/index.tsx`, import.meta.url).href;
       let modEntry;
+
       try {
         modEntry = await import(modUrl);
       } catch {
         continue;
       }
-      const modRoutes = modEntry?.routes || mod.routes || [];
+
+      const modRoutes = modEntry?.routes || [];
       for (const route of modRoutes) {
         const match = matchRoute(path, route);
+
         if (match.matched) {
           if (modEntry?.render) {
             try {
@@ -129,19 +150,25 @@ async function handleRequest(req: Request): Promise<Response> {
           }
         }
       }
-      if (handled) break;
+
+      if (handled)
+        break;
     }
     if (!handled) {
       status = 404;
-      content = React.createElement(Layout, { user, title: "Not Found", path },
-        React.createElement("p", null, "Page not found")
-      );
+      content = React.createElement(Layout, {
+        user,
+        title: "Not Found",
+        path
+      }, React.createElement("p", null, "Page not found"));
     }
   } else {
     status = 404;
-    content = React.createElement(Layout, { user, title: "Not Found", path },
-      React.createElement("p", null, "Page not found")
-    );
+    content = React.createElement(Layout, {
+      user,
+      title: "Not Found",
+      path
+    }, React.createElement("p", null, "Page not found"));
   }
 
   return new Response(renderPage(content), {

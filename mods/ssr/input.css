@@ -120,9 +120,9 @@ a.btn {
 }
 
 /* Menu */
-.menu input[type="checkbox"] { display: none; }
+/* .menu input[type="checkbox"] { display: none; } */
 .menu input:checked ~ .functions {
-	transform: translateX(0px);
+  transform: translateX(162px);
 }
 
 .functions {
@@ -131,8 +131,8 @@ a.btn {
   display: flex !important;
   flex-direction: column;
   background-color: #fefefe;
-  transform: translateX(202px);
-  width: 170px;
+  transform: translateX(0px);
+  width: 130px;
 }
 
 .functions > button, .functions > a.btn {

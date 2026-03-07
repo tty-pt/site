@@ -1,37 +1,14 @@
-import React from "https://esm.sh/react@18";
+import IndexAdd from "@/index/IndexAdd.tsx";
+import IndexList from "@/index/IndexList.tsx";
 
 const repoRoot = Deno.env.get("REPO_ROOT") || "/home/quirinpa/site";
 
-export const routes = ["/choir", "/choir/new", "/choir/:id", "/choir/:id/edit"];
-
-// Read choir index database
-async function getChoirs() {
-  const indexPath = `${repoRoot}/items/choir/items/index.db`;
-  const choirs: Array<{ id: string; title: string }> = [];
-  
-  try {
-    const proc = new Deno.Command("qmap", {
-      args: ["-l", indexPath],
-      stdout: "piped",
-    });
-    const output = await proc.output();
-    const text = new TextDecoder().decode(output.stdout);
-    
-    for (const line of text.trim().split("\n")) {
-      if (!line) continue;
-      const parts = line.split(" ");
-      if (parts.length >= 2) {
-        const id = parts[0];
-        const title = parts.slice(1).join(" ");
-        choirs.push({ id, title });
-      }
-    }
-  } catch {
-    // Database doesn't exist yet
-  }
-  
-  return choirs;
-}
+export const routes = [
+  "/choir",
+  "/choir/add",
+  "/choir/:id",
+  "/choir/:id/edit"
+];
 
 // Read choir details
 async function getChoir(id: string) {
@@ -77,99 +54,25 @@ async function getChoir(id: string) {
   }
 }
 
-export async function render({ user, path, params }: {
+export async function render({ user, path, params, body }: {
   user: string | null;
   path: string;
   params: Record<string, string>;
+  body?: string | null;
 }) {
-  // List all choirs
-  if (path === "/choir") {
-    const choirs = await getChoirs();
-    
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, "Choirs"),
-      user ? React.createElement("div", { style: { marginBottom: "1rem" } },
-        React.createElement("a", {
-          href: "/choir/new",
-          style: {
-            padding: "0.5rem 1rem",
-            backgroundColor: "#007bff",
-            color: "white",
-            textDecoration: "none",
-            borderRadius: "4px",
-            display: "inline-block"
-          }
-        }, "Create New Choir")
-      ) : null,
-      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" } },
-        choirs.length === 0
-          ? React.createElement("p", null, "No choirs yet.")
-          : choirs.map(choir =>
-              React.createElement("div", {
-                key: choir.id,
-                style: {
-                  border: "1px solid #ccc",
-                  padding: "1rem",
-                  borderRadius: "4px"
-                }
-              },
-                React.createElement("h3", null,
-                  React.createElement("a", { href: `/choir/${choir.id}` }, choir.title)
-                ),
-                React.createElement("p", { style: { fontSize: "0.9rem", color: "#666" } },
-                  `ID: ${choir.id}`
-                )
-              )
-            )
-      )
-    );
-  }
-  
+  if (path === "/choir/add")
+    return IndexAdd({
+      user,
+      module: "choir",
+    });
+
+  if (path === "/choir")
+    return IndexList({
+      module: "choir",
+      body: body || null,
+    });
+
   // Create new choir form
-  if (path === "/choir/new") {
-    if (!user) {
-      return React.createElement("div", { style: { padding: "2rem" } },
-        React.createElement("h1", null, "Login Required"),
-        React.createElement("p", null, "You must be logged in to create a choir."),
-        React.createElement("a", { href: "/auth/login" }, "Login")
-      );
-    }
-    
-    return React.createElement("div", { style: { padding: "2rem" } },
-      React.createElement("h1", null, "Create New Choir"),
-      React.createElement("form", {
-        method: "POST",
-        action: "/api/choir/create",
-        encType: "multipart/form-data",
-        style: { display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }
-      },
-        React.createElement("label", null,
-          "Choir ID (no spaces):",
-          React.createElement("input", {
-            type: "text",
-            name: "id",
-            required: true,
-            pattern: "[a-z0-9_-]+",
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          })
-        ),
-        React.createElement("label", null,
-          "Choir Name:",
-          React.createElement("input", {
-            type: "text",
-            name: "title",
-            required: true,
-            style: { display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }
-          })
-        ),
-        React.createElement("button", {
-          type: "submit",
-          style: { padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }
-        }, "Create Choir")
-      )
-    );
-  }
-  
   // View choir
   if (params.id && !path.endsWith("/edit")) {
     const choir = await getChoir(params.id);

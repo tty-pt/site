@@ -1,4 +1,4 @@
-import { Layout } from "../../../ssr/ui.tsx";
+import { Layout } from "../ssr/ui.tsx";
 
 export default function PoemList({ user, path, poems }: { user: string | null; path: string; poems: string[] }) {
   const buttons = poems.map((poem) => (

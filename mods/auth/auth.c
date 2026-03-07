@@ -1,4 +1,3 @@
-/* #include "./auth.h" */
 #include <ttypt/ndx-mod.h>
 
 #include <stddef.h>
@@ -11,10 +10,10 @@
 #include <ttypt/qmap.h>
 
 #include "../common/common.h"
-#include "../ssr/ssr.h"
+#include "../index/index.h"
 
-static uint32_t users_map;
-static uint32_t sessions_map;
+static unsigned users_map;
+static unsigned sessions_map;
 
 struct user {
 	char active;
@@ -23,18 +22,11 @@ struct user {
 	char confirm_code[64];
 };
 
-static uint32_t auth_db_hd = 0;
+static unsigned auth_hd = 0;
 
-static uint32_t
-get_auth_db(void)
+NDX_DEF(const char *, get_session_user,
+		const char *, token)
 {
-	if (!auth_db_hd) {
-		auth_db_hd = qmap_open(NULL, "hd", QM_STR, QM_STR, 0xFF, 0);
-	}
-	return auth_db_hd;
-}
-
-NDX_DEF(const char *, get_session_user, const char *, token) {
 	if (!token || !*token)
 		return NULL;
 	return qmap_get(sessions_map, token);
@@ -45,7 +37,8 @@ generate_token(char *buf, size_t len)
 {
 	FILE *f = fopen("/dev/urandom", "r");
 	if (!f) {
-		snprintf(buf, len, "%llx", (unsigned long long)time(NULL));
+		snprintf(buf, len, "%llx", (unsigned long long)
+				time(NULL));
 		return;
 	}
 	for (size_t i = 0; i + 1 < len; ) {
@@ -68,7 +61,8 @@ handle_session(int fd, char *body)
 	char token[64] = {0};
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_query_param(cookie, "QSESSION", token, sizeof(token));
+	call_query_param(cookie, "QSESSION",
+			token, sizeof(token));
 
 	const char *username = qmap_get(sessions_map, token);
 	ndc_header(fd, "Content-Type", "text/plain");
@@ -80,17 +74,28 @@ handle_session(int fd, char *body)
 static int
 handle_login(int fd, char *body)
 {
-	char username[64] = {0};
-	char password[64] = {0};
-	char redirect[256] = {0};
+	char username[64], password[64], redirect[256],
+		salt[30], token[64], cookie[128], *hash;
 
-	fprintf(stderr, "AUTH DEBUG handle_login: body=%p body_str='%s' len=%lu\n", 
-		(void*)body, body ? body : "(null)", body ? strlen(body) : 0);
+	struct user *user;
+
+	fprintf(stderr, "AUTH DEBUG handle_login: "
+			"body=%p body_str='%s' len=%lu\n", 
+		(void*) body,
+		body ? body : "(null)",
+		body ? strlen(body) : 0);
 	
-	call_query_param(body, "username", username, sizeof(username));
-	fprintf(stderr, "AUTH DEBUG: After query_param, username='%s'\n", username);
-	call_query_param(body, "password", password, sizeof(password));
-	call_query_param(body, "ret", redirect, sizeof(redirect));
+	call_query_param(body, "username",
+			username, sizeof(username));
+
+	fprintf(stderr, "AUTH DEBUG: After query_param, "
+			"username='%s'\n", username);
+
+	call_query_param(body, "password",
+			password, sizeof(password));
+
+	call_query_param(body, "ret",
+			redirect, sizeof(redirect));
 
 	if (!*username || !*password) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -99,7 +104,8 @@ handle_login(int fd, char *body)
 		return 1;
 	}
 
-	struct user *user = (struct user *)qmap_get(users_map, username);
+	user = (struct user *) qmap_get(users_map, username);
+
 	if (!user) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
@@ -107,9 +113,9 @@ handle_login(int fd, char *body)
 		return 1;
 	}
 
-	char salt[30] = {0};
+
 	strncpy(salt, user->hash, 29);
-	char *hash = crypt(password, salt);
+	hash = crypt(password, salt);
 
 	if (!hash || strcmp(hash, user->hash)) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -125,12 +131,15 @@ handle_login(int fd, char *body)
 		return 1;
 	}
 
-	char token[64];
 	generate_token(token, sizeof(token));
 	qmap_put(sessions_map, token, username);
-	char cookie[128];
-	snprintf(cookie, sizeof(cookie), "QSESSION=%s", token);
-	ndc_header(fd, "Location", *redirect ? redirect : "/");
+
+	snprintf(cookie, sizeof(cookie),
+			"QSESSION=%s", token);
+
+	ndc_header(fd, "Location",
+			*redirect ? redirect : "/");
+
 	ndc_header(fd, "Set-Cookie", cookie);
 	ndc_head(fd, 303);
 	ndc_close(fd);
@@ -142,21 +151,24 @@ handle_logout(int fd, char *body)
 {
 	(void)body;
 
-	char cookie[256] = {0};
-	char query[256] = {0};
-	char token[64] = {0};
-	char redirect[256] = {0};
+	char cookie[256], query[256],
+		token[64], redirect[256];
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	ndc_env_get(fd, query, "QUERY_STRING");
 	
-	call_query_param(cookie, "QSESSION", token, sizeof(token));
-	call_query_param(query, "ret", redirect, sizeof(redirect));
+	call_query_param(cookie, "QSESSION",
+			token, sizeof(token));
+
+	call_query_param(query, "ret",
+			redirect, sizeof(redirect));
 
 	if (*token)
 		qmap_del(sessions_map, token);
 
-	ndc_header(fd, "Location", *redirect ? redirect : "/");
+	ndc_header(fd, "Location",
+			*redirect ? redirect : "/");
+
 	ndc_header(fd, "Set-Cookie", "");
 	ndc_head(fd, 303);
 	ndc_close(fd);
@@ -166,27 +178,41 @@ handle_logout(int fd, char *body)
 static int
 valid_username_char(char c)
 {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-	       (c >= '0' && c <= '9') || c == '_' || c == '-';
+	return (c >= 'a' && c <= 'z')
+		|| (c >= 'A' && c <= 'Z')
+		|| (c >= '0' && c <= '9')
+		|| c == '_' || c == '-';
 }
 
 static int
 handle_register(int fd, char *body)
 {
-	char username[64] = {0};
-	char password[64] = {0};
-	char password_confirm[64] = {0};
-	char email[128] = {0};
+	char username[64], password[64], *hash,
+		password_confirm[64], email[128];
 
-	fprintf(stderr, "AUTH DEBUG handle_register: body=%p body_str='%s' len=%lu\n", 
-		(void*)body, body ? body : "(null)", body ? strlen(body) : 0);
+	size_t username_len;
+	struct user user;
 
-	call_query_param(body, "username", username, sizeof(username));
-	call_query_param(body, "password", password, sizeof(password));
-	call_query_param(body, "password2", password_confirm, sizeof(password_confirm));
-	call_query_param(body, "email", email, sizeof(email));
+	fprintf(stderr, "AUTH DEBUG handle_register: "
+			"body=%p body_str='%s' len=%lu\n", 
+			(void*)body, body ? body : "(null)",
+			body ? strlen(body) : 0);
 
-	size_t username_len = strlen(username);
+	call_query_param(body, "username",
+			username, sizeof(username));
+
+	call_query_param(body, "password",
+			password, sizeof(password));
+
+	call_query_param(body, "password2",
+			password_confirm,
+			sizeof(password_confirm));
+
+	call_query_param(body, "email",
+			email, sizeof(email));
+
+	username_len = strlen(username);
+
 	if (username_len < 2 || username_len > 32) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
@@ -224,8 +250,9 @@ handle_register(int fd, char *body)
 		return 1;
 	}
 
-	struct user user = {0};
-	char *hash = crypt(password, "$2b$12$abcdefghijklmnopqrstuu");
+	hash = crypt(password,
+			"$2b$12$abcdefghijklmnopqrstuu");
+
 	if (!hash) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
@@ -235,30 +262,36 @@ handle_register(int fd, char *body)
 
 	strncpy(user.hash, hash, sizeof(user.hash) - 1);
 	strncpy(user.email, email, sizeof(user.email) - 1);
-	generate_token(user.confirm_code, sizeof(user.confirm_code));
+	generate_token(user.confirm_code,
+			sizeof(user.confirm_code));
+
 	qmap_put(users_map, username, &user);
 
 	fprintf(stderr, "Register: /confirm?u=%s&r=%s\n",
 		username, user.confirm_code);
+
 	ndc_header(fd, "Location", "/welcome");
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;
 }
 
-static int
-handle_confirm(int fd, char *body)
+static int handle_confirm(int fd, char *body)
 {
 	(void)body;
 
-	char query[256] = {0};
-	char username[64] = {0};
-	char code[64] = {0};
+	char query[256], username[64], code[64],
+		token[64], cookie[128];
+
+	struct user user, *existing;
 
 	ndc_env_get(fd, query, "QUERY_STRING");
 	
-	call_query_param(query, "u", username, sizeof(username));
-	call_query_param(query, "r", code, sizeof(code));
+	call_query_param(query, "u",
+			username, sizeof(username));
+
+	call_query_param(query, "r",
+			code, sizeof(code));
 
 	if (!*username || !*code) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -267,7 +300,9 @@ handle_confirm(int fd, char *body)
 		return 1;
 	}
 
-	struct user *existing = (struct user *)qmap_get(users_map, username);
+	existing = (struct user *)
+		qmap_get(users_map, username);
+
 	if (!existing || existing->active) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 400);
@@ -282,29 +317,28 @@ handle_confirm(int fd, char *body)
 		return 1;
 	}
 
-	struct user user;
 	memcpy(&user, existing, sizeof(user));
 	user.active = 1;
 	qmap_put(users_map, username, &user);
 
-	char token[64];
 	generate_token(token, sizeof(token));
 	qmap_put(sessions_map, token, username);
-	char cookie[128];
-	snprintf(cookie, sizeof(cookie), "QSESSION=%s", token);
+
+	snprintf(cookie, sizeof(cookie),
+			"QSESSION=%s", token);
+
 	ndc_header(fd, "Location", "/");
 	ndc_header(fd, "Set-Cookie", cookie);
 	ndc_head(fd, 303);
 	ndc_close(fd);
-	
+
 	return 0;
 }
 
-MODULE_API void
-ndx_install(void)
+void ndx_install(void)
 {
+	ndx_load("./mods/index/index");
 	ndx_load("./mods/common/common");
-	ndx_load("./mods/ssr/ssr");
 	users_map = qmap_open(NULL, "users", QM_STR,
 			      qmap_reg(sizeof(struct user)), 0xFF, 0);
 	sessions_map = qmap_open(NULL, "sess", QM_STR,
@@ -316,10 +350,10 @@ ndx_install(void)
 	ndc_register_handler("/logout", handle_logout);
 	ndc_register_handler("/confirm", handle_confirm);
 
-	call_ssr_register_module("auth", "Auth");
+	auth_hd = qmap_open(NULL, "hd",
+			QM_STR, QM_STR, 0xFF, 0);
+
+	call_index_open("Auth", 0, 0);
 }
 
-MODULE_API void
-ndx_open(void)
-{
-}
+void ndx_open(void) {}

@@ -6,15 +6,19 @@
 #include <errno.h>
 
 #include <ttypt/ndc.h>
+
 #include "../mpfd/mpfd.h"
-#include "../ssr/ssr.h"
+#include "../index/index.h"
 
 #define POEM_ITEMS_PATH "items/poem/items"
+
+static unsigned index_hd;
 
 static void
 handle_poem_add(int fd, char *doc_root)
 {
 	char id[64] = { 0 };
+	char title[256] = { 0 };
 
 	/* Check if id field exists */
 	int id_len = call_mpfd_get("id", id, sizeof(id) - 1);
@@ -25,6 +29,12 @@ handle_poem_add(int fd, char *doc_root)
 		return;
 	}
 	id[id_len] = '\0';
+
+	/* Get title (optional) */
+	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
+	if (title_len > 0) {
+		title[title_len] = '\0';
+	}
 
 	/* Check if file field exists */
 	if (!call_mpfd_exists("file")) {
@@ -93,6 +103,17 @@ handle_poem_add(int fd, char *doc_root)
 	FILE *cfp = fopen(comment_path, "w");
 	if (cfp) fclose(cfp);
 
+	/* Write title file */
+	if (title[0]) {
+		char title_path[1024];
+		snprintf(title_path, sizeof(title_path), "%s/title", item_path);
+		FILE *tfp = fopen(title_path, "w");
+		if (tfp) {
+			fwrite(title, 1, strlen(title), tfp);
+			fclose(tfp);
+		}
+	}
+
 	ndc_header(fd, "Location", "/poem/");
 	ndc_head(fd, 303);
 	ndc_close(fd);
@@ -108,6 +129,7 @@ poem_handler(int fd, char *body)
 	ndc_env_get(fd, method, "REQUEST_METHOD");
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+
 
 	/* Parse multipart form data */
 	int parse_result = call_mpfd_parse(fd, body);
@@ -131,26 +153,13 @@ poem_handler(int fd, char *body)
 	return 0;
 }
 
-static int
-poem_get_handler(int fd, char *body)
-{
-	ndc_header(fd, "Content-Type", "text/plain");
-	ndc_head(fd, 405);
-	ndc_body(fd, "Method Not Allowed");
-	return 1;
+void ndx_install(void) {
+	ndx_load("./mods/index/index");
+
+	// TODO make sure we can edit the poem using the above
+	// function for add, which is deprecated.
+	
+	index_hd = call_index_open("Poem", 0, 1);
 }
 
-MODULE_API void
-ndx_install(void)
-{
-	ndx_load("./mods/ssr/ssr");
-	ndx_load("./mods/mpfd/mpfd");
-	ndc_register_handler("POST:/poem/add", poem_handler);
-
-	call_ssr_register_module("poem", "Poem");
-}
-
-MODULE_API void
-ndx_open(void)
-{
-}
+void ndx_open(void) {}

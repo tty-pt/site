@@ -3,15 +3,18 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "./../proxy/proxy.h"
+
 static int
 load_modules_from_file(const char *path)
 {
 	char mod_line[1030];
+	char line[512];
 	FILE *fp = fopen(path, "r");
+
 	if (!fp)
 		return 0;
 
-	char line[512];
 	while (fgets(line, sizeof(line), fp)) {
 		size_t len = strlen(line);
 		while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
@@ -28,11 +31,10 @@ load_modules_from_file(const char *path)
 	return 1;
 }
 
-void ndx_open(void)
-{
-	load_modules_from_file("./mods.load");
-}
-
 void ndx_install(void) {
 	load_modules_from_file("./mods.load");
+	ndx_load("./mods/proxy/proxy");
+	call_proxy_connect("127.0.0.1", 3000);
 }
+
+void ndx_open(void) {}
