@@ -18,7 +18,6 @@ Client → ndc (port 8080) → ssr.c → Deno SSR (port 3000) → React → HTML
 1. Client sends HTTP request to ndc on port 8080
 2. C modules handle registered routes (e.g., `/poem/add` POST)
 3. Unmatched routes fall through to `ssr.c`
-4. `ssr.c` reads `module.db` to discover available modules
 5. Builds `X-Modules` header with module metadata (JSON)
 6. Forwards request to Deno SSR on localhost:3000
 7. Deno loads appropriate module SSR components
@@ -34,17 +33,14 @@ Client → ndc (port 8080) → ssr.c → Deno SSR (port 3000) → React → HTML
 **Purpose:** Intercept and proxy requests to Deno SSR
 
 **Key Functions:**
-- `build_modules_json()` - Read module.db and build JSON array
 - `ssr_handler()` - Main proxy handler
 - `parse_http_response()` - Parse upstream HTTP response
-- `get_field()` - Parse module.db field values
 
 **Configuration:**
 - `PROXY_HOST`: `127.0.0.1`
 - `PROXY_PORT`: `3000`
 
 **Module Discovery:**
-Reads `module.db` (qmap) to build JSON like:
 ```json
 [
   {
@@ -344,19 +340,6 @@ The Deno server can be configured via environment:
 - `DENO_DIR` - Deno cache directory
 - Listening port is hardcoded to 3000
 
-### Module Database
-
-The `module.db` file must exist and contain module metadata. Created by:
-
-```sh
-./scripts/mod_add <module_name>
-```
-
-Format (qmap key:value pairs):
-```
-module_id:title=Title; routes=; ssr=path/to/ssr/index.tsx; be=path/to/module.so
-```
-
 ## Starting the SSR Server
 
 ### Manual Start
@@ -382,8 +365,6 @@ This:
 ## Implementation Details
 
 **C Proxy:** `ssr.c`
-- Lines 20-38: `get_field()` - Parse module.db values
-- Lines 44-97: `build_modules_json()` - Build X-Modules header
 - Lines 281-511: `ssr_handler()` - Main proxy logic
 - Caches `modules_db_hd` for performance
 
@@ -419,7 +400,6 @@ Errors are logged to stderr/console.
 
 ## Performance Considerations
 
-- `module.db` is opened once and cached (`modules_db_hd`)
 - Deno caches imported modules (no reloading on each request)
 - Socket connections to Deno are short-lived (new connection per request)
 
@@ -450,18 +430,10 @@ deno run --allow-net --allow-read --allow-env server.ts
 ### Module not appearing in listing
 
 **Causes:**
-1. Not registered in `module.db`
-2. Invalid SSR path in module.db
-3. SSR file doesn't exist
+1. SSR file doesn't exist
 
 **Debug:**
 ```sh
-# List all modules
-qmap -l module.db
-
-# Check specific module
-qmap -g poem module.db
-
 # Verify SSR file exists
 ls -l mods/poem/ssr/index.tsx
 ```

@@ -40,13 +40,11 @@ Client → ndc (port 8080) → ssr.so (C proxy) → Deno SSR (port 3000) → Rea
 
 - `mods/ssr/ssr.c` - C proxy that forwards HTTP requests to Deno SSR, parses responses
 - `mods/ssr/server.ts` - Deno SSR server that renders React pages
-- `module.db` - qmap database with module metadata (routes, titles, etc.)
 - `mods.load` - List of module .so files to load at startup
 
 ### How SSR Works
 
 1. ndc receives HTTP request on port 8080
-2. ssr.so intercepts via registered routes (defined in module.db)
 3. ssr.so forwards request to Deno SSR (port 3000) with X-Modules header
 4. Deno loads appropriate module SSR component (e.g., mods/auth/ssr/index.tsx)
 5. Module's `render()` returns React element or null
@@ -479,7 +477,6 @@ Use `scripts/mod_add` to add a module:
 
 This:
 - Appends the module's `.so` path to `mods.load`
-- Adds an entry to `module.db` with title and SSR path (if SSR exists)
 
 Module must be located at `mods/<modulename>/<modulename>.so`
 
@@ -509,7 +506,7 @@ Available variables:
 
 2. Add module to system:
    - Ensure module .so is built
-   - Add to `mods.load` and `module.db` using `./scripts/mod_add <modname>`
+   - Add to `mods.load` using `./scripts/mod_add <modname>`
 
 ### SSR Component Pattern
 
@@ -696,9 +693,6 @@ make clean
 
 # List built modules
 cat mods.load
-
-# View module database
-qmap -l module.db
 ```
 
 ---
@@ -710,7 +704,6 @@ qmap -l module.db
 | `mods/*/` | Module directories |
 | `mods/*/*.c` | C module source |
 | `mods/*/ssr/*.tsx` | SSR React components |
-| `module.db` | Module metadata database |
 | `mods.load` | List of .so files to load |
 | `scripts/mod_add` | Adds module to system |
 | `build.mk` | Common build rules |

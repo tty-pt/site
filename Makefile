@@ -37,6 +37,5 @@ integration-tests: all
 
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
-	rm -f core.so module.db
 
 .PHONY: all mods modules run clean test unit-tests pages-test integration-tests

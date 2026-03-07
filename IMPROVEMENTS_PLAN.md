@@ -18,16 +18,9 @@ This document outlines a plan to simplify the codebase while maintaining the sam
 - `query_param` in `auth.c`
 - These should be shared
 
-### 3. Repeated module.db Opens
-- `ssr.c` calls `qmap_open("./module.db"...)` in multiple places without caching
-
-### 4. Unused Tailwind Build Files
+### 3. Unused Tailwind Build Files
 - `tailwind.config.js`, `TAILWIND_MAPPING.md`, `mods/ssr/input.css` are not needed
 - Compiled CSS already exists in `htdocs/styles.css`
-
-### 5. Unused mod.db Files
-- `mods/ssr/mod.db`, `mods/poem/mod.db`, `mods/mpfd/mod.db` exist but are unused
-- Only root `module.db` is used
 
 ---
 
@@ -47,7 +40,6 @@ Auth-specific functionality:
 - All current auth handlers (login, register, logout, confirm)
 
 ### SSR Module (mods/ssr/)
-- `get_field` - parse module.db values (stays here)
 - Uses common utilities (`json_escape`, `url_encode`)
 - Uses auth's `get_session_user()` and `get_cookie()`
 
@@ -88,7 +80,6 @@ Modify `mods/ssr/`:
 - Add dependencies on auth and common
 - Remove duplicate functions (use from common/auth)
 - Remove `sessions/` file handling - use auth's session lookup
-- Add cached module.db handle
 
 ### Phase 4: Update Dependencies
 Update mod.json files:
@@ -107,7 +98,6 @@ Delete:
 
 ### Phase 6: Rebuild
 ```sh
-make module.db
 make clean && make test
 ```
 
@@ -132,8 +122,7 @@ make clean && make test
 4. Modify mods/auth/auth.c
 5. Modify mods/ssr/ssr.c
 6. Delete unused files
-7. make module.db
-8. make clean && make test
+7. make clean && make test
 ```
 
 ---
@@ -274,7 +263,6 @@ void url_encode(const char *in, char *out, size_t outlen) {
 
 - **Single source of truth** for sessions (qmap via auth)
 - **Shared utilities** in common module
-- **Faster requests** from cached module.db
 - **Cleaner build** without unused files
 - **No circular dependencies**
 

@@ -91,7 +91,7 @@ chmod +x .githooks/pre-commit
 
 Development notes
 - The SSR proxy was hardened to parse upstream status/headers and forward them via `ndc_head`/`ndc_header` to avoid duplicated headers and injection risks — see `mods/ssr/ssr.c`.
-- Avoid committing generated binaries (`*.so`, `module.db`, `mods.load`) or editor swap files. These are ignored by `.gitignore`.
+- Avoid committing generated binaries (`*.so`, `mods.load`) or editor swap files. These are ignored by `.gitignore`.
 
 ## Recent Fixes
 
@@ -178,9 +178,6 @@ deno run --allow-net --allow-read --allow-env server.ts
 ```sh
 # Check if module is in mods.load
 cat mods.load | grep mymodule
-
-# Check module.db entry
-qmap -g mymodule module.db
 
 # Check ndc logs for load errors
 tail -f /tmp/ndc.log
