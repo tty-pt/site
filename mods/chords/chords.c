@@ -10,12 +10,14 @@
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
 #include "../ssr/ssr.h"
+#include "../index/index.h"
 #include "../../lib/transp/transp.h"
 
 #define CHORDS_ITEMS_PATH "items/chords/items"
 
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
+static unsigned index_hd;
 
 /* 
  * NDX API: Transpose chord chart text
@@ -331,14 +333,9 @@ chords_ssr_handler(int fd, char *body)
 	ndc_env_get(fd, query, "QUERY_STRING");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	
-	/* If no ID pattern match, this is /chords/ list page - proxy GET */
+	/* If no ID pattern match, this is /chords/ list page - use index_page */
 	if (!id[0]) {
-		/* Append query string if present */
-		if (query[0]) {
-			size_t path_len = strlen(path);
-			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
-		}
-		return call_ssr_proxy_get(fd, path);
+		return call_index_page(fd, index_hd, "/chords", "Chords");
 	}
 	
 	/* Have ID - check if transposition requested */
@@ -462,6 +459,7 @@ ndx_install(void)
 	}
 	
 	ndx_load("./mods/ssr/ssr");
+	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 	
 	ndc_register_handler("POST:/chords/add", chords_handler);
@@ -470,6 +468,9 @@ ndx_install(void)
 	ndc_register_handler("GET:/chords/:id", chords_ssr_handler);
 
 	call_ssr_register_module("chords", "Chords");
+
+	index_hd = call_index_open("./items/chords/items", 0);
+
 }
 
 MODULE_API void

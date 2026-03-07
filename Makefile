@@ -14,7 +14,7 @@ mods:
 modules:
 	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done
 
-run:
+run: all
 	./start.sh
 
 MODS != cat mods.load

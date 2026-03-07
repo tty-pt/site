@@ -1,5 +1,3 @@
-import React from "https://esm.sh/react@18";
-
 const repoRoot = Deno.env.get("REPO_ROOT") || "/home/quirinpa/site";
 
 export const routes = ["/sb", "/sb/new", "/sb/:id", "/sb/:id/edit"];

@@ -1,6 +1,5 @@
-import React from "https://esm.sh/react@18";
-import ReactDOMServer from "https://esm.sh/react-dom@18/server";
-
+import React from 'react';
+import ReactDOMServer from "react-dom/server";
 import { Layout } from "./ui.tsx";
 
 interface ModuleEntry {

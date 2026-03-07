@@ -1,15 +1,14 @@
-import React from "https://esm.sh/react@18";
 import PoemList from "./components/PoemList.tsx";
 import PoemAdd from "./components/PoemAdd.tsx";
 import PoemDetail from "./components/PoemDetail.tsx";
-import { dirname, fromFileUrl, resolve } from "https://deno.land/std@0.208.0/path/mod.ts";
+import { dirname, fromFileUrl, resolve } from "jsr:@std/path";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = resolve(moduleDir, "../../../");
 
 async function getPoems(): Promise<string[]> {
   try {
-    const dir = await Deno.readDir(`${repoRoot}/items/poem/items`);
+    const dir = Deno.readDir(`${repoRoot}/items/poem/items`);
     const poems: string[] = [];
     for await (const entry of dir) {
       if (entry.isDirectory && !entry.name.startsWith(".")) {

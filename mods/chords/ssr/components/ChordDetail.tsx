@@ -1,4 +1,3 @@
-import React from "https://esm.sh/react@18";
 import { Layout } from "../../../ssr/ui.tsx";
 
 export default function ChordDetail({ 
@@ -37,7 +36,7 @@ export default function ChordDetail({
         <h2>{displayTitle}</h2>
         
         {/* Transpose Controls */}
-        <form method="get" action={`/chords/${id}`} style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+        <form method="get" action={`/chords/${id}`} className="horizontal">
           <label>
             Transpose:
             <select name="t" style={{ marginLeft: "0.5rem" }}>
@@ -47,12 +46,12 @@ export default function ChordDetail({
           
           <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
             <input type="checkbox" name="b" value="1" checked={useBemol} />
-            Use Flats (♭)
+            <span>Flats (♭)</span>
           </label>
           
           <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
             <input type="checkbox" name="l" value="1" checked={useLatin} />
-            Latin (Do-Ré-Mi)
+            <span>Latin</span>
           </label>
           
           <button type="submit" className="btn">Apply</button>
