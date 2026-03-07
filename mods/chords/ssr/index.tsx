@@ -1,25 +1,11 @@
 import ChordList from "./components/ChordList.tsx";
 import ChordAdd from "./components/ChordAdd.tsx";
 import ChordDetail from "./components/ChordDetail.tsx";
+import IndexList from "../../index/ssr/components/IndexList.tsx";
 import { dirname, fromFileUrl, resolve } from "https://deno.land/std@0.208.0/path/mod.ts";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = resolve(moduleDir, "../../../");
-
-async function getChords(): Promise<string[]> {
-  try {
-    const dir = await Deno.readDir(`${repoRoot}/items/chords/items`);
-    const chords: string[] = [];
-    for await (const entry of dir) {
-      if (entry.isDirectory && !entry.name.startsWith(".")) {
-        chords.push(entry.name);
-      }
-    }
-    return chords.sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  }
-}
 
 async function getChordData(id: string): Promise<{ data: string; title: string | null } | null> {
   try {
@@ -54,8 +40,7 @@ export async function render({ user, path, params, searchParams, body }: {
   }
 
   if (path === "/chords" || path === "/chords/") {
-    const chords = await getChords();
-    return ChordList({ user, path, chords });
+    return IndexList({ module: "chords", body: body || null });
   }
 
   const id = params.id;

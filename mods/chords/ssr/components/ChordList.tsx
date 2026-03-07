@@ -1,9 +1,9 @@
 import { Layout } from "../../../ssr/ui.tsx";
 
-export default function ChordList({ user, path, chords }: { user: string | null; path: string; chords: string[] }) {
+export default function ChordList({ user, path, chords, titles = {} }: { user: string | null; path: string; chords: string[]; titles?: Record<string, string> }) {
   const buttons = chords.map((chord) => (
     <a key={chord} href={`/chords/${chord}/`} className="btn">
-      {chord}
+      {titles[chord] || chord}
     </a>
   ));
 
