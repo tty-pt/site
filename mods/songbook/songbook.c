@@ -801,8 +801,7 @@ handle_sb_delete(int fd, char *body)
 }
 #endif
 
-MODULE_API void
-ndx_install(void)
+void ndx_install(void)
 {
 	/* ndx_load("./mods/auth/auth"); */
 	/* ndx_load("./mods/common/common"); */
@@ -820,7 +819,4 @@ ndx_install(void)
 	index_hd = call_index_open("Songbook", 0, 1);
 }
 
-MODULE_API void
-ndx_open(void)
-{
-}
+void ndx_open(void) {}

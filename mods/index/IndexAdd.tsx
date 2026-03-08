@@ -4,18 +4,25 @@ import type { State } from "#/routes/_middleware.ts";
 
 interface AddData {
   user: string | null;
+  module: string;
 }
 
 export const handler: Handlers<AddData, State> = {
   GET(req, ctx) {
-    return ctx.render({ user: ctx.state.user });
+    const splits = req.url.split('/');
+    splits.pop();
+    const module = splits.pop()!;
+    return ctx.render({
+      user: ctx.state.user,
+      module,
+    });
   },
 };
 
-export default function IndexAdd({
+function IndexAdd({
   module,
   user,
-}: { module: string, user: string | null }) {
+}: { module?: string; user: string | null }) {
   const path = `/${module}/add`;
 
   return (
@@ -31,4 +38,6 @@ export default function IndexAdd({
   );
 }
 
-export type AddProps = PageProps<AddData>;
+export default function SongAdd({ data }: PageProps<AddData>) {
+  return <IndexAdd user={data.user} module={data.module} />;
+}
