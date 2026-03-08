@@ -41,7 +41,7 @@ make run
 Migrated from legacy SSR to Fresh routes:
 
 - **Route files**: `mods/<module>/routes/` → hard linked to `routes/<module>/`
-- **Island files**: `mods/<module>/(_islands)/` → hard linked to `islands/`
+- **Island files**: `mods/<module>/islands/` → hard linked to `islands/`
 - **Auto-generated**: Run `deno task start` to create hard links
 
 ### Edit Pages Pattern

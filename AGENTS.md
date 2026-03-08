@@ -205,7 +205,7 @@ export const handler: Handlers<EditData, State> = {
 ## Fresh Hard Link Architecture
 
 - Source in `mods/<module>/routes/` → hard linked to `routes/<module>/`
-- Source in `mods/<module>/(_islands)/` → hard linked to `islands/`
+- Source in `mods/<module>/islands/` → hard linked to `islands/`
 - Run `deno task start` or `deno task setup-routes` to regenerate
 
 **Module URL path = directory name** (e.g., `songbook` module → `/songbook/` routes)

@@ -443,51 +443,59 @@ transp_init(void)
 char *
 transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 {
-	if (!ctx || !input)
-		return NULL;
-	
-	/* Normalize negative transpose */
-	if (semitones < 0)
-		semitones += (1 + (semitones / 12)) * 12;
-	
-	/* Set i18n table based on flags */
-	if (flags & TRANSP_LATIN)
-		ctx->i18n_table = chromatic_latin;
-	else
-		ctx->i18n_table = chromatic_en;
-	
-	/* Split input by lines */
-	char *input_copy = strdup(input);
-	char *result = malloc(strlen(input) * 3);  /* Generous buffer */
-	if (!result) {
-		free(input_copy);
-		return NULL;
-	}
-	result[0] = '\0';
-	
-	char *line = strtok(input_copy, "\n");
-	while (line) {
-		int skip_empty = 0;
-		char *transposed = proc_line(ctx, line, semitones, flags, &skip_empty);
-		if (transposed && !skip_empty) {
-			strcat(result, transposed);
-			free(transposed);
-		} else if (transposed) {
-			free(transposed);
-		}
-		line = strtok(NULL, "\n");
-	}
-	
-	free(input_copy);
-	
-	/* Clean up any remaining queue entries */
-	while (!TAILQ_EMPTY(&ctx->queue)) {
-		struct space_queue *elem = TAILQ_FIRST(&ctx->queue);
-		TAILQ_REMOVE(&ctx->queue, elem, entries);
-		free(elem);
-	}
-	
-	return result;
+    if (!ctx || !input)
+        return NULL;
+
+    /* Normalize negative transpose */
+    if (semitones < 0)
+        semitones += (1 + (semitones / 12)) * 12;
+
+    /* Set i18n table based on flags */
+    if (flags & TRANSP_LATIN)
+        ctx->i18n_table = chromatic_latin;
+    else
+        ctx->i18n_table = chromatic_en;
+
+    /* Split input by lines manually to respect empty lines (essential for HTML) */
+    char *input_copy = strdup(input);
+    char *result = malloc(strlen(input) * 8); /* Increased for HTML tags & entities */
+    if (!result) {
+        free(input_copy);
+        return NULL;
+    }
+    result[0] = '\0';
+
+    char *line_start = input_copy;
+    char *line_end;
+
+    while (line_start && *line_start) {
+        line_end = strchr(line_start, '\n');
+        if (line_end) *line_end = '\0';
+
+        int skip_empty = 0;
+        char *transposed = proc_line(ctx, line_start, semitones, flags, &skip_empty);
+
+        if (transposed) {
+            if (!skip_empty) {
+                strcat(result, transposed);
+            }
+            free(transposed);
+        }
+
+        line_start = line_end ? line_end + 1 : NULL;
+    }
+
+    free(input_copy);
+
+    /* Clean up any remaining queue entries (Standard C99 logic) */
+    struct space_queue *elem;
+    while (!TAILQ_EMPTY(&ctx->queue)) {
+        elem = TAILQ_FIRST(&ctx->queue);
+        TAILQ_REMOVE(&ctx->queue, elem, entries);
+        free(elem);
+    }
+
+    return result;
 }
 
 int

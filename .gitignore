@@ -16,14 +16,9 @@
 # Regenerated on every `deno task start` and `deno task build`
 
 # Module routes (hard-linked from mods/*/routes/)
-/routes/song/
-/routes/auth/
-/routes/choir/
-/routes/songbook/
-/routes/poem/
+/routes
 
-# Module islands (hard-linked from mods/*/(_islands)/)
-/islands/TransposeControls.tsx
+# Module islands (hard-linked from mods/*/island/)
 /islands/*.tsx
 
 # Core routes remain tracked (not hard-linked):

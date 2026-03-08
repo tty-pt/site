@@ -38,36 +38,146 @@ NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, ch
 }
 
 /* Parse transpose params from query string using common module */
+/* Parse transpose params from query string using common module */
 static int
 parse_transpose_params(const char *query, int *transpose, int *flags, int *show_media)
 {
 	*transpose = 0;
-	*flags = 0;
 	*show_media = 0;
-	
+
 	if (!query || !*query) return 0;
-	
+
 	char query_copy[1024];
 	snprintf(query_copy, sizeof(query_copy), "%s", query);
-	
+
 	if (call_query_parse(query_copy) != 0)
 		return -1;
-	
+
 	char buf[32];
-	
+
 	if (call_query_param("t", buf, sizeof(buf)) > 0)
 		*transpose = atoi(buf);
-	
+
 	if (call_query_exists("b"))
 		*flags |= TRANSP_BEMOL;
-	
+
 	if (call_query_exists("l"))
 		*flags |= TRANSP_LATIN;
-	
+
+	/* ADD THIS LINE: Sets the HTML flag so transp_buffer knows to wrap divs */
+	if (call_query_exists("h"))
+		*flags |= TRANSP_HTML;
+
 	if (call_query_exists("m"))
 		*show_media = 1;
-	
+
 	return (*transpose || *flags || *show_media) ? 0 : 1;
+}
+
+static void read_meta_file(
+		const char *item_path,
+		const char *name,
+		char *buf, size_t sz)
+{
+	char p[1024];
+	snprintf(p, sizeof(p), "%s/%s", item_path, name);
+	FILE *mfp = fopen(p, "r");
+
+	if (!mfp)
+		return;
+	if (fgets(buf, (int)sz - 1, mfp)) {
+		size_t l = strlen(buf);
+		if (l > 0 && buf[l - 1] == '\n') buf[l - 1] = '\0';
+	}
+	fclose(mfp);
+}
+
+char *song_json(int fd, int flags) {
+	char doc_root[256] = {0};
+	char query[1024] = {0};
+	char id[128] = {0};
+	int transpose = 0;
+	int show_media = 0;
+	char item_path[512];
+	char filepath[552];
+
+	/* Buffers for raw and escaped strings */
+	char title[256] = {0}, yt[512] = {0}, audio[512] = {0}, pdf[512] = {0};
+	char esc_title[512], esc_yt[1024], esc_audio[1024], esc_pdf[1024];
+
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	ndc_env_get(fd, query, "QUERY_STRING");
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+
+	if (!id[0]) return NULL;
+
+	if (parse_transpose_params(query, &transpose, &flags, &show_media) != 0)
+		return NULL;
+
+	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
+			doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
+
+	/* Load metadata fields */
+	read_meta_file(item_path, "title", title, sizeof(title));
+	read_meta_file(item_path, "yt", yt, sizeof(yt));
+	read_meta_file(item_path, "audio", audio, sizeof(audio));
+	read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
+
+	/* Read and Transpose Chord File */
+	snprintf(filepath, sizeof(filepath), "%s/data.txt", item_path);
+	FILE *fp = fopen(filepath, "r");
+	if (!fp) return NULL;
+
+	fseek(fp, 0, SEEK_END);
+	long fsize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	char *content = malloc(fsize + 1);
+	if (!content) { fclose(fp); return NULL; }
+
+	fread(content, 1, fsize, fp);
+	fclose(fp);
+	content[fsize] = '\0';
+
+	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
+	free(content);
+
+	if (!transposed) return NULL;
+
+	/* Escape all fields for JSON safety */
+	size_t data_esc_len = 3 * strlen(transposed);
+	char *escaped_data = malloc(data_esc_len);
+	if (!escaped_data) { free(transposed); return NULL; }
+
+	call_json_escape(transposed, escaped_data, data_esc_len);
+	free(transposed);
+
+	call_json_escape(title, esc_title, sizeof(esc_title));
+	call_json_escape(yt, esc_yt, sizeof(esc_yt));
+	call_json_escape(audio, esc_audio, sizeof(esc_audio));
+	call_json_escape(pdf, esc_pdf, sizeof(esc_pdf));
+
+	/* Build the final JSON string */
+	size_t resp_len = strlen(escaped_data) + strlen(esc_title) +
+		strlen(esc_yt) + strlen(esc_audio) +
+		strlen(esc_pdf) + 512;
+
+	char *response = malloc(resp_len);
+	if (response) {
+		snprintf(response, resp_len,
+				"{"
+				"\"title\":\"%s\","
+				"\"data\":\"%s\","
+				"\"showMedia\":%d,"
+				"\"yt\":\"%s\","
+				"\"audio\":\"%s\","
+				"\"pdf\":\"%s\""
+				"}",
+				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf);
+	}
+
+	free(escaped_data);
+	return response;
 }
 
 /* GET /api/song/:id/edit - JSON API for transposition */
@@ -75,87 +185,21 @@ static int
 api_song_transpose_handler(int fd, char *body)
 {
 	(void)body;
-	
-	char doc_root[256] = {0};
-	char query[1024] = {0};
-	char id[128] = {0};
-	
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	ndc_env_get(fd, query, "QUERY_STRING");
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 400);
-		ndc_body(fd, "{\"error\":\"Missing id\"}");
-		return 0;
-	}
-	
-	int transpose = 0;
-	int flags = 0;
-	int show_media = 0;
-	
-	if (parse_transpose_params(query, &transpose, &flags, &show_media) != 0) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 400);
-		ndc_body(fd, "{\"error\":\"Invalid params\"}");
-		return 0;
-	}
-	
-	/* Read chord file */
-	char filepath[512];
-	snprintf(filepath, sizeof(filepath), "%s/%s/%s/data.txt",
-			doc_root, CHORDS_ITEMS_PATH, id);
-	
-	FILE *fp = fopen(filepath, "r");
-	if (!fp) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 404);
-		ndc_body(fd, "{\"error\":\"Song not found\"}");
-		return 0;
-	}
-	
-	fseek(fp, 0, SEEK_END);
-	long fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	
-	char *content = malloc(fsize + 1);
-	if (!content) {
-		fclose(fp);
+
+	char *json = song_json(fd, 0);
+
+	if (!json) {
 		ndc_header(fd, "Content-Type", "application/json");
 		ndc_head(fd, 500);
-		ndc_body(fd, "{\"error\":\"Memory error\"}");
+		ndc_body(fd, "{\"error\":\"Failed to generate content\"}");
 		return 0;
 	}
-	
-	fread(content, 1, fsize, fp);
-	fclose(fp);
-	content[fsize] = '\0';
-	
-	/* Transpose */
-	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
-	free(content);
-	
-	if (!transposed) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 500);
-		ndc_body(fd, "{\"error\":\"Transposition failed\"}");
-		return 0;
-	}
-	
-	/* Return JSON */
+
 	ndc_header(fd, "Content-Type", "application/json");
 	ndc_head(fd, 200);
+	ndc_body(fd, json);
 	
-	char escaped[3 * strlen(transposed)];
-	/* Build JSON response with proper escaping */
-	call_json_escape(transposed, escaped, sizeof(escaped));
-	size_t response_len = strlen(escaped) + 32;
-	char response[response_len];
-	snprintf(response, response_len, "{\"data\":\"%s\",\"showMedia\":%d}", escaped, show_media);
-	ndc_body(fd, response);
-	
-	free(transposed);
+	free(json);
 	return 0;
 }
 
@@ -319,124 +363,9 @@ song_details_handler(int fd, char *body)
 {
 	(void)body;  /* SSR is GET requests, body unused */
 	
-	char doc_root[256] = { 0 };
-	char path[512] = { 0 };
-	char query[1024] = { 0 };
-	char id[128] = { 0 };
-	
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	ndc_env_get(fd, path, "DOCUMENT_URI");
-	ndc_env_get(fd, query, "QUERY_STRING");
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	
-	/* Have ID - check if transposition requested */
-	int transpose = 0;
-	int flags = 0;
-	int needs_transpose = 0;
-	
-	if (query[0]) {
-		/* Parse query params */
-		char *saveptr;
-		char *query_copy = strdup(query);
-		if (!query_copy)
-			return call_core_get(fd, path);
-		
-		char *param = strtok_r(query_copy, "&", &saveptr);
-		
-		while (param) {
-			char *eq = strchr(param, '=');
-			if (eq) {
-				*eq = '\0';
-				char *key = param;
-				char *value = eq + 1;
-				
-				if (strcmp(key, "t") == 0) {
-					transpose = atoi(value);
-					needs_transpose = 1;
-				} else if (strcmp(key, "b") == 0 && strcmp(value, "1") == 0) {
-					flags |= TRANSP_BEMOL;
-					needs_transpose = 1;
-				} else if (strcmp(key, "l") == 0 && strcmp(value, "1") == 0) {
-					flags |= TRANSP_LATIN;
-					needs_transpose = 1;
-				} else if (strcmp(key, "C") == 0 && strcmp(value, "1") == 0) {
-					flags |= TRANSP_HIDE_CHORDS;
-					needs_transpose = 1;
-				} else if (strcmp(key, "L") == 0 && strcmp(value, "1") == 0) {
-					flags |= TRANSP_HIDE_LYRICS;
-					needs_transpose = 1;
-				}
-			}
-			param = strtok_r(NULL, "&", &saveptr);
-		}
-		free(query_copy);
-	}
-	
-	/* No transposition needed - just proxy GET */
-	if (!needs_transpose) {
-		/* Append query string for Deno */
-		if (query[0]) {
-			size_t path_len = strlen(path);
-			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
-		}
-		return call_core_get(fd, path);
-	}
-	
-	/* Read chord file */
-	char filepath[512];
-	snprintf(filepath, sizeof(filepath), "%s/%s/%s/data.txt",
-			doc_root, CHORDS_ITEMS_PATH, id);
-	
-	FILE *fp = fopen(filepath, "r");
-	if (!fp) {
-		/* File not found - let Deno handle 404 */
-		if (query[0]) {
-			size_t path_len = strlen(path);
-			snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
-		}
-
-		return call_core_get(fd, path);
-	}
-	
-	fseek(fp, 0, SEEK_END);
-	long fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	
-	char *content = malloc(fsize + 1);
-	if (!content) {
-		fclose(fp);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Memory allocation failed");
-		return 1;
-	}
-	
-	fread(content, 1, fsize, fp);
-	fclose(fp);
-	content[fsize] = '\0';
-	
-	/* Transpose */
-	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
-	free(content);
-	
-	if (!transposed) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Transposition failed");
-		return 1;
-	}
-	
-	/* Append query string to path for Deno */
-	if (query[0]) {
-		size_t path_len = strlen(path);
-		snprintf(path + path_len, sizeof(path) - path_len, "?%s", query);
-	}
-	
-	/* Proxy POST with transposed data */
-	size_t transposed_len = strlen(transposed);
-	int result = call_core_post(fd, transposed, transposed_len);
-	
-	free(transposed);
+	char *json = song_json(fd, TRANSP_HTML);
+	int result = call_core_post(fd, json, strlen(json));
+	free(json);
 	return result;
 }
 

@@ -2,18 +2,18 @@
 /**
  * Setup Routes - Hard Link Module Routes and Islands to Fresh
  * 
- * This script auto-discovers modules with routes/ and (_islands)/ directories
+ * This script auto-discovers modules with routes/ and islands/ directories
  * and creates hard links so Fresh can discover them as regular files.
  * 
  * Usage:
  *   deno run --allow-read --allow-write scripts/setup-routes.ts
  * 
  * Flow:
- *   1. Scan mods/ for directories containing routes/ or (_islands)/ subdirectories
+ *   1. Scan mods/ for directories containing routes/ or islands/ subdirectories
  *   2. Remove existing hard links and symlinks in routes/ and islands/
  *   3. Create fresh hard links for each file:
  *      - Each file in mods/<module>/routes/ -> routes/<module>/<file>
- *      - Each file in mods/<module>/(_islands)/ -> islands/<file>
+ *      - Each file in mods/<module>/islands/ -> islands/<file>
  *   4. Verify hard links created correctly (same inode)
  *   5. Report what was linked
  */
@@ -71,7 +71,7 @@ async function discoverModules(): Promise<ModuleInfo[]> {
       
       const moduleName = entry.name;
       const moduleRoutesPath = resolve(modsDir, moduleName, "routes");
-      const moduleIslandsPath = resolve(modsDir, moduleName, "(_islands)");
+      const moduleIslandsPath = resolve(modsDir, moduleName, "islands");
       
       const hasRoutes = await exists(moduleRoutesPath);
       const hasIslands = await exists(moduleIslandsPath);
@@ -187,7 +187,7 @@ async function createRouteHardLinks(moduleName: string): Promise<HardLinkInfo[]>
  */
 async function createIslandHardLinks(moduleName: string): Promise<HardLinkInfo[]> {
   const links: HardLinkInfo[] = [];
-  const moduleIslandsPath = resolve(modsDir, moduleName, "(_islands)");
+  const moduleIslandsPath = resolve(modsDir, moduleName, "islands");
   
   if (!await exists(moduleIslandsPath)) {
     return links;
