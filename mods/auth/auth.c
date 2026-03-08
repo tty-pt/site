@@ -58,11 +58,14 @@ handle_session(int fd, char *body)
 	(void)body;
 
 	char cookie[256] = {0};
+	char query[256] = {0};
 	char token[64] = {0};
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_query_param(cookie, "QSESSION",
-			token, sizeof(token));
+	ndc_env_get(fd, query, "QUERY_STRING");
+
+	call_query_parse(query);
+	call_query_param("QSESSION", token, sizeof(token));
 
 	const char *username = qmap_get(sessions_map, token);
 	ndc_header(fd, "Content-Type", "text/plain");
@@ -85,17 +88,16 @@ handle_login(int fd, char *body)
 		body ? body : "(null)",
 		body ? strlen(body) : 0);
 	
-	call_query_param(body, "username",
-			username, sizeof(username));
+	call_query_parse(cookie);
+
+	call_query_param("username", username, sizeof(username));
 
 	fprintf(stderr, "AUTH DEBUG: After query_param, "
 			"username='%s'\n", username);
 
-	call_query_param(body, "password",
-			password, sizeof(password));
+	call_query_param("password", username, sizeof(username));
 
-	call_query_param(body, "ret",
-			redirect, sizeof(redirect));
+	call_query_param("ret", redirect, sizeof(redirect));
 
 	if (!*username || !*password) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -156,12 +158,11 @@ handle_logout(int fd, char *body)
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	ndc_env_get(fd, query, "QUERY_STRING");
-	
-	call_query_param(cookie, "QSESSION",
-			token, sizeof(token));
 
-	call_query_param(query, "ret",
-			redirect, sizeof(redirect));
+	call_query_parse(query);
+
+	call_query_param("QSESSION", token, sizeof(token));
+	call_query_param("ret", redirect, sizeof(redirect));
 
 	if (*token)
 		qmap_del(sessions_map, token);
@@ -198,18 +199,12 @@ handle_register(int fd, char *body)
 			(void*)body, body ? body : "(null)",
 			body ? strlen(body) : 0);
 
-	call_query_param(body, "username",
-			username, sizeof(username));
+	call_query_parse(body);
 
-	call_query_param(body, "password",
-			password, sizeof(password));
-
-	call_query_param(body, "password2",
-			password_confirm,
-			sizeof(password_confirm));
-
-	call_query_param(body, "email",
-			email, sizeof(email));
+	call_query_param("username", username, sizeof(username));
+	call_query_param("password", password, sizeof(password));
+	call_query_param("password2", password_confirm, sizeof(password_confirm));
+	call_query_param("email", email, sizeof(email));
 
 	username_len = strlen(username);
 
@@ -287,11 +282,10 @@ static int handle_confirm(int fd, char *body)
 
 	ndc_env_get(fd, query, "QUERY_STRING");
 	
-	call_query_param(query, "u",
-			username, sizeof(username));
+	call_query_parse(query);
 
-	call_query_param(query, "r",
-			code, sizeof(code));
+	call_query_param("u", username, sizeof(username));
+	call_query_param("r", code, sizeof(code));
 
 	if (!*username || !*code) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -346,7 +340,7 @@ void ndx_install(void)
 
 	ndc_register_handler("POST:/auth/login", handle_login);
 	ndc_register_handler("POST:/auth/register", handle_register);
-	ndc_register_handler("/auth/api/session", handle_session);
+	ndc_register_handler("GET:/auth/api/session", handle_session);
 	ndc_register_handler("/auth/logout", handle_logout);
 	ndc_register_handler("/auth/confirm", handle_confirm);
 

@@ -10,6 +10,7 @@
 #include <ttypt/ndc.h>
 #include "../mpfd/mpfd.h"
 #include "../index/index.h"
+#include "../common/common.h"
 #include "../../lib/transp/transp.h"
 
 #define CHORDS_ITEMS_PATH "items/song/items"
@@ -36,7 +37,7 @@ NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, ch
 	return 0;
 }
 
-/* Parse transpose params from query string */
+/* Parse transpose params from query string using common module */
 static int
 parse_transpose_params(const char *query, int *transpose, int *flags, int *show_media)
 {
@@ -46,69 +47,27 @@ parse_transpose_params(const char *query, int *transpose, int *flags, int *show_
 	
 	if (!query || !*query) return 0;
 	
-	char *query_copy = strdup(query);
-	if (!query_copy) return -1;
+	char query_copy[1024];
+	snprintf(query_copy, sizeof(query_copy), "%s", query);
 	
-	char *saveptr;
-	char *param = strtok_r(query_copy, "&", &saveptr);
-	int needs_transpose = 0;
+	if (call_query_parse(query_copy) != 0)
+		return -1;
 	
-	while (param) {
-		char *eq = strchr(param, '=');
-		if (eq) {
-			*eq = '\0';
-			char *key = param;
-			char *value = eq + 1;
-			
-			if (strcmp(key, "t") == 0) {
-				*transpose = atoi(value);
-				needs_transpose = 1;
-			} else if (strcmp(key, "b") == 0 && strcmp(value, "1") == 0) {
-				*flags |= TRANSP_BEMOL;
-				needs_transpose = 1;
-			} else if (strcmp(key, "l") == 0 && strcmp(value, "1") == 0) {
-				*flags |= TRANSP_LATIN;
-				needs_transpose = 1;
-			} else if (strcmp(key, "m") == 0 && strcmp(value, "1") == 0) {
-				*show_media = 1;
-				needs_transpose = 1;
-			}
-		}
-		param = strtok_r(NULL, "&", &saveptr);
-	}
+	char buf[32];
 	
-	free(query_copy);
-	return needs_transpose ? 0 : 1;
-}
-
-/* Escape string for JSON - caller must free result */
-static char *
-json_escape(const char *str)
-{
-	if (!str) return NULL;
+	if (call_query_param("t", buf, sizeof(buf)) > 0)
+		*transpose = atoi(buf);
 	
-	size_t len = strlen(str);
-	size_t max_escaped = len * 4 + 1;
-	char *result = malloc(max_escaped);
-	if (!result) return NULL;
+	if (call_query_exists("b"))
+		*flags |= TRANSP_BEMOL;
 	
-	char *dst = result;
-	const char *src = str;
+	if (call_query_exists("l"))
+		*flags |= TRANSP_LATIN;
 	
-	while (*src) {
-		switch (*src) {
-			case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
-			case '"':  *dst++ = '\\'; *dst++ = '"'; break;
-			case '\n': *dst++ = '\\'; *dst++ = 'n'; break;
-			case '\r': *dst++ = '\\'; *dst++ = 'r'; break;
-			case '\t': *dst++ = '\\'; *dst++ = 't'; break;
-			default:    *dst++ = *src; break;
-		}
-		src++;
-	}
-	*dst = '\0';
+	if (call_query_exists("m"))
+		*show_media = 1;
 	
-	return result;
+	return (*transpose || *flags || *show_media) ? 0 : 1;
 }
 
 /* GET /api/song/:id/edit - JSON API for transposition */
@@ -188,22 +147,13 @@ api_song_transpose_handler(int fd, char *body)
 	ndc_header(fd, "Content-Type", "application/json");
 	ndc_head(fd, 200);
 	
+	char escaped[3 * strlen(transposed)];
 	/* Build JSON response with proper escaping */
-	char *escaped = json_escape(transposed);
-	if (escaped) {
-		size_t response_len = strlen(escaped) + 32;
-		char *response = malloc(response_len);
-		if (response) {
-			snprintf(response, response_len, "{\"data\":\"%s\",\"showMedia\":%d}", escaped, show_media);
-			ndc_body(fd, response);
-			free(response);
-		} else {
-			ndc_body(fd, "{\"data\":\"\",\"showMedia\":0}");
-		}
-		free(escaped);
-	} else {
-		ndc_body(fd, "{\"data\":\"\",\"showMedia\":0}");
-	}
+	call_json_escape(transposed, escaped, sizeof(escaped));
+	size_t response_len = strlen(escaped) + 32;
+	char response[response_len];
+	snprintf(response, response_len, "{\"data\":\"%s\",\"showMedia\":%d}", escaped, show_media);
+	ndc_body(fd, response);
 	
 	free(transposed);
 	return 0;
@@ -608,60 +558,23 @@ song_edit_get_handler(int fd, char *body)
 	size_t pos = 0;
 
 	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "title=");
-	for (size_t i = 0; title[i] && pos < sizeof(post_body) - 4; i++) {
-		char c = title[i];
-		if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-		else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-		else if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-		else post_body[pos++] = c;
-	}
-
+	pos += call_url_encode(title, post_body + pos, sizeof(post_body) - pos);
+	
 	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&type=");
-	for (size_t i = 0; type[i] && pos < sizeof(post_body) - 4; i++) {
-		char c = type[i];
-		if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-		else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-		else if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-		else post_body[pos++] = c;
-	}
-
+	pos += call_url_encode(type, post_body + pos, sizeof(post_body) - pos);
+	
 	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&yt=");
-	for (size_t i = 0; yt[i] && pos < sizeof(post_body) - 4; i++) {
-		char c = yt[i];
-		if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-		else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-		else if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-		else post_body[pos++] = c;
-	}
-
+	pos += call_url_encode(yt, post_body + pos, sizeof(post_body) - pos);
+	
 	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&audio=");
-	for (size_t i = 0; audio[i] && pos < sizeof(post_body) - 4; i++) {
-		char c = audio[i];
-		if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-		else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-		else if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-		else post_body[pos++] = c;
-	}
-
+	pos += call_url_encode(audio, post_body + pos, sizeof(post_body) - pos);
+	
 	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&pdf=");
-	for (size_t i = 0; pdf[i] && pos < sizeof(post_body) - 4; i++) {
-		char c = pdf[i];
-		if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-		else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-		else if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-		else post_body[pos++] = c;
-	}
+	pos += call_url_encode(pdf, post_body + pos, sizeof(post_body) - pos);
 
 	if (data_content && data_len > 0) {
 		pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&data=");
-		for (size_t i = 0; i < data_len && pos < sizeof(post_body) - 10; i++) {
-			char c = data_content[i];
-			if (c == '\n') pos += snprintf(post_body + pos, 4, "%%0A");
-			else if (c == '\r') { /* skip */ }
-			else if (c == '%') pos += snprintf(post_body + pos, 4, "%%25");
-			else if (c == ' ') pos += snprintf(post_body + pos, 4, "%%20");
-			else post_body[pos++] = c;
-		}
+		pos += call_url_encode(data_content, post_body + pos, sizeof(post_body) - pos);
 		free(data_content);
 	}
 
@@ -811,6 +724,7 @@ void ndx_install(void)
 		fprintf(stderr, "[song] Failed to initialize"
 				" transp context\n");
 
+	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 

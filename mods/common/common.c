@@ -4,18 +4,28 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <openssl/evp.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
 
+static uint32_t query_db;
+
 NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
+	const char *p;
+
 	token[0] = '\0';
+
 	if (!cookie || !*cookie)
 		return -1;
-	const char *p = cookie;
+
+	p = cookie;
+
 	while (*p) {
-		while (*p == ' ' || *p == '\t') p++;
+		while (*p == ' ' || *p == '\t')
+			p++;
+
 		if (!strncmp(p, "QSESSION=", 9)) {
 			p += 9;
 			const char *amp = strchr(p, '&');
@@ -25,58 +35,15 @@ NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
 			token[tlen] = '\0';
 			return 0;
 		}
-		while (*p && *p != '&') p++;
-		if (*p == '&') p++;
+
+		while (*p && *p != '&')
+			p++;
+
+		if (*p == '&')
+			p++;
 	}
 	
 	return 0;
-}
-
-NDX_DEF(int, query_param, char *, query, const char *, key, char *, out, size_t, out_len) {
-	fprintf(stderr, "QUERY_PARAM DEBUG: query=%p query_str='%s' key='%s'\n", 
-		(void*)query, query ? query : "(null)", key);
-	
-	if (!out || !out_len)
-		return -1;
-	out[0] = 0;
-	if (!query)
-		return -1;
-
-	size_t key_len = strlen(key);
-	for (char *p = query; *p; ) {
-		while (*p && (*p == '&' || *p == ';' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
-			p++;
-		if (!strncmp(p, key, key_len) && p[key_len] == '=') {
-			char *val = p + key_len + 1;
-			size_t n = 0;
-			while (val[n] && val[n] != '&')
-				n++;
-			if (n >= out_len)
-				n = out_len - 1;
-			memcpy(out, val, n);
-			out[n] = 0;
-
-			size_t j = 0;
-			for (size_t i = 0; out[i]; i++) {
-				if (out[i] == '+') {
-					out[j++] = ' ';
-				} else if (out[i] == '%' && out[i+1] && out[i+2]) {
-					int c;
-					sscanf(out + i + 1, "%2x", &c);
-					out[j++] = c;
-					i += 2;
-				} else {
-					out[j++] = out[i];
-				}
-			}
-			out[j] = 0;
-			return 0;
-		}
-		while (*p && *p != '&')
-			p++;
-	}
-
-	return -1;
 }
 
 NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen) {
@@ -129,9 +96,89 @@ NDX_DEF(int, b64_encode, const char *, in, char *, out, size_t, outlen) {
 	return 0;
 }
 
+NDX_DEF(int, query_parse, char *, query) {
+	if (!query_db) return -1;
+	
+	qmap_drop(query_db);
+	query_db = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	if (!query_db) return -1;
+	
+	if (!query || !*query) return 0;
+	
+	char *query_copy = strdup(query);
+	if (!query_copy) return -1;
+	
+	char *saveptr;
+	char *param = strtok_r(query_copy, "&", &saveptr);
+	
+	while (param) {
+		char *eq = strchr(param, '=');
+		if (eq) {
+			*eq = '\0';
+			char *key = param;
+			char *value = eq + 1;
+			
+			size_t val_len = strlen(value);
+			char *decoded = malloc(val_len + 1);
+			if (decoded) {
+				size_t j = 0;
+				for (size_t i = 0; value[i] && j < val_len; i++) {
+					if (value[i] == '+') {
+						decoded[j++] = ' ';
+					} else if (value[i] == '%' && value[i+1] && value[i+2]) {
+						int c;
+						sscanf(value + i + 1, "%2x", &c);
+						decoded[j++] = c;
+						i += 2;
+					} else {
+						decoded[j++] = value[i];
+					}
+				}
+				decoded[j] = '\0';
+				qmap_put(query_db, key, decoded);
+				free(decoded);
+			}
+		}
+		param = strtok_r(NULL, "&", &saveptr);
+	}
+	
+	free(query_copy);
+	return 0;
+}
+
+NDX_DEF(int, query_exists, const char *, name) {
+	if (!query_db) return 0;
+	return qmap_get(query_db, name) != NULL ? 1 : 0;
+}
+
+NDX_DEF(int, query_param, const char *, name, char *, buf, size_t, buf_len) {
+	const char *val;
+	size_t len;
+
+	if (!query_db || !buf || !buf_len)
+		return -1;
+
+	buf[0] = '\0';
+	
+	val = (const char *) qmap_get(query_db, name);
+
+	if (!val)
+		return -1;
+	
+	len = strlen(val);
+
+	if (len >= buf_len)
+		len = buf_len - 1;
+
+	memcpy(buf, val, len);
+	buf[len] = '\0';
+	return len;
+}
+
 MODULE_API void
 ndx_install(void)
 {
+	query_db = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
 }
 
 MODULE_API void
