@@ -8,7 +8,9 @@ export default function ChordDetail({
   title,
   transpose = 0,
   useBemol = false,
-  useLatin = false
+  useLatin = false,
+  transposeForm,
+  customTransposeControls
 }: { 
   user: string | null; 
   path: string; 
@@ -18,45 +20,17 @@ export default function ChordDetail({
   transpose?: number;
   useBemol?: boolean;
   useLatin?: boolean;
+  transposeForm?: any;
+  customTransposeControls?: any;
 }) {
   const displayTitle = title || id;
   
-  const transposeOptions = [];
-  for (let i = -11; i <= 11; i++) {
-    transposeOptions.push(
-      <option key={i} value={i} selected={i === transpose}>
-        {i === 0 ? "Original" : (i > 0 ? `+${i}` : i)}
-      </option>
-    );
-  }
-  
-  // Transpose controls form for the menu
-  const transposeControls = (
-    <form id="transpose-form" method="get" action={`/song/${id}`}>
-      <label>
-        Transpose:
-        <select name="t">
-          {transposeOptions}
-        </select>
-      </label>
-      
-      <label>
-        <input type="checkbox" name="b" value="1" checked={useBemol} />
-        <span>Flats (♭)</span>
-      </label>
-      
-      <label>
-        <input type="checkbox" name="l" value="1" checked={useLatin} />
-        <span>Latin</span>
-      </label>
-      
-      <button type="submit" className="btn">Apply</button>
-    </form>
-  );
-  
   return (
-    <Layout user={user} title={`song: ${displayTitle}`} path={path} menuItems={transposeControls}>
+    <Layout user={user} title={`song: ${displayTitle}`} path={path} menuItems={transposeForm}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
+        {/* Show island controls in main content if provided */}
+        {customTransposeControls && <div>{customTransposeControls}</div>}
+        
         <h2>{displayTitle}</h2>
         
         {/* Chord Chart */}

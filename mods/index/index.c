@@ -334,10 +334,14 @@ NDX_DEF(int, core_post,
 {
 	(void)body;
 	
-	char path[512] = { 0 };
+	char uri[512] = { 0 };
+	char param[512] = { 0 };
+	char full_path[PATH_MAX] = { 0 };
 	
-	ndc_env_get(fd, path, "DOCUMENT_URI");
-	call_proxy_init("POST", path);
+	ndc_env_get(fd, uri, "DOCUMENT_URI");
+	ndc_env_get(fd, param, "QUERY_STRING");
+	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
+	call_proxy_init("POST", full_path);
 	call_proxy_header("X-Modules", modules_header);
 	return call_proxy_body(fd, body, len);
 }

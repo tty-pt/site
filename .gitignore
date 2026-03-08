@@ -4,3 +4,30 @@
 /htdocs
 *.so
 *.o
+/_fresh/
+/deno.lock
+/fresh.gen.ts
+
+# ------------------------------------------------------------------------------
+# HARD-LINKED FILES (Auto-generated - DO NOT EDIT)
+# ------------------------------------------------------------------------------
+# Source of truth is in mods/<module>/ directories
+# These are hard-linked copies created by scripts/setup-routes.ts
+# Regenerated on every `deno task start` and `deno task build`
+
+# Module routes (hard-linked from mods/*/routes/)
+/routes/song/
+/routes/auth/
+/routes/choir/
+/routes/songbook/
+/routes/poem/
+
+# Module islands (hard-linked from mods/*/(_islands)/)
+/islands/TransposeControls.tsx
+/islands/*.tsx
+
+# Core routes remain tracked (not hard-linked):
+!/routes/_app.tsx
+!/routes/index.tsx
+!/routes/_middleware.ts
+!/routes/[...slug].tsx
