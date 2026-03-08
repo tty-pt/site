@@ -1,9 +1,9 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import ChordDetail from "@/song/ChordDetail.tsx";
-import TransposeControls from "../../islands/TransposeControls.tsx";
-import TransposeForm from "../../islands/TransposeForm.tsx";
+import TransposeControls from "#/islands/TransposeControls.tsx";
+import TransposeForm from "#/islands/TransposeForm.tsx";
 import { dirname, fromFileUrl, resolve } from "@std/path";
-import type { State } from "../_middleware.ts";
+import type { State } from "#/routes/_middleware.ts";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = resolve(moduleDir, "../..");
@@ -100,7 +100,7 @@ export const handler: Handlers<SongDetailData, State> = {
       user: ctx.state.user,
       path: url.pathname,
       id,
-      data: transposedData,  // Use C-transposed data from POST body
+      data: transposedData,
       title: songData?.title || null,
       transpose,
       useBemol,

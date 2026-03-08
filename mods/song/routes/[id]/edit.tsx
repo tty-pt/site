@@ -1,7 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import IndexAdd from "@/index/IndexAdd.tsx";
 import { dirname, fromFileUrl, resolve } from "@std/path";
-import type { State } from "../../_middleware.ts";
+import type { State } from "#/routes/_middleware.ts";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = resolve(moduleDir, "../../..");

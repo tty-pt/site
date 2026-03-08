@@ -1,4 +1,4 @@
-import { Layout } from "../ssr/ui.tsx";
+import { Layout } from "@/ssr/ui.tsx";
 
 export default function ChordDetail({ 
   user, 

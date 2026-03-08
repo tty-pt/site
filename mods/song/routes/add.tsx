@@ -1,6 +1,6 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import IndexAdd from "@/index/IndexAdd.tsx";
-import type { State } from "../../../routes/_middleware.ts";
+import type { State } from "#/routes/_middleware.ts";
 
 interface SongAddData {
   user: string | null;

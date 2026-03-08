@@ -191,7 +191,7 @@ handle_register(int fd, char *body)
 		password_confirm[64], email[128];
 
 	size_t username_len;
-	struct user user;
+	struct user user = { 0 };
 
 	fprintf(stderr, "AUTH DEBUG handle_register: "
 			"body=%p body_str='%s' len=%lu\n", 
@@ -267,7 +267,7 @@ handle_register(int fd, char *body)
 
 	qmap_put(users_map, username, &user);
 
-	fprintf(stderr, "Register: /confirm?u=%s&r=%s\n",
+	fprintf(stderr, "Register: /auth/confirm?u=%s&r=%s\n",
 		username, user.confirm_code);
 
 	ndc_header(fd, "Location", "/welcome");
@@ -344,11 +344,11 @@ void ndx_install(void)
 	sessions_map = qmap_open(NULL, "sess", QM_STR,
 				 QM_STR, 0xFF, 0);
 
-	ndc_register_handler("POST:/login", handle_login);
-	ndc_register_handler("POST:/register", handle_register);
-	ndc_register_handler("/api/session", handle_session);
-	ndc_register_handler("/logout", handle_logout);
-	ndc_register_handler("/confirm", handle_confirm);
+	ndc_register_handler("POST:/auth/login", handle_login);
+	ndc_register_handler("POST:/auth/register", handle_register);
+	ndc_register_handler("/auth/api/session", handle_session);
+	ndc_register_handler("/auth/logout", handle_logout);
+	ndc_register_handler("/auth/confirm", handle_confirm);
 
 	auth_hd = qmap_open(NULL, "hd",
 			QM_STR, QM_STR, 0xFF, 0);

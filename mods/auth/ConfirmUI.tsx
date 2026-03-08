@@ -1,4 +1,4 @@
-import { Layout } from "../ssr/ui.tsx";
+import { Layout } from "@/ssr/ui.tsx";
 
 export default function ConfirmUI({ user, path, params }: { user: string | null; path: string; params: Record<string,string> }) {
   const u = params.u || "";

@@ -1,9 +1,9 @@
 import { Layout } from "../ssr/ui.tsx";
 
-export default function Login({ user, path }: { user: string | null; path: string }) {
+export default function Login({ user }: { user: string | null }) {
   return (
-    <Layout user={user} title="Login" path={path}>
-      <form action="/login" method="POST">
+    <Layout user={user} title="Login" path="/auth/login">
+      <form action="/auth/login" method="POST">
         <label>
           Username: <input required name="username" />
         </label>

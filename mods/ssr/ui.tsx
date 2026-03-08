@@ -27,11 +27,11 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
         </>
       ) : (
         <>
-          <a className="btn" href="/login?ret=/">
+          <a className="btn" href="/auth/login?ret=/">
             <span>🔑</span>
             <label>login</label>
           </a>
-          <a className="btn" href="/register">
+          <a className="btn" href="/auth/register">
             <span>📝</span>
             <label>register</label>
           </a>
