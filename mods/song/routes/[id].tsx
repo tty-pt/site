@@ -14,6 +14,9 @@ async function getSongData(id: string) {
   try {
     const data = await Deno.readTextFile(`${base}/data.txt`);
     let title: string | null = null;
+    let yt: string | null = null;
+    let audio: string | null = null;
+    let pdf: string | null = null;
     
     try {
       title = await Deno.readTextFile(`${base}/title`);
@@ -21,7 +24,25 @@ async function getSongData(id: string) {
       // Title is optional
     }
     
-    return { data, title };
+    try {
+      yt = (await Deno.readTextFile(`${base}/yt`)).trim();
+    } catch {
+      // No yt file
+    }
+    
+    try {
+      audio = (await Deno.readTextFile(`${base}/audio`)).trim();
+    } catch {
+      // No audio file
+    }
+    
+    try {
+      pdf = (await Deno.readTextFile(`${base}/pdf`)).trim();
+    } catch {
+      // No pdf file
+    }
+    
+    return { data, title, yt, audio, pdf };
   } catch {
     return null;
   }
@@ -33,9 +54,13 @@ interface SongDetailData {
   id: string;
   data: string;
   title: string | null;
+  yt: string | null;
+  audio: string | null;
+  pdf: string | null;
   transpose: number;
   useBemol: boolean;
   useLatin: boolean;
+  showMedia: boolean;
 }
 
 /**
@@ -58,10 +83,11 @@ export const handler: Handlers<SongDetailData, State> = {
     const id = ctx.params.id;
     const url = new URL(req.url);
     
-    // Parse query params (t=transpose, b=bemol/flats, l=latin)
+    // Parse query params (t=transpose, b=bemol/flats, l=latin, m=media)
     const transpose = parseInt(url.searchParams.get("t") || "0", 10);
     const useBemol = url.searchParams.get("b") === "1";
     const useLatin = url.searchParams.get("l") === "1";
+    const showMedia = url.searchParams.get("m") === "1";
     
     const songData = await getSongData(id);
     
@@ -75,9 +101,13 @@ export const handler: Handlers<SongDetailData, State> = {
       id,
       data: songData.data,
       title: songData.title,
+      yt: songData.yt,
+      audio: songData.audio,
+      pdf: songData.pdf,
       transpose,
       useBemol,
       useLatin,
+      showMedia,
     });
   },
   
@@ -92,6 +122,7 @@ export const handler: Handlers<SongDetailData, State> = {
     const transpose = parseInt(url.searchParams.get("t") || "0", 10);
     const useBemol = url.searchParams.get("b") === "1";
     const useLatin = url.searchParams.get("l") === "1";
+    const showMedia = url.searchParams.get("m") === "1";
     
     // Still need title from filesystem
     const songData = await getSongData(id);
@@ -102,9 +133,13 @@ export const handler: Handlers<SongDetailData, State> = {
       id,
       data: transposedData,
       title: songData?.title || null,
+      yt: songData?.yt || null,
+      audio: songData?.audio || null,
+      pdf: songData?.pdf || null,
       transpose,
       useBemol,
       useLatin,
+      showMedia,
     });
   },
 };
@@ -117,22 +152,23 @@ export default function SongDetail({ data }: PageProps<SongDetailData>) {
       id={data.id}
       data={data.data}
       title={data.title}
+      yt={data.yt}
+      audio={data.audio}
+      pdf={data.pdf}
       transpose={data.transpose}
       useBemol={data.useBemol}
       useLatin={data.useLatin}
+      showMedia={data.showMedia}
       transposeForm={
         <TransposeForm
           id={data.id}
           transpose={data.transpose}
           useBemol={data.useBemol}
           useLatin={data.useLatin}
-        />
-      }
-      customTransposeControls={
-        <TransposeControls 
-          initialTranspose={data.transpose}
-          useBemol={data.useBemol}
-          useLatin={data.useLatin}
+          showMedia={data.showMedia}
+          yt={data.yt}
+          audio={data.audio}
+          pdf={data.pdf}
         />
       }
     />

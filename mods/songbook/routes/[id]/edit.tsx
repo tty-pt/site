@@ -28,44 +28,34 @@ interface SbEditData {
 interface Songbook {
   id: string;
   title: string;
-  owner: string;
   choir: string;
   songs: Song[];
 }
 
-async function getSongbook(id: string): Promise<Songbook | null> {
-  const sbPath = `${repoRoot}/items/sb/items/${id}`;
+function urlDecode(str: string): string {
+  return str.replace(/%([0-9A-Fa-f]{2})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  ).replace(/%0A/g, "\n");
+}
 
-  try {
-    const title = await Deno.readTextFile(`${sbPath}/title`);
-    let owner = "";
-    try {
-      owner = (await Deno.readTextFile(`${sbPath}/.owner`)).trim();
-    } catch {
-      // No owner file
-    }
+function parseBody(body: string | null): { title: string; choir: string; songs: Song[] } {
+  if (!body) return { title: "", choir: "", songs: [] };
 
-    let choir = "";
-    try {
-      choir = (await Deno.readTextFile(`${sbPath}/choir`)).trim();
-    } catch {
-      // No choir file
-    }
+  const params = new URLSearchParams(body);
+  const title = urlDecode(params.get("title") || "");
+  const choir = urlDecode(params.get("choir") || "");
+  
+  const songsStr = params.get("songs") || "";
+  const songs: Song[] = songsStr.split("\n").filter(line => line.trim()).map(line => {
+    const parts = line.split(":");
+    return {
+      chordId: parts[0] || "",
+      transpose: parseInt(parts[1] || "0", 10),
+      format: parts[2] || "any",
+    };
+  });
 
-    const dataText = await Deno.readTextFile(`${sbPath}/data.txt`);
-    const songs = dataText.trim().split("\n").map((line) => {
-      const parts = line.split(":");
-      return {
-        chordId: parts[0] || "",
-        transpose: parseInt(parts[1] || "0", 10),
-        format: parts[2] || "any",
-      };
-    });
-
-    return { id, title: title.trim(), owner, choir, songs };
-  } catch {
-    return null;
-  }
+  return { title, choir, songs };
 }
 
 async function getAllChords(): Promise<Chord[]> {
@@ -101,52 +91,44 @@ async function getAllChords(): Promise<Chord[]> {
 }
 
 export const handler: Handlers<SbEditData, State> = {
-  async GET(req, ctx) {
+  async POST(req, ctx) {
+    const body = await req.text();
+    const { title, choir, songs } = parseBody(body);
     const id = ctx.params.id;
-    const songbook = await getSongbook(id);
 
-    if (!songbook) {
+    return ctx.render({
+      user: ctx.state.user,
+      songbook: { id, title, choir, songs },
+      allChords: [],
+    });
+  },
+
+  async GET(req, ctx) {
+    const body = await req.text();
+    const { title, choir, songs } = parseBody(body);
+    const id = ctx.params.id;
+
+    if (!title && !songs.length) {
       return ctx.renderNotFound();
-    }
-
-    if (ctx.state.user !== songbook.owner) {
-      return ctx.render({
-        user: ctx.state.user,
-        songbook: null,
-        allChords: [],
-        error: "permission_denied",
-      });
     }
 
     const allChords = await getAllChords();
 
     return ctx.render({
       user: ctx.state.user,
-      songbook,
+      songbook: { id, title, choir, songs },
       allChords,
     });
   },
 };
 
 export default function SbEdit({ data }: PageProps<SbEditData>) {
-  if (data.error === "permission_denied") {
-    return (
-      <Layout user={data.user} title="Permission Denied" path="/sb">
-        <div className="center">
-          <h1>Permission Denied</h1>
-          <p>You don't own this songbook.</p>
-          <a href="/sb">← Back to Songbooks</a>
-        </div>
-      </Layout>
-    );
-  }
-
   if (!data.songbook) {
     return (
-      <Layout user={data.user} title="Songbook Not Found" path="/sb">
+      <Layout user={data.user} title="Songbook Not Found" path="/songbook">
         <div className="center">
           <h1>Songbook Not Found</h1>
-          <a href="/sb">← Back to Songbooks</a>
+          <a href="/songbook">← Back to Songbooks</a>
         </div>
       </Layout>
     );
@@ -156,12 +138,12 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
   const allChords = data.allChords;
 
   return (
-    <Layout user={data.user} title={`Edit ${songbook.title}`} path={`/sb/${songbook.id}/edit`}>
+    <Layout user={data.user} title={`Edit ${songbook.title}`} path={`/songbook/${songbook.id}/edit`}>
       <div className="center">
         <h1>Edit {songbook.title}</h1>
         <form
           method="POST"
-          action={`/api/sb/${songbook.id}/edit`}
+          action={`/songbook/${songbook.id}/edit`}
           encType="multipart/form-data"
           style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
         >
@@ -221,7 +203,7 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
               Save Changes
             </button>
             <a
-              href={`/sb/${songbook.id}`}
+              href={`/songbook/${songbook.id}`}
               style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
             >
               Cancel

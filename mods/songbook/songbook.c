@@ -378,7 +378,125 @@ handle_sb_create(int fd, char *body)
 	return 0;
 }
 
-/* POST /api/sb/:id/edit - Edit songbook */
+/* GET /songbook/:id/edit - read songbook and proxy to Fresh */
+static int
+handle_sb_edit_get(int fd, char *body)
+{
+	(void)body;
+
+	char id[128] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+
+	char doc_root[256] = {0};
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	if (!doc_root[0])
+		strcpy(doc_root, ".");
+
+	char sb_path[512];
+	snprintf(sb_path, sizeof(sb_path), "%s/items/songbook/items/%s", doc_root, id);
+
+	/* Check if songbook exists */
+	struct stat st;
+	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 404);
+		ndc_body(fd, "Songbook not found");
+		return 1;
+	}
+
+	/* Read title */
+	char title[256] = {0};
+	char title_path[512];
+	snprintf(title_path, sizeof(title_path), "%s/title", sb_path);
+	FILE *tfp = fopen(title_path, "r");
+	if (tfp) {
+		if (fgets(title, sizeof(title) - 1, tfp)) {
+			size_t len = strlen(title);
+			if (len > 0 && title[len - 1] == '\n')
+				title[len - 1] = '\0';
+		}
+		fclose(tfp);
+	}
+
+	/* Read choir */
+	char choir[128] = {0};
+	char choir_path[512];
+	snprintf(choir_path, sizeof(choir_path), "%s/choir", sb_path);
+	FILE *cfp = fopen(choir_path, "r");
+	if (cfp) {
+		if (fgets(choir, sizeof(choir) - 1, cfp)) {
+			size_t len = strlen(choir);
+			if (len > 0 && choir[len - 1] == '\n')
+				choir[len - 1] = '\0';
+		}
+		fclose(cfp);
+	}
+
+	/* Read data.txt */
+	char *data_content = NULL;
+	size_t data_len = 0;
+	char data_path[512];
+	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
+	FILE *dfp = fopen(data_path, "r");
+	if (dfp) {
+		fseek(dfp, 0, SEEK_END);
+		long fsize = ftell(dfp);
+		fseek(dfp, 0, SEEK_SET);
+		if (fsize > 0 && fsize < 65536) {
+			data_content = malloc(fsize + 1);
+			if (data_content) {
+				data_len = fread(data_content, 1, fsize, dfp);
+				data_content[data_len] = '\0';
+			}
+		}
+		fclose(dfp);
+	}
+
+	/* Build POST body */
+	char post_body[70000] = {0};
+	size_t pos = 0;
+
+	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "title=");
+	if (title[0]) {
+		for (size_t i = 0; title[i] && pos < sizeof(post_body) - 4; i++) {
+			char c = title[i];
+			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
+			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
+			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
+			else { post_body[pos++] = c; }
+		}
+	}
+
+	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&choir=");
+	if (choir[0]) {
+		for (size_t i = 0; choir[i] && pos < sizeof(post_body) - 4; i++) {
+			char c = choir[i];
+			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
+			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
+			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
+			else { post_body[pos++] = c; }
+		}
+	}
+
+	if (data_content && data_len > 0) {
+		pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&songs=");
+		for (size_t i = 0; i < data_len && pos < sizeof(post_body) - 10; i++) {
+			char c = data_content[i];
+			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
+			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
+			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
+			else if (c == ':') { pos += snprintf(post_body + pos, 4, "%%3A"); }
+			else { post_body[pos++] = c; }
+		}
+	}
+
+	if (data_content) free(data_content);
+
+	/* POST to Fresh */
+	return call_core_post(fd, post_body, strlen(post_body));
+}
+
+/* POST /songbook/:id/edit - Edit songbook */
 static int
 handle_sb_edit(int fd, char *body)
 {
@@ -809,11 +927,11 @@ void ndx_install(void)
 	ndx_load("./mods/index/index");
 
 	/*
-	ndc_register_handler("POST:/api/sb/create", handle_sb_create);
-	ndc_register_handler("POST:/api/sb/:id/edit", handle_sb_edit);
-	ndc_register_handler("POST:/api/sb/:id/transpose", handle_sb_transpose);
-	ndc_register_handler("POST:/api/sb/:id/randomize", handle_sb_randomize);
-	ndc_register_handler("DELETE:/api/sb/:id", handle_sb_delete);
+	ndc_register_handler("POST:/api/songbook/create", handle_sb_create);
+	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
+	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
+	ndc_register_handler("POST:/songbook/:id/transpose", handle_sb_transpose);
+	ndc_register_handler("POST:/songbook/:id/randomize", handle_sb_randomize);
 	*/
 
 	index_hd = call_index_open("Songbook", 0, 1);

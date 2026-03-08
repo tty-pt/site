@@ -28,7 +28,7 @@ interface Songbook {
 }
 
 async function getSongbook(id: string): Promise<Songbook | null> {
-  const sbPath = `${repoRoot}/items/sb/items/${id}`;
+  const sbPath = `${repoRoot}/items/songbook/items/${id}`;
 
   try {
     const title = await Deno.readTextFile(`${sbPath}/title`);
@@ -125,10 +125,10 @@ export const handler: Handlers<SbData, State> = {
 export default function SbDetail({ data }: PageProps<SbData>) {
   if (!data.songbook) {
     return (
-      <Layout user={data.user} title="Songbook Not Found" path="/sb">
+      <Layout user={data.user} title="Songbook Not Found" path="/songbook">
         <div className="center">
           <h1>Songbook Not Found</h1>
-          <a href="/sb" className="btn">Back to Songbooks</a>
+          <a href="/songbook" className="btn">Back to Songbooks</a>
         </div>
       </Layout>
     );
@@ -138,7 +138,7 @@ export default function SbDetail({ data }: PageProps<SbData>) {
   const isOwner = data.user === songbook.owner;
 
   return (
-    <Layout user={data.user} title={songbook.title} path={`/sb/${songbook.id}`}>
+    <Layout user={data.user} title={songbook.title} path={`/songbook/${songbook.id}`}>
       <div style={{ padding: "2rem", maxWidth: "900px", margin: "0 auto" }}>
         <h1>{songbook.title}</h1>
         <p style={{ color: "#666" }}>Choir: {songbook.choir}</p>
@@ -146,7 +146,7 @@ export default function SbDetail({ data }: PageProps<SbData>) {
         {isOwner && (
           <div style={{ marginTop: "1rem", marginBottom: "2rem" }}>
             <a
-              href={`/sb/${songbook.id}/edit`}
+              href={`/songbook/${songbook.id}/edit`}
               style={{
                 padding: "0.5rem 1rem",
                 backgroundColor: "#ffc107",
@@ -182,7 +182,7 @@ export default function SbDetail({ data }: PageProps<SbData>) {
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                       <form
                         method="POST"
-                        action={`/api/sb/${songbook.id}/transpose`}
+                        action={`/songbook/${songbook.id}/transpose`}
                         encType="multipart/form-data"
                         style={{ display: "inline" }}
                       >
@@ -202,7 +202,7 @@ export default function SbDetail({ data }: PageProps<SbData>) {
                       </form>
                       <form
                         method="POST"
-                        action={`/api/sb/${songbook.id}/randomize`}
+                        action={`/songbook/${songbook.id}/randomize`}
                         encType="multipart/form-data"
                         style={{ display: "inline" }}
                       >
@@ -235,7 +235,7 @@ export default function SbDetail({ data }: PageProps<SbData>) {
         ))}
 
         <div style={{ marginTop: "2rem" }}>
-          <a href="/sb">← Back to Songbooks</a>
+          <a href="/songbook">← Back to Songbooks</a>
         </div>
       </div>
     </Layout>
