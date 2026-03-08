@@ -3,5 +3,5 @@ import type { IndexProps } from "@/index/IndexList.tsx";
 export { handler } from "@/index/IndexList.tsx";
 
 export default function SongIndex({ data }: IndexProps) {
-  return <IndexList module="song" body={data.body} />;
+  return <IndexList module="poem" body={data.body} />;
 }

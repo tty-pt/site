@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <string.h>
 
 #include <ttypt/ndc.h>
 
@@ -114,9 +115,66 @@ handle_poem_add(int fd, char *doc_root)
 		}
 	}
 
-	ndc_header(fd, "Location", "/poem/");
+	char redirect_path[256];
+	snprintf(redirect_path, sizeof(redirect_path), "/poem/%s/", id);
+	ndc_header(fd, "Location", redirect_path);
 	ndc_head(fd, 303);
 	ndc_close(fd);
+}
+
+static int
+poem_detail_handler(int fd, char *body)
+{
+	(void)body;
+
+	char uri[256], doc_root[256], path[512];
+	char *content = NULL;
+	size_t content_len = 0;
+
+	ndc_env_get(fd, uri, "DOCUMENT_URI");
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+
+	char *id = strchr(uri + 1, '/');
+	if (!id) {
+		ndc_head(fd, 404);
+		ndc_body(fd, "Not found");
+		return 1;
+	}
+	id++;
+
+	snprintf(path, sizeof(path), "%s/items/poem/items/%s/pt_PT.html",
+		doc_root[0] ? doc_root : ".", id);
+
+	FILE *fp = fopen(path, "r");
+	if (!fp) {
+		ndc_head(fd, 404);
+		ndc_body(fd, "Poem not found");
+		return 1;
+	}
+
+	fseek(fp, 0, SEEK_END);
+	content_len = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	content = malloc(content_len + 1);
+	if (!content) {
+		fclose(fp);
+		ndc_head(fd, 500);
+		ndc_body(fd, "Memory error");
+		return 1;
+	}
+
+	size_t got = fread(content, 1, content_len, fp);
+	fclose(fp);
+	content[got] = '\0';
+
+	char fresh_path[256];
+	snprintf(fresh_path, sizeof(fresh_path), "/poem/%s/", id);
+
+	int ret = call_core_post(fd, content, got);
+	free(content);
+
+	return ret;
 }
 
 static int
@@ -156,8 +214,8 @@ poem_handler(int fd, char *body)
 void ndx_install(void) {
 	ndx_load("./mods/index/index");
 
-	// TODO make sure we can edit the poem using the above
-	// function for add, which is deprecated.
+	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
+	ndc_register_handler("POST:/poem/add", poem_handler);
 	
 	index_hd = call_index_open("Poem", 0, 1);
 }

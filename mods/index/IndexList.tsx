@@ -1,4 +1,21 @@
+import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "../ssr/ui.tsx";
+import type { State } from "#/routes/_middleware.ts";
+
+interface IndexData {
+  user: string | null;
+  body: string | null;
+}
+
+export const handler: Handlers<IndexData, State> = {
+  async POST(req, ctx) {
+    const body = await req.text();
+    return ctx.render({ 
+      user: ctx.state.user,
+      body,
+    });
+  },
+};
 
 interface IndexItem {
   id: string;
@@ -56,3 +73,5 @@ export default function IndexList({
     </Layout>
   );
 }
+
+export type IndexProps = PageProps<IndexData>;

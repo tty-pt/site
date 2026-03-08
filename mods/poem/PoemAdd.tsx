@@ -1,8 +1,8 @@
-import { Layout } from "../ssr/ui.tsx";
+import { Layout } from "@/ssr/ui.tsx";
 
-export default function PoemAdd({ user, path }: { user: string | null; path: string }) {
+export default function PoemAdd({ user }: { user: string | null }) {
   return (
-    <Layout user={user} title="Add Poem" path={path}>
+    <Layout user={user} title="Add Poem" path="/poem/add">
       <form action="/poem/add" method="POST" encType="multipart/form-data">
         <label>
           ID: <input required name="id" />

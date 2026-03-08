@@ -3,5 +3,5 @@ import type { AddProps } from "@/index/IndexAdd.tsx";
 export { handler } from "@/index/IndexAdd.tsx";
 
 export default function SongAdd({ data }: AddProps) {
-  return <IndexAdd user={data.user} module="song" />;
+  return <IndexAdd user={data.user} module="poem" />;
 }

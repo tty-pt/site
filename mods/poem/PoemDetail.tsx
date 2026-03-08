@@ -1,8 +1,8 @@
-import { Layout } from "../ssr/ui.tsx";
+import { Layout } from "@/ssr/ui.tsx";
 
-export default function PoemDetail({ user, path, id, html }: { user: string | null; path: string; id: string; html: string }) {
+export default function PoemDetail({ user, id, html }: { user: string | null; id: string; html: string }) {
   return (
-    <Layout user={user} title={`poem: ${id}`} path={path}>
+    <Layout user={user} title={`poem: ${id}`} path={`/poem/${id}`}>
       <div className="flex flex-col items-center gap-2">
         {html ? (
           <div dangerouslySetInnerHTML={{ __html: html }} />
