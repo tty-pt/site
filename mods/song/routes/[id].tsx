@@ -15,6 +15,7 @@ interface SongDetailData {
   useBemol: boolean;
   useLatin: boolean;
   showMedia: boolean;
+  originalKey: number;
 }
 
 /**

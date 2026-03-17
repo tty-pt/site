@@ -498,6 +498,14 @@ transp_get_key(transp_ctx_t *ctx)
 	return ctx->key;
 }
 
+void
+transp_reset_key(transp_ctx_t *ctx)
+{
+	if (!ctx)
+		return;
+	ctx->key = -1;
+}
+
 char *
 transp_shift_table(transp_ctx_t *ctx, int latin)
 {

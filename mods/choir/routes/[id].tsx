@@ -1,14 +1,18 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
-import { dirname, fromFileUrl, resolve } from "@std/path";
 
-const moduleDir = dirname(fromFileUrl(import.meta.url));
-const repoRoot = resolve(moduleDir, "../../../..");
+interface ChoirSong {
+  id: string;
+  title: string;
+  preferredKey: number;
+  format: string;
+}
 
 interface ChoirData {
   user: string | null;
   choir: Choir | null;
+  songs: ChoirSong[];
   error?: string;
 }
 
@@ -20,60 +24,28 @@ interface Choir {
   formats: string[];
 }
 
-async function getChoir(id: string): Promise<Choir | null> {
-  const choirPath = `${repoRoot}/items/choir/items/${id}`;
-
-  try {
-    const title = await Deno.readTextFile(`${choirPath}/title`);
-    let owner = "";
-    try {
-      owner = (await Deno.readTextFile(`${choirPath}/.owner`)).trim();
-    } catch {
-      // No owner file
-    }
-
-    let counter = "0";
-    try {
-      counter = (await Deno.readTextFile(`${choirPath}/counter`)).trim();
-    } catch {
-      // No counter file
-    }
-
-    let formats: string[] = [];
-    try {
-      const formatText = await Deno.readTextFile(`${choirPath}/format`);
-      formats = formatText.trim().split("\n").filter((f) => f.length > 0);
-    } catch {
-      formats = [
-        "entrada",
-        "aleluia",
-        "ofertorio",
-        "santo",
-        "comunhao",
-        "acao_de_gracas",
-        "saida",
-        "any",
-      ];
-    }
-
-    return { id, title: title.trim(), owner, counter, formats };
-  } catch {
-    return null;
-  }
-}
+const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 export const handler: Handlers<ChoirData, State> = {
-  async GET(req, ctx) {
-    const id = ctx.params.id;
-    const choir = await getChoir(id);
+  async POST(req, ctx) {
+    const body = await req.json();
 
-    if (!choir) {
-      return ctx.renderNotFound();
-    }
+    const formats = body.formats ? body.formats.split("\n").filter((f: string) => f.length > 0) : [];
+
+    const choir: Choir = {
+      id: ctx.params.id,
+      title: body.title || "",
+      owner: body.owner || "",
+      counter: body.counter || "0",
+      formats,
+    };
+
+    const songs: ChoirSong[] = body.songs || [];
 
     return ctx.render({
       user: ctx.state.user,
       choir,
+      songs,
     });
   },
 };
@@ -93,29 +65,89 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
   const choir = data.choir;
   const isOwner = data.user === choir.owner;
 
+  const menuItems = (
+    <div className="flex flex-col gap-2">
+      <a
+        href={`/choir/${choir.id}/edit`}
+        className="btn"
+      >
+        📝 Edit
+      </a>
+      <a
+        href={`/choir/${choir.id}/delete`}
+        className="btn"
+      >
+        🗑 Delete
+      </a>
+      <a
+        href={`/songbook/new?choir=${choir.id}`}
+        className="btn"
+      >
+        + Add Songbook
+      </a>
+    </div>
+  );
+
   return (
-    <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`}>
+    <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`} menuItems={menuItems}>
       <div className="center">
-        <h1>{choir.title}</h1>
-        <p>Choir ID: {choir.id}</p>
         <p>Owner: {choir.owner || "Unknown"}</p>
         <p>Songbooks: {choir.counter}</p>
 
+        <h3 style={{ marginTop: "2rem" }}>Repertoire</h3>
+        {data.songs.length === 0 ? (
+          <p style={{ color: "#666" }}>No songs in repertoire yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, textAlign: "left", maxWidth: "500px", margin: "0 auto" }}>
+            {data.songs.map((song) => (
+              <li key={song.id} style={{ padding: "0.5rem", borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <a href={`/choir/${choir.id}/song/${song.id}`} style={{ flex: 1 }}>
+                  {song.title || song.id}
+                </a>
+                <span style={{ color: "#666", marginRight: "1rem" }}>
+                  {song.preferredKey !== 0 ? KEY_NAMES[song.preferredKey % 12] : "original"}
+                </span>
+                {isOwner && (
+                  <button
+                    className="btn"
+                    style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem", backgroundColor: "#ff6b6b" }}
+                    onClick={async () => {
+                      if (!confirm(`Remove "${song.title || song.id}" from repertoire?`)) return;
+                      await fetch(`/api/choir/${choir.id}/song/${song.id}`, { method: "DELETE" });
+                      window.location.reload();
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
         {isOwner && (
-          <div style={{ marginTop: "1rem", marginBottom: "1rem", display: "flex", gap: "0.5rem" }}>
-            <a
-              href={`/choir/${choir.id}/edit`}
-              className="btn"
-              style={{ backgroundColor: "#ffc107", color: "black" }}
-            >
-              Edit Choir
-            </a>
-            <a
-              href={`/sb/new?choir=${choir.id}`}
-              className="btn"
-            >
-              Create Songbook
-            </a>
+          <div style={{ marginTop: "1rem" }}>
+            <details>
+              <summary style={{ cursor: "pointer", color: "#0066cc" }}>Add song to repertoire</summary>
+              <form
+                method="POST"
+                action={`/api/choir/${choir.id}/songs`}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.target as HTMLFormElement;
+                  const fd = new FormData(form);
+                  fetch(`/api/choir/${choir.id}/songs`, {
+                    method: "POST",
+                    body: fd,
+                  }).then(() => window.location.reload());
+                }}
+                style={{ marginTop: "0.5rem" }}
+              >
+                <input type="text" name="song_id" placeholder="Song ID" required style={{ padding: "0.5rem", marginRight: "0.5rem" }} />
+                <input type="text" name="format" placeholder="Format (e.g., any)" defaultValue="any" style={{ padding: "0.5rem", marginRight: "0.5rem" }} />
+                <button type="submit" className="btn">Add</button>
+              </form>
+            </details>
           </div>
         )}
 
@@ -124,9 +156,9 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
           {choir.formats.join("\n")}
         </pre>
 
-        <div style={{ marginTop: "2rem" }}>
-          <a href="/choir">← Back to Choirs</a>
-        </div>
+        <a href="/choir/" className="btn">
+          Back to Choirs
+        </a>
       </div>
     </Layout>
   );

@@ -1,7 +1,7 @@
 #ifndef CHORDS_API_H
 #define CHORDS_API_H
 
-#include <ttypt/ndx.h>
+#include <ttypt/ndx-mod.h>
 
 /*
  * Transpose chord chart text
@@ -11,16 +11,38 @@
  *   semitones: Number of semitones to transpose (-11 to +11)
  *   flags: Bitwise OR of TRANSP_* flags (see transp.h)
  *   output: Pointer to receive allocated result string (caller must free)
+ *   key: Pointer to receive detected original key (0-11, chromatic index)
  * 
  * Returns: 0 on success, -1 on error
  * 
  * Example:
  *   char *result;
- *   if (call_chords_transpose("C G Am F\n", 2, 0, &result) == 0) {
- *       printf("%s", result);
+ *   int key;
+ *   if (call_song_transpose("C G Am F\n", 2, 0, &result, &key) == 0) {
+ *       printf("Original key: %d, Result: %s", key, result);
  *       free(result);
  *   }
  */
-NDX_DECL(int, chords_transpose, const char *, input, int, semitones, int, flags, char **, output);
+NDX_DECL(int, song_transpose, const char *, input, int, semitones, int, flags, char **, output, int *, key);
+
+/*
+ * Reset transpose key detection
+ * 
+ * Call this before transposing different songs to ensure clean key detection.
+ */
+NDX_DECL(int, song_reset_key, int, dummy);
+
+/*
+ * Get a random song by type/format
+ * 
+ * Parameters:
+ *   type: The song type/format to search for (e.g., "aleluia", "santo")
+ *   out_id: Pointer to receive allocated song ID string (caller must free)
+ * 
+ * Returns: 0 on success, -1 on error
+ * 
+ * If no songs match the given type, falls back to "any" type.
+ */
+NDX_DECL(int, song_get_random_by_type, const char *, type, char **, out_id);
 
 #endif /* CHORDS_API_H */

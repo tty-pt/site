@@ -15,6 +15,25 @@ interface SongDetailProps {
   useBemol: boolean;
   useLatin: boolean;
   showMedia: boolean;
+  originalKey: number;
+}
+
+const KEY_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const KEY_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+const KEY_NAMES_LATIN_SHARP = ["Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"];
+const KEY_NAMES_LATIN_FLAT = ["Do", "Reb", "Re", "Mib", "Mi", "Fa", "Solb", "Sol", "Lab", "La", "Sib", "Si"];
+
+function getKeyNames(useBemol: boolean, useLatin: boolean): string[] {
+  if (useLatin) {
+    return useBemol ? KEY_NAMES_LATIN_FLAT : KEY_NAMES_LATIN_SHARP;
+  }
+  return useBemol ? KEY_NAMES_FLAT : KEY_NAMES_SHARP;
+}
+
+function getTargetKey(originalKey: number, semitones: number, useBemol: boolean, useLatin: boolean): string {
+  const keys = getKeyNames(useBemol, useLatin);
+  const targetIndex = (originalKey + semitones + 12) % 12;
+  return keys[targetIndex];
 }
 
 export default function SongDetailIsland(props: SongDetailProps) {
@@ -24,6 +43,11 @@ export default function SongDetailIsland(props: SongDetailProps) {
   const [useLatin, setUseLatin] = useState(props.useLatin);
   const [showMedia, setShowMedia] = useState(props.showMedia);
   const [chordHtml, setChordHtml] = useState(props.data);
+
+  // Calculate target key from transpose
+  const originalKey = props.originalKey || 0;
+  const targetKey = getTargetKey(originalKey, transpose, useBemol, useLatin);
+  const keys = getKeyNames(useBemol, useLatin);
 
   const isMounted = useRef(false);
   const displayTitle = props.title || props.id;
@@ -70,17 +94,25 @@ export default function SongDetailIsland(props: SongDetailProps) {
   const transposeForm = (
     <form id="transpose-form" method="get" action={props.path}>
       <label>
-        Transpose:
+        Key:
         <select
           name="t"
-          value={transpose}
-          onChange={(e) => setTranspose(parseInt(e.currentTarget.value, 10))}
+          value={targetKey}
+          onChange={(e) => {
+            const selectedKey = e.currentTarget.value;
+            const selectedIndex = keys.indexOf(selectedKey);
+            const semitones = (selectedIndex - originalKey + 12) % 12;
+            setTranspose(semitones);
+          }}
         >
-          {Array.from({ length: 23 }, (_, i) => i - 11).map(i => (
-            <option key={i} value={i}>
-              {i === 0 ? "Original" : (i > 0 ? `+${i}` : i)}
-            </option>
-          ))}
+          {keys.map((key, i) => {
+            const semitones = (i - originalKey + 12) % 12;
+            return (
+              <option key={semitones} value={semitones}>
+                {key}{semitones === 0 ? " (Original)" : ""}
+              </option>
+            );
+          })}
         </select>
       </label>
 
@@ -176,7 +208,7 @@ export default function SongDetailIsland(props: SongDetailProps) {
         />
 
         <a href="/song/" className="btn">
-          Back to Chords
+          Back to Songs
         </a>
       </div>
     </Layout>

@@ -60,6 +60,16 @@ char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int fla
 int transp_get_key(transp_ctx_t *ctx);
 
 /*
+ * Reset detected key
+ * 
+ * Clears the detected key so the next transposition will detect a new key.
+ * 
+ * Params:
+ *   ctx - Context to reset
+ */
+void transp_reset_key(transp_ctx_t *ctx);
+
+/*
  * Generate transposition shift table
  * 
  * Generates a reference table showing all 12 keys with their semitone offsets

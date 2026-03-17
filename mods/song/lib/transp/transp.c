@@ -257,10 +257,10 @@ proc_line(transp_ctx_t *ctx, const char *line, int t, int flags, int *skip_empty
 			modlen = strlen(buf);
 		} else {
 			/* Transpose chord */
-			chord = (chord + t) % 12;
 			if (ctx->key == (unsigned) -1) {
 				ctx->key = chord;
 			}
+			chord = (chord + t) % 12;
 			new_cstr = chord_str(ctx, chord, flags);
 			len = strlen(buf);
 			diff = strlen(new_cstr) - len;
@@ -504,6 +504,14 @@ transp_get_key(transp_ctx_t *ctx)
 	if (!ctx)
 		return -1;
 	return ctx->key;
+}
+
+void
+transp_reset_key(transp_ctx_t *ctx)
+{
+	if (!ctx)
+		return;
+	ctx->key = -1;
 }
 
 char *

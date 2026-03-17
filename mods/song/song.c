@@ -4,10 +4,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <dirent.h>
 
 #include <ttypt/ndc.h>
+#include <ttypt/qmap.h>
 #include "../mpfd/mpfd.h"
 #include "../index/index.h"
 #include "../common/common.h"
@@ -19,12 +22,119 @@
 static transp_ctx_t *g_transp_ctx = NULL;
 static unsigned index_hd;
 
+/* Type index: type -> qmap of song IDs */
+static unsigned type_index_hd = 0;
+
+static void build_type_index(const char *doc_root)
+{
+	type_index_hd = qmap_open(NULL, "type_idx", QM_STR, QM_STR, 0x3FF, 0);
+	if (!type_index_hd) {
+		fprintf(stderr, "[song] Failed to open type index\n");
+		return;
+	}
+
+	char songs_path[512];
+	snprintf(songs_path, sizeof(songs_path), "%s/%s", doc_root, CHORDS_ITEMS_PATH);
+
+	DIR *dir = opendir(songs_path);
+	if (!dir) {
+		perror("opendir songs");
+		return;
+	}
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
+			continue;
+
+		char type_path[512];
+		snprintf(type_path, sizeof(type_path), "%s/%s/type",
+			songs_path, entry->d_name);
+
+		char song_type[64] = "any";
+		FILE *tfp = fopen(type_path, "r");
+		if (tfp) {
+			if (fgets(song_type, sizeof(song_type) - 1, tfp)) {
+				size_t len = strlen(song_type);
+				if (len > 0 && song_type[len - 1] == '\n')
+					song_type[len - 1] = '\0';
+			}
+			fclose(tfp);
+		}
+
+		/* Get or create the song list for this type */
+		char *song_list_val = (char *)qmap_get(type_index_hd, song_type);
+		char song_list[8192] = {0};
+		if (song_list_val) {
+			snprintf(song_list, sizeof(song_list), "%s", song_list_val);
+		}
+
+		/* Append this song ID (comma-separated) */
+		size_t current_len = strlen(song_list);
+		if (current_len > 0 && current_len < sizeof(song_list) - 2) {
+			strcat(song_list, ",");
+		}
+		if (current_len < sizeof(song_list) - strlen(entry->d_name) - 2) {
+			strcat(song_list, entry->d_name);
+		}
+
+		qmap_put(type_index_hd, song_type, song_list);
+	}
+
+	closedir(dir);
+
+	fprintf(stderr, "[song] Type index built\n");
+}
+
+NDX_DEF(int, song_get_random_by_type, const char *, type, char **, out_id)
+{
+	if (!type || !type_index_hd) {
+		return -1;
+	}
+
+	/* Get list of songs for this type */
+	char *song_list = (char *)qmap_get(type_index_hd, type);
+	if (!song_list || !*song_list) {
+		/* Try "any" as fallback */
+		song_list = (char *)qmap_get(type_index_hd, "any");
+		if (!song_list || !*song_list) {
+			return -1;
+		}
+	}
+
+	/* Count songs */
+	int count = 1;
+	for (char *p = song_list; *p; p++) {
+		if (*p == ',') count++;
+	}
+
+	/* Pick random */
+	int idx = rand() % count;
+
+	/* Find and copy the idx-th song */
+	char *copy = strdup(song_list);
+	if (!copy) return -1;
+
+	char *token = strtok(copy, ",");
+	for (int i = 0; i < idx && token; i++) {
+		token = strtok(NULL, ",");
+	}
+
+	if (token && out_id) {
+		*out_id = strdup(token);
+	}
+
+	free(copy);
+
+	return (*out_id) ? 0 : -1;
+}
+
 /* 
  * NDX API: Transpose chord chart text
  */
-NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, char **, output)
+NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, char **, output, int *, key)
 {
-	if (!g_transp_ctx || !input || !output) {
+	if (!g_transp_ctx || !input || (!output && !key)) {
 		return -1;
 	}
 	
@@ -33,7 +143,26 @@ NDX_DEF(int, song_transpose, const char *, input, int, semitones, int, flags, ch
 		return -1;
 	}
 	
-	*output = result;
+	if (output) {
+		*output = result;
+	} else {
+		free(result);
+	}
+	
+	if (key) {
+		*key = transp_get_key(g_transp_ctx);
+	}
+	
+	return 0;
+}
+
+/*
+ * NDX API: Reset transpose key detection
+ */
+NDX_DEF(int, song_reset_key, int, dummy)
+{
+	(void)dummy;
+	transp_reset_key(g_transp_ctx);
 	return 0;
 }
 
@@ -139,10 +268,17 @@ char *song_json(int fd, int flags) {
 	fclose(fp);
 	content[fsize] = '\0';
 
+	/* Reset key detection for each new song */
+	transp_reset_key(g_transp_ctx);
+
 	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
 	free(content);
 
 	if (!transposed) return NULL;
+
+	/* Get detected key after transposition */
+	int original_key = transp_get_key(g_transp_ctx);
+	if (original_key < 0) original_key = 0;
 
 	/* Escape all fields for JSON safety */
 	size_t data_esc_len = 3 * strlen(transposed);
@@ -171,9 +307,10 @@ char *song_json(int fd, int flags) {
 				"\"showMedia\":%d,"
 				"\"yt\":\"%s\","
 				"\"audio\":\"%s\","
-				"\"pdf\":\"%s\""
+				"\"pdf\":\"%s\","
+				"\"originalKey\":%d"
 				"}",
-				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf);
+				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf, original_key);
 	}
 
 	free(escaped_data);
@@ -647,11 +784,19 @@ song_edit_post_handler(int fd, char *body)
 
 void ndx_install(void)
 {
+	char doc_root[256] = {0};
+	ndc_env_get(0, doc_root, "DOCUMENT_ROOT");
+	if (!doc_root[0])
+		strcpy(doc_root, ".");
+
 	/* Initialize transpose context */
 	g_transp_ctx = transp_init();
 	if (!g_transp_ctx)
 		fprintf(stderr, "[song] Failed to initialize"
 				" transp context\n");
+
+	/* Build type index */
+	build_type_index(doc_root);
 
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");

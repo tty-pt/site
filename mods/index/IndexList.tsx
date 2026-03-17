@@ -76,7 +76,7 @@ function IndexList({
           <p>No items yet.</p>
         )}
         <a href={`/${module}/add`} className="btn">
-          Add
+          AddAAA
         </a>
       </div>
     </Layout>
