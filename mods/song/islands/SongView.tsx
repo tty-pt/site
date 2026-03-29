@@ -97,12 +97,9 @@ export default function SongDetailIsland(props: SongDetailProps) {
         Key:
         <select
           name="t"
-          value={targetKey}
+          value={transpose}
           onChange={(e) => {
-            const selectedKey = e.currentTarget.value;
-            const selectedIndex = keys.indexOf(selectedKey);
-            const semitones = (selectedIndex - originalKey + 12) % 12;
-            setTranspose(semitones);
+            setTranspose(parseInt(e.currentTarget.value, 10));
           }}
         >
           {keys.map((key, i) => {

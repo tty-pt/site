@@ -932,7 +932,7 @@ handle_choir_song_view(int fd, char *body)
 	return 0;
 }
 
-MODULE_API void
+void
 ndx_install(void)
 {
 	ndx_load("./mods/index/index");

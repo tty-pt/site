@@ -50,7 +50,6 @@ function IndexList({
   title,
   module,
 }: IndexData) {
-  console.log("MODULE", module);
   const items = parseBody(body);
 
   const buttons = items.map((item) => (
