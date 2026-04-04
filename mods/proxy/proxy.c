@@ -2,9 +2,12 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
@@ -19,6 +22,7 @@ static unsigned proxy_port;
 /* --- Internal Helper: The Read/Forward Loop --- */
 static int proxy_await_response(int fd)
 {
+  if (proxy_fd < 0) goto upstream_err;
   char buf[4096];
   ssize_t n;
   int headers_done = 0;
@@ -110,6 +114,62 @@ NDX_DEF(int, proxy_init,
     const char *, method,
     const char *, path)
 {
+  struct sockaddr_in addr;
+  int flags;
+  fd_set wfds;
+  struct timeval tv;
+
+  /* Open a fresh connection to upstream per request */
+  if (proxy_fd >= 0) {
+    close(proxy_fd);
+    proxy_fd = -1;
+  }
+
+  proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (proxy_fd < 0)
+    return -1;
+
+  flags = fcntl(proxy_fd, F_GETFL, 0);
+  fcntl(proxy_fd, F_SETFL, flags | O_NONBLOCK);
+
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(proxy_port);
+  inet_pton(AF_INET, proxy_host, &addr.sin_addr);
+
+  if (connect(proxy_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (errno != EINPROGRESS) {
+      close(proxy_fd);
+      proxy_fd = -1;
+      return -1;
+    }
+
+    /* Wait up to 1s for connection */
+    FD_ZERO(&wfds);
+    FD_SET(proxy_fd, &wfds);
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+
+    if (select(proxy_fd + 1, NULL, &wfds, NULL, &tv) <= 0) {
+      close(proxy_fd);
+      proxy_fd = -1;
+      return -1;
+    }
+
+    /* Check for connect error */
+    int err = 0;
+    socklen_t elen = sizeof(err);
+    getsockopt(proxy_fd, SOL_SOCKET, SO_ERROR, &err, &elen);
+    if (err) {
+      close(proxy_fd);
+      proxy_fd = -1;
+      return -1;
+    }
+  }
+
+  /* Restore blocking mode for read/write */
+  fcntl(proxy_fd, F_SETFL, flags);
+
   req_len = snprintf(req_buf, sizeof(req_buf),
       "%s %s HTTP/1.1\r\n"
       "Host: %s:%d\r\n",
@@ -137,6 +197,7 @@ NDX_DEF(int, proxy_write,
     size_t, len)
 {
   if (!proxy_headers_sent) {
+    if (proxy_fd < 0) return -1;
     proxy_header("Connection", "keep-alive");
 
     if (req_len + 2 >= sizeof(req_buf))
@@ -171,7 +232,9 @@ NDX_DEF(int, proxy_body,
   }
 
   proxy_write(data, len);
-  return proxy_await_response(fd);
+  int ret = proxy_await_response(fd);
+  if (proxy_fd >= 0) { close(proxy_fd); proxy_fd = -1; }
+  return ret;
 }
 
 /* For GET or requests with no body */
@@ -184,25 +247,8 @@ NDX_DEF(int, proxy_connect,
     const char *, host,
     unsigned, port)
 {
-  static struct sockaddr_in serv_addr;
-
   strlcpy(proxy_host, host, sizeof(proxy_host));
   proxy_port = port;
-
-  proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (proxy_fd < 0)
-    return 1;
-
-  memset(&serv_addr, 0, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(proxy_port);
-  inet_pton(AF_INET, proxy_host, &serv_addr.sin_addr);
-
-  if (connect(proxy_fd, (struct sockaddr *) &serv_addr,
-        sizeof(serv_addr)) < 0)
-
-    return 1;
-
   return 0;
 }
 

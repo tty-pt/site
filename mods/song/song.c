@@ -802,6 +802,10 @@ void ndx_install(void)
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 
+	index_hd = call_index_open("Song", 0, 1);
+
+	/* Register after index_open so we override its generic POST:/song/add */
+	ndc_register_handler("POST:/song/add", song_handler);
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);
 	ndc_register_handler("GET:/song/:id/edit",
@@ -811,8 +815,6 @@ void ndx_install(void)
 
 	ndc_register_handler("GET:/api/song/:id/transpose",
 			api_song_transpose_handler);
-
-	index_hd = call_index_open("Song", 0, 1);
 }
 
 void ndx_open(void) {}

@@ -10,8 +10,6 @@
 #include <unistd.h>
 #endif
 
-#include "./../proxy/proxy.h"
-
 static int
 load_modules_from_file(const char *path)
 {
@@ -62,8 +60,7 @@ frsh_upstream(socket_t client_fd)
 
 void ndx_install(void) {
 	load_modules_from_file("./mods.load");
-	ndx_load("./mods/proxy/proxy");
-	call_proxy_connect("127.0.0.1", 3000);
+	ndx_load("./mods/ssr/ssr");
 	/* ndc_ws_handler("/_frsh/alive", frsh_upstream); */
 }
 

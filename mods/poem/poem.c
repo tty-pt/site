@@ -214,10 +214,11 @@ poem_handler(int fd, char *body)
 void ndx_install(void) {
 	ndx_load("./mods/index/index");
 
+	index_hd = call_index_open("Poem", 0, 1);
+
+	/* Register after index_open so we override its generic POST:/poem/add */
 	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
 	ndc_register_handler("POST:/poem/add", poem_handler);
-	
-	index_hd = call_index_open("Poem", 0, 1);
 }
 
 void ndx_open(void) {}

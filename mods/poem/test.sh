@@ -22,11 +22,13 @@ code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 # 2. POST missing id field (file has content but no id)
 echo -n "2. POST missing id field... "
 echo "test content" > "$TMPFILE"
+sleep 0.1
 out=$(curl -s -X POST "$BASE/poem/add" -F "file=@$TMPFILE")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
 
 # 3. POST missing file field
 echo -n "3. POST missing file field... "
+sleep 0.1
 out=$(curl -s -X POST "$BASE/poem/add" \
 	-F "id=testpoem")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
@@ -34,6 +36,7 @@ echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail
 # 4. POST empty file (id provided but file is empty - same as missing)
 echo -n "4. POST empty file... "
 > "$TMPFILE2"
+sleep 0.1
 out=$(curl -s -X POST "$BASE/poem/add" -F "id=testpoem2" -F "file=@$TMPFILE2")
 echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
 
@@ -41,6 +44,7 @@ echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail
 echo -n "5. POST valid multipart... "
 echo "This is a test poem content.
 With multiple lines." > "$TMPFILE"
+sleep 0.1
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
 	-F "id=testpoem" -F "file=@$TMPFILE")
 sleep 0.3
