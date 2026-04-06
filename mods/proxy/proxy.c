@@ -70,7 +70,7 @@ static int proxy_await_response(int fd)
 
         /* Filter hop-by-hop; Keep-Alive is handled at the transport layer */
         if (!strcasecmp(key, "Connection") || !strcasecmp(key, "Keep-Alive") ||
-            !strcasecmp(key, "Proxy-Connection") || !strcasecmp(key, "Transfer-Encoding"))
+            !strcasecmp(key, "Proxy-Connection"))
           continue;
 
         ndc_header(fd, key, val);
@@ -198,7 +198,7 @@ NDX_DEF(int, proxy_write,
 {
   if (!proxy_headers_sent) {
     if (proxy_fd < 0) return -1;
-    proxy_header("Connection", "keep-alive");
+    proxy_header("Connection", "close");
 
     if (req_len + 2 >= sizeof(req_buf))
       return -1;

@@ -1013,14 +1013,22 @@ handle_choir_song_view(int fd, char *body)
 	return 0;
 }
 
+static int
+handle_choir_add_get(int fd, char *body)
+{
+	return call_core_get(fd, body);
+}
+
 void
 ndx_install(void)
 {
+	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/song/song");
 
+	ndc_register_handler("GET:/choir/add", handle_choir_add_get);
 	ndc_register_handler("GET:/choir/:id", choir_details_handler);
 	ndc_register_handler("GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	ndc_register_handler("GET:/api/choir/:id/songs", handle_choir_songs_list);

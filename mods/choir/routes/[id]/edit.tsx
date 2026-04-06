@@ -1,10 +1,6 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
-import { dirname, fromFileUrl, resolve } from "@std/path";
-
-const moduleDir = dirname(fromFileUrl(import.meta.url));
-const repoRoot = resolve(moduleDir, "../../../..");
 
 interface ChoirEditData {
   user: string | null;
@@ -21,7 +17,7 @@ interface Choir {
 }
 
 async function getChoir(id: string): Promise<Choir | null> {
-  const choirPath = `${repoRoot}/items/choir/items/${id}`;
+  const choirPath = `${Deno.cwd()}/items/choir/items/${id}`;
 
   try {
     const title = await Deno.readTextFile(`${choirPath}/title`);

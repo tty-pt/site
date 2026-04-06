@@ -65,7 +65,7 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
   const choir = data.choir;
   const isOwner = data.user === choir.owner;
 
-  const menuItems = (
+  const menuItems = isOwner ? (
     <div className="flex flex-col gap-2">
       <a
         href={`/choir/${choir.id}/edit`}
@@ -86,7 +86,7 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
         + Add Songbook
       </a>
     </div>
-  );
+  ) : undefined;
 
   return (
     <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`} menuItems={menuItems}>

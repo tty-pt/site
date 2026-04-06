@@ -20,7 +20,7 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
             <span>😊</span>
             <label>me</label>
           </a>
-          <a className="btn" href="/logout">
+          <a className="btn" href="/auth/logout">
             <span>🚪</span>
             <label>logout</label>
           </a>

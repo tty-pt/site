@@ -1,10 +1,8 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
-import { dirname, fromFileUrl, resolve } from "@std/path";
 
-const moduleDir = dirname(fromFileUrl(import.meta.url));
-const repoRoot = resolve(moduleDir, "../../../..");
+const repoRoot = Deno.cwd();
 
 interface Song {
   chordId: string;

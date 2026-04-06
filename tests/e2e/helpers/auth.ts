@@ -106,7 +106,7 @@ export async function logoutUser(
   page: import("npm:playwright").Page,
   base: string,
 ): Promise<void> {
-  await page.goto(`${base}/logout`);
+  await page.goto(`${base}/auth/logout`);
   await page.waitForURL(`${base}/`, { timeout: 5000 });
 }
 

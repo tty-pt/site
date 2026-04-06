@@ -10,8 +10,11 @@
 #include "./../common/common.h"
 #include "./../proxy/proxy.h"
 #include "./../mpfd/mpfd.h"
+#include "./../auth/auth.h"
 
 #define MAX_MODULES 64
+
+static int index_add_get_handler(int fd, char *body);
 
 static char modules_header[2 * 256 * MAX_MODULES];
 
@@ -155,6 +158,21 @@ static int index_add_handler(
 	fwrite(title, 1, strlen(title), tfp);
 	fclose(tfp);
 
+	/* Write .owner file from session */
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (username && *username) {
+		snprintf(path + path_len, sizeof(path) - path_len, "/.owner");
+		FILE *ofp = fopen(path, "w");
+		if (ofp) {
+			fwrite(username, 1, strlen(username), ofp);
+			fclose(ofp);
+		}
+	}
+
 	hd = *(unsigned *) qmap_get(module_hd, module);
 	qmap_put(hd, id, title);
 
@@ -205,10 +223,13 @@ NDX_DEF(int, index_page,
 	call_proxy_init("POST", path);
 	call_proxy_header("X-Modules", modules_header);
 	{
-		char remote_user[256] = { 0 };
-		ndc_env_get(fd, remote_user, "REMOTE_USER");
-		if (*remote_user)
-			call_proxy_header("X-Remote-User", remote_user);
+		char cookie[256] = { 0 };
+		char token[64] = { 0 };
+		ndc_env_get(fd, cookie, "HTTP_COOKIE");
+		call_get_cookie(cookie, token, sizeof(token));
+		const char *username = call_get_session_user(token);
+		if (username && *username)
+			call_proxy_header("X-Remote-User", (char *)username);
 	}
 	ret = call_proxy_body(fd, body, total);
 	free(body);
@@ -288,6 +309,9 @@ NDX_DEF(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "POST:/%s/add", id);
 	ndc_register_handler(buf, index_add_handler);
 
+	snprintf(buf, sizeof(buf), "GET:/%s/add", id);
+	ndc_register_handler(buf, index_add_get_handler);
+
 	snprintf(buf, sizeof(buf), "GET:/%s", id);
 	ndc_register_handler(buf, index_list_handler);
 
@@ -326,14 +350,23 @@ NDX_DEF(int, core_get,
 	(void)body;
 
 	char path[512] = { 0 };
-	char remote_user[256] = { 0 };
+	char cookie[256] = { 0 };
+	char token[64] = { 0 };
+	char host[256] = { 0 };
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 	call_proxy_init("GET", path);
 	call_proxy_header("X-Modules", modules_header);
-	ndc_env_get(fd, remote_user, "REMOTE_USER");
-	if (*remote_user)
-		call_proxy_header("X-Remote-User", remote_user);
+	ndc_env_get(fd, host, "HTTP_HOST");
+	if (host[0])
+		call_proxy_header("X-Forwarded-Host", host);
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	{
+		const char *username = call_get_session_user(token);
+		if (username && *username)
+			call_proxy_header("X-Remote-User", (char *)username);
+	}
 	return call_proxy_head(fd);
 }
 
@@ -347,17 +380,33 @@ NDX_DEF(int, core_post,
 	char uri[512] = { 0 };
 	char param[512] = { 0 };
 	char full_path[PATH_MAX] = { 0 };
-	char remote_user[256] = { 0 };
+	char cookie[256] = { 0 };
+	char token[64] = { 0 };
+	char host[256] = { 0 };
 
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
 	call_proxy_init("POST", full_path);
 	call_proxy_header("X-Modules", modules_header);
-	ndc_env_get(fd, remote_user, "REMOTE_USER");
-	if (*remote_user)
-		call_proxy_header("X-Remote-User", remote_user);
+	ndc_env_get(fd, host, "HTTP_HOST");
+	if (host[0])
+		call_proxy_header("X-Forwarded-Host", host);
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	{
+		const char *username = call_get_session_user(token);
+		if (username && *username)
+			call_proxy_header("X-Remote-User", (char *)username);
+	}
 	return call_proxy_body(fd, body, len);
+}
+
+static int index_add_get_handler(
+		int fd,
+		char *body)
+{
+	return call_core_get(fd, body);
 }
 
 void ndx_install(void)

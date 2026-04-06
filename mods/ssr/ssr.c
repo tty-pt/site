@@ -51,7 +51,7 @@ start_deno(void)
 			_exit(1);
 		}
 
-		char *argv[] = { "deno", "task", "start", NULL };
+		char *argv[] = { "deno", "task", "serve", NULL };
 		execvp("deno", argv);
 		perror("ssr: execvp deno");
 		_exit(1);
@@ -70,7 +70,7 @@ probe_port_3000(void)
 	int fd, flags, ret = 0;
 	struct sockaddr_in addr;
 	fd_set wfds;
-	struct timeval tv = {0, 0};
+	struct timeval tv = {0, 100000}; /* 100ms */
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0)

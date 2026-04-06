@@ -255,33 +255,40 @@ char *song_json(int fd, int flags) {
 	/* Read and Transpose Chord File */
 	snprintf(filepath, sizeof(filepath), "%s/data.txt", item_path);
 	FILE *fp = fopen(filepath, "r");
-	if (!fp) return NULL;
 
-	fseek(fp, 0, SEEK_END);
-	long fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-
-	char *content = malloc(fsize + 1);
-	if (!content) { fclose(fp); return NULL; }
-
-	fread(content, 1, fsize, fp);
-	fclose(fp);
-	content[fsize] = '\0';
+	char *transposed = NULL;
 
 	/* Reset key detection for each new song */
 	transp_reset_key(g_transp_ctx);
 
-	char *transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
-	free(content);
+	if (fp) {
+		fseek(fp, 0, SEEK_END);
+		long fsize = ftell(fp);
+		fseek(fp, 0, SEEK_SET);
 
-	if (!transposed) return NULL;
+		char *content = malloc(fsize + 1);
+		if (!content) { fclose(fp); return NULL; }
+
+		fread(content, 1, fsize, fp);
+		fclose(fp);
+		content[fsize] = '\0';
+
+		transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
+		free(content);
+
+		if (!transposed) return NULL;
+	} else {
+		/* No data.txt yet — treat as empty chord sheet */
+		transposed = strdup("");
+		if (!transposed) return NULL;
+	}
 
 	/* Get detected key after transposition */
 	int original_key = transp_get_key(g_transp_ctx);
 	if (original_key < 0) original_key = 0;
 
 	/* Escape all fields for JSON safety */
-	size_t data_esc_len = 3 * strlen(transposed);
+	size_t data_esc_len = 3 * strlen(transposed) + 1;
 	char *escaped_data = malloc(data_esc_len);
 	if (!escaped_data) { free(transposed); return NULL; }
 
@@ -811,8 +818,6 @@ void ndx_install(void)
 
 	index_hd = call_index_open("Song", 0, 1);
 
-	/* Register after index_open so we override its generic POST:/song/add */
-	ndc_register_handler("POST:/song/add", song_handler);
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);
 	ndc_register_handler("GET:/song/:id/edit",

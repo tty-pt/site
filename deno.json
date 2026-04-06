@@ -16,7 +16,7 @@
     "setup-routes": "deno run --allow-read --allow-write scripts/setup-routes.ts",
     "start": "deno run --allow-read --allow-write scripts/setup-routes.ts && deno run -A --watch=static/,routes/ dev.ts",
     "build": "deno run --allow-read --allow-write scripts/setup-routes.ts && deno run -A dev.ts build",
-    "preview": "deno run -A main.ts",
+    "serve": "deno run --allow-read --allow-write scripts/setup-routes.ts && deno run -A main.ts",
     "build:css": "npm run build:css",
     "e2e": "deno test --allow-all tests/e2e/"
   },

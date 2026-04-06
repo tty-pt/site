@@ -1,5 +1,5 @@
 #include <ttypt/ndc.h>
-#include <ttypt/ndc-ndx.h>
+// #include <ttypt/ndc-ndx.h>
 #include <string.h>
 #include <stdio.h>
 

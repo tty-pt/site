@@ -10,8 +10,13 @@ interface AddData {
 export const handler: Handlers<AddData, State> = {
   GET(req, ctx) {
     if (!ctx.state.user) {
-      const ret = encodeURIComponent(new URL(req.url).pathname);
-      return Response.redirect(new URL(`/auth/login?ret=${ret}`, req.url), 303);
+      const reqUrl = new URL(req.url);
+      const forwardedHost = req.headers.get("X-Forwarded-Host");
+      if (forwardedHost) {
+        reqUrl.host = forwardedHost;
+      }
+      const ret = encodeURIComponent(reqUrl.pathname);
+      return Response.redirect(new URL(`/auth/login?ret=${ret}`, reqUrl), 303);
     }
     const splits = req.url.split('/');
     splits.pop();
