@@ -150,8 +150,14 @@ export default function SongDetailIsland(props: SongDetailProps) {
     </form>
   );
 
+  const editLink = props.user && (
+    <a href={`/song/${props.id}/edit`} className="btn">
+      Edit
+    </a>
+  );
+
   return (
-    <Layout user={props.user} title={`song: ${displayTitle}`} path={props.path} menuItems={transposeForm}>
+    <Layout user={props.user} title={`song: ${displayTitle}`} path={props.path} menuItems={<>{transposeForm}{editLink}</>}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
         
         {/* Media container - reacts to showMedia state */}

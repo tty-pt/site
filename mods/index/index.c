@@ -204,6 +204,12 @@ NDX_DEF(int, index_page,
 	*s = '\0';
 	call_proxy_init("POST", path);
 	call_proxy_header("X-Modules", modules_header);
+	{
+		char remote_user[256] = { 0 };
+		ndc_env_get(fd, remote_user, "REMOTE_USER");
+		if (*remote_user)
+			call_proxy_header("X-Remote-User", remote_user);
+	}
 	ret = call_proxy_body(fd, body, total);
 	free(body);
 	return ret;
@@ -318,12 +324,16 @@ NDX_DEF(int, core_get,
 		char *, body)
 {
 	(void)body;
-	
+
 	char path[512] = { 0 };
-	
+	char remote_user[256] = { 0 };
+
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 	call_proxy_init("GET", path);
 	call_proxy_header("X-Modules", modules_header);
+	ndc_env_get(fd, remote_user, "REMOTE_USER");
+	if (*remote_user)
+		call_proxy_header("X-Remote-User", remote_user);
 	return call_proxy_head(fd);
 }
 
@@ -333,16 +343,20 @@ NDX_DEF(int, core_post,
 		size_t, len)
 {
 	(void)body;
-	
+
 	char uri[512] = { 0 };
 	char param[512] = { 0 };
 	char full_path[PATH_MAX] = { 0 };
-	
+	char remote_user[256] = { 0 };
+
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
 	call_proxy_init("POST", full_path);
 	call_proxy_header("X-Modules", modules_header);
+	ndc_env_get(fd, remote_user, "REMOTE_USER");
+	if (*remote_user)
+		call_proxy_header("X-Remote-User", remote_user);
 	return call_proxy_body(fd, body, len);
 }
 

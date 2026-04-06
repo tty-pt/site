@@ -47,8 +47,8 @@ function parseBody(body: string | null): IndexItem[] {
 
 function IndexList({
   body,
-  title,
   module,
+  user,
 }: IndexData) {
   const items = parseBody(body);
 
@@ -64,8 +64,8 @@ function IndexList({
 
   return (
     <Layout
-      user={null}
-      title={title || module}
+      user={user}
+      title={module}
       path={`/${module}`}
     >
       <div className="center">
@@ -74,14 +74,16 @@ function IndexList({
         ) : (
           <p>No items yet.</p>
         )}
-        <a href={`/${module}/add`} className="btn">
-          AddAAA
-        </a>
+        {user && (
+          <a href={`/${module}/add`} className="btn">
+            Add
+          </a>
+        )}
       </div>
     </Layout>
   );
 }
 
 export default function Index({ data }: PageProps<IndexData>) {
-  return <IndexList module={data.module} body={data.body} />;
+  return <IndexList module={data.module} body={data.body} user={data.user} />;
 }

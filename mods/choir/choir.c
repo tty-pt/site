@@ -349,6 +349,87 @@ parse_choir_song_line(const char *line, char *song_id, int *preferred_key, char 
 	size_t fmt_len = strlen(format);
 #endif
 
+/* POST /api/choir/:id/edit - Edit choir title and formats */
+static int
+handle_choir_edit(int fd, char *body)
+{
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 1;
+	}
+
+	char id[128] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+
+	char doc_root[256] = {0};
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	if (!doc_root[0])
+		strcpy(doc_root, ".");
+
+	char choir_path[512];
+	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s",
+		doc_root, id);
+
+	struct stat st;
+	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 404);
+		ndc_body(fd, "Choir not found");
+		return 1;
+	}
+
+	if (!check_choir_ownership(choir_path, username)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "You don't own this choir");
+		return 1;
+	}
+
+	call_mpfd_parse(fd, body);
+
+	char title[256] = {0};
+	char format[2048] = {0};
+	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
+	int format_len = call_mpfd_get("format", format, sizeof(format) - 1);
+
+	if (title_len > 0) {
+		title[title_len] = '\0';
+		char title_path[1024];
+		snprintf(title_path, sizeof(title_path), "%s/title", choir_path);
+		FILE *tfp = fopen(title_path, "w");
+		if (tfp) {
+			fwrite(title, 1, strlen(title), tfp);
+			fclose(tfp);
+		}
+	}
+
+	if (format_len > 0) {
+		format[format_len] = '\0';
+		char format_path[1024];
+		snprintf(format_path, sizeof(format_path), "%s/format", choir_path);
+		FILE *ffp = fopen(format_path, "w");
+		if (ffp) {
+			fwrite(format, 1, strlen(format), ffp);
+			fclose(ffp);
+		}
+	}
+
+	char location[256];
+	snprintf(location, sizeof(location), "/choir/%s", id);
+	ndc_header(fd, "Location", location);
+	ndc_head(fd, 303);
+	ndc_close(fd);
+	return 0;
+}
+
 /* Parse choir song line: song_id:preferred_key:format */
 static int
 parse_choir_song_line(const char *line, char *song_id, int *preferred_key, char *format)
@@ -946,6 +1027,7 @@ ndx_install(void)
 	ndc_register_handler("POST:/api/choir/:id/songs", handle_choir_song_add);
 	ndc_register_handler("POST:/api/choir/:id/song/:song_id/key", handle_choir_song_key);
 	ndc_register_handler("DELETE:/api/choir/:id/song/:song_id", handle_choir_song_delete);
+	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 
 	index_hd = call_index_open("Choir", 0, 1);
 }

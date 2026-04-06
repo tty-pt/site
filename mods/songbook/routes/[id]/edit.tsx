@@ -59,7 +59,7 @@ function parseBody(body: string | null): { title: string; choir: string; songs: 
 }
 
 async function getAllChords(): Promise<Chord[]> {
-  const chordsPath = `${repoRoot}/items/chords/items`;
+  const chordsPath = `${repoRoot}/items/song/items`;
   const chords: Chord[] = [];
 
   try {

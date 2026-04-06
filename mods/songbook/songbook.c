@@ -1091,11 +1091,9 @@ void ndx_install(void)
 
 	ndc_register_handler("POST:/songbook/:id/randomize", handle_sb_randomize);
 	ndc_register_handler("POST:/songbook/:id/transpose", handle_sb_transpose);
-	/*
-	ndc_register_handler("POST:/api/songbook/create", handle_sb_create);
+	/* ndc_register_handler("POST:/api/songbook/create", handle_sb_create); */
 	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
-	*/
 
 	index_hd = call_index_open("Songbook", 0, 1);
 }

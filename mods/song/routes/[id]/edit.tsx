@@ -44,8 +44,8 @@ export const handler: Handlers<SongEditData, State> = {
     data.id = ctx.params.id;
 
     return ctx.render({
-      user: ctx.state.user,
       ...data,
+      user: ctx.state.user,
     });
   },
 };

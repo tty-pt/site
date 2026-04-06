@@ -88,7 +88,7 @@ NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 		}
 	}
 	out[j] = '\0';
-	return 0;
+	return (int)j;
 }
 
 NDX_DEF(int, b64_encode, const char *, in, char *, out, size_t, outlen) {

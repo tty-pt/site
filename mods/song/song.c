@@ -652,10 +652,16 @@ song_edit_get_handler(int fd, char *body)
 static int
 song_edit_post_handler(int fd, char *body)
 {
-	(void)body;
-
 	char doc_root[256] = { 0 };
 	char id[128] = { 0 };
+
+	int parse_result = call_mpfd_parse(fd, body);
+	if (parse_result == -1) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 415);
+		ndc_body(fd, "Expected multipart/form-data");
+		return 1;
+	}
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -707,7 +713,7 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write title file */
-	if (title[0]) {
+	{
 		char title_path[1024];
 		snprintf(title_path, sizeof(title_path), "%s/title", item_path);
 		FILE *tfp = fopen(title_path, "w");
@@ -718,7 +724,7 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write type file */
-	if (type[0]) {
+	{
 		char type_path[1024];
 		snprintf(type_path, sizeof(type_path), "%s/type", item_path);
 		FILE *tfp = fopen(type_path, "w");
@@ -729,7 +735,7 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write yt file */
-	if (yt[0]) {
+	{
 		char yt_path[1024];
 		snprintf(yt_path, sizeof(yt_path), "%s/yt", item_path);
 		FILE *tfp = fopen(yt_path, "w");
@@ -740,7 +746,7 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write audio file */
-	if (audio[0]) {
+	{
 		char audio_path[1024];
 		snprintf(audio_path, sizeof(audio_path), "%s/audio", item_path);
 		FILE *tfp = fopen(audio_path, "w");
@@ -751,7 +757,7 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write pdf file */
-	if (pdf[0]) {
+	{
 		char pdf_path[1024];
 		snprintf(pdf_path, sizeof(pdf_path), "%s/pdf", item_path);
 		FILE *tfp = fopen(pdf_path, "w");
@@ -762,12 +768,13 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write data file */
-	if (data_content) {
+	{
 		char data_path[1024];
 		snprintf(data_path, sizeof(data_path), "%s/data.txt", item_path);
 		FILE *dfp = fopen(data_path, "w");
 		if (dfp) {
-			fwrite(data_content, 1, data_len, dfp);
+			if (data_content)
+				fwrite(data_content, 1, data_len, dfp);
 			fclose(dfp);
 		}
 		free(data_content);

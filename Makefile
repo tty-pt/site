@@ -35,7 +35,10 @@ test:
 integration-tests: all
 	@sh tests/integration/run_all.sh
 
+e2e-tests:
+	deno test --allow-all tests/e2e/
+
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 
-.PHONY: all mods modules run clean test unit-tests pages-test integration-tests
+.PHONY: all mods modules run clean test unit-tests pages-test integration-tests e2e-tests
