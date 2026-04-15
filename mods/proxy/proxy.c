@@ -76,6 +76,13 @@ static int proxy_await_response(int fd)
         ndc_header(fd, key, val);
       }
 
+      /* Tell NDC to close the browser connection after this response so it
+       * does not pipeline subsequent requests over the same fd.  NDC handles
+       * one request per fd at a time, and a pipelined keep-alive connection
+       * would stall waiting for the previous request to finish. */
+      ndc_header(fd, "Connection", "close");
+      ndc_set_flags(fd, DF_TO_CLOSE);
+
       ndc_head(fd, status);
       headbuf[header_len] = saved_byte;
       headers_done = 1;
@@ -147,7 +154,7 @@ NDX_DEF(int, proxy_init,
     /* Wait up to 1s for connection */
     FD_ZERO(&wfds);
     FD_SET(proxy_fd, &wfds);
-    tv.tv_sec = 0;
+    tv.tv_sec = 1;
     tv.tv_usec = 0;
 
     if (select(proxy_fd + 1, NULL, &wfds, NULL, &tv) <= 0) {

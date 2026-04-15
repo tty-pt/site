@@ -180,6 +180,8 @@ static int index_add_handler(
 			"/%s/%s", module, id);
 
 	ndc_header(fd, "Location", path);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;

@@ -60,7 +60,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
         <form
           method="POST"
           action={`/song/${id}/edit`}
-          encType="multipart/form-data"
+          encType="application/x-www-form-urlencoded"
           style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "600px" }}
         >
           <label>

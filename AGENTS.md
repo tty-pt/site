@@ -1,228 +1,232 @@
 # Agent Development Guide
 
-This document provides guidelines for AI coding agents working on this NDC + Deno SSR site.
-
-## Project Overview
+## Architecture
 
 Hybrid web application:
-- **NDC HTTP server** (C) on port 8080 - handles HTTP, auth, sessions, file uploads
-- **Fresh framework** (Deno/TypeScript/Preact) on port 3000 - renders UI components
-- **Proxy**: Client → NDC:8080 → proxy.c → Fresh:3000 → Preact
+- **NDC HTTP server** (C) on port 8080 — handles HTTP, auth, sessions, file uploads, all business logic
+- **Fresh/Deno** (TypeScript/Preact) on port 3000 — renders HTML only, never fetches data
+- **Proxy**: Browser → NDC:8080 → `proxy.c` → Fresh:3000
+
+**NDC manages Deno internally** via `mods/ssr/ssr.c`. Do NOT start Deno separately. NDC forks `deno task serve` on startup.
 
 **Stack:** qmap, ndx, ndc, Fresh 1.7.3, Preact 10, Tailwind CSS 3.4
 
-## Build Commands
+## The cardinal rule: Deno/Fresh never makes requests
 
-```bash
-make                    # Build all C modules + CSS
-make clean              # Remove build artifacts (*.so files)
-make run                # Build and start both servers
-npm run build:css       # Build Tailwind CSS
-deno task start         # Start Fresh dev server (auto-creates hard links)
-./start.sh              # Start NDC server (port 8080)
+Fresh only *receives* requests — it never calls `fetch()`, reads files, or queries databases.
+
+- **C GET handler** reads filesystem, builds a POST body, calls `call_core_post(fd, body, len)` to proxy to Fresh
+- **Fresh POST handler** receives that body, parses it, calls `ctx.render(data)`
+- **Browser form** POSTs directly to NDC (C), never to Fresh
+- **Fresh GET handler** is only for rendering forms that don't need data (e.g. `/song/add`); redirect to login if unauthenticated
+
+Islands (`fetch()` calls in browser JS) are the **only** exception — they call NDC endpoints directly, never Fresh.
+
+### Correct pattern for data pages
+
+```c
+// C: read files, POST body to Fresh
+static int my_handler(int fd, char *body) {
+    char post_body[4096];
+    snprintf(post_body, sizeof(post_body), "title=%s&data=%s", ...);
+    return call_core_post(fd, post_body, strlen(post_body));
+}
 ```
 
-## Test Commands
+```tsx
+// Fresh: only POST handler — receives C-built body
+export const handler: Handlers<Data, State> = {
+  async POST(req, ctx) {
+    const body = await req.text();
+    const params = new URLSearchParams(body);
+    return ctx.render({ title: params.get("title") ?? "" });
+  },
+};
+```
+
+```tsx
+// Form targets NDC, not Fresh
+<form method="POST" action={`/song/${id}/edit`}>
+```
+
+### Correct pattern for add/form pages (no data needed)
+
+```tsx
+// Fresh: only GET handler
+export const handler: Handlers<AddData, State> = {
+  GET(req, ctx) {
+    if (!ctx.state.user) return Response.redirect(...);
+    return ctx.render({ user: ctx.state.user });
+  },
+};
+```
+
+## Build & Run
 
 ```bash
-make test               # Run all tests (unit + pages)
-make unit-tests         # Run all module test.sh scripts
-cd mods/poem && ./test.sh   # Run single module test
-make pages-test         # Quick SSR rendering smoke tests
-make integration-tests  # Run integration tests (requires server)
-sh tests/integration/01-auth-poem-flow.sh  # Single integration test
+make                    # Build all C .so modules + CSS
+make clean              # Remove *.so build artifacts
+deno task start         # (dev) setup hard links + watch mode
 ```
+
+**Starting servers (for tests/production):**
+```bash
+cd /home/quirinpa/site
+setsid ndc -C . -p 8080 -d >> /tmp/site.log 2>&1 &
+# NDC spawns Deno internally; wait for "deno ready" in /tmp/site.log
+```
+
+## Testing
+
+```bash
+make test                          # unit tests + pages smoke tests
+make unit-tests                    # all mods/*/test.sh
+cd mods/poem && ./test.sh          # single module
+make pages-test                    # SSR smoke tests (requires servers)
+make e2e-tests                     # full Playwright suite (requires servers)
+# Run one e2e file at a time to avoid timeout:
+deno test --allow-all tests/e2e/song-add.test.ts
+```
+
+**e2e prerequisites:** NDC must be running on :8080, and `/tmp/site.log` must be writable (tests poll it for auth confirmation rcodes). Run tests one file at a time (≤60s each) to avoid bash timeout.
 
 **Pre-commit hook:**
 ```bash
 ln -s ../../.githooks/pre-commit .git/hooks/pre-commit
 ```
 
-## Code Style - TypeScript/TSX
+## C Module Conventions
 
-### Imports
-```tsx
-// Use Preact (NOT React)
-import { Handlers, PageProps } from "$fresh/server.ts";
-
-// Use @/ alias for mods/ imports
-import { Layout } from "@/ssr/ui.tsx";
-
-// Islands use islands/ path (after hard-linking)
-import TransposeControls from "../../islands/TransposeControls.tsx";
-
-// Middleware state
-import type { State } from "../../_middleware.ts";
-
-// Deno std with JSR imports
-import { dirname, fromFileUrl, resolve } from "@std/path";
-```
-
-### Type Annotations
-- **Always type** function parameters and return types
-- Use `interface` for component props
-- Use `Record<string, string>` for dynamic objects
-- Mark optional fields with `?`
-
-```tsx
-interface ModuleEntry {
-  id: string;
-  title: string;
-  flags?: number;
-}
-
-function MyComponent({ user }: { user: string | null }) {
-  return <div>{user}</div>;
-}
-```
-
-### Formatting
-- Double quotes for strings
-- 2-space indentation (not tabs)
-- Be consistent with semicolons within files
-
-### Error Handling
-```tsx
-try {
-  const data = await Deno.readTextFile(path);
-  return <Component data={data} />;
-} catch (e) {
-  console.error("Failed to read file:", e);
-  return null;
-}
-```
-
-### Minimal Route Files
-For simple index/add pages, derive module from URL automatically:
-```tsx
-// Just re-export - module name derived from file path
-export { handler, default } from "@/index/IndexList.tsx";
-// or
-export { handler, default } from "@/index/IndexAdd.tsx";
-```
-
-## Code Style - C Modules
-
-### Indentation
-- **Use tabs** (not spaces)
-- Order includes: system, then local headers
+### Redirect pattern (CRITICAL)
+Every `303` redirect **must** set `Connection: close` + `DF_TO_CLOSE` **before** `ndc_head`. Wrong order causes HTTP pipelining hangs:
 
 ```c
-#include <stdio.h>
-#include <string.h>
-#include <ttypt/ndc.h>
-#include "../common/common.h"
+ndc_header(fd, "Location", location);
+ndc_header(fd, "Connection", "close");
+ndc_set_flags(fd, DF_TO_CLOSE);   // MUST be before ndc_head
+ndc_head(fd, 303);
+ndc_close(fd);
+return 0;
 ```
 
-### Memory Management (CRITICAL!)
-**NEVER free() qmap-managed values!** qmap owns the memory.
-```c
-// WRONG
-char *value = qmap_get(map, key);
-free(value);
+`DF_TO_CLOSE = 8` — defined in `/usr/include/ttypt/ndc.h`.
 
-// CORRECT - let qmap manage
+### Form parsing
+- Use `call_query_parse` + `call_query_param` for `application/x-www-form-urlencoded` forms
+- Use `call_mpfd_parse` + `call_mpfd_get` only for `multipart/form-data` (file uploads)
+- Never use `call_mpfd_parse` for plain form fields — prefer url-encoded + `call_query_parse`
+
+```c
+// url-encoded form
+call_query_parse(body);
+char title[256] = {0};
+call_query_param("title", title, sizeof(title) - 1);
+
+// multipart (file uploads only)
+call_mpfd_parse(fd, body);
+call_mpfd_get("file", buf, buflen);
+```
+
+### Memory management (CRITICAL)
+**Never `free()` qmap-managed values.** qmap owns that memory.
+
+```c
+// WRONG — crash
+char *val = qmap_get(map, key);
+free(val);
+
+// CORRECT — qmap manages it
 qmap_put(map, key, new_value);
 ```
 
-### Error Handling (CRITICAL!)
-**Always check syscall return values!**
+### Exported functions
+Use `NDX_DEF` macro; declare with `NDX_DECL` in the corresponding `.h`:
+
 ```c
-if (mkdir(path, 0755) && errno != EEXIST) {
-    ndc_head(500);
-    ndc_body("Failed to create directory");
-    free(allocated_memory);
-    return;
-}
+NDX_DEF(const char *, get_session_user, const char *, token) { ... }
 ```
 
-### Naming
-- Functions/structs/variables: `snake_case`
-- Macros/constants: `UPPER_CASE`
-
-### Exported Functions
-Use `NDX_DEF` macro:
-```c
-NDX_DEF(const char *, get_session_user, const char *, token) {
-    if (!token || !*token) return NULL;
-    return qmap_get(sessions_map, token);
-}
-```
-
-## Fresh + C Integration Pattern
-
-### Handler Registration
-Register handlers in `ndx_install()`:
+### Handler registration
 ```c
 void ndx_install(void) {
+    ndx_load("./mods/index/index");   // load dependencies first
     ndc_register_handler("GET:/song/:id", song_details_handler);
-    ndc_register_handler("GET:/song/:id/edit", song_edit_get_handler);
     ndc_register_handler("POST:/song/:id/edit", song_edit_post_handler);
 }
 ```
 
-### C → Fresh Proxy Pattern (Edit Pages)
-For edit forms, C reads files then POSTs to Fresh:
+### Style
+- Tabs for indentation
+- System includes first, then local headers
+- `snake_case` for functions/vars, `UPPER_CASE` for macros
 
-**1. C GET handler reads files:**
-```c
-static int song_edit_get_handler(int fd, char *body) {
-    // Read title, data.txt from filesystem
-    char title[256] = {0};
-    FILE *tfp = fopen(path, "r");
-    if (tfp) { fgets(title, sizeof(title), tfp); fclose(tfp); }
-    
-    // Build URL-encoded POST body
-    char post_body[4096];
-    snprintf(post_body, "title=%s&data=%s", url_encode(title), url_encode(data));
-    
-    // POST to Fresh
-    return call_core_post(fd, post_body, strlen(post_body));
-}
-```
+## TypeScript/TSX Conventions
 
-**2. Fresh handler receives POST body:**
+### Imports
 ```tsx
-export const handler: Handlers<EditData, State> = {
-    async POST(req, ctx) {
-        const body = await req.text();
-        const { title, data } = parseBody(body); // URLSearchParams
-        return ctx.render({ user: ctx.state.user, title, data });
-    },
-    async GET(req, ctx) {
-        const body = await req.text();
-        const { title, data } = parseBody(body);
-        return ctx.render({ title, data });
-    },
-};
+import { Handlers, PageProps } from "$fresh/server.ts";
+import { Layout } from "@/ssr/ui.tsx";        // @/ = mods/
+import type { State } from "#/routes/_middleware.ts";  // #/ = repo root
+import { join } from "@std/path";
 ```
 
-**3. Form posts back to C for saving:**
-```tsx
-<form method="POST" action={`/song/${id}/edit`}>
-```
+### Route structure
+- Simple list page: `export { handler, default } from "@/index/IndexList.tsx";`
+- Simple add page: `export { handler, default } from "@/index/IndexAdd.tsx";`
+- Module-specific pages need their own handler + component
 
-## Fresh Hard Link Architecture
+### Auth state
+User is available via `ctx.state.user` (set by `_middleware.ts` from `X-Remote-User` header, which NDC sets from cookie lookup). Auth cookie is `QSESSION`.
 
-- Source in `mods/<module>/routes/` → hard linked to `routes/<module>/`
-- Source in `mods/<module>/islands/` → hard linked to `islands/`
-- Run `deno task start` or `deno task setup-routes` to regenerate
+### Hard link architecture
+- Source: `mods/<module>/routes/` → hard linked to `routes/<module>/`
+- Source: `mods/<module>/islands/` → hard linked to `islands/`
+- Regenerate: `deno task setup-routes`
+- Verify: `stat` both files — inodes must match
 
-**Module URL path = directory name** (e.g., `songbook` module → `/songbook/` routes)
+**Module URL path = directory name** (`songbook` module → `/songbook/` routes)
 
 ## Common Pitfalls
 
-1. DON'T free qmap-managed memory - causes crashes
-2. ALWAYS check syscall return values
-3. Create required directories: `mkdir -p items/poem/items items/song/items items/songbook/items`
-4. DON'T commit build artifacts: *.so, mods.load, swap files
-5. Run `make test` after EVERY change
-6. Fresh routes take precedence over `[...slug]` catch-all
+1. Fresh makes NO outbound requests — all data comes from C via POST body
+2. Every C `303` redirect needs `Connection: close` + `ndc_set_flags(fd, DF_TO_CLOSE)` before `ndc_head`
+3. Don't use `call_mpfd_parse` for url-encoded forms — use `call_query_parse`
+4. Don't `free()` qmap-managed values
+5. `IndexList.tsx` POST handler: use `.filter(Boolean)` before `.pop()` to handle trailing-slash URLs
+6. Don't commit build artifacts: `*.so`, `mods.load`, swap files
+7. Required data dirs: `mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items`
 
 ## Troubleshooting
 
-- **Module not loading?** Check `cat mods.load` and verify .so exists
-- **SSR 502 errors?** Check Deno: `pgrep -a deno` and port 3000: `lsof -i :3000`
+- **Module not loading?** Check `cat mods.load` and verify `.so` exists
+- **SSR 502?** Check `/tmp/deno-ssr.log`; verify port 3000: `lsof -i :3000`
 - **Fresh routes missing?** Run `deno task setup-routes`
-- **Hard link verification:** `stat` both files - inodes should match
-- **C handler not called?** Check ndc logs for registered handlers
+- **C handler not called?** Check `/tmp/site.log` for registered handler lines
+- **Pipelining hang after redirect?** Missing `Connection: close` + `DF_TO_CLOSE` before `ndc_head(fd, 303)`
+- **Only ONE NDC + ONE Deno process at a time:** `kill -9 $(lsof -ti:8080) $(lsof -ti:3000) 2>/dev/null`
+
+## NDC internals: POST body buffering
+
+NDC's `ndc_read()` returns as soon as a `recv()` call returns fewer bytes than `BUFSIZ`. On loopback, HTTP headers often arrive in one TCP segment and the body in a second — so handlers can receive a `body` pointer pointing past the end of the actually-received data, into stale `input` buffer content from the previous request.
+
+**Fix (applied in `../ndc/src/libndc.c`):** After `headers_get()` in `request_handle()`, a loop reads from the socket until `Content-Length` bytes of body are present. This makes all POST handlers — especially `multipart/form-data` to pattern routes — reliable.
+
+**Symptom of regression:** `call_mpfd_parse` returns 0 but `call_mpfd_get("title", ...)` returns -1; body first bytes show stale data from previous request rather than the multipart boundary.
+
+### `fresh.gen.ts` must be updated for new routes
+
+Fresh uses a static manifest (`fresh.gen.ts`) in serve mode. Adding a new route file requires manually adding an import and entry there. Only `dev.ts` auto-regenerates it.
+
+### `qmap_put` takes ownership — never `free()` the pointer
+
+`qmap_put(map, key, ptr)` takes ownership of `ptr`. Calling `free(ptr)` afterwards is a use-after-free crash.
+
+### `ndc_register_handler` is last-registration-wins
+
+Registering two handlers for the same path: the second wins.
+
+## e2e Test Status
+
+Tests in `tests/e2e/`. Run with `make e2e-tests` or one file at a time.
+
+All 13 tests pass when servers are running.

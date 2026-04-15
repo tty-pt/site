@@ -10,7 +10,7 @@ interface IndexData {
 
 export const handler: Handlers<IndexData, State> = {
   async POST(req, ctx) {
-    const splits = req.url.split('/');
+    const splits = req.url.split('/').filter(Boolean);
     const module = splits.pop()!;
     const body = await req.text();
     return ctx.render({ 

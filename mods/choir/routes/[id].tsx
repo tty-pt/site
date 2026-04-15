@@ -9,10 +9,16 @@ interface ChoirSong {
   format: string;
 }
 
+interface SongEntry {
+  id: string;
+  title: string;
+}
+
 interface ChoirData {
   user: string | null;
   choir: Choir | null;
   songs: ChoirSong[];
+  allSongs: SongEntry[];
   error?: string;
 }
 
@@ -41,11 +47,15 @@ export const handler: Handlers<ChoirData, State> = {
     };
 
     const songs: ChoirSong[] = body.songs || [];
+    const allSongs: SongEntry[] = (body.allSongs || []).sort(
+      (a: SongEntry, b: SongEntry) => a.title.localeCompare(b.title),
+    );
 
     return ctx.render({
       user: ctx.state.user,
       choir,
       songs,
+      allSongs,
     });
   },
 };
@@ -108,17 +118,15 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
                   {song.preferredKey !== 0 ? KEY_NAMES[song.preferredKey % 12] : "original"}
                 </span>
                 {isOwner && (
-                  <button
-                    className="btn"
-                    style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem", backgroundColor: "#ff6b6b" }}
-                    onClick={async () => {
-                      if (!confirm(`Remove "${song.title || song.id}" from repertoire?`)) return;
-                      await fetch(`/api/choir/${choir.id}/song/${song.id}`, { method: "DELETE" });
-                      window.location.reload();
-                    }}
-                  >
-                    Remove
-                  </button>
+                  <form method="POST" action={`/api/choir/${choir.id}/song/${song.id}/remove`} style={{ display: "inline" }}>
+                    <button
+                      type="submit"
+                      className="btn"
+                      style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem", backgroundColor: "#ff6b6b" }}
+                    >
+                      Remove
+                    </button>
+                  </form>
                 )}
               </li>
             ))}
@@ -132,19 +140,14 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
               <form
                 method="POST"
                 action={`/api/choir/${choir.id}/songs`}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const form = e.target as HTMLFormElement;
-                  const fd = new FormData(form);
-                  fetch(`/api/choir/${choir.id}/songs`, {
-                    method: "POST",
-                    body: fd,
-                  }).then(() => window.location.reload());
-                }}
                 style={{ marginTop: "0.5rem" }}
               >
-                <input type="text" name="song_id" placeholder="Song ID" required style={{ padding: "0.5rem", marginRight: "0.5rem" }} />
-                <input type="text" name="format" placeholder="Format (e.g., any)" defaultValue="any" style={{ padding: "0.5rem", marginRight: "0.5rem" }} />
+                <select name="song_id" required style={{ padding: "0.5rem", marginRight: "0.5rem" }}>
+                  <option value="">-- select a song --</option>
+                  {data.allSongs.map((s) => (
+                    <option key={s.id} value={s.id}>{s.title}</option>
+                  ))}
+                </select>
                 <button type="submit" className="btn">Add</button>
               </form>
             </details>

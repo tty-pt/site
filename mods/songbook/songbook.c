@@ -321,6 +321,8 @@ handle_sb_create(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s/edit", id);
 	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;
@@ -544,6 +546,8 @@ handle_sb_edit(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s", id);
 	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;
@@ -671,6 +675,8 @@ handle_sb_transpose(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s#%d", id, line_num);
 	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;
@@ -798,6 +804,8 @@ handle_sb_randomize(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s#%d", id, line_num);
 	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;
@@ -869,6 +877,8 @@ handle_sb_delete(int fd, char *body)
 
 	/* Redirect to songbook list */
 	ndc_header(fd, "Location", "/songbook");
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;

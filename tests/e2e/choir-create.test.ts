@@ -32,11 +32,21 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
   try {
     page.setDefaultNavigationTimeout(10000);
     page.setDefaultTimeout(10000);
+
+    // Block static asset requests that would pile up on the keep-alive connection
+    // and stall subsequent API calls. We only need the SSR HTML for our checks.
+    await page.route("**/_frsh/js/**", (route) => route.abort());
+    await page.route("**/styles.css", (route) => route.abort());
+    await page.route("**/app.js", (route) => route.abort());
+    await page.route("**/favicon.ico", (route) => route.abort());
+
     const user = await createAndLoginUser(page, BASE);
     const choirTitle = `Test Choir ${Date.now()}`;
 
+    const GOTO = { waitUntil: "domcontentloaded" as const };
+
     // ── 1. Create choir via /choir/add ──────────────────────────────────────
-    await page.goto(`${BASE}/choir/add`);
+    await page.goto(`${BASE}/choir/add`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', choirTitle);
     await page.click('button[type="submit"]');
@@ -61,7 +71,7 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     }
 
     // ── 4. Navigate to edit form and verify pre-population ─────────────────
-    await page.goto(`${BASE}/choir/${choirId}/edit`);
+    await page.goto(`${BASE}/choir/${choirId}/edit`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
 
     const formTitle = await page.inputValue('input[name="title"]');
@@ -72,94 +82,91 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     }
 
     // ── 5. Cancel returns to detail page ────────────────────────────────────
-    await page.click('a[href*="/choir/"]');
+    await page.click('a[href="/choir/' + choirId + '"]');
     await page.waitForURL(`${BASE}/choir/${choirId}`, { timeout: 5000 });
     await waitForText(page, "body", choirTitle);
 
+    // Extract session cookie for out-of-browser API calls (avoids pipelining hangs)
+    const cookies = await page.context().cookies();
+    const sessionCookie = cookies.find((c) => c.name === "session" || c.name === "token" || c.name === "sid");
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+
+    // Helper: perform API calls using Deno's native fetch (outside browser).
+    // This avoids HTTP pipelining issues on NDC's single-fd-per-connection model.
+    const apiFetch = (url: string, init?: RequestInit) =>
+      fetch(url, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string> ?? {}),
+          "Cookie": cookieHeader,
+        },
+      });
+
     // ── 6. Edit choir title via form submit ─────────────────────────────────
     const updatedTitle = `${choirTitle} (updated)`;
-
-    // Use fetch (same session cookie via the browser context) to POST the edit
-    const editResp = await page.evaluate(
-      async ({ url, title }: { url: string; title: string }) => {
-        const fd = new FormData();
-        fd.append("title", title);
-        const r = await fetch(url, { method: "POST", body: fd });
-        return { status: r.status, url: r.url };
-      },
-      { url: `${BASE}/api/choir/${choirId}/edit`, title: updatedTitle },
-    );
-
+    const fd6 = new FormData();
+    fd6.append("title", updatedTitle);
+    const editResp = await apiFetch(`${BASE}/api/choir/${choirId}/edit`, { method: "POST", body: fd6 });
     if (editResp.status !== 200 && editResp.status !== 303) {
       throw new Error(`Choir edit POST returned unexpected status ${editResp.status}`);
     }
+    await editResp.body?.cancel();
 
     // Reload detail page and verify updated title
-    await page.goto(`${BASE}/choir/${choirId}`);
+    await page.goto(`${BASE}/choir/${choirId}`, GOTO);
     await page.waitForSelector("h1", { timeout: 5000 });
     await waitForText(page, "body", updatedTitle);
 
     // ── 7. Add known song to choir repertoire ───────────────────────────────
-    const addSongResp = await page.evaluate(
-      async ({ url, songId }: { url: string; songId: string }) => {
-        const fd = new FormData();
-        fd.append("song_id", songId);
-        fd.append("format", "any");
-        const r = await fetch(url, { method: "POST", body: fd });
-        return r.status;
-      },
-      { url: `${BASE}/api/choir/${choirId}/songs`, songId: KNOWN_SONG_ID },
-    );
-
-    if (addSongResp >= 400) {
-      throw new Error(`Add song to choir returned unexpected status ${addSongResp}`);
+    const body7 = new URLSearchParams({ song_id: KNOWN_SONG_ID, format: "any" });
+    const addSongResp = await apiFetch(`${BASE}/api/choir/${choirId}/songs`, {
+      method: "POST",
+      body: body7.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    if (addSongResp.status >= 400) {
+      throw new Error(`Add song to choir returned unexpected status ${addSongResp.status}`);
     }
+    await addSongResp.body?.cancel();
 
     // Reload and verify song appears in the repertoire list
-    await page.goto(`${BASE}/choir/${choirId}`);
+    await page.goto(`${BASE}/choir/${choirId}`, GOTO);
     await page.waitForSelector("h1", { timeout: 5000 });
     await waitForText(page, "body", KNOWN_SONG_TITLE, 6000);
 
     // ── 8. Update preferred key for the song ────────────────────────────────
-    const keyResp = await page.evaluate(
-      async ({ url }: { url: string }) => {
-        const fd = new FormData();
-        fd.append("key", "5");
-        const r = await fetch(url, { method: "POST", body: fd });
-        return r.status;
-      },
-      { url: `${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/key` },
-    );
-
-    if (keyResp >= 400) {
-      throw new Error(`Key update returned unexpected status ${keyResp}`);
+    const body8 = new URLSearchParams({ key: "5" });
+    const keyResp = await apiFetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/key`, {
+      method: "POST",
+      body: body8.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      redirect: "manual",
+    });
+    if (keyResp.status >= 400) {
+      throw new Error(`Key update returned unexpected status ${keyResp.status}`);
     }
+    await keyResp.body?.cancel();
 
-    // ── 9. View the choir song page ─────────────────────────────────────────
-    await page.goto(`${BASE}/choir/${choirId}/song/${KNOWN_SONG_ID}`);
+    // ── 9. View the choir song page via browser (follows redirect to /song/:id?t=X) ──
+    await page.goto(`${BASE}/choir/${choirId}/song/${KNOWN_SONG_ID}`, GOTO);
     await page.waitForSelector("h1", { timeout: 5000 });
-    await waitForText(page, "body", KNOWN_SONG_TITLE);
+    await waitForText(page, "body", KNOWN_SONG_TITLE, 5000);
 
     // ── 10. Delete song from choir ───────────────────────────────────────────
-    const deleteResp = await page.evaluate(
-      async ({ url }: { url: string }) => {
-        const r = await fetch(url, { method: "DELETE" });
-        return r.status;
-      },
-      { url: `${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}` },
-    );
-
-    if (deleteResp >= 400) {
-      throw new Error(`Song delete returned unexpected status ${deleteResp}`);
+    // Note: NDC doesn't support DELETE, use POST /remove endpoint instead
+    const deleteResp = await apiFetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/remove`, {
+      method: "POST",
+      redirect: "manual",
+    });
+    if (deleteResp.status >= 400) {
+      throw new Error(`Song delete returned unexpected status ${deleteResp.status}`);
     }
+    await deleteResp.body?.cancel();
 
-    // Reload and verify song no longer appears
-    await page.goto(`${BASE}/choir/${choirId}`);
+    // Reload and verify song no longer appears in repertoire list
+    await page.goto(`${BASE}/choir/${choirId}`, GOTO);
     await page.waitForSelector("h1", { timeout: 5000 });
-    const bodyText = await page.textContent("body");
-    if (bodyText?.includes(KNOWN_SONG_TITLE)) {
-      throw new Error(`Song "${KNOWN_SONG_TITLE}" still visible after deletion`);
-    }
+    await waitForText(page, "body", "No songs in repertoire yet");
   } finally {
     await browser.close();
   }

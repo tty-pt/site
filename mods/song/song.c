@@ -505,7 +505,7 @@ song_handler(int fd, char *body)
 static int
 song_details_handler(int fd, char *body)
 {
-	(void)body;  /* SSR is GET requests, body unused */
+	(void)body;
 	
 	char *json = song_json(fd, TRANSP_HTML);
 	int result = call_core_post(fd, json, strlen(json));
@@ -662,11 +662,11 @@ song_edit_post_handler(int fd, char *body)
 	char doc_root[256] = { 0 };
 	char id[128] = { 0 };
 
-	int parse_result = call_mpfd_parse(fd, body);
+	int parse_result = call_query_parse(body);
 	if (parse_result == -1) {
 		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 415);
-		ndc_body(fd, "Expected multipart/form-data");
+		ndc_head(fd, 400);
+		ndc_body(fd, "Failed to parse form body");
 		return 1;
 	}
 
@@ -686,36 +686,42 @@ song_edit_post_handler(int fd, char *body)
 
 	/* Get title */
 	char title[256] = { 0 };
-	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
+	int title_len = call_query_param("title", title, sizeof(title) - 1);
 	if (title_len > 0)
 		title[title_len] = '\0';
 
 	/* Get type */
 	char type[256] = { 0 };
-	int type_len = call_mpfd_get("type", type, sizeof(type) - 1);
+	int type_len = call_query_param("type", type, sizeof(type) - 1);
 	if (type_len > 0)
 		type[type_len] = '\0';
 
 	/* Get yt */
 	char yt[512] = { 0 };
-	call_mpfd_get("yt", yt, sizeof(yt) - 1);
+	call_query_param("yt", yt, sizeof(yt) - 1);
 
 	/* Get audio */
 	char audio[512] = { 0 };
-	call_mpfd_get("audio", audio, sizeof(audio) - 1);
+	call_query_param("audio", audio, sizeof(audio) - 1);
 
 	/* Get pdf */
 	char pdf[512] = { 0 };
-	call_mpfd_get("pdf", pdf, sizeof(pdf) - 1);
+	call_query_param("pdf", pdf, sizeof(pdf) - 1);
 
 	/* Get data */
-	int data_len = call_mpfd_len("data");
 	char *data_content = NULL;
-	if (data_len > 0) {
-		data_content = malloc(data_len + 1);
-		if (data_content) {
-			call_mpfd_get("data", data_content, data_len);
-			data_content[data_len] = '\0';
+	int data_len = 0;
+	{
+		/* Use a generous fixed buffer for chord data */
+		char data_buf[65536] = { 0 };
+		int got = call_query_param("data", data_buf, sizeof(data_buf) - 1);
+		if (got > 0) {
+			data_len = got;
+			data_content = malloc(data_len + 1);
+			if (data_content) {
+				memcpy(data_content, data_buf, data_len);
+				data_content[data_len] = '\0';
+			}
 		}
 	}
 
@@ -791,6 +797,8 @@ song_edit_post_handler(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/song/%s", id);
 	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
 	ndc_close(fd);
 	return 0;

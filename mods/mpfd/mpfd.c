@@ -205,11 +205,8 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 	if (data_len)
 		memcpy(val->data + fname_len, data_start, data_len);
 
-	/* Store value in qmap - qmap handles memory management */
+	/* Store value in qmap - qmap takes ownership of the pointer */
 	qmap_put(mpfd_db, key, val);
-	
-	/* Free our temporary allocation - qmap has made its own copy */
-	free(val);
 	field_count++;
 
 next_part:

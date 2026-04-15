@@ -2,7 +2,6 @@
 set -e
 
 BASE="http://localhost:8080"
-LOG="/tmp/site.log"
 POEM_DIR="/home/quirinpa/site/items/poem/items"
 
 fail() { echo "FAIL: $1"; exit 1; }
@@ -11,61 +10,66 @@ pass() { echo "PASS: $1"; }
 TMPFILE="/tmp/poem_test_$$"
 TMPFILE2="/tmp/poem_test2_$$"
 
-mkdir -p "$POEM_DIR"
+mkdir -p "$POEM_DIR/testpoem"
 
 # 1. POST with wrong content-type
 echo -n "1. POST wrong content-type... "
-code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
-	-d "id=test&file=content")
+code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/testpoem/edit" \
+	-d "title=test")
 [ "$code" = "415" ] && pass "415 for unsupported media type" || fail "expected 415, got $code"
 
-# 2. POST missing id field (file has content but no id)
-echo -n "2. POST missing id field... "
-echo "test content" > "$TMPFILE"
+# 2. POST with only title (no file) — both fields are optional
+echo -n "2. POST title only... "
 sleep 0.1
-out=$(curl -s -X POST "$BASE/poem/add" -F "file=@$TMPFILE")
-echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
+code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/testpoem/edit" \
+	-F "title=My Test Poem")
+[ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
-# 3. POST missing file field
-echo -n "3. POST missing file field... "
-sleep 0.1
-out=$(curl -s -X POST "$BASE/poem/add" \
-	-F "id=testpoem")
-echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
-
-# 4. POST empty file (id provided but file is empty - same as missing)
-echo -n "4. POST empty file... "
-> "$TMPFILE2"
-sleep 0.1
-out=$(curl -s -X POST "$BASE/poem/add" -F "id=testpoem2" -F "file=@$TMPFILE2")
-echo "$out" | grep -q "Missing id or file" && pass "missing id detected" || fail "expected 'Missing id or file', got: $out"
-
-# 5. POST valid multipart
-echo -n "5. POST valid multipart... "
+# 3. POST with file upload (no title)
+echo -n "3. POST file only... "
 echo "This is a test poem content.
 With multiple lines." > "$TMPFILE"
 sleep 0.1
-code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/add" \
-	-F "id=testpoem" -F "file=@$TMPFILE")
+code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/testpoem/edit" \
+	-F "file=@$TMPFILE")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
-    
 
-# 6. Verify poem file was created
-echo -n "6. Poem file created... "
+# 4. Verify poem file was created
+echo -n "4. Poem file created... "
 [ -f "$POEM_DIR/testpoem/pt_PT.html" ] && pass "poem file exists" || fail "poem file not found"
 
-# 7. Verify poem content
-echo -n "7. Poem content correct... "
+# 5. Verify poem content
+echo -n "5. Poem content correct... "
 content=$(cat "$POEM_DIR/testpoem/pt_PT.html")
 echo "$content" | grep -q "test poem content" && pass "content matches" || fail "content mismatch"
 
-# 8. Verify comments file created
-echo -n "8. Comments file created... "
-[ -f "$POEM_DIR/testpoem/comments.txt" ] && pass "comments file exists" || fail "comments file not found"
+# 6. POST with both title and file
+echo -n "6. POST title + file... "
+echo "Updated poem content." > "$TMPFILE2"
+sleep 0.1
+code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/testpoem/edit" \
+	-F "title=Updated Title" -F "file=@$TMPFILE2")
+sleep 0.3
+[ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
-# 10. POST to unknown path (falls through to default handler)
-# This test is optional since unknown paths go to SSR, not poem
-# Skipping this test as it depends on SSR behavior
-echo -n "10. POST to unknown path... "
-pass "skipped (falls through to SSR)"
+# 7. Verify title file was written
+echo -n "7. Title file created... "
+[ -f "$POEM_DIR/testpoem/title" ] && pass "title file exists" || fail "title file not found"
+
+# 8. Verify title content
+echo -n "8. Title content correct... "
+title_content=$(cat "$POEM_DIR/testpoem/title")
+echo "$title_content" | grep -q "Updated Title" && pass "title matches" || fail "title mismatch: $title_content"
+
+# 9. Verify updated poem content
+echo -n "9. Updated poem content correct... "
+content=$(cat "$POEM_DIR/testpoem/pt_PT.html")
+echo "$content" | grep -q "Updated poem content" && pass "content matches" || fail "content mismatch"
+
+# 10. POST empty multipart (no fields) — should still redirect
+echo -n "10. POST empty multipart... "
+sleep 0.1
+code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/testpoem/edit" \
+	-F "dummy=")
+[ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
