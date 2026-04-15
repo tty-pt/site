@@ -11,14 +11,11 @@ fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
 
 cleanup() {
-	rm -rf "$SB_DIR" "$CHOIR_DIR"
-	rm -f /home/quirinpa/site/items/sb/items/index.db
-	rm -f /home/quirinpa/site/items/choir/items/index.db
+	rm -rf "$SB_DIR"/* "$CHOIR_DIR"/*
 }
 
 echo "=== Songbook Module API Tests ==="
 cleanup
-mkdir -p "$SB_DIR" "$CHOIR_DIR"
 
 # 1. Create songbook without auth (should fail)
 echo -n "1. Create songbook without auth... "

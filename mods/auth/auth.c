@@ -520,7 +520,7 @@ void ndx_install(void)
 	ndx_load("./mods/common/common");
 
 	users_map = qmap_open(NULL, "users", QM_STR,
-			qmap_reg(sizeof(struct user)), 0xFF, 0);
+			qmap_reg(sizeof(struct user)), 0xFFFF, 0);
 	sessions_map = qmap_open(NULL, "sess", QM_STR,
 			QM_STR, 0xFF, 0);
 

@@ -278,7 +278,10 @@ NDX_DEF(unsigned, index_open,
 	if (!(flags & 1))
 		return 0;
 
+	snprintf(buf, sizeof(buf), "./items/%s", id);
+	mkdir(buf, 0755);
 	snprintf(buf, sizeof(buf), "./items/%s/items", id);
+	mkdir(buf, 0755);
 
 	dir = opendir(buf);
 	if (!dir) {

@@ -73,8 +73,8 @@ export async function createAndLoginUser(
   base: string,
 ): Promise<TestUser> {
   const user: TestUser = {
-    username: `e2e_${Date.now()}`,
-    password: `pw_${Date.now()}`,
+    username: `e2e_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+    password: `pw_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
   };
 
   await registerUser(base, user);

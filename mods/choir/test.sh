@@ -10,13 +10,11 @@ fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
 
 cleanup() {
-	rm -rf "$CHOIR_DIR"
-	rm -f /home/quirinpa/site/items/choir/items/index.db
+	rm -rf "$CHOIR_DIR"/*
 }
 
 echo "=== Choir Module API Tests ==="
 cleanup
-mkdir -p "$CHOIR_DIR"
 
 # 1. Create choir without auth (should fail)
 echo -n "1. Create choir without auth... "
