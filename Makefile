@@ -32,14 +32,13 @@ pages-test: all
 	@echo "Running pages smoke tests"
 	sh tests/pages/10-pages-render.sh
 
-test:
-	${MAKE} unit-tests pages-test
-
 integration-tests: all
 	@sh tests/integration/run_all.sh
 
 e2e-tests: test-data-dirs
 	deno test --allow-all tests/e2e/
+
+test: unit-tests pages-test e2e-tests
 
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
