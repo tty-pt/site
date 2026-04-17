@@ -13,4 +13,5 @@ NDX_DECL(int, query_parse, char *, query);
 NDX_DECL(int, query_exists, const char *, name);
 NDX_DECL(int, query_param, const char *, name, char *, buf, size_t, buf_len);
 
+
 #endif

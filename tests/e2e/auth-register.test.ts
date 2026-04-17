@@ -4,18 +4,17 @@
  * Tests:
  *   1. Navigate to /auth/register in browser
  *   2. Fill all fields and submit
- *   3. Confirm registration via link found in server log
- *   4. Verify confirmation redirects successfully
+ *   3. Verify registration redirects successfully (users are auto-activated)
+ *   4. Log in with the new account
  *
  * Requires: NDC (8080), Fresh (3000) running.
  */
 
 import { chromium } from "npm:playwright";
-import { confirmUser } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 
-Deno.test("auth: browser register → confirm → can log in", async () => {
+Deno.test("auth: browser register → can log in", async () => {
   const username = `e2e_reg_${Date.now()}`;
   const password = `pw_${Date.now()}`;
 
@@ -43,10 +42,7 @@ Deno.test("auth: browser register → confirm → can log in", async () => {
       throw new Error(`Register redirected to unexpected URL: ${status}`);
     }
 
-    // ── 3. Confirm via link from server log ─────────────────────────────────
-    await confirmUser(BASE, username);
-
-    // ── 4. Now log in with the confirmed account ────────────────────────────
+    // ── 3. Log in with the registered account (users are auto-activated) ────
     await page.goto(`${BASE}/auth/login`);
     await page.waitForSelector('input[name="username"]', { timeout: 5000 });
     await page.fill('input[name="username"]', username);

@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 /* #include <errno.h> */
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <pwd.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
@@ -62,34 +64,16 @@ parse_sb_line(const char *line, char *chord_id, int *transpose, char *format)
 static int
 check_sb_ownership(const char *sb_path, const char *username)
 {
-	if (!username || !*username)
-		return 0;
-
-	char owner_path[1024];
-	snprintf(owner_path, sizeof(owner_path), "%s/.owner", sb_path);
-
-	FILE *fp = fopen(owner_path, "r");
-	if (!fp)
-		return 0;
-
-	char owner[64] = {0};
-	size_t n = fread(owner, 1, sizeof(owner) - 1, fp);
-	fclose(fp);
-	if (n == 0)
-		return 0;
-	owner[n] = '\0';
-
-	/* Remove trailing newline */
-	if (owner[n - 1] == '\n')
-		owner[n - 1] = '\0';
-
-	return strcmp(owner, username) == 0;
+	return call_item_check_ownership(sb_path, username);
 }
 
 /* Check if user owns the choir associated with this songbook */
 static int
 check_choir_ownership_for_sb(const char *doc_root, const char *sb_path, const char *username)
 {
+	if (!username || !*username)
+		return 0;
+
 	char choir_file[1024];
 	snprintf(choir_file, sizeof(choir_file), "%s/choir", sb_path);
 
@@ -108,28 +92,11 @@ check_choir_ownership_for_sb(const char *doc_root, const char *sb_path, const ch
 	if (choir_id[n - 1] == '\n')
 		choir_id[n - 1] = '\0';
 
-	/* Check choir ownership */
+	/* Check choir ownership via owner file */
 	char choir_path[1024];
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, choir_id);
 
-	char owner_path[1024];
-	snprintf(owner_path, sizeof(owner_path), "%s/.owner", choir_path);
-
-	FILE *ofp = fopen(owner_path, "r");
-	if (!ofp)
-		return 0;
-
-	char owner[64] = {0};
-	n = fread(owner, 1, sizeof(owner) - 1, ofp);
-	fclose(ofp);
-	if (n == 0)
-		return 0;
-	owner[n] = '\0';
-
-	if (owner[n - 1] == '\n')
-		owner[n - 1] = '\0';
-
-	return strcmp(owner, username) == 0;
+	return call_item_check_ownership(choir_path, username);
 }
 
 /* Get random chord by type/format - uses song module's type index */
@@ -202,24 +169,7 @@ handle_sb_create(int fd, char *body)
 	char choir_path[512];
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, choir);
 
-	char choir_owner_path[1024];
-	snprintf(choir_owner_path, sizeof(choir_owner_path), "%s/.owner", choir_path);
-
-	FILE *cfp = fopen(choir_owner_path, "r");
-	if (!cfp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Choir not found");
-		return 1;
-	}
-
-	char choir_owner[64] = {0};
-	size_t n = fread(choir_owner, 1, sizeof(choir_owner) - 1, cfp);
-	fclose(cfp);
-	if (n > 0 && choir_owner[n - 1] == '\n')
-		choir_owner[n - 1] = '\0';
-
-	if (strcmp(choir_owner, username) != 0) {
+	if (!call_item_check_ownership(choir_path, username)) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 403);
 		ndc_body(fd, "You don't own this choir");
@@ -237,14 +187,8 @@ handle_sb_create(int fd, char *body)
 		return 1;
 	}
 
-	/* Write .owner */
-	char owner_path[1024];
-	snprintf(owner_path, sizeof(owner_path), "%s/.owner", sb_path);
-	FILE *ofp = fopen(owner_path, "w");
-	if (ofp) {
-		fwrite(username, 1, strlen(username), ofp);
-		fclose(ofp);
-	}
+	/* Record ownership */
+	call_item_record_ownership(sb_path, username);
 
 	/* Write title */
 	char title_path[1024];
@@ -384,7 +328,6 @@ handle_sb_edit_get(int fd, char *body)
 
 	/* Read data.txt */
 	char *data_content = NULL;
-	size_t data_len = 0;
 	char data_path[512];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 	FILE *dfp = fopen(data_path, "r");
@@ -395,55 +338,102 @@ handle_sb_edit_get(int fd, char *body)
 		if (fsize > 0 && fsize < 65536) {
 			data_content = malloc(fsize + 1);
 			if (data_content) {
-				data_len = fread(data_content, 1, fsize, dfp);
-				data_content[data_len] = '\0';
+				size_t n = fread(data_content, 1, fsize, dfp);
+				data_content[n] = '\0';
 			}
 		}
 		fclose(dfp);
 	}
 
-	/* Build POST body */
-	char post_body[70000] = {0};
-	size_t pos = 0;
+	/* Build allChords JSON from items/song/items/ */
+	size_t ac_cap = 65536;
+	char *ac_json = malloc(ac_cap);
+	if (!ac_json) return 1;
+	strcpy(ac_json, "[");
+	int ac_first = 1;
 
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "title=");
-	if (title[0]) {
-		for (size_t i = 0; title[i] && pos < sizeof(post_body) - 4; i++) {
-			char c = title[i];
-			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
-			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
-			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
-			else { post_body[pos++] = c; }
+	char songs_dir[512];
+	snprintf(songs_dir, sizeof(songs_dir), "%s/items/song/items",
+		doc_root[0] ? doc_root : ".");
+	DIR *sdp = opendir(songs_dir);
+	if (sdp) {
+		struct dirent *sde;
+		while ((sde = readdir(sdp)) != NULL) {
+			if (sde->d_name[0] == '.') continue;
+
+			char stitle[256] = {0}, stype[64] = {0}, spath[768];
+
+			snprintf(spath, sizeof(spath), "%s/%s/title", songs_dir, sde->d_name);
+			FILE *stfp = fopen(spath, "r");
+			if (!stfp) continue;
+			if (fgets(stitle, sizeof(stitle) - 1, stfp)) {
+				size_t l = strlen(stitle);
+				if (l > 0 && stitle[l-1] == '\n') stitle[l-1] = '\0';
+			}
+			fclose(stfp);
+
+			snprintf(spath, sizeof(spath), "%s/%s/type", songs_dir, sde->d_name);
+			FILE *stypfp = fopen(spath, "r");
+			if (stypfp) {
+				if (fgets(stype, sizeof(stype) - 1, stypfp)) {
+					size_t l = strlen(stype);
+					if (l > 0 && stype[l-1] == '\n') stype[l-1] = '\0';
+				}
+				fclose(stypfp);
+			}
+
+			char esc_sid[256], esc_stitle[512], esc_stype[128];
+			call_json_escape(sde->d_name, esc_sid, sizeof(esc_sid));
+			call_json_escape(stitle, esc_stitle, sizeof(esc_stitle));
+			call_json_escape(stype, esc_stype, sizeof(esc_stype));
+
+			char item[900];
+			snprintf(item, sizeof(item),
+				"%s{\"id\":\"%s\",\"title\":\"%s\",\"type\":\"%s\"}",
+				ac_first ? "" : ",", esc_sid, esc_stitle, esc_stype);
+			ac_first = 0;
+
+			size_t cur = strlen(ac_json);
+			size_t need = cur + strlen(item) + 4;
+			if (need >= ac_cap) {
+				ac_cap = need * 2;
+				char *tmp = realloc(ac_json, ac_cap);
+				if (!tmp) { free(ac_json); closedir(sdp); return 1; }
+				ac_json = tmp;
+			}
+			strcat(ac_json, item);
 		}
+		closedir(sdp);
+	}
+	strcat(ac_json, "]");
+
+	char enc_title[512], enc_choir[256], enc_songs[65536];
+	call_url_encode(title, enc_title, sizeof(enc_title));
+	call_url_encode(choir, enc_choir, sizeof(enc_choir));
+	if (data_content) {
+		call_url_encode(data_content, enc_songs, sizeof(enc_songs));
+		free(data_content);
+	} else {
+		enc_songs[0] = '\0';
 	}
 
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&choir=");
-	if (choir[0]) {
-		for (size_t i = 0; choir[i] && pos < sizeof(post_body) - 4; i++) {
-			char c = choir[i];
-			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
-			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
-			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
-			else { post_body[pos++] = c; }
-		}
-	}
+	size_t ac_enc_cap = strlen(ac_json) * 3 + 4;
+	char *enc_ac = malloc(ac_enc_cap);
+	if (!enc_ac) { free(ac_json); return 1; }
+	call_url_encode(ac_json, enc_ac, ac_enc_cap);
+	free(ac_json);
 
-	if (data_content && data_len > 0) {
-		pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&songs=");
-		for (size_t i = 0; i < data_len && pos < sizeof(post_body) - 10; i++) {
-			char c = data_content[i];
-			if (c == '%') { pos += snprintf(post_body + pos, 4, "%%25"); }
-			else if (c == ' ') { pos += snprintf(post_body + pos, 4, "%%20"); }
-			else if (c == '\n') { pos += snprintf(post_body + pos, 4, "%%0A"); }
-			else if (c == ':') { pos += snprintf(post_body + pos, 4, "%%3A"); }
-			else { post_body[pos++] = c; }
-		}
-	}
+	size_t pb_cap = strlen(enc_title) + strlen(enc_choir) + strlen(enc_songs) + strlen(enc_ac) + 64;
+	char *post_body = malloc(pb_cap);
+	if (!post_body) { free(enc_ac); return 1; }
+	int len = snprintf(post_body, pb_cap,
+		"title=%s&choir=%s&songs=%s&allChords=%s",
+		enc_title, enc_choir, enc_songs, enc_ac);
+	free(enc_ac);
 
-	if (data_content) free(data_content);
-
-	/* POST to Fresh */
-	return call_core_post(fd, post_body, strlen(post_body));
+	int r = call_core_post(fd, post_body, len);
+	free(post_body);
+	return r;
 }
 
 /* POST /songbook/:id/edit - Edit songbook */
@@ -865,8 +855,7 @@ handle_sb_delete(int fd, char *body)
 
 	/* Delete files */
 	char path_buf[1024];
-	snprintf(path_buf, sizeof(path_buf), "%s/.owner", sb_path);
-	unlink(path_buf);
+	call_item_unlink_owner(sb_path);
 	snprintf(path_buf, sizeof(path_buf), "%s/title", sb_path);
 	unlink(path_buf);
 	snprintf(path_buf, sizeof(path_buf), "%s/choir", sb_path);
@@ -918,15 +907,7 @@ songbook_json(int fd)
 	}
 
 	/* Read owner */
-	snprintf(path_buf, sizeof(path_buf), "%s/.owner", sb_path);
-	FILE *ofp = fopen(path_buf, "r");
-	if (ofp) {
-		if (fgets(owner, sizeof(owner) - 1, ofp)) {
-			size_t l = strlen(owner);
-			if (l > 0 && owner[l - 1] == '\n') owner[l - 1] = '\0';
-		}
-		fclose(ofp);
-	}
+	call_item_read_owner(sb_path, owner, sizeof(owner));
 
 	/* Read choir */
 	snprintf(path_buf, sizeof(path_buf), "%s/choir", sb_path);

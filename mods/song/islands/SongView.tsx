@@ -16,6 +16,7 @@ interface SongDetailProps {
   useLatin: boolean;
   showMedia: boolean;
   originalKey: number;
+  owner?: boolean;
 }
 
 const KEY_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -150,7 +151,7 @@ export default function SongDetailIsland(props: SongDetailProps) {
     </form>
   );
 
-  const editLink = props.user && (
+  const editLink = props.owner && (
     <a href={`/song/${props.id}/edit`} className="btn">
       Edit
     </a>

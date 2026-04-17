@@ -76,6 +76,45 @@ setsid ndc -C . -p 8080 -d >> /tmp/site.log 2>&1 &
 # NDC spawns Deno internally; wait for "deno ready" in /tmp/site.log
 ```
 
+## Chroot Setup
+
+The site runs inside a chroot at the repo root. `ndx_install()` in `mods/auth/auth.c` creates the necessary `./etc/` files automatically on first start, but the shell and its libraries must be set up manually once per deployment.
+
+### Linux
+
+`./etc/nsswitch.conf` is written automatically by `ndx_install()` on first start — no manual step needed.
+
+Copy `sh` and its shared libraries into the chroot:
+
+```bash
+mkdir -p ./bin ./lib ./lib/x86_64-linux-gnu
+cp /bin/sh ./bin/sh
+
+# Mirror every library listed by ldd
+ldd /bin/sh
+# e.g. copy /lib/x86_64-linux-gnu/libc.so.6 → ./lib/x86_64-linux-gnu/libc.so.6
+#          /lib64/ld-linux-x86-64.so.2       → ./lib64/ld-linux-x86-64.so.2
+
+# NSS files resolver (needed for getpwnam() to read ./etc/passwd)
+cp /lib/x86_64-linux-gnu/libnss_files.so.2 ./lib/x86_64-linux-gnu/
+```
+
+Paths vary by distro — use `ldd /bin/sh` and `ldd /lib/x86_64-linux-gnu/libnss_files.so.2` to find all transitive deps.
+
+`./etc/passwd`, `./etc/shadow`, `./etc/group` are maintained automatically by the auth module.
+
+### OpenBSD
+
+Run once after initial deployment to bootstrap `pwd.db`/`spwd.db` from the existing `master.passwd`:
+
+```bash
+pwd_mkdb -d /path/to/site/etc /path/to/site/etc/master.passwd
+```
+
+`pwd_mkdb` is called automatically by `handle_register()` on every new registration, so this one-time step is only needed to cover pre-existing users.
+
+Copy `sh` and its libraries the same way as Linux, adjusting paths for OpenBSD conventions.
+
 ## Testing
 
 ```bash

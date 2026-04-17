@@ -2,8 +2,6 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
-const repoRoot = Deno.cwd();
-
 interface Song {
   chordId: string;
   transpose: number;
@@ -20,7 +18,6 @@ interface SbEditData {
   user: string | null;
   songbook: Songbook | null;
   allChords: Chord[];
-  error?: string;
 }
 
 interface Songbook {
@@ -30,87 +27,41 @@ interface Songbook {
   songs: Song[];
 }
 
-function urlDecode(str: string): string {
-  return str.replace(/%([0-9A-Fa-f]{2})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
-  ).replace(/%0A/g, "\n");
-}
-
-function parseBody(body: string | null): { title: string; choir: string; songs: Song[] } {
-  if (!body) return { title: "", choir: "", songs: [] };
+function parseBody(body: string | null): { title: string; choir: string; songs: Song[]; allChords: Chord[] } {
+  if (!body) return { title: "", choir: "", songs: [], allChords: [] };
 
   const params = new URLSearchParams(body);
-  const title = urlDecode(params.get("title") || "");
-  const choir = urlDecode(params.get("choir") || "");
-  
-  const songsStr = params.get("songs") || "";
-  const songs: Song[] = songsStr.split("\n").filter(line => line.trim()).map(line => {
+  const title = params.get("title") ?? "";
+  const choir = params.get("choir") ?? "";
+
+  const songsStr = params.get("songs") ?? "";
+  const songs: Song[] = songsStr.split("\n").filter((l) => l.trim()).map((line) => {
     const parts = line.split(":");
     return {
-      chordId: parts[0] || "",
-      transpose: parseInt(parts[1] || "0", 10),
-      format: parts[2] || "any",
+      chordId: parts[0] ?? "",
+      transpose: parseInt(parts[1] ?? "0", 10),
+      format: parts[2] ?? "any",
     };
   });
 
-  return { title, choir, songs };
-}
-
-async function getAllChords(): Promise<Chord[]> {
-  const chordsPath = `${repoRoot}/items/song/items`;
-  const chords: Chord[] = [];
-
-  try {
-    for await (const entry of Deno.readDir(chordsPath)) {
-      if (!entry.isDirectory || entry.name.startsWith(".")) continue;
-
-      const chordPath = `${chordsPath}/${entry.name}`;
-      let title = entry.name;
-      try {
-        title = (await Deno.readTextFile(`${chordPath}/title`)).trim();
-      } catch {
-        // No title file
-      }
-
-      let type = "";
-      try {
-        type = (await Deno.readTextFile(`${chordPath}/type`)).trim();
-      } catch {
-        // No type file
-      }
-
-      chords.push({ id: entry.name, title, type });
+  let allChords: Chord[] = [];
+  const allChordsStr = params.get("allChords");
+  if (allChordsStr) {
+    try {
+      allChords = JSON.parse(allChordsStr);
+    } catch {
+      allChords = [];
     }
-  } catch {
-    // No chords directory
   }
 
-  return chords.sort((a, b) => a.title.localeCompare(b.title));
+  return { title, choir, songs, allChords };
 }
 
 export const handler: Handlers<SbEditData, State> = {
   async POST(req, ctx) {
     const body = await req.text();
-    const { title, choir, songs } = parseBody(body);
+    const { title, choir, songs, allChords } = parseBody(body);
     const id = ctx.params.id;
-
-    return ctx.render({
-      user: ctx.state.user,
-      songbook: { id, title, choir, songs },
-      allChords: [],
-    });
-  },
-
-  async GET(req, ctx) {
-    const body = await req.text();
-    const { title, choir, songs } = parseBody(body);
-    const id = ctx.params.id;
-
-    if (!title && !songs.length) {
-      return ctx.renderNotFound();
-    }
-
-    const allChords = await getAllChords();
 
     return ctx.render({
       user: ctx.state.user,

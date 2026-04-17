@@ -36,13 +36,29 @@ Deno.test("songbook randomize: create songbook → seed data → click randomize
     sbId = sbUrl.split("/songbook/")[1];
     if (!sbId) throw new Error(`Could not extract songbook id from ${sbUrl}`);
 
-    // ── 2. Seed data.txt so the detail page renders a SongItem ───────────────
-    // Format: <song_id>:<transpose>:<format>
-    const sbPath = `items/songbook/items/${sbId}`;
-    await Deno.writeTextFile(
-      `${sbPath}/data.txt`,
-      `${SEED_SONG_ID}:0:any\n`,
-    );
+    // ── 2. Seed data via POST to edit endpoint ────────────────────────────────
+    // Get the session cookie from the browser context to authenticate the fetch
+    const cookies = await page.context().cookies();
+    const sessionCookie = cookies.find((c) => c.name === "QSESSION");
+    const cookieHeader = sessionCookie ? `QSESSION=${sessionCookie.value}` : "";
+
+    const formData = new FormData();
+    formData.set("amount", "1");
+    formData.set("song_0", SEED_SONG_ID);
+    formData.set("fmt_0", "any");
+    formData.set("t_0", "0");
+
+    const editRes = await fetch(`${BASE}/songbook/${sbId}/edit`, {
+      method: "POST",
+      headers: { "Cookie": cookieHeader },
+      body: formData,
+      redirect: "manual",
+    });
+    if (editRes.status !== 303 && editRes.status !== 200) {
+      await editRes.text();
+      throw new Error(`Failed to seed songbook data: HTTP ${editRes.status}`);
+    }
+    await editRes.body?.cancel();
 
     // ── 3. Navigate to songbook detail page ───────────────────────────────────
     await page.goto(`${BASE}/songbook/${sbId}`);
@@ -65,14 +81,5 @@ Deno.test("songbook randomize: create songbook → seed data → click randomize
     }
   } finally {
     await browser.close();
-
-    // Cleanup
-    if (sbId) {
-      try {
-        await Deno.remove(`items/songbook/items/${sbId}`, { recursive: true });
-      } catch {
-        // ignore
-      }
-    }
   }
 });

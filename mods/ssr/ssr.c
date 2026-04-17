@@ -29,7 +29,42 @@ static char repo_root[4096];
 static void
 start_deno(void)
 {
-	pid_t pid = fork();
+	pid_t setup_pid, pid;
+	int status;
+
+	/* Run setup-routes.ts synchronously first */
+	setup_pid = fork();
+	if (setup_pid < 0) {
+		perror("ssr: fork setup");
+		return;
+	}
+	if (setup_pid == 0) {
+		int logfd = open(DENO_LOG,
+			O_WRONLY | O_CREAT | O_APPEND, 0644);
+		if (logfd >= 0) {
+			dup2(logfd, STDOUT_FILENO);
+			dup2(logfd, STDERR_FILENO);
+			close(logfd);
+		}
+		if (chdir(repo_root) < 0) {
+			perror("ssr: chdir setup");
+			_exit(1);
+		}
+		setenv("HOME", "/home/quirinpa", 1);
+		char *deno = "/home/quirinpa/.deno/bin/deno";
+		char *argv[] = { deno, "run", "--allow-read",
+			"--allow-write", "scripts/setup-routes.ts", NULL };
+		execv(deno, argv);
+		perror("ssr: execvp deno setup");
+		_exit(1);
+	}
+	waitpid(setup_pid, &status, 0);
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		fprintf(stderr, "ssr: setup-routes exited with %d\n",
+			WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+
+	/* Now start the server as a long-running process */
+	pid = fork();
 
 	if (pid < 0) {
 		perror("ssr: fork");
@@ -37,7 +72,9 @@ start_deno(void)
 	}
 
 	if (pid == 0) {
-		/* child */
+		/* child: own process group so killpg kills all descendants */
+		setpgid(0, 0);
+
 		int logfd = open(DENO_LOG,
 			O_WRONLY | O_CREAT | O_APPEND, 0644);
 		if (logfd >= 0) {
@@ -51,8 +88,10 @@ start_deno(void)
 			_exit(1);
 		}
 
-		char *argv[] = { "deno", "task", "serve", NULL };
-		execvp("deno", argv);
+		setenv("HOME", "/home/quirinpa", 1);
+		char *deno = "/home/quirinpa/.deno/bin/deno";
+		char *argv[] = { deno, "run", "-A", "main.ts", NULL };
+		execv(deno, argv);
 		perror("ssr: execvp deno");
 		_exit(1);
 	}
@@ -143,7 +182,7 @@ NDX_DEF(int, on_ndc_exit, int, i)
 {
 	if (deno_pid > 0) {
 		fprintf(stderr, "ssr: stopping deno pid %d\n", (int)deno_pid);
-		kill(deno_pid, SIGTERM);
+		killpg(deno_pid, SIGTERM);
 		waitpid(deno_pid, NULL, 0);
 		deno_pid = -1;
 	}

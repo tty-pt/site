@@ -16,6 +16,7 @@ interface SongDetailData {
   useLatin: boolean;
   showMedia: boolean;
   originalKey: number;
+  owner: boolean;
 }
 
 /**

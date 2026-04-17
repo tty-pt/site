@@ -14,6 +14,7 @@
 #include "../mpfd/mpfd.h"
 #include "../index/index.h"
 #include "../common/common.h"
+#include "../auth/auth.h"
 #include "../../lib/transp/transp.h"
 
 #define CHORDS_ITEMS_PATH "items/song/items"
@@ -300,6 +301,17 @@ char *song_json(int fd, int flags) {
 	call_json_escape(audio, esc_audio, sizeof(esc_audio));
 	call_json_escape(pdf, esc_pdf, sizeof(esc_pdf));
 
+	/* Determine ownership */
+	int is_owner = 0;
+	{
+		char cookie[256] = {0}, token[64] = {0};
+		ndc_env_get(fd, cookie, "HTTP_COOKIE");
+		call_get_cookie(cookie, token, sizeof(token));
+		const char *username = call_get_session_user(token);
+		if (username && *username)
+			is_owner = call_item_check_ownership(item_path, username);
+	}
+
 	/* Build the final JSON string */
 	size_t resp_len = strlen(escaped_data) + strlen(esc_title) +
 		strlen(esc_yt) + strlen(esc_audio) +
@@ -315,9 +327,11 @@ char *song_json(int fd, int flags) {
 				"\"yt\":\"%s\","
 				"\"audio\":\"%s\","
 				"\"pdf\":\"%s\","
-				"\"originalKey\":%d"
+				"\"originalKey\":%d,"
+				"\"owner\":%s"
 				"}",
-				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf, original_key);
+				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf, original_key,
+				is_owner ? "true" : "false");
 	}
 
 	free(escaped_data);
@@ -522,6 +536,18 @@ song_edit_get_handler(int fd, char *body)
 	char doc_root[256] = { 0 };
 	char id[128] = { 0 };
 
+	/* Auth + ownership check */
+	char cookie[256] = { 0 }, token[64] = { 0 };
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 1;
+	}
+
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
@@ -535,6 +561,20 @@ song_edit_get_handler(int fd, char *body)
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
 		doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
+
+	if (!call_item_check_ownership(item_path, username)) {
+		struct stat st;
+		if (stat(item_path, &st) != 0) {
+			ndc_header(fd, "Content-Type", "text/plain");
+			ndc_head(fd, 404);
+			ndc_body(fd, "Song not found");
+			return 1;
+		}
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "Forbidden");
+		return 1;
+	}
 
 	/* Read title */
 	char title[256] = { 0 };
@@ -662,6 +702,19 @@ song_edit_post_handler(int fd, char *body)
 	char doc_root[256] = { 0 };
 	char id[128] = { 0 };
 
+	/* Auth check */
+	char cookie[256] = { 0 };
+	char token[64] = { 0 };
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 1;
+	}
+
 	int parse_result = call_query_parse(body);
 	if (parse_result == -1) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -683,6 +736,22 @@ song_edit_post_handler(int fd, char *body)
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
 		doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
+
+	/* Ownership check */
+	if (!call_item_check_ownership(item_path, username)) {
+		/* Distinguish 404 from 403 */
+		struct stat st;
+		if (stat(item_path, &st) != 0) {
+			ndc_header(fd, "Content-Type", "text/plain");
+			ndc_head(fd, 404);
+			ndc_body(fd, "Song not found");
+			return 1;
+		}
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "You don't own this song");
+		return 1;
+	}
 
 	/* Get title */
 	char title[256] = { 0 };
@@ -823,6 +892,7 @@ void ndx_install(void)
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
+	ndx_load("./mods/auth/auth");
 
 	index_hd = call_index_open("Song", 0, 1);
 

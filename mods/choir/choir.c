@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <pwd.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
@@ -24,27 +25,7 @@
 static int
 check_choir_ownership(const char *choir_path, const char *username)
 {
-	if (!username || !*username)
-		return 0;
-
-	char owner_path[1024];
-	snprintf(owner_path, sizeof(owner_path), "%s/.owner", choir_path);
-
-	FILE *fp = fopen(owner_path, "r");
-	if (!fp)
-		return 0;
-
-	char owner[64] = {0};
-	size_t n = fread(owner, 1, sizeof(owner) - 1, fp);
-	fclose(fp);
-	if (n == 0)
-		return 0;
-	owner[n] = '\0';
-
-	if (owner[n - 1] == '\n')
-		owner[n - 1] = '\0';
-
-	return strcmp(owner, username) == 0;
+	return call_item_check_ownership(choir_path, username);
 }
 
 
@@ -115,18 +96,8 @@ handle_choir_create(int fd, char *body)
 		return 1;
 	}
 
-	/* Write .owner file */
-	char owner_path[1024];
-	snprintf(owner_path, sizeof(owner_path), "%s/.owner", choir_path);
-	FILE *ofp = fopen(owner_path, "w");
-	if (!ofp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to write owner file");
-		return 1;
-	}
-	fwrite(username, 1, strlen(username), ofp);
-	fclose(ofp);
+	/* Record ownership */
+	call_item_record_ownership(choir_path, username);
 
 	/* Write title file */
 	char title_path[1024];
@@ -311,8 +282,7 @@ handle_choir_delete(int fd, char *body)
 
 	/* Delete directory (simple approach - just remove key files) */
 	char path_buf[1024];
-	snprintf(path_buf, sizeof(path_buf), "%s/.owner", choir_path);
-	unlink(path_buf);
+	call_item_unlink_owner(choir_path);
 	snprintf(path_buf, sizeof(path_buf), "%s/title", choir_path);
 	unlink(path_buf);
 	snprintf(path_buf, sizeof(path_buf), "%s/counter", choir_path);
@@ -500,15 +470,8 @@ choir_json(int fd)
 		return NULL;
 	}
 
-	snprintf(path_buf, sizeof(path_buf), "%s/.owner", choir_path);
-	FILE *ofp = fopen(path_buf, "r");
-	if (ofp) {
-		if (fgets(owner, sizeof(owner) - 1, ofp)) {
-			size_t l = strlen(owner);
-			if (l > 0 && owner[l - 1] == '\n') owner[l - 1] = '\0';
-		}
-		fclose(ofp);
-	}
+	/* Get owner username */
+	call_item_read_owner(choir_path, owner, sizeof(owner));
 
 	snprintf(path_buf, sizeof(path_buf), "%s/counter", choir_path);
 	FILE *cfp = fopen(path_buf, "r");
@@ -1098,6 +1061,86 @@ handle_choir_add_get(int fd, char *body)
 	return call_core_get(fd, body);
 }
 
+/* GET /choir/:id/edit - read choir data and proxy to Fresh */
+static int
+handle_choir_edit_get(int fd, char *body)
+{
+	(void)body;
+
+	char id[128] = {0};
+	char doc_root[256] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	if (!doc_root[0]) strcpy(doc_root, ".");
+
+	char choir_path[512];
+	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, id);
+
+	struct stat st;
+	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 404);
+		ndc_body(fd, "Choir not found");
+		return 1;
+	}
+
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 1;
+	}
+
+	if (!check_choir_ownership(choir_path, username)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "You don't own this choir");
+		return 1;
+	}
+
+	char path_buf[1024];
+	char title[256] = {0}, format[2048] = {0};
+
+	snprintf(path_buf, sizeof(path_buf), "%s/title", choir_path);
+	FILE *tfp = fopen(path_buf, "r");
+	if (tfp) {
+		if (fgets(title, sizeof(title) - 1, tfp)) {
+			size_t l = strlen(title);
+			if (l > 0 && title[l-1] == '\n') title[l-1] = '\0';
+		}
+		fclose(tfp);
+	}
+
+	snprintf(path_buf, sizeof(path_buf), "%s/format", choir_path);
+	FILE *ffp = fopen(path_buf, "r");
+	if (ffp) {
+		size_t n = fread(format, 1, sizeof(format) - 1, ffp);
+		format[n] = '\0';
+		if (n > 0 && format[n-1] == '\n') format[n-1] = '\0';
+		fclose(ffp);
+	} else {
+		strcpy(format, "entrada\naleluia\nofertorio\nsanto\ncomunhao\nacao_de_gracas\nsaida\nany");
+	}
+
+	char enc_id[256], enc_title[512], enc_format[6144];
+	call_url_encode(id, enc_id, sizeof(enc_id));
+	call_url_encode(title, enc_title, sizeof(enc_title));
+	call_url_encode(format, enc_format, sizeof(enc_format));
+
+	char post_body[8192];
+	int len = snprintf(post_body, sizeof(post_body),
+		"id=%s&title=%s&format=%s",
+		enc_id, enc_title, enc_format);
+
+	return call_core_post(fd, post_body, len);
+}
+
 /* POST /api/choir/:id/song/:song_id/remove - Remove song (HTML form-friendly alias for DELETE) */
 static int
 handle_choir_song_remove(int fd, char *body)
@@ -1193,6 +1236,7 @@ ndx_install(void)
 	ndx_load("./mods/song/song");
 
 	ndc_register_handler("GET:/choir/add", handle_choir_add_get);
+	ndc_register_handler("GET:/choir/:id/edit", handle_choir_edit_get);
 	ndc_register_handler("GET:/choir/:id", choir_details_handler);
 	ndc_register_handler("GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	ndc_register_handler("GET:/api/choir/:id/songs", handle_choir_songs_list);

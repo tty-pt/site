@@ -10,12 +10,11 @@ interface PoemEditData {
 
 export const handler: Handlers<PoemEditData, State> = {
   async POST(req, ctx) {
-    const body = await req.text();
-    const params = new URLSearchParams(body);
+    const data = JSON.parse(await req.text());
     return ctx.render({
       user: ctx.state.user,
       id: ctx.params.id,
-      title: params.get("title") ?? "",
+      title: data.title ?? "",
     });
   },
 };

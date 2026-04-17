@@ -78,7 +78,6 @@ export async function createAndLoginUser(
   };
 
   await registerUser(base, user);
-  await confirmUser(base, user.username);
   await loginUser(page, base, user);
 
   return user;

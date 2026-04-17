@@ -5,13 +5,10 @@ export default function PoemAdd({ user }: { user: string | null }) {
     <Layout user={user} title="Add Poem" path="/poem/add">
       <form action="/poem/add" method="POST" encType="multipart/form-data">
         <label>
-          ID: <input required name="id" />
+          Title: <input required name="title" />
         </label>
         <label>
-          Title: <input name="title" />
-        </label>
-        <label>
-          File: <input required type="file" name="file" />
+          File: <input type="file" name="file" />
         </label>
         <button type="submit">Upload</button>
       </form>

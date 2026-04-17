@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <dirent.h>
+#include <errno.h>
 #include <iconv.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <ttypt/qmap.h>
 #include <ttypt/ndx-mod.h>
@@ -27,9 +29,11 @@ static size_t modules_rem = sizeof(modules_json),
 static unsigned module_hd;
 static iconv_t cd;
 
-int index_id(
-		char *result, size_t result_len,
-		const char *title, size_t title_len)
+NDX_DEF(int, index_id,
+		char *, result,
+		size_t, result_len,
+		const char *, title,
+		size_t, title_len)
 {
 	size_t i, j;
 	char *o = result;
@@ -110,6 +114,19 @@ static int index_add_handler(
 	unsigned hd;
 	FILE *tfp;
 
+	/* Require authenticated session */
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 401;
+	}
+
 	parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1) {
 		ndc_header(fd, "Content-Type", "text/plain");
@@ -136,12 +153,15 @@ static int index_add_handler(
 
 	int r = mkdir(path, 0755);
 
-	if (r == -1) {
+	if (r == -1 && errno != EEXIST) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 403);
 		ndc_body(fd, "You don't have permissions for that");
 		return 403;
 	}
+
+	/* Record ownership */
+	call_item_record_ownership(path, username);
 
 	snprintf(path + path_len,
 			sizeof(path) - path_len,
@@ -157,21 +177,6 @@ static int index_add_handler(
 
 	fwrite(title, 1, strlen(title), tfp);
 	fclose(tfp);
-
-	/* Write .owner file from session */
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (username && *username) {
-		snprintf(path + path_len, sizeof(path) - path_len, "/.owner");
-		FILE *ofp = fopen(path, "w");
-		if (ofp) {
-			fwrite(username, 1, strlen(username), ofp);
-			fclose(ofp);
-		}
-	}
 
 	hd = *(unsigned *) qmap_get(module_hd, module);
 	qmap_put(hd, id, title);
@@ -330,6 +335,14 @@ NDX_DEF(unsigned, index_put,
 		char *, value)
 {
 	return qmap_put(hd, key, value);
+}
+
+NDX_DEF(int, index_del,
+		unsigned, hd,
+		char *, key)
+{
+	qmap_del(hd, key);
+	return 0;
 }
 
 NDX_DEF(unsigned, index_get,

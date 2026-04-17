@@ -13,10 +13,7 @@
 import { chromium } from "npm:playwright";
 import {
   createAndLoginUser,
-  loginUser,
   logoutUser,
-  registerUser,
-  confirmUser,
   waitForText,
 } from "./helpers/auth.ts";
 
@@ -43,13 +40,7 @@ Deno.test("choir ownership: non-owner cannot see edit menu or edit choir", async
     // ── 2. Log out user A, register and log in user B ────────────────────────
     await logoutUser(page, BASE);
 
-    const userB = {
-      username: `e2e_userb_${Date.now()}`,
-      password: `pw_b_${Date.now()}`,
-    };
-    await registerUser(BASE, userB);
-    await confirmUser(BASE, userB.username);
-    await loginUser(page, BASE, userB);
+    await createAndLoginUser(page, BASE);
 
     // ── 3. User B visits choir detail page ───────────────────────────────────
     await page.goto(`${BASE}/choir/${choirId}`);

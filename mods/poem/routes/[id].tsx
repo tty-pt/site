@@ -2,18 +2,31 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import type { State } from "#/routes/_middleware.ts";
 import PoemDetail from "@/poem/PoemDetail.tsx";
 
-export const handler: Handlers<unknown, State> = {
+interface PoemDetailData {
+  user: string | null;
+  id: string;
+  title: string;
+  html: string;
+  owner: boolean;
+}
+
+export const handler: Handlers<PoemDetailData, State> = {
   async GET(_req, ctx) {
     return ctx.renderNotFound();
   },
 
   async POST(req, ctx) {
-    const content = await req.text();
-    const id = ctx.params.id;
-    return ctx.render({ user: ctx.state.user, id, html: content });
+    const data = JSON.parse(await req.text());
+    return ctx.render({
+      user: ctx.state.user,
+      id: ctx.params.id,
+      title: data.title ?? "",
+      html: data.html ?? "",
+      owner: data.owner === true,
+    });
   },
 };
 
-export default function PoemPage({ data }: PageProps<{ user: string | null; id: string; html: string }>) {
-  return <PoemDetail user={data.user} id={data.id} html={data.html} />;
+export default function PoemPage({ data }: PageProps<PoemDetailData>) {
+  return <PoemDetail user={data.user} id={data.id} title={data.title} html={data.html} owner={data.owner} />;
 }
