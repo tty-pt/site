@@ -358,106 +358,16 @@ poem_edit_post_handler(int fd, char *body)
 	return 0;
 }
 
-/* GET /poem/:id/delete — confirmation page */
-static int
-poem_delete_get_handler(int fd, char *body)
-{
-	(void)body;
-
-	char id[128] = { 0 };
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing poem ID");
-		return 1;
-	}
-
-	if (!poem_is_owner(fd, id)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 1;
-	}
-
-	char title[256] = { 0 };
-	char title_path[512];
-	snprintf(title_path, sizeof(title_path), "%s/%s/title", POEM_ITEMS_PATH, id);
-	FILE *tfp = fopen(title_path, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp))
-			title[strcspn(title, "\n")] = '\0';
-		fclose(tfp);
-	}
-
-	char title_esc[512] = { 0 };
-	call_json_escape(title, title_esc, sizeof(title_esc));
-
-	char json[768];
-	snprintf(json, sizeof(json),
-		"{\"id\":\"%s\",\"title\":\"%s\"}", id, title_esc);
-
-	call_proxy_header("Content-Type", "application/json");
-	return call_core_post(fd, json, strlen(json));
-}
-
-/* POST /poem/:id/delete — delete poem */
-static int
-poem_delete_post_handler(int fd, char *body)
-{
-	(void)body;
-
-	char id[128] = { 0 };
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing poem ID");
-		return 1;
-	}
-
-	if (!poem_is_owner(fd, id)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 1;
-	}
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
-
-	char path_buf[768];
-	call_item_unlink_owner(item_path);
-	snprintf(path_buf, sizeof(path_buf), "%s/pt_PT.html", item_path);
-	unlink(path_buf);
-	snprintf(path_buf, sizeof(path_buf), "%s/title", item_path);
-	unlink(path_buf);
-	rmdir(item_path);
-
-	call_index_del(index_hd, id);
-
-	ndc_header(fd, "Location", "/poem/");
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
-}
-
 void ndx_install(void) {
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/index/index");
 
-	index_hd = call_index_open("Poem", 0, 1);
+	index_hd = call_index_open("Poem", 0, 1, NULL);
 
 	ndc_register_handler("POST:/poem/add", poem_add_post_handler);
 	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
 	ndc_register_handler("GET:/poem/:id/edit", poem_edit_get_handler);
 	ndc_register_handler("POST:/poem/:id/edit", poem_edit_post_handler);
-	ndc_register_handler("GET:/poem/:id/delete", poem_delete_get_handler);
-	ndc_register_handler("POST:/poem/:id/delete", poem_delete_post_handler);
 }
 
 void ndx_open(void) {}

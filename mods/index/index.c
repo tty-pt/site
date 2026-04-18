@@ -14,9 +14,13 @@
 #include "./../mpfd/mpfd.h"
 #include "./../auth/auth.h"
 
+typedef void (*index_cleanup_fn)(const char *id);
+
 #define MAX_MODULES 64
 
 static int index_add_get_handler(int fd, char *body);
+static int index_delete_get_handler(int fd, char *body);
+static int index_delete_handler(int fd, char *body);
 
 static char modules_header[2 * 256 * MAX_MODULES];
 
@@ -28,6 +32,12 @@ static size_t modules_rem = sizeof(modules_json),
 
 static unsigned module_hd;
 static iconv_t cd;
+
+/* Per-module cleanup callbacks and hd lookup */
+static char  module_names[MAX_MODULES][64];
+static unsigned module_hds[MAX_MODULES];
+static void (*module_cleanups[MAX_MODULES])(const char *id);
+static size_t module_slot_count = 0;
 
 NDX_DEF(int, index_id,
 		char *, result,
@@ -267,7 +277,8 @@ static int index_list_handler(
 NDX_DEF(unsigned, index_open,
 		const char *, name,
 		unsigned, mask,
-		unsigned, flags)
+		unsigned, flags,
+		index_cleanup_fn, cleanup)
 {
 	unsigned hd = qmap_open(NULL, "hd", QM_STR, QM_STR,
 			mask ? mask : 0x3FF, QM_SORTED);
@@ -324,6 +335,19 @@ NDX_DEF(unsigned, index_open,
 
 	snprintf(buf, sizeof(buf), "GET:/%s", id);
 	ndc_register_handler(buf, index_list_handler);
+
+	snprintf(buf, sizeof(buf), "GET:/%s/:id/delete", id);
+	ndc_register_handler(buf, index_delete_get_handler);
+
+	snprintf(buf, sizeof(buf), "POST:/%s/:id/delete", id);
+	ndc_register_handler(buf, index_delete_handler);
+
+	if (module_slot_count < MAX_MODULES) {
+		size_t slot = module_slot_count++;
+		snprintf(module_names[slot], sizeof(module_names[slot]), "%s", id);
+		module_hds[slot] = hd;
+		module_cleanups[slot] = cleanup;
+	}
 
 	qmap_put(module_hd, id, &hd);
 	return hd;
@@ -425,6 +449,150 @@ static int index_add_get_handler(
 		char *body)
 {
 	return call_core_get(fd, body);
+}
+
+/* GET /<module>/:id/delete — confirmation page */
+static int index_delete_get_handler(int fd, char *body)
+{
+	(void)body;
+
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 401;
+	}
+
+	char id[128] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+	if (!id[0]) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 400);
+		ndc_body(fd, "Missing ID");
+		return 400;
+	}
+
+	const char *module = index_name(fd);
+
+	char item_path[512];
+	snprintf(item_path, sizeof(item_path),
+			"./items/%s/items/%s", module, id);
+
+	if (!call_item_check_ownership(item_path, username)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "Forbidden");
+		return 403;
+	}
+
+	char title[256] = {0};
+	char title_path[640];
+	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
+	FILE *tfp = fopen(title_path, "r");
+	if (tfp) {
+		if (fgets(title, sizeof(title) - 1, tfp))
+			title[strcspn(title, "\n")] = '\0';
+		fclose(tfp);
+	}
+
+	char title_esc[512] = {0};
+	call_json_escape(title, title_esc, sizeof(title_esc));
+
+	char json[768];
+	snprintf(json, sizeof(json),
+		"{\"id\":\"%s\",\"title\":\"%s\"}", id, title_esc);
+
+	call_proxy_header("Content-Type", "application/json");
+	return call_core_post(fd, json, strlen(json));
+}
+
+/* POST /<module>/:id/delete — perform delete */
+static int index_delete_handler(int fd, char *body)
+{
+	(void)body;
+
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	const char *username = call_get_session_user(token);
+	if (!username || !*username) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 401);
+		ndc_body(fd, "Login required");
+		return 401;
+	}
+
+	char id[128] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+	if (!id[0]) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 400);
+		ndc_body(fd, "Missing ID");
+		return 400;
+	}
+
+	const char *module = index_name(fd);
+
+	char item_path[512];
+	snprintf(item_path, sizeof(item_path),
+			"./items/%s/items/%s", module, id);
+
+	if (!call_item_check_ownership(item_path, username)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "Forbidden");
+		return 403;
+	}
+
+	/* Remove ownership file */
+	call_item_unlink_owner(item_path);
+
+	/* Remove all files in the item directory, then rmdir */
+	{
+		DIR *d = opendir(item_path);
+		if (d) {
+			struct dirent *e;
+			char fpath[640];
+			while ((e = readdir(d)) != NULL) {
+				if (e->d_name[0] == '.')
+					continue;
+				snprintf(fpath, sizeof(fpath), "%s/%s",
+						item_path, e->d_name);
+				unlink(fpath);
+			}
+			closedir(d);
+		}
+	}
+	rmdir(item_path);
+
+	/* Find module slot and call cleanup + index_del */
+	unsigned hd = 0;
+	for (size_t i = 0; i < module_slot_count; i++) {
+		if (strcmp(module_names[i], module) == 0) {
+			hd = module_hds[i];
+			if (module_cleanups[i])
+				module_cleanups[i](id);
+			break;
+		}
+	}
+
+	if (hd)
+		qmap_del(hd, id);
+
+	char location[256];
+	snprintf(location, sizeof(location), "/%s/", module);
+	ndc_header(fd, "Location", location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
+	ndc_head(fd, 303);
+	ndc_close(fd);
+	return 0;
 }
 
 void ndx_install(void)

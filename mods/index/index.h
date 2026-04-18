@@ -3,7 +3,9 @@
 
 #include <ttypt/ndx-mod.h>
 
-NDX_DECL(unsigned, index_open, const char *, name, unsigned, mask, unsigned, flags);
+typedef void (*index_cleanup_fn)(const char *id);
+
+NDX_DECL(unsigned, index_open, const char *, name, unsigned, mask, unsigned, flags, index_cleanup_fn, cleanup);
 
 NDX_DECL(unsigned, index_put, unsigned, hd, char *, key, char *, value);
 

@@ -1246,7 +1246,7 @@ ndx_install(void)
 	ndc_register_handler("POST:/api/choir/:id/song/:song_id/remove", handle_choir_song_remove);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 
-	index_hd = call_index_open("Choir", 0, 1);
+	index_hd = call_index_open("Choir", 0, 1, NULL);
 }
 
 void ndx_open(void) {}

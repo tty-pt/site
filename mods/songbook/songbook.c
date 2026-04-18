@@ -298,6 +298,14 @@ handle_sb_edit_get(int fd, char *body)
 		return 1;
 	}
 
+	/* Check ownership */
+	if (!call_item_check_ownership(sb_path, username)) {
+		ndc_header(fd, "Content-Type", "text/plain");
+		ndc_head(fd, 403);
+		ndc_body(fd, "Forbidden");
+		return 1;
+	}
+
 	/* Read title */
 	char title[256] = {0};
 	char title_path[512];
@@ -547,21 +555,18 @@ handle_sb_edit(int fd, char *body)
 static int
 handle_sb_transpose(int fd, char *body)
 {
-	/* Get current user */
-	/* char cookie[256] = {0}; */
+	/* Require authenticated session */
+	char cookie[256] = {0};
 	char token[64] = {0};
-  /*
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	call_get_cookie(cookie, token, sizeof(token));
 	const char *username = call_get_session_user(token);
-
 	if (!username || !*username) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 401);
 		ndc_body(fd, "Login required");
 		return 1;
 	}
-  */
 
 	/* Get songbook ID */
 	char id[128] = {0};
@@ -585,14 +590,12 @@ handle_sb_transpose(int fd, char *body)
 	}
 
 	/* Check ownership */
-  /*
 	if (!check_sb_ownership(sb_path, username)) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 403);
 		ndc_body(fd, "You don't own this songbook");
 		return 1;
 	}
-  */
 
 	/* Parse form data */
 	call_mpfd_parse(fd, body);
@@ -676,21 +679,18 @@ handle_sb_transpose(int fd, char *body)
 static int
 handle_sb_randomize(int fd, char *body)
 {
-	/* Get current user */
-  /*
+	/* Require authenticated session */
 	char cookie[256] = {0};
 	char token[64] = {0};
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	call_get_cookie(cookie, token, sizeof(token));
 	const char *username = call_get_session_user(token);
-
 	if (!username || !*username) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 401);
 		ndc_body(fd, "Login required");
 		return 1;
 	}
-  */
 
 	/* Get songbook ID */
 	char id[128] = {0};
@@ -714,14 +714,12 @@ handle_sb_randomize(int fd, char *body)
 	}
 
 	/* Check ownership */
-  /*
 	if (!check_sb_ownership(sb_path, username)) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 403);
 		ndc_body(fd, "You don't own this songbook");
 		return 1;
 	}
-  */
 
 	/* Parse form data */
 	call_mpfd_parse(fd, body);
@@ -794,78 +792,6 @@ handle_sb_randomize(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s#%d", id, line_num);
 	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
-}
-
-/* DELETE /api/songbook/:id - Delete songbook */
-static int
-handle_sb_delete(int fd, char *body)
-{
-	(void)body;
-
-	/* Get current user */
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 1;
-	}
-
-	/* Get songbook ID */
-	char id[128] = {0};
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	char doc_root[256] = {0};
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	if (!doc_root[0])
-		strcpy(doc_root, ".");
-
-	char sb_path[512];
-	snprintf(sb_path, sizeof(sb_path), "%s/items/songbook/items/%s", doc_root, id);
-
-	/* Check if songbook exists */
-	struct stat st;
-	if (stat(sb_path, &st) != 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Songbook not found");
-		return 1;
-	}
-
-	/* Check ownership */
-	if (!check_sb_ownership(sb_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't own this songbook");
-		return 1;
-	}
-
-	/* Remove from database - index module handles this */
-	/* Note: index module doesn't have a del function, title file removal will handle it on next scan */
-
-	/* Delete files */
-	char path_buf[1024];
-	call_item_unlink_owner(sb_path);
-	snprintf(path_buf, sizeof(path_buf), "%s/title", sb_path);
-	unlink(path_buf);
-	snprintf(path_buf, sizeof(path_buf), "%s/choir", sb_path);
-	unlink(path_buf);
-	snprintf(path_buf, sizeof(path_buf), "%s/data.txt", sb_path);
-	unlink(path_buf);
-	rmdir(sb_path);
-
-	/* Redirect to songbook list */
-	ndc_header(fd, "Location", "/songbook");
 	ndc_header(fd, "Connection", "close");
 	ndc_set_flags(fd, DF_TO_CLOSE);
 	ndc_head(fd, 303);
@@ -1086,7 +1012,7 @@ void ndx_install(void)
 	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 
-	index_hd = call_index_open("Songbook", 0, 1);
+	index_hd = call_index_open("Songbook", 0, 1, NULL);
 }
 
 void ndx_open(void) {}

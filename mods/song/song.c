@@ -873,6 +873,54 @@ song_edit_post_handler(int fd, char *body)
 	return 0;
 }
 
+/* Remove song id from type_index_hd when a song is deleted */
+static void song_cleanup(const char *id)
+{
+	if (!type_index_hd)
+		return;
+
+	/* Read the song's type file */
+	char type_path[512];
+	snprintf(type_path, sizeof(type_path),
+			"./items/song/items/%s/type", id);
+	FILE *fp = fopen(type_path, "r");
+	if (!fp)
+		return;
+	char song_type[64] = {0};
+	if (!fgets(song_type, sizeof(song_type) - 1, fp)) {
+		fclose(fp);
+		return;
+	}
+	fclose(fp);
+	song_type[strcspn(song_type, "\n")] = '\0';
+	if (!song_type[0])
+		return;
+
+	const char *list = (const char *)qmap_get(type_index_hd, song_type);
+	if (!list || !*list)
+		return;
+
+	/* Build new csv without id */
+	char new_list[8192] = {0};
+	char *copy = strdup(list);
+	if (!copy)
+		return;
+	char *tok = strtok(copy, ",");
+	int first = 1;
+	while (tok) {
+		if (strcmp(tok, id) != 0) {
+			if (!first)
+				strcat(new_list, ",");
+			strcat(new_list, tok);
+			first = 0;
+		}
+		tok = strtok(NULL, ",");
+	}
+	free(copy);
+
+	qmap_put(type_index_hd, song_type, new_list);
+}
+
 void ndx_install(void)
 {
 	char doc_root[256] = {0};
@@ -894,7 +942,7 @@ void ndx_install(void)
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
 
-	index_hd = call_index_open("Song", 0, 1);
+	index_hd = call_index_open("Song", 0, 1, song_cleanup);
 
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);

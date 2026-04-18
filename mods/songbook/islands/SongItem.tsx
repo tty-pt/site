@@ -80,39 +80,43 @@ export default function SongItem(props: Props) {
           </p>
         </div>
 
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <select
-              name="t"
-              onChange={async (e) => {
-                const semitones = parseInt(e.currentTarget.value, 10);
-                setTranspose(semitones);
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            {props.isOwner && (
+              <select
+                name="t"
+                onChange={async (e) => {
+                  const semitones = parseInt(e.currentTarget.value, 10);
+                  setTranspose(semitones);
 
-                // Fire-and-forget POST to persist the transpose value
-                const formData = new FormData();
-                formData.append('n', props.index.toString());
-                formData.append('t', semitones.toString());
-                fetch(`/songbook/${props.songbookId}/transpose`, {
-                  method: "POST",
-                  body: formData,
-                }).catch(console.error);
-              }}
-              value={transpose}
-              style={{ padding: "0.25rem" }}
-            >
-              {keys.map((key, i) => {
-                const semitones = (i - originalKey + 12) % 12;
-                return (
-                  <option key={semitones} value={semitones}>
-                    {key}{semitones === 0 ? " (Original)" : ""}
-                  </option>
-                );
-              })}
-            </select>
+                  // Fire-and-forget POST to persist the transpose value
+                  const formData = new FormData();
+                  formData.append('n', props.index.toString());
+                  formData.append('t', semitones.toString());
+                  fetch(`/songbook/${props.songbookId}/transpose`, {
+                    method: "POST",
+                    body: formData,
+                  }).catch(console.error);
+                }}
+                value={transpose}
+                style={{ padding: "0.25rem" }}
+              >
+                {keys.map((key, i) => {
+                  const semitones = (i - originalKey + 12) % 12;
+                  return (
+                    <option key={semitones} value={semitones}>
+                      {key}{semitones === 0 ? " (Original)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
 
-            <form method="POST" action={`/songbook/${props.songbookId}/randomize`} encType="multipart/form-data">
-              <input type="hidden" name="n" value={`${props.index}`} />
-              <button type="submit" style={{ padding: "0.25rem 0.5rem" }}>🎲</button>
-            </form>
+            {props.isOwner && (
+              <form method="POST" action={`/songbook/${props.songbookId}/randomize`} encType="multipart/form-data">
+                <input type="hidden" name="n" value={`${props.index}`} />
+                <button type="submit" style={{ padding: "0.25rem 0.5rem" }}>🎲</button>
+              </form>
+            )}
           </div>
       </div>
 
