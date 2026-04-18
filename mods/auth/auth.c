@@ -922,7 +922,7 @@ void ndx_install(void)
 
 	auth_hd = qmap_open(NULL, "hd", QM_STR, QM_STR, 0xFF, 0);
 
-	call_index_open("Auth", 0, 0);
+	call_index_open("Auth", 0, 0, NULL);
 }
 
 void ndx_open(void) {}

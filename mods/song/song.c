@@ -1,5 +1,6 @@
 #include <ttypt/ndx-mod.h>
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -48,7 +49,7 @@ static void build_type_index(const char *doc_root)
 		if (entry->d_name[0] == '.')
 			continue;
 
-		char type_path[512];
+		char type_path[PATH_MAX];
 		snprintf(type_path, sizeof(type_path), "%s/%s/type",
 			songs_path, entry->d_name);
 

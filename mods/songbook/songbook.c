@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* #include <errno.h> */
+
 #include <errno.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -93,7 +94,7 @@ check_choir_ownership_for_sb(const char *doc_root, const char *sb_path, const ch
 		choir_id[n - 1] = '\0';
 
 	/* Check choir ownership via owner file */
-	char choir_path[1024];
+	char choir_path[512];
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, choir_id);
 
 	return call_item_check_ownership(choir_path, username);
@@ -120,163 +121,24 @@ get_random_chord_by_type(const char *doc_root, const char *type, char *out_id, s
 	return -1;
 }
 
-/* POST /api/songbook/create - Create new songbook */
+/* GET /songbook/:id/edit - read songbook and proxy to Fresh */
 static int
-handle_sb_create(int fd, char *body)
+handle_sb_edit_get(int fd, char *body)
 {
-	/* Get current user */
+	(void)body;
+
+	/* Require authenticated session */
 	char cookie[256] = {0};
 	char token[64] = {0};
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
 	call_get_cookie(cookie, token, sizeof(token));
 	const char *username = call_get_session_user(token);
-
 	if (!username || !*username) {
 		ndc_header(fd, "Content-Type", "text/plain");
 		ndc_head(fd, 401);
 		ndc_body(fd, "Login required");
 		return 1;
 	}
-
-	/* Parse form data */
-	call_mpfd_parse(fd, body);
-
-	char id[128] = {0};
-	char title[256] = {0};
-	char choir[128] = {0};
-	int id_len = call_mpfd_get("id", id, sizeof(id) - 1);
-	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
-	int choir_len = call_mpfd_get("choir", choir, sizeof(choir) - 1);
-
-	if (id_len <= 0 || title_len <= 0 || choir_len <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing id, title, or choir");
-		return 1;
-	}
-
-	id[id_len] = '\0';
-	title[title_len] = '\0';
-	choir[choir_len] = '\0';
-
-	/* Get doc root */
-	char doc_root[256] = {0};
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	if (!doc_root[0])
-		strcpy(doc_root, ".");
-
-	/* Check choir ownership */
-	char choir_path[512];
-	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, choir);
-
-	if (!call_item_check_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't own this choir");
-		return 1;
-	}
-
-	/* Create songbook directory */
-	char sb_path[512];
-	snprintf(sb_path, sizeof(sb_path), "%s/items/songbook/items/%s", doc_root, id);
-
-	if (mkdir(sb_path, 0755) == -1 && errno != EEXIST) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to create songbook directory");
-		return 1;
-	}
-
-	/* Record ownership */
-	call_item_record_ownership(sb_path, username);
-
-	/* Write title */
-	char title_path[1024];
-	snprintf(title_path, sizeof(title_path), "%s/title", sb_path);
-	FILE *tfp = fopen(title_path, "w");
-	if (tfp) {
-		fwrite(title, 1, strlen(title), tfp);
-		fclose(tfp);
-	}
-
-	/* Write choir reference */
-	char choir_file[1024];
-	snprintf(choir_file, sizeof(choir_file), "%s/choir", sb_path);
-	FILE *chfp = fopen(choir_file, "w");
-	if (chfp) {
-		fwrite(choir, 1, strlen(choir), chfp);
-		fclose(chfp);
-	}
-
-	/* Initialize data.txt with choir's format */
-	char format_path[1024];
-	snprintf(format_path, sizeof(format_path), "%s/format", choir_path);
-
-	char data_path[1024];
-	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
-	FILE *dfp = fopen(data_path, "w");
-	if (dfp) {
-		FILE *ffp = fopen(format_path, "r");
-		if (ffp) {
-			/* Read choir format and create empty slots */
-			char line[128];
-			while (fgets(line, sizeof(line), ffp)) {
-				/* Remove trailing newline */
-				size_t len = strlen(line);
-				while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-					line[--len] = '\0';
-				if (len > 0)
-					fprintf(dfp, ":0:%s\n", line);
-			}
-			fclose(ffp);
-		} else {
-			/* Use default format */
-			fprintf(dfp, ":0:entrada\n");
-			fprintf(dfp, ":0:aleluia\n");
-			fprintf(dfp, ":0:ofertorio\n");
-			fprintf(dfp, ":0:santo\n");
-			fprintf(dfp, ":0:comunhao\n");
-			fprintf(dfp, ":0:acao_de_gracas\n");
-			fprintf(dfp, ":0:saida\n");
-		}
-		fclose(dfp);
-	}
-
-	/* Increment choir counter */
-	char counter_path[1024];
-	snprintf(counter_path, sizeof(counter_path), "%s/counter", choir_path);
-	int counter = 0;
-	FILE *cntfp = fopen(counter_path, "r");
-	if (cntfp) {
-		fscanf(cntfp, "%d", &counter);
-		fclose(cntfp);
-	}
-	counter++;
-	cntfp = fopen(counter_path, "w");
-	if (cntfp) {
-		fprintf(cntfp, "%d", counter);
-		fclose(cntfp);
-	}
-
-	/* Add to index database */
-	call_index_put(index_hd, id, title);
-
-	/* Redirect to edit page */
-	char location[256];
-	snprintf(location, sizeof(location), "/songbook/%s/edit", id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
-}
-
-/* GET /songbook/:id/edit - read songbook and proxy to Fresh */
-static int
-handle_sb_edit_get(int fd, char *body)
-{
-	(void)body;
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -308,7 +170,7 @@ handle_sb_edit_get(int fd, char *body)
 
 	/* Read title */
 	char title[256] = {0};
-	char title_path[512];
+	char title_path[PATH_MAX];
 	snprintf(title_path, sizeof(title_path), "%s/title", sb_path);
 	FILE *tfp = fopen(title_path, "r");
 	if (tfp) {
@@ -322,7 +184,7 @@ handle_sb_edit_get(int fd, char *body)
 
 	/* Read choir */
 	char choir[128] = {0};
-	char choir_path[512];
+	char choir_path[PATH_MAX];
 	snprintf(choir_path, sizeof(choir_path), "%s/choir", sb_path);
 	FILE *cfp = fopen(choir_path, "r");
 	if (cfp) {
@@ -336,7 +198,7 @@ handle_sb_edit_get(int fd, char *body)
 
 	/* Read data.txt */
 	char *data_content = NULL;
-	char data_path[512];
+	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 	FILE *dfp = fopen(data_path, "r");
 	if (dfp) {
@@ -369,7 +231,7 @@ handle_sb_edit_get(int fd, char *body)
 		while ((sde = readdir(sdp)) != NULL) {
 			if (sde->d_name[0] == '.') continue;
 
-			char stitle[256] = {0}, stype[64] = {0}, spath[768];
+			char stitle[256] = {0}, stype[64] = {0}, spath[PATH_MAX];
 
 			snprintf(spath, sizeof(spath), "%s/%s/title", songs_dir, sde->d_name);
 			FILE *stfp = fopen(spath, "r");
@@ -395,7 +257,7 @@ handle_sb_edit_get(int fd, char *body)
 			call_json_escape(stitle, esc_stitle, sizeof(esc_stitle));
 			call_json_escape(stype, esc_stype, sizeof(esc_stype));
 
-			char item[900];
+			char item[1024];
 			snprintf(item, sizeof(item),
 				"%s{\"id\":\"%s\",\"title\":\"%s\",\"type\":\"%s\"}",
 				ac_first ? "" : ",", esc_sid, esc_stitle, esc_stype);
@@ -507,7 +369,7 @@ handle_sb_edit(int fd, char *body)
 	}
 
 	/* Build new data.txt content */
-	char data_path[1024];
+	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *dfp = fopen(data_path, "w");
@@ -609,7 +471,7 @@ handle_sb_transpose(int fd, char *body)
 	int new_transpose = atoi(t_str);
 
 	/* Read current data.txt */
-	char data_path[1024];
+	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *fp = fopen(data_path, "r");
@@ -729,7 +591,7 @@ handle_sb_randomize(int fd, char *body)
 	int line_num = atoi(n_str);
 
 	/* Read current data.txt */
-	char data_path[1024];
+	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *fp = fopen(data_path, "r");
@@ -1008,7 +870,6 @@ void ndx_install(void)
 
 	ndc_register_handler("POST:/songbook/:id/randomize", handle_sb_randomize);
 	ndc_register_handler("POST:/songbook/:id/transpose", handle_sb_transpose);
-	/* ndc_register_handler("POST:/api/songbook/create", handle_sb_create); */
 	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 

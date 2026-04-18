@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <limits.h>
 #include <dirent.h>
 #include <errno.h>
 #include <iconv.h>
@@ -34,7 +35,7 @@ static unsigned module_hd;
 static iconv_t cd;
 
 /* Per-module cleanup callbacks and hd lookup */
-static char  module_names[MAX_MODULES][64];
+static char  module_names[MAX_MODULES][256];
 static unsigned module_hds[MAX_MODULES];
 static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
@@ -558,7 +559,7 @@ static int index_delete_handler(int fd, char *body)
 		DIR *d = opendir(item_path);
 		if (d) {
 			struct dirent *e;
-			char fpath[640];
+			char fpath[PATH_MAX];
 			while ((e = readdir(d)) != NULL) {
 				if (e->d_name[0] == '.')
 					continue;
