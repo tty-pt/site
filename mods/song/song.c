@@ -22,7 +22,6 @@
 
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
-static unsigned index_hd;
 
 /* Type index: type -> qmap of song IDs */
 static unsigned type_index_hd = 0;
@@ -362,157 +361,6 @@ api_song_transpose_handler(int fd, char *body)
 	return 0;
 }
 
-static void
-handle_song_add(int fd, char *doc_root)
-{
-	char id[64] = { 0 };
-	char title[256] = { 0 };
-	char type[64] = { 0 };
-
-	/* Check if id field exists */
-	int id_len = call_mpfd_get("id", id, sizeof(id) - 1);
-	if (id_len <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing id");
-		return;
-	}
-	id[id_len] = '\0';
-
-	/* Get title (optional) */
-	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
-	if (title_len > 0) {
-		title[title_len] = '\0';
-	}
-
-	/* Get type (optional) */
-	int type_len = call_mpfd_get("type", type, sizeof(type) - 1);
-	if (type_len > 0) {
-		type[type_len] = '\0';
-	}
-
-	/* Check if data field exists */
-	if (!call_mpfd_exists("data")) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing chord data");
-		return;
-	}
-
-	/* Check if data has content */
-	int data_len = call_mpfd_len("data");
-	if (data_len <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing chord data");
-		return;
-	}
-
-	char *data_content = malloc(data_len + 1);
-	if (!data_content) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Memory error");
-		return;
-	}
-
-	int got = call_mpfd_get("data", data_content, data_len);
-	if (got <= 0) {
-		free(data_content);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing chord data");
-		return;
-	}
-	data_content[got] = '\0';
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s/%s", 
-		doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
-	
-	if (mkdir(item_path, 0755) == -1 && errno != EEXIST) {
-		free(data_content);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to create chord directory");
-		return;
-	}
-
-	/* Write data.txt */
-	char data_path[1024];
-	snprintf(data_path, sizeof(data_path), "%s/data.txt", item_path);
-
-	FILE *dfp = fopen(data_path, "w");
-	if (!dfp) {
-		free(data_content);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to write chord data");
-		return;
-	}
-	fwrite(data_content, 1, got, dfp);
-	fclose(dfp);
-	free(data_content);
-
-	/* Write title file */
-	if (title[0]) {
-		char title_path[1024];
-		snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-		FILE *tfp = fopen(title_path, "w");
-		if (tfp) {
-			fwrite(title, 1, strlen(title), tfp);
-			fclose(tfp);
-		}
-	}
-
-	/* Write type file */
-	if (type[0]) {
-		char type_path[1024];
-		snprintf(type_path, sizeof(type_path), "%s/type", item_path);
-		FILE *yfp = fopen(type_path, "w");
-		if (yfp) {
-			fwrite(type, 1, strlen(type), yfp);
-			fclose(yfp);
-		}
-	}
-
-	ndc_header(fd, "Location", "/song/");
-	ndc_head(fd, 303);
-	ndc_close(fd);
-}
-
-static int
-song_handler(int fd, char *body)
-{
-	char method[16] = { 0 };
-	char uri[256] = { 0 };
-	char doc_root[256] = { 0 };
-
-	ndc_env_get(fd, method, "REQUEST_METHOD");
-	ndc_env_get(fd, uri, "DOCUMENT_URI");
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-
-	/* Parse multipart form data */
-	int parse_result = call_mpfd_parse(fd, body);
-	
-	if (parse_result == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 415);
-		ndc_body(fd, "Expected multipart/form-data");
-		return 1;
-	}
-	
-	if (parse_result < 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Parse error");
-		return 1;
-	}
-
-	/* Now process the upload */
-	handle_song_add(fd, doc_root);
-	return 0;
-}
 
 /* SSR handler for /song/* routes
  * Handles transposition when query params present, delegates to Deno
@@ -943,7 +791,7 @@ void ndx_install(void)
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
 
-	index_hd = call_index_open("Song", 0, 1, song_cleanup);
+	call_index_open("Song", 0, 1, song_cleanup);
 
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);

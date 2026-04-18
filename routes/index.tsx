@@ -2,12 +2,6 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "@/ssr/ui.tsx";
 import type { State } from "./_middleware.ts";
 
-interface ModuleEntry {
-  id: string;
-  title: string;
-  flags: number;
-}
-
 interface HomeData {
   modules: ModuleEntry[];
   user: string | null;

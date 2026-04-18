@@ -131,6 +131,9 @@ proc_line(transp_ctx_t *ctx, const char *line, int t, int flags, int *skip_empty
 	char *line_copy = strdup(line);
 	if (linelen > 0 && line_copy[linelen - 1] == '\n')
 		line_copy[linelen - 1] = '\0';
+	linelen = strlen(line_copy);
+	if (linelen > 0 && line_copy[linelen - 1] == '\r')
+		line_copy[linelen - 1] = '\0';
 	
 	/* Handle skip empty */
 	if (ctx->skip_empty && strcmp(line_copy, "") == 0) {

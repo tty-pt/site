@@ -1,4 +1,3 @@
-/* #include "common.h" */
 #include <ttypt/ndx-mod.h>
 
 #include <ctype.h>

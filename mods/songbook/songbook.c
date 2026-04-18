@@ -24,8 +24,6 @@
 #define SONGBOOK_ITEMS_PATH "items/songbook/items"
 #define SONG_ITEMS_PATH "items/song/items"
 
-static unsigned index_hd;
-
 /* Parse a songbook line: chord_id:transpose:format */
 static int
 parse_sb_line(const char *line, char *chord_id, int *transpose, char *format)
@@ -66,38 +64,6 @@ static int
 check_sb_ownership(const char *sb_path, const char *username)
 {
 	return call_item_check_ownership(sb_path, username);
-}
-
-/* Check if user owns the choir associated with this songbook */
-static int
-check_choir_ownership_for_sb(const char *doc_root, const char *sb_path, const char *username)
-{
-	if (!username || !*username)
-		return 0;
-
-	char choir_file[1024];
-	snprintf(choir_file, sizeof(choir_file), "%s/choir", sb_path);
-
-	FILE *fp = fopen(choir_file, "r");
-	if (!fp)
-		return 0;
-
-	char choir_id[64] = {0};
-	size_t n = fread(choir_id, 1, sizeof(choir_id) - 1, fp);
-	fclose(fp);
-	if (n == 0)
-		return 0;
-	choir_id[n] = '\0';
-
-	/* Remove trailing newline */
-	if (choir_id[n - 1] == '\n')
-		choir_id[n - 1] = '\0';
-
-	/* Check choir ownership via owner file */
-	char choir_path[512];
-	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, choir_id);
-
-	return call_item_check_ownership(choir_path, username);
 }
 
 /* Get random chord by type/format - uses song module's type index */
@@ -859,7 +825,6 @@ songbook_details_handler(int fd, char *body)
 
 void ndx_install(void)
 {
-	/* ndx_load("./mods/common/common"); */
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
@@ -873,7 +838,7 @@ void ndx_install(void)
 	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 
-	index_hd = call_index_open("Songbook", 0, 1, NULL);
+	call_index_open("Songbook", 0, 1, NULL);
 }
 
 void ndx_open(void) {}

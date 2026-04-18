@@ -1,4 +1,3 @@
-/* #include "mpfd.h" */
 #include <ttypt/ndx-mod.h>
 
 #include <sys/stat.h>

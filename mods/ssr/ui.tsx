@@ -1,9 +1,3 @@
-interface ModuleEntry {
-  id: string;
-  title: string;
-  routes: string[];
-}
-
 export function Menu({ user, path }: { user: string | null; path: string }) {
   const isHome = path === "/" || path === "";
   return (

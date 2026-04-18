@@ -25,8 +25,6 @@ struct user {
 	char hash[64];
 };
 
-static unsigned auth_hd = 0;
-
 /* ------------------------------------------------------------------ */
 /* Path helpers                                                         */
 /* ------------------------------------------------------------------ */
@@ -919,10 +917,6 @@ void ndx_install(void)
 	ndc_register_handler("GET:/auth/api/session", handle_session);
 	ndc_register_handler("/auth/logout",        handle_logout);
 	ndc_register_handler("/auth/confirm",       handle_confirm);
-
-	auth_hd = qmap_open(NULL, "hd", QM_STR, QM_STR, 0xFF, 0);
-
-	call_index_open("Auth", 0, 0, NULL);
 }
 
 void ndx_open(void) {}

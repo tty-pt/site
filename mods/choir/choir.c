@@ -30,8 +30,6 @@ check_choir_ownership(const char *choir_path, const char *username)
 }
 
 
-static unsigned index_hd = 0;
-
 
 /* POST /api/choir/:id/edit - Edit choir title and formats */
 static int
@@ -954,7 +952,7 @@ ndx_install(void)
 	ndc_register_handler("POST:/api/choir/:id/song/:song_id/remove", handle_choir_song_remove);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 
-	index_hd = call_index_open("Choir", 0, 1, NULL);
+	call_index_open("Choir", 0, 1, NULL);
 }
 
 void ndx_open(void) {}
