@@ -13,11 +13,14 @@
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
 
+#include <ttypt/ndc-ndx.h>
+
 #include "../common/common.h"
 #include "../index/index.h"
 
 static unsigned users_map;
 static unsigned sessions_map;
+
 
 struct user {
 	char active;
@@ -95,6 +98,60 @@ NDX_DEF(int, get_user_uid, const char *, username)
 {
 	struct user *u = (struct user *)qmap_get(users_map, username);
 	return u ? u->uid : -1;
+}
+
+NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len)
+{
+	const char *p;
+
+	token[0] = '\0';
+
+	if (!cookie || !*cookie)
+		return -1;
+
+	p = cookie;
+
+	while (*p) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+
+		if (!strncmp(p, "QSESSION=", 9)) {
+			p += 9;
+			const char *amp = strchr(p, '&');
+			size_t tlen = amp ? (size_t)(amp - p) : strlen(p);
+			if (tlen >= len) tlen = len - 1;
+			strncpy(token, p, tlen);
+			token[tlen] = '\0';
+			return 0;
+		}
+
+		while (*p && *p != '&')
+			p++;
+
+		if (*p == '&')
+			p++;
+	}
+
+	return 0;
+}
+
+NDX_DEF(const char *, get_request_user, int, fd)
+{
+	char cookie[256] = {0};
+	char token[64] = {0};
+	ndc_env_get(fd, cookie, "HTTP_COOKIE");
+	call_get_cookie(cookie, token, sizeof(token));
+	return call_get_session_user(token);
+}
+
+NDX_DEF(int, require_login, int, fd, const char *, username)
+{
+	if (username && *username)
+		return 0;
+	ndc_header(fd, "Content-Type", "text/plain");
+	ndc_head(fd, 401);
+	ndc_body(fd, "Login required");
+	return 1;
 }
 
 static void
@@ -560,6 +617,18 @@ NDX_DEF(int, item_unlink_owner, const char *, item_path)
 		unlink(owner_path);
 	}
 	return 0;
+}
+
+NDX_DEF(int, require_ownership,
+	int, fd, const char *, item_path,
+	const char *, username, const char *, msg)
+{
+	if (item_check_ownership(item_path, username))
+		return 0;
+	ndc_header(fd, "Content-Type", "text/plain");
+	ndc_head(fd, 403);
+	ndc_body(fd, msg ? msg : "Forbidden");
+	return 1;
 }
 
 /* ------------------------------------------------------------------ */

@@ -126,17 +126,9 @@ static int index_add_handler(
 	FILE *tfp;
 
 	/* Require authenticated session */
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
 		return 401;
-	}
 
 	parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1) {
@@ -195,12 +187,7 @@ static int index_add_handler(
 	path_len = snprintf(path, sizeof(path),
 			"/%s/%s", module, id);
 
-	ndc_header(fd, "Location", path);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, path);
 }
 
 NDX_DEF(int, index_page,
@@ -457,17 +444,9 @@ static int index_delete_get_handler(int fd, char *body)
 {
 	(void)body;
 
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
 		return 401;
-	}
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -517,17 +496,9 @@ static int index_delete_handler(int fd, char *body)
 {
 	(void)body;
 
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
 		return 401;
-	}
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -588,12 +559,7 @@ static int index_delete_handler(int fd, char *body)
 
 	char location[256];
 	snprintf(location, sizeof(location), "/%s/", module);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, location);
 }
 
 void ndx_install(void)

@@ -18,30 +18,6 @@
 
 static unsigned index_hd;
 
-/* Return current session username, or NULL */
-static const char *
-poem_current_user(int fd)
-{
-	char cookie[256] = { 0 };
-	char token[64] = { 0 };
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	return call_get_session_user(token);
-}
-
-/* 1 if user owns the poem, 0 otherwise */
-static int
-poem_is_owner(int fd, const char *id)
-{
-	const char *username = poem_current_user(fd);
-	if (!username || !username[0])
-		return 0;
-
-	char path[512];
-	snprintf(path, sizeof(path), "%s/%s", POEM_ITEMS_PATH, id);
-	return call_item_check_ownership(path, username);
-}
-
 /* GET /poem/:id — read HTML content and proxy to Fresh for rendering */
 static int
 poem_detail_handler(int fd, char *body)
@@ -83,21 +59,8 @@ poem_detail_handler(int fd, char *body)
 
 	char html_path[512];
 	snprintf(html_path, sizeof(html_path), "%s/%s/pt_PT.html", POEM_ITEMS_PATH, id);
-	char *content = NULL;
-	size_t content_len = 0;
-	FILE *fp = fopen(html_path, "r");
-	if (fp) {
-		fseek(fp, 0, SEEK_END);
-		content_len = (size_t)ftell(fp);
-		fseek(fp, 0, SEEK_SET);
-		content = malloc(content_len + 1);
-		if (content) {
-			size_t got = fread(content, 1, content_len, fp);
-			content[got] = '\0';
-			content_len = got;
-		}
-		fclose(fp);
-	}
+	char *content = call_slurp_file(html_path);
+	size_t content_len = content ? strlen(content) : 0;
 
 	/* Escape title and html for JSON */
 	char title_esc[512] = { 0 };
@@ -111,7 +74,12 @@ poem_detail_handler(int fd, char *body)
 		return 1;
 	}
 
-	int owner = poem_is_owner(fd, id);
+	/* Determine ownership */
+	char item_path[512];
+	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
+	const char *username = call_get_request_user(fd);
+	int owner = username && *username
+		? call_item_check_ownership(item_path, username) : 0;
 
 	if (content) {
 		char *html_esc = malloc(content_len * 2 + 1);
@@ -143,15 +111,9 @@ poem_detail_handler(int fd, char *body)
 static int
 poem_add_post_handler(int fd, char *body)
 {
-	const char *username = poem_current_user(fd);
-	if (!username || !username[0]) {
-		ndc_header(fd, "Location", "/auth/login");
-		ndc_header(fd, "Connection", "close");
-		ndc_set_flags(fd, DF_TO_CLOSE);
-		ndc_head(fd, 303);
-		ndc_close(fd);
-		return 0;
-	}
+	const char *username = call_get_request_user(fd);
+	if (!username || !username[0])
+		return call_redirect(fd, "/auth/login");
 
 	int parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1) {
@@ -220,12 +182,7 @@ poem_add_post_handler(int fd, char *body)
 
 	char redirect[512];
 	snprintf(redirect, sizeof(redirect), "/poem/%s", id);
-	ndc_header(fd, "Location", redirect);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, redirect);
 }
 
 /* GET /poem/:id/edit — read title and proxy to Fresh for edit form */
@@ -244,16 +201,15 @@ poem_edit_get_handler(int fd, char *body)
 		return 1;
 	}
 
-	if (!poem_is_owner(fd, id)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
+	char item_path[512];
+	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
+	const char *username = call_get_request_user(fd);
+	if (call_require_ownership(fd, item_path, username, "Forbidden"))
 		return 1;
-	}
 
 	char title[256] = { 0 };
 	char title_path[512];
-	snprintf(title_path, sizeof(title_path), "%s/%s/title", POEM_ITEMS_PATH, id);
+	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
 	FILE *tfp = fopen(title_path, "r");
 	if (tfp) {
 		if (fgets(title, sizeof(title) - 1, tfp))
@@ -294,15 +250,11 @@ poem_edit_post_handler(int fd, char *body)
 		return 1;
 	}
 
-	if (!poem_is_owner(fd, id)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 1;
-	}
-
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
+	const char *username = call_get_request_user(fd);
+	if (call_require_ownership(fd, item_path, username, "Forbidden"))
+		return 1;
 
 	/* Optional: update title */
 	char title[256] = { 0 };
@@ -350,12 +302,7 @@ poem_edit_post_handler(int fd, char *body)
 
 	char redirect[256];
 	snprintf(redirect, sizeof(redirect), "/poem/%s", id);
-	ndc_header(fd, "Location", redirect);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, redirect);
 }
 
 void ndx_install(void) {

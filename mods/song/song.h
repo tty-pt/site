@@ -45,4 +45,8 @@ NDX_DECL(int, song_reset_key, int, dummy);
  */
 NDX_DECL(int, song_get_random_by_type, const char *, type, char **, out_id);
 
+/* Parse a colon-separated item line: id:int_field:format
+ * Used by choir and songbook to parse their data.txt lines. */
+NDX_DECL(int, parse_item_line, const char *, line, char *, id_out, int *, int_out, char *, format_out);
+
 #endif /* CHORDS_API_H */

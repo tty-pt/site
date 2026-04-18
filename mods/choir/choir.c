@@ -22,39 +22,18 @@
 
 #define CHOIR_SONGS_PATH "items/choir/items"
 
-/* Check if user owns a choir */
-static int
-check_choir_ownership(const char *choir_path, const char *username)
-{
-	return call_item_check_ownership(choir_path, username);
-}
-
-
-
 /* POST /api/choir/:id/edit - Edit choir title and formats */
 static int
 handle_choir_edit(int fd, char *body)
 {
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 1;
-	}
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 1;
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
 	char doc_root[256] = {0};
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	if (!doc_root[0])
-		strcpy(doc_root, ".");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 
 	char choir_path[512];
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s",
@@ -68,12 +47,7 @@ handle_choir_edit(int fd, char *body)
 		return 1;
 	}
 
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't own this choir");
-		return 1;
-	}
+	if (call_require_ownership(fd, choir_path, username, "You don't own this choir")) return 1;
 
 	call_mpfd_parse(fd, body);
 
@@ -106,42 +80,7 @@ handle_choir_edit(int fd, char *body)
 
 	char location[256];
 	snprintf(location, sizeof(location), "/choir/%s", id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
-}
-
-/* Parse choir song line: song_id:preferred_key:format */
-static int
-parse_choir_song_line(const char *line, char *song_id, int *preferred_key, char *format)
-{
-	char *colon1 = strchr(line, ':');
-	if (!colon1)
-		return -1;
-
-	char *colon2 = strchr(colon1 + 1, ':');
-	if (!colon2)
-		return -1;
-
-	size_t id_len = colon1 - line;
-	if (id_len > 127) id_len = 127;
-	strncpy(song_id, line, id_len);
-	song_id[id_len] = '\0';
-
-	*preferred_key = atoi(colon1 + 1);
-
-	strncpy(format, colon2 + 1, 127);
-	format[127] = '\0';
-
-	size_t fmt_len = strlen(format);
-	while (fmt_len > 0 && (format[fmt_len - 1] == '\n' || format[fmt_len - 1] == '\r')) {
-		format[--fmt_len] = '\0';
-	}
-
-	return 0;
+	return call_redirect(fd, location);
 }
 
 static char *
@@ -154,43 +93,23 @@ choir_json(int fd)
 	char title[256] = {0}, owner[64] = {0}, counter[32] = {0}, format[2048] = {0};
 	char esc_title[512], esc_owner[128], esc_counter[64], esc_format[4096];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
 	if (!id[0]) return NULL;
 
-	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s",
-		doc_root[0] ? doc_root : ".", id);
+	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, id);
 
-	char path_buf[PATH_MAX];
-
-	snprintf(path_buf, sizeof(path_buf), "%s/title", choir_path);
-	FILE *tfp = fopen(path_buf, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp)) {
-			size_t l = strlen(title);
-			if (l > 0 && title[l - 1] == '\n') title[l - 1] = '\0';
-		}
-		fclose(tfp);
-	} else {
+	if (call_read_meta_file(choir_path, "title", title, sizeof(title)) != 0)
 		return NULL;
-	}
 
 	/* Get owner username */
 	call_item_read_owner(choir_path, owner, sizeof(owner));
 
-	snprintf(path_buf, sizeof(path_buf), "%s/counter", choir_path);
-	FILE *cfp = fopen(path_buf, "r");
-	if (cfp) {
-		if (fgets(counter, sizeof(counter) - 1, cfp)) {
-			size_t l = strlen(counter);
-			if (l > 0 && counter[l - 1] == '\n') counter[l - 1] = '\0';
-		}
-		fclose(cfp);
-	} else {
+	if (call_read_meta_file(choir_path, "counter", counter, sizeof(counter)) != 0)
 		snprintf(counter, sizeof(counter), "0");
-	}
 
+	char path_buf[PATH_MAX];
 	snprintf(path_buf, sizeof(path_buf), "%s/format", choir_path);
 	FILE *ffp = fopen(path_buf, "r");
 	if (ffp) {
@@ -213,7 +132,7 @@ choir_json(int fd)
 			int pkey = 0;
 			char fmt[64] = {0};
 
-			if (parse_choir_song_line(line, sid, &pkey, fmt) != 0)
+			if (call_parse_item_line(line, sid, &pkey, fmt) != 0)
 				continue;
 
 			if (!sid[0])
@@ -221,16 +140,9 @@ choir_json(int fd)
 
 			char song_title[256] = {0};
 			char song_path[PATH_MAX];
-			snprintf(song_path, sizeof(song_path), "%s/items/song/items/%s/title",
-				doc_root[0] ? doc_root : ".", sid);
-			FILE *tfp = fopen(song_path, "r");
-			if (tfp) {
-				if (fgets(song_title, sizeof(song_title) - 1, tfp)) {
-					size_t l = strlen(song_title);
-					if (l > 0 && song_title[l - 1] == '\n') song_title[l - 1] = '\0';
-				}
-				fclose(tfp);
-			}
+			snprintf(song_path, sizeof(song_path), "%s/items/song/items/%s",
+				doc_root, sid);
+			call_read_meta_file(song_path, "title", song_title, sizeof(song_title));
 
 			char esc_stitle[512];
 			call_json_escape(song_title, esc_stitle, sizeof(esc_stitle));
@@ -257,26 +169,19 @@ choir_json(int fd)
 	int all_first = 1;
 
 	char songs_dir[512];
-	snprintf(songs_dir, sizeof(songs_dir), "%s/items/song/items",
-		doc_root[0] ? doc_root : ".");
+	snprintf(songs_dir, sizeof(songs_dir), "%s/items/song/items", doc_root);
 	DIR *sdp = opendir(songs_dir);
 	if (sdp) {
 		struct dirent *sde;
 		while ((sde = readdir(sdp)) != NULL) {
 			if (sde->d_name[0] == '.') continue;
 
-			char song_title_path[PATH_MAX];
-			snprintf(song_title_path, sizeof(song_title_path),
-				"%s/%s/title", songs_dir, sde->d_name);
-			FILE *stfp = fopen(song_title_path, "r");
-			if (!stfp) continue;
+			char song_item_path[PATH_MAX];
+			snprintf(song_item_path, sizeof(song_item_path),
+				"%s/%s", songs_dir, sde->d_name);
 
 			char stitle[256] = {0};
-			if (fgets(stitle, sizeof(stitle) - 1, stfp)) {
-				size_t l = strlen(stitle);
-				if (l > 0 && stitle[l - 1] == '\n') stitle[l - 1] = '\0';
-			}
-			fclose(stfp);
+			call_read_meta_file(song_item_path, "title", stitle, sizeof(stitle));
 
 			char esc_sid[256], esc_stitle2[512];
 			call_json_escape(sde->d_name, esc_sid, sizeof(esc_sid));
@@ -352,7 +257,7 @@ handle_choir_songs_list(int fd, char *body)
 	char choir_path[512];
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 
 	if (!choir_id[0]) {
@@ -362,7 +267,7 @@ handle_choir_songs_list(int fd, char *body)
 	}
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
 	FILE *sfp = fopen(songs_path, "r");
@@ -382,7 +287,7 @@ handle_choir_songs_list(int fd, char *body)
 		int preferred_key = 0;
 		char format[64] = {0};
 
-		if (parse_choir_song_line(line, song_id, &preferred_key, format) != 0)
+		if (call_parse_item_line(line, song_id, &preferred_key, format) != 0)
 			continue;
 
 		if (!song_id[0])
@@ -390,16 +295,9 @@ handle_choir_songs_list(int fd, char *body)
 
 		char song_title[256] = {0};
 		char song_path[PATH_MAX];
-		snprintf(song_path, sizeof(song_path), "%s/items/song/items/%s/title",
-			doc_root[0] ? doc_root : ".", song_id);
-		FILE *tfp = fopen(song_path, "r");
-		if (tfp) {
-			if (fgets(song_title, sizeof(song_title) - 1, tfp)) {
-				size_t l = strlen(song_title);
-				if (l > 0 && song_title[l - 1] == '\n') song_title[l - 1] = '\0';
-			}
-			fclose(tfp);
-		}
+		snprintf(song_path, sizeof(song_path), "%s/items/song/items/%s",
+			doc_root, song_id);
+		call_read_meta_file(song_path, "title", song_title, sizeof(song_title));
 
 		char esc_title[512];
 		call_json_escape(song_title, esc_title, sizeof(esc_title));
@@ -428,25 +326,15 @@ handle_choir_songs_list(int fd, char *body)
 static int
 handle_choir_song_add(int fd, char *body)
 {
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 0;
-	}
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 0;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
 	char choir_path[512];
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 
 	if (!choir_id[0]) {
@@ -456,15 +344,10 @@ handle_choir_song_add(int fd, char *body)
 	}
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Not authorized");
-		return 0;
-	}
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
 	call_query_parse(body);
 
@@ -497,30 +380,15 @@ handle_choir_song_add(int fd, char *body)
 
 	char location[256];
 	snprintf(location, sizeof(location), "/choir/%s", choir_id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, location);
 }
 
 /* POST /api/choir/:id/song/:song_id/key - Set preferred key */
 static int
 handle_choir_song_key(int fd, char *body)
 {
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 0;
-	}
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 0;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -528,7 +396,7 @@ handle_choir_song_key(int fd, char *body)
 	char choir_path[512];
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
@@ -539,15 +407,10 @@ handle_choir_song_key(int fd, char *body)
 	}
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Not authorized");
-		return 0;
-	}
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
 	call_query_parse(body);
 
@@ -570,30 +433,25 @@ handle_choir_song_key(int fd, char *body)
 		return 0;
 	}
 
-	while (fgets(line, sizeof(line), rfp)) {
+	while (rfp && fgets(line, sizeof(line), rfp)) {
 		char sid[128] = {0};
 		int pkey = 0;
 		char fmt[64] = {0};
 
-		if (parse_choir_song_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
+		if (call_parse_item_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
 			fprintf(wfp, "%s:%d:%s\n", sid, preferred_key, fmt);
 		} else {
 			fputs(line, wfp);
 		}
 	}
-	fclose(rfp);
+	if (rfp) fclose(rfp);
 	fclose(wfp);
 
 	rename(temp_path, songs_path);
 
 	char location[256];
 	snprintf(location, sizeof(location), "/choir/%s", choir_id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, location);
 }
 
 /* DELETE /api/choir/:id/song/:song_id - Remove song from repertoire */
@@ -602,18 +460,8 @@ handle_choir_song_delete(int fd, char *body)
 {
 	(void)body;
 
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 0;
-	}
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 0;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -621,7 +469,7 @@ handle_choir_song_delete(int fd, char *body)
 	char choir_path[512];
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
@@ -632,15 +480,10 @@ handle_choir_song_delete(int fd, char *body)
 	}
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Not authorized");
-		return 0;
-	}
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
 	char line[256];
 	char temp_path[PATH_MAX];
@@ -655,18 +498,18 @@ handle_choir_song_delete(int fd, char *body)
 	}
 
 	int found = 0;
-	while (fgets(line, sizeof(line), rfp)) {
+	while (rfp && fgets(line, sizeof(line), rfp)) {
 		char sid[128] = {0};
 		int pkey = 0;
 		char fmt[64] = {0};
 
-		if (parse_choir_song_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
+		if (call_parse_item_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
 			found = 1;
 		} else {
 			fputs(line, wfp);
 		}
 	}
-	fclose(rfp);
+	if (rfp) fclose(rfp);
 	fclose(wfp);
 
 	rename(temp_path, songs_path);
@@ -674,11 +517,7 @@ handle_choir_song_delete(int fd, char *body)
 	if (found) {
 		char location[256];
 		snprintf(location, sizeof(location), "/choir/%s", choir_id);
-		ndc_header(fd, "Location", location);
-		ndc_header(fd, "Connection", "close");
-		ndc_set_flags(fd, DF_TO_CLOSE);
-		ndc_head(fd, 303);
-		ndc_close(fd);
+		return call_redirect(fd, location);
 	} else {
 		ndc_head(fd, 404);
 		ndc_body(fd, "Song not found");
@@ -697,7 +536,7 @@ handle_choir_song_view(int fd, char *body)
 	char song_id[128] = {0};
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
@@ -708,7 +547,7 @@ handle_choir_song_view(int fd, char *body)
 	}
 
 	snprintf(songs_path, sizeof(songs_path), "%s/%s/%s/songs",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 
 	int preferred_key = 0;
 	char format[64] = {0};
@@ -721,7 +560,7 @@ handle_choir_song_view(int fd, char *body)
 			int pkey = 0;
 			char fmt[64] = {0};
 
-			if (parse_choir_song_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
+			if (call_parse_item_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
 				preferred_key = pkey;
 				strncpy(format, fmt, sizeof(format) - 1);
 				break;
@@ -729,6 +568,7 @@ handle_choir_song_view(int fd, char *body)
 		}
 		fclose(sfp);
 	}
+	(void)format;
 
 	int transpose = 0;
 	int original_key = 0;
@@ -736,29 +576,19 @@ handle_choir_song_view(int fd, char *body)
 	if (preferred_key != 0) {
 		char song_data_path[512];
 		snprintf(song_data_path, sizeof(song_data_path), "%s/items/song/items/%s/data.txt",
-			doc_root[0] ? doc_root : ".", song_id);
+			doc_root, song_id);
 
-		FILE *dfp = fopen(song_data_path, "r");
-		if (dfp) {
-			char data[4096] = {0};
-			size_t n = fread(data, 1, sizeof(data) - 1, dfp);
-			data[n] = '\0';
-			fclose(dfp);
-
+		char *data = call_slurp_file(song_data_path);
+		if (data) {
 			call_song_transpose(data, 0, 0, NULL, &original_key);
+			free(data);
 			transpose = preferred_key - original_key;
 		}
 	}
 
 	char redirect_url[512];
 	snprintf(redirect_url, sizeof(redirect_url), "/song/%s?t=%d", song_id, transpose);
-
-	ndc_header(fd, "Location", redirect_url);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, redirect_url);
 }
 
 static int
@@ -776,8 +606,7 @@ handle_choir_edit_get(int fd, char *body)
 	char id[128] = {0};
 	char doc_root[256] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	if (!doc_root[0]) strcpy(doc_root, ".");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 
 	char choir_path[512];
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, id);
@@ -790,39 +619,15 @@ handle_choir_edit_get(int fd, char *body)
 		return 1;
 	}
 
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 1;
+	if (call_require_ownership(fd, choir_path, username, "You don't own this choir")) return 1;
 
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 1;
-	}
-
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't own this choir");
-		return 1;
-	}
-
-	char path_buf[PATH_MAX];
 	char title[256] = {0}, format[2048] = {0};
 
-	snprintf(path_buf, sizeof(path_buf), "%s/title", choir_path);
-	FILE *tfp = fopen(path_buf, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp)) {
-			size_t l = strlen(title);
-			if (l > 0 && title[l-1] == '\n') title[l-1] = '\0';
-		}
-		fclose(tfp);
-	}
+	call_read_meta_file(choir_path, "title", title, sizeof(title));
 
+	char path_buf[PATH_MAX];
 	snprintf(path_buf, sizeof(path_buf), "%s/format", choir_path);
 	FILE *ffp = fopen(path_buf, "r");
 	if (ffp) {
@@ -853,18 +658,8 @@ handle_choir_song_remove(int fd, char *body)
 {
 	(void)body;
 
-	char cookie[256] = {0};
-	char token[64] = {0};
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
-		return 0;
-	}
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username)) return 0;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -872,7 +667,7 @@ handle_choir_song_remove(int fd, char *body)
 	char choir_path[512];
 	char songs_path[PATH_MAX];
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
@@ -883,15 +678,10 @@ handle_choir_song_remove(int fd, char *body)
 	}
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHOIR_SONGS_PATH, choir_id);
+		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (!check_choir_ownership(choir_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Not authorized");
-		return 0;
-	}
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
 	char line[256];
 	char temp_path[PATH_MAX];
@@ -910,7 +700,7 @@ handle_choir_song_remove(int fd, char *body)
 		int pkey = 0;
 		char fmt[64] = {0};
 
-		if (parse_choir_song_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
+		if (call_parse_item_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
 			/* skip - removing this entry */
 		} else {
 			fputs(line, wfp);
@@ -921,15 +711,9 @@ handle_choir_song_remove(int fd, char *body)
 
 	rename(temp_path, songs_path);
 
-	/* Redirect back to choir detail page */
 	char location[256];
 	snprintf(location, sizeof(location), "/choir/%s", choir_id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, location);
 }
 
 void

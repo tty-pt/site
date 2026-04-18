@@ -204,23 +204,6 @@ parse_transpose_params(const char *query, int *transpose, int *flags, int *show_
 	return (*transpose || *flags || *show_media) ? 0 : 1;
 }
 
-static void read_meta_file(
-		const char *item_path,
-		const char *name,
-		char *buf, size_t sz)
-{
-	char p[1024];
-	snprintf(p, sizeof(p), "%s/%s", item_path, name);
-	FILE *mfp = fopen(p, "r");
-
-	if (!mfp)
-		return;
-	if (fgets(buf, (int)sz - 1, mfp)) {
-		size_t l = strlen(buf);
-		if (l > 0 && buf[l - 1] == '\n') buf[l - 1] = '\0';
-	}
-	fclose(mfp);
-}
 
 char *song_json(int fd, int flags) {
 	char doc_root[256] = {0};
@@ -248,10 +231,10 @@ char *song_json(int fd, int flags) {
 			doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
 
 	/* Load metadata fields */
-	read_meta_file(item_path, "title", title, sizeof(title));
-	read_meta_file(item_path, "yt", yt, sizeof(yt));
-	read_meta_file(item_path, "audio", audio, sizeof(audio));
-	read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
+	call_read_meta_file(item_path, "title", title, sizeof(title));
+	call_read_meta_file(item_path, "yt", yt, sizeof(yt));
+	call_read_meta_file(item_path, "audio", audio, sizeof(audio));
+	call_read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
 
 	/* Read and Transpose Chord File */
 	snprintf(filepath, sizeof(filepath), "%s/data.txt", item_path);
@@ -304,10 +287,7 @@ char *song_json(int fd, int flags) {
 	/* Determine ownership */
 	int is_owner = 0;
 	{
-		char cookie[256] = {0}, token[64] = {0};
-		ndc_env_get(fd, cookie, "HTTP_COOKIE");
-		call_get_cookie(cookie, token, sizeof(token));
-		const char *username = call_get_session_user(token);
+		const char *username = call_get_request_user(fd);
 		if (username && *username)
 			is_owner = call_item_check_ownership(item_path, username);
 	}
@@ -386,16 +366,9 @@ song_edit_get_handler(int fd, char *body)
 	char id[128] = { 0 };
 
 	/* Auth + ownership check */
-	char cookie[256] = { 0 }, token[64] = { 0 };
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
 		return 1;
-	}
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -552,17 +525,9 @@ song_edit_post_handler(int fd, char *body)
 	char id[128] = { 0 };
 
 	/* Auth check */
-	char cookie[256] = { 0 };
-	char token[64] = { 0 };
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	const char *username = call_get_session_user(token);
-	if (!username || !*username) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Login required");
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
 		return 1;
-	}
 
 	int parse_result = call_query_parse(body);
 	if (parse_result == -1) {
@@ -714,12 +679,7 @@ song_edit_post_handler(int fd, char *body)
 	/* Redirect to song page */
 	char location[256];
 	snprintf(location, sizeof(location), "/song/%s", id);
-	ndc_header(fd, "Location", location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, location);
 }
 
 /* Remove song id from type_index_hd when a song is deleted */
@@ -768,6 +728,36 @@ static void song_cleanup(const char *id)
 	free(copy);
 
 	qmap_put(type_index_hd, song_type, new_list);
+}
+
+/* Parse a colon-separated item line: id:int_field:format\n */
+NDX_DEF(int, parse_item_line,
+	const char *, line, char *, id_out,
+	int *, int_out, char *, format_out)
+{
+	char *colon1 = strchr(line, ':');
+	if (!colon1)
+		return -1;
+
+	char *colon2 = strchr(colon1 + 1, ':');
+	if (!colon2)
+		return -1;
+
+	size_t id_len = (size_t)(colon1 - line);
+	if (id_len > 127) id_len = 127;
+	strncpy(id_out, line, id_len);
+	id_out[id_len] = '\0';
+
+	*int_out = atoi(colon1 + 1);
+
+	strncpy(format_out, colon2 + 1, 127);
+	format_out[127] = '\0';
+
+	size_t fmt_len = strlen(format_out);
+	while (fmt_len > 0 && (format_out[fmt_len - 1] == '\n' || format_out[fmt_len - 1] == '\r'))
+		format_out[--fmt_len] = '\0';
+
+	return 0;
 }
 
 void ndx_install(void)

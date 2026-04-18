@@ -4,46 +4,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <openssl/evp.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
 
+#ifndef DF_TO_CLOSE
+#define DF_TO_CLOSE 8
+#endif
+
 static uint32_t query_db;
-
-NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len) {
-	const char *p;
-
-	token[0] = '\0';
-
-	if (!cookie || !*cookie)
-		return -1;
-
-	p = cookie;
-
-	while (*p) {
-		while (*p == ' ' || *p == '\t')
-			p++;
-
-		if (!strncmp(p, "QSESSION=", 9)) {
-			p += 9;
-			const char *amp = strchr(p, '&');
-			size_t tlen = amp ? (amp - p) : strlen(p);
-			if (tlen >= len) tlen = len - 1;
-			strncpy(token, p, tlen);
-			token[tlen] = '\0';
-			return 0;
-		}
-
-		while (*p && *p != '&')
-			p++;
-
-		if (*p == '&')
-			p++;
-	}
-	
-	return 0;
-}
 
 NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen) {
 	size_t j = 0;
@@ -91,32 +62,32 @@ NDX_DEF(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 }
 
 NDX_DEF(int, b64_encode, const char *, in, char *, out, size_t, outlen) {
-	EVP_EncodeBlock(out, in, strlen(in));
+	EVP_EncodeBlock((unsigned char *)out, (const unsigned char *)in, (int)strlen(in));
 	return 0;
 }
 
 NDX_DEF(int, query_parse, char *, query) {
 	if (!query_db) return -1;
-	
+
 	qmap_drop(query_db);
 	query_db = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
 	if (!query_db) return -1;
-	
+
 	if (!query || !*query) return 0;
-	
+
 	char *query_copy = strdup(query);
 	if (!query_copy) return -1;
-	
+
 	char *saveptr;
 	char *param = strtok_r(query_copy, "&", &saveptr);
-	
+
 	while (param) {
 		char *eq = strchr(param, '=');
 		if (eq) {
 			*eq = '\0';
 			char *key = param;
 			char *value = eq + 1;
-			
+
 			size_t val_len = strlen(value);
 			char *decoded = malloc(val_len + 1);
 			if (decoded) {
@@ -127,7 +98,7 @@ NDX_DEF(int, query_parse, char *, query) {
 					} else if (value[i] == '%' && value[i+1] && value[i+2]) {
 						int c;
 						sscanf(value + i + 1, "%2x", &c);
-						decoded[j++] = c;
+						decoded[j++] = (char)c;
 						i += 2;
 					} else {
 						decoded[j++] = value[i];
@@ -140,7 +111,7 @@ NDX_DEF(int, query_parse, char *, query) {
 		}
 		param = strtok_r(NULL, "&", &saveptr);
 	}
-	
+
 	free(query_copy);
 	return 0;
 }
@@ -158,12 +129,12 @@ NDX_DEF(int, query_param, const char *, name, char *, buf, size_t, buf_len) {
 		return -1;
 
 	buf[0] = '\0';
-	
+
 	val = (const char *) qmap_get(query_db, name);
 
 	if (!val)
 		return -1;
-	
+
 	len = strlen(val);
 
 	if (len >= buf_len)
@@ -171,7 +142,66 @@ NDX_DEF(int, query_param, const char *, name, char *, buf, size_t, buf_len) {
 
 	memcpy(buf, val, len);
 	buf[len] = '\0';
-	return len;
+	return (int)len;
+}
+
+NDX_DEF(int, redirect, int, fd, const char *, location)
+{
+	ndc_header(fd, "Location", (char *)location);
+	ndc_header(fd, "Connection", "close");
+	ndc_set_flags(fd, DF_TO_CLOSE);
+	ndc_head(fd, 303);
+	ndc_close(fd);
+	return 0;
+}
+
+NDX_DEF(int, read_meta_file,
+	const char *, item_path, const char *, name,
+	char *, buf, size_t, sz)
+{
+	char p[PATH_MAX];
+	snprintf(p, sizeof(p), "%s/%s", item_path, name);
+	FILE *mfp = fopen(p, "r");
+	if (!mfp)
+		return -1;
+	if (fgets(buf, (int)sz - 1, mfp)) {
+		size_t l = strlen(buf);
+		if (l > 0 && buf[l - 1] == '\n') buf[l - 1] = '\0';
+	}
+	fclose(mfp);
+	return 0;
+}
+
+NDX_DEF(char *, slurp_file, const char *, path)
+{
+	FILE *fp = fopen(path, "r");
+	if (!fp)
+		return NULL;
+	fseek(fp, 0, SEEK_END);
+	long fsize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	if (fsize <= 0) {
+		fclose(fp);
+		return strdup("");
+	}
+	char *buf = malloc((size_t)fsize + 1);
+	if (!buf) {
+		fclose(fp);
+		return NULL;
+	}
+	size_t got = fread(buf, 1, (size_t)fsize, fp);
+	fclose(fp);
+	buf[got] = '\0';
+	return buf;
+}
+
+NDX_DEF(int, get_doc_root, int, fd, char *, buf, size_t, len)
+{
+	buf[0] = '\0';
+	ndc_env_get(fd, buf, "DOCUMENT_ROOT");
+	if (!buf[0])
+		snprintf(buf, len, ".");
+	return 0;
 }
 
 MODULE_API void
