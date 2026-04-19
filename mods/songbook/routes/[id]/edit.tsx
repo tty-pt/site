@@ -103,7 +103,7 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
           method="POST"
           action={`/songbook/${songbook.id}/edit`}
           encType="multipart/form-data"
-          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+          className="flex flex-col gap-2 w-full"
         >
           {songbook.songs.map((song, i) => (
             <SongbookEditRow
@@ -122,12 +122,12 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
             name="amount"
             value={`${songbook.songs.length}`}
           />
-          <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
+          <div className="mt-4 flex gap-2">
             <button
               type="submit"
               name="action"
               value="save"
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+              className="btn btn-primary"
             >
               Save Changes
             </button>
@@ -135,13 +135,13 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
               type="submit"
               name="action"
               value="add_row"
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+              className="btn btn-action"
             >
               + Add Row
             </button>
             <a
               href={`/songbook/${songbook.id}`}
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
+              className="btn btn-secondary"
             >
               Cancel
             </a>

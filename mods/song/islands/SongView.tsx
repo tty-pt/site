@@ -157,36 +157,35 @@ export default function SongDetailIsland(props: SongDetailProps) {
 
   return (
     <Layout user={props.user} title={`song: ${displayTitle}`} path={props.path} icon="🎸" menuItems={<>{transposeForm}{editLink}</>}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
+      <div className="flex flex-col items-center gap-4">
         
         {/* Media container - reacts to showMedia state */}
         {(props.yt || props.audio || props.pdf) && (
           <div 
             id="media-container"
-            class={showMedia ? '' : 'hidden'}
-            style={{ width: "100%", maxWidth: "600px" }}
+            class={showMedia ? 'w-full max-w-xl' : 'hidden w-full max-w-xl'}
           >
             {props.yt && (
-              <div style={{ marginBottom: "1rem" }}>
+              <div className="mb-4">
                 <iframe 
                   src={`https://www.youtube.com/embed/${props.yt}`}
-                  style={{ width: "100%", aspectRatio: "16/9", border: "none" }}
+                  className="w-full aspect-video border-none"
                   allowFullScreen
                 />
               </div>
             )}
             
             {props.audio && (
-              <div style={{ marginBottom: "1rem" }}>
-                <audio controls style={{ width: "100%" }}>
+              <div className="mb-4">
+                <audio controls className="w-full">
                   <source src={props.audio} type="audio/mpeg" />
                 </audio>
               </div>
             )}
             
             {props.pdf && (
-              <div style={{ marginBottom: "1rem" }}>
-                <a href={props.pdf} target="_blank" rel="noopener" style={{ color: "#007bff" }}>
+              <div className="mb-4">
+                <a href={props.pdf} target="_blank" rel="noopener" className="text-blue-600">
                   📄 View PDF
                 </a>
               </div>
@@ -196,11 +195,11 @@ export default function SongDetailIsland(props: SongDetailProps) {
 
         {/* Categories + Author row */}
         {(props.categories || props.author) && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%", maxWidth: "600px", fontSize: "0.8em", color: "grey" }}>
-            <div style={{ fontStyle: "italic", whiteSpace: "pre-wrap" }}>
+          <div className="flex justify-between items-start w-full max-w-xl text-xs text-gray-400">
+            <div className="italic whitespace-pre-wrap">
               {props.categories || ""}
             </div>
-            <div style={{ textAlign: "right" }}>
+            <div className="text-right">
               {props.author || "N/A"}
             </div>
           </div>
@@ -210,15 +209,7 @@ export default function SongDetailIsland(props: SongDetailProps) {
         <div
           id="chord-data"
           dangerouslySetInnerHTML={{ __html: chordHtml }}
-          style={{
-            whiteSpace: "pre-wrap",
-            fontFamily: "monospace",
-            padding: "1rem",
-            background: "#f5f5f5",
-            borderRadius: "4px",
-            width: "100%",
-            maxWidth: "600px"
-          }}
+          className="whitespace-pre-wrap font-mono p-4 rounded w-full max-w-xl chord-data"
         />
 
       </div>

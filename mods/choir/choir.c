@@ -140,13 +140,15 @@ choir_json(int fd)
 				doc_root, sid);
 			call_read_meta_file(song_path, "title", song_title, sizeof(song_title));
 
+			int original_key = call_song_get_original_key(sid);
+
 			char esc_stitle[512];
 			call_json_escape(song_title, esc_stitle, sizeof(esc_stitle));
 
 			char item_json[1024];
 			snprintf(item_json, sizeof(item_json),
-				"%s{\"id\":\"%s\",\"title\":\"%s\",\"preferredKey\":%d,\"format\":\"%s\"}",
-				first ? "" : ",", sid, esc_stitle, pkey, fmt);
+				"%s{\"id\":\"%s\",\"title\":\"%s\",\"preferredKey\":%d,\"originalKey\":%d,\"format\":\"%s\"}",
+				first ? "" : ",", sid, esc_stitle, pkey, original_key, fmt);
 			first = 0;
 
 			if (strlen(songs_json) + strlen(item_json) < sizeof(songs_json) - 2) {

@@ -667,6 +667,51 @@ static void song_cleanup(const char *id)
 	qmap_put(type_index_hd, song_type, new_list);
 }
 
+/*
+ * NDX API: Get original key of a song by reading its data.txt
+ * Returns chromatic index 0-11, or 0 if undetectable.
+ */
+NDX_DEF(int, song_get_original_key, const char *, song_id)
+{
+	if (!g_transp_ctx || !song_id || !song_id[0])
+		return 0;
+
+	char data_path[PATH_MAX];
+	snprintf(data_path, sizeof(data_path),
+		"%s/%s/data.txt", CHORDS_ITEMS_PATH, song_id);
+
+	FILE *fp = fopen(data_path, "r");
+	if (!fp)
+		return 0;
+
+	fseek(fp, 0, SEEK_END);
+	long fsize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	if (fsize <= 0) {
+		fclose(fp);
+		return 0;
+	}
+
+	char *content = malloc(fsize + 1);
+	if (!content) {
+		fclose(fp);
+		return 0;
+	}
+
+	fread(content, 1, fsize, fp);
+	fclose(fp);
+	content[fsize] = '\0';
+
+	transp_reset_key(g_transp_ctx);
+	char *out = transp_buffer(g_transp_ctx, content, 0, 0);
+	free(content);
+	if (out) free(out);
+
+	int key = transp_get_key(g_transp_ctx);
+	return key < 0 ? 0 : key;
+}
+
 /* Parse a colon-separated item line: id:int_field:format\n */
 NDX_DEF(int, parse_item_line,
 	const char *, line, char *, id_out,

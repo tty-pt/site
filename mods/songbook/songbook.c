@@ -719,6 +719,38 @@ handle_sb_add(int fd, char *body)
 			fwrite(choir, 1, strlen(choir), fp);
 			fclose(fp);
 		}
+
+		/* Pre-populate data.txt with one random song per choir format type */
+		char doc_root[256] = {0};
+		call_get_doc_root(fd, doc_root, sizeof(doc_root));
+
+		char format_path[PATH_MAX];
+		snprintf(format_path, sizeof(format_path),
+			"%s/items/choir/items/%s/format", doc_root, choir);
+
+		FILE *ffp = fopen(format_path, "r");
+		if (ffp) {
+			char data_path[PATH_MAX];
+			snprintf(data_path, sizeof(data_path),
+				"./items/songbook/items/%s/data.txt", id);
+			FILE *dfp = fopen(data_path, "w");
+
+			char type[128];
+			while (dfp && fgets(type, sizeof(type), ffp)) {
+				/* strip trailing newline/whitespace */
+				size_t tlen = strlen(type);
+				while (tlen > 0 && (type[tlen-1] == '\n' || type[tlen-1] == '\r' || type[tlen-1] == ' '))
+					type[--tlen] = '\0';
+				if (tlen == 0) continue;
+
+				char song_id[256] = {0};
+				if (get_random_chord_by_type(type, song_id, sizeof(song_id)) == 0)
+					fprintf(dfp, "%s:0:%s\n", song_id, type);
+			}
+
+			if (dfp) fclose(dfp);
+			fclose(ffp);
+		}
 	}
 
 	char location[512];

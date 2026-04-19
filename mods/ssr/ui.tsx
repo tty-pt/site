@@ -82,14 +82,14 @@ export function Layout({ children, user, title, path, menuItems, icon }: {
       <input
         name="functions"
         type="checkbox"
-        style={{ display: "none" }}
+        class="hidden"
       ></input>
 
       <span className="fixed top-0 right-0 z-10 p-2 flex items-center gap-4">
-        <a className="menu-toggle bg-gray-50 border border-gray-200 flex items-center justify-center cursor-pointer text-base btn">⚙️</a>
+        <a className="menu-toggle flex items-center justify-center cursor-pointer text-base btn">⚙️</a>
       </span>
 
-      <span className="functions flex-1 fixed right-0 z-20 h-full overflow-y-auto bg-gray-50 text-sm capitalize flex flex-col gap-2 p-4">
+      <span className="functions flex-1 fixed right-0 z-20 h-full overflow-y-auto text-sm capitalize flex flex-col gap-2 p-4">
         <Menu user={user} path={path} icon={icon} />
         {menuItems && (
           <>

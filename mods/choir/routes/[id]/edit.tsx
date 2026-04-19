@@ -33,7 +33,7 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
           method="POST"
           action={`/api/choir/${id}/edit`}
           encType="multipart/form-data"
-          style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }}
+          className="flex flex-col gap-4 w-full max-w-lg"
         >
           <label>
             Choir Name:
@@ -42,7 +42,7 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
               name="title"
               defaultValue={title}
               required
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
           <label>
@@ -51,20 +51,14 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
               name="format"
               rows={10}
               defaultValue={formats.join("\n")}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem", fontFamily: "monospace" }}
+              className="block mt-1 w-full font-mono"
             />
           </label>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              type="submit"
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
-            >
+          <div className="flex gap-2">
+            <button type="submit" className="btn btn-primary">
               Save Changes
             </button>
-            <a
-              href={`/choir/${id}`}
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
-            >
+            <a href={`/choir/${id}`} className="btn btn-secondary">
               Cancel
             </a>
           </div>

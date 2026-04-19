@@ -65,25 +65,25 @@ export default function SongItem(props: Props) {
 
   if (!props.chordId) {
     return (
-      <div style={{ padding: "1rem", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+      <div className="p-4 bg-surface rounded">
         <h3>{format.toUpperCase()}</h3>
       </div>
     );
   }
 
   return (
-    <div style={{ marginTop: "2rem", borderTop: "2px solid #ddd", paddingTop: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div className="mt-8 border-t-2 border-gray-300 pt-4">
+      <div className="flex justify-between items-center">
         <div>
-          <h4 style={{ margin: 0 }}>
+          <h4 className="m-0">
             <a href={`/song/${props.chordId}`} target="_blank">{props.chordTitle || ""}</a>
           </h4>
-          <p style={{ margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" }}>
+          <p className="my-1 text-sm text-gray-500">
             {format} • Key: {targetKey}
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div className="flex gap-2 items-center">
             {props.isOwner && (
               <select
                 name="t"
@@ -101,7 +101,7 @@ export default function SongItem(props: Props) {
                   }).catch(console.error);
                 }}
                 value={transpose}
-                style={{ padding: "0.25rem" }}
+                className="p-1"
               >
                 {keys.map((key, i) => {
                   const semitones = (i - originalKey + 12) % 12;
@@ -117,7 +117,7 @@ export default function SongItem(props: Props) {
             {props.isOwner && (
               <form method="POST" action={`/songbook/${props.songbookId}/randomize`} encType="multipart/form-data">
                 <input type="hidden" name="n" value={`${props.index}`} />
-                <button type="submit" style={{ padding: "0.25rem 0.5rem" }}>🎲</button>
+                <button type="submit" className="btn py-1 px-2">🎲</button>
               </form>
             )}
           </div>
@@ -125,15 +125,7 @@ export default function SongItem(props: Props) {
 
       <pre
         dangerouslySetInnerHTML={{ __html: chordHtml || "" }}
-        style={{
-          fontFamily: "monospace",
-          fontSize: "0.9rem",
-          whiteSpace: "pre-wrap",
-          backgroundColor: "#f9f9f9",
-          padding: "1rem",
-          borderRadius: "4px",
-          marginTop: "0.5rem",
-        }}
+        className="font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded mt-2"
       />
     </div>
   );

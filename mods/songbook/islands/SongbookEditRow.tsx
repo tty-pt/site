@@ -36,7 +36,7 @@ export default function SongbookEditRow(props: Props) {
   const targetKey = (props.originalKey + props.transpose) % 12;
 
   return (
-    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+    <div className="flex gap-2 items-center">
       <datalist id={`types-${i}`}>
         {allTypes.map((t) => <option key={t} value={t} />)}
       </datalist>
@@ -46,33 +46,33 @@ export default function SongbookEditRow(props: Props) {
         ))}
       </datalist>
 
-      <label style={{ flex: "0 0 150px" }}>
+      <label className="w-[150px] shrink-0">
         {i + 1}. Format:
         <input
           list={`types-${i}`}
           name={`fmt_${i}`}
           value={selectedFormat}
           onInput={(e) => setSelectedFormat((e.target as HTMLInputElement).value)}
-          style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          className="w-full mt-1"
         />
       </label>
 
-      <label style={{ flex: 1 }}>
+      <label className="flex-1">
         Song:
         <input
           list={`songs-${i}`}
           name={`song_${i}`}
           defaultValue={displayVal}
-          style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          className="w-full mt-1"
         />
       </label>
 
-      <label style={{ flex: "0 0 80px" }}>
+      <label className="w-20 shrink-0">
         Key:
         <select
           name={`key_${i}`}
           defaultValue={`${targetKey}`}
-          style={{ width: "100%", padding: "0.25rem", marginTop: "0.25rem" }}
+          className="w-full mt-1"
         >
           {KEY_NAMES.map((name, idx) => (
             <option key={idx} value={`${idx}`}>{name}</option>

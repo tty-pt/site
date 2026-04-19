@@ -63,7 +63,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
           method="POST"
           action={`/song/${id}/edit`}
           encType="application/x-www-form-urlencoded"
-          style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "600px" }}
+          className="flex flex-col gap-4 w-full max-w-2xl"
         >
           <label>
             Title:
@@ -71,7 +71,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="title"
               defaultValue={title}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
 
@@ -81,7 +81,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="author"
               defaultValue={author}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
           
@@ -91,7 +91,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               name="type"
               defaultValue={type}
               rows={3}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem", fontFamily: "monospace" }}
+              className="block mt-1 w-full font-mono"
             />
           </label>
           
@@ -101,7 +101,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="yt"
               defaultValue={yt}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
           
@@ -111,7 +111,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="audio"
               defaultValue={audio}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
           
@@ -121,7 +121,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="pdf"
               defaultValue={pdf}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+              className="block mt-1 w-full"
             />
           </label>
           
@@ -131,21 +131,15 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               name="data"
               defaultValue={songData}
               rows={20}
-              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem", fontFamily: "monospace", whiteSpace: "pre" }}
+              className="block mt-1 w-full font-mono whitespace-pre"
             />
           </label>
           
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              type="submit"
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
-            >
+          <div className="flex gap-2">
+            <button type="submit" className="btn btn-primary">
               Save Changes
             </button>
-            <a
-              href={`/song/${id}`}
-              style={{ padding: "0.5rem 1rem", backgroundColor: "#6c757d", color: "white", textDecoration: "none", borderRadius: "4px", display: "inline-block" }}
-            >
+            <a href={`/song/${id}`} className="btn btn-secondary">
               Cancel
             </a>
           </div>

@@ -26,3 +26,4 @@
 !/routes/index.tsx
 !/routes/_middleware.ts
 !/routes/[...slug].tsx
+/.cache

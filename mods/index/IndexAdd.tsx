@@ -2,9 +2,15 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout } from "../ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
+interface ExtraField {
+  name: string;
+  value: string;
+}
+
 interface AddData {
   user: string | null;
   module: string;
+  extraFields?: ExtraField[];
 }
 
 export const handler: Handlers<AddData, State> = {
@@ -28,10 +34,11 @@ export const handler: Handlers<AddData, State> = {
   },
 };
 
-function IndexAdd({
+export function IndexAdd({
   module,
   user,
-}: { module?: string; user: string | null }) {
+  extraFields,
+}: { module?: string; user: string | null; extraFields?: ExtraField[] }) {
   const path = `/${module}/add`;
 
   return (
@@ -41,12 +48,15 @@ function IndexAdd({
           <span>Title:</span>
           <input name="title" />
         </label>
+        {extraFields?.map((f) => (
+          <input key={f.name} type="hidden" name={f.name} value={f.value} />
+        ))}
         <button type="submit">Add</button>
       </form>
     </Layout>
   );
 }
 
-export default function SongAdd({ data }: PageProps<AddData>) {
-  return <IndexAdd user={data.user} module={data.module} />;
+export default function IndexAddPage({ data }: PageProps<AddData>) {
+  return <IndexAdd user={data.user} module={data.module} extraFields={data.extraFields} />;
 }

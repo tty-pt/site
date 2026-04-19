@@ -58,4 +58,8 @@ NDX_DECL(char *, song_get_types_json, int, dummy);
  * Returns a malloc'd string the caller must free, or NULL on error. */
 NDX_DECL(char *, build_all_songs_json, const char *, doc_root, int, include_type);
 
+/* Get the original key of a song by reading and parsing its data.txt.
+ * Returns chromatic index 0-11 (0=C), or 0 if undetectable. */
+NDX_DECL(int, song_get_original_key, const char *, song_id);
+
 #endif /* CHORDS_API_H */

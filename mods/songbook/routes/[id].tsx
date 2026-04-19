@@ -61,10 +61,10 @@ export default function SbDetail({ data }: PageProps<SbData>) {
   return (
     <Layout user={data.user} title={`songbook: ${songbook.title}`} path={`/songbook/${songbook.id}`} icon="📖"
       menuItems={<ItemMenu module="songbook" id={songbook.id} isOwner={isOwner} />}>
-      <div style={{ padding: "2rem", maxWidth: "900px", margin: "0 auto" }}>
+      <div className="p-8 w-full max-w-4xl mx-auto">
         {songbook.choir && (
-          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "0.8em", color: "grey" }}>
-            <a href={`/choir/${songbook.choir}`} style={{ color: "grey" }}>
+          <div className="flex justify-end text-xs text-gray-400">
+            <a href={`/choir/${songbook.choir}`} className="text-gray-400">
               {songbook.choir}
             </a>
           </div>

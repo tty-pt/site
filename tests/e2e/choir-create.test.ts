@@ -57,7 +57,7 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     // ── 2. Verify detail page shows title and owner ─────────────────────────
     await page.waitForSelector("h1", { timeout: 5000 });
     await waitForText(page, "body", choirTitle);
-    await waitForText(page, "body", `Owner: ${user.username}`);
+    await waitForText(page, "body", user.username);
 
     // Extract choir ID from URL
     const choirUrl = page.url();

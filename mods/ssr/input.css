@@ -2,135 +2,97 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles */
-
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600&display=swap');
 
 :root {
-  --cf: #3c403c;
-  --c0: #2c2c2c;
-  --c5: #6e5f8a;
-  --c13: #877cb3;
+  --link: #6e5f8a;
+  --link-hover: #877cb3;
+  --bg-page: #f9f9f9;
+  --bg-surface: whitesmoke;
+  --border: gainsboro;
+  --text: #2c2c2c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --link: #877cb3;
+    --bg-page: #3c403c;
+    --bg-surface: #2c2c2c;
+    --border: #555;
+    --text: #c1c3da;
+    color-scheme: dark;
+  }
 }
 
 body {
   font-family: "Noto Sans", "Segoe UI", Roboto, sans-serif;
   font-size: 1.1em;
-  color: var(--c0);
-  background: #f9f9f9;
+  color: var(--text);
+  background: var(--bg-page);
   margin: 0;
 }
 
 /* Layout */
-.menu {
-  display: flex; flex-direction: column; height: 100vh; margin: 0;
-  position: fixed;
-}
+.menu { display: flex; flex-direction: column; height: 100vh; margin: 0; position: fixed; }
 .main { flex: 1; padding: 16px; display: flex; flex-direction: column; align-items: center; }
 h1 { text-transform: capitalize; text-align: center; margin-bottom: 16px; font-size: 1.5em; font-weight: 600; }
 
-/* Form */
+/* Forms */
 form { display: flex; gap: 16px; }
+form:not(.horizontal) { flex-direction: column; }
+form.horizontal { align-items: center; }
 form label { display: flex; font-size: 0.8em; }
 form > a { text-align: center; }
 
-label:not(:has(> input[type="checkbox"])) {
-  flex-direction: column;
-}
+label { display: flex; gap: 4px; font-size: 0.8em; }
+label:not(:has(> input[type="checkbox"])) { flex-direction: column; }
+label > input, label > textarea { display: block; }
 
-form:not(.horizontal) { flex-direction: column; }
-form.horizontal { align-items: center; }
-
-/* Center container */
-.center { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-
-/* Menu toggle */
-.menu-toggle { padding: 12px; border-radius: 50%; }
-
-/* Dark mode */
-@media (prefers-color-scheme: dark) {
-  body {
-    color: #c1c3da;
-    background: #3c403c;
-  }
-  a { color: var(--c13); }
-}
-
-/* Form styles */
-input, textarea {
-  border: 1px solid var(--c0);
+input, textarea, select {
+  border: 1px solid var(--border);
   padding: 8px;
   font-size: inherit;
   border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text);
 }
 
-input:focus {
-  outline: 2px solid var(--c5);
+input:focus, select:focus {
+  outline: 2px solid var(--link);
   outline-offset: -1px;
 }
 
-/* Button styles */
-button,
-.btn,
-a.btn,
-.btn:visited,
-a.btn:visited {
+/* Buttons */
+button, .btn, a.btn {
   padding: 8px 16px;
-  background: whitesmoke;
-  border: 1px solid gainsboro;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text);
   cursor: pointer;
   transition: filter 0.2s;
   text-decoration: none;
   display: flex;
-  color: inherit !important;
   justify-content: center;
-  display: flex;
   align-items: center;
   gap: 8px;
-  text-decoration: none;
-  color: inherit;
 }
 
 button:hover, a.btn:hover { filter: brightness(110%); }
 
-@media (prefers-color-scheme: dark) {
-  button,
-  .btn,
-  a.btn {
-    background: var(--c0);
-    color: #c1c3da;
-    border: none;
-  }
-}
-
-/* Link styles */
-a {
-  color: var(--c5);
-  text-decoration: none;
-}
-
-a:hover {
-  color: var(--c13);
-}
-
-/* Button links use foreground color */
-a.btn {
-  color: var(--cf);
-}
+/* Links */
+a { color: var(--link); text-decoration: none; }
+a:hover { color: var(--link-hover); }
+a.btn { color: var(--text); }
 
 /* Menu */
-/* .menu input[type="checkbox"] { display: none; } */
-.menu input:checked ~ .functions {
-  transform: translateX(162px);
-}
+.menu input:checked ~ .functions { transform: translateX(162px); }
 
 .functions {
   transition: transform 0.3s ease;
   overflow-x: visible;
   display: flex !important;
   flex-direction: column;
-  background-color: #fefefe;
+  background-color: var(--bg-surface);
   transform: translateX(0px);
   width: 130px;
 }
@@ -138,131 +100,55 @@ a.btn {
 .functions > button, .functions > a.btn {
   white-space: nowrap !important;
   padding: 12px 16px;
-  display: flex;
   justify-content: space-between;
-  gap: 8px;
-  align-items: center;
 }
 
-.functions a.btn {
-  padding: 8px 16px !important;
-  background: whitesmoke !important;
-  border: 1px solid gainsboro !important;
-  border-radius: 4px !important;
-}
+.functions a.btn { padding: 8px 16px !important; border-radius: 4px !important; }
+
+.functions form label { flex-direction: column; gap: 0.25rem; font-size: 0.875rem; text-transform: none; }
+.functions form label:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; }
+.functions form input[type="checkbox"] { width: auto; margin-right: 0.25rem; }
+.functions form select, .functions form input[type="number"] { padding: 6px 8px; font-size: 0.875rem; }
+.functions form button[type="submit"] { margin-top: 0.25rem; }
 
 .menu-toggle {
   cursor: pointer;
   padding: 8px;
-  background: whitesmoke;
-  border: 1px solid gainsboro;
   border-radius: 50%;
   width: 2.3rem;
   height: 2.3rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  .menu-toggle {
-    background: var(--c0);
-    color: #c1c3da;
-  }
-}
+/* Utilities */
+.center { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
-/* Card/item styles */
 .card {
   padding: 16px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: white;
+  background: var(--bg-surface);
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
-@media (prefers-color-scheme: dark) {
-  .card {
-    background: var(--c0);
-    border-color: #444;
-  }
-}
+.container { max-width: 600px; margin: 0 auto; padding: 16px; }
 
-/* Container */
-.container {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 16px;
-}
+.menu-separator { border-top: 1px solid var(--border); margin: 0.75rem 0; }
 
-/* Labels */
-label {
-  display: flex;
-  /* flex-direction: column; */
-  gap: 4px;
-  font-size: 0.8em;
-}
+.module-menu { display: flex; flex-direction: column; gap: 0.5rem; }
+.module-menu form { display: flex; flex-direction: column; gap: 0.75rem; }
 
-label > input,
-label > textarea {
-  display: block;
-}
+.bg-surface, .chord-data { background: var(--bg-surface); }
 
-/* Menu separator and module menu */
-.menu-separator {
-  border-top: 1px solid #e5e7eb;
-  margin: 0.75rem 0;
-}
+/* Semantic button variants */
+.btn-primary   { background: #28a745 !important; color: white !important; border-color: #28a745 !important; }
+.btn-action    { background: #007bff !important; color: white !important; border-color: #007bff !important; }
+.btn-secondary { background: #6c757d !important; color: white !important; border-color: #6c757d !important; }
+.btn-danger    { background: #e05c5c !important; color: white !important; border-color: #e05c5c !important; }
 
 @media (prefers-color-scheme: dark) {
-  .menu-separator {
-    border-top-color: #444;
-  }
-}
-
-.module-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.module-menu form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.functions form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-  text-transform: none;
-}
-
-.functions form select,
-.functions form input[type="number"] {
-  padding: 6px 8px;
-  font-size: 0.875rem;
-  border-radius: 4px;
-  border: 1px solid #d1d5db;
-}
-
-.functions form input[type="checkbox"] {
-  width: auto;
-  margin-right: 0.25rem;
-}
-
-.functions form label:has(> input[type="checkbox"]) {
-  flex-direction: row;
-  align-items: center;
-}
-
-.functions form button[type="submit"] {
-  margin-top: 0.25rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .functions form select,
-  .functions form input[type="number"] {
-    background: var(--c0);
-    color: #c1c3da;
-    border-color: #555;
-  }
+  .btn-primary   { background: #1e7e34 !important; border-color: #1e7e34 !important; }
+  .btn-action    { background: #0056b3 !important; border-color: #0056b3 !important; }
+  .btn-secondary { background: #545b62 !important; border-color: #545b62 !important; }
+  .btn-danger    { background: #c0392b !important; border-color: #c0392b !important; }
 }
