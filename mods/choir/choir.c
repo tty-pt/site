@@ -54,24 +54,12 @@ handle_choir_edit(int fd, char *body)
 
 	if (title_len > 0) {
 		title[title_len] = '\0';
-		char title_path[PATH_MAX];
-		snprintf(title_path, sizeof(title_path), "%s/title", choir_path);
-		FILE *tfp = fopen(title_path, "w");
-		if (tfp) {
-			fwrite(title, 1, strlen(title), tfp);
-			fclose(tfp);
-		}
+		call_write_meta_file(choir_path, "title", title, strlen(title));
 	}
 
 	if (format_len > 0) {
 		format[format_len] = '\0';
-		char format_path[PATH_MAX];
-		snprintf(format_path, sizeof(format_path), "%s/format", choir_path);
-		FILE *ffp = fopen(format_path, "w");
-		if (ffp) {
-			fwrite(format, 1, strlen(format), ffp);
-			fclose(ffp);
-		}
+		call_write_meta_file(choir_path, "format", format, strlen(format));
 	}
 
 	char location[256];
@@ -317,7 +305,7 @@ static int
 handle_choir_song_add(int fd, char *body)
 {
 	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username)) return 0;
+	if (call_require_login(fd, username)) return 1;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -334,7 +322,7 @@ handle_choir_song_add(int fd, char *body)
 		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 1;
 
 	ndc_query_parse(body);
 	
@@ -378,7 +366,7 @@ static int
 handle_choir_song_key(int fd, char *body)
 {
 	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username)) return 0;
+	if (call_require_login(fd, username)) return 1;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -397,7 +385,7 @@ handle_choir_song_key(int fd, char *body)
 		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 1;
 
 	ndc_query_parse(body);
 	
@@ -445,7 +433,7 @@ handle_choir_song_delete(int fd, char *body)
 	(void)body;
 
 	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username)) return 0;
+	if (call_require_login(fd, username)) return 1;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -464,7 +452,7 @@ handle_choir_song_delete(int fd, char *body)
 		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 1;
 
 	char line[256];
 	char temp_path[PATH_MAX];
@@ -627,7 +615,7 @@ handle_choir_song_remove(int fd, char *body)
 	(void)body;
 
 	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username)) return 0;
+	if (call_require_login(fd, username)) return 1;
 
 	char doc_root[256] = {0};
 	char choir_id[128] = {0};
@@ -646,7 +634,7 @@ handle_choir_song_remove(int fd, char *body)
 		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
-	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
+	if (call_require_ownership(fd, choir_path, username, NULL)) return 1;
 
 	char line[256];
 	char temp_path[PATH_MAX];

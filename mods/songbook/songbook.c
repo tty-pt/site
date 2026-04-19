@@ -582,26 +582,9 @@ songbook_json(int fd)
 		int transpose = 0;
 		char format[64] = {0};
 
-		char *colon1 = strchr(line, ':');
-		if (colon1) {
-			size_t id_len = colon1 - line;
-			if (id_len > 127) id_len = 127;
-			strncpy(chord_id, line, id_len);
-
-			char *colon2 = strchr(colon1 + 1, ':');
-			if (colon2) {
-				strncpy(format, colon2 + 1, sizeof(format) - 1);
-				*colon2 = '\0';
-			}
-			transpose = atoi(colon1 + 1);
-		} else {
-			strncpy(chord_id, line, sizeof(chord_id) - 1);
-		}
-
-		/* Remove trailing \r if present */
-		size_t fmt_len = strlen(format);
-		while (fmt_len > 0 && (format[fmt_len - 1] == '\r' || format[fmt_len - 1] == '\n')) {
-			format[--fmt_len] = '\0';
+		if (call_parse_item_line(line, chord_id, &transpose, format) != 0) {
+			line = strtok(NULL, "\n");
+			continue;
 		}
 
 		if (chord_id[0]) {
@@ -711,14 +694,10 @@ handle_sb_add(int fd, char *body)
 	int choir_len = call_mpfd_get("choir", choir, sizeof(choir) - 1);
 	if (choir_len > 0) {
 		choir[choir_len] = '\0';
-		char choir_path[512];
-		snprintf(choir_path, sizeof(choir_path),
-			"./items/songbook/items/%s/choir", id);
-		FILE *fp = fopen(choir_path, "w");
-		if (fp) {
-			fwrite(choir, 1, strlen(choir), fp);
-			fclose(fp);
-		}
+		char sb_item_path[512];
+		snprintf(sb_item_path, sizeof(sb_item_path),
+			"./items/songbook/items/%s", id);
+		call_write_meta_file(sb_item_path, "choir", choir, strlen(choir));
 
 		/* Pre-populate data.txt with one random song per choir format type */
 		char doc_root[256] = {0};

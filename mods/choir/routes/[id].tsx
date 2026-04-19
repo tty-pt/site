@@ -1,6 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Layout, ItemMenu } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
+import { KEY_NAMES_SHARP as KEY_NAMES } from "@/ssr/keys.ts";
 
 interface ChoirSong {
   id: string;
@@ -32,7 +33,6 @@ interface Choir {
   formats: string[];
 }
 
-const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 export const handler: Handlers<ChoirData, State> = {
   async POST(req, ctx) {

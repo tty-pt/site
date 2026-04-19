@@ -204,13 +204,7 @@ poem_add_post_handler(int fd, char *body)
 
 	call_item_record_ownership(item_path, username);
 
-	char title_path[768];
-	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-	FILE *tfp = fopen(title_path, "w");
-	if (tfp) {
-		fwrite(title, 1, (size_t)title_len, tfp);
-		fclose(tfp);
-	}
+	call_write_meta_file(item_path, "title", title, (size_t)title_len);
 
 	int file_len = call_mpfd_len("file");
 	if (file_len > 0) {
@@ -295,13 +289,7 @@ poem_edit_post_handler(int fd, char *body)
 	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len > 0) {
 		title[title_len] = '\0';
-		char title_path[768];
-		snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-		FILE *tfp = fopen(title_path, "w");
-		if (tfp) {
-			fwrite(title, 1, (size_t)title_len, tfp);
-			fclose(tfp);
-		}
+		call_write_meta_file(item_path, "title", title, (size_t)title_len);
 		call_index_put(index_hd, id, title);
 	}
 

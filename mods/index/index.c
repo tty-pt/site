@@ -22,6 +22,7 @@ typedef void (*index_cleanup_fn)(const char *id);
 static int index_add_get_handler(int fd, char *body);
 static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
+int index_add_item(int fd, char *body, char *id_out, size_t id_len);
 
 static char modules_header[2 * 256 * MAX_MODULES];
 
@@ -120,59 +121,15 @@ static int index_add_handler(
 		int fd,
 		char *body)
 {
-	char title[256], id[256], path[1024];
-	int parse_result, title_len;
+	char id[256] = {0};
 	const char *module;
-	size_t path_len;
-	unsigned hd;
-	FILE *tfp;
+	char path[512];
 
-	/* Require authenticated session */
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
+	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
 
-	parse_result = call_mpfd_parse(fd, body);
-	if (parse_result == -1)
-		return call_respond_plain(fd, 415, "Expected multipart/form-data");
-
-	title_len = call_mpfd_get("title",
-			title, sizeof(title) - 1);
-
-	if (title_len <= 0)
-		return call_respond_plain(fd, 400, "Missing title");
-
-	index_id(id, sizeof(id), title, title_len);
 	module = index_name(fd);
-
-	path_len = snprintf(path, sizeof(path),
-			"./items/%s/items/%s", module, id);
-
-	int r = mkdir(path, 0755);
-
-	if (r == -1 && errno != EEXIST)
-		return call_respond_plain(fd, 403, "You don't have permissions for that");
-
-	/* Record ownership */
-	call_item_record_ownership(path, username);
-
-	snprintf(path + path_len,
-			sizeof(path) - path_len,
-			"/title");
-
-	tfp = fopen(path, "w");
-	if (!tfp)
-		return call_respond_plain(fd, 403, "You don't have permissions for that");
-
-	fwrite(title, 1, strlen(title), tfp);
-	fclose(tfp);
-
-	hd = *(unsigned *) qmap_get(module_hd, module);
-	qmap_put(hd, id, title);
-
-	path_len = snprintf(path, sizeof(path),
-			"/%s/%s", module, id);
-
+	snprintf(path, sizeof(path), "/%s/%s", module, id);
 	return call_redirect(fd, path);
 }
 
@@ -191,7 +148,6 @@ NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_l
 	const char *module;
 	size_t path_len;
 	unsigned hd;
-	FILE *tfp;
 
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username))
@@ -217,17 +173,14 @@ NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_l
 
 	call_item_record_ownership(path, username);
 
-	snprintf(path + path_len, sizeof(path) - path_len, "/title");
-	tfp = fopen(path, "w");
-	if (!tfp)
+	if (call_write_meta_file(path, "title", title, (size_t)title_len) != 0)
 		return call_respond_plain(fd, 403, "You don't have permissions for that");
-	fwrite(title, 1, strlen(title), tfp);
-	fclose(tfp);
 
 	hd = *(unsigned *) qmap_get(module_hd, module);
 	qmap_put(hd, id, title);
 
 	snprintf(id_out, id_len, "%s", id);
+	(void)path_len;
 	return 0;
 }
 

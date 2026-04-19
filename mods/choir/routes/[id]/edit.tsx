@@ -28,7 +28,6 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
   return (
     <Layout user={user} title={`Edit ${title}`} path={`/choir/${id}/edit`} icon="🎶">
       <div className="center">
-        <h1>Edit {title}</h1>
         <form
           method="POST"
           action={`/api/choir/${id}/edit`}

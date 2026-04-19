@@ -535,70 +535,22 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write title file */
-	{
-		char title_path[1024];
-		snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-		FILE *tfp = fopen(title_path, "w");
-		if (tfp) {
-			fwrite(title, 1, strlen(title), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "title", title, strlen(title));
 
 	/* Write type file */
-	{
-		char type_path[1024];
-		snprintf(type_path, sizeof(type_path), "%s/type", item_path);
-		FILE *tfp = fopen(type_path, "w");
-		if (tfp) {
-			fwrite(type, 1, strlen(type), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "type", type, strlen(type));
 
 	/* Write yt file */
-	{
-		char yt_path[1024];
-		snprintf(yt_path, sizeof(yt_path), "%s/yt", item_path);
-		FILE *tfp = fopen(yt_path, "w");
-		if (tfp) {
-			fwrite(yt, 1, strlen(yt), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "yt", yt, strlen(yt));
 
 	/* Write audio file */
-	{
-		char audio_path[1024];
-		snprintf(audio_path, sizeof(audio_path), "%s/audio", item_path);
-		FILE *tfp = fopen(audio_path, "w");
-		if (tfp) {
-			fwrite(audio, 1, strlen(audio), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "audio", audio, strlen(audio));
 
 	/* Write pdf file */
-	{
-		char pdf_path[1024];
-		snprintf(pdf_path, sizeof(pdf_path), "%s/pdf", item_path);
-		FILE *tfp = fopen(pdf_path, "w");
-		if (tfp) {
-			fwrite(pdf, 1, strlen(pdf), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "pdf", pdf, strlen(pdf));
 
 	/* Write author file */
-	{
-		char author_path[1024];
-		snprintf(author_path, sizeof(author_path), "%s/author", item_path);
-		FILE *tfp = fopen(author_path, "w");
-		if (tfp) {
-			fwrite(author, 1, strlen(author), tfp);
-			fclose(tfp);
-		}
-	}
+	call_write_meta_file(item_path, "author", author, strlen(author));
 
 	/* Write data file */
 	{

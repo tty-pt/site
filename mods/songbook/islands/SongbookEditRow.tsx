@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { KEY_NAMES_SHARP as KEY_NAMES } from "@/ssr/keys.ts";
 
 interface Chord {
   id: string;
@@ -16,7 +17,6 @@ interface Props {
   allTypes: string[];
 }
 
-const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 export default function SongbookEditRow(props: Props) {
   const { index: i, allChords, allTypes } = props;

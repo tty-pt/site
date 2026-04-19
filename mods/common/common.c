@@ -96,6 +96,20 @@ NDX_DEF(int, read_meta_file,
 	return 0;
 }
 
+NDX_DEF(int, write_meta_file,
+	const char *, item_path, const char *, name,
+	const char *, buf, size_t, sz)
+{
+	char p[PATH_MAX];
+	snprintf(p, sizeof(p), "%s/%s", item_path, name);
+	FILE *fp = fopen(p, "w");
+	if (!fp)
+		return -1;
+	fwrite(buf, 1, sz, fp);
+	fclose(fp);
+	return 0;
+}
+
 NDX_DEF(char *, slurp_file, const char *, path)
 {
 	FILE *fp = fopen(path, "r");
