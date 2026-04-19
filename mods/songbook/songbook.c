@@ -64,7 +64,7 @@ handle_sb_edit_get(int fd, char *body)
 	/* Check if songbook exists */
 	struct stat st;
 	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
-		return call_respond_plain(fd, 404, "Songbook not found");
+		return call_respond_error(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, NULL))
 		return 1;
@@ -193,7 +193,7 @@ handle_sb_edit(int fd, char *body)
 	/* Check if songbook exists */
 	struct stat st;
 	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
-		return call_respond_plain(fd, 404, "Songbook not found");
+		return call_respond_error(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -370,7 +370,7 @@ handle_sb_transpose(int fd, char *body)
 	/* Check if songbook exists */
 	struct stat st;
 	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
-		return call_respond_plain(fd, 404, "Songbook not found");
+		return call_respond_error(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -460,7 +460,7 @@ handle_sb_randomize(int fd, char *body)
 
 	struct stat st;
 	if (stat(sb_path, &st) != 0)
-		return call_respond_plain(fd, 404, "Songbook not found");
+		return call_respond_error(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -677,7 +677,9 @@ songbook_details_handler(int fd, char *body)
 	(void)body;
 
 	char *json = songbook_json(fd);
-	int result = call_core_post(fd, json, json ? strlen(json) : 0);
+	if (!json)
+		return call_respond_error(fd, 404, "Songbook not found");
+	int result = call_core_post(fd, json, strlen(json));
 	free(json);
 	return result;
 }

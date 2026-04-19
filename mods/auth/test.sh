@@ -68,8 +68,8 @@ echo "$out" | grep -q "Invalid" && pass "wrong password rejected" || fail "expec
 
 # 12. Login nonexistent user
 echo -n "12. Login nonexistent user... "
-out=$(curl -s -X POST "$BASE/auth/login" -d "username=nobody_$$&password=pass1234")
-echo "$out" | grep -qi "not found" && pass "nonexistent rejected" || fail "expected 'not found', got: $out"
+status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -d "username=nobody_$$&password=pass1234")
+[ "$status" = "401" ] && pass "nonexistent rejected" || fail "expected 401, got: $status"
 
 rm -f "$COOKIE"
 echo "All auth tests passed."

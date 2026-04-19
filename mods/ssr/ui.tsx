@@ -69,6 +69,19 @@ export function Menu({ user, path, icon }: { user: string | null; path: string; 
   );
 }
 
+export function ErrorPage({ status, message, user, path }: {
+  status: number;
+  message: string;
+  user: string | null;
+  path: string;
+}) {
+  return (
+    <Layout user={user} title={`${status}`} path={path}>
+      <p>{message}</p>
+    </Layout>
+  );
+}
+
 export function Layout({ children, user, title, path, menuItems, icon }: {
   children: any;
   user: string | null;

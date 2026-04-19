@@ -142,6 +142,29 @@ NDX_DEF(int, get_doc_root, int, fd, char *, buf, size_t, len)
 	return 0;
 }
 
+/* core_post is defined in index.c; declare here to call it from respond_error */
+NDX_DECL(int, core_post, int, fd, char *, body, size_t, len);
+
+/*
+ * respond_error — send a pretty HTML error page when the client accepts
+ * text/html (browser navigation), or a plain-text response otherwise
+ * (API / curl / test clients).
+ */
+NDX_DEF(int, respond_error, int, fd, int, status, const char *, msg)
+{
+	char accept[256] = {0};
+	ndc_header_get(fd, "Accept", accept, sizeof(accept));
+	if (strstr(accept, "text/html")) {
+		char enc[512] = {0};
+		char body[640];
+		int len;
+		call_url_encode(msg, enc, sizeof(enc));
+		len = snprintf(body, sizeof(body), "status=%d&error=%s", status, enc);
+		return call_core_post(fd, body, (size_t)len);
+	}
+	return call_respond_plain(fd, status, msg);
+}
+
 MODULE_API void
 ndx_install(void)
 {

@@ -2,13 +2,27 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import type { State } from "#/routes/_middleware.ts";
 import Login from "@/auth/Login.tsx";
 
-export const handler: Handlers<unknown, State> = {
+interface LoginData {
+  user: string | null;
+  ret: string;
+  error?: string;
+}
+
+export const handler: Handlers<LoginData, State> = {
   GET(req, ctx) {
     const ret = new URL(req.url).searchParams.get("ret") ?? "/";
     return ctx.render({ user: ctx.state.user, ret });
   },
+
+  async POST(req, ctx) {
+    const params = new URLSearchParams(await req.text());
+    const error = params.get("error") ?? undefined;
+    const ret = params.get("ret") ?? "/";
+    const status = Number(params.get("status") ?? "401");
+    return ctx.render({ user: ctx.state.user, ret, error }, { status });
+  },
 };
 
-export default function LoginPage({ data }: PageProps<{ user: string | null; ret: string }>) {
-  return <Login user={data.user} ret={data.ret} />;
+export default function LoginPage({ data }: PageProps<LoginData>) {
+  return <Login user={data.user} ret={data.ret} error={data.error} />;
 }

@@ -133,7 +133,7 @@ poem_detail_handler(int fd, char *body)
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
 	if (!id[0])
-		return call_respond_plain(fd, 404, "Not found");
+		return call_respond_error(fd, 404, "Not found");
 
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
@@ -141,7 +141,7 @@ poem_detail_handler(int fd, char *body)
 	{
 		struct stat st;
 		if (stat(item_path, &st) != 0)
-			return call_respond_plain(fd, 404, "Not found");
+			return call_respond_error(fd, 404, "Poem not found");
 	}
 
 	char title[256] = { 0 };

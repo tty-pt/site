@@ -644,6 +644,22 @@ handle_session(int fd, char *body)
 	return call_respond_plain(fd, 200, username ? username : "");
 }
 
+/* Login-specific error: pretty page with ret= for browsers, plain text for API. */
+static int
+login_error(int fd, int status, const char *msg, const char *ret)
+{
+	char accept[256] = {0};
+	ndc_header_get(fd, "Accept", accept, sizeof(accept));
+	if (strstr(accept, "text/html")) {
+		char enc[128] = {0}, enc_ret[256] = {0}, pb[512];
+		call_url_encode(msg, enc, sizeof(enc));
+		call_url_encode(ret, enc_ret, sizeof(enc_ret));
+		int plen = snprintf(pb, sizeof(pb), "status=%d&error=%s&ret=%s", status, enc, enc_ret);
+		return call_core_post(fd, pb, (size_t)plen);
+	}
+	return call_respond_plain(fd, status, msg);
+}
+
 static int
 handle_login(int fd, char *body)
 {
@@ -658,16 +674,18 @@ handle_login(int fd, char *body)
 	if (!*username || !*password)
 		return call_respond_plain(fd, 400, "Missing username or password");
 
+	const char *ret = *redirect ? redirect : "/";
+
 	struct user *user = (struct user *)qmap_get(users_map, username);
 	if (!user)
-		return call_respond_plain(fd, 400, "User not found");
+		return login_error(fd, 401, "Invalid credentials", ret);
 
 	char *hash = crypt(password, user->hash);
 	if (!hash || strcmp(hash, user->hash))
-		return call_respond_plain(fd, 401, "Invalid password");
+		return login_error(fd, 401, "Invalid credentials", ret);
 
 	if (!user->active)
-		return call_respond_plain(fd, 400, "Account not confirmed");
+		return login_error(fd, 401, "Account not confirmed", ret);
 
 	generate_token(token, sizeof(token));
 	qmap_put(sessions_map, token, username);

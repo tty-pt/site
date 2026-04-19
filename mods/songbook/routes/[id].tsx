@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout, ItemMenu } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu, ErrorPage } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 import SongItem from "#/islands/SongItem.tsx";
 
@@ -15,6 +15,8 @@ interface Song {
 interface SbData {
   user: string | null;
   songbook: Songbook | null;
+  error?: string;
+  status?: number;
 }
 
 interface Songbook {
@@ -27,8 +29,15 @@ interface Songbook {
 
 export const handler: Handlers<SbData, State> = {
   async POST(req, ctx) {
-    const body = await req.json();
+    const text = await req.text();
+    const params = new URLSearchParams(text);
+    const error = params.get("error");
+    if (error) {
+      const status = Number(params.get("status") ?? "500");
+      return ctx.render({ user: ctx.state.user, songbook: null, error, status }, { status });
+    }
 
+    const body = JSON.parse(text);
     const songbook: Songbook = {
       id: ctx.params.id,
       title: body.title || "",
@@ -45,14 +54,8 @@ export const handler: Handlers<SbData, State> = {
 };
 
 export default function SbDetail({ data }: PageProps<SbData>) {
-  if (!data.songbook) {
-    return (
-      <Layout user={data.user} title="Songbook Not Found" path="/songbook" icon="📖">
-        <div className="center">
-          <h1>Songbook Not Found</h1>
-        </div>
-      </Layout>
-    );
+  if (data.error || !data.songbook) {
+    return <ErrorPage status={data.status ?? 404} message={data.error ?? "Songbook not found"} user={data.user} path="/songbook" />;
   }
 
   const songbook = data.songbook as Songbook & { songs: Array<Song & { chordTitle: string; chordData: string; originalKey: number }> };

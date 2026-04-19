@@ -351,8 +351,10 @@ static int
 song_details_handler(int fd, char *body)
 {
 	(void)body;
-	
+
 	char *json = song_json(fd, TRANSP_HTML);
+	if (!json)
+		return call_respond_error(fd, 404, "Song not found");
 	int result = call_core_post(fd, json, strlen(json));
 	free(json);
 	return result;
@@ -385,8 +387,8 @@ song_edit_get_handler(int fd, char *body)
 	if (!call_item_check_ownership(item_path, username)) {
 		struct stat st;
 		if (stat(item_path, &st) != 0)
-			return call_respond_plain(fd, 404, "Song not found");
-		return call_respond_plain(fd, 403, "Forbidden");
+			return call_respond_error(fd, 404, "Song not found");
+		return call_respond_error(fd, 403, "Forbidden");
 	}
 
 	/* Read metadata */

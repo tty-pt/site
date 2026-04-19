@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout, ItemMenu } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu, ErrorPage } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 import { KEY_NAMES_SHARP as KEY_NAMES } from "@/ssr/keys.ts";
 
@@ -36,8 +36,18 @@ interface Choir {
 
 export const handler: Handlers<ChoirData, State> = {
   async POST(req, ctx) {
-    const body = await req.json();
+    const text = await req.text();
+    const params = new URLSearchParams(text);
+    const error = params.get("error");
+    if (error) {
+      const status = Number(params.get("status") ?? "500");
+      return ctx.render(
+        { user: ctx.state.user, choir: null, songs: [], allSongs: [], songbooks: [], error, status },
+        { status },
+      );
+    }
 
+    const body = JSON.parse(text);
     const formats = body.formats ? body.formats.split("\n").filter((f: string) => f.length > 0) : [];
 
     const choir: Choir = {
@@ -65,14 +75,8 @@ export const handler: Handlers<ChoirData, State> = {
 };
 
 export default function ChoirDetail({ data }: PageProps<ChoirData>) {
-  if (!data.choir) {
-    return (
-      <Layout user={data.user} title="Choir Not Found" path="/choir" icon="🎶">
-        <div className="center">
-          <h1>Choir Not Found</h1>
-        </div>
-      </Layout>
-    );
+  if (data.error || !data.choir) {
+    return <ErrorPage status={data.status ?? 404} message={data.error ?? "Choir not found"} user={data.user} path="/choir" />;
   }
 
   const choir = data.choir;

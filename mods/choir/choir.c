@@ -41,7 +41,7 @@ handle_choir_edit(int fd, char *body)
 
 	struct stat st;
 	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode))
-		return call_respond_plain(fd, 404, "Choir not found");
+		return call_respond_error(fd, 404, "Choir not found");
 
 	if (call_require_ownership(fd, choir_path, username, "You don't own this choir")) return 1;
 
@@ -230,7 +230,9 @@ choir_details_handler(int fd, char *body)
 	(void)body;
 
 	char *json = choir_json(fd);
-	int result = call_core_post(fd, json, json ? strlen(json) : 0);
+	if (!json)
+		return call_respond_error(fd, 404, "Choir not found");
+	int result = call_core_post(fd, json, strlen(json));
 	free(json);
 	return result;
 }
@@ -573,7 +575,7 @@ handle_choir_edit_get(int fd, char *body)
 
 	struct stat st;
 	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode))
-		return call_respond_plain(fd, 404, "Choir not found");
+		return call_respond_error(fd, 404, "Choir not found");
 
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username)) return 1;
