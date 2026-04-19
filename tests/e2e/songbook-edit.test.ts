@@ -50,7 +50,8 @@ Deno.test("songbook: register → login → create songbook → load edit page �
         const fd = new FormData();
         fd.append("amount", "1");
         fd.append("song_0", "");
-        fd.append("t_0", "0");
+        fd.append("key_0", "0");
+        fd.append("orig_0", "0");
         fd.append("fmt_0", "any");
         const r = await fetch(url, { method: "POST", body: fd });
         return { status: r.status, location: r.url };

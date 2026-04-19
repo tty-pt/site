@@ -191,6 +191,71 @@ TEST(shift_table) {
 	transp_free(ctx);
 }
 
+TEST(repeat_markers_html) {
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "|: C G :|", 0, TRANSP_HTML);
+	assert(result != NULL);
+	/* Must be bolded */
+	assert(str_contains(result, "<b>"));
+	assert(str_contains(result, "</b>"));
+	/* No stray closing tag before content */
+	assert(!str_contains(result, "<div></b>"));
+	/* Markers intact */
+	assert(str_contains(result, "|:"));
+	assert(str_contains(result, ":|"));
+	/* Chords present */
+	assert(str_contains(result, "C"));
+	assert(str_contains(result, "G"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(repeat_markers_transpose) {
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "|: C G :|", 2, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>"));
+	assert(!str_contains(result, "<div></b>"));
+	assert(str_contains(result, "|:"));
+	assert(str_contains(result, ":|"));
+	assert(str_contains(result, "D"));
+	assert(str_contains(result, "A"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(repeat_markers_second_song) {
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* First song — leaves ctx in post-song state */
+	char *first = transp_buffer(ctx, "|: C G :|", 0, TRANSP_HTML);
+	assert(first != NULL);
+	free(first);
+
+	/* Reset key as songbook does between songs */
+	transp_reset_key(ctx);
+
+	/* Second song — repeat markers must still render correctly */
+	char *result = transp_buffer(ctx, "|: C G :|", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>"));
+	assert(!str_contains(result, "<div></b>"));
+	assert(str_contains(result, "|:"));
+	assert(str_contains(result, ":|"));
+	assert(str_contains(result, "C"));
+	assert(str_contains(result, "G"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 TEST(complex_song) {
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
@@ -228,6 +293,9 @@ int main(void) {
 	RUN_TEST(hide_lyrics);
 	RUN_TEST(key_detection);
 	RUN_TEST(shift_table);
+	RUN_TEST(repeat_markers_html);
+	RUN_TEST(repeat_markers_transpose);
+	RUN_TEST(repeat_markers_second_song);
 	RUN_TEST(complex_song);
 	
 	printf("\nAll tests passed!\n");

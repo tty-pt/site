@@ -26,7 +26,7 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
   const { user, id, title, formats } = data;
 
   return (
-    <Layout user={user} title={`Edit ${title}`} path={`/choir/${id}/edit`}>
+    <Layout user={user} title={`Edit ${title}`} path={`/choir/${id}/edit`} icon="🎶">
       <div className="center">
         <h1>Edit {title}</h1>
         <form

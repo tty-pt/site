@@ -63,5 +63,3 @@ void ndx_install(void) {
 	ndx_load("./mods/ssr/ssr");
 	/* ndc_ws_handler("/_frsh/alive", frsh_upstream); */
 }
-
-void ndx_open(void) {}

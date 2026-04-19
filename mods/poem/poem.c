@@ -27,38 +27,24 @@ poem_detail_handler(int fd, char *body)
 	char id[128] = { 0 };
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Not found");
-		return 1;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 404, "Not found");
+
+	char item_path[512];
+	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
 
 	/* Return 404 if poem directory does not exist */
 	{
-		char dir_path[512];
 		struct stat st;
-		snprintf(dir_path, sizeof(dir_path), "%s/%s", POEM_ITEMS_PATH, id);
-		if (stat(dir_path, &st) != 0) {
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 404);
-			ndc_body(fd, "Not found");
-			return 1;
-		}
+		if (stat(item_path, &st) != 0)
+			return call_respond_plain(fd, 404, "Not found");
 	}
 
 	char title[256] = { 0 };
-	char title_path[512];
-	snprintf(title_path, sizeof(title_path), "%s/%s/title", POEM_ITEMS_PATH, id);
-	FILE *tfp = fopen(title_path, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp))
-			title[strcspn(title, "\n")] = '\0';
-		fclose(tfp);
-	}
+	call_read_meta_file(item_path, "title", title, sizeof(title));
 
-	char html_path[512];
-	snprintf(html_path, sizeof(html_path), "%s/%s/pt_PT.html", POEM_ITEMS_PATH, id);
+	char html_path[1024];
+	snprintf(html_path, sizeof(html_path), "%s/pt_PT.html", item_path);
 	char *content = call_slurp_file(html_path);
 	size_t content_len = content ? strlen(content) : 0;
 
@@ -70,13 +56,10 @@ poem_detail_handler(int fd, char *body)
 	char *json = malloc(json_len);
 	if (!json) {
 		free(content);
-		ndc_head(fd, 500);
-		return 1;
+		return call_respond_json(fd, 500, "{\"error\":\"Out of memory\"}");
 	}
 
 	/* Determine ownership */
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
 	const char *username = call_get_request_user(fd);
 	int owner = username && *username
 		? call_item_check_ownership(item_path, username) : 0;
@@ -116,21 +99,13 @@ poem_add_post_handler(int fd, char *body)
 		return call_redirect(fd, "/auth/login");
 
 	int parse_result = call_mpfd_parse(fd, body);
-	if (parse_result == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 415);
-		ndc_body(fd, "Expected multipart/form-data");
-		return 1;
-	}
+	if (parse_result == -1)
+		return call_respond_plain(fd, 415, "Expected multipart/form-data");
 
 	char title[256] = { 0 };
 	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
-	if (title_len <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing title");
-		return 1;
-	}
+	if (title_len <= 0)
+		return call_respond_plain(fd, 400, "Missing title");
 	title[title_len] = '\0';
 
 	char id[256] = { 0 };
@@ -139,12 +114,8 @@ poem_add_post_handler(int fd, char *body)
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
 
-	if (mkdir(item_path, 0755) == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 409);
-		ndc_body(fd, "Poem already exists");
-		return 1;
-	}
+	if (mkdir(item_path, 0755) == -1)
+		return call_respond_plain(fd, 409, "Poem already exists");
 
 	/* Record ownership */
 	call_item_record_ownership(item_path, username);
@@ -194,12 +165,8 @@ poem_edit_get_handler(int fd, char *body)
 	char id[128] = { 0 };
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing poem ID");
-		return 1;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing poem ID");
 
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
@@ -208,14 +175,7 @@ poem_edit_get_handler(int fd, char *body)
 		return 1;
 
 	char title[256] = { 0 };
-	char title_path[512];
-	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-	FILE *tfp = fopen(title_path, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp))
-			title[strcspn(title, "\n")] = '\0';
-		fclose(tfp);
-	}
+	call_read_meta_file(item_path, "title", title, sizeof(title));
 
 	char title_esc[512] = { 0 };
 	call_json_escape(title, title_esc, sizeof(title_esc));
@@ -235,20 +195,12 @@ poem_edit_post_handler(int fd, char *body)
 	char id[128] = { 0 };
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing poem ID");
-		return 1;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing poem ID");
 
 	int parse_result = call_mpfd_parse(fd, body);
-	if (parse_result == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 415);
-		ndc_body(fd, "Expected multipart/form-data");
-		return 1;
-	}
+	if (parse_result == -1)
+		return call_respond_plain(fd, 415, "Expected multipart/form-data");
 
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
@@ -275,12 +227,8 @@ poem_edit_post_handler(int fd, char *body)
 	int file_len = call_mpfd_len("file");
 	if (file_len > 0) {
 		char *file_content = malloc((size_t)file_len + 1);
-		if (!file_content) {
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 500);
-			ndc_body(fd, "Memory error");
-			return 1;
-		}
+		if (!file_content)
+			return call_respond_plain(fd, 500, "Memory error");
 		int got = call_mpfd_get("file", file_content, file_len);
 		if (got > 0) {
 			file_content[got] = '\0';
@@ -289,10 +237,7 @@ poem_edit_post_handler(int fd, char *body)
 			FILE *dfp = fopen(dst_path, "w");
 			if (!dfp) {
 				free(file_content);
-				ndc_header(fd, "Content-Type", "text/plain");
-				ndc_head(fd, 500);
-				ndc_body(fd, "Failed to write poem file");
-				return 1;
+				return call_respond_plain(fd, 500, "Failed to write poem file");
 			}
 			fwrite(file_content, 1, (size_t)got, dfp);
 			fclose(dfp);
@@ -316,5 +261,3 @@ void ndx_install(void) {
 	ndc_register_handler("GET:/poem/:id/edit", poem_edit_get_handler);
 	ndc_register_handler("POST:/poem/:id/edit", poem_edit_post_handler);
 }
-
-void ndx_open(void) {}

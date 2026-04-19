@@ -17,6 +17,8 @@ interface SongDetailData {
   showMedia: boolean;
   originalKey: number;
   owner: boolean;
+  categories: string | null;
+  author: string | null;
 }
 
 /**

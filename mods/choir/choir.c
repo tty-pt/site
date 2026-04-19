@@ -40,12 +40,8 @@ handle_choir_edit(int fd, char *body)
 		doc_root, id);
 
 	struct stat st;
-	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Choir not found");
-		return 1;
-	}
+	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return call_respond_plain(fd, 404, "Choir not found");
 
 	if (call_require_ownership(fd, choir_path, username, "You don't own this choir")) return 1;
 
@@ -161,51 +157,53 @@ choir_json(int fd)
 	}
 	strcat(songs_json, "]");
 
-	/* Build allSongs JSON array from items/song/items/ */
-	size_t all_songs_cap = 65536;
-	char *all_songs_json = malloc(all_songs_cap);
-	if (!all_songs_json) return NULL;
-	strcpy(all_songs_json, "[");
-	int all_first = 1;
-
-	char songs_dir[512];
-	snprintf(songs_dir, sizeof(songs_dir), "%s/items/song/items", doc_root);
-	DIR *sdp = opendir(songs_dir);
-	if (sdp) {
+	/* Build songbooks JSON array — scan items/songbook/items/ for choir match */
+	char sb_items_path[PATH_MAX];
+	snprintf(sb_items_path, sizeof(sb_items_path), "%s/items/songbook/items", doc_root);
+	char songbooks_json[16384] = "[";
+	int sb_first = 1;
+	int sb_count = 0;
+	DIR *sbdp = opendir(sb_items_path);
+	if (sbdp) {
 		struct dirent *sde;
-		while ((sde = readdir(sdp)) != NULL) {
+		while ((sde = readdir(sbdp)) != NULL) {
 			if (sde->d_name[0] == '.') continue;
-
-			char song_item_path[PATH_MAX];
-			snprintf(song_item_path, sizeof(song_item_path),
-				"%s/%s", songs_dir, sde->d_name);
-
-			char stitle[256] = {0};
-			call_read_meta_file(song_item_path, "title", stitle, sizeof(stitle));
-
-			char esc_sid[256], esc_stitle2[512];
-			call_json_escape(sde->d_name, esc_sid, sizeof(esc_sid));
-			call_json_escape(stitle, esc_stitle2, sizeof(esc_stitle2));
-
-			char item[800];
-			snprintf(item, sizeof(item),
+			char sb_choir_path[PATH_MAX];
+			snprintf(sb_choir_path, sizeof(sb_choir_path),
+				"%s/%s/choir", sb_items_path, sde->d_name);
+			FILE *cfp = fopen(sb_choir_path, "r");
+			if (!cfp) continue;
+			char sb_choir[128] = {0};
+			size_t n = fread(sb_choir, 1, sizeof(sb_choir) - 1, cfp);
+			fclose(cfp);
+			sb_choir[n] = '\0';
+			/* strip trailing newline */
+			while (n > 0 && (sb_choir[n-1] == '\n' || sb_choir[n-1] == '\r'))
+				sb_choir[--n] = '\0';
+			if (strcmp(sb_choir, id) != 0) continue;
+			sb_count++;
+			char sb_title[256] = {0};
+			char sb_path2[PATH_MAX];
+			snprintf(sb_path2, sizeof(sb_path2), "%s/%s", sb_items_path, sde->d_name);
+			call_read_meta_file(sb_path2, "title", sb_title, sizeof(sb_title));
+			char esc_sb_title[512];
+			call_json_escape(sb_title, esc_sb_title, sizeof(esc_sb_title));
+			char sb_item[640];
+			snprintf(sb_item, sizeof(sb_item),
 				"%s{\"id\":\"%s\",\"title\":\"%s\"}",
-				all_first ? "" : ",", esc_sid, esc_stitle2);
-			all_first = 0;
-
-			size_t cur = strlen(all_songs_json);
-			size_t need = cur + strlen(item) + 4;
-			if (need >= all_songs_cap) {
-				all_songs_cap = need * 2;
-				char *tmp = realloc(all_songs_json, all_songs_cap);
-				if (!tmp) { free(all_songs_json); closedir(sdp); return NULL; }
-				all_songs_json = tmp;
-			}
-			strcat(all_songs_json, item);
+				sb_first ? "" : ",", sde->d_name, esc_sb_title);
+			sb_first = 0;
+			if (strlen(songbooks_json) + strlen(sb_item) < sizeof(songbooks_json) - 2)
+				strcat(songbooks_json, sb_item);
 		}
-		closedir(sdp);
+		closedir(sbdp);
 	}
-	strcat(all_songs_json, "]");
+	strcat(songbooks_json, "]");
+
+	/* derive counter from scan */
+	snprintf(counter, sizeof(counter), "%d", sb_count);
+	char *all_songs_json = call_build_all_songs_json(doc_root, 0);
+	if (!all_songs_json) return NULL;
 
 	call_json_escape(title, esc_title, sizeof(esc_title));
 	call_json_escape(owner, esc_owner, sizeof(esc_owner));
@@ -214,7 +212,7 @@ choir_json(int fd)
 
 	size_t resp_len = strlen(esc_title) + strlen(esc_owner) +
 		strlen(esc_counter) + strlen(esc_format) + strlen(songs_json) +
-		strlen(all_songs_json) + 256;
+		strlen(all_songs_json) + strlen(songbooks_json) + 256;
 
 	char *response = malloc(resp_len);
 	if (response) {
@@ -225,10 +223,11 @@ choir_json(int fd)
 			"\"counter\":\"%s\","
 			"\"formats\":\"%s\","
 			"\"songs\":%s,"
-			"\"allSongs\":%s"
+			"\"allSongs\":%s,"
+			"\"songbooks\":%s"
 			"}",
 			esc_title, esc_owner, esc_counter, esc_format,
-			songs_json, all_songs_json);
+			songs_json, all_songs_json, songbooks_json);
 	}
 
 	free(all_songs_json);
@@ -260,23 +259,16 @@ handle_choir_songs_list(int fd, char *body)
 	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 
-	if (!choir_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing choir ID");
-		return 0;
-	}
+	if (!choir_id[0])
+		return call_respond_plain(fd, 400, "Missing choir ID");
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
 
 	FILE *sfp = fopen(songs_path, "r");
-	if (!sfp) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 200);
-		ndc_body(fd, "[]");
-		return 0;
-	}
+	if (!sfp)
+		return call_respond_json(fd, 200, "[]");
 
 	char line[256];
 	char songs_json[16384] = "[";
@@ -315,11 +307,7 @@ handle_choir_songs_list(int fd, char *body)
 	fclose(sfp);
 
 	strcat(songs_json, "]");
-
-	ndc_header(fd, "Content-Type", "application/json");
-	ndc_head(fd, 200);
-	ndc_body(fd, songs_json);
-	return 0;
+	return call_respond_json(fd, 200, songs_json);
 }
 
 /* POST /api/choir/:id/songs - Add song to choir repertoire */
@@ -337,11 +325,8 @@ handle_choir_song_add(int fd, char *body)
 	call_get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 
-	if (!choir_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing choir ID");
-		return 0;
-	}
+	if (!choir_id[0])
+		return call_respond_plain(fd, 400, "Missing choir ID");
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
@@ -349,19 +334,25 @@ handle_choir_song_add(int fd, char *body)
 
 	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
-	call_query_parse(body);
-
+	ndc_query_parse(body);
+	
 	char song_id[128] = {0};
 	char format[64] = {0};
-	int song_id_len = call_query_param("song_id", song_id, sizeof(song_id) - 1);
-	int format_len = call_query_param("format", format, sizeof(format) - 1);
+	int song_id_len = ndc_query_param("song_id", song_id, sizeof(song_id) - 1);
+	int format_len = ndc_query_param("format", format, sizeof(format) - 1);
 
-	if (song_id_len <= 0) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing song_id");
-		return 0;
-	}
+	if (song_id_len <= 0)
+		return call_respond_plain(fd, 400, "Missing song_id");
 	song_id[song_id_len] = '\0';
+
+	/* Extract id from "Title [id]" datalist format */
+	{
+		char *bracket = strrchr(song_id, '[');
+		if (bracket) {
+			char *end = strchr(bracket + 1, ']');
+			if (end) { *end = '\0'; memmove(song_id, bracket + 1, end - bracket); }
+		}
+	}
 
 	if (format_len > 0) {
 		format[format_len] = '\0';
@@ -370,11 +361,8 @@ handle_choir_song_add(int fd, char *body)
 	}
 
 	FILE *afp = fopen(songs_path, "a");
-	if (!afp) {
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to open songs file");
-		return 0;
-	}
+	if (!afp)
+		return call_respond_plain(fd, 500, "Failed to open songs file");
 	fprintf(afp, "%s:0:%s\n", song_id, format);
 	fclose(afp);
 
@@ -400,11 +388,8 @@ handle_choir_song_key(int fd, char *body)
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
-	if (!choir_id[0] || !song_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing parameters");
-		return 0;
-	}
+	if (!choir_id[0] || !song_id[0])
+		return call_respond_plain(fd, 400, "Missing parameters");
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
@@ -412,10 +397,10 @@ handle_choir_song_key(int fd, char *body)
 
 	if (call_require_ownership(fd, choir_path, username, NULL)) return 0;
 
-	call_query_parse(body);
-
+	ndc_query_parse(body);
+	
 	char key_str[32] = {0};
-	int key_len = call_query_param("key", key_str, sizeof(key_str) - 1);
+	int key_len = ndc_query_param("key", key_str, sizeof(key_str) - 1);
 	int preferred_key = 0;
 	if (key_len > 0) {
 		preferred_key = atoi(key_str);
@@ -427,11 +412,8 @@ handle_choir_song_key(int fd, char *body)
 
 	FILE *rfp = fopen(songs_path, "r");
 	FILE *wfp = fopen(temp_path, "w");
-	if (!wfp) {
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to update");
-		return 0;
-	}
+	if (!wfp)
+		return call_respond_plain(fd, 500, "Failed to update");
 
 	while (rfp && fgets(line, sizeof(line), rfp)) {
 		char sid[128] = {0};
@@ -473,11 +455,8 @@ handle_choir_song_delete(int fd, char *body)
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
-	if (!choir_id[0] || !song_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing parameters");
-		return 0;
-	}
+	if (!choir_id[0] || !song_id[0])
+		return call_respond_plain(fd, 400, "Missing parameters");
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
@@ -491,11 +470,8 @@ handle_choir_song_delete(int fd, char *body)
 
 	FILE *rfp = fopen(songs_path, "r");
 	FILE *wfp = fopen(temp_path, "w");
-	if (!wfp) {
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to update");
-		return 0;
-	}
+	if (!wfp)
+		return call_respond_plain(fd, 500, "Failed to update");
 
 	int found = 0;
 	while (rfp && fgets(line, sizeof(line), rfp)) {
@@ -518,11 +494,8 @@ handle_choir_song_delete(int fd, char *body)
 		char location[256];
 		snprintf(location, sizeof(location), "/choir/%s", choir_id);
 		return call_redirect(fd, location);
-	} else {
-		ndc_head(fd, 404);
-		ndc_body(fd, "Song not found");
 	}
-	return 0;
+	return call_respond_plain(fd, 404, "Song not found");
 }
 
 /* GET /choir/:id/song/:song_id - View song with choir preferred key */
@@ -540,11 +513,8 @@ handle_choir_song_view(int fd, char *body)
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
-	if (!choir_id[0] || !song_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing parameters");
-		return 0;
-	}
+	if (!choir_id[0] || !song_id[0])
+		return call_respond_plain(fd, 400, "Missing parameters");
 
 	snprintf(songs_path, sizeof(songs_path), "%s/%s/%s/songs",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
@@ -612,12 +582,8 @@ handle_choir_edit_get(int fd, char *body)
 	snprintf(choir_path, sizeof(choir_path), "%s/items/choir/items/%s", doc_root, id);
 
 	struct stat st;
-	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Choir not found");
-		return 1;
-	}
+	if (stat(choir_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return call_respond_plain(fd, 404, "Choir not found");
 
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username)) return 1;
@@ -671,11 +637,8 @@ handle_choir_song_remove(int fd, char *body)
 	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
 
-	if (!choir_id[0] || !song_id[0]) {
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing parameters");
-		return 0;
-	}
+	if (!choir_id[0] || !song_id[0])
+		return call_respond_plain(fd, 400, "Missing parameters");
 
 	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
 		doc_root, CHOIR_SONGS_PATH, choir_id);
@@ -689,11 +652,8 @@ handle_choir_song_remove(int fd, char *body)
 
 	FILE *rfp = fopen(songs_path, "r");
 	FILE *wfp = fopen(temp_path, "w");
-	if (!wfp) {
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to update");
-		return 0;
-	}
+	if (!wfp)
+		return call_respond_plain(fd, 500, "Failed to update");
 
 	while (rfp && fgets(line, sizeof(line), rfp)) {
 		char sid[128] = {0};
@@ -738,5 +698,3 @@ ndx_install(void)
 
 	call_index_open("Choir", 0, 1, NULL);
 }
-
-void ndx_open(void) {}

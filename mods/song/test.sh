@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+# Run transp unit tests first
+make -C lib/transp test
+
 BASE="http://localhost:8080"
 SONG_DIR="/home/quirinpa/site/items/song/items"
 COOKIE="/tmp/song_test_cookie_$$"

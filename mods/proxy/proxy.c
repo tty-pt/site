@@ -12,6 +12,8 @@
 #include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
 
+#include "../common/common.h"
+
 static char req_buf[16384];
 static size_t req_len = 0;
 static int proxy_fd = -1;
@@ -73,17 +75,15 @@ static int proxy_await_response(int fd)
             !strcasecmp(key, "Proxy-Connection"))
           continue;
 
-        ndc_header(fd, key, val);
+        ndc_header_set(fd, key, val);
       }
 
       /* Tell NDC to close the browser connection after this response so it
        * does not pipeline subsequent requests over the same fd.  NDC handles
        * one request per fd at a time, and a pipelined keep-alive connection
        * would stall waiting for the previous request to finish. */
-      ndc_header(fd, "Connection", "close");
-      ndc_set_flags(fd, DF_TO_CLOSE);
 
-      ndc_head(fd, status);
+      ndc_respond(fd, status, NULL);
       headbuf[header_len] = saved_byte;
       headers_done = 1;
 
@@ -111,9 +111,7 @@ static int proxy_await_response(int fd)
   return 0;
 
 upstream_err:
-  ndc_header(fd, "Content-Type", "text/plain");
-  ndc_head(fd, 502);
-  ndc_body(fd, "Upstream Error");
+  call_respond_plain(fd, 502, "Upstream Error");
   return -1;
 }
 
@@ -260,4 +258,3 @@ NDX_DEF(int, proxy_connect,
 }
 
 void ndx_install(void) {}
-void ndx_open(void) {}

@@ -1,11 +1,45 @@
-export function Menu({ user, path }: { user: string | null; path: string }) {
+export interface OwnerAction {
+  href: string;
+  icon: string;
+  label: string;
+}
+
+export function OwnerActions({ actions }: { actions: OwnerAction[] }) {
+  return (
+    <>
+      {actions.map(({ href, icon, label }) => (
+        <a key={href} href={href} className="btn">
+          <span>{icon}</span><label>{label}</label>
+        </a>
+      ))}
+    </>
+  );
+}
+
+export function ItemMenu({ module, id, isOwner }: { module: string; id: string; isOwner: boolean }) {
+  if (!isOwner) return null;
+  return (
+    <OwnerActions actions={[
+      { href: `/${module}/${id}/edit`, icon: "✏️", label: "edit" },
+      { href: `/${module}/${id}/delete`, icon: "🗑️", label: "delete" },
+    ]} />
+  );
+}
+
+function parentPath(path: string): string {
+  const parts = path.replace(/\/$/, "").split("/").filter(Boolean);
+  parts.pop();
+  return "/" + parts.join("/");
+}
+
+export function Menu({ user, path, icon }: { user: string | null; path: string; icon?: string }) {
   const isHome = path === "/" || path === "";
   return (
     <>
       {!isHome && (
-        <a className="btn" href="/">
-          <span>🏠</span>
-          <label>home</label>
+        <a className="btn" href={parentPath(path)}>
+          <span>{icon ?? "🏠"}</span>
+          <label>go up</label>
         </a>
       )}
       {user ? (
@@ -21,7 +55,7 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
         </>
       ) : (
         <>
-          <a className="btn" href="/auth/login?ret=/">
+          <a className="btn" href={`/auth/login?ret=${path}`}>
             <span>🔑</span>
             <label>login</label>
           </a>
@@ -35,12 +69,13 @@ export function Menu({ user, path }: { user: string | null; path: string }) {
   );
 }
 
-export function Layout({ children, user, title, path, menuItems }: {
+export function Layout({ children, user, title, path, menuItems, icon }: {
   children: any;
   user: string | null;
   title: string;
   path: string;
   menuItems?: any;
+  icon?: string;
 }) {
   return (<div>
     <label className="menu">
@@ -55,7 +90,7 @@ export function Layout({ children, user, title, path, menuItems }: {
       </span>
 
       <span className="functions flex-1 fixed right-0 z-20 h-full overflow-y-auto bg-gray-50 text-sm capitalize flex flex-col gap-2 p-4">
-        <Menu user={user} path={path} />
+        <Menu user={user} path={path} icon={icon} />
         {menuItems && (
           <>
             <div className="menu-separator"></div>

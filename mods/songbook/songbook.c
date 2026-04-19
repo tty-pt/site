@@ -63,12 +63,8 @@ handle_sb_edit_get(int fd, char *body)
 
 	/* Check if songbook exists */
 	struct stat st;
-	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Songbook not found");
-		return 1;
-	}
+	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return call_respond_plain(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, NULL))
 		return 1;
@@ -81,90 +77,96 @@ handle_sb_edit_get(int fd, char *body)
 	char choir[128] = {0};
 	call_read_meta_file(sb_path, "choir", choir, sizeof(choir));
 
-	/* Read data.txt */
+	/* Read data.txt and resolve originalKey per song */
 	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 	char *data_content = call_slurp_file(data_path);
 
-	/* Build allChords JSON from items/song/items/ */
-	size_t ac_cap = 65536;
-	char *ac_json = malloc(ac_cap);
+	char *ac_json = call_build_all_songs_json(doc_root, 1);
 	if (!ac_json) { free(data_content); return 1; }
-	strcpy(ac_json, "[");
-	int ac_first = 1;
 
-	char songs_dir[512];
-	snprintf(songs_dir, sizeof(songs_dir), "%s/items/song/items", doc_root);
-	DIR *sdp = opendir(songs_dir);
-	if (sdp) {
-		struct dirent *sde;
-		while ((sde = readdir(sdp)) != NULL) {
-			if (sde->d_name[0] == '.') continue;
+	char *at_json = call_song_get_types_json(0);
+	if (!at_json) { free(ac_json); free(data_content); return 1; }
 
-			char stitle[256] = {0}, stype[64] = {0}, spath[PATH_MAX];
-			char song_item_path[PATH_MAX];
-			snprintf(song_item_path, sizeof(song_item_path), "%s/%s",
-				songs_dir, sde->d_name);
-
-			snprintf(spath, sizeof(spath), "%s/title", song_item_path);
-			FILE *stfp = fopen(spath, "r");
-			if (!stfp) continue;
-			if (fgets(stitle, sizeof(stitle) - 1, stfp)) {
-				size_t l = strlen(stitle);
-				if (l > 0 && stitle[l-1] == '\n') stitle[l-1] = '\0';
+	/* Build 4-field songs string: chord_id:transpose:format:originalKey */
+	char songs_buf[65536] = {0};
+	size_t songs_pos = 0;
+	if (data_content) {
+		char *line = strtok(data_content, "\n");
+		while (line) {
+			char chord_id[128] = {0};
+			int transpose = 0;
+			char format[64] = {0};
+			char *c1 = strchr(line, ':');
+			if (c1) {
+				size_t idlen = c1 - line;
+				if (idlen > 127) idlen = 127;
+				strncpy(chord_id, line, idlen);
+				char *c2 = strchr(c1 + 1, ':');
+				if (c2) {
+					strncpy(format, c2 + 1, sizeof(format) - 1);
+					/* strip trailing \r */
+					size_t fl = strlen(format);
+					while (fl > 0 && (format[fl-1] == '\r' || format[fl-1] == '\n'))
+						format[--fl] = '\0';
+					*c2 = '\0';
+				}
+				transpose = atoi(c1 + 1);
+			} else {
+				strncpy(chord_id, line, sizeof(chord_id) - 1);
 			}
-			fclose(stfp);
 
-			call_read_meta_file(song_item_path, "type", stype, sizeof(stype));
-
-			char esc_sid[256], esc_stitle[512], esc_stype[128];
-			call_json_escape(sde->d_name, esc_sid, sizeof(esc_sid));
-			call_json_escape(stitle, esc_stitle, sizeof(esc_stitle));
-			call_json_escape(stype, esc_stype, sizeof(esc_stype));
-
-			char item[1024];
-			snprintf(item, sizeof(item),
-				"%s{\"id\":\"%s\",\"title\":\"%s\",\"type\":\"%s\"}",
-				ac_first ? "" : ",", esc_sid, esc_stitle, esc_stype);
-			ac_first = 0;
-
-			size_t cur = strlen(ac_json);
-			size_t need = cur + strlen(item) + 4;
-			if (need >= ac_cap) {
-				ac_cap = need * 2;
-				char *tmp = realloc(ac_json, ac_cap);
-				if (!tmp) { free(ac_json); free(data_content); closedir(sdp); return 1; }
-				ac_json = tmp;
+			int original_key = 0;
+			if (chord_id[0]) {
+				char song_data_path[PATH_MAX];
+				snprintf(song_data_path, sizeof(song_data_path),
+					"%s/%s/%s/data.txt", doc_root, SONG_ITEMS_PATH, chord_id);
+				char *song_data = call_slurp_file(song_data_path);
+				if (song_data) {
+					char *transposed = NULL;
+					call_song_reset_key(0);
+					call_song_transpose(song_data, 0, 0, &transposed, &original_key);
+					if (original_key < 0) original_key = 0;
+					free(song_data);
+					free(transposed);
+				}
 			}
-			strcat(ac_json, item);
+
+			songs_pos += snprintf(songs_buf + songs_pos,
+				sizeof(songs_buf) - songs_pos,
+				"%s:%d:%s:%d\n",
+				chord_id, transpose, format[0] ? format : "any", original_key);
+
+			line = strtok(NULL, "\n");
 		}
-		closedir(sdp);
+		free(data_content);
 	}
-	strcat(ac_json, "]");
 
-	char enc_title[512], enc_choir[256], enc_songs[65536];
+	char enc_title[512], enc_choir[256], enc_songs[65536 * 3];
 	call_url_encode(title, enc_title, sizeof(enc_title));
 	call_url_encode(choir, enc_choir, sizeof(enc_choir));
-	if (data_content) {
-		call_url_encode(data_content, enc_songs, sizeof(enc_songs));
-		free(data_content);
-	} else {
-		enc_songs[0] = '\0';
-	}
+	call_url_encode(songs_buf, enc_songs, sizeof(enc_songs));
 
 	size_t ac_enc_cap = strlen(ac_json) * 3 + 4;
 	char *enc_ac = malloc(ac_enc_cap);
-	if (!enc_ac) { free(ac_json); return 1; }
+	if (!enc_ac) { free(at_json); free(ac_json); return 1; }
 	call_url_encode(ac_json, enc_ac, ac_enc_cap);
 	free(ac_json);
 
-	size_t pb_cap = strlen(enc_title) + strlen(enc_choir) + strlen(enc_songs) + strlen(enc_ac) + 64;
+	size_t at_enc_cap = strlen(at_json) * 3 + 4;
+	char *enc_at = malloc(at_enc_cap);
+	if (!enc_at) { free(enc_ac); free(at_json); return 1; }
+	call_url_encode(at_json, enc_at, at_enc_cap);
+	free(at_json);
+
+	size_t pb_cap = strlen(enc_title) + strlen(enc_choir) + strlen(enc_songs) + strlen(enc_ac) + strlen(enc_at) + 80;
 	char *post_body = malloc(pb_cap);
-	if (!post_body) { free(enc_ac); return 1; }
+	if (!post_body) { free(enc_at); free(enc_ac); return 1; }
 	int len = snprintf(post_body, pb_cap,
-		"title=%s&choir=%s&songs=%s&allChords=%s",
-		enc_title, enc_choir, enc_songs, enc_ac);
+		"title=%s&choir=%s&songs=%s&allChords=%s&allTypes=%s",
+		enc_title, enc_choir, enc_songs, enc_ac, enc_at);
 	free(enc_ac);
+	free(enc_at);
 
 	int r = call_core_post(fd, post_body, len);
 	free(post_body);
@@ -190,12 +192,8 @@ handle_sb_edit(int fd, char *body)
 
 	/* Check if songbook exists */
 	struct stat st;
-	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Songbook not found");
-		return 1;
-	}
+	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return call_respond_plain(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -203,47 +201,144 @@ handle_sb_edit(int fd, char *body)
 	/* Parse form data */
 	call_mpfd_parse(fd, body);
 
+	/* Check action — "add_row" re-renders the edit page with one blank row appended */
+	char action[32] = {0};
+	call_mpfd_get("action", action, sizeof(action) - 1);
+
 	/* Get amount */
 	char amount_str[16] = {0};
 	int amount_len = call_mpfd_get("amount", amount_str, sizeof(amount_str) - 1);
 	int amount = amount_len > 0 ? atoi(amount_str) : 0;
 
-	if (amount <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Invalid amount");
-		return 1;
+	if (strcmp(action, "add_row") == 0) {
+		/* Reconstruct songs string from submitted fields, append one blank row */
+		char songs_buf[65536] = {0};
+		size_t songs_pos = 0;
+		for (int i = 0; i < amount; i++) {
+			char sk[32], kk[32], ok[32], fk[32];
+			char sv[128] = {0}, kv[16] = {0}, ov[16] = {0}, fv[128] = {0};
+			snprintf(sk, sizeof(sk), "song_%d", i);
+			snprintf(kk, sizeof(kk), "key_%d",  i);
+			snprintf(ok, sizeof(ok), "orig_%d", i);
+			snprintf(fk, sizeof(fk), "fmt_%d",  i);
+			call_mpfd_get(sk, sv, sizeof(sv) - 1);
+			call_mpfd_get(kk, kv, sizeof(kv) - 1);
+			call_mpfd_get(ok, ov, sizeof(ov) - 1);
+			call_mpfd_get(fk, fv, sizeof(fv) - 1);
+			/* Extract id from "Title [id]" format */
+			char *bracket = strrchr(sv, '[');
+			if (bracket) {
+				char *end = strchr(bracket + 1, ']');
+				if (end) { *end = '\0'; memmove(sv, bracket + 1, end - bracket); }
+			}
+			/* Convert key+orig back to transpose for storage format */
+			int target_key = kv[0] ? atoi(kv) : 0;
+			int orig        = ov[0] ? atoi(ov) : 0;
+			int transpose   = ((target_key - orig) % 12 + 12) % 12;
+			songs_pos += snprintf(songs_buf + songs_pos,
+				sizeof(songs_buf) - songs_pos,
+				"%s:%d:%s:%s\n",
+				sv, transpose, fv[0] ? fv : "any", ov[0] ? ov : "0");
+		}
+		/* Append blank row: originalKey=0, transpose=0, so target key=0 (C) */
+		songs_pos += snprintf(songs_buf + songs_pos,
+			sizeof(songs_buf) - songs_pos, "::any:0\n");
+
+		/* Read allChords + allTypes JSON */
+		char doc_root[256] = {0};
+		call_get_doc_root(fd, doc_root, sizeof(doc_root));
+		char *ac_json = call_build_all_songs_json(doc_root, 1);
+		if (!ac_json) return 1;
+		char *at_json = call_song_get_types_json(0);
+		if (!at_json) { free(ac_json); return 1; }
+
+		/* Read title + choir from disk (not form — keep stable) */
+		char sb_id[128] = {0};
+		ndc_env_get(fd, sb_id, "PATTERN_PARAM_ID");
+		char sb_path[512];
+		snprintf(sb_path, sizeof(sb_path), "%s/items/songbook/items/%s", doc_root, sb_id);
+		char title[256] = {0}, choir[128] = {0};
+		call_read_meta_file(sb_path, "title", title, sizeof(title));
+		call_read_meta_file(sb_path, "choir", choir, sizeof(choir));
+
+		char enc_title[512], enc_choir[256], enc_songs[65536 * 3];
+		call_url_encode(title, enc_title, sizeof(enc_title));
+		call_url_encode(choir, enc_choir, sizeof(enc_choir));
+		call_url_encode(songs_buf, enc_songs, sizeof(enc_songs));
+
+		size_t ac_enc_cap = strlen(ac_json) * 3 + 4;
+		char *enc_ac = malloc(ac_enc_cap);
+		if (!enc_ac) { free(at_json); free(ac_json); return 1; }
+		call_url_encode(ac_json, enc_ac, ac_enc_cap);
+		free(ac_json);
+
+		size_t at_enc_cap = strlen(at_json) * 3 + 4;
+		char *enc_at = malloc(at_enc_cap);
+		if (!enc_at) { free(enc_ac); free(at_json); return 1; }
+		call_url_encode(at_json, enc_at, at_enc_cap);
+		free(at_json);
+
+		size_t pb_cap = strlen(enc_title) + strlen(enc_choir) + strlen(enc_songs) + strlen(enc_ac) + strlen(enc_at) + 80;
+		char *post_body = malloc(pb_cap);
+		if (!post_body) { free(enc_at); free(enc_ac); return 1; }
+		int len = snprintf(post_body, pb_cap,
+			"title=%s&choir=%s&songs=%s&allChords=%s&allTypes=%s",
+			enc_title, enc_choir, enc_songs, enc_ac, enc_at);
+		free(enc_ac);
+		free(enc_at);
+		int r = call_core_post(fd, post_body, len);
+		free(post_body);
+		return r;
 	}
+
+	if (amount < 0)
+		return call_respond_plain(fd, 400, "Invalid amount");
 
 	/* Build new data.txt content */
 	char data_path[PATH_MAX];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *dfp = fopen(data_path, "w");
-	if (!dfp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to write data file");
-		return 1;
-	}
+	if (!dfp)
+		return call_respond_plain(fd, 500, "Failed to write data file");
 
 	for (int i = 0; i < amount; i++) {
-		char song_key[32], t_key[32], fmt_key[32];
+		char song_key[32], key_key[32], orig_key[32], fmt_key[32];
 		snprintf(song_key, sizeof(song_key), "song_%d", i);
-		snprintf(t_key, sizeof(t_key), "t_%d", i);
-		snprintf(fmt_key, sizeof(fmt_key), "fmt_%d", i);
+		snprintf(key_key,  sizeof(key_key),  "key_%d",  i);
+		snprintf(orig_key, sizeof(orig_key), "orig_%d", i);
+		snprintf(fmt_key,  sizeof(fmt_key),  "fmt_%d",  i);
 
 		char song[128] = {0};
-		char t[16] = {0};
+		char key_str[16] = {0};
+		char orig_str[16] = {0};
 		char fmt[128] = {0};
 
 		call_mpfd_get(song_key, song, sizeof(song) - 1);
-		call_mpfd_get(t_key, t, sizeof(t) - 1);
-		call_mpfd_get(fmt_key, fmt, sizeof(fmt) - 1);
+		call_mpfd_get(key_key,  key_str,  sizeof(key_str)  - 1);
+		call_mpfd_get(orig_key, orig_str, sizeof(orig_str) - 1);
+		call_mpfd_get(fmt_key,  fmt,      sizeof(fmt)      - 1);
 
-		fprintf(dfp, "%s:%s:%s\n",
+		/* Parse id from "Title [id]" datalist format */
+		{
+			char *bracket = strrchr(song, '[');
+			if (bracket) {
+				char *end = strchr(bracket + 1, ']');
+				if (end) {
+					*end = '\0';
+					memmove(song, bracket + 1, end - bracket);
+				}
+			}
+		}
+
+		/* Convert target key note → semitone transpose */
+		int target_key = key_str[0] ? atoi(key_str) : 0;
+		int orig        = orig_str[0] ? atoi(orig_str) : 0;
+		int transpose   = ((target_key - orig) % 12 + 12) % 12;
+
+		fprintf(dfp, "%s:%d:%s\n",
 			song[0] ? song : "",
-			t[0] ? t : "0",
+			transpose,
 			fmt[0] ? fmt : "any");
 	}
 
@@ -274,12 +369,8 @@ handle_sb_transpose(int fd, char *body)
 
 	/* Check if songbook exists */
 	struct stat st;
-	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Songbook not found");
-		return 1;
-	}
+	if (stat(sb_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return call_respond_plain(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -300,12 +391,8 @@ handle_sb_transpose(int fd, char *body)
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *fp = fopen(data_path, "r");
-	if (!fp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to read data file");
-		return 1;
-	}
+	if (!fp)
+		return call_respond_plain(fd, 500, "Failed to read data file");
 
 	/* Read all lines */
 	char **lines = NULL;
@@ -372,12 +459,8 @@ handle_sb_randomize(int fd, char *body)
 	snprintf(sb_path, sizeof(sb_path), "%s/items/songbook/items/%s", doc_root, id);
 
 	struct stat st;
-	if (stat(sb_path, &st) != 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 404);
-		ndc_body(fd, "Songbook not found");
-		return 1;
-	}
+	if (stat(sb_path, &st) != 0)
+		return call_respond_plain(fd, 404, "Songbook not found");
 
 	if (call_require_ownership(fd, sb_path, username, "You don't own this songbook"))
 		return 1;
@@ -394,12 +477,8 @@ handle_sb_randomize(int fd, char *body)
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", sb_path);
 
 	FILE *fp = fopen(data_path, "r");
-	if (!fp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Failed to read data file");
-		return 1;
-	}
+	if (!fp)
+		return call_respond_plain(fd, 500, "Failed to read data file");
 
 	/* Read all lines */
 	char **lines = NULL;
@@ -472,17 +551,8 @@ songbook_json(int fd)
 		doc_root, SONGBOOK_ITEMS_PATH, id);
 
 	/* Read title */
-	snprintf(path_buf, sizeof(path_buf), "%s/title", sb_path);
-	FILE *tfp = fopen(path_buf, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp)) {
-			size_t l = strlen(title);
-			if (l > 0 && title[l - 1] == '\n') title[l - 1] = '\0';
-		}
-		fclose(tfp);
-	} else {
+	if (call_read_meta_file(sb_path, "title", title, sizeof(title)) != 0)
 		return NULL;
-	}
 
 	/* Read owner */
 	call_item_read_owner(sb_path, owner, sizeof(owner));
@@ -562,20 +632,16 @@ songbook_json(int fd)
 				chord_data[n] = '\0';
 				fclose(cdfp);
 
-				call_song_reset_key(0);
-				call_song_transpose(chord_data, 0, 0, NULL, &original_key);
-				if (original_key < 0) original_key = 0;
-
-				char *transposed = NULL;
-				if (transpose != 0) {
-					call_song_transpose(chord_data, transpose, 0, &transposed, NULL);
-					if (transposed) {
-						strncpy(chord_data, transposed, sizeof(chord_data) - 1);
-						free(transposed);
-					}
-				}
-
-				call_json_escape(chord_data, chord_data_esc, sizeof(chord_data_esc));
+			call_song_reset_key(0);
+			char *transposed = NULL;
+			call_song_transpose(chord_data, transpose, 0x04 /* TRANSP_HTML */, &transposed, &original_key);
+			if (original_key < 0) original_key = 0;
+			if (transposed) {
+				call_json_escape(transposed, chord_data_esc, sizeof(chord_data_esc));
+				free(transposed);
+			} else {
+				chord_data_esc[0] = '\0';
+			}
 			}
 
 			call_json_escape(chord_title, chord_title_esc, sizeof(chord_title_esc));
@@ -633,6 +699,33 @@ songbook_details_handler(int fd, char *body)
 	return result;
 }
 
+static int
+handle_sb_add(int fd, char *body)
+{
+	char id[256] = {0};
+	if (call_index_add_item(fd, body, id, sizeof(id)) != 0)
+		return 1;
+
+	/* Write choir field if provided */
+	char choir[128] = {0};
+	int choir_len = call_mpfd_get("choir", choir, sizeof(choir) - 1);
+	if (choir_len > 0) {
+		choir[choir_len] = '\0';
+		char choir_path[512];
+		snprintf(choir_path, sizeof(choir_path),
+			"./items/songbook/items/%s/choir", id);
+		FILE *fp = fopen(choir_path, "w");
+		if (fp) {
+			fwrite(choir, 1, strlen(choir), fp);
+			fclose(fp);
+		}
+	}
+
+	char location[512];
+	snprintf(location, sizeof(location), "/songbook/%s", id);
+	return call_redirect(fd, location);
+}
+
 void ndx_install(void)
 {
 	ndx_load("./mods/index/index");
@@ -649,6 +742,7 @@ void ndx_install(void)
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 
 	call_index_open("Songbook", 0, 1, NULL);
-}
 
-void ndx_open(void) {}
+	/* Override the generic POST:/songbook/add to also handle the choir field */
+	ndc_register_handler("POST:/songbook/add", handle_sb_add);
+}

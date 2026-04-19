@@ -49,4 +49,13 @@ NDX_DECL(int, song_get_random_by_type, const char *, type, char **, out_id);
  * Used by choir and songbook to parse their data.txt lines. */
 NDX_DECL(int, parse_item_line, const char *, line, char *, id_out, int *, int_out, char *, format_out);
 
+/* Build a JSON array of all known song types from the persistent type index.
+ * Returns a malloc'd string the caller must free, or NULL on error. */
+NDX_DECL(char *, song_get_types_json, int, dummy);
+
+/* Build a JSON array of all songs from items/song/items/.
+ * If include_type is non-zero, each object includes a "type" field.
+ * Returns a malloc'd string the caller must free, or NULL on error. */
+NDX_DECL(char *, build_all_songs_json, const char *, doc_root, int, include_type);
+
 #endif /* CHORDS_API_H */

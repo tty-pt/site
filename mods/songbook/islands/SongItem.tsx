@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { IS_BROWSER } from "$fresh/runtime.ts";
 
 interface Props {
@@ -36,8 +36,11 @@ export default function SongItem(props: Props) {
   const targetIndex = (originalKey + transpose + 12) % 12;
   const targetKey = keys[targetIndex];
 
+  const isMounted = useRef(false);
+
   useEffect(() => {
     if (!IS_BROWSER) return;
+    if (!isMounted.current) { isMounted.current = true; return; }
 
     const updateChords = async () => {
       try {

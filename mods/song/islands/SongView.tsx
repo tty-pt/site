@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "preact/hooks";
 import { IS_BROWSER } from "$fresh/runtime.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu } from "@/ssr/ui.tsx";
 
 interface SongDetailProps {
   user: string | null;
@@ -17,6 +17,8 @@ interface SongDetailProps {
   showMedia: boolean;
   originalKey: number;
   owner?: boolean;
+  categories?: string | null;
+  author?: string | null;
 }
 
 const KEY_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -151,14 +153,10 @@ export default function SongDetailIsland(props: SongDetailProps) {
     </form>
   );
 
-  const editLink = props.owner && (
-    <a href={`/song/${props.id}/edit`} className="btn">
-      Edit
-    </a>
-  );
+  const editLink = <ItemMenu module="song" id={props.id} isOwner={!!props.owner} />;
 
   return (
-    <Layout user={props.user} title={`song: ${displayTitle}`} path={props.path} menuItems={<>{transposeForm}{editLink}</>}>
+    <Layout user={props.user} title={`song: ${displayTitle}`} path={props.path} icon="🎸" menuItems={<>{transposeForm}{editLink}</>}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
         
         {/* Media container - reacts to showMedia state */}
@@ -196,6 +194,18 @@ export default function SongDetailIsland(props: SongDetailProps) {
           </div>
         )}
 
+        {/* Categories + Author row */}
+        {(props.categories || props.author) && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%", maxWidth: "600px", fontSize: "0.8em", color: "grey" }}>
+            <div style={{ fontStyle: "italic", whiteSpace: "pre-wrap" }}>
+              {props.categories || ""}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              {props.author || "N/A"}
+            </div>
+          </div>
+        )}
+
         {/* The Live Data */}
         <div
           id="chord-data"
@@ -211,9 +221,6 @@ export default function SongDetailIsland(props: SongDetailProps) {
           }}
         />
 
-        <a href="/song/" className="btn">
-          Back to Songs
-        </a>
       </div>
     </Layout>
   );

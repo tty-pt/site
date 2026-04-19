@@ -311,8 +311,3 @@ ndx_install(void)
 	mpfd_val_type = qmap_mreg(mpfd_val_measure);
 	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
 }
-
-MODULE_API void
-ndx_open(void)
-{
-}

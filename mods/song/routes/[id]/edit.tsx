@@ -11,6 +11,7 @@ interface SongEditData {
   audio: string;
   pdf: string;
   data: string;
+  author: string;
 }
 
 function urlDecode(str: string): string {
@@ -21,7 +22,7 @@ function urlDecode(str: string): string {
 
 function parseBody(body: string | null): SongEditData {
   if (!body) {
-    return { user: null, id: "", title: "", type: "", yt: "", audio: "", pdf: "", data: "" };
+    return { user: null, id: "", title: "", type: "", yt: "", audio: "", pdf: "", data: "", author: "" };
   }
 
   const params = new URLSearchParams(body);
@@ -34,6 +35,7 @@ function parseBody(body: string | null): SongEditData {
     audio: urlDecode(params.get("audio") || ""),
     pdf: urlDecode(params.get("pdf") || ""),
     data: urlDecode(params.get("data") || ""),
+    author: urlDecode(params.get("author") || ""),
   };
 }
 
@@ -51,10 +53,10 @@ export const handler: Handlers<SongEditData, State> = {
 };
 
 export default function SongEdit({ data }: PageProps<SongEditData>) {
-  const { id, title, type, yt, audio, pdf, data: songData } = data;
+  const { id, title, type, yt, audio, pdf, data: songData, author } = data;
 
   return (
-    <Layout user={data.user} title={`Edit ${title || id}`} path={`/song/${id}/edit`}>
+    <Layout user={data.user} title={`Edit ${title || id}`} path={`/song/${id}/edit`} icon="🎸">
       <div className="center">
         <h1>Edit Song</h1>
         <form
@@ -69,6 +71,16 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="title"
               defaultValue={title}
+              style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
+            />
+          </label>
+
+          <label>
+            Author:
+            <input
+              type="text"
+              name="author"
+              defaultValue={author}
               style={{ display: "block", marginTop: "0.25rem", width: "100%", padding: "0.5rem" }}
             />
           </label>

@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Layout, OwnerActions } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface IndexData {
@@ -67,17 +67,16 @@ function IndexList({
       user={user}
       title={module}
       path={`/${module}`}
+      icon="🏠"
+      menuItems={user
+        ? <OwnerActions actions={[{ href: `/${module}/add`, icon: "➕", label: "add" }]} />
+        : undefined}
     >
       <div className="center">
         {buttons.length > 0 ? (
           buttons
         ) : (
           <p>No items yet.</p>
-        )}
-        {user && (
-          <a href={`/${module}/add`} className="btn">
-            Add
-          </a>
         )}
       </div>
     </Layout>

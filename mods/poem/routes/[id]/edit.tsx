@@ -23,7 +23,7 @@ export default function PoemEdit({ data }: PageProps<PoemEditData>) {
   const { id, title } = data;
 
   return (
-    <Layout user={data.user} title={`Edit ${title || id}`} path={`/poem/${id}/edit`}>
+    <Layout user={data.user} title={`Edit ${title || id}`} path={`/poem/${id}/edit`} icon="📜">
       <div class="center">
         <h1>Edit Poem</h1>
         <form

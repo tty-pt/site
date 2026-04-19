@@ -8,14 +8,6 @@
 #include <openssl/evp.h>
 
 #include <ttypt/ndc.h>
-#include <ttypt/qmap.h>
-
-#ifndef DF_TO_CLOSE
-#define DF_TO_CLOSE 8
-#endif
-
-static uint32_t query_db;
-
 NDX_DEF(int, json_escape, const char *, in, char *, out, size_t, outlen) {
 	size_t j = 0;
 	for (size_t i = 0; in[i] && j + 2 < outlen; i++) {
@@ -66,92 +58,24 @@ NDX_DEF(int, b64_encode, const char *, in, char *, out, size_t, outlen) {
 	return 0;
 }
 
-NDX_DEF(int, query_parse, char *, query) {
-	if (!query_db) return -1;
-
-	qmap_drop(query_db);
-	query_db = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
-	if (!query_db) return -1;
-
-	if (!query || !*query) return 0;
-
-	char *query_copy = strdup(query);
-	if (!query_copy) return -1;
-
-	char *saveptr;
-	char *param = strtok_r(query_copy, "&", &saveptr);
-
-	while (param) {
-		char *eq = strchr(param, '=');
-		if (eq) {
-			*eq = '\0';
-			char *key = param;
-			char *value = eq + 1;
-
-			size_t val_len = strlen(value);
-			char *decoded = malloc(val_len + 1);
-			if (decoded) {
-				size_t j = 0;
-				for (size_t i = 0; value[i] && j < val_len; i++) {
-					if (value[i] == '+') {
-						decoded[j++] = ' ';
-					} else if (value[i] == '%' && value[i+1] && value[i+2]) {
-						int c;
-						sscanf(value + i + 1, "%2x", &c);
-						decoded[j++] = (char)c;
-						i += 2;
-					} else {
-						decoded[j++] = value[i];
-					}
-				}
-				decoded[j] = '\0';
-				qmap_put(query_db, key, decoded);
-				free(decoded);
-			}
-		}
-		param = strtok_r(NULL, "&", &saveptr);
-	}
-
-	free(query_copy);
-	return 0;
+NDX_DEF(int, respond_plain, int, fd, int, status, const char *, msg)
+{
+	ndc_header_set(fd, "Content-Type", "text/plain");
+	ndc_respond(fd, status, msg);
+	return 1;
 }
 
-NDX_DEF(int, query_exists, const char *, name) {
-	if (!query_db) return 0;
-	return qmap_get(query_db, name) != NULL ? 1 : 0;
-}
-
-NDX_DEF(int, query_param, const char *, name, char *, buf, size_t, buf_len) {
-	const char *val;
-	size_t len;
-
-	if (!query_db || !buf || !buf_len)
-		return -1;
-
-	buf[0] = '\0';
-
-	val = (const char *) qmap_get(query_db, name);
-
-	if (!val)
-		return -1;
-
-	len = strlen(val);
-
-	if (len >= buf_len)
-		len = buf_len - 1;
-
-	memcpy(buf, val, len);
-	buf[len] = '\0';
-	return (int)len;
+NDX_DEF(int, respond_json, int, fd, int, status, const char *, msg)
+{
+	ndc_header_set(fd, "Content-Type", "application/json");
+	ndc_respond(fd, status, msg);
+	return 1;
 }
 
 NDX_DEF(int, redirect, int, fd, const char *, location)
 {
-	ndc_header(fd, "Location", (char *)location);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
+	ndc_header_set(fd, "Location", (char *)location);
+	ndc_respond(fd, 303, "");
 	return 0;
 }
 
@@ -206,11 +130,5 @@ NDX_DEF(int, get_doc_root, int, fd, char *, buf, size_t, len)
 
 MODULE_API void
 ndx_install(void)
-{
-	query_db = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
-}
-
-MODULE_API void
-ndx_open(void)
 {
 }

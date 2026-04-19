@@ -14,6 +14,7 @@ NDX_DECL(unsigned, index_get, unsigned, hd, char *, value, size_t, len, char *, 
 NDX_DECL(int, index_page, unsigned, fd, unsigned, hd, char *, path, char *, title);
 
 NDX_DECL(int, index_id, char *, result, size_t, result_len, const char *, title, size_t, title_len);
+NDX_DECL(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_len);
 
 NDX_DECL(int, index_del, unsigned, hd, char *, key);
 

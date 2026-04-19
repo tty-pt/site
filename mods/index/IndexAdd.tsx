@@ -35,7 +35,7 @@ function IndexAdd({
   const path = `/${module}/add`;
 
   return (
-    <Layout user={user} title="Add Item" path={path}>
+    <Layout user={user} title="Add Item" path={path} icon="🏠">
       <form action={path} method="POST" encType="multipart/form-data">
         <label>
           <span>Title:</span>

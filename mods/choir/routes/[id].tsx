@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface ChoirSong {
@@ -19,6 +19,7 @@ interface ChoirData {
   choir: Choir | null;
   songs: ChoirSong[];
   allSongs: SongEntry[];
+  songbooks: SongEntry[];
   error?: string;
 }
 
@@ -50,12 +51,14 @@ export const handler: Handlers<ChoirData, State> = {
     const allSongs: SongEntry[] = (body.allSongs || []).sort(
       (a: SongEntry, b: SongEntry) => a.title.localeCompare(b.title),
     );
+    const songbooks: SongEntry[] = body.songbooks || [];
 
     return ctx.render({
       user: ctx.state.user,
       choir,
       songs,
       allSongs,
+      songbooks,
     });
   },
 };
@@ -63,10 +66,9 @@ export const handler: Handlers<ChoirData, State> = {
 export default function ChoirDetail({ data }: PageProps<ChoirData>) {
   if (!data.choir) {
     return (
-      <Layout user={data.user} title="Choir Not Found" path="/choir">
+      <Layout user={data.user} title="Choir Not Found" path="/choir" icon="🎶">
         <div className="center">
           <h1>Choir Not Found</h1>
-          <a href="/choir" className="btn">Back to Choirs</a>
         </div>
       </Layout>
     );
@@ -75,34 +77,32 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
   const choir = data.choir;
   const isOwner = data.user === choir.owner;
 
-  const menuItems = isOwner ? (
-    <div className="flex flex-col gap-2">
-      <a
-        href={`/choir/${choir.id}/edit`}
-        className="btn"
-      >
-        📝 Edit
-      </a>
-      <a
-        href={`/choir/${choir.id}/delete`}
-        className="btn"
-      >
-        🗑 Delete
-      </a>
-      <a
-        href={`/songbook/new?choir=${choir.id}`}
-        className="btn"
-      >
-        + Add Songbook
-      </a>
-    </div>
-  ) : undefined;
+  const menuItems = (
+    <>
+      <ItemMenu module="choir" id={choir.id} isOwner={isOwner} />
+      {isOwner && <a href={`/songbook/add?choir=${choir.id}`} className="btn"><span>➕</span><label>add songbook</label></a>}
+    </>
+  );
 
   return (
-    <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`} menuItems={menuItems}>
+    <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`} icon="🎶" menuItems={menuItems}>
       <div className="center">
-        <p>Owner: {choir.owner || "Unknown"}</p>
-        <p>Songbooks: {choir.counter}</p>
+        {choir.owner && (
+          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "0.8em", color: "grey" }}>
+            <span>Owner: <a href={`/${choir.owner}/`} style={{ color: "grey" }}>{choir.owner}</a></span>
+          </div>
+        )}
+
+        <h3 style={{ marginTop: "2rem" }}>Songbooks</h3>
+        {data.songbooks.length === 0 ? (
+          <p style={{ color: "#666" }}>No songbooks yet.</p>
+        ) : (
+          <div className="center">
+            {data.songbooks.map((sb) => (
+              <a key={sb.id} href={`/songbook/${sb.id}`} className="btn">{sb.title || sb.id}</a>
+            ))}
+          </div>
+        )}
 
         <h3 style={{ marginTop: "2rem" }}>Repertoire</h3>
         {data.songs.length === 0 ? (
@@ -115,7 +115,7 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
                   {song.title || song.id}
                 </a>
                 <span style={{ color: "#666", marginRight: "1rem" }}>
-                  {song.preferredKey !== 0 ? KEY_NAMES[song.preferredKey % 12] : "original"}
+                  {KEY_NAMES[song.preferredKey % 12]}
                 </span>
                 {isOwner && (
                   <form method="POST" action={`/api/choir/${choir.id}/song/${song.id}/remove`} style={{ display: "inline" }}>
@@ -142,12 +142,12 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
                 action={`/api/choir/${choir.id}/songs`}
                 style={{ marginTop: "0.5rem" }}
               >
-                <select name="song_id" required style={{ padding: "0.5rem", marginRight: "0.5rem" }}>
-                  <option value="">-- select a song --</option>
+                <datalist id="choir-songs">
                   {data.allSongs.map((s) => (
-                    <option key={s.id} value={s.id}>{s.title}</option>
+                    <option key={s.id} value={`${s.title} [${s.id}]`} />
                   ))}
-                </select>
+                </datalist>
+                <input list="choir-songs" name="song_id" placeholder="Search song..." required style={{ padding: "0.5rem", marginRight: "0.5rem" }} />
                 <button type="submit" className="btn">Add</button>
               </form>
             </details>
@@ -158,10 +158,6 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
         <pre style={{ backgroundColor: "#f5f5f5", padding: "1rem", borderRadius: "4px", textAlign: "left" }}>
           {choir.formats.join("\n")}
         </pre>
-
-        <a href="/choir/" className="btn">
-          Back to Choirs
-        </a>
       </div>
     </Layout>
   );

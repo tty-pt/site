@@ -46,13 +46,15 @@ NDX_DEF(int, index_id,
 		const char *, title,
 		size_t, title_len)
 {
-	size_t i, j;
+	size_t i, j, written;
 	char *o = result;
 
+	written = result_len;
 	iconv(cd, (char **) &title, &title_len,
 			&result, &result_len);
+	written -= result_len;
 
-	for (i = 0; i < result_len; i++) {
+	for (i = 0; i < written; i++) {
 		register char c = *o;
 		if (c == ' ') {
 			*o = '_';
@@ -118,7 +120,7 @@ static int index_add_handler(
 		int fd,
 		char *body)
 {
-	char title[256], id[256], path[1024], uri[256];
+	char title[256], id[256], path[1024];
 	int parse_result, title_len;
 	const char *module;
 	size_t path_len;
@@ -128,25 +130,17 @@ static int index_add_handler(
 	/* Require authenticated session */
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username))
-		return 401;
+		return 1;
 
 	parse_result = call_mpfd_parse(fd, body);
-	if (parse_result == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 415);
-		ndc_body(fd, "Expected multipart/form-data");
-		return 415;
-	}
+	if (parse_result == -1)
+		return call_respond_plain(fd, 415, "Expected multipart/form-data");
 
 	title_len = call_mpfd_get("title",
 			title, sizeof(title) - 1);
 
-	if (title_len <= 0) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing title");
-		return 400;
-	}
+	if (title_len <= 0)
+		return call_respond_plain(fd, 400, "Missing title");
 
 	index_id(id, sizeof(id), title, title_len);
 	module = index_name(fd);
@@ -156,12 +150,8 @@ static int index_add_handler(
 
 	int r = mkdir(path, 0755);
 
-	if (r == -1 && errno != EEXIST) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't have permissions for that");
-		return 403;
-	}
+	if (r == -1 && errno != EEXIST)
+		return call_respond_plain(fd, 403, "You don't have permissions for that");
 
 	/* Record ownership */
 	call_item_record_ownership(path, username);
@@ -171,12 +161,8 @@ static int index_add_handler(
 			"/title");
 
 	tfp = fopen(path, "w");
-	if (!tfp) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't have permissions for that");
-		return 403;
-	}
+	if (!tfp)
+		return call_respond_plain(fd, 403, "You don't have permissions for that");
 
 	fwrite(title, 1, strlen(title), tfp);
 	fclose(tfp);
@@ -188,6 +174,61 @@ static int index_add_handler(
 			"/%s/%s", module, id);
 
 	return call_redirect(fd, path);
+}
+
+/*
+ * NDX hook: create an index item from a parsed multipart form on fd/body.
+ * Performs auth check, creates the item directory, writes the title file,
+ * records ownership, and updates the in-memory index.
+ * Writes the generated id into id_out (up to id_len bytes).
+ * On error, sends the error response itself and returns non-zero.
+ * On success returns 0 and id_out is populated — caller must redirect.
+ */
+NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_len)
+{
+	char title[256], id[256], path[1024];
+	int parse_result, title_len;
+	const char *module;
+	size_t path_len;
+	unsigned hd;
+	FILE *tfp;
+
+	const char *username = call_get_request_user(fd);
+	if (call_require_login(fd, username))
+		return 1;
+
+	parse_result = call_mpfd_parse(fd, body);
+	if (parse_result == -1)
+		return call_respond_plain(fd, 415, "Expected multipart/form-data");
+
+	title_len = call_mpfd_get("title", title, sizeof(title) - 1);
+	if (title_len <= 0)
+		return call_respond_plain(fd, 400, "Missing title");
+
+	index_id(id, sizeof(id), title, title_len);
+	module = index_name(fd);
+
+	path_len = snprintf(path, sizeof(path),
+			"./items/%s/items/%s", module, id);
+
+	int r = mkdir(path, 0755);
+	if (r == -1 && errno != EEXIST)
+		return call_respond_plain(fd, 403, "You don't have permissions for that");
+
+	call_item_record_ownership(path, username);
+
+	snprintf(path + path_len, sizeof(path) - path_len, "/title");
+	tfp = fopen(path, "w");
+	if (!tfp)
+		return call_respond_plain(fd, 403, "You don't have permissions for that");
+	fwrite(title, 1, strlen(title), tfp);
+	fclose(tfp);
+
+	hd = *(unsigned *) qmap_get(module_hd, module);
+	qmap_put(hd, id, title);
+
+	snprintf(id_out, id_len, "%s", id);
+	return 0;
 }
 
 NDX_DEF(int, index_page,
@@ -245,12 +286,9 @@ static int index_list_handler(
 		int fd,
 		char *body)
 {
-	char title[256], id[256], path[1024], uri[256];
-	int parse_result, title_len;
-	size_t path_len;
+	char path[1024];
 	unsigned hd;
 	const char *module;
-	FILE *tfp;
 
 	module = index_name(fd);
 
@@ -294,23 +332,16 @@ NDX_DEF(unsigned, index_open,
 	}
 
 	while ((entry = readdir(dir)) != NULL) {
-		char title_path[PATH_MAX], title[256];
-		FILE *f;
+		char title[256] = { 0 };
+		char item_path[PATH_MAX];
 
-		snprintf(title_path, sizeof(title_path),
-				"%s/%s/title", buf,
-				entry->d_name);
+		snprintf(item_path, sizeof(item_path),
+				"%s/%s", buf, entry->d_name);
 
-		f = fopen(title_path, "r");
-		if (!f)
+		if (call_read_meta_file(item_path, "title", title, sizeof(title)) != 0)
 			continue;
 
-		if (fgets(title, sizeof(title), f)) {
-			title[strcspn(title, "\n")] = 0;
-			qmap_put(hd, entry->d_name, title);
-		}
-
-		fclose(f);
+		qmap_put(hd, entry->d_name, title);
 	}
 
 	closedir(dir);
@@ -380,12 +411,19 @@ NDX_DEF(int, core_get,
 	(void)body;
 
 	char path[512] = { 0 };
+	char param[512] = { 0 };
+	char full_path[PATH_MAX] = { 0 };
 	char cookie[256] = { 0 };
 	char token[64] = { 0 };
 	char host[256] = { 0 };
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
-	call_proxy_init("GET", path);
+	ndc_env_get(fd, param, "QUERY_STRING");
+	if (param[0])
+		snprintf(full_path, sizeof(full_path), "%s?%s", path, param);
+	else
+		snprintf(full_path, sizeof(full_path), "%s", path);
+	call_proxy_init("GET", full_path);
 	call_proxy_header("X-Modules", modules_header);
 	ndc_env_get(fd, host, "HTTP_HOST");
 	if (host[0])
@@ -446,16 +484,12 @@ static int index_delete_get_handler(int fd, char *body)
 
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username))
-		return 401;
+		return 1;
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing ID");
-		return 400;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing ID");
 
 	const char *module = index_name(fd);
 
@@ -463,12 +497,8 @@ static int index_delete_get_handler(int fd, char *body)
 	snprintf(item_path, sizeof(item_path),
 			"./items/%s/items/%s", module, id);
 
-	if (!call_item_check_ownership(item_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 403;
-	}
+	if (!call_item_check_ownership(item_path, username))
+		return call_respond_plain(fd, 403, "Forbidden");
 
 	char title[256] = {0};
 	char title_path[640];
@@ -498,16 +528,12 @@ static int index_delete_handler(int fd, char *body)
 
 	const char *username = call_get_request_user(fd);
 	if (call_require_login(fd, username))
-		return 401;
+		return 1;
 
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing ID");
-		return 400;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing ID");
 
 	const char *module = index_name(fd);
 
@@ -515,12 +541,8 @@ static int index_delete_handler(int fd, char *body)
 	snprintf(item_path, sizeof(item_path),
 			"./items/%s/items/%s", module, id);
 
-	if (!call_item_check_ownership(item_path, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 403;
-	}
+	if (!call_item_check_ownership(item_path, username))
+		return call_respond_plain(fd, 403, "Forbidden");
 
 	/* Remove ownership file */
 	call_item_unlink_owner(item_path);
@@ -574,5 +596,3 @@ void ndx_install(void)
 	cd = iconv_open("ASCII//TRANSLIT", "UTF-8");
 	ndc_config.default_handler = core_get;
 }
-
-void ndx_open(void) {}

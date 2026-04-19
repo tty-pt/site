@@ -148,10 +148,7 @@ NDX_DEF(int, require_login, int, fd, const char *, username)
 {
 	if (username && *username)
 		return 0;
-	ndc_header(fd, "Content-Type", "text/plain");
-	ndc_head(fd, 401);
-	ndc_body(fd, "Login required");
-	return 1;
+	return call_respond_plain(fd, 401, "Login required");
 }
 
 static void
@@ -625,10 +622,7 @@ NDX_DEF(int, require_ownership,
 {
 	if (item_check_ownership(item_path, username))
 		return 0;
-	ndc_header(fd, "Content-Type", "text/plain");
-	ndc_head(fd, 403);
-	ndc_body(fd, msg ? msg : "Forbidden");
-	return 1;
+	return call_respond_plain(fd, 403, msg ? msg : "Forbidden");
 }
 
 /* ------------------------------------------------------------------ */
@@ -647,10 +641,7 @@ handle_session(int fd, char *body)
 	call_get_cookie(cookie, token, sizeof(token));
 
 	const char *username = qmap_get(sessions_map, token);
-	ndc_header(fd, "Content-Type", "text/plain");
-	ndc_head(fd, 200);
-	ndc_body(fd, username ? username : "");
-	return 0;
+	return call_respond_plain(fd, 200, username ? username : "");
 }
 
 static int
@@ -659,40 +650,24 @@ handle_login(int fd, char *body)
 	char username[64], password[64], redirect[256],
 	     token[64], cookie[128];
 
-	call_query_parse(body);
-	call_query_param("username", username, sizeof(username));
-	call_query_param("password", password, sizeof(password));
-	call_query_param("ret",      redirect, sizeof(redirect));
+	ndc_query_parse(body);
+	ndc_query_param("username", username, sizeof(username));
+	ndc_query_param("password", password, sizeof(password));
+	ndc_query_param("ret",      redirect, sizeof(redirect));
 
-	if (!*username || !*password) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing username or password");
-		return 1;
-	}
+	if (!*username || !*password)
+		return call_respond_plain(fd, 400, "Missing username or password");
 
 	struct user *user = (struct user *)qmap_get(users_map, username);
-	if (!user) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "User not found");
-		return 1;
-	}
+	if (!user)
+		return call_respond_plain(fd, 400, "User not found");
 
 	char *hash = crypt(password, user->hash);
-	if (!hash || strcmp(hash, user->hash)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 401);
-		ndc_body(fd, "Invalid password");
-		return 1;
-	}
+	if (!hash || strcmp(hash, user->hash))
+		return call_respond_plain(fd, 401, "Invalid password");
 
-	if (!user->active) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Account not confirmed");
-		return 1;
-	}
+	if (!user->active)
+		return call_respond_plain(fd, 400, "Account not confirmed");
 
 	generate_token(token, sizeof(token));
 	qmap_put(sessions_map, token, username);
@@ -700,13 +675,8 @@ handle_login(int fd, char *body)
 	snprintf(cookie, sizeof(cookie),
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
-	ndc_header(fd, "Location",  *redirect ? redirect : "/");
-	ndc_header(fd, "Set-Cookie", cookie);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	ndc_header_set(fd, "Set-Cookie", cookie);
+	return call_redirect(fd, *redirect ? redirect : "/");
 }
 
 static int
@@ -721,14 +691,9 @@ handle_logout(int fd, char *body)
 	if (*token)
 		qmap_del(sessions_map, token);
 
-	ndc_header(fd, "Location",  "/");
-	ndc_header(fd, "Set-Cookie",
+	ndc_header_set(fd, "Set-Cookie",
 		"QSESSION=; Path=/; Max-Age=0; SameSite=Lax");
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	return call_redirect(fd, "/");
 }
 
 static int
@@ -749,56 +714,32 @@ handle_register(int fd, char *body)
 
 	struct user user = {0};
 
-	call_query_parse(body);
-	call_query_param("username",  username,         sizeof(username));
-	call_query_param("password",  password,         sizeof(password));
-	call_query_param("password2", password_confirm, sizeof(password_confirm));
-	call_query_param("email",     email,            sizeof(email));
+	ndc_query_parse(body);
+	ndc_query_param("username",  username,         sizeof(username));
+	ndc_query_param("password",  password,         sizeof(password));
+	ndc_query_param("password2", password_confirm, sizeof(password_confirm));
+	ndc_query_param("email",     email,            sizeof(email));
 	char redirect[256] = {0};
-	call_query_param("ret",       redirect,         sizeof(redirect));
+	ndc_query_param("ret",       redirect,         sizeof(redirect));
 
 	size_t ulen = strlen(username);
-	if (ulen < 2 || ulen > 32) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Username must be 2-32 characters");
-		return 1;
-	}
+	if (ulen < 2 || ulen > 32)
+		return call_respond_plain(fd, 400, "Username must be 2-32 characters");
 	for (char *p = username; *p; p++) {
-		if (!valid_username_char(*p)) {
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 400);
-			ndc_body(fd, "Invalid username character");
-			return 1;
-		}
+		if (!valid_username_char(*p))
+			return call_respond_plain(fd, 400, "Invalid username character");
 	}
-	if (strlen(password) < 4) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Password too short");
-		return 1;
-	}
-	if (strcmp(password, password_confirm)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Passwords do not match");
-		return 1;
-	}
-	if (qmap_get(users_map, username)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Username already exists");
-		return 1;
-	}
+	if (strlen(password) < 4)
+		return call_respond_plain(fd, 400, "Password too short");
+	if (strcmp(password, password_confirm))
+		return call_respond_plain(fd, 400, "Passwords do not match");
+	if (qmap_get(users_map, username))
+		return call_respond_plain(fd, 400, "Username already exists");
 
 	generate_bcrypt_salt(salt, sizeof(salt));
 	char *hash = crypt(password, salt);
-	if (!hash) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 500);
-		ndc_body(fd, "Password hashing failed");
-		return 1;
-	}
+	if (!hash)
+		return call_respond_plain(fd, 500, "Password hashing failed");
 
 	int uid = next_uid();
 
@@ -849,13 +790,8 @@ handle_register(int fd, char *body)
 	snprintf(cookie, sizeof(cookie),
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
-	ndc_header(fd, "Location",  *redirect ? redirect : "/");
-	ndc_header(fd, "Set-Cookie", cookie);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	ndc_header_set(fd, "Set-Cookie", cookie);
+	return call_redirect(fd, *redirect ? redirect : "/");
 }
 
 static int
@@ -871,40 +807,25 @@ handle_confirm(int fd, char *body)
 	struct user user, *existing;
 
 	ndc_env_get(fd, query, "QUERY_STRING");
-	call_query_parse(query);
-	call_query_param("u", username, sizeof(username));
-	call_query_param("r", code,     sizeof(code));
+	ndc_query_parse(query);
+	ndc_query_param("u", username, sizeof(username));
+	ndc_query_param("r", code,     sizeof(code));
 
-	if (!*username || !*code) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing parameters");
-		return 1;
-	}
+	if (!*username || !*code)
+		return call_respond_plain(fd, 400, "Missing parameters");
 
 	existing = (struct user *)qmap_get(users_map, username);
-	if (!existing || existing->active) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Invalid confirmation");
-		return 1;
-	}
+	if (!existing || existing->active)
+		return call_respond_plain(fd, 400, "Invalid confirmation");
 
 	snprintf(rcode_path, sizeof(rcode_path),
 		"./users/%s/rcode", username);
 	FILE *rf = fopen(rcode_path, "r");
-	if (!rf) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "No confirmation pending");
-		return 1;
-	}
+	if (!rf)
+		return call_respond_plain(fd, 400, "No confirmation pending");
 	if (!fgets(stored_rcode, sizeof(stored_rcode), rf)) {
 		fclose(rf);
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Could not read confirmation code");
-		return 1;
+		return call_respond_plain(fd, 400, "Could not read confirmation code");
 	}
 	fclose(rf);
 
@@ -913,12 +834,8 @@ handle_confirm(int fd, char *body)
 	                    stored_rcode[rlen-1] == '\r'))
 		stored_rcode[--rlen] = '\0';
 
-	if (strcmp(code, stored_rcode)) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Wrong confirmation code");
-		return 1;
-	}
+	if (strcmp(code, stored_rcode))
+		return call_respond_plain(fd, 400, "Wrong confirmation code");
 
 	memcpy(&user, existing, sizeof(user));
 	user.active = 1;
@@ -937,13 +854,8 @@ handle_confirm(int fd, char *body)
 	snprintf(cookie, sizeof(cookie),
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
-	ndc_header(fd, "Location",  "/");
-	ndc_header(fd, "Set-Cookie", cookie);
-	ndc_header(fd, "Connection", "close");
-	ndc_set_flags(fd, DF_TO_CLOSE);
-	ndc_head(fd, 303);
-	ndc_close(fd);
-	return 0;
+	ndc_header_set(fd, "Set-Cookie", cookie);
+	return call_redirect(fd, "/");
 }
 
 /* ------------------------------------------------------------------ */
@@ -987,5 +899,3 @@ void ndx_install(void)
 	ndc_register_handler("/auth/logout",        handle_logout);
 	ndc_register_handler("/auth/confirm",       handle_confirm);
 }
-
-void ndx_open(void) {}

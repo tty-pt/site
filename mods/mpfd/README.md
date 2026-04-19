@@ -186,7 +186,7 @@ From `mods/poem/poem.c`:
 // Parse the request
 int parse_result = call_mpfd_parse(fd, body);
 if (parse_result == -1) {
-    ndc_header(fd, "Content-Type", "text/plain");
+    ndc_header_set(fd, "Content-Type", "text/plain");
     ndc_head(fd, 415);
     ndc_body(fd, "Expected multipart/form-data");
     return 1;

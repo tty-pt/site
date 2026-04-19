@@ -180,25 +180,25 @@ parse_transpose_params(const char *query, int *transpose, int *flags, int *show_
 	char query_copy[1024];
 	snprintf(query_copy, sizeof(query_copy), "%s", query);
 
-	if (call_query_parse(query_copy) != 0)
+	if (ndc_query_parse(query_copy) != 0)
 		return -1;
 
 	char buf[32];
 
-	if (call_query_param("t", buf, sizeof(buf)) > 0)
+	if (ndc_query_param("t", buf, sizeof(buf)) > 0)
 		*transpose = atoi(buf);
 
-	if (call_query_exists("b"))
+	if (ndc_query_param("b", buf, sizeof(buf)) >= 0)
 		*flags |= TRANSP_BEMOL;
 
-	if (call_query_exists("l"))
+	if (ndc_query_param("l", buf, sizeof(buf)) >= 0)
 		*flags |= TRANSP_LATIN;
 
 	/* ADD THIS LINE: Sets the HTML flag so transp_buffer knows to wrap divs */
-	if (call_query_exists("h"))
+	if (ndc_query_param("h", buf, sizeof(buf)) >= 0)
 		*flags |= TRANSP_HTML;
 
-	if (call_query_exists("m"))
+	if (ndc_query_param("m", buf, sizeof(buf)) >= 0)
 		*show_media = 1;
 
 	return (*transpose || *flags || *show_media) ? 0 : 1;
@@ -216,7 +216,9 @@ char *song_json(int fd, int flags) {
 
 	/* Buffers for raw and escaped strings */
 	char title[256] = {0}, yt[512] = {0}, audio[512] = {0}, pdf[512] = {0};
+	char categories[256] = {0}, author[256] = {0};
 	char esc_title[512], esc_yt[1024], esc_audio[1024], esc_pdf[1024];
+	char esc_categories[512], esc_author[512];
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, query, "QUERY_STRING");
@@ -235,6 +237,8 @@ char *song_json(int fd, int flags) {
 	call_read_meta_file(item_path, "yt", yt, sizeof(yt));
 	call_read_meta_file(item_path, "audio", audio, sizeof(audio));
 	call_read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
+	call_read_meta_file(item_path, "type", categories, sizeof(categories));
+	call_read_meta_file(item_path, "author", author, sizeof(author));
 
 	/* Read and Transpose Chord File */
 	snprintf(filepath, sizeof(filepath), "%s/data.txt", item_path);
@@ -283,6 +287,8 @@ char *song_json(int fd, int flags) {
 	call_json_escape(yt, esc_yt, sizeof(esc_yt));
 	call_json_escape(audio, esc_audio, sizeof(esc_audio));
 	call_json_escape(pdf, esc_pdf, sizeof(esc_pdf));
+	call_json_escape(categories, esc_categories, sizeof(esc_categories));
+	call_json_escape(author, esc_author, sizeof(esc_author));
 
 	/* Determine ownership */
 	int is_owner = 0;
@@ -295,7 +301,7 @@ char *song_json(int fd, int flags) {
 	/* Build the final JSON string */
 	size_t resp_len = strlen(escaped_data) + strlen(esc_title) +
 		strlen(esc_yt) + strlen(esc_audio) +
-		strlen(esc_pdf) + 512;
+		strlen(esc_pdf) + strlen(esc_categories) + strlen(esc_author) + 512;
 
 	char *response = malloc(resp_len);
 	if (response) {
@@ -308,10 +314,13 @@ char *song_json(int fd, int flags) {
 				"\"audio\":\"%s\","
 				"\"pdf\":\"%s\","
 				"\"originalKey\":%d,"
-				"\"owner\":%s"
+				"\"owner\":%s,"
+				"\"categories\":\"%s\","
+				"\"author\":\"%s\""
 				"}",
 				esc_title, escaped_data, show_media, esc_yt, esc_audio, esc_pdf, original_key,
-				is_owner ? "true" : "false");
+				is_owner ? "true" : "false",
+				esc_categories, esc_author);
 	}
 
 	free(escaped_data);
@@ -326,17 +335,10 @@ api_song_transpose_handler(int fd, char *body)
 
 	char *json = song_json(fd, 0);
 
-	if (!json) {
-		ndc_header(fd, "Content-Type", "application/json");
-		ndc_head(fd, 500);
-		ndc_body(fd, "{\"error\":\"Failed to generate content\"}");
-		return 0;
-	}
+	if (!json)
+		return call_respond_json(fd, 500, "{\"error\":\"Failed to generate content\"}");
 
-	ndc_header(fd, "Content-Type", "application/json");
-	ndc_head(fd, 200);
-	ndc_body(fd, json);
-	
+	call_respond_json(fd, 200, json);
 	free(json);
 	return 0;
 }
@@ -373,12 +375,8 @@ song_edit_get_handler(int fd, char *body)
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing song ID");
-		return 1;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing song ID");
 
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
@@ -386,87 +384,24 @@ song_edit_get_handler(int fd, char *body)
 
 	if (!call_item_check_ownership(item_path, username)) {
 		struct stat st;
-		if (stat(item_path, &st) != 0) {
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 404);
-			ndc_body(fd, "Song not found");
-			return 1;
-		}
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "Forbidden");
-		return 1;
+		if (stat(item_path, &st) != 0)
+			return call_respond_plain(fd, 404, "Song not found");
+		return call_respond_plain(fd, 403, "Forbidden");
 	}
 
-	/* Read title */
+	/* Read metadata */
 	char title[256] = { 0 };
-	char title_path[1024];
-	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-	FILE *tfp = fopen(title_path, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp)) {
-			size_t len = strlen(title);
-			if (len > 0 && title[len - 1] == '\n')
-				title[len - 1] = '\0';
-		}
-		fclose(tfp);
-	}
-
-	/* Read type */
 	char type[256] = { 0 };
-	char type_path[1024];
-	snprintf(type_path, sizeof(type_path), "%s/type", item_path);
-	FILE *typefp = fopen(type_path, "r");
-	if (typefp) {
-		if (fgets(type, sizeof(type) - 1, typefp)) {
-			size_t len = strlen(type);
-			if (len > 0 && type[len - 1] == '\n')
-				type[len - 1] = '\0';
-		}
-		fclose(typefp);
-	}
-
-	/* Read yt */
 	char yt[512] = { 0 };
-	char yt_path[1024];
-	snprintf(yt_path, sizeof(yt_path), "%s/yt", item_path);
-	FILE *ytfp = fopen(yt_path, "r");
-	if (ytfp) {
-		if (fgets(yt, sizeof(yt) - 1, ytfp)) {
-			size_t len = strlen(yt);
-			if (len > 0 && yt[len - 1] == '\n')
-				yt[len - 1] = '\0';
-		}
-		fclose(ytfp);
-	}
-
-	/* Read audio */
 	char audio[512] = { 0 };
-	char audio_path[1024];
-	snprintf(audio_path, sizeof(audio_path), "%s/audio", item_path);
-	FILE *audiofp = fopen(audio_path, "r");
-	if (audiofp) {
-		if (fgets(audio, sizeof(audio) - 1, audiofp)) {
-			size_t len = strlen(audio);
-			if (len > 0 && audio[len - 1] == '\n')
-				audio[len - 1] = '\0';
-		}
-		fclose(audiofp);
-	}
-
-	/* Read pdf */
 	char pdf[512] = { 0 };
-	char pdf_path[1024];
-	snprintf(pdf_path, sizeof(pdf_path), "%s/pdf", item_path);
-	FILE *pdfp = fopen(pdf_path, "r");
-	if (pdfp) {
-		if (fgets(pdf, sizeof(pdf) - 1, pdfp)) {
-			size_t len = strlen(pdf);
-			if (len > 0 && pdf[len - 1] == '\n')
-				pdf[len - 1] = '\0';
-		}
-		fclose(pdfp);
-	}
+	char author[256] = { 0 };
+	call_read_meta_file(item_path, "title", title, sizeof(title));
+	call_read_meta_file(item_path, "type", type, sizeof(type));
+	call_read_meta_file(item_path, "yt", yt, sizeof(yt));
+	call_read_meta_file(item_path, "audio", audio, sizeof(audio));
+	call_read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
+	call_read_meta_file(item_path, "author", author, sizeof(author));
 
 	/* Read data */
 	char *data_content = NULL;
@@ -513,6 +448,9 @@ song_edit_get_handler(int fd, char *body)
 		free(data_content);
 	}
 
+	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&author=");
+	pos += call_url_encode(author, post_body + pos, sizeof(post_body) - pos);
+
 	/* POST to Fresh */
 	return call_core_post(fd, post_body, strlen(post_body));
 }
@@ -529,23 +467,15 @@ song_edit_post_handler(int fd, char *body)
 	if (call_require_login(fd, username))
 		return 1;
 
-	int parse_result = call_query_parse(body);
-	if (parse_result == -1) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Failed to parse form body");
-		return 1;
-	}
+	int parse_result = ndc_query_parse(body);
+	if (parse_result == -1)
+		return call_respond_plain(fd, 400, "Failed to parse form body");
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
-	if (!id[0]) {
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 400);
-		ndc_body(fd, "Missing song ID");
-		return 1;
-	}
+	if (!id[0])
+		return call_respond_plain(fd, 400, "Missing song ID");
 
 	char item_path[512];
 	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
@@ -553,43 +483,39 @@ song_edit_post_handler(int fd, char *body)
 
 	/* Ownership check */
 	if (!call_item_check_ownership(item_path, username)) {
-		/* Distinguish 404 from 403 */
 		struct stat st;
-		if (stat(item_path, &st) != 0) {
-			ndc_header(fd, "Content-Type", "text/plain");
-			ndc_head(fd, 404);
-			ndc_body(fd, "Song not found");
-			return 1;
-		}
-		ndc_header(fd, "Content-Type", "text/plain");
-		ndc_head(fd, 403);
-		ndc_body(fd, "You don't own this song");
-		return 1;
+		if (stat(item_path, &st) != 0)
+			return call_respond_plain(fd, 404, "Song not found");
+		return call_respond_plain(fd, 403, "You don't own this song");
 	}
 
 	/* Get title */
 	char title[256] = { 0 };
-	int title_len = call_query_param("title", title, sizeof(title) - 1);
+	int title_len = ndc_query_param("title", title, sizeof(title) - 1);
 	if (title_len > 0)
 		title[title_len] = '\0';
 
 	/* Get type */
 	char type[256] = { 0 };
-	int type_len = call_query_param("type", type, sizeof(type) - 1);
+	int type_len = ndc_query_param("type", type, sizeof(type) - 1);
 	if (type_len > 0)
 		type[type_len] = '\0';
 
 	/* Get yt */
 	char yt[512] = { 0 };
-	call_query_param("yt", yt, sizeof(yt) - 1);
+	ndc_query_param("yt", yt, sizeof(yt) - 1);
 
 	/* Get audio */
 	char audio[512] = { 0 };
-	call_query_param("audio", audio, sizeof(audio) - 1);
+	ndc_query_param("audio", audio, sizeof(audio) - 1);
 
 	/* Get pdf */
 	char pdf[512] = { 0 };
-	call_query_param("pdf", pdf, sizeof(pdf) - 1);
+	ndc_query_param("pdf", pdf, sizeof(pdf) - 1);
+
+	/* Get author */
+	char author[256] = { 0 };
+	ndc_query_param("author", author, sizeof(author) - 1);
 
 	/* Get data */
 	char *data_content = NULL;
@@ -597,7 +523,7 @@ song_edit_post_handler(int fd, char *body)
 	{
 		/* Use a generous fixed buffer for chord data */
 		char data_buf[65536] = { 0 };
-		int got = call_query_param("data", data_buf, sizeof(data_buf) - 1);
+		int got = ndc_query_param("data", data_buf, sizeof(data_buf) - 1);
 		if (got > 0) {
 			data_len = got;
 			data_content = malloc(data_len + 1);
@@ -659,6 +585,17 @@ song_edit_post_handler(int fd, char *body)
 		FILE *tfp = fopen(pdf_path, "w");
 		if (tfp) {
 			fwrite(pdf, 1, strlen(pdf), tfp);
+			fclose(tfp);
+		}
+	}
+
+	/* Write author file */
+	{
+		char author_path[1024];
+		snprintf(author_path, sizeof(author_path), "%s/author", item_path);
+		FILE *tfp = fopen(author_path, "w");
+		if (tfp) {
+			fwrite(author, 1, strlen(author), tfp);
 			fclose(tfp);
 		}
 	}
@@ -760,6 +697,102 @@ NDX_DEF(int, parse_item_line,
 	return 0;
 }
 
+/* Build a JSON array of all known song types from the type index.
+ * Returns a malloc'd string the caller must free, or NULL on error. */
+NDX_DEF(char *, song_get_types_json, int, dummy)
+{
+	(void)dummy;
+	size_t cap = 4096;
+	char *json = malloc(cap);
+	if (!json) return NULL;
+	strcpy(json, "[");
+	int first = 1;
+
+	unsigned cur = qmap_iter(type_index_hd, NULL, 0);
+	const void *key, *val;
+	while (qmap_next(&key, &val, cur)) {
+		const char *type = (const char *)key;
+		char esc[256];
+		call_json_escape(type, esc, sizeof(esc));
+		size_t needed = strlen(json) + strlen(esc) + 8;
+		if (needed >= cap) {
+			cap *= 2;
+			char *tmp = realloc(json, cap);
+			if (!tmp) { free(json); return NULL; }
+			json = tmp;
+		}
+		if (!first) strcat(json, ",");
+		first = 0;
+		strcat(json, "\"");
+		strcat(json, esc);
+		strcat(json, "\"");
+	}
+	strcat(json, "]");
+	return json;
+}
+
+/* Build a JSON array of all songs from items/song/items/.
+ * If include_type is non-zero each object includes a "type" field.
+ * Returns a malloc'd string the caller must free, or NULL on error. */
+NDX_DEF(char *, build_all_songs_json, const char *, doc_root, int, include_type)
+{
+	size_t cap = 65536;
+	char *json = malloc(cap);
+	if (!json) return NULL;
+	strcpy(json, "[");
+	int first = 1;
+
+	char songs_dir[512];
+	snprintf(songs_dir, sizeof(songs_dir), "%s/%s", doc_root, CHORDS_ITEMS_PATH);
+
+	DIR *dp = opendir(songs_dir);
+	if (dp) {
+		struct dirent *de;
+		while ((de = readdir(dp)) != NULL) {
+			if (de->d_name[0] == '.') continue;
+
+			char item_path[PATH_MAX];
+			snprintf(item_path, sizeof(item_path), "%s/%s", songs_dir, de->d_name);
+
+			char stitle[256] = {0};
+			call_read_meta_file(item_path, "title", stitle, sizeof(stitle));
+
+			char esc_id[256], esc_title[512];
+			call_json_escape(de->d_name, esc_id, sizeof(esc_id));
+			call_json_escape(stitle, esc_title, sizeof(esc_title));
+
+			char entry[1200];
+			if (include_type) {
+				char stype[64] = {0};
+				call_read_meta_file(item_path, "type", stype, sizeof(stype));
+				char esc_type[128];
+				call_json_escape(stype, esc_type, sizeof(esc_type));
+				snprintf(entry, sizeof(entry),
+					"%s{\"id\":\"%s\",\"title\":\"%s\",\"type\":\"%s\"}",
+					first ? "" : ",", esc_id, esc_title, esc_type);
+			} else {
+				snprintf(entry, sizeof(entry),
+					"%s{\"id\":\"%s\",\"title\":\"%s\"}",
+					first ? "" : ",", esc_id, esc_title);
+			}
+			first = 0;
+
+			size_t cur = strlen(json);
+			size_t need = cur + strlen(entry) + 4;
+			if (need >= cap) {
+				cap = need * 2;
+				char *tmp = realloc(json, cap);
+				if (!tmp) { free(json); closedir(dp); return NULL; }
+				json = tmp;
+			}
+			strcat(json, entry);
+		}
+		closedir(dp);
+	}
+	strcat(json, "]");
+	return json;
+}
+
 void ndx_install(void)
 {
 	char doc_root[256] = {0};
@@ -793,5 +826,3 @@ void ndx_install(void)
 	ndc_register_handler("GET:/api/song/:id/transpose",
 			api_song_transpose_handler);
 }
-
-void ndx_open(void) {}

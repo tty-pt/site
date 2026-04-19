@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 import SongItem from "#/islands/SongItem.tsx";
 
@@ -47,10 +47,9 @@ export const handler: Handlers<SbData, State> = {
 export default function SbDetail({ data }: PageProps<SbData>) {
   if (!data.songbook) {
     return (
-      <Layout user={data.user} title="Songbook Not Found" path="/songbook">
+      <Layout user={data.user} title="Songbook Not Found" path="/songbook" icon="📖">
         <div className="center">
           <h1>Songbook Not Found</h1>
-          <a href="/songbook" className="btn">Back to Songbooks</a>
         </div>
       </Layout>
     );
@@ -60,24 +59,13 @@ export default function SbDetail({ data }: PageProps<SbData>) {
   const isOwner = data.user === songbook.owner;
 
   return (
-    <Layout user={data.user} title={songbook.title} path={`/songbook/${songbook.id}`}>
+    <Layout user={data.user} title={`songbook: ${songbook.title}`} path={`/songbook/${songbook.id}`} icon="📖"
+      menuItems={<ItemMenu module="songbook" id={songbook.id} isOwner={isOwner} />}>
       <div style={{ padding: "2rem", maxWidth: "900px", margin: "0 auto" }}>
-        <p style={{ color: "#666" }}>Choir: {songbook.choir}</p>
-
-        {isOwner && (
-          <div style={{ marginTop: "1rem", marginBottom: "2rem" }}>
-            <a
-              href={`/songbook/${songbook.id}/edit`}
-              style={{
-                padding: "0.5rem 1rem",
-                backgroundColor: "#ffc107",
-                color: "black",
-                textDecoration: "none",
-                borderRadius: "4px",
-                marginRight: "0.5rem",
-              }}
-            >
-              Edit Songbook
+        {songbook.choir && (
+          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "0.8em", color: "grey" }}>
+            <a href={`/choir/${songbook.choir}`} style={{ color: "grey" }}>
+              {songbook.choir}
             </a>
           </div>
         )}
@@ -97,9 +85,6 @@ export default function SbDetail({ data }: PageProps<SbData>) {
           />
         ))}
 
-        <div style={{ marginTop: "2rem" }}>
-          <a href="/songbook">← Back to Songbooks</a>
-        </div>
       </div>
     </Layout>
   );

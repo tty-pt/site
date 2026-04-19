@@ -198,6 +198,3 @@ ndx_install(void)
 	ndx_load("./mods/proxy/proxy");
 	start_deno();
 }
-
-void
-ndx_open(void) {}
