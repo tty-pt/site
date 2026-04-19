@@ -42,7 +42,7 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
               name="title"
               defaultValue={title}
               required
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
           <label>
@@ -51,7 +51,7 @@ export default function ChoirEdit({ data }: PageProps<ChoirEditData>) {
               name="format"
               rows={10}
               defaultValue={formats.join("\n")}
-              className="block mt-1 w-full font-mono"
+              className="w-full font-mono"
             />
           </label>
           <div className="flex gap-2">

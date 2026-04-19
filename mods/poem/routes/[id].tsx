@@ -6,7 +6,7 @@ interface PoemDetailData {
   user: string | null;
   id: string;
   title: string;
-  html: string;
+  lang: string;
   owner: boolean;
 }
 
@@ -21,12 +21,12 @@ export const handler: Handlers<PoemDetailData, State> = {
       user: ctx.state.user,
       id: ctx.params.id,
       title: data.title ?? "",
-      html: data.html ?? "",
+      lang: data.lang ?? "pt_PT",
       owner: data.owner === true,
     });
   },
 };
 
 export default function PoemPage({ data }: PageProps<PoemDetailData>) {
-  return <PoemDetail user={data.user} id={data.id} title={data.title} html={data.html} owner={data.owner} />;
+  return <PoemDetail user={data.user} id={data.id} title={data.title} lang={data.lang} owner={data.owner} />;
 }

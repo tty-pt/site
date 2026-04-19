@@ -71,7 +71,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="title"
               defaultValue={title}
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
 
@@ -81,7 +81,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="author"
               defaultValue={author}
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
           
@@ -91,7 +91,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               name="type"
               defaultValue={type}
               rows={3}
-              className="block mt-1 w-full font-mono"
+              className="w-full font-mono"
             />
           </label>
           
@@ -101,7 +101,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="yt"
               defaultValue={yt}
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
           
@@ -111,7 +111,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="audio"
               defaultValue={audio}
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
           
@@ -121,7 +121,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               type="text"
               name="pdf"
               defaultValue={pdf}
-              className="block mt-1 w-full"
+              className="w-full"
             />
           </label>
           
@@ -131,7 +131,7 @@ export default function SongEdit({ data }: PageProps<SongEditData>) {
               name="data"
               defaultValue={songData}
               rows={20}
-              className="block mt-1 w-full font-mono whitespace-pre"
+              className="w-full font-mono whitespace-pre"
             />
           </label>
           

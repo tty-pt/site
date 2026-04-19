@@ -53,7 +53,7 @@ export default function SongbookEditRow(props: Props) {
           name={`fmt_${i}`}
           value={selectedFormat}
           onInput={(e) => setSelectedFormat((e.target as HTMLInputElement).value)}
-          className="w-full mt-1"
+          className="w-full"
         />
       </label>
 
@@ -63,7 +63,7 @@ export default function SongbookEditRow(props: Props) {
           list={`songs-${i}`}
           name={`song_${i}`}
           defaultValue={displayVal}
-          className="w-full mt-1"
+          className="w-full"
         />
       </label>
 
@@ -72,7 +72,7 @@ export default function SongbookEditRow(props: Props) {
         <select
           name={`key_${i}`}
           defaultValue={`${targetKey}`}
-          className="w-full mt-1"
+          className="w-full"
         >
           {KEY_NAMES.map((name, idx) => (
             <option key={idx} value={`${idx}`}>{name}</option>

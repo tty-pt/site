@@ -72,13 +72,13 @@ export default function SongItem(props: Props) {
   }
 
   return (
-    <div className="mt-8 border-t-2 border-gray-300 pt-4">
+    <div className="separator flex flex-col gap-2">
       <div className="flex justify-between items-center">
-        <div>
+        <div className="flex flex-col gap-1">
           <h4 className="m-0">
             <a href={`/song/${props.chordId}`} target="_blank">{props.chordTitle || ""}</a>
           </h4>
-          <p className="my-1 text-sm text-gray-500">
+          <p className="text-sm text-muted">
             {format} • Key: {targetKey}
           </p>
         </div>
@@ -125,7 +125,7 @@ export default function SongItem(props: Props) {
 
       <pre
         dangerouslySetInnerHTML={{ __html: chordHtml || "" }}
-        className="font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded mt-2"
+        className="font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded"
       />
     </div>
   );

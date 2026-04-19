@@ -122,7 +122,7 @@ export default function SbEdit({ data }: PageProps<SbEditData>) {
             name="amount"
             value={`${songbook.songs.length}`}
           />
-          <div className="mt-4 flex gap-2">
+          <div className="flex gap-2">
             <button
               type="submit"
               name="action"

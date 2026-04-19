@@ -161,41 +161,35 @@ export default function SongDetailIsland(props: SongDetailProps) {
         
         {/* Media container - reacts to showMedia state */}
         {(props.yt || props.audio || props.pdf) && (
-          <div 
+          <div
             id="media-container"
-            class={showMedia ? 'w-full max-w-xl' : 'hidden w-full max-w-xl'}
+            class={showMedia ? 'flex flex-col gap-4 w-full max-w-xl' : 'hidden w-full max-w-xl'}
           >
             {props.yt && (
-              <div className="mb-4">
-                <iframe 
-                  src={`https://www.youtube.com/embed/${props.yt}`}
-                  className="w-full aspect-video border-none"
-                  allowFullScreen
-                />
-              </div>
+              <iframe
+                src={`https://www.youtube.com/embed/${props.yt}`}
+                className="w-full aspect-video border-none"
+                allowFullScreen
+              />
             )}
-            
+
             {props.audio && (
-              <div className="mb-4">
-                <audio controls className="w-full">
-                  <source src={props.audio} type="audio/mpeg" />
-                </audio>
-              </div>
+              <audio controls className="w-full">
+                <source src={props.audio} type="audio/mpeg" />
+              </audio>
             )}
-            
+
             {props.pdf && (
-              <div className="mb-4">
-                <a href={props.pdf} target="_blank" rel="noopener" className="text-blue-600">
-                  📄 View PDF
-                </a>
-              </div>
+              <a href={props.pdf} target="_blank" rel="noopener" className="text-blue-600">
+                📄 View PDF
+              </a>
             )}
           </div>
         )}
 
         {/* Categories + Author row */}
         {(props.categories || props.author) && (
-          <div className="flex justify-between items-start w-full max-w-xl text-xs text-gray-400">
+          <div className="flex justify-between items-start w-full max-w-xl text-xs text-muted">
             <div className="italic whitespace-pre-wrap">
               {props.categories || ""}
             </div>

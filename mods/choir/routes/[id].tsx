@@ -89,14 +89,14 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
     <Layout user={data.user} title={choir.title} path={`/choir/${choir.id}`} icon="🎶" menuItems={menuItems}>
       <div className="center">
         {choir.owner && (
-          <div className="flex justify-end text-xs text-gray-400 w-full">
-            <a href={`/${choir.owner}/`} className="text-gray-400">{choir.owner}</a>
+          <div className="flex justify-end text-xs text-muted w-full">
+            <a href={`/${choir.owner}/`} className="text-muted">{choir.owner}</a>
           </div>
         )}
 
-        <h3 className="mt-8">Songbooks</h3>
+        <h3>Songbooks</h3>
         {data.songbooks.length === 0 ? (
-          <p className="text-gray-500">No songbooks yet.</p>
+          <p className="text-muted">No songbooks yet.</p>
         ) : (
           <div className="center">
             {data.songbooks.map((sb) => (
@@ -105,17 +105,17 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
           </div>
         )}
 
-        <h3 className="mt-8">Repertoire</h3>
+        <h3>Repertoire</h3>
         {data.songs.length === 0 ? (
-          <p className="text-gray-500">No songs in repertoire yet.</p>
+          <p className="text-muted">No songs in repertoire yet.</p>
         ) : (
           <ul className="list-none p-0 text-left w-full max-w-lg mx-auto">
             {data.songs.map((song) => (
-              <li key={song.id} className="p-2 border-b border-gray-200 flex justify-between items-center">
+              <li key={song.id} className="p-2 border-b border-muted flex justify-between items-center">
                 <a href={`/choir/${choir.id}/song/${song.id}`} className="flex-1">
                   {song.title || song.id}
                 </a>
-                <span className="text-gray-500 mr-4">
+                <span className="text-muted mr-4">
                   {KEY_NAMES[(song.preferredKey || song.originalKey) % 12]}
                 </span>
                 {isOwner && (
@@ -134,27 +134,28 @@ export default function ChoirDetail({ data }: PageProps<ChoirData>) {
         )}
 
         {isOwner && (
-          <div className="mt-4 w-full max-w-lg">
+          <div className="w-full max-w-lg">
             <details>
               <summary className="cursor-pointer text-blue-600">Add song to repertoire</summary>
               <form
                 method="POST"
                 action={`/api/choir/${choir.id}/songs`}
-                className="mt-2"
               >
                 <datalist id="choir-songs">
                   {data.allSongs.map((s) => (
                     <option key={s.id} value={`${s.title} [${s.id}]`} />
                   ))}
                 </datalist>
-                <input list="choir-songs" name="song_id" placeholder="Search song..." required className="mr-2" />
-                <button type="submit" className="btn">Add</button>
+                <div className="btn-row">
+                  <input list="choir-songs" name="song_id" placeholder="Search song..." required />
+                  <button type="submit" className="btn">Add</button>
+                </div>
               </form>
             </details>
           </div>
         )}
 
-        <h3 className="mt-8">Song Formats</h3>
+        <h3>Song Formats</h3>
         <pre className="bg-surface p-4 rounded text-left w-full max-w-lg">
           {choir.formats.join("\n")}
         </pre>

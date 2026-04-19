@@ -32,7 +32,6 @@ export default function IndexDelete({ data }: PageProps<DeleteData>) {
   return (
     <Layout user={data.user} title={`Delete ${title || id}`} path={path} icon="🏠">
       <div class="center">
-        <h1>Delete</h1>
         <p>Are you sure you want to delete <strong>{title || id}</strong>?</p>
         <form method="POST" action={path}>
           <button type="submit">Delete</button>

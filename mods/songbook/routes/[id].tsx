@@ -61,10 +61,10 @@ export default function SbDetail({ data }: PageProps<SbData>) {
   return (
     <Layout user={data.user} title={`songbook: ${songbook.title}`} path={`/songbook/${songbook.id}`} icon="📖"
       menuItems={<ItemMenu module="songbook" id={songbook.id} isOwner={isOwner} />}>
-      <div className="p-8 w-full max-w-4xl mx-auto">
+      <div className="flex flex-col gap-1">
         {songbook.choir && (
-          <div className="flex justify-end text-xs text-gray-400">
-            <a href={`/choir/${songbook.choir}`} className="text-gray-400">
+          <div className="flex justify-end text-xs text-muted">
+            <a href={`/choir/${songbook.choir}`} className="text-muted">
               {songbook.choir}
             </a>
           </div>

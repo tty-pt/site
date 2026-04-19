@@ -11,6 +11,7 @@
   --bg-surface: whitesmoke;
   --border: gainsboro;
   --text: #2c2c2c;
+  --text-muted: #666;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
     --bg-surface: #2c2c2c;
     --border: #555;
     --text: #c1c3da;
+    --text-muted: #999;
     color-scheme: dark;
   }
 }
@@ -34,8 +36,8 @@ body {
 
 /* Layout */
 .menu { display: flex; flex-direction: column; height: 100vh; margin: 0; position: fixed; }
-.main { flex: 1; padding: 16px; display: flex; flex-direction: column; align-items: center; }
-h1 { text-transform: capitalize; text-align: center; margin-bottom: 16px; font-size: 1.5em; font-weight: 600; }
+.main { flex: 1; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+h1 { text-transform: capitalize; text-align: center; font-size: 1.5em; font-weight: 600; }
 
 /* Forms */
 form { display: flex; gap: 16px; }
@@ -48,7 +50,7 @@ label { display: flex; gap: 4px; font-size: 0.8em; }
 label:not(:has(> input[type="checkbox"])) { flex-direction: column; }
 label > input, label > textarea { display: block; }
 
-input, textarea, select {
+input, textarea, select, pre {
   border: 1px solid var(--border);
   padding: 8px;
   font-size: inherit;
@@ -139,6 +141,9 @@ a.btn { color: var(--text); }
 .module-menu form { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .bg-surface, .chord-data { background: var(--bg-surface); }
+.text-muted { color: var(--text-muted); }
+.border-muted { border-color: var(--border); }
+.separator { border-top: 2px solid var(--border); }
 
 /* Semantic button variants */
 .btn-primary   { background: #28a745 !important; color: white !important; border-color: #28a745 !important; }
