@@ -355,27 +355,14 @@ song_edit_get_handler(int fd, char *body)
 {
 	(void)body;
 
-	char doc_root[256] = { 0 };
-	char id[128] = { 0 };
+	item_ctx_t ctx;
+	if (call_item_ctx_load(&ctx, fd, CHORDS_ITEMS_PATH,
+			ICTX_NEED_LOGIN)) return 1;
 
-	/* Auth + ownership check */
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
-		return 1;
-
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing song ID");
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
-
-	if (!call_item_check_ownership(item_path, username)) {
+	/* Distinguish 404 (missing) from 403 (not owner) */
+	if (!call_item_check_ownership(ctx.item_path, ctx.username)) {
 		struct stat st;
-		if (stat(item_path, &st) != 0)
+		if (stat(ctx.item_path, &st) != 0)
 			return call_respond_error(fd, 404, "Song not found");
 		return call_respond_error(fd, 403, "Forbidden");
 	}
@@ -387,16 +374,16 @@ song_edit_get_handler(int fd, char *body)
 	char audio[512] = { 0 };
 	char pdf[512] = { 0 };
 	char author[256] = { 0 };
-	call_read_meta_file(item_path, "title", title, sizeof(title));
-	call_read_meta_file(item_path, "type", type, sizeof(type));
-	call_read_meta_file(item_path, "yt", yt, sizeof(yt));
-	call_read_meta_file(item_path, "audio", audio, sizeof(audio));
-	call_read_meta_file(item_path, "pdf", pdf, sizeof(pdf));
-	call_read_meta_file(item_path, "author", author, sizeof(author));
+	call_read_meta_file(ctx.item_path, "title", title, sizeof(title));
+	call_read_meta_file(ctx.item_path, "type", type, sizeof(type));
+	call_read_meta_file(ctx.item_path, "yt", yt, sizeof(yt));
+	call_read_meta_file(ctx.item_path, "audio", audio, sizeof(audio));
+	call_read_meta_file(ctx.item_path, "pdf", pdf, sizeof(pdf));
+	call_read_meta_file(ctx.item_path, "author", author, sizeof(author));
 
 	/* Read data */
-	char data_path[1024];
-	snprintf(data_path, sizeof(data_path), "%s/data.txt", item_path);
+	char data_path[PATH_MAX];
+	snprintf(data_path, sizeof(data_path), "%s/data.txt", ctx.item_path);
 	char *data_content = call_slurp_file(data_path);
 
 	/* Build POST body for Fresh */
@@ -431,34 +418,20 @@ song_edit_get_handler(int fd, char *body)
 static int
 song_edit_post_handler(int fd, char *body)
 {
-	char doc_root[256] = { 0 };
-	char id[128] = { 0 };
-
-	/* Auth check */
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
-		return 1;
+	item_ctx_t ctx;
+	if (call_item_ctx_load(&ctx, fd, CHORDS_ITEMS_PATH,
+			ICTX_NEED_LOGIN)) return 1;
 
 	int parse_result = ndc_query_parse(body);
 	if (parse_result == -1)
-		return call_respond_plain(fd, 400, "Failed to parse form body");
+		return call_bad_request(fd, "Failed to parse form body");
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing song ID");
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s/%s",
-		doc_root[0] ? doc_root : ".", CHORDS_ITEMS_PATH, id);
-
-	/* Ownership check */
-	if (!call_item_check_ownership(item_path, username)) {
+	/* Ownership check (with 404 vs 403 distinction) */
+	if (!call_item_check_ownership(ctx.item_path, ctx.username)) {
 		struct stat st;
-		if (stat(item_path, &st) != 0)
-			return call_respond_plain(fd, 404, "Song not found");
-		return call_respond_plain(fd, 403, "You don't own this song");
+		if (stat(ctx.item_path, &st) != 0)
+			return call_not_found(fd, "Song not found");
+		return call_respond_error(fd, 403, "You don't own this song");
 	}
 
 	/* Get title */
@@ -507,27 +480,27 @@ song_edit_post_handler(int fd, char *body)
 	}
 
 	/* Write title file */
-	call_write_meta_file(item_path, "title", title, strlen(title));
+	call_write_meta_file(ctx.item_path, "title", title, strlen(title));
 
 	/* Write type file */
-	call_write_meta_file(item_path, "type", type, strlen(type));
+	call_write_meta_file(ctx.item_path, "type", type, strlen(type));
 
 	/* Write yt file */
-	call_write_meta_file(item_path, "yt", yt, strlen(yt));
+	call_write_meta_file(ctx.item_path, "yt", yt, strlen(yt));
 
 	/* Write audio file */
-	call_write_meta_file(item_path, "audio", audio, strlen(audio));
+	call_write_meta_file(ctx.item_path, "audio", audio, strlen(audio));
 
 	/* Write pdf file */
-	call_write_meta_file(item_path, "pdf", pdf, strlen(pdf));
+	call_write_meta_file(ctx.item_path, "pdf", pdf, strlen(pdf));
 
 	/* Write author file */
-	call_write_meta_file(item_path, "author", author, strlen(author));
+	call_write_meta_file(ctx.item_path, "author", author, strlen(author));
 
 	/* Write data file */
 	{
-		char data_path[1024];
-		snprintf(data_path, sizeof(data_path), "%s/data.txt", item_path);
+		char data_path[PATH_MAX];
+		snprintf(data_path, sizeof(data_path), "%s/data.txt", ctx.item_path);
 		FILE *dfp = fopen(data_path, "w");
 		if (dfp) {
 			if (data_content)
@@ -539,7 +512,7 @@ song_edit_post_handler(int fd, char *body)
 
 	/* Redirect to song page */
 	char location[256];
-	snprintf(location, sizeof(location), "/song/%s", id);
+	snprintf(location, sizeof(location), "/song/%s", ctx.id);
 	return call_redirect(fd, location);
 }
 

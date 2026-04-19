@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout, ItemMenu, ErrorPage } from "@/ssr/ui.tsx";
+import { Layout, ItemMenu, ErrorPage, parseErrorBody } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 import SongItem from "#/islands/SongItem.tsx";
 
@@ -30,11 +30,9 @@ interface Songbook {
 export const handler: Handlers<SbData, State> = {
   async POST(req, ctx) {
     const text = await req.text();
-    const params = new URLSearchParams(text);
-    const error = params.get("error");
-    if (error) {
-      const status = Number(params.get("status") ?? "500");
-      return ctx.render({ user: ctx.state.user, songbook: null, error, status }, { status });
+    const err = parseErrorBody(text);
+    if (err) {
+      return ctx.render({ user: ctx.state.user, songbook: null, ...err }, { status: err.status });
     }
 
     const body = JSON.parse(text);

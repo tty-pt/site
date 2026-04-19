@@ -18,19 +18,19 @@ code=$(curl -sw "%{http_code}" -o /dev/null -c "$COOKIE" -X POST "$BASE/auth/reg
 	-d "username=$USER&password=pass1234&password2=pass1234&email=test@test.com")
 [ "$code" = "303" ] && pass "registered" || fail "expected 303, got $code"
 
-# 1. POST edit with wrong content-type (authenticated, expect 415)
-echo -n "1. POST wrong content-type... "
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
-	-d "title=test")
-[ "$code" = "415" ] && pass "415 for unsupported media type" || fail "expected 415, got $code"
-
-# Add a poem via /poem/add first so the item exists and is owned by our user
-echo -n "1b. Add poem via /poem/add... "
+# 1. Add a poem via /poem/add first so the item exists and is owned by our user
+echo -n "1. Add poem via /poem/add... "
 echo "<p>Initial content.</p>" > "$TMPFILE"
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -c "$COOKIE" \
 	-X POST "$BASE/poem/add" \
 	-F "title=$USER" -F "file=@$TMPFILE")
 [ "$code" = "303" ] && pass "add redirects" || fail "expected 303, got $code"
+
+# 1b. POST edit with wrong content-type on owned item (expect 415)
+echo -n "1b. POST wrong content-type... "
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
+	-d "title=test")
+[ "$code" = "415" ] && pass "415 for unsupported media type" || fail "expected 415, got $code"
 
 # 2. POST with only title (no file)
 echo -n "2. POST title only... "

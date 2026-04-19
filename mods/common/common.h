@@ -41,6 +41,9 @@ NDX_DECL(int, b64_encode, const char *, in, char *, out, size_t, outlen);
 NDX_DECL(int, respond_plain, int, fd, int, status, const char *, msg);
 NDX_DECL(int, respond_json, int, fd, int, status, const char *, msg);
 NDX_DECL(int, respond_error, int, fd, int, status, const char *, msg);
+NDX_DECL(int, bad_request,  int, fd, const char *, msg);  /* 400; NULL -> "Bad request" */
+NDX_DECL(int, server_error, int, fd, const char *, msg);  /* 500; NULL -> "Internal server error" */
+NDX_DECL(int, not_found,    int, fd, const char *, msg);  /* 404; NULL -> "Not found" */
 NDX_DECL(int, redirect, int, fd, const char *, location);
 NDX_DECL(int, read_meta_file, const char *, item_path, const char *, name, char *, buf, size_t, sz);
 NDX_DECL(int, write_meta_file, const char *, item_path, const char *, name, const char *, buf, size_t, sz);
@@ -54,9 +57,6 @@ NDX_DECL(int, item_path_build,
 
 NDX_DECL(int, datalist_extract_id,
 	const char *, in, char *, id_out, size_t, outlen);
-
-NDX_DECL(int, proxy_add_standard_headers,
-	int, fd, const char *, modules_header);
 
 /* --- JSON array lifecycle --- */
 NDX_DECL(json_array_t *, json_array_new, int, dummy);

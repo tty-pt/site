@@ -1,3 +1,16 @@
+/**
+ * parseErrorBody — if body is a urlencoded `error=...&status=...` envelope
+ * (as emitted by call_respond_error in C), returns { error, status } so the
+ * caller can short-circuit into ctx.render with the matching HTTP status.
+ * Returns null when body is not an error envelope.
+ */
+export function parseErrorBody(text: string): { error: string; status: number } | null {
+  const params = new URLSearchParams(text);
+  const error = params.get("error");
+  if (!error) return null;
+  return { error, status: Number(params.get("status") ?? "500") };
+}
+
 export interface OwnerAction {
   href: string;
   icon: string;

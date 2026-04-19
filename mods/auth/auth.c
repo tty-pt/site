@@ -18,6 +18,10 @@
 #include "../common/common.h"
 #include "../index/index.h"
 
+#define AUTH_IMPL
+#include "auth.h"
+#undef AUTH_IMPL
+
 static unsigned users_map;
 static unsigned sessions_map;
 
@@ -148,7 +152,7 @@ NDX_DEF(int, require_login, int, fd, const char *, username)
 {
 	if (username && *username)
 		return 0;
-	return call_respond_plain(fd, 401, "Login required");
+	return call_respond_error(fd, 401, "Login required");
 }
 
 static void
@@ -622,7 +626,47 @@ NDX_DEF(int, require_ownership,
 {
 	if (item_check_ownership(item_path, username))
 		return 0;
-	return call_respond_plain(fd, 403, msg ? msg : "Forbidden");
+	return call_respond_error(fd, 403, msg ? msg : "Forbidden");
+}
+
+/* --- Item context --- */
+
+NDX_DEF(int, item_ctx_load,
+	item_ctx_t *, ctx, int, fd,
+	const char *, items_path, unsigned, flags)
+{
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->fd = fd;
+
+	if (flags & ICTX_NEED_LOGIN) {
+		ctx->username = call_get_request_user(fd);
+		if (call_require_login(fd, ctx->username)) return 1;
+	} else {
+		ctx->username = call_get_request_user(fd);
+	}
+
+	call_get_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
+	ndc_env_get(fd, ctx->id, "PATTERN_PARAM_ID");
+
+	if (flags & ICTX_SONG_ID)
+		ndc_env_get(fd, ctx->song_id, "PATTERN_PARAM_SONG_ID");
+
+	if (!ctx->id[0] ||
+	    ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
+		call_bad_request(fd, "Missing parameters");
+		return 1;
+	}
+
+	snprintf(ctx->item_path, sizeof(ctx->item_path), "%s/%s/%s",
+		ctx->doc_root, items_path, ctx->id);
+
+	if (flags & ICTX_NEED_OWNERSHIP) {
+		if (call_require_ownership(fd, ctx->item_path,
+				ctx->username, NULL))
+			return 1;
+	}
+
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -672,7 +716,7 @@ handle_login(int fd, char *body)
 	ndc_query_param("ret",      redirect, sizeof(redirect));
 
 	if (!*username || !*password)
-		return call_respond_plain(fd, 400, "Missing username or password");
+		return call_bad_request(fd, "Missing username or password");
 
 	const char *ret = *redirect ? redirect : "/";
 
@@ -742,22 +786,22 @@ handle_register(int fd, char *body)
 
 	size_t ulen = strlen(username);
 	if (ulen < 2 || ulen > 32)
-		return call_respond_plain(fd, 400, "Username must be 2-32 characters");
+		return call_bad_request(fd, "Username must be 2-32 characters");
 	for (char *p = username; *p; p++) {
 		if (!valid_username_char(*p))
-			return call_respond_plain(fd, 400, "Invalid username character");
+			return call_bad_request(fd, "Invalid username character");
 	}
 	if (strlen(password) < 4)
-		return call_respond_plain(fd, 400, "Password too short");
+		return call_bad_request(fd, "Password too short");
 	if (strcmp(password, password_confirm))
-		return call_respond_plain(fd, 400, "Passwords do not match");
+		return call_bad_request(fd, "Passwords do not match");
 	if (qmap_get(users_map, username))
-		return call_respond_plain(fd, 400, "Username already exists");
+		return call_bad_request(fd, "Username already exists");
 
 	generate_bcrypt_salt(salt, sizeof(salt));
 	char *hash = crypt(password, salt);
 	if (!hash)
-		return call_respond_plain(fd, 500, "Password hashing failed");
+		return call_server_error(fd, "Password hashing failed");
 
 	int uid = next_uid();
 
@@ -830,20 +874,20 @@ handle_confirm(int fd, char *body)
 	ndc_query_param("r", code,     sizeof(code));
 
 	if (!*username || !*code)
-		return call_respond_plain(fd, 400, "Missing parameters");
+		return call_bad_request(fd, "Missing parameters");
 
 	existing = (struct user *)qmap_get(users_map, username);
 	if (!existing || existing->active)
-		return call_respond_plain(fd, 400, "Invalid confirmation");
+		return call_bad_request(fd, "Invalid confirmation");
 
 	snprintf(rcode_path, sizeof(rcode_path),
 		"./users/%s/rcode", username);
 	FILE *rf = fopen(rcode_path, "r");
 	if (!rf)
-		return call_respond_plain(fd, 400, "No confirmation pending");
+		return call_bad_request(fd, "No confirmation pending");
 	if (!fgets(stored_rcode, sizeof(stored_rcode), rf)) {
 		fclose(rf);
-		return call_respond_plain(fd, 400, "Could not read confirmation code");
+		return call_bad_request(fd, "Could not read confirmation code");
 	}
 	fclose(rf);
 
@@ -853,7 +897,7 @@ handle_confirm(int fd, char *body)
 		stored_rcode[--rlen] = '\0';
 
 	if (strcmp(code, stored_rcode))
-		return call_respond_plain(fd, 400, "Wrong confirmation code");
+		return call_bad_request(fd, "Wrong confirmation code");
 
 	memcpy(&user, existing, sizeof(user));
 	user.active = 1;

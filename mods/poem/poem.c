@@ -185,12 +185,12 @@ poem_add_post_handler(int fd, char *body)
 
 	int parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1)
-		return call_respond_plain(fd, 415, "Expected multipart/form-data");
+		return call_respond_error(fd, 415, "Expected multipart/form-data");
 
 	char title[256] = { 0 };
 	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len <= 0)
-		return call_respond_plain(fd, 400, "Missing title");
+		return call_bad_request(fd, "Missing title");
 	title[title_len] = '\0';
 
 	char id[256] = { 0 };
@@ -200,7 +200,7 @@ poem_add_post_handler(int fd, char *body)
 	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
 
 	if (mkdir(item_path, 0755) == -1)
-		return call_respond_plain(fd, 409, "Poem already exists");
+		return call_respond_error(fd, 409, "Poem already exists");
 
 	call_item_record_ownership(item_path, username);
 
@@ -239,27 +239,20 @@ poem_edit_get_handler(int fd, char *body)
 {
 	(void)body;
 
-	char id[128] = { 0 };
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing poem ID");
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
-	const char *username = call_get_request_user(fd);
-	if (call_require_ownership(fd, item_path, username, "Forbidden"))
+	item_ctx_t ctx;
+	if (call_item_ctx_load(&ctx, fd, POEM_ITEMS_PATH,
+			ICTX_NEED_OWNERSHIP))
 		return 1;
 
 	char title[256] = { 0 };
-	call_read_meta_file(item_path, "title", title, sizeof(title));
+	call_read_meta_file(ctx.item_path, "title", title, sizeof(title));
 
 	char title_esc[512] = { 0 };
 	call_json_escape(title, title_esc, sizeof(title_esc));
 
 	char json[768];
 	snprintf(json, sizeof(json),
-		"{\"id\":\"%s\",\"title\":\"%s\"}", id, title_esc);
+		"{\"id\":\"%s\",\"title\":\"%s\"}", ctx.id, title_esc);
 
 	call_proxy_header("Content-Type", "application/json");
 	return call_core_post(fd, json, strlen(json));
@@ -269,54 +262,47 @@ poem_edit_get_handler(int fd, char *body)
 static int
 poem_edit_post_handler(int fd, char *body)
 {
-	char id[128] = { 0 };
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing poem ID");
+	item_ctx_t ctx;
+	if (call_item_ctx_load(&ctx, fd, POEM_ITEMS_PATH,
+			ICTX_NEED_OWNERSHIP))
+		return 1;
 
 	int parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1)
-		return call_respond_plain(fd, 415, "Expected multipart/form-data");
-
-	char item_path[512];
-	snprintf(item_path, sizeof(item_path), "%s/%s", POEM_ITEMS_PATH, id);
-	const char *username = call_get_request_user(fd);
-	if (call_require_ownership(fd, item_path, username, "Forbidden"))
-		return 1;
+		return call_respond_error(fd, 415, "Expected multipart/form-data");
 
 	char title[256] = { 0 };
 	int title_len = call_mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len > 0) {
 		title[title_len] = '\0';
-		call_write_meta_file(item_path, "title", title, (size_t)title_len);
-		call_index_put(index_hd, id, title);
+		call_write_meta_file(ctx.item_path, "title", title, (size_t)title_len);
+		call_index_put(index_hd, ctx.id, title);
 	}
 
 	int file_len = call_mpfd_len("file");
 	if (file_len > 0) {
 		char *file_content = malloc((size_t)file_len + 1);
 		if (!file_content)
-			return call_respond_plain(fd, 500, "Memory error");
+			return call_server_error(fd, "Memory error");
 		int got = call_mpfd_get("file", file_content, file_len);
 		if (got > 0) {
 			file_content[got] = '\0';
-			char dst_path[768];
-			snprintf(dst_path, sizeof(dst_path), "%s/pt_PT.html", item_path);
+			char dst_path[PATH_MAX];
+			snprintf(dst_path, sizeof(dst_path), "%s/pt_PT.html", ctx.item_path);
 			FILE *dfp = fopen(dst_path, "w");
 			if (!dfp) {
 				free(file_content);
-				return call_respond_plain(fd, 500, "Failed to write poem file");
+				return call_server_error(fd, "Failed to write poem file");
 			}
 			fwrite(file_content, 1, (size_t)got, dfp);
 			fclose(dfp);
-			langs_cache_put(id, "pt_PT");
+			langs_cache_put(ctx.id, "pt_PT");
 		}
 		free(file_content);
 	}
 
 	char redirect[256];
-	snprintf(redirect, sizeof(redirect), "/poem/%s", id);
+	snprintf(redirect, sizeof(redirect), "/poem/%s", ctx.id);
 	return call_redirect(fd, redirect);
 }
 

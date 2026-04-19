@@ -32,4 +32,9 @@ NDX_DECL(int, proxy_connect,
     const char *, host,
     unsigned, port);
 
+/** Add standard proxy headers (X-Modules, X-Forwarded-Host, X-Remote-User).
+ *  Pulls session cookie & resolves user via auth. */
+NDX_DECL(int, proxy_add_standard_headers,
+    int, fd, const char *, modules_header);
+
 #endif

@@ -155,11 +155,11 @@ NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_l
 
 	parse_result = call_mpfd_parse(fd, body);
 	if (parse_result == -1)
-		return call_respond_plain(fd, 415, "Expected multipart/form-data");
+		return call_respond_error(fd, 415, "Expected multipart/form-data");
 
 	title_len = call_mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len <= 0)
-		return call_respond_plain(fd, 400, "Missing title");
+		return call_bad_request(fd, "Missing title");
 
 	index_id(id, sizeof(id), title, title_len);
 	module = index_name(fd);
@@ -169,12 +169,12 @@ NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_l
 
 	int r = mkdir(path, 0755);
 	if (r == -1 && errno != EEXIST)
-		return call_respond_plain(fd, 403, "You don't have permissions for that");
+		return call_respond_error(fd, 403, "You don't have permissions for that");
 
 	call_item_record_ownership(path, username);
 
 	if (call_write_meta_file(path, "title", title, (size_t)title_len) != 0)
-		return call_respond_plain(fd, 403, "You don't have permissions for that");
+		return call_respond_error(fd, 403, "You don't have permissions for that");
 
 	hd = *(unsigned *) qmap_get(module_hd, module);
 	qmap_put(hd, id, title);
@@ -415,7 +415,7 @@ static int index_delete_get_handler(int fd, char *body)
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing ID");
+		return call_bad_request(fd, "Missing ID");
 
 	const char *module = index_name(fd);
 
@@ -424,7 +424,7 @@ static int index_delete_get_handler(int fd, char *body)
 			"./items/%s/items/%s", module, id);
 
 	if (!call_item_check_ownership(item_path, username))
-		return call_respond_plain(fd, 403, "Forbidden");
+		return call_respond_error(fd, 403, "Forbidden");
 
 	char title[256] = {0};
 	char title_path[640];
@@ -459,7 +459,7 @@ static int index_delete_handler(int fd, char *body)
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
-		return call_respond_plain(fd, 400, "Missing ID");
+		return call_bad_request(fd, "Missing ID");
 
 	const char *module = index_name(fd);
 
@@ -468,7 +468,7 @@ static int index_delete_handler(int fd, char *body)
 			"./items/%s/items/%s", module, id);
 
 	if (!call_item_check_ownership(item_path, username))
-		return call_respond_plain(fd, 403, "Forbidden");
+		return call_respond_error(fd, 403, "Forbidden");
 
 	/* Remove ownership file */
 	call_item_unlink_owner(item_path);

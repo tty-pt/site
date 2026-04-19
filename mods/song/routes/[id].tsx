@@ -1,7 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import SongView from "#/islands/SongView.tsx";
 import type { State } from "#/routes/_middleware.ts";
-import { ErrorPage } from "@/ssr/ui.tsx";
+import { ErrorPage, parseErrorBody } from "@/ssr/ui.tsx";
 
 interface SongDetailData {
   user: string | null;
@@ -45,13 +45,11 @@ export const handler: Handlers<SongDetailData, State> = {
     const id = ctx.params.id;
     const url = new URL(req.url);
 
-    const params = new URLSearchParams(text);
-    const error = params.get("error");
-    if (error) {
-      const status = Number(params.get("status") ?? "500");
+    const err = parseErrorBody(text);
+    if (err) {
       return ctx.render(
-        { user: ctx.state.user, path: url.pathname, id, data: "", title: null, yt: null, audio: null, pdf: null, transpose: 0, useBemol: false, useLatin: false, showMedia: false, originalKey: 0, owner: false, categories: null, author: null, error, status },
-        { status },
+        { user: ctx.state.user, path: url.pathname, id, data: "", title: null, yt: null, audio: null, pdf: null, transpose: 0, useBemol: false, useLatin: false, showMedia: false, originalKey: 0, owner: false, categories: null, author: null, ...err },
+        { status: err.status },
       );
     }
 

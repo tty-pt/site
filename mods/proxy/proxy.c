@@ -13,6 +13,7 @@
 #include <ttypt/ndx-mod.h>
 
 #include "../common/common.h"
+#include "../auth/auth.h"
 
 static char req_buf[16384];
 static size_t req_len = 0;
@@ -254,6 +255,30 @@ NDX_DEF(int, proxy_connect,
 {
   strlcpy(proxy_host, host, sizeof(proxy_host));
   proxy_port = port;
+  return 0;
+}
+
+NDX_DEF(int, proxy_add_standard_headers,
+    int, fd, const char *, modules_header)
+{
+  char host[256] = {0};
+  char cookie[256] = {0};
+  char token[64] = {0};
+
+  if (modules_header && modules_header[0])
+    call_proxy_header("X-Modules", modules_header);
+
+  ndc_env_get(fd, host, "HTTP_HOST");
+  if (host[0])
+    call_proxy_header("X-Forwarded-Host", host);
+
+  ndc_env_get(fd, cookie, "HTTP_COOKIE");
+  call_get_cookie(cookie, token, sizeof(token));
+  {
+    const char *username = call_get_session_user(token);
+    if (username && *username)
+      call_proxy_header("X-Remote-User", (char *)username);
+  }
   return 0;
 }
 

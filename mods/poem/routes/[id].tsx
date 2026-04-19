@@ -1,7 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import type { State } from "#/routes/_middleware.ts";
 import PoemDetail from "@/poem/PoemDetail.tsx";
-import { ErrorPage } from "@/ssr/ui.tsx";
+import { ErrorPage, parseErrorBody } from "@/ssr/ui.tsx";
 
 interface PoemDetailData {
   user: string | null;
@@ -20,13 +20,11 @@ export const handler: Handlers<PoemDetailData, State> = {
 
   async POST(req, ctx) {
     const body = await req.text();
-    const params = new URLSearchParams(body);
-    const error = params.get("error");
-    if (error) {
-      const status = Number(params.get("status") ?? "500");
+    const err = parseErrorBody(body);
+    if (err) {
       return ctx.render(
-        { user: ctx.state.user, id: ctx.params.id, title: "", lang: "pt_PT", owner: false, error, status },
-        { status },
+        { user: ctx.state.user, id: ctx.params.id, title: "", lang: "pt_PT", owner: false, ...err },
+        { status: err.status },
       );
     }
     const data = JSON.parse(body);

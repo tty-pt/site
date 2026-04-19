@@ -4,12 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <unistd.h>
 #include <openssl/evp.h>
 
 #include <ttypt/ndc.h>
-
-#include "../proxy/proxy.h"
-#include "../auth/auth.h"
 
 #define COMMON_IMPL
 #include "common.h"
@@ -77,6 +75,44 @@ NDX_DEF(int, respond_json, int, fd, int, status, const char *, msg)
 	ndc_header_set(fd, "Content-Type", "application/json");
 	ndc_respond(fd, status, msg);
 	return 1;
+}
+
+/* core_post is defined in index.c; declare here to call it from respond_error */
+NDX_DECL(int, core_post, int, fd, char *, body, size_t, len);
+
+/*
+ * respond_error — send a pretty HTML error page when the client accepts
+ * text/html (browser navigation), or a plain-text response otherwise
+ * (API / curl / test clients).
+ */
+NDX_DEF(int, respond_error, int, fd, int, status, const char *, msg)
+{
+	char accept[256] = {0};
+	ndc_header_get(fd, "Accept", accept, sizeof(accept));
+	if (strstr(accept, "text/html")) {
+		char enc[512] = {0};
+		char body[640];
+		int len;
+		call_url_encode(msg, enc, sizeof(enc));
+		len = snprintf(body, sizeof(body), "status=%d&error=%s", status, enc);
+		return call_core_post(fd, body, (size_t)len);
+	}
+	return call_respond_plain(fd, status, msg);
+}
+
+NDX_DEF(int, bad_request, int, fd, const char *, msg)
+{
+	return call_respond_error(fd, 400, msg ? msg : "Bad request");
+}
+
+NDX_DEF(int, server_error, int, fd, const char *, msg)
+{
+	return call_respond_error(fd, 500, msg ? msg : "Internal server error");
+}
+
+NDX_DEF(int, not_found, int, fd, const char *, msg)
+{
+	return call_respond_error(fd, 404, msg ? msg : "Not found");
 }
 
 NDX_DEF(int, redirect, int, fd, const char *, location)
@@ -149,28 +185,6 @@ NDX_DEF(int, get_doc_root, int, fd, char *, buf, size_t, len)
 	return 0;
 }
 
-/* core_post is defined in index.c; declare here to call it from respond_error */
-NDX_DECL(int, core_post, int, fd, char *, body, size_t, len);
-
-/*
- * respond_error — send a pretty HTML error page when the client accepts
- * text/html (browser navigation), or a plain-text response otherwise
- * (API / curl / test clients).
- */
-NDX_DEF(int, respond_error, int, fd, int, status, const char *, msg)
-{
-	char accept[256] = {0};
-	ndc_header_get(fd, "Accept", accept, sizeof(accept));
-	if (strstr(accept, "text/html")) {
-		char enc[512] = {0};
-		char body[640];
-		int len;
-		call_url_encode(msg, enc, sizeof(enc));
-		len = snprintf(body, sizeof(body), "status=%d&error=%s", status, enc);
-		return call_core_post(fd, body, (size_t)len);
-	}
-	return call_respond_plain(fd, status, msg);
-}
 
 /* ---------------------------------------------------------------------------
  * Phase A helpers
@@ -207,29 +221,6 @@ NDX_DEF(int, datalist_extract_id,
 	return 0;
 }
 
-NDX_DEF(int, proxy_add_standard_headers,
-	int, fd, const char *, modules_header)
-{
-	char host[256] = {0};
-	char cookie[256] = {0};
-	char token[64] = {0};
-
-	if (modules_header && modules_header[0])
-		call_proxy_header("X-Modules", modules_header);
-
-	ndc_env_get(fd, host, "HTTP_HOST");
-	if (host[0])
-		call_proxy_header("X-Forwarded-Host", host);
-
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	{
-		const char *username = call_get_session_user(token);
-		if (username && *username)
-			call_proxy_header("X-Remote-User", (char *)username);
-	}
-	return 0;
-}
 
 /* --- JSON array builder --- */
 
