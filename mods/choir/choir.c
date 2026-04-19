@@ -103,8 +103,9 @@ choir_json(int fd)
 		fclose(ffp);
 	}
 
-	char songs_json[16384] = "[";
-	int first = 1;
+	/* Build songs JSON array (choir repertoire) */
+	json_array_t *songs_ja = call_json_array_new(0);
+	if (!songs_ja) return NULL;
 
 	char songs_path[PATH_MAX];
 	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
@@ -130,28 +131,24 @@ choir_json(int fd)
 
 			int original_key = call_song_get_original_key(sid);
 
-			char esc_stitle[512];
-			call_json_escape(song_title, esc_stitle, sizeof(esc_stitle));
-
-			char item_json[1024];
-			snprintf(item_json, sizeof(item_json),
-				"%s{\"id\":\"%s\",\"title\":\"%s\",\"preferredKey\":%d,\"originalKey\":%d,\"format\":\"%s\"}",
-				first ? "" : ",", sid, esc_stitle, pkey, original_key, fmt);
-			first = 0;
-
-			if (strlen(songs_json) + strlen(item_json) < sizeof(songs_json) - 2) {
-				strcat(songs_json, item_json);
-			}
+			call_json_array_begin_object(songs_ja);
+			call_json_array_kv_str(songs_ja, "id", sid);
+			call_json_array_kv_str(songs_ja, "title", song_title);
+			call_json_array_kv_int(songs_ja, "preferredKey", pkey);
+			call_json_array_kv_int(songs_ja, "originalKey", original_key);
+			call_json_array_kv_str(songs_ja, "format", fmt);
+			call_json_array_end_object(songs_ja);
 		}
 		fclose(sfp);
 	}
-	strcat(songs_json, "]");
+	char *songs_json = call_json_array_finish(songs_ja);
+	if (!songs_json) return NULL;
 
 	/* Build songbooks JSON array — scan items/songbook/items/ for choir match */
 	char sb_items_path[PATH_MAX];
 	snprintf(sb_items_path, sizeof(sb_items_path), "%s/items/songbook/items", doc_root);
-	char songbooks_json[16384] = "[";
-	int sb_first = 1;
+	json_array_t *sb_ja = call_json_array_new(0);
+	if (!sb_ja) { free(songs_json); return NULL; }
 	int sb_count = 0;
 	DIR *sbdp = opendir(sb_items_path);
 	if (sbdp) {
@@ -176,24 +173,20 @@ choir_json(int fd)
 			char sb_path2[PATH_MAX];
 			snprintf(sb_path2, sizeof(sb_path2), "%s/%s", sb_items_path, sde->d_name);
 			call_read_meta_file(sb_path2, "title", sb_title, sizeof(sb_title));
-			char esc_sb_title[512];
-			call_json_escape(sb_title, esc_sb_title, sizeof(esc_sb_title));
-			char sb_item[640];
-			snprintf(sb_item, sizeof(sb_item),
-				"%s{\"id\":\"%s\",\"title\":\"%s\"}",
-				sb_first ? "" : ",", sde->d_name, esc_sb_title);
-			sb_first = 0;
-			if (strlen(songbooks_json) + strlen(sb_item) < sizeof(songbooks_json) - 2)
-				strcat(songbooks_json, sb_item);
+			call_json_array_begin_object(sb_ja);
+			call_json_array_kv_str(sb_ja, "id", sde->d_name);
+			call_json_array_kv_str(sb_ja, "title", sb_title);
+			call_json_array_end_object(sb_ja);
 		}
 		closedir(sbdp);
 	}
-	strcat(songbooks_json, "]");
+	char *songbooks_json = call_json_array_finish(sb_ja);
+	if (!songbooks_json) { free(songs_json); return NULL; }
 
 	/* derive counter from scan */
 	snprintf(counter, sizeof(counter), "%d", sb_count);
 	char *all_songs_json = call_build_all_songs_json(doc_root, 0);
-	if (!all_songs_json) return NULL;
+	if (!all_songs_json) { free(songs_json); free(songbooks_json); return NULL; }
 
 	call_json_escape(title, esc_title, sizeof(esc_title));
 	call_json_escape(owner, esc_owner, sizeof(esc_owner));
@@ -220,6 +213,8 @@ choir_json(int fd)
 			songs_json, all_songs_json, songbooks_json);
 	}
 
+	free(songs_json);
+	free(songbooks_json);
 	free(all_songs_json);
 	return response;
 }
@@ -263,8 +258,8 @@ handle_choir_songs_list(int fd, char *body)
 		return call_respond_json(fd, 200, "[]");
 
 	char line[256];
-	char songs_json[16384] = "[";
-	int first = 1;
+	json_array_t *ja = call_json_array_new(0);
+	if (!ja) { fclose(sfp); return call_respond_error(fd, 500, "OOM"); }
 
 	while (fgets(line, sizeof(line), sfp)) {
 		char song_id[128] = {0};
@@ -283,23 +278,20 @@ handle_choir_songs_list(int fd, char *body)
 			doc_root, song_id);
 		call_read_meta_file(song_path, "title", song_title, sizeof(song_title));
 
-		char esc_title[512];
-		call_json_escape(song_title, esc_title, sizeof(esc_title));
-
-		char item_json[1024];
-		snprintf(item_json, sizeof(item_json),
-			"%s{\"id\":\"%s\",\"title\":\"%s\",\"preferredKey\":%d,\"format\":\"%s\"}",
-			first ? "" : ",", song_id, esc_title, preferred_key, format);
-		first = 0;
-
-		if (strlen(songs_json) + strlen(item_json) < sizeof(songs_json) - 2) {
-			strcat(songs_json, item_json);
-		}
+		call_json_array_begin_object(ja);
+		call_json_array_kv_str(ja, "id", song_id);
+		call_json_array_kv_str(ja, "title", song_title);
+		call_json_array_kv_int(ja, "preferredKey", preferred_key);
+		call_json_array_kv_str(ja, "format", format);
+		call_json_array_end_object(ja);
 	}
 	fclose(sfp);
 
-	strcat(songs_json, "]");
-	return call_respond_json(fd, 200, songs_json);
+	char *songs_json = call_json_array_finish(ja);
+	if (!songs_json) return call_respond_error(fd, 500, "OOM");
+	int r = call_respond_json(fd, 200, songs_json);
+	free(songs_json);
+	return r;
 }
 
 /* POST /api/choir/:id/songs - Add song to choir repertoire */
@@ -338,13 +330,7 @@ handle_choir_song_add(int fd, char *body)
 	song_id[song_id_len] = '\0';
 
 	/* Extract id from "Title [id]" datalist format */
-	{
-		char *bracket = strrchr(song_id, '[');
-		if (bracket) {
-			char *end = strchr(bracket + 1, ']');
-			if (end) { *end = '\0'; memmove(song_id, bracket + 1, end - bracket); }
-		}
-	}
+	call_datalist_extract_id(song_id, song_id, sizeof(song_id));
 
 	if (format_len > 0) {
 		format[format_len] = '\0';
@@ -597,75 +583,25 @@ handle_choir_edit_get(int fd, char *body)
 		strcpy(format, "entrada\naleluia\nofertorio\nsanto\ncomunhao\nacao_de_gracas\nsaida\nany");
 	}
 
-	char enc_id[256], enc_title[512], enc_format[6144];
-	call_url_encode(id, enc_id, sizeof(enc_id));
-	call_url_encode(title, enc_title, sizeof(enc_title));
-	call_url_encode(format, enc_format, sizeof(enc_format));
+	form_body_t *fb = call_form_body_new(0);
+	if (!fb) return call_respond_error(fd, 500, "OOM");
+	call_form_body_add(fb, "id", id);
+	call_form_body_add(fb, "title", title);
+	call_form_body_add(fb, "format", format);
 
-	char post_body[8192];
-	int len = snprintf(post_body, sizeof(post_body),
-		"id=%s&title=%s&format=%s",
-		enc_id, enc_title, enc_format);
-
-	return call_core_post(fd, post_body, len);
+	size_t pb_len = 0;
+	char *post_body = call_form_body_finish(fb, &pb_len);
+	if (!post_body) return call_respond_error(fd, 500, "OOM");
+	int r = call_core_post(fd, post_body, pb_len);
+	free(post_body);
+	return r;
 }
 
 /* POST /api/choir/:id/song/:song_id/remove - Remove song (HTML form-friendly alias for DELETE) */
 static int
 handle_choir_song_remove(int fd, char *body)
 {
-	(void)body;
-
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username)) return 1;
-
-	char doc_root[256] = {0};
-	char choir_id[128] = {0};
-	char song_id[128] = {0};
-	char choir_path[512];
-	char songs_path[PATH_MAX];
-
-	call_get_doc_root(fd, doc_root, sizeof(doc_root));
-	ndc_env_get(fd, choir_id, "PATTERN_PARAM_ID");
-	ndc_env_get(fd, song_id, "PATTERN_PARAM_SONG_ID");
-
-	if (!choir_id[0] || !song_id[0])
-		return call_respond_plain(fd, 400, "Missing parameters");
-
-	snprintf(choir_path, sizeof(choir_path), "%s/%s/%s",
-		doc_root, CHOIR_SONGS_PATH, choir_id);
-	snprintf(songs_path, sizeof(songs_path), "%s/songs", choir_path);
-
-	if (call_require_ownership(fd, choir_path, username, NULL)) return 1;
-
-	char line[256];
-	char temp_path[PATH_MAX];
-	snprintf(temp_path, sizeof(temp_path), "%s/songs.tmp", choir_path);
-
-	FILE *rfp = fopen(songs_path, "r");
-	FILE *wfp = fopen(temp_path, "w");
-	if (!wfp)
-		return call_respond_plain(fd, 500, "Failed to update");
-
-	while (rfp && fgets(line, sizeof(line), rfp)) {
-		char sid[128] = {0};
-		int pkey = 0;
-		char fmt[64] = {0};
-
-		if (call_parse_item_line(line, sid, &pkey, fmt) == 0 && strcmp(sid, song_id) == 0) {
-			/* skip - removing this entry */
-		} else {
-			fputs(line, wfp);
-		}
-	}
-	if (rfp) fclose(rfp);
-	fclose(wfp);
-
-	rename(temp_path, songs_path);
-
-	char location[256];
-	snprintf(location, sizeof(location), "/choir/%s", choir_id);
-	return call_redirect(fd, location);
+	return handle_choir_song_delete(fd, body);
 }
 
 void

@@ -242,25 +242,14 @@ char *song_json(int fd, int flags) {
 
 	/* Read and Transpose Chord File */
 	snprintf(filepath, sizeof(filepath), "%s/data.txt", item_path);
-	FILE *fp = fopen(filepath, "r");
+	char *content = call_slurp_file(filepath);
 
 	char *transposed = NULL;
 
 	/* Reset key detection for each new song */
 	transp_reset_key(g_transp_ctx);
 
-	if (fp) {
-		fseek(fp, 0, SEEK_END);
-		long fsize = ftell(fp);
-		fseek(fp, 0, SEEK_SET);
-
-		char *content = malloc(fsize + 1);
-		if (!content) { fclose(fp); return NULL; }
-
-		fread(content, 1, fsize, fp);
-		fclose(fp);
-		content[fsize] = '\0';
-
+	if (content) {
 		transposed = transp_buffer(g_transp_ctx, content, transpose, flags);
 		free(content);
 
@@ -406,55 +395,36 @@ song_edit_get_handler(int fd, char *body)
 	call_read_meta_file(item_path, "author", author, sizeof(author));
 
 	/* Read data */
-	char *data_content = NULL;
-	size_t data_len = 0;
 	char data_path[1024];
 	snprintf(data_path, sizeof(data_path), "%s/data.txt", item_path);
-	FILE *dfp = fopen(data_path, "r");
-	if (dfp) {
-		fseek(dfp, 0, SEEK_END);
-		long fsize = ftell(dfp);
-		fseek(dfp, 0, SEEK_SET);
-		if (fsize > 0) {
-			data_content = malloc(fsize + 1);
-			if (data_content) {
-				data_len = fread(data_content, 1, fsize, dfp);
-				data_content[data_len] = '\0';
-			}
-		}
-		fclose(dfp);
-	}
+	char *data_content = call_slurp_file(data_path);
 
 	/* Build POST body for Fresh */
-	char post_body[16384] = { 0 };
-	size_t pos = 0;
-
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "title=");
-	pos += call_url_encode(title, post_body + pos, sizeof(post_body) - pos);
-	
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&type=");
-	pos += call_url_encode(type, post_body + pos, sizeof(post_body) - pos);
-	
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&yt=");
-	pos += call_url_encode(yt, post_body + pos, sizeof(post_body) - pos);
-	
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&audio=");
-	pos += call_url_encode(audio, post_body + pos, sizeof(post_body) - pos);
-	
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&pdf=");
-	pos += call_url_encode(pdf, post_body + pos, sizeof(post_body) - pos);
-
-	if (data_content && data_len > 0) {
-		pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&data=");
-		pos += call_url_encode(data_content, post_body + pos, sizeof(post_body) - pos);
-		free(data_content);
+	form_body_t *fb = call_form_body_new(0);
+	if (!fb) {
+		if (data_content) free(data_content);
+		return call_respond_error(fd, 500, "OOM");
 	}
+	call_form_body_add(fb, "title", title);
+	call_form_body_add(fb, "type", type);
+	call_form_body_add(fb, "yt", yt);
+	call_form_body_add(fb, "audio", audio);
+	call_form_body_add(fb, "pdf", pdf);
+	if (data_content && data_content[0]) {
+		call_form_body_add(fb, "data", data_content);
+	}
+	if (data_content) free(data_content);
+	call_form_body_add(fb, "author", author);
 
-	pos += snprintf(post_body + pos, sizeof(post_body) - pos, "&author=");
-	pos += call_url_encode(author, post_body + pos, sizeof(post_body) - pos);
+	size_t pb_len = 0;
+	char *post_body = call_form_body_finish(fb, &pb_len);
+	if (!post_body)
+		return call_respond_error(fd, 500, "OOM");
 
 	/* POST to Fresh */
-	return call_core_post(fd, post_body, strlen(post_body));
+	int r = call_core_post(fd, post_body, pb_len);
+	free(post_body);
+	return r;
 }
 
 /* POST /song/:id/edit - save edit */
@@ -634,28 +604,9 @@ NDX_DEF(int, song_get_original_key, const char *, song_id)
 	snprintf(data_path, sizeof(data_path),
 		"%s/%s/data.txt", CHORDS_ITEMS_PATH, song_id);
 
-	FILE *fp = fopen(data_path, "r");
-	if (!fp)
+	char *content = call_slurp_file(data_path);
+	if (!content)
 		return 0;
-
-	fseek(fp, 0, SEEK_END);
-	long fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-
-	if (fsize <= 0) {
-		fclose(fp);
-		return 0;
-	}
-
-	char *content = malloc(fsize + 1);
-	if (!content) {
-		fclose(fp);
-		return 0;
-	}
-
-	fread(content, 1, fsize, fp);
-	fclose(fp);
-	content[fsize] = '\0';
 
 	transp_reset_key(g_transp_ctx);
 	char *out = transp_buffer(g_transp_ctx, content, 0, 0);
@@ -701,11 +652,8 @@ NDX_DEF(int, parse_item_line,
 NDX_DEF(char *, song_get_types_json, int, dummy)
 {
 	(void)dummy;
-	size_t cap = 4096;
-	char *json = malloc(cap);
-	if (!json) return NULL;
-	strcpy(json, "[");
-	int first = 1;
+	json_array_t *ja = call_json_array_new(0);
+	if (!ja) return NULL;
 
 	unsigned cur = qmap_iter(type_index_hd, NULL, 0);
 	const void *key, *val;
@@ -713,21 +661,11 @@ NDX_DEF(char *, song_get_types_json, int, dummy)
 		const char *type = (const char *)key;
 		char esc[256];
 		call_json_escape(type, esc, sizeof(esc));
-		size_t needed = strlen(json) + strlen(esc) + 8;
-		if (needed >= cap) {
-			cap *= 2;
-			char *tmp = realloc(json, cap);
-			if (!tmp) { free(json); return NULL; }
-			json = tmp;
-		}
-		if (!first) strcat(json, ",");
-		first = 0;
-		strcat(json, "\"");
-		strcat(json, esc);
-		strcat(json, "\"");
+		char entry[260];
+		snprintf(entry, sizeof(entry), "\"%s\"", esc);
+		call_json_array_append_raw(ja, entry);
 	}
-	strcat(json, "]");
-	return json;
+	return call_json_array_finish(ja);
 }
 
 /* Build a JSON array of all songs from items/song/items/.
@@ -735,11 +673,8 @@ NDX_DEF(char *, song_get_types_json, int, dummy)
  * Returns a malloc'd string the caller must free, or NULL on error. */
 NDX_DEF(char *, build_all_songs_json, const char *, doc_root, int, include_type)
 {
-	size_t cap = 65536;
-	char *json = malloc(cap);
-	if (!json) return NULL;
-	strcpy(json, "[");
-	int first = 1;
+	json_array_t *ja = call_json_array_new(0);
+	if (!ja) return NULL;
 
 	char songs_dir[512];
 	snprintf(songs_dir, sizeof(songs_dir), "%s/%s", doc_root, CHORDS_ITEMS_PATH);
@@ -756,40 +691,19 @@ NDX_DEF(char *, build_all_songs_json, const char *, doc_root, int, include_type)
 			char stitle[256] = {0};
 			call_read_meta_file(item_path, "title", stitle, sizeof(stitle));
 
-			char esc_id[256], esc_title[512];
-			call_json_escape(de->d_name, esc_id, sizeof(esc_id));
-			call_json_escape(stitle, esc_title, sizeof(esc_title));
-
-			char entry[1200];
+			call_json_array_begin_object(ja);
+			call_json_array_kv_str(ja, "id", de->d_name);
+			call_json_array_kv_str(ja, "title", stitle);
 			if (include_type) {
 				char stype[64] = {0};
 				call_read_meta_file(item_path, "type", stype, sizeof(stype));
-				char esc_type[128];
-				call_json_escape(stype, esc_type, sizeof(esc_type));
-				snprintf(entry, sizeof(entry),
-					"%s{\"id\":\"%s\",\"title\":\"%s\",\"type\":\"%s\"}",
-					first ? "" : ",", esc_id, esc_title, esc_type);
-			} else {
-				snprintf(entry, sizeof(entry),
-					"%s{\"id\":\"%s\",\"title\":\"%s\"}",
-					first ? "" : ",", esc_id, esc_title);
+				call_json_array_kv_str(ja, "type", stype);
 			}
-			first = 0;
-
-			size_t cur = strlen(json);
-			size_t need = cur + strlen(entry) + 4;
-			if (need >= cap) {
-				cap = need * 2;
-				char *tmp = realloc(json, cap);
-				if (!tmp) { free(json); closedir(dp); return NULL; }
-				json = tmp;
-			}
-			strcat(json, entry);
+			call_json_array_end_object(ja);
 		}
 		closedir(dp);
 	}
-	strcat(json, "]");
-	return json;
+	return call_json_array_finish(ja);
 }
 
 void ndx_install(void)

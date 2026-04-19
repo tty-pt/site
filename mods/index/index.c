@@ -220,16 +220,7 @@ NDX_DEF(int, index_page,
 	// send it
 	*s = '\0';
 	call_proxy_init("POST", path);
-	call_proxy_header("X-Modules", modules_header);
-	{
-		char cookie[256] = { 0 };
-		char token[64] = { 0 };
-		ndc_env_get(fd, cookie, "HTTP_COOKIE");
-		call_get_cookie(cookie, token, sizeof(token));
-		const char *username = call_get_session_user(token);
-		if (username && *username)
-			call_proxy_header("X-Remote-User", (char *)username);
-	}
+	call_proxy_add_standard_headers(fd, modules_header);
 	ret = call_proxy_body(fd, body, total);
 	free(body);
 	return ret;
@@ -377,17 +368,8 @@ NDX_DEF(int, core_get,
 	else
 		snprintf(full_path, sizeof(full_path), "%s", path);
 	call_proxy_init("GET", full_path);
-	call_proxy_header("X-Modules", modules_header);
-	ndc_env_get(fd, host, "HTTP_HOST");
-	if (host[0])
-		call_proxy_header("X-Forwarded-Host", host);
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	{
-		const char *username = call_get_session_user(token);
-		if (username && *username)
-			call_proxy_header("X-Remote-User", (char *)username);
-	}
+	call_proxy_add_standard_headers(fd, modules_header);
+	(void)cookie; (void)token; (void)host;
 	return call_proxy_head(fd);
 }
 
@@ -409,17 +391,8 @@ NDX_DEF(int, core_post,
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
 	call_proxy_init("POST", full_path);
-	call_proxy_header("X-Modules", modules_header);
-	ndc_env_get(fd, host, "HTTP_HOST");
-	if (host[0])
-		call_proxy_header("X-Forwarded-Host", host);
-	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	{
-		const char *username = call_get_session_user(token);
-		if (username && *username)
-			call_proxy_header("X-Remote-User", (char *)username);
-	}
+	call_proxy_add_standard_headers(fd, modules_header);
+	(void)cookie; (void)token; (void)host;
 	return call_proxy_body(fd, body, len);
 }
 
