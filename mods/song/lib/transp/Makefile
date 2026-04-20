@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -g -O0 -fPIC -I../../ndc/include -I../../ndx/include -I../../qmap/include -I/usr/include/ttypt
+CFLAGS = -g -O0 -fPIC
 LDFLAGS = -shared -L../../ndc/lib -L../../qmap/lib -Wl,-rpath,../../ndc/lib -Wl,-rpath,../../qmap/lib
 LDLIBS = -lqmap
 

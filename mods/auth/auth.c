@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <crypt.h>
 #include <sys/stat.h>
@@ -31,6 +32,21 @@ struct user {
 	int  uid;
 	char hash[64];
 };
+
+static int
+skip_confirm_required(void)
+{
+	const char *env = getenv("AUTH_SKIP_CONFIRM");
+
+	if (!env || !*env)
+		return 0;
+
+	return strcmp(env, "0") != 0
+	    && strcmp(env, "false") != 0
+	    && strcmp(env, "FALSE") != 0
+	    && strcmp(env, "no") != 0
+	    && strcmp(env, "NO") != 0;
+}
 
 /* ------------------------------------------------------------------ */
 /* Path helpers                                                         */
@@ -403,8 +419,7 @@ shadow_update(const char *username, const char *new_hash)
  * Handles both old 2-field format (login:hash) and full OS formats
  * (9-field Linux shadow, 10-field OpenBSD master.passwd) by extracting
  * only field 2 as the hash and field 3 as uid (OpenBSD only).
- * Active state: user is active if they have ./users/<name>/active file
- * OR if they have no ./users/<name>/rcode file (old-site compat).
+ * Active state: user is active if they have no ./users/<name>/rcode file.
  */
 static void
 load_shadow(void)
@@ -463,16 +478,13 @@ load_shadow(void)
 		}
 #endif
 
-		/* active: has active file, or no rcode file */
-		char active_path[560], rcode_path[560];
-		snprintf(active_path, sizeof(active_path),
-			"./users/%s/active", uname);
+		/* active: no rcode file means confirmed */
+		char rcode_path[560];
 		snprintf(rcode_path, sizeof(rcode_path),
 			"./users/%s/rcode", uname);
 		struct stat st;
-		int has_active = (stat(active_path, &st) == 0);
 		int has_rcode  = (stat(rcode_path,  &st) == 0);
-		u.active = (has_active || !has_rcode) ? 1 : 0;
+		u.active = has_rcode ? 0 : 1;
 
 		qmap_put(users_map, uname, &u);
 	}
@@ -772,7 +784,8 @@ handle_register(int fd, char *body)
 {
 	char username[64], password[64], password_confirm[64], email[128];
 	char salt[64], cookie[128], token[64];
-	char user_dir[512];
+	char user_dir[512], rcode_path[560], rcode[64];
+	int skip_confirm;
 
 	struct user user = {0};
 
@@ -806,8 +819,10 @@ handle_register(int fd, char *body)
 	int uid = next_uid();
 
 	strncpy(user.hash, hash, sizeof(user.hash) - 1);
-	user.active = 1;
 	user.uid    = uid;
+
+	skip_confirm = skip_confirm_required();
+	user.active = skip_confirm ? 1 : 0;
 
 	qmap_put(users_map, username, &user);
 
@@ -830,6 +845,8 @@ handle_register(int fd, char *body)
 		fprintf(stderr, "auth: warning: could not create user dir %s\n",
 			user_dir);
 
+	snprintf(rcode_path, sizeof(rcode_path), "%s/rcode", user_dir);
+
 	/* Create home directory */
 	char home_dir[512];
 	snprintf(home_dir, sizeof(home_dir), "./home/%s", username);
@@ -845,7 +862,21 @@ handle_register(int fd, char *body)
 		if (ef) { fputs(email, ef); fclose(ef); }
 	}
 
-	/* Auto-login: create session */
+	if (skip_confirm) {
+		remove(rcode_path);
+	} else {
+		generate_token(rcode, sizeof(rcode));
+		FILE *rf = fopen(rcode_path, "w");
+		if (!rf)
+			return call_server_error(fd, "Could not create confirmation");
+		fputs(rcode, rf);
+		fclose(rf);
+		fprintf(stderr, "Register: /auth/confirm?u=%s&r=%s\n",
+			username, rcode);
+		return call_redirect(fd, *redirect ? redirect : "/");
+	}
+
+	/* Auto-login only when confirmation is explicitly skipped. */
 	generate_token(token, sizeof(token));
 	qmap_put(sessions_map, token, username);
 
@@ -863,7 +894,7 @@ handle_confirm(int fd, char *body)
 
 	char query[256], username[64], code[64],
 	     token[64], cookie[128];
-	char rcode_path[512], active_path[512];
+	char rcode_path[512];
 	char stored_rcode[64] = {0};
 
 	struct user user, *existing;
@@ -902,11 +933,6 @@ handle_confirm(int fd, char *body)
 	memcpy(&user, existing, sizeof(user));
 	user.active = 1;
 	qmap_put(users_map, username, &user);
-
-	snprintf(active_path, sizeof(active_path),
-		"./users/%s/active", username);
-	FILE *af = fopen(active_path, "w");
-	if (af) fclose(af);
 
 	remove(rcode_path);
 

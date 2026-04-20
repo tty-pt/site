@@ -15,9 +15,7 @@ NDC_PREFIX ?= /home/quirinpa/ndc
 QMAP_PREFIX ?= /home/quirinpa/qmap
 
 CFLAGS ?= -g -O0 -fPIC
-CFLAGS += -I$(NDX_PREFIX)/include -I$(NDX_PREFIX)/src \
-	-I$(NDC_PREFIX)/include -I$(QMAP_PREFIX)/include -I/usr/include/ttypt \
-	$(EXTRA_CFLAGS)
+CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS ?= -shared
 LDFLAGS += -L$(NDC_PREFIX)/lib -L$(QMAP_PREFIX)/lib \

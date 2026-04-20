@@ -6,6 +6,8 @@ User registration, login, logout, and session management.
 
 The auth module provides complete user authentication functionality including registration with email confirmation, login/logout, and session management via cookies.
 
+Confirmation is required by default. Set `AUTH_SKIP_CONFIRM=1` to skip confirmation in non-production environments.
+
 ## Endpoints
 
 ### POST /login
@@ -46,7 +48,9 @@ Register a new user account.
 - `303 See Other` - Success, redirects to `/`
 - `400 Bad Request` - Missing fields or username already exists
 
-**Note:** Account is inactive until email is confirmed. A confirmation code is generated and logged (in production, this would be emailed).
+**Default behavior:** Account is inactive until email is confirmed. A confirmation code is generated and logged (in production, this would be emailed).
+
+**Opt-out for non-production:** Set `AUTH_SKIP_CONFIRM=1` to activate the account immediately and keep the current auto-login behavior.
 
 ### GET /confirm
 
@@ -54,13 +58,13 @@ Confirm email address with code.
 
 **Parameters (query string):**
 - `u` (required) - Username
-- `c` (required) - Confirmation code
+- `r` (required) - Confirmation code
 
 **Responses:**
 - `303 See Other` - Success, redirects to `/login`
 - `400 Bad Request` - Invalid username or confirmation code
 
-**Effect:** Activates the user account (sets `active = 1`)
+**Effect:** Activates the user account by removing the pending `rcode`
 
 ### GET /api/session
 
@@ -186,10 +190,12 @@ Never stores plaintext passwords.
 ### Email Confirmation
 
 New accounts require email confirmation:
-1. Registration creates inactive account (`active = 0`)
+1. Registration creates inactive account by writing `./users/<user>/rcode`
 2. Confirmation code generated and logged
-3. User must visit `/confirm?u=<user>&c=<code>`
-4. Only then is account activated (`active = 1`)
+3. User must visit `/confirm?u=<user>&r=<code>`
+4. Confirmation removes `rcode`, which marks the account as active
+
+Set `AUTH_SKIP_CONFIRM=1` only when you intentionally want to bypass this requirement outside production.
 
 **Note:** In production, confirmation codes should be emailed, not logged.
 

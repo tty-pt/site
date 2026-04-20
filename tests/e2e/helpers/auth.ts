@@ -10,6 +10,12 @@ export interface TestUser {
 
 const LOG_FILE = "/tmp/site.log";
 
+function skipConfirmRequired(): boolean {
+  const env = Deno.env.get("AUTH_SKIP_CONFIRM");
+  if (!env) return false;
+  return !["0", "false", "FALSE", "no", "NO"].includes(env);
+}
+
 /**
  * Register a new user (POST to /auth/register).
  * Throws on non-303 response.
@@ -66,6 +72,7 @@ export async function confirmUser(base: string, username: string): Promise<void>
 
 /**
  * Full user lifecycle: register → confirm → login via browser.
+ * When AUTH_SKIP_CONFIRM is enabled for tests, the confirm step is skipped.
  * Returns the TestUser object for convenience.
  */
 export async function createAndLoginUser(
@@ -78,6 +85,9 @@ export async function createAndLoginUser(
   };
 
   await registerUser(base, user);
+  if (!skipConfirmRequired()) {
+    await confirmUser(base, user.username);
+  }
   await loginUser(page, base, user);
 
   return user;

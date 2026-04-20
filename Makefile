@@ -36,7 +36,7 @@ integration-tests: all
 	@sh tests/integration/run_all.sh
 
 e2e-tests: test-data-dirs
-	deno test --allow-all tests/e2e/
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
 
 test: unit-tests pages-test e2e-tests
 
