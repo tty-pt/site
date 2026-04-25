@@ -36,7 +36,7 @@ int query_param(char *query, const char *key, char *out, size_t out_len)
 **Example:**
 ```c
 char username[64] = {0};
-int result = call_query_param(body, "username", username, sizeof(username));
+int result = query_param(body, "username", username, sizeof(username));
 if (result == 0) {
     // username contains the decoded value
 }
@@ -75,7 +75,7 @@ char cookie[256] = {0};
 char token[64] = {0};
 
 ndc_env_get(fd, cookie, "HTTP_COOKIE");
-call_get_cookie(cookie, token, sizeof(token));
+get_cookie(cookie, token, sizeof(token));
 
 if (token[0]) {
     // Session token found
@@ -115,7 +115,7 @@ int json_escape(const char *in, char *out, size_t outlen)
 ```c
 const char *title = "Hello \"World\"";
 char escaped[256];
-call_json_escape(title, escaped, sizeof(escaped));
+json_escape(title, escaped, sizeof(escaped));
 // Result: Hello \"World\"
 ```
 
@@ -149,7 +149,7 @@ int url_encode(const char *in, char *out, size_t outlen)
 ```c
 const char *str = "Hello World!";
 char encoded[256];
-call_url_encode(str, encoded, sizeof(encoded));
+url_encode(str, encoded, sizeof(encoded));
 // Result: Hello%20World%21
 ```
 
@@ -236,9 +236,9 @@ char password[64] = {0};
 char redirect[256] = {0};
 
 // Parse form-encoded POST body
-call_query_param(body, "username", username, sizeof(username));
-call_query_param(body, "password", password, sizeof(password));
-call_query_param(body, "ret", redirect, sizeof(redirect));
+query_param(body, "username", username, sizeof(username));
+query_param(body, "password", password, sizeof(password));
+query_param(body, "ret", redirect, sizeof(redirect));
 
 // username and password now contain decoded values
 ```
@@ -250,14 +250,14 @@ From `mods/ssr/ssr.c`:
 char cookie[256] = {0};
 char token[64] = {0};
 ndc_env_get(fd, cookie, "HTTP_COOKIE");
-call_get_cookie(cookie, token, sizeof(token));
+get_cookie(cookie, token, sizeof(token));
 
 // Look up username
-const char *username = call_get_session_user(token);
+const char *username = get_session_user(token);
 
 // Escape for JSON
 char title_esc[256];
-call_json_escape(title, title_esc, sizeof(title_esc));
+json_escape(title, title_esc, sizeof(title_esc));
 ```
 
 ## Edge Cases Handled

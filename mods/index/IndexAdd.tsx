@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "../ssr/ui.tsx";
+import { Field, FormActions, Layout, loginRedirect, moduleActionPath, moduleCollectionPath } from "../ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface ExtraField {
@@ -16,13 +16,7 @@ interface AddData {
 export const handler: Handlers<AddData, State> = {
   GET(req, ctx) {
     if (!ctx.state.user) {
-      const reqUrl = new URL(req.url);
-      const forwardedHost = req.headers.get("X-Forwarded-Host");
-      if (forwardedHost) {
-        reqUrl.host = forwardedHost;
-      }
-      const ret = encodeURIComponent(reqUrl.pathname);
-      return Response.redirect(new URL(`/auth/login?ret=${ret}`, reqUrl), 303);
+      return loginRedirect(req);
     }
     const splits = req.url.split('/');
     splits.pop();
@@ -39,19 +33,19 @@ export function IndexAdd({
   user,
   extraFields,
 }: { module?: string; user: string | null; extraFields?: ExtraField[] }) {
-  const path = `/${module}/add`;
+  const path = module ? moduleActionPath(module, "add") : "/add";
+  const cancelHref = module ? moduleCollectionPath(module) : "/";
 
   return (
     <Layout user={user} title="Add Item" path={path} icon="🏠">
-      <form action={path} method="POST" encType="multipart/form-data">
-        <label>
-          <span>Title:</span>
+      <form action={path} method="POST" encType="multipart/form-data" className="flex flex-col gap-4">
+        <Field label="Title:">
           <input name="title" />
-        </label>
+        </Field>
         {extraFields?.map((f) => (
           <input key={f.name} type="hidden" name={f.name} value={f.value} />
         ))}
-        <button type="submit">Add</button>
+        <FormActions cancelHref={cancelHref} submitLabel="Add" />
       </form>
     </Layout>
   );

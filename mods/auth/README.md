@@ -158,9 +158,9 @@ char cookie[256] = {0};
 char token[64] = {0};
 
 ndc_env_get(fd, cookie, "HTTP_COOKIE");
-call_get_cookie(cookie, token, sizeof(token));
+get_cookie(cookie, token, sizeof(token));
 
-const char *username = call_get_session_user(token);
+const char *username = get_session_user(token);
 if (username) {
     // User is logged in
 } else {
@@ -240,10 +240,10 @@ From `mods/ssr/ssr.c`:
 char cookie[256] = {0};
 char token[64] = {0};
 ndc_env_get(fd, cookie, "HTTP_COOKIE");
-call_get_cookie(cookie, token, sizeof(token));
+get_cookie(cookie, token, sizeof(token));
 
 // Check if user is logged in
-const char *username = call_get_session_user(token);
+const char *username = get_session_user(token);
 
 // Forward username to SSR via X-Remote-User header
 if (username) {

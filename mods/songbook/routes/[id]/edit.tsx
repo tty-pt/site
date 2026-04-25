@@ -1,13 +1,11 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { FormActions, FormPage, moduleItemActionPath, moduleItemPath, modulePath, readPostedForm } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 import SongbookEditRow from "#/islands/SongbookEditRow.tsx";
 
-const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-
 interface Song {
-  chordId: string;
-  transpose: number;
+	chordId: string;
+	transpose: number;
   format: string;
   originalKey: number;
 }
@@ -26,128 +24,170 @@ interface SbEditData {
 }
 
 interface Songbook {
-  id: string;
-  title: string;
-  choir: string;
-  songs: Song[];
+	id: string;
+	title: string;
+	choir: string;
+	songs: Song[];
 }
 
-function parseBody(body: string | null): { title: string; choir: string; songs: Song[]; allChords: Chord[]; allTypes: string[] } {
-  if (!body) return { title: "", choir: "", songs: [], allChords: [], allTypes: [] };
+interface SongbookEditPayload {
+	title: string;
+	choir: string;
+	songs: Song[];
+	allChords: Chord[];
+	allTypes: string[];
+}
 
-  const params = new URLSearchParams(body);
-  const title = params.get("title") ?? "";
-  const choir = params.get("choir") ?? "";
+function SongbookNotFound({ user }: { user: string | null }) {
+	return (
+		<FormPage
+			user={user}
+			title="Songbook Not Found"
+			path={modulePath("songbook")}
+			icon="📖"
+			heading="Songbook Not Found"
+		>
+			<></>
+		</FormPage>
+	);
+}
 
-  const songsStr = params.get("songs") ?? "";
-  const songs: Song[] = songsStr.split("\n").filter((l) => l.trim()).map((line) => {
-    const parts = line.split(":");
-    return {
-      chordId: parts[0] ?? "",
-      transpose: parseInt(parts[1] ?? "0", 10),
-      format: parts[2] ?? "any",
-      originalKey: parseInt(parts[3] ?? "0", 10),
-    };
-  });
+function SongbookEditRows({
+  songs,
+  allChords,
+  allTypes,
+}: {
+  songs: Song[];
+  allChords: Chord[];
+  allTypes: string[];
+}) {
+  return (
+    <>
+      {songs.map((song, index) => (
+        <SongbookEditRow
+          key={index}
+          index={index}
+          chordId={song.chordId}
+          transpose={song.transpose}
+          format={song.format}
+          originalKey={song.originalKey}
+          allChords={allChords}
+          allTypes={allTypes}
+        />
+      ))}
+    </>
+  );
+}
 
-  let allChords: Chord[] = [];
-  const allChordsStr = params.get("allChords");
-  if (allChordsStr) {
-    try { allChords = JSON.parse(allChordsStr); } catch { allChords = []; }
-  }
+function SongbookEditActions({ songbookId }: { songbookId: string }) {
+	return (
+    <FormActions cancelHref={moduleItemPath("songbook", songbookId)}>
+      <button type="submit" name="action" value="add_row" className="btn btn-action">
+        + Add Row
+      </button>
+    </FormActions>
+	);
+}
 
-  let allTypes: string[] = [];
-  const allTypesStr = params.get("allTypes");
-  if (allTypesStr) {
-    try { allTypes = JSON.parse(allTypesStr); } catch { allTypes = []; }
-  }
+function parseSong(line: string): Song {
+	const [chordId = "", transpose = "0", format = "any", originalKey = "0"] = line.split(":");
+	return {
+		chordId,
+		transpose: parseInt(transpose, 10),
+		format,
+		originalKey: parseInt(originalKey, 10),
+	};
+}
 
-  return { title, choir, songs, allChords, allTypes };
+function parseJsonArray<T>(raw: string | null): T[] {
+	if (!raw) return [];
+	try {
+		return JSON.parse(raw) as T[];
+	} catch {
+		return [];
+	}
+}
+
+function parseBody(params: URLSearchParams): SongbookEditPayload {
+	return {
+		title: params.get("title") ?? "",
+		choir: params.get("choir") ?? "",
+		songs: (params.get("songs") ?? "")
+			.split("\n")
+			.filter((line) => line.trim())
+			.map(parseSong),
+		allChords: parseJsonArray<Chord>(params.get("allChords")),
+		allTypes: parseJsonArray<string>(params.get("allTypes")),
+	};
+}
+
+function toSongbook(id: string, payload: SongbookEditPayload): Songbook {
+	return {
+		id,
+		title: payload.title,
+		choir: payload.choir,
+		songs: payload.songs,
+	};
+}
+
+function SongbookEditForm({
+	songbook,
+	allChords,
+	allTypes,
+}: {
+	songbook: Songbook;
+	allChords: Chord[];
+	allTypes: string[];
+}) {
+	return (
+		<form
+			method="POST"
+			action={moduleItemActionPath("songbook", songbook.id, "edit")}
+			encType="multipart/form-data"
+			className="flex flex-col gap-2 w-full"
+		>
+			<SongbookEditRows songs={songbook.songs} allChords={allChords} allTypes={allTypes} />
+			<input
+				type="hidden"
+				name="amount"
+				value={`${songbook.songs.length}`}
+			/>
+			<SongbookEditActions songbookId={songbook.id} />
+		</form>
+	);
 }
 
 export const handler: Handlers<SbEditData, State> = {
-  async POST(req, ctx) {
-    const body = await req.text();
-    const { title, choir, songs, allChords, allTypes } = parseBody(body);
-    const id = ctx.params.id;
+	async POST(req, ctx) {
+		const payload = parseBody(await readPostedForm(req));
 
-    return ctx.render({
-      user: ctx.state.user,
-      songbook: { id, title, choir, songs },
-      allChords,
-      allTypes,
-    });
-  },
+		return ctx.render({
+			user: ctx.state.user,
+			songbook: toSongbook(ctx.params.id, payload),
+			allChords: payload.allChords,
+			allTypes: payload.allTypes,
+		});
+	},
 };
 
 export default function SbEdit({ data }: PageProps<SbEditData>) {
   if (!data.songbook) {
-    return (
-      <Layout user={data.user} title="Songbook Not Found" path="/songbook" icon="📖">
-        <div className="center">
-          <h1>Songbook Not Found</h1>
-        </div>
-      </Layout>
-    );
+    return <SongbookNotFound user={data.user} />;
   }
 
-  const songbook = data.songbook;
-  const allChords = data.allChords;
-  const allTypes = data.allTypes;
-
-  return (
-    <Layout user={data.user} title={`Edit ${songbook.title}`} path={`/songbook/${songbook.id}/edit`} icon="📖">
-      <div className="center">
-        <h1>Edit {songbook.title}</h1>
-        <form
-          method="POST"
-          action={`/songbook/${songbook.id}/edit`}
-          encType="multipart/form-data"
-          className="flex flex-col gap-2 w-full"
-        >
-          {songbook.songs.map((song, i) => (
-            <SongbookEditRow
-              key={i}
-              index={i}
-              chordId={song.chordId}
-              transpose={song.transpose}
-              format={song.format}
-              originalKey={song.originalKey}
-              allChords={allChords}
-              allTypes={allTypes}
-            />
-          ))}
-          <input
-            type="hidden"
-            name="amount"
-            value={`${songbook.songs.length}`}
-          />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              name="action"
-              value="save"
-              className="btn btn-primary"
-            >
-              Save Changes
-            </button>
-            <button
-              type="submit"
-              name="action"
-              value="add_row"
-              className="btn btn-action"
-            >
-              + Add Row
-            </button>
-            <a
-              href={`/songbook/${songbook.id}`}
-              className="btn btn-secondary"
-            >
-              Cancel
-            </a>
-          </div>
-        </form>
-      </div>
-    </Layout>
-  );
+	return (
+		<FormPage
+			user={data.user}
+			title={`Edit ${data.songbook.title}`}
+			path={moduleItemActionPath("songbook", data.songbook.id, "edit")}
+			icon="📖"
+			heading={`Edit ${data.songbook.title}`}
+		>
+			<SongbookEditForm
+				songbook={data.songbook}
+				allChords={data.allChords}
+				allTypes={data.allTypes}
+			/>
+		</FormPage>
+	);
 }

@@ -1,7 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import type { State } from "#/routes/_middleware.ts";
 import PoemDetail from "@/poem/PoemDetail.tsx";
-import { ErrorPage, parseErrorBody } from "@/ssr/ui.tsx";
+import { ErrorPage, moduleItemPath, readPostedJson } from "@/ssr/ui.tsx";
 
 interface PoemDetailData {
   user: string | null;
@@ -19,15 +19,14 @@ export const handler: Handlers<PoemDetailData, State> = {
   },
 
   async POST(req, ctx) {
-    const body = await req.text();
-    const err = parseErrorBody(body);
-    if (err) {
+    const result = await readPostedJson<{ title?: string; lang?: string; owner?: boolean }>(req);
+    if (!result.ok) {
       return ctx.render(
-        { user: ctx.state.user, id: ctx.params.id, title: "", lang: "pt_PT", owner: false, ...err },
-        { status: err.status },
+        { user: ctx.state.user, id: ctx.params.id, title: "", lang: "pt_PT", owner: false, error: result.error, status: result.status },
+        { status: result.status },
       );
     }
-    const data = JSON.parse(body);
+    const data = result.data;
     return ctx.render({
       user: ctx.state.user,
       id: ctx.params.id,
@@ -40,7 +39,7 @@ export const handler: Handlers<PoemDetailData, State> = {
 
 export default function PoemPage({ data }: PageProps<PoemDetailData>) {
   if (data.error) {
-    return <ErrorPage status={data.status ?? 500} message={data.error} user={data.user} path={`/poem/${data.id}`} />;
+    return <ErrorPage status={data.status ?? 500} message={data.error} user={data.user} path={moduleItemPath("poem", data.id)} />;
   }
   return <PoemDetail user={data.user} id={data.id} title={data.title} lang={data.lang} owner={data.owner} />;
 }

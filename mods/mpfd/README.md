@@ -29,7 +29,7 @@ Parse a multipart form data request.
 
 **Example:**
 ```c
-int result = call_mpfd_parse(fd, body);
+int result = mpfd_parse(fd, body);
 if (result == -1) {
     ndc_head(fd, 415);  // Unsupported Media Type
     return 1;
@@ -69,7 +69,7 @@ Copy field data into buffer.
 **Example:**
 ```c
 char id[64] = {0};
-int len = call_mpfd_get("id", id, sizeof(id) - 1);
+int len = mpfd_get("id", id, sizeof(id) - 1);
 if (len > 0) {
     id[len] = '\0';
 }
@@ -105,7 +105,7 @@ Configure size limits for uploads.
 
 **Example:**
 ```c
-call_mpfd_set_limits(20 * 1024 * 1024,  // 20 MB per field
+mpfd_set_limits(20 * 1024 * 1024,  // 20 MB per field
                      100 * 1024 * 1024, // 100 MB total
                      200);               // 200 fields max
 ```
@@ -184,7 +184,7 @@ From `mods/poem/poem.c`:
 
 ```c
 // Parse the request
-int parse_result = call_mpfd_parse(fd, body);
+int parse_result = mpfd_parse(fd, body);
 if (parse_result == -1) {
     ndc_header_set(fd, "Content-Type", "text/plain");
     ndc_head(fd, 415);
@@ -193,18 +193,18 @@ if (parse_result == -1) {
 }
 
 // Check if field exists
-if (!call_mpfd_exists("file")) {
+if (!mpfd_exists("file")) {
     ndc_head(fd, 400);
     ndc_body(fd, "Missing file");
     return 1;
 }
 
 // Get field length
-int file_len = call_mpfd_len("file");
+int file_len = mpfd_len("file");
 
 // Allocate buffer and get data
 char *content = malloc(file_len + 1);
-int got = call_mpfd_get("file", content, file_len);
+int got = mpfd_get("file", content, file_len);
 content[got] = '\0';
 
 // Use content...

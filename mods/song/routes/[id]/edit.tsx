@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Field, FormActions, FormPage, moduleItemActionPath, moduleItemPath, readPostedForm } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface SongEditData {
@@ -14,35 +14,80 @@ interface SongEditData {
   author: string;
 }
 
-function urlDecode(str: string): string {
-  return str.replace(/%([0-9A-Fa-f]{2})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
-  ).replace(/%0A/g, "\n");
+interface SongEditFormFieldsProps {
+  title: string;
+  author: string;
+  type: string;
+  yt: string;
+  audio: string;
+  pdf: string;
+  songData: string;
 }
 
-function parseBody(body: string | null): SongEditData {
-  if (!body) {
-    return { user: null, id: "", title: "", type: "", yt: "", audio: "", pdf: "", data: "", author: "" };
-  }
+function SongEditFormFields({
+  title,
+  author,
+  type,
+  yt,
+  audio,
+  pdf,
+  songData,
+}: SongEditFormFieldsProps) {
+  return (
+    <>
+      <Field label="Title:">
+        <input type="text" name="title" defaultValue={title} className="w-full" />
+      </Field>
 
-  const params = new URLSearchParams(body);
+      <Field label="Author:">
+        <input type="text" name="author" defaultValue={author} className="w-full" />
+      </Field>
+
+      <Field label="Type (e.g., entrada, santo, comunhao):">
+        <textarea name="type" defaultValue={type} rows={3} className="w-full font-mono" />
+      </Field>
+
+      <Field label="YouTube URL:">
+        <input type="text" name="yt" defaultValue={yt} className="w-full" />
+      </Field>
+
+      <Field label="Audio URL:">
+        <input type="text" name="audio" defaultValue={audio} className="w-full" />
+      </Field>
+
+      <Field label="PDF URL:">
+        <input type="text" name="pdf" defaultValue={pdf} className="w-full" />
+      </Field>
+
+      <Field label="Chord Data:">
+        <textarea
+          name="data"
+          defaultValue={songData}
+          rows={20}
+          className="w-full font-mono whitespace-pre"
+        />
+      </Field>
+    </>
+  );
+}
+
+function parseBody(params: URLSearchParams): SongEditData {
   return {
     user: null,
     id: "",
-    title: urlDecode(params.get("title") || ""),
-    type: urlDecode(params.get("type") || ""),
-    yt: urlDecode(params.get("yt") || ""),
-    audio: urlDecode(params.get("audio") || ""),
-    pdf: urlDecode(params.get("pdf") || ""),
-    data: urlDecode(params.get("data") || ""),
-    author: urlDecode(params.get("author") || ""),
+    title: params.get("title") || "",
+    type: params.get("type") || "",
+    yt: params.get("yt") || "",
+    audio: params.get("audio") || "",
+    pdf: params.get("pdf") || "",
+    data: params.get("data") || "",
+    author: params.get("author") || "",
   };
 }
 
 export const handler: Handlers<SongEditData, State> = {
   async POST(req, ctx) {
-    const body = await req.text();
-    const data = parseBody(body);
+    const data = parseBody(await readPostedForm(req));
     data.id = ctx.params.id;
 
     return ctx.render({
@@ -54,97 +99,28 @@ export const handler: Handlers<SongEditData, State> = {
 
 export default function SongEdit({ data }: PageProps<SongEditData>) {
   const { id, title, type, yt, audio, pdf, data: songData, author } = data;
+  const action = moduleItemActionPath("song", id, "edit");
+  const cancelHref = moduleItemPath("song", id);
 
   return (
-    <Layout user={data.user} title={`Edit ${title || id}`} path={`/song/${id}/edit`} icon="🎸">
-      <div className="center">
-        <h1>Edit Song</h1>
-        <form
-          method="POST"
-          action={`/song/${id}/edit`}
-          encType="application/x-www-form-urlencoded"
-          className="flex flex-col gap-4 w-full max-w-2xl"
-        >
-          <label>
-            Title:
-            <input
-              type="text"
-              name="title"
-              defaultValue={title}
-              className="w-full"
-            />
-          </label>
-
-          <label>
-            Author:
-            <input
-              type="text"
-              name="author"
-              defaultValue={author}
-              className="w-full"
-            />
-          </label>
-          
-          <label>
-            Type (e.g., entrada, santo, comunhao):
-            <textarea
-              name="type"
-              defaultValue={type}
-              rows={3}
-              className="w-full font-mono"
-            />
-          </label>
-          
-          <label>
-            YouTube URL:
-            <input
-              type="text"
-              name="yt"
-              defaultValue={yt}
-              className="w-full"
-            />
-          </label>
-          
-          <label>
-            Audio URL:
-            <input
-              type="text"
-              name="audio"
-              defaultValue={audio}
-              className="w-full"
-            />
-          </label>
-          
-          <label>
-            PDF URL:
-            <input
-              type="text"
-              name="pdf"
-              defaultValue={pdf}
-              className="w-full"
-            />
-          </label>
-          
-          <label>
-            Chord Data:
-            <textarea
-              name="data"
-              defaultValue={songData}
-              rows={20}
-              className="w-full font-mono whitespace-pre"
-            />
-          </label>
-          
-          <div className="flex gap-2">
-            <button type="submit" className="btn btn-primary">
-              Save Changes
-            </button>
-            <a href={`/song/${id}`} className="btn btn-secondary">
-              Cancel
-            </a>
-          </div>
-        </form>
-      </div>
-    </Layout>
+    <FormPage user={data.user} title={`Edit ${title || id}`} path={moduleItemActionPath("song", id, "edit")} icon="🎸" heading="Edit Song">
+      <form
+        method="POST"
+        action={action}
+        encType="application/x-www-form-urlencoded"
+        className="flex flex-col gap-4 w-full max-w-2xl"
+      >
+        <SongEditFormFields
+          title={title}
+          author={author}
+          type={type}
+          yt={yt}
+          audio={audio}
+          pdf={pdf}
+          songData={songData}
+        />
+        <FormActions cancelHref={cancelHref} />
+      </form>
+    </FormPage>
   );
 }

@@ -48,6 +48,12 @@ skip_confirm_required(void)
 	    && strcmp(env, "NO") != 0;
 }
 
+static const char *
+redirect_target(const char *path)
+{
+	return (path && *path) ? path : "/";
+}
+
 /* ------------------------------------------------------------------ */
 /* Path helpers                                                         */
 /* ------------------------------------------------------------------ */
@@ -106,7 +112,7 @@ next_uid(void)
 /* Session helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-NDX_DEF(const char *, get_session_user,
+NDX_LISTENER(const char *, get_session_user,
 		const char *, token)
 {
 	if (!token || !*token)
@@ -114,13 +120,14 @@ NDX_DEF(const char *, get_session_user,
 	return qmap_get(sessions_map, token);
 }
 
-NDX_DEF(int, get_user_uid, const char *, username)
+static int
+get_user_uid(const char *username)
 {
 	struct user *u = (struct user *)qmap_get(users_map, username);
 	return u ? u->uid : -1;
 }
 
-NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len)
+NDX_LISTENER(int, get_cookie, const char *, cookie, char *, token, size_t, len)
 {
 	const char *p;
 
@@ -155,20 +162,20 @@ NDX_DEF(int, get_cookie, const char *, cookie, char *, token, size_t, len)
 	return 0;
 }
 
-NDX_DEF(const char *, get_request_user, int, fd)
+NDX_LISTENER(const char *, get_request_user, int, fd)
 {
 	char cookie[256] = {0};
 	char token[64] = {0};
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
-	return call_get_session_user(token);
+	get_cookie(cookie, token, sizeof(token));
+	return get_session_user(token);
 }
 
-NDX_DEF(int, require_login, int, fd, const char *, username)
+NDX_LISTENER(int, require_login, int, fd, const char *, username)
 {
 	if (username && *username)
 		return 0;
-	return call_respond_error(fd, 401, "Login required");
+	return respond_error(fd, 401, "Login required");
 }
 
 static void
@@ -544,11 +551,11 @@ load_passwd(void)
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-NDX_DEF(int, item_record_ownership,
+NDX_LISTENER(int, item_record_ownership,
 	const char *, item_path, const char *, username)
 {
 	if (geteuid() == 0) {
-		int uid = call_get_user_uid(username);
+		int uid = get_user_uid(username);
 		if (uid >= 0)
 			chown(item_path, (uid_t)uid, (gid_t)-1);
 	} else {
@@ -563,7 +570,7 @@ NDX_DEF(int, item_record_ownership,
 	return 0;
 }
 
-NDX_DEF(int, item_check_ownership,
+NDX_LISTENER(int, item_check_ownership,
 	const char *, item_path, const char *, username)
 {
 	if (!username || !*username)
@@ -573,7 +580,7 @@ NDX_DEF(int, item_check_ownership,
 		struct stat st;
 		if (stat(item_path, &st) != 0)
 			return 0;
-		int uid = call_get_user_uid(username);
+		int uid = get_user_uid(username);
 		return uid >= 0 && (uid_t)uid == st.st_uid;
 	} else {
 		char owner_path[1024];
@@ -588,7 +595,7 @@ NDX_DEF(int, item_check_ownership,
 	}
 }
 
-NDX_DEF(int, item_read_owner,
+NDX_LISTENER(int, item_read_owner,
 	const char *, item_path, char *, out, size_t, outlen)
 {
 	if (!out || outlen == 0)
@@ -622,7 +629,7 @@ NDX_DEF(int, item_read_owner,
 	}
 }
 
-NDX_DEF(int, item_unlink_owner, const char *, item_path)
+NDX_LISTENER(int, item_unlink_owner, const char *, item_path)
 {
 	if (geteuid() != 0) {
 		char owner_path[1024];
@@ -632,18 +639,48 @@ NDX_DEF(int, item_unlink_owner, const char *, item_path)
 	return 0;
 }
 
-NDX_DEF(int, require_ownership,
-	int, fd, const char *, item_path,
-	const char *, username, const char *, msg)
+NDX_LISTENER(item_access_t, item_access_status,
+	const char *, item_path, const char *, username, unsigned, flags)
 {
-	if (item_check_ownership(item_path, username))
+	if ((flags & ICTX_NEED_LOGIN) && (!username || !*username))
+		return ITEM_ACCESS_UNAUTHENTICATED;
+
+	if ((flags & ICTX_NEED_OWNERSHIP) || (flags & ICTX_NEED_LOGIN)) {
+		struct stat st;
+		if (stat(item_path, &st) != 0 || !S_ISDIR(st.st_mode))
+			return ITEM_ACCESS_MISSING;
+	}
+
+	if ((flags & ICTX_NEED_OWNERSHIP) &&
+			!item_check_ownership(item_path, username))
+		return ITEM_ACCESS_FORBIDDEN;
+
+	return ITEM_ACCESS_OK;
+}
+
+NDX_LISTENER(int, item_require_access,
+	int, fd, const char *, item_path, const char *, username, unsigned, flags,
+	const char *, not_found_msg, const char *, forbidden_msg)
+{
+	item_access_t status = item_access_status(item_path, username, flags);
+	switch (status) {
+	case ITEM_ACCESS_OK:
 		return 0;
-	return call_respond_error(fd, 403, msg ? msg : "Forbidden");
+	case ITEM_ACCESS_UNAUTHENTICATED:
+		return require_login(fd, username);
+	case ITEM_ACCESS_MISSING:
+		return respond_error(fd, 404,
+			not_found_msg ? not_found_msg : "Not found");
+	case ITEM_ACCESS_FORBIDDEN:
+		return respond_error(fd, 403,
+			forbidden_msg ? forbidden_msg : "Forbidden");
+	}
+	return respond_error(fd, 500, "Invalid item access status");
 }
 
 /* --- Item context --- */
 
-NDX_DEF(int, item_ctx_load,
+NDX_LISTENER(int, item_ctx_load,
 	item_ctx_t *, ctx, int, fd,
 	const char *, items_path, unsigned, flags)
 {
@@ -651,13 +688,13 @@ NDX_DEF(int, item_ctx_load,
 	ctx->fd = fd;
 
 	if (flags & ICTX_NEED_LOGIN) {
-		ctx->username = call_get_request_user(fd);
-		if (call_require_login(fd, ctx->username)) return 1;
+		ctx->username = get_request_user(fd);
+		if (require_login(fd, ctx->username)) return 1;
 	} else {
-		ctx->username = call_get_request_user(fd);
+		ctx->username = get_request_user(fd);
 	}
 
-	call_get_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
+	get_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
 	ndc_env_get(fd, ctx->id, "PATTERN_PARAM_ID");
 
 	if (flags & ICTX_SONG_ID)
@@ -665,7 +702,7 @@ NDX_DEF(int, item_ctx_load,
 
 	if (!ctx->id[0] ||
 	    ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
-		call_bad_request(fd, "Missing parameters");
+		bad_request(fd, "Missing parameters");
 		return 1;
 	}
 
@@ -673,8 +710,8 @@ NDX_DEF(int, item_ctx_load,
 		ctx->doc_root, items_path, ctx->id);
 
 	if (flags & ICTX_NEED_OWNERSHIP) {
-		if (call_require_ownership(fd, ctx->item_path,
-				ctx->username, NULL))
+		if (item_require_access(fd, ctx->item_path, ctx->username, flags,
+				"Not found", "Forbidden"))
 			return 1;
 	}
 
@@ -694,10 +731,10 @@ handle_session(int fd, char *body)
 	char token[64]   = {0};
 
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
+	get_cookie(cookie, token, sizeof(token));
 
 	const char *username = qmap_get(sessions_map, token);
-	return call_respond_plain(fd, 200, username ? username : "");
+	return respond_plain(fd, 200, username ? username : "");
 }
 
 /* Login-specific error: pretty page with ret= for browsers, plain text for API. */
@@ -708,29 +745,29 @@ login_error(int fd, int status, const char *msg, const char *ret)
 	ndc_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
 		char enc[128] = {0}, enc_ret[256] = {0}, pb[512];
-		call_url_encode(msg, enc, sizeof(enc));
-		call_url_encode(ret, enc_ret, sizeof(enc_ret));
+		url_encode(msg, enc, sizeof(enc));
+		url_encode(ret, enc_ret, sizeof(enc_ret));
 		int plen = snprintf(pb, sizeof(pb), "status=%d&error=%s&ret=%s", status, enc, enc_ret);
-		return call_core_post(fd, pb, (size_t)plen);
+		return core_post(fd, pb, (size_t)plen);
 	}
-	return call_respond_plain(fd, status, msg);
+	return respond_plain(fd, status, msg);
 }
 
 static int
 handle_login(int fd, char *body)
 {
-	char username[64], password[64], redirect[256],
+	char username[64], password[64], redirect_path[256],
 	     token[64], cookie[128];
 
 	ndc_query_parse(body);
 	ndc_query_param("username", username, sizeof(username));
 	ndc_query_param("password", password, sizeof(password));
-	ndc_query_param("ret",      redirect, sizeof(redirect));
+	ndc_query_param("ret",      redirect_path, sizeof(redirect_path));
 
 	if (!*username || !*password)
-		return call_bad_request(fd, "Missing username or password");
+		return bad_request(fd, "Missing username or password");
 
-	const char *ret = *redirect ? redirect : "/";
+	const char *ret = redirect_target(redirect_path);
 
 	struct user *user = (struct user *)qmap_get(users_map, username);
 	if (!user)
@@ -750,7 +787,7 @@ handle_login(int fd, char *body)
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
-	return call_redirect(fd, *redirect ? redirect : "/");
+	return redirect(fd, ret);
 }
 
 static int
@@ -760,14 +797,14 @@ handle_logout(int fd, char *body)
 
 	char cookie[256], token[64];
 	ndc_env_get(fd, cookie, "HTTP_COOKIE");
-	call_get_cookie(cookie, token, sizeof(token));
+	get_cookie(cookie, token, sizeof(token));
 
 	if (*token)
 		qmap_del(sessions_map, token);
 
 	ndc_header_set(fd, "Set-Cookie",
 		"QSESSION=; Path=/; Max-Age=0; SameSite=Lax");
-	return call_redirect(fd, "/");
+	return redirect(fd, "/");
 }
 
 static int
@@ -785,6 +822,7 @@ handle_register(int fd, char *body)
 	char username[64], password[64], password_confirm[64], email[128];
 	char salt[64], cookie[128], token[64];
 	char user_dir[512], rcode_path[560], rcode[64];
+	const char *target;
 	int skip_confirm;
 
 	struct user user = {0};
@@ -794,27 +832,28 @@ handle_register(int fd, char *body)
 	ndc_query_param("password",  password,         sizeof(password));
 	ndc_query_param("password2", password_confirm, sizeof(password_confirm));
 	ndc_query_param("email",     email,            sizeof(email));
-	char redirect[256] = {0};
-	ndc_query_param("ret",       redirect,         sizeof(redirect));
+	char redirect_path[256] = {0};
+	ndc_query_param("ret",       redirect_path,    sizeof(redirect_path));
+	target = redirect_target(redirect_path);
 
 	size_t ulen = strlen(username);
 	if (ulen < 2 || ulen > 32)
-		return call_bad_request(fd, "Username must be 2-32 characters");
+		return bad_request(fd, "Username must be 2-32 characters");
 	for (char *p = username; *p; p++) {
 		if (!valid_username_char(*p))
-			return call_bad_request(fd, "Invalid username character");
+			return bad_request(fd, "Invalid username character");
 	}
 	if (strlen(password) < 4)
-		return call_bad_request(fd, "Password too short");
+		return bad_request(fd, "Password too short");
 	if (strcmp(password, password_confirm))
-		return call_bad_request(fd, "Passwords do not match");
+		return bad_request(fd, "Passwords do not match");
 	if (qmap_get(users_map, username))
-		return call_bad_request(fd, "Username already exists");
+		return bad_request(fd, "Username already exists");
 
 	generate_bcrypt_salt(salt, sizeof(salt));
 	char *hash = crypt(password, salt);
 	if (!hash)
-		return call_server_error(fd, "Password hashing failed");
+		return server_error(fd, "Password hashing failed");
 
 	int uid = next_uid();
 
@@ -868,12 +907,12 @@ handle_register(int fd, char *body)
 		generate_token(rcode, sizeof(rcode));
 		FILE *rf = fopen(rcode_path, "w");
 		if (!rf)
-			return call_server_error(fd, "Could not create confirmation");
+			return server_error(fd, "Could not create confirmation");
 		fputs(rcode, rf);
 		fclose(rf);
 		fprintf(stderr, "Register: /auth/confirm?u=%s&r=%s\n",
 			username, rcode);
-		return call_redirect(fd, *redirect ? redirect : "/");
+		return redirect(fd, target);
 	}
 
 	/* Auto-login only when confirmation is explicitly skipped. */
@@ -884,7 +923,7 @@ handle_register(int fd, char *body)
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
-	return call_redirect(fd, *redirect ? redirect : "/");
+	return redirect(fd, target);
 }
 
 static int
@@ -905,20 +944,20 @@ handle_confirm(int fd, char *body)
 	ndc_query_param("r", code,     sizeof(code));
 
 	if (!*username || !*code)
-		return call_bad_request(fd, "Missing parameters");
+		return bad_request(fd, "Missing parameters");
 
 	existing = (struct user *)qmap_get(users_map, username);
 	if (!existing || existing->active)
-		return call_bad_request(fd, "Invalid confirmation");
+		return bad_request(fd, "Invalid confirmation");
 
 	snprintf(rcode_path, sizeof(rcode_path),
 		"./users/%s/rcode", username);
 	FILE *rf = fopen(rcode_path, "r");
 	if (!rf)
-		return call_bad_request(fd, "No confirmation pending");
+		return bad_request(fd, "No confirmation pending");
 	if (!fgets(stored_rcode, sizeof(stored_rcode), rf)) {
 		fclose(rf);
-		return call_bad_request(fd, "Could not read confirmation code");
+		return bad_request(fd, "Could not read confirmation code");
 	}
 	fclose(rf);
 
@@ -928,7 +967,7 @@ handle_confirm(int fd, char *body)
 		stored_rcode[--rlen] = '\0';
 
 	if (strcmp(code, stored_rcode))
-		return call_bad_request(fd, "Wrong confirmation code");
+		return bad_request(fd, "Wrong confirmation code");
 
 	memcpy(&user, existing, sizeof(user));
 	user.active = 1;
@@ -943,7 +982,7 @@ handle_confirm(int fd, char *body)
 		"QSESSION=%s; Path=/; SameSite=Lax", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
-	return call_redirect(fd, "/");
+	return redirect(fd, "/");
 }
 
 /* ------------------------------------------------------------------ */

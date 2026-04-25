@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout } from "@/ssr/ui.tsx";
+import { Field, FormActions, FormPage, moduleItemActionPath, moduleItemPath, readPostedJson } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface PoemEditData {
@@ -10,41 +10,31 @@ interface PoemEditData {
 
 export const handler: Handlers<PoemEditData, State> = {
   async POST(req, ctx) {
-    const data = JSON.parse(await req.text());
+    const result = await readPostedJson<{ title?: string }>(req);
+    const title = result.ok ? result.data.title ?? "" : "";
     return ctx.render({
       user: ctx.state.user,
       id: ctx.params.id,
-      title: data.title ?? "",
+      title,
     });
   },
 };
 
 export default function PoemEdit({ data }: PageProps<PoemEditData>) {
   const { id, title } = data;
+  const path = moduleItemActionPath("poem", id, "edit");
 
   return (
-    <Layout user={data.user} title={`Edit ${title || id}`} path={`/poem/${id}/edit`} icon="📜">
-      <div class="center">
-        <h1>Edit Poem</h1>
-        <form
-          method="POST"
-          action={`/poem/${id}/edit`}
-          encType="multipart/form-data"
-        >
-          <label>
-            <span>Title:</span>
-            <input type="text" name="title" defaultValue={title} />
-          </label>
-          <label>
-            <span>File:</span>
-            <input type="file" name="file" accept=".html,.htm,.txt" />
-          </label>
-          <div>
-            <button type="submit">Save</button>
-            <a href={`/poem/${id}`}>Cancel</a>
-          </div>
-        </form>
-      </div>
-    </Layout>
+    <FormPage user={data.user} title={`Edit ${title || id}`} path={path} icon="📜" heading="Edit Poem">
+      <form method="POST" action={path} encType="multipart/form-data" className="flex flex-col gap-4">
+        <Field label="Title:">
+          <input type="text" name="title" defaultValue={title} />
+        </Field>
+        <Field label="File:">
+          <input type="file" name="file" accept=".html,.htm,.txt" />
+        </Field>
+        <FormActions cancelHref={moduleItemPath("poem", id)} submitLabel="Save" />
+      </form>
+    </FormPage>
   );
 }

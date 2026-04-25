@@ -1,5 +1,5 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
-import { Layout, OwnerActions } from "@/ssr/ui.tsx";
+import { EmptyState, Layout, OwnerActions, moduleItemPath, modulePath } from "@/ssr/ui.tsx";
 import type { State } from "#/routes/_middleware.ts";
 
 interface IndexData {
@@ -45,39 +45,45 @@ function parseBody(body: string | null): IndexItem[] {
   return items;
 }
 
-function IndexList({
-  body,
-  module,
-  user,
-}: IndexData) {
-  const items = parseBody(body);
+function IndexItemLinks({ module, items }: {
+  module: string;
+  items: IndexItem[];
+}) {
+  if (items.length === 0) {
+    return <EmptyState message="No items yet." />;
+  }
 
-  const buttons = items.map((item) => (
-    <a
-      key={item.id}
-      href={`/${module}/${item.id}/`}
-      className="btn"
-    >
-      {item.title || item.id}
-    </a>
-  ));
+  return (
+    <>
+      {items.map((item) => (
+        <a
+          key={item.id}
+          href={`${moduleItemPath(module, item.id)}/`}
+          className="btn"
+        >
+          {item.title || item.id}
+        </a>
+      ))}
+    </>
+  );
+}
+
+function IndexList({ body, module, user }: IndexData) {
+  const items = parseBody(body);
+  const menuItems = user
+    ? <OwnerActions actions={[{ href: `/${module}/add`, icon: "➕", label: "add" }]} />
+    : undefined;
 
   return (
     <Layout
       user={user}
       title={module}
-      path={`/${module}`}
+      path={modulePath(module)}
       icon="🏠"
-      menuItems={user
-        ? <OwnerActions actions={[{ href: `/${module}/add`, icon: "➕", label: "add" }]} />
-        : undefined}
+      menuItems={menuItems}
     >
       <div className="center">
-        {buttons.length > 0 ? (
-          buttons
-        ) : (
-          <p>No items yet.</p>
-        )}
+        <IndexItemLinks module={module} items={items} />
       </div>
     </Layout>
   );

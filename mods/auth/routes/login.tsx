@@ -1,6 +1,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import type { State } from "#/routes/_middleware.ts";
 import Login from "@/auth/Login.tsx";
+import { readPostedForm } from "@/ssr/ui.tsx";
 
 interface LoginData {
   user: string | null;
@@ -15,7 +16,7 @@ export const handler: Handlers<LoginData, State> = {
   },
 
   async POST(req, ctx) {
-    const params = new URLSearchParams(await req.text());
+    const params = await readPostedForm(req);
     const error = params.get("error") ?? undefined;
     const ret = params.get("ret") ?? "/";
     const status = Number(params.get("status") ?? "401");

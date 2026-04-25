@@ -41,7 +41,7 @@ static unsigned module_hds[MAX_MODULES];
 static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
 
-NDX_DEF(int, index_id,
+NDX_LISTENER(int, index_id,
 		char *, result,
 		size_t, result_len,
 		const char *, title,
@@ -95,7 +95,7 @@ int index_update_json(
 	modules_json_end[1] = '\0';
 
 	memset(modules_header, 0, sizeof(modules_header));
-	call_b64_encode(modules_json,
+	b64_encode(modules_json,
 			modules_header,
 			sizeof(modules_header));
 
@@ -130,7 +130,7 @@ static int index_add_handler(
 
 	module = index_name(fd);
 	snprintf(path, sizeof(path), "/%s/%s", module, id);
-	return call_redirect(fd, path);
+	return redirect(fd, path);
 }
 
 /*
@@ -141,54 +141,49 @@ static int index_add_handler(
  * On error, sends the error response itself and returns non-zero.
  * On success returns 0 and id_out is populated — caller must redirect.
  */
-NDX_DEF(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_len)
+NDX_LISTENER(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_len)
 {
 	char title[256], id[256], path[1024];
 	int parse_result, title_len;
 	const char *module;
-	size_t path_len;
 	unsigned hd;
 
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
+	const char *username = get_request_user(fd);
+	if (require_login(fd, username))
 		return 1;
 
-	parse_result = call_mpfd_parse(fd, body);
+	parse_result = mpfd_parse(fd, body);
 	if (parse_result == -1)
-		return call_respond_error(fd, 415, "Expected multipart/form-data");
+		return respond_error(fd, 415, "Expected multipart/form-data");
 
-	title_len = call_mpfd_get("title", title, sizeof(title) - 1);
+	title_len = mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len <= 0)
-		return call_bad_request(fd, "Missing title");
+		return bad_request(fd, "Missing title");
 
 	index_id(id, sizeof(id), title, title_len);
 	module = index_name(fd);
 
-	path_len = snprintf(path, sizeof(path),
-			"./items/%s/items/%s", module, id);
+	if (item_path_build(fd, module, id, path, sizeof(path)) != 0)
+		return server_error(fd, "Failed to resolve item path");
 
 	int r = mkdir(path, 0755);
 	if (r == -1 && errno != EEXIST)
-		return call_respond_error(fd, 403, "You don't have permissions for that");
+		return respond_error(fd, 403, "You don't have permissions for that");
 
-	call_item_record_ownership(path, username);
+	item_record_ownership(path, username);
 
-	if (call_write_meta_file(path, "title", title, (size_t)title_len) != 0)
-		return call_respond_error(fd, 403, "You don't have permissions for that");
+	if (write_meta_file(path, "title", title, (size_t)title_len) != 0)
+		return respond_error(fd, 403, "You don't have permissions for that");
 
 	hd = *(unsigned *) qmap_get(module_hd, module);
 	qmap_put(hd, id, title);
 
 	snprintf(id_out, id_len, "%s", id);
-	(void)path_len;
 	return 0;
 }
 
-NDX_DEF(int, index_page,
-		unsigned, fd,
-		unsigned, hd,
-		char *, path,
-		char *, title)
+static int
+index_page(unsigned fd, unsigned hd, char *path, char *title)
 {
 	register size_t total = 0;
 	unsigned cur = qmap_iter(hd, NULL, 0);
@@ -219,9 +214,9 @@ NDX_DEF(int, index_page,
 
 	// send it
 	*s = '\0';
-	call_proxy_init("POST", path);
-	call_proxy_add_standard_headers(fd, modules_header);
-	ret = call_proxy_body(fd, body, total);
+	proxy_init("POST", path);
+	proxy_add_standard_headers(fd, modules_header);
+	ret = proxy_body(fd, body, total);
 	free(body);
 	return ret;
 }
@@ -244,7 +239,7 @@ static int index_list_handler(
 			(char *) module);
 }
 
-NDX_DEF(unsigned, index_open,
+NDX_LISTENER(unsigned, index_open,
 		const char *, name,
 		unsigned, mask,
 		unsigned, flags,
@@ -264,9 +259,11 @@ NDX_DEF(unsigned, index_open,
 	if (!(flags & 1))
 		return 0;
 
-	snprintf(buf, sizeof(buf), "./items/%s", id);
+	if (module_path_build(".", id, buf, sizeof(buf)) != 0)
+		return QM_MISS;
 	mkdir(buf, 0755);
-	snprintf(buf, sizeof(buf), "./items/%s/items", id);
+	if (module_items_path_build(".", id, buf, sizeof(buf)) != 0)
+		return QM_MISS;
 	mkdir(buf, 0755);
 
 	dir = opendir(buf);
@@ -279,10 +276,11 @@ NDX_DEF(unsigned, index_open,
 		char title[256] = { 0 };
 		char item_path[PATH_MAX];
 
-		snprintf(item_path, sizeof(item_path),
-				"%s/%s", buf, entry->d_name);
+		if (item_path_build_root(".", id, entry->d_name,
+				item_path, sizeof(item_path)) != 0)
+			continue;
 
-		if (call_read_meta_file(item_path, "title", title, sizeof(title)) != 0)
+		if (read_meta_file(item_path, "title", title, sizeof(title)) != 0)
 			continue;
 
 		qmap_put(hd, entry->d_name, title);
@@ -316,7 +314,7 @@ NDX_DEF(unsigned, index_open,
 	return hd;
 }
 
-NDX_DEF(unsigned, index_put,
+NDX_LISTENER(unsigned, index_put,
 		unsigned, hd,
 		char *, key,
 		char *, value)
@@ -324,19 +322,15 @@ NDX_DEF(unsigned, index_put,
 	return qmap_put(hd, key, value);
 }
 
-NDX_DEF(int, index_del,
-		unsigned, hd,
-		char *, key)
+static int
+index_del(unsigned hd, char *key)
 {
 	qmap_del(hd, key);
 	return 0;
 }
 
-NDX_DEF(unsigned, index_get,
-		unsigned, hd,
-		char *, value,
-		size_t, len,
-		char *, key)
+static unsigned
+index_get(unsigned hd, char *value, size_t len, char *key)
 {
 	const void *val = qmap_get(hd, key);
 	size_t rlen = qmap_len(QM_STR, val);
@@ -348,7 +342,7 @@ NDX_DEF(unsigned, index_get,
 	return 0;
 }
 
-NDX_DEF(int, core_get,
+NDX_LISTENER(int, core_get,
 		int, fd,
 		char *, body)
 {
@@ -367,13 +361,13 @@ NDX_DEF(int, core_get,
 		snprintf(full_path, sizeof(full_path), "%s?%s", path, param);
 	else
 		snprintf(full_path, sizeof(full_path), "%s", path);
-	call_proxy_init("GET", full_path);
-	call_proxy_add_standard_headers(fd, modules_header);
+	proxy_init("GET", full_path);
+	proxy_add_standard_headers(fd, modules_header);
 	(void)cookie; (void)token; (void)host;
-	return call_proxy_head(fd);
+	return proxy_head(fd);
 }
 
-NDX_DEF(int, core_post,
+NDX_LISTENER(int, core_post,
 		int, fd,
 		char *, body,
 		size_t, len)
@@ -390,17 +384,17 @@ NDX_DEF(int, core_post,
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
-	call_proxy_init("POST", full_path);
-	call_proxy_add_standard_headers(fd, modules_header);
+	proxy_init("POST", full_path);
+	proxy_add_standard_headers(fd, modules_header);
 	(void)cookie; (void)token; (void)host;
-	return call_proxy_body(fd, body, len);
+	return proxy_body(fd, body, len);
 }
 
 static int index_add_get_handler(
 		int fd,
 		char *body)
 {
-	return call_core_get(fd, body);
+	return core_get(fd, body);
 }
 
 /* GET /<module>/:id/delete — confirmation page */
@@ -408,43 +402,40 @@ static int index_delete_get_handler(int fd, char *body)
 {
 	(void)body;
 
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
-		return 1;
-
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
-		return call_bad_request(fd, "Missing ID");
+		return bad_request(fd, "Missing ID");
 
 	const char *module = index_name(fd);
 
 	char item_path[512];
-	snprintf(item_path, sizeof(item_path),
-			"./items/%s/items/%s", module, id);
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return server_error(fd, "Failed to resolve item path");
 
-	if (!call_item_check_ownership(item_path, username))
-		return call_respond_error(fd, 403, "Forbidden");
+	const char *username = get_request_user(fd);
+	if (item_require_access(fd, item_path, username,
+			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+			"Not found", "Forbidden"))
+		return 1;
 
 	char title[256] = {0};
-	char title_path[640];
-	snprintf(title_path, sizeof(title_path), "%s/title", item_path);
-	FILE *tfp = fopen(title_path, "r");
-	if (tfp) {
-		if (fgets(title, sizeof(title) - 1, tfp))
-			title[strcspn(title, "\n")] = '\0';
-		fclose(tfp);
+	read_meta_file(item_path, "title", title, sizeof(title));
+
+	json_object_t *jo = json_object_new(0);
+	if (!jo)
+		return respond_error(fd, 500, "OOM");
+	if (json_object_kv_str(jo, "id", id) != 0 ||
+			json_object_kv_str(jo, "title", title) != 0) {
+		json_object_free(jo);
+		return respond_error(fd, 500, "OOM");
 	}
-
-	char title_esc[512] = {0};
-	call_json_escape(title, title_esc, sizeof(title_esc));
-
-	char json[768];
-	snprintf(json, sizeof(json),
-		"{\"id\":\"%s\",\"title\":\"%s\"}", id, title_esc);
-
-	call_proxy_header("Content-Type", "application/json");
-	return call_core_post(fd, json, strlen(json));
+	char *json = json_object_finish(jo);
+	if (!json)
+		return respond_error(fd, 500, "OOM");
+	int rc = core_post_json(fd, json);
+	free(json);
+	return rc;
 }
 
 /* POST /<module>/:id/delete — perform delete */
@@ -452,44 +443,25 @@ static int index_delete_handler(int fd, char *body)
 {
 	(void)body;
 
-	const char *username = call_get_request_user(fd);
-	if (call_require_login(fd, username))
-		return 1;
-
 	char id[128] = {0};
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
-		return call_bad_request(fd, "Missing ID");
+		return bad_request(fd, "Missing ID");
 
 	const char *module = index_name(fd);
 
 	char item_path[512];
-	snprintf(item_path, sizeof(item_path),
-			"./items/%s/items/%s", module, id);
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return server_error(fd, "Failed to resolve item path");
 
-	if (!call_item_check_ownership(item_path, username))
-		return call_respond_error(fd, 403, "Forbidden");
+	const char *username = get_request_user(fd);
+	if (item_require_access(fd, item_path, username,
+			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+			"Not found", "Forbidden"))
+		return 1;
 
 	/* Remove ownership file */
-	call_item_unlink_owner(item_path);
-
-	/* Remove all files in the item directory, then rmdir */
-	{
-		DIR *d = opendir(item_path);
-		if (d) {
-			struct dirent *e;
-			char fpath[PATH_MAX];
-			while ((e = readdir(d)) != NULL) {
-				if (e->d_name[0] == '.')
-					continue;
-				snprintf(fpath, sizeof(fpath), "%s/%s",
-						item_path, e->d_name);
-				unlink(fpath);
-			}
-			closedir(d);
-		}
-	}
-	rmdir(item_path);
+	item_unlink_owner(item_path);
 
 	/* Find module slot and call cleanup + index_del */
 	unsigned hd = 0;
@@ -502,12 +474,15 @@ static int index_delete_handler(int fd, char *body)
 		}
 	}
 
+	if (item_remove_path_recursive(item_path) != 0)
+		return server_error(fd, "Failed to delete item path");
+
 	if (hd)
 		qmap_del(hd, id);
 
 	char location[256];
 	snprintf(location, sizeof(location), "/%s/", module);
-	return call_redirect(fd, location);
+	return redirect(fd, location);
 }
 
 void ndx_install(void)

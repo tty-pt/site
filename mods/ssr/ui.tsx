@@ -1,3 +1,5 @@
+import type { ComponentChildren } from "preact";
+
 /**
  * parseErrorBody — if body is a urlencoded `error=...&status=...` envelope
  * (as emitted by call_respond_error in C), returns { error, status } so the
@@ -9,6 +11,58 @@ export function parseErrorBody(text: string): { error: string; status: number } 
   const error = params.get("error");
   if (!error) return null;
   return { error, status: Number(params.get("status") ?? "500") };
+}
+
+export type PostedResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; status: number };
+
+export async function readPostedJson<T>(req: Request): Promise<PostedResult<T>> {
+  const text = await req.text();
+  const err = parseErrorBody(text);
+  if (err) return { ok: false, ...err };
+  return { ok: true, data: JSON.parse(text) as T };
+}
+
+export async function readPostedForm(req: Request): Promise<URLSearchParams> {
+  return new URLSearchParams(await req.text());
+}
+
+export function modulePath(module: string): string {
+  return `/${module}`;
+}
+
+export function moduleCollectionPath(module: string): string {
+  return `/${module}/`;
+}
+
+export function moduleItemPath(module: string, id: string): string {
+  return `/${module}/${id}`;
+}
+
+export function moduleItemActionPath(module: string, id: string, action: string): string {
+  return `/${module}/${id}/${action}`;
+}
+
+export function moduleActionPath(module: string, action: string): string {
+  return `/${module}/${action}`;
+}
+
+export function authPath(action: string): string {
+  return `/auth/${action}`;
+}
+
+export function loginRedirect(req: Request): Response {
+  const reqUrl = new URL(req.url);
+  const forwardedHost = req.headers.get("X-Forwarded-Host");
+  if (forwardedHost) {
+    reqUrl.host = forwardedHost;
+  }
+  return Response.redirect(new URL(authLoginHref(reqUrl.pathname + reqUrl.search), reqUrl), 303);
+}
+
+export function authLoginHref(ret: string): string {
+  return `${authPath("login")}?${new URLSearchParams({ ret }).toString()}`;
 }
 
 export interface OwnerAction {
@@ -33,8 +87,8 @@ export function ItemMenu({ module, id, isOwner }: { module: string; id: string; 
   if (!isOwner) return null;
   return (
     <OwnerActions actions={[
-      { href: `/${module}/${id}/edit`, icon: "✏️", label: "edit" },
-      { href: `/${module}/${id}/delete`, icon: "🗑️", label: "delete" },
+      { href: moduleItemActionPath(module, id, "edit"), icon: "✏️", label: "edit" },
+      { href: moduleItemActionPath(module, id, "delete"), icon: "🗑️", label: "delete" },
     ]} />
   );
 }
@@ -68,11 +122,11 @@ export function Menu({ user, path, icon }: { user: string | null; path: string; 
         </>
       ) : (
         <>
-          <a className="btn" href={`/auth/login?ret=${path}`}>
+          <a className="btn" href={authLoginHref(path)}>
             <span>🔑</span>
             <label>login</label>
           </a>
-          <a className="btn" href="/auth/register">
+          <a className="btn" href={authPath("register")}>
             <span>📝</span>
             <label>register</label>
           </a>
@@ -95,12 +149,89 @@ export function ErrorPage({ status, message, user, path }: {
   );
 }
 
-export function Layout({ children, user, title, path, menuItems, icon }: {
-  children: any;
+export function PageSection({ title, children }: {
+  title: string;
+  children: ComponentChildren;
+}) {
+  return (
+    <>
+      <h3>{title}</h3>
+      {children}
+    </>
+  );
+}
+
+export function EmptyState({ message }: { message: string }) {
+  return <p className="text-muted">{message}</p>;
+}
+
+export function Field({ label, children }: {
+  label: string;
+  children: ComponentChildren;
+}) {
+  return (
+    <label>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+export function FormActions({
+  cancelHref,
+  submitLabel = "Save Changes",
+  cancelLabel = "Cancel",
+  children,
+}: {
+  cancelHref: string;
+  submitLabel?: string;
+  cancelLabel?: string;
+  children?: ComponentChildren;
+}) {
+  return (
+    <div className="flex gap-2">
+      <button type="submit" className="btn btn-primary">
+        {submitLabel}
+      </button>
+      {children}
+      <a href={cancelHref} className="btn btn-secondary">
+        {cancelLabel}
+      </a>
+    </div>
+  );
+}
+
+export function FormPage({
+  user,
+  title,
+  path,
+  icon,
+  heading,
+  children,
+}: {
   user: string | null;
   title: string;
   path: string;
-  menuItems?: any;
+  icon?: string;
+  heading?: string;
+  children: ComponentChildren;
+}) {
+  return (
+    <Layout user={user} title={title} path={path} icon={icon}>
+      <div className="center">
+        {heading && <h1>{heading}</h1>}
+        {children}
+      </div>
+    </Layout>
+  );
+}
+
+export function Layout({ children, user, title, path, menuItems, icon }: {
+  children: ComponentChildren;
+  user: string | null;
+  title: string;
+  path: string;
+  menuItems?: ComponentChildren;
   icon?: string;
 }) {
   return (<div>

@@ -222,8 +222,8 @@ The module's SSR component also registers routes in `ssr/index.tsx`:
 
 ### C Module Dependencies
 - `mods/ssr/ssr.so` - SSR rendering and proxy APIs
-  - `call_ssr_proxy_get(fd, path)` - Proxy GET to Deno
-  - `call_ssr_proxy_post(fd, path, body, len)` - Proxy POST with processed data
+  - `ssr_proxy_get(fd, path)` - Proxy GET to Deno
+  - `ssr_proxy_post(fd, path, body, len)` - Proxy POST with processed data
 - `mods/mpfd/mpfd.so` - Multipart form data parsing
 - `lib/transp/libtransp.so` - Chord transposition library (C linkage)
 

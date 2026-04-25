@@ -112,11 +112,11 @@ static int proxy_await_response(int fd)
   return 0;
 
 upstream_err:
-  call_respond_plain(fd, 502, "Upstream Error");
+  respond_plain(fd, 502, "Upstream Error");
   return -1;
 }
 
-NDX_DEF(int, proxy_init,
+NDX_LISTENER(int, proxy_init,
     const char *, method,
     const char *, path)
 {
@@ -185,7 +185,7 @@ NDX_DEF(int, proxy_init,
   return 0;
 }
 
-NDX_DEF(int, proxy_header,
+NDX_LISTENER(int, proxy_header,
     const char *, name,
     const char *, val)
 {
@@ -198,7 +198,7 @@ NDX_DEF(int, proxy_header,
 /* Streams raw data upstream.
  * Automatically finalizes headers on first call.
  */
-NDX_DEF(int, proxy_write,
+NDX_LISTENER(int, proxy_write,
     const char *, data,
     size_t, len)
 {
@@ -226,7 +226,7 @@ NDX_DEF(int, proxy_write,
 
 /* Finalizes headers, sends body data,
  * and starts the response read loop */
-NDX_DEF(int, proxy_body,
+NDX_LISTENER(int, proxy_body,
     int, fd,
     const char *, data,
     size_t, len)
@@ -244,12 +244,12 @@ NDX_DEF(int, proxy_body,
 }
 
 /* For GET or requests with no body */
-NDX_DEF(int, proxy_head, int, fd)
+NDX_LISTENER(int, proxy_head, int, fd)
 {
   return proxy_body(fd, NULL, 0);
 }
 
-NDX_DEF(int, proxy_connect,
+NDX_LISTENER(int, proxy_connect,
     const char *, host,
     unsigned, port)
 {
@@ -258,7 +258,7 @@ NDX_DEF(int, proxy_connect,
   return 0;
 }
 
-NDX_DEF(int, proxy_add_standard_headers,
+NDX_LISTENER(int, proxy_add_standard_headers,
     int, fd, const char *, modules_header)
 {
   char host[256] = {0};
@@ -266,18 +266,18 @@ NDX_DEF(int, proxy_add_standard_headers,
   char token[64] = {0};
 
   if (modules_header && modules_header[0])
-    call_proxy_header("X-Modules", modules_header);
+    proxy_header("X-Modules", modules_header);
 
   ndc_env_get(fd, host, "HTTP_HOST");
   if (host[0])
-    call_proxy_header("X-Forwarded-Host", host);
+    proxy_header("X-Forwarded-Host", host);
 
   ndc_env_get(fd, cookie, "HTTP_COOKIE");
-  call_get_cookie(cookie, token, sizeof(token));
+  get_cookie(cookie, token, sizeof(token));
   {
-    const char *username = call_get_session_user(token);
+    const char *username = get_session_user(token);
     if (username && *username)
-      call_proxy_header("X-Remote-User", (char *)username);
+      proxy_header("X-Remote-User", (char *)username);
   }
   return 0;
 }

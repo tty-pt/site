@@ -225,7 +225,7 @@ static void mpfd_clear(void)
 }
 
 /* Parse & Lifecycle */
-NDX_DEF(int, mpfd_parse, socket_t, fd, char *, body)
+NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body)
 {
 	char content_type[512] = {0};
 	char clen_str[32] = {0};
@@ -248,18 +248,20 @@ NDX_DEF(int, mpfd_parse, socket_t, fd, char *, body)
 }
 
 /* Field Inspection - All O(1) */
-NDX_DEF(int, mpfd_exists, const char *, name)
+static int
+mpfd_exists(const char *name)
 {
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
-NDX_DEF(int, mpfd_len, const char *, name)
+NDX_LISTENER(int, mpfd_len, const char *, name)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	return val ? (int)val->len : -1;
 }
 
-NDX_DEF(int, mpfd_filename, const char *, name, char *, buf, size_t, buf_len)
+static int
+mpfd_filename(const char *name, char *buf, size_t buf_len)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
@@ -272,7 +274,7 @@ NDX_DEF(int, mpfd_filename, const char *, name, char *, buf, size_t, buf_len)
 }
 
 /* Data Retrieval */
-NDX_DEF(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
+NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
@@ -284,7 +286,8 @@ NDX_DEF(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 	return (int)val->len;
 }
 
-NDX_DEF(int, mpfd_save, const char *, name, const char *, path)
+static int
+mpfd_save(const char *name, const char *path)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
@@ -298,7 +301,8 @@ NDX_DEF(int, mpfd_save, const char *, name, const char *, path)
 }
 
 /* Configuration */
-NDX_DEF(int, mpfd_set_limits, size_t, max_field_size, size_t, max_total_size)
+static int
+mpfd_set_limits(size_t max_field_size, size_t max_total_size)
 {
 	mpfd_max_field_size = max_field_size;
 	mpfd_max_total_size = max_total_size;

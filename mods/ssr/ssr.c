@@ -173,12 +173,12 @@ on_ndc_update(unsigned long long dt)
 	/* Probe port 3000 until ready */
 	if (!deno_ready && probe_port_3000()) {
 		deno_ready = 1;
-		call_proxy_connect("127.0.0.1", 3000);
+		proxy_connect("127.0.0.1", 3000);
 		fprintf(stderr, "ssr: deno ready, proxy connected\n");
 	}
 }
 
-NDX_DEF(int, on_ndc_exit, int, i)
+NDX_LISTENER(int, on_ndc_exit, int, i)
 {
 	if (deno_pid > 0) {
 		fprintf(stderr, "ssr: stopping deno pid %d\n", (int)deno_pid);
