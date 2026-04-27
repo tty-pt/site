@@ -3,10 +3,7 @@ CC ?= clang
 MOD_DIRS := $(sort $(dir $(wildcard mods/*/Makefile)))
 MODULE_DIRS := $(sort $(dir $(wildcard modules/*/Makefile)))
 
-all: mods modules htdocs/styles.css
-
-htdocs/styles.css: mods/ssr/input.css
-	npm run build:css
+all: mods modules
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done

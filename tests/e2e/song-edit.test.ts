@@ -5,7 +5,7 @@
  *
  * Requires both servers to be running:
  *   NDC on port 8080  (./start.sh)
- *   Fresh on port 3000 (deno task start)
+ *   ndc on port 8080
  */
 
 import { chromium } from "npm:playwright";

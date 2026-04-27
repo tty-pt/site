@@ -7,7 +7,7 @@
  *   3. Submit deletion form
  *   4. Poem is gone (detail page returns 404 or poem listing no longer has it)
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

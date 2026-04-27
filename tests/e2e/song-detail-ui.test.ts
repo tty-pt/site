@@ -7,7 +7,7 @@
  *   3. Logged in as owner: edit + delete buttons appear in sidebar (.functions)
  *   4. Logged out: edit + delete buttons are absent
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

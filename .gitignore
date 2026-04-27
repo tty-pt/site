@@ -1,9 +1,12 @@
 /node_modules/
 /.deno/
 /items
-/htdocs
+/htdocs/*
+!/htdocs/app.js
+!/htdocs/styles.css
 *.so
 *.o
+*.swp
 /_fresh/
 /deno.lock
 /fresh.gen.ts
@@ -35,3 +38,4 @@
 /users
 /usr
 /mods/song/lib/transp/test_transp
+/mods/song/lib/transp/libtransp.a

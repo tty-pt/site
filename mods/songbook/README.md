@@ -14,7 +14,7 @@ The songbook module provides:
 ## Architecture
 
 - **Backend:** `sb.c` - C module with ndc HTTP handlers
-- **Frontend:** `ssr/index.tsx` - Deno SSR React component  
+- **SSR:** `ssr.rs` - Rust Dioxus SSR renderer
 - **Storage:** Filesystem + qmap index database
 - **Dependencies:** auth, common, mpfd, choir (indirect)
 

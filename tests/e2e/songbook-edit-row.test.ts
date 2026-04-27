@@ -1,5 +1,5 @@
 /**
- * E2E test: songbook edit page — SongbookEditRow island
+ * E2E test: songbook edit page — edit row client-side enhancement
  *
  * Tests:
  *   1. Edit page renders datalists for types (#types-0) and songs (#songs-0)
@@ -7,7 +7,7 @@
  *   3. Hidden orig field (input[name="orig_0"]) is present
  *   4. Submitting with a known song + key saves correctly and song appears on view page
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -18,7 +18,7 @@ const KNOWN_SONG_ID = "a_alegria_esta_no_coracao";
 const KNOWN_SONG_TITLE = "A alegria está no coração";
 
 Deno.test({
-  name: "songbook edit: SongbookEditRow island renders correctly and saves song with key",
+  name: "songbook edit: client-side row enhancement renders correctly and saves song with key",
   sanitizeResources: false,
   sanitizeOps: false,
 }, async () => {
@@ -50,12 +50,11 @@ Deno.test({
     await page.waitForSelector("h1", { timeout: 5000 });
 
     // New songbook has 0 songs — click "+ Add Row" to append a blank row,
-    // which re-renders the page with one SongbookEditRow island.
+    // which re-renders the page with one edit row.
     await page.click('button[value="add_row"]');
     await page.waitForSelector("h1", { timeout: 5000 });
 
-    // Wait for the island to hydrate — select[name="key_0"] is a visible element
-    // rendered by the island; datalists are always hidden so we check attached.
+    // Wait for the client-side enhancement to attach; datalists stay hidden.
     await page.waitForSelector('select[name="key_0"]', { timeout: 8000 });
 
     // ── 1. Verify datalists exist ─────────────────────────────────────────────
@@ -92,7 +91,7 @@ Deno.test({
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 
-    // We use fetch (multipart) to POST the edit form, simulating the island submission.
+    // We use fetch (multipart) to POST the edit form, simulating the client-side submission.
     // song_0 uses datalist "Title [id]" format; key_0 = 5 (F), orig_0 = 0
     const fd = new FormData();
     fd.append("amount", "1");

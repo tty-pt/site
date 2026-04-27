@@ -7,7 +7,7 @@
  *   3. POST /songbook/<id>/edit with valid data redirects to the view page
  *   4. After save, the view page still shows the songbook title
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

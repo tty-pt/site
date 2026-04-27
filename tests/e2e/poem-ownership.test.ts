@@ -8,7 +8,7 @@
  *   4. User B tries to GET /poem/<id>/delete → 403
  *   5. User B tries to POST /poem/<id>/delete → 403
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

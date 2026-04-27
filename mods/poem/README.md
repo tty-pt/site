@@ -83,7 +83,7 @@ The module includes comprehensive error checking (added March 2026):
 ## Dependencies
 
 This module depends on:
-- `mods/ssr/ssr` - For SSR rendering and proxy functionality
+- `mods/ssr/ssr` - For SSR rendering
 - `mods/mpfd/mpfd` - For parsing multipart form data uploads
 
 Declared in `ndx_deps[]` and loaded via `ndx_load()` in `ndx_install()`.
@@ -153,7 +153,7 @@ mkdir -p /home/quirinpa/site/items/poem/items
 
 **Causes:**
 1. Directory doesn't exist (see above)
-2. SSR server (Deno) not running
+2. Site server not running
 3. Permissions issue on items directory
 
 **Debug:**
@@ -161,8 +161,8 @@ mkdir -p /home/quirinpa/site/items/poem/items
 # Check if directory exists
 ls -la items/poem/items/
 
-# Check if Deno SSR is running
-pgrep -a deno
+# Check if ndc is running
+pgrep -a ndc
 
 # Check directory permissions
 ls -ld items/poem/items/

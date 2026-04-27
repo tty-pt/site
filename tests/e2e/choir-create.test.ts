@@ -14,7 +14,7 @@
  *   9. View the choir song page (GET /choir/:id/song/:song_id)
  *  10. Delete song from choir → verify it no longer appears on detail page
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

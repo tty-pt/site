@@ -7,7 +7,7 @@
  *   3. Edit/Delete menu is NOT shown to user B
  *   4. User B's direct POST to /api/choir/:id/edit returns 403
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

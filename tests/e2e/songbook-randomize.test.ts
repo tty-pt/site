@@ -5,7 +5,7 @@
  * randomize button on the detail page and verifies the page stays on
  * the songbook detail (the randomize POST redirects back to the same page).
  *
- * Requires both servers running: NDC (8080), Fresh (3000).
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -62,7 +62,7 @@ Deno.test("songbook randomize: create songbook → seed data → click randomize
 
     // ── 3. Navigate to songbook detail page ───────────────────────────────────
     await page.goto(`${BASE}/songbook/${sbId}`);
-    // Wait for the SongItem island to hydrate — it renders a 🎲 randomize button
+    // Wait for the client-side controls to attach — they render a 🎲 randomize button
     await page.waitForSelector('button[type="submit"]', { timeout: 8000 });
 
     // ── 4. Click the randomize (🎲) button ────────────────────────────────────

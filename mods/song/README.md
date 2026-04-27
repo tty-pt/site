@@ -176,9 +176,9 @@ Registered in `chords.c` as pattern handlers:
 3. If transposition needed:
    - Reads chord file from filesystem
    - Calls `transp_buffer()` from libtransp.so
-   - Sends transposed data to Deno SSR via POST
+   - Sends transposed data to the SSR layer
 4. If no transposition (no query params):
-   - Proxies GET request to Deno SSR
+   - Sends the request to the SSR layer unchanged
    - SSR reads file directly
 5. SSR component receives either:
    - `body` parameter (pre-transposed data from C)
@@ -186,7 +186,7 @@ Registered in `chords.c` as pattern handlers:
 
 **Benefits:**
 - Performant C-based transposition
-- No FFI complexity in Deno
+- No JS/runtime coupling in the transposition path
 - Clean memory management (C frees after POST)
 - SSR focuses on rendering only
 
@@ -221,18 +221,14 @@ The module's SSR component also registers routes in `ssr/index.tsx`:
 ## Dependencies
 
 ### C Module Dependencies
-- `mods/ssr/ssr.so` - SSR rendering and proxy APIs
-  - `ssr_proxy_get(fd, path)` - Proxy GET to Deno
-  - `ssr_proxy_post(fd, path, body, len)` - Proxy POST with processed data
+- `mods/ssr/ssr.so` - SSR bridge APIs
 - `mods/mpfd/mpfd.so` - Multipart form data parsing
 - `lib/transp/libtransp.so` - Chord transposition library (C linkage)
 
 Loaded via `ndx_load()` and NDX_DEF declarations in `chords.c`
 
 ### SSR Dependencies
-- React 18
-- Deno std library (path utilities)
-- Layout component from `mods/ssr/ui.tsx`
+- Rust/Dioxus SSR renderer
 
 ### Transp Library
 - Location: `lib/transp/`
@@ -384,7 +380,7 @@ curl -F "id=test" -F "data=@file.txt" http://localhost:8080/chords/add
 
 **Fix:**
 1. Check directory: `ls items/chords/items/`
-2. Restart Deno SSR: `pkill -f deno && cd mods/ssr && deno run --allow-all server.ts &`
+2. Rebuild and restart the site server after SSR changes
 3. Ensure id doesn't start with dot (hidden files are skipped)
 
 ### Tests fail with "Connection refused"

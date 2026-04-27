@@ -6,7 +6,7 @@
  *   2. After submission, redirects to /song/<id> detail page
  *   3. Detail page shows the song title
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

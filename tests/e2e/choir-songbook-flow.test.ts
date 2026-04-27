@@ -19,7 +19,7 @@
  *   4. Add a songbook linked to that choir
  *   5. Verify the songbook view page already shows a song (auto-populated)
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -103,7 +103,7 @@ Deno.test({
     sbId = page.url().split("/songbook/")[1];
 
     // ── 5. Add 2 songs to songbook via edit page ───────────────────────────────
-    // Post the edit form directly with both rows (no need for island interaction)
+    // Post the edit form directly with both rows.
     const fd = new FormData();
     fd.append("amount", "2");
     fd.append("song_0", `${SONG1_TITLE} [${SONG1_ID}]`);

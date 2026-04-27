@@ -5,7 +5,7 @@
  *   1. GET /auth/login?ret=/song/ — hidden ret input has value "/song/"
  *   2. Logging in redirects to /song/, not /
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

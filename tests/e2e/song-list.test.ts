@@ -3,7 +3,7 @@
  *
  * Verifies that /song/ renders and shows song entries.
  *
- * Requires both servers running: NDC (8080), Fresh (3000).
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";

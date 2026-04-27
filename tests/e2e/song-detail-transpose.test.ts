@@ -1,11 +1,12 @@
 /**
- * E2E test: song detail — live transposition via JS island.
+ * E2E test: song detail — live transposition via client-side JS.
  *
- * The SongView island makes async fetch calls to /api/song/:id/transpose
- * whenever the user changes the key/notation. This test verifies the island
+ * The song detail client-side enhancement makes async fetch calls to
+ * /api/song/:id/transpose whenever the user changes the key/notation.
+ * This test verifies the enhancement
  * correctly updates the chord display after selecting a different key.
  *
- * Requires: NDC (8080), Fresh (3000) running.
+ * Requires: ndc running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -14,7 +15,7 @@ import { createAndLoginUser } from "./helpers/auth.ts";
 const BASE = "http://localhost:8080";
 const SONG_ID = "a_alegria_esta_no_coracao";
 
-Deno.test("song detail: login → view song → transpose via island → verify display changed", async () => {
+Deno.test("song detail: login → view song → transpose via JS → verify display changed", async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
@@ -35,7 +36,7 @@ Deno.test("song detail: login → view song → transpose via island → verify 
     // Select a different key (index 5 = +5 semitones)
     await selectEl.selectOption({ index: 5 });
 
-    // Wait for the island to update the chord display by polling
+    // Wait for the client-side update to change the chord display
     const deadline = Date.now() + 5000;
     let newHtml = "";
     while (Date.now() < deadline) {
