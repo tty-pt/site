@@ -37,4 +37,6 @@ $(TARGET): $(SRC) $(MAKEFILE_DEPS)
 clean:
 	rm -f $(TARGET)
 
-.PHONY: all clean
+distclean: clean
+
+.PHONY: all clean distclean

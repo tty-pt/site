@@ -12,8 +12,7 @@ rust-renderer:
 
 ${TARGET}: rust-renderer
 
-clean:
-	rm -f ${TARGET}
+distclean: clean
 	cargo clean --manifest-path ${RUST_RENDERER_DIR}/Cargo.toml
 
-.PHONY: clean rust-renderer
+.PHONY: distclean rust-renderer

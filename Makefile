@@ -43,4 +43,7 @@ test: unit-tests pages-test e2e-tests
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 
-.PHONY: all mods modules run clean test unit-tests pages-test integration-tests e2e-tests test-data-dirs
+distclean:
+	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d distclean; done
+
+.PHONY: all mods modules run clean distclean test unit-tests pages-test integration-tests e2e-tests test-data-dirs
