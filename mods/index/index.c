@@ -11,9 +11,9 @@
 #include <ttypt/ndc.h>
 
 #include "./../common/common.h"
-#include "./../proxy/proxy.h"
 #include "./../mpfd/mpfd.h"
 #include "./../auth/auth.h"
+#include "./../ssr/ssr.h"
 
 typedef void (*index_cleanup_fn)(const char *id);
 
@@ -186,6 +186,7 @@ static int
 index_page(unsigned fd, unsigned hd, char *path, char *title)
 {
 	register size_t total = 0;
+	size_t body_len;
 	unsigned cur = qmap_iter(hd, NULL, 0);
 	const void *key, *val;
 	char *body, *s;
@@ -211,12 +212,20 @@ index_page(unsigned fd, unsigned hd, char *path, char *title)
 				(char *) key,
 				(char *) val);
 	}
+	body_len = (size_t)(s - body);
 
 	// send it
 	*s = '\0';
-	proxy_init("POST", path);
-	proxy_add_standard_headers(fd, modules_header);
-	ret = proxy_body(fd, body, total);
+	(void)title;
+	{
+		char query[512] = {0};
+		char host[256] = {0};
+		const char *username = get_request_user(fd);
+		ndc_env_get(fd, query, "QUERY_STRING");
+		ndc_header_get(fd, "Host", host, sizeof(host));
+		ret = ssr_render(fd, "POST", path, query, body, body_len,
+			username ? username : "", host, modules_header);
+	}
 	free(body);
 	return ret;
 }
@@ -297,6 +306,9 @@ NDX_LISTENER(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "GET:/%s", id);
 	ndc_register_handler(buf, index_list_handler);
 
+	snprintf(buf, sizeof(buf), "GET:/%s/", id);
+	ndc_register_handler(buf, index_list_handler);
+
 	snprintf(buf, sizeof(buf), "GET:/%s/:id/delete", id);
 	ndc_register_handler(buf, index_delete_get_handler);
 
@@ -357,14 +369,11 @@ NDX_LISTENER(int, core_get,
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
-	if (param[0])
-		snprintf(full_path, sizeof(full_path), "%s?%s", path, param);
-	else
-		snprintf(full_path, sizeof(full_path), "%s", path);
-	proxy_init("GET", full_path);
-	proxy_add_standard_headers(fd, modules_header);
+	snprintf(full_path, sizeof(full_path), "%s", path);
 	(void)cookie; (void)token; (void)host;
-	return proxy_head(fd);
+	ndc_header_get(fd, "Host", host, sizeof(host));
+	return ssr_render(fd, "GET", full_path, param, NULL, 0,
+		get_request_user(fd), host, modules_header);
 }
 
 NDX_LISTENER(int, core_post,
@@ -383,11 +392,11 @@ NDX_LISTENER(int, core_post,
 
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
-	snprintf(full_path, sizeof(full_path), "%s?%s", uri, param);
-	proxy_init("POST", full_path);
-	proxy_add_standard_headers(fd, modules_header);
+	snprintf(full_path, sizeof(full_path), "%s", uri);
 	(void)cookie; (void)token; (void)host;
-	return proxy_body(fd, body, len);
+	ndc_header_get(fd, "Host", host, sizeof(host));
+	return ssr_render(fd, "POST", full_path, param, body, len,
+		get_request_user(fd), host, modules_header);
 }
 
 static int index_add_get_handler(
@@ -481,7 +490,7 @@ static int index_delete_handler(int fd, char *body)
 		qmap_del(hd, id);
 
 	char location[256];
-	snprintf(location, sizeof(location), "/%s/", module);
+	snprintf(location, sizeof(location), "/%s", module);
 	return redirect(fd, location);
 }
 
@@ -489,7 +498,6 @@ void ndx_install(void)
 {
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/mpfd/mpfd");
-	ndx_load("./mods/proxy/proxy");
 
 	module_hd = qmap_open(NULL, NULL,
 			QM_STR, QM_U32, 0x1FF, 0);

@@ -1,0 +1,16 @@
+[package]
+name = "ndc_ssr_render"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+base64 = "0.22"
+dioxus = "0.7.3"
+dioxus-ssr = "0.7.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2.5"

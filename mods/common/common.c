@@ -11,8 +11,6 @@
 
 #include <ttypt/ndc.h>
 
-#include "../proxy/proxy.h"
-
 #define COMMON_IMPL
 #include "common.h"
 #undef COMMON_IMPL
@@ -325,7 +323,6 @@ NDX_LISTENER(int, item_remove_path_recursive, const char *, item_path)
 
 NDX_LISTENER(int, core_post_json, int, fd, const char *, json)
 {
-	proxy_header("Content-Type", "application/json");
 	return core_post(fd, (char *)json, strlen(json));
 }
 

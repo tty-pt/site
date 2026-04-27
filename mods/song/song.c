@@ -699,6 +699,8 @@ void ndx_install(void)
 
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);
+	ndc_register_handler("GET:/song/:id/",
+			song_details_handler);
 	ndc_register_handler("GET:/song/:id/edit",
 			song_edit_get_handler);
 	ndc_register_handler("POST:/song/:id/edit",

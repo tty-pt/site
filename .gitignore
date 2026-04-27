@@ -27,3 +27,12 @@
 !/routes/_middleware.ts
 !/routes/[...slug].tsx
 /.cache
+/mods/ssr/rust-renderer/target
+/etc
+/home
+/lib
+/lib64
+/users
+/usr
+/mods/song/lib/transp/test_transp
+/mods/choir/repertoire_impl.inc

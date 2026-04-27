@@ -532,6 +532,7 @@ ndx_install(void)
 	ndc_register_handler("GET:/choir/add", handle_choir_add_get);
 	ndc_register_handler("GET:/choir/:id/edit", handle_choir_edit_get);
 	ndc_register_handler("GET:/choir/:id", choir_details_handler);
+	ndc_register_handler("GET:/choir/:id/", choir_details_handler);
 	ndc_register_handler("GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	ndc_register_handler("GET:/api/choir/:id/songs", handle_choir_songs_list);
 	ndc_register_handler("POST:/api/choir/:id/songs", handle_choir_song_add);
