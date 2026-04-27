@@ -22,6 +22,7 @@ LDFLAGS += -shared
 
 LDLIBS += -lndc -lqmap
 LDLIBS += $(EXTRA_LDLIBS)
+LDLIBS += $(EXTRA_LDLIBS-$(uname))
 
 all: dirs $(TARGET)
 
