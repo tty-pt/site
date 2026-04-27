@@ -3,7 +3,7 @@ BUILD_MK_DIR := $(dir $(BUILD_MK))
 REPO_ROOT := $(BUILD_MK_DIR)
 MOD_NAME := $(notdir $(CURDIR))
 
-include $(BUILD_MK_DIR)/../mk/portable.mk
+include $(HOME)/mk/portable.mk
 
 MAKEFILE_DEPS := $(MAKEFILE_LIST)
 

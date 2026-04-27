@@ -1,4 +1,4 @@
-include ../../../../../mk/portable.mk
+include $(HOME)/mk/portable.mk
 
 CC ?= ${cc}
 CFLAGS += -g -O0 -fPIC
