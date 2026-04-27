@@ -2,26 +2,25 @@ include ../../../../../mk/portable.mk
 
 CC ?= ${cc}
 CFLAGS += -g -O0 -fPIC
-LDFLAGS += -shared
 LDLIBS += -lqmap
 
-TARGET = libtransp.so
+TARGET = libtransp.a
 SRC = transp.c
 OBJ = $(SRC:.c=.o)
 
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	ar rcs $@ $^
 
 %.o: %.c transp.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 test_transp: test_transp.c $(TARGET)
-	$(CC) $(CFLAGS) -o $@ $< -L. -ltransp -Wl,-rpath,. $(LDLIBS)
+	$(CC) $(CFLAGS) -o $@ $< ./$(TARGET) $(LDLIBS)
 
 test: test_transp
-	LD_LIBRARY_PATH=. ./test_transp
+	./test_transp
 
 clean:
 	rm -f $(OBJ) $(TARGET) test_transp

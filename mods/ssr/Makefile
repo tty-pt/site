@@ -1,9 +1,8 @@
 RUST_RENDERER_DIR = rust-renderer
-RUST_RENDERER_LIB = ${RUST_RENDERER_DIR}/target/release/libndc_ssr_render.so
+RUST_RENDERER_LIB = ${RUST_RENDERER_DIR}/target/release/libndc_ssr_render.a
 
-EXTRA_LDLIBS += -L${RUST_RENDERER_DIR}/target/release -lndc_ssr_render -lqsys
+EXTRA_LDLIBS += ${RUST_RENDERER_LIB} -lqsys
 LDFLAGS += -shared
-LDFLAGS += -Wl,-rpath,\$$ORIGIN/rust-renderer/target/release
 
 include ../../build.mk
 

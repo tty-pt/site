@@ -687,15 +687,13 @@ void ndx_install(void)
 		fprintf(stderr, "[song] Failed to initialize"
 				" transp context\n");
 
-	/* Build type index */
-	build_type_index(doc_root);
-
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
 
 	index_open("Song", 0, 1, song_cleanup);
+	build_type_index(doc_root);
 
 	ndc_register_handler("GET:/song/:id",
 			song_details_handler);

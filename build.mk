@@ -5,6 +5,8 @@ MOD_NAME := $(notdir $(CURDIR))
 
 include $(BUILD_MK_DIR)/../mk/portable.mk
 
+MAKEFILE_DEPS := $(MAKEFILE_LIST)
+
 ifneq (,$(findstring /modules/,$(CURDIR)))
 TARGET ?= be/nd_$(MOD_NAME).so
 SRC ?= be/nd_$(MOD_NAME).c
@@ -29,7 +31,7 @@ all: dirs $(TARGET)
 dirs:
 	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) $(MAKEFILE_DEPS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
 clean:
