@@ -57,15 +57,8 @@ ndx_install(void)
 	ndx_load("./mods/common/common");
 
 	ndc_register_handler("GET:/sb", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/add", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/:id", songbook_redirect_handler);
-	ndc_register_handler("/sb/:id", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/:id/edit", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/:id/delete", songbook_redirect_handler);
+	ndc_register_handler("GET:/sb/*", songbook_redirect_handler);
 
 	ndc_register_handler("GET:/chords", song_redirect_handler);
-	ndc_register_handler("GET:/chords/", song_redirect_handler);
-	ndc_register_handler("GET:/chords/:id", song_redirect_handler);
-	ndc_register_handler("/chords/:id", song_redirect_handler);
+	ndc_register_handler("GET:/chords/*", song_redirect_handler);
 }

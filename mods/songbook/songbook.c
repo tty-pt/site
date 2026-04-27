@@ -642,8 +642,6 @@ void ndx_install(void)
 
 	ndc_register_handler("GET:/songbook/:id",
 			songbook_details_handler);
-	ndc_register_handler("GET:/songbook/:id/",
-			songbook_details_handler);
 
 	ndc_register_handler("POST:/songbook/:id/randomize", handle_sb_randomize);
 	ndc_register_handler("POST:/songbook/:id/transpose", handle_sb_transpose);

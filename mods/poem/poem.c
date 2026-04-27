@@ -347,7 +347,6 @@ void ndx_install(void) {
 
 	ndc_register_handler("POST:/poem/add", poem_add_post_handler);
 	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
-	ndc_register_handler("GET:/poem/:id/", poem_detail_handler);
 	ndc_register_handler("GET:/poem/:id/edit", poem_edit_get_handler);
 	ndc_register_handler("POST:/poem/:id/edit", poem_edit_post_handler);
 }
