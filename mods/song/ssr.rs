@@ -75,7 +75,13 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let audio = payload.audio.filter(|s| !s.is_empty());
             let pdf = payload.pdf.filter(|s| !s.is_empty());
             let menu_items = Some(rsx! {
-                form { id: "transpose-form", method: "GET", action: "{path}", class: "flex flex-col gap-2",
+                form {
+                    id: "transpose-form",
+                    method: "GET",
+                    action: "{path}",
+                    class: "flex flex-col gap-2",
+                    "data-song-id": "{id}",
+                    "data-song-transpose-runtime": "wasm",
                     label {
                         "Key:"
                         select { name: "t",

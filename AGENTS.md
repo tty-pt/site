@@ -6,7 +6,8 @@ Current runtime:
 - `ndc` on port `8080` handles HTTP, auth, sessions, uploads, and business logic.
 - `mods/ssr/ssr.c` calls the Rust renderer directly.
 - `mods/ssr/rust-renderer/` renders HTML with Dioxus SSR.
-- `htdocs/app.js` provides the small amount of client-side enhancement.
+- `htdocs/wasm.js` loads the Rust/WASM browser enhancements.
+- `mods/song/client/` and `mods/songbook/client/` own the current browser-side enhancement code.
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
 
@@ -23,6 +24,14 @@ Notes:
 - `make clean` removes built module artifacts but keeps Cargo caches.
 - `make distclean` also runs deeper per-module cleanup, including `cargo clean`.
 - If `8080` is busy: `PORT=8081 make run`
+- `make` only rebuilds the wasm browser assets when both `wasm-bindgen` and the `wasm32-unknown-unknown` target are installed.
+
+WASM setup:
+
+```bash
+cargo install -f wasm-bindgen-cli
+rustup target add wasm32-unknown-unknown
+```
 
 For manual startup:
 

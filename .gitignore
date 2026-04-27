@@ -2,8 +2,12 @@
 /.deno/
 /items
 /htdocs/*
-!/htdocs/app.js
 !/htdocs/styles.css
+!/htdocs/wasm.js
+!/htdocs/song_client.js
+!/htdocs/song_client_bg.wasm
+!/htdocs/songbook_client.js
+!/htdocs/songbook_client_bg.wasm
 *.so
 *.o
 *.swp
@@ -31,6 +35,7 @@
 !/routes/[...slug].tsx
 /.cache
 /mods/ssr/rust-renderer/target
+/mods/*/client/target
 /etc
 /home
 /lib

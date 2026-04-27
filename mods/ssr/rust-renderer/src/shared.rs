@@ -110,7 +110,7 @@ pub(crate) fn login_redirect(ctx: &RequestContext) -> ResponsePayload {
 fn render_document(title: &str, body: Element) -> String {
     let body_html = render_element(body);
     format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\"></head><body style=\"margin: 0\">{}</body></html>",
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\"></head><body style=\"margin: 0\">{}<script type=\"module\" src=\"/wasm.js\"></script></body></html>",
         escape_html(title),
         body_html
     )
@@ -261,7 +261,6 @@ pub(crate) fn layout(
                 h1 { "{title}" }
                 { children }
             }
-            script { src: "/app.js", defer: true }
         }
     }
 }

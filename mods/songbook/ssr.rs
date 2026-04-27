@@ -204,6 +204,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                                                                     }
                                                                 }
                                                                 input { r#type: "hidden", name: "n", value: "{index}" }
+                                                                button { r#type: "submit", class: "btn py-1 px-2", "Apply" }
                                                             }
                                                             form { method: "POST", action: "/songbook/{id}/randomize", enctype: "multipart/form-data",
                                                                 input { r#type: "hidden", name: "n", value: "{index}" }

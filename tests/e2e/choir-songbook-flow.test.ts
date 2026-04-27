@@ -49,7 +49,7 @@ Deno.test({
 
     await page.route("**/_frsh/js/**", (route) => route.abort());
     await page.route("**/styles.css", (route) => route.abort());
-    await page.route("**/app.js", (route) => route.abort());
+    await page.route("**/wasm.js", (route) => route.abort());
     await page.route("**/favicon.ico", (route) => route.abort());
 
     const GOTO = { waitUntil: "domcontentloaded" as const };
@@ -167,7 +167,7 @@ Deno.test({
 
     await page.route("**/_frsh/js/**", (route) => route.abort());
     await page.route("**/styles.css", (route) => route.abort());
-    await page.route("**/app.js", (route) => route.abort());
+    await page.route("**/wasm.js", (route) => route.abort());
     await page.route("**/favicon.ico", (route) => route.abort());
 
     const GOTO = { waitUntil: "domcontentloaded" as const };

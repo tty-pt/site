@@ -37,7 +37,7 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     // and stall subsequent API calls. We only need the SSR HTML for our checks.
     await page.route("**/_frsh/js/**", (route) => route.abort());
     await page.route("**/styles.css", (route) => route.abort());
-    await page.route("**/app.js", (route) => route.abort());
+    await page.route("**/wasm.js", (route) => route.abort());
     await page.route("**/favicon.ico", (route) => route.abort());
 
     const user = await createAndLoginUser(page, BASE);

@@ -9,7 +9,8 @@ This site runs as an NDC application with Rust SSR.
 - `ndc` handles HTTP, auth, sessions, file uploads, and business logic.
 - `mods/ssr/ssr.c` bridges NDC to the Rust renderer.
 - `mods/ssr/rust-renderer/` renders HTML with Dioxus SSR.
-- `htdocs/app.js` provides the small amount of client-side enhancement.
+- `htdocs/wasm.js` loads the browser-side wasm modules.
+- `mods/song/client/` and `mods/songbook/client/` provide Rust/WASM browser enhancements, built with `wasm-bindgen`.
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
 
@@ -38,9 +39,27 @@ make clean
 make distclean
 ```
 
-- `make` builds all modules
+- `make` builds all modules and rebuilds the checked-in wasm browser assets when the local wasm toolchain is available
 - `make clean` removes built module artifacts but keeps Cargo caches
 - `make distclean` also runs deeper per-module cleanup, including Rust `cargo clean`
+
+## WASM Setup
+
+If you want `make` to rebuild the song client wasm locally, install the CLI and target once:
+
+```bash
+cargo install -f wasm-bindgen-cli
+rustup target add wasm32-unknown-unknown
+```
+
+Then verify:
+
+```bash
+wasm-bindgen --version
+rustup target list --installed | grep wasm32-unknown-unknown
+```
+
+On OpenBSD, `cargo install` is the expected path for `wasm-bindgen-cli`.
 
 ## Test
 
@@ -61,6 +80,7 @@ deno test --allow-all tests/e2e/song-add.test.ts
 
 - C compiler
 - Rust/Cargo
+- `wasm-bindgen` CLI + `rustup target add wasm32-unknown-unknown` if you want to rebuild the wasm browser assets locally
 - `ndc`, `ndx`, `qmap`
 - Deno only for the Playwright e2e test runner
 
@@ -75,5 +95,6 @@ deno test --allow-all tests/e2e/song-add.test.ts
 ## Notes
 
 - Checked-in browser assets live in [htdocs](/home/quirinpa/site/htdocs).
+- The browser enhancement path is now wasm-driven; there is no handwritten `app.js` runtime left.
 - The Rust lockfile is tracked at [mods/ssr/rust-renderer/Cargo.lock](/home/quirinpa/site/mods/ssr/rust-renderer/Cargo.lock).
 - The old Fresh/proxy frontend tree has been removed.
