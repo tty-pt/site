@@ -1,7 +1,9 @@
-CC = cc
-CFLAGS = -g -O0 -fPIC
-LDFLAGS = -shared -L../../ndc/lib -L../../qmap/lib -Wl,-rpath,../../ndc/lib -Wl,-rpath,../../qmap/lib
-LDLIBS = -lqmap
+include ../../../../../mk/portable.mk
+
+CC ?= ${cc}
+CFLAGS += -g -O0 -fPIC
+LDFLAGS += -shared
+LDLIBS += -lqmap
 
 TARGET = libtransp.so
 SRC = transp.c

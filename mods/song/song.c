@@ -405,7 +405,7 @@ api_song_transpose_handler(int fd, char *body)
 }
 
 
-/* SSR handler for /song/* routes
+/* SSR handler for /song/... routes
  * Handles transposition when query params present, delegates to Deno
  */
 static int

@@ -1,5 +1,9 @@
-REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+BUILD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
+BUILD_MK_DIR := $(dir $(BUILD_MK))
+REPO_ROOT := $(BUILD_MK_DIR)
 MOD_NAME := $(notdir $(CURDIR))
+
+include $(BUILD_MK_DIR)/../mk/portable.mk
 
 ifneq (,$(findstring /modules/,$(CURDIR)))
 TARGET ?= be/nd_$(MOD_NAME).so
@@ -10,18 +14,13 @@ SRC ?= $(MOD_NAME).c
 endif
 
 CC ?= clang
-NDX_PREFIX ?= /home/quirinpa/ndx
-NDC_PREFIX ?= /home/quirinpa/ndc
-QMAP_PREFIX ?= /home/quirinpa/qmap
 
-CFLAGS ?= -g -O0 -fPIC
+CFLAGS += -g -O0 -fPIC
 CFLAGS += $(EXTRA_CFLAGS)
 
-LDFLAGS ?= -shared
-LDFLAGS += -L$(NDC_PREFIX)/lib -L$(QMAP_PREFIX)/lib \
-	-Wl,-rpath,$(NDC_PREFIX)/lib -Wl,-rpath,$(QMAP_PREFIX)/lib
+LDFLAGS += -shared
 
-LDLIBS ?= -lndc -lqmap
+LDLIBS += -lndc -lqmap
 LDLIBS += $(EXTRA_LDLIBS)
 
 all: dirs $(TARGET)
