@@ -1,8 +1,6 @@
 include ../../build.mk
 
-ifneq ($(uname),OpenBSD)
-EXTRA_LDLIBS += -lcrypt
-endif
+EXTRA_LDLIBS-Linux += -lcrypt
 
 test:
 	./test.sh

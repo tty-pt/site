@@ -1,7 +1,7 @@
 CC ?= clang
 
-MOD_DIRS := $(sort $(dir $(wildcard mods/*/Makefile)))
-MODULE_DIRS := $(sort $(dir $(wildcard modules/*/Makefile)))
+MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
+MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
 all: mods modules
 

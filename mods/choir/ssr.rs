@@ -26,6 +26,7 @@ struct ChoirSong {
     title: String,
     preferredKey: i32,
     originalKey: i32,
+    #[allow(dead_code)]
     format: String,
 }
 
@@ -40,6 +41,7 @@ struct SongEntry {
 struct ChoirPayload {
     title: Option<String>,
     owner: Option<String>,
+    #[allow(dead_code)]
     counter: Option<String>,
     formats: Option<String>,
     songs: Option<Vec<ChoirSong>>,

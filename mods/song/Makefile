@@ -1,9 +1,9 @@
 EXTRA_CFLAGS += -I./lib/transp
 EXTRA_LDLIBS += ./lib/transp/libtransp.a
 
-all: transp.so client-wasm song.so
-
 include ../../build.mk
+
+all: transp.so client-wasm $(TARGET)
 
 transp.so:
 	${MAKE} -C lib/transp

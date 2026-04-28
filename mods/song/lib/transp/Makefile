@@ -1,7 +1,9 @@
 include $(HOME)/mk/portable.mk
 
 CC ?= ${cc}
-CFLAGS += -g -O0 -fPIC
+PICFLAGS-Unix = -fPIC
+PICFLAGS = ${PICFLAGS-${SYS}}
+CFLAGS += -g -O0 $(PICFLAGS)
 LDLIBS += -lqmap
 
 TARGET = libtransp.a
@@ -11,13 +13,13 @@ OBJ = $(SRC:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	ar rcs $@ $^
+	ar rcs $@ $(OBJ)
 
-%.o: %.c transp.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(OBJ): $(SRC) transp.h
+	$(CC) $(CFLAGS) -c -o $@ $(SRC)
 
 test_transp: test_transp.c $(TARGET)
-	$(CC) $(CFLAGS) -o $@ $< ./$(TARGET) $(LDLIBS)
+	$(CC) $(CFLAGS) -o $@ test_transp.c ./$(TARGET) $(LDLIBS)
 
 test: test_transp
 	./test_transp

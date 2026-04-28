@@ -1,23 +1,19 @@
-BUILD_MK := $(abspath $(lastword $(MAKEFILE_LIST)))
-BUILD_MK_DIR := $(dir $(BUILD_MK))
-REPO_ROOT := $(BUILD_MK_DIR)
-MOD_NAME := $(notdir $(CURDIR))
-
 include $(HOME)/mk/portable.mk
 
-MAKEFILE_DEPS := $(MAKEFILE_LIST)
+REPO_ROOT != cd ../.. && pwd
+MOD_NAME != basename "$$(pwd)"
+TARGET_AUTO != case "$$(pwd)" in */modules/*) printf 'be/nd_%s.%s\n' "$$(basename "$$(pwd)")" "${SO}";; *) printf '%s.%s\n' "$$(basename "$$(pwd)")" "${SO}";; esac
+SRC_AUTO != case "$$(pwd)" in */modules/*) printf 'be/nd_%s.c\n' "$$(basename "$$(pwd)")";; *) printf '%s.c\n' "$$(basename "$$(pwd)")";; esac
+PICFLAGS-Unix = -fPIC
+PICFLAGS = ${PICFLAGS-${SYS}}
 
-ifneq (,$(findstring /modules/,$(CURDIR)))
-TARGET ?= be/nd_$(MOD_NAME).so
-SRC ?= be/nd_$(MOD_NAME).c
-else
-TARGET ?= $(MOD_NAME).so
-SRC ?= $(MOD_NAME).c
-endif
+TARGET ?= $(TARGET_AUTO)
+SRC ?= $(SRC_AUTO)
+MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk
 
 CC ?= clang
 
-CFLAGS += -g -O0 -fPIC
+CFLAGS += -g -O0 $(PICFLAGS)
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
@@ -32,7 +28,7 @@ dirs:
 	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
 $(TARGET): $(SRC) $(MAKEFILE_DEPS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
 
 clean:
 	rm -f $(TARGET)
