@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    RequestContext, ResponsePayload, current_user, error_page, form_actions, form_page,
+    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
@@ -217,27 +217,24 @@ pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pdf = crate::get_pair(&pairs, "pdf").unwrap_or("").to_string();
     let data = crate::get_pair(&pairs, "data").unwrap_or("").to_string();
     let action = format!("/song/{id}/edit");
-    html_response(
-        &format!("Edit {}", if title.is_empty() { id } else { title.as_str() }),
-        form_page(
-            current_user(ctx),
-            &format!("Edit {}", if title.is_empty() { id } else { title.as_str() }),
-            &action,
-            Some("🎸"),
-            Some("Edit Song"),
-            rsx! {
-                form { method: "POST", action: "{action}", enctype: "application/x-www-form-urlencoded", class: "flex flex-col gap-4 w-full max-w-2xl",
-                    { form_field("Title:", "title", &title, None, "text", "w-full") }
-                    { form_field("Author:", "author", &author, None, "text", "w-full") }
-                    { form_field("Type (e.g., entrada, santo, comunhao):", "type", &r#type, Some(3), "text", "w-full font-mono") }
-                    { form_field("YouTube URL:", "yt", &yt, None, "text", "w-full") }
-                    { form_field("Audio URL:", "audio", &audio, None, "text", "w-full") }
-                    { form_field("PDF URL:", "pdf", &pdf, None, "text", "w-full") }
-                    { form_field("Chord Data:", "data", &data, Some(20), "text", "w-full font-mono whitespace-pre") }
-                    { form_actions(&item_path("song", id), "Save Changes", None) }
-                }
-            },
-        ),
+    let heading = format!("Edit {}", if title.is_empty() { id } else { title.as_str() });
+    edit_form_page(
+        current_user(ctx),
+        &heading,
+        &action,
+        Some("🎸"),
+        rsx! {
+            form { method: "POST", action: "{action}", enctype: "application/x-www-form-urlencoded", class: "flex flex-col gap-4 w-full max-w-2xl",
+                { form_field("Title:", "title", &title, None, "text", "w-full") }
+                { form_field("Author:", "author", &author, None, "text", "w-full") }
+                { form_field("Type (e.g., entrada, santo, comunhao):", "type", &r#type, Some(3), "text", "w-full font-mono") }
+                { form_field("YouTube URL:", "yt", &yt, None, "text", "w-full") }
+                { form_field("Audio URL:", "audio", &audio, None, "text", "w-full") }
+                { form_field("PDF URL:", "pdf", &pdf, None, "text", "w-full") }
+                { form_field("Chord Data:", "data", &data, Some(20), "text", "w-full font-mono whitespace-pre") }
+                { form_actions(&item_path("song", id), "Save Changes", None) }
+            }
+        },
     )
 }
 

@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    RequestContext, ResponsePayload, current_user, empty_state, error_page, form_actions,
-    form_page, html_response, html_response_with_status, item_menu, item_path, key_names,
+    RequestContext, ResponsePayload, current_user, edit_form_page, empty_state, error_page,
+    form_actions, html_response, html_response_with_status, item_menu, item_path, key_names,
     parse_json_body, parse_pairs,
 };
 
@@ -312,64 +312,60 @@ pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let extra = Some(rsx! {
         button { r#type: "submit", name: "action", value: "add_row", class: "btn btn-action", "+ Add Row" }
     });
-    html_response(
+    edit_form_page(
+        current_user(ctx),
         &heading,
-        form_page(
-            current_user(ctx),
-            &heading,
-            &path,
-            Some("📖"),
-            Some(&heading),
-            rsx! {
-                form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-2 w-full",
-                    for row in rows {
-                        div { class: "flex gap-2 items-center", "data-songbook-edit-row": "1",
-                            datalist { id: "types-{row.index}",
-                                for kind in all_types.iter() {
-                                    option { value: "{kind}" }
-                                }
+        &path,
+        Some("📖"),
+        rsx! {
+            form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-2 w-full",
+                for row in rows {
+                    div { class: "flex gap-2 items-center", "data-songbook-edit-row": "1",
+                        datalist { id: "types-{row.index}",
+                            for kind in all_types.iter() {
+                                option { value: "{kind}" }
                             }
-                            datalist { id: "songs-{row.index}",
-                                for chord in all_chords.iter() {
-                                    option { value: "{chord.title} [{chord.id}]", "data-chord-type": "{chord.r#type}" }
-                                }
-                            }
-                            label { class: "w-[150px] shrink-0",
-                                "{row.index + 1}. Format:"
-                                input {
-                                    list: "types-{row.index}",
-                                    name: "fmt_{row.index}",
-                                    value: "{row.format_value}",
-                                    class: "w-full",
-                                    "data-songbook-format-input": "1",
-                                    "data-songbook-song-list": "songs-{row.index}"
-                                }
-                            }
-                            label { class: "flex-1",
-                                "Song:"
-                                input {
-                                    list: "songs-{row.index}",
-                                    name: "song_{row.index}",
-                                    value: "{row.display_song}",
-                                    class: "w-full",
-                                    "data-songbook-song-input": "1"
-                                }
-                            }
-                            label { class: "w-20 shrink-0",
-                                "Key:"
-                                select { name: "key_{row.index}", class: "w-full",
-                                    for (key_idx, name) in key_names(false, false).iter().enumerate() {
-                                        option { value: "{key_idx}", selected: key_idx as i32 == row.target_key, "{name}" }
-                                    }
-                                }
-                            }
-                            input { r#type: "hidden", name: "orig_{row.index}", value: "{row.original_key}" }
                         }
+                        datalist { id: "songs-{row.index}",
+                            for chord in all_chords.iter() {
+                                option { value: "{chord.title} [{chord.id}]", "data-chord-type": "{chord.r#type}" }
+                            }
+                        }
+                        label { class: "w-[150px] shrink-0",
+                            "{row.index + 1}. Format:"
+                            input {
+                                list: "types-{row.index}",
+                                name: "fmt_{row.index}",
+                                value: "{row.format_value}",
+                                class: "w-full",
+                                "data-songbook-format-input": "1",
+                                "data-songbook-song-list": "songs-{row.index}"
+                            }
+                        }
+                        label { class: "flex-1",
+                            "Song:"
+                            input {
+                                list: "songs-{row.index}",
+                                name: "song_{row.index}",
+                                value: "{row.display_song}",
+                                class: "w-full",
+                                "data-songbook-song-input": "1"
+                            }
+                        }
+                        label { class: "w-20 shrink-0",
+                            "Key:"
+                            select { name: "key_{row.index}", class: "w-full",
+                                for (key_idx, name) in key_names(false, false).iter().enumerate() {
+                                    option { value: "{key_idx}", selected: key_idx as i32 == row.target_key, "{name}" }
+                                }
+                            }
+                        }
+                        input { r#type: "hidden", name: "orig_{row.index}", value: "{row.original_key}" }
                     }
-                    input { r#type: "hidden", name: "amount", value: "{songs.len()}" }
-                    { form_actions(&item_path("songbook", id), "Save Changes", extra) }
                 }
-            },
-        ),
+                input { r#type: "hidden", name: "amount", value: "{songs.len()}" }
+                { form_actions(&item_path("songbook", id), "Save Changes", extra) }
+            }
+        },
     )
 }

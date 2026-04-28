@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    RequestContext, ResponsePayload, current_user, error_page, form_actions, form_page,
+    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
@@ -184,25 +184,22 @@ pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let title = crate::get_pair(&pairs, "title").unwrap_or("").to_string();
     let formats = crate::get_pair(&pairs, "format").unwrap_or("").to_string();
     let path = format!("/choir/{id}/edit");
-    html_response(
-        &format!("Edit {}", title),
-        form_page(
-            current_user(ctx),
-            &format!("Edit {}", title),
-            &path,
-            Some("🎶"),
-            None,
-            rsx! {
-                form { method: "POST", action: "/api/choir/{id}/edit", enctype: "multipart/form-data", class: "flex flex-col gap-4 w-full max-w-lg",
-                    label { "Choir Name:"
-                        input { r#type: "text", name: "title", value: "{title}", required: true, class: "w-full" }
-                    }
-                    label { "Song Formats (one per line):"
-                        textarea { name: "format", rows: 10, class: "w-full font-mono", "{formats}" }
-                    }
-                    { form_actions(&item_path("choir", id), "Save Changes", None) }
+    let heading = format!("Edit {}", title);
+    edit_form_page(
+        current_user(ctx),
+        &heading,
+        &path,
+        Some("🎶"),
+        rsx! {
+            form { method: "POST", action: "/api/choir/{id}/edit", enctype: "multipart/form-data", class: "flex flex-col gap-4 w-full max-w-lg",
+                label { "Choir Name:"
+                    input { r#type: "text", name: "title", value: "{title}", required: true, class: "w-full" }
                 }
-            },
-        ),
+                label { "Song Formats (one per line):"
+                    textarea { name: "format", rows: 10, class: "w-full font-mono", "{formats}" }
+                }
+                { form_actions(&item_path("choir", id), "Save Changes", None) }
+            }
+        },
     )
 }

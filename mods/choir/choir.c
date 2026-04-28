@@ -30,6 +30,11 @@ typedef struct {
 	char format[2048];
 } choir_meta_t;
 
+typedef struct {
+	const item_ctx_t *ctx;
+	const choir_meta_t *meta;
+} choir_edit_form_t;
+
 static const char *CHOIR_DEFAULT_FORMATS =
 	"entrada\naleluia\nofertorio\nsanto\ncomunhao\nacao_de_gracas\nsaida\nany";
 
@@ -72,27 +77,34 @@ choir_meta_write(const char *item_path, const choir_meta_t *meta)
 		meta->format, strlen(meta->format));
 }
 
+static int
+choir_edit_form_build(int fd, form_body_t *fb, void *user)
+{
+	choir_edit_form_t *form = user;
+
+	if (form_body_add(fb, "id", form->ctx->id) != 0 ||
+			form_body_add(fb, "title", form->meta->title) != 0 ||
+			form_body_add(fb, "format", form->meta->format) != 0)
+		return respond_error(fd, 500, "OOM");
+
+	return 0;
+}
+
 #include "repertoire_impl.inc"
 
 #define CHOIR_SONGS_PATH "items/choir/items"
 
 /* POST /api/choir/:id/edit - Edit choir title and formats */
 static int
-handle_choir_edit(int fd, char *body)
+handle_choir_edit_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Choir not found", "You don't own this choir"))
-		return 1;
+	(void)user;
 
 	mpfd_parse(fd, body);
 
 	choir_meta_t meta;
-	choir_meta_read(ctx.item_path, &meta);
+	choir_meta_read(ctx->item_path, &meta);
 	int title_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
 	int format_len = mpfd_get("format", meta.format, sizeof(meta.format) - 1);
 
@@ -105,13 +117,22 @@ handle_choir_edit(int fd, char *body)
 	}
 
 	if ((title_len > 0 || format_len > 0) &&
-			choir_meta_write(ctx.item_path, &meta) != 0) {
+			choir_meta_write(ctx->item_path, &meta) != 0) {
 		return server_error(fd, "Failed to write choir metadata");
 	}
 
 	char location[256];
-	snprintf(location, sizeof(location), "/choir/%s", ctx.id);
+	snprintf(location, sizeof(location), "/choir/%s", ctx->id);
 	return redirect(fd, location);
+}
+
+static int
+handle_choir_edit(int fd, char *body)
+{
+	return with_item_access(fd, body, CHOIR_SONGS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Choir not found", "You don't own this choir",
+		handle_choir_edit_authorized, NULL);
 }
 
 static char *
@@ -489,28 +510,29 @@ handle_choir_add_get(int fd, char *body)
 
 /* GET /choir/:id/edit - read choir data and proxy to Fresh */
 static int
-handle_choir_edit_get(int fd, char *body)
+handle_choir_edit_get_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Choir not found", "You don't own this choir"))
-		return 1;
+	(void)user;
 
 	choir_meta_t meta;
-	choir_meta_read(ctx.item_path, &meta);
+	choir_meta_read(ctx->item_path, &meta);
 
-	form_body_t *fb = form_body_new(0);
-	if (!fb) return respond_error(fd, 500, "OOM");
-	form_body_add(fb, "id", ctx.id);
-	form_body_add(fb, "title", meta.title);
-	form_body_add(fb, "format", meta.format);
-	return core_post_form(fd, fb);
+	choir_edit_form_t form = {
+		.ctx = ctx,
+		.meta = &meta,
+	};
+	return core_post_form_builder(fd, choir_edit_form_build, &form);
+}
+
+static int
+handle_choir_edit_get(int fd, char *body)
+{
+	return with_item_access(fd, body, CHOIR_SONGS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Choir not found", "You don't own this choir",
+		handle_choir_edit_get_authorized, NULL);
 }
 
 /* POST /api/choir/:id/song/:song_id/remove - Remove song (HTML form-friendly alias for DELETE) */

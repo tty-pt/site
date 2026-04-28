@@ -36,6 +36,13 @@ typedef struct {
 	char choir[128];
 } songbook_meta_t;
 
+typedef struct {
+	const songbook_meta_t *meta;
+	const char *songs;
+	const char *all_chords;
+	const char *all_types;
+} sb_edit_form_t;
+
 static void
 songbook_meta_read(const char *item_path, songbook_meta_t *meta)
 {
@@ -57,6 +64,21 @@ songbook_meta_write(const char *item_path, const songbook_meta_t *meta)
 	};
 
 	return meta_fields_write(item_path, fields, sizeof(fields) / sizeof(fields[0]));
+}
+
+static int
+sb_edit_form_build(int fd, form_body_t *fb, void *user)
+{
+	sb_edit_form_t *form = user;
+
+	if (form_body_add(fb, "title", form->meta->title) != 0 ||
+			form_body_add(fb, "choir", form->meta->choir) != 0 ||
+			form_body_add(fb, "songs", form->songs) != 0 ||
+			form_body_add(fb, "allChords", form->all_chords) != 0 ||
+			form_body_add(fb, "allTypes", form->all_types) != 0)
+		return respond_error(fd, 500, "OOM");
+
+	return 0;
 }
 
 /* Get random chord by type/format - uses song module's type index */
@@ -228,31 +250,24 @@ sb_form_rows_build_edit_songs(int amount, int append_blank,
 
 /* GET /songbook/:id/edit - read songbook and proxy to Fresh */
 static int
-handle_sb_edit_get(int fd, char *body)
+handle_sb_edit_get_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, SONGBOOK_ITEMS_PATH, ICTX_NEED_LOGIN))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Songbook not found", "Forbidden"))
-		return 1;
+	(void)user;
 
 	songbook_meta_t meta;
-	songbook_meta_read(ctx.item_path, &meta);
+	songbook_meta_read(ctx->item_path, &meta);
 
 	/* Read data.txt and resolve originalKey per song */
 	char data_path[PATH_MAX];
-	item_child_path(ctx.item_path, "data.txt", data_path, sizeof(data_path));
+	item_child_path(ctx->item_path, "data.txt", data_path, sizeof(data_path));
 	repertoire_row_t *rows = NULL;
 	size_t row_count = 0;
 	if (repertoire_rows_load(data_path, &rows, &row_count) != 0)
 		return respond_error(fd, 500, "Failed to read data file");
 
-	char *ac_json = build_all_songs_json(ctx.doc_root, 1);
+	char *ac_json = build_all_songs_json(ctx->doc_root, 1);
 	if (!ac_json) { free(rows); return 1; }
 
 	char *at_json = song_get_types_json(0);
@@ -261,45 +276,55 @@ handle_sb_edit_get(int fd, char *body)
 	/* Build 4-field songs string: chord_id:transpose:format:originalKey */
 	char songs_buf[65536] = {0};
 	size_t songs_pos = 0;
-	for (size_t i = 0; i < row_count; i++) {
-		if (sb_edit_song_row_append(songs_buf, sizeof(songs_buf), &songs_pos,
-				ctx.doc_root, &rows[i]) != 0) {
+	if (row_count == 0) {
+		songs_pos += snprintf(songs_buf + songs_pos,
+			sizeof(songs_buf) - songs_pos, "::any:0\n");
+		if (songs_pos >= sizeof(songs_buf)) {
 			free(rows);
 			free(ac_json);
 			free(at_json);
 			return respond_error(fd, 500, "OOM");
 		}
+	} else {
+		for (size_t i = 0; i < row_count; i++) {
+			if (sb_edit_song_row_append(songs_buf, sizeof(songs_buf), &songs_pos,
+					ctx->doc_root, &rows[i]) != 0) {
+				free(rows);
+				free(ac_json);
+				free(at_json);
+				return respond_error(fd, 500, "OOM");
+			}
+		}
 	}
 	free(rows);
 
-	/* Build POST body to Fresh */
-	form_body_t *fb = form_body_new(0);
-	if (!fb) { free(ac_json); free(at_json); return respond_error(fd, 500, "OOM"); }
-	form_body_add(fb, "title", meta.title);
-	form_body_add(fb, "choir", meta.choir);
-	form_body_add(fb, "songs", songs_buf);
-	form_body_add(fb, "allChords", ac_json);
-	form_body_add(fb, "allTypes", at_json);
+	sb_edit_form_t form = {
+		.meta = &meta,
+		.songs = songs_buf,
+		.all_chords = ac_json,
+		.all_types = at_json,
+	};
+	int rc = core_post_form_builder(fd, sb_edit_form_build, &form);
 	free(ac_json);
 	free(at_json);
+	return rc;
+}
 
-	size_t pb_len = 0;
-	(void)pb_len;
-	return core_post_form(fd, fb);
+static int
+handle_sb_edit_get(int fd, char *body)
+{
+	return with_item_access(fd, body, SONGBOOK_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Songbook not found", "Forbidden",
+		handle_sb_edit_get_authorized, NULL);
 }
 
 /* POST /songbook/:id/edit - Edit songbook */
 static int
-handle_sb_edit(int fd, char *body)
+handle_sb_edit_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, SONGBOOK_ITEMS_PATH, ICTX_NEED_LOGIN))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Songbook not found", "You don't own this songbook"))
-		return 1;
+	(void)user;
 
 	/* Parse form data */
 	mpfd_parse(fd, body);
@@ -319,25 +344,24 @@ handle_sb_edit(int fd, char *body)
 				songs_buf, sizeof(songs_buf)) != 0)
 			return respond_error(fd, 500, "OOM");
 
-		char *ac_json = build_all_songs_json(ctx.doc_root, 1);
+		char *ac_json = build_all_songs_json(ctx->doc_root, 1);
 		if (!ac_json) return 1;
 		char *at_json = song_get_types_json(0);
 		if (!at_json) { free(ac_json); return 1; }
 
 		songbook_meta_t meta;
-		songbook_meta_read(ctx.item_path, &meta);
+		songbook_meta_read(ctx->item_path, &meta);
 
-		form_body_t *fb = form_body_new(0);
-		if (!fb) { free(ac_json); free(at_json); return respond_error(fd, 500, "OOM"); }
-		form_body_add(fb, "title", meta.title);
-		form_body_add(fb, "choir", meta.choir);
-		form_body_add(fb, "songs", songs_buf);
-		form_body_add(fb, "allChords", ac_json);
-		form_body_add(fb, "allTypes", at_json);
+		sb_edit_form_t form = {
+			.meta = &meta,
+			.songs = songs_buf,
+			.all_chords = ac_json,
+			.all_types = at_json,
+		};
+		int rc = core_post_form_builder(fd, sb_edit_form_build, &form);
 		free(ac_json);
 		free(at_json);
-
-		return core_post_form(fd, fb);
+		return rc;
 	}
 
 	if (amount < 0)
@@ -345,7 +369,7 @@ handle_sb_edit(int fd, char *body)
 
 	/* Build new data.txt content */
 	char data_path[PATH_MAX];
-	item_child_path(ctx.item_path, "data.txt", data_path, sizeof(data_path));
+	item_child_path(ctx->item_path, "data.txt", data_path, sizeof(data_path));
 
 	repertoire_row_t *rows = NULL;
 	size_t row_count = 0;
@@ -359,8 +383,17 @@ handle_sb_edit(int fd, char *body)
 
 	/* Redirect to view page */
 	char location[256];
-	snprintf(location, sizeof(location), "/songbook/%s", ctx.id);
+	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
 	return redirect(fd, location);
+}
+
+static int
+handle_sb_edit(int fd, char *body)
+{
+	return with_item_access(fd, body, SONGBOOK_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Songbook not found", "You don't own this songbook",
+		handle_sb_edit_authorized, NULL);
 }
 
 /* POST /api/songbook/:id/transpose - Transpose single song */
@@ -381,16 +414,10 @@ sb_transpose_cb(int idx, const char *raw, int parsed,
 }
 
 static int
-handle_sb_transpose(int fd, char *body)
+handle_sb_transpose_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, SONGBOOK_ITEMS_PATH,
-			ICTX_NEED_LOGIN)) return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Songbook not found", "You don't own this songbook"))
-		return 1;
+	(void)user;
 
 	/* Parse form data */
 	mpfd_parse(fd, body);
@@ -406,15 +433,24 @@ handle_sb_transpose(int fd, char *body)
 	};
 
 	char data_path[PATH_MAX];
-	item_child_path(ctx.item_path, "data.txt", data_path, sizeof(data_path));
+	item_child_path(ctx->item_path, "data.txt", data_path, sizeof(data_path));
 
 	if (repertoire_file_rewrite(data_path, sb_transpose_cb, &cbc) < 0)
 		return server_error(fd, "Failed to update");
 
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s#%d",
-		ctx.id, cbc.target_idx);
+		ctx->id, cbc.target_idx);
 	return redirect(fd, location);
+}
+
+static int
+handle_sb_transpose(int fd, char *body)
+{
+	return with_item_access(fd, body, SONGBOOK_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Songbook not found", "You don't own this songbook",
+		handle_sb_transpose_authorized, NULL);
 }
 
 /* POST /api/songbook/:id/randomize - Randomize song selection */
@@ -436,16 +472,10 @@ sb_randomize_cb(int idx, const char *raw, int parsed,
 }
 
 static int
-handle_sb_randomize(int fd, char *body)
+handle_sb_randomize_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, SONGBOOK_ITEMS_PATH,
-			ICTX_NEED_LOGIN)) return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Songbook not found", "You don't own this songbook"))
-		return 1;
+	(void)user;
 
 	/* Parse form data */
 	mpfd_parse(fd, body);
@@ -455,14 +485,23 @@ handle_sb_randomize(int fd, char *body)
 	int line_num = atoi(n_str);
 
 	char data_path[PATH_MAX];
-	item_child_path(ctx.item_path, "data.txt", data_path, sizeof(data_path));
+	item_child_path(ctx->item_path, "data.txt", data_path, sizeof(data_path));
 
 	if (repertoire_file_rewrite(data_path, sb_randomize_cb, &line_num) < 0)
 		return server_error(fd, "Failed to update");
 
 	char location[256];
-	snprintf(location, sizeof(location), "/songbook/%s#%d", ctx.id, line_num);
+	snprintf(location, sizeof(location), "/songbook/%s#%d", ctx->id, line_num);
 	return redirect(fd, location);
+}
+
+static int
+handle_sb_randomize(int fd, char *body)
+{
+	return with_item_access(fd, body, SONGBOOK_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Songbook not found", "You don't own this songbook",
+		handle_sb_randomize_authorized, NULL);
 }
 
 static char *

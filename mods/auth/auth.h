@@ -32,6 +32,9 @@ typedef enum {
 	ITEM_ACCESS_FORBIDDEN,
 } item_access_t;
 
+typedef int (*item_handler_cb)(int fd, char *body,
+	const item_ctx_t *ctx, void *user);
+
 #define ICTX_NEED_LOGIN      0x1  /* require logged-in user; else 401 */
 #define ICTX_NEED_OWNERSHIP  0x2  /* require item ownership; else 403/404 */
 #define ICTX_SONG_ID         0x4  /* also read PATTERN_PARAM_SONG_ID */
@@ -73,6 +76,12 @@ NDX_HOOK_DECL(int, item_unlink_owner, const char *, item_path);
 NDX_HOOK_DECL(int, item_ctx_load,
 	item_ctx_t *, ctx, int, fd,
 	const char *, items_path, unsigned, flags);
+
+NDX_HOOK_DECL(int, with_item_access,
+	int, fd, char *, body,
+	const char *, items_path, unsigned, flags,
+	const char *, not_found_msg, const char *, forbidden_msg,
+	item_handler_cb, cb, void *, user);
 
 #endif /* AUTH_IMPL */
 

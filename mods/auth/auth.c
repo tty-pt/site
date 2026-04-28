@@ -720,6 +720,28 @@ NDX_LISTENER(int, item_ctx_load,
 	return 0;
 }
 
+NDX_LISTENER(int, with_item_access,
+	int, fd, char *, body,
+	const char *, items_path, unsigned, flags,
+	const char *, not_found_msg, const char *, forbidden_msg,
+	item_handler_cb, cb, void *, user)
+{
+	item_ctx_t ctx;
+	unsigned load_flags = flags & ~ICTX_NEED_OWNERSHIP;
+
+	if (!cb)
+		return respond_error(fd, 500, "Missing item handler");
+
+	if (item_ctx_load(&ctx, fd, items_path, load_flags))
+		return 1;
+
+	if (item_require_access(fd, ctx.item_path, ctx.username, flags,
+			not_found_msg, forbidden_msg))
+		return 1;
+
+	return cb(fd, body, &ctx, user);
+}
+
 /* ------------------------------------------------------------------ */
 /* HTTP handlers                                                        */
 /* ------------------------------------------------------------------ */

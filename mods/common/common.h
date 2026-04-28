@@ -40,6 +40,8 @@ typedef struct {
 	size_t sz;
 } meta_field_t;
 
+typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
+
 /* ---------------------------------------------------------------------------
  * NDX declarations.
  *
@@ -82,6 +84,8 @@ NDX_HOOK_DECL(int, item_child_path,
 NDX_HOOK_DECL(int, item_remove_path_recursive, const char *, item_path);
 NDX_HOOK_DECL(int, core_post_json, int, fd, const char *, json);
 NDX_HOOK_DECL(int, core_post_form, int, fd, form_body_t *, fb);
+NDX_HOOK_DECL(int, core_post_form_builder,
+	int, fd, form_body_builder_cb, cb, void *, user);
 
 /* Phase A helpers */
 NDX_HOOK_DECL(int, module_path_build,
@@ -131,6 +135,7 @@ NDX_HOOK_DECL(int, json_object_free, json_object_t *, jo);
 NDX_HOOK_DECL(form_body_t *, form_body_new, int, dummy);
 NDX_HOOK_DECL(int, form_body_add,
 	form_body_t *, fb, const char *, name, const char *, value);
+NDX_HOOK_DECL(int, form_body_free, form_body_t *, fb);
 
 #endif /* COMMON_IMPL */
 

@@ -17,6 +17,8 @@
 #undef COMMON_IMPL
 
 static char *form_body_finish(form_body_t *fb, size_t *out_len);
+form_body_t *form_body_new(int dummy);
+int form_body_free(form_body_t *fb);
 int write_file_path(const char *path, const char *buf, size_t sz);
 static int remove_path_recursive(const char *path);
 int item_child_path(const char *item_path, const char *name,
@@ -353,6 +355,28 @@ NDX_LISTENER(int, core_post_form, int, fd, form_body_t *, fb)
 	int rc = core_post(fd, post_body, pb_len);
 	free(post_body);
 	return rc;
+}
+
+NDX_LISTENER(int, core_post_form_builder,
+	int, fd, form_body_builder_cb, cb, void *, user)
+{
+	form_body_t *fb = form_body_new(0);
+	int rc;
+
+	if (!fb)
+		return respond_error(fd, 500, "OOM");
+	if (!cb) {
+		form_body_free(fb);
+		return respond_error(fd, 500, "Missing form builder");
+	}
+
+	rc = cb(fd, fb, user);
+	if (rc != 0) {
+		form_body_free(fb);
+		return rc;
+	}
+
+	return core_post_form(fd, fb);
 }
 
 
@@ -729,6 +753,15 @@ NDX_LISTENER(int, form_body_add,
 		"%s=%s", en, ev);
 	free(en);
 	free(ev);
+	return 0;
+}
+
+NDX_LISTENER(int, form_body_free, form_body_t *, fb)
+{
+	if (!fb)
+		return 0;
+	free(fb->buf);
+	free(fb);
 	return 0;
 }
 

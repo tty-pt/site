@@ -257,27 +257,19 @@ poem_add_post_handler(int fd, char *body)
 
 /* GET /poem/:id/edit — read title and proxy to Fresh for edit form */
 static int
-poem_edit_get_handler(int fd, char *body)
+poem_edit_get_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, POEM_ITEMS_PATH,
-			0))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_OWNERSHIP,
-			"Poem not found", "Forbidden"))
-		return 1;
+	(void)user;
 
 	poem_meta_t meta;
-	poem_meta_read(ctx.item_path, &meta);
+	poem_meta_read(ctx->item_path, &meta);
 
 	json_object_t *jo = json_object_new(0);
 	if (!jo)
 		return respond_error(fd, 500, "OOM");
-	if (json_object_kv_str(jo, "id", ctx.id) != 0 ||
+	if (json_object_kv_str(jo, "id", ctx->id) != 0 ||
 			json_object_kv_str(jo, "title", meta.title) != 0) {
 		json_object_free(jo);
 		return respond_error(fd, 500, "OOM");
@@ -290,19 +282,21 @@ poem_edit_get_handler(int fd, char *body)
 	return rc;
 }
 
+static int
+poem_edit_get_handler(int fd, char *body)
+{
+	return with_item_access(fd, body, POEM_ITEMS_PATH,
+		ICTX_NEED_OWNERSHIP,
+		"Poem not found", "Forbidden",
+		poem_edit_get_authorized, NULL);
+}
+
 /* POST /poem/:id/edit — save title (optional) + file upload */
 static int
-poem_edit_post_handler(int fd, char *body)
+poem_edit_post_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, POEM_ITEMS_PATH,
-			0))
-		return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_OWNERSHIP,
-			"Poem not found", "Forbidden"))
-		return 1;
+	(void)user;
 
 	int parse_result = mpfd_parse(fd, body);
 	if (parse_result == -1)
@@ -312,17 +306,26 @@ poem_edit_post_handler(int fd, char *body)
 	int title_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
 	if (title_len > 0) {
 		meta.title[title_len] = '\0';
-		if (poem_meta_write(ctx.item_path, &meta) != 0)
+		if (poem_meta_write(ctx->item_path, &meta) != 0)
 			return server_error(fd, "Failed to write poem title");
-		index_put(index_hd, ctx.id, meta.title);
+		index_put(index_hd, (char *)ctx->id, meta.title);
 	}
 
-	if (poem_write_uploaded_html(ctx.item_path, ctx.id) != 0)
+	if (poem_write_uploaded_html(ctx->item_path, ctx->id) != 0)
 		return server_error(fd, "Failed to write poem file");
 
 	char redirect_path[256];
-	snprintf(redirect_path, sizeof(redirect_path), "/poem/%s", ctx.id);
+	snprintf(redirect_path, sizeof(redirect_path), "/poem/%s", ctx->id);
 	return redirect(fd, redirect_path);
+}
+
+static int
+poem_edit_post_handler(int fd, char *body)
+{
+	return with_item_access(fd, body, POEM_ITEMS_PATH,
+		ICTX_NEED_OWNERSHIP,
+		"Poem not found", "Forbidden",
+		poem_edit_post_authorized, NULL);
 }
 
 void ndx_install(void) {

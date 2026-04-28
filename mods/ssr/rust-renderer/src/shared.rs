@@ -278,9 +278,9 @@ pub(crate) fn form_actions(cancel_href: &str, submit_label: &str, extra: Option<
 }
 
 pub(crate) fn form_page(
-    user: Option<&str>,
-    title: &str,
-    path: &str,
+	user: Option<&str>,
+	title: &str,
+	path: &str,
     icon: Option<&str>,
     heading: Option<&str>,
     children: Element,
@@ -299,12 +299,25 @@ pub(crate) fn form_page(
                 { children }
             }
         },
-    )
+	)
+}
+
+pub(crate) fn edit_form_page(
+	user: Option<&str>,
+	title: &str,
+	path: &str,
+	icon: Option<&str>,
+	children: Element,
+) -> ResponsePayload {
+	html_response(
+		title,
+		form_page(user, title, path, icon, None, children),
+	)
 }
 
 pub(crate) fn error_page(
-    user: Option<&str>,
-    path: &str,
+	user: Option<&str>,
+	path: &str,
     status: u16,
     message: &str,
 ) -> Element {

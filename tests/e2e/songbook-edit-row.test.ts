@@ -48,13 +48,10 @@ Deno.test({
     // ── Load edit page ────────────────────────────────────────────────────────
     await page.goto(`${BASE}/songbook/${sbId}/edit`, GOTO);
     await page.waitForSelector("h1", { timeout: 5000 });
+    const titleCount = await page.locator("h1").count();
+    if (titleCount !== 1) throw new Error(`Expected one edit page title, got ${titleCount}`);
 
-    // New songbook has 0 songs — click "+ Add Row" to append a blank row,
-    // which re-renders the page with one edit row.
-    await page.click('button[value="add_row"]');
-    await page.waitForSelector("h1", { timeout: 5000 });
-
-    // Wait for the client-side enhancement to attach; datalists stay hidden.
+    // A new songbook should open with one blank editable row.
     await page.waitForSelector('select[name="key_0"]', { timeout: 8000 });
 
     // ── 1. Verify datalists exist ─────────────────────────────────────────────

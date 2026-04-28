@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    RequestContext, ResponsePayload, current_user, error_page, form_actions, form_page,
+    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response, html_response_with_status, item_menu, item_path, parse_json_body,
 };
 
@@ -73,25 +73,22 @@ pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
         .and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_default();
     let path = format!("/poem/{id}/edit");
-    html_response(
-        &format!("Edit {}", if title.is_empty() { id } else { title.as_str() }),
-        form_page(
-            current_user(ctx),
-            &format!("Edit {}", if title.is_empty() { id } else { title.as_str() }),
-            &path,
-            Some("📜"),
-            Some("Edit Poem"),
-            rsx! {
-                form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-4",
-                    label { "Title:"
-                        input { r#type: "text", name: "title", value: "{title}" }
-                    }
-                    label { "File:"
-                        input { r#type: "file", name: "file", accept: ".html,.htm,.txt" }
-                    }
-                    { form_actions(&item_path("poem", id), "Save", None) }
+    let heading = format!("Edit {}", if title.is_empty() { id } else { title.as_str() });
+    edit_form_page(
+        current_user(ctx),
+        &heading,
+        &path,
+        Some("📜"),
+        rsx! {
+            form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-4",
+                label { "Title:"
+                    input { r#type: "text", name: "title", value: "{title}" }
                 }
-            },
-        ),
+                label { "File:"
+                    input { r#type: "file", name: "file", accept: ".html,.htm,.txt" }
+                }
+                { form_actions(&item_path("poem", id), "Save", None) }
+            }
+        },
     )
 }

@@ -38,6 +38,11 @@ typedef struct {
 	char author[256];
 } song_meta_t;
 
+typedef struct {
+	const song_meta_t *meta;
+	const char *data;
+} song_edit_form_t;
+
 static int song_viewer_pref_write_raw(const char *username, const char *name,
 	const char *value);
 
@@ -168,6 +173,24 @@ song_meta_write(const char *item_path, const song_meta_t *meta)
 	};
 
 	meta_fields_write(item_path, fields, sizeof(fields) / sizeof(fields[0]));
+}
+
+static int
+song_edit_form_build(int fd, form_body_t *fb, void *user)
+{
+	song_edit_form_t *form = user;
+
+	if (form_body_add(fb, "title", form->meta->title) != 0 ||
+			form_body_add(fb, "type", form->meta->type) != 0 ||
+			form_body_add(fb, "yt", form->meta->yt) != 0 ||
+			form_body_add(fb, "audio", form->meta->audio) != 0 ||
+			form_body_add(fb, "pdf", form->meta->pdf) != 0 ||
+			(form->data && form->data[0] &&
+			 form_body_add(fb, "data", form->data) != 0) ||
+			form_body_add(fb, "author", form->meta->author) != 0)
+		return respond_error(fd, 500, "OOM");
+
+	return 0;
 }
 
 static int
@@ -603,63 +626,48 @@ song_details_handler(int fd, char *body)
 
 /* GET /song/:id/edit - read files and proxy to Fresh */
 static int
-song_edit_get_handler(int fd, char *body)
+song_edit_get_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, CHORDS_ITEMS_PATH,
-			ICTX_NEED_LOGIN)) return 1;
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Song not found", "Forbidden"))
-		return 1;
+	(void)user;
 
 	song_meta_t meta;
-	song_meta_read(ctx.item_path, &meta);
+	song_meta_read(ctx->item_path, &meta);
 
 	/* Read data */
 	char data_path[PATH_MAX];
-	song_data_path_build(ctx.item_path, data_path, sizeof(data_path));
+	song_data_path_build(ctx->item_path, data_path, sizeof(data_path));
 	char *data_content = slurp_file(data_path);
 
-	/* Build POST body for Fresh */
-	form_body_t *fb = form_body_new(0);
-	if (!fb) {
-		if (data_content) free(data_content);
-		return respond_error(fd, 500, "OOM");
-	}
-	form_body_add(fb, "title", meta.title);
-	form_body_add(fb, "type", meta.type);
-	form_body_add(fb, "yt", meta.yt);
-	form_body_add(fb, "audio", meta.audio);
-	form_body_add(fb, "pdf", meta.pdf);
-	if (data_content && data_content[0]) {
-		form_body_add(fb, "data", data_content);
-	}
-	if (data_content) free(data_content);
-	form_body_add(fb, "author", meta.author);
+	song_edit_form_t form = {
+		.meta = &meta,
+		.data = data_content,
+	};
+	int rc = core_post_form_builder(fd, song_edit_form_build, &form);
+	free(data_content);
+	return rc;
+}
 
-	return core_post_form(fd, fb);
+static int
+song_edit_get_handler(int fd, char *body)
+{
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Song not found", "Forbidden",
+		song_edit_get_authorized, NULL);
 }
 
 /* POST /song/:id/edit - save edit */
 static int
-song_edit_post_handler(int fd, char *body)
+song_edit_post_authorized(int fd, char *body,
+	const item_ctx_t *ctx, void *user)
 {
-	item_ctx_t ctx;
-	if (item_ctx_load(&ctx, fd, CHORDS_ITEMS_PATH,
-			ICTX_NEED_LOGIN)) return 1;
+	(void)user;
 
 	int parse_result = ndc_query_parse(body);
 	if (parse_result == -1)
 		return bad_request(fd, "Failed to parse form body");
-
-	if (item_require_access(fd, ctx.item_path, ctx.username,
-			ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-			"Song not found", "You don't own this song"))
-		return 1;
 
 	song_meta_t meta = {0};
 	int title_len = ndc_query_param("title", meta.title, sizeof(meta.title) - 1);
@@ -690,12 +698,12 @@ song_edit_post_handler(int fd, char *body)
 		}
 	}
 
-	song_meta_write(ctx.item_path, &meta);
+	song_meta_write(ctx->item_path, &meta);
 
 	/* Write data file */
 	{
 		char data_path[PATH_MAX];
-		song_data_path_build(ctx.item_path, data_path, sizeof(data_path));
+		song_data_path_build(ctx->item_path, data_path, sizeof(data_path));
 		FILE *dfp = fopen(data_path, "w");
 		if (dfp) {
 			if (data_content)
@@ -707,8 +715,17 @@ song_edit_post_handler(int fd, char *body)
 
 	/* Redirect to song page */
 	char location[256];
-	snprintf(location, sizeof(location), "/song/%s", ctx.id);
+	snprintf(location, sizeof(location), "/song/%s", ctx->id);
 	return redirect(fd, location);
+}
+
+static int
+song_edit_post_handler(int fd, char *body)
+{
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH,
+		ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+		"Song not found", "You don't own this song",
+		song_edit_post_authorized, NULL);
 }
 
 /* Remove song id from type_index_hd when a song is deleted */
