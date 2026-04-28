@@ -285,18 +285,18 @@ a:hover {
   color: var(--link-hover);
 }
 
-.menu input:checked ~ .functions {
-  transform: translateX(162px);
-}
-
 .functions {
   transition: transform 0.3s ease;
   overflow-x: visible;
   display: flex !important;
   flex-direction: column;
   background-color: var(--bg-surface);
-  transform: translateX(0px);
+  transform: translateX(calc(100% + 1rem));
   width: 130px;
+}
+
+.menu input:checked ~ .functions {
+  transform: translateX(0);
 }
 
 .functions > button,
