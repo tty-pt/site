@@ -28,6 +28,9 @@ struct SongPayload {
     audio: Option<String>,
     pdf: Option<String>,
     originalKey: Option<i32>,
+    viewerZoom: Option<i32>,
+    viewerBemol: Option<bool>,
+    viewerLatin: Option<bool>,
     owner: Option<bool>,
     categories: Option<String>,
     author: Option<String>,
@@ -51,12 +54,15 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let title = payload.title.clone().unwrap_or_default();
             let display_title = if title.is_empty() { id.to_string() } else { title };
             let (transpose, use_bemol, use_latin, show_media) = song_flags(&ctx.query);
+            let viewer_zoom = payload.viewerZoom.unwrap_or(100).clamp(70, 170);
+            let viewer_bemol = payload.viewerBemol.unwrap_or(use_bemol);
+            let viewer_latin = payload.viewerLatin.unwrap_or(use_latin);
             let original_key = payload.originalKey.unwrap_or(0);
             let owner = payload.owner.unwrap_or(false);
             let categories = payload.categories.unwrap_or_default();
             let author = payload.author.unwrap_or_default();
             let chord_data = payload.data.unwrap_or_default();
-            let keys = key_names(use_bemol, use_latin);
+            let keys = key_names(viewer_bemol, viewer_latin);
             let key_options: Vec<(i32, String)> = keys
                 .iter()
                 .enumerate()
@@ -74,7 +80,37 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let yt = payload.yt.filter(|s| !s.is_empty());
             let audio = payload.audio.filter(|s| !s.is_empty());
             let pdf = payload.pdf.filter(|s| !s.is_empty());
+            let save_url = if current_user(ctx).is_some() {
+                "/api/song/prefs"
+            } else {
+                ""
+            };
             let menu_items = Some(rsx! {
+                div {
+                    class: "viewer-controls",
+                    "data-detail-viewer-controls": "song",
+                    "data-detail-viewer-save-url": "{save_url}",
+                    label {
+                        "Zoom"
+                        input {
+                            r#type: "range",
+                            min: "70",
+                            max: "170",
+                            step: "10",
+                            value: "{viewer_zoom}",
+                            "data-detail-viewer-zoom": "1"
+                        }
+                    }
+                    p { class: "text-xs text-muted", "data-detail-viewer-zoom-label": "1", "{viewer_zoom}%" }
+                    label {
+                        input {
+                            r#type: "checkbox",
+                            checked: true,
+                            "data-detail-viewer-wrap": "1"
+                        }
+                        span { "Wrap lines" }
+                    }
+                }
                 form {
                     id: "transpose-form",
                     method: "GET",
@@ -95,11 +131,11 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                         }
                     }
                     label {
-                        input { r#type: "checkbox", name: "b", value: "1", checked: use_bemol }
+                        input { r#type: "checkbox", name: "b", value: "1", checked: viewer_bemol }
                         span { "Flats (♭)" }
                     }
                     label {
-                        input { r#type: "checkbox", name: "l", value: "1", checked: use_latin }
+                        input { r#type: "checkbox", name: "l", value: "1", checked: viewer_latin }
                         span { "Latin" }
                     }
                     label {
@@ -121,17 +157,20 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                     menu_items,
                     rsx! {
                         div { class: "center flex flex-col gap-4",
-                            div { id: "song-detail-body", class: "contents",
+                            div { id: "song-detail-body", class: "contents", "data-detail-viewer-scope": "1",
                                 if !categories.is_empty() || !author.is_empty() {
                                     div { class: "flex justify-between items-start w-full max-w-xl text-xs text-muted",
                                         div { class: "italic whitespace-pre-wrap", "{categories}" }
                                         div { class: "text-right", "{author_display}" }
                                     }
                                 }
-                                div {
-                                    id: "chord-data",
-                                    class: "whitespace-pre-wrap font-mono p-4 rounded w-full max-w-xl chord-data",
-                                    dangerous_inner_html: "{chord_data}"
+                                div { class: "detail-viewer-scroll w-full max-w-xl", "data-detail-viewer-scroll": "1",
+                                    pre {
+                                        id: "chord-data",
+                                        "data-detail-viewer-target": "1",
+                                        class: "whitespace-pre-wrap font-mono p-4 rounded chord-data",
+                                        dangerous_inner_html: "{chord_data}"
+                                    }
                                 }
                                 div { id: "media-slot", class: "contents",
                                     if show_media && (yt.is_some() || audio.is_some() || pdf.is_some()) {

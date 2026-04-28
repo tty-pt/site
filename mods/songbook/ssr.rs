@@ -42,10 +42,12 @@ struct SongbookSong {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[allow(non_snake_case)]
 struct SongbookPayload {
     title: Option<String>,
     owner: Option<String>,
     choir: Option<String>,
+    viewerZoom: Option<i32>,
     songs: Option<Vec<SongbookSong>>,
 }
 
@@ -105,11 +107,17 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let title = payload.title.unwrap_or_default();
             let owner = payload.owner.unwrap_or_default();
             let choir = payload.choir.unwrap_or_default();
+            let viewer_zoom = payload.viewerZoom.unwrap_or(100).clamp(70, 170);
             let songs = payload.songs.unwrap_or_default();
             let is_owner = current_user(ctx) == Some(owner.as_str());
             let path = item_path("songbook", id);
             let page_title = format!("songbook: {title}");
             let choir_href = item_path("choir", &choir);
+            let save_url = if current_user(ctx).is_some() {
+                "/api/song/prefs"
+            } else {
+                ""
+            };
             let display_songs: Vec<DisplaySongbookSong> = songs
                 .into_iter()
                 .map(|song| {
@@ -153,9 +161,36 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                     &page_title,
                     &path,
                     Some("📖"),
-                    Some(item_menu("songbook", id, is_owner)),
+                    Some(rsx! {
+                        div {
+                            class: "viewer-controls",
+                            "data-detail-viewer-controls": "songbook",
+                            "data-detail-viewer-save-url": "{save_url}",
+                            label {
+                                "Zoom"
+                                input {
+                                    r#type: "range",
+                                    min: "70",
+                                    max: "170",
+                                    step: "10",
+                                    value: "{viewer_zoom}",
+                                    "data-detail-viewer-zoom": "1"
+                                }
+                            }
+                            p { class: "text-xs text-muted", "data-detail-viewer-zoom-label": "1", "{viewer_zoom}%" }
+                            label {
+                                input {
+                                    r#type: "checkbox",
+                                    checked: true,
+                                    "data-detail-viewer-wrap": "1"
+                                }
+                                span { "Wrap lines" }
+                            }
+                        }
+                        { item_menu("songbook", id, is_owner) }
+                    }),
                     rsx! {
-                        div { class: "flex flex-col gap-1",
+                        div { class: "flex flex-col gap-1", "data-detail-viewer-scope": "1",
                             if !choir.is_empty() {
                                 div { class: "flex justify-end text-xs text-muted",
                                     a { href: "{choir_href}", class: "text-muted", "{choir}" }
@@ -213,10 +248,13 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                                                         }
                                                     }
                                                 }
-                                                pre {
-                                                    "data-songbook-chord-data": "1",
-                                                    class: "font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded",
-                                                    dangerous_inner_html: "{song.chord_data}"
+                                                div { class: "detail-viewer-scroll", "data-detail-viewer-scroll": "1",
+                                                    pre {
+                                                        "data-detail-viewer-target": "1",
+                                                        "data-songbook-chord-data": "1",
+                                                        class: "font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded",
+                                                        dangerous_inner_html: "{song.chord_data}"
+                                                    }
                                                 }
                                             }
                                         }

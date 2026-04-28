@@ -66,10 +66,15 @@ NDX_HOOK_DECL(int, meta_fields_write,
 	const char *, item_path, const meta_field_t *, fields, size_t, count);
 NDX_HOOK_DECL(int, write_item_child_file,
 	const char *, item_path, const char *, name, const char *, buf, size_t, sz);
+NDX_HOOK_DECL(int, write_file_path, const char *, path, const char *, buf, size_t, sz);
 NDX_HOOK_DECL(char *, slurp_file, const char *, path);
 NDX_HOOK_DECL(char *, slurp_item_child_file,
 	const char *, item_path, const char *, name);
 NDX_HOOK_DECL(int, get_doc_root, int, fd, char *, buf, size_t, len);
+NDX_HOOK_DECL(int, ensure_dir_path, const char *, path);
+NDX_HOOK_DECL(int, user_path_build,
+	const char *, username, const char *, suffix,
+	char *, out, size_t, outlen);
 NDX_HOOK_DECL(int, item_dir_exists, const char *, item_path);
 NDX_HOOK_DECL(int, item_child_path,
 	const char *, item_path, const char *, name,

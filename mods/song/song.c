@@ -6,7 +6,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <errno.h>
 #include <stdlib.h>
 #include <dirent.h>
 
@@ -19,6 +18,10 @@
 #include "../../lib/transp/transp.h"
 
 #define CHORDS_ITEMS_PATH "items/song/items"
+#define VIEWER_ZOOM_MIN 70
+#define VIEWER_ZOOM_MAX 170
+#define VIEWER_ZOOM_DEFAULT 100
+#define VIEWER_BOOL_DEFAULT 0
 
 /* Global transpose context (initialized once in ndx_install) */
 static transp_ctx_t *g_transp_ctx = NULL;
@@ -34,6 +37,107 @@ typedef struct {
 	char pdf[512];
 	char author[256];
 } song_meta_t;
+
+static int song_viewer_pref_write_raw(const char *username, const char *name,
+	const char *value);
+
+static int
+song_viewer_zoom_clamp(int zoom)
+{
+	if (zoom < VIEWER_ZOOM_MIN || zoom > VIEWER_ZOOM_MAX)
+		return VIEWER_ZOOM_DEFAULT;
+	return zoom;
+}
+
+static int
+song_viewer_pref_path(const char *username, const char *name,
+	char *out, size_t out_sz)
+{
+	char suffix[PATH_MAX];
+
+	if (!username || !username[0] || !name || !name[0] || !out || out_sz == 0)
+		return -1;
+	snprintf(suffix, sizeof(suffix), ".tty/%s", name);
+	return user_path_build(username, suffix, out, out_sz);
+}
+
+static int
+song_viewer_pref_dir(const char *username, char *out, size_t out_sz)
+{
+	if (!username || !username[0] || !out || out_sz == 0)
+		return -1;
+	return user_path_build(username, ".tty", out, out_sz);
+}
+
+static int
+song_viewer_pref_write_int(const char *username, const char *name, int value)
+{
+	char buf[16];
+	int len = snprintf(buf, sizeof(buf), "%d", value);
+
+	if (len < 0 || (size_t)len >= sizeof(buf))
+		return -1;
+	return song_viewer_pref_write_raw(username, name, buf);
+}
+
+static int
+song_viewer_pref_write_raw(const char *username, const char *name,
+	const char *value)
+{
+	char tty_dir[PATH_MAX];
+	char path[PATH_MAX];
+
+	if (song_viewer_pref_dir(username, tty_dir, sizeof(tty_dir)) != 0)
+		return -1;
+	if (ensure_dir_path(tty_dir) != 0)
+		return -1;
+	if (song_viewer_pref_path(username, name, path, sizeof(path)) != 0)
+		return -1;
+	return write_file_path(path, value ? value : "", value ? strlen(value) : 0);
+}
+
+static int
+song_viewer_pref_read_int(const char *username, const char *name, int fallback)
+{
+	char path[PATH_MAX];
+	char *raw = NULL;
+	int value = fallback;
+
+	if (song_viewer_pref_path(username, name, path, sizeof(path)) != 0)
+		return fallback;
+
+	raw = slurp_file(path);
+	if (!raw)
+		return fallback;
+	if (raw[0])
+		value = atoi(raw);
+	free(raw);
+	return value;
+}
+
+static int
+song_viewer_pref_read_bool(const char *username, const char *name)
+{
+	return song_viewer_pref_read_int(username, name, VIEWER_BOOL_DEFAULT) ? 1 : 0;
+}
+
+static int
+song_viewer_pref_write_bool(const char *username, const char *name, int value)
+{
+	return song_viewer_pref_write_int(username, name, value ? 1 : 0);
+}
+
+NDX_LISTENER(int, song_get_viewer_zoom, const char *, username)
+{
+	return song_viewer_zoom_clamp(
+		song_viewer_pref_read_int(username, "chords-zoom", VIEWER_ZOOM_DEFAULT));
+}
+
+NDX_LISTENER(int, song_set_viewer_zoom, const char *, username, int, zoom)
+{
+	return song_viewer_pref_write_int(username, "chords-zoom",
+		song_viewer_zoom_clamp(zoom));
+}
 
 static void
 song_meta_read(const char *item_path, song_meta_t *meta)
@@ -304,8 +408,48 @@ parse_transpose_params(const char *query, int *transpose, int *flags, int *show_
 	return (*transpose || *flags || *show_media) ? 0 : 1;
 }
 
+static int
+api_song_viewer_prefs_handler(int fd, char *body)
+{
+	const char *username = get_request_user(fd);
+	char bool_buf[8] = {0};
+	char zoom_buf[16] = {0};
+	int has_value = 0;
 
-char *song_json(int fd, int flags) {
+	if (!username || !username[0])
+		return respond_plain(fd, 204, "");
+
+	if (!body || ndc_query_parse(body) != 0)
+		return bad_request(fd, "Failed to parse viewer prefs");
+
+	if (ndc_query_param("v", zoom_buf, sizeof(zoom_buf) - 1) >= 0) {
+		if (song_set_viewer_zoom(username, atoi(zoom_buf)) != 0)
+			return server_error(fd, "Failed to save zoom");
+		has_value = 1;
+	}
+
+	if (ndc_query_param("b", bool_buf, sizeof(bool_buf) - 1) >= 0) {
+		if (song_viewer_pref_write_bool(username, "chords-bemol",
+				atoi(bool_buf) != 0) != 0)
+			return server_error(fd, "Failed to save flats option");
+		has_value = 1;
+	}
+
+	if (ndc_query_param("l", bool_buf, sizeof(bool_buf) - 1) >= 0) {
+		if (song_viewer_pref_write_bool(username, "chords-latin",
+				atoi(bool_buf) != 0) != 0)
+			return server_error(fd, "Failed to save latin option");
+		has_value = 1;
+	}
+
+	if (!has_value)
+		return bad_request(fd, "Missing viewer prefs");
+
+	return respond_plain(fd, 204, "");
+}
+
+
+char *song_json(int fd, int flags, int sync_viewer_prefs) {
 	char doc_root[256] = {0};
 	char query[1024] = {0};
 	char id[128] = {0};
@@ -314,6 +458,12 @@ char *song_json(int fd, int flags) {
 	char item_path[512];
 	char filepath[552];
 	song_meta_t meta;
+	const char *username = NULL;
+	int use_bemol = 0;
+	int use_latin = 0;
+	int viewer_zoom = VIEWER_ZOOM_DEFAULT;
+	int viewer_bemol = VIEWER_BOOL_DEFAULT;
+	int viewer_latin = VIEWER_BOOL_DEFAULT;
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	ndc_env_get(fd, query, "QUERY_STRING");
@@ -321,8 +471,36 @@ char *song_json(int fd, int flags) {
 
 	if (!id[0]) return NULL;
 
-	if (parse_transpose_params(query, &transpose, &flags, &show_media) != 0)
-		return NULL;
+	username = get_request_user(fd);
+	if (username && *username) {
+		viewer_zoom = song_get_viewer_zoom(username);
+		viewer_bemol = song_viewer_pref_read_bool(username, "chords-bemol");
+		viewer_latin = song_viewer_pref_read_bool(username, "chords-latin");
+	}
+
+	if (query[0]) {
+		if (parse_transpose_params(query, &transpose, &flags, &show_media) != 0)
+			return NULL;
+		use_bemol = (flags & TRANSP_BEMOL) != 0;
+		use_latin = (flags & TRANSP_LATIN) != 0;
+		if (sync_viewer_prefs && username && *username) {
+			if (song_viewer_pref_write_bool(username, "chords-bemol",
+					use_bemol) != 0)
+				return NULL;
+			if (song_viewer_pref_write_bool(username, "chords-latin",
+					use_latin) != 0)
+				return NULL;
+			viewer_bemol = use_bemol;
+			viewer_latin = use_latin;
+		}
+	} else {
+		use_bemol = viewer_bemol;
+		use_latin = viewer_latin;
+		if (use_bemol)
+			flags |= TRANSP_BEMOL;
+		if (use_latin)
+			flags |= TRANSP_LATIN;
+	}
 
 	if (song_item_path_build(doc_root[0] ? doc_root : ".", id,
 			item_path, sizeof(item_path)) != 0)
@@ -358,7 +536,6 @@ char *song_json(int fd, int flags) {
 	/* Determine ownership */
 	int is_owner = 0;
 	{
-		const char *username = get_request_user(fd);
 		if (username && *username)
 			is_owner = item_check_ownership(item_path, username);
 	}
@@ -375,6 +552,9 @@ char *song_json(int fd, int flags) {
 			json_object_kv_str(jo, "audio", meta.audio) != 0 ||
 			json_object_kv_str(jo, "pdf", meta.pdf) != 0 ||
 			json_object_kv_int(jo, "originalKey", original_key) != 0 ||
+			json_object_kv_int(jo, "viewerZoom", viewer_zoom) != 0 ||
+			json_object_kv_bool(jo, "viewerBemol", use_bemol) != 0 ||
+			json_object_kv_bool(jo, "viewerLatin", use_latin) != 0 ||
 			json_object_kv_bool(jo, "owner", is_owner) != 0 ||
 			json_object_kv_str(jo, "categories", meta.type) != 0 ||
 			json_object_kv_str(jo, "author", meta.author) != 0) {
@@ -394,7 +574,7 @@ api_song_transpose_handler(int fd, char *body)
 {
 	(void)body;
 
-	char *json = song_json(fd, 0);
+	char *json = song_json(fd, 0, 0);
 
 	if (!json)
 		return respond_json(fd, 500, "{\"error\":\"Failed to generate content\"}");
@@ -413,7 +593,7 @@ song_details_handler(int fd, char *body)
 {
 	(void)body;
 
-	char *json = song_json(fd, TRANSP_HTML);
+	char *json = song_json(fd, TRANSP_HTML, 1);
 	if (!json)
 		return respond_error(fd, 404, "Song not found");
 	int result = core_post_json(fd, json);
@@ -704,4 +884,6 @@ void ndx_install(void)
 
 	ndc_register_handler("GET:/api/song/:id/transpose",
 			api_song_transpose_handler);
+	ndc_register_handler("POST:/api/song/prefs",
+			api_song_viewer_prefs_handler);
 }

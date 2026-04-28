@@ -370,10 +370,25 @@ a:hover {
   gap: 0.5rem;
 }
 
+.viewer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.viewer-controls input[type="range"] {
+  width: 100%;
+}
+
 .module-menu form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.detail-viewer-scroll {
+  width: 100%;
+  overflow-x: visible;
 }
 
 .chord-data {

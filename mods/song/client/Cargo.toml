@@ -14,6 +14,7 @@ wasm-bindgen-futures = "0.4.68"
 [dependencies.web-sys]
 version = "0.3.95"
 features = [
+    "CssStyleDeclaration",
     "Document",
     "DomParser",
     "Element",
@@ -21,6 +22,7 @@ features = [
     "EventTarget",
     "History",
     "HtmlButtonElement",
+    "HtmlElement",
     "HtmlFormElement",
     "HtmlInputElement",
     "HtmlSelectElement",

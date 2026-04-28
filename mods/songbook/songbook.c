@@ -472,9 +472,11 @@ songbook_json(int fd)
 	char id[128] = {0};
 	char sb_path[512];
 	char owner[64] = {0};
+	const char *username = NULL;
 	songbook_meta_t meta;
 	repertoire_row_t *rows = NULL;
 	size_t row_count = 0;
+	int viewer_zoom = 100;
 
 	get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
@@ -490,6 +492,9 @@ songbook_json(int fd)
 
 	/* Read owner */
 	item_read_owner(sb_path, owner, sizeof(owner));
+	username = get_request_user(fd);
+	if (username && *username)
+		viewer_zoom = song_get_viewer_zoom(username);
 
 	/* Read data.txt - contains lines of chord_id:transpose:format */
 	char path_buf[1024];
@@ -520,6 +525,7 @@ songbook_json(int fd)
 			json_object_kv_str(jo, "title", meta.title) != 0 ||
 			json_object_kv_str(jo, "owner", owner) != 0 ||
 			json_object_kv_str(jo, "choir", meta.choir) != 0 ||
+			json_object_kv_int(jo, "viewerZoom", viewer_zoom) != 0 ||
 			json_object_kv_raw(jo, "songs", songs_json) != 0) {
 		json_object_free(jo);
 		free(songs_json);

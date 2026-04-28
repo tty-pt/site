@@ -2,8 +2,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{
-    Document, Element, Event, FormData, HtmlButtonElement, HtmlDataListElement, HtmlFormElement,
-    HtmlInputElement, HtmlOptionElement, HtmlSelectElement, RequestInit, Response,
+    Document, Element, Event, FormData, HtmlButtonElement, HtmlDataListElement, HtmlElement,
+    HtmlFormElement, HtmlInputElement, HtmlOptionElement, HtmlSelectElement, RequestInit, Response,
     UrlSearchParams,
 };
 
@@ -21,6 +21,27 @@ fn document() -> Result<Document, JsValue> {
 
 fn query_typed<T: JsCast>(root: &Element, selector: &str) -> Result<Option<T>, JsValue> {
     Ok(root.query_selector(selector)?.and_then(|node| node.dyn_into::<T>().ok()))
+}
+
+fn viewer_save_url(container: &Element) -> Option<String> {
+    container
+        .get_attribute("data-detail-viewer-save-url")
+        .filter(|value| !value.is_empty())
+}
+
+async fn post_viewer_prefs(url: String, body: String) -> Result<(), JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("missing window"))?;
+    let init = RequestInit::new();
+    init.set_method("POST");
+    init.set_body(&JsValue::from_str(&body));
+
+    let response = JsFuture::from(window.fetch_with_str_and_init(&url, &init)).await?;
+    let response: Response = response.dyn_into()?;
+    if response.ok() || response.status() == 204 {
+        return Ok(());
+    }
+
+    Err(JsValue::from_str(&format!("HTTP {}", response.status())))
 }
 
 fn datalist_options(datalist: &HtmlDataListElement) -> Vec<DatalistOption> {
@@ -123,13 +144,13 @@ async fn enhance_transpose(
     form: HtmlFormElement,
     row: Element,
     song_id: String,
-    chord_data: Option<Element>,
+    chord_data: Option<HtmlElement>,
     target_key: Option<Element>,
     select: HtmlSelectElement,
     submit_button: Option<HtmlButtonElement>,
 ) -> Result<(), JsValue> {
     if let Some(chord_data) = chord_data.as_ref() {
-        chord_data.set_attribute("style", "opacity: 0.5;")?;
+        chord_data.style().set_property("opacity", "0.5")?;
     }
     if let Some(button) = submit_button.as_ref() {
         button.set_disabled(true);
@@ -168,7 +189,7 @@ async fn enhance_transpose(
 
     if let Some(chord_data) = chord_data {
         chord_data.set_inner_html(&chord_html);
-        let _ = chord_data.remove_attribute("style");
+        let _ = chord_data.style().remove_property("opacity");
     }
 
     if let Some(target_key) = target_key {
@@ -200,7 +221,7 @@ fn init_detail_forms() -> Result<(), JsValue> {
             continue;
         };
         let submit_button = hide_submit(&form);
-        let chord_data = query_typed::<Element>(&row, "[data-songbook-chord-data=\"1\"]")?;
+        let chord_data = query_typed::<HtmlElement>(&row, "[data-songbook-chord-data=\"1\"]")?;
         let target_key = query_typed::<Element>(&row, "[data-songbook-target-key=\"1\"]")?;
 
         let form_clone = form.clone();
@@ -239,7 +260,7 @@ fn init_detail_forms() -> Result<(), JsValue> {
                 .await;
 
                 if let Some(chord_data) = inner_chord.as_ref() {
-                    let _ = chord_data.remove_attribute("style");
+                    let _ = chord_data.style().remove_property("opacity");
                 }
                 if let Some(button) = inner_button.as_ref() {
                     button.set_disabled(false);
@@ -257,8 +278,126 @@ fn init_detail_forms() -> Result<(), JsValue> {
     Ok(())
 }
 
+fn apply_viewer_state(
+    scopes: &[HtmlElement],
+    targets: &[HtmlElement],
+    scrolls: &[HtmlElement],
+    zoom: &HtmlInputElement,
+    wrap: &HtmlInputElement,
+    label: &Element,
+) {
+    let scale = zoom.value().parse::<i32>().unwrap_or(100).clamp(70, 170);
+    let wrap_lines = wrap.checked();
+    label.set_text_content(Some(&format!("{scale}%")));
+
+    for scope in scopes {
+        let style = scope.style();
+        let _ = style.set_property("font-size", &format!("calc({:.2} * 0.8rem)", scale as f64 / 100.0));
+    }
+
+    for target in targets {
+        let style = target.style();
+        let _ = style.set_property("white-space", if wrap_lines { "break-spaces" } else { "pre" });
+        let _ = style.set_property("display", if wrap_lines { "block" } else { "inline-block" });
+        let _ = style.set_property("min-width", if wrap_lines { "0" } else { "100%" });
+    }
+
+    for scroll in scrolls {
+        let style = scroll.style();
+        let _ = style.set_property("overflow-x", if wrap_lines { "visible" } else { "auto" });
+    }
+}
+
+fn spawn_save_zoom_pref(container: Element, zoom: HtmlInputElement) {
+    let Some(url) = viewer_save_url(&container) else {
+        return;
+    };
+    let body = format!(
+        "v={}",
+        zoom.value().parse::<i32>().unwrap_or(100).clamp(70, 170)
+    );
+    spawn_local(async move {
+        let _ = post_viewer_prefs(url, body).await;
+    });
+}
+
+fn init_detail_viewer() -> Result<(), JsValue> {
+    let Some(container) = document()?.query_selector("[data-detail-viewer-controls=\"songbook\"]")? else {
+        return Ok(());
+    };
+    let Some(zoom) = query_typed::<HtmlInputElement>(&container, "[data-detail-viewer-zoom=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(wrap) = query_typed::<HtmlInputElement>(&container, "[data-detail-viewer-wrap=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(label) = container.query_selector("[data-detail-viewer-zoom-label=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(scope) = document()?
+        .query_selector("[data-detail-viewer-scope=\"1\"]")?
+        .and_then(|node| node.dyn_into::<HtmlElement>().ok())
+    else {
+        return Ok(());
+    };
+    let nodes = document()?.query_selector_all("[data-songbook-chord-data=\"1\"]")?;
+    let scroll_nodes = document()?.query_selector_all("[data-detail-viewer-scroll=\"1\"]")?;
+    let scopes = vec![scope];
+    let mut targets = Vec::new();
+    let mut scrolls = Vec::new();
+    for index in 0..nodes.length() {
+        if let Some(node) = nodes.item(index).and_then(|node| node.dyn_into::<HtmlElement>().ok()) {
+            targets.push(node);
+        }
+    }
+    for index in 0..scroll_nodes.length() {
+        if let Some(node) = scroll_nodes.item(index).and_then(|node| node.dyn_into::<HtmlElement>().ok()) {
+            scrolls.push(node);
+        }
+    }
+    if targets.is_empty() {
+        return Ok(());
+    }
+    apply_viewer_state(&scopes, &targets, &scrolls, &zoom, &wrap, &label);
+
+    let zoom_scopes = scopes.clone();
+    let zoom_targets = targets.clone();
+    let zoom_scrolls = scrolls.clone();
+    let zoom_input = zoom.clone();
+    let zoom_wrap = wrap.clone();
+    let zoom_label = label.clone();
+    let on_zoom = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        apply_viewer_state(&zoom_scopes, &zoom_targets, &zoom_scrolls, &zoom_input, &zoom_wrap, &zoom_label);
+    }));
+    zoom.add_event_listener_with_callback("input", on_zoom.as_ref().unchecked_ref())?;
+    on_zoom.forget();
+
+    let save_container = container.clone();
+    let save_zoom = zoom.clone();
+    let on_zoom_change = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        spawn_save_zoom_pref(save_container.clone(), save_zoom.clone());
+    }));
+    zoom.add_event_listener_with_callback("change", on_zoom_change.as_ref().unchecked_ref())?;
+    on_zoom_change.forget();
+
+    let wrap_scopes = scopes.clone();
+    let wrap_targets = targets.clone();
+    let wrap_scrolls = scrolls.clone();
+    let wrap_zoom = zoom.clone();
+    let wrap_input = wrap.clone();
+    let wrap_label = label.clone();
+    let on_wrap = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        apply_viewer_state(&wrap_scopes, &wrap_targets, &wrap_scrolls, &wrap_zoom, &wrap_input, &wrap_label);
+    }));
+    wrap.add_event_listener_with_callback("change", on_wrap.as_ref().unchecked_ref())?;
+    on_wrap.forget();
+
+    Ok(())
+}
+
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
+    init_detail_viewer()?;
     init_edit_rows()?;
     init_detail_forms()?;
     Ok(())

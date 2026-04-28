@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <unistd.h>
+#include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <openssl/evp.h>
@@ -16,7 +17,7 @@
 #undef COMMON_IMPL
 
 static char *form_body_finish(form_body_t *fb, size_t *out_len);
-static int write_file_path(const char *path, const char *buf, size_t sz);
+int write_file_path(const char *path, const char *buf, size_t sz);
 static int remove_path_recursive(const char *path);
 int item_child_path(const char *item_path, const char *name,
 	char *out, size_t outlen);
@@ -193,8 +194,7 @@ NDX_LISTENER(int, meta_fields_write,
 	return 0;
 }
 
-static int
-write_file_path(const char *path, const char *buf, size_t sz)
+NDX_LISTENER(int, write_file_path, const char *, path, const char *, buf, size_t, sz)
 {
 	FILE *fp = fopen(path, "w");
 	if (!fp)
@@ -204,6 +204,23 @@ write_file_path(const char *path, const char *buf, size_t sz)
 		return -1;
 	}
 	fclose(fp);
+	return 0;
+}
+
+NDX_LISTENER(int, ensure_dir_path, const char *, path)
+{
+	if (mkdir(path, 0755) == 0 || errno == EEXIST)
+		return 0;
+	return -1;
+}
+
+NDX_LISTENER(int, user_path_build,
+	const char *, username, const char *, suffix,
+	char *, out, size_t, outlen)
+{
+	if (!username || !username[0] || !suffix || !suffix[0] || !out || outlen == 0)
+		return -1;
+	snprintf(out, outlen, "./home/%s/%s", username, suffix);
 	return 0;
 }
 

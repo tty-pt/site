@@ -78,4 +78,9 @@ NDX_HOOK_DECL(int, song_get_original_key_root,
  * Returns chromatic index 0-11 (0=C), or 0 if undetectable. */
 NDX_HOOK_DECL(int, song_get_original_key, const char *, song_id);
 
+/* Get or set the shared chord-viewer zoom preference for a user.
+ * Values are clamped to the 70-170 range; missing/invalid values default to 100. */
+NDX_HOOK_DECL(int, song_get_viewer_zoom, const char *, username);
+NDX_HOOK_DECL(int, song_set_viewer_zoom, const char *, username, int, zoom);
+
 #endif /* CHORDS_API_H */

@@ -2,7 +2,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{
-    Document, Element, Event, HtmlButtonElement, HtmlFormElement, HtmlInputElement,
+    Document, Element, Event, HtmlButtonElement, HtmlElement, HtmlFormElement, HtmlInputElement,
     HtmlSelectElement, RequestInit, Response, Url, UrlSearchParams, Window,
 };
 
@@ -80,6 +80,46 @@ fn api_url(song_id: &str, params: &UrlSearchParams) -> String {
     }
 }
 
+fn viewer_save_url(container: &Element) -> Option<String> {
+    container
+        .get_attribute("data-detail-viewer-save-url")
+        .filter(|value| !value.is_empty())
+}
+
+async fn post_viewer_prefs(url: String, body: String) -> Result<(), JsValue> {
+    let window = window()?;
+    let init = RequestInit::new();
+    init.set_method("POST");
+    init.set_body(&JsValue::from_str(&body));
+
+    let response = JsFuture::from(window.fetch_with_str_and_init(&url, &init)).await?;
+    let response: Response = response.dyn_into()?;
+    if response.ok() || response.status() == 204 {
+        return Ok(());
+    }
+
+    Err(JsValue::from_str(&format!("HTTP {}", response.status())))
+}
+
+async fn save_song_viewer_prefs(form: &HtmlFormElement) -> Result<(), JsValue> {
+    let Some(container) = document()?.query_selector("[data-detail-viewer-controls=\"song\"]")? else {
+        return Ok(());
+    };
+    let Some(url) = viewer_save_url(&container) else {
+        return Ok(());
+    };
+    let Some(zoom) = query_typed::<HtmlInputElement>(&container, "[data-detail-viewer-zoom=\"1\"]")? else {
+        return Ok(());
+    };
+    let body = format!(
+        "v={}&b={}&l={}",
+        zoom.value().parse::<i32>().unwrap_or(100).clamp(70, 170),
+        if checkbox_value(form.as_ref(), "b")? { 1 } else { 0 },
+        if checkbox_value(form.as_ref(), "l")? { 1 } else { 0 }
+    );
+    post_viewer_prefs(url, body).await
+}
+
 fn update_song_media(media_slot: Option<&Element>, payload: &js_sys::Object) {
     let Some(media_slot) = media_slot else {
         return;
@@ -131,7 +171,7 @@ fn update_song_media(media_slot: Option<&Element>, payload: &js_sys::Object) {
 
 async fn update_song_detail(
     form: HtmlFormElement,
-    chord_data: Element,
+    chord_data: HtmlElement,
     media_slot: Option<Element>,
     submit_button: Option<HtmlButtonElement>,
 ) -> Result<(), JsValue> {
@@ -145,7 +185,7 @@ async fn update_song_detail(
     let window = window()?;
     let history = window.history()?;
 
-    chord_data.set_attribute("style", "opacity: 0.5;")?;
+    chord_data.style().set_property("opacity", "0.5")?;
     if let Some(button) = submit_button.as_ref() {
         button.set_disabled(true);
     }
@@ -168,12 +208,13 @@ async fn update_song_detail(
     chord_data.set_inner_html(&chord_html);
     update_song_media(media_slot.as_ref(), &payload);
     history.push_state_with_url(&JsValue::NULL, "", Some(&page_path))?;
+    let _ = save_song_viewer_prefs(&form).await;
     Ok(())
 }
 
 fn spawn_update(
     form: HtmlFormElement,
-    chord_data: Element,
+    chord_data: HtmlElement,
     media_slot: Option<Element>,
     submit_button: Option<HtmlButtonElement>,
 ) {
@@ -196,7 +237,7 @@ fn spawn_update(
         if let Some(button) = submit_button.as_ref() {
             button.set_disabled(false);
         }
-        let _ = chord_data.remove_attribute("style");
+        let _ = chord_data.style().remove_property("opacity");
         let _ = form.remove_attribute("data-song-transpose-busy");
 
         if result.is_err() {
@@ -212,7 +253,8 @@ fn bind_song_transpose(form: HtmlFormElement) -> Result<(), JsValue> {
 
     let chord_data = document()?
         .get_element_by_id("chord-data")
-        .ok_or_else(|| JsValue::from_str("missing chord-data element"))?;
+        .ok_or_else(|| JsValue::from_str("missing chord-data element"))?
+        .dyn_into::<HtmlElement>()?;
     let media_slot = document()?.get_element_by_id("media-slot");
     let submit_button =
         query_typed::<HtmlButtonElement>(form.as_ref(), "button[type=\"submit\"]")?;
@@ -266,8 +308,123 @@ fn bind_song_transpose(form: HtmlFormElement) -> Result<(), JsValue> {
     Ok(())
 }
 
+fn apply_viewer_state(
+    scopes: &[HtmlElement],
+    targets: &[HtmlElement],
+    scrolls: &[HtmlElement],
+    zoom: &HtmlInputElement,
+    wrap: &HtmlInputElement,
+    label: &Element,
+) {
+    let scale = zoom.value().parse::<i32>().unwrap_or(100).clamp(70, 170);
+    let wrap_lines = wrap.checked();
+    label.set_text_content(Some(&format!("{scale}%")));
+
+    for scope in scopes {
+        let style = scope.style();
+        let _ = style.set_property("font-size", &format!("calc({:.2} * 0.8rem)", scale as f64 / 100.0));
+    }
+
+    for target in targets {
+        let style = target.style();
+        let _ = style.set_property("white-space", if wrap_lines { "break-spaces" } else { "pre" });
+        let _ = style.set_property("display", if wrap_lines { "block" } else { "inline-block" });
+        let _ = style.set_property("min-width", if wrap_lines { "0" } else { "100%" });
+    }
+
+    for scroll in scrolls {
+        let style = scroll.style();
+        let _ = style.set_property("overflow-x", if wrap_lines { "visible" } else { "auto" });
+    }
+}
+
+fn spawn_save_zoom_pref(container: Element, zoom: HtmlInputElement) {
+    let Some(url) = viewer_save_url(&container) else {
+        return;
+    };
+    let body = format!(
+        "v={}",
+        zoom.value().parse::<i32>().unwrap_or(100).clamp(70, 170)
+    );
+    spawn_local(async move {
+        let _ = post_viewer_prefs(url, body).await;
+    });
+}
+
+fn init_detail_viewer() -> Result<(), JsValue> {
+    let Some(container) = document()?.query_selector("[data-detail-viewer-controls=\"song\"]")? else {
+        return Ok(());
+    };
+    let Some(zoom) = query_typed::<HtmlInputElement>(&container, "[data-detail-viewer-zoom=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(wrap) = query_typed::<HtmlInputElement>(&container, "[data-detail-viewer-wrap=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(label) = container.query_selector("[data-detail-viewer-zoom-label=\"1\"]")? else {
+        return Ok(());
+    };
+    let Some(scope) = document()?
+        .query_selector("[data-detail-viewer-scope=\"1\"]")?
+        .and_then(|node| node.dyn_into::<HtmlElement>().ok())
+    else {
+        return Ok(());
+    };
+    let Some(scroll) = document()?
+        .query_selector("[data-detail-viewer-scroll=\"1\"]")?
+        .and_then(|node| node.dyn_into::<HtmlElement>().ok())
+    else {
+        return Ok(());
+    };
+    let Some(target) = document()?
+        .get_element_by_id("chord-data")
+        .and_then(|node| node.dyn_into::<HtmlElement>().ok())
+    else {
+        return Ok(());
+    };
+    let scopes = vec![scope];
+    let targets = vec![target];
+    let scrolls = vec![scroll];
+    apply_viewer_state(&scopes, &targets, &scrolls, &zoom, &wrap, &label);
+
+    let zoom_scopes = scopes.clone();
+    let zoom_targets = targets.clone();
+    let zoom_scrolls = scrolls.clone();
+    let zoom_input = zoom.clone();
+    let zoom_wrap = wrap.clone();
+    let zoom_label = label.clone();
+    let on_zoom = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        apply_viewer_state(&zoom_scopes, &zoom_targets, &zoom_scrolls, &zoom_input, &zoom_wrap, &zoom_label);
+    }));
+    zoom.add_event_listener_with_callback("input", on_zoom.as_ref().unchecked_ref())?;
+    on_zoom.forget();
+
+    let save_container = container.clone();
+    let save_zoom = zoom.clone();
+    let on_zoom_change = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        spawn_save_zoom_pref(save_container.clone(), save_zoom.clone());
+    }));
+    zoom.add_event_listener_with_callback("change", on_zoom_change.as_ref().unchecked_ref())?;
+    on_zoom_change.forget();
+
+    let wrap_scopes = scopes.clone();
+    let wrap_targets = targets.clone();
+    let wrap_scrolls = scrolls.clone();
+    let wrap_zoom = zoom.clone();
+    let wrap_input = wrap.clone();
+    let wrap_label = label.clone();
+    let on_wrap = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+        apply_viewer_state(&wrap_scopes, &wrap_targets, &wrap_scrolls, &wrap_zoom, &wrap_input, &wrap_label);
+    }));
+    wrap.add_event_listener_with_callback("change", on_wrap.as_ref().unchecked_ref())?;
+    on_wrap.forget();
+
+    Ok(())
+}
+
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
+    init_detail_viewer()?;
     if let Some(form) = form()? {
         bind_song_transpose(form)?;
     }
