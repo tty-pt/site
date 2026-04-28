@@ -107,21 +107,34 @@ pub(crate) fn login_redirect(ctx: &RequestContext) -> ResponsePayload {
     }
 }
 
-fn render_document(title: &str, body: Element) -> String {
+fn render_document_with_head(title: &str, body: Element, extra_head: &str) -> String {
     let body_html = render_element(body);
     format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\"></head><body style=\"margin: 0\">{}<script type=\"module\" src=\"/wasm.js\"></script></body></html>",
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\">{}</head><body style=\"margin: 0\">{}<script type=\"module\" src=\"/wasm.js\"></script></body></html>",
         escape_html(title),
+        extra_head,
         body_html
     )
 }
 
+fn render_document(title: &str, body: Element) -> String {
+    render_document_with_head(title, body, "")
+}
+
 pub(crate) fn html_response(title: &str, body: Element) -> ResponsePayload {
+    html_response_with_head(title, "", body)
+}
+
+pub(crate) fn html_response_with_head(
+    title: &str,
+    extra_head: &str,
+    body: Element,
+) -> ResponsePayload {
     ResponsePayload {
         status: 200,
         content_type: "text/html; charset=utf-8".to_string(),
         location: None,
-        body: render_document(title, body),
+        body: render_document_with_head(title, body, extra_head),
     }
 }
 
@@ -244,22 +257,22 @@ pub(crate) fn layout(
 ) -> Element {
     rsx! {
         div {
+            div { class: "main",
+                h1 { "{title}" }
+                { children }
+            }
             label { class: "menu",
                 input { name: "functions", r#type: "checkbox", class: "hidden" }
-                span { class: "fixed top-0 right-0 z-10 p-2 flex items-center gap-4",
+                span { class: "fixed top-0 right-0 z-50 p-2 flex items-center gap-4",
                     a { class: "menu-toggle flex items-center justify-center cursor-pointer text-base btn", "⚙️" }
                 }
-                span { class: "functions flex-1 fixed right-0 z-20 h-full overflow-y-auto text-sm capitalize flex flex-col gap-2 p-4",
+                span { class: "functions flex-1 fixed right-0 z-50 h-full overflow-y-auto text-sm capitalize flex flex-col gap-2 p-4",
                     { menu(user, path, icon) }
                     if let Some(menu_items) = menu_items {
                         div { class: "menu-separator" }
                         div { class: "module-menu", { menu_items } }
                     }
                 }
-            }
-            div { class: "main",
-                h1 { "{title}" }
-                { children }
             }
         }
     }

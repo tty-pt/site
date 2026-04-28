@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -21,6 +22,9 @@ static unsigned index_hd;
 static unsigned langs_hd; /* qmap: "{id}/{lang}" -> "1" */
 
 static void langs_cache_put(const char *id, const char *lang);
+static int poem_post_detail(int fd, const char *id,
+	const char *title, const char *head_content,
+	const char *body_content, int owner);
 
 typedef struct {
 	char title[256];
@@ -77,6 +81,74 @@ poem_write_uploaded_html(const char *item_path, const char *id)
 
 	free(file_content);
 	return 0;
+}
+
+static int
+poem_child_name_safe(const char *name)
+{
+	return name && name[0] && name[0] != '/' &&
+		!strstr(name, "..") && !strchr(name, '\\');
+}
+
+static const char *
+html_tag_start(const char *html, const char *tag)
+{
+	size_t tag_len = strlen(tag);
+
+	for (const char *p = html; (p = strchr(p, '<')) != NULL; p++) {
+		p++;
+		if (strncasecmp(p, tag, tag_len) != 0)
+			continue;
+		char next = p[tag_len];
+		if (next == '>' || next == ' ' || next == '\t' ||
+				next == '\r' || next == '\n')
+			return p - 1;
+	}
+	return NULL;
+}
+
+static const char *
+html_tag_end(const char *html, const char *tag)
+{
+	size_t tag_len = strlen(tag);
+
+	for (const char *p = html; (p = strchr(p, '<')) != NULL; p++) {
+		p++;
+		if (*p != '/')
+			continue;
+		p++;
+		if (strncasecmp(p, tag, tag_len) != 0)
+			continue;
+		char next = p[tag_len];
+		if (next == '>' || next == ' ' || next == '\t' ||
+				next == '\r' || next == '\n')
+			return p - 2;
+	}
+	return NULL;
+}
+
+static char *
+html_tag_inner(const char *html, const char *tag)
+{
+	const char *start = html_tag_start(html, tag);
+	if (!start)
+		return strdup("");
+	const char *inner_start = strchr(start, '>');
+	if (!inner_start)
+		return NULL;
+	inner_start++;
+
+	const char *inner_end = html_tag_end(inner_start, tag);
+	if (!inner_end || inner_end < inner_start)
+		return strdup(inner_start);
+
+	size_t out_len = (size_t)(inner_end - inner_start);
+	char *out = malloc(out_len + 1);
+	if (!out)
+		return NULL;
+	memcpy(out, inner_start, out_len);
+	out[out_len] = '\0';
+	return out;
 }
 
 /* Register that a lang file exists for an item in the cache. */
@@ -186,7 +258,7 @@ langs_cache_scan_item(const char *id)
 	closedir(dp);
 }
 
-/* GET /poem/:id — look up lang from cache, proxy to Fresh */
+/* GET /poem/:id — look up lang from cache and render the poem detail page. */
 static int
 poem_detail_handler(int fd, char *body)
 {
@@ -213,17 +285,48 @@ poem_detail_handler(int fd, char *body)
 
 	char lang[64] = { 0 };
 	pick_lang(id, accept_lang, lang, sizeof(lang));
+	char lang_file[80];
+	int lang_file_len = snprintf(lang_file, sizeof(lang_file), "%s.html", lang);
+	if (lang_file_len < 0 || (size_t)lang_file_len >= sizeof(lang_file))
+		return server_error(fd, "Failed to resolve poem language");
 
 	const char *username = get_request_user(fd);
 	int owner = username && *username
 		? item_check_ownership(item_path, username) : 0;
 
+	char *html_content = slurp_item_child_file(item_path, lang_file);
+	if (!html_content)
+		return poem_post_detail(fd, id, meta.title, "", "", owner);
+
+	char *head_content = html_tag_inner(html_content, "head");
+	char *body_content = html_tag_inner(html_content, "body");
+	free(html_content);
+	if (!head_content || !body_content) {
+		free(head_content);
+		free(body_content);
+		return respond_error(fd, 500, "OOM");
+	}
+
+	int rc = poem_post_detail(fd, id, meta.title,
+		head_content, body_content, owner);
+	free(head_content);
+	free(body_content);
+	return rc;
+}
+
+static int
+poem_post_detail(int fd, const char *id,
+	const char *title, const char *head_content,
+	const char *body_content, int owner)
+{
 	json_object_t *jo = json_object_new(0);
 	if (!jo)
 		return respond_error(fd, 500, "OOM");
+
 	if (json_object_kv_str(jo, "id", id) != 0 ||
-			json_object_kv_str(jo, "title", meta.title) != 0 ||
-			json_object_kv_str(jo, "lang", lang) != 0 ||
+			json_object_kv_str(jo, "title", title) != 0 ||
+			json_object_kv_str(jo, "head_content", head_content) != 0 ||
+			json_object_kv_str(jo, "body_content", body_content) != 0 ||
 			json_object_kv_bool(jo, "owner", owner) != 0) {
 		json_object_free(jo);
 		return respond_error(fd, 500, "OOM");
@@ -234,6 +337,39 @@ poem_detail_handler(int fd, char *body)
 	int rc = core_post_json(fd, json);
 	free(json);
 	return rc;
+}
+
+/* GET /poem/:id/* — serve files referenced by a directly-served poem. */
+static int
+poem_child_file_handler(int fd, char *body)
+{
+	(void)body;
+
+	char id[128];
+	char name[512];
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
+	ndc_env_get(fd, name, "PATTERN_PARAM_FILE");
+
+	if (!poem_child_name_safe(name))
+		return not_found(fd, "Not found");
+
+	char item_path[512];
+	if (poem_item_path_build(fd, id, item_path, sizeof(item_path)) != 0)
+		return server_error(fd, "Failed to resolve poem path");
+	if (!item_dir_exists(item_path))
+		return not_found(fd, "Poem not found");
+
+	char child_path[1024];
+	if (item_child_path(item_path, name, child_path, sizeof(child_path)) != 0)
+		return not_found(fd, "Not found");
+
+	const char *dot = strrchr(name, '.');
+	if (dot && strcmp(dot, ".html") == 0) {
+		return not_found(fd, "Not found");
+	}
+
+	ndc_sendfile(fd, child_path);
+	return 0;
 }
 
 /* POST /poem/add — handle multipart upload, create item */
@@ -349,6 +485,9 @@ void ndx_install(void) {
 	}
 
 	ndc_register_handler("POST:/poem/add", poem_add_post_handler);
+	ndc_register_handler("GET:/poem-file/:id/:file", poem_child_file_handler);
+	ndc_register_handler("GET:/poem/:id/:file", poem_child_file_handler);
+	ndc_register_handler("GET:/poem/:id/*", poem_child_file_handler);
 	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
 	ndc_register_handler("GET:/poem/:id/edit", poem_edit_get_handler);
 	ndc_register_handler("POST:/poem/:id/edit", poem_edit_post_handler);

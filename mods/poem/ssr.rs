@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::{
     RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
-    html_response, html_response_with_status, item_menu, item_path, parse_json_body,
+    html_response_with_head, html_response_with_status, item_menu, item_path, parse_json_body,
 };
 
 pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
@@ -22,41 +22,43 @@ pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 #[derive(Clone, Debug, Deserialize)]
 struct PoemPayload {
     title: Option<String>,
-    lang: Option<String>,
     owner: Option<bool>,
+    head_content: Option<String>,
+    body_content: Option<String>,
 }
 
 pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<PoemPayload>(&ctx.body) {
         Ok(payload) => {
             let title = payload.title.unwrap_or_default();
-            let lang = payload.lang.unwrap_or_else(|| "pt_PT".to_string());
+            let body_content = payload.body_content.unwrap_or_default();
+            let head_content = payload.head_content.unwrap_or_default();
             let owner = payload.owner.unwrap_or(false);
             let page_title = if title.is_empty() {
                 format!("poem: {id}")
             } else {
                 title.clone()
             };
-            html_response(
+            html_response_with_head(
                 &page_title,
+                &head_content,
                 crate::layout(
                     current_user(ctx),
                     &page_title,
                     &item_path("poem", id),
                     Some("📜"),
                     Some(item_menu("poem", id, owner)),
-                    if lang.is_empty() {
+                    if body_content.is_empty() {
                         crate::empty_state("No content yet.")
                     } else {
                         rsx! {
-                            iframe {
-                                src: "/poem/{id}/{lang}.html",
-                                class: "w-full",
-                                style: "height: 80vh; border: none;"
+                            div {
+                                class: "w-full poem-content",
+                                dangerous_inner_html: "{body_content}"
                             }
                         }
-                    },
-                ),
+                    }
+                )
             )
         }
         Err(err) => html_response_with_status(

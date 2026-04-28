@@ -200,11 +200,11 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                             if display_songs.is_empty() {
                                 { empty_state("No songs yet.") }
                             } else {
-                                div { class: "flex flex-col gap-1",
+                                div { class: "flex flex-col gap-4",
                                     for (index, song) in display_songs.into_iter().enumerate() {
                                         div {
                                             id: "{index}",
-                                            class: "separator flex flex-col gap-2",
+                                            class: "flex flex-col gap-2",
                                             "data-songbook-item": "1",
                                             "data-songbook-id": "{id}",
                                             "data-song-id": "{song.chord_id}",
