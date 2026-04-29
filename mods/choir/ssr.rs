@@ -40,7 +40,7 @@ struct SongEntry {
 #[allow(non_snake_case)]
 struct ChoirPayload {
     title: Option<String>,
-    owner: Option<String>,
+    owner_name: Option<String>,
     #[allow(dead_code)]
     counter: Option<String>,
     formats: Option<String>,
@@ -53,7 +53,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<ChoirPayload>(&ctx.body) {
         Ok(mut payload) => {
             let title = payload.title.take().unwrap_or_default();
-            let owner = payload.owner.take().unwrap_or_default();
+            let owner = payload.owner_name.take().unwrap_or_default();
             let is_owner = current_user(ctx) == Some(owner.as_str());
             let mut all_songs = payload.allSongs.take().unwrap_or_default();
             all_songs.sort_by(|a, b| a.title.cmp(&b.title));

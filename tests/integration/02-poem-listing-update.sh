@@ -5,7 +5,6 @@ HOST="localhost"
 PORT="3002"
 BASE="http://$HOST:$PORT"
 LOG="/tmp/poem_listing_test_ndc.log"
-DENO_LOG="/tmp/poem_listing_test_deno.log"
 POEM_DIR="/home/quirinpa/site/items/poem/items"
 TMPFILE1="/tmp/poem_listing_test_1_$$"
 TMPFILE2="/tmp/poem_listing_test_2_$$"
@@ -16,24 +15,16 @@ pass() { echo "PASS: $1"; }
 cleanup() {
 	# Kill processes by port number to be more specific
 	fuser -k $PORT/tcp >/dev/null 2>&1 || true
-	pkill -f "deno.*server.ts" 2>/dev/null || true
 	sleep 1
 	rm -rf "$POEM_DIR"
-	rm -f "$LOG" "$DENO_LOG" "$TMPFILE1" "$TMPFILE2"
+	rm -f "$LOG" "$TMPFILE1" "$TMPFILE2"
 }
 
 start_server() {
 	cleanup
 	sleep 2
 	mkdir -p "$POEM_DIR"
-	
-	# Start Deno SSR server
-	cd /home/quirinpa/site/mods/ssr
-	/home/quirinpa/.deno/bin/deno run --allow-net --allow-read --allow-env server.ts > "$DENO_LOG" 2>&1 &
-	deno_pid=$!
-	cd - > /dev/null
-	sleep 2
-	
+
 	# Start ndc
 	LD_LIBRARY_PATH=/home/quirinpa/ndc/lib:/home/quirinpa/qmap/lib \
 		/home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &

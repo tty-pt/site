@@ -90,18 +90,13 @@ pwd_mkdb -d /path/to/site/etc /path/to/site/etc/master.passwd
 
 ### Redirects
 
-Every `303` redirect must set `Connection: close` and `DF_TO_CLOSE` before `ndc_head`:
+Every `303` redirect should use `ndc_header_set` and `ndc_respond`:
 
 ```c
-ndc_header(fd, "Location", location);
-ndc_header(fd, "Connection", "close");
-ndc_set_flags(fd, DF_TO_CLOSE);
-ndc_head(fd, 303);
-ndc_close(fd);
+ndc_header_set(fd, "Location", location);
+ndc_respond(fd, 303, "");
 return 0;
 ```
-
-`DF_TO_CLOSE = 8` from `/usr/include/ttypt/ndc.h`.
 
 ### Form parsing
 

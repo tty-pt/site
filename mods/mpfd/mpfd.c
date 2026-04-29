@@ -119,34 +119,59 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		if (!headers_end)
 			break;
 
-		/* Find Content-Disposition */
-		char *cd = find_substr(pos, headers_end - pos, CD, sizeof(CD) - 1);
+		/* Find Content-Disposition (case-insensitive) */
+		char *cd = NULL;
+		for (char *p = pos; p + 19 <= headers_end; p++) {
+			if (strncasecmp(p, "Content-Disposition:", 20) == 0) {
+				cd = p;
+				break;
+			}
+		}
+
 		if (!cd) {
 			pos = headers_end + 4;
 			continue;
 		}
-		cd += sizeof(CD) - 1;
+
+		/* Find name="..." within Content-Disposition (case-insensitive) */
+		char *name_start = NULL;
+		for (char *p = cd; p + 6 <= headers_end; p++) {
+			if (strncasecmp(p, "name=\"", 6) == 0) {
+				name_start = p + 6;
+				break;
+			}
+		}
+
+		if (!name_start) {
+			pos = headers_end + 4;
+			continue;
+		}
 
 		/* Extract name="..." */
-		/* cd points to first char after 'name="', find closing quote within headers */
 		char key[256] = {0};
-		char *q_end = cd;
+		char *q_end = name_start;
 		while (q_end < headers_end && *q_end != '"')
 			q_end++;
 		if (q_end >= headers_end)
 			goto next_part;
-		size_t klen = q_end - cd;
+		size_t klen = q_end - name_start;
 		if (klen >= sizeof(key))
 			klen = sizeof(key) - 1;
-		strncpy(key, cd, klen);
+		strncpy(key, name_start, klen);
 		key[klen] = '\0';
 
-		/* Extract filename if present */
+		/* Extract filename if present (case-insensitive) */
 		char filename[256] = {0};
 		size_t fname_len = 0;
-		char *fstart = strstr(cd, "filename=\"");
+		char *fstart = NULL;
+		for (char *p = cd; p + 10 <= headers_end; p++) {
+			if (strncasecmp(p, "filename=\"", 10) == 0) {
+				fstart = p + 10;
+				break;
+			}
+		}
+
 		if (fstart && fstart < headers_end) {
-			fstart += 10;
 			char *fq_end = fstart;
 			while (fq_end < headers_end && *fq_end != '"')
 				fq_end++;

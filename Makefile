@@ -37,6 +37,9 @@ e2e-tests: test-data-dirs
 
 test: unit-tests pages-test e2e-tests
 
+watch:
+	./scripts/watch.sh
+
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 

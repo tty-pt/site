@@ -18,12 +18,12 @@
 
 #include <ttypt/ndc-ndx.h>
 
-#include "../common/common.h"
-#include "../index/index.h"
-
 #define AUTH_IMPL
 #include "auth.h"
 #undef AUTH_IMPL
+
+#include "../common/common.h"
+#include "../index/index.h"
 
 static unsigned users_map;
 static unsigned sessions_map;
@@ -647,11 +647,9 @@ NDX_LISTENER(item_access_t, item_access_status,
 	if ((flags & ICTX_NEED_LOGIN) && (!username || !*username))
 		return ITEM_ACCESS_UNAUTHENTICATED;
 
-	if ((flags & ICTX_NEED_OWNERSHIP) || (flags & ICTX_NEED_LOGIN)) {
-		struct stat st;
-		if (stat(item_path, &st) != 0 || !S_ISDIR(st.st_mode))
-			return ITEM_ACCESS_MISSING;
-	}
+	struct stat st;
+	if (stat(item_path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return ITEM_ACCESS_MISSING;
 
 	if ((flags & ICTX_NEED_OWNERSHIP) &&
 			!item_check_ownership(item_path, username))
