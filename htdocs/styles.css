@@ -414,14 +414,22 @@ a:hover {
 
 /* Common utilities used by SSR */
 .fixed { position: fixed; }
+.absolute { position: absolute; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
 .right-0 { right: 0; }
 .top-0 { top: 0; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-30 { z-index: 30; }
+.z-40 { z-index: 40; }
 .z-50 { z-index: 50; }
 .p-2 { padding: 0.5rem; }
 .p-4 { padding: 1rem; }
 .flex { display: flex; }
+.flex-1 { flex: 1 1 0%; }
 .flex-col { flex-direction: column; }
 .items-center { align-items: center; }
+.justify-center { justify-content: center; }
 .gap-2 { gap: 0.5rem; }
 .gap-4 { gap: 1rem; }
 .h-full { height: 100%; }
@@ -430,5 +438,21 @@ a:hover {
 .capitalize { text-transform: capitalize; }
 .text-sm { font-size: 0.875rem; }
 .text-base { font-size: 1rem; }
+.text-xs { font-size: 0.75rem; }
 .cursor-pointer { cursor: pointer; }
 .hidden { display: none; }
+
+.menu-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.menu input:checked ~ .menu-overlay {
+  display: block;
+}

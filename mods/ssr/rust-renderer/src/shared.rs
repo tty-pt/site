@@ -203,11 +203,11 @@ pub(crate) fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
     rsx! {
         a { href: "{edit_href}", class: "btn",
             span { "✏️" }
-            label { "edit" }
+            span { "edit" }
         }
         a { href: "{delete_href}", class: "btn",
             span { "🗑️" }
-            label { "delete" }
+            span { "delete" }
         }
     }
 }
@@ -222,26 +222,26 @@ pub(crate) fn menu(user: Option<&str>, path: &str, icon: Option<&str>) -> Elemen
         if !is_home {
             a { class: "btn", href: "{up_href}",
                 span { "{icon}" }
-                label { "go up" }
+                span { "go up" }
             }
         }
         if let Some(user) = user {
             a { class: "btn", href: "/{user}/",
                 span { "😊" }
-                label { "me" }
+                span { "me" }
             }
             a { class: "btn", href: "/auth/logout",
                 span { "🚪" }
-                label { "logout" }
+                span { "logout" }
             }
         } else {
             a { class: "btn", href: "{login_link}",
                 span { "🔑" }
-                label { "login" }
+                span { "login" }
             }
             a { class: "btn", href: "{register_href}",
                 span { "📝" }
-                label { "register" }
+                span { "register" }
             }
         }
     }
@@ -261,16 +261,20 @@ pub(crate) fn layout(
             { children }
         }
         nav { class: "menu",
-            input { name: "functions", r#type: "checkbox", class: "hidden" }
-            span { class: "fixed top-0 right-0 z-50 p-2 flex items-center gap-4",
-                a { class: "menu-toggle flex items-center justify-center cursor-pointer text-base btn", "⚙️" }
-            }
-            span { class: "functions flex-1 fixed right-0 z-50 h-full overflow-y-auto text-sm capitalize flex flex-col gap-2 p-4",
-                { menu(user, path, icon) }
-                if let Some(menu_items) = menu_items {
-                    div { class: "menu-separator" }
-                    div { class: "module-menu", { menu_items } }
+            input { id: "menu-functions", name: "functions", r#type: "checkbox", class: "hidden" }
+            label { r#for: "menu-functions", class: "menu-overlay", aria_label: "Close Menu" }
+            span { class: "functions flex-1 fixed right-0 z-50 h-full overflow-y-auto text-sm capitalize flex flex-col p-4",
+                div { class: "relative z-20 flex flex-col gap-2",
+                    { menu(user, path, icon) }
+                    if let Some(menu_items) = menu_items {
+                        div { class: "menu-separator" }
+                        div { class: "module-menu", { menu_items } }
+                    }
                 }
+                label { r#for: "menu-functions", class: "absolute inset-0 z-10 cursor-pointer", aria_label: "Close Menu" }
+            }
+            span { class: "fixed top-0 right-0 z-30 p-2 flex items-center gap-4",
+                label { r#for: "menu-functions", class: "menu-toggle flex items-center justify-center cursor-pointer text-base btn", aria_label: "Menu", "⚙️" }
             }
         }
     }
