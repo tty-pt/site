@@ -15,6 +15,13 @@ NDX_HOOK_DECL(int, ssr_render,
 	const char *, remote_user,
 	const char *, forwarded_host,
 	const char *, modules_header);
+
+NDX_HOOK_DECL(int, ssr_render_item,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, action,
+	const char *, json);
 #endif
 
 #endif

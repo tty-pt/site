@@ -13,6 +13,6 @@ NDX_HOOK_DECL(int, index_id, char *, result, size_t, result_len, const char *, t
 NDX_HOOK_DECL(int, index_add_item, int, fd, char *, body, char *, id_out, size_t, id_len);
 
 NDX_HOOK_DECL(int, core_get, int, fd, char *, body);
-NDX_HOOK_DECL(int, core_post, int, fd, char *, body, size_t, len);
+NDX_HOOK_DECL(const char *, index_get_modules_header, int, dummy);
 
 #endif

@@ -24,6 +24,7 @@
 
 #include "../common/common.h"
 #include "../index/index.h"
+#include "../ssr/ssr.h"
 
 static unsigned users_map;
 static unsigned sessions_map;
@@ -766,11 +767,13 @@ login_error(int fd, int status, const char *msg, const char *ret)
 	char accept[256] = {0};
 	ndc_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
-		char enc[128] = {0}, enc_ret[256] = {0}, pb[512];
+		char enc[128] = {0}, enc_ret[256] = {0}, pb[512], host[256] = {0};
 		url_encode(msg, enc, sizeof(enc));
 		url_encode(ret, enc_ret, sizeof(enc_ret));
 		int plen = snprintf(pb, sizeof(pb), "status=%d&error=%s&ret=%s", status, enc, enc_ret);
-		return core_post(fd, pb, (size_t)plen);
+		ndc_header_get(fd, "Host", host, sizeof(host));
+		return ssr_render(fd, "POST", "/auth/login", "", pb, (size_t)plen,
+				get_request_user(fd), host, index_get_modules_header(0));
 	}
 	return respond_plain(fd, status, msg);
 }

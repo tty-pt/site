@@ -21,6 +21,7 @@
 #include "../index/index.h"
 #include "../song/song.h"
 #include "../choir/repertoire.h"
+#include "../ssr/ssr.h"
 
 #define SONGBOOK_ITEMS_PATH "items/songbook/items"
 static unsigned index_hd = 0;
@@ -716,11 +717,13 @@ static int
 songbook_details_handler(int fd, char *body)
 {
 	(void)body;
+	char id[128] = {0};
+	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 
 	char *json = songbook_json(fd);
 	if (!json)
 		return respond_error(fd, 404, "Songbook not found");
-	int result = core_post_json(fd, json);
+	int result = ssr_render_item(fd, "songbook", id, "detail", json);
 	free(json);
 	return result;
 }

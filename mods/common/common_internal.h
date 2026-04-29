@@ -7,8 +7,6 @@
 #include "common.h"
 #undef COMMON_IMPL
 
-NDX_HOOK_DECL(int, core_post, int, fd, char *, body, size_t, len);
-
 int json_escape(const char *in, char *out, size_t outlen);
 int url_encode(const char *in, char *out, size_t outlen);
 
@@ -22,8 +20,6 @@ int item_child_path(const char *item_path, const char *name,
 form_body_t *form_body_new(int dummy);
 int form_body_free(form_body_t *fb);
 char *form_body_finish(form_body_t *fb, size_t *out_len);
-
-int core_post_json(int fd, const char *json);
 
 json_object_t *json_object_new(int dummy);
 int json_object_kv_str(json_object_t *jo, const char *key,

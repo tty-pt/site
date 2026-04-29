@@ -107,6 +107,48 @@ pub extern "C" fn ssr_render_ffi(request: *const RenderRequest) -> RenderResult 
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn ssr_render_item_ffi(
+    module: *const c_char,
+    action: *const c_char,
+    id: *const c_char,
+    query: *const c_char,
+    json: *const c_char,
+    remote_user: *const c_char,
+    modules_header: *const c_char,
+) -> RenderResult {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let module_s = cstr(module);
+        let action_s = cstr(action);
+        let id_s = cstr(id);
+        let ctx = RequestContext {
+            method: "POST".to_string(),
+            path: format!("/{}/{}", module_s, id_s),
+            query: cstr(query),
+            body: cstr(json),
+            remote_user: opt_cstr(remote_user),
+            modules: parse_modules(opt_cstr(modules_header)),
+        };
+        match dispatch_item(&module_s, &action_s, &id_s, &ctx) {
+            Some(res) => to_ffi(res),
+            None => to_ffi(html_response_with_status(
+                404,
+                "404",
+                error_page(current_user(&ctx), &ctx.path, 404, "Not found"),
+            )),
+        }
+    }));
+
+    match result {
+        Ok(payload) => payload,
+        Err(_) => to_ffi(html_response_with_status(
+            500,
+            "500",
+            error_page(None, "/", 500, "Internal server error"),
+        )),
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn ssr_free_result_ffi(result: *mut RenderResult) {
     if result.is_null() {
         return;

@@ -29,12 +29,50 @@ struct render_result {
 };
 
 extern struct render_result ssr_render_ffi(const struct render_request *request);
+extern struct render_result ssr_render_item_ffi(
+	const char *module,
+	const char *action,
+	const char *id,
+	const char *query,
+	const char *json,
+	const char *remote_user,
+	const char *modules_header);
 extern void ssr_free_result_ffi(struct render_result *result);
 
 static int
 ssr_get_handler(int fd, char *body)
 {
 	return core_get(fd, body);
+}
+
+NDX_LISTENER(int, ssr_render_item,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, action,
+	const char *, json)
+{
+	char query[512] = {0};
+	ndc_env_get(fd, query, "QUERY_STRING");
+
+	struct render_result result = ssr_render_item_ffi(
+		module, action, id, query, json,
+		get_request_user(fd),
+		index_get_modules_header(0));
+
+	if (result.location && result.location[0]) {
+		ndc_header_set(fd, "Location", result.location);
+		ndc_respond(fd, result.status ? result.status : 303, "");
+		ssr_free_result_ffi(&result);
+		return 0;
+	}
+
+	ndc_header_set(fd, "Content-Type",
+		result.content_type ? result.content_type : "text/html; charset=utf-8");
+	ndc_respond(fd, result.status ? result.status : 200,
+		result.body ? result.body : "");
+	ssr_free_result_ffi(&result);
+	return 0;
 }
 
 NDX_LISTENER(int, ssr_render,

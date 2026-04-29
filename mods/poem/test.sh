@@ -103,4 +103,12 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$US
 echo -n "13. Poem directory removed... "
 [ ! -d "$POEM_DIR/$USER" ] && pass "directory gone" || fail "directory still exists"
 
+# 14. Verify direct rendering via GET
+echo -n "14. Verify detail GET... "
+# Re-add a poem to test GET
+echo "Direct render test" > "$TMPFILE"
+curl -s -b "$COOKIE" -X POST "$BASE/poem/add" -F "title=direct_test" -F "file=@$TMPFILE" > /dev/null
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/poem/direct_test")
+[ "$code" = "200" ] && pass "GET success" || fail "expected 200, got $code"
+
 rm -f "$TMPFILE" "$TMPFILE2" "$COOKIE"

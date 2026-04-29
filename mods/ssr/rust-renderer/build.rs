@@ -53,5 +53,24 @@ fn main() {
 		"\thtml_response_with_status(\n\t\t404,\n\t\t\"404\",\n\t\terror_page(current_user(ctx), &ctx.path, 404, \"Not found\"),\n\t)\n}\n",
 	);
 
+	source.push_str("\npub(crate) fn dispatch_item(module: &str, action: &str, id: &str, ctx: &RequestContext) -> Option<ResponsePayload> {\n");
+	source.push_str("\tmatch (module, action) {\n");
+	for (module, _) in &modules {
+		if module == "auth" || module == "index" {
+			continue;
+		}
+		source.push_str(&format!(
+			"\t\t(\"{module}\", \"detail\") => Some({module}::render_detail(ctx, id)),\n"
+		));
+		source.push_str(&format!(
+			"\t\t(\"{module}\", \"edit\") => Some({module}::render_edit(ctx, id)),\n"
+		));
+		source.push_str(&format!(
+			"\t\t(\"{module}\", \"delete\") => Some(crate::index::render_delete_confirm(ctx, \"{module}\", id)),\n"
+		));
+	}
+	source.push_str("\t\t_ => None,\n");
+	source.push_str("\t}\n}\n");
+
 	fs::write(generated, source).unwrap();
 }

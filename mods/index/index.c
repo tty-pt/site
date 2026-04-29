@@ -64,7 +64,8 @@ NDX_LISTENER(int, index_id,
 			*o = *o + 32;
 			o++;
 		} else if ((c >= 'a' && c <= 'z')
-				|| (c >= '0' && c <= '9'))
+				|| (c >= '0' && c <= '9')
+				|| (c == '_'))
 			o++;
 	}
 	*o = '\0';
@@ -376,29 +377,6 @@ NDX_LISTENER(int, core_get,
 		get_request_user(fd), host, modules_header);
 }
 
-NDX_LISTENER(int, core_post,
-		int, fd,
-		char *, body,
-		size_t, len)
-{
-	(void)body;
-
-	char uri[512] = { 0 };
-	char param[512] = { 0 };
-	char full_path[PATH_MAX] = { 0 };
-	char cookie[256] = { 0 };
-	char token[64] = { 0 };
-	char host[256] = { 0 };
-
-	ndc_env_get(fd, uri, "DOCUMENT_URI");
-	ndc_env_get(fd, param, "QUERY_STRING");
-	snprintf(full_path, sizeof(full_path), "%s", uri);
-	(void)cookie; (void)token; (void)host;
-	ndc_header_get(fd, "Host", host, sizeof(host));
-	return ssr_render(fd, "POST", full_path, param, body, len,
-		get_request_user(fd), host, modules_header);
-}
-
 static int index_add_get_handler(
 		int fd,
 		char *body)
@@ -442,7 +420,7 @@ static int index_delete_get_handler(int fd, char *body)
 	char *json = json_object_finish(jo);
 	if (!json)
 		return respond_error(fd, 500, "OOM");
-	int rc = core_post_json(fd, json);
+	int rc = ssr_render_item(fd, module, id, "delete", json);
 	free(json);
 	return rc;
 }
@@ -492,6 +470,12 @@ static int index_delete_handler(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/%s", module);
 	return redirect(fd, location);
+}
+
+NDX_LISTENER(const char *, index_get_modules_header, int, dummy)
+{
+	(void)dummy;
+	return modules_header;
 }
 
 void ndx_install(void)

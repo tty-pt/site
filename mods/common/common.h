@@ -89,7 +89,6 @@ NDX_HOOK_DECL(int, item_child_path,
 	const char *, item_path, const char *, name,
 	char *, out, size_t, outlen);
 NDX_HOOK_DECL(int, item_remove_path_recursive, const char *, item_path);
-NDX_HOOK_DECL(int, core_post_json, int, fd, const char *, json);
 NDX_HOOK_DECL(int, core_post_form, int, fd, form_body_t *, fb);
 NDX_HOOK_DECL(int, core_post_form_builder,
 	int, fd, form_body_builder_cb, cb, void *, user);
