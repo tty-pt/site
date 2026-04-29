@@ -89,18 +89,10 @@ static void song_type_index_remove(const char *id) {
 }
 
 static int song_index_write_file(const char *doc) {
-	char path[PATH_MAX], tmp[PATH_MAX];
+	char path[PATH_MAX];
 	const char *root = (doc && doc[0]) ? doc : ".";
 	snprintf(path, sizeof(path), "%s/items/song/index.tsv", root);
-	snprintf(tmp, sizeof(tmp), "%s/items/song/index.tsv.tmp", root);
-	FILE *fp = fopen(tmp, "w");
-	if (!fp) return -1;
-	unsigned c = qmap_iter(song_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c))
-		fprintf(fp, "%s\t%s\n", (const char *)k, (const char *)v);
-	if (fclose(fp) != 0) return -1;
-	return rename(tmp, path);
+	return index_tsv_save(song_index_hd, path);
 }
 
 static void song_index_put_meta(const char *id, const song_meta_t *m) {
@@ -128,42 +120,35 @@ static void song_index_delete(const char *id) {
 	song_index_write_file(".");
 }
 
-static int song_index_load(const char *doc) {
-	char path[PATH_MAX], line[2048];
-	const char *root = (doc && doc[0]) ? doc : ".";
-	snprintf(path, sizeof(path), "%s/items/song/index.tsv", root);
-	FILE *fp = fopen(path, "r");
-	if (!fp) return -1;
-	while (fgets(line, sizeof(line), fp)) {
-		char *id = line, *title, *type, *author;
-		char *nl = strpbrk(line, "\r\n");
-		if (nl) *nl = '\0';
-		title = strchr(id, '\t'); if (!title) continue; *title++ = '\0';
-		type = strchr(title, '\t'); if (!type) continue; *type++ = '\0';
-		author = strchr(type, '\t'); if (!author) author = "";
-		else *author++ = '\0';
-		char val[768];
-		snprintf(val, sizeof(val), "%s\t%s\t%s", title, type, author);
-		qmap_put(song_index_hd, id, val);
-		song_type_index_add(type, id);
-	}
-	fclose(fp);
+static void song_load_cb(const char *id, const char *val, void *user) {
+	(void)user; char buf[768], *type; snprintf(buf, sizeof(buf), "%s", val);
+	type = strchr(buf, '\t'); if (!type) return;
+	type++; char *next = strchr(type, '\t'); if (next) *next = '\0';
+	song_type_index_add(type, id);
+}
+
+static int song_item_read_for_index(const char *path, char *out, size_t sz) {
+	song_meta_t m; song_meta_read(path, &m);
+	char title[256], type[256], author[256];
+	snprintf(title, sizeof(title), "%s", m.title);
+	snprintf(type, sizeof(type), "%s", m.type[0] ? m.type : "any");
+	snprintf(author, sizeof(author), "%s", m.author);
+	index_field_clean(title); index_field_clean(type); index_field_clean(author);
+	snprintf(out, sz, "%s\t%s\t%s", title, type, author);
 	return 0;
 }
 
-static void song_index_rebuild(const char *doc) {
-	char p[512];
-	module_items_path_build(doc, "song", p, sizeof(p));
-	DIR *d = opendir(p); if (!d) return;
-	struct dirent *e;
-	while ((e = readdir(d))) {
-		if (e->d_name[0] == '.') continue;
-		char item_path[PATH_MAX];
-		if (item_path_build_root(doc, "song", e->d_name, item_path, sizeof(item_path)) != 0)
-			continue;
-		song_index_upsert(doc, e->d_name, item_path);
+static void build_type_index(const char *doc) {
+	song_index_hd = qmap_open(NULL, "song_idx", QM_STR, QM_STR, 0x3FF, QM_SORTED);
+	type_index_hd = qmap_open(NULL, "type_idx", QM_STR, QM_STR, 0x3FF, 0);
+	char path[PATH_MAX]; const char *root = (doc && doc[0]) ? doc : ".";
+	snprintf(path, sizeof(path), "%s/items/song/index.tsv", root);
+	if (index_tsv_load(song_index_hd, path, song_load_cb, NULL) != 0) {
+		index_tsv_rebuild(root, "song", song_index_hd, song_item_read_for_index);
+		unsigned c = qmap_iter(song_index_hd, NULL, 0); const void *k, *v;
+		while (qmap_next(&k, &v, c)) song_load_cb((const char*)k, (const char*)v, NULL);
+		index_tsv_save(song_index_hd, path);
 	}
-	closedir(d);
 }
 
 static int song_viewer_pref_path(const char *user, const char *name, char *out, size_t sz) {
@@ -206,13 +191,6 @@ NDX_LISTENER(int, song_transpose_root, const char *, doc, const char *, id, int,
 	transp_reset_key(g_transp_ctx); *out = transp_buffer(g_transp_ctx, c, semi, fl);
 	int k = transp_get_key(g_transp_ctx); if (key) *key = k < 0 ? 0 : k;
 	free(c); return 0;
-}
-
-static void build_type_index(const char *doc) {
-	song_index_hd = qmap_open(NULL, "song_idx", QM_STR, QM_STR, 0x3FF, QM_SORTED);
-	type_index_hd = qmap_open(NULL, "type_idx", QM_STR, QM_STR, 0x3FF, 0);
-	if (song_index_load(doc) != 0)
-		song_index_rebuild(doc);
 }
 
 NDX_LISTENER(int, song_get_random_by_type, const char *, t, char **, out) {

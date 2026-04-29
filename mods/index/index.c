@@ -16,6 +16,8 @@
 #include "./../ssr/ssr.h"
 
 typedef void (*index_cleanup_fn)(const char *id);
+typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
+typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
 
 #define MAX_MODULES 64
 
@@ -47,7 +49,7 @@ NDX_LISTENER(int, index_id,
 		const char *, title,
 		size_t, title_len)
 {
-	size_t i, j, written;
+	size_t i, written;
 	char *o = result;
 
 	written = result_len;
@@ -78,7 +80,6 @@ int index_update_json(
 		unsigned flags)
 {
 	long offset;
-	char module_json[256];
 
 	offset = snprintf(modules_json_end, modules_rem, "%c{"
 			"\"id\":\"%s\","
@@ -161,7 +162,7 @@ NDX_LISTENER(int, index_add_item, int, fd, char *, body, char *, id_out, size_t,
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
-	index_id(id, sizeof(id), title, title_len);
+	index_id(id, sizeof(id), title, (size_t)title_len);
 	module = index_name(fd);
 
 	if (item_path_build(fd, module, id, path, sizeof(path)) != 0)
@@ -221,10 +222,10 @@ index_page(unsigned fd, unsigned hd, char *path, char *title)
 	{
 		char query[512] = {0};
 		char host[256] = {0};
-		const char *username = get_request_user(fd);
-		ndc_env_get(fd, query, "QUERY_STRING");
-		ndc_header_get(fd, "Host", host, sizeof(host));
-		ret = ssr_render(fd, "POST", path, query, body, body_len,
+		const char *username = get_request_user((int)fd);
+		ndc_env_get((int)fd, query, "QUERY_STRING");
+		ndc_header_get((int)fd, "Host", host, sizeof(host));
+		ret = ssr_render((int)fd, "POST", path, query, body, body_len,
 			username ? username : "", host, modules_header);
 	}
 	free(body);
@@ -239,13 +240,14 @@ static int index_list_handler(
 	unsigned hd;
 	const char *module;
 
+	(void)body;
 	module = index_name(fd);
 
 	hd = *(unsigned *) qmap_get(module_hd, module);
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 
-	return index_page(fd, hd, path,
+	return index_page((unsigned)fd, hd, path,
 			(char *) module);
 }
 
@@ -335,23 +337,60 @@ NDX_LISTENER(unsigned, index_put,
 	return qmap_put(hd, key, value);
 }
 
-static int
-index_del(unsigned hd, char *key)
+NDX_LISTENER(int, index_tsv_load, unsigned, hd, const char *, path, index_tsv_cb, cb, void *, user)
 {
-	qmap_del(hd, key);
+	FILE *fp = fopen(path, "r");
+	char line[2048];
+	if (!fp) return -1;
+	while (fgets(line, sizeof(line), fp)) {
+		char *id = line;
+		char *nl = strpbrk(line, "\r\n");
+		if (nl) *nl = '\0';
+		char *val = strchr(id, '\t');
+		if (!val) continue;
+		*val++ = '\0';
+		qmap_put(hd, id, val);
+		if (cb) cb(id, val, user);
+	}
+	fclose(fp);
 	return 0;
 }
 
-static unsigned
-index_get(unsigned hd, char *value, size_t len, char *key)
+NDX_LISTENER(int, index_tsv_save, unsigned, hd, const char *, path)
 {
-	const void *val = qmap_get(hd, key);
-	size_t rlen = qmap_len(QM_STR, val);
+	char tmp[PATH_MAX];
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE *fp = fopen(tmp, "w");
+	if (!fp) return -1;
+	unsigned c = qmap_iter(hd, NULL, 0);
+	const void *k, *v;
+	while (qmap_next(&k, &v, c)) {
+		fprintf(fp, "%s\t%s\n", (const char *)k, (const char *)v);
+	}
+	if (fclose(fp) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return rename(tmp, path);
+}
 
-	if (rlen > len)
-		return 1;
-
-	memcpy(value, val, rlen);
+NDX_LISTENER(int, index_tsv_rebuild, const char *, doc_root, const char *, module, unsigned, hd, index_item_read_fn, item_read_fn)
+{
+	char p[512];
+	if (module_items_path_build(doc_root, module, p, sizeof(p)) != 0) return -1;
+	DIR *d = opendir(p);
+	if (!d) return -1;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.') continue;
+		char item_path[PATH_MAX], val[1024];
+		if (item_path_build_root(doc_root, module, e->d_name, item_path, sizeof(item_path)) != 0)
+			continue;
+		if (item_read_fn(item_path, val, sizeof(val)) == 0) {
+			qmap_put(hd, e->d_name, val);
+		}
+	}
+	closedir(d);
 	return 0;
 }
 
@@ -364,14 +403,11 @@ NDX_LISTENER(int, core_get,
 	char path[512] = { 0 };
 	char param[512] = { 0 };
 	char full_path[PATH_MAX] = { 0 };
-	char cookie[256] = { 0 };
-	char token[64] = { 0 };
 	char host[256] = { 0 };
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s", path);
-	(void)cookie; (void)token; (void)host;
 	ndc_header_get(fd, "Host", host, sizeof(host));
 	return ssr_render(fd, "GET", full_path, param, NULL, 0,
 		get_request_user(fd), host, modules_header);

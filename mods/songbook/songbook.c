@@ -82,24 +82,9 @@ static int
 songbook_index_write_file(const char *doc_root)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	char path[PATH_MAX], tmp[PATH_MAX];
-	FILE *fp;
-	unsigned c;
-	const void *k, *v;
-
+	char path[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", root);
-	snprintf(tmp, sizeof(tmp), "%s/items/songbook/index.tsv.tmp", root);
-	fp = fopen(tmp, "w");
-	if (!fp)
-		return -1;
-
-	c = qmap_iter(songbook_index_hd, NULL, 0);
-	while (qmap_next(&k, &v, c))
-		fprintf(fp, "%s\t%s\n", (const char *)k, (const char *)v);
-
-	if (fclose(fp) != 0)
-		return -1;
-	return rename(tmp, path);
+	return index_tsv_save(songbook_index_hd, path);
 }
 
 static void
@@ -132,59 +117,21 @@ songbook_cleanup(const char *id)
 	songbook_index_write_file(".");
 }
 
-static int
-songbook_index_load(const char *doc_root)
-{
-	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	char path[PATH_MAX], line[1024];
-	FILE *fp;
-
-	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", root);
-	fp = fopen(path, "r");
-	if (!fp)
-		return -1;
-
-	while (fgets(line, sizeof(line), fp)) {
-		char *id = line, *title, *choir, val[512];
-		char *nl = strpbrk(line, "\r\n");
-		if (nl) *nl = '\0';
-		title = strchr(id, '\t');
-		if (!title) continue;
-		*title++ = '\0';
-		choir = strchr(title, '\t');
-		if (!choir) choir = "";
-		else *choir++ = '\0';
-		snprintf(val, sizeof(val), "%s\t%s", title, choir);
-		qmap_put(songbook_index_hd, id, val);
-	}
-
-	fclose(fp);
+static int songbook_item_read_for_index(const char *path, char *out, size_t sz) {
+	songbook_meta_t meta; songbook_meta_read(path, &meta);
+	char title[256], choir[128];
+	snprintf(title, sizeof(title), "%s", meta.title);
+	snprintf(choir, sizeof(choir), "%s", meta.choir);
+	index_field_clean(title); index_field_clean(choir);
+	snprintf(out, sz, "%s\t%s", title, choir);
 	return 0;
 }
 
 static void
 songbook_index_rebuild(const char *doc_root)
 {
-	char path[PATH_MAX];
-	DIR *dir;
-	struct dirent *entry;
-
-	if (module_items_path_build(doc_root, "songbook", path, sizeof(path)) != 0)
-		return;
-	dir = opendir(path);
-	if (!dir)
-		return;
-
-	while ((entry = readdir(dir)) != NULL) {
-		char item_path[PATH_MAX];
-		if (entry->d_name[0] == '.')
-			continue;
-		if (item_path_build_root(doc_root, "songbook", entry->d_name,
-				item_path, sizeof(item_path)) != 0)
-			continue;
-		songbook_index_upsert(doc_root, entry->d_name, item_path);
-	}
-	closedir(dir);
+	index_tsv_rebuild(doc_root, "songbook", songbook_index_hd, songbook_item_read_for_index);
+	songbook_index_write_file(doc_root);
 }
 
 static int
@@ -848,7 +795,9 @@ void ndx_install(void)
 
 	songbook_index_hd = qmap_open(NULL, "songbook_idx", QM_STR, QM_STR,
 		0x3FF, QM_SORTED);
-	if (songbook_index_load(doc_root) != 0)
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", doc_root);
+	if (index_tsv_load(songbook_index_hd, path, NULL, NULL) != 0)
 		songbook_index_rebuild(doc_root);
 
 	index_hd = index_open("Songbook", 0, 1, songbook_cleanup);
