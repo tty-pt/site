@@ -1,0 +1,10 @@
+[package]
+name = "songbook_ssr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dioxus = "0.7.6"
+serde = "1.0.228"
+serde_json = "1.0"
+ndc_dioxus = { path = "../../ssr/rust-renderer" }

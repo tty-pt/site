@@ -7,7 +7,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 mod shared;
 include!(concat!(env!("OUT_DIR"), "/generated_routes.rs"));
 
-pub(crate) use shared::*;
+pub use shared::*;
 
 #[repr(C)]
 pub struct RenderRequest {

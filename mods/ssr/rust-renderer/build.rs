@@ -24,17 +24,23 @@ fn main() {
 		}
 
 		let route_file = path.join("ssr.rs");
-		if route_file.is_file() {
-			println!("cargo:rerun-if-changed={}", route_file.display());
-			modules.push((name, route_file.canonicalize().unwrap()));
-		}
+		let route_file = if route_file.is_file() {
+			route_file.canonicalize().unwrap()
+		} else {
+			let alt = path.join("ssr/src/main.rs");
+			if alt.is_file() {
+				alt.canonicalize().unwrap()
+			} else {
+				continue;
+			}
+		};
+		println!("cargo:rerun-if-changed={}", route_file.display());
+		modules.push((name, route_file));
 	}
 
 	modules.sort();
 
-	let mut source = String::from(
-		"use crate::{RequestContext, ResponsePayload, current_user, error_page, html_response_with_status};\n",
-	);
+	let mut source = String::new();
 
 	for (module, path) in &modules {
 		let path = path.display().to_string().replace('\\', "\\\\");
@@ -50,7 +56,7 @@ fn main() {
 		));
 	}
 	source.push_str(
-		"\thtml_response_with_status(\n\t\t404,\n\t\t\"404\",\n\t\terror_page(current_user(ctx), &ctx.path, 404, \"Not found\"),\n\t)\n}\n",
+		"\tcrate::shared::html_response_with_status(\n\t\t404,\n\t\t\"404\",\n\t\tcrate::shared::error_page(crate::shared::current_user(ctx), &ctx.path, 404, \"Not found\"),\n\t)\n}\n",
 	);
 
 	source.push_str("\npub(crate) fn dispatch_item(module: &str, action: &str, id: &str, ctx: &RequestContext) -> Option<ResponsePayload> {\n");

@@ -1,11 +1,11 @@
 [package]
-name = "ndc_ssr_render"
+name = "ndc_dioxus"
 version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 base64 = "0.22"

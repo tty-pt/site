@@ -1,6 +1,6 @@
 OUT_DIR = ../../../htdocs
 OUT_NAME = song_client
-TARGET = target/wasm32-unknown-unknown/release/ndc_song_client.wasm
+TARGET = ../../../target/wasm32-unknown-unknown/release/ndc_song_client.wasm
 OUTPUTS = ${OUT_DIR}/${OUT_NAME}.js ${OUT_DIR}/${OUT_NAME}_bg.wasm
 
 all: ${OUTPUTS}

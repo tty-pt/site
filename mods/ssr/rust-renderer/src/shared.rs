@@ -4,37 +4,37 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::form_urlencoded;
 
-pub(crate) struct RequestContext {
-    pub(crate) method: String,
-    pub(crate) path: String,
-    pub(crate) query: String,
-    pub(crate) body: String,
-    pub(crate) remote_user: Option<String>,
-    pub(crate) modules: Vec<ModuleEntry>,
+pub struct RequestContext {
+    pub method: String,
+    pub path: String,
+    pub query: String,
+    pub body: String,
+    pub remote_user: Option<String>,
+    pub modules: Vec<ModuleEntry>,
 }
 
-pub(crate) struct ResponsePayload {
-    pub(crate) status: u16,
-    pub(crate) content_type: String,
-    pub(crate) location: Option<String>,
-    pub(crate) body: String,
+pub struct ResponsePayload {
+    pub status: u16,
+    pub content_type: String,
+    pub location: Option<String>,
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub(crate) struct ModuleEntry {
-    pub(crate) id: String,
-    pub(crate) title: String,
-    pub(crate) flags: Value,
+pub struct ModuleEntry {
+    pub id: String,
+    pub title: String,
+    pub flags: Value,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RouteError {
-    pub(crate) status: u16,
-    pub(crate) message: String,
+pub struct RouteError {
+    pub status: u16,
+    pub message: String,
 }
 
 impl ModuleEntry {
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         match &self.flags {
             Value::String(s) => s.parse::<u32>().unwrap_or(0) != 0,
             Value::Number(n) => n.as_u64().unwrap_or(0) != 0,
@@ -44,24 +44,24 @@ impl ModuleEntry {
     }
 }
 
-pub(crate) fn split_path(path: &str) -> Vec<&str> {
+pub fn split_path(path: &str) -> Vec<&str> {
     path.trim_matches('/')
         .split('/')
         .filter(|part| !part.is_empty())
         .collect()
 }
 
-pub(crate) fn parse_pairs(text: &str) -> Vec<(String, String)> {
+pub fn parse_pairs(text: &str) -> Vec<(String, String)> {
     form_urlencoded::parse(text.as_bytes())
         .into_owned()
         .collect()
 }
 
-pub(crate) fn get_pair<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+pub fn get_pair<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
 }
 
-pub(crate) fn parse_error_body(text: &str) -> Option<RouteError> {
+pub fn parse_error_body(text: &str) -> Option<RouteError> {
     let pairs = parse_pairs(text);
     let error = get_pair(&pairs, "error")?;
     let status = get_pair(&pairs, "status")
@@ -73,7 +73,7 @@ pub(crate) fn parse_error_body(text: &str) -> Option<RouteError> {
     })
 }
 
-pub(crate) fn parse_json_body<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, RouteError> {
+pub fn parse_json_body<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, RouteError> {
     if let Some(err) = parse_error_body(text) {
         return Err(err);
     }
@@ -83,17 +83,17 @@ pub(crate) fn parse_json_body<T: for<'de> Deserialize<'de>>(text: &str) -> Resul
     })
 }
 
-pub(crate) fn current_user(ctx: &RequestContext) -> Option<&str> {
+pub fn current_user(ctx: &RequestContext) -> Option<&str> {
     ctx.remote_user.as_deref()
 }
 
-pub(crate) fn login_href(ret: &str) -> String {
+pub fn login_href(ret: &str) -> String {
     let mut out = form_urlencoded::Serializer::new(String::new());
     out.append_pair("ret", ret);
     format!("/auth/login?{}", out.finish())
 }
 
-pub(crate) fn login_redirect(ctx: &RequestContext) -> ResponsePayload {
+pub fn login_redirect(ctx: &RequestContext) -> ResponsePayload {
     let ret = if ctx.query.is_empty() {
         ctx.path.clone()
     } else {
@@ -121,11 +121,11 @@ fn render_document(title: &str, body: Element) -> String {
     render_document_with_head(title, body, "")
 }
 
-pub(crate) fn html_response(title: &str, body: Element) -> ResponsePayload {
+pub fn html_response(title: &str, body: Element) -> ResponsePayload {
     html_response_with_head(title, "", body)
 }
 
-pub(crate) fn html_response_with_head(
+pub fn html_response_with_head(
     title: &str,
     extra_head: &str,
     body: Element,
@@ -138,7 +138,7 @@ pub(crate) fn html_response_with_head(
     }
 }
 
-pub(crate) fn html_response_with_status(
+pub fn html_response_with_status(
     status: u16,
     title: &str,
     body: Element,
@@ -151,7 +151,7 @@ pub(crate) fn html_response_with_status(
     }
 }
 
-pub(crate) fn parent_path(path: &str) -> String {
+pub fn parent_path(path: &str) -> String {
     let mut parts: Vec<&str> = split_path(path);
     parts.pop();
     if parts.is_empty() {
@@ -161,19 +161,19 @@ pub(crate) fn parent_path(path: &str) -> String {
     }
 }
 
-pub(crate) fn collection_path(module: &str) -> String {
+pub fn collection_path(module: &str) -> String {
     format!("/{module}/")
 }
 
-pub(crate) fn item_path(module: &str, id: &str) -> String {
+pub fn item_path(module: &str, id: &str) -> String {
     format!("/{module}/{id}")
 }
 
-pub(crate) fn item_action_path(module: &str, id: &str, action: &str) -> String {
+pub fn item_action_path(module: &str, id: &str, action: &str) -> String {
     format!("/{module}/{id}/{action}")
 }
 
-pub(crate) fn auth_path(action: &str) -> String {
+pub fn auth_path(action: &str) -> String {
     format!("/auth/{action}")
 }
 
@@ -185,7 +185,7 @@ fn escape_html(input: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub(crate) fn key_names(use_bemol: bool, use_latin: bool) -> &'static [&'static str] {
+pub fn key_names(use_bemol: bool, use_latin: bool) -> &'static [&'static str] {
     match (use_bemol, use_latin) {
         (false, false) => &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
         (true, false) => &["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
@@ -194,7 +194,7 @@ pub(crate) fn key_names(use_bemol: bool, use_latin: bool) -> &'static [&'static 
     }
 }
 
-pub(crate) fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
+pub fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
     if !is_owner {
         return rsx! {};
     }
@@ -212,7 +212,7 @@ pub(crate) fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
     }
 }
 
-pub(crate) fn menu(user: Option<&str>, path: &str, icon: Option<&str>) -> Element {
+pub fn menu(user: Option<&str>, path: &str, icon: Option<&str>) -> Element {
     let is_home = path == "/" || path.is_empty();
     let icon = icon.unwrap_or("🏠");
     let login_link = login_href(path);
@@ -247,7 +247,7 @@ pub(crate) fn menu(user: Option<&str>, path: &str, icon: Option<&str>) -> Elemen
     }
 }
 
-pub(crate) fn layout(
+pub fn layout(
     user: Option<&str>,
     title: &str,
     path: &str,
@@ -280,7 +280,7 @@ pub(crate) fn layout(
     }
 }
 
-pub(crate) fn form_actions(cancel_href: &str, submit_label: &str, extra: Option<Element>) -> Element {
+pub fn form_actions(cancel_href: &str, submit_label: &str, extra: Option<Element>) -> Element {
     rsx! {
         div { class: "flex gap-2",
             button { r#type: "submit", class: "btn btn-primary", "{submit_label}" }
@@ -292,7 +292,7 @@ pub(crate) fn form_actions(cancel_href: &str, submit_label: &str, extra: Option<
     }
 }
 
-pub(crate) fn form_page(
+pub fn form_page(
 	user: Option<&str>,
 	title: &str,
 	path: &str,
@@ -317,7 +317,7 @@ pub(crate) fn form_page(
 	)
 }
 
-pub(crate) fn edit_form_page(
+pub fn edit_form_page(
 	user: Option<&str>,
 	title: &str,
 	path: &str,
@@ -330,7 +330,7 @@ pub(crate) fn edit_form_page(
 	)
 }
 
-pub(crate) fn error_page(
+pub fn error_page(
 	user: Option<&str>,
 	path: &str,
     status: u16,
@@ -346,6 +346,6 @@ pub(crate) fn error_page(
     )
 }
 
-pub(crate) fn empty_state(message: &str) -> Element {
+pub fn empty_state(message: &str) -> Element {
     rsx! { p { class: "text-muted", "{message}" } }
 }

@@ -1,18 +1,29 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
-
-use crate::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, empty_state, error_page,
-    form_actions, html_response, html_response_with_status, item_menu, item_path, key_names,
-    parse_json_body, parse_pairs,
-};
+use crate::html_response;
+use crate::parse_pairs;
+use crate::parse_json_body;
+use crate::empty_state;
+use crate::item_path;
+use crate::current_user;
+use crate::error_page;
+use crate::html_response_with_status;
+use crate::edit_form_page;
+use crate::key_names;
+use crate::item_menu;
+use crate::form_actions;
+use crate::layout;
+use crate::split_path;
+use crate::get_pair;
+use crate::RequestContext;
+use crate::ResponsePayload;
 
 pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = crate::split_path(&ctx.path);
+	let parts = split_path(&ctx.path);
 	match (ctx.method.as_str(), parts.as_slice()) {
 		("GET", ["songbook", "add"]) => {
 			let pairs = parse_pairs(&ctx.query);
-			let choir = crate::get_pair(&pairs, "choir").unwrap_or("").to_string();
+			let choir = get_pair(&pairs, "choir").unwrap_or("").to_string();
 			let extra = if choir.is_empty() {
 				Vec::new()
 			} else {
@@ -25,6 +36,7 @@ pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 			Some(crate::index::render_delete_confirm(ctx, "songbook", id))
 		}
 		("POST", ["songbook", id]) => Some(render_detail(ctx, id)),
+		("GET", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
 		("POST", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
 		_ => None,
 	}
@@ -156,7 +168,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 .collect();
             html_response(
                 &page_title,
-                crate::layout(
+                layout(
                     current_user(ctx),
                     &page_title,
                     &path,
@@ -276,17 +288,17 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
 
 pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(&ctx.body);
-    let title = crate::get_pair(&pairs, "title").unwrap_or("").to_string();
-    let songs = crate::get_pair(&pairs, "songs")
+    let title = get_pair(&pairs, "title").unwrap_or("").to_string();
+    let songs = get_pair(&pairs, "songs")
         .unwrap_or("")
         .lines()
-        .filter(|line| !line.trim().is_empty())
+        .filter(|line: &&str| !line.trim().is_empty())
         .map(parse_songbook_edit_song)
         .collect::<Vec<_>>();
     let all_chords =
-        parse_json_array::<SongbookEditChord>(crate::get_pair(&pairs, "allChords").unwrap_or("[]"));
+        parse_json_array::<SongbookEditChord>(get_pair(&pairs, "allChords").unwrap_or("[]"));
     let all_types =
-        parse_json_array::<String>(crate::get_pair(&pairs, "allTypes").unwrap_or("[]"));
+        parse_json_array::<String>(get_pair(&pairs, "allTypes").unwrap_or("[]"));
     let path = format!("/songbook/{id}/edit");
     let heading = format!("Edit {title}");
     let rows: Vec<DisplaySongbookEditRow> = songs

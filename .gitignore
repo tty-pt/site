@@ -15,6 +15,9 @@
 /.cache
 /mods/ssr/rust-renderer/target
 /mods/*/client/target
+/mods/*/ssr/target
+/mods/unified-client/
+/target/
 /etc
 /home
 /lib
@@ -23,3 +26,5 @@
 /usr
 /mods/song/lib/transp/test_transp
 /mods/song/lib/transp/libtransp.a
+/htdocs/*.js
+/htdocs/*.wasm

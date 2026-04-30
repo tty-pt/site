@@ -1,0 +1,9 @@
+[package]
+name = "choir_ssr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dioxus = "0.7.6"
+serde = "1.0.228"
+ndc_dioxus = { path = "../../ssr/rust-renderer" }
