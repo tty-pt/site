@@ -1,24 +1,24 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
-use crate::html_response;
-use crate::parse_pairs;
-use crate::parse_json_body;
-use crate::empty_state;
-use crate::item_path;
-use crate::current_user;
-use crate::error_page;
-use crate::html_response_with_status;
-use crate::edit_form_page;
-use crate::key_names;
-use crate::item_menu;
-use crate::form_actions;
-use crate::layout;
-use crate::split_path;
-use crate::get_pair;
-use crate::RequestContext;
-use crate::ResponsePayload;
+use ndc_dioxus_shared::html_response;
+use ndc_dioxus_shared::parse_pairs;
+use ndc_dioxus_shared::parse_json_body;
+use ndc_dioxus_shared::empty_state;
+use ndc_dioxus_shared::item_path;
+use ndc_dioxus_shared::current_user;
+use ndc_dioxus_shared::error_page;
+use ndc_dioxus_shared::html_response_with_status;
+use ndc_dioxus_shared::edit_form_page;
+use ndc_dioxus_shared::key_names;
+use ndc_dioxus_shared::item_menu;
+use ndc_dioxus_shared::form_actions;
+use ndc_dioxus_shared::layout;
+use ndc_dioxus_shared::split_path;
+use ndc_dioxus_shared::get_pair;
+use ndc_dioxus_shared::RequestContext;
+use ndc_dioxus_shared::ResponsePayload;
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
 	match (ctx.method.as_str(), parts.as_slice()) {
 		("GET", ["songbook", "add"]) => {
@@ -29,11 +29,11 @@ pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 			} else {
 				vec![("choir", choir)]
 			};
-			Some(crate::index::render_add_form(ctx, "songbook", extra))
+			Some(ndc_dioxus_shared::render_add_form(ctx, "songbook", extra))
 		}
-		("POST", ["songbook"]) => Some(crate::index::render_list(ctx, "songbook")),
+		("POST", ["songbook"]) => Some(ndc_dioxus_shared::render_list(ctx, "songbook")),
 		("POST", ["songbook", id, "delete"]) => {
-			Some(crate::index::render_delete_confirm(ctx, "songbook", id))
+			Some(ndc_dioxus_shared::render_delete_confirm(ctx, "songbook", id))
 		}
 		("POST", ["songbook", id]) => Some(render_detail(ctx, id)),
 		("GET", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
@@ -113,7 +113,7 @@ fn parse_json_array<T: for<'de> Deserialize<'de>>(raw: &str) -> Vec<T> {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
-pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<SongbookPayload>(&ctx.body) {
         Ok(payload) => {
             let title = payload.title.unwrap_or_default();
@@ -286,7 +286,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(&ctx.body);
     let title = get_pair(&pairs, "title").unwrap_or("").to_string();
     let songs = get_pair(&pairs, "songs")

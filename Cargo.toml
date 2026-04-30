@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = [
+    "mods/ssr/ndc_dioxus_shared",
+    "mods/ssr/rust-renderer",
+    "mods/unified-client",
+    "mods/song/ssr",
+    "mods/poem/ssr",
+    "mods/choir/ssr",
+    "mods/songbook/ssr",
+]
+
+exclude = [
+    "mods/song/client",
+    "mods/poem/client",
+    "mods/choir/client",
+    "mods/songbook/client",
+]

@@ -56,7 +56,11 @@ fn main() {
 		));
 	}
 	source.push_str(
-		"\tcrate::shared::html_response_with_status(\n\t\t404,\n\t\t\"404\",\n\t\tcrate::shared::error_page(crate::shared::current_user(ctx), &ctx.path, 404, \"Not found\"),\n\t)\n}\n",
+		"\tcrate::shared::html_response_with_status(
+\t\t404,
+\t\t\"404\",
+\t\tcrate::shared::error_page(crate::shared::current_user(ctx), &ctx.path, 404, \"Not found\"),
+\t)\n}\n",
 	);
 
 	source.push_str("\npub(crate) fn dispatch_item(module: &str, action: &str, id: &str, ctx: &RequestContext) -> Option<ResponsePayload> {\n");
@@ -72,7 +76,7 @@ fn main() {
 			"\t\t(\"{module}\", \"edit\") => Some({module}::render_edit(ctx, id)),\n"
 		));
 		source.push_str(&format!(
-			"\t\t(\"{module}\", \"delete\") => Some(crate::index::render_delete_confirm(ctx, \"{module}\", id)),\n"
+			"\t\t(\"{module}\", \"delete\") => Some(crate::render_delete_confirm(ctx, \"{module}\", id)),\n"
 		));
 	}
 	source.push_str("\t\t_ => None,\n");

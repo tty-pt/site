@@ -2,9 +2,13 @@
 name = "poem_ssr"
 version = "0.1.0"
 edition = "2024"
+autobins = false
+
+[lib]
+path = "src/main.rs"
 
 [dependencies]
 dioxus = "0.7.6"
 serde = "1.0.228"
 serde_json = "1.0"
-ndc_dioxus = { path = "../../ssr/rust-renderer" }
+ndc_dioxus_shared = { path = "../../ssr/ndc_dioxus_shared" }

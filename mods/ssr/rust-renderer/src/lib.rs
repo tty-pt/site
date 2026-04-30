@@ -5,6 +5,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
 mod shared;
+// use ndc_dioxus_shared::*;
+
 include!(concat!(env!("OUT_DIR"), "/generated_routes.rs"));
 
 pub use shared::*;

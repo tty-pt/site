@@ -1,18 +1,18 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 
-use crate::{
+use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = crate::split_path(&ctx.path);
+pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+	let parts = ndc_dioxus_shared::split_path(&ctx.path);
 	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["song", "add"]) => Some(crate::index::render_add_form(ctx, "song", Vec::new())),
-		("POST", ["song"]) => Some(crate::index::render_list(ctx, "song")),
-		("POST", ["song", id, "delete"]) => Some(crate::index::render_delete_confirm(ctx, "song", id)),
+		("GET", ["song", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "song", Vec::new())),
+		("POST", ["song"]) => Some(ndc_dioxus_shared::render_list(ctx, "song")),
+		("POST", ["song", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "song", id)),
 		("POST", ["song", id]) => Some(render_detail(ctx, id)),
 		("POST", ["song", id, "edit"]) => Some(render_edit(ctx, id)),
 		_ => None,
@@ -38,16 +38,16 @@ struct SongPayload {
 
 fn song_flags(query: &str) -> (i32, bool, bool, bool) {
     let pairs = parse_pairs(query);
-    let transpose = crate::get_pair(&pairs, "t")
+    let transpose = ndc_dioxus_shared::get_pair(&pairs, "t")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let use_bemol = crate::get_pair(&pairs, "b") == Some("1");
-    let use_latin = crate::get_pair(&pairs, "l") == Some("1");
-    let show_media = crate::get_pair(&pairs, "m") == Some("1");
+    let use_bemol = ndc_dioxus_shared::get_pair(&pairs, "b") == Some("1");
+    let use_latin = ndc_dioxus_shared::get_pair(&pairs, "l") == Some("1");
+    let show_media = ndc_dioxus_shared::get_pair(&pairs, "m") == Some("1");
     (transpose, use_bemol, use_latin, show_media)
 }
 
-pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<SongPayload>(&ctx.body) {
         Ok(payload) => {
             let path = item_path("song", id);
@@ -149,7 +149,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
 
             html_response(
                 &display_title,
-                crate::layout(
+                ndc_dioxus_shared::layout(
                     current_user(ctx),
                     &display_title,
                     &path,
@@ -207,15 +207,15 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(&ctx.body);
-    let title = crate::get_pair(&pairs, "title").unwrap_or("").to_string();
-    let author = crate::get_pair(&pairs, "author").unwrap_or("").to_string();
-    let r#type = crate::get_pair(&pairs, "type").unwrap_or("").to_string();
-    let yt = crate::get_pair(&pairs, "yt").unwrap_or("").to_string();
-    let audio = crate::get_pair(&pairs, "audio").unwrap_or("").to_string();
-    let pdf = crate::get_pair(&pairs, "pdf").unwrap_or("").to_string();
-    let data = crate::get_pair(&pairs, "data").unwrap_or("").to_string();
+    let title = ndc_dioxus_shared::get_pair(&pairs, "title").unwrap_or("").to_string();
+    let author = ndc_dioxus_shared::get_pair(&pairs, "author").unwrap_or("").to_string();
+    let r#type = ndc_dioxus_shared::get_pair(&pairs, "type").unwrap_or("").to_string();
+    let yt = ndc_dioxus_shared::get_pair(&pairs, "yt").unwrap_or("").to_string();
+    let audio = ndc_dioxus_shared::get_pair(&pairs, "audio").unwrap_or("").to_string();
+    let pdf = ndc_dioxus_shared::get_pair(&pairs, "pdf").unwrap_or("").to_string();
+    let data = ndc_dioxus_shared::get_pair(&pairs, "data").unwrap_or("").to_string();
     let action = format!("/song/{id}/edit");
     let heading = format!("Edit {}", if title.is_empty() { id } else { title.as_str() });
     edit_form_page(
@@ -238,7 +238,7 @@ pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     )
 }
 
-pub(crate) fn form_field(
+pub fn form_field(
     label: &str,
     name: &str,
     value: &str,

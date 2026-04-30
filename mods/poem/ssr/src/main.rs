@@ -2,17 +2,17 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
+use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response_with_head, html_response_with_status, item_menu, item_path, parse_json_body,
 };
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = crate::split_path(&ctx.path);
+pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+	let parts = ndc_dioxus_shared::split_path(&ctx.path);
 	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["poem", "add"]) => Some(crate::index::render_add_form(ctx, "poem", Vec::new())),
-		("POST", ["poem"]) => Some(crate::index::render_list(ctx, "poem")),
-		("POST", ["poem", id, "delete"]) => Some(crate::index::render_delete_confirm(ctx, "poem", id)),
+		("GET", ["poem", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "poem", Vec::new())),
+		("POST", ["poem"]) => Some(ndc_dioxus_shared::render_list(ctx, "poem")),
+		("POST", ["poem", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "poem", id)),
 		("POST", ["poem", id]) => Some(render_detail(ctx, id)),
 		("POST", ["poem", id, "edit"]) => Some(render_edit(ctx, id)),
 		_ => None,
@@ -27,7 +27,7 @@ struct PoemPayload {
     body_content: Option<String>,
 }
 
-pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<PoemPayload>(&ctx.body) {
         Ok(payload) => {
             let title = payload.title.unwrap_or_default();
@@ -42,14 +42,14 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             html_response_with_head(
                 &page_title,
                 &head_content,
-                crate::layout(
+                ndc_dioxus_shared::layout(
                     current_user(ctx),
                     &page_title,
                     &item_path("poem", id),
                     Some("📜"),
                     Some(item_menu("poem", id, owner)),
                     if body_content.is_empty() {
-                        crate::empty_state("No content yet.")
+                        ndc_dioxus_shared::empty_state("No content yet.")
                     } else {
                         rsx! {
                             div {
@@ -69,7 +69,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let title = parse_json_body::<Value>(&ctx.body)
         .ok()
         .and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string))

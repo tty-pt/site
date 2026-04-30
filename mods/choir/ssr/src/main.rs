@@ -1,18 +1,18 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 
-use crate::{
+use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
     html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = crate::split_path(&ctx.path);
+pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+	let parts = ndc_dioxus_shared::split_path(&ctx.path);
 	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["choir", "add"]) => Some(crate::index::render_add_form(ctx, "choir", Vec::new())),
-		("POST", ["choir"]) => Some(crate::index::render_list(ctx, "choir")),
-		("POST", ["choir", id, "delete"]) => Some(crate::index::render_delete_confirm(ctx, "choir", id)),
+		("GET", ["choir", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "choir", Vec::new())),
+		("POST", ["choir"]) => Some(ndc_dioxus_shared::render_list(ctx, "choir")),
+		("POST", ["choir", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "choir", id)),
 		("POST", ["choir", id]) => Some(render_detail(ctx, id)),
 		("POST", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
 		_ => None,
@@ -49,7 +49,7 @@ struct ChoirPayload {
     songbooks: Option<Vec<SongEntry>>,
 }
 
-pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<ChoirPayload>(&ctx.body) {
         Ok(mut payload) => {
             let title = payload.title.take().unwrap_or_default();
@@ -105,7 +105,7 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             });
             html_response(
                 &title,
-                crate::layout(
+                ndc_dioxus_shared::layout(
                     current_user(ctx),
                     &title,
                     &path,
@@ -179,10 +179,10 @@ pub(crate) fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub(crate) fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
+pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(&ctx.body);
-    let title = crate::get_pair(&pairs, "title").unwrap_or("").to_string();
-    let formats = crate::get_pair(&pairs, "format").unwrap_or("").to_string();
+    let title = ndc_dioxus_shared::get_pair(&pairs, "title").unwrap_or("").to_string();
+    let formats = ndc_dioxus_shared::get_pair(&pairs, "format").unwrap_or("").to_string();
     let path = format!("/choir/{id}/edit");
     let heading = format!("Edit {}", title);
     edit_form_page(
