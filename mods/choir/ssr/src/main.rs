@@ -6,17 +6,7 @@ use ndc_dioxus_shared::{
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "choir", render_detail_stub, render_edit)
-}
-
-/// Placeholder — choir detail is rendered directly via ssr_render_choir_detail FFI.
-fn render_detail_stub(_ctx: &RequestContext<'_>, _id: &str) -> ResponsePayload {
-	ndc_dioxus_shared::ResponsePayload {
-		status: 404,
-		content_type: "text/plain".to_string(),
-		location: None,
-		body: "Not found".to_string(),
-	}
+	ndc_dioxus_shared::default_crud_routes(ctx, "choir", None::<fn(_, _) -> _>, Some(render_edit))
 }
 
 pub fn render_detail(payload: &ChoirItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {

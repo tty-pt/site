@@ -266,9 +266,14 @@ static int song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *us
 
 	int rc = 0;
 	if (ssr_response) {
+		static __thread char s_query[512];
+		struct ModuleEntryFfi modules_snap[64];
+		size_t modules_len;
 		int owner = (ctx->username && ctx->username[0])
 			? item_check_ownership(ctx->item_path, ctx->username) : 0;
-		struct SongItemFfi payload = {
+		ndc_env_get(fd, s_query, "QUERY_STRING");
+		SSR_FILL_MODULES(modules_snap, modules_len);
+		struct SongDetailRenderFfi req = {
 			.title        = meta.title,
 			.data         = trans ? trans : "",
 			.yt           = meta.yt,
@@ -282,8 +287,13 @@ static int song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *us
 			.viewer_bemol = (f & TRANSP_BEMOL) != 0,
 			.viewer_latin = (f & TRANSP_LATIN) != 0,
 			.owner        = owner != 0,
+			.id           = ctx->id,
+			.query        = s_query,
+			.remote_user  = ctx->username ? ctx->username : "",
+			.modules      = modules_snap,
+			.modules_len  = modules_len,
 		};
-		rc = ssr_render_song_detail(fd, &payload);
+		rc = ssr_render_song_detail(fd, &req);
 	} else {
 		json_object_t *jo = json_object_new(0);
 		if (!jo) {

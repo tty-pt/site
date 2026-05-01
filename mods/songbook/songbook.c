@@ -634,15 +634,26 @@ songbook_details_handler(int fd, char *body)
 	}
 	free(rows);
 
-	struct SongbookItemFfi payload = {
-		.title       = meta.title,
+	static __thread char s_id[128], s_query[512];
+	struct ModuleEntryFfi modules_snap[64];
+	size_t modules_len;
+	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
+	ndc_env_get(fd, s_query, "QUERY_STRING");
+	SSR_FILL_MODULES(modules_snap, modules_len);
+	struct SongbookDetailRenderFfi req = {
+		.sb_title    = meta.title,
 		.owner       = owner,
 		.choir       = meta.choir,
 		.viewer_zoom = viewer_zoom,
 		.songs       = song_slots,
 		.songs_len   = row_count,
+		.id          = s_id,
+		.query       = s_query,
+		.remote_user = get_request_user(fd),
+		.modules     = modules_snap,
+		.modules_len = modules_len,
 	};
-	return ssr_render_songbook_detail(fd, &payload);
+	return ssr_render_songbook_detail(fd, &req);
 }
 
 static int

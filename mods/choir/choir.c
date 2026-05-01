@@ -184,7 +184,13 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 
 	snprintf(meta.counter, sizeof(meta.counter), "%zu", sb_count);
 
-	struct ChoirItemFfi payload = {
+	static __thread char s_id[128], s_query[512];
+	struct ModuleEntryFfi modules_snap[64];
+	size_t modules_len;
+	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
+	ndc_env_get(fd, s_query, "QUERY_STRING");
+	SSR_FILL_MODULES(modules_snap, modules_len);
+	struct ChoirDetailRenderFfi req = {
 		.title         = meta.title,
 		.owner_name    = owner,
 		.counter       = meta.counter,
@@ -195,8 +201,13 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 		.all_songs_len = all_count,
 		.songbooks     = songbook_slots,
 		.songbooks_len = sb_count,
+		.id            = s_id,
+		.query         = s_query,
+		.remote_user   = get_request_user(fd),
+		.modules       = modules_snap,
+		.modules_len   = modules_len,
 	};
-	return ssr_render_choir_detail(fd, &payload);
+	return ssr_render_choir_detail(fd, &req);
 }
 
 static int choir_details_handler(int fd, char *body) {

@@ -1,16 +1,11 @@
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, PoemItem, RouteError, current_user, display_or_id, edit_form_page,
+    RequestContext, ResponsePayload, PoemItem, current_user, display_or_id, edit_form_page,
     edit_path, form_actions, html_response_with_head, item_menu, item_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "poem", render_detail_route, render_edit)
-}
-
-// Stub — poem detail is now served via ssr_render_poem_detail_ffi (typed path).
-fn render_detail_route(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    ndc_dioxus_shared::render_item_error(ctx, &item_path("poem", id), &RouteError { status: 500, message: "unreachable".into() })
+	ndc_dioxus_shared::default_crud_routes(ctx, "poem", None::<fn(_, _) -> _>, None::<fn(_, _) -> _>)
 }
 
 pub fn render_detail(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {
@@ -44,10 +39,6 @@ pub fn render_detail(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>)
             }
         )
     )
-}
-
-pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    ndc_dioxus_shared::render_item_error(ctx, &item_path("poem", id), &RouteError { status: 500, message: "unreachable".into() })
 }
 
 pub fn render_edit_typed(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {

@@ -4,23 +4,11 @@ use std::path::PathBuf;
 
 fn main() {
 	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-
-	// Generate ssr_ffi.h from the #[repr(C)] structs and #[no_mangle] functions
-	// in lib.rs so that ssr.c can #include it instead of re-declaring them by hand.
-	let header_out = manifest_dir.join("../ssr_ffi.h");
-	let config = cbindgen::Config::from_file(manifest_dir.join("cbindgen.toml"))
-		.expect("cbindgen.toml not found");
-	cbindgen::Builder::new()
-		.with_src(manifest_dir.join("src/lib.rs"))
-		.with_config(config)
-		.generate()
-		.expect("cbindgen failed to generate ssr_ffi.h")
-		.write_to_file(&header_out);
-
 	let mods_dir = manifest_dir.join("../..");
 	let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 	let generated = out_dir.join("generated_routes.rs");
-	let mut modules = Vec::new();
+	let mut modules: Vec<(String, PathBuf)> = Vec::new();
+	let mut ffi_modules: Vec<(String, PathBuf)> = Vec::new();
 
 	println!("cargo:rerun-if-changed={}", mods_dir.display());
 
@@ -48,17 +36,49 @@ fn main() {
 			}
 		};
 		println!("cargo:rerun-if-changed={}", route_file.display());
-		modules.push((name, route_file));
+		modules.push((name.clone(), route_file));
+
+		let ffi_file = path.join("ssr/render_ffi.rs");
+		if ffi_file.is_file() {
+			let ffi_file = ffi_file.canonicalize().unwrap();
+			println!("cargo:rerun-if-changed={}", ffi_file.display());
+			ffi_modules.push((name, ffi_file));
+		}
 	}
 
 	modules.sort();
+	ffi_modules.sort();
 
+	// Generate ssr_ffi.h — scan lib.rs plus every module's render_ffi.rs so that
+	// module-specific #[repr(C)] structs (defined there) appear in the header.
+	let header_out = manifest_dir.join("../ssr_ffi.h");
+	let config = cbindgen::Config::from_file(manifest_dir.join("cbindgen.toml"))
+		.expect("cbindgen.toml not found");
+	let mut builder = cbindgen::Builder::new()
+		.with_src(manifest_dir.join("src/lib.rs"));
+	for (_, ffi_path) in &ffi_modules {
+		builder = builder.with_src(ffi_path);
+	}
+	builder
+		.with_config(config)
+		.generate()
+		.expect("cbindgen failed to generate ssr_ffi.h")
+		.write_to_file(&header_out);
+
+	// Generate the route dispatcher and per-module FFI submodule includes.
 	let mut source = String::new();
 
 	for (module, path) in &modules {
-		let path = path.display().to_string().replace('\\', "\\\\");
+		let escaped = path.display().to_string().replace('\\', "\\\\");
 		source.push_str(&format!(
-			"#[path = \"{path}\"]\nmod {module};\n"
+			"#[path = \"{escaped}\"]\nmod {module};\n"
+		));
+	}
+
+	for (module, path) in &ffi_modules {
+		let escaped = path.display().to_string().replace('\\', "\\\\");
+		source.push_str(&format!(
+			"#[path = \"{escaped}\"]\nmod {module}_ffi;\n"
 		));
 	}
 

@@ -94,13 +94,23 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	free(html);
 	int owner = (ctx->username && ctx->username[0])
 		? item_check_ownership(ctx->item_path, ctx->username) : 0;
-	struct PoemItemFfi payload = {
+	static __thread char s_query[512];
+	struct ModuleEntryFfi modules_snap[64];
+	size_t modules_len;
+	ndc_env_get(fd, s_query, "QUERY_STRING");
+	SSR_FILL_MODULES(modules_snap, modules_len);
+	struct PoemRenderFfi req = {
 		.title        = meta.title,
 		.head_content = head        ? head        : "",
 		.body_content = body_content ? body_content : "",
 		.owner        = owner != 0,
+		.id           = ctx->id,
+		.query        = s_query,
+		.remote_user  = ctx->username ? ctx->username : "",
+		.modules      = modules_snap,
+		.modules_len  = modules_len,
 	};
-	int rc = ssr_render_poem_detail(fd, &payload);
+	int rc = ssr_render_poem_detail(fd, &req);
 	free(head);
 	free(body_content);
 	return rc;
@@ -143,13 +153,23 @@ static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, v
 	poem_meta_read(ctx->item_path, &meta);
 	int owner = (ctx->username && ctx->username[0])
 		? item_check_ownership(ctx->item_path, ctx->username) : 0;
-	struct PoemItemFfi payload = {
+	static __thread char s_query[512];
+	struct ModuleEntryFfi modules_snap[64];
+	size_t modules_len;
+	ndc_env_get(fd, s_query, "QUERY_STRING");
+	SSR_FILL_MODULES(modules_snap, modules_len);
+	struct PoemRenderFfi req = {
 		.title        = meta.title,
 		.head_content = "",
 		.body_content = "",
 		.owner        = owner != 0,
+		.id           = ctx->id,
+		.query        = s_query,
+		.remote_user  = ctx->username ? ctx->username : "",
+		.modules      = modules_snap,
+		.modules_len  = modules_len,
 	};
-	return ssr_render_poem_edit(fd, &payload);
+	return ssr_render_poem_edit(fd, &req);
 }
 
 static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {

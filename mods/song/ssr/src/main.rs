@@ -1,18 +1,13 @@
 use dioxus::prelude::*;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, RouteError, SongItem, current_user, display_or_id, edit_form_page,
+    RequestContext, ResponsePayload, SongItem, current_user, display_or_id, edit_form_page,
     edit_path, form_actions, form_field, html_response, item_menu, item_path,
     key_transpose_options, parse_pairs, prefs_save_url, body_str,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "song", render_detail_route, render_edit)
-}
-
-// Stub — song detail is now served via ssr_render_song_detail_ffi (typed path).
-fn render_detail_route(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    ndc_dioxus_shared::render_item_error(ctx, &item_path("song", id), &RouteError { status: 500, message: "unreachable".into() })
+	ndc_dioxus_shared::default_crud_routes(ctx, "song", None::<fn(_, _) -> _>, Some(render_edit))
 }
 
 fn song_flags(query: &str) -> (i32, bool, bool, bool) {

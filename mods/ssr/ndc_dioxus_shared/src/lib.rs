@@ -535,8 +535,8 @@ pub fn render_item_error(ctx: &RequestContext<'_>, back_path: &str, err: &RouteE
 pub fn default_crud_routes<F, G>(
     ctx: &RequestContext<'_>,
     module: &str,
-    render_detail: F,
-    render_edit: G,
+    render_detail: Option<F>,
+    render_edit: Option<G>,
 ) -> Option<ResponsePayload>
 where
     F: Fn(&RequestContext<'_>, &str) -> ResponsePayload,
@@ -551,9 +551,9 @@ where
         ("POST", [m, id, "delete"]) if *m == module =>
             Some(render_delete_confirm(module, id, "", ctx)),
         ("POST", [m, id]) if *m == module =>
-            Some(render_detail(ctx, id)),
+            render_detail.map(|f| f(ctx, id)),
         ("POST", [m, id, "edit"]) if *m == module =>
-            Some(render_edit(ctx, id)),
+            render_edit.map(|f| f(ctx, id)),
         _ => None,
     }
 }
