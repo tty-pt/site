@@ -4,6 +4,19 @@ use std::path::PathBuf;
 
 fn main() {
 	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+
+	// Generate ssr_ffi.h from the #[repr(C)] structs and #[no_mangle] functions
+	// in lib.rs so that ssr.c can #include it instead of re-declaring them by hand.
+	let header_out = manifest_dir.join("../ssr_ffi.h");
+	let config = cbindgen::Config::from_file(manifest_dir.join("cbindgen.toml"))
+		.expect("cbindgen.toml not found");
+	cbindgen::Builder::new()
+		.with_crate(&manifest_dir)
+		.with_config(config)
+		.generate()
+		.expect("cbindgen failed to generate ssr_ffi.h")
+		.write_to_file(&header_out);
+
 	let mods_dir = manifest_dir.join("../..");
 	let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 	let generated = out_dir.join("generated_routes.rs");

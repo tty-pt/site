@@ -17,7 +17,8 @@ serde_json = "1"
 url = "2.5"
 
 [build-dependencies]
-song_ssr = { path = "../../song/ssr" }
-poem_ssr = { path = "../../poem/ssr" }
-choir_ssr = { path = "../../choir/ssr" }
+cbindgen = "0.28"
+song_ssr    = { path = "../../song/ssr" }
+poem_ssr    = { path = "../../poem/ssr" }
+choir_ssr   = { path = "../../choir/ssr" }
 songbook_ssr = { path = "../../songbook/ssr" }

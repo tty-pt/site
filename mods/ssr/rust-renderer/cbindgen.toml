@@ -1,0 +1,11 @@
+language = "C"
+include_guard = "SSR_FFI_H"
+tab_width = 1
+usize_is_size_t = true
+cpp_compat = false
+
+[export]
+include = ["RenderRequest", "RenderResult"]
+
+[fn]
+prefix = "extern"
