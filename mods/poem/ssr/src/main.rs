@@ -3,20 +3,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
-    html_response_with_head, html_response_with_status, item_menu, item_path, parse_json_body,
+    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
+    html_response_with_head, item_menu, item_path, parse_json_body,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = ndc_dioxus_shared::split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["poem", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "poem", Vec::new())),
-		("POST", ["poem"]) => Some(ndc_dioxus_shared::render_list(ctx, "poem")),
-		("POST", ["poem", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "poem", id)),
-		("POST", ["poem", id]) => Some(render_detail(ctx, id)),
-		("POST", ["poem", id, "edit"]) => Some(render_edit(ctx, id)),
-		_ => None,
-	}
+	ndc_dioxus_shared::default_crud_routes(ctx, "poem", render_detail, render_edit)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -61,11 +53,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 )
             )
         }
-        Err(err) => html_response_with_status(
-            err.status,
-            &err.status.to_string(),
-            error_page(current_user(ctx), &item_path("poem", id), err.status, &err.message),
-        ),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, &item_path("poem", id), &err),
     }
 }
 

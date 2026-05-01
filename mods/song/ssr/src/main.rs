@@ -2,21 +2,13 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
-    html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
+    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
+    html_response, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = ndc_dioxus_shared::split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["song", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "song", Vec::new())),
-		("POST", ["song"]) => Some(ndc_dioxus_shared::render_list(ctx, "song")),
-		("POST", ["song", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "song", id)),
-		("POST", ["song", id]) => Some(render_detail(ctx, id)),
-		("POST", ["song", id, "edit"]) => Some(render_edit(ctx, id)),
-		_ => None,
-	}
+	ndc_dioxus_shared::default_crud_routes(ctx, "song", render_detail, render_edit)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -86,31 +78,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ""
             };
             let menu_items = Some(rsx! {
-                div {
-                    class: "viewer-controls",
-                    "data-detail-viewer-controls": "song",
-                    "data-detail-viewer-save-url": "{save_url}",
-                    label {
-                        "Zoom"
-                        input {
-                            r#type: "range",
-                            min: "70",
-                            max: "170",
-                            step: "10",
-                            value: "{viewer_zoom}",
-                            "data-detail-viewer-zoom": "1"
-                        }
-                    }
-                    p { class: "text-xs text-muted", "data-detail-viewer-zoom-label": "1", "{viewer_zoom}%" }
-                    label {
-                        input {
-                            r#type: "checkbox",
-                            checked: true,
-                            "data-detail-viewer-wrap": "1"
-                        }
-                        span { "Wrap lines" }
-                    }
-                }
+                { ndc_dioxus_shared::viewer_controls("song", viewer_zoom, save_url) }
                 form {
                     id: "transpose-form",
                     method: "GET",
@@ -199,11 +167,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ),
             )
         }
-        Err(err) => html_response_with_status(
-            err.status,
-            &err.status.to_string(),
-            error_page(current_user(ctx), &item_path("song", id), err.status, &err.message),
-        ),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, &item_path("song", id), &err),
     }
 }
 

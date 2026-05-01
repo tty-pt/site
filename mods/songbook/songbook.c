@@ -767,9 +767,7 @@ handle_sb_add(int fd, char *body)
 void ndx_install(void)
 {
 	char doc_root[256] = {0};
-	ndc_env_get(0, doc_root, "DOCUMENT_ROOT");
-	if (!doc_root[0])
-		strcpy(doc_root, ".");
+	get_doc_root(0, doc_root, sizeof(doc_root));
 
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");

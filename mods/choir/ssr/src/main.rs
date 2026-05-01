@@ -2,21 +2,13 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, error_page, form_actions,
-    html_response, html_response_with_status, item_menu, item_path, key_names, parse_json_body,
+    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
+    html_response, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
-	let parts = ndc_dioxus_shared::split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
-		("GET", ["choir", "add"]) => Some(ndc_dioxus_shared::render_add_form(ctx, "choir", Vec::new())),
-		("POST", ["choir"]) => Some(ndc_dioxus_shared::render_list(ctx, "choir")),
-		("POST", ["choir", id, "delete"]) => Some(ndc_dioxus_shared::render_delete_confirm(ctx, "choir", id)),
-		("POST", ["choir", id]) => Some(render_detail(ctx, id)),
-		("POST", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
-		_ => None,
-	}
+	ndc_dioxus_shared::default_crud_routes(ctx, "choir", render_detail, render_edit)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -171,11 +163,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ),
             )
         }
-        Err(err) => html_response_with_status(
-            err.status,
-            &err.status.to_string(),
-            error_page(current_user(ctx), "/choir/", err.status, &err.message),
-        ),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, "/choir/", &err),
     }
 }
 

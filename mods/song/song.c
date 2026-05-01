@@ -438,7 +438,7 @@ static int song_add_post_handler(int fd, char *body) {
 }
 
 void ndx_install(void) {
-	char dr[256] = {0}; ndc_env_get(0, dr, "DOCUMENT_ROOT"); if (!dr[0]) strcpy(dr, ".");
+	char dr[256] = {0}; get_doc_root(0, dr, sizeof(dr));
 	g_transp_ctx = transp_init(); ndx_load("./mods/common/common"); ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd"); ndx_load("./mods/auth/auth");
 	index_hd = index_open("Song", 0, 1, song_cleanup); build_type_index(dr);

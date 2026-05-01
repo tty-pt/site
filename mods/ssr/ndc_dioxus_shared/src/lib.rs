@@ -443,6 +443,74 @@ pub fn render_add_form(
     )
 }
 
+/// Render the standard error response for a failed item detail/edit request.
+pub fn render_item_error(ctx: &RequestContext, back_path: &str, err: &RouteError) -> ResponsePayload {
+    html_response_with_status(
+        err.status,
+        &err.status.to_string(),
+        error_page(current_user(ctx), back_path, err.status, &err.message),
+    )
+}
+
+/// Standard CRUD route dispatcher for modules that only have the default 5 arms.
+/// Modules with extra arms can call this and fall back with `.or_else(|| ...)`.
+pub fn default_crud_routes<F, G>(
+    ctx: &RequestContext,
+    module: &str,
+    render_detail: F,
+    render_edit: G,
+) -> Option<ResponsePayload>
+where
+    F: Fn(&RequestContext, &str) -> ResponsePayload,
+    G: Fn(&RequestContext, &str) -> ResponsePayload,
+{
+    let parts = split_path(&ctx.path);
+    match (ctx.method.as_str(), parts.as_slice()) {
+        ("GET", [m, "add"]) if *m == module =>
+            Some(render_add_form(ctx, module, Vec::new())),
+        ("POST", [m]) if *m == module =>
+            Some(render_list(ctx, module)),
+        ("POST", [m, id, "delete"]) if *m == module =>
+            Some(render_delete_confirm(ctx, module, id)),
+        ("POST", [m, id]) if *m == module =>
+            Some(render_detail(ctx, id)),
+        ("POST", [m, id, "edit"]) if *m == module =>
+            Some(render_edit(ctx, id)),
+        _ => None,
+    }
+}
+
+/// Shared viewer-controls sidebar widget used by song and songbook detail pages.
+pub fn viewer_controls(module: &str, zoom: i32, save_url: &str) -> Element {
+    rsx! {
+        div {
+            class: "viewer-controls",
+            "data-detail-viewer-controls": "{module}",
+            "data-detail-viewer-save-url": "{save_url}",
+            label {
+                "Zoom"
+                input {
+                    r#type: "range",
+                    min: "70",
+                    max: "170",
+                    step: "10",
+                    value: "{zoom}",
+                    "data-detail-viewer-zoom": "1"
+                }
+            }
+            p { class: "text-xs text-muted", "data-detail-viewer-zoom-label": "1", "{zoom}%" }
+            label {
+                input {
+                    r#type: "checkbox",
+                    checked: true,
+                    "data-detail-viewer-wrap": "1"
+                }
+                span { "Wrap lines" }
+            }
+        }
+    }
+}
+
 pub fn render_delete_confirm(
     ctx: &RequestContext,
     module: &str,

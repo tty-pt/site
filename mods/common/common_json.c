@@ -6,77 +6,60 @@
 
 #include "common_internal.h"
 
-static int ja_reserve(json_array_t *ja, size_t extra)
+/* ---------------------------------------------------------------------------
+ * Private generic buffer — identical layout to json_array_t, json_object_t,
+ * and form_body_t.  All three public types are cast to this for the shared
+ * helpers below; the cast is safe because the struct fields are identical.
+ * ------------------------------------------------------------------------- */
+typedef struct {
+	char  *buf;
+	size_t len;
+	size_t cap;
+	int    first;
+} json_buf_t;
+
+static int jb_reserve(json_buf_t *jb, size_t extra)
 {
-	size_t need = ja->len + extra + 1;
+	size_t need = jb->len + extra + 1;
 	size_t nc;
 	char *nb;
 
-	if (need <= ja->cap)
+	if (need <= jb->cap)
 		return 0;
-	nc = ja->cap ? ja->cap : 1024;
+	nc = jb->cap ? jb->cap : 1024;
 	while (nc < need)
 		nc *= 2;
-	nb = realloc(ja->buf, nc);
+	nb = realloc(jb->buf, nc);
 	if (!nb)
 		return -1;
-	ja->buf = nb;
-	ja->cap = nc;
+	jb->buf = nb;
+	jb->cap = nc;
 	return 0;
 }
 
-static int ja_append_str(json_array_t *ja, const char *s, size_t n)
+static int jb_append_str(json_buf_t *jb, const char *s, size_t n)
 {
-	if (ja_reserve(ja, n) != 0)
+	if (jb_reserve(jb, n) != 0)
 		return -1;
-	memcpy(ja->buf + ja->len, s, n);
-	ja->len += n;
-	ja->buf[ja->len] = '\0';
+	memcpy(jb->buf + jb->len, s, n);
+	jb->len += n;
+	jb->buf[jb->len] = '\0';
 	return 0;
 }
 
-static int jo_reserve(json_object_t *jo, size_t extra)
+static int jb_field_sep(json_buf_t *jb)
 {
-	size_t need = jo->len + extra + 1;
-	size_t nc;
-	char *nb;
-
-	if (need <= jo->cap)
-		return 0;
-	nc = jo->cap ? jo->cap : 1024;
-	while (nc < need)
-		nc *= 2;
-	nb = realloc(jo->buf, nc);
-	if (!nb)
-		return -1;
-	jo->buf = nb;
-	jo->cap = nc;
+	if (jb->len > 0 && jb->buf[jb->len - 1] != '{')
+		return jb_append_str(jb, ",", 1);
 	return 0;
 }
 
-static int jo_append_str(json_object_t *jo, const char *s, size_t n)
-{
-	if (jo_reserve(jo, n) != 0)
-		return -1;
-	memcpy(jo->buf + jo->len, s, n);
-	jo->len += n;
-	jo->buf[jo->len] = '\0';
-	return 0;
-}
+/* Convenience casts */
+#define JB(p) ((json_buf_t *)(p))
 
-static int ja_field_sep(json_array_t *ja)
-{
-	if (ja->len > 0 && ja->buf[ja->len - 1] != '{')
-		return ja_append_str(ja, ",", 1);
-	return 0;
-}
-
-static int jo_field_sep(json_object_t *jo)
-{
-	if (jo->len > 0 && jo->buf[jo->len - 1] != '{')
-		return jo_append_str(jo, ",", 1);
-	return 0;
-}
+/* ---------------------------------------------------------------------------
+ * json_array_t
+ * ------------------------------------------------------------------------- */
 
 NDX_LISTENER(json_array_t *, json_array_new, int, dummy)
 {
@@ -104,27 +87,27 @@ NDX_LISTENER(int, json_array_append_raw,
 {
 	if (!ja)
 		return -1;
-	if (!ja->first && ja_append_str(ja, ",", 1) != 0)
+	if (!ja->first && jb_append_str(JB(ja), ",", 1) != 0)
 		return -1;
 	ja->first = 0;
-	return ja_append_str(ja, s, strlen(s));
+	return jb_append_str(JB(ja), s, strlen(s));
 }
 
 NDX_LISTENER(int, json_array_begin_object, json_array_t *, ja)
 {
 	if (!ja)
 		return -1;
-	if (!ja->first && ja_append_str(ja, ",", 1) != 0)
+	if (!ja->first && jb_append_str(JB(ja), ",", 1) != 0)
 		return -1;
 	ja->first = 0;
-	return ja_append_str(ja, "{", 1);
+	return jb_append_str(JB(ja), "{", 1);
 }
 
 NDX_LISTENER(int, json_array_end_object, json_array_t *, ja)
 {
 	if (!ja)
 		return -1;
-	return ja_append_str(ja, "}", 1);
+	return jb_append_str(JB(ja), "}", 1);
 }
 
 NDX_LISTENER(int, json_array_kv_str,
@@ -144,8 +127,8 @@ NDX_LISTENER(int, json_array_kv_str,
 		return -1;
 	json_escape(v, esc, esc_cap);
 
-	rc = ja_field_sep(ja);
-	if (rc == 0 && ja_reserve(ja, strlen(key) + strlen(esc) + 6) == 0) {
+	rc = jb_field_sep(JB(ja));
+	if (rc == 0 && jb_reserve(JB(ja), strlen(key) + strlen(esc) + 6) == 0) {
 		ja->len += snprintf(ja->buf + ja->len, ja->cap - ja->len,
 			"\"%s\":\"%s\"", key, esc);
 	} else {
@@ -160,7 +143,7 @@ NDX_LISTENER(int, json_array_kv_int,
 {
 	if (!ja || !key)
 		return -1;
-	if (ja_field_sep(ja) != 0 || ja_reserve(ja, strlen(key) + 32) != 0)
+	if (jb_field_sep(JB(ja)) != 0 || jb_reserve(JB(ja), strlen(key) + 32) != 0)
 		return -1;
 	ja->len += snprintf(ja->buf + ja->len, ja->cap - ja->len,
 		"\"%s\":%d", key, value);
@@ -172,7 +155,7 @@ NDX_LISTENER(int, json_array_kv_bool,
 {
 	if (!ja || !key)
 		return -1;
-	if (ja_field_sep(ja) != 0 || ja_reserve(ja, strlen(key) + 10) != 0)
+	if (jb_field_sep(JB(ja)) != 0 || jb_reserve(JB(ja), strlen(key) + 10) != 0)
 		return -1;
 	ja->len += snprintf(ja->buf + ja->len, ja->cap - ja->len,
 		"\"%s\":%s", key, value ? "true" : "false");
@@ -185,7 +168,7 @@ NDX_LISTENER(char *, json_array_finish, json_array_t *, ja)
 
 	if (!ja)
 		return NULL;
-	if (ja_append_str(ja, "]", 1) != 0) {
+	if (jb_append_str(JB(ja), "]", 1) != 0) {
 		free(ja->buf);
 		free(ja);
 		return NULL;
@@ -194,6 +177,10 @@ NDX_LISTENER(char *, json_array_finish, json_array_t *, ja)
 	free(ja);
 	return out;
 }
+
+/* ---------------------------------------------------------------------------
+ * json_object_t
+ * ------------------------------------------------------------------------- */
 
 NDX_LISTENER(json_object_t *, json_object_new, int, dummy)
 {
@@ -233,8 +220,8 @@ NDX_LISTENER(int, json_object_kv_str,
 		return -1;
 	json_escape(v, esc, esc_cap);
 
-	rc = jo_field_sep(jo);
-	if (rc == 0 && jo_reserve(jo, strlen(key) + strlen(esc) + 6) == 0) {
+	rc = jb_field_sep(JB(jo));
+	if (rc == 0 && jb_reserve(JB(jo), strlen(key) + strlen(esc) + 6) == 0) {
 		jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len,
 			"\"%s\":\"%s\"", key, esc);
 	} else {
@@ -249,7 +236,7 @@ NDX_LISTENER(int, json_object_kv_int,
 {
 	if (!jo || !key)
 		return -1;
-	if (jo_field_sep(jo) != 0 || jo_reserve(jo, strlen(key) + 32) != 0)
+	if (jb_field_sep(JB(jo)) != 0 || jb_reserve(JB(jo), strlen(key) + 32) != 0)
 		return -1;
 	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len,
 		"\"%s\":%d", key, value);
@@ -261,7 +248,7 @@ NDX_LISTENER(int, json_object_kv_bool,
 {
 	if (!jo || !key)
 		return -1;
-	if (jo_field_sep(jo) != 0 || jo_reserve(jo, strlen(key) + 10) != 0)
+	if (jb_field_sep(JB(jo)) != 0 || jb_reserve(JB(jo), strlen(key) + 10) != 0)
 		return -1;
 	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len,
 		"\"%s\":%s", key, value ? "true" : "false");
@@ -273,8 +260,8 @@ NDX_LISTENER(int, json_object_kv_raw,
 {
 	if (!jo || !key || !value)
 		return -1;
-	if (jo_field_sep(jo) != 0 ||
-			jo_reserve(jo, strlen(key) + strlen(value) + 4) != 0)
+	if (jb_field_sep(JB(jo)) != 0 ||
+			jb_reserve(JB(jo), strlen(key) + strlen(value) + 4) != 0)
 		return -1;
 	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len,
 		"\"%s\":%s", key, value);
@@ -287,7 +274,7 @@ NDX_LISTENER(char *, json_object_finish, json_object_t *, jo)
 
 	if (!jo)
 		return NULL;
-	if (jo_append_str(jo, "}", 1) != 0) {
+	if (jb_append_str(JB(jo), "}", 1) != 0) {
 		free(jo->buf);
 		free(jo);
 		return NULL;
@@ -311,7 +298,7 @@ json_object_append_fragment(json_object_t *jo, const char *fragment, size_t len)
 {
 	if (!jo || !fragment)
 		return -1;
-	if (jo_field_sep(jo) != 0)
+	if (jb_field_sep(JB(jo)) != 0)
 		return -1;
-	return jo_append_str(jo, fragment, len);
+	return jb_append_str(JB(jo), fragment, len);
 }

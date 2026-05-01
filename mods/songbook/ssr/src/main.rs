@@ -1,22 +1,10 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
-use ndc_dioxus_shared::html_response;
-use ndc_dioxus_shared::parse_pairs;
-use ndc_dioxus_shared::parse_json_body;
-use ndc_dioxus_shared::empty_state;
-use ndc_dioxus_shared::item_path;
-use ndc_dioxus_shared::current_user;
-use ndc_dioxus_shared::error_page;
-use ndc_dioxus_shared::html_response_with_status;
-use ndc_dioxus_shared::edit_form_page;
-use ndc_dioxus_shared::key_names;
-use ndc_dioxus_shared::item_menu;
-use ndc_dioxus_shared::form_actions;
-use ndc_dioxus_shared::layout;
-use ndc_dioxus_shared::split_path;
-use ndc_dioxus_shared::get_pair;
-use ndc_dioxus_shared::RequestContext;
-use ndc_dioxus_shared::ResponsePayload;
+use ndc_dioxus_shared::{
+    RequestContext, ResponsePayload, current_user, edit_form_page, empty_state, form_actions,
+    get_pair, html_response, item_menu, item_path, key_names, layout, parse_json_body,
+    parse_pairs, split_path,
+};
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
@@ -174,31 +162,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                     &path,
                     Some("📖"),
                     Some(rsx! {
-                        div {
-                            class: "viewer-controls",
-                            "data-detail-viewer-controls": "songbook",
-                            "data-detail-viewer-save-url": "{save_url}",
-                            label {
-                                "Zoom"
-                                input {
-                                    r#type: "range",
-                                    min: "70",
-                                    max: "170",
-                                    step: "10",
-                                    value: "{viewer_zoom}",
-                                    "data-detail-viewer-zoom": "1"
-                                }
-                            }
-                            p { class: "text-xs text-muted", "data-detail-viewer-zoom-label": "1", "{viewer_zoom}%" }
-                            label {
-                                input {
-                                    r#type: "checkbox",
-                                    checked: true,
-                                    "data-detail-viewer-wrap": "1"
-                                }
-                                span { "Wrap lines" }
-                            }
-                        }
+                        { ndc_dioxus_shared::viewer_controls("songbook", viewer_zoom, save_url) }
                         { item_menu("songbook", id, is_owner) }
                     }),
                     rsx! {
@@ -278,11 +242,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ),
             )
         }
-        Err(err) => html_response_with_status(
-            err.status,
-            &err.status.to_string(),
-            error_page(current_user(ctx), "/songbook/", err.status, &err.message),
-        ),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, "/songbook/", &err),
     }
 }
 
