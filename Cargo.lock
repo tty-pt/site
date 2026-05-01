@@ -154,7 +154,6 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "ndc_dioxus_shared",
- "serde",
 ]
 
 [[package]]

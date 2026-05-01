@@ -416,8 +416,7 @@ NDX_LISTENER(int, song_get_original_key_root, const char *, doc, const char *, i
 
 NDX_LISTENER(int, song_get_original_key, const char *, id) { return song_get_original_key_root(g_doc_root, id); }
 
-NDX_LISTENER(char *, build_all_songs_json, int, inc_t) {
-	json_array_t *ja = json_array_new(0);
+NDX_LISTENER(char *, build_all_songs_json, int, inc_t) {	json_array_t *ja = json_array_new(0);
 	if (!ja) return NULL;
 	unsigned c = qmap_iter(song_index_hd, NULL, 0);
 	const void *k, *v;
@@ -437,6 +436,26 @@ NDX_LISTENER(char *, build_all_songs_json, int, inc_t) {
 		json_array_end_object(ja);
 	}
 	return json_array_finish(ja);
+}
+
+typedef int (*song_for_each_cb_t)(const char *, const char *, void *);
+
+NDX_LISTENER(int, song_for_each,
+	song_for_each_cb_t, cb,
+	void *, user)
+{
+	unsigned c = qmap_iter(song_index_hd, NULL, 0);
+	const void *k, *v;
+	while (qmap_next(&k, &v, c)) {
+		char buf[768], *title, *tab;
+		snprintf(buf, sizeof(buf), "%s", (const char *)v);
+		title = buf;
+		tab = strchr(title, '\t');
+		if (tab) *tab = '\0';
+		int r = cb((const char *)k, title, user);
+		if (r) return r;
+	}
+	return 0;
 }
 
 static int song_add_post_handler(int fd, char *body) {

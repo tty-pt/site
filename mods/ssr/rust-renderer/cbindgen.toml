@@ -3,11 +3,9 @@ include_guard = "SSR_FFI_H"
 tab_width = 1
 usize_is_size_t = true
 cpp_compat = false
-after_includes = "#include \"ssr_item_types.h\""
 
 [export]
-include = ["RenderRequest", "RenderResult", "ModuleEntryFfi", "ItemContext", "RenderItemRequest"]
-exclude = ["SongItemFfi", "PoemItemFfi", "DeleteItemFfi"]
+include = ["RenderRequest", "RenderResult", "ModuleEntryFfi", "ItemContext", "RenderItemRequest", "SongItemFfi", "PoemItemFfi", "DeleteItemFfi"]
 
 [fn]
 prefix = "extern"

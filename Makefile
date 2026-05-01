@@ -5,8 +5,11 @@ MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; do
 
 all: mods modules
 
-mods:
-	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
+mods: mods/ssr
+	@for d in $(MOD_DIRS); do [ "$$d" = "mods/ssr" ] && continue; $(MAKE) -C $$d; done
+
+mods/ssr:
+	$(MAKE) -C mods/ssr
 
 modules:
 	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done

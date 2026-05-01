@@ -14,16 +14,9 @@ pub struct ModuleEntryFfi {
     pub flags: u32,
 }
 
-/// Shared context passed to every per-module item FFI entry point.
-#[repr(C)]
-pub struct ItemContext {
-    pub id:          *const c_char,
-    pub query:       *const c_char,
-    pub remote_user: *const c_char,
-    pub modules:     *const ModuleEntryFfi,
-    pub modules_len: usize,
-}
+// ── Leaf payload types (used by C callers, kept for cbindgen) ────────────────
 
+/// C callers (song.c) still build this and pass it to the ssr_render_song_detail NDX hook.
 #[repr(C)]
 pub struct SongItemFfi {
     pub title:        *const c_char,
@@ -41,6 +34,7 @@ pub struct SongItemFfi {
     pub owner:        bool,
 }
 
+/// C callers (poem.c) still build this and pass it to poem NDX hooks.
 #[repr(C)]
 pub struct PoemItemFfi {
     pub title:        *const c_char,
@@ -49,35 +43,171 @@ pub struct PoemItemFfi {
     pub owner:        bool,
 }
 
-/// Used by the generic delete confirmation page (all modules).
+/// C callers (various modules) pass this to ssr_render_delete NDX hook.
 #[repr(C)]
 pub struct DeleteItemFfi {
     pub title: *const c_char,
 }
 
+/// C callers (songbook.c) still build this and pass it to ssr_render_songbook_detail.
 #[repr(C)]
-pub struct RenderRequest {
-    method: *const c_char,
-    path: *const c_char,
-    query: *const c_char,
-    body: *const c_uchar,
-    body_len: usize,
-    remote_user: *const c_char,
-    modules: *const ModuleEntryFfi,
-    modules_len: usize,
+pub struct SongbookItemFfi {
+    pub title:      *const c_char,
+    pub owner:      *const c_char,
+    pub choir:      *const c_char,
+    pub viewer_zoom: i32,
+    pub songs:      *const SongbookSongFfi,
+    pub songs_len:  usize,
+}
+
+/// C callers (choir.c) still build this and pass it to ssr_render_choir_detail.
+#[repr(C)]
+pub struct ChoirItemFfi {
+    pub title:         *const c_char,
+    pub owner_name:    *const c_char,
+    pub counter:       *const c_char,
+    pub formats:       *const c_char,
+    pub songs:         *const ChoirSongFfi,
+    pub songs_len:     usize,
+    pub all_songs:     *const ChoirEntryFfi,
+    pub all_songs_len: usize,
+    pub songbooks:     *const ChoirEntryFfi,
+    pub songbooks_len: usize,
 }
 
 #[repr(C)]
-pub struct RenderItemRequest {
-    module: *const c_char,
-    action: *const c_char,
-    id: *const c_char,
-    query: *const c_char,
-    json: *const c_char,
-    remote_user: *const c_char,
-    modules: *const ModuleEntryFfi,
-    modules_len: usize,
+pub struct SongbookSongFfi {
+    pub chord_id:    *const c_char,
+    pub format:      *const c_char,
+    pub chord_title: *const c_char,
+    pub chord_data:  *const c_char,
+    pub transpose:   i32,
+    pub original_key: i32,
 }
+
+#[repr(C)]
+pub struct ChoirSongFfi {
+    pub id:            *const c_char,
+    pub title:         *const c_char,
+    pub format:        *const c_char,
+    pub preferred_key: i32,
+    pub original_key:  i32,
+}
+
+#[repr(C)]
+pub struct ChoirEntryFfi {
+    pub id:    *const c_char,
+    pub title: *const c_char,
+}
+
+// ── Combined render structs ───────────────────────────────────────────────────
+
+/// Generic page render (home, login, register, error pages).
+/// Replaces RenderRequest + ssr_render_ffi.
+#[repr(C)]
+pub struct PageRenderFfi {
+    pub method:      *const c_char,
+    pub path:        *const c_char,
+    pub query:       *const c_char,
+    pub body:        *const c_uchar,
+    pub body_len:    usize,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+#[repr(C)]
+pub struct SongDetailRenderFfi {
+    // payload
+    pub title:        *const c_char,
+    pub data:         *const c_char,
+    pub yt:           *const c_char,
+    pub audio:        *const c_char,
+    pub pdf:          *const c_char,
+    pub categories:   *const c_char,
+    pub author:       *const c_char,
+    pub original_key: i32,
+    pub viewer_zoom:  i32,
+    pub show_media:   bool,
+    pub viewer_bemol: bool,
+    pub viewer_latin: bool,
+    pub owner:        bool,
+    // context
+    pub id:          *const c_char,
+    pub query:       *const c_char,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+/// Reused for both poem detail and poem edit.
+#[repr(C)]
+pub struct PoemRenderFfi {
+    // payload
+    pub title:        *const c_char,
+    pub head_content: *const c_char,
+    pub body_content: *const c_char,
+    pub owner:        bool,
+    // context
+    pub id:          *const c_char,
+    pub query:       *const c_char,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+#[repr(C)]
+pub struct DeleteRenderFfi {
+    // payload
+    pub module: *const c_char,
+    pub title:  *const c_char,
+    // context
+    pub id:          *const c_char,
+    pub query:       *const c_char,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+#[repr(C)]
+pub struct SongbookDetailRenderFfi {
+    // payload
+    pub sb_title:    *const c_char,
+    pub owner:       *const c_char,
+    pub choir:       *const c_char,
+    pub viewer_zoom: i32,
+    pub songs:       *const SongbookSongFfi,
+    pub songs_len:   usize,
+    // context
+    pub id:          *const c_char,
+    pub query:       *const c_char,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+#[repr(C)]
+pub struct ChoirDetailRenderFfi {
+    // payload
+    pub title:         *const c_char,
+    pub owner_name:    *const c_char,
+    pub counter:       *const c_char,
+    pub formats:       *const c_char,
+    pub songs:         *const ChoirSongFfi,
+    pub songs_len:     usize,
+    pub all_songs:     *const ChoirEntryFfi,
+    pub all_songs_len: usize,
+    pub songbooks:     *const ChoirEntryFfi,
+    pub songbooks_len: usize,
+    // context
+    pub id:          *const c_char,
+    pub query:       *const c_char,
+    pub remote_user: *const c_char,
+    pub modules:     *const ModuleEntryFfi,
+    pub modules_len: usize,
+}
+
+// ── Result type ───────────────────────────────────────────────────────────────
 
 #[repr(C)]
 pub struct RenderResult {
@@ -104,17 +234,20 @@ fn to_ffi(response: ResponsePayload) -> RenderResult {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_ffi(request: *const RenderRequest) -> RenderResult {
-    if request.is_null() {
-        eprintln!("ssr_render_ffi: null request pointer");
-        return to_ffi(html_response_with_status(
-            500, "500", error_page(None, "/", 500, "Internal server error"),
-        ));
-    }
+fn internal_error() -> RenderResult {
+    to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")))
+}
 
+// ── FFI entry points ──────────────────────────────────────────────────────────
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ssr_render_page_ffi(req: *const PageRenderFfi) -> RenderResult {
+    if req.is_null() {
+        eprintln!("ssr_render_page_ffi: null pointer");
+        return internal_error();
+    }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let req = unsafe { &*request };
+        let req = unsafe { &*req };
         let body_slice: &[u8] = if req.body.is_null() || req.body_len == 0 {
             &[]
         } else {
@@ -133,195 +266,287 @@ pub extern "C" fn ssr_render_ffi(request: *const RenderRequest) -> RenderResult 
         };
         to_ffi(route(&ctx))
     }));
-
     match result {
-        Ok(payload) => payload,
+        Ok(r) => r,
         Err(e) => {
-            let msg = e.downcast_ref::<&str>().copied()
-                .or_else(|| e.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("(unknown)");
-            eprintln!("ssr_render_ffi panic: {msg}");
-            to_ffi(html_response_with_status(
-                500, "500", error_page(None, "/", 500, "Internal server error"),
-            ))
+            eprintln!("ssr_render_page_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
+            internal_error()
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_item_ffi(request: *const RenderItemRequest) -> RenderResult {
-    if request.is_null() {
-        eprintln!("ssr_render_item_ffi: null request pointer");
-        return to_ffi(html_response_with_status(
-            500, "500", error_page(None, "/", 500, "Internal server error"),
-        ));
+pub extern "C" fn ssr_render_song_detail_ffi(req: *const SongDetailRenderFfi) -> RenderResult {
+    if req.is_null() {
+        eprintln!("ssr_render_song_detail_ffi: null pointer");
+        return internal_error();
     }
-
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let req = unsafe { &*request };
-        let module_s = unsafe { cstr_ref(req.module) };
-        let action_s = unsafe { cstr_ref(req.action) };
-        let id_s     = unsafe { cstr_ref(req.id) };
-        let path_buf = format!("/{}/{}", module_s, id_s);
-        let json_slice: &[u8] = if req.json.is_null() {
-            &[]
-        } else {
-            let len = unsafe { std::ffi::CStr::from_ptr(req.json).to_bytes().len() };
-            unsafe { std::slice::from_raw_parts(req.json as *const u8, len) }
-        };
+        let r = unsafe { &*req };
+        let id_s = unsafe { cstr_ref(r.id) };
+        let path_buf = format!("/song/{}", id_s);
         let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-        let modules_slice = unsafe { fill_modules(&mut modules_buf, req.modules, req.modules_len) };
-        let remote_user_str = unsafe { cstr_ref(req.remote_user) };
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
         let ctx = RequestContext {
-            method:      "POST",
+            method:      "GET",
             path:        &path_buf,
-            query:       unsafe { cstr_ref(req.query) },
-            body:        json_slice,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
             remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
             modules:     modules_slice,
         };
-        match dispatch_item(module_s, action_s, id_s, &ctx) {
-            Some(res) => to_ffi(res),
-            None => to_ffi(html_response_with_status(
-                404,
-                "404",
-                error_page(current_user(&ctx), &ctx.path, 404, "Not found"),
-            )),
-        }
-    }));
-
-    match result {
-        Ok(payload) => payload,
-        Err(e) => {
-            let msg = e.downcast_ref::<&str>().copied()
-                .or_else(|| e.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("(unknown)");
-            eprintln!("ssr_render_item_ffi panic: {msg}");
-            to_ffi(html_response_with_status(
-                500, "500", error_page(None, "/", 500, "Internal server error"),
-            ))
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_song_detail_ffi(
-    payload: *const SongItemFfi,
-    ictx: *const ItemContext,
-) -> RenderResult {
-    if payload.is_null() || ictx.is_null() {
-        eprintln!("ssr_render_song_detail_ffi: null pointer");
-        return to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")));
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let payload = unsafe { &*payload };
-        let ictx    = unsafe { &*ictx };
-        let id_s    = unsafe { cstr_ref(ictx.id) };
-        let path_buf = format!("/song/{}", id_s);
-        let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-        let ctx = unsafe { item_context_to_request(ictx, &path_buf, &mut modules_buf) };
-        let view = unsafe { song_item_to_view(payload) };
+        let view = ndc_dioxus_shared::SongItem {
+            title:        unsafe { cstr_ref(r.title) },
+            data:         unsafe { cstr_ref(r.data) },
+            yt:           unsafe { cstr_ref(r.yt) },
+            audio:        unsafe { cstr_ref(r.audio) },
+            pdf:          unsafe { cstr_ref(r.pdf) },
+            categories:   unsafe { cstr_ref(r.categories) },
+            author:       unsafe { cstr_ref(r.author) },
+            original_key: r.original_key,
+            viewer_zoom:  r.viewer_zoom,
+            show_media:   r.show_media,
+            viewer_bemol: r.viewer_bemol,
+            viewer_latin: r.viewer_latin,
+            owner:        r.owner,
+        };
         to_ffi(song::render_detail(&view, id_s, &ctx))
     }));
     match result {
         Ok(r) => r,
         Err(e) => {
             eprintln!("ssr_render_song_detail_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
-            to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")))
+            internal_error()
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_poem_detail_ffi(
-    payload: *const PoemItemFfi,
-    ictx: *const ItemContext,
-) -> RenderResult {
-    if payload.is_null() || ictx.is_null() {
+pub extern "C" fn ssr_render_poem_detail_ffi(req: *const PoemRenderFfi) -> RenderResult {
+    if req.is_null() {
         eprintln!("ssr_render_poem_detail_ffi: null pointer");
-        return to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")));
+        return internal_error();
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let payload = unsafe { &*payload };
-        let ictx    = unsafe { &*ictx };
-        let id_s    = unsafe { cstr_ref(ictx.id) };
+        let r = unsafe { &*req };
+        let id_s = unsafe { cstr_ref(r.id) };
         let path_buf = format!("/poem/{}", id_s);
         let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-        let ctx = unsafe { item_context_to_request(ictx, &path_buf, &mut modules_buf) };
-        let view = unsafe { poem_item_to_view(payload) };
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let ctx = RequestContext {
+            method:      "GET",
+            path:        &path_buf,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
+            remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
+            modules:     modules_slice,
+        };
+        let view = ndc_dioxus_shared::PoemItem {
+            title:        unsafe { cstr_ref(r.title) },
+            head_content: unsafe { cstr_ref(r.head_content) },
+            body_content: unsafe { cstr_ref(r.body_content) },
+            owner:        r.owner,
+        };
         to_ffi(poem::render_detail(&view, id_s, &ctx))
     }));
     match result {
         Ok(r) => r,
         Err(e) => {
             eprintln!("ssr_render_poem_detail_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
-            to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")))
+            internal_error()
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_poem_edit_ffi(
-    payload: *const PoemItemFfi,
-    ictx: *const ItemContext,
-) -> RenderResult {
-    if payload.is_null() || ictx.is_null() {
+pub extern "C" fn ssr_render_poem_edit_ffi(req: *const PoemRenderFfi) -> RenderResult {
+    if req.is_null() {
         eprintln!("ssr_render_poem_edit_ffi: null pointer");
-        return to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")));
+        return internal_error();
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let payload = unsafe { &*payload };
-        let ictx    = unsafe { &*ictx };
-        let id_s    = unsafe { cstr_ref(ictx.id) };
+        let r = unsafe { &*req };
+        let id_s = unsafe { cstr_ref(r.id) };
         let path_buf = format!("/poem/{}", id_s);
         let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-        let ctx = unsafe { item_context_to_request(ictx, &path_buf, &mut modules_buf) };
-        let view = unsafe { poem_item_to_view(payload) };
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let ctx = RequestContext {
+            method:      "GET",
+            path:        &path_buf,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
+            remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
+            modules:     modules_slice,
+        };
+        let view = ndc_dioxus_shared::PoemItem {
+            title:        unsafe { cstr_ref(r.title) },
+            head_content: unsafe { cstr_ref(r.head_content) },
+            body_content: unsafe { cstr_ref(r.body_content) },
+            owner:        r.owner,
+        };
         to_ffi(poem::render_edit_typed(&view, id_s, &ctx))
     }));
     match result {
         Ok(r) => r,
         Err(e) => {
             eprintln!("ssr_render_poem_edit_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
-            to_ffi(html_response_with_status(500, "500", error_page(None, "/", 500, "Internal server error")))
+            internal_error()
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ssr_render_delete_ffi(
-    module: *const c_char,
-    payload: *const DeleteItemFfi,
-    ictx: *const ItemContext,
-) -> RenderResult {
-    if payload.is_null() || ictx.is_null() {
+pub extern "C" fn ssr_render_delete_ffi(req: *const DeleteRenderFfi) -> RenderResult {
+    if req.is_null() {
         eprintln!("ssr_render_delete_ffi: null pointer");
-        return to_ffi(html_response_with_status(
-            500, "500", error_page(None, "/", 500, "Internal server error"),
-        ));
+        return internal_error();
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let module_s  = unsafe { cstr_ref(module) };
-        let payload   = unsafe { &*payload };
-        let ictx      = unsafe { &*ictx };
-        let id_s      = unsafe { cstr_ref(ictx.id) };
-        let title_s   = unsafe { cstr_ref(payload.title) };
-        let path_buf  = format!("/{}/{}", module_s, id_s);
-        let mut modules_buf: [ModuleRef<'_>; 64] =
-            std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-        let ctx = unsafe { item_context_to_request(ictx, &path_buf, &mut modules_buf) };
+        let r = unsafe { &*req };
+        let module_s = unsafe { cstr_ref(r.module) };
+        let id_s     = unsafe { cstr_ref(r.id) };
+        let title_s  = unsafe { cstr_ref(r.title) };
+        let path_buf = format!("/{}/{}", module_s, id_s);
+        let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let ctx = RequestContext {
+            method:      "GET",
+            path:        &path_buf,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
+            remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
+            modules:     modules_slice,
+        };
         to_ffi(render_delete_confirm(module_s, id_s, title_s, &ctx))
     }));
     match result {
         Ok(r) => r,
         Err(e) => {
-            let msg = e.downcast_ref::<&str>().copied()
-                .or_else(|| e.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("(unknown)");
-            eprintln!("ssr_render_delete_ffi panic: {msg}");
-            to_ffi(html_response_with_status(
-                500, "500", error_page(None, "/", 500, "Internal server error"),
-            ))
+            eprintln!("ssr_render_delete_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
+            internal_error()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ssr_render_songbook_detail_ffi(req: *const SongbookDetailRenderFfi) -> RenderResult {
+    if req.is_null() {
+        eprintln!("ssr_render_songbook_detail_ffi: null pointer");
+        return internal_error();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &*req };
+        let id_s = unsafe { cstr_ref(r.id) };
+        let path_buf = format!("/songbook/{}", id_s);
+        let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let ctx = RequestContext {
+            method:      "GET",
+            path:        &path_buf,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
+            remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
+            modules:     modules_slice,
+        };
+        let ffi_songs: &[SongbookSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(r.songs, r.songs_len) }
+        };
+        let view = ndc_dioxus_shared::SongbookItem {
+            title:       unsafe { cstr_ref(r.sb_title) },
+            owner:       unsafe { cstr_ref(r.owner) },
+            choir:       unsafe { cstr_ref(r.choir) },
+            viewer_zoom: r.viewer_zoom,
+            songs: ffi_songs.iter().map(|s| ndc_dioxus_shared::SongbookSong {
+                chord_id:    unsafe { cstr_ref(s.chord_id) },
+                format:      unsafe { cstr_ref(s.format) },
+                chord_title: unsafe { cstr_ref(s.chord_title) },
+                chord_data:  unsafe { cstr_ref(s.chord_data) },
+                transpose:   s.transpose,
+                original_key: s.original_key,
+            }).collect(),
+        };
+        to_ffi(songbook::render_detail(&view, id_s, &ctx))
+    }));
+    match result {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ssr_render_songbook_detail_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
+            internal_error()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ssr_render_choir_detail_ffi(req: *const ChoirDetailRenderFfi) -> RenderResult {
+    if req.is_null() {
+        eprintln!("ssr_render_choir_detail_ffi: null pointer");
+        return internal_error();
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &*req };
+        let id_s = unsafe { cstr_ref(r.id) };
+        let path_buf = format!("/choir/{}", id_s);
+        let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
+        let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
+        let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let ctx = RequestContext {
+            method:      "GET",
+            path:        &path_buf,
+            query:       unsafe { cstr_ref(r.query) },
+            body:        &[],
+            remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
+            modules:     modules_slice,
+        };
+        let ffi_songs: &[ChoirSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(r.songs, r.songs_len) }
+        };
+        let ffi_all_songs: &[ChoirEntryFfi] = if r.all_songs.is_null() || r.all_songs_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(r.all_songs, r.all_songs_len) }
+        };
+        let ffi_songbooks: &[ChoirEntryFfi] = if r.songbooks.is_null() || r.songbooks_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(r.songbooks, r.songbooks_len) }
+        };
+        let view = ndc_dioxus_shared::ChoirItem {
+            title:      unsafe { cstr_ref(r.title) },
+            owner_name: unsafe { cstr_ref(r.owner_name) },
+            counter:    unsafe { cstr_ref(r.counter) },
+            formats:    unsafe { cstr_ref(r.formats) },
+            songs: ffi_songs.iter().map(|s| ndc_dioxus_shared::ChoirSong {
+                id:            unsafe { cstr_ref(s.id) },
+                title:         unsafe { cstr_ref(s.title) },
+                format:        unsafe { cstr_ref(s.format) },
+                preferred_key: s.preferred_key,
+                original_key:  s.original_key,
+            }).collect(),
+            all_songs: ffi_all_songs.iter().map(|e| ndc_dioxus_shared::ChoirEntry {
+                id:    unsafe { cstr_ref(e.id) },
+                title: unsafe { cstr_ref(e.title) },
+            }).collect(),
+            songbooks: ffi_songbooks.iter().map(|e| ndc_dioxus_shared::ChoirEntry {
+                id:    unsafe { cstr_ref(e.id) },
+                title: unsafe { cstr_ref(e.title) },
+            }).collect(),
+        };
+        to_ffi(choir::render_detail(&view, id_s, &ctx))
+    }));
+    match result {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("ssr_render_choir_detail_ffi panic: {}", e.downcast_ref::<&str>().copied().unwrap_or("(unknown)"));
+            internal_error()
         }
     }
 }

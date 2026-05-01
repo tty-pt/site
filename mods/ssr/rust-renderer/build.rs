@@ -76,26 +76,5 @@ fn main() {
 \t)\n}\n",
 	);
 
-	source.push_str("\npub(crate) fn dispatch_item(module: &str, action: &str, id: &str, ctx: &RequestContext) -> Option<ResponsePayload> {\n");
-	source.push_str("\tmatch (module, action) {\n");
-	for (module, _) in &modules {
-		// song and poem use typed per-module FFI entry points; delete uses ssr_render_delete_ffi.
-		// Only modules still using the generic JSON body path are listed here.
-		if module == "auth" || module == "index" || module == "song" || module == "poem" {
-			continue;
-		}
-		source.push_str(&format!(
-			"\t\t(\"{module}\", \"detail\") => Some({module}::render_detail(ctx, id)),\n"
-		));
-		source.push_str(&format!(
-			"\t\t(\"{module}\", \"edit\") => Some({module}::render_edit(ctx, id)),\n"
-		));
-		source.push_str(&format!(
-			"\t\t(\"{module}\", \"delete\") => Some(crate::render_delete_confirm(\"{module}\", id, \"\", ctx)),\n"
-		));
-	}
-	source.push_str("\t\t_ => None,\n");
-	source.push_str("\t}\n}\n");
-
 	fs::write(generated, source).unwrap();
 }

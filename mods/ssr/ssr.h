@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <ttypt/ndx-mod.h>
-#include "ssr_item_types.h"
+#include "ssr_ffi.h"
 
 #ifndef SSR_IMPL
 NDX_HOOK_DECL(int, ssr_render,
@@ -15,30 +15,31 @@ NDX_HOOK_DECL(int, ssr_render,
 	size_t, body_len,
 	const char *, remote_user);
 
-NDX_HOOK_DECL(int, ssr_render_item,
-	int, fd,
-	const char *, module,
-	const char *, id,
-	const char *, action,
-	const char *, json);
-
 NDX_HOOK_DECL(int, ssr_render_song_detail,
 	int, fd,
-	const struct SongItemFfi *, payload);
+	const SongItemFfi *, payload);
 
 NDX_HOOK_DECL(int, ssr_render_poem_detail,
 	int, fd,
-	const struct PoemItemFfi *, payload);
+	const PoemItemFfi *, payload);
 
 NDX_HOOK_DECL(int, ssr_render_poem_edit,
 	int, fd,
-	const struct PoemItemFfi *, payload);
+	const PoemItemFfi *, payload);
 
 NDX_HOOK_DECL(int, ssr_render_delete,
 	int, fd,
 	const char *, module,
 	const char *, id,
 	const char *, title);
+
+NDX_HOOK_DECL(int, ssr_render_songbook_detail,
+	int, fd,
+	const SongbookItemFfi *, payload);
+
+NDX_HOOK_DECL(int, ssr_render_choir_detail,
+	int, fd,
+	const ChoirItemFfi *, payload);
 #endif
 
 #endif

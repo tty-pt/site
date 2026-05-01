@@ -18,6 +18,7 @@
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
 #include "../song/song.h"
+#include "../ssr/ssr.h"
 
 #define CHOIR_REPERTOIRE_IMPL
 #include "choir.h"
@@ -87,40 +88,81 @@ static int handle_choir_edit(int fd, char *body) {
 	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL, handle_choir_edit_authorized, NULL);
 }
 
+struct all_songs_ctx {
+	struct ChoirEntryFfi *slots;
+	char (*titles)[256];
+	size_t count;
+	size_t max;
+};
+
+static int all_songs_cb(const char *id, const char *title, void *user) {
+	struct all_songs_ctx *c = user;
+	if (c->count >= c->max) return 1;
+	snprintf(c->titles[c->count], 256, "%s", title);
+	c->slots[c->count].id    = id;
+	c->slots[c->count].title = c->titles[c->count];
+	c->count++;
+	return 0;
+}
+
+#define MAX_CHOIR_SONGS    256
+#define MAX_CHOIR_ALL      1024
+#define MAX_CHOIR_SONGBOOKS 256
+
 static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
 	(void)body; (void)user;
+	static __thread struct ChoirSongFfi    song_slots[MAX_CHOIR_SONGS];
+	static __thread struct ChoirEntryFfi   all_song_slots[MAX_CHOIR_ALL];
+	static __thread struct ChoirEntryFfi   songbook_slots[MAX_CHOIR_SONGBOOKS];
+	static __thread char   song_titles[MAX_CHOIR_SONGS][256];
+	static __thread char   song_ids[MAX_CHOIR_SONGS][128];
+	static __thread char   song_fmts[MAX_CHOIR_SONGS][128];
+	static __thread char   all_titles[MAX_CHOIR_ALL][256];
+	static __thread char   sb_titles[MAX_CHOIR_SONGBOOKS][256];
+	static __thread char   sb_ids[MAX_CHOIR_SONGBOOKS][128];
+
 	choir_meta_t meta;
 	choir_meta_read(ctx->item_path, &meta);
 	char owner[64] = {0};
 	item_read_owner(ctx->item_path, owner, sizeof(owner));
 
+	/* Load repertoire songs */
 	repertoire_row_t *rows = NULL; size_t count = 0;
 	char songs_path[PATH_MAX];
 	if (item_child_path(ctx->item_path, "songs", songs_path, sizeof(songs_path)) != 0)
 		return server_error(fd, "Failed to resolve songs path");
 	repertoire_rows_load(songs_path, &rows, &count);
-	json_array_t *ja = json_array_new(0);
+	if (count > MAX_CHOIR_SONGS) count = MAX_CHOIR_SONGS;
 	for (size_t i = 0; i < count; i++) {
-		char title[256] = {0}; song_read_title(ctx->doc_root, rows[i].id, title, sizeof(title));
-		json_array_begin_object(ja);
-		json_array_kv_str(ja, "id", rows[i].id);
-		json_array_kv_str(ja, "title", title);
-		json_array_kv_int(ja, "preferredKey", rows[i].value);
-		json_array_kv_int(ja, "originalKey", song_get_original_key(rows[i].id));
-		json_array_kv_str(ja, "format", rows[i].format);
-		json_array_end_object(ja);
+		song_read_title(ctx->doc_root, rows[i].id, song_titles[i], sizeof(song_titles[i]));
+		snprintf(song_ids[i], sizeof(song_ids[i]), "%s", rows[i].id);
+		snprintf(song_fmts[i], sizeof(song_fmts[i]), "%s", rows[i].format);
+		song_slots[i].id            = song_ids[i];
+		song_slots[i].title         = song_titles[i];
+		song_slots[i].format        = song_fmts[i];
+		song_slots[i].preferred_key = rows[i].value;
+		song_slots[i].original_key  = song_get_original_key(rows[i].id);
 	}
 	repertoire_rows_dispose(rows);
-	char *songs_j = json_array_finish(ja);
 
-	json_array_t *sb_ja = json_array_new(0);
-	int sb_count = 0;
+	/* Load all songs for datalist via song_for_each */
+	struct all_songs_ctx asc = {
+		.slots  = all_song_slots,
+		.titles = all_titles,
+		.count  = 0,
+		.max    = MAX_CHOIR_ALL,
+	};
+	song_for_each(all_songs_cb, &asc);
+	size_t all_count = asc.count;
+
+	/* Load songbooks for this choir */
+	size_t sb_count = 0;
 	char sb_index_path[PATH_MAX];
 	snprintf(sb_index_path, sizeof(sb_index_path), "%s/items/songbook/index.tsv", ctx->doc_root);
 	FILE *sbf = fopen(sb_index_path, "r");
 	if (sbf) {
 		char line[1024];
-		while (fgets(line, sizeof(line), sbf)) {
+		while (fgets(line, sizeof(line), sbf) && sb_count < MAX_CHOIR_SONGBOOKS) {
 			char *id = line, *title, *choir;
 			char *nl = strpbrk(line, "\r\n");
 			if (nl) *nl = '\0';
@@ -131,58 +173,30 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 			if (!choir) continue;
 			*choir++ = '\0';
 			if (strcmp(choir, ctx->id) != 0) continue;
+			snprintf(sb_ids[sb_count],    sizeof(sb_ids[sb_count]),    "%s", id);
+			snprintf(sb_titles[sb_count], sizeof(sb_titles[sb_count]), "%s", title);
+			songbook_slots[sb_count].id    = sb_ids[sb_count];
+			songbook_slots[sb_count].title = sb_titles[sb_count];
 			sb_count++;
-			json_array_begin_object(sb_ja);
-			json_array_kv_str(sb_ja, "id", id);
-			json_array_kv_str(sb_ja, "title", title);
-			json_array_end_object(sb_ja);
 		}
 		fclose(sbf);
-	} else {
-		char sb_path[PATH_MAX];
-		if (module_items_path_build(ctx->doc_root, "songbook", sb_path, sizeof(sb_path)) != 0)
-			return server_error(fd, "Failed to resolve songbook path");
-		DIR *dp = opendir(sb_path);
-		if (dp) {
-			struct dirent *de;
-			while ((de = readdir(dp))) {
-				if (de->d_name[0] == '.') continue;
-				char sb_item_path[PATH_MAX], c_p[PATH_MAX];
-				if (item_path_build_root(ctx->doc_root, "songbook", de->d_name,
-						sb_item_path, sizeof(sb_item_path)) != 0)
-					continue;
-				if (item_child_path(sb_item_path, "choir", c_p, sizeof(c_p)) != 0)
-					continue;
-				FILE *f = fopen(c_p, "r"); if (!f) continue;
-				char c_id[128] = {0}; size_t n = fread(c_id, 1, sizeof(c_id)-1, f); fclose(f);
-				while(n > 0 && (c_id[n-1]=='\n' || c_id[n-1]=='\r')) c_id[--n] = '\0';
-				if (strcmp(c_id, ctx->id) != 0) continue;
-				sb_count++;
-				char sb_t[256] = {0};
-				read_meta_file(sb_item_path, "title", sb_t, sizeof(sb_t));
-				json_array_begin_object(sb_ja);
-				json_array_kv_str(sb_ja, "id", de->d_name);
-				json_array_kv_str(sb_ja, "title", sb_t);
-				json_array_end_object(sb_ja);
-			}
-			closedir(dp);
-		}
 	}
-	char *sb_j = json_array_finish(sb_ja);
-	snprintf(meta.counter, sizeof(meta.counter), "%d", sb_count);
-	char *all_j = build_all_songs_json(0);
 
-	char extra[65536];
-	snprintf(extra, sizeof(extra), "\"songs\":%s,\"allSongs\":%s,\"songbooks\":%s",
-		songs_j ? songs_j : "[]", all_j ? all_j : "[]", sb_j ? sb_j : "[]");
-	free(songs_j); free(sb_j); free(all_j);
-	meta_field_t f[] = {
-		{ "title", meta.title, 0 },
-		{ "owner_name", owner, 0 },
-		{ "counter", meta.counter, 0 },
-		{ "formats", meta.format, 0 }
+	snprintf(meta.counter, sizeof(meta.counter), "%zu", sb_count);
+
+	struct ChoirItemFfi payload = {
+		.title         = meta.title,
+		.owner_name    = owner,
+		.counter       = meta.counter,
+		.formats       = meta.format,
+		.songs         = song_slots,
+		.songs_len     = count,
+		.all_songs     = all_song_slots,
+		.all_songs_len = all_count,
+		.songbooks     = songbook_slots,
+		.songbooks_len = sb_count,
 	};
-	return respond_with_item_json(fd, ctx, f, 4, extra);
+	return ssr_render_choir_detail(fd, &payload);
 }
 
 static int choir_details_handler(int fd, char *body) {

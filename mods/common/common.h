@@ -65,9 +65,6 @@ NDX_HOOK_DECL(int, not_found,    int, fd, const char *, msg);  /* 404; NULL -> "
 NDX_HOOK_DECL(int, redirect, int, fd, const char *, location);
 NDX_HOOK_DECL(int, redirect_to_item, int, fd, const char *, module, const char *, id);
 
-NDX_HOOK_DECL(int, respond_with_item_json, int, fd, const item_ctx_t *, ctx,
-	const meta_field_t *, fields, size_t, count, const char *, extra_json);
-
 NDX_HOOK_DECL(int, read_meta_file, const char *, item_path, const char *, name, char *, buf, size_t, sz);
 NDX_HOOK_DECL(int, write_meta_file, const char *, item_path, const char *, name, const char *, buf, size_t, sz);
 NDX_HOOK_DECL(int, meta_fields_read,

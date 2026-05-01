@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_ssr::render_element;
-use serde::Deserialize;
+
 use url::form_urlencoded;
 
 pub struct ModuleRef<'a> {
@@ -56,6 +56,48 @@ pub struct PoemItem<'a> {
     pub owner:        bool,
 }
 
+pub struct SongbookSong<'a> {
+    pub chord_id:    &'a str,
+    pub format:      &'a str,
+    pub chord_title: &'a str,
+    pub chord_data:  &'a str,
+    pub transpose:   i32,
+    pub original_key: i32,
+}
+
+/// Safe borrowed view of songbook item data passed from C via FFI.
+pub struct SongbookItem<'a> {
+    pub title:      &'a str,
+    pub owner:      &'a str,
+    pub choir:      &'a str,
+    pub viewer_zoom: i32,
+    pub songs:      Vec<SongbookSong<'a>>,
+}
+
+pub struct ChoirSong<'a> {
+    pub id:            &'a str,
+    pub title:         &'a str,
+    pub format:        &'a str,
+    pub preferred_key: i32,
+    pub original_key:  i32,
+}
+
+pub struct ChoirEntry<'a> {
+    pub id:    &'a str,
+    pub title: &'a str,
+}
+
+/// Safe borrowed view of choir item data passed from C via FFI.
+pub struct ChoirItem<'a> {
+    pub title:      &'a str,
+    pub owner_name: &'a str,
+    pub counter:    &'a str,
+    pub formats:    &'a str,
+    pub songs:      Vec<ChoirSong<'a>>,
+    pub all_songs:  Vec<ChoirEntry<'a>>,
+    pub songbooks:  Vec<ChoirEntry<'a>>,
+}
+
 /// Interpret a raw byte body as UTF-8 text. Zero allocation; returns "" on invalid UTF-8.
 pub fn body_str(b: &[u8]) -> &str {
     std::str::from_utf8(b).unwrap_or("")
@@ -93,16 +135,6 @@ pub fn parse_error_body(text: &str) -> Option<RouteError> {
     Some(RouteError {
         status,
         message: error.to_string(),
-    })
-}
-
-pub fn parse_json_body<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, RouteError> {
-    if let Some(err) = parse_error_body(text) {
-        return Err(err);
-    }
-    serde_json::from_str(text).map_err(|_| RouteError {
-        status: 500,
-        message: "Failed to parse posted JSON".to_string(),
     })
 }
 

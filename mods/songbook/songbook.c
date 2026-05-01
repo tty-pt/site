@@ -207,33 +207,6 @@ sb_form_row_to_repertoire(const sb_form_row_t *form_row, repertoire_row_t *row)
 }
 
 static int
-sb_song_json_append(json_array_t *songs_ja, const char *doc_root,
-	const repertoire_row_t *row)
-{
-	char chord_title[256] = {0};
-	int original_key = 0;
-	char *transposed = NULL;
-
-	song_read_title(doc_root, row->id, chord_title, sizeof(chord_title));
-	if (song_transpose_root(doc_root, row->id, row->value, 0x04,
-			&transposed, &original_key) != 0) {
-		original_key = 0;
-	}
-
-	json_array_begin_object(songs_ja);
-	json_array_kv_str(songs_ja, "chordId", row->id);
-	json_array_kv_int(songs_ja, "transpose", row->value);
-	json_array_kv_str(songs_ja, "format", row->format);
-	json_array_kv_str(songs_ja, "chordTitle", chord_title);
-	json_array_kv_str(songs_ja, "chordData", transposed ? transposed : "");
-	json_array_kv_int(songs_ja, "originalKey", original_key);
-	json_array_end_object(songs_ja);
-
-	free(transposed);
-	return 0;
-}
-
-static int
 sb_edit_song_row_append(char *songs_buf, size_t songs_sz, size_t *songs_pos,
 	const char *doc_root, const repertoire_row_t *row)
 {
@@ -584,9 +557,18 @@ handle_sb_randomize(int fd, char *body)
 		handle_sb_randomize_authorized, NULL);
 }
 
-static char *
-songbook_json(int fd)
+#define MAX_SB_SONGS 256
+
+static int
+songbook_details_handler(int fd, char *body)
 {
+	(void)body;
+	static __thread struct SongbookSongFfi song_slots[MAX_SB_SONGS];
+	static __thread char chord_ids[MAX_SB_SONGS][128];
+	static __thread char chord_formats[MAX_SB_SONGS][128];
+	static __thread char chord_titles[MAX_SB_SONGS][256];
+	static __thread char chord_datas[MAX_SB_SONGS][65536];
+
 	char doc_root[256] = {0};
 	char id[128] = {0};
 	char sb_path[512];
@@ -599,76 +581,68 @@ songbook_json(int fd)
 
 	get_doc_root(fd, doc_root, sizeof(doc_root));
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	if (!id[0]) return NULL;
+	if (!id[0])
+		return respond_error(fd, 404, "Songbook not found");
 
 	if (item_path_build(fd, "songbook", id, sb_path, sizeof(sb_path)) != 0)
-		return NULL;
+		return respond_error(fd, 404, "Songbook not found");
 
 	songbook_meta_read(sb_path, &meta);
 	if (!meta.title[0])
-		return NULL;
+		return respond_error(fd, 404, "Songbook not found");
 
-	/* Read owner */
 	item_read_owner(sb_path, owner, sizeof(owner));
 	username = get_request_user(fd);
 	if (username && *username)
 		viewer_zoom = song_get_viewer_zoom(username);
 
-	/* Read data.txt - contains lines of chord_id:transpose:format */
 	char path_buf[1024];
 	item_child_path(sb_path, "data.txt", path_buf, sizeof(path_buf));
 	if (repertoire_rows_load(path_buf, &rows, &row_count) != 0)
-		return NULL;
+		row_count = 0;
 
-	/* Parse data lines and build songs JSON array */
-	json_array_t *songs_ja = json_array_new(0);
-	if (!songs_ja) {
-		free(rows);
-		return NULL;
+	if (row_count > MAX_SB_SONGS)
+		row_count = MAX_SB_SONGS;
+
+	for (size_t i = 0; i < row_count; i++) {
+		char *transposed = NULL;
+		int original_key = 0;
+
+		song_read_title(doc_root, rows[i].id,
+			chord_titles[i], sizeof(chord_titles[i]));
+		snprintf(chord_ids[i], sizeof(chord_ids[i]), "%s", rows[i].id);
+		snprintf(chord_formats[i], sizeof(chord_formats[i]), "%s", rows[i].format);
+		if (song_transpose_root(doc_root, rows[i].id, rows[i].value, 0x04,
+				&transposed, &original_key) != 0) {
+			original_key = 0;
+			transposed = NULL;
+		}
+
+		if (transposed) {
+			snprintf(chord_datas[i], sizeof(chord_datas[i]), "%s", transposed);
+			free(transposed);
+		} else {
+			chord_datas[i][0] = '\0';
+		}
+
+		song_slots[i].chord_id    = chord_ids[i];
+		song_slots[i].format      = chord_formats[i];
+		song_slots[i].chord_title = chord_titles[i];
+		song_slots[i].chord_data  = chord_datas[i];
+		song_slots[i].transpose   = rows[i].value;
+		song_slots[i].original_key = original_key;
 	}
-
-	for (size_t i = 0; i < row_count; i++)
-		sb_song_json_append(songs_ja, doc_root, &rows[i]);
 	free(rows);
 
-	char *songs_json = json_array_finish(songs_ja);
-	if (!songs_json) return NULL;
-
-	json_object_t *jo = json_object_new(0);
-	if (!jo) {
-		free(songs_json);
-		return NULL;
-	}
-	if (json_object_kv_str(jo, "id", id) != 0 ||
-			json_object_kv_str(jo, "title", meta.title) != 0 ||
-			json_object_kv_str(jo, "owner", owner) != 0 ||
-			json_object_kv_str(jo, "choir", meta.choir) != 0 ||
-			json_object_kv_int(jo, "viewerZoom", viewer_zoom) != 0 ||
-			json_object_kv_raw(jo, "songs", songs_json) != 0) {
-		json_object_free(jo);
-		free(songs_json);
-		return NULL;
-	}
-	char *response = json_object_finish(jo);
-
-	free(songs_json);
-	return response;
-}
-
-static int
-songbook_details_handler(int fd, char *body)
-{
-	(void)body;
-	char id[128] = {0};
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-
-	char *json = songbook_json(fd);
-	if (!json)
-		return respond_error(fd, 404, "Songbook not found");
-	int result = ssr_render_item(fd, "songbook", id, "detail", json);
-	free(json);
-	return result;
+	struct SongbookItemFfi payload = {
+		.title       = meta.title,
+		.owner       = owner,
+		.choir       = meta.choir,
+		.viewer_zoom = viewer_zoom,
+		.songs       = song_slots,
+		.songs_len   = row_count,
+	};
+	return ssr_render_songbook_detail(fd, &payload);
 }
 
 static int

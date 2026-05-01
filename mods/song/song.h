@@ -83,4 +83,12 @@ NDX_HOOK_DECL(int, song_get_original_key, const char *, song_id);
 NDX_HOOK_DECL(int, song_get_viewer_zoom, const char *, username);
 NDX_HOOK_DECL(int, song_set_viewer_zoom, const char *, username, int, zoom);
 
+/* Iterate all songs in the index.
+ * Calls cb(id, title, user) for each entry; stops early if cb returns non-zero.
+ * Returns 0 when all entries were visited, or the first non-zero cb return value. */
+typedef int (*song_for_each_cb_t)(const char *, const char *, void *);
+NDX_HOOK_DECL(int, song_for_each,
+	song_for_each_cb_t, cb,
+	void *, user);
+
 #endif /* CHORDS_API_H */
