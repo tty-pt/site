@@ -186,8 +186,8 @@ generate_token(char *buf, size_t len)
 {
 	FILE *f = fopen("/dev/urandom", "r");
 	if (!f) {
-		snprintf(buf, len, "%llx", (unsigned long long)time(NULL));
-		return;
+		perror("generate_token: /dev/urandom");
+		abort();
 	}
 	for (size_t i = 0; i + 1 < len; ) {
 		int c = fgetc(f);
@@ -809,7 +809,7 @@ handle_login(int fd, char *body)
 	qmap_put(sessions_map, token, username);
 
 	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax", token);
+		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
 	return redirect(fd, ret);
@@ -828,7 +828,7 @@ handle_logout(int fd, char *body)
 		qmap_del(sessions_map, token);
 
 	ndc_header_set(fd, "Set-Cookie",
-		"QSESSION=; Path=/; Max-Age=0; SameSite=Lax");
+		"QSESSION=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
 	return redirect(fd, "/");
 }
 
@@ -945,7 +945,7 @@ handle_register(int fd, char *body)
 	qmap_put(sessions_map, token, username);
 
 	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax", token);
+		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
 	return redirect(fd, target);
@@ -1004,7 +1004,7 @@ handle_confirm(int fd, char *body)
 	qmap_put(sessions_map, token, username);
 
 	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax", token);
+		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
 
 	ndc_header_set(fd, "Set-Cookie", cookie);
 	return redirect(fd, "/");

@@ -305,3 +305,11 @@ NDX_LISTENER(int, datalist_extract_id,
 	id_out[n] = '\0';
 	return 0;
 }
+
+NDX_LISTENER(int, index_field_clean, char *, s)
+{
+	for (; s && *s; s++)
+		if (*s == '\t' || *s == '\n' || *s == '\r')
+			*s = ' ';
+	return 0;
+}

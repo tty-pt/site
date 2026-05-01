@@ -16,6 +16,7 @@ int respond_error(int fd, int status, const char *msg);
 int write_file_path(const char *path, const char *buf, size_t sz);
 int item_child_path(const char *item_path, const char *name,
 	char *out, size_t outlen);
+int index_field_clean(char *s);
 
 form_body_t *form_body_new(int dummy);
 int form_body_free(form_body_t *fb);

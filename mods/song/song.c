@@ -40,9 +40,7 @@ static int song_meta_write(const char *path, const song_meta_t *m) {
 	return meta_fields_write(path, f, 6);
 }
 
-static void index_field_clean(char *s) {
-	for (; s && *s; s++) if (*s == '\t' || *s == '\n' || *s == '\r') *s = ' ';
-}
+
 
 static void song_type_index_add(const char *type, const char *id) {
 	const char *t = (type && type[0]) ? type : "any";

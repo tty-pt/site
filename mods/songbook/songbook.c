@@ -70,13 +70,6 @@ songbook_meta_write(const char *item_path, const songbook_meta_t *meta)
 	return meta_fields_write(item_path, fields, sizeof(fields) / sizeof(fields[0]));
 }
 
-static void
-index_field_clean(char *s)
-{
-	for (; s && *s; s++)
-		if (*s == '\t' || *s == '\n' || *s == '\r')
-			*s = ' ';
-}
 
 static int
 songbook_index_write_file(const char *doc_root)

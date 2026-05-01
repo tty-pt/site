@@ -80,13 +80,17 @@ int index_update_json(
 		unsigned flags)
 {
 	long offset;
+	char id_esc[512], title_esc[512];
+
+	json_escape(id, id_esc, sizeof(id_esc));
+	json_escape(title, title_esc, sizeof(title_esc));
 
 	offset = snprintf(modules_json_end, modules_rem, "%c{"
 			"\"id\":\"%s\","
 			"\"title\":\"%s\","
-			"\"flags\":\"%u\"}",
+			"\"flags\":%u}",
 			(modules_count ? ',' : '['),
-			id, title, flags);
+			id_esc, title_esc, flags);
 
 	if (offset < 0)
 		return -1;
