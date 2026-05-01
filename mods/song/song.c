@@ -10,7 +10,7 @@
 
 #include <ttypt/ndc.h>
 #include <ttypt/qmap.h>
-#include "../mpfd/mpfd.h"
+#include "../ssr/ssr.h"
 #include "../index/index.h"
 #include "../common/common.h"
 #include "../auth/auth.h"
@@ -264,24 +264,26 @@ static int song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *us
 	song_transpose_root(ctx->doc_root, ctx->id, t, f, &trans, &k);
 	song_meta_t meta; song_meta_read(ctx->item_path, &meta);
 
-	char extra[512];
-	snprintf(extra, sizeof(extra),
-		"\"showMedia\":%s,\"originalKey\":%d,\"viewerZoom\":%d,\"viewerBemol\":%s,\"viewerLatin\":%s",
-		m ? "true" : "false", k, v_z,
-		(f & TRANSP_BEMOL) ? "true" : "false",
-		(f & TRANSP_LATIN) ? "true" : "false");
-	meta_field_t fields[] = {
-		{ "title", meta.title, 0 },
-		{ "data", trans ? trans : "", 0 },
-		{ "yt", meta.yt, 0 },
-		{ "audio", meta.audio, 0 },
-		{ "pdf", meta.pdf, 0 },
-		{ "categories", meta.type, 0 },
-		{ "author", meta.author, 0 }
-	};
 	int rc = 0;
 	if (ssr_response) {
-		rc = respond_with_item_json(fd, ctx, fields, 7, extra);
+		int owner = (ctx->username && ctx->username[0])
+			? item_check_ownership(ctx->item_path, ctx->username) : 0;
+		struct SongItemFfi payload = {
+			.title        = meta.title,
+			.data         = trans ? trans : "",
+			.yt           = meta.yt,
+			.audio        = meta.audio,
+			.pdf          = meta.pdf,
+			.categories   = meta.type,
+			.author       = meta.author,
+			.original_key = k,
+			.viewer_zoom  = v_z,
+			.show_media   = m != 0,
+			.viewer_bemol = (f & TRANSP_BEMOL) != 0,
+			.viewer_latin = (f & TRANSP_LATIN) != 0,
+			.owner        = owner != 0,
+		};
+		rc = ssr_render_song_detail(fd, &payload);
 	} else {
 		json_object_t *jo = json_object_new(0);
 		if (!jo) {
@@ -289,8 +291,13 @@ static int song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *us
 			return respond_error(fd, 500, "OOM");
 		}
 		json_object_kv_str(jo, "id", ctx->id);
-		for (size_t i = 0; i < 7; i++)
-			json_object_kv_str(jo, fields[i].name, fields[i].buf);
+		json_object_kv_str(jo, "title",      meta.title);
+		json_object_kv_str(jo, "data",       trans ? trans : "");
+		json_object_kv_str(jo, "yt",         meta.yt);
+		json_object_kv_str(jo, "audio",      meta.audio);
+		json_object_kv_str(jo, "pdf",        meta.pdf);
+		json_object_kv_str(jo, "categories", meta.type);
+		json_object_kv_str(jo, "author",     meta.author);
 		json_object_kv_bool(jo, "showMedia", m);
 		json_object_kv_int(jo, "originalKey", k);
 		json_object_kv_int(jo, "viewerZoom", v_z);

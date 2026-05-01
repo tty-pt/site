@@ -5,7 +5,6 @@
 
 #include "common_internal.h"
 #include "../ssr/ssr.h"
-#include "../index/index.h"
 
 NDX_LISTENER(int, core_post_form, int, fd, form_body_t *, fb)
 {
@@ -16,13 +15,12 @@ NDX_LISTENER(int, core_post_form, int, fd, form_body_t *, fb)
 	if (!post_body)
 		return respond_error(fd, 500, "OOM");
 
-	char uri[512] = {0}, query[512] = {0}, host[256] = {0};
+	char uri[512] = {0}, query[512] = {0};
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, query, "QUERY_STRING");
-	ndc_header_get(fd, "Host", host, sizeof(host));
 
 	rc = ssr_render(fd, "POST", uri, query, post_body, pb_len,
-		get_request_user(fd), host, index_get_modules_header(0));
+		get_request_user(fd));
 	free(post_body);
 	return rc;
 }

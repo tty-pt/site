@@ -6,7 +6,6 @@
 
 #include "common_internal.h"
 #include "../ssr/ssr.h"
-#include "../index/index.h"
 
 NDX_LISTENER(int, respond_plain, int, fd, int, status, const char *, msg)
 {
@@ -29,7 +28,7 @@ NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg)
 	ndc_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
 		char enc[512] = {0};
-		char body[640], uri[512] = {0}, query[512] = {0}, host[256] = {0};
+		char body[640], uri[512] = {0}, query[512] = {0};
 		int len;
 
 		url_encode(msg, enc, sizeof(enc));
@@ -37,10 +36,9 @@ NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg)
 			status, enc);
 		ndc_env_get(fd, uri, "DOCUMENT_URI");
 		ndc_env_get(fd, query, "QUERY_STRING");
-		ndc_header_get(fd, "Host", host, sizeof(host));
 
 		return ssr_render(fd, "POST", uri, query, body, (size_t)len,
-			get_request_user(fd), host, index_get_modules_header(0));
+			get_request_user(fd));
 	}
 
 	return respond_plain(fd, status, msg);

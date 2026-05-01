@@ -15,6 +15,7 @@
 #include "../index/index.h"
 #include "../auth/auth.h"
 #include "../common/common.h"
+#include "../ssr/ssr.h"
 
 #define POEM_ITEMS_PATH "items/poem/items"
 
@@ -91,12 +92,15 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char *head = html ? html_tag_inner(html, "head") : strdup("");
 	char *body_content = html ? html_tag_inner(html, "body") : strdup("");
 	free(html);
-	meta_field_t f[] = {
-		{ "title", meta.title, 0 },
-		{ "head_content", head ? head : "", 0 },
-		{ "body_content", body_content ? body_content : "", 0 }
+	int owner = (ctx->username && ctx->username[0])
+		? item_check_ownership(ctx->item_path, ctx->username) : 0;
+	struct PoemItemFfi payload = {
+		.title        = meta.title,
+		.head_content = head        ? head        : "",
+		.body_content = body_content ? body_content : "",
+		.owner        = owner != 0,
 	};
-	int rc = respond_with_item_json(fd, ctx, f, 3, NULL);
+	int rc = ssr_render_poem_detail(fd, &payload);
 	free(head);
 	free(body_content);
 	return rc;
@@ -137,8 +141,15 @@ static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, v
 	(void)body; (void)user;
 	poem_meta_t meta;
 	poem_meta_read(ctx->item_path, &meta);
-	meta_field_t f[] = {{ "title", meta.title, 0 }};
-	return respond_with_item_json(fd, ctx, f, 1, NULL);
+	int owner = (ctx->username && ctx->username[0])
+		? item_check_ownership(ctx->item_path, ctx->username) : 0;
+	struct PoemItemFfi payload = {
+		.title        = meta.title,
+		.head_content = "",
+		.body_content = "",
+		.owner        = owner != 0,
+	};
+	return ssr_render_poem_edit(fd, &payload);
 }
 
 static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {

@@ -19,6 +19,9 @@ NDX_HOOK_DECL(int, index_tsv_save, unsigned, hd, const char *, path);
 NDX_HOOK_DECL(int, index_tsv_rebuild, const char *, doc_root, const char *, module, unsigned, hd, index_item_read_fn, item_read_fn);
 
 NDX_HOOK_DECL(int, core_get, int, fd, char *, body);
-NDX_HOOK_DECL(const char *, index_get_modules_header, int, dummy);
+NDX_HOOK_DECL(size_t,       index_get_module_count, int, dummy);
+NDX_HOOK_DECL(const char *, index_get_module_id,    size_t, i);
+NDX_HOOK_DECL(const char *, index_get_module_title, size_t, i);
+NDX_HOOK_DECL(unsigned,     index_get_module_flags, size_t, i);
 
 #endif

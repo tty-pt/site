@@ -1,13 +1,13 @@
 use dioxus::prelude::*;
 
 use crate::{
-    RequestContext, ResponsePayload, auth_path, current_user, form_page, get_pair,
+    RequestContext, ResponsePayload, auth_path, body_str, current_user, form_page, get_pair,
     html_response, html_response_with_status, parse_pairs,
 };
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+pub(crate) fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = crate::split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
+	match (ctx.method, parts.as_slice()) {
 		("GET", ["auth", "login"]) => Some(render_login(ctx)),
 		("POST", ["auth", "login"]) => Some(render_login(ctx)),
 		("GET", ["auth", "register"]) => Some(render_register(ctx)),
@@ -15,9 +15,9 @@ pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 	}
 }
 
-pub(crate) fn render_login(ctx: &RequestContext) -> ResponsePayload {
+pub(crate) fn render_login(ctx: &RequestContext<'_>) -> ResponsePayload {
     let (ret, error, status) = if ctx.method == "POST" {
-        let pairs = parse_pairs(&ctx.body);
+        let pairs = parse_pairs(body_str(ctx.body));
         let ret = get_pair(&pairs, "ret").unwrap_or("/").to_string();
         let error = get_pair(&pairs, "error").map(str::to_string);
         let status = get_pair(&pairs, "status")
@@ -57,7 +57,7 @@ pub(crate) fn render_login(ctx: &RequestContext) -> ResponsePayload {
     )
 }
 
-pub(crate) fn render_register(ctx: &RequestContext) -> ResponsePayload {
+pub(crate) fn render_register(ctx: &RequestContext<'_>) -> ResponsePayload {
     html_response(
         "Register",
         form_page(

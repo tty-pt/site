@@ -9,4 +9,3 @@ dioxus-ssr = "0.7.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2.5"
-base64 = "0.22"

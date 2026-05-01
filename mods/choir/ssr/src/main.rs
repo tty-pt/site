@@ -3,11 +3,11 @@ use serde::Deserialize;
 
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
-    form_actions, html_response, item_menu, item_path, key_names, parse_json_body,
+    body_str, form_actions, html_response, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
-pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	ndc_dioxus_shared::default_crud_routes(ctx, "choir", render_detail, render_edit)
 }
 
@@ -38,8 +38,8 @@ struct ChoirPayload {
     songbooks: Option<Vec<SongEntry>>,
 }
 
-pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
-    match parse_json_body::<ChoirPayload>(&ctx.body) {
+pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    match parse_json_body::<ChoirPayload>(body_str(ctx.body)) {
         Ok(mut payload) => {
             let title = payload.title.take().unwrap_or_default();
             let owner = payload.owner_name.take().unwrap_or_default();
@@ -156,8 +156,8 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
-    let pairs = parse_pairs(&ctx.body);
+pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    let pairs = parse_pairs(body_str(ctx.body));
     let title = ndc_dioxus_shared::get_pair(&pairs, "title").unwrap_or("").to_string();
     let formats = ndc_dioxus_shared::get_pair(&pairs, "format").unwrap_or("").to_string();
     let path = edit_path("choir", id);

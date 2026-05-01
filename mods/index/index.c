@@ -26,8 +26,6 @@ static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
 int index_add_item(int fd, char *body, char *id_out, size_t id_len);
 
-static char modules_header[2 * 256 * MAX_MODULES];
-
 static char modules_json[256 * MAX_MODULES],
 	    *modules_json_end = modules_json;
 
@@ -39,7 +37,9 @@ static iconv_t cd;
 
 /* Per-module cleanup callbacks and hd lookup */
 static char  module_names[MAX_MODULES][256];
+static char  module_titles[MAX_MODULES][256];
 static unsigned module_hds[MAX_MODULES];
+static unsigned module_flags_arr[MAX_MODULES];
 static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
 
@@ -82,6 +82,13 @@ int index_update_json(
 	long offset;
 	char id_esc[512], title_esc[512];
 
+	if (modules_count >= MAX_MODULES)
+		return -1;
+
+	snprintf(module_names[modules_count],  sizeof(module_names[0]),  "%s", id);
+	snprintf(module_titles[modules_count], sizeof(module_titles[0]), "%s", title);
+	module_flags_arr[modules_count] = flags;
+
 	json_escape(id, id_esc, sizeof(id_esc));
 	json_escape(title, title_esc, sizeof(title_esc));
 
@@ -99,11 +106,6 @@ int index_update_json(
 	modules_rem -= offset;
 	modules_json_end[0] = ']';
 	modules_json_end[1] = '\0';
-
-	memset(modules_header, 0, sizeof(modules_header));
-	b64_encode(modules_json,
-			modules_header,
-			sizeof(modules_header));
 
 	modules_count++;
 
@@ -224,12 +226,10 @@ index_page(unsigned fd, unsigned hd, char *path)
 	*s = '\0';
 	{
 		char query[512] = {0};
-		char host[256] = {0};
 		const char *username = get_request_user((int)fd);
 		ndc_env_get((int)fd, query, "QUERY_STRING");
-		ndc_header_get((int)fd, "Host", host, sizeof(host));
 		ret = ssr_render((int)fd, "POST", path, query, body, body_len,
-			username ? username : "", host, modules_header);
+			username ? username : "");
 	}
 	free(body);
 	return ret;
@@ -405,14 +405,11 @@ NDX_LISTENER(int, core_get,
 	char path[512] = { 0 };
 	char param[512] = { 0 };
 	char full_path[PATH_MAX] = { 0 };
-	char host[256] = { 0 };
-
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 	ndc_env_get(fd, param, "QUERY_STRING");
 	snprintf(full_path, sizeof(full_path), "%s", path);
-	ndc_header_get(fd, "Host", host, sizeof(host));
 	return ssr_render(fd, "GET", full_path, param, NULL, 0,
-		get_request_user(fd), host, modules_header);
+		get_request_user(fd));
 }
 
 static int index_add_get_handler(
@@ -447,20 +444,7 @@ static int index_delete_get_handler(int fd, char *body)
 	char title[256] = {0};
 	read_meta_file(item_path, "title", title, sizeof(title));
 
-	json_object_t *jo = json_object_new(0);
-	if (!jo)
-		return respond_error(fd, 500, "OOM");
-	if (json_object_kv_str(jo, "id", id) != 0 ||
-			json_object_kv_str(jo, "title", title) != 0) {
-		json_object_free(jo);
-		return respond_error(fd, 500, "OOM");
-	}
-	char *json = json_object_finish(jo);
-	if (!json)
-		return respond_error(fd, 500, "OOM");
-	int rc = ssr_render_item(fd, module, id, "delete", json);
-	free(json);
-	return rc;
+	return ssr_render_delete(fd, module, id, title);
 }
 
 /* POST /<module>/:id/delete — perform delete */
@@ -510,10 +494,25 @@ static int index_delete_handler(int fd, char *body)
 	return redirect(fd, location);
 }
 
-NDX_LISTENER(const char *, index_get_modules_header, int, dummy)
+NDX_LISTENER(size_t, index_get_module_count, int, dummy)
 {
 	(void)dummy;
-	return modules_header;
+	return modules_count;
+}
+
+NDX_LISTENER(const char *, index_get_module_id, size_t, i)
+{
+	return (i < modules_count) ? module_names[i] : "";
+}
+
+NDX_LISTENER(const char *, index_get_module_title, size_t, i)
+{
+	return (i < modules_count) ? module_titles[i] : "";
+}
+
+NDX_LISTENER(unsigned, index_get_module_flags, size_t, i)
+{
+	return (i < modules_count) ? module_flags_arr[i] : 0;
 }
 
 void ndx_install(void)

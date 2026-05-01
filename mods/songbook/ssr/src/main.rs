@@ -1,15 +1,15 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
+    RequestContext, ResponsePayload, body_str, current_user, display_or_id, edit_form_page, edit_path,
     empty_state, form_actions, get_pair, html_response, item_menu, item_path, key_names,
     key_transpose_options, layout, parse_json_array, parse_json_body, parse_pairs,
     prefs_save_url, split_path,
 };
 
-pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
+	match (ctx.method, parts.as_slice()) {
 		("GET", ["songbook", "add"]) => {
 			let pairs = parse_pairs(&ctx.query);
 			let choir = get_pair(&pairs, "choir").unwrap_or("").to_string();
@@ -22,7 +22,7 @@ pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 		}
 		("POST", ["songbook"]) => Some(ndc_dioxus_shared::render_list(ctx, "songbook")),
 		("POST", ["songbook", id, "delete"]) => {
-			Some(ndc_dioxus_shared::render_delete_confirm(ctx, "songbook", id))
+			Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))
 		}
 		("POST", ["songbook", id]) => Some(render_detail(ctx, id)),
 		("GET", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
@@ -98,8 +98,8 @@ fn parse_songbook_edit_song(line: &str) -> SongbookEditSong {
     }
 }
 
-pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
-    match parse_json_body::<SongbookPayload>(&ctx.body) {
+pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    match parse_json_body::<SongbookPayload>(body_str(ctx.body)) {
         Ok(payload) => {
             let title = payload.title.unwrap_or_default();
             let owner = payload.owner.unwrap_or_default();
@@ -227,8 +227,8 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     }
 }
 
-pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
-    let pairs = parse_pairs(&ctx.body);
+pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    let pairs = parse_pairs(body_str(ctx.body));
     let title = get_pair(&pairs, "title").unwrap_or("").to_string();
     let songs = get_pair(&pairs, "songs")
         .unwrap_or("")

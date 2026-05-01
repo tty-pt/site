@@ -11,7 +11,7 @@ fn main() {
 	let config = cbindgen::Config::from_file(manifest_dir.join("cbindgen.toml"))
 		.expect("cbindgen.toml not found");
 	cbindgen::Builder::new()
-		.with_crate(&manifest_dir)
+		.with_src(manifest_dir.join("src/lib.rs"))
 		.with_config(config)
 		.generate()
 		.expect("cbindgen failed to generate ssr_ffi.h")
@@ -79,7 +79,9 @@ fn main() {
 	source.push_str("\npub(crate) fn dispatch_item(module: &str, action: &str, id: &str, ctx: &RequestContext) -> Option<ResponsePayload> {\n");
 	source.push_str("\tmatch (module, action) {\n");
 	for (module, _) in &modules {
-		if module == "auth" || module == "index" {
+		// song and poem use typed per-module FFI entry points; delete uses ssr_render_delete_ffi.
+		// Only modules still using the generic JSON body path are listed here.
+		if module == "auth" || module == "index" || module == "song" || module == "poem" {
 			continue;
 		}
 		source.push_str(&format!(
@@ -89,7 +91,7 @@ fn main() {
 			"\t\t(\"{module}\", \"edit\") => Some({module}::render_edit(ctx, id)),\n"
 		));
 		source.push_str(&format!(
-			"\t\t(\"{module}\", \"delete\") => Some(crate::render_delete_confirm(ctx, \"{module}\", id)),\n"
+			"\t\t(\"{module}\", \"delete\") => Some(crate::render_delete_confirm(\"{module}\", id, \"\", ctx)),\n"
 		));
 	}
 	source.push_str("\t\t_ => None,\n");

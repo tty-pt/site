@@ -1,16 +1,27 @@
 use dioxus::prelude::*;
 use dioxus_ssr::render_element;
 use serde::Deserialize;
-use serde_json::Value;
 use url::form_urlencoded;
 
-pub struct RequestContext {
-    pub method: String,
-    pub path: String,
-    pub query: String,
-    pub body: String,
-    pub remote_user: Option<String>,
-    pub modules: Vec<ModuleEntry>,
+pub struct ModuleRef<'a> {
+    pub id:    &'a str,
+    pub title: &'a str,
+    pub flags: u32,
+}
+
+impl<'a> ModuleRef<'a> {
+    pub fn enabled(&self) -> bool {
+        self.flags != 0
+    }
+}
+
+pub struct RequestContext<'a> {
+    pub method:      &'a str,
+    pub path:        &'a str,
+    pub query:       &'a str,
+    pub body:        &'a [u8],
+    pub remote_user: Option<&'a str>,
+    pub modules:     &'a [ModuleRef<'a>],
 }
 
 pub struct ResponsePayload {
@@ -20,28 +31,40 @@ pub struct ResponsePayload {
     pub body: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct ModuleEntry {
-    pub id: String,
-    pub title: String,
-    pub flags: Value,
+/// Safe borrowed view of song item data passed from C via FFI.
+pub struct SongItem<'a> {
+    pub title:        &'a str,
+    pub data:         &'a str,
+    pub yt:           &'a str,
+    pub audio:        &'a str,
+    pub pdf:          &'a str,
+    pub categories:   &'a str,
+    pub author:       &'a str,
+    pub original_key: i32,
+    pub viewer_zoom:  i32,
+    pub show_media:   bool,
+    pub viewer_bemol: bool,
+    pub viewer_latin: bool,
+    pub owner:        bool,
+}
+
+/// Safe borrowed view of poem item data passed from C via FFI.
+pub struct PoemItem<'a> {
+    pub title:        &'a str,
+    pub head_content: &'a str,
+    pub body_content: &'a str,
+    pub owner:        bool,
+}
+
+/// Interpret a raw byte body as UTF-8 text. Zero allocation; returns "" on invalid UTF-8.
+pub fn body_str(b: &[u8]) -> &str {
+    std::str::from_utf8(b).unwrap_or("")
 }
 
 #[derive(Clone, Debug)]
 pub struct RouteError {
     pub status: u16,
     pub message: String,
-}
-
-impl ModuleEntry {
-    pub fn enabled(&self) -> bool {
-        match &self.flags {
-            Value::String(s) => s.parse::<u32>().unwrap_or(0) != 0,
-            Value::Number(n) => n.as_u64().unwrap_or(0) != 0,
-            Value::Bool(b) => *b,
-            _ => false,
-        }
-    }
 }
 
 pub fn split_path(path: &str) -> Vec<&str> {
@@ -83,8 +106,8 @@ pub fn parse_json_body<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, Ro
     })
 }
 
-pub fn current_user(ctx: &RequestContext) -> Option<&str> {
-    ctx.remote_user.as_deref()
+pub fn current_user<'a>(ctx: &RequestContext<'a>) -> Option<&'a str> {
+    ctx.remote_user
 }
 
 pub fn login_href(ret: &str) -> String {
@@ -93,9 +116,9 @@ pub fn login_href(ret: &str) -> String {
     format!("/auth/login?{}", out.finish())
 }
 
-pub fn login_redirect(ctx: &RequestContext) -> ResponsePayload {
-    let ret = if ctx.query.is_empty() {
-        ctx.path.clone()
+pub fn login_redirect(ctx: &RequestContext<'_>) -> ResponsePayload {
+    let ret: String = if ctx.query.is_empty() {
+        ctx.path.to_string()
     } else {
         format!("{}?{}", ctx.path, ctx.query)
     };
@@ -217,7 +240,7 @@ pub fn edit_path(module: &str, id: &str) -> String {
     format!("/{module}/{id}/edit")
 }
 
-pub fn prefs_save_url(ctx: &RequestContext) -> &'static str {
+pub fn prefs_save_url(ctx: &RequestContext<'_>) -> &'static str {
     if current_user(ctx).is_some() { "/api/song/prefs" } else { "" }
 }
 
@@ -393,8 +416,8 @@ fn parse_index_items(body: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn render_list(ctx: &RequestContext, module: &str) -> ResponsePayload {
-    let display_items = parse_index_items(&ctx.body);
+pub fn render_list(ctx: &RequestContext<'_>, module: &str) -> ResponsePayload {
+    let display_items = parse_index_items(body_str(ctx.body));
     let add_href = format!("/{module}/add");
     let menu_items = crate::current_user(ctx).map(|_| {
         rsx! {
@@ -428,7 +451,7 @@ pub fn render_list(ctx: &RequestContext, module: &str) -> ResponsePayload {
 }
 
 pub fn render_add_form(
-    ctx: &RequestContext,
+    ctx: &RequestContext<'_>,
     module: &str,
     extra_fields: Vec<(&str, String)>,
 ) -> ResponsePayload {
@@ -467,7 +490,7 @@ pub fn render_add_form(
 }
 
 /// Render the standard error response for a failed item detail/edit request.
-pub fn render_item_error(ctx: &RequestContext, back_path: &str, err: &RouteError) -> ResponsePayload {
+pub fn render_item_error(ctx: &RequestContext<'_>, back_path: &str, err: &RouteError) -> ResponsePayload {
     html_response_with_status(
         err.status,
         &err.status.to_string(),
@@ -478,23 +501,23 @@ pub fn render_item_error(ctx: &RequestContext, back_path: &str, err: &RouteError
 /// Standard CRUD route dispatcher for modules that only have the default 5 arms.
 /// Modules with extra arms can call this and fall back with `.or_else(|| ...)`.
 pub fn default_crud_routes<F, G>(
-    ctx: &RequestContext,
+    ctx: &RequestContext<'_>,
     module: &str,
     render_detail: F,
     render_edit: G,
 ) -> Option<ResponsePayload>
 where
-    F: Fn(&RequestContext, &str) -> ResponsePayload,
-    G: Fn(&RequestContext, &str) -> ResponsePayload,
+    F: Fn(&RequestContext<'_>, &str) -> ResponsePayload,
+    G: Fn(&RequestContext<'_>, &str) -> ResponsePayload,
 {
     let parts = split_path(&ctx.path);
-    match (ctx.method.as_str(), parts.as_slice()) {
+    match (ctx.method, parts.as_slice()) {
         ("GET", [m, "add"]) if *m == module =>
             Some(render_add_form(ctx, module, Vec::new())),
         ("POST", [m]) if *m == module =>
             Some(render_list(ctx, module)),
         ("POST", [m, id, "delete"]) if *m == module =>
-            Some(render_delete_confirm(ctx, module, id)),
+            Some(render_delete_confirm(module, id, "", ctx)),
         ("POST", [m, id]) if *m == module =>
             Some(render_detail(ctx, id)),
         ("POST", [m, id, "edit"]) if *m == module =>
@@ -559,20 +582,12 @@ pub fn form_field(
 }
 
 pub fn render_delete_confirm(
-    ctx: &RequestContext,
     module: &str,
     id: &str,
+    title: &str,
+    ctx: &RequestContext<'_>,
 ) -> ResponsePayload {
-    let result = crate::parse_json_body::<serde_json::Value>(&ctx.body);
-    let title = result
-        .ok()
-        .and_then(|v: serde_json::Value| v.get("title").and_then(serde_json::Value::as_str).map(str::to_string))
-        .unwrap_or_default();
-    let display_title = if title.is_empty() {
-        id.to_string()
-    } else {
-        title.clone()
-    };
+    let display_title = if title.is_empty() { id } else { title };
     let path = format!("/{module}/{id}/delete");
     crate::html_response(
         &format!("Delete {display_title}"),

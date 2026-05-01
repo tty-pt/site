@@ -1,28 +1,21 @@
 use dioxus::prelude::*;
 
-use crate::{ModuleEntry, RequestContext, ResponsePayload, current_user, html_response, layout, split_path};
+use crate::{RequestContext, ResponsePayload, current_user, html_response, layout, split_path};
 
-pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
+pub(crate) fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
-	match (ctx.method.as_str(), parts.as_slice()) {
+	match (ctx.method, parts.as_slice()) {
 		("GET", []) => Some(render_home(ctx)),
 		_ => None,
 	}
 }
 
-pub(crate) fn render_home(ctx: &RequestContext) -> ResponsePayload {
-    let buttons: Vec<(String, String)> = ctx
+pub(crate) fn render_home(ctx: &RequestContext<'_>) -> ResponsePayload {
+    let buttons: Vec<(&str, &str)> = ctx
         .modules
         .iter()
-        .filter(|m: &&ModuleEntry| m.enabled())
-        .map(|m| {
-            let label = if m.title.is_empty() {
-                m.id.clone()
-            } else {
-                m.title.clone()
-            };
-            (m.id.clone(), label)
-        })
+        .filter(|m| m.enabled())
+        .map(|m| (m.id, if m.title.is_empty() { m.id } else { m.title }))
         .collect();
     html_response(
         "tty.pt",
@@ -34,7 +27,7 @@ pub(crate) fn render_home(ctx: &RequestContext) -> ResponsePayload {
             None,
             rsx! {
                 div { class: "center",
-                    for (module_id, label) in buttons {
+                    for (module_id, label) in &buttons {
                         a {
                             href: "/{module_id}/",
                             class: "btn",
