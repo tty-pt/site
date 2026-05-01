@@ -1,10 +1,8 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
-use serde_json::Value;
-
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
-    html_response_with_head, item_menu, item_path, parse_json_body,
+    RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
+    form_actions, html_response_with_head, item_menu, item_path, parse_json_body,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
@@ -58,12 +56,11 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
 }
 
 pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
-    let title = parse_json_body::<Value>(&ctx.body)
-        .ok()
-        .and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string))
+    let title = parse_json_body::<PoemPayload>(&ctx.body)
+        .map(|p| p.title.unwrap_or_default())
         .unwrap_or_default();
-    let path = format!("/poem/{id}/edit");
-    let heading = format!("Edit {}", if title.is_empty() { id } else { title.as_str() });
+    let path = edit_path("poem", id);
+    let heading = format!("Edit {}", display_or_id(&title, id));
     edit_form_page(
         current_user(ctx),
         &heading,

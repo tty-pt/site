@@ -88,11 +88,11 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$US
 	-F "dummy=")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
-# 11. Unauthenticated edit should be 403
-echo -n "11. Unauthenticated edit forbidden... "
+# 11. Unauthenticated edit should redirect to login (401)
+echo -n "11. Unauthenticated edit redirects to login... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/$USER/edit" \
 	-F "title=Hacked")
-[ "$code" = "403" ] && pass "403 forbidden" || fail "expected 403, got $code"
+[ "$code" = "401" ] && pass "401 login redirect" || fail "expected 401, got $code"
 
 # 12. Delete poem
 echo -n "12. Delete poem... "

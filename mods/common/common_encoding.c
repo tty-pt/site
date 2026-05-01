@@ -15,23 +15,15 @@ NDX_LISTENER(int, json_escape, const char *, in, char *, out, size_t, outlen)
 		unsigned char c = (unsigned char)in[i];
 
 		if (c == '"' || c == '\\') {
-			if (j + 2 >= outlen)
-				break;
 			out[j++] = '\\';
 			out[j++] = c;
 		} else if (c == '\n') {
-			if (j + 2 >= outlen)
-				break;
 			out[j++] = '\\';
 			out[j++] = 'n';
 		} else if (c == '\r') {
-			if (j + 2 >= outlen)
-				break;
 			out[j++] = '\\';
 			out[j++] = 'r';
 		} else if (c == '\t') {
-			if (j + 2 >= outlen)
-				break;
 			out[j++] = '\\';
 			out[j++] = 't';
 		} else if (c < 0x20) {
@@ -67,8 +59,11 @@ NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen)
 
 NDX_LISTENER(int, b64_encode, const char *, in, char *, out, size_t, outlen)
 {
-	(void)outlen;
+	size_t inlen = strlen(in);
+	size_t needed = ((inlen + 2) / 3) * 4 + 1;
+	if (outlen < needed)
+		return -1;
 	EVP_EncodeBlock((unsigned char *)out, (const unsigned char *)in,
-		(int)strlen(in));
+		(int)inlen);
 	return 0;
 }

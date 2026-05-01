@@ -16,26 +16,18 @@ pub(crate) fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
 }
 
 pub(crate) fn render_login(ctx: &RequestContext) -> ResponsePayload {
-    let ret = if ctx.method == "POST" {
+    let (ret, error, status) = if ctx.method == "POST" {
         let pairs = parse_pairs(&ctx.body);
-        get_pair(&pairs, "ret").unwrap_or("/").to_string()
+        let ret = get_pair(&pairs, "ret").unwrap_or("/").to_string();
+        let error = get_pair(&pairs, "error").map(str::to_string);
+        let status = get_pair(&pairs, "status")
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(401);
+        (ret, error, status)
     } else {
         let pairs = parse_pairs(&ctx.query);
-        get_pair(&pairs, "ret").unwrap_or("/").to_string()
-    };
-    let error = if ctx.method == "POST" {
-        let pairs = parse_pairs(&ctx.body);
-        get_pair(&pairs, "error").map(str::to_string)
-    } else {
-        None
-    };
-    let status = if ctx.method == "POST" {
-        let pairs = parse_pairs(&ctx.body);
-        get_pair(&pairs, "status")
-            .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(401)
-    } else {
-        200
+        let ret = get_pair(&pairs, "ret").unwrap_or("/").to_string();
+        (ret, None, 200u16)
     };
     html_response_with_status(
         status,

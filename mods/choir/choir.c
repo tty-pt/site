@@ -7,7 +7,6 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <unistd.h>
-#include <pwd.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
@@ -81,13 +80,11 @@ static int handle_choir_edit_authorized(int fd, char *body, const item_ctx_t *ct
 		return server_error(fd, "Failed to write choir metadata");
 	if (t_len > 0)
 		index_put(index_hd, (char *)ctx->id, meta.title);
-	char loc[256];
-	snprintf(loc, sizeof(loc), "/choir/%s", ctx->id);
-	return redirect(fd, loc);
+	return redirect_to_item(fd, "choir", ctx->id);
 }
 
 static int handle_choir_edit(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Not found", "Forbidden", handle_choir_edit_authorized, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL, handle_choir_edit_authorized, NULL);
 }
 
 static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
@@ -173,7 +170,7 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 	}
 	char *sb_j = json_array_finish(sb_ja);
 	snprintf(meta.counter, sizeof(meta.counter), "%d", sb_count);
-	char *all_j = build_all_songs_json(ctx->doc_root, 0);
+	char *all_j = build_all_songs_json(0);
 
 	char extra[65536];
 	snprintf(extra, sizeof(extra), "\"songs\":%s,\"allSongs\":%s,\"songbooks\":%s",
@@ -189,7 +186,7 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 }
 
 static int choir_details_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, 0, "Not found", "Forbidden", choir_details_authorized, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, 0, NULL, NULL, choir_details_authorized, NULL);
 }
 
 static int handle_choir_songs_list(int fd, char *body) {
@@ -221,11 +218,11 @@ static int handle_choir_song_add_auth(int fd, char *body, const item_ctx_t *ctx,
 	row.value = 0; snprintf(row.format, sizeof(row.format), "%s", fmt);
 	if (repertoire_file_append(p, &row) != 0)
 		return server_error(fd, "Failed to add song");
-	char loc[256]; snprintf(loc, sizeof(loc), "/choir/%s", ctx->id); return redirect(fd, loc);
+	return redirect_to_item(fd, "choir", ctx->id);
 }
 
 static int handle_choir_song_add(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, "Not found", "Forbidden", handle_choir_song_add_auth, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, NULL, NULL, handle_choir_song_add_auth, NULL);
 }
 
 struct key_cb_ctx { const char *song_id; int new_key; };
@@ -240,11 +237,11 @@ static int handle_choir_song_key_auth(int fd, char *body, const item_ctx_t *ctx,
 	ndc_query_parse(body); int k_l = ndc_query_param("key", k_s, sizeof(k_s)-1);
 	struct key_cb_ctx cbc = { .song_id = ctx->song_id, .new_key = (k_l > 0) ? atoi(k_s) : 0 };
 	repertoire_file_rewrite(p, song_key_cb, &cbc);
-	char loc[256]; snprintf(loc, sizeof(loc), "/choir/%s", ctx->id); return redirect(fd, loc);
+	return redirect_to_item(fd, "choir", ctx->id);
 }
 
 static int handle_choir_song_key(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|ICTX_SONG_ID, "Not found", "Forbidden", handle_choir_song_key_auth, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|ICTX_SONG_ID, NULL, NULL, handle_choir_song_key_auth, NULL);
 }
 
 static int song_del_cb(int idx, const char *raw, int p, const char *sid, int v, const char *f, void *u, char *o, size_t os) {
@@ -255,11 +252,11 @@ static int song_del_cb(int idx, const char *raw, int p, const char *sid, int v, 
 static int handle_choir_song_del_auth(int fd, char *body, const item_ctx_t *ctx, void *user) {
 	(void)body; (void)user; char p[PATH_MAX]; item_child_path(ctx->item_path, "songs", p, sizeof(p));
 	repertoire_file_rewrite(p, song_del_cb, (void *)ctx->song_id);
-	char loc[256]; snprintf(loc, sizeof(loc), "/choir/%s", ctx->id); return redirect(fd, loc);
+	return redirect_to_item(fd, "choir", ctx->id);
 }
 
 static int handle_choir_song_delete(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|ICTX_SONG_ID, "Not found", "Forbidden", handle_choir_song_del_auth, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|ICTX_SONG_ID, NULL, NULL, handle_choir_song_del_auth, NULL);
 }
 
 static int handle_choir_song_view_auth(int fd, char *body, const item_ctx_t *ctx, void *user) {
@@ -272,7 +269,7 @@ static int handle_choir_song_view_auth(int fd, char *body, const item_ctx_t *ctx
 }
 
 static int handle_choir_song_view(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_SONG_ID, "Not found", "Forbidden", handle_choir_song_view_auth, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_SONG_ID, NULL, NULL, handle_choir_song_view_auth, NULL);
 }
 
 static int handle_choir_add_get(int fd, char *body) { return core_get(fd, body); }
@@ -285,7 +282,7 @@ static int handle_choir_edit_get_auth(int fd, char *body, const item_ctx_t *ctx,
 }
 
 static int handle_choir_edit_get(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, "Not found", "Forbidden", handle_choir_edit_get_auth, NULL);
+	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, NULL, NULL, handle_choir_edit_get_auth, NULL);
 }
 
 void ndx_install(void) {

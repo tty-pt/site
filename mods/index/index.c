@@ -189,7 +189,7 @@ NDX_LISTENER(int, index_add_item, int, fd, char *, body, char *, id_out, size_t,
 }
 
 static int
-index_page(unsigned fd, unsigned hd, char *path, char *title)
+index_page(unsigned fd, unsigned hd, char *path)
 {
 	register size_t total = 0;
 	size_t body_len;
@@ -222,7 +222,6 @@ index_page(unsigned fd, unsigned hd, char *path, char *title)
 
 	// send it
 	*s = '\0';
-	(void)title;
 	{
 		char query[512] = {0};
 		char host[256] = {0};
@@ -251,8 +250,7 @@ static int index_list_handler(
 
 	ndc_env_get(fd, path, "DOCUMENT_URI");
 
-	return index_page((unsigned)fd, hd, path,
-			(char *) module);
+	return index_page((unsigned)fd, hd, path);
 }
 
 NDX_LISTENER(unsigned, index_open,

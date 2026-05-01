@@ -194,6 +194,33 @@ pub fn key_names(use_bemol: bool, use_latin: bool) -> &'static [&'static str] {
     }
 }
 
+pub fn key_transpose_options(original_key: i32, use_bemol: bool, use_latin: bool) -> Vec<(i32, String)> {    key_names(use_bemol, use_latin)
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let semitones = ((i as i32 - original_key) % 12 + 12) % 12;
+            let suffix = if semitones == 0 { " (Original)" } else { "" };
+            (semitones, format!("{key}{suffix}"))
+        })
+        .collect()
+}
+
+pub fn display_or_id<'a>(title: &'a str, id: &'a str) -> &'a str {
+    if title.is_empty() { id } else { title }
+}
+
+pub fn parse_json_array<T: for<'de> serde::Deserialize<'de>>(raw: &str) -> Vec<T> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+pub fn edit_path(module: &str, id: &str) -> String {
+    format!("/{module}/{id}/edit")
+}
+
+pub fn prefs_save_url(ctx: &RequestContext) -> &'static str {
+    if current_user(ctx).is_some() { "/api/song/prefs" } else { "" }
+}
+
 pub fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
     if !is_owner {
         return rsx! {};
@@ -358,20 +385,16 @@ fn parse_index_items(body: &str) -> Vec<(String, String)> {
                 return None;
             }
             let idx = trimmed.find(' ')?;
-            Some((trimmed[..idx].to_string(), trimmed[idx + 1..].to_string()))
+            let id = trimmed[..idx].to_string();
+            let title = trimmed[idx + 1..].to_string();
+            let label = if title.is_empty() { id.clone() } else { title };
+            Some((id, label))
         })
         .collect()
 }
 
 pub fn render_list(ctx: &RequestContext, module: &str) -> ResponsePayload {
-    let items = parse_index_items(&ctx.body);
-    let display_items: Vec<(String, String)> = items
-        .into_iter()
-        .map(|(id, title)| {
-            let label = if title.is_empty() { id.clone() } else { title };
-            (id, label)
-        })
-        .collect();
+    let display_items = parse_index_items(&ctx.body);
     let add_href = format!("/{module}/add");
     let menu_items = crate::current_user(ctx).map(|_| {
         rsx! {
@@ -508,6 +531,30 @@ pub fn viewer_controls(module: &str, zoom: i32, save_url: &str) -> Element {
                 span { "Wrap lines" }
             }
         }
+    }
+}
+
+pub fn form_field(
+    label: &str,
+    name: &str,
+    value: &str,
+    textarea_rows: Option<usize>,
+    input_type: &str,
+    extra_class: &str,
+) -> Element {
+    match textarea_rows {
+        Some(rows) => rsx! {
+            label {
+                "{label}"
+                textarea { name: "{name}", rows: rows as i64, class: "{extra_class}", "{value}" }
+            }
+        },
+        None => rsx! {
+            label {
+                "{label}"
+                input { r#type: "{input_type}", name: "{name}", value: "{value}", class: "{extra_class}" }
+            }
+        },
     }
 }
 

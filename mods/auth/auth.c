@@ -22,6 +22,11 @@
 #include "auth.h"
 #undef AUTH_IMPL
 
+#define AUTH_COOKIE_NAME  "QSESSION"
+#define AUTH_COOKIE_ATTRS "; Path=/; SameSite=Lax; HttpOnly"
+#define AUTH_ETC_DIR      "./etc"
+#define AUTH_WWW_GID      67
+
 #include "../common/common.h"
 #include "../index/index.h"
 #include "../ssr/ssr.h"
@@ -65,16 +70,16 @@ static void
 shadow_path(char *buf, size_t len)
 {
 #ifdef __OpenBSD__
-	snprintf(buf, len, "./etc/master.passwd");
+	snprintf(buf, len, AUTH_ETC_DIR "/master.passwd");
 #else
-	snprintf(buf, len, "./etc/shadow");
+	snprintf(buf, len, AUTH_ETC_DIR "/shadow");
 #endif
 }
 
 static void
 passwd_path(char *buf, size_t len)
 {
-	snprintf(buf, len, "./etc/passwd");
+	snprintf(buf, len, AUTH_ETC_DIR "/passwd");
 }
 
 /* ------------------------------------------------------------------ */
@@ -145,8 +150,8 @@ NDX_LISTENER(int, get_cookie, const char *, cookie, char *, token, size_t, len)
 		while (*p == ' ' || *p == '\t')
 			p++;
 
-		if (!strncmp(p, "QSESSION=", 9)) {
-			p += 9;
+		if (!strncmp(p, AUTH_COOKIE_NAME "=", sizeof(AUTH_COOKIE_NAME))) {
+			p += sizeof(AUTH_COOKIE_NAME);
 			const char *amp = strchr(p, '&');
 			size_t tlen = amp ? (size_t)(amp - p) : strlen(p);
 			if (tlen >= len) tlen = len - 1;
@@ -275,8 +280,8 @@ shadow_append(const char *username, const char *hash, int uid)
 	if (!f)
 		return -1;
 #ifdef __OpenBSD__
-	fprintf(f, "%s:%s:%d:67::0:0:%s:/home/%s:/bin/sh\n",
-		username, hash, uid, username, username);
+	fprintf(f, "%s:%s:%d:%d::0:0:%s:/home/%s:/bin/sh\n",
+		username, hash, uid, AUTH_WWW_GID, username, username);
 #else
 	long lastchg = (long)(time(NULL) / 86400);
 	fprintf(f, "%s:%s:%ld:0:99999:7:::\n",
@@ -307,14 +312,28 @@ passwd_append(const char *username, int uid)
 	if (!f)
 		return -1;
 #ifdef __OpenBSD__
-	fprintf(f, "%s:*:%d:67::0:0:%s:/home/%s:/bin/sh\n",
-		username, uid, username, username);
+	fprintf(f, "%s:*:%d:%d::0:0:%s:/home/%s:/bin/sh\n",
+		username, uid, AUTH_WWW_GID, username, username);
 #else
-	fprintf(f, "%s:x:%d:67::/home/%s:/bin/sh\n",
-		username, uid, username);
+	fprintf(f, "%s:x:%d:%d::/home/%s:/bin/sh\n",
+		username, uid, AUTH_WWW_GID, username);
 #endif
 	fclose(f);
 	return 0;
+}
+
+static void
+strip_trailing_nl(char *s)
+{
+	size_t l = strlen(s);
+	while (l > 0 && (s[l-1] == '\n' || s[l-1] == '\r'))
+		s[--l] = '\0';
+}
+
+static void
+build_owner_path(const char *ip, char *out, size_t len)
+{
+	snprintf(out, len, "%s/owner", ip);
 }
 
 /*
@@ -323,8 +342,8 @@ passwd_append(const char *username, int uid)
 static int
 group_append(const char *username)
 {
-	FILE *in  = fopen("./etc/group", "r");
-	FILE *out = fopen("./etc/group.tmp", "w");
+	FILE *in  = fopen(AUTH_ETC_DIR "/group", "r");
+	FILE *out = fopen(AUTH_ETC_DIR "/group.tmp", "w");
 	if (!out) {
 		if (in) fclose(in);
 		return -1;
@@ -332,9 +351,7 @@ group_append(const char *username)
 	if (in) {
 		char line[4096];
 		while (fgets(line, sizeof(line), in)) {
-			size_t ll = strlen(line);
-			while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-				line[--ll] = '\0';
+			strip_trailing_nl(line);
 			if (strncmp(line, "www:", 4) == 0)
 				fprintf(out, "%s,%s\n", line, username);
 			else
@@ -343,7 +360,7 @@ group_append(const char *username)
 		fclose(in);
 	}
 	fclose(out);
-	rename("./etc/group.tmp", "./etc/group");
+	rename(AUTH_ETC_DIR "/group.tmp", AUTH_ETC_DIR "/group");
 	return 0;
 }
 
@@ -354,8 +371,8 @@ run_pwd_mkdb(void)
 	pid_t pid = fork();
 	if (pid == 0) {
 		char *argv[] = {
-			"pwd_mkdb", "-d", "./etc",
-			"./etc/master.passwd", NULL
+			"pwd_mkdb", "-d", AUTH_ETC_DIR,
+			AUTH_ETC_DIR "/master.passwd", NULL
 		};
 		execv("/usr/sbin/pwd_mkdb", argv);
 		_exit(1);
@@ -385,9 +402,7 @@ shadow_update(const char *username, const char *new_hash)
 		char line[512];
 		while (fgets(line, sizeof(line), in)) {
 			/* strip trailing newline for clean reassembly */
-			size_t ll = strlen(line);
-			while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-				line[--ll] = '\0';
+			strip_trailing_nl(line);
 
 			char *colon1 = strchr(line, ':');
 			if (!colon1) {
@@ -442,9 +457,7 @@ load_shadow(void)
 
 	char line[512];
 	while (fgets(line, sizeof(line), f)) {
-		size_t ll = strlen(line);
-		while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-			line[--ll] = '\0';
+		strip_trailing_nl(line);
 
 		/* field 1: username */
 		char *colon1 = strchr(line, ':');
@@ -517,9 +530,7 @@ load_passwd(void)
 
 	char line[512];
 	while (fgets(line, sizeof(line), f)) {
-		size_t ll = strlen(line);
-		while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-			line[--ll] = '\0';
+		strip_trailing_nl(line);
 
 		/* field 1: username */
 		char *c1 = strchr(line, ':');
@@ -563,7 +574,7 @@ NDX_LISTENER(int, item_record_ownership,
 			chown(item_path, (uid_t)uid, (gid_t)-1);
 	} else {
 		char owner_path[1024];
-		snprintf(owner_path, sizeof(owner_path), "%s/owner", item_path);
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "w");
 		if (fp) {
 			fwrite(username, 1, strlen(username), fp);
@@ -587,7 +598,7 @@ NDX_LISTENER(int, item_check_ownership,
 		return uid >= 0 && (uid_t)uid == st.st_uid;
 	} else {
 		char owner_path[1024];
-		snprintf(owner_path, sizeof(owner_path), "%s/owner", item_path);
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "r");
 		if (!fp) return 0;
 		char owner[64] = {0};
@@ -620,7 +631,7 @@ NDX_LISTENER(int, item_read_owner,
 		return -1;
 	} else {
 		char owner_path[1024];
-		snprintf(owner_path, sizeof(owner_path), "%s/owner", item_path);
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "r");
 		if (!fp) return -1;
 		if (fgets(out, (int)outlen, fp))
@@ -636,7 +647,7 @@ NDX_LISTENER(int, item_unlink_owner, const char *, item_path)
 {
 	if (geteuid() != 0) {
 		char owner_path[1024];
-		snprintf(owner_path, sizeof(owner_path), "%s/owner", item_path);
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		unlink(owner_path);
 	}
 	return 0;
@@ -779,10 +790,21 @@ login_error(int fd, int status, const char *msg, const char *ret)
 }
 
 static int
+login_as(int fd, const char *username, const char *target)
+{
+	char token[64], cookie[128];
+	generate_token(token, sizeof(token));
+	qmap_put(sessions_map, token, username);
+	snprintf(cookie, sizeof(cookie),
+		AUTH_COOKIE_NAME "=%s" AUTH_COOKIE_ATTRS, token);
+	ndc_header_set(fd, "Set-Cookie", cookie);
+	return redirect(fd, target);
+}
+
+static int
 handle_login(int fd, char *body)
 {
-	char username[64], password[64], redirect_path[256],
-	     token[64], cookie[128];
+	char username[64], password[64], redirect_path[256];
 
 	ndc_query_parse(body);
 	ndc_query_param("username", username, sizeof(username));
@@ -805,14 +827,7 @@ handle_login(int fd, char *body)
 	if (!user->active)
 		return login_error(fd, 401, "Account not confirmed", ret);
 
-	generate_token(token, sizeof(token));
-	qmap_put(sessions_map, token, username);
-
-	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
-
-	ndc_header_set(fd, "Set-Cookie", cookie);
-	return redirect(fd, ret);
+	return login_as(fd, username, ret);
 }
 
 static int
@@ -828,7 +843,7 @@ handle_logout(int fd, char *body)
 		qmap_del(sessions_map, token);
 
 	ndc_header_set(fd, "Set-Cookie",
-		"QSESSION=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
+		AUTH_COOKIE_NAME "=; Path=/; Max-Age=0" AUTH_COOKIE_ATTRS);
 	return redirect(fd, "/");
 }
 
@@ -845,7 +860,7 @@ static int
 handle_register(int fd, char *body)
 {
 	char username[64], password[64], password_confirm[64], email[128];
-	char salt[64], cookie[128], token[64];
+	char salt[64];
 	char user_dir[512], rcode_path[560], rcode[64];
 	const char *target;
 	int skip_confirm;
@@ -941,14 +956,7 @@ handle_register(int fd, char *body)
 	}
 
 	/* Auto-login only when confirmation is explicitly skipped. */
-	generate_token(token, sizeof(token));
-	qmap_put(sessions_map, token, username);
-
-	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
-
-	ndc_header_set(fd, "Set-Cookie", cookie);
-	return redirect(fd, target);
+	return login_as(fd, username, target);
 }
 
 static int
@@ -956,8 +964,7 @@ handle_confirm(int fd, char *body)
 {
 	(void)body;
 
-	char query[256], username[64], code[64],
-	     token[64], cookie[128];
+	char query[256], username[64], code[64];
 	char rcode_path[512];
 	char stored_rcode[64] = {0};
 
@@ -986,10 +993,7 @@ handle_confirm(int fd, char *body)
 	}
 	fclose(rf);
 
-	size_t rlen = strlen(stored_rcode);
-	while (rlen > 0 && (stored_rcode[rlen-1] == '\n' ||
-	                    stored_rcode[rlen-1] == '\r'))
-		stored_rcode[--rlen] = '\0';
+	strip_trailing_nl(stored_rcode);
 
 	if (strcmp(code, stored_rcode))
 		return bad_request(fd, "Wrong confirmation code");
@@ -1000,14 +1004,7 @@ handle_confirm(int fd, char *body)
 
 	remove(rcode_path);
 
-	generate_token(token, sizeof(token));
-	qmap_put(sessions_map, token, username);
-
-	snprintf(cookie, sizeof(cookie),
-		"QSESSION=%s; Path=/; SameSite=Lax; HttpOnly", token);
-
-	ndc_header_set(fd, "Set-Cookie", cookie);
-	return redirect(fd, "/");
+	return login_as(fd, username, "/");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1030,7 +1027,7 @@ void ndx_install(void)
 
 #ifndef __OpenBSD__
 	{
-		FILE *ns = fopen("./etc/nsswitch.conf", "wx");
+		FILE *ns = fopen(AUTH_ETC_DIR "/nsswitch.conf", "wx");
 		if (ns) {
 			fputs("passwd:     files\n", ns);
 			fputs("shadow:     files\n", ns);

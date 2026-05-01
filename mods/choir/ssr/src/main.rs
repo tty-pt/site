@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
-    html_response, item_menu, item_path, key_names, parse_json_body,
+    RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
+    form_actions, html_response, item_menu, item_path, key_names, parse_json_body,
     parse_pairs,
 };
 
@@ -18,8 +18,7 @@ struct ChoirSong {
     title: String,
     preferredKey: i32,
     originalKey: i32,
-    #[allow(dead_code)]
-    format: String,
+
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -33,8 +32,6 @@ struct SongEntry {
 struct ChoirPayload {
     title: Option<String>,
     owner_name: Option<String>,
-    #[allow(dead_code)]
-    counter: Option<String>,
     formats: Option<String>,
     songs: Option<Vec<ChoirSong>>,
     allSongs: Option<Vec<SongEntry>>,
@@ -56,22 +53,14 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let display_songbooks: Vec<(String, String)> = songbooks
                 .iter()
                 .map(|sb| {
-                    let label = if sb.title.is_empty() {
-                        sb.id.clone()
-                    } else {
-                        sb.title.clone()
-                    };
+                    let label = display_or_id(&sb.title, &sb.id).to_string();
                     (sb.id.clone(), label)
                 })
                 .collect();
             let display_songs: Vec<(String, String, String)> = songs
                 .iter()
                 .map(|song| {
-                    let label = if song.title.is_empty() {
-                        song.id.clone()
-                    } else {
-                        song.title.clone()
-                    };
+                    let label = display_or_id(&song.title, &song.id).to_string();
                     let key_idx = ((if song.preferredKey != 0 {
                         song.preferredKey
                     } else {
@@ -163,7 +152,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ),
             )
         }
-        Err(err) => ndc_dioxus_shared::render_item_error(ctx, "/choir/", &err),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, &item_path("choir", id), &err),
     }
 }
 
@@ -171,7 +160,7 @@ pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(&ctx.body);
     let title = ndc_dioxus_shared::get_pair(&pairs, "title").unwrap_or("").to_string();
     let formats = ndc_dioxus_shared::get_pair(&pairs, "format").unwrap_or("").to_string();
-    let path = format!("/choir/{id}/edit");
+    let path = edit_path("choir", id);
     let heading = format!("Edit {}", title);
     edit_form_page(
         current_user(ctx),

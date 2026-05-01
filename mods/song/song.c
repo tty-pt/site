@@ -17,6 +17,8 @@
 #include "../../lib/transp/transp.h"
 
 #define CHORDS_ITEMS_PATH "items/song/items"
+#define SONG_TYPE_INDEX_BUF_SIZE 8192
+#define SONG_CHORD_DATA_BUF_SIZE 65536
 #define VIEWER_ZOOM_MIN 70
 #define VIEWER_ZOOM_MAX 170
 #define VIEWER_ZOOM_DEFAULT 100
@@ -25,6 +27,7 @@ static transp_ctx_t *g_transp_ctx = NULL;
 static unsigned index_hd = 0;
 static unsigned song_index_hd = 0;
 static unsigned type_index_hd = 0;
+static char g_doc_root[256] = ".";
 
 typedef struct {
 	char title[256], type[256], yt[512], audio[512], pdf[512], author[256];
@@ -45,7 +48,7 @@ static int song_meta_write(const char *path, const song_meta_t *m) {
 static void song_type_index_add(const char *type, const char *id) {
 	const char *t = (type && type[0]) ? type : "any";
 	char *l_v = (char *)qmap_get(type_index_hd, t);
-	char l[8192] = {0};
+	char l[SONG_TYPE_INDEX_BUF_SIZE] = {0};
 	if (l_v) snprintf(l, sizeof(l), "%s", l_v);
 	if (l[0] && strlen(l) < sizeof(l) - 2) strcat(l, ",");
 	if (strlen(l) < sizeof(l) - strlen(id) - 2) strcat(l, id);
@@ -55,7 +58,7 @@ static void song_type_index_add(const char *type, const char *id) {
 static void song_type_index_remove_from(const char *type, const char *id) {
 	const char *t = (type && type[0]) ? type : "any";
 	const char *l = (const char *)qmap_get(type_index_hd, t);
-	char nl[8192] = {0}, *cp, *tok;
+	char nl[SONG_TYPE_INDEX_BUF_SIZE] = {0}, *cp, *tok;
 	if (!l) return;
 	cp = strdup(l);
 	if (!cp) return;
@@ -93,15 +96,23 @@ static int song_index_write_file(const char *doc) {
 	return index_tsv_save(song_index_hd, path);
 }
 
-static void song_index_put_meta(const char *id, const song_meta_t *m) {
-	char title[256], type[256], author[256], val[768];
+static void song_format_index_val(const song_meta_t *m, char *out, size_t sz) {
+	char title[256], type[256], author[256];
 	snprintf(title, sizeof(title), "%s", m->title);
 	snprintf(type, sizeof(type), "%s", m->type[0] ? m->type : "any");
 	snprintf(author, sizeof(author), "%s", m->author);
 	index_field_clean(title); index_field_clean(type); index_field_clean(author);
-	snprintf(val, sizeof(val), "%s\t%s\t%s", title, type, author);
+	snprintf(out, sz, "%s\t%s\t%s", title, type, author);
+}
+
+static void song_index_put_meta(const char *id, const song_meta_t *m) {
+	char val[768];
+	song_format_index_val(m, val, sizeof(val));
 	song_type_index_remove(id);
 	qmap_put(song_index_hd, id, val);
+	char type[256];
+	snprintf(type, sizeof(type), "%s", m->type[0] ? m->type : "any");
+	index_field_clean(type);
 	song_type_index_add(type, id);
 }
 
@@ -115,7 +126,7 @@ static int song_index_upsert(const char *doc, const char *id, const char *item_p
 static void song_index_delete(const char *id) {
 	song_type_index_remove(id);
 	qmap_del(song_index_hd, id);
-	song_index_write_file(".");
+	song_index_write_file(g_doc_root);
 }
 
 static void song_load_cb(const char *id, const char *val, void *user) {
@@ -127,12 +138,7 @@ static void song_load_cb(const char *id, const char *val, void *user) {
 
 static int song_item_read_for_index(const char *path, char *out, size_t sz) {
 	song_meta_t m; song_meta_read(path, &m);
-	char title[256], type[256], author[256];
-	snprintf(title, sizeof(title), "%s", m.title);
-	snprintf(type, sizeof(type), "%s", m.type[0] ? m.type : "any");
-	snprintf(author, sizeof(author), "%s", m.author);
-	index_field_clean(title); index_field_clean(type); index_field_clean(author);
-	snprintf(out, sz, "%s\t%s\t%s", title, type, author);
+	song_format_index_val(&m, out, sz);
 	return 0;
 }
 
@@ -306,11 +312,11 @@ static int song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *us
 }
 
 static int song_details_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHORDS_ITEMS_PATH, 0, "Not found", "Forbidden", song_details_auth, (void*)TRANSP_HTML);
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH, 0, NULL, NULL, song_details_auth, (void*)TRANSP_HTML);
 }
 
 static int api_song_transpose_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHORDS_ITEMS_PATH, 0, "Not found", "Forbidden", song_details_auth, NULL);
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH, 0, NULL, NULL, song_details_auth, NULL);
 }
 
 static int song_edit_get_auth(int fd, char *body, const item_ctx_t *ctx, void *u) {
@@ -324,7 +330,7 @@ static int song_edit_get_auth(int fd, char *body, const item_ctx_t *ctx, void *u
 }
 
 static int song_edit_get_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHORDS_ITEMS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, "Not found", "Forbidden", song_edit_get_auth, NULL);
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, NULL, NULL, song_edit_get_auth, NULL);
 }
 
 static int song_edit_post_auth(int fd, char *body, const item_ctx_t *ctx, void *u) {
@@ -340,15 +346,15 @@ static int song_edit_post_auth(int fd, char *body, const item_ctx_t *ctx, void *
 	index_put(index_hd, (char *)ctx->id, m.title);
 	song_index_put_meta(ctx->id, &m);
 	song_index_write_file(ctx->doc_root);
-	char db[65536]; int dl = ndc_query_param("data", db, 65535);
+	char db[SONG_CHORD_DATA_BUF_SIZE]; int dl = ndc_query_param("data", db, SONG_CHORD_DATA_BUF_SIZE - 1);
 	char dp[PATH_MAX]; item_child_path(ctx->item_path, "data.txt", dp, sizeof(dp));
 	if (write_file_path(dp, db, dl > 0 ? dl : 0) != 0)
 		return server_error(fd, "Failed to write song data");
-	char loc[256]; snprintf(loc, sizeof(loc), "/song/%s", ctx->id); return redirect(fd, loc);
+	return redirect_to_item(fd, "song", ctx->id);
 }
 
 static int song_edit_post_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHORDS_ITEMS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, "Not found", "Forbidden", song_edit_post_auth, NULL);
+	return with_item_access(fd, body, CHORDS_ITEMS_PATH, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP, NULL, NULL, song_edit_post_auth, NULL);
 }
 
 static void song_cleanup(const char *id) {
@@ -401,10 +407,9 @@ NDX_LISTENER(int, song_get_original_key_root, const char *, doc, const char *, i
 	int k = 0; char *o = NULL; song_transpose_root(doc, id, 0, 0, &o, &k); free(o); return k;
 }
 
-NDX_LISTENER(int, song_get_original_key, const char *, id) { return song_get_original_key_root(".", id); }
+NDX_LISTENER(int, song_get_original_key, const char *, id) { return song_get_original_key_root(g_doc_root, id); }
 
-NDX_LISTENER(char *, build_all_songs_json, const char *, doc, int, inc_t) {
-	(void)doc;
+NDX_LISTENER(char *, build_all_songs_json, int, inc_t) {
 	json_array_t *ja = json_array_new(0);
 	if (!ja) return NULL;
 	unsigned c = qmap_iter(song_index_hd, NULL, 0);
@@ -431,14 +436,17 @@ static int song_add_post_handler(int fd, char *body) {
 	char id[256] = {0}, item_path[PATH_MAX], location[512];
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
-	if (item_path_build(fd, "song", id, item_path, sizeof(item_path)) == 0)
-		song_index_upsert(".", id, item_path);
+	if (item_path_build(fd, "song", id, item_path, sizeof(item_path)) == 0) {
+		char dr[256] = {0}; get_doc_root(fd, dr, sizeof(dr));
+		song_index_upsert(dr[0] ? dr : g_doc_root, id, item_path);
+	}
 	snprintf(location, sizeof(location), "/song/%s", id);
 	return redirect(fd, location);
 }
 
 void ndx_install(void) {
 	char dr[256] = {0}; get_doc_root(0, dr, sizeof(dr));
+	if (dr[0]) strncpy(g_doc_root, dr, sizeof(g_doc_root) - 1);
 	g_transp_ctx = transp_init(); ndx_load("./mods/common/common"); ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd"); ndx_load("./mods/auth/auth");
 	index_hd = index_open("Song", 0, 1, song_cleanup); build_type_index(dr);

@@ -67,3 +67,10 @@ NDX_LISTENER(int, redirect, int, fd, const char *, location)
 	ndc_respond(fd, 303, "");
 	return 0;
 }
+
+NDX_LISTENER(int, redirect_to_item, int, fd, const char *, module, const char *, id)
+{
+	char loc[256];
+	snprintf(loc, sizeof(loc), "/%s/%s", module, id);
+	return redirect(fd, loc);
+}

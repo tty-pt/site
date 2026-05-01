@@ -8,7 +8,6 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <unistd.h>
-#include <pwd.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndx.h>
@@ -24,8 +23,10 @@
 #include "../ssr/ssr.h"
 
 #define SONGBOOK_ITEMS_PATH "items/songbook/items"
+#define SB_SONGS_BUF_SIZE 65536
 static unsigned index_hd = 0;
 static unsigned songbook_index_hd = 0;
+static char g_doc_root[256] = ".";
 
 typedef struct {
 	char song[128];
@@ -81,15 +82,21 @@ songbook_index_write_file(const char *doc_root)
 }
 
 static void
-songbook_index_put_meta(const char *id, const songbook_meta_t *meta)
+songbook_format_index_val(const songbook_meta_t *meta, char *out, size_t sz)
 {
-	char title[256], choir[128], val[512];
-
+	char title[256], choir[128];
 	snprintf(title, sizeof(title), "%s", meta->title);
 	snprintf(choir, sizeof(choir), "%s", meta->choir);
 	index_field_clean(title);
 	index_field_clean(choir);
-	snprintf(val, sizeof(val), "%s\t%s", title, choir);
+	snprintf(out, sz, "%s\t%s", title, choir);
+}
+
+static void
+songbook_index_put_meta(const char *id, const songbook_meta_t *meta)
+{
+	char val[512];
+	songbook_format_index_val(meta, val, sizeof(val));
 	qmap_put(songbook_index_hd, id, val);
 }
 
@@ -107,16 +114,12 @@ static void
 songbook_cleanup(const char *id)
 {
 	qmap_del(songbook_index_hd, id);
-	songbook_index_write_file(".");
+	songbook_index_write_file(g_doc_root);
 }
 
 static int songbook_item_read_for_index(const char *path, char *out, size_t sz) {
 	songbook_meta_t meta; songbook_meta_read(path, &meta);
-	char title[256], choir[128];
-	snprintf(title, sizeof(title), "%s", meta.title);
-	snprintf(choir, sizeof(choir), "%s", meta.choir);
-	index_field_clean(title); index_field_clean(choir);
-	snprintf(out, sz, "%s\t%s", title, choir);
+	songbook_format_index_val(&meta, out, sz);
 	return 0;
 }
 
@@ -328,14 +331,14 @@ handle_sb_edit_get_authorized(int fd, char *body,
 	if (repertoire_rows_load(data_path, &rows, &row_count) != 0)
 		return respond_error(fd, 500, "Failed to read data file");
 
-	char *ac_json = build_all_songs_json(ctx->doc_root, 1);
-	if (!ac_json) { free(rows); return 1; }
+	char *ac_json = build_all_songs_json(1);
+	if (!ac_json) { free(rows); return server_error(fd, "OOM"); }
 
 	char *at_json = song_get_types_json(0);
 	if (!at_json) { free(ac_json); free(rows); return 1; }
 
 	/* Build 4-field songs string: chord_id:transpose:format:originalKey */
-	char songs_buf[65536] = {0};
+	char songs_buf[SB_SONGS_BUF_SIZE] = {0};
 	size_t songs_pos = 0;
 	if (row_count == 0) {
 		songs_pos += snprintf(songs_buf + songs_pos,
@@ -400,15 +403,15 @@ handle_sb_edit_authorized(int fd, char *body,
 	int amount = amount_len > 0 ? atoi(amount_str) : 0;
 
 	if (strcmp(action, "add_row") == 0) {
-		char songs_buf[65536] = {0};
+	char songs_buf[SB_SONGS_BUF_SIZE] = {0};
 		if (sb_form_rows_build_edit_songs(amount, 1,
 				songs_buf, sizeof(songs_buf)) != 0)
 			return respond_error(fd, 500, "OOM");
 
-		char *ac_json = build_all_songs_json(ctx->doc_root, 1);
-		if (!ac_json) return 1;
+		char *ac_json = build_all_songs_json(1);
+		if (!ac_json) return server_error(fd, "OOM");
 		char *at_json = song_get_types_json(0);
-		if (!at_json) { free(ac_json); return 1; }
+		if (!at_json) { free(ac_json); return server_error(fd, "OOM"); }
 
 		songbook_meta_t meta;
 		songbook_meta_read(ctx->item_path, &meta);
@@ -691,7 +694,7 @@ handle_sb_add(int fd, char *body)
 			return server_error(fd, "Failed to write songbook metadata");
 		index_put(index_hd, id, meta.title);
 		songbook_index_put_meta(id, &meta);
-		songbook_index_write_file(".");
+		songbook_index_write_file(g_doc_root);
 
 		/* Pre-populate data.txt with one random song per choir format type */
 		char choir_item_path[PATH_MAX];
@@ -756,7 +759,7 @@ handle_sb_add(int fd, char *body)
 		char sb_item_path[512];
 		if (item_path_build(fd, "songbook", id,
 				sb_item_path, sizeof(sb_item_path)) == 0)
-			songbook_index_upsert(".", id, sb_item_path);
+			songbook_index_upsert(g_doc_root, id, sb_item_path);
 	}
 
 	char location[512];
@@ -768,6 +771,7 @@ void ndx_install(void)
 {
 	char doc_root[256] = {0};
 	get_doc_root(0, doc_root, sizeof(doc_root));
+	if (doc_root[0]) strncpy(g_doc_root, doc_root, sizeof(g_doc_root) - 1);
 
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");

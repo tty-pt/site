@@ -56,7 +56,7 @@ NDX_HOOK_DECL(char *, song_get_types_json, int, dummy);
 /* Build a JSON array of all songs from items/song/items/.
  * If include_type is non-zero, each object includes a "type" field.
  * Returns a malloc'd string the caller must free, or NULL on error. */
-NDX_HOOK_DECL(char *, build_all_songs_json, const char *, doc_root, int, include_type);
+NDX_HOOK_DECL(char *, build_all_songs_json, int, include_type);
 
 /* Read a song title from doc root + song id into out. */
 NDX_HOOK_DECL(int, song_read_title,

@@ -63,6 +63,7 @@ NDX_HOOK_DECL(int, bad_request,  int, fd, const char *, msg);  /* 400; NULL -> "
 NDX_HOOK_DECL(int, server_error, int, fd, const char *, msg);  /* 500; NULL -> "Internal server error" */
 NDX_HOOK_DECL(int, not_found,    int, fd, const char *, msg);  /* 404; NULL -> "Not found" */
 NDX_HOOK_DECL(int, redirect, int, fd, const char *, location);
+NDX_HOOK_DECL(int, redirect_to_item, int, fd, const char *, module, const char *, id);
 
 NDX_HOOK_DECL(int, respond_with_item_json, int, fd, const item_ctx_t *, ctx,
 	const meta_field_t *, fields, size_t, count, const char *, extra_json);

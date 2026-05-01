@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, empty_state, form_actions,
-    get_pair, html_response, item_menu, item_path, key_names, layout, parse_json_body,
-    parse_pairs, split_path,
+    RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
+    empty_state, form_actions, get_pair, html_response, item_menu, item_path, key_names,
+    key_transpose_options, layout, parse_json_array, parse_json_body, parse_pairs,
+    prefs_save_url, split_path,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
@@ -97,10 +98,6 @@ fn parse_songbook_edit_song(line: &str) -> SongbookEditSong {
     }
 }
 
-fn parse_json_array<T: for<'de> Deserialize<'de>>(raw: &str) -> Vec<T> {
-    serde_json::from_str(raw).unwrap_or_default()
-}
-
 pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
     match parse_json_body::<SongbookPayload>(&ctx.body) {
         Ok(payload) => {
@@ -113,11 +110,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let path = item_path("songbook", id);
             let page_title = format!("songbook: {title}");
             let choir_href = item_path("choir", &choir);
-            let save_url = if current_user(ctx).is_some() {
-                "/api/song/prefs"
-            } else {
-                ""
-            };
+            let save_url = prefs_save_url(ctx);
             let display_songs: Vec<DisplaySongbookSong> = songs
                 .into_iter()
                 .map(|song| {
@@ -129,20 +122,8 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                     let original_key = song.originalKey.unwrap_or(0);
                     let target_idx = ((original_key + transpose) % 12 + 12) % 12;
                     let target_key = key_names(false, false)[target_idx as usize].to_string();
-                    let transpose_options = key_names(false, false)
-                        .iter()
-                        .enumerate()
-                        .map(|(i, key)| {
-                            let semitones = ((i as i32 - original_key) % 12 + 12) % 12;
-                            let suffix = if semitones == 0 { " (Original)" } else { "" };
-                            (semitones, format!("{key}{suffix}"))
-                        })
-                        .collect();
-                    let display_title = if chord_title.is_empty() {
-                        chord_id.clone()
-                    } else {
-                        chord_title
-                    };
+                    let transpose_options = key_transpose_options(original_key, false, false);
+                    let display_title = display_or_id(&chord_title, &chord_id).to_string();
                     DisplaySongbookSong {
                         chord_id,
                         transpose,
@@ -242,7 +223,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
                 ),
             )
         }
-        Err(err) => ndc_dioxus_shared::render_item_error(ctx, "/songbook/", &err),
+        Err(err) => ndc_dioxus_shared::render_item_error(ctx, &item_path("songbook", id), &err),
     }
 }
 
@@ -259,7 +240,7 @@ pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
         parse_json_array::<SongbookEditChord>(get_pair(&pairs, "allChords").unwrap_or("[]"));
     let all_types =
         parse_json_array::<String>(get_pair(&pairs, "allTypes").unwrap_or("[]"));
-    let path = format!("/songbook/{id}/edit");
+    let path = edit_path("songbook", id);
     let heading = format!("Edit {title}");
     let rows: Vec<DisplaySongbookEditRow> = songs
         .iter()

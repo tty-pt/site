@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, current_user, edit_form_page, form_actions,
-    html_response, item_menu, item_path, key_names, parse_json_body,
-    parse_pairs,
+    RequestContext, ResponsePayload, current_user, display_or_id, edit_form_page, edit_path,
+    form_actions, form_field, html_response, item_menu, item_path, key_transpose_options,
+    parse_json_body, parse_pairs, prefs_save_url,
 };
 
 pub fn route(ctx: &RequestContext) -> Option<ResponsePayload> {
@@ -44,7 +44,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
         Ok(payload) => {
             let path = item_path("song", id);
             let title = payload.title.clone().unwrap_or_default();
-            let display_title = if title.is_empty() { id.to_string() } else { title };
+            let display_title = display_or_id(&title, id).to_string();
             let (transpose, use_bemol, use_latin, show_media) = song_flags(&ctx.query);
             let viewer_zoom = payload.viewerZoom.unwrap_or(100).clamp(70, 170);
             let viewer_bemol = payload.viewerBemol.unwrap_or(use_bemol);
@@ -54,16 +54,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let categories = payload.categories.unwrap_or_default();
             let author = payload.author.unwrap_or_default();
             let chord_data = payload.data.unwrap_or_default();
-            let keys = key_names(viewer_bemol, viewer_latin);
-            let key_options: Vec<(i32, String)> = keys
-                .iter()
-                .enumerate()
-                .map(|(i, key)| {
-                    let semitones = ((i as i32 - original_key) % 12 + 12) % 12;
-                    let suffix = if semitones == 0 { " (Original)" } else { "" };
-                    (semitones, format!("{key}{suffix}"))
-                })
-                .collect();
+            let key_options = key_transpose_options(original_key, viewer_bemol, viewer_latin);
             let author_display = if author.is_empty() {
                 "N/A".to_string()
             } else {
@@ -72,11 +63,7 @@ pub fn render_detail(ctx: &RequestContext, id: &str) -> ResponsePayload {
             let yt = payload.yt.filter(|s| !s.is_empty());
             let audio = payload.audio.filter(|s| !s.is_empty());
             let pdf = payload.pdf.filter(|s| !s.is_empty());
-            let save_url = if current_user(ctx).is_some() {
-                "/api/song/prefs"
-            } else {
-                ""
-            };
+            let save_url = prefs_save_url(ctx);
             let menu_items = Some(rsx! {
                 { ndc_dioxus_shared::viewer_controls("song", viewer_zoom, save_url) }
                 form {
@@ -180,8 +167,8 @@ pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     let audio = ndc_dioxus_shared::get_pair(&pairs, "audio").unwrap_or("").to_string();
     let pdf = ndc_dioxus_shared::get_pair(&pairs, "pdf").unwrap_or("").to_string();
     let data = ndc_dioxus_shared::get_pair(&pairs, "data").unwrap_or("").to_string();
-    let action = format!("/song/{id}/edit");
-    let heading = format!("Edit {}", if title.is_empty() { id } else { title.as_str() });
+    let action = edit_path("song", id);
+    let heading = format!("Edit {}", display_or_id(&title, id));
     edit_form_page(
         current_user(ctx),
         &heading,
@@ -202,26 +189,3 @@ pub fn render_edit(ctx: &RequestContext, id: &str) -> ResponsePayload {
     )
 }
 
-pub fn form_field(
-    label: &str,
-    name: &str,
-    value: &str,
-    textarea_rows: Option<usize>,
-    input_type: &str,
-    extra_class: &str,
-) -> Element {
-    match textarea_rows {
-        Some(rows) => rsx! {
-            label {
-                "{label}"
-                textarea { name: "{name}", rows: rows as i64, class: "{extra_class}", "{value}" }
-            }
-        },
-        None => rsx! {
-            label {
-                "{label}"
-                input { r#type: "{input_type}", name: "{name}", value: "{value}", class: "{extra_class}" }
-            }
-        },
-    }
-}
