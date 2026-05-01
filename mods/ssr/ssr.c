@@ -53,18 +53,16 @@ NDX_LISTENER(int, ssr_render,
 	const char *, body,
 	size_t, body_len,
 	const char *, remote_user,
-	const char *, forwarded_host,
 	const char *, modules_header)
 {
 	struct RenderRequest request = {
-		.method = method ? method : "",
-		.path = path ? path : "/",
-		.query = query ? query : "",
-		.body = (const unsigned char *)body,
-		.body_len = body_len,
-		.remote_user = remote_user ? remote_user : "",
-		.forwarded_host = forwarded_host ? forwarded_host : "",
-		.modules_header = modules_header ? modules_header : "",
+		.method          = method          ? method          : "",
+		.path            = path            ? path            : "/",
+		.query           = query           ? query           : "",
+		.body            = (const unsigned char *)body,
+		.body_len        = body_len,
+		.remote_user     = remote_user     ? remote_user     : "",
+		.modules_header  = modules_header  ? modules_header  : "",
 	};
 	struct RenderResult result = ssr_render_ffi(&request);
 

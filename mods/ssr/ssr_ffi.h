@@ -21,7 +21,6 @@ typedef struct RenderRequest {
  const unsigned char *body;
  size_t body_len;
  const char *remote_user;
- const char *forwarded_host;
  const char *modules_header;
 } RenderRequest;
 

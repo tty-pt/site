@@ -19,7 +19,6 @@ pub struct RenderRequest {
     body: *const c_uchar,
     body_len: usize,
     remote_user: *const c_char,
-    forwarded_host: *const c_char,
     modules_header: *const c_char,
 }
 
@@ -71,20 +70,34 @@ fn parse_modules(header: Option<String>) -> Vec<ModuleEntry> {
     serde_json::from_slice::<Vec<ModuleEntry>>(&decoded).unwrap_or_default()
 }
 
+fn safe_cstring(s: String) -> CString {
+    // Strip interior NUL bytes rather than panicking; CString::new is then
+    // guaranteed to succeed because no NULs remain.
+    let sanitised = s.replace('\0', "");
+    CString::new(sanitised).unwrap()
+}
+
 fn to_ffi(response: ResponsePayload) -> RenderResult {
     RenderResult {
         status: response.status,
-        content_type: CString::new(response.content_type).unwrap().into_raw(),
+        content_type: safe_cstring(response.content_type).into_raw(),
         location: response
             .location
             .and_then(|value| CString::new(value).ok())
             .map_or(std::ptr::null_mut(), CString::into_raw),
-        body: CString::new(response.body).unwrap().into_raw(),
+        body: safe_cstring(response.body).into_raw(),
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ssr_render_ffi(request: *const RenderRequest) -> RenderResult {
+    if request.is_null() {
+        eprintln!("ssr_render_ffi: null request pointer");
+        return to_ffi(html_response_with_status(
+            500, "500", error_page(None, "/", 500, "Internal server error"),
+        ));
+    }
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let req = unsafe { &*request };
         let ctx = RequestContext {
@@ -100,11 +113,15 @@ pub extern "C" fn ssr_render_ffi(request: *const RenderRequest) -> RenderResult 
 
     match result {
         Ok(payload) => payload,
-        Err(_) => to_ffi(html_response_with_status(
-            500,
-            "500",
-            error_page(None, "/", 500, "Internal server error"),
-        )),
+        Err(e) => {
+            let msg = e.downcast_ref::<&str>().copied()
+                .or_else(|| e.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("(unknown)");
+            eprintln!("ssr_render_ffi panic: {msg}");
+            to_ffi(html_response_with_status(
+                500, "500", error_page(None, "/", 500, "Internal server error"),
+            ))
+        }
     }
 }
 
@@ -142,11 +159,15 @@ pub extern "C" fn ssr_render_item_ffi(
 
     match result {
         Ok(payload) => payload,
-        Err(_) => to_ffi(html_response_with_status(
-            500,
-            "500",
-            error_page(None, "/", 500, "Internal server error"),
-        )),
+        Err(e) => {
+            let msg = e.downcast_ref::<&str>().copied()
+                .or_else(|| e.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("(unknown)");
+            eprintln!("ssr_render_item_ffi panic: {msg}");
+            to_ffi(html_response_with_status(
+                500, "500", error_page(None, "/", 500, "Internal server error"),
+            ))
+        }
     }
 }
 
@@ -156,26 +177,29 @@ pub extern "C" fn ssr_free_result_ffi(result: *mut RenderResult) {
         return;
     }
 
-    let result = unsafe { &mut *result };
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let result = unsafe { &mut *result };
 
-    if !result.content_type.is_null() {
-        unsafe {
-            drop(CString::from_raw(result.content_type));
+        if !result.content_type.is_null() {
+            unsafe { drop(CString::from_raw(result.content_type)); }
+            result.content_type = std::ptr::null_mut();
         }
-        result.content_type = std::ptr::null_mut();
-    }
 
-    if !result.location.is_null() {
-        unsafe {
-            drop(CString::from_raw(result.location));
+        if !result.location.is_null() {
+            unsafe { drop(CString::from_raw(result.location)); }
+            result.location = std::ptr::null_mut();
         }
-        result.location = std::ptr::null_mut();
-    }
 
-    if !result.body.is_null() {
-        unsafe {
-            drop(CString::from_raw(result.body));
+        if !result.body.is_null() {
+            unsafe { drop(CString::from_raw(result.body)); }
+            result.body = std::ptr::null_mut();
         }
-        result.body = std::ptr::null_mut();
+    }));
+
+    if let Err(e) = r {
+        let msg = e.downcast_ref::<&str>().copied()
+            .or_else(|| e.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("(unknown)");
+        eprintln!("ssr_free_result_ffi panic: {msg}");
     }
 }
