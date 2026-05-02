@@ -6,7 +6,7 @@ use ndc_dioxus_shared::{
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "choir", None::<fn(_, _) -> _>, Some(render_edit))
+	ndc_dioxus_shared::default_crud_routes(ctx, "choir", Some("🎶"), None::<fn(_, _) -> _>, Some(render_edit))
 }
 
 pub fn render_detail(payload: &ChoirItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {

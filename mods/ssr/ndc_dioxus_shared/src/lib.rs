@@ -91,7 +91,6 @@ pub struct ChoirEntry<'a> {
 pub struct ChoirItem<'a> {
     pub title:      &'a str,
     pub owner_name: &'a str,
-    pub counter:    &'a str,
     pub formats:    &'a str,
     pub songs:      Vec<ChoirSong<'a>>,
     pub all_songs:  Vec<ChoirEntry<'a>>,
@@ -101,12 +100,6 @@ pub struct ChoirItem<'a> {
 /// Interpret a raw byte body as UTF-8 text. Zero allocation; returns "" on invalid UTF-8.
 pub fn body_str(b: &[u8]) -> &str {
     std::str::from_utf8(b).unwrap_or("")
-}
-
-#[derive(Clone, Debug)]
-pub struct RouteError {
-    pub status: u16,
-    pub message: String,
 }
 
 pub fn split_path(path: &str) -> Vec<&str> {
@@ -124,18 +117,6 @@ pub fn parse_pairs(text: &str) -> Vec<(String, String)> {
 
 pub fn get_pair<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-}
-
-pub fn parse_error_body(text: &str) -> Option<RouteError> {
-    let pairs = parse_pairs(text);
-    let error = get_pair(&pairs, "error")?;
-    let status = get_pair(&pairs, "status")
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(500);
-    Some(RouteError {
-        status,
-        message: error.to_string(),
-    })
 }
 
 pub fn current_user<'a>(ctx: &RequestContext<'a>) -> Option<&'a str> {
@@ -270,10 +251,6 @@ pub fn parse_json_array<T: for<'de> serde::Deserialize<'de>>(raw: &str) -> Vec<T
 
 pub fn edit_path(module: &str, id: &str) -> String {
     format!("/{module}/{id}/edit")
-}
-
-pub fn prefs_save_url(ctx: &RequestContext<'_>) -> &'static str {
-    if current_user(ctx).is_some() { "/api/song/prefs" } else { "" }
 }
 
 pub fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
@@ -448,7 +425,7 @@ fn parse_index_items(body: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn render_list(ctx: &RequestContext<'_>, module: &str) -> ResponsePayload {
+pub fn render_list(ctx: &RequestContext<'_>, module: &str, icon: Option<&str>) -> ResponsePayload {
     let display_items = parse_index_items(body_str(ctx.body));
     let add_href = format!("/{module}/add");
     let menu_items = crate::current_user(ctx).map(|_| {
@@ -465,7 +442,7 @@ pub fn render_list(ctx: &RequestContext<'_>, module: &str) -> ResponsePayload {
             crate::current_user(ctx),
             module,
             &format!("/{module}"),
-            Some("🏠"),
+            Some(icon.unwrap_or("🏠")),
             menu_items,
             rsx! {
                 div { class: "center",
@@ -485,6 +462,7 @@ pub fn render_list(ctx: &RequestContext<'_>, module: &str) -> ResponsePayload {
 pub fn render_add_form(
     ctx: &RequestContext<'_>,
     module: &str,
+    icon: Option<&str>,
     extra_fields: Vec<(&str, String)>,
 ) -> ResponsePayload {
     if crate::current_user(ctx).is_none() {
@@ -497,7 +475,7 @@ pub fn render_add_form(
             crate::current_user(ctx),
             "Add Item",
             &path,
-            Some("🏠"),
+            Some(icon.unwrap_or("🏠")),
             None,
             rsx! {
                 form {
@@ -521,20 +499,12 @@ pub fn render_add_form(
     )
 }
 
-/// Render the standard error response for a failed item detail/edit request.
-pub fn render_item_error(ctx: &RequestContext<'_>, back_path: &str, err: &RouteError) -> ResponsePayload {
-    html_response_with_status(
-        err.status,
-        &err.status.to_string(),
-        error_page(current_user(ctx), back_path, err.status, &err.message),
-    )
-}
-
 /// Standard CRUD route dispatcher for modules that only have the default 5 arms.
 /// Modules with extra arms can call this and fall back with `.or_else(|| ...)`.
 pub fn default_crud_routes<F, G>(
     ctx: &RequestContext<'_>,
     module: &str,
+    icon: Option<&str>,
     render_detail: Option<F>,
     render_edit: Option<G>,
 ) -> Option<ResponsePayload>
@@ -545,9 +515,9 @@ where
     let parts = split_path(&ctx.path);
     match (ctx.method, parts.as_slice()) {
         ("GET", [m, "add"]) if *m == module =>
-            Some(render_add_form(ctx, module, Vec::new())),
+            Some(render_add_form(ctx, module, icon, Vec::new())),
         ("POST", [m]) if *m == module =>
-            Some(render_list(ctx, module)),
+            Some(render_list(ctx, module, icon)),
         ("POST", [m, id, "delete"]) if *m == module =>
             Some(render_delete_confirm(module, id, "", ctx)),
         ("POST", [m, id]) if *m == module =>

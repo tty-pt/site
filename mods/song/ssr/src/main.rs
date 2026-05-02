@@ -3,11 +3,11 @@ use dioxus::prelude::*;
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, SongItem, current_user, display_or_id, edit_form_page,
     edit_path, form_actions, form_field, html_response, item_menu, item_path,
-    key_transpose_options, parse_pairs, prefs_save_url, body_str,
+    key_transpose_options, parse_pairs, body_str,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "song", None::<fn(_, _) -> _>, Some(render_edit))
+	ndc_dioxus_shared::default_crud_routes(ctx, "song", Some("🎸"), None::<fn(_, _) -> _>, Some(render_edit))
 }
 
 fn song_flags(query: &str) -> (i32, bool, bool, bool) {
@@ -45,7 +45,7 @@ pub fn render_detail(payload: &SongItem<'_>, id: &str, ctx: &RequestContext<'_>)
     let yt    = if yt_raw.is_empty()    { None } else { Some(yt_raw) };
     let audio = if audio_raw.is_empty() { None } else { Some(audio_raw) };
     let pdf   = if pdf_raw.is_empty()   { None } else { Some(pdf_raw) };
-    let save_url = prefs_save_url(ctx);
+    let save_url: &str = if current_user(ctx).is_some() { "/api/song/prefs" } else { "" };
 
     let menu_items = Some(rsx! {
         { ndc_dioxus_shared::viewer_controls("song", viewer_zoom, save_url) }

@@ -4,7 +4,7 @@ use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, SongbookItem, body_str, current_user, display_or_id,
     edit_form_page, edit_path, empty_state, form_actions, get_pair, html_response, item_menu,
     item_path, key_names, key_transpose_options, layout, parse_json_array, parse_pairs,
-    prefs_save_url, split_path,
+    split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -18,9 +18,9 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 			} else {
 				vec![("choir", choir)]
 			};
-			Some(ndc_dioxus_shared::render_add_form(ctx, "songbook", extra))
+			Some(ndc_dioxus_shared::render_add_form(ctx, "songbook", Some("📖"), extra))
 		}
-		("POST", ["songbook"]) => Some(ndc_dioxus_shared::render_list(ctx, "songbook")),
+		("POST", ["songbook"]) => Some(ndc_dioxus_shared::render_list(ctx, "songbook", Some("📖"))),
 		("POST", ["songbook", id, "delete"]) => {
 			Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))
 		}
@@ -85,7 +85,7 @@ pub fn render_detail(payload: &SongbookItem<'_>, id: &str, ctx: &RequestContext<
     let path = item_path("songbook", id);
     let page_title = format!("songbook: {title}");
     let choir_href = item_path("choir", choir);
-    let save_url = prefs_save_url(ctx);
+    let save_url: &str = if current_user(ctx).is_some() { "/api/song/prefs" } else { "" };
     let display_songs: Vec<DisplaySongbookSong> = payload.songs
         .iter()
         .map(|song| {

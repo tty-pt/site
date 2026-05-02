@@ -30,20 +30,7 @@ pub extern "C" fn ssr_render_songbook_detail_ffi(
 	req: *const SongbookDetailRenderFfi,
 ) -> crate::RenderResult {
 	crate::dispatch_item(req, "ssr_render_songbook_detail_ffi", |r| {
-		let id_s = unsafe { crate::cstr_ref(r.id) };
-		let path_buf = std::format!("/songbook/{}", id_s);
-		let mut modules_buf: [crate::ModuleRef<'_>; 64] =
-			std::array::from_fn(|_| crate::ModuleRef { id: "", title: "", flags: 0 });
-		let modules_slice = unsafe { crate::fill_modules(&mut modules_buf, r.modules, r.modules_len) };
-		let remote_user_str = unsafe { crate::cstr_ref(r.remote_user) };
-		let ctx = crate::RequestContext {
-			method:      "GET",
-			path:        &path_buf,
-			query:       unsafe { crate::cstr_ref(r.query) },
-			body:        &[],
-			remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
-			modules:     modules_slice,
-		};
+		let (id_s, ctx) = crate::make_item_ctx!(r, "songbook");
 		let ffi_songs: &[SongbookSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
 			&[]
 		} else {

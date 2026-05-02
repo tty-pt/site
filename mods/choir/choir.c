@@ -29,7 +29,6 @@ static unsigned index_hd = 0;
 
 typedef struct {
 	char title[256];
-	char counter[32];
 	char format[2048];
 } choir_meta_t;
 
@@ -41,11 +40,9 @@ choir_meta_read(const char *item_path, choir_meta_t *meta)
 {
 	meta_field_t fields[] = {
 		{ "title", meta->title, sizeof(meta->title) },
-		{ "counter", meta->counter, sizeof(meta->counter) },
 	};
 	memset(meta, 0, sizeof(*meta));
-	meta_fields_read(item_path, fields, 2);
-	if (!meta->counter[0]) strcpy(meta->counter, "0");
+	meta_fields_read(item_path, fields, 1);
 	char *format = slurp_item_child_file(item_path, "format");
 	if (format) {
 		snprintf(meta->format, sizeof(meta->format), "%s", format);
@@ -182,8 +179,6 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 		fclose(sbf);
 	}
 
-	snprintf(meta.counter, sizeof(meta.counter), "%zu", sb_count);
-
 	static __thread char s_id[128], s_query[512];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
@@ -193,7 +188,6 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, v
 	struct ChoirDetailRenderFfi req = {
 		.title         = meta.title,
 		.owner_name    = owner,
-		.counter       = meta.counter,
 		.formats       = meta.format,
 		.songs         = song_slots,
 		.songs_len     = count,

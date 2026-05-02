@@ -19,7 +19,6 @@ pub struct ChoirEntryFfi {
 pub struct ChoirDetailRenderFfi {
 	pub title:         *const c_char,
 	pub owner_name:    *const c_char,
-	pub counter:       *const c_char,
 	pub formats:       *const c_char,
 	pub songs:         *const ChoirSongFfi,
 	pub songs_len:     usize,
@@ -39,20 +38,7 @@ pub extern "C" fn ssr_render_choir_detail_ffi(
 	req: *const ChoirDetailRenderFfi,
 ) -> crate::RenderResult {
 	crate::dispatch_item(req, "ssr_render_choir_detail_ffi", |r| {
-		let id_s = unsafe { crate::cstr_ref(r.id) };
-		let path_buf = std::format!("/choir/{}", id_s);
-		let mut modules_buf: [crate::ModuleRef<'_>; 64] =
-			std::array::from_fn(|_| crate::ModuleRef { id: "", title: "", flags: 0 });
-		let modules_slice = unsafe { crate::fill_modules(&mut modules_buf, r.modules, r.modules_len) };
-		let remote_user_str = unsafe { crate::cstr_ref(r.remote_user) };
-		let ctx = crate::RequestContext {
-			method:      "GET",
-			path:        &path_buf,
-			query:       unsafe { crate::cstr_ref(r.query) },
-			body:        &[],
-			remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
-			modules:     modules_slice,
-		};
+		let (id_s, ctx) = crate::make_item_ctx!(r, "choir");
 		let ffi_songs: &[ChoirSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
 			&[]
 		} else {
@@ -71,7 +57,6 @@ pub extern "C" fn ssr_render_choir_detail_ffi(
 		let view = crate::ChoirItem {
 			title:      unsafe { crate::cstr_ref(r.title) },
 			owner_name: unsafe { crate::cstr_ref(r.owner_name) },
-			counter:    unsafe { crate::cstr_ref(r.counter) },
 			formats:    unsafe { crate::cstr_ref(r.formats) },
 			songs: ffi_songs.iter().map(|s| crate::ChoirSong {
 				id:            unsafe { crate::cstr_ref(s.id) },
