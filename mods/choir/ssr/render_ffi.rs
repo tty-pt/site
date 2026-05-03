@@ -38,7 +38,7 @@ pub extern "C" fn ssr_render_choir_detail_ffi(
 	req: *const ChoirDetailRenderFfi,
 ) -> crate::RenderResult {
 	crate::dispatch_item(req, "ssr_render_choir_detail_ffi", |r| {
-		let (id_s, ctx) = crate::make_item_ctx!(r, "choir");
+		crate::make_item_ctx!(r, "choir", id_s, ctx);
 		let ffi_songs: &[ChoirSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
 			&[]
 		} else {
@@ -74,6 +74,6 @@ pub extern "C" fn ssr_render_choir_detail_ffi(
 				title: unsafe { crate::cstr_ref(e.title) },
 			}).collect(),
 		};
-		super::render_detail(&view, id_s, &ctx)
+		crate::choir::render_detail(&view, id_s, &ctx)
 	})
 }

@@ -30,7 +30,7 @@ pub extern "C" fn ssr_render_songbook_detail_ffi(
 	req: *const SongbookDetailRenderFfi,
 ) -> crate::RenderResult {
 	crate::dispatch_item(req, "ssr_render_songbook_detail_ffi", |r| {
-		let (id_s, ctx) = crate::make_item_ctx!(r, "songbook");
+		crate::make_item_ctx!(r, "songbook", id_s, ctx);
 		let ffi_songs: &[SongbookSongFfi] = if r.songs.is_null() || r.songs_len == 0 {
 			&[]
 		} else {
@@ -50,6 +50,6 @@ pub extern "C" fn ssr_render_songbook_detail_ffi(
 				original_key: s.original_key,
 			}).collect(),
 		};
-		super::render_detail(&view, id_s, &ctx)
+		crate::songbook::render_detail(&view, id_s, &ctx)
 	})
 }

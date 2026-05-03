@@ -1,5 +1,5 @@
 use std::ffi::{CString, c_char, c_uchar};
-use std::panic::catch_unwind;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 mod shared;
 
@@ -91,7 +91,7 @@ where
     match result {
         Ok(r) => r,
         Err(e) => {
-            let msg = e.downcast_ref::<&str>().copied()
+            let msg: &str = e.downcast_ref::<&str>().copied()
                 .or_else(|| e.downcast_ref::<String>().map(String::as_str))
                 .unwrap_or("(unknown)");
             eprintln!("{name} panic: {msg}");
@@ -168,7 +168,7 @@ pub extern "C" fn ssr_free_result_ffi(result: *mut RenderResult) {
         }
     }));
     if let Err(e) = r {
-        let msg = e.downcast_ref::<&str>().copied()
+        let msg: &str = e.downcast_ref::<&str>().copied()
             .or_else(|| e.downcast_ref::<String>().map(String::as_str))
             .unwrap_or("(unknown)");
         eprintln!("ssr_free_result_ffi panic: {msg}");

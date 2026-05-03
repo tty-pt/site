@@ -5,7 +5,7 @@ use ndc_dioxus_shared::{
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "poem", Some("📜"), None::<fn(_, _) -> _>, None::<fn(_, _) -> _>)
+	ndc_dioxus_shared::default_crud_routes(ctx, "poem", Some("📜"), None::<ndc_dioxus_shared::CrudHandler>, None::<ndc_dioxus_shared::CrudHandler>)
 }
 
 pub fn render_detail(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {

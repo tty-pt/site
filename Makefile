@@ -49,4 +49,4 @@ clean:
 distclean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d distclean; done
 
-.PHONY: all mods modules run clean distclean test unit-tests pages-test integration-tests e2e-tests test-data-dirs
+.PHONY: all mods modules run clean distclean test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr

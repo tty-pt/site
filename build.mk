@@ -9,7 +9,7 @@ PICFLAGS = ${PICFLAGS-${SYS}}
 
 TARGET ?= $(TARGET_AUTO)
 SRC ?= $(SRC_AUTO)
-MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk
+MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk $(REPO_ROOT)/mods/ssr/ssr_ffi.h
 
 CC ?= clang
 

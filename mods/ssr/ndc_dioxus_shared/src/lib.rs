@@ -499,18 +499,17 @@ pub fn render_add_form(
     )
 }
 
+pub type CrudHandler = fn(&RequestContext<'_>, &str) -> ResponsePayload;
+
 /// Standard CRUD route dispatcher for modules that only have the default 5 arms.
 /// Modules with extra arms can call this and fall back with `.or_else(|| ...)`.
-pub fn default_crud_routes<F, G>(
+pub fn default_crud_routes(
     ctx: &RequestContext<'_>,
     module: &str,
     icon: Option<&str>,
-    render_detail: Option<F>,
-    render_edit: Option<G>,
+    render_detail: Option<CrudHandler>,
+    render_edit: Option<CrudHandler>,
 ) -> Option<ResponsePayload>
-where
-    F: Fn(&RequestContext<'_>, &str) -> ResponsePayload,
-    G: Fn(&RequestContext<'_>, &str) -> ResponsePayload,
 {
     let parts = split_path(&ctx.path);
     match (ctx.method, parts.as_slice()) {

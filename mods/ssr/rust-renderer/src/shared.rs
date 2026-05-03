@@ -3,20 +3,19 @@ pub use ndc_dioxus_shared::*;
 use std::ffi::c_char;
 
 /// Builds a `RequestContext` for a typed item FFI handler.
-/// Declares `id_s` and `ctx` in the caller's scope, both borrowing from
-/// stack-allocated `path_buf` and `modules_buf` that the macro also declares.
+/// Declares `id_s`, `path_buf`, `modules_buf`, and `ctx` in the caller's scope.
 ///
-/// Usage: `let (id_s, ctx) = make_item_ctx!(r, "song");`
+/// Usage: `make_item_ctx!(r, "song", id_s, ctx);`
 macro_rules! make_item_ctx {
-    ($r:expr, $module:expr) => {{
-        let id_s = unsafe { crate::cstr_ref($r.id) };
-        let path_buf = ::std::format!("/{}/{}", $module, id_s);
+    ($r:expr, $module:expr, $id_s:ident, $ctx:ident) => {
+        let $id_s = unsafe { crate::cstr_ref($r.id) };
+        let path_buf = ::std::format!("/{}/{}", $module, $id_s);
         let mut modules_buf: [crate::ModuleRef<'_>; 64] =
             ::std::array::from_fn(|_| crate::ModuleRef { id: "", title: "", flags: 0 });
         let modules_slice =
             unsafe { crate::fill_modules(&mut modules_buf, $r.modules, $r.modules_len) };
         let remote_user_str = unsafe { crate::cstr_ref($r.remote_user) };
-        let ctx = crate::RequestContext {
+        let $ctx = crate::RequestContext {
             method:      "GET",
             path:        &path_buf,
             query:       unsafe { crate::cstr_ref($r.query) },
@@ -24,8 +23,7 @@ macro_rules! make_item_ctx {
             remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
             modules:     modules_slice,
         };
-        (id_s, ctx)
-    }};
+    };
 }
 pub(crate) use make_item_ctx;
 

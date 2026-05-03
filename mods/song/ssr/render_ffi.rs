@@ -27,7 +27,7 @@ pub extern "C" fn ssr_render_song_detail_ffi(
 	req: *const SongDetailRenderFfi,
 ) -> crate::RenderResult {
 	crate::dispatch_item(req, "ssr_render_song_detail_ffi", |r| {
-		let (id_s, ctx) = crate::make_item_ctx!(r, "song");
+		crate::make_item_ctx!(r, "song", id_s, ctx);
 		let view = crate::SongItem {
 			title:        unsafe { crate::cstr_ref(r.title) },
 			data:         unsafe { crate::cstr_ref(r.data) },
@@ -43,6 +43,6 @@ pub extern "C" fn ssr_render_song_detail_ffi(
 			viewer_latin: r.viewer_latin,
 			owner:        r.owner,
 		};
-		super::render_detail(&view, id_s, &ctx)
+		crate::song::render_detail(&view, id_s, &ctx)
 	})
 }

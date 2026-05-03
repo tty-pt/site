@@ -19,7 +19,7 @@ where
 	F: Fn(&crate::PoemItem<'_>, &str, &crate::RequestContext<'_>) -> crate::ResponsePayload,
 {
 	crate::dispatch_item(req, name, |r| {
-		let (id_s, ctx) = crate::make_item_ctx!(r, "poem");
+		crate::make_item_ctx!(r, "poem", id_s, ctx);
 		let view = crate::PoemItem {
 			title:        unsafe { crate::cstr_ref(r.title) },
 			head_content: unsafe { crate::cstr_ref(r.head_content) },
@@ -32,10 +32,10 @@ where
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ssr_render_poem_detail_ffi(req: *const PoemRenderFfi) -> crate::RenderResult {
-	dispatch_poem(req, "ssr_render_poem_detail_ffi", super::render_detail)
+	dispatch_poem(req, "ssr_render_poem_detail_ffi", crate::poem::render_detail)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ssr_render_poem_edit_ffi(req: *const PoemRenderFfi) -> crate::RenderResult {
-	dispatch_poem(req, "ssr_render_poem_edit_ffi", super::render_edit_typed)
+	dispatch_poem(req, "ssr_render_poem_edit_ffi", crate::poem::render_edit_typed)
 }

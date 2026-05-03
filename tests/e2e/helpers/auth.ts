@@ -105,8 +105,10 @@ export async function loginUser(
   await page.goto(`${base}/auth/login`, GOTO);
   await page.fill('input[name="username"]', user.username);
   await page.fill('input[name="password"]', user.password);
-  await page.click('button[type="submit"]');
-  await page.waitForURL(`${base}/`, { timeout: 5000 });
+  await Promise.all([
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.click('button[type="submit"]'),
+  ]);
 }
 
 /**
@@ -116,8 +118,10 @@ export async function logoutUser(
   page: import("npm:playwright").Page,
   base: string,
 ): Promise<void> {
-  await page.goto(`${base}/auth/logout`, { waitUntil: "domcontentloaded" });
-  await page.waitForURL(`${base}/`, { timeout: 5000 });
+  await Promise.all([
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.goto(`${base}/auth/logout`, { waitUntil: "domcontentloaded" }),
+  ]);
 }
 
 /**
