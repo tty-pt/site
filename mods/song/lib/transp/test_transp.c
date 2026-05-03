@@ -17,11 +17,13 @@
 	} while (0)
 
 /* Helper: check if string contains substring */
-static int str_contains(const char *haystack, const char *needle) {
+static int str_contains(const char *haystack, const char *needle)
+{
 	return strstr(haystack, needle) != NULL;
 }
 
-TEST(basic_transpose) {
+TEST(basic_transpose)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -33,7 +35,8 @@ TEST(basic_transpose) {
 	transp_free(ctx);
 }
 
-TEST(transpose_with_modifiers) {
+TEST(transpose_with_modifiers)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -47,7 +50,8 @@ TEST(transpose_with_modifiers) {
 	transp_free(ctx);
 }
 
-TEST(transpose_minor_chords) {
+TEST(transpose_minor_chords)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -61,7 +65,8 @@ TEST(transpose_minor_chords) {
 	transp_free(ctx);
 }
 
-TEST(transpose_negative) {
+TEST(transpose_negative)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -73,7 +78,8 @@ TEST(transpose_negative) {
 	transp_free(ctx);
 }
 
-TEST(html_output) {
+TEST(html_output)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -87,7 +93,8 @@ TEST(html_output) {
 	transp_free(ctx);
 }
 
-TEST(flat_notation) {
+TEST(flat_notation)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -101,7 +108,8 @@ TEST(flat_notation) {
 	transp_free(ctx);
 }
 
-TEST(latin_notation) {
+TEST(latin_notation)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -115,7 +123,8 @@ TEST(latin_notation) {
 	transp_free(ctx);
 }
 
-TEST(multiline_input) {
+TEST(multiline_input)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -128,12 +137,13 @@ TEST(multiline_input) {
 	transp_free(ctx);
 }
 
-TEST(hide_chords) {
+TEST(hide_chords)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
-	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0,
-	                             TRANSP_HIDE_CHORDS);
+	char *result = transp_buffer(
+	        ctx, "C G Am F\nTest lyrics here", 0, TRANSP_HIDE_CHORDS);
 	assert(result != NULL);
 	/* Should not contain chord names as standalone tokens */
 	assert(!str_contains(result, "C "));
@@ -146,12 +156,13 @@ TEST(hide_chords) {
 	transp_free(ctx);
 }
 
-TEST(hide_lyrics) {
+TEST(hide_lyrics)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
-	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0,
-	                             TRANSP_HIDE_LYRICS);
+	char *result = transp_buffer(
+	        ctx, "C G Am F\nTest lyrics here", 0, TRANSP_HIDE_LYRICS);
 	assert(result != NULL);
 	assert(str_contains(result, "C"));
 	assert(str_contains(result, "G"));
@@ -162,7 +173,8 @@ TEST(hide_lyrics) {
 	transp_free(ctx);
 }
 
-TEST(key_detection) {
+TEST(key_detection)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -175,7 +187,8 @@ TEST(key_detection) {
 	transp_free(ctx);
 }
 
-TEST(shift_table) {
+TEST(shift_table)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -194,7 +207,8 @@ TEST(shift_table) {
 	transp_free(ctx);
 }
 
-TEST(repeat_markers_html) {
+TEST(repeat_markers_html)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -216,7 +230,8 @@ TEST(repeat_markers_html) {
 	transp_free(ctx);
 }
 
-TEST(repeat_markers_transpose) {
+TEST(repeat_markers_transpose)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -233,7 +248,8 @@ TEST(repeat_markers_transpose) {
 	transp_free(ctx);
 }
 
-TEST(repeat_markers_second_song) {
+TEST(repeat_markers_second_song)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -259,7 +275,8 @@ TEST(repeat_markers_second_song) {
 	transp_free(ctx);
 }
 
-TEST(complex_song) {
+TEST(complex_song)
+{
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
@@ -280,7 +297,8 @@ TEST(complex_song) {
 	transp_free(ctx);
 }
 
-int main(void) {
+int main(void)
+{
 	printf("=== Transp Library Unit Tests ===\n\n");
 
 	RUN_TEST(basic_transpose);

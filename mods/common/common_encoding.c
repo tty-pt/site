@@ -7,7 +7,8 @@
 
 #include "common_internal.h"
 
-NDX_LISTENER(int, json_escape, const char *, in, char *, out, size_t, outlen) {
+NDX_LISTENER(int, json_escape, const char *, in, char *, out, size_t, outlen)
+{
 	size_t j = 0;
 
 	for (size_t i = 0; in[i] && j + 2 < outlen; i++) {
@@ -38,14 +39,15 @@ NDX_LISTENER(int, json_escape, const char *, in, char *, out, size_t, outlen) {
 	return 0;
 }
 
-NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen) {
+NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen)
+{
 	size_t j = 0;
 
 	for (size_t i = 0; in[i] && j + 4 < outlen; i++) {
 		unsigned char c = (unsigned char)in[i];
 
-		if (isalnum(c) || c == '-' || c == '_' || c == '.' ||
-		    c == '~') {
+		if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+		{
 			out[j++] = c;
 		} else {
 			j += snprintf(out + j, outlen - j, "%%%02X", c);
@@ -56,12 +58,13 @@ NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 	return (int)j;
 }
 
-NDX_LISTENER(int, b64_encode, const char *, in, char *, out, size_t, outlen) {
+NDX_LISTENER(int, b64_encode, const char *, in, char *, out, size_t, outlen)
+{
 	size_t inlen = strlen(in);
 	size_t needed = ((inlen + 2) / 3) * 4 + 1;
 	if (outlen < needed)
 		return -1;
-	EVP_EncodeBlock((unsigned char *)out, (const unsigned char *)in,
-	                (int)inlen);
+	EVP_EncodeBlock(
+	        (unsigned char *)out, (const unsigned char *)in, (int)inlen);
 	return 0;
 }

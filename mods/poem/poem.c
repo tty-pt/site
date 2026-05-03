@@ -25,7 +25,8 @@ typedef struct {
 	char title[256];
 } poem_meta_t;
 
-static void poem_meta_read(const char *item_path, poem_meta_t *meta) {
+static void poem_meta_read(const char *item_path, poem_meta_t *meta)
+{
 	meta_field_t fields[] = {
 		{ "title", meta->title, sizeof(meta->title) },
 	};
@@ -33,14 +34,16 @@ static void poem_meta_read(const char *item_path, poem_meta_t *meta) {
 	meta_fields_read(item_path, fields, 1);
 }
 
-static int poem_meta_write(const char *item_path, const poem_meta_t *meta) {
+static int poem_meta_write(const char *item_path, const poem_meta_t *meta)
+{
 	meta_field_t fields[] = {
 		{ "title", (char *)meta->title, sizeof(meta->title) },
 	};
 	return meta_fields_write(item_path, fields, 1);
 }
 
-static int poem_write_uploaded_html(const char *item_path) {
+static int poem_write_uploaded_html(const char *item_path)
+{
 	int file_len = mpfd_len("file");
 	if (file_len <= 0)
 		return 0;
@@ -50,14 +53,15 @@ static int poem_write_uploaded_html(const char *item_path) {
 	int got = mpfd_get("file", file_content, file_len);
 	if (got > 0) {
 		file_content[got] = '\0';
-		write_item_child_file(item_path, "pt_PT.html", file_content,
-		                      (size_t)got);
+		write_item_child_file(
+		        item_path, "pt_PT.html", file_content, (size_t)got);
 	}
 	free(file_content);
 	return 0;
 }
 
-static char *html_tag_inner(const char *html, const char *tag) {
+static char *html_tag_inner(const char *html, const char *tag)
+{
 	const char *start = strstr(html, tag);
 	if (!start)
 		return strdup("");
@@ -79,8 +83,9 @@ static char *html_tag_inner(const char *html, const char *tag) {
 	return out;
 }
 
-static int poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx,
-                                  void *user) {
+static int
+poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	poem_meta_t meta;
@@ -91,7 +96,8 @@ static int poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx,
 	char *head = html ? html_tag_inner(html, "head") : strdup("");
 	char *body_content = html ? html_tag_inner(html, "body") : strdup("");
 	free(html);
-	int owner = (ctx->username && ctx->username[0])
+	int owner =
+	        (ctx->username && ctx->username[0])
 	                ? item_check_ownership(ctx->item_path, ctx->username)
 	                : 0;
 	static __thread char s_query[512];
@@ -116,13 +122,22 @@ static int poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx,
 	return rc;
 }
 
-static int poem_detail_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL,
-	                        poem_detail_authorized, NULL);
+static int poem_detail_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        POEM_ITEMS_PATH,
+	        0,
+	        NULL,
+	        NULL,
+	        poem_detail_authorized,
+	        NULL);
 }
 
-static int poem_child_file_authorized(int fd, char *body, const item_ctx_t *ctx,
-                                      void *user) {
+static int poem_child_file_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	char name[512], child_path[1024];
@@ -130,19 +145,28 @@ static int poem_child_file_authorized(int fd, char *body, const item_ctx_t *ctx,
 	if (name[0] == '/' || strstr(name, "..") ||
 	    (strstr(name, ".html") && !strstr(name, ".html.")))
 		return not_found(fd, "Not found");
-	if (item_child_path(ctx->item_path, name, child_path,
-	                    sizeof(child_path)) != 0)
+	if (item_child_path(
+	            ctx->item_path, name, child_path, sizeof(child_path)) != 0)
 		return not_found(fd, "Not found");
 	ndc_sendfile(fd, child_path);
 	return 0;
 }
 
-static int poem_child_file_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL,
-	                        poem_child_file_authorized, NULL);
+static int poem_child_file_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        POEM_ITEMS_PATH,
+	        0,
+	        NULL,
+	        NULL,
+	        poem_child_file_authorized,
+	        NULL);
 }
 
-static int poem_add_post_handler(int fd, char *body) {
+static int poem_add_post_handler(int fd, char *body)
+{
 	char id[256] = { 0 }, item_path[512], redirect_path[512];
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
@@ -152,13 +176,15 @@ static int poem_add_post_handler(int fd, char *body) {
 	return ndc_redirect(fd, redirect_path);
 }
 
-static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx,
-                                    void *user) {
+static int
+poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	poem_meta_t meta;
 	poem_meta_read(ctx->item_path, &meta);
-	int owner = (ctx->username && ctx->username[0])
+	int owner =
+	        (ctx->username && ctx->username[0])
 	                ? item_check_ownership(ctx->item_path, ctx->username)
 	                : 0;
 	static __thread char s_query[512];
@@ -180,8 +206,9 @@ static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx,
 	return ssr_render_poem_edit(fd, &req);
 }
 
-static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx,
-                                     void *user) {
+static int
+poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)user;
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
@@ -198,19 +225,34 @@ static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx,
 	return ndc_redirect(fd, redirect_path);
 }
 
-static int poem_edit_get_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	                        NULL, poem_edit_get_authorized, NULL);
+static int poem_edit_get_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        POEM_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        poem_edit_get_authorized,
+	        NULL);
 }
 
-static int poem_edit_post_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	                        NULL, poem_edit_post_authorized, NULL);
+static int poem_edit_post_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        POEM_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        poem_edit_post_authorized,
+	        NULL);
 }
 
-void ndx_install(void) {
+void ndx_install(void)
+{
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/index/index");
 	index_hd = index_open("Poem", 0, 1, NULL);

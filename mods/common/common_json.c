@@ -18,7 +18,8 @@ typedef struct {
 	int first;
 } json_buf_t;
 
-static int jb_reserve(json_buf_t *jb, size_t extra) {
+static int jb_reserve(json_buf_t *jb, size_t extra)
+{
 	size_t need = jb->len + extra + 1;
 	size_t nc;
 	char *nb;
@@ -36,7 +37,8 @@ static int jb_reserve(json_buf_t *jb, size_t extra) {
 	return 0;
 }
 
-static int jb_append_str(json_buf_t *jb, const char *s, size_t n) {
+static int jb_append_str(json_buf_t *jb, const char *s, size_t n)
+{
 	if (jb_reserve(jb, n) != 0)
 		return -1;
 	memcpy(jb->buf + jb->len, s, n);
@@ -45,7 +47,8 @@ static int jb_append_str(json_buf_t *jb, const char *s, size_t n) {
 	return 0;
 }
 
-static int jb_field_sep(json_buf_t *jb) {
+static int jb_field_sep(json_buf_t *jb)
+{
 	if (jb->len > 0 && jb->buf[jb->len - 1] != '{')
 		return jb_append_str(jb, ",", 1);
 	return 0;
@@ -58,7 +61,8 @@ static int jb_field_sep(json_buf_t *jb) {
  * Private kv helpers — shared by both json_array_t and json_object_t variants
  * ------------------------------------------------------------------------- */
 
-static int jb_kv_str(json_buf_t *jb, const char *key, const char *value) {
+static int jb_kv_str(json_buf_t *jb, const char *key, const char *value)
+{
 	const char *v = value ? value : "";
 	size_t esc_cap;
 	char *esc;
@@ -75,31 +79,41 @@ static int jb_kv_str(json_buf_t *jb, const char *key, const char *value) {
 
 	rc = jb_field_sep(jb);
 	if (rc == 0 && jb_reserve(jb, strlen(key) + strlen(esc) + 6) == 0)
-		jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len,
-		                    "\"%s\":\"%s\"", key, esc);
+		jb->len += snprintf(
+		        jb->buf + jb->len,
+		        jb->cap - jb->len,
+		        "\"%s\":\"%s\"",
+		        key,
+		        esc);
 	else
 		rc = -1;
 	free(esc);
 	return rc;
 }
 
-static int jb_kv_int(json_buf_t *jb, const char *key, int value) {
+static int jb_kv_int(json_buf_t *jb, const char *key, int value)
+{
 	if (!jb || !key)
 		return -1;
 	if (jb_field_sep(jb) != 0 || jb_reserve(jb, strlen(key) + 32) != 0)
 		return -1;
-	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len, "\"%s\":%d",
-	                    key, value);
+	jb->len += snprintf(
+	        jb->buf + jb->len, jb->cap - jb->len, "\"%s\":%d", key, value);
 	return 0;
 }
 
-static int jb_kv_bool(json_buf_t *jb, const char *key, int value) {
+static int jb_kv_bool(json_buf_t *jb, const char *key, int value)
+{
 	if (!jb || !key)
 		return -1;
 	if (jb_field_sep(jb) != 0 || jb_reserve(jb, strlen(key) + 10) != 0)
 		return -1;
-	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len, "\"%s\":%s",
-	                    key, value ? "true" : "false");
+	jb->len += snprintf(
+	        jb->buf + jb->len,
+	        jb->cap - jb->len,
+	        "\"%s\":%s",
+	        key,
+	        value ? "true" : "false");
 	return 0;
 }
 
@@ -107,7 +121,8 @@ static int jb_kv_bool(json_buf_t *jb, const char *key, int value) {
  * json_array_t
  * ------------------------------------------------------------------------- */
 
-NDX_LISTENER(json_array_t *, json_array_new, int, dummy) {
+NDX_LISTENER(json_array_t *, json_array_new, int, dummy)
+{
 	json_array_t *ja;
 
 	(void)dummy;
@@ -127,7 +142,8 @@ NDX_LISTENER(json_array_t *, json_array_new, int, dummy) {
 	return ja;
 }
 
-NDX_LISTENER(int, json_array_append_raw, json_array_t *, ja, const char *, s) {
+NDX_LISTENER(int, json_array_append_raw, json_array_t *, ja, const char *, s)
+{
 	if (!ja)
 		return -1;
 	if (!ja->first && jb_append_str(JB(ja), ",", 1) != 0)
@@ -136,7 +152,8 @@ NDX_LISTENER(int, json_array_append_raw, json_array_t *, ja, const char *, s) {
 	return jb_append_str(JB(ja), s, strlen(s));
 }
 
-NDX_LISTENER(int, json_array_begin_object, json_array_t *, ja) {
+NDX_LISTENER(int, json_array_begin_object, json_array_t *, ja)
+{
 	if (!ja)
 		return -1;
 	if (!ja->first && jb_append_str(JB(ja), ",", 1) != 0)
@@ -145,28 +162,39 @@ NDX_LISTENER(int, json_array_begin_object, json_array_t *, ja) {
 	return jb_append_str(JB(ja), "{", 1);
 }
 
-NDX_LISTENER(int, json_array_end_object, json_array_t *, ja) {
+NDX_LISTENER(int, json_array_end_object, json_array_t *, ja)
+{
 	if (!ja)
 		return -1;
 	return jb_append_str(JB(ja), "}", 1);
 }
 
-NDX_LISTENER(int, json_array_kv_str, json_array_t *, ja, const char *, key,
-             const char *, value) {
+NDX_LISTENER(int, json_array_kv_str,
+	json_array_t *, ja,
+	const char *, key,
+	const char *, value)
+{
 	return jb_kv_str(JB(ja), key, value);
 }
 
-NDX_LISTENER(int, json_array_kv_int, json_array_t *, ja, const char *, key, int,
-             value) {
+NDX_LISTENER(int, json_array_kv_int,
+	json_array_t *, ja,
+	const char *, key,
+	int, value)
+{
 	return jb_kv_int(JB(ja), key, value);
 }
 
-NDX_LISTENER(int, json_array_kv_bool, json_array_t *, ja, const char *, key,
-             int, value) {
+NDX_LISTENER(int, json_array_kv_bool,
+	json_array_t *, ja,
+	const char *, key,
+	int, value)
+{
 	return jb_kv_bool(JB(ja), key, value);
 }
 
-NDX_LISTENER(char *, json_array_finish, json_array_t *, ja) {
+NDX_LISTENER(char *, json_array_finish, json_array_t *, ja)
+{
 	char *out;
 
 	if (!ja)
@@ -185,7 +213,8 @@ NDX_LISTENER(char *, json_array_finish, json_array_t *, ja) {
  * json_object_t
  * ------------------------------------------------------------------------- */
 
-NDX_LISTENER(json_object_t *, json_object_new, int, dummy) {
+NDX_LISTENER(json_object_t *, json_object_new, int, dummy)
+{
 	json_object_t *jo;
 
 	(void)dummy;
@@ -205,34 +234,47 @@ NDX_LISTENER(json_object_t *, json_object_new, int, dummy) {
 	return jo;
 }
 
-NDX_LISTENER(int, json_object_kv_str, json_object_t *, jo, const char *, key,
-             const char *, value) {
+NDX_LISTENER(int, json_object_kv_str,
+	json_object_t *, jo,
+	const char *, key,
+	const char *, value)
+{
 	return jb_kv_str(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_int, json_object_t *, jo, const char *, key,
-             int, value) {
+NDX_LISTENER(int, json_object_kv_int,
+	json_object_t *, jo,
+	const char *, key,
+	int, value)
+{
 	return jb_kv_int(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_bool, json_object_t *, jo, const char *, key,
-             int, value) {
+NDX_LISTENER(int, json_object_kv_bool,
+	json_object_t *, jo,
+	const char *, key,
+	int, value)
+{
 	return jb_kv_bool(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_raw, json_object_t *, jo, const char *, key,
-             const char *, value) {
+NDX_LISTENER(int, json_object_kv_raw,
+	json_object_t *, jo,
+	const char *, key,
+	const char *, value)
+{
 	if (!jo || !key || !value)
 		return -1;
 	if (jb_field_sep(JB(jo)) != 0 ||
 	    jb_reserve(JB(jo), strlen(key) + strlen(value) + 4) != 0)
 		return -1;
-	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len, "\"%s\":%s",
-	                    key, value);
+	jo->len += snprintf(
+	        jo->buf + jo->len, jo->cap - jo->len, "\"%s\":%s", key, value);
 	return 0;
 }
 
-NDX_LISTENER(char *, json_object_finish, json_object_t *, jo) {
+NDX_LISTENER(char *, json_object_finish, json_object_t *, jo)
+{
 	char *out;
 
 	if (!jo)
@@ -247,7 +289,8 @@ NDX_LISTENER(char *, json_object_finish, json_object_t *, jo) {
 	return out;
 }
 
-NDX_LISTENER(int, json_object_free, json_object_t *, jo) {
+NDX_LISTENER(int, json_object_free, json_object_t *, jo)
+{
 	if (!jo)
 		return 0;
 	free(jo->buf);
@@ -255,8 +298,9 @@ NDX_LISTENER(int, json_object_free, json_object_t *, jo) {
 	return 0;
 }
 
-int json_object_append_fragment(json_object_t *jo, const char *fragment,
-                                size_t len) {
+int json_object_append_fragment(
+        json_object_t *jo, const char *fragment, size_t len)
+{
 	if (!jo || !fragment)
 		return -1;
 	if (jb_field_sep(JB(jo)) != 0)

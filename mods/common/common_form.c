@@ -6,7 +6,8 @@
 
 #include "common_internal.h"
 
-static int fb_reserve(form_body_t *fb, size_t extra) {
+static int fb_reserve(form_body_t *fb, size_t extra)
+{
 	size_t need = fb->len + extra + 1;
 	size_t nc;
 	char *nb;
@@ -24,7 +25,8 @@ static int fb_reserve(form_body_t *fb, size_t extra) {
 	return 0;
 }
 
-NDX_LISTENER(form_body_t *, form_body_new, int, dummy) {
+NDX_LISTENER(form_body_t *, form_body_new, int, dummy)
+{
 	form_body_t *fb;
 
 	(void)dummy;
@@ -42,8 +44,11 @@ NDX_LISTENER(form_body_t *, form_body_new, int, dummy) {
 	return fb;
 }
 
-NDX_LISTENER(int, form_body_add, form_body_t *, fb, const char *, name,
-             const char *, value) {
+NDX_LISTENER(int, form_body_add,
+	form_body_t *, fb,
+	const char *, name,
+	const char *, value)
+{
 	const char *v = value ? value : "";
 	size_t n_cap;
 	size_t v_cap;
@@ -75,14 +80,15 @@ NDX_LISTENER(int, form_body_add, form_body_t *, fb, const char *, name,
 		fb->buf[fb->len++] = '&';
 	fb->first = 0;
 	fb->len +=
-	    snprintf(fb->buf + fb->len, fb->cap - fb->len, "%s=%s", en, ev);
+	        snprintf(fb->buf + fb->len, fb->cap - fb->len, "%s=%s", en, ev);
 
 	free(en);
 	free(ev);
 	return 0;
 }
 
-NDX_LISTENER(int, form_body_free, form_body_t *, fb) {
+NDX_LISTENER(int, form_body_free, form_body_t *, fb)
+{
 	if (!fb)
 		return 0;
 	free(fb->buf);
@@ -90,7 +96,8 @@ NDX_LISTENER(int, form_body_free, form_body_t *, fb) {
 	return 0;
 }
 
-char *form_body_finish(form_body_t *fb, size_t *out_len) {
+char *form_body_finish(form_body_t *fb, size_t *out_len)
+{
 	char *out;
 
 	if (!fb) {

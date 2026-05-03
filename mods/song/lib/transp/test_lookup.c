@@ -2,7 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int main(void) {
+int main(void)
+{
 	transp_ctx_t *ctx = transp_init();
 
 	// Try with HTML flag

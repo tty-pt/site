@@ -30,25 +30,32 @@ struct mpfd_val {
 	char data[];
 };
 
-static size_t mpfd_val_measure(const void *data) {
+static size_t mpfd_val_measure(const void *data)
+{
 	const struct mpfd_val *val = data;
 	return sizeof(struct mpfd_val) + val->len + val->filename_len;
 }
 
-static void set_error(const char *fmt, ...) {
+static void set_error(const char *fmt, ...)
+{
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(mpfd_error_buf, sizeof(mpfd_error_buf), fmt, args);
 	va_end(args);
 }
 
-static void clear_error(void) {
+static void clear_error(void)
+{
 	mpfd_error_buf[0] = '\0';
 }
 
 /* Safe substring search that works even with binary data (embedded '\0') */
-static char *find_substr(const char *haystack, size_t hay_len,
-                         const char *needle, size_t needle_len) {
+static char *find_substr(
+        const char *haystack,
+        size_t hay_len,
+        const char *needle,
+        size_t needle_len)
+{
 	if (needle_len == 0 || hay_len < needle_len)
 		return NULL;
 	for (size_t i = 0; i <= hay_len - needle_len; i++) {
@@ -58,8 +65,9 @@ static char *find_substr(const char *haystack, size_t hay_len,
 	return NULL;
 }
 
-static int parse_multipart(char *body, const char *content_type,
-                           size_t body_len) {
+static int
+parse_multipart(char *body, const char *content_type, size_t body_len)
+{
 	if (!body || body_len == 0)
 		return -1;
 
@@ -79,8 +87,12 @@ static int parse_multipart(char *body, const char *content_type,
 	while (*bend && *bend != '"' && *bend != ';' && *bend != '\r' &&
 	       *bend != '\n')
 		bend++;
-	snprintf(boundary, sizeof(boundary), "--%.*s", (int)(bend - bstart),
-	         bstart);
+	snprintf(
+	        boundary,
+	        sizeof(boundary),
+	        "--%.*s",
+	        (int)(bend - bstart),
+	        bstart);
 
 	size_t blen = strlen(boundary);
 	snprintf(boundary_crlf, sizeof(boundary_crlf), "\r\n%s", boundary);
@@ -90,8 +102,8 @@ static int parse_multipart(char *body, const char *content_type,
 
 	char *pos = body;
 	while (1) {
-		char *bpos =
-		    find_substr(pos, body_len - (pos - body), boundary, blen);
+		char *bpos = find_substr(
+		        pos, body_len - (pos - body), boundary, blen);
 		if (!bpos)
 			break;
 
@@ -102,16 +114,16 @@ static int parse_multipart(char *body, const char *content_type,
 			break;
 
 		/* Expect \r\n after boundary */
-		if (body_len - (pos - body) < 2 ||
-		    strncmp(pos, "\r\n", 2) != 0) {
+		if (body_len - (pos - body) < 2 || strncmp(pos, "\r\n", 2) != 0)
+		{
 			pos = bpos + 1;
 			continue;
 		}
 		pos += 2;
 
 		/* Headers until \r\n\r\n */
-		char *headers_end =
-		    find_substr(pos, body_len - (pos - body), "\r\n\r\n", 4);
+		char *headers_end = find_substr(
+		        pos, body_len - (pos - body), "\r\n\r\n", 4);
 		if (!headers_end)
 			break;
 
@@ -185,9 +197,11 @@ static int parse_multipart(char *body, const char *content_type,
 		size_t data_remaining = body_len - (data_start - body);
 
 		/* Find next boundary line "\r\n--xxxx" */
-		char *next_sep =
-		    find_substr(data_start, data_remaining, boundary_crlf,
-		                strlen(boundary_crlf));
+		char *next_sep = find_substr(
+		        data_start,
+		        data_remaining,
+		        boundary_crlf,
+		        strlen(boundary_crlf));
 		size_t data_len;
 		if (next_sep) {
 			data_len = next_sep - data_start;
@@ -197,21 +211,25 @@ static int parse_multipart(char *body, const char *content_type,
 
 		/* Enforce limits */
 		if (field_count >= mpfd_max_field_count) {
-			set_error("Too many fields (max %zu)",
-			          mpfd_max_field_count);
+			set_error(
+			        "Too many fields (max %zu)",
+			        mpfd_max_field_count);
 			return -2;
 		}
 
 		if (data_len > mpfd_max_field_size) {
-			set_error("Field '%s' too large (max %zu bytes)", key,
-			          mpfd_max_field_size);
+			set_error(
+			        "Field '%s' too large (max %zu bytes)",
+			        key,
+			        mpfd_max_field_size);
 			return -2;
 		}
 
 		total_size += data_len;
 		if (total_size > mpfd_max_total_size) {
-			set_error("Total size too large (max %zu bytes)",
-			          mpfd_max_total_size);
+			set_error(
+			        "Total size too large (max %zu bytes)",
+			        mpfd_max_total_size);
 			return -2;
 		}
 
@@ -245,13 +263,15 @@ static int parse_multipart(char *body, const char *content_type,
 
 /* NDX exports */
 
-static void mpfd_clear(void) {
+static void mpfd_clear(void)
+{
 	qmap_drop(mpfd_db);
 	clear_error();
 }
 
 /* Parse & Lifecycle */
-NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body) {
+NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body)
+{
 	char content_type[512] = { 0 };
 	char clen_str[32] = { 0 };
 
@@ -273,21 +293,24 @@ NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body) {
 }
 
 /* Field Inspection - All O(1) */
-static int mpfd_exists(const char *name) {
+static int mpfd_exists(const char *name)
+{
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
-NDX_LISTENER(int, mpfd_len, const char *, name) {
+NDX_LISTENER(int, mpfd_len, const char *, name)
+{
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	return val ? (int)val->len : -1;
 }
 
-static int mpfd_filename(const char *name, char *buf, size_t buf_len) {
+static int mpfd_filename(const char *name, char *buf, size_t buf_len)
+{
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
 		return -1;
 	size_t to_copy =
-	    val->filename_len < buf_len ? val->filename_len : buf_len;
+	        val->filename_len < buf_len ? val->filename_len : buf_len;
 	memcpy(buf, val->data, to_copy);
 	if (to_copy > 0 && buf_len > to_copy)
 		buf[to_copy] = '\0';
@@ -295,7 +318,8 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len) {
 }
 
 /* Data Retrieval */
-NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len) {
+NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
+{
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
 		return -1;
@@ -306,7 +330,8 @@ NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len) {
 	return (int)val->len;
 }
 
-static int mpfd_save(const char *name, const char *path) {
+static int mpfd_save(const char *name, const char *path)
+{
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
 		return -1;
@@ -319,13 +344,15 @@ static int mpfd_save(const char *name, const char *path) {
 }
 
 /* Configuration */
-static int mpfd_set_limits(size_t max_field_size, size_t max_total_size) {
+static int mpfd_set_limits(size_t max_field_size, size_t max_total_size)
+{
 	mpfd_max_field_size = max_field_size;
 	mpfd_max_total_size = max_total_size;
 	return 0;
 }
 
-MODULE_API void ndx_install(void) {
+MODULE_API void ndx_install(void)
+{
 	mpfd_val_type = qmap_mreg(mpfd_val_measure);
 	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
 }

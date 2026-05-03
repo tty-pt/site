@@ -61,7 +61,8 @@ static char *special[] = {
 static const unsigned special_sentinel = 0;
 
 /* Get chord string with sharp or flat notation */
-static inline char *chord_str(transp_ctx_t *ctx, size_t chord, int flags) {
+static inline char *chord_str(transp_ctx_t *ctx, size_t chord, int flags)
+{
 	char *str = ctx->i18n_table[chord];
 	if ((flags & TRANSP_BEMOL) && strchr(str, '#'))
 		str += strlen(str) + 1;
@@ -69,8 +70,9 @@ static inline char *chord_str(transp_ctx_t *ctx, size_t chord, int flags) {
 }
 
 /* Safe snprintf wrapper that returns characters written */
-static inline int outprintf(char *buf, size_t bufsize, size_t offset,
-                            const char *fmt, ...) {
+static inline int
+outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
+{
 	va_list args;
 	va_start(args, fmt);
 	int ret = vsnprintf(buf + offset, bufsize - offset, fmt, args);
@@ -80,7 +82,8 @@ static inline int outprintf(char *buf, size_t bufsize, size_t offset,
 
 /* Populate chord_db: keys are chord name strings, values are chromatic indices.
  */
-static void chord_db_init(int hd, char **table) {
+static void chord_db_init(int hd, char **table)
+{
 	for (unsigned u = 0; table[u]; u++) {
 		char *key = table[u];
 		qmap_put(hd, key, &(unsigned){ u });
@@ -91,13 +94,15 @@ static void chord_db_init(int hd, char **table) {
 }
 
 /* Populate special_db: only presence is checked, value is never read. */
-static void special_db_init(int hd, char **table) {
+static void special_db_init(int hd, char **table)
+{
 	for (unsigned u = 0; table[u]; u++)
 		qmap_put(hd, table[u], &special_sentinel);
 }
 
 /* Process a single line of chord chart */
-static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
+static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
+{
 	char outbuf[8192];
 	char buf[8];
 	char *o = outbuf;
@@ -134,8 +139,13 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 
 			size_t len = dot + 1 - s;
 			sim += len;
-			si += outprintf(outbuf, sizeof(outbuf), si,
-			                "<b>%.*s</b>", (int)len, s);
+			si += outprintf(
+			        outbuf,
+			        sizeof(outbuf),
+			        si,
+			        "<b>%.*s</b>",
+			        (int)len,
+			        s);
 			s += len;
 		}
 	}
@@ -167,12 +177,19 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 			if (flags & TRANSP_REMOVE_COMMENTS)
 				ctx->skip_empty = 1;
 			else if (not_bolded && (flags & TRANSP_HTML))
-				o += outprintf(outbuf, sizeof(outbuf),
-				               o - outbuf,
-				               "<b class='comment'>%s</b>", s);
+				o += outprintf(
+				        outbuf,
+				        sizeof(outbuf),
+				        o - outbuf,
+				        "<b class='comment'>%s</b>",
+				        s);
 			else
-				o += outprintf(outbuf, sizeof(outbuf),
-				               o - outbuf, "%s", s);
+				o += outprintf(
+				        outbuf,
+				        sizeof(outbuf),
+				        o - outbuf,
+				        "%s",
+				        s);
 			s += strlen(s);
 			continue;
 		}
@@ -254,14 +271,14 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 
 		/* HTML bold opening tag */
 		if (not_bolded && (flags & TRANSP_HTML)) {
-			o += outprintf(outbuf, sizeof(outbuf), o - outbuf,
-			               "<b>");
+			o += outprintf(
+			        outbuf, sizeof(outbuf), o - outbuf, "<b>");
 			not_bolded = 0;
 		}
 
 		if (is_special) {
-			o += outprintf(outbuf, sizeof(outbuf), o - outbuf, "%s",
-			               buf);
+			o += outprintf(
+			        outbuf, sizeof(outbuf), o - outbuf, "%s", buf);
 			s += modlen;
 			continue;
 		}
@@ -285,8 +302,13 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 			buf[0] = '-';
 
 		/* Output transposed chord */
-		o += outprintf(outbuf, sizeof(outbuf), o - outbuf, "%s%s",
-		               new_cstr, buf);
+		o += outprintf(
+		        outbuf,
+		        sizeof(outbuf),
+		        o - outbuf,
+		        "%s%s",
+		        new_cstr,
+		        buf);
 
 		/* Add space if needed */
 		if (*s != ' ' && *s != '/' && *s != '\0') {
@@ -297,7 +319,7 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 		/* Queue spacing adjustment for lyrics */
 		if (i < diff) {
 			struct space_queue *new_element =
-			    malloc(sizeof(*new_element));
+			        malloc(sizeof(*new_element));
 			new_element->len = diff - i;
 			new_element->start = j;
 			TAILQ_INSERT_TAIL(&ctx->queue, new_element, entries);
@@ -338,8 +360,8 @@ no_chord:
 					while (j < first->start + first->len) {
 						char c = (o > outbuf &&
 						          *(o - 1) == ' ')
-						             ? ' '
-						             : '-';
+						                 ? ' '
+						                 : '-';
 						*o++ = c;
 						j++;
 					}
@@ -351,8 +373,8 @@ no_chord:
 
 		/* HTML passthrough */
 		if (*s == '<') {
-			o += outprintf(outbuf, sizeof(outbuf), o - outbuf, "%s",
-			               s);
+			o += outprintf(
+			        outbuf, sizeof(outbuf), o - outbuf, "%s", s);
 			j = 0;
 			goto end;
 		}
@@ -375,8 +397,8 @@ end:
 	/* Close HTML tags */
 	if (flags & TRANSP_HTML) {
 		if (!not_bolded)
-			o += outprintf(outbuf, sizeof(outbuf), o - outbuf,
-			               "</b>");
+			o += outprintf(
+			        outbuf, sizeof(outbuf), o - outbuf, "</b>");
 		/* Add space to prevent empty div */
 		if (o - outbuf < 6 && !has_chords)
 			*o++ = ' ';
@@ -392,7 +414,8 @@ end:
 
 /* Public API */
 
-transp_ctx_t *transp_init(void) {
+transp_ctx_t *transp_init(void)
+{
 	transp_ctx_t *ctx = calloc(1, sizeof(*ctx));
 	if (!ctx)
 		return NULL;
@@ -426,8 +449,9 @@ transp_ctx_t *transp_init(void) {
 	return ctx;
 }
 
-char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones,
-                    int flags) {
+char *
+transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
+{
 	if (!ctx || !input)
 		return NULL;
 
@@ -437,7 +461,7 @@ char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones,
 
 	/* Set i18n table based on flags */
 	ctx->i18n_table =
-	    (flags & TRANSP_LATIN) ? chromatic_latin : chromatic_en;
+	        (flags & TRANSP_LATIN) ? chromatic_latin : chromatic_en;
 
 	/*
 	 * Allocate output buffer. HTML wrapping and transposition can expand
@@ -483,19 +507,22 @@ char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones,
 	return result;
 }
 
-int transp_get_key(transp_ctx_t *ctx) {
+int transp_get_key(transp_ctx_t *ctx)
+{
 	if (!ctx)
 		return -1;
 	return ctx->key;
 }
 
-void transp_reset_key(transp_ctx_t *ctx) {
+void transp_reset_key(transp_ctx_t *ctx)
+{
 	if (!ctx)
 		return;
 	ctx->key = -1;
 }
 
-char *transp_shift_table(transp_ctx_t *ctx, int latin) {
+char *transp_shift_table(transp_ctx_t *ctx, int latin)
+{
 	if (!ctx || ctx->key == (unsigned)-1)
 		return NULL;
 
@@ -518,7 +545,8 @@ char *transp_shift_table(transp_ctx_t *ctx, int latin) {
 	return result;
 }
 
-void transp_free(transp_ctx_t *ctx) {
+void transp_free(transp_ctx_t *ctx)
+{
 	if (!ctx)
 		return;
 

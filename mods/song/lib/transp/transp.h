@@ -48,8 +48,8 @@ transp_ctx_t *transp_init(void);
  *   // result: "<div><b>D A Bm G</b></div><div>Lyrics</div>"
  *   free(result);
  */
-char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones,
-                    int flags);
+char *
+transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags);
 
 /*
  * Get detected key from last transposition

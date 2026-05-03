@@ -29,9 +29,16 @@
 #define REPERTOIRE_LINE_REPLACE 1
 #define REPERTOIRE_LINE_SKIP -1
 
-typedef int (*repertoire_line_fn)(int idx, const char *raw, int parsed,
-                                  const char *sid, int ival, const char *fmt,
-                                  void *user, char *out, size_t out_sz);
+typedef int (*repertoire_line_fn)(
+        int idx,
+        const char *raw,
+        int parsed,
+        const char *sid,
+        int ival,
+        const char *fmt,
+        void *user,
+        char *out,
+        size_t out_sz);
 
 typedef struct {
 	int parsed;
@@ -41,20 +48,29 @@ typedef struct {
 } repertoire_row_t;
 
 #ifndef CHOIR_REPERTOIRE_IMPL
-NDX_HOOK_DECL(int, repertoire_file_rewrite, const char *, path,
-              repertoire_line_fn, cb, void *, user);
-NDX_HOOK_DECL(int, repertoire_parse_line, const char *, line,
-              repertoire_row_t *, row);
-NDX_HOOK_DECL(int, repertoire_rows_load, const char *, path,
-              repertoire_row_t **, rows, size_t *, count);
-NDX_HOOK_DECL(int, repertoire_file_append, const char *, path,
-              const repertoire_row_t *, row);
-NDX_HOOK_DECL(int, repertoire_rows_write, const char *, path,
-              const repertoire_row_t *, rows, size_t, count);
+NDX_HOOK_DECL(int, repertoire_file_rewrite,
+	const char *, path,
+	repertoire_line_fn, cb,
+	void *, user);
+NDX_HOOK_DECL(int, repertoire_parse_line,
+	const char *, line,
+	repertoire_row_t *, row);
+NDX_HOOK_DECL(int, repertoire_rows_load,
+	const char *, path,
+	repertoire_row_t **, rows,
+	size_t *, count);
+NDX_HOOK_DECL(int, repertoire_file_append,
+	const char *, path,
+	const repertoire_row_t *, row);
+NDX_HOOK_DECL(int, repertoire_rows_write,
+	const char *, path,
+	const repertoire_row_t *, rows,
+	size_t, count);
 #endif
 
 /* Heap rows returned by repertoire_rows_load are freed by callers. */
-static inline void repertoire_rows_dispose(repertoire_row_t *rows) {
+static inline void repertoire_rows_dispose(repertoire_row_t *rows)
+{
 	free(rows);
 }
 

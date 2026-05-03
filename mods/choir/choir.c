@@ -33,9 +33,11 @@ typedef struct {
 } choir_meta_t;
 
 static const char *CHOIR_DEFAULT_FORMATS =
-    "entrada\naleluia\nofertorio\nsanto\ncomunhao\nacao_de_gracas\nsaida\nany";
+        "entrada\naleluia\nofertorio\nsanto\ncomunhao\nacao_de_"
+        "gracas\nsaida\nany";
 
-static void choir_meta_read(const char *item_path, choir_meta_t *meta) {
+static void choir_meta_read(const char *item_path, choir_meta_t *meta)
+{
 	meta_field_t fields[] = {
 		{ "title", meta->title, sizeof(meta->title) },
 	};
@@ -54,17 +56,19 @@ static void choir_meta_read(const char *item_path, choir_meta_t *meta) {
 	}
 }
 
-static int choir_meta_write(const char *item_path, const choir_meta_t *meta) {
+static int choir_meta_write(const char *item_path, const choir_meta_t *meta)
+{
 	meta_field_t f[] = { { "title", (char *)meta->title, 0 } };
 	meta_fields_write(item_path, f, 1);
-	return write_item_child_file(item_path, "format", meta->format,
-	                             strlen(meta->format));
+	return write_item_child_file(
+	        item_path, "format", meta->format, strlen(meta->format));
 }
 
 #include "repertoire_impl.inc"
 
-static int handle_choir_edit_authorized(int fd, char *body,
-                                        const item_ctx_t *ctx, void *user) {
+static int handle_choir_edit_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)user;
 	mpfd_parse(fd, body);
 	choir_meta_t meta;
@@ -83,10 +87,17 @@ static int handle_choir_edit_authorized(int fd, char *body,
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
-static int handle_choir_edit(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	                        NULL, handle_choir_edit_authorized, NULL);
+static int handle_choir_edit(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        handle_choir_edit_authorized,
+	        NULL);
 }
 
 struct all_songs_ctx {
@@ -96,7 +107,8 @@ struct all_songs_ctx {
 	size_t max;
 };
 
-static int all_songs_cb(const char *id, const char *title, void *user) {
+static int all_songs_cb(const char *id, const char *title, void *user)
+{
 	struct all_songs_ctx *c = user;
 	if (c->count >= c->max)
 		return 1;
@@ -111,14 +123,15 @@ static int all_songs_cb(const char *id, const char *title, void *user) {
 #define MAX_CHOIR_ALL 1024
 #define MAX_CHOIR_SONGBOOKS 256
 
-static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx,
-                                    void *user) {
+static int
+choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	static __thread struct ChoirSongFfi song_slots[MAX_CHOIR_SONGS];
 	static __thread struct ChoirEntryFfi all_song_slots[MAX_CHOIR_ALL];
 	static __thread struct ChoirEntryFfi
-	    songbook_slots[MAX_CHOIR_SONGBOOKS];
+	        songbook_slots[MAX_CHOIR_SONGBOOKS];
 	static __thread char song_titles[MAX_CHOIR_SONGS][256];
 	static __thread char song_ids[MAX_CHOIR_SONGS][128];
 	static __thread char song_fmts[MAX_CHOIR_SONGS][128];
@@ -135,18 +148,25 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx,
 	repertoire_row_t *rows = NULL;
 	size_t count = 0;
 	char songs_path[PATH_MAX];
-	if (item_child_path(ctx->item_path, "songs", songs_path,
-	                    sizeof(songs_path)) != 0)
+	if (item_child_path(
+	            ctx->item_path, "songs", songs_path, sizeof(songs_path)) !=
+	    0)
 		return server_error(fd, "Failed to resolve songs path");
 	repertoire_rows_load(songs_path, &rows, &count);
 	if (count > MAX_CHOIR_SONGS)
 		count = MAX_CHOIR_SONGS;
 	for (size_t i = 0; i < count; i++) {
-		song_read_title(ctx->doc_root, rows[i].id, song_titles[i],
-		                sizeof(song_titles[i]));
+		song_read_title(
+		        ctx->doc_root,
+		        rows[i].id,
+		        song_titles[i],
+		        sizeof(song_titles[i]));
 		snprintf(song_ids[i], sizeof(song_ids[i]), "%s", rows[i].id);
-		snprintf(song_fmts[i], sizeof(song_fmts[i]), "%s",
-		         rows[i].format);
+		snprintf(
+		        song_fmts[i],
+		        sizeof(song_fmts[i]),
+		        "%s",
+		        rows[i].format);
 		song_slots[i].id = song_ids[i];
 		song_slots[i].title = song_titles[i];
 		song_slots[i].format = song_fmts[i];
@@ -168,13 +188,17 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx,
 	/* Load songbooks for this choir */
 	size_t sb_count = 0;
 	char sb_index_path[PATH_MAX];
-	snprintf(sb_index_path, sizeof(sb_index_path),
-	         "%s/items/songbook/index.tsv", ctx->doc_root);
+	snprintf(
+	        sb_index_path,
+	        sizeof(sb_index_path),
+	        "%s/items/songbook/index.tsv",
+	        ctx->doc_root);
 	FILE *sbf = fopen(sb_index_path, "r");
 	if (sbf) {
 		char line[1024];
 		while (fgets(line, sizeof(line), sbf) &&
-		       sb_count < MAX_CHOIR_SONGBOOKS) {
+		       sb_count < MAX_CHOIR_SONGBOOKS)
+		{
 			char *id = line, *title, *choir;
 			char *nl = strpbrk(line, "\r\n");
 			if (nl)
@@ -189,10 +213,16 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx,
 			*choir++ = '\0';
 			if (strcmp(choir, ctx->id) != 0)
 				continue;
-			snprintf(sb_ids[sb_count], sizeof(sb_ids[sb_count]),
-			         "%s", id);
-			snprintf(sb_titles[sb_count],
-			         sizeof(sb_titles[sb_count]), "%s", title);
+			snprintf(
+			        sb_ids[sb_count],
+			        sizeof(sb_ids[sb_count]),
+			        "%s",
+			        id);
+			snprintf(
+			        sb_titles[sb_count],
+			        sizeof(sb_titles[sb_count]),
+			        "%s",
+			        title);
 			songbook_slots[sb_count].id = sb_ids[sb_count];
 			songbook_slots[sb_count].title = sb_titles[sb_count];
 			sb_count++;
@@ -225,12 +255,21 @@ static int choir_details_authorized(int fd, char *body, const item_ctx_t *ctx,
 	return ssr_render_choir_detail(fd, &req);
 }
 
-static int choir_details_handler(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, 0, NULL, NULL,
-	                        choir_details_authorized, NULL);
+static int choir_details_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        0,
+	        NULL,
+	        NULL,
+	        choir_details_authorized,
+	        NULL);
 }
 
-static int handle_choir_songs_list(int fd, char *body) {
+static int handle_choir_songs_list(int fd, char *body)
+{
 	(void)body;
 	item_ctx_t ctx;
 	if (item_ctx_load(&ctx, fd, CHOIR_SONGS_PATH, 0))
@@ -258,8 +297,9 @@ static int handle_choir_songs_list(int fd, char *body) {
 	return res;
 }
 
-static int handle_choir_song_add_auth(int fd, char *body, const item_ctx_t *ctx,
-                                      void *user) {
+static int handle_choir_song_add_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)user;
 	char p[PATH_MAX], s_id[128] = { 0 }, fmt[64] = { 0 };
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
@@ -280,19 +320,34 @@ static int handle_choir_song_add_auth(int fd, char *body, const item_ctx_t *ctx,
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
-static int handle_choir_song_add(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	                        NULL, handle_choir_song_add_auth, NULL);
+static int handle_choir_song_add(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        handle_choir_song_add_auth,
+	        NULL);
 }
 
 struct key_cb_ctx {
 	const char *song_id;
 	int new_key;
 };
-static int song_key_cb(int idx, const char *raw, int parsed, const char *sid,
-                       int ival, const char *fmt, void *user, char *out,
-                       size_t out_sz) {
+static int song_key_cb(
+        int idx,
+        const char *raw,
+        int parsed,
+        const char *sid,
+        int ival,
+        const char *fmt,
+        void *user,
+        char *out,
+        size_t out_sz)
+{
 	(void)idx;
 	(void)raw;
 	(void)ival;
@@ -304,8 +359,9 @@ static int song_key_cb(int idx, const char *raw, int parsed, const char *sid,
 	return REPERTOIRE_LINE_KEEP;
 }
 
-static int handle_choir_song_key_auth(int fd, char *body, const item_ctx_t *ctx,
-                                      void *user) {
+static int handle_choir_song_key_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)user;
 	char p[PATH_MAX], k_s[32] = { 0 };
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
@@ -317,15 +373,30 @@ static int handle_choir_song_key_auth(int fd, char *body, const item_ctx_t *ctx,
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
-static int handle_choir_song_key(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP |
-	                            ICTX_SONG_ID,
-	                        NULL, NULL, handle_choir_song_key_auth, NULL);
+static int handle_choir_song_key(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID,
+	        NULL,
+	        NULL,
+	        handle_choir_song_key_auth,
+	        NULL);
 }
 
-static int song_del_cb(int idx, const char *raw, int p, const char *sid, int v,
-                       const char *f, void *u, char *o, size_t os) {
+static int song_del_cb(
+        int idx,
+        const char *raw,
+        int p,
+        const char *sid,
+        int v,
+        const char *f,
+        void *u,
+        char *o,
+        size_t os)
+{
 	(void)idx;
 	(void)raw;
 	(void)v;
@@ -336,8 +407,9 @@ static int song_del_cb(int idx, const char *raw, int p, const char *sid, int v,
 	                                          : REPERTOIRE_LINE_KEEP;
 }
 
-static int handle_choir_song_del_auth(int fd, char *body, const item_ctx_t *ctx,
-                                      void *user) {
+static int handle_choir_song_del_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	char p[PATH_MAX];
@@ -346,15 +418,22 @@ static int handle_choir_song_del_auth(int fd, char *body, const item_ctx_t *ctx,
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
-static int handle_choir_song_delete(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP |
-	                            ICTX_SONG_ID,
-	                        NULL, NULL, handle_choir_song_del_auth, NULL);
+static int handle_choir_song_delete(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID,
+	        NULL,
+	        NULL,
+	        handle_choir_song_del_auth,
+	        NULL);
 }
 
-static int handle_choir_song_view_auth(int fd, char *body,
-                                       const item_ctx_t *ctx, void *user) {
+static int handle_choir_song_view_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	char p[PATH_MAX];
@@ -379,17 +458,27 @@ static int handle_choir_song_view_auth(int fd, char *body,
 	return ndc_redirect(fd, loc);
 }
 
-static int handle_choir_song_view(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH, ICTX_SONG_ID, NULL,
-	                        NULL, handle_choir_song_view_auth, NULL);
+static int handle_choir_song_view(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_SONG_ID,
+	        NULL,
+	        NULL,
+	        handle_choir_song_view_auth,
+	        NULL);
 }
 
-static int handle_choir_add_get(int fd, char *body) {
+static int handle_choir_add_get(int fd, char *body)
+{
 	return core_get(fd, body);
 }
 
-static int handle_choir_edit_get_auth(int fd, char *body, const item_ctx_t *ctx,
-                                      void *user) {
+static int handle_choir_edit_get_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
 	(void)body;
 	(void)user;
 	choir_meta_t meta;
@@ -401,13 +490,21 @@ static int handle_choir_edit_get_auth(int fd, char *body, const item_ctx_t *ctx,
 	return core_post_form(fd, fb);
 }
 
-static int handle_choir_edit_get(int fd, char *body) {
-	return with_item_access(fd, body, CHOIR_SONGS_PATH,
-	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	                        NULL, handle_choir_edit_get_auth, NULL);
+static int handle_choir_edit_get(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        CHOIR_SONGS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        handle_choir_edit_get_auth,
+	        NULL);
 }
 
-void ndx_install(void) {
+void ndx_install(void)
+{
 	ndx_load("./mods/common/common");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/auth/auth");
@@ -416,18 +513,20 @@ void ndx_install(void) {
 	ndc_register_handler("GET:/choir/add", handle_choir_add_get);
 	ndc_register_handler("GET:/choir/:id/edit", handle_choir_edit_get);
 	ndc_register_handler("GET:/choir/:id", choir_details_handler);
-	ndc_register_handler("GET:/choir/:id/song/:song_id",
-	                     handle_choir_song_view);
-	ndc_register_handler("GET:/api/choir/:id/songs",
-	                     handle_choir_songs_list);
-	ndc_register_handler("POST:/api/choir/:id/songs",
-	                     handle_choir_song_add);
-	ndc_register_handler("POST:/api/choir/:id/song/:song_id/key",
-	                     handle_choir_song_key);
-	ndc_register_handler("DELETE:/api/choir/:id/song/:song_id",
-	                     handle_choir_song_delete);
-	ndc_register_handler("POST:/api/choir/:id/song/:song_id/remove",
-	                     handle_choir_song_delete);
+	ndc_register_handler(
+	        "GET:/choir/:id/song/:song_id", handle_choir_song_view);
+	ndc_register_handler(
+	        "GET:/api/choir/:id/songs", handle_choir_songs_list);
+	ndc_register_handler(
+	        "POST:/api/choir/:id/songs", handle_choir_song_add);
+	ndc_register_handler(
+	        "POST:/api/choir/:id/song/:song_id/key", handle_choir_song_key);
+	ndc_register_handler(
+	        "DELETE:/api/choir/:id/song/:song_id",
+	        handle_choir_song_delete);
+	ndc_register_handler(
+	        "POST:/api/choir/:id/song/:song_id/remove",
+	        handle_choir_song_delete);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 	index_hd = index_open("Choir", 0, 1, NULL);
 }

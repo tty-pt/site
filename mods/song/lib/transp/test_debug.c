@@ -3,7 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main(void) {
+int main(void)
+{
 	transp_ctx_t *ctx = transp_init();
 
 	const char *song = "1. Verse\n"
