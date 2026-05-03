@@ -18,7 +18,7 @@
  */
 
 import { chromium } from "npm:playwright";
-import { createAndLoginUser, waitForText } from "./helpers/auth.ts";
+import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 // A song that always exists in the test data
@@ -88,25 +88,19 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
 
     // Extract session cookie for out-of-browser API calls (avoids pipelining hangs)
     const cookies = await page.context().cookies();
-    const sessionCookie = cookies.find((c) => c.name === "session" || c.name === "token" || c.name === "sid");
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-
-    // Helper: perform API calls using Deno's native fetch (outside browser).
-    // This avoids HTTP pipelining issues on NDC's single-fd-per-connection model.
-    const apiFetch = (url: string, init?: RequestInit) =>
-      fetch(url, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string> ?? {}),
-          "Cookie": cookieHeader,
-        },
-      });
 
     // ── 6. Edit choir title via form submit ─────────────────────────────────
     const updatedTitle = `${choirTitle} (updated)`;
+    const { token: csrf6, cookieHeader: ch6 } = await getCsrfToken(cookieHeader, BASE);
     const fd6 = new FormData();
     fd6.append("title", updatedTitle);
-    const editResp = await apiFetch(`${BASE}/api/choir/${choirId}/edit`, { method: "POST", body: fd6 });
+    fd6.append("csrf_token", csrf6);
+    const editResp = await fetch(`${BASE}/api/choir/${choirId}/edit`, {
+      method: "POST",
+      body: fd6,
+      headers: { Cookie: ch6 },
+    });
     if (editResp.status !== 200 && editResp.status !== 303) {
       throw new Error(`Choir edit POST returned unexpected status ${editResp.status}`);
     }
@@ -118,11 +112,12 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     await waitForText(page, "body", updatedTitle);
 
     // ── 7. Add known song to choir repertoire ───────────────────────────────
-    const body7 = new URLSearchParams({ song_id: KNOWN_SONG_ID, format: "any" });
-    const addSongResp = await apiFetch(`${BASE}/api/choir/${choirId}/songs`, {
+    const { token: csrf7, cookieHeader: ch7 } = await getCsrfToken(cookieHeader, BASE);
+    const body7 = new URLSearchParams({ song_id: KNOWN_SONG_ID, format: "any", csrf_token: csrf7 });
+    const addSongResp = await fetch(`${BASE}/api/choir/${choirId}/songs`, {
       method: "POST",
       body: body7.toString(),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch7 },
     });
     if (addSongResp.status >= 400) {
       throw new Error(`Add song to choir returned unexpected status ${addSongResp.status}`);
@@ -135,11 +130,12 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
     await waitForText(page, "body", KNOWN_SONG_TITLE, 6000);
 
     // ── 8. Update preferred key for the song ────────────────────────────────
-    const body8 = new URLSearchParams({ key: "5" });
-    const keyResp = await apiFetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/key`, {
+    const { token: csrf8, cookieHeader: ch8 } = await getCsrfToken(cookieHeader, BASE);
+    const body8 = new URLSearchParams({ key: "5", csrf_token: csrf8 });
+    const keyResp = await fetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/key`, {
       method: "POST",
       body: body8.toString(),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch8 },
       redirect: "manual",
     });
     if (keyResp.status >= 400) {
@@ -154,8 +150,11 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
 
     // ── 10. Delete song from choir ───────────────────────────────────────────
     // Note: NDC doesn't support DELETE, use POST /remove endpoint instead
-    const deleteResp = await apiFetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/remove`, {
+    const { token: csrf10, cookieHeader: ch10 } = await getCsrfToken(cookieHeader, BASE);
+    const deleteResp = await fetch(`${BASE}/api/choir/${choirId}/song/${KNOWN_SONG_ID}/remove`, {
       method: "POST",
+      body: new URLSearchParams({ csrf_token: csrf10 }).toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch10 },
       redirect: "manual",
     });
     if (deleteResp.status >= 400) {

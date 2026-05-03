@@ -54,10 +54,10 @@ Deno.test("song edit: login → add song → edit title → verify on detail pag
 
     // ── 3. Edit title and submit ──────────────────────────────────────────────
     await page.fill('input[name="title"]', editedTitle);
-    await page.click('button[type="submit"]');
-
-    // Should redirect to /song/:id after save
-    await page.waitForURL(`${BASE}/song/${songId}`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
+      page.click('button[type="submit"]'),
+    ]);
 
     // ── 4. Verify new title appears on the detail page ────────────────────────
     await page.waitForSelector("h1", { timeout: 5000 });

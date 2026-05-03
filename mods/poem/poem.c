@@ -148,9 +148,11 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                ? item_check_ownership(ctx->item_path, ctx->username)
 	                : 0;
 	static __thread char s_query[512];
+	static __thread char s_csrf[33];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
 	ndc_env_get(fd, s_query, "QUERY_STRING");
+	csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct PoemRenderFfi req = {
 		.title = meta.title,
@@ -162,6 +164,7 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 		.remote_user = ctx->username ? ctx->username : "",
 		.modules = modules_snap,
 		.modules_len = modules_len,
+		.csrf_token = s_csrf,
 	};
 	int rc = ssr_render_poem_detail(fd, &req);
 	free(head);
@@ -235,9 +238,11 @@ poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                ? item_check_ownership(ctx->item_path, ctx->username)
 	                : 0;
 	static __thread char s_query[512];
+	static __thread char s_csrf[33];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
 	ndc_env_get(fd, s_query, "QUERY_STRING");
+	csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct PoemRenderFfi req = {
 		.title = meta.title,
@@ -249,6 +254,7 @@ poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 		.remote_user = ctx->username ? ctx->username : "",
 		.modules = modules_snap,
 		.modules_len = modules_len,
+		.csrf_token = s_csrf,
 	};
 	return ssr_render_poem_edit(fd, &req);
 }
@@ -259,6 +265,15 @@ poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	(void)user;
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	poem_meta_t meta = { 0 };
 	int title_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
 	if (title_len > 0) {

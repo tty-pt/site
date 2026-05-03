@@ -410,27 +410,33 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		                    : 0;
 		ndc_env_get(fd, s_query, "QUERY_STRING");
 		SSR_FILL_MODULES(modules_snap, modules_len);
-		struct SongDetailRenderFfi req = {
-			.title = meta.title,
-			.data = trans ? trans : "",
-			.yt = meta.yt,
-			.audio = meta.audio,
-			.pdf = meta.pdf,
-			.categories = meta.type,
-			.author = meta.author,
-			.original_key = k,
-			.viewer_zoom = v_z,
-			.show_media = m != 0,
-			.viewer_bemol = (f & TRANSP_BEMOL) != 0,
-			.viewer_latin = (f & TRANSP_LATIN) != 0,
-			.owner = owner != 0,
-			.id = ctx->id,
-			.query = s_query,
-			.remote_user = ctx->username ? ctx->username : "",
-			.modules = modules_snap,
-			.modules_len = modules_len,
-		};
-		rc = ssr_render_song_detail(fd, &req);
+		{
+			static __thread char s_csrf[33];
+			csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
+			struct SongDetailRenderFfi req = {
+				.title = meta.title,
+				.data = trans ? trans : "",
+				.yt = meta.yt,
+				.audio = meta.audio,
+				.pdf = meta.pdf,
+				.categories = meta.type,
+				.author = meta.author,
+				.original_key = k,
+				.viewer_zoom = v_z,
+				.show_media = m != 0,
+				.viewer_bemol = (f & TRANSP_BEMOL) != 0,
+				.viewer_latin = (f & TRANSP_LATIN) != 0,
+				.owner = owner != 0,
+				.id = ctx->id,
+				.query = s_query,
+				.remote_user =
+				        ctx->username ? ctx->username : "",
+				.modules = modules_snap,
+				.modules_len = modules_len,
+				.csrf_token = s_csrf,
+			};
+			rc = ssr_render_song_detail(fd, &req);
+		}
 	} else {
 		json_object_t *jo = json_object_new(0);
 		if (!jo) {
@@ -534,6 +540,13 @@ song_edit_post_auth(int fd, char *body, const item_ctx_t *ctx, void *u)
 {
 	(void)u;
 	ndc_query_parse(body);
+	{
+		char csrf_submitted[33] = { 0 };
+		ndc_query_param(
+		        "csrf_token", csrf_submitted, sizeof(csrf_submitted));
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	song_meta_t m = { 0 };
 	int tl = ndc_query_param("title", m.title, 255);
 	if (tl > 0)

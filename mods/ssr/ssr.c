@@ -5,6 +5,7 @@
 
 #include "../common/common.h"
 #include "../index/index.h"
+#include "../auth/auth.h"
 #define SSR_IMPL
 #include "ssr.h"
 #include "ssr_ffi.h"
@@ -63,9 +64,11 @@ NDX_LISTENER(int, ssr_render_delete,
 	const char *, title)
 {
 	static __thread char query[512];
+	static __thread char csrf_token[33];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
 	ndc_env_get(fd, query, "QUERY_STRING");
+	csrf_set_cookie(fd, csrf_token, sizeof(csrf_token));
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct DeleteRenderFfi req = {
 		.module = module,
@@ -75,6 +78,7 @@ NDX_LISTENER(int, ssr_render_delete,
 		.remote_user = get_request_user(fd),
 		.modules = modules_snap,
 		.modules_len = modules_len,
+		.csrf_token = csrf_token,
 	};
 	return dispatch_render_result(fd, ssr_render_delete_ffi(&req));
 }
@@ -102,8 +106,10 @@ NDX_LISTENER(int, ssr_render,
 	size_t, body_len,
 	const char *, remote_user)
 {
+	static __thread char csrf_token[33];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
+	csrf_set_cookie(fd, csrf_token, sizeof(csrf_token));
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct PageRenderFfi req = {
 		.method = method ? method : "",
@@ -114,6 +120,7 @@ NDX_LISTENER(int, ssr_render,
 		.remote_user = remote_user ? remote_user : "",
 		.modules = modules_snap,
 		.modules_len = modules_len,
+		.csrf_token = csrf_token,
 	};
 	return dispatch_render_result(fd, ssr_render_page_ffi(&req));
 }

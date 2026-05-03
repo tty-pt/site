@@ -11,7 +11,7 @@
  */
 
 import { chromium } from "npm:playwright";
-import { createAndLoginUser, waitForText } from "./helpers/auth.ts";
+import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 const KNOWN_SONG_ID = "a_alegria_esta_no_coracao";
@@ -90,17 +90,19 @@ Deno.test({
 
     // We use fetch (multipart) to POST the edit form, simulating the client-side submission.
     // song_0 uses datalist "Title [id]" format; key_0 = 5 (F), orig_0 = 0
+    const { token: csrfToken, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
     const fd = new FormData();
     fd.append("amount", "1");
     fd.append("song_0", `${KNOWN_SONG_TITLE} [${KNOWN_SONG_ID}]`);
     fd.append("key_0", "5");
     fd.append("orig_0", "0");
     fd.append("fmt_0", "any");
+    fd.append("csrf_token", csrfToken);
 
     const editResp = await fetch(`${BASE}/songbook/${sbId}/edit`, {
       method: "POST",
       body: fd,
-      headers: { Cookie: cookieHeader },
+      headers: { Cookie: ch },
       redirect: "manual",
     });
 

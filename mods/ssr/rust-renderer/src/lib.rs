@@ -27,6 +27,7 @@ pub struct PageRenderFfi {
     pub remote_user: *const c_char,
     pub modules:     *const ModuleEntryFfi,
     pub modules_len: usize,
+    pub csrf_token:  *const c_char,
 }
 
 #[repr(C)]
@@ -38,6 +39,7 @@ pub struct DeleteRenderFfi {
     pub remote_user: *const c_char,
     pub modules:     *const ModuleEntryFfi,
     pub modules_len: usize,
+    pub csrf_token:  *const c_char,
 }
 
 // ── Result type ───────────────────────────────────────────────────────────────
@@ -113,6 +115,7 @@ pub extern "C" fn ssr_render_page_ffi(req: *const PageRenderFfi) -> RenderResult
         let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
         let modules_slice = unsafe { fill_modules(&mut modules_buf, req.modules, req.modules_len) };
         let remote_user_str = unsafe { cstr_ref(req.remote_user) };
+        let csrf_str = unsafe { cstr_ref(req.csrf_token) };
         let ctx = RequestContext {
             method:      unsafe { cstr_ref(req.method) },
             path:        unsafe { cstr_ref(req.path) },
@@ -120,6 +123,7 @@ pub extern "C" fn ssr_render_page_ffi(req: *const PageRenderFfi) -> RenderResult
             body:        body_slice,
             remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
             modules:     modules_slice,
+            csrf_token:  csrf_str,
         };
         route(&ctx)
     })
@@ -135,6 +139,7 @@ pub extern "C" fn ssr_render_delete_ffi(req: *const DeleteRenderFfi) -> RenderRe
         let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
         let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
         let remote_user_str = unsafe { cstr_ref(r.remote_user) };
+        let csrf_str = unsafe { cstr_ref(r.csrf_token) };
         let ctx = RequestContext {
             method:      "GET",
             path:        &path_buf,
@@ -142,6 +147,7 @@ pub extern "C" fn ssr_render_delete_ffi(req: *const DeleteRenderFfi) -> RenderRe
             body:        &[],
             remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
             modules:     modules_slice,
+            csrf_token:  csrf_str,
         };
         render_delete_confirm(module_s, id_s, title_s, &ctx)
     })

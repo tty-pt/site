@@ -71,6 +71,15 @@ static int handle_choir_edit_authorized(
 {
 	(void)user;
 	mpfd_parse(fd, body);
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	choir_meta_t meta;
 	choir_meta_read(ctx->item_path, &meta);
 	int t_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
@@ -236,23 +245,28 @@ choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, s_query, "QUERY_STRING");
 	SSR_FILL_MODULES(modules_snap, modules_len);
-	struct ChoirDetailRenderFfi req = {
-		.title = meta.title,
-		.owner_name = owner,
-		.formats = meta.format,
-		.songs = song_slots,
-		.songs_len = count,
-		.all_songs = all_song_slots,
-		.all_songs_len = all_count,
-		.songbooks = songbook_slots,
-		.songbooks_len = sb_count,
-		.id = s_id,
-		.query = s_query,
-		.remote_user = get_request_user(fd),
-		.modules = modules_snap,
-		.modules_len = modules_len,
-	};
-	return ssr_render_choir_detail(fd, &req);
+	{
+		static __thread char s_csrf[33];
+		csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
+		struct ChoirDetailRenderFfi req = {
+			.title = meta.title,
+			.owner_name = owner,
+			.formats = meta.format,
+			.songs = song_slots,
+			.songs_len = count,
+			.all_songs = all_song_slots,
+			.all_songs_len = all_count,
+			.songbooks = songbook_slots,
+			.songbooks_len = sb_count,
+			.id = s_id,
+			.query = s_query,
+			.remote_user = get_request_user(fd),
+			.modules = modules_snap,
+			.modules_len = modules_len,
+			.csrf_token = s_csrf,
+		};
+		return ssr_render_choir_detail(fd, &req);
+	}
 }
 
 static int choir_details_handler(int fd, char *body)
@@ -304,6 +318,13 @@ static int handle_choir_song_add_auth(
 	char p[PATH_MAX], s_id[128] = { 0 }, fmt[64] = { 0 };
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
 	ndc_query_parse(body);
+	{
+		char csrf_submitted[33] = { 0 };
+		ndc_query_param(
+		        "csrf_token", csrf_submitted, sizeof(csrf_submitted));
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	int s_len = ndc_query_param("song_id", s_id, sizeof(s_id) - 1);
 	int f_len = ndc_query_param("format", fmt, sizeof(fmt) - 1);
 	if (s_len <= 0)
@@ -366,6 +387,13 @@ static int handle_choir_song_key_auth(
 	char p[PATH_MAX], k_s[32] = { 0 };
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
 	ndc_query_parse(body);
+	{
+		char csrf_submitted[33] = { 0 };
+		ndc_query_param(
+		        "csrf_token", csrf_submitted, sizeof(csrf_submitted));
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	int k_l = ndc_query_param("key", k_s, sizeof(k_s) - 1);
 	struct key_cb_ctx cbc = { .song_id = ctx->song_id,
 		                  .new_key = (k_l > 0) ? atoi(k_s) : 0 };
@@ -410,9 +438,16 @@ static int song_del_cb(
 static int handle_choir_song_del_auth(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
-	(void)body;
 	(void)user;
 	char p[PATH_MAX];
+	ndc_query_parse(body);
+	{
+		char csrf_submitted[33] = { 0 };
+		ndc_query_param(
+		        "csrf_token", csrf_submitted, sizeof(csrf_submitted));
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
 	repertoire_file_rewrite(p, song_del_cb, (void *)ctx->song_id);
 	return redirect_to_item(fd, "choir", ctx->id);

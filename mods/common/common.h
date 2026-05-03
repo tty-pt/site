@@ -59,9 +59,9 @@ NDX_HOOK_DECL(int, b64_encode, const char *, in, char *, out, size_t, outlen);
 NDX_HOOK_DECL(int, respond_json, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, respond_error, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
-                request" */
+  request" */
 NDX_HOOK_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal
-                server error" */
+  server error" */
 NDX_HOOK_DECL(int, not_found, int, fd, const char *, msg); /* 404; NULL -> "Not found"
                                                      */
 NDX_HOOK_DECL(int, redirect_to_item,

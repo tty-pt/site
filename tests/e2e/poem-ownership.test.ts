@@ -12,7 +12,7 @@
  */
 
 import { chromium } from "npm:playwright";
-import { createAndLoginUser, registerUser } from "./helpers/auth.ts";
+import { createAndLoginUser, getCsrfToken, registerUser } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 
@@ -66,6 +66,7 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
     }
 
     // ── 3. User B: POST /poem/<id>/edit → expect 403 ──────────────────────────
+    // Ownership is checked before the callback (before mpfd_parse/csrf), so any POST triggers 403.
     const editPostResp = await fetch(`${BASE}/poem/${poemId}/edit`, {
       method: "POST",
       headers: {
@@ -95,13 +96,15 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
     }
 
     // ── 5. User B: POST /poem/<id>/delete → expect 403 ───────────────────────
+    // index_delete_handler: mpfd_parse → csrf_validate → ownership check.
+    // Send multipart with user B's valid csrf token so we reach the ownership check.
+    const { token: csrfB, cookieHeader: chB } = await getCsrfToken(cookieHeader, BASE);
+    const delFd = new FormData();
+    delFd.append("csrf_token", csrfB);
     const delPostResp = await fetch(`${BASE}/poem/${poemId}/delete`, {
       method: "POST",
-      headers: {
-        Cookie: cookieHeader,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "",
+      headers: { Cookie: chB },
+      body: delFd,
       redirect: "manual",
     });
     await delPostResp.body?.cancel();

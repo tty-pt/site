@@ -45,18 +45,23 @@ Deno.test("songbook: register → login → create songbook → load edit page �
     await page.waitForSelector('button[type="submit"]', { timeout: 5000 });
 
     // ── 3. POST edit form via fetch (1 empty slot so amount > 0) ───────────
+    // Read the csrf_token cookie the browser received when loading the edit page.
+    const cookies = await page.context().cookies();
+    const csrfCookie = cookies.find((c) => c.name === "csrf_token");
+    if (!csrfCookie) throw new Error("csrf_token cookie not found after loading edit page");
     const editResp = await page.evaluate(
-      async ({ url }: { url: string }) => {
+      async ({ url, csrfToken }: { url: string; csrfToken: string }) => {
         const fd = new FormData();
         fd.append("amount", "1");
         fd.append("song_0", "");
         fd.append("key_0", "0");
         fd.append("orig_0", "0");
         fd.append("fmt_0", "any");
+        fd.append("csrf_token", csrfToken);
         const r = await fetch(url, { method: "POST", body: fd });
         return { status: r.status, location: r.url };
       },
-      { url: `${BASE}/songbook/${sbId}/edit` },
+      { url: `${BASE}/songbook/${sbId}/edit`, csrfToken: csrfCookie.value },
     );
 
     if (editResp.status !== 303 && editResp.status !== 200) {

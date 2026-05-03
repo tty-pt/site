@@ -12,18 +12,27 @@ pass() { echo "PASS: $1"; }
 TMPFILE="/tmp/poem_test_$$"
 TMPFILE2="/tmp/poem_test2_$$"
 
+# Extract csrf_token value from cookie jar
+csrf_for() {
+	grep csrf_token "$1" 2>/dev/null | awk '{print $NF}' | head -1
+}
+
 # Register and login as test user
 echo -n "0. Register test user... "
 code=$(curl -sw "%{http_code}" -o /dev/null -c "$COOKIE" -X POST "$BASE/auth/register" \
 	-d "username=$USER&password=pass1234&password2=pass1234&email=test@test.com")
 [ "$code" = "303" ] && pass "registered" || fail "expected 303, got $code"
 
+# Seed cookie jar with a csrf_token by hitting a GET page
+curl -s -b "$COOKIE" -c "$COOKIE" "$BASE/poem/add" > /dev/null
+
 # 1. Add a poem via /poem/add
 echo -n "1. Add poem via /poem/add... "
 echo "<p>Initial content.</p>" > "$TMPFILE"
+csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/add" \
-	-F "title=$USER" -F "file=@$TMPFILE")
+	-F "title=$USER" -F "file=@$TMPFILE" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "add redirects" || fail "expected 303, got $code"
 
 # 1b. POST edit with wrong content-type on owned item (expect 415)
@@ -35,9 +44,10 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$US
 # 2. POST with only title (no file)
 echo -n "2. POST title only... "
 sleep 0.1
+csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
-	-F "title=My Test Poem")
+	-F "title=My Test Poem" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
 # 3. POST with file upload (no title)
@@ -45,9 +55,10 @@ echo -n "3. POST file only... "
 echo "This is a test poem content.
 With multiple lines." > "$TMPFILE"
 sleep 0.1
+csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
-	-F "file=@$TMPFILE")
+	-F "file=@$TMPFILE" -F "csrf_token=$csrf")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -64,9 +75,10 @@ echo "$content" | grep -q "test poem content" && pass "content matches" || fail 
 echo -n "6. POST title + file... "
 echo "Updated poem content." > "$TMPFILE2"
 sleep 0.1
+csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
-	-F "title=Updated Title" -F "file=@$TMPFILE2")
+	-F "title=Updated Title" -F "file=@$TMPFILE2" -F "csrf_token=$csrf")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -84,13 +96,13 @@ echo -n "9. Updated poem content correct... "
 content=$(cat "$POEM_DIR/$USER/pt_PT.html")
 echo "$content" | grep -q "Updated poem content" && pass "content matches" || fail "content mismatch"
 
-# 10. POST empty multipart (no fields) — should still redirect
-echo -n "10. POST empty multipart... "
+# 10. POST empty multipart (no fields) — should fail with 403 (no csrf token)
+echo -n "10. POST empty multipart without csrf... "
 sleep 0.1
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
 	-F "dummy=")
-[ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
+[ "$code" = "403" ] && pass "403 without csrf" || fail "expected 403, got $code"
 
 # 11. Unauthenticated edit should redirect to login (401)
 echo -n "11. Unauthenticated edit redirects to login... "
@@ -100,9 +112,10 @@ code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/$USER/edit" \
 
 # 12. Delete poem
 echo -n "12. Delete poem... "
+csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/delete" \
-	-F "dummy=")
+	-F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "delete redirects" || fail "expected 303, got $code"
 
 # 13. Verify poem directory removed
@@ -113,8 +126,9 @@ echo -n "13. Poem directory removed... "
 echo -n "14. Verify detail GET... "
 # Re-add a poem to test GET
 echo "Direct render test" > "$TMPFILE"
+csrf=$(csrf_for "$COOKIE")
 curl -s -b "$COOKIE" -X POST "$BASE/poem/add" \
-	-F "title=direct_test" -F "file=@$TMPFILE" > /dev/null
+	-F "title=direct_test" -F "file=@$TMPFILE" -F "csrf_token=$csrf" > /dev/null
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/poem/direct_test")
 [ "$code" = "200" ] && pass "GET success" || fail "expected 200, got $code"
 

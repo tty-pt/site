@@ -170,6 +170,16 @@ NDX_LISTENER(int, index_add_item,
 	if (parse_result == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
 
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
+
 	title_len = mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
@@ -487,8 +497,14 @@ static int index_delete_get_handler(int fd, char *body)
 static int index_delete_handler(int fd, char *body)
 {
 	char id[128] = { 0 };
+	char csrf_submitted[33] = { 0 };
 
-	(void)body;
+	if (mpfd_parse(fd, body) == -1)
+		return respond_error(fd, 415, "Expected multipart/form-data");
+	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted) - 1);
+	if (csrf_validate(fd, csrf_submitted))
+		return respond_error(fd, 403, "Forbidden");
+
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");

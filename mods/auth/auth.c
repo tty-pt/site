@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <fcntl.h>
 
 #include <ttypt/ndc.h>
 #include <ttypt/ndc-ndx.h>
@@ -17,6 +18,81 @@
 
 #include "../common/common.h"
 #include "../ssr/ssr.h"
+
+/* ------------------------------------------------------------------ */
+/* CSRF helpers                                                         */
+/* ------------------------------------------------------------------ */
+
+NDX_LISTENER(int, csrf_generate_token, char *, out, size_t, len)
+{
+	unsigned char buf[16];
+	int urfd;
+	size_t i;
+	ssize_t n;
+
+	if (!out || len < 33)
+		return 0;
+
+	urfd = open("/dev/urandom", O_RDONLY);
+	if (urfd < 0) {
+		out[0] = '\0';
+		return 0;
+	}
+	n = read(urfd, buf, sizeof(buf));
+	close(urfd);
+	if (n != (ssize_t)sizeof(buf)) {
+		out[0] = '\0';
+		return 0;
+	}
+	for (i = 0; i < sizeof(buf); i++)
+		snprintf(out + i * 2, 3, "%02x", buf[i]);
+	out[32] = '\0';
+	return 0;
+}
+
+NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
+{
+	char token[33];
+	char header[80];
+
+	csrf_generate_token(token, sizeof(token));
+	snprintf(
+	        header,
+	        sizeof(header),
+	        "csrf_token=%s; Path=/; SameSite=Strict",
+	        token);
+	ndc_header_set(fd, "Set-Cookie", header);
+	if (out && len > 0)
+		snprintf(out, len, "%s", token);
+	return 0;
+}
+
+NDX_LISTENER(int, csrf_validate, int, fd, const char *, submitted)
+{
+	char cookie_hdr[512];
+	char *p;
+	char *eq;
+	char *end;
+	size_t vlen;
+	size_t slen;
+
+	if (!submitted || !submitted[0])
+		return -1;
+
+	cookie_hdr[0] = '\0';
+	ndc_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+
+	p = strstr(cookie_hdr, "csrf_token=");
+	if (!p)
+		return -1;
+	eq = p + strlen("csrf_token=");
+	end = strchr(eq, ';');
+	vlen = end ? (size_t)(end - eq) : strlen(eq);
+	slen = strlen(submitted);
+	if (vlen != slen)
+		return -1;
+	return memcmp(eq, submitted, vlen) == 0 ? 0 : -1;
+}
 
 /* ------------------------------------------------------------------ */
 /* Internal helpers                                                     */
@@ -294,10 +370,21 @@ int on_auth_login_error(
 /* Module init                                                          */
 /* ------------------------------------------------------------------ */
 
+static int csrf_endpoint_handler(int fd, char *body)
+{
+	char token[33] = { 0 };
+	(void)body;
+	csrf_set_cookie(fd, token, sizeof(token));
+	ndc_header_set(fd, "Content-Type", "text/plain");
+	ndc_respond(fd, 200, token);
+	return 0;
+}
+
 void ndx_install(void)
 {
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/common/common");
 	ndx_load("ndc-auth");
+	ndc_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	auth_init();
 }

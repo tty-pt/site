@@ -12,6 +12,7 @@ pub struct PoemRenderFfi {
 	pub remote_user:  *const c_char,
 	pub modules:      *const crate::ModuleEntryFfi,
 	pub modules_len:  usize,
+	pub csrf_token:   *const c_char,
 }
 
 fn dispatch_poem<F>(req: *const PoemRenderFfi, name: &str, render_fn: F) -> crate::RenderResult

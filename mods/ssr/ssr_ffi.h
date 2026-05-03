@@ -32,6 +32,7 @@ typedef struct PageRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } PageRenderFfi;
 
 typedef struct DeleteRenderFfi {
@@ -42,6 +43,7 @@ typedef struct DeleteRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } DeleteRenderFfi;
 
 typedef struct ChoirSongFfi {
@@ -72,6 +74,7 @@ typedef struct ChoirDetailRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } ChoirDetailRenderFfi;
 
 /**
@@ -87,6 +90,7 @@ typedef struct PoemRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } PoemRenderFfi;
 
 typedef struct SongDetailRenderFfi {
@@ -108,6 +112,7 @@ typedef struct SongDetailRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } SongDetailRenderFfi;
 
 typedef struct SongbookSongFfi {
@@ -131,6 +136,7 @@ typedef struct SongbookDetailRenderFfi {
  const char *remote_user;
  const struct ModuleEntryFfi *modules;
  size_t modules_len;
+ const char *csrf_token;
 } SongbookDetailRenderFfi;
 
 extern struct RenderResult ssr_render_page_ffi(const struct PageRenderFfi *req);

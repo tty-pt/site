@@ -22,6 +22,7 @@ macro_rules! make_item_ctx {
             body:        &[],
             remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
             modules:     modules_slice,
+            csrf_token:  unsafe { crate::cstr_ref($r.csrf_token) },
         };
     };
 }

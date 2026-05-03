@@ -22,6 +22,7 @@ pub struct RequestContext<'a> {
     pub body:        &'a [u8],
     pub remote_user: Option<&'a str>,
     pub modules:     &'a [ModuleRef<'a>],
+    pub csrf_token:  &'a str,
 }
 
 pub struct ResponsePayload {
@@ -483,6 +484,7 @@ pub fn render_add_form(
                     method: "POST",
                     enctype: "multipart/form-data",
                     class: "flex flex-col gap-4",
+                    input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                     label { "Title:"
                         input { name: "title" }
                     }
@@ -606,6 +608,7 @@ pub fn render_delete_confirm(
                         "?"
                     }
                     form { method: "POST", action: "{path}", enctype: "multipart/form-data",
+                        input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                         div { class: "flex gap-2",
                             button { r#type: "submit", class: "btn btn-primary", "Delete" }
                             a { href: "{crate::item_path(module, id)}", class: "btn btn-secondary", "Cancel" }

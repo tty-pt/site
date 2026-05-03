@@ -50,7 +50,7 @@ export async function registerUser(
  */
 export async function confirmUser(base: string, username: string): Promise<void> {
   const pattern = new RegExp(
-    `Register: (/auth/confirm\\?u=${username}&r=[a-f0-9]+)`,
+    `ndc-auth: confirm: (/auth/confirm\\?u=${username}&r=[a-f0-9]+)`,
   );
   const deadline = Date.now() + 5000;
 
@@ -122,6 +122,35 @@ export async function logoutUser(
     page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
     page.goto(`${base}/auth/logout`, { waitUntil: "domcontentloaded" }),
   ]);
+}
+
+/**
+ * Fetch a CSRF token from GET /api/csrf using the given cookie header.
+ * Returns { token, cookieHeader } where cookieHeader has the csrf_token cookie
+ * appended so that subsequent fetch calls send the matching cookie.
+ */
+export async function getCsrfToken(
+  cookieHeader: string,
+  base: string,
+): Promise<{ token: string; cookieHeader: string }> {
+  const resp = await fetch(`${base}/api/csrf`, {
+    headers: { Cookie: cookieHeader },
+  });
+  const token = (await resp.text()).trim();
+  if (!token || token.length < 16) {
+    throw new Error(`getCsrfToken: unexpected response "${token}"`);
+  }
+  // Extract csrf_token value from Set-Cookie header and append to cookie string.
+  const setCookie = resp.headers.get("set-cookie") ?? "";
+  const match = setCookie.match(/csrf_token=([^;]+)/);
+  const csrfCookieVal = match ? match[1] : token;
+  // Remove any existing csrf_token entry then append the fresh one.
+  const base64 = cookieHeader
+    .split("; ")
+    .filter((p) => !p.startsWith("csrf_token="))
+    .join("; ");
+  const updated = base64 ? `${base64}; csrf_token=${csrfCookieVal}` : `csrf_token=${csrfCookieVal}`;
+  return { token, cookieHeader: updated };
 }
 
 /**

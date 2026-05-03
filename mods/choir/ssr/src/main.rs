@@ -96,8 +96,9 @@ pub fn render_detail(payload: &ChoirItem<'_>, id: &str, ctx: &RequestContext<'_>
 									a { href: "/choir/{id}/song/{song_id}", class: "flex-1", "{song_label}" }
 									span { class: "text-muted mr-4", "{key_label}" }
 									if is_owner {
-										form { method: "POST", action: "/api/choir/{id}/song/{song_id}/remove", class: "inline",
-											button { r#type: "submit", class: "btn btn-danger py-1 px-2 text-xs", "Remove" }
+									form { method: "POST", action: "/api/choir/{id}/song/{song_id}/remove", class: "inline",
+										input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
+										button { r#type: "submit", class: "btn btn-danger py-1 px-2 text-xs", "Remove" }
 										}
 									}
 								}
@@ -108,13 +109,14 @@ pub fn render_detail(payload: &ChoirItem<'_>, id: &str, ctx: &RequestContext<'_>
 						div { class: "w-full max-w-lg",
 							details {
 								summary { class: "cursor-pointer text-blue-600", "Add song to repertoire" }
-								form { method: "POST", action: "/api/choir/{id}/songs",
-									datalist { id: "choir-songs",
-										for (song_id, song_title) in all_songs {
-											option { value: "{song_title} [{song_id}]" }
-										}
+							form { method: "POST", action: "/api/choir/{id}/songs",
+								datalist { id: "choir-songs",
+									for (song_id, song_title) in all_songs {
+										option { value: "{song_title} [{song_id}]" }
 									}
-									div { class: "btn-row",
+								}
+								input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
+								div { class: "btn-row",
 										input { list: "choir-songs", name: "song_id", placeholder: "Search song...", required: true }
 										button { r#type: "submit", class: "btn", "Add" }
 									}
@@ -143,6 +145,7 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 		Some("🎶"),
 		rsx! {
 			form { method: "POST", action: "/api/choir/{id}/edit", enctype: "multipart/form-data", class: "flex flex-col gap-4 w-full max-w-lg",
+				input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
 				label { "Choir Name:"
 					input { r#type: "text", name: "title", value: "{title}", required: true, class: "w-full" }
 				}

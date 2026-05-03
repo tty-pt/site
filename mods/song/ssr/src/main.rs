@@ -156,6 +156,7 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
         Some("🎸"),
         rsx! {
             form { method: "POST", action: "{action}", enctype: "application/x-www-form-urlencoded", class: "flex flex-col gap-4 w-full max-w-2xl",
+                input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                 { form_field("Title:", "title", &title, None, "text", "w-full") }
                 { form_field("Author:", "author", &author, None, "text", "w-full") }
                 { form_field("Type (e.g., entrada, santo, comunhao):", "type", &r#type, Some(3), "text", "w-full font-mono") }

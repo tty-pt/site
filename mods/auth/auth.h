@@ -98,6 +98,11 @@ NDX_HOOK_DECL(int, with_item_access,
 	item_handler_cb, cb,
 	void *, user);
 
+/* CSRF helpers */
+NDX_HOOK_DECL(int, csrf_generate_token, char *, out, size_t, len);
+NDX_HOOK_DECL(int, csrf_set_cookie, int, fd, char *, out, size_t, len);
+NDX_HOOK_DECL(int, csrf_validate, int, fd, const char *, submitted);
+
 #endif /* ITEM_IMPL */
 
 #endif

@@ -31,6 +31,7 @@ pub struct ChoirDetailRenderFfi {
 	pub remote_user:   *const c_char,
 	pub modules:       *const crate::ModuleEntryFfi,
 	pub modules_len:   usize,
+	pub csrf_token:    *const c_char,
 }
 
 #[unsafe(no_mangle)]

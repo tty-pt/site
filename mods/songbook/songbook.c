@@ -396,6 +396,16 @@ handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Parse form data */
 	mpfd_parse(fd, body);
 
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
+
 	/* Check action — "add_row" re-renders the edit page with one blank row
 	 * appended */
 	char action[32] = { 0 };
@@ -525,6 +535,16 @@ static int handle_sb_transpose_authorized(
 	/* Parse form data */
 	mpfd_parse(fd, body);
 
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
+
 	char n_str[16] = { 0 };
 	char t_str[16] = { 0 };
 	mpfd_get("n", n_str, sizeof(n_str) - 1);
@@ -605,6 +625,16 @@ static int handle_sb_randomize_authorized(
 
 	/* Parse form data */
 	mpfd_parse(fd, body);
+
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
 
 	char n_str[16] = { 0 };
 	mpfd_get("n", n_str, sizeof(n_str) - 1);
@@ -739,20 +769,25 @@ static int songbook_details_handler(int fd, char *body)
 	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
 	ndc_env_get(fd, s_query, "QUERY_STRING");
 	SSR_FILL_MODULES(modules_snap, modules_len);
-	struct SongbookDetailRenderFfi req = {
-		.sb_title = meta.title,
-		.owner = owner,
-		.choir = meta.choir,
-		.viewer_zoom = viewer_zoom,
-		.songs = song_slots,
-		.songs_len = row_count,
-		.id = s_id,
-		.query = s_query,
-		.remote_user = get_request_user(fd),
-		.modules = modules_snap,
-		.modules_len = modules_len,
-	};
-	return ssr_render_songbook_detail(fd, &req);
+	{
+		static __thread char s_csrf[33];
+		csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
+		struct SongbookDetailRenderFfi req = {
+			.sb_title = meta.title,
+			.owner = owner,
+			.choir = meta.choir,
+			.viewer_zoom = viewer_zoom,
+			.songs = song_slots,
+			.songs_len = row_count,
+			.id = s_id,
+			.query = s_query,
+			.remote_user = get_request_user(fd),
+			.modules = modules_snap,
+			.modules_len = modules_len,
+			.csrf_token = s_csrf,
+		};
+		return ssr_render_songbook_detail(fd, &req);
+	}
 }
 
 static int handle_sb_add(int fd, char *body)

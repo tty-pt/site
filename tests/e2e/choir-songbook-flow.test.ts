@@ -23,7 +23,7 @@
  */
 
 import { chromium } from "npm:playwright";
-import { createAndLoginUser, waitForText } from "./helpers/auth.ts";
+import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 
@@ -58,14 +58,6 @@ Deno.test({
 
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const apiFetch = (url: string, init?: RequestInit) =>
-      fetch(url, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string> ?? {}),
-          Cookie: cookieHeader,
-        },
-      });
 
     // ── 1. Create choir ────────────────────────────────────────────────────────
     const choirTitle = `Flow Choir ${Date.now()}`;
@@ -78,11 +70,12 @@ Deno.test({
 
     // ── 2. Add 2 songs to choir repertoire ────────────────────────────────────
     for (const songId of [SONG1_ID, SONG2_ID]) {
-      const body = new URLSearchParams({ song_id: songId, format: "any" });
-      const r = await apiFetch(`${BASE}/api/choir/${choirId}/songs`, {
+      const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
+      const body = new URLSearchParams({ song_id: songId, format: "any", csrf_token: csrf });
+      const r = await fetch(`${BASE}/api/choir/${choirId}/songs`, {
         method: "POST",
         body: body.toString(),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch },
       });
       if (r.status >= 400) throw new Error(`Add song ${songId} failed: ${r.status}`);
       await r.body?.cancel();
@@ -104,6 +97,7 @@ Deno.test({
 
     // ── 5. Add 2 songs to songbook via edit page ───────────────────────────────
     // Post the edit form directly with both rows.
+    const { token: csrfSb, cookieHeader: chSb } = await getCsrfToken(cookieHeader, BASE);
     const fd = new FormData();
     fd.append("amount", "2");
     fd.append("song_0", `${SONG1_TITLE} [${SONG1_ID}]`);
@@ -115,10 +109,12 @@ Deno.test({
     fd.append("orig_1", "0");
     fd.append("fmt_1", "any");
     fd.append("action", "save");
+    fd.append("csrf_token", csrfSb);
 
-    const editResp = await apiFetch(`${BASE}/songbook/${sbId}/edit`, {
+    const editResp = await fetch(`${BASE}/songbook/${sbId}/edit`, {
       method: "POST",
       body: fd,
+      headers: { Cookie: chSb },
       redirect: "manual",
     });
     if (editResp.status >= 400) {
@@ -176,14 +172,6 @@ Deno.test({
 
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const apiFetch = (url: string, init?: RequestInit) =>
-      fetch(url, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string> ?? {}),
-          Cookie: cookieHeader,
-        },
-      });
 
     // ── 1. Create choir ────────────────────────────────────────────────────────
     const choirTitle = `Prepop Choir ${Date.now()}`;
@@ -195,12 +183,15 @@ Deno.test({
     choirId = page.url().split("/choir/")[1];
 
     // ── 2. Set choir format to "any" ──────────────────────────────────────────
+    const { token: csrfEdit, cookieHeader: chEdit } = await getCsrfToken(cookieHeader, BASE);
     const editFd = new FormData();
     editFd.append("title", choirTitle);
     editFd.append("format", "any");
-    const editR = await apiFetch(`${BASE}/api/choir/${choirId}/edit`, {
+    editFd.append("csrf_token", csrfEdit);
+    const editR = await fetch(`${BASE}/api/choir/${choirId}/edit`, {
       method: "POST",
       body: editFd,
+      headers: { Cookie: chEdit },
       redirect: "manual",
     });
     if (editR.status >= 400) throw new Error(`Choir edit failed: ${editR.status}`);

@@ -153,12 +153,13 @@ pub fn render_detail(payload: &SongbookItem<'_>, id: &str, ctx: &RequestContext<
                                             }
                                             if is_owner {
                                                 div { class: "flex gap-2 items-center",
-                                                    form {
+                                                     form {
                                                         method: "POST",
                                                         action: "/songbook/{id}/transpose",
                                                         "data-songbook-transpose-form": "1",
                                                         "data-song-id": "{song.chord_id}",
                                                         "data-row-index": "{index}",
+                                                        input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                                                         select { name: "t", class: "p-1",
                                                             for (semitones, option_label) in song.transpose_options.iter() {
                                                                 option { value: "{semitones}", selected: *semitones == song.transpose, "{option_label}" }
@@ -168,6 +169,7 @@ pub fn render_detail(payload: &SongbookItem<'_>, id: &str, ctx: &RequestContext<
                                                         button { r#type: "submit", class: "btn py-1 px-2", "Apply" }
                                                     }
                                                     form { method: "POST", action: "/songbook/{id}/randomize", enctype: "multipart/form-data",
+                                                        input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                                                         input { r#type: "hidden", name: "n", value: "{index}" }
                                                         button { r#type: "submit", class: "btn py-1 px-2", "🎲" }
                                                     }
@@ -238,6 +240,7 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
         Some("📖"),
         rsx! {
             form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-2 w-full",
+                input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                 for row in rows {
                     div { class: "flex gap-2 items-center", "data-songbook-edit-row": "1",
                         datalist { id: "types-{row.index}",

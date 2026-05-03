@@ -52,6 +52,7 @@ pub fn render_edit_typed(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<
         Some("📜"),
         rsx! {
             form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-4",
+                input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
                 label { "Title:"
                     input { r#type: "text", name: "title", value: "{title}" }
                 }
