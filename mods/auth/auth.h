@@ -39,13 +39,9 @@ typedef int (*item_handler_cb)(int fd, char *body,
 #define ICTX_NEED_OWNERSHIP  0x2  /* require item ownership; else 403/404 */
 #define ICTX_SONG_ID         0x4  /* also read PATTERN_PARAM_SONG_ID */
 
-#ifndef AUTH_IMPL
+#include <ttypt/auth.h>
 
-/* Session helpers */
-NDX_HOOK_DECL(int, get_cookie, const char *, cookie, char *, token, size_t, len);
-NDX_HOOK_DECL(const char *, get_session_user, const char *, token);
-NDX_HOOK_DECL(const char *, get_request_user, int, fd);
-NDX_HOOK_DECL(int, require_login, int, fd, const char *, username);
+#ifndef ITEM_IMPL
 
 /* Ownership helpers */
 
@@ -83,6 +79,6 @@ NDX_HOOK_DECL(int, with_item_access,
 	const char *, not_found_msg, const char *, forbidden_msg,
 	item_handler_cb, cb, void *, user);
 
-#endif /* AUTH_IMPL */
+#endif /* ITEM_IMPL */
 
 #endif
