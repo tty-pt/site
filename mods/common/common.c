@@ -8,6 +8,5 @@
 #include "common_storage.c"
 
 MODULE_API void
-ndx_install(void)
-{
+ndx_install(void) {
 }

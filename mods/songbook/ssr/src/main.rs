@@ -119,10 +119,10 @@ pub fn render_detail(payload: &SongbookItem<'_>, id: &str, ctx: &RequestContext<
                 div { class: "flex flex-col gap-1", "data-detail-viewer-scope": "1",
                     if !choir.is_empty() {
                         div { class: "flex justify-end text-xs text-muted",
+                            span { class: "grow", "" }
                             a { href: "{choir_href}", class: "text-muted", "{choir}" }
                         }
                     }
-                    h3 { "Songs" }
                     if display_songs.is_empty() {
                         { empty_state("No songs yet.") }
                     } else {
@@ -178,7 +178,7 @@ pub fn render_detail(payload: &SongbookItem<'_>, id: &str, ctx: &RequestContext<
                                             pre {
                                                 "data-detail-viewer-target": "1",
                                                 "data-songbook-chord-data": "1",
-                                                class: "font-mono text-sm whitespace-pre-wrap bg-surface p-4 rounded",
+                                                class: "font-mono whitespace-pre-wrap bg-surface p-4 rounded",
                                                 dangerous_inner_html: "{song.chord_data}"
                                             }
                                         }

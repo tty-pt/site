@@ -1,0 +1,10 @@
+BasedOnStyle: LLVM
+IndentWidth: 8
+UseTab: ForIndentation
+TabWidth: 8
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+BreakBeforeBraces: Attach
+ColumnLimit: 0
+SortIncludes: Never
+SpaceBeforeParens: ControlStatements

@@ -11,8 +11,7 @@
 #endif
 
 static int
-load_modules_from_file(const char *path)
-{
+load_modules_from_file(const char *path) {
 	char mod_line[1030];
 	char line[512];
 	FILE *fp = fopen(path, "r");

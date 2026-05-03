@@ -19,62 +19,64 @@
 
 /* Spacing queue - tracks chord length differences for lyrics alignment */
 struct space_queue {
-	unsigned len;        /* Number of spaces to add */
-	unsigned start;      /* Position in lyric line to insert */
-	TAILQ_ENTRY(space_queue) entries;
+	unsigned len;   /* Number of spaces to add */
+	unsigned start; /* Position in lyric line to insert */
+	TAILQ_ENTRY(space_queue)
+	entries;
 };
 
 /* Transposer context */
 struct transp_ctx {
-	int chord_db;        /* qmap handle for chord lookup */
-	int special_db;      /* qmap handle for special symbols */
-	unsigned key;        /* Detected key (0-11 or -1) */
-	char **i18n_table;   /* chromatic_en or chromatic_latin */
-	TAILQ_HEAD(queue_head, space_queue) queue;  /* Spacing queue */
+	int chord_db;      /* qmap handle for chord lookup */
+	int special_db;    /* qmap handle for special symbols */
+	unsigned key;      /* Detected key (0-11 or -1) */
+	char **i18n_table; /* chromatic_en or chromatic_latin */
+	TAILQ_HEAD(queue_head, space_queue)
+	queue; /* Spacing queue */
 
 	/* Per-song state — reset by transp_reset() */
-	int skip_empty;      /* Skip next empty line */
-	int not_special;     /* Current line is not a special/repeat marker line */
+	int skip_empty;  /* Skip next empty line */
+	int not_special; /* Current line is not a special/repeat marker line */
 };
 
 /* Chromatic scale tables */
 static char *chromatic_en[] = {
-	"C\0",
-	"C#\0Db",
-	"D\0",
-	"D#\0Eb",
-	"E\0",
-	"F\0",
-	"F#\0Gb",
-	"G\0",
-	"G#\0Ab",
-	"A\0",
-	"A#\0Bb",
-	"B\0",
-	NULL,
+    "C\0",
+    "C#\0Db",
+    "D\0",
+    "D#\0Eb",
+    "E\0",
+    "F\0",
+    "F#\0Gb",
+    "G\0",
+    "G#\0Ab",
+    "A\0",
+    "A#\0Bb",
+    "B\0",
+    NULL,
 };
 
 static char *chromatic_latin[] = {
-	"Do\0",
-	"Do#\0Reb",
-	"Re\0",
-	"Re#\0Mib",
-	"Mi\0",
-	"Fa\0",
-	"Fa#\0Solb",
-	"Sol\0",
-	"Sol#\0Lab",
-	"La\0",
-	"La#\0Sib",
-	"Si\0",
-	NULL,
+    "Do\0",
+    "Do#\0Reb",
+    "Re\0",
+    "Re#\0Mib",
+    "Mi\0",
+    "Fa\0",
+    "Fa#\0Solb",
+    "Sol\0",
+    "Sol#\0Lab",
+    "La\0",
+    "La#\0Sib",
+    "Si\0",
+    NULL,
 };
 
 static char *special[] = {
-	"|",
-	":",
-	"-",
-	NULL,
+    "|",
+    ":",
+    "-",
+    NULL,
 };
 
 /* Sentinel: stored in special_db to indicate presence (value never read) */
@@ -82,8 +84,7 @@ static const unsigned special_sentinel = 0;
 
 /* Get chord string with sharp or flat notation */
 static inline char *
-chord_str(transp_ctx_t *ctx, size_t chord, int flags)
-{
+chord_str(transp_ctx_t *ctx, size_t chord, int flags) {
 	char *str = ctx->i18n_table[chord];
 	if ((flags & TRANSP_BEMOL) && strchr(str, '#'))
 		str += strlen(str) + 1;
@@ -92,8 +93,7 @@ chord_str(transp_ctx_t *ctx, size_t chord, int flags)
 
 /* Safe snprintf wrapper that returns characters written */
 static inline int
-outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
-{
+outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 	int ret = vsnprintf(buf + offset, bufsize - offset, fmt, args);
@@ -103,8 +103,7 @@ outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
 
 /* Populate chord_db: keys are chord name strings, values are chromatic indices. */
 static void
-chord_db_init(int hd, char **table)
-{
+chord_db_init(int hd, char **table) {
 	for (unsigned u = 0; table[u]; u++) {
 		char *key = table[u];
 		qmap_put(hd, key, &(unsigned){u});
@@ -116,22 +115,20 @@ chord_db_init(int hd, char **table)
 
 /* Populate special_db: only presence is checked, value is never read. */
 static void
-special_db_init(int hd, char **table)
-{
+special_db_init(int hd, char **table) {
 	for (unsigned u = 0; table[u]; u++)
 		qmap_put(hd, table[u], &special_sentinel);
 }
 
 /* Process a single line of chord chart */
 static char *
-proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
-{
+proc_line(transp_ctx_t *ctx, const char *line, int t, int flags) {
 	char outbuf[8192];
 	char buf[8];
 	char *o = outbuf;
 	int not_bolded = 1, is_special = 0;
 	unsigned j = 0;
-	int sim = 0, si = 0;  /* sim = offset in input, si = offset in output */
+	int sim = 0, si = 0; /* sim = offset in input, si = offset in output */
 
 	/* Trim trailing \r\n in-place on a working copy */
 	char *line_copy = strdup(line);
@@ -226,12 +223,10 @@ proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			case '\n':
 			case '\0':
 			case '/':
-			case 'm': break;
+			case 'm':
+				break;
 			default:
-				if (isdigit(*eoc) || !strncmp(eoc, "sus", 3)
-						|| !strncmp(eoc, "add", 3)
-						|| !strncmp(eoc, "maj", 3)
-						|| !strncmp(eoc, "dim", 3))
+				if (isdigit(*eoc) || !strncmp(eoc, "sus", 3) || !strncmp(eoc, "add", 3) || !strncmp(eoc, "maj", 3) || !strncmp(eoc, "dim", 3))
 					break;
 				goto no_chord;
 			}
@@ -294,10 +289,12 @@ proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 		s = eoc + modlen;
 
 		/* Skip absorbed spaces */
-		for (i = 0; i < diff && *s == ' '; i++, s++, j++) ;
+		for (i = 0; i < diff && *s == ' '; i++, s++, j++)
+			;
 
 		if (*s == '\0')
-			for (i = 0; i < diff; i++, j++) ;
+			for (i = 0; i < diff; i++, j++)
+				;
 
 		/* Latin notation: 'm' → '-' for minor chords */
 		if (buf[0] == 'm' && ctx->i18n_table == chromatic_latin)
@@ -405,8 +402,7 @@ end:
 /* Public API */
 
 transp_ctx_t *
-transp_init(void)
-{
+transp_init(void) {
 	transp_ctx_t *ctx = calloc(1, sizeof(*ctx));
 	if (!ctx)
 		return NULL;
@@ -441,8 +437,7 @@ transp_init(void)
 }
 
 char *
-transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
-{
+transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags) {
 	if (!ctx || !input)
 		return NULL;
 
@@ -471,7 +466,8 @@ transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 
 	while (line_start && *line_start) {
 		line_end = strchr(line_start, '\n');
-		if (line_end) *line_end = '\0';
+		if (line_end)
+			*line_end = '\0';
 
 		char *transposed = proc_line(ctx, line_start, semitones, flags);
 		if (transposed) {
@@ -496,25 +492,20 @@ transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 	return result;
 }
 
-int
-transp_get_key(transp_ctx_t *ctx)
-{
+int transp_get_key(transp_ctx_t *ctx) {
 	if (!ctx)
 		return -1;
 	return ctx->key;
 }
 
-void
-transp_reset_key(transp_ctx_t *ctx)
-{
+void transp_reset_key(transp_ctx_t *ctx) {
 	if (!ctx)
 		return;
 	ctx->key = -1;
 }
 
 char *
-transp_shift_table(transp_ctx_t *ctx, int latin)
-{
+transp_shift_table(transp_ctx_t *ctx, int latin) {
 	if (!ctx || ctx->key == (unsigned)-1)
 		return NULL;
 
@@ -537,9 +528,7 @@ transp_shift_table(transp_ctx_t *ctx, int latin)
 	return result;
 }
 
-void
-transp_free(transp_ctx_t *ctx)
-{
+void transp_free(transp_ctx_t *ctx) {
 	if (!ctx)
 		return;
 

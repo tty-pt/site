@@ -43,10 +43,13 @@ test: unit-tests pages-test e2e-tests
 watch:
 	./scripts/watch.sh
 
+format:
+	find mods lib -name "*.c" -o -name "*.h" | xargs clang-format -i
+
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
 
 distclean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d distclean; done
 
-.PHONY: all mods modules run clean distclean test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr
+.PHONY: all mods modules run clean distclean format test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr
