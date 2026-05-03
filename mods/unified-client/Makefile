@@ -3,7 +3,12 @@ OUT_NAME = client
 TARGET = target/wasm32-unknown-unknown/release/ndc_client.wasm
 OUTPUTS = ${OUT_DIR}/${OUT_NAME}.js ${OUT_DIR}/${OUT_NAME}_bg.wasm
 
-all: ${OUTPUTS}
+all:
+	@if command -v wasm-bindgen >/dev/null 2>&1 && rustup target list --installed | grep -qx wasm32-unknown-unknown; then \
+		${MAKE} ${OUTPUTS}; \
+	else \
+		echo "Skipping unified-client wasm build (need wasm-bindgen and rustup target wasm32-unknown-unknown)"; \
+	fi
 
 ${TARGET}: Cargo.toml src/lib.rs
 	cargo build --manifest-path Cargo.toml --target wasm32-unknown-unknown --release

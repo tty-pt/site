@@ -1,5 +1,3 @@
-include ../../build.mk
-
 all: client-wasm $(TARGET)
 
 client-wasm:
@@ -8,3 +6,5 @@ client-wasm:
 	else \
 		echo "Skipping songbook wasm client build (need wasm-bindgen and rustup target wasm32-unknown-unknown)"; \
 	fi
+
+include ../../build.mk
