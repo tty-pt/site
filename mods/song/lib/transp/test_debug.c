@@ -6,10 +6,9 @@
 int main(void) {
 	transp_ctx_t *ctx = transp_init();
 
-	const char *song =
-	    "1. Verse\n"
-	    "C       G       Am      F\n"
-	    "Amazing Grace, how sweet the sound\n";
+	const char *song = "1. Verse\n"
+	                   "C       G       Am      F\n"
+	                   "Amazing Grace, how sweet the sound\n";
 
 	printf("Processing song:\n%s\n", song);
 	printf("Transposing by +2 with HTML...\n\n");

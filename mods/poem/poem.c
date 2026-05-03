@@ -25,25 +25,22 @@ typedef struct {
 	char title[256];
 } poem_meta_t;
 
-static void
-poem_meta_read(const char *item_path, poem_meta_t *meta) {
+static void poem_meta_read(const char *item_path, poem_meta_t *meta) {
 	meta_field_t fields[] = {
-	    {"title", meta->title, sizeof(meta->title)},
+		{ "title", meta->title, sizeof(meta->title) },
 	};
 	memset(meta, 0, sizeof(*meta));
 	meta_fields_read(item_path, fields, 1);
 }
 
-static int
-poem_meta_write(const char *item_path, const poem_meta_t *meta) {
+static int poem_meta_write(const char *item_path, const poem_meta_t *meta) {
 	meta_field_t fields[] = {
-	    {"title", (char *)meta->title, sizeof(meta->title)},
+		{ "title", (char *)meta->title, sizeof(meta->title) },
 	};
 	return meta_fields_write(item_path, fields, 1);
 }
 
-static int
-poem_write_uploaded_html(const char *item_path) {
+static int poem_write_uploaded_html(const char *item_path) {
 	int file_len = mpfd_len("file");
 	if (file_len <= 0)
 		return 0;
@@ -53,14 +50,14 @@ poem_write_uploaded_html(const char *item_path) {
 	int got = mpfd_get("file", file_content, file_len);
 	if (got > 0) {
 		file_content[got] = '\0';
-		write_item_child_file(item_path, "pt_PT.html", file_content, (size_t)got);
+		write_item_child_file(item_path, "pt_PT.html", file_content,
+		                      (size_t)got);
 	}
 	free(file_content);
 	return 0;
 }
 
-static char *
-html_tag_inner(const char *html, const char *tag) {
+static char *html_tag_inner(const char *html, const char *tag) {
 	const char *start = strstr(html, tag);
 	if (!start)
 		return strdup("");
@@ -82,8 +79,8 @@ html_tag_inner(const char *html, const char *tag) {
 	return out;
 }
 
-static int
-poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
+static int poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx,
+                                  void *user) {
 	(void)body;
 	(void)user;
 	poem_meta_t meta;
@@ -103,15 +100,15 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
 	ndc_env_get(fd, s_query, "QUERY_STRING");
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct PoemRenderFfi req = {
-	    .title = meta.title,
-	    .head_content = head ? head : "",
-	    .body_content = body_content ? body_content : "",
-	    .owner = owner != 0,
-	    .id = ctx->id,
-	    .query = s_query,
-	    .remote_user = ctx->username ? ctx->username : "",
-	    .modules = modules_snap,
-	    .modules_len = modules_len,
+		.title = meta.title,
+		.head_content = head ? head : "",
+		.body_content = body_content ? body_content : "",
+		.owner = owner != 0,
+		.id = ctx->id,
+		.query = s_query,
+		.remote_user = ctx->username ? ctx->username : "",
+		.modules = modules_snap,
+		.modules_len = modules_len,
 	};
 	int rc = ssr_render_poem_detail(fd, &req);
 	free(head);
@@ -120,29 +117,33 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
 }
 
 static int poem_detail_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL, poem_detail_authorized, NULL);
+	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL,
+	                        poem_detail_authorized, NULL);
 }
 
-static int
-poem_child_file_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
+static int poem_child_file_authorized(int fd, char *body, const item_ctx_t *ctx,
+                                      void *user) {
 	(void)body;
 	(void)user;
 	char name[512], child_path[1024];
 	ndc_env_get(fd, name, "PATTERN_PARAM_FILE");
-	if (name[0] == '/' || strstr(name, "..") || (strstr(name, ".html") && !strstr(name, ".html.")))
+	if (name[0] == '/' || strstr(name, "..") ||
+	    (strstr(name, ".html") && !strstr(name, ".html.")))
 		return not_found(fd, "Not found");
-	if (item_child_path(ctx->item_path, name, child_path, sizeof(child_path)) != 0)
+	if (item_child_path(ctx->item_path, name, child_path,
+	                    sizeof(child_path)) != 0)
 		return not_found(fd, "Not found");
 	ndc_sendfile(fd, child_path);
 	return 0;
 }
 
 static int poem_child_file_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL, poem_child_file_authorized, NULL);
+	return with_item_access(fd, body, POEM_ITEMS_PATH, 0, NULL, NULL,
+	                        poem_child_file_authorized, NULL);
 }
 
 static int poem_add_post_handler(int fd, char *body) {
-	char id[256] = {0}, item_path[512], redirect_path[512];
+	char id[256] = { 0 }, item_path[512], redirect_path[512];
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
 	item_path_build(fd, "poem", id, item_path, sizeof(item_path));
@@ -151,7 +152,8 @@ static int poem_add_post_handler(int fd, char *body) {
 	return ndc_redirect(fd, redirect_path);
 }
 
-static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
+static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx,
+                                    void *user) {
 	(void)body;
 	(void)user;
 	poem_meta_t meta;
@@ -165,24 +167,25 @@ static int poem_edit_get_authorized(int fd, char *body, const item_ctx_t *ctx, v
 	ndc_env_get(fd, s_query, "QUERY_STRING");
 	SSR_FILL_MODULES(modules_snap, modules_len);
 	struct PoemRenderFfi req = {
-	    .title = meta.title,
-	    .head_content = "",
-	    .body_content = "",
-	    .owner = owner != 0,
-	    .id = ctx->id,
-	    .query = s_query,
-	    .remote_user = ctx->username ? ctx->username : "",
-	    .modules = modules_snap,
-	    .modules_len = modules_len,
+		.title = meta.title,
+		.head_content = "",
+		.body_content = "",
+		.owner = owner != 0,
+		.id = ctx->id,
+		.query = s_query,
+		.remote_user = ctx->username ? ctx->username : "",
+		.modules = modules_snap,
+		.modules_len = modules_len,
 	};
 	return ssr_render_poem_edit(fd, &req);
 }
 
-static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user) {
+static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx,
+                                     void *user) {
 	(void)user;
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
-	poem_meta_t meta = {0};
+	poem_meta_t meta = { 0 };
 	int title_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
 	if (title_len > 0) {
 		meta.title[title_len] = '\0';
@@ -196,11 +199,15 @@ static int poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, 
 }
 
 static int poem_edit_get_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL, poem_edit_get_authorized, NULL);
+	return with_item_access(fd, body, POEM_ITEMS_PATH,
+	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	                        NULL, poem_edit_get_authorized, NULL);
 }
 
 static int poem_edit_post_handler(int fd, char *body) {
-	return with_item_access(fd, body, POEM_ITEMS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL, poem_edit_post_authorized, NULL);
+	return with_item_access(fd, body, POEM_ITEMS_PATH,
+	                        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	                        NULL, poem_edit_post_authorized, NULL);
 }
 
 void ndx_install(void) {

@@ -123,6 +123,12 @@ Use `NDX_DEF` in the implementation and `NDX_DECL` in the header.
 - System includes first, then local includes
 - `snake_case` for functions/vars
 - `UPPER_CASE` for macros
+- C89 style: declare all local variables at the **top of their block**, before any
+  statements. Never declare variables mid-block after a statement.
+- One statement per line — no `;`-separated statements on the same line.
+- Blank lines are permitted to separate logical sections within a function body,
+  but use them sparingly.
+- Run `make format` after editing C files to apply `clang-format` automatically.
 
 ## Rust SSR Layout
 

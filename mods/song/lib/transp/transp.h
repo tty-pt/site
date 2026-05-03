@@ -1,7 +1,8 @@
 /*
  * transp.h - Chord transposition library
  *
- * Transposes chord symbols in text while preserving lyrics and spacing alignment.
+ * Transposes chord symbols in text while preserving lyrics and spacing
+ * alignment.
  */
 
 #ifndef TRANSP_H
@@ -47,13 +48,15 @@ transp_ctx_t *transp_init(void);
  *   // result: "<div><b>D A Bm G</b></div><div>Lyrics</div>"
  *   free(result);
  */
-char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags);
+char *transp_buffer(transp_ctx_t *ctx, const char *input, int semitones,
+                    int flags);
 
 /*
  * Get detected key from last transposition
  *
- * Returns the chromatic index (0-11) of the detected key, or -1 if no key detected yet.
- * Key is detected from the first chord in the first transposition operation.
+ * Returns the chromatic index (0-11) of the detected key, or -1 if no key
+ * detected yet. Key is detected from the first chord in the first transposition
+ * operation.
  *
  * Returns: 0=C, 1=C#, 2=D, ..., 11=B, or -1 if no key
  */

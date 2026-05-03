@@ -58,8 +58,7 @@ static int jb_field_sep(json_buf_t *jb) {
  * Private kv helpers — shared by both json_array_t and json_object_t variants
  * ------------------------------------------------------------------------- */
 
-static int
-jb_kv_str(json_buf_t *jb, const char *key, const char *value) {
+static int jb_kv_str(json_buf_t *jb, const char *key, const char *value) {
 	const char *v = value ? value : "";
 	size_t esc_cap;
 	char *esc;
@@ -84,25 +83,23 @@ jb_kv_str(json_buf_t *jb, const char *key, const char *value) {
 	return rc;
 }
 
-static int
-jb_kv_int(json_buf_t *jb, const char *key, int value) {
+static int jb_kv_int(json_buf_t *jb, const char *key, int value) {
 	if (!jb || !key)
 		return -1;
 	if (jb_field_sep(jb) != 0 || jb_reserve(jb, strlen(key) + 32) != 0)
 		return -1;
-	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len,
-	                    "\"%s\":%d", key, value);
+	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len, "\"%s\":%d",
+	                    key, value);
 	return 0;
 }
 
-static int
-jb_kv_bool(json_buf_t *jb, const char *key, int value) {
+static int jb_kv_bool(json_buf_t *jb, const char *key, int value) {
 	if (!jb || !key)
 		return -1;
 	if (jb_field_sep(jb) != 0 || jb_reserve(jb, strlen(key) + 10) != 0)
 		return -1;
-	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len,
-	                    "\"%s\":%s", key, value ? "true" : "false");
+	jb->len += snprintf(jb->buf + jb->len, jb->cap - jb->len, "\"%s\":%s",
+	                    key, value ? "true" : "false");
 	return 0;
 }
 
@@ -130,8 +127,7 @@ NDX_LISTENER(json_array_t *, json_array_new, int, dummy) {
 	return ja;
 }
 
-NDX_LISTENER(int, json_array_append_raw,
-             json_array_t *, ja, const char *, s) {
+NDX_LISTENER(int, json_array_append_raw, json_array_t *, ja, const char *, s) {
 	if (!ja)
 		return -1;
 	if (!ja->first && jb_append_str(JB(ja), ",", 1) != 0)
@@ -155,18 +151,18 @@ NDX_LISTENER(int, json_array_end_object, json_array_t *, ja) {
 	return jb_append_str(JB(ja), "}", 1);
 }
 
-NDX_LISTENER(int, json_array_kv_str,
-             json_array_t *, ja, const char *, key, const char *, value) {
+NDX_LISTENER(int, json_array_kv_str, json_array_t *, ja, const char *, key,
+             const char *, value) {
 	return jb_kv_str(JB(ja), key, value);
 }
 
-NDX_LISTENER(int, json_array_kv_int,
-             json_array_t *, ja, const char *, key, int, value) {
+NDX_LISTENER(int, json_array_kv_int, json_array_t *, ja, const char *, key, int,
+             value) {
 	return jb_kv_int(JB(ja), key, value);
 }
 
-NDX_LISTENER(int, json_array_kv_bool,
-             json_array_t *, ja, const char *, key, int, value) {
+NDX_LISTENER(int, json_array_kv_bool, json_array_t *, ja, const char *, key,
+             int, value) {
 	return jb_kv_bool(JB(ja), key, value);
 }
 
@@ -209,30 +205,30 @@ NDX_LISTENER(json_object_t *, json_object_new, int, dummy) {
 	return jo;
 }
 
-NDX_LISTENER(int, json_object_kv_str,
-             json_object_t *, jo, const char *, key, const char *, value) {
+NDX_LISTENER(int, json_object_kv_str, json_object_t *, jo, const char *, key,
+             const char *, value) {
 	return jb_kv_str(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_int,
-             json_object_t *, jo, const char *, key, int, value) {
+NDX_LISTENER(int, json_object_kv_int, json_object_t *, jo, const char *, key,
+             int, value) {
 	return jb_kv_int(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_bool,
-             json_object_t *, jo, const char *, key, int, value) {
+NDX_LISTENER(int, json_object_kv_bool, json_object_t *, jo, const char *, key,
+             int, value) {
 	return jb_kv_bool(JB(jo), key, value);
 }
 
-NDX_LISTENER(int, json_object_kv_raw,
-             json_object_t *, jo, const char *, key, const char *, value) {
+NDX_LISTENER(int, json_object_kv_raw, json_object_t *, jo, const char *, key,
+             const char *, value) {
 	if (!jo || !key || !value)
 		return -1;
 	if (jb_field_sep(JB(jo)) != 0 ||
 	    jb_reserve(JB(jo), strlen(key) + strlen(value) + 4) != 0)
 		return -1;
-	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len,
-	                    "\"%s\":%s", key, value);
+	jo->len += snprintf(jo->buf + jo->len, jo->cap - jo->len, "\"%s\":%s",
+	                    key, value);
 	return 0;
 }
 
@@ -259,7 +255,8 @@ NDX_LISTENER(int, json_object_free, json_object_t *, jo) {
 	return 0;
 }
 
-int json_object_append_fragment(json_object_t *jo, const char *fragment, size_t len) {
+int json_object_append_fragment(json_object_t *jo, const char *fragment,
+                                size_t len) {
 	if (!jo || !fragment)
 		return -1;
 	if (jb_field_sep(JB(jo)) != 0)

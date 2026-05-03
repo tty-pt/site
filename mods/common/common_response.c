@@ -14,17 +14,17 @@ NDX_LISTENER(int, respond_json, int, fd, int, status, const char *, msg) {
 }
 
 NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg) {
-	char accept[256] = {0};
+	char accept[256] = { 0 };
 
 	ndc_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
-		char enc[512] = {0};
-		char body[640], uri[512] = {0}, query[512] = {0};
+		char enc[512] = { 0 };
+		char body[640], uri[512] = { 0 }, query[512] = { 0 };
 		int len;
 
 		url_encode(msg, enc, sizeof(enc));
-		len = snprintf(body, sizeof(body), "status=%d&error=%s",
-		               status, enc);
+		len = snprintf(body, sizeof(body), "status=%d&error=%s", status,
+		               enc);
 		ndc_env_get(fd, uri, "DOCUMENT_URI");
 		ndc_env_get(fd, query, "QUERY_STRING");
 
@@ -47,7 +47,8 @@ NDX_LISTENER(int, not_found, int, fd, const char *, msg) {
 	return respond_error(fd, 404, msg ? msg : "Not found");
 }
 
-NDX_LISTENER(int, redirect_to_item, int, fd, const char *, module, const char *, id) {
+NDX_LISTENER(int, redirect_to_item, int, fd, const char *, module, const char *,
+             id) {
 	char loc[256];
 	snprintf(loc, sizeof(loc), "/%s/%s", module, id);
 	return ndc_redirect(fd, loc);

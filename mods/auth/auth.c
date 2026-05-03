@@ -22,8 +22,7 @@
 /* Internal helpers                                                     */
 /* ------------------------------------------------------------------ */
 
-static void
-build_owner_path(const char *ip, char *out, size_t len) {
+static void build_owner_path(const char *ip, char *out, size_t len) {
 	snprintf(out, len, "%s/owner", ip);
 }
 
@@ -31,8 +30,8 @@ build_owner_path(const char *ip, char *out, size_t len) {
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-NDX_LISTENER(int, item_record_ownership,
-             const char *, item_path, const char *, username) {
+NDX_LISTENER(int, item_record_ownership, const char *, item_path, const char *,
+             username) {
 	if (geteuid() == 0) {
 		int uid = auth_get_uid(username);
 		if (uid >= 0)
@@ -49,8 +48,8 @@ NDX_LISTENER(int, item_record_ownership,
 	return 0;
 }
 
-NDX_LISTENER(int, item_check_ownership,
-             const char *, item_path, const char *, username) {
+NDX_LISTENER(int, item_check_ownership, const char *, item_path, const char *,
+             username) {
 	if (!username || !*username)
 		return 0;
 
@@ -66,7 +65,7 @@ NDX_LISTENER(int, item_check_ownership,
 		FILE *fp = fopen(owner_path, "r");
 		if (!fp)
 			return 0;
-		char owner[64] = {0};
+		char owner[64] = { 0 };
 		if (fgets(owner, sizeof(owner) - 1, fp))
 			owner[strcspn(owner, "\n")] = '\0';
 		fclose(fp);
@@ -74,8 +73,8 @@ NDX_LISTENER(int, item_check_ownership,
 	}
 }
 
-NDX_LISTENER(int, item_read_owner,
-             const char *, item_path, char *, out, size_t, outlen) {
+NDX_LISTENER(int, item_read_owner, const char *, item_path, char *, out, size_t,
+             outlen) {
 	if (!out || outlen == 0)
 		return -1;
 	out[0] = '\0';
@@ -86,7 +85,9 @@ NDX_LISTENER(int, item_read_owner,
 			return -1;
 		char buf[4096];
 		struct passwd pw, *result = NULL;
-		if (getpwuid_r(st.st_uid, &pw, buf, sizeof(buf), &result) == 0 && result) {
+		if (getpwuid_r(st.st_uid, &pw, buf, sizeof(buf), &result) ==
+		        0 &&
+		    result) {
 			strncpy(out, result->pw_name, outlen - 1);
 			out[outlen - 1] = '\0';
 			return 0;
@@ -116,8 +117,8 @@ NDX_LISTENER(int, item_unlink_owner, const char *, item_path) {
 	return 0;
 }
 
-NDX_LISTENER(item_access_t, item_access_status,
-             const char *, item_path, const char *, username, unsigned, flags) {
+NDX_LISTENER(item_access_t, item_access_status, const char *, item_path,
+             const char *, username, unsigned, flags) {
 	if ((flags & ICTX_NEED_LOGIN) && (!username || !*username))
 		return ITEM_ACCESS_UNAUTHENTICATED;
 
@@ -132,9 +133,9 @@ NDX_LISTENER(item_access_t, item_access_status,
 	return ITEM_ACCESS_OK;
 }
 
-NDX_LISTENER(int, item_require_access,
-             int, fd, const char *, item_path, const char *, username, unsigned, flags,
-             const char *, not_found_msg, const char *, forbidden_msg) {
+NDX_LISTENER(int, item_require_access, int, fd, const char *, item_path,
+             const char *, username, unsigned, flags, const char *,
+             not_found_msg, const char *, forbidden_msg) {
 	item_access_t status = item_access_status(item_path, username, flags);
 	switch (status) {
 	case ITEM_ACCESS_OK:
@@ -142,20 +143,19 @@ NDX_LISTENER(int, item_require_access,
 	case ITEM_ACCESS_UNAUTHENTICATED:
 		return require_login(fd, username);
 	case ITEM_ACCESS_MISSING:
-		return respond_error(fd, 404,
-		                     not_found_msg ? not_found_msg : "Not found");
+		return respond_error(
+		    fd, 404, not_found_msg ? not_found_msg : "Not found");
 	case ITEM_ACCESS_FORBIDDEN:
-		return respond_error(fd, 403,
-		                     forbidden_msg ? forbidden_msg : "Forbidden");
+		return respond_error(
+		    fd, 403, forbidden_msg ? forbidden_msg : "Forbidden");
 	}
 	return respond_error(fd, 500, "Invalid item access status");
 }
 
 /* --- Item context --- */
 
-NDX_LISTENER(int, item_ctx_load,
-             item_ctx_t *, ctx, int, fd,
-             const char *, items_path, unsigned, flags) {
+NDX_LISTENER(int, item_ctx_load, item_ctx_t *, ctx, int, fd, const char *,
+             items_path, unsigned, flags) {
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->fd = fd;
 
@@ -173,8 +173,7 @@ NDX_LISTENER(int, item_ctx_load,
 	if (flags & ICTX_SONG_ID)
 		ndc_env_get(fd, ctx->song_id, "PATTERN_PARAM_SONG_ID");
 
-	if (!ctx->id[0] ||
-	    ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
+	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
 		bad_request(fd, "Missing parameters");
 		return 1;
 	}
@@ -183,19 +182,17 @@ NDX_LISTENER(int, item_ctx_load,
 	         ctx->doc_root, items_path, ctx->id);
 
 	if (flags & ICTX_NEED_OWNERSHIP) {
-		if (item_require_access(fd, ctx->item_path, ctx->username, flags,
-		                        "Not found", "Forbidden"))
+		if (item_require_access(fd, ctx->item_path, ctx->username,
+		                        flags, "Not found", "Forbidden"))
 			return 1;
 	}
 
 	return 0;
 }
 
-NDX_LISTENER(int, with_item_access,
-             int, fd, char *, body,
-             const char *, items_path, unsigned, flags,
-             const char *, not_found_msg, const char *, forbidden_msg,
-             item_handler_cb, cb, void *, user) {
+NDX_LISTENER(int, with_item_access, int, fd, char *, body, const char *,
+             items_path, unsigned, flags, const char *, not_found_msg,
+             const char *, forbidden_msg, item_handler_cb, cb, void *, user) {
 	item_ctx_t ctx;
 	unsigned load_flags = flags & ~ICTX_NEED_OWNERSHIP;
 
@@ -216,20 +213,21 @@ NDX_LISTENER(int, with_item_access,
 /* SSR outcome hooks                                                    */
 /* ------------------------------------------------------------------ */
 
-int on_auth_login_error(int fd, int status, const char *msg, const char *redirect) {
-	char accept[256] = {0};
+int on_auth_login_error(int fd, int status, const char *msg,
+                        const char *redirect) {
+	char accept[256] = { 0 };
 	ndc_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
-		char enc[128] = {0}, enc_ret[256] = {0}, pb[512];
-		char ret[256] = {0};
+		char enc[128] = { 0 }, enc_ret[256] = { 0 }, pb[512];
+		char ret[256] = { 0 };
 		if (redirect)
 			strncpy(ret, redirect, sizeof(ret) - 1);
 		url_encode(msg, enc, sizeof(enc));
 		url_encode(ret, enc_ret, sizeof(enc_ret));
-		int plen = snprintf(pb, sizeof(pb),
-		                    "status=%d&error=%s&ret=%s", status, enc, enc_ret);
-		return ssr_render(fd, "POST", "/auth/login", "", pb, (size_t)plen,
-		                  get_request_user(fd));
+		int plen = snprintf(pb, sizeof(pb), "status=%d&error=%s&ret=%s",
+		                    status, enc, enc_ret);
+		return ssr_render(fd, "POST", "/auth/login", "", pb,
+		                  (size_t)plen, get_request_user(fd));
 	}
 	ndc_header_set(fd, "Content-Type", "text/plain");
 	ndc_respond(fd, status, msg ? msg : "");

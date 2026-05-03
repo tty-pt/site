@@ -22,7 +22,7 @@ static size_t mpfd_max_total_size = 50 * 1024 * 1024; /* 50 MB */
 static size_t mpfd_max_field_count = 100;
 
 /* Error tracking */
-static char mpfd_error_buf[256] = {0};
+static char mpfd_error_buf[256] = { 0 };
 
 struct mpfd_val {
 	uint32_t len;
@@ -30,29 +30,25 @@ struct mpfd_val {
 	char data[];
 };
 
-static size_t
-mpfd_val_measure(const void *data) {
+static size_t mpfd_val_measure(const void *data) {
 	const struct mpfd_val *val = data;
 	return sizeof(struct mpfd_val) + val->len + val->filename_len;
 }
 
-static void
-set_error(const char *fmt, ...) {
+static void set_error(const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 	vsnprintf(mpfd_error_buf, sizeof(mpfd_error_buf), fmt, args);
 	va_end(args);
 }
 
-static void
-clear_error(void) {
+static void clear_error(void) {
 	mpfd_error_buf[0] = '\0';
 }
 
 /* Safe substring search that works even with binary data (embedded '\0') */
-static char *
-find_substr(const char *haystack, size_t hay_len,
-            const char *needle, size_t needle_len) {
+static char *find_substr(const char *haystack, size_t hay_len,
+                         const char *needle, size_t needle_len) {
 	if (needle_len == 0 || hay_len < needle_len)
 		return NULL;
 	for (size_t i = 0; i <= hay_len - needle_len; i++) {
@@ -62,13 +58,13 @@ find_substr(const char *haystack, size_t hay_len,
 	return NULL;
 }
 
-static int
-parse_multipart(char *body, const char *content_type, size_t body_len) {
+static int parse_multipart(char *body, const char *content_type,
+                           size_t body_len) {
 	if (!body || body_len == 0)
 		return -1;
 
-	char boundary[256] = {0};
-	char boundary_crlf[512] = {0};
+	char boundary[256] = { 0 };
+	char boundary_crlf[512] = { 0 };
 
 	/* Extract boundary */
 	const char *bstart = strstr(content_type, "boundary=");
@@ -80,9 +76,11 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 	while (*bstart == ' ' || *bstart == '"')
 		bstart++;
 	const char *bend = bstart;
-	while (*bend && *bend != '"' && *bend != ';' && *bend != '\r' && *bend != '\n')
+	while (*bend && *bend != '"' && *bend != ';' && *bend != '\r' &&
+	       *bend != '\n')
 		bend++;
-	snprintf(boundary, sizeof(boundary), "--%.*s", (int)(bend - bstart), bstart);
+	snprintf(boundary, sizeof(boundary), "--%.*s", (int)(bend - bstart),
+	         bstart);
 
 	size_t blen = strlen(boundary);
 	snprintf(boundary_crlf, sizeof(boundary_crlf), "\r\n%s", boundary);
@@ -92,7 +90,8 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 
 	char *pos = body;
 	while (1) {
-		char *bpos = find_substr(pos, body_len - (pos - body), boundary, blen);
+		char *bpos =
+		    find_substr(pos, body_len - (pos - body), boundary, blen);
 		if (!bpos)
 			break;
 
@@ -103,14 +102,16 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 			break;
 
 		/* Expect \r\n after boundary */
-		if (body_len - (pos - body) < 2 || strncmp(pos, "\r\n", 2) != 0) {
+		if (body_len - (pos - body) < 2 ||
+		    strncmp(pos, "\r\n", 2) != 0) {
 			pos = bpos + 1;
 			continue;
 		}
 		pos += 2;
 
 		/* Headers until \r\n\r\n */
-		char *headers_end = find_substr(pos, body_len - (pos - body), "\r\n\r\n", 4);
+		char *headers_end =
+		    find_substr(pos, body_len - (pos - body), "\r\n\r\n", 4);
 		if (!headers_end)
 			break;
 
@@ -128,7 +129,8 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 			continue;
 		}
 
-		/* Find name="..." within Content-Disposition (case-insensitive) */
+		/* Find name="..." within Content-Disposition (case-insensitive)
+		 */
 		char *name_start = NULL;
 		for (char *p = cd; p + 6 <= headers_end; p++) {
 			if (strncasecmp(p, "name=\"", 6) == 0) {
@@ -143,7 +145,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 		}
 
 		/* Extract name="..." */
-		char key[256] = {0};
+		char key[256] = { 0 };
 		char *q_end = name_start;
 		while (q_end < headers_end && *q_end != '"')
 			q_end++;
@@ -156,7 +158,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 		key[klen] = '\0';
 
 		/* Extract filename if present (case-insensitive) */
-		char filename[256] = {0};
+		char filename[256] = { 0 };
 		size_t fname_len = 0;
 		char *fstart = NULL;
 		for (char *p = cd; p + 10 <= headers_end; p++) {
@@ -183,7 +185,9 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 		size_t data_remaining = body_len - (data_start - body);
 
 		/* Find next boundary line "\r\n--xxxx" */
-		char *next_sep = find_substr(data_start, data_remaining, boundary_crlf, strlen(boundary_crlf));
+		char *next_sep =
+		    find_substr(data_start, data_remaining, boundary_crlf,
+		                strlen(boundary_crlf));
 		size_t data_len;
 		if (next_sep) {
 			data_len = next_sep - data_start;
@@ -193,18 +197,21 @@ parse_multipart(char *body, const char *content_type, size_t body_len) {
 
 		/* Enforce limits */
 		if (field_count >= mpfd_max_field_count) {
-			set_error("Too many fields (max %zu)", mpfd_max_field_count);
+			set_error("Too many fields (max %zu)",
+			          mpfd_max_field_count);
 			return -2;
 		}
 
 		if (data_len > mpfd_max_field_size) {
-			set_error("Field '%s' too large (max %zu bytes)", key, mpfd_max_field_size);
+			set_error("Field '%s' too large (max %zu bytes)", key,
+			          mpfd_max_field_size);
 			return -2;
 		}
 
 		total_size += data_len;
 		if (total_size > mpfd_max_total_size) {
-			set_error("Total size too large (max %zu bytes)", mpfd_max_total_size);
+			set_error("Total size too large (max %zu bytes)",
+			          mpfd_max_total_size);
 			return -2;
 		}
 
@@ -245,8 +252,8 @@ static void mpfd_clear(void) {
 
 /* Parse & Lifecycle */
 NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body) {
-	char content_type[512] = {0};
-	char clen_str[32] = {0};
+	char content_type[512] = { 0 };
+	char clen_str[32] = { 0 };
 
 	ndc_env_get(fd, content_type, "HTTP_CONTENT_TYPE");
 	ndc_env_get(fd, clen_str, "HTTP_CONTENT_LENGTH");
@@ -266,8 +273,7 @@ NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body) {
 }
 
 /* Field Inspection - All O(1) */
-static int
-mpfd_exists(const char *name) {
+static int mpfd_exists(const char *name) {
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
@@ -276,12 +282,12 @@ NDX_LISTENER(int, mpfd_len, const char *, name) {
 	return val ? (int)val->len : -1;
 }
 
-static int
-mpfd_filename(const char *name, char *buf, size_t buf_len) {
+static int mpfd_filename(const char *name, char *buf, size_t buf_len) {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
 		return -1;
-	size_t to_copy = val->filename_len < buf_len ? val->filename_len : buf_len;
+	size_t to_copy =
+	    val->filename_len < buf_len ? val->filename_len : buf_len;
 	memcpy(buf, val->data, to_copy);
 	if (to_copy > 0 && buf_len > to_copy)
 		buf[to_copy] = '\0';
@@ -300,8 +306,7 @@ NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len) {
 	return (int)val->len;
 }
 
-static int
-mpfd_save(const char *name, const char *path) {
+static int mpfd_save(const char *name, const char *path) {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
 		return -1;
@@ -314,15 +319,13 @@ mpfd_save(const char *name, const char *path) {
 }
 
 /* Configuration */
-static int
-mpfd_set_limits(size_t max_field_size, size_t max_total_size) {
+static int mpfd_set_limits(size_t max_field_size, size_t max_total_size) {
 	mpfd_max_field_size = max_field_size;
 	mpfd_max_total_size = max_total_size;
 	return 0;
 }
 
-MODULE_API void
-ndx_install(void) {
+MODULE_API void ndx_install(void) {
 	mpfd_val_type = qmap_mreg(mpfd_val_measure);
 	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
 }

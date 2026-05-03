@@ -9,11 +9,11 @@
 #include <assert.h>
 
 #define TEST(name) void test_##name(void)
-#define RUN_TEST(name)                           \
-	do {                                     \
-		printf("Running " #name "... "); \
-		test_##name();                   \
-		printf("PASS\n");                \
+#define RUN_TEST(name)                                                         \
+	do {                                                                   \
+		printf("Running " #name "... ");                               \
+		test_##name();                                                 \
+		printf("PASS\n");                                              \
 	} while (0)
 
 /* Helper: check if string contains substring */
@@ -132,7 +132,8 @@ TEST(hide_chords) {
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
-	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0, TRANSP_HIDE_CHORDS);
+	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0,
+	                             TRANSP_HIDE_CHORDS);
 	assert(result != NULL);
 	/* Should not contain chord names as standalone tokens */
 	assert(!str_contains(result, "C "));
@@ -149,7 +150,8 @@ TEST(hide_lyrics) {
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
-	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0, TRANSP_HIDE_LYRICS);
+	char *result = transp_buffer(ctx, "C G Am F\nTest lyrics here", 0,
+	                             TRANSP_HIDE_LYRICS);
 	assert(result != NULL);
 	assert(str_contains(result, "C"));
 	assert(str_contains(result, "G"));
@@ -261,12 +263,11 @@ TEST(complex_song) {
 	transp_ctx_t *ctx = transp_init();
 	assert(ctx != NULL);
 
-	const char *song =
-	    "1. Verse\n"
-	    "C       G       Am      F\n"
-	    "Amazing Grace, how sweet the sound\n"
-	    "F       C       G\n"
-	    "That saved a wretch like me\n";
+	const char *song = "1. Verse\n"
+	                   "C       G       Am      F\n"
+	                   "Amazing Grace, how sweet the sound\n"
+	                   "F       C       G\n"
+	                   "That saved a wretch like me\n";
 
 	char *result = transp_buffer(ctx, song, 2, TRANSP_HTML);
 	assert(result != NULL);

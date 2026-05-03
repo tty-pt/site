@@ -14,7 +14,7 @@ NDX_LISTENER(int, core_post_form, int, fd, form_body_t *, fb) {
 	if (!post_body)
 		return respond_error(fd, 500, "OOM");
 
-	char uri[512] = {0}, query[512] = {0};
+	char uri[512] = { 0 }, query[512] = { 0 };
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
 	ndc_env_get(fd, query, "QUERY_STRING");
 
@@ -24,8 +24,8 @@ NDX_LISTENER(int, core_post_form, int, fd, form_body_t *, fb) {
 	return rc;
 }
 
-NDX_LISTENER(int, core_post_form_builder,
-             int, fd, form_body_builder_cb, cb, void *, user) {
+NDX_LISTENER(int, core_post_form_builder, int, fd, form_body_builder_cb, cb,
+             void *, user) {
 	form_body_t *fb = form_body_new(0);
 	int rc;
 

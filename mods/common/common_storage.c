@@ -14,8 +14,7 @@
 
 static int remove_path_recursive(const char *path);
 
-NDX_LISTENER(int, read_meta_file,
-             const char *, item_path, const char *, name,
+NDX_LISTENER(int, read_meta_file, const char *, item_path, const char *, name,
              char *, buf, size_t, sz) {
 	char p[PATH_MAX];
 	FILE *mfp;
@@ -33,8 +32,7 @@ NDX_LISTENER(int, read_meta_file,
 	return 0;
 }
 
-NDX_LISTENER(int, write_meta_file,
-             const char *, item_path, const char *, name,
+NDX_LISTENER(int, write_meta_file, const char *, item_path, const char *, name,
              const char *, buf, size_t, sz) {
 	char p[PATH_MAX];
 
@@ -42,8 +40,8 @@ NDX_LISTENER(int, write_meta_file,
 	return write_file_path(p, buf, sz);
 }
 
-NDX_LISTENER(int, meta_fields_read,
-             const char *, item_path, meta_field_t *, fields, size_t, count) {
+NDX_LISTENER(int, meta_fields_read, const char *, item_path, meta_field_t *,
+             fields, size_t, count) {
 	if (!item_path || !fields)
 		return -1;
 
@@ -58,8 +56,8 @@ NDX_LISTENER(int, meta_fields_read,
 	return 0;
 }
 
-NDX_LISTENER(int, meta_fields_write,
-             const char *, item_path, const meta_field_t *, fields, size_t, count) {
+NDX_LISTENER(int, meta_fields_write, const char *, item_path,
+             const meta_field_t *, fields, size_t, count) {
 	if (!item_path || !fields)
 		return -1;
 
@@ -74,8 +72,8 @@ NDX_LISTENER(int, meta_fields_write,
 	return 0;
 }
 
-NDX_LISTENER(int, write_file_path,
-             const char *, path, const char *, buf, size_t, sz) {
+NDX_LISTENER(int, write_file_path, const char *, path, const char *, buf,
+             size_t, sz) {
 	FILE *fp = fopen(path, "w");
 
 	if (!fp)
@@ -94,19 +92,17 @@ NDX_LISTENER(int, ensure_dir_path, const char *, path) {
 	return -1;
 }
 
-NDX_LISTENER(int, user_path_build,
-             const char *, username, const char *, suffix,
+NDX_LISTENER(int, user_path_build, const char *, username, const char *, suffix,
              char *, out, size_t, outlen) {
-	if (!username || !username[0] || !suffix || !suffix[0] ||
-	    !out || outlen == 0)
+	if (!username || !username[0] || !suffix || !suffix[0] || !out ||
+	    outlen == 0)
 		return -1;
 	snprintf(out, outlen, "./home/%s/%s", username, suffix);
 	return 0;
 }
 
-NDX_LISTENER(int, write_item_child_file,
-             const char *, item_path, const char *, name,
-             const char *, buf, size_t, sz) {
+NDX_LISTENER(int, write_item_child_file, const char *, item_path, const char *,
+             name, const char *, buf, size_t, sz) {
 	char p[PATH_MAX];
 
 	if (item_child_path(item_path, name, p, sizeof(p)) != 0)
@@ -140,8 +136,8 @@ NDX_LISTENER(char *, slurp_file, const char *, path) {
 	return buf;
 }
 
-NDX_LISTENER(char *, slurp_item_child_file,
-             const char *, item_path, const char *, name) {
+NDX_LISTENER(char *, slurp_item_child_file, const char *, item_path,
+             const char *, name) {
 	char path[PATH_MAX];
 
 	if (item_child_path(item_path, name, path, sizeof(path)) != 0)
@@ -163,8 +159,7 @@ NDX_LISTENER(int, item_dir_exists, const char *, item_path) {
 	return stat(item_path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-NDX_LISTENER(int, item_child_path,
-             const char *, item_path, const char *, name,
+NDX_LISTENER(int, item_child_path, const char *, item_path, const char *, name,
              char *, out, size_t, outlen) {
 	int n = snprintf(out, outlen, "%s/%s", item_path, name);
 
@@ -173,8 +168,7 @@ NDX_LISTENER(int, item_child_path,
 	return 0;
 }
 
-static int
-remove_path_recursive(const char *path) {
+static int remove_path_recursive(const char *path) {
 	struct stat st;
 	DIR *dir;
 	struct dirent *entry;
@@ -195,8 +189,8 @@ remove_path_recursive(const char *path) {
 		if (strcmp(entry->d_name, ".") == 0 ||
 		    strcmp(entry->d_name, "..") == 0)
 			continue;
-		if (snprintf(child, sizeof(child), "%s/%s",
-		             path, entry->d_name) >= (int)sizeof(child)) {
+		if (snprintf(child, sizeof(child), "%s/%s", path,
+		             entry->d_name) >= (int)sizeof(child)) {
 			rc = -1;
 			break;
 		}
@@ -218,9 +212,8 @@ NDX_LISTENER(int, item_remove_path_recursive, const char *, item_path) {
 	return remove_path_recursive(item_path);
 }
 
-NDX_LISTENER(int, module_path_build,
-             const char *, doc_root, const char *, module,
-             char *, out, size_t, outlen) {
+NDX_LISTENER(int, module_path_build, const char *, doc_root, const char *,
+             module, char *, out, size_t, outlen) {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
 	int n = snprintf(out, outlen, "%s/items/%s", root, module);
 
@@ -229,9 +222,8 @@ NDX_LISTENER(int, module_path_build,
 	return 0;
 }
 
-NDX_LISTENER(int, module_items_path_build,
-             const char *, doc_root, const char *, module,
-             char *, out, size_t, outlen) {
+NDX_LISTENER(int, module_items_path_build, const char *, doc_root, const char *,
+             module, char *, out, size_t, outlen) {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
 	int n = snprintf(out, outlen, "%s/items/%s/items", root, module);
 
@@ -240,29 +232,26 @@ NDX_LISTENER(int, module_items_path_build,
 	return 0;
 }
 
-NDX_LISTENER(int, item_path_build_root,
-             const char *, doc_root, const char *, module, const char *, id,
-             char *, out, size_t, outlen) {
+NDX_LISTENER(int, item_path_build_root, const char *, doc_root, const char *,
+             module, const char *, id, char *, out, size_t, outlen) {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s/items/%s",
-	                 root, module, id);
+	int n = snprintf(out, outlen, "%s/items/%s/items/%s", root, module, id);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
 	return 0;
 }
 
-NDX_LISTENER(int, item_path_build,
-             int, fd, const char *, module, const char *, id,
-             char *, out, size_t, outlen) {
-	char doc_root[256] = {0};
+NDX_LISTENER(int, item_path_build, int, fd, const char *, module, const char *,
+             id, char *, out, size_t, outlen) {
+	char doc_root[256] = { 0 };
 
 	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
 	return item_path_build_root(doc_root, module, id, out, outlen);
 }
 
-NDX_LISTENER(int, datalist_extract_id,
-             const char *, in, char *, id_out, size_t, outlen) {
+NDX_LISTENER(int, datalist_extract_id, const char *, in, char *, id_out, size_t,
+             outlen) {
 	const char *lb;
 	const char *rb;
 	size_t n;

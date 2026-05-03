@@ -42,8 +42,8 @@ NDX_LISTENER(form_body_t *, form_body_new, int, dummy) {
 	return fb;
 }
 
-NDX_LISTENER(int, form_body_add,
-             form_body_t *, fb, const char *, name, const char *, value) {
+NDX_LISTENER(int, form_body_add, form_body_t *, fb, const char *, name,
+             const char *, value) {
 	const char *v = value ? value : "";
 	size_t n_cap;
 	size_t v_cap;
@@ -74,8 +74,8 @@ NDX_LISTENER(int, form_body_add,
 	if (!fb->first)
 		fb->buf[fb->len++] = '&';
 	fb->first = 0;
-	fb->len += snprintf(fb->buf + fb->len, fb->cap - fb->len,
-	                    "%s=%s", en, ev);
+	fb->len +=
+	    snprintf(fb->buf + fb->len, fb->cap - fb->len, "%s=%s", en, ev);
 
 	free(en);
 	free(ev);
@@ -90,8 +90,7 @@ NDX_LISTENER(int, form_body_free, form_body_t *, fb) {
 	return 0;
 }
 
-char *
-form_body_finish(form_body_t *fb, size_t *out_len) {
+char *form_body_finish(form_body_t *fb, size_t *out_len) {
 	char *out;
 
 	if (!fb) {

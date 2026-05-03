@@ -7,6 +7,5 @@
 #include "common_response.c"
 #include "common_storage.c"
 
-MODULE_API void
-ndx_install(void) {
+MODULE_API void ndx_install(void) {
 }

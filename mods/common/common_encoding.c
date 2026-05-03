@@ -44,7 +44,8 @@ NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen) {
 	for (size_t i = 0; in[i] && j + 4 < outlen; i++) {
 		unsigned char c = (unsigned char)in[i];
 
-		if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+		if (isalnum(c) || c == '-' || c == '_' || c == '.' ||
+		    c == '~') {
 			out[j++] = c;
 		} else {
 			j += snprintf(out + j, outlen - j, "%%%02X", c);

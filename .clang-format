@@ -5,6 +5,7 @@ TabWidth: 8
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: None
 BreakBeforeBraces: Attach
-ColumnLimit: 0
+ColumnLimit: 80
+Cpp11BracedListStyle: false
 SortIncludes: Never
 SpaceBeforeParens: ControlStatements
