@@ -605,7 +605,7 @@ pub fn render_delete_confirm(
                         strong { "{display_title}" }
                         "?"
                     }
-                    form { method: "POST", action: "{path}",
+                    form { method: "POST", action: "{path}", enctype: "multipart/form-data",
                         div { class: "flex gap-2",
                             button { r#type: "submit", class: "btn btn-primary", "Delete" }
                             a { href: "{crate::item_path(module, id)}", class: "btn btn-secondary", "Cancel" }

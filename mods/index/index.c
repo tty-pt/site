@@ -118,7 +118,7 @@ int index_update_json(const char *id, const char *title, unsigned flags)
 
 static const char *index_name(int fd)
 {
-	static char uri[256];
+	static __thread char uri[256];
 	char *module;
 
 	ndc_env_get(fd, uri, "DOCUMENT_URI");
@@ -486,9 +486,9 @@ static int index_delete_get_handler(int fd, char *body)
 /* POST /<module>/:id/delete — perform delete */
 static int index_delete_handler(int fd, char *body)
 {
-	(void)body;
-
 	char id[128] = { 0 };
+
+	(void)body;
 	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");

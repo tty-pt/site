@@ -2,6 +2,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -41,7 +42,7 @@ static void song_meta_read(const char *path, song_meta_t *m)
 		{ "pdf", m->pdf, 512 },     { "author", m->author, 256 }
 	};
 	memset(m, 0, sizeof(*m));
-	meta_fields_read(path, f, 6);
+	meta_fields_read(path, f, sizeof(f) / sizeof(f[0]));
 }
 
 static int song_meta_write(const char *path, const song_meta_t *m)
@@ -52,7 +53,7 @@ static int song_meta_write(const char *path, const song_meta_t *m)
 		             { "audio", (char *)m->audio, 0 },
 		             { "pdf", (char *)m->pdf, 0 },
 		             { "author", (char *)m->author, 0 } };
-	return meta_fields_write(path, f, 6);
+	return meta_fields_write(path, f, sizeof(f) / sizeof(f[0]));
 }
 
 static void song_type_index_add(const char *type, const char *id)
@@ -60,12 +61,13 @@ static void song_type_index_add(const char *type, const char *id)
 	const char *t = (type && type[0]) ? type : "any";
 	char *l_v = (char *)qmap_get(type_index_hd, t);
 	char l[SONG_TYPE_INDEX_BUF_SIZE] = { 0 };
-	if (l_v)
-		snprintf(l, sizeof(l), "%s", l_v);
-	if (l[0] && strlen(l) < sizeof(l) - 2)
-		strcat(l, ",");
-	if (strlen(l) < sizeof(l) - strlen(id) - 2)
-		strcat(l, id);
+	snprintf(
+	        l,
+	        sizeof(l),
+	        "%s%s%s",
+	        l_v ? l_v : "",
+	        (l_v && l_v[0]) ? "," : "",
+	        id);
 	qmap_put(type_index_hd, t, l);
 }
 
@@ -287,18 +289,22 @@ NDX_LISTENER(int, song_transpose_root,
 
 NDX_LISTENER(int, song_get_random_by_type, const char *, t, char **, out)
 {
+	int c, idx, i;
 	char *l = (char *)qmap_get(type_index_hd, t);
+	char *cp, *tok;
+
 	if (!l)
 		l = (char *)qmap_get(type_index_hd, "any");
 	if (!l)
 		return -1;
-	int c = 1;
+	c = 1;
 	for (char *p = l; *p; p++)
 		if (*p == ',')
 			c++;
-	int idx = rand() % c;
-	char *cp = strdup(l), *tok = strtok(cp, ",");
-	for (int i = 0; i < idx && tok; i++)
+	idx = rand() % c;
+	cp = strdup(l);
+	tok = strtok(cp, ",");
+	for (i = 0; i < idx && tok; i++)
 		tok = strtok(NULL, ",");
 	if (tok && out)
 		*out = strdup(tok);
@@ -696,7 +702,7 @@ NDX_LISTENER(int, song_for_each, song_for_each_cb_t, cb, void *, user)
 
 static int song_add_post_handler(int fd, char *body)
 {
-	char id[256] = { 0 }, item_path[PATH_MAX], location[512];
+	char id[256] = { 0 }, item_path[PATH_MAX];
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
 	if (item_path_build(fd, "song", id, item_path, sizeof(item_path)) == 0)
@@ -705,13 +711,13 @@ static int song_add_post_handler(int fd, char *body)
 		get_doc_root(fd, dr, sizeof(dr));
 		song_index_upsert(dr[0] ? dr : g_doc_root, id, item_path);
 	}
-	snprintf(location, sizeof(location), "/song/%s", id);
-	return ndc_redirect(fd, location);
+	return redirect_to_item(fd, "song", id);
 }
 
 void ndx_install(void)
 {
 	char dr[256] = { 0 };
+	srand((unsigned)time(NULL));
 	get_doc_root(0, dr, sizeof(dr));
 	if (dr[0])
 		strncpy(g_doc_root, dr, sizeof(g_doc_root) - 1);

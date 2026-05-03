@@ -80,6 +80,49 @@ outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
 	return ret > 0 ? ret : 0;
 }
 
+/*
+ * Write HTML-escaped version of src into dst (NUL-terminated).
+ * Escapes &, <, >, " — leaves all other bytes as-is.
+ * Returns number of bytes written (not counting NUL).
+ */
+static size_t html_escape_into(const char *src, char *dst, size_t dstsize)
+{
+	size_t w = 0;
+	const char *ent;
+	size_t elen;
+
+	while (*src && w < dstsize - 1) {
+		switch (*src) {
+		case '&':
+			ent = "&amp;";
+			elen = 5;
+			break;
+		case '<':
+			ent = "&lt;";
+			elen = 4;
+			break;
+		case '>':
+			ent = "&gt;";
+			elen = 4;
+			break;
+		case '"':
+			ent = "&quot;";
+			elen = 6;
+			break;
+		default:
+			dst[w++] = *src++;
+			continue;
+		}
+		if (w + elen >= dstsize)
+			break;
+		memcpy(dst + w, ent, elen);
+		w += elen;
+		src++;
+	}
+	dst[w] = '\0';
+	return w;
+}
+
 /* Populate chord_db: keys are chord name strings, values are chromatic indices.
  */
 static void chord_db_init(int hd, char **table)
@@ -139,13 +182,16 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 
 			size_t len = dot + 1 - s;
 			sim += len;
-			si += outprintf(
-			        outbuf,
-			        sizeof(outbuf),
-			        si,
-			        "<b>%.*s</b>",
-			        (int)len,
-			        s);
+			{
+				char esc[64];
+				html_escape_into(s, esc, sizeof(esc));
+				si += outprintf(
+				        outbuf,
+				        sizeof(outbuf),
+				        si,
+				        "<b>%s</b>",
+				        esc);
+			}
 			s += len;
 		}
 	}
@@ -176,14 +222,16 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 		if (*s == '%') {
 			if (flags & TRANSP_REMOVE_COMMENTS)
 				ctx->skip_empty = 1;
-			else if (not_bolded && (flags & TRANSP_HTML))
+			else if (not_bolded && (flags & TRANSP_HTML)) {
+				char esc[4096];
+				html_escape_into(s, esc, sizeof(esc));
 				o += outprintf(
 				        outbuf,
 				        sizeof(outbuf),
 				        o - outbuf,
 				        "<b class='comment'>%s</b>",
-				        s);
-			else
+				        esc);
+			} else
 				o += outprintf(
 				        outbuf,
 				        sizeof(outbuf),
@@ -389,6 +437,41 @@ no_chord:
 			}
 		}
 
+		if (flags & TRANSP_HTML) {
+			const char *ent = NULL;
+			size_t elen = 0;
+			switch (*s) {
+			case '&':
+				ent = "&amp;";
+				elen = 5;
+				break;
+			case '<':
+				ent = "&lt;";
+				elen = 4;
+				break;
+			case '>':
+				ent = "&gt;";
+				elen = 4;
+				break;
+			case '"':
+				ent = "&quot;";
+				elen = 6;
+				break;
+			default:
+				break;
+			}
+			if (ent) {
+				if ((size_t)(o - outbuf) + elen <
+				    sizeof(outbuf))
+				{
+					memcpy(o, ent, elen);
+					o += elen;
+				}
+				s++;
+				j++;
+				continue;
+			}
+		}
 		*o++ = *s++;
 		j++;
 	}

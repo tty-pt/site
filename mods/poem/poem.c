@@ -83,6 +83,49 @@ static char *html_tag_inner(const char *html, const char *tag)
 	return out;
 }
 
+/*
+ * Remove all <script>...</script> blocks from html in-place (case-insensitive
+ * tag match). Protects other users from stored XSS via uploaded poem HTML.
+ */
+static void strip_script_tags(char *html)
+{
+	char *p = html;
+
+	while (*p) {
+		/* Case-insensitive search for <script */
+		if (*p == '<' && strncasecmp(p + 1, "script", 6) == 0 &&
+		    (p[7] == '>' || p[7] == ' ' || p[7] == '\t' ||
+		     p[7] == '\n' || p[7] == '\r' || p[7] == '/'))
+		{
+			/* Find closing </script> — case-insensitive */
+			char *end = p + 7;
+			while (*end) {
+				if (*end == '<' &&
+				    strncasecmp(end + 1, "/script", 7) == 0)
+				{
+					char *close = strchr(end + 7, '>');
+					if (close) {
+						/* Remove from p to close+1 */
+						size_t remove_len =
+						        (size_t)(close + 1 - p);
+						memmove(p,
+						        close + 1,
+						        strlen(close + 1) + 1);
+						(void)remove_len;
+						goto next;
+					}
+				}
+				end++;
+			}
+			/* No closing tag found — truncate from here */
+			*p = '\0';
+			return;
+		}
+		p++;
+	next:;
+	}
+}
+
 static int
 poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
@@ -96,6 +139,10 @@ poem_detail_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char *head = html ? html_tag_inner(html, "head") : strdup("");
 	char *body_content = html ? html_tag_inner(html, "body") : strdup("");
 	free(html);
+	if (head)
+		strip_script_tags(head);
+	if (body_content)
+		strip_script_tags(body_content);
 	int owner =
 	        (ctx->username && ctx->username[0])
 	                ? item_check_ownership(ctx->item_path, ctx->username)

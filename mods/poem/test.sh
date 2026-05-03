@@ -18,10 +18,10 @@ code=$(curl -sw "%{http_code}" -o /dev/null -c "$COOKIE" -X POST "$BASE/auth/reg
 	-d "username=$USER&password=pass1234&password2=pass1234&email=test@test.com")
 [ "$code" = "303" ] && pass "registered" || fail "expected 303, got $code"
 
-# 1. Add a poem via /poem/add first so the item exists and is owned by our user
+# 1. Add a poem via /poem/add
 echo -n "1. Add poem via /poem/add... "
 echo "<p>Initial content.</p>" > "$TMPFILE"
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -c "$COOKIE" \
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/add" \
 	-F "title=$USER" -F "file=@$TMPFILE")
 [ "$code" = "303" ] && pass "add redirects" || fail "expected 303, got $code"
@@ -35,7 +35,8 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$US
 # 2. POST with only title (no file)
 echo -n "2. POST title only... "
 sleep 0.1
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/poem/$USER/edit" \
 	-F "title=My Test Poem")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -44,7 +45,8 @@ echo -n "3. POST file only... "
 echo "This is a test poem content.
 With multiple lines." > "$TMPFILE"
 sleep 0.1
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/poem/$USER/edit" \
 	-F "file=@$TMPFILE")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
@@ -62,7 +64,8 @@ echo "$content" | grep -q "test poem content" && pass "content matches" || fail 
 echo -n "6. POST title + file... "
 echo "Updated poem content." > "$TMPFILE2"
 sleep 0.1
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/poem/$USER/edit" \
 	-F "title=Updated Title" -F "file=@$TMPFILE2")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
@@ -84,7 +87,8 @@ echo "$content" | grep -q "Updated poem content" && pass "content matches" || fa
 # 10. POST empty multipart (no fields) — should still redirect
 echo -n "10. POST empty multipart... "
 sleep 0.1
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/edit" \
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/poem/$USER/edit" \
 	-F "dummy=")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -96,7 +100,9 @@ code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/poem/$USER/edit" \
 
 # 12. Delete poem
 echo -n "12. Delete poem... "
-code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/$USER/delete")
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/poem/$USER/delete" \
+	-F "dummy=")
 [ "$code" = "303" ] && pass "delete redirects" || fail "expected 303, got $code"
 
 # 13. Verify poem directory removed
@@ -107,7 +113,8 @@ echo -n "13. Poem directory removed... "
 echo -n "14. Verify detail GET... "
 # Re-add a poem to test GET
 echo "Direct render test" > "$TMPFILE"
-curl -s -b "$COOKIE" -X POST "$BASE/poem/add" -F "title=direct_test" -F "file=@$TMPFILE" > /dev/null
+curl -s -b "$COOKIE" -X POST "$BASE/poem/add" \
+	-F "title=direct_test" -F "file=@$TMPFILE" > /dev/null
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/poem/direct_test")
 [ "$code" = "200" ] && pass "GET success" || fail "expected 200, got $code"
 

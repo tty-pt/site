@@ -23,6 +23,8 @@ test-data-dirs:
 	mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items
 
 unit-tests: all test-data-dirs
+	@curl -s --max-time 2 http://localhost:8080/ > /dev/null 2>&1 || \
+		{ echo "ERROR: ndc not running on :8080 — start the server before running unit-tests"; exit 1; }
 	@for d in $(MODS); do \
 		echo "=== TESTING $$d ==="; \
 		(cd mods/$$d && ./test.sh) || exit 1; \
@@ -44,7 +46,7 @@ watch:
 	./scripts/watch.sh
 
 format:
-	find mods lib -name "*.c" -o -name "*.h" | xargs clang-format -i
+	find mods lib \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
 
 clean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done

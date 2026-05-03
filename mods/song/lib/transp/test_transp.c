@@ -297,6 +297,38 @@ TEST(complex_song)
 	transp_free(ctx);
 }
 
+TEST(html_escape_lyrics)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Lyric line (non-chord) with & and " — escaped in HTML mode */
+	char *result =
+	        transp_buffer(ctx, "Hello & world \"quoted\"", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "&amp;"));
+	assert(str_contains(result, "&quot;"));
+	assert(!str_contains(result, " & "));
+	free(result);
+
+	/* Comment line with HTML special chars — must be escaped */
+	result = transp_buffer(ctx, "%<b>injected</b> & more", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>injected</b>"));
+	assert(str_contains(result, "&lt;b&gt;injected&lt;/b&gt;"));
+	assert(str_contains(result, "&amp;"));
+	free(result);
+
+	/* In plain (non-HTML) mode, chars passed through unescaped */
+	result = transp_buffer(ctx, "Hello & world", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Hello & world"));
+	assert(!str_contains(result, "&amp;"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -317,6 +349,7 @@ int main(void)
 	RUN_TEST(repeat_markers_transpose);
 	RUN_TEST(repeat_markers_second_song);
 	RUN_TEST(complex_song);
+	RUN_TEST(html_escape_lyrics);
 
 	printf("\nAll tests passed!\n");
 	return 0;

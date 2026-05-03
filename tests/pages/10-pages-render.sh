@@ -30,6 +30,9 @@ echo "Running page smoke tests against $BASE"
 
 check "/" "<!DOCTYPE html>" "root DOCTYPE"
 check "/poem" "<title>[^<]*[Pp]oem|href=\"/poem" "poem page"
+check "/song" "<title>[^<]*[Ss]ong|href=\"/song" "song page"
+check "/songbook" "<title>[^<]*[Ss]ongbook|href=\"/songbook" "songbook page"
+check "/choir" "<title>[^<]*[Cc]hoir|href=\"/choir" "choir page"
 check "/auth/login" "name=\"username\"|<form[^>]*action=\"/auth/login\"" "login form"
 check "/auth/register" "name=\"email\"|<form[^>]*action=\"/auth/register\"" "register form"
 
