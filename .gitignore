@@ -16,7 +16,6 @@
 /mods/ssr/rust-renderer/target
 /mods/*/client/target
 /mods/*/ssr/target
-/mods/unified-client/
 /target/
 /etc
 /home
