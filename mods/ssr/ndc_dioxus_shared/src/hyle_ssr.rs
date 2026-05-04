@@ -8,7 +8,7 @@ use hyle_dioxus::{
     DioxusMutationOptions, HyleAdapter, HyleConfig, HyleFiltersState, HyleSourceState,
     UseFiltersOptions,
 };
-use hyle_dioxus_native::{HyleTableFilters, HyleTablePanel};
+use hyle_dioxus_native::{HyleTableFilterBar, HyleTableFilters, HyleTablePanel};
 
 use crate::{
     IndexItem, RequestContext, ResponsePayload, blueprint::get_blueprint,
@@ -176,7 +176,7 @@ pub fn render_hyle_list(
         content_type: "text/html; charset=utf-8".to_string(),
         location: None,
         body: format!(
-            "<!DOCTYPE html><html lang=\"pt\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{module}</title><link rel=\"stylesheet\" href=\"/styles.css\"></head><body style=\"margin: 0\">{body}<script type=\"module\" src=\"/wasm.js\"></script></body></html>"
+            "<!DOCTYPE html><html lang=\"pt\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{module}</title><link rel=\"stylesheet\" href=\"/styles.css\"><link rel=\"stylesheet\" href=\"/hyle.css\"></head><body style=\"margin: 0\">{body}<script type=\"module\" src=\"/wasm.js\"></script></body></html>"
         ),
     }
 }
@@ -242,6 +242,7 @@ fn HyleListInner(props: HyleListInnerProps) -> Element {
                 list,
                 filters,
                 row_href,
+                HyleTableFilterBar { filters }
                 HyleTableFilters {}
             }
         }

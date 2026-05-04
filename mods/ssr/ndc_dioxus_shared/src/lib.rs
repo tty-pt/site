@@ -153,7 +153,7 @@ pub fn login_redirect(ctx: &RequestContext<'_>) -> ResponsePayload {
 fn render_document_with_head(title: &str, body: Element, extra_head: &str) -> String {
     let body_html = render_element(body);
     format!(
-        "<!DOCTYPE html><html lang=\"pt\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\">{}</head><body style=\"margin: 0\">{}<script type=\"module\" src=\"/wasm.js\"></script></body></html>",
+        "<!DOCTYPE html><html lang=\"pt\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>{}</title><link rel=\"stylesheet\" href=\"/styles.css\"><link rel=\"stylesheet\" href=\"/hyle.css\">{}</head><body style=\"margin: 0\">{}<script type=\"module\" src=\"/wasm.js\"></script></body></html>",
         escape_html(title),
         extra_head,
         body_html

@@ -20,7 +20,7 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 
 fn render_song_list(ctx: &RequestContext<'_>) -> ResponsePayload {
     let items = parse_index_items_rich(body_str(ctx.body), &["type"]);
-    render_hyle_list(ctx, "song", Some("🎸"), items, &["title", "type"], 20)
+    render_hyle_list(ctx, "song", Some("🎸"), items, &["title", "type"], 10)
 }
 
 fn song_flags(query: &str) -> (i32, bool, bool, bool) {

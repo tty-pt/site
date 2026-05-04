@@ -10,7 +10,7 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     match (ctx.method, parts.as_slice()) {
         ("POST", ["choir"]) => {
             let items = parse_index_items_rich(body_str(ctx.body), &[]);
-            Some(render_hyle_list(ctx, "choir", Some("🎶"), items, &["title"], 20))
+            Some(render_hyle_list(ctx, "choir", Some("🎶"), items, &["title"], 10))
         }
         _ => ndc_dioxus_shared::default_crud_routes(
             ctx, "choir", Some("🎶"),

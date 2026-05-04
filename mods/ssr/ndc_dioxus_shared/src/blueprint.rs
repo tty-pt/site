@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use hyle::{Blueprint, Field, Model};
+use hyle::{Blueprint, Field, InputHint, Model};
 
 static BLUEPRINT: OnceLock<Arc<Blueprint>> = OnceLock::new();
 
@@ -18,7 +18,7 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                             .field("yt", Field::string("YouTube URL"))
                             .field("audio", Field::string("Audio URL"))
                             .field("pdf", Field::string("PDF URL"))
-                            .field("data", Field::textarea("Chord Data", 20)),
+                            .field("data", Field::string("Chord Data").with_input(InputHint::new("textarea").with_prop("rows", 20))),
                     )
                     .model(
                         "song_type",
@@ -34,7 +34,7 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                         "choir",
                         Model::new()
                             .field("title", Field::string("Choir Name"))
-                            .field("format", Field::textarea("Song Formats", 10)),
+                            .field("format", Field::string("Song Formats").with_input(InputHint::new("textarea").with_prop("rows", 10))),
                     )
                     .model(
                         "songbook",

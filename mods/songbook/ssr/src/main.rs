@@ -22,7 +22,7 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 		}
         ("POST", ["songbook"]) => {
             let items = parse_index_items_rich(body_str(ctx.body), &["choir"]);
-            Some(render_hyle_list(ctx, "songbook", Some("📖"), items, &["title", "choir"], 20))
+            Some(render_hyle_list(ctx, "songbook", Some("📖"), items, &["title", "choir"], 10))
         }
 		("POST", ["songbook", id, "delete"]) => {
 			Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))

@@ -457,12 +457,7 @@ a:hover {
   display: block;
 }
 
-/* ── Hyle table ── */
-.tableWrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  width: 100%;
-}
+/* ── Table base ── */
 
 table {
   width: 100%;
@@ -485,113 +480,4 @@ th {
 
 tbody tr:last-child td {
   border-bottom: 0;
-}
-
-.headerCell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.sortButton {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 0.75em;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  text-align: center;
-}
-
-.sortButton:hover {
-  color: var(--text);
-}
-
-.columnFilter-wrap {
-  width: 100%;
-}
-
-.columnFilter-wrap input,
-.columnFilter-wrap select {
-  width: 100%;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-weight: normal;
-  text-transform: none;
-  letter-spacing: normal;
-  background: var(--bg-surface);
-  color: var(--text);
-  box-sizing: border-box;
-}
-
-.columnFilter-wrap input:focus,
-.columnFilter-wrap select:focus {
-  outline: 2px solid var(--link);
-  outline-offset: -1px;
-}
-
-.rowClickable {
-  cursor: pointer;
-}
-
-.rowClickable:hover td {
-  background: var(--bg-page);
-}
-
-.rowSelected td {
-  background: color-mix(in srgb, var(--link) 12%, transparent);
-}
-
-.emptyState {
-  text-align: center;
-  color: var(--text-muted);
-  padding: 48px 14px;
-  font-size: 0.9em;
-}
-
-.filterActions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.tableFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-  gap: 12px;
-  flex-wrap: wrap;
-  background: var(--bg-surface);
-}
-
-.pagination {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85em;
-}
-
-.pagination button,
-.pagination select {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 4px;
-}
-
-.pagination button:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
-
-.rowCount {
-  color: var(--text-muted);
-  font-size: 0.75em;
-  white-space: nowrap;
 }
