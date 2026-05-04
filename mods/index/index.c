@@ -18,8 +18,8 @@
 typedef void (*index_cleanup_fn)(const char *id);
 typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
 typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
-typedef size_t (*index_format_fn)(const char *id, const char *val,
-                                  char *out, size_t out_sz);
+typedef size_t (*index_format_fn)(
+        const char *id, const char *val, char *out, size_t out_sz);
 
 #define MAX_MODULES 64
 
@@ -237,11 +237,13 @@ NDX_LISTENER(int, index_render_list,
 	cur = qmap_iter(hd, NULL, 0);
 	while (qmap_next(&key, &val, cur)) {
 		if (fmt) {
-			s += fmt((const char *)key, (const char *)val,
-			         s, total - (size_t)(s - body));
+			s +=
+			        fmt((const char *)key,
+			            (const char *)val,
+			            s,
+			            total - (size_t)(s - body));
 		} else {
-			s += sprintf(s, "%s %s\r\n",
-			             (char *)key, (char *)val);
+			s += sprintf(s, "%s %s\r\n", (char *)key, (char *)val);
 		}
 	}
 	body_len = (size_t)(s - body);
@@ -251,8 +253,14 @@ NDX_LISTENER(int, index_render_list,
 		char query[512] = { 0 };
 		const char *username = get_request_user(fd);
 		ndc_env_get(fd, query, "QUERY_STRING");
-		ret = ssr_render(fd, "POST", path, query, body, body_len,
-		                 username ? username : "");
+		ret = ssr_render(
+		        fd,
+		        "POST",
+		        path,
+		        query,
+		        body,
+		        body_len,
+		        username ? username : "");
 	}
 	free(body);
 	return ret;

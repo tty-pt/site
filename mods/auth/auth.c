@@ -54,8 +54,28 @@ NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 {
 	char token[33];
 	char header[80];
+	char cookie_hdr[512] = { 0 };
+	char *p;
+	char *eq;
+	char *end;
+	size_t vlen;
 
-	csrf_generate_token(token, sizeof(token));
+	token[0] = '\0';
+	ndc_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+	p = strstr(cookie_hdr, "csrf_token=");
+	if (p) {
+		eq = p + strlen("csrf_token=");
+		end = strchr(eq, ';');
+		vlen = end ? (size_t)(end - eq) : strlen(eq);
+		if (vlen == 32) {
+			memcpy(token, eq, 32);
+			token[32] = '\0';
+		}
+	}
+
+	if (!token[0])
+		csrf_generate_token(token, sizeof(token));
+
 	snprintf(
 	        header,
 	        sizeof(header),

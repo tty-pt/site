@@ -2,7 +2,7 @@ pub mod blueprint;
 pub mod hyle_ssr;
 
 pub use blueprint::get_blueprint;
-pub use hyle_ssr::{items_to_source, render_hyle_list};
+pub use hyle_ssr::{items_to_source, item_to_source, render_hyle_edit, render_hyle_list};
 
 use dioxus::prelude::*;
 use dioxus_ssr::render_element;
@@ -697,10 +697,21 @@ pub fn render_add_form(
     icon: Option<&str>,
     extra_fields: Vec<(&str, String)>,
 ) -> ResponsePayload {
+    render_add_form_with_error(ctx, module, icon, extra_fields, None)
+}
+
+pub fn render_add_form_with_error(
+    ctx: &RequestContext<'_>,
+    module: &str,
+    icon: Option<&str>,
+    extra_fields: Vec<(&str, String)>,
+    error: Option<&str>,
+) -> ResponsePayload {
     if crate::current_user(ctx).is_none() {
         return crate::login_redirect(ctx);
     }
     let path = format!("/{module}/add");
+    let error = error.map(|s| s.to_string());
     crate::html_response(
         "Add Item",
         crate::layout(
@@ -710,6 +721,9 @@ pub fn render_add_form(
             Some(icon.unwrap_or("🏠")),
             None,
             rsx! {
+                if let Some(msg) = error {
+                    p { class: "text-error", "{msg}" }
+                }
                 form {
                     action: "{path}",
                     method: "POST",
@@ -748,6 +762,12 @@ pub fn default_crud_routes(
     match (ctx.method, parts.as_slice()) {
         ("GET", [m, "add"]) if *m == module =>
             Some(render_add_form(ctx, module, icon, Vec::new())),
+        ("POST", [m, "add"]) if *m == module => {
+            let body = body_str(ctx.body);
+            let pairs = parse_pairs(body);
+            let error = get_pair(&pairs, "error").unwrap_or("An error occurred");
+            Some(render_add_form_with_error(ctx, module, icon, Vec::new(), Some(error)))
+        }
         ("POST", [m]) if *m == module =>
             Some(render_list(ctx, module, icon)),
         ("POST", [m, id, "delete"]) if *m == module =>

@@ -499,6 +499,8 @@ static int api_song_transpose_handler(int fd, char *body)
 	        NULL);
 }
 
+static char *song_get_types_json(int dummy);
+
 static int
 song_edit_get_auth(int fd, char *body, const item_ctx_t *ctx, void *u)
 {
@@ -510,6 +512,7 @@ song_edit_get_auth(int fd, char *body, const item_ctx_t *ctx, void *u)
 	item_child_path(ctx->item_path, "data.txt", dp, sizeof(dp));
 	char *c = slurp_file(dp);
 	form_body_t *fb = form_body_new(0);
+	char *at_json = song_get_types_json(0);
 	form_body_add(fb, "title", m.title);
 	form_body_add(fb, "type", m.type);
 	form_body_add(fb, "yt", m.yt);
@@ -519,6 +522,10 @@ song_edit_get_auth(int fd, char *body, const item_ctx_t *ctx, void *u)
 	if (c)
 		form_body_add(fb, "data", c);
 	free(c);
+	if (at_json) {
+		form_body_add(fb, "allTypes", at_json);
+		free(at_json);
+	}
 	return core_post_form(fd, fb);
 }
 
@@ -713,8 +720,8 @@ NDX_LISTENER(int, song_for_each, song_for_each_cb_t, cb, void *, user)
 	return 0;
 }
 
-static size_t song_format_line(const char *id, const char *val,
-                               char *out, size_t out_sz)
+static size_t
+song_format_line(const char *id, const char *val, char *out, size_t out_sz)
 {
 	char buf[768], *title, *type;
 	snprintf(buf, sizeof(buf), "%s", val);

@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, PoemItem, body_str, current_user, display_or_id,
-    edit_form_page, edit_path, form_actions, html_response_with_head, item_menu, item_path,
-    parse_index_items_rich, render_hyle_list, split_path,
+    RequestContext, ResponsePayload, PoemItem, body_str, current_user,
+    html_response_with_head, item_menu, item_path, parse_index_items_rich,
+    render_hyle_edit, render_hyle_list, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -54,25 +54,18 @@ pub fn render_detail(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>)
 }
 
 pub fn render_edit_typed(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {
-    let title = payload.title;
-    let path = edit_path("poem", id);
-    let heading = format!("Edit {}", display_or_id(title, id));
-    edit_form_page(
-        current_user(ctx),
-        &heading,
-        &path,
+    let fields = [("title", payload.title)]
+        .iter()
+        .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+    render_hyle_edit(
+        ctx,
+        "poem",
         Some("📜"),
-        rsx! {
-            form { method: "POST", action: "{path}", enctype: "multipart/form-data", class: "flex flex-col gap-4",
-                input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
-                label { "Title:"
-                    input { r#type: "text", name: "title", value: "{title}" }
-                }
-                label { "File:"
-                    input { r#type: "file", name: "file", accept: ".html,.htm,.txt" }
-                }
-                { form_actions(&item_path("poem", id), "Save", None) }
-            }
-        },
+        id,
+        fields,
+        &["title", "file"],
+        "multipart/form-data",
+        vec![],
     )
 }

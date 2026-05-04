@@ -247,3 +247,151 @@ fn HyleListInner(props: HyleListInnerProps) -> Element {
         }
     }
 }
+
+// ── Edit form support ─────────────────────────────────────────────────────────
+
+/// Build a single-row `Source` for an edit form.
+///
+/// For `"song"`, also builds a `song_type` lookup from the provided
+/// `all_types` list so the reference `<select>` shows all known options.
+pub fn item_to_source(
+    model: &str,
+    id: &str,
+    fields: &IndexMap<String, String>,
+    all_types: Vec<String>,
+) -> Source {
+    let mut row = IndexMap::new();
+    row.insert("id".to_owned(), Value::String(id.to_owned()));
+    for (k, v) in fields {
+        row.insert(k.clone(), Value::String(v.clone()));
+    }
+    let mut source: Source = IndexMap::new();
+    source.insert(model.to_owned(), ModelResult::one(row));
+
+    if model == "song" {
+        let type_rows: Vec<Row> = all_types
+            .into_iter()
+            .map(|t| {
+                let mut r = IndexMap::new();
+                r.insert("id".to_owned(), Value::String(t.clone()));
+                r.insert("name".to_owned(), Value::String(t));
+                r
+            })
+            .collect();
+        source.insert("song_type".to_owned(), ModelResult::many(type_rows));
+    }
+
+    source
+}
+
+/// Render a hyle-driven edit form for a module item.
+pub fn render_hyle_edit(
+    ctx: &crate::RequestContext<'_>,
+    module: &'static str,
+    icon: Option<&str>,
+    id: &str,
+    fields: IndexMap<String, String>,
+    select_fields: &'static [&'static str],
+    enctype: &'static str,
+    all_types: Vec<String>,
+) -> crate::ResponsePayload {
+    let title = fields.get("title").map(|s| s.as_str()).unwrap_or("");
+    let heading = format!("Edit {}", crate::display_or_id(title, id));
+    let action = crate::edit_path(module, id);
+    let cancel_href = crate::item_path(module, id);
+    let csrf_token = ctx.csrf_token.to_owned();
+    let source = item_to_source(module, id, &fields, all_types);
+    let blueprint = get_blueprint();
+    let user = ctx.remote_user;
+
+    crate::edit_form_page(
+        user,
+        &heading,
+        &action,
+        icon,
+        rsx! {
+            HyleEditInner {
+                blueprint,
+                source,
+                module,
+                select_fields,
+                action: action.clone(),
+                enctype,
+                csrf_token,
+                cancel_href,
+            }
+        },
+    )
+}
+
+// ── HyleEditInner component ───────────────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+struct HyleEditInnerProps {
+    blueprint:    std::sync::Arc<hyle::Blueprint>,
+    source:       Source,
+    module:       &'static str,
+    select_fields: &'static [&'static str],
+    action:       String,
+    enctype:      &'static str,
+    csrf_token:   String,
+    cancel_href:  String,
+}
+
+#[component]
+fn HyleEditInner(props: HyleEditInnerProps) -> Element {
+    use hyle_dioxus_native::HyleFormFields;
+
+    let HyleEditInnerProps {
+        blueprint,
+        source,
+        module,
+        select_fields,
+        action,
+        enctype,
+        csrf_token,
+        cancel_href,
+    } = props;
+
+    use_context_provider(|| HyleConfig { blueprint });
+    let adapter = use_static_adapter(source);
+    use_context_provider(|| adapter);
+
+    // Build initial committed values from the single row in the source
+    // by reading all select_fields out of the adapter source signal.
+    // Since source is Ready, we can pull the row directly via a query.
+    let base_query = hyle::Query {
+        model: module.to_owned(),
+        select: select_fields.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    };
+
+    // For the edit form: use_filters with all field values pre-committed.
+    // We pass initial_committed from the source row directly.
+    let initial_committed: IndexMap<String, String> = select_fields
+        .iter()
+        .map(|&k| (k.to_owned(), String::new()))
+        .collect();
+
+    let filters: HyleFiltersState = use_filters(
+        base_query,
+        UseFiltersOptions {
+            initial_committed,
+            change: None,
+        },
+    );
+
+    let only: Vec<String> = select_fields.iter().map(|s| s.to_string()).collect();
+
+    rsx! {
+        form {
+            method: "POST",
+            action: "{action}",
+            enctype: "{enctype}",
+            class: "flex flex-col gap-4 w-full max-w-2xl",
+            input { r#type: "hidden", name: "csrf_token", value: "{csrf_token}" }
+            HyleFormFields { filters, only }
+            { crate::form_actions(&cancel_href, "Save Changes", None) }
+        }
+    }
+}

@@ -1491,9 +1491,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hyle"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b74041b346007bd9e03c0991936e436988fdfe503b41f979552d972204d6a47e"
+checksum = "2e73d01df0c0a6c886a20ae6d11962fea77efc4b0391e592d8995ab1088045fa"
 dependencies = [
  "garde",
  "indexmap",
@@ -1505,9 +1505,9 @@ dependencies = [
 
 [[package]]
 name = "hyle-dioxus"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c739f8f00af9e012579ceb54a13db4d5167f29cb42dd5b48f7fdbb4f6006a81a"
+checksum = "5b065380dce0356067ba5a50f1778a8aaf32a80287329b0c0e1c629d40529929"
 dependencies = [
  "dioxus",
  "dioxus-core",
@@ -1524,9 +1524,9 @@ dependencies = [
 
 [[package]]
 name = "hyle-dioxus-native"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "107171a4ffb648aab646f223d563aaca1b58420b2f1eb27308c3a8fe4a9b56ec"
+checksum = "d04f5f209c9c63dea9c600d4f83e28c347b6b0b551811ea1696a64be49957bfe"
 dependencies = [
  "dioxus",
  "dioxus-signals",

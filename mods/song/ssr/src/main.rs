@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, SongItem, body_str, current_user, display_or_id,
-    edit_form_page, edit_path, form_actions, form_field, html_response, item_menu, item_path,
-    key_transpose_options, parse_pairs, parse_index_items_rich, render_hyle_list, split_path,
+    html_response, item_menu, item_path, key_transpose_options, parse_pairs,
+    parse_index_items_rich, parse_json_array, render_hyle_edit, render_hyle_list, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -153,32 +153,26 @@ pub fn render_detail(payload: &SongItem<'_>, id: &str, ctx: &RequestContext<'_>)
 
 pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     let pairs = parse_pairs(body_str(ctx.body));
-    let title = ndc_dioxus_shared::get_pair(&pairs, "title").unwrap_or("").to_string();
-    let author = ndc_dioxus_shared::get_pair(&pairs, "author").unwrap_or("").to_string();
-    let r#type = ndc_dioxus_shared::get_pair(&pairs, "type").unwrap_or("").to_string();
-    let yt = ndc_dioxus_shared::get_pair(&pairs, "yt").unwrap_or("").to_string();
-    let audio = ndc_dioxus_shared::get_pair(&pairs, "audio").unwrap_or("").to_string();
-    let pdf = ndc_dioxus_shared::get_pair(&pairs, "pdf").unwrap_or("").to_string();
-    let data = ndc_dioxus_shared::get_pair(&pairs, "data").unwrap_or("").to_string();
-    let action = edit_path("song", id);
-    let heading = format!("Edit {}", display_or_id(&title, id));
-    edit_form_page(
-        current_user(ctx),
-        &heading,
-        &action,
+    let all_types = parse_json_array::<String>(
+        ndc_dioxus_shared::get_pair(&pairs, "allTypes").unwrap_or("[]"),
+    );
+    let fields = ["title", "author", "type", "yt", "audio", "pdf", "data"]
+        .iter()
+        .map(|&k| {
+            (
+                k.to_owned(),
+                ndc_dioxus_shared::get_pair(&pairs, k).unwrap_or("").to_owned(),
+            )
+        })
+        .collect();
+    render_hyle_edit(
+        ctx,
+        "song",
         Some("🎸"),
-        rsx! {
-            form { method: "POST", action: "{action}", enctype: "application/x-www-form-urlencoded", class: "flex flex-col gap-4 w-full max-w-2xl",
-                input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
-                { form_field("Title:", "title", &title, None, "text", "w-full") }
-                { form_field("Author:", "author", &author, None, "text", "w-full") }
-                { form_field("Type (e.g., entrada, santo, comunhao):", "type", &r#type, Some(3), "text", "w-full font-mono") }
-                { form_field("YouTube URL:", "yt", &yt, None, "text", "w-full") }
-                { form_field("Audio URL:", "audio", &audio, None, "text", "w-full") }
-                { form_field("PDF URL:", "pdf", &pdf, None, "text", "w-full") }
-                { form_field("Chord Data:", "data", &data, Some(20), "text", "w-full font-mono whitespace-pre") }
-                { form_actions(&item_path("song", id), "Save Changes", None) }
-            }
-        },
+        id,
+        fields,
+        &["title", "type", "author", "yt", "audio", "pdf", "data"],
+        "application/x-www-form-urlencoded",
+        all_types,
     )
 }

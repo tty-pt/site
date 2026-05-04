@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
     ChoirItem, RequestContext, ResponsePayload, body_str, current_user, display_or_id,
-    edit_form_page, edit_path, form_actions, get_pair, html_response, item_menu, item_path,
-    key_names, layout, parse_pairs, parse_index_items_rich, render_hyle_list, split_path,
+    get_pair, html_response, item_menu, item_path, key_names, layout, parse_pairs,
+    parse_index_items_rich, render_hyle_edit, render_hyle_list, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -145,26 +145,18 @@ pub fn render_detail(payload: &ChoirItem<'_>, id: &str, ctx: &RequestContext<'_>
 
 pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 	let pairs = parse_pairs(body_str(ctx.body));
-	let title = get_pair(&pairs, "title").unwrap_or("").to_string();
-	let formats = get_pair(&pairs, "format").unwrap_or("").to_string();
-	let path = edit_path("choir", id);
-	let heading = format!("Edit {}", title);
-	edit_form_page(
-		current_user(ctx),
-		&heading,
-		&path,
+	let fields = ["title", "format"]
+		.iter()
+		.map(|&k| (k.to_owned(), get_pair(&pairs, k).unwrap_or("").to_owned()))
+		.collect();
+	render_hyle_edit(
+		ctx,
+		"choir",
 		Some("🎶"),
-		rsx! {
-			form { method: "POST", action: "/api/choir/{id}/edit", enctype: "multipart/form-data", class: "flex flex-col gap-4 w-full max-w-lg",
-				input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
-				label { "Choir Name:"
-					input { r#type: "text", name: "title", value: "{title}", required: true, class: "w-full" }
-				}
-				label { "Song Formats (one per line):"
-					textarea { name: "format", rows: 10, class: "w-full font-mono", "{formats}" }
-				}
-				{ form_actions(&item_path("choir", id), "Save Changes", None) }
-			}
-		},
+		id,
+		fields,
+		&["title", "format"],
+		"multipart/form-data",
+		vec![],
 	)
 }

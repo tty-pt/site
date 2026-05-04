@@ -11,8 +11,8 @@ typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
  * Writes one line for (id, val) into out (up to out_sz bytes).
  * Returns the number of bytes written (like snprintf, without NUL).
  * NULL → default "id val\r\n" format. */
-typedef size_t (*index_format_fn)(const char *id, const char *val,
-                                  char *out, size_t out_sz);
+typedef size_t (*index_format_fn)(
+        const char *id, const char *val, char *out, size_t out_sz);
 
 NDX_HOOK_DECL(unsigned, index_open,
 	const char *, name,

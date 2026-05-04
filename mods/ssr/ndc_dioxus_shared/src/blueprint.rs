@@ -14,14 +14,28 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                         Model::new()
                             .field("title", Field::string("Title"))
                             .field("type", Field::reference("Type", "song_type"))
-                            .field("author", Field::string("Author")),
+                            .field("author", Field::string("Author"))
+                            .field("yt", Field::string("YouTube URL"))
+                            .field("audio", Field::string("Audio URL"))
+                            .field("pdf", Field::string("PDF URL"))
+                            .field("data", Field::textarea("Chord Data", 20)),
                     )
                     .model(
                         "song_type",
                         Model::new().field("name", Field::string("Name")),
                     )
-                    .model("poem", Model::new().field("title", Field::string("Title")))
-                    .model("choir", Model::new().field("title", Field::string("Title")))
+                    .model(
+                        "poem",
+                        Model::new()
+                            .field("title", Field::string("Title"))
+                            .field("file", Field::file("File")),
+                    )
+                    .model(
+                        "choir",
+                        Model::new()
+                            .field("title", Field::string("Choir Name"))
+                            .field("format", Field::textarea("Song Formats", 10)),
+                    )
                     .model(
                         "songbook",
                         Model::new()
