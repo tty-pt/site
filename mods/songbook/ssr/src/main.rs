@@ -4,7 +4,7 @@ use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, SongbookItem, body_str, current_user, display_or_id,
     edit_form_page, edit_path, empty_state, form_actions, get_pair, html_response, item_menu,
     item_path, key_names, key_transpose_options, layout, parse_json_array, parse_pairs,
-    split_path, parse_index_items_rich, render_index_table,
+    split_path, parse_index_items_rich, render_hyle_list,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -20,9 +20,9 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 			};
 			Some(ndc_dioxus_shared::render_add_form(ctx, "songbook", Some("📖"), extra))
 		}
-		("POST", ["songbook"]) => {
-            let items = parse_index_items_rich(body_str(ctx.body), &[]);
-            Some(render_index_table(ctx, "songbook", Some("📖"), items, &[("title", "Title")]))
+        ("POST", ["songbook"]) => {
+            let items = parse_index_items_rich(body_str(ctx.body), &["choir"]);
+            Some(render_hyle_list(ctx, "songbook", Some("📖"), items, &["title", "choir"], 20))
         }
 		("POST", ["songbook", id, "delete"]) => {
 			Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))

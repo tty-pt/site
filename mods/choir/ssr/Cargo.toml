@@ -8,5 +8,5 @@ autobins = false
 path = "src/main.rs"
 
 [dependencies]
-dioxus = "0.7.6"
+dioxus            = { workspace = true }
 ndc_dioxus_shared = { path = "../../ssr/ndc_dioxus_shared" }

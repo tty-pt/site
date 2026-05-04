@@ -8,16 +8,16 @@ build = "build.rs"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-dioxus = "0.7.6"
-dioxus-ssr = "0.7.6"
+dioxus            = { workspace = true }
+dioxus-ssr        = { workspace = true }
 ndc_dioxus_shared = { path = "../ndc_dioxus_shared" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-url = "2.5"
+serde             = { workspace = true }
+serde_json        = { workspace = true }
+url               = { workspace = true }
 
 [build-dependencies]
-cbindgen = "0.28"
-song_ssr    = { path = "../../song/ssr" }
-poem_ssr    = { path = "../../poem/ssr" }
-choir_ssr   = { path = "../../choir/ssr" }
+cbindgen     = "0.28"
+song_ssr     = { path = "../../song/ssr" }
+poem_ssr     = { path = "../../poem/ssr" }
+choir_ssr    = { path = "../../choir/ssr" }
 songbook_ssr = { path = "../../songbook/ssr" }

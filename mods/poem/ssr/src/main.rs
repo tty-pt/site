@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, PoemItem, body_str, current_user, display_or_id,
     edit_form_page, edit_path, form_actions, html_response_with_head, item_menu, item_path,
-    parse_index_items_rich, render_index_table, split_path,
+    parse_index_items_rich, render_hyle_list, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
@@ -10,7 +10,7 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     match (ctx.method, parts.as_slice()) {
         ("POST", ["poem"]) => {
             let items = parse_index_items_rich(body_str(ctx.body), &[]);
-            Some(render_index_table(ctx, "poem", Some("📜"), items, &[("title", "Title")]))
+            Some(render_hyle_list(ctx, "poem", Some("📜"), items, &["title"], 20))
         }
         _ => ndc_dioxus_shared::default_crud_routes(
             ctx, "poem", Some("📜"),

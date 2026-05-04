@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dioxus = "0.7.6"
-dioxus-ssr = "0.7.6"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-url = "2.5"
+dioxus             = { workspace = true }
+dioxus-ssr         = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+url                = { workspace = true }
+indexmap           = { workspace = true }
+hyle               = { workspace = true }
+hyle-dioxus        = { workspace = true }
+hyle-dioxus-native = { workspace = true }
