@@ -713,6 +713,30 @@ NDX_LISTENER(int, song_for_each, song_for_each_cb_t, cb, void *, user)
 	return 0;
 }
 
+static size_t song_format_line(const char *id, const char *val,
+                               char *out, size_t out_sz)
+{
+	char buf[768], *title, *type;
+	snprintf(buf, sizeof(buf), "%s", val);
+	title = buf;
+	type = strchr(title, '\t');
+	if (type) {
+		*type++ = '\0';
+		char *author = strchr(type, '\t');
+		if (author)
+			*author = '\0';
+	} else {
+		type = "any";
+	}
+	return (size_t)snprintf(out, out_sz, "%s\t%s\t%s\r\n", id, title, type);
+}
+
+static int song_list_handler(int fd, char *body)
+{
+	(void)body;
+	return index_render_list(fd, song_index_hd, song_format_line);
+}
+
 static int song_add_post_handler(int fd, char *body)
 {
 	char id[256] = { 0 }, item_path[PATH_MAX];
@@ -741,6 +765,8 @@ void ndx_install(void)
 	ndx_load("./mods/auth/auth");
 	index_hd = index_open("Song", 0, 1, song_cleanup);
 	build_type_index(dr);
+	ndc_register_handler("GET:/song/", song_list_handler);
+	ndc_register_handler("GET:/song", song_list_handler);
 	ndc_register_handler("POST:/song/add", song_add_post_handler);
 	ndc_register_handler("GET:/song/:id", song_details_handler);
 	ndc_register_handler("GET:/song/:id/edit", song_edit_get_handler);

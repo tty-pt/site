@@ -410,6 +410,231 @@ pub fn empty_state(message: &str) -> Element {
     rsx! { p { class: "text-muted", "{message}" } }
 }
 
+pub struct IndexItem {
+    pub id: String,
+    pub title: String,
+    pub extra: Vec<(String, String)>, // e.g. [("type", "Comunhão")]
+}
+
+/// Parse a list body where lines are either:
+///   tab-separated:   "id\ttitle\textra1\textra2\r\n"  (rich format from song_format_line)
+///   space-separated: "id title\r\n"                   (generic format from index_render_list)
+pub fn parse_index_items_rich(body: &str, extra_keys: &[&str]) -> Vec<IndexItem> {
+    body.lines()
+        .filter_map(|line| {
+            let line = line.trim_end_matches('\r').trim();
+            if line.is_empty() {
+                return None;
+            }
+            if line.contains('\t') {
+                let mut parts = line.splitn(2 + extra_keys.len(), '\t');
+                let id = parts.next()?.to_string();
+                let title = parts.next().unwrap_or("").to_string();
+                let title = if title.is_empty() { id.clone() } else { title };
+                let extra = extra_keys
+                    .iter()
+                    .zip(parts)
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                Some(IndexItem { id, title, extra })
+            } else {
+                let idx = line.find(' ')?;
+                let id = line[..idx].to_string();
+                let title = line[idx + 1..].to_string();
+                let title = if title.is_empty() { id.clone() } else { title };
+                Some(IndexItem { id, title, extra: vec![] })
+            }
+        })
+        .collect()
+}
+
+/// Render a filterable index table for a module.
+///
+/// `filter_fields` is a slice of `(key, label)` pairs used to build the filter form
+/// and table columns. The first element must always be `("title", ...)`.
+/// For any field named `"type"`, a `<select>` dropdown is rendered (populated from
+/// distinct values in `items`); all other fields get a text `<input>`.
+///
+/// Filtering is applied in Rust: each active query param is matched
+/// case-insensitively against the corresponding field of each item.
+pub fn render_index_table(
+    ctx: &RequestContext<'_>,
+    module: &str,
+    icon: Option<&str>,
+    items: Vec<IndexItem>,
+    filter_fields: &[(&str, &str)],
+) -> ResponsePayload {
+    let query_pairs = parse_pairs(ctx.query);
+
+    // Collect active filter values from query string
+    let filters: Vec<(String, String)> = filter_fields
+        .iter()
+        .map(|(key, _)| {
+            let val = get_pair(&query_pairs, key).unwrap_or("").to_string();
+            (key.to_string(), val)
+        })
+        .collect();
+
+    // Collect distinct values for "type" field (for select dropdown)
+    let type_values: Vec<String> = {
+        let mut vals: Vec<String> = items
+            .iter()
+            .flat_map(|item| {
+                item.extra
+                    .iter()
+                    .filter(|(k, _)| k == "type")
+                    .map(|(_, v)| v.clone())
+            })
+            .collect();
+        vals.sort();
+        vals.dedup();
+        vals
+    };
+
+    // Apply filters
+    let filtered: Vec<&IndexItem> = items
+        .iter()
+        .filter(|item| {
+            filters.iter().all(|(key, val)| {
+                if val.is_empty() {
+                    return true;
+                }
+                let val_lower = val.to_lowercase();
+                if key == "title" {
+                    item.title.to_lowercase().contains(&val_lower)
+                } else {
+                    item.extra
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map(|(_, v)| {
+                            // for type: exact match (it's a select)
+                            if key == "type" {
+                                v.to_lowercase() == val_lower
+                            } else {
+                                v.to_lowercase().contains(&val_lower)
+                            }
+                        })
+                        .unwrap_or(false)
+                }
+            })
+        })
+        .collect();
+
+    let add_href = format!("/{module}/add");
+    let collection_href = format!("/{module}/");
+    let menu_items = crate::current_user(ctx).map(|_| {
+        rsx! {
+            a { href: "{add_href}", class: "btn",
+                span { "➕" }
+                label { "add" }
+            }
+        }
+    });
+
+    // Build filter_fields and type_values as owned data for the closure
+    let filter_fields_owned: Vec<(String, String)> = filter_fields
+        .iter()
+        .map(|(k, l)| (k.to_string(), l.to_string()))
+        .collect();
+
+    let has_extra_cols = filter_fields.len() > 1;
+
+    crate::html_response(
+        module,
+        crate::layout(
+            crate::current_user(ctx),
+            module,
+            &collection_href,
+            Some(icon.unwrap_or("🏠")),
+            menu_items,
+            rsx! {
+                div { class: "center",
+                    // Filter form
+                    form { method: "get", action: "{collection_href}", class: "flex flex-wrap gap-2 mb-4 items-end",
+                        for (key, label) in filter_fields_owned.iter() {
+                            label { class: "flex flex-col gap-1 text-sm",
+                                "{label}"
+                                if key == "type" {
+                                    select { name: "{key}", class: "p-1 border rounded",
+                                        option { value: "", "All" }
+                                        for type_val in type_values.iter() {
+                                            {
+                                                let selected = filters.iter()
+                                                    .find(|(k, _)| k == key)
+                                                    .map(|(_, v)| v == type_val)
+                                                    .unwrap_or(false);
+                                                rsx! {
+                                                    option {
+                                                        value: "{type_val}",
+                                                        selected,
+                                                        "{type_val}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    {
+                                        let cur_val = filters.iter()
+                                            .find(|(k, _)| k == key)
+                                            .map(|(_, v)| v.as_str())
+                                            .unwrap_or("");
+                                        rsx! {
+                                            input {
+                                                r#type: "text",
+                                                name: "{key}",
+                                                value: "{cur_val}",
+                                                class: "p-1 border rounded"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        button { r#type: "submit", class: "btn", "Filter" }
+                    }
+                    // Results
+                    if filtered.is_empty() {
+                        { crate::empty_state("No items found.") }
+                    } else {
+                        table { class: "w-full max-w-2xl text-left border-collapse",
+                            thead {
+                                tr {
+                                    for (_, label) in filter_fields_owned.iter() {
+                                        th { class: "border-b p-2 text-sm font-semibold", "{label}" }
+                                    }
+                                }
+                            }
+                            tbody {
+                                for item in filtered.iter() {
+                                    tr { class: "border-b hover:bg-surface",
+                                        td { class: "p-2",
+                                            a { href: "/{module}/{item.id}/", class: "hover:underline", "{item.title}" }
+                                        }
+                                        if has_extra_cols {
+                                            for (key, _) in filter_fields_owned.iter().skip(1) {
+                                                td { class: "p-2 text-sm text-muted",
+                                                    {
+                                                        let v = item.extra.iter()
+                                                            .find(|(k, _)| k == key)
+                                                            .map(|(_, v)| v.as_str())
+                                                            .unwrap_or("");
+                                                        rsx! { "{v}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ),
+    )
+}
+
 fn parse_index_items(body: &str) -> Vec<(String, String)> {
     body.lines()
         .filter_map(|line| {

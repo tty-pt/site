@@ -18,6 +18,8 @@
 typedef void (*index_cleanup_fn)(const char *id);
 typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
 typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
+typedef size_t (*index_format_fn)(const char *id, const char *val,
+                                  char *out, size_t out_sz);
 
 #define MAX_MODULES 64
 
@@ -208,49 +210,49 @@ NDX_LISTENER(int, index_add_item,
 	return 0;
 }
 
-static int index_page(unsigned fd, unsigned hd, char *path)
+NDX_LISTENER(int, index_render_list,
+	int, fd,
+	unsigned, hd,
+	index_format_fn, fmt)
 {
 	register size_t total = 0;
 	size_t body_len;
 	unsigned cur = qmap_iter(hd, NULL, 0);
 	const void *key, *val;
 	char *body, *s;
+	char path[1024];
 	int ret;
 
-	// count body size
+	ndc_env_get(fd, path, "DOCUMENT_URI");
+
+	// count body size (generous upper bound per entry)
 	while (qmap_next(&key, &val, cur)) {
-		register size_t klen, vlen;
-		klen = qmap_len(QM_STR, key);
-		vlen = qmap_len(QM_STR, val);
-		total += klen + vlen + 3;
+		total += qmap_len(QM_STR, key) + qmap_len(QM_STR, val) + 4;
 	}
 
-	// alloc it
 	total++;
 	body = malloc(total);
 	s = body;
 
-	// store it
 	cur = qmap_iter(hd, NULL, 0);
 	while (qmap_next(&key, &val, cur)) {
-		s += sprintf(s, "%s %s\r\n", (char *)key, (char *)val);
+		if (fmt) {
+			s += fmt((const char *)key, (const char *)val,
+			         s, total - (size_t)(s - body));
+		} else {
+			s += sprintf(s, "%s %s\r\n",
+			             (char *)key, (char *)val);
+		}
 	}
 	body_len = (size_t)(s - body);
-
-	// send it
 	*s = '\0';
+
 	{
 		char query[512] = { 0 };
-		const char *username = get_request_user((int)fd);
-		ndc_env_get((int)fd, query, "QUERY_STRING");
-		ret = ssr_render(
-		        (int)fd,
-		        "POST",
-		        path,
-		        query,
-		        body,
-		        body_len,
-		        username ? username : "");
+		const char *username = get_request_user(fd);
+		ndc_env_get(fd, query, "QUERY_STRING");
+		ret = ssr_render(fd, "POST", path, query, body, body_len,
+		                 username ? username : "");
 	}
 	free(body);
 	return ret;
@@ -258,18 +260,13 @@ static int index_page(unsigned fd, unsigned hd, char *path)
 
 static int index_list_handler(int fd, char *body)
 {
-	char path[1024];
-	unsigned hd;
 	const char *module;
+	unsigned hd;
 
 	(void)body;
 	module = index_name(fd);
-
 	hd = *(unsigned *)qmap_get(module_hd, module);
-
-	ndc_env_get(fd, path, "DOCUMENT_URI");
-
-	return index_page((unsigned)fd, hd, path);
+	return index_render_list(fd, hd, NULL);
 }
 
 NDX_LISTENER(unsigned, index_open,

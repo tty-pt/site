@@ -7,6 +7,13 @@ typedef void (*index_cleanup_fn)(const char *id);
 typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
 typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
 
+/* Optional serializer for index_render_list.
+ * Writes one line for (id, val) into out (up to out_sz bytes).
+ * Returns the number of bytes written (like snprintf, without NUL).
+ * NULL → default "id val\r\n" format. */
+typedef size_t (*index_format_fn)(const char *id, const char *val,
+                                  char *out, size_t out_sz);
+
 NDX_HOOK_DECL(unsigned, index_open,
 	const char *, name,
 	unsigned, mask,
@@ -39,6 +46,10 @@ NDX_HOOK_DECL(int, index_tsv_rebuild,
 	index_item_read_fn, item_read_fn);
 
 NDX_HOOK_DECL(int, core_get, int, fd, char *, body);
+NDX_HOOK_DECL(int, index_render_list,
+	int, fd,
+	unsigned, hd,
+	index_format_fn, fmt);
 NDX_HOOK_DECL(size_t, index_get_module_count, int, dummy);
 NDX_HOOK_DECL(const char *, index_get_module_id, size_t, i);
 NDX_HOOK_DECL(const char *, index_get_module_title, size_t, i);

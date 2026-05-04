@@ -1,11 +1,23 @@
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
-    RequestContext, ResponsePayload, PoemItem, current_user, display_or_id, edit_form_page,
-    edit_path, form_actions, html_response_with_head, item_menu, item_path,
+    RequestContext, ResponsePayload, PoemItem, body_str, current_user, display_or_id,
+    edit_form_page, edit_path, form_actions, html_response_with_head, item_menu, item_path,
+    parse_index_items_rich, render_index_table, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	ndc_dioxus_shared::default_crud_routes(ctx, "poem", Some("📜"), None::<ndc_dioxus_shared::CrudHandler>, None::<ndc_dioxus_shared::CrudHandler>)
+    let parts = split_path(ctx.path);
+    match (ctx.method, parts.as_slice()) {
+        ("POST", ["poem"]) => {
+            let items = parse_index_items_rich(body_str(ctx.body), &[]);
+            Some(render_index_table(ctx, "poem", Some("📜"), items, &[("title", "Title")]))
+        }
+        _ => ndc_dioxus_shared::default_crud_routes(
+            ctx, "poem", Some("📜"),
+            None::<ndc_dioxus_shared::CrudHandler>,
+            None::<ndc_dioxus_shared::CrudHandler>,
+        ),
+    }
 }
 
 pub fn render_detail(payload: &PoemItem<'_>, id: &str, ctx: &RequestContext<'_>) -> ResponsePayload {
