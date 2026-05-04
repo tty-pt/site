@@ -1,0 +1,21 @@
+Checks: >
+  readability-*,
+  clang-analyzer-*,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-avoid-const-params-in-decls,
+  -readability-non-const-parameter,
+  -readability-braces-around-statements,
+  -readability-redundant-declaration,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-security.insecureAPI.strcpy
+
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '15'
+  - key: readability-function-cognitive-complexity.DescribeBasicIncrements
+    value: 'false'
+
+HeaderFilterRegex: '.*'

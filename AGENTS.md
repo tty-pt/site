@@ -119,7 +119,17 @@ Use `NDX_DEF` in the implementation and `NDX_DECL` in the header.
 
 ### Style
 
-- Tabs for indentation
+- **Tabs for indentation.** Not spaces. If you indent with spaces you are
+  wrong, and I don't mean "wrong" in some aesthetic sense — I mean you are
+  *objectively, factually wrong*. Tabs. One tab per level. This is enforced
+  by `.clang-format` and there is nothing to discuss.
+- **Maximum 4 levels of indentation.** If you need more than 4 levels, your
+  code is broken. Not "suboptimal." Not "a bit hard to read." *Broken.* You
+  have written garbage and you should feel bad. Extract a function. Invert a
+  condition. Use a guard clause. Do literally anything except keep stacking
+  indentation like it makes you look smart. It doesn't. This is enforced by
+  `clang-tidy` — run `make lint` and fix every single warning before
+  committing.
 - System includes first, then local includes
 - `snake_case` for functions/vars
 - `UPPER_CASE` for macros
