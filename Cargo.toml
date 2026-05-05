@@ -27,3 +27,4 @@ indexmap           = { version = "2", features = ["serde"] }
 hyle               = { version = "0.1.3" }
 hyle-dioxus        = { version = "0.1.3" }
 hyle-dioxus-native = { version = "0.1.3" }
+ndx                = "0.1"

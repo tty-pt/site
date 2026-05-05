@@ -49,22 +49,6 @@ fn main() {
 	modules.sort();
 	ffi_modules.sort();
 
-	// Generate ssr_ffi.h — scan lib.rs plus every module's render_ffi.rs so that
-	// module-specific #[repr(C)] structs (defined there) appear in the header.
-	let header_out = manifest_dir.join("../ssr_ffi.h");
-	let config = cbindgen::Config::from_file(manifest_dir.join("cbindgen.toml"))
-		.expect("cbindgen.toml not found");
-	let mut builder = cbindgen::Builder::new()
-		.with_src(manifest_dir.join("src/lib.rs"));
-	for (_, ffi_path) in &ffi_modules {
-		builder = builder.with_src(ffi_path);
-	}
-	builder
-		.with_config(config)
-		.generate()
-		.expect("cbindgen failed to generate ssr_ffi.h")
-		.write_to_file(&header_out);
-
 	// Generate the route dispatcher and per-module FFI submodule includes.
 	let mut source = String::new();
 

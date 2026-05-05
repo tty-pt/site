@@ -5,19 +5,25 @@ edition = "2024"
 build = "build.rs"
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 dioxus            = { workspace = true }
 dioxus-ssr        = { workspace = true }
 ndc_dioxus_shared = { path = "../ndc_dioxus_shared" }
+ndx               = "0.1"
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 url               = { workspace = true }
 
 [build-dependencies]
-cbindgen     = "0.28"
 song_ssr     = { path = "../../song/ssr" }
 poem_ssr     = { path = "../../poem/ssr" }
 choir_ssr    = { path = "../../choir/ssr" }
 songbook_ssr = { path = "../../songbook/ssr" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

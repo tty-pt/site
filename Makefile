@@ -1,4 +1,5 @@
-CC ?= clang
+CC  ?= clang
+DEV ?= 0
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
@@ -9,12 +10,13 @@ mods: mods/ssr
 	@for d in $(MOD_DIRS); do [ "$$d" = "mods/ssr" ] && continue; $(MAKE) -C $$d; done
 
 mods/ssr:
-	$(MAKE) -C mods/ssr
+	$(MAKE) -C mods/ssr DEV=$(DEV)
 
 modules:
 	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done
 
-run: all
+run:
+	$(MAKE) DEV=1 all
 	./start.sh
 
 MODS != cat mods.load

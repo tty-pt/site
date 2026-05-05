@@ -1,18 +1,29 @@
 RUST_RENDERER_DIR = rust-renderer
-RUST_RENDERER_LIB = ../../target/release/libndc_dioxus.a
+RUST_TARGET_DIR   = ../../target
+TARGET            = ssr.so
+DEV              ?= 0
 
-EXTRA_LDLIBS += ${RUST_RENDERER_LIB} -lqsys
-EXTRA_LDLIBS-OpenBSD += -lexecinfo -lpthread -lc++abi -lcompiler_rt
-LDFLAGS += -shared
-
-include ../../build.mk
+ifeq ($(DEV),1)
+CARGO_FLAGS   =
+CARGO_OUT_DIR = $(RUST_TARGET_DIR)/debug
+else
+CARGO_FLAGS   = --release
+CARGO_OUT_DIR = $(RUST_TARGET_DIR)/release
+endif
 
 rust-renderer:
-	cargo build --manifest-path ${RUST_RENDERER_DIR}/Cargo.toml --release
+	cargo build --manifest-path $(RUST_RENDERER_DIR)/Cargo.toml \
+		--target-dir $(RUST_TARGET_DIR) $(CARGO_FLAGS)
 
-${TARGET}: rust-renderer
+$(TARGET): rust-renderer
+	cp $(CARGO_OUT_DIR)/libndc_dioxus.so $@
+
+all: ${TARGET}
+
+clean:
+	rm -f ${TARGET}
 
 distclean: clean
 	cargo clean --manifest-path ${RUST_RENDERER_DIR}/Cargo.toml
 
-.PHONY: distclean rust-renderer
+.PHONY: all clean distclean rust-renderer
