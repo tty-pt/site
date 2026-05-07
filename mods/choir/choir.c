@@ -26,6 +26,8 @@
 
 #define CHOIR_SONGS_PATH "items/choir/items"
 static unsigned index_hd = 0;
+static unsigned choir_index_hd = 0;
+static unsigned choir_meta_qtype = 0;
 
 typedef struct {
 	char title[256];
@@ -64,6 +66,42 @@ static int choir_meta_write(const char *item_path, const choir_meta_t *meta)
 	        item_path, "format", meta->format, strlen(meta->format));
 }
 
+static int choir_index_write_file(const char *root)
+{
+	char path[PATH_MAX], tmp[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/items/choir/index.tsv", root);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE *fp = fopen(tmp, "w");
+	if (!fp)
+		return -1;
+	unsigned c = qmap_iter(choir_index_hd, NULL, 0);
+	const void *k, *v;
+	while (qmap_next(&k, &v, c)) {
+		const choir_meta_t *m = (const choir_meta_t *)v;
+		char title[256], fmt[2048];
+		char *p;
+		snprintf(title, sizeof(title), "%s", m->title);
+		snprintf(fmt, sizeof(fmt), "%s", m->format);
+		index_field_clean(title);
+		/* Replace newlines in format with '|' for TSV storage */
+		for (p = fmt; *p; p++) {
+			if (*p == '\n' || *p == '\r')
+				*p = '|';
+		}
+		fprintf(fp, "%s\t%s\t%s\n", (const char *)k, title, fmt);
+	}
+	if (fclose(fp) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return rename(tmp, path);
+}
+
+static void choir_index_put_meta(const char *id, const choir_meta_t *meta)
+{
+	qmap_put(choir_index_hd, id, meta);
+}
+
 #include "repertoire_impl.inc"
 
 static int handle_choir_edit_authorized(
@@ -93,6 +131,8 @@ static int handle_choir_edit_authorized(
 		return server_error(fd, "Failed to write choir metadata");
 	if (t_len > 0)
 		index_put(index_hd, (char *)ctx->id, meta.title);
+	if (t_len > 0 || f_len > 0)
+		choir_index_put_meta(ctx->id, &meta);
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
@@ -564,4 +604,77 @@ void ndx_install(void)
 	        handle_choir_song_delete);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 	index_hd = index_open("Choir", 0, 1, NULL);
+	{
+		char doc_root[256] = { 0 };
+		get_doc_root(0, doc_root, sizeof(doc_root));
+		const char *root = doc_root[0] ? doc_root : ".";
+		choir_meta_qtype = qmap_reg(sizeof(choir_meta_t));
+		choir_index_hd = qmap_open(
+		        NULL, "choir_idx", QM_STR, choir_meta_qtype, 0x3FF,
+		        QM_SORTED);
+		char path[PATH_MAX];
+		snprintf(path, sizeof(path), "%s/items/choir/index.tsv", root);
+		FILE *fp = fopen(path, "r");
+		if (fp) {
+			char line[4096];
+			while (fgets(line, sizeof(line), fp)) {
+				char *id = line;
+				char *nl = strpbrk(line, "\r\n");
+				if (nl)
+					*nl = '\0';
+				char *val = strchr(id, '\t');
+				if (!val)
+					continue;
+				*val++ = '\0';
+				choir_meta_t meta;
+				memset(&meta, 0, sizeof(meta));
+				char *fmt = strchr(val, '\t');
+				if (fmt) {
+					*fmt++ = '\0';
+					/* Restore newlines from '|' */
+					char *p;
+					snprintf(
+					        meta.format,
+					        sizeof(meta.format),
+					        "%s",
+					        fmt);
+					for (p = meta.format; *p; p++) {
+						if (*p == '|')
+							*p = '\n';
+					}
+				}
+				snprintf(
+				        meta.title,
+				        sizeof(meta.title),
+				        "%s",
+				        val);
+				qmap_put(choir_index_hd, id, &meta);
+			}
+			fclose(fp);
+		} else {
+			/* Rebuild from filesystem */
+			char p[PATH_MAX];
+			if (module_items_path_build(root, "choir", p, sizeof(p)) == 0) {
+				DIR *d = opendir(p);
+				if (d) {
+					struct dirent *e;
+					while ((e = readdir(d))) {
+						char ip[PATH_MAX];
+						choir_meta_t meta;
+						if (e->d_name[0] == '.')
+							continue;
+						if (item_path_build_root(
+						            root, "choir",
+						            e->d_name, ip,
+						            sizeof(ip)) != 0)
+							continue;
+						choir_meta_read(ip, &meta);
+						choir_index_put_meta(e->d_name, &meta);
+					}
+					closedir(d);
+					choir_index_write_file(root);
+				}
+			}
+		}
+	}
 }

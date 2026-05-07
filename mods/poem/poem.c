@@ -20,6 +20,8 @@
 #define POEM_ITEMS_PATH "items/poem/items"
 
 static unsigned index_hd;
+static unsigned poem_index_hd = 0;
+static unsigned poem_meta_qtype = 0;
 
 typedef struct {
 	char title[256];
@@ -40,6 +42,35 @@ static int poem_meta_write(const char *item_path, const poem_meta_t *meta)
 		{ "title", (char *)meta->title, sizeof(meta->title) },
 	};
 	return meta_fields_write(item_path, fields, 1);
+}
+
+static int poem_index_write_file(const char *root)
+{
+	char path[PATH_MAX], tmp[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/items/poem/index.tsv", root);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE *fp = fopen(tmp, "w");
+	if (!fp)
+		return -1;
+	unsigned c = qmap_iter(poem_index_hd, NULL, 0);
+	const void *k, *v;
+	while (qmap_next(&k, &v, c)) {
+		const poem_meta_t *m = (const poem_meta_t *)v;
+		char title[256];
+		snprintf(title, sizeof(title), "%s", m->title);
+		index_field_clean(title);
+		fprintf(fp, "%s\t%s\n", (const char *)k, title);
+	}
+	if (fclose(fp) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return rename(tmp, path);
+}
+
+static void poem_index_put_meta(const char *id, const poem_meta_t *meta)
+{
+	qmap_put(poem_index_hd, id, meta);
 }
 
 static int poem_write_uploaded_html(const char *item_path)
@@ -280,6 +311,7 @@ poem_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 		meta.title[title_len] = '\0';
 		poem_meta_write(ctx->item_path, &meta);
 		index_put(index_hd, (char *)ctx->id, meta.title);
+		poem_index_put_meta(ctx->id, &meta);
 	}
 	poem_write_uploaded_html(ctx->item_path);
 	char redirect_path[256];
@@ -315,9 +347,63 @@ static int poem_edit_post_handler(int fd, char *body)
 
 void ndx_install(void)
 {
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/index/index");
+	ndx_load("./mods/common/common");
 	index_hd = index_open("Poem", 0, 1, NULL);
+	poem_meta_qtype = qmap_reg(sizeof(poem_meta_t));
+	poem_index_hd = qmap_open(
+	        NULL, "poem_idx", QM_STR, poem_meta_qtype, 0x3FF, QM_SORTED);
+	{
+		const char *root = doc_root[0] ? doc_root : ".";
+		char path[PATH_MAX];
+		snprintf(path, sizeof(path), "%s/items/poem/index.tsv", root);
+		FILE *fp = fopen(path, "r");
+		if (fp) {
+			char line[512];
+			while (fgets(line, sizeof(line), fp)) {
+				char *id = line;
+				char *nl = strpbrk(line, "\r\n");
+				if (nl)
+					*nl = '\0';
+				char *val = strchr(id, '\t');
+				if (!val)
+					continue;
+				*val++ = '\0';
+				poem_meta_t meta;
+				memset(&meta, 0, sizeof(meta));
+				snprintf(meta.title, sizeof(meta.title), "%s", val);
+				qmap_put(poem_index_hd, id, &meta);
+			}
+			fclose(fp);
+		} else {
+			/* Rebuild from filesystem */
+			char p[PATH_MAX];
+			if (module_items_path_build(root, "poem", p, sizeof(p)) == 0) {
+				DIR *d = opendir(p);
+				if (d) {
+					struct dirent *e;
+					while ((e = readdir(d))) {
+						char ip[PATH_MAX];
+						poem_meta_t meta;
+						if (e->d_name[0] == '.')
+							continue;
+						if (item_path_build_root(
+						            root, "poem",
+						            e->d_name, ip,
+						            sizeof(ip)) != 0)
+							continue;
+						poem_meta_read(ip, &meta);
+						poem_index_put_meta(e->d_name, &meta);
+					}
+					closedir(d);
+					poem_index_write_file(root);
+				}
+			}
+		}
+	}
 	ndc_register_handler("POST:/poem/add", poem_add_post_handler);
 	ndc_register_handler("GET:/poem/:id/*", poem_child_file_handler);
 	ndc_register_handler("GET:/poem/:id", poem_detail_handler);

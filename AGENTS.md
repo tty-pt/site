@@ -37,8 +37,11 @@ For manual startup:
 
 ```bash
 cd /home/quirinpa/site
-setsid ndc -C . -p 8080 -d >> /tmp/site.log 2>&1 &
+setsid ndc -C . -p 8080 -d -m mods/core/core >> /tmp/site.log 2>&1 &
 ```
+
+The `-m mods/core/core` flag is required. Without it no modules load, no
+handlers are registered, and requests will crash or return unexpected errors.
 
 ## Testing
 

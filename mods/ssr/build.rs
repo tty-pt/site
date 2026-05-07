@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn main() {
 	let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-	let mods_dir = manifest_dir.join("../..");
+	let mods_dir = manifest_dir.join("..");
 	let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 	let generated = out_dir.join("generated_routes.rs");
 	let mut modules: Vec<(String, PathBuf)> = Vec::new();

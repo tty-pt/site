@@ -117,6 +117,18 @@ where
 // ── GET handler (served via ndc_register_handler) ────────────────────────────
 
 unsafe extern "C" fn ssr_get_handler(fd: c_int, body: *mut c_char) -> c_int {
+    // diagnostic: log NDX.call state before dispatch
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true).open("/tmp/ssr_diag.log")
+        .or_else(|_| std::fs::OpenOptions::new()
+            .create(true).append(true).open("tmp/ssr_diag.log"))
+    {
+        use std::io::Write;
+        let call_ptr: usize = unsafe {
+            NDX.call.map(|f| f as usize).unwrap_or(0)
+        };
+        let _ = writeln!(f, "ssr_get_handler: NDX.call={:#x}", call_ptr);
+    }
     unsafe { core_get(fd, body) }
 }
 

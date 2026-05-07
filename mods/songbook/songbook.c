@@ -26,6 +26,7 @@
 #define SB_SONGS_BUF_SIZE 65536
 static unsigned index_hd = 0;
 static unsigned songbook_index_hd = 0;
+static unsigned songbook_meta_qtype = 0;
 static char g_doc_root[256] = ".";
 
 typedef struct {
@@ -74,29 +75,33 @@ songbook_meta_write(const char *item_path, const songbook_meta_t *meta)
 static int songbook_index_write_file(const char *doc_root)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	char path[PATH_MAX];
+	char path[PATH_MAX], tmp[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", root);
-	return index_tsv_save(songbook_index_hd, path);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE *fp = fopen(tmp, "w");
+	if (!fp)
+		return -1;
+	unsigned c = qmap_iter(songbook_index_hd, NULL, 0);
+	const void *k, *v;
+	while (qmap_next(&k, &v, c)) {
+		const songbook_meta_t *m = (const songbook_meta_t *)v;
+		char title[256], choir[128];
+		snprintf(title, sizeof(title), "%s", m->title);
+		snprintf(choir, sizeof(choir), "%s", m->choir);
+		index_field_clean(title);
+		index_field_clean(choir);
+		fprintf(fp, "%s\t%s\t%s\n", (const char *)k, title, choir);
+	}
+	if (fclose(fp) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return rename(tmp, path);
 }
-
-static void
-songbook_format_index_val(const songbook_meta_t *meta, char *out, size_t sz)
-{
-	char title[256], choir[128];
-	snprintf(title, sizeof(title), "%s", meta->title);
-	snprintf(choir, sizeof(choir), "%s", meta->choir);
-	index_field_clean(title);
-	index_field_clean(choir);
-	snprintf(out, sz, "%s\t%s", title, choir);
-}
-
 static void songbook_index_put_meta(const char *id, const songbook_meta_t *meta)
 {
-	char val[512];
-	songbook_format_index_val(meta, val, sizeof(val));
-	qmap_put(songbook_index_hd, id, val);
+	qmap_put(songbook_index_hd, id, meta);
 }
-
 static int songbook_index_upsert(
         const char *doc_root, const char *id, const char *item_path)
 {
@@ -113,21 +118,29 @@ static void songbook_cleanup(const char *id)
 	songbook_index_write_file(g_doc_root);
 }
 
-static int songbook_item_read_for_index(const char *path, char *out, size_t sz)
-{
-	songbook_meta_t meta;
-	songbook_meta_read(path, &meta);
-	songbook_format_index_val(&meta, out, sz);
-	return 0;
-}
-
 static void songbook_index_rebuild(const char *doc_root)
 {
-	index_tsv_rebuild(
-	        doc_root,
-	        "songbook",
-	        songbook_index_hd,
-	        songbook_item_read_for_index);
+	char p[PATH_MAX];
+	struct dirent *e;
+	DIR *d;
+	if (module_items_path_build(doc_root, "songbook", p, sizeof(p)) != 0)
+		return;
+	d = opendir(p);
+	if (!d)
+		return;
+	while ((e = readdir(d))) {
+		char item_path[PATH_MAX];
+		songbook_meta_t meta;
+		if (e->d_name[0] == '.')
+			continue;
+		if (item_path_build_root(
+		            doc_root, "songbook", e->d_name, item_path,
+		            sizeof(item_path)) != 0)
+			continue;
+		songbook_meta_read(item_path, &meta);
+		songbook_index_put_meta(e->d_name, &meta);
+	}
+	closedir(d);
 	songbook_index_write_file(doc_root);
 }
 
@@ -959,12 +972,52 @@ void ndx_install(void)
 	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
 	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 
+	songbook_meta_qtype = qmap_reg(sizeof(songbook_meta_t));
 	songbook_index_hd = qmap_open(
-	        NULL, "songbook_idx", QM_STR, QM_STR, 0x3FF, QM_SORTED);
-	char path[PATH_MAX];
-	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", doc_root);
-	if (index_tsv_load(songbook_index_hd, path, NULL, NULL) != 0)
-		songbook_index_rebuild(doc_root);
+	        NULL, "songbook_idx", QM_STR, songbook_meta_qtype, 0x3FF,
+	        QM_SORTED);
+	{
+		char path[PATH_MAX];
+		snprintf(
+		        path,
+		        sizeof(path),
+		        "%s/items/songbook/index.tsv",
+		        doc_root);
+		FILE *fp = fopen(path, "r");
+		if (fp) {
+			char line[1024];
+			while (fgets(line, sizeof(line), fp)) {
+				char *id = line;
+				char *nl = strpbrk(line, "\r\n");
+				if (nl)
+					*nl = '\0';
+				char *val = strchr(id, '\t');
+				if (!val)
+					continue;
+				*val++ = '\0';
+				songbook_meta_t meta;
+				memset(&meta, 0, sizeof(meta));
+				char *choir = strchr(val, '\t');
+				if (choir) {
+					*choir++ = '\0';
+					snprintf(
+					        meta.choir,
+					        sizeof(meta.choir),
+					        "%s",
+					        choir);
+				}
+				snprintf(
+				        meta.title,
+				        sizeof(meta.title),
+				        "%s",
+				        val);
+				qmap_put(songbook_index_hd, id, &meta);
+			}
+			fclose(fp);
+		} else {
+			songbook_index_rebuild(doc_root);
+		}
+	}
 
 	index_hd = index_open("Songbook", 0, 1, songbook_cleanup);
 

@@ -18,11 +18,11 @@ Deno.test("song list: /song/ renders with song links", async () => {
     // Navigate to /song/ — no auth required for list view
     await page.goto(`${BASE}/song/`, { waitUntil: "domcontentloaded" });
 
-    // Wait for the table rows to render (HyleTablePanel renders rowClickable rows)
-    await page.waitForSelector("tr.rowClickable", { timeout: 5000 });
+    // Wait for the table rows to render (HyleTablePanel renders hyle-row-clickable rows)
+    await page.waitForSelector("tr.hyle-row-clickable", { timeout: 5000 });
 
     // Should contain at least one song link (there are 440+ songs in the fixture data)
-    const links = await page.$$('tr.rowClickable a[href^="/song/"]');
+    const links = await page.$$('tr.hyle-row-clickable a[href^="/song/"]');
     if (links.length === 0) {
       throw new Error("Expected at least one song link on /song/, found none.");
     }

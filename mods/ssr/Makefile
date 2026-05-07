@@ -1,4 +1,3 @@
-RUST_RENDERER_DIR = rust-renderer
 RUST_TARGET_DIR   = ../../target
 TARGET            = ssr.so
 DEV              ?= 0
@@ -11,19 +10,21 @@ CARGO_FLAGS   = --release
 CARGO_OUT_DIR = $(RUST_TARGET_DIR)/release
 endif
 
+all: ${TARGET}
+
 rust-renderer:
-	cargo build --manifest-path $(RUST_RENDERER_DIR)/Cargo.toml \
+	cargo build --manifest-path Cargo.toml \
 		--target-dir $(RUST_TARGET_DIR) $(CARGO_FLAGS)
 
 $(TARGET): rust-renderer
-	cp $(CARGO_OUT_DIR)/libndc_dioxus.so $@
-
-all: ${TARGET}
+	@if ! cmp -s $(CARGO_OUT_DIR)/libndc_dioxus.so $@; then \
+		cp $(CARGO_OUT_DIR)/libndc_dioxus.so $@; \
+	fi
 
 clean:
 	rm -f ${TARGET}
 
 distclean: clean
-	cargo clean --manifest-path ${RUST_RENDERER_DIR}/Cargo.toml
+	cargo clean --manifest-path Cargo.toml
 
 .PHONY: all clean distclean rust-renderer

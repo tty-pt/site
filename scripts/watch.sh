@@ -26,4 +26,4 @@ fi
 make test-data-dirs >/dev/null 2>&1
 
 echo "Starting watch loop. Server logs will be visible here."
-find_files | entr -c -r sh -c "make && DEBUG=1 ./start.sh"
+find_files | entr -n -r sh -c "make && DEBUG=1 ./start.sh"
