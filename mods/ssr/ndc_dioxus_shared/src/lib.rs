@@ -6,6 +6,8 @@ pub use hyle_ssr::{items_to_source, item_to_source, render_hyle_edit, render_hyl
 
 use dioxus::prelude::*;
 use dioxus_ssr::render_element;
+use serde::Deserialize;
+use std::ffi::c_int;
 
 use url::form_urlencoded;
 
@@ -22,6 +24,7 @@ impl<'a> ModuleRef<'a> {
 }
 
 pub struct RequestContext<'a> {
+    pub fd:          c_int,
     pub method:      &'a str,
     pub path:        &'a str,
     pub query:       &'a str,
@@ -36,6 +39,26 @@ pub struct ResponsePayload {
     pub content_type: String,
     pub location: Option<String>,
     pub body: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DatasetField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub writable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DatasetPayload<T> {
+    pub dataset: String,
+    pub version: u32,
+    #[serde(rename = "keyField")]
+    pub key_field: String,
+    pub fields: Vec<DatasetField>,
+    pub rows: Vec<T>,
+    #[serde(default)]
+    pub includes: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Safe borrowed view of song item data passed from C via FFI.
@@ -254,6 +277,10 @@ pub fn display_or_id<'a>(title: &'a str, id: &'a str) -> &'a str {
 
 pub fn parse_json_array<T: for<'de> serde::Deserialize<'de>>(raw: &str) -> Vec<T> {
     serde_json::from_str(raw).unwrap_or_default()
+}
+
+pub fn parse_json_object<T: for<'de> serde::Deserialize<'de>>(raw: &str) -> Option<T> {
+    serde_json::from_str(raw).ok()
 }
 
 pub fn edit_path(module: &str, id: &str) -> String {

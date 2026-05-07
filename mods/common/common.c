@@ -1,5 +1,6 @@
 #include <ttypt/ndx-mod.h>
 
+#include "common_dataset.c"
 #include "common_encoding.c"
 #include "common_form.c"
 #include "common_json.c"
@@ -8,4 +9,6 @@
 #include "common_storage.c"
 
 MODULE_API void ndx_install(void)
-{}
+{
+	dataset_install_routes();
+}

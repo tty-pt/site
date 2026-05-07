@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -6,6 +7,78 @@ use web_sys::{
     HtmlFormElement, HtmlInputElement, HtmlOptionElement, HtmlSelectElement, RequestInit, Response,
     Url, UrlSearchParams, Window,
 };
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DatasetField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub writable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DatasetPayload<T> {
+    pub dataset: String,
+    pub version: u32,
+    #[serde(rename = "keyField")]
+    pub key_field: String,
+    pub fields: Vec<DatasetField>,
+    pub rows: Vec<T>,
+    #[serde(default)]
+    pub includes: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SongbookEditChord {
+    pub id: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub chord_type: String,
+}
+
+static mut CHORD_CHOICES: Option<Vec<SongbookEditChord>> = None;
+
+async fn ensure_chord_choices() -> Result<&'static [SongbookEditChord], JsValue> {
+    unsafe {
+        if let Some(ref choices) = CHORD_CHOICES {
+            return Ok(choices);
+        }
+    }
+
+    let payload: DatasetPayload<SongbookEditChord> = load_dataset("song.edit_choices", None).await?;
+    unsafe {
+        CHORD_CHOICES = Some(payload.rows);
+        Ok(CHORD_CHOICES.as_ref().unwrap())
+    }
+}
+
+async fn load_dataset_json(dataset_id: &str, include: Option<&str>) -> Result<String, JsValue> {
+    let window = window()?;
+    let mut url = format!("/api/dataset/{}", dataset_id);
+    if let Some(inc) = include {
+        url.push_str(&format!("?include={}", inc));
+    }
+
+    let init = RequestInit::new();
+    init.set_method("GET");
+
+    let response = JsFuture::from(window.fetch_with_str_and_init(&url, &init)).await?;
+    let response: Response = response.dyn_into()?;
+    if !response.ok() {
+        return Err(JsValue::from_str(&format!("HTTP {}", response.status())));
+    }
+
+    let text = JsFuture::from(response.text()?).await?;
+    Ok(text.as_string().unwrap_or_default())
+}
+
+async fn load_dataset<T: for<'de> Deserialize<'de>>(
+    dataset_id: &str,
+    include: Option<&str>,
+) -> Result<DatasetPayload<T>, JsValue> {
+    let json = load_dataset_json(dataset_id, include).await?;
+    serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))
+}
 
 fn window() -> Result<Window, JsValue> {
     web_sys::window().ok_or_else(|| JsValue::from_str("missing window"))
@@ -478,34 +551,63 @@ fn apply_datalist_filter(input: &HtmlInputElement, datalist: &HtmlDataListElemen
 
 fn init_songbook_edit_rows() -> Result<(), JsValue> {
     let inputs = document()?.query_selector_all("input[data-songbook-format-input]")?;
-    for index in 0..inputs.length() {
-        let Some(node) = inputs.item(index) else {
-            continue;
-        };
-        let Ok(input) = node.dyn_into::<HtmlInputElement>() else {
-            continue;
-        };
-        let Some(list_id) = input.get_attribute("data-songbook-song-list") else {
-            continue;
-        };
-        let Some(datalist_node) = document()?.get_element_by_id(&list_id) else {
-            continue;
-        };
-        let Ok(datalist) = datalist_node.dyn_into::<HtmlDataListElement>() else {
-            continue;
-        };
-        let source = datalist_options(&datalist);
-        apply_datalist_filter(&input, &datalist, &source);
-
-        let input_clone = input.clone();
-        let datalist_clone = datalist.clone();
-        let source_clone = source.clone();
-        let on_input = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
-            apply_datalist_filter(&input_clone, &datalist_clone, &source_clone);
-        }));
-        input.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref())?;
-        on_input.forget();
+    if inputs.length() == 0 {
+        return Ok(());
     }
+
+    spawn_local(async move {
+        let choices = match ensure_chord_choices().await {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let datalist_options: Vec<DatalistOption> = choices
+            .iter()
+            .map(|c| DatalistOption {
+                value: format!("{} [{}]", c.title, c.id),
+                chord_type: c.chord_type.clone(),
+            })
+            .collect();
+
+        let inputs = match document()
+            .and_then(|d| d.query_selector_all("input[data-songbook-format-input]"))
+        {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+
+        for index in 0..inputs.length() {
+            let Some(node) = inputs.item(index) else {
+                continue;
+            };
+            let Ok(input) = node.dyn_into::<HtmlInputElement>() else {
+                continue;
+            };
+            let Some(list_id) = input.get_attribute("data-songbook-song-list") else {
+                continue;
+            };
+            let Some(datalist_node) =
+                document().ok().and_then(|d| d.get_element_by_id(&list_id))
+            else {
+                continue;
+            };
+            let Ok(datalist) = datalist_node.dyn_into::<HtmlDataListElement>() else {
+                continue;
+            };
+
+            apply_datalist_filter(&input, &datalist, &datalist_options);
+
+            let input_clone = input.clone();
+            let datalist_clone = datalist.clone();
+            let source_clone = datalist_options.clone();
+            let on_input = Closure::<dyn FnMut(Event)>::wrap(Box::new(move |_event: Event| {
+                apply_datalist_filter(&input_clone, &datalist_clone, &source_clone);
+            }));
+            let _ = input.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref());
+            on_input.forget();
+        }
+    });
+
     Ok(())
 }
 

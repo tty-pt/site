@@ -1,4 +1,4 @@
-use std::ffi::{CString, c_char, c_int, c_uchar};
+use std::ffi::{CString, c_char, c_int, c_uchar, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use ndx::prelude::*;
@@ -20,6 +20,7 @@ unsafe extern "C" {
     fn ndc_env_get(fd: c_int, target: *mut c_char, key: *const c_char) -> c_int;
     fn ndc_header_set(fd: c_int, key: *const c_char, value: *const c_char);
     fn ndc_respond(fd: c_int, code: c_int, body: *const c_char);
+    fn free(ptr: *mut c_void);
 }
 
 // ── NDX hook declarations (outbound calls routed through NDX.call) ────────────
@@ -44,6 +45,9 @@ pub fn index_get_module_title(i: usize) -> *const c_char {}
 
 #[ndx_hook_decl]
 pub fn index_get_module_flags(i: usize) -> u32 {}
+
+#[ndx_hook_decl]
+pub fn dataset_get_json(fd: c_int, dataset_id: *const c_char, include: *const c_char, out_json: *mut *mut c_char) -> c_int {}
 
 // ── ModuleEntryFfi (shared with render_ffi submodules via crate::) ────────────
 
@@ -70,6 +74,36 @@ fn collect_modules<'a>(buf: &'a mut [ModuleRef<'a>; 64]) -> &'a [ModuleRef<'a>] 
         buf[i] = ModuleRef { id, title, flags };
     }
     &buf[..count]
+}
+
+pub fn load_dataset_json_with_include(
+    fd: c_int,
+    dataset_id: &str,
+    include: Option<&str>,
+) -> Option<String> {
+    let dataset_id_c = CString::new(dataset_id).ok()?;
+    let include_c = include.and_then(|s| CString::new(s).ok());
+    let include_ptr = include_c
+        .as_ref()
+        .map(|s| s.as_ptr())
+        .unwrap_or(std::ptr::null());
+    let mut raw: *mut c_char = std::ptr::null_mut();
+    let rc = unsafe { dataset_get_json(fd, dataset_id_c.as_ptr(), include_ptr, &mut raw) };
+    let json = if rc == 0 && !raw.is_null() {
+        let owned = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    } else {
+        if !raw.is_null() {
+            unsafe { free(raw.cast()) };
+        }
+        None
+    };
+    json
+}
+
+pub fn load_dataset_json(fd: c_int, dataset_id: &str) -> Option<String> {
+    load_dataset_json_with_include(fd, dataset_id, None)
 }
 
 fn dispatch_result(fd: c_int, response: ResponsePayload) {
@@ -161,6 +195,7 @@ pub fn ssr_render(
 
     let remote_user_str = unsafe { cstr_ref(remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      unsafe { cstr_ref(method) },
         path:        unsafe { cstr_ref(path) },
         query:       unsafe { cstr_ref(query) },
@@ -205,6 +240,7 @@ pub fn ssr_render_delete(
     let modules_slice = collect_modules(&mut modules_buf);
 
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &path_buf,
         query:       query_str,
@@ -227,6 +263,7 @@ pub fn ssr_render_song_detail(fd: c_int, req: *const song_ffi::SongDetailRenderF
     let id_s = unsafe { cstr_ref(r.id) };
     let remote_user_str = unsafe { cstr_ref(r.remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &format!("/song/{id_s}"),
         query:       unsafe { cstr_ref(r.query) },
@@ -263,6 +300,7 @@ pub fn ssr_render_poem_detail(fd: c_int, req: *const poem_ffi::PoemRenderFfi) ->
     let id_s = unsafe { cstr_ref(r.id) };
     let remote_user_str = unsafe { cstr_ref(r.remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &format!("/poem/{id_s}"),
         query:       unsafe { cstr_ref(r.query) },
@@ -290,6 +328,7 @@ pub fn ssr_render_poem_edit(fd: c_int, req: *const poem_ffi::PoemRenderFfi) -> c
     let id_s = unsafe { cstr_ref(r.id) };
     let remote_user_str = unsafe { cstr_ref(r.remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &format!("/poem/{id_s}/edit"),
         query:       unsafe { cstr_ref(r.query) },
@@ -317,6 +356,7 @@ pub fn ssr_render_songbook_detail(fd: c_int, req: *const songbook_ffi::SongbookD
     let id_s = unsafe { cstr_ref(r.id) };
     let remote_user_str = unsafe { cstr_ref(r.remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &format!("/songbook/{id_s}"),
         query:       unsafe { cstr_ref(r.query) },
@@ -356,6 +396,7 @@ pub fn ssr_render_choir_detail(fd: c_int, req: *const choir_ffi::ChoirDetailRend
     let id_s = unsafe { cstr_ref(r.id) };
     let remote_user_str = unsafe { cstr_ref(r.remote_user) };
     let ctx = RequestContext {
+        fd,
         method:      "GET",
         path:        &format!("/choir/{id_s}"),
         query:       unsafe { cstr_ref(r.query) },

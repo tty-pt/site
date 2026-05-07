@@ -40,6 +40,67 @@ typedef struct {
 	size_t sz;
 } meta_field_t;
 
+typedef enum {
+	DATASET_ACCESS_PUBLIC = 0,
+	DATASET_ACCESS_LOGIN,
+	DATASET_ACCESS_CALLBACK,
+} dataset_access_policy_t;
+
+typedef enum {
+	DATASET_ACCESS_RESULT_ALLOW = 0,
+	DATASET_ACCESS_RESULT_UNAUTHORIZED,
+	DATASET_ACCESS_RESULT_FORBIDDEN,
+} dataset_access_result_t;
+
+typedef enum {
+	DATASET_FIELD_STRING = 0,
+	DATASET_FIELD_INT,
+	DATASET_FIELD_BOOL,
+	DATASET_FIELD_NULLABLE_STRING,
+} dataset_field_type_t;
+
+typedef struct {
+	const char *name;
+	dataset_field_type_t type;
+	int writable;
+} dataset_field_t;
+
+typedef struct {
+	const char *name;
+	const char *target_dataset_id;
+} dataset_relation_t;
+
+typedef int (*dataset_row_json_cb)(
+        json_object_t *row, const char *key, const void *value, void *user);
+typedef dataset_access_result_t (*dataset_access_cb)(
+        int fd, const char *username, void *user);
+
+typedef int (*dataset_create_cb)(
+        int fd, const char *username, unsigned data_hd, void *user,
+        char *out_key, size_t out_key_len);
+typedef int (*dataset_update_cb)(
+        int fd, const char *username, const char *key, unsigned data_hd,
+        void *user);
+typedef int (*dataset_delete_cb)(
+        int fd, const char *username, const char *key, void *user);
+
+typedef struct {
+	const char *id;
+	const char *key_field;
+	dataset_access_policy_t access_policy;
+	const dataset_field_t *fields;
+	size_t field_count;
+	unsigned source_hd;
+	dataset_row_json_cb row_json_cb;
+	dataset_access_cb access_cb;
+	dataset_create_cb create_cb;
+	dataset_update_cb update_cb;
+	dataset_delete_cb delete_cb;
+	const dataset_relation_t *relations;
+	size_t relation_count;
+	void *user;
+} dataset_def_t;
+
 /* Re-use item_ctx_t and flags from auth.h */
 #include "../auth/auth.h"
 
@@ -197,6 +258,14 @@ NDX_HOOK_DECL(int, form_body_add,
 	const char *, name,
 	const char *, value);
 NDX_HOOK_DECL(int, form_body_free, form_body_t *, fb);
+
+/* --- Dataset registry / JSON export --- */
+NDX_HOOK_DECL(int, dataset_register, const dataset_def_t *, def);
+NDX_HOOK_DECL(int, dataset_get_json,
+	int, fd,
+	const char *, dataset_id,
+	const char *, include,
+	char **, out_json);
 
 #endif /* COMMON_IMPL */
 
