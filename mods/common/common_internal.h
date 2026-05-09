@@ -39,6 +39,7 @@ int json_object_kv_bool(json_object_t *jo, const char *key, int value);
 int json_object_kv_raw(json_object_t *jo, const char *key, const char *value);
 char *json_object_finish(json_object_t *jo);
 int json_object_free(json_object_t *jo);
+int json_array_free(json_array_t *ja);
 int json_object_append_fragment(
         json_object_t *jo, const char *fragment, size_t len);
 

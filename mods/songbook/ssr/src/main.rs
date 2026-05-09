@@ -211,6 +211,7 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
         parse_json_array::<SongbookEditChord>(get_pair(&pairs, "allChords").unwrap_or("[]"));
     let all_types =
         parse_json_array::<String>(get_pair(&pairs, "allTypes").unwrap_or("[]"));
+
     let path = edit_path("songbook", id);
     let heading = format!("Edit {title}");
     let rows: Vec<DisplaySongbookEditRow> = songs

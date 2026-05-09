@@ -134,7 +134,10 @@ static void songbook_index_rebuild(const char *doc_root)
 		if (e->d_name[0] == '.')
 			continue;
 		if (item_path_build_root(
-		            doc_root, "songbook", e->d_name, item_path,
+		            doc_root,
+		            "songbook",
+		            e->d_name,
+		            item_path,
 		            sizeof(item_path)) != 0)
 			continue;
 		songbook_meta_read(item_path, &meta);
@@ -340,7 +343,7 @@ static int handle_sb_edit_get_authorized(
 	if (!at_json) {
 		free(ac_json);
 		free(rows);
-		return 1;
+		return server_error(fd, "failed to get song types");
 	}
 
 	/* Build 4-field songs string: chord_id:transpose:format:originalKey */
@@ -353,8 +356,6 @@ static int handle_sb_edit_get_authorized(
 		        "::any:0\n");
 		if (songs_pos >= sizeof(songs_buf)) {
 			free(rows);
-			free(ac_json);
-			free(at_json);
 			return respond_error(fd, 500, "OOM");
 		}
 	} else {
@@ -367,24 +368,21 @@ static int handle_sb_edit_get_authorized(
 			            &rows[i]) != 0)
 			{
 				free(rows);
-				free(ac_json);
-				free(at_json);
 				return respond_error(fd, 500, "OOM");
 			}
 		}
 	}
 	free(rows);
-
 	sb_edit_form_t form = {
 		.meta = &meta,
 		.songs = songs_buf,
 		.all_chords = ac_json,
 		.all_types = at_json,
 	};
-	int rc = core_post_form_builder(fd, sb_edit_form_build, &form);
+	int sb_rc = core_post_form_builder(fd, sb_edit_form_build, &form);
 	free(ac_json);
 	free(at_json);
-	return rc;
+	return sb_rc;
 }
 
 static int handle_sb_edit_get(int fd, char *body)
@@ -974,7 +972,11 @@ void ndx_install(void)
 
 	songbook_meta_qtype = qmap_reg(sizeof(songbook_meta_t));
 	songbook_index_hd = qmap_open(
-	        NULL, "songbook_idx", QM_STR, songbook_meta_qtype, 0x3FF,
+	        NULL,
+	        "songbook_idx",
+	        QM_STR,
+	        songbook_meta_qtype,
+	        0x3FF,
 	        QM_SORTED);
 	{
 		char path[PATH_MAX];

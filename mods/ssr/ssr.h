@@ -6,7 +6,8 @@
 #include <stdbool.h>
 #include <ttypt/ndx-mod.h>
 
-/* ── FFI structs (layout must match Rust #[repr(C)] definitions in lib.rs) ── */
+/* ── FFI structs (layout must match Rust #[repr(C)] definitions in lib.rs) ──
+ */
 
 typedef struct ModuleEntryFfi {
 	const char *id;
@@ -104,7 +105,8 @@ typedef struct ChoirDetailRenderFfi {
 	const char *csrf_token;
 } ChoirDetailRenderFfi;
 
-/* ── Helper macro to snapshot the module list ─────────────────────────────── */
+/* ── Helper macro to snapshot the module list ───────────────────────────────
+ */
 
 #define SSR_FILL_MODULES(snap_, len_out_)                                      \
 	do {                                                                   \
@@ -119,7 +121,8 @@ typedef struct ChoirDetailRenderFfi {
 		}                                                              \
 	} while (0)
 
-/* ── Hook declarations (used by song.c, poem.c, choir.c, songbook.c, etc.) ── */
+/* ── Hook declarations (used by song.c, poem.c, choir.c, songbook.c, etc.) ──
+ */
 
 NDX_HOOK_DECL(int, ssr_render,
 	int, fd,

@@ -374,14 +374,20 @@ void ndx_install(void)
 				*val++ = '\0';
 				poem_meta_t meta;
 				memset(&meta, 0, sizeof(meta));
-				snprintf(meta.title, sizeof(meta.title), "%s", val);
+				snprintf(
+				        meta.title,
+				        sizeof(meta.title),
+				        "%s",
+				        val);
 				qmap_put(poem_index_hd, id, &meta);
 			}
 			fclose(fp);
 		} else {
 			/* Rebuild from filesystem */
 			char p[PATH_MAX];
-			if (module_items_path_build(root, "poem", p, sizeof(p)) == 0) {
+			if (module_items_path_build(
+			            root, "poem", p, sizeof(p)) == 0)
+			{
 				DIR *d = opendir(p);
 				if (d) {
 					struct dirent *e;
@@ -391,12 +397,15 @@ void ndx_install(void)
 						if (e->d_name[0] == '.')
 							continue;
 						if (item_path_build_root(
-						            root, "poem",
-						            e->d_name, ip,
+						            root,
+						            "poem",
+						            e->d_name,
+						            ip,
 						            sizeof(ip)) != 0)
 							continue;
 						poem_meta_read(ip, &meta);
-						poem_index_put_meta(e->d_name, &meta);
+						poem_index_put_meta(
+						        e->d_name, &meta);
 					}
 					closedir(d);
 					poem_index_write_file(root);

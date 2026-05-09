@@ -11,6 +11,15 @@
 
 #define MAX_DATASETS 64
 
+/* internal error codes for dataset_write_init */
+#define DATASET_INIT_ERR_NO_BODY 1001
+#define DATASET_INIT_ERR_BAD_CSRF 1002
+
+/*
+ * Thread-safety: registration (dataset_register) is assumed to happen during
+ * single-threaded startup only. If concurrent registration or read access is
+ * needed later, these globals must be protected by a mutex.
+ */
 static dataset_def_t dataset_defs[MAX_DATASETS];
 static size_t dataset_count = 0;
 
@@ -48,8 +57,8 @@ static dataset_def_t *dataset_find(const char *dataset_id)
 	return NULL;
 }
 
-static dataset_access_result_t dataset_access_allowed(
-        dataset_def_t *def, int fd, const char *username)
+static dataset_access_result_t
+dataset_access_allowed(dataset_def_t *def, int fd, const char *username)
 {
 	switch (def->access_policy) {
 	case DATASET_ACCESS_PUBLIC:
@@ -66,8 +75,7 @@ static dataset_access_result_t dataset_access_allowed(
 	return DATASET_ACCESS_RESULT_FORBIDDEN;
 }
 
-static int dataset_fields_json_build(
-        const dataset_def_t *def, char **out_json)
+static int dataset_fields_json_build(const dataset_def_t *def, char **out_json)
 {
 	json_array_t *fields;
 	char *json;
@@ -85,9 +93,13 @@ static int dataset_fields_json_build(
 		            fields,
 		            "type",
 		            dataset_field_type_name(field->type)) != 0 ||
-		    json_array_kv_bool(fields, "writable", field->writable) != 0 ||
+		    json_array_kv_bool(fields, "writable", field->writable) !=
+		            0 ||
 		    json_array_end_object(fields) != 0)
+		{
+			json_array_free(fields);
 			return -1;
+		}
 	}
 
 	json = json_array_finish(fields);
@@ -115,8 +127,7 @@ static int dataset_key_field_valid(const dataset_def_t *def)
  * which generally follows insertion order for small maps or hash order.
  * This is considered stable-enough-for-now.
  */
-static int dataset_rows_json_build(
-        const dataset_def_t *def, char **out_json)
+static int dataset_rows_json_build(const dataset_def_t *def, char **out_json)
 {
 	json_array_t *rows;
 	unsigned cur;
@@ -126,6 +137,12 @@ static int dataset_rows_json_build(
 	char *rows_json;
 	json_object_t *row;
 
+	fprintf(stderr,
+	        "DEBUG: dataset_rows_json_build: field_count=%zu "
+	        "source_hd=%u\n",
+	        def->field_count,
+	        def->source_hd);
+	fflush(stderr);
 	rows = json_array_new(0);
 	if (!rows)
 		return -1;
@@ -133,23 +150,27 @@ static int dataset_rows_json_build(
 	cur = qmap_iter(def->source_hd, NULL, 0);
 	while (qmap_next(&key, &value, cur)) {
 		row = json_object_new(0);
-		if (!row)
+		if (!row) {
+			json_array_free(rows);
 			return -1;
+		}
 		if (!def->row_json_cb ||
 		    def->row_json_cb(
-		            row,
-		            (const char *)key,
-		            value,
-		            def->user) != 0) {
+		            row, (const char *)key, value, def->user) != 0)
+		{
 			json_object_free(row);
+			json_array_free(rows);
 			return -1;
 		}
 
 		row_json = json_object_finish(row);
-		if (!row_json)
+		if (!row_json) {
+			json_array_free(rows);
 			return -1;
+		}
 		if (json_array_append_raw(rows, row_json) != 0) {
 			free(row_json);
+			json_array_free(rows);
 			return -1;
 		}
 		free(row_json);
@@ -163,15 +184,18 @@ static int dataset_rows_json_build(
 	return 0;
 }
 
-static int dataset_json_parts_build(
-        const dataset_def_t *def, dataset_json_parts_t *parts)
+static int
+dataset_json_parts_build(const dataset_def_t *def, dataset_json_parts_t *parts)
 {
 	parts->fields_json = NULL;
 	parts->rows_json = NULL;
 	if (dataset_fields_json_build(def, &parts->fields_json) != 0)
 		return -1;
-	if (dataset_rows_json_build(def, &parts->rows_json) != 0)
+	if (dataset_rows_json_build(def, &parts->rows_json) != 0) {
+		free(parts->fields_json);
+		parts->fields_json = NULL;
 		return -1;
+	}
 	return 0;
 }
 
@@ -185,8 +209,8 @@ static void dataset_json_parts_free(dataset_json_parts_t *parts)
 	parts->rows_json = NULL;
 }
 
-static const dataset_relation_t *dataset_relation_find(
-        const dataset_def_t *def, const char *name)
+static const dataset_relation_t *
+dataset_relation_find(const dataset_def_t *def, const char *name)
 {
 	size_t i;
 
@@ -199,8 +223,7 @@ static const dataset_relation_t *dataset_relation_find(
 }
 
 static int dataset_includes_json_build(
-        int fd, const dataset_def_t *def, const char *include,
-        char **out_json);
+        int fd, const dataset_def_t *def, const char *include, char **out_json);
 
 static int dataset_json_build(
         int fd, const dataset_def_t *def, const char *include, char **out_json)
@@ -209,6 +232,7 @@ static int dataset_json_build(
 	dataset_json_parts_t parts;
 	char *includes_json;
 	char *json;
+	int rc;
 
 	parts.fields_json = NULL;
 	parts.rows_json = NULL;
@@ -217,9 +241,16 @@ static int dataset_json_build(
 
 	if (dataset_json_parts_build(def, &parts) != 0)
 		goto oom;
-	if (include && include[0] &&
-	    dataset_includes_json_build(fd, def, include, &includes_json) != 0)
-		goto oom;
+	if (include && include[0]) {
+		rc = dataset_includes_json_build(
+		        fd, def, include, &includes_json);
+		if (rc == -2 || rc == -3) {
+			dataset_json_parts_free(&parts);
+			return rc;
+		}
+		if (rc != 0)
+			goto oom;
+	}
 
 	root = json_object_new(0);
 	if (!root)
@@ -251,23 +282,23 @@ oom:
 }
 
 static int dataset_includes_json_build(
-        int fd, const dataset_def_t *def, const char *include,
-        char **out_json)
+        int fd, const dataset_def_t *def, const char *include, char **out_json)
 {
 	char include_buf[512];
 	char *token;
+	char *saveptr = NULL;
 	json_object_t *includes;
 
 	includes = json_object_new(0);
 	if (!includes)
 		return -1;
 	snprintf(include_buf, sizeof(include_buf), "%s", include);
-	token = strtok(include_buf, ",");
+	token = strtok_r(include_buf, ",", &saveptr);
 	while (token) {
 		const dataset_relation_t *rel;
 		dataset_def_t *target_def;
 		char *target_json;
-		char *next_token;
+		const char *username;
 
 		while (*token == ' ')
 			token++;
@@ -278,8 +309,21 @@ static int dataset_includes_json_build(
 		}
 
 		target_def = dataset_find(rel->target_dataset_id);
-		if (!target_def ||
-		    dataset_json_build(fd, target_def, NULL, &target_json) != 0) {
+		if (!target_def) {
+			json_object_free(includes);
+			return -1;
+		}
+
+		username = get_request_user(fd);
+		if (dataset_access_allowed(target_def, fd, username) !=
+		    DATASET_ACCESS_RESULT_ALLOW)
+		{
+			json_object_free(includes);
+			return -3;
+		}
+
+		if (dataset_json_build(fd, target_def, NULL, &target_json) != 0)
+		{
 			json_object_free(includes);
 			return -1;
 		}
@@ -291,8 +335,7 @@ static int dataset_includes_json_build(
 		}
 		free(target_json);
 
-		next_token = strtok(NULL, ",");
-		token = next_token;
+		token = strtok_r(NULL, ",", &saveptr);
 	}
 
 	*out_json = json_object_finish(includes);
@@ -310,6 +353,13 @@ NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 	if (dataset_count >= MAX_DATASETS || dataset_find(def->id))
 		return -1;
 
+	/*
+	 * Shallow copy: caller-owned pointers (id, key_field, fields,
+	 * relations, callbacks, user) are copied by reference. These must
+	 * remain valid for the lifetime of the program, or until the dataset
+	 * is unregistered (not yet supported). Typically callers use static
+	 * or otherwise immortal storage.
+	 */
 	dataset_defs[dataset_count++] = *def;
 	return 0;
 }
@@ -323,6 +373,7 @@ NDX_LISTENER(int, dataset_get_json,
 	dataset_def_t *def;
 	const char *username;
 	dataset_access_result_t access_result;
+	int rc;
 
 	if (out_json)
 		*out_json = NULL;
@@ -338,9 +389,12 @@ NDX_LISTENER(int, dataset_get_json,
 	if (access_result == DATASET_ACCESS_RESULT_FORBIDDEN)
 		return 403;
 
-	if (dataset_json_build(fd, def, include, out_json) == -2)
+	rc = dataset_json_build(fd, def, include, out_json);
+	if (rc == -2)
 		return 400;
-	if (!out_json || !*out_json)
+	if (rc == -3)
+		return 403;
+	if (rc != 0 || !out_json || !*out_json)
 		return 500;
 
 	return 0;
@@ -363,7 +417,8 @@ static int dataset_get_handler(int fd, char *body)
 		ndc_query_param("include", include, sizeof(include) - 1);
 	}
 
-	rc = dataset_get_json(fd, dataset_id, include[0] ? include : NULL, &json);
+	rc = dataset_get_json(
+	        fd, dataset_id, include[0] ? include : NULL, &json);
 	if (rc == 0) {
 		rc = respond_json(fd, 200, json);
 		free(json);
@@ -380,7 +435,11 @@ static int dataset_get_handler(int fd, char *body)
 	return server_error(fd, "Failed to render dataset");
 }
 
-static int dataset_write_init(int fd, char *body, const dataset_def_t **out_def, const char **out_username)
+static int dataset_write_init(
+        int fd,
+        char *body,
+        const dataset_def_t **out_def,
+        const char **out_username)
 {
 	char dataset_id[256] = { 0 };
 	ndc_env_get(fd, dataset_id, "PATTERN_PARAM_DATASET_ID");
@@ -392,7 +451,8 @@ static int dataset_write_init(int fd, char *body, const dataset_def_t **out_def,
 
 	*out_username = get_request_user(fd);
 	if (dataset_access_allowed(*out_def, fd, *out_username) !=
-	    DATASET_ACCESS_RESULT_ALLOW) {
+	    DATASET_ACCESS_RESULT_ALLOW)
+	{
 		return (*out_username && **out_username) ? 403 : 401;
 	}
 
@@ -404,14 +464,14 @@ static int dataset_write_init(int fd, char *body, const dataset_def_t **out_def,
 	}
 
 	if (!body || !body[0]) {
-		return 400;
+		return DATASET_INIT_ERR_NO_BODY;
 	}
 
 	ndc_query_parse(body);
 	char csrf[64] = { 0 };
 	ndc_query_param("csrf_token", csrf, sizeof(csrf) - 1);
 	if (csrf_validate(fd, csrf) != 0) {
-		return 403;
+		return DATASET_INIT_ERR_BAD_CSRF;
 	}
 
 	return 0;
@@ -421,6 +481,7 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 {
 	unsigned hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
 	size_t i;
+	int ret_len;
 	char val[1024];
 
 	if (hd == 0)
@@ -431,9 +492,14 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 		if (!f->writable)
 			continue;
 
-		if (ndc_query_param(f->name, val, sizeof(val) - 1) >= 0) {
-			qmap_put(hd, f->name, val);
+		ret_len = ndc_query_param(f->name, val, sizeof(val) - 1);
+		if (ret_len < 0)
+			continue;
+		if (ret_len >= (int)(sizeof(val) - 1)) {
+			qmap_close(hd);
+			return 0;
 		}
+		qmap_put(hd, f->name, val);
 	}
 	return hd;
 }
@@ -444,11 +510,14 @@ static int dataset_post_handler(int fd, char *body)
 	const char *username;
 	int rc = dataset_write_init(fd, body, &def, &username);
 	if (rc != 0)
-		return (rc == 404) ? respond_error(fd, 404, "Not found") :
-		       (rc == 401) ? respond_error(fd, 401, "Unauthorized") :
-		       (rc == 403) ? respond_error(fd, 403, "Forbidden") :
-		       (rc == 415) ? respond_error(fd, 415, "Unsupported Media Type") :
-		                     respond_error(fd, 400, "Bad request");
+		return (rc == 404)   ? respond_error(fd, 404, "Not found")
+		       : (rc == 401) ? respond_error(fd, 401, "Unauthorized")
+		       : (rc == 403 || rc == DATASET_INIT_ERR_BAD_CSRF)
+		               ? respond_error(fd, 403, "Forbidden")
+		       : (rc == 415)
+		               ? respond_error(
+		                         fd, 415, "Unsupported Media Type")
+		               : respond_error(fd, 400, "Bad request");
 
 	if (!def->create_cb)
 		return respond_error(fd, 405, "Method not allowed");
@@ -463,9 +532,22 @@ static int dataset_post_handler(int fd, char *body)
 	qmap_close(data_hd);
 
 	if (rc == 0) {
-		char out[512];
-		snprintf(out, sizeof(out), "{\"%s\":\"%s\"}", def->key_field, new_key);
-		return respond_json(fd, 201, out);
+		json_object_t *jo = json_object_new(0);
+		char *out;
+		int r;
+
+		if (!jo)
+			return server_error(fd, "OOM");
+		if (json_object_kv_str(jo, def->key_field, new_key) != 0) {
+			json_object_free(jo);
+			return server_error(fd, "OOM");
+		}
+		out = json_object_finish(jo);
+		if (!out)
+			return server_error(fd, "OOM");
+		r = respond_json(fd, 201, out);
+		free(out);
+		return r;
 	}
 	return (rc > 0) ? rc : server_error(fd, "Create failed");
 }
@@ -477,11 +559,14 @@ static int dataset_put_handler(int fd, char *body)
 	char key[256] = { 0 };
 	int rc = dataset_write_init(fd, body, &def, &username);
 	if (rc != 0)
-		return (rc == 404) ? respond_error(fd, 404, "Not found") :
-		       (rc == 401) ? respond_error(fd, 401, "Unauthorized") :
-		       (rc == 403) ? respond_error(fd, 403, "Forbidden") :
-		       (rc == 415) ? respond_error(fd, 415, "Unsupported Media Type") :
-		                     respond_error(fd, 400, "Bad request");
+		return (rc == 404)   ? respond_error(fd, 404, "Not found")
+		       : (rc == 401) ? respond_error(fd, 401, "Unauthorized")
+		       : (rc == 403 || rc == DATASET_INIT_ERR_BAD_CSRF)
+		               ? respond_error(fd, 403, "Forbidden")
+		       : (rc == 415)
+		               ? respond_error(
+		                         fd, 415, "Unsupported Media Type")
+		               : respond_error(fd, 400, "Bad request");
 
 	if (!def->update_cb)
 		return respond_error(fd, 405, "Method not allowed");
@@ -508,16 +593,15 @@ static int dataset_delete_handler(int fd, char *body)
 	const char *username;
 	char key[256] = { 0 };
 	int rc = dataset_write_init(fd, body, &def, &username);
-	if (rc != 0 && rc != 400) // body might be empty for DELETE
-		return (rc == 404) ? respond_error(fd, 404, "Not found") :
-		       (rc == 401) ? respond_error(fd, 401, "Unauthorized") :
-		       (rc == 403) ? respond_error(fd, 403, "Forbidden") :
-		       (rc == 415) ? respond_error(fd, 415, "Unsupported Media Type") :
-		                     respond_error(fd, 400, "Bad request");
-
-	if (rc == 400) {
-		return respond_error(fd, 400, "Missing CSRF token in body");
-	}
+	if (rc != 0 && rc != DATASET_INIT_ERR_NO_BODY)
+		return (rc == 404)   ? respond_error(fd, 404, "Not found")
+		       : (rc == 401) ? respond_error(fd, 401, "Unauthorized")
+		       : (rc == 403 || rc == DATASET_INIT_ERR_BAD_CSRF)
+		               ? respond_error(fd, 403, "Forbidden")
+		       : (rc == 415)
+		               ? respond_error(
+		                         fd, 415, "Unsupported Media Type")
+		               : respond_error(fd, 400, "Bad request");
 
 	if (!def->delete_cb)
 		return respond_error(fd, 405, "Method not allowed");
@@ -534,11 +618,12 @@ static int dataset_delete_handler(int fd, char *body)
 
 void dataset_install_routes(void)
 {
-	ndc_register_handler("GET:/api/dataset/:dataset_id", dataset_get_handler);
-	ndc_register_handler("POST:/api/dataset/:dataset_id", dataset_post_handler);
+	ndc_register_handler(
+	        "GET:/api/dataset/:dataset_id", dataset_get_handler);
+	ndc_register_handler(
+	        "POST:/api/dataset/:dataset_id", dataset_post_handler);
 	ndc_register_handler(
 	        "PUT:/api/dataset/:dataset_id/:key", dataset_put_handler);
 	ndc_register_handler(
 	        "DELETE:/api/dataset/:dataset_id/:key", dataset_delete_handler);
 }
-

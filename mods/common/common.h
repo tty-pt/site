@@ -76,10 +76,17 @@ typedef dataset_access_result_t (*dataset_access_cb)(
         int fd, const char *username, void *user);
 
 typedef int (*dataset_create_cb)(
-        int fd, const char *username, unsigned data_hd, void *user,
-        char *out_key, size_t out_key_len);
+        int fd,
+        const char *username,
+        unsigned data_hd,
+        void *user,
+        char *out_key,
+        size_t out_key_len);
 typedef int (*dataset_update_cb)(
-        int fd, const char *username, const char *key, unsigned data_hd,
+        int fd,
+        const char *username,
+        const char *key,
+        unsigned data_hd,
         void *user);
 typedef int (*dataset_delete_cb)(
         int fd, const char *username, const char *key, void *user);
@@ -250,6 +257,7 @@ NDX_HOOK_DECL(int, json_object_kv_raw,
 	const char *, value);
 NDX_HOOK_DECL(char *, json_object_finish, json_object_t *, jo);
 NDX_HOOK_DECL(int, json_object_free, json_object_t *, jo);
+NDX_HOOK_DECL(int, json_array_free, json_array_t *, ja);
 
 /* --- Form body lifecycle --- */
 NDX_HOOK_DECL(form_body_t *, form_body_new, int, dummy);

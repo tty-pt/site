@@ -610,7 +610,11 @@ void ndx_install(void)
 		const char *root = doc_root[0] ? doc_root : ".";
 		choir_meta_qtype = qmap_reg(sizeof(choir_meta_t));
 		choir_index_hd = qmap_open(
-		        NULL, "choir_idx", QM_STR, choir_meta_qtype, 0x3FF,
+		        NULL,
+		        "choir_idx",
+		        QM_STR,
+		        choir_meta_qtype,
+		        0x3FF,
 		        QM_SORTED);
 		char path[PATH_MAX];
 		snprintf(path, sizeof(path), "%s/items/choir/index.tsv", root);
@@ -654,7 +658,9 @@ void ndx_install(void)
 		} else {
 			/* Rebuild from filesystem */
 			char p[PATH_MAX];
-			if (module_items_path_build(root, "choir", p, sizeof(p)) == 0) {
+			if (module_items_path_build(
+			            root, "choir", p, sizeof(p)) == 0)
+			{
 				DIR *d = opendir(p);
 				if (d) {
 					struct dirent *e;
@@ -664,12 +670,15 @@ void ndx_install(void)
 						if (e->d_name[0] == '.')
 							continue;
 						if (item_path_build_root(
-						            root, "choir",
-						            e->d_name, ip,
+						            root,
+						            "choir",
+						            e->d_name,
+						            ip,
 						            sizeof(ip)) != 0)
 							continue;
 						choir_meta_read(ip, &meta);
-						choir_index_put_meta(e->d_name, &meta);
+						choir_index_put_meta(
+						        e->d_name, &meta);
 					}
 					closedir(d);
 					choir_index_write_file(root);

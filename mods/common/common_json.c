@@ -204,6 +204,12 @@ NDX_LISTENER(char *, json_array_finish, json_array_t *, ja)
 		free(ja);
 		return NULL;
 	}
+	if (jb_reserve(JB(ja), 1) != 0) {
+		free(ja->buf);
+		free(ja);
+		return NULL;
+	}
+	ja->buf[ja->len] = '\0';
 	out = ja->buf;
 	free(ja);
 	return out;
@@ -265,8 +271,14 @@ NDX_LISTENER(int, json_object_kv_raw,
 {
 	if (!jo || !key || !value)
 		return -1;
+	size_t val_len = strlen(value);
+	fprintf(stderr,
+	        "DEBUG: json_object_kv_raw: key=%s val_len=%zu\n",
+	        key,
+	        val_len);
+	fflush(stderr);
 	if (jb_field_sep(JB(jo)) != 0 ||
-	    jb_reserve(JB(jo), strlen(key) + strlen(value) + 4) != 0)
+	    jb_reserve(JB(jo), strlen(key) + val_len + 4) != 0)
 		return -1;
 	jo->len += snprintf(
 	        jo->buf + jo->len, jo->cap - jo->len, "\"%s\":%s", key, value);
@@ -284,6 +296,12 @@ NDX_LISTENER(char *, json_object_finish, json_object_t *, jo)
 		free(jo);
 		return NULL;
 	}
+	if (jb_reserve(JB(jo), 1) != 0) {
+		free(jo->buf);
+		free(jo);
+		return NULL;
+	}
+	jo->buf[jo->len] = '\0';
 	out = jo->buf;
 	free(jo);
 	return out;
@@ -295,6 +313,15 @@ NDX_LISTENER(int, json_object_free, json_object_t *, jo)
 		return 0;
 	free(jo->buf);
 	free(jo);
+	return 0;
+}
+
+NDX_LISTENER(int, json_array_free, json_array_t *, ja)
+{
+	if (!ja)
+		return 0;
+	free(ja->buf);
+	free(ja);
 	return 0;
 }
 
