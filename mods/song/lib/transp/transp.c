@@ -85,13 +85,15 @@ outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
  * Escapes &, <, >, " — leaves all other bytes as-is.
  * Returns number of bytes written (not counting NUL).
  */
-static size_t html_escape_into(const char *src, char *dst, size_t dstsize)
+static size_t
+html_escape_into(const char *src, char *dst, size_t dstsize, size_t srclen)
 {
 	size_t w = 0;
 	const char *ent;
 	size_t elen;
 
-	while (*src && w < dstsize - 1) {
+	while (srclen > 0 && *src && w < dstsize - 1) {
+		srclen--;
 		switch (*src) {
 		case '&':
 			ent = "&amp;";
@@ -184,7 +186,7 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			sim += len;
 			{
 				char esc[64];
-				html_escape_into(s, esc, sizeof(esc));
+				html_escape_into(s, esc, sizeof(esc), len);
 				si += outprintf(
 				        outbuf,
 				        sizeof(outbuf),
@@ -224,7 +226,8 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 				ctx->skip_empty = 1;
 			else if (not_bolded && (flags & TRANSP_HTML)) {
 				char esc[4096];
-				html_escape_into(s, esc, sizeof(esc));
+				html_escape_into(
+				        s, esc, sizeof(esc), strlen(s));
 				o += outprintf(
 				        outbuf,
 				        sizeof(outbuf),
