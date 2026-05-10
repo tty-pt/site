@@ -546,11 +546,6 @@ static int handle_choir_song_view(int fd, char *body)
 	        NULL);
 }
 
-static int handle_choir_add_get(int fd, char *body)
-{
-	return core_get(fd, body);
-}
-
 static int handle_choir_edit_get_auth(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
@@ -578,6 +573,8 @@ static int handle_choir_edit_get(int fd, char *body)
 	        NULL);
 }
 
+static int choir_details_handler(int fd, char *body);
+
 void ndx_install(void)
 {
 	ndx_load("./mods/common/common");
@@ -585,9 +582,6 @@ void ndx_install(void)
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/song/song");
-	ndc_register_handler("GET:/choir/add", handle_choir_add_get);
-	ndc_register_handler("GET:/choir/:id/edit", handle_choir_edit_get);
-	ndc_register_handler("GET:/choir/:id", choir_details_handler);
 	ndc_register_handler(
 	        "GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	ndc_register_handler(
@@ -603,7 +597,15 @@ void ndx_install(void)
 	        "POST:/api/choir/:id/song/:song_id/remove",
 	        handle_choir_song_delete);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
-	index_hd = index_open("Choir", 0, 1, NULL);
+	index_hd = index_open(
+	        "Choir",
+	        0,
+	        1,
+	        NULL,
+	        choir_details_handler,
+	        NULL,
+	        handle_choir_edit_get,
+	        NULL);
 	{
 		char doc_root[256] = { 0 };
 		get_doc_root(0, doc_root, sizeof(doc_root));

@@ -20,6 +20,8 @@ typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
 typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
 typedef size_t (*index_format_fn)(
         const char *id, const char *val, char *out, size_t out_sz);
+typedef int (*index_detail_handler_fn)(int fd, char *body);
+typedef int (*index_handler_fn)(int fd, char *body);
 
 #define MAX_MODULES 64
 
@@ -281,7 +283,11 @@ NDX_LISTENER(unsigned, index_open,
 	const char *, name,
 	unsigned, mask,
 	unsigned, flags,
-	index_cleanup_fn, cleanup)
+	index_cleanup_fn, cleanup,
+	index_detail_handler_fn, detail_handler,
+	index_handler_fn, add_handler,
+	index_handler_fn, edit_get_handler,
+	index_handler_fn, edit_post_handler)
 {
 	unsigned hd = qmap_open(
 	        NULL, "hd", QM_STR, QM_STR, mask ? mask : 0x3FF, QM_SORTED);
@@ -332,7 +338,8 @@ NDX_LISTENER(unsigned, index_open,
 	closedir(dir);
 
 	snprintf(buf, sizeof(buf), "POST:/%s/add", id);
-	ndc_register_handler(buf, index_add_handler);
+	ndc_register_handler(
+	        buf, add_handler ? add_handler : index_add_handler);
 
 	snprintf(buf, sizeof(buf), "GET:/%s/add", id);
 	ndc_register_handler(buf, index_add_get_handler);
@@ -343,11 +350,25 @@ NDX_LISTENER(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "GET:/%s/", id);
 	ndc_register_handler(buf, index_list_handler);
 
+	if (detail_handler) {
+		snprintf(buf, sizeof(buf), "GET:/%s/:id", id);
+		ndc_register_handler(buf, detail_handler);
+	}
+
 	snprintf(buf, sizeof(buf), "GET:/%s/:id/delete", id);
 	ndc_register_handler(buf, index_delete_get_handler);
 
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/delete", id);
 	ndc_register_handler(buf, index_delete_handler);
+
+	if (edit_get_handler) {
+		snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
+		ndc_register_handler(buf, edit_get_handler);
+	}
+	if (edit_post_handler) {
+		snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
+		ndc_register_handler(buf, edit_post_handler);
+	}
 
 	if (module_slot_count < MAX_MODULES) {
 		size_t slot = module_slot_count++;

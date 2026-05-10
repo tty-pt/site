@@ -13,6 +13,7 @@
 import { chromium } from "npm:playwright";
 import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
 
+const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const BASE = "http://localhost:8080";
 const KNOWN_SONG_ID = "a_alegria_esta_no_coracao";
 const KNOWN_SONG_TITLE = "A alegria está no coração";
@@ -120,7 +121,7 @@ Deno.test({
     // Cleanup
     if (sbId) {
       try {
-        const sbPath = `${Deno.cwd()}/items/songbook/items/${sbId}`;
+        const sbPath = `${REPO_ROOT}/items/songbook/items/${sbId}`;
         for await (const entry of Deno.readDir(sbPath)) {
           await Deno.remove(`${sbPath}/${entry.name}`);
         }

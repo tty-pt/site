@@ -947,6 +947,8 @@ static int handle_sb_add(int fd, char *body)
 	return ndc_redirect(fd, location);
 }
 
+static int songbook_details_handler(int fd, char *body);
+
 void ndx_install(void)
 {
 	char doc_root[256] = { 0 };
@@ -961,14 +963,10 @@ void ndx_install(void)
 	ndx_load("./mods/choir/choir");
 	ndx_load("./mods/common/common");
 
-	ndc_register_handler("GET:/songbook/:id", songbook_details_handler);
-
 	ndc_register_handler(
 	        "POST:/songbook/:id/randomize", handle_sb_randomize);
 	ndc_register_handler(
 	        "POST:/songbook/:id/transpose", handle_sb_transpose);
-	ndc_register_handler("GET:/songbook/:id/edit", handle_sb_edit_get);
-	ndc_register_handler("POST:/songbook/:id/edit", handle_sb_edit);
 
 	songbook_meta_qtype = qmap_reg(sizeof(songbook_meta_t));
 	songbook_index_hd = qmap_open(
@@ -1021,9 +1019,13 @@ void ndx_install(void)
 		}
 	}
 
-	index_hd = index_open("Songbook", 0, 1, songbook_cleanup);
-
-	/* Override the generic POST:/songbook/add to also handle the choir
-	 * field */
-	ndc_register_handler("POST:/songbook/add", handle_sb_add);
+	index_hd = index_open(
+	        "Songbook",
+	        0,
+	        1,
+	        songbook_cleanup,
+	        songbook_details_handler,
+	        handle_sb_add,
+	        handle_sb_edit_get,
+	        handle_sb_edit);
 }

@@ -13,6 +13,7 @@
 import { chromium } from "npm:playwright";
 import { createAndLoginUser, waitForText } from "./helpers/auth.ts";
 
+const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const BASE = "http://localhost:8080";
 // A song known to exist in test data with a "type" (categories) set
 const SONG_ID = "a_alegria_esta_no_coracao";
@@ -110,7 +111,7 @@ Deno.test({
     // Cleanup created song
     if (createdSongId) {
       try {
-        await Deno.remove(`${Deno.cwd()}/items/song/items/${createdSongId}`, { recursive: true });
+        await Deno.remove(`${REPO_ROOT}/items/song/items/${createdSongId}`, { recursive: true });
       } catch { /* ignore */ }
     }
     await browser.close();

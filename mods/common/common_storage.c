@@ -180,11 +180,16 @@ NDX_LISTENER(char *, slurp_item_child_file,
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
 	(void)fd;
-	/* Always use relative root "." for local file access.
-	 * DOCUMENT_ROOT from the environment can contain pre-chroot absolute
-	 * paths that are invalid inside the chroot. Since ndc ensures the CWD
-	 * is the site root, "." is the correct reliable base. */
-	snprintf(buf, len, ".");
+	/* When ndc runs as root, it chroots to the site directory.
+	 * Inside the chroot, the site root is at absolute path '/'.
+	 * Using '.' can fail if the chroot doesn't correctly update the CWD.
+	 * When running as non-root, use '.' to access files in the current CWD.
+	 */
+	if (geteuid() == 0) {
+		snprintf(buf, len, "/");
+	} else {
+		snprintf(buf, len, ".");
+	}
 	return 0;
 }
 

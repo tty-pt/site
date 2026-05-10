@@ -14,11 +14,18 @@ typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
 typedef size_t (*index_format_fn)(
         const char *id, const char *val, char *out, size_t out_sz);
 
+typedef int (*index_handler_fn)(int fd, char *body);
+typedef int (*index_detail_handler_fn)(int fd, char *body);
+
 NDX_HOOK_DECL(unsigned, index_open,
 	const char *, name,
 	unsigned, mask,
 	unsigned, flags,
-	index_cleanup_fn, cleanup);
+	index_cleanup_fn, cleanup,
+	index_detail_handler_fn, detail_handler,
+	index_handler_fn, add_handler,
+	index_handler_fn, edit_get_handler,
+	index_handler_fn, edit_post_handler);
 
 NDX_HOOK_DECL(unsigned, index_put, unsigned, hd, char *, key, char *, value);
 

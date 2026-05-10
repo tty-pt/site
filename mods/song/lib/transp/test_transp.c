@@ -351,8 +351,8 @@ TEST(valid_chords_still_bolded)
 	assert(ctx != NULL);
 
 	/* All chords on a single line are wrapped in one <b> block */
-	char *result = transp_buffer(
-	        ctx, "Am Dm7 G#maj7 Bbm7b5", 0, TRANSP_HTML);
+	char *result =
+	        transp_buffer(ctx, "Am Dm7 G#maj7 Bbm7b5", 0, TRANSP_HTML);
 	assert(result != NULL);
 	/* Bbm7b5 defaults to A#m7b5 (sharp notation) */
 	assert(str_contains(result, "<b>Am Dm7 G#maj7 A#m7b5</b>"));

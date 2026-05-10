@@ -774,60 +774,6 @@ song_format_line(const char *id, const char *val, char *out, size_t out_sz)
 	        out, out_sz, "%s\t%s\t%s\r\n", id, m->title, type);
 }
 
-static int song_list_handler(int fd, char *body)
-{
-	(void)body;
-	char path[512] = { 0 };
-	char query[512] = { 0 };
-	const void *k, *v;
-	size_t total = 0;
-	unsigned c;
-	char *buf, *s;
-	int rc;
-	ndc_env_get(fd, path, "DOCUMENT_URI");
-	ndc_env_get(fd, query, "QUERY_STRING");
-	c = qmap_iter(song_index_hd, NULL, 0);
-	while (qmap_next(&k, &v, c))
-		total += 512;
-	total++;
-	buf = malloc(total);
-	if (!buf)
-		return respond_error(fd, 500, "OOM");
-	s = buf;
-	c = qmap_iter(song_index_hd, NULL, 0);
-	while (qmap_next(&k, &v, c))
-		s += song_format_line(
-		        (const char *)k,
-		        (const char *)v,
-		        s,
-		        total - (size_t)(s - buf));
-	*s = ' ';
-	rc = ssr_render(
-	        fd,
-	        "POST",
-	        path,
-	        query,
-	        buf,
-	        (size_t)(s - buf),
-	        get_request_user(fd) ? get_request_user(fd) : "");
-	free(buf);
-	return rc;
-}
-
-static int song_add_post_handler(int fd, char *body)
-{
-	char id[256] = { 0 }, item_path[PATH_MAX];
-	if (index_add_item(fd, body, id, sizeof(id)) != 0)
-		return 1;
-	if (item_path_build(fd, "song", id, item_path, sizeof(item_path)) == 0)
-	{
-		char dr[256] = { 0 };
-		get_doc_root(fd, dr, sizeof(dr));
-		song_index_upsert(dr[0] ? dr : g_doc_root, id, item_path);
-	}
-	return redirect_to_item(fd, "song", id);
-}
-
 static int song_type_dataset_row_json(
         json_object_t *jo, const char *key, const void *val, void *user)
 {
@@ -973,7 +919,15 @@ void ndx_install(void)
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
-	index_hd = index_open("Song", 0, 1, song_cleanup);
+	index_hd = index_open(
+	        "Song",
+	        0,
+	        1,
+	        song_cleanup,
+	        song_details_handler,
+	        NULL,
+	        song_edit_get_handler,
+	        song_edit_post_handler);
 	build_type_index(dr);
 
 	{
@@ -1013,12 +967,6 @@ void ndx_install(void)
 		dataset_register(&def);
 	}
 
-	ndc_register_handler("GET:/song/", song_list_handler);
-	ndc_register_handler("GET:/song", song_list_handler);
-	ndc_register_handler("POST:/song/add", song_add_post_handler);
-	ndc_register_handler("GET:/song/:id", song_details_handler);
-	ndc_register_handler("GET:/song/:id/edit", song_edit_get_handler);
-	ndc_register_handler("POST:/song/:id/edit", song_edit_post_handler);
 	ndc_register_handler(
 	        "GET:/api/song/:id/transpose", api_song_transpose_handler);
 	ndc_register_handler(

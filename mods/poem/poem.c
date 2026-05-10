@@ -345,6 +345,8 @@ static int poem_edit_post_handler(int fd, char *body)
 	        NULL);
 }
 
+static int poem_detail_handler(int fd, char *body);
+
 void ndx_install(void)
 {
 	char doc_root[256] = { 0 };
@@ -352,7 +354,15 @@ void ndx_install(void)
 	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/common/common");
-	index_hd = index_open("Poem", 0, 1, NULL);
+	index_hd = index_open(
+	        "Poem",
+	        0,
+	        1,
+	        NULL,
+	        poem_detail_handler,
+	        poem_add_post_handler,
+	        poem_edit_get_handler,
+	        poem_edit_post_handler);
 	poem_meta_qtype = qmap_reg(sizeof(poem_meta_t));
 	poem_index_hd = qmap_open(
 	        NULL, "poem_idx", QM_STR, poem_meta_qtype, 0x3FF, QM_SORTED);
@@ -413,9 +423,5 @@ void ndx_install(void)
 			}
 		}
 	}
-	ndc_register_handler("POST:/poem/add", poem_add_post_handler);
 	ndc_register_handler("GET:/poem/:id/*", poem_child_file_handler);
-	ndc_register_handler("GET:/poem/:id", poem_detail_handler);
-	ndc_register_handler("GET:/poem/:id/edit", poem_edit_get_handler);
-	ndc_register_handler("POST:/poem/:id/edit", poem_edit_post_handler);
 }

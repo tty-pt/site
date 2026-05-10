@@ -13,6 +13,7 @@
 import { chromium } from "npm:playwright";
 import { createAndLoginUser, waitForText } from "./helpers/auth.ts";
 
+const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const BASE = "http://localhost:8080";
 
 Deno.test("songbook: register → login → create songbook → load edit page → save → view", async () => {
@@ -78,7 +79,7 @@ Deno.test("songbook: register → login → create songbook → load edit page �
     // Cleanup: remove the created songbook directory
     if (sbId) {
       try {
-        const sbPath = `${Deno.cwd()}/items/songbook/items/${sbId}`;
+        const sbPath = `${REPO_ROOT}/items/songbook/items/${sbId}`;
         for await (const entry of Deno.readDir(sbPath)) {
           await Deno.remove(`${sbPath}/${entry.name}`);
         }
