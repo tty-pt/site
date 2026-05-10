@@ -179,10 +179,12 @@ NDX_LISTENER(char *, slurp_item_child_file,
 
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	buf[0] = '\0';
-	ndc_env_get(fd, buf, "DOCUMENT_ROOT");
-	if (!buf[0])
-		snprintf(buf, len, ".");
+	(void)fd;
+	/* Always use relative root "." for local file access.
+	 * DOCUMENT_ROOT from the environment can contain pre-chroot absolute
+	 * paths that are invalid inside the chroot. Since ndc ensures the CWD
+	 * is the site root, "." is the correct reliable base. */
+	snprintf(buf, len, ".");
 	return 0;
 }
 
@@ -309,7 +311,7 @@ NDX_LISTENER(int, item_path_build,
 {
 	char doc_root[256] = { 0 };
 
-	ndc_env_get(fd, doc_root, "DOCUMENT_ROOT");
+	get_doc_root(fd, doc_root, sizeof(doc_root));
 	return item_path_build_root(doc_root, module, id, out, outlen);
 }
 

@@ -5,7 +5,8 @@ set -e
 make -C lib/transp test
 
 BASE="http://localhost:8080"
-SONG_DIR="/home/quirinpa/site/items/song/items"
+REPO_ROOT="$(cd ../.. && pwd)"
+SONG_DIR="$REPO_ROOT/items/song/items"
 COOKIE="/tmp/song_test_cookie_$$"
 USER="songtest$$"
 

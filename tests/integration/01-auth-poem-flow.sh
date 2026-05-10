@@ -8,6 +8,11 @@ LOG="/tmp/auth_poem_test_ndc.log"
 COOKIE="/tmp/auth_poem_test_cookie"
 RCODE=""
 
+# Environment setup
+SITE_DIR="${SITE_DIR:-$(pwd)}"
+NDC_DIR="${NDC_DIR:-$(dirname "$SITE_DIR")/ndc}"
+QMAP_DIR="${QMAP_DIR:-$(dirname "$SITE_DIR")/qmap}"
+
 fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
 
@@ -16,15 +21,15 @@ TMPFILE="/tmp/poem_test_$$"
 cleanup() {
 	pkill -f "ndc.*$PORT" 2>/dev/null || true
 	rm -f "$LOG" "$COOKIE" auth.qmap "$TMPFILE"
-	rm -rf /home/quirinpa/site/items/poem/items
+	rm -rf "$SITE_DIR/items/poem/items"
 }
 
 start_server() {
 	cleanup
 	sleep 1
 	rm -f auth.qmap
-	mkdir -p /home/quirinpa/site/items/poem/items
-	LD_LIBRARY_PATH=/home/quirinpa/ndc/lib:/home/quirinpa/qmap/lib /home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
+	mkdir -p "$SITE_DIR/items/poem/items"
+	LD_LIBRARY_PATH="$NDC_DIR/lib:$QMAP_DIR/lib" "$NDC_DIR/bin/ndc" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
 	sleep 3
 }
 
@@ -67,7 +72,7 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/add
 
 # 6. Verify poem file exists
 echo -n "6. Poem file created... "
-[ -f /home/quirinpa/site/items/poem/items/testpoem/pt_PT.html ] && pass "file exists" || fail "file not found"
+[ -f "$SITE_DIR/items/poem/items/testpoem/pt_PT.html" ] && pass "file exists" || fail "file not found"
 
 # 7. Logout
 echo -n "7. Logout... "

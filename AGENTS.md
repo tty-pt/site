@@ -36,7 +36,7 @@ rustup target add wasm32-unknown-unknown
 For manual startup:
 
 ```bash
-cd /home/quirinpa/site
+cd .
 setsid ndc -C . -p 8080 -d -m mods/core/core >> /tmp/site.log 2>&1 &
 ```
 

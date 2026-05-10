@@ -2,7 +2,8 @@
 set -e
 
 BASE="http://localhost:8080"
-POEM_DIR="/home/quirinpa/site/items/poem/items"
+REPO_ROOT="$(cd ../.. && pwd)"
+POEM_DIR="$REPO_ROOT/items/poem/items"
 COOKIE="/tmp/poem_test_cookie_$$"
 USER="poemtest$$"
 

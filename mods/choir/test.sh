@@ -4,7 +4,8 @@ set -e
 HOST="localhost"
 PORT="${NDC_PORT:-8080}"
 BASE="http://$HOST:$PORT"
-CHOIR_DIR="/home/quirinpa/site/items/choir/items"
+REPO_ROOT="$(cd ../.. && pwd)"
+CHOIR_DIR="$REPO_ROOT/items/choir/items"
 
 fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }

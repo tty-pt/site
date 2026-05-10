@@ -145,6 +145,23 @@ static void special_db_init(int hd, char **table)
 		qmap_put(hd, table[u], &special_sentinel);
 }
 
+/* Return 1 if every byte in s[0..len) is a valid chord modifier character */
+static int valid_modifier(const char *s, size_t len)
+{
+	for (size_t i = 0; i < len; i++) {
+		char c = s[i];
+		if (c >= '0' && c <= '9')
+			continue;
+		if (c == '#' || c == 'b')
+			continue;
+		if (c == 'm' || c == 'a' || c == 'j' || c == 'd' || c == 'i' ||
+		    c == 'u' || c == 'g' || c == 's' || c == 'n')
+			continue;
+		return 0;
+	}
+	return 1;
+}
+
 /* Process a single line of chord chart */
 static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 {
@@ -315,6 +332,11 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			modlen = space_after ? space_after - eoc : strlen(eoc);
 		}
 
+		/* Reject if modifier contains chars invalid for chord suffixes
+		 */
+		if (!is_special && !valid_modifier(eoc, modlen))
+			goto no_chord;
+
 		if (flags & TRANSP_HIDE_CHORDS) {
 			s = eoc + modlen;
 			continue;
@@ -395,11 +417,10 @@ no_chord:
 
 	s = line_copy + sim;
 
-	/* Close bold tag if needed */
-	if ((flags & TRANSP_HTML) && !not_bolded) {
-		o += outprintf(outbuf, sizeof(outbuf), o - outbuf, "</b>");
+	/* o foi reiniciado para outbuf + si; o <b> correspondente
+	   já foi descartado. Apenas marcar como não-bold. */
+	if ((flags & TRANSP_HTML) && !not_bolded)
 		not_bolded = 1;
-	}
 
 	/* Process lyrics with spacing adjustments */
 	for (; *s;) {

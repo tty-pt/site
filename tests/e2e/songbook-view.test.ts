@@ -53,7 +53,7 @@ Deno.test("songbook: register → login → create songbook → view detail page
     // Cleanup: remove the created songbook directory
     if (sbId) {
       try {
-        const sbPath = `/home/quirinpa/site/items/songbook/items/${sbId}`;
+        const sbPath = `${Deno.cwd()}/items/songbook/items/${sbId}`;
         for await (const entry of Deno.readDir(sbPath)) {
           await Deno.remove(`${sbPath}/${entry.name}`);
         }

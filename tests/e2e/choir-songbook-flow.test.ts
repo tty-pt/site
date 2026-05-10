@@ -135,7 +135,7 @@ Deno.test({
   } finally {
     if (sbId) {
       try {
-        const sbPath = `/home/quirinpa/site/items/songbook/items/${sbId}`;
+        const sbPath = `${Deno.cwd()}/items/songbook/items/${sbId}`;
         for await (const entry of Deno.readDir(sbPath)) {
           await Deno.remove(`${sbPath}/${entry.name}`);
         }
@@ -216,13 +216,13 @@ Deno.test({
     // We check that data.txt was written by confirming the page is not totally empty of content.
     // More concretely: a pre-populated songbook will not show a blank page — it renders SongItems.
     // We verify by checking the data.txt file was created with content.
-    const dataPath = `/home/quirinpa/site/items/songbook/items/${sbId}/data.txt`;
+    const dataPath = `${Deno.cwd()}/items/songbook/items/${sbId}/data.txt`;
     const stat = await Deno.stat(dataPath);
     if (stat.size === 0) throw new Error("data.txt was created but is empty — no songs pre-populated");
   } finally {
     if (sbId) {
       try {
-        const sbPath = `/home/quirinpa/site/items/songbook/items/${sbId}`;
+        const sbPath = `${Deno.cwd()}/items/songbook/items/${sbId}`;
         for await (const entry of Deno.readDir(sbPath)) {
           await Deno.remove(`${sbPath}/${entry.name}`);
         }

@@ -146,7 +146,7 @@ From another module or handler:
 
 **Solution:**
 ```sh
-mkdir -p /home/quirinpa/site/items/poem/items
+mkdir -p items/poem/items
 ```
 
 ### Poems don't appear in listing

@@ -3,9 +3,14 @@ set -e
 
 HOST="localhost"
 PORT="3002"
+# Environment setup
+SITE_DIR="${SITE_DIR:-$(pwd)}"
+NDC_DIR="${NDC_DIR:-$(dirname "$SITE_DIR")/ndc}"
+QMAP_DIR="${QMAP_DIR:-$(dirname "$SITE_DIR")/qmap}"
+
 BASE="http://$HOST:$PORT"
 LOG="/tmp/poem_listing_test_ndc.log"
-POEM_DIR="/home/quirinpa/site/items/poem/items"
+POEM_DIR="$SITE_DIR/items/poem/items"
 TMPFILE1="/tmp/poem_listing_test_1_$$"
 TMPFILE2="/tmp/poem_listing_test_2_$$"
 
@@ -26,8 +31,8 @@ start_server() {
 	mkdir -p "$POEM_DIR"
 
 	# Start ndc
-	LD_LIBRARY_PATH=/home/quirinpa/ndc/lib:/home/quirinpa/qmap/lib \
-		/home/quirinpa/ndc/bin/ndc -C /home/quirinpa/site -p $PORT -d 2>"$LOG" &
+	LD_LIBRARY_PATH="$NDC_DIR/lib:$QMAP_DIR/lib" \
+		"$NDC_DIR/bin/ndc" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
 	sleep 3
 }
 

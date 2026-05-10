@@ -329,6 +329,86 @@ TEST(html_escape_lyrics)
 	transp_free(ctx);
 }
 
+TEST(no_stray_close_bold_on_lyric_line)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Word starting with a chord letter but not a chord */
+	char *result = transp_buffer(ctx, "Amazing Grace", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(!str_contains(result, "</b>"));
+	assert(str_contains(result, "Amazing Grace"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(valid_chords_still_bolded)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* All chords on a single line are wrapped in one <b> block */
+	char *result = transp_buffer(
+	        ctx, "Am Dm7 G#maj7 Bbm7b5", 0, TRANSP_HTML);
+	assert(result != NULL);
+	/* Bbm7b5 defaults to A#m7b5 (sharp notation) */
+	assert(str_contains(result, "<b>Am Dm7 G#maj7 A#m7b5</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(lyric_word_not_treated_as_chord)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Brilhará novo Sol", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(str_contains(result, "Brilhará novo Sol"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(lyric_word_with_chord_root_prefix)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Erguendo ao alto", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(str_contains(result, "Erguendo ao alto"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(numbered_verse_no_duplicate_text)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "1. Verse text", 0, TRANSP_HTML);
+	assert(result != NULL);
+	/* The "1." must be bolded */
+	assert(str_contains(result, "<b>1.</b>"));
+	/* The rest must appear as lyrics */
+	assert(str_contains(result, "Verse text"));
+	/* "Verse text" must appear exactly once */
+	char *first = strstr(result, "Verse text");
+	assert(first != NULL);
+	assert(strstr(first + 1, "Verse text") == NULL);
+	free(result);
+
+	transp_free(ctx);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -350,6 +430,11 @@ int main(void)
 	RUN_TEST(repeat_markers_second_song);
 	RUN_TEST(complex_song);
 	RUN_TEST(html_escape_lyrics);
+	RUN_TEST(no_stray_close_bold_on_lyric_line);
+	RUN_TEST(valid_chords_still_bolded);
+	RUN_TEST(lyric_word_not_treated_as_chord);
+	RUN_TEST(lyric_word_with_chord_root_prefix);
+	RUN_TEST(numbered_verse_no_duplicate_text);
 
 	printf("\nAll tests passed!\n");
 	return 0;

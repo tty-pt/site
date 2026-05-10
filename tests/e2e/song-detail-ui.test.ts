@@ -110,7 +110,7 @@ Deno.test({
     // Cleanup created song
     if (createdSongId) {
       try {
-        await Deno.remove(`/home/quirinpa/site/items/song/items/${createdSongId}`, { recursive: true });
+        await Deno.remove(`${Deno.cwd()}/items/song/items/${createdSongId}`, { recursive: true });
       } catch { /* ignore */ }
     }
     await browser.close();

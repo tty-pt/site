@@ -94,7 +94,7 @@ deno test --allow-all tests/e2e/song-add.test.ts
 
 ## Notes
 
-- Checked-in browser assets live in [htdocs](/home/quirinpa/site/htdocs).
+- Checked-in browser assets live in [htdocs](htdocs).
 - The browser enhancement path is now wasm-driven; there is no handwritten `app.js` runtime left.
-- The Rust lockfile is tracked at [mods/ssr/rust-renderer/Cargo.lock](/home/quirinpa/site/mods/ssr/rust-renderer/Cargo.lock).
+- The Rust lockfile is tracked at [mods/ssr/rust-renderer/Cargo.lock](mods/ssr/rust-renderer/Cargo.lock).
 - The old Fresh/proxy frontend tree has been removed.
