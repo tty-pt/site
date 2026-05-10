@@ -62,4 +62,17 @@ NDX_HOOK_DECL(const char *, index_get_module_id, size_t, i);
 NDX_HOOK_DECL(const char *, index_get_module_title, size_t, i);
 NDX_HOOK_DECL(unsigned, index_get_module_flags, size_t, i);
 
+/* Ownership helpers — moved from auth; they're item metadata ops, not auth */
+
+NDX_HOOK_DECL(int, item_record_ownership,
+	const char *, item_path,
+	const char *, username);
+
+NDX_HOOK_DECL(int, item_read_owner,
+	const char *, item_path,
+	char *, out,
+	size_t, outlen);
+
+NDX_HOOK_DECL(int, item_unlink_owner, const char *, item_path);
+
 #endif

@@ -127,26 +127,6 @@ static void build_owner_path(const char *ip, char *out, size_t len)
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-NDX_LISTENER(int, item_record_ownership,
-	const char *, item_path,
-	const char *, username)
-{
-	if (geteuid() == 0) {
-		int uid = auth_get_uid(username);
-		if (uid >= 0)
-			chown(item_path, (uid_t)uid, (gid_t)-1);
-	} else {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		FILE *fp = fopen(owner_path, "w");
-		if (fp) {
-			fwrite(username, 1, strlen(username), fp);
-			fclose(fp);
-		}
-	}
-	return 0;
-}
-
 NDX_LISTENER(int, item_check_ownership,
 	const char *, item_path,
 	const char *, username)
@@ -172,55 +152,6 @@ NDX_LISTENER(int, item_check_ownership,
 		fclose(fp);
 		return owner[0] && strcmp(owner, username) == 0;
 	}
-}
-
-NDX_LISTENER(int, item_read_owner,
-	const char *, item_path,
-	char *, out,
-	size_t, outlen)
-{
-	if (!out || outlen == 0)
-		return -1;
-	out[0] = '\0';
-
-	if (geteuid() == 0) {
-		struct stat st;
-		if (stat(item_path, &st) != 0)
-			return -1;
-		char buf[4096];
-		struct passwd pw, *result = NULL;
-		if (getpwuid_r(st.st_uid, &pw, buf, sizeof(buf), &result) ==
-		            0 &&
-		    result)
-		{
-			strncpy(out, result->pw_name, outlen - 1);
-			out[outlen - 1] = '\0';
-			return 0;
-		}
-		return -1;
-	} else {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		FILE *fp = fopen(owner_path, "r");
-		if (!fp)
-			return -1;
-		if (fgets(out, (int)outlen, fp))
-			out[strcspn(out, "\n")] = '\0';
-		else
-			out[0] = '\0';
-		fclose(fp);
-		return out[0] ? 0 : -1;
-	}
-}
-
-NDX_LISTENER(int, item_unlink_owner, const char *, item_path)
-{
-	if (geteuid() != 0) {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		unlink(owner_path);
-	}
-	return 0;
 }
 
 NDX_LISTENER(item_access_t, item_access_status,

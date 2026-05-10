@@ -43,13 +43,7 @@ typedef int (*item_handler_cb)(
 
 #ifndef ITEM_IMPL
 
-/* Ownership helpers */
-
-/* Record ownership of item_path for username.
- * When root: chown to uid. When non-root: write owner file. */
-NDX_HOOK_DECL(int, item_record_ownership,
-	const char *, item_path,
-	const char *, username);
+/* Ownership helper */
 
 /* Check if username owns item_path.
  * When root: compare stat uid. When non-root: read owner file. */
@@ -68,16 +62,6 @@ NDX_HOOK_DECL(int, item_require_access,
 	unsigned, flags,
 	const char *, not_found_msg,
 	const char *, forbidden_msg);
-
-/* Read owner name into out (display use).
- * When root: getpwuid_r. When non-root: read owner file. */
-NDX_HOOK_DECL(int, item_read_owner,
-	const char *, item_path,
-	char *, out,
-	size_t, outlen);
-
-/* Unlink owner file (non-root only); call before rmdir. */
-NDX_HOOK_DECL(int, item_unlink_owner, const char *, item_path);
 
 /* Populate an item_ctx_t from the request; enforces flags and responds
  * with an appropriate error on failure. Returns 0 on success, non-zero

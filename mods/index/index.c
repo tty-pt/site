@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <iconv.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -29,6 +30,9 @@ static int index_add_get_handler(int fd, char *body);
 static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
 int index_add_item(int fd, char *body, char *id_out, size_t id_len);
+int item_record_ownership(const char *item_path, const char *username);
+int item_read_owner(const char *item_path, char *out, size_t outlen);
+int item_unlink_owner(const char *item_path);
 
 static char modules_json[256 * MAX_MODULES], *modules_json_end = modules_json;
 
@@ -595,6 +599,84 @@ NDX_LISTENER(const char *, index_get_module_title, size_t, i)
 NDX_LISTENER(unsigned, index_get_module_flags, size_t, i)
 {
 	return (i < modules_count) ? module_flags_arr[i] : 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ownership helpers — item metadata management                        */
+/* ------------------------------------------------------------------ */
+
+static void build_owner_path(const char *ip, char *out, size_t len)
+{
+	snprintf(out, len, "%s/owner", ip);
+}
+
+NDX_LISTENER(int, item_record_ownership,
+	const char *, item_path,
+	const char *, username)
+{
+	if (geteuid() == 0) {
+		int uid = auth_get_uid(username);
+		if (uid >= 0)
+			chown(item_path, (uid_t)uid, (gid_t)-1);
+	} else {
+		char owner_path[1024];
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
+		FILE *fp = fopen(owner_path, "w");
+		if (fp) {
+			fwrite(username, 1, strlen(username), fp);
+			fclose(fp);
+		}
+	}
+	return 0;
+}
+
+NDX_LISTENER(int, item_read_owner,
+	const char *, item_path,
+	char *, out,
+	size_t, outlen)
+{
+	if (!out || outlen == 0)
+		return -1;
+	out[0] = '\0';
+
+	if (geteuid() == 0) {
+		struct stat st;
+		if (stat(item_path, &st) != 0)
+			return -1;
+		char buf[4096];
+		struct passwd pw, *result = NULL;
+		if (getpwuid_r(st.st_uid, &pw, buf, sizeof(buf), &result) ==
+		            0 &&
+		    result)
+		{
+			strncpy(out, result->pw_name, outlen - 1);
+			out[outlen - 1] = '\0';
+			return 0;
+		}
+		return -1;
+	} else {
+		char owner_path[1024];
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
+		FILE *fp = fopen(owner_path, "r");
+		if (!fp)
+			return -1;
+		if (fgets(out, (int)outlen, fp))
+			out[strcspn(out, "\n")] = '\0';
+		else
+			out[0] = '\0';
+		fclose(fp);
+		return out[0] ? 0 : -1;
+	}
+}
+
+NDX_LISTENER(int, item_unlink_owner, const char *, item_path)
+{
+	if (geteuid() != 0) {
+		char owner_path[1024];
+		build_owner_path(item_path, owner_path, sizeof(owner_path));
+		unlink(owner_path);
+	}
+	return 0;
 }
 
 void ndx_install(void)
