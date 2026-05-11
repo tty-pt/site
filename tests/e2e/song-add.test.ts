@@ -6,7 +6,7 @@
  *   2. After submission, redirects to /song/<id> detail page
  *   3. Detail page shows the song title
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

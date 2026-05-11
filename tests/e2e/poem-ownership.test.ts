@@ -8,7 +8,7 @@
  *   4. User B tries to GET /poem/<id>/delete → 403
  *   5. User B tries to POST /poem/<id>/delete → 403
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Simple smoke tests that assert a few pages render via the running ndc server.
-# Usage: NDC_HOST=127.0.0.1 NDC_PORT=8080 sh tests/pages/10-pages-render.sh
+# Simple smoke tests that assert a few pages render via the running axil server.
+# Usage: AXIL_HOST=127.0.0.1 AXIL_PORT=8080 sh tests/pages/10-pages-render.sh
 
 . "$(dirname "$0")/00-helpers.sh"
 

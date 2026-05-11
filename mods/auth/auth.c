@@ -9,15 +9,15 @@
 #include <pwd.h>
 #include <fcntl.h>
 
-#include <ttypt/ndc.h>
-#include <ttypt/ndc-ndx.h>
+#include <ttypt/axil.h>
+#include <ttypt/axil-ndx.h>
 
 #define ITEM_IMPL
 #include "auth.h"
 #undef ITEM_IMPL
 
 #include "../common/common.h"
-#include "../ssr/ssr.h"
+#include "ux/all.c"
 
 /* ------------------------------------------------------------------ */
 /* CSRF helpers                                                         */
@@ -61,7 +61,7 @@ NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 	size_t vlen;
 
 	token[0] = '\0';
-	ndc_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+	axil_env_get(fd, cookie_hdr, "HTTP_COOKIE");
 	p = strstr(cookie_hdr, "csrf_token=");
 	if (p) {
 		eq = p + strlen("csrf_token=");
@@ -81,7 +81,7 @@ NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 	        sizeof(header),
 	        "csrf_token=%s; Path=/; SameSite=Strict",
 	        token);
-	ndc_header_set(fd, "Set-Cookie", header);
+	axil_header_set(fd, "Set-Cookie", header);
 	if (out && len > 0)
 		snprintf(out, len, "%s", token);
 	return 0;
@@ -100,7 +100,7 @@ NDX_LISTENER(int, csrf_validate, int, fd, const char *, submitted)
 		return -1;
 
 	cookie_hdr[0] = '\0';
-	ndc_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+	axil_env_get(fd, cookie_hdr, "HTTP_COOKIE");
 
 	p = strstr(cookie_hdr, "csrf_token=");
 	if (!p)
@@ -115,17 +115,13 @@ NDX_LISTENER(int, csrf_validate, int, fd, const char *, submitted)
 }
 
 /* ------------------------------------------------------------------ */
-/* Internal helpers                                                     */
+/* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
 static void build_owner_path(const char *ip, char *out, size_t len)
 {
 	snprintf(out, len, "%s/owner", ip);
 }
-
-/* ------------------------------------------------------------------ */
-/* Ownership helpers                                                    */
-/* ------------------------------------------------------------------ */
 
 NDX_LISTENER(int, item_check_ownership,
 	const char *, item_path,
@@ -144,13 +140,22 @@ NDX_LISTENER(int, item_check_ownership,
 		char owner_path[1024];
 		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "r");
-		if (!fp)
+		if (fp) {
+			char owner[64] = { 0 };
+			if (fgets(owner, sizeof(owner) - 1, fp))
+				owner[strcspn(owner, "\n")] = '\0';
+			fclose(fp);
+			if (owner[0] && strcmp(owner, username) == 0)
+				return 1;
+		}
+
+		struct stat st;
+		if (stat(item_path, &st) != 0)
 			return 0;
-		char owner[64] = { 0 };
-		if (fgets(owner, sizeof(owner) - 1, fp))
-			owner[strcspn(owner, "\n")] = '\0';
-		fclose(fp);
-		return owner[0] && strcmp(owner, username) == 0;
+		if (geteuid() != st.st_uid)
+			return 0;
+		int uid = auth_get_uid(username);
+		return uid >= 0 && (uid_t)uid == st.st_uid;
 	}
 }
 
@@ -216,11 +221,11 @@ NDX_LISTENER(int, item_ctx_load,
 		ctx->username = get_request_user(fd);
 	}
 
-	get_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
-	ndc_env_get(fd, ctx->id, "PATTERN_PARAM_ID");
+	resolve_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
+	axil_env_get(fd, ctx->id, "PATTERN_PARAM_ID");
 
 	if (flags & ICTX_SONG_ID)
-		ndc_env_get(fd, ctx->song_id, "PATTERN_PARAM_SONG_ID");
+		axil_env_get(fd, ctx->song_id, "PATTERN_PARAM_SONG_ID");
 
 	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
 		bad_request(fd, "Missing parameters");
@@ -280,6 +285,22 @@ NDX_LISTENER(int, with_item_access,
 	return cb(fd, body, &ctx, user);
 }
 
+/* ── HTTP response helper (moved from auth_fe.c) ───────────── */
+
+static void
+auth_send_html(int fd, uint16_t status, const char *title, bud_node *layout)
+{
+	char *html = site_ui_page(title, NULL, NULL, layout);
+
+	if (html) {
+		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
+		axil_respond(fd, status, html);
+		bud_free_string(html);
+	} else {
+		axil_respond(fd, 500, "Internal Server Error");
+	}
+}
+
 /* ------------------------------------------------------------------ */
 /* SSR outcome hooks                                                    */
 /* ------------------------------------------------------------------ */
@@ -288,32 +309,15 @@ int on_auth_login_error(
         int fd, int status, const char *msg, const char *redirect)
 {
 	char accept[256] = { 0 };
-	ndc_header_get(fd, "Accept", accept, sizeof(accept));
+	axil_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
-		char enc[128] = { 0 }, enc_ret[256] = { 0 }, pb[512];
-		char ret[256] = { 0 };
-		if (redirect)
-			strncpy(ret, redirect, sizeof(ret) - 1);
-		url_encode(msg, enc, sizeof(enc));
-		url_encode(ret, enc_ret, sizeof(enc_ret));
-		int plen = snprintf(
-		        pb,
-		        sizeof(pb),
-		        "status=%d&error=%s&ret=%s",
-		        status,
-		        enc,
-		        enc_ret);
-		return ssr_render(
-		        fd,
-		        "POST",
-		        "/auth/login",
-		        "",
-		        pb,
-		        (size_t)plen,
-		        get_request_user(fd));
+		const char *user = get_request_user(fd);
+		bud_node *layout = auth_render_login(user, redirect, msg);
+		auth_send_html(fd, (uint16_t)status, "Login", layout);
+		return 1;
 	}
-	ndc_header_set(fd, "Content-Type", "text/plain");
-	ndc_respond(fd, status, msg ? msg : "");
+	axil_header_set(fd, "Content-Type", "text/plain");
+	axil_respond(fd, status, msg ? msg : "");
 	return 1;
 }
 
@@ -326,8 +330,49 @@ static int csrf_endpoint_handler(int fd, char *body)
 	char token[33] = { 0 };
 	(void)body;
 	csrf_set_cookie(fd, token, sizeof(token));
-	ndc_header_set(fd, "Content-Type", "text/plain");
-	ndc_respond(fd, 200, token);
+	axil_header_set(fd, "Content-Type", "text/plain");
+	axil_respond(fd, 200, token);
+	return 0;
+}
+
+static int login_get_handler(int fd, char *body)
+{
+	char qs[512] = { 0 };
+	char ret[256] = { 0 };
+	const char *user;
+	char *p;
+	char *end;
+
+	(void)body;
+	user = get_request_user(fd);
+	axil_env_get(fd, qs, "QUERY_STRING");
+	p = strstr(qs, "ret=");
+	if (p) {
+		p += 4;
+		end = strchr(p, '&');
+		if (end) {
+			size_t n = (size_t)(end - p);
+
+			if (n >= sizeof(ret))
+				n = sizeof(ret) - 1;
+			memcpy(ret, p, n);
+			ret[n] = '\0';
+		} else {
+			strncpy(ret, p, sizeof(ret) - 1);
+		}
+	}
+	{
+		bud_node *layout = auth_render_login(user, ret, NULL);
+		auth_send_html(fd, 200, "Login", layout);
+	}
+	return 0;
+}
+
+static int register_get_handler(int fd, char *body)
+{
+	(void)body;
+	bud_node *layout = auth_render_register(get_request_user(fd));
+	auth_send_html(fd, 200, "Register", layout);
 	return 0;
 }
 
@@ -335,7 +380,9 @@ void ndx_install(void)
 {
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/common/common");
-	ndx_load("ndc-auth");
-	ndc_register_handler("GET:/api/csrf", csrf_endpoint_handler);
+	ndx_load("axil-auth");
+	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
+	axil_register_handler("GET:/auth/login", login_get_handler);
+	axil_register_handler("GET:/auth/register", register_get_handler);
 	auth_init();
 }

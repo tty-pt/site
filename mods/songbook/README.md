@@ -13,7 +13,7 @@ The songbook module provides:
 
 ## Architecture
 
-- **Backend:** `sb.c` - C module with ndc HTTP handlers
+- **Backend:** `sb.c` - C module with axil HTTP handlers
 - **SSR:** `ssr.rs` - Rust Dioxus SSR renderer
 - **Storage:** Filesystem + qmap index database
 - **Dependencies:** auth, common, mpfd, choir (indirect)
@@ -418,6 +418,42 @@ qmap -l items/sb/items/index.db
 **Problem:** Songs appear empty in view mode
 - **Cause:** Chord files missing or transpose API down
 - **Fix:** Check chord files exist, verify `/api/chords/transpose` works
+
+## Known Issues
+
+### Song Dropdown Empty in Edit Mode
+
+When editing a songbook, the song dropdown may show "No songs yet" even though songs exist. This is related to how the dataset system loads song data.
+
+**Symptoms:**
+- `tests/e2e/songbook-edit-row.test.ts` fails with "No songs yet" message
+- Song list page (`/song/`) works correctly
+- Songs exist on disk at `items/song/items/{id}/`
+
+**Root Cause (investigating):**
+The songbook edit page uses `load_dataset_json(ctx.fd, "song.items")` to populate the song dropdown. This calls the C dataset system which:
+1. Iterates over `source_hd` (index_hd for songs)
+2. Looks up JSON for each song ID
+3. For empty JSON, calls `dataset_scan_item` to read from disk
+
+The issue may be that the inline scan in `dataset_rows_json_build` isn't triggering correctly, or the index isn't populated at startup.
+
+**Debug Commands:**
+```bash
+# Check if song exists on disk
+ls -la items/song/items/a_alegria_esta_no_coracao/
+
+# Check if song is in index.tsv
+grep "a_alegria" items/song/index.tsv
+
+# Check runtime debug output
+cat debug/runtime/axil.log | grep "DEBUG dataset_rows"
+
+# Run test with capture
+make test-single-capture TEST=songbook-edit-row.test.ts
+```
+
+See `debug/songbook-edit-row-debugging.md` for detailed investigation notes.
 
 ## Future Enhancements
 

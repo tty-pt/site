@@ -7,7 +7,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
-#include <ttypt/ndc.h>
+#include <ttypt/axil.h>
 #include <ttypt/qmap.h>
 #include <ttypt/qsys.h>
 
@@ -275,8 +275,8 @@ NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body)
 	char content_type[512] = { 0 };
 	char clen_str[32] = { 0 };
 
-	ndc_env_get(fd, content_type, "HTTP_CONTENT_TYPE");
-	ndc_env_get(fd, clen_str, "HTTP_CONTENT_LENGTH");
+	axil_env_get(fd, content_type, "HTTP_CONTENT_TYPE");
+	axil_env_get(fd, clen_str, "HTTP_CONTENT_LENGTH");
 
 	/* Not multipart - not an error, just skip */
 	if (!strstr(content_type, "multipart/form-data")) {
@@ -298,7 +298,7 @@ static int mpfd_exists(const char *name)
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
-NDX_LISTENER(int, mpfd_len, const char *, name)
+static int mpfd_len(const char *name)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	return val ? (int)val->len : -1;

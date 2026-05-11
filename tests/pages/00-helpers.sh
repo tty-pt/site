@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-: ${NDC_HOST:=127.0.0.1}
-: ${NDC_PORT:=8080}
+: ${AXIL_HOST:=127.0.0.1}
+: ${AXIL_PORT:=8080}
 
-BASE="http://$NDC_HOST:$NDC_PORT"
+BASE="http://$AXIL_HOST:$AXIL_PORT"
 
 fail(){ echo "FAIL: $*"; exit 1; }
 pass(){ echo "PASS: $*"; }

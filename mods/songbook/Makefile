@@ -1,10 +1,11 @@
-all: client-wasm $(TARGET)
+EXTRA_CFLAGS += -I../../external/bud/include -I../common
+EXTRA_LDLIBS += -L../../external/bud/lib -lbud -laxil-auth -ljson-c
 
-client-wasm:
-	@if command -v wasm-bindgen >/dev/null 2>&1 && rustup target list --installed | grep -qx wasm32-unknown-unknown; then \
-		${MAKE} -C client; \
-	else \
-		echo "Skipping songbook wasm client build (need wasm-bindgen and rustup target wasm32-unknown-unknown)"; \
-	fi
+# WASM
+WASM_TARGETS = $(WASM_PATH)/songbook_fe.wasm
+songbook_fe-src = ux/all.c
+songbook_fe-cflags = -I$(REPO_ROOT)/mods/common
+
+all: $(TARGET)
 
 include ../../build.mk

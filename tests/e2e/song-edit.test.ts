@@ -4,8 +4,7 @@
  * Creates a fresh song, edits its title, verifies the change, then cleans up.
  *
  * Requires both servers to be running:
- *   NDC on port 8080  (./start.sh)
- *   ndc on port 8080
+ *   axil on port 8080  (./start.sh)
  */
 
 import { chromium } from "npm:playwright";

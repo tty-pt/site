@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-HOST="${NDC_HOST:-localhost}"
-PORT="${NDC_PORT:-8080}"
+HOST="${AXIL_HOST:-localhost}"
+PORT="${AXIL_PORT:-8080}"
 BASE="http://$HOST:$PORT"
 
 fail() { echo "FAIL: $1"; exit 1; }

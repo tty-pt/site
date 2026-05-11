@@ -3,7 +3,7 @@
  *
  * Runs axe-core analysis on key pages to ensure accessibility standards are met.
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

@@ -4,13 +4,13 @@ set -e
 HOST="localhost"
 PORT="3001"
 BASE="http://$HOST:$PORT"
-LOG="/tmp/auth_poem_test_ndc.log"
+LOG="/tmp/auth_poem_test_axil.log"
 COOKIE="/tmp/auth_poem_test_cookie"
 RCODE=""
 
 # Environment setup
 SITE_DIR="${SITE_DIR:-$(pwd)}"
-NDC_DIR="${NDC_DIR:-$(dirname "$SITE_DIR")/ndc}"
+AXIL_DIR="${AXIL_DIR:-$(dirname "$SITE_DIR")/axil}"
 QMAP_DIR="${QMAP_DIR:-$(dirname "$SITE_DIR")/qmap}"
 
 fail() { echo "FAIL: $1"; exit 1; }
@@ -19,7 +19,7 @@ pass() { echo "PASS: $1"; }
 TMPFILE="/tmp/poem_test_$$"
 
 cleanup() {
-	pkill -f "ndc.*$PORT" 2>/dev/null || true
+	pkill -f "axil.*$PORT" 2>/dev/null || true
 	rm -f "$LOG" "$COOKIE" auth.qmap "$TMPFILE"
 	rm -rf "$SITE_DIR/items/poem/items"
 }
@@ -29,7 +29,7 @@ start_server() {
 	sleep 1
 	rm -f auth.qmap
 	mkdir -p "$SITE_DIR/items/poem/items"
-	LD_LIBRARY_PATH="$NDC_DIR/lib:$QMAP_DIR/lib" "$NDC_DIR/bin/ndc" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
+	LD_LIBRARY_PATH="$AXIL_DIR/lib:$QMAP_DIR/lib" "$AXIL_DIR/bin/axil" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
 	sleep 3
 }
 
@@ -67,7 +67,7 @@ out=$(curl -sb "$COOKIE" "$BASE/api/session")
 echo -n "5. Upload poem... "
 echo "Test poem content" > "$TMPFILE"
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/add" \
-	-F "id=testpoem" -F "file=@$TMPFILE")
+	-F "id=testpoem" -F "body_content=@$TMPFILE")
 [ "$code" = "303" ] && pass "poem uploaded" || fail "expected 303, got $code"
 
 # 6. Verify poem file exists

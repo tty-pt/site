@@ -8,7 +8,7 @@
  *   4. After submission, redirects to /poem/<id> detail page
  *   5. Detail page shows the uploaded poem content
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -48,7 +48,14 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
 
     // ── 2. Navigate to edit page ──────────────────────────────────────────────
     await page.goto(`${BASE}/poem/${poemId}/edit`);
-    await page.waitForSelector('input[name="title"]', { timeout: 5000 });
+    try {
+        await page.waitForSelector('input[name="title"]', { timeout: 5000 });
+    } catch (err) {
+        console.error("Failed to wait for selector 'input[name=\"title\"]'");
+        console.error("Current URL:", page.url());
+        console.error("Page content:", await page.content());
+        throw err;
+    }
 
     // Verify pre-populated title
     const currentTitle = await page.inputValue('input[name="title"]');
@@ -60,7 +67,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
 
     // ── 3. Edit title and upload file ─────────────────────────────────────────
     await page.fill('input[name="title"]', editedTitle);
-    const fileInput = page.locator('input[type="file"][name="file"]');
+    const fileInput = page.locator('input[type="file"][name="body_content"]');
     await fileInput.setInputFiles(tmpFile);
     await page.click('button[type="submit"]');
 

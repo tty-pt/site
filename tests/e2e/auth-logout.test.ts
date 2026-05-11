@@ -7,7 +7,7 @@
  *   3. Logout
  *   4. Verify logged out state (has login link in nav)
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

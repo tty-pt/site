@@ -2,7 +2,7 @@
 set -e
 
 HOST="localhost"
-PORT="${NDC_PORT:-8080}"
+PORT="${AXIL_PORT:-8080}"
 BASE="http://$HOST:$PORT"
 REPO_ROOT="$(cd ../.. && pwd)"
 CHOIR_DIR="$REPO_ROOT/items/choir/items"

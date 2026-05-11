@@ -1,5 +1,6 @@
-LDLIBS = -lndc
+EXTRA_CFLAGS += -I../../external/bud/include
+EXTRA_LDLIBS += -L../../external/bud/lib -lbud
 
-$(TARGET): common.c common_dataset.c common_encoding.c common_form.c common_json.c common_post.c common_response.c common_storage.c
+$(TARGET): ux/site_ui.c
 
 include ../../build.mk

@@ -7,7 +7,7 @@
  *   3. Logged in as owner: edit + delete buttons appear in sidebar (.functions)
  *   4. Logged out: edit + delete buttons are absent
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -53,6 +53,16 @@ Deno.test({
       if (text?.toLowerCase().includes("back")) {
         throw new Error('Found "Back to Songs" link inside .center — it should have been removed');
       }
+    }
+
+    // Transposition form should be in the sidebar, not the body
+    const formInCenter = await page.$('.center #transpose-form');
+    if (formInCenter) {
+      throw new Error('Transpose form should NOT be in .center — it belongs in the sidebar');
+    }
+    const formInFunctions = await page.$('.functions #transpose-form');
+    if (!formInFunctions) {
+      throw new Error('Transpose form should be in .functions sidebar, but was not found');
     }
 
     // ── 2. Logged in as owner: create song + verify owner sidebar buttons ─────

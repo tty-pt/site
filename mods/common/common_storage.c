@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <ttypt/ndc.h>
+#include <ttypt/axil.h>
 #include <ttypt/ndx-mod.h>
 
 #include "common_internal.h"
@@ -166,38 +166,21 @@ NDX_LISTENER(char *, slurp_file, const char *, path)
 	return buf;
 }
 
-NDX_LISTENER(char *, slurp_item_child_file,
-	const char *, item_path,
-	const char *, name)
-{
-	char path[PATH_MAX];
-
-	if (item_child_path(item_path, name, path, sizeof(path)) != 0)
-		return NULL;
-	return slurp_file(path);
-}
-
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	(void)fd;
-	/* When ndc runs as root, it chroots to the site directory.
-	 * Inside the chroot, the site root is at absolute path '/'.
-	 * Using '.' can fail if the chroot doesn't correctly update the CWD.
-	 * When running as non-root, use '.' to access files in the current CWD.
-	 */
-	if (geteuid() == 0) {
-		snprintf(buf, len, "/");
-	} else {
-		snprintf(buf, len, ".");
-	}
+	if (fd > 0 && axil_env_get(fd, buf, "DOCUMENT_ROOT") > 0 && buf[0])
+		return 0;
+
+	snprintf(buf, len, ".");
 	return 0;
 }
 
-NDX_LISTENER(int, item_dir_exists, const char *, item_path)
+NDX_LISTENER(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len)
 {
-	struct stat st;
-
-	return stat(item_path, &st) == 0 && S_ISDIR(st.st_mode);
+	get_doc_root(fd, buf, len);
+	if (fd == 0 && (!buf[0] || buf[0] == '.'))
+		return ".";
+	return buf;
 }
 
 NDX_LISTENER(int, item_child_path,
@@ -220,14 +203,17 @@ static int remove_path_recursive(const char *path)
 	struct dirent *entry;
 	int rc = 0;
 
-	if (lstat(path, &st) != 0)
+	if (lstat(path, &st) != 0) {
 		return -1;
-	if (!S_ISDIR(st.st_mode))
+	}
+	if (!S_ISDIR(st.st_mode)) {
 		return unlink(path);
+	}
 
 	dir = opendir(path);
-	if (!dir)
+	if (!dir) {
 		return -1;
+	}
 
 	while ((entry = readdir(dir)) != NULL) {
 		char child[PATH_MAX];
@@ -345,13 +331,5 @@ NDX_LISTENER(int, datalist_extract_id,
 		n = outlen - 1;
 	memmove(id_out, lb + 1, n);
 	id_out[n] = '\0';
-	return 0;
-}
-
-NDX_LISTENER(int, index_field_clean, char *, s)
-{
-	for (; s && *s; s++)
-		if (*s == '\t' || *s == '\n' || *s == '\r')
-			*s = ' ';
 	return 0;
 }

@@ -1,22 +1,21 @@
-# Gemini Project Context: NDC + Rust SSR Site
+# Gemini Project Context: AXIL + Rust SSR Site
 
-This project is a hybrid C and Rust web application built on the NDC framework. It uses C for core business logic and request handling, while Rust (via Dioxus) provides server-side rendering (SSR) and browser enhancements (WASM).
+This project is a hybrid C and Rust web application built on the AXIL framework. It uses C for core business logic and request handling, while Rust (via Dioxus) provides server-side rendering (SSR) and browser enhancements (WASM).
 
 ## Architecture Overview
 
-- **Server (C):** The `ndc` binary serves as the web server. It loads modules as dynamic libraries (`.so`).
+- **Server (C):** The `axil` binary serves as the web server. It loads modules as dynamic libraries (`.so`).
 - **Business Logic (C):** Modules in `mods/` (e.g., `auth`, `song`, `poem`) handle requests, manage data in the `items/` directory, and perform logic.
-- **SSR Bridge (C/Rust):** `mods/ssr/ssr.c` acts as a high-performance bridge. It passes request data and complex payloads as **JSON strings** to a Rust dynamic library (`mods/ssr/rust-renderer`). This avoids complex struct mirroring and minimizes FFI boilerplate.
-- **FFI Boundary:** The C/Rust boundary is surgical. It uses a stable `RenderRequest` / `RenderResult` C-compatible ABI. Memory allocated by Rust MUST be freed by Rust via an explicit `ssr_free_result_ffi` call from the C side. **Note:** This interface is a primary candidate for further optimization and improvement to reduce boilerplate and enhance data throughput.
-- **Rendering (Rust):** The Rust renderer uses Dioxus for HTML generation. It dynamically includes `ssr.rs` files from other modules. JSON is the primary data source, ensuring the C side only needs to preocupy itself with data gathering and authorization before passing a single blob to Rust.
-- **Client-side (Rust/WASM):** Interactive features are implemented in Rust and compiled to WASM (e.g., `mods/song/client`).
+- **SSR (Rust):** `mods/ssr/` builds `ssr.so` using Dioxus SSR. The C side calls the Rust renderer via an NDX hook (`ssr_render`). Module-specific rendering lives in `mods/<module>/ssr/src/main.rs`, auto-discovered by `mods/ssr/build.rs`.
+- **Data access (Rust):** The Rust SSR reads data from C-side qmap handles via NDX hooks (`source_query`, `source_get_data_hd`, `source_get_fields_hd`) and builds typed `hyle::Row`/`hyle::Source` structs directly — no JSON serialization.
+- **Client-side (Rust/WASM):** Interactive features are implemented in Rust and compiled to WASM (e.g., `mods/song/client`), using Dioxus hydration over the SSR-rendered DOM.
 - **Deployment:** The application is designed to run within a chroot environment for security.
 
 ## Project Structure
 
 - `mods/`: Backend logic and SSR definitions.
   - `<module>/<module>.c`: C request handlers and logic.
-  - `<module>/ssr.rs`: Rust rendering logic for the module.
+  - `<module>/ssr/src/main.rs`: Rust rendering logic for the module (auto-discovered by build.rs).
   - `<module>/client/`: (Optional) Rust WASM client-side code.
 - `htdocs/`: Static assets and compiled WASM/JS.
 - `items/`: Data storage for application entities (songs, poems, etc.).
@@ -28,28 +27,32 @@ This project is a hybrid C and Rust web application built on the NDC framework. 
 ## Key Development Commands
 
 - **Build all:** `make`
-- **Run server:** `./start.sh` (Starts `ndc` on port 8080 by default)
+- **Run server:** `./start.sh` (Starts `axil` on port 8080 by default)
+- **Auto-rebuild:** `make watch` (rebuilds on file changes, saves logs to `debug/`)
 - **Run all tests:** `make test`
 - **Run unit tests:** `make unit-tests` (Runs `test.sh` in each active module)
-- **Run e2e tests:** `make e2e-tests` (Requires Deno and a running server)
+- **Run e2e tests:** `make e2e-tests` (Requires Deno and server with `AUTH_SKIP_CONFIRM=1`)
+- **Debug test:** `make test-single-capture TEST=foo.test.ts` (captures test output to `debug/tests/`)
+- **View logs:** `make debug-logs`
 - **Clean build:** `make clean` or `make distclean`
 
 ## Development Conventions
 
 ### C Programming
 - **Indentation:** Use tabs.
-- **Redirects:** Use `ndc_header_set` and `ndc_respond` for 303 redirects:
+- **Redirects:** Use `axil_header_set` and `axil_respond` for 303 redirects:
   ```c
-  ndc_header_set(fd, "Location", location);
-  ndc_respond(fd, 303, "");
+  axil_header_set(fd, "Location", location);
+  axil_respond(fd, 303, "");
   return 0;
   ```
 - **Memory:** Never `free()` values returned by `qmap_get` or other `qmap` managed pointers.
-- **Handlers:** Registered in `ndx_install()` using `ndc_register_handler`.
+- **Handlers:** Registered in `ndx_install()` using `axil_register_handler`.
 
 ### Rust SSR
-- Module rendering logic must be in `ssr.rs` within the module directory.
-- The `rust-renderer` build script (`build.rs`) auto-discovers these files.
+- Module rendering logic must be in `<module>/ssr/src/main.rs`.
+- The build script (`mods/ssr/build.rs`) auto-discovers module SSR files.
+- Module SSR files expose a `route()` function; the SSR dispatcher tries each in discovery order.
 - Use `RequestContext` to access request details and return `ResponsePayload`.
 
 ### Data Management
@@ -82,7 +85,7 @@ Introduce a schema-driven approach for module metadata. Define field names and s
 
 ### 3. Simplified Handler Registration
 Implement a `register_standard_item_handlers(module_name, callbacks_struct)` helper.
-- **Goal:** Reduce the repetitive `ndc_register_handler` calls in `ndx_install` for standard routes like `GET /:id` and `POST /:id/edit`.
+- **Goal:** Reduce the repetitive `axil_register_handler` calls in `ndx_install` for standard routes like `GET /:id` and `POST /:id/edit`.
 
 ### 4. Choir-Centric Repertoire Reuse
 The `choir` and `songbook` modules share identical repertoire management logic (collections of songs). Instead of a complete merge, the `choir` module serves as the primary provider of repertoire features, which the `songbook` module reuses.

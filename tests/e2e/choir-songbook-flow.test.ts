@@ -19,7 +19,7 @@
  *   4. Add a songbook linked to that choir
  *   5. Verify the songbook view page already shows a song (auto-populated)
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";
@@ -50,7 +50,6 @@ Deno.test({
 
     await page.route("**/_frsh/js/**", (route) => route.abort());
     await page.route("**/styles.css", (route) => route.abort());
-    await page.route("**/wasm.js", (route) => route.abort());
     await page.route("**/favicon.ico", (route) => route.abort());
 
     const GOTO = { waitUntil: "domcontentloaded" as const };
@@ -70,6 +69,7 @@ Deno.test({
     choirId = page.url().split("/choir/")[1];
 
     // ── 2. Add 2 songs to choir repertoire ────────────────────────────────────
+    const repoIds: string[] = [];
     for (const songId of [SONG1_ID, SONG2_ID]) {
       const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
       const body = new URLSearchParams({ song_id: songId, format: "any", csrf_token: csrf });
@@ -80,6 +80,7 @@ Deno.test({
       });
       if (r.status >= 400) throw new Error(`Add song ${songId} failed: ${r.status}`);
       await r.body?.cancel();
+      repoIds.push(`${choirId}_${songId}`);
     }
 
     // ── 3. Verify both songs appear on choir detail ────────────────────────────
@@ -97,15 +98,15 @@ Deno.test({
     sbId = page.url().split("/songbook/")[1];
 
     // ── 5. Add 2 songs to songbook via edit page ───────────────────────────────
-    // Post the edit form directly with both rows.
+    // Post the edit form directly with both rows, using repertoire entry IDs.
     const { token: csrfSb, cookieHeader: chSb } = await getCsrfToken(cookieHeader, BASE);
     const fd = new FormData();
     fd.append("amount", "2");
-    fd.append("song_0", `${SONG1_TITLE} [${SONG1_ID}]`);
+    fd.append("song_0", `${SONG1_TITLE} [${repoIds[0]}]`);
     fd.append("key_0", "0");
     fd.append("orig_0", "0");
     fd.append("fmt_0", "any");
-    fd.append("song_1", `${SONG2_TITLE} [${SONG2_ID}]`);
+    fd.append("song_1", `${SONG2_TITLE} [${repoIds[1]}]`);
     fd.append("key_1", "2");
     fd.append("orig_1", "0");
     fd.append("fmt_1", "any");
@@ -164,7 +165,6 @@ Deno.test({
 
     await page.route("**/_frsh/js/**", (route) => route.abort());
     await page.route("**/styles.css", (route) => route.abort());
-    await page.route("**/wasm.js", (route) => route.abort());
     await page.route("**/favicon.ico", (route) => route.abort());
 
     const GOTO = { waitUntil: "domcontentloaded" as const };
@@ -189,7 +189,7 @@ Deno.test({
     editFd.append("title", choirTitle);
     editFd.append("format", "any");
     editFd.append("csrf_token", csrfEdit);
-    const editR = await fetch(`${BASE}/api/choir/${choirId}/edit`, {
+      const editR = await fetch(`${BASE}/choir/${choirId}/edit`, {
       method: "POST",
       body: editFd,
       headers: { Cookie: chEdit },
@@ -198,7 +198,20 @@ Deno.test({
     if (editR.status >= 400) throw new Error(`Choir edit failed: ${editR.status}`);
     await editR.body?.cancel();
 
-    // ── 3. Add songbook linked to choir ───────────────────────────────────────
+    // ── 3. Seed a song into the choir repertoire ──────────────────────────────
+    {
+      const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
+      const body = new URLSearchParams({ song_id: SONG1_ID, format: "any", csrf_token: csrf });
+      const r = await fetch(`${BASE}/api/choir/${choirId}/songs`, {
+        method: "POST",
+        body: body.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch },
+      });
+      if (r.status >= 400) throw new Error(`Seed song failed: ${r.status}`);
+      await r.body?.cancel();
+    }
+
+    // ── 4. Add songbook linked to choir ───────────────────────────────────────
     const sbTitle = `Prepop SB ${Date.now()}`;
     await page.goto(`${BASE}/songbook/add?choir=${choirId}`, GOTO);
     await page.waitForSelector('input[name="title"]');
@@ -207,19 +220,13 @@ Deno.test({
     await page.waitForURL(/\/songbook\/[^/]+$/, { timeout: 5000 });
     sbId = page.url().split("/songbook/")[1];
 
-    // ── 4. Verify songbook view already has a song (auto-populated) ───────────
+    // ── 5. Verify songbook view already has a song (auto-populated) ───────────
     await page.goto(`${BASE}/songbook/${sbId}`, GOTO);
     await page.waitForSelector("body");
-    // The page should show at least one song entry — verified by absence of empty state
-    const bodyText = await page.textContent("body") ?? "";
-    // The songbook detail renders song items; an empty songbook renders nothing between
-    // the choir link and the end. A song entry will contain chord data or a song title.
-    // We check that data.txt was written by confirming the page is not totally empty of content.
-    // More concretely: a pre-populated songbook will not show a blank page — it renders SongItems.
-    // We verify by checking the data.txt file was created with content.
-    const dataPath = `${REPO_ROOT}/items/songbook/items/${sbId}/data.txt`;
-    const stat = await Deno.stat(dataPath);
-    if (stat.size === 0) throw new Error("data.txt was created but is empty — no songs pre-populated");
+    const songItems = await page.$$('[data-songbook-item]');
+    if (songItems.length === 0) {
+        throw new Error("No pre-populated song items rendered on detail page");
+    }
   } finally {
     if (sbId) {
       try {

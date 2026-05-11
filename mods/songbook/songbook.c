@@ -2,585 +2,167 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <errno.h>
 #include <limits.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <unistd.h>
 
-#include <ttypt/ndc.h>
+#include <ttypt/axil.h>
 #include <ttypt/ndx.h>
 #include <ttypt/ndx-mod.h>
 #include <ttypt/qmap.h>
 
 #include "../common/common.h"
+#include "../source/source.h"
+
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
-#include "../index/index.h"
 #include "../song/song.h"
-#include "../choir/repertoire.h"
-#include "../ssr/ssr.h"
+#include "fields.h"
+#include "../index/index.h"
 
 #define SONGBOOK_ITEMS_PATH "items/songbook/items"
-#define SB_SONGS_BUF_SIZE 65536
-static unsigned index_hd = 0;
-static unsigned songbook_index_hd = 0;
 static unsigned songbook_meta_qtype = 0;
 static char g_doc_root[256] = ".";
 
-typedef struct {
-	char song[128];
-	int target_key;
-	int original_key;
-	int transpose;
-	char format[128];
-} sb_form_row_t;
-
-typedef struct {
-	char title[256];
-	char choir[128];
-} songbook_meta_t;
-
-typedef struct {
-	const songbook_meta_t *meta;
-	const char *songs;
-	const char *all_chords;
-	const char *all_types;
-} sb_edit_form_t;
-
-static void songbook_meta_read(const char *item_path, songbook_meta_t *meta)
+static void songbook_meta_read(const char *item_path, songbook_cache_t *meta)
 {
-	meta_field_t fields[] = {
-		{ "title", meta->title, sizeof(meta->title) },
-		{ "choir", meta->choir, sizeof(meta->choir) },
-	};
-
-	memset(meta, 0, sizeof(*meta));
-	meta_fields_read(item_path, fields, sizeof(fields) / sizeof(fields[0]));
+	source_meta_read(
+	        item_path,
+	        songbook_fields,
+	        SB_FIELD_COUNT,
+	        meta,
+	        sizeof(*meta));
 }
 
 static int
-songbook_meta_write(const char *item_path, const songbook_meta_t *meta)
+songbook_meta_write(const char *item_path, const songbook_cache_t *meta)
 {
-	meta_field_t fields[] = {
-		{ "title", (char *)meta->title, sizeof(meta->title) },
-		{ "choir", (char *)meta->choir, sizeof(meta->choir) },
-	};
-
-	return meta_fields_write(
-	        item_path, fields, sizeof(fields) / sizeof(fields[0]));
+	return source_meta_write(
+	        item_path, songbook_fields, SB_FIELD_COUNT, meta);
 }
 
-static int songbook_index_write_file(const char *doc_root)
+/* Get a random repertoire entry for the given type from the
+ * songbook's choir. sb_id is the songbook item ID. */
+static int get_random_repertoire_by_type(
+        const char *sb_id, const char *type, char *out_id, size_t out_len)
 {
-	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	char path[PATH_MAX], tmp[PATH_MAX];
-	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", root);
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	FILE *fp = fopen(tmp, "w");
-	if (!fp)
-		return -1;
-	unsigned c = qmap_iter(songbook_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		const songbook_meta_t *m = (const songbook_meta_t *)v;
-		char title[256], choir[128];
-		snprintf(title, sizeof(title), "%s", m->title);
-		snprintf(choir, sizeof(choir), "%s", m->choir);
-		index_field_clean(title);
-		index_field_clean(choir);
-		fprintf(fp, "%s\t%s\t%s\n", (const char *)k, title, choir);
-	}
-	if (fclose(fp) != 0) {
-		unlink(tmp);
-		return -1;
-	}
-	return rename(tmp, path);
-}
-static void songbook_index_put_meta(const char *id, const songbook_meta_t *meta)
-{
-	qmap_put(songbook_index_hd, id, meta);
-}
-static int songbook_index_upsert(
-        const char *doc_root, const char *id, const char *item_path)
-{
-	songbook_meta_t meta;
-
-	songbook_meta_read(item_path, &meta);
-	songbook_index_put_meta(id, &meta);
-	return songbook_index_write_file(doc_root);
-}
-
-static void songbook_cleanup(const char *id)
-{
-	qmap_del(songbook_index_hd, id);
-	songbook_index_write_file(g_doc_root);
-}
-
-static void songbook_index_rebuild(const char *doc_root)
-{
-	char p[PATH_MAX];
-	struct dirent *e;
-	DIR *d;
-	if (module_items_path_build(doc_root, "songbook", p, sizeof(p)) != 0)
-		return;
-	d = opendir(p);
-	if (!d)
-		return;
-	while ((e = readdir(d))) {
-		char item_path[PATH_MAX];
-		songbook_meta_t meta;
-		if (e->d_name[0] == '.')
-			continue;
-		if (item_path_build_root(
-		            doc_root,
-		            "songbook",
-		            e->d_name,
-		            item_path,
-		            sizeof(item_path)) != 0)
-			continue;
-		songbook_meta_read(item_path, &meta);
-		songbook_index_put_meta(e->d_name, &meta);
-	}
-	closedir(d);
-	songbook_index_write_file(doc_root);
-}
-
-static int sb_edit_form_build(int fd, form_body_t *fb, void *user)
-{
-	sb_edit_form_t *form = user;
-
-	if (form_body_add(fb, "title", form->meta->title) != 0 ||
-	    form_body_add(fb, "choir", form->meta->choir) != 0 ||
-	    form_body_add(fb, "songs", form->songs) != 0 ||
-	    form_body_add(fb, "allChords", form->all_chords) != 0 ||
-	    form_body_add(fb, "allTypes", form->all_types) != 0)
-		return respond_error(fd, 500, "OOM");
-
-	return 0;
-}
-
-/* Get random chord by type/format - uses song module's type index */
-static int
-get_random_chord_by_type(const char *type, char *out_id, size_t out_len)
-{
-	char *random_id = NULL;
-	if (song_get_random_by_type(type, &random_id) != 0)
-		return -1;
-
-	if (random_id) {
-		strncpy(out_id, random_id, out_len - 1);
-		out_id[out_len - 1] = '\0';
-		free(random_id);
-		return 0;
-	}
-
-	return -1;
-}
-
-static void sb_form_row_load(int idx, sb_form_row_t *row)
-{
-	char song_key[32], key_key[32], orig_key[32], fmt_key[32];
-	char key_str[16] = { 0 };
-	char orig_str[16] = { 0 };
-
-	memset(row, 0, sizeof(*row));
-
-	snprintf(song_key, sizeof(song_key), "song_%d", idx);
-	snprintf(key_key, sizeof(key_key), "key_%d", idx);
-	snprintf(orig_key, sizeof(orig_key), "orig_%d", idx);
-	snprintf(fmt_key, sizeof(fmt_key), "fmt_%d", idx);
-
-	mpfd_get(song_key, row->song, sizeof(row->song) - 1);
-	mpfd_get(key_key, key_str, sizeof(key_str) - 1);
-	mpfd_get(orig_key, orig_str, sizeof(orig_str) - 1);
-	mpfd_get(fmt_key, row->format, sizeof(row->format) - 1);
-
-	datalist_extract_id(row->song, row->song, sizeof(row->song));
-
-	row->target_key = key_str[0] ? atoi(key_str) : 0;
-	row->original_key = orig_str[0] ? atoi(orig_str) : 0;
-	row->transpose = ((row->target_key - row->original_key) % 12 + 12) % 12;
-
-	if (!row->format[0])
-		snprintf(row->format, sizeof(row->format), "any");
-}
-
-static int
-sb_form_row_to_repertoire(const sb_form_row_t *form_row, repertoire_row_t *row)
-{
-	if (!form_row || !row)
-		return -1;
-
-	memset(row, 0, sizeof(*row));
-	snprintf(row->id, sizeof(row->id), "%s", form_row->song);
-	row->value = form_row->transpose;
+	/* Read choir from songbook metadata file */
+	char sb_item_path[PATH_MAX];
 	snprintf(
-	        row->format,
-	        sizeof(row->format),
-	        "%s",
-	        form_row->format[0] ? form_row->format : "any");
-	return 0;
-}
-
-static int sb_edit_song_row_append(
-        char *songs_buf,
-        size_t songs_sz,
-        size_t *songs_pos,
-        const char *doc_root,
-        const repertoire_row_t *row)
-{
-	char chord_id[128] = { 0 };
-	snprintf(chord_id, sizeof(chord_id), "%s", row->id);
-
-	int original_key = 0;
-	if (chord_id[0]) {
-		original_key = song_get_original_key_root(doc_root, chord_id);
-	}
-
-	*songs_pos += snprintf(
-	        songs_buf + *songs_pos,
-	        songs_sz - *songs_pos,
-	        "%s:%d:%s:%d\n",
-	        chord_id,
-	        row->value,
-	        row->format[0] ? row->format : "any",
-	        original_key);
-	if (*songs_pos >= songs_sz)
+	        sb_item_path,
+	        sizeof(sb_item_path),
+	        "%s/items/songbook/items/%s",
+	        g_doc_root,
+	        sb_id);
+	songbook_cache_t meta;
+	songbook_meta_read(sb_item_path, &meta);
+	if (!meta.choir[0])
 		return -1;
 
-	return 0;
-}
-
-static int
-sb_form_rows_collect(int amount, repertoire_row_t **rows_out, size_t *count_out)
-{
-	repertoire_row_t *rows;
-
-	if (!rows_out || !count_out || amount < 0)
+	source_def_t *choir_def = source_find("choir.items");
+	source_def_t *repo_def = source_find("choir.repertoire");
+	if (!repo_def || !repo_def->fields_hd || !choir_def ||
+	    !choir_def->fields_hd)
 		return -1;
 
-	*rows_out = NULL;
-	*count_out = 0;
-
-	if (amount == 0)
-		return 0;
-
-	rows = calloc((size_t)amount, sizeof(*rows));
-	if (!rows)
+	uint32_t choir_pos = qmap_pos(choir_def->fields_hd, meta.choir);
+	if (choir_pos == UINT32_MAX)
 		return -1;
 
-	for (int i = 0; i < amount; i++) {
-		sb_form_row_t form_row;
-		sb_form_row_load(i, &form_row);
-		sb_form_row_to_repertoire(&form_row, &rows[i]);
-	}
+	uint32_t buf[4096];
+	size_t n = qmap_inv_get(
+	        repo_def->fields_hd, "choir", choir_pos, buf, 4096);
+	if (n == 0)
+		return -1;
 
-	*rows_out = rows;
-	*count_out = (size_t)amount;
-	return 0;
-}
+	/* Collect matching entry IDs (null-terminated packed) */
+	char ids[4096] = { 0 };
+	size_t id_pos = 0;
+	size_t match_count = 0;
 
-static int sb_form_rows_build_edit_songs(
-        int amount, int append_blank, char *songs_buf, size_t songs_sz)
-{
-	size_t songs_pos = 0;
-	for (int i = 0; i < amount; i++) {
-		sb_form_row_t row;
-		sb_form_row_load(i, &row);
+	for (size_t i = 0; i < n; i++) {
+		const char *eid = qmap_get_key(repo_def->fields_hd, buf[i]);
+		if (!eid)
+			continue;
 
-		songs_pos += snprintf(
-		        songs_buf + songs_pos,
-		        songs_sz - songs_pos,
-		        "%s:%d:%s:%d\n",
-		        row.song,
-		        row.transpose,
-		        row.format,
-		        row.original_key);
-		if (songs_pos >= songs_sz)
-			return -1;
-	}
+		const char *fmt =
+		        qmap_field_get(repo_def->fields_hd, eid, "format");
+		const char *ftype = (fmt && fmt[0]) ? fmt : "any";
 
-	if (append_blank) {
-		songs_pos += snprintf(
-		        songs_buf + songs_pos,
-		        songs_sz - songs_pos,
-		        "::any:0\n");
-		if (songs_pos >= songs_sz)
-			return -1;
-	}
-
-	return 0;
-}
-
-/* GET /songbook/:id/edit - read songbook and render the edit form */
-static int handle_sb_edit_get_authorized(
-        int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-
-	songbook_meta_t meta;
-	songbook_meta_read(ctx->item_path, &meta);
-
-	/* Read data.txt and resolve originalKey per song */
-	char data_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
-	repertoire_row_t *rows = NULL;
-	size_t row_count = 0;
-	if (repertoire_rows_load(data_path, &rows, &row_count) != 0)
-		return respond_error(fd, 500, "Failed to read data file");
-
-	char *ac_json = build_all_songs_json(1);
-	if (!ac_json) {
-		free(rows);
-		return server_error(fd, "OOM");
-	}
-
-	char *at_json = song_get_types_json(0);
-	if (!at_json) {
-		free(ac_json);
-		free(rows);
-		return server_error(fd, "failed to get song types");
-	}
-
-	/* Build 4-field songs string: chord_id:transpose:format:originalKey */
-	char songs_buf[SB_SONGS_BUF_SIZE] = { 0 };
-	size_t songs_pos = 0;
-	if (row_count == 0) {
-		songs_pos += snprintf(
-		        songs_buf + songs_pos,
-		        sizeof(songs_buf) - songs_pos,
-		        "::any:0\n");
-		if (songs_pos >= sizeof(songs_buf)) {
-			free(rows);
-			return respond_error(fd, 500, "OOM");
-		}
-	} else {
-		for (size_t i = 0; i < row_count; i++) {
-			if (sb_edit_song_row_append(
-			            songs_buf,
-			            sizeof(songs_buf),
-			            &songs_pos,
-			            ctx->doc_root,
-			            &rows[i]) != 0)
-			{
-				free(rows);
-				return respond_error(fd, 500, "OOM");
+		if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
+			size_t elen = strlen(eid);
+			if (id_pos + elen + 1 < sizeof(ids)) {
+				memcpy(ids + id_pos, eid, elen + 1);
+				id_pos += elen + 1;
+				match_count++;
 			}
 		}
 	}
-	free(rows);
-	sb_edit_form_t form = {
-		.meta = &meta,
-		.songs = songs_buf,
-		.all_chords = ac_json,
-		.all_types = at_json,
-	};
-	int sb_rc = core_post_form_builder(fd, sb_edit_form_build, &form);
-	free(ac_json);
-	free(at_json);
-	return sb_rc;
+
+	if (match_count == 0)
+		return -1;
+
+	/* Pick random */
+	int pick = rand() % match_count;
+	const char *p = ids;
+	for (int i = 0; i < pick; i++)
+		p += strlen(p) + 1;
+
+	strncpy(out_id, p, out_len - 1);
+	out_id[out_len - 1] = '\0';
+	return 0;
 }
 
-static int handle_sb_edit_get(int fd, char *body)
-{
-	return with_item_access(
-	        fd,
-	        body,
-	        SONGBOOK_ITEMS_PATH,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        "Songbook not found",
-	        "Forbidden",
-	        handle_sb_edit_get_authorized,
-	        NULL);
-}
-
-/* POST /songbook/:id/edit - Edit songbook */
-static int
-handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)user;
-
-	/* Parse form data */
-	mpfd_parse(fd, body);
-
-	{
-		char csrf_submitted[33] = { 0 };
-		mpfd_get(
-		        "csrf_token",
-		        csrf_submitted,
-		        sizeof(csrf_submitted) - 1);
-		if (csrf_validate(fd, csrf_submitted))
-			return respond_error(fd, 403, "Forbidden");
-	}
-
-	/* Check action — "add_row" re-renders the edit page with one blank row
-	 * appended */
-	char action[32] = { 0 };
-	mpfd_get("action", action, sizeof(action) - 1);
-
-	/* Get amount */
-	char amount_str[16] = { 0 };
-	int amount_len = mpfd_get("amount", amount_str, sizeof(amount_str) - 1);
-	int amount = amount_len > 0 ? atoi(amount_str) : 0;
-
-	if (strcmp(action, "add_row") == 0) {
-		char songs_buf[SB_SONGS_BUF_SIZE] = { 0 };
-		if (sb_form_rows_build_edit_songs(
-		            amount, 1, songs_buf, sizeof(songs_buf)) != 0)
-			return respond_error(fd, 500, "OOM");
-
-		char *ac_json = build_all_songs_json(1);
-		if (!ac_json)
-			return server_error(fd, "OOM");
-		char *at_json = song_get_types_json(0);
-		if (!at_json) {
-			free(ac_json);
-			return server_error(fd, "OOM");
-		}
-
-		songbook_meta_t meta;
-		songbook_meta_read(ctx->item_path, &meta);
-
-		sb_edit_form_t form = {
-			.meta = &meta,
-			.songs = songs_buf,
-			.all_chords = ac_json,
-			.all_types = at_json,
-		};
-		int rc = core_post_form_builder(fd, sb_edit_form_build, &form);
-		free(ac_json);
-		free(at_json);
-		return rc;
-	}
-
-	if (amount < 0)
-		return bad_request(fd, "Invalid amount");
-
-	songbook_meta_t meta;
-	songbook_meta_read(ctx->item_path, &meta);
-	int title_len = mpfd_get("title", meta.title, sizeof(meta.title) - 1);
-	int choir_len = mpfd_get("choir", meta.choir, sizeof(meta.choir) - 1);
-	if (title_len > 0)
-		meta.title[title_len] = '\0';
-	if (choir_len > 0)
-		meta.choir[choir_len] = '\0';
-	if (title_len > 0 || choir_len > 0) {
-		if (songbook_meta_write(ctx->item_path, &meta) != 0)
-			return server_error(
-			        fd, "Failed to write songbook metadata");
-		index_put(index_hd, (char *)ctx->id, meta.title);
-		songbook_index_put_meta(ctx->id, &meta);
-		songbook_index_write_file(ctx->doc_root);
-	}
-
-	/* Build new data.txt content */
-	char data_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
-
-	repertoire_row_t *rows = NULL;
-	size_t row_count = 0;
-	if (sb_form_rows_collect(amount, &rows, &row_count) != 0)
-		return respond_error(fd, 500, "OOM");
-	if (repertoire_rows_write(data_path, rows, row_count) != 0) {
-		free(rows);
-		return server_error(fd, "Failed to write data file");
-	}
-	free(rows);
-
-	/* Redirect to view page */
-	char location[256];
-	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
-	return ndc_redirect(fd, location);
-}
-
-static int handle_sb_edit(int fd, char *body)
-{
-	return with_item_access(
-	        fd,
-	        body,
-	        SONGBOOK_ITEMS_PATH,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        "Songbook not found",
-	        "You don't own this songbook",
-	        handle_sb_edit_authorized,
-	        NULL);
-}
-
-/* POST /api/songbook/:id/transpose - Transpose single song */
-struct sb_transpose_cb {
-	int target_idx;
-	int new_transpose;
-};
-
-static int sb_transpose_cb(
-        int idx,
-        const char *raw,
-        int parsed,
-        const char *sid,
-        int ival,
-        const char *fmt,
-        void *user,
-        char *out,
-        size_t out_sz)
-{
-	(void)raw;
-	(void)ival;
-	struct sb_transpose_cb *c = user;
-	if (parsed && idx == c->target_idx) {
-		snprintf(out, out_sz, "%s:%d:%s\n", sid, c->new_transpose, fmt);
-		return REPERTOIRE_LINE_REPLACE;
-	}
-	return REPERTOIRE_LINE_KEEP;
-}
-
+/* POST /songbook/:id/transpose - Transpose single song by index */
 static int handle_sb_transpose_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
 
-	/* Parse form data */
 	mpfd_parse(fd, body);
-
-	{
-		char csrf_submitted[33] = { 0 };
-		mpfd_get(
-		        "csrf_token",
-		        csrf_submitted,
-		        sizeof(csrf_submitted) - 1);
-		if (csrf_validate(fd, csrf_submitted))
-			return respond_error(fd, 403, "Forbidden");
-	}
+	if (csrf_check_mpfd(fd))
+		return 1;
 
 	char n_str[16] = { 0 };
 	char t_str[16] = { 0 };
 	mpfd_get("n", n_str, sizeof(n_str) - 1);
 	mpfd_get("t", t_str, sizeof(t_str) - 1);
 
-	struct sb_transpose_cb cbc = {
-		.target_idx = atoi(n_str),
-		.new_transpose = atoi(t_str),
-	};
+	if (!n_str[0])
+		return bad_request(fd, "Missing n");
 
-	char data_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
+	source_def_t *sis_def = source_find("songbook.item_songs");
+	source_def_t *sb_def = source_find("songbook.items");
+	if (!sis_def || !sb_def)
+		return server_error(fd, "Source not found");
 
-	if (repertoire_file_rewrite(data_path, sb_transpose_cb, &cbc) < 0)
-		return server_error(fd, "Failed to update");
+	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
+	int idx = atoi(n_str);
+	if (sb_pos != UINT32_MAX) {
+		uint32_t buf[4096];
+		size_t n = qmap_inv_get(
+		        sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
+		if (idx >= 0 && (size_t)idx < n) {
+			const char *eid =
+			        qmap_get_key(sis_def->fields_hd, buf[idx]);
+			if (eid) {
+				unsigned dh = qmap_open(
+				        NULL,
+				        "row_data",
+				        QM_STR,
+				        QM_STR,
+				        0x1F,
+				        0);
+				qmap_put(dh, "transpose", t_str);
+				source_update_item(
+				        fd, "songbook.item_songs", eid, dh);
+				qmap_close(dh);
+			}
+		}
+	}
 
 	char location[256];
-	snprintf(
-	        location,
-	        sizeof(location),
-	        "/songbook/%s#%d",
-	        ctx->id,
-	        cbc.target_idx);
-	return ndc_redirect(fd, location);
+	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
+	return axil_redirect(fd, location);
 }
 
 static int handle_sb_transpose(int fd, char *body)
@@ -596,76 +178,70 @@ static int handle_sb_transpose(int fd, char *body)
 	        NULL);
 }
 
-/* POST /api/songbook/:id/randomize - Randomize song selection */
-static int sb_randomize_cb(
-        int idx,
-        const char *raw,
-        int parsed,
-        const char *sid,
-        int ival,
-        const char *fmt,
-        void *user,
-        char *out,
-        size_t out_sz)
-{
-	(void)raw;
-	(void)sid;
-	int target_idx = *(int *)user;
-	if (parsed && idx == target_idx) {
-		char new_chord[128] = { 0 };
-		if (get_random_chord_by_type(
-		            fmt, new_chord, sizeof(new_chord)) == 0)
-		{
-			snprintf(
-			        out,
-			        out_sz,
-			        "%s:%d:%s\n",
-			        new_chord,
-			        ival,
-			        fmt);
-			return REPERTOIRE_LINE_REPLACE;
-		}
-	}
-	return REPERTOIRE_LINE_KEEP;
-}
-
+/* POST /songbook/:id/randomize - Randomize song by index */
 static int handle_sb_randomize_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
 
-	/* Parse form data */
 	mpfd_parse(fd, body);
-
-	{
-		char csrf_submitted[33] = { 0 };
-		mpfd_get(
-		        "csrf_token",
-		        csrf_submitted,
-		        sizeof(csrf_submitted) - 1);
-		if (csrf_validate(fd, csrf_submitted))
-			return respond_error(fd, 403, "Forbidden");
-	}
+	if (csrf_check_mpfd(fd))
+		return 1;
 
 	char n_str[16] = { 0 };
 	mpfd_get("n", n_str, sizeof(n_str) - 1);
-	int line_num = atoi(n_str);
 
-	char data_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
+	if (!n_str[0])
+		return bad_request(fd, "Missing n");
 
-	if (repertoire_file_rewrite(data_path, sb_randomize_cb, &line_num) < 0)
-		return server_error(fd, "Failed to update");
+	source_def_t *sis_def = source_find("songbook.item_songs");
+	source_def_t *sb_def = source_find("songbook.items");
+	if (!sis_def || !sb_def)
+		return server_error(fd, "Source not found");
 
+	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
+	int idx = atoi(n_str);
+	if (sb_pos != UINT32_MAX) {
+		uint32_t buf[4096];
+		size_t n = qmap_inv_get(
+		        sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
+		if (idx >= 0 && (size_t)idx < n) {
+			const char *eid =
+			        qmap_get_key(sis_def->fields_hd, buf[idx]);
+			if (!eid)
+				goto done;
+
+			/* Get current format type */
+			const char *fmt = qmap_field_get(
+			        sis_def->fields_hd, eid, "format");
+			const char *ftype = (fmt && fmt[0]) ? fmt : "any";
+
+			/* Pick random repertoire entry of same type */
+			char new_repo_id[128] = { 0 };
+			if (get_random_repertoire_by_type(
+			            ctx->id,
+			            ftype,
+			            new_repo_id,
+			            sizeof(new_repo_id)) == 0)
+			{
+				unsigned dh = qmap_open(
+				        NULL,
+				        "row_data",
+				        QM_STR,
+				        QM_STR,
+				        0x1F,
+				        0);
+				qmap_put(dh, "song", new_repo_id);
+				source_update_item(
+				        fd, "songbook.item_songs", eid, dh);
+				qmap_close(dh);
+			}
+		}
+	}
+done:
 	char location[256];
-	snprintf(
-	        location,
-	        sizeof(location),
-	        "/songbook/%s#%d",
-	        ctx->id,
-	        line_num);
-	return ndc_redirect(fd, location);
+	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
+	return axil_redirect(fd, location);
 }
 
 static int handle_sb_randomize(int fd, char *body)
@@ -681,124 +257,93 @@ static int handle_sb_randomize(int fd, char *body)
 	        NULL);
 }
 
-#define MAX_SB_SONGS 256
-
-static int songbook_details_handler(int fd, char *body)
+/* POST /api/songbook/:id/songs - Add a song to the songbook */
+static int handle_sb_song_add_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
 {
-	(void)body;
-	static __thread struct SongbookSongFfi song_slots[MAX_SB_SONGS];
-	static __thread char chord_ids[MAX_SB_SONGS][128];
-	static __thread char chord_formats[MAX_SB_SONGS][128];
-	static __thread char chord_titles[MAX_SB_SONGS][256];
-	static __thread char chord_datas[MAX_SB_SONGS][65536];
+	(void)user;
+	char s_id[128] = { 0 };
 
-	char doc_root[256] = { 0 };
-	char id[128] = { 0 };
-	char sb_path[512];
-	char owner[64] = { 0 };
-	const char *username = NULL;
-	songbook_meta_t meta;
-	repertoire_row_t *rows = NULL;
-	size_t row_count = 0;
-	int viewer_zoom = 100;
+	if (csrf_check_query(fd, body))
+		return 1;
+	int s_len = axil_query_param("song_id", s_id, sizeof(s_id) - 1);
+	if (s_len <= 0)
+		return bad_request(fd, "Missing song_id");
+	datalist_extract_id(s_id, s_id, sizeof(s_id));
 
-	get_doc_root(fd, doc_root, sizeof(doc_root));
-	ndc_env_get(fd, id, "PATTERN_PARAM_ID");
-	if (!id[0])
-		return respond_error(fd, 404, "Songbook not found");
+	unsigned dh = source_parse_form("songbook.item_songs");
+	if (dh == 0)
+		return server_error(fd, "OOM");
+	qmap_put(dh, "song", s_id);
+	qmap_put(dh, "transpose", "0");
+	qmap_put(dh, "songbook", ctx->id);
+	if (!qmap_get(dh, "format"))
+		qmap_put(dh, "format", "any");
+	source_update_item(fd, "songbook.item_songs", NULL, dh);
+	qmap_close(dh);
 
-	if (item_path_build(fd, "songbook", id, sb_path, sizeof(sb_path)) != 0)
-		return respond_error(fd, 404, "Songbook not found");
+	return redirect_to_item(fd, "songbook", ctx->id);
+}
 
-	songbook_meta_read(sb_path, &meta);
-	if (!meta.title[0])
-		return respond_error(fd, 404, "Songbook not found");
+static int handle_sb_song_add(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        SONGBOOK_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Songbook not found",
+	        "Forbidden",
+	        handle_sb_song_add_authorized,
+	        NULL);
+}
 
-	item_read_owner(sb_path, owner, sizeof(owner));
-	username = get_request_user(fd);
-	if (username && *username)
-		viewer_zoom = song_get_viewer_zoom(username);
+/* POST /api/songbook/:id/song/:n/remove - Remove a song from the songbook */
+static int handle_sb_song_remove_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)user;
 
-	char path_buf[1024];
-	item_child_path(sb_path, "data.txt", path_buf, sizeof(path_buf));
-	if (repertoire_rows_load(path_buf, &rows, &row_count) != 0)
-		row_count = 0;
+	if (csrf_check_query(fd, body))
+		return 1;
 
-	if (row_count > MAX_SB_SONGS)
-		row_count = MAX_SB_SONGS;
+	source_def_t *sis_def = source_find("songbook.item_songs");
+	source_def_t *sb_def = source_find("songbook.items");
+	if (!sis_def || !sb_def)
+		return server_error(fd, "Source not found");
 
-	for (size_t i = 0; i < row_count; i++) {
-		char *transposed = NULL;
-		int original_key = 0;
+	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
+	if (sb_pos == UINT32_MAX)
+		return redirect_to_item(fd, "songbook", ctx->id);
 
-		song_read_title(
-		        doc_root,
-		        rows[i].id,
-		        chord_titles[i],
-		        sizeof(chord_titles[i]));
-		snprintf(chord_ids[i], sizeof(chord_ids[i]), "%s", rows[i].id);
-		snprintf(
-		        chord_formats[i],
-		        sizeof(chord_formats[i]),
-		        "%s",
-		        rows[i].format);
-		if (song_transpose_root(
-		            doc_root,
-		            rows[i].id,
-		            rows[i].value,
-		            0x04,
-		            &transposed,
-		            &original_key) != 0)
-		{
-			original_key = 0;
-			transposed = NULL;
-		}
+	uint32_t buf[4096];
+	size_t n =
+	        qmap_inv_get(sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
 
-		if (transposed) {
-			snprintf(
-			        chord_datas[i],
-			        sizeof(chord_datas[i]),
-			        "%s",
-			        transposed);
-			free(transposed);
-		} else {
-			chord_datas[i][0] = '\0';
-		}
+	char n_str[16] = { 0 };
+	axil_query_param("n", n_str, sizeof(n_str) - 1);
+	int idx = atoi(n_str);
 
-		song_slots[i].chord_id = chord_ids[i];
-		song_slots[i].format = chord_formats[i];
-		song_slots[i].chord_title = chord_titles[i];
-		song_slots[i].chord_data = chord_datas[i];
-		song_slots[i].transpose = rows[i].value;
-		song_slots[i].original_key = original_key;
+	if (idx >= 0 && (size_t)idx < n) {
+		const char *eid = qmap_get_key(sis_def->fields_hd, buf[idx]);
+		if (eid)
+			source_delete_item(fd, sis_def, eid);
 	}
-	free(rows);
 
-	static __thread char s_id[128], s_query[512];
-	struct ModuleEntryFfi modules_snap[64];
-	size_t modules_len;
-	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
-	ndc_env_get(fd, s_query, "QUERY_STRING");
-	SSR_FILL_MODULES(modules_snap, modules_len);
-	{
-		static __thread char s_csrf[33];
-		csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
-		struct SongbookDetailRenderFfi req = {
-			.sb_title = meta.title,
-			.owner = owner,
-			.choir = meta.choir,
-			.viewer_zoom = viewer_zoom,
-			.songs = song_slots,
-			.songs_len = row_count,
-			.id = s_id,
-			.query = s_query,
-			.remote_user = get_request_user(fd),
-			.modules = modules_snap,
-			.modules_len = modules_len,
-			.csrf_token = s_csrf,
-		};
-		return ssr_render_songbook_detail(fd, &req);
-	}
+	return redirect_to_item(fd, "songbook", ctx->id);
+}
+
+static int handle_sb_song_remove(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        SONGBOOK_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Songbook not found",
+	        "Forbidden",
+	        handle_sb_song_remove_authorized,
+	        NULL);
 }
 
 static int handle_sb_add(int fd, char *body)
@@ -807,11 +352,9 @@ static int handle_sb_add(int fd, char *body)
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
 
-	/* Write choir field if provided */
 	char choir[128] = { 0 };
 	int choir_len = mpfd_get("choir", choir, sizeof(choir) - 1);
 	if (choir_len > 0) {
-		songbook_meta_t meta = { 0 };
 		choir[choir_len] = '\0';
 		char sb_item_path[512];
 		if (item_path_build(
@@ -822,210 +365,1122 @@ static int handle_sb_add(int fd, char *body)
 		            sizeof(sb_item_path)) != 0)
 			return server_error(
 			        fd, "Failed to resolve songbook path");
+
+		songbook_cache_t meta;
 		songbook_meta_read(sb_item_path, &meta);
 		snprintf(meta.choir, sizeof(meta.choir), "%s", choir);
-		if (songbook_meta_write(sb_item_path, &meta) != 0)
+		int meta_wr = songbook_meta_write(sb_item_path, &meta);
+		if (meta_wr != 0)
 			return server_error(
 			        fd, "Failed to write songbook metadata");
-		index_put(index_hd, id, meta.title);
-		songbook_index_put_meta(id, &meta);
-		songbook_index_write_file(g_doc_root);
 
-		/* Pre-populate data.txt with one random song per choir format
-		 * type */
-		char choir_item_path[PATH_MAX];
-		if (item_path_build(
-		            fd,
-		            "choir",
-		            choir,
-		            choir_item_path,
-		            sizeof(choir_item_path)) != 0)
-			return server_error(fd, "Failed to resolve choir path");
+		source_refresh_row(fd, "songbook.items", id);
 
-		char format_path[PATH_MAX];
-		if (item_child_path(
-		            choir_item_path,
-		            "format",
-		            format_path,
-		            sizeof(format_path)) != 0)
-			return server_error(
-			        fd, "Failed to resolve choir format path");
-
-		FILE *ffp = fopen(format_path, "r");
-		if (ffp) {
-			char data_path[PATH_MAX];
-			if (item_child_path(
-			            sb_item_path,
-			            "data.txt",
-			            data_path,
-			            sizeof(data_path)) != 0)
-				return server_error(
-				        fd,
-				        "Failed to resolve songbook data path");
-			char type[128];
-			repertoire_row_t *rows = NULL;
-			size_t row_count = 0;
-			size_t row_cap = 0;
-			while (fgets(type, sizeof(type), ffp)) {
-				/* strip trailing newline/whitespace */
-				size_t tlen = strlen(type);
-				while (tlen > 0 && (type[tlen - 1] == '\n' ||
-				                    type[tlen - 1] == '\r' ||
-				                    type[tlen - 1] == ' '))
-					type[--tlen] = '\0';
-				if (tlen == 0)
-					continue;
-
-				char song_id[256] = { 0 };
-				if (get_random_chord_by_type(
-				            type, song_id, sizeof(song_id)) ==
-				    0)
-				{
-					repertoire_row_t *tmp;
-					if (row_count == row_cap) {
-						row_cap = row_cap ? row_cap * 2
-						                  : 8;
-						tmp = realloc(
-						        rows,
-						        row_cap *
-						                sizeof(*rows));
-						if (!tmp) {
-							free(rows);
-							fclose(ffp);
-							return server_error(
-							        fd, "OOM");
-						}
-						rows = tmp;
+		/* Pre-populate with one random repertoire entry per choir
+		 * format type */
+		source_def_t *sis_def = source_find("songbook.item_songs");
+		if (sis_def) {
+			char choir_item_path[PATH_MAX];
+			item_path_build(
+			        0,
+			        "choir",
+			        choir,
+			        choir_item_path,
+			        sizeof(choir_item_path));
+			char format_path[PATH_MAX];
+			item_child_path(
+			        choir_item_path,
+			        "format",
+			        format_path,
+			        sizeof(format_path));
+			FILE *ffp = fopen(format_path, "r");
+			if (ffp) {
+				char type[128];
+				while (fgets(type, sizeof(type), ffp)) {
+					size_t tlen = strlen(type);
+					while (tlen > 0 &&
+					       (type[tlen - 1] == '\n' ||
+					        type[tlen - 1] == '\r'))
+						type[--tlen] = '\0';
+					if (tlen == 0)
+						continue;
+					char repo_id[256] = { 0 };
+					if (get_random_repertoire_by_type(
+					            id,
+					            type,
+					            repo_id,
+					            sizeof(repo_id)) == 0)
+					{
+						unsigned dh = qmap_open(
+						        NULL,
+						        "row_data",
+						        QM_STR,
+						        QM_STR,
+						        0x1F,
+						        0);
+						qmap_put(dh, "song", repo_id);
+						qmap_put(dh, "transpose", "0");
+						qmap_put(dh, "format", type);
+						qmap_put(dh, "songbook", id);
+						source_update_item(
+						        fd,
+						        "songbook.item_songs",
+						        NULL,
+						        dh);
+						qmap_close(dh);
 					}
-					memset(&rows[row_count],
-					       0,
-					       sizeof(rows[row_count]));
-					snprintf(
-					        rows[row_count].id,
-					        sizeof(rows[row_count].id),
-					        "%.*s",
-					        (int)sizeof(
-					                rows[row_count].id) -
-					                1,
-					        song_id);
-					snprintf(
-					        rows[row_count].format,
-					        sizeof(rows[row_count].format),
-					        "%.*s",
-					        (int)sizeof(rows[row_count]
-					                            .format) -
-					                1,
-					        type);
-					row_count++;
 				}
-			}
-
-			if (repertoire_rows_write(data_path, rows, row_count) !=
-			    0)
-			{
-				free(rows);
 				fclose(ffp);
-				return server_error(
-				        fd, "Failed to write data file");
 			}
-			free(rows);
-			fclose(ffp);
 		}
 	} else {
-		char sb_item_path[512];
-		if (item_path_build(
-		            fd,
-		            "songbook",
-		            id,
-		            sb_item_path,
-		            sizeof(sb_item_path)) == 0)
-			songbook_index_upsert(g_doc_root, id, sb_item_path);
+		source_def_t *sb_def = source_find("songbook.items");
+		if (sb_def) {
+			unsigned dh = qmap_open(
+			        NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
+			qmap_put(dh, "choir", "");
+			source_update_item(fd, "songbook.items", id, dh);
+			qmap_close(dh);
+		}
 	}
+
+	source_refresh_row(fd, "songbook.items", id);
 
 	char location[512];
 	snprintf(location, sizeof(location), "/songbook/%s", id);
-	return ndc_redirect(fd, location);
+	return axil_redirect(fd, location);
 }
 
-static int songbook_details_handler(int fd, char *body);
+#include "ux/all.c"
+
+static void sb_load_song_options(
+        unsigned choir_fhd,
+        const char *choir_id,
+        unsigned repo_hd,
+        unsigned song_hd)
+{
+	if (!choir_id || !choir_id[0] || !repo_hd || !song_hd)
+		return;
+	uint32_t cp = qmap_pos(choir_fhd, choir_id);
+	if (cp == QM_MISS)
+		return;
+	uint32_t buf[512];
+	size_t n = qmap_inv_get(repo_hd, "choir", cp, buf, 512);
+	for (size_t j = 0; j < n && sb_app_state.n_song_options < MAX_SB_OPTS;
+	     j++)
+	{
+		const char *eid = qmap_get_key(repo_hd, buf[j]);
+		if (!eid)
+			continue;
+		const char *rs = qmap_field_get(repo_hd, eid, "song");
+		if (!rs)
+			continue;
+		const char *st = qmap_get_field_str(song_hd, rs, "title");
+		if (!st)
+			st = rs;
+		sb_song_option_t *o =
+		        &g_sb_options[sb_app_state.n_song_options];
+		snprintf(o->id, sizeof(o->id), "%s", eid);
+		snprintf(o->title, sizeof(o->title), "%s", st);
+		sb_app_state.n_song_options++;
+	}
+}
+
+static void sb_load_song_list(
+        unsigned sis_hd,
+        uint32_t sb_pos,
+        unsigned repo_hd,
+        unsigned song_hd,
+        int flags)
+{
+	uint32_t buf[512];
+	size_t n = qmap_inv_get(sis_hd, "songbook", sb_pos, buf, 512);
+	for (size_t i = 0; i < n; i++) {
+		const char *eid = qmap_get_key(sis_hd, buf[i]);
+		if (!eid)
+			continue;
+		const char *sr = qmap_field_get(sis_hd, eid, "song");
+		const char *ts = qmap_field_get(sis_hd, eid, "transpose");
+		if (!sr)
+			continue;
+		int tp = ts ? atoi(ts) : 0;
+		const char *st = NULL;
+		const char *rs = NULL;
+		int ok = 0;
+		if (repo_hd)
+			rs = qmap_field_get(repo_hd, sr, "song");
+		if (rs && song_hd) {
+			st = qmap_get_field_str(song_hd, rs, "title");
+			ok = song_get_original_key(rs);
+		}
+		if (!st)
+			st = sr;
+		char *ch = NULL;
+		int dk = 0;
+		if (rs)
+			song_transpose_root(
+			        g_doc_root, rs, tp, flags, &ch, &dk);
+		if (sb_app_state.n_songs < MAX_SB_SONGS) {
+			sb_song_row_data_t *sd =
+			        &g_sb_songs[sb_app_state.n_songs];
+			memset(sd, 0, sizeof(*sd));
+			snprintf(sd->title, sizeof(sd->title), "%s", st);
+			if (rs)
+				snprintf(
+				        sd->song_id,
+				        sizeof(sd->song_id),
+				        "%s",
+				        rs);
+			sd->orig_key = ok;
+			sd->transpose = tp;
+			sd->flags = flags;
+			sd->chord_html = ch;
+			sb_app_state.n_songs++;
+		} else if (ch) {
+			free(ch);
+		}
+	}
+}
+
+static char *sb_emit_state_json(void)
+{
+	json_object *j_root = json_object_new_object();
+
+	json_object_object_add(
+	        j_root, "id", json_object_new_string(sb_app_state.sb_id));
+	json_object_object_add(
+	        j_root, "zoom", json_object_new_int(sb_app_state.zoom));
+	json_object_object_add(
+	        j_root, "b", json_object_new_int(sb_app_state.bemol));
+	json_object_object_add(
+	        j_root, "l", json_object_new_int(sb_app_state.latin));
+	json_object_object_add(
+	        j_root, "owner", json_object_new_int(sb_app_state.is_owner));
+	json_object_object_add(
+	        j_root, "title", json_object_new_string(sb_app_state.title));
+	json_object_object_add(
+	        j_root, "user", json_object_new_string(sb_app_state.user));
+	json_object_object_add(
+	        j_root, "choir", json_object_new_string(sb_app_state.choir_id));
+	json_object_object_add(
+	        j_root,
+	        "csrf",
+	        json_object_new_string(sb_app_state.csrf_token));
+	json_object_object_add(
+	        j_root,
+	        "owner_name",
+	        json_object_new_string(sb_app_state.owner));
+	json_object_object_add(
+	        j_root, "n", json_object_new_int(sb_app_state.n_songs));
+
+	json_object *j_songs = json_object_new_array();
+	for (int i = 0; i < sb_app_state.n_songs; i++) {
+		json_object *j_song = json_object_new_array();
+		json_object_array_add(
+		        j_song, json_object_new_string(g_sb_songs[i].title));
+		json_object_array_add(
+		        j_song, json_object_new_string(g_sb_songs[i].song_id));
+		json_object_array_add(
+		        j_song, json_object_new_int(g_sb_songs[i].orig_key));
+		json_object_array_add(
+		        j_song, json_object_new_int(g_sb_songs[i].transpose));
+		json_object_array_add(
+		        j_song, json_object_new_int(g_sb_songs[i].flags));
+		json_object_array_add(j_songs, j_song);
+	}
+	json_object_object_add(j_root, "songs", j_songs);
+
+	json_object *j_opts = json_object_new_array();
+	for (int j = 0; j < sb_app_state.n_song_options; j++) {
+		json_object *j_opt = json_object_new_array();
+		json_object_array_add(
+		        j_opt, json_object_new_string(g_sb_options[j].id));
+		json_object_array_add(
+		        j_opt, json_object_new_string(g_sb_options[j].title));
+		json_object_array_add(j_opts, j_opt);
+	}
+	json_object_object_add(j_root, "opts", j_opts);
+
+	const char *json_str = json_object_to_json_string(j_root);
+	char *sj = malloc(65536);
+	snprintf(
+	        sj,
+	        65536,
+	        "<script type=\"application/json\" "
+	        "id=\"bud-state\">%s</script>",
+	        json_str);
+	json_object_put(j_root);
+	return sj;
+}
+
+/* GET /api/songbook/:id/transpose - Return transposed chord HTML for
+ * song at index n (ephemeral — does not persist). Used by WASM bridge. */
+static int api_sb_transpose_get(int fd, char *body)
+{
+	(void)body;
+	char id[128] = { 0 };
+	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	if (!id[0])
+		return bad_request(fd, "Missing ID");
+
+	char qs[1024] = { 0 };
+	axil_env_get(fd, qs, "QUERY_STRING");
+	if (!qs[0])
+		return bad_request(fd, "Missing query string");
+
+	axil_query_parse(qs);
+	char n_str[16] = { 0 }, t_str[16] = { 0 };
+	int flags = TRANSP_HTML;
+	axil_query_param("n", n_str, sizeof(n_str) - 1);
+	axil_query_param("t", t_str, sizeof(t_str) - 1);
+	{
+		char b[4] = { 0 };
+		if (axil_query_param("b", b, sizeof(b)) >= 0 && b[0] == '1')
+			flags |= TRANSP_BEMOL;
+	}
+	{
+		char l[4] = { 0 };
+		if (axil_query_param("l", l, sizeof(l)) >= 0 && l[0] == '1')
+			flags |= TRANSP_LATIN;
+	}
+
+	if (!n_str[0])
+		return bad_request(fd, "Missing n");
+
+	int idx = atoi(n_str);
+	int transpose = t_str[0] ? atoi(t_str) : 0;
+
+	unsigned sb_hd = source_get_fields_hd("songbook.items");
+	unsigned sis_hd = source_get_fields_hd("songbook.item_songs");
+	unsigned repo_hd = source_get_fields_hd("choir.repertoire");
+
+	if (!sb_hd || !sis_hd || !repo_hd)
+		return server_error(fd, "Source not found");
+
+	uint32_t sb_pos = qmap_pos(sb_hd, id);
+	if (sb_pos == QM_MISS)
+		return respond_error(fd, 404, "Songbook not found");
+
+	uint32_t buf[4096];
+	size_t n = qmap_inv_get(sis_hd, "songbook", sb_pos, buf, 4096);
+	if (idx < 0 || (size_t)idx >= n)
+		return respond_error(fd, 404, "Song not found");
+
+	const char *eid = qmap_get_key(sis_hd, buf[idx]);
+	if (!eid)
+		return respond_error(fd, 404, "Entry not found");
+
+	const char *song_ref = qmap_field_get(sis_hd, eid, "song");
+	if (!song_ref)
+		return respond_error(fd, 404, "Song ref not found");
+
+	const char *repo_song = NULL;
+	if (repo_hd)
+		repo_song = qmap_field_get(repo_hd, song_ref, "song");
+
+	if (!repo_song)
+		return respond_error(fd, 404, "Song not found in repertoire");
+
+	char *chord_html = NULL;
+	int detected_key = 0;
+	song_transpose_root(
+	        g_doc_root,
+	        repo_song,
+	        transpose,
+	        flags,
+	        &chord_html,
+	        &detected_key);
+
+	const char *tgt_key = target_key_name(detected_key, transpose, flags);
+
+	json_object *j_resp = json_object_new_object();
+	json_object_object_add(j_resp, "index", json_object_new_int(idx));
+	json_object_object_add(
+	        j_resp,
+	        "chord_html",
+	        json_object_new_string(chord_html ? chord_html : ""));
+	json_object_object_add(
+	        j_resp, "target_key", json_object_new_string(tgt_key));
+	json_object_object_add(
+	        j_resp, "original_key", json_object_new_int(detected_key));
+
+	const char *json_str = json_object_to_json_string(j_resp);
+	free(chord_html);
+	axil_header_set(fd, "Content-Type", "application/json");
+	axil_respond(fd, 200, json_str);
+	json_object_put(j_resp);
+	return 1;
+}
+
+/* ── HTTP handlers ──────────────────────────────────────── */
+
+/* ── Detail handler ──────────────────────────────────────── */
+
+static int songbook_detail_handler(int fd, char *body)
+{
+	(void)body;
+	char id[128] = { 0 };
+	const char *user = get_request_user(fd);
+	unsigned sb_hd, sis_hd, repo_hd, song_hd, choir_fhd;
+	const char *title, *owner;
+	char fkey[512];
+	bud_node *layout;
+	int is_owner = 0;
+	char page_title[256];
+	char *choir_id = NULL;
+	const char *csrf_token = csrf_setup(fd);
+
+	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	if (!id[0])
+		return bad_request(fd, "Missing ID");
+
+	sb_hd = source_get_fields_hd("songbook.items");
+	if (!sb_hd)
+		return server_error(fd, "No fields_hd");
+
+	title = qmap_get_field_str(sb_hd, id, "title");
+	if (!title)
+		return respond_error(fd, 404, "Songbook not found");
+
+	owner = qmap_get_field_str(sb_hd, id, "owner");
+	if (!owner)
+		owner = "";
+
+	is_owner = (user && user[0] && strcmp(user, owner) == 0);
+
+	/* Parse query prefs */
+	int t = 0, f = 0;
+	{
+		char qs[1024] = { 0 };
+		axil_env_get(fd, qs, "QUERY_STRING");
+		if (qs[0])
+			axil_query_parse(qs);
+	}
+	{
+		char tmp[16] = { 0 };
+		axil_query_param("t", tmp, sizeof(tmp));
+		if (tmp[0])
+			t = atoi(tmp);
+	}
+	{
+		char tmp[16] = { 0 };
+		axil_query_param("b", tmp, sizeof(tmp));
+		if (tmp[0] && tmp[0] == '1')
+			f |= TRANSP_BEMOL;
+	}
+	{
+		char tmp[16] = { 0 };
+		axil_query_param("l", tmp, sizeof(tmp));
+		if (tmp[0] && tmp[0] == '1')
+			f |= TRANSP_LATIN;
+	}
+	{
+		char qs[1024] = { 0 };
+		axil_env_get(fd, qs, "QUERY_STRING");
+		if (!qs[0] && user && user[0]) {
+			char p[PATH_MAX];
+			char *v;
+			if (user_path_build(
+			            user, ".tty/chords-bemol", p, sizeof(p)) ==
+			    0)
+			{
+				v = slurp_file(p);
+				if (v) {
+					if (atoi(v))
+						f |= TRANSP_BEMOL;
+					free(v);
+				}
+			}
+			if (user_path_build(
+			            user, ".tty/chords-latin", p, sizeof(p)) ==
+			    0)
+			{
+				v = slurp_file(p);
+				if (v) {
+					if (atoi(v))
+						f |= TRANSP_LATIN;
+					free(v);
+				}
+			}
+		}
+	}
+
+	f |= TRANSP_HTML;
+
+	int zoom = 100;
+	if (user && user[0]) {
+		zoom = song_get_viewer_zoom(user);
+		if (zoom < 70 || zoom > 170)
+			zoom = 100;
+	}
+
+	/* Resolve choir ID from songbook reference field */
+	{
+		snprintf(fkey, sizeof(fkey), "%s:choir", id);
+		const uint32_t *choir_ref =
+		        (const uint32_t *)qmap_get(sb_hd, fkey);
+		if (choir_ref && *choir_ref != QM_MISS) {
+			choir_fhd = source_get_fields_hd("choir.items");
+			if (choir_fhd) {
+				const char *cid =
+				        qmap_get_key(choir_fhd, *choir_ref);
+				if (cid && cid[0])
+					choir_id = strdup(cid);
+			}
+		}
+	}
+
+	snprintf(page_title, sizeof(page_title), "songbook: %s", title);
+
+	/* Open data handles we need throughout */
+	repo_hd = source_get_fields_hd("choir.repertoire");
+	song_hd = source_get_fields_hd("song.items");
+
+	/* Add-song options */
+	memset(&sb_app_state, 0, sizeof(sb_app_state));
+	sb_load_song_options(choir_fhd, choir_id, repo_hd, song_hd);
+
+	/* Song list */
+	sis_hd = source_get_fields_hd("songbook.item_songs");
+	if (sis_hd) {
+		uint32_t sb_pos = qmap_pos(sb_hd, id);
+		if (sb_pos != QM_MISS) {
+			uint32_t inv_buf[512];
+			size_t n = qmap_inv_get(
+			        sis_hd, "songbook", sb_pos, inv_buf, 512);
+
+			/* On-access migration from legacy data.txt
+			 * (song_id:transpose:format) — runs whenever
+			 * data.txt exists, deleting partial entries first */
+			if (choir_id) {
+				char ipath[PATH_MAX];
+				char dpath[PATH_MAX];
+				if (item_path_build(
+				            fd,
+				            "songbook",
+				            id,
+				            ipath,
+				            sizeof(ipath)) == 0 &&
+				    item_child_path(
+				            ipath,
+				            "data.txt",
+				            dpath,
+				            sizeof(dpath)) == 0)
+				{
+					char *raw = slurp_file(dpath);
+					if (raw) {
+						if (n > 0) {
+							source_def_t *sis_def =
+							        source_find(
+							                "songbo"
+							                "ok."
+							                "item_"
+							                "song"
+							                "s");
+							if (sis_def) {
+								for (size_t i =
+								             0;
+								     i < n;
+								     i++)
+								{
+									const char *eid = qmap_get_key(
+									        sis_hd,
+									        inv_buf[i]);
+									if (eid)
+										source_delete_item(
+										        fd,
+										        sis_def,
+										        eid);
+								}
+							}
+						}
+
+						uint32_t choir_pos = qmap_pos(
+						        choir_fhd, choir_id);
+						if (choir_pos != QM_MISS) {
+							uint32_t repo_buf[512];
+							size_t n_repo =
+							        qmap_inv_get(
+							                repo_hd,
+							                "choir",
+							                choir_pos,
+							                repo_buf,
+							                512);
+							char *p = raw;
+							while (*p) {
+								char *nl = strchr(
+								        p,
+								        '\n');
+								size_t llen =
+								        nl ? (size_t)(nl -
+								                      p)
+								           : strlen(p);
+								if (llen > 0 &&
+								    p[0] != '#')
+								{
+									char buf[256];
+									char entry_id
+									        [1024];
+									snprintf(
+									        buf,
+									        sizeof(buf),
+									        "%.*s",
+									        (int)llen,
+									        p);
+									char *tr_str = strchr(
+									        buf,
+									        ':');
+									if (tr_str)
+									{
+										*tr_str++ =
+										        '\0';
+										char *fmt_str = strchr(
+										        tr_str,
+										        ':');
+										if (fmt_str)
+										{
+											*fmt_str++ =
+											        '\0';
+											const char *song_id =
+											        buf;
+											int transpose =
+											        atoi(tr_str);
+											const char *repo_id =
+											        NULL;
+											for (size_t i =
+											             0;
+											     i <
+											     n_repo;
+											     i++)
+											{
+												const char *eid = qmap_get_key(
+												        repo_hd,
+												        repo_buf[i]);
+												if (!eid)
+													continue;
+												const char *rs = qmap_field_get(
+												        repo_hd,
+												        eid,
+												        "song");
+												if (rs &&
+												    strcmp(rs,
+												           song_id) ==
+												            0)
+												{
+													repo_id =
+													        eid;
+													break;
+												}
+											}
+											if (!repo_id)
+											{
+												snprintf(
+												        entry_id,
+												        sizeof(entry_id),
+												        "%s_%s",
+												        choir_id,
+												        song_id);
+												unsigned rdh = source_parse_form(
+												        "choir.repertoire");
+												if (rdh)
+												{
+													qmap_put(
+													        rdh,
+													        "song",
+													        song_id);
+													qmap_put(
+													        rdh,
+													        "transpose",
+													        "0");
+													qmap_put(
+													        rdh,
+													        "choir",
+													        choir_id);
+													qmap_put(
+													        rdh,
+													        "format",
+													        fmt_str[0]
+													                ? fmt_str
+													                : "any");
+													source_update_item(
+													        fd,
+													        "choir.repertoire",
+													        entry_id,
+													        rdh);
+													qmap_close(
+													        rdh);
+													repo_id =
+													        entry_id;
+												}
+											}
+											if (repo_id)
+											{
+												unsigned dh = source_parse_form(
+												        "songbook.item_songs");
+												if (dh)
+												{
+													char t_str
+													        [16];
+													snprintf(
+													        t_str,
+													        sizeof(t_str),
+													        "%d",
+													        transpose);
+													qmap_put(
+													        dh,
+													        "song",
+													        repo_id);
+													qmap_put(
+													        dh,
+													        "transpose",
+													        t_str);
+													qmap_put(
+													        dh,
+													        "format",
+													        fmt_str[0]
+													                ? fmt_str
+													                : "any");
+													qmap_put(
+													        dh,
+													        "songbook",
+													        id);
+													source_update_item(
+													        fd,
+													        "songbook.item_songs",
+													        NULL,
+													        dh);
+													qmap_close(
+													        dh);
+												}
+											}
+										}
+									}
+								}
+								if (nl)
+									p = nl +
+									    1;
+								else
+									break;
+							}
+						}
+						free(raw);
+						source_refresh_row(
+						        fd,
+						        "songbook."
+						        "items",
+						        id);
+					}
+				}
+			}
+			sb_load_song_list(sis_hd, sb_pos, repo_hd, song_hd, f);
+		}
+	}
+
+	/* ── Populate sb_app_state with page data ────────────────────── */
+	sb_app_state.zoom = zoom;
+	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
+	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
+	sb_app_state.is_owner = is_owner;
+	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", id);
+	snprintf(
+	        sb_app_state.title,
+	        sizeof(sb_app_state.title),
+	        "%s",
+	        page_title);
+	snprintf(
+	        sb_app_state.user,
+	        sizeof(sb_app_state.user),
+	        "%s",
+	        user ? user : "");
+	snprintf(
+	        sb_app_state.csrf_token,
+	        sizeof(sb_app_state.csrf_token),
+	        "%s",
+	        csrf_token);
+	snprintf(
+	        sb_app_state.choir_id,
+	        sizeof(sb_app_state.choir_id),
+	        "%s",
+	        choir_id ? choir_id : "");
+	snprintf(sb_app_state.owner, sizeof(sb_app_state.owner), "%s", owner);
+
+	/* ── Build page through isomorphic entry point ────────────────── */
+	layout = bud_app_render();
+
+	/* ── JSON state blob for WASM init (inside <script> tag) ──────── */
+	{
+		char *state_json = sb_emit_state_json();
+		site_ui_respond_page(
+		        fd, page_title, state_json, "songbook", layout);
+		free(state_json);
+	}
+
+	/* Free allocated chord data after render */
+	for (int i = 0; i < sb_app_state.n_songs; i++) {
+		free(g_sb_songs[i].chord_html);
+		g_sb_songs[i].chord_html = NULL;
+	}
+	free(choir_id);
+
+	return 0;
+}
+
+/* ── Edit GET handler ────────────────────────────────────── */
+
+/* ── Edit GET handler ───────────────────────────────────── */
+
+static int songbook_edit_get_handler(int fd, char *body)
+{
+	(void)body;
+	char id[128] = { 0 };
+	const char *user;
+	char item_path_buf[512];
+	unsigned fields_hd;
+	const char *title;
+	char fkey[256];
+
+	if (check_item_access(
+	            fd,
+	            "songbook",
+	            id,
+	            sizeof(id),
+	            &user,
+	            item_path_buf,
+	            sizeof(item_path_buf)))
+		return 1;
+
+	fields_hd = source_get_fields_hd("songbook.items");
+	if (!fields_hd)
+		return server_error(fd, "No fields_hd");
+
+	title = qmap_get_field_str(fields_hd, id, "title");
+	if (!title)
+		title = "";
+
+	/* Resolve choir ID from songbook reference field */
+	unsigned choir_fhd = 0;
+	const char *choir_id = NULL;
+	{
+		snprintf(fkey, sizeof(fkey), "%s:choir", id);
+		const uint32_t *choir_ref =
+		        (const uint32_t *)qmap_get(fields_hd, fkey);
+		if (choir_ref && *choir_ref != QM_MISS) {
+			choir_fhd = source_get_fields_hd("choir.items");
+			if (choir_fhd) {
+				const char *cid =
+				        qmap_get_key(choir_fhd, *choir_ref);
+				if (cid && cid[0])
+					choir_id = cid;
+			}
+		}
+	}
+
+	unsigned sis_hd = source_get_fields_hd("songbook.item_songs");
+	unsigned repo_hd = source_get_fields_hd("choir.repertoire");
+	unsigned song_hd = source_get_fields_hd("song.items");
+
+	/* Load current songs */
+	sb_edit_row_t songs[256];
+	int n_songs = 0;
+
+	uint32_t sb_pos = qmap_pos(fields_hd, id);
+	if (sb_pos != UINT32_MAX && sis_hd) {
+		uint32_t inv_buf[512];
+		size_t n =
+		        qmap_inv_get(sis_hd, "songbook", sb_pos, inv_buf, 512);
+		for (size_t i = 0; i < n && n_songs < 256; i++) {
+			const char *eid = qmap_get_key(sis_hd, inv_buf[i]);
+			if (!eid)
+				continue;
+
+			const char *song_ref =
+			        qmap_field_get(sis_hd, eid, "song");
+			const char *t_str =
+			        qmap_field_get(sis_hd, eid, "transpose");
+			const char *fmt = qmap_field_get(sis_hd, eid, "format");
+
+			if (!song_ref)
+				continue;
+			if (!fmt)
+				fmt = "any";
+
+			const char *s_title = NULL;
+			if (repo_hd && song_hd) {
+				const char *repo_song = qmap_field_get(
+				        repo_hd, song_ref, "song");
+				if (repo_song) {
+					snprintf(
+					        fkey,
+					        sizeof(fkey),
+					        "%s:title",
+					        repo_song);
+					s_title = qmap_get(song_hd, fkey);
+				}
+			}
+			if (!s_title)
+				s_title = song_ref;
+
+			songs[n_songs].repo_id = song_ref;
+			songs[n_songs].title = s_title;
+			songs[n_songs].transpose = t_str ? t_str : "";
+			songs[n_songs].format = fmt;
+			n_songs++;
+		}
+	}
+
+	/* Load repertoire options for the song select dropdowns */
+	sb_repo_opt_t options[512];
+	int n_options = 0;
+
+	if (choir_id && choir_fhd && repo_hd && song_hd) {
+		uint32_t choir_pos = qmap_pos(choir_fhd, choir_id);
+		if (choir_pos != UINT32_MAX) {
+			uint32_t repo_buf[512];
+			size_t n_repo = qmap_inv_get(
+			        repo_hd, "choir", choir_pos, repo_buf, 512);
+			for (size_t i = 0; i < n_repo && n_options < 512; i++) {
+				const char *eid =
+				        qmap_get_key(repo_hd, repo_buf[i]);
+				if (!eid)
+					continue;
+
+				const char *repo_s =
+				        qmap_field_get(repo_hd, eid, "song");
+				if (!repo_s)
+					continue;
+
+				snprintf(
+				        fkey, sizeof(fkey), "%s:title", repo_s);
+				const char *s_title = qmap_get(song_hd, fkey);
+				if (!s_title)
+					s_title = repo_s;
+
+				options[n_options].id = eid;
+				options[n_options].title = s_title;
+				n_options++;
+			}
+		}
+	}
+
+	const char *csrf_token = csrf_setup(fd);
+
+	char action[256];
+	char cancel_href[256];
+	snprintf(action, sizeof(action), "/songbook/%s/edit", id);
+	snprintf(cancel_href, sizeof(cancel_href), "/songbook/%s", id);
+
+	bud_node *form = sb_render_edit_form(
+	        action,
+	        csrf_token,
+	        title,
+	        cancel_href,
+	        n_songs,
+	        songs,
+	        n_options,
+	        options);
+
+	return site_ui_respond_edit_page(
+	        fd, user, "songbook", "\xf0\x9f\x93\x95", title, id, form);
+}
+
+/* ── Add GET handler ─────────────────────────────────────── */
+
+static int songbook_add_get_handler(int fd, char *body)
+{
+	(void)body;
+	const char *user = require_user(fd);
+	if (!user)
+		return 1;
+
+	const char *csrf_token = csrf_setup(fd);
+
+	char qs[512] = { 0 };
+	axil_env_get(fd, qs, "QUERY_STRING");
+	if (qs[0])
+		axil_query_parse(qs);
+
+	char choir_val[128] = { 0 };
+	axil_query_param("choir", choir_val, sizeof(choir_val) - 1);
+
+	bud_node *form = sb_render_add_form(csrf_token, choir_val);
+
+	return site_ui_respond_add_page(
+	        fd, user, "songbook", "\xf0\x9f\x93\x95", form);
+}
+
+/* ── Edit POST handler ───────────────────────────────────── */
+
+static int songbook_edit_post_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)user;
+
+	mpfd_parse(fd, body);
+	if (csrf_check_mpfd(fd))
+		return 1;
+
+	/* Update title */
+	{
+		char title[256] = { 0 };
+		int title_len = mpfd_get("title", title, sizeof(title) - 1);
+		if (title_len > 0) {
+			unsigned dh = source_parse_form("songbook.items");
+			if (dh) {
+				qmap_put(dh, "title", title);
+				source_update_item(
+				        fd, "songbook.items", ctx->id, dh);
+				qmap_close(dh);
+			}
+		}
+	}
+
+	/* Delete existing songs before recreating from form data */
+	{
+		source_def_t *sis_def = source_find("songbook.item_songs");
+		source_def_t *sb_def = source_find("songbook.items");
+		if (sis_def && sb_def) {
+			uint32_t del_pos = qmap_pos(sb_def->fields_hd, ctx->id);
+			if (del_pos != UINT32_MAX) {
+				uint32_t del_buf[4096];
+				size_t n_del = qmap_inv_get(
+				        sis_def->fields_hd,
+				        "songbook",
+				        del_pos,
+				        del_buf,
+				        4096);
+				for (size_t i = 0; i < n_del; i++) {
+					const char *eid = qmap_get_key(
+					        sis_def->fields_hd, del_buf[i]);
+					if (eid)
+						source_delete_item(
+						        fd, sis_def, eid);
+				}
+			}
+		}
+	}
+
+	/* Process song rows */
+	{
+		char amount_str[16] = { 0 };
+		int amount = 0;
+		if (mpfd_get("amount", amount_str, sizeof(amount_str) - 1) > 0)
+			amount = atoi(amount_str);
+
+		for (int i = 0; i < amount; i++) {
+			char song_field[32], key_field[32], fmt_field[32];
+			snprintf(song_field, sizeof(song_field), "song_%d", i);
+			snprintf(key_field, sizeof(key_field), "key_%d", i);
+			snprintf(fmt_field, sizeof(fmt_field), "fmt_%d", i);
+
+			char song_val[256] = { 0 };
+			if (mpfd_get(
+			            song_field,
+			            song_val,
+			            sizeof(song_val) - 1) <= 0)
+				continue;
+
+			/* Extract repo ID from "Title [repo_id]" format */
+			char *repo_id = strrchr(song_val, '[');
+			if (repo_id) {
+				repo_id++;
+				char *end = strrchr(repo_id, ']');
+				if (end)
+					*end = '\0';
+			} else {
+				continue;
+			}
+
+			char key_val[16] = { 0 };
+			mpfd_get(key_field, key_val, sizeof(key_val) - 1);
+			char fmt_val[64] = { 0 };
+			mpfd_get(fmt_field, fmt_val, sizeof(fmt_val) - 1);
+
+			unsigned dh = source_parse_form("songbook.item_songs");
+			if (dh == 0)
+				continue;
+			qmap_put(dh, "song", repo_id);
+			qmap_put(dh, "transpose", key_val[0] ? key_val : "0");
+			qmap_put(dh, "songbook", ctx->id);
+			qmap_put(dh, "format", fmt_val[0] ? fmt_val : "any");
+			source_update_item(fd, "songbook.item_songs", NULL, dh);
+			qmap_close(dh);
+		}
+	}
+
+	return redirect_to_item(fd, "songbook", ctx->id);
+}
+
+static int songbook_edit_post_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd,
+	        body,
+	        SONGBOOK_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Songbook not found",
+	        "Forbidden",
+	        songbook_edit_post_authorized,
+	        NULL);
+}
 
 void ndx_install(void)
 {
 	char doc_root[256] = { 0 };
-	get_doc_root(0, doc_root, sizeof(doc_root));
-	if (doc_root[0])
-		strncpy(g_doc_root, doc_root, sizeof(g_doc_root) - 1);
+	resolve_doc_root(0, doc_root, sizeof(doc_root));
+	strncpy(g_doc_root, doc_root, sizeof(g_doc_root) - 1);
 
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
-	ndx_load("./mods/auth/auth");
 	ndx_load("./mods/song/song");
+	ndx_load("./mods/source/source");
 	ndx_load("./mods/choir/choir");
-	ndx_load("./mods/common/common");
 
-	ndc_register_handler(
-	        "POST:/songbook/:id/randomize", handle_sb_randomize);
-	ndc_register_handler(
-	        "POST:/songbook/:id/transpose", handle_sb_transpose);
-
-	songbook_meta_qtype = qmap_reg(sizeof(songbook_meta_t));
-	songbook_index_hd = qmap_open(
+	source_setup(
+	        "songbook.items",
 	        NULL,
-	        "songbook_idx",
-	        QM_STR,
-	        songbook_meta_qtype,
-	        0x3FF,
-	        QM_SORTED);
-	{
-		char path[PATH_MAX];
-		snprintf(
-		        path,
-		        sizeof(path),
-		        "%s/items/songbook/index.tsv",
-		        doc_root);
-		FILE *fp = fopen(path, "r");
-		if (fp) {
-			char line[1024];
-			while (fgets(line, sizeof(line), fp)) {
-				char *id = line;
-				char *nl = strpbrk(line, "\r\n");
-				if (nl)
-					*nl = '\0';
-				char *val = strchr(id, '\t');
-				if (!val)
-					continue;
-				*val++ = '\0';
-				songbook_meta_t meta;
-				memset(&meta, 0, sizeof(meta));
-				char *choir = strchr(val, '\t');
-				if (choir) {
-					*choir++ = '\0';
-					snprintf(
-					        meta.choir,
-					        sizeof(meta.choir),
-					        "%s",
-					        choir);
-				}
-				snprintf(
-				        meta.title,
-				        sizeof(meta.title),
-				        "%s",
-				        val);
-				qmap_put(songbook_index_hd, id, &meta);
-			}
-			fclose(fp);
-		} else {
-			songbook_index_rebuild(doc_root);
-		}
-	}
+	        sizeof(songbook_cache_t),
+	        "items/songbook/items",
+	        songbook_fields,
+	        SB_FIELD_COUNT,
+	        0);
+	source_setup(
+	        "songbook.item_songs",
+	        NULL,
+	        sizeof(songbook_item_song_cache_t),
+	        "items/songbook/item_songs",
+	        songbook_item_song_fields,
+	        SB_ITEM_SONG_FIELD_COUNT,
+	        QM_AINDEX);
 
-	index_hd = index_open(
+	index_open(
 	        "Songbook",
-	        0,
-	        1,
-	        songbook_cleanup,
-	        songbook_details_handler,
+	        "songbook.items",
+	        NULL,
+	        songbook_detail_handler,
 	        handle_sb_add,
-	        handle_sb_edit_get,
-	        handle_sb_edit);
+	        songbook_edit_get_handler,
+	        songbook_edit_post_handler);
+
+	axil_register_handler("GET:/songbook/add", songbook_add_get_handler);
+	axil_register_handler(
+	        "POST:/songbook/:id/randomize", handle_sb_randomize);
+	axil_register_handler(
+	        "POST:/songbook/:id/transpose", handle_sb_transpose);
+	axil_register_handler(
+	        "POST:/api/songbook/:id/songs", handle_sb_song_add);
+	axil_register_handler(
+	        "POST:/api/songbook/:id/song/:n/remove", handle_sb_song_remove);
+	axil_register_handler(
+	        "GET:/api/songbook/:id/transpose", api_sb_transpose_get);
+
+	/* Ensure item_songs storage directory exists */
+	{
+		char is_path[PATH_MAX];
+		snprintf(
+		        is_path,
+		        sizeof(is_path),
+		        "%s/items/songbook/item_songs",
+		        g_doc_root);
+		mkdir(is_path, 0755);
+	}
 }

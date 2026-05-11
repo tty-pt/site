@@ -5,11 +5,11 @@ HOST="localhost"
 PORT="3002"
 # Environment setup
 SITE_DIR="${SITE_DIR:-$(pwd)}"
-NDC_DIR="${NDC_DIR:-$(dirname "$SITE_DIR")/ndc}"
+AXIL_DIR="${AXIL_DIR:-$(dirname "$SITE_DIR")/axil}"
 QMAP_DIR="${QMAP_DIR:-$(dirname "$SITE_DIR")/qmap}"
 
 BASE="http://$HOST:$PORT"
-LOG="/tmp/poem_listing_test_ndc.log"
+LOG="/tmp/poem_listing_test_axil.log"
 POEM_DIR="$SITE_DIR/items/poem/items"
 TMPFILE1="/tmp/poem_listing_test_1_$$"
 TMPFILE2="/tmp/poem_listing_test_2_$$"
@@ -30,9 +30,9 @@ start_server() {
 	sleep 2
 	mkdir -p "$POEM_DIR"
 
-	# Start ndc
-	LD_LIBRARY_PATH="$NDC_DIR/lib:$QMAP_DIR/lib" \
-		"$NDC_DIR/bin/ndc" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
+	# Start axil
+	LD_LIBRARY_PATH="$AXIL_DIR/lib:$QMAP_DIR/lib" \
+		"$AXIL_DIR/bin/axil" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
 	sleep 3
 }
 
@@ -78,7 +78,7 @@ echo -n "2. Add first poem... "
 echo "This is the first test poem.
 It has multiple lines." > "$TMPFILE1"
 result=$(curl -sw "\n%{http_code}" -X POST "$BASE/poem/add" \
-	-F "id=testpoem1" -F "file=@$TMPFILE1")
+	-F "id=testpoem1" -F "body_content=@$TMPFILE1")
 code=$(echo "$result" | tail -1)
 body=$(echo "$result" | head -n -1)
 if [ "$code" = "303" ]; then
@@ -112,7 +112,7 @@ echo -n "5. Add second poem... "
 echo "This is the second test poem.
 Also with multiple lines." > "$TMPFILE2"
 result=$(curl -sw "\n%{http_code}" -X POST "$BASE/poem/add" \
-	-F "id=testpoem2" -F "file=@$TMPFILE2")
+	-F "id=testpoem2" -F "body_content=@$TMPFILE2")
 code=$(echo "$result" | tail -1)
 body=$(echo "$result" | head -n -1)
 if [ "$code" = "303" ]; then

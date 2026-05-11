@@ -5,7 +5,7 @@
  *   1. Unauthenticated: no "add" button on /song/
  *   2. Authenticated: "add" button is in the sidebar (.functions), not in .center
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

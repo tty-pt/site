@@ -7,7 +7,7 @@
  *   3. Navigate to the choir detail page
  *   4. Verify the "Songbooks" section lists the created songbook
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

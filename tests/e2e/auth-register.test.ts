@@ -7,7 +7,7 @@
  *   3. Verify registration redirects successfully (users are auto-activated)
  *   4. Log in with the new account
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

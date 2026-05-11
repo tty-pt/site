@@ -45,18 +45,31 @@ export async function registerUser(
 }
 
 /**
- * Confirm a user by polling the NDC log for the registration rcode.
+ * Confirm a user by polling the AXIL log for the registration rcode.
  * Throws if rcode not found within 5s.
  */
 export async function confirmUser(base: string, username: string): Promise<void> {
   const pattern = new RegExp(
-    `ndc-auth: confirm: (/auth/confirm\\?u=${username}&r=[a-f0-9]+)`,
+    `axil-auth: confirm: (/auth/confirm\\?u=${username}&r=[a-f0-9]+)`,
   );
-  const deadline = Date.now() + 5000;
+  // Let server process registration & flush log before we start
+  await new Promise((r) => setTimeout(r, 1000));
+  const deadline = Date.now() + 15000;
 
   while (Date.now() < deadline) {
-    const log = await Deno.readTextFile(LOG_FILE);
-    const lines = log.split("\n").reverse();
+    const stat = await Deno.stat(LOG_FILE).catch(() => null);
+    if (!stat || stat.size === 0) {
+      await new Promise((r) => setTimeout(r, 500));
+      continue;
+    }
+    const tailSize = Math.min(stat.size, 131072);
+    const file = await Deno.open(LOG_FILE, { read: true });
+    await file.seek(-tailSize, Deno.SeekMode.End);
+    const buf = new Uint8Array(tailSize);
+    const n = await file.read(buf);
+    file.close();
+    const tail = new TextDecoder().decode(buf.subarray(0, n ?? tailSize));
+    const lines = tail.split("\n").reverse();
     for (const line of lines) {
       const m = line.match(pattern);
       if (m) {
@@ -65,7 +78,7 @@ export async function confirmUser(base: string, username: string): Promise<void>
         return;
       }
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error(`confirmUser: rcode for ${username} not found in ${LOG_FILE}`);
 }

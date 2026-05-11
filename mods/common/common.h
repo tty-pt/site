@@ -5,34 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/ndx.h>
 
-/* ---------------------------------------------------------------------------
- * Dynamic JSON array / form-body builder types.
- * Exposed as concrete structs so other modules may inspect fields if needed;
- * lifecycle is managed via the NDX ops below.
- * ------------------------------------------------------------------------- */
-
-typedef struct {
-	char *buf;  /* heap-allocated; NUL-terminated */
-	size_t len; /* bytes used, not counting trailing NUL */
-	size_t cap; /* total bytes allocated */
-	int first;  /* 1 until the first element/object is appended */
-} json_array_t;
-
-typedef struct {
-	char *buf;
-	size_t len;
-	size_t cap;
-	int first;
-} json_object_t;
-
-typedef struct {
-	char *buf;
-	size_t len;
-	size_t cap;
-	int first;
-} form_body_t;
+typedef struct bud_node bud_node;
 
 typedef struct {
 	const char *name;
@@ -40,78 +15,15 @@ typedef struct {
 	size_t sz;
 } meta_field_t;
 
-typedef enum {
-	DATASET_ACCESS_PUBLIC = 0,
-	DATASET_ACCESS_LOGIN,
-	DATASET_ACCESS_CALLBACK,
-} dataset_access_policy_t;
+/* Convenience macros: declare a local `fields` array then call these. */
+#define META_READ(item_path, fields)                                           \
+	meta_fields_read(                                                      \
+	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
+#define META_WRITE(item_path, fields)                                          \
+	meta_fields_write(                                                     \
+	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
 
-typedef enum {
-	DATASET_ACCESS_RESULT_ALLOW = 0,
-	DATASET_ACCESS_RESULT_UNAUTHORIZED,
-	DATASET_ACCESS_RESULT_FORBIDDEN,
-} dataset_access_result_t;
-
-typedef enum {
-	DATASET_FIELD_STRING = 0,
-	DATASET_FIELD_INT,
-	DATASET_FIELD_BOOL,
-	DATASET_FIELD_NULLABLE_STRING,
-} dataset_field_type_t;
-
-typedef struct {
-	const char *name;
-	dataset_field_type_t type;
-	int writable;
-} dataset_field_t;
-
-typedef struct {
-	const char *name;
-	const char *target_dataset_id;
-} dataset_relation_t;
-
-typedef int (*dataset_row_json_cb)(
-        json_object_t *row, const char *key, const void *value, void *user);
-typedef dataset_access_result_t (*dataset_access_cb)(
-        int fd, const char *username, void *user);
-
-typedef int (*dataset_create_cb)(
-        int fd,
-        const char *username,
-        unsigned data_hd,
-        void *user,
-        char *out_key,
-        size_t out_key_len);
-typedef int (*dataset_update_cb)(
-        int fd,
-        const char *username,
-        const char *key,
-        unsigned data_hd,
-        void *user);
-typedef int (*dataset_delete_cb)(
-        int fd, const char *username, const char *key, void *user);
-
-typedef struct {
-	const char *id;
-	const char *key_field;
-	dataset_access_policy_t access_policy;
-	const dataset_field_t *fields;
-	size_t field_count;
-	unsigned source_hd;
-	dataset_row_json_cb row_json_cb;
-	dataset_access_cb access_cb;
-	dataset_create_cb create_cb;
-	dataset_update_cb update_cb;
-	dataset_delete_cb delete_cb;
-	const dataset_relation_t *relations;
-	size_t relation_count;
-	void *user;
-} dataset_def_t;
-
-/* Re-use item_ctx_t and flags from auth.h */
-#include "../auth/auth.h"
-
-typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
+typedef int (*str_list_cb)(const char *token, void *user);
 
 /* ---------------------------------------------------------------------------
  * NDX declarations.
@@ -121,9 +33,13 @@ typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
  * ------------------------------------------------------------------------- */
 #ifndef COMMON_IMPL
 
-NDX_HOOK_DECL(int, json_escape, const char *, in, char *, out, size_t, outlen);
-NDX_HOOK_DECL(int, url_encode, const char *, in, char *, out, size_t, outlen);
-NDX_HOOK_DECL(int, b64_encode, const char *, in, char *, out, size_t, outlen);
+NDX_HOOK_DECL(int, str_trim, char *, s);
+NDX_HOOK_DECL(int, str_list_contains, const char *, list, const char *, token);
+NDX_HOOK_DECL(int, str_list_append, char *, out, size_t, out_sz, const char *, token);
+NDX_HOOK_DECL(int, str_list_normalize, const char *, input, char *, out, size_t, out_sz);
+NDX_HOOK_DECL(int, str_list_for_each, const char *, list, str_list_cb, cb, void *, user);
+NDX_HOOK_DECL(int, respond_html, int, fd, const char *, html);
+NDX_HOOK_DECL(const char *, require_user, int, fd);
 NDX_HOOK_DECL(int, respond_json, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, respond_error, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
@@ -165,29 +81,20 @@ NDX_HOOK_DECL(int, write_file_path,
 	const char *, buf,
 	size_t, sz);
 NDX_HOOK_DECL(char *, slurp_file, const char *, path);
-NDX_HOOK_DECL(char *, slurp_item_child_file,
-	const char *, item_path,
-	const char *, name);
 NDX_HOOK_DECL(int, get_doc_root, int, fd, char *, buf, size_t, len);
+NDX_HOOK_DECL(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len);
 NDX_HOOK_DECL(int, ensure_dir_path, const char *, path);
 NDX_HOOK_DECL(int, user_path_build,
 	const char *, username,
 	const char *, suffix,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_dir_exists, const char *, item_path);
 NDX_HOOK_DECL(int, item_child_path,
 	const char *, item_path,
 	const char *, name,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, index_field_clean, char *, s);
 NDX_HOOK_DECL(int, item_remove_path_recursive, const char *, item_path);
-NDX_HOOK_DECL(int, core_post_form, int, fd, form_body_t *, fb);
-NDX_HOOK_DECL(int, core_post_form_builder,
-	int, fd,
-	form_body_builder_cb, cb,
-	void *, user);
 
 /* Phase A helpers */
 NDX_HOOK_DECL(int, module_path_build,
@@ -218,63 +125,41 @@ NDX_HOOK_DECL(int, datalist_extract_id,
 	char *, id_out,
 	size_t, outlen);
 
-/* --- JSON array lifecycle --- */
-NDX_HOOK_DECL(json_array_t *, json_array_new, int, dummy);
-NDX_HOOK_DECL(int, json_array_append_raw, json_array_t *, ja, const char *, s);
-NDX_HOOK_DECL(int, json_array_begin_object, json_array_t *, ja);
-NDX_HOOK_DECL(int, json_array_end_object, json_array_t *, ja);
-NDX_HOOK_DECL(int, json_array_kv_str,
-	json_array_t *, ja,
-	const char *, key,
-	const char *, value);
-NDX_HOOK_DECL(int, json_array_kv_int,
-	json_array_t *, ja,
-	const char *, key,
-	int, value);
-NDX_HOOK_DECL(int, json_array_kv_bool,
-	json_array_t *, ja,
-	const char *, key,
-	int, value);
-NDX_HOOK_DECL(char *, json_array_finish, json_array_t *, ja);
-
-/* --- JSON object lifecycle --- */
-NDX_HOOK_DECL(json_object_t *, json_object_new, int, dummy);
-NDX_HOOK_DECL(int, json_object_kv_str,
-	json_object_t *, jo,
-	const char *, key,
-	const char *, value);
-NDX_HOOK_DECL(int, json_object_kv_int,
-	json_object_t *, jo,
-	const char *, key,
-	int, value);
-NDX_HOOK_DECL(int, json_object_kv_bool,
-	json_object_t *, jo,
-	const char *, key,
-	int, value);
-NDX_HOOK_DECL(int, json_object_kv_raw,
-	json_object_t *, jo,
-	const char *, key,
-	const char *, value);
-NDX_HOOK_DECL(char *, json_object_finish, json_object_t *, jo);
-NDX_HOOK_DECL(int, json_object_free, json_object_t *, jo);
-NDX_HOOK_DECL(int, json_array_free, json_array_t *, ja);
-
-/* --- Form body lifecycle --- */
-NDX_HOOK_DECL(form_body_t *, form_body_new, int, dummy);
-NDX_HOOK_DECL(int, form_body_add,
-	form_body_t *, fb,
-	const char *, name,
-	const char *, value);
-NDX_HOOK_DECL(int, form_body_free, form_body_t *, fb);
-
-/* --- Dataset registry / JSON export --- */
-NDX_HOOK_DECL(int, dataset_register, const dataset_def_t *, def);
-NDX_HOOK_DECL(int, dataset_get_json,
+NDX_HOOK_DECL(int, site_ui_respond_page,
 	int, fd,
-	const char *, dataset_id,
-	const char *, include,
-	char **, out_json);
+	const char *, title,
+	const char *, extra_head,
+	const char *, module,
+	bud_node *, body);
+NDX_HOOK_DECL(int, site_ui_respond_form_page,
+	int, fd,
+	const char *, user,
+	const char *, title,
+	const char *, action,
+	const char *, icon,
+	const char *, module,
+	bud_node *, form);
 
-#endif /* COMMON_IMPL */
+NDX_HOOK_DECL(int, csrf_check_mpfd, int, fd);
+NDX_HOOK_DECL(int, csrf_check_query, int, fd, char *, body);
+NDX_HOOK_DECL(const char *, csrf_setup, int, fd);
+
+NDX_HOOK_DECL(int, site_ui_respond_add_page,
+	int, fd,
+	const char *, user,
+	const char *, module,
+	const char *, icon,
+	bud_node *, form);
+
+NDX_HOOK_DECL(int, site_ui_respond_edit_page,
+	int, fd,
+	const char *, user,
+	const char *, module,
+	const char *, icon,
+	const char *, title,
+	const char *, id,
+	bud_node *, form);
+
+#endif /* COMMON_H */
 
 #endif

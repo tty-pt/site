@@ -5,7 +5,7 @@
  *   1. Authenticated user can create a poem via /poem/add (title only)
  *   2. After submission, redirects to /poem/<id> detail page
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

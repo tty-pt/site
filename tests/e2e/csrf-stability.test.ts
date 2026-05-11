@@ -11,7 +11,7 @@
  *   3. Navigate back to /song/add
  *   4. Submit the form — must succeed (303) not fail with 403 Forbidden
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

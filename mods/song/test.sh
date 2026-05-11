@@ -24,11 +24,16 @@ mkdir -p "$SONG_DIR/amazing_grace" "$SONG_DIR/testchord"
 printf '%s' "$USER" > "$SONG_DIR/amazing_grace/owner"
 printf '%s' "$USER" > "$SONG_DIR/testchord/owner"
 
+# Get CSRF token (save CSRF cookie for POST validation)
+curl -s -b "$COOKIE" -c "$COOKIE" "$BASE/song/amazing_grace/edit" > /tmp/test_sh_get_edit.html
+csrf=$(cat /tmp/test_sh_get_edit.html | grep -o 'csrf_token[^>]*value="[^"]*"' | grep -o 'value="[^"]*"' | cut -d'"' -f2 | head -1)
+
 # 1. POST url-encoded edit (authenticated)
+echo "CSRF IS: $csrf"
 echo -n "1. POST url-encoded edit... "
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/amazing_grace/edit" \
-	--data-urlencode "title=Amazing Grace" \
-	--data-urlencode "data=C G Am F
+	-F "title=Amazing Grace" -F "csrf_token=$csrf" \
+	-F "data=C G Am F
 Amazing Grace, how sweet the sound")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -50,10 +55,13 @@ echo -n "5. Chord content correct... "
 content=$(cat "$SONG_DIR/amazing_grace/data.txt")
 echo "$content" | grep -q "Amazing Grace" && pass "content matches" || fail "content mismatch"
 
+# Seed Communion type
+curl -s -b "$COOKIE" -X POST "$BASE/api/dataset/song.types/Communion/edit" -F "name=Communion" -F "csrf_token=$csrf" > /dev/null
+
 # 6. POST with type field
 echo -n "6. POST with type... "
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/amazing_grace/edit" \
-	--data-urlencode "type=Communion")
+	-F "title=Amazing Grace" -F "type=Communion" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
 # 7. Verify type file created
@@ -68,14 +76,14 @@ echo "$content" | grep -q "Communion" && pass "type matches" || fail "type misma
 # 9. POST minimal (empty body) — all fields optional, should still redirect
 echo -n "9. POST minimal (empty)... "
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/testchord/edit" \
-	-d "")
+	-F "title=Testchord" -F "dummy=" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
 # 10. POST with yt and audio fields
 echo -n "10. POST yt + audio fields... "
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/amazing_grace/edit" \
-	--data-urlencode "yt=dQw4w9WgXcQ" \
-	--data-urlencode "audio=amazing_grace.mp3")
+	-F "title=Amazing Grace" -F "yt=dQw4w9WgXcQ" -F "csrf_token=$csrf" \
+	-F "audio=amazing_grace.mp3")
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
 # 11. Verify yt file written
@@ -85,7 +93,7 @@ echo -n "11. YT file created... "
 # 12. Unauthenticated edit forbidden
 echo -n "12. Unauthenticated edit... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/song/amazing_grace/edit" \
-	--data-urlencode "title=Hack")
+	-F "title=Hack" -F "csrf_token=$csrf")
 [ "$code" = "401" ] && pass "401 unauthorized" || fail "expected 401, got $code"
 
 # 13. Edit of unowned song returns 403
@@ -93,7 +101,7 @@ echo -n "13. Unowned song edit forbidden... "
 mkdir -p "$SONG_DIR/unowned_song"
 printf 'otheruser' > "$SONG_DIR/unowned_song/owner"
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/unowned_song/edit" \
-	--data-urlencode "title=Hack")
+	-F "title=Hack" -F "csrf_token=$csrf")
 [ "$code" = "403" ] && pass "403 forbidden" || fail "expected 403, got $code"
 
 # Cleanup

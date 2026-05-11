@@ -3,7 +3,7 @@
  *
  * Verifies that /song/ renders and shows song entries.
  *
- * Requires: ndc running on :8080.
+ * Requires: axil running on :8080.
  */
 
 import { chromium } from "npm:playwright";

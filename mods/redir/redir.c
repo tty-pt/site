@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <ttypt/ndc.h>
+#include <ttypt/axil.h>
 #include <ttypt/ndx-mod.h>
 
 #include "../common/common.h"
@@ -14,8 +14,8 @@ static int alias_redirect(
 	char location[1600];
 	int written;
 
-	ndc_env_get(fd, uri, "DOCUMENT_URI");
-	ndc_env_get(fd, query, "QUERY_STRING");
+	axil_env_get(fd, uri, "DOCUMENT_URI");
+	axil_env_get(fd, query, "QUERY_STRING");
 
 	if (strncmp(uri, from_prefix, strlen(from_prefix)) != 0)
 		return not_found(fd, "Not found");
@@ -39,8 +39,8 @@ static int alias_redirect(
 			return server_error(fd, "Redirect path too long");
 	}
 
-	ndc_header_set(fd, "Location", location);
-	ndc_respond(fd, status, "");
+	axil_header_set(fd, "Location", location);
+	axil_respond(fd, status, "");
 	return 0;
 }
 
@@ -60,9 +60,9 @@ void ndx_install(void)
 {
 	ndx_load("./mods/common/common");
 
-	ndc_register_handler("GET:/sb", songbook_redirect_handler);
-	ndc_register_handler("GET:/sb/*", songbook_redirect_handler);
+	axil_register_handler("GET:/sb", songbook_redirect_handler);
+	axil_register_handler("GET:/sb/*", songbook_redirect_handler);
 
-	ndc_register_handler("GET:/chords", song_redirect_handler);
-	ndc_register_handler("GET:/chords/*", song_redirect_handler);
+	axil_register_handler("GET:/chords", song_redirect_handler);
+	axil_register_handler("GET:/chords/*", song_redirect_handler);
 }

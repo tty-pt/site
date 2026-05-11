@@ -19,7 +19,7 @@ int mpfd_parse(int fd, char *body)
 Parse a multipart form data request.
 
 **Parameters:**
-- `fd` - ndc file descriptor
+- `fd` - axil file descriptor
 - `body` - Request body (can be NULL for GET requests)
 
 **Returns:**
@@ -31,7 +31,7 @@ Parse a multipart form data request.
 ```c
 int result = mpfd_parse(fd, body);
 if (result == -1) {
-    ndc_head(fd, 415);  // Unsupported Media Type
+    axil_head(fd, 415);  // Unsupported Media Type
     return 1;
 }
 ```
@@ -186,16 +186,16 @@ From `mods/poem/poem.c`:
 // Parse the request
 int parse_result = mpfd_parse(fd, body);
 if (parse_result == -1) {
-    ndc_header_set(fd, "Content-Type", "text/plain");
-    ndc_head(fd, 415);
-    ndc_body(fd, "Expected multipart/form-data");
+    axil_header_set(fd, "Content-Type", "text/plain");
+    axil_head(fd, 415);
+    axil_body(fd, "Expected multipart/form-data");
     return 1;
 }
 
 // Check if field exists
 if (!mpfd_exists("file")) {
-    ndc_head(fd, 400);
-    ndc_body(fd, "Missing file");
+    axil_head(fd, 400);
+    axil_body(fd, "Missing file");
     return 1;
 }
 

@@ -1,23 +1,35 @@
-#include "transp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "transp.h"
 
-int main(void)
+int main()
 {
 	transp_ctx_t *ctx = transp_init();
+	if (!ctx) {
+		printf("FAIL: ctx init\n");
+		return 1;
+	}
 
-	const char *song = "1. Verse\n"
-	                   "C       G       Am      F\n"
-	                   "Amazing Grace, how sweet the sound\n";
+	// Test individual chords
+	char *test1 = "E/G#";
+	char *result1 = transp_buffer(ctx, test1, 2, 0);
+	printf("Input: '%s' -> Output: '%s'\n",
+	       test1,
+	       result1 ? result1 : "(null)");
+	free(result1);
 
-	printf("Processing song:\n%s\n", song);
-	printf("Transposing by +2 with HTML...\n\n");
+	// Reset key
+	transp_reset_key(ctx);
 
-	char *result = transp_buffer(ctx, song, 2, TRANSP_HTML);
-	printf("Result:\n%s\n\n", result);
+	// Test with space
+	char *test2 = "E/G# A";
+	char *result2 = transp_buffer(ctx, test2, 2, 0);
+	printf("Input: '%s' -> Output: '%s'\n",
+	       test2,
+	       result2 ? result2 : "(null)");
+	free(result2);
 
-	free(result);
 	transp_free(ctx);
 	return 0;
 }
