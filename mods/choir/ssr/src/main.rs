@@ -1,21 +1,23 @@
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
     ChoirItem, RequestContext, ResponsePayload, body_str, current_user, display_or_id,
-    get_pair, html_response, item_menu, item_path, key_names, layout, parse_pairs,
-    parse_index_items_rich, render_hyle_edit, render_hyle_list, split_path,
+    get_pair, html_response, item_menu, item_path, key_names, layout, parse_dataset_items,
+    parse_pairs, render_hyle_edit, render_hyle_list, split_path,
 };
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);
     match (ctx.method, parts.as_slice()) {
         ("POST", ["choir"]) => {
-            let items = parse_index_items_rich(body_str(ctx.body), &[]);
-            Some(render_hyle_list(ctx, "choir", Some("🎶"), items, &["title"], 10))
+            let items = parse_dataset_items(body_str(ctx.body), &["title", "format"]);
+            Some(render_hyle_list(ctx, "choir", Some("🎶"), items, &["title", "format"], 10))
         }
+        ("GET", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
+        ("POST", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
         _ => ndc_dioxus_shared::default_crud_routes(
             ctx, "choir", Some("🎶"),
             None::<ndc_dioxus_shared::CrudHandler>,
-            Some(render_edit as ndc_dioxus_shared::CrudHandler),
+            None::<ndc_dioxus_shared::CrudHandler>,
         ),
     }
 }

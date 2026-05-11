@@ -11,13 +11,19 @@ int json_escape(const char *in, char *out, size_t outlen);
 int url_encode(const char *in, char *out, size_t outlen);
 
 int respond_error(int fd, int status, const char *msg);
+int bad_request(int fd, const char *msg);
 
 int write_file_path(const char *path, const char *buf, size_t sz);
+int write_item_child_file(
+        const char *item_path, const char *name, const char *buf, size_t sz);
+char *slurp_item_child_file(const char *item_path, const char *name);
 int item_child_path(
         const char *item_path, const char *name, char *out, size_t outlen);
 int index_field_clean(char *s);
 int server_error(int fd, const char *msg);
 int respond_json(int fd, int status, const char *msg);
+int get_doc_root(int fd, char *buf, size_t len);
+int item_remove_path_recursive(const char *item_path);
 
 form_body_t *form_body_new(int dummy);
 int form_body_free(form_body_t *fb);

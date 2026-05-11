@@ -133,23 +133,15 @@ NDX_HOOK_DECL(int, ssr_render,
 	size_t, body_len,
 	const char *, remote_user);
 
-NDX_HOOK_DECL(int, ssr_render_song_detail,
-	int, fd,
-	const SongDetailRenderFfi *, req);
+NDX_HOOK_DECL(int, ssr_render_poem_detail, int, fd, const char *, id);
 
-NDX_HOOK_DECL(int, ssr_render_poem_detail, int, fd, const PoemRenderFfi *, req);
-
-NDX_HOOK_DECL(int, ssr_render_poem_edit, int, fd, const PoemRenderFfi *, req);
+NDX_HOOK_DECL(int, ssr_render_poem_edit, int, fd, const char *, id);
 
 NDX_HOOK_DECL(int, ssr_render_delete,
 	int, fd,
 	const char *, module,
 	const char *, id,
 	const char *, title);
-
-NDX_HOOK_DECL(int, ssr_render_songbook_detail,
-	int, fd,
-	const SongbookDetailRenderFfi *, req);
 
 NDX_HOOK_DECL(int, ssr_render_choir_detail,
 	int, fd,

@@ -26,7 +26,6 @@
 
 static transp_ctx_t *g_transp_ctx = NULL;
 static unsigned index_hd = 0;
-static unsigned song_index_hd = 0;
 static unsigned type_index_hd = 0;
 static unsigned song_meta_qtype = 0;
 static char g_doc_root[256] = ".";
@@ -98,55 +97,23 @@ static void song_type_index_remove_from(const char *type, const char *id)
 
 static void song_type_index_remove(const char *id)
 {
-	const song_meta_t *m = (const song_meta_t *)qmap_get(song_index_hd, id);
-	if (!m)
-		return;
-	song_type_index_remove_from(m->type, id);
+	char item_path[PATH_MAX];
+	char type[256] = { 0 };
+	snprintf(item_path, sizeof(item_path), "items/song/items/%s", id);
+	read_meta_file(item_path, "type", type, sizeof(type));
+	song_type_index_remove_from(type, id);
 }
 
 static int song_index_write_file(const char *doc)
 {
-	char path[PATH_MAX], tmp[PATH_MAX];
-	const char *root = (doc && doc[0]) ? doc : ".";
-	snprintf(path, sizeof(path), "%s/items/song/index.tsv", root);
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	FILE *fp = fopen(tmp, "w");
-	if (!fp)
-		return -1;
-	unsigned c = qmap_iter(song_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		const song_meta_t *m = (const song_meta_t *)v;
-		char title[256], type[256], author[256];
-		snprintf(title, sizeof(title), "%s", m->title);
-		snprintf(
-		        type, sizeof(type), "%s", m->type[0] ? m->type : "any");
-		snprintf(author, sizeof(author), "%s", m->author);
-		index_field_clean(title);
-		index_field_clean(type);
-		index_field_clean(author);
-		fprintf(fp,
-		        "%s\t%s\t%s\t%s\n",
-		        (const char *)k,
-		        title,
-		        type,
-		        author);
-	}
-	if (fclose(fp) != 0) {
-		unlink(tmp);
-		return -1;
-	}
-	return rename(tmp, path);
+	(void)doc;
+	return 0;
 }
 
 static void song_index_put_meta(const char *id, const song_meta_t *m)
 {
-	char type[256];
-	song_type_index_remove(id);
-	qmap_put(song_index_hd, id, m);
-	snprintf(type, sizeof(type), "%s", m->type[0] ? m->type : "any");
-	index_field_clean(type);
-	song_type_index_add(type, id);
+	(void)id;
+	(void)m;
 }
 
 static int
@@ -161,100 +128,59 @@ song_index_upsert(const char *doc, const char *id, const char *item_path)
 static void song_index_delete(const char *id)
 {
 	song_type_index_remove(id);
-	qmap_del(song_index_hd, id);
-	song_index_write_file(g_doc_root);
 }
 
 static void song_load_cb(const char *id, const char *val, void *user)
 {
+	(void)id;
+	(void)val;
 	(void)user;
-	/* val is the raw TSV value: title\ttype\tauthor (from index_tsv_load)
-	 */
-	song_meta_t m;
-	char buf[768], *type, *author;
-	memset(&m, 0, sizeof(m));
-	snprintf(buf, sizeof(buf), "%s", val);
-	type = strchr(buf, '\t');
-	if (!type) {
-		snprintf(m.title, sizeof(m.title), "%s", buf);
-		qmap_put(song_index_hd, id, &m);
-		song_type_index_add("any", id);
-		return;
-	}
-	*type++ = '\0';
-	snprintf(m.title, sizeof(m.title), "%s", buf);
-	author = strchr(type, '\t');
-	if (author) {
-		*author++ = '\0';
-		snprintf(m.author, sizeof(m.author), "%s", author);
-	}
-	snprintf(m.type, sizeof(m.type), "%s", type);
-	qmap_put(song_index_hd, id, &m);
-	song_type_index_add(type, id);
 }
 
 static int song_tsv_load(const char *path)
 {
-	FILE *fp = fopen(path, "r");
-	char line[1024];
-	if (!fp)
-		return -1;
-	while (fgets(line, sizeof(line), fp)) {
-		char *id = line;
-		char *nl = strpbrk(line, "\r\n");
-		if (nl)
-			*nl = '\0';
-		char *val = strchr(id, '\t');
-		if (!val)
-			continue;
-		*val++ = '\0';
-		song_load_cb(id, val, NULL);
-	}
-	fclose(fp);
+	(void)path;
 	return 0;
 }
 
 static void song_index_rebuild(const char *root)
 {
-	char p[PATH_MAX];
-	struct dirent *e;
-	DIR *d;
-	if (module_items_path_build(root, "song", p, sizeof(p)) != 0)
-		return;
-	d = opendir(p);
-	if (!d)
-		return;
-	while ((e = readdir(d))) {
-		char item_path[PATH_MAX];
-		song_meta_t m;
-		if (e->d_name[0] == '.')
-			continue;
-		if (item_path_build_root(
-		            root,
-		            "song",
-		            e->d_name,
-		            item_path,
-		            sizeof(item_path)) != 0)
-			continue;
-		song_meta_read(item_path, &m);
-		song_index_put_meta(e->d_name, &m);
-	}
-	closedir(d);
+	(void)root;
 }
 
 static void build_type_index(const char *doc)
 {
-	song_meta_qtype = qmap_reg(sizeof(song_meta_t));
-	song_index_hd = qmap_open(
-	        NULL, "song_idx", QM_STR, song_meta_qtype, 0x3FF, QM_SORTED);
 	type_index_hd = qmap_open(NULL, "type_idx", QM_STR, QM_STR, 0x3FF, 0);
-	char path[PATH_MAX];
+
+	char items_path[PATH_MAX];
 	const char *root = (doc && doc[0]) ? doc : ".";
-	snprintf(path, sizeof(path), "%s/items/song/index.tsv", root);
-	if (song_tsv_load(path) != 0) {
-		song_index_rebuild(root);
-		song_index_write_file(root);
+	snprintf(items_path, sizeof(items_path), "%s/items/song/items", root);
+
+	DIR *d = opendir(items_path);
+	if (!d)
+		return;
+
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.')
+			continue;
+
+		char item_path[PATH_MAX];
+		char type[256] = { 0 };
+		snprintf(
+		        item_path,
+		        sizeof(item_path),
+		        "%s/%s",
+		        items_path,
+		        e->d_name);
+		read_meta_file(item_path, "type", type, sizeof(type));
+
+		if (type[0])
+			song_type_index_add(type, e->d_name);
+		else
+			song_type_index_add("any", e->d_name);
 	}
+	closedir(d);
 }
 
 static int
@@ -489,7 +415,17 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 				.modules_len = modules_len,
 				.csrf_token = s_csrf,
 			};
-			rc = ssr_render_song_detail(fd, &req);
+			{
+				char location[256];
+				snprintf(
+				        location,
+				        sizeof(location),
+				        "/song/%s",
+				        ctx->id);
+				ndc_header_set(fd, "Location", location);
+				ndc_respond(fd, 303, "");
+				return 0;
+			}
 		}
 	} else {
 		json_object_t *jo = json_object_new(0);
@@ -657,6 +593,16 @@ static int song_edit_post_handler(int fd, char *body)
 static void song_cleanup(const char *id)
 {
 	song_index_delete(id);
+
+	char item_path[PATH_MAX];
+	char type[256] = { 0 };
+	snprintf(item_path, sizeof(item_path), "items/song/items/%s", id);
+	read_meta_file(item_path, "type", type, sizeof(type));
+
+	if (type[0])
+		song_type_index_add(type, id);
+	else
+		song_type_index_add("any", id);
 }
 
 NDX_LISTENER(int, parse_item_line,
@@ -729,24 +675,10 @@ NDX_LISTENER(int, song_get_original_key, const char *, id)
 
 NDX_LISTENER(char *, build_all_songs_json, int, inc_t)
 {
-	json_array_t *ja;
-	char *json;
-
-	ja = json_array_new(0);
-	if (!ja)
+	(void)inc_t;
+	char *json = NULL;
+	if (dataset_get_json(0, "song.items", NULL, &json) != 0 || !json)
 		return NULL;
-	unsigned c = qmap_iter(song_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		const song_meta_t *m = (const song_meta_t *)v;
-		json_array_begin_object(ja);
-		json_array_kv_str(ja, "id", (const char *)k);
-		json_array_kv_str(ja, "title", m->title);
-		if (inc_t)
-			json_array_kv_str(ja, "type", m->type);
-		json_array_end_object(ja);
-	}
-	json = json_array_finish(ja);
 	return json;
 }
 
@@ -754,15 +686,51 @@ typedef int (*song_for_each_cb_t)(const char *, const char *, void *);
 
 NDX_LISTENER(int, song_for_each, song_for_each_cb_t, cb, void *, user)
 {
-	unsigned c = qmap_iter(song_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		const song_meta_t *m = (const song_meta_t *)v;
-		int r = cb((const char *)k, m->title, user);
-		if (r)
-			return r;
+	if (index_hd == 0)
+		return 0;
+
+	char id[256] = { 0 };
+	void *val = NULL;
+	size_t iter = qmap_iter(index_hd, NULL, 0);
+	int result = 0;
+
+	while (result == 0 && qmap_next(id, &val, iter)) {
+		char *json = (char *)qmap_get(index_hd, id);
+		if (!json)
+			continue;
+
+		const char *title = "";
+		char *title_start = strstr(json, "\"title\"");
+		if (title_start) {
+			title_start = strchr(title_start, ':');
+			if (title_start) {
+				title_start++;
+				while (*title_start == ' ' ||
+				       *title_start == '"')
+					title_start++;
+				char *title_end = strchr(title_start, '"');
+				if (title_end) {
+					size_t title_len =
+					        title_end - title_start;
+					if (title_len > 255)
+						title_len = 255;
+					static __thread char title_buf[256];
+					title_len = (title_len < 255)
+					                    ? title_len
+					                    : 255;
+					memcpy(title_buf,
+					       title_start,
+					       title_len);
+					title_buf[title_len] = '\0';
+					title = title_buf;
+				}
+			}
+		}
+
+		result = cb(id, title, user);
 	}
-	return 0;
+
+	return result;
 }
 
 static size_t
@@ -919,51 +887,46 @@ void ndx_install(void)
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/mpfd/mpfd");
 	ndx_load("./mods/auth/auth");
-	index_hd = index_open(
-	        "Song",
-	        0,
-	        1,
-	        song_cleanup,
-	        song_details_handler,
-	        NULL,
-	        song_edit_get_handler,
-	        song_edit_post_handler);
-	build_type_index(dr);
+
+	index_hd =
+	        index_open("Song", 0, 1, song_cleanup, NULL, NULL, NULL, NULL);
 
 	{
 		static const dataset_field_t fields[] = {
-			{ "id", DATASET_FIELD_STRING, 0 },
-			{ "title", DATASET_FIELD_STRING, 1 },
-			{ "type", DATASET_FIELD_STRING, 1 },
-			{ "data", DATASET_FIELD_STRING, 1 }
+			{ "id", NULL, DATASET_FIELD_STRING, 0 },
+			{ "title", "title", DATASET_FIELD_STRING, 1 },
+			{ "type", "type", DATASET_FIELD_STRING, 1 },
+			{ "author", "author", DATASET_FIELD_STRING, 1 },
+			{ "yt", "yt", DATASET_FIELD_STRING, 1 },
+			{ "audio", "audio", DATASET_FIELD_STRING, 1 },
+			{ "pdf", "pdf", DATASET_FIELD_STRING, 1 },
+			{ "data", "data.txt", DATASET_FIELD_STRING, 1 },
+			{ "owner", "owner", DATASET_FIELD_STRING, 0 },
 		};
-		dataset_def_t def = { .id = "song.edit_choices",
+		dataset_def_t def = { .id = "song.items",
 			              .key_field = "id",
-			              .access_policy = DATASET_ACCESS_LOGIN,
+			              .items_path = "items/song/items",
+			              .access_policy = DATASET_ACCESS_PUBLIC,
 			              .fields = fields,
 			              .field_count = sizeof(fields) /
 			                             sizeof(fields[0]),
-			              .source_hd = song_index_hd,
-			              .row_json_cb = song_dataset_row_json,
-			              .create_cb = song_dataset_create,
-			              .update_cb = song_dataset_update,
-			              .delete_cb = song_dataset_delete };
+			              .source_hd = index_hd };
 		dataset_register(&def);
 	}
+	build_type_index(dr);
 
 	{
 		static const dataset_field_t fields[] = {
 			{ "name", DATASET_FIELD_STRING, 0 }
 		};
-		dataset_def_t def = {
-			.id = "song.types",
-			.key_field = "name",
-			.access_policy = DATASET_ACCESS_PUBLIC,
-			.fields = fields,
-			.field_count = sizeof(fields) / sizeof(fields[0]),
-			.source_hd = type_index_hd,
-			.row_json_cb = song_type_dataset_row_json
-		};
+		dataset_def_t def = { .id = "song.types",
+			              .key_field = "name",
+			              .items_path = "items/song/types",
+			              .access_policy = DATASET_ACCESS_PUBLIC,
+			              .fields = fields,
+			              .field_count = sizeof(fields) /
+			                             sizeof(fields[0]),
+			              .source_hd = type_index_hd };
 		dataset_register(&def);
 	}
 

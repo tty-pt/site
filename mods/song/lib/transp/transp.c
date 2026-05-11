@@ -155,7 +155,8 @@ static int valid_modifier(const char *s, size_t len)
 		if (c == '#' || c == 'b')
 			continue;
 		if (c == 'm' || c == 'a' || c == 'j' || c == 'd' || c == 'i' ||
-		    c == 'u' || c == 'g' || c == 's' || c == 'n')
+		    c == 'u' || c == 'g' || c == 's' || c == 'n' || c == '+' ||
+		    c == '(' || c == ')' || c == '/')
 			continue;
 		return 0;
 	}
@@ -288,6 +289,8 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			case '\0':
 			case '/':
 			case 'm':
+			case '(':
+			case '+':
 				break;
 			default:
 				if (isdigit(*eoc) || !strncmp(eoc, "sus", 3) ||
@@ -329,7 +332,14 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			new_cstr = chord_str(ctx, chord, flags);
 			len = strlen(buf);
 			diff = strlen(new_cstr) - len;
-			modlen = space_after ? space_after - eoc : strlen(eoc);
+			if (eoc[0] == '/' && space_after == eoc) {
+				char *bass_end = strchr(eoc + 1, ' ');
+				modlen =
+				        bass_end ? bass_end - eoc : strlen(eoc);
+			} else {
+				modlen = space_after ? space_after - eoc
+				                     : strlen(eoc);
+			}
 		}
 
 		/* Reject if modifier contains chars invalid for chord suffixes

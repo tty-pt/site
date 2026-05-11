@@ -28,7 +28,7 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                         "poem",
                         Model::new()
                             .field("title", Field::string("Title"))
-                            .field("file", Field::file("File")),
+                            .field("body_content", Field::file("Body Content")),
                     )
                     .model(
                         "choir",

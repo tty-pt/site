@@ -283,6 +283,144 @@ static int index_list_handler(int fd, char *body)
 	return index_render_list(fd, hd, NULL);
 }
 
+static int index_generic_add_handler(int fd, char *body)
+{
+	char id[256] = { 0 };
+	char title[256] = { 0 };
+	const char *module = index_name(fd);
+	char items_path[512];
+	char dataset_id[512];
+
+	const char *username = get_request_user(fd);
+	if (!username || !username[0]) {
+		return respond_error(fd, 401, "Unauthorized");
+	}
+
+	if (mpfd_parse(fd, body) == -1)
+		return respond_error(fd, 415, "Expected multipart/form-data");
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get(
+		        "csrf_token",
+		        csrf_submitted,
+		        sizeof(csrf_submitted) - 1);
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
+
+	int title_len = mpfd_get("title", title, sizeof(title) - 1);
+	if (title_len <= 0)
+		return bad_request(fd, "Missing title");
+
+	index_id(id, sizeof(id), title, (size_t)title_len);
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+
+	if (item_path_build(fd, module, id, items_path, sizeof(items_path)) !=
+	    0)
+		return server_error(fd, "Failed to resolve item path");
+
+	if (mkdir(items_path, 0755) == -1 && errno != EEXIST)
+		return respond_error(
+		        fd, 403, "Failed to create item directory");
+
+	item_record_ownership(items_path, username);
+	write_meta_file(items_path, "title", title, (size_t)title_len);
+
+	unsigned data_hd = dataset_parse_form(dataset_id);
+	if (!data_hd)
+		return server_error(fd, "OOM");
+
+	if (dataset_update_item(dataset_id, id, data_hd) != 0) {
+		qmap_close(data_hd);
+		return server_error(fd, "Failed to save item data");
+	}
+	qmap_close(data_hd);
+
+	return redirect_to_item(fd, module, id);
+}
+
+static int index_generic_edit_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)user;
+	char dataset_id[512];
+	char items_path[512];
+	const char *module = index_name(fd);
+
+	fprintf(stderr, "DEBUG edit: START id=%s\n", ctx->id);
+	if (mpfd_parse(fd, body) == -1) {
+		fprintf(stderr, "DEBUG edit: mpfd_parse FAILED\n");
+		return respond_error(fd, 415, "Expected multipart/form-data");
+	}
+	fprintf(stderr, "DEBUG edit: mpfd_parse OK\n");
+	{
+		char csrf_submitted[33] = { 0 };
+		mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted));
+		if (csrf_validate(fd, csrf_submitted))
+			return respond_error(fd, 403, "Forbidden");
+	}
+
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+	fprintf(stderr, "DEBUG edit: dataset_id=%s\n", dataset_id);
+
+	unsigned data_hd = dataset_parse_form(dataset_id);
+	fprintf(stderr, "DEBUG edit: data_hd=%u\n", data_hd);
+	if (!data_hd)
+		return server_error(fd, "OOM");
+
+	int rc = dataset_update_item(dataset_id, ctx->id, data_hd);
+	fprintf(stderr, "DEBUG edit: dataset_update_item returned %d\n", rc);
+	if (rc != 0) {
+		qmap_close(data_hd);
+		return server_error(fd, "Failed to update item data");
+	}
+
+	qmap_close(data_hd);
+
+	/* Update title in meta file if provided */
+	char title[256];
+	int title_len = mpfd_get("title", title, sizeof(title) - 1);
+	fprintf(stderr,
+	        "DEBUG edit: title_len=%d, title='%s'\n",
+	        title_len,
+	        title);
+	if (title_len > 0) {
+		if (item_path_build(
+		            fd,
+		            module,
+		            ctx->id,
+		            items_path,
+		            sizeof(items_path)) == 0)
+		{
+			fprintf(stderr,
+			        "DEBUG edit: writing meta file title='%s'\n",
+			        title);
+			write_meta_file(
+			        items_path, "title", title, strlen(title));
+		}
+	}
+
+	fprintf(stderr, "DEBUG edit: DONE, redirecting\n");
+	return redirect_to_item(fd, module, ctx->id);
+}
+
+static int index_generic_edit_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	char items_path[512];
+	snprintf(items_path, sizeof(items_path), "items/%s/items", module);
+
+	return with_item_access(
+	        fd,
+	        body,
+	        items_path,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL,
+	        NULL,
+	        index_generic_edit_authorized,
+	        NULL);
+}
+
 NDX_LISTENER(unsigned, index_open,
 	const char *, name,
 	unsigned, mask,
@@ -319,31 +457,11 @@ NDX_LISTENER(unsigned, index_open,
 		perror("opendir");
 		return QM_MISS;
 	}
-
-	while ((entry = readdir(dir)) != NULL) {
-		char title[256] = { 0 };
-		char item_path[PATH_MAX];
-
-		if (item_path_build_root(
-		            ".",
-		            id,
-		            entry->d_name,
-		            item_path,
-		            sizeof(item_path)) != 0)
-			continue;
-
-		if (read_meta_file(item_path, "title", title, sizeof(title)) !=
-		    0)
-			continue;
-
-		qmap_put(hd, entry->d_name, title);
-	}
-
 	closedir(dir);
 
 	snprintf(buf, sizeof(buf), "POST:/%s/add", id);
 	ndc_register_handler(
-	        buf, add_handler ? add_handler : index_add_handler);
+	        buf, add_handler ? add_handler : index_generic_add_handler);
 
 	snprintf(buf, sizeof(buf), "GET:/%s/add", id);
 	ndc_register_handler(buf, index_add_get_handler);
@@ -369,10 +487,11 @@ NDX_LISTENER(unsigned, index_open,
 		snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
 		ndc_register_handler(buf, edit_get_handler);
 	}
-	if (edit_post_handler) {
-		snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
-		ndc_register_handler(buf, edit_post_handler);
-	}
+	snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
+	ndc_register_handler(
+	        buf,
+	        edit_post_handler ? edit_post_handler
+	                          : index_generic_edit_handler);
 
 	if (module_slot_count < MAX_MODULES) {
 		size_t slot = module_slot_count++;
@@ -555,8 +674,9 @@ static int index_delete_handler(int fd, char *body)
 	            "Forbidden"))
 		return 1;
 
-	/* Remove ownership file */
+	/* Remove ownership file and item directory */
 	item_unlink_owner(item_path);
+	item_remove_path_recursive(item_path);
 
 	/* Find module slot and call cleanup + index_del */
 	unsigned hd = 0;
@@ -568,9 +688,6 @@ static int index_delete_handler(int fd, char *body)
 			break;
 		}
 	}
-
-	if (item_remove_path_recursive(item_path) != 0)
-		return server_error(fd, "Failed to delete item path");
 
 	if (hd)
 		qmap_del(hd, id);

@@ -60,7 +60,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
 
     // ── 3. Edit title and upload file ─────────────────────────────────────────
     await page.fill('input[name="title"]', editedTitle);
-    const fileInput = page.locator('input[type="file"][name="file"]');
+    const fileInput = page.locator('input[type="file"][name="body_content"]');
     await fileInput.setInputFiles(tmpFile);
     await page.click('button[type="submit"]');
 

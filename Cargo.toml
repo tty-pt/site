@@ -24,9 +24,9 @@ serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
 url                = "2.5"
 indexmap           = { version = "2", features = ["serde"] }
-hyle               = { version = "0.1.5" }
-hyle-dioxus        = { version = "0.1.5" }
-hyle-dioxus-native = { version = "0.1.5" }
+hyle               = { version = "0.1.6" }
+hyle-dioxus        = { version = "0.1.6" }
+hyle-dioxus-native = { version = "0.1.6" }
 ndx                = "0.1.1"
 
 [profile.dev]

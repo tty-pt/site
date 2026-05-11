@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 dioxus            = { workspace = true }
 dioxus-ssr        = { workspace = true }
+indexmap          = { workspace = true }
 ndc_dioxus_shared = { path = "ndc_dioxus_shared" }
 ndx               = "0.1"
 serde             = { workspace = true }

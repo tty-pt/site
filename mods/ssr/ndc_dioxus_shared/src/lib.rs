@@ -3,6 +3,7 @@ pub mod hyle_ssr;
 
 pub use blueprint::get_blueprint;
 pub use hyle_ssr::{items_to_source, item_to_source, render_hyle_edit, render_hyle_list};
+pub use indexmap::IndexMap;
 
 use dioxus::prelude::*;
 use dioxus_ssr::render_element;
@@ -481,6 +482,37 @@ pub fn parse_index_items_rich(body: &str, extra_keys: &[&str]) -> Vec<IndexItem>
         .collect()
 }
 
+pub fn parse_dataset_items(body: &str, extract_keys: &[&str]) -> Vec<IndexItem> {
+    body.lines()
+        .filter_map(|line| {
+            let line = line.trim_end_matches('\r').trim();
+            if line.is_empty() {
+                return None;
+            }
+            let idx = line.find(' ')?;
+            let id = line[..idx].to_string();
+            let json_str = &line[idx + 1..];
+
+            let mut title = id.clone();
+            let mut extra = Vec::new();
+
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                if let Some(t) = val.get("title").and_then(|v| v.as_str()) {
+                    title = t.to_string();
+                }
+                for k in extract_keys {
+                    let v = val.get(*k).and_then(|v| v.as_str()).unwrap_or("");
+                    extra.push((k.to_string(), v.to_string()));
+                }
+            } else {
+                title = json_str.to_string();
+            }
+
+            Some(IndexItem { id, title, extra })
+        })
+        .collect()
+}
+
 /// Render a filterable index table for a module.
 ///
 /// `filter_fields` is a slice of `(key, label)` pairs used to build the filter form
@@ -797,12 +829,8 @@ pub fn default_crud_routes(
         }
         ("POST", [m]) if *m == module =>
             Some(render_list(ctx, module, icon)),
-        ("POST", [m, id, "delete"]) if *m == module =>
-            Some(render_delete_confirm(module, id, "", ctx)),
         ("POST", [m, id]) if *m == module =>
             render_detail.map(|f| f(ctx, id)),
-        ("POST", [m, id, "edit"]) if *m == module =>
-            render_edit.map(|f| f(ctx, id)),
         _ => None,
     }
 }

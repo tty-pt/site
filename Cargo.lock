@@ -1377,9 +1377,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hyle"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3d6c10093c48f98b8d26bfd2461c626a232a0fe72b52fe51fe43634f056777f"
+checksum = "cbd35e466d7474528fd00f59b549c71c54a46a40866a7e825c2482068a7ee417"
 dependencies = [
  "garde",
  "indexmap",
@@ -1392,9 +1392,9 @@ dependencies = [
 
 [[package]]
 name = "hyle-dioxus"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e9bef37c4e45ad39802cc2c3f6d81c59c56b782cec28d7ffb87aaaa423b4082"
+checksum = "e5023ca070eab55ff45ba248a0cff9e68d4b11e3e466e02ba1177ac6a7c75393"
 dependencies = [
  "dioxus",
  "dioxus-core",
@@ -1411,9 +1411,9 @@ dependencies = [
 
 [[package]]
 name = "hyle-dioxus-native"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ddd0ccbbf62f15600514ae9d3386bb2646a68418f657faddf0bfd6ecdb932bd"
+checksum = "69b29c448b407b1c12049e4c359de15c223dd0e0717784a3507339df34a41f3f"
 dependencies = [
  "dioxus",
  "dioxus-signals",
@@ -1944,6 +1944,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "dioxus-ssr",
+ "indexmap",
  "ndc_dioxus_shared",
  "ndx",
  "serde",
@@ -2136,10 +2137,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
-name = "poem_ssr"
+name = "poem-ssr"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "indexmap",
  "ndc_dioxus_shared",
  "serde",
  "serde_json",

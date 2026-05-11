@@ -688,4 +688,22 @@ void ndx_install(void)
 			}
 		}
 	}
+
+	{
+		static const dataset_field_t fields[] = {
+			{ "id", NULL, DATASET_FIELD_STRING, 0 },
+			{ "title", "title", DATASET_FIELD_STRING, 1 },
+			{ "format", "format", DATASET_FIELD_STRING, 1 },
+			{ "owner", "owner", DATASET_FIELD_STRING, 0 },
+		};
+		dataset_def_t def = { .id = "choir.items",
+			              .key_field = "id",
+			              .items_path = "items/choir/items",
+			              .access_policy = DATASET_ACCESS_PUBLIC,
+			              .fields = fields,
+			              .field_count = sizeof(fields) /
+			                             sizeof(fields[0]),
+			              .source_hd = index_hd };
+		dataset_register(&def);
+	}
 }

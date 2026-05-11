@@ -60,7 +60,8 @@ typedef enum {
 } dataset_field_type_t;
 
 typedef struct {
-	const char *name;
+	const char *name; // JSON field name
+	const char *file; // file name in item directory (NULL for key field)
 	dataset_field_type_t type;
 	int writable;
 } dataset_field_t;
@@ -70,41 +71,15 @@ typedef struct {
 	const char *target_dataset_id;
 } dataset_relation_t;
 
-typedef int (*dataset_row_json_cb)(
-        json_object_t *row, const char *key, const void *value, void *user);
-typedef dataset_access_result_t (*dataset_access_cb)(
-        int fd, const char *username, void *user);
-
-typedef int (*dataset_create_cb)(
-        int fd,
-        const char *username,
-        unsigned data_hd,
-        void *user,
-        char *out_key,
-        size_t out_key_len);
-typedef int (*dataset_update_cb)(
-        int fd,
-        const char *username,
-        const char *key,
-        unsigned data_hd,
-        void *user);
-typedef int (*dataset_delete_cb)(
-        int fd, const char *username, const char *key, void *user);
-
 typedef struct {
 	const char *id;
 	const char *key_field;
+	const char *items_path; // path to items directory (e.g.,
+	                        // "items/poem/items")
 	dataset_access_policy_t access_policy;
 	const dataset_field_t *fields;
 	size_t field_count;
-	unsigned source_hd;
-	dataset_row_json_cb row_json_cb;
-	dataset_access_cb access_cb;
-	dataset_create_cb create_cb;
-	dataset_update_cb update_cb;
-	dataset_delete_cb delete_cb;
-	const dataset_relation_t *relations;
-	size_t relation_count;
+	unsigned source_hd; // qmap handle for index storage
 	void *user;
 } dataset_def_t;
 
@@ -274,6 +249,9 @@ NDX_HOOK_DECL(int, dataset_get_json,
 	const char *, dataset_id,
 	const char *, include,
 	char **, out_json);
+NDX_HOOK_DECL(int, dataset_refresh_row, const char *, dataset_id, const char *, id);
+NDX_HOOK_DECL(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd);
+NDX_HOOK_DECL(unsigned, dataset_parse_form, const char *, dataset_id);
 
 #endif /* COMMON_IMPL */
 

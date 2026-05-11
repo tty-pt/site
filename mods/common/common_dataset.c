@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #include <ttypt/auth.h>
 #include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
 #include <ttypt/qmap.h>
+#include "../mpfd/mpfd.h"
 
 #include "common_internal.h"
 
@@ -58,7 +61,7 @@ static dataset_def_t *dataset_find(const char *dataset_id)
 }
 
 static dataset_access_result_t
-dataset_access_allowed(dataset_def_t *def, int fd, const char *username)
+dataset_access_allowed(const dataset_def_t *def, int fd, const char *username)
 {
 	switch (def->access_policy) {
 	case DATASET_ACCESS_PUBLIC:
@@ -67,10 +70,6 @@ dataset_access_allowed(dataset_def_t *def, int fd, const char *username)
 		return (username && username[0])
 		               ? DATASET_ACCESS_RESULT_ALLOW
 		               : DATASET_ACCESS_RESULT_UNAUTHORIZED;
-	case DATASET_ACCESS_CALLBACK:
-		if (!def->access_cb)
-			return DATASET_ACCESS_RESULT_FORBIDDEN;
-		return def->access_cb(fd, username, def->user);
 	}
 	return DATASET_ACCESS_RESULT_FORBIDDEN;
 }
@@ -125,55 +124,157 @@ static int dataset_key_field_valid(const dataset_def_t *def)
  * Builds the rows array for a dataset.
  * Note: Row order is currently determined by qmap iteration order,
  * which generally follows insertion order for small maps or hash order.
- * This is considered stable-enough-for-now.
+/*
+ * Build rows JSON from stored data.
+ * If include is specified, also read file-based fields from disk.
  */
-static int dataset_rows_json_build(const dataset_def_t *def, char **out_json)
+static int dataset_rows_json_build(
+        const dataset_def_t *def, const char *include, char **out_json)
 {
 	json_array_t *rows;
 	unsigned cur;
 	const void *key;
 	const void *value;
-	char *row_json;
 	char *rows_json;
-	json_object_t *row;
 
-	fprintf(stderr,
-	        "DEBUG: dataset_rows_json_build: field_count=%zu "
-	        "source_hd=%u\n",
-	        def->field_count,
-	        def->source_hd);
-	fflush(stderr);
 	rows = json_array_new(0);
 	if (!rows)
 		return -1;
 
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+
 	cur = qmap_iter(def->source_hd, NULL, 0);
 	while (qmap_next(&key, &value, cur)) {
-		row = json_object_new(0);
-		if (!row) {
-			json_array_free(rows);
-			return -1;
-		}
-		if (!def->row_json_cb ||
-		    def->row_json_cb(
-		            row, (const char *)key, value, def->user) != 0)
-		{
-			json_object_free(row);
-			json_array_free(rows);
-			return -1;
+		const char *id = (const char *)key;
+		const char *json_val = (const char *)value;
+
+		if (!json_val || !json_val[0])
+			continue;
+
+		char *row_json = NULL;
+		if (include && include[0]) {
+			char item_path[PATH_MAX];
+			snprintf(
+			        item_path,
+			        sizeof(item_path),
+			        "%s/%s/%s",
+			        root,
+			        def->items_path,
+			        id);
+
+			char base_json[8192] = { 0 };
+			strncpy(base_json, json_val, sizeof(base_json) - 1);
+
+			char include_copy[256];
+			strncpy(include_copy,
+			        include,
+			        sizeof(include_copy) - 1);
+			char *saveptr;
+			char *field = strtok_r(include_copy, ",", &saveptr);
+			while (field) {
+				while (*field == ' ')
+					field++;
+				const dataset_field_t *f = NULL;
+				for (unsigned i = 0; i < def->field_count; i++)
+				{
+					if (strcmp(def->fields[i].name,
+					           field) == 0)
+					{
+						f = &def->fields[i];
+						break;
+					}
+				}
+				if (f && f->file && f->file[0]) {
+					char file_path[PATH_MAX];
+					snprintf(
+					        file_path,
+					        sizeof(file_path),
+					        "%s/%s",
+					        item_path,
+					        f->file);
+					FILE *fp = fopen(file_path, "r");
+					if (fp) {
+						fseek(fp, 0, SEEK_END);
+						long len = ftell(fp);
+						fseek(fp, 0, SEEK_SET);
+						if (len > 0 && len < 4096) {
+							char file_data[4096] = {
+								0
+							};
+							size_t r =
+							        fread(file_data,
+							              1,
+							              len,
+							              fp);
+							file_data[r] = '\0';
+
+							char escaped[8192] = {
+								0
+							};
+							char *ep = escaped;
+							for (size_t i = 0;
+							     file_data[i] &&
+							     ep < escaped + sizeof(escaped) -
+							                     4;
+							     i++)
+							{
+								if (file_data[i] ==
+								            '"' ||
+								    file_data[i] ==
+								            '\\')
+									*ep++ = '\\';
+								*ep++ = file_data
+								        [i];
+							}
+
+							char new_field[128];
+							snprintf(
+							        new_field,
+							        sizeof(new_field),
+							        ",\"%s\":\"%"
+							        "s\"",
+							        field,
+							        escaped);
+							size_t base_len = strlen(
+							        base_json);
+							size_t field_len =
+							        strlen(new_field);
+							if (base_len +
+							            field_len <
+							    sizeof(base_json) -
+							            1)
+							{
+								char *brace = strchr(
+								        base_json,
+								        '}');
+								if (brace) {
+									memmove(brace + field_len,
+									        brace + 1,
+									        strlen(brace));
+									memcpy(brace,
+									       new_field,
+									       field_len);
+								}
+							}
+						}
+						fclose(fp);
+					}
+				}
+				field = strtok_r(NULL, ",", &saveptr);
+			}
+			row_json = base_json;
+		} else {
+			row_json = (char *)json_val;
 		}
 
-		row_json = json_object_finish(row);
-		if (!row_json) {
-			json_array_free(rows);
-			return -1;
+		if (row_json && row_json[0]) {
+			if (json_array_append_raw(rows, row_json) != 0) {
+				json_array_free(rows);
+				return -1;
+			}
 		}
-		if (json_array_append_raw(rows, row_json) != 0) {
-			free(row_json);
-			json_array_free(rows);
-			return -1;
-		}
-		free(row_json);
 	}
 
 	rows_json = json_array_finish(rows);
@@ -184,14 +285,16 @@ static int dataset_rows_json_build(const dataset_def_t *def, char **out_json)
 	return 0;
 }
 
-static int
-dataset_json_parts_build(const dataset_def_t *def, dataset_json_parts_t *parts)
+static int dataset_json_parts_build(
+        const dataset_def_t *def,
+        const char *include,
+        dataset_json_parts_t *parts)
 {
 	parts->fields_json = NULL;
 	parts->rows_json = NULL;
 	if (dataset_fields_json_build(def, &parts->fields_json) != 0)
 		return -1;
-	if (dataset_rows_json_build(def, &parts->rows_json) != 0) {
+	if (dataset_rows_json_build(def, include, &parts->rows_json) != 0) {
 		free(parts->fields_json);
 		parts->fields_json = NULL;
 		return -1;
@@ -209,48 +312,20 @@ static void dataset_json_parts_free(dataset_json_parts_t *parts)
 	parts->rows_json = NULL;
 }
 
-static const dataset_relation_t *
-dataset_relation_find(const dataset_def_t *def, const char *name)
-{
-	size_t i;
-
-	if (!def || !name || !name[0])
-		return NULL;
-	for (i = 0; i < def->relation_count; i++)
-		if (strcmp(def->relations[i].name, name) == 0)
-			return &def->relations[i];
-	return NULL;
-}
-
-static int dataset_includes_json_build(
-        int fd, const dataset_def_t *def, const char *include, char **out_json);
-
 static int dataset_json_build(
         int fd, const dataset_def_t *def, const char *include, char **out_json)
 {
+	(void)fd;
 	json_object_t *root;
 	dataset_json_parts_t parts;
-	char *includes_json;
 	char *json;
-	int rc;
 
 	parts.fields_json = NULL;
 	parts.rows_json = NULL;
-	includes_json = NULL;
 	root = NULL;
 
-	if (dataset_json_parts_build(def, &parts) != 0)
+	if (dataset_json_parts_build(def, include, &parts) != 0)
 		goto oom;
-	if (include && include[0]) {
-		rc = dataset_includes_json_build(
-		        fd, def, include, &includes_json);
-		if (rc == -2 || rc == -3) {
-			dataset_json_parts_free(&parts);
-			return rc;
-		}
-		if (rc != 0)
-			goto oom;
-	}
 
 	root = json_object_new(0);
 	if (!root)
@@ -260,14 +335,11 @@ static int dataset_json_build(
 	    json_object_kv_int(root, "version", 1) != 0 ||
 	    json_object_kv_str(root, "keyField", def->key_field) != 0 ||
 	    json_object_kv_raw(root, "fields", parts.fields_json) != 0 ||
-	    json_object_kv_raw(root, "rows", parts.rows_json) != 0 ||
-	    (includes_json &&
-	     json_object_kv_raw(root, "includes", includes_json) != 0))
+	    json_object_kv_raw(root, "rows", parts.rows_json) != 0)
 		goto oom;
 
 	json = json_object_finish(root);
 	dataset_json_parts_free(&parts);
-	free(includes_json);
 	if (!json)
 		return -1;
 
@@ -276,90 +348,143 @@ static int dataset_json_build(
 
 oom:
 	dataset_json_parts_free(&parts);
-	free(includes_json);
 	json_object_free(root);
 	return -1;
 }
 
-static int dataset_includes_json_build(
-        int fd, const dataset_def_t *def, const char *include, char **out_json)
+static char *dataset_slurp_file(const char *path, size_t *out_len)
 {
-	char include_buf[512];
-	char *token;
-	char *saveptr = NULL;
-	json_object_t *includes;
+	FILE *fp = fopen(path, "r");
+	if (!fp)
+		return NULL;
 
-	includes = json_object_new(0);
-	if (!includes)
-		return -1;
-	snprintf(include_buf, sizeof(include_buf), "%s", include);
-	token = strtok_r(include_buf, ",", &saveptr);
-	while (token) {
-		const dataset_relation_t *rel;
-		dataset_def_t *target_def;
-		char *target_json;
-		const char *username;
+	fseek(fp, 0, SEEK_END);
+	long len = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
 
-		while (*token == ' ')
-			token++;
-		rel = dataset_relation_find(def, token);
-		if (!rel) {
-			json_object_free(includes);
-			return -2;
-		}
-
-		target_def = dataset_find(rel->target_dataset_id);
-		if (!target_def) {
-			json_object_free(includes);
-			return -1;
-		}
-
-		username = get_request_user(fd);
-		if (dataset_access_allowed(target_def, fd, username) !=
-		    DATASET_ACCESS_RESULT_ALLOW)
-		{
-			json_object_free(includes);
-			return -3;
-		}
-
-		if (dataset_json_build(fd, target_def, NULL, &target_json) != 0)
-		{
-			json_object_free(includes);
-			return -1;
-		}
-
-		if (json_object_kv_raw(includes, rel->name, target_json) != 0) {
-			free(target_json);
-			json_object_free(includes);
-			return -1;
-		}
-		free(target_json);
-
-		token = strtok_r(NULL, ",", &saveptr);
+	char *buf = malloc((size_t)len + 1);
+	if (!buf) {
+		fclose(fp);
+		return NULL;
 	}
 
-	*out_json = json_object_finish(includes);
-	return *out_json ? 0 : -1;
+	size_t read = fread(buf, 1, (size_t)len, fp);
+	buf[read] = '\0';
+	fclose(fp);
+
+	if (out_len)
+		*out_len = read;
+	return buf;
+}
+
+static int dataset_scan_item(const dataset_def_t *def, const char *id)
+{
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+
+	char item_path[PATH_MAX];
+	snprintf(
+	        item_path,
+	        sizeof(item_path),
+	        "%s/%s/%s",
+	        root,
+	        def->items_path,
+	        id);
+
+	json_object_t *obj = json_object_new(0);
+	if (!obj)
+		return -1;
+
+	json_object_kv_str(obj, "id", id);
+
+	for (size_t i = 0; i < def->field_count; i++) {
+		if (!def->fields[i].file)
+			continue;
+
+		char file_path[PATH_MAX];
+		snprintf(
+		        file_path,
+		        sizeof(file_path),
+		        "%s/%s",
+		        item_path,
+		        def->fields[i].file);
+
+		char *content = dataset_slurp_file(file_path, NULL);
+		if (content) {
+			json_object_kv_str(obj, def->fields[i].name, content);
+			free(content);
+		}
+	}
+
+	char *json = json_object_finish(obj);
+	if (json) {
+		qmap_put(def->source_hd, id, json);
+		free(json);
+	}
+	return 0;
+}
+
+static int dataset_scan_items(dataset_def_t *def)
+{
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+
+	char items_path[PATH_MAX];
+	snprintf(
+	        items_path, sizeof(items_path), "%s/%s", root, def->items_path);
+
+	DIR *dir = opendir(items_path);
+	if (!dir)
+		return 0;
+
+	struct dirent *entry;
+	while ((entry = readdir(dir))) {
+		if (entry->d_name[0] == '.')
+			continue;
+
+		if (entry->d_type != DT_DIR)
+			continue;
+
+		dataset_scan_item(def, entry->d_name);
+	}
+
+	closedir(dir);
+	return 0;
+}
+
+NDX_LISTENER(int, dataset_refresh_row, const char *, dataset_id, const char *, id)
+{
+	dataset_def_t *def = dataset_find(dataset_id);
+	if (!def || !id || !id[0])
+		return -1;
+	return dataset_scan_item(def, id);
+}
+
+static unsigned dataset_parse_row_data(const dataset_def_t *def);
+
+NDX_LISTENER(unsigned, dataset_parse_form, const char *, dataset_id)
+{
+	const dataset_def_t *def = dataset_find(dataset_id);
+	if (!def)
+		return 0;
+	return dataset_parse_row_data(def);
 }
 
 NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 {
 	if (!def || !def->id || !def->id[0] || !def->key_field ||
 	    !def->key_field[0] || !def->fields || def->field_count == 0 ||
-	    !def->row_json_cb || def->source_hd == 0 ||
+	    !def->items_path || def->source_hd == 0 ||
 	    !dataset_key_field_valid(def))
 		return -1;
 
 	if (dataset_count >= MAX_DATASETS || dataset_find(def->id))
 		return -1;
 
-	/*
-	 * Shallow copy: caller-owned pointers (id, key_field, fields,
-	 * relations, callbacks, user) are copied by reference. These must
-	 * remain valid for the lifetime of the program, or until the dataset
-	 * is unregistered (not yet supported). Typically callers use static
-	 * or otherwise immortal storage.
-	 */
+	dataset_scan_items((dataset_def_t *)def);
+
 	dataset_defs[dataset_count++] = *def;
 	return 0;
 }
@@ -492,8 +617,8 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 		if (!f->writable)
 			continue;
 
-		ret_len = ndc_query_param(f->name, val, sizeof(val) - 1);
-		if (ret_len < 0)
+		ret_len = mpfd_get(f->name, val, sizeof(val) - 1);
+		if (ret_len <= 0)
 			continue;
 		if (ret_len >= (int)(sizeof(val) - 1)) {
 			qmap_close(hd);
@@ -502,6 +627,78 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 		qmap_put(hd, f->name, val);
 	}
 	return hd;
+}
+
+NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd)
+{
+	const dataset_def_t *def = dataset_find(dataset_id);
+	if (!def || !id || !id[0])
+		return -1;
+
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+
+	char item_path[PATH_MAX];
+	snprintf(
+	        item_path,
+	        sizeof(item_path),
+	        "%s/%s/%s",
+	        root,
+	        def->items_path,
+	        id);
+	mkdir(item_path, 0755);
+
+	json_object_t *obj = json_object_new(0);
+	if (!obj)
+		return -1;
+	json_object_kv_str(obj, "id", id);
+
+	for (size_t i = 0; i < def->field_count; i++) {
+		const dataset_field_t *f = &def->fields[i];
+		const char *val = qmap_get(data_hd, f->name);
+
+		/* If field is in request, update file and object */
+		if (val) {
+			if (f->file) {
+				write_item_child_file(
+				        item_path, f->file, val, strlen(val));
+			}
+			json_object_kv_str(obj, f->name, val);
+		} else {
+			/* Slurp existing if available to maintain full row JSON
+			 */
+			if (f->file) {
+				char file_path[PATH_MAX];
+				snprintf(
+				        file_path,
+				        sizeof(file_path),
+				        "%s/%s",
+				        item_path,
+				        f->file);
+				char *content =
+				        dataset_slurp_file(file_path, NULL);
+				if (content) {
+					json_object_kv_str(
+					        obj, f->name, content);
+					free(content);
+				} else {
+					/* Create empty file for new items with
+					 * file-based fields */
+					FILE *fp = fopen(file_path, "w");
+					if (fp)
+						fclose(fp);
+				}
+			}
+		}
+	}
+
+	char *json = json_object_finish(obj);
+	if (json) {
+		qmap_put(def->source_hd, id, json);
+		free(json);
+	}
+	return 0;
 }
 
 static int dataset_post_handler(int fd, char *body)
@@ -519,37 +716,31 @@ static int dataset_post_handler(int fd, char *body)
 		                         fd, 415, "Unsupported Media Type")
 		               : respond_error(fd, 400, "Bad request");
 
-	if (!def->create_cb)
-		return respond_error(fd, 405, "Method not allowed");
-
 	unsigned data_hd = dataset_parse_row_data(def);
 	if (data_hd == 0)
 		return server_error(fd, "OOM");
 
-	char new_key[256] = { 0 };
-	rc = def->create_cb(
-	        fd, username, data_hd, def->user, new_key, sizeof(new_key));
+	const char *id = qmap_get(data_hd, def->key_field);
+	if (!id || !id[0]) {
+		qmap_close(data_hd);
+		return bad_request(fd, "Missing key field");
+	}
+
+	rc = dataset_update_item(def->id, id, data_hd);
 	qmap_close(data_hd);
 
 	if (rc == 0) {
 		json_object_t *jo = json_object_new(0);
 		char *out;
-		int r;
-
 		if (!jo)
 			return server_error(fd, "OOM");
-		if (json_object_kv_str(jo, def->key_field, new_key) != 0) {
-			json_object_free(jo);
-			return server_error(fd, "OOM");
-		}
+		json_object_kv_str(jo, def->key_field, id);
 		out = json_object_finish(jo);
-		if (!out)
-			return server_error(fd, "OOM");
-		r = respond_json(fd, 201, out);
+		respond_json(fd, 201, out);
 		free(out);
-		return r;
+		return 0;
 	}
-	return (rc > 0) ? rc : server_error(fd, "Create failed");
+	return server_error(fd, "Create failed");
 }
 
 static int dataset_put_handler(int fd, char *body)
@@ -568,9 +759,6 @@ static int dataset_put_handler(int fd, char *body)
 		                         fd, 415, "Unsupported Media Type")
 		               : respond_error(fd, 400, "Bad request");
 
-	if (!def->update_cb)
-		return respond_error(fd, 405, "Method not allowed");
-
 	ndc_env_get(fd, key, "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_error(fd, 400, "Missing key");
@@ -579,12 +767,12 @@ static int dataset_put_handler(int fd, char *body)
 	if (data_hd == 0)
 		return server_error(fd, "OOM");
 
-	rc = def->update_cb(fd, username, key, data_hd, def->user);
+	rc = dataset_update_item(def->id, key, data_hd);
 	qmap_close(data_hd);
 
 	if (rc == 0)
 		return respond_json(fd, 200, "{\"status\":\"ok\"}");
-	return (rc > 0) ? rc : server_error(fd, "Update failed");
+	return server_error(fd, "Update failed");
 }
 
 static int dataset_delete_handler(int fd, char *body)
@@ -603,17 +791,26 @@ static int dataset_delete_handler(int fd, char *body)
 		                         fd, 415, "Unsupported Media Type")
 		               : respond_error(fd, 400, "Bad request");
 
-	if (!def->delete_cb)
-		return respond_error(fd, 405, "Method not allowed");
-
 	ndc_env_get(fd, key, "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_error(fd, 400, "Missing key");
 
-	rc = def->delete_cb(fd, username, key, def->user);
-	if (rc == 0)
-		return respond_json(fd, 200, "{\"status\":\"ok\"}");
-	return (rc > 0) ? rc : server_error(fd, "Delete failed");
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+	char item_path[PATH_MAX];
+	snprintf(
+	        item_path,
+	        sizeof(item_path),
+	        "%s/%s/%s",
+	        root,
+	        def->items_path,
+	        key);
+
+	item_remove_path_recursive(item_path);
+	qmap_del(def->source_hd, key);
+
+	return respond_json(fd, 200, "{\"status\":\"ok\"}");
 }
 
 void dataset_install_routes(void)
