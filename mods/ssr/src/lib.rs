@@ -254,61 +254,8 @@ pub fn ssr_render_delete(
     0
 }
 
-#[ndx_listener]
-pub fn ssr_render_choir_detail(fd: c_int, req: *const choir_ffi::ChoirDetailRenderFfi) -> c_int {
-    if req.is_null() { internal_error(fd); return 0; }
-    let r = unsafe { &*req };
-    let mut modules_buf: [ModuleRef<'_>; 64] = std::array::from_fn(|_| ModuleRef { id: "", title: "", flags: 0 });
-    let modules_slice = unsafe { fill_modules(&mut modules_buf, r.modules, r.modules_len) };
-    let id_s = unsafe { cstr_ref(r.id) };
-    let remote_user_str = unsafe { cstr_ref(r.remote_user) };
-    let ctx = RequestContext {
-        fd,
-        method:      "GET",
-        path:        &format!("/choir/{id_s}"),
-        query:       unsafe { cstr_ref(r.query) },
-        body:        &[],
-        remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },
-        modules:     modules_slice,
-        csrf_token:  unsafe { cstr_ref(r.csrf_token) },
-    };
-    let songs_raw = if r.songs.is_null() { &[] } else {
-        unsafe { std::slice::from_raw_parts(r.songs, r.songs_len) }
-    };
-    let all_songs_raw = if r.all_songs.is_null() { &[] } else {
-        unsafe { std::slice::from_raw_parts(r.all_songs, r.all_songs_len) }
-    };
-    let songbooks_raw = if r.songbooks.is_null() { &[] } else {
-        unsafe { std::slice::from_raw_parts(r.songbooks, r.songbooks_len) }
-    };
-    let songs: Vec<ChoirSong<'_>> = songs_raw.iter().map(|s| ChoirSong {
-        id:            unsafe { cstr_ref(s.id) },
-        title:         unsafe { cstr_ref(s.title) },
-        format:        unsafe { cstr_ref(s.format) },
-        preferred_key: s.preferred_key,
-        original_key:  s.original_key,
-    }).collect();
-    let all_songs: Vec<ChoirEntry<'_>> = all_songs_raw.iter().map(|e| ChoirEntry {
-        id:    unsafe { cstr_ref(e.id) },
-        title: unsafe { cstr_ref(e.title) },
-    }).collect();
-    let songbooks: Vec<ChoirEntry<'_>> = songbooks_raw.iter().map(|e| ChoirEntry {
-        id:    unsafe { cstr_ref(e.id) },
-        title: unsafe { cstr_ref(e.title) },
-    }).collect();
-    let item = ChoirItem {
-        title:      unsafe { cstr_ref(r.title) },
-        owner_name: unsafe { cstr_ref(r.owner_name) },
-        formats:    unsafe { cstr_ref(r.formats) },
-        songs,
-        all_songs,
-        songbooks,
-    };
-    catch_dispatch(fd, "ssr_render_choir_detail", || choir::render_detail(&item, id_s, &ctx));
-    0
-}
-
-// ── ndx_install ───────────────────────────────────────────────────────────────
+// Choir detail now rendered via dataset + hyle (no FFI)
+// TODO: Add route for GET /choir/:id that loads from dataset
 
 ndx_install! {
     unsafe {

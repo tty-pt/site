@@ -105,28 +105,7 @@ pub struct SongbookItem<'a> {
     pub songs:      Vec<SongbookSong<'a>>,
 }
 
-pub struct ChoirSong<'a> {
-    pub id:            &'a str,
-    pub title:         &'a str,
-    pub format:        &'a str,
-    pub preferred_key: i32,
-    pub original_key:  i32,
-}
-
-pub struct ChoirEntry<'a> {
-    pub id:    &'a str,
-    pub title: &'a str,
-}
-
-/// Safe borrowed view of choir item data passed from C via FFI.
-pub struct ChoirItem<'a> {
-    pub title:      &'a str,
-    pub owner_name: &'a str,
-    pub formats:    &'a str,
-    pub songs:      Vec<ChoirSong<'a>>,
-    pub all_songs:  Vec<ChoirEntry<'a>>,
-    pub songbooks:  Vec<ChoirEntry<'a>>,
-}
+// ChoirSong, ChoirEntry, ChoirItem - removed (now using dataset-based rendering)
 
 /// Interpret a raw byte body as UTF-8 text. Zero allocation; returns "" on invalid UTF-8.
 pub fn body_str(b: &[u8]) -> &str {

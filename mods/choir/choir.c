@@ -179,14 +179,10 @@ choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	(void)user;
 	static __thread struct ChoirSongFfi song_slots[MAX_CHOIR_SONGS];
 	static __thread struct ChoirEntryFfi all_song_slots[MAX_CHOIR_ALL];
-	static __thread struct ChoirEntryFfi
-	        songbook_slots[MAX_CHOIR_SONGBOOKS];
 	static __thread char song_titles[MAX_CHOIR_SONGS][256];
 	static __thread char song_ids[MAX_CHOIR_SONGS][128];
 	static __thread char song_fmts[MAX_CHOIR_SONGS][128];
 	static __thread char all_titles[MAX_CHOIR_ALL][256];
-	static __thread char sb_titles[MAX_CHOIR_SONGBOOKS][256];
-	static __thread char sb_ids[MAX_CHOIR_SONGBOOKS][128];
 
 	choir_meta_t meta;
 	choir_meta_read(ctx->item_path, &meta);
@@ -234,51 +230,6 @@ choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	song_for_each(all_songs_cb, &asc);
 	size_t all_count = asc.count;
 
-	/* Load songbooks for this choir */
-	size_t sb_count = 0;
-	char sb_index_path[PATH_MAX];
-	snprintf(
-	        sb_index_path,
-	        sizeof(sb_index_path),
-	        "%s/items/songbook/index.tsv",
-	        ctx->doc_root);
-	FILE *sbf = fopen(sb_index_path, "r");
-	if (sbf) {
-		char line[1024];
-		while (fgets(line, sizeof(line), sbf) &&
-		       sb_count < MAX_CHOIR_SONGBOOKS)
-		{
-			char *id = line, *title, *choir;
-			char *nl = strpbrk(line, "\r\n");
-			if (nl)
-				*nl = '\0';
-			title = strchr(id, '\t');
-			if (!title)
-				continue;
-			*title++ = '\0';
-			choir = strchr(title, '\t');
-			if (!choir)
-				continue;
-			*choir++ = '\0';
-			if (strcmp(choir, ctx->id) != 0)
-				continue;
-			snprintf(
-			        sb_ids[sb_count],
-			        sizeof(sb_ids[sb_count]),
-			        "%s",
-			        id);
-			snprintf(
-			        sb_titles[sb_count],
-			        sizeof(sb_titles[sb_count]),
-			        "%s",
-			        title);
-			songbook_slots[sb_count].id = sb_ids[sb_count];
-			songbook_slots[sb_count].title = sb_titles[sb_count];
-			sb_count++;
-		}
-		fclose(sbf);
-	}
-
 	static __thread char s_id[128], s_query[512];
 	struct ModuleEntryFfi modules_snap[64];
 	size_t modules_len;
@@ -296,8 +247,6 @@ choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 			.songs_len = count,
 			.all_songs = all_song_slots,
 			.all_songs_len = all_count,
-			.songbooks = songbook_slots,
-			.songbooks_len = sb_count,
 			.id = s_id,
 			.query = s_query,
 			.remote_user = get_request_user(fd),
@@ -307,19 +256,6 @@ choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 		};
 		return ssr_render_choir_detail(fd, &req);
 	}
-}
-
-static int choir_details_handler(int fd, char *body)
-{
-	return with_item_access(
-	        fd,
-	        body,
-	        CHOIR_SONGS_PATH,
-	        0,
-	        NULL,
-	        NULL,
-	        choir_details_authorized,
-	        NULL);
 }
 
 static int handle_choir_songs_list(int fd, char *body)
@@ -573,8 +509,6 @@ static int handle_choir_edit_get(int fd, char *body)
 	        NULL);
 }
 
-static int choir_details_handler(int fd, char *body);
-
 void ndx_install(void)
 {
 	ndx_load("./mods/common/common");
@@ -598,14 +532,7 @@ void ndx_install(void)
 	        handle_choir_song_delete);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
 	index_hd = index_open(
-	        "Choir",
-	        0,
-	        1,
-	        NULL,
-	        choir_details_handler,
-	        NULL,
-	        handle_choir_edit_get,
-	        NULL);
+	        "Choir", 0, 1, NULL, NULL, NULL, handle_choir_edit_get, NULL);
 	{
 		char doc_root[256] = { 0 };
 		get_doc_root(0, doc_root, sizeof(doc_root));

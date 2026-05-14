@@ -57,6 +57,7 @@ typedef enum {
 	DATASET_FIELD_INT,
 	DATASET_FIELD_BOOL,
 	DATASET_FIELD_NULLABLE_STRING,
+	DATASET_FIELD_REFERENCE,
 } dataset_field_type_t;
 
 typedef struct {
@@ -64,6 +65,8 @@ typedef struct {
 	const char *file; // file name in item directory (NULL for key field)
 	dataset_field_type_t type;
 	int writable;
+	const char *target_dataset; // e.g., "choir.items"
+	const char *inverse_name;   // e.g., "songbooks" (for reverse lookup)
 } dataset_field_t;
 
 typedef struct {

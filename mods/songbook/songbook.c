@@ -797,6 +797,15 @@ static int handle_sb_add(int fd, char *body)
 		songbook_index_put_meta(id, &meta);
 		songbook_index_write_file(g_doc_root);
 
+		/* Update association map: choir → [songbook_id] */
+		unsigned data_hd =
+		        qmap_open(NULL, NULL, QM_STR, QM_STR, 0x3FF, 0);
+		if (data_hd != 0 && data_hd != QM_MISS) {
+			qmap_put(data_hd, "choir", choir);
+			dataset_update_item("songbook.items", id, data_hd);
+			qmap_close(data_hd);
+		}
+
 		/* Pre-populate data.txt with one random song per choir format
 		 * type */
 		char choir_item_path[PATH_MAX];
@@ -941,7 +950,12 @@ void ndx_install(void)
 		static const dataset_field_t fields[] = {
 			{ "id", NULL, DATASET_FIELD_STRING, 0 },
 			{ "title", "title", DATASET_FIELD_STRING, 1 },
-			{ "choir", "choir", DATASET_FIELD_STRING, 1 },
+			{ "choir",
+			  "choir",
+			  DATASET_FIELD_REFERENCE,
+			  1,
+			  "choir.items",
+			  "songbooks" },
 			{ "songs", "data.txt", DATASET_FIELD_STRING, 1 },
 			{ "owner", "owner", DATASET_FIELD_STRING, 0 },
 		};
