@@ -8,7 +8,7 @@ use ndc_dioxus_shared::{
     split_path,
 };
 
-use crate::{load_dataset_json, load_dataset_json_with_include};
+use crate::{load_dataset_json, load_dataset_item_json, load_dataset_json_with_include};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
@@ -113,19 +113,14 @@ fn parse_songbook_edit_song(line: &str) -> SongbookEditSong {
 }
 
 pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_json(ctx.fd, "songbook.items") {
+    let json = match load_dataset_item_json(ctx.fd, "songbook.items", id) {
         Some(j) => j,
-        None => return html_response("500", rsx!{ "Dataset error" }),
-    };
-
-    let parsed: SongbookDatasetJson = match serde_json::from_str(&json) {
-        Ok(p) => p,
-        Err(_) => return html_response("500", rsx!{ "Parse error" }),
-    };
-
-    let item = match parsed.rows.iter().find(|p| p.id == id) {
-        Some(i) => i,
         None => return html_response_with_status(404, "404", rsx!{ "Songbook not found" }),
+    };
+
+    let item: SongbookDatasetRow = match serde_json::from_str(&json) {
+        Ok(p) => p,
+        Err(e) => return html_response("500", rsx!{ "Parse error: {e}" }),
     };
 
     let title = &item.title;
@@ -137,12 +132,6 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     let page_title = format!("songbook: {title}");
     let choir_href = item_path("choir", choir);
     let save_url: &str = if current_user(ctx).is_some() { "/api/song/prefs" } else { "" };
-
-    let songs_json = match load_dataset_json(ctx.fd, "song.items") {
-        Some(j) => j,
-        None => String::new(),
-    };
-    let song_parsed: SongDatasetJson = serde_json::from_str(&songs_json).unwrap_or(SongDatasetJson { rows: vec![] });
 
     let song_entries: Vec<(&str, i32, &str, i32)> = item.songs
         .lines()
@@ -159,23 +148,22 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 
     let display_songs: Vec<DisplaySongbookSong> = song_entries
         .iter()
-        .map(|(chord_id, transpose, format, original_key)| {
-            let song_data = song_parsed.rows.iter().find(|s| &s.id == chord_id);
-            let song_title = song_data.map(|s| s.title.as_str()).unwrap_or("");
-            let chord_data = song_data.map(|s| s.data.as_str()).unwrap_or("");
+        .filter_map(|(chord_id, transpose, format, original_key)| {
+            let song_json = load_dataset_item_json(ctx.fd, "song.items", chord_id)?;
+            let song: SongDatasetRow = serde_json::from_str(&song_json).ok()?;
             let target_idx = ((original_key + transpose) % 12 + 12) % 12;
             let target_key = key_names(false, false)[target_idx as usize].to_string();
             let transpose_options = key_transpose_options(*original_key, false, false);
-            let display_title = display_or_id(song_title, chord_id).to_string();
-            DisplaySongbookSong {
+            let display_title = display_or_id(&song.title, chord_id).to_string();
+            Some(DisplaySongbookSong {
                 chord_id: chord_id.to_string(),
                 transpose: *transpose,
                 format_name: format.to_string(),
                 display_title,
-                chord_data: chord_data.to_string(),
+                chord_data: song.data,
                 target_key,
                 transpose_options,
-            }
+            })
         })
         .collect();
     html_response(
@@ -270,17 +258,13 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 }
 
 pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let sb_json = match load_dataset_json(ctx.fd, "songbook.items") {
+    let sb_json = match load_dataset_item_json(ctx.fd, "songbook.items", id) {
         Some(j) => j,
-        None => return html_response("500", rsx!{ "Dataset error" }),
+        None => return html_response_with_status(404, "404", rsx!{ "Songbook not found" }),
     };
-    let sb_parsed: SongbookDatasetJson = match serde_json::from_str(&sb_json) {
+    let sb_item: SongbookDatasetRow = match serde_json::from_str(&sb_json) {
         Ok(p) => p,
         Err(_) => return html_response("500", rsx!{ "Parse error" }),
-    };
-    let sb_item = match sb_parsed.rows.iter().find(|p| p.id == id) {
-        Some(i) => i,
-        None => return html_response_with_status(404, "404", rsx!{ "Songbook not found" }),
     };
 
     let songs_json = match load_dataset_json(ctx.fd, "song.items") {

@@ -130,7 +130,7 @@ static int handle_choir_edit_authorized(
 	    choir_meta_write(ctx->item_path, &meta) != 0)
 		return server_error(fd, "Failed to write choir metadata");
 	if (t_len > 0)
-		index_put(index_hd, (char *)ctx->id, meta.title);
+		qmap_put(choir_index_hd, (char *)ctx->id, &meta);
 	if (t_len > 0 || f_len > 0)
 		choir_index_put_meta(ctx->id, &meta);
 	return redirect_to_item(fd, "choir", ctx->id);
@@ -531,8 +531,7 @@ void ndx_install(void)
 	        "POST:/api/choir/:id/song/:song_id/remove",
 	        handle_choir_song_delete);
 	ndc_register_handler("POST:/api/choir/:id/edit", handle_choir_edit);
-	index_hd = index_open(
-	        "Choir", 0, 1, NULL, NULL, NULL, handle_choir_edit_get, NULL);
+	index_hd = index_open("Choir", 0, 1, NULL, NULL, NULL, NULL, NULL);
 	{
 		char doc_root[256] = { 0 };
 		get_doc_root(0, doc_root, sizeof(doc_root));

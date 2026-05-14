@@ -49,6 +49,9 @@ pub fn index_get_module_flags(i: usize) -> u32 {}
 #[ndx_hook_decl]
 pub fn dataset_get_json(fd: c_int, dataset_id: *const c_char, include: *const c_char, out_json: *mut *mut c_char) -> c_int {}
 
+#[ndx_hook_decl]
+pub fn dataset_get_item_json(fd: c_int, dataset_id: *const c_char, id: *const c_char, out_json: *mut *mut c_char) -> c_int {}
+
 // ── ModuleEntryFfi (shared with render_ffi submodules via crate::) ────────────
 
 #[repr(C)]
@@ -104,6 +107,24 @@ pub fn load_dataset_json_with_include(
 
 pub fn load_dataset_json(fd: c_int, dataset_id: &str) -> Option<String> {
     load_dataset_json_with_include(fd, dataset_id, None)
+}
+
+pub fn load_dataset_item_json(fd: c_int, dataset_id: &str, id: &str) -> Option<String> {
+    let dataset_id_c = CString::new(dataset_id).ok()?;
+    let id_c = CString::new(id).ok()?;
+    let mut raw: *mut c_char = std::ptr::null_mut();
+    let rc = unsafe { dataset_get_item_json(fd, dataset_id_c.as_ptr(), id_c.as_ptr(), &mut raw) };
+    let json = if rc == 0 && !raw.is_null() {
+        let owned = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    } else {
+        if !raw.is_null() {
+            unsafe { free(raw.cast()) };
+        }
+        None
+    };
+    json
 }
 
 fn dispatch_result(fd: c_int, response: ResponsePayload) {
@@ -178,6 +199,17 @@ pub fn ssr_render(
     body_len: usize,
     remote_user: *const c_char,
 ) -> c_int {
+    let method_str = unsafe { cstr_ref(method) };
+    let path_str = unsafe { cstr_ref(path) };
+    
+    // Debug: log call to /tmp/ssr_render_debug.log
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true).open("/tmp/ssr_render_debug.log")
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "ssr_render called: method={} path={}", method_str, path_str);
+    }
+
     const CSRF_BUF_SIZE: usize = 33;
     let mut csrf_buf = [0u8; CSRF_BUF_SIZE];
     unsafe { csrf_set_cookie(fd, csrf_buf.as_mut_ptr() as *mut c_char, CSRF_BUF_SIZE) };
@@ -196,8 +228,8 @@ pub fn ssr_render(
     let remote_user_str = unsafe { cstr_ref(remote_user) };
     let ctx = RequestContext {
         fd,
-        method:      unsafe { cstr_ref(method) },
-        path:        unsafe { cstr_ref(path) },
+        method:      method_str,
+        path:        path_str,
         query:       unsafe { cstr_ref(query) },
         body:        body_slice,
         remote_user: if remote_user_str.is_empty() { None } else { Some(remote_user_str) },

@@ -25,7 +25,6 @@
 #define SONGBOOK_ITEMS_PATH "items/songbook/items"
 #define SB_SONGS_BUF_SIZE 65536
 static unsigned index_hd = 0;
-static unsigned songbook_index_hd = 0;
 static unsigned songbook_meta_qtype = 0;
 static char g_doc_root[256] = ".";
 
@@ -72,79 +71,9 @@ songbook_meta_write(const char *item_path, const songbook_meta_t *meta)
 	        item_path, fields, sizeof(fields) / sizeof(fields[0]));
 }
 
-static int songbook_index_write_file(const char *doc_root)
-{
-	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	char path[PATH_MAX], tmp[PATH_MAX + 8];
-	snprintf(path, sizeof(path), "%s/items/songbook/index.tsv", root);
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	FILE *fp = fopen(tmp, "w");
-	if (!fp)
-		return -1;
-	unsigned c = qmap_iter(songbook_index_hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		const songbook_meta_t *m = (const songbook_meta_t *)v;
-		char title[256], choir[128];
-		snprintf(title, sizeof(title), "%s", m->title);
-		snprintf(choir, sizeof(choir), "%s", m->choir);
-		index_field_clean(title);
-		index_field_clean(choir);
-		fprintf(fp, "%s\t%s\t%s\n", (const char *)k, title, choir);
-	}
-	if (fclose(fp) != 0) {
-		unlink(tmp);
-		return -1;
-	}
-	return rename(tmp, path);
-}
-static void songbook_index_put_meta(const char *id, const songbook_meta_t *meta)
-{
-	qmap_put(songbook_index_hd, id, meta);
-}
-static int songbook_index_upsert(
-        const char *doc_root, const char *id, const char *item_path)
-{
-	songbook_meta_t meta;
-
-	songbook_meta_read(item_path, &meta);
-	songbook_index_put_meta(id, &meta);
-	return songbook_index_write_file(doc_root);
-}
-
 static void songbook_cleanup(const char *id)
 {
-	qmap_del(songbook_index_hd, id);
-	songbook_index_write_file(g_doc_root);
-}
-
-static void songbook_index_rebuild(const char *doc_root)
-{
-	char p[PATH_MAX];
-	struct dirent *e;
-	DIR *d;
-	if (module_items_path_build(doc_root, "songbook", p, sizeof(p)) != 0)
-		return;
-	d = opendir(p);
-	if (!d)
-		return;
-	while ((e = readdir(d))) {
-		char item_path[PATH_MAX];
-		songbook_meta_t meta;
-		if (e->d_name[0] == '.')
-			continue;
-		if (item_path_build_root(
-		            doc_root,
-		            "songbook",
-		            e->d_name,
-		            item_path,
-		            sizeof(item_path)) != 0)
-			continue;
-		songbook_meta_read(item_path, &meta);
-		songbook_index_put_meta(e->d_name, &meta);
-	}
-	closedir(d);
-	songbook_index_write_file(doc_root);
+	(void)id;
 }
 
 static int sb_edit_form_build(int fd, form_body_t *fb, void *user)
@@ -472,9 +401,6 @@ handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 		if (songbook_meta_write(ctx->item_path, &meta) != 0)
 			return server_error(
 			        fd, "Failed to write songbook metadata");
-		index_put(index_hd, (char *)ctx->id, meta.title);
-		songbook_index_put_meta(ctx->id, &meta);
-		songbook_index_write_file(ctx->doc_root);
 	}
 
 	/* Build new data.txt content */
@@ -506,36 +432,6 @@ handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 			}
 		}
 		fclose(dfp);
-
-		if (songs_data && songs_data[0]) {
-			char escaped_songs[4096] = { 0 };
-			char *dp = escaped_songs;
-			char *sp = songs_data;
-			while (*sp &&
-			       dp < escaped_songs + sizeof(escaped_songs) - 4)
-			{
-				if (*sp == '"' || *sp == '\\') {
-					*dp++ = '\\';
-				}
-				*dp++ = *sp++;
-			}
-			escaped_songs[sizeof(escaped_songs) - 1] = '\0';
-
-			char json_row[8192];
-			snprintf(
-			        json_row,
-			        sizeof(json_row),
-			        "{\"id\":\"%s\",\"title\":\"%s\",\"choir\":\"%"
-			        "s\",\"owner\":\"%s\",\"songs\":\"%s\"}",
-			        ctx->id,
-			        meta.title,
-			        meta.choir,
-			        ctx->username,
-			        escaped_songs);
-			index_put(index_hd, ctx->id, json_row);
-		}
-		if (songs_data)
-			free(songs_data);
 	}
 
 	/* Redirect to view page */
@@ -558,7 +454,7 @@ static int handle_sb_edit(int fd, char *body)
 }
 
 /* POST /api/songbook/:id/transpose - Transpose single song */
-struct sb_transpose_cb {
+struct sb_transpose_ctx {
 	int target_idx;
 	int new_transpose;
 };
@@ -576,7 +472,7 @@ static int sb_transpose_cb(
 {
 	(void)raw;
 	(void)ival;
-	struct sb_transpose_cb *c = user;
+	struct sb_transpose_ctx *c = user;
 	if (parsed && idx == c->target_idx) {
 		snprintf(out, out_sz, "%s:%d:%s\n", sid, c->new_transpose, fmt);
 		return REPERTOIRE_LINE_REPLACE;
@@ -607,7 +503,7 @@ static int handle_sb_transpose_authorized(
 	mpfd_get("n", n_str, sizeof(n_str) - 1);
 	mpfd_get("t", t_str, sizeof(t_str) - 1);
 
-	struct sb_transpose_cb cbc = {
+	struct sb_transpose_ctx cbc = {
 		.target_idx = atoi(n_str),
 		.new_transpose = atoi(t_str),
 	};
@@ -793,19 +689,6 @@ static int handle_sb_add(int fd, char *body)
 				fclose(dfp);
 		}
 
-		index_put(index_hd, id, meta.title);
-		songbook_index_put_meta(id, &meta);
-		songbook_index_write_file(g_doc_root);
-
-		/* Update association map: choir → [songbook_id] */
-		unsigned data_hd =
-		        qmap_open(NULL, NULL, QM_STR, QM_STR, 0x3FF, 0);
-		if (data_hd != 0 && data_hd != QM_MISS) {
-			qmap_put(data_hd, "choir", choir);
-			dataset_update_item("songbook.items", id, data_hd);
-			qmap_close(data_hd);
-		}
-
 		/* Pre-populate data.txt with one random song per choir format
 		 * type */
 		char choir_item_path[PATH_MAX];
@@ -906,15 +789,6 @@ static int handle_sb_add(int fd, char *body)
 			free(rows);
 			fclose(ffp);
 		}
-	} else {
-		char sb_item_path[512];
-		if (item_path_build(
-		            fd,
-		            "songbook",
-		            id,
-		            sb_item_path,
-		            sizeof(sb_item_path)) == 0)
-			songbook_index_upsert(g_doc_root, id, sb_item_path);
 	}
 
 	char location[512];
@@ -938,8 +812,7 @@ void ndx_install(void)
 	ndx_load("./mods/song/song");
 	ndx_load("./mods/choir/choir");
 
-	index_hd = index_open(
-	        "Songbook", 0, 1, songbook_cleanup, NULL, NULL, NULL, NULL);
+	index_hd = index_open("Songbook", 0, 1, NULL, NULL, NULL, NULL, NULL);
 
 	ndc_register_handler(
 	        "POST:/songbook/:id/randomize", handle_sb_randomize);
@@ -959,14 +832,18 @@ void ndx_install(void)
 			{ "songs", "data.txt", DATASET_FIELD_STRING, 1 },
 			{ "owner", "owner", DATASET_FIELD_STRING, 0 },
 		};
-		dataset_def_t def = { .id = "songbook.items",
-			              .key_field = "id",
-			              .items_path = "items/songbook/items",
-			              .access_policy = DATASET_ACCESS_PUBLIC,
-			              .fields = fields,
-			              .field_count = sizeof(fields) /
-			                             sizeof(fields[0]),
-			              .source_hd = index_hd };
+
+		dataset_def_t def = {
+      .id = "songbook.items",
+      .key_field = "id",
+      .items_path = "items/songbook/items",
+      .access_policy = DATASET_ACCESS_PUBLIC,
+      .fields = fields,
+      .field_count = sizeof(fields) /
+        sizeof(fields[0]),
+      .source_hd = index_hd
+    };
+
 		dataset_register(&def);
 	}
 }

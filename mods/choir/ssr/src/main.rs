@@ -2,23 +2,32 @@ use dioxus::prelude::*;
 use indexmap::IndexMap;
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, body_str, current_user, display_or_id,
-    html_response, item_menu, item_path, layout,
+    html_response, html_response_with_status, item_menu, item_path, layout,
     parse_dataset_items, render_hyle_edit, render_hyle_list, split_path,
 };
 
-use crate::{load_dataset_json, load_dataset_json_with_include};
+use crate::{load_dataset_json, load_dataset_json_with_include, load_dataset_item_json};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);
     match (ctx.method, parts.as_slice()) {
+        ("GET", ["choir", "add"]) => Some(render_hyle_edit(
+            ctx,
+            "choir",
+            Some("🎶"),
+            "",
+            IndexMap::new(),
+            &["title", "format"],
+            "application/x-www-form-urlencoded",
+            Vec::new(),
+        )),
         ("POST", ["choir"]) => {
             let items = parse_dataset_items(body_str(ctx.body), &["title", "format"]);
             Some(render_hyle_list(ctx, "choir", Some("🎶"), items, &["title", "format"], 10))
         }
-        ("GET", ["choir", id]) => Some(render_choir_detail(ctx, id)),
-        ("POST", ["choir", id]) => Some(render_choir_detail(ctx, id)),
         ("GET", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
         ("POST", ["choir", id, "edit"]) => Some(render_edit(ctx, id)),
+        (_, ["choir", id]) if *id != "add" && *id != "edit" => Some(render_choir_detail(ctx, id)),
         _ => ndc_dioxus_shared::default_crud_routes(
             ctx, "choir", Some("🎶"),
             None::<ndc_dioxus_shared::CrudHandler>,
@@ -28,11 +37,26 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 }
 
 pub fn render_choir_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let choir_json = load_dataset_json(ctx.fd, "choir.items");
+    let choir_json = load_dataset_item_json(ctx.fd, "choir.items", id);
     let songbook_json = load_dataset_json_with_include(ctx.fd, "songbook.items", None);
 
-    let title = id;
-    let owner = "";
+    let mut title = id.to_string();
+    let mut owner = String::new();
+
+    if let Some(json) = choir_json {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(t) = data.get("title").and_then(|v| v.as_str()) {
+                if !t.is_empty() {
+                    title = t.to_string();
+                }
+            }
+            if let Some(o) = data.get("owner").and_then(|v| v.as_str()) {
+                owner = o.to_string();
+            }
+        }
+    } else {
+        return html_response_with_status(404, "404", rsx!{ "Choir not found" });
+    }
 
     let mut display_songbooks: Vec<(String, String)> = Vec::new();
 
@@ -55,7 +79,7 @@ pub fn render_choir_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayloa
         }
     }
 
-    let is_owner = false;
+    let is_owner = current_user(ctx).map(|u| u == owner).unwrap_or(false);
 
     let menu_items = Some(rsx! {
         { item_menu("choir", id, is_owner) }
@@ -68,10 +92,10 @@ pub fn render_choir_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayloa
     });
 
     html_response(
-        title,
+        &title,
         layout(
             current_user(ctx),
-            title,
+            &title,
             &item_path("choir", id),
             Some("🎶"),
             menu_items,

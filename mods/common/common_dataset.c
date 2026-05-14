@@ -682,6 +682,77 @@ NDX_LISTENER(int, dataset_refresh_row, const char *, dataset_id, const char *, i
 	return dataset_scan_item(def, id);
 }
 
+NDX_LISTENER(int, dataset_get_item_json,
+	int, fd,
+	const char *, dataset_id,
+	const char *, id,
+	char **, out_json)
+{
+	dataset_def_t *def;
+	const char *username;
+	const char *cached;
+
+	if (out_json)
+		*out_json = NULL;
+
+	def = dataset_find(dataset_id);
+	if (!def || !id || !id[0])
+		return 404;
+
+	username = get_request_user(fd);
+	if (dataset_access_allowed(def, fd, username) != DATASET_ACCESS_RESULT_ALLOW)
+		return 403;
+
+	cached = qmap_get(def->source_hd, id);
+	if (cached && cached[0]) {
+		*out_json = strdup(cached);
+		return *out_json ? 0 : -1;
+	}
+
+	if (dataset_scan_item(def, id) != 0)
+		return 500;
+
+	cached = qmap_get(def->source_hd, id);
+	if (cached && cached[0]) {
+		*out_json = strdup(cached);
+		return *out_json ? 0 : -1;
+	}
+
+	char doc_root[256] = { 0 };
+	get_doc_root(0, doc_root, sizeof(doc_root));
+	const char *root = doc_root[0] ? doc_root : ".";
+
+	char item_path[PATH_MAX];
+	snprintf(item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path, id);
+
+	json_object_t *obj = json_object_new(0);
+	if (!obj)
+		return 404;
+
+	json_object_kv_str(obj, "id", id);
+
+	for (size_t i = 0; i < def->field_count; i++) {
+		if (!def->fields[i].file)
+			continue;
+		char file_path[PATH_MAX];
+		snprintf(file_path, sizeof(file_path), "%s/%s", item_path, def->fields[i].file);
+		char *content = dataset_slurp_file(file_path, NULL);
+		if (content) {
+			json_object_kv_str(obj, def->fields[i].name, content);
+			free(content);
+		}
+	}
+
+	char *json = json_object_finish(obj);
+	if (json) {
+		qmap_put(def->source_hd, id, json);
+		*out_json = json;
+		return 0;
+	}
+
+	return 404;
+}
+
 static unsigned dataset_parse_row_data(const dataset_def_t *def);
 
 NDX_LISTENER(unsigned, dataset_parse_form, const char *, dataset_id)

@@ -252,6 +252,11 @@ NDX_HOOK_DECL(int, dataset_get_json,
 	const char *, dataset_id,
 	const char *, include,
 	char **, out_json);
+NDX_HOOK_DECL(int, dataset_get_item_json,
+	int, fd,
+	const char *, dataset_id,
+	const char *, id,
+	char **, out_json);
 NDX_HOOK_DECL(int, dataset_refresh_row, const char *, dataset_id, const char *, id);
 NDX_HOOK_DECL(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd);
 NDX_HOOK_DECL(unsigned, dataset_parse_form, const char *, dataset_id);
