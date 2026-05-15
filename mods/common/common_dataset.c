@@ -337,6 +337,8 @@ static int dataset_key_field_valid(const dataset_def_t *def)
  * Build rows JSON from stored data.
  * If include is specified, also read file-based fields from disk.
  */
+static int dataset_scan_item(const dataset_def_t *def, const char *id);
+
 static int dataset_rows_json_build(
         const dataset_def_t *def, const char *include, char **out_json)
 {
@@ -355,12 +357,25 @@ static int dataset_rows_json_build(
 	const char *root = doc_root[0] ? doc_root : ".";
 
 	cur = qmap_iter(def->source_hd, NULL, 0);
+	fprintf(stderr, "DEBUG dataset_rows: source_hd=%p, def_id=%s, include=%s\n",
+	        (void*)def->source_hd, def->id, include ? include : "NULL");
+	unsigned count = 0;
 	while (qmap_next(&key, &value, cur)) {
+		count++;
 		const char *id = (const char *)key;
 		const char *json_val = (const char *)value;
+		fprintf(stderr, "DEBUG dataset_rows: count=%u id=%s json_val=%s\n",
+		        count, id, json_val ? json_val : "NULL");
 
-		if (!json_val || !json_val[0])
-			continue;
+		if (!json_val || !json_val[0]) {
+			fprintf(stderr, "DEBUG dataset_rows: empty json, calling scan for %s\n", id);
+			dataset_scan_item(def, id);
+			json_val = qmap_get(def->source_hd, id);
+			fprintf(stderr, "DEBUG dataset_rows: after scan json_val=%s\n",
+			        json_val ? json_val : "NULL");
+			if (!json_val || !json_val[0])
+				continue;
+		}
 
 		char *row_json = NULL;
 		if (include && include[0]) {

@@ -8,6 +8,8 @@ The auth module provides complete user authentication functionality including re
 
 Confirmation is required by default. Set `AUTH_SKIP_CONFIRM=1` to skip confirmation in non-production environments.
 
+**Important:** The `AUTH_SKIP_CONFIRM` environment variable must be set when **starting the server**, not just when running tests. The auth module reads this at startup to determine behavior. For development, use `make watch` or start with `AUTH_SKIP_CONFIRM=1 ./start.sh`.
+
 ## Endpoints
 
 ### POST /login
@@ -271,6 +273,9 @@ curl -i -X POST http://localhost:8080/login -d "username=test&password=pass"
 
 # Check if cookie is sent in request
 curl -b "QSESSION=<token>" http://localhost:8080/api/session
+
+# Check server logs for confirmation codes (when AUTH_SKIP_CONFIRM not set)
+tail -100 debug/runtime/ndc.log | grep "ndc-auth: confirm"
 ```
 
 ### auth.qmap permission errors
@@ -292,3 +297,4 @@ chmod 644 auth.qmap
 - [mods/common/README.md](../common/README.md) - Shared utility functions
 - [mods/ssr/README.md](../ssr/README.md) - How SSR uses authentication
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
+- [debug/README.md](../../debug/README.md) - Debug logging system

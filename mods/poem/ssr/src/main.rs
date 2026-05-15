@@ -1,8 +1,8 @@
 use indexmap::IndexMap;
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
-    body_str, current_user, get_pair, html_response, html_response_with_status, item_menu, layout,
-    parse_dataset_items, parse_pairs, render_hyle_edit, render_hyle_list, split_path,
+    current_user, html_response, html_response_with_status, item_menu, layout,
+    parse_dataset_items, render_hyle_edit, render_hyle_list, split_path,
     RequestContext, ResponsePayload,
 };
 use crate::load_dataset_json;

@@ -264,7 +264,11 @@ pub fn parse_json_object<T: for<'de> serde::Deserialize<'de>>(raw: &str) -> Opti
 }
 
 pub fn edit_path(module: &str, id: &str) -> String {
-    format!("/{module}/{id}/edit")
+    if id.is_empty() {
+        format!("/{module}/add")
+    } else {
+        format!("/{module}/{id}/edit")
+    }
 }
 
 pub fn item_menu(module: &str, id: &str, is_owner: bool) -> Element {
@@ -793,13 +797,16 @@ pub fn default_crud_routes(
     module: &str,
     icon: Option<&str>,
     render_detail: Option<CrudHandler>,
-    render_edit: Option<CrudHandler>,
+    _render_edit: Option<CrudHandler>,
 ) -> Option<ResponsePayload>
 {
     let parts = split_path(&ctx.path);
     match (ctx.method, parts.as_slice()) {
-        ("GET", [m, "add"]) if *m == module =>
-            Some(render_add_form(ctx, module, icon, Vec::new())),
+        ("GET", [m, "add"]) if *m == module => {
+            let pairs = parse_pairs(ctx.query);
+            let extra = pairs.iter().map(|(k, v)| (k.as_str(), v.to_string())).collect();
+            Some(render_add_form(ctx, module, icon, extra))
+        }
         ("POST", [m, "add"]) if *m == module => {
             let body = body_str(ctx.body);
             let pairs = parse_pairs(body);

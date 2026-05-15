@@ -29,9 +29,12 @@ This project is a hybrid C and Rust web application built on the NDC framework. 
 
 - **Build all:** `make`
 - **Run server:** `./start.sh` (Starts `ndc` on port 8080 by default)
+- **Auto-rebuild:** `make watch` (rebuilds on file changes, saves logs to `debug/`)
 - **Run all tests:** `make test`
 - **Run unit tests:** `make unit-tests` (Runs `test.sh` in each active module)
-- **Run e2e tests:** `make e2e-tests` (Requires Deno and a running server)
+- **Run e2e tests:** `make e2e-tests` (Requires Deno and server with `AUTH_SKIP_CONFIRM=1`)
+- **Debug test:** `make test-single-capture TEST=foo.test.ts` (captures test output to `debug/tests/`)
+- **View logs:** `make debug-logs`
 - **Clean build:** `make clean` or `make distclean`
 
 ## Development Conventions

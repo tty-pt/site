@@ -20,10 +20,12 @@ There is no Fresh/Deno proxy runtime in the request path anymore.
 mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items
 
 make
-./start.sh
+make watch
 ```
 
 Then open `http://localhost:8080`.
+
+`make watch` automatically captures build and runtime logs to `debug/` directory.
 
 If port `8080` is already in use:
 
@@ -75,6 +77,24 @@ You can also run one e2e file at a time:
 ```bash
 deno test --allow-all tests/e2e/song-add.test.ts
 ```
+
+For test debugging, see [debug/README.md](debug/README.md):
+- `make debug-logs` - View recent logs
+- `make test-single-capture TEST=foo.test.ts` - Capture specific test
+- `make build-capture` - Capture build output
+
+**Note:** e2e tests require the server running with `AUTH_SKIP_CONFIRM=1`. When using `make watch`, this is set automatically.
+
+## Debug Logging
+
+The `debug/` directory captures build output, runtime logs, and test results:
+
+```bash
+make debug-logs      # View recent logs
+make debug-clean     # Clear debug logs
+```
+
+See [debug/README.md](debug/README.md) for full documentation.
 
 ## Requirements
 

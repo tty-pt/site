@@ -1,63 +1,61 @@
-# Chords Module
+# Song Module
 
-The chords module provides functionality for uploading, storing, and displaying chord charts with lyrics.
+Upload and display songs with chord charts via HTTP endpoints and SSR pages.
 
 ## Purpose
 
-This module allows users to:
-- Upload chord charts with lyrics (text format with chord symbols)
-- Store optional metadata (title, type/category)
-- View a listing of all uploaded chords
-- Display individual chord charts in a readable format
+The song module provides functionality for:
+- Uploading songs with chord charts (text format with chord symbols above lyrics)
+- Storing metadata (title, type/category, author, media links)
+- Displaying a listing of all uploaded songs
+- Transposing songs to different keys (client-side and server-side)
 
 ## Architecture
 
-**Phase 1 - Core CRUD (✓ Complete)**
+- **Backend:** `song.c` - C module with ndc HTTP handlers
+- **SSR:** `ssr/src/main.rs` - Rust Dioxus SSR renderer
+- **Dataset:** Uses the common dataset system for loading song data
+- **Storage:** Filesystem + qmap index database
+- **Transposition:** C library (`lib/transp/`) for chord transposition
+- **WASM:** Client-side enhancements via Rust/WASM
 
-The chords module follows the same pattern as the poem module:
-- C backend handles file uploads via multipart/form-data
-- Filesystem storage for chord data
-- SSR components render the UI
+### SSR Route Pattern
 
-**Phase 2 - Transposition (✓ Complete)**
-
-Chord transposition to different keys:
-- libtransp.so C library (UTF-8 complete rewrite from tty.pt)
-- Server-side processing: C handler transposes data, sends to SSR via POST
-- API endpoint: `/api/chords/transpose` (for programmatic access)
-- SSR routes: `GET /chords/:id?t=N&b=1&l=1` (user-facing pages)
-- Client-side JavaScript for live transposition controls
-- Support for flats (♭), Latin notation (Do-Ré-Mi), and transpose range -11 to +11
-
-**Future Phases:**
-- Phase 3: Media integration (YouTube, audio, PDF)
-- Phase 4: Type filtering, fork/merge workflow
+The module uses a pattern-based routing system:
+- `GET /song/` - List all songs (via hyle SSR)
+- `GET /song/add` - Upload form (via hyle SSR)
+- `GET /song/:id` - Song detail with optional transposition
+- `GET /song/:id/edit` - Edit song form
 
 ## API
 
-### POST /chords/add
+### POST /song/add
 
-Upload a new chord chart.
+Upload a new song.
 
 **Request:**
 - Method: `POST`
 - Content-Type: `multipart/form-data`
 - Required fields:
-  - `id` - Unique identifier for the chord (e.g., "amazing_grace")
+  - `id` - Unique identifier for the song (e.g., "amazing_grace")
   - `data` - Chord chart content (text with chord symbols and lyrics)
 - Optional fields:
   - `title` - Display title (defaults to id if not provided)
-  - `type` - Category/type (e.g., "Communion", "Thanksgiving")
+  - `type` - Category/type (e.g., "Communion", "Entrance")
+  - `author` - Author name
+  - `yt` - YouTube URL
+  - `audio` - Audio URL
+  - `pdf` - PDF URL
 
 **Response:**
-- `303 See Other` - Success, redirects to `/chords/`
+- `303 See Other` - Success, redirects to `/song/`
 - `400 Bad Request` - Missing required fields
 - `415 Unsupported Media Type` - Not multipart/form-data
 - `500 Internal Server Error` - System error (mkdir, fopen failures)
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/chords/add \
+curl -X POST http://localhost:8080/song/add \
   -F "id=amazing_grace" \
   -F "title=Amazing Grace" \
   -F "type=Communion" \
@@ -72,64 +70,64 @@ Amazing Grace, how sweet the sound
 That saved a wretch like me
 ```
 
-### GET /api/chords/transpose
+### GET /api/song/:id/transpose
 
-Transpose a chord chart to a different key.
+Transpose a song to a different key.
 
 **Request:**
 - Method: `GET`
 - Query Parameters:
-  - `id` - Chord identifier (required)
+  - `id` - Song identifier (required)
   - `t` - Transpose semitones from -11 to +11 (default: 0)
   - `b` - Use flats notation (1=yes, 0=no, default: 0)
   - `l` - Use Latin notation Do-Ré-Mi (1=yes, 0=no, default: 0)
 
 **Response:**
-- `200 OK` - Returns transposed chord chart as `text/plain; charset=utf-8`
+- `200 OK` - Returns transposed song as `text/plain; charset=utf-8`
 - `400 Bad Request` - Missing or invalid id
 - `500 Internal Server Error` - File read or transpose error
 
 **Examples:**
 ```bash
 # Transpose up 2 semitones (C → D)
-curl "http://localhost:8080/api/chords/transpose?id=amazing_grace&t=2"
+curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=2"
 
 # Transpose down 3 semitones with flats (C → A♭)
-curl "http://localhost:8080/api/chords/transpose?id=amazing_grace&t=-3&b=1"
+curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=-3&b=1"
 
 # Show in Latin notation without transposing (C → Do)
-curl "http://localhost:8080/api/chords/transpose?id=amazing_grace&l=1"
+curl "http://localhost:8080/api/song/transpose?id=amazing_grace&l=1"
 
 # Combine all options: transpose +1 with flats and Latin
-curl "http://localhost:8080/api/chords/transpose?id=amazing_grace&t=1&b=1&l=1"
+curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=1&b=1&l=1"
 ```
 
 **Transpose Flags:**
-- `TRANSP_HTML` (0x01) - Generate HTML markup (not used in API, for future)
 - `TRANSP_BEMOL` (0x02) - Use flats instead of sharps
 - `TRANSP_LATIN` (0x04) - Use Latin notation (Do, Ré, Mi, Fa, Sol, La, Si)
-- `TRANSP_HIDE_CHORDS` (0x08) - Hide chord lines (not exposed in API)
-- `TRANSP_HIDE_LYRICS` (0x10) - Hide lyric lines (not exposed in API)
-- `TRANSP_BREAK_SLASH` (0x20) - Break slash chords (not exposed in API)
-- `TRANSP_REMOVE_COMMENTS` (0x40) - Remove comment lines (not exposed in API)
 
 ## Storage
 
 ### Directory Structure
 
-Chords are stored in `items/chords/items/{id}/`:
+Songs are stored in `items/song/items/{id}/`:
 
 ```
-items/chords/items/
+items/song/items/
 └── amazing_grace/
-    ├── data.txt    # Chord chart with lyrics (required)
+    ├── data.txt    # Song with chords and lyrics (required)
     ├── title       # Display title (optional)
-    └── type        # Category/type (optional)
+    ├── type        # Category/type (optional)
+    ├── author      # Author name (optional)
+    ├── yt          # YouTube URL (optional)
+    ├── audio       # Audio URL (optional)
+    ├── pdf         # PDF URL (optional)
+    └── owner       # Owner username (optional)
 ```
 
 **Required Directory:**
-- `items/chords/items/` must exist before uploads will work
-- Created automatically by `make` or manually: `mkdir -p items/chords/items`
+- `items/song/items/` must exist before uploads will work
+- Created automatically by `make test-data-dirs` or manually: `mkdir -p items/song/items`
 
 ### File Formats
 
@@ -151,287 +149,135 @@ Amazing Grace
 Communion
 ```
 
-## SSR Routes
+### Song Types
 
-The module provides these SSR routes via two mechanisms:
+Song types are categories used for organizing songs and filtering. Default types include:
+- entrada (Entrance)
+- aleluia (Alleluia)
+- ofertorio (Offertory)
+- santo (Holy)
+- comunhao (Communion)
+- acao_de_gracas (Thanksgiving)
+- saida (Closing)
+- any (General use)
 
-### Pattern Handlers (C → SSR)
+## Dataset System
 
-**GET /chords/:id** - Displays individual chord with optional transposition
+The song module uses the common dataset system for loading song data across the application.
 
-Registered in `chords.c` as pattern handlers:
-- `GET:/chords/` - List view (proxies to SSR)
-- `GET:/chords/:id` - Detail view with server-side transposition
+### Data Flow
 
-**Query Parameters:**
-- `t=N` - Transpose by N semitones (-11 to +11, default: 0)
-- `b=1` - Use flats (♭) notation
-- `l=1` - Use Latin notation (Do-Ré-Mi)
-- `C=1` - Hide chords (lyrics only)
-- `L=1` - Hide lyrics (chords only)
+```
+index_hd (qmap) ← populated at startup by index_open
+       ↓
+dataset_def.source_hd = index_hd
+       ↓
+dataset_rows_json_build iterates over source_hd
+       ↓
+For each ID, looks up JSON from source_hd
+       ↓
+If JSON empty, calls dataset_scan_item to read from disk
+```
 
-**Server-Side Processing Flow:**
-1. C handler extracts `:id` from URL pattern
-2. Reads query parameters (t, b, l, C, L)
-3. If transposition needed:
-   - Reads chord file from filesystem
-   - Calls `transp_buffer()` from libtransp.so
-   - Sends transposed data to the SSR layer
-4. If no transposition (no query params):
-   - Sends the request to the SSR layer unchanged
-   - SSR reads file directly
-5. SSR component receives either:
-   - `body` parameter (pre-transposed data from C)
-   - No body (reads file normally)
+### Dataset Definition (song.c)
 
-**Benefits:**
-- Performant C-based transposition
-- No JS/runtime coupling in the transposition path
-- Clean memory management (C frees after POST)
-- SSR focuses on rendering only
+```c
+static const dataset_field_t fields[] = {
+    { "id", NULL, DATASET_FIELD_STRING, 0 },
+    { "title", "title", DATASET_FIELD_STRING, 1 },
+    { "type", "type", DATASET_FIELD_STRING, 1 },
+    { "author", "author", DATASET_FIELD_STRING, 1 },
+    { "yt", "yt", DATASET_FIELD_STRING, 1 },
+    { "audio", "audio", DATASET_FIELD_STRING, 1 },
+    { "pdf", "pdf", DATASET_FIELD_STRING, 1 },
+    { "data", "data.txt", DATASET_FIELD_STRING, 1 },
+    { "owner", "owner", DATASET_FIELD_STRING, 0 },
+};
 
-### Direct SSR Routes
-
-The module's SSR component also registers routes in `ssr/index.tsx`:
-- `GET /chords/` - List all chords
-- `GET /chords/add` - Upload form
-- `GET /chords/:id` - Display individual chord (fallback if no query params)
-
-### Components
-
-**ChordList** (`ssr/components/ChordList.tsx`)
-- Displays all chords as clickable buttons
-- Shows "No chords yet" if none exist
-- Provides "Add Chord" button
-
-**ChordAdd** (`ssr/components/ChordAdd.tsx`)
-- Form with fields: id, title, type, data (textarea)
-- Posts to `/chords/add`
-
-**ChordDetail** (`ssr/components/ChordDetail.tsx`)
-- Displays chord chart in monospace font with pre-wrap
-- Shows title (or id if no title)
-- **Transpose controls:**
-  - Dropdown selector for -11 to +11 semitones
-  - Checkbox for flats (♭) notation
-  - Checkbox for Latin (Do-Ré-Mi) notation
-  - Client-side JavaScript fetches transposed version from `/api/chords/transpose`
-- Provides "Back to Chords" link
-
-## Dependencies
-
-### C Module Dependencies
-- `mods/ssr/ssr.so` - SSR bridge APIs
-- `mods/mpfd/mpfd.so` - Multipart form data parsing
-- `lib/transp/libtransp.so` - Chord transposition library (C linkage)
-
-Loaded via `ndx_load()` and NDX_DEF declarations in `chords.c`
-
-### SSR Dependencies
-- Rust/Dioxus SSR renderer
-
-### Transp Library
-- Location: `lib/transp/`
-- Language: C (shared library)
-- UTF-8 native (complete rewrite from tty.pt wchar_t version)
-- 13 unit tests (all passing)
-- See: `lib/transp/README.md` for library documentation
+dataset_def_t def = {
+    .id = "song.items",
+    .items_path = "items/song/items",
+    .source_hd = index_hd,
+    // ...
+};
+dataset_register(&def);
+```
 
 ## Testing
 
 ### Unit Tests
 
-**Transp Library Tests:**
 ```bash
-cd lib/transp && make test
+make unit-tests
+# or
+cd mods/song && ./test.sh
 ```
 
-13 unit tests covering:
-- Chord recognition and transposition
-- Flat notation (b flag)
-- Latin notation (l flag)
-- Numbered verses ("1. Verse")
-- Line-by-line processing
-- Context state management
-
-**Chords Module Tests:**
-```bash
-./mods/chords/test.sh
-```
-
-Test coverage (11 tests):
-1. POST with wrong content-type (415)
-2. POST missing id field (400)
-3. POST missing data field (400)
-4. POST empty data (400)
-5. POST valid multipart (303 redirect)
-6. Verify data.txt created
-7. Verify content matches
-8. Verify title file created
-9. Verify type file created
-10. POST with minimal fields (id + data only)
-11. Verify minimal chord created
-
-### Integration Tests
-
-**Transpose API Tests:**
-```bash
-./mods/chords/test_integration.sh
-```
-
-21 tests covering:
-- Transpose range (-11 to +11)
-- Flat notation (b=1)
-- Latin notation (l=1)
-- Combined flags (t+b+l)
-- Chord name transposition (C→D, Am→Bm)
-- Lyrics preservation
-
-### System-Wide Tests
-
-The module is included in system-wide tests:
-```bash
-make test              # All tests
-make unit-tests        # Module unit tests only
-make pages-test        # SSR page smoke tests
-```
-
-## Usage Examples
-
-### Upload a Simple Chord
+### E2E Tests
 
 ```bash
-# Create chord file
-cat > mychord.txt << 'EOF'
-C       G       Am      F
-This is a test chord
-EOF
-
-# Upload with minimal fields
-curl -X POST http://localhost:8080/chords/add \
-  -F "id=test_chord" \
-  -F "data=@mychord.txt"
+make test-single-capture TEST=song-list.test.ts
+make test-single-capture TEST=song-add.test.ts
+make test-single-capture TEST=song-edit.test.ts
+make test-single-capture TEST=song-detail-transpose.test.ts
 ```
 
-### Upload with All Fields
+For debugging test failures, see [debug/README.md](../../debug/README.md).
 
-```bash
-curl -X POST http://localhost:8080/chords/add \
-  -F "id=holy_god" \
-  -F "title=Holy God We Praise Thy Name" \
-  -F "type=Thanksgiving" \
-  -F "data=@holy_god.txt"
-```
+## Dependencies
 
-### View in Browser
-
-1. Start the site: `./start.sh`
-2. Navigate to: `http://localhost:8080/chords/`
-3. Click on a chord to view it
-4. Click "Add Chord" to upload a new one
-
-## Error Handling
-
-The module implements comprehensive error handling:
-
-### System Call Checks
-- `mkdir()` - Checks for errors, allows EEXIST (chords.c:83-88)
-- `fopen()` - Checks for NULL return (chords.c:94-101, 109-117, 124-132)
-
-### HTTP Error Codes
-- `400 Bad Request` - Missing or empty id/data fields
-- `415 Unsupported Media Type` - Wrong Content-Type
-- `500 Internal Server Error` - mkdir/fopen failures with descriptive messages
-
-### Memory Management
-- Allocates buffer for chord data (chords.c:68)
-- Frees on all error paths (chords.c:71, 76, 87, 100)
-- Frees after successful write (chords.c:104)
+- `mods/ssr/ssr` - SSR rendering
+- `mods/mpfd/mpfd` - Multipart form data parsing
+- `mods/auth/auth` - Session management
+- `mods/index/index` - Index management
+- `mods/common/common` - Dataset system
 
 ## Troubleshooting
 
 ### Upload fails with HTTP 500
 
-**Symptom:** POST returns "Failed to create chord directory"
-
-**Cause:** `items/chords/items/` directory doesn't exist
+**Cause:** Directory `items/song/items/` doesn't exist.
 
 **Fix:**
 ```bash
-mkdir -p items/chords/items
+mkdir -p items/song/items
 ```
 
-### Upload fails with HTTP 415
+### Songs don't appear in listing
 
-**Symptom:** POST returns "Expected multipart/form-data"
+**Causes:**
+1. Directory doesn't exist (see above)
+2. Server not restarted after changes
+3. Song files missing or corrupted
 
-**Cause:** Wrong Content-Type header
-
-**Fix:** Use `-F` with curl (sets multipart/form-data automatically):
+**Debug:**
 ```bash
-curl -F "id=test" -F "data=@file.txt" http://localhost:8080/chords/add
+# Check if directory exists
+ls -la items/song/items/
+
+# Check if ndc is running
+pgrep -a ndc
+
+# Check server logs
+tail -100 debug/runtime/ndc.log
 ```
 
-### Chord doesn't appear in listing
+### Transpose not working
 
-**Symptom:** Upload succeeds but chord not visible at `/chords/`
+**Cause:** Song ID doesn't exist or data.txt is empty.
 
-**Cause:** SSR server might need restart, or directory has dot prefix
-
-**Fix:**
-1. Check directory: `ls items/chords/items/`
-2. Rebuild and restart the site server after SSR changes
-3. Ensure id doesn't start with dot (hidden files are skipped)
-
-### Tests fail with "Connection refused"
-
-**Symptom:** `./mods/chords/test.sh` fails to connect
-
-**Cause:** Port conflict or previous test didn't clean up
-
-**Fix:**
+**Debug:**
 ```bash
-# Kill any existing test servers
-pkill -f "ndc.*3002"
+# Check song exists
+ls -la items/song/items/{song_id}/
 
-# Re-run tests
-./mods/chords/test.sh
+# Check data.txt has content
+cat items/song/items/{song_id}/data.txt
 ```
 
-## Future Enhancements
+## See Also
 
-### Phase 3: Media Integration
-- YouTube video embedding (yt field)
-- Audio player (audio field)
-- PDF links (pdf field)
-- MusicXML sheet music rendering
-
-### Phase 4: Advanced Features
-- Type filtering/categorization with qmap databases
-- Fork/merge workflow (personal workspaces)
-- Zoom preferences
-- Edit existing chords
-
-## Code References
-
-### C Implementation
-- Main handler: `handle_chords_add()` (chords.c:14-134)
-- POST handler: `chords_handler()` (chords.c:136-166)
-- Module registration: `ndx_install()` (chords.c:175-186)
-
-### SSR Implementation
-- Main routes: `render()` (ssr/index.tsx:43-62)
-- Chord listing: `getChords()` (ssr/index.tsx:10-23)
-- Data retrieval: `getChordData()` (ssr/index.tsx:25-41)
-
-### Tests
-- Unit tests: `test.sh:30-91` (11 test cases)
-- Error handling: `test.sh:34-54` (4 error scenarios)
-- Success paths: `test.sh:62-89` (7 verification tests)
-
-## Related Modules
-
-- **poem** - Similar file upload pattern, reference implementation
-- **mpfd** - Multipart form data parsing library
-- **ssr** - SSR rendering and layout components
-- **auth** - Future: user authentication for edit/delete operations
+- [AGENTS.md](../../AGENTS.md) - Development guidelines
+- [debug/README.md](../../debug/README.md) - Debug logging system
+- [mods/common/README.md](../common/README.md) - Dataset system documentation
+- [mods/song/lib/transp/README.md](lib/transp/README.md) - Transposition library

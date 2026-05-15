@@ -2,13 +2,13 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, body_str, current_user, display_or_id,
-    edit_form_page, edit_path, empty_state, form_actions, get_pair, html_response,
+    edit_form_page, edit_path, empty_state, form_actions, html_response,
     html_response_with_status, item_menu,
-    item_path, key_names, key_transpose_options, layout, parse_dataset_items, parse_pairs,
-    split_path,
-};
+    item_path, key_names, key_transpose_options, layout, parse_dataset_items,
+    render_hyle_edit, render_hyle_list, split_path,
+    };
 
-use crate::{load_dataset_json, load_dataset_item_json, load_dataset_json_with_include};
+    use crate::{load_dataset_json, load_dataset_item_json};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
@@ -136,34 +136,55 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     let song_entries: Vec<(&str, i32, &str, i32)> = item.songs
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| {
+        .map(|line| {
             let parts: Vec<&str> = line.split(':').collect();
-            if parts.len() >= 4 {
-                Some((parts[0], parts[1].parse().unwrap_or(0), parts[2], parts[3].parse().unwrap_or(0)))
-            } else {
-                None
-            }
+            let chord_id = parts.get(0).cloned().unwrap_or("");
+            let transpose = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+            let format = parts.get(2).cloned().unwrap_or("any");
+            let original_key = parts.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
+            (chord_id, transpose, format, original_key)
         })
         .collect();
 
     let display_songs: Vec<DisplaySongbookSong> = song_entries
         .iter()
-        .filter_map(|(chord_id, transpose, format, original_key)| {
-            let song_json = load_dataset_item_json(ctx.fd, "song.items", chord_id)?;
-            let song: SongDatasetRow = serde_json::from_str(&song_json).ok()?;
+        .map(|(chord_id, transpose, format, original_key)| {
+            if chord_id.is_empty() {
+                return DisplaySongbookSong {
+                    chord_id: String::new(),
+                    transpose: *transpose,
+                    format_name: format.to_string(),
+                    display_title: format.to_uppercase(),
+                    chord_data: String::new(),
+                    target_key: String::new(),
+                    transpose_options: Vec::new(),
+                };
+            }
+            let song_json = load_dataset_item_json(ctx.fd, "song.items", chord_id);
+            let (title, data) = if let Some(sj) = song_json {
+                if let Ok(song) = serde_json::from_str::<SongDatasetRow>(&sj) {
+                    (song.title, song.data)
+                } else {
+                    (chord_id.to_string(), String::new())
+                }
+            } else {
+                (chord_id.to_string(), String::new())
+            };
+
             let target_idx = ((original_key + transpose) % 12 + 12) % 12;
             let target_key = key_names(false, false)[target_idx as usize].to_string();
             let transpose_options = key_transpose_options(*original_key, false, false);
-            let display_title = display_or_id(&song.title, chord_id).to_string();
-            Some(DisplaySongbookSong {
+            let display_title = display_or_id(&title, chord_id).to_string();
+
+            DisplaySongbookSong {
                 chord_id: chord_id.to_string(),
                 transpose: *transpose,
                 format_name: format.to_string(),
                 display_title,
-                chord_data: song.data,
+                chord_data: data,
                 target_key,
                 transpose_options,
-            })
+            }
         })
         .collect();
     html_response(
@@ -197,8 +218,15 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
                                     "data-songbook-id": "{id}",
                                     "data-song-id": "{song.chord_id}",
                                     if song.chord_id.is_empty() {
-                                        div { class: "p-4 bg-surface rounded",
-                                            h3 { "{song.format_name.to_uppercase()}" }
+                                        div { class: "flex justify-between items-center p-4 bg-surface rounded",
+                                            h3 { class: "m-0", "{song.format_name.to_uppercase()}" }
+                                            if is_owner {
+                                                form { method: "POST", action: "/songbook/{id}/randomize", enctype: "multipart/form-data",
+                                                    input { r#type: "hidden", name: "csrf_token", value: "{ctx.csrf_token}" }
+                                                    input { r#type: "hidden", name: "n", value: "{index}" }
+                                                    button { r#type: "submit", class: "btn py-1 px-2", "🎲" }
+                                                }
+                                            }
                                         }
                                     } else {
                                         div { class: "flex justify-between items-center",

@@ -312,6 +312,46 @@ cat items/choir/items/mychoir/data.txt
 - **Cause:** Corrupt data.txt or missing title line
 - **Fix:** Verify `data.txt` has `title:...` as first line
 
+## Known Issues
+
+### Choir Detail Returns 404 for New Choirs
+
+When creating a new choir, the detail page returns "404 Not Found" even though the choir was created successfully.
+
+**Symptoms:**
+- `tests/e2e/choir-create.test.ts` fails with 404
+- `tests/e2e/choir-ownership.test.ts` fails with 404
+- Choir directory exists on disk at `items/choir/items/{id}/`
+
+**Root Cause (investigating):**
+The choir SSR uses `load_dataset_item_json("choir.items", id)` which calls the C dataset system. Choir uses a separate `choir_index_hd` for storing items, which may not be properly linked to the dataset's `source_hd`.
+
+**Debug Commands:**
+```bash
+# Check if choir directory exists
+ls -la items/choir/items/{choir_id}/
+
+# Check choir data
+cat items/choir/items/{choir_id}/data.txt
+
+# Check if choir is in index
+grep "{choir_id}" items/choir/index.tsv
+
+# Check runtime logs for debug output
+tail -100 debug/runtime/ndc.log | grep "choir"
+
+# Run specific test with capture
+make test-single-capture TEST=choir-create.test.ts
+```
+
+See `debug/choir-404-debugging.md` (to be created) for detailed investigation notes.
+
+## See Also
+
+- [AGENTS.md](../../AGENTS.md) - Development guidelines
+- [debug/README.md](../../debug/README.md) - Debug logging system
+- [mods/songbook/README.md](../songbook/README.md) - Songbook module (uses choir for organization)
+
 ## Future Enhancements
 
 Potential improvements not yet implemented:

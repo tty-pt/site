@@ -418,21 +418,7 @@ handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	}
 	free(rows);
 
-	FILE *dfp = fopen(data_path, "r");
-	if (dfp) {
-		fseek(dfp, 0, SEEK_END);
-		long songs_len = ftell(dfp);
-		fseek(dfp, 0, SEEK_SET);
-		char *songs_data = NULL;
-		if (songs_len > 0) {
-			songs_data = malloc(songs_len + 1);
-			if (songs_data) {
-				size_t r = fread(songs_data, 1, songs_len, dfp);
-				songs_data[r] = '\0';
-			}
-		}
-		fclose(dfp);
-	}
+	dataset_refresh_row("songbook.items", ctx->id);
 
 	/* Redirect to view page */
 	char location[256];
@@ -514,6 +500,8 @@ static int handle_sb_transpose_authorized(
 
 	if (repertoire_file_rewrite(data_path, sb_transpose_cb, &cbc) < 0)
 		return server_error(fd, "Failed to update");
+
+	dataset_refresh_row("songbook.items", ctx->id);
 
 	char location[256];
 	snprintf(
@@ -600,6 +588,8 @@ static int handle_sb_randomize_authorized(
 	if (repertoire_file_rewrite(data_path, sb_randomize_cb, &line_num) < 0)
 		return server_error(fd, "Failed to update");
 
+	dataset_refresh_row("songbook.items", ctx->id);
+
 	char location[256];
 	snprintf(
 	        location,
@@ -676,6 +666,8 @@ static int handle_sb_add(int fd, char *body)
 		if (songbook_meta_write(sb_item_path, &meta) != 0)
 			return server_error(
 			        fd, "Failed to write songbook metadata");
+
+		dataset_refresh_row("songbook.items", id);
 
 		char data_path[PATH_MAX];
 		if (item_child_path(
@@ -791,6 +783,8 @@ static int handle_sb_add(int fd, char *body)
 		}
 	}
 
+	dataset_refresh_row("songbook.items", id);
+
 	char location[512];
 	snprintf(location, sizeof(location), "/songbook/%s", id);
 	return ndc_redirect(fd, location);
@@ -812,7 +806,7 @@ void ndx_install(void)
 	ndx_load("./mods/song/song");
 	ndx_load("./mods/choir/choir");
 
-	index_hd = index_open("Songbook", 0, 1, NULL, NULL, NULL, NULL, NULL);
+	index_hd = index_open("Songbook", 0, 1, NULL, NULL, handle_sb_add, NULL, handle_sb_edit);
 
 	ndc_register_handler(
 	        "POST:/songbook/:id/randomize", handle_sb_randomize);

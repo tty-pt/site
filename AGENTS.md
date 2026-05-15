@@ -11,6 +11,35 @@ Current runtime:
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
 
+## Debug Logging System
+
+All build output, runtime logs, and test results are automatically captured to `debug/` directory.
+
+### Debug Directory Structure
+```
+debug/
+├── builds/           # Compilation output (timestamped logs)
+├── runtime/          # Server output (ndc logs)
+└── tests/            # E2E test results
+```
+
+### Debug Commands
+```bash
+make debug-logs                      # View recent logs (builds, tests, runtime)
+make build-capture                   # Capture single build to log
+make test-single-capture TEST=foo.ts  # Capture specific test
+make test-capture                     # Capture all e2e tests
+make debug-clean                      # Delete all debug logs
+```
+
+### Adding Debug Output in C
+```c
+fprintf(stderr, "DEBUG: my message %s\n", value);
+```
+Check output in `debug/runtime/ndc.log` (server must be running via `make watch`).
+
+See `debug/README.md` for full documentation.
+
 ## Build & Run
 
 ```bash
@@ -18,13 +47,14 @@ make
 make clean
 make distclean
 make run
+make watch    # Auto-rebuild and restart with logging
 ```
 
 Notes:
 - `make clean` removes built module artifacts but keeps Cargo caches.
 - `make distclean` also runs deeper per-module cleanup, including `cargo clean`.
 - If `8080` is busy: `PORT=8081 make run`
-- `make` only rebuilds the wasm browser assets when both `wasm-bindgen` and the `wasm32-unknown-unknown` target are installed.
+- `make watch` saves build logs to `debug/builds/` and runtime logs to `debug/runtime/ndc.log`
 
 WASM setup:
 
@@ -36,8 +66,7 @@ rustup target add wasm32-unknown-unknown
 For manual startup:
 
 ```bash
-cd .
-setsid ndc -C . -p 8080 -d -m mods/core/core >> /tmp/site.log 2>&1 &
+AUTH_SKIP_CONFIRM=1 ./start.sh
 ```
 
 The `-m mods/core/core` flag is required. Without it no modules load, no
@@ -59,8 +88,12 @@ deno test --allow-all tests/e2e/song-add.test.ts
 ```
 
 e2e prerequisites:
-- `ndc` running on `:8080`
-- `/tmp/site.log` writable
+- `ndc` running on `:8080` with `AUTH_SKIP_CONFIRM=1` set
+- `/tmp/site.log` writable (or check `debug/runtime/ndc.log`)
+
+**Important:** The `AUTH_SKIP_CONFIRM=1` environment variable must be set when
+**starting the server**, not just when running tests. The auth module reads this
+at startup to determine behavior.
 
 ## Chroot Setup
 

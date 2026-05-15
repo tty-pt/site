@@ -209,8 +209,11 @@ NDX_LISTENER(int, index_add_item,
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
 
-	hd = *(unsigned *)qmap_get(module_hd, module);
-	qmap_put(hd, id, title);
+	{
+		char dataset_id[512];
+		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+		dataset_refresh_row(dataset_id, id);
+	}
 
 	snprintf(id_out, id_len, "%s", id);
 	return 0;

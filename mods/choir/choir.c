@@ -133,6 +133,9 @@ static int handle_choir_edit_authorized(
 		qmap_put(choir_index_hd, (char *)ctx->id, &meta);
 	if (t_len > 0 || f_len > 0)
 		choir_index_put_meta(ctx->id, &meta);
+
+	dataset_refresh_row("choir.items", ctx->id);
+
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
@@ -314,6 +317,9 @@ static int handle_choir_song_add_auth(
 	snprintf(row.format, sizeof(row.format), "%s", fmt);
 	if (repertoire_file_append(p, &row) != 0)
 		return server_error(fd, "Failed to add song");
+
+	dataset_refresh_row("choir.items", ctx->id);
+
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
@@ -374,6 +380,9 @@ static int handle_choir_song_key_auth(
 	struct key_cb_ctx cbc = { .song_id = ctx->song_id,
 		                  .new_key = (k_l > 0) ? atoi(k_s) : 0 };
 	repertoire_file_rewrite(p, song_key_cb, &cbc);
+
+	dataset_refresh_row("choir.items", ctx->id);
+
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
@@ -426,6 +435,9 @@ static int handle_choir_song_del_auth(
 	}
 	item_child_path(ctx->item_path, "songs", p, sizeof(p));
 	repertoire_file_rewrite(p, song_del_cb, (void *)ctx->song_id);
+
+	dataset_refresh_row("choir.items", ctx->id);
+
 	return redirect_to_item(fd, "choir", ctx->id);
 }
 
@@ -620,6 +632,7 @@ void ndx_install(void)
 			{ "id", NULL, DATASET_FIELD_STRING, 0 },
 			{ "title", "title", DATASET_FIELD_STRING, 1 },
 			{ "format", "format", DATASET_FIELD_STRING, 1 },
+			{ "songs", "songs", DATASET_FIELD_STRING, 1 },
 			{ "owner", "owner", DATASET_FIELD_STRING, 0 },
 		};
 		dataset_def_t def = { .id = "choir.items",

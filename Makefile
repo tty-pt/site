@@ -59,4 +59,56 @@ clean:
 distclean:
 	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d distclean; done
 
-.PHONY: all mods modules run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr
+# Debug/compilation capture targets
+DEBUG_DIR := debug
+BUILD_LOG_DIR := $(DEBUG_DIR)/builds
+RUNTIME_LOG_DIR := $(DEBUG_DIR)/runtime
+TEST_LOG_DIR := $(DEBUG_DIR)/tests
+
+# Capture build output with timestamp
+build-capture:
+	@mkdir -p $(BUILD_LOG_DIR)
+	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
+	touch $(BUILD_LOG_DIR)/build_$$timestamp.log; \
+	echo "=== Build started at $$(date) ===" >> $(BUILD_LOG_DIR)/build_$$timestamp.log; \
+	$(MAKE) 2>&1 | tee -a $(BUILD_LOG_DIR)/build_$$timestamp.log; \
+	echo "=== Build completed at $$(date) ===" >> $(BUILD_LOG_DIR)/build_$$timestamp.log
+	@echo "Build log saved to $(BUILD_LOG_DIR)/build_$$timestamp.log"
+
+# Capture e2e test output
+test-capture: test-data-dirs
+	@mkdir -p $(TEST_LOG_DIR)
+	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
+	touch $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	echo "=== Tests started at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	echo "=== Tests completed at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log
+	@echo "Test log saved to $(TEST_LOG_DIR)/test_$$timestamp.log"
+
+# Capture single test output
+test-single-capture: test-data-dirs
+	@mkdir -p $(TEST_LOG_DIR)
+	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
+	test_file=${TEST}; \
+	touch $(TEST_LOG_DIR)/test_$$test_file_$$timestamp.log; \
+	echo "=== Test $(TEST) started at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$test_file_$$timestamp.log; \
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/$(TEST) 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$test_file_$$timestamp.log; \
+	echo "=== Test $(TEST) completed at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$test_file_$$timestamp.log
+	@echo "Test log saved to $(TEST_LOG_DIR)/test_$(TEST)_$$timestamp.log"
+
+# Show recent debug logs
+debug-logs:
+	@echo "=== Recent Build Logs ==="; \
+	ls -la $(BUILD_LOG_DIR)/*.log 2>/dev/null | tail -5; \
+	echo ""; \
+	echo "=== Recent Test Logs ==="; \
+	ls -la $(TEST_LOG_DIR)/*.log 2>/dev/null | tail -5; \
+	echo ""; \
+	echo "=== Runtime Log (last 20 lines) ==="; \
+	tail -20 $(RUNTIME_LOG_DIR)/ndc.log 2>/dev/null || echo "No runtime log found"
+
+# Clean debug logs
+debug-clean:
+	rm -rf $(DEBUG_DIR)/*
+
+.PHONY: all mods modules run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr build-capture test-capture test-single-capture debug-logs debug-clean

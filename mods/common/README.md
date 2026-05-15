@@ -294,3 +294,92 @@ json_escape(title, title_esc, sizeof(title_esc));
 - [mods/auth/README.md](../auth/README.md) - Uses query_param
 - [mods/ssr/README.md](../ssr/README.md) - Uses get_cookie, json_escape, url_encode
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
+
+## Dataset System
+
+The common module also includes the dataset system for loading and querying item data.
+
+### Overview
+
+The dataset system provides a unified way to load item data across modules. It uses:
+- `source_hd` - A qmap that stores cached JSON for each item
+- `dataset_scan_item()` - Reads item files from disk and populates the cache
+- `dataset_rows_json_build()` - Builds JSON array of all items
+
+### Data Flow
+
+```
+index_hd (qmap) ← populated at startup by index_open
+       ↓
+dataset_def.source_hd = index_hd
+       ↓
+dataset_rows_json_build iterates over source_hd
+       ↓
+For each ID, looks up json_val from source_hd
+       ↓
+If json_val is empty, calls dataset_scan_item to read from disk
+```
+
+### Key Functions
+
+#### dataset_scan_item()
+Reads item files from disk and populates the source_hd cache.
+
+```c
+static int dataset_scan_item(const dataset_def_t *def, const char *id);
+```
+
+**Parameters:**
+- `def` - Dataset definition containing items_path and field definitions
+- `id` - Item identifier
+
+**Behavior:**
+1. Builds path: `{doc_root}/{def->items_path}/{id}/`
+2. For each field with a file, reads the file content
+3. Creates JSON object with id and field values
+4. Stores JSON in `def->source_hd` via qmap_put
+
+#### dataset_rows_json_build()
+Builds JSON array of all items in a dataset.
+
+```c
+static int dataset_rows_json_build(
+        const dataset_def_t *def, const char *include, char **out_json);
+```
+
+**Parameters:**
+- `def` - Dataset definition
+- `include` - Optional comma-separated list of extra fields to include from disk
+- `out_json` - Output parameter for allocated JSON string
+
+**Behavior:**
+1. Iterates over all IDs in `def->source_hd`
+2. For each ID with non-empty JSON, adds to output array
+3. For IDs with empty JSON, calls `dataset_scan_item` then re-checks
+4. If `include` is specified, reads additional files from disk
+
+### Adding Debug Output
+
+To debug dataset loading issues, add fprintf statements:
+
+```c
+fprintf(stderr, "DEBUG dataset_rows: id=%s json_val=%s\n", id, json_val ? json_val : "NULL");
+```
+
+Check output in `debug/runtime/ndc.log` (server must be running via `make watch`).
+
+### Common Issues
+
+1. **Item not appearing in dataset**
+   - Check if item ID is in `source_hd` (qmap iteration)
+   - Verify item directory exists on disk at `{items_path}/{id}/`
+   - Check if `dataset_scan_item` successfully reads files
+
+2. **Empty JSON for existing item**
+   - The inline scan in `dataset_rows_json_build` should handle this
+   - Verify `dataset_scan_item` is populating the cache correctly
+   - Check file permissions on item directory
+
+3. **Index not populated at startup**
+   - Songs use `index_hd` which is populated by `index_open`
+   - New items added to disk after startup need `dataset_scan_item` to be queried
