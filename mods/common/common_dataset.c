@@ -33,7 +33,8 @@ typedef struct {
 
 /*
  * Association support for reference fields.
- * Stores handles to secondary qmaps for reverse lookups.
+ * Registration stores the reference field metadata; reverse lookups are built
+ * on demand from the current cached rows.
  */
 #define MAX_REFERENCE_FIELDS 16
 
@@ -43,7 +44,6 @@ typedef struct {
 	const char *field_name;     // e.g., "choir"
 	const char *target_dataset; // e.g., "choir.items"
 	const char *inverse_name;   // e.g., "songbooks"
-	unsigned inverse_hd;        // qmap handle: ref_value -> [primary_keys]
 } dataset_assoc_t;
 
 typedef struct {
@@ -52,15 +52,6 @@ typedef struct {
 } dataset_associations_t;
 
 static dataset_associations_t dataset_associations[MAX_DATASETS];
-
-/*
- * Callback type for extracting reference value from primary JSON.
- * The callback is called by qmap_assoc to determine the secondary key.
- */
-typedef void (*dataset_assoc_cb)(
-        const char **out_ref, /* output: secondary key value */
-        const char *pkey,     /* input: primary key (item id) */
-        const char *value);   /* input: primary value (full JSON) */
 
 /*
  * Extract the value of a field from JSON string.
@@ -89,20 +80,18 @@ static const char *json_extract_field(const char *json, const char *field)
 	return buf;
 }
 
-/*
- * Association callback to extract reference value from JSON.
- * Called by qmap when primary map changes.
- */
-static void
-extract_ref_value(const void **skey, const void *pkey, const void *value)
+static int dataset_def_index(const char *dataset_id)
 {
-	(void)pkey;
-	const char *json = (const char *)value;
-	const char *ref = json_extract_field(json, "choir");
-	if (ref && ref[0])
-		*skey = ref;
-	else
-		*skey = "";
+	size_t i;
+
+	if (!dataset_id || !dataset_id[0])
+		return -1;
+
+	for (i = 0; i < dataset_count; i++)
+		if (strcmp(dataset_defs[i].id, dataset_id) == 0)
+			return (int)i;
+
+	return -1;
 }
 
 /*
@@ -112,46 +101,58 @@ extract_ref_value(const void **skey, const void *pkey, const void *value)
 static int dataset_build_relations_json(
         const dataset_def_t *def, char **out_relations_json)
 {
+	int def_idx;
+	dataset_associations_t *assoc;
+	json_object_t *relations;
+	size_t a;
+
 	if (!out_relations_json)
 		return -1;
 	*out_relations_json = NULL;
 
-	size_t def_idx = 0;
-	for (size_t i = 0; i < dataset_count; i++) {
-		if (strcmp(dataset_defs[i].id, def->id) == 0) {
-			def_idx = i;
-			break;
-		}
-	}
-	if (def_idx >= dataset_count)
+	def_idx = dataset_def_index(def->id);
+	if (def_idx < 0)
 		return 0;
 
-	dataset_associations_t *assoc = &dataset_associations[def_idx];
+	assoc = &dataset_associations[def_idx];
 	if (assoc->assoc_count == 0)
 		return 0;
 
-	json_object_t *relations = json_object_new(0);
+	relations = json_object_new(0);
 	if (!relations)
 		return -1;
 
-	for (size_t a = 0; a < assoc->assoc_count; a++) {
-		dataset_assoc_t *ref = &assoc->assocs[a];
-		if (!ref->inverse_hd)
+	for (a = 0; a < assoc->assoc_count; a++) {
+		dataset_assoc_t *ref;
+		json_object_t *rel_obj;
+		json_array_t *items;
+		unsigned inverse_hd;
+		unsigned cur;
+		const void *key;
+		const void *value;
+		const char *last_ref_value;
+		char target_buf[256];
+		char inverse_buf[128] = { 0 };
+		char keybuf[64];
+		char *items_json;
+		char *rel_json;
+
+		ref = &assoc->assocs[a];
+		if (!ref->field_name || !ref->field_name[0] ||
+		    !ref->target_dataset || !ref->target_dataset[0])
 			continue;
 
-		json_object_t *rel_obj = json_object_new(0);
+		rel_obj = json_object_new(0);
 		if (!rel_obj) {
 			json_object_free(relations);
 			return -1;
 		}
 
-		char target_buf[256];
 		snprintf(
 		        target_buf,
 		        sizeof(target_buf),
 		        "%s",
 		        ref->target_dataset);
-		char inverse_buf[128] = { 0 };
 		if (ref->inverse_name)
 			snprintf(
 			        inverse_buf,
@@ -163,47 +164,98 @@ static int dataset_build_relations_json(
 		if (inverse_buf[0])
 			json_object_kv_str(rel_obj, "inverse", inverse_buf);
 
-		json_array_t *items = json_array_new(0);
+		items = json_array_new(0);
 		if (!items) {
 			json_object_free(rel_obj);
 			json_object_free(relations);
 			return -1;
 		}
 
-		uint32_t cur = qmap_iter(ref->inverse_hd, NULL, 0);
-		const void *k, *v;
-		while (qmap_next(&k, &v, cur)) {
-			const char *ref_value = (const char *)k;
+		inverse_hd = qmap_open(
+		        NULL,
+		        NULL,
+		        QM_STR,
+		        QM_STR,
+		        0x3FF,
+		        QM_PGET | QM_SORTED | QM_MULTIVALUE);
+		if (inverse_hd == 0) {
+			json_array_free(items);
+			json_object_free(rel_obj);
+			json_object_free(relations);
+			return -1;
+		}
 
-			json_object_t *item = json_object_new(0);
+		cur = qmap_iter(def->source_hd, NULL, 0);
+		while (qmap_next(&key, &value, cur)) {
+			const char *id;
+			const char *row_json;
+			const char *ref_value;
+
+			id = (const char *)key;
+			row_json = (const char *)value;
+			if (!id || !id[0] || !row_json || !row_json[0])
+				continue;
+
+			ref_value = json_extract_field(row_json, ref->field_name);
+			if (!ref_value || !ref_value[0])
+				continue;
+
+			qmap_put(inverse_hd, ref_value, id);
+		}
+		qmap_fin(cur);
+
+		last_ref_value = NULL;
+		cur = qmap_iter(inverse_hd, NULL, 0);
+		while (qmap_next(&key, &value, cur)) {
+			const char *ref_value;
+			json_object_t *item;
+			unsigned inv_cur;
+			const void *inv_key;
+			const void *inv_value;
+			json_array_t *inv_arr;
+			char *inv_json;
+			char *item_json;
+
+			(void)value;
+			ref_value = (const char *)key;
+			if (!ref_value || !ref_value[0])
+				continue;
+			if (last_ref_value &&
+			    strcmp(last_ref_value, ref_value) == 0)
+				continue;
+			last_ref_value = ref_value;
+
+			item = json_object_new(0);
 			if (!item)
 				continue;
 			json_object_kv_str(item, "id", ref_value);
 
-			uint32_t inv_cur =
-			        qmap_get_multi(ref->inverse_hd, ref_value);
-			const void *ik, *iv;
-			json_array_t *inv_arr = json_array_new(0);
+			inv_cur = qmap_get_multi(inverse_hd, ref_value);
+			inv_arr = json_array_new(0);
+			inv_json = NULL;
 			if (inv_arr) {
-				while (qmap_next(&ik, &iv, inv_cur)) {
+				while (qmap_next(&inv_key, &inv_value, inv_cur)) {
 					char idbuf[128];
+
+					(void)inv_key;
 					snprintf(
 					        idbuf,
 					        sizeof(idbuf),
 					        "%s",
-					        (const char *)iv);
-					json_array_append_raw(inv_arr, idbuf);
+					        (const char *)inv_value);
+					if (json_array_append_raw(inv_arr, idbuf) != 0)
+						break;
 				}
-				qmap_fin(inv_cur);
-				char *inv_json = json_array_finish(inv_arr);
-				if (inverse_buf[0] && inv_json)
-					json_object_kv_raw(
-					        item, inverse_buf, inv_json);
-				else if (inv_json)
-					free(inv_json);
+				inv_json = json_array_finish(inv_arr);
 			}
+			qmap_fin(inv_cur);
 
-			char *item_json = json_object_finish(item);
+			if (inverse_buf[0] && inv_json)
+				json_object_kv_raw(item, inverse_buf, inv_json);
+			else if (inv_json)
+				free(inv_json);
+
+			item_json = json_object_finish(item);
 			if (item_json) {
 				json_array_append_raw(items, item_json);
 				free(item_json);
@@ -211,7 +263,7 @@ static int dataset_build_relations_json(
 		}
 		qmap_fin(cur);
 
-		char *items_json = json_array_finish(items);
+		items_json = json_array_finish(items);
 		if (items_json) {
 			json_object_kv_raw(rel_obj, "items", items_json);
 			free(items_json);
@@ -219,9 +271,10 @@ static int dataset_build_relations_json(
 			json_array_free(items);
 		}
 
-		char *rel_json = json_object_finish(rel_obj);
+		qmap_close(inverse_hd);
+
+		rel_json = json_object_finish(rel_obj);
 		if (rel_json) {
-			char keybuf[64];
 			snprintf(keybuf, sizeof(keybuf), "%s", ref->field_name);
 			json_object_kv_raw(relations, keybuf, rel_json);
 			free(rel_json);
@@ -257,16 +310,12 @@ static const char *dataset_field_type_name(dataset_field_type_t type)
 
 static dataset_def_t *dataset_find(const char *dataset_id)
 {
-	size_t i;
+	int idx;
 
-	if (!dataset_id || !dataset_id[0])
+	idx = dataset_def_index(dataset_id);
+	if (idx < 0)
 		return NULL;
-
-	for (i = 0; i < dataset_count; i++)
-		if (strcmp(dataset_defs[i].id, dataset_id) == 0)
-			return &dataset_defs[i];
-
-	return NULL;
+	return &dataset_defs[idx];
 }
 
 static dataset_access_result_t
@@ -333,8 +382,6 @@ static int dataset_key_field_valid(const dataset_def_t *def)
  * Builds the rows array for a dataset.
  * Note: Row order is currently determined by qmap iteration order,
  * which generally follows insertion order for small maps or hash order.
-/*
- * Build rows JSON from stored data.
  * If include is specified, also read file-based fields from disk.
  */
 static int dataset_scan_item(const dataset_def_t *def, const char *id);
@@ -357,22 +404,13 @@ static int dataset_rows_json_build(
 	const char *root = doc_root[0] ? doc_root : ".";
 
 	cur = qmap_iter(def->source_hd, NULL, 0);
-	fprintf(stderr, "DEBUG dataset_rows: source_hd=%p, def_id=%s, include=%s\n",
-	        (void*)def->source_hd, def->id, include ? include : "NULL");
-	unsigned count = 0;
 	while (qmap_next(&key, &value, cur)) {
-		count++;
 		const char *id = (const char *)key;
 		const char *json_val = (const char *)value;
-		fprintf(stderr, "DEBUG dataset_rows: count=%u id=%s json_val=%s\n",
-		        count, id, json_val ? json_val : "NULL");
 
 		if (!json_val || !json_val[0]) {
-			fprintf(stderr, "DEBUG dataset_rows: empty json, calling scan for %s\n", id);
 			dataset_scan_item(def, id);
 			json_val = qmap_get(def->source_hd, id);
-			fprintf(stderr, "DEBUG dataset_rows: after scan json_val=%s\n",
-			        json_val ? json_val : "NULL");
 			if (!json_val || !json_val[0])
 				continue;
 		}
@@ -655,7 +693,6 @@ static int dataset_scan_item(const dataset_def_t *def, const char *id)
 	char *json = json_object_finish(obj);
 	if (json) {
 		qmap_put(def->source_hd, id, json);
-		free(json);
 	}
 	return 0;
 }
@@ -715,8 +752,14 @@ NDX_LISTENER(int, dataset_get_item_json,
 		return 404;
 
 	username = get_request_user(fd);
-	if (dataset_access_allowed(def, fd, username) != DATASET_ACCESS_RESULT_ALLOW)
+	switch (dataset_access_allowed(def, fd, username)) {
+	case DATASET_ACCESS_RESULT_ALLOW:
+		break;
+	case DATASET_ACCESS_RESULT_UNAUTHORIZED:
+		return 401;
+	case DATASET_ACCESS_RESULT_FORBIDDEN:
 		return 403;
+	}
 
 	cached = qmap_get(def->source_hd, id);
 	if (cached && cached[0]) {
@@ -761,8 +804,11 @@ NDX_LISTENER(int, dataset_get_item_json,
 	char *json = json_object_finish(obj);
 	if (json) {
 		qmap_put(def->source_hd, id, json);
-		*out_json = json;
-		return 0;
+		cached = qmap_get(def->source_hd, id);
+		if (cached && cached[0]) {
+			*out_json = strdup(cached);
+			return *out_json ? 0 : -1;
+		}
 	}
 
 	return 404;
@@ -780,7 +826,9 @@ NDX_LISTENER(unsigned, dataset_parse_form, const char *, dataset_id)
 
 NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 {
+	dataset_associations_t *assoc;
 	size_t i;
+
 	if (!def || !def->id || !def->id[0] || !def->key_field ||
 	    !def->key_field[0] || !def->fields || def->field_count == 0 ||
 	    !def->items_path || def->source_hd == 0 ||
@@ -793,33 +841,24 @@ NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 	dataset_scan_items((dataset_def_t *)def);
 
 	dataset_defs[dataset_count] = *def;
+	assoc = &dataset_associations[dataset_count];
+	memset(assoc, 0, sizeof(*assoc));
 
 	for (i = 0; i < def->field_count; i++) {
 		const dataset_field_t *f = &def->fields[i];
+		size_t assoc_idx;
+
 		if (f->type != DATASET_FIELD_REFERENCE || !f->target_dataset)
 			continue;
+		if (assoc->assoc_count >= MAX_REFERENCE_FIELDS)
+			return -1;
 
-		dataset_associations[dataset_count].assocs[0].source_dataset =
-		        def->id;
-		dataset_associations[dataset_count].assocs[0].field_name =
-		        f->name;
-		dataset_associations[dataset_count].assocs[0].target_dataset =
-		        f->target_dataset;
-		dataset_associations[dataset_count].assocs[0].inverse_name =
-		        f->inverse_name;
-
-		unsigned inv_hd = qmap_open(
-		        NULL,
-		        NULL,
-		        QM_STR,
-		        QM_STR,
-		        0x3FF,
-		        QM_PGET | QM_SORTED | QM_MULTIVALUE);
-		dataset_associations[dataset_count].assocs[0].inverse_hd =
-		        inv_hd;
-
-		qmap_assoc(inv_hd, def->source_hd, extract_ref_value);
-		dataset_associations[dataset_count].assoc_count = 1;
+		assoc_idx = assoc->assoc_count;
+		assoc->assocs[assoc_idx].source_dataset = def->id;
+		assoc->assocs[assoc_idx].field_name = f->name;
+		assoc->assocs[assoc_idx].target_dataset = f->target_dataset;
+		assoc->assocs[assoc_idx].inverse_name = f->inverse_name;
+		assoc->assoc_count++;
 	}
 
 	dataset_count++;
@@ -956,6 +995,9 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 
 		ret_len = mpfd_get(f->name, val, sizeof(val) - 1);
 		if (ret_len <= 0)
+			ret_len =
+			        ndc_query_param(f->name, val, sizeof(val) - 1);
+		if (ret_len <= 0)
 			continue;
 		if (ret_len >= (int)(sizeof(val) - 1)) {
 			qmap_close(hd);
@@ -1028,7 +1070,6 @@ NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, i
 	char *json = json_object_finish(obj);
 	if (json) {
 		qmap_put(def->source_hd, id, json);
-		free(json);
 	}
 	return 0;
 }
