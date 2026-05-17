@@ -1,9 +1,11 @@
-use std::ffi::{CString, c_char, c_int, c_uchar, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_uchar, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use ndx::prelude::*;
 
 mod shared;
+pub mod ffi;
+pub mod api;
 
 include!(concat!(env!("OUT_DIR"), "/generated_routes.rs"));
 
@@ -52,13 +54,47 @@ pub fn dataset_get_json(fd: c_int, dataset_id: *const c_char, include: *const c_
 #[ndx_hook_decl]
 pub fn dataset_get_item_json(fd: c_int, dataset_id: *const c_char, id: *const c_char, out_json: *mut *mut c_char) -> c_int {}
 
-// ── ModuleEntryFfi (shared with render_ffi submodules via crate::) ────────────
+#[ndx_hook_decl]
+pub fn song_get_pref(user: *const c_char, name: *const c_char) -> *mut c_char {}
 
-#[repr(C)]
-pub struct ModuleEntryFfi {
-    pub id:    *const c_char,
-    pub title: *const c_char,
-    pub flags: u32,
+#[ndx_hook_decl]
+pub fn song_get_original_key(id: *const c_char) -> c_int {}
+
+pub fn get_song_pref(user: &str, name: &str) -> Option<String> {
+    let user_c = CString::new(user).ok()?;
+    let name_c = CString::new(name).ok()?;
+    let raw = unsafe { song_get_pref(user_c.as_ptr(), name_c.as_ptr()) };
+    if raw.is_null() {
+        None
+    } else {
+        let owned = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    }
+}
+
+#[ndx_hook_decl]
+pub fn song_transpose(id: *const c_char, semi: c_int, fl: c_int, out: *mut *mut c_char) -> c_int {}
+
+pub fn get_song_original_key(id: &str) -> i32 {
+    let id_c = CString::new(id).unwrap();
+    unsafe { song_get_original_key(id_c.as_ptr()) }
+}
+
+pub fn get_song_transpose(id: &str, semi: i32, flags: i32) -> Option<String> {
+    let id_c = CString::new(id).ok()?;
+    let mut raw: *mut c_char = std::ptr::null_mut();
+    let rc = unsafe { song_transpose(id_c.as_ptr(), semi, flags, &mut raw) };
+    if rc == 0 && !raw.is_null() {
+        let owned = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    } else {
+        if !raw.is_null() {
+            unsafe { free(raw.cast()) };
+        }
+        None
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -125,6 +161,63 @@ pub fn load_dataset_item_json(fd: c_int, dataset_id: &str, id: &str) -> Option<S
         None
     };
     json
+}
+
+pub fn load_dataset_source(dataset_id: &str) -> Option<hyle::Source> {
+    let def_ffi = ffi::dataset::find_dataset_def(dataset_id)?;
+    let qmap_ptr = unsafe { qmap::Qmap::from_handle(def_ffi.source_hd) };
+    
+    // Convert FFI def to hyle-ndc-dataset def
+    let fields = unsafe {
+        std::slice::from_raw_parts(def_ffi.fields, def_ffi.field_count)
+    };
+    
+    let rust_fields = fields.iter().map(|f| {
+        let name = unsafe { CStr::from_ptr(f.name) }.to_string_lossy().into_owned();
+        let target_dataset = if f.target_dataset.is_null() {
+            None
+        } else {
+            let full_target = unsafe { CStr::from_ptr(f.target_dataset) }.to_string_lossy();
+            Some(full_target.strip_suffix(".items").unwrap_or(&full_target).to_string())
+        };
+        
+        let field_type = match f.field_type {
+            1 => hyle_ndc_dataset::FieldType::Int,
+            2 => hyle_ndc_dataset::FieldType::Bool,
+            3 => hyle_ndc_dataset::FieldType::NullableString,
+            4 => hyle_ndc_dataset::FieldType::Reference,
+            5 => hyle_ndc_dataset::FieldType::MultiReference,
+            _ => hyle_ndc_dataset::FieldType::String,
+        };
+        
+        let inverse_name = if f.inverse_name.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(f.inverse_name) }.to_string_lossy().into_owned())
+        };
+        
+        hyle_ndc_dataset::FieldDef {
+            name,
+            field_type,
+            target_dataset,
+            inverse_name,
+        }
+    }).collect();
+    
+    let model_id = dataset_id.strip_suffix(".items").unwrap_or(dataset_id);
+    let rust_def = hyle_ndc_dataset::DatasetDef {
+        id: model_id.to_owned(),
+        fields: rust_fields,
+        source_hd: def_ffi.source_hd,
+    };
+    
+    let source = hyle_ndc_dataset::build_source_from_json_qmap(&qmap_ptr, &rust_def);
+    if let Some(res) = source.get(model_id) {
+        let pid = unsafe { libc::getpid() };
+        eprintln!("[{}] load_dataset_source: loaded {} rows for {}", pid, res.rows().len(), model_id);
+    }
+    std::mem::forget(qmap_ptr);
+    Some(source)
 }
 
 fn dispatch_result(fd: c_int, response: ResponsePayload) {

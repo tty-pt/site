@@ -10,6 +10,7 @@
 
 MODULE_API void ndx_install(void)
 {
+	ndx_load("./mods/ssr/ssr");
 	ndx_load("./mods/mpfd/mpfd");
 	dataset_install_routes();
 }

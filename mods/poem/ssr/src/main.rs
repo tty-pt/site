@@ -2,67 +2,73 @@ use indexmap::IndexMap;
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
     current_user, html_response, html_response_with_status, item_menu, layout,
-    parse_dataset_items, render_hyle_edit, render_hyle_list, split_path,
+    render_hyle_edit, render_hyle_list_with_source, split_path,
     RequestContext, ResponsePayload,
 };
-use crate::load_dataset_json;
 use serde::Deserialize;
+
+use crate::{load_dataset_item_json, load_dataset_source};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);
     match (ctx.method, parts.as_slice()) {
-        ("POST", ["poem"]) => Some(render_poem_list(ctx)),
-        (_, ["poem", id]) if *id != "add" => Some(render_poem_detail(ctx, id)),
-        ("GET", ["poem", id, "edit"]) => Some(render_poem_edit(ctx, id)),
-        _ => ndc_dioxus_shared::default_crud_routes(
-            ctx,
-            "poem",
-            Some("📝"),
-            None,
-            None,
-        ),
+        ("GET", ["poem"]) | ("POST", ["poem"]) => {
+            let source = load_dataset_source("poem.items")?;
+            Some(render_hyle_list_with_source(
+                ctx,
+                "poem",
+                Some("📝"),
+                source,
+                &["title", "body_content", "owner"],
+                20,
+            ))
+        }
+        ("GET", ["poem", id]) if *id != "add" => Some(render_detail(ctx, id)),
+        ("GET", ["poem", id, "edit"]) => Some(render_edit(ctx, id)),
+        ("GET", ["poem", id, "delete"]) if *id != "add" => {
+            let json = load_dataset_item_json(ctx.fd, "poem.items", id)?;
+            let item: PoemRow = serde_json::from_str(&json).ok()?;
+            Some(ndc_dioxus_shared::render_delete_confirm("poem", id, &item.title, ctx))
+        }
+        _ => ndc_dioxus_shared::default_crud_routes(ctx, "poem", Some("📝"), None, None),
     }
 }
 
-fn render_poem_list(ctx: &RequestContext<'_>) -> ResponsePayload {
-    let body_str = std::str::from_utf8(ctx.body).unwrap_or("");
-    let items = parse_dataset_items(body_str, &["title"]);
-    render_hyle_list(ctx, "poem", Some("📝"), items, &["title"], 10)
-}
-
-fn render_poem_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_json(ctx.fd, "poem.items") {
+pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    let json = match load_dataset_item_json(ctx.fd, "poem.items", id) {
         Some(j) => j,
-        None => return html_response("500", rsx!{ "Dataset error" }),
+        None => {
+            return html_response_with_status(404, "404", rsx! { "Poem not found" })
+        }
     };
 
-    let parsed: DatasetJson = match serde_json::from_str(&json) {
+    let item: PoemRow = match serde_json::from_str(&json) {
         Ok(p) => p,
-        Err(_) => return html_response("500", rsx!{ "Parse error" }),
+        Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
     };
 
-    let item = match parsed.rows.iter().find(|p| p.id == id) {
-        Some(i) => i,
-        None => return html_response_with_status(404, "404", rsx!{ "Poem not found" }),
-    };
-
-    let title = item.title.as_str();
-    let content = item.body_content.as_str();
-    let is_owner = current_user(ctx).map(|u| u == item.owner).unwrap_or(false);
+    let title = &item.title;
+    let owner = &item.owner;
+    let body_content = &item.body_content;
+    let is_owner = current_user(ctx) == Some(owner);
+    let path = format!("/poem/{id}");
+    let page_title = format!("poem: {title}");
 
     html_response(
-        title,
+        &page_title,
         layout(
             current_user(ctx),
-            title,
-            ctx.path,
+            &page_title,
+            &path,
             Some("📝"),
             Some(item_menu("poem", id, is_owner)),
             rsx! {
-                div {
-                    style: "padding: 20px; max-width: 800px; margin: 0 auto;",
-                    div {
-                        dangerous_inner_html: "{content}"
+                div { class: "flex flex-col gap-4",
+                    div { class: "poem-body bg-surface p-6 rounded shadow-sm whitespace-pre-wrap font-serif leading-relaxed",
+                        "{body_content}"
+                    }
+                    if !owner.is_empty() {
+                        div { class: "text-sm text-muted text-right", "By {owner}" }
                     }
                 }
             },
@@ -70,32 +76,29 @@ fn render_poem_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     )
 }
 
-fn render_poem_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_json(ctx.fd, "poem.items") {
+pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
+    let json = match load_dataset_item_json(ctx.fd, "poem.items", id) {
         Some(j) => j,
-        None => return html_response("500", rsx!{ "Dataset error" }),
+        None => {
+            return html_response_with_status(404, "404", rsx! { "Poem not found" })
+        }
     };
 
-    let parsed: DatasetJson = match serde_json::from_str(&json) {
+    let item: PoemRow = match serde_json::from_str(&json) {
         Ok(p) => p,
-        Err(_) => return html_response("500", rsx!{ "Parse error" }),
+        Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
     };
 
-    let item = match parsed.rows.iter().find(|p| p.id == id) {
-        Some(i) => i,
-        None => return html_response_with_status(404, "404", rsx!{ "Poem not found" }),
-    };
-
-    let is_owner = current_user(ctx).map(|u| u == item.owner).unwrap_or(false);
+    let is_owner = current_user(ctx) == Some(&item.owner);
     if !is_owner {
-        return html_response_with_status(403, "403", rsx!{ "Forbidden" });
+        return html_response_with_status(403, "403", rsx! { "Forbidden" });
     }
 
-    let item = parsed.rows.into_iter().find(|p| p.id == id);
-    let fields = IndexMap::from([
-        ("title".to_owned(), item.as_ref().map(|p| p.title.clone()).unwrap_or_default()),
-        ("body_content".to_owned(), item.map(|p| p.body_content.clone()).unwrap_or_default()),
-    ]);
+    let mut fields = IndexMap::new();
+    fields.insert("title".to_owned(), item.title.clone());
+    fields.insert("owner".to_owned(), item.owner.clone());
+    // body_content is a file field, we don't pass its content to the form initial value
+    // as we want an empty file input for uploading.
 
     render_hyle_edit(
         ctx,
@@ -105,17 +108,12 @@ fn render_poem_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
         fields,
         &["title", "body_content"],
         "multipart/form-data",
-        vec![],
     )
 }
 
 #[derive(Debug, Deserialize)]
-struct DatasetJson {
-    rows: Vec<PoemRow>,
-}
-
-#[derive(Debug, Deserialize)]
 struct PoemRow {
+    #[allow(dead_code)]
     id: String,
     #[serde(default)]
     title: String,

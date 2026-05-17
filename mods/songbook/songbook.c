@@ -90,10 +90,42 @@ static int sb_edit_form_build(int fd, form_body_t *fb, void *user)
 	return 0;
 }
 
-/* Get random chord by type/format - uses song module's type index */
+/* Get random chord by type/format - prefers linked choir repertoire if available,
+ * otherwise uses global song module's type index */
 static int
-get_random_chord_by_type(const char *type, char *out_id, size_t out_len)
+get_random_chord_by_type(
+        const char *type, const char *choir_id, char *out_id, size_t out_len)
 {
+	if (choir_id && choir_id[0]) {
+		char path[PATH_MAX];
+		snprintf(
+		        path,
+		        sizeof(path),
+		        "items/choir/items/%s/songs",
+		        choir_id);
+		repertoire_row_t *rows = NULL;
+		size_t count = 0;
+		if (repertoire_rows_load(path, &rows, &count) == 0) {
+			const repertoire_row_t *matches[256];
+			int match_count = 0;
+			for (size_t i = 0; i < count && match_count < 256; i++) {
+				if (strcmp(rows[i].format, type) == 0 ||
+				    strcmp(type, "any") == 0)
+				{
+					matches[match_count++] = &rows[i];
+				}
+			}
+			if (match_count > 0) {
+				int idx = rand() % match_count;
+				strncpy(out_id, matches[idx]->id, out_len - 1);
+				out_id[out_len - 1] = '\0';
+				repertoire_rows_dispose(rows);
+				return 0;
+			}
+			repertoire_rows_dispose(rows);
+		}
+	}
+
 	char *random_id = NULL;
 	if (song_get_random_by_type(type, &random_id) != 0)
 		return -1;
@@ -544,7 +576,7 @@ static int sb_randomize_cb(
 	if (parsed && idx == target_idx) {
 		char new_chord[128] = { 0 };
 		if (get_random_chord_by_type(
-		            fmt, new_chord, sizeof(new_chord)) == 0)
+		            fmt, NULL, new_chord, sizeof(new_chord)) == 0)
 		{
 			snprintf(
 			        out,
@@ -728,7 +760,7 @@ static int handle_sb_add(int fd, char *body)
 
 				char song_id[256] = { 0 };
 				if (get_random_chord_by_type(
-				            type, song_id, sizeof(song_id)) ==
+				            type, choir, song_id, sizeof(song_id)) ==
 				    0)
 				{
 					repertoire_row_t *tmp;

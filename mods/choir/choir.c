@@ -68,7 +68,7 @@ static int choir_meta_write(const char *item_path, const choir_meta_t *meta)
 
 static int choir_index_write_file(const char *root)
 {
-	char path[PATH_MAX], tmp[PATH_MAX];
+	char path[PATH_MAX], tmp[PATH_MAX + 16];
 	snprintf(path, sizeof(path), "%s/items/choir/index.tsv", root);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
 	FILE *fp = fopen(tmp, "w");
@@ -150,115 +150,6 @@ static int handle_choir_edit(int fd, char *body)
 	        NULL,
 	        handle_choir_edit_authorized,
 	        NULL);
-}
-
-struct all_songs_ctx {
-	struct ChoirEntryFfi *slots;
-	char (*titles)[256];
-	size_t count;
-	size_t max;
-};
-
-static int all_songs_cb(const char *id, const char *title, void *user)
-{
-	struct all_songs_ctx *c = user;
-	if (c->count >= c->max)
-		return 1;
-	snprintf(c->titles[c->count], 256, "%s", title);
-	c->slots[c->count].id = id;
-	c->slots[c->count].title = c->titles[c->count];
-	c->count++;
-	return 0;
-}
-
-#define MAX_CHOIR_SONGS 256
-#define MAX_CHOIR_ALL 1024
-#define MAX_CHOIR_SONGBOOKS 256
-
-static int
-choir_details_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-	static __thread struct ChoirSongFfi song_slots[MAX_CHOIR_SONGS];
-	static __thread struct ChoirEntryFfi all_song_slots[MAX_CHOIR_ALL];
-	static __thread char song_titles[MAX_CHOIR_SONGS][256];
-	static __thread char song_ids[MAX_CHOIR_SONGS][128];
-	static __thread char song_fmts[MAX_CHOIR_SONGS][128];
-	static __thread char all_titles[MAX_CHOIR_ALL][256];
-
-	choir_meta_t meta;
-	choir_meta_read(ctx->item_path, &meta);
-	char owner[64] = { 0 };
-	item_read_owner(ctx->item_path, owner, sizeof(owner));
-
-	/* Load repertoire songs */
-	repertoire_row_t *rows = NULL;
-	size_t count = 0;
-	char songs_path[PATH_MAX];
-	if (item_child_path(
-	            ctx->item_path, "songs", songs_path, sizeof(songs_path)) !=
-	    0)
-		return server_error(fd, "Failed to resolve songs path");
-	repertoire_rows_load(songs_path, &rows, &count);
-	if (count > MAX_CHOIR_SONGS)
-		count = MAX_CHOIR_SONGS;
-	for (size_t i = 0; i < count; i++) {
-		song_read_title(
-		        ctx->doc_root,
-		        rows[i].id,
-		        song_titles[i],
-		        sizeof(song_titles[i]));
-		snprintf(song_ids[i], sizeof(song_ids[i]), "%s", rows[i].id);
-		snprintf(
-		        song_fmts[i],
-		        sizeof(song_fmts[i]),
-		        "%s",
-		        rows[i].format);
-		song_slots[i].id = song_ids[i];
-		song_slots[i].title = song_titles[i];
-		song_slots[i].format = song_fmts[i];
-		song_slots[i].preferred_key = rows[i].value;
-		song_slots[i].original_key = song_get_original_key(rows[i].id);
-	}
-	repertoire_rows_dispose(rows);
-
-	/* Load all songs for datalist via song_for_each */
-	struct all_songs_ctx asc = {
-		.slots = all_song_slots,
-		.titles = all_titles,
-		.count = 0,
-		.max = MAX_CHOIR_ALL,
-	};
-	song_for_each(all_songs_cb, &asc);
-	size_t all_count = asc.count;
-
-	static __thread char s_id[128], s_query[512];
-	struct ModuleEntryFfi modules_snap[64];
-	size_t modules_len;
-	ndc_env_get(fd, s_id, "PATTERN_PARAM_ID");
-	ndc_env_get(fd, s_query, "QUERY_STRING");
-	SSR_FILL_MODULES(modules_snap, modules_len);
-	{
-		static __thread char s_csrf[33];
-		csrf_set_cookie(fd, s_csrf, sizeof(s_csrf));
-		struct ChoirDetailRenderFfi req = {
-			.title = meta.title,
-			.owner_name = owner,
-			.formats = meta.format,
-			.songs = song_slots,
-			.songs_len = count,
-			.all_songs = all_song_slots,
-			.all_songs_len = all_count,
-			.id = s_id,
-			.query = s_query,
-			.remote_user = get_request_user(fd),
-			.modules = modules_snap,
-			.modules_len = modules_len,
-			.csrf_token = s_csrf,
-		};
-		return ssr_render_choir_detail(fd, &req);
-	}
 }
 
 static int handle_choir_songs_list(int fd, char *body)

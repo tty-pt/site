@@ -272,11 +272,6 @@ NDX_LISTENER(int, json_object_kv_raw,
 	if (!jo || !key || !value)
 		return -1;
 	size_t val_len = strlen(value);
-	fprintf(stderr,
-	        "DEBUG: json_object_kv_raw: key=%s val_len=%zu\n",
-	        key,
-	        val_len);
-	fflush(stderr);
 	if (jb_field_sep(JB(jo)) != 0 ||
 	    jb_reserve(JB(jo), strlen(key) + val_len + 4) != 0)
 		return -1;

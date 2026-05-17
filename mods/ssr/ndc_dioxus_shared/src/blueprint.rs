@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use hyle::{Blueprint, Field, InputHint, Model};
+use hyle::{Blueprint, Field, FieldType, InputHint, Model, Reference};
 
 static BLUEPRINT: OnceLock<Arc<Blueprint>> = OnceLock::new();
 
@@ -13,39 +13,48 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                         "song",
                         Model::new()
                             .field("title", Field::string("Title"))
-                            .field("type", Field::reference("Type", "song_type"))
+                            .field(
+                                "type",
+                                Field::array(
+                                    "Type",
+                                    FieldType::Reference {
+                                        reference: Reference {
+                                            entity: "song.types".into(),
+                                            display_field: "name".into(),
+                                        },
+                                    },
+                                ),
+                            )
                             .field("author", Field::string("Author"))
-                            .field("yt", Field::string("YouTube URL"))
-                            .field("audio", Field::string("Audio URL"))
-                            .field("pdf", Field::string("PDF URL"))
-                            .field("data", Field::string("Chord Data").with_input(InputHint::new("textarea").with_prop("rows", 20))),
+                            .field("yt", Field::string("YouTube URL").with_input(InputHint::new("url")))
+                            .field("audio", Field::string("Audio URL").with_input(InputHint::new("url")))
+                            .field("pdf", Field::string("PDF URL").with_input(InputHint::new("url")))
+                            .field("data", Field::textarea("Chord Data", 20))
+                            .field("owner", Field::string("Owner")),
                     )
                     .model(
-                        "song_type",
+                        "song.types",
                         Model::new().field("name", Field::string("Name")),
                     )
                     .model(
                         "poem",
                         Model::new()
                             .field("title", Field::string("Title"))
-                            .field("body_content", Field::file("Body Content")),
-                    )
-                    .model(
-                        "choir",
-                        Model::new()
-                            .field("title", Field::string("Choir Name"))
-                            .field("format", Field::string("Song Formats").with_input(InputHint::new("textarea").with_prop("rows", 10))),
+                            .field("body_content", Field::file("Body Content"))
+                            .field("owner", Field::string("Owner")),
                     )
                     .model(
                         "songbook",
                         Model::new()
                             .field("title", Field::string("Title"))
-                            .field("choir", Field::reference("Choir", "choir_ref")),
+                            .field("choir", Field::reference("Choir", "choir")),
                     )
                     .model(
-                        "choir_ref",
-                        Model::new().field("name", Field::string("Name")),
-                    ),
+                        "choir",
+                        Model::new()
+                            .field("title", Field::string("Choir Name"))
+                            .field("format", Field::textarea("Song Formats", 10)),
+                    )
             )
         })
         .clone()

@@ -16,4 +16,8 @@ ndx               = "0.1"
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 url               = { workspace = true }
+qmap              = { package = "qmap-rs", path = "../../external/libqmap/rust-bindings" }
+hyle-ndc-dataset  = { path = "../../external/hyle/crates/hyle-ndc-dataset" }
+hyle              = { workspace = true }
+libc              = "0.2"
 

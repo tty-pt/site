@@ -350,12 +350,9 @@ static int index_generic_edit_authorized(
 	char items_path[512];
 	const char *module = index_name(fd);
 
-	fprintf(stderr, "DEBUG edit: START id=%s\n", ctx->id);
 	if (mpfd_parse(fd, body) == -1) {
-		fprintf(stderr, "DEBUG edit: mpfd_parse FAILED\n");
 		return respond_error(fd, 415, "Expected multipart/form-data");
 	}
-	fprintf(stderr, "DEBUG edit: mpfd_parse OK\n");
 	{
 		char csrf_submitted[33] = { 0 };
 		mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted));
@@ -364,15 +361,12 @@ static int index_generic_edit_authorized(
 	}
 
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-	fprintf(stderr, "DEBUG edit: dataset_id=%s\n", dataset_id);
 
 	unsigned data_hd = dataset_parse_form(dataset_id);
-	fprintf(stderr, "DEBUG edit: data_hd=%u\n", data_hd);
 	if (!data_hd)
 		return server_error(fd, "OOM");
 
 	int rc = dataset_update_item(dataset_id, ctx->id, data_hd);
-	fprintf(stderr, "DEBUG edit: dataset_update_item returned %d\n", rc);
 	if (rc != 0) {
 		qmap_close(data_hd);
 		return server_error(fd, "Failed to update item data");
@@ -383,10 +377,6 @@ static int index_generic_edit_authorized(
 	/* Update title in meta file if provided */
 	char title[256];
 	int title_len = mpfd_get("title", title, sizeof(title) - 1);
-	fprintf(stderr,
-	        "DEBUG edit: title_len=%d, title='%s'\n",
-	        title_len,
-	        title);
 	if (title_len > 0) {
 		if (item_path_build(
 		            fd,
@@ -395,15 +385,11 @@ static int index_generic_edit_authorized(
 		            items_path,
 		            sizeof(items_path)) == 0)
 		{
-			fprintf(stderr,
-			        "DEBUG edit: writing meta file title='%s'\n",
-			        title);
 			write_meta_file(
 			        items_path, "title", title, strlen(title));
 		}
 	}
 
-	fprintf(stderr, "DEBUG edit: DONE, redirecting\n");
 	return redirect_to_item(fd, module, ctx->id);
 }
 
@@ -679,21 +665,32 @@ static int index_delete_handler(int fd, char *body)
 
 	/* Remove ownership file and item directory */
 	item_unlink_owner(item_path);
-	item_remove_path_recursive(item_path);
+	int remove_rc = item_remove_path_recursive(item_path);
+	if (remove_rc != 0) {
+		fprintf(stderr, "ERROR delete: item_remove_path_recursive failed for %s\n", item_path);
+	}
 
 	/* Find module slot and call cleanup + index_del */
 	unsigned hd = 0;
+	pid_t pid = getpid();
 	for (size_t i = 0; i < module_slot_count; i++) {
-		if (strcmp(module_names[i], module) == 0) {
+		char simple_name[257];
+		snprintf(simple_name, sizeof(simple_name), "%s", module_names[i]);
+		char *dot = strchr(simple_name, '.');
+		if (dot) *dot = '\0';
+
+		if (strcmp(module_names[i], module) == 0 || strcmp(simple_name, module) == 0) {
 			hd = module_hds[i];
-			if (module_cleanups[i])
+			if (module_cleanups[i]) {
 				module_cleanups[i](id);
+			}
 			break;
 		}
 	}
 
-	if (hd)
-		qmap_del(hd, id);
+	if (hd) {
+		qmap_del_all(hd, id);
+	}
 
 	char location[256];
 	snprintf(location, sizeof(location), "/%s", module);

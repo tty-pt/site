@@ -8,6 +8,8 @@ members = [
     "mods/poem/ssr",
     "mods/choir/ssr",
     "mods/songbook/ssr",
+    "external/libqmap/rust-bindings",
+    "external/hyle/crates/hyle-ndc-dataset",
 ]
 
 exclude = [
@@ -17,17 +19,27 @@ exclude = [
     "mods/songbook/client",
 ]
 
+[workspace.package]
+edition = "2024"
+version = "0.1.7"
+license = "BSD-2-Clause"
+repository = "https://github.com/tty-pt/hyle"
+
 [workspace.dependencies]
 dioxus             = "0.7.7"
 dioxus-ssr         = "0.7.7"
+dioxus-core        = "0.7.7"
+dioxus-hooks       = "0.7.7"
+dioxus-signals     = "0.7.7"
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
 url                = "2.5"
 indexmap           = { version = "2", features = ["serde"] }
-hyle               = { version = "0.1.6" }
-hyle-dioxus        = { version = "0.1.6" }
-hyle-dioxus-native = { version = "0.1.6" }
+hyle               = { path = "external/hyle/crates/hyle" }
+hyle-dioxus        = { path = "external/hyle/crates/hyle-dioxus" }
+hyle-dioxus-native = { path = "external/hyle/crates/hyle-dioxus-native" }
 ndx                = "0.1.1"
+thiserror          = "2"
 
 [profile.dev]
 panic = "unwind"

@@ -67,7 +67,7 @@ out=$(curl -sb "$COOKIE" "$BASE/api/session")
 echo -n "5. Upload poem... "
 echo "Test poem content" > "$TMPFILE"
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/add" \
-	-F "id=testpoem" -F "file=@$TMPFILE")
+	-F "id=testpoem" -F "body_content=@$TMPFILE")
 [ "$code" = "303" ] && pass "poem uploaded" || fail "expected 303, got $code"
 
 # 6. Verify poem file exists

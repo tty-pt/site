@@ -39,6 +39,7 @@ pub struct SongbookEditChord {
 static mut CHORD_CHOICES: Option<Vec<SongbookEditChord>> = None;
 
 async fn ensure_chord_choices() -> Result<&'static [SongbookEditChord], JsValue> {
+    #[allow(static_mut_refs)]
     unsafe {
         if let Some(ref choices) = CHORD_CHOICES {
             return Ok(choices);
@@ -46,6 +47,7 @@ async fn ensure_chord_choices() -> Result<&'static [SongbookEditChord], JsValue>
     }
 
     let payload: DatasetPayload<SongbookEditChord> = load_dataset("song.edit_choices", None).await?;
+    #[allow(static_mut_refs)]
     unsafe {
         CHORD_CHOICES = Some(payload.rows);
         Ok(CHORD_CHOICES.as_ref().unwrap())
@@ -506,6 +508,7 @@ struct DatalistOption {
     chord_type: String,
 }
 
+#[allow(dead_code)]
 fn datalist_options(datalist: &HtmlDataListElement) -> Vec<DatalistOption> {
     let options = datalist.query_selector_all("option").ok();
     let Some(options) = options else {

@@ -33,7 +33,7 @@ echo "<p>Initial content.</p>" > "$TMPFILE"
 csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/add" \
-	-F "title=$USER" -F "file=@$TMPFILE" -F "csrf_token=$csrf")
+	-F "title=$USER" -F "body_content=@$TMPFILE" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "add redirects" || fail "expected 303, got $code"
 
 # 1b. POST edit with wrong content-type on owned item (expect 415)
@@ -59,7 +59,7 @@ sleep 0.1
 csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
-	-F "file=@$TMPFILE" -F "csrf_token=$csrf")
+	-F "body_content=@$TMPFILE" -F "csrf_token=$csrf")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -79,7 +79,7 @@ sleep 0.1
 csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/poem/$USER/edit" \
-	-F "title=Updated Title" -F "file=@$TMPFILE2" -F "csrf_token=$csrf")
+	-F "title=Updated Title" -F "body_content=@$TMPFILE2" -F "csrf_token=$csrf")
 sleep 0.3
 [ "$code" = "303" ] && pass "redirects on success" || fail "expected 303, got $code"
 
@@ -129,7 +129,7 @@ echo -n "14. Verify detail GET... "
 echo "Direct render test" > "$TMPFILE"
 csrf=$(csrf_for "$COOKIE")
 curl -s -b "$COOKIE" -X POST "$BASE/poem/add" \
-	-F "title=direct_test" -F "file=@$TMPFILE" -F "csrf_token=$csrf" > /dev/null
+	-F "title=direct_test" -F "body_content=@$TMPFILE" -F "csrf_token=$csrf" > /dev/null
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/poem/direct_test")
 [ "$code" = "200" ] && pass "GET success" || fail "expected 200, got $code"
 

@@ -2,45 +2,41 @@ use dioxus::prelude::*;
 use serde::Deserialize;
 use ndc_dioxus_shared::{
     RequestContext, ResponsePayload, body_str, current_user, display_or_id,
-    edit_form_page, edit_path, empty_state, form_actions, html_response,
+    edit_form_page, edit_path, empty_state, form_actions, get_pair, html_response,
     html_response_with_status, item_menu,
-    item_path, key_names, key_transpose_options, layout, parse_dataset_items,
-    render_hyle_edit, render_hyle_list, split_path,
+    item_path, key_names, key_transpose_options, layout,
+    parse_pairs, split_path,
     };
 
-    use crate::{load_dataset_json, load_dataset_item_json};
+    use crate::{load_dataset_json, load_dataset_item_json, load_dataset_source};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
-	let parts = split_path(&ctx.path);
-	match (ctx.method, parts.as_slice()) {
-		("POST", ["songbook"]) => {
-			let items = parse_dataset_items(body_str(ctx.body), &["title", "choir"]);
-			Some(ndc_dioxus_shared::render_hyle_list(ctx, "songbook", Some("📖"), items, &["title", "choir"], 10))
-		}
-		("GET", ["songbook", id]) if *id != "add" => Some(render_detail(ctx, id)),
-		("POST", ["songbook", id]) if *id != "add" => Some(render_detail(ctx, id)),
-		("GET", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
-		("POST", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
-		("POST", ["songbook", id, "delete"]) if *id != "add" => {
-			Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))
-		}
-		_ => ndc_dioxus_shared::default_crud_routes(
-			ctx,
-			"songbook",
-			Some("📖"),
-			None,
-			None,
-		),
-	}
-}
-
-#[derive(Debug, Deserialize)]
-struct SongbookDatasetJson {
-    rows: Vec<SongbookDatasetRow>,
+    let parts = split_path(ctx.path);
+    match (ctx.method, parts.as_slice()) {
+        ("GET", ["songbook"]) | ("POST", ["songbook"]) => {
+            let source = load_dataset_source("songbook.items")?;
+            Some(ndc_dioxus_shared::render_hyle_list_with_source(
+                ctx,
+                "songbook",
+                Some("📖"),
+                source,
+                &["title", "choir"],
+                10,
+            ))
+        }
+        ("GET", ["songbook", id]) if *id != "add" => Some(render_detail(ctx, id)),
+        ("GET", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
+        ("POST", ["songbook", id, "edit"]) => Some(render_edit(ctx, id)),
+        ("POST", ["songbook", id, "delete"]) if *id != "add" => {
+            Some(ndc_dioxus_shared::render_delete_confirm("songbook", id, "", ctx))
+        }
+        _ => ndc_dioxus_shared::default_crud_routes(ctx, "songbook", Some("📖"), None, None),
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct SongbookDatasetRow {
+    #[allow(dead_code)]
     id: String,
     #[serde(default)]
     title: String,
@@ -62,8 +58,6 @@ struct SongDatasetRow {
     id: String,
     #[serde(default)]
     title: String,
-    #[serde(default)]
-    data: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -126,14 +120,28 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     let title = &item.title;
     let owner = &item.owner;
     let choir = &item.choir;
-    let viewer_zoom = 100;
     let is_owner = current_user(ctx) == Some(owner);
     let path = item_path("songbook", id);
     let page_title = format!("songbook: {title}");
     let choir_href = item_path("choir", choir);
     let save_url: &str = if current_user(ctx).is_some() { "/api/song/prefs" } else { "" };
 
-    let song_entries: Vec<(&str, i32, &str, i32)> = item.songs
+    let mut viewer_zoom = 100;
+    let mut use_bemol = false;
+    let mut use_latin = false;
+    if let Some(user) = current_user(ctx) {
+        if let Some(z) = crate::get_song_pref(user, "chords-zoom") {
+            viewer_zoom = z.parse().unwrap_or(100);
+        }
+        if let Some(b) = crate::get_song_pref(user, "chords-bemol") {
+            use_bemol = b.trim() == "1";
+        }
+        if let Some(l) = crate::get_song_pref(user, "chords-latin") {
+            use_latin = l.trim() == "1";
+        }
+    }
+
+    let song_entries: Vec<(&str, i32, &str)> = item.songs
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
@@ -141,14 +149,13 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
             let chord_id = parts.get(0).cloned().unwrap_or("");
             let transpose = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
             let format = parts.get(2).cloned().unwrap_or("any");
-            let original_key = parts.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
-            (chord_id, transpose, format, original_key)
+            (chord_id, transpose, format)
         })
         .collect();
 
     let display_songs: Vec<DisplaySongbookSong> = song_entries
         .iter()
-        .map(|(chord_id, transpose, format, original_key)| {
+        .map(|(chord_id, transpose, format)| {
             if chord_id.is_empty() {
                 return DisplaySongbookSong {
                     chord_id: String::new(),
@@ -161,19 +168,25 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
                 };
             }
             let song_json = load_dataset_item_json(ctx.fd, "song.items", chord_id);
-            let (title, data) = if let Some(sj) = song_json {
+            let title = if let Some(sj) = song_json {
                 if let Ok(song) = serde_json::from_str::<SongDatasetRow>(&sj) {
-                    (song.title, song.data)
+                    song.title
                 } else {
-                    (chord_id.to_string(), String::new())
+                    chord_id.to_string()
                 }
             } else {
-                (chord_id.to_string(), String::new())
+                chord_id.to_string()
             };
 
-            let target_idx = ((original_key + transpose) % 12 + 12) % 12;
-            let target_key = key_names(false, false)[target_idx as usize].to_string();
-            let transpose_options = key_transpose_options(*original_key, false, false);
+            let mut flags = 0x04; // TRANSP_HTML
+            if use_bemol { flags |= 0x08; }
+            if use_latin { flags |= 0x80; }
+            let chord_data = crate::get_song_transpose(chord_id, *transpose, flags).unwrap_or_default();
+
+            let actual_original_key = crate::get_song_original_key(chord_id);
+            let target_idx = ((actual_original_key + transpose) % 12 + 12) % 12;
+            let target_key = key_names(use_bemol, use_latin)[target_idx as usize].to_string();
+            let transpose_options = key_transpose_options(actual_original_key, use_bemol, use_latin);
             let display_title = display_or_id(&title, chord_id).to_string();
 
             DisplaySongbookSong {
@@ -181,7 +194,7 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
                 transpose: *transpose,
                 format_name: format.to_string(),
                 display_title,
-                chord_data: data,
+                chord_data,
                 target_key,
                 transpose_options,
             }
@@ -288,12 +301,31 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     let sb_json = match load_dataset_item_json(ctx.fd, "songbook.items", id) {
         Some(j) => j,
-        None => return html_response_with_status(404, "404", rsx!{ "Songbook not found" }),
+        None => return html_response_with_status(404, "404", rsx! { "Songbook not found" }),
     };
-    let sb_item: SongbookDatasetRow = match serde_json::from_str(&sb_json) {
+    let mut sb_item: SongbookDatasetRow = match serde_json::from_str(&sb_json) {
         Ok(p) => p,
-        Err(_) => return html_response("500", rsx!{ "Parse error" }),
+        Err(_) => return html_response("500", rsx! { "Parse error" }),
     };
+
+    if ctx.method == "POST" {
+        let body = body_str(ctx.body);
+        let pairs = parse_pairs(body);
+        if let Some(songs) = get_pair(&pairs, "songs") {
+            sb_item.songs = songs.to_string();
+        }
+        if let Some(title) = get_pair(&pairs, "title") {
+            sb_item.title = title.to_string();
+        }
+        if let Some(choir) = get_pair(&pairs, "choir") {
+            sb_item.choir = choir.to_string();
+        }
+    }
+
+    let is_owner = current_user(ctx) == Some(&sb_item.owner);
+    if !is_owner {
+        return html_response_with_status(403, "403", rsx! { "Forbidden" });
+    }
 
     let songs_json = match load_dataset_json(ctx.fd, "song.items") {
         Some(j) => j,

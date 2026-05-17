@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <ttypt/ndx-mod.h>
 
+NDX_HOOK_DECL(int, ssr_dataset_get_json, int, fd, const char *, dataset_id, const char *, include, char **, out_json);
+NDX_HOOK_DECL(int, ssr_dataset_get_item_json, int, fd, const char *, dataset_id, const char *, id, char **, out_json);
+
 /* ---------------------------------------------------------------------------
  * Dynamic JSON array / form-body builder types.
  * Exposed as concrete structs so other modules may inspect fields if needed;
@@ -58,6 +61,7 @@ typedef enum {
 	DATASET_FIELD_BOOL,
 	DATASET_FIELD_NULLABLE_STRING,
 	DATASET_FIELD_REFERENCE,
+	DATASET_FIELD_MULTI_REFERENCE,
 } dataset_field_type_t;
 
 typedef struct {
@@ -99,6 +103,7 @@ typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
  * ------------------------------------------------------------------------- */
 #ifndef COMMON_IMPL
 
+NDX_HOOK_DECL(dataset_def_t *, dataset_find, const char *, dataset_id);
 NDX_HOOK_DECL(int, json_escape, const char *, in, char *, out, size_t, outlen);
 NDX_HOOK_DECL(int, url_encode, const char *, in, char *, out, size_t, outlen);
 NDX_HOOK_DECL(int, b64_encode, const char *, in, char *, out, size_t, outlen);
@@ -261,6 +266,7 @@ NDX_HOOK_DECL(int, dataset_refresh_row, const char *, dataset_id, const char *, 
 NDX_HOOK_DECL(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd);
 NDX_HOOK_DECL(unsigned, dataset_parse_form, const char *, dataset_id);
 
-#endif /* COMMON_IMPL */
+#endif
+ /* COMMON_IMPL */
 
 #endif

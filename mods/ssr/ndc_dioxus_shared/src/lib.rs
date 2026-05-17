@@ -2,7 +2,15 @@ pub mod blueprint;
 pub mod hyle_ssr;
 
 pub use blueprint::get_blueprint;
-pub use hyle_ssr::{items_to_source, item_to_source, render_hyle_edit, render_hyle_list};
+pub use hyle_ssr::{
+    items_to_source,
+    item_to_source,
+    render_hyle_edit,
+    render_hyle_edit_with_source,
+    render_hyle_list,
+    render_hyle_list_with_source,
+};
+pub use hyle::{ModelResult, Row, Source, Value};
 pub use indexmap::IndexMap;
 
 use dioxus::prelude::*;
@@ -61,51 +69,6 @@ pub struct DatasetPayload<T> {
     #[serde(default)]
     pub includes: serde_json::Map<String, serde_json::Value>,
 }
-
-/// Safe borrowed view of song item data passed from C via FFI.
-pub struct SongItem<'a> {
-    pub title:        &'a str,
-    pub data:         &'a str,
-    pub yt:           &'a str,
-    pub audio:        &'a str,
-    pub pdf:          &'a str,
-    pub categories:   &'a str,
-    pub author:       &'a str,
-    pub original_key: i32,
-    pub viewer_zoom:  i32,
-    pub show_media:   bool,
-    pub viewer_bemol: bool,
-    pub viewer_latin: bool,
-    pub owner:        bool,
-}
-
-/// Safe borrowed view of poem item data passed from C via FFI.
-pub struct PoemItem<'a> {
-    pub title:        &'a str,
-    pub head_content: &'a str,
-    pub body_content: &'a str,
-    pub owner:        bool,
-}
-
-pub struct SongbookSong<'a> {
-    pub chord_id:    &'a str,
-    pub format:      &'a str,
-    pub chord_title: &'a str,
-    pub chord_data:  &'a str,
-    pub transpose:   i32,
-    pub original_key: i32,
-}
-
-/// Safe borrowed view of songbook item data passed from C via FFI.
-pub struct SongbookItem<'a> {
-    pub title:      &'a str,
-    pub owner:      &'a str,
-    pub choir:      &'a str,
-    pub viewer_zoom: i32,
-    pub songs:      Vec<SongbookSong<'a>>,
-}
-
-// ChoirSong, ChoirEntry, ChoirItem - removed (now using dataset-based rendering)
 
 /// Interpret a raw byte body as UTF-8 text. Zero allocation; returns "" on invalid UTF-8.
 pub fn body_str(b: &[u8]) -> &str {

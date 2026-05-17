@@ -78,7 +78,7 @@ echo -n "2. Add first poem... "
 echo "This is the first test poem.
 It has multiple lines." > "$TMPFILE1"
 result=$(curl -sw "\n%{http_code}" -X POST "$BASE/poem/add" \
-	-F "id=testpoem1" -F "file=@$TMPFILE1")
+	-F "id=testpoem1" -F "body_content=@$TMPFILE1")
 code=$(echo "$result" | tail -1)
 body=$(echo "$result" | head -n -1)
 if [ "$code" = "303" ]; then
@@ -112,7 +112,7 @@ echo -n "5. Add second poem... "
 echo "This is the second test poem.
 Also with multiple lines." > "$TMPFILE2"
 result=$(curl -sw "\n%{http_code}" -X POST "$BASE/poem/add" \
-	-F "id=testpoem2" -F "file=@$TMPFILE2")
+	-F "id=testpoem2" -F "body_content=@$TMPFILE2")
 code=$(echo "$result" | tail -1)
 body=$(echo "$result" | head -n -1)
 if [ "$code" = "303" ]; then

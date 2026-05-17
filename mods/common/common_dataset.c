@@ -26,59 +26,91 @@
 static dataset_def_t dataset_defs[MAX_DATASETS];
 static size_t dataset_count = 0;
 
-typedef struct {
-	char *fields_json;
-	char *rows_json;
-} dataset_json_parts_t;
 
-/*
- * Association support for reference fields.
- * Registration stores the reference field metadata; reverse lookups are built
- * on demand from the current cached rows.
- */
-#define MAX_REFERENCE_FIELDS 16
+static int dataset_scan_item(const dataset_def_t *def, const char *id);
 
-typedef struct {
-	const char *source_dataset; // e.g., "songbook.items" - which dataset
-	                            // owns this assoc
-	const char *field_name;     // e.g., "choir"
-	const char *target_dataset; // e.g., "choir.items"
-	const char *inverse_name;   // e.g., "songbooks"
-} dataset_assoc_t;
-
-typedef struct {
-	dataset_assoc_t assocs[MAX_REFERENCE_FIELDS];
-	size_t assoc_count;
-} dataset_associations_t;
-
-static dataset_associations_t dataset_associations[MAX_DATASETS];
-
-/*
- * Extract the value of a field from JSON string.
- * Looks for "field":"value" pattern (simple approach).
- */
-static const char *json_extract_field(const char *json, const char *field)
+static int dataset_field_is_multi_reference(dataset_field_type_t type)
 {
-	static char buf[256];
-	char pattern[32];
-	snprintf(pattern, sizeof(pattern), "\"%s\":\"", field);
-	const char *p = strstr(json, pattern);
-	if (!p) {
-		snprintf(pattern, sizeof(pattern), "\"%s\": \"", field);
-		p = strstr(json, pattern);
-	}
-	if (!p)
-		return NULL;
-	p += strlen(pattern);
-	size_t len = 0;
-	while (p[len] && p[len] != '"' && len < sizeof(buf) - 1)
-		len++;
-	if (len >= sizeof(buf))
-		len = sizeof(buf) - 1;
-	memcpy(buf, p, len);
-	buf[len] = '\0';
-	return buf;
+	return type == DATASET_FIELD_MULTI_REFERENCE;
 }
+
+static char *dataset_multiref_json_from_text(const char *text)
+{
+	json_array_t *arr;
+	char *copy;
+	char *line;
+	char *saveptr;
+	char *json;
+
+	arr = json_array_new(0);
+	if (!arr)
+		return NULL;
+
+	if (!text || !text[0]) {
+		json = json_array_finish(arr);
+		if (!json)
+			return strdup("[]");
+		return json;
+	}
+
+	copy = strdup(text);
+	if (!copy) {
+		json_array_free(arr);
+		return NULL;
+	}
+
+	line = strtok_r(copy, "\r\n", &saveptr);
+	while (line) {
+		char escaped[1024];
+		char raw[1060];
+
+		if (line[0]) {
+			if (json_escape(
+			            line,
+			            escaped,
+			            sizeof(escaped) - 1) != 0)
+			{
+				free(copy);
+				json_array_free(arr);
+				return NULL;
+			}
+			snprintf(raw, sizeof(raw), "\"%s\"", escaped);
+			if (json_array_append_raw(arr, raw) != 0) {
+				free(copy);
+				json_array_free(arr);
+				return NULL;
+			}
+		}
+		line = strtok_r(NULL, "\r\n", &saveptr);
+	}
+
+	free(copy);
+	json = json_array_finish(arr);
+	if (!json)
+		return strdup("[]");
+	return json;
+}
+
+static int dataset_json_object_add_field(
+        json_object_t *obj, const dataset_field_t *field, const char *content)
+{
+	char *arr_json;
+	int rc;
+
+	if (!obj || !field)
+		return -1;
+
+	if (!dataset_field_is_multi_reference(field->type))
+		return json_object_kv_str(obj, field->name, content ? content : "");
+
+	arr_json = dataset_multiref_json_from_text(content);
+	if (!arr_json)
+		return -1;
+	rc = json_object_kv_raw(obj, field->name, arr_json);
+	free(arr_json);
+	return rc;
+}
+
 
 static int dataset_def_index(const char *dataset_id)
 {
@@ -94,229 +126,18 @@ static int dataset_def_index(const char *dataset_id)
 	return -1;
 }
 
-/*
- * Build relations JSON for a dataset.
- * Iterates over association maps and builds the inverse relation data.
- */
-static int dataset_build_relations_json(
-        const dataset_def_t *def, char **out_relations_json)
-{
-	int def_idx;
-	dataset_associations_t *assoc;
-	json_object_t *relations;
-	size_t a;
 
-	if (!out_relations_json)
-		return -1;
-	*out_relations_json = NULL;
-
-	def_idx = dataset_def_index(def->id);
-	if (def_idx < 0)
-		return 0;
-
-	assoc = &dataset_associations[def_idx];
-	if (assoc->assoc_count == 0)
-		return 0;
-
-	relations = json_object_new(0);
-	if (!relations)
-		return -1;
-
-	for (a = 0; a < assoc->assoc_count; a++) {
-		dataset_assoc_t *ref;
-		json_object_t *rel_obj;
-		json_array_t *items;
-		unsigned inverse_hd;
-		unsigned cur;
-		const void *key;
-		const void *value;
-		const char *last_ref_value;
-		char target_buf[256];
-		char inverse_buf[128] = { 0 };
-		char keybuf[64];
-		char *items_json;
-		char *rel_json;
-
-		ref = &assoc->assocs[a];
-		if (!ref->field_name || !ref->field_name[0] ||
-		    !ref->target_dataset || !ref->target_dataset[0])
-			continue;
-
-		rel_obj = json_object_new(0);
-		if (!rel_obj) {
-			json_object_free(relations);
-			return -1;
-		}
-
-		snprintf(
-		        target_buf,
-		        sizeof(target_buf),
-		        "%s",
-		        ref->target_dataset);
-		if (ref->inverse_name)
-			snprintf(
-			        inverse_buf,
-			        sizeof(inverse_buf),
-			        "%s",
-			        ref->inverse_name);
-
-		json_object_kv_str(rel_obj, "target", target_buf);
-		if (inverse_buf[0])
-			json_object_kv_str(rel_obj, "inverse", inverse_buf);
-
-		items = json_array_new(0);
-		if (!items) {
-			json_object_free(rel_obj);
-			json_object_free(relations);
-			return -1;
-		}
-
-		inverse_hd = qmap_open(
-		        NULL,
-		        NULL,
-		        QM_STR,
-		        QM_STR,
-		        0x3FF,
-		        QM_PGET | QM_SORTED | QM_MULTIVALUE);
-		if (inverse_hd == 0) {
-			json_array_free(items);
-			json_object_free(rel_obj);
-			json_object_free(relations);
-			return -1;
-		}
-
-		cur = qmap_iter(def->source_hd, NULL, 0);
-		while (qmap_next(&key, &value, cur)) {
-			const char *id;
-			const char *row_json;
-			const char *ref_value;
-
-			id = (const char *)key;
-			row_json = (const char *)value;
-			if (!id || !id[0] || !row_json || !row_json[0])
-				continue;
-
-			ref_value = json_extract_field(row_json, ref->field_name);
-			if (!ref_value || !ref_value[0])
-				continue;
-
-			qmap_put(inverse_hd, ref_value, id);
-		}
-		qmap_fin(cur);
-
-		last_ref_value = NULL;
-		cur = qmap_iter(inverse_hd, NULL, 0);
-		while (qmap_next(&key, &value, cur)) {
-			const char *ref_value;
-			json_object_t *item;
-			unsigned inv_cur;
-			const void *inv_key;
-			const void *inv_value;
-			json_array_t *inv_arr;
-			char *inv_json;
-			char *item_json;
-
-			(void)value;
-			ref_value = (const char *)key;
-			if (!ref_value || !ref_value[0])
-				continue;
-			if (last_ref_value &&
-			    strcmp(last_ref_value, ref_value) == 0)
-				continue;
-			last_ref_value = ref_value;
-
-			item = json_object_new(0);
-			if (!item)
-				continue;
-			json_object_kv_str(item, "id", ref_value);
-
-			inv_cur = qmap_get_multi(inverse_hd, ref_value);
-			inv_arr = json_array_new(0);
-			inv_json = NULL;
-			if (inv_arr) {
-				while (qmap_next(&inv_key, &inv_value, inv_cur)) {
-					char idbuf[128];
-
-					(void)inv_key;
-					snprintf(
-					        idbuf,
-					        sizeof(idbuf),
-					        "%s",
-					        (const char *)inv_value);
-					if (json_array_append_raw(inv_arr, idbuf) != 0)
-						break;
-				}
-				inv_json = json_array_finish(inv_arr);
-			}
-			qmap_fin(inv_cur);
-
-			if (inverse_buf[0] && inv_json)
-				json_object_kv_raw(item, inverse_buf, inv_json);
-			else if (inv_json)
-				free(inv_json);
-
-			item_json = json_object_finish(item);
-			if (item_json) {
-				json_array_append_raw(items, item_json);
-				free(item_json);
-			}
-		}
-		qmap_fin(cur);
-
-		items_json = json_array_finish(items);
-		if (items_json) {
-			json_object_kv_raw(rel_obj, "items", items_json);
-			free(items_json);
-		} else {
-			json_array_free(items);
-		}
-
-		qmap_close(inverse_hd);
-
-		rel_json = json_object_finish(rel_obj);
-		if (rel_json) {
-			snprintf(keybuf, sizeof(keybuf), "%s", ref->field_name);
-			json_object_kv_raw(relations, keybuf, rel_json);
-			free(rel_json);
-		}
-	}
-
-	char *relations_json = json_object_finish(relations);
-	if (!relations_json) {
-		*out_relations_json = NULL;
-		return -1;
-	}
-
-	*out_relations_json = relations_json;
-	return 0;
-}
-
-static const char *dataset_field_type_name(dataset_field_type_t type)
-{
-	switch (type) {
-	case DATASET_FIELD_STRING:
-		return "string";
-	case DATASET_FIELD_INT:
-		return "int";
-	case DATASET_FIELD_BOOL:
-		return "bool";
-	case DATASET_FIELD_NULLABLE_STRING:
-		return "nullable_string";
-	case DATASET_FIELD_REFERENCE:
-		return "reference";
-	}
-	return "string";
-}
-
-static dataset_def_t *dataset_find(const char *dataset_id)
+NDX_LISTENER(dataset_def_t *, dataset_find, const char *, dataset_id)
 {
 	int idx;
 
 	idx = dataset_def_index(dataset_id);
 	if (idx < 0)
 		return NULL;
+
 	return &dataset_defs[idx];
 }
+
 
 static dataset_access_result_t
 dataset_access_allowed(const dataset_def_t *def, int fd, const char *username)
@@ -332,298 +153,6 @@ dataset_access_allowed(const dataset_def_t *def, int fd, const char *username)
 	return DATASET_ACCESS_RESULT_FORBIDDEN;
 }
 
-static int dataset_fields_json_build(const dataset_def_t *def, char **out_json)
-{
-	json_array_t *fields;
-	char *json;
-	size_t i;
-
-	fields = json_array_new(0);
-	if (!fields)
-		return -1;
-
-	for (i = 0; i < def->field_count; i++) {
-		const dataset_field_t *field = &def->fields[i];
-		if (json_array_begin_object(fields) != 0 ||
-		    json_array_kv_str(fields, "name", field->name) != 0 ||
-		    json_array_kv_str(
-		            fields,
-		            "type",
-		            dataset_field_type_name(field->type)) != 0 ||
-		    json_array_kv_bool(fields, "writable", field->writable) !=
-		            0 ||
-		    json_array_end_object(fields) != 0)
-		{
-			json_array_free(fields);
-			return -1;
-		}
-	}
-
-	json = json_array_finish(fields);
-	if (!json)
-		return -1;
-
-	*out_json = json;
-	return 0;
-}
-
-static int dataset_key_field_valid(const dataset_def_t *def)
-{
-	size_t i;
-
-	for (i = 0; i < def->field_count; i++)
-		if (strcmp(def->fields[i].name, def->key_field) == 0)
-			return 1;
-
-	return 0;
-}
-
-/*
- * Builds the rows array for a dataset.
- * Note: Row order is currently determined by qmap iteration order,
- * which generally follows insertion order for small maps or hash order.
- * If include is specified, also read file-based fields from disk.
- */
-static int dataset_scan_item(const dataset_def_t *def, const char *id);
-
-static int dataset_rows_json_build(
-        const dataset_def_t *def, const char *include, char **out_json)
-{
-	json_array_t *rows;
-	unsigned cur;
-	const void *key;
-	const void *value;
-	char *rows_json;
-
-	rows = json_array_new(0);
-	if (!rows)
-		return -1;
-
-	char doc_root[256] = { 0 };
-	get_doc_root(0, doc_root, sizeof(doc_root));
-	const char *root = doc_root[0] ? doc_root : ".";
-
-	cur = qmap_iter(def->source_hd, NULL, 0);
-	while (qmap_next(&key, &value, cur)) {
-		const char *id = (const char *)key;
-		const char *json_val = (const char *)value;
-
-		if (!json_val || !json_val[0]) {
-			dataset_scan_item(def, id);
-			json_val = qmap_get(def->source_hd, id);
-			if (!json_val || !json_val[0])
-				continue;
-		}
-
-		char *row_json = NULL;
-		if (include && include[0]) {
-			char item_path[PATH_MAX];
-			snprintf(
-			        item_path,
-			        sizeof(item_path),
-			        "%s/%s/%s",
-			        root,
-			        def->items_path,
-			        id);
-
-			char base_json[8192] = { 0 };
-			strncpy(base_json, json_val, sizeof(base_json) - 1);
-
-			char include_copy[256];
-			strncpy(include_copy,
-			        include,
-			        sizeof(include_copy) - 1);
-			char *saveptr;
-			char *field = strtok_r(include_copy, ",", &saveptr);
-			while (field) {
-				while (*field == ' ')
-					field++;
-				const dataset_field_t *f = NULL;
-				for (unsigned i = 0; i < def->field_count; i++)
-				{
-					if (strcmp(def->fields[i].name,
-					           field) == 0)
-					{
-						f = &def->fields[i];
-						break;
-					}
-				}
-				if (f && f->file && f->file[0]) {
-					char file_path[PATH_MAX];
-					snprintf(
-					        file_path,
-					        sizeof(file_path),
-					        "%s/%s",
-					        item_path,
-					        f->file);
-					FILE *fp = fopen(file_path, "r");
-					if (fp) {
-						fseek(fp, 0, SEEK_END);
-						long len = ftell(fp);
-						fseek(fp, 0, SEEK_SET);
-						if (len > 0 && len < 4096) {
-							char file_data[4096] = {
-								0
-							};
-							size_t r =
-							        fread(file_data,
-							              1,
-							              len,
-							              fp);
-							file_data[r] = '\0';
-
-							char escaped[8192] = {
-								0
-							};
-							char *ep = escaped;
-							for (size_t i = 0;
-							     file_data[i] &&
-							     ep < escaped + sizeof(escaped) -
-							                     4;
-							     i++)
-							{
-								if (file_data[i] ==
-								            '"' ||
-								    file_data[i] ==
-								            '\\')
-									*ep++ = '\\';
-								*ep++ = file_data
-								        [i];
-							}
-
-							char new_field[128];
-							snprintf(
-							        new_field,
-							        sizeof(new_field),
-							        ",\"%s\":\"%"
-							        "s\"",
-							        field,
-							        escaped);
-							size_t base_len = strlen(
-							        base_json);
-							size_t field_len =
-							        strlen(new_field);
-							if (base_len +
-							            field_len <
-							    sizeof(base_json) -
-							            1)
-							{
-								char *brace = strchr(
-								        base_json,
-								        '}');
-								if (brace) {
-									memmove(brace + field_len,
-									        brace + 1,
-									        strlen(brace));
-									memcpy(brace,
-									       new_field,
-									       field_len);
-								}
-							}
-						}
-						fclose(fp);
-					}
-				}
-				field = strtok_r(NULL, ",", &saveptr);
-			}
-			row_json = base_json;
-		} else {
-			row_json = (char *)json_val;
-		}
-
-		if (row_json && row_json[0]) {
-			if (json_array_append_raw(rows, row_json) != 0) {
-				json_array_free(rows);
-				return -1;
-			}
-		}
-	}
-
-	rows_json = json_array_finish(rows);
-	if (!rows_json)
-		return -1;
-
-	*out_json = rows_json;
-	return 0;
-}
-
-static int dataset_json_parts_build(
-        const dataset_def_t *def,
-        const char *include,
-        dataset_json_parts_t *parts)
-{
-	parts->fields_json = NULL;
-	parts->rows_json = NULL;
-	if (dataset_fields_json_build(def, &parts->fields_json) != 0)
-		return -1;
-	if (dataset_rows_json_build(def, include, &parts->rows_json) != 0) {
-		free(parts->fields_json);
-		parts->fields_json = NULL;
-		return -1;
-	}
-	return 0;
-}
-
-static void dataset_json_parts_free(dataset_json_parts_t *parts)
-{
-	if (!parts)
-		return;
-	free(parts->fields_json);
-	free(parts->rows_json);
-	parts->fields_json = NULL;
-	parts->rows_json = NULL;
-}
-
-static int dataset_json_build(
-        int fd, const dataset_def_t *def, const char *include, char **out_json)
-{
-	(void)fd;
-	json_object_t *root;
-	dataset_json_parts_t parts;
-	char *relations_json = NULL;
-	char *json;
-
-	parts.fields_json = NULL;
-	parts.rows_json = NULL;
-	root = NULL;
-
-	if (dataset_json_parts_build(def, include, &parts) != 0)
-		goto oom;
-
-	if (dataset_build_relations_json(def, &relations_json) != 0)
-		goto oom;
-
-	root = json_object_new(0);
-	if (!root)
-		goto oom;
-
-	if (json_object_kv_str(root, "dataset", def->id) != 0 ||
-	    json_object_kv_int(root, "version", 1) != 0 ||
-	    json_object_kv_str(root, "keyField", def->key_field) != 0 ||
-	    json_object_kv_raw(root, "fields", parts.fields_json) != 0 ||
-	    json_object_kv_raw(root, "rows", parts.rows_json) != 0)
-		goto oom;
-
-	if (relations_json) {
-		if (json_object_kv_raw(root, "relations", relations_json) != 0)
-			goto oom;
-	}
-
-	json = json_object_finish(root);
-	free(relations_json);
-	dataset_json_parts_free(&parts);
-	if (!json)
-		return -1;
-
-	*out_json = json;
-	return 0;
-
-oom:
-	free(relations_json);
-	dataset_json_parts_free(&parts);
-	json_object_free(root);
-	return -1;
-}
 
 static char *dataset_slurp_file(const char *path, size_t *out_len)
 {
@@ -665,6 +194,11 @@ static int dataset_scan_item(const dataset_def_t *def, const char *id)
 	        def->items_path,
 	        id);
 
+	struct stat st;
+	if (lstat(item_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		return -1;
+	}
+
 	json_object_t *obj = json_object_new(0);
 	if (!obj)
 		return -1;
@@ -675,7 +209,7 @@ static int dataset_scan_item(const dataset_def_t *def, const char *id)
 		if (!def->fields[i].file)
 			continue;
 
-		char file_path[PATH_MAX];
+		char file_path[PATH_MAX + 256];
 		snprintf(
 		        file_path,
 		        sizeof(file_path),
@@ -685,8 +219,12 @@ static int dataset_scan_item(const dataset_def_t *def, const char *id)
 
 		char *content = dataset_slurp_file(file_path, NULL);
 		if (content) {
-			json_object_kv_str(obj, def->fields[i].name, content);
+			dataset_json_object_add_field(
+			        obj, &def->fields[i], content);
 			free(content);
+		} else if (dataset_field_is_multi_reference(
+		                   def->fields[i].type)) {
+			dataset_json_object_add_field(obj, &def->fields[i], NULL);
 		}
 	}
 
@@ -742,7 +280,6 @@ NDX_LISTENER(int, dataset_get_item_json,
 {
 	dataset_def_t *def;
 	const char *username;
-	const char *cached;
 
 	if (out_json)
 		*out_json = NULL;
@@ -761,57 +298,18 @@ NDX_LISTENER(int, dataset_get_item_json,
 		return 403;
 	}
 
-	cached = qmap_get(def->source_hd, id);
-	if (cached && cached[0]) {
-		*out_json = strdup(cached);
-		return *out_json ? 0 : -1;
+	if (!qmap_get(def->source_hd, id)) {
+		if (dataset_scan_item(def, id) != 0) {
+			return 404;
+		}
 	}
 
-	if (dataset_scan_item(def, id) != 0)
-		return 500;
-
-	cached = qmap_get(def->source_hd, id);
-	if (cached && cached[0]) {
-		*out_json = strdup(cached);
-		return *out_json ? 0 : -1;
-	}
-
-	char doc_root[256] = { 0 };
-	get_doc_root(0, doc_root, sizeof(doc_root));
-	const char *root = doc_root[0] ? doc_root : ".";
-
-	char item_path[PATH_MAX];
-	snprintf(item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path, id);
-
-	json_object_t *obj = json_object_new(0);
-	if (!obj)
+	/* Double check existence in qmap after potential scan before calling SSR */
+	if (!qmap_get(def->source_hd, id)) {
 		return 404;
-
-	json_object_kv_str(obj, "id", id);
-
-	for (size_t i = 0; i < def->field_count; i++) {
-		if (!def->fields[i].file)
-			continue;
-		char file_path[PATH_MAX];
-		snprintf(file_path, sizeof(file_path), "%s/%s", item_path, def->fields[i].file);
-		char *content = dataset_slurp_file(file_path, NULL);
-		if (content) {
-			json_object_kv_str(obj, def->fields[i].name, content);
-			free(content);
-		}
 	}
 
-	char *json = json_object_finish(obj);
-	if (json) {
-		qmap_put(def->source_hd, id, json);
-		cached = qmap_get(def->source_hd, id);
-		if (cached && cached[0]) {
-			*out_json = strdup(cached);
-			return *out_json ? 0 : -1;
-		}
-	}
-
-	return 404;
+	return ssr_dataset_get_item_json(fd, dataset_id, id, out_json);
 }
 
 static unsigned dataset_parse_row_data(const dataset_def_t *def);
@@ -826,13 +324,9 @@ NDX_LISTENER(unsigned, dataset_parse_form, const char *, dataset_id)
 
 NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 {
-	dataset_associations_t *assoc;
-	size_t i;
-
 	if (!def || !def->id || !def->id[0] || !def->key_field ||
 	    !def->key_field[0] || !def->fields || def->field_count == 0 ||
-	    !def->items_path || def->source_hd == 0 ||
-	    !dataset_key_field_valid(def))
+	    !def->items_path || def->source_hd == 0)
 		return -1;
 
 	if (dataset_count >= MAX_DATASETS || dataset_find(def->id))
@@ -841,26 +335,6 @@ NDX_LISTENER(int, dataset_register, const dataset_def_t *, def)
 	dataset_scan_items((dataset_def_t *)def);
 
 	dataset_defs[dataset_count] = *def;
-	assoc = &dataset_associations[dataset_count];
-	memset(assoc, 0, sizeof(*assoc));
-
-	for (i = 0; i < def->field_count; i++) {
-		const dataset_field_t *f = &def->fields[i];
-		size_t assoc_idx;
-
-		if (f->type != DATASET_FIELD_REFERENCE || !f->target_dataset)
-			continue;
-		if (assoc->assoc_count >= MAX_REFERENCE_FIELDS)
-			return -1;
-
-		assoc_idx = assoc->assoc_count;
-		assoc->assocs[assoc_idx].source_dataset = def->id;
-		assoc->assocs[assoc_idx].field_name = f->name;
-		assoc->assocs[assoc_idx].target_dataset = f->target_dataset;
-		assoc->assocs[assoc_idx].inverse_name = f->inverse_name;
-		assoc->assoc_count++;
-	}
-
 	dataset_count++;
 	return 0;
 }
@@ -874,7 +348,6 @@ NDX_LISTENER(int, dataset_get_json,
 	dataset_def_t *def;
 	const char *username;
 	dataset_access_result_t access_result;
-	int rc;
 
 	if (out_json)
 		*out_json = NULL;
@@ -890,15 +363,7 @@ NDX_LISTENER(int, dataset_get_json,
 	if (access_result == DATASET_ACCESS_RESULT_FORBIDDEN)
 		return 403;
 
-	rc = dataset_json_build(fd, def, include, out_json);
-	if (rc == -2)
-		return 400;
-	if (rc == -3)
-		return 403;
-	if (rc != 0 || !out_json || !*out_json)
-		return 500;
-
-	return 0;
+	return ssr_dataset_get_json(fd, dataset_id, include, out_json);
 }
 
 static int dataset_get_handler(int fd, char *body)
@@ -968,23 +433,134 @@ static int dataset_write_init(
 		return DATASET_INIT_ERR_NO_BODY;
 	}
 
-	ndc_query_parse(body);
-	char csrf[64] = { 0 };
-	ndc_query_param("csrf_token", csrf, sizeof(csrf) - 1);
-	if (csrf_validate(fd, csrf) != 0) {
-		return DATASET_INIT_ERR_BAD_CSRF;
+	{
+		char *copy;
+		copy = strdup(body);
+		if (!copy)
+			return -1;
+		ndc_query_parse(copy);
+		char csrf[64] = { 0 };
+		ndc_query_param("csrf_token", csrf, sizeof(csrf) - 1);
+		free(copy);
+		if (csrf_validate(fd, csrf) != 0) {
+			return DATASET_INIT_ERR_BAD_CSRF;
+		}
 	}
 
 	return 0;
 }
 
-static unsigned dataset_parse_row_data(const dataset_def_t *def)
+static int dataset_hex_digit_value(int ch)
 {
-	unsigned hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
+	if (ch >= '0' && ch <= '9')
+		return ch - '0';
+	if (ch >= 'A' && ch <= 'F')
+		return ch - 'A' + 10;
+	if (ch >= 'a' && ch <= 'f')
+		return ch - 'a' + 10;
+	return -1;
+}
+
+static size_t dataset_url_decode_component(
+        const char *src, size_t src_len, char *out, size_t out_len)
+{
+	size_t si;
+	size_t oi;
+
+	if (!out || out_len == 0)
+		return 0;
+
+	oi = 0;
+	for (si = 0; si < src_len && oi + 1 < out_len; si++) {
+		if (src[si] == '+') {
+			out[oi++] = ' ';
+			continue;
+		}
+		if (src[si] == '%' && si + 2 < src_len) {
+			int hi;
+			int lo;
+
+			hi = dataset_hex_digit_value(src[si + 1]);
+			lo = dataset_hex_digit_value(src[si + 2]);
+			if (hi >= 0 && lo >= 0) {
+				out[oi++] = (char)((hi << 4) | lo);
+				si += 2;
+				continue;
+			}
+		}
+		out[oi++] = src[si];
+	}
+	out[oi] = '\0';
+	return oi;
+}
+
+static int dataset_collect_query_values(
+        const char *body, const char *name, char *buf, size_t buf_len)
+{
+	const char *p;
+	size_t name_len;
+	size_t used;
+
+	if (!body || !name || !buf || buf_len == 0)
+		return -1;
+
+	name_len = strlen(name);
+	used = 0;
+	p = body;
+	while (*p) {
+		const char *amp;
+		const char *eq;
+		size_t key_len;
+		char key[256];
+		char value[1024];
+		size_t value_len;
+
+		amp = strchr(p, '&');
+		if (!amp)
+			amp = p + strlen(p);
+		eq = memchr(p, '=', (size_t)(amp - p));
+		key_len = eq ? (size_t)(eq - p) : (size_t)(amp - p);
+		if (key_len >= sizeof(key))
+			key_len = sizeof(key) - 1;
+		dataset_url_decode_component(p, key_len, key, sizeof(key));
+		if (strcmp(key, name) == 0) {
+			value_len = 0;
+			if (eq && eq + 1 <= amp) {
+				value_len = dataset_url_decode_component(
+				        eq + 1,
+				        (size_t)(amp - (eq + 1)),
+				        value,
+				        sizeof(value));
+			}
+			if (value[0]) {
+				if (used && used + 1 >= buf_len)
+					return -1;
+				if (used)
+					buf[used++] = '\n';
+				if (used + value_len >= buf_len)
+					return -1;
+				memcpy(buf + used, value, value_len);
+				used += value_len;
+				buf[used] = '\0';
+			}
+		}
+		if (*amp == '\0')
+			break;
+		p = amp + 1;
+	}
+
+	return used > 0 ? (int)used : -1;
+}
+
+static unsigned dataset_parse_row_data_body(
+        const dataset_def_t *def, const char *body)
+{
+	unsigned hd;
 	size_t i;
 	int ret_len;
 	char val[1024];
 
+	hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
 	if (hd == 0)
 		return 0;
 
@@ -993,7 +569,13 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 		if (!f->writable)
 			continue;
 
-		ret_len = mpfd_get(f->name, val, sizeof(val) - 1);
+		if (dataset_field_is_multi_reference(f->type))
+			ret_len = dataset_collect_query_values(
+			        body, f->name, val, sizeof(val));
+		else
+			ret_len = -1;
+		if (ret_len <= 0)
+			ret_len = mpfd_get(f->name, val, sizeof(val) - 1);
 		if (ret_len <= 0)
 			ret_len =
 			        ndc_query_param(f->name, val, sizeof(val) - 1);
@@ -1006,6 +588,11 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 		qmap_put(hd, f->name, val);
 	}
 	return hd;
+}
+
+static unsigned dataset_parse_row_data(const dataset_def_t *def)
+{
+	return dataset_parse_row_data_body(def, NULL);
 }
 
 NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd)
@@ -1042,10 +629,10 @@ NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, i
 				write_item_child_file(
 				        item_path, f->file, val, strlen(val));
 			}
-			json_object_kv_str(obj, f->name, val);
+			dataset_json_object_add_field(obj, f, val);
 		} else {
 			if (f->file) {
-				char file_path[PATH_MAX];
+				char file_path[PATH_MAX + 256];
 				snprintf(
 				        file_path,
 				        sizeof(file_path),
@@ -1055,9 +642,13 @@ NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, i
 				char *content =
 				        dataset_slurp_file(file_path, NULL);
 				if (content) {
-					json_object_kv_str(
-					        obj, f->name, content);
+					dataset_json_object_add_field(
+					        obj, f, content);
 					free(content);
+				} else if (dataset_field_is_multi_reference(
+				                   f->type)) {
+					dataset_json_object_add_field(
+					        obj, f, NULL);
 				} else {
 					FILE *fp = fopen(file_path, "w");
 					if (fp)
@@ -1089,7 +680,7 @@ static int dataset_post_handler(int fd, char *body)
 		                         fd, 415, "Unsupported Media Type")
 		               : respond_error(fd, 400, "Bad request");
 
-	unsigned data_hd = dataset_parse_row_data(def);
+	unsigned data_hd = dataset_parse_row_data_body(def, body);
 	if (data_hd == 0)
 		return server_error(fd, "OOM");
 
@@ -1136,7 +727,7 @@ static int dataset_put_handler(int fd, char *body)
 	if (!key[0])
 		return respond_error(fd, 400, "Missing key");
 
-	unsigned data_hd = dataset_parse_row_data(def);
+	unsigned data_hd = dataset_parse_row_data_body(def, body);
 	if (data_hd == 0)
 		return server_error(fd, "OOM");
 

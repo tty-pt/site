@@ -1,0 +1,15 @@
+[submodule "external/hyle"]
+	path = external/hyle
+	url = git@github.com:tty-pt/hyle.git
+[submodule "external/libqmap"]
+	path = external/libqmap
+	url = git@github.com:tty-pt/libqmap.git
+[submodule "external/ndc"]
+	path = external/ndc
+	url = git@github.com:tty-pt/ndc.git
+[submodule "external/libndx"]
+	path = external/libndx
+	url = git@github.com:tty-pt/libndx.git
+[submodule "external/mk"]
+	path = external/mk
+	url = git@github.com:tty-pt/mk.git

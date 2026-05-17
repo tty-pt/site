@@ -220,14 +220,17 @@ static int remove_path_recursive(const char *path)
 	struct dirent *entry;
 	int rc = 0;
 
-	if (lstat(path, &st) != 0)
+	if (lstat(path, &st) != 0) {
 		return -1;
-	if (!S_ISDIR(st.st_mode))
+	}
+	if (!S_ISDIR(st.st_mode)) {
 		return unlink(path);
+	}
 
 	dir = opendir(path);
-	if (!dir)
+	if (!dir) {
 		return -1;
+	}
 
 	while ((entry = readdir(dir)) != NULL) {
 		char child[PATH_MAX];

@@ -14,7 +14,7 @@ Upload a poem via multipart form data.
 
 **Parameters:**
 - `id` (required) - Poem identifier (alphanumeric, used as directory name)
-- `file` (required) - Poem content file (text)
+- `body_content` (required) - Poem content file (text)
 
 **Responses:**
 - `303 See Other` - Success, redirects to `/poem/`
@@ -26,7 +26,7 @@ Upload a poem via multipart form data.
 ```sh
 curl -X POST http://localhost:8080/poem/add \
   -F "id=my-poem" \
-  -F "file=@poem.txt"
+  -F "body_content=@poem.txt"
 ```
 
 ### GET /poem/add

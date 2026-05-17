@@ -16,9 +16,6 @@ use crate::{
 };
 
 /// Convert parsed index items into a hyle `Source`.
-///
-/// For the `"song"` model, also extracts distinct `"type"` values and adds
-/// a `"song_type"` lookup model so the reference field renders as a `<select>`.
 pub fn items_to_source(model: &str, items: &[IndexItem]) -> Source {
     let rows: Vec<Row> = items
         .iter()
@@ -36,28 +33,6 @@ pub fn items_to_source(model: &str, items: &[IndexItem]) -> Source {
     let total = rows.len();
     let mut source: Source = IndexMap::new();
     source.insert(model.to_owned(), ModelResult::many(rows));
-
-    // For song, build synthetic song_type lookup from distinct type values.
-    if model == "song" {
-        let mut seen = std::collections::BTreeSet::new();
-        for item in items {
-            for (k, v) in &item.extra {
-                if k == "type" && !v.is_empty() {
-                    seen.insert(v.clone());
-                }
-            }
-        }
-        let type_rows: Vec<Row> = seen
-            .into_iter()
-            .map(|t| {
-                let mut row = IndexMap::new();
-                row.insert("id".to_owned(), Value::String(t.clone()));
-                row.insert("name".to_owned(), Value::String(t));
-                row
-            })
-            .collect();
-        source.insert("song_type".to_owned(), ModelResult::many(type_rows));
-    }
 
     // For songbook, build synthetic choir_ref lookup from distinct choir values.
     if model == "songbook" {
@@ -117,6 +92,25 @@ pub fn render_hyle_list(
     select_fields: &'static [&'static str],
     default_per_page: usize,
 ) -> ResponsePayload {
+    let source = items_to_source(module, &items);
+    render_hyle_list_with_source(
+        ctx,
+        module,
+        icon,
+        source,
+        select_fields,
+        default_per_page,
+    )
+}
+
+pub fn render_hyle_list_with_source(
+    ctx: &RequestContext<'_>,
+    module: &'static str,
+    icon: Option<&str>,
+    source: Source,
+    select_fields: &'static [&'static str],
+    default_per_page: usize,
+) -> ResponsePayload {
     let query_pairs = parse_pairs(ctx.query);
 
     // Parse page / per_page from URL query params.
@@ -137,7 +131,6 @@ pub fn render_hyle_list(
         })
         .collect();
 
-    let source = items_to_source(module, &items);
     let blueprint = get_blueprint();
     let collection_href = format!("/{module}/");
     let add_href = format!("/{module}/add");
@@ -251,15 +244,10 @@ fn HyleListInner(props: HyleListInnerProps) -> Element {
 
 // ── Edit form support ─────────────────────────────────────────────────────────
 
-/// Build a single-row `Source` for an edit form.
-///
-/// For `"song"`, also builds a `song_type` lookup from the provided
-/// `all_types` list so the reference `<select>` shows all known options.
 pub fn item_to_source(
     model: &str,
     id: &str,
     fields: &IndexMap<String, String>,
-    all_types: Vec<String>,
 ) -> Source {
     let mut row = IndexMap::new();
     row.insert("id".to_owned(), Value::String(id.to_owned()));
@@ -269,39 +257,51 @@ pub fn item_to_source(
     let mut source: Source = IndexMap::new();
     source.insert(model.to_owned(), ModelResult::one(row));
 
-    if model == "song" {
-        let type_rows: Vec<Row> = all_types
-            .into_iter()
-            .map(|t| {
-                let mut r = IndexMap::new();
-                r.insert("id".to_owned(), Value::String(t.clone()));
-                r.insert("name".to_owned(), Value::String(t));
-                r
-            })
-            .collect();
-        source.insert("song_type".to_owned(), ModelResult::many(type_rows));
+    // Synthesize lookups from field values based on blueprint
+    let blueprint = get_blueprint();
+    if let Some(m) = blueprint.models.get(model) {
+        for (field_name, field) in &m.fields {
+            if let hyle::FieldType::Reference { reference } = &field.field_type {
+                if let Some(val) = fields.get(field_name) {
+                    let mut seen = std::collections::BTreeSet::new();
+                    for v in val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                        seen.insert(v.to_owned());
+                    }
+                    if !seen.is_empty() {
+                        let lookup_rows: Vec<Row> = seen
+                            .into_iter()
+                            .map(|v| {
+                                let mut r = IndexMap::new();
+                                r.insert("id".to_owned(), Value::String(v.clone()));
+                                r.insert(reference.display_field.clone(), Value::String(v));
+                                r
+                            })
+                            .collect();
+                        source.insert(reference.entity.clone(), ModelResult::many(lookup_rows));
+                    }
+                }
+            }
+        }
     }
 
     source
 }
 
-/// Render a hyle-driven edit form for a module item.
-pub fn render_hyle_edit(
+pub fn render_hyle_edit_with_source(
     ctx: &crate::RequestContext<'_>,
     module: &'static str,
     icon: Option<&str>,
     id: &str,
+    source: Source,
     fields: IndexMap<String, String>,
     select_fields: &'static [&'static str],
     enctype: &'static str,
-    all_types: Vec<String>,
 ) -> crate::ResponsePayload {
     let title = fields.get("title").map(|s| s.as_str()).unwrap_or("");
     let heading = format!("Edit {}", crate::display_or_id(title, id));
     let action = crate::edit_path(module, id);
     let cancel_href = crate::item_path(module, id);
     let csrf_token = ctx.csrf_token.to_owned();
-    let source = item_to_source(module, id, &fields, all_types);
     let blueprint = get_blueprint();
     let user = ctx.remote_user;
 
@@ -322,6 +322,29 @@ pub fn render_hyle_edit(
                 cancel_href,
             }
         },
+    )
+}
+
+/// Render a hyle-driven edit form for a module item.
+pub fn render_hyle_edit(
+    ctx: &crate::RequestContext<'_>,
+    module: &'static str,
+    icon: Option<&str>,
+    id: &str,
+    initial: IndexMap<String, String>,
+    select_fields: &'static [&'static str],
+    enctype: &'static str,
+) -> crate::ResponsePayload {
+    let source = item_to_source(module, id, &initial);
+    render_hyle_edit_with_source(
+        ctx,
+        module,
+        icon,
+        id,
+        source,
+        initial,
+        select_fields,
+        enctype,
     )
 }
 
@@ -355,24 +378,40 @@ fn HyleEditInner(props: HyleEditInnerProps) -> Element {
     } = props;
 
     use_context_provider(|| HyleConfig { blueprint });
-    let adapter = use_static_adapter(source);
+    let adapter = use_static_adapter(source.clone());
     use_context_provider(|| adapter);
 
     // Build initial committed values from the single row in the source
-    // by reading all select_fields out of the adapter source signal.
-    // Since source is Ready, we can pull the row directly via a query.
+    let initial_committed: IndexMap<String, String> = if let Some(res) = source.get(module) {
+        let rows = res.rows();
+        if !rows.is_empty() {
+            let row = &rows[0];
+            select_fields
+                .iter()
+                .map(|&k| {
+                    let val = match row.get(k) {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(Value::Array(arr)) => arr.iter().filter_map(|v| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        }).collect::<Vec<_>>().join(","),
+                        _ => String::new(),
+                    };
+                    (k.to_owned(), val)
+                })
+                .collect()
+        } else {
+            IndexMap::new()
+        }
+    } else {
+        IndexMap::new()
+    };
+
     let base_query = hyle::Query {
         model: module.to_owned(),
         select: select_fields.iter().map(|s| s.to_string()).collect(),
         ..Default::default()
     };
-
-    // For the edit form: use_filters with all field values pre-committed.
-    // We pass initial_committed from the source row directly.
-    let initial_committed: IndexMap<String, String> = select_fields
-        .iter()
-        .map(|&k| (k.to_owned(), String::new()))
-        .collect();
 
     let filters: HyleFiltersState = use_filters(
         base_query,
