@@ -254,9 +254,6 @@ static int dataset_scan_items(dataset_def_t *def)
 		if (entry->d_name[0] == '.')
 			continue;
 
-		if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN)
-			continue;
-
 		dataset_scan_item(def, entry->d_name);
 	}
 
