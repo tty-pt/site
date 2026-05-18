@@ -180,16 +180,7 @@ NDX_LISTENER(char *, slurp_item_child_file,
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
 	(void)fd;
-	/* When ndc runs as root, it chroots to the site directory.
-	 * Inside the chroot, the site root is at absolute path '/'.
-	 * Using '.' can fail if the chroot doesn't correctly update the CWD.
-	 * When running as non-root, use '.' to access files in the current CWD.
-	 */
-	if (geteuid() == 0) {
-		snprintf(buf, len, "/");
-	} else {
-		snprintf(buf, len, ".");
-	}
+	snprintf(buf, len, ".");
 	return 0;
 }
 
