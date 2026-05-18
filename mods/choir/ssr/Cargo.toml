@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2024"
 autobins = false
 
+resolver = "2"
+
 [lib]
 path = "src/main.rs"
 
 [dependencies]
 dioxus            = { workspace = true }
 ndc_dioxus_shared = { path = "../../ssr/ndc_dioxus_shared" }
+serde_json        = { workspace = true }
+indexmap          = { workspace = true }
+serde             = { workspace = true }

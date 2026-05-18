@@ -7,7 +7,7 @@ use ndc_dioxus_shared::{
 };
 use serde::Deserialize;
 
-use crate::{load_dataset_item_json, load_dataset_source};
+use super::{load_dataset_item_json, load_dataset_source};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);

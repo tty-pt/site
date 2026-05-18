@@ -7,7 +7,7 @@ use ndc_dioxus_shared::{
     key_transpose_options, parse_pairs, render_hyle_list_with_source, split_path, RequestContext,
     ResponsePayload,
 };
-use crate::{load_dataset_item_json, load_dataset_source};
+use super::{load_dataset_item_json, load_dataset_source};
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);

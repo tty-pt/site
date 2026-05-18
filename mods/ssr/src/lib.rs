@@ -167,7 +167,7 @@ pub fn load_dataset_source(dataset_id: &str) -> Option<hyle::Source> {
     let def_ffi = ffi::dataset::find_dataset_def(dataset_id)?;
     let qmap_ptr = unsafe { qmap::Qmap::from_handle(def_ffi.source_hd) };
     
-    // Convert FFI def to hyle-ndc-dataset def
+    // Convert FFI def to hyle-source-qmap def
     let fields = unsafe {
         std::slice::from_raw_parts(def_ffi.fields, def_ffi.field_count)
     };
@@ -182,12 +182,12 @@ pub fn load_dataset_source(dataset_id: &str) -> Option<hyle::Source> {
         };
         
         let field_type = match f.field_type {
-            1 => hyle_ndc_dataset::FieldType::Int,
-            2 => hyle_ndc_dataset::FieldType::Bool,
-            3 => hyle_ndc_dataset::FieldType::NullableString,
-            4 => hyle_ndc_dataset::FieldType::Reference,
-            5 => hyle_ndc_dataset::FieldType::MultiReference,
-            _ => hyle_ndc_dataset::FieldType::String,
+            1 => hyle_source_qmap::FieldType::Int,
+            2 => hyle_source_qmap::FieldType::Bool,
+            3 => hyle_source_qmap::FieldType::NullableString,
+            4 => hyle_source_qmap::FieldType::Reference,
+            5 => hyle_source_qmap::FieldType::MultiReference,
+            _ => hyle_source_qmap::FieldType::String,
         };
         
         let inverse_name = if f.inverse_name.is_null() {
@@ -196,7 +196,7 @@ pub fn load_dataset_source(dataset_id: &str) -> Option<hyle::Source> {
             Some(unsafe { CStr::from_ptr(f.inverse_name) }.to_string_lossy().into_owned())
         };
         
-        hyle_ndc_dataset::FieldDef {
+        hyle_source_qmap::FieldDef {
             name,
             field_type,
             target_dataset,
@@ -205,13 +205,13 @@ pub fn load_dataset_source(dataset_id: &str) -> Option<hyle::Source> {
     }).collect();
     
     let model_id = dataset_id.strip_suffix(".items").unwrap_or(dataset_id);
-    let rust_def = hyle_ndc_dataset::DatasetDef {
+    let rust_def = hyle_source_qmap::DatasetDef {
         id: model_id.to_owned(),
         fields: rust_fields,
         source_hd: def_ffi.source_hd,
     };
     
-    let source = hyle_ndc_dataset::build_source_from_json_qmap(&qmap_ptr, &rust_def);
+    let source = hyle_source_qmap::build_source_from_json_qmap(&qmap_ptr, &rust_def);
     if let Some(res) = source.get(model_id) {
         let pid = unsafe { libc::getpid() };
         eprintln!("[{}] load_dataset_source: loaded {} rows for {}", pid, res.rows().len(), model_id);
