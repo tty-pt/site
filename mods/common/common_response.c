@@ -24,7 +24,7 @@ NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg)
 		char body[640], uri[512] = { 0 }, query[512] = { 0 };
 		int len;
 
-		url_encode(msg, enc, sizeof(enc));
+		ndc_url_encode(msg, enc, sizeof(enc));
 		len = snprintf(
 		        body, sizeof(body), "status=%d&error=%s", status, enc);
 		ndc_env_get(fd, uri, "DOCUMENT_URI");

@@ -7,10 +7,9 @@ This site runs as an NDC application with Rust SSR.
 ## Architecture
 
 - `ndc` handles HTTP, auth, sessions, file uploads, and business logic.
-- `mods/ssr/ssr.c` bridges NDC to the Rust renderer.
-- `mods/ssr/rust-renderer/` renders HTML with Dioxus SSR.
-- `htdocs/wasm.js` loads the browser-side wasm modules.
-- `mods/song/client/` and `mods/songbook/client/` provide Rust/WASM browser enhancements, built with `wasm-bindgen`.
+- `mods/ssr/` builds `ssr.so` from Rust with Dioxus SSR.
+- `htdocs/song-client.js` loads the Rust/WASM song detail browser enhancements.
+- `mods/song/client/` owns the current browser-side enhancement code, built with `wasm-bindgen`.
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
 
@@ -116,5 +115,5 @@ See [debug/README.md](debug/README.md) for full documentation.
 
 - Checked-in browser assets live in [htdocs](htdocs).
 - The browser enhancement path is now wasm-driven; there is no handwritten `app.js` runtime left.
-- The Rust lockfile is tracked at [mods/ssr/rust-renderer/Cargo.lock](mods/ssr/rust-renderer/Cargo.lock).
+- The Rust lockfile is tracked at [mods/ssr/Cargo.lock](mods/ssr/Cargo.lock).
 - The old Fresh/proxy frontend tree has been removed.

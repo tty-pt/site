@@ -6,17 +6,16 @@ This project is a hybrid C and Rust web application built on the NDC framework. 
 
 - **Server (C):** The `ndc` binary serves as the web server. It loads modules as dynamic libraries (`.so`).
 - **Business Logic (C):** Modules in `mods/` (e.g., `auth`, `song`, `poem`) handle requests, manage data in the `items/` directory, and perform logic.
-- **SSR Bridge (C/Rust):** `mods/ssr/ssr.c` acts as a high-performance bridge. It passes request data and complex payloads as **JSON strings** to a Rust dynamic library (`mods/ssr/rust-renderer`). This avoids complex struct mirroring and minimizes FFI boilerplate.
-- **FFI Boundary:** The C/Rust boundary is surgical. It uses a stable `RenderRequest` / `RenderResult` C-compatible ABI. Memory allocated by Rust MUST be freed by Rust via an explicit `ssr_free_result_ffi` call from the C side. **Note:** This interface is a primary candidate for further optimization and improvement to reduce boilerplate and enhance data throughput.
-- **Rendering (Rust):** The Rust renderer uses Dioxus for HTML generation. It dynamically includes `ssr.rs` files from other modules. JSON is the primary data source, ensuring the C side only needs to preocupy itself with data gathering and authorization before passing a single blob to Rust.
-- **Client-side (Rust/WASM):** Interactive features are implemented in Rust and compiled to WASM (e.g., `mods/song/client`).
+- **SSR (Rust):** `mods/ssr/` builds `ssr.so` using Dioxus SSR. The C side calls the Rust renderer via an NDX hook (`ssr_render`). Module-specific rendering lives in `mods/<module>/ssr/src/main.rs`, auto-discovered by `mods/ssr/build.rs`.
+- **Data access (Rust):** The Rust SSR reads data from C-side qmap handles via NDX hooks (`source_query`, `source_get_data_hd`, `source_get_fields_hd`) and builds typed `hyle::Row`/`hyle::Source` structs directly — no JSON serialization.
+- **Client-side (Rust/WASM):** Interactive features are implemented in Rust and compiled to WASM (e.g., `mods/song/client`), using Dioxus hydration over the SSR-rendered DOM.
 - **Deployment:** The application is designed to run within a chroot environment for security.
 
 ## Project Structure
 
 - `mods/`: Backend logic and SSR definitions.
   - `<module>/<module>.c`: C request handlers and logic.
-  - `<module>/ssr.rs`: Rust rendering logic for the module.
+  - `<module>/ssr/src/main.rs`: Rust rendering logic for the module (auto-discovered by build.rs).
   - `<module>/client/`: (Optional) Rust WASM client-side code.
 - `htdocs/`: Static assets and compiled WASM/JS.
 - `items/`: Data storage for application entities (songs, poems, etc.).
@@ -51,8 +50,9 @@ This project is a hybrid C and Rust web application built on the NDC framework. 
 - **Handlers:** Registered in `ndx_install()` using `ndc_register_handler`.
 
 ### Rust SSR
-- Module rendering logic must be in `ssr.rs` within the module directory.
-- The `rust-renderer` build script (`build.rs`) auto-discovers these files.
+- Module rendering logic must be in `<module>/ssr/src/main.rs`.
+- The build script (`mods/ssr/build.rs`) auto-discovers module SSR files.
+- Module SSR files expose a `route()` function; the SSR dispatcher tries each in discovery order.
 - Use `RequestContext` to access request details and return `ResponsePayload`.
 
 ### Data Management

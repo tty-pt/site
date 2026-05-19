@@ -1,49 +1,34 @@
 use indexmap::IndexMap;
 use dioxus::prelude::*;
 use ndc_dioxus_shared::{
-    current_user, html_response, html_response_with_status, item_menu, layout,
-    render_hyle_edit, render_hyle_list_with_source, split_path,
-    RequestContext, ResponsePayload,
+    current_user, html_response, html_response_with_status,
+    split_path, RequestContext, ResponsePayload,
 };
+use crate::site_ui::{item_menu, layout};
+use crate::hyle_ssr::{render_hyle_edit, render_hyle_list_queried};
 use serde::Deserialize;
 
-use super::{load_dataset_item_json, load_dataset_source};
+use hyle::load_typed_item;
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);
     match (ctx.method, parts.as_slice()) {
         ("GET", ["poem"]) | ("POST", ["poem"]) => {
-            let source = load_dataset_source("poem.items")?;
-            Some(render_hyle_list_with_source(
-                ctx,
-                "poem",
-                Some("📝"),
-                source,
-                &["title", "owner"],
-                20,
+            let source = crate::source_query::query_source("poem.items", ctx.query, Some(20))?;
+            Some(render_hyle_list_queried(
+                ctx, "poem", "📝", source, &["title", "owner"], 20,
             ))
         }
         ("GET", ["poem", id]) if *id != "add" => Some(render_detail(ctx, id)),
         ("GET", ["poem", id, "edit"]) => Some(render_edit(ctx, id)),
-        ("GET", ["poem", id, "delete"]) if *id != "add" => {
-            let json = load_dataset_item_json(ctx.fd, "poem.items", id)?;
-            let item: PoemRow = serde_json::from_str(&json).ok()?;
-            Some(ndc_dioxus_shared::render_delete_confirm("poem", id, &item.title, ctx))
-        }
-        _ => ndc_dioxus_shared::default_crud_routes(ctx, "poem", Some("📝"), None, None),
+        _ => crate::site_ui::default_crud_routes(ctx, "poem", "📝"),
     }
 }
 
 pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_item_json(ctx.fd, "poem.items", id) {
-        Some(j) => j,
-        None => {
-            return html_response_with_status(404, "404", rsx! { "Poem not found" })
-        }
-    };
-
-    let item: PoemRow = match serde_json::from_str(&json) {
-        Ok(p) => p,
+    let item: PoemRow = match load_typed_item("poem.items", id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return html_response_with_status(404, "404", rsx! { "Poem not found" }),
         Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
     };
 
@@ -60,8 +45,8 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
             current_user(ctx),
             &page_title,
             &path,
-            Some("📝"),
-            Some(item_menu("poem", id, is_owner)),
+        "📝",
+        Some(item_menu("poem", id, is_owner)),
             rsx! {
                 div { class: "flex flex-col gap-4",
                     div { 
@@ -78,15 +63,9 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 }
 
 pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_item_json(ctx.fd, "poem.items", id) {
-        Some(j) => j,
-        None => {
-            return html_response_with_status(404, "404", rsx! { "Poem not found" })
-        }
-    };
-
-    let item: PoemRow = match serde_json::from_str(&json) {
-        Ok(p) => p,
+    let item: PoemRow = match load_typed_item("poem.items", id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return html_response_with_status(404, "404", rsx! { "Poem not found" }),
         Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
     };
 
@@ -102,10 +81,7 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
     // as we want an empty file input for uploading.
 
     render_hyle_edit(
-        ctx,
-        "poem",
-        Some("📝"),
-        id,
+        ctx, "poem", "📝", id,
         fields,
         &["title", "body_content"],
         "multipart/form-data",
@@ -114,8 +90,6 @@ pub fn render_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
 
 #[derive(Debug, Deserialize)]
 struct PoemRow {
-    #[allow(dead_code)]
-    id: String,
     #[serde(default)]
     title: String,
     #[serde(default)]

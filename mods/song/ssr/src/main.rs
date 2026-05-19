@@ -1,45 +1,93 @@
+use std::collections::HashMap;
+use std::ffi::CStr;
+use std::ffi::CString;
+use std::os::raw::c_char;
+use std::os::raw::c_int;
+use std::os::raw::c_void;
+use ndx::ndx_hook_decl;
+use crate::NDX;
 use indexmap::IndexMap;
 use dioxus::prelude::*;
 use serde::Deserialize;
 
 use ndc_dioxus_shared::{
-    current_user, display_or_id, html_response, html_response_with_status, item_menu, item_path,
-    key_transpose_options, parse_pairs, render_hyle_list_with_source, split_path, RequestContext,
-    ResponsePayload,
+    current_user, display_or_id, html_response, html_response_with_status, item_path,
+    parse_pairs, split_path, RequestContext, ResponsePayload,
 };
-use super::{load_dataset_item_json, load_dataset_source};
+use crate::hyle_ssr::render_hyle_list_queried;
+use hyle::{load_source, load_typed_item};
+
+// ── NDX hook declarations (outbound calls routed through NDX.call) ───
+
+#[ndx_hook_decl]
+pub fn song_get_pref(user: *const c_char, name: *const c_char) -> *mut c_char {}
+
+#[ndx_hook_decl]
+pub fn song_get_original_key(id: *const c_char) -> c_int {}
+
+#[ndx_hook_decl]
+pub fn song_transpose(id: *const c_char, semi: c_int, fl: c_int, out: *mut *mut c_char) -> c_int {}
+
+// Rust wrapper functions for ergonomic Rust callers
+pub fn get_song_pref(user: &str, name: &str) -> Option<String> {
+    let user_c = CString::new(user).ok()?;
+    let name_c = CString::new(name).ok()?;
+    let raw = unsafe { song_get_pref(user_c.as_ptr(), name_c.as_ptr()) };
+    if raw.is_null() {
+        None
+    } else {
+        let owned = unsafe { CStr::from_ptr(raw) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    }
+}
+
+pub fn get_song_original_key(id: &str) -> i32 {
+    let id_c = CString::new(id).unwrap();
+    unsafe { song_get_original_key(id_c.as_ptr()) }
+}
+
+pub fn get_song_transpose(id: &str, semi: i32, flags: i32) -> Option<String> {
+    let id_c = CString::new(id).ok()?;
+    let mut raw: *mut c_char = std::ptr::null_mut();
+    let rc = unsafe { song_transpose(id_c.as_ptr(), semi, flags, &mut raw) };
+    if rc == 0 && !raw.is_null() {
+        let owned = unsafe { CStr::from_ptr(raw) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { free(raw.cast()) };
+        Some(owned)
+    } else {
+        if !raw.is_null() {
+            unsafe { free(raw.cast()) };
+        }
+        None
+    }
+}
+
+unsafe extern "C" {
+    fn free(ptr: *mut c_void);
+}
 
 pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
     let parts = split_path(ctx.path);
     match (ctx.method, parts.as_slice()) {
         ("GET", ["song"]) | ("POST", ["song"]) => {
-            let mut source = load_dataset_source("song.items")?;
-            if let Some(types) = load_dataset_source("song.types") {
+            let mut source = crate::source_query::query_source("song.items", ctx.query, Some(10))?;
+            if let Some(types) = crate::source_query::query_source("song.types", "", None) {
                 source.extend(types);
             }
-            Some(render_hyle_list_with_source(
-                ctx,
-                "song",
-                Some("🎸"),
-                source,
+            Some(render_hyle_list_queried(
+                ctx, "song", "🎸", source,
                 &["title", "type", "author"],
                 10,
             ))
         }
         ("GET", ["song", id]) if *id != "add" => Some(render_song_detail(ctx, id)),
         ("GET", ["song", id, "edit"]) => Some(render_song_edit(ctx, id)),
-        ("GET", ["song", id, "delete"]) if *id != "add" => {
-            let json = load_dataset_item_json(ctx.fd, "song.items", id)?;
-            let item: SongRow = serde_json::from_str(&json).ok()?;
-            Some(ndc_dioxus_shared::render_delete_confirm("song", id, &item.title, ctx))
-        }
-        _ => ndc_dioxus_shared::default_crud_routes(
-            ctx,
-            "song",
-            Some("🎸"),
-            None::<ndc_dioxus_shared::CrudHandler>,
-            None::<ndc_dioxus_shared::CrudHandler>,
-        ),
+        _ => crate::site_ui::default_crud_routes(ctx, "song", "🎸"),
     }
 }
 
@@ -54,10 +102,10 @@ fn song_flags(query: &str, user: Option<&str>) -> (i32, bool, bool, bool) {
 
     if query.is_empty() {
         if let Some(user) = user {
-            if let Some(b) = crate::get_song_pref(user, "chords-bemol") {
+            if let Some(b) = get_song_pref(user, "chords-bemol") {
                 use_bemol = b.trim() == "1";
             }
-            if let Some(l) = crate::get_song_pref(user, "chords-latin") {
+            if let Some(l) = get_song_pref(user, "chords-latin") {
                 use_latin = l.trim() == "1";
             }
         }
@@ -67,146 +115,82 @@ fn song_flags(query: &str, user: Option<&str>) -> (i32, bool, bool, bool) {
 }
 
 fn render_song_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_item_json(ctx.fd, "song.items", id) {
-        Some(j) => j,
-        None => return html_response_with_status(404, "404", rsx! { "Song not found" }),
-    };
+	let item: SongRow = match load_typed_item("song.items", id) {
+		Ok(Some(p)) => p,
+		Ok(None) => return html_response_with_status(404, "404", rsx! { "Song not found" }),
+		Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
+	};
 
-    let item: SongRow = match serde_json::from_str(&json) {
-        Ok(p) => p,
-        Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
-    };
+	let title = item.title.as_str();
+	let author = item.author.as_str();
+	let song_type = song_type_display(&item.song_type);
+	let is_owner = current_user(ctx).map(|u| u == item.owner).unwrap_or(false);
 
-    let title = item.title.as_str();
-    let yt_raw = item.yt.as_str();
-    let audio_raw = item.audio.as_str();
-    let pdf_raw = item.pdf.as_str();
-    let author = item.author.as_str();
-    let song_type = song_type_display(&item.song_type);
-    let is_owner = current_user(ctx).map(|u| u == item.owner).unwrap_or(false);
+	let display_title = display_or_id(title, id).to_string();
+	let path = item_path("song", id);
+	let (transpose, use_bemol, use_latin, show_media) = song_flags(ctx.query, current_user(ctx));
 
-    let display_title = display_or_id(title, id).to_string();
-    let path = item_path("song", id);
-    let (transpose, use_bemol, use_latin, show_media_query) = song_flags(ctx.query, current_user(ctx));
-    let show_media = show_media_query;
+	let original_key = get_song_original_key(id);
+	let mut flags = 0x04;
+	if use_bemol { flags |= 0x08; }
+	if use_latin { flags |= 0x80; }
+	let chord_data = get_song_transpose(id, transpose, flags).unwrap_or_else(|| item.data.clone());
 
-    let original_key = crate::get_song_original_key(id);
-    let mut flags = 0x04; // TRANSP_HTML
-    if use_bemol { flags |= 0x08; } // TRANSP_BEMOL
-    if use_latin { flags |= 0x80; } // TRANSP_LATIN
-    
-    let chord_data = crate::get_song_transpose(id, transpose, flags).unwrap_or_else(|| item.data.clone());
+	let save_url = if current_user(ctx).is_some() {
+		"/api/song/prefs".to_string()
+	} else {
+		String::new()
+	};
+	let author_display = if author.is_empty() {
+		"N/A".to_string()
+	} else {
+		author.to_string()
+	};
 
-    let key_options = key_transpose_options(original_key, use_bemol, use_latin);
-    let author_display = if author.is_empty() { "N/A" } else { author };
-    let yt = if yt_raw.is_empty() { None } else { Some(yt_raw) };
-    let audio = if audio_raw.is_empty() { None } else { Some(audio_raw) };
-    let pdf = if pdf_raw.is_empty() { None } else { Some(pdf_raw) };
-    let save_url: &str = if current_user(ctx).is_some() {
-        "/api/song/prefs"
-    } else {
-        ""
-    };
+	let detail_body_html = if !song_type.is_empty() || !author_display.is_empty() {
+		format!(
+			r#"<div class="flex justify-between items-start w-full max-w-xl text-xs text-muted"><div class="italic whitespace-pre-wrap">{}</div><div class="text-right">{}</div></div>"#,
+			ndc_dioxus_shared::escape_html(&song_type),
+			ndc_dioxus_shared::escape_html(&author_display),
+		)
+	} else {
+		String::new()
+	};
 
-    let menu_items = Some(rsx! {
-        { ndc_dioxus_shared::viewer_controls("song", 100, save_url) }
-        form {
-            id: "transpose-form",
-            method: "GET",
-            action: "{path}",
-            class: "flex flex-col gap-2",
-            "data-song-id": "{id}",
-            "data-song-transpose-runtime": "wasm",
-            label {
-                "Key:"
-                select { name: "t",
-                    for (semitones, option_label) in key_options {
-                        option {
-                            value: "{semitones}",
-                            selected: semitones == transpose,
-                            "{option_label}"
-                        }
-                    }
-                }
-            }
-            label {
-                input { r#type: "checkbox", name: "b", value: "1", checked: use_bemol }
-                span { "Flats (♭)" }
-            }
-            label {
-                input { r#type: "checkbox", name: "l", value: "1", checked: use_latin }
-                span { "Latin" }
-            }
-            label {
-                input { r#type: "checkbox", name: "m", value: "1", checked: show_media }
-                span { "▶️ Video" }
-            }
-            button { r#type: "submit", class: "btn", "Apply" }
-        }
-        { item_menu("song", id, is_owner) }
-    });
+	let props = ndc_song_shared::SongDetailPageProps {
+		page_user: current_user(ctx).map(|u| u.to_string()),
+		display_title: display_title.clone(),
+		path,
+		is_owner,
+		state: ndc_song_shared::SongState {
+			song_id: id.to_string(),
+			transpose,
+			use_bemol,
+			use_latin,
+			show_media,
+			yt: item.yt.clone(),
+			audio: item.audio.clone(),
+			pdf: item.pdf.clone(),
+			chord_html: chord_data,
+			original_key,
+			save_url: save_url.clone(),
+		},
+		detail_body_html,
+	};
 
-    html_response(
-        &display_title,
-        ndc_dioxus_shared::layout(
-            current_user(ctx),
-            &display_title,
-            &path,
-            Some("🎸"),
-            menu_items,
-            rsx! {
-                div { class: "center flex flex-col gap-4",
-                    div { id: "song-detail-body", class: "contents", "data-detail-viewer-scope": "1",
-                        if !song_type.is_empty() || !author.is_empty() {
-                            div { class: "flex justify-between items-start w-full max-w-xl text-xs text-muted",
-                                div { class: "italic whitespace-pre-wrap", "{song_type}" }
-                                div { class: "text-right", "{author_display}" }
-                            }
-                        }
-                        div { class: "detail-viewer-scroll w-full max-w-xl", "data-detail-viewer-scroll": "1",
-                            pre {
-                                id: "chord-data",
-                                "data-detail-viewer-target": "1",
-                                class: "whitespace-pre-wrap font-mono p-4 rounded chord-data",
-                                dangerous_inner_html: "{chord_data}"
-                            }
-                        }
-                        div { id: "media-slot", class: "contents",
-                            if show_media && (yt.is_some() || audio.is_some() || pdf.is_some()) {
-                                div { id: "media-container", class: "flex flex-col gap-4 w-full max-w-xl",
-                                    if let Some(yt) = yt {
-                                        iframe {
-                                            src: "https://www.youtube.com/embed/{yt}",
-                                            class: "w-full aspect-video border-none",
-                                            allowfullscreen: true
-                                        }
-                                    }
-                                    if let Some(audio) = audio {
-                                        audio { controls: true, class: "w-full",
-                                            source { src: "{audio}", r#type: "audio/mpeg" }
-                                        }
-                                    }
-                                    if let Some(pdf) = pdf {
-                                        a { href: "{pdf}", target: "_blank", rel: "noopener", class: "text-blue-600", "📄 View PDF" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-        ),
-    )
+	ndc_dioxus_shared::html_response_with_component(
+		&display_title,
+		"",
+		"song",
+		ndc_song_shared::SongDetailPage,
+		props,
+	)
 }
 
 fn render_song_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
-    let json = match load_dataset_item_json(ctx.fd, "song.items", id) {
-        Some(j) => j,
-        None => return html_response_with_status(404, "404", rsx! { "Song not found" }),
-    };
-
-    let item: SongRow = match serde_json::from_str(&json) {
-        Ok(p) => p,
+    let item: SongRow = match load_typed_item("song.items", id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return html_response_with_status(404, "404", rsx! { "Song not found" }),
         Err(e) => return html_response("500", rsx! { "Parse error: {e}" }),
     };
 
@@ -225,25 +209,44 @@ fn render_song_edit(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
         ("data".to_owned(), item.data.clone()),
     ]);
 
-    ndc_dioxus_shared::render_hyle_edit(
-        ctx,
-        "song",
-        Some("🎸"),
-        id,
+    crate::hyle_ssr::render_hyle_edit(
+        ctx, "song", "🎸", id,
         initial,
         &["title", "type", "author", "yt", "audio", "pdf", "data"],
         "multipart/form-data",
     )
 }
 
+fn type_display_map() -> HashMap<String, String> {
+	let mut map = HashMap::new();
+	if let Some(source) = load_source("song.types") {
+		if let Some(types) = source.get("song.types") {
+			for row in types.rows() {
+				let id = row.get("id").and_then(|v| {
+					if let hyle::Value::String(s) = v { Some(s.clone()) } else { None }
+				});
+				let name = row.get("name").and_then(|v| {
+					if let hyle::Value::String(s) = v { Some(s.clone()) } else { None }
+				});
+				if let (Some(id), Some(name)) = (id, name) {
+					map.insert(id, name);
+				}
+			}
+		}
+	}
+	map
+}
+
 fn song_type_display(types: &[String]) -> String {
-    types.join(", ")
+	let map = type_display_map();
+	types.iter()
+		.map(|t| map.get(t).map(|s| s.as_str()).unwrap_or(t))
+		.collect::<Vec<_>>()
+		.join(", ")
 }
 
 #[derive(Debug, Deserialize)]
 struct SongRow {
-    #[allow(dead_code)]
-    id: String,
     #[serde(default)]
     title: String,
     #[serde(default, rename = "type")]

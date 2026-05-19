@@ -12,12 +12,13 @@ dioxus            = { workspace = true }
 dioxus-ssr        = { workspace = true }
 indexmap          = { workspace = true }
 ndc_dioxus_shared = { path = "ndc_dioxus_shared" }
+ndc_song_shared   = { path = "../song/ndc_song_shared" }
 ndx               = "0.1"
 serde             = { workspace = true }
 serde_json        = { workspace = true }
 url               = { workspace = true }
-qmap              = { package = "qmap-rs", path = "../../external/libqmap/rust-bindings" }
-hyle-source-qmap  = { workspace = true }
 hyle              = { workspace = true }
-libc              = "0.2"
+hyle-dioxus        = { workspace = true }
+hyle-dioxus-native = { workspace = true }
+qmap               = { workspace = true }
 

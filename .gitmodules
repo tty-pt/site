@@ -13,3 +13,6 @@
 [submodule "external/mk"]
 	path = external/mk
 	url = git@github.com:tty-pt/mk.git
+[submodule "external/ndc-auth"]
+	path = external/ndc-auth
+	url = git@github.com:tty-pt/ndc-auth.git

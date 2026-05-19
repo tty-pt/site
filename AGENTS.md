@@ -4,12 +4,24 @@
 
 Current runtime:
 - `ndc` on port `8080` handles HTTP, auth, sessions, uploads, and business logic.
-- `mods/ssr/ssr.c` calls the Rust renderer directly.
-- `mods/ssr/rust-renderer/` renders HTML with Dioxus SSR.
-- `htdocs/wasm.js` loads the Rust/WASM browser enhancements.
-- `mods/song/client/` and `mods/songbook/client/` own the current browser-side enhancement code.
+- `mods/ssr/` builds `ssr.so` from Rust with Dioxus SSR.
+- `htdocs/song-client.js` loads the Rust/WASM song detail browser enhancements.
+- `mods/song/client/` owns the current browser-side enhancement code.
+- `mods/source/source.c` (~706 lines) owns dataset CRUD, `/api/dataset/*` routes.
+- Encoding helpers (`ndc_url_encode`, `ndc_url_decode`, `ndc_json_escape`, `ndc_slugify`) live in `external/ndc/src/ndc-encode.c` as direct C functions (not NDX hooks).
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
+
+### Module dependency chain (load order enforced by `mods/core/core.c`)
+
+```
+ndc (libndc.so)
+ ├── common.so    (~980 lines: JSON builders, response helpers, storage, str_trim)
+ ├── ssr.so       (Rust SSR with Dioxus)
+ ├── source.so    (dataset CRUD + /api/dataset/* routes)
+ ├── mods.load     (poem, songbook — loaded after explicit ndx_load calls)
+ └── Others: auth, index, song, choir, mpfd, redir
+```
 
 ## Debug Logging System
 
@@ -68,6 +80,9 @@ For manual startup:
 ```bash
 AUTH_SKIP_CONFIRM=1 ./start.sh
 ```
+
+`start.sh` automatically sets `LD_LIBRARY_PATH` to include `external/ndc/lib/`
+so the updated ndc encoding symbols are found at runtime.
 
 The `-m mods/core/core` flag is required. Without it no modules load, no
 handlers are registered, and requests will crash or return unexpected errors.
@@ -151,7 +166,7 @@ char *val = qmap_get(map, key);   /* do not free(val) */
 
 ### Exported functions
 
-Use `NDX_DEF` in the implementation and `NDX_DECL` in the header.
+Use `NDX_HOOK_DEF` in the host or `NDX_LISTENER` in modules, and `NDX_HOOK_DECL` in shared headers.
 
 ### Style
 
@@ -178,10 +193,10 @@ Use `NDX_DEF` in the implementation and `NDX_DECL` in the header.
 
 ## Rust SSR Layout
 
-- `mods/<module>/ssr.rs` owns module-specific rendering.
-- `mods/ssr/rust-renderer/src/lib.rs` is the generic FFI shell.
-- `mods/ssr/rust-renderer/build.rs` auto-discovers module SSR files.
-- `mods/ssr/rust-renderer/Cargo.lock` is tracked.
+- `mods/<module>/ssr/src/main.rs` owns module-specific rendering.
+- `mods/ssr/src/lib.rs` is the main SSR entry point (FFI shell, route dispatch).
+- `mods/ssr/build.rs` auto-discovers module SSR files.
+- `mods/ssr/Cargo.lock` is tracked.
 
 ## Common Pitfalls
 

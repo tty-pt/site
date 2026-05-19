@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
 
 #include "common_internal.h"
@@ -75,7 +76,7 @@ static int jb_kv_str(json_buf_t *jb, const char *key, const char *value)
 	esc = malloc(esc_cap);
 	if (!esc)
 		return -1;
-	json_escape(v, esc, esc_cap);
+	ndc_json_escape(v, esc, esc_cap);
 
 	rc = jb_field_sep(jb);
 	if (rc == 0 && jb_reserve(jb, strlen(key) + strlen(esc) + 6) == 0)
@@ -300,32 +301,4 @@ NDX_LISTENER(char *, json_object_finish, json_object_t *, jo)
 	out = jo->buf;
 	free(jo);
 	return out;
-}
-
-NDX_LISTENER(int, json_object_free, json_object_t *, jo)
-{
-	if (!jo)
-		return 0;
-	free(jo->buf);
-	free(jo);
-	return 0;
-}
-
-NDX_LISTENER(int, json_array_free, json_array_t *, ja)
-{
-	if (!ja)
-		return 0;
-	free(ja->buf);
-	free(ja);
-	return 0;
-}
-
-int json_object_append_fragment(
-        json_object_t *jo, const char *fragment, size_t len)
-{
-	if (!jo || !fragment)
-		return -1;
-	if (jb_field_sep(JB(jo)) != 0)
-		return -1;
-	return jb_append_str(JB(jo), fragment, len);
 }

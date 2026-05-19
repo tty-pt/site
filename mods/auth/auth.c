@@ -294,8 +294,8 @@ int on_auth_login_error(
 		char ret[256] = { 0 };
 		if (redirect)
 			strncpy(ret, redirect, sizeof(ret) - 1);
-		url_encode(msg, enc, sizeof(enc));
-		url_encode(ret, enc_ret, sizeof(enc_ret));
+		ndc_url_encode(msg, enc, sizeof(enc));
+		ndc_url_encode(ret, enc_ret, sizeof(enc_ret));
 		int plen = snprintf(
 		        pb,
 		        sizeof(pb),

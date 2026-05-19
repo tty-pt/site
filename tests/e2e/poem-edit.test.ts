@@ -48,7 +48,14 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
 
     // ── 2. Navigate to edit page ──────────────────────────────────────────────
     await page.goto(`${BASE}/poem/${poemId}/edit`);
-    await page.waitForSelector('input[name="title"]', { timeout: 5000 });
+    try {
+        await page.waitForSelector('input[name="title"]', { timeout: 5000 });
+    } catch (err) {
+        console.error("Failed to wait for selector 'input[name=\"title\"]'");
+        console.error("Current URL:", page.url());
+        console.error("Page content:", await page.content());
+        throw err;
+    }
 
     // Verify pre-populated title
     const currentTitle = await page.inputValue('input[name="title"]');

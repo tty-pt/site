@@ -2,19 +2,18 @@
  * E2E test: songbook transposition
  *
  * Tests:
- *   1. Create songbook with a song
- *   2. Post transposition change via /api/songbook/:id/transpose
+ *   1. Create songbook with a song via the new add API
+ *   2. Post transposition change via /songbook/:id/transpose
  *   3. Verify transposition is reflected on the view page
  *
- * Requires: ndc running on :8080.
+ * Requires: ndc running on :8080 with AUTH_SKIP_CONFIRM=1.
  */
 
 import { chromium } from "npm:playwright";
-import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
+import { createAndLoginUser, getCsrfToken } from "./helpers/auth.ts";
 
 const BASE = "http://localhost:8080";
 const SONG_ID = "a_alegria_esta_no_coracao";
-const SONG_TITLE = "A alegria está no coração";
 
 Deno.test({
   name: "songbook transposition: persist key change",
@@ -32,36 +31,51 @@ Deno.test({
     await createAndLoginUser(page, BASE);
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const GOTO = { waitUntil: "domcontentloaded" as const };
 
-    // 1. Create a songbook with 1 song
+    // ── 0. Create a choir and seed the song ───────────────────────────────
+    const choirTitle = `Transpose Choir ${Date.now()}`;
+    await page.goto(`${BASE}/choir/add`, GOTO);
+    await page.waitForSelector('input[name="title"]');
+    await page.fill('input[name="title"]', choirTitle);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/choir\/[^/]+$/);
+    const choirId = page.url().split("/choir/")[1];
+
+    const { token: csrfSeed, cookieHeader: chSeed } = await getCsrfToken(cookieHeader, BASE);
+    const seedBody = new URLSearchParams({ song_id: SONG_ID, format: "any", csrf_token: csrfSeed });
+    const seedResp = await fetch(`${BASE}/api/choir/${choirId}/songs`, {
+      method: "POST",
+      body: seedBody.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: chSeed },
+      redirect: "manual",
+    });
+    if (seedResp.status >= 400) throw new Error(`Seed song failed: ${seedResp.status}`);
+    await seedResp.body?.cancel();
+    const repoId = `${choirId}_${SONG_ID}`;
+
+    // ── 1. Create a songbook linked to the choir ──────────────────────────
     const sbTitle = `Transpose Test SB ${Date.now()}`;
-    await page.goto(`${BASE}/songbook/add`);
+    await page.goto(`${BASE}/songbook/add?choir=${choirId}`, GOTO);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', sbTitle);
     await page.click('button[type="submit"]');
     await page.waitForURL(/\/songbook\/[^/]+$/);
     sbId = page.url().split("/songbook/")[1].replace(/\/$/, "");
 
-    // Add song via edit page (multipart)
+    // ── 2. Add song via new API (url-encoded) ─────────────────────────────
     const { token: csrfAdd, cookieHeader: chAdd } = await getCsrfToken(cookieHeader, BASE);
-    const fd = new FormData();
-    fd.append("amount", "1");
-    fd.append("song_0", `${SONG_TITLE} [${SONG_ID}]`);
-    fd.append("key_0", "0");
-    fd.append("orig_0", "0");
-    fd.append("fmt_0", "any");
-    fd.append("csrf_token", csrfAdd);
-
-    const addResp = await fetch(`${BASE}/songbook/${sbId}/edit`, {
+    const addBody = new URLSearchParams({ song_id: repoId, csrf_token: csrfAdd });
+    const addResp = await fetch(`${BASE}/api/songbook/${sbId}/songs`, {
       method: "POST",
-      body: fd,
-      headers: { Cookie: chAdd },
+      body: addBody.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: chAdd },
       redirect: "manual",
     });
     if (addResp.status >= 400) throw new Error(`Add song to SB failed: ${addResp.status}`);
     await addResp.body?.cancel();
 
-    // 2. Transpose the song (n=0, t=2)
+    // ── 3. Transpose the song (n=0, t=2) ──────────────────────────────────
     const { token: csrfTrans, cookieHeader: chTrans } = await getCsrfToken(cookieHeader, BASE);
     const transFd = new FormData();
     transFd.append("n", "0");
@@ -77,16 +91,12 @@ Deno.test({
     if (transResp.status >= 400) throw new Error(`Transpose failed: ${transResp.status}`);
     await transResp.body?.cancel();
 
-    // 3. Verify on view page
+    // ── 4. Verify on view page ────────────────────────────────────────────
     await page.goto(`${BASE}/songbook/${sbId}`);
     await page.waitForSelector('[data-songbook-chord-data]');
-    
-    // We expect the chord data to be rendered.
-    // Transposition +2 of "G" should be "A".
-    // Original song "a_alegria_esta_no_coracao" usually starts with "G".
+
     const chordData = await page.textContent('[data-songbook-chord-data]') ?? "";
     if (!chordData.includes("A") && !chordData.includes("G")) {
-        // Just verify it's not empty and contains some expected chord-like character
         if (chordData.length < 10) throw new Error("Chord data too short or empty");
     }
 

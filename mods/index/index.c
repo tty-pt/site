@@ -2,7 +2,6 @@
 #include <limits.h>
 #include <dirent.h>
 #include <errno.h>
-#include <iconv.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -12,13 +11,12 @@
 #include <ttypt/ndc.h>
 
 #include "./../common/common.h"
+#include "./../source/source.h"
 #include "./../mpfd/mpfd.h"
 #include "./../auth/auth.h"
 #include "./../ssr/ssr.h"
 
 typedef void (*index_cleanup_fn)(const char *id);
-typedef void (*index_tsv_cb)(const char *id, const char *val, void *user);
-typedef int (*index_item_read_fn)(const char *path, char *out, size_t sz);
 typedef size_t (*index_format_fn)(
         const char *id, const char *val, char *out, size_t out_sz);
 typedef int (*index_detail_handler_fn)(int fd, char *body);
@@ -39,7 +37,6 @@ static char modules_json[256 * MAX_MODULES], *modules_json_end = modules_json;
 static size_t modules_rem = sizeof(modules_json), modules_count = 0;
 
 static unsigned module_hd;
-static iconv_t cd;
 
 /* Per-module cleanup callbacks and hd lookup */
 static char module_names[MAX_MODULES][256];
@@ -48,36 +45,6 @@ static unsigned module_hds[MAX_MODULES];
 static unsigned module_flags_arr[MAX_MODULES];
 static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
-
-NDX_LISTENER(int, index_id,
-	char *, result,
-	size_t, result_len,
-	const char *, title,
-	size_t, title_len)
-{
-	size_t i, written;
-	char *o = result;
-
-	written = result_len;
-	iconv(cd, (char **)&title, &title_len, &result, &result_len);
-	written -= result_len;
-
-	for (i = 0; i < written; i++) {
-		register char c = *o;
-		if (c == ' ') {
-			*o = '_';
-			o++;
-		} else if (c >= 'A' && c <= 'Z') {
-			*o = *o + 32;
-			o++;
-		} else if (
-		        (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-		        (c == '_'))
-			o++;
-	}
-	*o = '\0';
-	return 0;
-}
 
 int index_update_json(const char *id, const char *title, unsigned flags)
 {
@@ -96,8 +63,8 @@ int index_update_json(const char *id, const char *title, unsigned flags)
 	        title);
 	module_flags_arr[modules_count] = flags;
 
-	json_escape(id, id_esc, sizeof(id_esc));
-	json_escape(title, title_esc, sizeof(title_esc));
+	ndc_json_escape(id, id_esc, sizeof(id_esc));
+	ndc_json_escape(title, title_esc, sizeof(title_esc));
 
 	offset = snprintf(
 	        modules_json_end,
@@ -135,20 +102,6 @@ static const char *index_name(int fd)
 		*module = '\0';
 	module = uri + 1;
 	return module;
-}
-
-static int index_add_handler(int fd, char *body)
-{
-	char id[256] = { 0 };
-	const char *module;
-	char path[512];
-
-	if (index_add_item(fd, body, id, sizeof(id)) != 0)
-		return 1;
-
-	module = index_name(fd);
-	snprintf(path, sizeof(path), "/%s/%s", module, id);
-	return ndc_redirect(fd, path);
 }
 
 /*
@@ -192,7 +145,7 @@ NDX_LISTENER(int, index_add_item,
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
-	index_id(id, sizeof(id), title, (size_t)title_len);
+	ndc_slugify(title, (size_t)title_len, id, sizeof(id));
 	module = index_name(fd);
 
 	if (item_path_build(fd, module, id, path, sizeof(path)) != 0)
@@ -212,7 +165,7 @@ NDX_LISTENER(int, index_add_item,
 	{
 		char dataset_id[512];
 		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		dataset_refresh_row(fd, dataset_id, id);
+		source_refresh_row(fd, dataset_id, id);
 	}
 
 	snprintf(id_out, id_len, "%s", id);
@@ -224,54 +177,17 @@ NDX_LISTENER(int, index_render_list,
 	unsigned, hd,
 	index_format_fn, fmt)
 {
-	register size_t total = 0;
-	size_t body_len;
-	unsigned cur = qmap_iter(hd, NULL, 0);
-	const void *key, *val;
-	char *body, *s;
 	char path[1024];
+	char query[512] = { 0 };
+	const char *username;
 	int ret;
 
+	(void)hd;
 	ndc_env_get(fd, path, "DOCUMENT_URI");
-
-	// count body size (generous upper bound per entry)
-	while (qmap_next(&key, &val, cur)) {
-		total += qmap_len(QM_STR, key) + qmap_len(QM_STR, val) + 4;
-	}
-
-	total++;
-	body = malloc(total);
-	s = body;
-
-	cur = qmap_iter(hd, NULL, 0);
-	while (qmap_next(&key, &val, cur)) {
-		if (fmt) {
-			s +=
-			        fmt((const char *)key,
-			            (const char *)val,
-			            s,
-			            total - (size_t)(s - body));
-		} else {
-			s += sprintf(s, "%s %s\r\n", (char *)key, (char *)val);
-		}
-	}
-	body_len = (size_t)(s - body);
-	*s = '\0';
-
-	{
-		char query[512] = { 0 };
-		const char *username = get_request_user(fd);
-		ndc_env_get(fd, query, "QUERY_STRING");
-		ret = ssr_render(
-		        fd,
-		        "POST",
-		        path,
-		        query,
-		        body,
-		        body_len,
-		        username ? username : "");
-	}
-	free(body);
+	ndc_env_get(fd, query, "QUERY_STRING");
+	username = get_request_user(fd);
+	ret = ssr_render(
+	        fd, "GET", path, query, "", 0, username ? username : "");
 	return ret;
 }
 
@@ -295,9 +211,8 @@ static int index_generic_add_handler(int fd, char *body)
 	char dataset_id[512];
 
 	const char *username = get_request_user(fd);
-	if (!username || !username[0]) {
+	if (!username || !username[0])
 		return respond_error(fd, 401, "Unauthorized");
-	}
 
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
@@ -315,7 +230,7 @@ static int index_generic_add_handler(int fd, char *body)
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
-	index_id(id, sizeof(id), title, (size_t)title_len);
+	ndc_slugify(title, (size_t)title_len, id, sizeof(id));
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
 
 	if (item_path_build(fd, module, id, items_path, sizeof(items_path)) !=
@@ -329,15 +244,15 @@ static int index_generic_add_handler(int fd, char *body)
 	item_record_ownership(items_path, username);
 	write_meta_file(items_path, "title", title, (size_t)title_len);
 
-	unsigned data_hd = dataset_parse_form(dataset_id);
-	if (!data_hd)
+	unsigned data_handle = source_parse_form(dataset_id);
+	if (!data_handle)
 		return server_error(fd, "OOM");
 
-	if (dataset_update_item(fd, dataset_id, id, data_hd) != 0) {
-		qmap_close(data_hd);
+	if (source_update_item(fd, dataset_id, id, data_handle) != 0) {
+		qmap_close(data_handle);
 		return server_error(fd, "Failed to save item data");
 	}
-	qmap_close(data_hd);
+	qmap_close(data_handle);
 
 	return redirect_to_item(fd, module, id);
 }
@@ -362,17 +277,17 @@ static int index_generic_edit_authorized(
 
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
 
-	unsigned data_hd = dataset_parse_form(dataset_id);
-	if (!data_hd)
+	unsigned data_handle = source_parse_form(dataset_id);
+	if (!data_handle)
 		return server_error(fd, "OOM");
 
-	int rc = dataset_update_item(fd, dataset_id, ctx->id, data_hd);
+	int rc = source_update_item(fd, dataset_id, ctx->id, data_handle);
 	if (rc != 0) {
-		qmap_close(data_hd);
+		qmap_close(data_handle);
 		return server_error(fd, "Failed to update item data");
 	}
 
-	qmap_close(data_hd);
+	qmap_close(data_handle);
 
 	/* Update title in meta file if provided */
 	char title[256];
@@ -412,17 +327,14 @@ static int index_generic_edit_handler(int fd, char *body)
 
 NDX_LISTENER(unsigned, index_open,
 	const char *, name,
-	unsigned, mask,
 	unsigned, flags,
+	unsigned, hd,
 	index_cleanup_fn, cleanup,
 	index_detail_handler_fn, detail_handler,
 	index_handler_fn, add_handler,
 	index_handler_fn, edit_get_handler,
 	index_handler_fn, edit_post_handler)
 {
-	unsigned hd = qmap_open(
-	        NULL, "hd", QM_STR, QM_STR, mask ? mask : 0x3FF, QM_SORTED);
-
 	struct dirent *entry;
 	char buf[PATH_MAX / 2];
 	char id[256] = { 0 };
@@ -431,7 +343,7 @@ NDX_LISTENER(unsigned, index_open,
 
 	get_doc_root(0, doc_root, sizeof(doc_root));
 
-	index_id(id, sizeof(id), name, strlen(name));
+	ndc_slugify(name, strlen(name), id, sizeof(id));
 	index_update_json(id, name, flags);
 
 	if (!(flags & 1))
@@ -503,84 +415,6 @@ NDX_LISTENER(unsigned, index_open,
 NDX_LISTENER(unsigned, index_put, unsigned, hd, char *, key, char *, value)
 {
 	return qmap_put(hd, key, value);
-}
-
-NDX_LISTENER(int, index_tsv_load,
-	unsigned, hd,
-	const char *, path,
-	index_tsv_cb, cb,
-	void *, user)
-{
-	FILE *fp = fopen(path, "r");
-	char line[2048];
-	if (!fp)
-		return -1;
-	while (fgets(line, sizeof(line), fp)) {
-		char *id = line;
-		char *nl = strpbrk(line, "\r\n");
-		if (nl)
-			*nl = '\0';
-		char *val = strchr(id, '\t');
-		if (!val)
-			continue;
-		*val++ = '\0';
-		qmap_put(hd, id, val);
-		if (cb)
-			cb(id, val, user);
-	}
-	fclose(fp);
-	return 0;
-}
-
-NDX_LISTENER(int, index_tsv_save, unsigned, hd, const char *, path)
-{
-	char tmp[PATH_MAX];
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	FILE *fp = fopen(tmp, "w");
-	if (!fp)
-		return -1;
-	unsigned c = qmap_iter(hd, NULL, 0);
-	const void *k, *v;
-	while (qmap_next(&k, &v, c)) {
-		fprintf(fp, "%s\t%s\n", (const char *)k, (const char *)v);
-	}
-	if (fclose(fp) != 0) {
-		unlink(tmp);
-		return -1;
-	}
-	return rename(tmp, path);
-}
-
-NDX_LISTENER(int, index_tsv_rebuild,
-	const char *, doc_root,
-	const char *, module,
-	unsigned, hd,
-	index_item_read_fn, item_read_fn)
-{
-	char p[512];
-	if (module_items_path_build(doc_root, module, p, sizeof(p)) != 0)
-		return -1;
-	DIR *d = opendir(p);
-	if (!d)
-		return -1;
-	struct dirent *e;
-	while ((e = readdir(d))) {
-		if (e->d_name[0] == '.')
-			continue;
-		char item_path[PATH_MAX], val[1024];
-		if (item_path_build_root(
-		            doc_root,
-		            module,
-		            e->d_name,
-		            item_path,
-		            sizeof(item_path)) != 0)
-			continue;
-		if (item_read_fn(item_path, val, sizeof(val)) == 0) {
-			qmap_put(hd, e->d_name, val);
-		}
-	}
-	closedir(d);
-	return 0;
 }
 
 NDX_LISTENER(int, core_get, int, fd, char *, body)
@@ -670,7 +504,10 @@ static int index_delete_handler(int fd, char *body)
 	item_unlink_owner(item_path);
 	int remove_rc = item_remove_path_recursive(item_path);
 	if (remove_rc != 0) {
-		fprintf(stderr, "ERROR delete: item_remove_path_recursive failed for %s\n", item_path);
+		fprintf(stderr,
+		        "ERROR delete: item_remove_path_recursive failed for "
+		        "%s\n",
+		        item_path);
 	}
 
 	/* Find module slot and call cleanup + index_del */
@@ -678,11 +515,18 @@ static int index_delete_handler(int fd, char *body)
 	pid_t pid = getpid();
 	for (size_t i = 0; i < module_slot_count; i++) {
 		char simple_name[257];
-		snprintf(simple_name, sizeof(simple_name), "%s", module_names[i]);
+		snprintf(
+		        simple_name,
+		        sizeof(simple_name),
+		        "%s",
+		        module_names[i]);
 		char *dot = strchr(simple_name, '.');
-		if (dot) *dot = '\0';
+		if (dot)
+			*dot = '\0';
 
-		if (strcmp(module_names[i], module) == 0 || strcmp(simple_name, module) == 0) {
+		if (strcmp(module_names[i], module) == 0 ||
+		    strcmp(simple_name, module) == 0)
+		{
 			hd = module_hds[i];
 			if (module_cleanups[i]) {
 				module_cleanups[i](id);
@@ -806,6 +650,5 @@ void ndx_install(void)
 
 	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
 
-	cd = iconv_open("ASCII//TRANSLIT", "UTF-8");
 	ndc_config.default_handler = core_get;
 }

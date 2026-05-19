@@ -166,17 +166,6 @@ NDX_LISTENER(char *, slurp_file, const char *, path)
 	return buf;
 }
 
-NDX_LISTENER(char *, slurp_item_child_file,
-	const char *, item_path,
-	const char *, name)
-{
-	char path[PATH_MAX];
-
-	if (item_child_path(item_path, name, path, sizeof(path)) != 0)
-		return NULL;
-	return slurp_file(path);
-}
-
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
 	if (fd > 0 && ndc_env_get(fd, buf, "DOCUMENT_ROOT") > 0 && buf[0])
@@ -184,13 +173,6 @@ NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 
 	snprintf(buf, len, ".");
 	return 0;
-}
-
-NDX_LISTENER(int, item_dir_exists, const char *, item_path)
-{
-	struct stat st;
-
-	return stat(item_path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 NDX_LISTENER(int, item_child_path,
@@ -341,13 +323,5 @@ NDX_LISTENER(int, datalist_extract_id,
 		n = outlen - 1;
 	memmove(id_out, lb + 1, n);
 	id_out[n] = '\0';
-	return 0;
-}
-
-NDX_LISTENER(int, index_field_clean, char *, s)
-{
-	for (; s && *s; s++)
-		if (*s == '\t' || *s == '\n' || *s == '\r')
-			*s = ' ';
 	return 0;
 }

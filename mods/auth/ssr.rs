@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 
 use crate::{
-    RequestContext, ResponsePayload, auth_path, body_str, current_user, form_page, get_pair,
+    RequestContext, ResponsePayload, auth_path, body_str, current_user, get_pair,
     html_response, html_response_with_status, parse_pairs,
 };
+use crate::site_ui::form_page;
 
 pub(crate) fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = crate::split_path(&ctx.path);
@@ -36,7 +37,7 @@ pub(crate) fn render_login(ctx: &RequestContext<'_>) -> ResponsePayload {
             current_user(ctx),
             "Login",
             &auth_path("login"),
-            Some("🔑"),
+            "🔑",
             None,
             rsx! {
                 if let Some(error) = error {
@@ -64,7 +65,7 @@ pub(crate) fn render_register(ctx: &RequestContext<'_>) -> ResponsePayload {
             current_user(ctx),
             "Register",
             &auth_path("register"),
-            Some("📝"),
+            "📝",
             None,
             rsx! {
                 form { action: "/auth/register", method: "POST", class: "flex flex-col gap-4",

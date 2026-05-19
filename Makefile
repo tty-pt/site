@@ -3,8 +3,9 @@ DEV ?= 0
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
+CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: mods modules
+all: hyle-lib mods modules clients
 
 mods: mods/ssr
 	@for d in $(MOD_DIRS); do [ "$$d" = "mods/ssr" ] && continue; $(MAKE) -C $$d; done
@@ -14,6 +15,12 @@ mods/ssr:
 
 modules:
 	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done
+
+clients:
+	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
+
+hyle-lib:
+	$(MAKE) -C external/hyle
 
 run:
 	$(MAKE) DEV=1 all
@@ -54,10 +61,10 @@ lint:
 	find mods -name "*.c" -exec clang-tidy {} -- \;
 
 clean:
-	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d clean; done
+	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
 
 distclean:
-	@for d in $(MOD_DIRS) $(MODULE_DIRS); do $(MAKE) -C $$d distclean; done
+	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
 
 # Debug/compilation capture targets
 DEBUG_DIR := debug
@@ -108,7 +115,21 @@ debug-logs:
 	tail -20 $(RUNTIME_LOG_DIR)/ndc.log 2>/dev/null || echo "No runtime log found"
 
 # Clean debug logs
+# Run hyle workspace crate tests (core, ndc, source-qmap)
+hyle-tests:
+	RUSTFLAGS="-l qmap" cargo test --workspace \
+		--manifest-path external/hyle/Cargo.toml 2>&1
+
 debug-clean:
 	rm -rf $(DEBUG_DIR)/*
 
-.PHONY: all mods modules run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests test-data-dirs mods/ssr build-capture test-capture test-single-capture debug-logs debug-clean
+# Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
+DEPLOY_HOST ?= tty.pt
+DEPLOY_PATH ?= /var/www/htdocs
+
+deploy-wasm: clients
+	scp htdocs/*.js htdocs/*.wasm htdocs/*.css \
+	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
+	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
+
+.PHONY: all mods modules clients run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs mods/ssr build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm

@@ -26,9 +26,18 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                                 ),
                             )
                             .field("author", Field::string("Author"))
-                            .field("yt", Field::string("YouTube URL").with_input(InputHint::new("url")))
-                            .field("audio", Field::string("Audio URL").with_input(InputHint::new("url")))
-                            .field("pdf", Field::string("PDF URL").with_input(InputHint::new("url")))
+                            .field(
+                                "yt",
+                                Field::string("YouTube URL").with_input(InputHint::new("url")),
+                            )
+                            .field(
+                                "audio",
+                                Field::string("Audio URL").with_input(InputHint::new("url")),
+                            )
+                            .field(
+                                "pdf",
+                                Field::string("PDF URL").with_input(InputHint::new("url")),
+                            )
                             .field("data", Field::textarea("Chord Data", 20))
                             .field("owner", Field::string("Owner")),
                     )
@@ -54,7 +63,7 @@ pub fn get_blueprint() -> Arc<Blueprint> {
                         Model::new()
                             .field("title", Field::string("Choir Name"))
                             .field("format", Field::textarea("Song Formats", 10)),
-                    )
+                    ),
             )
         })
         .clone()

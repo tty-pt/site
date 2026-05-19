@@ -20,9 +20,19 @@ Deno.test("song detail SSR: verify original key and bolded chords", async () => 
     const chordData = page.locator("#chord-data");
     await chordData.waitFor({ state: "attached", timeout: 5000 });
 
+    // 0. Verify song content is visible in viewport (not hidden in side menu)
+    const mainBox = await page.locator("#main").boundingBox();
+    if (!mainBox || mainBox.width < 10 || mainBox.x < 0) {
+        throw new Error("#main is not visible in viewport");
+    }
+    const chordBox = await chordData.boundingBox();
+    if (!chordBox || chordBox.width < 10 || chordBox.y < 0) {
+        throw new Error("#chord-data is not visible in viewport");
+    }
+
     // 1. Verify chords are bolded (look for <b> tags in innerHTML)
     const innerHtml = await chordData.innerHTML();
-    console.log("Chord HTML snippet:", innerHtml.slice(0, 100));
+    if (Deno.env.get("DEBUG")) console.log("Chord HTML snippet:", innerHtml.slice(0, 100));
     
     if (!innerHtml.includes("<b>") && !innerHtml.includes("&lt;b&gt;")) {
         // Since we are using dangerous_inner_html in SSR, it should contain <b>
@@ -43,7 +53,7 @@ Deno.test("song detail SSR: verify original key and bolded chords", async () => 
     const selectedValue = await page.$eval('select[name="t"]', (el: any) => el.value);
     const selectedText = await page.$eval('select[name="t"] option:checked', (el: any) => el.text);
     
-    console.log(`Selected key value: ${selectedValue}, text: ${selectedText}`);
+    if (Deno.env.get("DEBUG")) console.log(`Selected key value: ${selectedValue}, text: ${selectedText}`);
     
     if (!selectedText.includes("(Original)")) {
         throw new Error(`Original key is not selected by default. Selected: ${selectedText}`);

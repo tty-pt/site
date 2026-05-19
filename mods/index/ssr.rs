@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::{RequestContext, ResponsePayload, current_user, html_response, layout, split_path};
+use crate::{RequestContext, ResponsePayload, current_user, html_response, split_path};
+use crate::site_ui::layout;
 
 pub(crate) fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
 	let parts = split_path(&ctx.path);
@@ -20,10 +21,8 @@ pub(crate) fn render_home(ctx: &RequestContext<'_>) -> ResponsePayload {
     html_response(
         "tty.pt",
         layout(
-            current_user(ctx),
-            "tty.pt",
-            &ctx.path,
-            None,
+            current_user(ctx), "tty.pt", &ctx.path,
+            "🏠",
             None,
             rsx! {
                 div { class: "center",

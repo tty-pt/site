@@ -1,70 +1,36 @@
 #include <ctype.h>
+#include <errno.h>
+#include <iconv.h>
 #include <stdio.h>
 #include <string.h>
 
-#include <openssl/evp.h>
+#include <ttypt/ndc.h>
 #include <ttypt/ndx-mod.h>
 
 #include "common_internal.h"
 
-NDX_LISTENER(int, json_escape, const char *, in, char *, out, size_t, outlen)
+NDX_LISTENER(int, str_trim, char *, s)
 {
-	size_t j = 0;
+	char *start;
+	char *end;
 
-	for (size_t i = 0; in[i] && j + 2 < outlen; i++) {
-		unsigned char c = (unsigned char)in[i];
+	if (!s || !s[0])
+		return 0;
 
-		if (c == '"' || c == '\\') {
-			out[j++] = '\\';
-			out[j++] = c;
-		} else if (c == '\n') {
-			out[j++] = '\\';
-			out[j++] = 'n';
-		} else if (c == '\r') {
-			out[j++] = '\\';
-			out[j++] = 'r';
-		} else if (c == '\t') {
-			out[j++] = '\\';
-			out[j++] = 't';
-		} else if (c < 0x20) {
-			if (j + 6 >= outlen)
-				break;
-			j += snprintf(out + j, outlen - j, "\\u%04x", c);
-		} else {
-			out[j++] = c;
-		}
+	start = s;
+	while (*start == ' ' || *start == '\t' || *start == '\r' ||
+	       *start == '\n')
+		start++;
+	if (start != s)
+		memmove(s, start, strlen(start) + 1);
+
+	end = s + strlen(s);
+	while (end > s) {
+		if (end[-1] != ' ' && end[-1] != '\t' && end[-1] != '\r' &&
+		    end[-1] != '\n')
+			break;
+		end--;
 	}
-
-	out[j] = '\0';
-	return 0;
-}
-
-NDX_LISTENER(int, url_encode, const char *, in, char *, out, size_t, outlen)
-{
-	size_t j = 0;
-
-	for (size_t i = 0; in[i] && j + 4 < outlen; i++) {
-		unsigned char c = (unsigned char)in[i];
-
-		if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
-		{
-			out[j++] = c;
-		} else {
-			j += snprintf(out + j, outlen - j, "%%%02X", c);
-		}
-	}
-
-	out[j] = '\0';
-	return (int)j;
-}
-
-NDX_LISTENER(int, b64_encode, const char *, in, char *, out, size_t, outlen)
-{
-	size_t inlen = strlen(in);
-	size_t needed = ((inlen + 2) / 3) * 4 + 1;
-	if (outlen < needed)
-		return -1;
-	EVP_EncodeBlock(
-	        (unsigned char *)out, (const unsigned char *)in, (int)inlen);
+	*end = '\0';
 	return 0;
 }

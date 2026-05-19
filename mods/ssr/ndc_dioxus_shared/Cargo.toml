@@ -6,10 +6,7 @@ edition = "2024"
 [dependencies]
 dioxus             = { workspace = true }
 dioxus-ssr         = { workspace = true }
-serde              = { workspace = true }
-serde_json         = { workspace = true }
+dioxus-fullstack-core = { version = "0.7.7", features = ["server"] }
+
 url                = { workspace = true }
-indexmap           = { workspace = true }
-hyle               = { workspace = true }
-hyle-dioxus        = { workspace = true }
-hyle-dioxus-native = { workspace = true }
+ndc_types          = { path = "../../ndc-types" }

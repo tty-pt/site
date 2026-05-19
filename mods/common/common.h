@@ -5,10 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <ttypt/ndx-mod.h>
-
-NDX_HOOK_DECL(int, ssr_dataset_get_json, int, fd, const char *, dataset_id, const char *, include, char **, out_json);
-NDX_HOOK_DECL(int, ssr_dataset_get_item_json, int, fd, const char *, dataset_id, const char *, id, char **, out_json);
+#include <ttypt/ndx.h>
 
 /* ---------------------------------------------------------------------------
  * Dynamic JSON array / form-body builder types.
@@ -43,57 +40,15 @@ typedef struct {
 	size_t sz;
 } meta_field_t;
 
-typedef enum {
-	DATASET_ACCESS_PUBLIC = 0,
-	DATASET_ACCESS_LOGIN,
-	DATASET_ACCESS_CALLBACK,
-} dataset_access_policy_t;
+/* Convenience macros: declare a local `fields` array then call these. */
+#define META_READ(item_path, fields)                                           \
+	meta_fields_read(                                                      \
+	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
+#define META_WRITE(item_path, fields)                                          \
+	meta_fields_write(                                                     \
+	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
 
-typedef enum {
-	DATASET_ACCESS_RESULT_ALLOW = 0,
-	DATASET_ACCESS_RESULT_UNAUTHORIZED,
-	DATASET_ACCESS_RESULT_FORBIDDEN,
-} dataset_access_result_t;
-
-typedef enum {
-	DATASET_FIELD_STRING = 0,
-	DATASET_FIELD_INT,
-	DATASET_FIELD_BOOL,
-	DATASET_FIELD_NULLABLE_STRING,
-	DATASET_FIELD_REFERENCE,
-	DATASET_FIELD_MULTI_REFERENCE,
-} dataset_field_type_t;
-
-typedef struct {
-	const char *name; // JSON field name
-	const char *file; // file name in item directory (NULL for key field)
-	dataset_field_type_t type;
-	int writable;
-	const char *target_dataset; // e.g., "choir.items"
-	const char *inverse_name;   // e.g., "songbooks" (for reverse lookup)
-} dataset_field_t;
-
-typedef struct {
-	const char *name;
-	const char *target_dataset_id;
-} dataset_relation_t;
-
-typedef struct {
-	const char *id;
-	const char *key_field;
-	const char *items_path; // path to items directory (e.g.,
-	                        // "items/poem/items")
-	dataset_access_policy_t access_policy;
-	const dataset_field_t *fields;
-	size_t field_count;
-	unsigned source_hd; // qmap handle for index storage
-	void *user;
-} dataset_def_t;
-
-/* Re-use item_ctx_t and flags from auth.h */
-#include "../auth/auth.h"
-
-typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
+typedef int (*str_list_cb)(const char *token, void *user);
 
 /* ---------------------------------------------------------------------------
  * NDX declarations.
@@ -103,10 +58,11 @@ typedef int (*form_body_builder_cb)(int fd, form_body_t *fb, void *user);
  * ------------------------------------------------------------------------- */
 #ifndef COMMON_IMPL
 
-NDX_HOOK_DECL(dataset_def_t *, dataset_find, const char *, dataset_id);
-NDX_HOOK_DECL(int, json_escape, const char *, in, char *, out, size_t, outlen);
-NDX_HOOK_DECL(int, url_encode, const char *, in, char *, out, size_t, outlen);
-NDX_HOOK_DECL(int, b64_encode, const char *, in, char *, out, size_t, outlen);
+NDX_HOOK_DECL(int, str_trim, char *, s);
+NDX_HOOK_DECL(int, str_list_contains, const char *, list, const char *, token);
+NDX_HOOK_DECL(int, str_list_append, char *, out, size_t, out_sz, const char *, token);
+NDX_HOOK_DECL(int, str_list_normalize, const char *, input, char *, out, size_t, out_sz);
+NDX_HOOK_DECL(int, str_list_for_each, const char *, list, str_list_cb, cb, void *, user);
 NDX_HOOK_DECL(int, respond_json, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, respond_error, int, fd, int, status, const char *, msg);
 NDX_HOOK_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
@@ -148,9 +104,6 @@ NDX_HOOK_DECL(int, write_file_path,
 	const char *, buf,
 	size_t, sz);
 NDX_HOOK_DECL(char *, slurp_file, const char *, path);
-NDX_HOOK_DECL(char *, slurp_item_child_file,
-	const char *, item_path,
-	const char *, name);
 NDX_HOOK_DECL(int, get_doc_root, int, fd, char *, buf, size_t, len);
 NDX_HOOK_DECL(int, ensure_dir_path, const char *, path);
 NDX_HOOK_DECL(int, user_path_build,
@@ -158,19 +111,12 @@ NDX_HOOK_DECL(int, user_path_build,
 	const char *, suffix,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_dir_exists, const char *, item_path);
 NDX_HOOK_DECL(int, item_child_path,
 	const char *, item_path,
 	const char *, name,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, index_field_clean, char *, s);
 NDX_HOOK_DECL(int, item_remove_path_recursive, const char *, item_path);
-NDX_HOOK_DECL(int, core_post_form, int, fd, form_body_t *, fb);
-NDX_HOOK_DECL(int, core_post_form_builder,
-	int, fd,
-	form_body_builder_cb, cb,
-	void *, user);
 
 /* Phase A helpers */
 NDX_HOOK_DECL(int, module_path_build,
@@ -239,38 +185,9 @@ NDX_HOOK_DECL(int, json_object_kv_raw,
 	const char *, key,
 	const char *, value);
 NDX_HOOK_DECL(char *, json_object_finish, json_object_t *, jo);
-NDX_HOOK_DECL(int, json_object_free, json_object_t *, jo);
-NDX_HOOK_DECL(int, json_array_free, json_array_t *, ja);
 
-/* --- Form body lifecycle --- */
-NDX_HOOK_DECL(form_body_t *, form_body_new, int, dummy);
-NDX_HOOK_DECL(int, form_body_add,
-	form_body_t *, fb,
-	const char *, name,
-	const char *, value);
-NDX_HOOK_DECL(int, form_body_free, form_body_t *, fb);
+#endif /* COMMON_H */
 
-/* --- Dataset registry / JSON export --- */
-NDX_HOOK_DECL(int, dataset_register, const dataset_def_t *, def);
-NDX_HOOK_DECL(int, dataset_get_json,
-	int, fd,
-	const char *, dataset_id,
-	const char *, include,
-	char **, out_json);
-NDX_HOOK_DECL(int, dataset_get_item_json,
-	int, fd,
-	const char *, dataset_id,
-	const char *, id,
-	char **, out_json);
-NDX_HOOK_DECL(int, dataset_refresh_row, int, fd, const char *, dataset_id, const char *, id);
-NDX_HOOK_DECL(int, dataset_update_item,
-	int, fd,
-	const char *, dataset_id,
-	const char *, id,
-	unsigned, data_hd);
-NDX_HOOK_DECL(unsigned, dataset_parse_form, const char *, dataset_id);
-
-#endif
- /* COMMON_IMPL */
+/* COMMON_IMPL */
 
 #endif

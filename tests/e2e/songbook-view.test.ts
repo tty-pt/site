@@ -43,13 +43,8 @@ Deno.test("songbook: register → login → create songbook → view detail page
     await waitForText(page, "body", sbTitle);
 
     // ── 3. Owner sees the Edit Songbook link ────────────────────────────────
-    await page.waitForSelector('a[href*="/edit"]', { timeout: 5000 });
-    const editLink = await page.getAttribute('a[href*="/edit"]', "href");
-    if (!editLink?.includes(sbId)) {
-      throw new Error(
-        `Edit link "${editLink}" does not belong to songbook ${sbId}`,
-      );
-    }
+    const editSel = `a[href="/songbook/${sbId}/edit"]`;
+    await page.waitForSelector(editSel, { timeout: 5000 });
   } finally {
     // Cleanup: remove the created songbook directory
     if (sbId) {

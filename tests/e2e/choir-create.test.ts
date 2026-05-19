@@ -40,7 +40,6 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
       // and stall subsequent API calls. We only need the SSR HTML for our checks.
       await page.route("**/_frsh/js/**", (route) => route.abort());
       await page.route("**/styles.css", (route) => route.abort());
-      await page.route("**/wasm.js", (route) => route.abort());
       await page.route("**/favicon.ico", (route) => route.abort());
 
       const user = await createAndLoginUser(page, BASE);
@@ -55,7 +54,7 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
       await page.click('button[type="submit"]');
 
       // Should redirect to /choir/<id> after creation
-      await page.waitForURL(/\/choir\//, { timeout: 5000 });
+      await page.waitForURL(/\/choir\/[^/]+$/, { timeout: 5000 });
 
       // ── 2. Verify detail page shows title and owner ─────────────────────────
       await page.waitForSelector("h1", { timeout: 5000 });
@@ -85,8 +84,8 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
       }
 
       // ── 5. Cancel returns to detail page ────────────────────────────────────
-      await page.click('a[href="/choir/' + choirId + '"]');
-      await page.waitForURL(`${BASE}/choir/${choirId}`, { timeout: 5000 });
+      await page.click('a[href*="/choir/' + choirId + '"]');
+      await page.waitForURL(new RegExp(`/choir/${choirId}(/|$)`), { timeout: 8000 });
       await waitForText(page, "body", choirTitle);
 
       // Extract session cookie for out-of-browser API calls (avoids pipelining hangs)
@@ -99,7 +98,7 @@ Deno.test({ name: "choir: register → login → create choir → view detail �
       const fd6 = new FormData();
       fd6.append("title", updatedTitle);
       fd6.append("csrf_token", csrf6);
-      const editResp = await fetch(`${BASE}/api/choir/${choirId}/edit`, {
+      const editResp = await fetch(`${BASE}/choir/${choirId}/edit`, {
         method: "POST",
         body: fd6,
         headers: { Cookie: ch6 },

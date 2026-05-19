@@ -1,0 +1,12 @@
+[package]
+name = "ndc_song_shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dioxus                = { workspace = true }
+serde                 = { workspace = true }
+ndc_dioxus_shared     = { path = "../../ssr/ndc_dioxus_shared" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = "0.6"

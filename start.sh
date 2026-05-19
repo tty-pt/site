@@ -3,6 +3,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
+export LD_LIBRARY_PATH="/home/quirinpa/site/external/ndc/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"

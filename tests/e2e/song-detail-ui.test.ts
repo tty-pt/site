@@ -55,6 +55,16 @@ Deno.test({
       }
     }
 
+    // Transposition form should be in the sidebar, not the body
+    const formInCenter = await page.$('.center #transpose-form');
+    if (formInCenter) {
+      throw new Error('Transpose form should NOT be in .center — it belongs in the sidebar');
+    }
+    const formInFunctions = await page.$('.functions #transpose-form');
+    if (!formInFunctions) {
+      throw new Error('Transpose form should be in .functions sidebar, but was not found');
+    }
+
     // ── 2. Logged in as owner: create song + verify owner sidebar buttons ─────
     await createAndLoginUser(page, BASE);
 

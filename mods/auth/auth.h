@@ -2,7 +2,7 @@
 #define MOD_AUTH_H
 
 #include <stddef.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/ndx.h>
 
 #ifndef PATH_MAX
 #include <limits.h>

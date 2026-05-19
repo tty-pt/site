@@ -2,12 +2,6 @@
 /.deno/
 /items
 /htdocs/*
-!/htdocs/styles.css
-!/htdocs/wasm.js
-!/htdocs/song_client.js
-!/htdocs/song_client_bg.wasm
-!/htdocs/songbook_client.js
-!/htdocs/songbook_client_bg.wasm
 *.so
 *.o
 *.swp
@@ -25,5 +19,10 @@
 /usr
 /mods/song/lib/transp/test_transp
 /mods/song/lib/transp/libtransp.a
-/htdocs/*.js
-/htdocs/*.wasm
+/mods/client/target
+/mods/client/htdocs
+*.wasm
+
+# Exceptions for htdocs
+!/htdocs/styles.css
+!/htdocs/song-client.js

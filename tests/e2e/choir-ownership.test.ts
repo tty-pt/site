@@ -5,7 +5,7 @@
  *   1. User A creates a choir
  *   2. User B (different account) visits the detail page
  *   3. Edit/Delete menu is NOT shown to user B
- *   4. User B's direct POST to /api/choir/:id/edit returns 403
+ *   4. User B's direct POST to /choir/:id/edit returns 403
  *
  * Requires: ndc running on :8080.
  */
@@ -62,7 +62,7 @@ Deno.test("choir ownership: non-owner cannot see edit menu or edit choir", async
       throw new Error("Non-owner user B can see the choir edit link — should be hidden");
     }
 
-    // ── 4. User B direct POST to /api/choir/:id/edit returns 403 ────────────
+    // ── 4. User B direct POST to /choir/:id/edit returns 403 ────────────
     const status = await page.evaluate(
       async ({ url }: { url: string }) => {
         const fd = new FormData();
@@ -70,7 +70,7 @@ Deno.test("choir ownership: non-owner cannot see edit menu or edit choir", async
         const r = await fetch(url, { method: "POST", body: fd });
         return r.status;
       },
-      { url: `${BASE}/api/choir/${choirId}/edit` },
+      { url: `${BASE}/choir/${choirId}/edit` },
     );
 
     if (status !== 403) {

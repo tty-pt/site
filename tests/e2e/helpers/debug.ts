@@ -11,12 +11,14 @@ const DEBUG_DIR = "../../debug/tests";
 
 /**
  * Setup request/response logging for a page.
+ * Only active when DEBUG=1 is set.
  * Logs are printed to stdout and will appear in test capture files.
  */
 export function setupRequestLogging(page: Page): void {
+  if (!Deno.env.get("DEBUG")) return;
+
   page.on("request", (req) => {
     const url = req.url();
-    // Skip noisy resources
     if (url.includes(".css") || url.includes(".wasm") || url.includes(".js")) {
       return;
     }
@@ -25,7 +27,6 @@ export function setupRequestLogging(page: Page): void {
 
   page.on("response", (res) => {
     const url = res.url();
-    // Skip noisy resources
     if (url.includes(".css") || url.includes(".wasm") || url.includes(".js")) {
       return;
     }
