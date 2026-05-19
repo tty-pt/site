@@ -212,7 +212,7 @@ NDX_LISTENER(int, index_add_item,
 	{
 		char dataset_id[512];
 		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		dataset_refresh_row(dataset_id, id);
+		dataset_refresh_row(fd, dataset_id, id);
 	}
 
 	snprintf(id_out, id_len, "%s", id);
@@ -333,7 +333,7 @@ static int index_generic_add_handler(int fd, char *body)
 	if (!data_hd)
 		return server_error(fd, "OOM");
 
-	if (dataset_update_item(dataset_id, id, data_hd) != 0) {
+	if (dataset_update_item(fd, dataset_id, id, data_hd) != 0) {
 		qmap_close(data_hd);
 		return server_error(fd, "Failed to save item data");
 	}
@@ -366,7 +366,7 @@ static int index_generic_edit_authorized(
 	if (!data_hd)
 		return server_error(fd, "OOM");
 
-	int rc = dataset_update_item(dataset_id, ctx->id, data_hd);
+	int rc = dataset_update_item(fd, dataset_id, ctx->id, data_hd);
 	if (rc != 0) {
 		qmap_close(data_hd);
 		return server_error(fd, "Failed to update item data");
@@ -426,7 +426,10 @@ NDX_LISTENER(unsigned, index_open,
 	struct dirent *entry;
 	char buf[PATH_MAX / 2];
 	char id[256] = { 0 };
+	char doc_root[256] = { 0 };
 	DIR *dir;
+
+	get_doc_root(0, doc_root, sizeof(doc_root));
 
 	index_id(id, sizeof(id), name, strlen(name));
 	index_update_json(id, name, flags);
@@ -434,10 +437,10 @@ NDX_LISTENER(unsigned, index_open,
 	if (!(flags & 1))
 		return 0;
 
-	if (module_path_build(".", id, buf, sizeof(buf)) != 0)
+	if (module_path_build(doc_root, id, buf, sizeof(buf)) != 0)
 		return QM_MISS;
 	mkdir(buf, 0755);
-	if (module_items_path_build(".", id, buf, sizeof(buf)) != 0)
+	if (module_items_path_build(doc_root, id, buf, sizeof(buf)) != 0)
 		return QM_MISS;
 	mkdir(buf, 0755);
 

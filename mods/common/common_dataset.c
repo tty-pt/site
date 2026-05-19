@@ -27,7 +27,7 @@ static dataset_def_t dataset_defs[MAX_DATASETS];
 static size_t dataset_count = 0;
 
 
-static int dataset_scan_item(const dataset_def_t *def, const char *id);
+static int dataset_scan_item(int fd, const dataset_def_t *def, const char *id);
 
 static int dataset_field_is_multi_reference(dataset_field_type_t type)
 {
@@ -179,11 +179,11 @@ static char *dataset_slurp_file(const char *path, size_t *out_len)
 	return buf;
 }
 
-static int dataset_scan_item(const dataset_def_t *def, const char *id)
+static int dataset_scan_item(int fd, const dataset_def_t *def, const char *id)
 {
 	char doc_root[256] = { 0 };
-	get_doc_root(0, doc_root, sizeof(doc_root));
-	const char *root = doc_root[0] ? doc_root : ".";
+	get_doc_root(fd, doc_root, sizeof(doc_root));
+	const char *root = (fd == 0 && !doc_root[0]) ? "." : doc_root;
 
 	char item_path[PATH_MAX];
 	snprintf(
@@ -254,19 +254,19 @@ static int dataset_scan_items(dataset_def_t *def)
 		if (entry->d_name[0] == '.')
 			continue;
 
-		dataset_scan_item(def, entry->d_name);
+		dataset_scan_item(0, def, entry->d_name);
 	}
 
 	closedir(dir);
 	return 0;
 }
 
-NDX_LISTENER(int, dataset_refresh_row, const char *, dataset_id, const char *, id)
+NDX_LISTENER(int, dataset_refresh_row, int, fd, const char *, dataset_id, const char *, id)
 {
 	dataset_def_t *def = dataset_find(dataset_id);
 	if (!def || !id || !id[0])
 		return -1;
-	return dataset_scan_item(def, id);
+	return dataset_scan_item(fd, def, id);
 }
 
 NDX_LISTENER(int, dataset_get_item_json,
@@ -296,7 +296,7 @@ NDX_LISTENER(int, dataset_get_item_json,
 	}
 
 	if (!qmap_get(def->source_hd, id)) {
-		if (dataset_scan_item(def, id) != 0) {
+		if (dataset_scan_item(fd, def, id) != 0) {
 			return 404;
 		}
 	}
@@ -592,15 +592,15 @@ static unsigned dataset_parse_row_data(const dataset_def_t *def)
 	return dataset_parse_row_data_body(def, NULL);
 }
 
-NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, id, unsigned, data_hd)
+NDX_LISTENER(int, dataset_update_item, int, fd, const char *, dataset_id, const char *, id, unsigned, data_hd)
 {
 	const dataset_def_t *def = dataset_find(dataset_id);
 	if (!def || !id || !id[0])
 		return -1;
 
 	char doc_root[256] = { 0 };
-	get_doc_root(0, doc_root, sizeof(doc_root));
-	const char *root = doc_root[0] ? doc_root : ".";
+	get_doc_root(fd, doc_root, sizeof(doc_root));
+	const char *root = (fd == 0 && !doc_root[0]) ? "." : doc_root;
 
 	char item_path[PATH_MAX];
 	snprintf(
@@ -659,7 +659,7 @@ NDX_LISTENER(int, dataset_update_item, const char *, dataset_id, const char *, i
 	if (json) {
 		qmap_put(def->source_hd, id, json);
 	}
-	return 0;
+	return dataset_scan_item(fd, def, id);
 }
 
 static int dataset_post_handler(int fd, char *body)
@@ -687,7 +687,7 @@ static int dataset_post_handler(int fd, char *body)
 		return bad_request(fd, "Missing key field");
 	}
 
-	rc = dataset_update_item(def->id, id, data_hd);
+	rc = dataset_update_item(fd, def->id, id, data_hd);
 	qmap_close(data_hd);
 
 	if (rc == 0) {
@@ -728,7 +728,7 @@ static int dataset_put_handler(int fd, char *body)
 	if (data_hd == 0)
 		return server_error(fd, "OOM");
 
-	rc = dataset_update_item(def->id, key, data_hd);
+	rc = dataset_update_item(fd, def->id, key, data_hd);
 	qmap_close(data_hd);
 
 	if (rc == 0)

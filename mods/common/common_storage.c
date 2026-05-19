@@ -179,7 +179,9 @@ NDX_LISTENER(char *, slurp_item_child_file,
 
 NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	(void)fd;
+	if (fd > 0 && ndc_env_get(fd, buf, "DOCUMENT_ROOT") > 0 && buf[0])
+		return 0;
+
 	snprintf(buf, len, ".");
 	return 0;
 }

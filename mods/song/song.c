@@ -501,7 +501,7 @@ static void song_type_index_remove(const char *id)
 {
 	char item_path[PATH_MAX];
 	char type[SONG_TYPES_BUF_SIZE] = { 0 };
-	snprintf(item_path, sizeof(item_path), "items/song/items/%s", id);
+	item_path_build(0, "song", id, item_path, sizeof(item_path));
 	read_meta_file(item_path, "type", type, sizeof(type));
 	song_type_index_remove_from(type, id);
 }
@@ -949,7 +949,7 @@ static void song_cleanup(const char *id)
 	char type[SONG_TYPES_BUF_SIZE] = { 0 };
 
 	song_index_delete(id);
-	snprintf(item_path, sizeof(item_path), "items/song/items/%s", id);
+	item_path_build(0, "song", id, item_path, sizeof(item_path));
 	read_meta_file(item_path, "type", type, sizeof(type));
 	song_types_normalize(type, type, sizeof(type));
 	song_type_index_add(type, id);

@@ -229,13 +229,15 @@ fn HyleListInner(props: HyleListInnerProps) -> Element {
         format!("/{module}/{id}/")
     });
 
+    let filter_keys = Some(select_fields.iter().map(|s| s.to_string()).collect());
+
     rsx! {
         div { class: "center",
             HyleTablePanel {
                 list,
-                filters,
+                filters: Some(filters),
                 row_href,
-                HyleTableFilterBar { filters }
+                HyleTableFilterBar { filters, only: filter_keys }
                 HyleTableFilters {}
             }
         }

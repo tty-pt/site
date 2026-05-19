@@ -98,11 +98,9 @@ get_random_chord_by_type(
 {
 	if (choir_id && choir_id[0]) {
 		char path[PATH_MAX];
-		snprintf(
-		        path,
-		        sizeof(path),
-		        "items/choir/items/%s/songs",
-		        choir_id);
+		char choir_path[PATH_MAX];
+		item_path_build(0, "choir", choir_id, choir_path, sizeof(choir_path));
+		item_child_path(choir_path, "songs", path, sizeof(path));
 		repertoire_row_t *rows = NULL;
 		size_t count = 0;
 		if (repertoire_rows_load(path, &rows, &count) == 0) {
@@ -450,7 +448,7 @@ handle_sb_edit_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	}
 	free(rows);
 
-	dataset_refresh_row("songbook.items", ctx->id);
+	dataset_refresh_row(fd, "songbook.items", ctx->id);
 
 	/* Redirect to view page */
 	char location[256];
@@ -533,7 +531,7 @@ static int handle_sb_transpose_authorized(
 	if (repertoire_file_rewrite(data_path, sb_transpose_cb, &cbc) < 0)
 		return server_error(fd, "Failed to update");
 
-	dataset_refresh_row("songbook.items", ctx->id);
+	dataset_refresh_row(fd, "songbook.items", ctx->id);
 
 	char location[256];
 	snprintf(
@@ -620,7 +618,7 @@ static int handle_sb_randomize_authorized(
 	if (repertoire_file_rewrite(data_path, sb_randomize_cb, &line_num) < 0)
 		return server_error(fd, "Failed to update");
 
-	dataset_refresh_row("songbook.items", ctx->id);
+	dataset_refresh_row(fd, "songbook.items", ctx->id);
 
 	char location[256];
 	snprintf(
@@ -699,7 +697,7 @@ static int handle_sb_add(int fd, char *body)
 			return server_error(
 			        fd, "Failed to write songbook metadata");
 
-		dataset_refresh_row("songbook.items", id);
+		dataset_refresh_row(fd, "songbook.items", id);
 
 		char data_path[PATH_MAX];
 		if (item_child_path(
@@ -815,7 +813,7 @@ static int handle_sb_add(int fd, char *body)
 		}
 	}
 
-	dataset_refresh_row("songbook.items", id);
+	dataset_refresh_row(fd, "songbook.items", id);
 
 	char location[512];
 	snprintf(location, sizeof(location), "/songbook/%s", id);

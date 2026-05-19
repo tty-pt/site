@@ -19,7 +19,7 @@ pub fn route(ctx: &RequestContext<'_>) -> Option<ResponsePayload> {
                 "poem",
                 Some("📝"),
                 source,
-                &["title", "body_content", "owner"],
+                &["title", "owner"],
                 20,
             ))
         }
