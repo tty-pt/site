@@ -481,3 +481,71 @@ th {
 tbody tr:last-child td {
   border-bottom: 0;
 }
+
+/* ── Responsive Tables ── */
+
+.hyle-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media screen and (max-width: 600px) {
+  .hyle-table-wrap table, 
+  .hyle-table-wrap thead, 
+  .hyle-table-wrap tbody, 
+  .hyle-table-wrap th, 
+  .hyle-table-wrap td, 
+  .hyle-table-wrap tr {
+    display: block;
+  }
+
+  /* Hide table headers (but keep for screen readers) */
+  .hyle-table-wrap thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  .hyle-table-wrap tr {
+    margin: 0 0 1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-surface);
+  }
+
+  .hyle-table-wrap td {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    padding-left: 50%;
+    text-align: right;
+    min-height: 44px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .hyle-table-wrap td:last-child {
+    border-bottom: 0;
+  }
+
+  /* Label the data */
+  .hyle-table-wrap td:before {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 45%;
+    height: 100%;
+    padding: 10px 14px;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: bold;
+    color: var(--text-muted);
+    font-size: 0.75em;
+    text-transform: uppercase;
+    content: attr(data-label);
+    display: flex;
+    align-items: center;
+  }
+}
