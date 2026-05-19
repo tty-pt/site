@@ -549,3 +549,39 @@ tbody tr:last-child td {
     align-items: center;
   }
 }
+
+/* ── Responsive Table Footer & Pagination ── */
+
+.hyle-table-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  width: 100%;
+}
+
+.hyle-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.hyle-pagination > * {
+  flex-shrink: 0;
+}
+
+@media screen and (min-width: 600px) {
+  .hyle-table-footer {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  
+  .hyle-pagination {
+    width: auto;
+    justify-content: flex-start;
+  }
+}

@@ -64,8 +64,9 @@ pub fn render_detail(ctx: &RequestContext<'_>, id: &str) -> ResponsePayload {
             Some(item_menu("poem", id, is_owner)),
             rsx! {
                 div { class: "flex flex-col gap-4",
-                    div { class: "poem-body bg-surface p-6 rounded shadow-sm whitespace-pre-wrap font-serif leading-relaxed",
-                        "{body_content}"
+                    div { 
+                        class: "poem-body bg-surface p-6 rounded shadow-sm font-serif leading-relaxed",
+                        dangerous_inner_html: "{body_content}"
                     }
                     if !owner.is_empty() {
                         div { class: "text-sm text-muted text-right", "By {owner}" }
