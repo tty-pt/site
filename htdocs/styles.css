@@ -585,3 +585,20 @@ tbody tr:last-child td {
     justify-content: flex-start;
   }
 }
+
+/* ── Filter Enhancements ── */
+
+.hyle-checkbox-filter {
+  max-height: 70px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
+.hyle-checkbox-filter legend {
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: var(--text-muted);
+}
