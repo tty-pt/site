@@ -380,7 +380,7 @@ void ndx_install(void)
 {
 	ndx_load("./mods/index/index");
 	ndx_load("./mods/common/common");
-	ndx_load("axil-auth");
+	ndx_load("libaxil-auth");
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);
