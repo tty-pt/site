@@ -279,7 +279,11 @@ static int handle_sb_song_add_authorized(
 	qmap_put(dh, "songbook", ctx->id);
 	if (!qmap_get(dh, "format"))
 		qmap_put(dh, "format", "any");
-	source_update_item(fd, "songbook.item_songs", NULL, dh);
+	if (source_update_item(
+	            fd, "songbook.item_songs", NULL, dh) != 0) {
+		qmap_close(dh);
+		return server_error(fd, "Failed to add song to songbook");
+	}
 	qmap_close(dh);
 
 	return redirect_to_item(fd, "songbook", ctx->id);

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <dirent.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <limits.h>
 #include <pwd.h>
@@ -672,7 +673,8 @@ NDX_LISTENER(int, source_update_item,
 	        root,
 	        def->items_path,
 	        id);
-	mkdir(item_path, 0755);
+	if (mkdir(item_path, 0755) != 0 && errno != EEXIST)
+		return -1;
 
 	for (size_t i = 0; i < def->field_count; i++) {
 		const source_field_t *f = &def->fields[i];
@@ -680,8 +682,12 @@ NDX_LISTENER(int, source_update_item,
 
 		if (val) {
 			if (f->file) {
-				write_item_child_file(
-				        item_path, f->file, val, strlen(val));
+				if (write_item_child_file(
+				            item_path,
+				            f->file,
+				            val,
+				            strlen(val)) != 0)
+					return -1;
 			}
 		} else {
 			if (f->file) {

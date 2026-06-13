@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <limits.h>
 #include <sys/stat.h>
 
@@ -60,7 +61,7 @@ static int handle_choir_song_add_auth(
 		qmap_put(dh, "format", "any");
 	if (source_update_item(fd, "choir.repertoire", entry_id, dh) != 0) {
 		qmap_close(dh);
-		return 1;
+		return server_error(fd, "Failed to add song to repertoire");
 	}
 	qmap_close(dh);
 
@@ -510,6 +511,10 @@ void ndx_install(void)
 		        sizeof(rep_path),
 		        "%s/items/choir/repertoire",
 		        root);
-		mkdir(rep_path, 0755);
+		if (mkdir(rep_path, 0755) != 0 && errno != EEXIST)
+			fprintf(stderr,
+			        "WARN: could not create repertoire dir %s: %s\n",
+			        rep_path,
+			        strerror(errno));
 	}
 }
