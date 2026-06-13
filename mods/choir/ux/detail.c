@@ -4,8 +4,6 @@ static bud_node *ch_render_detail_header(const char *title, const char *owner)
 	if (!frag)
 		return NULL;
 
-	bud_append(frag, lx_el("h1", lx_text(title)).data.node);
-
 	if (owner && owner[0]) {
 		char owner_buf[256];
 		snprintf(owner_buf, sizeof(owner_buf), "By %s", owner);

@@ -222,8 +222,6 @@ sb_render_header(const char *title, const char *choir_href, const char *owner)
 	if (!frag)
 		return NULL;
 
-	bud_append(frag, lx_el("h1", lx_text(title)).data.node);
-
 	if (owner && owner[0]) {
 		bud_append(
 		        frag,

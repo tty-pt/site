@@ -616,3 +616,5 @@ tbody tr:last-child td {
   overflow-wrap: break-word;
   white-space: pre-wrap;
 }
+
+body[data-wasm-loaded] [data-wasm-hide] { display: none; }

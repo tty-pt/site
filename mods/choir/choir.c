@@ -59,11 +59,12 @@ static int handle_choir_song_add_auth(
 	qmap_put(dh, "choir", ctx->id);
 	if (!qmap_get(dh, "format"))
 		qmap_put(dh, "format", "any");
-	if (source_update_item(fd, "choir.repertoire", entry_id, dh) != 0) {
-		qmap_close(dh);
-		return server_error(fd, "Failed to add song to repertoire");
-	}
+	int rc = source_update_item(fd, "choir.repertoire", entry_id, dh);
 	qmap_close(dh);
+	if (rc == -1)
+		return server_error(fd, "Failed to add song to repertoire");
+	if (rc != 0)
+		return 1;
 
 	return redirect_to_item(fd, "choir", ctx->id);
 }
@@ -513,7 +514,8 @@ void ndx_install(void)
 		        root);
 		if (mkdir(rep_path, 0755) != 0 && errno != EEXIST)
 			fprintf(stderr,
-			        "WARN: could not create repertoire dir %s: %s\n",
+			        "WARN: could not create repertoire dir %s: "
+			        "%s\n",
 			        rep_path,
 			        strerror(errno));
 	}

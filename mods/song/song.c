@@ -382,11 +382,7 @@ static int song_detail_handler(int fd, char *body)
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", id);
 
 	source_overlay_from_desc(
-	        jo,
-	        &app_state,
-	        song_fields,
-	        BUD_OVERLAY_INT,
-	        BUD_OVERLAY_STR);
+	        jo, &app_state, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
 	/* Populate record fields from JSON into app_state (for bud template) */
 	bud_state_apply(

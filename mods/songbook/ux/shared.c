@@ -58,11 +58,21 @@ static bud_node *g_sb_zoom_label = NULL;
 
 static void parse_songs_array(const char *json)
 {
-	/* Format: "songs":[[title,song_id,key,tr,flags],...] */
-	const char *p = strstr(json, "\"songs\":[");
+	/* Format: "songs": [ [title,song_id,key,tr,flags],...] */
+	const char *p = strstr(json, "\"songs\"");
 	if (!p)
 		return;
-	p += 8;
+	p += 7; /* skip "songs" */
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p != ':')
+		return;
+	p++;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p != '[')
+		return;
+	p++;
 	sb_app_state.n_songs = 0;
 	while (*p && *p != ']' && sb_app_state.n_songs < MAX_SB_SONGS) {
 		while (*p == ' ' || *p == '\t' || *p == '\n')
@@ -145,11 +155,21 @@ static void parse_songs_array(const char *json)
 
 static void parse_opts_array(const char *json)
 {
-	/* Format: "opts":[[id,title],...] */
-	const char *p = strstr(json, "\"opts\":[");
+	/* Format: "opts": [ [id,title],...] */
+	const char *p = strstr(json, "\"opts\"");
 	if (!p)
 		return;
-	p += 7;
+	p += 6; /* skip "opts" (6 chars) */
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p != ':')
+		return;
+	p++;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p != '[')
+		return;
+	p++;
 	sb_app_state.n_song_options = 0;
 	while (*p && *p != ']' && sb_app_state.n_song_options < MAX_SB_OPTS) {
 		while (*p == ' ' || *p == '\t' || *p == '\n')
@@ -209,52 +229,76 @@ static void parse_opts_array(const char *json)
 	}
 }
 
-/* ── WASM state init (called by JS bridge before bud_app_mount) ── */
-
-void wasm_init(const char *json, int len)
-{
-	(void)len;
-
-	bud_json_str(
-	        json, "id", sb_app_state.sb_id, sizeof(sb_app_state.sb_id));
-	bud_json_str(
-	        json, "title", sb_app_state.title, sizeof(sb_app_state.title));
-	bud_json_str(
-	        json, "user", sb_app_state.user, sizeof(sb_app_state.user));
-	bud_json_str(
-	        json,
-	        "csrf",
-	        sb_app_state.csrf_token,
-	        sizeof(sb_app_state.csrf_token));
-	bud_json_str(
-	        json,
-	        "choir",
-	        sb_app_state.choir_id,
-	        sizeof(sb_app_state.choir_id));
-	bud_json_str(
-	        json,
-	        "owner_name",
-	        sb_app_state.owner,
-	        sizeof(sb_app_state.owner));
-
-	sb_app_state.zoom = bud_json_int(json, "zoom", 100);
-	sb_app_state.bemol = bud_json_int(json, "b", 0);
-	sb_app_state.latin = bud_json_int(json, "l", 0);
-	sb_app_state.is_owner = bud_json_int(json, "owner", 0);
-
-	if (sb_app_state.zoom < 70 || sb_app_state.zoom > 170)
-		sb_app_state.zoom = 100;
-
-	parse_songs_array(json);
-	parse_opts_array(json);
-}
-
 #define BUD_LOG(msg)                                                           \
 	do {                                                                   \
 		const char *_m = (msg);                                        \
 		if (bud_host_log_fn)                                           \
 			bud_host_log_fn(_m, strlen(_m));                       \
 	} while (0)
+
+/* ── Field descriptor table for sb_app_state_t (simple fields) ── */
+
+static const bud_field_desc_t songbook_app_fields[] = {
+	OVERLAY_STR(id, sb_app_state_t, sb_id, 128),
+	OVERLAY_INT(zoom, sb_app_state_t, zoom),
+	OVERLAY_INT(b, sb_app_state_t, bemol),
+	OVERLAY_INT(l, sb_app_state_t, latin),
+	OVERLAY_INT(owner, sb_app_state_t, is_owner),
+	OVERLAY_STR(title, sb_app_state_t, title, 256),
+	OVERLAY_STR(user, sb_app_state_t, user, 64),
+	OVERLAY_STR(csrf, sb_app_state_t, csrf_token, 33),
+	OVERLAY_STR(choir, sb_app_state_t, choir_id, 128),
+	OVERLAY_STR(owner_name, sb_app_state_t, owner, 64),
+	FIELD_END
+};
+
+/* ── WASM state init (called by JS bridge before bud_app_mount) ── */
+
+void wasm_init(const char *json, int len)
+{
+	(void)len;
+	memset(&sb_app_state, 0, sizeof(sb_app_state));
+
+	bud_state_apply(&sb_app_state, songbook_app_fields, json);
+
+	if (sb_app_state.zoom < 70 || sb_app_state.zoom > 170)
+		sb_app_state.zoom = 100;
+
+	/* DIAG: log JSON info before array parsing */
+	{
+		int json_len = strlen(json);
+		const char *sp = strstr(json, "\"songs\":[");
+		const char *op = strstr(json, "\"opts\":[");
+		char _b[256];
+		snprintf(
+		        _b, sizeof(_b),
+		        "DIAG wasm_init: len=%d songs_at=%d opts_at=%d",
+		        json_len,
+		        sp ? (int)(sp - json) : -1,
+		        op ? (int)(op - json) : -1);
+		BUD_LOG(_b);
+	}
+
+	parse_songs_array(json);
+	parse_opts_array(json);
+
+	/* DIAG: log parsed state */
+	{
+		char _b[256];
+		snprintf(
+		        _b,
+		        sizeof(_b),
+		        "DIAG wasm_init: n_songs=%d n_opts=%d is_owner=%d "
+		        "zoom=%d user='%s' choir='%s'",
+		        sb_app_state.n_songs,
+		        sb_app_state.n_song_options,
+		        sb_app_state.is_owner,
+		        sb_app_state.zoom,
+		        sb_app_state.user,
+		        sb_app_state.choir_id);
+		BUD_LOG(_b);
+	}
+}
 
 /* ── Zoom slider event handler ──────────────────────────── */
 
@@ -324,8 +368,32 @@ static bud_node *sb_build_body_content(void);
 
 bud_node *bud_app_render(void)
 {
+	g_sb_root = NULL;
+	g_sb_main = NULL;
+	g_sb_zoom_label = NULL;
+	g_sb_n_chord_nodes = 0;
+
 	char zoom_str[16];
 	char zoom_style[64];
+
+	/* DIAG: log before rendering */
+	{
+		char _b[256];
+		snprintf(
+		        _b,
+		        sizeof(_b),
+		        "DIAG bud_app_render: n_songs=%d n_opts=%d is_owner=%d "
+		        "zoom=%d",
+		        sb_app_state.n_songs,
+		        sb_app_state.n_song_options,
+		        sb_app_state.is_owner,
+		        sb_app_state.zoom);
+#ifndef __wasm__
+		fprintf(stderr, "DIAG %s\n", _b);
+#else
+		BUD_LOG(_b);
+#endif
+	}
 
 	snprintf(zoom_str, sizeof(zoom_str), "%d", sb_app_state.zoom);
 	snprintf(
@@ -378,4 +446,24 @@ bud_node *bud_app_render(void)
 	                    .data.node;
 
 	return g_sb_root;
+}
+
+/* DIAG: log tree node IDs */
+void wasm_diag_log_tree(void)
+{
+	if (!g_sb_root)
+		return;
+	char _b[256];
+	snprintf(
+	        _b,
+	        sizeof(_b),
+	        "DIAG tree: root_id=%u main_id=%u zoom_label=%s",
+	        bud_node_id(g_sb_root),
+	        bud_node_id(g_sb_main),
+	        g_sb_zoom_label ? "set" : "null");
+#ifndef __wasm__
+	fprintf(stderr, "DIAG %s\n", _b);
+#else
+	BUD_LOG(_b);
+#endif
 }

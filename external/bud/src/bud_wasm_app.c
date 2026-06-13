@@ -82,6 +82,9 @@ __attribute__((export_name("bud_app_mount"))) void wasm_mount(void)
 	if (!runtime) {
 		bud_node *app = bud_app_render();
 		bud_render_ops(app, noop_emit, NULL);
+		/* DIAG: log tree info after ID assignment */
+		extern void wasm_diag_log_tree(void);
+		wasm_diag_log_tree();
 		runtime = bud_runtime_new(app);
 		bud_runtime_mount(runtime);
 		bud_host_emit_patch(

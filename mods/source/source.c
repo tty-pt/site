@@ -755,6 +755,54 @@ NDX_LISTENER(int, source_update_item,
 		}
 	}
 
+	if (result == 0) {
+		for (size_t i = 0; i < def->field_count; i++) {
+			const source_field_t *f = &def->fields[i];
+			if (f->type != SOURCE_FIELD_REFERENCE &&
+			    f->type != SOURCE_FIELD_MULTI_REFERENCE)
+				continue;
+			const char *val = qmap_get(data_handle, f->name);
+			if (!val || !val[0])
+				continue;
+			const char *resolved =
+			        qmap_field_get(def->fields_hd, id, f->name);
+			if (resolved)
+				continue;
+			char msg[512];
+			snprintf(
+			        msg,
+			        sizeof(msg),
+			        "Referenced %s '%s' not found in %s",
+			        f->name,
+			        val,
+			        f->target_source ? f->target_source
+			                         : "(unknown)");
+			json_object *j_root = json_object_new_object();
+			json_object_object_add(
+			        j_root,
+			        "error",
+			        json_object_new_string("Reference not found"));
+			json_object *j_errors = json_object_new_array();
+			json_object *j_err = json_object_new_object();
+			json_object_object_add(
+			        j_err,
+			        "field",
+			        json_object_new_string(f->name));
+			json_object_object_add(
+			        j_err, "message", json_object_new_string(msg));
+			json_object_array_add(j_errors, j_err);
+			json_object_object_add(j_root, "errors", j_errors);
+			const char *json_str =
+			        json_object_to_json_string(j_root);
+			axil_header_set(fd, "Connection", "close");
+			axil_header_set(fd, "Content-Type", "application/json");
+			axil_respond(fd, 422, json_str);
+			json_object_put(j_root);
+			result = SOURCE_ERR_VALIDATION;
+			break;
+		}
+	}
+
 	if (result == 0)
 		source_after_update(fd, dataset_id, id, data_handle);
 	return result;
