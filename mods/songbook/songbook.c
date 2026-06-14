@@ -881,6 +881,122 @@ static int songbook_detail_handler(int fd, char *body)
 		}
 	}
 
+	/* Fallback: load from legacy data.txt if no qmap entries */
+	if (sb_app_state.n_songs == 0) {
+		char dpath[PATH_MAX];
+		snprintf(dpath, sizeof(dpath),
+		        "%s/items/songbook/items/%s/data.txt",
+		        g_doc_root, id);
+		struct stat st;
+		if (stat(dpath, &st) == 0 && S_ISREG(st.st_mode)) {
+			char *raw = slurp_file(dpath);
+			if (raw) {
+				char *p = raw;
+				while (*p &&
+				       sb_app_state.n_songs < MAX_SB_SONGS)
+				{
+					char *nl = strchr(p, '\n');
+					size_t llen = nl ?
+					        (size_t)(nl - p) :
+					        strlen(p);
+					if (llen > 0 && llen < 255 &&
+					    p[0] != '#')
+					{
+						char buf[256];
+						snprintf(
+						        buf,
+						        sizeof(buf),
+						        "%.*s",
+						        (int)llen,
+						        p);
+						char *tr_str =
+						        strchr(buf, ':');
+						if (tr_str) {
+							*tr_str++ = '\0';
+							char *fmt_str =
+							        strchr(
+							                tr_str,
+							                ':');
+							if (fmt_str) {
+								*fmt_str++ =
+								        '\0';
+								const char
+								        *song_id =
+								        buf;
+								int transpose =
+								        atoi(tr_str);
+								if (qmap_pos(
+								            song_hd,
+								            song_id) !=
+								    QM_MISS)
+								{
+									const char
+									        *st =
+									        qmap_get_field_str(
+									                song_hd,
+									                song_id,
+									                "title");
+									if (!st)
+										st =
+										        song_id;
+									int ok =
+									        song_get_original_key(
+									                song_id);
+									char *ch =
+									        NULL;
+									int dk = 0;
+									song_transpose_root(
+									        g_doc_root,
+									        song_id,
+									        transpose,
+									        f,
+									        &ch,
+									        &dk);
+									sb_song_row_data_t
+									        *sd =
+									        &g_sb_songs
+									                [sb_app_state
+									                         .n_songs];
+									memset(
+									        sd,
+									        0,
+									        sizeof(
+									                *sd));
+									snprintf(
+									        sd->title,
+									        sizeof(
+									                sd->title),
+									        "%s",
+									        st);
+									snprintf(
+									        sd->song_id,
+									        sizeof(
+									                sd->song_id),
+									        "%s",
+									        song_id);
+									sd->orig_key =
+									        ok;
+									sd->transpose =
+									        transpose;
+									sd->flags = f;
+									sd->chord_html =
+									        ch;
+									sb_app_state
+									        .n_songs++;
+								}
+							}
+						}
+					}
+					if (nl)
+						p = nl + 1;
+					else
+						break;
+				}
+				free(raw);
+			}
+		}
+	}
+
 	/* ── Populate sb_app_state with page data ────────────────────── */
 	sb_app_state.zoom = zoom;
 	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
