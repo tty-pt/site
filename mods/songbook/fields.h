@@ -36,57 +36,10 @@ static const bud_field_desc_t songbook_fields[] = {
 	        "songbooks",
 	        1),
 	EXCL_FIELD(owner, songbook_cache_t, owner, 32, BUD_QM_STR, 0),
-	INVERSE_FIELD(item_songs, "songbook.item_songs", "songbook"),
 	FIELD_END
 };
 
 #define SB_FIELD_COUNT                                                         \
 	(sizeof(songbook_fields) / sizeof(songbook_fields[0]) - 1)
-
-/* ── Songbook item_songs ────────────────────────────────── */
-
-typedef struct {
-	char id[64];
-	char song[128];
-	char transpose[16];
-	char format[64];
-	char songbook[128];
-} songbook_item_song_cache_t;
-
-static const bud_field_desc_t songbook_item_song_fields[] = {
-	REC_FIELD(id, songbook_item_song_cache_t, id, 64, 1, 0, 0, 0),
-	REF_FIELD(
-	        song,
-	        songbook_item_song_cache_t,
-	        song,
-	        128,
-	        "choir.repertoire",
-	        "in_songbooks",
-	        0),
-	REC_FIELD(
-	        transpose,
-	        songbook_item_song_cache_t,
-	        transpose,
-	        16,
-	        1,
-	        0,
-	        0,
-	        0),
-	REC_FIELD(format, songbook_item_song_cache_t, format, 64, 1, 0, 0, 0),
-	REF_FIELD(
-	        songbook,
-	        songbook_item_song_cache_t,
-	        songbook,
-	        128,
-	        "songbook.items",
-	        "item_songs",
-	        0),
-	FIELD_END
-};
-
-#define SB_ITEM_SONG_FIELD_COUNT                                               \
-	(sizeof(songbook_item_song_fields) /                                   \
-	         sizeof(songbook_item_song_fields[0]) -                        \
-	 1)
 
 #endif

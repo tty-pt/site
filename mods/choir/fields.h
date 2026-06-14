@@ -65,7 +65,6 @@ static const bud_field_desc_t choir_repertoire_fields[] = {
 	        "choir.items",
 	        "repertoire",
 	        0),
-	INVERSE_FIELD(in_songbooks, "songbook.item_songs", "song"),
 	FIELD_END
 };
 

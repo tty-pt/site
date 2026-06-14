@@ -88,10 +88,14 @@ static int get_random_repertoire_by_type(
 		        qmap_field_get(repo_def->fields_hd, eid, "format");
 		const char *ftype = (fmt && fmt[0]) ? fmt : "any";
 
-		if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
-			size_t elen = strlen(eid);
+			if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
+			const char *rs = qmap_field_get(
+			        repo_def->fields_hd, eid, "song");
+			if (!rs)
+				continue;
+			size_t elen = strlen(rs);
 			if (id_pos + elen + 1 < sizeof(ids)) {
-				memcpy(ids + id_pos, eid, elen + 1);
+				memcpy(ids + id_pos, rs, elen + 1);
 				id_pos += elen + 1;
 				match_count++;
 			}
@@ -130,35 +134,55 @@ static int handle_sb_transpose_authorized(
 	if (!n_str[0])
 		return bad_request(fd, "Missing n");
 
-	source_def_t *sis_def = source_find("songbook.item_songs");
-	source_def_t *sb_def = source_find("songbook.items");
-	if (!sis_def || !sb_def)
-		return server_error(fd, "Source not found");
-
-	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
 	int idx = atoi(n_str);
-	if (sb_pos != UINT32_MAX) {
-		uint32_t buf[4096];
-		size_t n = qmap_inv_get(
-		        sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
-		if (idx >= 0 && (size_t)idx < n) {
-			const char *eid =
-			        qmap_get_key(sis_def->fields_hd, buf[idx]);
-			if (eid) {
-				unsigned dh = qmap_open(
-				        NULL,
-				        "row_data",
-				        QM_STR,
-				        QM_STR,
-				        0x1F,
-				        0);
-				qmap_put(dh, "transpose", t_str);
-				source_update_item(
-				        fd, "songbook.item_songs", eid, dh);
-				qmap_close(dh);
+
+	char dpath[PATH_MAX], tmp[PATH_MAX];
+	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
+	         g_doc_root, ctx->id);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
+
+	char *raw = slurp_file(dpath);
+	if (!raw)
+		return server_error(fd, "No data.txt");
+
+	FILE *fp = fopen(tmp, "w");
+	if (!fp) {
+		free(raw);
+		return server_error(fd, "Failed to write");
+	}
+
+	int line = 0;
+	char *p = raw;
+	while (*p) {
+		char *nl = strchr(p, '\n');
+		size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+		if (line == idx && llen > 0) {
+			char buf[256];
+			snprintf(buf, sizeof(buf), "%.*s", (int)llen, p);
+			char *first = strchr(buf, ':');
+			if (first) {
+				*first++ = '\0';
+				char *second = strchr(first, ':');
+				if (second) {
+					*second++ = '\0';
+					fprintf(fp, "%s:%s:%s\n",
+					        buf, t_str, second);
+					goto next_line;
+				}
 			}
 		}
+		fprintf(fp, "%.*s\n", (int)llen, p);
+	next_line:
+		if (nl)
+			p = nl + 1;
+		else
+			break;
+		line++;
 	}
+
+	fclose(fp);
+	free(raw);
+	rename(tmp, dpath);
 
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
@@ -194,51 +218,83 @@ static int handle_sb_randomize_authorized(
 	if (!n_str[0])
 		return bad_request(fd, "Missing n");
 
-	source_def_t *sis_def = source_find("songbook.item_songs");
-	source_def_t *sb_def = source_find("songbook.items");
-	if (!sis_def || !sb_def)
-		return server_error(fd, "Source not found");
-
-	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
 	int idx = atoi(n_str);
-	if (sb_pos != UINT32_MAX) {
-		uint32_t buf[4096];
-		size_t n = qmap_inv_get(
-		        sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
-		if (idx >= 0 && (size_t)idx < n) {
-			const char *eid =
-			        qmap_get_key(sis_def->fields_hd, buf[idx]);
-			if (!eid)
-				goto done;
 
-			/* Get current format type */
-			const char *fmt = qmap_field_get(
-			        sis_def->fields_hd, eid, "format");
-			const char *ftype = (fmt && fmt[0]) ? fmt : "any";
+	char dpath[PATH_MAX], tmp[PATH_MAX];
+	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
+	         g_doc_root, ctx->id);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
-			/* Pick random repertoire entry of same type */
-			char new_repo_id[128] = { 0 };
-			if (get_random_repertoire_by_type(
-			            ctx->id,
-			            ftype,
-			            new_repo_id,
-			            sizeof(new_repo_id)) == 0)
-			{
-				unsigned dh = qmap_open(
-				        NULL,
-				        "row_data",
-				        QM_STR,
-				        QM_STR,
-				        0x1F,
-				        0);
-				qmap_put(dh, "song", new_repo_id);
-				source_update_item(
-				        fd, "songbook.item_songs", eid, dh);
-				qmap_close(dh);
+	char *raw = slurp_file(dpath);
+	if (!raw)
+		return server_error(fd, "No data.txt");
+
+	/* Find the format of the current song at idx */
+	char fmt_str[64] = "any";
+	{
+		int line = 0;
+		char *p = raw;
+		while (*p && line <= idx) {
+			char *nl = strchr(p, '\n');
+			size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+			if (line == idx && llen > 0) {
+				char *first = strchr(p, ':');
+				if (first && (size_t)(first - p) < llen) {
+					char *second = strchr(first + 1, ':');
+					if (second && (size_t)(second - p) < llen) {
+						size_t flen = (p + llen) - (second + 1);
+						if (flen >= sizeof(fmt_str))
+							flen = sizeof(fmt_str) - 1;
+						memcpy(fmt_str, second + 1, flen);
+						fmt_str[flen] = '\0';
+					}
+				}
+				break;
 			}
+			if (nl) p = nl + 1; else break;
+			line++;
 		}
 	}
-done:
+
+	/* Pick a random song of the same format */
+	char new_song_id[128] = { 0 };
+	if (get_random_repertoire_by_type(
+	            ctx->id, fmt_str, new_song_id, sizeof(new_song_id)) != 0)
+	{
+		free(raw);
+		return server_error(fd, "No songs found for format");
+	}
+
+	/* Rewrite data.txt with the new song at idx */
+	FILE *fp = fopen(tmp, "w");
+	if (!fp) {
+		free(raw);
+		return server_error(fd, "Failed to write");
+	}
+
+	int line = 0;
+	char *p = raw;
+	while (*p) {
+		char *nl = strchr(p, '\n');
+		size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+		if (line == idx && llen > 0) {
+			char *first = strchr(p, ':');
+			if (first && (size_t)(first - p) < llen) {
+				/* Replace song_id, reset transpose to 0 */
+				fprintf(fp, "%s:0:%s\n", new_song_id, fmt_str);
+				goto next_line_r;
+			}
+		}
+		fprintf(fp, "%.*s\n", (int)llen, p);
+	next_line_r:
+		if (nl) p = nl + 1; else break;
+		line++;
+	}
+
+	fclose(fp);
+	free(raw);
+	rename(tmp, dpath);
+
 	char location[256];
 	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
 	return axil_redirect(fd, location);
@@ -271,20 +327,37 @@ static int handle_sb_song_add_authorized(
 		return bad_request(fd, "Missing song_id");
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 
-	unsigned dh = source_parse_form("songbook.item_songs");
-	if (dh == 0)
-		return server_error(fd, "OOM");
-	qmap_put(dh, "song", s_id);
-	qmap_put(dh, "transpose", "0");
-	qmap_put(dh, "songbook", ctx->id);
-	if (!qmap_get(dh, "format"))
-		qmap_put(dh, "format", "any");
-	int rc = source_update_item(fd, "songbook.item_songs", NULL, dh);
-	qmap_close(dh);
-	if (rc == -1)
-		return server_error(fd, "Failed to add song to songbook");
-	if (rc != 0)
-		return 1;
+	/* Resolve repertoire entry IDs to bare song IDs for compatibility */
+	{
+		source_def_t *song_def = source_find("song.items");
+		source_def_t *repo_def = source_find("choir.repertoire");
+		if (song_def && repo_def &&
+		    qmap_pos(song_def->fields_hd, s_id) == QM_MISS)
+		{
+			uint32_t rp = qmap_pos(repo_def->fields_hd, s_id);
+			if (rp != QM_MISS) {
+				const char *rs = qmap_field_get(
+				        repo_def->fields_hd, s_id, "song");
+				if (rs)
+					snprintf(s_id, sizeof(s_id), "%s", rs);
+			}
+		}
+	}
+
+	char fmt_val[64] = "any";
+	axil_query_param("format", fmt_val, sizeof(fmt_val) - 1);
+	if (!fmt_val[0])
+		snprintf(fmt_val, sizeof(fmt_val), "any");
+
+	char dpath[PATH_MAX];
+	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
+	         g_doc_root, ctx->id);
+
+	FILE *fp = fopen(dpath, "a");
+	if (!fp)
+		return server_error(fd, "Failed to open data.txt");
+	fprintf(fp, "%s:0:%s\n", s_id, fmt_val);
+	fclose(fp);
 
 	return redirect_to_item(fd, "songbook", ctx->id);
 }
@@ -311,28 +384,42 @@ static int handle_sb_song_remove_authorized(
 	if (csrf_check_query(fd, body))
 		return 1;
 
-	source_def_t *sis_def = source_find("songbook.item_songs");
-	source_def_t *sb_def = source_find("songbook.items");
-	if (!sis_def || !sb_def)
-		return server_error(fd, "Source not found");
-
-	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
-	if (sb_pos == UINT32_MAX)
-		return redirect_to_item(fd, "songbook", ctx->id);
-
-	uint32_t buf[4096];
-	size_t n =
-	        qmap_inv_get(sis_def->fields_hd, "songbook", sb_pos, buf, 4096);
-
 	char n_str[16] = { 0 };
 	axil_query_param("n", n_str, sizeof(n_str) - 1);
 	int idx = atoi(n_str);
 
-	if (idx >= 0 && (size_t)idx < n) {
-		const char *eid = qmap_get_key(sis_def->fields_hd, buf[idx]);
-		if (eid)
-			source_delete_item(fd, sis_def, eid);
+	char dpath[PATH_MAX], tmp[PATH_MAX];
+	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
+	         g_doc_root, ctx->id);
+	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
+
+	char *raw = slurp_file(dpath);
+	if (!raw)
+		return redirect_to_item(fd, "songbook", ctx->id);
+
+	FILE *fp = fopen(tmp, "w");
+	if (!fp) {
+		free(raw);
+		return server_error(fd, "Failed to write");
 	}
+
+	int line = 0;
+	char *p = raw;
+	while (*p) {
+		char *nl = strchr(p, '\n');
+		size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+		if (llen > 0 && line != idx)
+			fprintf(fp, "%.*s\n", (int)llen, p);
+		if (nl)
+			p = nl + 1;
+		else
+			break;
+		line++;
+	}
+
+	fclose(fp);
+	free(raw);
+	rename(tmp, dpath);
 
 	return redirect_to_item(fd, "songbook", ctx->id);
 }
@@ -380,61 +467,58 @@ static int handle_sb_add(int fd, char *body)
 
 		source_refresh_row(fd, "songbook.items", id);
 
-		/* Pre-populate with one random repertoire entry per choir
+		/* Pre-populate data.txt with one random song per choir
 		 * format type */
-		source_def_t *sis_def = source_find("songbook.item_songs");
-		if (sis_def) {
-			char choir_item_path[PATH_MAX];
-			item_path_build(
-			        0,
-			        "choir",
-			        choir,
-			        choir_item_path,
-			        sizeof(choir_item_path));
-			char format_path[PATH_MAX];
-			item_child_path(
-			        choir_item_path,
-			        "format",
-			        format_path,
-			        sizeof(format_path));
-			FILE *ffp = fopen(format_path, "r");
-			if (ffp) {
-				char type[128];
-				while (fgets(type, sizeof(type), ffp)) {
-					size_t tlen = strlen(type);
-					while (tlen > 0 &&
-					       (type[tlen - 1] == '\n' ||
-					        type[tlen - 1] == '\r'))
-						type[--tlen] = '\0';
-					if (tlen == 0)
-						continue;
-					char repo_id[256] = { 0 };
-					if (get_random_repertoire_by_type(
-					            id,
-					            type,
-					            repo_id,
-					            sizeof(repo_id)) == 0)
+		{
+			char dpath[PATH_MAX];
+			snprintf(dpath, sizeof(dpath),
+			        "%s/items/songbook/items/%s/data.txt",
+			        g_doc_root, id);
+			FILE *fp = fopen(dpath, "w");
+			if (fp) {
+				char choir_item_path[PATH_MAX];
+				item_path_build(
+				        0, "choir", choir,
+				        choir_item_path,
+				        sizeof(choir_item_path));
+				char format_path[PATH_MAX];
+				item_child_path(
+				        choir_item_path, "format",
+				        format_path, sizeof(format_path));
+				FILE *ffp = fopen(format_path, "r");
+				if (ffp) {
+					char type[128];
+					while (fgets(type, sizeof(type),
+					            ffp))
 					{
-						unsigned dh = qmap_open(
-						        NULL,
-						        "row_data",
-						        QM_STR,
-						        QM_STR,
-						        0x1F,
-						        0);
-						qmap_put(dh, "song", repo_id);
-						qmap_put(dh, "transpose", "0");
-						qmap_put(dh, "format", type);
-						qmap_put(dh, "songbook", id);
-						source_update_item(
-						        fd,
-						        "songbook.item_songs",
-						        NULL,
-						        dh);
-						qmap_close(dh);
+						size_t tlen =
+						        strlen(type);
+						while (tlen > 0 &&
+						       (type[tlen - 1] ==
+						                '\n' ||
+						        type[tlen - 1] ==
+						                '\r'))
+							type[--tlen] = '\0';
+						if (tlen == 0)
+							continue;
+						char song_id[256] =
+						        { 0 };
+						if (get_random_repertoire_by_type(
+						            id,
+						            type,
+						            song_id,
+						            sizeof(
+						                    song_id)) ==
+						    0)
+							fprintf(
+							        fp,
+							        "%s:0:%s\n",
+							        song_id,
+							        type);
 					}
+					fclose(ffp);
 				}
-				fclose(ffp);
+				fclose(fp);
 			}
 		}
 	} else {
@@ -484,65 +568,9 @@ static void sb_load_song_options(
 			st = rs;
 		sb_song_option_t *o =
 		        &g_sb_options[sb_app_state.n_song_options];
-		snprintf(o->id, sizeof(o->id), "%s", eid);
+		snprintf(o->id, sizeof(o->id), "%s", rs);
 		snprintf(o->title, sizeof(o->title), "%s", st);
 		sb_app_state.n_song_options++;
-	}
-}
-
-static void sb_load_song_list(
-        unsigned sis_hd,
-        uint32_t sb_pos,
-        unsigned repo_hd,
-        unsigned song_hd,
-        int flags)
-{
-	uint32_t buf[512];
-	size_t n = qmap_inv_get(sis_hd, "songbook", sb_pos, buf, 512);
-	for (size_t i = 0; i < n; i++) {
-		const char *eid = qmap_get_key(sis_hd, buf[i]);
-		if (!eid)
-			continue;
-		const char *sr = qmap_field_get(sis_hd, eid, "song");
-		const char *ts = qmap_field_get(sis_hd, eid, "transpose");
-		if (!sr)
-			continue;
-		int tp = ts ? atoi(ts) : 0;
-		const char *st = NULL;
-		const char *rs = NULL;
-		int ok = 0;
-		if (repo_hd)
-			rs = qmap_field_get(repo_hd, sr, "song");
-		if (rs && song_hd) {
-			st = qmap_get_field_str(song_hd, rs, "title");
-			ok = song_get_original_key(rs);
-		}
-		if (!st)
-			st = sr;
-		char *ch = NULL;
-		int dk = 0;
-		if (rs)
-			song_transpose_root(
-			        g_doc_root, rs, tp, flags, &ch, &dk);
-		if (sb_app_state.n_songs < MAX_SB_SONGS) {
-			sb_song_row_data_t *sd =
-			        &g_sb_songs[sb_app_state.n_songs];
-			memset(sd, 0, sizeof(*sd));
-			snprintf(sd->title, sizeof(sd->title), "%s", st);
-			if (rs)
-				snprintf(
-				        sd->song_id,
-				        sizeof(sd->song_id),
-				        "%s",
-				        rs);
-			sd->orig_key = ok;
-			sd->transpose = tp;
-			sd->flags = flags;
-			sd->chord_html = ch;
-			sb_app_state.n_songs++;
-		} else if (ch) {
-			free(ch);
-		}
 	}
 }
 
@@ -667,46 +695,59 @@ static int api_sb_transpose_get(int fd, char *body)
 	int idx = atoi(n_str);
 	int transpose = t_str[0] ? atoi(t_str) : 0;
 
-	unsigned sb_hd = source_get_fields_hd("songbook.items");
-	unsigned sis_hd = source_get_fields_hd("songbook.item_songs");
-	unsigned repo_hd = source_get_fields_hd("choir.repertoire");
-
-	if (!sb_hd || !sis_hd || !repo_hd)
-		return server_error(fd, "Source not found");
-
-	uint32_t sb_pos = qmap_pos(sb_hd, id);
-	if (sb_pos == QM_MISS)
+	/* Read song_id and transpose from data.txt line N */
+	char dpath[PATH_MAX];
+	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
+	         g_doc_root, id);
+	char *raw = slurp_file(dpath);
+	if (!raw)
 		return respond_error(fd, 404, "Songbook not found");
 
-	uint32_t buf[4096];
-	size_t n = qmap_inv_get(sis_hd, "songbook", sb_pos, buf, 4096);
-	if (idx < 0 || (size_t)idx >= n)
+	char found_song[128] = { 0 };
+	int line = 0;
+	int found = 0;
+	char *p = raw;
+	while (*p && !found) {
+		char *nl = strchr(p, '\n');
+		size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+		if (line == idx && llen > 0) {
+			char buf[256];
+			snprintf(buf, sizeof(buf), "%.*s", (int)llen, p);
+			char *first = strchr(buf, ':');
+			if (first) {
+				*first++ = '\0';
+				char *second = strchr(first, ':');
+				if (second) {
+					*second++ = '\0';
+					snprintf(found_song, sizeof(found_song),
+					         "%s", buf);
+					if (t_str[0])
+						transpose = atoi(t_str);
+					else
+						transpose = atoi(first);
+					found = 1;
+				}
+			}
+		}
+		if (nl) p = nl + 1; else break;
+		line++;
+	}
+
+	if (!found || !found_song[0]) {
+		free(raw);
 		return respond_error(fd, 404, "Song not found");
-
-	const char *eid = qmap_get_key(sis_hd, buf[idx]);
-	if (!eid)
-		return respond_error(fd, 404, "Entry not found");
-
-	const char *song_ref = qmap_field_get(sis_hd, eid, "song");
-	if (!song_ref)
-		return respond_error(fd, 404, "Song ref not found");
-
-	const char *repo_song = NULL;
-	if (repo_hd)
-		repo_song = qmap_field_get(repo_hd, song_ref, "song");
-
-	if (!repo_song)
-		return respond_error(fd, 404, "Song not found in repertoire");
+	}
 
 	char *chord_html = NULL;
 	int detected_key = 0;
 	song_transpose_root(
 	        g_doc_root,
-	        repo_song,
+	        found_song,
 	        transpose,
 	        flags,
 	        &chord_html,
 	        &detected_key);
+	free(raw);
 
 	const char *tgt_key = target_key_name(detected_key, transpose, flags);
 
@@ -750,7 +791,7 @@ static int songbook_detail_handler(int fd, char *body)
 	(void)body;
 	char id[128] = { 0 };
 	const char *user = get_request_user(fd);
-	unsigned sb_hd, sis_hd, repo_hd, song_hd, choir_fhd;
+	unsigned sb_hd, repo_hd, song_hd, choir_fhd;
 	const char *title, *owner;
 	char fkey[512];
 	bud_node *layout;
@@ -872,17 +913,8 @@ static int songbook_detail_handler(int fd, char *body)
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 	sb_load_song_options(choir_fhd, choir_id, repo_hd, song_hd);
 
-	/* Song list */
-	sis_hd = source_get_fields_hd("songbook.item_songs");
-	if (sis_hd) {
-		uint32_t sb_pos = qmap_pos(sb_hd, id);
-		if (sb_pos != QM_MISS) {
-			sb_load_song_list(sis_hd, sb_pos, repo_hd, song_hd, f);
-		}
-	}
-
-	/* Fallback: load from legacy data.txt if no qmap entries */
-	if (sb_app_state.n_songs == 0) {
+	/* Load songs from data.txt */
+	{
 		char dpath[PATH_MAX];
 		snprintf(dpath, sizeof(dpath),
 		        "%s/items/songbook/items/%s/data.txt",
@@ -1048,196 +1080,6 @@ static int songbook_detail_handler(int fd, char *body)
 
 /* ── POST /songbook/:id/migrate — run data.txt migration ── */
 
-static int handle_sb_run_migration_authorized(
-        int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-
-	source_def_t *sb_def = source_find("songbook.items");
-	unsigned repo_hd = source_get_fields_hd("choir.repertoire");
-	unsigned song_hd = source_get_fields_hd("song.items");
-	unsigned sis_hd = source_get_fields_hd("songbook.item_songs");
-	unsigned choir_hd = source_get_fields_hd("choir.items");
-	if (!sb_def || !repo_hd || !song_hd || !sis_hd || !choir_hd)
-		return server_error(fd, "Failed to open data handles");
-
-	const char *choir_id = NULL;
-	char fkey[256];
-	snprintf(fkey, sizeof(fkey), "%s:choir", ctx->id);
-	const uint32_t *choir_ref =
-	        (const uint32_t *)qmap_get(sb_def->fields_hd, fkey);
-	if (choir_ref && *choir_ref != QM_MISS)
-		choir_id = qmap_get_key(choir_hd, *choir_ref);
-	if (!choir_id || !choir_id[0])
-		return bad_request(fd, "Songbook has no choir");
-
-	char ipath[PATH_MAX];
-	char dpath[PATH_MAX];
-	if (item_path_build(fd, "songbook", ctx->id, ipath, sizeof(ipath)) !=
-	            0 ||
-	    item_child_path(ipath, "data.txt", dpath, sizeof(dpath)) != 0)
-		return server_error(fd, "Failed to build path");
-
-	char *raw = slurp_file(dpath);
-	if (!raw)
-		return bad_request(fd, "No data.txt found");
-
-	uint32_t choir_pos = qmap_pos(choir_hd, choir_id);
-	if (choir_pos == QM_MISS) {
-		free(raw);
-		return server_error(fd, "Choir not found");
-	}
-
-	uint32_t repo_buf[512];
-	size_t n_repo =
-	        qmap_inv_get(repo_hd, "choir", choir_pos, repo_buf, 512);
-
-	uint32_t sb_pos = qmap_pos(sb_def->fields_hd, ctx->id);
-	if (sb_pos == QM_MISS) {
-		free(raw);
-		return server_error(fd, "Songbook position not found");
-	}
-
-	source_def_t *sis_def = source_find("songbook.item_songs");
-	if (sis_def) {
-		uint32_t del_buf[512];
-		size_t n_del =
-		        qmap_inv_get(sis_hd, "songbook", sb_pos, del_buf, 512);
-		for (size_t i = 0; i < n_del; i++) {
-			const char *eid = qmap_get_key(sis_hd, del_buf[i]);
-			if (eid)
-				source_delete_item(fd, sis_def, eid);
-		}
-	}
-
-	int migrated = 0;
-	int skipped = 0;
-	char *p = raw;
-	while (*p) {
-		char *nl = strchr(p, '\n');
-		size_t llen = nl ? (size_t)(nl - p) : strlen(p);
-		if (llen > 0 && p[0] != '#') {
-			char buf[256];
-			snprintf(buf, sizeof(buf), "%.*s", (int)llen, p);
-
-			char *tr_str = strchr(buf, ':');
-			if (!tr_str)
-				goto next;
-			*tr_str++ = '\0';
-			char *fmt_str = strchr(tr_str, ':');
-			if (!fmt_str)
-				goto next;
-			*fmt_str++ = '\0';
-
-			const char *song_id = buf;
-			int transpose = atoi(tr_str);
-
-			if (qmap_pos(song_hd, song_id) == QM_MISS) {
-				skipped++;
-				goto next;
-			}
-
-			const char *repo_id = NULL;
-			for (size_t i = 0; i < n_repo; i++) {
-				const char *eid =
-				        qmap_get_key(repo_hd, repo_buf[i]);
-				if (!eid)
-					continue;
-				const char *rs =
-				        qmap_field_get(repo_hd, eid, "song");
-				if (rs && strcmp(rs, song_id) == 0) {
-					repo_id = eid;
-					break;
-				}
-			}
-
-			if (!repo_id) {
-				char entry_id[1024];
-				snprintf(
-				        entry_id,
-				        sizeof(entry_id),
-				        "%s_%s",
-				        choir_id,
-				        song_id);
-				unsigned rdh =
-				        source_parse_form("choir.repertoire");
-				if (rdh) {
-					qmap_put(rdh, "song", song_id);
-					qmap_put(rdh, "transpose", "0");
-					qmap_put(rdh, "choir", choir_id);
-					qmap_put(
-					        rdh,
-					        "format",
-					        fmt_str[0] ? fmt_str : "any");
-					source_update_item(
-					        fd,
-					        "choir.repertoire",
-					        entry_id,
-					        rdh);
-					qmap_close(rdh);
-					repo_id = entry_id;
-				}
-			}
-
-			if (repo_id) {
-				unsigned dh = source_parse_form(
-				        "songbook.item_songs");
-				if (dh) {
-					char t_str[16];
-					snprintf(
-					        t_str,
-					        sizeof(t_str),
-					        "%d",
-					        transpose);
-					qmap_put(dh, "song", repo_id);
-					qmap_put(dh, "transpose", t_str);
-					qmap_put(
-					        dh,
-					        "format",
-					        fmt_str[0] ? fmt_str : "any");
-					qmap_put(dh, "songbook", ctx->id);
-					source_update_item(
-					        fd,
-					        "songbook.item_songs",
-					        NULL,
-					        dh);
-					qmap_close(dh);
-					migrated++;
-				}
-			}
-		}
-	next:
-		if (nl)
-			p = nl + 1;
-		else
-			break;
-	}
-	free(raw);
-
-	if (n_repo > 0 || skipped == 0)
-		remove(dpath);
-
-	char location[256];
-	snprintf(location, sizeof(location), "/songbook/%s", ctx->id);
-	return axil_redirect(fd, location);
-}
-
-static int handle_sb_run_migration(int fd, char *body)
-{
-	return with_item_access(
-	        fd,
-	        body,
-	        SONGBOOK_ITEMS_PATH,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        "Songbook not found",
-	        "You don't own this songbook",
-	        handle_sb_run_migration_authorized,
-	        NULL);
-}
-
-/* ── Edit GET handler ────────────────────────────────────── */
-
 /* ── Edit GET handler ───────────────────────────────────── */
 
 static int songbook_edit_get_handler(int fd, char *body)
@@ -1286,60 +1128,83 @@ static int songbook_edit_get_handler(int fd, char *body)
 		}
 	}
 
-	unsigned sis_hd = source_get_fields_hd("songbook.item_songs");
 	unsigned repo_hd = source_get_fields_hd("choir.repertoire");
 	unsigned song_hd = source_get_fields_hd("song.items");
 
-	/* Load current songs */
+	/* Load current songs from data.txt */
 	sb_edit_row_t songs[256];
 	int n_songs = 0;
 
-	uint32_t sb_pos = qmap_pos(fields_hd, id);
-	if (sb_pos != UINT32_MAX && sis_hd) {
-		uint32_t inv_buf[512];
-		size_t n =
-		        qmap_inv_get(sis_hd, "songbook", sb_pos, inv_buf, 512);
-		for (size_t i = 0; i < n && n_songs < 256; i++) {
-			const char *eid = qmap_get_key(sis_hd, inv_buf[i]);
-			if (!eid)
-				continue;
-
-			const char *song_ref =
-			        qmap_field_get(sis_hd, eid, "song");
-			const char *t_str =
-			        qmap_field_get(sis_hd, eid, "transpose");
-			const char *fmt = qmap_field_get(sis_hd, eid, "format");
-
-			if (!song_ref)
-				continue;
-			if (!fmt)
-				fmt = "any";
-
-			const char *s_title = NULL;
-			if (repo_hd && song_hd) {
-				const char *repo_song = qmap_field_get(
-				        repo_hd, song_ref, "song");
-				if (repo_song) {
-					snprintf(
-					        fkey,
-					        sizeof(fkey),
-					        "%s:title",
-					        repo_song);
-					s_title = qmap_get(song_hd, fkey);
+	{
+		char dpath[PATH_MAX];
+		snprintf(dpath, sizeof(dpath),
+		        "%s/items/songbook/items/%s/data.txt",
+		        g_doc_root, id);
+		struct stat st;
+		if (stat(dpath, &st) == 0 && S_ISREG(st.st_mode)) {
+			char *raw = slurp_file(dpath);
+			if (raw) {
+				char *p = raw;
+				while (*p && n_songs < 256) {
+					char *nl = strchr(p, '\n');
+					size_t llen = nl ?
+					        (size_t)(nl - p) :
+					        strlen(p);
+					if (llen > 0 && p[0] != '#') {
+						char buf[256];
+						snprintf(
+						        buf, sizeof(buf),
+						        "%.*s", (int)llen, p);
+						char *first =
+						        strchr(buf, ':');
+						if (first) {
+							*first++ = '\0';
+							char *second =
+							        strchr(
+							                first,
+							                ':');
+							if (second) {
+								*second++ =
+								        '\0';
+								const char
+								        *sid =
+								        buf;
+								const char
+								        *s_title =
+								        qmap_get_field_str(
+								                song_hd,
+								                sid,
+								                "title");
+								if (!s_title)
+									s_title =
+									        sid;
+								songs[n_songs]
+								        .repo_id =
+								        sid;
+								songs[n_songs]
+								        .title =
+								        s_title;
+								songs[n_songs]
+								        .transpose =
+								        first;
+								songs[n_songs]
+								        .format =
+								        second;
+								n_songs++;
+							}
+						}
+					}
+					if (nl)
+						p = nl + 1;
+					else
+						break;
 				}
+				free(raw);
 			}
-			if (!s_title)
-				s_title = song_ref;
-
-			songs[n_songs].repo_id = song_ref;
-			songs[n_songs].title = s_title;
-			songs[n_songs].transpose = t_str ? t_str : "";
-			songs[n_songs].format = fmt;
-			n_songs++;
 		}
 	}
 
-	/* Load repertoire options for the song select dropdowns */
+	/* Load song options for the select dropdowns (use song IDs) */
 	sb_repo_opt_t options[512];
 	int n_options = 0;
 
@@ -1366,7 +1231,7 @@ static int songbook_edit_get_handler(int fd, char *body)
 				if (!s_title)
 					s_title = repo_s;
 
-				options[n_options].id = eid;
+				options[n_options].id = repo_s;
 				options[n_options].title = s_title;
 				n_options++;
 			}
@@ -1445,37 +1310,22 @@ static int songbook_edit_post_authorized(
 		}
 	}
 
-	/* Delete existing songs before recreating from form data */
+	/* Write songs to data.txt */
 	{
-		source_def_t *sis_def = source_find("songbook.item_songs");
-		source_def_t *sb_def = source_find("songbook.items");
-		if (sis_def && sb_def) {
-			uint32_t del_pos = qmap_pos(sb_def->fields_hd, ctx->id);
-			if (del_pos != UINT32_MAX) {
-				uint32_t del_buf[4096];
-				size_t n_del = qmap_inv_get(
-				        sis_def->fields_hd,
-				        "songbook",
-				        del_pos,
-				        del_buf,
-				        4096);
-				for (size_t i = 0; i < n_del; i++) {
-					const char *eid = qmap_get_key(
-					        sis_def->fields_hd, del_buf[i]);
-					if (eid)
-						source_delete_item(
-						        fd, sis_def, eid);
-				}
-			}
-		}
-	}
+		char dpath[PATH_MAX], tmp[PATH_MAX];
+		snprintf(dpath, sizeof(dpath),
+		        "%s/items/songbook/items/%s/data.txt",
+		        g_doc_root, ctx->id);
+		snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
-	/* Process song rows */
-	{
 		char amount_str[16] = { 0 };
 		int amount = 0;
 		if (mpfd_get("amount", amount_str, sizeof(amount_str) - 1) > 0)
 			amount = atoi(amount_str);
+
+		FILE *fp = fopen(tmp, "w");
+		if (!fp)
+			return server_error(fd, "Failed to write data.txt");
 
 		for (int i = 0; i < amount; i++) {
 			char song_field[32], key_field[32], fmt_field[32];
@@ -1490,11 +1340,11 @@ static int songbook_edit_post_authorized(
 			            sizeof(song_val) - 1) <= 0)
 				continue;
 
-			/* Extract repo ID from "Title [repo_id]" format */
-			char *repo_id = strrchr(song_val, '[');
-			if (repo_id) {
-				repo_id++;
-				char *end = strrchr(repo_id, ']');
+			/* Extract song ID from "Title [song_id]" format */
+			char *sid = strrchr(song_val, '[');
+			if (sid) {
+				sid++;
+				char *end = strrchr(sid, ']');
 				if (end)
 					*end = '\0';
 			} else {
@@ -1506,16 +1356,14 @@ static int songbook_edit_post_authorized(
 			char fmt_val[64] = { 0 };
 			mpfd_get(fmt_field, fmt_val, sizeof(fmt_val) - 1);
 
-			unsigned dh = source_parse_form("songbook.item_songs");
-			if (dh == 0)
-				continue;
-			qmap_put(dh, "song", repo_id);
-			qmap_put(dh, "transpose", key_val[0] ? key_val : "0");
-			qmap_put(dh, "songbook", ctx->id);
-			qmap_put(dh, "format", fmt_val[0] ? fmt_val : "any");
-			source_update_item(fd, "songbook.item_songs", NULL, dh);
-			qmap_close(dh);
+			fprintf(fp, "%s:%s:%s\n",
+			        sid,
+			        key_val[0] ? key_val : "0",
+			        fmt_val[0] ? fmt_val : "any");
 		}
+
+		fclose(fp);
+		rename(tmp, dpath);
 	}
 
 	return redirect_to_item(fd, "songbook", ctx->id);
@@ -1554,15 +1402,6 @@ void ndx_install(void)
 	        songbook_fields,
 	        SB_FIELD_COUNT,
 	        0);
-	source_setup(
-	        "songbook.item_songs",
-	        NULL,
-	        sizeof(songbook_item_song_cache_t),
-	        "items/songbook/item_songs",
-	        songbook_item_song_fields,
-	        SB_ITEM_SONG_FIELD_COUNT,
-	        QM_AINDEX);
-
 	index_open(
 	        "Songbook",
 	        "songbook.items",
@@ -1582,18 +1421,5 @@ void ndx_install(void)
 	axil_register_handler(
 	        "POST:/api/songbook/:id/song/:n/remove", handle_sb_song_remove);
 	axil_register_handler(
-	        "POST:/songbook/:id/migrate", handle_sb_run_migration);
-	axil_register_handler(
 	        "GET:/api/songbook/:id/transpose", api_sb_transpose_get);
-
-	/* Ensure item_songs storage directory exists */
-	{
-		char is_path[PATH_MAX];
-		snprintf(
-		        is_path,
-		        sizeof(is_path),
-		        "%s/items/songbook/item_songs",
-		        g_doc_root);
-		mkdir(is_path, 0755);
-	}
 }
