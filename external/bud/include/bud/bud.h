@@ -15,6 +15,14 @@ typedef enum bud_node_kind {
 } bud_node_kind;
 
 typedef struct bud_node bud_node;
+
+#ifdef BUD_DEBUG
+#define BUD_SRC_FIELDS                                                         \
+	const char *src_file;                                                  \
+	int src_line;
+#else
+#define BUD_SRC_FIELDS
+#endif
 typedef struct bud_runtime bud_runtime;
 
 typedef int (*bud_emit_fn)(
@@ -188,6 +196,11 @@ typedef struct bud_field_desc {
 
 void bud_state_apply(
         void *state, const bud_field_desc_t *fields, const char *json);
+
+/* Debug helpers — available in all builds, most useful with BUD_DEBUG */
+void bud_node_set_src(bud_node *node, const char *file, int line);
+const char *bud_node_get_src(const bud_node *node);
+int bud_sprint_tree(const bud_node *root, char *buf, size_t bufsz);
 
 /* Platform host function pointers (set by WASM adapter, NULL on native) */
 extern void (*bud_host_fetch_fn)(const char *url, size_t len, int id);

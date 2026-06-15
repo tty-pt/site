@@ -154,9 +154,9 @@ static int valid_modifier(const char *s, size_t len)
 			continue;
 		if (c == '#' || c == 'b')
 			continue;
-		if (c == 'm' || c == 'a' || c == 'j' || c == 'd' || c == 'i' ||
-		    c == 'u' || c == 'g' || c == 's' || c == 'n' || c == '+' ||
-		    c == '(' || c == ')' || c == '/')
+		if (c == 'm' || c == 'M' || c == 'h' || c == 'a' || c == 'j' ||
+		    c == 'd' || c == 'i' || c == 'u' || c == 'g' || c == 's' ||
+		    c == 'n' || c == '+' || c == '(' || c == ')' || c == '/')
 			continue;
 		return 0;
 	}
@@ -289,6 +289,7 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			case '\0':
 			case '/':
 			case 'm':
+			case 'M':
 			case '(':
 			case '+':
 				break;
@@ -342,10 +343,26 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			}
 		}
 
-		/* Reject if modifier contains chars invalid for chord suffixes
-		 */
-		if (!is_special && !valid_modifier(eoc, modlen))
-			goto no_chord;
+		/* Reject if modifier contains chars invalid for chord suffixes.
+		 * Slash chords (e.g., G/B, Am/C) validate the bass note against
+		 * chord_db instead, so any known root name (English, Latin,
+		 * with or without accidentals) is accepted. */
+		if (!is_special) {
+			int mod_valid = valid_modifier(eoc, modlen);
+			if (!mod_valid && eoc[0] == '/') {
+				size_t blen = modlen - 1;
+				char bass[16];
+				if (blen < sizeof(bass)) {
+					memcpy(bass, eoc + 1, blen);
+					bass[blen] = '\0';
+					mod_valid =
+					        qmap_get(ctx->chord_db, bass) !=
+					        NULL;
+				}
+			}
+			if (!mod_valid)
+				goto no_chord;
+		}
 
 		if (flags & TRANSP_HIDE_CHORDS) {
 			s = eoc + modlen;

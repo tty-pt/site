@@ -82,4 +82,15 @@ bud_node *site_ui_form_fields(
         const char **values,
         const char *csrf_token);
 
+/* ── Shared checkbox builder ────────────────────── */
+bud_node *site_ui_checkbox(
+        const char *name,
+        const char *label,
+        int checked,
+        bud_event_handler_fn on_change);
+
+/* ── Shared media slot renderer ──────────────────── */
+bud_node *
+site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf);
+
 #endif

@@ -88,7 +88,7 @@ static int get_random_repertoire_by_type(
 		        qmap_field_get(repo_def->fields_hd, eid, "format");
 		const char *ftype = (fmt && fmt[0]) ? fmt : "any";
 
-			if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
+		if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
 			const char *rs = qmap_field_get(
 			        repo_def->fields_hd, eid, "song");
 			if (!rs)
@@ -136,9 +136,13 @@ static int handle_sb_transpose_authorized(
 
 	int idx = atoi(n_str);
 
-	char dpath[PATH_MAX], tmp[PATH_MAX];
-	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
-	         g_doc_root, ctx->id);
+	char dpath[PATH_MAX], tmp[PATH_MAX + 4];
+	snprintf(
+	        dpath,
+	        sizeof(dpath),
+	        "%s/items/songbook/items/%s/data.txt",
+	        g_doc_root,
+	        ctx->id);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
 	char *raw = slurp_file(dpath);
@@ -165,8 +169,11 @@ static int handle_sb_transpose_authorized(
 				char *second = strchr(first, ':');
 				if (second) {
 					*second++ = '\0';
-					fprintf(fp, "%s:%s:%s\n",
-					        buf, t_str, second);
+					fprintf(fp,
+					        "%s:%s:%s\n",
+					        buf,
+					        t_str,
+					        second);
 					goto next_line;
 				}
 			}
@@ -220,9 +227,13 @@ static int handle_sb_randomize_authorized(
 
 	int idx = atoi(n_str);
 
-	char dpath[PATH_MAX], tmp[PATH_MAX];
-	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
-	         g_doc_root, ctx->id);
+	char dpath[PATH_MAX], tmp[PATH_MAX + 4];
+	snprintf(
+	        dpath,
+	        sizeof(dpath),
+	        "%s/items/songbook/items/%s/data.txt",
+	        g_doc_root,
+	        ctx->id);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
 	char *raw = slurp_file(dpath);
@@ -241,17 +252,26 @@ static int handle_sb_randomize_authorized(
 				char *first = strchr(p, ':');
 				if (first && (size_t)(first - p) < llen) {
 					char *second = strchr(first + 1, ':');
-					if (second && (size_t)(second - p) < llen) {
-						size_t flen = (p + llen) - (second + 1);
+					if (second &&
+					    (size_t)(second - p) < llen)
+					{
+						size_t flen = (p + llen) -
+						              (second + 1);
 						if (flen >= sizeof(fmt_str))
-							flen = sizeof(fmt_str) - 1;
-						memcpy(fmt_str, second + 1, flen);
+							flen = sizeof(fmt_str) -
+							       1;
+						memcpy(fmt_str,
+						       second + 1,
+						       flen);
 						fmt_str[flen] = '\0';
 					}
 				}
 				break;
 			}
-			if (nl) p = nl + 1; else break;
+			if (nl)
+				p = nl + 1;
+			else
+				break;
 			line++;
 		}
 	}
@@ -287,7 +307,10 @@ static int handle_sb_randomize_authorized(
 		}
 		fprintf(fp, "%.*s\n", (int)llen, p);
 	next_line_r:
-		if (nl) p = nl + 1; else break;
+		if (nl)
+			p = nl + 1;
+		else
+			break;
 		line++;
 	}
 
@@ -350,8 +373,12 @@ static int handle_sb_song_add_authorized(
 		snprintf(fmt_val, sizeof(fmt_val), "any");
 
 	char dpath[PATH_MAX];
-	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
-	         g_doc_root, ctx->id);
+	snprintf(
+	        dpath,
+	        sizeof(dpath),
+	        "%s/items/songbook/items/%s/data.txt",
+	        g_doc_root,
+	        ctx->id);
 
 	FILE *fp = fopen(dpath, "a");
 	if (!fp)
@@ -388,9 +415,13 @@ static int handle_sb_song_remove_authorized(
 	axil_query_param("n", n_str, sizeof(n_str) - 1);
 	int idx = atoi(n_str);
 
-	char dpath[PATH_MAX], tmp[PATH_MAX];
-	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
-	         g_doc_root, ctx->id);
+	char dpath[PATH_MAX], tmp[PATH_MAX + 4];
+	snprintf(
+	        dpath,
+	        sizeof(dpath),
+	        "%s/items/songbook/items/%s/data.txt",
+	        g_doc_root,
+	        ctx->id);
 	snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
 	char *raw = slurp_file(dpath);
@@ -471,47 +502,47 @@ static int handle_sb_add(int fd, char *body)
 		 * format type */
 		{
 			char dpath[PATH_MAX];
-			snprintf(dpath, sizeof(dpath),
+			snprintf(
+			        dpath,
+			        sizeof(dpath),
 			        "%s/items/songbook/items/%s/data.txt",
-			        g_doc_root, id);
+			        g_doc_root,
+			        id);
 			FILE *fp = fopen(dpath, "w");
 			if (fp) {
 				char choir_item_path[PATH_MAX];
 				item_path_build(
-				        0, "choir", choir,
+				        0,
+				        "choir",
+				        choir,
 				        choir_item_path,
 				        sizeof(choir_item_path));
 				char format_path[PATH_MAX];
 				item_child_path(
-				        choir_item_path, "format",
-				        format_path, sizeof(format_path));
+				        choir_item_path,
+				        "format",
+				        format_path,
+				        sizeof(format_path));
 				FILE *ffp = fopen(format_path, "r");
 				if (ffp) {
 					char type[128];
-					while (fgets(type, sizeof(type),
-					            ffp))
-					{
-						size_t tlen =
-						        strlen(type);
+					while (fgets(type, sizeof(type), ffp)) {
+						size_t tlen = strlen(type);
 						while (tlen > 0 &&
 						       (type[tlen - 1] ==
 						                '\n' ||
-						        type[tlen - 1] ==
-						                '\r'))
+						        type[tlen - 1] == '\r'))
 							type[--tlen] = '\0';
 						if (tlen == 0)
 							continue;
-						char song_id[256] =
-						        { 0 };
+						char song_id[256] = { 0 };
 						if (get_random_repertoire_by_type(
 						            id,
 						            type,
 						            song_id,
-						            sizeof(
-						                    song_id)) ==
+						            sizeof(song_id)) ==
 						    0)
-							fprintf(
-							        fp,
+							fprintf(fp,
 							        "%s:0:%s\n",
 							        song_id,
 							        type);
@@ -604,6 +635,8 @@ static char *sb_emit_state_json(void)
 	        json_object_new_string(sb_app_state.owner));
 	json_object_object_add(
 	        j_root, "n", json_object_new_int(sb_app_state.n_songs));
+	json_object_object_add(
+	        j_root, "m", json_object_new_int(sb_app_state.show_media));
 
 	json_object *j_songs = json_object_new_array();
 	for (int i = 0; i < sb_app_state.n_songs; i++) {
@@ -618,6 +651,12 @@ static char *sb_emit_state_json(void)
 		        j_song, json_object_new_int(g_sb_songs[i].transpose));
 		json_object_array_add(
 		        j_song, json_object_new_int(g_sb_songs[i].flags));
+		json_object_array_add(
+		        j_song, json_object_new_string(g_sb_songs[i].yt));
+		json_object_array_add(
+		        j_song, json_object_new_string(g_sb_songs[i].audio));
+		json_object_array_add(
+		        j_song, json_object_new_string(g_sb_songs[i].pdf));
 		json_object_array_add(j_songs, j_song);
 	}
 	json_object_object_add(j_root, "songs", j_songs);
@@ -633,10 +672,11 @@ static char *sb_emit_state_json(void)
 	}
 	json_object_object_add(j_root, "opts", j_opts);
 
-	const char *json_str = json_object_to_json_string(j_root);
+	const char *json_str = json_object_to_json_string_ext(j_root, 0);
 	int json_len = strlen(json_str);
 	int req = snprintf(
-	        NULL, 0,
+	        NULL,
+	        0,
 	        "<script type=\"application/json\" "
 	        "id=\"bud-state\">%s</script>",
 	        json_str);
@@ -646,14 +686,15 @@ static char *sb_emit_state_json(void)
 		return NULL;
 	}
 	snprintf(
-	        sj, req + 1,
+	        sj,
+	        req + 1,
 	        "<script type=\"application/json\" "
 	        "id=\"bud-state\">%s</script>",
 	        json_str);
-	fprintf(
-	        stderr,
+	fprintf(stderr,
 	        "DIAG sb_emit_state_json: json_len=%d buf_len=%d\n",
-	        json_len, req + 1);
+	        json_len,
+	        req + 1);
 	json_object_put(j_root);
 	return sj;
 }
@@ -688,6 +729,8 @@ static int api_sb_transpose_get(int fd, char *body)
 		if (axil_query_param("l", l, sizeof(l)) >= 0 && l[0] == '1')
 			flags |= TRANSP_LATIN;
 	}
+	(void)axil_query_param(
+	        "m", (char[4]){ 0 }, 4); /* consumed for consistency */
 
 	if (!n_str[0])
 		return bad_request(fd, "Missing n");
@@ -697,13 +740,17 @@ static int api_sb_transpose_get(int fd, char *body)
 
 	/* Read song_id and transpose from data.txt line N */
 	char dpath[PATH_MAX];
-	snprintf(dpath, sizeof(dpath), "%s/items/songbook/items/%s/data.txt",
-	         g_doc_root, id);
+	snprintf(
+	        dpath,
+	        sizeof(dpath),
+	        "%s/items/songbook/items/%s/data.txt",
+	        g_doc_root,
+	        id);
 	char *raw = slurp_file(dpath);
 	if (!raw)
 		return respond_error(fd, 404, "Songbook not found");
 
-	char found_song[128] = { 0 };
+	char found_song[256] = { 0 };
 	int line = 0;
 	int found = 0;
 	char *p = raw;
@@ -719,8 +766,11 @@ static int api_sb_transpose_get(int fd, char *body)
 				char *second = strchr(first, ':');
 				if (second) {
 					*second++ = '\0';
-					snprintf(found_song, sizeof(found_song),
-					         "%s", buf);
+					snprintf(
+					        found_song,
+					        sizeof(found_song),
+					        "%s",
+					        buf);
 					if (t_str[0])
 						transpose = atoi(t_str);
 					else
@@ -729,7 +779,10 @@ static int api_sb_transpose_get(int fd, char *body)
 				}
 			}
 		}
-		if (nl) p = nl + 1; else break;
+		if (nl)
+			p = nl + 1;
+		else
+			break;
 		line++;
 	}
 
@@ -819,7 +872,7 @@ static int songbook_detail_handler(int fd, char *body)
 	is_owner = (user && user[0] && strcmp(user, owner) == 0);
 
 	/* Parse query prefs */
-	int t = 0, f = 0;
+	int t = 0, f = TRANSP_HTML, show_media = 0;
 	{
 		char qs[1024] = { 0 };
 		axil_env_get(fd, qs, "QUERY_STRING");
@@ -845,37 +898,36 @@ static int songbook_detail_handler(int fd, char *body)
 			f |= TRANSP_LATIN;
 	}
 	{
+		char tmp[16] = { 0 };
+		axil_query_param("m", tmp, sizeof(tmp));
+		if (tmp[0] && tmp[0] == '1')
+			show_media = 1;
+	}
+	{
 		char qs[1024] = { 0 };
 		axil_env_get(fd, qs, "QUERY_STRING");
 		if (!qs[0] && user && user[0]) {
-			char p[PATH_MAX];
 			char *v;
-			if (user_path_build(
-			            user, ".tty/chords-bemol", p, sizeof(p)) ==
-			    0)
-			{
-				v = slurp_file(p);
-				if (v) {
-					if (atoi(v))
-						f |= TRANSP_BEMOL;
-					free(v);
-				}
+			v = song_get_pref(user, "chords-bemol");
+			if (v) {
+				if (atoi(v))
+					f |= TRANSP_BEMOL;
+				free(v);
 			}
-			if (user_path_build(
-			            user, ".tty/chords-latin", p, sizeof(p)) ==
-			    0)
-			{
-				v = slurp_file(p);
-				if (v) {
-					if (atoi(v))
-						f |= TRANSP_LATIN;
-					free(v);
-				}
+			v = song_get_pref(user, "chords-latin");
+			if (v) {
+				if (atoi(v))
+					f |= TRANSP_LATIN;
+				free(v);
+			}
+			v = song_get_pref(user, "chords-media");
+			if (v) {
+				if (atoi(v))
+					show_media = 1;
+				free(v);
 			}
 		}
 	}
-
-	f |= TRANSP_HTML;
 
 	int zoom = 100;
 	if (user && user[0]) {
@@ -916,9 +968,12 @@ static int songbook_detail_handler(int fd, char *body)
 	/* Load songs from data.txt */
 	{
 		char dpath[PATH_MAX];
-		snprintf(dpath, sizeof(dpath),
+		snprintf(
+		        dpath,
+		        sizeof(dpath),
 		        "%s/items/songbook/items/%s/data.txt",
-		        g_doc_root, id);
+		        g_doc_root,
+		        id);
 		struct stat st;
 		if (stat(dpath, &st) == 0 && S_ISREG(st.st_mode)) {
 			char *raw = slurp_file(dpath);
@@ -928,9 +983,8 @@ static int songbook_detail_handler(int fd, char *body)
 				       sb_app_state.n_songs < MAX_SB_SONGS)
 				{
 					char *nl = strchr(p, '\n');
-					size_t llen = nl ?
-					        (size_t)(nl - p) :
-					        strlen(p);
+					size_t llen = nl ? (size_t)(nl - p)
+					                 : strlen(p);
 					if (llen > 0 && llen < 255 &&
 					    p[0] != '#')
 					{
@@ -941,42 +995,35 @@ static int songbook_detail_handler(int fd, char *body)
 						        "%.*s",
 						        (int)llen,
 						        p);
-						char *tr_str =
-						        strchr(buf, ':');
+						char *tr_str = strchr(buf, ':');
 						if (tr_str) {
 							*tr_str++ = '\0';
-							char *fmt_str =
-							        strchr(
-							                tr_str,
-							                ':');
+							char *fmt_str = strchr(
+							        tr_str, ':');
 							if (fmt_str) {
 								*fmt_str++ =
 								        '\0';
-								const char
-								        *song_id =
+								const char *song_id =
 								        buf;
-								int transpose =
-								        atoi(tr_str);
+								int transpose = atoi(
+								        tr_str);
 								if (qmap_pos(
 								            song_hd,
 								            song_id) !=
 								    QM_MISS)
 								{
-									const char
-									        *st =
-									        qmap_get_field_str(
-									                song_hd,
-									                song_id,
-									                "title");
+									const char *st = qmap_get_field_str(
+									        song_hd,
+									        song_id,
+									        "title");
 									if (!st)
-										st =
-										        song_id;
-									int ok =
-									        song_get_original_key(
-									                song_id);
+										st = song_id;
+									int ok = song_get_original_key(
+									        song_id);
 									char *ch =
 									        NULL;
-									int dk = 0;
+									int dk =
+									        0;
 									song_transpose_root(
 									        g_doc_root,
 									        song_id,
@@ -984,33 +1031,61 @@ static int songbook_detail_handler(int fd, char *body)
 									        f,
 									        &ch,
 									        &dk);
-									sb_song_row_data_t
-									        *sd =
+									sb_song_row_data_t *sd =
 									        &g_sb_songs
 									                [sb_app_state
 									                         .n_songs];
-									memset(
-									        sd,
-									        0,
-									        sizeof(
-									                *sd));
+									memset(sd,
+									       0,
+									       sizeof(*sd));
 									snprintf(
 									        sd->title,
-									        sizeof(
-									                sd->title),
+									        sizeof(sd->title),
 									        "%s",
 									        st);
 									snprintf(
 									        sd->song_id,
-									        sizeof(
-									                sd->song_id),
+									        sizeof(sd->song_id),
 									        "%s",
 									        song_id);
 									sd->orig_key =
 									        ok;
 									sd->transpose =
 									        transpose;
-									sd->flags = f;
+									sd->flags =
+									        f;
+									{
+										const char *_yt = qmap_get_field_str(
+										        song_hd,
+										        song_id,
+										        "yt");
+										const char *_audio = qmap_get_field_str(
+										        song_hd,
+										        song_id,
+										        "audio");
+										const char *_pdf = qmap_get_field_str(
+										        song_hd,
+										        song_id,
+										        "pdf");
+										if (_yt)
+											snprintf(
+											        sd->yt,
+											        sizeof(sd->yt),
+											        "%s",
+											        _yt);
+										if (_audio)
+											snprintf(
+											        sd->audio,
+											        sizeof(sd->audio),
+											        "%s",
+											        _audio);
+										if (_pdf)
+											snprintf(
+											        sd->pdf,
+											        sizeof(sd->pdf),
+											        "%s",
+											        _pdf);
+									}
 									sd->chord_html =
 									        ch;
 									sb_app_state
@@ -1033,6 +1108,7 @@ static int songbook_detail_handler(int fd, char *body)
 	sb_app_state.zoom = zoom;
 	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
 	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
+	sb_app_state.show_media = show_media;
 	sb_app_state.is_owner = is_owner;
 	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", id);
 	snprintf(
@@ -1137,9 +1213,12 @@ static int songbook_edit_get_handler(int fd, char *body)
 
 	{
 		char dpath[PATH_MAX];
-		snprintf(dpath, sizeof(dpath),
+		snprintf(
+		        dpath,
+		        sizeof(dpath),
 		        "%s/items/songbook/items/%s/data.txt",
-		        g_doc_root, id);
+		        g_doc_root,
+		        id);
 		struct stat st;
 		if (stat(dpath, &st) == 0 && S_ISREG(st.st_mode)) {
 			char *raw = slurp_file(dpath);
@@ -1147,34 +1226,31 @@ static int songbook_edit_get_handler(int fd, char *body)
 				char *p = raw;
 				while (*p && n_songs < 256) {
 					char *nl = strchr(p, '\n');
-					size_t llen = nl ?
-					        (size_t)(nl - p) :
-					        strlen(p);
+					size_t llen = nl ? (size_t)(nl - p)
+					                 : strlen(p);
 					if (llen > 0 && p[0] != '#') {
 						char buf[256];
 						snprintf(
-						        buf, sizeof(buf),
-						        "%.*s", (int)llen, p);
-						char *first =
-						        strchr(buf, ':');
+						        buf,
+						        sizeof(buf),
+						        "%.*s",
+						        (int)llen,
+						        p);
+						char *first = strchr(buf, ':');
 						if (first) {
 							*first++ = '\0';
-							char *second =
-							        strchr(
-							                first,
-							                ':');
+							char *second = strchr(
+							        first, ':');
 							if (second) {
 								*second++ =
 								        '\0';
-								const char
-								        *sid =
+								const char *sid =
 								        buf;
-								const char
-								        *s_title =
-								        qmap_get_field_str(
-								                song_hd,
-								                sid,
-								                "title");
+								const char *s_title = qmap_get_field_str(
+								        song_hd,
+								        sid,
+								        "titl"
+								        "e");
 								if (!s_title)
 									s_title =
 									        sid;
@@ -1312,10 +1388,13 @@ static int songbook_edit_post_authorized(
 
 	/* Write songs to data.txt */
 	{
-		char dpath[PATH_MAX], tmp[PATH_MAX];
-		snprintf(dpath, sizeof(dpath),
+		char dpath[PATH_MAX], tmp[PATH_MAX + 4];
+		snprintf(
+		        dpath,
+		        sizeof(dpath),
 		        "%s/items/songbook/items/%s/data.txt",
-		        g_doc_root, ctx->id);
+		        g_doc_root,
+		        ctx->id);
 		snprintf(tmp, sizeof(tmp), "%s.tmp", dpath);
 
 		char amount_str[16] = { 0 };
@@ -1356,7 +1435,8 @@ static int songbook_edit_post_authorized(
 			char fmt_val[64] = { 0 };
 			mpfd_get(fmt_field, fmt_val, sizeof(fmt_val) - 1);
 
-			fprintf(fp, "%s:%s:%s\n",
+			fprintf(fp,
+			        "%s:%s:%s\n",
 			        sid,
 			        key_val[0] ? key_val : "0",
 			        fmt_val[0] ? fmt_val : "any");

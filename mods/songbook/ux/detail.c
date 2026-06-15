@@ -51,7 +51,11 @@ static bud_node *sb_render_song_row(
         int orig_key,
         int flags,
         const char *n_buf,
-        bud_node **out_pre)
+        const char *yt,
+        const char *audio,
+        const char *pdf,
+        bud_node **out_pre,
+        bud_node **out_media)
 {
 	int t = t_str ? atoi(t_str) : 0;
 	int bemol = (flags & TRANSP_BEMOL) ? 1 : 0;
@@ -87,6 +91,28 @@ static bud_node *sb_render_song_row(
 	if (out_pre)
 		*out_pre = chord_pre;
 
+	/* Media container (always rendered, patched by WASM) */
+	bud_node *media_node = lx_el("div",
+	                             lx_attr("data-songbook-media", n_buf),
+	                             lx_attr("class", "songbook-media mt-1"),
+	                             lx_node(bud_raw("")))
+	                               .data.node;
+
+	/* Pre-populate media content on server when show_media is active */
+	if (sb_app_state.show_media && (yt[0] || audio[0] || pdf[0])) {
+		bud_node *slot = site_ui_render_media_slot(yt, audio, pdf);
+		if (slot)
+			media_node =
+			        lx_el("div",
+			              lx_attr("data-songbook-media", n_buf),
+			              lx_attr("class", "songbook-media mt-1"),
+			              lx_node(slot))
+			                .data.node;
+	}
+
+	if (out_media)
+		*out_media = media_node;
+
 	return lx_el("div",
 	             lx_attr("data-songbook-item", ""),
 	             lx_attr("class",
@@ -95,16 +121,22 @@ static bud_node *sb_render_song_row(
 	                   lx_attr("class",
 	                           "flex justify-between items-center"),
 	                   lx_el("div",
-	                         lx_attr("class", "flex flex-col"),
+	                         lx_attr("class",
+	                                 "flex gap-16 justify-between"),
 	                         lx_el("a",
 	                               lx_attr("class", "font-bold"),
 	                               song_href ? lx_attr("href", song_href)
 	                                         : lx_none(),
 	                               lx_text(s_title)),
-	                         lx_el("span",
-	                               lx_attr("data-songbook-target-key", ""),
-	                               lx_attr("class", "text-xs text-muted"),
-	                               lx_text(tgt_key))),
+	                         sb_app_state.user[0]
+	                                 ? lx_none()
+	                                 : lx_el("span",
+	                                         lx_attr("data-songbook-target-"
+	                                                 "key",
+	                                                 ""),
+	                                         lx_attr("class",
+	                                                 "text-xs text-muted"),
+	                                         lx_text(tgt_key))),
 	                   is_owner
 	                           ? lx_el("div",
 	                                   lx_attr("class", "flex gap-2"),
@@ -211,7 +243,8 @@ static bud_node *sb_render_song_row(
 	                                                       "px-2"),
 	                                               lx_text("🗑"))))
 	                           : lx_none()),
-	             lx_node(chord_pre))
+	             lx_node(chord_pre),
+	             lx_node(media_node))
 	        .data.node;
 }
 
@@ -307,7 +340,7 @@ static bud_node *sb_build_body_content(void)
 		for (int i = 0; i < sb_app_state.n_songs; i++) {
 			sb_song_row_data_t *s = &g_sb_songs[i];
 
-			char n_buf[16], song_href[256], tgt_key[32];
+			char n_buf[16], song_href[320], tgt_key[32];
 			char rem_action[256], tpose_action[256],
 			        rand_action[256], t_str[16];
 
@@ -349,7 +382,7 @@ static bud_node *sb_build_body_content(void)
 
 			snprintf(t_str, sizeof(t_str), "%d", s->transpose);
 
-			bud_node *pre_ptr = NULL;
+			bud_node *pre_ptr = NULL, *media_ptr = NULL;
 			bud_node *row = sb_render_song_row(
 			        s->title,
 			        song_href[0] ? song_href : NULL,
@@ -364,11 +397,19 @@ static bud_node *sb_build_body_content(void)
 			        s->orig_key,
 			        s->flags,
 			        n_buf,
-			        &pre_ptr);
+			        s->yt,
+			        s->audio,
+			        s->pdf,
+			        &pre_ptr,
+			        &media_ptr);
 
 			if (pre_ptr && g_sb_n_chord_nodes < MAX_SB_SONGS)
 				g_sb_chord_nodes[g_sb_n_chord_nodes++] =
 				        pre_ptr;
+
+			if (media_ptr && g_sb_n_chord_nodes <= MAX_SB_SONGS)
+				g_sb_media_nodes[g_sb_n_chord_nodes - 1] =
+				        media_ptr;
 
 			bud_append(frag, row);
 		}

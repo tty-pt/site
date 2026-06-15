@@ -1,4 +1,5 @@
 #include "../include/bud/bud_app.h"
+#include "../include/bud/bud.h"
 #include <stddef.h>
 
 #ifdef __wasm__
@@ -49,6 +50,7 @@ __attribute__((constructor)) static void wasm_platform_init(void)
 }
 
 static bud_runtime *runtime = NULL;
+static char wasm_dbg_buf[65536];
 
 static int noop_emit(
         void *user, const char *op, const char *a, const char *b, const char *c)
@@ -82,9 +84,6 @@ __attribute__((export_name("bud_app_mount"))) void wasm_mount(void)
 	if (!runtime) {
 		bud_node *app = bud_app_render();
 		bud_render_ops(app, noop_emit, NULL);
-		/* DIAG: log tree info after ID assignment */
-		extern void wasm_diag_log_tree(void);
-		wasm_diag_log_tree();
 		runtime = bud_runtime_new(app);
 		bud_runtime_mount(runtime);
 		bud_host_emit_patch(
@@ -206,23 +205,90 @@ __attribute__((export_name("bud_app_dispatch"))) int wasm_dispatch_event(
         void *event_data)
 {
 	if (runtime) {
-		WASM_LOG("dispatch: looking for node");
-		bud_node *target =
-		        find_node_by_id(bud_runtime_root(runtime), node_id);
+		bud_node *root = bud_runtime_root(runtime);
+		bud_node *target = find_node_by_id(root, node_id);
 		if (target) {
-			wasm_printf("dispatch: found node=%d\n", node_id);
 			bud_host_emit_patch(
 			        "DISPATCH", 8, NULL, 0, NULL, 0, NULL, 0);
 			int ret = bud_runtime_dispatch(
 			        runtime, target, event_name, event_data);
-			wasm_printf("dispatch: result=%d\n", ret);
 			return ret;
 		}
 		wasm_printf("dispatch: node=%d NOT FOUND\n", node_id);
 		return -2;
 	}
-	WASM_LOG("dispatch: runtime null");
 	return -1;
+}
+
+/* ── Debug exports ── */
+
+__attribute__((export_name("wasm_dump_tree"))) void wasm_dump_tree(void)
+{
+	bud_node *root;
+
+	if (!runtime) {
+		WASM_LOG("(no runtime)");
+		return;
+	}
+	root = bud_runtime_root(runtime);
+	if (!root) {
+		WASM_LOG("(no root)");
+		return;
+	}
+	bud_sprint_tree(root, wasm_dbg_buf, sizeof(wasm_dbg_buf));
+	WASM_LOG("--- WASM tree ---");
+	WASM_LOG(wasm_dbg_buf);
+	WASM_LOG("--- end tree ---");
+}
+
+__attribute__((export_name("wasm_get_tree_text"))) const char *
+wasm_get_tree_text(void)
+{
+	bud_node *root;
+
+	if (!runtime) {
+		wasm_dbg_buf[0] = '\0';
+		return wasm_dbg_buf;
+	}
+	root = bud_runtime_root(runtime);
+	if (!root) {
+		wasm_dbg_buf[0] = '\0';
+		return wasm_dbg_buf;
+	}
+	bud_sprint_tree(root, wasm_dbg_buf, sizeof(wasm_dbg_buf));
+	return wasm_dbg_buf;
+}
+
+__attribute__((export_name("wasm_get_src"))) const char *
+wasm_get_src(unsigned int node_id)
+{
+	bud_node *root;
+	bud_node *target;
+
+	if (!runtime) {
+		wasm_dbg_buf[0] = '\0';
+		return wasm_dbg_buf;
+	}
+	root = bud_runtime_root(runtime);
+	if (!root) {
+		wasm_dbg_buf[0] = '\0';
+		return wasm_dbg_buf;
+	}
+	target = find_node_by_id(root, node_id);
+	if (!target) {
+		snprintf(
+		        wasm_dbg_buf,
+		        sizeof(wasm_dbg_buf),
+		        "node=%d NOT IN WASM TREE",
+		        node_id);
+		return wasm_dbg_buf;
+	}
+	snprintf(
+	        wasm_dbg_buf,
+	        sizeof(wasm_dbg_buf),
+	        "%s",
+	        bud_node_get_src(target));
+	return wasm_dbg_buf;
 }
 
 #else
@@ -298,6 +364,22 @@ void bud_host_set_location(const char *url, size_t len)
 {
 	(void)url;
 	(void)len;
+}
+
+void wasm_dump_tree(void)
+{
+	(void)0;
+}
+
+const char *wasm_get_tree_text(void)
+{
+	return "";
+}
+
+const char *wasm_get_src(unsigned int node_id)
+{
+	(void)node_id;
+	return "";
 }
 
 #endif

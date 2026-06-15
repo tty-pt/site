@@ -26,9 +26,9 @@ Deno.test("song media: verify YouTube iframe in SSR", async () => {
     }
 
     // 3. Verify media container is present
-    const container = page.locator("#media-container");
+    const container = page.locator(".media-slot");
     if (await container.count() === 0) {
-        throw new Error("Media container (#media-container) not found in SSR");
+        throw new Error("Media container (.media-slot) not found in SSR");
     }
 
   } finally {

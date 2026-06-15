@@ -45,6 +45,7 @@ struct bud_node {
 	bud_lifecycle_fn on_unmount;
 	void *lifecycle_user;
 	int mounted;
+	BUD_SRC_FIELDS
 };
 
 typedef struct bud_runtime {
@@ -486,6 +487,23 @@ static int bud_render_html_node(const bud_node *node, bud_buf *buf)
 	if (bud_buf_append(buf, node->tag) != 0) {
 		return -1;
 	}
+#ifdef BUD_DEBUG
+	if (node->src_file && node->src_file[0]) {
+		char src_buf[384];
+		int src_len = snprintf(
+		        src_buf,
+		        sizeof(src_buf),
+		        "%s:%d",
+		        node->src_file,
+		        node->src_line);
+		if (src_len > 0 && src_len < (int)sizeof(src_buf)) {
+			if (bud_append_attr(buf, "data-bud-src", src_buf) != 0)
+			{
+				return -1;
+			}
+		}
+	}
+#endif
 	for (attr = node->attrs; attr; attr = attr->next) {
 		if (attr->is_boolean) {
 			if (bud_buf_append_char(buf, ' ') != 0) {
@@ -609,6 +627,23 @@ static int bud_render_hydrated_html_node(const bud_node *node, bud_buf *buf)
 	if (bud_append_attr(buf, "data-bud-id", id_buf) != 0) {
 		return -1;
 	}
+#ifdef BUD_DEBUG
+	if (node->src_file && node->src_file[0]) {
+		char src_buf[384];
+		int src_len = snprintf(
+		        src_buf,
+		        sizeof(src_buf),
+		        "%s:%d",
+		        node->src_file,
+		        node->src_line);
+		if (src_len > 0 && src_len < (int)sizeof(src_buf)) {
+			if (bud_append_attr(buf, "data-bud-src", src_buf) != 0)
+			{
+				return -1;
+			}
+		}
+	}
+#endif
 	if (node->listeners) {
 		if (bud_buf_append(buf, " data-bud-on=\"") != 0) {
 			return -1;
@@ -2021,33 +2056,6 @@ void bud_event_prevent_default(bud_event *event)
 	event->default_prevented = 1;
 }
 
-#ifdef __wasm__
-__attribute__((import_module("env"), import_name("bud_host_log"))) void
-bud_dbg_log(const char *msg, size_t len);
-#define DBG_LOG(msg)                                                           \
-	do {                                                                   \
-		const char *_m = (msg);                                        \
-		bud_dbg_log(_m, strlen(_m));                                   \
-	} while (0)
-static void dbg_printf(const char *fmt, ...)
-{
-	char buf[256];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, ap);
-	va_end(ap);
-	bud_dbg_log(buf, strlen(buf));
-}
-#else
-#define DBG_LOG(msg)                                                           \
-	do {                                                                   \
-	} while (0)
-static void dbg_printf(const char *fmt, ...)
-{
-	(void)fmt;
-}
-#endif
-
 static int bud_dispatch_event_node(bud_node *node, bud_event *event)
 {
 	bud_listener *listener;
@@ -2059,25 +2067,14 @@ static int bud_dispatch_event_node(bud_node *node, bud_event *event)
 
 	event->current_target = node;
 	allow_bubble = node != event->target;
-	dbg_printf(
-	        "DEN: node=%d listeners=%p\n",
-	        node->id,
-	        (void *)node->listeners);
 	for (listener = node->listeners; listener; listener = listener->next) {
-		dbg_printf(
-		        "DEN: event=%s type=%s handler=%p\n",
-		        listener->event,
-		        event->type,
-		        (void *)(intptr_t)listener->handler);
 		if (strcmp(listener->event, event->type) != 0) {
 			continue;
 		}
 		if (allow_bubble && !listener->bubbles) {
-			dbg_printf("DEN: skip bubble for node=%d\n", node->id);
 			continue;
 		}
 		if (listener->handler) {
-			dbg_printf("DEN: calling handler node=%d\n", node->id);
 			if (listener->handler(event) != 0) {
 				return -1;
 			}
@@ -2132,6 +2129,193 @@ void bud_free(bud_node *node)
 void bud_free_string(char *value)
 {
 	free(value);
+}
+
+void bud_node_set_src(bud_node *node, const char *file, int line)
+{
+	if (!node)
+		return;
+#ifdef BUD_DEBUG
+	node->src_file = file;
+	node->src_line = line;
+#else
+	(void)file;
+	(void)line;
+#endif
+}
+
+static char bud_src_buf[256];
+
+const char *bud_node_get_src(const bud_node *node)
+{
+	if (!node)
+		return "(null)";
+#ifdef BUD_DEBUG
+	if (node->src_file) {
+		snprintf(
+		        bud_src_buf,
+		        sizeof(bud_src_buf),
+		        "%s:%d",
+		        node->src_file,
+		        node->src_line);
+		return bud_src_buf;
+	}
+#endif
+	snprintf(
+	        bud_src_buf,
+	        sizeof(bud_src_buf),
+	        "node=%d kind=%u tag=%s",
+	        bud_node_id(node),
+	        (unsigned)bud_node_kind_of(node),
+	        bud_node_tag(node) ? bud_node_tag(node) : "(null)");
+	return bud_src_buf;
+}
+
+/* ── Tree dump for debugging ── */
+
+static int bud_sprint_tree_node(
+        const bud_node *node, char *buf, size_t bufsz, size_t *pos, int depth)
+{
+	const bud_attr *attr;
+	size_t i;
+	int n;
+
+	if (!node)
+		return 0;
+
+	/* indent */
+	for (i = 0; i < (size_t)depth && *pos < bufsz; i++) {
+		buf[*pos] = ' ';
+		(*pos)++;
+	}
+	if (*pos >= bufsz)
+		return -1;
+
+	/* id= */
+	n = snprintf(buf + *pos, bufsz - *pos, "id=%u ", bud_node_id(node));
+	if (n < 0 || (size_t)n >= bufsz - *pos)
+		return -1;
+	*pos += n;
+
+	/* kind */
+	switch (bud_node_kind_of(node)) {
+	case BUD_NODE_FRAGMENT:
+		n = snprintf(buf + *pos, bufsz - *pos, "kind=FRAGMENT");
+		break;
+	case BUD_NODE_ELEMENT:
+		n = snprintf(buf + *pos, bufsz - *pos, "kind=ELEMENT");
+		break;
+	case BUD_NODE_TEXT:
+		n = snprintf(buf + *pos, bufsz - *pos, "kind=TEXT");
+		break;
+	case BUD_NODE_RAW_HTML:
+		n = snprintf(buf + *pos, bufsz - *pos, "kind=RAW_HTML");
+		break;
+	default:
+		n = snprintf(buf + *pos, bufsz - *pos, "kind=?");
+		break;
+	}
+	if (n < 0 || (size_t)n >= bufsz - *pos)
+		return -1;
+	*pos += n;
+
+	/* tag (for elements) */
+	if (bud_node_kind_of(node) == BUD_NODE_ELEMENT && bud_node_tag(node)) {
+		n = snprintf(
+		        buf + *pos,
+		        bufsz - *pos,
+		        " tag=%s",
+		        bud_node_tag(node));
+		if (n < 0 || (size_t)n >= bufsz - *pos)
+			return -1;
+		*pos += n;
+
+		/* first two key attrs: id, class */
+		for (attr = node->attrs; attr; attr = attr->next) {
+			if (strcmp(attr->name, "id") == 0 ||
+			    strcmp(attr->name, "class") == 0)
+			{
+				n = snprintf(
+				        buf + *pos,
+				        bufsz - *pos,
+				        " %s=\"%s\"",
+				        attr->name,
+				        attr->value);
+				if (n < 0 || (size_t)n >= bufsz - *pos)
+					return -1;
+				*pos += n;
+			}
+		}
+	}
+
+	/* text snippet (for TEXT) */
+	if (bud_node_kind_of(node) == BUD_NODE_TEXT && bud_node_text(node)) {
+		const char *t = bud_node_text(node);
+		size_t tlen = strlen(t);
+		n = snprintf(
+		        buf + *pos,
+		        bufsz - *pos,
+		        " \"%.*s%s\"",
+		        (int)(tlen < 40 ? tlen : 40),
+		        t,
+		        tlen > 40 ? "..." : "");
+		if (n < 0 || (size_t)n >= bufsz - *pos)
+			return -1;
+		*pos += n;
+	}
+
+	/* source location */
+#ifdef BUD_DEBUG
+	if (node->src_file) {
+		n = snprintf(
+		        buf + *pos,
+		        bufsz - *pos,
+		        " [%s:%d]",
+		        node->src_file,
+		        node->src_line);
+		if (n < 0 || (size_t)n >= bufsz - *pos)
+			return -1;
+		*pos += n;
+	}
+#endif
+
+	/* newline */
+	if (*pos < bufsz) {
+		buf[*pos] = '\n';
+		(*pos)++;
+	}
+
+	/* children */
+	for (i = 0; i < bud_node_child_count(node); i++) {
+		if (bud_sprint_tree_node(
+		            bud_node_child(node, i),
+		            buf,
+		            bufsz,
+		            pos,
+		            depth + 1) != 0)
+			return -1;
+	}
+
+	return 0;
+}
+
+int bud_sprint_tree(const bud_node *root, char *buf, size_t bufsz)
+{
+	size_t pos = 0;
+
+	if (!root || !buf || bufsz == 0)
+		return -1;
+
+	buf[0] = '\0';
+	if (bud_sprint_tree_node(root, buf, bufsz, &pos, 0) != 0)
+		return -1;
+
+	if (pos < bufsz)
+		buf[pos] = '\0';
+	else
+		buf[bufsz - 1] = '\0';
+
+	return 0;
 }
 
 bud_node *bud_el_impl(const char *tag, size_t count, const bud_arg *args)

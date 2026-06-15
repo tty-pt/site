@@ -7,6 +7,8 @@ LDLIBS-bud_test := -lbud
 
 include ../mk/include.mk
 
+CFLAGS += $(EXTRA_CFLAGS)
+
 test: all
 	LD_LIBRARY_PATH=./lib ./bin/bud_test
 

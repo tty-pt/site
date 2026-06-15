@@ -307,6 +307,101 @@ bud_node *site_ui_viewer_controls(
 	        .data.node;
 }
 
+/* ── Shared checkbox builder ─────────────────────────── */
+
+bud_node *site_ui_checkbox(
+        const char *name,
+        const char *label,
+        int checked,
+        bud_event_handler_fn on_change)
+{
+	if (!name || !label)
+		return lx_none().data.node;
+
+	bud_arg bind = lx_none();
+	if (on_change)
+		bind = lx_bind("change", 0, on_change);
+
+	return lx_el("label",
+	             lx_el("input",
+	                   lx_attr("type", "checkbox"),
+	                   lx_attr("name", name),
+	                   bind,
+	                   checked ? lx_attr("checked", "") : lx_none()),
+	             lx_text(label))
+	        .data.node;
+}
+
+/* ── Shared media slot renderer ──────────────────────── */
+
+bud_node *
+site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
+{
+	char src[1024];
+	bud_node *inner = bud_fragment();
+	int has_media = 0;
+	if (!inner)
+		return NULL;
+
+	if (yt && yt[0]) {
+		snprintf(
+		        src,
+		        sizeof(src),
+		        "https://www.youtube.com/embed/%s",
+		        yt);
+		bud_append(
+		        inner,
+		        lx_el("div",
+		              lx_attr("class", "flex flex-col gap-4 w-full"),
+		              lx_el("iframe",
+		                    lx_attr("src", src),
+		                    lx_attr("class",
+		                            "w-full aspect-video "
+		                            "border-none"),
+		                    lx_attr("allowfullscreen", "")))
+		                .data.node);
+		has_media = 1;
+	}
+
+	if (audio && audio[0]) {
+		bud_append(
+		        inner,
+		        lx_el("div",
+		              lx_attr("class", "flex flex-col gap-4 w-full"),
+		              lx_el("audio",
+		                    lx_attr("controls", ""),
+		                    lx_attr("class", "w-full"),
+		                    lx_el("source",
+		                          lx_attr("src", audio),
+		                          lx_attr("type", "audio/mpeg"))))
+		                .data.node);
+		has_media = 1;
+	}
+
+	if (pdf && pdf[0]) {
+		bud_append(
+		        inner,
+		        lx_el("div",
+		              lx_attr("class", "flex flex-col gap-4 w-full"),
+		              lx_el("a",
+		                    lx_attr("href", pdf),
+		                    lx_attr("target", "_blank"),
+		                    lx_attr("rel", "noopener"),
+		                    lx_attr("class", "text-blue-600"),
+		                    lx_text("View PDF")))
+		                .data.node);
+		has_media = 1;
+	}
+
+	if (!has_media)
+		return NULL;
+
+	return lx_el("div",
+	             lx_attr("class", "media-slot flex flex-col gap-4 w-full"),
+	             lx_node(inner))
+	        .data.node;
+}
+
 bud_node *site_ui_layout(
         const char *title,
         const char *path,

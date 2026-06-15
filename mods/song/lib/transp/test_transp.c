@@ -409,6 +409,110 @@ TEST(numbered_verse_no_duplicate_text)
 	transp_free(ctx);
 }
 
+TEST(slash_chord_identified)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "G/B D/F# A/E", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "G/B"));
+	assert(str_contains(result, "D/F#"));
+	assert(str_contains(result, "A/E"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(slash_chord_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "G/B D/F#", 2, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "A/B"));
+	assert(str_contains(result, "E/F#"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(slash_chord_latin_bass)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "G/Do C/Sol D/Re", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "G/Do"));
+	assert(str_contains(result, "C/Sol"));
+	assert(str_contains(result, "D/Re"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(slash_chord_with_accidental_bass)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "E/G# C/A# G/Bb", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "E/G#"));
+	assert(str_contains(result, "C/A#"));
+	assert(str_contains(result, "G/Bb"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(major7_notation)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "C7M FM7", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "C7M"));
+	assert(str_contains(result, "FM7"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(major7_notation_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "C7M FM7", 2, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "D7M"));
+	assert(str_contains(result, "GM7"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(invalid_slash_not_a_chord)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "G/thing C/foo", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(str_contains(result, "G/thing C/foo"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -435,6 +539,13 @@ int main(void)
 	RUN_TEST(lyric_word_not_treated_as_chord);
 	RUN_TEST(lyric_word_with_chord_root_prefix);
 	RUN_TEST(numbered_verse_no_duplicate_text);
+	RUN_TEST(slash_chord_identified);
+	RUN_TEST(slash_chord_transposed);
+	RUN_TEST(slash_chord_latin_bass);
+	RUN_TEST(slash_chord_with_accidental_bass);
+	RUN_TEST(major7_notation);
+	RUN_TEST(major7_notation_transposed);
+	RUN_TEST(invalid_slash_not_a_chord);
 
 	printf("\nAll tests passed!\n");
 	return 0;

@@ -70,17 +70,18 @@ Deno.test("songbook SSR: verify bolded chords and user prefs", async () => {
         throw new Error("Chords are not bolded in Songbook SSR");
     }
 
-    // 3. Set Latin preference server-side by navigating with query param
-    await page.goto(`${BASE}/song/${SONG_ID}?l=1&b=0&t=0`, { waitUntil: 'domcontentloaded' });
-
-    await pageNoJs.goto(`${BASE}/songbook/${sbId}`);
-    const targetKeyText = await pageNoJs.textContent('[data-songbook-target-key]');
+    // 3. Check target key as guest (not logged in) with Latin notation via URL param
+    const contextGuest = await browser.newContext({ javaScriptEnabled: false });
+    const pageGuest = await contextGuest.newPage();
+    await pageGuest.goto(`${BASE}/songbook/${sbId}?l=1`);
+    const targetKeyText = await pageGuest.textContent('[data-songbook-target-key]');
     if (Deno.env.get("DEBUG")) console.log("Songbook Target Key (Latin?):", targetKeyText);
     
     // Original key of A alegria is A. In Latin it's La.
     if (!targetKeyText?.includes("La")) {
         throw new Error(`Expected Latin notation (La) in Songbook SSR, got: ${targetKeyText}`);
     }
+    await contextGuest.close();
 
   } finally {
     await browser.close();

@@ -34,6 +34,12 @@ NDX_HOOK_DECL(int, song_transpose_root,
 	char **, output,
 	int *, key);
 
+/* Read a viewer preference for a user (e.g. "chords-bemol", "chords-latin").
+ * Returns a malloc'd string the caller must free, or NULL on error/missing. */
+NDX_HOOK_DECL(char *, song_get_pref,
+	const char *, username,
+	const char *, name);
+
 /* Get the original key of a song by reading and parsing its data.txt from
  * the given doc root. Returns chromatic index 0-11 (0=C), or 0 if undetectable.
  */

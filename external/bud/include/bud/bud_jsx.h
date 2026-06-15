@@ -66,6 +66,47 @@ bud_node *bud_frag_impl(size_t count, const bud_arg *args);
 	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
 	                (bud_arg[]){ __VA_ARGS__ }) })
 
+/* ── BUD_DEBUG: source location tracking ── */
+/* When BUD_DEBUG is defined, lx_el/lx_text/lx_frag capture __FILE__/__LINE__
+ * and stamp it on the created node.  lx_raw() is also provided as a
+ * source-aware wrapper for bud_raw().
+ *
+ * Call bud_sprint_tree(root, buf, size) to dump the tree with source info.
+ * From WASM, call wasm_dump_tree() to log the tree via bud_host_log.
+ */
+#ifdef BUD_DEBUG
+static inline bud_arg _bud_src_node(bud_node *node, const char *file, int line)
+{
+	bud_node_set_src(node, file, line);
+	return (bud_arg){ .type = BUD_ARG_NODE, .data.node = node };
+}
+
+#undef lx_text
+#define lx_text(str) _bud_src_node(bud_text(str), __FILE__, __LINE__)
+
+#undef lx_el
+#define lx_el(tag, ...)                                                        \
+	_bud_src_node(                                                         \
+	        bud_el_impl(                                                   \
+	                (tag),                                                 \
+	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
+	                (bud_arg[]){ __VA_ARGS__ }),                           \
+	        __FILE__,                                                      \
+	        __LINE__)
+
+#undef lx_frag
+#define lx_frag(...)                                                           \
+	_bud_src_node(                                                         \
+	        bud_frag_impl(                                                 \
+	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
+	                (bud_arg[]){ __VA_ARGS__ }),                           \
+	        __FILE__,                                                      \
+	        __LINE__)
+
+/* lx_raw wraps bud_raw with source tracking (use as a child arg to lx_el) */
+#define lx_raw(html) _bud_src_node(bud_raw(html), __FILE__, __LINE__)
+#endif /* BUD_DEBUG */
+
 #ifdef __cplusplus
 }
 #endif

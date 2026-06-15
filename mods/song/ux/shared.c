@@ -144,82 +144,13 @@ bud_node *bud_app_render(void)
 	char media_val[2] = { app_state.show_media ? '1' : '0', '\0' };
 	char owner_val[2] = { app_state.is_owner ? '1' : '0', '\0' };
 
-	int has_media =
-	        (app_state.cache.yt[0] != '\0' ||
-	         app_state.cache.audio[0] != '\0' ||
-	         app_state.cache.pdf[0] != '\0');
-
 	bud_node *media_slot = NULL;
-	if (app_state.show_media && has_media) {
-		bud_node *yt_slot = NULL;
-		if (app_state.cache.yt[0]) {
-			char yt_src[1024];
-			snprintf(
-			        yt_src,
-			        sizeof(yt_src),
-			        "https://www.youtube.com/embed/%s",
-			        app_state.cache.yt);
-			yt_slot = lx_el("div",
-			                lx_attr("id", "media-container"),
-			                lx_attr("class",
-			                        "flex flex-col gap-4 w-full "
-			                        "max-w-xl"),
-			                lx_el("iframe",
-			                      lx_attr("src", yt_src),
-			                      lx_attr("class",
-			                              "w-full aspect-video "
-			                              "border-none"),
-			                      lx_attr("allowfullscreen", "")))
-			                  .data.node;
-		}
-
-		bud_node *audio_slot = NULL;
-		if (app_state.cache.audio[0]) {
-			audio_slot = lx_el("div",
-			                   lx_attr("id", "media-container"),
-			                   lx_attr("class",
-			                           "flex flex-col gap-4 w-full "
-			                           "max-w-xl"),
-			                   lx_el("audio",
-			                         lx_attr("controls", ""),
-			                         lx_attr("class", "w-full"),
-			                         lx_el("source",
-			                               lx_attr("src",
-			                                       app_state.cache
-			                                               .audio),
-			                               lx_attr("type",
-			                                       "audio/mpeg"))))
-			                     .data.node;
-		}
-
-		bud_node *pdf_slot = NULL;
-		if (app_state.cache.pdf[0]) {
-			pdf_slot =
-			        lx_el("div",
-			              lx_attr("id", "media-container"),
-			              lx_attr("class",
-			                      "flex flex-col gap-4 w-full "
-			                      "max-w-xl"),
-			              lx_el("a",
-			                    lx_attr("href",
-			                            app_state.cache.pdf),
-			                    lx_attr("target", "_blank"),
-			                    lx_attr("rel", "noopener"),
-			                    lx_attr("class", "text-blue-600"),
-			                    lx_text("View PDF")))
-			                .data.node;
-		}
-
-		media_slot =
-		        lx_el("div",
-		              lx_attr("id", "media-slot"),
-		              lx_attr("class",
-		                      "flex flex-col gap-4 w-full max-w-xl"),
-		              yt_slot ? lx_node(yt_slot) : lx_none(),
-		              audio_slot ? lx_node(audio_slot) : lx_none(),
-		              pdf_slot ? lx_node(pdf_slot) : lx_none())
-		                .data.node;
-	}
+	bud_node *g_main_inner = NULL;
+	if (app_state.show_media)
+		media_slot = site_ui_render_media_slot(
+		        app_state.cache.yt,
+		        app_state.cache.audio,
+		        app_state.cache.pdf);
 
 	g_chord_raw = bud_raw(app_state.chord_html);
 	g_chord_pre = lx_el("pre",
@@ -230,6 +161,18 @@ bud_node *bud_app_render(void)
 	                            "chord-data"),
 	                    lx_node(g_chord_raw))
 	                      .data.node;
+
+	g_main_inner =
+	        lx_el("div",
+	              lx_attr("class", "flex flex-col gap-4 w-full max-w-xl"),
+	              lx_el("div",
+	                    lx_attr("class",
+	                            "detail-viewer-scroll w-full "
+	                            "max-w-xl"),
+	                    lx_attr("data-detail-viewer-scroll", "1"),
+	                    lx_node(g_chord_pre)),
+	              media_slot ? lx_node(media_slot) : lx_none())
+	                .data.node;
 
 	g_main = lx_el("div",
 	               lx_attr("id", "main"),
@@ -250,16 +193,7 @@ bud_node *bud_app_render(void)
 	               lx_attr("style", zoom_style),
 	               lx_attr("data-type-display", app_state.cache.type),
 	               lx_attr("data-author", app_state.cache.author),
-	               lx_el("div",
-	                     lx_attr("class",
-	                             "flex flex-col gap-4 w-full max-w-xl"),
-	                     lx_el("div",
-	                           lx_attr("class",
-	                                   "detail-viewer-scroll w-full "
-	                                   "max-w-xl"),
-	                           lx_attr("data-detail-viewer-scroll", "1"),
-	                           lx_node(g_chord_pre)),
-	                     media_slot ? lx_node(media_slot) : lx_none()))
+	               lx_node(g_main_inner))
 	                 .data.node;
 
 	bud_node *detail_body = NULL;
@@ -285,6 +219,7 @@ bud_node *bud_app_render(void)
 		                                                    .author
 		                                          : "N/A"))))
 		                .data.node;
+		bud_append(g_main_inner, detail_body);
 	}
 
 	bud_node *key_options = NULL;
@@ -322,30 +257,21 @@ bud_node *bud_app_render(void)
 	                          lx_attr("name", "t"),
 	                          lx_bind("change", 0, on_transpose_change),
 	                          lx_node(key_options))),
-	              lx_el("label",
-	                    lx_el("input",
-	                          lx_attr("type", "checkbox"),
-	                          lx_attr("name", "b"),
-	                          lx_bind("change", 0, on_transpose_change),
-	                          app_state.use_bemol ? lx_attr("checked", "")
-	                                              : lx_none()),
-	                    lx_text("Flats (♭)")),
-	              lx_el("label",
-	                    lx_el("input",
-	                          lx_attr("type", "checkbox"),
-	                          lx_attr("name", "l"),
-	                          lx_bind("change", 0, on_transpose_change),
-	                          app_state.use_latin ? lx_attr("checked", "")
-	                                              : lx_none()),
-	                    lx_text("Latin")),
-	              lx_el("label",
-	                    lx_el("input",
-	                          lx_attr("type", "checkbox"),
-	                          lx_attr("name", "m"),
-	                          lx_bind("change", 0, on_transpose_change),
-	                          app_state.show_media ? lx_attr("checked", "")
-	                                               : lx_none()),
-	                    lx_text("Video")),
+	              lx_node(site_ui_checkbox(
+	                      "b",
+	                      "Flats (\xe2\x99\xad)",
+	                      app_state.use_bemol,
+	                      on_transpose_change)),
+	              lx_node(site_ui_checkbox(
+	                      "l",
+	                      "Latin",
+	                      app_state.use_latin,
+	                      on_transpose_change)),
+	              lx_node(site_ui_checkbox(
+	                      "m",
+	                      "Video",
+	                      app_state.show_media,
+	                      on_transpose_change)),
 	              lx_el("button",
 	                    lx_attr("type", "submit"),
 	                    lx_attr("class", "btn"),
@@ -375,8 +301,7 @@ bud_node *bud_app_render(void)
 	        menu_items,
 	        lx_frag(lx_el("div",
 	                      lx_attr("class", "center flex flex-col gap-4"),
-	                      lx_node(g_main),
-	                      detail_body ? lx_node(detail_body) : lx_none()))
+	                      lx_node(g_main)))
 	                .data.node);
 	return lx_el("div", lx_attr("id", "bud-root"), lx_node(inner))
 	        .data.node;

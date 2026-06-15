@@ -440,12 +440,16 @@ a:hover {
 .gap-4 { gap: 1rem; }
 .h-full { height: 100%; }
 .w-full { width: 100%; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.max-w-xl { max-width: 80rem; }
 .overflow-y-auto { overflow-y: auto; }
 .capitalize { text-transform: capitalize; }
 .text-sm { font-size: 0.875rem; }
 .text-base { font-size: 1rem; }
 .text-xs { font-size: 0.75rem; }
 .cursor-pointer { cursor: pointer; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
 .hidden { display: none; }
 
 .menu-overlay {

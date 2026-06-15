@@ -28,7 +28,7 @@ LDLIBS += $(EXTRA_LDLIBS-$(uname))
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= clang
 WASI_SYSROOT ?=
-WASM_CFLAGS  ?= -O2 -D__wasm__ --target=wasm32-wasi
+WASM_CFLAGS  ?= -g -O0 -D__wasm__ --target=wasm32-wasi
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--allow-undefined
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/bud/src/libbud.c $(REPO_ROOT)/external/bud/src/bud_wasm_app.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/bud/include
@@ -37,7 +37,7 @@ all: dirs $(TARGET) $(WASM_TARGETS)
 
 $(WASM_PATH)/%.wasm:
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
-		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
+		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
 	fi
@@ -50,9 +50,13 @@ $(TARGET): $(SRC) $(MAKEFILE_DEPS)
 
 wasm: $(WASM_TARGETS)
 
+wasm-debug:
+	rm -f $(WASM_TARGETS)
+	$(MAKE) WASM_CFLAGS='$(WASM_CFLAGS) -DBUD_DEBUG' wasm
+
 clean:
 	rm -f $(TARGET) $(WASM_TARGETS)
 
 distclean: clean
 
-.PHONY: all clean distclean wasm
+.PHONY: all clean distclean wasm wasm-debug
