@@ -857,6 +857,13 @@ static int index_delete_handler(int fd, char *body)
 		}
 	}
 
+	/* Clear inverse references in other datasets before purging qmap */
+	{
+		char dset[256];
+		snprintf(dset, sizeof(dset), "%s.items", module);
+		source_clear_inverse_refs(dset, id);
+	}
+
 	if (hd) {
 		qmap_del_all(hd, id);
 	}

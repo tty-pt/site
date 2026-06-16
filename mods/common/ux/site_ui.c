@@ -43,8 +43,16 @@ void parent_path(const char *path, char *buf, size_t len)
 		return;
 	}
 	if (*(slash + 1) == '\0') {
-		snprintf(buf, len, "%s", path);
-		return;
+		/* Path ends with /; skip it and find the previous / */
+		const char *p = slash - 1;
+		while (p > path && *p != '/')
+			p--;
+		if (*p == '/') {
+			slash = p;
+		} else {
+			snprintf(buf, len, "/");
+			return;
+		}
 	}
 	size_t n = (size_t)(slash - path) + 1;
 	if (n >= len)

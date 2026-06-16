@@ -2,10 +2,11 @@
 
 static app_state_t app_state = { 0 };
 static bud_node *g_main = NULL;
-static bud_node *g_zoom_label = NULL;
+
 static bud_node *g_chord_raw = NULL;
 static bud_node *g_chord_pre = NULL;
 static bud_node *g_key_options[23] = { NULL };
+static bud_node *g_media_node = NULL;
 
 #define BUD_LOG(msg)                                                           \
 	do {                                                                   \
@@ -13,6 +14,73 @@ static bud_node *g_key_options[23] = { NULL };
 		if (bud_host_log_fn)                                           \
 			bud_host_log_fn(_m, strlen(_m));                       \
 	} while (0)
+
+static void song_build_media_html(char *out, size_t out_sz)
+{
+	char buf[8192];
+	int pos = 0;
+	int has = 0;
+
+#define APPEND(...)                                                            \
+	do {                                                                   \
+		int r = snprintf(                                              \
+		        buf + pos, sizeof(buf) - (size_t)pos, __VA_ARGS__);    \
+		if (r > 0)                                                     \
+			pos += r;                                              \
+		if ((size_t)pos >= sizeof(buf))                                \
+			goto done;                                             \
+	} while (0)
+
+	if (app_state.cache.yt[0]) {
+		char src[1024];
+		snprintf(
+		        src,
+		        sizeof(src),
+		        "https://www.youtube.com/embed/%s",
+		        app_state.cache.yt);
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<iframe src=\"%s\" class=\"w-full aspect-video "
+		       "border-none\" allowfullscreen></iframe></div>",
+		       src);
+		has = 1;
+	}
+	if (app_state.cache.audio[0]) {
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<audio controls class=\"w-full\">"
+		       "<source src=\"%s\" type=\"audio/mpeg\">"
+		       "</audio></div>",
+		       app_state.cache.audio);
+		has = 1;
+	}
+	if (app_state.cache.pdf[0]) {
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<a href=\"%s\" target=\"_blank\" rel=\"noopener\" "
+		       "class=\"text-blue-600\">View PDF</a></div>",
+		       app_state.cache.pdf);
+		has = 1;
+	}
+#undef APPEND
+done:
+	if (has)
+		snprintf(out, out_sz, "%s", buf);
+	else
+		out[0] = '\0';
+}
+
+static void toggle_media(void)
+{
+	if (!g_media_node)
+		return;
+	extern void bud_patch_innerhtml(unsigned int node_id, const char *html);
+	if (app_state.show_media) {
+		char html[8192];
+		song_build_media_html(html, sizeof(html));
+		bud_patch_innerhtml(
+		        bud_node_id(g_media_node), html[0] ? html : "");
+	} else {
+		bud_patch_innerhtml(bud_node_id(g_media_node), "");
+	}
+}
 
 static void fetch_transpose(void)
 {
@@ -22,12 +90,13 @@ static void fetch_transpose(void)
 	snprintf(
 	        url,
 	        sizeof(url),
-	        "/api/song/%s/transpose?t=%d&h=1%s%s%s",
+	        "/api/song/%s/transpose?t=%d&h=1%s%s%s&z=%d",
 	        app_state.cache.id,
 	        app_state.transpose,
 	        app_state.use_bemol ? "&b=1" : "",
 	        app_state.use_latin ? "&l=1" : "",
-	        app_state.show_media ? "&m=1" : "");
+	        app_state.show_media ? "&m=1" : "",
+	        app_state.zoom);
 	bud_host_fetch_fn(url, strlen(url), 1);
 }
 
@@ -57,6 +126,7 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 		if (g_key_options[i + 11])
 			bud_patch_text(g_key_options[i + 11], name);
 	}
+	toggle_media();
 }
 
 void wasm_load_chords(void)
@@ -89,8 +159,18 @@ static int on_transpose_change(bud_event *event)
 		app_state.use_bemol = atoi(value);
 	else if (strcmp(name, "l") == 0)
 		app_state.use_latin = atoi(value);
-	else if (strcmp(name, "m") == 0)
+	else if (strcmp(name, "m") == 0) {
 		app_state.show_media = atoi(value);
+		toggle_media();
+	} else if (strcmp(name, "z") == 0) {
+		int z = atoi(value);
+		if (z < 70)
+			z = 70;
+		if (z > 170)
+			z = 170;
+		app_state.zoom = z;
+		ui_apply_zoom(g_main, NULL, z);
+	}
 
 	BUD_LOG("otc: calling fetch_transpose");
 	fetch_transpose();
@@ -99,21 +179,17 @@ static int on_transpose_change(bud_event *event)
 		snprintf(
 		        url,
 		        sizeof(url),
-		        "%s?t=%d&b=%d&l=%d&m=%d",
+		        "%s?t=%d&b=%d&l=%d&m=%d&z=%d",
 		        app_state.path,
 		        app_state.transpose,
 		        app_state.use_bemol ? 1 : 0,
 		        app_state.use_latin ? 1 : 0,
-		        app_state.show_media ? 1 : 0);
+		        app_state.show_media ? 1 : 0,
+		        app_state.zoom);
 		bud_host_set_location_fn(url, strlen(url));
 	}
 	BUD_LOG("otc: done");
 	return 0;
-}
-
-static int on_zoom_change(bud_event *event)
-{
-	return ui_on_zoom_change(event, &app_state.zoom, g_main, g_zoom_label);
 }
 
 bud_node *bud_app_render(void)
@@ -145,7 +221,6 @@ bud_node *bud_app_render(void)
 	char owner_val[2] = { app_state.is_owner ? '1' : '0', '\0' };
 
 	bud_node *media_slot = NULL;
-	bud_node *g_main_inner = NULL;
 	if (app_state.show_media)
 		media_slot = site_ui_render_media_slot(
 		        app_state.cache.yt,
@@ -162,7 +237,7 @@ bud_node *bud_app_render(void)
 	                    lx_node(g_chord_raw))
 	                      .data.node;
 
-	g_main_inner =
+	bud_node *g_main_inner =
 	        lx_el("div",
 	              lx_attr("class", "flex flex-col gap-4 w-full max-w-xl"),
 	              lx_el("div",
@@ -170,7 +245,13 @@ bud_node *bud_app_render(void)
 	                            "detail-viewer-scroll w-full "
 	                            "max-w-xl"),
 	                    lx_attr("data-detail-viewer-scroll", "1"),
-	                    lx_node(g_chord_pre)),
+	                    lx_node(g_chord_pre)))
+	                .data.node;
+
+	g_media_node =
+	        lx_el("div",
+	              lx_attr("class", "flex flex-col gap-4 w-full max-w-xl"),
+	              lx_attr("data-song-media", "1"),
 	              media_slot ? lx_node(media_slot) : lx_none())
 	                .data.node;
 
@@ -193,7 +274,8 @@ bud_node *bud_app_render(void)
 	               lx_attr("style", zoom_style),
 	               lx_attr("data-type-display", app_state.cache.type),
 	               lx_attr("data-author", app_state.cache.author),
-	               lx_node(g_main_inner))
+	               lx_node(g_main_inner),
+	               lx_node(g_media_node))
 	                 .data.node;
 
 	bud_node *detail_body = NULL;
@@ -272,24 +354,29 @@ bud_node *bud_app_render(void)
 	                      "Video",
 	                      app_state.show_media,
 	                      on_transpose_change)),
+	              lx_el("label",
+	                    lx_text("Zoom"),
+	                    lx_el("input",
+	                          lx_attr("type", "range"),
+	                          lx_attr("name", "z"),
+	                          lx_attr("min", "70"),
+	                          lx_attr("max", "170"),
+	                          lx_attr("step", "10"),
+	                          lx_attr("value", zoom_str),
+	                          lx_attr("data-detail-viewer-zoom", "1"),
+	                          lx_bind("change", 0, on_transpose_change))),
 	              lx_el("button",
 	                    lx_attr("type", "submit"),
 	                    lx_attr("class", "btn"),
+	                    lx_attr("data-wasm-hide", "1"),
 	                    lx_text("Apply")))
 	                .data.node;
 
-	bud_node *zoom_ctrl = site_ui_viewer_controls(
-	        "song",
-	        app_state.zoom,
-	        app_state.save_url,
-	        on_zoom_change,
-	        &g_zoom_label);
 	bud_node *item_menu = site_ui_item_menu(
 	        "song", app_state.cache.id, app_state.is_owner);
 
 	bud_node *menu_items =
 	        lx_frag(lx_node(transpose_form),
-	                zoom_ctrl ? lx_node(zoom_ctrl) : lx_none(),
 	                item_menu ? lx_node(item_menu) : lx_none())
 	                .data.node;
 

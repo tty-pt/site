@@ -110,6 +110,9 @@ json_extract_strings(json_object *jo, const json_str_map_t *map)
 struct bud_field_desc;
 
 #ifndef SOURCE_IMPL
+NDX_HOOK_DECL(int, source_clear_inverse_refs,
+    const char *, dataset_id,
+    const char *, item_id);
 NDX_HOOK_DECL(int, source_def_to_qmap,
     const struct bud_field_desc *, defs, int, count, void *, out);
 NDX_HOOK_DECL(int, source_def_to_source_fields,

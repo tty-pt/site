@@ -23,6 +23,7 @@ typedef struct {
 	char yt[512];
 	char audio[512];
 	char pdf[512];
+	char type[512];
 	char *chord_html; /* server-side only; free after render */
 } sb_song_row_data_t;
 
@@ -33,11 +34,13 @@ typedef struct {
 
 typedef struct {
 	char sb_id[128];
+	char path[256];
 	int zoom;
 	int bemol;
 	int latin;
 	int show_media;
 	int is_owner;
+	int can_migrate;
 	char title[256];
 	char user[64];
 	char csrf_token[33];
@@ -55,7 +58,6 @@ static bud_node *g_sb_media_nodes[MAX_SB_SONGS];
 static int g_sb_n_chord_nodes;
 static bud_node *g_sb_root = NULL;
 static bud_node *g_sb_main = NULL;
-static bud_node *g_sb_zoom_label = NULL;
 
 /* ── WASM state init (called by JS bridge before bud_app_mount) ── */
 
@@ -63,7 +65,8 @@ static bud_node *g_sb_zoom_label = NULL;
 
 static void parse_songs_array(const char *json)
 {
-	/* Format: "songs": [ [title,song_id,key,tr,flags,yt,audio,pdf],...] */
+	/* Format: "songs": [
+	 * [title,song_id,key,tr,flags,yt,audio,pdf,type],...] */
 	const char *p = strstr(json, "\"songs\"");
 	if (!p)
 		return;
@@ -145,11 +148,13 @@ static void parse_songs_array(const char *json)
 		if (*p == ',')
 			p++;
 
-		/* yt, audio, pdf strings */
+		/* yt, audio, pdf, type strings */
 		{
-			const char *str_fields[] = { s->yt, s->audio, s->pdf };
-			int str_sizes[] = { 512, 512, 512 };
-			for (int fi = 0; fi < 3; fi++) {
+			const char *str_fields[] = {
+				s->yt, s->audio, s->pdf, s->type
+			};
+			int str_sizes[] = { 512, 512, 512, 512 };
+			for (int fi = 0; fi < 4; fi++) {
 				while (*p == ' ' || *p == '\t' || *p == '\n')
 					p++;
 				if (*p == '"') {
@@ -175,7 +180,7 @@ static void parse_songs_array(const char *json)
 				}
 				if (*p == ',') {
 					p++;
-				} else if (*p != ']' && *p != '"' && fi < 2) {
+				} else if (*p != ']' && *p != '"' && fi < 3) {
 					break;
 				}
 			}
@@ -279,11 +284,13 @@ static void parse_opts_array(const char *json)
 
 static const bud_field_desc_t songbook_app_fields[] = {
 	OVERLAY_STR(id, sb_app_state_t, sb_id, 128),
+	OVERLAY_STR(path, sb_app_state_t, path, 256),
 	OVERLAY_INT(zoom, sb_app_state_t, zoom),
 	OVERLAY_INT(b, sb_app_state_t, bemol),
 	OVERLAY_INT(l, sb_app_state_t, latin),
 	OVERLAY_INT(m, sb_app_state_t, show_media),
 	OVERLAY_INT(owner, sb_app_state_t, is_owner),
+	OVERLAY_INT(can_migrate, sb_app_state_t, can_migrate),
 	OVERLAY_STR(title, sb_app_state_t, title, 256),
 	OVERLAY_STR(user, sb_app_state_t, user, 64),
 	OVERLAY_STR(csrf, sb_app_state_t, csrf_token, 33),
@@ -320,12 +327,6 @@ void wasm_init(const char *json, int len)
 
 /* ── Zoom slider event handler ──────────────────────────── */
 
-static int on_sb_zoom_change(bud_event *event)
-{
-	return ui_on_zoom_change(
-	        event, &sb_app_state.zoom, g_sb_main, g_sb_zoom_label);
-}
-
 static void fetch_sb_transpose(int song_index, int semitones)
 {
 	if (!bud_host_fetch_fn)
@@ -334,13 +335,14 @@ static void fetch_sb_transpose(int song_index, int semitones)
 	snprintf(
 	        url,
 	        sizeof(url),
-	        "/api/songbook/%s/transpose?n=%d&t=%d%s%s%s",
+	        "/api/songbook/%s/transpose?n=%d&t=%d%s%s%s&z=%d",
 	        sb_app_state.sb_id,
 	        song_index,
 	        semitones,
 	        sb_app_state.bemol ? "&b=1" : "",
 	        sb_app_state.latin ? "&l=1" : "",
-	        sb_app_state.show_media ? "&m=1" : "");
+	        sb_app_state.show_media ? "&m=1" : "",
+	        sb_app_state.zoom);
 	bud_host_fetch_fn(url, strlen(url), 1);
 }
 
@@ -472,6 +474,14 @@ static int on_sb_option_change(bud_event *event)
 	else if (strcmp(name, "m") == 0) {
 		sb_app_state.show_media = atoi(value);
 		sb_toggle_media(sb_app_state.show_media);
+	} else if (strcmp(name, "z") == 0) {
+		int z = atoi(value);
+		if (z < 70)
+			z = 70;
+		if (z > 170)
+			z = 170;
+		sb_app_state.zoom = z;
+		ui_apply_zoom(g_sb_main, NULL, z);
 	}
 
 	/* For latin/flats, re-fetch all songs with new flags */
@@ -486,11 +496,12 @@ static int on_sb_option_change(bud_event *event)
 		snprintf(
 		        url,
 		        sizeof(url),
-		        "/songbook/%s?b=%d&l=%d&m=%d",
-		        sb_app_state.sb_id,
+		        "%s?b=%d&l=%d&m=%d&z=%d",
+		        sb_app_state.path,
 		        sb_app_state.bemol ? 1 : 0,
 		        sb_app_state.latin ? 1 : 0,
-		        sb_app_state.show_media ? 1 : 0);
+		        sb_app_state.show_media ? 1 : 0,
+		        sb_app_state.zoom);
 		bud_host_set_location_fn(url, strlen(url));
 	}
 	return 0;
@@ -505,7 +516,6 @@ bud_node *bud_app_render(void)
 {
 	g_sb_root = NULL;
 	g_sb_main = NULL;
-	g_sb_zoom_label = NULL;
 	g_sb_n_chord_nodes = 0;
 	memset(g_sb_media_nodes, 0, sizeof(g_sb_media_nodes));
 
@@ -519,44 +529,83 @@ bud_node *bud_app_render(void)
 	        "width:100%%;max-width:100%%;--chord-zoom:%d",
 	        sb_app_state.zoom);
 
-	/* Option checkboxes (latin, flats, media) */
-	bud_node *opts = lx_el("div",
-	                       lx_attr("class", "viewer-controls"),
-	                       lx_attr("data-viewer-opts", "songbook"),
-	                       lx_node(site_ui_checkbox(
-	                               "l",
-	                               "Latin",
-	                               sb_app_state.latin,
-	                               on_sb_option_change)),
-	                       lx_node(site_ui_checkbox(
-	                               "b",
-	                               "Flats (\xe2\x99\xad)",
-	                               sb_app_state.bemol,
-	                               on_sb_option_change)),
-	                       lx_node(site_ui_checkbox(
-	                               "m",
-	                               "Video",
-	                               sb_app_state.show_media,
-	                               on_sb_option_change)))
-	                         .data.node;
-
-	/* Zoom controls with WASM event handler */
-	bud_node *zoom_ctrl = site_ui_viewer_controls(
-	        "songbook",
-	        sb_app_state.zoom,
-	        "/api/song/prefs",
-	        on_sb_zoom_change,
-	        &g_sb_zoom_label);
+	/* Option checkboxes + zoom slider inside a form */
+	bud_node *opts =
+	        lx_el("form",
+	              lx_attr("class", "viewer-controls"),
+	              lx_attr("method", "GET"),
+	              lx_attr("action", sb_app_state.path),
+	              lx_attr("data-viewer-opts", "songbook"),
+	              lx_node(site_ui_checkbox(
+	                      "l",
+	                      "Latin",
+	                      sb_app_state.latin,
+	                      on_sb_option_change)),
+	              lx_node(site_ui_checkbox(
+	                      "b",
+	                      "Flats (\xe2\x99\xad)",
+	                      sb_app_state.bemol,
+	                      on_sb_option_change)),
+	              lx_node(site_ui_checkbox(
+	                      "m",
+	                      "Video",
+	                      sb_app_state.show_media,
+	                      on_sb_option_change)),
+	              lx_el("label",
+	                    lx_text("Zoom"),
+	                    lx_el("input",
+	                          lx_attr("type", "range"),
+	                          lx_attr("name", "z"),
+	                          lx_attr("min", "70"),
+	                          lx_attr("max", "170"),
+	                          lx_attr("step", "10"),
+	                          lx_attr("value", zoom_str),
+	                          lx_attr("data-detail-viewer-zoom", "1"),
+	                          lx_bind("change", 0, on_sb_option_change))),
+	              lx_el("button",
+	                    lx_attr("type", "submit"),
+	                    lx_attr("class", "btn"),
+	                    lx_attr("data-wasm-hide", "1"),
+	                    lx_text("Apply")))
+	                .data.node;
 
 	/* Item menu (edit/delete, owner only) */
 	bud_node *item_menu = site_ui_item_menu(
 	        "songbook", sb_app_state.sb_id, sb_app_state.is_owner);
 
+	/* Migrate to repertoire button (owner of both songbook + choir) */
+	char migrate_action[256];
+	if (sb_app_state.sb_id[0])
+		snprintf(
+		        migrate_action,
+		        sizeof(migrate_action),
+		        "/songbook/%s/migrate",
+		        sb_app_state.sb_id);
+	else
+		migrate_action[0] = '\0';
+
+	bud_node *migrate_form =
+	        sb_app_state.can_migrate
+	                ? lx_el("form",
+	                        lx_attr("method", "POST"),
+	                        lx_attr("action", migrate_action),
+	                        lx_el("input",
+	                              lx_attr("type", "hidden"),
+	                              lx_attr("name", "csrf_token"),
+	                              lx_attr("value",
+	                                      sb_app_state.csrf_token)),
+	                        lx_el("button",
+	                              lx_attr("type", "submit"),
+	                              lx_attr("class", "btn"),
+	                              lx_text("\xf0\x9f\x9a\x97 Migrate")))
+	                          .data.node
+	                : NULL;
+
 	/* Menu items fragment */
 	bud_node *menu_items =
 	        lx_frag(lx_node(opts),
-	                zoom_ctrl ? lx_node(zoom_ctrl) : lx_none(),
-	                item_menu ? lx_node(item_menu) : lx_none())
+	                item_menu ? lx_node(item_menu) : lx_none(),
+	                migrate_form ? lx_node(migrate_form) : lx_none())
 	                .data.node;
 
 	/* Build body content from state (proper Bud nodes for hydration) */
@@ -566,7 +615,7 @@ bud_node *bud_app_render(void)
 	/* Page layout with proper Bud nodes */
 	bud_node *layout = site_ui_layout(
 	        sb_app_state.title,
-	        sb_app_state.title,
+	        sb_app_state.path,
 	        "\xf0\x9f\x93\x95",
 	        sb_app_state.user,
 	        menu_items,

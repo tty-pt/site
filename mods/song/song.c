@@ -132,9 +132,9 @@ static int parse_params(const char *q, int *t, int *f, int *m)
 		*f |= TRANSP_BEMOL;
 	if (axil_query_param("l", b, sizeof(b)) >= 0 && atoi(b) != 0)
 		*f |= TRANSP_LATIN;
-	if (axil_query_param("h", b, sizeof(b)) >= 0)
+	if (axil_query_param("h", b, sizeof(b)) >= 0 && atoi(b) != 0)
 		*f |= TRANSP_HTML;
-	if (axil_query_param("m", b, sizeof(b)) >= 0)
+	if (axil_query_param("m", b, sizeof(b)) >= 0 && atoi(b) != 0)
 		*m = 1;
 	return 0;
 }
@@ -186,6 +186,14 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 			pv[0] = (f & TRANSP_LATIN) ? '1' : '0';
 			song_viewer_pref_write(
 			        ctx->username, "chords-latin", pv);
+		}
+		char tmp[16] = { 0 };
+		axil_query_param("z", tmp, sizeof(tmp));
+		if (tmp[0]) {
+			int zv = atoi(tmp);
+			if (ctx->username && ctx->username[0])
+				song_set_viewer_zoom(ctx->username, zv);
+			v_z = zv;
 		}
 	} else {
 		song_load_saved_prefs(ctx->username, &f);
@@ -320,14 +328,22 @@ static int song_detail_handler(int fd, char *body)
 	axil_env_get(fd, q, "QUERY_STRING");
 	parse_params(q, &t, &f, &m);
 
+	int url_z = 0;
 	if (q[0] && user && user[0]) {
 		char b[16];
 		if (axil_query_param("l", b, sizeof(b)) >= 0)
 			song_viewer_pref_write(user, "chords-latin", b);
 		if (axil_query_param("b", b, sizeof(b)) >= 0)
 			song_viewer_pref_write(user, "chords-bemol", b);
-		if (axil_query_param("t", b, sizeof(b)) > 0)
-			song_set_viewer_zoom(user, atoi(b));
+		if (axil_query_param("z", b, sizeof(b)) > 0) {
+			url_z = atoi(b);
+			song_set_viewer_zoom(user, url_z);
+		}
+	}
+	if (q[0] && (!user || !user[0])) {
+		char zb[16];
+		if (axil_query_param("z", zb, sizeof(zb)) > 0)
+			url_z = atoi(zb);
 	}
 
 	if (!q[0])
@@ -362,7 +378,10 @@ static int song_detail_handler(int fd, char *body)
 	app_state.show_media = m;
 	app_state.original_key = k;
 	app_state.is_owner = is_owner;
-	app_state.zoom = song_get_viewer_zoom(user);
+	if (url_z)
+		app_state.zoom = url_z;
+	else
+		app_state.zoom = song_get_viewer_zoom(user);
 	snprintf(
 	        app_state.chord_html,
 	        sizeof(app_state.chord_html),

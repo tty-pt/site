@@ -39,6 +39,7 @@ static bud_node *sb_render_add_song_form(
 
 static bud_node *sb_render_song_row(
         const char *s_title,
+        const char *s_type,
         const char *song_href,
         const char *tgt_key,
         int is_owner,
@@ -123,11 +124,23 @@ static bud_node *sb_render_song_row(
 	                   lx_el("div",
 	                         lx_attr("class",
 	                                 "flex gap-16 justify-between"),
-	                         lx_el("a",
-	                               lx_attr("class", "font-bold"),
-	                               song_href ? lx_attr("href", song_href)
-	                                         : lx_none(),
-	                               lx_text(s_title)),
+	                         lx_el("div",
+	                               lx_attr("class", "flex flex-col"),
+	                               s_type && s_type[0]
+	                                       ? lx_el("span",
+	                                               lx_attr("class",
+	                                                       "text-xs "
+	                                                       "italic "
+	                                                       "text-"
+	                                                       "muted"),
+	                                               lx_text(s_type))
+	                                       : lx_none(),
+	                               lx_el("a",
+	                                     lx_attr("class", "font-bold"),
+	                                     song_href ? lx_attr("href",
+	                                                         song_href)
+	                                               : lx_none(),
+	                                     lx_text(s_title))),
 	                         sb_app_state.user[0]
 	                                 ? lx_none()
 	                                 : lx_el("span",
@@ -385,6 +398,7 @@ static bud_node *sb_build_body_content(void)
 			bud_node *pre_ptr = NULL, *media_ptr = NULL;
 			bud_node *row = sb_render_song_row(
 			        s->title,
+			        s->type,
 			        song_href[0] ? song_href : NULL,
 			        tgt_key,
 			        sb_app_state.is_owner,

@@ -386,6 +386,76 @@ NDX_LISTENER(int, source_delete_item,
 	return 0;
 }
 
+struct clear_inv_ctx {
+	const source_def_t *def;
+	uint32_t item_pos;
+};
+
+static int clear_inv_refs_cb(const source_def_t *target, void *user)
+{
+	struct clear_inv_ctx *ctx = user;
+	if (target == ctx->def)
+		return 0;
+	if (!target->record_id || !target->fields_hd)
+		return 0;
+
+	for (size_t i = 0; i < target->field_count; i++) {
+		const source_field_t *f = &target->fields[i];
+		if (f->type != SOURCE_FIELD_REFERENCE &&
+		    f->type != SOURCE_FIELD_MULTI_REFERENCE)
+			continue;
+		if (!f->target_source)
+			continue;
+		if (strcmp(f->target_source, ctx->def->id) != 0)
+			continue;
+
+		uint32_t inv_buf[256];
+		size_t count = qmap_inv_get(
+		        target->fields_hd,
+		        f->name,
+		        ctx->item_pos,
+		        inv_buf,
+		        256);
+		for (size_t j = 0; j < count; j++) {
+			const char *ref_key =
+			        qmap_get_key(target->fields_hd, inv_buf[j]);
+			if (!ref_key)
+				continue;
+			char key[512];
+			snprintf(key, sizeof(key), "%s:%s", ref_key, f->name);
+			qmap_del(target->fields_hd, key);
+		}
+	}
+	return 0;
+}
+
+NDX_LISTENER(int, source_clear_inverse_refs,
+	const char *, dataset_id,
+	const char *, item_id)
+{
+	const source_def_t *def = source_find(dataset_id);
+	if (!def || !def->fields_hd)
+		return 0;
+
+	uint32_t del_pos = qmap_pos(def->fields_hd, item_id);
+	if (del_pos == UINT32_MAX)
+		return 0;
+
+	struct clear_inv_ctx ctx = { .def = def, .item_pos = del_pos };
+	size_t n = hyle_source_count();
+	for (size_t i = 0; i < n; i++) {
+		const char *sid = hyle_source_id_at(i);
+		source_def_t *target;
+		if (!sid)
+			continue;
+		target = (source_def_t *)hyle_source_get_user(sid);
+		if (!target)
+			continue;
+		clear_inv_refs_cb(target, &ctx);
+	}
+	return 0;
+}
+
 static int source_scan_items(source_def_t *def)
 {
 	char doc_root[256] = { 0 };
