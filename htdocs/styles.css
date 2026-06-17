@@ -439,6 +439,10 @@ a:hover {
 .gap-2 { gap: 0.5rem; }
 .gap-4 { gap: 1rem; }
 .h-full { height: 100%; }
+.w-24 { width: 6rem; }
+.w-32 { width: 8rem; }
+.w-48 { width: 12rem; }
+.w-60 { width: 15rem; }
 .w-full { width: 100%; }
 .items-start { align-items: flex-start; }
 .justify-between { justify-content: space-between; }

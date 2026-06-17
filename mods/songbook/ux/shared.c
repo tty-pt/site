@@ -40,7 +40,6 @@ typedef struct {
 	int latin;
 	int show_media;
 	int is_owner;
-	int can_migrate;
 	char title[256];
 	char user[64];
 	char csrf_token[33];
@@ -290,7 +289,6 @@ static const bud_field_desc_t songbook_app_fields[] = {
 	OVERLAY_INT(l, sb_app_state_t, latin),
 	OVERLAY_INT(m, sb_app_state_t, show_media),
 	OVERLAY_INT(owner, sb_app_state_t, is_owner),
-	OVERLAY_INT(can_migrate, sb_app_state_t, can_migrate),
 	OVERLAY_STR(title, sb_app_state_t, title, 256),
 	OVERLAY_STR(user, sb_app_state_t, user, 64),
 	OVERLAY_STR(csrf, sb_app_state_t, csrf_token, 33),
@@ -573,39 +571,10 @@ bud_node *bud_app_render(void)
 	bud_node *item_menu = site_ui_item_menu(
 	        "songbook", sb_app_state.sb_id, sb_app_state.is_owner);
 
-	/* Migrate to repertoire button (owner of both songbook + choir) */
-	char migrate_action[256];
-	if (sb_app_state.sb_id[0])
-		snprintf(
-		        migrate_action,
-		        sizeof(migrate_action),
-		        "/songbook/%s/migrate",
-		        sb_app_state.sb_id);
-	else
-		migrate_action[0] = '\0';
-
-	bud_node *migrate_form =
-	        sb_app_state.can_migrate
-	                ? lx_el("form",
-	                        lx_attr("method", "POST"),
-	                        lx_attr("action", migrate_action),
-	                        lx_el("input",
-	                              lx_attr("type", "hidden"),
-	                              lx_attr("name", "csrf_token"),
-	                              lx_attr("value",
-	                                      sb_app_state.csrf_token)),
-	                        lx_el("button",
-	                              lx_attr("type", "submit"),
-	                              lx_attr("class", "btn"),
-	                              lx_text("\xf0\x9f\x9a\x97 Migrate")))
-	                          .data.node
-	                : NULL;
-
 	/* Menu items fragment */
 	bud_node *menu_items =
 	        lx_frag(lx_node(opts),
-	                item_menu ? lx_node(item_menu) : lx_none(),
-	                migrate_form ? lx_node(migrate_form) : lx_none())
+	                item_menu ? lx_node(item_menu) : lx_none())
 	                .data.node;
 
 	/* Build body content from state (proper Bud nodes for hydration) */

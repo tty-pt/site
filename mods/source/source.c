@@ -285,6 +285,10 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			qmap_field_put(def->fields_hd, id, "id", id_norm);
 	}
 
+	/* Register the item in source_hd so reference fields can resolve by ID */
+	if (def->source_hd)
+		qmap_put(def->source_hd, id, "");
+
 	int owner_read = 0;
 
 	for (size_t i = 0; i < def->field_count; i++) {
@@ -326,7 +330,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			        def->id, def->fields[i].name, &data, &len);
 			qmap_field_put(
 			        def->fields_hd, id, def->fields[i].name, data);
-			if (strcmp(def->fields[i].name, "owner") == 0)
+			if (strcmp(def->fields[i].name, "owner") == 0 && data[0])
 				owner_read = 1;
 		}
 		free(data);
@@ -571,11 +575,11 @@ NDX_LISTENER(int, source_register, const source_def_t *, def)
 			    !sf->target_source)
 				continue;
 			target = source_find(sf->target_source);
-			if (target && target->fields_hd)
+			if (target && target->source_hd)
 				qmap_record_field_set_target_hd(
 				        def->record_id,
 				        sf->name,
-				        target->fields_hd);
+				        target->source_hd);
 		}
 	}
 
@@ -774,6 +778,9 @@ NDX_LISTENER(int, source_update_item,
 				} else if (!source_field_is_multi_reference(
 				                   f->type))
 				{
+					if (strcmp(f->name, "owner") == 0 &&
+					    geteuid() == 0)
+						continue;
 					FILE *fp = fopen(file_path, "w");
 					if (fp)
 						fclose(fp);

@@ -209,7 +209,7 @@ Use `NDX_HOOK_DEF` in the host or `NDX_LISTENER` in modules, and `NDX_HOOK_DECL`
 4. `axil_register_handler` is last-registration-wins.
 5. Do not commit build artifacts like `*.so`, `*.o`, swap files, or Rust `target/`.
 6. Required data dirs: `items/poem/items`, `items/song/items`, `items/songbook/items`, `items/choir/items`.
-7. `QM_REFERENCE` field values are stored as binary `uint32_t` positions, not strings. To read a reference: `const uint32_t *ref = (const uint32_t *)qmap_get(hd, "id:field");` then resolve via `qmap_get_key(target_hd, *ref)`. Do NOT treat the return of `qmap_get` for a reference field as a `const char *`.
+7. `QM_REFERENCE` field values are stored as string IDs (slugs), not positions. To read a reference: `const char *ref = qmap_get(hd, "id:field");`. The string is the referenced item's key directly — no position resolution needed.
 
 ## Troubleshooting
 

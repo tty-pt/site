@@ -122,7 +122,7 @@ NDX_LISTENER(int, site_ui_respond_form_page,
 	bud_node *, form)
 {
 	bud_node *page =
-	        site_ui_form_page(user, title, action, icon, title, form);
+	site_ui_form_page(user, title, action, icon, NULL, form);
 	return site_ui_respond_page(fd, title, NULL, module, page);
 }
 
