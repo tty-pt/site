@@ -1,4 +1,4 @@
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include "../auth/auth.h"
 
@@ -8,7 +8,7 @@
 #include "common_strlist.c"
 #include "ux/site_ui.c"
 
-MODULE_API void ndx_install(void)
+XY_MODULE_API void xy_install(void)
 {
-	ndx_load("./mods/mpfd/mpfd");
+	xy_load("./mods/mpfd/mpfd");
 }

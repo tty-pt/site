@@ -1,5 +1,5 @@
 #include <ttypt/axil.h>
-#include <ttypt/axil-ndx.h>
+#include <ttypt/axil-xy.h>
 #include <string.h>
 #include <stdio.h>
 #include <dlfcn.h>
@@ -24,7 +24,7 @@ static int load_modules_from_file(const char *path)
 		if (len == 0 || line[0] == '#')
 			continue;
 		snprintf(mod_line, sizeof(mod_line), "mods/%s/%s", line, line);
-		ndx_load(mod_line);
+		xy_load(mod_line);
 	}
 
 	fclose(fp);
@@ -87,10 +87,10 @@ static int song_redirect_handler(int fd, char *body)
 	return alias_redirect(fd, "/chords", "/song", 301);
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/common/common");
-	ndx_load("./mods/source/source");
+	xy_load("./mods/common/common");
+	xy_load("./mods/source/source");
 	load_modules_from_file("./mods.load");
 
 	axil_register_handler("GET:/sb", songbook_redirect_handler);

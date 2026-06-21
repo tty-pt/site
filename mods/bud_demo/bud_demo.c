@@ -1,5 +1,5 @@
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 #include <stdio.h>
 #include "bud/bud.h"
 
@@ -46,7 +46,7 @@ static int handler(int fd, char *path)
 	return 0;
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
 	axil_register_handler("GET:/bud-demo", handler);
 }

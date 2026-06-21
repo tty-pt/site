@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include "../common/common.h"
 
@@ -56,9 +56,9 @@ static int song_redirect_handler(int fd, char *body)
 	return alias_redirect(fd, "/chords", "/song", 301);
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/common/common");
+	xy_load("./mods/common/common");
 
 	axil_register_handler("GET:/sb", songbook_redirect_handler);
 	axil_register_handler("GET:/sb/*", songbook_redirect_handler);

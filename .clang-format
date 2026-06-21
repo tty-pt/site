@@ -18,7 +18,7 @@ BraceWrapping:
   SplitEmptyRecord: false
 AlignAfterOpenBracket: AlwaysBreak
 ContinuationIndentWidth: 8
-WhitespaceSensitiveMacros: [NDX_LISTENER, NDX_DEF, NDX_DECL, NDX_HOOK_DECL]
+WhitespaceSensitiveMacros: [XY_IMPL, XY_DEF, XY_DECL]
 ColumnLimit: 80
 Cpp11BracedListStyle: false
 SortIncludes: Never

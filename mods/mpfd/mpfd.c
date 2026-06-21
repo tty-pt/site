@@ -1,4 +1,4 @@
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include <sys/stat.h>
 #include <stdio.h>
@@ -261,7 +261,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 	return 0;
 }
 
-/* NDX exports */
+/* XY exports */
 
 static void mpfd_clear(void)
 {
@@ -270,7 +270,7 @@ static void mpfd_clear(void)
 }
 
 /* Parse & Lifecycle */
-NDX_LISTENER(int, mpfd_parse, socket_t, fd, char *, body)
+XY_IMPL(int, mpfd_parse, socket_t, fd, char *, body)
 {
 	char content_type[512] = { 0 };
 	char clen_str[32] = { 0 };
@@ -318,7 +318,7 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 }
 
 /* Data Retrieval */
-NDX_LISTENER(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
+XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
@@ -351,7 +351,7 @@ static int mpfd_set_limits(size_t max_field_size, size_t max_total_size)
 	return 0;
 }
 
-MODULE_API void ndx_install(void)
+XY_MODULE_API void xy_install(void)
 {
 	mpfd_val_type = qmap_mreg(mpfd_val_measure);
 	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);

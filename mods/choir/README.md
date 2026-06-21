@@ -237,13 +237,13 @@ Run unit tests:
 - `choir_edit()` - POST handler for editing choirs
 - `choir_delete()` - DELETE handler for deleting choirs
 - `check_choir_ownership()` - Verify user owns choir
-- `ndx_install()` - Register HTTP handlers
-- `ndx_open()` - Initialize qmap database
+- `xy_install()` - Register HTTP handlers
+- `xy_open()` - Initialize qmap database
 
-**NDX API Exports:**
+**XY API Exports:**
 - None (choir is a leaf module)
 
-**NDX API Imports:**
+**XY API Imports:**
 - `get_session_user()` from auth module
 - `url_encode()`, `read_file()`, `json_escape()` from common module
 - `mpfd_parse()`, `mpfd_get()` from mpfd module

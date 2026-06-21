@@ -36,7 +36,8 @@ static const bud_field_desc_t songbook_fields[] = {
 	        "choir.items",
 	        "songbooks",
 	        1),
-	EXCL_FIELD(song_source, songbook_cache_t, song_source, 16, BUD_QM_STR, 0),
+	EXCL_FIELD(
+	        song_source, songbook_cache_t, song_source, 16, BUD_QM_STR, 0),
 	EXCL_FIELD(owner, songbook_cache_t, owner, 32, BUD_QM_STR, 0),
 	FIELD_END
 };

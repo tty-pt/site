@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <ttypt/ndx.h>
+#include <ttypt/xy.h>
 
 typedef struct bud_node bud_node;
 
@@ -26,112 +26,112 @@ typedef struct {
 typedef int (*str_list_cb)(const char *token, void *user);
 
 /* ---------------------------------------------------------------------------
- * NDX declarations.
+ * XY declarations.
  *
- * common.c (the implementer) must NOT include this header, since NDX_DEF +
- * NDX_HOOK_DECL on the same symbol clash. Other modules include this freely.
+ * common.c (the implementer) must NOT include this header, since XY_DEF +
+ * XY_DECL on the same symbol clash. Other modules include this freely.
  * ------------------------------------------------------------------------- */
 #ifndef COMMON_IMPL
 
-NDX_HOOK_DECL(int, str_trim, char *, s);
-NDX_HOOK_DECL(int, str_list_contains, const char *, list, const char *, token);
-NDX_HOOK_DECL(int, str_list_append, char *, out, size_t, out_sz, const char *, token);
-NDX_HOOK_DECL(int, str_list_normalize, const char *, input, char *, out, size_t, out_sz);
-NDX_HOOK_DECL(int, str_list_for_each, const char *, list, str_list_cb, cb, void *, user);
-NDX_HOOK_DECL(int, respond_html, int, fd, const char *, html);
-NDX_HOOK_DECL(const char *, require_user, int, fd);
-NDX_HOOK_DECL(int, respond_json, int, fd, int, status, const char *, msg);
-NDX_HOOK_DECL(int, respond_error, int, fd, int, status, const char *, msg);
-NDX_HOOK_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
+XY_DECL(int, str_trim, char *, s);
+XY_DECL(int, str_list_contains, const char *, list, const char *, token);
+XY_DECL(int, str_list_append, char *, out, size_t, out_sz, const char *, token);
+XY_DECL(int, str_list_normalize, const char *, input, char *, out, size_t, out_sz);
+XY_DECL(int, str_list_for_each, const char *, list, str_list_cb, cb, void *, user);
+XY_DECL(int, respond_html, int, fd, const char *, html);
+XY_DECL(const char *, require_user, int, fd);
+XY_DECL(int, respond_json, int, fd, int, status, const char *, msg);
+XY_DECL(int, respond_error, int, fd, int, status, const char *, msg);
+XY_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
 request" */
-NDX_HOOK_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal
+XY_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal
 server error" */
-NDX_HOOK_DECL(int, not_found, int, fd, const char *, msg); /* 404; NULL -> "Not found"
-                                                     */
-NDX_HOOK_DECL(int, redirect_to_item,
+XY_DECL(int, not_found, int, fd, const char *, msg); /* 404; NULL -> "Not found"
+                                                    */
+XY_DECL(int, redirect_to_item,
 	int, fd,
 	const char *, module,
 	const char *, id);
 
-NDX_HOOK_DECL(int, read_meta_file,
+XY_DECL(int, read_meta_file,
 	const char *, item_path,
 	const char *, name,
 	char *, buf,
 	size_t, sz);
-NDX_HOOK_DECL(int, write_meta_file,
+XY_DECL(int, write_meta_file,
 	const char *, item_path,
 	const char *, name,
 	const char *, buf,
 	size_t, sz);
-NDX_HOOK_DECL(int, meta_fields_read,
+XY_DECL(int, meta_fields_read,
 	const char *, item_path,
 	meta_field_t *, fields,
 	size_t, count);
-NDX_HOOK_DECL(int, meta_fields_write,
+XY_DECL(int, meta_fields_write,
 	const char *, item_path,
 	const meta_field_t *, fields,
 	size_t, count);
-NDX_HOOK_DECL(int, write_item_child_file,
+XY_DECL(int, write_item_child_file,
 	const char *, item_path,
 	const char *, name,
 	const char *, buf,
 	size_t, sz);
-NDX_HOOK_DECL(int, write_file_path,
+XY_DECL(int, write_file_path,
 	const char *, path,
 	const char *, buf,
 	size_t, sz);
-NDX_HOOK_DECL(char *, slurp_file, const char *, path);
-NDX_HOOK_DECL(int, get_doc_root, int, fd, char *, buf, size_t, len);
-NDX_HOOK_DECL(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len);
-NDX_HOOK_DECL(int, ensure_dir_path, const char *, path);
-NDX_HOOK_DECL(int, user_path_build,
+XY_DECL(char *, slurp_file, const char *, path);
+XY_DECL(int, get_doc_root, int, fd, char *, buf, size_t, len);
+XY_DECL(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len);
+XY_DECL(int, ensure_dir_path, const char *, path);
+XY_DECL(int, user_path_build,
 	const char *, username,
 	const char *, suffix,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_child_path,
+XY_DECL(int, item_child_path,
 	const char *, item_path,
 	const char *, name,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_remove_path_recursive, const char *, item_path);
+XY_DECL(int, item_remove_path_recursive, const char *, item_path);
 
 /* Phase A helpers */
-NDX_HOOK_DECL(int, module_path_build,
+XY_DECL(int, module_path_build,
 	const char *, doc_root,
 	const char *, module,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, module_items_path_build,
+XY_DECL(int, module_items_path_build,
 	const char *, doc_root,
 	const char *, module,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_path_build_root,
+XY_DECL(int, item_path_build_root,
 	const char *, doc_root,
 	const char *, module,
 	const char *, id,
 	char *, out,
 	size_t, outlen);
-NDX_HOOK_DECL(int, item_path_build,
+XY_DECL(int, item_path_build,
 	int, fd,
 	const char *, module,
 	const char *, id,
 	char *, out,
 	size_t, outlen);
 
-NDX_HOOK_DECL(int, datalist_extract_id,
+XY_DECL(int, datalist_extract_id,
 	const char *, in,
 	char *, id_out,
 	size_t, outlen);
 
-NDX_HOOK_DECL(int, site_ui_respond_page,
+XY_DECL(int, site_ui_respond_page,
 	int, fd,
 	const char *, title,
 	const char *, extra_head,
 	const char *, module,
 	bud_node *, body);
-NDX_HOOK_DECL(int, site_ui_respond_form_page,
+XY_DECL(int, site_ui_respond_form_page,
 	int, fd,
 	const char *, user,
 	const char *, title,
@@ -140,18 +140,18 @@ NDX_HOOK_DECL(int, site_ui_respond_form_page,
 	const char *, module,
 	bud_node *, form);
 
-NDX_HOOK_DECL(int, csrf_check_mpfd, int, fd);
-NDX_HOOK_DECL(int, csrf_check_query, int, fd, char *, body);
-NDX_HOOK_DECL(const char *, csrf_setup, int, fd);
+XY_DECL(int, csrf_check_mpfd, int, fd);
+XY_DECL(int, csrf_check_query, int, fd, char *, body);
+XY_DECL(const char *, csrf_setup, int, fd);
 
-NDX_HOOK_DECL(int, site_ui_respond_add_page,
+XY_DECL(int, site_ui_respond_add_page,
 	int, fd,
 	const char *, user,
 	const char *, module,
 	const char *, icon,
 	bud_node *, form);
 
-NDX_HOOK_DECL(int, site_ui_respond_edit_page,
+XY_DECL(int, site_ui_respond_edit_page,
 	int, fd,
 	const char *, user,
 	const char *, module,

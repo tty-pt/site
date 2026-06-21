@@ -6,8 +6,8 @@
 #include <sys/stat.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
-#include <ttypt/ndx.h>
+#include <ttypt/xy-mod.h>
+#include <ttypt/xy.h>
 #include <ttypt/qmap.h>
 
 #include "../index/index.h"
@@ -456,11 +456,11 @@ static int choir_detail_handler(int fd, char *body)
 	return site_ui_respond_page(fd, page_title, NULL, "choir", layout);
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/index/index");
-	ndx_load("./mods/mpfd/mpfd");
-	ndx_load("./mods/song/song");
+	xy_load("./mods/index/index");
+	xy_load("./mods/mpfd/mpfd");
+	xy_load("./mods/song/song");
 	axil_register_handler(
 	        "GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	axil_register_handler(

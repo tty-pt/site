@@ -8,7 +8,7 @@ The mpfd module provides a parser for multipart form data, commonly used for HTM
 
 ## Exported API
 
-All functions are exported via the ndx system. Call them using `call_mpfd_*()` from other modules.
+All functions are exported via the xy system. Call them using `call_mpfd_*()` from other modules.
 
 ### mpfd_parse
 

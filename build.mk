@@ -14,7 +14,7 @@ MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk
 CC ?= clang
 
 CFLAGS += -g -O0 $(PICFLAGS)
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared

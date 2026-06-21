@@ -5,11 +5,11 @@
 #include <string.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include "common_internal.h"
 
-NDX_LISTENER(int, str_trim, char *, s)
+XY_IMPL(int, str_trim, char *, s)
 {
 	char *start;
 	char *end;

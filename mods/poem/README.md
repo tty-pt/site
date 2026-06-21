@@ -86,7 +86,7 @@ This module depends on:
 - `mods/ssr/ssr` - For SSR rendering
 - `mods/mpfd/mpfd` - For parsing multipart form data uploads
 
-Declared in `ndx_deps[]` and loaded via `ndx_load()` in `ndx_install()`.
+Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
 
 ## Implementation Details
 

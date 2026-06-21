@@ -6,7 +6,7 @@
 #include <dirent.h>
 #include <unistd.h>
 
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
 #include <ttypt/qmap.h>
 
@@ -122,9 +122,9 @@ static int poem_detail_handler(int fd, char *body)
 	return site_ui_respond_page(fd, page_title, NULL, "poem", layout);
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/index/index");
+	xy_load("./mods/index/index");
 
 	source_setup(
 	        "poem.items",

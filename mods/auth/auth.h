@@ -2,7 +2,7 @@
 #define MOD_AUTH_H
 
 #include <stddef.h>
-#include <ttypt/ndx.h>
+#include <ttypt/xy.h>
 
 #ifndef PATH_MAX
 #include <limits.h>
@@ -47,15 +47,15 @@ typedef int (*item_handler_cb)(
 
 /* Check if username owns item_path.
  * When root: compare stat uid. When non-root: read owner file. */
-NDX_HOOK_DECL(int, item_check_ownership,
+XY_DECL(int, item_check_ownership,
 	const char *, item_path,
 	const char *, username);
 
-NDX_HOOK_DECL(item_access_t, item_access_status,
+XY_DECL(item_access_t, item_access_status,
 	const char *, item_path,
 	const char *, username,
 	unsigned, flags);
-NDX_HOOK_DECL(int, item_require_access,
+XY_DECL(int, item_require_access,
 	int, fd,
 	const char *, item_path,
 	const char *, username,
@@ -66,13 +66,13 @@ NDX_HOOK_DECL(int, item_require_access,
 /* Populate an item_ctx_t from the request; enforces flags and responds
  * with an appropriate error on failure. Returns 0 on success, non-zero
  * if the handler should return (response already sent). */
-NDX_HOOK_DECL(int, item_ctx_load,
+XY_DECL(int, item_ctx_load,
 	item_ctx_t *, ctx,
 	int, fd,
 	const char *, items_path,
 	unsigned, flags);
 
-NDX_HOOK_DECL(int, with_item_access,
+XY_DECL(int, with_item_access,
 	int, fd,
 	char *, body,
 	const char *, items_path,
@@ -83,9 +83,9 @@ NDX_HOOK_DECL(int, with_item_access,
 	void *, user);
 
 /* CSRF helpers */
-NDX_HOOK_DECL(int, csrf_generate_token, char *, out, size_t, len);
-NDX_HOOK_DECL(int, csrf_set_cookie, int, fd, char *, out, size_t, len);
-NDX_HOOK_DECL(int, csrf_validate, int, fd, const char *, submitted);
+XY_DECL(int, csrf_generate_token, char *, out, size_t, len);
+XY_DECL(int, csrf_set_cookie, int, fd, char *, out, size_t, len);
+XY_DECL(int, csrf_validate, int, fd, const char *, submitted);
 
 #endif /* ITEM_IMPL */
 

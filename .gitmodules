@@ -4,9 +4,9 @@
 [submodule "external/libqmap"]
 	path = external/libqmap
 	url = git@github.com:tty-pt/libqmap.git
-[submodule "external/libndx"]
-	path = external/libndx
-	url = git@github.com:tty-pt/libndx.git
+[submodule "external/libxylem"]
+	path = external/libxylem
+	url = git@github.com:tty-pt/libxylem.git
 [submodule "external/mk"]
 	path = external/mk
 	url = git@github.com:tty-pt/mk.git

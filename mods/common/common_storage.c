@@ -8,13 +8,13 @@
 #include <unistd.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include "common_internal.h"
 
 static int remove_path_recursive(const char *path);
 
-NDX_LISTENER(int, read_meta_file,
+XY_IMPL(int, read_meta_file,
 	const char *, item_path,
 	const char *, name,
 	char *, buf,
@@ -36,7 +36,7 @@ NDX_LISTENER(int, read_meta_file,
 	return 0;
 }
 
-NDX_LISTENER(int, write_meta_file,
+XY_IMPL(int, write_meta_file,
 	const char *, item_path,
 	const char *, name,
 	const char *, buf,
@@ -48,7 +48,7 @@ NDX_LISTENER(int, write_meta_file,
 	return write_file_path(p, buf, sz);
 }
 
-NDX_LISTENER(int, meta_fields_read,
+XY_IMPL(int, meta_fields_read,
 	const char *, item_path,
 	meta_field_t *, fields,
 	size_t, count)
@@ -67,7 +67,7 @@ NDX_LISTENER(int, meta_fields_read,
 	return 0;
 }
 
-NDX_LISTENER(int, meta_fields_write,
+XY_IMPL(int, meta_fields_write,
 	const char *, item_path,
 	const meta_field_t *, fields,
 	size_t, count)
@@ -89,7 +89,7 @@ NDX_LISTENER(int, meta_fields_write,
 	return 0;
 }
 
-NDX_LISTENER(int, write_file_path,
+XY_IMPL(int, write_file_path,
 	const char *, path,
 	const char *, buf,
 	size_t, sz)
@@ -106,14 +106,14 @@ NDX_LISTENER(int, write_file_path,
 	return 0;
 }
 
-NDX_LISTENER(int, ensure_dir_path, const char *, path)
+XY_IMPL(int, ensure_dir_path, const char *, path)
 {
 	if (mkdir(path, 0755) == 0 || errno == EEXIST)
 		return 0;
 	return -1;
 }
 
-NDX_LISTENER(int, user_path_build,
+XY_IMPL(int, user_path_build,
 	const char *, username,
 	const char *, suffix,
 	char *, out,
@@ -126,7 +126,7 @@ NDX_LISTENER(int, user_path_build,
 	return 0;
 }
 
-NDX_LISTENER(int, write_item_child_file,
+XY_IMPL(int, write_item_child_file,
 	const char *, item_path,
 	const char *, name,
 	const char *, buf,
@@ -139,7 +139,7 @@ NDX_LISTENER(int, write_item_child_file,
 	return write_file_path(p, buf, sz);
 }
 
-NDX_LISTENER(char *, slurp_file, const char *, path)
+XY_IMPL(char *, slurp_file, const char *, path)
 {
 	FILE *fp = fopen(path, "r");
 	long fsize;
@@ -166,7 +166,7 @@ NDX_LISTENER(char *, slurp_file, const char *, path)
 	return buf;
 }
 
-NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
+XY_IMPL(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
 	if (fd > 0 && axil_env_get(fd, buf, "DOCUMENT_ROOT") > 0 && buf[0])
 		return 0;
@@ -175,7 +175,7 @@ NDX_LISTENER(int, get_doc_root, int, fd, char *, buf, size_t, len)
 	return 0;
 }
 
-NDX_LISTENER(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len)
+XY_IMPL(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len)
 {
 	get_doc_root(fd, buf, len);
 	if (fd == 0 && (!buf[0] || buf[0] == '.'))
@@ -183,7 +183,7 @@ NDX_LISTENER(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len)
 	return buf;
 }
 
-NDX_LISTENER(int, item_child_path,
+XY_IMPL(int, item_child_path,
 	const char *, item_path,
 	const char *, name,
 	char *, out,
@@ -243,14 +243,14 @@ static int remove_path_recursive(const char *path)
 	return rmdir(path);
 }
 
-NDX_LISTENER(int, item_remove_path_recursive, const char *, item_path)
+XY_IMPL(int, item_remove_path_recursive, const char *, item_path)
 {
 	if (!item_path || !item_path[0])
 		return -1;
 	return remove_path_recursive(item_path);
 }
 
-NDX_LISTENER(int, module_path_build,
+XY_IMPL(int, module_path_build,
 	const char *, doc_root,
 	const char *, module,
 	char *, out,
@@ -264,7 +264,7 @@ NDX_LISTENER(int, module_path_build,
 	return 0;
 }
 
-NDX_LISTENER(int, module_items_path_build,
+XY_IMPL(int, module_items_path_build,
 	const char *, doc_root,
 	const char *, module,
 	char *, out,
@@ -278,7 +278,7 @@ NDX_LISTENER(int, module_items_path_build,
 	return 0;
 }
 
-NDX_LISTENER(int, item_path_build_root,
+XY_IMPL(int, item_path_build_root,
 	const char *, doc_root,
 	const char *, module,
 	const char *, id,
@@ -293,7 +293,7 @@ NDX_LISTENER(int, item_path_build_root,
 	return 0;
 }
 
-NDX_LISTENER(int, item_path_build,
+XY_IMPL(int, item_path_build,
 	int, fd,
 	const char *, module,
 	const char *, id,
@@ -306,7 +306,7 @@ NDX_LISTENER(int, item_path_build,
 	return item_path_build_root(doc_root, module, id, out, outlen);
 }
 
-NDX_LISTENER(int, datalist_extract_id,
+XY_IMPL(int, datalist_extract_id,
 	const char *, in,
 	char *, id_out,
 	size_t, outlen)

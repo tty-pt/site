@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include "common_internal.h"
 #include "ux/site_ui.h"
@@ -10,7 +10,7 @@
 #include "../mpfd/mpfd.h"
 #include "../auth/auth.h"
 
-NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg)
+XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 {
 	char accept[256] = { 0 };
 
@@ -49,22 +49,22 @@ NDX_LISTENER(int, respond_error, int, fd, int, status, const char *, msg)
 	return axil_respond_plain(fd, status, msg);
 }
 
-NDX_LISTENER(int, bad_request, int, fd, const char *, msg)
+XY_IMPL(int, bad_request, int, fd, const char *, msg)
 {
 	return respond_error(fd, 400, msg ? msg : "Bad request");
 }
 
-NDX_LISTENER(int, server_error, int, fd, const char *, msg)
+XY_IMPL(int, server_error, int, fd, const char *, msg)
 {
 	return respond_error(fd, 500, msg ? msg : "Internal server error");
 }
 
-NDX_LISTENER(int, not_found, int, fd, const char *, msg)
+XY_IMPL(int, not_found, int, fd, const char *, msg)
 {
 	return respond_error(fd, 404, msg ? msg : "Not found");
 }
 
-NDX_LISTENER(const char *, require_user, int, fd)
+XY_IMPL(const char *, require_user, int, fd)
 {
 	const char *user = get_request_user(fd);
 	if (!user || !user[0]) {
@@ -74,7 +74,7 @@ NDX_LISTENER(const char *, require_user, int, fd)
 	return user;
 }
 
-NDX_LISTENER(int, respond_html, int, fd, const char *, html)
+XY_IMPL(int, respond_html, int, fd, const char *, html)
 {
 	if (html) {
 		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
@@ -85,14 +85,14 @@ NDX_LISTENER(int, respond_html, int, fd, const char *, html)
 	return server_error(fd, "Internal Server Error");
 }
 
-NDX_LISTENER(int, respond_json, int, fd, int, status, const char *, msg)
+XY_IMPL(int, respond_json, int, fd, int, status, const char *, msg)
 {
 	axil_header_set(fd, "Content-Type", "application/json");
 	axil_respond(fd, status, msg);
 	return 1;
 }
 
-NDX_LISTENER(int, redirect_to_item,
+XY_IMPL(int, redirect_to_item,
 	int, fd,
 	const char *, module,
 	const char *, id)
@@ -102,7 +102,7 @@ NDX_LISTENER(int, redirect_to_item,
 	return axil_redirect(fd, loc);
 }
 
-NDX_LISTENER(int, site_ui_respond_page,
+XY_IMPL(int, site_ui_respond_page,
 	int, fd,
 	const char *, title,
 	const char *, extra_head,
@@ -112,7 +112,7 @@ NDX_LISTENER(int, site_ui_respond_page,
 	return respond_html(fd, site_ui_page(title, extra_head, module, body));
 }
 
-NDX_LISTENER(int, site_ui_respond_form_page,
+XY_IMPL(int, site_ui_respond_form_page,
 	int, fd,
 	const char *, user,
 	const char *, title,
@@ -122,11 +122,11 @@ NDX_LISTENER(int, site_ui_respond_form_page,
 	bud_node *, form)
 {
 	bud_node *page =
-	site_ui_form_page(user, title, action, icon, NULL, form);
+	        site_ui_form_page(user, title, action, icon, NULL, form);
 	return site_ui_respond_page(fd, title, NULL, module, page);
 }
 
-NDX_LISTENER(int, csrf_check_mpfd, int, fd)
+XY_IMPL(int, csrf_check_mpfd, int, fd)
 {
 	char csrf_submitted[33] = { 0 };
 	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted) - 1);
@@ -135,7 +135,7 @@ NDX_LISTENER(int, csrf_check_mpfd, int, fd)
 	return 0;
 }
 
-NDX_LISTENER(int, csrf_check_query, int, fd, char *, body)
+XY_IMPL(int, csrf_check_query, int, fd, char *, body)
 {
 	axil_query_parse(body);
 	char csrf_submitted[33] = { 0 };
@@ -145,14 +145,14 @@ NDX_LISTENER(int, csrf_check_query, int, fd, char *, body)
 	return 0;
 }
 
-NDX_LISTENER(const char *, csrf_setup, int, fd)
+XY_IMPL(const char *, csrf_setup, int, fd)
 {
 	static __thread char csrf_token[33];
 	csrf_set_cookie(fd, csrf_token, sizeof(csrf_token));
 	return csrf_token;
 }
 
-NDX_LISTENER(int, site_ui_respond_add_page,
+XY_IMPL(int, site_ui_respond_add_page,
 	int, fd,
 	const char *, user,
 	const char *, module,
@@ -166,7 +166,7 @@ NDX_LISTENER(int, site_ui_respond_add_page,
 	        fd, user, title, action, icon, module, form);
 }
 
-NDX_LISTENER(int, site_ui_respond_edit_page,
+XY_IMPL(int, site_ui_respond_edit_page,
 	int, fd,
 	const char *, user,
 	const char *, module,

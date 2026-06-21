@@ -4,7 +4,7 @@
 
 #include "common_internal.h"
 
-NDX_LISTENER(int, str_list_contains, const char *, list, const char *, token)
+XY_IMPL(int, str_list_contains, const char *, list, const char *, token)
 {
 	if (!list || !list[0] || !token || !token[0])
 		return 0;
@@ -23,7 +23,7 @@ NDX_LISTENER(int, str_list_contains, const char *, list, const char *, token)
 	return 0;
 }
 
-NDX_LISTENER(int, str_list_append, char *, out, size_t, out_sz,
+XY_IMPL(int, str_list_append, char *, out, size_t, out_sz,
         const char *, token)
 {
 	size_t used;
@@ -48,7 +48,7 @@ NDX_LISTENER(int, str_list_append, char *, out, size_t, out_sz,
 	return 0;
 }
 
-NDX_LISTENER(int, str_list_normalize, const char *, input, char *, out,
+XY_IMPL(int, str_list_normalize, const char *, input, char *, out,
         size_t, out_sz)
 {
 	char copy[8192];
@@ -77,7 +77,7 @@ NDX_LISTENER(int, str_list_normalize, const char *, input, char *, out,
 	return 0;
 }
 
-NDX_LISTENER(int, str_list_for_each, const char *, list,
+XY_IMPL(int, str_list_for_each, const char *, list,
         str_list_cb, cb, void *, user)
 {
 	char copy[8192];

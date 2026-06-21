@@ -6,8 +6,8 @@ This project is a hybrid C and Rust web application built on the AXIL framework.
 
 - **Server (C):** The `axil` binary serves as the web server. It loads modules as dynamic libraries (`.so`).
 - **Business Logic (C):** Modules in `mods/` (e.g., `auth`, `song`, `poem`) handle requests, manage data in the `items/` directory, and perform logic.
-- **SSR (Rust):** `mods/ssr/` builds `ssr.so` using Dioxus SSR. The C side calls the Rust renderer via an NDX hook (`ssr_render`). Module-specific rendering lives in `mods/<module>/ssr/src/main.rs`, auto-discovered by `mods/ssr/build.rs`.
-- **Data access (Rust):** The Rust SSR reads data from C-side qmap handles via NDX hooks (`source_query`, `source_get_data_hd`, `source_get_fields_hd`) and builds typed `hyle::Row`/`hyle::Source` structs directly — no JSON serialization.
+- **SSR (Rust):** `mods/ssr/` builds `ssr.so` using Dioxus SSR. The C side calls the Rust renderer via an XY hook (`ssr_render`). Module-specific rendering lives in `mods/<module>/ssr/src/main.rs`, auto-discovered by `mods/ssr/build.rs`.
+- **Data access (Rust):** The Rust SSR reads data from C-side qmap handles via XY hooks (`source_query`, `source_get_data_hd`, `source_get_fields_hd`) and builds typed `hyle::Row`/`hyle::Source` structs directly — no JSON serialization.
 - **Client-side (Rust/WASM):** Interactive features are implemented in Rust and compiled to WASM (e.g., `mods/song/client`), using Dioxus hydration over the SSR-rendered DOM.
 - **Deployment:** The application is designed to run within a chroot environment for security.
 
@@ -47,7 +47,7 @@ This project is a hybrid C and Rust web application built on the AXIL framework.
   return 0;
   ```
 - **Memory:** Never `free()` values returned by `qmap_get` or other `qmap` managed pointers.
-- **Handlers:** Registered in `ndx_install()` using `axil_register_handler`.
+- **Handlers:** Registered in `xy_install()` using `axil_register_handler`.
 
 ### Rust SSR
 - Module rendering logic must be in `<module>/ssr/src/main.rs`.
@@ -85,7 +85,7 @@ Introduce a schema-driven approach for module metadata. Define field names and s
 
 ### 3. Simplified Handler Registration
 Implement a `register_standard_item_handlers(module_name, callbacks_struct)` helper.
-- **Goal:** Reduce the repetitive `axil_register_handler` calls in `ndx_install` for standard routes like `GET /:id` and `POST /:id/edit`.
+- **Goal:** Reduce the repetitive `axil_register_handler` calls in `xy_install` for standard routes like `GET /:id` and `POST /:id/edit`.
 
 ### 4. Choir-Centric Repertoire Reuse
 The `choir` and `songbook` modules share identical repertoire management logic (collections of songs). Instead of a complete merge, the `choir` module serves as the primary provider of repertoire features, which the `songbook` module reuses.

@@ -1,12 +1,12 @@
 #ifndef MPFD_H
 #define MPFD_H
 
-#include <ttypt/axil-ndx.h>
+#include <ttypt/axil-xy.h>
 
 /* Parse & Lifecycle */
-NDX_HOOK_DECL(int, mpfd_parse, socket_t, fd, char *, body);
+XY_DECL(int, mpfd_parse, socket_t, fd, char *, body);
 
 /* Data Retrieval */
-NDX_HOOK_DECL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len);
+XY_DECL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len);
 
 #endif

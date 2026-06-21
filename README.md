@@ -112,7 +112,7 @@ See [debug/README.md](debug/README.md) for full documentation.
 - C compiler
 - Rust/Cargo
 - `wasm-bindgen` CLI + `rustup target add wasm32-unknown-unknown` if you want to rebuild the wasm browser assets locally
-- `axil`, `ndx`, `qmap`
+- `axil`, `xy`, `qmap`
 - Deno only for the Playwright e2e test runner
 
 ## Modules

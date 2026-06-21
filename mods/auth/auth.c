@@ -1,4 +1,4 @@
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 #include <stddef.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 #include <fcntl.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/axil-ndx.h>
+#include <ttypt/axil-xy.h>
 
 #define ITEM_IMPL
 #include "auth.h"
@@ -23,7 +23,7 @@
 /* CSRF helpers                                                         */
 /* ------------------------------------------------------------------ */
 
-NDX_LISTENER(int, csrf_generate_token, char *, out, size_t, len)
+XY_IMPL(int, csrf_generate_token, char *, out, size_t, len)
 {
 	unsigned char buf[16];
 	int urfd;
@@ -50,7 +50,7 @@ NDX_LISTENER(int, csrf_generate_token, char *, out, size_t, len)
 	return 0;
 }
 
-NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
+XY_IMPL(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 {
 	char token[33];
 	char header[80];
@@ -87,7 +87,7 @@ NDX_LISTENER(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 	return 0;
 }
 
-NDX_LISTENER(int, csrf_validate, int, fd, const char *, submitted)
+XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 {
 	char cookie_hdr[512];
 	char *p;
@@ -123,7 +123,7 @@ static void build_owner_path(const char *ip, char *out, size_t len)
 	snprintf(out, len, "%s/owner", ip);
 }
 
-NDX_LISTENER(int, item_check_ownership,
+XY_IMPL(int, item_check_ownership,
 	const char *, item_path,
 	const char *, username)
 {
@@ -159,7 +159,7 @@ NDX_LISTENER(int, item_check_ownership,
 	}
 }
 
-NDX_LISTENER(item_access_t, item_access_status,
+XY_IMPL(item_access_t, item_access_status,
 	const char *, item_path,
 	const char *, username,
 	unsigned, flags)
@@ -178,7 +178,7 @@ NDX_LISTENER(item_access_t, item_access_status,
 	return ITEM_ACCESS_OK;
 }
 
-NDX_LISTENER(int, item_require_access,
+XY_IMPL(int, item_require_access,
 	int, fd,
 	const char *, item_path,
 	const char *, username,
@@ -204,7 +204,7 @@ NDX_LISTENER(int, item_require_access,
 
 /* --- Item context --- */
 
-NDX_LISTENER(int, item_ctx_load,
+XY_IMPL(int, item_ctx_load,
 	item_ctx_t *, ctx,
 	int, fd,
 	const char *, items_path,
@@ -254,7 +254,7 @@ NDX_LISTENER(int, item_ctx_load,
 	return 0;
 }
 
-NDX_LISTENER(int, with_item_access,
+XY_IMPL(int, with_item_access,
 	int, fd,
 	char *, body,
 	const char *, items_path,
@@ -376,11 +376,11 @@ static int register_get_handler(int fd, char *body)
 	return 0;
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/index/index");
-	ndx_load("./mods/common/common");
-	ndx_load("libaxil-auth");
+	xy_load("./mods/index/index");
+	xy_load("./mods/common/common");
+	xy_load("libaxil-auth");
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);

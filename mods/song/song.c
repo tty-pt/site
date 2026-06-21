@@ -1,4 +1,4 @@
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -62,7 +62,7 @@ static char *song_viewer_pref_read(const char *user, const char *name)
 	return slurp_file(p);
 }
 
-NDX_LISTENER(int, song_get_viewer_zoom, const char *, user)
+XY_IMPL(int, song_get_viewer_zoom, const char *, user)
 {
 	char *r = song_viewer_pref_read(user, "chords-zoom");
 	int v = r ? atoi(r) : VIEWER_ZOOM_DEFAULT;
@@ -72,14 +72,14 @@ NDX_LISTENER(int, song_get_viewer_zoom, const char *, user)
 	               : v;
 }
 
-NDX_LISTENER(int, song_set_viewer_zoom, const char *, user, int, zoom)
+XY_IMPL(int, song_set_viewer_zoom, const char *, user, int, zoom)
 {
 	char b[16];
 	snprintf(b, sizeof(b), "%d", zoom);
 	return song_viewer_pref_write(user, "chords-zoom", b);
 }
 
-NDX_LISTENER(int, song_transpose_root,
+XY_IMPL(int, song_transpose_root,
 	const char *, doc,
 	const char *, id,
 	int, semi,
@@ -257,7 +257,7 @@ static void song_cleanup(const char *id)
 	(void)id;
 }
 
-NDX_LISTENER(int, song_get_original_key_root,
+XY_IMPL(int, song_get_original_key_root,
 	const char *, doc,
 	const char *, id)
 {
@@ -268,17 +268,17 @@ NDX_LISTENER(int, song_get_original_key_root,
 	return k;
 }
 
-NDX_LISTENER(int, song_get_original_key, const char *, id)
+XY_IMPL(int, song_get_original_key, const char *, id)
 {
 	return song_get_original_key_root(g_doc_root, id);
 }
 
-NDX_LISTENER(char *, song_get_pref, const char *, user, const char *, name)
+XY_IMPL(char *, song_get_pref, const char *, user, const char *, name)
 {
 	return song_viewer_pref_read(user, name);
 }
 
-NDX_LISTENER(int, source_after_update,
+XY_IMPL(int, source_after_update,
         int, fd,
         const char *, dataset_id,
         const char *, id,
@@ -474,15 +474,15 @@ static int song_add_get_handler(int fd, char *body)
 	        fd, user, "song", "\xf0\x9f\x8e\xb8", form);
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
 	char dr[256] = { 0 };
 	srand((unsigned)time(NULL));
 	resolve_doc_root(0, dr, sizeof(dr));
 	strncpy(g_doc_root, dr, sizeof(g_doc_root) - 1);
 	g_transp_ctx = transp_init();
-	ndx_load("./mods/index/index");
-	ndx_load("./mods/mpfd/mpfd");
+	xy_load("./mods/index/index");
+	xy_load("./mods/mpfd/mpfd");
 
 	/* Precompute state specs from field table */
 	source_build_state_specs(

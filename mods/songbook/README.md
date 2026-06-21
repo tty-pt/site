@@ -337,10 +337,10 @@ Run integration tests:
 - `check_sb_ownership()` - Verify songbook ownership
 - `check_choir_ownership_for_sb()` - Verify choir ownership
 
-**NDX API Exports:**
+**XYLEM API Exports:**
 - None (songbook is a leaf module)
 
-**NDX API Imports:**
+**XYLEM API Imports:**
 - `get_session_user()` from auth module
 - `url_encode()`, `read_file()`, `json_escape()` from common module
 - `mpfd_parse()`, `mpfd_get()` from mpfd module

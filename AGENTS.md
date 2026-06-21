@@ -10,7 +10,7 @@ Current runtime:
 - `mods/song/song_fe.c` owns the C/bud frontend for song detail pages.
 - `mods/common/site_ui_fe.c` owns the shared site layout, menu, and form helpers.
 - `mods/source/source.c` (~708 lines) owns dataset CRUD, `/api/dataset/*` routes.
-- Encoding helpers (`axil_url_encode`, `axil_url_decode`, `axil_json_escape`, `axil_slugify`) live in `external/axil/src/axil-encode.c` as direct C functions (not NDX hooks).
+- Encoding helpers (`axil_url_encode`, `axil_url_decode`, `axil_json_escape`, `axil_slugify`) live in `external/axil/src/axil-encode.c` as direct C functions (not XY hooks).
 
 There is no Fresh/Deno proxy runtime in the request path anymore.
 
@@ -21,7 +21,7 @@ axil (libaxil.so)
  ├── common.so    (~980 lines: JSON builders, response helpers, storage, str_trim)
  ├── ssr.so       (Rust SSR with Dioxus)
  ├── source.so    (dataset CRUD + /api/dataset/* routes)
- ├── mods.load     (poem, songbook, song, choir — loaded after explicit ndx_load calls)
+ ├── mods.load     (poem, songbook, song, choir — loaded after explicit xy_load calls)
  └── Others: auth, index, mpfd, redir
 ```
 
@@ -114,7 +114,7 @@ at startup to determine behavior.
 
 ## Chroot Setup
 
-The site runs inside a chroot at the repo root. `ndx_install()` in `mods/auth/auth.c`
+The site runs inside a chroot at the repo root. `xy_install()` in `mods/auth/auth.c`
 creates the `./etc/` files automatically on first start, but `sh` and its shared
 libraries still need to exist inside the tree.
 
@@ -169,7 +169,7 @@ char *val = qmap_get(map, key);   /* do not free(val) */
 
 ### Exported functions
 
-Use `NDX_HOOK_DEF` in the host or `NDX_LISTENER` in modules, and `NDX_HOOK_DECL` in shared headers.
+Use `XY_DEF` in the host or `XY_IMPL` in modules, and `XY_DECL` in shared headers.
 
 ### Style
 

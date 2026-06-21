@@ -174,7 +174,7 @@ if (username) {
 
 - `mods/common/common` - For `query_param()` utility function
 
-Declared in `ndx_deps[]` and loaded in `ndx_install()`.
+Declared in `xy_deps[]` and loaded in `xy_install()`.
 
 ## Security Features
 

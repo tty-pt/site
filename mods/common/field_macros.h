@@ -2,7 +2,7 @@
  * Consolidates bud_field_desc_t initializers that are identical
  * across song, choir, songbook, and poem modules.
  *
- * WASM-safe: pure C, no NDX hooks.
+ * WASM-safe: pure C, no XY hooks.
  */
 #ifndef FIELD_MACROS_H
 #define FIELD_MACROS_H

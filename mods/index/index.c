@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #include <ttypt/qmap.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
 
 #include "./../common/common.h"
@@ -99,14 +99,14 @@ static const char *index_name(int fd)
 }
 
 /*
- * NDX hook: create an index item from a parsed multipart form on fd/body.
+ * XY hook: create an index item from a parsed multipart form on fd/body.
  * Performs auth check, creates the item directory, writes the title file,
  * records ownership, and updates the in-memory index.
  * Writes the generated id into id_out (up to id_len bytes).
  * On error, sends the error response itself and returns non-zero.
  * On success returns 0 and id_out is populated — caller must redirect.
  */
-NDX_LISTENER(int, index_add_item,
+XY_IMPL(int, index_add_item,
 	int, fd,
 	char *, body,
 	char *, id_out,
@@ -495,7 +495,7 @@ empty_page: {
 	return 0;
 }
 
-NDX_LISTENER(int, index_render_list,
+XY_IMPL(int, index_render_list,
 	int, fd,
 	unsigned, hd,
 	index_format_fn, fmt)
@@ -634,7 +634,7 @@ static int index_generic_edit_handler(int fd, char *body)
 	        NULL);
 }
 
-NDX_LISTENER(unsigned, index_open,
+XY_IMPL(unsigned, index_open,
 	const char *, name,
 	const char *, dataset_name,
 	index_cleanup_fn, cleanup,
@@ -720,7 +720,7 @@ NDX_LISTENER(unsigned, index_open,
 	return hd;
 }
 
-NDX_LISTENER(int, core_get, int, fd, char *, body)
+XY_IMPL(int, core_get, int, fd, char *, body)
 {
 	(void)body;
 	const char *username = get_request_user(fd);
@@ -891,7 +891,7 @@ static void build_owner_path(const char *ip, char *out, size_t len)
 	snprintf(out, len, "%s/owner", ip);
 }
 
-NDX_LISTENER(int, item_record_ownership,
+XY_IMPL(int, item_record_ownership,
 	const char *, item_path,
 	const char *, username)
 {
@@ -921,7 +921,7 @@ static int item_unlink_owner(const char *item_path)
 	return 0;
 }
 
-NDX_LISTENER(int, check_item_access,
+XY_IMPL(int, check_item_access,
 	int, fd,
 	const char *, module,
 	char *, id, size_t, id_sz,
@@ -955,11 +955,11 @@ NDX_LISTENER(int, check_item_access,
 	return 0;
 }
 
-void ndx_install(void)
+void xy_install(void)
 {
-	ndx_load("./mods/common/common");
-	ndx_load("./mods/auth/auth");
-	ndx_load("./mods/mpfd/mpfd");
+	xy_load("./mods/common/common");
+	xy_load("./mods/auth/auth");
+	xy_load("./mods/mpfd/mpfd");
 
 	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
 

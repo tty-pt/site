@@ -8,7 +8,7 @@ The common module provides foundational utilities that are used by multiple othe
 
 ## Exported API
 
-All functions are exported via the ndx system. Call them using `call_<function_name>()` from other modules.
+All functions are exported via the xy system. Call them using `call_<function_name>()` from other modules.
 
 ### query_param
 
@@ -167,9 +167,9 @@ url_encode(str, encoded, sizeof(encoded));
 
 **No dependencies:** This module is foundational and has no external dependencies.
 
-**NDX hooks:**
-- `ndx_install()` - Empty (no handlers to register)
-- `ndx_open()` - Empty (no initialization needed)
+**XY hooks:**
+- `xy_install()` - Empty (no handlers to register)
+- `xy_open()` - Empty (no initialization needed)
 
 ## Dependencies
 

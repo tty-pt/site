@@ -1,7 +1,7 @@
 #ifndef INDEX_MOD_H
 #define INDEX_MOD_H
 
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 
 typedef void (*index_cleanup_fn)(const char *id);
 
@@ -15,7 +15,7 @@ typedef size_t (*index_format_fn)(
 typedef int (*index_handler_fn)(int fd, char *body);
 typedef int (*index_detail_handler_fn)(int fd, char *body);
 
-NDX_HOOK_DECL(unsigned, index_open,
+XY_DECL(unsigned, index_open,
 	const char *, name,
 	const char *, dataset_name,
 	index_cleanup_fn, cleanup,
@@ -24,24 +24,24 @@ NDX_HOOK_DECL(unsigned, index_open,
 	index_handler_fn, edit_get_handler,
 	index_handler_fn, edit_post_handler);
 
-NDX_HOOK_DECL(int, index_add_item,
+XY_DECL(int, index_add_item,
 	int, fd,
 	char *, body,
 	char *, id_out,
 	size_t, id_len);
 
-NDX_HOOK_DECL(int, core_get, int, fd, char *, body);
-NDX_HOOK_DECL(int, index_render_list,
+XY_DECL(int, core_get, int, fd, char *, body);
+XY_DECL(int, index_render_list,
 	int, fd,
 	unsigned, hd,
 	index_format_fn, fmt);
 /* Ownership helpers — moved from auth; they're item metadata ops, not auth */
 
-NDX_HOOK_DECL(int, item_record_ownership,
+XY_DECL(int, item_record_ownership,
 	const char *, item_path,
 	const char *, username);
 
-NDX_HOOK_DECL(int, check_item_access,
+XY_DECL(int, check_item_access,
 	int, fd,
 	const char *, module,
 	char *, id, size_t, id_sz,

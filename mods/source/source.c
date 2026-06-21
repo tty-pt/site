@@ -4,13 +4,14 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
 #include <pwd.h>
 
 #include "../auth/auth.h"
 #include <ttypt/axil.h>
-#include <ttypt/ndx-mod.h>
+#include <ttypt/xy-mod.h>
 #include <ttypt/qmap.h>
 #include "bud/bud.h"
 #include "hyle/hyle.h"
@@ -28,7 +29,7 @@ static int ref_normalize(
         const char *field_name,
         char **data,
         size_t *len);
-NDX_HOOK_DECL(int, source_after_update,
+XY_DECL(int, source_after_update,
 	int, fd, const char *, dataset_id,
 	const char *, id, unsigned, data_handle);
 
@@ -41,7 +42,7 @@ static int source_field_is_multi_reference(source_field_type_t type)
  * source_find returns the source_def_t stored as the libhyle user pointer.
  * All registration stores a heap-allocated copy of the def there.
  */
-NDX_LISTENER(source_def_t *, source_find, const char *, dataset_id)
+XY_IMPL(source_def_t *, source_find, const char *, dataset_id)
 {
 	if (!dataset_id || !dataset_id[0])
 		return NULL;
@@ -84,7 +85,7 @@ static void resolve_ref_append(
 	}
 }
 
-NDX_LISTENER(int, source_resolve_ref_display_str,
+XY_IMPL(int, source_resolve_ref_display_str,
 	const char *, dataset_id,
 	const char *, item_id,
 	const char *, field_name,
@@ -159,7 +160,7 @@ NDX_LISTENER(int, source_resolve_ref_display_str,
 	return 0;
 }
 
-NDX_LISTENER(int, source_resolve_meta_display,
+XY_IMPL(int, source_resolve_meta_display,
 	const char *, dataset_id,
 	const char *, item_id,
 	const bud_field_desc_t *, fields,
@@ -285,7 +286,8 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			qmap_field_put(def->fields_hd, id, "id", id_norm);
 	}
 
-	/* Register the item in source_hd so reference fields can resolve by ID */
+	/* Register the item in source_hd so reference fields can resolve by ID
+	 */
 	if (def->source_hd)
 		qmap_put(def->source_hd, id, "");
 
@@ -330,7 +332,8 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			        def->id, def->fields[i].name, &data, &len);
 			qmap_field_put(
 			        def->fields_hd, id, def->fields[i].name, data);
-			if (strcmp(def->fields[i].name, "owner") == 0 && data[0])
+			if (strcmp(def->fields[i].name, "owner") == 0 &&
+			    data[0])
 				owner_read = 1;
 		}
 		free(data);
@@ -364,7 +367,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 	return 0;
 }
 
-NDX_LISTENER(int, source_delete_item,
+XY_IMPL(int, source_delete_item,
 	int, fd,
 	const source_def_t *, def,
 	const char *, item_id)
@@ -433,7 +436,7 @@ static int clear_inv_refs_cb(const source_def_t *target, void *user)
 	return 0;
 }
 
-NDX_LISTENER(int, source_clear_inverse_refs,
+XY_IMPL(int, source_clear_inverse_refs,
 	const char *, dataset_id,
 	const char *, item_id)
 {
@@ -484,7 +487,7 @@ static int source_scan_items(source_def_t *def)
 	return 0;
 }
 
-NDX_LISTENER(int, source_refresh_row,
+XY_IMPL(int, source_refresh_row,
 	int, fd, const char *, dataset_id, const char *, id)
 {
 	source_def_t *def = source_find(dataset_id);
@@ -495,7 +498,7 @@ NDX_LISTENER(int, source_refresh_row,
 
 static unsigned source_parse_row_data(const source_def_t *def);
 
-NDX_LISTENER(unsigned, source_parse_form, const char *, dataset_id)
+XY_IMPL(unsigned, source_parse_form, const char *, dataset_id)
 {
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -503,7 +506,7 @@ NDX_LISTENER(unsigned, source_parse_form, const char *, dataset_id)
 	return source_parse_row_data(def);
 }
 
-NDX_LISTENER(int, source_register, const source_def_t *, def)
+XY_IMPL(int, source_register, const source_def_t *, def)
 {
 	size_t n;
 	size_t i;
@@ -714,7 +717,7 @@ source_validate_row(int fd, const source_def_t *def, unsigned data_handle)
 	return 1;
 }
 
-NDX_LISTENER(int, source_update_item,
+XY_IMPL(int, source_update_item,
 	int, fd,
 	const char *, dataset_id,
 	const char *, id,
@@ -895,7 +898,7 @@ typedef struct {
 static ref_reg_t ref_regs[MAX_REF_REGISTRATIONS];
 static size_t ref_reg_count = 0;
 
-NDX_LISTENER(int, ref_field_register,
+XY_IMPL(int, ref_field_register,
 	const char *, dataset_id,
 	const char *, field_name)
 {
@@ -982,7 +985,7 @@ int source_http_build_state_json(
         json_object **out);
 int source_http_state_overlay(json_object *jo, const source_state_kv_t *kvs);
 
-NDX_LISTENER(int, source_for_each, source_each_cb_t, cb, void *, user)
+XY_IMPL(int, source_for_each, source_each_cb_t, cb, void *, user)
 {
 	size_t count;
 	size_t i;
@@ -1005,7 +1008,7 @@ NDX_LISTENER(int, source_for_each, source_each_cb_t, cb, void *, user)
 	return 0;
 }
 
-NDX_LISTENER(int, source_build_state_json,
+XY_IMPL(int, source_build_state_json,
 	const char *, dataset_id,
 	const char *, item_id,
 	const source_state_field_t *, specs,
@@ -1014,14 +1017,14 @@ NDX_LISTENER(int, source_build_state_json,
 	return source_http_build_state_json(dataset_id, item_id, specs, out);
 }
 
-NDX_LISTENER(int, source_state_overlay,
+XY_IMPL(int, source_state_overlay,
 	json_object *, jo,
 	const source_state_kv_t *, kvs)
 {
 	return source_http_state_overlay(jo, kvs);
 }
 
-NDX_LISTENER(int, source_overlay_from_desc,
+XY_IMPL(int, source_overlay_from_desc,
 	json_object *, jo,
 	const void *, state,
 	const bud_field_desc_t *, fields,
@@ -1052,7 +1055,7 @@ NDX_LISTENER(int, source_overlay_from_desc,
 	return 0;
 }
 
-NDX_LISTENER(unsigned, source_query,
+XY_IMPL(unsigned, source_query,
 	const char *, dataset_id,
 	const char *, query_str)
 {
@@ -1116,12 +1119,12 @@ NDX_LISTENER(unsigned, source_query,
 	return output.row_hd;
 }
 
-NDX_LISTENER(unsigned, source_get_data_hd, const char *, dataset_id)
+XY_IMPL(unsigned, source_get_data_hd, const char *, dataset_id)
 {
 	return hyle_source_get_row_hd(dataset_id);
 }
 
-NDX_LISTENER(unsigned, source_get_fields_hd, const char *, dataset_id)
+XY_IMPL(unsigned, source_get_fields_hd, const char *, dataset_id)
 {
 	return hyle_source_get_fields_hd(dataset_id);
 }
@@ -1165,7 +1168,7 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 	return hd;
 }
 
-NDX_LISTENER(unsigned, source_get_schema_hd, const char *, dataset_id)
+XY_IMPL(unsigned, source_get_schema_hd, const char *, dataset_id)
 {
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -1173,7 +1176,7 @@ NDX_LISTENER(unsigned, source_get_schema_hd, const char *, dataset_id)
 	return source_build_schema_hd(def);
 }
 
-MODULE_API void ndx_install(void)
+XY_MODULE_API void xy_install(void)
 {
 	source_install_routes();
 }
@@ -1202,7 +1205,7 @@ impl_source_def_to_qmap(const bud_field_desc_t *defs, int count, void *out)
 	return n;
 }
 
-NDX_LISTENER(int, source_def_to_qmap,
+XY_IMPL(int, source_def_to_qmap,
     const bud_field_desc_t *, defs, int, count, void *, out)
 {
 	return impl_source_def_to_qmap(defs, count, out);
@@ -1253,7 +1256,7 @@ static int impl_source_def_to_source_fields(
 	return n;
 }
 
-NDX_LISTENER(int, source_def_to_source_fields,
+XY_IMPL(int, source_def_to_source_fields,
     const bud_field_desc_t *, defs, int, count, void *, out)
 {
 	return impl_source_def_to_source_fields(defs, count, out);
@@ -1277,7 +1280,7 @@ static int impl_source_def_to_meta_fields(
 	return n;
 }
 
-NDX_LISTENER(int, source_def_to_meta_fields,
+XY_IMPL(int, source_def_to_meta_fields,
     const bud_field_desc_t *, defs, int, count,
     const void *, record, void *, out)
 {
@@ -1304,7 +1307,7 @@ static int impl_source_build_state_specs(
 	return i;
 }
 
-NDX_LISTENER(int, source_build_state_specs,
+XY_IMPL(int, source_build_state_specs,
 	const bud_field_desc_t *, fields,
 	source_state_field_t *, specs,
 	int, max_specs)
@@ -1312,7 +1315,7 @@ NDX_LISTENER(int, source_build_state_specs,
 	return impl_source_build_state_specs(fields, specs, max_specs);
 }
 
-NDX_LISTENER(int, source_meta_read,
+XY_IMPL(int, source_meta_read,
 	const char *, path,
 	const bud_field_desc_t *, fields,
 	int, count,
@@ -1325,7 +1328,7 @@ NDX_LISTENER(int, source_meta_read,
 	return meta_fields_read(path, f, (size_t)n);
 }
 
-NDX_LISTENER(int, source_meta_write,
+XY_IMPL(int, source_meta_write,
 	const char *, path,
 	const bud_field_desc_t *, fields,
 	int, count,
@@ -1349,7 +1352,7 @@ static void impl_source_patch_qmap_targets(
 	}
 }
 
-NDX_LISTENER(size_t, source_inv_keys,
+XY_IMPL(size_t, source_inv_keys,
 	const char *, dataset_id,
 	const char *, field,
 	uint32_t, target_pos,
@@ -1373,7 +1376,7 @@ NDX_LISTENER(size_t, source_inv_keys,
 	return j;
 }
 
-NDX_LISTENER(const char *, source_inv_key_at,
+XY_IMPL(const char *, source_inv_key_at,
 	const char *, dataset_id,
 	const char *, field,
 	uint32_t, target_pos,
@@ -1393,7 +1396,7 @@ NDX_LISTENER(const char *, source_inv_key_at,
 	return qmap_get_key(fhd, buf[index]);
 }
 
-NDX_LISTENER(const char *, qmap_get_field_str,
+XY_IMPL(const char *, qmap_get_field_str,
 	unsigned, hd,
 	const char *, id,
 	const char *, field)
@@ -1404,7 +1407,7 @@ NDX_LISTENER(const char *, qmap_get_field_str,
 	return qmap_get(hd, key);
 }
 
-NDX_LISTENER(uint32_t, source_setup,
+XY_IMPL(uint32_t, source_setup,
 	const char *, source_id,
 	const char *, key_field,
 	size_t, record_size,
