@@ -1,4 +1,6 @@
 #include <ttypt/xy-mod.h>
+#include <ttypt/xy.h>
+#include <ttypt/qmap.h>
 
 #include <stddef.h>
 #include <string.h>
@@ -11,6 +13,13 @@
 
 #include <ttypt/axil.h>
 #include <ttypt/axil-xy.h>
+
+#include "../index/index.h"
+#include <hyle/source.h>
+
+#include "../common/common.h"
+#include "../mpfd/mpfd.h"
+#include "../source/source.h"
 
 #define ITEM_IMPL
 #include "auth.h"
@@ -77,10 +86,8 @@ XY_IMPL(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 		csrf_generate_token(token, sizeof(token));
 
 	snprintf(
-	        header,
-	        sizeof(header),
-	        "csrf_token=%s; Path=/; SameSite=Strict",
-	        token);
+	        header, sizeof(header),
+	        "csrf_token=%s; Path=/; SameSite=Strict", token);
 	axil_header_set(fd, "Set-Cookie", header);
 	if (out && len > 0)
 		snprintf(out, len, "%s", token);
@@ -117,11 +124,6 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 /* ------------------------------------------------------------------ */
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
-
-static void build_owner_path(const char *ip, char *out, size_t len)
-{
-	snprintf(out, len, "%s/owner", ip);
-}
 
 XY_IMPL(int, item_check_ownership,
 	const char *, item_path,
@@ -233,21 +235,13 @@ XY_IMPL(int, item_ctx_load,
 	}
 
 	snprintf(
-	        ctx->item_path,
-	        sizeof(ctx->item_path),
-	        "%s/%s/%s",
-	        ctx->doc_root,
-	        items_path,
-	        ctx->id);
+	        ctx->item_path, sizeof(ctx->item_path), "%s/%s/%s",
+	        ctx->doc_root, items_path, ctx->id);
 
 	if (flags & ICTX_NEED_OWNERSHIP) {
 		if (item_require_access(
-		            fd,
-		            ctx->item_path,
-		            ctx->username,
-		            flags,
-		            "Not found",
-		            "Forbidden"))
+		            fd, ctx->item_path, ctx->username, flags,
+		            "Not found", "Forbidden"))
 			return 1;
 	}
 
@@ -265,7 +259,8 @@ XY_IMPL(int, with_item_access,
 	void *, user)
 {
 	item_ctx_t ctx;
-	unsigned load_flags = flags & ~ICTX_NEED_OWNERSHIP;
+	unsigned load_flags = flags & ~(ICTX_NEED_OWNERSHIP | ICTX_CSRF_MPFD |
+	                                ICTX_CSRF_QUERY);
 
 	if (!cb)
 		return respond_error(fd, 500, "Missing item handler");
@@ -274,13 +269,18 @@ XY_IMPL(int, with_item_access,
 		return 1;
 
 	if (item_require_access(
-	            fd,
-	            ctx.item_path,
-	            ctx.username,
-	            flags,
-	            not_found_msg,
+	            fd, ctx.item_path, ctx.username, flags, not_found_msg,
 	            forbidden_msg))
 		return 1;
+
+	if (flags & ICTX_CSRF_MPFD) {
+		mpfd_parse(fd, body);
+		if (csrf_check_mpfd(fd))
+			return 1;
+	} else if (flags & ICTX_CSRF_QUERY) {
+		if (csrf_check_query(fd, body))
+			return 1;
+	}
 
 	return cb(fd, body, &ctx, user);
 }

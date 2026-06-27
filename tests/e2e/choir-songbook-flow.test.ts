@@ -80,7 +80,7 @@ Deno.test({
       });
       if (r.status >= 400) throw new Error(`Add song ${songId} failed: ${r.status}`);
       await r.body?.cancel();
-      repoIds.push(`${choirId}_${songId}`);
+      repoIds.push(`${songId}`);
     }
 
     // ── 3. Verify both songs appear on choir detail ────────────────────────────

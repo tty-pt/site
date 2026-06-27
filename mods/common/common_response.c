@@ -10,6 +10,37 @@
 #include "../mpfd/mpfd.h"
 #include "../auth/auth.h"
 
+XY_IMPL(int, parse_transpose_qs,
+	const char *, qs,
+	int *, transpose,
+	int *, flags,
+	int *, show_media);
+
+int parse_transpose_qs(
+        const char *qs, int *transpose, int *flags, int *show_media)
+{
+	*transpose = 0;
+	*flags = 0;
+	*show_media = 0;
+	if (!qs || !*qs)
+		return 0;
+	char copy[1024];
+	snprintf(copy, sizeof(copy), "%s", qs);
+	axil_query_parse(copy);
+	char buf[32];
+	if (axil_query_param("t", buf, sizeof(buf)) > 0)
+		*transpose = atoi(buf);
+	if (axil_query_param("b", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
+		*flags |= TPARAM_BEMOL;
+	if (axil_query_param("l", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
+		*flags |= TPARAM_LATIN;
+	if (axil_query_param("h", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
+		*flags |= TPARAM_HTML;
+	if (axil_query_param("m", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
+		*show_media = 1;
+	return 0;
+}
+
 XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 {
 	char accept[256] = { 0 };
@@ -25,15 +56,10 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 		axil_env_get(fd, uri, "DOCUMENT_URI");
 
 		body = site_ui_layout(
-		        msg ? msg : status_str,
-		        uri,
-		        "!",
-		        get_request_user(fd),
+		        msg ? msg : status_str, uri, "!", get_request_user(fd),
 		        NULL,
-		        lx_el("p",
-		              lx_el("strong", lx_text(status_str)),
-		              lx_text(" "),
-		              lx_text(msg ? msg : "Error"))
+		        lx_el("p", lx_el("strong", lx_text(status_str)),
+		              lx_text(" "), lx_text(msg ? msg : "Error"))
 		                .data.node);
 
 		html = site_ui_page(msg ? msg : status_str, NULL, NULL, body);
@@ -180,4 +206,33 @@ XY_IMPL(int, site_ui_respond_edit_page,
 	snprintf(action, sizeof(action), "/%s/%s/edit", module, id);
 	return site_ui_respond_form_page(
 	        fd, user, page_title, action, icon, module, form);
+}
+
+XY_IMPL(int, register_standard_item_handlers,
+	const char *, module_name,
+	const standard_item_handlers_t *, handlers)
+{
+	char buf[256];
+
+	if (handlers->add_get) {
+		snprintf(buf, sizeof(buf), "GET:/%s/add", module_name);
+		axil_register_handler(buf, handlers->add_get);
+	}
+	if (handlers->add_post) {
+		snprintf(buf, sizeof(buf), "POST:/%s/add", module_name);
+		axil_register_handler(buf, handlers->add_post);
+	}
+	if (handlers->detail) {
+		snprintf(buf, sizeof(buf), "GET:/%s/:id", module_name);
+		axil_register_handler(buf, handlers->detail);
+	}
+	if (handlers->edit_get) {
+		snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", module_name);
+		axil_register_handler(buf, handlers->edit_get);
+	}
+	if (handlers->edit_post) {
+		snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", module_name);
+		axil_register_handler(buf, handlers->edit_post);
+	}
+	return 0;
 }

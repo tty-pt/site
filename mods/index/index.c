@@ -54,23 +54,18 @@ int index_update_json(const char *id, const char *title)
 	snprintf(
 	        module_names[modules_count], sizeof(module_names[0]), "%s", id);
 	snprintf(
-	        module_titles[modules_count],
-	        sizeof(module_titles[0]),
-	        "%s",
+	        module_titles[modules_count], sizeof(module_titles[0]), "%s",
 	        title);
 
 	axil_json_escape(id, id_esc, sizeof(id_esc));
 	axil_json_escape(title, title_esc, sizeof(title_esc));
 
 	offset = snprintf(
-	        modules_json_end,
-	        modules_rem,
+	        modules_json_end, modules_rem,
 	        "%c{"
 	        "\"id\":\"%s\","
 	        "\"title\":\"%s\"}",
-	        (modules_count ? ',' : '['),
-	        id_esc,
-	        title_esc);
+	        (modules_count ? ',' : '['), id_esc, title_esc);
 
 	if (offset < 0)
 		return -1;
@@ -162,9 +157,7 @@ XY_IMPL(int, index_add_item,
 /* ── Schema & data querying (native-only: axil, source, qmap) ── */
 
 static int idx_schema_collect(
-        const char *dataset_id,
-        const char *select_csv,
-        col_t *cols,
+        const char *dataset_id, const char *select_csv, col_t *cols,
         int max_cols)
 {
 	unsigned schema_hd;
@@ -199,16 +192,13 @@ static int idx_schema_collect(
 			if (val && ((const char *)val)[0] == '{') {
 				int t;
 				char ts[64] = "";
-				int m =
-				        sscanf((const char *)val,
-				               "{\"t\":%d,\"s\":\"%63[^\"]\"",
-				               &t,
-				               ts);
+				int m = sscanf(
+				        (const char *)val,
+				        "{\"t\":%d,\"s\":\"%63[^\"]\"", &t, ts);
 				if (m >= 1)
 					cols[n].type = t;
 				if (m >= 2 && ts[0]) {
-					strncpy(cols[n].target_source,
-					        ts,
+					strncpy(cols[n].target_source, ts,
 					        sizeof(cols[n].target_source) -
 					                1);
 				}
@@ -218,13 +208,11 @@ static int idx_schema_collect(
 	} else {
 		cur = qmap_iter(schema_hd, NULL, 0);
 		while (n < max_cols && qmap_next(&key, &val, cur)) {
-			strncpy(cols[n].key,
-			        (const char *)key,
+			strncpy(cols[n].key, (const char *)key,
 			        sizeof(cols[n].key) - 1);
 			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
 			col_tok_label(
-			        cols[n].label,
-			        sizeof(cols[n].label),
+			        cols[n].label, sizeof(cols[n].label),
 			        (const char *)key);
 			if (cols[n].label[0] >= 'a')
 				cols[n].label[0] -= 32;
@@ -258,15 +246,13 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 				const char *fn = (const char *)ckey;
 				if (strcmp(fn, "id") == 0)
 					continue;
-				strncpy(display_field,
-				        fn,
+				strncpy(display_field, fn,
 				        sizeof(display_field) - 1);
 				break;
 			}
 			qmap_fin(ccur);
 		}
-		strncpy(last_target,
-		        col->target_source,
+		strncpy(last_target, col->target_source,
 		        sizeof(last_target) - 1);
 	}
 
@@ -302,21 +288,16 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 				if (slug) {
 					char name_key[320];
 					snprintf(
-					        name_key,
-					        sizeof(name_key),
-					        "%s:%s",
-					        slug,
-					        df);
+					        name_key, sizeof(name_key),
+					        "%s:%s", slug, df);
 					name = (const char *)qmap_get(
 					        col->target_hd, name_key);
 					if (buf[0])
-						strncat(buf,
-						        ", ",
+						strncat(buf, ", ",
 						        sizeof(buf) -
 						                strlen(buf) -
 						                1);
-					strncat(buf,
-					        name ? name : slug,
+					strncat(buf, name ? name : slug,
 					        sizeof(buf) - strlen(buf) - 1);
 				}
 			}
@@ -431,11 +412,8 @@ static int idx_render_list_bud(
 			for (j = 0; j < ncols; j++) {
 				char fkey[256];
 				snprintf(
-				        fkey,
-				        sizeof(fkey),
-				        "%s:%s",
-				        disp_ids[i],
-				        cols[j].key);
+				        fkey, sizeof(fkey), "%s:%s",
+				        disp_ids[i], cols[j].key);
 				const char *fval =
 				        (const char *)qmap_get(fields_hd, fkey);
 				if (!fval)
@@ -452,20 +430,9 @@ static int idx_render_list_bud(
 		}
 
 		layout = idx_list_layout(
-		        module,
-		        query_str,
-		        username,
-		        (int)page,
-		        (int)per_page,
-		        (int)total,
-		        cols,
-		        ncols,
-		        disp_ids,
-		        disp_nids,
-		        values,
-		        sort_field,
-		        sort_asc,
-		        has_page);
+		        module, query_str, username, (int)page, (int)per_page,
+		        (int)total, cols, ncols, disp_ids, disp_nids, values,
+		        sort_field, sort_asc, has_page);
 
 		rc = 0;
 		if (layout) {
@@ -603,10 +570,7 @@ static int index_generic_edit_authorized(
 	int title_len = mpfd_get("title", title, sizeof(title) - 1);
 	if (title_len > 0) {
 		if (item_path_build(
-		            fd,
-		            module,
-		            ctx->id,
-		            items_path,
+		            fd, module, ctx->id, items_path,
 		            sizeof(items_path)) == 0)
 		{
 			write_meta_file(
@@ -624,14 +588,8 @@ static int index_generic_edit_handler(int fd, char *body)
 	snprintf(items_path, sizeof(items_path), "items/%s/items", module);
 
 	return with_item_access(
-	        fd,
-	        body,
-	        items_path,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        NULL,
-	        NULL,
-	        index_generic_edit_authorized,
-	        NULL);
+	        fd, body, items_path, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL, NULL, index_generic_edit_authorized, NULL);
 }
 
 XY_IMPL(unsigned, index_open,
@@ -701,16 +659,13 @@ XY_IMPL(unsigned, index_open,
 	}
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
 	axil_register_handler(
-	        buf,
-	        edit_post_handler ? edit_post_handler
-	                          : index_generic_edit_handler);
+	        buf, edit_post_handler ? edit_post_handler
+	                               : index_generic_edit_handler);
 
 	if (module_slot_count < MAX_MODULES) {
 		size_t slot = module_slot_count++;
 		snprintf(
-		        module_names[slot],
-		        sizeof(module_names[slot]),
-		        "%s",
+		        module_names[slot], sizeof(module_names[slot]), "%s",
 		        id);
 		module_hds[slot] = hd;
 		module_cleanups[slot] = cleanup;
@@ -765,11 +720,8 @@ static int index_delete_get_handler(int fd, char *body)
 
 	const char *username = get_request_user(fd);
 	if (item_require_access(
-	            fd,
-	            item_path,
-	            username,
-	            ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	            "Not found",
+	            fd, item_path, username,
+	            ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Not found",
 	            "Forbidden"))
 		return 1;
 
@@ -781,9 +733,7 @@ static int index_delete_get_handler(int fd, char *body)
 	bud_node *form = site_ui_delete_confirm(module, id, title, csrf_token);
 	char page_title[512];
 	snprintf(
-	        page_title,
-	        sizeof(page_title),
-	        "Delete %s",
+	        page_title, sizeof(page_title), "Delete %s",
 	        title[0] ? title : id);
 
 	char href_path[256];
@@ -815,11 +765,8 @@ static int index_delete_handler(int fd, char *body)
 
 	const char *username = get_request_user(fd);
 	if (item_require_access(
-	            fd,
-	            item_path,
-	            username,
-	            ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	            "Not found",
+	            fd, item_path, username,
+	            ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Not found",
 	            "Forbidden"))
 		return 1;
 
@@ -838,9 +785,7 @@ static int index_delete_handler(int fd, char *body)
 	for (size_t i = 0; i < module_slot_count; i++) {
 		char simple_name[257];
 		snprintf(
-		        simple_name,
-		        sizeof(simple_name),
-		        "%s",
+		        simple_name, sizeof(simple_name), "%s",
 		        module_names[i]);
 		char *dot = strchr(simple_name, '.');
 		if (dot)
@@ -885,11 +830,6 @@ static int index_delete_handler(int fd, char *body)
 /* ------------------------------------------------------------------ */
 /* Ownership helpers — item metadata management                        */
 /* ------------------------------------------------------------------ */
-
-static void build_owner_path(const char *ip, char *out, size_t len)
-{
-	snprintf(out, len, "%s/owner", ip);
-}
 
 XY_IMPL(int, item_record_ownership,
 	const char *, item_path,
@@ -944,12 +884,8 @@ XY_IMPL(int, check_item_access,
 	}
 
 	if (item_require_access(
-	            fd,
-	            item_path,
-	            *user,
-	            ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	            "Not found",
-	            "Forbidden"))
+	            fd, item_path, *user, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	            "Not found", "Forbidden"))
 		return -1;
 
 	return 0;

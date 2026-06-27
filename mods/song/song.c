@@ -6,9 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <stdlib.h>
-#include <dirent.h>
 
 #include <ttypt/axil.h>
 #include <ttypt/qmap.h>
@@ -21,11 +19,6 @@
 #include "fields.h"
 
 #define CHORDS_ITEMS_PATH "items/song/items"
-
-#define SONG_TYPES_BUF_SIZE 2048
-#define VIEWER_ZOOM_MIN 70
-#define VIEWER_ZOOM_MAX 170
-#define VIEWER_ZOOM_DEFAULT 100
 
 static transp_ctx_t *g_transp_ctx = NULL;
 static char g_doc_root[256] = ".";
@@ -116,27 +109,46 @@ static void song_load_saved_prefs(const char *user, int *f)
 	free(rl);
 }
 
-static int parse_params(const char *q, int *t, int *f, int *m)
+static void song_parse_prefs(
+        int fd, const char *username, char *qs, int *t, int *f, int *m,
+        int *zoom)
 {
-	*t = 0;
-	*m = 0;
-	if (!q || !*q)
-		return 0;
-	char c[1024];
-	snprintf(c, sizeof(c), "%s", q);
-	axil_query_parse(c);
-	char b[32];
-	if (axil_query_param("t", b, sizeof(b)) > 0)
-		*t = atoi(b);
-	if (axil_query_param("b", b, sizeof(b)) >= 0 && atoi(b) != 0)
+	int pf;
+	*zoom = 0;
+	parse_transpose_qs(qs, t, &pf, m);
+	if (pf & TPARAM_BEMOL)
 		*f |= TRANSP_BEMOL;
-	if (axil_query_param("l", b, sizeof(b)) >= 0 && atoi(b) != 0)
+	if (pf & TPARAM_LATIN)
 		*f |= TRANSP_LATIN;
-	if (axil_query_param("h", b, sizeof(b)) >= 0 && atoi(b) != 0)
+	if (pf & TPARAM_HTML)
 		*f |= TRANSP_HTML;
-	if (axil_query_param("m", b, sizeof(b)) >= 0 && atoi(b) != 0)
-		*m = 1;
-	return 0;
+
+	if (qs[0] && username && username[0]) {
+		char pv[2];
+		if (*f & TRANSP_BEMOL)
+			pv[0] = '1';
+		else
+			pv[0] = '0';
+		pv[1] = '\0';
+		song_viewer_pref_write(username, "chords-bemol", pv);
+		pv[0] = (*f & TRANSP_LATIN) ? '1' : '0';
+		song_viewer_pref_write(username, "chords-latin", pv);
+	}
+	if (qs[0]) {
+		char zb[16];
+		if (axil_query_param("z", zb, sizeof(zb)) > 0) {
+			*zoom = atoi(zb);
+			if (*zoom < VIEWER_ZOOM_MIN)
+				*zoom = VIEWER_ZOOM_MIN;
+			if (*zoom > VIEWER_ZOOM_MAX)
+				*zoom = VIEWER_ZOOM_MAX;
+			if (username && username[0])
+				song_set_viewer_zoom(username, *zoom);
+		}
+	}
+
+	if (!qs[0])
+		song_load_saved_prefs(username, f);
 }
 
 static int api_song_viewer_prefs_handler(int fd, char *body)
@@ -164,53 +176,42 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 
 static source_state_field_t song_state_specs[SONG_FIELD_COUNT + 1];
 
+struct song_custom_overlay {
+	char *trans;
+};
+
+static void song_custom_overlay_fn(struct json_object *jo, void *user_data)
+{
+	struct song_custom_overlay *data =
+	        (struct song_custom_overlay *)user_data;
+	json_object_object_add(
+	        jo, "data",
+	        json_object_new_string(data->trans ? data->trans : ""));
+}
+
 static int
+
 song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
 	(void)user;
-	int t = 0, f = 0, m = 0;
-	char q[1024] = { 0 };
-	axil_env_get(fd, q, "QUERY_STRING");
-	parse_params(q, &t, &f, &m);
-
-	int v_z = VIEWER_ZOOM_DEFAULT;
-	if (ctx->username && ctx->username[0])
-		v_z = song_get_viewer_zoom(ctx->username);
-
-	if (q[0]) {
-		if (ctx->username && ctx->username[0]) {
-			char pv[2] = { (f & TRANSP_BEMOL) ? '1' : '0', '\0' };
-			song_viewer_pref_write(
-			        ctx->username, "chords-bemol", pv);
-			pv[0] = (f & TRANSP_LATIN) ? '1' : '0';
-			song_viewer_pref_write(
-			        ctx->username, "chords-latin", pv);
-		}
-		char tmp[16] = { 0 };
-		axil_query_param("z", tmp, sizeof(tmp));
-		if (tmp[0]) {
-			int zv = atoi(tmp);
-			if (ctx->username && ctx->username[0])
-				song_set_viewer_zoom(ctx->username, zv);
-			v_z = zv;
-		}
-	} else {
-		song_load_saved_prefs(ctx->username, &f);
-	}
-
+	int t = 0, f = 0, m = 0, v_z = 0;
+	char qs[1024] = { 0 };
 	char *trans = NULL;
 	int k = 0;
+	axil_env_get(fd, qs, "QUERY_STRING");
+	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &v_z);
+
+	if (v_z == 0) {
+		if (ctx->username && ctx->username[0])
+			v_z = song_get_viewer_zoom(ctx->username);
+		else
+			v_z = VIEWER_ZOOM_DEFAULT;
+	}
+
 	song_transpose_root(ctx->doc_root, ctx->id, t, f, &trans, &k);
 
-	json_object *jo = NULL;
-	source_build_state_json("song.items", ctx->id, song_state_specs, &jo);
-	if (!jo) {
-		free(trans);
-		return respond_error(fd, 404, "Song not found");
-	}
-	json_object_object_add(
-	        jo, "data", json_object_new_string(trans ? trans : ""));
+	struct song_custom_overlay custom_data = { trans };
 
 	app_state_t tmp;
 	memset(&tmp, 0, sizeof(tmp));
@@ -218,23 +219,17 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        (ctx->username && ctx->username[0])
 	                ? item_check_ownership(ctx->item_path, ctx->username)
 	                : 0;
+	tmp.transpose = t;
 	tmp.zoom = v_z;
 	tmp.use_bemol = (f & TRANSP_BEMOL) != 0;
 	tmp.use_latin = (f & TRANSP_LATIN) != 0;
 	tmp.show_media = m;
 	tmp.original_key = k;
-	source_overlay_from_desc(
-	        jo, &tmp, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
-	const char *json_str = json_object_to_json_string(jo);
-	char *json = strdup(json_str ? json_str : "{}");
-	json_object_put(jo);
-	if (!json) {
-		free(trans);
-		return respond_error(fd, 500, "Failed to finish JSON");
-	}
-	int rc = respond_json(fd, 200, json);
-	free(json);
+	int rc = source_respond_page_state(
+	        fd, "song.items", ctx->id, song_state_specs, &tmp, song_fields,
+	        song_custom_overlay_fn, &custom_data);
+
 	free(trans);
 	return rc;
 }
@@ -242,19 +237,8 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 static int api_song_transpose_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd,
-	        body,
-	        CHORDS_ITEMS_PATH,
-	        0,
-	        NULL,
-	        NULL,
-	        song_details_auth,
+	        fd, body, CHORDS_ITEMS_PATH, 0, NULL, NULL, song_details_auth,
 	        NULL);
-}
-
-static void song_cleanup(const char *id)
-{
-	(void)id;
 }
 
 XY_IMPL(int, song_get_original_key_root,
@@ -302,61 +286,32 @@ XY_IMPL(int, source_after_update,
 	return 0;
 }
 
-#include "ux/all.c"
+#include "ux/detail.c"
+#include "ux/form.c"
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
 
-static int song_detail_handler(int fd, char *body)
+static int
+song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
-	char id[128] = { 0 };
-	const char *user = get_request_user(fd);
+	(void)user_data;
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
-	if (!id[0])
-		return bad_request(fd, "Missing ID");
+	int is_owner = item_check_ownership(ctx->item_path, ctx->username);
 
-	char item_path_buf[512];
-	if (item_path_build(
-	            fd, "song", id, item_path_buf, sizeof(item_path_buf)) != 0)
-		return server_error(fd, "Failed to resolve path");
-
-	int is_owner = item_check_ownership(item_path_buf, user);
-
-	int t = 0, f = 0, m = 0;
-	char q[1024] = { 0 };
-	axil_env_get(fd, q, "QUERY_STRING");
-	parse_params(q, &t, &f, &m);
-
-	int url_z = 0;
-	if (q[0] && user && user[0]) {
-		char b[16];
-		if (axil_query_param("l", b, sizeof(b)) >= 0)
-			song_viewer_pref_write(user, "chords-latin", b);
-		if (axil_query_param("b", b, sizeof(b)) >= 0)
-			song_viewer_pref_write(user, "chords-bemol", b);
-		if (axil_query_param("z", b, sizeof(b)) > 0) {
-			url_z = atoi(b);
-			song_set_viewer_zoom(user, url_z);
-		}
-	}
-	if (q[0] && (!user || !user[0])) {
-		char zb[16];
-		if (axil_query_param("z", zb, sizeof(zb)) > 0)
-			url_z = atoi(zb);
-	}
-
-	if (!q[0])
-		song_load_saved_prefs(user, &f);
+	int t = 0, f = 0, m = 0, zoom = 0;
+	char qs[1024] = { 0 };
+	char *trans = NULL;
+	int k = 0;
+	json_object *jo = NULL;
+	axil_env_get(fd, qs, "QUERY_STRING");
+	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &zoom);
 
 	f |= TRANSP_HTML;
 
-	char *trans = NULL;
-	int k = 0;
-	song_transpose_root(g_doc_root, id, t, f, &trans, &k);
+	song_transpose_root(g_doc_root, ctx->id, t, f, &trans, &k);
 
-	json_object *jo = NULL;
-	source_build_state_json("song.items", id, song_state_specs, &jo);
+	source_build_state_json("song.items", ctx->id, song_state_specs, &jo);
 	if (!jo)
 		return respond_error(fd, 404, "Song not found");
 
@@ -369,51 +324,42 @@ static int song_detail_handler(int fd, char *body)
 		return respond_error(fd, 404, "Song not found");
 	}
 
-	/* Populate computed values into app_state for overlay + bud template */
 	memset(&app_state, 0, sizeof(app_state));
-	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", id);
+	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
 	app_state.transpose = t;
 	app_state.use_bemol = (f & TRANSP_BEMOL) != 0;
 	app_state.use_latin = (f & TRANSP_LATIN) != 0;
 	app_state.show_media = m;
 	app_state.original_key = k;
 	app_state.is_owner = is_owner;
-	if (url_z)
-		app_state.zoom = url_z;
+	if (zoom)
+		app_state.zoom = zoom;
 	else
-		app_state.zoom = song_get_viewer_zoom(user);
+		app_state.zoom = song_get_viewer_zoom(ctx->username);
 	snprintf(
-	        app_state.chord_html,
-	        sizeof(app_state.chord_html),
-	        "%s",
+	        app_state.chord_html, sizeof(app_state.chord_html), "%s",
 	        trans ? trans : "");
-	if (user && user[0]) {
+	if (ctx->username && ctx->username[0]) {
 		snprintf(
-		        app_state.page_user,
-		        sizeof(app_state.page_user),
-		        "%s",
-		        user);
+		        app_state.page_user, sizeof(app_state.page_user), "%s",
+		        ctx->username);
 		snprintf(
-		        app_state.save_url,
-		        sizeof(app_state.save_url),
+		        app_state.save_url, sizeof(app_state.save_url),
 		        "/api/song/prefs");
 	}
-	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", id);
+	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
 
 	source_overlay_from_desc(
 	        jo, &app_state, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
-	/* Populate record fields from JSON into app_state (for bud template) */
 	bud_state_apply(
 	        &app_state, song_fields, json_object_to_json_string(jo));
 
 	bud_node *layout = bud_app_render();
-	char *html;
 	{
 		char state_buf[16384];
 		snprintf(
-		        state_buf,
-		        sizeof(state_buf),
+		        state_buf, sizeof(state_buf),
 		        "<script type=\"application/json\" "
 		        "id=\"bud-state\">%s</script>",
 		        json_object_to_json_string(jo));
@@ -421,43 +367,50 @@ static int song_detail_handler(int fd, char *body)
 
 		free(trans);
 		return site_ui_respond_page(
-		        fd, app_state.cache.title, state_buf, "song", layout);
+		        fd, app_state.cache.title, state_buf, "song_detail",
+		        layout);
 	}
 }
 
-static int song_edit_get_handler(int fd, char *body)
+static int song_detail_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd, body, CHORDS_ITEMS_PATH, 0, "Song not found", NULL,
+	        song_detail_auth, NULL);
+}
+
+static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-	char id[128] = { 0 };
-	const char *user;
-	char item_path_buf[512];
+	(void)user;
 	song_cache_t meta;
 
-	if (check_item_access(
-	            fd,
-	            "song",
-	            id,
-	            sizeof(id),
-	            &user,
-	            item_path_buf,
-	            sizeof(item_path_buf)))
-		return 1;
-	song_meta_read(item_path_buf, &meta);
+	song_meta_read(ctx->item_path, &meta);
 	source_resolve_meta_display(
-	        "song.items", id, song_fields, SONG_FIELD_COUNT, &meta);
+	        "song.items", ctx->id, song_fields, SONG_FIELD_COUNT, &meta);
 
 	char data_path[PATH_MAX];
 	item_child_path(
-	        item_path_buf, "data.txt", data_path, sizeof(data_path));
+	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
 	char *data_val = slurp_file(data_path);
 
 	const char *csrf_token = csrf_setup(fd);
 
-	bud_node *form = song_form_content(1, id, &meta, data_val, csrf_token);
+	bud_node *form =
+	        song_form_content(1, ctx->id, &meta, data_val, csrf_token);
 	free(data_val);
 
 	return site_ui_respond_edit_page(
-	        fd, user, "song", "\xf0\x9f\x8e\xb8", meta.title, id, form);
+	        fd, ctx->username, "song", "\xf0\x9f\x8e\xb8", meta.title,
+	        ctx->id, form);
+}
+
+static int song_edit_get_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd, body, CHORDS_ITEMS_PATH,
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Song not found", NULL,
+	        song_edit_auth, NULL);
 }
 
 static int song_add_get_handler(int fd, char *body)
@@ -489,30 +442,24 @@ void xy_install(void)
 	        song_fields, song_state_specs, SONG_FIELD_COUNT);
 
 	source_setup(
-	        "song.types",
-	        "name",
-	        sizeof(song_type_cache_t),
-	        "items/song/types",
-	        song_type_fields,
-	        SONG_TYPE_FIELD_COUNT,
+	        "song.types", "name", sizeof(song_type_cache_t),
+	        "items/song/types", song_type_fields, SONG_TYPE_FIELD_COUNT,
 	        SOURCE_FLAG_VOLATILE);
 
 	ref_field_register("song.items", "type");
 
 	source_setup(
-	        "song.items",
-	        NULL,
-	        sizeof(song_cache_t),
-	        "items/song/items",
-	        song_fields,
-	        SONG_FIELD_COUNT,
-	        0);
+	        "song.items", NULL, sizeof(song_cache_t), "items/song/items",
+	        song_fields, SONG_FIELD_COUNT, 0);
 
-	index_open("Song", "song.items", song_cleanup, NULL, NULL, NULL, NULL);
+	index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL);
 
-	axil_register_handler("GET:/song/add", song_add_get_handler);
-	axil_register_handler("GET:/song/:id/edit", song_edit_get_handler);
-	axil_register_handler("GET:/song/:id", song_detail_handler);
+	standard_item_handlers_t handlers = {
+		.detail = song_detail_handler,
+		.add_get = song_add_get_handler,
+		.edit_get = song_edit_get_handler,
+	};
+	register_standard_item_handlers("song", &handlers);
 	axil_register_handler(
 	        "GET:/api/song/:id/transpose", api_song_transpose_handler);
 	axil_register_handler(

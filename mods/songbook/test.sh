@@ -61,10 +61,14 @@ echo -n "3. Create choir... "
 api_post_dataset "id=sb_choir&title=Test+Choir&format=sbt_ent%0Asbt_san" "$BASE/api/dataset/choir.items" > /dev/null 2>&1
 pass "choir created"
 
-# ── 4. Create repertoire entries for the choir ──
+# ── 4. Create repertoire entries for the choir via choir API ──
 echo -n "4. Create repertoire entries... "
-api_post_dataset "id=sb_rep1&song=sb_sg1&transpose=0&format=sbt_ent&choir=sb_choir" "$BASE/api/dataset/choir.repertoire" > /dev/null 2>&1
-api_post_dataset "id=sb_rep2&song=sb_sg2&transpose=2&format=sbt_san&choir=sb_choir" "$BASE/api/dataset/choir.repertoire" > /dev/null 2>&1
+csrf=$(api "$BASE/api/csrf")
+api -X POST "$BASE/api/choir/sb_choir/songs" \
+	-d "song_id=sb_sg1&format=sbt_ent&transpose=0&csrf_token=$csrf" > /dev/null 2>&1
+csrf=$(api "$BASE/api/csrf")
+api -X POST "$BASE/api/choir/sb_choir/songs" \
+	-d "song_id=sb_sg2&format=sbt_san&transpose=2&csrf_token=$csrf" > /dev/null 2>&1
 pass "repertoire created"
 
 # ── 5. Create songbook linked to choir ──
@@ -123,14 +127,15 @@ LINES=$(wc -l < "$DATAFILE" 2>/dev/null || echo 0)
 
 # ── 11. Verify migration ran — sb_sg3 in choir repertoire ──
 echo -n "11. song3 appears in choir repertoire after migration... "
-REPO_JSON=$(api "$BASE/api/dataset/choir.repertoire")
-echo "$REPO_JSON" | grep -q "sb_sg3" && pass "found" || fail "not in repertoire"
+CHOIR_DATAFILE="$REPO_ROOT/items/choir/items/sb_choir/data.txt"
+grep -q "sb_sg3" "$CHOIR_DATAFILE" && pass "found" || fail "not in repertoire"
 
 # Verify song count >= 3 unique songs in repertoire
 echo -n "    Repertoire has >=3 unique songs... "
-SONG_COUNT=$(printf '%s\n' "$REPO_JSON" | grep -o '"song": "[^"]*"' | sort -u | wc -l | tr -d ' ')
+SONG_COUNT=$(cut -d: -f1 "$CHOIR_DATAFILE" | sort -u | wc -l | tr -d ' ')
 [ "$SONG_COUNT" -ge 3 ] && pass "($SONG_COUNT songs)" || {
-	echo "DEBUG: JSON preview (first 300 chars): ${REPO_JSON:0:300}"
+	echo "DEBUG: data.txt content:"
+	cat "$CHOIR_DATAFILE"
 	fail "got $SONG_COUNT, expected >=3"
 }
 

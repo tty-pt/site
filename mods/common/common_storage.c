@@ -79,9 +79,7 @@ XY_IMPL(int, meta_fields_write,
 		if (!fields[i].name || !fields[i].buf)
 			continue;
 		if (write_meta_file(
-		            item_path,
-		            fields[i].name,
-		            fields[i].buf,
+		            item_path, fields[i].name, fields[i].buf,
 		            strlen(fields[i].buf)) != 0)
 			return -1;
 	}
@@ -222,10 +220,7 @@ static int remove_path_recursive(const char *path)
 		    strcmp(entry->d_name, "..") == 0)
 			continue;
 		if (snprintf(
-		            child,
-		            sizeof(child),
-		            "%s/%s",
-		            path,
+		            child, sizeof(child), "%s/%s", path,
 		            entry->d_name) >= (int)sizeof(child))
 		{
 			rc = -1;
@@ -331,5 +326,14 @@ XY_IMPL(int, datalist_extract_id,
 		n = outlen - 1;
 	memmove(id_out, lb + 1, n);
 	id_out[n] = '\0';
+	return 0;
+}
+
+XY_IMPL(int, build_owner_path,
+	const char *, ip,
+	char *, out,
+	size_t, len)
+{
+	snprintf(out, len, "%s/owner", ip);
 	return 0;
 }

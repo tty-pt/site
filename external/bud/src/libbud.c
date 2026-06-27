@@ -438,9 +438,7 @@ static int bud_listeners_to_attr(const bud_node *node, bud_buf *buf)
 			return -1;
 		}
 		len = snprintf(
-		        mode_buf,
-		        sizeof(mode_buf),
-		        "%d",
+		        mode_buf, sizeof(mode_buf), "%d",
 		        listener->bubbles ? 1 : 0);
 		if (len < 0) {
 			return -1;
@@ -491,10 +489,7 @@ static int bud_render_html_node(const bud_node *node, bud_buf *buf)
 	if (node->src_file && node->src_file[0]) {
 		char src_buf[384];
 		int src_len = snprintf(
-		        src_buf,
-		        sizeof(src_buf),
-		        "%s:%d",
-		        node->src_file,
+		        src_buf, sizeof(src_buf), "%s:%d", node->src_file,
 		        node->src_line);
 		if (src_len > 0 && src_len < (int)sizeof(src_buf)) {
 			if (bud_append_attr(buf, "data-bud-src", src_buf) != 0)
@@ -631,10 +626,7 @@ static int bud_render_hydrated_html_node(const bud_node *node, bud_buf *buf)
 	if (node->src_file && node->src_file[0]) {
 		char src_buf[384];
 		int src_len = snprintf(
-		        src_buf,
-		        sizeof(src_buf),
-		        "%s:%d",
-		        node->src_file,
+		        src_buf, sizeof(src_buf), "%s:%d", node->src_file,
 		        node->src_line);
 		if (src_len > 0 && src_len < (int)sizeof(src_buf)) {
 			if (bud_append_attr(buf, "data-bud-src", src_buf) != 0)
@@ -735,11 +727,8 @@ bud_render_ops_node(const bud_node *node, bud_emit_fn emit, void *user)
 			return -1;
 		}
 		for (attr = node->attrs; attr; attr = attr->next) {
-			if (emit(user,
-			         "attr",
-			         attr->name,
-			         attr->value ? attr->value : "",
-			         id_buf) != 0)
+			if (emit(user, "attr", attr->name,
+			         attr->value ? attr->value : "", id_buf) != 0)
 			{
 				return -1;
 			}
@@ -748,14 +737,9 @@ bud_render_ops_node(const bud_node *node, bud_emit_fn emit, void *user)
 		     listener = listener->next)
 		{
 			snprintf(
-			        mode_buf,
-			        sizeof(mode_buf),
-			        "%d",
+			        mode_buf, sizeof(mode_buf), "%d",
 			        listener->bubbles ? 1 : 0);
-			if (emit(user,
-			         "listener",
-			         listener->event,
-			         mode_buf,
+			if (emit(user, "listener", listener->event, mode_buf,
 			         id_buf) != 0)
 			{
 				return -1;
@@ -981,6 +965,18 @@ int bud_set_attr(bud_node *node, const char *name, const char *value)
 
 	tail->next = attr;
 	return 0;
+}
+
+bud_arg bud_attr_fmt(const char *name, const char *fmt, ...)
+{
+	static char buf[4][256];
+	static int idx = 0;
+	va_list ap;
+	idx = (idx + 1) % 4;
+	va_start(ap, fmt);
+	vsnprintf(buf[idx], sizeof(buf[idx]), fmt, ap);
+	va_end(ap);
+	return (bud_arg){ .type = BUD_ARG_ATTR, .data.attr = { name, buf[idx] } };
 }
 
 int bud_set_bool_attr(bud_node *node, const char *name)
@@ -1221,9 +1217,7 @@ int bud_on(bud_node *node, const char *event, int bubbles)
 }
 
 int bud_bind(
-        bud_node *node,
-        const char *event,
-        int bubbles,
+        bud_node *node, const char *event, int bubbles,
         bud_event_handler_fn handler)
 {
 	bud_listener *listener;
@@ -1271,11 +1265,8 @@ int bud_bind(
 }
 
 int bud_set_lifecycle(
-        bud_node *node,
-        bud_lifecycle_fn on_mount,
-        bud_lifecycle_fn on_update,
-        bud_lifecycle_fn on_unmount,
-        void *user)
+        bud_node *node, bud_lifecycle_fn on_mount, bud_lifecycle_fn on_update,
+        bud_lifecycle_fn on_unmount, void *user)
 {
 	if (!node) {
 		return -1;
@@ -1615,10 +1606,7 @@ bud_render_patch_ops_node(const bud_node *node, bud_emit_fn emit, void *user)
 			return -1;
 		}
 		for (attr = node->attrs; attr; attr = attr->next) {
-			if (emit(user,
-			         "patch-attr",
-			         id_buf,
-			         attr->name,
+			if (emit(user, "patch-attr", id_buf, attr->name,
 			         attr->value ? attr->value : "") != 0)
 			{
 				return -1;
@@ -1628,15 +1616,10 @@ bud_render_patch_ops_node(const bud_node *node, bud_emit_fn emit, void *user)
 		     listener = listener->next)
 		{
 			snprintf(
-			        bubbles_buf,
-			        sizeof(bubbles_buf),
-			        "%d",
+			        bubbles_buf, sizeof(bubbles_buf), "%d",
 			        listener->bubbles ? 1 : 0);
-			if (emit(user,
-			         "patch-listener",
-			         id_buf,
-			         listener->event,
-			         bubbles_buf) != 0)
+			if (emit(user, "patch-listener", id_buf,
+			         listener->event, bubbles_buf) != 0)
 			{
 				return -1;
 			}
@@ -1728,10 +1711,7 @@ static int bud_render_walk_ops_node(
 		return -1;
 	}
 
-	if (emit(user,
-	         "walk-enter",
-	         depth_buf,
-	         bud_kind_name(node->kind),
+	if (emit(user, "walk-enter", depth_buf, bud_kind_name(node->kind),
 	         id_buf) != 0)
 	{
 		return -1;
@@ -1751,10 +1731,7 @@ static int bud_render_walk_ops_node(
 		break;
 	case BUD_NODE_ELEMENT:
 		for (attr = node->attrs; attr; attr = attr->next) {
-			if (emit(user,
-			         "walk-attr",
-			         id_buf,
-			         attr->name,
+			if (emit(user, "walk-attr", id_buf, attr->name,
 			         attr->value) != 0)
 			{
 				return -1;
@@ -1764,14 +1741,9 @@ static int bud_render_walk_ops_node(
 		     listener = listener->next)
 		{
 			snprintf(
-			        bubbles_buf,
-			        sizeof(bubbles_buf),
-			        "%d",
+			        bubbles_buf, sizeof(bubbles_buf), "%d",
 			        listener->bubbles ? 1 : 0);
-			if (emit(user,
-			         "walk-listener",
-			         id_buf,
-			         listener->event,
+			if (emit(user, "walk-listener", id_buf, listener->event,
 			         bubbles_buf) != 0)
 			{
 				return -1;
@@ -1803,10 +1775,7 @@ static int bud_render_walk_ops_node(
 		return -1;
 	}
 
-	return emit(user,
-	            "walk-leave",
-	            depth_buf,
-	            bud_kind_name(node->kind),
+	return emit(user, "walk-leave", depth_buf, bud_kind_name(node->kind),
 	            id_buf) != 0
 	               ? -1
 	               : 0;
@@ -1854,11 +1823,7 @@ bud_walk_node(const bud_node *node, const bud_walk_ops *ops, size_t depth)
 	for (attr = node->attrs; attr; attr = attr->next) {
 		if (ops->attr) {
 			if (ops->attr(
-			            ops->user,
-			            node,
-			            depth,
-			            index,
-			            attr->name,
+			            ops->user, node, depth, index, attr->name,
 			            attr->value) != 0)
 			{
 				return -1;
@@ -1871,12 +1836,8 @@ bud_walk_node(const bud_node *node, const bud_walk_ops *ops, size_t depth)
 	for (listener = node->listeners; listener; listener = listener->next) {
 		if (ops->listener) {
 			if (ops->listener(
-			            ops->user,
-			            node,
-			            depth,
-			            index,
-			            listener->event,
-			            listener->bubbles) != 0)
+			            ops->user, node, depth, index,
+			            listener->event, listener->bubbles) != 0)
 			{
 				return -1;
 			}
@@ -2088,9 +2049,7 @@ static int bud_dispatch_event_node(bud_node *node, bud_event *event)
 }
 
 int bud_runtime_dispatch(
-        bud_runtime *runtime,
-        bud_node *target,
-        const char *event,
+        bud_runtime *runtime, bud_node *target, const char *event,
         void *event_user)
 {
 	bud_event ev;
@@ -2153,20 +2112,14 @@ const char *bud_node_get_src(const bud_node *node)
 #ifdef BUD_DEBUG
 	if (node->src_file) {
 		snprintf(
-		        bud_src_buf,
-		        sizeof(bud_src_buf),
-		        "%s:%d",
-		        node->src_file,
-		        node->src_line);
+		        bud_src_buf, sizeof(bud_src_buf), "%s:%d",
+		        node->src_file, node->src_line);
 		return bud_src_buf;
 	}
 #endif
 	snprintf(
-	        bud_src_buf,
-	        sizeof(bud_src_buf),
-	        "node=%d kind=%u tag=%s",
-	        bud_node_id(node),
-	        (unsigned)bud_node_kind_of(node),
+	        bud_src_buf, sizeof(bud_src_buf), "node=%d kind=%u tag=%s",
+	        bud_node_id(node), (unsigned)bud_node_kind_of(node),
 	        bud_node_tag(node) ? bud_node_tag(node) : "(null)");
 	return bud_src_buf;
 }
@@ -2222,9 +2175,7 @@ static int bud_sprint_tree_node(
 	/* tag (for elements) */
 	if (bud_node_kind_of(node) == BUD_NODE_ELEMENT && bud_node_tag(node)) {
 		n = snprintf(
-		        buf + *pos,
-		        bufsz - *pos,
-		        " tag=%s",
+		        buf + *pos, bufsz - *pos, " tag=%s",
 		        bud_node_tag(node));
 		if (n < 0 || (size_t)n >= bufsz - *pos)
 			return -1;
@@ -2236,11 +2187,8 @@ static int bud_sprint_tree_node(
 			    strcmp(attr->name, "class") == 0)
 			{
 				n = snprintf(
-				        buf + *pos,
-				        bufsz - *pos,
-				        " %s=\"%s\"",
-				        attr->name,
-				        attr->value);
+				        buf + *pos, bufsz - *pos, " %s=\"%s\"",
+				        attr->name, attr->value);
 				if (n < 0 || (size_t)n >= bufsz - *pos)
 					return -1;
 				*pos += n;
@@ -2253,11 +2201,8 @@ static int bud_sprint_tree_node(
 		const char *t = bud_node_text(node);
 		size_t tlen = strlen(t);
 		n = snprintf(
-		        buf + *pos,
-		        bufsz - *pos,
-		        " \"%.*s%s\"",
-		        (int)(tlen < 40 ? tlen : 40),
-		        t,
+		        buf + *pos, bufsz - *pos, " \"%.*s%s\"",
+		        (int)(tlen < 40 ? tlen : 40), t,
 		        tlen > 40 ? "..." : "");
 		if (n < 0 || (size_t)n >= bufsz - *pos)
 			return -1;
@@ -2268,10 +2213,7 @@ static int bud_sprint_tree_node(
 #ifdef BUD_DEBUG
 	if (node->src_file) {
 		n = snprintf(
-		        buf + *pos,
-		        bufsz - *pos,
-		        " [%s:%d]",
-		        node->src_file,
+		        buf + *pos, bufsz - *pos, " [%s:%d]", node->src_file,
 		        node->src_line);
 		if (n < 0 || (size_t)n >= bufsz - *pos)
 			return -1;
@@ -2288,10 +2230,7 @@ static int bud_sprint_tree_node(
 	/* children */
 	for (i = 0; i < bud_node_child_count(node); i++) {
 		if (bud_sprint_tree_node(
-		            bud_node_child(node, i),
-		            buf,
-		            bufsz,
-		            pos,
+		            bud_node_child(node, i), buf, bufsz, pos,
 		            depth + 1) != 0)
 			return -1;
 	}
@@ -2337,19 +2276,16 @@ bud_node *bud_el_impl(const char *tag, size_t count, const bud_arg *args)
 			break;
 		case BUD_ARG_ATTR:
 			bud_set_attr(
-			        node,
-			        args[i].data.attr.name,
+			        node, args[i].data.attr.name,
 			        args[i].data.attr.value);
 			break;
 		case BUD_ARG_EVENT:
-			bud_on(node,
-			       args[i].data.ev.event,
+			bud_on(node, args[i].data.ev.event,
 			       args[i].data.ev.bubbles);
 			break;
 		case BUD_ARG_BIND:
 			bud_bind(
-			        node,
-			        args[i].data.bind.event,
+			        node, args[i].data.bind.event,
 			        args[i].data.bind.bubbles,
 			        args[i].data.bind.handler);
 			break;
@@ -2522,6 +2458,91 @@ void bud_json_data(const char *json, char *out, size_t out_size)
 	}
 }
 
+int bud_json_array_for_each(
+        const char *json, void (*fn)(const char *elem, size_t len, void *user),
+        void *user)
+{
+	const char *p;
+	int count;
+
+	if (!json)
+		return -1;
+	p = json;
+	while (*p == ' ' || *p == '\t' || *p == '\n')
+		p++;
+	if (*p != '[')
+		return -1;
+	p++;
+
+	count = 0;
+	while (*p && *p != ']') {
+		const char *start;
+		int depth;
+
+		while (*p == ' ' || *p == '\t' || *p == '\n')
+			p++;
+		if (*p == ']')
+			break;
+		if (*p == ',') {
+			p++;
+			continue;
+		}
+
+		start = p;
+
+		if (*p == '{' || *p == '[') {
+			depth = 1;
+			p++;
+			while (*p && depth > 0) {
+				if (*p == '\\' && *(p + 1))
+					p++;
+				else if (*p == '"') {
+					p++;
+					while (*p && *p != '"') {
+						if (*p == '\\' && *(p + 1))
+							p++;
+						p++;
+					}
+				} else if (*p == '{' || *p == '[')
+					depth++;
+				else if (*p == '}' || *p == ']')
+					depth--;
+				if (*p && depth > 0)
+					p++;
+			}
+			if (fn)
+				fn(start, (size_t)(p - start + 1), user);
+			if (*p)
+				p++;
+		} else if (*p == '"') {
+			p++;
+			while (*p && *p != '"') {
+				if (*p == '\\' && *(p + 1))
+					p++;
+				p++;
+			}
+			if (fn)
+				fn(start, (size_t)(p - start + 1), user);
+			if (*p)
+				p++;
+		} else {
+			while (*p && *p != ',' && *p != ']' && *p != ' ' &&
+			       *p != '\t' && *p != '\n')
+				p++;
+			if (fn)
+				fn(start, (size_t)(p - start), user);
+		}
+
+		count++;
+		while (*p == ' ' || *p == '\t' || *p == '\n')
+			p++;
+		if (*p == ',')
+			p++;
+	}
+
+	return count;
+}
+
 /* ── Table-driven state ── */
 
 void bud_state_apply(
@@ -2543,4 +2564,225 @@ void bud_state_apply(
 			bud_json_str(json, f->key, dest, f->size);
 		}
 	}
+}
+
+struct apply_array_ctx {
+	char *array_out;
+	size_t elem_size;
+	int count;
+	int max_elems;
+	const bud_field_desc_t *schema;
+};
+
+static void apply_array_cb(const char *elem, size_t len, void *user)
+{
+	struct apply_array_ctx *ctx = (struct apply_array_ctx *)user;
+	if (ctx->count >= ctx->max_elems)
+		return;
+
+	char tmp[4096];
+	size_t n = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+	memcpy(tmp, elem, n);
+	tmp[n] = '\0';
+
+	char *dest = ctx->array_out + (ctx->count * ctx->elem_size);
+	memset(dest, 0, ctx->elem_size);
+	bud_state_apply(dest, ctx->schema, tmp);
+	ctx->count++;
+}
+
+void bud_state_apply_array(
+        const char *json, const char *key, void *array_out, size_t elem_size,
+        int *count_out, int max_elems, const bud_field_desc_t *schema)
+{
+	struct apply_array_ctx ctx;
+	ctx.array_out = (char *)array_out;
+	ctx.elem_size = elem_size;
+	ctx.count = 0;
+	ctx.max_elems = max_elems;
+	ctx.schema = schema;
+
+	char search_key[256];
+	snprintf(search_key, sizeof(search_key), "\"%s\":", key);
+
+	const char *p = strstr(json, search_key);
+	if (p) {
+		p += strlen(search_key);
+		bud_json_array_for_each(p, apply_array_cb, &ctx);
+	}
+
+	if (count_out)
+		*count_out = ctx.count;
+}
+
+/* ── Form-aware API action handler ──────────────────────────────────── */
+
+/* Get the current value of a single form control from the Bud DOM tree.
+   Returns a pointer to the attribute value (do not free). */
+static const char *bud_control_value(bud_node *node)
+{
+	const char *tag;
+	bud_node *child;
+
+	if (!node || node->kind != BUD_NODE_ELEMENT)
+		return NULL;
+	tag = node->tag;
+	if (!tag)
+		return NULL;
+
+	if (strcmp(tag, "select") == 0) {
+		for (child = node->first_child; child;
+		     child = child->next_sibling)
+		{
+			if (child->kind == BUD_NODE_ELEMENT && child->tag &&
+			    strcmp(child->tag, "option") == 0 &&
+			    bud_attr_find(child, "selected"))
+			{
+				const char *v = bud_get_attr(child, "value");
+				return v ? v : "";
+			}
+		}
+		return NULL;
+	}
+
+	if (strcmp(tag, "input") == 0) {
+		const char *type = bud_get_attr(node, "type");
+		if (type && strcmp(type, "checkbox") == 0)
+			return bud_attr_find(node, "checked") ? "1" : "0";
+		return bud_get_attr(node, "value");
+	}
+
+	return NULL;
+}
+
+/* Recursively walk node children and collect name=value pairs from every
+   named form control into the query buffer.  For the event-target control,
+   use event->user (the live JS value) rather than the stale Bud DOM value,
+   unless a pre-handler has updated the Bud DOM attribute. */
+static void bud_collect_form_query(
+        bud_node *node, bud_node *target, const char *target_val, char *buf,
+        size_t buf_sz, int *pos)
+{
+	const char *tag;
+	const char *type;
+	const char *name;
+	const char *value;
+	bud_node *child;
+	int n;
+
+	if (!node || node->kind != BUD_NODE_ELEMENT)
+		return;
+	tag = node->tag;
+	if (!tag)
+		goto recurse;
+
+	if (strcmp(tag, "select") == 0 || strcmp(tag, "input") == 0) {
+		type = strcmp(tag, "input") == 0 ? bud_get_attr(node, "type")
+		                                 : NULL;
+		if (type && (strcmp(type, "hidden") == 0 ||
+		             strcmp(type, "submit") == 0))
+			goto recurse;
+
+		name = bud_get_attr(node, "name");
+		if (!name)
+			goto recurse;
+
+		if (node == target) {
+			/* Prefer the live event value (event->user) — the Bud
+			 * DOM reflects render-time state and is stale for the
+			 * target control (the browser, not Bud, updates the
+			 * real DOM on user interaction).  Fall back to Bud DOM
+			 * only when the live value is absent. */
+			value = target_val;
+			if (!value || !value[0])
+				value = bud_control_value(node);
+		} else {
+			value = bud_control_value(node);
+		}
+
+		if (value && value[0]) {
+			n = snprintf(
+			        buf + *pos, buf_sz - *pos, "%s%s=%s",
+			        *pos > 0 ? "&" : "", name, value);
+			if (n > 0 && (size_t)n < buf_sz - *pos)
+				*pos += n;
+		}
+		return;
+	}
+
+recurse:
+	for (child = node->first_child; child; child = child->next_sibling)
+		bud_collect_form_query(
+		        child, target, target_val, buf, buf_sz, pos);
+}
+
+int bud_api_action_handler(bud_event *event)
+{
+	bud_node *curr = event->target;
+	const char *action = NULL;
+
+	while (curr) {
+		action = bud_get_attr(curr, "data-action");
+		if (action)
+			break;
+		curr = curr->parent;
+	}
+
+	if (!action || !bud_host_fetch_fn)
+		return 0;
+
+	/* Find enclosing <form> element */
+	curr = event->target;
+	while (curr && curr->kind == BUD_NODE_ELEMENT) {
+		if (curr->tag && strcmp(curr->tag, "form") == 0)
+			break;
+		curr = curr->parent;
+	}
+
+	char url[2048];
+
+	if (curr && curr->kind == BUD_NODE_ELEMENT && curr->tag &&
+	    strcmp(curr->tag, "form") == 0)
+	{
+		char query[1024];
+		int pos = 0;
+
+		bud_collect_form_query(
+		        curr, event->target, (const char *)event->user, query,
+		        sizeof(query), &pos);
+
+		if (pos > 0) {
+			snprintf(
+			        url, sizeof(url), "%s%c%s", action,
+			        strchr(action, '?') ? '&' : '?', query);
+			bud_host_fetch_fn(url, strlen(url), 1);
+
+			/* Sync browser location via form's action path */
+			if (bud_host_set_location_fn) {
+				const char *path = bud_get_attr(curr, "action");
+				if (path) {
+					snprintf(
+					        url, sizeof(url), "%s?%s", path,
+					        query);
+					bud_host_set_location_fn(
+					        url, strlen(url));
+				}
+			}
+		} else {
+			bud_host_fetch_fn(action, strlen(action), 1);
+		}
+	} else {
+		/* No parent form — original single-value behaviour */
+		const char *value = (const char *)event->user;
+		if (value && value[0]) {
+			snprintf(
+			        url, sizeof(url), "%s%c%s", action,
+			        strchr(action, '?') ? '&' : '?', value);
+		} else {
+			snprintf(url, sizeof(url), "%s", action);
+		}
+		bud_host_fetch_fn(url, strlen(url), 1);
+	}
+
+	return 0;
 }

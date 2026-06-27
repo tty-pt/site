@@ -52,8 +52,7 @@ typedef struct {
 static const bud_field_desc_t song_type_fields[] = {
 	REC_FIELD(id, song_type_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(name, song_type_cache_t, name, 256, 1, 0, 0, 1),
-	INVERSE_FIELD(songs, "song.items", "type"),
-	FIELD_END
+	INVERSE_FIELD(songs, "song.items", "type"), FIELD_END
 };
 
 #define SONG_TYPE_FIELD_COUNT                                                  \
@@ -72,16 +71,16 @@ static const bud_field_desc_t song_fields[] = {
 	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
 	EXCL_FIELD_V(data, BUD_QM_VSTR, 1, 0),
 	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
-	OVERLAY_INT(t, app_state_t, transpose),
-	OVERLAY_INT(b, app_state_t, use_bemol),
-	OVERLAY_INT(l, app_state_t, use_latin),
-	OVERLAY_INT(m, app_state_t, show_media),
+	OVERLAY_INT(transpose, app_state_t, transpose),
+	OVERLAY_INT(use_bemol, app_state_t, use_bemol),
+	OVERLAY_INT(use_latin, app_state_t, use_latin),
+	OVERLAY_INT(show_media, app_state_t, show_media),
 	OVERLAY_INT(zoom, app_state_t, zoom),
-	OVERLAY_INT(key, app_state_t, original_key),
-	OVERLAY_INT(owner, app_state_t, is_owner),
-	OVERLAY_STR(user, app_state_t, page_user, 64),
+	OVERLAY_INT(original_key, app_state_t, original_key),
+	OVERLAY_INT(is_owner, app_state_t, is_owner),
+	OVERLAY_STR(page_user, app_state_t, page_user, 64),
 	OVERLAY_STR(path, app_state_t, path, 256),
-	OVERLAY_STR(save, app_state_t, save_url, 512),
+	OVERLAY_STR(save_url, app_state_t, save_url, 512),
 	FIELD_END
 };
 

@@ -38,6 +38,9 @@ typedef int (*item_handler_cb)(
 #define ICTX_NEED_LOGIN 0x1     /* require logged-in user; else 401 */
 #define ICTX_NEED_OWNERSHIP 0x2 /* require item ownership; else 403/404 */
 #define ICTX_SONG_ID 0x4        /* also read PATTERN_PARAM_SONG_ID */
+#define ICTX_CSRF_MPFD 0x8 /* validate CSRF token from multipart form data */
+#define ICTX_CSRF_QUERY                                                        \
+	0x10 /* validate CSRF token from query string / url-encoded body */
 
 #include <ttypt/auth.h>
 

@@ -24,5 +24,6 @@ int server_error(int fd, const char *msg);
 int respond_json(int fd, int status, const char *msg);
 int get_doc_root(int fd, char *buf, size_t len);
 int item_remove_path_recursive(const char *item_path);
+int build_owner_path(const char *ip, char *out, size_t len);
 
 #endif

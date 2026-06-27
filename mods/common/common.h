@@ -6,8 +6,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <ttypt/xy.h>
+#include <ttypt/axil.h>
 
 typedef struct bud_node bud_node;
+
+typedef struct {
+	axil_handler_t *detail;
+	axil_handler_t *add_get;
+	axil_handler_t *add_post;
+	axil_handler_t *edit_get;
+	axil_handler_t *edit_post;
+} standard_item_handlers_t;
 
 typedef struct {
 	const char *name;
@@ -34,6 +43,9 @@ typedef int (*str_list_cb)(const char *token, void *user);
 #ifndef COMMON_IMPL
 
 XY_DECL(int, str_trim, char *, s);
+XY_DECL(int, register_standard_item_handlers,
+	const char *, module_name,
+	const standard_item_handlers_t *, handlers);
 XY_DECL(int, str_list_contains, const char *, list, const char *, token);
 XY_DECL(int, str_list_append, char *, out, size_t, out_sz, const char *, token);
 XY_DECL(int, str_list_normalize, const char *, input, char *, out, size_t, out_sz);
@@ -46,12 +58,17 @@ XY_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
 request" */
 XY_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal
 server error" */
-XY_DECL(int, not_found, int, fd, const char *, msg); /* 404; NULL -> "Not found"
-                                                    */
+XY_DECL(int, not_found, int, fd, const char *, msg);    /* 404; NULL -> "Not found"
+                                                  */
 XY_DECL(int, redirect_to_item,
 	int, fd,
 	const char *, module,
 	const char *, id);
+
+XY_DECL(int, build_owner_path,
+	const char *, ip,
+	char *, out,
+	size_t, len);
 
 XY_DECL(int, read_meta_file,
 	const char *, item_path,
@@ -160,6 +177,20 @@ XY_DECL(int, site_ui_respond_edit_page,
 	const char *, id,
 	bud_node *, form);
 
-#endif /* COMMON_H */
+XY_DECL(int, parse_transpose_qs,
+	const char *, qs,
+	int *, transpose,
+	int *, flags,
+	int *, show_media);
 
-#endif
+#endif /* COMMON_IMPL — end of XY_DECL section */
+
+/* Transpose viewer query-string parser — outside COMMON_IMPL guard so the
+ * implementation (common) can see it too. Callers also see it by inclusion. */
+#define TPARAM_BEMOL 1
+#define TPARAM_LATIN 2
+#define TPARAM_HTML 4
+
+#include "viewer_zoom.h"
+
+#endif /* COMMON_H */

@@ -110,6 +110,29 @@ function parseIntOrNull(value) {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
+function buildControlValue(target) {
+	if (!target || target.nodeType !== Node.ELEMENT_NODE) {
+		return '';
+	}
+
+	const tag = target.tagName.toLowerCase();
+	if (tag === 'select') {
+		return target.value;
+	}
+	if (tag === 'input' && target.type === 'checkbox') {
+		return target.checked ? '1' : '0';
+	}
+	if (tag === 'input' || tag === 'textarea') {
+		return target.value;
+	}
+
+	return '';
+}
+
+function buildEventPayload(target) {
+	return buildControlValue(target);
+}
+
 function getListenerSpec(node, event) {
 	if (!node || node.nodeType !== Node.ELEMENT_NODE) {
 		return null;
@@ -224,6 +247,13 @@ class BudHostBase {
 		this.nodes.clear();
 		this.boundHandlers.clear();
 		this.rootListeners.clear();
+	}
+
+	refreshTrackedSubtree(root) {
+		for (const [id, node] of buildHydrationMap(root).entries()) {
+			this.nodes.set(id, node);
+		}
+		this.autoBindListeners();
 	}
 
 	removeTrackedNode(id) {
@@ -481,6 +511,7 @@ class BudHostBase {
 				node = this.getNode(id);
 				if (node && node.nodeType === Node.ELEMENT_NODE) {
 					node.innerHTML = op.b || '';
+					this.refreshTrackedSubtree(node);
 				}
 			}
 			return true;
@@ -691,27 +722,18 @@ export class BudWasmBridge {
 		if (this.wasm && typeof this.wasm.bud_app_dispatch === 'function') {
 			return (evt, candidate) => {
 				const target = evt.target;
-				let eventData = null;
 				const malloc = getWasmExport(this.wasm, ['malloc']);
 				const free = getWasmExport(this.wasm, ['free']);
+				const value = buildEventPayload(target);
+				let eventData = null;
 				let eventDataPtr = 0;
-				if (target && target.nodeType === Node.ELEMENT_NODE) {
-					let value = '';
-					const tag = target.tagName.toLowerCase();
-					if (tag === 'select') {
-						value = target.value;
-					} else if (tag === 'input' && target.type === 'checkbox') {
-						value = target.checked ? '1' : '0';
-					} else if (tag === 'input' || tag === 'textarea') {
-						value = target.value;
-					}
-					if (value && malloc) {
-						const bytes = new TextEncoder().encode(value + '\0');
-						eventDataPtr = malloc(bytes.length);
-						if (eventDataPtr) {
-							new Uint8Array(this.memory.buffer, eventDataPtr, bytes.length).set(bytes);
-							eventData = eventDataPtr;
-						}
+
+				if (value && malloc) {
+					const bytes = new TextEncoder().encode(value + '\0');
+					eventDataPtr = malloc(bytes.length);
+					if (eventDataPtr) {
+						new Uint8Array(this.memory.buffer, eventDataPtr, bytes.length).set(bytes);
+						eventData = eventDataPtr;
 					}
 				}
 				this.dispatchEvent(info.id, info.event, info.bubbles, eventData);
@@ -729,26 +751,16 @@ export class BudWasmBridge {
 
 		return (evt) => {
 			const target = evt && evt.target;
+			const value = buildEventPayload(target);
 			let eventData = null;
-			if (target && target.nodeType === Node.ELEMENT_NODE) {
-				let value = '';
-				const tag = target.tagName.toLowerCase();
-				if (tag === 'select') {
-					value = target.value;
-				} else if (tag === 'input' && target.type === 'checkbox') {
-					value = target.checked ? '1' : '0';
-				} else if (tag === 'input' || tag === 'textarea') {
-					value = target.value;
-				}
-				if (value) {
-					const malloc = getWasmExport(this.wasm, ['malloc']);
-					if (malloc) {
-						const bytes = new TextEncoder().encode(value + '\0');
-						const ptr = malloc(bytes.length);
-						if (ptr) {
-							new Uint8Array(this.memory.buffer, ptr, bytes.length).set(bytes);
-							eventData = ptr;
-						}
+			if (value) {
+				const malloc = getWasmExport(this.wasm, ['malloc']);
+				if (malloc) {
+					const bytes = new TextEncoder().encode(value + '\0');
+					const ptr = malloc(bytes.length);
+					if (ptr) {
+						new Uint8Array(this.memory.buffer, ptr, bytes.length).set(bytes);
+						eventData = ptr;
 					}
 				}
 			}

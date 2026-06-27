@@ -8,19 +8,13 @@
 #ifndef TRANSP_H
 #define TRANSP_H
 
+#include "transp_flags.h"
 #include <stddef.h>
 
 /* Opaque context handle */
 typedef struct transp_ctx transp_ctx_t;
 
-/* Flags (bitwise OR together) */
-#define TRANSP_HTML 0x04            /* HTML output with <div><b> tags */
-#define TRANSP_BEMOL 0x08           /* Flat notation (Db instead of C#) */
-#define TRANSP_BREAK_SLASH 0x20     /* Insert newline before " / " */
-#define TRANSP_REMOVE_COMMENTS 0x10 /* Remove lines starting with % */
-#define TRANSP_HIDE_CHORDS 0x01     /* Show only lyrics */
-#define TRANSP_HIDE_LYRICS 0x02     /* Show only chords */
-#define TRANSP_LATIN 0x80           /* Latin notation (Do/Re/Mi) */
+/* Flags (bitwise OR together) — see transp_flags.h */
 
 /*
  * Initialize transposer context

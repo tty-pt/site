@@ -98,9 +98,7 @@ json_extract_strings(json_object *jo, const json_str_map_t *map)
 	for (const json_str_map_t *m = map; m->key; m++) {
 		if (json_object_object_get_ex(jo, m->key, &jval))
 			snprintf(
-			        m->dest,
-			        m->dest_size,
-			        "%s",
+			        m->dest, m->dest_size, "%s",
 			        json_object_get_string(jval));
 	}
 }
@@ -159,6 +157,19 @@ XY_DECL(int, source_overlay_from_desc,
     const struct bud_field_desc *, fields,
     int, int_kind,
     int, str_kind);
+XY_DECL(int, source_respond_page_state,
+    int, fd,
+    const char *, dataset_id,
+    const char *, item_id,
+    const source_state_field_t *, specs,
+    const void *, state_struct,
+    const struct bud_field_desc *, overlay_fields,
+    void *, custom_overlay_fn,
+    void *, user_data);
+XY_DECL(json_object *, source_overlay_array,
+    const void *, items, int, count, size_t, elem_size,
+    const struct bud_field_desc *, fields,
+    int, int_kind, int, str_kind);
 XY_DECL(int, source_resolve_ref_display_str,
     const char *, dataset_id,
     const char *, item_id,
@@ -207,5 +218,16 @@ XY_DECL(const char *, qmap_get_field_str,
     unsigned, hd,
     const char *, id,
     const char *, field);
+
+XY_DECL(int, source_dsv_load,
+    const char *, source_id,
+    const char *, pval,
+    unsigned, fhd,
+    void *, user);
+XY_DECL(int, source_dsv_save,
+    const char *, source_id,
+    const char *, pval,
+    unsigned, fhd,
+    void *, user);
 #endif /* SOURCE_IMPL */
 #endif

@@ -1,6 +1,8 @@
 #ifndef BUD_BUD_JSX_H
 #define BUD_BUD_JSX_H
 
+#include <stdio.h>
+
 #include "bud.h"
 
 #ifdef __cplusplus
@@ -36,8 +38,21 @@ typedef struct bud_arg {
 } bud_arg;
 
 #define lx_none() ((bud_arg){ .type = BUD_ARG_NONE })
-#define lx_attr(k, v)                                                          \
+#define _bud_ATTR_SEL(_1, _2, _3, _4, _5, _6, _7, NAME, ...) NAME
+#define lx_attr(...)                                                           \
+	_bud_ATTR_SEL(                                                         \
+	        __VA_ARGS__, _bud_attr_7, _bud_attr_6, _bud_attr_5,            \
+	        _bud_attr_4, _bud_attr_3, _bud_attr_2)(__VA_ARGS__)
+
+#define _bud_attr_2(k, v)                                                      \
 	((bud_arg){ .type = BUD_ARG_ATTR, .data.attr = { (k), (v) } })
+#define _bud_attr_3(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
+#define _bud_attr_4(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
+#define _bud_attr_5(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
+#define _bud_attr_6(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
+#define _bud_attr_7(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
+
+#define _bud_attr_N(k, fmt, ...)  bud_attr_fmt(k, fmt, ##__VA_ARGS__)
 #define lx_text(str)                                                           \
 	((bud_arg){ .type = BUD_ARG_NODE, .data.node = bud_text(str) })
 #define lx_node(n) ((bud_arg){ .type = BUD_ARG_NODE, .data.node = (n) })
@@ -48,6 +63,7 @@ typedef struct bud_arg {
 
 bud_node *bud_el_impl(const char *tag, size_t count, const bud_arg *args);
 bud_node *bud_frag_impl(size_t count, const bud_arg *args);
+bud_arg bud_attr_fmt(const char *name, const char *fmt, ...);
 
 /* Note: In C99, __VA_ARGS__ cannot be empty. For empty nodes, use lx_el("tag",
  * lx_none()) */
@@ -91,8 +107,7 @@ static inline bud_arg _bud_src_node(bud_node *node, const char *file, int line)
 	                (tag),                                                 \
 	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
 	                (bud_arg[]){ __VA_ARGS__ }),                           \
-	        __FILE__,                                                      \
-	        __LINE__)
+	        __FILE__, __LINE__)
 
 #undef lx_frag
 #define lx_frag(...)                                                           \
@@ -100,8 +115,7 @@ static inline bud_arg _bud_src_node(bud_node *node, const char *file, int line)
 	        bud_frag_impl(                                                 \
 	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
 	                (bud_arg[]){ __VA_ARGS__ }),                           \
-	        __FILE__,                                                      \
-	        __LINE__)
+	        __FILE__, __LINE__)
 
 /* lx_raw wraps bud_raw with source tracking (use as a child arg to lx_el) */
 #define lx_raw(html) _bud_src_node(bud_raw(html), __FILE__, __LINE__)

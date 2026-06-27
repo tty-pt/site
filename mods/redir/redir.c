@@ -21,20 +21,15 @@ static int alias_redirect(
 		return not_found(fd, "Not found");
 
 	written = snprintf(
-	        location,
-	        sizeof(location),
-	        "%s%s",
-	        to_prefix,
+	        location, sizeof(location), "%s%s", to_prefix,
 	        uri + strlen(from_prefix));
 	if (written < 0 || (size_t)written >= sizeof(location))
 		return server_error(fd, "Redirect path too long");
 
 	if (query[0]) {
 		written += snprintf(
-		        location + written,
-		        sizeof(location) - (size_t)written,
-		        "?%s",
-		        query);
+		        location + written, sizeof(location) - (size_t)written,
+		        "?%s", query);
 		if (written < 0 || (size_t)written >= sizeof(location))
 			return server_error(fd, "Redirect path too long");
 	}

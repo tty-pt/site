@@ -116,9 +116,7 @@ typedef struct {
 /* ── Filter option resolution ─────────────────────────────── */
 
 static int idx_resolve_filter_options(
-        const char *target_source,
-        unsigned target_hd,
-        hyle_bud_option_t *opts,
+        const char *target_source, unsigned target_hd, hyle_bud_option_t *opts,
         int max_opts)
 {
 	unsigned row_hd;
@@ -156,10 +154,7 @@ static int idx_resolve_filter_options(
 		if (display_field[0]) {
 			char name_key[320];
 			snprintf(
-			        name_key,
-			        sizeof(name_key),
-			        "%s:%s",
-			        row_id,
+			        name_key, sizeof(name_key), "%s:%s", row_id,
 			        display_field);
 			const char *name =
 			        (const char *)qmap_get(target_hd, name_key);
@@ -197,19 +192,13 @@ static bud_node *idx_filter_bar(col_t *cols, int ncols, const char *qs)
 		     cols[i].type == SOURCE_FIELD_MULTI_REFERENCE))
 		{
 			nopts = idx_resolve_filter_options(
-			        cols[i].target_source,
-			        cols[i].target_hd,
-			        opts,
+			        cols[i].target_source, cols[i].target_hd, opts,
 			        256);
 		}
 
 		field = hyle_bud_filter_field(
-		        cols[i].key,
-		        cols[i].label,
-		        cols[i].type,
-		        cur,
-		        nopts > 0 ? opts : NULL,
-		        nopts);
+		        cols[i].key, cols[i].label, cols[i].type, cur,
+		        nopts > 0 ? opts : NULL, nopts);
 
 		if (field)
 			bud_append(bar, field);
@@ -218,20 +207,10 @@ static bud_node *idx_filter_bar(col_t *cols, int ncols, const char *qs)
 }
 
 static bud_node *idx_list_layout(
-        const char *module,
-        const char *query_str,
-        const char *username,
-        int page,
-        int per_page,
-        int total,
-        col_t *cols,
-        int ncols,
-        const char **ids,
-        int nids,
-        const char **values,
-        const char *sort_field,
-        int sort_asc,
-        int has_page)
+        const char *module, const char *query_str, const char *username,
+        int page, int per_page, int total, col_t *cols, int ncols,
+        const char **ids, int nids, const char **values, const char *sort_field,
+        int sort_asc, int has_page)
 {
 	char path[256];
 	char title[128];
@@ -248,46 +227,34 @@ static bud_node *idx_list_layout(
 
 	bud_node *filter_bar = idx_filter_bar(cols, ncols, query_str);
 	bud_node *table = hyle_bud_table(
-	        col_keys,
-	        col_labels,
-	        ncols,
-	        ids,
-	        nids,
-	        values,
-	        module,
-	        sort_field,
-	        sort_asc,
-	        query_str);
+	        col_keys, col_labels, ncols, ids, nids, values, module,
+	        sort_field, sort_asc, query_str);
 	bud_node *pagination =
 	        hyle_bud_pagination(page, per_page, total, nids, query_str);
 
 	bud_node *filter_wrap = NULL;
 	bud_node *actions_wrap = NULL;
 	if (filter_bar) {
-		filter_wrap = lx_el("div",
-		                    lx_attr("class", "hyle-filter-bar"),
+		filter_wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
 		                    lx_node(filter_bar))
 		                      .data.node;
-		actions_wrap = lx_el("div",
-		                     lx_attr("class", "hyle-filter-actions"),
-		                     lx_el("button",
-		                           lx_attr("type", "reset"),
-		                           lx_text("Clear")),
-		                     lx_el("button",
-		                           lx_attr("type", "submit"),
-		                           lx_text("Apply")))
-		                       .data.node;
+		actions_wrap =
+		        lx_el("div", lx_attr("class", "hyle-filter-actions"),
+		              lx_el("button", lx_attr("type", "reset"),
+		                    lx_text("Clear")),
+		              lx_el("button", lx_attr("type", "submit"),
+		                    lx_text("Apply")))
+		                .data.node;
 		bud_append(filter_wrap, actions_wrap);
 	}
 
-	bud_node *form = lx_el("form",
-	                       lx_attr("method", "get"),
-	                       lx_attr("action", ""),
-	                       lx_attr("class", "list-form"),
-	                       filter_wrap ? lx_node(filter_wrap) : lx_none(),
-	                       table ? lx_node(table) : lx_none(),
-	                       pagination ? lx_node(pagination) : lx_none())
-	                         .data.node;
+	bud_node *form =
+	        lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
+	              lx_attr("class", "list-form"),
+	              filter_wrap ? lx_node(filter_wrap) : lx_none(),
+	              table ? lx_node(table) : lx_none(),
+	              pagination ? lx_node(pagination) : lx_none())
+	                .data.node;
 
 	snprintf(title, sizeof(title), "%ss", module);
 	if (title[0] >= 'a')
@@ -296,20 +263,15 @@ static bud_node *idx_list_layout(
 
 	char href_buf[256];
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", module);
-	bud_node *add_btn = (username && username[0])
-	                            ? lx_el("a",
-	                                    lx_attr("href", href_buf),
-	                                    lx_attr("class", "btn"),
-	                                    lx_text("+ add"))
-	                                      .data.node
-	                            : NULL;
+	bud_node *add_btn =
+	        (username && username[0])
+	                ? lx_el("a", lx_attr("href", href_buf),
+	                        lx_attr("class", "btn"), lx_text("+ add"))
+	                          .data.node
+	                : NULL;
 
 	return site_ui_layout(
-	        title,
-	        path,
-	        "\xf0\x9f\x93\x8b",
-	        username,
-	        add_btn,
+	        title, path, "\xf0\x9f\x93\x8b", username, add_btn,
 	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
 }
@@ -321,22 +283,16 @@ static bud_node *idx_list_empty_layout(const char *module, const char *username)
 
 	char href_buf[256];
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", module);
-	bud_node *add_btn = (username && username[0])
-	                            ? lx_el("a",
-	                                    lx_attr("href", href_buf),
-	                                    lx_attr("class", "btn"),
-	                                    lx_text("+ add"))
-	                                      .data.node
-	                            : NULL;
+	bud_node *add_btn =
+	        (username && username[0])
+	                ? lx_el("a", lx_attr("href", href_buf),
+	                        lx_attr("class", "btn"), lx_text("+ add"))
+	                          .data.node
+	                : NULL;
 
 	return site_ui_layout(
-	        module,
-	        path,
-	        "\xf0\x9f\x93\x8b",
-	        username,
-	        add_btn,
-	        lx_el("div",
-	              lx_attr("class", "center"),
+	        module, path, "\xf0\x9f\x93\x8b", username, add_btn,
+	        lx_el("div", lx_attr("class", "center"),
 	              lx_node(site_ui_empty_state("No items")))
 	                .data.node);
 }

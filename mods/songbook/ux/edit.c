@@ -1,3 +1,15 @@
+#include "bud/bud.h"
+#include "bud/bud_jsx.h"
+#include "bud/bud_app.h"
+#include "../fields.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "../../song/ux/music.c"
+
+#include "../../common/ux/site_ui.c"
+
 typedef struct {
 	int orig_key;
 	char repo_id[256];
@@ -17,20 +29,11 @@ typedef struct {
 } sb_choir_opt_t;
 
 static bud_node *sb_render_edit_form(
-        const char *action,
-        const char *csrf_token,
-        const char *title,
-        const char *choir_id,
-        int n_choirs,
-        const sb_choir_opt_t *choirs,
-        const char *cancel_href,
-        int n_songs,
-        const sb_edit_row_t *songs,
-        int n_options,
-        const sb_repo_opt_t *options,
-        int n_format_opts,
-        const char **format_opts,
-        const char *song_source)
+        const char *action, const char *csrf_token, const char *title,
+        const char *choir_id, int n_choirs, const sb_choir_opt_t *choirs,
+        const char *cancel_href, int n_songs, const sb_edit_row_t *songs,
+        int n_options, const sb_repo_opt_t *options, int n_format_opts,
+        const char **format_opts, const char *song_source)
 {
 	int total = n_songs + 1;
 	bud_node *rows = bud_fragment();
@@ -41,8 +44,7 @@ static bud_node *sb_render_edit_form(
 	bud_node *choir_opts = bud_fragment();
 	bud_append(
 	        choir_opts,
-	        lx_el("option",
-	              lx_attr("value", ""),
+	        lx_el("option", lx_attr("value", ""),
 	              (!choir_id || !choir_id[0]) ? lx_attr("selected", "")
 	                                          : lx_none(),
 	              lx_text("None"))
@@ -53,8 +55,7 @@ static bud_node *sb_render_edit_form(
 			break;
 		bud_append(
 		        choir_opts,
-		        lx_el("option",
-		              lx_attr("value", c->id),
+		        lx_el("option", lx_attr("value", c->id),
 		              (choir_id && strcmp(choir_id, c->id) == 0)
 		                      ? lx_attr("selected", "")
 		                      : lx_none(),
@@ -62,8 +63,7 @@ static bud_node *sb_render_edit_form(
 		                .data.node);
 	}
 	bud_node *choir_select =
-	        lx_el("select",
-	              lx_attr("name", "choir"),
+	        lx_el("select", lx_attr("name", "choir"),
 	              lx_attr("class", "border rounded p-1 w-60"),
 	              lx_node(choir_opts))
 	                .data.node;
@@ -117,14 +117,10 @@ static bud_node *sb_render_edit_form(
 		for (int j = 0; j < n_options; j++) {
 			char val[512];
 			snprintf(
-			        val,
-			        sizeof(val),
-			        "%s [%s]",
-			        options[j].title,
+			        val, sizeof(val), "%s [%s]", options[j].title,
 			        options[j].id);
 			bud_node *o =
-			        lx_el("option",
-			              lx_attr("value", val),
+			        lx_el("option", lx_attr("value", val),
 			              (cur && strcmp(options[j].id, cur) == 0)
 			                      ? lx_attr("selected", "")
 			                      : lx_none(),
@@ -137,13 +133,9 @@ static bud_node *sb_render_edit_form(
 		if (!opts && cur && is_existing) {
 			char val[1024];
 			snprintf(
-			        val,
-			        sizeof(val),
-			        "%s [%s]",
-			        songs[i].title,
+			        val, sizeof(val), "%s [%s]", songs[i].title,
 			        cur);
-			bud_node *o = lx_el("option",
-			                    lx_attr("value", val),
+			bud_node *o = lx_el("option", lx_attr("value", val),
 			                    lx_attr("selected", ""),
 			                    lx_text(songs[i].title))
 			                      .data.node;
@@ -152,8 +144,7 @@ static bud_node *sb_render_edit_form(
 		}
 
 		bud_node *select =
-		        lx_el("select",
-		              lx_attr("name", song_f),
+		        lx_el("select", lx_attr("name", song_f),
 		              lx_attr("class", "border rounded p-1 w-60"),
 		              opts ? lx_node(opts) : lx_none())
 		                .data.node;
@@ -164,8 +155,7 @@ static bud_node *sb_render_edit_form(
 			char v[16];
 			snprintf(v, sizeof(v), "%d", si);
 			bud_node *o =
-			        lx_el("option",
-			              lx_attr("value", v),
+			        lx_el("option", lx_attr("value", v),
 			              si == cur_key ? lx_attr("selected", "")
 			                            : lx_none(),
 			              lx_text(key_name(si, orig_key, 0, 0)))
@@ -178,8 +168,7 @@ static bud_node *sb_render_edit_form(
 		if (cur_key < -11 || cur_key > 11) {
 			char v[16];
 			snprintf(v, sizeof(v), "%d", cur_key);
-			bud_node *o = lx_el("option",
-			                    lx_attr("value", v),
+			bud_node *o = lx_el("option", lx_attr("value", v),
 			                    lx_attr("selected", ""),
 			                    lx_text(songs[i].transpose))
 			                      .data.node;
@@ -187,8 +176,7 @@ static bud_node *sb_render_edit_form(
 		}
 
 		bud_node *key_select =
-		        lx_el("select",
-		              lx_attr("name", key_f),
+		        lx_el("select", lx_attr("name", key_f),
 		              lx_attr("class", "border rounded p-1 w-24"),
 		              lx_node(key_opts))
 		                .data.node;
@@ -230,15 +218,13 @@ static bud_node *sb_render_edit_form(
 					                .data.node);
 				}
 			}
-			fmt_ctl = lx_el("select",
-			                lx_attr("name", fmt_f),
+			fmt_ctl = lx_el("select", lx_attr("name", fmt_f),
 			                lx_attr("class",
 			                        "border rounded p-1 w-32"),
 			                lx_node(fmt_opts))
 			                  .data.node;
 		} else {
-			fmt_ctl = lx_el("input",
-			                lx_attr("type", "text"),
+			fmt_ctl = lx_el("input", lx_attr("type", "text"),
 			                lx_attr("name", fmt_f),
 			                lx_attr("class",
 			                        "border rounded p-1 w-24"),
@@ -252,8 +238,7 @@ static bud_node *sb_render_edit_form(
 		bud_node *row =
 		        lx_el("div",
 		              lx_attr("class", "flex gap-2 items-center"),
-		              lx_node(select),
-		              lx_node(key_select),
+		              lx_node(select), lx_node(key_select),
 		              lx_node(fmt_ctl),
 		              is_existing
 		                      ? lx_el("label",
@@ -270,35 +255,28 @@ static bud_node *sb_render_edit_form(
 		bud_append(rows, row);
 	}
 
-	return lx_el("form",
-	             lx_attr("action", action),
+	return lx_el("form", lx_attr("action", action),
 	             lx_attr("method", "POST"),
 	             lx_attr("enctype", "multipart/form-data"),
 	             lx_attr("class", "flex flex-col gap-4"),
-	             lx_el("input",
-	                   lx_attr("type", "hidden"),
+	             lx_el("input", lx_attr("type", "hidden"),
 	                   lx_attr("name", "csrf_token"),
 	                   lx_attr("value", csrf_token)),
-	             lx_el("input",
-	                   lx_attr("type", "hidden"),
+	             lx_el("input", lx_attr("type", "hidden"),
 	                   lx_attr("name", "amount"),
 	                   lx_attr("value", amount_str)),
-	             lx_el("label",
-	                   lx_text("Title:"),
-	                   lx_el("input",
-	                         lx_attr("type", "text"),
+	             lx_el("label", lx_text("Title:"),
+	                   lx_el("input", lx_attr("type", "text"),
 	                         lx_attr("name", "title"),
 	                         (title && title[0]) ? lx_attr("value", title)
 	                                             : lx_none())),
 	             lx_el("label", lx_text("Choir:"), lx_node(choir_select)),
 	             (choir_id && choir_id[0])
-	                     ? lx_el("label",
-	                             lx_text("Song source:"),
+	                     ? lx_el("label", lx_text("Song source:"),
 	                             lx_el("select",
 	                                   lx_attr("name", "song_source"),
-	                                   lx_attr("class",
-	                                           "border rounded "
-	                                           "p-1 w-48"),
+	                                   lx_attr("class", "border rounded "
+	                                                    "p-1 w-48"),
 	                                   lx_el("option",
 	                                         lx_attr("value", "all"),
 	                                         (!song_source ||

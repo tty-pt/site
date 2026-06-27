@@ -66,8 +66,8 @@ Deno.test({
     if (r2.status >= 400) throw new Error(`Seed B failed: ${r2.status}`);
     await r2.body?.cancel();
 
-    const repoA = `${choirId}_${SONG_A_ID}`;
-    const repoB = `${choirId}_${SONG_B_ID}`;
+    const repoA = `${SONG_A_ID}`;
+    const repoB = `${SONG_B_ID}`;
 
     // ── 1. Create a songbook linked to the choir ──────────────────────────
     await page.goto(`${BASE}/songbook/add?choir=${choirId}`, GOTO);

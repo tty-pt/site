@@ -6,7 +6,7 @@ int main(void)
 {
 	transp_ctx_t *ctx = transp_init();
 
-	// Try with HTML flag
+	/* Try with HTML flag */
 	const char *line = "Amazing Grace, how sweet the sound\n";
 	printf("Input: %s", line);
 

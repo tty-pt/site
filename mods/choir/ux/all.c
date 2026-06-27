@@ -4,7 +4,11 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "../../common/viewer_zoom.h"
+
 #include "../../common/ux/site_ui.c"
+
+#include "../../song/ux/music.c"
 
 #include "detail.c"
 #include "add.c"

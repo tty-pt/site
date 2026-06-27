@@ -117,10 +117,10 @@ Deno.test({
       const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
       const fd = new FormData();
       fd.append("amount", "3");
-      fd.append("song_0", `${SONG1_TITLE} [${choirId}_${SONG1_ID}]`);
+      fd.append("song_0", `${SONG1_TITLE} [${SONG1_ID}]`);
       fd.append("key_0", "0");
       fd.append("fmt_0", "any");
-      fd.append("song_1", `${SONG2_TITLE} [${choirId}_${SONG2_ID}]`);
+      fd.append("song_1", `${SONG2_TITLE} [${SONG2_ID}]`);
       fd.append("key_1", "0");
       fd.append("fmt_1", "any");
       fd.append("song_2", `${SONG3_TITLE} [${SONG3_ID}]`);
@@ -152,7 +152,7 @@ Deno.test({
       const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
       const fd = new FormData();
       fd.append("amount", "2");
-      fd.append("song_0", `${SONG2_TITLE} [${choirId}_${SONG2_ID}]`);
+      fd.append("song_0", `${SONG2_TITLE} [${SONG2_ID}]`);
       fd.append("key_0", "0");
       fd.append("fmt_0", "any");
       fd.append("song_1", `${SONG3_TITLE} [${SONG3_ID}]`);

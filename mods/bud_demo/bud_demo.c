@@ -24,8 +24,7 @@ static int handler(int fd, char *path)
 	}
 	char page[8192];
 	snprintf(
-	        page,
-	        sizeof(page),
+	        page, sizeof(page),
 	        "<!DOCTYPE html>\n"
 	        "<html lang=\"en\">\n"
 	        "<head>\n"

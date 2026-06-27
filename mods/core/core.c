@@ -48,10 +48,7 @@ static int alias_redirect(
 	}
 
 	written = snprintf(
-	        location,
-	        sizeof(location),
-	        "%s%s",
-	        to_prefix,
+	        location, sizeof(location), "%s%s", to_prefix,
 	        uri + strlen(from_prefix));
 	if (written < 0 || (size_t)written >= sizeof(location)) {
 		axil_respond(fd, 500, "Redirect path too long");
@@ -60,10 +57,8 @@ static int alias_redirect(
 
 	if (query[0]) {
 		written += snprintf(
-		        location + written,
-		        sizeof(location) - (size_t)written,
-		        "?%s",
-		        query);
+		        location + written, sizeof(location) - (size_t)written,
+		        "?%s", query);
 		if (written < 0 || (size_t)written >= sizeof(location)) {
 			axil_respond(fd, 500, "Redirect path too long");
 			return 1;

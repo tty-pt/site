@@ -79,23 +79,22 @@ Common TSV management (loading, saving, rebuilding, field cleaning) has been mov
 - **Functions:** `index_tsv_load`, `index_tsv_save`, `index_tsv_rebuild`.
 - **Status:** Integrated into `song.c` and `songbook.c`, saving ~200 lines total.
 
-### 2. Schema-Driven Metadata Handling
+### 2. Schema-Driven Metadata Handling [COMPLETED]
 Introduce a schema-driven approach for module metadata. Define field names and sizes in an array and use a generic `item_meta_respond` helper to handle reading and JSON responding in one step.
 - **Goal:** Eliminate repetitive "authorized" callbacks and manual `meta_field_t` setup.
 
-### 3. Simplified Handler Registration
+### 3. Simplified Handler Registration [COMPLETED]
 Implement a `register_standard_item_handlers(module_name, callbacks_struct)` helper.
 - **Goal:** Reduce the repetitive `axil_register_handler` calls in `xy_install` for standard routes like `GET /:id` and `POST /:id/edit`.
 
-### 4. Choir-Centric Repertoire Reuse
-The `choir` and `songbook` modules share identical repertoire management logic (collections of songs). Instead of a complete merge, the `choir` module serves as the primary provider of repertoire features, which the `songbook` module reuses.
-- **Goal:** Centralize repertoire implementation in `choir` (e.g., using `repertoire_impl.inc`) and ensure `songbook` consumes these features without duplication.
-- **Isolation:** Maintain distinct modules for distinct types of collections, but share the underlying logic.
+### 4. DSV-Backed Ordered Collections [COMPLETED]
+The `choir` and `songbook` modules both manage collections of songs. Previously, these relied on a complex custom "repertoire" system. This has been fully migrated to use the `hyle_source_ordered` API.
+- **Implementation:** Repertoire is now stored in a standard `data.txt` file as an ordered sequence of delimited fields using the DSV engine.
+- **Goal:** Unify the collection-backing layer, simplify handler logic, eliminate legacy inverse-lookup mapping, and increase maintainability for any collection-style module.
 
 ### 5. Memory & Module Integrity
 - **Memory Management:** Avoid manual memory management (`malloc`/`free`). Always prefer the `qmap` system and other framework-provided managed pointers to ensure safety and prevent leaks.
 - **Module Lifecycle:** Never re-purpose existing modules for different functionality. Each module should have a clear, stable responsibility. If new functionality is significantly different, create a new module.
-- **Shared Repertoire Logic:** Standardize the "repertoire" file name (e.g., always `data.txt`) and utilize `choir`'s core repertoire actions across all collection-style modules.
 
 ### 6. JSON as Universal Interface
 Minimize C-side logic by gathering data into JSON objects as early as possible.

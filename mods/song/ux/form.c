@@ -1,9 +1,16 @@
+#include "bud/bud.h"
+#include "bud/bud_jsx.h"
+#include "bud/bud_app.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "../../common/ux/site_ui.c"
+#include "../fields.h"
+
 bud_node *song_form_content(
-        int is_edit,
-        const char *id,
-        const song_cache_t *meta,
-        const char *data_val,
-        const char *csrf_token)
+        int is_edit, const char *id, const song_cache_t *meta,
+        const char *data_val, const char *csrf_token)
 {
 	char action[256];
 	char cancel_href[256];
@@ -46,11 +53,9 @@ bud_node *song_form_content(
 	bud_node *fields = site_ui_form_fields(ff, vals, csrf_token);
 	bud_append(fields, site_ui_form_actions(cancel_href, "Save", NULL));
 
-	return lx_el("form",
-	             lx_attr("action", action),
+	return lx_el("form", lx_attr("action", action),
 	             lx_attr("method", "POST"),
 	             lx_attr("enctype", "multipart/form-data"),
-	             lx_attr("class", "flex flex-col gap-4"),
-	             lx_node(fields))
+	             lx_attr("class", "flex flex-col gap-4"), lx_node(fields))
 	        .data.node;
 }

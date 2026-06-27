@@ -52,16 +52,9 @@ static int test_emit(
 	}
 
 	wrote = snprintf(
-	        ops->buffer + ops->len,
-	        sizeof(ops->buffer) - ops->len,
-	        "%s%s%s%s%s%s%s\n",
-	        op,
-	        a ? ":" : "",
-	        a ? a : "",
-	        b ? ":" : "",
-	        b ? b : "",
-	        c ? ":" : "",
-	        c ? c : "");
+	        ops->buffer + ops->len, sizeof(ops->buffer) - ops->len,
+	        "%s%s%s%s%s%s%s\n", op, a ? ":" : "", a ? a : "", b ? ":" : "",
+	        b ? b : "", c ? ":" : "", c ? c : "");
 	if (wrote < 0) {
 		return -1;
 	}
@@ -81,10 +74,7 @@ static int check(int cond, const char *msg)
 }
 
 static int hydrate_lookup(
-        void *user,
-        unsigned int id,
-        const char **kind,
-        const char **tag,
+        void *user, unsigned int id, const char **kind, const char **tag,
         const char **text)
 {
 	hydrate_expect *expect;
@@ -128,9 +118,7 @@ static int walk_push(walk_ops *ops, const char *fmt, ...)
 
 	va_start(ap, fmt);
 	wrote = vsnprintf(
-	        ops->buffer + ops->len,
-	        sizeof(ops->buffer) - ops->len,
-	        fmt,
+	        ops->buffer + ops->len, sizeof(ops->buffer) - ops->len, fmt,
 	        ap);
 	va_end(ap);
 	if (wrote < 0) {
@@ -167,41 +155,25 @@ static int walk_enter(void *user, const bud_node *node, size_t depth)
 }
 
 static int walk_attr(
-        void *user,
-        const bud_node *node,
-        size_t depth,
-        size_t index,
-        const char *name,
-        const char *value)
+        void *user, const bud_node *node, size_t depth, size_t index,
+        const char *name, const char *value)
 {
 	(void)node;
 	return walk_push(
-	        (walk_ops *)user,
-	        "attr:%zu:%zu:%s=%s\n",
-	        depth,
-	        index,
-	        name,
+	        (walk_ops *)user, "attr:%zu:%zu:%s=%s\n", depth, index, name,
 	        value);
 }
 
 static int walk_listener(
-        void *user,
-        const bud_node *node,
-        size_t depth,
-        size_t index,
-        const char *event,
-        int bubbles)
+        void *user, const bud_node *node, size_t depth, size_t index,
+        const char *event, int bubbles)
 {
 	walk_ops *ops;
 
 	(void)node;
 	ops = (walk_ops *)user;
 	return walk_push(
-	        ops,
-	        "listener:%zu:%zu:%s:%d\n",
-	        depth,
-	        index,
-	        event,
+	        ops, "listener:%zu:%zu:%s:%d\n", depth, index, event,
 	        bubbles ? 1 : 0);
 }
 
@@ -238,9 +210,7 @@ static int lifecycle_push(lifecycle_log *log, const char *fmt, ...)
 
 	va_start(ap, fmt);
 	wrote = vsnprintf(
-	        log->buffer + log->len,
-	        sizeof(log->buffer) - log->len,
-	        fmt,
+	        log->buffer + log->len, sizeof(log->buffer) - log->len, fmt,
 	        ap);
 	va_end(ap);
 	if (wrote < 0) {
@@ -316,20 +286,16 @@ static int on_submit(bud_event *event)
 static int test_jsx(void)
 {
 	bud_arg tree = lx_frag(
-	        lx_el("main",
-	              lx_attr("data-role", "app"),
+	        lx_el("main", lx_attr("data-role", "app"),
 	              lx_el("h1", lx_text("Hello")),
-	              lx_el("button",
-	                    lx_on("click", 1),
-	                    lx_on("submit", 0),
+	              lx_el("button", lx_on("click", 1), lx_on("submit", 0),
 	                    lx_text("Click me")),
 	              lx_el("p", lx_text("C DOM runtime"))));
 	char *html = bud_render_html(tree.data.node);
 	int rc = 0;
 	if (!html ||
-	    !strstr(html,
-	            "<main data-role=\"app\"><h1>Hello</h1><button>Click "
-	            "me</button><p>C DOM runtime</p></main>"))
+	    !strstr(html, "<main data-role=\"app\"><h1>Hello</h1><button>Click "
+	                  "me</button><p>C DOM runtime</p></main>"))
 	{
 		fprintf(stderr, "JSX test failed: %s\n", html ? html : "NULL");
 		rc = 1;
@@ -361,8 +327,7 @@ static int test_bool_attr(void)
 
 	html = bud_render_html(el);
 	if (!html || !strstr(html, "checked") || strstr(html, "checked=\"\"")) {
-		fprintf(stderr,
-		        "bool attr test failed: %s\n",
+		fprintf(stderr, "bool attr test failed: %s\n",
 		        html ? html : "NULL");
 		bud_free_string(html);
 		bud_free(el);
@@ -399,8 +364,7 @@ static int test_raw_html(void)
 
 	html = bud_render_html(el);
 	if (!html || strstr(html, "&lt;") || !strstr(html, "<b>bold</b>")) {
-		fprintf(stderr,
-		        "raw html test failed: %s\n",
+		fprintf(stderr, "raw html test failed: %s\n",
 		        html ? html : "NULL");
 		bud_free_string(html);
 		bud_free(el);
@@ -433,8 +397,7 @@ static int test_get_attr(void)
 
 	val = bud_get_attr(el, "data-x");
 	if (!val || strcmp(val, "hello") != 0) {
-		fprintf(stderr,
-		        "get attr value failed: %s\n",
+		fprintf(stderr, "get attr value failed: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -486,8 +449,7 @@ static int test_class_helpers(void)
 
 	val = bud_get_attr(el, "class");
 	if (!val || strcmp(val, "foo") != 0) {
-		fprintf(stderr,
-		        "add class duplicate result: %s\n",
+		fprintf(stderr, "add class duplicate result: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -502,8 +464,7 @@ static int test_class_helpers(void)
 
 	val = bud_get_attr(el, "class");
 	if (!val || strcmp(val, "foo bar") != 0) {
-		fprintf(stderr,
-		        "add class second result: %s\n",
+		fprintf(stderr, "add class second result: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -518,8 +479,7 @@ static int test_class_helpers(void)
 
 	val = bud_get_attr(el, "class");
 	if (!val || strcmp(val, "bar") != 0) {
-		fprintf(stderr,
-		        "remove class result: %s\n",
+		fprintf(stderr, "remove class result: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -541,8 +501,7 @@ static int test_class_helpers(void)
 
 	val = bud_get_attr(el, "class");
 	if (!val || strcmp(val, "bar foo") != 0) {
-		fprintf(stderr,
-		        "toggle class add result: %s\n",
+		fprintf(stderr, "toggle class add result: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -557,8 +516,7 @@ static int test_class_helpers(void)
 
 	val = bud_get_attr(el, "class");
 	if (!val || strcmp(val, "foo") != 0) {
-		fprintf(stderr,
-		        "toggle class remove result: %s\n",
+		fprintf(stderr, "toggle class remove result: %s\n",
 		        val ? val : "NULL");
 		bud_free(el);
 		return 1;
@@ -940,12 +898,11 @@ int main(void)
 	if (rc != 0) {
 		goto cleanup;
 	}
-	rc =
-	        check(strcmp(html,
-	                     "<main data-role=\"app\"><h1>Hello &amp; "
+	rc = check(
+	        strcmp(html, "<main data-role=\"app\"><h1>Hello &amp; "
 	                     "&lt;world&gt;</h1><button>Click me</button><p>C "
 	                     "DOM runtime</p></main>") == 0,
-	              "html output");
+	        "html output");
 	if (rc != 0) {
 		fprintf(stderr, "got: %s\n", html);
 		goto cleanup;

@@ -67,14 +67,8 @@ static int emit_patch_wrapper(
         void *user, const char *op, const char *a, const char *b, const char *c)
 {
 	bud_host_emit_patch(
-	        op,
-	        op ? strlen(op) : 0,
-	        a,
-	        a ? strlen(a) : 0,
-	        b,
-	        b ? strlen(b) : 0,
-	        c,
-	        c ? strlen(c) : 0);
+	        op, op ? strlen(op) : 0, a, a ? strlen(a) : 0, b,
+	        b ? strlen(b) : 0, c, c ? strlen(c) : 0);
 	return 0;
 }
 
@@ -153,14 +147,8 @@ void bud_patch_attr(bud_node *node, const char *name, const char *value)
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", bud_node_id(node));
 	bud_host_emit_patch(
-	        "patch-attr",
-	        10,
-	        id_str,
-	        strlen(id_str),
-	        name,
-	        strlen(name),
-	        value,
-	        strlen(value));
+	        "patch-attr", 10, id_str, strlen(id_str), name, strlen(name),
+	        value, strlen(value));
 }
 
 void bud_patch_text(bud_node *node, const char *value)
@@ -170,14 +158,8 @@ void bud_patch_text(bud_node *node, const char *value)
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", bud_node_id(node));
 	bud_host_emit_patch(
-	        "patch-text",
-	        11,
-	        value,
-	        strlen(value),
-	        id_str,
-	        strlen(id_str),
-	        NULL,
-	        0);
+	        "patch-text", 11, value, strlen(value), id_str, strlen(id_str),
+	        NULL, 0);
 }
 
 __attribute__((export_name("bud_patch_innerhtml"))) void
@@ -188,20 +170,12 @@ bud_patch_innerhtml(unsigned int node_id, const char *html)
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", node_id);
 	bud_host_emit_patch(
-	        "patch-innerhtml",
-	        15,
-	        id_str,
-	        strlen(id_str),
-	        html,
-	        strlen(html),
-	        NULL,
-	        0);
+	        "patch-innerhtml", 15, id_str, strlen(id_str), html,
+	        strlen(html), NULL, 0);
 }
 
 __attribute__((export_name("bud_app_dispatch"))) int wasm_dispatch_event(
-        unsigned int node_id,
-        const char *event_name,
-        int bubbles,
+        unsigned int node_id, const char *event_name, int bubbles,
         void *event_data)
 {
 	if (runtime) {
@@ -277,16 +251,12 @@ wasm_get_src(unsigned int node_id)
 	target = find_node_by_id(root, node_id);
 	if (!target) {
 		snprintf(
-		        wasm_dbg_buf,
-		        sizeof(wasm_dbg_buf),
-		        "node=%d NOT IN WASM TREE",
-		        node_id);
+		        wasm_dbg_buf, sizeof(wasm_dbg_buf),
+		        "node=%d NOT IN WASM TREE", node_id);
 		return wasm_dbg_buf;
 	}
 	snprintf(
-	        wasm_dbg_buf,
-	        sizeof(wasm_dbg_buf),
-	        "%s",
+	        wasm_dbg_buf, sizeof(wasm_dbg_buf), "%s",
 	        bud_node_get_src(target));
 	return wasm_dbg_buf;
 }
@@ -342,9 +312,7 @@ void bud_patch_text(bud_node *node, const char *value)
 }
 
 int wasm_dispatch_event(
-        unsigned int node_id,
-        const char *event_name,
-        int bubbles,
+        unsigned int node_id, const char *event_name, int bubbles,
         void *event_data)
 {
 	(void)node_id;

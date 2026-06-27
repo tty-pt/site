@@ -1,7 +1,5 @@
 static bud_node *idx_home_layout(
-        const char *user,
-        const char **mod_names,
-        const char **mod_titles,
+        const char *user, const char **mod_names, const char **mod_titles,
         size_t mod_count)
 {
 	bud_node *frag =
@@ -14,10 +12,8 @@ static bud_node *idx_home_layout(
 		site_ui_collection_path(mod_names[i], href, sizeof(href));
 		bud_append(
 		        frag,
-		        lx_el("a",
-		              lx_attr("href", href),
-		              lx_attr("class", "btn"),
-		              lx_text(mod_titles[i]))
+		        lx_el("a", lx_attr("href", href),
+		              lx_attr("class", "btn"), lx_text(mod_titles[i]))
 		                .data.node);
 	}
 

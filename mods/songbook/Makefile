@@ -1,11 +1,10 @@
-EXTRA_CFLAGS += -I../../external/bud/include -I../common
-EXTRA_LDLIBS += -L../../external/bud/lib -lbud -laxil-auth -ljson-c
+EXTRA_CFLAGS += -I../common
+EXTRA_LDLIBS += -lbud -laxil-auth -ljson-c -lhyle
 
-# WASM
-WASM_TARGETS = $(WASM_PATH)/songbook_fe.wasm
-songbook_fe-src = ux/all.c
-songbook_fe-cflags = -I$(REPO_ROOT)/mods/common
-
-all: $(TARGET)
+# WASM targets must be defined before including build.mk so the shared
+# all:/wasm: rules can see them during parse time.
+WASM_TARGETS = $(WASM_PATH)/songbook_detail.wasm
+songbook_detail-src = ux/detail.c
+songbook_detail-cflags = -I$(REPO_ROOT)/mods/common
 
 include ../../build.mk

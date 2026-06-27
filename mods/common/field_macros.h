@@ -68,6 +68,13 @@
 		        NULL, NULL, im, NULL                                   \
 	}
 
+/* Excluded field, writable (backed by struct member) */
+#define EXCL_FIELD_W(name, st, mb, sz, qt, im)                                 \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_EXCLUDE, qt,               \
+		        SOURCE_FIELD_STRING, 1, 0, 0, NULL, NULL, im, NULL     \
+	}
+
 /* Excluded virtual field (no struct backing) */
 #define EXCL_FIELD_V(name, qt, wr, im)                                         \
 	{                                                                      \

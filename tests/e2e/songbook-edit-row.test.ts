@@ -54,7 +54,7 @@ Deno.test({
     });
     if (seedResp.status >= 400) throw new Error(`Seed failed: ${seedResp.status}`);
     await seedResp.body?.cancel();
-    const repoId = `${choirId}_${KNOWN_SONG_ID}`;
+    const repoId = `${KNOWN_SONG_ID}`;
 
     // ── 1. Create a songbook linked to the choir ──────────────────────────
     await page.goto(`${BASE}/songbook/add?choir=${choirId}`, GOTO);

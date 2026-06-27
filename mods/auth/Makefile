@@ -1,5 +1,5 @@
-EXTRA_CFLAGS += -I../../external/bud/include -I../common
-EXTRA_LDLIBS := -laxil-auth -L../../external/bud/lib -lbud
+EXTRA_CFLAGS += -I../common
+EXTRA_LDLIBS := -laxil-auth -lbud
 
 include ../../build.mk
 

@@ -29,15 +29,10 @@ static const bud_field_desc_t songbook_fields[] = {
 	REC_FIELD(id, songbook_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(title, songbook_cache_t, title, 256, 1, 0, 0, 1),
 	REF_FIELD(
-	        choir,
-	        songbook_cache_t,
-	        choir,
-	        128,
-	        "choir.items",
-	        "songbooks",
+	        choir, songbook_cache_t, choir, 128, "choir.items", "songbooks",
 	        1),
-	EXCL_FIELD(
-	        song_source, songbook_cache_t, song_source, 16, BUD_QM_STR, 0),
+	EXCL_FIELD_W(
+	        song_source, songbook_cache_t, song_source, 16, BUD_QM_STR, 1),
 	EXCL_FIELD(owner, songbook_cache_t, owner, 32, BUD_QM_STR, 0),
 	FIELD_END
 };

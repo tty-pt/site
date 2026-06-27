@@ -25,9 +25,7 @@
 static int source_scan_item(int fd, const source_def_t *def, const char *id);
 static hyle_field_type_t source_to_hyle_type(source_field_type_t t);
 static int ref_normalize(
-        const char *dataset_id,
-        const char *field_name,
-        char **data,
+        const char *dataset_id, const char *field_name, char **data,
         size_t *len);
 XY_DECL(int, source_after_update,
 	int, fd, const char *, dataset_id,
@@ -36,6 +34,12 @@ XY_DECL(int, source_after_update,
 static int source_field_is_multi_reference(source_field_type_t type)
 {
 	return type == SOURCE_FIELD_MULTI_REFERENCE;
+}
+
+static int respond_422_close(int fd, const char *json_str)
+{
+	axil_header_set(fd, "Connection", "close");
+	return respond_json(fd, 422, json_str);
 }
 
 /*
@@ -50,10 +54,7 @@ XY_IMPL(source_def_t *, source_find, const char *, dataset_id)
 }
 
 static void resolve_ref_append(
-        char *out,
-        size_t *rpos,
-        size_t out_sz,
-        const source_def_t *target,
+        char *out, size_t *rpos, size_t out_sz, const source_def_t *target,
         const char *token)
 {
 	const char *target_id = NULL;
@@ -179,18 +180,13 @@ XY_IMPL(int, source_resolve_meta_display,
 			continue;
 		char buf[4096] = { 0 };
 		if (source_resolve_ref_display_str(
-		            dataset_id,
-		            item_id,
-		            fields[i].key,
-		            buf,
+		            dataset_id, item_id, fields[i].key, buf,
 		            sizeof(buf)) == 0 &&
 		    buf[0])
 		{
 			snprintf(
 			        (char *)state + fields[i].offset,
-			        fields[i].size,
-			        "%s",
-			        buf);
+			        fields[i].size, "%s", buf);
 			resolved++;
 		}
 	}
@@ -225,9 +221,7 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 	}
 	if (target->key_field)
 		qmap_field_put(
-		        target->fields_hd,
-		        slug,
-		        target->key_field,
+		        target->fields_hd, slug, target->key_field,
 		        display_name);
 	if (target->source_hd)
 		qmap_put(target->source_hd, slug, "");
@@ -243,12 +237,8 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 		snprintf(dir, sizeof(dir), "%s/%s", target->items_path, slug);
 		mkdir(dir, 0755);
 		snprintf(
-		        npath,
-		        sizeof(npath),
-		        "%s/%s/%s",
-		        target->items_path,
-		        slug,
-		        fname);
+		        npath, sizeof(npath), "%s/%s/%s", target->items_path,
+		        slug, fname);
 		fp = fopen(npath, "w");
 		if (fp) {
 			fwrite(display_name, 1, strlen(display_name), fp);
@@ -264,11 +254,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 
 	char item_path[PATH_MAX];
 	snprintf(
-	        item_path,
-	        sizeof(item_path),
-	        "%s/%s/%s",
-	        root,
-	        def->items_path,
+	        item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path,
 	        id);
 
 	struct stat st;
@@ -301,10 +287,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 
 		char file_path[PATH_MAX + 256];
 		snprintf(
-		        file_path,
-		        sizeof(file_path),
-		        "%s/%s",
-		        item_path,
+		        file_path, sizeof(file_path), "%s/%s", item_path,
 		        def->fields[i].file);
 
 		char *data = slurp_file(file_path);
@@ -355,9 +338,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			struct passwd *pw = getpwuid(st.st_uid);
 			if (pw && pw->pw_name)
 				qmap_field_put(
-				        def->fields_hd,
-				        id,
-				        "owner",
+				        def->fields_hd, id, "owner",
 				        pw->pw_name);
 		}
 	}
@@ -380,11 +361,7 @@ XY_IMPL(int, source_delete_item,
 
 	char item_path[PATH_MAX];
 	snprintf(
-	        item_path,
-	        sizeof(item_path),
-	        "%s/%s/%s",
-	        root,
-	        def->items_path,
+	        item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path,
 	        item_id);
 
 	item_remove_path_recursive(item_path);
@@ -418,10 +395,7 @@ static int clear_inv_refs_cb(const source_def_t *target, void *user)
 
 		uint32_t inv_buf[256];
 		size_t count = qmap_inv_get(
-		        target->fields_hd,
-		        f->name,
-		        ctx->item_pos,
-		        inv_buf,
+		        target->fields_hd, f->name, ctx->item_pos, inv_buf,
 		        256);
 		for (size_t j = 0; j < count; j++) {
 			const char *ref_key =
@@ -580,8 +554,7 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 			target = source_find(sf->target_source);
 			if (target && target->source_hd)
 				qmap_record_field_set_target_hd(
-				        def->record_id,
-				        sf->name,
+				        def->record_id, sf->name,
 				        target->source_hd);
 		}
 	}
@@ -699,8 +672,7 @@ source_validate_row(int fd, const source_def_t *def, unsigned data_handle)
 		json_object_object_add(
 		        j_err, "rule", json_object_new_string(errs[j].rule));
 		json_object_object_add(
-		        j_err,
-		        "message",
+		        j_err, "message",
 		        json_object_new_string(errs[j].message));
 		json_object_array_add(j_errors, j_err);
 	}
@@ -710,9 +682,7 @@ source_validate_row(int fd, const source_def_t *def, unsigned data_handle)
 	hyle_purify_errors_free(errs, nerr);
 
 	const char *json_str = json_object_to_json_string(j_root);
-	axil_header_set(fd, "Connection", "close");
-	axil_header_set(fd, "Content-Type", "application/json");
-	axil_respond(fd, 422, json_str);
+	respond_422_close(fd, json_str);
 	json_object_put(j_root);
 	return 1;
 }
@@ -732,9 +702,7 @@ XY_IMPL(int, source_update_item,
 	if (!id || !id[0]) {
 		static uint32_t source_auto_seq = 0;
 		snprintf(
-		        auto_key_buf,
-		        sizeof(auto_key_buf),
-		        "%u",
+		        auto_key_buf, sizeof(auto_key_buf), "%u",
 		        ++source_auto_seq);
 		id = auto_key_buf;
 	}
@@ -744,11 +712,7 @@ XY_IMPL(int, source_update_item,
 
 	char item_path[PATH_MAX];
 	snprintf(
-	        item_path,
-	        sizeof(item_path),
-	        "%s/%s/%s",
-	        root,
-	        def->items_path,
+	        item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path,
 	        id);
 	if (mkdir(item_path, 0755) != 0 && errno != EEXIST)
 		return -1;
@@ -760,9 +724,7 @@ XY_IMPL(int, source_update_item,
 		if (val) {
 			if (f->file) {
 				if (write_item_child_file(
-				            item_path,
-				            f->file,
-				            val,
+				            item_path, f->file, val,
 				            strlen(val)) != 0)
 					return -1;
 			}
@@ -770,11 +732,8 @@ XY_IMPL(int, source_update_item,
 			if (f->file) {
 				char file_path[PATH_MAX + 256];
 				snprintf(
-				        file_path,
-				        sizeof(file_path),
-				        "%s/%s",
-				        item_path,
-				        f->file);
+				        file_path, sizeof(file_path), "%s/%s",
+				        item_path, f->file);
 				char *content = slurp_file(file_path);
 				if (content) {
 					free(content);
@@ -822,10 +781,7 @@ XY_IMPL(int, source_update_item,
 				continue;
 			char display[8192] = { 0 };
 			if (source_resolve_ref_display_str(
-			            def->id,
-			            id,
-			            f->name,
-			            display,
+			            def->id, id, f->name, display,
 			            sizeof(display)) != 0)
 				continue;
 			if (!display[0])
@@ -850,23 +806,19 @@ XY_IMPL(int, source_update_item,
 				continue;
 			char msg[512];
 			snprintf(
-			        msg,
-			        sizeof(msg),
-			        "Referenced %s '%s' not found in %s",
-			        f->name,
+			        msg, sizeof(msg),
+			        "Referenced %s '%s' not found in %s", f->name,
 			        val,
 			        f->target_source ? f->target_source
 			                         : "(unknown)");
 			json_object *j_root = json_object_new_object();
 			json_object_object_add(
-			        j_root,
-			        "error",
+			        j_root, "error",
 			        json_object_new_string("Reference not found"));
 			json_object *j_errors = json_object_new_array();
 			json_object *j_err = json_object_new_object();
 			json_object_object_add(
-			        j_err,
-			        "field",
+			        j_err, "field",
 			        json_object_new_string(f->name));
 			json_object_object_add(
 			        j_err, "message", json_object_new_string(msg));
@@ -874,9 +826,7 @@ XY_IMPL(int, source_update_item,
 			json_object_object_add(j_root, "errors", j_errors);
 			const char *json_str =
 			        json_object_to_json_string(j_root);
-			axil_header_set(fd, "Connection", "close");
-			axil_header_set(fd, "Content-Type", "application/json");
-			axil_respond(fd, 422, json_str);
+			respond_422_close(fd, json_str);
 			json_object_put(j_root);
 			result = SOURCE_ERR_VALIDATION;
 			break;
@@ -918,9 +868,7 @@ XY_IMPL(int, ref_field_register,
 }
 
 int ref_normalize(
-        const char *dataset_id,
-        const char *field_name,
-        char **data,
+        const char *dataset_id, const char *field_name, char **data,
         size_t *len)
 {
 	if (!dataset_id || !field_name || !data || !*data || !(*data)[0])
@@ -956,11 +904,8 @@ int ref_normalize(
 			        tok, strlen(tok), id_norm, sizeof(id_norm));
 			rlen = strlen(result);
 			snprintf(
-			        result + rlen,
-			        sizeof(result) - rlen,
-			        "%s%s",
-			        first ? "" : "\n",
-			        id_norm);
+			        result + rlen, sizeof(result) - rlen, "%s%s",
+			        first ? "" : "\n", id_norm);
 			first = 0;
 		}
 		tok = strtok_r(NULL, "\r\n", &saveptr);
@@ -979,10 +924,8 @@ int ref_normalize(
 /* Functions implemented in source-http.c */
 void source_install_routes(void);
 int source_http_build_state_json(
-        const char *dataset_id,
-        const char *item_id,
-        const source_state_field_t *specs,
-        json_object **out);
+        const char *dataset_id, const char *item_id,
+        const source_state_field_t *specs, json_object **out);
 int source_http_state_overlay(json_object *jo, const source_state_kv_t *kvs);
 
 XY_IMPL(int, source_for_each, source_each_cb_t, cb, void *, user)
@@ -1055,6 +998,22 @@ XY_IMPL(int, source_overlay_from_desc,
 	return 0;
 }
 
+XY_IMPL(json_object *, source_overlay_array,
+	const void *, items, int, count, size_t, elem_size,
+	const bud_field_desc_t *, fields,
+	int, int_kind, int, str_kind)
+{
+	json_object *arr = json_object_new_array();
+	for (int i = 0; i < count; i++) {
+		json_object *obj = json_object_new_object();
+		source_overlay_from_desc(
+		        obj, (const char *)items + i * elem_size, fields,
+		        int_kind, str_kind);
+		json_object_array_add(arr, obj);
+	}
+	return arr;
+}
+
 XY_IMPL(unsigned, source_query,
 	const char *, dataset_id,
 	const char *, query_str)
@@ -1091,8 +1050,7 @@ XY_IMPL(unsigned, source_query,
 						char slug[256];
 						axil_slugify(
 						        f->value,
-						        strlen(f->value),
-						        slug,
+						        strlen(f->value), slug,
 						        sizeof(slug));
 						f->value = strdup(slug);
 						break;
@@ -1146,15 +1104,12 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 		    f->type == SOURCE_FIELD_MULTI_REFERENCE)
 		{
 			snprintf(
-			        buf,
-			        sizeof(buf),
-			        "{\"t\":%d,\"s\":\"%s\"}",
+			        buf, sizeof(buf), "{\"t\":%d,\"s\":\"%s\"}",
 			        (int)f->type,
 			        f->target_source ? f->target_source : "");
 		} else if (f->type == SOURCE_FIELD_INVERSE) {
 			snprintf(
-			        buf,
-			        sizeof(buf),
+			        buf, sizeof(buf),
 			        "{\"t\":%d,\"s\":\"%s\",\"i\":\"%s\"}",
 			        (int)f->type,
 			        f->target_source ? f->target_source : "",
@@ -1288,8 +1243,7 @@ XY_IMPL(int, source_def_to_meta_fields,
 }
 
 static int impl_source_build_state_specs(
-        const bud_field_desc_t *fields,
-        source_state_field_t *specs,
+        const bud_field_desc_t *fields, source_state_field_t *specs,
         int max_specs)
 {
 	int i = 0;
@@ -1455,4 +1409,45 @@ XY_IMPL(uint32_t, source_setup,
 	        .flags = flags,
 	});
 	return record_id;
+}
+
+XY_IMPL(int, source_respond_page_state,
+    int, fd,
+    const char *, dataset_id,
+    const char *, item_id,
+    const source_state_field_t *, specs,
+    const void *, state_struct,
+    const struct bud_field_desc *, overlay_fields,
+    void *, custom_overlay_fn_ptr,
+    void *, user_data)
+{
+	void (*custom_overlay_fn)(struct json_object *, void *) =
+	        custom_overlay_fn_ptr;
+	json_object *jo = NULL;
+	int rc = source_build_state_json(dataset_id, item_id, specs, &jo);
+	if (rc != 0 || !jo) {
+		if (jo)
+			json_object_put(jo);
+		return respond_error(fd, 404, "Not found");
+	}
+
+	if (state_struct && overlay_fields) {
+		source_overlay_from_desc(
+		        jo, state_struct, overlay_fields, 3, 4);
+	}
+
+	if (custom_overlay_fn) {
+		custom_overlay_fn(jo, user_data);
+	}
+
+	const char *json_str = json_object_to_json_string_ext(jo, 0);
+	char *json = strdup(json_str ? json_str : "{}");
+	json_object_put(jo);
+
+	if (!json)
+		return respond_error(fd, 500, "OOM");
+
+	rc = respond_json(fd, 200, json);
+	free(json);
+	return rc;
 }

@@ -45,7 +45,7 @@ Deno.test("songbook randomize: create songbook → seed data → click randomize
     });
     if (seedResp.status >= 400) throw new Error(`Seed song failed: ${seedResp.status}`);
     await seedResp.body?.cancel();
-    const repoId = `${choirId}_${SEED_SONG_ID}`;
+    const repoId = `${SEED_SONG_ID}`;
 
     // ── 1. Create songbook linked to the choir ────────────────────────────
     const sbTitle = `Randomize Test ${Date.now()}`;

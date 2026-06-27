@@ -41,68 +41,55 @@ static int poem_add_get_handler(int fd, char *body)
 	        fd, user, "poem", "\xf0\x9f\x93\x9d", form);
 }
 
-static int poem_edit_get_handler(int fd, char *body)
+static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
-	char id[128] = { 0 };
-	const char *user;
-	char item_path_buf[512];
-
-	if (check_item_access(
-	            fd,
-	            "poem",
-	            id,
-	            sizeof(id),
-	            &user,
-	            item_path_buf,
-	            sizeof(item_path_buf)))
-		return 1;
-
+	(void)user;
 	poem_cache_t meta;
-	poem_meta_read(item_path_buf, &meta);
+	poem_meta_read(ctx->item_path, &meta);
 
 	const char *csrf_token = csrf_setup(fd);
 
-	bud_node *form = poem_form_content(1, id, &meta, csrf_token);
+	bud_node *form = poem_form_content(1, ctx->id, &meta, csrf_token);
 	return site_ui_respond_edit_page(
-	        fd, user, "poem", "\xf0\x9f\x93\x9d", meta.title, id, form);
+	        fd, ctx->username, "poem", "\xf0\x9f\x93\x9d", meta.title,
+	        ctx->id, form);
 }
 
-static int poem_detail_handler(int fd, char *body)
+static int poem_edit_get_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd, body, "items/poem/items",
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL,
+	        poem_edit_auth, NULL);
+}
+
+static int
+poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
-	char id[128] = { 0 };
-	const char *user = get_request_user(fd);
+	(void)user_data;
 	char path[256];
 	char page_title[512];
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
-	if (!id[0])
-		return bad_request(fd, "Missing ID");
-
-	char item_path_buf[512];
-	if (item_path_build(
-	            fd, "poem", id, item_path_buf, sizeof(item_path_buf)) != 0)
-		return server_error(fd, "Failed to resolve path");
-
 	poem_cache_t meta;
-	poem_meta_read(item_path_buf, &meta);
+	poem_meta_read(ctx->item_path, &meta);
 
 	if (!meta.title[0])
 		return respond_error(fd, 404, "Poem not found");
 
 	char content_path[PATH_MAX];
 	item_child_path(
-	        item_path_buf,
-	        "pt_PT.html",
-	        content_path,
+	        ctx->item_path, "pt_PT.html", content_path,
 	        sizeof(content_path));
 	char *body_content = slurp_file(content_path);
 	if (!body_content)
 		body_content = strdup("");
 
-	int is_owner = (user && user[0] && strcmp(user, meta.owner) == 0);
-	snprintf(path, sizeof(path), "/poem/%s", id);
+	int is_owner =
+	        (ctx->username && ctx->username[0] &&
+	         strcmp(ctx->username, meta.owner) == 0);
+	snprintf(path, sizeof(path), "/poem/%s", ctx->id);
 	snprintf(page_title, sizeof(page_title), "poem: %s", meta.title);
 
 	bud_node *frag = poem_render_detail_body(body_content, meta.owner);
@@ -112,14 +99,17 @@ static int poem_detail_handler(int fd, char *body)
 		return server_error(fd, "OOM");
 
 	bud_node *layout = site_ui_layout(
-	        page_title,
-	        path,
-	        "\xf0\x9f\x93\x9d",
-	        user,
-	        site_ui_item_menu("poem", id, is_owner),
-	        frag);
+	        page_title, path, "\xf0\x9f\x93\x9d", ctx->username,
+	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
 
 	return site_ui_respond_page(fd, page_title, NULL, "poem", layout);
+}
+
+static int poem_detail_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd, body, "items/poem/items", 0, NULL, NULL, poem_detail_auth,
+	        NULL);
 }
 
 void xy_install(void)
@@ -127,21 +117,14 @@ void xy_install(void)
 	xy_load("./mods/index/index");
 
 	source_setup(
-	        "poem.items",
-	        NULL,
-	        sizeof(poem_cache_t),
-	        "items/poem/items",
-	        poem_fields,
-	        POEM_FIELD_COUNT,
-	        0);
+	        "poem.items", NULL, sizeof(poem_cache_t), "items/poem/items",
+	        poem_fields, POEM_FIELD_COUNT, 0);
 
-	index_open(
-	        "Poem",
-	        "poem.items",
-	        NULL,
-	        poem_detail_handler,
-	        NULL,
-	        poem_edit_get_handler,
-	        NULL);
-	axil_register_handler("GET:/poem/add", poem_add_get_handler);
+	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL);
+	standard_item_handlers_t handlers = {
+		.detail = poem_detail_handler,
+		.add_get = poem_add_get_handler,
+		.edit_get = poem_edit_get_handler,
+	};
+	register_standard_item_handlers("poem", &handlers);
 }

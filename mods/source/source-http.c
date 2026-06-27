@@ -9,6 +9,7 @@
 #include <ttypt/qmap.h>
 #include "../mpfd/mpfd.h"
 #include "../common/common.h"
+#include "../index/index.h"
 #include "source.h"
 
 /* -----------------------------------------------------------------------
@@ -141,9 +142,7 @@ enum {
 };
 
 static int source_write_init(
-        int fd,
-        char *body,
-        const source_def_t **out_def,
+        int fd, char *body, const source_def_t **out_def,
         const char **out_username)
 {
 	char dataset_id[128] = { 0 };
@@ -195,8 +194,7 @@ static json_object *source_build_fields_json(const source_def_t *def)
 		        jo, "name", json_object_new_string(f->name));
 		str = field_type_name(f->type);
 		json_object_object_add(
-		        jo,
-		        "type",
+		        jo, "type",
 		        json_object_new_string(str ? str : "unknown"));
 		json_object_object_add(
 		        jo, "writable", json_object_new_boolean(f->writable));
@@ -210,28 +208,23 @@ static json_object *source_build_fields_json(const source_def_t *def)
 			        jo, "max", json_object_new_int64(f->max));
 		if (f->min_length)
 			json_object_object_add(
-			        jo,
-			        "minLength",
+			        jo, "minLength",
 			        json_object_new_int64(f->min_length));
 		if (f->max_length)
 			json_object_object_add(
-			        jo,
-			        "maxLength",
+			        jo, "maxLength",
 			        json_object_new_int64(f->max_length));
 		if (f->pattern)
 			json_object_object_add(
-			        jo,
-			        "pattern",
+			        jo, "pattern",
 			        json_object_new_string(f->pattern));
 		if (f->target_source)
 			json_object_object_add(
-			        jo,
-			        "targetSource",
+			        jo, "targetSource",
 			        json_object_new_string(f->target_source));
 		if (f->inverse_name)
 			json_object_object_add(
-			        jo,
-			        "inverseName",
+			        jo, "inverseName",
 			        json_object_new_string(f->inverse_name));
 		json_object_array_add(ja, jo);
 	}
@@ -258,9 +251,8 @@ static json_object *source_build_string_array(const char *input)
 				field_val = strndup(start, (size_t)(p - start));
 				if (field_val) {
 					json_object_array_add(
-					        ja,
-					        json_object_new_string(
-					                field_val));
+					        ja, json_object_new_string(
+					                    field_val));
 					free(field_val);
 				}
 				p++;
@@ -282,8 +274,7 @@ static json_object *source_build_string_array(const char *input)
 }
 
 static json_object *source_build_inverse_array(
-        const source_def_t *def,
-        const source_field_t *field,
+        const source_def_t *def, const source_field_t *field,
         const char *item_id)
 {
 	if (!field->target_source || !field->inverse_name)
@@ -315,11 +306,8 @@ static json_object *source_build_inverse_array(
 }
 
 static int source_build_rows_json(
-        const source_def_t *def,
-        const char *qs,
-        const char *include,
-        int *out_total_rows,
-        json_object **out_rows_ja)
+        const source_def_t *def, const char *qs, const char *include,
+        int *out_total_rows, json_object **out_rows_ja)
 {
 	unsigned result_hd;
 	json_object *ja;
@@ -385,29 +373,25 @@ static int source_build_rows_json(
 			case SOURCE_FIELD_STRING:
 				if (val)
 					json_object_object_add(
-					        jo,
-					        f->name,
+					        jo, f->name,
 					        json_object_new_string(val));
 				break;
 			case DATASET_FIELD_NULLABLE_STRING:
 				if (val && val[0])
 					json_object_object_add(
-					        jo,
-					        f->name,
+					        jo, f->name,
 					        json_object_new_string(val));
 				break;
 			case DATASET_FIELD_INT:
 				if (val)
 					json_object_object_add(
-					        jo,
-					        f->name,
+					        jo, f->name,
 					        json_object_new_int(atoi(val)));
 				break;
 			case DATASET_FIELD_BOOL:
 				if (val)
 					json_object_object_add(
-					        jo,
-					        f->name,
+					        jo, f->name,
 					        json_object_new_boolean(
 					                strcmp(val, "1") == 0 ||
 					                strcmp(val, "true") ==
@@ -416,16 +400,14 @@ static int source_build_rows_json(
 			case SOURCE_FIELD_REFERENCE:
 				if (val)
 					json_object_object_add(
-					        jo,
-					        f->name,
+					        jo, f->name,
 					        json_object_new_string(val));
 				break;
 			case SOURCE_FIELD_MULTI_REFERENCE: {
 				json_object *arr;
 				arr = source_build_string_array(val);
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        arr ? arr : json_object_new_array());
 				break;
 			}
@@ -434,8 +416,7 @@ static int source_build_rows_json(
 				arr = source_build_inverse_array(
 				        def, f, item_id);
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        arr ? arr : json_object_new_array());
 				break;
 			}
@@ -472,29 +453,25 @@ int source_build_item_json(
 		case SOURCE_FIELD_STRING:
 			if (val)
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        json_object_new_string(val));
 			break;
 		case DATASET_FIELD_NULLABLE_STRING:
 			if (val && val[0])
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        json_object_new_string(val));
 			break;
 		case DATASET_FIELD_INT:
 			if (val)
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        json_object_new_int(atoi(val)));
 			break;
 		case DATASET_FIELD_BOOL:
 			if (val)
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        json_object_new_boolean(
 				                strcmp(val, "1") == 0 ||
 				                strcmp(val, "true") == 0));
@@ -502,15 +479,13 @@ int source_build_item_json(
 		case SOURCE_FIELD_REFERENCE:
 			if (val)
 				json_object_object_add(
-				        jo,
-				        f->name,
+				        jo, f->name,
 				        json_object_new_string(val));
 			break;
 		case SOURCE_FIELD_MULTI_REFERENCE: {
 			json_object *arr = source_build_string_array(val);
 			json_object_object_add(
-			        jo,
-			        f->name,
+			        jo, f->name,
 			        arr ? arr : json_object_new_array());
 			break;
 		}
@@ -518,8 +493,7 @@ int source_build_item_json(
 			json_object *arr =
 			        source_build_inverse_array(def, f, item_id);
 			json_object_object_add(
-			        jo,
-			        f->name,
+			        jo, f->name,
 			        arr ? arr : json_object_new_array());
 			break;
 		}
@@ -531,12 +505,8 @@ int source_build_item_json(
 }
 
 static int source_build_json(
-        const source_def_t *def,
-        const char *qs,
-        const char *include,
-        int page,
-        int per_page,
-        char **out_json)
+        const source_def_t *def, const char *qs, const char *include, int page,
+        int per_page, char **out_json)
 {
 	json_object *fields_ja;
 	json_object *rows_ja;
@@ -577,12 +547,10 @@ static int source_build_json(
 		json_object_object_add(
 		        jo, "keyField", json_object_new_string(def->key_field));
 		json_object_object_add(
-		        jo,
-		        "fields",
+		        jo, "fields",
 		        fields_ja ? fields_ja : json_object_new_array());
 		json_object_object_add(
-		        jo,
-		        "rows",
+		        jo, "rows",
 		        rows_ja ? rows_ja : json_object_new_array());
 		json_object_object_add(jo, "pagination", pjo);
 
@@ -711,6 +679,14 @@ static int source_post_handler(int fd, char *body)
 	if (rc != 0)
 		return respond_json_error(fd, 500, "Create failed");
 
+	char doc_root[256] = { 0 };
+	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));
+	char owner_path[PATH_MAX];
+	snprintf(
+	        owner_path, sizeof(owner_path), "%s/%s/%s", root,
+	        def->items_path, id);
+	item_record_ownership(owner_path, username);
+
 	char resp[256];
 	snprintf(resp, sizeof(resp), "{\"%s\":\"%s\"}", def->key_field, id);
 	return respond_json(fd, 201, resp);
@@ -786,13 +762,10 @@ static int inv_guard_cb(const source_def_t *target, void *user)
 		        target->fields_hd, f->name, ctx->item_pos, inv_buf, 16);
 		if (count > 0) {
 			snprintf(
-			        ctx->err_buf,
-			        ctx->err_cap,
+			        ctx->err_buf, ctx->err_cap,
 			        "Cannot delete '%s': "
 			        "referenced by %zu item(s) in %s",
-			        ctx->item_id,
-			        count,
-			        target->id);
+			        ctx->item_id, count, target->id);
 			return 1;
 		}
 	}
@@ -910,9 +883,7 @@ int source_http_get_item_json(
 /* ── State JSON builder ──────────────────────────────────────────── */
 
 static void source_resolve_ref_display(
-        json_object *jo,
-        const source_def_t *def,
-        const source_field_t *f,
+        json_object *jo, const source_def_t *def, const source_field_t *f,
         const char *item_id)
 {
 	char result[4096] = { 0 };
@@ -928,10 +899,8 @@ static void source_resolve_ref_display(
 }
 
 int source_http_build_state_json(
-        const char *dataset_id,
-        const char *item_id,
-        const source_state_field_t *specs,
-        json_object **out)
+        const char *dataset_id, const char *item_id,
+        const source_state_field_t *specs, json_object **out)
 {
 	const source_def_t *def;
 	json_object *jo;
@@ -988,8 +957,7 @@ int source_http_state_overlay(json_object *jo, const source_state_kv_t *kvs)
 			        jo, kv->key, json_object_new_int(kv->int_val));
 		else
 			json_object_object_add(
-			        jo,
-			        kv->key,
+			        jo, kv->key,
 			        json_object_new_string(
 			                kv->str_val ? kv->str_val : ""));
 	}

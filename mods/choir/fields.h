@@ -28,49 +28,10 @@ static const bud_field_desc_t choir_fields[] = {
 	REC_FIELD(format, choir_cache_t, format, 2048, 1, 0, 0, 1),
 	EXCL_FIELD(owner, choir_cache_t, owner, 32, BUD_QM_STR, 1),
 	INVERSE_FIELD(songbooks, "songbook.items", "choir"),
-	INVERSE_FIELD(repertoire, "choir.repertoire", "choir"),
+	INVERSE_FIELD(repertoire, "choir.songs", "choir"),
 	FIELD_END
 };
 
 #define CHOIR_FIELD_COUNT (sizeof(choir_fields) / sizeof(choir_fields[0]) - 1)
-
-/* ── Choir repertoire ────────────────────────────────────── */
-
-typedef struct {
-	char id[64];
-	char song[128];
-	char transpose[16];
-	char format[64];
-	char choir[128];
-} choir_repertoire_cache_t;
-
-static const bud_field_desc_t choir_repertoire_fields[] = {
-	REC_FIELD(id, choir_repertoire_cache_t, id, 64, 1, 0, 0, 0),
-	REF_FIELD(
-	        song,
-	        choir_repertoire_cache_t,
-	        song,
-	        128,
-	        "song.items",
-	        "in_choir_repertoire",
-	        0),
-	REC_FIELD(
-	        transpose, choir_repertoire_cache_t, transpose, 16, 1, 0, 0, 0),
-	REC_FIELD(format, choir_repertoire_cache_t, format, 64, 1, 0, 0, 0),
-	REF_FIELD(
-	        choir,
-	        choir_repertoire_cache_t,
-	        choir,
-	        128,
-	        "choir.items",
-	        "repertoire",
-	        0),
-	FIELD_END
-};
-
-#define CHOIR_REPERTOIRE_FIELD_COUNT                                           \
-	(sizeof(choir_repertoire_fields) /                                     \
-	         sizeof(choir_repertoire_fields[0]) -                          \
-	 1)
 
 #endif

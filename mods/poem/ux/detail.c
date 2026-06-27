@@ -4,8 +4,7 @@ static bud_node *poem_render_detail_body(const char *content, const char *owner)
 	if (owner && owner[0])
 		snprintf(owner_text, sizeof(owner_text), "By %s", owner);
 
-	return lx_el("div",
-	             lx_attr("class", "flex flex-col gap-4"),
+	return lx_el("div", lx_attr("class", "flex flex-col gap-4"),
 	             lx_el("div",
 	                   lx_attr("class",
 	                           "poem-body bg-surface p-6 rounded "

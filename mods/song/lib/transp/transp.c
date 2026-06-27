@@ -29,6 +29,7 @@ struct space_queue {
 struct transp_ctx {
 	int chord_db;      /* qmap handle for chord lookup */
 	int special_db;    /* qmap handle for special symbols */
+	int paren_db;      /* qmap handle for paren word lookup */
 	unsigned key;      /* Detected key (0-11 or -1) */
 	char **i18n_table; /* chromatic_en or chromatic_latin */
 	TAILQ_HEAD(queue_head, space_queue)
@@ -145,8 +146,8 @@ static void special_db_init(int hd, char **table)
 		qmap_put(hd, table[u], &special_sentinel);
 }
 
-/* Return 1 if every byte in s[0..len) is a valid chord modifier character */
-static int valid_modifier(const char *s, size_t len)
+/* Return 1 if s[0..len) is a valid chord modifier suffix */
+static int valid_modifier(const char *s, size_t len, int paren_db)
 {
 	for (size_t i = 0; i < len; i++) {
 		char c = s[i];
@@ -156,7 +157,36 @@ static int valid_modifier(const char *s, size_t len)
 			continue;
 		if (c == 'm' || c == 'M' || c == 'h' || c == 'a' || c == 'j' ||
 		    c == 'd' || c == 'i' || c == 'u' || c == 'g' || c == 's' ||
-		    c == 'n' || c == '+' || c == '(' || c == ')' || c == '/')
+		    c == 'n' || c == '+' || c == '/')
+			continue;
+		if (c == '(') {
+			i++;
+			while (i < len && s[i] != ')') {
+				if (isalpha((unsigned char)s[i])) {
+					size_t start = i;
+					while (i < len &&
+					       isalpha((unsigned char)s[i]))
+						i++;
+					size_t wlen = i - start;
+					char buf[16];
+					if (wlen >= sizeof(buf))
+						return 0;
+					memcpy(buf, s + start, wlen);
+					buf[wlen] = '\0';
+					if (!qmap_get(paren_db, buf))
+						return 0;
+				} else if (
+				        (s[i] >= '0' && s[i] <= '9') ||
+				        s[i] == '#' || s[i] == 'b')
+					i++;
+				else
+					return 0;
+			}
+			if (i >= len || s[i] != ')')
+				return 0;
+			continue;
+		}
+		if (c == ')')
 			continue;
 		return 0;
 	}
@@ -206,10 +236,7 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 				char esc[64];
 				html_escape_into(s, esc, sizeof(esc), len);
 				si += outprintf(
-				        outbuf,
-				        sizeof(outbuf),
-				        si,
-				        "<b>%s</b>",
+				        outbuf, sizeof(outbuf), si, "<b>%s</b>",
 				        esc);
 			}
 			s += len;
@@ -247,18 +274,12 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 				html_escape_into(
 				        s, esc, sizeof(esc), strlen(s));
 				o += outprintf(
-				        outbuf,
-				        sizeof(outbuf),
-				        o - outbuf,
-				        "<b class='comment'>%s</b>",
-				        esc);
+				        outbuf, sizeof(outbuf), o - outbuf,
+				        "<b class='comment'>%s</b>", esc);
 			} else
 				o += outprintf(
-				        outbuf,
-				        sizeof(outbuf),
-				        o - outbuf,
-				        "%s",
-				        s);
+				        outbuf, sizeof(outbuf), o - outbuf,
+				        "%s", s);
 			s += strlen(s);
 			continue;
 		}
@@ -348,7 +369,8 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 		 * chord_db instead, so any known root name (English, Latin,
 		 * with or without accidentals) is accepted. */
 		if (!is_special) {
-			int mod_valid = valid_modifier(eoc, modlen);
+			int mod_valid =
+			        valid_modifier(eoc, modlen, ctx->paren_db);
 			if (!mod_valid && eoc[0] == '/') {
 				size_t blen = modlen - 1;
 				char bass[16];
@@ -380,6 +402,10 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 			o += outprintf(
 			        outbuf, sizeof(outbuf), o - outbuf, "%s", buf);
 			s += modlen;
+			/* Consume repeat-bracket digits: |1, |2, |10, etc. */
+			if (buf[0] == '|')
+				while (isdigit((unsigned char)*s))
+					*o++ = *s++;
 			continue;
 		}
 
@@ -403,11 +429,7 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 
 		/* Output transposed chord */
 		o += outprintf(
-		        outbuf,
-		        sizeof(outbuf),
-		        o - outbuf,
-		        "%s%s",
-		        new_cstr,
+		        outbuf, sizeof(outbuf), o - outbuf, "%s%s", new_cstr,
 		        buf);
 
 		/* Add space if needed */
@@ -560,8 +582,9 @@ transp_ctx_t *transp_init(void)
 	/* Create in-memory qmap databases */
 	ctx->chord_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0x1F, 0);
 	ctx->special_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0xF, 0);
+	ctx->paren_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0xF, 0);
 
-	if (ctx->chord_db < 0 || ctx->special_db < 0) {
+	if (ctx->chord_db < 0 || ctx->special_db < 0 || ctx->paren_db < 0) {
 		free(ctx);
 		return NULL;
 	}
@@ -573,6 +596,12 @@ transp_ctx_t *transp_init(void)
 	chord_db_init(ctx->chord_db, chromatic_en);
 	chord_db_init(ctx->chord_db, chromatic_latin);
 	special_db_init(ctx->special_db, special);
+	{
+		static char *paren_words[] = {
+			"no", "add", "sus", "maj", "dim", "aug", "omit", NULL,
+		};
+		special_db_init(ctx->paren_db, paren_words);
+	}
 
 	TAILQ_INIT(&ctx->queue);
 	ctx->key = -1;
@@ -688,6 +717,8 @@ void transp_free(transp_ctx_t *ctx)
 		qmap_close(ctx->chord_db);
 	if (ctx->special_db >= 0)
 		qmap_close(ctx->special_db);
+	if (ctx->paren_db >= 0)
+		qmap_close(ctx->paren_db);
 
 	while (!TAILQ_EMPTY(&ctx->queue)) {
 		struct space_queue *elem = TAILQ_FIRST(&ctx->queue);

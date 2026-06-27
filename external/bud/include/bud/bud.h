@@ -26,17 +26,11 @@ typedef struct bud_node bud_node;
 typedef struct bud_runtime bud_runtime;
 
 typedef int (*bud_emit_fn)(
-        void *user,
-        const char *op,
-        const char *a,
-        const char *b,
+        void *user, const char *op, const char *a, const char *b,
         const char *c);
 
 typedef int (*bud_hydrate_lookup_fn)(
-        void *user,
-        unsigned int id,
-        const char **kind,
-        const char **tag,
+        void *user, unsigned int id, const char **kind, const char **tag,
         const char **text);
 
 typedef void (*bud_runtime_invalidate_fn)(void *user, bud_runtime *runtime);
@@ -59,19 +53,11 @@ typedef void (*bud_lifecycle_fn)(
 typedef int (*bud_walk_enter_fn)(
         void *user, const bud_node *node, size_t depth);
 typedef int (*bud_walk_attr_fn)(
-        void *user,
-        const bud_node *node,
-        size_t depth,
-        size_t index,
-        const char *name,
-        const char *value);
+        void *user, const bud_node *node, size_t depth, size_t index,
+        const char *name, const char *value);
 typedef int (*bud_walk_listener_fn)(
-        void *user,
-        const bud_node *node,
-        size_t depth,
-        size_t index,
-        const char *event,
-        int bubbles);
+        void *user, const bud_node *node, size_t depth, size_t index,
+        const char *event, int bubbles);
 typedef int (*bud_walk_leave_fn)(
         void *user, const bud_node *node, size_t depth);
 
@@ -107,16 +93,14 @@ int bud_toggle_class(bud_node *node, const char *cls);
 int bud_detach(bud_node *node);
 int bud_on(bud_node *node, const char *event, int bubbles);
 int bud_bind(
-        bud_node *node,
-        const char *event,
-        int bubbles,
+        bud_node *node, const char *event, int bubbles,
         bud_event_handler_fn handler);
+
+/* Universal API action dispatcher */
+int bud_api_action_handler(bud_event *event);
 int bud_set_lifecycle(
-        bud_node *node,
-        bud_lifecycle_fn on_mount,
-        bud_lifecycle_fn on_update,
-        bud_lifecycle_fn on_unmount,
-        void *user);
+        bud_node *node, bud_lifecycle_fn on_mount, bud_lifecycle_fn on_update,
+        bud_lifecycle_fn on_unmount, void *user);
 int bud_append(bud_node *parent, bud_node *child);
 
 bud_node_kind bud_node_kind_of(const bud_node *node);
@@ -154,9 +138,7 @@ int bud_runtime_mount(bud_runtime *runtime);
 int bud_runtime_update(bud_runtime *runtime);
 int bud_runtime_unmount(bud_runtime *runtime);
 int bud_runtime_dispatch(
-        bud_runtime *runtime,
-        bud_node *target,
-        const char *event,
+        bud_runtime *runtime, bud_node *target, const char *event,
         void *event_user);
 void bud_event_stop_propagation(bud_event *event);
 void bud_event_prevent_default(bud_event *event);
@@ -169,6 +151,9 @@ void bud_json_str(
         const char *json, const char *key, char *out, size_t out_size);
 int bud_json_int(const char *json, const char *key, int default_val);
 void bud_json_data(const char *json, char *out, size_t out_size);
+int bud_json_array_for_each(
+        const char *json, void (*fn)(const char *elem, size_t len, void *user),
+        void *user);
 
 /* Table-driven state: one field definition drives wasm_init, wasm_set_* */
 typedef struct bud_field_desc {
@@ -196,6 +181,9 @@ typedef struct bud_field_desc {
 
 void bud_state_apply(
         void *state, const bud_field_desc_t *fields, const char *json);
+void bud_state_apply_array(
+        const char *json, const char *key, void *array_out, size_t elem_size,
+        int *count_out, int max_elems, const bud_field_desc_t *schema);
 
 /* Debug helpers — available in all builds, most useful with BUD_DEBUG */
 void bud_node_set_src(bud_node *node, const char *file, int line);

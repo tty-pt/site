@@ -1,3 +1,5 @@
+#ifndef SITE_UI_C
+#define SITE_UI_C
 #include "site_ui.h"
 #include "bud/bud_app.h"
 #include <string.h>
@@ -68,10 +70,7 @@ void site_ui_item_path(
 }
 
 void item_action_path(
-        const char *module,
-        const char *id,
-        const char *action,
-        char *buf,
+        const char *module, const char *id, const char *action, char *buf,
         size_t len)
 {
 	snprintf(buf, len, "/%s/%s/%s", module, id, action);
@@ -98,62 +97,14 @@ void login_href(const char *ret, char *buf, size_t len)
 	snprintf(buf, len, "/auth/login?ret=%s", encoded);
 }
 
-/* ── Shared key name tables ─────────────────────────── */
-static const char *KEY_NAMES[] = { "C",  "C#", "D",  "D#", "E",  "F",
-	                           "F#", "G",  "G#", "A",  "A#", "B" };
-static const char *KEY_NAMES_B[] = { "C",  "Db", "D",  "Eb", "E",  "F",
-	                             "Gb", "G",  "Ab", "A",  "Bb", "B" };
-static const char *KEY_NAMES_LATIN[] = { "Do",   "Do#", "Re",  "Re#",
-	                                 "Mi",   "Fa",  "Fa#", "Sol",
-	                                 "Sol#", "La",  "La#", "Si" };
-static const char *KEY_NAMES_BL[] = {
-	"Do",   "Reb", "Re",  "Mib", "Mi",  "Fa",
-	"Solb", "Sol", "Lab", "La",  "Sib", "Si"
-};
-
-const char *key_name(int semitones, int orig_key, int bemol, int latin)
-{
-	static char buf[64];
-	const char **table = KEY_NAMES;
-	if (bemol && latin)
-		table = KEY_NAMES_BL;
-	else if (bemol)
-		table = KEY_NAMES_B;
-	else if (latin)
-		table = KEY_NAMES_LATIN;
-	int idx = ((orig_key + semitones) % 12 + 12) % 12;
-	if (semitones == 0)
-		snprintf(buf, sizeof(buf), "%s (Original)", table[idx]);
-	else
-		snprintf(buf, sizeof(buf), "%s (%+d)", table[idx], semitones);
-	return buf;
-}
-
-const char *target_key_name(int orig_key, int transpose, int flags)
-{
-	int bemol = (flags & 0x08) ? 1 : 0;
-	int latin = (flags & 0x80) ? 1 : 0;
-	const char **kt = KEY_NAMES;
-	if (bemol && latin)
-		kt = KEY_NAMES_BL;
-	else if (bemol)
-		kt = KEY_NAMES_B;
-	else if (latin)
-		kt = KEY_NAMES_LATIN;
-	int idx = ((orig_key + transpose) % 12 + 12) % 12;
-	return kt[idx];
-}
-
 /* ── Zoom helpers (WASM-safe) ──────────────────────── */
 
 void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom)
 {
 	char style[64], zoom_str[16], zoom_pct[16];
 	snprintf(
-	        style,
-	        sizeof(style),
-	        "width:100%%;max-width:100%%;--chord-zoom:%d",
-	        zoom);
+	        style, sizeof(style),
+	        "width:100%%;max-width:100%%;--chord-zoom:%d", zoom);
 	snprintf(zoom_str, sizeof(zoom_str), "%d", zoom);
 	snprintf(zoom_pct, sizeof(zoom_pct), "%d%%", zoom);
 	bud_patch_attr(main_node, "style", style);
@@ -163,19 +114,17 @@ void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom)
 }
 
 int ui_on_zoom_change(
-        bud_event *event,
-        int *zoom_out,
-        bud_node *main_node,
+        bud_event *event, int *zoom_out, bud_node *main_node,
         bud_node *zoom_label)
 {
 	const char *value = (const char *)event->user;
 	if (!value)
 		return 0;
 	int z = atoi(value);
-	if (z < 70)
-		z = 70;
-	else if (z > 170)
-		z = 170;
+	if (z < VIEWER_ZOOM_MIN)
+		z = VIEWER_ZOOM_MIN;
+	else if (z > VIEWER_ZOOM_MAX)
+		z = VIEWER_ZOOM_MAX;
 	*zoom_out = z;
 	ui_apply_zoom(main_node, zoom_label, z);
 	return 0;
@@ -199,26 +148,20 @@ bud_node *site_ui_menu(const char *user, const char *path, const char *icon)
 	}
 
 	return lx_frag(is_home ? lx_none()
-	                       : lx_el("a",
-	                               lx_attr("class", "btn"),
-	                               lx_attr("href", up),
-	                               lx_text(icon),
+	                       : lx_el("a", lx_attr("class", "btn"),
+	                               lx_attr("href", up), lx_text(icon),
 	                               lx_text("go up")),
 	               (user && user[0])
-	                       ? lx_frag(lx_el("a",
-	                                       lx_attr("class", "btn"),
+	                       ? lx_frag(lx_el("a", lx_attr("class", "btn"),
 	                                       lx_attr("href", me_href),
 	                                       lx_text("😊 me")),
-	                                 lx_el("a",
-	                                       lx_attr("class", "btn"),
+	                                 lx_el("a", lx_attr("class", "btn"),
 	                                       lx_attr("href", "/auth/logout"),
 	                                       lx_text("🚪 logout")))
-	                       : lx_frag(lx_el("a",
-	                                       lx_attr("class", "btn"),
+	                       : lx_frag(lx_el("a", lx_attr("class", "btn"),
 	                                       lx_attr("href", login_buf),
 	                                       lx_text("🔑 login")),
-	                                 lx_el("a",
-	                                       lx_attr("class", "btn"),
+	                                 lx_el("a", lx_attr("class", "btn"),
 	                                       lx_attr("href", reg_href),
 	                                       lx_text("📝 register"))))
 	        .data.node;
@@ -234,29 +177,22 @@ bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
 	item_action_path(module, id, "edit", edit_href, sizeof(edit_href));
 	item_action_path(module, id, "delete", del_href, sizeof(del_href));
 
-	return lx_frag(lx_el("a",
-	                     lx_attr("class", "btn"),
-	                     lx_attr("href", edit_href),
-	                     lx_text("✏️ edit")),
-	               lx_el("a",
-	                     lx_attr("class", "btn"),
-	                     lx_attr("href", del_href),
-	                     lx_text("🗑️ delete")))
+	return lx_frag(lx_el("a", lx_attr("class", "btn"),
+	                     lx_attr("href", edit_href), lx_text("✏️ edit")),
+	               lx_el("a", lx_attr("class", "btn"),
+	                     lx_attr("href", del_href), lx_text("🗑️ delete")))
 	        .data.node;
 }
 
 bud_node *site_ui_form_actions(
         const char *cancel_href, const char *submit_label, bud_node *extra)
 {
-	return lx_el("div",
-	             lx_attr("class", "flex gap-2"),
-	             lx_el("button",
-	                   lx_attr("type", "submit"),
+	return lx_el("div", lx_attr("class", "flex gap-2"),
+	             lx_el("button", lx_attr("type", "submit"),
 	                   lx_attr("class", "btn btn-primary"),
 	                   lx_text(submit_label)),
 	             extra ? lx_node(extra) : lx_none(),
-	             lx_el("a",
-	                   lx_attr("href", cancel_href),
+	             lx_el("a", lx_attr("href", cancel_href),
 	                   lx_attr("class", "btn btn-secondary"),
 	                   lx_text("Cancel")))
 	        .data.node;
@@ -269,11 +205,8 @@ bud_node *site_ui_empty_state(const char *message)
 }
 
 bud_node *site_ui_viewer_controls(
-        const char *module,
-        int zoom,
-        const char *save_url,
-        bud_event_handler_fn on_zoom_change,
-        bud_node **zoom_text_out)
+        const char *module, int zoom, const char *save_url,
+        bud_event_handler_fn on_zoom_change, bud_node **zoom_text_out)
 {
 	char zoom_str[16];
 	char zoom_pct[16];
@@ -286,29 +219,26 @@ bud_node *site_ui_viewer_controls(
 
 	bud_arg zoom_input = lx_none();
 	if (on_zoom_change)
-		zoom_input = lx_bind("change", 0, on_zoom_change);
+		zoom_input =
+		        lx_frag(lx_bind("input", 0, on_zoom_change),
+		                lx_bind("change", 0, on_zoom_change));
 
-	return lx_el("div",
-	             lx_attr("class", "viewer-controls"),
+	return lx_el("div", lx_attr("class", "viewer-controls"),
 	             lx_attr("data-detail-viewer-controls", module),
 	             lx_attr("data-detail-viewer-save-url", save_url),
-	             lx_el("label",
-	                   lx_text("Zoom"),
-	                   lx_el("input",
-	                         lx_attr("type", "range"),
-	                         lx_attr("min", "70"),
-	                         lx_attr("max", "170"),
+	             lx_el("label", lx_text("Zoom"),
+	                   lx_el("input", lx_attr("type", "range"),
+	                         lx_attr("min", STR(VIEWER_ZOOM_MIN)),
+	                         lx_attr("max", STR(VIEWER_ZOOM_MAX)),
 	                         lx_attr("step", "10"),
 	                         lx_attr("value", zoom_str),
 	                         lx_attr("data-detail-viewer-zoom", "1"),
 	                         zoom_input)),
-	             lx_el("p",
-	                   lx_attr("class", "text-xs text-muted"),
+	             lx_el("p", lx_attr("class", "text-xs text-muted"),
 	                   lx_attr("data-detail-viewer-zoom-label", "1"),
 	                   lx_node(zoom_text_node)),
 	             lx_el("label",
-	                   lx_el("input",
-	                         lx_attr("type", "checkbox"),
+	                   lx_el("input", lx_attr("type", "checkbox"),
 	                         lx_attr("checked", "checked"),
 	                         lx_attr("data-detail-viewer-wrap", "1")),
 	                   lx_text("Wrap lines")))
@@ -318,9 +248,7 @@ bud_node *site_ui_viewer_controls(
 /* ── Shared checkbox builder ─────────────────────────── */
 
 bud_node *site_ui_checkbox(
-        const char *name,
-        const char *label,
-        int checked,
+        const char *name, const char *label, int checked,
         bud_event_handler_fn on_change)
 {
 	if (!name || !label)
@@ -331,10 +259,8 @@ bud_node *site_ui_checkbox(
 		bind = lx_bind("change", 0, on_change);
 
 	return lx_el("label",
-	             lx_el("input",
-	                   lx_attr("type", "checkbox"),
-	                   lx_attr("name", name),
-	                   bind,
+	             lx_el("input", lx_attr("type", "checkbox"),
+	                   lx_attr("name", name), lx_attr("value", "1"), bind,
 	                   checked ? lx_attr("checked", "") : lx_none()),
 	             lx_text(label))
 	        .data.node;
@@ -353,19 +279,15 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 
 	if (yt && yt[0]) {
 		snprintf(
-		        src,
-		        sizeof(src),
-		        "https://www.youtube.com/embed/%s",
+		        src, sizeof(src), "https://www.youtube.com/embed/%s",
 		        yt);
 		bud_append(
 		        inner,
 		        lx_el("div",
 		              lx_attr("class", "flex flex-col gap-4 w-full"),
-		              lx_el("iframe",
-		                    lx_attr("src", src),
-		                    lx_attr("class",
-		                            "w-full aspect-video "
-		                            "border-none"),
+		              lx_el("iframe", lx_attr("src", src),
+		                    lx_attr("class", "w-full aspect-video "
+		                                     "border-none"),
 		                    lx_attr("allowfullscreen", "")))
 		                .data.node);
 		has_media = 1;
@@ -376,11 +298,9 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		        inner,
 		        lx_el("div",
 		              lx_attr("class", "flex flex-col gap-4 w-full"),
-		              lx_el("audio",
-		                    lx_attr("controls", ""),
+		              lx_el("audio", lx_attr("controls", ""),
 		                    lx_attr("class", "w-full"),
-		                    lx_el("source",
-		                          lx_attr("src", audio),
+		                    lx_el("source", lx_attr("src", audio),
 		                          lx_attr("type", "audio/mpeg"))))
 		                .data.node);
 		has_media = 1;
@@ -391,8 +311,7 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		        inner,
 		        lx_el("div",
 		              lx_attr("class", "flex flex-col gap-4 w-full"),
-		              lx_el("a",
-		                    lx_attr("href", pdf),
+		              lx_el("a", lx_attr("href", pdf),
 		                    lx_attr("target", "_blank"),
 		                    lx_attr("rel", "noopener"),
 		                    lx_attr("class", "text-blue-600"),
@@ -410,27 +329,72 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	        .data.node;
 }
 
-bud_node *site_ui_layout(
-        const char *title,
-        const char *path,
-        const char *icon,
-        const char *user,
-        bud_node *menu_items,
-        bud_node *children)
+int site_ui_build_media_html(
+        const char *yt, const char *audio, const char *pdf, char *out,
+        size_t out_sz)
 {
-	return lx_frag(lx_el("main",
-	                     lx_attr("class", "main"),
+	char buf[8192];
+	int pos = 0;
+	int has = 0;
+
+#define APPEND(...)                                                            \
+	do {                                                                   \
+		int r = snprintf(                                              \
+		        buf + pos, sizeof(buf) - (size_t)pos, __VA_ARGS__);    \
+		if (r > 0)                                                     \
+			pos += r;                                              \
+		if ((size_t)pos >= sizeof(buf))                                \
+			goto done;                                             \
+	} while (0)
+
+	if (yt && yt[0]) {
+		char src[1024];
+		snprintf(
+		        src, sizeof(src), "https://www.youtube.com/embed/%s",
+		        yt);
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<iframe src=\"%s\" class=\"w-full aspect-video "
+		       "border-none\" allowfullscreen></iframe></div>",
+		       src);
+		has = 1;
+	}
+	if (audio && audio[0]) {
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<audio controls class=\"w-full\">"
+		       "<source src=\"%s\" type=\"audio/mpeg\">"
+		       "</audio></div>",
+		       audio);
+		has = 1;
+	}
+	if (pdf && pdf[0]) {
+		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		       "<a href=\"%s\" target=\"_blank\" rel=\"noopener\" "
+		       "class=\"text-blue-600\">View PDF</a></div>",
+		       pdf);
+		has = 1;
+	}
+#undef APPEND
+done:
+	if (has)
+		snprintf(out, out_sz, "%s", buf);
+	else
+		out[0] = '\0';
+	return has;
+}
+
+bud_node *site_ui_layout(
+        const char *title, const char *path, const char *icon, const char *user,
+        bud_node *menu_items, bud_node *children)
+{
+	return lx_frag(lx_el("main", lx_attr("class", "main"),
 	                     lx_el("h1", lx_text(title)),
 	                     children ? lx_node(children) : lx_none()),
-	               lx_el("nav",
-	                     lx_attr("class", "menu"),
-	                     lx_el("input",
-	                           lx_attr("id", "menu-functions"),
+	               lx_el("nav", lx_attr("class", "menu"),
+	                     lx_el("input", lx_attr("id", "menu-functions"),
 	                           lx_attr("name", "functions"),
 	                           lx_attr("type", "checkbox"),
 	                           lx_attr("class", "hidden")),
-	                     lx_el("label",
-	                           lx_attr("for", "menu-functions"),
+	                     lx_el("label", lx_attr("for", "menu-functions"),
 	                           lx_attr("class", "menu-overlay"),
 	                           lx_attr("aria-label", "Close Menu")),
 	                     lx_el("span",
@@ -486,16 +450,11 @@ bud_node *site_ui_layout(
 }
 
 bud_node *site_ui_form_page(
-        const char *user,
-        const char *title,
-        const char *path,
-        const char *icon,
-        const char *heading,
-        bud_node *children)
+        const char *user, const char *title, const char *path, const char *icon,
+        const char *heading, bud_node *children)
 {
 	bud_node *center =
-	        lx_el("div",
-	              lx_attr("class", "center"),
+	        lx_el("div", lx_attr("class", "center"),
 	              (heading && heading[0]) ? lx_el("h1", lx_text(heading))
 	                                      : lx_none(),
 	              children ? lx_node(children) : lx_none())
@@ -505,9 +464,7 @@ bud_node *site_ui_form_page(
 }
 
 bud_node *site_ui_delete_confirm(
-        const char *module,
-        const char *id,
-        const char *title,
+        const char *module, const char *id, const char *title,
         const char *csrf_token)
 {
 	char action_path[PATH_MAX];
@@ -516,19 +473,15 @@ bud_node *site_ui_delete_confirm(
 	        module, id, "delete", action_path, sizeof(action_path));
 	site_ui_item_path(module, id, cancel_path, sizeof(cancel_path));
 
-	return lx_el("div",
-	             lx_attr("class", "center"),
-	             lx_el("p",
-	                   lx_text("Are you sure you want to delete "),
+	return lx_el("div", lx_attr("class", "center"),
+	             lx_el("p", lx_text("Are you sure you want to delete "),
 	                   lx_el("strong",
 	                         lx_text((title && title[0]) ? title : id)),
 	                   lx_text("?")),
-	             lx_el("form",
-	                   lx_attr("method", "POST"),
+	             lx_el("form", lx_attr("method", "POST"),
 	                   lx_attr("action", action_path),
 	                   lx_attr("enctype", "multipart/form-data"),
-	                   lx_el("input",
-	                         lx_attr("type", "hidden"),
+	                   lx_el("input", lx_attr("type", "hidden"),
 	                         lx_attr("name", "csrf_token"),
 	                         lx_attr("value", csrf_token)),
 	                   lx_node(site_ui_form_actions(
@@ -537,9 +490,7 @@ bud_node *site_ui_delete_confirm(
 }
 
 bud_node *site_ui_add_form(
-        const char *module,
-        const char *csrf_token,
-        int has_error,
+        const char *module, const char *csrf_token, int has_error,
         const char *error_msg)
 {
 	char action[PATH_MAX];
@@ -548,21 +499,17 @@ bud_node *site_ui_add_form(
 	snprintf(cancel_href, sizeof(cancel_href), "/%s/", module);
 
 	return lx_frag((has_error && error_msg)
-	                       ? lx_el("p",
-	                               lx_attr("class", "text-error"),
+	                       ? lx_el("p", lx_attr("class", "text-error"),
 	                               lx_text(error_msg))
 	                       : lx_none(),
-	               lx_el("form",
-	                     lx_attr("action", action),
+	               lx_el("form", lx_attr("action", action),
 	                     lx_attr("method", "POST"),
 	                     lx_attr("enctype", "multipart/form-data"),
 	                     lx_attr("class", "flex flex-col gap-4"),
-	                     lx_el("input",
-	                           lx_attr("type", "hidden"),
+	                     lx_el("input", lx_attr("type", "hidden"),
 	                           lx_attr("name", "csrf_token"),
 	                           lx_attr("value", csrf_token)),
-	                     lx_el("label",
-	                           lx_text("Title:"),
+	                     lx_el("label", lx_text("Title:"),
 	                           lx_el("input", lx_attr("name", "title"))),
 	                     lx_node(site_ui_form_actions(
 	                             cancel_href, "Add", NULL))))
@@ -579,28 +526,23 @@ bud_node *site_ui_form_fields(
 		return NULL;
 
 	bud_append(
-	        frag,
-	        lx_el("input",
-	              lx_attr("type", "hidden"),
-	              lx_attr("name", "csrf_token"),
-	              lx_attr("value", csrf_token))
-	                .data.node);
+	        frag, lx_el("input", lx_attr("type", "hidden"),
+	                    lx_attr("name", "csrf_token"),
+	                    lx_attr("value", csrf_token))
+	                      .data.node);
 
 	for (const form_field_t *f = fields; f->name; f++) {
 		const char *val = values ? values[f - fields] : NULL;
 		if (f->type == 2) {
 			bud_append(
 			        frag,
-			        lx_el("label",
-			              lx_text(f->label),
-			              lx_el("input",
-			                    lx_attr("type", "file"),
+			        lx_el("label", lx_text(f->label),
+			              lx_el("input", lx_attr("type", "file"),
 			                    lx_attr("name", f->name)))
 			                .data.node);
 		} else if (f->type == 1) {
 			bud_node *ta =
-			        lx_el("textarea",
-			              lx_attr("name", f->name),
+			        lx_el("textarea", lx_attr("name", f->name),
 			              lx_attr("class", "font-mono w-full"))
 			                .data.node;
 			bud_append(ta, bud_raw(val ? val : ""));
@@ -611,10 +553,8 @@ bud_node *site_ui_form_fields(
 		} else {
 			bud_append(
 			        frag,
-			        lx_el("label",
-			              lx_text(f->label),
-			              lx_el("input",
-			                    lx_attr("type", "text"),
+			        lx_el("label", lx_text(f->label),
+			              lx_el("input", lx_attr("type", "text"),
 			                    lx_attr("name", f->name),
 			                    (val && val[0])
 			                            ? lx_attr("value", val)
@@ -626,9 +566,7 @@ bud_node *site_ui_form_fields(
 }
 
 char *site_ui_page(
-        const char *title,
-        const char *extra_head,
-        const char *module,
+        const char *title, const char *extra_head, const char *module,
         bud_node *body)
 {
 	char *body_html;
@@ -645,13 +583,10 @@ char *site_ui_page(
 
 	if (module && module[0]) {
 		snprintf(
-		        module_attr,
-		        sizeof(module_attr),
-		        " data-modules=\"%s\"",
-		        module);
+		        module_attr, sizeof(module_attr),
+		        " data-modules=\"%s\"", module);
 		snprintf(
-		        client_script,
-		        sizeof(client_script),
+		        client_script, sizeof(client_script),
 		        "<script type=\"module\" "
 		        "src=\"/bud-client.js\"></script>\n");
 	} else {
@@ -663,8 +598,7 @@ char *site_ui_page(
 		extra_head = "";
 
 	len = snprintf(
-	        NULL,
-	        0,
+	        NULL, 0,
 	        "<!DOCTYPE html>\n<html lang=\"pt\">\n<head>\n"
 	        "<meta charset=\"utf-8\">\n"
 	        "<meta name=\"viewport\" content=\"width=device-width, "
@@ -676,11 +610,7 @@ char *site_ui_page(
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
-	        title,
-	        extra_head,
-	        module_attr,
-	        body_html,
-	        client_script);
+	        title, extra_head, module_attr, body_html, client_script);
 
 	page = (char *)malloc((size_t)len + 1);
 	if (!page) {
@@ -689,8 +619,7 @@ char *site_ui_page(
 	}
 
 	snprintf(
-	        page,
-	        (size_t)len + 1,
+	        page, (size_t)len + 1,
 	        "<!DOCTYPE html>\n<html lang=\"pt\">\n<head>\n"
 	        "<meta charset=\"utf-8\">\n"
 	        "<meta name=\"viewport\" content=\"width=device-width, "
@@ -702,12 +631,9 @@ char *site_ui_page(
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
-	        title,
-	        extra_head,
-	        module_attr,
-	        body_html,
-	        client_script);
+	        title, extra_head, module_attr, body_html, client_script);
 
 	bud_free_string(body_html);
 	return page;
 }
+#endif

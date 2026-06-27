@@ -51,9 +51,7 @@ static void clear_error(void)
 
 /* Safe substring search that works even with binary data (embedded '\0') */
 static char *find_substr(
-        const char *haystack,
-        size_t hay_len,
-        const char *needle,
+        const char *haystack, size_t hay_len, const char *needle,
         size_t needle_len)
 {
 	if (needle_len == 0 || hay_len < needle_len)
@@ -88,10 +86,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 	       *bend != '\n')
 		bend++;
 	snprintf(
-	        boundary,
-	        sizeof(boundary),
-	        "--%.*s",
-	        (int)(bend - bstart),
+	        boundary, sizeof(boundary), "--%.*s", (int)(bend - bstart),
 	        bstart);
 
 	size_t blen = strlen(boundary);
@@ -198,9 +193,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 
 		/* Find next boundary line "\r\n--xxxx" */
 		char *next_sep = find_substr(
-		        data_start,
-		        data_remaining,
-		        boundary_crlf,
+		        data_start, data_remaining, boundary_crlf,
 		        strlen(boundary_crlf));
 		size_t data_len;
 		if (next_sep) {
@@ -219,8 +212,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 
 		if (data_len > mpfd_max_field_size) {
 			set_error(
-			        "Field '%s' too large (max %zu bytes)",
-			        key,
+			        "Field '%s' too large (max %zu bytes)", key,
 			        mpfd_max_field_size);
 			return -2;
 		}

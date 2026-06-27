@@ -35,7 +35,7 @@ Deno.test("songbook SSR: verify bolded chords and user prefs", async () => {
     });
     if (seedResp.status >= 400) throw new Error(`Seed song failed: ${seedResp.status}`);
     await seedResp.body?.cancel();
-    const repoId = `${choirId}_${SONG_ID}`;
+    const repoId = `${SONG_ID}`;
 
     // 1. Create a songbook linked to the choir
     const sbTitle = `SSR Test SB ${Date.now()}`;

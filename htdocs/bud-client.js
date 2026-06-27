@@ -10,7 +10,7 @@ async function init() {
 	if (!root) return;
 
 	try {
-		const res = await fetch(`/${module}_fe.wasm`);
+		const res = await fetch(`/${module}.wasm`);
 		const wasmBytes = await res.arrayBuffer();
 		const bridge = createBudWasmBridge(root);
 

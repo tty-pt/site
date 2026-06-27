@@ -23,5 +23,5 @@ ColumnLimit: 80
 Cpp11BracedListStyle: false
 SortIncludes: Never
 SpaceBeforeParens: ControlStatements
-BinPackParameters: false
-BinPackArguments: false
+BinPackParameters: true
+BinPackArguments: true

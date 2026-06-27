@@ -275,6 +275,50 @@ TEST(repeat_markers_second_song)
 	transp_free(ctx);
 }
 
+TEST(repeat_brackets_html)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result =
+	        transp_buffer(ctx, "|1 Bm7 C#7 |2 E/G# - |", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>"));
+	assert(str_contains(result, "</b>"));
+	assert(str_contains(result, "|1"));
+	assert(str_contains(result, "|2"));
+	assert(str_contains(result, "Bm7"));
+	assert(str_contains(result, "C#7"));
+	assert(str_contains(result, "E/G#"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(paren_chord_suffixes)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "A(no3)7 Dm", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>"));
+	assert(str_contains(result, "A(no3)7"));
+	assert(str_contains(result, "Dm"));
+	free(result);
+
+	result = transp_buffer(ctx, "C Dm G(omit3) Dm", 0, TRANSP_HTML);
+	assert(str_contains(result, "G(omit3)"));
+	free(result);
+
+	/* Unknown paren content must not become a chord */
+	result = transp_buffer(ctx, "C(not) Dm", 0, TRANSP_HTML);
+	assert(!str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 TEST(complex_song)
 {
 	transp_ctx_t *ctx = transp_init();
@@ -532,6 +576,8 @@ int main(void)
 	RUN_TEST(repeat_markers_html);
 	RUN_TEST(repeat_markers_transpose);
 	RUN_TEST(repeat_markers_second_song);
+	RUN_TEST(repeat_brackets_html);
+	RUN_TEST(paren_chord_suffixes);
 	RUN_TEST(complex_song);
 	RUN_TEST(html_escape_lyrics);
 	RUN_TEST(no_stray_close_bold_on_lyric_line);
