@@ -151,6 +151,13 @@ static int valid_modifier(const char *s, size_t len, int paren_db)
 {
 	for (size_t i = 0; i < len; i++) {
 		char c = s[i];
+		/* Augmented symbol º (U+00BA, UTF-8 C2 BA) — skip both bytes */
+		if ((unsigned char)c == 0xC2 && i + 1 < len &&
+		    (unsigned char)s[i + 1] == 0xBA)
+		{
+			i++;
+			continue;
+		}
 		if (c >= '0' && c <= '9')
 			continue;
 		if (c == '#' || c == 'b')
@@ -319,6 +326,10 @@ static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
 				    !strncmp(eoc, "add", 3) ||
 				    !strncmp(eoc, "maj", 3) ||
 				    !strncmp(eoc, "dim", 3))
+					break;
+				/* Augmented symbol º (U+00BA, UTF-8 C2 BA) */
+				if ((unsigned char)*eoc == 0xC2 &&
+				    (unsigned char)eoc[1] == 0xBA)
 					break;
 				goto no_chord;
 			}

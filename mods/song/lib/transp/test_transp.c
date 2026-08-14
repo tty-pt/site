@@ -557,6 +557,37 @@ TEST(invalid_slash_not_a_chord)
 	transp_free(ctx);
 }
 
+TEST(augmented_chord_bolded)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Cº is a valid chord — bolded with the º suffix preserved */
+	char *result = transp_buffer(ctx, "Cº Dº7 Eº", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Cº"));
+	assert(str_contains(result, "Dº7"));
+	assert(str_contains(result, "Eº"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(augmented_chord_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Cº Fº", 2, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Dº"));
+	assert(str_contains(result, "Gº"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -592,6 +623,8 @@ int main(void)
 	RUN_TEST(major7_notation);
 	RUN_TEST(major7_notation_transposed);
 	RUN_TEST(invalid_slash_not_a_chord);
+	RUN_TEST(augmented_chord_bolded);
+	RUN_TEST(augmented_chord_transposed);
 
 	printf("\nAll tests passed!\n");
 	return 0;

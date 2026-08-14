@@ -862,6 +862,11 @@ static void sb_parse_detail_prefs(
 				if (user && user[0])
 					song_set_viewer_zoom(user, zv);
 				*zoom = zv;
+			} else if (user && user[0]) {
+				*zoom = song_get_viewer_zoom(user);
+				if (*zoom < VIEWER_ZOOM_MIN ||
+				    *zoom > VIEWER_ZOOM_MAX)
+					*zoom = VIEWER_ZOOM_DEFAULT;
 			}
 		}
 	} else if (user && user[0]) {

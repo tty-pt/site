@@ -1,5 +1,7 @@
+HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
 EXTRA_CFLAGS += -I../common
-EXTRA_LDLIBS += -lbud -laxil-auth -ljson-c -lhyle
+EXTRA_LDLIBS += -lbud -laxil-auth -ljson-c
+EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
 
 # WASM targets must be defined before including build.mk so the shared
 # all:/wasm: rules can see them during parse time.

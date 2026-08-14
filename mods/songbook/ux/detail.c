@@ -258,6 +258,17 @@ static int on_sb_option_change(bud_event *event)
 		        sb_app_state.show_media ? 1 : 0, sb_app_state.zoom);
 		bud_host_set_location_fn(url, strlen(url));
 	}
+
+	/* Persist viewer settings to the shared song prefs (zoom, flats,
+	 * latin, video) so both modules stay in sync. */
+	if (bud_host_fetch_fn) {
+		char url[512];
+		snprintf(
+		        url, sizeof(url), "/api/song/prefs?b=%d&l=%d&m=%d&z=%d",
+		        sb_app_state.bemol ? 1 : 0, sb_app_state.latin ? 1 : 0,
+		        sb_app_state.show_media ? 1 : 0, sb_app_state.zoom);
+		bud_host_fetch_fn(url, strlen(url), 1);
+	}
 	return 0;
 }
 

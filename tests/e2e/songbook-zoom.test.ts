@@ -6,6 +6,8 @@
  *   2. View songbook page, verify zoom slider exists
  *   3. Change zoom via slider, verify data-zoom attribute
  *   4. Reload and verify zoom persists in SSR
+ *   5. Cross-module: songbook → song page (b/l/m/z via GET /api/song/prefs)
+ *   6. Cross-module: song page → songbook (transpose endpoint persists)
  *
  * Requires: axil running on :8080 with AUTH_SKIP_CONFIRM=1.
  */
@@ -149,6 +151,56 @@ Deno.test({
 
     if (Deno.env.get("DEBUG"))
       console.log(`Zoom SSR: ${zoomSsr}`);
+    if (zoomSsr !== "150") {
+      throw new Error(
+        `Zoom did not persist via SSR: expected 150, got ${zoomSsr}`,
+      );
+    }
+
+    // ── 6. Cross-module: songbook → song page ─────────────────────────────
+    // Toggle latin/video/flats on the songbook page; the WASM persists all
+    // four settings (b/l/m/z) via GET /api/song/prefs.
+    for (const name of ["l", "m", "b"]) {
+      await page.locator(`input[type="checkbox"][name="${name}"]`)
+        .evaluate((el) => {
+          (el as unknown as { checked: boolean }).checked = true;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    }
+    await page.waitForTimeout(600);
+
+    const pageSong = await contextNoJs.newPage();
+    await pageSong.goto(`${BASE}/song/${SONG_ID}`, GOTO);
+    const songZoom = await pageSong.getAttribute("#main", "data-zoom");
+    const songLatin = await pageSong.getAttribute("#main", "data-use-latin");
+    const songMedia = await pageSong.getAttribute("#main", "data-show-media");
+    const songBemol = await pageSong.getAttribute("#main", "data-use-bemol");
+    if (songZoom !== "150" || songLatin !== "1" || songMedia !== "1" ||
+        songBemol !== "1") {
+      throw new Error(
+        `Song page not synced from songbook: zoom=${songZoom} ` +
+        `latin=${songLatin} media=${songMedia} bemol=${songBemol}`,
+      );
+    }
+
+    // ── 7. Cross-module: song page → songbook ─────────────────────────────
+    // The song transpose endpoint persists z/b/l/m prefs for the user.
+    const syncResp = await fetch(
+      `${BASE}/api/song/${SONG_ID}/transpose?z=110&b=0&l=0&m=0`,
+      { headers: { Cookie: cookieHeader }, redirect: "manual" },
+    );
+    if (syncResp.status >= 400)
+      throw new Error(`Song transpose persist failed: ${syncResp.status}`);
+    await syncResp.body?.cancel();
+
+    const pageSb2 = await contextNoJs.newPage();
+    await pageSb2.goto(`${BASE}/songbook/${sbId}`, GOTO);
+    const sbZoom2 = await pageSb2.getAttribute("#sb-main", "data-zoom");
+    if (sbZoom2 !== "110") {
+      throw new Error(
+        `Songbook not synced from song page: expected 110, got ${sbZoom2}`,
+      );
+    }
 
     // Clean up: reset zoom to 100
     await page.goto(`${BASE}/songbook/${sbId}`, GOTO);

@@ -104,6 +104,40 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/song/uno
 	-F "title=Hack" -F "csrf_token=$csrf")
 [ "$code" = "403" ] && pass "403 forbidden" || fail "expected 403, got $code"
 
+# 14. POST /api/song/prefs writes all four viewer pref files
+TTY="$REPO_ROOT/home/$USER/.tty"
+echo -n "14. POST /api/song/prefs... "
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/api/song/prefs" \
+	-d "v=130&b=1&l=1&m=1&z=140")
+[ "$code" = "204" ] && pass "204 no content" || fail "expected 204, got $code"
+
+# 15. Verify pref files written by POST
+echo -n "15. Pref files written by POST... "
+[ "$(cat "$TTY/chords-zoom")" = "140" ] \
+	&& [ "$(cat "$TTY/chords-bemol")" = "1" ] \
+	&& [ "$(cat "$TTY/chords-latin")" = "1" ] \
+	&& [ "$(cat "$TTY/chords-media")" = "1" ] \
+	&& pass "all four prefs match" \
+	|| fail "prefs mismatch: z=$(cat "$TTY/chords-zoom") b=$(cat "$TTY/chords-bemol") l=$(cat "$TTY/chords-latin") m=$(cat "$TTY/chords-media")"
+
+# 16. GET /api/song/prefs (query string, used by WASM) works too
+echo -n "16. GET /api/song/prefs... "
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/api/song/prefs?b=0&l=0&m=0&z=90")
+[ "$code" = "204" ] && pass "204 no content" || fail "expected 204, got $code"
+
+# 17. Verify GET updated prefs
+echo -n "17. Pref files updated by GET... "
+[ "$(cat "$TTY/chords-zoom")" = "90" ] \
+	&& [ "$(cat "$TTY/chords-media")" = "0" ] \
+	&& [ "$(cat "$TTY/chords-bemol")" = "0" ] \
+	&& [ "$(cat "$TTY/chords-latin")" = "0" ] \
+	&& pass "prefs updated" || fail "prefs not updated"
+
+# 18. Unauthenticated /api/song/prefs is a 204 no-op
+echo -n "18. Unauthenticated prefs... "
+code=$(curl -sw "%{http_code}" -o /dev/null "$BASE/api/song/prefs?z=80")
+[ "$code" = "204" ] && pass "204 no-op" || fail "expected 204, got $code"
+
 # Cleanup
 rm -f "$COOKIE"
-rm -rf "$SONG_DIR/unowned_song"
+rm -rf "$SONG_DIR/unowned_song" "$TTY"
