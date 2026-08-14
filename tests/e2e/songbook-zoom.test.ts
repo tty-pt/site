@@ -169,6 +169,30 @@ Deno.test({
     }
     await page.waitForTimeout(600);
 
+    // ── 6.1 Remove URL params and reload (JS enabled): saved prefs must
+    // come back. The WASM rewrote the URL to ?b=&l=&m=&z= after the toggles;
+    // stripping them and reloading must restore the saved settings via SSR.
+    const paramUrl = page.url();
+    if (!paramUrl.includes("?"))
+      throw new Error(`Expected URL params after toggles, got ${paramUrl}`);
+    await page.goto(`${BASE}/songbook/${sbId}`, GOTO);
+    await page.waitForSelector('input[type="range"][data-detail-viewer-zoom]');
+    await page.waitForTimeout(400); // let WASM hydrate from embedded state
+    const noParamZoom = await page.getAttribute("#sb-main", "data-zoom");
+    const noParamLatin = await page.locator(
+      'input[type="checkbox"][name="l"]').isChecked();
+    const noParamMedia = await page.locator(
+      'input[type="checkbox"][name="m"]').isChecked();
+    const noParamBemol = await page.locator(
+      'input[type="checkbox"][name="b"]').isChecked();
+    if (noParamZoom !== "150" || !noParamLatin || !noParamMedia ||
+        !noParamBemol) {
+      throw new Error(
+        `Removing URL params lost saved prefs: zoom=${noParamZoom} ` +
+        `latin=${noParamLatin} media=${noParamMedia} bemol=${noParamBemol}`,
+      );
+    }
+
     const pageSong = await contextNoJs.newPage();
     await pageSong.goto(`${BASE}/song/${SONG_ID}`, GOTO);
     const songZoom = await pageSong.getAttribute("#main", "data-zoom");
