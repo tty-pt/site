@@ -191,3 +191,8 @@ cp /bin/sh ./bin/sh
    `common.so` whose address is taken by XY's adapter will be exported as `T` in
    `nm -D` (because `XY_IMPL` gives default visibility), but it is still
    **not** directly callable by name from another `.so` at link time.
+10. `stoma_fold` forces a UTF-8 `LC_CTYPE` lazily (`token.c`), so accent folding
+    is stable under any inherited locale — do NOT remove that, and do NOT
+    replace TRANSLIT with hand-rolled accent tables. FTS tests must not pin
+    `LC_ALL` (that masked a root-server C-locale bug); the fold suites are
+    verified under `LC_ALL=C` too.

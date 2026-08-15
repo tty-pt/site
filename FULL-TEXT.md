@@ -568,22 +568,31 @@ Test run needs `LD_LIBRARY_PATH=./lib:../libqmap/lib ./bin/stoma_test`
 (`-lstoma` resolves at link from `-L./lib` via portable.mk, but at runtime the
 loader needs the dirs).
 
-### 10.2 `stoma_fold` — glibc TRANSLIT requires setlocale (cost: debug session)
+### 10.2 `stoma_fold` — TRANSLIT needs a UTF-8 LC_CTYPE; force it (cost: debug session)
 
 A bare `iconv_open("ASCII//TRANSLIT","UTF-8")` + `iconv` returns `?` for accented
-input (`É`→`?`) even with `LC_ALL=C.UTF-8` set on the command line — **unless the
-process has called `setlocale()`**. The `iconv(1)` CLI works because it calls
-`setlocale(LC_ALL, "")` first. Fix in `token.c`:
+input (`É`→`?`) unless the process runs under a UTF-8 `LC_CTYPE`. The
+`iconv(1)` CLI works because it calls `setlocale(LC_ALL, "")` first and
+(usually) inherits a UTF-8 shell. Fix in `token.c` — `fold_init()` forces a
+UTF-8 CTYPE locale lazily before `iconv_open`:
 
 ```c
-static int localized = 0;
-if (!localized) { setlocale(LC_CTYPE, ""); localized = 1; }
+lc = setlocale(LC_CTYPE, "");
+if (!lc || !strstr(lc, "UTF-8")) {
+    if (!setlocale(LC_CTYPE, "C.UTF-8") &&
+        !setlocale(LC_CTYPE, "en_US.UTF-8"))
+        setlocale(LC_CTYPE, "pt_PT.UTF-8");
+}
+fold_cd = iconv_open("ASCII//TRANSLIT", "UTF-8");
 ```
 
-placed lazily at the top of `stoma_fold`, before `iconv_open`. This makes the
-library standalone ("any software can use it") instead of relying on the host
-(axil) having set a locale. This also means the original `fold_utf8` in
-view.c:31 had the same latent bug (worked only because axil sets a locale).
+This makes the library standalone ("any software can use it") instead of
+relying on the host (axil) having set a locale. **Real-world trigger:** the
+live daemon runs as root under `LC_ALL=`/`LC_CTYPE="C"` (doas/rc.d) — before
+this fix "Pão" folded to `p?o` → tokens `p` + `o` → the FTS prefix scan matched
+almost every row ("unwanted results"). The old `setlocale(LC_CTYPE, "")` only
+read the env, which was already "C". This also means the original `fold_utf8`
+in view.c:31 had the same latent bug.
 
 ### 10.3 Two off-by-one length bugs in libstoma.c (both fixed, tests green)
 
