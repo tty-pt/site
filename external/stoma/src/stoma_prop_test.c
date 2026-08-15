@@ -24,12 +24,14 @@
 static const char *field_names[MAX_FIELDS] = { "title", "author" };
 
 static const char *vocab[] = {
-	"starlight", "station", "nostalgia", "black", "star", "night",
-	"dark", "love", "world", "another", "song", "1984", "yesterday",
-	"coffee", "river", "mountain", "summer", "winter", "spring", "autumn",
-	"café", "naïve", "Übermensch", "El Niño", "Straße", "Ærø", "Ångström",
-	"cœur", "crème", "über", "日本語", "sky", "moon", "sea", "fire",
-	"coldplay", "radiohead", "neon", "green", "blue",
+	"starlight", "station",   "nostalgia",  "black",   "star",
+	"night",     "dark",      "love",       "world",   "another",
+	"song",      "1984",      "yesterday",  "coffee",  "river",
+	"mountain",  "summer",    "winter",     "spring",  "autumn",
+	"café",      "naïve",     "Übermensch", "El Niño", "Straße",
+	"Ærø",       "Ångström",  "cœur",       "crème",   "über",
+	"日本語",    "sky",       "moon",       "sea",     "fire",
+	"coldplay",  "radiohead", "neon",       "green",   "blue",
 };
 #define NVOCAB ((int)(sizeof(vocab) / sizeof(vocab[0])))
 
@@ -51,16 +53,16 @@ static unsigned pick(unsigned n)
 }
 
 typedef struct {
-	char    tok[MAX_VT][TOK_CAP + 1];
-	int     n;
+	char tok[MAX_VT][TOK_CAP + 1];
+	int n;
 } toks_t;
 
 /* Fold + tokenize a value exactly the way stoma does, but independently. */
 static void fold_tokens(const char *value, toks_t *t)
 {
-	char    folded[8192];
+	char folded[8192];
 	const char *p;
-	int     n = 0;
+	int n = 0;
 
 	t->n = 0;
 	if (!value)
@@ -70,7 +72,7 @@ static void fold_tokens(const char *value, toks_t *t)
 	p = folded;
 	while (*p) {
 		const char *start;
-		int         len;
+		int len;
 
 		if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9'))) {
 			p++;
@@ -78,8 +80,9 @@ static void fold_tokens(const char *value, toks_t *t)
 		}
 		start = p;
 		len = 0;
-		while (*p && ((*p >= 'a' && *p <= 'z') ||
-			(*p >= '0' && *p <= '9'))) {
+		while (*p &&
+		       ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9')))
+		{
 			p++;
 			len++;
 		}
@@ -95,14 +98,14 @@ static void fold_tokens(const char *value, toks_t *t)
 }
 
 static toks_t row_toks[MAX_ROWS][MAX_FIELDS];
-static int      row_has[MAX_ROWS][MAX_FIELDS];
+static int row_has[MAX_ROWS][MAX_FIELDS];
 static stoma_db_t *db;
 
 static void gen_row_value(char *value, size_t vsz, int *present, toks_t *t)
 {
-	int     nt = (int)pick((unsigned)(MAX_VT + 1));
-	int     off = 0;
-	int     i;
+	int nt = (int)pick((unsigned)(MAX_VT + 1));
+	int off = 0;
+	int i;
 
 	*present = (int)pick(4) != 0;
 	if (!*present) {
@@ -112,7 +115,7 @@ static void gen_row_value(char *value, size_t vsz, int *present, toks_t *t)
 	}
 	if (nt == 0) {
 		const char *p = punct[pick(NPUNCT)];
-		size_t      l = strlen(p);
+		size_t l = strlen(p);
 
 		if (l >= vsz)
 			l = vsz - 1;
@@ -121,7 +124,7 @@ static void gen_row_value(char *value, size_t vsz, int *present, toks_t *t)
 	} else {
 		for (i = 0; i < nt; i++) {
 			const char *w = vocab[pick(NVOCAB)];
-			int         l = (int)strlen(w);
+			int l = (int)strlen(w);
 
 			if (off + l + 2 >= (int)vsz)
 				break;
@@ -137,13 +140,13 @@ static void gen_row_value(char *value, size_t vsz, int *present, toks_t *t)
 
 static void gen_query(char *query, size_t qsz)
 {
-	int     nt = 1 + (int)pick(MAX_QT);
-	int     off = 0;
-	int     i;
+	int nt = 1 + (int)pick(MAX_QT);
+	int off = 0;
+	int i;
 
 	if (pick(10) == 0) {
 		const char *p = punct[pick(NPUNCT)];
-		size_t      l = strlen(p);
+		size_t l = strlen(p);
 
 		if (l >= qsz)
 			l = qsz - 1;
@@ -153,11 +156,11 @@ static void gen_query(char *query, size_t qsz)
 	}
 	for (i = 0; i < nt; i++) {
 		const char *w = vocab[pick(NVOCAB)];
-		char        tmp[TOK_CAP + 1];
-		int         len = (int)strlen(w);
-		int         cut;
-		int         random = 0;
-		int         j;
+		char tmp[TOK_CAP + 1];
+		int len = (int)strlen(w);
+		int cut;
+		int random = 0;
+		int j;
 
 		switch (pick(4)) {
 		case 0:
@@ -190,8 +193,7 @@ static void gen_query(char *query, size_t qsz)
 			if (cut > 0 && pick(3) == 0)
 				for (j = 0; j < cut; j++)
 					if (tmp[j] >= 'a' && tmp[j] <= 'z')
-						tmp[j] =
-							(char)(tmp[j] - 32);
+						tmp[j] = (char)(tmp[j] - 32);
 		}
 		if (off + cut + 2 >= (int)qsz)
 			break;
@@ -217,7 +219,8 @@ static int ref_matches(int row, int fi, const toks_t *qt)
 
 		for (t = 0; t < row_toks[row][fi].n; t++)
 			if (strncmp(row_toks[row][fi].tok[t], qt->tok[i],
-				strlen(qt->tok[i])) == 0) {
+			            strlen(qt->tok[i])) == 0)
+			{
 				ok = 1;
 				break;
 			}
@@ -229,8 +232,8 @@ static int ref_matches(int row, int fi, const toks_t *qt)
 
 static int run_seed(unsigned long seed)
 {
-	int     failures = 0;
-	int     q;
+	int failures = 0;
+	int q;
 
 	rng_state = seed;
 	stoma_clear(db);
@@ -242,30 +245,32 @@ static int run_seed(unsigned long seed)
 
 		for (r = 0; r < MAX_ROWS; r++)
 			for (f = 0; f < MAX_FIELDS; f++) {
-				char    value[256];
-				char    rid[16];
+				char value[256];
+				char rid[16];
 
-				gen_row_value(value, sizeof(value),
-					&row_has[r][f], &row_toks[r][f]);
+				gen_row_value(
+				        value, sizeof(value), &row_has[r][f],
+				        &row_toks[r][f]);
 				if (!row_has[r][f])
 					continue;
 				snprintf(rid, sizeof(rid), "r%d", r);
-				if (stoma_index(db, field_names[f], rid, value)
-					!= 0)
+				if (stoma_index(
+				            db, field_names[f], rid, value) !=
+				    0)
 					failures++;
 			}
 	}
 
 	/* run queries, compare against reference */
 	for (q = 0; q < MAX_QUERIES; q++) {
-		char    query[512];
-		toks_t  qt;
-		int     fi = (int)pick(MAX_FIELDS);
+		char query[512];
+		toks_t qt;
+		int fi = (int)pick(MAX_FIELDS);
 		unsigned out_hd;
-		int     handled = 0;
+		int handled = 0;
 		uint32_t n;
-		int     exp_total = 0;
-		int     r;
+		int exp_total = 0;
+		int r;
 
 		gen_query(query, sizeof(query));
 		fold_tokens(query, &qt);
@@ -275,16 +280,16 @@ static int run_seed(unsigned long seed)
 
 		if ((qt.n > 0) != (handled > 0)) {
 			printf("seed %lu q%d: handled mismatch "
-				"(stoma=%d ref=%d) query='%s'\n",
-				seed, q, handled, qt.n > 0, query);
+			       "(stoma=%d ref=%d) query='%s'\n",
+			       seed, q, handled, qt.n > 0, query);
 			failures++;
 			qmap_close(out_hd);
 			continue;
 		}
 		for (r = 0; r < MAX_ROWS; r++) {
-			char    rid[16];
-			int     exp = handled && ref_matches(r, fi, &qt);
-			int     got;
+			char rid[16];
+			int exp = handled && ref_matches(r, fi, &qt);
+			int got;
 
 			snprintf(rid, sizeof(rid), "r%d", r);
 			got = qmap_get(out_hd, rid) != NULL;
@@ -292,36 +297,32 @@ static int run_seed(unsigned long seed)
 			if (got != exp) {
 				if (failures < 5)
 					printf("seed %lu q%d: row %s "
-						"field '%s' query='%s' "
-						"stoma=%d ref=%d\n",
-						seed, q, rid,
-						field_names[fi], query, got, exp);
+					       "field '%s' query='%s' "
+					       "stoma=%d ref=%d\n",
+					       seed, q, rid, field_names[fi],
+					       query, got, exp);
 				failures++;
 			}
 		}
 		if ((uint32_t)exp_total != n) {
 			printf("seed %lu q%d: count mismatch "
-				"(stoma=%u ref=%d) query='%s'\n",
-				seed, q, (unsigned)n, exp_total, query);
+			       "(stoma=%u ref=%d) query='%s'\n",
+			       seed, q, (unsigned)n, exp_total, query);
 			failures++;
 		}
 		qmap_close(out_hd);
 	}
 
-	printf("seed %lu: %d rows, %d queries%s\n", seed, MAX_ROWS,
-		MAX_QUERIES, failures ? " FAILED" : " OK");
+	printf("seed %lu: %d rows, %d queries%s\n", seed, MAX_ROWS, MAX_QUERIES,
+	       failures ? " FAILED" : " OK");
 	return failures;
 }
 
 int main(void)
 {
 	static const unsigned long seeds[] = { 1, 42, 1337 };
-	int      total_fail = 0;
-	size_t   i;
-
-	setenv("LC_ALL", "C.UTF-8", 1);
-	if (!setlocale(LC_ALL, ""))
-		setlocale(LC_ALL, "en_US.UTF-8");
+	int total_fail = 0;
+	size_t i;
 
 	db = stoma_open(0);
 	if (!db) {

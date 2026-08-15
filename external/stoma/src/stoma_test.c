@@ -8,13 +8,13 @@
 static int failures = 0;
 static int total = 0;
 
-#define CHECK(cond, name)                                                    \
-	do {                                                                 \
-		total++;                                                     \
-		if (!(cond)) {                                               \
-			failures++;                                          \
-			printf("FAIL: %s (line %d)\n", name, __LINE__);      \
-		}                                                            \
+#define CHECK(cond, name)                                                      \
+	do {                                                                   \
+		total++;                                                       \
+		if (!(cond)) {                                                 \
+			failures++;                                            \
+			printf("FAIL: %s (line %d)\n", name, __LINE__);        \
+		}                                                              \
 	} while (0)
 
 static int hd_has(unsigned hd, const char *row)
@@ -25,15 +25,9 @@ static int hd_has(unsigned hd, const char *row)
 int main(void)
 {
 	stoma_db_t *db = stoma_open(0);
-	unsigned    out = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
-	int         handled = 0;
-	uint32_t    n;
-
-	/* glibc TRANSLIT output depends on the process locale; pin it so the
-	 * tests pass regardless of the shell's LC_* settings. */
-	setenv("LC_ALL", "C.UTF-8", 1);
-	if (!setlocale(LC_ALL, ""))
-		setlocale(LC_ALL, "en_US.UTF-8");
+	unsigned out = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	int handled = 0;
+	uint32_t n;
 
 	if (!db || !out) {
 		printf("setup failed\n");
@@ -61,7 +55,7 @@ int main(void)
 	n = stoma_query(db, "title", "st", out, &handled);
 	CHECK(handled == 1 && n == 3, "prefix st");
 	CHECK(hd_has(out, "r1") && hd_has(out, "r2") && hd_has(out, "r3"),
-		"prefix rows");
+	      "prefix rows");
 	CHECK(!hd_has(out, "r4"), "prefix excludes non-match");
 	qmap_drop(out);
 
@@ -123,27 +117,43 @@ int main(void)
 		char b[128];
 
 		CHECK(stoma_fold(b, sizeof(b), "Straße") > 0 &&
-			strcmp(b, "strasse") == 0, "fold sz");
+		              strcmp(b, "strasse") == 0,
+		      "fold sz");
 		CHECK(stoma_fold(b, sizeof(b), "Øresund ærø å") > 0 &&
-			strcmp(b, "oresund aero a") == 0, "fold oslash ae aa");
+		              strcmp(b, "oresund aero a") == 0,
+		      "fold oslash ae aa");
 		CHECK(stoma_fold(b, sizeof(b), "El Niño açúcar") > 0 &&
-			strcmp(b, "el nino acucar") == 0, "fold ntilde ccedil");
+		              strcmp(b, "el nino acucar") == 0,
+		      "fold ntilde ccedil");
 		CHECK(stoma_fold(b, sizeof(b), "Ünter Öl Ärger") > 0 &&
-			strcmp(b, "unter ol arger") == 0, "fold umlauts");
+		              strcmp(b, "unter ol arger") == 0,
+		      "fold umlauts");
 		CHECK(stoma_fold(b, sizeof(b), "ÉTÉ") > 0 &&
-			strcmp(b, "ete") == 0, "fold case after translit");
+		              strcmp(b, "ete") == 0,
+		      "fold case after translit");
+		CHECK(stoma_fold(b, sizeof(b), "Pão") > 0 &&
+		              strcmp(b, "pao") == 0,
+		      "fold pao");
+		CHECK(stoma_fold(b, sizeof(b), "não senhôr çãõ") > 0 &&
+		              strcmp(b, "nao senhor cao") == 0,
+		      "fold pt accents");
+		CHECK(stoma_fold(b, sizeof(b), "À É Í Ó Ú à é í ó ú") > 0 &&
+		              strcmp(b, "a e i o u a e i o u") == 0,
+		      "fold upper accents");
 	}
 
 	/* 12. fold buffer boundaries */
 	{
 		char b[4];
 
-		/* "été" folds to 3 bytes + NUL → 4-byte buffer is an exact fit */
+		/* "été" folds to 3 bytes + NUL → 4-byte buffer is an exact fit
+		 */
 		CHECK(stoma_fold(b, sizeof(b), "été") == 3 &&
-			strcmp(b, "ete") == 0, "fold exact fit");
+		              strcmp(b, "ete") == 0,
+		      "fold exact fit");
 		/* "étété" = 5 bytes + NUL → 4-byte buffer too small → -1 */
 		CHECK(stoma_fold(b, sizeof(b), "étété") == -1,
-			"fold buffer too small");
+		      "fold buffer too small");
 		CHECK(stoma_fold(b, sizeof(b), "") == 0, "fold empty string");
 	}
 
@@ -151,9 +161,9 @@ int main(void)
 	{
 		char b[128];
 
-		CHECK(stoma_fold(b, sizeof(b), "駅東京") == 3 &&
-			b[0] == '?' && b[1] == '?' && b[2] == '?',
-			"fold cjk to ?");
+		CHECK(stoma_fold(b, sizeof(b), "駅東京") == 3 && b[0] == '?' &&
+		              b[1] == '?' && b[2] == '?',
+		      "fold cjk to ?");
 		stoma_index(db, "title", "r13", "駅東京");
 		n = stoma_query(db, "title", "駅", out, &handled);
 		CHECK(handled == 0 && n == 0, "cjk unsearchable");
@@ -195,11 +205,11 @@ int main(void)
 	CHECK(n == 1 && hd_has(out, "r17"), "query alpha");
 	n = stoma_query(db, "title", "gamma", out, &handled);
 	CHECK(n == 1 && hd_has(out, "r17") && hd_has(out, "r18"),
-		"query appends (union)");
+	      "query appends (union)");
 	qmap_drop(out);
 	n = stoma_query(db, "title", "gamma", out, &handled);
 	CHECK(n == 1 && !hd_has(out, "r17") && hd_has(out, "r18"),
-		"drop between queries isolates");
+	      "drop between queries isolates");
 
 	/* 17. query truncates at STOMA_MAX_TOKENS (64) */
 	{
@@ -211,15 +221,17 @@ int main(void)
 		 * uncapped); query below has 64 non-matching tokens + needle
 		 * as token #65 → #65 is dropped → no match. */
 		for (i = 0; i < 65; i++)
-			off += snprintf(big1 + off, sizeof(big1) - (size_t)off,
-				"t%zu ", i);
+			off += snprintf(
+			        big1 + off, sizeof(big1) - (size_t)off, "t%zu ",
+			        i);
 		snprintf(big1 + off, sizeof(big1) - (size_t)off, "needle");
 		stoma_index(db, "title", "r19", big1);
 		qmap_drop(out);
 		off = 0;
 		for (i = 0; i < 64; i++)
-			off += snprintf(big2 + off, sizeof(big2) - (size_t)off,
-				"zz%zu ", i);
+			off += snprintf(
+			        big2 + off, sizeof(big2) - (size_t)off,
+			        "zz%zu ", i);
 		snprintf(big2 + off, sizeof(big2) - (size_t)off, "needle");
 		n = stoma_query(db, "title", big2, out, &handled);
 		CHECK(handled == 1 && n == 0, "token 65+ ignored in query");
@@ -232,12 +244,10 @@ int main(void)
 	/* 18. query normalization: punctuation and extra spaces */
 	stoma_index(db, "title", "r20", "Black Star");
 	n = stoma_query(db, "title", "black,  star", out, &handled);
-	CHECK(handled == 1 && n == 1 && hd_has(out, "r20"),
-		"punct+spaces AND");
+	CHECK(handled == 1 && n == 1 && hd_has(out, "r20"), "punct+spaces AND");
 	qmap_drop(out);
 	n = stoma_query(db, "title", "  BLACK   STAR ", out, &handled);
-	CHECK(handled == 1 && n == 1 && hd_has(out, "r20"),
-		"case+spaces AND");
+	CHECK(handled == 1 && n == 1 && hd_has(out, "r20"), "case+spaces AND");
 	qmap_drop(out);
 
 	/* 19. same token in two fields of one row stays field-isolated */
@@ -268,8 +278,9 @@ int main(void)
 
 	/* 21. single-char query token */
 	n = stoma_query(db, "title", "s", out, &handled);
-	CHECK(handled == 1 && n == 2 && hd_has(out, "r20") && hd_has(out, "r23"),
-		"single-char token");
+	CHECK(handled == 1 && n == 2 && hd_has(out, "r20") &&
+	              hd_has(out, "r23"),
+	      "single-char token");
 	qmap_drop(out);
 
 	stoma_close(db);

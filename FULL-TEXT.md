@@ -456,13 +456,18 @@ source/filter path is unchanged.
   anything that links it.
 - `LD_LIBRARY_PATH` in hyle's test target needs `../stoma/lib` (dev); production
   runtime needs `/usr/lib/libstoma.so` (install).
-- glibc `ASCII//TRANSLIT` silently emits `?` unless `setlocale()` was called —
-  `stoma_fold` handles this itself (token.c); don't "fix" by removing it.
-- **Axil must run under a UTF-8 locale** (`LC_ALL`/`LANG` unset or set to a
-  `.utf8`/`.UTF-8` locale, NOT bare `C`) for accent folding to work: token.c's
-  lazy `setlocale(LC_CTYPE, "")` reads the env, and under `LC_ALL=C` Western
-  accents fold to `?` → zero tokens → unsearchable (§10.8). `start.sh`/`make
-  watch` currently inherit the shell locale — leave it as a UTF-8 locale.
+- glibc `ASCII//TRANSLIT` silently emits `?` for accented input unless the
+  process runs under a UTF-8 `LC_CTYPE` — `stoma_fold` forces one lazily
+  (`setlocale(LC_CTYPE, "C.UTF-8")` then `en_US.UTF-8` / `pt_PT.UTF-8`) before
+  `iconv_open`, so folding is stable regardless of the inherited locale. Don't
+  "fix" by removing it, and don't replace it with hand-rolled accent tables.
+- Accent folding no longer requires a UTF-8 process locale (§10.2): the old
+  "**Axil must run under a UTF-8 locale**" rule was removed — under `LC_ALL=C`
+  (e.g. a root-started daemon) the fold now self-corrects. Keeping a UTF-8
+  locale at server start is still recommended for other locale-sensitive code,
+  but it is no longer required for FTS. Regression coverage: fold tests in
+  `stoma_test` run un-pinned (they set no locale) and the suite is verified
+  under `LC_ALL=C` and `LC_ALL=C.UTF-8`.
 - stoma's base source file MUST be `src/libstoma.c` and extra objs MUST go in
   `libstoma-obj-y` (include.mk convention) — see §10.1.
 - **`make format` / `make lint` at repo root only cover `mods/` + `external/bud/`**

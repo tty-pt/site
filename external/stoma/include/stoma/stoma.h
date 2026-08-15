@@ -16,9 +16,10 @@
 
 /*
  * Fold a UTF-8 string to lowercase ASCII base letters (accent
- * insensitivity) using iconv's TRANSLIT tables. Returns the number of bytes
- * written, or -1 if the output buffer is too small (caller falls back to raw
- * comparison).
+ * insensitivity) via iconv TRANSLIT. A UTF-8 LC_CTYPE locale is forced
+ * lazily on first use, so output is stable regardless of the process's
+ * inherited locale. Returns the number of bytes written, or -1 if the
+ * output buffer is too small (caller falls back to raw comparison).
  */
 int stoma_fold(char *out, size_t outsz, const char *in);
 
