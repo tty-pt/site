@@ -602,19 +602,30 @@ tbody tr:last-child td {
 
 /* ── Filter Enhancements ── */
 
-.hyle-checkbox-filter {
-  max-height: 70px;
+.hyle-filter-bar fieldset.hyle-checkbox-filter {
+  flex: 0 0 100%;
+  order: -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 4px 10px;
+  max-height: 160px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  padding: 0.5rem;
-  border-radius: 4px;
 }
 
-.hyle-checkbox-filter legend {
+.hyle-filter-bar .hyle-checkbox-filter legend {
+  grid-column: 1 / -1;
   padding: 0 0.5rem;
   font-size: 0.75rem;
   font-weight: bold;
   color: var(--text-muted);
+}
+
+.hyle-filter-bar .hyle-checkbox-filter label {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: normal;
 }
 
 :root { --chord-zoom: 100; }
