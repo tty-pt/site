@@ -574,7 +574,7 @@ static int index_generic_edit_authorized(
 		            sizeof(items_path)) == 0)
 		{
 			write_meta_file(
-			        items_path, "title", title, strlen(title));
+			        items_path, "title", title, (size_t)title_len);
 		}
 	}
 

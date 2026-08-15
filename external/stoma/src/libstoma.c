@@ -5,7 +5,6 @@
 #include "stoma/stoma.h"
 
 #define STOMA_MAX_TOKENS 64
-#define STOMA_FOLD_BUF 8192
 
 /* Declared in token.c (internal). */
 void stoma_tokenize(const char *folded,
@@ -76,17 +75,26 @@ static void index_token(const char *tok, size_t len, void *user)
 int stoma_index(stoma_db_t *db,
 	const char *field, const char *row_id, const char *value)
 {
-	char       folded[STOMA_FOLD_BUF];
 	index_ctx_t ctx;
+	size_t      vlen;
+	char       *folded;
 
 	if (!db || !field || !row_id || !value)
 		return -1;
-	if (stoma_fold(folded, sizeof(folded), value) < 0)
+	/* The fold never grows its output, so strlen+1 always fits. */
+	vlen = strlen(value);
+	folded = malloc(vlen + 1);
+	if (!folded)
+		return -1;
+	if (stoma_fold(folded, vlen + 1, value) < 0) {
+		free(folded);
 		return 0;
+	}
 	ctx.field = field;
 	ctx.row_id = row_id;
 	ctx.hd = db->hd;
 	stoma_tokenize(folded, index_token, &ctx);
+	free(folded);
 	return 0;
 }
 
@@ -113,9 +121,10 @@ uint32_t stoma_query(stoma_db_t *db,
 	const char *field, const char *query,
 	uint32_t out_hd, int *handled)
 {
-	char         folded[STOMA_FOLD_BUF];
 	collect_ctx_t toks;
 	size_t        fld;
+	size_t        qlen;
+	char         *folded;
 	unsigned      cur_hd = 0;
 	uint32_t      matches = 0;
 	size_t        i;
@@ -124,13 +133,22 @@ uint32_t stoma_query(stoma_db_t *db,
 		*handled = 0;
 	if (!db || !field || !query || !out_hd)
 		return 0;
-	if (stoma_fold(folded, sizeof(folded), query) < 0)
+	/* The fold never grows its output, so strlen+1 always fits. */
+	qlen = strlen(query);
+	folded = malloc(qlen + 1);
+	if (!folded)
 		return 0;
+	if (stoma_fold(folded, qlen + 1, query) < 0) {
+		free(folded);
+		return 0;
+	}
 
 	toks.n = 0;
 	stoma_tokenize(folded, collect_token, &toks);
-	if (toks.n == 0)
+	if (toks.n == 0) {
+		free(folded);
 		return 0;
+	}
 	if (handled)
 		*handled = 1;
 
@@ -184,6 +202,8 @@ uint32_t stoma_query(stoma_db_t *db,
 			qmap_close(cur_hd);
 		cur_hd = nxt_hd;
 	}
+
+	free(folded);
 
 	if (cur_hd) {
 		uint32_t cur = qmap_iter(cur_hd, NULL, 0);

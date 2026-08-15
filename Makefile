@@ -50,14 +50,16 @@ pages-test: all
 	sh tests/pages/10-pages-render.sh
 	sh tests/pages/20-song-search.sh
 
+unit-c-tests:
+	@sh tests/scripts/repro-matrix.sh --build
+
 integration-tests: all
 	@sh tests/integration/run_all.sh
 
 e2e-tests: test-data-dirs
 	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
 
-test: unit-tests pages-test e2e-tests
-
+test: unit-c-tests unit-tests pages-test e2e-tests
 watch:
 	./scripts/watch.sh
 
@@ -141,4 +143,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
+.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
