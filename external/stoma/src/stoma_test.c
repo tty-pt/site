@@ -38,7 +38,7 @@ int main(void)
 	{
 		char b[64];
 		int r = stoma_fold(b, sizeof(b), "Été Aéro");
-		CHECK(r > 0 && strcmp(b, "ete aero") == 0, "fold accent+case");
+		CHECK(r > 0 && strcmp(b, "été aéro") == 0, "fold accent+case");
 	}
 
 	/* 2-3. index + exact + prefix */
@@ -112,33 +112,33 @@ int main(void)
 	CHECK(n == 1, "stale token remains (documented)");
 	qmap_drop(out);
 
-	/* 11. fold translit table */
+	/* 11. fold: lowercase, accents preserved (accent-sensitive) */
 	{
 		char b[128];
 
 		CHECK(stoma_fold(b, sizeof(b), "Straße") > 0 &&
-		              strcmp(b, "strasse") == 0,
+		              strcmp(b, "straße") == 0,
 		      "fold sz");
 		CHECK(stoma_fold(b, sizeof(b), "Øresund ærø å") > 0 &&
-		              strcmp(b, "oresund aero a") == 0,
+		              strcmp(b, "øresund ærø å") == 0,
 		      "fold oslash ae aa");
 		CHECK(stoma_fold(b, sizeof(b), "El Niño açúcar") > 0 &&
-		              strcmp(b, "el nino acucar") == 0,
+		              strcmp(b, "el niño açúcar") == 0,
 		      "fold ntilde ccedil");
 		CHECK(stoma_fold(b, sizeof(b), "Ünter Öl Ärger") > 0 &&
-		              strcmp(b, "unter ol arger") == 0,
+		              strcmp(b, "ünter öl ärger") == 0,
 		      "fold umlauts");
 		CHECK(stoma_fold(b, sizeof(b), "ÉTÉ") > 0 &&
-		              strcmp(b, "ete") == 0,
-		      "fold case after translit");
+		              strcmp(b, "été") == 0,
+		      "fold case");
 		CHECK(stoma_fold(b, sizeof(b), "Pão") > 0 &&
-		              strcmp(b, "pao") == 0,
-		      "fold pao");
+		              strcmp(b, "pão") == 0,
+		      "fold pao preserves accent");
 		CHECK(stoma_fold(b, sizeof(b), "não senhôr çãõ") > 0 &&
-		              strcmp(b, "nao senhor cao") == 0,
+		              strcmp(b, "não senhôr çãõ") == 0,
 		      "fold pt accents");
 		CHECK(stoma_fold(b, sizeof(b), "À É Í Ó Ú à é í ó ú") > 0 &&
-		              strcmp(b, "a e i o u a e i o u") == 0,
+		              strcmp(b, "à é í ó ú à é í ó ú") == 0,
 		      "fold upper accents");
 	}
 
@@ -146,27 +146,27 @@ int main(void)
 	{
 		char b[4];
 
-		/* "été" folds to 3 bytes + NUL → 4-byte buffer is an exact fit
+		/* "abc" folds to 3 bytes + NUL → 4-byte buffer is an exact fit
 		 */
-		CHECK(stoma_fold(b, sizeof(b), "été") == 3 &&
-		              strcmp(b, "ete") == 0,
+		CHECK(stoma_fold(b, sizeof(b), "abc") == 3 &&
+		              strcmp(b, "abc") == 0,
 		      "fold exact fit");
-		/* "étété" = 5 bytes + NUL → 4-byte buffer too small → -1 */
-		CHECK(stoma_fold(b, sizeof(b), "étété") == -1,
+		/* "abcd" = 4 bytes + NUL → 4-byte buffer too small → -1 */
+		CHECK(stoma_fold(b, sizeof(b), "abcd") == -1,
 		      "fold buffer too small");
 		CHECK(stoma_fold(b, sizeof(b), "") == 0, "fold empty string");
 	}
 
-	/* 13. non-Latin folds to '?' → zero tokens → unsearchable (doc'd) */
+	/* 13. non-Latin text is preserved and searchable (accent-sensitive) */
 	{
 		char b[128];
 
-		CHECK(stoma_fold(b, sizeof(b), "駅東京") == 3 && b[0] == '?' &&
-		              b[1] == '?' && b[2] == '?',
-		      "fold cjk to ?");
+		CHECK(stoma_fold(b, sizeof(b), "駅東京") == 9 &&
+		              strcmp(b, "駅東京") == 0,
+		      "fold cjk verbatim");
 		stoma_index(db, "title", "r13", "駅東京");
 		n = stoma_query(db, "title", "駅", out, &handled);
-		CHECK(handled == 0 && n == 0, "cjk unsearchable");
+		CHECK(handled == 1 && n == 1, "cjk searchable");
 		qmap_drop(out);
 	}
 

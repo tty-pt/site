@@ -1,78 +1,56 @@
 #include <string.h>
 #include <ctype.h>
-#include <errno.h>
-#include <iconv.h>
-#include <locale.h>
 #include "stoma/stoma.h"
 
-static iconv_t fold_cd = (iconv_t)-1;
-static int fold_ready = 0;
-
-static void fold_init(void)
-{
-	const char *lc;
-
-	if (fold_ready)
-		return;
-	fold_ready = 1;
-
-	/* TRANSLIT output depends on the process LC_CTYPE: under a C/POSIX
-	 * locale accented chars fold to '?' instead of base letters. Force a
-	 * UTF-8 CTYPE locale lazily so folding is stable regardless of the
-	 * host environment. */
-	lc = setlocale(LC_CTYPE, "");
-	if (!lc || !strstr(lc, "UTF-8")) {
-		if (!setlocale(LC_CTYPE, "C.UTF-8") &&
-		    !setlocale(LC_CTYPE, "en_US.UTF-8"))
-			setlocale(LC_CTYPE, "pt_PT.UTF-8");
-	}
-	fold_cd = iconv_open("ASCII//TRANSLIT", "UTF-8");
-}
-
+/* Fold a UTF-8 string to lowercase, preserving accents (accent-sensitive
+ * search). ASCII A-Z and the Latin-1 Supplement uppercase letters
+ * (U+00C0-U+00DE, encoded as 0xC3 0x80-0x9E, minus U+00D7 '×') are
+ * lowercased; everything else is copied verbatim. Lowercasing never grows
+ * the output, so the result fits whenever outsz > strlen(in). The fold is
+ * locale-independent (no iconv, no setlocale). */
 int stoma_fold(char *out, size_t outsz, const char *in)
 {
-	char *in_ptr = (char *)in;
+	const char *in_ptr = in;
 	char *out_ptr = out;
-	size_t in_len;
-	size_t out_len;
-	size_t i;
+	size_t in_len = strlen(in);
+	size_t out_len = outsz;
 
 	if (outsz == 0)
 		return -1;
-
-	fold_init();
-	if (fold_cd == (iconv_t)-1)
+	if (in_len >= out_len)
 		return -1;
 
-	in_len = strlen(in);
-	out_len = outsz - 1;
-	while (in_len > 0 && out_len > 0) {
-		size_t res =
-		        iconv(fold_cd, (void *)&in_ptr, &in_len,
-		              (void *)&out_ptr, &out_len);
-		if (res != (size_t)-1)
-			continue;
-		if (errno != EILSEQ && errno != EINVAL)
-			break;
+	while (in_len > 0) {
+		unsigned char c = (unsigned char)*in_ptr;
+
+		if (c >= 'A' && c <= 'Z') {
+			*out_ptr++ = (char)(c + 32);
+		} else if (c == 0xC3 && in_len >= 2) {
+			unsigned char b = (unsigned char)in_ptr[1];
+
+			if (b >= 0x80 && b <= 0x9E && b != 0x97) {
+				*out_ptr++ = (char)0xC3;
+				*out_ptr++ = (char)(b + 0x20);
+				in_ptr += 2;
+				in_len -= 2;
+				continue;
+			}
+			*out_ptr++ = (char)c;
+		} else {
+			*out_ptr++ = (char)c;
+		}
 		in_ptr++;
 		in_len--;
-		iconv(fold_cd, NULL, NULL, (void *)&out_ptr, &out_len);
 	}
-
-	if (in_len > 0) { /* output too small */
-		*out_ptr = '\0';
-		return -1;
-	}
-
-	for (i = 0; i < (size_t)(out_ptr - out); i++)
-		if (out[i] >= 'A' && out[i] <= 'Z')
-			out[i] = (char)(out[i] + 32);
 	*out_ptr = '\0';
 	return (int)(out_ptr - out);
 }
 
-/* Internal tokenizer: calls cb(token, len, user) for each maximal
- * run of [a-z0-9] in the folded string. Tokens may be a single char. */
+/* Internal tokenizer: calls cb(token, len, user) for each maximal run of
+ * word characters in the folded string. A word character is an ASCII
+ * alphanumeric or any byte >= 0x80 (UTF-8 accented letters and other
+ * non-ASCII letters stay inside their token). Everything else (space,
+ * punctuation, '?') separates tokens. */
 void stoma_tokenize(
         const char *folded, void (*cb)(const char *tok, size_t len, void *user),
         void *user)
@@ -82,13 +60,20 @@ void stoma_tokenize(
 	if (!folded || !cb)
 		return;
 	while (*p) {
-		if (!isalnum((unsigned char)*p)) {
+		const char *start = p;
+		unsigned char c = (unsigned char)*p;
+
+		if (!isalnum(c) && c < 0x80) {
 			p++;
 			continue;
 		}
-		const char *start = p;
-		while (*p && isalnum((unsigned char)*p))
+		while (*p) {
+			unsigned char w = (unsigned char)*p;
+
+			if (!isalnum(w) && w < 0x80)
+				break;
 			p++;
+		}
 		cb(start, (size_t)(p - start), user);
 	}
 }

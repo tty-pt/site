@@ -15,11 +15,13 @@
  */
 
 /*
- * Fold a UTF-8 string to lowercase ASCII base letters (accent
- * insensitivity) via iconv TRANSLIT. A UTF-8 LC_CTYPE locale is forced
- * lazily on first use, so output is stable regardless of the process's
- * inherited locale. Returns the number of bytes written, or -1 if the
- * output buffer is too small (caller falls back to raw comparison).
+ * Fold a UTF-8 string to lowercase, preserving accents (accent-sensitive
+ * search). ASCII A-Z and the Latin-1 Supplement uppercase letters are
+ * lowercased; all other bytes are copied verbatim. The fold is
+ * locale-independent (no iconv, no setlocale) and never grows the output,
+ * so it fits whenever outsz > strlen(in). Returns the number of bytes
+ * written, or -1 if the output buffer is too small (caller falls back to
+ * raw comparison).
  */
 int stoma_fold(char *out, size_t outsz, const char *in);
 

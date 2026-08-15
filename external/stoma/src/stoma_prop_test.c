@@ -74,14 +74,19 @@ static void fold_tokens(const char *value, toks_t *t)
 		const char *start;
 		int len;
 
-		if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9'))) {
+		if (!((*p >= 'a' && *p <= 'z') ||
+		      (*p >= '0' && *p <= '9') ||
+		      (unsigned char)*p >= 0x80))
+		{
 			p++;
 			continue;
 		}
 		start = p;
 		len = 0;
 		while (*p &&
-		       ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9')))
+		       ((*p >= 'a' && *p <= 'z') ||
+		        (*p >= '0' && *p <= '9') ||
+		        (unsigned char)*p >= 0x80))
 		{
 			p++;
 			len++;

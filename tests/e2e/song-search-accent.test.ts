@@ -1,12 +1,10 @@
 /**
- * E2E test: accent-insensitive search on song listing
+ * E2E test: accent-sensitive search on song listing
  *
- * Verifies that the title filter matches accented characters whether the
- * user types them accented or not:
+ * Verifies the title filter matches accented characters faithfully:
  * 1. searching "Coração" (accented) returns "Coração Adorador" and only
  *    rows whose title contains "cora"
- * 2. searching "coracao" (unaccented) returns rows matching the same
- *    property (accent folding)
+ * 2. searching "coracao" (unaccented) returns 0 rows (no accent folding)
  * 3. searching a non-matching value returns 0 rows
  *
  * Requires: axil running on :8080.
@@ -16,7 +14,7 @@ import { chromium } from "npm:playwright";
 
 const BASE = "http://localhost:8080";
 
-Deno.test("song list: accent-insensitive title search", async () => {
+Deno.test("song list: accent-sensitive title search", async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
@@ -53,31 +51,16 @@ Deno.test("song list: accent-insensitive title search", async () => {
       );
     }
 
-    // ---- 2. Unaccented query matches accented data ----
+    // ---- 2. Unaccented query matches nothing (no accent folding) ----
     await page.locator('input[name="title"]').fill("coracao");
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
     await page.waitForURL(/title=coracao/, { timeout: 10000 });
-    await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
+    await page.waitForSelector("div.hyle-table-wrap", { timeout: 10000 });
 
-    rows = page.locator("tr.hyle-row-clickable");
-    if (await rows.count() === 0) {
+    const contentUnaccented = await page.content();
+    if (!contentUnaccented.includes("0 of 0 rows")) {
       throw new Error(
-        'Expected rows for title="coracao", got 0',
-      );
-    }
-
-    const titlesUnaccented = await rows.locator("td:first-child")
-      .allTextContents();
-    for (const t of titlesUnaccented) {
-      if (!/cora/i.test(t)) {
-        throw new Error(
-          `Expected every row to contain "cora" for unaccented query, got: "${t}"`,
-        );
-      }
-    }
-    if (!titlesUnaccented.join("|").includes("Coração Adorador")) {
-      throw new Error(
-        'Expected "Coração Adorador" among unaccented-query results',
+        'Expected "0 of 0 rows" for title="coracao" (accent-sensitive), got something else',
       );
     }
 

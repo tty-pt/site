@@ -191,8 +191,13 @@ cp /bin/sh ./bin/sh
    `common.so` whose address is taken by XY's adapter will be exported as `T` in
    `nm -D` (because `XY_IMPL` gives default visibility), but it is still
    **not** directly callable by name from another `.so` at link time.
-10. `stoma_fold` forces a UTF-8 `LC_CTYPE` lazily (`token.c`), so accent folding
-    is stable under any inherited locale — do NOT remove that, and do NOT
-    replace TRANSLIT with hand-rolled accent tables. FTS tests must not pin
-    `LC_ALL` (that masked a root-server C-locale bug); the fold suites are
-    verified under `LC_ALL=C` too.
+10. Search is **accent-sensitive** by design (user requirement): `stoma_fold`
+    (`external/stoma/src/token.c`) lowercases ASCII A-Z and Latin-1 Supplement
+    uppercase (U+00C0–U+00DE minus `×`), preserving accents, and is
+    iconv/locale-free — `pão` and `pao` are different tokens. Do NOT reintroduce
+    iconv TRANSLIT or hand-rolled accent-stripping tables into the search fold,
+    and do NOT make it accent-insensitive again. FTS tests must not pin `LC_ALL`
+    (that masked a root-server C-locale bug); the fold suites are verified under
+    `LC_ALL=C` too. The TRANSLIT + forced-UTF-8-locale pattern survives ONLY in
+    `axil_slugify` (`external/axil/src/axil-encode.c`), which must keep
+    producing ASCII slugs.

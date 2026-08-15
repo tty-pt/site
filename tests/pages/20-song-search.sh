@@ -5,7 +5,7 @@ set -eu
 # Pins the token-prefix behavior that replaced ci_substr substring matching:
 #  - "star" is NOT a token prefix of "estar"/"Starlight" -> 0 rows (old code matched)
 #  - "cor" IS a token prefix ("Coração", "Corações") -> rows
-#  - accent folding: "coracao" matches "Coração"
+#  - accent-sensitive: "coracao" does NOT match "Coração" -> 0 rows
 #  - multi-field AND across two searchable string fields
 # Usage: AXIL_HOST=127.0.0.1 AXIL_PORT=8080 sh tests/pages/20-song-search.sh
 
@@ -48,7 +48,7 @@ echo "Running FTS song-search smoke tests against $BASE"
 
 expect_zero "/song/?title=star" "mid-word 'star' must NOT match 'estar' (prefix semantics)"
 expect_rows "/song/?title=cor" "token prefix 'cor' matches"
-expect_rows "/song/?title=coracao" "accent fold: 'coracao' matches 'Coração'"
+expect_zero "/song/?title=coracao" "accent-sensitive: 'coracao' must NOT match 'Coração'"
 expect_zero "/song/?title=zzzzzz" "non-matching value -> 0 rows"
 expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
 expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"

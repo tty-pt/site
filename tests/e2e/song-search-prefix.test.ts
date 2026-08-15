@@ -6,7 +6,7 @@
  * 1. searching "star" returns 0 rows (mid-word "estar" is NOT a token prefix;
  *    the old substring path would have matched)
  * 2. searching "cor" returns rows whose title starts a token with "cor"
- * 3. searching "coracao" (unaccented) still matches accented titles (fold)
+ * 3. searching "coracao" (unaccented) returns 0 rows (accent-sensitive)
  * 4. title + author filters AND: title="cor" AND author="joaquim" narrows to
  *    "Abri os Corações"; adding a non-matching author kills the result set
  *
@@ -70,18 +70,13 @@ Deno.test("song list: FTS prefix semantics + multi-field AND", async () => {
       }
     }
 
-    // ---- 3. Accent fold: "coracao" matches accented data ----
+    // ---- 3. No accent fold: "coracao" matches nothing ----
     await page.locator('input[name="title"]').fill("coracao");
     await applyFilter();
     await page.waitForURL(/title=coracao/, { timeout: 10000 });
-    if (await rowCount() === 0) {
-      throw new Error(`Expected rows for title="coracao", got 0`);
-    }
-    const titlesFold = await page.locator("tr.hyle-row-clickable td:first-child")
-      .allTextContents();
-    if (!titlesFold.join("|").includes("Coração")) {
+    if ((await totalText()) !== "0 of 0 rows") {
       throw new Error(
-        `Expected an accented "Coração" title for unaccented query, got: ${JSON.stringify(titlesFold)}`,
+        `Expected "0 of 0 rows" for title="coracao" (accent-sensitive), got "${await totalText()}"`,
       );
     }
 
