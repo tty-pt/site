@@ -213,8 +213,10 @@ Implementation notes (verified against qmap source):
   them). Digits are kept so titles like `1984` stay searchable.
 - The SAME fold+tokenize code is used for indexing and for query values —
   otherwise prefixes won't line up.
-- No stopword list in step 1. Skip fields whose folded value exceeds the
-  buffer (long VSTR values are not indexable anyway in step 1).
+- No stopword list. Index buffers are **dynamic** (malloc `strlen+1`; the
+  accent-preserving fold never grows its output, so it always fits) — there is
+  **no fold-buffer skip**: long VSTR values (e.g. full lyrics) are indexed in
+  full (cap fix, 2026-08-15, regression test `17b` in stoma_test.c).
 
 ---
 
@@ -225,30 +227,32 @@ Implementation notes (verified against qmap source):
 `external/hyle/include/hyle/field.h:17` — add `int searchable;` to
 `hyle_field_t` (default 1 for direct constructors; the site sets it explicitly).
 
-**Which fields are searchable (verified — lyrics auto-excluded):**
+**Which fields are searchable (verified live, 2026-08-15):**
 index **only** `HYLE_FIELD_STRING` and `HYLE_FIELD_NULLABLE_STRING`. The rule
-keeps lyrics `data` out:
+comes from the source type, and — contrary to what this section originally
+claimed — it does **NOT** keep lyrics `data` out:
 
-- `EXCL_FIELD_V(data, BUD_QM_VSTR, 1, 0)` (mods/song/fields.h:72) sets the
-  field's source type to `BUD_QM_VSTR` = **7** (mods/common/field_macros.h:26).
-- `impl_source_def_to_source_fields` copies it verbatim as `sf[n].type = 7`
-  (mods/source/source.c:1199).
-- `source_to_hyle_type(7)` hits `default:` → `HYLE_FIELD_STRING`
-  (source.c:617-618). So the hyle schema *does* carry `data` as STRING — but the
-  *source* schema carries `type == 7`, which is neither
-  `SOURCE_FIELD_STRING`(0) nor `DATASET_FIELD_NULLABLE_STRING`(4).
+- `EXCL_FIELD_V(data, BUD_QM_VSTR, 1, 0)` (mods/song/fields.h:72) expands to
+  `{ "data", 0, 0, 0, BUD_EXCLUDE, /*qm_type=*/BUD_QM_VSTR, /*source_type=*/0,
+  wr=1, ... }`. `BUD_QM_VSTR` (8) lands in the `qm_type` slot **only**; the
+  `source_type` slot is hardcoded `0` (bud_field_desc_t layout:
+  external/bud/include/bud/bud.h:159-175; macro: mods/common/field_macros.h:79-83).
+- `impl_source_def_to_source_fields` copies it verbatim as `sf[n].type = 0`
+  (mods/source/source.c).
+- `sf->type == SOURCE_FIELD_STRING` (0) → **`searchable = 1`**.
 
-**So the indexability decision must come from the site layer.** One line in
-`mods/source/source.c` `source_register` (hf build loop at :505-518):
+**So the indexability decision comes from the site layer.** One line in
+`mods/source/source.c` `source_register` (hf build loop):
 
 ```c
 hf[i].searchable = (sf->type == SOURCE_FIELD_STRING ||
                     sf->type == DATASET_FIELD_NULLABLE_STRING);
 ```
 
-Indexable today: `title`, `author`, `owner`, `yt`, `pdf`. Not indexable:
-`type` (multi-ref → existing `token_match` + `prefilter_multi_ref`), `data`
-(VSTR lyrics), ref/inverse/numeric fields.
+Indexable today (song): `id`, `title`, `author`, `yt`, `audio`, `pdf`, `data`
+(VSTR lyrics — searchable, and exercised by the Content lookup, see
+LOOKUP.md), `owner`. Not indexable: `type` (multi-ref → existing `token_match`
++ `prefilter_multi_ref`), ref/inverse/numeric fields.
 
 ### 4.2 Registry: one stoma db per source
 
@@ -427,10 +431,9 @@ source/filter path is unchanged.
 
 ## 7. Deferred (explicitly out of scope)
 
-- **Omnisearch (`q=`)** over all fields incl. lyrics/`data` (QM_VSTR). The
-  field-prefixed key layout and the `searchable` flag are the hooks. Reading
-  VSTR values via `qmap_field_get` already works (libqmap.c:1452-1457), so
-  indexing `data` later is mechanical (bump stoma's fold buffer).
+- **Omnisearch (`q=`)** over all fields. Per-field lyrics search is **done**
+  (see LOOKUP.md): `data` is indexed and searched through the normal
+  `?data=` filter path and the Content lookup box on `/song`.
 - **Index persistence** to disk (qmap file-backed `qmap_open(filename, …)`).
   In-memory + lazy rebuild at boot is fine at current scale.
 - **Per-field opt-in tuning** beyond STRING/NULLABLE — the `searchable` bit.

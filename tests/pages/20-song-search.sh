@@ -7,6 +7,9 @@ set -eu
 #  - "cor" IS a token prefix ("Coração", "Corações") -> rows
 #  - accent-sensitive: "coracao" does NOT match "Coração" -> 0 rows
 #  - multi-field AND across two searchable string fields
+# Content lookup (`data=`, the lyric/chord-chart field):
+#  - "amazing" / "sweet" match the only song with lyrics (amazing_grace)
+#  - multi-token AND ("amazing sound"), non-matching -> 0 rows
 # Usage: AXIL_HOST=127.0.0.1 AXIL_PORT=8080 sh tests/pages/20-song-search.sh
 
 . "$(dirname "$0")/00-helpers.sh"
@@ -52,5 +55,13 @@ expect_zero "/song/?title=coracao" "accent-sensitive: 'coracao' must NOT match '
 expect_zero "/song/?title=zzzzzz" "non-matching value -> 0 rows"
 expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
 expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"
+
+# Content lookup (`data=` lyric/chord field) — corpus: items/song/items/amazing_grace/data
+expect_rows "/song/?data=amazing" "content lookup: 'amazing' matches lyrics"
+expect_rows "/song/?data=sweet" "content lookup: 'sweet' matches lyrics"
+expect_rows "/song/?data=amazing+sound" "content lookup: multi-token AND ('amazing sound')"
+expect_zero "/song/?data=amazing+zzz" "content lookup: AND with bad token -> 0 rows"
+expect_zero "/song/?data=zzzzzz" "content lookup: non-matching value -> 0 rows"
+expect_rows "/song/?title=grace&data=sweet" "content lookup ANDs with metadata filters"
 
 pass "FTS song-search smoke tests all OK"

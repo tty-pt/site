@@ -8,5 +8,6 @@ XY_DECL(int, mpfd_parse, socket_t, fd, char *, body);
 
 /* Data Retrieval */
 XY_DECL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len);
+XY_DECL(int, mpfd_len, const char *, name);
 
 #endif

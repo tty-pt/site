@@ -171,7 +171,25 @@ static int idx_resolve_filter_options(
 
 /* ── Rendering functions ──────────────────────────────────── */
 
-static bud_node *idx_filter_bar(col_t *cols, int ncols, const char *qs)
+static bud_node *idx_content_lookup(const char *qs)
+{
+	char cur[512] = "";
+
+	idx_query_param(qs, "data", cur, sizeof(cur));
+
+	return lx_el("label", lx_attr("class", "filter-field filter-lookup"),
+	             lx_text("Content"), lx_text(":"),
+	             lx_el("input", lx_attr("type", "text"),
+	                   lx_attr("name", "data"),
+	                   lx_attr("class", "filter-lookup"),
+	                   lx_attr("placeholder",
+	                           "lyrics / chords\xe2\x80\xa6"),
+	                   lx_attr("value", cur)))
+	        .data.node;
+}
+
+static bud_node *
+idx_filter_bar(col_t *cols, int ncols, const char *qs, const char *module)
 {
 	bud_node *bar = bud_fragment();
 	int i;
@@ -203,6 +221,10 @@ static bud_node *idx_filter_bar(col_t *cols, int ncols, const char *qs)
 		if (field)
 			bud_append(bar, field);
 	}
+
+	if (!strcmp(module, "song"))
+		bud_append(bar, idx_content_lookup(qs));
+
 	return bar;
 }
 
@@ -225,7 +247,7 @@ static bud_node *idx_list_layout(
 		col_labels[i] = cols[i].label;
 	}
 
-	bud_node *filter_bar = idx_filter_bar(cols, ncols, query_str);
+	bud_node *filter_bar = idx_filter_bar(cols, ncols, query_str, module);
 	bud_node *table = hyle_bud_table(
 	        col_keys, col_labels, ncols, ids, nids, values, module,
 	        sort_field, sort_asc, query_str);

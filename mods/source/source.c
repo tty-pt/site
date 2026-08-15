@@ -10,6 +10,7 @@
 #include <pwd.h>
 
 #include "../auth/auth.h"
+#include "../mpfd/mpfd.h"
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/qmap.h>
@@ -267,7 +268,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 	size_t nb = 0;
 
 	char id_norm[256];
-	axil_slugify(id, strlen(id), id_norm, sizeof(id_norm));
+	axil_slugify(id, strnlen(id, sizeof(id)), id_norm, sizeof(id_norm));
 
 	names[k] = "id";
 	values[k] = strcmp(id, id_norm) != 0 ? id_norm : id;
@@ -567,8 +568,6 @@ static unsigned source_parse_row_data(const source_def_t *def)
 {
 	unsigned hd;
 	size_t i;
-	int ret_len;
-	char val[1024];
 
 	hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
 	if (hd == 0)
@@ -576,16 +575,49 @@ static unsigned source_parse_row_data(const source_def_t *def)
 
 	for (i = 0; i < def->field_count; i++) {
 		const source_field_t *f = &def->fields[i];
+		int fld_len;
+		char *val;
+
 		if (!f->writable)
 			continue;
 
-		ret_len = mpfd_get(f->name, val, sizeof(val) - 1);
-		if (ret_len <= 0)
-			ret_len =
-			        axil_query_param(f->name, val, sizeof(val) - 1);
-		if (ret_len <= 0)
+		fld_len = mpfd_len(f->name);
+		if (fld_len < 0) {
+			/* Not a multipart field — try the url-encoded query
+			 * string. Values longer than the probe are skipped. */
+			char tmp[1024];
+			int rl = axil_query_param(f->name, tmp, sizeof(tmp));
+
+			if (rl <= 0 || rl >= (int)(sizeof(tmp) - 1))
+				continue;
+			val = malloc((size_t)rl + 1);
+			if (!val) {
+				qmap_close(hd);
+				return 0;
+			}
+			if (axil_query_param(f->name, val, (size_t)rl + 1) !=
+			    rl)
+			{
+				free(val);
+				qmap_close(hd);
+				return 0;
+			}
+			qmap_put(hd, f->name, val);
 			continue;
-		if (ret_len >= (int)(sizeof(val) - 1)) {
+		}
+		if (fld_len == 0)
+			continue;
+
+		/* Field values may exceed a stack buffer (e.g. the song
+		 * `data` VSTR holds full lyrics). qmap_put takes ownership,
+		 * so allocate. */
+		val = malloc((size_t)fld_len + 1);
+		if (!val) {
+			qmap_close(hd);
+			return 0;
+		}
+		if (mpfd_get(f->name, val, (size_t)fld_len + 1) != fld_len) {
+			free(val);
 			qmap_close(hd);
 			return 0;
 		}

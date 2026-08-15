@@ -290,7 +290,7 @@ static int mpfd_exists(const char *name)
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
-static int mpfd_len(const char *name)
+XY_IMPL(int, mpfd_len, const char *, name)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	return val ? (int)val->len : -1;

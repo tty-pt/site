@@ -241,6 +241,28 @@ int main(void)
 		qmap_drop(out);
 	}
 
+	/* 17b. value larger than the old 8KB fold buffer (regression) */
+	{
+		/* 8980 'a's + " quarantinemon" (14 chars) = 8994 > 8192 */
+		char *big = malloc(9000);
+		size_t i;
+		int off = 0;
+
+		for (i = 0; i < 8980; i++)
+			off += snprintf(big + off, 9000 - (size_t)off, "a");
+		snprintf(big + off, 9000 - (size_t)off, " quarantinemon");
+		stoma_index(db, "title", "r19b", big);
+		free(big);
+		qmap_drop(out);
+		n = stoma_query(db, "title", "quarantinemon", out, &handled);
+		CHECK(handled == 1 && n == 1 && hd_has(out, "r19b"),
+		      "token past 8KB matches");
+		qmap_drop(out);
+		n = stoma_query(db, "title", "aaaa", out, &handled);
+		CHECK(n == 1 && hd_has(out, "r19b"), "early tokens still match");
+		qmap_drop(out);
+	}
+
 	/* 18. query normalization: punctuation and extra spaces */
 	stoma_index(db, "title", "r20", "Black Star");
 	n = stoma_query(db, "title", "black,  star", out, &handled);

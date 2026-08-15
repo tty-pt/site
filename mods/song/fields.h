@@ -69,7 +69,7 @@ static const bud_field_desc_t song_fields[] = {
 	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
 	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
 	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
-	EXCL_FIELD_V(data, BUD_QM_VSTR, 1, 0),
+	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
 	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
 	OVERLAY_INT(transpose, app_state_t, transpose),
 	OVERLAY_INT(use_bemol, app_state_t, use_bemol),
