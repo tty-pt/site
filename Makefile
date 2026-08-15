@@ -5,7 +5,7 @@ MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | s
 MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: hyle-lib bud-lib hyle-bud mods modules clients
+all: stoma-lib hyle-lib bud-lib hyle-bud mods modules clients
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -15,6 +15,9 @@ modules:
 
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
+
+stoma-lib:
+	$(MAKE) -C external/stoma
 
 hyle-lib:
 	$(MAKE) -C external/hyle
@@ -45,6 +48,7 @@ unit-tests: all test-data-dirs
 pages-test: all
 	@echo "Running pages smoke tests"
 	sh tests/pages/10-pages-render.sh
+	sh tests/pages/20-song-search.sh
 
 integration-tests: all
 	@sh tests/integration/run_all.sh
@@ -137,4 +141,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib
+.PHONY: all mods modules clients run clean distclean format lint test unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib

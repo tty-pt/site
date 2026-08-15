@@ -198,9 +198,9 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 {
 	source_def_t *target;
 	char slug[64];
-	uint32_t stid;
-	size_t struct_size;
-	void *buf;
+	const char *ename;
+	const char *evalue;
+	size_t ecount;
 
 	if (!ref_source || !display_name || !display_name[0])
 		return;
@@ -212,19 +212,14 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 		return;
 	if (qmap_get(target->fields_hd, slug))
 		return;
-	stid = qmap_record_type_id(target->record_id);
-	struct_size = stid != QM_MISS ? qmap_type_len(stid) : 0;
-	buf = struct_size > 0 ? calloc(1, struct_size) : NULL;
-	if (buf) {
-		qmap_put(target->fields_hd, slug, buf);
-		free(buf);
-	}
-	if (target->key_field)
-		qmap_field_put(
-		        target->fields_hd, slug, target->key_field,
-		        display_name);
-	if (target->source_hd)
-		qmap_put(target->source_hd, slug, "");
+
+	/* Write the row through hyle so the full-text index is invalidated
+	 * automatically. qmap_field_put auto-creates the record struct. */
+	ename = target->key_field;
+	evalue = display_name;
+	ecount = ename ? 1 : 0;
+	hyle_source_put(target->id, slug, &ename, &evalue, ecount);
+
 	if (!(target->flags & SOURCE_FLAG_VOLATILE) && target->items_path &&
 	    target->items_path[0])
 	{
@@ -261,40 +256,39 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 	if (lstat(item_path, &st) != 0 || !S_ISDIR(st.st_mode))
 		return -1;
 
-	/* Write "id" field first */
-	qmap_field_put(def->fields_hd, id, "id", id);
-
-	/* Normalize id field to URL-safe form */
-	{
-		char id_norm[256];
-		axil_slugify(id, strlen(id), id_norm, sizeof(id_norm));
-		if (strcmp(id, id_norm) != 0)
-			qmap_field_put(def->fields_hd, id, "id", id_norm);
-	}
-
-	/* Register the item in source_hd so reference fields can resolve by ID
-	 */
-	if (def->source_hd)
-		qmap_put(def->source_hd, id, "");
-
+	/* Gather the row's field values, then write them through hyle so the
+	 * full-text index is invalidated automatically (hyle_source_put sets
+	 * stoma_dirty). */
+	const char *names[64];
+	const char *values[64];
+	size_t k = 0;
 	int owner_read = 0;
+	char *bufs[64];
+	size_t nb = 0;
 
-	for (size_t i = 0; i < def->field_count; i++) {
-		if (strcmp(def->fields[i].name, "id") == 0)
+	char id_norm[256];
+	axil_slugify(id, strlen(id), id_norm, sizeof(id_norm));
+
+	names[k] = "id";
+	values[k] = strcmp(id, id_norm) != 0 ? id_norm : id;
+	k++;
+
+	for (size_t i = 0; i < def->field_count && k < 64; i++) {
+		const source_field_t *f = &def->fields[i];
+		if (strcmp(f->name, "id") == 0)
 			continue;
-		if (!def->fields[i].file)
+		if (!f->file)
 			continue;
 
 		char file_path[PATH_MAX + 256];
 		snprintf(
 		        file_path, sizeof(file_path), "%s/%s", item_path,
-		        def->fields[i].file);
+		        f->file);
 
 		char *data = slurp_file(file_path);
 		if (data) {
-			if (def->fields[i].type ==
-			            SOURCE_FIELD_MULTI_REFERENCE &&
-			    def->fields[i].target_source)
+			if (f->type == SOURCE_FIELD_MULTI_REFERENCE &&
+			    f->target_source)
 			{
 				char ebuf[8192];
 				snprintf(ebuf, sizeof(ebuf), "%s", data);
@@ -304,29 +298,26 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 					str_trim(etok);
 					if (etok[0])
 						source_ensure_entity(
-						        def->fields[i]
-						                .target_source,
-						        etok);
+						        f->target_source, etok);
 					etok = strtok_r(NULL, "\r\n", &esv);
 				}
 			}
 			size_t len = strlen(data);
-			ref_normalize(
-			        def->id, def->fields[i].name, &data, &len);
-			qmap_field_put(
-			        def->fields_hd, id, def->fields[i].name, data);
-			if (strcmp(def->fields[i].name, "owner") == 0 &&
-			    data[0])
+			ref_normalize(def->id, f->name, &data, &len);
+			names[k] = f->name;
+			values[k] = data;
+			k++;
+			bufs[nb++] = data;
+			if (strcmp(f->name, "owner") == 0 && data[0])
 				owner_read = 1;
 		}
-		free(data);
 	}
 
 	/* Fallback: if schema has an "owner" field but no owner file was
 	 * written (e.g. running as root — item_record_ownership uses chown
 	 * instead of writing a file), resolve from filesystem directory
 	 * owner via getpwuid. */
-	{
+	if (!owner_read && k < 64) {
 		int has_owner = 0;
 		for (size_t i = 0; i < def->field_count; i++) {
 			if (strcmp(def->fields[i].name, "owner") == 0) {
@@ -334,18 +325,22 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 				break;
 			}
 		}
-		if (has_owner && !owner_read) {
+		if (has_owner) {
 			struct passwd *pw = getpwuid(st.st_uid);
-			if (pw && pw->pw_name)
-				qmap_field_put(
-				        def->fields_hd, id, "owner",
-				        pw->pw_name);
+			if (pw && pw->pw_name) {
+				names[k] = "owner";
+				values[k] = pw->pw_name;
+				k++;
+			}
 		}
 	}
 
-	qmap_put(def->source_hd, id, "");
+	int rc = hyle_source_put(def->id, id, names, values, k);
 
-	return 0;
+	for (size_t i = 0; i < nb; i++)
+		free(bufs[i]);
+
+	return rc;
 }
 
 XY_IMPL(int, source_delete_item,
@@ -365,8 +360,7 @@ XY_IMPL(int, source_delete_item,
 	        item_id);
 
 	item_remove_path_recursive(item_path);
-	qmap_del(def->fields_hd, item_id);
-	qmap_del(def->source_hd, item_id);
+	hyle_source_del(def->id, item_id);
 	return 0;
 }
 
@@ -515,6 +509,9 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 		hf[i].min_length = sf->min_length;
 		hf[i].max_length = sf->max_length;
 		hf[i].pattern = sf->pattern;
+		hf[i].searchable =
+		        (sf->type == SOURCE_FIELD_STRING ||
+		         sf->type == DATASET_FIELD_NULLABLE_STRING);
 	}
 
 	/*
