@@ -29,6 +29,7 @@ make watch          # auto-rebuild + restart on :8080
 | WASM bridge internals: bud-client.js, bud-hydrate.js, patch ops, patch-target pitfalls | `docs/WASM-BRIDGE.md` |
 | Filter semantics: multi-ref storage, query parsing, union/intersect, repeated-key wire format | `docs/FILTERS.md` |
 | Schema metadata strings and the opaque UI-hint mechanism (`"f":"dropdown"`) | `docs/SCHEMA.md` |
+| Chord syntax, transp internals, grammar + pipeline | `CHORDS.md` |
 
 ## Rules that must never be eroded
 

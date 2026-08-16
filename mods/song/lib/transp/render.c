@@ -16,10 +16,10 @@
 
 #define OUTBUF_MIN 8192
 
-/* Spacing queue — FIFO of { start, len } alignment inserts. */
+/* Spacing queue — FIFO of { start, len } alignment inserts. A single
+ * interleaved array so a grow is one realloc (no partial-failure window). */
 typedef struct {
-	size_t *start;
-	size_t *len;
+	size_t *pair; /* {start,len} interleaved */
 	size_t n;
 	size_t cap;
 } transp_queue_t;
@@ -28,27 +28,21 @@ static int q_push(transp_queue_t *q, size_t start, size_t len)
 {
 	if (q->n == q->cap) {
 		size_t ncap = q->cap ? q->cap * 2 : 8;
-		size_t *s = realloc(q->start, ncap * sizeof(*s));
-		size_t *l = realloc(q->len, ncap * sizeof(*l));
-		if (!s || !l) {
-			free(s);
-			free(l);
+		size_t *p = realloc(q->pair, ncap * 2 * sizeof(*p));
+		if (!p)
 			return 0;
-		}
-		q->start = s;
-		q->len = l;
+		q->pair = p;
 		q->cap = ncap;
 	}
-	q->start[q->n] = start;
-	q->len[q->n] = len;
+	q->pair[2 * q->n] = start;
+	q->pair[2 * q->n + 1] = len;
 	q->n++;
 	return 1;
 }
 
 static void q_free(transp_queue_t *q)
 {
-	free(q->start);
-	free(q->len);
+	free(q->pair);
 	memset(q, 0, sizeof(*q));
 }
 
@@ -129,9 +123,9 @@ static void lyric_fill(
         render_state_t *st, int html, char *out, size_t outsz, size_t *o,
         size_t *j)
 {
-	while (st->q.n > 0 && *j >= st->q.start[0]) {
-		size_t start = st->q.start[0];
-		size_t len = st->q.len[0];
+	while (st->q.n > 0 && *j >= st->q.pair[0]) {
+		size_t start = st->q.pair[0];
+		size_t len = st->q.pair[1];
 		if (st->not_special) {
 			while (*j < start + len) {
 				char c = (*o > 0 && out[*o - 1] == ' ') ? ' '
@@ -142,10 +136,8 @@ static void lyric_fill(
 		}
 		/* drain regardless of not_special */
 		if (st->q.n > 1) {
-			memmove(&st->q.start[0], &st->q.start[1],
-			        (st->q.n - 1) * sizeof(st->q.start[0]));
-			memmove(&st->q.len[0], &st->q.len[1],
-			        (st->q.n - 1) * sizeof(st->q.len[0]));
+			memmove(&st->q.pair[0], &st->q.pair[2],
+			        (st->q.n - 1) * 2 * sizeof(st->q.pair[0]));
 		}
 		st->q.n--;
 	}
@@ -328,18 +320,11 @@ static int render_chord_line(
 		const char *mod = t->text + t->info.mod_off;
 
 		/* mod is copied verbatim (never transposed); a leading 'm'
-		 * becomes '-' under Latin output */
-		char modbuf[256];
-		size_t mod_out_len = mod_len;
-		if (mod_len > 0 && mod[0] == 'm' && i18n[0][0] == 'D' &&
-		    flags & TRANSP_LATIN)
-		{
-			/* Latin: leading 'm' -> '-' (e.g. Am -> La-) */
-			memcpy(modbuf, mod, mod_len);
-			modbuf[0] = '-';
-			mod = modbuf;
-		}
-		(void)mod_out_len;
+		 * becomes '-' under Latin output. The split emit avoids a fixed
+		 * stack buffer (mod_len is unbounded for long 'm'-runs). */
+		int latin_m =
+		        (mod_len > 0 && mod[0] == 'm' &&
+		         (flags & TRANSP_LATIN));
 
 		/* Diff/absorb: grow the root, eating up to diff spaces from the
 		 * following token's lead (port of the historical logic). */
@@ -356,8 +341,12 @@ static int render_chord_line(
 		}
 
 		out_append(out, outsz, o, new_cstr, new_len);
-		if (mod_len > 0)
+		if (latin_m) {
+			out_append(out, outsz, o, "-", 1);
+			out_append(out, outsz, o, mod + 1, mod_len - 1);
+		} else if (mod_len > 0) {
 			out_append(out, outsz, o, mod, mod_len);
+		}
 		j += root_len + mod_len;
 
 		/* If the following char is not space/slash/NUL, add one space

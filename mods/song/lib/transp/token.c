@@ -141,6 +141,69 @@ static size_t word_atom(const char *s, size_t len, size_t pos)
 	return 0;
 }
 
+/* Chord quality from the suffix bytes (the part after the root, before any
+ * '/' bass). Mirrors word_atom's longest-first matching; the FIRST quality-
+ * bearing atom wins, so Gm7(5º) is MINOR (the (5º) is a fifth alteration, not
+ * a quality change). Parentheses are skipped entirely: interval parsing — a
+ * later layer — owns paren content. Default is MAJOR; bare "5" is POWER;
+ * no3/omit3 make the third undefined. */
+static transp_quality_t chord_quality(const char *s, size_t n)
+{
+	size_t i = 0;
+
+	while (i < n) {
+		if (s[i] == '/')
+			break;
+		if (n - i >= 3 && memcmp(s + i, "maj", 3) == 0) {
+			return TRANSP_QUAL_MAJOR;
+		} else if (n - i >= 3 && memcmp(s + i, "min", 3) == 0) {
+			return TRANSP_QUAL_MINOR;
+		} else if (n - i >= 3 && memcmp(s + i, "dim", 3) == 0) {
+			return TRANSP_QUAL_DIMINISHED;
+		} else if (n - i >= 3 && memcmp(s + i, "aug", 3) == 0) {
+			return TRANSP_QUAL_AUGMENTED;
+		} else if (n - i >= 3 && memcmp(s + i, "sus", 3) == 0) {
+			return TRANSP_QUAL_SUSPENDED;
+		} else if (n - i >= 2 && memcmp(s + i, "no", 2) == 0) {
+			return TRANSP_QUAL_UNDEFINED;
+		} else if (n - i >= 4 && memcmp(s + i, "omit", 4) == 0) {
+			return TRANSP_QUAL_UNDEFINED;
+		}
+		if (s[i] == 'm')
+			return TRANSP_QUAL_MINOR;
+		if (s[i] == 'M')
+			return TRANSP_QUAL_MAJOR;
+		if (s[i] == 'h')
+			return TRANSP_QUAL_HALF_DIM;
+		if (s[i] == '-')
+			return TRANSP_QUAL_MINOR;
+		if ((unsigned char)s[i] == 0xC2 && i + 1 < n &&
+		    (unsigned char)s[i + 1] == 0xBA)
+			return TRANSP_QUAL_DIMINISHED;
+		if (s[i] == '+')
+			return TRANSP_QUAL_AUGMENTED;
+		if (s[i] >= '0' && s[i] <= '9') {
+			size_t d = i;
+			while (d < n && s[d] >= '0' && s[d] <= '9')
+				d++;
+			/* bare "5" power chord, no third */
+			if (d == i + 1 && s[i] == '5' && d == n)
+				return TRANSP_QUAL_POWER;
+			i = d;
+			continue;
+		}
+		if (s[i] == '(') {
+			while (i < n && s[i] != ')')
+				i++;
+			if (i < n)
+				i++;
+			continue;
+		}
+		i++;
+	}
+	return TRANSP_QUAL_MAJOR;
+}
+
 int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out)
 {
 	int root;
@@ -165,6 +228,11 @@ int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out)
 	if (!parse_root(tok, len, &root, &root_len))
 		return TRANSP_TOK_NOT_CHORD;
 
+	/* Defaults; the slash-bass branch below overrides them. */
+	out->bass = -1;
+	out->bass_off = 0;
+	out->bass_len = 0;
+
 	pos = root_len;
 	while (pos < len) {
 		unsigned char c = (unsigned char)tok[pos];
@@ -177,6 +245,9 @@ int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out)
 			    pos + 1 + blen == len)
 			{
 				/* slash bass — must end the token */
+				out->bass = b;
+				out->bass_off = pos + 1;
+				out->bass_len = blen;
 				pos = len;
 				break;
 			}
@@ -237,5 +308,6 @@ int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out)
 	out->root_len = root_len;
 	out->mod_off = root_len;
 	out->mod_len = len - root_len;
+	out->quality = chord_quality(tok + root_len, len - root_len);
 	return TRANSP_TOK_CHORD;
 }

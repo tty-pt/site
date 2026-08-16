@@ -90,7 +90,7 @@ input → parse.c ──► song model ──► render.c ──► output
 
 | File | Role |
 |------|------|
-| `token.h` / `token.c` | Chord grammar: `transp_token_analyze()` classifies a token as CHORD / SPECIAL / SEP / NOT_CHORD and extracts the root index + root/suffix spans. No qmap; roots map by letter→index arithmetic, paren words are a static list. |
+| `token.h` / `token.c` | Chord grammar: `transp_token_analyze()` classifies a token as CHORD / SPECIAL / SEP / NOT_CHORD and extracts the root index + root/suffix spans, the **quality** enum (first quality-bearing suffix atom wins, parens skipped) and the **slash bass** (chromatic index + byte offsets, or `bass=-1`). No qmap; roots map by letter→index arithmetic, paren words are a static list. |
 | `parse.h` / `parse.c` | Splits the input into lines and space-tokens (recording leading whitespace per token), splits leading special runs, strips verse-number prefixes, classifies each line (all tokens chord/special/sep → chord line), detects `key`. Pure — no flags, no output. |
 | `render.h` / `render.c` | Walks the model: transposes roots, emits one `<b>` per chord line with verbatim spacing (diff absorb/add), manages the spacing queue for lyric lines (space/`-` fillers; `not_special` resets per chord line), verse numbers, HTML escaping, comments, `TRANSP_BREAK_SLASH`, hide flags, empty-line and `skip_empty` handling. Per-song state is local. |
 | `transp.c` | Public API: `transp_init` / `transp_buffer` (parse → render) / `transp_get_key` / `transp_reset_key` / `transp_shift_table` / `transp_free`. `ctx` holds only `{ key, i18n_table }`. |
@@ -119,7 +119,7 @@ slash-bass special case) plus the mid-line `goto no_chord` reset.
 
 `make -C mods/song/lib/transp test` (run from `mods/song/lib/transp`; wired into
 `mods/song/test.sh` line 5 — `make -C lib/transp test` — which runs under the
-root `make test` → `make unit-tests` path via `mods.load`). All 54 tests pass,
+root `make test` → `make unit-tests` path via `mods.load`). All 58 tests pass,
 ASan/UBSan-clean.
 
 The suite in `test_transp.c` is ordered as a syntax matrix:
@@ -137,7 +137,21 @@ The suite in `test_transp.c` is ordered as a syntax matrix:
 - **F. Desired (the rework's contract)** — `Gm7(5º)` bolded + transposed,
   consistent `aug`/`maj`/`sus`/`omit`/`no`/`h`/`-`, Latin input roots, combo
   grammar (`Gmaj7(9) F#m7b5(5º) Csus2(omit3) Bb/D`), the full user song.
-- **G. Regression guards** — `Amada Amiga Amina` stays lyrics.
+- **G. Regression guards** — `Amada Amiga Amina` stays lyrics; `user_song_full`
+  and `user_song_bold_exact` pin the real user song (see below).
+- **H. Model (quality + bass)** — the first token-level section: direct
+  `transp_token_analyze` assertions on the `quality` / `bass` / `bass_off` /
+  `bass_len` fields (`model_quality_matrix`, `model_first_quality_atom_wins`,
+  `model_slash_bass`). Added 2026-08-16 with the model rework; the rest of the
+  suite stays pipeline-string based.
+
+`user_song_bold_exact` pins the user song's first stanza byte-for-byte (bold
+HTML + plain, transpose 0 and +1): chord lines stay one `<b>` block with
+verbatim spacing, `Bbm7` renders `A#m7` (sharp default), the spacing queue
+realigns the lyric lines with `-` fillers (`No Senhor-`, `có-rdia …
+re--den---ção.`), the trailing space on the last lyric line is preserved, and
+the detected key is F. The expected strings were captured from a probe run and
+pinned — not hand-assumed.
 
 The whole matrix is written first; sections A–E must pass against the old code
 and F–G fail (the documented gap), then the refactor makes everything pass.
@@ -154,8 +168,9 @@ and F–G fail (the documented gap), then the refactor makes everything pass.
 
 DONE:
 - `CHORDS.md` (this file).
-- Full test matrix added to `mods/song/lib/transp/test_transp.c` (Sections A–G;
-  existing 30 tests unchanged). Tests assert **future-correct behavior** — if a
+- Full test matrix added to `mods/song/lib/transp/test_transp.c` (Sections A–G
+  at the time, later joined by Section H; the existing 30 tests are
+  unchanged). Tests assert **future-correct behavior** — if a
   case fails today, it must be left failing (it is the spec for the refactor).
 - Baseline run against the current `transp.c` was attempted. `make -C
   mods/song/lib/transp test` aborts on the first failing `assert`; the baseline
@@ -176,15 +191,33 @@ IN PROGRESS (2026-08-16):
   written.
 - `transp.c` rewrite (qmap-free public API, spec §8.5) and the Makefile
   (spec §8.6) — DONE.
-- `make -C mods/song/lib/transp test` — GREEN (54/54, ASan/UBSan-clean).
+- `make -C mods/song/lib/transp test` — GREEN (58/58, ASan/UBSan-clean).
 - `make format` — DONE (reformats mods/ + external/bud; transp files were the
   only drift, still green after).
+- **Model rework (quality + bass) — DONE 2026-08-16.** `transp_token_info_t`
+  gained a `transp_quality_t` enum + `bass`/`bass_off`/`bass_len` fields; the
+  classifier fills them (see §8.2). First token-level test section (H) added —
+  the pipeline string tests (A–G) assert only rendered output, so this was the
+  first direct check of the model fields. One bug surfaced and was fixed: the
+  non-slash path left `bass` uninitialized stack memory, then the naive "init
+  in the final writes" fix **clobbered** the slash-bass capture (bass defaults
+  now initialize right after the root parse, before the suffix loop — finding
+  10).
+- **Hardening pass — DONE 2026-08-16.** Two robustness bugs in `render.c`
+  fixed (findings 8–9): a stack overflow on the `modbuf[256]` buffer and a
+  `q_push` double-free on partial realloc failure. The old
+  `i18n[0][0]=='D'` Latin-detection hack was dropped in the same pass.
 - Root `make test` wiring — VERIFIED: transp suite runs under `make unit-tests`
   → `mods/song/test.sh` line 5 `make -C lib/transp test` (`song` is in
   `mods.load`). Requires axil on `:8080` for the mods test.sh, but the transp
   C tests run first and are server-free.
+- **Not yet done: `mods/song/lib/transp/README.md` rewrite** (it documented a
+  dead API — old `transp_buffer` signature, `transp_line`, 13 tests,
+  `libtransp.so`, `mods/chords`, `tty.pt` — and predated the grammar, the
+  model fields, and the 58-test suite). **DONE 2026-08-16** alongside this
+  update.
 - Not yet verified: `make lint` (aborted mid-run), `make unit-tests` end-to-end
-  (server-dependent), AGENTS.md row.
+  (server-dependent). AGENTS.md row added 2026-08-16.
 
 Decision log (things the original spec left ambiguous, settled during the
 rework — keep these in sync with the code):
@@ -224,12 +257,27 @@ rework — keep these in sync with the code):
   lead + root + suffix + absorbed spaces + residual on chord lines, and lyric
   bytes on lyric lines; the "add one space" path deliberately does **not**
   increment `j` (matches the original queue-start arithmetic).
+- **Quality model** (2026-08-16): the first quality-bearing suffix atom wins
+  (`Gm7(5º)`→MINOR from the `m`, `Fm7b5`→MINOR, `Cmaj9`→MAJOR, `Bh`→HALF_DIM,
+  `C5`→POWER, `Gno3`/`Gomit3`→UNDEFINED, no qualifier→MAJOR). Parenthesized
+  groups are skipped (locked scope: quality does not consult parens this pass).
+  The heuristic mirrors `word_atom`'s longest-first matching so the enum can
+  never disagree with the grammar's acceptance.
+- **Bass model** (2026-08-16): a trailing `/root` bass is recorded as a
+  chromatic index + `bass_off`/`bass_len` byte offsets (render never touches
+  it). No slash → `bass=-1, bass_off=0, bass_len=0`. An extension slash
+  (`G6/9`) is not a bass — `bass` stays −1. `G#/Bb`-style respelling
+  (accidentals) and interval-aware key handling are explicitly future work
+  (§9) and were NOT designed in.
+- **Bass defaults must precede the suffix loop**: initializing
+  `bass=-1/off=0/len=0` inside the final writes block (after the loop) is a
+  bug — it overwrites a slash-bass capture. The defaults are set right after
+  the root parse.
 
 REMAINING (verification/wiring):
 - `make lint` (was aborted mid-run) → `make unit-tests` end-to-end (axil on
-  :8080; pre-existing `songbook` step-6 failure unrelated) → add
-  `| Chord syntax, transp internals, grammar + pipeline | CHORDS.md |` row to
-  `AGENTS.md`.
+  :8080; pre-existing `songbook` step-6 failure unrelated). AGENTS.md row added
+  and README rewritten as part of the 2026-08-16 model/hardening pass.
 
 ### 8.8 Research findings (2026-08-16 — bugs found while tracing tests to code)
 
@@ -312,10 +360,38 @@ Status of the implementation run (updated 2026-08-16, as fixes land):
   `%` before escaping (HTML mode only; plain mode still passes the line
   through verbatim). `comment_line_html` then passes.
 
-All 54 tests in `test_transp.c` pass; `make -C mods/song/lib/transp test` is
+All 58 tests in `test_transp.c` pass; `make -C mods/song/lib/transp test` is
 green and ASan/UBSan-clean; `make format` done; root-`make test` wiring
-verified. Remaining: `make lint` (aborted mid-run), `make unit-tests`
-end-to-end (server on :8080), AGENTS.md row.
+verified; transp README rewritten. Remaining: `make lint` (aborted mid-run),
+`make unit-tests` end-to-end (server on :8080), AGENTS.md row.
+
+Findings from the model + hardening pass (2026-08-16):
+
+8. **`render.c` stack overflow on `modbuf[256]`.** The old code built a
+   `char modbuf[256]` with a bare `strcat` loop over suffix atoms. An input
+   like `G` followed by 256+ copies of `m` (each 1 byte, e.g. from a
+   hand-typed `Gmmmmm…`) overflows it. It was reachable under
+   `TRANSP_LATIN`, which re-renders the mod. **Fixed:** no stack buffer — the
+   mod is emitted in two pieces (`'-'` + `mod+1`) when the Latin `m`→`-`
+   substitution fires, and `latin_m` is tracked alongside. The
+   `i18n[0][0]=='D'` Latin-detection hack went away in the same edit (the
+   `latin` flag is passed down explicitly now).
+9. **`render.c` `q_push` double-free on partial realloc failure.** The
+   spacing queue stored `start[]` and `len[]` in two separately-realloc'd
+   arrays: `realloc(start)` could succeed while `realloc(len)` failed, leaving
+   `q->start` pointing at freed memory that `q_free` then freed again. (Same
+   latent bug class as the finding-6 arity bug — untriggered by normal tests,
+   found by reading the code.) **Fixed:** a single interleaved
+   `{start,len}` array; on realloc failure both pointers stay valid and
+   `lyric_fill` was updated to drain the new layout.
+10. **`transp_token_analyze` left `bass`/`quality` uninitialized for chords
+    without a slash bass.** Section H caught it: `assert_chord_info`'s
+    `info` is plain stack memory, so `info.bass == -1` compared against
+    garbage. The first fix (initialize in the final writes block) then made
+    `model_slash_bass` fail with `info.bass == 8` because the defaults
+    overwrote the slash-bass capture. **Fixed:** defaults initialize right
+    after the root parse, before the suffix loop; the slash-bass branch
+    overrides them.
 
 Minor/known-verbatim port deltas (accepted, mostly untested):
 - SEP `/` sets `has_chords`, so `/G` renders `<b>/G</b>` (old:
@@ -351,6 +427,15 @@ typedef enum {
     TRANSP_TOK_SEP = 3,       /* lone '/' */
 } transp_tok_kind_t;
 
+typedef enum {
+    TRANSP_QUAL_MAJOR = 0,    /* no qualifier, or M / maj / sus / add / aug */
+    TRANSP_QUAL_MINOR = 1,    /* m / min / '-' */
+    TRANSP_QUAL_HALF_DIM = 2, /* h */
+    TRANSP_QUAL_POWER = 3,    /* 5 (no third) */
+    TRANSP_QUAL_DIMINISHED = 4, /* dim / º */
+    TRANSP_QUAL_UNDEFINED = 5,   /* omit3 / no3 — no third, no usable tag */
+} transp_quality_t;
+
 typedef struct {
     transp_tok_kind_t kind;
     int root;            /* chromatic 0-11 (C=0 … B=11), or -1 */
@@ -358,6 +443,10 @@ typedef struct {
     size_t root_len;     /* bytes of the root (1-3: "C", "A#", "Sol") */
     size_t mod_off;      /* == root_off + root_len */
     size_t mod_len;      /* bytes of the suffix (0 for bare roots) */
+    transp_quality_t quality; /* first quality-bearing atom (§8.2) */
+    int bass;            /* chromatic of slash bass, or -1 if none */
+    size_t bass_off;     /* byte offset of the bass within the token */
+    size_t bass_len;     /* bytes of the bass ("F#", "Do") */
 } transp_token_info_t;
 
 int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out);
@@ -386,10 +475,23 @@ int transp_token_analyze(const char *tok, size_t len, transp_token_info_t *out);
      - digit: consume digit run.
      - `0xC2 0xBA` (`º`): consume 2 bytes.
      - `'+'`: consume 1.
-     - atoms longest-first: `maj min dim aug sus add omit no` (allow optional
-       trailing digits for `sus`/`add`/`omit`; bare `sus`/`add`/`dim`/`aug`/`no`
-       are valid), then `m M h`, then `'-'` (minor dash, Brazilian/Latin).
-     - anything else → NOT_CHORD.
+      - atoms longest-first: `maj min dim aug sus add omit no` (allow optional
+        trailing digits for `sus`/`add`/`omit`; bare `sus`/`add`/`dim`/`aug`/`no`
+        are valid), then `m M h`, then `'-'` (minor dash, Brazilian/Latin).
+      - anything else → NOT_CHORD.
+  4. **Defaults first**: `bass=-1, bass_off=0, bass_len=0` are set right after
+     the root parse (before the loop) — never in the final writes block, or a
+     slash-bass capture is overwritten (finding 10).
+- **Bass capture**: in the `'/'` branch, when `parse_root` consumes the tail
+  (`pos+1+blen == len`), record `out->bass = b`, `bass_off = pos+1`,
+  `bass_len = blen`. Extension slash (`G6/9`) does not touch the bass fields.
+- **Quality** `chord_quality(mod, mod_len)`: a static longest-first walk over
+  the suffix mirrors `word_atom`. First quality-bearing atom wins:
+  `m`/`min`/`-`→MINOR, `dim`/`º`→DIMINISHED, `h`→HALF_DIM, `5`→POWER
+  (`omit3`/`no3`→UNDEFINED, checked before the `5`-as-extension rule),
+  `M`/`maj`/`sus`/`add`/`aug`→MAJOR, nothing→MAJOR. Paren groups (`(` … `)`)
+  are skipped. The scan only sets a field the token already accepts — it can
+  never turn a NOT_CHORD into a CHORD.
 
 ### 8.3 parse.h / parse.c — the song model
 
@@ -464,10 +566,14 @@ char *transp_render(const transp_song_t *song, int semitones, int flags,
 ```
 
 `render.c` details — port the current `proc_line` semantics **verbatim** onto
-the model; keep the 8192-byte per-line outbuf + `strlen(input)*8+64` result
-buffer, `strcat`-append pattern, and the per-song local state:
+the model; keep the `strcat`-append pattern and the per-song local state:
 `skip_empty`, `not_special` (reset to 1 at each chord line, set 0 if the line
-has a SPECIAL token), and a TAILQ spacing queue (drain at end).
+has a SPECIAL token), and the spacing queue (drain at end). **Hardening
+(2026-08-16):** the queue is a **single interleaved `{start,len}` growable
+array** (not two arrays — a partial realloc failure used to double-free, and
+not the spec's TAILQ — `sys/queue.h` is gone); the per-line outbuf is
+`max(8192, line_len*8+64)`; and the **`modbuf[256]` stack buffer is removed**
+(fixed overflow, findings 8–9).
 - **Empty line**: if `skip_empty` pending → consume it, emit nothing. Else HTML
   `<div> </div>` (space guard), plain `\n`.
 - **Comment** (`%`): `TRANSP_REMOVE_COMMENTS` → set `skip_empty=1`, still emit
@@ -478,15 +584,16 @@ has a SPECIAL token), and a TAILQ spacing queue (drain at end).
   (`TRANSP_HIDE_LYRICS`: collapse to a single space after the first chord, i.e.
   `no_space && has_chords` logic); SPECIAL/SEP → emit raw text, `j += len`,
   set `not_special=0`; CHORD → `newroot=(root+semitones)%12`,
-  `new_cstr=chord_str` (bemol: `#` spelling → flat; Latin: `m`→`-`),
-  emit `new_cstr + mod` verbatim. **Diff/absorb** (port exactly): `diff =
-  strlen(new_cstr) - root_len`; if `diff>0` absorb `i=min(diff, next_lead)`
-  spaces from the following token's lead (`j+=i`); if at EOL `j+=diff`; if the
-  following char is not space/slash/NUL add one `' '` (`diff++`); then if
-  `i<diff` push `{start=j, len=diff-i}` to the queue and `j+=len`. Slash bass
-  and `º`/`-` suffixes are copied verbatim (never transposed).
-  `TRANSP_HIDE_CHORDS`: emit nothing but `<div> </div>` (no queue entries).
-  `TRANSP_HIDE_LYRICS` is fine (normal chord rendering).
+  `new_cstr=chord_str` (bemol: `#` spelling → flat; Latin: `m`→`-`), emit
+  `new_cstr` then the mod **without a stack buffer** (Latin `m`→`-` emits
+  `'-'` + `mod+1`; `latin_m` tracked per chord). **Diff/absorb** (port
+  exactly): `diff = strlen(new_cstr) - root_len`; if `diff>0` absorb
+  `i=min(diff, next_lead)` spaces from the following token's lead (`j+=i`); if
+  at EOL `j+=diff`; if the following char is not space/slash/NUL add one `' '`
+  (`diff++`); then if `i<diff` push `{start=j, len=diff-i}` to the queue and
+  `j+=len`. Slash bass and `º`/`-` suffixes are copied verbatim (never
+  transposed). `TRANSP_HIDE_CHORDS`: emit nothing but `<div> </div>` (no queue
+  entries). `TRANSP_HIDE_LYRICS` is fine (normal chord rendering).
 - **Lyric line**: `TRANSP_HIDE_LYRICS` → `<div></div>` (no space — match today).
   HTML `<div>`; if `has_verse` emit `<b>…N.…</b>` (escaped). Walk bytes from
   `text+verse_len`, `j` from 0: consume queue entries while `j>=start` (if
@@ -536,3 +643,29 @@ $(OBJ): $(SRC) transp.h transp_flags.h token.h parse.h render.h
 - Key detection only fires when `key == -1` (callers use `transp_reset_key`
   between songs).
 - The `user_song_full` test asserts `transp_get_key(ctx) == 5` (first chord F).
+
+## 9. Future features & seams (model rework, 2026-08-16)
+
+Scoped out by the user for this pass; the model was shaped so they land without
+churning the token contract:
+
+- **Accidental-aware / key-aware respelling** — "later, not now". The model
+  already carries the *chromatic* root and bass (`G#/Bb`-equivalence), but the
+  renderer picks spellings by preference flag, not by key. A future step would
+  pick `Bbm7` vs `A#m7` from the song key; the tests keep the current
+  sharp-default (`Bbm7` renders `A#m7`) until then.
+- **Intervals / music-theory reasoning** — explicitly future. The `quality`
+  enum + `bass` are the seam; the renderer still copies suffixes verbatim.
+  Nothing key- or theory-aware is designed in (§8.1 decision log).
+- **`bass_off`/`bass_len`** let a future renderer re-emit or transpose the bass
+  spelling without re-parsing the token string.
+- **Quality heuristics that must keep matching the grammar**: `chord_quality`
+  mirrors `word_atom` longest-first; `omit3`/`no3` are checked before the `5`
+  power-chord rule so `Gomit3` stays UNDEFINED, not POWER. Parens are skipped —
+  revisiting that is the natural next refinement (e.g. `G(no3)` could consult
+  parens for quality).
+- Hardening made the renderer **overflow/leak-safe by construction** (findings
+  8–9): no fixed stack buffer for mods, single-array queue, per-line outbuf
+  floor `max(8192, line_len*8+64)`.
+- Still open, unchanged from §8.1: `make lint`, end-to-end `make unit-tests`
+  (axil on :8080). AGENTS.md row + README rewrite are done.

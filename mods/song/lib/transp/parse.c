@@ -75,6 +75,10 @@ static int tokenize_piece(
 		t->info.root_len = 0;
 		t->info.mod_off = 0;
 		t->info.mod_len = 0;
+		t->info.bass = -1;
+		t->info.bass_off = 0;
+		t->info.bass_len = 0;
+		t->info.quality = TRANSP_QUAL_MAJOR;
 		pl->ntok++;
 		first = 0;
 		p += consume;

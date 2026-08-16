@@ -3,6 +3,7 @@
  */
 
 #include "transp.h"
+#include "token.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -970,12 +971,11 @@ TEST(user_song_bold_exact)
 
 	char *result = transp_buffer(ctx, song, 0, TRANSP_HTML);
 	assert(result != NULL);
-	assert(strcmp(
-	        result,
-	        "<div><b>Fm   Cm A#m G#  Gº</b></div>"
-	        "<div>No Senhor es-tá  a miseri-</div>"
-	        "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b></div>"
-	        "<div>córdia e a abundânte   re-den--ção. </div>") == 0);
+	assert(strcmp(result,
+	              "<div><b>Fm   Cm A#m G#  Gº</b></div>"
+	              "<div>No Senhor es-tá  a miseri-</div>"
+	              "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b></div>"
+	              "<div>córdia e a abundânte   re-den--ção. </div>") == 0);
 	free(result);
 
 	/* +1: every root transposed, spacing still verbatim on chord lines, and
@@ -983,24 +983,24 @@ TEST(user_song_bold_exact)
 	transp_reset_key(ctx);
 	result = transp_buffer(ctx, song, 1, TRANSP_HTML);
 	assert(result != NULL);
-	assert(strcmp(
-	        result,
-	        "<div><b>F#m   C#m  Bm A  G#º</b></div>"
-	        "<div>No Senhor- es-tá  a miseri-</div>"
-	        "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5</b></div>"
-	        "<div>có-rdia e a a-bundânte   re--den---ção. </div>") == 0);
+	assert(strcmp(result,
+	              "<div><b>F#m   C#m  Bm A  G#º</b></div>"
+	              "<div>No Senhor- es-tá  a miseri-</div>"
+	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 "
+	              "C#5</b></div>"
+	              "<div>có-rdia e a a-bundânte   re--den---ção. </div>") ==
+	       0);
 	assert(transp_get_key(ctx) == 5); /* F */
 	free(result);
 
 	/* Plain mode: same transposition, no markup, same line breaks. */
 	result = transp_buffer(ctx, song, 1, 0);
 	assert(result != NULL);
-	assert(strcmp(
-	        result,
-	        "F#m   C#m  Bm A  G#º\n"
-	        "No Senhor- es-tá  a miseri-\n"
-	        "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
-	        "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
+	assert(strcmp(result,
+	              "F#m   C#m  Bm A  G#º\n"
+	              "No Senhor- es-tá  a miseri-\n"
+	              "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
+	              "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
 	free(result);
 
 	transp_free(ctx);
@@ -1021,6 +1021,76 @@ TEST(lyric_false_positives_guard)
 	free(result);
 
 	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section H — model: quality + slash bass (token-level)
+ * ===================================================================== */
+
+static void assert_chord_info(
+        const char *tok, int root, transp_quality_t q, int bass,
+        size_t bass_len)
+{
+	transp_token_info_t info;
+	int kind = transp_token_analyze(tok, strlen(tok), &info);
+	assert(kind == TRANSP_TOK_CHORD);
+	assert(info.root == root);
+	assert(info.quality == q);
+	assert(info.bass == bass);
+	assert(info.bass_len == bass_len);
+}
+
+TEST(model_quality_matrix)
+{
+	assert_chord_info("C", 0, TRANSP_QUAL_MAJOR, -1, 0);
+	assert_chord_info("Cm", 0, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("G-", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gmin", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gdim", 7, TRANSP_QUAL_DIMINISHED, -1, 0);
+	assert_chord_info("Gº", 7, TRANSP_QUAL_DIMINISHED, -1, 0);
+	assert_chord_info("Bh", 11, TRANSP_QUAL_HALF_DIM, -1, 0);
+	assert_chord_info("Gaug", 7, TRANSP_QUAL_AUGMENTED, -1, 0);
+	assert_chord_info("G+", 7, TRANSP_QUAL_AUGMENTED, -1, 0);
+	assert_chord_info("Gsus4", 7, TRANSP_QUAL_SUSPENDED, -1, 0);
+	assert_chord_info("C5", 0, TRANSP_QUAL_POWER, -1, 0);
+	assert_chord_info("Gno3", 7, TRANSP_QUAL_UNDEFINED, -1, 0);
+	assert_chord_info("Cmaj9", 0, TRANSP_QUAL_MAJOR, -1, 0);
+	assert_chord_info("G6/9", 7, TRANSP_QUAL_MAJOR, -1, 0);
+}
+
+TEST(model_first_quality_atom_wins)
+{
+	/* The FIRST quality-bearing atom wins: the (5º) is a fifth alteration,
+	 * not a quality change, so Gm7(5º) stays MINOR. */
+	assert_chord_info("Gm7(5º)", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Fm7b5", 5, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gm7b5", 7, TRANSP_QUAL_MINOR, -1, 0);
+}
+
+TEST(model_slash_bass)
+{
+	transp_token_info_t info;
+
+	assert(transp_token_analyze("E/G#", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.root == 4); /* E */
+	assert(info.quality == TRANSP_QUAL_MAJOR);
+	assert(info.bass == 8); /* G# */
+	assert(info.bass_len == 2);
+	assert(info.bass_off == 2);
+
+	assert(transp_token_analyze("D9/F#", 5, &info) == TRANSP_TOK_CHORD);
+	assert(info.bass == 6); /* F# */
+	assert(info.bass_len == 2);
+
+	assert(transp_token_analyze("Bb/D", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.root == 10); /* Bb */
+	assert(info.bass == 2);  /* D */
+	assert(info.bass_len == 1);
+
+	/* extension slash G6/9 is not a bass */
+	assert(transp_token_analyze("G6/9", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.bass == -1);
+	assert(info.bass_len == 0);
 }
 
 int main(void)
@@ -1085,6 +1155,10 @@ int main(void)
 	RUN_TEST(user_song_full);
 	RUN_TEST(user_song_bold_exact);
 	RUN_TEST(lyric_false_positives_guard);
+
+	RUN_TEST(model_quality_matrix);
+	RUN_TEST(model_first_quality_atom_wins);
+	RUN_TEST(model_slash_bass);
 
 	printf("\nAll tests passed!\n");
 	return 0;
