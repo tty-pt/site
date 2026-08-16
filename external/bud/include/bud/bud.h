@@ -175,6 +175,8 @@ typedef struct bud_field_desc {
 	/* Server-side filter-style UI hint (e.g. "dropdown"); unused by WASM.
 	 */
 	const char *filter_style;
+	/* Server-side combine-mode hint ("and"/NULL); unused by WASM. */
+	const char *filter_mode;
 } bud_field_desc_t;
 
 /* Server-side qmap type constants — must match qmap.h QM_* values */

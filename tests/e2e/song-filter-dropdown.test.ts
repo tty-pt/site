@@ -138,14 +138,17 @@ Deno.test({
       // ---- 4. Summary label sync (WASM patch) ----
       await searchInput.fill("");
       await natalCb.check();
-      await comunhaoCb.check();
+      const saidaCb = page.locator(
+        'details.hyle-multiselect input[name="type"][value="saida"]',
+      );
+      await saidaCb.check();
       const summary = page.locator(
         'details.hyle-multiselect [data-hyle-ms-values]',
       );
       await waitFor(
         async () => {
           const t = (await summary.textContent()) ?? "";
-          return t.includes("Natal") && t.includes("Comunhão");
+          return t.includes("Natal") && t.includes("Saída");
         },
         5000,
         "summary should sync to both selections",
@@ -153,33 +156,33 @@ Deno.test({
       const summaryText = (await summary.textContent())?.trim() ?? "";
       console.log(`Summary after selecting: "${summaryText}"`);
 
-      // ---- 5. Apply -> repeated-key union URL ----
+      // ---- 5. Apply -> AND filter URL (type default = AND) ----
       await page.locator('.hyle-filter-actions button[type="submit"]').click();
       await waitFor(
         async () => {
           const u = new URL(page.url());
           const types = u.searchParams.getAll("type");
-          return types.includes("natal") && types.includes("comunhao");
+          return types.includes("natal") && types.includes("saida");
         },
         10000,
-        "URL should carry type=natal and type=comunhao",
+        "URL should carry type=natal and type=saida",
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
       const content = await page.content();
       assert(
-        content.includes("type=natal") && content.includes("type=comunhao"),
-        "URL should carry both type=natal and type=comunhao",
+        content.includes("type=natal") && content.includes("type=saida"),
+        "URL should carry both type=natal and type=saida",
       );
 
       const rows = page.locator("tr.hyle-row-clickable");
       const n = await rows.count();
-      assert(n > 0, "union filter should return rows");
+      assert(n > 0, "AND filter (natal+saida) should return rows");
       const typeCells = await rows.locator("td:nth-child(2)").allTextContents();
       for (const t of typeCells) {
         assert(
-          t.includes("Natal") || t.includes("Comunhão"),
-          `union-filtered row should be Natal or Comunhão, got: "${t}"`,
+          t.includes("Natal") && t.includes("Saída"),
+          `AND-filtered row should contain BOTH Natal and Saída, got: "${t}"`,
         );
       }
 
@@ -194,15 +197,15 @@ Deno.test({
       );
       assert(
         await page.locator(
-          'details.hyle-multiselect input[name="type"][value="comunhao"]',
+          'details.hyle-multiselect input[name="type"][value="saida"]',
         ).isChecked(),
-        "comunhao checkbox should stay checked after reload",
+        "saida checkbox should stay checked after reload",
       );
       const reloadSummary = (await page.locator(
         'details.hyle-multiselect [data-hyle-ms-values]',
       ).textContent())?.trim() ?? "";
       assert(
-        reloadSummary.includes("Natal") && reloadSummary.includes("Comunhão"),
+        reloadSummary.includes("Natal") && reloadSummary.includes("Saída"),
         `reload summary should list both selections, got: "${reloadSummary}"`,
       );
       console.log(`Reload summary: "${reloadSummary}"`);
@@ -213,7 +216,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "song type: multiselect union filter works with JS disabled (SSR only)",
+  name: "song type: AND filter and OR override work with JS disabled (SSR only)",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -222,20 +225,21 @@ Deno.test({
     const page = await context.newPage();
 
     try {
+      // AND default: natal+saida → only dual-typed songs
       await page.goto(
-        `${BASE}/song/?type=natal&type=comunhao`,
+        `${BASE}/song/?type=natal&type=saida`,
         { waitUntil: "load" },
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
       const rows = page.locator("tr.hyle-row-clickable");
       const n = await rows.count();
-      assert(n > 0, "JS-disabled union filter should return rows");
+      assert(n > 0, "JS-disabled AND filter (natal+saida) should return rows");
       const typeCells = await rows.locator("td:nth-child(2)").allTextContents();
       for (const t of typeCells) {
         assert(
-          t.includes("Natal") || t.includes("Comunhão"),
-          `JS-disabled union-filtered row should be Natal or Comunhão, got: "${t}"`,
+          t.includes("Natal") && t.includes("Saída"),
+          `JS-disabled AND-filtered row should contain BOTH Natal and Saída, got: "${t}"`,
         );
       }
 
@@ -247,11 +251,30 @@ Deno.test({
       );
       assert(
         await page.locator(
-          'details.hyle-multiselect input[name="type"][value="comunhao"]',
+          'details.hyle-multiselect input[name="type"][value="saida"]',
         ).isChecked(),
-        "JS-disabled: comunhao checkbox should render checked from SSR",
+        "JS-disabled: saida checkbox should render checked from SSR",
       );
-      console.log("JS-disabled union filter verified (SSR only)");
+      console.log("JS-disabled AND filter verified (SSR only)");
+
+      // OR override: natal+comunhao with type_op=or → union
+      await page.goto(
+        `${BASE}/song/?type=natal&type=comunhao&type_op=or`,
+        { waitUntil: "load" },
+      );
+      await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
+
+      const orRows = page.locator("tr.hyle-row-clickable");
+      const orN = await orRows.count();
+      assert(orN > 0, "JS-disabled OR override (natal+comunhao) should return rows");
+      const orTypeCells = await orRows.locator("td:nth-child(2)").allTextContents();
+      for (const t of orTypeCells) {
+        assert(
+          t.includes("Natal") || t.includes("Comunhão"),
+          `JS-disabled OR-filtered row should be Natal or Comunhão, got: "${t}"`,
+        );
+      }
+      console.log("JS-disabled OR override verified (SSR only)");
     } finally {
       await browser.close();
     }

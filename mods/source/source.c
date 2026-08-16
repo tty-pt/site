@@ -513,6 +513,9 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 		hf[i].searchable =
 		        (sf->type == SOURCE_FIELD_STRING ||
 		         sf->type == DATASET_FIELD_NULLABLE_STRING);
+		hf[i].combine =
+		        (sf->filter_mode &&
+		         strcmp(sf->filter_mode, "and") == 0) ? 1 : 0;
 	}
 
 	/*
@@ -1071,10 +1074,12 @@ XY_IMPL(unsigned, source_query,
 				for (size_t sj = 0; sj < sdef->field_count;
 				     sj++)
 				{
-					if (strcmp(sdef->fields[sj].name,
-					           f->field) == 0 &&
-					    sdef->fields[sj].type ==
-					            SOURCE_FIELD_MULTI_REFERENCE)
+				if (strcmp(sdef->fields[sj].name,
+				           f->field) == 0 &&
+				    (sdef->fields[sj].type ==
+				             SOURCE_FIELD_MULTI_REFERENCE ||
+				     sdef->fields[sj].type ==
+				             SOURCE_FIELD_REFERENCE))
 					{
 						char slug[256];
 						axil_slugify(
@@ -1132,20 +1137,27 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 		if (f->type == SOURCE_FIELD_REFERENCE ||
 		    f->type == SOURCE_FIELD_MULTI_REFERENCE)
 		{
+			char mode_suf[20] = "";
+
+			if (f->filter_mode &&
+			    strcmp(f->filter_mode, "and") == 0)
+				snprintf(mode_suf, sizeof(mode_suf),
+				         ",\"m\":\"and\"");
 			if (f->filter_style && f->filter_style[0]) {
 				snprintf(
 				        buf, sizeof(buf),
-				        "{\"t\":%d,\"s\":\"%s\",\"f\":\"%s\"}",
+				        "{\"t\":%d,\"s\":\"%s\",\"f\":\"%s\"%s}",
 				        (int)f->type,
 				        f->target_source ? f->target_source
 				                         : "",
-				        f->filter_style);
+				        f->filter_style, mode_suf);
 			} else {
 				snprintf(
 				        buf, sizeof(buf),
-				        "{\"t\":%d,\"s\":\"%s\"}", (int)f->type,
+				        "{\"t\":%d,\"s\":\"%s\"%s}", (int)f->type,
 				        f->target_source ? f->target_source
-				                         : "");
+				                         : "",
+				        mode_suf);
 			}
 		} else if (f->type == SOURCE_FIELD_INVERSE) {
 			snprintf(
@@ -1228,10 +1240,11 @@ static int impl_source_def_to_source_fields(
 			sf[n].max = 0;
 			sf[n].min_length = 0;
 			sf[n].max_length = 0;
-			sf[n].pattern = NULL;
-			sf[n].filter_style = NULL;
-			n++;
-			continue;
+		sf[n].pattern = NULL;
+		sf[n].filter_style = NULL;
+		sf[n].filter_mode = NULL;
+		n++;
+		continue;
 		}
 		if (!d->key || d->kind >= 3)
 			continue;
@@ -1248,6 +1261,7 @@ static int impl_source_def_to_source_fields(
 		sf[n].max_length = 0;
 		sf[n].pattern = NULL;
 		sf[n].filter_style = d->filter_style;
+		sf[n].filter_mode = d->filter_mode;
 		n++;
 	}
 	return n;

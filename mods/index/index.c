@@ -464,19 +464,29 @@ static int idx_render_list_bud(
 			cols[i].target_hd =
 			        source_get_fields_hd(cols[i].target_source);
 
-		if (cols[i].type == SOURCE_FIELD_MULTI_REFERENCE &&
-		    cols[i].target_hd)
 		{
-			idx_query_params_join(
-			        query_str, cols[i].key, state.cols[i].current,
-			        sizeof(state.cols[i].current));
-		} else {
-			idx_query_param(
-			        query_str, cols[i].key, cur_buf,
-			        sizeof(cur_buf));
-			snprintf(
-			        state.cols[i].current,
-			        sizeof(state.cols[i].current), "%s", cur_buf);
+			int is_multi =
+			        cols[i].type == SOURCE_FIELD_MULTI_REFERENCE;
+
+			if (!is_multi &&
+			    cols[i].type == SOURCE_FIELD_REFERENCE &&
+			    (strcmp(cols[i].filter, "multiselect") == 0 ||
+			     strcmp(cols[i].filter, "grid") == 0))
+				is_multi = 1;
+			if (is_multi && cols[i].target_hd) {
+				idx_query_params_join(
+				        query_str, cols[i].key,
+				        state.cols[i].current,
+				        sizeof(state.cols[i].current));
+			} else {
+				idx_query_param(
+				        query_str, cols[i].key, cur_buf,
+				        sizeof(cur_buf));
+				snprintf(
+				        state.cols[i].current,
+				        sizeof(state.cols[i].current), "%s",
+				        cur_buf);
+			}
 		}
 
 		if (cols[i].target_hd &&

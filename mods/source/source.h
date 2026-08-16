@@ -43,6 +43,7 @@ typedef struct {
 	size_t max_length;
 	const char *pattern;
 	const char *filter_style;
+	const char *filter_mode;
 } source_field_t;
 
 typedef struct {
