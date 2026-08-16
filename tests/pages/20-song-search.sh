@@ -26,7 +26,13 @@ row_count(){
     fail "$route returned HTTP $code"
   fi
 
-  printf '%s' "$body" | grep -oE '[0-9]+ of [0-9]+ rows' | head -1
+  count=$(printf '%s' "$body" | grep -oE '[0-9]+ of [0-9]+ rows' | head -1)
+  # A valid-but-zero result renders the "No items" empty state instead of the
+  # pagination row-count line; treat that as 0 of 0 rows.
+  if [ -z "$count" ] && printf '%s' "$body" | grep -q 'No items'; then
+    count="0 of 0 rows"
+  fi
+  printf '%s' "$count"
 }
 
 expect_zero(){

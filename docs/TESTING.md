@@ -26,10 +26,10 @@ pre-existing, and how to write e2e assertions that don't flake.
   on clean `main`.
 - `make -C external/hyle test` `zig-test` step fails when `zig` is not
   installed (unrelated to the C suite).
-- `tests/pages/20-song-search.sh` greps for `'0 of 0 rows'`; since the list
-  page renders the "No items" empty state (a deliberate behavior change for
-  zero-row-but-valid results) that grep returns `''`. Update that test to the
-  new empty state when touching it.
+- `tests/pages/20-song-search.sh` expects the "No items" empty state: a
+  valid-but-zero FTS result renders `<p class="text-muted">No items</p>` (the
+  deliberate zero-row empty state) instead of a `0 of 0 rows` pagination line;
+  `row_count` maps that marker to `0 of 0 rows`.
 
 ## Debug logging
 

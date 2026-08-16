@@ -4,19 +4,19 @@ CC ?= ${cc}
 PICFLAGS-Unix = -fPIC
 PICFLAGS = ${PICFLAGS-${SYS}}
 CFLAGS += -g -O0 $(PICFLAGS)
-LDLIBS += -lqmap
 
 TARGET = libtransp.a
-SRC = transp.c
+SRC = token.c parse.c render.c transp.c
 OBJ = $(SRC:.c=.o)
+HDR = transp.h transp_flags.h token.h parse.h render.h
 
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	ar rcs $@ $(OBJ)
 
-$(OBJ): $(SRC) transp.h
-	$(CC) $(CFLAGS) -c -o $@ $(SRC)
+$(OBJ): %.o: %.c $(HDR)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 test_transp: test_transp.c $(TARGET)
 	$(CC) $(CFLAGS) -o $@ test_transp.c ./$(TARGET) $(LDLIBS)

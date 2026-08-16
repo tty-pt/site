@@ -1,46 +1,28 @@
 /*
- * transp.c - Chord transposition library implementation
+ * transp.c - Public API for the chord transposition library
  *
- * Refactored from tty.pt/items/chords/src/transp/src/transp.c
- * Changes: wchar_t → UTF-8 char*, globals → context, library API
+ * Thin wrapper over the parse → render pipeline (token.c / parse.c / render.c).
+ * The context holds only the detected key and the active i18n table; there is
+ * no qmap. See CHORDS.md §8.5.
  */
 
 #include "transp.h"
 
-#include <ctype.h>
 #include <locale.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/queue.h>
 
-#include <ttypt/qmap.h>
+#include "parse.h"
+#include "render.h"
 
-/* Spacing queue - tracks chord length differences for lyrics alignment */
-struct space_queue {
-	unsigned len;   /* Number of spaces to add */
-	unsigned start; /* Position in lyric line to insert */
-	TAILQ_ENTRY(space_queue)
-	entries;
-};
-
-/* Transposer context */
 struct transp_ctx {
-	int chord_db;      /* qmap handle for chord lookup */
-	int special_db;    /* qmap handle for special symbols */
-	int paren_db;      /* qmap handle for paren word lookup */
-	unsigned key;      /* Detected key (0-11 or -1) */
+	int key;           /* chromatic 0-11, or -1 */
 	char **i18n_table; /* chromatic_en or chromatic_latin */
-	TAILQ_HEAD(queue_head, space_queue)
-	queue; /* Spacing queue */
-
-	/* Per-song state — reset by transp_reset() */
-	int skip_empty;  /* Skip next empty line */
-	int not_special; /* Current line is not a special/repeat marker line */
 };
 
-/* Chromatic scale tables */
+/* Chromatic scale tables. Encoding is "sharp\0flat" pairs; chord_str() (in
+ * render.c) picks the flat half under TRANSP_BEMOL. */
 static char *chromatic_en[] = {
 	"C\0", "C#\0Db", "D\0", "D#\0Eb", "E\0", "F\0", "F#\0Gb",
 	"G\0", "G#\0Ab", "A\0", "A#\0Bb", "B\0", NULL,
@@ -51,633 +33,55 @@ static char *chromatic_latin[] = {
 	"Sol\0", "Sol#\0Lab", "La\0", "La#\0Sib", "Si\0", NULL,
 };
 
-static char *special[] = {
-	"|",
-	":",
-	"-",
-	NULL,
-};
-
-/* Sentinel: stored in special_db to indicate presence (value never read) */
-static const unsigned special_sentinel = 0;
-
-/* Get chord string with sharp or flat notation */
-static inline char *chord_str(transp_ctx_t *ctx, size_t chord, int flags)
-{
-	char *str = ctx->i18n_table[chord];
-	if ((flags & TRANSP_BEMOL) && strchr(str, '#'))
-		str += strlen(str) + 1;
-	return str;
-}
-
-/* Safe snprintf wrapper that returns characters written */
-static inline int
-outprintf(char *buf, size_t bufsize, size_t offset, const char *fmt, ...)
-{
-	va_list args;
-	va_start(args, fmt);
-	int ret = vsnprintf(buf + offset, bufsize - offset, fmt, args);
-	va_end(args);
-	return ret > 0 ? ret : 0;
-}
-
-/*
- * Write HTML-escaped version of src into dst (NUL-terminated).
- * Escapes &, <, >, " — leaves all other bytes as-is.
- * Returns number of bytes written (not counting NUL).
- */
-static size_t
-html_escape_into(const char *src, char *dst, size_t dstsize, size_t srclen)
-{
-	size_t w = 0;
-	const char *ent;
-	size_t elen;
-
-	while (srclen > 0 && *src && w < dstsize - 1) {
-		srclen--;
-		switch (*src) {
-		case '&':
-			ent = "&amp;";
-			elen = 5;
-			break;
-		case '<':
-			ent = "&lt;";
-			elen = 4;
-			break;
-		case '>':
-			ent = "&gt;";
-			elen = 4;
-			break;
-		case '"':
-			ent = "&quot;";
-			elen = 6;
-			break;
-		default:
-			dst[w++] = *src++;
-			continue;
-		}
-		if (w + elen >= dstsize)
-			break;
-		memcpy(dst + w, ent, elen);
-		w += elen;
-		src++;
-	}
-	dst[w] = '\0';
-	return w;
-}
-
-/* Populate chord_db: keys are chord name strings, values are chromatic indices.
- */
-static void chord_db_init(int hd, char **table)
-{
-	for (unsigned u = 0; table[u]; u++) {
-		char *key = table[u];
-		qmap_put(hd, key, &(unsigned){ u });
-		key += strlen(key) + 1;
-		if (*key)
-			qmap_put(hd, key, &(unsigned){ u });
-	}
-}
-
-/* Populate special_db: only presence is checked, value is never read. */
-static void special_db_init(int hd, char **table)
-{
-	for (unsigned u = 0; table[u]; u++)
-		qmap_put(hd, table[u], &special_sentinel);
-}
-
-/* Return 1 if s[0..len) is a valid chord modifier suffix */
-static int valid_modifier(const char *s, size_t len, int paren_db)
-{
-	for (size_t i = 0; i < len; i++) {
-		char c = s[i];
-		/* Augmented symbol º (U+00BA, UTF-8 C2 BA) — skip both bytes */
-		if ((unsigned char)c == 0xC2 && i + 1 < len &&
-		    (unsigned char)s[i + 1] == 0xBA)
-		{
-			i++;
-			continue;
-		}
-		if (c >= '0' && c <= '9')
-			continue;
-		if (c == '#' || c == 'b')
-			continue;
-		if (c == 'm' || c == 'M' || c == 'h' || c == 'a' || c == 'j' ||
-		    c == 'd' || c == 'i' || c == 'u' || c == 'g' || c == 's' ||
-		    c == 'n' || c == '+' || c == '/')
-			continue;
-		if (c == '(') {
-			i++;
-			while (i < len && s[i] != ')') {
-				if (isalpha((unsigned char)s[i])) {
-					size_t start = i;
-					while (i < len &&
-					       isalpha((unsigned char)s[i]))
-						i++;
-					size_t wlen = i - start;
-					char buf[16];
-					if (wlen >= sizeof(buf))
-						return 0;
-					memcpy(buf, s + start, wlen);
-					buf[wlen] = '\0';
-					if (!qmap_get(paren_db, buf))
-						return 0;
-				} else if (
-				        (s[i] >= '0' && s[i] <= '9') ||
-				        s[i] == '#' || s[i] == 'b')
-					i++;
-				else
-					return 0;
-			}
-			if (i >= len || s[i] != ')')
-				return 0;
-			continue;
-		}
-		if (c == ')')
-			continue;
-		return 0;
-	}
-	return 1;
-}
-
-/* Process a single line of chord chart */
-static char *proc_line(transp_ctx_t *ctx, const char *line, int t, int flags)
-{
-	char outbuf[8192];
-	char buf[8];
-	char *o = outbuf;
-	int not_bolded = 1, is_special = 0;
-	unsigned j = 0;
-	int sim = 0, si = 0; /* sim = offset in input, si = offset in output */
-
-	/* Trim trailing \r\n in-place on a working copy */
-	char *line_copy = strdup(line);
-	size_t linelen = strlen(line_copy);
-	if (linelen > 0 && line_copy[linelen - 1] == '\n')
-		line_copy[--linelen] = '\0';
-	if (linelen > 0 && line_copy[linelen - 1] == '\r')
-		line_copy[--linelen] = '\0';
-
-	/* Handle skip empty */
-	if (ctx->skip_empty && linelen == 0) {
-		ctx->skip_empty = 0;
-		free(line_copy);
-		return strdup("");
-	}
-
-	const char *s = line_copy;
-
-	/* HTML opening tag */
-	if (flags & TRANSP_HTML) {
-		si += outprintf(outbuf, sizeof(outbuf), si, "<div>");
-
-		/* Handle numbered lines (verses) */
-		if (isdigit(*s)) {
-			char *dot = strchr(s, '.');
-			if (!dot)
-				goto end;
-
-			size_t len = dot + 1 - s;
-			sim += len;
-			{
-				char esc[64];
-				html_escape_into(s, esc, sizeof(esc), len);
-				si += outprintf(
-				        outbuf, sizeof(outbuf), si, "<b>%s</b>",
-				        esc);
-			}
-			s += len;
-		}
-	}
-
-	o = outbuf + si;
-
-	int no_space = 1, has_chords = 0;
-	for (; *s;) {
-		/* Handle spaces and slashes */
-		if (*s == ' ' || *s == '/') {
-			char what = *s;
-			if (flags & TRANSP_HIDE_LYRICS) {
-				if (no_space && has_chords) {
-					*o++ = what;
-					no_space = 0;
-					s++;
-					j++;
-					continue;
-				}
-			} else if (!(flags & TRANSP_HIDE_CHORDS))
-				*o++ = what;
-			s++;
-			j++;
-			continue;
-		}
-
-		/* Handle comments */
-		if (*s == '%') {
-			if (flags & TRANSP_REMOVE_COMMENTS)
-				ctx->skip_empty = 1;
-			else if (not_bolded && (flags & TRANSP_HTML)) {
-				char esc[4096];
-				html_escape_into(
-				        s, esc, sizeof(esc), strlen(s));
-				o += outprintf(
-				        outbuf, sizeof(outbuf), o - outbuf,
-				        "<b class='comment'>%s</b>", esc);
-			} else
-				o += outprintf(
-				        outbuf, sizeof(outbuf), o - outbuf,
-				        "%s", s);
-			s += strlen(s);
-			continue;
-		}
-
-		no_space = 1;
-
-		char *eoc, *space_after, *slash_after;
-
-		eoc = (char *)s + (s[1] == '#' || s[1] == 'b' ? 2 : 1);
-		space_after = strchr(eoc, ' ');
-		slash_after = strchr(eoc, '/');
-
-		const void *chord_r;
-		unsigned chord = -1;
-
-		memset(buf, 0, sizeof(buf));
-		strncpy(buf, s, 1);
-
-		/* Check if special symbol */
-		chord_r = qmap_get(ctx->special_db, buf);
-		if ((is_special = !!chord_r)) {
-			ctx->not_special = 0;
-		} else {
-			/* Validate chord modifiers */
-			switch (*eoc) {
-			case ' ':
-			case '\n':
-			case '\0':
-			case '/':
-			case 'm':
-			case 'M':
-			case '(':
-			case '+':
-				break;
-			default:
-				if (isdigit(*eoc) || !strncmp(eoc, "sus", 3) ||
-				    !strncmp(eoc, "add", 3) ||
-				    !strncmp(eoc, "maj", 3) ||
-				    !strncmp(eoc, "dim", 3))
-					break;
-				/* Augmented symbol º (U+00BA, UTF-8 C2 BA) */
-				if ((unsigned char)*eoc == 0xC2 &&
-				    (unsigned char)eoc[1] == 0xBA)
-					break;
-				goto no_chord;
-			}
-		}
-
-		if (slash_after && (!space_after || space_after > slash_after))
-			space_after = slash_after;
-
-		/* Lookup chord in database */
-		if (!is_special) {
-			memset(buf, 0, sizeof(buf));
-			strncpy(buf, s, eoc - s);
-			chord_r = qmap_get(ctx->chord_db, buf);
-			if (!chord_r)
-				goto no_chord;
-			chord = *(const unsigned *)chord_r;
-		}
-
-		char *new_cstr;
-		int len, diff, modlen, i;
-
-		has_chords = 1;
-
-		if (is_special) {
-			new_cstr = (char *)s;
-			diff = 0;
-			modlen = 1;
-		} else {
-			/* Transpose chord */
-			if (ctx->key == (unsigned)-1)
-				ctx->key = chord;
-			chord = (chord + t) % 12;
-			new_cstr = chord_str(ctx, chord, flags);
-			len = strlen(buf);
-			diff = strlen(new_cstr) - len;
-			if (eoc[0] == '/' && space_after == eoc) {
-				char *bass_end = strchr(eoc + 1, ' ');
-				modlen =
-				        bass_end ? bass_end - eoc : strlen(eoc);
-			} else {
-				modlen = space_after ? space_after - eoc
-				                     : strlen(eoc);
-			}
-		}
-
-		/* Reject if modifier contains chars invalid for chord suffixes.
-		 * Slash chords (e.g., G/B, Am/C) validate the bass note against
-		 * chord_db instead, so any known root name (English, Latin,
-		 * with or without accidentals) is accepted. */
-		if (!is_special) {
-			int mod_valid =
-			        valid_modifier(eoc, modlen, ctx->paren_db);
-			if (!mod_valid && eoc[0] == '/') {
-				size_t blen = modlen - 1;
-				char bass[16];
-				if (blen < sizeof(bass)) {
-					memcpy(bass, eoc + 1, blen);
-					bass[blen] = '\0';
-					mod_valid =
-					        qmap_get(ctx->chord_db, bass) !=
-					        NULL;
-				}
-			}
-			if (!mod_valid)
-				goto no_chord;
-		}
-
-		if (flags & TRANSP_HIDE_CHORDS) {
-			s = eoc + modlen;
-			continue;
-		}
-
-		/* HTML bold opening tag */
-		if (not_bolded && (flags & TRANSP_HTML)) {
-			o += outprintf(
-			        outbuf, sizeof(outbuf), o - outbuf, "<b>");
-			not_bolded = 0;
-		}
-
-		if (is_special) {
-			o += outprintf(
-			        outbuf, sizeof(outbuf), o - outbuf, "%s", buf);
-			s += modlen;
-			/* Consume repeat-bracket digits: |1, |2, |10, etc. */
-			if (buf[0] == '|')
-				while (isdigit((unsigned char)*s))
-					*o++ = *s++;
-			continue;
-		}
-
-		/* Copy chord modifiers */
-		memset(buf, 0, sizeof(buf));
-		strncpy(buf, eoc, modlen);
-		j += eoc - s + modlen;
-		s = eoc + modlen;
-
-		/* Skip absorbed spaces */
-		for (i = 0; i < diff && *s == ' '; i++, s++, j++)
-			;
-
-		if (*s == '\0')
-			for (i = 0; i < diff; i++, j++)
-				;
-
-		/* Latin notation: 'm' → '-' for minor chords */
-		if (buf[0] == 'm' && ctx->i18n_table == chromatic_latin)
-			buf[0] = '-';
-
-		/* Output transposed chord */
-		o += outprintf(
-		        outbuf, sizeof(outbuf), o - outbuf, "%s%s", new_cstr,
-		        buf);
-
-		/* Add space if needed */
-		if (*s != ' ' && *s != '/' && *s != '\0') {
-			*o++ = ' ';
-			diff++;
-		}
-
-		/* Queue spacing adjustment for lyrics */
-		if (i < diff) {
-			struct space_queue *new_element =
-			        malloc(sizeof(*new_element));
-			new_element->len = diff - i;
-			new_element->start = j;
-			TAILQ_INSERT_TAIL(&ctx->queue, new_element, entries);
-			j += diff - i;
-		}
-	}
-
-	goto end;
-
-no_chord:
-	/* Line contains lyrics, not chords */
-	j = 0;
-	o = outbuf + si;
-	if (flags & TRANSP_HTML && si == 0)
-		o += outprintf(outbuf, sizeof(outbuf), 0, "<div>");
-	if (flags & TRANSP_HIDE_LYRICS) {
-		free(line_copy);
-		if (flags & TRANSP_HTML)
-			return strdup("<div></div>");
-		return strdup("");
-	}
-
-	s = line_copy + sim;
-
-	/* o foi reiniciado para outbuf + si; o <b> correspondente
-	   já foi descartado. Apenas marcar como não-bold. */
-	if ((flags & TRANSP_HTML) && !not_bolded)
-		not_bolded = 1;
-
-	/* Process lyrics with spacing adjustments */
-	for (; *s;) {
-		/* Apply spacing adjustments from chord line */
-		if (!TAILQ_EMPTY(&ctx->queue)) {
-			struct space_queue *first = TAILQ_FIRST(&ctx->queue);
-			if (j >= first->start) {
-				if (ctx->not_special) {
-					while (j < first->start + first->len) {
-						char c = (o > outbuf &&
-						          *(o - 1) == ' ')
-						                 ? ' '
-						                 : '-';
-						*o++ = c;
-						j++;
-					}
-				}
-				TAILQ_REMOVE(&ctx->queue, first, entries);
-				free(first);
-			}
-		}
-
-		/* HTML passthrough */
-		if (*s == '<') {
-			o += outprintf(
-			        outbuf, sizeof(outbuf), o - outbuf, "%s", s);
-			j = 0;
-			goto end;
-		}
-
-		/* Break on slash */
-		if (flags & TRANSP_BREAK_SLASH) {
-			if (*s == '/' && *(s + 1) == ' ') {
-				s += 2;
-				*o++ = '\n';
-				j = 0;
-				continue;
-			}
-		}
-
-		if (flags & TRANSP_HTML) {
-			const char *ent = NULL;
-			size_t elen = 0;
-			switch (*s) {
-			case '&':
-				ent = "&amp;";
-				elen = 5;
-				break;
-			case '<':
-				ent = "&lt;";
-				elen = 4;
-				break;
-			case '>':
-				ent = "&gt;";
-				elen = 4;
-				break;
-			case '"':
-				ent = "&quot;";
-				elen = 6;
-				break;
-			default:
-				break;
-			}
-			if (ent) {
-				if ((size_t)(o - outbuf) + elen <
-				    sizeof(outbuf))
-				{
-					memcpy(o, ent, elen);
-					o += elen;
-				}
-				s++;
-				j++;
-				continue;
-			}
-		}
-		*o++ = *s++;
-		j++;
-	}
-
-end:
-	/* Close HTML tags */
-	if (flags & TRANSP_HTML) {
-		if (!not_bolded)
-			o += outprintf(
-			        outbuf, sizeof(outbuf), o - outbuf, "</b>");
-		/* Add space to prevent empty div */
-		if (o - outbuf < 6 && !has_chords)
-			*o++ = ' ';
-		o += outprintf(outbuf, sizeof(outbuf), o - outbuf, "</div>");
-	} else {
-		*o++ = '\n';
-	}
-	*o = '\0';
-
-	free(line_copy);
-	return strdup(outbuf);
-}
-
-/* Public API */
-
 transp_ctx_t *transp_init(void)
 {
 	transp_ctx_t *ctx = calloc(1, sizeof(*ctx));
 	if (!ctx)
 		return NULL;
 
-	/* Register qmap value type */
-	unsigned uint_type = qmap_reg(sizeof(unsigned));
-
-	/* Create in-memory qmap databases */
-	ctx->chord_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0x1F, 0);
-	ctx->special_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0xF, 0);
-	ctx->paren_db = qmap_open(NULL, NULL, QM_STR, uint_type, 0xF, 0);
-
-	if (ctx->chord_db < 0 || ctx->special_db < 0 || ctx->paren_db < 0) {
-		free(ctx);
-		return NULL;
-	}
-
-	/* Initialize locale for UTF-8 */
 	setlocale(LC_ALL, "en_US.UTF-8");
 
-	/* Populate databases */
-	chord_db_init(ctx->chord_db, chromatic_en);
-	chord_db_init(ctx->chord_db, chromatic_latin);
-	special_db_init(ctx->special_db, special);
-	{
-		static char *paren_words[] = {
-			"no", "add", "sus", "maj", "dim", "aug", "omit", NULL,
-		};
-		special_db_init(ctx->paren_db, paren_words);
-	}
-
-	TAILQ_INIT(&ctx->queue);
 	ctx->key = -1;
-	ctx->skip_empty = 0;
-	ctx->not_special = 1;
 	ctx->i18n_table = chromatic_en;
-
 	return ctx;
+}
+
+void transp_free(transp_ctx_t *ctx)
+{
+	free(ctx);
 }
 
 char *
 transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 {
+	transp_song_t song;
+	char *input_copy;
+	char *result;
+
 	if (!ctx || !input)
 		return NULL;
 
-	/* Normalize negative transpose */
+	/* Normalize negative transpose (verbatim port of the historical code)
+	 */
 	if (semitones < 0)
 		semitones += (1 + (semitones / 12)) * 12;
 
-	/* Set i18n table based on flags */
 	ctx->i18n_table =
 	        (flags & TRANSP_LATIN) ? chromatic_latin : chromatic_en;
 
-	/*
-	 * Allocate output buffer. HTML wrapping and transposition can expand
-	 * each line significantly (<div><b>...</b></div> + longer chord names),
-	 * so 8× the input length is used as a conservative upper bound.
-	 */
-	char *input_copy = strdup(input);
-	char *result = malloc(strlen(input) * 8 + 64);
-	if (!result) {
+	input_copy = strdup(input);
+	if (!input_copy)
+		return NULL;
+
+	if (transp_song_parse(input_copy, &song, &ctx->key) < 0) {
 		free(input_copy);
 		return NULL;
 	}
-	result[0] = '\0';
 
-	char *line_start = input_copy;
-	char *line_end;
-
-	while (line_start && *line_start) {
-		line_end = strchr(line_start, '\n');
-		if (line_end)
-			*line_end = '\0';
-
-		char *transposed = proc_line(ctx, line_start, semitones, flags);
-		if (transposed) {
-			if (transposed[0] != '\0')
-				strcat(result, transposed);
-			free(transposed);
-		}
-
-		line_start = line_end ? line_end + 1 : NULL;
-	}
-
+	result = transp_render(
+	        &song, semitones, flags, ctx->i18n_table, &ctx->key);
+	transp_song_free(&song);
 	free(input_copy);
-
-	/* Drain any leftover queue entries */
-	struct space_queue *elem;
-	while (!TAILQ_EMPTY(&ctx->queue)) {
-		elem = TAILQ_FIRST(&ctx->queue);
-		TAILQ_REMOVE(&ctx->queue, elem, entries);
-		free(elem);
-	}
-
 	return result;
 }
 
@@ -697,7 +101,7 @@ void transp_reset_key(transp_ctx_t *ctx)
 
 char *transp_shift_table(transp_ctx_t *ctx, int latin)
 {
-	if (!ctx || ctx->key == (unsigned)-1)
+	if (!ctx || ctx->key == -1)
 		return NULL;
 
 	char **table = latin ? chromatic_latin : chromatic_en;
@@ -717,25 +121,4 @@ char *transp_shift_table(transp_ctx_t *ctx, int latin)
 	}
 
 	return result;
-}
-
-void transp_free(transp_ctx_t *ctx)
-{
-	if (!ctx)
-		return;
-
-	if (ctx->chord_db >= 0)
-		qmap_close(ctx->chord_db);
-	if (ctx->special_db >= 0)
-		qmap_close(ctx->special_db);
-	if (ctx->paren_db >= 0)
-		qmap_close(ctx->paren_db);
-
-	while (!TAILQ_EMPTY(&ctx->queue)) {
-		struct space_queue *elem = TAILQ_FIRST(&ctx->queue);
-		TAILQ_REMOVE(&ctx->queue, elem, entries);
-		free(elem);
-	}
-
-	free(ctx);
 }
