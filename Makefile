@@ -49,6 +49,7 @@ pages-test: all
 	@echo "Running pages smoke tests"
 	sh tests/pages/10-pages-render.sh
 	sh tests/pages/20-song-search.sh
+	sh tests/pages/30-song-multiselect.sh
 
 unit-c-tests:
 	@sh tests/scripts/repro-matrix.sh --build
@@ -67,7 +68,10 @@ format:
 	find mods external/bud \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
 
 lint:
-	find mods external/bud -name "*.c" -exec clang-tidy {} -- \;
+	find mods external/bud -name "*.c" -exec clang-tidy {} -- \
+		-Iexternal/axil/include -Iexternal/qmap/include \
+		-Iexternal/libxylem/include -Iexternal/bud/include \
+		-Iexternal/hyle/include -Iexternal/hyle/c/libhyle-bud/include \;
 
 clean:
 	$(MAKE) -C external/bud clean

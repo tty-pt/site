@@ -52,7 +52,7 @@ typedef struct bud_arg {
 #define _bud_attr_6(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
 #define _bud_attr_7(k, fmt, ...) _bud_attr_N(k, fmt, ##__VA_ARGS__)
 
-#define _bud_attr_N(k, fmt, ...)  bud_attr_fmt(k, fmt, ##__VA_ARGS__)
+#define _bud_attr_N(k, fmt, ...) bud_attr_fmt(k, fmt, ##__VA_ARGS__)
 #define lx_text(str)                                                           \
 	((bud_arg){ .type = BUD_ARG_NODE, .data.node = bud_text(str) })
 #define lx_node(n) ((bud_arg){ .type = BUD_ARG_NODE, .data.node = (n) })

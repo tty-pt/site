@@ -1132,10 +1132,21 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 		if (f->type == SOURCE_FIELD_REFERENCE ||
 		    f->type == SOURCE_FIELD_MULTI_REFERENCE)
 		{
-			snprintf(
-			        buf, sizeof(buf), "{\"t\":%d,\"s\":\"%s\"}",
-			        (int)f->type,
-			        f->target_source ? f->target_source : "");
+			if (f->filter_style && f->filter_style[0]) {
+				snprintf(
+				        buf, sizeof(buf),
+				        "{\"t\":%d,\"s\":\"%s\",\"f\":\"%s\"}",
+				        (int)f->type,
+				        f->target_source ? f->target_source
+				                         : "",
+				        f->filter_style);
+			} else {
+				snprintf(
+				        buf, sizeof(buf),
+				        "{\"t\":%d,\"s\":\"%s\"}", (int)f->type,
+				        f->target_source ? f->target_source
+				                         : "");
+			}
 		} else if (f->type == SOURCE_FIELD_INVERSE) {
 			snprintf(
 			        buf, sizeof(buf),
@@ -1218,6 +1229,7 @@ static int impl_source_def_to_source_fields(
 			sf[n].min_length = 0;
 			sf[n].max_length = 0;
 			sf[n].pattern = NULL;
+			sf[n].filter_style = NULL;
 			n++;
 			continue;
 		}
@@ -1235,6 +1247,7 @@ static int impl_source_def_to_source_fields(
 		sf[n].min_length = d->min_length;
 		sf[n].max_length = 0;
 		sf[n].pattern = NULL;
+		sf[n].filter_style = d->filter_style;
 		n++;
 	}
 	return n;

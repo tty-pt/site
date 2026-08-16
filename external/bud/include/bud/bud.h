@@ -172,6 +172,9 @@ typedef struct bud_field_desc {
 	const char *ref_inverse;
 	int in_meta;
 	const char *file;
+	/* Server-side filter-style UI hint (e.g. "dropdown"); unused by WASM.
+	 */
+	const char *filter_style;
 } bud_field_desc_t;
 
 /* Server-side qmap type constants — must match qmap.h QM_* values */

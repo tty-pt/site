@@ -55,6 +55,14 @@
 		        0, src, inv, im, NULL                                  \
 	}
 
+/* Multi-reference field with an explicit filter style hint */
+#define MULTI_REF_FIELD_S(name, st, mb, sz, src, inv, im, style)               \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
+		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
+		        0, src, inv, im, NULL, style                           \
+	}
+
 /* Inverse field (virtual, computed from reference) */
 #define INVERSE_FIELD(name, src, inv)                                          \
 	{                                                                      \

@@ -58,9 +58,13 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
       );
     }
 
-    // ---- Filter: check "Comunhão" checkbox in type fieldset, Apply ----
+    // ---- Filter: open the type multiselect, check "Comunhão", Apply ----
+    const msSummary = page.locator(
+      'details.hyle-multiselect[data-hyle-ms="type"] summary.hyle-ms-trigger',
+    );
+    await msSummary.click();
     await page.locator(
-      'fieldset.hyle-checkbox-filter input[name="type"][value="comunhao"]',
+      'details.hyle-multiselect input[name="type"][value="comunhao"]',
     ).check();
     console.log("Type checkbox 'comunhao' checked");
 

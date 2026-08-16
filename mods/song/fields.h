@@ -63,8 +63,9 @@ static const bud_field_desc_t song_type_fields[] = {
 static const bud_field_desc_t song_fields[] = {
 	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
 	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
-	MULTI_REF_FIELD(
-	        type, song_cache_t, type, 2048, "song.types", "songs", 1),
+	MULTI_REF_FIELD_S(
+	        type, song_cache_t, type, 2048, "song.types", "songs", 1,
+	        "dropdown"),
 	REC_FIELD(author, song_cache_t, author, 256, 1, 0, 0, 1),
 	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
 	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
