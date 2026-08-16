@@ -559,12 +559,15 @@ Deno.test({
       await page.goto(`${BASE}/song/`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
-      // Check that filter checkboxes exist for type field
+      // Check that filter checkboxes exist for type field (multiselect)
+      await page.locator(
+        'details.hyle-multiselect[data-hyle-ms="type"] summary.hyle-ms-trigger',
+      ).click();
       const gjTcCheckbox = page.locator(
-        'input[name="type"][value="communion"]',
+        'details.hyle-multiselect input[name="type"][value="communion"]',
       );
       const gjTeCheckbox = page.locator(
-        'input[name="type"][value="entry"]',
+        'details.hyle-multiselect input[name="type"][value="entry"]',
       );
 
       const gjTcVisible = await gjTcCheckbox.isVisible().catch(() => false);

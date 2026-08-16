@@ -83,7 +83,8 @@ The module includes comprehensive error checking (added March 2026):
 ## Dependencies
 
 This module depends on:
-- `mods/ssr/ssr` - For SSR rendering
+- `mods/index/index` - List rendering, item CRUD routes
+- `mods/common/common` - Page layout, response helpers
 - `mods/mpfd/mpfd` - For parsing multipart form data uploads
 
 Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
@@ -97,10 +98,9 @@ Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
 - Creates empty `comments.txt` file
 - Redirects to listing page on success
 
-**SSR:** `ssr/index.tsx`
-- `getPoems()` - Reads directory and returns poem IDs
-- `getPoemContent()` - Reads poem HTML file
-- Components: `PoemList`, `PoemAdd`, `PoemDetail`
+Pages (list/add/detail) are server-rendered by `mods/index` (generic `/module/*`
+CRUD routes) + the common page layout; the poem module registers its add/detail
+handlers with `register_standard_item_handlers()`.
 
 ## Testing
 
@@ -181,5 +181,4 @@ mkdir -p items/poem/items
 ## See Also
 
 - [mods/mpfd/README.md](../mpfd/README.md) - Multipart form data parsing
-- [mods/ssr/README.md](../ssr/README.md) - SSR architecture
 - [AGENTS.md](../../AGENTS.md) - Development guidelines

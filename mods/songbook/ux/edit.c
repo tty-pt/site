@@ -158,7 +158,7 @@ static bud_node *sb_render_edit_form(
 			        lx_el("option", lx_attr("value", v),
 			              si == cur_key ? lx_attr("selected", "")
 			                            : lx_none(),
-			              lx_text(key_name(si, orig_key, 0, 0)))
+			              lx_text(key_name(si, orig_key, 0)))
 			                .data.node;
 			if (!key_opts)
 				key_opts = bud_fragment();

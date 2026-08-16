@@ -47,12 +47,36 @@
 		        SOURCE_FIELD_REFERENCE, 1, 0, 0, src, inv, im, NULL    \
 	}
 
+/* Single reference field with a filter style hint (e.g. "dropdown") */
+#define REF_FIELD_S(name, st, mb, sz, src, inv, im, style)                     \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_REFERENCE,  \
+		        SOURCE_FIELD_REFERENCE, 1, 0, 0, src, inv, im, NULL,   \
+		        style, NULL                                            \
+	}
+
 /* Multi-reference field (resolves to display names) */
 #define MULTI_REF_FIELD(name, st, mb, sz, src, inv, im)                        \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
 		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
 		        0, src, inv, im, NULL                                  \
+	}
+
+/* Multi-reference field with an explicit filter style hint */
+#define MULTI_REF_FIELD_S(name, st, mb, sz, src, inv, im, style)               \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
+		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
+		        0, src, inv, im, NULL, style                           \
+	}
+
+/* Multi-reference field with style + combine-mode hint ("and"/"or"/NULL) */
+#define MULTI_REF_FIELD_SM(name, st, mb, sz, src, inv, im, style, mode)        \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
+		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
+		        0, src, inv, im, NULL, style, mode                     \
 	}
 
 /* Inverse field (virtual, computed from reference) */

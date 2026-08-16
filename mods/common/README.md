@@ -120,7 +120,7 @@ json_escape(title, escaped, sizeof(escaped));
 ```
 
 **Used by:**
-- `mods/ssr/ssr.c` - Escape module titles for X-Modules JSON header
+- `mods/common/ux/site_ui.c` - session/X-Modules header building for page responses
 
 ---
 
@@ -154,7 +154,7 @@ url_encode(str, encoded, sizeof(encoded));
 ```
 
 **Used by:**
-- `mods/ssr/ssr.c` - URL-encode X-Modules header (though ultimately uses JSON, so this may be redundant)
+- `mods/common/ux/site_ui.c` - URL-encode query values in page links
 
 ## Implementation Details
 
@@ -178,7 +178,7 @@ None - this is a foundational module.
 ## Used By
 
 - **mods/auth/auth.c** - Uses `query_param()` to parse form data
-- **mods/ssr/ssr.c** - Uses `get_cookie()`, `json_escape()`, `url_encode()` for header building
+- **mods/index/index.c** - Uses `axil_json_escape` (from axil) for JSON header values
 
 ## Testing
 
@@ -190,7 +190,7 @@ No dedicated test file currently. Testing is performed via modules that use thes
 
 Originally, these utilities were duplicated across modules:
 - `query_param` in auth.c
-- `get_cookie`, `json_escape`, `url_encode` in ssr.c
+- `get_cookie`, `json_escape`, `url_encode` in the pre-module site code
 
 The common module:
 - Eliminates code duplication
@@ -243,7 +243,7 @@ query_param(body, "ret", redirect, sizeof(redirect));
 // username and password now contain decoded values
 ```
 
-From `mods/ssr/ssr.c`:
+From an auth module handler:
 
 ```c
 // Extract session token from cookie
@@ -292,7 +292,6 @@ json_escape(title, title_esc, sizeof(title_esc));
 ## See Also
 
 - [mods/auth/README.md](../auth/README.md) - Uses query_param
-- [mods/ssr/README.md](../ssr/README.md) - Uses get_cookie, json_escape, url_encode
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
 
 ## Dataset System

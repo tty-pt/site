@@ -95,18 +95,18 @@ XY_IMPL(int, song_transpose_root,
 	return 0;
 }
 
-static void song_load_saved_prefs(const char *user, int *f)
+static void song_load_saved_prefs(const char *user, int *f, int *m)
 {
 	if (!user || !user[0])
 		return;
-	char *rb = song_viewer_pref_read(user, "chords-bemol");
 	char *rl = song_viewer_pref_read(user, "chords-latin");
-	if (rb && atoi(rb))
-		*f |= TRANSP_BEMOL;
+	char *rm = song_viewer_pref_read(user, "chords-media");
 	if (rl && atoi(rl))
 		*f |= TRANSP_LATIN;
-	free(rb);
+	if (rm && atoi(rm))
+		*m = 1;
 	free(rl);
+	free(rm);
 }
 
 static void song_parse_prefs(
@@ -116,8 +116,6 @@ static void song_parse_prefs(
 	int pf;
 	*zoom = 0;
 	parse_transpose_qs(qs, t, &pf, m);
-	if (pf & TPARAM_BEMOL)
-		*f |= TRANSP_BEMOL;
 	if (pf & TPARAM_LATIN)
 		*f |= TRANSP_LATIN;
 	if (pf & TPARAM_HTML)
@@ -125,14 +123,11 @@ static void song_parse_prefs(
 
 	if (qs[0] && username && username[0]) {
 		char pv[2];
-		if (*f & TRANSP_BEMOL)
-			pv[0] = '1';
-		else
-			pv[0] = '0';
-		pv[1] = '\0';
-		song_viewer_pref_write(username, "chords-bemol", pv);
 		pv[0] = (*f & TRANSP_LATIN) ? '1' : '0';
+		pv[1] = '\0';
 		song_viewer_pref_write(username, "chords-latin", pv);
+		pv[0] = (*m) ? '1' : '0';
+		song_viewer_pref_write(username, "chords-media", pv);
 	}
 	if (qs[0]) {
 		char zb[16];
@@ -148,7 +143,7 @@ static void song_parse_prefs(
 	}
 
 	if (!qs[0])
-		song_load_saved_prefs(username, f);
+		song_load_saved_prefs(username, f, m);
 }
 
 static int api_song_viewer_prefs_handler(int fd, char *body)
@@ -158,7 +153,15 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 		axil_respond(fd, 204, "");
 		return 0;
 	}
-	axil_query_parse(body);
+	char method[16] = { 0 };
+	axil_env_get(fd, method, "REQUEST_METHOD");
+	if (strcmp(method, "GET") == 0) {
+		char qs[1024] = { 0 };
+		axil_env_get(fd, qs, "QUERY_STRING");
+		axil_query_parse(qs);
+	} else {
+		axil_query_parse(body);
+	}
 	char b[16];
 	if (axil_query_param("v", b, sizeof(b)) >= 0)
 		song_set_viewer_zoom(u, atoi(b));
@@ -166,6 +169,8 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 		song_viewer_pref_write(u, "chords-bemol", b);
 	if (axil_query_param("l", b, sizeof(b)) >= 0)
 		song_viewer_pref_write(u, "chords-latin", b);
+	if (axil_query_param("m", b, sizeof(b)) >= 0)
+		song_viewer_pref_write(u, "chords-media", b);
 	if (axil_query_param("z", b, sizeof(b)) >= 0)
 		song_set_viewer_zoom(u, atoi(b));
 	axil_respond(fd, 204, "");
@@ -221,7 +226,6 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                : 0;
 	tmp.transpose = t;
 	tmp.zoom = v_z;
-	tmp.use_bemol = (f & TRANSP_BEMOL) != 0;
 	tmp.use_latin = (f & TRANSP_LATIN) != 0;
 	tmp.show_media = m;
 	tmp.original_key = k;
@@ -327,7 +331,6 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
 	app_state.transpose = t;
-	app_state.use_bemol = (f & TRANSP_BEMOL) != 0;
 	app_state.use_latin = (f & TRANSP_LATIN) != 0;
 	app_state.show_media = m;
 	app_state.original_key = k;
@@ -462,6 +465,8 @@ void xy_install(void)
 	register_standard_item_handlers("song", &handlers);
 	axil_register_handler(
 	        "GET:/api/song/:id/transpose", api_song_transpose_handler);
+	axil_register_handler(
+	        "GET:/api/song/prefs", api_song_viewer_prefs_handler);
 	axil_register_handler(
 	        "POST:/api/song/prefs", api_song_viewer_prefs_handler);
 }

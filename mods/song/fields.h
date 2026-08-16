@@ -30,7 +30,6 @@ typedef struct {
 typedef struct {
 	song_cache_t cache;
 	int transpose;
-	int use_bemol;
 	int use_latin;
 	int show_media;
 	char chord_html[65536];
@@ -63,16 +62,16 @@ static const bud_field_desc_t song_type_fields[] = {
 static const bud_field_desc_t song_fields[] = {
 	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
 	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
-	MULTI_REF_FIELD(
-	        type, song_cache_t, type, 2048, "song.types", "songs", 1),
+	MULTI_REF_FIELD_SM(
+	        type, song_cache_t, type, 2048, "song.types", "songs", 1,
+	        "dropdown", "and"),
 	REC_FIELD(author, song_cache_t, author, 256, 1, 0, 0, 1),
 	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
 	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
 	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
-	EXCL_FIELD_V(data, BUD_QM_VSTR, 1, 0),
+	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
 	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
 	OVERLAY_INT(transpose, app_state_t, transpose),
-	OVERLAY_INT(use_bemol, app_state_t, use_bemol),
 	OVERLAY_INT(use_latin, app_state_t, use_latin),
 	OVERLAY_INT(show_media, app_state_t, show_media),
 	OVERLAY_INT(zoom, app_state_t, zoom),

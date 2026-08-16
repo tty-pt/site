@@ -1,7 +1,17 @@
+HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
 EXTRA_CFLAGS += -I../common
 EXTRA_LDLIBS += -lbud
-EXTRA_LDLIBS += -lhyle-bud
+EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
 EXTRA_LDLIBS-OpenBSD += -liconv
 EXTRA_LDLIBS += -laxil-auth
+
+# WASM targets must be defined before including build.mk so the shared
+# all:/wasm: rules can see them during parse time.
+WASM_TARGETS = $(WASM_PATH)/list.wasm
+list-src = ux/list_fe.c \
+	../../external/hyle/c/libhyle-bud/src/filter.c \
+	../../external/hyle/c/libhyle-bud/src/table.c
+list-cflags = -I$(REPO_ROOT)/mods/common \
+	-I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
 
 include ../../build.mk

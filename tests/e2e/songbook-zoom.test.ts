@@ -6,6 +6,8 @@
  *   2. View songbook page, verify zoom slider exists
  *   3. Change zoom via slider, verify data-zoom attribute
  *   4. Reload and verify zoom persists in SSR
+ *   5. Cross-module: songbook → song page (l/m/z via GET /api/song/prefs)
+ *   6. Cross-module: song page → songbook (transpose endpoint persists)
  *
  * Requires: axil running on :8080 with AUTH_SKIP_CONFIRM=1.
  */
@@ -149,6 +151,75 @@ Deno.test({
 
     if (Deno.env.get("DEBUG"))
       console.log(`Zoom SSR: ${zoomSsr}`);
+    if (zoomSsr !== "150") {
+      throw new Error(
+        `Zoom did not persist via SSR: expected 150, got ${zoomSsr}`,
+      );
+    }
+
+    // ── 6. Cross-module: songbook → song page ─────────────────────────────
+    // Toggle latin/video on the songbook page; the WASM persists all
+    // settings (l/m/z) via GET /api/song/prefs.
+    for (const name of ["l", "m"]) {
+      await page.locator(`input[type="checkbox"][name="${name}"]`)
+        .evaluate((el) => {
+          (el as unknown as { checked: boolean }).checked = true;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    }
+    await page.waitForTimeout(600);
+
+    // ── 6.1 Remove URL params and reload (JS enabled): saved prefs must
+    // come back. The WASM rewrote the URL to ?l=&m=&z= after the toggles;
+    // stripping them and reloading must restore the saved settings via SSR.
+    const paramUrl = page.url();
+    if (!paramUrl.includes("?"))
+      throw new Error(`Expected URL params after toggles, got ${paramUrl}`);
+    await page.goto(`${BASE}/songbook/${sbId}`, GOTO);
+    await page.waitForSelector('input[type="range"][data-detail-viewer-zoom]');
+    await page.waitForTimeout(400); // let WASM hydrate from embedded state
+    const noParamZoom = await page.getAttribute("#sb-main", "data-zoom");
+    const noParamLatin = await page.locator(
+      'input[type="checkbox"][name="l"]').isChecked();
+    const noParamMedia = await page.locator(
+      'input[type="checkbox"][name="m"]').isChecked();
+    if (noParamZoom !== "150" || !noParamLatin || !noParamMedia) {
+      throw new Error(
+        `Removing URL params lost saved prefs: zoom=${noParamZoom} ` +
+        `latin=${noParamLatin} media=${noParamMedia}`,
+      );
+    }
+
+    const pageSong = await contextNoJs.newPage();
+    await pageSong.goto(`${BASE}/song/${SONG_ID}`, GOTO);
+    const songZoom = await pageSong.getAttribute("#main", "data-zoom");
+    const songLatin = await pageSong.getAttribute("#main", "data-use-latin");
+    const songMedia = await pageSong.getAttribute("#main", "data-show-media");
+    if (songZoom !== "150" || songLatin !== "1" || songMedia !== "1") {
+      throw new Error(
+        `Song page not synced from songbook: zoom=${songZoom} ` +
+        `latin=${songLatin} media=${songMedia}`,
+      );
+    }
+
+    // ── 7. Cross-module: song page → songbook ─────────────────────────────
+    // The song transpose endpoint persists z/l/m prefs for the user.
+    const syncResp = await fetch(
+      `${BASE}/api/song/${SONG_ID}/transpose?z=110&l=0&m=0`,
+      { headers: { Cookie: cookieHeader }, redirect: "manual" },
+    );
+    if (syncResp.status >= 400)
+      throw new Error(`Song transpose persist failed: ${syncResp.status}`);
+    await syncResp.body?.cancel();
+
+    const pageSb2 = await contextNoJs.newPage();
+    await pageSb2.goto(`${BASE}/songbook/${sbId}`, GOTO);
+    const sbZoom2 = await pageSb2.getAttribute("#sb-main", "data-zoom");
+    if (sbZoom2 !== "110") {
+      throw new Error(
+        `Songbook not synced from song page: expected 110, got ${sbZoom2}`,
+      );
+    }
 
     // Clean up: reset zoom to 100
     await page.goto(`${BASE}/songbook/${sbId}`, GOTO);

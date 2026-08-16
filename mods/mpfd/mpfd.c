@@ -290,7 +290,7 @@ static int mpfd_exists(const char *name)
 	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
-static int mpfd_len(const char *name)
+XY_IMPL(int, mpfd_len, const char *, name)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	return val ? (int)val->len : -1;
@@ -304,9 +304,9 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 	size_t to_copy =
 	        val->filename_len < buf_len ? val->filename_len : buf_len;
 	memcpy(buf, val->data, to_copy);
-	if (to_copy > 0 && buf_len > to_copy)
+	if (to_copy > 0)
 		buf[to_copy] = '\0';
-	return (int)val->filename_len;
+	return (int)to_copy;
 }
 
 /* Data Retrieval */
@@ -317,9 +317,9 @@ XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 		return -1;
 	size_t to_copy = val->len < buf_len ? val->len : buf_len;
 	memcpy(buf, val->data + val->filename_len, to_copy);
-	if (to_copy > 0 && buf_len > to_copy)
+	if (to_copy > 0)
 		buf[to_copy] = '\0';
-	return (int)val->len;
+	return (int)to_copy;
 }
 
 static int mpfd_save(const char *name, const char *path)

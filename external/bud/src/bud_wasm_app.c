@@ -158,8 +158,8 @@ void bud_patch_text(bud_node *node, const char *value)
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", bud_node_id(node));
 	bud_host_emit_patch(
-	        "patch-text", 11, value, strlen(value), id_str, strlen(id_str),
-	        NULL, 0);
+	        "patch-text", strlen("patch-text"), value, strlen(value),
+	        id_str, strlen(id_str), NULL, 0);
 }
 
 __attribute__((export_name("bud_patch_innerhtml"))) void

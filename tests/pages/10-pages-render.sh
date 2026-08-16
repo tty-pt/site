@@ -26,6 +26,23 @@ check(){
   pass "$route: $desc"
 }
 
+check_cache_headers(){
+  route=$1
+  desc=$2
+
+  headers=$(curl -sS -D - -o /dev/null "$BASE$route" | tr -d '\r') ||
+    fail "$route header fetch failed"
+
+  printf '%s' "$headers" | grep -q '^Cache-Control: no-cache' ||
+    fail "$route missing Cache-Control: no-cache ($desc)"
+  printf '%s' "$headers" | grep -q '^ETag:' ||
+    fail "$route missing ETag ($desc)"
+  printf '%s' "$headers" | grep -q '^Last-Modified:' ||
+    fail "$route missing Last-Modified ($desc)"
+
+  pass "$route: $desc"
+}
+
 echo "Running page smoke tests against $BASE"
 
 check "/" "<!DOCTYPE html>" "root DOCTYPE"
@@ -35,5 +52,8 @@ check "/songbook" "<title>[^<]*[Ss]ongbook|href=\"/songbook" "songbook page"
 check "/choir" "<title>[^<]*[Cc]hoir|href=\"/choir" "choir page"
 check "/auth/login" "name=\"username\"|<form[^>]*action=\"/auth/login\"" "login form"
 check "/auth/register" "name=\"email\"|<form[^>]*action=\"/auth/register\"" "register form"
+
+check_cache_headers "/styles.css" "css cache validators"
+check_cache_headers "/hyle.css" "css cache validators"
 
 pass "pages smoke tests all OK"

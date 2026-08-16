@@ -3,6 +3,7 @@
  */
 
 #include "transp.h"
+#include "token.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -508,7 +509,7 @@ TEST(slash_chord_with_accidental_bass)
 	assert(result != NULL);
 	assert(str_contains(result, "E/G#"));
 	assert(str_contains(result, "C/A#"));
-	assert(str_contains(result, "G/Bb"));
+	assert(str_contains(result, "G/A#"));
 	free(result);
 
 	transp_free(ctx);
@@ -557,6 +558,748 @@ TEST(invalid_slash_not_a_chord)
 	transp_free(ctx);
 }
 
+TEST(augmented_chord_bolded)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Cº is a valid chord — bolded with the º suffix preserved */
+	char *result = transp_buffer(ctx, "Cº Dº7 Eº", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Cº"));
+	assert(str_contains(result, "Dº7"));
+	assert(str_contains(result, "Eº"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(augmented_chord_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Cº Fº", 2, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Dº"));
+	assert(str_contains(result, "Gº"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section A — roots (English)
+ * ===================================================================== */
+
+TEST(roots_plain)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "C D E F G A B", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>C D E F G A B</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(roots_sharp)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "C# D# F# G# A#", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Db Eb Gb Ab Bb</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(roots_flat_display_as_sharp)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Flat input renders with sharp defaults (Bbm7b5 -> A#m7b5 precedent)
+	 */
+	char *result = transp_buffer(ctx, "Db Eb Gb Ab Bb", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Db Eb Gb Ab Bb</b>"));
+	free(result);
+
+	/* A# and Bb map to the same chromatic index */
+	result = transp_buffer(ctx, "A# Bb", 0, TRANSP_HTML);
+	assert(str_contains(result, "<b>Bb Bb</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section B — qualities, extensions, slash bass
+ * ===================================================================== */
+
+TEST(quality_minor)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Cm Fm Am", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Cm Fm Am</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(quality_diminished_words)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Gdim Cdim7", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Gdim Cdim7</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(quality_sus_add_extension_slash)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result =
+	        transp_buffer(ctx, "Gadd9 Gsus2 Gsus4 G6/9", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Gadd9 Gsus2 Gsus4 G6/9</b>"));
+	free(result);
+
+	result = transp_buffer(ctx, "D9/F# C6 Cmaj9", 0, TRANSP_HTML);
+	assert(str_contains(result, "<b>D9/F# C6 Cmaj9</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(power_chord)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "C5", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>C5</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(slash_bass_with_accidentals)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "G/B D/F# A/E E/G# C/A# G/Bb", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "G/B"));
+	assert(str_contains(result, "D/F#"));
+	assert(str_contains(result, "A/E"));
+	assert(str_contains(result, "E/G#"));
+	assert(str_contains(result, "C/A#"));
+	assert(str_contains(result, "G/A#"));
+	assert(str_contains(result, "<b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section C — special symbols and repeat markers
+ * ===================================================================== */
+
+TEST(special_symbols_alone)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "| : -", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>| : -</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section D — line structure and lyric rejection
+ * ===================================================================== */
+
+TEST(lyric_syllables_not_chords)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Hyphenated syllables, lowercase starts, accents: all lyric */
+	char *result = transp_buffer(
+	        ctx,
+	        "No Senhor es-tá  a miseri-\ncórdia e a abundânte   "
+	        "re-den--ção.",
+	        0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(str_contains(result, "No Senhor es-tá  a miseri-"));
+	assert(str_contains(result, "córdia e a abundânte   re-den--ção."));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(comment_line_html)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result =
+	        transp_buffer(ctx, "%Intro comment\nC G\n", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b class='comment'>Intro comment</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(comment_removal_skips_blank)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "%Intro\n\nC G\nLyrics", 0,
+	        TRANSP_HTML | TRANSP_REMOVE_COMMENTS);
+	assert(result != NULL);
+	assert(!str_contains(result, "Intro"));
+	assert(str_contains(result, "<b>C G</b>"));
+	assert(str_contains(result, "Lyrics"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(break_slash_lyrics)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "Line one / line two", 0,
+	        TRANSP_HTML | TRANSP_BREAK_SLASH);
+	assert(result != NULL);
+	assert(str_contains(result, "Line one \n"));
+	assert(str_contains(result, "line two"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section F — DESIRED: fail against the old whitelist, pass after the
+ * grammar refactor. These pin the rework's contract.
+ * ===================================================================== */
+
+TEST(paren_diminished_fifth)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(
+	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(paren_diminished_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(ctx, "Gm7(5º)", 2, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Am7(5º)</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(consistent_quality_suffixes)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "Gaug Gmaj Gsus4 Gomit3 Gno3 Gh G-", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(
+	        result, "<b>Gaug Gmaj Gsus4 Gomit3 Gno3 Gh G-</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(latin_input_roots)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Latin solfege accepted as input; renders in the chosen notation */
+	char *result =
+	        transp_buffer(ctx, "Sol Do La-", 0, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>Sol Do La-</b>"));
+	free(result);
+
+	/* Same Latin input rendered in English defaults */
+	result = transp_buffer(ctx, "Sol", 0, TRANSP_HTML);
+	assert(str_contains(result, "<b>G</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(latin_input_roots_transposed)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result =
+	        transp_buffer(ctx, "Sol Do La-", 2, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>La Re Si-</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(combo_grammar)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	char *result = transp_buffer(
+	        ctx, "Gmaj7(9) F#m7b5(5º) Csus2(omit3) Bb/D", 2, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(
+	        result, "<b>Amaj7(9) G#m7b5(5º) Dsus2(omit3) C/D</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section G — regression guards (whole-song + false-positive rejection)
+ * ===================================================================== */
+
+TEST(user_song_full)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	const char *song = "Fm   Cm A#m G#  Gº\n"
+	                   "No Senhor es-tá  a miseri-\n"
+	                   "Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5\n"
+	                   "córdia e a abundânte   re-den--ção.\n"
+	                   "\n"
+	                   "Fm                           Em     Cm\n"
+	                   "1. Do profundo abismo clamo por Vós, Senhor.\n"
+	                   "C#               C#7   Cm\n"
+	                   "Senhor escutai a minha voz.\n";
+
+	char *result = transp_buffer(ctx, song, 0, TRANSP_HTML);
+	assert(result != NULL);
+
+	/* Chord lines stay one bolded block each, spacing preserved */
+	assert(str_contains(result, "<b>Fm   Cm Bbm Ab  Gº</b>"));
+	assert(str_contains(
+	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b>"));
+	assert(str_contains(result, "<b>Fm"));
+	assert(str_contains(result, "Em     Cm</b>"));
+	assert(str_contains(result, "<b>Db"));
+	assert(str_contains(result, "Db7   Cm</b>"));
+
+	/* Lyrics rendered plainly, never bolded */
+	assert(str_contains(result, "No Senhor es-tá  a miseri-"));
+	assert(str_contains(result, "córdia e a abundânte   re-den--ção."));
+	assert(str_contains(
+	        result, "Do profundo abismo clamo por Vós, Senhor."));
+	assert(str_contains(result, "Senhor escutai a minha voz."));
+	assert(!str_contains(result, "<b>No Senhor"));
+	assert(!str_contains(result, "<b>córdia"));
+	assert(!str_contains(result, "<b>Do profundo"));
+	assert(!str_contains(result, "<b>Senhor escutai"));
+
+	/* Key detected from first chord: F */
+	assert(transp_get_key(ctx) == 5);
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(user_song_bold_exact)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* The full first stanza of the user song, as-is (trailing space on the
+	 * last lyric line is intentional). Bold (TRANSP_HTML) output is pinned
+	 * byte-for-byte: chord lines one <b> block each with verbatim spacing,
+	 * Bbm7 stays Bbm7 (flat family, key F), lyrics verbatim and never
+	 * bolded, key = F. */
+	const char *song = "Fm   Cm A#m G#  Gº\n"
+	                   "No Senhor es-tá  a miseri-\n"
+	                   "Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5\n"
+	                   "córdia e a abundânte   re-den--ção. \n";
+
+	char *result = transp_buffer(ctx, song, 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(strcmp(result,
+	              "<div><b>Fm   Cm Bbm Ab  Gº</b></div>"
+	              "<div>No Senhor es-tá  a miseri-</div>"
+	              "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b></div>"
+	              "<div>córdia e a abundânte   re-den--ção. </div>") == 0);
+	free(result);
+
+	/* +1: every root transposed, spacing still verbatim on chord lines, and
+	 * the spacing queue realigns the lyric lines with '-' fillers. */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, song, 1, TRANSP_HTML);
+	assert(result != NULL);
+	assert(strcmp(result,
+	              "<div><b>F#m   C#m  Bm A  G#º</b></div>"
+	              "<div>No Senhor  es-tá  a miseri-</div>"
+	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5</b></div>"
+	              "<div>có-rdia e a a-bundânte   re--den---ção. </div>") ==
+	       0);
+	assert(transp_get_key(ctx) == 5); /* F */
+	free(result);
+
+	/* Plain mode: same transposition, no markup, same line breaks. */
+	result = transp_buffer(ctx, song, 1, 0);
+	assert(result != NULL);
+	assert(strcmp(result,
+	              "F#m   C#m  Bm A  G#º\n"
+	              "No Senhor  es-tá  a miseri-\n"
+	              "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
+	              "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(lyric_false_positives_guard)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Old whitelist read "Amada Amiga Amina" as chords (A +
+	 * mada/miga/mina); the grammar must reject them — they are lyric words.
+	 */
+	char *result = transp_buffer(ctx, "Amada Amiga Amina", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(!str_contains(result, "<b>"));
+	assert(str_contains(result, "Amada Amiga Amina"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section I — key-aware spelling (CHORDS.md §10)
+ * ===================================================================== */
+
+TEST(key_aware_flat_family_spelling)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (chromatic 5, flat family): flats stay flat */
+	char *result = transp_buffer(ctx, "F Bb Eb Ab", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>F Bb Eb Ab</b>"));
+	free(result);
+
+	/* A#m respelled to Bbm (flat family) */
+	result = transp_buffer(ctx, "F A#m", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>F Bbm</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_sharp_family_spelling)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key D (chromatic 2, sharp family): G#m stays G#m, not Abm */
+	char *result = transp_buffer(ctx, "D Bm G#m A", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>D Bm G#m A</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_transpose_derives_target_family)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* F +1 → target 6 = F# (sharp family) → F# */
+	char *result = transp_buffer(ctx, "F", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "F#"));
+	free(result);
+
+	/* G -1 → target 6 = F# (sharp family) → F# */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "G", -1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "F#"));
+	free(result);
+
+	/* C +1 → target 1 = Db (flat family) → Db */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Db"));
+	free(result);
+
+	/* Bb +1 → target 11 = B (sharp family) → B */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "Bb", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "B"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_slash_bass_normalized)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (flat): Gm/A# → Gm/Bb */
+	char *result = transp_buffer(ctx, "F Gm/A#", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Gm/Bb"));
+	free(result);
+
+	/* Key D (sharp): Gm/A# stays */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "D Gm/A#", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Gm/A#"));
+	free(result);
+
+	/* Key F (flat) +2 → target G (sharp): Gm/Bb → Am/A# (root transposes,
+	 * bass is respelled to sharp family A#) */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "F Gm/Bb", 2, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Am/A#"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_latin)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (flat, Latin): La and Sib stay flat; F→Fa grows root by 1,
+	 * creating a double space before La (diff absorb). */
+	char *result =
+	        transp_buffer(ctx, "F La Sib", 0, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Fa"));
+	assert(str_contains(result, "La"));
+	assert(str_contains(result, "Sib"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(bemol_flag_still_forces_flats)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key D (sharp): G#m normally stays G#m, but TRANSP_BEMOL forces Abm */
+	char *result = transp_buffer(ctx, "D G#m", 0, TRANSP_BEMOL);
+	assert(result != NULL);
+	assert(str_contains(result, "Abm"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_unknown_defaults_sharp)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* No chord tokens → key -1 → sharp family, no crash */
+	char *result = transp_buffer(ctx, "Hello world", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Hello world"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_shift_table)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key Bb (chromatic 10, flat family): rows spell per their own family
+	 */
+	char *result = transp_buffer(ctx, "Bb", 0, 0);
+	assert(result != NULL);
+	free(result);
+
+	char *table = transp_shift_table(ctx, 0);
+	assert(table != NULL);
+	/* Row 0 (C): sharp family → "C 2" */
+	assert(str_contains(table, "C 2"));
+	/* Row 1 (Db): flat family → "Db 3" (not C#) */
+	assert(str_contains(table, "Db 3"));
+	/* Row 5 (F): flat family → "F 7" (not E#) */
+	assert(str_contains(table, "F 7"));
+	/* Row 6 (F#): sharp family → "F# 8" (not Gb) */
+	assert(str_contains(table, "F# 8"));
+	/* Row 10 (Bb): flat family → "Bb 0" */
+	assert(str_contains(table, "Bb 0"));
+	free(table);
+
+	transp_free(ctx);
+}
+
+/* Alignment fillers must describe the source lyric boundary, not the
+ * already-rendered HTML/output buffer. */
+TEST(alignment_fillers_follow_word_boundaries)
+{
+	transp_ctx_t *ctx = transp_init();
+	char *result;
+
+	assert(ctx != NULL);
+
+	result = transp_buffer(ctx, "C  G\nfable", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab-le\n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfab le", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab  le\n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfab ", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab  \n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfable", 7, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<div>fab-le</div>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section H — model: quality + slash bass (token-level)
+ * ===================================================================== */
+
+static void assert_chord_info(
+        const char *tok, int root, transp_quality_t q, int bass,
+        size_t bass_len)
+{
+	transp_token_info_t info;
+	int kind = transp_token_analyze(tok, strlen(tok), &info);
+	assert(kind == TRANSP_TOK_CHORD);
+	assert(info.root == root);
+	assert(info.quality == q);
+	assert(info.bass == bass);
+	assert(info.bass_len == bass_len);
+}
+
+TEST(model_quality_matrix)
+{
+	assert_chord_info("C", 0, TRANSP_QUAL_MAJOR, -1, 0);
+	assert_chord_info("Cm", 0, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("G-", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gmin", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gdim", 7, TRANSP_QUAL_DIMINISHED, -1, 0);
+	assert_chord_info("Gº", 7, TRANSP_QUAL_DIMINISHED, -1, 0);
+	assert_chord_info("Bh", 11, TRANSP_QUAL_HALF_DIM, -1, 0);
+	assert_chord_info("Gaug", 7, TRANSP_QUAL_AUGMENTED, -1, 0);
+	assert_chord_info("G+", 7, TRANSP_QUAL_AUGMENTED, -1, 0);
+	assert_chord_info("Gsus4", 7, TRANSP_QUAL_SUSPENDED, -1, 0);
+	assert_chord_info("C5", 0, TRANSP_QUAL_POWER, -1, 0);
+	assert_chord_info("Gno3", 7, TRANSP_QUAL_UNDEFINED, -1, 0);
+	assert_chord_info("Cmaj9", 0, TRANSP_QUAL_MAJOR, -1, 0);
+	assert_chord_info("G6/9", 7, TRANSP_QUAL_MAJOR, -1, 0);
+}
+
+TEST(model_first_quality_atom_wins)
+{
+	/* The FIRST quality-bearing atom wins: the (5º) is a fifth alteration,
+	 * not a quality change, so Gm7(5º) stays MINOR. */
+	assert_chord_info("Gm7(5º)", 7, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Fm7b5", 5, TRANSP_QUAL_MINOR, -1, 0);
+	assert_chord_info("Gm7b5", 7, TRANSP_QUAL_MINOR, -1, 0);
+}
+
+TEST(model_slash_bass)
+{
+	transp_token_info_t info;
+
+	assert(transp_token_analyze("E/G#", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.root == 4); /* E */
+	assert(info.quality == TRANSP_QUAL_MAJOR);
+	assert(info.bass == 8); /* G# */
+	assert(info.bass_len == 2);
+	assert(info.bass_off == 2);
+
+	assert(transp_token_analyze("D9/F#", 5, &info) == TRANSP_TOK_CHORD);
+	assert(info.bass == 6); /* F# */
+	assert(info.bass_len == 2);
+
+	assert(transp_token_analyze("Bb/D", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.root == 10); /* Bb */
+	assert(info.bass == 2);  /* D */
+	assert(info.bass_len == 1);
+
+	/* extension slash G6/9 is not a bass */
+	assert(transp_token_analyze("G6/9", 4, &info) == TRANSP_TOK_CHORD);
+	assert(info.bass == -1);
+	assert(info.bass_len == 0);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -592,6 +1335,47 @@ int main(void)
 	RUN_TEST(major7_notation);
 	RUN_TEST(major7_notation_transposed);
 	RUN_TEST(invalid_slash_not_a_chord);
+	RUN_TEST(augmented_chord_bolded);
+	RUN_TEST(augmented_chord_transposed);
+
+	RUN_TEST(roots_plain);
+	RUN_TEST(roots_sharp);
+	RUN_TEST(roots_flat_display_as_sharp);
+	RUN_TEST(quality_minor);
+	RUN_TEST(quality_diminished_words);
+	RUN_TEST(quality_sus_add_extension_slash);
+	RUN_TEST(power_chord);
+	RUN_TEST(slash_bass_with_accidentals);
+	RUN_TEST(special_symbols_alone);
+	RUN_TEST(lyric_syllables_not_chords);
+	RUN_TEST(comment_line_html);
+	RUN_TEST(comment_removal_skips_blank);
+	RUN_TEST(break_slash_lyrics);
+
+	RUN_TEST(paren_diminished_fifth);
+	RUN_TEST(paren_diminished_transposed);
+	RUN_TEST(consistent_quality_suffixes);
+	RUN_TEST(latin_input_roots);
+	RUN_TEST(latin_input_roots_transposed);
+	RUN_TEST(combo_grammar);
+
+	RUN_TEST(user_song_full);
+	RUN_TEST(user_song_bold_exact);
+	RUN_TEST(lyric_false_positives_guard);
+
+	RUN_TEST(key_aware_flat_family_spelling);
+	RUN_TEST(key_aware_sharp_family_spelling);
+	RUN_TEST(key_aware_transpose_derives_target_family);
+	RUN_TEST(key_aware_slash_bass_normalized);
+	RUN_TEST(key_aware_latin);
+	RUN_TEST(bemol_flag_still_forces_flats);
+	RUN_TEST(key_unknown_defaults_sharp);
+	RUN_TEST(key_aware_shift_table);
+
+	RUN_TEST(alignment_fillers_follow_word_boundaries);
+	RUN_TEST(model_quality_matrix);
+	RUN_TEST(model_first_quality_atom_wins);
+	RUN_TEST(model_slash_bass);
 
 	printf("\nAll tests passed!\n");
 	return 0;

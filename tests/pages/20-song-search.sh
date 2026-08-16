@@ -1,0 +1,83 @@
+#!/bin/sh
+set -eu
+
+# Full-text (stoma) search semantics on the song listing.
+# Pins the token-prefix behavior that replaced ci_substr substring matching:
+#  - "star" is NOT a token prefix of "estar"/"Starlight" -> 0 rows (old code matched)
+#  - "cor" IS a token prefix ("Coração", "Corações") -> rows
+#  - accent-sensitive: "coracao" does NOT match "Coração" -> 0 rows
+#  - multi-field AND across two searchable string fields
+# Content lookup (`data=`, the lyric/chord-chart field, corpus file data.txt):
+#  - "amazing" / "sweet" match lyrics across the corpus
+#  - multi-token AND ("amazing sound"), non-matching -> 0 rows
+#  - quoted phrase ("minha alma tem sede") -> contiguous tokens only,
+#    reversed or spread tokens must NOT match
+# Usage: AXIL_HOST=127.0.0.1 AXIL_PORT=8080 sh tests/pages/20-song-search.sh
+
+. "$(dirname "$0")/00-helpers.sh"
+
+row_count(){
+  route=$1
+  out=$(curl_status_body "$route")
+  code=$(printf '%s\n' "$out" | sed -n '1p')
+  body=$(printf '%s\n' "$out" | sed -n '2,$p') || true
+
+  if [ "$code" != "200" ]; then
+    fail "$route returned HTTP $code"
+  fi
+
+  count=$(printf '%s' "$body" | grep -oE '[0-9]+ of [0-9]+ rows' | head -1)
+  # A valid-but-zero result renders the "No items" empty state instead of the
+  # pagination row-count line; treat that as 0 of 0 rows.
+  if [ -z "$count" ] && printf '%s' "$body" | grep -q 'No items'; then
+    count="0 of 0 rows"
+  fi
+  printf '%s' "$count"
+}
+
+expect_zero(){
+  route=$1
+  desc=$2
+  count=$(row_count "$route")
+  if [ "$count" != "0 of 0 rows" ]; then
+    fail "$route: expected '0 of 0 rows', got '$count' ($desc)"
+  fi
+  pass "$route: $desc"
+}
+
+expect_rows(){
+  route=$1
+  desc=$2
+  count=$(row_count "$route")
+  if [ -z "$count" ] || [ "$count" = "0 of 0 rows" ]; then
+    fail "$route: expected rows, got '$count' ($desc)"
+  fi
+  pass "$route: $desc"
+}
+
+echo "Running FTS song-search smoke tests against $BASE"
+
+expect_zero "/song/?title=star" "mid-word 'star' must NOT match 'estar' (prefix semantics)"
+expect_rows "/song/?title=cor" "token prefix 'cor' matches"
+expect_zero "/song/?title=coracao" "accent-sensitive: 'coracao' must NOT match 'Coração'"
+expect_zero "/song/?title=zzzzzz" "non-matching value -> 0 rows"
+expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
+expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"
+
+# Content lookup (`data=` lyric/chord field) — corpus files: items/song/items/*/data.txt
+expect_rows "/song/?data=amazing" "content lookup: 'amazing' matches lyrics"
+expect_rows "/song/?data=sweet" "content lookup: 'sweet' matches lyrics"
+expect_rows "/song/?data=amazing+sound" "content lookup: multi-token AND ('amazing sound')"
+expect_zero "/song/?data=amazing+zzz" "content lookup: AND with bad token -> 0 rows"
+expect_zero "/song/?data=zzzzzz" "content lookup: non-matching value -> 0 rows"
+expect_rows "/song/?title=grace&data=sweet" "content lookup ANDs with metadata filters"
+
+# Quoted phrase: contiguous tokens in order (sopra_em_nos, pra_te_adorar)
+expect_rows "/song/?data=%22minha+alma+tem+sede%22" \
+  "quoted phrase 'minha alma tem sede' matches contiguous tokens"
+expect_zero "/song/?data=%22sede+minha+alma%22" \
+  "quoted phrase: reversed order -> 0 rows"
+expect_zero "/song/?data=%22sede+minha%22" \
+  "quoted phrase: spread tokens -> 0 rows"
+
+pass "FTS song-search smoke tests all OK"

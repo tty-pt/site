@@ -976,7 +976,8 @@ bud_arg bud_attr_fmt(const char *name, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(buf[idx], sizeof(buf[idx]), fmt, ap);
 	va_end(ap);
-	return (bud_arg){ .type = BUD_ARG_ATTR, .data.attr = { name, buf[idx] } };
+	return (bud_arg){ .type = BUD_ARG_ATTR,
+		          .data.attr = { name, buf[idx] } };
 }
 
 int bud_set_bool_attr(bud_node *node, const char *name)

@@ -80,8 +80,7 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 
 	for (int i = -11; i <= 11; i++) {
 		const char *name = key_name(
-		        i, app_state.original_key, app_state.use_bemol,
-		        app_state.use_latin);
+		        i, app_state.original_key, app_state.use_latin);
 		if (g_key_options[i + 11])
 			bud_patch_text(g_key_options[i + 11], name);
 	}
@@ -108,7 +107,6 @@ static bud_node *render_key_options(void)
 		                                       : lx_none(),
 		              lx_text(key_name(
 		                      i, app_state.original_key,
-		                      app_state.use_bemol,
 		                      app_state.use_latin)))
 		                .data.node;
 		g_key_options[i + 11] = opt;
@@ -139,9 +137,6 @@ static bud_node *render_transpose_form(bud_node *key_options)
 	                   lx_el("select", lx_attr("name", "t"),
 	                         lx_bind("change", 0, bud_api_action_handler),
 	                         lx_node(key_options))),
-	             lx_node(site_ui_checkbox(
-	                     "b", "Flats (\xe2\x99\xad)", app_state.use_bemol,
-	                     bud_api_action_handler)),
 	             lx_node(site_ui_checkbox(
 	                     "l", "Latin", app_state.use_latin,
 	                     bud_api_action_handler)),
@@ -182,7 +177,6 @@ static void render_chord_viewer(void)
 	        orig_key_str, sizeof(orig_key_str), "%d",
 	        app_state.original_key);
 
-	char bemol_val[2] = { app_state.use_bemol ? '1' : '0', '\0' };
 	char latin_val[2] = { app_state.use_latin ? '1' : '0', '\0' };
 	char media_val[2] = { app_state.show_media ? '1' : '0', '\0' };
 	char owner_val[2] = { app_state.is_owner ? '1' : '0', '\0' };
@@ -247,7 +241,6 @@ static void render_chord_viewer(void)
 	g_main = lx_el("div", lx_attr("id", "main"),
 	               lx_attr("data-song-id", app_state.cache.id),
 	               lx_attr("data-chord-data", app_state.chord_html),
-	               lx_attr("data-use-bemol", bemol_val),
 	               lx_attr("data-use-latin", latin_val),
 	               lx_attr("data-show-media", media_val),
 	               lx_attr("data-yt", app_state.cache.yt),

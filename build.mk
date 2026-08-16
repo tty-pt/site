@@ -13,8 +13,14 @@ MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk
 
 CC ?= clang
 
+SANITIZE ?= 0
+ifeq ($(SANITIZE),1)
+CFLAGS += -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
+LDFLAGS += -fsanitize=address -fsanitize=undefined
+endif
+
 CFLAGS += -g -O0 $(PICFLAGS)
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared

@@ -15,7 +15,6 @@
 #include <ttypt/axil-xy.h>
 
 #include "../index/index.h"
-#include <hyle/source.h>
 
 #include "../common/common.h"
 #include "../mpfd/mpfd.h"
