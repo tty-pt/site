@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "spelling.h"
+
 #define OUTBUF_MIN 8192
 
 /* Spacing queue — FIFO of { start, len } alignment inserts. A single
@@ -53,12 +55,13 @@ typedef struct {
 	transp_queue_t q;
 } render_state_t;
 
-/* Transpose a chord root index (0-11) and render it, honoring BEMOL and the
- * Latin/English table. Shared spelling encoding: "C#\0Db", … */
-static const char *chord_str(char **i18n_table, size_t chord, int flags)
+/* Transpose a chord root index (0-11) and render it, honoring the resolved
+ * spell decision (SPELL_SHARP/SPELL_FLAT) and the Latin/English table.
+ * Shared spelling encoding: "C#\0Db", … */
+static const char *chord_str(char **i18n_table, size_t chord, int spell)
 {
 	const char *str = i18n_table[chord];
-	if ((flags & TRANSP_BEMOL) && strchr(str, '#'))
+	if (spell == SPELL_FLAT && strchr(str, '#'))
 		str += strlen(str) + 1;
 	return str;
 }
@@ -229,9 +232,11 @@ static void render_lyric_line(
 	}
 
 done:
-	/* fill any remaining queue entries at end of line */
-	while (st->q.n > 0)
-		lyric_fill(st, html, out, outsz, o, &j);
+	/* fill any remaining queue entries at end of line (if they start exactly here) */
+	lyric_fill(st, html, out, outsz, o, &j);
+	
+	/* discard any remaining queue entries (chord line was longer than lyric line) */
+	st->q.n = 0;
 
 	if (html)
 		out_append(out, outsz, o, "</div>", 6);
@@ -243,8 +248,8 @@ done:
  * push failed). */
 static int render_chord_line(
         render_state_t *st, const transp_song_t *song, const transp_pline_t *L,
-        int semitones, int flags, int html, char **i18n, char *out,
-        size_t outsz, size_t *o)
+        int semitones, int flags, int html, char **root_table, char **en_table,
+        char **latin_table, int spell, char *out, size_t outsz, size_t *o)
 {
 	size_t j = 0;
 	int has_chords = 0;
@@ -311,19 +316,37 @@ static int render_chord_line(
 		no_space = 1;
 
 		int root = t->info.root;
-		const char *new_cstr = chord_str(
-		        i18n, (size_t)((root + semitones) % 12), flags);
+		const char *new_cstr =
+		        chord_str(root_table, (size_t)((root + semitones) % 12), spell);
 		size_t new_len = strlen(new_cstr);
 		size_t root_len = t->info.root_len;
 		size_t diff = new_len > root_len ? new_len - root_len : 0;
 		size_t mod_len = t->info.mod_len;
 		const char *mod = t->text + t->info.mod_off;
 
-		/* mod is copied verbatim (never transposed); a leading 'm'
-		 * becomes '-' under Latin output. The split emit avoids a fixed
-		 * stack buffer (mod_len is unbounded for long 'm'-runs). */
+		/* Mod emission: the suffix is copied verbatim (never transposed),
+		 * except that a slash bass is re-emitted family-spelled (CHORDS.md
+		 * §10.3 step 3). prefix_len covers the suffix up to (not including)
+		 * the '/' separator; a leading 'm' becomes '-' under Latin output.
+		 * The split emits avoid a fixed stack buffer (mod_len is unbounded
+		 * for long 'm'-runs). */
+		size_t prefix_len = mod_len;
+		const char *bass_name = NULL;
+		if (t->info.bass >= 0) {
+			prefix_len = t->info.bass_off - t->info.root_len;
+			
+			int bass_latin = 0;
+			if (t->info.bass_len >= 2) {
+				char b1 = t->text[t->info.bass_off + 1];
+				if (b1 != '#' && b1 != 'b')
+					bass_latin = 1;
+			}
+			char **bass_table = bass_latin ? latin_table : en_table;
+			bass_name = chord_str(bass_table, (size_t)t->info.bass, spell);
+		}
+
 		int latin_m =
-		        (mod_len > 0 && mod[0] == 'm' &&
+		        (prefix_len > 0 && mod[0] == 'm' &&
 		         (flags & TRANSP_LATIN));
 
 		/* Diff/absorb: grow the root, eating up to diff spaces from the
@@ -343,9 +366,15 @@ static int render_chord_line(
 		out_append(out, outsz, o, new_cstr, new_len);
 		if (latin_m) {
 			out_append(out, outsz, o, "-", 1);
-			out_append(out, outsz, o, mod + 1, mod_len - 1);
-		} else if (mod_len > 0) {
-			out_append(out, outsz, o, mod, mod_len);
+			if (prefix_len > 1)
+				out_append(out, outsz, o, mod + 1, prefix_len - 1);
+		} else if (prefix_len > 0) {
+			out_append(out, outsz, o, mod, prefix_len);
+		}
+		if (bass_name) {
+			/* the '/' separator is the last byte of the prefix (the
+			 * bass starts at mod[prefix_len]) */
+			out_append(out, outsz, o, bass_name, strlen(bass_name));
 		}
 		j += root_len + mod_len;
 
@@ -427,22 +456,31 @@ static void render_empty_line(
 		return;
 	}
 	if (html) {
-		out_append(out, outsz, o, "<div> </div>", 11);
+		out_append(out, outsz, o, "<div> </div>", 12);
 	} else {
 		out_append(out, outsz, o, "\n", 1);
 	}
 }
 
 char *transp_render(
-        const transp_song_t *song, int semitones, int flags, char **i18n_table,
-        int *key)
+        const transp_song_t *song, int semitones, int flags, char **en_table,
+        char **latin_table, int *key)
 {
 	int html = (flags & TRANSP_HTML) != 0;
 	render_state_t st;
 	size_t total = 64;
 	char *out;
+	char **root_table = (flags & TRANSP_LATIN) ? latin_table : en_table;
 
-	(void)key;
+	/* Key-aware spelling: the family derives from the TARGET tonic
+	 * ((detected key + semitones) % 12); TRANSP_BEMOL overrides to flats.
+	 * semitones arrives already normalized to 0..11 by transp_buffer. */
+	int family = (*key >= 0) ? spelling_family((*key + semitones) % 12)
+	                         : SPELL_FAMILY_SHARP;
+	int spell =
+	        ((flags & TRANSP_BEMOL) || family == SPELL_FAMILY_FLAT)
+	                ? SPELL_FLAT
+	                : SPELL_SHARP;
 
 	/* Size the result: sum of line lengths * 8 + 64 (HTML wrapping and
 	 * longer chord names can expand each line significantly). */
@@ -470,7 +508,7 @@ char *transp_render(
 		} else if (L->is_chord_line) {
 			if (!render_chord_line(
 			            &st, song, L, semitones, flags, html,
-			            i18n_table, out, outsz, &o))
+			            root_table, en_table, latin_table, spell, out, outsz, &o))
 				goto oom;
 		} else {
 			render_lyric_line(&st, L, flags, html, out, outsz, &o);

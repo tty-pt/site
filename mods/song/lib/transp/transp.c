@@ -15,6 +15,7 @@
 
 #include "parse.h"
 #include "render.h"
+#include "spelling.h"
 
 struct transp_ctx {
 	int key;           /* chromatic 0-11, or -1 */
@@ -22,7 +23,8 @@ struct transp_ctx {
 };
 
 /* Chromatic scale tables. Encoding is "sharp\0flat" pairs; chord_str() (in
- * render.c) picks the flat half under TRANSP_BEMOL. */
+ * render.c) picks the flat half under a FLAT spell decision (TRANSP_BEMOL
+ * override or a flat spelling family — CHORDS.md §10). */
 static char *chromatic_en[] = {
 	"C\0", "C#\0Db", "D\0", "D#\0Eb", "E\0", "F\0", "F#\0Gb",
 	"G\0", "G#\0Ab", "A\0", "A#\0Bb", "B\0", NULL,
@@ -79,7 +81,7 @@ transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 	}
 
 	result = transp_render(
-	        &song, semitones, flags, ctx->i18n_table, &ctx->key);
+	        &song, semitones, flags, chromatic_en, chromatic_latin, &ctx->key);
 	transp_song_free(&song);
 	free(input_copy);
 	return result;
@@ -109,9 +111,15 @@ char *transp_shift_table(transp_ctx_t *ctx, int latin)
 	if (!result)
 		return NULL;
 
+	/* Family-consistent names: rows spell per the detected key's family
+	 * (CHORDS.md §10.3 step 4). */
+	int family = spelling_family(ctx->key);
+
 	result[0] = '\0';
 	for (unsigned i = 0; i < 12; i++) {
 		char *name = table[i];
+		if (family == SPELL_FAMILY_FLAT && strchr(name, '#'))
+			name += strlen(name) + 1;
 		long t = (long)i - ctx->key;
 		if (t < 0)
 			t += 12;

@@ -8,7 +8,7 @@ CFLAGS += -g -O0 $(PICFLAGS)
 TARGET = libtransp.a
 SRC = token.c parse.c render.c transp.c
 OBJ = $(SRC:.c=.o)
-HDR = transp.h transp_flags.h token.h parse.h render.h
+HDR = transp.h transp_flags.h token.h parse.h render.h spelling.h
 
 all: $(TARGET)
 

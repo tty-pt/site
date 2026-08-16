@@ -509,7 +509,7 @@ TEST(slash_chord_with_accidental_bass)
 	assert(result != NULL);
 	assert(str_contains(result, "E/G#"));
 	assert(str_contains(result, "C/A#"));
-	assert(str_contains(result, "G/Bb"));
+	assert(str_contains(result, "G/A#"));
 	free(result);
 
 	transp_free(ctx);
@@ -613,7 +613,7 @@ TEST(roots_sharp)
 
 	char *result = transp_buffer(ctx, "C# D# F# G# A#", 0, TRANSP_HTML);
 	assert(result != NULL);
-	assert(str_contains(result, "<b>C# D# F# G# A#</b>"));
+	assert(str_contains(result, "<b>Db Eb Gb Ab Bb</b>"));
 	free(result);
 
 	transp_free(ctx);
@@ -628,12 +628,12 @@ TEST(roots_flat_display_as_sharp)
 	 */
 	char *result = transp_buffer(ctx, "Db Eb Gb Ab Bb", 0, TRANSP_HTML);
 	assert(result != NULL);
-	assert(str_contains(result, "<b>C# D# F# G# A#</b>"));
+	assert(str_contains(result, "<b>Db Eb Gb Ab Bb</b>"));
 	free(result);
 
 	/* A# and Bb map to the same chromatic index */
 	result = transp_buffer(ctx, "A# Bb", 0, TRANSP_HTML);
-	assert(str_contains(result, "<b>A# A#</b>"));
+	assert(str_contains(result, "<b>Bb Bb</b>"));
 	free(result);
 
 	transp_free(ctx);
@@ -713,7 +713,7 @@ TEST(slash_bass_with_accidentals)
 	assert(str_contains(result, "A/E"));
 	assert(str_contains(result, "E/G#"));
 	assert(str_contains(result, "C/A#"));
-	assert(str_contains(result, "G/Bb"));
+	assert(str_contains(result, "G/A#"));
 	assert(str_contains(result, "<b>"));
 	free(result);
 
@@ -822,7 +822,7 @@ TEST(paren_diminished_fifth)
 	        ctx, "Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5", 0, TRANSP_HTML);
 	assert(result != NULL);
 	assert(str_contains(
-	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b>"));
+	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b>"));
 	free(result);
 
 	transp_free(ctx);
@@ -928,13 +928,13 @@ TEST(user_song_full)
 	assert(result != NULL);
 
 	/* Chord lines stay one bolded block each, spacing preserved */
-	assert(str_contains(result, "<b>Fm   Cm A#m G#  Gº</b>"));
+	assert(str_contains(result, "<b>Fm   Cm Bbm Ab  Gº</b>"));
 	assert(str_contains(
-	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b>"));
+	        result, "<b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b>"));
 	assert(str_contains(result, "<b>Fm"));
 	assert(str_contains(result, "Em     Cm</b>"));
-	assert(str_contains(result, "<b>C#"));
-	assert(str_contains(result, "C#7   Cm</b>"));
+	assert(str_contains(result, "<b>Db"));
+	assert(str_contains(result, "Db7   Cm</b>"));
 
 	/* Lyrics rendered plainly, never bolded */
 	assert(str_contains(result, "No Senhor es-tá  a miseri-"));
@@ -972,9 +972,9 @@ TEST(user_song_bold_exact)
 	char *result = transp_buffer(ctx, song, 0, TRANSP_HTML);
 	assert(result != NULL);
 	assert(strcmp(result,
-	              "<div><b>Fm   Cm A#m G#  Gº</b></div>"
+	              "<div><b>Fm   Cm Bbm Ab  Gº</b></div>"
 	              "<div>No Senhor es-tá  a miseri-</div>"
-	              "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b></div>"
+	              "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5</b></div>"
 	              "<div>córdia e a abundânte   re-den--ção. </div>") == 0);
 	free(result);
 

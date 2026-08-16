@@ -207,6 +207,12 @@ IN PROGRESS (2026-08-16):
   fixed (findings 8–9): a stack overflow on the `modbuf[256]` buffer and a
   `q_push` double-free on partial realloc failure. The old
   `i18n[0][0]=='D'` Latin-detection hack was dropped in the same pass.
+- **Key-aware spelling — DESIGNED 2026-08-16, IMPLEMENTATION IN PROGRESS.** Spec
+  in §10: key-aware becomes the default (no new flag), the site drops the
+  flat/sharp override entirely, family derives from the target tonic, slash
+  basses are normalized. Current behavior is unchanged until it lands. Library
+  implementation started (spelling.h, render.c parts, shift table — see §10.6);
+  the build is mid-change and the transp test pins are NOT yet amended.
 - Root `make test` wiring — VERIFIED: transp suite runs under `make unit-tests`
   → `mods/song/test.sh` line 5 `make -C lib/transp test` (`song` is in
   `mods.load`). Requires axil on `:8080` for the mods test.sh, but the transp
@@ -560,8 +566,10 @@ void transp_song_free(transp_song_t *song);
 #include "transp_flags.h"
 
 char *transp_render(const transp_song_t *song, int semitones, int flags,
-                    char **i18n_table, int *key);
-/* malloc'd string; NULL on OOM. i18n_table + key live in transp_ctx (above). */
+                    char **en_table, char **latin_table, int *key);
+/* malloc'd string; NULL on OOM. Both tables + key live in transp_ctx; the
+ * root table is chosen from TRANSP_LATIN, a slash bass through the table
+ * matching its own input language (§10.3 step 3). */
 #endif
 ```
 
@@ -612,7 +620,9 @@ struct transp_ctx { int key; char **i18n_table; };  /* opaque in header */
   table = `chromatic_en`. `transp_free`: free ctx.
 - `transp_buffer(ctx, input, semitones, flags)`: normalize negative semitones
   (existing `+= (1+(s/12))*12`); set `i18n_table` from `TRANSP_LATIN`; strdup
-  input; `transp_song_parse`; `transp_render`; free song + copy. Keep the 8×
+  input; `transp_song_parse`; `transp_render` (passing **both** tables —
+  `chromatic_en` + `chromatic_latin` — since §10 bass respelling needs the
+  language-detected table); free song + copy. Keep the 8×
   result buffer. Keep the static `chromatic_en`/`chromatic_latin` tables (same
   `"C\0", "C#\0Db", …` encoding, `chord_str` unchanged). **Delete** `chord_db`,
   `special_db`, `paren_db`, `qmap` includes, and `valid_modifier` entirely.
@@ -649,11 +659,11 @@ $(OBJ): $(SRC) transp.h transp_flags.h token.h parse.h render.h
 Scoped out by the user for this pass; the model was shaped so they land without
 churning the token contract:
 
-- **Accidental-aware / key-aware respelling** — "later, not now". The model
-  already carries the *chromatic* root and bass (`G#/Bb`-equivalence), but the
-  renderer picks spellings by preference flag, not by key. A future step would
-  pick `Bbm7` vs `A#m7` from the song key; the tests keep the current
-  sharp-default (`Bbm7` renders `A#m7`) until then.
+- **Accidental-aware / key-aware respelling** — **DESIGNED 2026-08-16, see
+  §10; implementation in progress (§10.6)**. The model already carries the
+  *chromatic* root and bass (`G#/Bb`-equivalence); the renderer still picks
+  spellings by preference flag, not by key. §10 is the spec the implementation
+  must match.
 - **Intervals / music-theory reasoning** — explicitly future. The `quality`
   enum + `bass` are the seam; the renderer still copies suffixes verbatim.
   Nothing key- or theory-aware is designed in (§8.1 decision log).
@@ -669,3 +679,367 @@ churning the token contract:
   floor `max(8192, line_len*8+64)`.
 - Still open, unchanged from §8.1: `make lint`, end-to-end `make unit-tests`
   (axil on :8080). AGENTS.md row + README rewrite are done.
+
+## 10. Key-aware spelling — design & spec (2026-08-16)
+
+The next transp feature, designed with the user on 2026-08-16 and **not yet
+implemented** (this section is the spec; §8.1–§8.7 describe current behavior).
+It uses the model seams added in the quality+bass pass: `transp_render`
+already receives `int *key` (currently `(void)`-cast), and
+`bass`/`bass_off`/`bass_len` make the slash bass re-emittable.
+
+### 10.1 Motivation & why this design (the reasoning, so it isn't re-derived)
+
+**The problem:** `chord_str()` spells every root with the sharp half of the
+`"C#\0Db"` tables unless `TRANSP_BEMOL` is set. The user's own song is in Fm —
+a 4-flat key (Bb, Eb, Ab, Db) — yet today it renders `Bbm7` as `A#m7`, `G#`
+as itself (should be `Ab`), and `A#m` stays sharp. For a Brazilian cifras site
+that is visibly wrong: Brazilian charts spell by the song's key, and the
+"Flats (♭)" checkbox was a manual workaround for the lack of key awareness.
+
+**Why key-aware is the default, with no new flag:** the checkbox/pref history
+shows nobody needs *per-song* control — they need the *right* spelling. A new
+`TRANSP_KEY` flag would add API surface, a query param, a pref, and state for
+what should simply be the behavior. Keep `TRANSP_BEMOL` in the **library** as a
+forced-flats capability (the unit tests exercise it; removing it churns 10+
+tests for zero user value) but the **site never sets it**.
+
+**Why the family derives from the TARGET tonic, not the original key:**
+anchoring to the original key (CifraClub style) is *stable* but produces
+enharmonic nonsense at the edges — an F song transposed -1 lands on E, and
+anchored-flat spelling renders its accidentals as flats (`Ab` for G#, `Eb` for
+D#), i.e. an E-major piece spelled like Fb major. Re-deriving from the target
+tonic `(key + semitones) % 12` is diatonically correct in the key you land on
+and matches how `music.c` already computes the target key name. In practice it
+is also stable: the family only flips at the enharmonic boundaries (F#/Gb,
+C#/Db), where either spelling is musically acceptable and the convention picks
+one (below).
+
+**Why the boundary keys resolve to Db and F#:** both spellings are legal for
+chromatic 1 (C# major = 7 sharps vs Db major = 5 flats) and chromatic 6 (F#
+major = 6 sharps vs Gb major = 6 flats). Brazilian cifra convention favors
+**Db** and **F#**; that is the single line a future agent must not "fix" to
+Gb/C# without a product decision.
+
+**Why slash basses are normalized too:** `Gm/A#` mixed with a flat root looks
+like a bug to any musician. The bass is *not* transposed (still the fixed
+pitch under the root) but its *spelling* follows the same family. The model's
+`bass`/`bass_off`/`bass_len` fields exist precisely so this can be done
+without re-parsing the token.
+
+**Rejected options (recorded so they aren't revisited):**
+- New `TRANSP_KEY` flag (API + wiring for a default behavior).
+- Anchor family to the original key (CifraClub style — enharmonic oddities).
+- Three-way UI control (auto/flats/sharps) — overkill; the binary checkbox was
+  a workaround, not a feature.
+- Bass spelled verbatim (mixed accidentals in one chord symbol).
+- Removing `TRANSP_BEMOL` from the library (test churn, no user value).
+- Keeping the site's `b` param accepted-but-ignored — just remove it; old
+  `?b=1` links degrade to key-aware rendering harmlessly.
+
+### 10.2 The family rule
+
+Spelling family of a tonic (chromatic 0–11), the single table that must not
+drift between the renderer and the UI:
+
+```
+FLAT  = { 1 (Db), 3 (Eb), 5 (F), 8 (Ab), 10 (Bb) }
+SHARP = { 0 (C), 2 (D), 4 (E), 6 (F#), 7 (G), 9 (A), 11 (B) }
+```
+
+This is the circle of fifths: keys with flats in the signature
+(F, Bb, Eb, Ab, Db) spell flat; sharp keys (G, D, A, E, B) spell sharp. The
+boundary keys 1 and 6 resolve by convention to **Db** and **F#** (see §10.1).
+C (0) is natural — it sits in the sharp family so the default half of the
+`"C\0"` table is used.
+
+Family is a function of the **target** tonic:
+
+```
+family = family_of_key[(key + semitones) % 12]     /* key = detected original */
+```
+
+`key == -1` (no chord tokens at all) falls back to SHARP — current behavior;
+there is nothing to spell anyway.
+
+**Known limitation (documented, inherited):** the detected `key` is the *first
+chord token*, not a tonic analysis. A song that starts on Cm but is really in
+Eb gets C-family spelling (sharps). Fixing that is the §10.7
+key-detection-robustness roadmap item; do NOT build tonic analysis into this
+feature. Mode is irrelevant to the family rule — A minor and A major share the
+same spelling family, so no mode logic is needed.
+
+**Width property (why diff/absorb needs no changes):** in the English tables
+every sharp/flat pair has equal width (`A#`/`Bb`, `C#`/`Db`, … all 2 chars), so
+respelling never changes `strlen(new_cstr)` and `diff` is unaffected. In the
+**Latin** tables widths can differ (`Fa#`=3 vs `Solb`=4), but the existing
+diff/absorb/queue machinery already handles arbitrary root-width changes — no
+special case needed, just don't be surprised by a queue entry under Latin.
+
+### 10.3 Implementation spec (concrete)
+
+**1. `spelling.h` (new, in `mods/song/lib/transp/`).**
+- `family_of_key[12]` (or `static inline int spelling_family(int chrom)`
+  returning 0=SHARP/1=FLAT) — the table above.
+- The chromatic sharp/flat name tables stay where they are (`chromatic_en` /
+  `chromatic_latin` in transp.c, encoding `"C#\0Db"`). Only the *decision*
+  moves to the shared header.
+- Included by `render.c`, `transp.c`, and `mods/song/ux/music.c` (music.c
+  already compiles with `-I./lib/transp` via `mods/song/Makefile`:
+  `EXTRA_CFLAGS += -I./lib/transp`). No new public `transp_*` symbol — the
+  family rule is a header constant so renderer and key dropdown cannot
+  disagree. Add `spelling.h` to the transp Makefile `HDR` list (it's already a
+  pattern dependency: `$(OBJ): %.o: %.c $(HDR)`).
+
+**2. `render.c` — root spelling.**
+- Change `chord_str(char **i18n_table, size_t chord, int flags)` to
+  `chord_str(char **i18n_table, size_t chord, int spell)`. The `spell`
+  parameter is the **resolved** decision — `SPELL_SHARP` or `SPELL_FLAT` —
+  never `SPELL_FAMILY`. `SPELL_FAMILY` is an **upstream-only** state
+  (documented in spelling.h); the caller resolves it once via `spelling_family`
+  before threading it down.
+- In `transp_render`, resolve **once**:
+  `int family = (*key >= 0) ? spelling_family((*key + semitones) % 12)
+                            : SPELL_FAMILY_SHARP;`
+  `int spell = ((flags & TRANSP_BEMOL) || family == SPELL_FAMILY_FLAT)
+               ? SPELL_FLAT : SPELL_SHARP;`
+  Thread `spell` into `render_chord_line`. **Remove the `(void)key` cast** —
+  `key` is now used. `semitones` arrives already normalized by `transp_buffer`
+  (negatives folded to 0..11); `transp_render` is only called from there.
+
+**3. `render.c` — slash-bass re-emission (the fiddly bit; two gotchas found
+in the implementation run, §10.6).**
+- The bass is part of `mod` today (emitted verbatim). With `bass >= 0`:
+  emit `mod[0 .. prefix_len)` where `prefix_len = bass_off - root_len`, then
+  the family-spelled bass. **GOTCHA 1 — the `/` is the LAST byte of the
+  prefix, not a separate byte after it**: `mod[prefix_len]` is the bass's
+  first byte, so emitting the slash separately yields `E/GG#` (slash + bass
+  again). The prefix slice already ends with `/`; just append `bass_name`.
+  Latin interaction: the `latin_m` split-emit still applies to the prefix
+  slice (`Gm/Bb` under Latin → `"-/"` + `"Bb"`), i.e. emit `'-'` +
+  `mod[1..prefix_len)` when `prefix_len > 1`, then the bass.
+- **GOTCHA 2 — the bass must be respelled through its OWN language table.**
+  `chord_str(i18n_table, (size_t)bass, spell)` corrupts Latin basses in
+  English mode (`G/Do` → `G/C`, `C/Sol` → `C/G`). The bass's language is
+  detected from its input bytes: `bass_latin = (bass_len >= 2 &&
+  bass_bytes[1] != '#' && bass_bytes[1] != 'b')` (a Latin root's second byte
+  is a vowel; an English accidental root's second byte is `#`/`b`; a 1-byte
+  bass is English). Spell through `chromatic_latin` for a Latin bass,
+  `chromatic_en` for an English bass — **never** the TRANSP_LATIN-chosen
+  root table. This is why `transp_render` now takes **both** tables
+  (`en_table, latin_table` — signature change from §8.4/§8.5; roots use the
+  TRANSP_LATIN-chosen table, basses use the language-detected table). No
+  semitone shift on the bass, ever.
+- Do this in the CHORD-token block; the no-bass branch (`prefix_len ==
+  mod_len`) is byte-identical to the old verbatim mod copy. The
+  `diff`/queue logic sits after the root emission and is untouched (width
+  property §10.2).
+
+**4. `transp.c` — `transp_shift_table`.** Currently always the sharp half.
+Make it family-consistent: `family = spelling_family(ctx->key)` (no transpose
+in a shift table; the tonic *is* the key) and pick the flat half per row when
+`family == SPELL_FAMILY_FLAT` (`strchr(name,'#')`). Implemented: `"C G"`
+(detected key C, sharp family) is byte-identical to today. (Dual
+`"C#/Db"` names are a §10.7 alternative — pick one; family spelling keeps it
+consistent with the rendered chords.)
+
+**5. `ux/music.c` — key dropdown names.**
+- `key_name(int semitones, int orig_key, int latin)` — drop the `bemol` param;
+  `idx = ((orig_key + semitones) % 12 + 12) % 12`; table =
+  `spelling_family(idx)` ? (latin ? `KEY_NAMES_BL` : `KEY_NAMES_B`)
+                           : (latin ? `KEY_NAMES_LATIN` : `KEY_NAMES`).
+- `target_key_name(int orig_key, int transpose, int latin)` — same, target
+  tonic `(orig_key + transpose) % 12`. Drop the `flags` param (it only
+  supplied bemol/latin); latin can move to a bool param or stay in flags —
+  pick one signature and update all callers:
+  - `mods/song/ux/detail.c:82` and `:111` (`key_name(i, original_key,
+    use_bemol, use_latin)` → drop `use_bemol`).
+  - `mods/songbook/ux/detail.c:402` (`key_name(i, orig_key, bemol, latin)` —
+    drop `bemol`, and its source at `:393-394`).
+  - `mods/songbook/songbook.c:517` (`target_key_name(detected_key,
+    transpose, flags)`).
+  - `mods/songbook/ux/edit.c:161` (`key_name(si, orig_key, 0, 0)` — the
+    `0,0` were bemol/latin; becomes `key_name(si, orig_key, 0)`).
+  Keep `KEY_NAMES`, `KEY_NAMES_B`, `KEY_NAMES_LATIN`, `KEY_NAMES_BL` — they
+  *are* the two families' tables.
+
+**6. Site removal of the sharp/bemol feature** (`song` and `songbook`):
+- `mods/song/song.c`: drop the `chords-bemol` pref read (`song_load_saved_prefs`
+  at `:102-108`), the `TPARAM_BEMOL → TRANSP_BEMOL` mapping (`:123-126`), the
+  `chords-bemol` pref write (`:132-139`), the `b` param in
+  `api_song_viewer_prefs_handler` (`:180`), and the two `use_bemol` state sets
+  (`:240`, `:346`).
+- `mods/song/fields.h`: remove `int use_bemol;` (`:33`) and its `OVERLAY_INT`
+  entry (`:76`). This changes the SSR/WASM state schema; `bud_state_apply`
+  maps fields **by name**, so removing it is safe for already-deployed JS.
+- `mods/song/ux/detail.c`: remove the `"Flats (♭)"` checkbox (`:143`),
+  `bemol_val` (`:185`), and the `data-use-bemol` attr (`:250`).
+- `mods/songbook/songbook.c`: drop `flags |= TRANSP_BEMOL` (`:471`), the
+  `TPARAM_BEMOL → TRANSP_BEMOL` mapping (`:849-850`), the `chords-bemol` pref
+  load (`:874-877`), and `sb_app_state.bemol` (`:968`).
+- `mods/songbook/ux/detail.c`: `sb_render_key_options` stops deriving `bemol`
+  from flags (`:393-394`); the `target_key_name` call at `:645`.
+- **Do NOT touch** `mods/common/common.h` `TPARAM_BEMOL` (:190) or
+  `common_response.c` `parse_transpose_qs` (:34) — the shared parser may be
+  used by other callers; leaving it means old `?b=1` URLs parse fine and the
+  bit is simply ignored by song/songbook. Remove the bit only where it feeds
+  `TRANSP_BEMOL`.
+- Tests that pin the removed surface: `mods/song/test.sh` `chords-bemol`
+  checks (`:117-132`), `tests/e2e/songbook-zoom.test.ts:201`
+  (`data-use-bemol` attr), `mods/song/README.md:106` (stale flag value 0x02 —
+  actual `TRANSP_BEMOL` is `0x08` in transp_flags.h; fix while touching).
+- `tests/pages` was audited: no chord-spelling pins there.
+
+### 10.4 Test plan (new Section I + amended pins)
+
+New Section I — key-aware spelling (`test_transp.c`):
+- `key_aware_flat_family_spelling`: `"F Bb Eb Ab"` (no flag) stays flats;
+  `"F A#m"` → `Bbm`.
+- `key_aware_sharp_family_spelling`: `"D Bm G#m A"` → `G#m` (not `Abm`).
+- `key_aware_transpose_derives_target_family`: `"F"` +1 → `F#` (chromatic 6
+  resolves sharp per §10.2); `"G"` -1 → `F#`; `"C"` +1 → `Db` (chromatic 1
+  resolves flat); `"Bb"` +1 → `B` (chromatic 11, sharp family).
+- `key_aware_slash_bass_normalized`: `"F Gm/A#"` → `Gm/Bb`; `"D Gm/A#"` → `A#`
+  stays; bass never transposed; `"F Gm/Bb"` +2 → `Am/C#`? — no: key F +2 =
+  target G, sharp family → `Gm/A#`. Verify both directions.
+- `key_aware_latin`: `"F La Sib"` → `La Sib` (flat family, Latin table).
+- `bemol_flag_still_forces_flats`: `"D G#m"` + `TRANSP_BEMOL` → `Abm`
+  (library-only override).
+- `key_unknown_defaults_sharp`: no chord tokens → key -1 → sharp family, no
+  crash.
+- `key_aware_shift_table`: `transp_shift_table` honors the family of the
+  detected key.
+
+Amended existing pins (must change when key-aware lands; **line numbers
+re-verified 2026-08-16 — the original draft listed two tests under the wrong
+names/lines and missed two bass tests + the user song's C# verse**):
+- `roots_flat_display_as_sharp` (`test_transp.c:622`): `"Db Eb Gb Ab Bb"`
+  (key Db = chromatic 1 → flat family) now **round-trips** to itself; `"A# Bb"`
+  (key 10, flat family) → `Bb Bb`. Rename the test (e.g.
+  `roots_flat_input_round_trips`).
+- `roots_sharp` (`:609`, input `"C# D# F# G# A#"`): key = C# (chromatic 1 →
+  boundary **Db/flat family**) → renders `<b>Db Eb Gb Ab Bb</b>`, NOT sharp.
+  **Original §10.4 claimed this test unchanged — wrong.** Either accept the
+  boundary behavior and rename (e.g. `roots_sharp_boundary_key_renders_flat`),
+  or change the input to a sharp-family key (e.g. `"A C# D F# G# B"`, key A)
+  so the original "sharp roots render sharp" intent survives. Recommend the
+  former: it pins the boundary rule explicitly.
+- `paren_diminished_fifth` (**actually `:816`**, not `:400`): input
+  `"Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5"`, key F (chromatic 5, flat family) →
+  pin reverts `A#m7` → `Bbm7`. The `:400` test the draft meant is
+  `valid_chords_still_bolded` (`"Am Dm7 G#maj7 Bbm7b5"`, key A, sharp family)
+  — that one stays `A#m7b5`, **unchanged**.
+- `slash_chord_with_accidental_bass` (`:503`, `"E/G# C/A# G/Bb"`, key E =
+  sharp family): **changes** — `G/Bb` → `G/A#`. **Missed by the original
+  draft** (bass normalization also affects these).
+- `slash_bass_with_accidentals` (`:703`, `"G/B D/F# A/E E/G# C/A# G/Bb"`,
+  key G = sharp family): **changes** — `G/Bb` → `G/A#`. **Missed by the
+  original draft.**
+- `user_song_full` (`:927`, key F flat family): pins change on line 1
+  (`A#m`→`Bbm`, `G#`→`Ab`, `G#º`→`Abº`), line 3 (`A#m7`→`Bbm7`), AND line 5
+  (`C#`→`Db`, `C#7`→`Db7` — the verse-one `C#` chords are accidental-bearing
+  and the whole song follows the detected key F's family). **The verse pins
+  were missed by the original draft.**
+- `user_song_bold_exact` (`:972`, key F): transpose=0 pins change (`A#m`→`Bbm`,
+  `G#`→`Ab`, `G#º`→`Abº`, `A#m7`→`Bbm7` — all same width, spacing verbatim);
+  the **+1 pins are unchanged** (target tonic 6 = F#, sharp family — `C#m`,
+  `G#º`, `Bm7`, `C#5` all confirmed sharp). Reverts the finding-4 amendment
+  for these two tests.
+- Confirmed **unchanged**: `paren_diminished_transposed` (`:831`, key G sharp),
+  `combo_grammar` (`:893`, key G → target A sharp), `slash_chord_transposed`
+  (`:473`, key G → target A sharp), `latin_input_roots`/`_transposed`
+  (`:866`/`:879`, key G sharp), `valid_chords_still_bolded` (`:400`, key A
+  sharp), `flat_notation` (`:97`, TRANSP_BEMOL override still forces flats),
+  `latin_notation` (`:112`), `major7_notation`/`_transposed` (`:518`/`:533`),
+  `shift_table` (`:191`, `"C G"` key C sharp family), and every other
+  `TRANSP_BEMOL` test.
+
+### 10.5 Implementation order
+
+1. `spelling.h` + Makefile `HDR`; compile check. **DONE** — see §10.6 for the
+   constant set actually landed.
+2. `render.c`: family + `chord_str` + bass re-emission; drop `(void)key`.
+   **IN PROGRESS** — chord_str + render_chord_line (incl. the two gotchas
+   below) + transp_render family/spell done; but `transp_render`'s own
+   definition and `transp.c`'s call site still use the old one-table
+   signature, so the code does not currently compile (§10.6).
+3. `transp.c`: `transp_shift_table` family spelling. **DONE**; the
+   `transp_buffer` → `transp_render` call site must change to the two-table
+   signature (compiles against the new render.h).
+4. Transp tests: add Section I, amend the pins listed in §10.4 (incl. the two
+   bass tests, the user-song verse C#, and the `roots_sharp` boundary key);
+   `make -C mods/song/lib/transp test` + ASan/UBSan build must be green.
+5. Site: `music.c` signature changes + all four callers; song + songbook
+   bemol removal (fields.h, song.c, ux/detail.c, songbook.c, test.sh, e2e,
+   song README).
+6. `make format`; `make lint` (still owed from §8.1); `make unit-tests`
+   (axil on :8080).
+7. Docs: mark §10 IMPLEMENTED, update §3 spelling bullets, transp README,
+   `music.c` header comment.
+
+### 10.6 Implementation run (2026-08-16, IN PROGRESS — pick up here next)
+
+State landed so far (compile is **broken** at this point — the fresh session
+starts by fixing §10.5 step 2's signature consistency):
+
+- `spelling.h` (new) — DONE. Contains: `SPELL_FAMILY_SHARP=0` / `SPELL_FLAT=1`
+  family constants, `SPELL_SHARP=0` / `SPELL_FLAT=1` (note the flat value
+  collides across the two enums; that is fine — the family constants are only
+  used via `spelling_family`, the spell constants only in `chord_str`), and
+  `static inline int spelling_family(int chrom)` with the §10.2 table
+  (`table[12]` explicit, out-of-range → SHARP). Makefile `HDR` gained
+  `spelling.h`.
+- `render.c` — IN PROGRESS. `chord_str(char **i18n_table, size_t chord,
+  int spell)` (drops `flags`); `render_chord_line` gained `int spell`; the
+  CHORD block computes `prefix_len = bass_off - root_len` (includes the `/`!)
+  and `bass_name = chord_str(table, (size_t)bass, spell)`; emission is
+  `latin_m ? '-' + mod[1..prefix_len) : mod[0..prefix_len)`, then `bass_name`.
+  `transp_render` resolves family+spell once and removed `(void)key`.
+- `transp.c` — `transp_shift_table` family-spelled (per-row flat half under a
+  flat detected key).
+- **NOT yet done in code:** `transp_render`'s definition still takes the old
+  `char **i18n_table` (render.h was updated to `en_table, latin_table`);
+  `transp_buffer`'s call site passes the old argument list; the bass currently
+  uses the song's `i18n` table (→ `G/Do` becomes `G/C`) instead of the
+  language-detected table; no Section I tests; no amended pins; site untouched.
+
+Two bugs already caught and fixed in this run (verify they stay fixed):
+
+1. **Separator position** — emitting the `/` separately after the prefix
+   produced `E/GG#` (`prefix_len` already ends at the `/`; `mod[prefix_len]`
+   is the bass's first byte). Fixed by appending only `bass_name`. Probe:
+   `transp_buffer(ctx, "|1 Bm7 C#7 |2 E/G# - |", 0, TRANSP_HTML)`.
+2. **Bass language corruption** — respelling the bass through the song's
+   `i18n_table` turned `"G/Do C/Sol D/Re"` into `G/C C/G D/D` (Latin basses
+   mangled in English mode). Fix = language-detected table: `bass_latin =
+   (bass_len >= 2 && bass_bytes[1] != '#' && bass_bytes[1] != 'b')`, spell
+   through `chromatic_latin`/`chromatic_en` accordingly. This forced the
+   two-table `transp_render` signature (en_table + latin_table). Probe:
+   `transp_buffer(ctx, "G/Do C/Sol D/Re", 0, TRANSP_HTML)` must keep
+   `G/Do C/Sol D/Re`.
+
+Verified against the code before stopping (test pins that §10.4 now reflects):
+`paren_diminished_fifth` is at `:816` (not `:400`); `:400` is
+`valid_chords_still_bolded`. `user_song_bold_exact` +1 pins confirmed sharp
+family. `shift_table` test uses key C (`"C G"`) → unaffected.
+
+### 10.7 Remaining future features (still scoped out, with reasoning)
+
+- **Parens-consulting quality** (small): `G(no3)` → UNDEFINED, and paren
+  `maj`/`dim` could refine the §8.2 heuristic. Currently `chord_quality` skips
+  parens; the change is confined to `chord_quality` + tests. Cheap; no consumer
+  depends on it yet.
+- **Interval / music-theory layer** (large): parse the suffix into interval
+  sets (third/fifth/seventh/extensions/alterations/omissions + bass) so the
+  library can reason about note sets — e.g. capo suggestions, scale-degree /
+  Nashville transposition, spelling auto-correction. The `quality` enum,
+  `bass`, and `bass_off`/`bass_len` are the seams. **Deferred because no
+  consumer feature is decided** — do not build it speculatively.
+- **Key-detection robustness**: the first-chord heuristic mislabels songs that
+  don't start on the tonic (§10.2 limitation). A weighted tonic analysis over
+  the parsed chord set (using `quality` + `bass`) could replace it. Medium
+  risk (changes key detection = changes spelling); defer until key-aware ships
+  and is stable.
+- **`transp_shift_table` dual names** (`"C#/Db"`): alternative to §10.3 step 4;
+  decide then. The key dropdown in the UI already shows per-family names, so
+  the shift table is low-traffic.

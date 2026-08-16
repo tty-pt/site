@@ -15,7 +15,9 @@
 #include "transp_flags.h"
 
 char *transp_render(
-        const transp_song_t *song, int semitones, int flags, char **i18n_table,
-        int *key);
-/* malloc'd string; NULL on OOM. i18n_table + key live in transp_ctx. */
+        const transp_song_t *song, int semitones, int flags, char **en_table,
+        char **latin_table, int *key);
+/* malloc'd string; NULL on OOM. Both tables (English + Latin) + key live in
+ * transp_ctx; the root table is chosen from TRANSP_LATIN, while a slash bass
+ * is respelled through the table matching its own input language. */
 #endif /* TRANSP_RENDER_H */
