@@ -13,16 +13,16 @@ The song module provides functionality for:
 ## Architecture
 
 - **Backend:** `song.c` - C module with axil HTTP handlers
-- **SSR:** `ssr/src/main.rs` - Rust Dioxus SSR renderer
+- **SSR:** Server-side HTML built with bud (via `mods/index` + common layout)
 - **Dataset:** Uses the common dataset system for loading song data
 - **Storage:** Filesystem + qmap index database
 - **Transposition:** C library (`lib/transp/`) for chord transposition
-- **WASM:** Client-side enhancements via Rust/WASM
+- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`)
 
 ### SSR Route Pattern
 
 The module uses a pattern-based routing system:
-- `GET /song/` - List all songs (via hyle SSR)
+- `GET /song/` - List all songs (via hyle/bud SSR)
 - `GET /song/add` - Upload form (via hyle SSR)
 - `GET /song/:id` - Song detail with optional transposition
 - `GET /song/:id/edit` - Edit song form
@@ -226,11 +226,11 @@ For debugging test failures, see [debug/README.md](../../debug/README.md).
 
 ## Dependencies
 
-- `mods/ssr/ssr` - SSR rendering
+- `mods/index/index` - List rendering, item CRUD routes
 - `mods/mpfd/mpfd` - Multipart form data parsing
-- `mods/auth/auth` - Session management
-- `mods/index/index` - Index management
-- `mods/common/common` - Dataset system
+- `mods/auth/auth` - Session management / item access
+- `mods/common/common` - Page layout, response helpers
+- `mods/source/source` - Dataset schema + query layer
 
 ## Troubleshooting
 

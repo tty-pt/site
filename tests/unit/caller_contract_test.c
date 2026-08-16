@@ -5,7 +5,7 @@
  * count and always NUL-terminates at buf[to_copy]), every sequence is
  * bounded and must run CLEAN under ASAN/valgrind (regression gate).
  *
- * Sequences replicated (see ADD.md §3):
+ * Sequences replicated:
  *   1. index.c:126→130 — add: mpfd_get("title", title, 255) then
  *      axil_slugify(title, title_len, id, 256). Pre-fix a 300-byte field
  *      returned 300 -> iconv over-read past the 256-byte stack `title`.

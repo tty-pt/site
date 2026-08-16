@@ -1,7 +1,7 @@
 /*
  * mpfd_contract_test.c — pins the documented mpfd_get contract.
  *
- * Root-cause analysis (ADD.md §3): mpfd_get (mods/mpfd/mpfd.c:313-323)
+ * Root-cause analysis: mpfd_get (mods/mpfd/mpfd.c:313-323)
  * copied min(val->len, buf_len) bytes, NUL-terminated ONLY when buf_len >
  * to_copy, and returned the FULL val->len — not the copied count. Callers
  * that trusted the return as a byte-count over-read (index.c:126/509/143/525)

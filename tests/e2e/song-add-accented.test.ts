@@ -8,7 +8,7 @@
  * the flow works and the server stays up (returns 200 on the detail
  * page afterwards).
  *
- * NOTE: locally (glibc) the crash does not reproduce — see ADD.md §4.
+ * NOTE: locally (glibc) the crash does not reproduce (OpenBSD-only).
  * This test is the e2e guard that MUST pass once the root cause
  * (mpfd_get truncated-copy length + axil_slugify over-read) is fixed,
  * and documents the accented-input path for the live box.

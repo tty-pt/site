@@ -217,9 +217,9 @@ Set `AUTH_SKIP_CONFIRM=1` only when you intentionally want to bypass this requir
 - Lines 152-228: `handle_register()` - Registration logic
 - Lines 230-277: `handle_confirm()` - Email confirmation logic
 
-**SSR:** `ssr/index.tsx`
-- Routes: `/login`, `/register`, `/confirm`
-- Components: `Login`, `Register`, `ConfirmUI`
+Routes `/auth/login`, `/auth/register`, `/api/csrf` are registered in
+`auth.c` `xy_install`; the forms themselves are plain SSR pages built with
+bud (no separate SSR layer).
 
 ## Testing
 
@@ -235,7 +235,7 @@ Covers:
 
 ## Usage Example
 
-From `mods/ssr/ssr.c`:
+From an `auth.c` request handler:
 
 ```c
 // Get session token from cookie
@@ -295,6 +295,5 @@ chmod 644 auth.qmap
 ## See Also
 
 - [mods/common/README.md](../common/README.md) - Shared utility functions
-- [mods/ssr/README.md](../ssr/README.md) - How SSR uses authentication
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
 - [debug/README.md](../../debug/README.md) - Debug logging system

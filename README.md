@@ -1,17 +1,23 @@
-# AXIL + Rust SSR Site
+# Site
+
+Pure-C music site (poem, song, songbook, choir) on top of the axil HTTP library,
+the libxylem XY module system, and the bud HTML builder.
 
 > For development conventions, see [AGENTS.md](./AGENTS.md).
-
-This site runs as an AXIL application with Rust SSR.
 
 ## Architecture
 
 - `axil` handles HTTP, auth, sessions, file uploads, and business logic.
-- `mods/ssr/` builds `ssr.so` from Rust with Dioxus SSR.
-- `htdocs/song-client.js` loads the Rust/WASM song detail browser enhancements.
-- `mods/song/client/` owns the current browser-side enhancement code, built with `wasm-bindgen`.
-
-There is no Fresh/Deno proxy runtime in the request path anymore.
+- All request handlers are C functions compiled into `mods/*/*.so`, loaded via
+  the libxylem XY module system (`RTLD_LOCAL` — cross-module calls go through
+  XY dispatch only).
+- HTML is built server-side with **bud** (a C DOM/SSR scaffold). There is no
+  Rust SSR / Dioxus / Fresh / Deno proxy in the request path.
+- The only WASM is C compiled to `wasm32-wasi` from the same sources as the
+  `.so` modules (e.g. `mods/song/ux/detail.c` → `htdocs/song_detail.wasm`),
+  loaded at runtime by `htdocs/bud-client.js` for browser-side enhancement.
+- Pages are SSR-first and work without JS; interactivity is progressive
+  enhancement (see AGENTS.md "Component abstraction limits").
 
 ## Quick Start
 
@@ -32,69 +38,39 @@ If port `8080` is already in use:
 PORT=8081 make run
 ```
 
+The server runs inside a chroot rooted at the repo root. See AGENTS.md "Chroot
+Setup" for the `sh` + shared-libs prerequisites.
+
 ## Build
 
 ```bash
-make
-make clean
+make          # build everything
+make clean    # remove built module artifacts
 make distclean
 ```
 
-- `make` builds all modules and rebuilds the checked-in wasm browser assets when the local wasm toolchain is available
-- `make clean` removes built module artifacts but keeps Cargo caches
-- `make distclean` also runs deeper per-module cleanup, including Rust `cargo clean`
-
-## WASM Setup
-
-If you want `make` to rebuild the song client wasm locally, install the CLI and target once:
-
-```bash
-cargo install -f wasm-bindgen-cli
-rustup target add wasm32-unknown-unknown
-```
-
-Then verify:
-
-```bash
-wasm-bindgen --version
-rustup target list --installed | grep wasm32-unknown-unknown
-```
-
-On OpenBSD, `cargo install` is the expected path for `wasm-bindgen-cli`.
-
-### Bud demo (C/WASM)
-
-For `make` to rebuild `htdocs/bud_demo.wasm` locally:
-
-```bash
-# Debian/Ubuntu
-sudo apt install wasi-libc lld-18 libclang-rt-18-dev-wasm32
-```
-
-Or download the [WASI SDK](https://github.com/WebAssembly/wasi-sdk) and override
-`WASI_CC` in `external/bud/Makefile`.
+- `make` builds all modules. WASM browser assets are built by the `build.mk`
+  WASI rule only when a WASI toolchain is available (probe-skipped otherwise).
+- To rebuild the `.wasm` assets locally, install the [WASI SDK](https://github.com/WebAssembly/wasi-sdk)
+  and point `WASI_CC` at it, or `apt install wasi-libc` on Debian/Ubuntu.
 
 ## Test
 
 ```bash
-make unit-tests
-make pages-test
-make e2e-tests
-make test
+make unit-tests   # module test.sh suites — needs axil running on :8080
+make pages-test   # page-render smoke tests (curl :8080 for DOCTYPE)
+make e2e-tests    # Playwright via Deno — needs server + AUTH_SKIP_CONFIRM=1
+make test         # all of the above
 ```
 
-You can also run one e2e file at a time:
+Run a single e2e file:
 
 ```bash
 deno test --allow-all tests/e2e/song-add.test.ts
 ```
 
-For test debugging, see [debug/README.md](debug/README.md):
-- `make debug-logs` - View recent logs
-- `make test-single-capture TEST=foo.test.ts` - Capture specific test
-- `make build-capture` - Capture build output
-
-**Note:** e2e tests require the server running with `AUTH_SKIP_CONFIRM=1`. When using `make watch`, this is set automatically.
+**Note:** e2e tests require the server running with `AUTH_SKIP_CONFIRM=1`
+set at startup (not just at test time). `make watch` sets it automatically.
 
 ## Debug Logging
 
@@ -102,30 +78,22 @@ The `debug/` directory captures build output, runtime logs, and test results:
 
 ```bash
 make debug-logs      # View recent logs
+make build-capture   # Rebuild + save log
+make test-capture    # Run e2e + save
 make debug-clean     # Clear debug logs
 ```
 
-See [debug/README.md](debug/README.md) for full documentation.
-
 ## Requirements
 
-- C compiler
-- Rust/Cargo
-- `wasm-bindgen` CLI + `rustup target add wasm32-unknown-unknown` if you want to rebuild the wasm browser assets locally
-- `axil`, `xy`, `qmap`
-- Deno only for the Playwright e2e test runner
+- C compiler (`clang` for WASM builds)
+- `axil`, `xy`, `qmap` (git submodules under `external/`)
+- Deno, only for the Playwright e2e test runner
 
 ## Modules
 
-- `/auth`
-- `/poem`
-- `/song`
-- `/choir`
-- `/songbook`
-
-## Notes
-
-- Checked-in browser assets live in [htdocs](htdocs).
-- The browser enhancement path is now wasm-driven; there is no handwritten `app.js` runtime left.
-- The Rust lockfile is tracked at [mods/ssr/Cargo.lock](mods/ssr/Cargo.lock).
-- The old Fresh/proxy frontend tree has been removed.
+- `/auth` — registration, login, sessions
+- `/poem` — poem upload/listing
+- `/song` — song detail, transpose, chord charts
+- `/choir` — choirs (songbook owners, format categories)
+- `/songbook` — songbooks with per-song transpose and choir formats
+- `/bud-demo` — bud WASM bridge demo

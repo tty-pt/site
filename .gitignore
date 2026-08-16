@@ -7,9 +7,6 @@
 *.swp
 /deno.lock
 /.cache
-/mods/ssr/rust-renderer/target
-/mods/*/client/target
-/mods/*/ssr/target
 /target/
 /etc
 /home
@@ -19,13 +16,11 @@
 /usr
 /mods/song/lib/transp/test_transp
 /mods/song/lib/transp/libtransp.a
-/mods/client/target
-/mods/client/htdocs
 *.wasm
 
 # Exceptions for htdocs
+!/htdocs/bud-client.js
+!/htdocs/bud-hydrate.js
 !/htdocs/styles.css
-!/htdocs/song-client.js
-!/htdocs/songbook-client.js
 /external/*/bin
 /external/*/lib

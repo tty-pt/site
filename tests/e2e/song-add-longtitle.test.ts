@@ -4,7 +4,7 @@
  * Exercises index.c:126/130 directly: mpfd_get copies min(len, 255)
  * bytes into title[256] but returns the FULL field length (e.g. 300),
  * and index_add_item passes that 300 as title_len to axil_slugify →
- * iconv reads past the stack buffer (ASAN-proven, ADD.md §3).
+ * iconv reads past the stack buffer (ASAN-proven).
  *
  * The generated slug will be truncated to the first 255 bytes. The test
  * only asserts the server stays alive and returns a redirect — the
