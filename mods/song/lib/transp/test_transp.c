@@ -953,6 +953,59 @@ TEST(user_song_full)
 	transp_free(ctx);
 }
 
+TEST(user_song_bold_exact)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* The full first stanza of the user song, as-is (trailing space on the
+	 * last lyric line is intentional). Bold (TRANSP_HTML) output is pinned
+	 * byte-for-byte: chord lines one <b> block each with verbatim spacing,
+	 * Bbm7 renders as A#m7 (sharp default), lyrics verbatim and never
+	 * bolded, key = F. */
+	const char *song = "Fm   Cm A#m G#  Gº\n"
+	                   "No Senhor es-tá  a miseri-\n"
+	                   "Fm Gm7(5º) Fm  Gm7(5º) Fm Bbm7 C5\n"
+	                   "córdia e a abundânte   re-den--ção. \n";
+
+	char *result = transp_buffer(ctx, song, 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(strcmp(
+	        result,
+	        "<div><b>Fm   Cm A#m G#  Gº</b></div>"
+	        "<div>No Senhor es-tá  a miseri-</div>"
+	        "<div><b>Fm Gm7(5º) Fm  Gm7(5º) Fm A#m7 C5</b></div>"
+	        "<div>córdia e a abundânte   re-den--ção. </div>") == 0);
+	free(result);
+
+	/* +1: every root transposed, spacing still verbatim on chord lines, and
+	 * the spacing queue realigns the lyric lines with '-' fillers. */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, song, 1, TRANSP_HTML);
+	assert(result != NULL);
+	assert(strcmp(
+	        result,
+	        "<div><b>F#m   C#m  Bm A  G#º</b></div>"
+	        "<div>No Senhor- es-tá  a miseri-</div>"
+	        "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5</b></div>"
+	        "<div>có-rdia e a a-bundânte   re--den---ção. </div>") == 0);
+	assert(transp_get_key(ctx) == 5); /* F */
+	free(result);
+
+	/* Plain mode: same transposition, no markup, same line breaks. */
+	result = transp_buffer(ctx, song, 1, 0);
+	assert(result != NULL);
+	assert(strcmp(
+	        result,
+	        "F#m   C#m  Bm A  G#º\n"
+	        "No Senhor- es-tá  a miseri-\n"
+	        "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
+	        "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
+	free(result);
+
+	transp_free(ctx);
+}
+
 TEST(lyric_false_positives_guard)
 {
 	transp_ctx_t *ctx = transp_init();
@@ -1030,6 +1083,7 @@ int main(void)
 	RUN_TEST(combo_grammar);
 
 	RUN_TEST(user_song_full);
+	RUN_TEST(user_song_bold_exact);
 	RUN_TEST(lyric_false_positives_guard);
 
 	printf("\nAll tests passed!\n");
