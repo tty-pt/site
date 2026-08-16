@@ -40,29 +40,38 @@ Consequences:
 
 ## 3. Example contract (multi-ref dropdown — `data-hyle-ms`)
 
+The widget is wrapped in a field container (`.hyle-ms-field`) with a visible
+caption so it matches sibling filter fields (uppercase micro-label above the
+control, `flex: 1 1 120px`):
+
 ```html
-<details class="hyle-multiselect" data-hyle-ms="type" data-hyle-ms-label="Type">
-  <summary class="hyle-ms-trigger">
-    <span class="hyle-ms-values" data-hyle-ms-values>Comunhão; Natal</span>
-    <span class="hyle-ms-caret" aria-hidden="true">▾</span>
-  </summary>
-  <div class="hyle-ms-panel" data-hyle-ms-panel>
-    <input type="search" class="hyle-ms-search" data-hyle-ms-search
-           placeholder="Search…" aria-label="Search options">
-    <div class="hyle-ms-options" data-hyle-ms-options>
-      <label class="hyle-ms-option">
-        <input type="checkbox" name="type" value="comunhao" checked> Comunhão
-      </label>
-      <!-- one per option; checked per current selection -->
+<div class="hyle-ms-field">
+  <span class="hyle-ms-caption">Type</span>
+  <details class="hyle-multiselect" data-hyle-ms="type" data-hyle-ms-label="Type">
+    <summary class="hyle-ms-trigger">
+      <span class="hyle-ms-values" data-hyle-ms-values>Comunhão; Natal</span>
+      <span class="hyle-ms-caret" aria-hidden="true">▾</span>
+    </summary>
+    <div class="hyle-ms-panel" data-hyle-ms-panel>
+      <input type="search" class="hyle-ms-search" data-hyle-ms-search
+             placeholder="Search…" aria-label="Search options">
+      <div class="hyle-ms-options" data-hyle-ms-options>
+        <label class="hyle-ms-option">
+          <input type="checkbox" name="type" value="comunhao" checked> Comunhão
+        </label>
+        <!-- one per option; checked per current selection -->
+      </div>
     </div>
-  </div>
-</details>
+  </details>
+</div>
 ```
 
 - No-JS: `<details>` opens natively; checkboxes submit repeated keys; the
   summary shows pre-rendered labels.
 - Enhanced (any client): live option search, click-outside/Esc close, summary
   label sync — implemented against `data-hyle-ms-*` only.
+- Styling notes (specificity traps when placing the classes in a filter bar)
+  are in `docs/STYLING.md`.
 
 ## 4. What the bud stack adds (and why it's not the contract)
 

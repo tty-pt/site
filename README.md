@@ -17,7 +17,7 @@ the libxylem XY module system, and the bud HTML builder.
   `.so` modules (e.g. `mods/song/ux/detail.c` → `htdocs/song_detail.wasm`),
   loaded at runtime by `htdocs/bud-client.js` for browser-side enhancement.
 - Pages are SSR-first and work without JS; interactivity is progressive
-  enhancement (see AGENTS.md "Component abstraction limits").
+  enhancement (see `docs/DESIGN.md`).
 
 ## Quick Start
 
@@ -38,8 +38,8 @@ If port `8080` is already in use:
 PORT=8081 make run
 ```
 
-The server runs inside a chroot rooted at the repo root. See AGENTS.md "Chroot
-Setup" for the `sh` + shared-libs prerequisites.
+The server runs inside a chroot rooted at the repo root. See `docs/BUILD.md`
+"Running the server" for the `sh` + shared-libs prerequisites.
 
 ## Build
 

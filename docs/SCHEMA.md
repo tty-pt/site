@@ -50,24 +50,25 @@ Rule (see `docs/ARCHITECTURE.md`): **hyle carries metadata; it never
 interprets presentation.** A UI hint is an extra key in the site schema string;
 hyle/hyle-core ignores it; the component layer (hyle-bud / mods) reads it.
 
-Planned hint for the multi-ref filter style (see `docs/FILTERS.md`):
+Implemented hint for the multi-ref filter style (see `docs/FILTERS.md`):
 
 ```
 {"t":5,"s":"types","f":"dropdown"}     ← dropdown (details+checkbox widget)
 {"t":5,"s":"types"}                    ← default: full-width checkbox grid
 ```
 
-Plumbing:
+Plumbing (all shipped):
 
-1. `source_build_schema_hd` (source.c:1136): append `,"f":"<style>"` when a
-   field opts in.
-2. `col_t`: add `char filter[16]` (or an enum).
-3. `idx_schema_collect` (index.c:195): extend sscanf with
-   `" ,\"f\":\"%63[^\"]\""`; `m >= 3` → hint set, `m == 2` → absent (grid).
-   Initialize the buffer to `""` first (sscanf won't touch it on mismatch).
-4. `idx_filter_bar` passes it to `hyle_bud_filter_field` (new `style` param);
-   `external/hyle/c/libhyle-bud/src/filter.c` renders
-   `hyle_bud_multiselect_field` when the hint requests it.
+1. `source_build_schema_hd` (source.c): append `,"f":"<style>"` when a field
+   opts in (`mods/song/fields.h` sets `filter_style="dropdown"` on `type`).
+2. `col_t`: `char filter[16]` (in `mods/index/ux/list.c`).
+3. `idx_schema_collect` (index.c): sscanf
+   `{"t":%d,"s":"%63[^\"]","f":"%15[^\"]"}` — `m >= 3` → hint set, `m == 2` →
+   absent (grid). Initialize `cols[n].filter[0]='\0'` up front (sscanf won't
+   touch it on mismatch).
+4. `idx_filter_bar` passes it to `hyle_bud_filter_field` (the trailing
+   `filter_style` param); `external/hyle/c/libhyle-bud/src/filter.c` renders
+   `hyle_bud_multiselect_field` when the hint is `"dropdown"`.
 
 Guard: no `bud`/component symbols may appear in `external/hyle/src` or
 `include/hyle` — the hint is an opaque string there.

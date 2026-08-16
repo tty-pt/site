@@ -89,7 +89,29 @@ SSR HTML (data-bud-id/data-bud-on + bud-state JSON)
   → SSR'd DOM updated in place
 ```
 
-## 6. Related docs
+## 6. Patch-op pitfalls (memorize)
+
+These cost real debugging time — read before emitting patches from wasm code:
+
+- **`bud_host_emit_patch` reads exactly `op_len` bytes** — pass
+  `strlen(op_name)`, never `sizeof`. `sizeof("patch-text")` is 11 (the NUL is
+  counted) and the JS `switch (op.op)` sees `"patch-text\0"`, which matches
+  nothing → **the patch is silently dropped**. This was a real shipped bug
+  (`external/bud/src/bud_wasm_app.c`); the JS side cannot detect it.
+- **`patch-text` updates a node in place ONLY when the id is a TEXT_NODE.**
+  `getNode(id)` for an element id falls back to `createWrappedText(id, text,
+  parent)` with a stale `_currentParent` (last `patch-close` of the mount
+  stream, i.e. `#bud-root`) → the text is **appended at the end of
+  `#bud-root`** and the real node never changes. To patch text reliably,
+  capture the actual text node once (`bud_text(...)`), put it in the tree via
+  `lx_node(...)`, store the TEXT node in your state, and pass it to
+  `bud_patch_text`. `patch-attr` has no such trap (it sets the attribute on
+  the element directly).
+- **`bud_patch_attr` / `bud_patch_text` are defined in BOTH builds** — the
+  real implementations on `__wasm__`, no-op stubs for native. Safe to call
+  from hyle-bud / shared renderers in either build.
+
+## 7. Related docs
 
 - `docs/C-ISOMORPHIC-BUD.md` — how to write the renderer/handlers that ride
   this bridge.

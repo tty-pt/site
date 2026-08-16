@@ -100,20 +100,32 @@ values that were handled.
   - `hyle_bud_filter_field` — dispatch switch; MULTI_REFERENCE → grid (text
     input fallback when no options).
 
-## 8. The multi-ref dropdown widget (planned contract)
+## 8. The multi-ref dropdown widget (shipped)
 
-Per-field opt-in via a schema hint (see `docs/SCHEMA.md`); when set, the grid is
-replaced by a `<details>`-based dropdown (contract in `docs/SSR-CONTRACT.md`):
+Per-field opt-in via the schema hint `"f":"dropdown"` (see `docs/SCHEMA.md`);
+when set, the full-width grid is replaced by a `<details>`-based dropdown
+(markup in `docs/SSR-CONTRACT.md`). Live for `song.type` today; the machinery
+is generic (hint absent = grid).
 
-- Checkboxes are real form fields → they submit **repeated keys** natively;
-  no-JS works.
+- Checkboxes are real form fields → they submit **repeated keys** natively
+  (`type=a&type=b`); no-JS works. The backend union-within-field /
+  intersect-across-fields semantics (§4) are implemented and tested.
 - Enhancement (bud WASM bundle, per `docs/C-ISOMORPHIC-BUD.md`) adds live
-  option search and summary label sync; the summary shows labels joined with
-  `;` (display only).
-- The `bud-state` JSON for the list page must carry: cols (key/label/type/hint/
+  option search (class-toggle only — never re-render option rows, it would
+  kill the `data-bud-on` bindings) and summary label sync via
+  `bud_patch_text` **targeted at the text node** (see `docs/WASM-BRIDGE.md`
+  §6); the summary shows labels joined with `; ` (display only).
+- The `bud-state` JSON for the list page carries: cols (key/label/type/hint/
   current selection), options (id/label) per multi-ref col, rows (id + display
   values), pagination/sort/user, so the WASM tree reproduces the SSR tree
   exactly (id alignment — see the C-isomorphic doc).
+- The widget's field wrapper `.hyle-ms-field` mirrors `.hyle-filter-bar
+  label` sizing so the trigger matches sibling inputs; its styles must
+  out-specify the bar's generic `label`/`input` rules (see `docs/STYLING.md`).
+- Widget implementation (`external/hyle/c/libhyle-bud/src/filter.c`): the
+  `hyle_bud_ms_t` registry **owns copies** of the options (never borrow the
+  caller's stack `opts[]` — the widget outlives `bud_app_render` on wasm) and
+  is reset via `hyle_bud_ms_reset()` from `idx_filter_bar`.
 
 ## 9. Tests
 

@@ -143,6 +143,9 @@ auth.h handles login/ownership/CSRF.
 
 - `body[data-modules]` names a module; `/{module}.wasm` is fetched (a 404 is
   caught silently — poem/choir intentionally have none).
+- **The list pages now ship `data-modules="list"`** → `htdocs/list.wasm`
+  (from `mods/index/ux/list.c`); poem/choir load it too and the enhancement
+  no-ops (no widget nodes). See `docs/C-ISOMORPHIC-BUD.md`.
 - `.wasm` assets are dual-compiled from the same sources as the `.so` (see
   `docs/C-ISOMORPHIC-BUD.md`); `make` probes for a WASI clang and skips if
   absent.

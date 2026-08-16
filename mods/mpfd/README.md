@@ -236,5 +236,5 @@ Callers should check return values:
 ## See Also
 
 - [mods/poem/README.md](../poem/README.md) - Example usage for file uploads
-- [AGENTS.md](../../AGENTS.md) - Memory management best practices
+- [docs/CONVENTIONS.md](../../docs/CONVENTIONS.md) - Memory management best practices
 - `mpfd.c:34-39` - `mpfd_val_measure()` function for custom type

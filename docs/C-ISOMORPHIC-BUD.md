@@ -9,8 +9,11 @@ A **C-isomorphic** renderer is a single C function tree that is compiled twice:
    to hydrate and enhance the SSR'd DOM.
 
 The same source must therefore satisfy **both** environments. This doc is the
-rulebook. Reference implementation: `mods/song/ux/detail.c` →
-`htdocs/song_detail.wasm` (also `mods/songbook/ux/detail.c`, `mods/bud_demo`).
+rulebook. Reference implementations: `mods/song/ux/detail.c` →
+`htdocs/song_detail.wasm` (also `mods/songbook/ux/detail.c`, `mods/bud_demo`),
+and the **list page** `mods/index/ux/list.c` → `htdocs/list.wasm` (served on
+all four list pages via `data-modules="list"`; poem/choir load it too and the
+enhancement no-ops).
 
 ---
 
@@ -205,6 +208,10 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
 - Native-only helpers (qmap/source/axil) must live in a DIFFERENT file (e.g.
   `mods/index/index.c`, `mods/source/source.c`) so they never end up in the
   wasm translation unit.
+- **The wasm rule has NO prerequisites** — a `.wasm` only rebuilds when the
+  target file is missing. After any change to a wasm-compiled source, force it:
+  `rm -f htdocs/<target>.wasm && make`. Plain `make` silently ships the stale
+  wasm (see `docs/BUILD.md`).
 
 ## 7. Checklist: add a new dual-compiled page
 
@@ -239,6 +246,12 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
 - **The native `.so` builds the same wasm_* symbols as no-op stubs**
   (bud_wasm_app.c non-`__wasm__` branch) — don't call them from native server
   code expecting browser behavior.
+- **`bud_patch_text` must target a TEXT node, not an element.** The JS
+  `patch-text` handler rewrites in place only for TEXT_NODE ids; an element id
+  hits the stale-parent `createWrappedText` fallback and the text lands
+  elsewhere (see `docs/WASM-BRIDGE.md` §6). Capture `bud_text(...)` once,
+  wire it into the tree with `lx_node(...)`, and keep the TEXT node in your
+  state.
 - **Node ids are not stable across unrelated pages** — they're per-render. Never
   hard-code an id.
 - **Keep `data-hyle-*`/framework-neutral hooks in the markup.** bud's
