@@ -55,10 +55,10 @@ Deno.test("song list: accent-sensitive title search", async () => {
     await page.locator('input[name="title"]').fill("coracao");
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
     await page.waitForURL(/title=coracao/, { timeout: 10000 });
-    await page.waitForSelector("div.hyle-table-wrap", { timeout: 10000 });
+    await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });
 
     const contentUnaccented = await page.content();
-    if (!contentUnaccented.includes("0 of 0 rows")) {
+    if (!contentUnaccented.includes("0 of 0 rows") && !contentUnaccented.includes("No items")) {
       throw new Error(
         'Expected "0 of 0 rows" for title="coracao" (accent-sensitive), got something else',
       );
@@ -68,10 +68,10 @@ Deno.test("song list: accent-sensitive title search", async () => {
     await page.locator('input[name="title"]').fill("zzzzzz");
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
     await page.waitForURL(/title=zzzzzz/, { timeout: 10000 });
-    await page.waitForSelector("div.hyle-table-wrap", { timeout: 10000 });
+    await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });
 
     const content = await page.content();
-    if (!content.includes("0 of 0 rows")) {
+    if (!content.includes("0 of 0 rows") && !content.includes("No items")) {
       throw new Error(
         'Expected "0 of 0 rows" for non-matching title, got something else',
       );

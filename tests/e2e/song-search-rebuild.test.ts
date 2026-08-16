@@ -25,17 +25,16 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
   async function totalText(): Promise<string> {
     const content = await page.content();
     const m = content.match(/(\d+) of (\d+) rows/);
-    if (!m) {
-      throw new Error(`Could not find "N of M rows" marker`);
-    }
-    return m[0];
+    if (m) return m[0];
+    if (content.includes("No items")) return "0 of 0 rows";
+    throw new Error(`Could not find "N of M rows" marker or "No items"`);
   }
 
   async function searchTitle(title: string): Promise<string> {
     await page.goto(`${BASE}/song/?title=${encodeURIComponent(title)}`, {
       waitUntil: "load",
     });
-    await page.waitForSelector("div.hyle-table-wrap", { timeout: 10000 });
+    await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });
     return await totalText();
   }
 

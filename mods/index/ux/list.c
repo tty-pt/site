@@ -333,6 +333,11 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	char path[256];
 	char href_buf[256];
 	bud_node *add_btn;
+	bud_node *filter_bar;
+	bud_node *filter_wrap;
+	bud_node *actions_wrap;
+	bud_node *form;
+	char title[128];
 
 	site_ui_collection_path(state->module, path, sizeof(path));
 
@@ -343,11 +348,37 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	                            .data.node
 	                  : NULL;
 
+	filter_bar = idx_filter_bar(state);
+	filter_wrap = NULL;
+	actions_wrap = NULL;
+	if (filter_bar) {
+		filter_wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
+		                    lx_node(filter_bar))
+		                      .data.node;
+		actions_wrap =
+		        lx_el("div", lx_attr("class", "hyle-filter-actions"),
+		              lx_el("button", lx_attr("type", "reset"),
+		                    lx_text("Clear")),
+		              lx_el("button", lx_attr("type", "submit"),
+		                    lx_text("Apply")))
+		                .data.node;
+		bud_append(filter_wrap, actions_wrap);
+	}
+
+	form = lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
+	             lx_attr("class", "list-form"),
+	             filter_wrap ? lx_node(filter_wrap) : lx_none(),
+	             lx_node(site_ui_empty_state("No items")))
+	               .data.node;
+
+	snprintf(title, sizeof(title), "%ss", state->module);
+	if (title[0] >= 'a')
+		title[0] -= 32;
+
 	return site_ui_layout(
-	        state->module, path, "\xf0\x9f\x93\x8b", state->username,
+	        title, path, "\xf0\x9f\x93\x8b", state->username,
 	        add_btn,
-	        lx_el("div", lx_attr("class", "center"),
-	              lx_node(site_ui_empty_state("No items")))
+	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
 }
 

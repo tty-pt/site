@@ -7,7 +7,7 @@ EXTRA_LDLIBS += ./lib/transp/libtransp.a -ljson-c
 # all:/wasm: rules can see them during parse time.
 WASM_TARGETS = $(WASM_PATH)/song_detail.wasm
 song_detail-src = ux/detail.c
-song_detail-cflags = -I$(REPO_ROOT)/mods/common
+song_detail-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/song/lib/transp
 
 include ../../build.mk
 

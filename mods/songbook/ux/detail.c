@@ -48,7 +48,6 @@ typedef struct {
 	char sb_id[128];
 	char path[256];
 	int zoom;
-	int bemol;
 	int latin;
 	int show_media;
 	int is_owner;
@@ -76,7 +75,6 @@ static const bud_field_desc_t songbook_app_fields[] = {
 	OVERLAY_STR(id, sb_app_state_t, sb_id, 128),
 	OVERLAY_STR(path, sb_app_state_t, path, 256),
 	OVERLAY_INT(zoom, sb_app_state_t, zoom),
-	OVERLAY_INT(b, sb_app_state_t, bemol),
 	OVERLAY_INT(l, sb_app_state_t, latin),
 	OVERLAY_INT(m, sb_app_state_t, show_media),
 	OVERLAY_INT(owner, sb_app_state_t, is_owner),
@@ -123,9 +121,8 @@ static void fetch_sb_transpose(int song_index, int semitones)
 	char url[1024];
 	snprintf(
 	        url, sizeof(url),
-	        "/api/songbook/%s/transpose?n=%d&t=%d%s%s%s&z=%d",
+	        "/api/songbook/%s/transpose?n=%d&t=%d%s%s&z=%d",
 	        sb_app_state.sb_id, song_index, semitones,
-	        sb_app_state.bemol ? "&b=1" : "",
 	        sb_app_state.latin ? "&l=1" : "",
 	        sb_app_state.show_media ? "&m=1" : "", sb_app_state.zoom);
 	bud_host_fetch_fn(url, strlen(url), 1);
@@ -225,9 +222,7 @@ static int on_sb_option_change(bud_event *event)
 	if (!name || !value)
 		return 0;
 
-	if (strcmp(name, "b") == 0)
-		sb_app_state.bemol = atoi(value);
-	else if (strcmp(name, "l") == 0)
+	if (strcmp(name, "l") == 0)
 		sb_app_state.latin = atoi(value);
 	else if (strcmp(name, "m") == 0) {
 		sb_app_state.show_media = atoi(value);
@@ -252,20 +247,19 @@ static int on_sb_option_change(bud_event *event)
 	if (bud_host_set_location_fn) {
 		char url[1024];
 		snprintf(
-		        url, sizeof(url), "%s?b=%d&l=%d&m=%d&z=%d",
-		        sb_app_state.path, sb_app_state.bemol ? 1 : 0,
-		        sb_app_state.latin ? 1 : 0,
+		        url, sizeof(url), "%s?l=%d&m=%d&z=%d",
+		        sb_app_state.path, sb_app_state.latin ? 1 : 0,
 		        sb_app_state.show_media ? 1 : 0, sb_app_state.zoom);
 		bud_host_set_location_fn(url, strlen(url));
 	}
 
-	/* Persist viewer settings to the shared song prefs (zoom, flats,
+	/* Persist viewer settings to the shared song prefs (zoom,
 	 * latin, video) so both modules stay in sync. */
 	if (bud_host_fetch_fn) {
 		char url[512];
 		snprintf(
-		        url, sizeof(url), "/api/song/prefs?b=%d&l=%d&m=%d&z=%d",
-		        sb_app_state.bemol ? 1 : 0, sb_app_state.latin ? 1 : 0,
+		        url, sizeof(url), "/api/song/prefs?l=%d&m=%d&z=%d",
+		        sb_app_state.latin ? 1 : 0,
 		        sb_app_state.show_media ? 1 : 0, sb_app_state.zoom);
 		bud_host_fetch_fn(url, strlen(url), 1);
 	}
@@ -301,9 +295,6 @@ bud_node *bud_app_render(void)
 	              lx_attr("data-viewer-opts", "songbook"),
 	              lx_node(site_ui_checkbox(
 	                      "l", "Latin", sb_app_state.latin,
-	                      on_sb_option_change)),
-	              lx_node(site_ui_checkbox(
-	                      "b", "Flats (\xe2\x99\xad)", sb_app_state.bemol,
 	                      on_sb_option_change)),
 	              lx_node(site_ui_checkbox(
 	                      "m", "Video", sb_app_state.show_media,
@@ -390,7 +381,6 @@ static bud_node *sb_render_add_song_form(
 
 static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 {
-	int bemol = (flags & TRANSP_BEMOL) ? 1 : 0;
 	int latin = (flags & TRANSP_LATIN) ? 1 : 0;
 	bud_node *key_opts = NULL;
 	for (int i = -11; i <= 11; i++) {
@@ -399,7 +389,7 @@ static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 		bud_node *o =
 		        lx_el("option", lx_attr("value", v),
 		              i == t ? lx_attr("selected", "") : lx_none(),
-		              lx_text(key_name(i, orig_key, bemol, latin)))
+		              lx_text(key_name(i, orig_key, latin)))
 		                .data.node;
 		if (!key_opts)
 			key_opts = bud_fragment();
@@ -643,7 +633,8 @@ static bud_node *sb_build_body_content(void)
 			snprintf(
 			        tgt_key, sizeof(tgt_key), "%s",
 			        target_key_name(
-			                s->orig_key, s->transpose, s->flags));
+			                s->orig_key, s->transpose,
+			                (s->flags & TRANSP_LATIN) ? 1 : 0));
 
 			snprintf(
 			        rem_action, sizeof(rem_action),

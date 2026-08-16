@@ -59,16 +59,8 @@ Deno.test("song detail SSR: verify original key and bolded chords", async () => 
         throw new Error(`Original key is not selected by default. Selected: ${selectedText}`);
     }
 
-    // 4. Verify Flats (bemol) notation in SSR
-    // We append ?b=1 to the URL
-    await page.goto(`${BASE}/song/${SONG_ID}?b=1`);
-    const chordHtmlBemol = await page.innerHTML("#chord-data");
-    // "A alegría está no coração" in A. If we transpose to some key that has flats...
-    // Actually, let's just check if the "Flats" checkbox is checked in SSR
-    const bemolChecked = await page.isChecked('input[name="b"]');
-    if (!bemolChecked) {
-        throw new Error("Flats checkbox should be checked when ?b=1 is present");
-    }
+    // 4. (Removed) The Flats (♭) checkbox was removed in the key-aware
+    // spelling refactor (CHORDS.md §10.6); ?b=1 is now silently ignored.
 
     // 5. Verify Latin notation in SSR
     await page.goto(`${BASE}/song/${SONG_ID}?l=1`);

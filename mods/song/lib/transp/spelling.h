@@ -20,7 +20,8 @@ enum {
 
 /* Family of a tonic (chromatic 0-11): FLAT keys spell accidentals as flats,
  * SHARP keys as sharps. Boundary keys resolve by Brazilian convention to
- * Db (1) and F# (6). Out-of-range input (e.g. key == -1) falls back to SHARP. */
+ * Db (1) and F# (6). Out-of-range input (e.g. key == -1) falls back to SHARP.
+ */
 static inline int spelling_family(int chrom)
 {
 	static const int table[12] = {

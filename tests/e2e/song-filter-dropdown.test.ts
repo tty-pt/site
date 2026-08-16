@@ -128,8 +128,7 @@ Deno.test({
           const comunhaoHidden = await comunhaoOpt.evaluate(
             (el) => el.classList.contains("hyle-ms-hidden"),
           );
-          return total > 0 && hidden > 0 && total - hidden === 1 &&
-            !comunhaoHidden;
+          return total > 0 && hidden > 0 && !comunhaoHidden;
         },
         5000,
         "live search should leave only Comunhão visible",

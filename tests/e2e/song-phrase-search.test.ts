@@ -29,7 +29,9 @@ const BASE = "http://localhost:8080";
 async function totalRows(page: any): Promise<string | null> {
   const content = await page.content();
   const m = content.match(/(\d+) of (\d+) rows/);
-  return m ? m[0] : null;
+  if (m) return m[0];
+  if (content.includes("No items")) return "0 of 0 rows";
+  return null;
 }
 
 Deno.test("song content lookup: quoted phrase requires contiguous tokens", async () => {

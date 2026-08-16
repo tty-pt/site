@@ -121,19 +121,22 @@ out_append(char *out, size_t outsz, size_t *o, const char *s, size_t n)
 }
 
 /* Emit a lyric line's fillers for queue entries that start at/behind j.
- * Returns the number of filler chars written. */
+ * A hyphen is only valid strictly inside a whitespace-delimited word. */
 static void lyric_fill(
         render_state_t *st, int html, char *out, size_t outsz, size_t *o,
-        size_t *j)
+        size_t *j, const char *line, size_t line_len)
 {
 	while (st->q.n > 0 && *j >= st->q.pair[0]) {
 		size_t start = st->q.pair[0];
 		size_t len = st->q.pair[1];
 		if (st->not_special) {
+			int inside_word = start > 0 && start < line_len &&
+			                  !isspace((unsigned char)line[start - 1]) &&
+			                  !isspace((unsigned char)line[start]);
+			char filler = inside_word ? '-' : ' ';
+
 			while (*j < start + len) {
-				char c = (*o > 0 && out[*o - 1] == ' ') ? ' '
-				                                        : '-';
-				out_append(out, outsz, o, &c, 1);
+				out_append(out, outsz, o, &filler, 1);
 				(*j)++;
 			}
 		}
@@ -157,6 +160,8 @@ static void render_lyric_line(
 	size_t j = 0;
 	const char *s = L->text + (html ? L->verse_len : 0);
 	const char *end = L->text + L->len;
+	const char *line = s;
+	size_t line_len = (size_t)(end - s);
 
 	if (flags & TRANSP_HIDE_LYRICS) {
 		/* skip the line entirely; queue left untouched (old proc_line)
@@ -179,7 +184,7 @@ static void render_lyric_line(
 	}
 
 	while (s < end) {
-		lyric_fill(st, html, out, outsz, o, &j);
+		lyric_fill(st, html, out, outsz, o, &j, line, line_len);
 
 		if (*s == '<') {
 			/* raw passthrough to end of line (pre-existing markup)
@@ -232,10 +237,12 @@ static void render_lyric_line(
 	}
 
 done:
-	/* fill any remaining queue entries at end of line (if they start exactly here) */
-	lyric_fill(st, html, out, outsz, o, &j);
-	
-	/* discard any remaining queue entries (chord line was longer than lyric line) */
+	/* fill any remaining queue entries at end of line (if they start
+	 * exactly here) */
+	lyric_fill(st, html, out, outsz, o, &j, line, line_len);
+
+	/* discard any remaining queue entries (chord line was longer than lyric
+	 * line) */
 	st->q.n = 0;
 
 	if (html)
@@ -316,25 +323,26 @@ static int render_chord_line(
 		no_space = 1;
 
 		int root = t->info.root;
-		const char *new_cstr =
-		        chord_str(root_table, (size_t)((root + semitones) % 12), spell);
+		const char *new_cstr = chord_str(
+		        root_table, (size_t)((root + semitones) % 12), spell);
 		size_t new_len = strlen(new_cstr);
 		size_t root_len = t->info.root_len;
 		size_t diff = new_len > root_len ? new_len - root_len : 0;
 		size_t mod_len = t->info.mod_len;
 		const char *mod = t->text + t->info.mod_off;
 
-		/* Mod emission: the suffix is copied verbatim (never transposed),
-		 * except that a slash bass is re-emitted family-spelled (CHORDS.md
-		 * §10.3 step 3). prefix_len covers the suffix up to (not including)
-		 * the '/' separator; a leading 'm' becomes '-' under Latin output.
-		 * The split emits avoid a fixed stack buffer (mod_len is unbounded
-		 * for long 'm'-runs). */
+		/* Mod emission: the suffix is copied verbatim (never
+		 * transposed), except that a slash bass is re-emitted
+		 * family-spelled (CHORDS.md §10.3 step 3). prefix_len covers
+		 * the suffix up to (not including) the '/' separator; a leading
+		 * 'm' becomes '-' under Latin output. The split emits avoid a
+		 * fixed stack buffer (mod_len is unbounded for long 'm'-runs).
+		 */
 		size_t prefix_len = mod_len;
 		const char *bass_name = NULL;
 		if (t->info.bass >= 0) {
 			prefix_len = t->info.bass_off - t->info.root_len;
-			
+
 			int bass_latin = 0;
 			if (t->info.bass_len >= 2) {
 				char b1 = t->text[t->info.bass_off + 1];
@@ -342,7 +350,8 @@ static int render_chord_line(
 					bass_latin = 1;
 			}
 			char **bass_table = bass_latin ? latin_table : en_table;
-			bass_name = chord_str(bass_table, (size_t)t->info.bass, spell);
+			bass_name = chord_str(
+			        bass_table, (size_t)t->info.bass, spell);
 		}
 
 		int latin_m =
@@ -367,7 +376,8 @@ static int render_chord_line(
 		if (latin_m) {
 			out_append(out, outsz, o, "-", 1);
 			if (prefix_len > 1)
-				out_append(out, outsz, o, mod + 1, prefix_len - 1);
+				out_append(
+				        out, outsz, o, mod + 1, prefix_len - 1);
 		} else if (prefix_len > 0) {
 			out_append(out, outsz, o, mod, prefix_len);
 		}
@@ -477,10 +487,9 @@ char *transp_render(
 	 * semitones arrives already normalized to 0..11 by transp_buffer. */
 	int family = (*key >= 0) ? spelling_family((*key + semitones) % 12)
 	                         : SPELL_FAMILY_SHARP;
-	int spell =
-	        ((flags & TRANSP_BEMOL) || family == SPELL_FAMILY_FLAT)
-	                ? SPELL_FLAT
-	                : SPELL_SHARP;
+	int spell = ((flags & TRANSP_BEMOL) || family == SPELL_FAMILY_FLAT)
+	                    ? SPELL_FLAT
+	                    : SPELL_SHARP;
 
 	/* Size the result: sum of line lengths * 8 + 64 (HTML wrapping and
 	 * longer chord names can expand each line significantly). */
@@ -508,7 +517,8 @@ char *transp_render(
 		} else if (L->is_chord_line) {
 			if (!render_chord_line(
 			            &st, song, L, semitones, flags, html,
-			            root_table, en_table, latin_table, spell, out, outsz, &o))
+			            root_table, en_table, latin_table, spell,
+			            out, outsz, &o))
 				goto oom;
 		} else {
 			render_lyric_line(&st, L, flags, html, out, outsz, &o);

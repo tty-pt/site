@@ -30,7 +30,6 @@ typedef struct {
 typedef struct {
 	song_cache_t cache;
 	int transpose;
-	int use_bemol;
 	int use_latin;
 	int show_media;
 	char chord_html[65536];
@@ -73,7 +72,6 @@ static const bud_field_desc_t song_fields[] = {
 	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
 	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
 	OVERLAY_INT(transpose, app_state_t, transpose),
-	OVERLAY_INT(use_bemol, app_state_t, use_bemol),
 	OVERLAY_INT(use_latin, app_state_t, use_latin),
 	OVERLAY_INT(show_media, app_state_t, show_media),
 	OVERLAY_INT(zoom, app_state_t, zoom),

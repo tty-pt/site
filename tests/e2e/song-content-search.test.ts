@@ -107,7 +107,8 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
     await page.waitForURL(/zapxq/, { timeout: 10000 });
     const content = await page.content();
     const total = content.match(/(\d+) of (\d+) rows/);
-    if (!total || total[1] !== "0") {
+    const isZero = (total && total[1] === "0") || content.includes("No items");
+    if (!isZero) {
       throw new Error(
         `Expected "0 of ... rows" for "xylofrenia zapxq", got "${total?.[0]}"`,
       );
@@ -121,7 +122,8 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
     await page.waitForURL(/xylofreniacao/, { timeout: 10000 });
     const contentAccent = await page.content();
     const totalAccent = contentAccent.match(/(\d+) of (\d+) rows/);
-    if (!totalAccent || totalAccent[1] !== "0") {
+    const isZeroAccent = (totalAccent && totalAccent[1] === "0") || contentAccent.includes("No items");
+    if (!isZeroAccent) {
       throw new Error(
         `Expected "0 of ... rows" for unaccented "xylofreniacao", got "${totalAccent?.[0]}"`,
       );

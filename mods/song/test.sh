@@ -114,11 +114,10 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/api/song
 # 15. Verify pref files written by POST
 echo -n "15. Pref files written by POST... "
 [ "$(cat "$TTY/chords-zoom")" = "140" ] \
-	&& [ "$(cat "$TTY/chords-bemol")" = "1" ] \
 	&& [ "$(cat "$TTY/chords-latin")" = "1" ] \
 	&& [ "$(cat "$TTY/chords-media")" = "1" ] \
-	&& pass "all four prefs match" \
-	|| fail "prefs mismatch: z=$(cat "$TTY/chords-zoom") b=$(cat "$TTY/chords-bemol") l=$(cat "$TTY/chords-latin") m=$(cat "$TTY/chords-media")"
+	&& pass "prefs match" \
+	|| fail "prefs mismatch: z=$(cat "$TTY/chords-zoom") l=$(cat "$TTY/chords-latin") m=$(cat "$TTY/chords-media")"
 
 # 16. GET /api/song/prefs (query string, used by WASM) works too
 echo -n "16. GET /api/song/prefs... "
@@ -129,7 +128,6 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" "$BASE/api/song/prefs?b
 echo -n "17. Pref files updated by GET... "
 [ "$(cat "$TTY/chords-zoom")" = "90" ] \
 	&& [ "$(cat "$TTY/chords-media")" = "0" ] \
-	&& [ "$(cat "$TTY/chords-bemol")" = "0" ] \
 	&& [ "$(cat "$TTY/chords-latin")" = "0" ] \
 	&& pass "prefs updated" || fail "prefs not updated"
 

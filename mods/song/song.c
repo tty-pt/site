@@ -99,16 +99,12 @@ static void song_load_saved_prefs(const char *user, int *f, int *m)
 {
 	if (!user || !user[0])
 		return;
-	char *rb = song_viewer_pref_read(user, "chords-bemol");
 	char *rl = song_viewer_pref_read(user, "chords-latin");
 	char *rm = song_viewer_pref_read(user, "chords-media");
-	if (rb && atoi(rb))
-		*f |= TRANSP_BEMOL;
 	if (rl && atoi(rl))
 		*f |= TRANSP_LATIN;
 	if (rm && atoi(rm))
 		*m = 1;
-	free(rb);
 	free(rl);
 	free(rm);
 }
@@ -120,8 +116,6 @@ static void song_parse_prefs(
 	int pf;
 	*zoom = 0;
 	parse_transpose_qs(qs, t, &pf, m);
-	if (pf & TPARAM_BEMOL)
-		*f |= TRANSP_BEMOL;
 	if (pf & TPARAM_LATIN)
 		*f |= TRANSP_LATIN;
 	if (pf & TPARAM_HTML)
@@ -129,13 +123,8 @@ static void song_parse_prefs(
 
 	if (qs[0] && username && username[0]) {
 		char pv[2];
-		if (*f & TRANSP_BEMOL)
-			pv[0] = '1';
-		else
-			pv[0] = '0';
-		pv[1] = '\0';
-		song_viewer_pref_write(username, "chords-bemol", pv);
 		pv[0] = (*f & TRANSP_LATIN) ? '1' : '0';
+		pv[1] = '\0';
 		song_viewer_pref_write(username, "chords-latin", pv);
 		pv[0] = (*m) ? '1' : '0';
 		song_viewer_pref_write(username, "chords-media", pv);
@@ -237,7 +226,6 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                : 0;
 	tmp.transpose = t;
 	tmp.zoom = v_z;
-	tmp.use_bemol = (f & TRANSP_BEMOL) != 0;
 	tmp.use_latin = (f & TRANSP_LATIN) != 0;
 	tmp.show_media = m;
 	tmp.original_key = k;
@@ -343,7 +331,6 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
 	app_state.transpose = t;
-	app_state.use_bemol = (f & TRANSP_BEMOL) != 0;
 	app_state.use_latin = (f & TRANSP_LATIN) != 0;
 	app_state.show_media = m;
 	app_state.original_key = k;

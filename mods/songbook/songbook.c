@@ -514,7 +514,8 @@ static int api_sb_transpose_get(int fd, char *body)
 	        g_doc_root, found_song, transpose, flags, &chord_html,
 	        &detected_key);
 
-	const char *tgt_key = target_key_name(detected_key, transpose, flags);
+	const char *tgt_key = target_key_name(
+	        detected_key, transpose, (flags & TRANSP_LATIN) ? 1 : 0);
 
 	json_object *j_resp = json_object_new_object();
 	json_object_object_add(j_resp, "index", json_object_new_int(idx));
@@ -871,12 +872,6 @@ static void sb_parse_detail_prefs(
 		}
 	} else if (user && user[0]) {
 		char *v;
-		v = song_get_pref(user, "chords-bemol");
-		if (v) {
-			if (atoi(v))
-				*f |= TRANSP_BEMOL;
-			free(v);
-		}
 		v = song_get_pref(user, "chords-latin");
 		if (v) {
 			if (atoi(v))
@@ -965,7 +960,6 @@ songbook_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	/* ── Populate sb_app_state with page data ────────────────── */
 	sb_app_state.zoom = zoom;
-	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
 	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
 	sb_app_state.show_media = show_media;
 	sb_app_state.is_owner = is_owner;

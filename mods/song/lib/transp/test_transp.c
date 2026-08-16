@@ -962,7 +962,7 @@ TEST(user_song_bold_exact)
 	/* The full first stanza of the user song, as-is (trailing space on the
 	 * last lyric line is intentional). Bold (TRANSP_HTML) output is pinned
 	 * byte-for-byte: chord lines one <b> block each with verbatim spacing,
-	 * Bbm7 renders as A#m7 (sharp default), lyrics verbatim and never
+	 * Bbm7 stays Bbm7 (flat family, key F), lyrics verbatim and never
 	 * bolded, key = F. */
 	const char *song = "Fm   Cm A#m G#  Gº\n"
 	                   "No Senhor es-tá  a miseri-\n"
@@ -985,9 +985,8 @@ TEST(user_song_bold_exact)
 	assert(result != NULL);
 	assert(strcmp(result,
 	              "<div><b>F#m   C#m  Bm A  G#º</b></div>"
-	              "<div>No Senhor- es-tá  a miseri-</div>"
-	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 "
-	              "C#5</b></div>"
+	              "<div>No Senhor  es-tá  a miseri-</div>"
+	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5</b></div>"
 	              "<div>có-rdia e a a-bundânte   re--den---ção. </div>") ==
 	       0);
 	assert(transp_get_key(ctx) == 5); /* F */
@@ -998,7 +997,7 @@ TEST(user_song_bold_exact)
 	assert(result != NULL);
 	assert(strcmp(result,
 	              "F#m   C#m  Bm A  G#º\n"
-	              "No Senhor- es-tá  a miseri-\n"
+	              "No Senhor  es-tá  a miseri-\n"
 	              "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
 	              "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
 	free(result);
@@ -1018,6 +1017,214 @@ TEST(lyric_false_positives_guard)
 	assert(result != NULL);
 	assert(!str_contains(result, "<b>"));
 	assert(str_contains(result, "Amada Amiga Amina"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+/* =========================================================================
+ * Section I — key-aware spelling (CHORDS.md §10)
+ * ===================================================================== */
+
+TEST(key_aware_flat_family_spelling)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (chromatic 5, flat family): flats stay flat */
+	char *result = transp_buffer(ctx, "F Bb Eb Ab", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>F Bb Eb Ab</b>"));
+	free(result);
+
+	/* A#m respelled to Bbm (flat family) */
+	result = transp_buffer(ctx, "F A#m", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>F Bbm</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_sharp_family_spelling)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key D (chromatic 2, sharp family): G#m stays G#m, not Abm */
+	char *result = transp_buffer(ctx, "D Bm G#m A", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>D Bm G#m A</b>"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_transpose_derives_target_family)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* F +1 → target 6 = F# (sharp family) → F# */
+	char *result = transp_buffer(ctx, "F", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "F#"));
+	free(result);
+
+	/* G -1 → target 6 = F# (sharp family) → F# */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "G", -1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "F#"));
+	free(result);
+
+	/* C +1 → target 1 = Db (flat family) → Db */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Db"));
+	free(result);
+
+	/* Bb +1 → target 11 = B (sharp family) → B */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "Bb", 1, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "B"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_slash_bass_normalized)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (flat): Gm/A# → Gm/Bb */
+	char *result = transp_buffer(ctx, "F Gm/A#", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Gm/Bb"));
+	free(result);
+
+	/* Key D (sharp): Gm/A# stays */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "D Gm/A#", 0, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Gm/A#"));
+	free(result);
+
+	/* Key F (flat) +2 → target G (sharp): Gm/Bb → Am/A# (root transposes,
+	 * bass is respelled to sharp family A#) */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "F Gm/Bb", 2, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "Am/A#"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_latin)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key F (flat, Latin): La and Sib stay flat; F→Fa grows root by 1,
+	 * creating a double space before La (diff absorb). */
+	char *result =
+	        transp_buffer(ctx, "F La Sib", 0, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Fa"));
+	assert(str_contains(result, "La"));
+	assert(str_contains(result, "Sib"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(bemol_flag_still_forces_flats)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key D (sharp): G#m normally stays G#m, but TRANSP_BEMOL forces Abm */
+	char *result = transp_buffer(ctx, "D G#m", 0, TRANSP_BEMOL);
+	assert(result != NULL);
+	assert(str_contains(result, "Abm"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_unknown_defaults_sharp)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* No chord tokens → key -1 → sharp family, no crash */
+	char *result = transp_buffer(ctx, "Hello world", 0, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "Hello world"));
+	free(result);
+
+	transp_free(ctx);
+}
+
+TEST(key_aware_shift_table)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Key Bb (chromatic 10, flat family): rows spell per their own family
+	 */
+	char *result = transp_buffer(ctx, "Bb", 0, 0);
+	assert(result != NULL);
+	free(result);
+
+	char *table = transp_shift_table(ctx, 0);
+	assert(table != NULL);
+	/* Row 0 (C): sharp family → "C 2" */
+	assert(str_contains(table, "C 2"));
+	/* Row 1 (Db): flat family → "Db 3" (not C#) */
+	assert(str_contains(table, "Db 3"));
+	/* Row 5 (F): flat family → "F 7" (not E#) */
+	assert(str_contains(table, "F 7"));
+	/* Row 6 (F#): sharp family → "F# 8" (not Gb) */
+	assert(str_contains(table, "F# 8"));
+	/* Row 10 (Bb): flat family → "Bb 0" */
+	assert(str_contains(table, "Bb 0"));
+	free(table);
+
+	transp_free(ctx);
+}
+
+/* Alignment fillers must describe the source lyric boundary, not the
+ * already-rendered HTML/output buffer. */
+TEST(alignment_fillers_follow_word_boundaries)
+{
+	transp_ctx_t *ctx = transp_init();
+	char *result;
+
+	assert(ctx != NULL);
+
+	result = transp_buffer(ctx, "C  G\nfable", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab-le\n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfab le", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab  le\n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfab ", 7, TRANSP_LATIN);
+	assert(result != NULL);
+	assert(str_contains(result, "Sol   Re\nfab  \n"));
+	free(result);
+
+	result = transp_buffer(ctx, "C  G\nfable", 7, TRANSP_LATIN | TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<div>fab-le</div>"));
 	free(result);
 
 	transp_free(ctx);
@@ -1156,6 +1363,16 @@ int main(void)
 	RUN_TEST(user_song_bold_exact);
 	RUN_TEST(lyric_false_positives_guard);
 
+	RUN_TEST(key_aware_flat_family_spelling);
+	RUN_TEST(key_aware_sharp_family_spelling);
+	RUN_TEST(key_aware_transpose_derives_target_family);
+	RUN_TEST(key_aware_slash_bass_normalized);
+	RUN_TEST(key_aware_latin);
+	RUN_TEST(bemol_flag_still_forces_flats);
+	RUN_TEST(key_unknown_defaults_sharp);
+	RUN_TEST(key_aware_shift_table);
+
+	RUN_TEST(alignment_fillers_follow_word_boundaries);
 	RUN_TEST(model_quality_matrix);
 	RUN_TEST(model_first_quality_atom_wins);
 	RUN_TEST(model_slash_bass);

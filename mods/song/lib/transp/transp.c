@@ -81,7 +81,8 @@ transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 	}
 
 	result = transp_render(
-	        &song, semitones, flags, chromatic_en, chromatic_latin, &ctx->key);
+	        &song, semitones, flags, chromatic_en, chromatic_latin,
+	        &ctx->key);
 	transp_song_free(&song);
 	free(input_copy);
 	return result;
@@ -111,14 +112,14 @@ char *transp_shift_table(transp_ctx_t *ctx, int latin)
 	if (!result)
 		return NULL;
 
-	/* Family-consistent names: rows spell per the detected key's family
-	 * (CHORDS.md §10.3 step 4). */
-	int family = spelling_family(ctx->key);
-
+	/* Family-consistent names: each row spells note i in that note's own
+	 * family (CHORDS.md §10.3 step 4), matching the rendered output for
+	 * a transposition to that target key. */
 	result[0] = '\0';
 	for (unsigned i = 0; i < 12; i++) {
 		char *name = table[i];
-		if (family == SPELL_FAMILY_FLAT && strchr(name, '#'))
+		if (spelling_family(i) == SPELL_FAMILY_FLAT &&
+		    strchr(name, '#'))
 			name += strlen(name) + 1;
 		long t = (long)i - ctx->key;
 		if (t < 0)

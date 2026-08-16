@@ -23,7 +23,7 @@ Deno.test("song list: FTS prefix semantics + multi-field AND", async () => {
 
   async function applyFilter(): Promise<void> {
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
-    await page.waitForSelector("div.hyle-table-wrap", { timeout: 10000 });
+    await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });
   }
 
   async function rowCount(): Promise<number> {
@@ -33,10 +33,9 @@ Deno.test("song list: FTS prefix semantics + multi-field AND", async () => {
   async function totalText(): Promise<string> {
     const content = await page.content();
     const m = content.match(/(\d+) of (\d+) rows/);
-    if (!m) {
-      throw new Error(`Could not find "N of M rows" marker`);
-    }
-    return m[0];
+    if (m) return m[0];
+    if (content.includes("No items")) return "0 of 0 rows";
+    throw new Error(`Could not find "N of M rows" marker or "No items"`);
   }
 
   try {

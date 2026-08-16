@@ -98,12 +98,11 @@ curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=-3&b=1"
 # Show in Latin notation without transposing (C → Do)
 curl "http://localhost:8080/api/song/transpose?id=amazing_grace&l=1"
 
-# Combine all options: transpose +1 with flats and Latin
-curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=1&b=1&l=1"
+# Combine all options: transpose +1 with Latin
+curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=1&l=1"
 ```
 
 **Transpose Flags:**
-- `TRANSP_BEMOL` (0x02) - Use flats instead of sharps
 - `TRANSP_LATIN` (0x04) - Use Latin notation (Do, Ré, Mi, Fa, Sol, La, Si)
 
 ## Storage
