@@ -55,4 +55,15 @@ uint32_t stoma_query(stoma_db_t *db,
 	const char *field, const char *query,
 	uint32_t out_hd, int *handled);
 
+/*
+ * Phrase query: every token of `query` must prefix-match in `field`, AND the
+ * tokens must occur in the indexed text as a contiguous subsequence (in query
+ * order). Line breaks and punctuation are token separators, so a phrase may
+ * span lines. A single-token query behaves exactly like stoma_query.
+ * Contract is otherwise identical to stoma_query.
+ */
+uint32_t stoma_query_phrase(stoma_db_t *db,
+	const char *field, const char *query,
+	uint32_t out_hd, int *handled);
+
 #endif

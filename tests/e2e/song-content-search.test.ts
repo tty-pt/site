@@ -10,6 +10,8 @@
  * 4. accent-sensitivity ("xylofreniacao" does NOT match "xylofreniação")
  * 5. a token beyond the (removed) 8KB fold-buffer cap is still indexed
  *
+ * Quoted-phrase semantics live in tests/e2e/song-phrase-search.test.ts.
+ *
  * Requires: axil running on :8080 with AUTH_SKIP_CONFIRM=1.
  */
 

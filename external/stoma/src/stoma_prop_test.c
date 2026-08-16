@@ -74,8 +74,7 @@ static void fold_tokens(const char *value, toks_t *t)
 		const char *start;
 		int len;
 
-		if (!((*p >= 'a' && *p <= 'z') ||
-		      (*p >= '0' && *p <= '9') ||
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
 		      (unsigned char)*p >= 0x80))
 		{
 			p++;
@@ -84,8 +83,7 @@ static void fold_tokens(const char *value, toks_t *t)
 		start = p;
 		len = 0;
 		while (*p &&
-		       ((*p >= 'a' && *p <= 'z') ||
-		        (*p >= '0' && *p <= '9') ||
+		       ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
 		        (unsigned char)*p >= 0x80))
 		{
 			p++;
@@ -235,6 +233,28 @@ static int ref_matches(int row, int fi, const toks_t *qt)
 	return 1;
 }
 
+/* Phrase reference: the query tokens must occur as a contiguous subsequence
+ * of the row's token stream, with per-token prefix matching. */
+static int ref_phrase_matches(int row, int fi, const toks_t *qt)
+{
+	int i;
+	int j;
+
+	if (qt->n == 0)
+		return 0;
+	if (qt->n > row_toks[row][fi].n)
+		return 0;
+	for (i = 0; i + qt->n <= row_toks[row][fi].n; i++) {
+		for (j = 0; j < qt->n; j++)
+			if (strncmp(row_toks[row][fi].tok[i + j], qt->tok[j],
+			            strlen(qt->tok[j])) != 0)
+				break;
+		if (j == qt->n)
+			return 1;
+	}
+	return 0;
+}
+
 static int run_seed(unsigned long seed)
 {
 	int failures = 0;
@@ -316,6 +336,58 @@ static int run_seed(unsigned long seed)
 			failures++;
 		}
 		qmap_close(out_hd);
+
+		/* phrase variant: the same query through stoma_query_phrase,
+		 * compared against the contiguous-subsequence reference. */
+		{
+			unsigned out_hd2 =
+			        qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+			uint32_t n2 = 0;
+			int handled2 = 0;
+			int exp_total2 = 0;
+			int r2;
+
+			n2 = stoma_query_phrase(
+			        db, field_names[fi], query, out_hd2, &handled2);
+			if ((qt.n > 0) != (handled2 > 0)) {
+				printf("seed %lu q%d: phrase handled mismatch "
+				       "(stoma=%d ref=%d) query='%s'\n",
+				       seed, q, handled2, qt.n > 0, query);
+				failures++;
+				qmap_close(out_hd2);
+				continue;
+			}
+			for (r2 = 0; r2 < MAX_ROWS; r2++) {
+				char rid2[16];
+				int exp2 = handled2 &&
+				           ref_phrase_matches(r2, fi, &qt);
+				int got2;
+
+				snprintf(rid2, sizeof(rid2), "r%d", r2);
+				got2 = qmap_get(out_hd2, rid2) != NULL;
+				exp_total2 += exp2;
+				if (got2 != exp2) {
+					if (failures < 5)
+						printf("seed %lu q%d: phrase "
+						       "row "
+						       "%s field '%s' "
+						       "query='%s' "
+						       "stoma=%d ref=%d\n",
+						       seed, q, rid2,
+						       field_names[fi], query,
+						       got2, exp2);
+					failures++;
+				}
+			}
+			if ((uint32_t)exp_total2 != n2) {
+				printf("seed %lu q%d: phrase count mismatch "
+				       "(stoma=%u ref=%d) query='%s'\n",
+				       seed, q, (unsigned)n2, exp_total2,
+				       query);
+				failures++;
+			}
+			qmap_close(out_hd2);
+		}
 	}
 
 	printf("seed %lu: %d rows, %d queries%s\n", seed, MAX_ROWS, MAX_QUERIES,

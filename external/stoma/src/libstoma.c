@@ -7,12 +7,14 @@
 #define STOMA_MAX_TOKENS 64
 
 /* Declared in token.c (internal). */
-void stoma_tokenize(const char *folded,
-	void (*cb)(const char *tok, size_t len, void *user),
-	void *user);
+void stoma_tokenize(
+        const char *folded, void (*cb)(const char *tok, size_t len, void *user),
+        void *user);
 
 struct stoma_db {
-	unsigned hd;	/* QM_SORTED, QM_STR → QM_STR inverted index */
+	unsigned hd;     /* QM_SORTED, QM_STR → QM_STR inverted index */
+	unsigned doc_hd; /* QM_SORTED, QM_STR → QM_STR folded text per
+	                    (field,row) */
 };
 
 stoma_db_t *stoma_open(unsigned mask)
@@ -27,6 +29,12 @@ stoma_db_t *stoma_open(unsigned mask)
 		free(db);
 		return NULL;
 	}
+	db->doc_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, mask, QM_SORTED);
+	if (!db->doc_hd) {
+		qmap_close(db->hd);
+		free(db);
+		return NULL;
+	}
 	return db;
 }
 
@@ -35,13 +43,16 @@ void stoma_close(stoma_db_t *db)
 	if (!db)
 		return;
 	qmap_close(db->hd);
+	qmap_close(db->doc_hd);
 	free(db);
 }
 
 void stoma_clear(stoma_db_t *db)
 {
-	if (db)
-		qmap_drop(db->hd);
+	if (!db)
+		return;
+	qmap_drop(db->hd);
+	qmap_drop(db->doc_hd);
 }
 
 /* ---- index ---- */
@@ -49,15 +60,15 @@ void stoma_clear(stoma_db_t *db)
 typedef struct {
 	const char *field;
 	const char *row_id;
-	unsigned   hd;
+	unsigned hd;
 } index_ctx_t;
 
 static void index_token(const char *tok, size_t len, void *user)
 {
 	index_ctx_t *ctx = (index_ctx_t *)user;
-	size_t       fld = strlen(ctx->field);
-	size_t       rid = strlen(ctx->row_id);
-	char        *key;
+	size_t fld = strlen(ctx->field);
+	size_t rid = strlen(ctx->row_id);
+	char *key;
 
 	key = malloc(fld + rid + len + 3);
 	if (!key)
@@ -72,12 +83,13 @@ static void index_token(const char *tok, size_t len, void *user)
 	free(key);
 }
 
-int stoma_index(stoma_db_t *db,
-	const char *field, const char *row_id, const char *value)
+int stoma_index(
+        stoma_db_t *db, const char *field, const char *row_id,
+        const char *value)
 {
 	index_ctx_t ctx;
-	size_t      vlen;
-	char       *folded;
+	size_t vlen;
+	char *folded;
 
 	if (!db || !field || !row_id || !value)
 		return -1;
@@ -94,6 +106,29 @@ int stoma_index(stoma_db_t *db,
 	ctx.row_id = row_id;
 	ctx.hd = db->hd;
 	stoma_tokenize(folded, index_token, &ctx);
+
+	/* Side table: store the folded text per (field,row_id) so phrase
+	 * queries can re-tokenize a document and test token adjacency. */
+	{
+		size_t fld = strlen(field);
+		size_t rid = strlen(row_id);
+		size_t dlen = fld + 1 + rid;
+		char *dkey = malloc(dlen + 1);
+		size_t fl = strlen(folded);
+		char *fdoc = malloc(fl + 1);
+
+		if (dkey && fdoc) {
+			memcpy(dkey, field, fld);
+			dkey[fld] = '\t';
+			memcpy(dkey + fld + 1, row_id, rid);
+			dkey[dlen] = '\0';
+			memcpy(fdoc, folded, fl + 1);
+			qmap_put(db->doc_hd, dkey, fdoc);
+		}
+		free(dkey);
+		free(fdoc);
+	}
+
 	free(folded);
 	return 0;
 }
@@ -102,8 +137,8 @@ int stoma_index(stoma_db_t *db,
 
 typedef struct {
 	const char *toks[STOMA_MAX_TOKENS];
-	size_t      len[STOMA_MAX_TOKENS];
-	size_t      n;
+	size_t len[STOMA_MAX_TOKENS];
+	size_t n;
 } collect_ctx_t;
 
 static void collect_token(const char *tok, size_t len, void *user)
@@ -117,17 +152,73 @@ static void collect_token(const char *tok, size_t len, void *user)
 	}
 }
 
-uint32_t stoma_query(stoma_db_t *db,
-	const char *field, const char *query,
-	uint32_t out_hd, int *handled)
+/* ---- phrase verification ---- */
+
+typedef struct {
+	const char *tok;
+	size_t len;
+} dtok_t;
+
+typedef struct {
+	dtok_t *ent;
+	size_t n;
+	size_t cap;
+} dctoks_t;
+
+static void collect_doc_token(const char *tok, size_t len, void *user)
+{
+	dctoks_t *t = (dctoks_t *)user;
+
+	if (t->n == t->cap) {
+		size_t ncap = t->cap ? t->cap * 2 : 64;
+		dtok_t *nt = realloc(t->ent, ncap * sizeof(*nt));
+
+		if (!nt)
+			return;
+		t->ent = nt;
+		t->cap = ncap;
+	}
+	t->ent[t->n].tok = tok;
+	t->ent[t->n].len = len;
+	t->n++;
+}
+
+/* Contiguous-subsequence test: the query tokens must appear in order with
+ * per-token prefix matching. A single query token is trivially present. */
+static int doc_matches_phrase(const dctoks_t *d, const collect_ctx_t *q)
+{
+	size_t i;
+	size_t j;
+
+	if (q->n > d->n)
+		return 0;
+	if (q->n == 1)
+		return 1;
+	for (i = 0; i + q->n <= d->n; i++) {
+		for (j = 0; j < q->n; j++) {
+			if (d->ent[i + j].len < q->len[j])
+				break;
+			if (memcmp(d->ent[i + j].tok, q->toks[j], q->len[j]) !=
+			    0)
+				break;
+		}
+		if (j == q->n)
+			return 1;
+	}
+	return 0;
+}
+
+static uint32_t stoma_query_any(
+        stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
+        int *handled, int phrase)
 {
 	collect_ctx_t toks;
-	size_t        fld;
-	size_t        qlen;
-	char         *folded;
-	unsigned      cur_hd = 0;
-	uint32_t      matches = 0;
-	size_t        i;
+	size_t fld;
+	size_t qlen;
+	char *folded;
+	unsigned cur_hd = 0;
+	uint32_t matches = 0;
+	size_t i;
 
 	if (handled)
 		*handled = 0;
@@ -156,8 +247,8 @@ uint32_t stoma_query(stoma_db_t *db,
 
 	for (i = 0; i < toks.n; i++) {
 		unsigned nxt_hd;
-		size_t   plen = fld + 1 + toks.len[i];
-		char    *prefix = malloc(plen + 1);
+		size_t plen = fld + 1 + toks.len[i];
+		char *prefix = malloc(plen + 1);
 		uint32_t cur;
 		const void *k;
 		const void *v;
@@ -203,20 +294,64 @@ uint32_t stoma_query(stoma_db_t *db,
 		cur_hd = nxt_hd;
 	}
 
-	free(folded);
-
 	if (cur_hd) {
 		uint32_t cur = qmap_iter(cur_hd, NULL, 0);
 		const void *k;
 		const void *v;
 
 		while (qmap_next(&k, &v, cur)) {
-			qmap_put(out_hd, (const char *)k, "");
-			matches++;
+			const char *rid = (const char *)k;
+			int keep = 1;
+
+			if (phrase && toks.n > 1) {
+				size_t dfl = fld + 1 + strlen(rid);
+				char *dkey = malloc(dfl + 1);
+				const char *dtext;
+				dctoks_t d;
+
+				if (!dkey)
+					break;
+				memcpy(dkey, field, fld);
+				dkey[fld] = '\t';
+				memcpy(dkey + fld + 1, rid, strlen(rid));
+				dkey[dfl] = '\0';
+				dtext = (const char *)qmap_get(
+				        db->doc_hd, dkey);
+				free(dkey);
+				memset(&d, 0, sizeof(d));
+				if (dtext) {
+					stoma_tokenize(
+					        dtext, collect_doc_token, &d);
+					keep = doc_matches_phrase(&d, &toks);
+				} else {
+					keep = 0;
+				}
+				free(d.ent);
+			}
+			if (keep) {
+				qmap_put(out_hd, rid, "");
+				matches++;
+			}
 		}
 		qmap_fin(cur);
 		qmap_close(cur_hd);
 	}
 
+	free(folded);
+
 	return matches;
+}
+
+uint32_t stoma_query(
+        stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
+        int *handled)
+{
+	return stoma_query_any(db, field, query, out_hd, handled, 0);
+}
+
+uint32_t stoma_query_phrase(
+        stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
+        int *handled)
+{
+	return stoma_query_any(db, field, query, out_hd, handled, 1);
 }

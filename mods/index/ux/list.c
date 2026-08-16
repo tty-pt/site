@@ -182,8 +182,8 @@ static bud_node *idx_content_lookup(const char *qs)
 	             lx_el("input", lx_attr("type", "text"),
 	                   lx_attr("name", "data"),
 	                   lx_attr("class", "filter-lookup"),
-	                   lx_attr("placeholder",
-	                           "lyrics / chords\xe2\x80\xa6"),
+	                   lx_attr("placeholder", "lyrics / chords\xe2\x80\xa6 "
+	                                          " e.g. \"a quiet place\""),
 	                   lx_attr("value", cur)))
 	        .data.node;
 }

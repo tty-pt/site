@@ -259,7 +259,8 @@ int main(void)
 		      "token past 8KB matches");
 		qmap_drop(out);
 		n = stoma_query(db, "title", "aaaa", out, &handled);
-		CHECK(n == 1 && hd_has(out, "r19b"), "early tokens still match");
+		CHECK(n == 1 && hd_has(out, "r19b"),
+		      "early tokens still match");
 		qmap_drop(out);
 	}
 
@@ -303,6 +304,78 @@ int main(void)
 	CHECK(handled == 1 && n == 2 && hd_has(out, "r20") &&
 	              hd_has(out, "r23"),
 	      "single-char token");
+	qmap_drop(out);
+
+	/* 22. phrase queries (stoma_query_phrase). Indexed tokens must avoid
+	 * 's' initials — test 21 pins the 's' prefix count to r20+r23. */
+	stoma_index(db, "title", "r24", "Blue Dawn");
+	n = stoma_query_phrase(db, "title", "blue dawn", out, &handled);
+	CHECK(handled == 1 && n == 1 && hd_has(out, "r24"),
+	      "phrase adjacent in order");
+	qmap_drop(out);
+	n = stoma_query_phrase(db, "title", "dawn blue", out, &handled);
+	CHECK(n == 0, "phrase rejects reorder");
+	qmap_drop(out);
+	n = stoma_query(db, "title", "dawn blue", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r24"), "AND stays order-insensitive");
+	qmap_drop(out);
+
+	stoma_index(db, "title", "r25", "Blue summer of the dawn");
+	n = stoma_query_phrase(db, "title", "blue dawn", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r24") && !hd_has(out, "r25"),
+	      "phrase rejects spread tokens");
+	qmap_drop(out);
+	n = stoma_query(db, "title", "blue dawn", out, &handled);
+	CHECK(n == 2 && hd_has(out, "r24") && hd_has(out, "r25"),
+	      "AND still matches spread tokens");
+	qmap_drop(out);
+
+	stoma_index(db, "title", "r26", "blackstar manor");
+	n = stoma_query_phrase(db, "title", "black manor", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r26"), "phrase allows per-token prefix");
+	qmap_drop(out);
+	n = stoma_query_phrase(db, "title", "star manor", out, &handled);
+	CHECK(n == 0, "phrase prefix must align at positions");
+	qmap_drop(out);
+
+	stoma_index(db, "title", "r27", "line one\nline two");
+	n = stoma_query_phrase(db, "title", "one line", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r27"),
+	      "phrase spans line break (token separator)");
+	qmap_drop(out);
+	n = stoma_query_phrase(db, "title", "two line", out, &handled);
+	CHECK(n == 0, "phrase order matters across lines");
+	qmap_drop(out);
+
+	stoma_index(db, "title", "r28", "Atenção Coração");
+	n = stoma_query_phrase(db, "title", "atenção coração", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r28"), "phrase with accents matches");
+	qmap_drop(out);
+	n = stoma_query_phrase(db, "title", "coracao atencao", out, &handled);
+	CHECK(n == 0, "phrase accent-sensitive");
+	qmap_drop(out);
+
+	stoma_index(db, "title", "r29", "Morning Dawn");
+	n = stoma_query_phrase(db, "title", "morning dawn", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r29"), "phrase case-insensitive");
+	qmap_drop(out);
+
+	n = stoma_query_phrase(db, "title", "dawn", out, &handled);
+	CHECK(handled == 1 && n == 3 && hd_has(out, "r24") &&
+	              hd_has(out, "r25") && hd_has(out, "r29"),
+	      "single-token phrase equals AND");
+	qmap_drop(out);
+
+	n = stoma_query_phrase(db, "title", "blue,  dawn", out, &handled);
+	CHECK(n == 1 && hd_has(out, "r24"), "phrase normalizes punct+spaces");
+	qmap_drop(out);
+
+	n = stoma_query_phrase(db, "title", "---", out, &handled);
+	CHECK(handled == 0 && n == 0, "zero-token phrase no-op");
+	qmap_drop(out);
+
+	n = stoma_query_phrase(db, "title", "nowhere at all", out, &handled);
+	CHECK(handled == 1 && n == 0, "phrase no match -> 0");
 	qmap_drop(out);
 
 	stoma_close(db);
