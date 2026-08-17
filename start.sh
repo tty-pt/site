@@ -22,7 +22,7 @@ if [ -n "$AUTH_SKIP_CONFIRM" ]; then
 fi
 
 export AUTH_SKIP_CONFIRM=1
-if test -z GDB; then
+if test ! -z "$GDB"; then
   gdb --args axil -C "$SCRIPT_DIR" -p 8080 -d -m mods/core/core
 else
   axil -C "$SCRIPT_DIR" -p "$PORT" -d -m mods/core/core 2>&1 | tee "$LOG_OUT"

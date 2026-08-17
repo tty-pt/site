@@ -668,7 +668,7 @@ source_validate_row(int fd, const source_def_t *def, unsigned data_handle)
 	if (!hfields || !values) {
 		free(hfields);
 		free(values);
-		return 0;
+		return -1;
 	}
 
 	for (i = 0; i < n; i++) {
@@ -1454,7 +1454,7 @@ XY_IMPL(uint32_t, source_setup,
 	if (!sf)
 		return 0;
 	n_sf = impl_source_def_to_source_fields(defs, field_count, sf);
-	source_register(&(source_def_t){
+	if (source_register(&(source_def_t){
 	        .id = source_id,
 	        .key_field = kf,
 	        .items_path = items_path,
@@ -1463,7 +1463,10 @@ XY_IMPL(uint32_t, source_setup,
 	        .field_count = (size_t)n_sf,
 	        .record_id = record_id,
 	        .flags = flags,
-	});
+	}) != 0) {
+		free(sf);
+		return 0;
+	}
 	return record_id;
 }
 

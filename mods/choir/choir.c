@@ -412,7 +412,7 @@ choir_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	        page_title, path, "\xf0\x9f\x8e\xb6", ctx->username,
 	        site_ui_item_menu("choir", ctx->id, is_owner), body_frag);
 
-	return site_ui_respond_page(fd, page_title, NULL, "choir", layout);
+	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);
 }
 
 static int choir_detail_handler(int fd, char *body)

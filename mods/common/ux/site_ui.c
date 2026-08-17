@@ -565,6 +565,33 @@ bud_node *site_ui_form_fields(
 	return frag;
 }
 
+static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
+{
+	size_t w = 0;
+	const char *ent;
+	size_t elen;
+
+	if (!src) src = "";
+	while (*src && w < dstsize - 1) {
+		switch (*src) {
+		case '&':  ent = "&amp;";  elen = 5; break;
+		case '<':  ent = "&lt;";   elen = 4; break;
+		case '>':  ent = "&gt;";   elen = 4; break;
+		case '"':  ent = "&quot;"; elen = 6; break;
+		default:
+			dst[w++] = *src++;
+			continue;
+		}
+		if (w + elen >= dstsize)
+			break;
+		memcpy(dst + w, ent, elen);
+		w += elen;
+		src++;
+	}
+	dst[w] = '\0';
+	return w;
+}
+
 char *site_ui_page(
         const char *title, const char *extra_head, const char *module,
         bud_node *body)
@@ -573,6 +600,7 @@ char *site_ui_page(
 	char *page;
 	char module_attr[256];
 	char client_script[512];
+	char title_esc[512];
 	int len;
 
 	if (!body)
@@ -580,6 +608,8 @@ char *site_ui_page(
 	body_html = bud_render_hydrated_html(body);
 	if (!body_html)
 		return NULL;
+
+	escape_html_into(title, title_esc, sizeof(title_esc));
 
 	if (module && module[0]) {
 		snprintf(
@@ -610,7 +640,7 @@ char *site_ui_page(
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
-	        title, extra_head, module_attr, body_html, client_script);
+	        title_esc, extra_head, module_attr, body_html, client_script);
 
 	page = (char *)malloc((size_t)len + 1);
 	if (!page) {
@@ -631,7 +661,7 @@ char *site_ui_page(
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
-	        title, extra_head, module_attr, body_html, client_script);
+	        title_esc, extra_head, module_attr, body_html, client_script);
 
 	bud_free_string(body_html);
 	return page;

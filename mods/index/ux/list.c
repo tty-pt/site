@@ -433,6 +433,10 @@ static void ljw_str(list_json_w *w, const char *s)
 			ljw_put(w, "\\r");
 		else if (c == '\t')
 			ljw_put(w, "\\t");
+		else if (c == '<')
+			ljw_put(w, "\\u003c");
+		else if (c == '/')
+			ljw_put(w, "\\/");
 		else if (c < 0x20) {
 			char esc[8];
 			snprintf(esc, sizeof(esc), "\\u%04x", c);

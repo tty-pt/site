@@ -795,8 +795,8 @@ XY_IMPL(unsigned, index_open,
 	if (!hd)
 		return QM_MISS;
 
-	index_update_json(id, name);
 	axil_slugify(name, strlen(name), id, sizeof(id));
+	index_update_json(id, name);
 	if (module_path_build(doc_root, id, buf, sizeof(buf)) != 0)
 		return QM_MISS;
 	mkdir(buf, 0755);

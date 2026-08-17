@@ -77,7 +77,7 @@ follow the same pattern: a small flags word, not a dozen bool params.
 
 ### 4.3 Opaque handles + documented ownership
 - `qmap` handles are `unsigned`; **never `free()` a qmap value**; `qmap_put`
-  takes ownership.
+  copies key and value; caller retains ownership.
 - `hyle_query_t` documents its lifetime in the header comment (caller keeps
   `query_str` alive; must call `hyle_query_clear`). Ownership rules live in the
   declaration, next to the type — that IS the documentation.

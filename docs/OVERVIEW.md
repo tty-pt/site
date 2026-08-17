@@ -62,10 +62,10 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 AGENTS.md          doc index — route from here (read this first)
 docs/              the docs (OVERVIEW, ARCHITECTURE, DESIGN, BUILD, TESTING,
                    CONVENTIONS, STYLING, SSR-CONTRACT, C-ISOMORPHIC-BUD,
-                   WASM-BRIDGE, FILTERS, SCHEMA)
+                   WASM-BRIDGE, FILTERS, SCHEMA, AUDIT)
 external/          axil, libxylem, libqmap, stoma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
-                   songbook, choir, bud_demo, redir (never loaded)
+                   songbook, choir, bud_demo
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
 items/<mod>/items  data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)
@@ -97,3 +97,4 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Touch the WASM bridge / patch ops | `docs/WASM-BRIDGE.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |
+| Deep audit: full issue catalog, proposed fixes, and phased roadmap | `docs/AUDIT.md` |

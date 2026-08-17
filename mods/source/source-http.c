@@ -364,8 +364,12 @@ static int source_build_rows_json(
 			f = &def->fields[i];
 			if (strcmp(f->name, "id") == 0)
 				continue;
-			if (has_include && !strstr(inc_set, f->name))
-				continue;
+			if (has_include) {
+				char needle[256];
+				snprintf(needle, sizeof(needle), ",%s,", f->name);
+				if (!strstr(inc_set, needle))
+					continue;
+			}
 
 			val = qmap_field_get(def->fields_hd, item_id, f->name);
 

@@ -240,7 +240,6 @@ static void render_chord_viewer(void)
 
 	g_main = lx_el("div", lx_attr("id", "main"),
 	               lx_attr("data-song-id", app_state.cache.id),
-	               lx_attr("data-chord-data", app_state.chord_html),
 	               lx_attr("data-use-latin", latin_val),
 	               lx_attr("data-show-media", media_val),
 	               lx_attr("data-yt", app_state.cache.yt),

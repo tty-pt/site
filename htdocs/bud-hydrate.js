@@ -126,7 +126,7 @@ function buildControlValue(target) {
 		return target.value;
 	}
 
-	return '';
+	return target.textContent || '';
 }
 
 function buildEventPayload(target) {
@@ -797,7 +797,10 @@ export class BudWasmBridge {
 			bud_host_fetch(url_ptr, url_len, request_id) {
 				const url = readWasmString(bridge.memory, url_ptr, url_len);
 				fetch(url)
-					.then(res => res.text())
+					.then(res => {
+						if (!res.ok) return;
+						return res.text();
+					})
 					.then(text => {
 						const malloc = getWasmExport(bridge.wasm, ['malloc']);
 						if (!malloc) return;

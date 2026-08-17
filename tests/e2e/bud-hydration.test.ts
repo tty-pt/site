@@ -20,16 +20,12 @@ Deno.test("bud hydration: verify SSR #main element with chord data", async () =>
 
     const songId = await mountEl.getAttribute("data-song-id");
     const transpose = await mountEl.getAttribute("data-transpose");
-    const chordData = await mountEl.getAttribute("data-chord-data");
 
     if (songId !== SONG_ID) {
       throw new Error(`data-song-id mismatch: expected ${SONG_ID}, got ${songId}`);
     }
     if (transpose === null) {
       throw new Error("data-transpose attribute missing");
-    }
-    if (!chordData || chordData.length < 10) {
-      throw new Error("data-chord-data attribute missing or too short");
     }
   } finally {
     await browser.close();

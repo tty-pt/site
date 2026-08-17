@@ -18,12 +18,9 @@
 #define BUD_OVERLAY_STR 4
 #define BUD_INVERSE 5
 
-/* QM type constants (from qmap.h — not always visible in bud.h) */
+/* QM type constants — BUD_QM_VSTR from bud.h; BUD_QM_REFERENCE from qmap.h */
 #ifndef BUD_QM_REFERENCE
 #define BUD_QM_REFERENCE 6
-#endif
-#ifndef BUD_QM_VSTR
-#define BUD_QM_VSTR 7
 #endif
 
 /* Source type constants (from source_field_type_t) */

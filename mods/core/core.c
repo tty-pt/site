@@ -42,9 +42,13 @@ static int alias_redirect(
 	axil_env_get(fd, uri, "DOCUMENT_URI");
 	axil_env_get(fd, query, "QUERY_STRING");
 
-	if (strncmp(uri, from_prefix, strlen(from_prefix)) != 0) {
-		axil_respond(fd, 404, "Not found");
-		return 1;
+	{
+		size_t flen = strlen(from_prefix);
+		if (strncmp(uri, from_prefix, flen) != 0 ||
+		    (uri[flen] != '\0' && uri[flen] != '/')) {
+			axil_respond(fd, 404, "Not found");
+			return 1;
+		}
 	}
 
 	written = snprintf(

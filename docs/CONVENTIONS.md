@@ -66,7 +66,7 @@ replaces, it does not append.
 ## Memory
 
 - Never `free()` qmap-managed values.
-- `qmap_put(map, key, ptr)` takes ownership of `ptr`.
+- `qmap_put(map, key, ptr)` copies key and value; caller retains ownership.
 - `QM_REFERENCE` field values are string IDs (slugs), not positions.
 
 ## XY cross-.so convention

@@ -102,7 +102,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	        page_title, path, "\xf0\x9f\x93\x9d", ctx->username,
 	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
 
-	return site_ui_respond_page(fd, page_title, NULL, "poem", layout);
+	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);
 }
 
 static int poem_detail_handler(int fd, char *body)

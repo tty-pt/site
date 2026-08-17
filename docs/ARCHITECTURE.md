@@ -50,7 +50,7 @@ Rules derived from the model:
 ```
 axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
-qmap ── the data store (never free() qmap values; qmap_put takes ownership)
+qmap ── the data store (qmap_put copies key and value; caller frees originals)
 stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
 hyle  ── data/schema/query layer, NO component symbols
         deps: stoma, qmap

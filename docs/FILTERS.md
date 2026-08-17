@@ -32,34 +32,32 @@ So `?type=comunhao&type=natal` produces two filters, both on field `type`.
 
 Order matters (`external/hyle/src/source.c`):
 
-1. `prefilter_fts` (source.c:315) — for searchable fields, resolves each filter
+1. `prefilter_fts` (source.c:579) — for searchable fields, resolves each filter
    against the stoma index, **intersects** the matching row sets. Rebuilds the
    index lazily after mutations.
-2. `prefilter_multi_ref` (source.c:217) — for multi-ref fields, resolves
+2. `prefilter_multi_ref` (source.c:331) — for multi-ref fields, resolves
    slug→position and pre-filters rows. Runs with
    `base_hd = fts_hd ? fts_hd : e->row_hd` (i.e. FTS narrowing is preserved).
 3. `hyle_apply_view` — the residual filter/sort on the pre-filtered row set.
    Handled filters have their `value` set to NULL so apply_view doesn't
    double-filter.
 
-## 4. The multi-ref bug and the required semantics (IMPORTANT)
+## 4. Multi-ref union/intersect semantics
 
-`prefilter_multi_ref` currently iterates filters and for EACH one REPLACES the
-running pre-filtered set with the new single-value set (`if (pre_hd)
-qmap_close(pre_hd); pre_hd = new_hd;`). With repeated keys only the **last**
-value wins — multi-select is broken.
-
-Required semantics (framework-neutral, hyle core):
+`prefilter_multi_ref` (`source.c:331`) implements the following:
 
 - **Union within a field**: rows matching ANY of the selected values for the
   same field.
 - **Intersect across fields**: rows matching field A AND field B.
-- Single-value behavior must remain byte-identical to today.
+- Single-value behavior is byte-identical to the simple case.
 
-Algorithm sketch: group filters by field name; for each distinct field build a
+Algorithm: group filters by field name; for each distinct field build a
 union map over `base_hd`; then fold the per-field union maps together by
-intersection. Remember to `qmap_close` intermediate maps and to NULL the filter
-values that were handled.
+intersection. Intermediate maps are closed and handled filter values are
+set to NULL so `hyle_apply_view` doesn't double-filter.
+
+Tested in `hyle_test.c:1615-1782`: same-field OR, cross-field AND,
+single-value unchanged, accent-sensitivity preserved.
 
 ## 5. Server-side handling of filter values
 
@@ -74,7 +72,7 @@ values that were handled.
 
 ## 6. SSR checked-state round-trip
 
-- `idx_query_param(qs, name, buf, len)` (`mods/index/ux/list.c:38`) returns only
+- `idx_query_param(qs, name, buf, len)` (`mods/index/ux/list.c:39`) returns only
   the FIRST occurrence of a repeated key — fine for `sort`/`page`/`per_page`,
   wrong for multi-ref selections.
 - Add/use `idx_query_params_join`: collect ALL occurrences of `name`, url-decode
@@ -86,10 +84,10 @@ values that were handled.
 ## 7. Filter UI options
 
 - `idx_resolve_filter_options(target_source, target_hd, opts, max)`
-  (`mods/index/ux/list.c:118`): builds `hyle_bud_option_t {id,label}[]` — id =
+  (`mods/index/index.c:48`): builds `hyle_bud_option_t {id,label}[]` — id =
   row_id (slug), label = the target source's first non-`id` display field value
   (via `"<row>:<display_field>"` lookup). Native-only (qmap).
-- `idx_filter_bar` (list.c:191) reads `cur`, resolves options for
+- `idx_filter_bar` (list.c:222) reads `cur`, resolves options for
   REFERENCE/MULTI_REFERENCE columns, calls `hyle_bud_filter_field(key, label,
   type, cur, opts, nopts)`.
 - Renderers live in `external/hyle/c/libhyle-bud/src/filter.c`:

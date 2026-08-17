@@ -30,6 +30,7 @@ make watch          # auto-rebuild + restart on :8080
 | Filter semantics: multi-ref storage, query parsing, union/intersect, repeated-key wire format | `docs/FILTERS.md` |
 | Schema metadata strings and the opaque UI-hint mechanism (`"f":"dropdown"`) | `docs/SCHEMA.md` |
 | Chord syntax, transp internals, grammar + pipeline | `CHORDS.md` |
+| Deep audit: full issue catalog with proposed fixes (security, correctness, efficiency, architecture) | `docs/AUDIT.md` |
 
 ## Rules that must never be eroded
 
@@ -42,5 +43,3 @@ make watch          # auto-rebuild + restart on :8080
 - Route all row writes through hyle `put`/`del` so the FTS index stays live.
 - Search is accent-sensitive by design (`pão` ≠ `pao`); no iconv TRANSLIT in
   the fold.
-- Stale Rust-SSR claims (`mods/ssr`, wasm-bindgen, `song-client.js`) in old
-  docs are removed code — trust `make` + `mods/` + `htdocs/`.
