@@ -21,6 +21,7 @@ Deno.test("song list: accent-sensitive title search", async () => {
   try {
     await page.goto(`${BASE}/song/`, { waitUntil: "load" });
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
+    await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
 
     // ---- 1. Accented query matches accented data ----
     await page.locator('input[name="title"]').fill("Coração");

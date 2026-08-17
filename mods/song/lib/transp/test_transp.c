@@ -884,7 +884,8 @@ TEST(latin_input_roots_transposed)
 	char *result =
 	        transp_buffer(ctx, "Sol Do La-", 2, TRANSP_LATIN | TRANSP_HTML);
 	assert(result != NULL);
-	assert(str_contains(result, "<b>La Re Si-</b>"));
+	/* Sol(4)→La(2): shrink -2, pad 2 spaces so Re keeps its column. */
+	assert(str_contains(result, "<b>La  Re Si-</b>"));
 	free(result);
 
 	transp_free(ctx);
@@ -979,14 +980,17 @@ TEST(user_song_bold_exact)
 	free(result);
 
 	/* +1: every root transposed, spacing still verbatim on chord lines, and
-	 * the spacing queue realigns the lyric lines with '-' fillers. */
+	 * the spacing queue realigns the lyric lines with '-' fillers.
+	 * Shrinks (A#m→Bm, G#→A) are padded on the chord line so later chords
+	 * keep their start columns; grows (Fm→F#m, Cm→C#m, Gº→G#º) absorb
+	 * leading spaces and push lyric fillers as before. */
 	transp_reset_key(ctx);
 	result = transp_buffer(ctx, song, 1, TRANSP_HTML);
 	assert(result != NULL);
 	assert(strcmp(result,
-	              "<div><b>F#m   C#m  Bm A  G#º</b></div>"
+	              "<div><b>F#m   C#m  Bm  A   G#º</b></div>"
 	              "<div>No Senhor  es-tá  a miseri-</div>"
-	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5</b></div>"
+	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7  C#5</b></div>"
 	              "<div>có-rdia e a a-bundânte   re--den---ção. </div>") ==
 	       0);
 	assert(transp_get_key(ctx) == 5); /* F */
@@ -996,9 +1000,9 @@ TEST(user_song_bold_exact)
 	result = transp_buffer(ctx, song, 1, 0);
 	assert(result != NULL);
 	assert(strcmp(result,
-	              "F#m   C#m  Bm A  G#º\n"
+	              "F#m   C#m  Bm  A   G#º\n"
 	              "No Senhor  es-tá  a miseri-\n"
-	              "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7 C#5\n"
+	              "F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7  C#5\n"
 	              "có-rdia e a a-bundânte   re--den---ção. \n") == 0);
 	free(result);
 
@@ -1198,6 +1202,58 @@ TEST(key_aware_shift_table)
 	transp_free(ctx);
 }
 
+/* Shrink: chord names that get shorter must pad the chord line so that every
+ * later chord keeps its original start column.  Lyrics are unaffected. */
+TEST(shrink_pads_chord_line)
+{
+	transp_ctx_t *ctx = transp_init();
+	char *result;
+
+	assert(ctx != NULL);
+
+	/* Single shrink: Eb(2)→C(1) padded by one space; next chord A4 keeps
+	 * its column. */
+	result = transp_buffer(ctx, "Eb  C4\nxy  z", -3, 0);
+	assert(result != NULL);
+	assert(strcmp(result, "C   A4\nxy  z\n") == 0);
+	free(result);
+
+	/* Multi-shrink across a full stanza (the user's original example). */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx,
+	        "Eb  C4 Cm         Bb      Fm\n"
+	        "Caminhamos para o Vosso altar men-\n"
+	        "Bb              Cm      Bb4   Cm7 Bb Eb\n"
+	        "digos do vosso amor, aco-lhei-nos ó  Deus.\n"
+	        "\n"
+	        "   Eb           Ab   Eb Bb\n"
+	        "7. Um dia em vossos átrios\n"
+	        "Bb          Ab   Fm\n"
+	        "vale por mais de mil\n",
+	        -3, 0);
+	assert(result != NULL);
+	assert(strcmp(result,
+	              "C   A4 Am         G       Dm\n"
+	              "Caminhamos para o Vosso altar men-\n"
+	              "G               Am      G4    Am7 G  C\n"
+	              "digos do vosso amor, aco-lhei-nos ó  Deus.\n"
+	              "\n"
+	              "   C            F    C  G\n"
+	              "7. Um dia em vossos átrios\n"
+	              "G           F    Dm\n"
+	              "vale por mais de mil\n") == 0);
+	free(result);
+
+	/* EOL shrink needs no trailing pad (no later chord to protect). */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C Eb\nab cd", -3, 0);
+	assert(result != NULL);
+	assert(strcmp(result, "A C\nab cd\n") == 0);
+	free(result);
+
+	transp_free(ctx);
+}
+
 /* Alignment fillers must describe the source lyric boundary, not the
  * already-rendered HTML/output buffer. */
 TEST(alignment_fillers_follow_word_boundaries)
@@ -1373,6 +1429,7 @@ int main(void)
 	RUN_TEST(key_aware_shift_table);
 
 	RUN_TEST(alignment_fillers_follow_word_boundaries);
+	RUN_TEST(shrink_pads_chord_line);
 	RUN_TEST(model_quality_matrix);
 	RUN_TEST(model_first_quality_atom_wins);
 	RUN_TEST(model_slash_bass);

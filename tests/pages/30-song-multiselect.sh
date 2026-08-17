@@ -26,7 +26,11 @@ body_of(){
 }
 
 row_count(){
-  printf '%s' "$1" | grep -oE '[0-9]+ of [0-9]+ rows' | head -1
+  result=$(printf '%s' "$1" | grep -oE '[0-9]+ of [0-9]+ rows' | head -1)
+  if [ -z "$result" ] && printf '%s' "$1" | grep -q 'No items'; then
+    result="0 of 0 rows"
+  fi
+  printf '%s' "$result"
 }
 
 echo "Running song multiselect SSR smoke tests against $BASE"

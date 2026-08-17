@@ -16,8 +16,14 @@ A song's `data.txt` is a sequence of lines. There are three line kinds:
 | **Comment / empty** | `%` starts a comment (bolded with `class='comment'`, or dropped with `TRANSP_REMOVE_COMMENTS`, which also drops the following empty line). Empty lines are structural. |
 
 Chord lines and lyric lines alternate; a chord line's spacing is preserved and,
-when transposition changes a chord.s width, the **spacing queue** realigns the
-next lyric line with space/`-` fillers. Filler selection uses `-` only when the
+when transposition changes a chord's width, the **signed width delta** governs
+realignment. A **grow** (longer name) absorbs following spaces from the chord
+line, then pushes any remainder to the **spacing queue** that realigns the next
+lyric line with space/`-` fillers. A **shrink** (shorter name) pads the chord
+line with spaces so every later chord keeps its original start column; the lyric
+line is unaffected. The delta is computed over the **full emitted token** (new
+root + suffix + respelled bass) vs the original token length, so bass respelling
+that changes width is included. Filler selection uses `-` only when the
 insertion is strictly inside a whitespace-delimited word; word boundaries use
 spaces.
 
@@ -262,10 +268,12 @@ rework — keep these in sync with the code):
   lengths (≥ the old `strlen(input)*8+64` bound) and keeps the 8192-byte
   per-line outbuf floor (bumped to `max(8192, line_len*8+64)` so single long
   lines cannot overflow the historical fixed buffer).
-- **`j` counter semantics**: ported exactly from `proc_line` — `j` counts
-  lead + root + suffix + absorbed spaces + residual on chord lines, and lyric
-  bytes on lyric lines; the "add one space" path deliberately does **not**
-  increment `j` (matches the original queue-start arithmetic).
+- **`j` counter semantics**: on chord lines `j` advances by `t->len`
+  (original token width) per chord, plus absorbed spaces on grow, plus queue
+  residual; on lyric lines `j` counts lyric bytes. The "add one space" path on
+  grow deliberately does **not** increment `j` (matches the original
+  queue-start arithmetic). Shrink pad spaces are emitted but do not advance
+  `j` beyond the original token boundary.
 - **Quality model** (2026-08-16): the first quality-bearing suffix atom wins
   (`Gm7(5º)`→MINOR from the `m`, `Fm7b5`→MINOR, `Cmaj9`→MAJOR, `Bh`→HALF_DIM,
   `C5`→POWER, `Gno3`/`Gomit3`→UNDEFINED, no qualifier→MAJOR). Parenthesized
@@ -597,12 +605,16 @@ not the spec's TAILQ — `sys/queue.h` is gone); the per-line outbuf is
   set `not_special=0`; CHORD → `newroot=(root+semitones)%12`,
   `new_cstr=chord_str` (bemol: `#` spelling → flat; Latin: `m`→`-`), emit
   `new_cstr` then the mod **without a stack buffer** (Latin `m`→`-` emits
-  `'-'` + `mod+1`; `latin_m` tracked per chord). **Diff/absorb** (port
-  exactly): `diff = strlen(new_cstr) - root_len`; if `diff>0` absorb
-  `i=min(diff, next_lead)` spaces from the following token's lead (`j+=i`); if
-  at EOL `j+=diff`; if the following char is not space/slash/NUL add one `' '`
-  (`diff++`); then if `i<diff` push `{start=j, len=diff-i}` to the queue and
-  `j+=len`. Slash bass and `º`/`-` suffixes are copied verbatim (never
+  `'-'` + `mod+1`; `latin_m` tracked per chord). **Width delta** (full token):
+  `tok_delta = emitted_len - t->len` where `emitted_len = strlen(new_root) +
+  prefix_len + strlen(bass_name)`. If `tok_delta > 0` (grow): absorb
+  `i=min(grow, next_lead)` spaces from the following token's lead (`j+=i`); if
+  the following char is not space/slash/NUL add one `' '` (`grow++`); then if
+  `i<grow` push `{start=j, len=grow-i}` to the queue and `j+=len`. If
+  `tok_delta < 0` (shrink) and there is a next token: emit `|tok_delta|` pad
+  spaces on the chord line so the next chord keeps its start column; no queue
+  push. `j` always advances by `t->len` (original token width). EOL shrink
+  needs no pad. Slash bass and `º`/`-` suffixes are copied verbatim (never
   transposed). `TRANSP_HIDE_CHORDS`: emit nothing but `<div> </div>` (no queue
   entries). `TRANSP_HIDE_LYRICS` is fine (normal chord rendering).
 - **Lyric line**: `TRANSP_HIDE_LYRICS` → `<div></div>` (no space — match today).

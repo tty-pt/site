@@ -326,8 +326,6 @@ static int render_chord_line(
 		const char *new_cstr = chord_str(
 		        root_table, (size_t)((root + semitones) % 12), spell);
 		size_t new_len = strlen(new_cstr);
-		size_t root_len = t->info.root_len;
-		size_t diff = new_len > root_len ? new_len - root_len : 0;
 		size_t mod_len = t->info.mod_len;
 		const char *mod = t->text + t->info.mod_off;
 
@@ -358,50 +356,88 @@ static int render_chord_line(
 		        (prefix_len > 0 && mod[0] == 'm' &&
 		         (flags & TRANSP_LATIN));
 
-		/* Diff/absorb: grow the root, eating up to diff spaces from the
-		 * following token's lead (port of the historical logic). */
+		/* Compute the emitted width of this token so we can compare it
+		 * against the original width (t->len) for the signed delta.
+		 * Emitted: new root + suffix prefix + bass name (respelled). */
+		size_t emitted_bass =
+		        bass_name ? strlen(bass_name) : 0;
+		size_t emitted_len =
+		        new_len + prefix_len + emitted_bass;
+
+		/* signed delta: positive = grew, negative = shrank */
+		int tok_delta = (int)emitted_len - (int)t->len;
+
+		/* Diff/absorb for grow; pad chord line for shrink.
+		 *
+		 * Grow (tok_delta > 0): absorb spaces from the following
+		 * token's lead, then push any remainder to the lyric queue so
+		 * the lyric line stays aligned with '-'/' ' fillers.
+		 *
+		 * Shrink (tok_delta < 0): after emitting the shorter chord,
+		 * insert |tok_delta| padding spaces so that every later chord
+		 * keeps its original start column.  No lyric-queue push needed
+		 * — the lyrics already align correctly.
+		 *
+		 * EOL: trailing grow absorbed silently; trailing shrink needs
+		 * no pad (no later chord to protect). */
 		const transp_ptoken_t *next =
 		        i + 1 < L->ntok ? &L->toks[i + 1] : NULL;
-		size_t i_absorb = 0;
-		if (!next) {
-			/* end of line: absorb into the line's tail */
-			j += diff;
-			i_absorb = diff;
-		} else {
-			i_absorb = diff < next->lead ? diff : next->lead;
-			j += i_absorb;
-		}
 
+		/* Emit root + suffix + bass. */
 		out_append(out, outsz, o, new_cstr, new_len);
 		if (latin_m) {
 			out_append(out, outsz, o, "-", 1);
 			if (prefix_len > 1)
-				out_append(
-				        out, outsz, o, mod + 1, prefix_len - 1);
+				out_append(out, outsz, o, mod + 1,
+				           prefix_len - 1);
 		} else if (prefix_len > 0) {
 			out_append(out, outsz, o, mod, prefix_len);
 		}
 		if (bass_name) {
 			/* the '/' separator is the last byte of the prefix (the
 			 * bass starts at mod[prefix_len]) */
-			out_append(out, outsz, o, bass_name, strlen(bass_name));
+			out_append(out, outsz, o, bass_name, emitted_bass);
 		}
-		j += root_len + mod_len;
+		j += t->len; /* advance j by original token width */
 
-		/* If the following char is not space/slash/NUL, add one space
-		 * and grow the diff (this does NOT advance j, like the old
-		 * proc_line). */
-		if (next && next->lead - i_absorb == 0 &&
-		    next->text[0] != '/' && next->text[0] != '\0')
-		{
-			out_append(out, outsz, o, " ", 1);
-			diff++;
-		}
+		if (tok_delta > 0) {
+			/* Grow: absorb from the next token's lead, push the
+			 * remainder to the lyric queue. */
+			size_t grow = (size_t)tok_delta;
+			size_t i_absorb = 0;
 
-		if (i_absorb < diff) {
-			if (!q_push(&st->q, j, diff - i_absorb))
-				return 0;
-			j += diff - i_absorb;
+			if (!next) {
+				i_absorb = grow;
+			} else {
+				i_absorb = grow < next->lead ? grow
+				                             : next->lead;
+				j += i_absorb;
+			}
+
+			/* If the following char is not space/slash/NUL, add one
+			 * space (does NOT advance j, like the old proc_line). */
+			if (next && next->lead - i_absorb == 0 &&
+			    next->text[0] != '/' &&
+			    next->text[0] != '\0')
+			{
+				out_append(out, outsz, o, " ", 1);
+				grow++;
+			}
+
+			if (i_absorb < grow) {
+				if (!q_push(&st->q, j, grow - i_absorb))
+					return 0;
+				j += grow - i_absorb;
+			}
+		} else if (tok_delta < 0 && next) {
+			/* Shrink: pad the chord line so the next chord keeps its
+			 * original column.  Only needed when there is a next
+			 * token (EOL shrink leaves no gap to protect). */
+			size_t pad = (size_t)(-tok_delta);
+			size_t k;
+
+			for (k = 0; k < pad; k++)
+				out_append(out, outsz, o, " ", 1);
 		}
 	}
 

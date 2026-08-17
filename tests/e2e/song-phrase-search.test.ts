@@ -40,6 +40,7 @@ Deno.test("song content lookup: quoted phrase requires contiguous tokens", async
 
   try {
     await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+    await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
     await page.waitForSelector('input[name="data"].filter-lookup', {
       timeout: 5000,
     });
