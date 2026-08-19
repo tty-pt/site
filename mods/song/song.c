@@ -154,10 +154,10 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 		return 0;
 	}
 	char method[16] = { 0 };
-	axil_env_get(fd, method, "REQUEST_METHOD");
+	axil_env_get(fd, method, sizeof(method), "REQUEST_METHOD");
 	if (strcmp(method, "GET") == 0) {
 		char qs[1024] = { 0 };
-		axil_env_get(fd, qs, "QUERY_STRING");
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 		axil_query_parse(qs);
 	} else {
 		axil_query_parse(body);
@@ -204,7 +204,7 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char qs[1024] = { 0 };
 	char *trans = NULL;
 	int k = 0;
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &v_z);
 
 	if (v_z == 0) {
@@ -308,7 +308,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	char *trans = NULL;
 	int k = 0;
 	json_object *jo = NULL;
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &zoom);
 
 	f |= TRANSP_HTML;

@@ -69,7 +69,7 @@ XY_IMPL(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 	size_t vlen;
 
 	token[0] = '\0';
-	axil_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+	axil_env_get(fd, cookie_hdr, sizeof(cookie_hdr), "HTTP_COOKIE");
 	p = strstr(cookie_hdr, "csrf_token=");
 	if (p) {
 		eq = p + strlen("csrf_token=");
@@ -106,7 +106,7 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 		return -1;
 
 	cookie_hdr[0] = '\0';
-	axil_env_get(fd, cookie_hdr, "HTTP_COOKIE");
+	axil_env_get(fd, cookie_hdr, sizeof(cookie_hdr), "HTTP_COOKIE");
 
 	p = strstr(cookie_hdr, "csrf_token=");
 	if (!p)
@@ -223,10 +223,10 @@ XY_IMPL(int, item_ctx_load,
 	}
 
 	resolve_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
-	axil_env_get(fd, ctx->id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, ctx->id, sizeof(ctx->id), "PATTERN_PARAM_ID");
 
 	if (flags & ICTX_SONG_ID)
-		axil_env_get(fd, ctx->song_id, "PATTERN_PARAM_SONG_ID");
+		axil_env_get(fd, ctx->song_id, sizeof(ctx->song_id), "PATTERN_PARAM_SONG_ID");
 
 	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
 		bad_request(fd, "Missing parameters");
@@ -344,7 +344,7 @@ static int login_get_handler(int fd, char *body)
 
 	(void)body;
 	user = get_request_user(fd);
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	p = strstr(qs, "ret=");
 	if (p) {
 		p += 4;

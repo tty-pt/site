@@ -316,8 +316,11 @@ static int render_chord_line(
 		no_space = 1;
 
 		int root = t->info.root;
+		int idx = (root + semitones) % 12;
+		if (idx < 0)
+			idx += 12;
 		const char *new_cstr = chord_str(
-		        root_table, (size_t)((root + semitones) % 12), spell);
+		        root_table, (size_t)idx, spell);
 		size_t new_len = strlen(new_cstr);
 		size_t mod_len = t->info.mod_len;
 		const char *mod = t->text + t->info.mod_off;

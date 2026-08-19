@@ -63,10 +63,7 @@ transp_buffer(transp_ctx_t *ctx, const char *input, int semitones, int flags)
 	if (!ctx || !input)
 		return NULL;
 
-	/* Normalize negative transpose (verbatim port of the historical code)
-	 */
-	if (semitones < 0)
-		semitones += (1 + (semitones / 12)) * 12;
+	semitones = ((semitones % 12) + 12) % 12;
 
 	ctx->i18n_table =
 	        (flags & TRANSP_LATIN) ? chromatic_latin : chromatic_en;

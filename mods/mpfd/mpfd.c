@@ -267,8 +267,8 @@ XY_IMPL(int, mpfd_parse, socket_t, fd, char *, body)
 	char content_type[512] = { 0 };
 	char clen_str[32] = { 0 };
 
-	axil_env_get(fd, content_type, "HTTP_CONTENT_TYPE");
-	axil_env_get(fd, clen_str, "HTTP_CONTENT_LENGTH");
+	axil_env_get(fd, content_type, sizeof(content_type), "HTTP_CONTENT_TYPE");
+	axil_env_get(fd, clen_str, sizeof(clen_str), "HTTP_CONTENT_LENGTH");
 
 	/* Not multipart - not an error, just skip */
 	if (!strstr(content_type, "multipart/form-data")) {

@@ -1,13 +1,10 @@
 # Audit — leftover issues
 
-Read-only review of the stack (2026-08-17). Site-only batches 1–3 already
-landed; this file lists **what is still open**. Do not re-fix anything
-not listed here.
+Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
+batch 4 (submodules) already landed; this file lists **what is still
+open**. Do not re-fix anything not listed here.
 
 **Not claimed:** live exploit verification, fuzzing, or network testing.
-
-Site-only work is allowed. Submodule PRs (axil, axil-auth, hyle, libxylem,
-libqmap, stoma, bud) are Phase 4 — do not edit those trees unless asked.
 
 Deferred on purpose (do not start without a plan): **C7** (GET `/api/song/prefs`
 writes; WASM depends on it), **E16** (`per_page` clamp must rewrite `qs_copy`
@@ -52,6 +49,22 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined).
 - Accent-sensitive search is intentional and correctly folded (`stoma_fold`).
 - XY `RTLD_LOCAL` isolation is the right model.
 - hyle core has **no** bud symbols; boundary rule is holding.
+
+---
+
+### Fix batch 4 — 2026-08-19
+
+Submodule + site fixes (axil, axil-auth, site call sites):
+
+| ID | What | File |
+|---|---|---|
+| **A1** | Decode-then-reject: URL-decode before `..` / NUL / `\` check; `snprintf` replaces `strncpy` (also fixes A5) | `external/axil/src/libaxil.c` |
+| **A2** | `axil_env_get` gains `dest_len` param; `strcpy` → `strlcpy`; all ~50 call sites bounded | `external/axil/include/ttypt/axil.h`, `external/axil/src/libaxil.c`, all `mods/` call sites |
+| **A3** | `axil_read` loop capped at 64 rounds (≈512 KiB); returns partial read instead of blocking | `external/axil/src/libaxil.c:672` |
+| **A4** | `descr_new` + WS upstream: reject `fd >= FD_SETSIZE`, close leaked fd | `external/axil/src/libaxil.c:603,2275` |
+| **B1** | `redirect_target` validates same-origin relative path: `/` prefix, reject `//`, control chars | `external/axil-auth/src/libaxil-auth.c:122` |
+| **B3** | `struct session` with `created_at`; 24h TTL; per-user cap of 8 with oldest-evict | `external/axil-auth/src/libaxil-auth.c`, `external/axil-auth/include/ttypt/auth.h` |
+| **B4** | `generate_token` / `generate_bcrypt_salt` return error; no `abort()` / `time()` fallback | `external/axil-auth/src/libaxil-auth.c` |
 
 ---
 
@@ -315,6 +328,21 @@ Only COOP/COEP/CORP. No `X-Content-Type-Options`, `Referrer-Policy`,
 "Fix telnet / verify SSL"; `TODO DESCRIBE` on `axil_fd_tick`.
 
 **Fix:** Implement or delete.
+
+**Land:** axil submodule.
+
+#### A21 — HTTP/2 preface logged as `GET *`; `SSL_shutdown` on dead peer
+
+**Severity:** Medium (gdb noise / possible hang on blocking fd)
+**Where:** was `axil.c` `axil_register("PRI", do_GET)`; `libaxil.c` `axil_close` `SSL_shutdown`
+
+Scanners send the HTTP/2 preface. PRI was registered as GET, so logs showed
+`GET *` and `axil_close` called `SSL_shutdown`, which writes close_notify
+to a gone peer (SIGPIPE; gdb stops). SIGPIPE was already `SIG_IGN`.
+
+**Fix (landed in axil):** drop SSL with `SSL_free` only; early-out the
+preface in `cmd_proc`; ALPN selects `http/1.1` (honest, not a ban — add
+`h2` when HTTP/2 exists).
 
 **Land:** axil submodule.
 
@@ -1292,15 +1320,17 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 
 ### Phase 4 — Submodule PRs
 
-| IDs | Library |
-|---|---|
-| **A1–A10** | axil: decode-then-reject, bounded env get, nonblock, accept bounds, headers, privdrop |
-| **B1, B3, B4** | axil-auth: redirect validate, session TTL, urandom in jail |
-| **F1–F3** | libxylem: missing-impl error, RTLD_NODELETE, error handling |
-| **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse |
-| **E26–E27** | libqmap: abort → error, stale TODOs |
-| **E25, F4** | stoma + xy logging |
-| **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` |
+| IDs | Library | Status |
+|---|---|---|
+| **A1–A5** | axil: decode-then-reject, bounded env get, nonblock, accept bounds, strncpy | **DONE** |
+| **B1, B3, B4** | axil-auth: redirect validate, session TTL, urandom in jail | **DONE** |
+| **A6–A10** | axil: cmd_new OOB, unchecked alloc, header inject, vsnprintf, privdrop | open |
+| **B2, B5–B12** | axil-auth: CSRF on login, session no-Secure, password min, etc. | open |
+| **F1–F3** | libxylem: missing-impl error, RTLD_NODELETE, error handling | open |
+| **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse | open |
+| **E26–E27** | libqmap: abort → error, stale TODOs | open |
+| **E25, F4** | stoma + xy logging | open |
+| **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` | open |
 
 ### Phase 5 — Cleanup
 

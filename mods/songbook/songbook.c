@@ -454,11 +454,11 @@ static int api_sb_transpose_get(int fd, char *body)
 	char qs[1024] = { 0 };
 	char n_str[16] = { 0 }, t_str[16] = { 0 };
 	int flags = TRANSP_HTML;
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");
 
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	if (!qs[0])
 		return bad_request(fd, "Missing query string");
 
@@ -843,7 +843,7 @@ static void sb_parse_detail_prefs(
 	*show_media = 0;
 	*zoom = VIEWER_ZOOM_DEFAULT;
 
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	if (qs[0]) {
 		int pf;
 		parse_transpose_qs(qs, t, &pf, show_media);
@@ -1115,7 +1115,7 @@ static int songbook_add_get_handler(int fd, char *body)
 	const char *csrf_token = csrf_setup(fd);
 
 	char qs[512] = { 0 };
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	if (qs[0])
 		axil_query_parse(qs);
 

@@ -53,7 +53,7 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 		bud_node *body;
 
 		snprintf(status_str, sizeof(status_str), "%d", status);
-		axil_env_get(fd, uri, "DOCUMENT_URI");
+		axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 
 		body = site_ui_layout(
 		        msg ? msg : status_str, uri, "!", get_request_user(fd),

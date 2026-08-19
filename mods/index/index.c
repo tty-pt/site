@@ -142,7 +142,7 @@ static const char *index_name(int fd)
 	static __thread char uri[256];
 	char *module;
 
-	axil_env_get(fd, uri, "DOCUMENT_URI");
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 	module = strchr(uri + 1, '/');
 	if (module)
 		*module = '\0';
@@ -657,7 +657,7 @@ XY_IMPL(int, index_render_list,
 
 	(void)hd;
 	(void)fmt;
-	axil_env_get(fd, query, "QUERY_STRING");
+	axil_env_get(fd, query, sizeof(query), "QUERY_STRING");
 	username = get_request_user(fd);
 	return idx_render_list_bud(
 	        fd, index_name(fd), query, username ? username : "");
@@ -898,7 +898,7 @@ static int index_delete_get_handler(int fd, char *body)
 	(void)body;
 
 	char id[128] = { 0 };
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");
 
@@ -943,7 +943,7 @@ static int index_delete_handler(int fd, char *body)
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");
 
@@ -1062,7 +1062,7 @@ XY_IMPL(int, check_item_access,
 	if (!*user)
 		return -1;
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, id_sz, "PATTERN_PARAM_ID");
 	if (!id[0]) {
 		bad_request(fd, "Missing ID");
 		return -1;

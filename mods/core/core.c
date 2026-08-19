@@ -39,8 +39,8 @@ static int alias_redirect(
 	char location[1600];
 	int written;
 
-	axil_env_get(fd, uri, "DOCUMENT_URI");
-	axil_env_get(fd, query, "QUERY_STRING");
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+	axil_env_get(fd, query, sizeof(query), "QUERY_STRING");
 
 	{
 		size_t flen = strlen(from_prefix);

@@ -79,6 +79,44 @@ TEST(transpose_negative)
 	transp_free(ctx);
 }
 
+TEST(transpose_large_negative)
+{
+	transp_ctx_t *ctx = transp_init();
+	assert(ctx != NULL);
+
+	/* Large negative transpose (beyond -12) must wrap correctly, not crash.
+	 * Regression: -86 was normalized to -158 by the old formula, causing
+	 * an OOB index in chord_str() -> SIGSEGV in strlen(). */
+	char *result = transp_buffer(ctx, "A F#m A", -86, TRANSP_HTML);
+	assert(result != NULL);
+	assert(str_contains(result, "<b>"));
+	/* -86 % 12 = 10: A(9)+10=19%12=7->G, F#m(6)+10=16%12=4->Em */
+	assert(str_contains(result, "G"));
+	assert(str_contains(result, "Em"));
+	free(result);
+
+	/* Also test -12, -13, and multiples of 12. */
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C", -12, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "C"));
+	free(result);
+
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C", -13, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "B"));
+	free(result);
+
+	transp_reset_key(ctx);
+	result = transp_buffer(ctx, "C", -24, 0);
+	assert(result != NULL);
+	assert(str_contains(result, "C"));
+	free(result);
+
+	transp_free(ctx);
+}
+
 TEST(html_output)
 {
 	transp_ctx_t *ctx = transp_init();
@@ -1364,6 +1402,7 @@ int main(void)
 	RUN_TEST(transpose_with_modifiers);
 	RUN_TEST(transpose_minor_chords);
 	RUN_TEST(transpose_negative);
+	RUN_TEST(transpose_large_negative);
 	RUN_TEST(html_output);
 	RUN_TEST(flat_notation);
 	RUN_TEST(latin_notation);

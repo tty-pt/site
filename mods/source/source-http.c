@@ -146,7 +146,7 @@ static int source_write_init(
         const char **out_username)
 {
 	char dataset_id[128] = { 0 };
-	axil_env_get(fd, dataset_id, "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -585,7 +585,7 @@ static int source_get_handler(int fd, char *body)
 	(void)body;
 
 	memset(dataset_id, 0, sizeof(dataset_id));
-	axil_env_get(fd, dataset_id, "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	def = source_find(dataset_id);
 	if (!def)
@@ -600,7 +600,7 @@ static int source_get_handler(int fd, char *body)
 		return respond_json_error(fd, 403, "Forbidden");
 
 	memset(qs, 0, sizeof(qs));
-	axil_env_get(fd, qs, "QUERY_STRING");
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
 	page = 1;
 	per_page = 0;
@@ -716,7 +716,7 @@ static int source_put_handler(int fd, char *body)
 	}
 
 	char key[128] = { 0 };
-	axil_env_get(fd, key, "PATTERN_PARAM_KEY");
+	axil_env_get(fd, key, sizeof(key), "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_json_error(fd, 400, "Missing key");
 
@@ -779,7 +779,7 @@ static int inv_guard_cb(const source_def_t *target, void *user)
 static int source_delete_handler(int fd, char *body)
 {
 	char dataset_id[128] = { 0 };
-	axil_env_get(fd, dataset_id, "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -804,7 +804,7 @@ static int source_delete_handler(int fd, char *body)
 	}
 
 	char key[128] = { 0 };
-	axil_env_get(fd, key, "PATTERN_PARAM_KEY");
+	axil_env_get(fd, key, sizeof(key), "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_json_error(fd, 400, "Missing key");
 
@@ -977,8 +977,8 @@ static int source_get_item_handler(int fd, char *body)
 
 	(void)body;
 
-	axil_env_get(fd, dataset_id, "PATTERN_PARAM_DATASET_ID");
-	axil_env_get(fd, item_id, "PATTERN_PARAM_KEY");
+	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(fd, item_id, sizeof(item_id), "PATTERN_PARAM_KEY");
 
 	rc = source_http_get_item_json(fd, dataset_id, item_id, &json);
 	if (rc == 404)

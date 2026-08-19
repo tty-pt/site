@@ -61,6 +61,8 @@ expect_zero "/song/?title=star" "mid-word 'star' must NOT match 'estar' (prefix 
 expect_rows "/song/?title=cor" "token prefix 'cor' matches"
 expect_zero "/song/?title=coracao" "accent-sensitive: 'coracao' must NOT match 'Coração'"
 expect_zero "/song/?title=zzzzzz" "non-matching value -> 0 rows"
+expect_rows "/song/?title=" "empty title param -> all songs (not filtered)"
+expect_rows "/song/?title=&author=" "all empty params -> all songs"
 expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
 expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"
 
