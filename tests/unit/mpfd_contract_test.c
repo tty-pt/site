@@ -39,7 +39,8 @@ static int mpfd_get(const char *name, char *buf, size_t buf_len)
 	const struct mpfd_val *val = fake_lookup(name);
 	if (!val)
 		return -1;
-	size_t to_copy = val->len < buf_len ? val->len : buf_len;
+	size_t to_copy = val->len < buf_len ? val->len
+	                                    : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data + val->filename_len, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';
@@ -96,7 +97,8 @@ static void expect_copied_nul(
 {
 	int ret;
 	char probe;
-	size_t copied = field_len < buf_len ? field_len : buf_len;
+	size_t copied = field_len < buf_len ? field_len
+	                                   : (buf_len > 0 ? buf_len - 1 : 0);
 
 	memset(buf, 0x41, buf_len);
 	probe = buf[buf_len + 1];
@@ -119,24 +121,24 @@ int main(void)
 	/* Field exactly buf_len: fixed contract NUL-terminates at
 	 * buf[to_copy] (callers pass sizeof(buf)-1 so this stays in-bounds). */
 	expect_copied_nul(
-	        "len == buf returns len (nul expected)", "0123456789abcdef", 16,
-	        buf, 16, 16, 1);
+	        "len == buf returns buf_len-1", "0123456789abcdef", 16,
+	        buf, 16, 15, 1);
 
 	/* Field larger than buffer: fixed contract returns the COPIED count
-	 * (buf_len), not the full field length. */
+	 * (buf_len - 1), not the full field length. */
 	expect_copied_nul(
 	        "len > buf returns copied count", "0123456789abcdef", 16, buf,
-	        8, 8, 0);
+	        8, 7, 0);
 
 	/* Missing field: -1. */
 	fake_present = 0;
 	CHECK("missing field -> -1", mpfd_get("nope", buf, sizeof(buf)) == -1);
 
-	/* NUL-termination when to_copy == buf_len is guaranteed (fixed). */
+	/* NUL-termination when to_copy == buf_len-1 is guaranteed (fixed). */
 	memset(buf, 0x41, sizeof(buf));
 	fake_set("01234567", 8, 0);
 	(void)mpfd_get("x", buf, 8);
-	CHECK("exact-fit terminates", buf[8] == '\0');
+	CHECK("exact-fit terminates", buf[7] == '\0');
 
 	if (failures) {
 		printf("mpfd_contract_test: %d/%d assertions failed — "

@@ -14,6 +14,20 @@
 
 static int remove_path_recursive(const char *path);
 
+static int is_safe_id(const char *id)
+{
+	const char *p;
+	if (!id || !id[0])
+		return 0;
+	if (strcmp(id, ".") == 0 || strcmp(id, "..") == 0)
+		return 0;
+	for (p = id; *p; p++) {
+		if (*p == '/' || *p == '\\' || *p < 0x20 || *p == 0x7f)
+			return 0;
+	}
+	return 1;
+}
+
 XY_IMPL(int, read_meta_file,
 	const char *, item_path,
 	const char *, name,
@@ -137,28 +151,31 @@ XY_IMPL(int, write_item_child_file,
 	return write_file_path(p, buf, sz);
 }
 
+#define SLURP_MAX (10 * 1024 * 1024)
+
 XY_IMPL(char *, slurp_file, const char *, path)
 {
 	FILE *fp = fopen(path, "r");
-	long fsize;
+	struct stat st;
 	char *buf;
 	size_t got;
 
 	if (!fp)
 		return NULL;
-	fseek(fp, 0, SEEK_END);
-	fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	if (fsize <= 0) {
+	if (fstat(fileno(fp), &st) != 0 || !S_ISREG(st.st_mode)) {
 		fclose(fp);
 		return strdup("");
 	}
-	buf = malloc((size_t)fsize + 1);
+	if (st.st_size <= 0 || (size_t)st.st_size > SLURP_MAX) {
+		fclose(fp);
+		return (st.st_size <= 0) ? strdup("") : NULL;
+	}
+	buf = malloc((size_t)st.st_size + 1);
 	if (!buf) {
 		fclose(fp);
 		return NULL;
 	}
-	got = fread(buf, 1, (size_t)fsize, fp);
+	got = fread(buf, 1, (size_t)st.st_size, fp);
 	fclose(fp);
 	buf[got] = '\0';
 	return buf;
@@ -280,8 +297,13 @@ XY_IMPL(int, item_path_build_root,
 	char *, out,
 	size_t, outlen)
 {
-	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s/items/%s", root, module, id);
+	const char *root;
+	int n;
+
+	if (!is_safe_id(id))
+		return -1;
+	root = (doc_root && doc_root[0]) ? doc_root : ".";
+	n = snprintf(out, outlen, "%s/items/%s/items/%s", root, module, id);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;

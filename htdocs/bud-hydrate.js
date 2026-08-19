@@ -30,6 +30,18 @@ function nodeIdFromComment(text) {
 	return match ? Number.parseInt(match[1], 10) : null;
 }
 
+function isRawComment(text) {
+	return text && /^bud-raw:\d+$/.test(text);
+}
+
+function sanitizeRawHtml(html) {
+	if (!html) {
+		return html;
+	}
+	return html.replace(
+	        /<!--\s*\/?bud-(?:text|fragment):\d+\s*-->/g, '<!-- raw -->');
+}
+
 function walkNodes(root, visitor) {
 	const stack = [root];
 
@@ -476,20 +488,37 @@ class BudHostBase {
 					node.textContent = op.a || '';
 				}
 			return true;
-		case 'patch-raw':
-			id = parseIntOrNull(op.b);
-			parent = this._currentParent || this.root;
-			if (parent && parent.nodeType === Node.ELEMENT_NODE) {
-				const doc = getDocumentForNode(parent);
+	case 'patch-raw':
+		id = parseIntOrNull(op.b);
+		if (id === null) {
+			return true;
+		}
+		parent = this._currentParent || this.root;
+		if (parent && parent.nodeType === Node.ELEMENT_NODE) {
+			const existing = this.getNode(id);
+			const doc = getDocumentForNode(parent);
+
+			if (existing && existing.nodeType === Node.COMMENT_NODE) {
+				while (existing.nextSibling) {
+					existing.nextSibling.remove();
+				}
+				if (op.a) {
+					const tpl = doc.createElement('template');
+					tpl.innerHTML = sanitizeRawHtml(op.a);
+					parent.insertBefore(tpl.content, null);
+				}
+			} else {
 				const marker = doc.createComment(`bud-raw:${id}`);
 				parent.appendChild(marker);
 				if (op.a) {
 					const tpl = doc.createElement('template');
-					tpl.innerHTML = op.a;
-					parent.insertBefore(tpl.content, marker.nextSibling);
+					tpl.innerHTML = sanitizeRawHtml(op.a);
+					parent.insertBefore(tpl.content, null);
 				}
+				this.setNode(id, marker);
 			}
-			return true;
+		}
+		return true;
 		case 'patch-remove':
 			id = parseIntOrNull(op.a);
 			if (id !== null) {

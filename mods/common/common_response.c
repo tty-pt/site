@@ -155,7 +155,7 @@ XY_IMPL(int, site_ui_respond_form_page,
 XY_IMPL(int, csrf_check_mpfd, int, fd)
 {
 	char csrf_submitted[33] = { 0 };
-	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted) - 1);
+	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted));
 	if (csrf_validate(fd, csrf_submitted))
 		return respond_error(fd, 403, "Forbidden");
 	return 0;

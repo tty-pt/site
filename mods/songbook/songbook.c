@@ -164,8 +164,8 @@ static int handle_sb_transpose_authorized(
 	const char *names[1];
 	const char *vals[1];
 
-	mpfd_get("n", n_str, sizeof(n_str) - 1);
-	mpfd_get("t", t_str, sizeof(t_str) - 1);
+	mpfd_get("n", n_str, sizeof(n_str));
+	mpfd_get("t", t_str, sizeof(t_str));
 	if (!n_str[0])
 		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
@@ -199,7 +199,7 @@ static int handle_sb_randomize_authorized(
 	char new_song_id[128] = { 0 };
 	char location[256];
 
-	mpfd_get("n", n_str, sizeof(n_str) - 1);
+	mpfd_get("n", n_str, sizeof(n_str));
 	if (!n_str[0])
 		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
@@ -293,7 +293,7 @@ static int handle_sb_add(int fd, char *body)
 	if (index_add_item(fd, body, id, sizeof(id)) != 0)
 		return 1;
 
-	int choir_len = mpfd_get("choir", choir, sizeof(choir) - 1);
+	int choir_len = mpfd_get("choir", choir, sizeof(choir));
 	if (choir_len > 0) {
 		choir[choir_len] = '\0';
 		char sb_item_path[512];
@@ -1173,7 +1173,7 @@ static int songbook_edit_post_authorized(
 		char amount_str[16] = { 0 };
 		int amount = 0, i;
 
-		if (mpfd_get("amount", amount_str, sizeof(amount_str) - 1) > 0)
+		if (mpfd_get("amount", amount_str, sizeof(amount_str)) > 0)
 			amount = atoi(amount_str);
 
 		hyle_source_ordered_clear("songbook.songs", ctx->id);
@@ -1193,12 +1193,12 @@ static int songbook_edit_post_authorized(
 
 			if (mpfd_get(
 			            remove_field, remove_val,
-			            sizeof(remove_val) - 1) > 0)
+			            sizeof(remove_val)) > 0)
 				continue;
 
 			if (mpfd_get(
 			            song_field, song_val,
-			            sizeof(song_val) - 1) <= 0)
+			            sizeof(song_val)) <= 0)
 				continue;
 
 			/* Extract song ID from "Title [song_id]" format */
@@ -1215,10 +1215,10 @@ static int songbook_edit_post_authorized(
 				char fmt_val[64] = { 0 };
 				mpfd_get(
 				        key_field, key_val,
-				        sizeof(key_val) - 1);
+				        sizeof(key_val));
 				mpfd_get(
 				        fmt_field, fmt_val,
-				        sizeof(fmt_val) - 1);
+				        sizeof(fmt_val));
 
 				sb_append_song(
 				        "songbook.songs", ctx->id, extracted,

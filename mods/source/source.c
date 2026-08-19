@@ -60,11 +60,12 @@ static void resolve_ref_append(
 {
 	const char *target_id = NULL;
 	const char *display = NULL;
+	char *end;
 	uint32_t pos;
 	size_t dlen;
 
-	pos = (uint32_t)strtoul(token, NULL, 10);
-	if (target->fields_hd)
+	pos = (uint32_t)strtoul(token, &end, 10);
+	if (target->fields_hd && end != token && *end == '\0')
 		target_id = qmap_get_key(target->fields_hd, pos);
 	if (!target_id)
 		target_id = token;

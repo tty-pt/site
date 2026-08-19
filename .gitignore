@@ -24,3 +24,5 @@
 !/htdocs/styles.css
 /external/*/bin
 /external/*/lib
+tests/unit/mpfd_contract_test
+.opencode

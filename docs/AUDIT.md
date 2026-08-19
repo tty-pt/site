@@ -1,10 +1,17 @@
-# Audit — issues catalog, proposed fixes, and roadmap
+# Audit — leftover issues
 
-Deep audit of the full stack: site modules, submodules (`axil`, `axil-auth`,
-`hyle`, `libqmap`, `libxylem`, `bud`, `stoma`), build, and tests.
+Read-only review of the stack (2026-08-17). Site-only batches 1–3 already
+landed; this file lists **what is still open**. Do not re-fix anything
+not listed here.
 
-**Date:** 2026-08-17. **Method:** read-only code review. **Not claimed:** live
-exploit verification, fuzzing, or network testing.
+**Not claimed:** live exploit verification, fuzzing, or network testing.
+
+Site-only work is allowed. Submodule PRs (axil, axil-auth, hyle, libxylem,
+libqmap, stoma, bud) are Phase 4 — do not edit those trees unless asked.
+
+Deferred on purpose (do not start without a plan): **C7** (GET `/api/song/prefs`
+writes; WASM depends on it), **E16** (`per_page` clamp must rewrite `qs_copy`
+or hyle still sees 0), **F15** (root-doc deletion; user declined).
 
 ---
 
@@ -13,49 +20,10 @@ exploit verification, fuzzing, or network testing.
 | First-pass claim | Actual |
 |---|---|
 | `GET /api/dataset/song.items/%2e%2e` is an API id traversal | Static mapping runs **before** handlers (`libaxil.c:2249-2250`). That URL serves `./htdocs` as a directory 200. The real primitive is `htdocs /*` + decode-after-`..`-check. `GET /%2e%2e/etc/shadow` and `/api/dataset/song.items/%2e%2e/%2e%2e/etc/shadow` both reach jail `./etc/shadow`. |
-| `qmap_put` takes ownership | It **copies** (`libqmap.c:1189-1218`). Site docs are wrong. Stack buffers are safe; `malloc`+`put` without `free` leaks. |
+| `qmap_put` takes ownership | It **copies** (`libqmap.c:1189-1218`). Stack buffers are safe; `malloc`+`put` without `free` leaks. |
 | PUT/DELETE `/api/dataset` are live write surfaces | axil only dispatches GET/POST. PUT/DELETE handlers are registered (`source-http.c:1004-1007`) but never called. **POST create/update is live** and sufficient for IDOR + empty-body CSRF skip. |
-| `get_doc_root` is a jail escape | Inverted return just forces `"."` (`common_storage.c:167-174`). Works only because non-root `chdir`s into the tree. |
-| `docs/FILTERS.md` §4: "last value wins" | C prefilter already does union-within-field. **Doc is stale.** |
+| `get_doc_root` is a jail escape | Inverted return just forces `"."` (`common_storage.c:184-190`). Works only because non-root `chdir`s into the tree. |
 | Host `/etc/shadow` always leaked | Only if not chrooted **and** readable. Root+chroot still leaks jail `./etc/shadow` (password hashes). |
-
----
-
-## 1b. Fix batch — 2026-08-17
-
-7 issues fixed in one pass (site-only, no submodule changes):
-
-| ID | What | File |
-|---|---|---|
-| **D2** | textarea XSS via `bud_raw` (open — `</textarea>` breakout only) | `mods/common/ux/site_ui.c:548` |
-| **D5** | HTML-escape `<title>` via `escape_html_into` | `mods/common/ux/site_ui.c:587-618` |
-| **D6** | Escape `<` and `/` in `ljw_str` (script injection) | `mods/index/ux/list.c:435-438` |
-| **D12** | Delete `data-chord-data` attr (64KB bloat) | `mods/song/ux/detail.c:243` |
-| **D19** | Pass `NULL` module for poem/choir (no `#bud-root`) | `mods/poem/poem.c:105`, `mods/choir/choir.c:415` |
-| **D20** | `if (!res.ok) return;` after WASM fetch | `htdocs/bud-client.js:14` |
-| **F10b** | `test -z "$GDB"` (dead gdb branch) | `start.sh:25` |
-| **F19** | Prefix boundary check in `alias_redirect` | `mods/core/core.c:45-49` |
-
-Build clean; all tests pass.
-
-### Fix batch 2 — 2026-08-17
-
-10 issues fixed (site-only, no submodule changes):
-
-| ID | What | File |
-|---|---|---|
-| **E7** | Fix qmap-ownership docs ("copies" not "takes ownership") | `docs/CONVENTIONS.md:69`, `docs/ARCHITECTURE.md:53` |
-| **E12** | `source_validate_row` OOM: `return 0` → `return -1` | `mods/source/source.c:671` |
-| **E21** | Include filter: `strstr` → comma-delimited match | `mods/source/source-http.c:367-372` |
-| **E22** | `index_open`: slugify before `index_update_json` | `mods/index/index.c:798-799` |
-| **E23** | Delete stale `BUD_QM_VSTR` fallback (=7, should be 8) | `mods/common/field_macros.h:25-27` |
-| **E24** | `source_setup`: check `source_register` return | `mods/source/source.c:1457-1467` |
-| **D15** | `bud_host_fetch`: add `res.ok` check | `htdocs/bud-hydrate.js:799-800` |
-| **D16** | `buildControlValue`: add `textContent` fallback | `htdocs/bud-hydrate.js:129` |
-| **F14** | Delete dead `mods/redir/` directory | `mods/redir/` |
-| **F15b** | Remove stale `mods/ssr` warning from AGENTS.md | `AGENTS.md:46-47` |
-
-Build clean; repro-matrix 8/8.
 
 ---
 
@@ -87,7 +55,7 @@ Build clean; repro-matrix 8/8.
 
 ---
 
-## 4. Issues by layer
+## 4. Open issues by layer
 
 ### A. axil (submodule `tty-pt/axil`)
 
@@ -533,10 +501,12 @@ generate fail; `HttpOnly; SameSite=Strict` (+ `Secure` on TLS).
 **Where:** `mods/auth/auth.c:327-334`
 
 `GET /auth/api/csrf` mints a token and returns it in the body. Any
-origin that can trigger a request can read a CSRF token.
+origin that can trigger a request can read a CSRF token. e2e helpers
+(`tests/e2e/helpers/auth.ts:145-167`) depend on this endpoint.
 
 **Fix:** Require session; `Cache-Control: no-store`; or stop returning
-the body (hidden field is enough).
+the body (hidden field is enough). Update e2e helpers if the body goes
+away.
 
 **Land:** Site.
 
@@ -556,19 +526,6 @@ require CSRF on mutating routes. Do not treat "public dataset" as
 
 **Land:** Site.
 
-#### C4 — Create with existing slug overwrites owner
-
-**Severity:** High
-**Where:** `mods/index/index.c:193-198`, `:702-706`
-
-`mkdir` + `EEXIST` is treated as success, then `item_record_ownership`
-overwrites the existing owner file.
-
-**Fix:** `EEXIST` → 409. Never rewrite owner on a directory that already
-exists.
-
-**Land:** Site.
-
 #### C5 — Non-root ownership fallback: first user owns everything
 
 **Severity:** High
@@ -576,7 +533,7 @@ exists.
 
 Missing owner file + euid matches dir uid + first user uid 1000 → first
 user passes both checks. `item_record_ownership` returns 0 on
-`fopen`/`chown` failure (`mods/index/index.c:1016-1033`), so the
+`fopen`/`chown` failure (`mods/index/index.c:1024-1041`), so the
 fallback is hit more often than intended.
 
 **Fix:** No owner file → deny. Fail `item_record_ownership` if
@@ -584,31 +541,36 @@ write/`chown` fails.
 
 **Land:** Site.
 
-#### C6 — `:id` unsanitized in path joins
+#### C6 — Remaining unsanitized `:id` path joins
 
 **Severity:** High
-**Where:** `mods/auth/auth.c:236-238`; `mods/index/index.c:938-956`;
-`mods/source/source.c:745-750`
+**Where:** `mods/auth/auth.c:236-238`; `mods/source/source.c:745-750`;
+`mods/source/source-http.c:654-665`, `:718-721`
 
-HTML add slugifies titles; URL `:id` does not. `item_ctx_load` copies
-`PATTERN_PARAM_ID` straight into a path. Delete recursively removes
-whatever that produces.
+`item_path_build_root` already rejects `/` `\` `.` `..` via `is_safe_id`.
+HTML add slugifies titles. These remaining joins still copy raw ids:
 
-**Fix:** Allow `[A-Za-z0-9_-]+` only. `realpath` + prefix under
-`items/<mod>/items`.
+- `item_ctx_load` snprintfs `ctx->id` straight into `ctx->item_path`
+- `source_update_item` mkdir on raw `id`
+- dataset POST uses raw key field / `PATTERN_PARAM_KEY`
+
+**Fix:** Allow `[A-Za-z0-9_-]+` only (or reuse `is_safe_id`) before every
+path join. `realpath` + prefix under `items/<mod>/items`.
 
 **Land:** Site.
 
-#### C7 — `GET /api/song/prefs` writes prefs, no CSRF
+#### C7 — `GET /api/song/prefs` writes prefs, no CSRF — **deferred**
 
 **Severity:** High
 **Where:** `mods/song/song.c:149-176`, `:466-471`
 
 GET and POST share `api_song_viewer_prefs_handler`. GET parses
 `QUERY_STRING` and writes zoom/latin/media with no CSRF. `<img
-src="/api/song/prefs?z=50">` mutates a logged-in user.
+src="/api/song/prefs?z=50">` mutates a logged-in user. WASM currently
+depends on the GET write.
 
-**Fix:** Writes only on POST + CSRF. GET read-only.
+**Fix:** Writes only on POST + CSRF. GET read-only. Update the WASM
+client in the same change.
 
 **Land:** Site.
 
@@ -669,21 +631,6 @@ textarea's raw-text state. Only vector is `</textarea>` breakout.
 
 **Land:** Site.
 
-#### D3 — Song lyric `<` passthrough → raw HTML in `bud_raw` / `innerHTML`
-
-**Severity:** Critical
-**Where:** `mods/song/lib/transp/render.c:189-194`; sinks at
-`mods/song/ux/detail.c:190`, `:243`; `htdocs/bud-hydrate.js:508-515`
-
-A lyric line starting with `<` is emitted raw (the rest of the line).
-Tests never cover this case. Then `bud_raw` (SSR) or `innerHTML` (WASM)
-executes it.
-
-**Fix:** Escape like other lyrics. Tiny allowlist (`<i>`, `<b>`) if
-markup is required.
-
-**Land:** Site.
-
 #### D4 — Unsanitized media URLs in WASM `innerHTML`
 
 **Severity:** Critical
@@ -699,18 +646,10 @@ audio/pdf; reject `"`, `'`, `<`, `>`, `\`, newlines. Or use
 
 **Land:** Site.
 
-#### D5 — `<title>` not escaped — **FIXED**
-
-HTML-escaped title via `escape_html_into` helper. (`site_ui.c:587-618`)
-
-#### D6 — List `#bud-state` JSON does not escape `<` — **FIXED**
-
-Added `<` → `\u003c` and `/` → `\/` escaping to `ljw_str`. (`list.c:435-438`)
-
 #### D7 — Empty list skips `#bud-state` → id drift
 
 **Severity:** High
-**Where:** `mods/index/index.c:631-640` vs `:596-616`
+**Where:** `mods/index/index.c:634-647` vs `:584-619`
 
 Non-empty lists serialize state and set `data-modules="list"`. Empty
 page still sets `data-modules="list"` but passes `extra_head=NULL`.
@@ -731,6 +670,7 @@ updates in-place for `TEXT_NODE`; otherwise `createWrappedText` appends
 under stale parent. Labels don't change; stray text appears.
 
 **Fix:** Capture the text node:
+
 ```c
 bud_node *txt = bud_text(key_name(...));
 g_key_options[i+11] = txt;
@@ -748,9 +688,11 @@ A present `.wasm` is never rebuilt. XSS/id-alignment fixes stay off the
 wire until someone `rm`s the artifact.
 
 **Fix:**
+
 ```make
 $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 ```
+
 Fail if WASI clang is missing when targets are set.
 
 **Land:** Site.
@@ -767,23 +709,6 @@ and `patch-raw`, one sink is a full XSS.
 `nosniff`; `Referrer-Policy`. Move inline `window.bud_data` out of line.
 
 **Land:** Site.
-
-#### D11 — Hydration-map poisoning via raw HTML comments
-
-**Severity:** Medium
-**Where:** `htdocs/bud-hydrate.js:24-88`
-
-`buildHydrationMap` trusts any `<!--bud-text:N-->` inside raw islands.
-A crafted comment steals an id.
-
-**Fix:** Strip comment markers matching `^/?bud-(text|fragment):\d+$`
-inside raw islands.
-
-**Land:** Site (bud-hydrate.js).
-
-#### D12 — `data-chord-data` dumps 64KB HTML into an attribute — **FIXED**
-
-Deleted `lx_attr("data-chord-data", ...)`. No JS reads it. Updated e2e test. (`detail.c:243`)
 
 #### D13 — Songbook media subtree changes child count with `show_media`
 
@@ -809,14 +734,6 @@ elements to 4096.
 
 **Land:** bud submodule (or site workaround).
 
-#### D15 — `bud_host_fetch` GET-only, ignores status — **FIXED**
-
-Added `if (!res.ok) return;` before `.text()`. (`bud-hydrate.js:799-800`)
-
-#### D16 — `buildEventPayload` dropped `textContent` — **FIXED**
-
-`return ''` → `return target.textContent || ''` for non-form elements. (`bud-hydrate.js:129`)
-
 #### D17 — Attribute/tag names not escaped
 
 **Severity:** Medium
@@ -840,14 +757,6 @@ Stray native symbols link as address 0 and crash in the browser.
 
 **Land:** Site.
 
-#### D19 — Poem/choir set `data-modules` without `#bud-root` — **FIXED**
-
-Pass `NULL` module for both pages; no WASM client loaded. (`poem.c:105`, `choir.c:415`)
-
-#### D20 — `bud-client.js` instantiates non-OK wasm responses — **FIXED**
-
-Added `if (!res.ok) return;` after `fetch()`. (`bud-client.js:13-14`)
-
 #### D21 — `bud_attr_fmt` 4-slot rotating buffer
 
 **Severity:** Low
@@ -859,17 +768,6 @@ Four 256-byte slots. Fifth formatted attr in one `lx_el` aliases.
 
 **Land:** bud submodule.
 
-#### D22 — `patch-raw` always appends, never replaces
-
-**Severity:** Low
-**Where:** `htdocs/bud-hydrate.js:479-491`
-
-Creates new `bud-raw` comment each time.
-
-**Fix:** Replace by id.
-
-**Land:** Site.
-
 ---
 
 ### E. Data layer (site + hyle + stoma + qmap)
@@ -877,7 +775,7 @@ Creates new `bud-raw` comment each time.
 #### E1 — HTML delete skips `hyle_source_del`
 
 **Severity:** High
-**Where:** `mods/index/index.c:955-1005`
+**Where:** `mods/index/index.c:955-1013`
 
 Delete uses `qmap_del_all` on `row_hd` / `fields_hd` and never sets
 `e->stoma_dirty`. Deleted IDs appear in search results.
@@ -890,7 +788,7 @@ Delete uses `qmap_del_all` on `row_hd` / `fields_hd` and never sets
 #### E2 — Inverse-ref cleanup is memory-only; disk resurrects
 
 **Severity:** High
-**Where:** `mods/source/source.c:391-402`
+**Where:** `mods/source/source.c:391-403`
 
 `qmap_del(target->fields_hd, "ref_key:field")` zeros memory. On
 restart, `source_scan_item` reloads old refs from disk.
@@ -943,18 +841,14 @@ function, never reuse on create.
 #### E6 — List pages leak result and schema qmaps
 
 **Severity:** High
-**Where:** `mods/index/index.c:506-629` (result_hd never closed);
-`mods/source/source.c:1124-1183` (`source_get_schema_hd` opens a new
+**Where:** `mods/index/index.c:509-632` (`result_hd` never closed);
+`mods/source/source.c:1125-1185` (`source_get_schema_hd` opens a new
 map every call, never closed)
 
 **Fix:** Close `result_hd` on every exit. Cache schema on
 `source_def_t` or close in callers.
 
 **Land:** Site.
-
-#### E7 — Docs say `qmap_put` takes ownership; it copies — **FIXED**
-
-Reworded both docs: "copies key and value; caller retains ownership." (`CONVENTIONS.md:69`, `ARCHITECTURE.md:53`)
 
 #### E8 — `source_after_update` is song-global, ignores `dataset_id`
 
@@ -997,23 +891,6 @@ via in-memory choir.songs. Restore hard fail in `test.sh`.
 
 **Land:** Site.
 
-#### E11 — Non-numeric ref token → position 0
-
-**Severity:** Medium
-**Where:** `mods/source/source.c:66-70`
-
-`strtoul(token, NULL, 10)` on a slug returns 0. Position 0 is the first
-row.
-
-**Fix:** `strtoul(token, &end, 10)` and require `*end=='\0'`. Otherwise
-treat as slug.
-
-**Land:** Site.
-
-#### E12 — `source_validate_row` OOM returns valid — **FIXED**
-
-Changed OOM return from 0 (valid) to -1. (`source.c:668-671`)
-
 #### E13 — `hyle_source_put` ignores `qmap_field_put` failure
 
 **Severity:** Medium
@@ -1029,7 +906,7 @@ Failed ref resolve returns `QM_MISS` but put returns 0 (success).
 
 **Severity:** Medium
 **Where:** `mods/source/source-http.c:807-825` vs
-`mods/index/index.c:955-1005`
+`mods/index/index.c:955-1013`
 
 API returns 409 if referenced, then `source_delete_item`. HTML clears
 inverse refs in memory and proceeds, skipping hyle.
@@ -1051,15 +928,17 @@ Song lyrics via API fail.
 
 **Land:** Site.
 
-#### E16 — Unbounded `per_page` on dataset API
+#### E16 — Unbounded `per_page` on dataset API — **deferred**
 
 **Severity:** Medium
 **Where:** `mods/source/source-http.c:601-623`
 
 `per_page=0` means "return all rows". Any logged-in user can dump a
-full dataset.
+full dataset. A local clamp is not enough: hyle still reads the original
+`qs_copy`.
 
-**Fix:** Default + hard cap (e.g. 100). Treat 0 as default.
+**Fix:** Default + hard cap (e.g. 100). Treat 0 as default. Rewrite
+`qs_copy` so hyle sees the clamped value.
 
 **Land:** Site.
 
@@ -1108,27 +987,11 @@ values are NULL.
 `external/hyle/crates/hyle/src/query.rs:55-65`
 
 C creates one filter per repeated key; Rust joins with commas. Site uses
-C. `docs/FILTERS.md` §4 still says "last value wins" (stale).
+C. `docs/FILTERS.md` §4 already documents union-within-field.
 
-**Fix:** Fix Rust crate or mark unused. Refresh FILTERS.md §4.
+**Fix:** Fix Rust crate or mark unused.
 
-**Land:** hyle submodule + docs.
-
-#### E21 — `include` filter `strstr` without commas — **FIXED**
-
-Comma-delimited match: `strstr(inc_set, ",name,")` instead of `strstr(inc_set, name)`. (`source-http.c:367`)
-
-#### E22 — `index_open` records empty module id — **FIXED**
-
-Swapped: `axil_slugify` before `index_update_json`. (`index.c:798-799`)
-
-#### E23 — `BUD_QM_VSTR` fallback is wrong value — **FIXED**
-
-Deleted stale `#define BUD_QM_VSTR 7` (bud.h provides correct value 8). (`field_macros.h:25-27`)
-
-#### E24 — `source_setup` ignores `source_register` failure — **FIXED**
-
-Check `source_register` return; free `sf` and return 0 on failure. (`source.c:1457-1467`)
+**Land:** hyle submodule.
 
 #### E25 — `stoma_fold` Latin-1 only; `STOMA_MAX_TOKENS` 64
 
@@ -1236,19 +1099,6 @@ every module bind.
 
 **Land:** Site.
 
-#### F6 — `mpfd_get` writes one byte past `buf_len`
-
-**Severity:** Medium
-**Where:** `mods/mpfd/mpfd.c:318-322`; test pins bug at
-`tests/unit/mpfd_contract_test.c:119-139`
-
-`to_copy = min(len, buf_len)` then `buf[to_copy] = '\0'` — writes
-`buf[buf_len]`.
-
-**Fix:** `to_copy = min(len, buf_len ? buf_len - 1 : 0)`. Update test.
-
-**Land:** Site.
-
 #### F7 — mpfd parser correctness gaps
 
 **Severity:** Medium
@@ -1268,7 +1118,7 @@ every module bind.
 #### F8 — `get_doc_root` inverts `axil_env_get` return code
 
 **Severity:** High
-**Where:** `mods/common/common_storage.c:167-174`
+**Where:** `mods/common/common_storage.c:184-190`
 
 `axil_env_get` returns 0 on hit, 1 on miss. `> 0` is true on miss,
 false on hit → always overwrites with `"."`. Works by accident (chdir
@@ -1281,7 +1131,7 @@ into tree). After root chroot, `DOCUMENT_ROOT` is `""` not `"/"`.
 #### F9 — `core` ignores `xy_load` errors; missing `mods.load` is OK
 
 **Severity:** High
-**Where:** `mods/core/core.c:13-14`, `:85-89`
+**Where:** `mods/core/core.c:13-14`, `:85-93`
 
 `xy_load` return discarded. Missing `mods.load` returns 0. A missing
 `.so` boots a server with no handlers / fake-success hooks.
@@ -1293,11 +1143,11 @@ into tree). After root chroot, `DOCUMENT_ROOT` is `""` not `"/"`.
 #### F10 — `start.sh` always enables `AUTH_SKIP_CONFIRM`
 
 **Severity:** Critical
-**Where:** `start.sh:24`, `:25-26`
+**Where:** `start.sh:24`
 
-`export AUTH_SKIP_CONFIRM=1` is unconditional. Gdb test fixed
-(`test -z "$GDB"`). The broader rework (gate on `AUTH_ENV=dev`) is
-tracked as B8.
+`export AUTH_SKIP_CONFIRM=1` is unconditional. The gdb test
+(`test ! -z "$GDB"`) is already correct. Broader rework (gate on
+`AUTH_ENV=dev`) is B8.
 
 **Land:** Site.
 
@@ -1315,47 +1165,37 @@ Add header-resolution check to `make`.
 
 **Land:** Site.
 
-#### F12 — CSS `?v=` duplicated, not computed
+#### F12 — CSS `?v=` not computed at build
 
-**Severity:** Medium
-**Where:** `mods/common/ux/site_ui.c:600-634`
+**Severity:** Low
+**Where:** `mods/common/ux/site_ui.c`
 
-Four literals, two copies of the HTML format. `hyle.css` is gitignored.
-
-**Fix:** `#define SITE_CSS_V` used once. Generate from cksum at build.
-Makefile copies `hyle.css` into `htdocs`.
+`#define SITE_CSS_V "?v=9"` is the single source. Cksum-at-build still
+open — bumping the define is still a manual step.
 
 **Land:** Site.
 
-#### F13 — e2e leftover `song-client.js`; confirm helper tails wrong log
+#### F13 — Confirm helper tails the wrong log
 
 **Severity:** Medium
-**Where:** `tests/e2e/bud-hydration.test.ts:39-58`
+**Where:** `tests/e2e/helpers/auth.ts`
 
-Test name/error still say `song-client.js`. Confirm helper looks at
-`/tmp/site.log` but watch logs to `debug/runtime/axil.log`.
-
-**Fix:** Rename assertion. Tail both logs.
+Confirm helper tails `/tmp/site.log` only; `make watch` logs to
+`debug/runtime/axil.log`.
 
 **Land:** Site.
 
-#### F14 — `mods/redir` dead duplicate of core redirects — **FIXED**
-
-Deleted `mods/redir/` directory. (`redir.c`; `core.c:45-96`)
-
-#### F15 — Stale planning / SSR docs
+#### F15 — Stale planning docs — **deferred** (do not delete unless asked)
 
 **Severity:** Low
 
 | Path | Problem |
 |---|---|
-| `mods/common/README.md` | Pre-rewrite APIs (`query_param`, `mods/ssr`) |
 | `HYLE-AO.md` | "IMPLEMENTATION IN PROGRESS" |
 | `AND-OR.md` | "PLAN (not yet implemented)" — shipped |
 | `DOC.md`, `TESTS.md`, `plans/*`, `scratch/*` | One-shot plans |
-| `AGENTS.md:45` | Warns about stale `mods/ssr`/`song-client.js` — still in e2e |
 
-**Fix:** Delete or archive. `docs/` is canonical.
+`docs/` is canonical. `mods/common/README.md` already matches the tree.
 
 **Land:** Site.
 
@@ -1375,7 +1215,7 @@ Deleted `mods/redir/` directory. (`redir.c`; `core.c:45-96`)
 #### F17 — `user_path_build` interpolates username into path
 
 **Severity:** Low
-**Where:** `mods/common/common_storage.c:123`
+**Where:** `mods/common/common_storage.c:128`
 
 `./home/%s/%s`. Username is already allowlisted in axil-auth (`[A-Za-z0-9_-]`), but no explicit check at this layer.
 
@@ -1383,84 +1223,72 @@ Deleted `mods/redir/` directory. (`redir.c`; `core.c:45-96`)
 
 **Land:** Site.
 
-#### F18 — Storage helpers lack hardening
+#### F18 — Remaining storage hardening
 
 **Severity:** Low
-**Where:** `mods/common/common_storage.c:90-104`, `:140-164`, `:241-288`
+**Where:** `mods/common/common_storage.c`
 
-- `write_file_path`: no `O_NOFOLLOW`, no fsync, no size cap.
-- `slurp_file`: unbounded `malloc(ftell)`.
-- `item_remove_path_recursive`: no prefix check under `items/`.
-- `item_path_build_root`: interpolates unsanitized id.
+`slurp_file` already has `fstat` + `S_ISREG` + 10 MiB cap.
+`item_path_build_root` already uses `is_safe_id`. Still open:
 
-**Fix:** `O_NOFOLLOW`; 10 MB slurp cap; `realpath` prefix; reject bad
-ids.
+- `write_file_path`: no `O_NOFOLLOW`, no fsync (`:104-118`)
+- `item_remove_path_recursive`: no prefix check under `items/` (`:258-262`)
 
 **Land:** Site.
 
-#### F19 — `alias_redirect` prefix match too broad — **FIXED**
-
-Added boundary check: `uri[flen] != '\0' && uri[flen] != '/'`. (`core.c:45-49`)
-
 ---
 
-## 5. Phased roadmap
+## 5. Phased roadmap (open only)
 
-### Phase 0 — Immediate safety (site, no submodule wait)
+### Phase 0 — Immediate safety (site)
 
-| ID | What | Status |
-|---|---|---|
-| **F10** | Fix `start.sh` gdb test (`$GDB`); `AUTH_SKIP_CONFIRM` rework (B8) | gdb fixed; export still unconditional |
-| **F9** | Fail boot on `xy_load` error | open |
-| **C1** | CSRF cookie: `HttpOnly`, pair parser, constant-time compare | open |
-| **C6** | Reject unsanitized `:id` in all path joins | open |
-| **D5, D6** | Kill XSS sinks: `<title>`, list JSON | **FIXED** |
-| **D2** | textarea XSS via `bud_raw` (only `</textarea>` breakout vector) | open |
-| **D12, D19, D20** | Delete `data-chord-data` attr, NULL module for poem/choir, res.ok | **FIXED** |
-| **F19** | alias_redirect prefix boundary | **FIXED** |
+| ID | What |
+|---|---|
+| **F10** | Stop unconditional `AUTH_SKIP_CONFIRM` (pairs with B8) |
+| **F9** | Fail boot on `xy_load` error / missing `mods.load` |
+| **C1** | CSRF cookie: `HttpOnly`, pair parser, constant-time compare |
+| **C6** | Sanitize remaining `:id` joins (`item_ctx_load`, source mkdir/API) |
+| **D1, D2, D4** | Remaining XSS sinks: poem `bud_raw`, textarea breakout, media URLs |
 
 ### Phase 1 — Security hardening (site)
 
 | ID | What |
 |---|---|
 | **C3** | Dataset POST: ownership + mandatory CSRF |
-| **C4** | `EEXIST` → 409 on create |
 | **C5** | Fail-closed owner check |
-| **C7** | Prefs: POST + CSRF only |
+| **C7** | Prefs: POST + CSRF only (**deferred** — WASM depends on GET write) |
+| **C2** | `/api/csrf` oracle (update e2e helpers) |
+| **C8, C9** | One owner source; drop poem static map |
 | **B2** | CSRF on login/register; POST-only logout |
 | **F8** | Fix `get_doc_root` return code |
 
 ### Phase 2 — Data layer correctness (site)
 
-| ID | What | Status |
-|---|---|---|
-| **E1** | Delete through hyle | open |
-| **E2** | Persist inverse-ref rewrites | open |
-| **E3** | One `target_hd` = `fields_hd` | open |
-| **E4–E5** | Sanitize API ids; durable auto-ids | open |
-| **E6** | Close leaked qmaps | open |
-| **E7** | Fix qmap-ownership docs | **FIXED** |
-| **E8** | Gate or delete `source_after_update` | open |
-| **E9** | Songbook empty `data.txt` | open |
-| **E12** | `source_validate_row` OOM return | **FIXED** |
-| **E17** | Choir persist root | open |
-| **E21** | Include filter substring match | **FIXED** |
-| **E22** | `index_open` empty module id | **FIXED** |
-| **E23** | `BUD_QM_VSTR` fallback wrong value | **FIXED** |
-| **E24** | `source_setup` ignores register failure | **FIXED** |
+| ID | What |
+|---|---|
+| **E1** | Delete through hyle |
+| **E2** | Persist inverse-ref rewrites |
+| **E3** | One `target_hd` = `fields_hd` |
+| **E4–E5** | Sanitize API ids; durable auto-ids |
+| **E6** | Close leaked qmaps |
+| **E8** | Gate or delete `source_after_update` |
+| **E9** | Songbook empty `data.txt` |
+| **E10** | DSV save-once |
+| **E14** | One delete path |
+| **E17** | Choir persist root |
 
 ### Phase 3 — WASM / build / infra (site)
 
-| ID | What | Status |
-|---|---|---|
-| **D9** | Wasm prerequisites in `build.mk` | open |
-| **D10** | CSP + nosniff + frame-ancestors | open |
-| **D7** | Empty list state | open |
-| **D8** | Store text nodes for option patch | open |
-| **D15** | `bud_host_fetch` res.ok check | **FIXED** |
-| **D16** | `buildControlValue` textContent fallback | **FIXED** |
-| **F12** | CSS cache bust single source |
+| ID | What |
+|---|---|
+| **D9** | Wasm prerequisites in `build.mk` |
+| **D10** | CSP + nosniff + frame-ancestors |
+| **D7** | Empty list always emits `#bud-state` |
+| **D8** | Store text nodes for option patch |
+| **D13** | Stable songbook media slot |
 | **F11** | Always add repo `-I` for hyle |
+| **F5, F7** | mpfd length + parser |
+| **F12** | Cksum-at-build CSS `?v=` |
 
 ### Phase 4 — Submodule PRs
 
@@ -1472,22 +1300,16 @@ Added boundary check: `uri[flen] != '\0' && uri[flen] != '/'`. (`core.c:45-49`)
 | **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse |
 | **E26–E27** | libqmap: abort → error, stale TODOs |
 | **E25, F4** | stoma + xy logging |
+| **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` |
 
 ### Phase 5 — Cleanup
 
-| ID | What | Status |
-|---|---|---|
-| **F14** | Delete `mods/redir` | **FIXED** |
-| **F15** | Delete stale docs | open |
-| **F16** | Makefile cleanup | open |
-| **A20, B12** | Stale TODOs and READMEs | open |
-| **E15, E16** | API body truncation, per_page cap | open |
-| **D13, D14, D15** | Bud internals | open |
-
----
-
-## 6. Stale docs
-
-These docs currently describe behavior that no longer matches the code:
-
-- `tests/e2e/bud-hydration.test.ts:39-58`: references `song-client.js`.
+| ID | What |
+|---|---|
+| **F15** | Delete stale root docs (**deferred**) |
+| **F13** | Confirm helper: also tail `debug/runtime/axil.log` |
+| **F16** | Makefile cleanup |
+| **A20, B12** | Stale TODOs and auth README |
+| **E15, E16** | API body truncation; `per_page` cap (**E16 deferred**) |
+| **F17, F18** | Username path check; `O_NOFOLLOW`/fsync; delete prefix |
+| **D18** | Wasm export allowlist |

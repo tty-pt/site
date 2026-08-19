@@ -186,13 +186,6 @@ static void render_lyric_line(
 	while (s < end) {
 		lyric_fill(st, html, out, outsz, o, &j, line, line_len);
 
-		if (*s == '<') {
-			/* raw passthrough to end of line (pre-existing markup)
-			 */
-			out_append(out, outsz, o, s, (size_t)(end - s));
-			j = 0;
-			goto done;
-		}
 		if ((flags & TRANSP_BREAK_SLASH) && *s == '/' && s + 1 < end &&
 		    s[1] == ' ')
 		{

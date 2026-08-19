@@ -180,7 +180,7 @@ XY_IMPL(int, index_add_item,
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	title_len = mpfd_get("title", title, sizeof(title) - 1);
+	title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
@@ -191,7 +191,10 @@ XY_IMPL(int, index_add_item,
 		return server_error(fd, "Failed to resolve item path");
 
 	int r = mkdir(path, 0755);
-	if (r == -1 && errno != EEXIST)
+	if (r == -1 && errno == EEXIST)
+		return respond_error(
+		        fd, 409, "An item with that title already exists");
+	if (r == -1)
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
 
@@ -688,7 +691,7 @@ static int index_generic_add_handler(int fd, char *body)
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	int title_len = mpfd_get("title", title, sizeof(title) - 1);
+	int title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
@@ -699,9 +702,14 @@ static int index_generic_add_handler(int fd, char *body)
 	    0)
 		return server_error(fd, "Failed to resolve item path");
 
-	if (mkdir(items_path, 0755) == -1 && errno != EEXIST)
+	if (mkdir(items_path, 0755) == -1) {
+		if (errno == EEXIST)
+			return respond_error(
+			        fd, 409,
+			        "An item with that title already exists");
 		return respond_error(
 		        fd, 403, "Failed to create item directory");
+	}
 
 	item_record_ownership(items_path, username);
 	write_meta_file(items_path, "title", title, (size_t)title_len);
@@ -749,7 +757,7 @@ static int index_generic_edit_authorized(
 
 	/* Update title in meta file if provided */
 	char title[256];
-	int title_len = mpfd_get("title", title, sizeof(title) - 1);
+	int title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len > 0) {
 		if (item_path_build(
 		            fd, module, ctx->id, items_path,

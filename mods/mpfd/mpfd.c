@@ -301,8 +301,9 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
 		return -1;
-	size_t to_copy =
-	        val->filename_len < buf_len ? val->filename_len : buf_len;
+	size_t to_copy = val->filename_len < buf_len
+	                         ? val->filename_len
+	                         : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';
@@ -315,7 +316,8 @@ XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
 		return -1;
-	size_t to_copy = val->len < buf_len ? val->len : buf_len;
+	size_t to_copy = val->len < buf_len ? val->len
+	                                    : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data + val->filename_len, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';

@@ -603,6 +603,8 @@ char *site_ui_page(
 	char title_esc[512];
 	int len;
 
+#define SITE_CSS_V "?v=9"
+
 	if (!body)
 		return NULL;
 	body_html = bud_render_hydrated_html(body);
@@ -634,8 +636,8 @@ char *site_ui_page(
 	        "<meta name=\"viewport\" content=\"width=device-width, "
 	        "initial-scale=1.0\">\n"
 	        "<title>%s</title>\n"
-	        "<link rel=\"stylesheet\" href=\"/styles.css?v=9\">\n"
-	        "<link rel=\"stylesheet\" href=\"/hyle.css?v=9\">\n"
+	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
+	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"
@@ -655,8 +657,8 @@ char *site_ui_page(
 	        "<meta name=\"viewport\" content=\"width=device-width, "
 	        "initial-scale=1.0\">\n"
 	        "<title>%s</title>\n"
-	        "<link rel=\"stylesheet\" href=\"/styles.css?v=9\">\n"
-	        "<link rel=\"stylesheet\" href=\"/hyle.css?v=9\">\n"
+	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
+	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
 	        "<script>window.bud_data={};window."
 	        "hydrate_queue=[];</script>\n"

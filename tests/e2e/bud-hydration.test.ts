@@ -32,7 +32,7 @@ Deno.test("bud hydration: verify SSR #main element with chord data", async () =>
   }
 });
 
-Deno.test("bud hydration: verify WASM module loads (song-client.js)", async () => {
+Deno.test("bud hydration: verify WASM module loads (bud-client.js)", async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
@@ -51,7 +51,7 @@ Deno.test("bud hydration: verify WASM module loads (song-client.js)", async () =
     await page.waitForTimeout(3000);
 
     if (wasmRequests.length === 0) {
-      throw new Error("song-client.js WASM module was not requested");
+      throw new Error("bud-client.js WASM module was not requested");
     }
   } finally {
     await browser.close();

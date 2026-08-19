@@ -6,7 +6,7 @@
  * bounded and must run CLEAN under ASAN/valgrind (regression gate).
  *
  * Sequences replicated:
- *   1. index.c:126→130 — add: mpfd_get("title", title, 255) then
+ *   1. index.c add: mpfd_get("title", title, sizeof(title)) then
  *      axil_slugify(title, title_len, id, 256). Pre-fix a 300-byte field
  *      returned 300 -> iconv over-read past the 256-byte stack `title`.
  *      Post-fix title_len is capped to 255 -> in bounds.
@@ -14,8 +14,8 @@
  *      title, title_len). Pre-fix strlen() over-read a possibly-unterminated
  *      buffer; post-fix mpfd_get guarantees a trailing NUL and the caller
  *      uses the returned length.
- *   3. songbook.c:296→298 — char choir[128]; mpfd_get("choir", choir,
- *      sizeof(choir)-1); then choir[choir_len] = '\0'. Pre-fix choir_len
+ *   3. songbook.c — char choir[128]; mpfd_get("choir", choir,
+ *      sizeof(choir)); then choir[choir_len] = '\0'. Pre-fix choir_len
  *      from a 200-byte field overflowed the stack; post-fix choir_len is
  *      capped to 127 and the write is in bounds.
  *
@@ -59,7 +59,8 @@ static int mpfd_get(const char *name, char *buf, size_t buf_len)
 	const struct mpfd_val *val = fake_lookup(name);
 	if (!val)
 		return -1;
-	size_t to_copy = val->len < buf_len ? val->len : buf_len;
+	size_t to_copy = val->len < buf_len ? val->len
+	                                    : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data + val->filename_len, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';
@@ -127,7 +128,7 @@ static void seq_index_add(void)
 	fake_set(field, sizeof(field));
 
 	/* index.c:126 */
-	title_len = mpfd_get("title", title, sizeof(title) - 1);
+	title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len <= 0) {
 		CHECK("seq1 title_len > 0", 0);
 		return;
@@ -163,7 +164,7 @@ static void seq_index_edit(void)
 	fake_set(field, sizeof(field));
 
 	/* index.c:570 */
-	title_len = mpfd_get("title", title, sizeof(title) - 1);
+	title_len = mpfd_get("title", title, sizeof(title));
 	CHECK("seq2 title_len=255 (capped)", title_len == 255);
 	if (title_len <= 0)
 		return;
@@ -188,7 +189,7 @@ static void seq_songbook(void)
 	/* Case A: field == sizeof(choir) (128 bytes). Post-fix
 	 * choir_len caps to 127, choir[127]='\0' stays in bounds. */
 	fake_set(field, sizeof(choir));
-	choir_len = mpfd_get("choir", choir, sizeof(choir) - 1);
+	choir_len = mpfd_get("choir", choir, sizeof(choir));
 	CHECK("seq3A choir_len capped to 127", choir_len == 127);
 	if (choir_len > 0)
 		choir[choir_len] = '\0';
@@ -199,7 +200,7 @@ static void seq_songbook(void)
 	 * the 32-byte redzone), so ASAN did NOT flag it: silent corruption
 	 * matching the live-box reality. Post-fix choir_len caps to 127. */
 	fake_set(field, sizeof(field));
-	choir_len = mpfd_get("choir", choir, sizeof(choir) - 1);
+	choir_len = mpfd_get("choir", choir, sizeof(choir));
 	CHECK("seq3B choir_len capped to 127", choir_len == 127);
 	if (choir_len > 0)
 		choir[choir_len] = '\0';
