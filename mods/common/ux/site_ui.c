@@ -337,6 +337,30 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	        .data.node;
 }
 
+static int valid_yt_id(const char *s)
+{
+	if (!s || strlen(s) != 11)
+		return 0;
+	for (int i = 0; i < 11; i++)
+		if (!((s[i] >= 'A' && s[i] <= 'Z') ||
+		      (s[i] >= 'a' && s[i] <= 'z') ||
+		      (s[i] >= '0' && s[i] <= '9') ||
+		      s[i] == '_' || s[i] == '-'))
+			return 0;
+	return 1;
+}
+
+static int safe_url(const char *s)
+{
+	if (!s || strncmp(s, "https://", 8) != 0)
+		return 0;
+	for (const char *p = s; *p; p++)
+		if (*p == '"' || *p == '\'' || *p == '<' || *p == '>' ||
+		    *p == '\\' || *p == '\n' || *p == '\r')
+			return 0;
+	return 1;
+}
+
 int site_ui_build_media_html(
         const char *yt, const char *audio, const char *pdf, char *out,
         size_t out_sz)
@@ -344,6 +368,13 @@ int site_ui_build_media_html(
 	char buf[8192];
 	int pos = 0;
 	int has = 0;
+
+	if (yt && yt[0] && !valid_yt_id(yt))
+		yt = NULL;
+	if (audio && audio[0] && !safe_url(audio))
+		audio = NULL;
+	if (pdf && pdf[0] && !safe_url(pdf))
+		pdf = NULL;
 
 #define APPEND(...)                                                            \
 	do {                                                                   \
@@ -557,7 +588,24 @@ bud_node *site_ui_form_fields(
 			        lx_el("textarea", lx_attr("name", f->name),
 			              lx_attr("class", "font-mono w-full"))
 			                .data.node;
-			bud_append(ta, bud_raw(val ? val : ""));
+			const char *raw = val ? val : "";
+			size_t raw_len = strlen(raw);
+			char *safe = malloc(raw_len + 1);
+			if (safe) {
+				size_t w = 0;
+				for (size_t i = 0; i < raw_len; i++) {
+					if (raw[i] == '<' && i + 1 < raw_len && raw[i + 1] == '/') {
+						i++;
+						continue;
+					}
+					safe[w++] = raw[i];
+				}
+				safe[w] = '\0';
+				bud_append(ta, bud_raw(safe));
+				free(safe);
+			} else {
+				bud_append(ta, bud_raw(raw));
+			}
 			bud_append(
 			        frag,
 			        lx_el("label", lx_text(f->label), lx_node(ta))
@@ -615,7 +663,7 @@ char *site_ui_page(
 	char title_esc[512];
 	int len;
 
-#define SITE_CSS_V "?v=12"
+#define SITE_CSS_V "?v=13"
 
 	if (!body)
 		return NULL;
@@ -651,8 +699,6 @@ char *site_ui_page(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
-	        "<script>window.bud_data={};window."
-	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, body_html, client_script);
 
@@ -672,8 +718,6 @@ char *site_ui_page(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
-	        "<script>window.bud_data={};window."
-	        "hydrate_queue=[];</script>\n"
 	        "%s</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, body_html, client_script);
 

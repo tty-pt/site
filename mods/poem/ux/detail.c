@@ -8,8 +8,9 @@ static bud_node *poem_render_detail_body(const char *content, const char *owner)
 	             lx_el("div",
 	                   lx_attr("class",
 	                           "poem-body bg-surface p-6 rounded "
-	                           "shadow-sm font-serif leading-relaxed"),
-	                   lx_node(bud_raw(content))),
+	                           "shadow-sm font-serif leading-relaxed "
+	                           "whitespace-pre-wrap"),
+	                   lx_text(content)),
 	             (owner && owner[0])
 	                     ? lx_el("div",
 	                             lx_attr("class",

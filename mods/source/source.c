@@ -10,6 +10,7 @@
 #include <pwd.h>
 
 #include "../auth/auth.h"
+#include "../common/common.h"
 #include "../mpfd/mpfd.h"
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
@@ -739,6 +740,9 @@ XY_IMPL(int, source_update_item,
 		        ++source_auto_seq);
 		id = auto_key_buf;
 	}
+
+	if (!is_safe_id(id))
+		return -1;
 
 	char doc_root[256] = { 0 };
 	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));

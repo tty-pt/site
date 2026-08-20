@@ -141,22 +141,15 @@ XY_IMPL(int, item_check_ownership,
 		char owner_path[1024];
 		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "r");
-		if (fp) {
-			char owner[64] = { 0 };
-			if (fgets(owner, sizeof(owner) - 1, fp))
-				owner[strcspn(owner, "\n")] = '\0';
-			fclose(fp);
-			if (owner[0] && strcmp(owner, username) == 0)
-				return 1;
-		}
-
-		struct stat st;
-		if (stat(item_path, &st) != 0)
+		if (!fp)
 			return 0;
-		if (geteuid() != st.st_uid)
-			return 0;
-		int uid = auth_get_uid(username);
-		return uid >= 0 && (uid_t)uid == st.st_uid;
+		char owner[64] = { 0 };
+		if (fgets(owner, sizeof(owner) - 1, fp))
+			owner[strcspn(owner, "\n")] = '\0';
+		fclose(fp);
+		if (owner[0] && strcmp(owner, username) == 0)
+			return 1;
+		return 0;
 	}
 }
 
@@ -230,6 +223,11 @@ XY_IMPL(int, item_ctx_load,
 
 	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
 		bad_request(fd, "Missing parameters");
+		return 1;
+	}
+
+	if (!is_safe_id(ctx->id)) {
+		bad_request(fd, "Invalid id");
 		return 1;
 	}
 

@@ -11,7 +11,7 @@ static int load_modules_from_file(const char *path)
 	FILE *fp = fopen(path, "r");
 
 	if (!fp)
-		return 0;
+		return -1;
 
 	while (fgets(line, sizeof(line), fp)) {
 		size_t len = strlen(line);
@@ -24,7 +24,9 @@ static int load_modules_from_file(const char *path)
 		if (len == 0 || line[0] == '#')
 			continue;
 		snprintf(mod_line, sizeof(mod_line), "mods/%s/%s", line, line);
-		xy_load(mod_line);
+		if (xy_load(mod_line) != XY_OK)
+			fprintf(stderr, "warning: module %s failed to load\n",
+			        mod_line);
 	}
 
 	fclose(fp);
@@ -88,9 +90,16 @@ static int song_redirect_handler(int fd, char *body)
 
 void xy_install(void)
 {
-	xy_load("./mods/common/common");
-	xy_load("./mods/source/source");
-	load_modules_from_file("./mods.load");
+	int common_ok = (xy_load("./mods/common/common") == XY_OK);
+	int source_ok = (xy_load("./mods/source/source") == XY_OK);
+
+	if (!common_ok)
+		fprintf(stderr, "warning: common module failed to load\n");
+	if (!source_ok)
+		fprintf(stderr, "warning: source module failed to load\n");
+
+	if (common_ok && source_ok)
+		load_modules_from_file("./mods.load");
 
 	axil_register_handler("GET:/sb", songbook_redirect_handler);
 	axil_register_handler("GET:/sb/*", songbook_redirect_handler);

@@ -2,5 +2,5 @@ HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
 SRC = source.c source-http.c dsv.c
 CFLAGS = -I$(shell cd ../.. && pwd)/external/libxylem/include
 EXTRA_CFLAGS := -I$(HYLE_DIR)/include -I$(shell cd ../.. && pwd)/external/bud/include
-EXTRA_LDLIBS := -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib -ljson-c
+EXTRA_LDLIBS := -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib -ljson-c -laxil-auth
 include ../../build.mk

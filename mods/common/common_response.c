@@ -41,6 +41,21 @@ int parse_transpose_qs(
 	return 0;
 }
 
+static void set_html_security_headers(int fd)
+{
+	axil_header_set(fd, "X-Content-Type-Options", "nosniff");
+	axil_header_set(fd, "X-Frame-Options", "DENY");
+	axil_header_set(fd, "Referrer-Policy", "strict-origin-when-cross-origin");
+	axil_header_set(fd, "Content-Security-Policy",
+	        "default-src 'self'; "
+	        "script-src 'self' 'wasm-unsafe-eval'; "
+	        "style-src 'self' 'unsafe-inline'; "
+	        "img-src 'self' data:; "
+	        "media-src 'self'; "
+	        "frame-src https://www.youtube.com; "
+	        "frame-ancestors 'none'");
+}
+
 XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 {
 	char accept[256] = { 0 };
@@ -64,6 +79,7 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 
 		html = site_ui_page(msg ? msg : status_str, NULL, NULL, body);
 		if (html) {
+			set_html_security_headers(fd);
 			axil_header_set(
 			        fd, "Content-Type", "text/html; charset=utf-8");
 			axil_respond(fd, status, html);
@@ -103,6 +119,7 @@ XY_IMPL(const char *, require_user, int, fd)
 XY_IMPL(int, respond_html, int, fd, const char *, html)
 {
 	if (html) {
+		set_html_security_headers(fd);
 		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
 		axil_respond(fd, 200, html);
 		bud_free_string((char *)html);

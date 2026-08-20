@@ -109,7 +109,7 @@ static bud_node *render_key_options(void)
 		                      i, app_state.original_key,
 		                      app_state.use_latin)))
 		                .data.node;
-		g_key_options[i + 11] = opt;
+		g_key_options[i + 11] = (bud_node *)bud_node_child(opt, 0);
 		if (!key_opts)
 			key_opts = lx_frag(lx_node(opt)).data.node;
 		else

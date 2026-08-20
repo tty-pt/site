@@ -1,7 +1,9 @@
 # Audit — leftover issues
 
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
-batch 4 (submodules) + batch 5 (A6, A9, F8) already landed; this file
+batch 4 (submodules) + batch 5 (A6, A9, F8) + batch 6 (A7, C3, F9) +
+batch 7 (C5, C6, D1, D2, D4, D10)
+already landed; this file
 lists **what is still open**. Do not re-fix anything not listed here.
 
 **Not claimed:** live exploit verification, fuzzing, or network testing.
@@ -59,6 +61,25 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined).
 | **A6** | `cmd_new` heap overflow — realloc guard `>` → `>=` ensures NUL terminator in bounds | `external/axil/src/libaxil.c:683` |
 | **A9** | `axil_dwritef` stack over-read — clamp `vsnprintf` return to `sizeof(buf) - 1` | `external/axil/src/libaxil.c:709` |
 | **F8** | `get_doc_root` inverted return — `axil_env_get(...) > 0` → `== 0` (0 = hit) | `mods/common/common_storage.c:186` |
+
+### Fix batch 6 — 2026-08-20
+
+| ID | What | File |
+|---|---|---|
+| **A7** | Unchecked `realloc`/`malloc` — NULL checks on 6 alloc sites; safe fallback on global `input` realloc | `external/axil/src/libaxil.c:544,620,659,701,1243,2141` |
+| **C3** | Dataset POST ownership + mandatory CSRF — `item_check_ownership` before write/delete; CSRF always validated | `mods/source/source-http.c:164,678,738,840` |
+| **F9** | `core` ignores `xy_load` errors — warn on top-level failure, skip dependent modules; check `xy_load` in loop | `mods/core/core.c:13,27,89` |
+
+### Fix batch 7 — 2026-08-20
+
+| ID | What | File |
+|---|---|---|
+| **C5** | Fail-closed ownership — removed stat-based uid fallback; `item_record_ownership` returns -1 on failure | `mods/auth/auth.c:140-159`, `mods/index/index.c:1032-1050` |
+| **C6** | ID sanitization — exposed `is_safe_id`; validate in `item_ctx_load`, `source_update_item`, POST/PUT/DELETE handlers | `mods/common/common.h`, `mods/common/common_storage.c:17`, `mods/auth/auth.c:228`, `mods/source/source.c:745`, `mods/source/source-http.c:669,740,845` |
+| **D1** | Poem XSS — `bud_raw(content)` → `lx_text(content)` + `whitespace-pre-wrap` | `mods/poem/ux/detail.c:12` |
+| **D2** | Textarea XSS — strip `</` from values before `bud_raw` in textarea branch | `mods/common/ux/site_ui.c:555-580` |
+| **D4** | Media URL validation — YouTube ID allowlist `[A-Za-z0-9_-]{11}`, HTTPS-only URL check | `mods/common/ux/site_ui.c:340-370` |
+| **D10** | Security headers — CSP, nosniff, X-Frame-Options, Referrer-Policy; inline script moved to `bud-client.js` | `mods/common/common_response.c:44-57`, `mods/common/ux/site_ui.c:700-723`, `htdocs/bud-client.js` |
 
 ---
 
@@ -188,6 +209,8 @@ write buffer → later crash.
 **Fix:** On NULL, close the connection. Cap before doubling.
 
 **Land:** axil submodule.
+
+**Status: DONE (batch 6)**
 
 #### A8 — Header injection via decoded CR/LF
 
@@ -564,6 +587,8 @@ require CSRF on mutating routes. Do not treat "public dataset" as
 
 **Land:** Site.
 
+**Status: DONE (batch 6)**
+
 #### C5 — Non-root ownership fallback: first user owns everything
 
 **Severity:** High
@@ -578,6 +603,8 @@ fallback is hit more often than intended.
 write/`chown` fails.
 
 **Land:** Site.
+
+**Status: DONE (batch 7)**
 
 #### C6 — Remaining unsanitized `:id` path joins
 
@@ -1178,6 +1205,8 @@ into tree). After root chroot, `DOCUMENT_ROOT` is `""` not `"/"`.
 
 **Land:** Site.
 
+**Status: DONE (batch 6)** — warn on top-level failure, skip dependent modules; check `xy_load` in loop.
+
 #### F10 — `start.sh` always enables `AUTH_SKIP_CONFIRM`
 
 **Severity:** Critical
@@ -1283,17 +1312,17 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **F10** | Stop unconditional `AUTH_SKIP_CONFIRM` (pairs with B8) |
-| **F9** | Fail boot on `xy_load` error / missing `mods.load` |
+| **F9** | ~~Fail boot on `xy_load` error / missing `mods.load`~~ **DONE** |
 | **C1** | CSRF cookie: `HttpOnly`, pair parser, constant-time compare |
-| **C6** | Sanitize remaining `:id` joins (`item_ctx_load`, source mkdir/API) |
-| **D1, D2, D4** | Remaining XSS sinks: poem `bud_raw`, textarea breakout, media URLs |
+| **C6** | ~~Sanitize remaining `:id` joins (`item_ctx_load`, source mkdir/API)~~ **DONE** |
+| **D1, D2, D4** | ~~Remaining XSS sinks: poem `bud_raw`, textarea breakout, media URLs~~ **DONE** |
 
 ### Phase 1 — Security hardening (site)
 
 | ID | What |
 |---|---|
-| **C3** | Dataset POST: ownership + mandatory CSRF |
-| **C5** | Fail-closed owner check |
+| **C3** | ~~Dataset POST: ownership + mandatory CSRF~~ **DONE** |
+| **C5** | ~~Fail-closed owner check~~ **DONE** |
 | **C7** | Prefs: POST + CSRF only (**deferred** — WASM depends on GET write) |
 | **C2** | `/api/csrf` oracle (update e2e helpers) |
 | **C8, C9** | One owner source; drop poem static map |
@@ -1319,7 +1348,7 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **D9** | Wasm prerequisites in `build.mk` |
-| **D10** | CSP + nosniff + frame-ancestors |
+| **D10** | ~~CSP + nosniff + frame-ancestors~~ **DONE** |
 | **D7** | Empty list always emits `#bud-state` |
 | **D8** | Store text nodes for option patch |
 | **D13** | Stable songbook media slot |
@@ -1334,7 +1363,7 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | **A1–A5** | axil: decode-then-reject, bounded env get, nonblock, accept bounds, strncpy | **DONE** |
 | **B1, B3, B4** | axil-auth: redirect validate, session TTL, urandom in jail | **DONE** |
 | **A6, A9** | axil: cmd_new OOB, vsnprintf over-read | **DONE** |
-| **A7, A8, A10** | axil: unchecked alloc, header inject, privdrop | open |
+| **A7, A8, A10** | axil: ~~unchecked alloc~~ **DONE (A7)**, header inject, privdrop | open |
 | **B2, B5–B12** | axil-auth: CSRF on login, session no-Secure, password min, etc. | open |
 | **F1–F3** | libxylem: missing-impl error, RTLD_NODELETE, error handling | open |
 | **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse | open |

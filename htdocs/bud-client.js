@@ -1,5 +1,8 @@
 import { createBudWasmBridge } from './bud-hydrate.js';
 
+window.bud_data = {};
+window.hydrate_queue = [];
+
 async function init() {
 	const body = document.body;
 	const mod = body.getAttribute('data-modules');

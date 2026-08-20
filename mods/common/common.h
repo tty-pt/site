@@ -113,6 +113,8 @@ XY_DECL(int, item_child_path,
 	size_t, outlen);
 XY_DECL(int, item_remove_path_recursive, const char *, item_path);
 
+XY_DECL(int, is_safe_id, const char *, id);
+
 /* Phase A helpers */
 XY_DECL(int, module_path_build,
 	const char *, doc_root,

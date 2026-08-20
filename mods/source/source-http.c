@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <sys/stat.h>
 
 #include "../auth/auth.h"
 #include <ttypt/axil.h>
@@ -160,13 +161,11 @@ static int source_write_init(
 	    DATASET_ACCESS_RESULT_ALLOW)
 		return SOURCE_INIT_FORBIDDEN;
 
-	if (body && body[0]) {
-		axil_query_parse(body);
-		char csrf[33] = { 0 };
-		axil_query_param("csrf_token", csrf, sizeof(csrf));
-		if (csrf_validate(fd, csrf) != 0)
-			return SOURCE_INIT_FORBIDDEN;
-	}
+	axil_query_parse(body ? body : "");
+	char csrf[33] = { 0 };
+	axil_query_param("csrf_token", csrf, sizeof(csrf));
+	if (csrf_validate(fd, csrf) != 0)
+		return SOURCE_INIT_FORBIDDEN;
 
 	if (out_def)
 		*out_def = def;
@@ -667,6 +666,25 @@ static int source_post_handler(int fd, char *body)
 		id = auto_key;
 	}
 
+	if (!is_safe_id(id))
+		return respond_json_error(fd, 400, "Invalid key");
+
+	/* Ownership check: if item already exists, require ownership */
+	{
+		char doc_root[256] = { 0 };
+		const char *root = resolve_doc_root(fd, doc_root,
+		                                   sizeof(doc_root));
+		char item_path[PATH_MAX];
+		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
+		         root, def->items_path, id);
+		struct stat st;
+		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+			if (!item_check_ownership(item_path, username))
+				return respond_json_error(fd, 403,
+				                           "Forbidden");
+		}
+	}
+
 	unsigned data_hd = source_parse_row_data_body(def, body);
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
@@ -719,6 +737,25 @@ static int source_put_handler(int fd, char *body)
 	axil_env_get(fd, key, sizeof(key), "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_json_error(fd, 400, "Missing key");
+
+	if (!is_safe_id(key))
+		return respond_json_error(fd, 400, "Invalid key");
+
+	/* Ownership check: require ownership for updates to existing items */
+	{
+		char doc_root[256] = { 0 };
+		const char *root = resolve_doc_root(fd, doc_root,
+		                                   sizeof(doc_root));
+		char item_path[PATH_MAX];
+		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
+		         root, def->items_path, key);
+		struct stat st;
+		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+			if (!item_check_ownership(item_path, username))
+				return respond_json_error(fd, 403,
+				                           "Forbidden");
+		}
+	}
 
 	unsigned data_hd = source_parse_row_data_body(def, body);
 	if (data_hd == 0)
@@ -795,18 +832,35 @@ static int source_delete_handler(int fd, char *body)
 		return respond_json_error(fd, 403, "Forbidden");
 	}
 
-	if (body && body[0]) {
-		axil_query_parse(body);
-		char csrf[33] = { 0 };
-		axil_query_param("csrf_token", csrf, sizeof(csrf));
-		if (csrf_validate(fd, csrf) != 0)
-			return respond_json_error(fd, 403, "Forbidden");
-	}
+	axil_query_parse(body ? body : "");
+	char csrf[33] = { 0 };
+	axil_query_param("csrf_token", csrf, sizeof(csrf));
+	if (csrf_validate(fd, csrf) != 0)
+		return respond_json_error(fd, 403, "Forbidden");
 
 	char key[128] = { 0 };
 	axil_env_get(fd, key, sizeof(key), "PATTERN_PARAM_KEY");
 	if (!key[0])
 		return respond_json_error(fd, 400, "Missing key");
+
+	if (!is_safe_id(key))
+		return respond_json_error(fd, 400, "Invalid key");
+
+	/* Ownership check: require ownership for deleting existing items */
+	{
+		char doc_root[256] = { 0 };
+		const char *root = resolve_doc_root(fd, doc_root,
+		                                   sizeof(doc_root));
+		char item_path[PATH_MAX];
+		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
+		         root, def->items_path, key);
+		struct stat st;
+		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+			if (!item_check_ownership(item_path, username))
+				return respond_json_error(fd, 403,
+				                           "Forbidden");
+		}
+	}
 
 	/* Inverse reference guard */
 	if (def->record_id > 0 && def->fields_hd) {

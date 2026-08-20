@@ -1035,16 +1035,22 @@ XY_IMPL(int, item_record_ownership,
 {
 	if (geteuid() == 0) {
 		int uid = auth_get_uid(username);
-		if (uid >= 0)
-			chown(item_path, (uid_t)uid, (gid_t)-1);
+		if (uid < 0)
+			return -1;
+		if (chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
+			return -1;
 	} else {
 		char owner_path[1024];
 		build_owner_path(item_path, owner_path, sizeof(owner_path));
 		FILE *fp = fopen(owner_path, "w");
-		if (fp) {
-			fwrite(username, 1, strlen(username), fp);
+		if (!fp)
+			return -1;
+		fwrite(username, 1, strlen(username), fp);
+		if (ferror(fp)) {
 			fclose(fp);
+			return -1;
 		}
+		fclose(fp);
 	}
 	return 0;
 }

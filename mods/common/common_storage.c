@@ -14,7 +14,7 @@
 
 static int remove_path_recursive(const char *path);
 
-static int is_safe_id(const char *id)
+XY_IMPL(int, is_safe_id, const char *, id)
 {
 	const char *p;
 	if (!id || !id[0])

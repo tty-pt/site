@@ -138,8 +138,18 @@ body {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 8px;
+  max-width: 782px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 600px) {
+  .main { padding: 8px; }
+}
+
+@media (max-width: 400px) {
+  .main { padding: 4px; }
 }
 
 #main {
@@ -305,6 +315,11 @@ a:hover {
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  width: 100%;
+}
+
+.center form {
+  width: 100%;
 }
 
 .btn-row {
