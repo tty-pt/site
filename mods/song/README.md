@@ -109,10 +109,10 @@ curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=1&l=1"
 
 ### Directory Structure
 
-Songs are stored in `items/song/items/{id}/`:
+Songs are stored in `var/song/{id}/`:
 
 ```
-items/song/items/
+var/song/
 └── amazing_grace/
     ├── data.txt    # Song with chords and lyrics (required)
     ├── title       # Display title (optional)
@@ -125,8 +125,8 @@ items/song/items/
 ```
 
 **Required Directory:**
-- `items/song/items/` must exist before uploads will work
-- Created automatically by `make test-data-dirs` or manually: `mkdir -p items/song/items`
+- `var/song/` must exist before uploads will work
+- Created automatically by `make test-data-dirs` or manually: `mkdir -p var/song`
 
 ### File Formats
 
@@ -195,7 +195,7 @@ static const dataset_field_t fields[] = {
 
 dataset_def_t def = {
     .id = "song.items",
-    .items_path = "items/song/items",
+    .items_path = "var/song",
     .source_hd = index_hd,
     // ...
 };
@@ -235,11 +235,11 @@ For debugging test failures, see [debug/README.md](../../debug/README.md).
 
 ### Upload fails with HTTP 500
 
-**Cause:** Directory `items/song/items/` doesn't exist.
+**Cause:** Directory `var/song/` doesn't exist.
 
 **Fix:**
 ```bash
-mkdir -p items/song/items
+mkdir -p var/song
 ```
 
 ### Songs don't appear in listing
@@ -252,7 +252,7 @@ mkdir -p items/song/items
 **Debug:**
 ```bash
 # Check if directory exists
-ls -la items/song/items/
+ls -la var/song/
 
 # Check if axil is running
 pgrep -a axildc
@@ -268,10 +268,10 @@ tail -100 debug/runtime/axil.log
 **Debug:**
 ```bash
 # Check song exists
-ls -la items/song/items/{song_id}/
+ls -la var/song/{song_id}/
 
 # Check data.txt has content
-cat items/song/items/{song_id}/data.txt
+cat var/song/{song_id}/data.txt
 ```
 
 ## See Also

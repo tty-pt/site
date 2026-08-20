@@ -21,14 +21,14 @@ TMPFILE="/tmp/poem_test_$$"
 cleanup() {
 	pkill -f "axil.*$PORT" 2>/dev/null || true
 	rm -f "$LOG" "$COOKIE" auth.qmap "$TMPFILE"
-	rm -rf "$SITE_DIR/items/poem/items"
+	rm -rf "$SITE_DIR/var/poem"
 }
 
 start_server() {
 	cleanup
 	sleep 1
 	rm -f auth.qmap
-	mkdir -p "$SITE_DIR/items/poem/items"
+	mkdir -p "$SITE_DIR/var/poem"
 	LD_LIBRARY_PATH="$AXIL_DIR/lib:$QMAP_DIR/lib" "$AXIL_DIR/bin/axil" -C "$SITE_DIR" -p $PORT -d 2>"$LOG" &
 	sleep 3
 }
@@ -72,7 +72,7 @@ code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" -X POST "$BASE/poem/add
 
 # 6. Verify poem file exists
 echo -n "6. Poem file created... "
-[ -f "$SITE_DIR/items/poem/items/testpoem/pt_PT.html" ] && pass "file exists" || fail "file not found"
+[ -f "$SITE_DIR/var/poem/testpoem/pt_PT.html" ] && pass "file exists" || fail "file not found"
 
 # 7. Logout
 echo -n "7. Logout... "

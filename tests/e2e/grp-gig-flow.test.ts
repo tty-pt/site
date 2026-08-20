@@ -1,0 +1,242 @@
+/**
+ * E2E test: grp + gig integration flow
+ *
+ * Test 1: create grp → add songs → add gig → add songs → verify grp link
+ *   1. Register & login
+ *   2. Create a grp
+ *   3. Add 2 songs to the grp repertoire
+ *   4. Verify both songs appear on the grp detail page
+ *   5. Add a gig linked to the grp
+ *   6. Add 2 songs to the gig via the edit page
+ *   7. Verify both songs appear on the gig view page
+ *   8. Click the grp link on the gig page
+ *   9. Verify the gig is listed on the grp detail page
+ *
+ * Test 2: gig linked to grp with format is pre-populated with random songs
+ *   1. Register & login
+ *   2. Create a grp
+ *   3. Set grp format to "any" (one type)
+ *   4. Add a gig linked to that grp
+ *   5. Verify the gig view page already shows a song (auto-populated)
+ *
+ * Requires: axil running on :8080.
+ */
+
+import { chromium } from "npm:playwright";
+import { createAndLoginUser, getCsrfToken, waitForText } from "./helpers/auth.ts";
+
+const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
+const BASE = "http://localhost:8080";
+
+const SONG1_ID = "a_alegria_esta_no_coracao";
+const SONG1_TITLE = "A alegria está no coração";
+const SONG2_ID = "abencoai_a_nossa_oferta";
+const SONG2_TITLE = "Abençoai a nossa oferta";
+
+Deno.test({
+  name: "grp+gig: create grp → add songs → add gig → add songs → verify grp link",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+
+  let grpId: string | null = null;
+  let sbId: string | null = null;
+
+  try {
+    page.setDefaultNavigationTimeout(10000);
+    page.setDefaultTimeout(10000);
+
+    await page.route("**/_frsh/js/**", (route) => route.abort());
+    await page.route("**/styles.css", (route) => route.abort());
+    await page.route("**/favicon.ico", (route) => route.abort());
+
+    const GOTO = { waitUntil: "domcontentloaded" as const };
+
+    await createAndLoginUser(page, BASE);
+
+    const cookies = await page.context().cookies();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+
+    // ── 1. Create grp ────────────────────────────────────────────────────────
+    const grpTitle = `Flow Grp ${Date.now()}`;
+    await page.goto(`${BASE}/grp/add`, GOTO);
+    await page.waitForSelector('input[name="title"]');
+    await page.fill('input[name="title"]', grpTitle);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
+    grpId = page.url().split("/grp/")[1];
+
+    // ── 2. Add 2 songs to grp repertoire ────────────────────────────────────
+    const repoIds: string[] = [];
+    for (const songId of [SONG1_ID, SONG2_ID]) {
+      const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
+      const body = new URLSearchParams({ song_id: songId, format: "any", csrf_token: csrf });
+      const r = await fetch(`${BASE}/api/grp/${grpId}/songs`, {
+        method: "POST",
+        body: body.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch },
+      });
+      if (r.status >= 400) throw new Error(`Add song ${songId} failed: ${r.status}`);
+      await r.body?.cancel();
+      repoIds.push(`${songId}`);
+    }
+
+    // ── 3. Verify both songs appear on grp detail ────────────────────────────
+    await page.goto(`${BASE}/grp/${grpId}`, GOTO);
+    await waitForText(page, "body", SONG1_TITLE);
+    await waitForText(page, "body", SONG2_TITLE);
+
+    // ── 4. Add gig linked to grp ───────────────────────────────────────
+    const sbTitle = `Flow SB ${Date.now()}`;
+    await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
+    await page.waitForSelector('input[name="title"]');
+    await page.fill('input[name="title"]', sbTitle);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
+    sbId = page.url().split("/gig/")[1];
+
+    // ── 5. Add 2 songs to gig via edit page ───────────────────────────────
+    // Post the edit form directly with both rows, using repertoire entry IDs.
+    const { token: csrfSb, cookieHeader: chSb } = await getCsrfToken(cookieHeader, BASE);
+    const fd = new FormData();
+    fd.append("amount", "2");
+    fd.append("song_0", `${SONG1_TITLE} [${repoIds[0]}]`);
+    fd.append("key_0", "0");
+    fd.append("orig_0", "0");
+    fd.append("fmt_0", "any");
+    fd.append("song_1", `${SONG2_TITLE} [${repoIds[1]}]`);
+    fd.append("key_1", "2");
+    fd.append("orig_1", "0");
+    fd.append("fmt_1", "any");
+    fd.append("action", "save");
+    fd.append("csrf_token", csrfSb);
+
+    const editResp = await fetch(`${BASE}/gig/${sbId}/edit`, {
+      method: "POST",
+      body: fd,
+      headers: { Cookie: chSb },
+      redirect: "manual",
+    });
+    if (editResp.status >= 400) {
+      const txt = await editResp.text();
+      throw new Error(`Gig edit POST failed ${editResp.status}: ${txt.slice(0, 200)}`);
+    }
+    await editResp.body?.cancel();
+
+    // ── 6. Verify both songs appear on gig view page ─────────────────────
+    await page.goto(`${BASE}/gig/${sbId}`, GOTO);
+    await waitForText(page, "body", SONG1_TITLE);
+    await waitForText(page, "body", SONG2_TITLE);
+
+    // ── 7. Click grp link → verify gig listed on grp page ────────────
+    await page.click(`a[href="/grp/${grpId}"]`);
+    await page.waitForURL(`${BASE}/grp/${grpId}`, { timeout: 5000 });
+    await waitForText(page, "body", sbTitle);
+  } finally {
+    if (sbId) {
+      try {
+        const sbPath = `${REPO_ROOT}/var/gig/${sbId}`;
+        for await (const entry of Deno.readDir(sbPath)) {
+          await Deno.remove(`${sbPath}/${entry.name}`);
+        }
+        await Deno.remove(sbPath);
+      } catch { /* ignore */ }
+    }
+    await browser.close();
+  }
+});
+
+Deno.test({
+  name: "grp+gig: gig linked to grp with format is pre-populated with random songs",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+
+  let grpId: string | null = null;
+  let sbId: string | null = null;
+
+  try {
+    page.setDefaultNavigationTimeout(10000);
+    page.setDefaultTimeout(10000);
+
+    await page.route("**/_frsh/js/**", (route) => route.abort());
+    await page.route("**/styles.css", (route) => route.abort());
+    await page.route("**/favicon.ico", (route) => route.abort());
+
+    const GOTO = { waitUntil: "domcontentloaded" as const };
+
+    await createAndLoginUser(page, BASE);
+
+    const cookies = await page.context().cookies();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+
+    // ── 1. Create grp ────────────────────────────────────────────────────────
+    const grpTitle = `Prepop Grp ${Date.now()}`;
+    await page.goto(`${BASE}/grp/add`, GOTO);
+    await page.waitForSelector('input[name="title"]');
+    await page.fill('input[name="title"]', grpTitle);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
+    grpId = page.url().split("/grp/")[1];
+
+    // ── 2. Set grp format to "any" ──────────────────────────────────────────
+    const { token: csrfEdit, cookieHeader: chEdit } = await getCsrfToken(cookieHeader, BASE);
+    const editFd = new FormData();
+    editFd.append("title", grpTitle);
+    editFd.append("format", "any");
+    editFd.append("csrf_token", csrfEdit);
+      const editR = await fetch(`${BASE}/grp/${grpId}/edit`, {
+      method: "POST",
+      body: editFd,
+      headers: { Cookie: chEdit },
+      redirect: "manual",
+    });
+    if (editR.status >= 400) throw new Error(`Grp edit failed: ${editR.status}`);
+    await editR.body?.cancel();
+
+    // ── 3. Seed a song into the grp repertoire ──────────────────────────────
+    {
+      const { token: csrf, cookieHeader: ch } = await getCsrfToken(cookieHeader, BASE);
+      const body = new URLSearchParams({ song_id: SONG1_ID, format: "any", csrf_token: csrf });
+      const r = await fetch(`${BASE}/api/grp/${grpId}/songs`, {
+        method: "POST",
+        body: body.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: ch },
+      });
+      if (r.status >= 400) throw new Error(`Seed song failed: ${r.status}`);
+      await r.body?.cancel();
+    }
+
+    // ── 4. Add gig linked to grp ───────────────────────────────────────
+    const sbTitle = `Prepop SB ${Date.now()}`;
+    await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
+    await page.waitForSelector('input[name="title"]');
+    await page.fill('input[name="title"]', sbTitle);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
+    sbId = page.url().split("/gig/")[1];
+
+    // ── 5. Verify gig view already has a song (auto-populated) ───────────
+    await page.goto(`${BASE}/gig/${sbId}`, GOTO);
+    await page.waitForSelector("body");
+    const songItems = await page.$$('[data-gig-item]');
+    if (songItems.length === 0) {
+        throw new Error("No pre-populated song items rendered on detail page");
+    }
+  } finally {
+    if (sbId) {
+      try {
+        const sbPath = `${REPO_ROOT}/var/gig/${sbId}`;
+        for await (const entry of Deno.readDir(sbPath)) {
+          await Deno.remove(`${sbPath}/${entry.name}`);
+        }
+        await Deno.remove(sbPath);
+      } catch { /* ignore */ }
+    }
+    await browser.close();
+  }
+});

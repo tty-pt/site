@@ -1,6 +1,6 @@
 # AGENTS.md — documentation index
 
-Pure-C music site (poem, song, songbook, choir) on the axil HTTP library, the
+Pure-C music site (poem, song, gig, grp) on the axil HTTP library, the
 libxylem XY module system, and the bud HTML builder. SSR-first with
 progressive WASM enhancement; no Rust/Dioxus/Deno in the request path.
 

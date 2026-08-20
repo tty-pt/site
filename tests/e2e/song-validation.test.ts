@@ -125,7 +125,7 @@ Deno.test({
     } finally {
       await browser.close();
       try {
-        await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+        await Deno.remove(`var/song/${songId}`, { recursive: true });
       } catch {
         // ignore
       }

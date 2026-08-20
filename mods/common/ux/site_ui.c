@@ -70,11 +70,17 @@ const char *site_ui_module_icon(const char *module) {
 		return "\xf0\x9f\x8e\xb5";
 	if (strcmp(module, "poem") == 0)
 		return "\xf0\x9f\x93\x9d";
-	if (strcmp(module, "songbook") == 0)
+	if (strcmp(module, "gig") == 0)
 		return "\xf0\x9f\x8e\xa4";
-	if (strcmp(module, "choir") == 0)
+	if (strcmp(module, "grp") == 0)
 		return "\xf0\x9f\x91\xa5";
 	return "\xf0\x9f\x8f\xa0";
+}
+
+const char *site_ui_module_display(const char *module) {
+	if (module && strcmp(module, "grp") == 0)
+		return "group";
+	return module;
 }
 
 void site_ui_item_path(

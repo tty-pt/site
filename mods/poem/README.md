@@ -46,24 +46,24 @@ The module provides server-side rendered pages:
 Poems are stored in the filesystem:
 
 ```
-items/poem/items/{id}/
+var/poem/{id}/
   ├── pt_PT.html      # Poem content
   └── comments.txt    # Comments file (empty on creation)
 ```
 
 **Example:**
 ```
-items/poem/items/my-poem/
+var/poem/my-poem/
   ├── pt_PT.html
   └── comments.txt
 ```
 
 ## Setup Requirements
 
-⚠️ **CRITICAL:** The directory `items/poem/items/` must exist before poems can be uploaded.
+⚠️ **CRITICAL:** The directory `var/poem/` must exist before poems can be uploaded.
 
 ```sh
-mkdir -p items/poem/items
+mkdir -p var/poem
 ```
 
 If this directory doesn't exist, all uploads will fail with:
@@ -93,7 +93,7 @@ Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
 
 **Backend:** `poem.c` (lines 14-99: `handle_poem_add()`)
 - Parses multipart form data using mpfd
-- Creates directory at `{DOCUMENT_ROOT}/items/poem/items/{id}/`
+- Creates directory at `{DOCUMENT_ROOT}/var/poem/{id}/`
 - Writes poem content to `pt_PT.html`
 - Creates empty `comments.txt` file
 - Redirects to listing page on success
@@ -135,18 +135,18 @@ From another module or handler:
 // Listing is rendered via SSR at /poem/
 
 // Files are accessible at:
-// {DOCUMENT_ROOT}/items/poem/items/{id}/pt_PT.html
+// {DOCUMENT_ROOT}/var/poem/{id}/pt_PT.html
 ```
 
 ## Troubleshooting
 
 ### Uploads fail with "Failed to create poem directory"
 
-**Cause:** Parent directory `items/poem/items/` doesn't exist.
+**Cause:** Parent directory `var/poem/` doesn't exist.
 
 **Solution:**
 ```sh
-mkdir -p items/poem/items
+mkdir -p var/poem
 ```
 
 ### Poems don't appear in listing
@@ -159,23 +159,23 @@ mkdir -p items/poem/items
 **Debug:**
 ```sh
 # Check if directory exists
-ls -la items/poem/items/
+ls -la var/poem/
 
 # Check if axil is running
 pgrep -a axildc
 
 # Check directory permissions
-ls -ld items/poem/items/
+ls -ld var/poem/
 ```
 
 ### Test cleanup deletes poems
 
-**Issue:** Running integration tests deletes `items/poem/items/` directory.
+**Issue:** Running integration tests deletes `var/poem/` directory.
 
 **Workaround:** Recreate directory after tests:
 ```sh
 make test
-mkdir -p items/poem/items
+mkdir -p var/poem
 ```
 
 ## See Also

@@ -10,9 +10,9 @@ A **C-isomorphic** renderer is a single C function tree that is compiled twice:
 
 The same source must therefore satisfy **both** environments. This doc is the
 rulebook. Reference implementations: `mods/song/ux/detail.c` →
-`htdocs/song_detail.wasm` (also `mods/songbook/ux/detail.c`, `mods/bud_demo`),
+`htdocs/song_detail.wasm` (also `mods/gig/ux/detail.c`, `mods/bud_demo`),
 and the **list page** `mods/index/ux/list.c` → `htdocs/list.wasm` (served on
-all four list pages via `data-modules="list"`; poem/choir load it too and the
+all four list pages via `data-modules="list"`; poem/grp load it too and the
 enhancement no-ops).
 
 ---
@@ -54,7 +54,7 @@ guarantees the native tree and the WASM tree are structurally identical — see
 
 ## 2. The state table (fields.h pattern)
 
-`mods/song/fields.h` and `mods/songbook/fields.h` define an `app_state_t` plus a
+`mods/song/fields.h` and `mods/gig/fields.h` define an `app_state_t` plus a
 `bud_field_desc_t` table (in bud.h) that drives BOTH environments:
 
 - server: the table feeds the `source_def_to_qmap` generators (mods/source),

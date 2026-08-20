@@ -101,12 +101,12 @@ printf '%s' "$single" | grep -q 'Natal' \
   || fail "/song/?custom=1&type=natal: trigger label missing 'Natal'"
 pass "/song/?custom=1&type=natal trigger label shows the selection"
 
-sb=$(body_of "/songbook/?custom=1")
-printf '%s' "$sb" | grep -q 'data-hyle-ss="choir"' \
-  || fail "/songbook/?custom=1 missing data-hyle-ss=\"choir\""
-pass "/songbook/?custom=1 has the dropdown single-select"
-printf '%s' "$sb" | grep -q 'name="choir"' \
-  || fail "/songbook/?custom=1 missing radio name=\"choir\" (no-JS baseline)"
-pass "/songbook/?custom=1 has real <input type=radio name=choir> controls"
+sb=$(body_of "/gig/?custom=1")
+printf '%s' "$sb" | grep -q 'data-hyle-ss="grp"' \
+  || fail "/gig/?custom=1 missing data-hyle-ss=\"grp\""
+pass "/gig/?custom=1 has the dropdown single-select"
+printf '%s' "$sb" | grep -q 'name="grp"' \
+  || fail "/gig/?custom=1 missing radio name=\"grp\" (no-JS baseline)"
+pass "/gig/?custom=1 has real <input type=radio name=grp> controls"
 
 pass "song multiselect SSR smoke tests all OK"

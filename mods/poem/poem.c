@@ -60,7 +60,7 @@ static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 static int poem_edit_get_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, "items/poem/items",
+	        fd, body, "var/poem",
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL,
 	        poem_edit_auth, NULL);
 }
@@ -110,7 +110,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 static int poem_detail_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, "items/poem/items", 0, NULL, NULL, poem_detail_auth,
+	        fd, body, "var/poem", 0, NULL, NULL, poem_detail_auth,
 	        NULL);
 }
 
@@ -119,10 +119,10 @@ void xy_install(void)
 	xy_load("./mods/index/index");
 
 	source_setup(
-	        "poem.items", NULL, sizeof(poem_cache_t), "items/poem/items",
+	        "poem.items", NULL, sizeof(poem_cache_t), "var/poem",
 	        poem_fields, POEM_FIELD_COUNT, 0);
 
-	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL);
+	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL, NULL);
 	standard_item_handlers_t handlers = {
 		.detail = poem_detail_handler,
 		.add_get = poem_add_get_handler,

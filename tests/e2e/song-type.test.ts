@@ -168,7 +168,7 @@ Deno.test({
 
       // ── 2. On-disk type file should contain "Communion"
       {
-        const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
         const content = await Deno.readTextFile(typeFile);
         assert(
           content.includes("Communion"),
@@ -244,7 +244,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -295,7 +295,7 @@ Deno.test({
 
       // ── 2. On-disk type file should contain both display names ────────────
       {
-        const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
         const content = await Deno.readTextFile(typeFile);
         assert(
           content.includes("Communion") && content.includes("Entry"),
@@ -340,7 +340,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -404,7 +404,7 @@ Deno.test({
       }
 
       // ── Verify type file on disk ──────────────────────────────────────────
-      const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+      const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
       const content = await Deno.readTextFile(typeFile);
       assert(
         content.includes("Communion"),
@@ -414,7 +414,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -432,7 +432,7 @@ Deno.test({
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
-    const gjTcName = `${REPO_ROOT}/items/song/types/communion/name`;
+    const gjTcName = `${REPO_ROOT}/var/song.types/communion/name`;
     try {
       const content = await Deno.readTextFile(gjTcName);
       assert(
@@ -446,7 +446,7 @@ Deno.test({
       throw e;
     }
 
-    const gjTeName = `${REPO_ROOT}/items/song/types/entry/name`;
+    const gjTeName = `${REPO_ROOT}/var/song.types/entry/name`;
     try {
       const content = await Deno.readTextFile(gjTeName);
       assert(
@@ -531,7 +531,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -624,7 +624,7 @@ Deno.test({
       );
 
       // On-disk type file should use newline separators, not comma separators
-      const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+      const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
       const content = await Deno.readTextFile(typeFile);
       const trimmed = content.trim();
 
@@ -650,7 +650,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -688,7 +688,7 @@ Deno.test({
 
       // Verify initial type on disk
       {
-        const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
         const content = await Deno.readTextFile(typeFile);
         assert(
           content.includes("Communion"),
@@ -729,7 +729,7 @@ Deno.test({
 
       // ── On-disk type file should now contain "Entry"
       {
-        const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
         const content = await Deno.readTextFile(typeFile);
         assert(
           content.includes("Entry"),
@@ -767,7 +767,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }
@@ -833,7 +833,7 @@ Deno.test({
 
       // ── On-disk type file should contain both
       {
-        const typeFile = `${REPO_ROOT}/items/song/items/${songId}/type`;
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
         const content = await Deno.readTextFile(typeFile);
         assert(
           content.includes("Communion") && content.includes("Entry"),
@@ -870,7 +870,7 @@ Deno.test({
       await browser.close();
       if (songId) {
         try {
-          await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
             recursive: true,
           });
         } catch { /* ignore */ }

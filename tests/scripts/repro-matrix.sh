@@ -10,7 +10,7 @@
 #   caller_contract: 3 caller replicas (fixed mpfd_get contract)
 #                    ASAN seq1     CLEAN (bounded iconv read)
 #                    ASAN seq2     CLEAN (NUL-terminated + length API)
-#                    ASAN seq3     CLEAN (choir[127] in-bounds)
+#                    ASAN seq3     CLEAN (group[127] in-bounds)
 #   slug_fuzz      : real axil_slugify fuzz
 #                    mode 0        PASS (robustness)
 #                    mode 1        CLEAN (fixed caller: capped length)

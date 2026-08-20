@@ -104,7 +104,7 @@ Body preview: ${textPreview}...
 /**
  * Wrapper that captures debug information on test failure.
  * Usage:
- *   await withDebugCapture(page, "songbook-edit-row", async () => {
+ *   await withDebugCapture(page, "gig-edit-row", async () => {
  *     // test code here
  *   });
  */

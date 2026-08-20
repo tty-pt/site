@@ -48,7 +48,7 @@ Deno.test("poem: login → add poem → verify detail page", async () => {
     // Cleanup: remove created poem directory
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone or never created — ignore
       }

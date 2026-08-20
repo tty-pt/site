@@ -8,7 +8,7 @@ bud-specific; the framework-neutral contract is `docs/SSR-CONTRACT.md`.
 - Reads `body[data-modules]` (uses the FIRST token as the module name),
   requires `#bud-root` — returns early without it.
 - Fetches `/{module}.wasm`; **a 404 is caught and logged** — modules without a
-  wasm (poem/choir today) degrade silently to pure SSR.
+  wasm (poem/grp today) degrade silently to pure SSR.
 - `WebAssembly.instantiate` with `createBudWasmBridge(root).makeImports()`
   (plus a no-op `wasi_snapshot_preview1` proxy), calls
   `_initialize`/`__wasm_call_ctors`.

@@ -297,7 +297,7 @@ TEST(repeat_markers_second_song)
 	assert(first != NULL);
 	free(first);
 
-	/* Reset key as songbook does between songs */
+	/* Reset key as gig does between songs */
 	transp_reset_key(ctx);
 
 	/* Second song — repeat markers must still render correctly */

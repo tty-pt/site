@@ -15,7 +15,7 @@ Shared C utilities used by every site module. Not a standalone XY module —
 
 ## Public API (via XY_DECL in `common.h`)
 
-Other modules call these via `call_<name>()`. Key groups:
+Other modules call these via `call_<name>()`. Key grps:
 
 **Responses:** `respond_html`, `respond_json`, `respond_error`, `bad_request`,
 `server_error`, `not_found`, `redirect_to_item`.

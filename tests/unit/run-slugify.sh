@@ -15,7 +15,7 @@
 #   slugify_test        PASS everywhere (correct-usage semantics)
 #   caller_contract 1   ASAN trip (iconv over-read), valgrind over-read
 #   caller_contract 2   ASAN trip (strlen over-read) when title[255]!=0
-#   caller_contract 3A  ASAN trip (choir[128] redzone write)
+#   caller_contract 3A  ASAN trip (grp[128] redzone write)
 #   caller_contract 3B  silent by design (write lands in addressable
 #                       neighbor stack — matches live-box behaviour)
 #   slug_fuzz mode 0    PASS (robustness)

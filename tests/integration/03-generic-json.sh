@@ -52,31 +52,31 @@ api_post "id=gj_type_e&name=Entry" "$BASE/api/dataset/song.types" > /dev/null 2>
 api_post "id=gj_song1&title=Amazing+Grace&author=John+Newton&yt=dQw4w9WgXcQ&type=gj_type_c%0Agj_type_e" "$BASE/api/dataset/song.items" > /dev/null 2>&1
 api_post "id=gj_song2&title=Holy+Holy+Holy&author=Reginald+Heber&type=gj_type_c" "$BASE/api/dataset/song.items" > /dev/null 2>&1
 
-api_post "id=gj_choir&title=Test+Choir&format=entrada,santo" "$BASE/api/dataset/choir.items" > /dev/null 2>&1
+api_post "id=gj_grp&title=Test+Grp&format=entrada,santo" "$BASE/api/dataset/grp.items" > /dev/null 2>&1
 
-api_post "id=gj_repo1&song=gj_song1&transpose=0&format=entrada&choir=gj_choir" "$BASE/api/dataset/choir.repertoire" > /dev/null 2>&1
-api_post "id=gj_repo2&song=gj_song2&transpose=2&format=santo&choir=gj_choir" "$BASE/api/dataset/choir.repertoire" > /dev/null 2>&1
+api_post "id=gj_repo1&song=gj_song1&transpose=0&format=entrada&grp=gj_grp" "$BASE/api/dataset/grp.repertoire" > /dev/null 2>&1
+api_post "id=gj_repo2&song=gj_song2&transpose=2&format=santo&grp=gj_grp" "$BASE/api/dataset/grp.repertoire" > /dev/null 2>&1
 
 sleep 1
 
 # ── Tests ──
 
-echo -n "1. STRING fields (choir.title)... "
-json=$(api "$BASE/api/dataset/choir.items/gj_choir")
-echo "$json" | grep -q '"title": "Test Choir"' && pass || fail "$json"
+echo -n "1. STRING fields (grp.title)... "
+json=$(api "$BASE/api/dataset/grp.items/gj_grp")
+echo "$json" | grep -q '"title": "Test Grp"' && pass || fail "$json"
 
 echo -n "2. REFERENCE field (repertoire.song)... "
-json=$(api "$BASE/api/dataset/choir.repertoire/gj_repo1")
+json=$(api "$BASE/api/dataset/grp.repertoire/gj_repo1")
 echo "$json" | grep -q '"song": "gj_song1"' && pass || fail "$json"
 
-echo -n "3. REFERENCE field (repertoire.choir)... "
-echo "$json" | grep -q '"choir": "gj_choir"' && pass || fail "$json"
+echo -n "3. REFERENCE field (repertoire.grp)... "
+echo "$json" | grep -q '"grp": "gj_grp"' && pass || fail "$json"
 
-echo -n "4. INVERSE field (choir.songbooks empty)... "
-json=$(api "$BASE/api/dataset/choir.items/gj_choir")
-echo "$json" | grep -qE '"songbooks":\s*\[\s*\]' && pass || fail "$json"
+echo -n "4. INVERSE field (grp.gigs empty)... "
+json=$(api "$BASE/api/dataset/grp.items/gj_grp")
+echo "$json" | grep -qE '"gigs":\s*\[\s*\]' && pass || fail "$json"
 
-echo -n "5. INVERSE field (choir.repertoire)... "
+echo -n "5. INVERSE field (grp.repertoire)... "
 echo "$json" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)

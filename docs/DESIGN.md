@@ -28,7 +28,7 @@ external libraries (neutral, self-contained)
    hyle-bud  the ONLY bud-dependent binding (external/hyle/c/libhyle-bud)
    bud    C DOM scaffold + WASM bridge (depends on nothing above)
 site modules (thin composition)
-   core → common → source → index → song/poem/songbook/choir (+ auth, mpfd)
+   core → common → source → index → song/poem/gig/grp (+ auth, mpfd)
 ```
 
 Rules:
@@ -156,6 +156,6 @@ keeps search live.
 - Native-only symbols leaking into wasm units (`--allow-undefined` hides it
   until the browser crashes).
 - Growing params instead of a flags word or a small struct.
-- Copied blocks of handler code between modules (song vs poem vs choir).
+- Copied blocks of handler code between modules (song vs poem vs grp).
 - New externals depending on the site or on each other's internals.
 - Exporting more symbols than callers need.

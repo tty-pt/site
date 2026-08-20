@@ -66,7 +66,7 @@ expect_rows "/song/?title=&author=" "all empty params -> all songs"
 expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
 expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"
 
-# Content lookup (`data=` lyric/chord field) — corpus files: items/song/items/*/data.txt
+# Content lookup (`data=` lyric/chord field) — corpus files: var/song/*/data.txt
 expect_rows "/song/?data=amazing" "content lookup: 'amazing' matches lyrics"
 expect_rows "/song/?data=sweet" "content lookup: 'sweet' matches lyrics"
 expect_rows "/song/?data=amazing+sound" "content lookup: multi-token AND ('amazing sound')"

@@ -89,7 +89,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
     // Cleanup: remove created poem directory
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone or never created — ignore
       }

@@ -275,7 +275,7 @@ XY_IMPL(int, module_path_build,
 	size_t, outlen)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s", root, module);
+	int n = snprintf(out, outlen, "%s/var/%s", root, module);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
@@ -289,7 +289,7 @@ XY_IMPL(int, module_items_path_build,
 	size_t, outlen)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s/items", root, module);
+	int n = snprintf(out, outlen, "%s/var/%s", root, module);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
@@ -309,7 +309,7 @@ XY_IMPL(int, item_path_build_root,
 	if (!is_safe_id(id))
 		return -1;
 	root = (doc_root && doc_root[0]) ? doc_root : ".";
-	n = snprintf(out, outlen, "%s/items/%s/items/%s", root, module, id);
+	n = snprintf(out, outlen, "%s/var/%s/%s", root, module, id);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;

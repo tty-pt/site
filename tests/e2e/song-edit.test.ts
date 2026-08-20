@@ -72,7 +72,7 @@ Deno.test("song edit: login → add song → edit title → verify on detail pag
     // Cleanup: remove created song directory
     if (songId) {
       try {
-        await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+        await Deno.remove(`var/song/${songId}`, { recursive: true });
       } catch {
         // Already gone or never created — ignore
       }

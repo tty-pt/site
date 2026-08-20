@@ -44,7 +44,7 @@ Deno.test("song: accented title add does not crash the server", async () => {
   } finally {
     await browser.close();
     try {
-      await Deno.remove(`items/song/items/${expectedSlug}`, { recursive: true });
+      await Deno.remove(`var/song/${expectedSlug}`, { recursive: true });
     } catch {
       // already gone
     }

@@ -35,7 +35,7 @@ run:
 MODS != cat mods.load
 
 test-data-dirs:
-	mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items
+	mkdir -p var/poem var/song var/gig var/grp var/song.types
 
 unit-tests: all test-data-dirs
 	@curl -s --max-time 2 http://localhost:8080/ > /dev/null 2>&1 || \

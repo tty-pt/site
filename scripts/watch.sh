@@ -12,7 +12,7 @@ find_files() {
     # Exclude data, git, node_modules, and rust build artifacts
     find . -type f \
       -not -path '*/.*' \
-      -not -path './items/*' \
+      -not -path './var/*' \
       -not -path './node_modules/*' \
       -not -path '*/target/*' \
       -not -path './etc/*' \

@@ -22,7 +22,8 @@ XY_DECL(unsigned, index_open,
 	index_detail_handler_fn, detail_handler,
 	index_handler_fn, add_handler,
 	index_handler_fn, edit_get_handler,
-	index_handler_fn, edit_post_handler);
+	index_handler_fn, edit_post_handler,
+	const char *, url_slug);
 
 XY_DECL(int, index_add_item,
 	int, fd,

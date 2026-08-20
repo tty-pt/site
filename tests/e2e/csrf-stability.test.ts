@@ -69,7 +69,7 @@ Deno.test("csrf: token is stable across page loads — add form succeeds after n
   } finally {
     await browser.close();
     try {
-      await Deno.remove(`items/song/items/${expectedId}`, { recursive: true });
+      await Deno.remove(`var/song/${expectedId}`, { recursive: true });
     } catch {
       // ignore
     }

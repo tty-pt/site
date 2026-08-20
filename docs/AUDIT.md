@@ -108,7 +108,7 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 | **C1** | CSRF cookie: pair-parser, HttpOnly, fail-closed generate, constant-time compare | `mods/auth/auth.c` |
 | **E4** | `is_safe_id` tightened to `[A-Za-z0-9_-]+` | `mods/common/common_storage.c:17-29` |
 | **E8** | `source_after_update` gated to `song.items` only | `mods/song/song.c:275` |
-| **E17** | Choir `g_doc_root` resolved at boot | `mods/choir/choir.c` |
+| **E17** | Grp `g_doc_root` resolved at boot | `mods/grp/grp.c` |
 | **F17** | `user_path_build` rejects path components in username | `mods/common/common_storage.c:134-136` |
 | **F11** | `build.mk` adds `-I…/external/hyle/include` | `build.mk:23` |
 | **F13** | e2e confirm helper tails both log paths | `tests/e2e/helpers/auth.ts:11` |
@@ -461,7 +461,7 @@ site usernames.
 #### C9 — Poem static map serves `owner` file
 
 **Severity:** Medium
-**Where:** `serve.allow:2` (`items/poem/items /poem/*/*`)
+**Where:** `serve.allow:2` (`var/poem /poem/*/*`)
 
 `/poem/:id/owner` is a public static file. Bypasses any future
 private-item design.
@@ -475,10 +475,10 @@ handler.
 
 ### D. XSS / bud / WASM
 
-#### D13 — Songbook media subtree changes child count with `show_media`
+#### D13 — Gig media subtree changes child count with `show_media`
 
 **Severity:** Medium
-**Where:** `mods/songbook/ux/detail.c:427-444`
+**Where:** `mods/gig/ux/detail.c:427-444`
 
 Always builds `div > bud_raw("")`, then replaces with full iframe tree
 when media exists. Different child counts → id drift.
@@ -570,7 +570,7 @@ position spaces. After delete+insert, they diverge.
 `mods/source/source-http.c:661-663`
 
 Two `static` counters start at 1. `mkdir` + `EEXIST` continues and
-overwrites files. Song e2e 403: `items/song/items/{1,3,6,9}` exist from
+overwrites files. Song e2e 403: `var/song/{1,3,6,9}` exist from
 earlier runs; `http_auto_seq` generates `1`; C5 fail-closed ownership
 denies.
 
@@ -579,18 +579,18 @@ function, never reuse on create.
 
 **Land:** Site.
 
-#### E9 — Songbook empty `data.txt`
+#### E9 — Gig empty `data.txt`
 
 **Severity:** Medium (known pre-existing)
-**Where:** `mods/songbook/songbook.c:99-152`, `:316-350`;
-`mods/songbook/test.sh:91-93`
+**Where:** `mods/gig/gig.c:99-152`, `:316-350`;
+`mods/gig/test.sh:91-93`
 
 Save runs even when 0 songs matched → empty file. Format-line vs
 type-slug mismatch in `get_random_repertoire_by_type`. Test now WARNs
 instead of failing.
 
 **Fix:** Don't save empty partition / fail create on zero songs. Match
-via in-memory choir.songs. Restore hard fail in `test.sh`.
+via in-memory grp.songs. Restore hard fail in `test.sh`.
 
 **Land:** Site.
 
@@ -875,7 +875,7 @@ open — bumping the define is still a manual step.
 `item_path_build_root` already uses `is_safe_id`. Still open:
 
 - `write_file_path`: no `O_NOFOLLOW`, no fsync (`:104-118`)
-- `item_remove_path_recursive`: no prefix check under `items/` (`:258-262`)
+- `item_remove_path_recursive`: no prefix check under `var/` (`:258-262`)
 
 **Land:** Site.
 
@@ -905,7 +905,7 @@ open — bumping the define is still a manual step.
 | **E2** | Persist inverse-ref rewrites |
 | **E3** | One `target_hd` = `fields_hd` |
 | **E5** | Durable auto-ids (max existing + 1, never reuse) |
-| **E9** | Songbook empty `data.txt` |
+| **E9** | Gig empty `data.txt` |
 | **E10** | DSV save-once |
 | **E14** | One delete path |
 
@@ -913,7 +913,7 @@ open — bumping the define is still a manual step.
 
 | ID | What |
 |---|---|
-| **D13** | Stable songbook media slot |
+| **D13** | Stable gig media slot |
 | **F5, F7** | mpfd length + parser |
 | **F12** | Cksum-at-build CSS `?v=` |
 

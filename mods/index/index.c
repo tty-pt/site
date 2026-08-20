@@ -802,7 +802,7 @@ static int index_generic_edit_handler(int fd, char *body)
 {
 	const char *module = index_name(fd);
 	char items_path[512];
-	snprintf(items_path, sizeof(items_path), "items/%s/items", module);
+	snprintf(items_path, sizeof(items_path), "var/%s", module);
 
 	return with_item_access(
 	        fd, body, items_path, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
@@ -816,7 +816,8 @@ XY_IMPL(unsigned, index_open,
 	index_detail_handler_fn, detail_handler,
 	index_handler_fn, add_handler,
 	index_handler_fn, edit_get_handler,
-	index_handler_fn, edit_post_handler)
+	index_handler_fn, edit_post_handler,
+	const char *, url_slug)
 {
 	struct dirent *entry;
 	char buf[PATH_MAX / 2];
@@ -830,7 +831,10 @@ XY_IMPL(unsigned, index_open,
 	if (!hd)
 		return QM_MISS;
 
-	axil_slugify(name, strlen(name), id, sizeof(id));
+	if (url_slug && url_slug[0])
+		snprintf(id, sizeof(id), "%s", url_slug);
+	else
+		axil_slugify(name, strlen(name), id, sizeof(id));
 	index_update_json(id, name);
 	if (module_path_build(doc_root, id, buf, sizeof(buf)) != 0)
 		return QM_MISS;

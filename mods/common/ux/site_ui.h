@@ -11,6 +11,7 @@ bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children);
 const char *site_ui_module_icon(const char *module);
+const char *site_ui_module_display(const char *module);
 bud_node *site_ui_menu(const char *user, const char *path);
 bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner);
 bud_node *site_ui_form_actions(

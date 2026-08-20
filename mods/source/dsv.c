@@ -18,11 +18,11 @@ static void dsv_path(
 	if (dot) {
 		size_t plen = (size_t)(dot - source_id);
 		snprintf(
-		        buf, sz, "%s/items/%.*s/items/%s/data.txt", doc_root,
+		        buf, sz, "%s/var/%.*s/%s/data.txt", doc_root,
 		        (int)plen, source_id, pval);
 	} else {
 		snprintf(
-		        buf, sz, "%s/items/%s/items/%s/data.txt", doc_root,
+		        buf, sz, "%s/var/%s/%s/data.txt", doc_root,
 		        source_id, pval);
 	}
 }

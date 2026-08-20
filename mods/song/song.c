@@ -18,7 +18,7 @@
 #include "../../lib/transp/transp.h"
 #include "fields.h"
 
-#define CHORDS_ITEMS_PATH "items/song/items"
+#define SONG_ITEMS_PATH "var/song"
 
 static transp_ctx_t *g_transp_ctx = NULL;
 static char g_doc_root[256] = ".";
@@ -241,7 +241,7 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 static int api_song_transpose_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, CHORDS_ITEMS_PATH, 0, NULL, NULL, song_details_auth,
+	        fd, body, SONG_ITEMS_PATH, 0, NULL, NULL, song_details_auth,
 	        NULL);
 }
 
@@ -379,7 +379,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 static int song_detail_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, CHORDS_ITEMS_PATH, 0, "Song not found", NULL,
+	        fd, body, SONG_ITEMS_PATH, 0, "Song not found", NULL,
 	        song_detail_auth, NULL);
 }
 
@@ -413,7 +413,7 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 static int song_edit_get_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, CHORDS_ITEMS_PATH,
+	        fd, body, SONG_ITEMS_PATH,
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Song not found", NULL,
 	        song_edit_auth, NULL);
 }
@@ -448,16 +448,16 @@ void xy_install(void)
 
 	source_setup(
 	        "song.types", "name", sizeof(song_type_cache_t),
-	        "items/song/types", song_type_fields, SONG_TYPE_FIELD_COUNT,
+	        "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT,
 	        SOURCE_FLAG_VOLATILE);
 
 	ref_field_register("song.items", "type");
 
 	source_setup(
-	        "song.items", NULL, sizeof(song_cache_t), "items/song/items",
+	        "song.items", NULL, sizeof(song_cache_t), "var/song",
 	        song_fields, SONG_FIELD_COUNT, 0);
 
-	index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL);
+	index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL, NULL);
 
 	standard_item_handlers_t handlers = {
 		.detail = song_detail_handler,

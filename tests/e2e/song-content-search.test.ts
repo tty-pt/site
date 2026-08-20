@@ -158,7 +158,7 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
 
     // ── Cleanup: remove created song directory ─────────────────────────────
     try {
-      await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+      await Deno.remove(`var/song/${songId}`, { recursive: true });
     } catch {
       // Already gone or never created — ignore
     }

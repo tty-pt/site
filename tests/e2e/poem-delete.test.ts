@@ -69,7 +69,7 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     // Cleanup in case deletion failed
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone — ignore
       }

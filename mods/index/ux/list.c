@@ -6,11 +6,18 @@ static const char *idx_select_fields_for(const char *module)
 		return "title,type,author";
 	if (!strcmp(module, "poem"))
 		return "title,owner";
-	if (!strcmp(module, "songbook"))
-		return "title,choir";
-	if (!strcmp(module, "choir"))
+	if (!strcmp(module, "gig"))
+		return "title,grp";
+	if (!strcmp(module, "grp"))
 		return "title";
 	return "title";
+}
+
+static const char *idx_display_name(const char *module)
+{
+	if (module && !strcmp(module, "grp"))
+		return "group";
+	return module;
 }
 
 static void idx_url_decode(char *s)
@@ -148,6 +155,11 @@ static void col_tok_label(char *out, size_t len, const char *key)
 	for (i = 0; key[i] && i < len - 1; i++)
 		out[i] = key[i] == '_' ? ' ' : key[i];
 	out[i] = '\0';
+
+	/* Display-name overrides for fields whose key is an internal
+	 * abbreviation (module/URL name differs from user-facing label). */
+	if (strcmp(out, "grp") == 0)
+		snprintf(out, len, "group");
 }
 
 /* ── Column definition ────────────────────────────────────── */
@@ -407,7 +419,8 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	             pagination ? lx_node(pagination) : lx_none())
 	               .data.node;
 
-	snprintf(title, sizeof(title), "%ss", state->module);
+	snprintf(title, sizeof(title), "%ss",
+	        idx_display_name(state->module));
 	if (title[0] >= 'a')
 		title[0] -= 32;
 	site_ui_collection_path(state->module, path, sizeof(path));
@@ -453,7 +466,8 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	             lx_node(site_ui_empty_state("No items")))
 	               .data.node;
 
-	snprintf(title, sizeof(title), "%ss", state->module);
+	snprintf(title, sizeof(title), "%ss",
+	        idx_display_name(state->module));
 	if (title[0] >= 'a')
 		title[0] -= 32;
 

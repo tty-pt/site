@@ -76,16 +76,35 @@ static int alias_redirect(
 	return 0;
 }
 
-static int songbook_redirect_handler(int fd, char *body)
+static int gig_redirect_handler(int fd, char *body)
 {
 	(void)body;
-	return alias_redirect(fd, "/sb", "/songbook", 303);
+	return alias_redirect(fd, "/sb", "/gig", 303);
 }
 
 static int song_redirect_handler(int fd, char *body)
 {
 	(void)body;
 	return alias_redirect(fd, "/chords", "/song", 301);
+}
+
+/* Pre-rename URL shims (301 permanent). */
+static int old_gig_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/songbook", "/gig", 301);
+}
+
+static int old_grp_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/choir", "/grp", 301);
+}
+
+static int grp_url_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/group", "/grp", 301);
 }
 
 void xy_install(void)
@@ -101,9 +120,18 @@ void xy_install(void)
 	if (common_ok && source_ok)
 		load_modules_from_file("./mods.load");
 
-	axil_register_handler("GET:/sb", songbook_redirect_handler);
-	axil_register_handler("GET:/sb/*", songbook_redirect_handler);
+	axil_register_handler("GET:/sb", gig_redirect_handler);
+	axil_register_handler("GET:/sb/*", gig_redirect_handler);
 
 	axil_register_handler("GET:/chords", song_redirect_handler);
 	axil_register_handler("GET:/chords/*", song_redirect_handler);
+
+	axil_register_handler("GET:/songbook", old_gig_redirect_handler);
+	axil_register_handler("GET:/songbook/*", old_gig_redirect_handler);
+
+	axil_register_handler("GET:/choir", old_grp_redirect_handler);
+	axil_register_handler("GET:/choir/*", old_grp_redirect_handler);
+
+	axil_register_handler("GET:/group", grp_url_redirect_handler);
+	axil_register_handler("GET:/group/*", grp_url_redirect_handler);
 }

@@ -50,7 +50,7 @@ Deno.test("song: title longer than 256 bytes does not kill the server", async ()
     await browser.close();
     if (slug) {
       try {
-        await Deno.remove(`items/song/items/${slug}`, { recursive: true });
+        await Deno.remove(`var/song/${slug}`, { recursive: true });
       } catch {
         // already gone
       }

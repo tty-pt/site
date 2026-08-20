@@ -72,12 +72,12 @@ core.so
  ├── common.so   response/page/CSRF/storage helpers (XY_DECL in common.h)
  │   └── mpfd.so multipart/form-data parser
  ├── source.so   dataset CRUD + /api/dataset/*
- └── mods.load → poem, songbook, bud_demo, song, choir
+ └── mods.load → poem, gig, bud_demo, song, grp
       ├── poem → index → auth, common, mpfd
-      ├── songbook → index, mpfd, song, source, choir
+      ├── gig → index, mpfd, song, source, grp
       ├── bud_demo (registers GET:/bud-demo)
       ├── song → index, mpfd
-      └── choir → index, mpfd, song
+      └── grp → index, mpfd, song
 ```
 
 - `index` registers `GET:/` and the default handler; `index_open()` adds the
@@ -102,8 +102,8 @@ the process chroots**. Consequences:
   (`bud-client.js` loads `/{module}.wasm` per `body[data-modules]`). Ignore any
   stale doc claiming a Rust SSR path (`mods/ssr`, `ssr.so`, wasm-bindgen).
 - The site self-serves from the repo root as a chroot; required data dirs:
-  `items/poem/items`, `items/song/items`, `items/songbook/items`,
-  `items/choir/items`.
+  `var/poem`, `var/song`, `var/gig`,
+  `var/grp`.
 - `htdocs/` is the static web root (`styles.css`, `hyle.css`, `*.wasm`,
   `bud-client.js`). `site_ui_page()` only emits `bud-client.js` +
   `data-modules` when given a non-empty module name — plain list pages stay
@@ -142,9 +142,9 @@ auth.h handles login/ownership/CSRF.
 ## 7. Client-side reality
 
 - `body[data-modules]` names a module; `/{module}.wasm` is fetched (a 404 is
-  caught silently — poem/choir intentionally have none).
+  caught silently — poem/grp intentionally have none).
 - **The list pages now ship `data-modules="list"`** → `htdocs/list.wasm`
-  (from `mods/index/ux/list.c`); poem/choir load it too and the enhancement
+  (from `mods/index/ux/list.c`); poem/grp load it too and the enhancement
   no-ops (no widget nodes). See `docs/C-ISOMORPHIC-BUD.md`.
 - `.wasm` assets are dual-compiled from the same sources as the `.so` (see
   `docs/C-ISOMORPHIC-BUD.md`); `make` probes for a WASI clang and skips if
@@ -169,7 +169,7 @@ auth.h handles login/ownership/CSRF.
 
 Logs: `debug/builds/`, `debug/runtime/axil.log`, `debug/tests/`.
 
-Known pre-existing failure: `songbook` unit-test step 6 (`data.txt empty`)
+Known pre-existing failure: `gig` unit-test step 6 (`data.txt empty`)
 fails on clean main — unrelated to any change.
 
 ## 9. Related docs

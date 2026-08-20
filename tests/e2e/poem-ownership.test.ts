@@ -118,7 +118,7 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
 
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone — ignore
       }

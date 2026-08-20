@@ -10,7 +10,7 @@ QMAP_DIR="${QMAP_DIR:-$(dirname "$SITE_DIR")/qmap}"
 
 BASE="http://$HOST:$PORT"
 LOG="/tmp/poem_listing_test_axil.log"
-POEM_DIR="$SITE_DIR/items/poem/items"
+POEM_DIR="$SITE_DIR/var/poem"
 TMPFILE1="/tmp/poem_listing_test_1_$$"
 TMPFILE2="/tmp/poem_listing_test_2_$$"
 

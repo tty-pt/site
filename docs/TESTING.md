@@ -22,7 +22,7 @@ pre-existing, and how to write e2e assertions that don't flake.
 
 ## Pre-existing failures (not caused by local changes)
 
-- `songbook` unit-test step 6 (`data.txt non-empty... FAIL: empty`) fails even
+- `gig` unit-test step 6 (`data.txt non-empty... FAIL: empty`) fails even
   on clean `main`. The test now **WARNs** and continues instead of failing.
   Root cause: `get_random_repertoire_by_type` format-line vs type-slug
   mismatch. See `docs/AUDIT.md` E9.

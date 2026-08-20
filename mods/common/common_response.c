@@ -203,7 +203,8 @@ XY_IMPL(int, site_ui_respond_add_page,
 	bud_node *, form)
 {
 	char title[64], action[256];
-	snprintf(title, sizeof(title), "Add %s", module);
+	snprintf(title, sizeof(title), "Add %s",
+	        site_ui_module_display(module));
 	snprintf(action, sizeof(action), "/%s/add", module);
 	return site_ui_respond_form_page(
 	        fd, user, title, action, icon, module, form);

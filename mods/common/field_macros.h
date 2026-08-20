@@ -1,6 +1,6 @@
 /* Shared field descriptor macros.
  * Consolidates bud_field_desc_t initializers that are identical
- * across song, choir, songbook, and poem modules.
+ * across song, grp, gig, and poem modules.
  *
  * WASM-safe: pure C, no XY hooks.
  */

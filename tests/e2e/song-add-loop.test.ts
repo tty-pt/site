@@ -46,7 +46,7 @@ Deno.test("song: N rapid adds leave the daemon alive", async () => {
     for (const slug of created) {
       if (!slug) continue;
       try {
-        await Deno.remove(`items/song/items/${slug}`, { recursive: true });
+        await Deno.remove(`var/song/${slug}`, { recursive: true });
       } catch {
         // already gone
       }

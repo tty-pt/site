@@ -121,7 +121,7 @@ Deno.test({
     // Cleanup created song
     if (createdSongId) {
       try {
-        await Deno.remove(`${REPO_ROOT}/items/song/items/${createdSongId}`, { recursive: true });
+        await Deno.remove(`${REPO_ROOT}/var/song/${createdSongId}`, { recursive: true });
       } catch { /* ignore */ }
     }
     await browser.close();

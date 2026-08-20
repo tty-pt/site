@@ -85,7 +85,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
 
     // ---- Cleanup: remove created song directory ----
     try {
-      await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+      await Deno.remove(`var/song/${songId}`, { recursive: true });
     } catch {
       // Already gone or never created — ignore
     }

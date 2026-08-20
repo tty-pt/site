@@ -50,7 +50,7 @@ Deno.test("song: login → add song → verify detail page", async () => {
 
     // ── Cleanup: remove created song directory ─────────────────────────────
     try {
-      await Deno.remove(`items/song/items/${expectedId}`, { recursive: true });
+      await Deno.remove(`var/song/${expectedId}`, { recursive: true });
     } catch {
       // Already gone or never created — ignore
     }

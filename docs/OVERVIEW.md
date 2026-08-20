@@ -6,7 +6,7 @@ in a `docs/` file linked below. The golden rule for every other doc:
 
 ## The site
 
-A pure-C music site for poems, songs, songbooks, and choirs. Server-rendered
+A pure-C music site for poems, songs, gigs, and grps. Server-rendered
 HTML (SSR-first) with progressive, optional WASM enhancement in the browser.
 **No Rust, Dioxus, or Deno in the request path** — the only WASM is C compiled
 to wasm32-wasi for browser-side polish.
@@ -65,9 +65,9 @@ docs/              the docs (OVERVIEW, ARCHITECTURE, DESIGN, BUILD, TESTING,
                    WASM-BRIDGE, FILTERS, SCHEMA, AUDIT)
 external/          axil, libxylem, libqmap, stoma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
-                   songbook, choir, bud_demo
+                   gig, grp, bud_demo
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
-items/<mod>/items  data directories (server chroots at the repo root)
+var/<source>       data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)
 debug/             captured build/runtime/test logs (gitignored)
 ```

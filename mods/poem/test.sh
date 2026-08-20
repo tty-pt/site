@@ -3,7 +3,7 @@ set -e
 
 BASE="http://localhost:8080"
 REPO_ROOT="$(cd ../.. && pwd)"
-POEM_DIR="$REPO_ROOT/items/poem/items"
+POEM_DIR="$REPO_ROOT/var/poem"
 COOKIE="/tmp/poem_test_cookie_$$"
 USER="poemtest$$"
 
