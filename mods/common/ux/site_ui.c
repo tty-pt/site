@@ -663,7 +663,7 @@ char *site_ui_page(
 	char title_esc[512];
 	int len;
 
-#define SITE_CSS_V "?v=13"
+#define SITE_CSS_V "?v=14"
 
 	if (!body)
 		return NULL;

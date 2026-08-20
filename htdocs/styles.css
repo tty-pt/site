@@ -650,4 +650,8 @@ tbody tr:last-child td {
   white-space: pre-wrap;
 }
 
+[data-hyle-mode="omni"] .hyle-filter-actions {
+  display: none;
+}
+
 body[data-wasm-loaded] [data-wasm-hide] { display: none; }
