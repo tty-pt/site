@@ -41,7 +41,10 @@ Deno.test({
         await getCsrfToken(cookieStr, BASE);
 
       // POST without title (missing required field)
+      // Use an explicit id to avoid collision with stale item directories
+      // (see FOUNDOUT.md for why auto-generated keys are unsafe here).
       const body = new URLSearchParams();
+      body.set("id", "test_validation_no_title");
       body.set("author", "Test Author");
       body.set("type", "1");
       body.set("csrf_token", csrf);
@@ -83,6 +86,7 @@ Deno.test({
   async fn() {
     const browser = await chromium.launch();
     const page = await browser.newPage();
+    const songId = `test_validation_${Date.now()}`;
     try {
       const user = await createAndLoginUser(page, BASE);
 
@@ -96,8 +100,8 @@ Deno.test({
       const { token: csrf, cookieHeader: ch } =
         await getCsrfToken(cookieStr, BASE);
 
-      // POST with title (should succeed)
       const body = new URLSearchParams();
+      body.set("id", songId);
       body.set("title", "Test Song Validation");
       body.set("author", "Test Author");
       body.set("type", "1");
@@ -120,6 +124,11 @@ Deno.test({
       assert(json.id !== undefined, "response has id");
     } finally {
       await browser.close();
+      try {
+        await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+      } catch {
+        // ignore
+      }
     }
   },
 });

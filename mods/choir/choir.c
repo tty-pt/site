@@ -272,7 +272,7 @@ static int choir_add_get_handler(int fd, char *body)
 
 	bud_node *form = ch_render_add_form(csrf_token);
 	return site_ui_respond_add_page(
-	        fd, user, "choir", "\xf0\x9f\x8e\xb6", form);
+	        fd, user, "choir", site_ui_module_icon("choir"), form);
 }
 
 /* ── Edit GET handler ────────────────────────────────────── */
@@ -308,7 +308,8 @@ choir_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	        action, csrf_token, title, format, cancel_href);
 
 	return site_ui_respond_edit_page(
-	        fd, ctx->username, "choir", "\xf0\x9f\x8e\xb6", title, ctx->id,
+	        fd, ctx->username, "choir", site_ui_module_icon("choir"),
+	        title, ctx->id,
 	        form);
 }
 
@@ -409,7 +410,8 @@ choir_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	snprintf(path, sizeof(path), "/choir/%s", ctx->id);
 	layout = site_ui_layout(
-	        page_title, path, "\xf0\x9f\x8e\xb6", ctx->username,
+	        page_title, path, site_ui_module_icon("choir"),
+	        ctx->username,
 	        site_ui_item_menu("choir", ctx->id, is_owner), body_frag);
 
 	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);

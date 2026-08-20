@@ -1091,7 +1091,8 @@ songbook_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        format_opts, song_source);
 
 	return site_ui_respond_edit_page(
-	        fd, ctx->username, "songbook", "ð", title, ctx->id,
+	        fd, ctx->username, "songbook",
+	        site_ui_module_icon("songbook"), title, ctx->id,
 	        form);
 }
 
@@ -1125,7 +1126,8 @@ static int songbook_add_get_handler(int fd, char *body)
 	bud_node *form = sb_render_add_form(csrf_token, choir_val);
 
 	return site_ui_respond_add_page(
-	        fd, user, "songbook", "\xf0\x9f\x93\x95", form);
+	        fd, user, "songbook", site_ui_module_icon("songbook"),
+	        form);
 }
 
 /* ── Edit POST handler ───────────────────────────────────── */

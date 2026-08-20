@@ -63,6 +63,20 @@ void parent_path(const char *path, char *buf, size_t len)
 	buf[n] = '\0';
 }
 
+const char *site_ui_module_icon(const char *module) {
+	if (!module || !module[0])
+		return "\xf0\x9f\x8f\xa0";
+	if (strcmp(module, "song") == 0)
+		return "\xf0\x9f\x8e\xb5";
+	if (strcmp(module, "poem") == 0)
+		return "\xf0\x9f\x93\x9d";
+	if (strcmp(module, "songbook") == 0)
+		return "\xf0\x9f\x8e\xa4";
+	if (strcmp(module, "choir") == 0)
+		return "\xf0\x9f\x91\xa5";
+	return "\xf0\x9f\x8f\xa0";
+}
+
 void site_ui_item_path(
         const char *module, const char *id, char *buf, size_t len)
 {
@@ -130,7 +144,13 @@ int ui_on_zoom_change(
 	return 0;
 }
 
-bud_node *site_ui_menu(const char *user, const char *path, const char *icon)
+static bud_arg menu_btn(const char *href, const char *icon, const char *label) {
+	return lx_el("a", lx_attr("class", "btn"), lx_attr("href", href),
+	              lx_el("span", lx_text(icon)),
+	              lx_el("span", lx_text(label)));
+}
+
+bud_node *site_ui_menu(const char *user, const char *path)
 {
 	int is_home = (!path || strcmp(path, "/") == 0);
 	char up[PATH_MAX] = "";
@@ -148,22 +168,12 @@ bud_node *site_ui_menu(const char *user, const char *path, const char *icon)
 	}
 
 	return lx_frag(is_home ? lx_none()
-	                       : lx_el("a", lx_attr("class", "btn"),
-	                               lx_attr("href", up), lx_text(icon),
-	                               lx_text("go up")),
+	                       : menu_btn(up, "⬆️", "go up"),
 	               (user && user[0])
-	                       ? lx_frag(lx_el("a", lx_attr("class", "btn"),
-	                                       lx_attr("href", me_href),
-	                                       lx_text("😊 me")),
-	                                 lx_el("a", lx_attr("class", "btn"),
-	                                       lx_attr("href", "/auth/logout"),
-	                                       lx_text("🚪 logout")))
-	                       : lx_frag(lx_el("a", lx_attr("class", "btn"),
-	                                       lx_attr("href", login_buf),
-	                                       lx_text("🔑 login")),
-	                                 lx_el("a", lx_attr("class", "btn"),
-	                                       lx_attr("href", reg_href),
-	                                       lx_text("📝 register"))))
+	                       ? lx_frag(menu_btn(me_href, "😊", "me"),
+	                                 menu_btn("/auth/logout", "🚪", "logout"))
+	                       : lx_frag(menu_btn(login_buf, "🔑", "login"),
+	                                 menu_btn(reg_href, "📝", "register")))
 	        .data.node;
 }
 
@@ -177,10 +187,8 @@ bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
 	item_action_path(module, id, "edit", edit_href, sizeof(edit_href));
 	item_action_path(module, id, "delete", del_href, sizeof(del_href));
 
-	return lx_frag(lx_el("a", lx_attr("class", "btn"),
-	                     lx_attr("href", edit_href), lx_text("✏️ edit")),
-	               lx_el("a", lx_attr("class", "btn"),
-	                     lx_attr("href", del_href), lx_text("🗑️ delete")))
+	return lx_frag(menu_btn(edit_href, "✏️", "edit"),
+	               menu_btn(del_href, "🗑️", "delete"))
 	        .data.node;
 }
 
@@ -450,9 +458,10 @@ bud_node *site_ui_layout(
 	                                 lx_attr("class",
 	                                         "relative z-20 flex flex-col "
 	                                         "gap-2"),
+lx_el("strong", lx_text(icon), lx_text(" "), lx_text(title)),
 	                                 lx_node(site_ui_menu(
-	                                         user, path, icon)),
-	                                 menu_items
+	                                         user, path)),
+                                 menu_items
 	                                         ? lx_frag(lx_el("div",
 	                                                         lx_attr("clas"
 	                                                                 "s",
@@ -488,7 +497,7 @@ bud_node *site_ui_layout(
 	                                         "btn"),
 	                                 lx_attr("aria-label", "Menu"),
 	                                 lx_attr("data-menu-toggle", "1"),
-	                                 lx_text("⚙️")))))
+	                                 lx_text(icon)))))
 	        .data.node;
 }
 
@@ -663,7 +672,7 @@ char *site_ui_page(
 	char title_esc[512];
 	int len;
 
-#define SITE_CSS_V "?v=14"
+#define SITE_CSS_V "?v=18"
 
 	if (!body)
 		return NULL;

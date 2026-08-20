@@ -84,7 +84,7 @@ Deno.test({
       await page.locator('[data-hyle-omnisearch] input[name="q"]').fill(
         "Coração Adorador",
       );
-      await page.locator('.hyle-filter-actions button[type="submit"]').click();
+      await page.locator('[data-hyle-omnisearch] input[name="q"]').press("Enter");
       await waitFor(
         async () => {
           const u = new URL(page.url());
@@ -106,7 +106,7 @@ Deno.test({
       await page.locator('[data-hyle-omnisearch] input[name="q"]').fill(
         "coracao",
       );
-      await page.locator('.hyle-filter-actions button[type="submit"]').click();
+      await page.locator('[data-hyle-omnisearch] input[name="q"]').press("Enter");
       await waitFor(
         async () => {
           const u = new URL(page.url());

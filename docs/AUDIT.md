@@ -2,15 +2,19 @@
 
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
 batch 4 (submodules) + batch 5 (A6, A9, F8) + batch 6 (A7, C3, F9) +
-batch 7 (C5, C6, D1, D2, D4, D10)
+batch 7 (C5, C6, D1, D2, D4, D8, D10)
 already landed; this file
 lists **what is still open**. Do not re-fix anything not listed here.
+
+Batches 1–3 were site-only pre-rewrite fixes; their IDs are not
+reconstructed here (they were dropped from this leftover file).
 
 **Not claimed:** live exploit verification, fuzzing, or network testing.
 
 Deferred on purpose (do not start without a plan): **C7** (GET `/api/song/prefs`
 writes; WASM depends on it), **E16** (`per_page` clamp must rewrite `qs_copy`
-or hyle still sees 0), **F15** (root-doc deletion; user declined).
+or hyle still sees 0), **F15** (root-doc deletion; user declined),
+**F10** (`AUTH_SKIP_CONFIRM` unconditional in `start.sh` — paired with B8).
 
 ---
 
@@ -54,6 +58,20 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined).
 
 ---
 
+### Fix batch 4 — 2026-08-19
+
+Submodule + site fixes (axil, axil-auth, site call sites):
+
+| ID | What | File |
+|---|---|---|
+| **A21** | HTTP/2 preface + `SSL_shutdown` on dead peer — `SSL_free` only; ALPN `http/1.1` | `external/axil/src/libaxil.c` |
+| **A2** | `axil_env_get` gains `dest_len` param; `strcpy` → `strlcpy`; all ~50 call sites bounded | `external/axil/include/ttypt/axil.h`, `external/axil/src/libaxil.c`, all `mods/` call sites |
+| **A3** | `axil_read` loop capped at 64 rounds (≈512 KiB); returns partial read instead of blocking | `external/axil/src/libaxil.c:672` |
+| **A4** | `descr_new` + WS upstream: reject `fd >= FD_SETSIZE`, close leaked fd | `external/axil/src/libaxil.c:603,2275` |
+| **B1** | `redirect_target` validates same-origin relative path: `/` prefix, reject `//`, control chars | `external/axil-auth/src/libaxil-auth.c:122` |
+| **B3** | `struct session` with `created_at`; 24h TTL; per-user cap of 8 with oldest-evict | `external/axil-auth/src/libaxil-auth.c`, `external/axil-auth/include/ttypt/auth.h` |
+| **B4** | `generate_token` / `generate_bcrypt_salt` return error; no `abort()` / `time()` fallback | `external/axil-auth/src/libaxil-auth.c` |
+
 ### Fix batch 5 — 2026-08-19
 
 | ID | What | File |
@@ -79,23 +97,8 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined).
 | **D1** | Poem XSS — `bud_raw(content)` → `lx_text(content)` + `whitespace-pre-wrap` | `mods/poem/ux/detail.c:12` |
 | **D2** | Textarea XSS — strip `</` from values before `bud_raw` in textarea branch | `mods/common/ux/site_ui.c:555-580` |
 | **D4** | Media URL validation — YouTube ID allowlist `[A-Za-z0-9_-]{11}`, HTTPS-only URL check | `mods/common/ux/site_ui.c:340-370` |
+| **D8** | Option patch text node — store `bud_node_child(opt, 0)` instead of option element | `mods/song/ux/detail.c:112` |
 | **D10** | Security headers — CSP, nosniff, X-Frame-Options, Referrer-Policy; inline script moved to `bud-client.js` | `mods/common/common_response.c:44-57`, `mods/common/ux/site_ui.c:700-723`, `htdocs/bud-client.js` |
-
----
-
-### Fix batch 4 — 2026-08-19
-
-Submodule + site fixes (axil, axil-auth, site call sites):
-
-| ID | What | File |
-|---|---|---|
-| **A1** | Decode-then-reject: URL-decode before `..` / NUL / `\` check; `snprintf` replaces `strncpy` (also fixes A5) | `external/axil/src/libaxil.c` |
-| **A2** | `axil_env_get` gains `dest_len` param; `strcpy` → `strlcpy`; all ~50 call sites bounded | `external/axil/include/ttypt/axil.h`, `external/axil/src/libaxil.c`, all `mods/` call sites |
-| **A3** | `axil_read` loop capped at 64 rounds (≈512 KiB); returns partial read instead of blocking | `external/axil/src/libaxil.c:672` |
-| **A4** | `descr_new` + WS upstream: reject `fd >= FD_SETSIZE`, close leaked fd | `external/axil/src/libaxil.c:603,2275` |
-| **B1** | `redirect_target` validates same-origin relative path: `/` prefix, reject `//`, control chars | `external/axil-auth/src/libaxil-auth.c:122` |
-| **B3** | `struct session` with `created_at`; 24h TTL; per-user cap of 8 with oldest-evict | `external/axil-auth/src/libaxil-auth.c`, `external/axil-auth/include/ttypt/auth.h` |
-| **B4** | `generate_token` / `generate_bcrypt_salt` return error; no `abort()` / `time()` fallback | `external/axil-auth/src/libaxil-auth.c` |
 
 ---
 
@@ -106,7 +109,7 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 #### A1 — Encoded `..` reaches static mapping before handlers
 
 **Severity:** Critical
-**Where:** `libaxil.c:2138-2145`, `:2249-2250`; `axil-posix.c:225-237`; `serve.allow:1`
+**Where:** `libaxil.c:2215-2221`, `:2249-2250`
 
 `..` is rejected on the **raw** request target, then `url_decode` decodes
 `%2e%2e` to `..`. `serve.allow` is `htdocs /*`; `fnmatch("/*", path, 0)`
@@ -125,58 +128,10 @@ static, or restrict `serve.allow` to explicit paths (`styles.css`,
 
 **Land:** axil submodule. Site-side mitigation: tighten `serve.allow`.
 
-#### A2 — `axil_env_get` is unbounded `strcpy`
-
-**Severity:** Critical
-**Where:** `libaxil.c:1336-1345`
-
-```c
-strcpy(target, skey);
-```
-
-No destination length. Callers use `cookie[256]`, `cookie_hdr[512]`,
-`uri[256]`, `host[128]`, `id[128]`. Cookie values can be ~16KB.
-A long `Cookie:` or `Host:` header is a stack smash on every request that
-reads those headers (login, CSRF, HTTPS redirect).
-
-**Fix:** `int axil_env_get(fd, dest, dest_len, key)` + `strlcpy`/`memcpy`
-with a cap. Audit every call site to use appropriate buffer sizes.
-
-**Land:** axil submodule.
-
-#### A3 — Blocking `recv` after full chunk hangs the process
-
-**Severity:** Critical
-**Where:** `libaxil.c:661-683`, `:631-634` (accepted fd not `O_NONBLOCK`)
-
-`axil_read` loops until `ret < sizeof(buf)`. After `select` reports
-readable, a full 8192-byte `recv` immediately calls `recv` again on a
-**blocking** fd. If the peer sent exactly `N*8192` bytes and stays open
-(normal HTTP/1.1), that recv blocks the only thread forever. One slow
-client hangs the entire server.
-
-**Fix:** `O_NONBLOCK` on accepted fds. Stop `axil_read` on `EAGAIN`.
-Cap header buffer (~64 KiB) and body (`max_body_size`).
-
-**Land:** axil submodule.
-
-#### A4 — `accept()` fd ≥ `FD_SETSIZE` is OOB write
-
-**Severity:** Critical
-**Where:** `libaxil.c:590-638` (`descr_new`), `:594-595` (`accept()`)
-
-No check that `fd < FD_SETSIZE`. A large fd smashes `descr_map[fd]` and
-`FD_SET(fd, &fds_active)`.
-
-**Fix:** If `fd >= FD_SETSIZE`, `close(fd)` and return. Longer term:
-`poll`/`epoll`.
-
-**Land:** axil submodule.
-
 #### A5 — `strncpy` URI may omit NUL
 
 **Severity:** High
-**Where:** `libaxil.c:2144-2145`
+**Where:** `libaxil.c:2220-2221`
 
 `strncpy(document_uri, argv[1], sizeof(document_uri))` then
 `url_decode(document_uri)`. If the target is ≥ `BUFSIZ`, no NUL;
@@ -185,32 +140,6 @@ decode walks off stack.
 **Fix:** `snprintf` + force NUL. 414 if URI ≥ `BUFSIZ`.
 
 **Land:** axil submodule.
-
-#### A6 — `cmd_new` writes one byte past `input`
-
-**Severity:** High
-**Where:** `libaxil.c:445`, `:674-680`
-
-When `input_len + ret == input_size`, the buffer is not grown, then
-`p[len] = '\0'` writes `input[input_size]`.
-
-**Fix:** Grow when `>= input_size`, or allocate +1 spare byte.
-
-**Land:** axil submodule.
-
-#### A7 — Unchecked `realloc`/`malloc`
-
-**Severity:** High
-**Where:** `libaxil.c:540`, `:677`, `:2073`, `:612`
-
-Failed `realloc` of `input` → NULL deref. Failed `malloc` of the 1 MiB
-write buffer → later crash.
-
-**Fix:** On NULL, close the connection. Cap before doubling.
-
-**Land:** axil submodule.
-
-**Status: DONE (batch 6)**
 
 #### A8 — Header injection via decoded CR/LF
 
@@ -222,18 +151,6 @@ params and `DOCUMENT_URI` can carry `\r\n` into `Location:` / `Host:`.
 
 **Fix:** Reject control bytes in URI and Host. Sanitize
 `axil_header_set` (reject or replace `\r`/`\n`).
-
-**Land:** axil submodule.
-
-#### A9 — `axil_dwritef` uses `vsnprintf` return as write length
-
-**Severity:** High
-**Where:** `libaxil.c:696-700`
-
-`vsnprintf` returns the *would-be* length. If longer than `BUFSIZ`,
-`axil_write` reads past the stack buffer.
-
-**Fix:** Write `min(returned, sizeof buf - 1)`.
 
 **Land:** axil submodule.
 
@@ -364,39 +281,6 @@ Only COOP/COEP/CORP. No `X-Content-Type-Options`, `Referrer-Policy`,
 
 **Land:** axil submodule.
 
-#### A21 — HTTP/2 preface logged as `GET *`; `SSL_shutdown` on dead peer
-
-**Severity:** Medium (gdb noise / possible hang on blocking fd)
-**Where:** was `axil.c` `axil_register("PRI", do_GET)`; `libaxil.c` `axil_close` `SSL_shutdown`
-
-Scanners send the HTTP/2 preface. PRI was registered as GET, so logs showed
-`GET *` and `axil_close` called `SSL_shutdown`, which writes close_notify
-to a gone peer (SIGPIPE; gdb stops). SIGPIPE was already `SIG_IGN`.
-
-**Fix (landed in axil):** drop SSL with `SSL_free` only; early-out the
-preface in `cmd_proc`; ALPN selects `http/1.1` (honest, not a ban — add
-`h2` when HTTP/2 exists).
-
-**Land:** axil submodule.
-
----
-
-### B. axil-auth (submodule `tty-pt/axil-auth`)
-
-#### B1 — Open redirect + header split via `ret=`
-
-**Severity:** Critical (splitting) / High (redirect)
-**Where:** `libaxil-auth.c:61-64`, `:557-564`; `auth.c:348-361`
-
-`ret` is not validated. `%0d%0a` in the POST body becomes CR/LF in
-`Location:` (header injection). `ret=https://evil.com` or `//evil.com`
-is an open redirect after login/register.
-
-**Fix:** Allow only same-origin relative paths: must start with `/`, must
-not start with `//`. Reject `\`, `\r`, `\n`, `:`. Else use `/`.
-
-**Land:** axil-auth submodule.
-
 #### B2 — Login/register/logout have no CSRF; logout is GET
 
 **Severity:** High
@@ -411,33 +295,6 @@ victim's browser stores `QSESSION` (forced login).
 POST form in nav.
 
 **Land:** axil-auth + site.
-
-#### B3 — Sessions: no TTL, no rotation, no `Secure`
-
-**Severity:** High
-**Where:** `libaxil-auth.c:34`, `:40` (`max_sessions=0xFF`), `:543-550`
-
-Each login adds a new token; old ones live forever. No per-user cap.
-No `Secure` (fine for :8080; wrong for HTTPS).
-
-**Fix:** Store `{user, expiry, created_at}`; purge on lookup; rotate on
-login; cap per user with eviction. `Secure` when TLS.
-
-**Land:** axil-auth submodule.
-
-#### B4 — `/dev/urandom` after chroot; bcrypt salt fallback is `time()`
-
-**Severity:** High
-**Where:** `libaxil-auth.c:253-256`, `:289-292`
-
-Root start does chroot; no `/dev` in the jail (`docs/BUILD.md` only
-copies `sh` + libs). `generate_token` abort()s if open fails. bcrypt salt
-falls back to `time(NULL)` — predictable.
-
-**Fix:** Bind-mount `/dev/urandom` in jail. Fail request on error (500),
-never abort, never use `time()` as entropy.
-
-**Land:** axil-auth + ops (jail setup).
 
 #### B5 — Password min 4; buffer truncation
 
@@ -571,59 +428,6 @@ away.
 
 **Land:** Site.
 
-#### C3 — Dataset POST: login-only, no ownership, CSRF skipped on empty body
-
-**Severity:** High
-**Where:** `mods/source/source-http.c:127-135`, `:144-169`, `:634-731`
-
-`source_access_allowed` treats `SOURCE_ACCESS_PUBLIC` and
-`DATASET_ACCESS_LOGIN` as full allow — no item ownership. CSRF is skipped
-when `body && body[0]` is false (`:163-169`). POST create/update writes
-any key as any logged-in user.
-
-**Fix:** Require ownership (same `item_require_access` as HTML). Always
-require CSRF on mutating routes. Do not treat "public dataset" as
-"world-writable".
-
-**Land:** Site.
-
-**Status: DONE (batch 6)**
-
-#### C5 — Non-root ownership fallback: first user owns everything
-
-**Severity:** High
-**Where:** `mods/auth/auth.c:140-159`
-
-Missing owner file + euid matches dir uid + first user uid 1000 → first
-user passes both checks. `item_record_ownership` returns 0 on
-`fopen`/`chown` failure (`mods/index/index.c:1024-1041`), so the
-fallback is hit more often than intended.
-
-**Fix:** No owner file → deny. Fail `item_record_ownership` if
-write/`chown` fails.
-
-**Land:** Site.
-
-**Status: DONE (batch 7)**
-
-#### C6 — Remaining unsanitized `:id` path joins
-
-**Severity:** High
-**Where:** `mods/auth/auth.c:236-238`; `mods/source/source.c:745-750`;
-`mods/source/source-http.c:654-665`, `:718-721`
-
-`item_path_build_root` already rejects `/` `\` `.` `..` via `is_safe_id`.
-HTML add slugifies titles. These remaining joins still copy raw ids:
-
-- `item_ctx_load` snprintfs `ctx->id` straight into `ctx->item_path`
-- `source_update_item` mkdir on raw `id`
-- dataset POST uses raw key field / `PATTERN_PARAM_KEY`
-
-**Fix:** Allow `[A-Za-z0-9_-]+` only (or reuse `is_safe_id`) before every
-path join. `realpath` + prefix under `items/<mod>/items`.
-
-**Land:** Site.
-
 #### C7 — `GET /api/song/prefs` writes prefs, no CSRF — **deferred**
 
 **Severity:** High
@@ -670,47 +474,6 @@ handler.
 
 ### D. XSS / bud / WASM
 
-#### D1 — Stored XSS: poem body via `bud_raw`
-
-**Severity:** Critical
-**Where:** `mods/poem/ux/detail.c:12`; `mods/poem/poem.c:81-95`
-
-Poem detail reads `pt_PT.html` and injects it unescaped via
-`bud_raw`. README and tests treat the upload as plain text. Any owner
-can store `<script>` in the file; every viewer executes it.
-
-**Fix:** Decide one contract. Plain text (matches README/tests):
-`lx_text(content)` + `whitespace-pre-wrap`. Rich HTML: sanitize with
-strict allowlist before `bud_raw`.
-
-**Land:** Site.
-
-#### D2 — Stored XSS: textarea replay via `bud_raw`
-
-**Severity:** Critical
-**Where:** `mods/common/ux/site_ui.c:548`
-
-`bud_raw(val)` replays stored values unescaped inside `<textarea>`.
-`bud_text()` was tried but hydration markers leak as literal text in
-textarea's raw-text state. Only vector is `</textarea>` breakout.
-
-**Land:** Site.
-
-#### D4 — Unsanitized media URLs in WASM `innerHTML`
-
-**Severity:** Critical
-**Where:** `mods/common/ux/site_ui.c:332-383`
-
-YouTube/audio/PDF URLs are interpolated into raw HTML strings via
-`snprintf` (`APPEND`). SSR uses `lx_attr` (escaped); WASM path does
-not. `yt=x" onload="alert(1)` → attribute injection.
-
-**Fix:** Allowlist YT id (`[A-Za-z0-9_-]{11}`); `https:` only for
-audio/pdf; reject `"`, `'`, `<`, `>`, `\`, newlines. Or use
-`bud_patch_attr`.
-
-**Land:** Site.
-
 #### D7 — Empty list skips `#bud-state` → id drift
 
 **Severity:** High
@@ -721,26 +484,6 @@ page still sets `data-modules="list"` but passes `extra_head=NULL`.
 `wasm_init` never runs; trees diverge.
 
 **Fix:** Always emit `list_state_to_json` + `#bud-state`.
-
-**Land:** Site.
-
-#### D8 — `bud_patch_text` on `<option>` elements (documented trap)
-
-**Severity:** High
-**Where:** `mods/song/ux/detail.c:81-112`;
-`htdocs/bud-hydrate.js:466-477`
-
-Transpose stores the **option element** as the tracked id. JS only
-updates in-place for `TEXT_NODE`; otherwise `createWrappedText` appends
-under stale parent. Labels don't change; stray text appears.
-
-**Fix:** Capture the text node:
-
-```c
-bud_node *txt = bud_text(key_name(...));
-g_key_options[i+11] = txt;
-lx_el("option", lx_attr("value", val_str), ..., lx_node(txt));
-```
 
 **Land:** Site.
 
@@ -759,19 +502,6 @@ $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 ```
 
 Fail if WASI clang is missing when targets are set.
-
-**Land:** Site.
-
-#### D10 — No CSP / nosniff / frame-ancestors
-
-**Severity:** High
-**Where:** `mods/common/common_response.c:103-111`
-
-HTML sent with only `Content-Type`. Combined with `bud_raw`, `innerHTML`,
-and `patch-raw`, one sink is a full XSS.
-
-**Fix:** Tight CSP (`script-src 'self'`; adjust for YouTube embeds);
-`nosniff`; `Referrer-Policy`. Move inline `window.bud_data` out of line.
 
 **Land:** Site.
 
@@ -876,14 +606,15 @@ position spaces. After delete+insert, they diverge.
 
 **Land:** Site.
 
-#### E4 — API item IDs unsanitized
+#### E4 — API item IDs allowlist too broad
 
 **Severity:** High
 **Where:** `mods/source/source.c:745-750`;
-`mods/source/source-http.c:654-665`
+`mods/source/source-http.c:669`
 
-POST creates via raw key field + `mkdir`. No rejection of `/`, `..`, NUL.
-Chroot limits blast radius but still allows overwriting `mods/`, `htdocs/`.
+Path-join hole closed by C6 (`is_safe_id` rejects `/ \ . ..` controls).
+Residual: allowlist is broader than `[a-z0-9_-]+`. Tighten to reject
+non-alphanumeric characters, or slugify-and-reject-if-changed.
 
 **Fix:** Accept only `[a-z0-9_-]+` or slugify and reject if changed.
 
@@ -896,7 +627,9 @@ Chroot limits blast radius but still allows overwriting `mods/`, `htdocs/`.
 `mods/source/source-http.c:661-663`
 
 Two `static` counters start at 1. `mkdir` + `EEXIST` continues and
-overwrites files.
+overwrites files. Song e2e 403: `items/song/items/{1,3,6,9}` exist from
+earlier runs; `http_auto_seq` generates `1`; C5 fail-closed ownership
+denies.
 
 **Fix:** `max(existing numeric keys)+1` from row map + dir scan. One
 function, never reuse on create.
@@ -1180,33 +913,6 @@ every module bind.
 
 **Land:** Site.
 
-#### F8 — `get_doc_root` inverts `axil_env_get` return code
-
-**Severity:** High
-**Where:** `mods/common/common_storage.c:184-190`
-
-`axil_env_get` returns 0 on hit, 1 on miss. `> 0` is true on miss,
-false on hit → always overwrites with `"."`. Works by accident (chdir
-into tree). After root chroot, `DOCUMENT_ROOT` is `""` not `"/"`.
-
-**Fix:** `== 0 && buf[0]`. After chroot, set `DOCUMENT_ROOT` to `"/"`.
-
-**Land:** Site.
-
-#### F9 — `core` ignores `xy_load` errors; missing `mods.load` is OK
-
-**Severity:** High
-**Where:** `mods/core/core.c:13-14`, `:85-93`
-
-`xy_load` return discarded. Missing `mods.load` returns 0. A missing
-`.so` boots a server with no handlers / fake-success hooks.
-
-**Fix:** `xy_load != XY_OK` → exit 1. Missing `mods.load` → exit 1.
-
-**Land:** Site.
-
-**Status: DONE (batch 6)** — warn on top-level failure, skip dependent modules; check `xy_load` in loop.
-
 #### F10 — `start.sh` always enables `AUTH_SKIP_CONFIRM`
 
 **Severity:** Critical
@@ -1312,17 +1018,12 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **F10** | Stop unconditional `AUTH_SKIP_CONFIRM` (pairs with B8) |
-| **F9** | ~~Fail boot on `xy_load` error / missing `mods.load`~~ **DONE** |
 | **C1** | CSRF cookie: `HttpOnly`, pair parser, constant-time compare |
-| **C6** | ~~Sanitize remaining `:id` joins (`item_ctx_load`, source mkdir/API)~~ **DONE** |
-| **D1, D2, D4** | ~~Remaining XSS sinks: poem `bud_raw`, textarea breakout, media URLs~~ **DONE** |
 
 ### Phase 1 — Security hardening (site)
 
 | ID | What |
 |---|---|
-| **C3** | ~~Dataset POST: ownership + mandatory CSRF~~ **DONE** |
-| **C5** | ~~Fail-closed owner check~~ **DONE** |
 | **C7** | Prefs: POST + CSRF only (**deferred** — WASM depends on GET write) |
 | **C2** | `/api/csrf` oracle (update e2e helpers) |
 | **C8, C9** | One owner source; drop poem static map |
@@ -1335,7 +1036,8 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | **E1** | Delete through hyle |
 | **E2** | Persist inverse-ref rewrites |
 | **E3** | One `target_hd` = `fields_hd` |
-| **E4–E5** | Sanitize API ids; durable auto-ids |
+| **E4** | Tighten API id allowlist to `[a-z0-9_-]+` |
+| **E5** | Durable auto-ids (max existing + 1, never reuse) |
 | **E6** | Close leaked qmaps |
 | **E8** | Gate or delete `source_after_update` |
 | **E9** | Songbook empty `data.txt` |
@@ -1348,9 +1050,7 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **D9** | Wasm prerequisites in `build.mk` |
-| **D10** | ~~CSP + nosniff + frame-ancestors~~ **DONE** |
 | **D7** | Empty list always emits `#bud-state` |
-| **D8** | Store text nodes for option patch |
 | **D13** | Stable songbook media slot |
 | **F11** | Always add repo `-I` for hyle |
 | **F5, F7** | mpfd length + parser |
@@ -1360,15 +1060,15 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 
 | IDs | Library | Status |
 |---|---|---|
-| **A1–A5** | axil: decode-then-reject, bounded env get, nonblock, accept bounds, strncpy | **DONE** |
+| **A2–A4** | axil: bounded env get, nonblock, accept bounds | **DONE** |
 | **B1, B3, B4** | axil-auth: redirect validate, session TTL, urandom in jail | **DONE** |
-| **A6, A9** | axil: cmd_new OOB, vsnprintf over-read | **DONE** |
-| **A7, A8, A10** | axil: ~~unchecked alloc~~ **DONE (A7)**, header inject, privdrop | open |
+| **A6, A9, A21** | axil: cmd_new OOB, vsnprintf over-read, HTTP/2 preface | **DONE** |
+| **A7** | axil: unchecked alloc | **DONE** |
+| **A1, A5, A8, A10–A20** | axil: decode-then-reject, strncpy NUL, header inject, privdrop, etc. | open |
 | **B2, B5–B12** | axil-auth: CSRF on login, session no-Secure, password min, etc. | open |
-| **F1–F3** | libxylem: missing-impl error, RTLD_NODELETE, error handling | open |
+| **F1–F4** | libxylem: missing-impl error, RTLD_NODELETE, error handling, logging | open |
 | **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse | open |
-| **E26–E27** | libqmap: abort → error, stale TODOs | open |
-| **E25, F4** | stoma + xy logging | open |
+| **E25–E27** | stoma fold + libqmap abort/TODOs | open |
 | **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` | open |
 
 ### Phase 5 — Cleanup

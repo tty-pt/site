@@ -404,7 +404,8 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	free(data_val);
 
 	return site_ui_respond_edit_page(
-	        fd, ctx->username, "song", "\xf0\x9f\x8e\xb8", meta.title,
+	        fd, ctx->username, "song", site_ui_module_icon("song"),
+	        meta.title,
 	        ctx->id, form);
 }
 
@@ -427,7 +428,7 @@ static int song_add_get_handler(int fd, char *body)
 
 	bud_node *form = song_form_content(0, NULL, NULL, NULL, csrf_token);
 	return site_ui_respond_add_page(
-	        fd, user, "song", "\xf0\x9f\x8e\xb8", form);
+	        fd, user, "song", site_ui_module_icon("song"), form);
 }
 
 void xy_install(void)

@@ -38,7 +38,7 @@ static int poem_add_get_handler(int fd, char *body)
 
 	bud_node *form = poem_form_content(0, NULL, NULL, csrf_token);
 	return site_ui_respond_add_page(
-	        fd, user, "poem", "\xf0\x9f\x93\x9d", form);
+	        fd, user, "poem", site_ui_module_icon("poem"), form);
 }
 
 static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
@@ -52,7 +52,8 @@ static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	bud_node *form = poem_form_content(1, ctx->id, &meta, csrf_token);
 	return site_ui_respond_edit_page(
-	        fd, ctx->username, "poem", "\xf0\x9f\x93\x9d", meta.title,
+	        fd, ctx->username, "poem", site_ui_module_icon("poem"),
+	        meta.title,
 	        ctx->id, form);
 }
 
@@ -99,7 +100,8 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		return server_error(fd, "OOM");
 
 	bud_node *layout = site_ui_layout(
-	        page_title, path, "\xf0\x9f\x93\x9d", ctx->username,
+	        page_title, path, site_ui_module_icon("poem"),
+	        ctx->username,
 	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
 
 	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);

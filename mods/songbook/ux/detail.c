@@ -330,7 +330,8 @@ bud_node *bud_app_render(void)
 
 	/* Page layout with proper Bud nodes */
 	bud_node *layout = site_ui_layout(
-	        sb_app_state.title, sb_app_state.path, "\xf0\x9f\x93\x95",
+	        sb_app_state.title, sb_app_state.path,
+	        site_ui_module_icon("songbook"),
 	        sb_app_state.user, menu_items, body_content);
 
 	/* Main wrapper with zoom CSS custom property */

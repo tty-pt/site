@@ -420,7 +420,9 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	                  : NULL;
 
 	return site_ui_layout(
-	        title, path, "\xf0\x9f\x93\x8b", state->username, add_btn,
+	        title, path, site_ui_module_icon(state->module),
+	        state->username,
+	        add_btn,
 	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
 }
@@ -456,7 +458,8 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 		title[0] -= 32;
 
 	return site_ui_layout(
-	        title, path, "\xf0\x9f\x93\x8b", state->username,
+	        title, path, site_ui_module_icon(state->module),
+	        state->username,
 	        add_btn,
 	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
