@@ -19,7 +19,7 @@ Deno.test("song list: accent-sensitive title search", async () => {
   const page = await browser.newPage();
 
   try {
-    await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+    await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
     await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
 

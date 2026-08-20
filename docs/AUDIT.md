@@ -1,8 +1,8 @@
 # Audit — leftover issues
 
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
-batch 4 (submodules) already landed; this file lists **what is still
-open**. Do not re-fix anything not listed here.
+batch 4 (submodules) + batch 5 (A6, A9, F8) already landed; this file
+lists **what is still open**. Do not re-fix anything not listed here.
 
 **Not claimed:** live exploit verification, fuzzing, or network testing.
 
@@ -49,6 +49,16 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined).
 - Accent-sensitive search is intentional and correctly folded (`stoma_fold`).
 - XY `RTLD_LOCAL` isolation is the right model.
 - hyle core has **no** bud symbols; boundary rule is holding.
+
+---
+
+### Fix batch 5 — 2026-08-19
+
+| ID | What | File |
+|---|---|---|
+| **A6** | `cmd_new` heap overflow — realloc guard `>` → `>=` ensures NUL terminator in bounds | `external/axil/src/libaxil.c:683` |
+| **A9** | `axil_dwritef` stack over-read — clamp `vsnprintf` return to `sizeof(buf) - 1` | `external/axil/src/libaxil.c:709` |
+| **F8** | `get_doc_root` inverted return — `axil_env_get(...) > 0` → `== 0` (0 = hit) | `mods/common/common_storage.c:186` |
 
 ---
 
@@ -1288,7 +1298,6 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | **C2** | `/api/csrf` oracle (update e2e helpers) |
 | **C8, C9** | One owner source; drop poem static map |
 | **B2** | CSRF on login/register; POST-only logout |
-| **F8** | Fix `get_doc_root` return code |
 
 ### Phase 2 — Data layer correctness (site)
 
@@ -1324,7 +1333,8 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 |---|---|---|
 | **A1–A5** | axil: decode-then-reject, bounded env get, nonblock, accept bounds, strncpy | **DONE** |
 | **B1, B3, B4** | axil-auth: redirect validate, session TTL, urandom in jail | **DONE** |
-| **A6–A10** | axil: cmd_new OOB, unchecked alloc, header inject, vsnprintf, privdrop | open |
+| **A6, A9** | axil: cmd_new OOB, vsnprintf over-read | **DONE** |
+| **A7, A8, A10** | axil: unchecked alloc, header inject, privdrop | open |
 | **B2, B5–B12** | axil-auth: CSRF on login, session no-Secure, password min, etc. | open |
 | **F1–F3** | libxylem: missing-impl error, RTLD_NODELETE, error handling | open |
 | **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse | open |

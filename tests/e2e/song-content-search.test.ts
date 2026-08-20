@@ -51,7 +51,7 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
     await page.waitForURL(`${BASE}/song/${songId}`, { timeout: 5000 });
 
     // ── 2. Content box narrows the list; value is retained ────────────────
-    await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+    await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
     await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
     await page.waitForSelector('input[name="data"].filter-lookup', {
       timeout: 5000,

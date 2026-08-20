@@ -439,6 +439,14 @@ static int idx_render_list_bud(
 	state.sort_asc = sort_asc;
 	state.page = (int)page;
 	state.per_page = (int)per_page;
+	{
+		char custom_buf[8] = "";
+
+		idx_query_param(
+		        query_str, "custom", custom_buf, sizeof(custom_buf));
+		state.custom = strcmp(custom_buf, "1") == 0;
+	}
+	idx_query_param(query_str, "q", state.q, sizeof(state.q));
 
 	ncols = idx_schema_collect(dataset_id, select_csv, cols, 32);
 	state.ncols = ncols;

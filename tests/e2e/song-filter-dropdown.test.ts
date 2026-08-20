@@ -50,7 +50,7 @@ Deno.test({
       page.setDefaultNavigationTimeout(10000);
       page.setDefaultTimeout(10000);
 
-      await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+      await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
       // ---- 1. SSR contract (works with no JS at all) ----
@@ -227,7 +227,7 @@ Deno.test({
     try {
       // AND default: natal+saida → only dual-typed songs
       await page.goto(
-        `${BASE}/song/?type=natal&type=saida`,
+        `${BASE}/song/?custom=1&type=natal&type=saida`,
         { waitUntil: "load" },
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
@@ -259,7 +259,7 @@ Deno.test({
 
       // OR override: natal+comunhao with type_op=or → union
       await page.goto(
-        `${BASE}/song/?type=natal&type=comunhao&type_op=or`,
+        `${BASE}/song/?custom=1&type=natal&type=comunhao&type_op=or`,
         { waitUntil: "load" },
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });

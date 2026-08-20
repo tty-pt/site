@@ -188,6 +188,8 @@ typedef struct {
 	char module[64];
 	char username[64];
 	char query[512]; /* raw QUERY_STRING (form action, pagination links) */
+	int custom;      /* 1 = per-field bar; 0 = omni (default) */
+	char q[512];
 	char sort_field[64];
 	int sort_asc;
 	int page, per_page, total, has_page;
@@ -219,15 +221,64 @@ static bud_node *idx_content_lookup(const char *qs)
 	        .data.node;
 }
 
+static void idx_mode_href(
+        char *out, size_t n, const list_state_t *s, int custom)
+{
+	size_t pos;
+	int first;
+
+	if (!out || n == 0)
+		return;
+	pos = (size_t)snprintf(out, n, "?");
+	if (pos >= n)
+		return;
+	first = 1;
+	if (custom) {
+		pos += (size_t)snprintf(out + pos, n - pos, "custom=1");
+		first = 0;
+		if (pos >= n)
+			return;
+	}
+	if (s && s->sort_field[0]) {
+		pos += (size_t)snprintf(
+		        out + pos, n - pos, "%ssort=%s:%s", first ? "" : "&",
+		        s->sort_field, s->sort_asc ? "asc" : "desc");
+		first = 0;
+		if (pos >= n)
+			return;
+	}
+	if (s && s->per_page > 0 && s->per_page != 10)
+		snprintf(out + pos, n - pos, "%sper_page=%d", first ? "" : "&",
+		         s->per_page);
+}
+
+static bud_node *idx_omnisearch_field(const char *q)
+{
+	bud_node *input;
+
+	input = lx_el("input", lx_attr("type", "search"), lx_attr("name", "q"),
+	              lx_attr("placeholder", "Search\xe2\x80\xa6"),
+	              lx_attr("aria-label", "Search everything"),
+	              (q && q[0]) ? lx_attr("value", q) : lx_none())
+	               .data.node;
+	return lx_el("label", lx_attr("class", "hyle-omnisearch"),
+	             lx_attr("data-hyle-omnisearch", "1"),
+	             lx_node(input))
+	        .data.node;
+}
+
 static bud_node *idx_filter_bar(const list_state_t *state)
 {
-	bud_node *bar = bud_fragment();
+	bud_node *bar;
 	int i;
 
+	hyle_bud_ms_reset();
+	if (!state->custom)
+		return idx_omnisearch_field(state->q);
+
+	bar = bud_fragment();
 	if (!bar)
 		return NULL;
-
-	hyle_bud_ms_reset();
 
 	for (i = 0; i < state->ncols; i++) {
 		const list_col_t *col = &state->cols[i];
@@ -257,17 +308,79 @@ static bud_node *idx_filter_bar(const list_state_t *state)
 	return bar;
 }
 
+static bud_node *idx_filter_chrome(const list_state_t *state)
+{
+	bud_node *bar;
+	bud_node *wrap;
+	bud_node *actions;
+	bud_node *hidden;
+	bud_node *toggle;
+	char href[256];
+	const char *other;
+	const char *icon;
+	const char *aria;
+	int omni;
+
+	bar = idx_filter_bar(state);
+	if (!bar)
+		return NULL;
+	omni = !state->custom;
+	if (omni) {
+		other = "custom";
+		icon = "\xe2\x9a\x99";
+		aria = "Advanced filters";
+	} else {
+		other = "omni";
+		icon = "\xe2\x8c\x95";
+		aria = "Search everything";
+	}
+	idx_mode_href(href, sizeof(href), state, omni ? 1 : 0);
+	toggle = lx_el("a", lx_attr("class", "hyle-mode-toggle"),
+	               lx_attr("data-hyle-mode-toggle", other),
+	               lx_attr("href", href),
+	               lx_attr("aria-label", aria), lx_text(icon))
+	                 .data.node;
+	if (toggle)
+		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
+		             lx_attr("data-hyle-mode", omni ? "omni" : "custom"),
+		             lx_node(toggle), lx_node(bar))
+		               .data.node;
+	else
+		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
+		             lx_attr("data-hyle-mode", omni ? "omni" : "custom"),
+		             lx_node(bar))
+		               .data.node;
+	if (!wrap)
+		return bar;
+	if (state->custom) {
+		hidden = lx_el("input", lx_attr("type", "hidden"),
+		               lx_attr("name", "custom"),
+		               lx_attr("value", "1"))
+		                 .data.node;
+		if (hidden)
+			bud_append(wrap, hidden);
+	}
+	actions = lx_el("div", lx_attr("class", "hyle-filter-actions"),
+	                omni ? lx_none() :
+	                lx_el("button", lx_attr("type", "reset"),
+	                      lx_text("Clear")),
+	                lx_el("button", lx_attr("type", "submit"),
+	                      lx_text("Apply")))
+	                 .data.node;
+	if (actions)
+		bud_append(wrap, actions);
+	return wrap;
+}
+
 static bud_node *idx_list_layout(const list_state_t *state)
 {
 	char path[256];
 	char title[128];
 	const char *col_keys[LIST_MAX_COLS];
 	const char *col_labels[LIST_MAX_COLS];
-	bud_node *filter_bar;
+	bud_node *filter_wrap;
 	bud_node *table;
 	bud_node *pagination;
-	bud_node *filter_wrap;
-	bud_node *actions_wrap;
 	bud_node *form;
 	bud_node *add_btn;
 	char href_buf[256];
@@ -278,7 +391,7 @@ static bud_node *idx_list_layout(const list_state_t *state)
 		col_labels[i] = state->cols[i].label;
 	}
 
-	filter_bar = idx_filter_bar(state);
+	filter_wrap = idx_filter_chrome(state);
 	table = hyle_bud_table(
 	        col_keys, col_labels, state->ncols, (const char **)state->ids,
 	        state->nids, (const char **)state->values, state->module,
@@ -286,22 +399,6 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	pagination = hyle_bud_pagination(
 	        state->page, state->per_page, state->total, state->nids,
 	        state->query);
-
-	filter_wrap = NULL;
-	actions_wrap = NULL;
-	if (filter_bar) {
-		filter_wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		                    lx_node(filter_bar))
-		                      .data.node;
-		actions_wrap =
-		        lx_el("div", lx_attr("class", "hyle-filter-actions"),
-		              lx_el("button", lx_attr("type", "reset"),
-		                    lx_text("Clear")),
-		              lx_el("button", lx_attr("type", "submit"),
-		                    lx_text("Apply")))
-		                .data.node;
-		bud_append(filter_wrap, actions_wrap);
-	}
 
 	form = lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
 	             lx_attr("class", "list-form"),
@@ -333,9 +430,7 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	char path[256];
 	char href_buf[256];
 	bud_node *add_btn;
-	bud_node *filter_bar;
 	bud_node *filter_wrap;
-	bud_node *actions_wrap;
 	bud_node *form;
 	char title[128];
 
@@ -348,22 +443,7 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	                            .data.node
 	                  : NULL;
 
-	filter_bar = idx_filter_bar(state);
-	filter_wrap = NULL;
-	actions_wrap = NULL;
-	if (filter_bar) {
-		filter_wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		                    lx_node(filter_bar))
-		                      .data.node;
-		actions_wrap =
-		        lx_el("div", lx_attr("class", "hyle-filter-actions"),
-		              lx_el("button", lx_attr("type", "reset"),
-		                    lx_text("Clear")),
-		              lx_el("button", lx_attr("type", "submit"),
-		                    lx_text("Apply")))
-		                .data.node;
-		bud_append(filter_wrap, actions_wrap);
-	}
+	filter_wrap = idx_filter_chrome(state);
 
 	form = lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
 	             lx_attr("class", "list-form"),
@@ -489,6 +569,10 @@ int list_state_to_json(const list_state_t *state, char *out, size_t out_sz)
 	ljw_str_key(&w, "username", state->username);
 	ljw_put(&w, ",");
 	ljw_str_key(&w, "query", state->query);
+	ljw_put(&w, ",");
+	ljw_int(&w, "custom", state->custom);
+	ljw_put(&w, ",");
+	ljw_str_key(&w, "q", state->q);
 	ljw_put(&w, ",");
 	ljw_str_key(&w, "sort_field", state->sort_field);
 	ljw_put(&w, ",");
@@ -737,6 +821,8 @@ void list_state_from_json(list_state_t *state, const char *json)
 	bud_json_str(
 	        json, "username", state->username, sizeof(state->username));
 	bud_json_str(json, "query", state->query, sizeof(state->query));
+	state->custom = bud_json_int(json, "custom", 0) ? 1 : 0;
+	bud_json_str(json, "q", state->q, sizeof(state->q));
 	bud_json_str(
 	        json, "sort_field", state->sort_field,
 	        sizeof(state->sort_field));

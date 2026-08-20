@@ -33,7 +33,7 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
 
   try {
     console.log("Navigating to", `${BASE}/song/`);
-    await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+    await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
     console.log("Page URL after goto:", page.url());
 
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });

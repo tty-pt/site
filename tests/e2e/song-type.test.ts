@@ -490,7 +490,7 @@ Deno.test({
       );
 
       // Use type=communion filter to narrow to songs with this type
-      await page.goto(`${BASE}/song?type=communion`, {
+      await page.goto(`${BASE}/song/?custom=1&type=communion`, {
         waitUntil: "domcontentloaded",
       });
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
@@ -556,7 +556,7 @@ Deno.test({
       page.setDefaultNavigationTimeout(10000);
       page.setDefaultTimeout(10000);
 
-      await page.goto(`${BASE}/song/`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
       // Check that filter checkboxes exist for type field (multiselect)

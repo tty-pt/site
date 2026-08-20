@@ -183,7 +183,7 @@ XY_IMPL(char *, slurp_file, const char *, path)
 
 XY_IMPL(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	if (fd > 0 && axil_env_get(fd, buf, len, "DOCUMENT_ROOT") > 0 && buf[0])
+	if (fd > 0 && axil_env_get(fd, buf, len, "DOCUMENT_ROOT") == 0 && buf[0])
 		return 0;
 
 	snprintf(buf, len, ".");

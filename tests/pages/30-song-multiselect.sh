@@ -35,41 +35,41 @@ row_count(){
 
 echo "Running song multiselect SSR smoke tests against $BASE"
 
-song=$(body_of "/song/")
+song=$(body_of "/song/?custom=1")
 
 printf '%s' "$song" | grep -q 'data-hyle-ms="type"' \
-  || fail "/song/ missing data-hyle-ms=\"type\""
-pass "/song/ has data-hyle-ms=\"type\""
+  || fail "/song/?custom=1 missing data-hyle-ms=\"type\""
+pass "/song/?custom=1 has data-hyle-ms=\"type\""
 
 printf '%s' "$song" | grep -q '<details[^>]*class="hyle-multiselect"' \
-  || fail "/song/ missing <details class=\"hyle-multiselect\">"
-pass "/song/ has the <details> SSR contract"
+  || fail "/song/?custom=1 missing <details class=\"hyle-multiselect\">"
+pass "/song/?custom=1 has the <details> SSR contract"
 
 printf '%s' "$song" | grep -q '<input[^>]*type="checkbox"[^>]*name="type"' \
-  || fail "/song/ missing real type checkboxes (no-JS baseline)"
-pass "/song/ has real <input type=checkbox name=type> controls"
+  || fail "/song/?custom=1 missing real type checkboxes (no-JS baseline)"
+pass "/song/?custom=1 has real <input type=checkbox name=type> controls"
 
 printf '%s' "$song" | grep -q 'id="bud-state"' \
-  || fail "/song/ missing bud-state JSON"
-pass "/song/ embeds id=\"bud-state\""
+  || fail "/song/?custom=1 missing bud-state JSON"
+pass "/song/?custom=1 embeds id=\"bud-state\""
 
 printf '%s' "$song" | grep -q 'data-modules="list"' \
-  || fail "/song/ missing data-modules=\"list\""
-pass "/song/ opts into data-modules=\"list\""
+  || fail "/song/?custom=1 missing data-modules=\"list\""
+pass "/song/?custom=1 opts into data-modules=\"list\""
 
-filtered=$(body_of "/song/?type=natal&type=comunhao&type_op=or")
+filtered=$(body_of "/song/?custom=1&type=natal&type=comunhao&type_op=or")
 count=$(row_count "$filtered")
 case "$count" in
   *" of 0 rows"|"")
-    fail "/song/?type=natal&type=comunhao&type_op=or: expected rows (union), got '$count'";;
+    fail "/song/?custom=1&type=natal&type=comunhao&type_op=or: expected rows (union), got '$count'";;
 esac
-pass "/song/?type=natal&type=comunhao&type_op=or filters (union): $count"
+pass "/song/?custom=1&type=natal&type=comunhao&type_op=or filters (union): $count"
 
 printf '%s' "$filtered" | grep -q 'a_ele_a_gloria' \
   && fail "union filter must exclude a Louvor-only song (a_ele_a_gloria)"
 pass "union filter excludes a song of neither type"
 
-and=$(body_of "/song/?type=natal&type=saida")
+and=$(body_of "/song/?custom=1&type=natal&type=saida")
 printf '%s' "$and" | grep -q 'alegremse_os_ceus_e_a_terra' \
   || fail "AND filter must include the dual-typed song (alegremse_os_ceus_e_a_terra)"
 pass "AND filter returns a song with both natal and saida"
@@ -79,34 +79,34 @@ pass "AND filter excludes a song of neither selected type"
 and_count=$(row_count "$and")
 case "$and_count" in
   "0 of 0 rows"|"")
-    fail "/song/?type=natal&type=saida (AND) returned no rows — expected matches";;
+    fail "/song/?custom=1&type=natal&type=saida (AND) returned no rows — expected matches";;
 esac
 pass "AND filter has rows: $and_count"
 
-and_empty=$(body_of "/song/?type=natal&type=comunhao")
+and_empty=$(body_of "/song/?custom=1&type=natal&type=comunhao")
 and_empty_count=$(row_count "$and_empty")
 case "$and_empty_count" in
   "0 of 0 rows")
     pass "AND ?type=natal&type=comunhao correctly returns 0 rows (no dual song)";;
   *)
-    fail "AND ?type=natal&type=comunhao should return 0 rows, got '$and_empty_count'";;
+    fail "AND ?custom=1&type=natal&type=comunhao should return 0 rows, got '$and_empty_count'";;
 esac
 
-single=$(body_of "/song/?type=natal")
+single=$(body_of "/song/?custom=1&type=natal")
 printf '%s' "$single" | grep -q 'value="natal" checked' \
-  || fail "/song/?type=natal: natal checkbox not checked on round-trip"
-pass "/song/?type=natal round-trips checked state"
+  || fail "/song/?custom=1&type=natal: natal checkbox not checked on round-trip"
+pass "/song/?custom=1&type=natal round-trips checked state"
 
 printf '%s' "$single" | grep -q 'Natal' \
-  || fail "/song/?type=natal: trigger label missing 'Natal'"
-pass "/song/?type=natal trigger label shows the selection"
+  || fail "/song/?custom=1&type=natal: trigger label missing 'Natal'"
+pass "/song/?custom=1&type=natal trigger label shows the selection"
 
-sb=$(body_of "/songbook/")
+sb=$(body_of "/songbook/?custom=1")
 printf '%s' "$sb" | grep -q 'data-hyle-ss="choir"' \
-  || fail "/songbook/ missing data-hyle-ss=\"choir\""
-pass "/songbook/ has the dropdown single-select"
+  || fail "/songbook/?custom=1 missing data-hyle-ss=\"choir\""
+pass "/songbook/?custom=1 has the dropdown single-select"
 printf '%s' "$sb" | grep -q 'name="choir"' \
-  || fail "/songbook/ missing radio name=\"choir\" (no-JS baseline)"
-pass "/songbook/ has real <input type=radio name=choir> controls"
+  || fail "/songbook/?custom=1 missing radio name=\"choir\" (no-JS baseline)"
+pass "/songbook/?custom=1 has real <input type=radio name=choir> controls"
 
 pass "song multiselect SSR smoke tests all OK"

@@ -31,7 +31,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
   }
 
   async function searchTitle(title: string): Promise<string> {
-    await page.goto(`${BASE}/song/?title=${encodeURIComponent(title)}`, {
+    await page.goto(`${BASE}/song/?custom=1&title=${encodeURIComponent(title)}`, {
       waitUntil: "load",
     });
     await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });

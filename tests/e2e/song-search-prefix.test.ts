@@ -40,7 +40,7 @@ Deno.test("song list: FTS prefix semantics + multi-field AND", async () => {
 
   try {
     // ---- 1. Prefix semantics: "star" matches nothing (mid-word) ----
-    await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+    await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
     await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
     await page.locator('input[name="title"]').fill("star");
