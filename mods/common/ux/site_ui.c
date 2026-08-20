@@ -288,6 +288,14 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		              lx_el("iframe", lx_attr("src", src),
 		                    lx_attr("class", "w-full aspect-video "
 		                                     "border-none"),
+		                    lx_attr("title", "YouTube video player"),
+		                    lx_attr("allow",
+		                            "accelerometer; autoplay; "
+		                            "clipboard-write; encrypted-media; "
+		                            "gyroscope; picture-in-picture; "
+		                            "web-share"),
+		                    lx_attr("referrerpolicy",
+		                            "strict-origin-when-cross-origin"),
 		                    lx_attr("allowfullscreen", "")))
 		                .data.node);
 		has_media = 1;
@@ -354,7 +362,11 @@ int site_ui_build_media_html(
 		        yt);
 		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
 		       "<iframe src=\"%s\" class=\"w-full aspect-video "
-		       "border-none\" allowfullscreen></iframe></div>",
+		       "border-none\" title=\"YouTube video player\" "
+		       "allow=\"accelerometer; autoplay; clipboard-write; "
+		       "encrypted-media; gyroscope; picture-in-picture; "
+		       "web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" "
+		       "allowfullscreen></iframe></div>",
 		       src);
 		has = 1;
 	}
