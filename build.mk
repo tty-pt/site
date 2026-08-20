@@ -20,7 +20,7 @@ LDFLAGS += -fsanitize=address -fsanitize=undefined
 endif
 
 CFLAGS += -g -O0 $(PICFLAGS)
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
@@ -41,7 +41,7 @@ WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/bud/include
 
 all: dirs $(TARGET) $(WASM_TARGETS)
 
-$(WASM_PATH)/%.wasm:
+$(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
 		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
 	else \

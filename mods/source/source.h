@@ -55,6 +55,7 @@ typedef struct {
 	size_t field_count;
 	unsigned source_hd;
 	unsigned fields_hd;
+	unsigned schema_hd;   /* lazily filled by source_get_schema_hd */
 	uint32_t record_id;
 	unsigned flags;
 	void *user;

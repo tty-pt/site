@@ -31,6 +31,52 @@
 /* CSRF helpers                                                         */
 /* ------------------------------------------------------------------ */
 
+static int csrf_find_token(const char *cookie, char *out, size_t len)
+{
+	const char *p;
+
+	out[0] = '\0';
+	if (!cookie || !*cookie)
+		return -1;
+	p = cookie;
+	while (*p) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (strncmp(p, "csrf_token=", 11) == 0) {
+			const char *val = p + 11;
+			const char *end = val;
+			size_t vlen;
+
+			while (*end && *end != ';')
+				end++;
+			vlen = (size_t)(end - val);
+			if (vlen >= len)
+				vlen = len - 1;
+			memcpy(out, val, vlen);
+			out[vlen] = '\0';
+			return 0;
+		}
+		while (*p && *p != ';')
+			p++;
+		if (*p == ';')
+			p++;
+	}
+	return -1;
+}
+
+static int csrf_ct_compare(const char *a, size_t alen,
+	const char *b, size_t blen)
+{
+	unsigned char diff = 0;
+	size_t i;
+
+	if (alen != blen)
+		return -1;
+	for (i = 0; i < alen; i++)
+		diff |= (unsigned char)(a[i] ^ b[i]);
+	return diff == 0 ? 0 : -1;
+}
+
 XY_IMPL(int, csrf_generate_token, char *, out, size_t, len)
 {
 	unsigned char buf[16];
@@ -39,18 +85,18 @@ XY_IMPL(int, csrf_generate_token, char *, out, size_t, len)
 	ssize_t n;
 
 	if (!out || len < 33)
-		return 0;
+		return -1;
 
 	urfd = open("/dev/urandom", O_RDONLY);
 	if (urfd < 0) {
 		out[0] = '\0';
-		return 0;
+		return -1;
 	}
 	n = read(urfd, buf, sizeof(buf));
 	close(urfd);
 	if (n != (ssize_t)sizeof(buf)) {
 		out[0] = '\0';
-		return 0;
+		return -1;
 	}
 	for (i = 0; i < sizeof(buf); i++)
 		snprintf(out + i * 2, 3, "%02x", buf[i]);
@@ -61,32 +107,20 @@ XY_IMPL(int, csrf_generate_token, char *, out, size_t, len)
 XY_IMPL(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 {
 	char token[33];
-	char header[80];
+	char header[96];
 	char cookie_hdr[512] = { 0 };
-	char *p;
-	char *eq;
-	char *end;
-	size_t vlen;
 
 	token[0] = '\0';
 	axil_env_get(fd, cookie_hdr, sizeof(cookie_hdr), "HTTP_COOKIE");
-	p = strstr(cookie_hdr, "csrf_token=");
-	if (p) {
-		eq = p + strlen("csrf_token=");
-		end = strchr(eq, ';');
-		vlen = end ? (size_t)(end - eq) : strlen(eq);
-		if (vlen == 32) {
-			memcpy(token, eq, 32);
-			token[32] = '\0';
-		}
-	}
+	csrf_find_token(cookie_hdr, token, sizeof(token));
 
 	if (!token[0])
-		csrf_generate_token(token, sizeof(token));
+		if (csrf_generate_token(token, sizeof(token)) != 0)
+			return -1;
 
 	snprintf(
 	        header, sizeof(header),
-	        "csrf_token=%s; Path=/; SameSite=Strict", token);
+	        "csrf_token=%s; Path=/; SameSite=Strict; HttpOnly", token);
 	axil_header_set(fd, "Set-Cookie", header);
 	if (out && len > 0)
 		snprintf(out, len, "%s", token);
@@ -96,11 +130,7 @@ XY_IMPL(int, csrf_set_cookie, int, fd, char *, out, size_t, len)
 XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 {
 	char cookie_hdr[512];
-	char *p;
-	char *eq;
-	char *end;
-	size_t vlen;
-	size_t slen;
+	char cookie_val[33];
 
 	if (!submitted || !submitted[0])
 		return -1;
@@ -108,16 +138,11 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 	cookie_hdr[0] = '\0';
 	axil_env_get(fd, cookie_hdr, sizeof(cookie_hdr), "HTTP_COOKIE");
 
-	p = strstr(cookie_hdr, "csrf_token=");
-	if (!p)
+	if (csrf_find_token(cookie_hdr, cookie_val, sizeof(cookie_val)) != 0)
 		return -1;
-	eq = p + strlen("csrf_token=");
-	end = strchr(eq, ';');
-	vlen = end ? (size_t)(end - eq) : strlen(eq);
-	slen = strlen(submitted);
-	if (vlen != slen)
-		return -1;
-	return memcmp(eq, submitted, vlen) == 0 ? 0 : -1;
+
+	return csrf_ct_compare(cookie_val, strlen(cookie_val),
+		submitted, strlen(submitted));
 }
 
 /* ------------------------------------------------------------------ */

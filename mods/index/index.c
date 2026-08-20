@@ -631,6 +631,8 @@ static int idx_render_list_bud(
 		free(extra_head);
 	}
 
+	qmap_close(result_hd);
+
 	for (i = 0; i < disp_nids; i++)
 		for (j = 0; j < ncols; j++)
 			free((void *)values[i * ncols + j]);
@@ -645,10 +647,27 @@ empty_page:
 	state.total = 0;
 	layout = list_render(&state);
 	if (layout) {
+		size_t json_budget = 8192 + 128;
+		char *json = malloc(json_budget);
+		char *extra_head = NULL;
+		if (json) {
+			int jrc = list_state_to_json(&state, json, json_budget);
+			if (jrc == 0) {
+				size_t hlen = strlen(json) + 128;
+				extra_head = malloc(hlen);
+				if (extra_head)
+					snprintf(
+					        extra_head, hlen,
+					        "<script type=\"application/json\" "
+					        "id=\"bud-state\">%s</script>", json);
+			}
+			free(json);
+		}
 		snprintf(title, sizeof(title), "%ss", module);
 		if (title[0] >= 'a')
 			title[0] -= 32;
-		respond_html(fd, site_ui_page(title, NULL, "list", layout));
+		respond_html(fd, site_ui_page(title, extra_head, "list", layout));
+		free(extra_head);
 	} else {
 		axil_respond(fd, 500, "Internal Server Error");
 	}
@@ -968,38 +987,6 @@ static int index_delete_handler(int fd, char *body)
 	            "Forbidden"))
 		return 1;
 
-	/* Remove item directory */
-	int remove_rc = item_remove_path_recursive(item_path);
-	if (remove_rc != 0) {
-		fprintf(stderr,
-		        "ERROR delete: item_remove_path_recursive failed for "
-		        "%s\n",
-		        item_path);
-	}
-
-	/* Find module slot and call cleanup + index_del */
-	unsigned hd = 0;
-	pid_t pid = getpid();
-	for (size_t i = 0; i < module_slot_count; i++) {
-		char simple_name[257];
-		snprintf(
-		        simple_name, sizeof(simple_name), "%s",
-		        module_names[i]);
-		char *dot = strchr(simple_name, '.');
-		if (dot)
-			*dot = '\0';
-
-		if (strcmp(module_names[i], module) == 0 ||
-		    strcmp(simple_name, module) == 0)
-		{
-			hd = module_hds[i];
-			if (module_cleanups[i]) {
-				module_cleanups[i](id);
-			}
-			break;
-		}
-	}
-
 	/* Clear inverse references in other datasets before purging qmap */
 	{
 		char dset[256];
@@ -1007,17 +994,37 @@ static int index_delete_handler(int fd, char *body)
 		source_clear_inverse_refs(dset, id);
 	}
 
-	if (hd) {
-		qmap_del_all(hd, id);
+	/* Find module slot and call module-specific cleanup */
+	{
+		size_t i;
+		for (i = 0; i < module_slot_count; i++) {
+			char simple_name[257];
+			snprintf(
+			        simple_name, sizeof(simple_name), "%s",
+			        module_names[i]);
+			char *dot = strchr(simple_name, '.');
+			if (dot)
+				*dot = '\0';
+			if (strcmp(module_names[i], module) == 0 ||
+			    strcmp(simple_name, module) == 0)
+			{
+				if (module_cleanups[i])
+					module_cleanups[i](id);
+				break;
+			}
+		}
 	}
 
-	/* Also clean up fields handle so detail handlers return 404 */
+	/* Delete through hyle (removes dir + qmaps + marks stoma_dirty) */
 	{
-		char dataset_id[256];
-		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		unsigned fhd = source_get_fields_hd(dataset_id);
-		if (fhd)
-			qmap_del_all(fhd, id);
+		char dset[256];
+		source_def_t *def;
+		snprintf(dset, sizeof(dset), "%s.items", module);
+		def = source_find(dset);
+		if (def)
+			source_delete_item(fd, def, id);
+		else
+			item_remove_path_recursive(item_path);
 	}
 
 	char location[256];

@@ -272,7 +272,8 @@ XY_IMPL(int, source_after_update,
         const char *, id,
         unsigned, data_handle)
 {
-	(void)dataset_id;
+	if (!dataset_id || strcmp(dataset_id, "song.items") != 0)
+		return 0;
 	char path[PATH_MAX], dr[256] = { 0 };
 	get_doc_root(fd, dr, sizeof(dr));
 	if (item_path_build_root(

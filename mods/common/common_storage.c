@@ -19,11 +19,12 @@ XY_IMPL(int, is_safe_id, const char *, id)
 	const char *p;
 	if (!id || !id[0])
 		return 0;
-	if (strcmp(id, ".") == 0 || strcmp(id, "..") == 0)
-		return 0;
 	for (p = id; *p; p++) {
-		if (*p == '/' || *p == '\\' || *p < 0x20 || *p == 0x7f)
-			return 0;
+		char c = *p;
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		    (c >= '0' && c <= '9') || c == '_' || c == '-')
+			continue;
+		return 0;
 	}
 	return 1;
 }
@@ -133,6 +134,11 @@ XY_IMPL(int, user_path_build,
 {
 	if (!username || !username[0] || !suffix || !suffix[0] || !out ||
 	    outlen == 0)
+		return -1;
+	if (username[0] == '/' || username[0] == '\\' ||
+	    username[0] == '.')
+		return -1;
+	if (strcmp(username, ".") == 0 || strcmp(username, "..") == 0)
 		return -1;
 	snprintf(out, outlen, "./home/%s/%s", username, suffix);
 	return 0;

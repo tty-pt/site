@@ -22,6 +22,8 @@
 
 #define CHOIR_SONGS_PATH "items/choir/items"
 
+static char g_doc_root[256] = ".";
+
 static int choir_song_index(const char *choir_id, const char *song_id)
 {
 	int total = hyle_source_ordered_count("choir.songs", choir_id);
@@ -429,6 +431,12 @@ void xy_install(void)
 	xy_load("./mods/index/index");
 	xy_load("./mods/mpfd/mpfd");
 	xy_load("./mods/song/song");
+
+	{
+		char doc_root[256] = { 0 };
+		resolve_doc_root(0, doc_root, sizeof(doc_root));
+		strncpy(g_doc_root, doc_root, sizeof(g_doc_root) - 1);
+	}
 	axil_register_handler(
 	        "GET:/choir/:id/song/:song_id", handle_choir_song_view);
 	axil_register_handler(
@@ -456,11 +464,10 @@ void xy_install(void)
 			{ "format", HYLE_FIELD_STRING, 1, NULL, NULL, 1, 0, 0,
 			  0, 16, NULL },
 		};
-		static char doc_root[256] = ".";
 		hyle_source_register_ordered(
 		        "choir.songs", ch_song_fields, 3, "choir", 0,
 		        HYLE_AUTO_RECORD, source_dsv_load, source_dsv_save,
-		        doc_root);
+		        g_doc_root);
 	}
 
 	index_open("Choir", "choir.items", NULL, NULL, NULL, NULL, NULL);

@@ -1182,10 +1182,13 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 
 XY_IMPL(unsigned, source_get_schema_hd, const char *, dataset_id)
 {
-	const source_def_t *def = source_find(dataset_id);
+	source_def_t *def = source_find(dataset_id);
 	if (!def)
 		return 0;
-	return source_build_schema_hd(def);
+	if (def->schema_hd)
+		return def->schema_hd;
+	def->schema_hd = source_build_schema_hd(def);
+	return def->schema_hd;
 }
 
 XY_MODULE_API void xy_install(void)

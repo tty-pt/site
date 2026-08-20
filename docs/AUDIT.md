@@ -2,7 +2,8 @@
 
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
 batch 4 (submodules) + batch 5 (A6, A9, F8) + batch 6 (A7, C3, F9) +
-batch 7 (C5, C6, D1, D2, D4, D8, D10)
+batch 7 (C5, C6, D1, D2, D4, D8, D10) +
+batch 8 (C1, D7, D9, E1, E4, E6, E8, E17, F11, F13, F17)
 already landed; this file
 lists **what is still open**. Do not re-fix anything not listed here.
 
@@ -99,6 +100,22 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 | **D4** | Media URL validation — YouTube ID allowlist `[A-Za-z0-9_-]{11}`, HTTPS-only URL check | `mods/common/ux/site_ui.c:340-370` |
 | **D8** | Option patch text node — store `bud_node_child(opt, 0)` instead of option element | `mods/song/ux/detail.c:112` |
 | **D10** | Security headers — CSP, nosniff, X-Frame-Options, Referrer-Policy; inline script moved to `bud-client.js` | `mods/common/common_response.c:44-57`, `mods/common/ux/site_ui.c:700-723`, `htdocs/bud-client.js` |
+
+### Fix batch 8 — 2026-08-21
+
+| ID | What | File |
+|---|---|---|
+| **C1** | CSRF cookie: pair-parser, HttpOnly, fail-closed generate, constant-time compare | `mods/auth/auth.c` |
+| **E4** | `is_safe_id` tightened to `[A-Za-z0-9_-]+` | `mods/common/common_storage.c:17-29` |
+| **E8** | `source_after_update` gated to `song.items` only | `mods/song/song.c:275` |
+| **E17** | Choir `g_doc_root` resolved at boot | `mods/choir/choir.c` |
+| **F17** | `user_path_build` rejects path components in username | `mods/common/common_storage.c:134-136` |
+| **F11** | `build.mk` adds `-I…/external/hyle/include` | `build.mk:23` |
+| **F13** | e2e confirm helper tails both log paths | `tests/e2e/helpers/auth.ts:11` |
+| **D7** | Empty list emits `#bud-state` JSON | `mods/index/index.c:642-655` |
+| **D9** | WASM rule gains source prereqs | `build.mk:44` |
+| **E1** | HTML delete routes through `source_delete_item` | `mods/index/index.c:971-1021` |
+| **E6** | Close `result_hd`; cache `schema_hd` on `source_def_t` | `mods/index/index.c`, `mods/source/source.h:57`, `mods/source/source.c:1183` |
 
 ---
 
@@ -397,22 +414,6 @@ Documents pre-rewrite code. Actual: bcrypt `$2b$`, rcode files, `/auth/*`.
 
 ### C. Site auth / CSRF / ownership
 
-#### C1 — CSRF cookie issues
-
-**Severity:** High
-**Where:** `mods/auth/auth.c:41-120`
-
-- Cookie not `HttpOnly` / `Secure` (`:87-90`). XSS can read it.
-- `strstr("csrf_token=")` prefix-matches inside `notcsrf_token=`
-  (`:73`, `:111`).
-- `memcmp` not constant-time (`:120`).
-- Generate-fail returns 0 with empty cookie (`:41-58`).
-
-**Fix:** Pair parser like `get_cookie`; `CRYPTO_memcmp`; fail closed on
-generate fail; `HttpOnly; SameSite=Strict` (+ `Secure` on TLS).
-
-**Land:** Site.
-
 #### C2 — `/api/csrf` is a token oracle
 
 **Severity:** High
@@ -473,37 +474,6 @@ handler.
 ---
 
 ### D. XSS / bud / WASM
-
-#### D7 — Empty list skips `#bud-state` → id drift
-
-**Severity:** High
-**Where:** `mods/index/index.c:634-647` vs `:584-619`
-
-Non-empty lists serialize state and set `data-modules="list"`. Empty
-page still sets `data-modules="list"` but passes `extra_head=NULL`.
-`wasm_init` never runs; trees diverge.
-
-**Fix:** Always emit `list_state_to_json` + `#bud-state`.
-
-**Land:** Site.
-
-#### D9 — Wasm rule has no prerequisites
-
-**Severity:** High
-**Where:** `build.mk:44-49`
-
-A present `.wasm` is never rebuilt. XSS/id-alignment fixes stay off the
-wire until someone `rm`s the artifact.
-
-**Fix:**
-
-```make
-$(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
-```
-
-Fail if WASI clang is missing when targets are set.
-
-**Land:** Site.
 
 #### D13 — Songbook media subtree changes child count with `show_media`
 
@@ -567,19 +537,6 @@ Four 256-byte slots. Fifth formatted attr in one `lx_el` aliases.
 
 ### E. Data layer (site + hyle + stoma + qmap)
 
-#### E1 — HTML delete skips `hyle_source_del`
-
-**Severity:** High
-**Where:** `mods/index/index.c:955-1013`
-
-Delete uses `qmap_del_all` on `row_hd` / `fields_hd` and never sets
-`e->stoma_dirty`. Deleted IDs appear in search results.
-
-**Fix:** Replace raw `qmap_del_all` with `source_delete_item` →
-`hyle_source_del`.
-
-**Land:** Site.
-
 #### E2 — Inverse-ref cleanup is memory-only; disk resurrects
 
 **Severity:** High
@@ -606,20 +563,6 @@ position spaces. After delete+insert, they diverge.
 
 **Land:** Site.
 
-#### E4 — API item IDs allowlist too broad
-
-**Severity:** High
-**Where:** `mods/source/source.c:745-750`;
-`mods/source/source-http.c:669`
-
-Path-join hole closed by C6 (`is_safe_id` rejects `/ \ . ..` controls).
-Residual: allowlist is broader than `[a-z0-9_-]+`. Tighten to reject
-non-alphanumeric characters, or slugify-and-reject-if-changed.
-
-**Fix:** Accept only `[a-z0-9_-]+` or slugify and reject if changed.
-
-**Land:** Site.
-
 #### E5 — Auto-id counters reset on restart; `EEXIST` is success
 
 **Severity:** High
@@ -633,32 +576,6 @@ denies.
 
 **Fix:** `max(existing numeric keys)+1` from row map + dir scan. One
 function, never reuse on create.
-
-**Land:** Site.
-
-#### E6 — List pages leak result and schema qmaps
-
-**Severity:** High
-**Where:** `mods/index/index.c:509-632` (`result_hd` never closed);
-`mods/source/source.c:1125-1185` (`source_get_schema_hd` opens a new
-map every call, never closed)
-
-**Fix:** Close `result_hd` on every exit. Cache schema on
-`source_def_t` or close in callers.
-
-**Land:** Site.
-
-#### E8 — `source_after_update` is song-global, ignores `dataset_id`
-
-**Severity:** Medium
-**Where:** `mods/song/song.c:269-291`; called from
-`mods/source/source.c:868-869`
-
-XY missing impl = success. Song impl ignores `dataset_id` and writes
-`data.txt` for every successful `source_update_item`.
-
-**Fix:** Gate on `strcmp(dataset_id, "song.items")==0` or delete the
-hook (`data.txt` is already a field file via `EXCL_FIELD_VF`).
 
 **Land:** Site.
 
@@ -737,18 +654,6 @@ full dataset. A local clamp is not enough: hyle still reads the original
 
 **Fix:** Default + hard cap (e.g. 100). Treat 0 as default. Rewrite
 `qs_copy` so hyle sees the clamped value.
-
-**Land:** Site.
-
-#### E17 — Choir persist root hardcoded `"."`
-
-**Severity:** Medium
-**Where:** `mods/choir/choir.c:457-461`
-
-Songbook copies `resolve_doc_root` into `g_doc_root`. Choir never
-updates `static char doc_root[256] = "."`.
-
-**Fix:** Same pattern as songbook: resolve once in `xy_install`.
 
 **Land:** Site.
 
@@ -924,20 +829,6 @@ every module bind.
 
 **Land:** Site.
 
-#### F11 — Stale `/usr/include` headers shadow repo
-
-**Severity:** High (if include order regresses)
-**Where:** `build.mk:23`
-
-`build.mk` puts repo `-I` first. Default CFLAGS don't include
-`external/hyle/include`. Any compile outside `build.mk` picks stale
-system headers.
-
-**Fix:** Add `-I$(REPO_ROOT)/external/hyle/include` to default CFLAGS.
-Add header-resolution check to `make`.
-
-**Land:** Site.
-
 #### F12 — CSS `?v=` not computed at build
 
 **Severity:** Low
@@ -945,16 +836,6 @@ Add header-resolution check to `make`.
 
 `#define SITE_CSS_V "?v=9"` is the single source. Cksum-at-build still
 open — bumping the define is still a manual step.
-
-**Land:** Site.
-
-#### F13 — Confirm helper tails the wrong log
-
-**Severity:** Medium
-**Where:** `tests/e2e/helpers/auth.ts`
-
-Confirm helper tails `/tmp/site.log` only; `make watch` logs to
-`debug/runtime/axil.log`.
 
 **Land:** Site.
 
@@ -985,17 +866,6 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 
 **Land:** Site.
 
-#### F17 — `user_path_build` interpolates username into path
-
-**Severity:** Low
-**Where:** `mods/common/common_storage.c:128`
-
-`./home/%s/%s`. Username is already allowlisted in axil-auth (`[A-Za-z0-9_-]`), but no explicit check at this layer.
-
-**Fix:** Reject `/` / `..` explicitly.
-
-**Land:** Site.
-
 #### F18 — Remaining storage hardening
 
 **Severity:** Low
@@ -1018,7 +888,6 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **F10** | Stop unconditional `AUTH_SKIP_CONFIRM` (pairs with B8) |
-| **C1** | CSRF cookie: `HttpOnly`, pair parser, constant-time compare |
 
 ### Phase 1 — Security hardening (site)
 
@@ -1033,26 +902,18 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 
 | ID | What |
 |---|---|
-| **E1** | Delete through hyle |
 | **E2** | Persist inverse-ref rewrites |
 | **E3** | One `target_hd` = `fields_hd` |
-| **E4** | Tighten API id allowlist to `[a-z0-9_-]+` |
 | **E5** | Durable auto-ids (max existing + 1, never reuse) |
-| **E6** | Close leaked qmaps |
-| **E8** | Gate or delete `source_after_update` |
 | **E9** | Songbook empty `data.txt` |
 | **E10** | DSV save-once |
 | **E14** | One delete path |
-| **E17** | Choir persist root |
 
 ### Phase 3 — WASM / build / infra (site)
 
 | ID | What |
 |---|---|
-| **D9** | Wasm prerequisites in `build.mk` |
-| **D7** | Empty list always emits `#bud-state` |
 | **D13** | Stable songbook media slot |
-| **F11** | Always add repo `-I` for hyle |
 | **F5, F7** | mpfd length + parser |
 | **F12** | Cksum-at-build CSS `?v=` |
 
@@ -1076,9 +937,8 @@ Confirm helper tails `/tmp/site.log` only; `make watch` logs to
 | ID | What |
 |---|---|
 | **F15** | Delete stale root docs (**deferred**) |
-| **F13** | Confirm helper: also tail `debug/runtime/axil.log` |
 | **F16** | Makefile cleanup |
 | **A20, B12** | Stale TODOs and auth README |
 | **E15, E16** | API body truncation; `per_page` cap (**E16 deferred**) |
-| **F17, F18** | Username path check; `O_NOFOLLOW`/fsync; delete prefix |
+| **F18** | `O_NOFOLLOW`/fsync; delete prefix |
 | **D18** | Wasm export allowlist |
