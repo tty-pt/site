@@ -37,6 +37,7 @@ XY_IMPL(int, source_dsv_load,
 	char dpath[PATH_MAX];
 	char *raw, *p;
 	size_t nfields, j;
+	int pos = 0;
 
 	(void)fhd;
 	if (!doc_root)
@@ -72,6 +73,7 @@ XY_IMPL(int, source_dsv_load,
 				cur++;
 			}
 			if (nparts == (int)nfields) {
+				char key[128];
 				vi = 0;
 				for (j = 0; j < nfields && vi < nparts; j++) {
 					if (hyle_source_get_field_type(
@@ -83,13 +85,20 @@ XY_IMPL(int, source_dsv_load,
 					vals[vi] = parts[vi];
 					vi++;
 				}
-				hyle_source_ordered_append(
-				        source_id, pval, names, vals, nparts);
+				snprintf(key, sizeof(key), "%s__%04d",
+				         pval, pos);
+				hyle_source_put(
+				        source_id, key, names, vals, vi);
+				pos++;
 			}
 		}
 		p = nl ? nl + 1 : p + strlen(p);
 	}
 	free(raw);
+
+	/* No save here: load_fn runs before ordered_ensure_loaded recounts
+	 * order_hd, so saving would rewrite data.txt empty. Disk stays
+	 * untouched; later mutations save via append/insert/remove. */
 	return 0;
 }
 

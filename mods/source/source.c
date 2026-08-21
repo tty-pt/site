@@ -370,15 +370,17 @@ XY_IMPL(int, source_delete_item,
 struct clear_inv_ctx {
 	const source_def_t *def;
 	uint32_t item_pos;
+	const char *item_id;
+	const char *doc_root;
 };
 
-static int clear_inv_refs_cb(const source_def_t *target, void *user)
+static void clear_inv_refs_cb(const source_def_t *target, void *user)
 {
 	struct clear_inv_ctx *ctx = user;
 	if (target == ctx->def)
-		return 0;
+		return;
 	if (!target->record_id || !target->fields_hd)
-		return 0;
+		return;
 
 	for (size_t i = 0; i < target->field_count; i++) {
 		const source_field_t *f = &target->fields[i];
@@ -399,18 +401,75 @@ static int clear_inv_refs_cb(const source_def_t *target, void *user)
 			        qmap_get_key(target->fields_hd, inv_buf[j]);
 			if (!ref_key)
 				continue;
-			char key[512];
-			snprintf(key, sizeof(key), "%s:%s", ref_key, f->name);
-			qmap_del(target->fields_hd, key);
+
+			/* Strip the deleted id from the field value
+			 * (newline-separated for multi-ref; a single-ref
+			 * that matched becomes empty). */
+			const char *cur = qmap_field_get(
+			        target->fields_hd, ref_key, f->name);
+			char remaining[8192];
+			size_t rem_len = 0;
+			int first = 1;
+
+			remaining[0] = '\0';
+			if (cur && cur[0]) {
+				char buf[8192];
+				char *tok, *sv;
+
+				snprintf(buf, sizeof(buf), "%s", cur);
+				tok = strtok_r(buf, "\r\n", &sv);
+				while (tok) {
+					size_t len;
+					str_trim(tok);
+					len = strlen(tok);
+					if (len > 0 &&
+					    strcmp(tok, ctx->item_id) != 0) {
+						if (!first)
+							remaining[rem_len++] =
+							        '\n';
+						memcpy(remaining + rem_len,
+						       tok, len);
+						rem_len += len;
+						first = 0;
+					}
+					tok = strtok_r(NULL, "\r\n", &sv);
+				}
+				remaining[rem_len] = '\0';
+			}
+
+			/* Persist just this field through hyle so the FTS
+			 * index stays live. */
+			{
+				const char *names[1];
+				const char *values[1];
+
+				names[0] = f->name;
+				values[0] = remaining;
+				hyle_source_put(
+				        target->id, ref_key, names, values,
+				        1);
+			}
+
+			if (f->file && ctx->doc_root) {
+				char dir[PATH_MAX];
+				snprintf(dir, sizeof(dir), "%s/%s/%s",
+				         ctx->doc_root, target->items_path,
+				         ref_key);
+				write_item_child_file(
+				        dir, f->file, remaining, rem_len);
+			}
 		}
 	}
-	return 0;
 }
 
 XY_IMPL(int, source_clear_inverse_refs,
+	int, fd,
 	const char *, dataset_id,
 	const char *, item_id)
 {
+	char doc_root[256] = { 0 };
+	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));
+
 	const source_def_t *def = source_find(dataset_id);
 	if (!def || !def->fields_hd)
 		return 0;
@@ -419,7 +478,12 @@ XY_IMPL(int, source_clear_inverse_refs,
 	if (del_pos == UINT32_MAX)
 		return 0;
 
-	struct clear_inv_ctx ctx = { .def = def, .item_pos = del_pos };
+	struct clear_inv_ctx ctx = {
+		.def = def,
+		.item_pos = del_pos,
+		.item_id = item_id,
+		.doc_root = root,
+	};
 	size_t n = hyle_source_count();
 	for (size_t i = 0; i < n; i++) {
 		const char *sid = hyle_source_id_at(i);
@@ -555,10 +619,10 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 			    !sf->target_source)
 				continue;
 			target = source_find(sf->target_source);
-			if (target && target->source_hd)
+			if (target && target->fields_hd)
 				qmap_record_field_set_target_hd(
 				        def->record_id, sf->name,
-				        target->source_hd);
+				        target->fields_hd);
 		}
 	}
 
@@ -732,20 +796,12 @@ XY_IMPL(int, source_update_item,
 		return -1;
 	if (source_validate_row(fd, def, data_handle))
 		return SOURCE_ERR_VALIDATION;
-	char auto_key_buf[32];
-	if (!id || !id[0]) {
-		static uint32_t source_auto_seq = 0;
-		snprintf(
-		        auto_key_buf, sizeof(auto_key_buf), "%u",
-		        ++source_auto_seq);
-		id = auto_key_buf;
-	}
-
-	if (!is_safe_id(id))
-		return -1;
 
 	char doc_root[256] = { 0 };
 	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));
+
+	if (!id || !id[0] || !is_safe_id(id))
+		return -1;
 
 	char item_path[PATH_MAX];
 	snprintf(

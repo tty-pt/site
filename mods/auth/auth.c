@@ -351,8 +351,17 @@ static int csrf_endpoint_handler(int fd, char *body)
 {
 	char token[33] = { 0 };
 	(void)body;
+
+	const char *user = get_request_user(fd);
+	if (!user || !user[0]) {
+		axil_header_set(fd, "Content-Type", "text/plain");
+		axil_respond(fd, 401, "");
+		return 0;
+	}
+
 	csrf_set_cookie(fd, token, sizeof(token));
 	axil_header_set(fd, "Content-Type", "text/plain");
+	axil_header_set(fd, "Cache-Control", "no-store");
 	axil_respond(fd, 200, token);
 	return 0;
 }

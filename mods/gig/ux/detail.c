@@ -426,23 +426,16 @@ static bud_node *sb_render_song_row(
 		*out_pre = chord_pre;
 
 	/* Media container (always rendered, patched by WASM) */
+	char media_html[8192] = { 0 };
+	if (sb_app_state.show_media && (yt[0] || audio[0] || pdf[0]))
+		site_ui_build_media_html(
+		        yt, audio, pdf, media_html, sizeof(media_html));
+
 	bud_node *media_node =
 	        lx_el("div", lx_attr("data-gig-media", n_buf),
 	              lx_attr("class", "gig-media mt-1"),
-	              lx_node(bud_raw("")))
+	              lx_node(bud_raw(media_html)))
 	                .data.node;
-
-	/* Pre-populate media content on server when show_media is active */
-	if (sb_app_state.show_media && (yt[0] || audio[0] || pdf[0])) {
-		bud_node *slot = site_ui_render_media_slot(yt, audio, pdf);
-		if (slot)
-			media_node =
-			        lx_el("div",
-			              lx_attr("data-gig-media", n_buf),
-			              lx_attr("class", "gig-media mt-1"),
-			              lx_node(slot))
-			                .data.node;
-	}
 
 	if (out_media)
 		*out_media = media_node;

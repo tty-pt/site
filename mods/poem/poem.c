@@ -114,6 +114,35 @@ static int poem_detail_handler(int fd, char *body)
 	        NULL);
 }
 
+/* GET /poem/:id/pt_PT.html — allowlisted body file, public read.
+ * Only this basename is ever served; owner/meta stay unreachable. */
+static int
+poem_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
+{
+	(void)body;
+	(void)user_data;
+
+	char content_path[PATH_MAX];
+	item_child_path(
+	        ctx->item_path, "pt_PT.html", content_path,
+	        sizeof(content_path));
+	char *content = slurp_file(content_path);
+	if (!content)
+		return respond_error(fd, 404, "Not found");
+
+	axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
+	axil_respond(fd, 200, content);
+	free(content);
+	return 0;
+}
+
+static int poem_body_handler(int fd, char *body)
+{
+	return with_item_access(
+	        fd, body, "var/poem", 0, NULL, NULL, poem_body_auth,
+	        NULL);
+}
+
 void xy_install(void)
 {
 	xy_load("./mods/index/index");
@@ -129,4 +158,6 @@ void xy_install(void)
 		.edit_get = poem_edit_get_handler,
 	};
 	register_standard_item_handlers("poem", &handlers);
+
+	axil_register_handler("GET:/poem/:id/pt_PT.html", poem_body_handler);
 }

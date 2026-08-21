@@ -995,7 +995,7 @@ static int index_delete_handler(int fd, char *body)
 	{
 		char dset[256];
 		snprintf(dset, sizeof(dset), "%s.items", module);
-		source_clear_inverse_refs(dset, id);
+		source_clear_inverse_refs(fd, dset, id);
 	}
 
 	/* Find module slot and call module-specific cleanup */

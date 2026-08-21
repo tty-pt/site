@@ -65,10 +65,25 @@ api_post "id=src_sg3&title=Source+Song+3&author=Author+C&type=src_type_b" "$BASE
 
 sleep 0.3
 
-# ── 1. POST with auto-generated ID ──
-echo -n "1. POST auto-generates ID... "
-json=$(api_post "" "$BASE/api/dataset/song.types")
-echo "$json" | grep -q '"id"' && pass "auto-id assigned" || { echo "got: $json"; fail "no auto-id"; }
+# ── 1. POST without id: 400 / slug / 409 ──
+api -X DELETE "$BASE/api/dataset/song.types/type_auto" \
+	-d "csrf_token=$(csrf_token)" > /dev/null 2>&1 || true
+
+echo -n "1a. POST with no id and no title/name returns 400... "
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/api/dataset/song.types" \
+	-d "csrf_token=$(csrf_token)")
+[ "$code" = "400" ] && pass "400" || fail "expected 400, got $code"
+
+echo -n "1b. POST name=Type+Auto slugs the key... "
+json=$(api_post "name=Type+Auto" "$BASE/api/dataset/song.types")
+echo "$json" | grep -q '"type_auto"' && pass "slug id" || { echo "got: $json"; fail "no slug id"; }
+
+echo -n "1c. POST same name again returns 409... "
+code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
+	-X POST "$BASE/api/dataset/song.types" \
+	-d "name=Type+Auto&csrf_token=$(csrf_token)")
+[ "$code" = "409" ] && pass "409" || fail "expected 409, got $code"
 
 # ── 2. POST with missing required field (title) → 422 ──
 echo -n "2. POST missing required title returns 422... "

@@ -112,6 +112,7 @@ struct bud_field_desc;
 
 #ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
+    int, fd,
     const char *, dataset_id,
     const char *, item_id);
 XY_DECL(int, source_def_to_qmap,

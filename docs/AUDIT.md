@@ -3,7 +3,8 @@
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
 batch 4 (submodules) + batch 5 (A6, A9, F8) + batch 6 (A7, C3, F9) +
 batch 7 (C5, C6, D1, D2, D4, D8, D10) +
-batch 8 (C1, D7, D9, E1, E4, E6, E8, E17, F11, F13, F17)
+batch 8 (C1, D7, D9, E1, E4, E6, E8, E17, F11, F13, F17) +
+batch 9 (C2, C9, D13, E2, E3, E5, E10, E14, E15)
 already landed; this file
 lists **what is still open**. Do not re-fix anything not listed here.
 
@@ -116,6 +117,20 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 | **D9** | WASM rule gains source prereqs | `build.mk:44` |
 | **E1** | HTML delete routes through `source_delete_item` | `mods/index/index.c:971-1021` |
 | **E6** | Close `result_hd`; cache `schema_hd` on `source_def_t` | `mods/index/index.c`, `mods/source/source.h:57`, `mods/source/source.c:1183` |
+
+### Fix batch 9 — 2026-08-21
+
+| ID | What | File |
+|---|---|---|
+| **E5** | API create slugifies `title`/`name` like HTML; 409 on collision; numeric auto-id removed | `mods/source/source.c`, `mods/source/source.h`, `mods/source/source-http.c` |
+| **C2** | CSRF oracle: session required, `Cache-Control: no-store` | `mods/auth/auth.c:350-367` |
+| **E3** | `target_hd` = `fields_hd` (not `source_hd`) | `mods/source/source.c:558-561` |
+| **C9** | No `/poem/*/*` static map; `GET /poem/:id/pt_PT.html` handler; `owner` not served | `serve.allow`, `mods/poem/poem.c` |
+| **E2** | Inverse-ref clear: `hyle_source_put` that field + write file (incl. empty); pass `fd` | `mods/source/source.c` (`clear_inv_refs_cb`), `mods/index/index.c` |
+| **E14** | One delete path (HTML clears+deletes, API keeps 409) | `mods/index/index.c:990-1025`, `mods/source/source-http.c:865-887` |
+| **E10** | DSV load: `hyle_source_put` only; no save from `load_fn` | `mods/source/dsv.c` |
+| **E15** | API body heap 256 KiB + 413 on truncation | `mods/source/source-http.c:97-133` |
+| **D13** | Stable gig media slot (always same `div > bud_raw`) | `mods/gig/ux/detail.c:428-445` |
 
 ---
 
@@ -414,21 +429,6 @@ Documents pre-rewrite code. Actual: bcrypt `$2b$`, rcode files, `/auth/*`.
 
 ### C. Site auth / CSRF / ownership
 
-#### C2 — `/api/csrf` is a token oracle
-
-**Severity:** High
-**Where:** `mods/auth/auth.c:327-334`
-
-`GET /auth/api/csrf` mints a token and returns it in the body. Any
-origin that can trigger a request can read a CSRF token. e2e helpers
-(`tests/e2e/helpers/auth.ts:145-167`) depend on this endpoint.
-
-**Fix:** Require session; `Cache-Control: no-store`; or stop returning
-the body (hidden field is enough). Update e2e helpers if the body goes
-away.
-
-**Land:** Site.
-
 #### C7 — `GET /api/song/prefs` writes prefs, no CSRF — **deferred**
 
 **Severity:** High
@@ -458,34 +458,9 @@ site usernames.
 
 **Land:** Site.
 
-#### C9 — Poem static map serves `owner` file
-
-**Severity:** Medium
-**Where:** `serve.allow:2` (`var/poem /poem/*/*`)
-
-`/poem/:id/owner` is a public static file. Bypasses any future
-private-item design.
-
-**Fix:** Remove item-store static map. Serve `pt_PT.html`/media via
-handler.
-
-**Land:** Site.
-
 ---
 
 ### D. XSS / bud / WASM
-
-#### D13 — Gig media subtree changes child count with `show_media`
-
-**Severity:** Medium
-**Where:** `mods/gig/ux/detail.c:427-444`
-
-Always builds `div > bud_raw("")`, then replaces with full iframe tree
-when media exists. Different child counts → id drift.
-
-**Fix:** Stable empty slot; fill via `patch-innerhtml`.
-
-**Land:** Site.
 
 #### D14 — `bud_json_*` is `strstr`, not a parser
 
@@ -537,48 +512,6 @@ Four 256-byte slots. Fifth formatted attr in one `lx_el` aliases.
 
 ### E. Data layer (site + hyle + stoma + qmap)
 
-#### E2 — Inverse-ref cleanup is memory-only; disk resurrects
-
-**Severity:** High
-**Where:** `mods/source/source.c:391-403`
-
-`qmap_del(target->fields_hd, "ref_key:field")` zeros memory. On
-restart, `source_scan_item` reloads old refs from disk.
-
-**Fix:** After clearing the field, rewrite the target item through
-`hyle_source_put` + `write_item_child_file`.
-
-**Land:** Site.
-
-#### E3 — Ref positions use wrong map
-
-**Severity:** High
-**Where:** `mods/source/source.c:557-559` vs
-`external/hyle/src/source.c:484-486`
-
-Write uses `row_hd`; filter/display use `fields_hd`. Different IDM
-position spaces. After delete+insert, they diverge.
-
-**Fix:** Store `fields_hd` as `target_hd` everywhere.
-
-**Land:** Site.
-
-#### E5 — Auto-id counters reset on restart; `EEXIST` is success
-
-**Severity:** High
-**Where:** `mods/source/source.c:735-749`;
-`mods/source/source-http.c:661-663`
-
-Two `static` counters start at 1. `mkdir` + `EEXIST` continues and
-overwrites files. Song e2e 403: `var/song/{1,3,6,9}` exist from
-earlier runs; `http_auto_seq` generates `1`; C5 fail-closed ownership
-denies.
-
-**Fix:** `max(existing numeric keys)+1` from row map + dir scan. One
-function, never reuse on create.
-
-**Land:** Site.
-
 #### E9 — Gig empty `data.txt`
 
 **Severity:** Medium (known pre-existing)
@@ -594,18 +527,6 @@ via in-memory grp.songs. Restore hard fail in `test.sh`.
 
 **Land:** Site.
 
-#### E10 — `source_dsv_load` saves after every line
-
-**Severity:** Medium
-**Where:** `mods/source/dsv.c:86-87`
-
-`ordered_append` calls `ordered_save` per line. Loading large
-`data.txt` rewrites it N times.
-
-**Fix:** Load-row without save; save once after.
-
-**Land:** Site.
-
 #### E13 — `hyle_source_put` ignores `qmap_field_put` failure
 
 **Severity:** Medium
@@ -616,32 +537,6 @@ Failed ref resolve returns `QM_MISS` but put returns 0 (success).
 **Fix:** Check result; fail the put.
 
 **Land:** hyle submodule.
-
-#### E14 — API vs HTML delete semantics disagree
-
-**Severity:** Medium
-**Where:** `mods/source/source-http.c:807-825` vs
-`mods/index/index.c:955-1013`
-
-API returns 409 if referenced, then `source_delete_item`. HTML clears
-inverse refs in memory and proceeds, skipping hyle.
-
-**Fix:** One delete function: optional 409, persist inverse-field
-rewrites, then `source_delete_item` + directory remove.
-
-**Land:** Site.
-
-#### E15 — API body parser truncates large fields
-
-**Severity:** Medium
-**Where:** `mods/source/source-http.c:106-121`
-
-Stack `val[4096]`; truncation → 500. Multipart path allocates correctly.
-Song lyrics via API fail.
-
-**Fix:** Heap-allocate or 413 with clear error.
-
-**Land:** Site.
 
 #### E16 — Unbounded `per_page` on dataset API — **deferred**
 
@@ -894,26 +789,19 @@ open — bumping the define is still a manual step.
 | ID | What |
 |---|---|
 | **C7** | Prefs: POST + CSRF only (**deferred** — WASM depends on GET write) |
-| **C2** | `/api/csrf` oracle (update e2e helpers) |
-| **C8, C9** | One owner source; drop poem static map |
+| **C8** | One owner source (deferred) |
 | **B2** | CSRF on login/register; POST-only logout |
 
 ### Phase 2 — Data layer correctness (site)
 
 | ID | What |
 |---|---|
-| **E2** | Persist inverse-ref rewrites |
-| **E3** | One `target_hd` = `fields_hd` |
-| **E5** | Durable auto-ids (max existing + 1, never reuse) |
 | **E9** | Gig empty `data.txt` |
-| **E10** | DSV save-once |
-| **E14** | One delete path |
 
 ### Phase 3 — WASM / build / infra (site)
 
 | ID | What |
 |---|---|
-| **D13** | Stable gig media slot |
 | **F5, F7** | mpfd length + parser |
 | **F12** | Cksum-at-build CSS `?v=` |
 
@@ -939,6 +827,6 @@ open — bumping the define is still a manual step.
 | **F15** | Delete stale root docs (**deferred**) |
 | **F16** | Makefile cleanup |
 | **A20, B12** | Stale TODOs and auth README |
-| **E15, E16** | API body truncation; `per_page` cap (**E16 deferred**) |
+| **E16** | `per_page` cap (**deferred**) |
 | **F18** | `O_NOFOLLOW`/fsync; delete prefix |
 | **D18** | Wasm export allowlist |

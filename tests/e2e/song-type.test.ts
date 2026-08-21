@@ -96,6 +96,15 @@ async function createSongViaApi(
   assert(resp.status === 201, `POST should return 201, got ${resp.status}`);
   const json = await resp.json();
   assert(!!json.id, "POST response should have id");
+  // E5: the API slugifies `title` like HTML does (no numeric auto-ids)
+  const expectedSlug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  assert(
+    json.id === expectedSlug,
+    `POST id should be the slug "${expectedSlug}", got "${json.id}"`,
+  );
   return json.id;
 }
 

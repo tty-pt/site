@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h>
 #include <sys/stat.h>
 
 #include "../auth/auth.h"
@@ -92,9 +93,10 @@ static int source_collect_query_values(
 	return found ? (int)strlen(buf) : -1;
 }
 
-static unsigned
+static int
 source_parse_row_data_body(const source_def_t *def, const char *body)
 {
+#define PARSE_BUF_CAP (256 * 1024)
 	unsigned hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
 	if (hd == 0)
 		return 0;
@@ -104,25 +106,35 @@ source_parse_row_data_body(const source_def_t *def, const char *body)
 		if (!f->writable)
 			continue;
 
-		char val[4096] = { 0 };
+		char *val = calloc(1, PARSE_BUF_CAP);
+		if (!val) {
+			qmap_close(hd);
+			return 0;
+		}
 		int ret_len;
 
 		if (f->type == SOURCE_FIELD_MULTI_REFERENCE)
 			ret_len = source_collect_query_values(
-			        body, f->name, val, sizeof(val));
+			        body, f->name, val, PARSE_BUF_CAP);
 		else
 			ret_len =
-			        axil_query_param(f->name, val, sizeof(val) - 1);
+			        axil_query_param(f->name, val,
+			                         PARSE_BUF_CAP - 1);
 
-		if (ret_len <= 0)
+		if (ret_len <= 0) {
+			free(val);
 			continue;
-		if (ret_len >= (int)(sizeof(val) - 1)) {
+		}
+		if (ret_len >= (int)(PARSE_BUF_CAP - 1)) {
+			free(val);
 			qmap_close(hd);
-			return 0;
+			return -1;
 		}
 		qmap_put(hd, f->name, val);
+		free(val);
 	}
-	return hd;
+#undef PARSE_BUF_CAP
+	return (int)hd;
 }
 
 static source_access_result_t
@@ -653,23 +665,27 @@ static int source_post_handler(int fd, char *body)
 		return respond_json_error(fd, 400, "Bad request");
 	}
 
-	/* Parse key field value from body (already parsed by write_init) */
+	/* Resolve the key: explicit id, else slugify title/name like
+	 * HTML does. 400 before slugify so "item" is never minted. */
 	char id_buf[128] = { 0 };
 	axil_query_param(def->key_field, id_buf, sizeof(id_buf));
-	const char *id = id_buf[0] ? id_buf : NULL;
 
-	/* Auto-generate ID if missing */
-	char auto_key[32] = { 0 };
-	if (!id) {
-		static uint32_t http_auto_seq = 0;
-		snprintf(auto_key, sizeof(auto_key), "%u", ++http_auto_seq);
-		id = auto_key;
+	if (!id_buf[0]) {
+		char src[512] = { 0 };
+		axil_query_param("title", src, sizeof(src));
+		if (!src[0])
+			axil_query_param("name", src, sizeof(src));
+		if (!src[0])
+			return respond_json_error(fd, 400, "Missing id");
+		axil_slugify(src, strlen(src), id_buf, sizeof(id_buf));
 	}
 
-	if (!is_safe_id(id))
+	if (!is_safe_id(id_buf))
 		return respond_json_error(fd, 400, "Invalid key");
 
-	/* Ownership check: if item already exists, require ownership */
+	const char *id = id_buf;
+
+	/* POST never overwrites: an existing item dir is a collision */
 	{
 		char doc_root[256] = { 0 };
 		const char *root = resolve_doc_root(fd, doc_root,
@@ -678,14 +694,16 @@ static int source_post_handler(int fd, char *body)
 		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
 		         root, def->items_path, id);
 		struct stat st;
-		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-			if (!item_check_ownership(item_path, username))
-				return respond_json_error(fd, 403,
-				                           "Forbidden");
-		}
+		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode))
+			return respond_json_error(
+			        fd, 409,
+			        "An item with that title already exists");
 	}
 
-	unsigned data_hd = source_parse_row_data_body(def, body);
+	int data_hd = source_parse_row_data_body(def, body);
+	if (data_hd < 0)
+		return respond_json_error(fd, 413,
+		                           "Field value too large");
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
 
@@ -757,7 +775,10 @@ static int source_put_handler(int fd, char *body)
 		}
 	}
 
-	unsigned data_hd = source_parse_row_data_body(def, body);
+	int data_hd = source_parse_row_data_body(def, body);
+	if (data_hd < 0)
+		return respond_json_error(fd, 413,
+		                           "Field value too large");
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
 
