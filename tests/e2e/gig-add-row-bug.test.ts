@@ -66,9 +66,6 @@ Deno.test({
     if (r2.status >= 400) throw new Error(`Seed B failed: ${r2.status}`);
     await r2.body?.cancel();
 
-    const repoA = `${SONG_A_ID}`;
-    const repoB = `${SONG_B_ID}`;
-
     // ── 1. Create a gig linked to the grp ──────────────────────────
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.fill('input[name="title"]', `MultiSong SB ${Date.now()}`);
@@ -87,17 +84,23 @@ Deno.test({
     }
     await waitForText(page, "body", "No songs yet");
 
-    // ── 3. Add song A via the "Add Song" form ────────────────────────────
-    await page.waitForSelector('input[name="song_id"]', { timeout: 5000 });
-    await page.fill('input[name="song_id"]', repoA);
-    await page.click('button:has-text("Add Song")');
+    // ── 3. Add song A via the list-grade picker (Enter submits the
+    //       omni search; whole-row button carries the song id) ───────────
+    await page.waitForSelector('form.list-form input[name="q"]', { timeout: 5000 });
+    await page.fill('form.list-form input[name="q"]', SONG_A_TITLE);
+    await page.press('form.list-form input[name="q"]', "Enter");
+    const pickA = `button.hyle-row-action[value="${SONG_A_ID}"]`;
+    await page.waitForSelector(pickA, { timeout: 8000 });
+    await page.click(pickA);
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
     await waitForText(page, "body", SONG_A_TITLE);
 
-    // ── 4. Add song B via the "Add Song" form ────────────────────────────
-    await page.waitForSelector('input[name="song_id"]', { timeout: 5000 });
-    await page.fill('input[name="song_id"]', repoB);
-    await page.click('button:has-text("Add Song")');
+    // ── 4. Add song B via the picker as well ─────────────────────────────
+    await page.fill('form.list-form input[name="q"]', SONG_B_TEXT);
+    await page.press('form.list-form input[name="q"]', "Enter");
+    const pickB = `button.hyle-row-action[value="${SONG_B_ID}"]`;
+    await page.waitForSelector(pickB, { timeout: 8000 });
+    await page.click(pickB);
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
     await waitForText(page, "body", SONG_A_TITLE);
     await waitForText(page, "body", SONG_B_TEXT);

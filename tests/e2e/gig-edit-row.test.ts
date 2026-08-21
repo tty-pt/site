@@ -54,7 +54,6 @@ Deno.test({
     });
     if (seedResp.status >= 400) throw new Error(`Seed failed: ${seedResp.status}`);
     await seedResp.body?.cancel();
-    const repoId = `${KNOWN_SONG_ID}`;
 
     // ── 1. Create a gig linked to the grp ──────────────────────────
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
@@ -75,10 +74,15 @@ Deno.test({
     }
     await waitForText(page, "body", "No songs yet");
 
-    // ── 3. Add a known song via the "Add Song" form ──────────────────────
-    await page.waitForSelector('input[name="song_id"]', { timeout: 5000 });
-    await page.fill('input[name="song_id"]', repoId);
-    await page.click('button:has-text("Add Song")');
+    // ── 3. Add a known song via the list-grade picker ────────────────────
+    // Omni mode hides Apply, so submit the search with Enter; then click
+    // the whole-row submit button carrying our song's id.
+    await page.waitForSelector('form.list-form input[name="q"]', { timeout: 5000 });
+    await page.fill('form.list-form input[name="q"]', KNOWN_SONG_TITLE);
+    await page.press('form.list-form input[name="q"]', "Enter");
+    const pickBtn = `button.hyle-row-action[value="${KNOWN_SONG_ID}"]`;
+    await page.waitForSelector(pickBtn, { timeout: 8000 });
+    await page.click(pickBtn);
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
     await waitForText(page, "body", KNOWN_SONG_TITLE);
 

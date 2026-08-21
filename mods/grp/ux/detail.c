@@ -81,7 +81,7 @@ static bud_node *ch_render_key_selector(int orig_key, int transpose)
 static bud_node *ch_render_song_row(
         const char *s_title, const char *song_href, const char *key_label,
         int is_owner, int orig_key, int transpose, const char *csrf_token,
-        const char *key_action, const char *rem_action)
+        const char *key_action, const char *rem_action, int pinned)
 {
 	bud_node *row =
 	        lx_el("div",
@@ -114,18 +114,27 @@ static bud_node *ch_render_song_row(
 		                    lx_text("Set")))
 		                .data.node);
 
-		bud_append(
-		        controls,
-		        lx_el("form", lx_attr("method", "POST"),
-		              lx_attr("action", rem_action),
-		              lx_el("input", lx_attr("type", "hidden"),
-		                    lx_attr("name", "csrf_token"),
-		                    lx_attr("value", csrf_token)),
-		              lx_el("button", lx_attr("type", "submit"),
-		                    lx_attr("class", "btn btn-danger "
-		                                     "text-xs py-1 px-2"),
-		                    lx_text("Remove")))
-		                .data.node);
+		/* Only pinned rows can be removed: derived rows are
+		 * owned by the gigs and would reappear on the next
+		 * rep_rebuild. */
+		if (pinned) {
+			bud_append(
+			        controls,
+			        lx_el("form", lx_attr("method", "POST"),
+			              lx_attr("action", rem_action),
+			              lx_el("input", lx_attr("type", "hidden"),
+			                    lx_attr("name", "csrf_token"),
+			                    lx_attr("value", csrf_token)),
+			              lx_el("button", lx_attr("type", "submit"),
+			                    lx_attr("title",
+			                            "Pinned song — remove "
+			                            "stops pinning it"),
+			                    lx_attr("class",
+			                            "btn btn-danger "
+			                            "text-xs py-1 px-2"),
+			                    lx_text("Remove")))
+			                .data.node);
+		}
 
 		bud_append(
 		        row, lx_el("div", lx_attr("class", "flex gap-2"),
@@ -134,31 +143,6 @@ static bud_node *ch_render_song_row(
 	}
 
 	return row;
-}
-
-static bud_node *ch_render_add_song_form(
-        const char *add_action, const char *csrf_token, bud_node *song_options)
-{
-	return lx_el("form", lx_attr("method", "POST"),
-	             lx_attr("action", add_action),
-	             lx_attr("class", "flex gap-2 items-center "
-	                              "mt-2 mb-4 p-2 "
-	                              "bg-surface rounded"),
-	             lx_el("input", lx_attr("type", "hidden"),
-	                   lx_attr("name", "csrf_token"),
-	                   lx_attr("value", csrf_token)),
-	             lx_el("input", lx_attr("type", "text"),
-	                   lx_attr("name", "song_id"),
-	                   lx_attr("list", "grp-song-datalist"),
-	                   lx_attr("placeholder", "Search songs..."),
-	                   lx_attr("autocomplete", "off"),
-	                   lx_attr("class", "border rounded p-1")),
-	             lx_el("datalist", lx_attr("id", "grp-song-datalist"),
-	                   song_options ? lx_node(song_options) : lx_none()),
-	             lx_el("button", lx_attr("type", "submit"),
-	                   lx_attr("class", "btn text-sm py-1 px-2"),
-	                   lx_text("Add Song")))
-	        .data.node;
 }
 
 static bud_node *ch_render_add_gig_link(const char *href)
@@ -173,7 +157,10 @@ static bud_node *ch_render_add_gig_link(const char *href)
 
 #define CH_MAX_GIGS 128
 #define CH_MAX_REP_SONGS 256
-#define CH_MAX_OPT_SONGS 512
+
+/* Shared list state for the song picker, filled natively by grp.c via
+ * list_fill_state() before rendering. */
+static list_state_t g_ch_pick_state;
 
 typedef struct {
 	char title[256];
@@ -185,16 +172,12 @@ typedef struct {
 	char key_label[64];
 	int orig_key;
 	int transpose;
+	int pinned;
 	char key_action[256];
 	char rem_action[256];
 } ch_rep_entry_t;
-typedef struct {
-	char id[128];
-	char title[256];
-} ch_opt_entry_t;
 
-static bud_node *
-ch_render_gigs_section(ch_sb_entry_t *gigs, int n_gigs)
+static bud_node *ch_render_gigs_section(ch_sb_entry_t *gigs, int n_gigs)
 {
 	bud_node *frag = bud_fragment();
 	if (!frag)
@@ -205,9 +188,8 @@ ch_render_gigs_section(ch_sb_entry_t *gigs, int n_gigs)
 	} else {
 		for (int i = 0; i < n_gigs; i++)
 			bud_append(
-			        frag,
-			        ch_render_gig_link(
-			                gigs[i].title, gigs[i].href));
+			        frag, ch_render_gig_link(
+			                      gigs[i].title, gigs[i].href));
 	}
 	return frag;
 }
@@ -220,6 +202,13 @@ static bud_node *ch_render_repertoire_section(
 	if (!frag)
 		return NULL;
 	bud_append(frag, ch_render_repertoire_header());
+	if (is_owner)
+		bud_append(
+		        frag,
+		        lx_el("p", lx_attr("class", "text-xs text-muted"),
+		              lx_text("Built from your gigs. Set a key to "
+		                      "pin a song; pinned songs stay."))
+		                .data.node);
 	if (n_repertoire == 0) {
 		bud_append(frag, ch_render_repertoire_empty());
 	} else {
@@ -231,36 +220,86 @@ static bud_node *ch_render_repertoire_section(
 			                e->title, e->song_href, e->key_label,
 			                is_owner, e->orig_key, e->transpose,
 			                csrf_token, e->key_action,
-			                e->rem_action));
+			                e->rem_action, e->pinned));
 		}
 	}
 	return frag;
 }
 
-static bud_node *ch_render_add_song_section(
-        ch_opt_entry_t *options, int n_options, const char *grp_id,
-        const char *csrf_token)
+/* List-grade song picker: omni ⇄ custom chrome, results table whose
+ * whole rows submit POST /api/grp/:id/songs (HTML5 form= attribute),
+ * pagination. State-driven; SSR-only module (no wasm). */
+static bud_node *
+ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 {
-	bud_node *frag = bud_fragment();
+	char action[256], add_action[256], sbh[256];
+	const char *col_keys[LIST_MAX_COLS];
+	const char *col_labels[LIST_MAX_COLS];
+	hyle_bud_row_action_t act;
+	bud_node *frag, *hint, *form, *chrome, *table, *pag, *post;
+	int i;
+
+	frag = bud_fragment();
 	if (!frag)
 		return NULL;
-	if (n_options > 0) {
-		bud_node *opts = NULL;
-		for (int i = 0; i < n_options; i++) {
-			bud_node *o =
-			        lx_el("option", lx_attr("value", options[i].id),
-			              lx_text(options[i].title))
-			                .data.node;
-			if (!opts)
-				opts = lx_frag(lx_node(o)).data.node;
-			else
-				bud_append(opts, o);
-		}
-		char aa[256];
-		snprintf(aa, sizeof(aa), "/api/grp/%s/songs", grp_id);
-		bud_append(frag, ch_render_add_song_form(aa, csrf_token, opts));
+	snprintf(action, sizeof(action), "/grp/%s", grp_id);
+	snprintf(add_action, sizeof(add_action), "/api/grp/%s/songs", grp_id);
+
+	for (i = 0; i < g_ch_pick_state.ncols && i < LIST_MAX_COLS; i++) {
+		col_keys[i] = g_ch_pick_state.cols[i].key;
+		col_labels[i] = g_ch_pick_state.cols[i].label;
 	}
-	char sbh[256];
+
+	if (list_has_query(&g_ch_pick_state)) {
+		hint = lx_el("div", lx_attr("class", "text-xs text-muted"),
+		             lx_text("Click a song to add it."))
+		               .data.node;
+		if (hint)
+			bud_append(frag, hint);
+	}
+
+	form = lx_el("form", lx_attr("method", "get"),
+	             lx_attr("action", action), lx_attr("class", "list-form"))
+	               .data.node;
+	chrome = idx_filter_chrome(&g_ch_pick_state);
+	if (form && chrome)
+		bud_append(form, chrome);
+
+	if (form && list_has_query(&g_ch_pick_state)) {
+		act.kind = HYLE_ROW_ACTION_SUBMIT;
+		act.css_class = NULL;
+		act.label = NULL;
+		act.aria_base = "Add";
+		act.href_base = NULL;
+		act.form_id = "ch-pick-post";
+		act.field_name = "song_id";
+		table = hyle_bud_table_actions(
+		        col_keys, col_labels, g_ch_pick_state.ncols,
+		        (const char **)g_ch_pick_state.ids,
+		        g_ch_pick_state.nids,
+		        (const char **)g_ch_pick_state.values, "song",
+		        g_ch_pick_state.sort_field, g_ch_pick_state.sort_asc,
+		        g_ch_pick_state.query, &act);
+		pag = hyle_bud_pagination(
+		        g_ch_pick_state.page, g_ch_pick_state.per_page,
+		        g_ch_pick_state.total, g_ch_pick_state.nids, "");
+		if (table)
+			bud_append(form, table);
+		if (pag)
+			bud_append(form, pag);
+	}
+	if (form)
+		bud_append(frag, form);
+	post = lx_el("form", lx_attr("id", "ch-pick-post"),
+	             lx_attr("method", "post"),
+	             lx_attr("action", add_action),
+	             lx_el("input", lx_attr("type", "hidden"),
+	                   lx_attr("name", "csrf_token"),
+	                   lx_attr("value", csrf_token)))
+	               .data.node;
+	if (post)
+		bud_append(frag, post);
+
 	snprintf(sbh, sizeof(sbh), "/gig/add?grp=%s", grp_id);
 	bud_append(frag, ch_render_add_gig_link(sbh));
 	return frag;

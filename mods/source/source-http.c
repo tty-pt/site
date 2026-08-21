@@ -93,8 +93,7 @@ static int source_collect_query_values(
 	return found ? (int)strlen(buf) : -1;
 }
 
-static int
-source_parse_row_data_body(const source_def_t *def, const char *body)
+static int source_parse_row_data_body(const source_def_t *def, const char *body)
 {
 #define PARSE_BUF_CAP (256 * 1024)
 	unsigned hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
@@ -117,9 +116,8 @@ source_parse_row_data_body(const source_def_t *def, const char *body)
 			ret_len = source_collect_query_values(
 			        body, f->name, val, PARSE_BUF_CAP);
 		else
-			ret_len =
-			        axil_query_param(f->name, val,
-			                         PARSE_BUF_CAP - 1);
+			ret_len = axil_query_param(
+			        f->name, val, PARSE_BUF_CAP - 1);
 
 		if (ret_len <= 0) {
 			free(val);
@@ -159,7 +157,8 @@ static int source_write_init(
         const char **out_username)
 {
 	char dataset_id[128] = { 0 };
-	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(
+	        fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -377,7 +376,9 @@ static int source_build_rows_json(
 				continue;
 			if (has_include) {
 				char needle[256];
-				snprintf(needle, sizeof(needle), ",%s,", f->name);
+				snprintf(
+				        needle, sizeof(needle), ",%s,",
+				        f->name);
 				if (!strstr(inc_set, needle))
 					continue;
 			}
@@ -596,7 +597,8 @@ static int source_get_handler(int fd, char *body)
 	(void)body;
 
 	memset(dataset_id, 0, sizeof(dataset_id));
-	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(
+	        fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	def = source_find(dataset_id);
 	if (!def)
@@ -688,11 +690,12 @@ static int source_post_handler(int fd, char *body)
 	/* POST never overwrites: an existing item dir is a collision */
 	{
 		char doc_root[256] = { 0 };
-		const char *root = resolve_doc_root(fd, doc_root,
-		                                   sizeof(doc_root));
+		const char *root =
+		        resolve_doc_root(fd, doc_root, sizeof(doc_root));
 		char item_path[PATH_MAX];
-		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
-		         root, def->items_path, id);
+		snprintf(
+		        item_path, sizeof(item_path), "%s/%s/%s", root,
+		        def->items_path, id);
 		struct stat st;
 		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode))
 			return respond_json_error(
@@ -702,8 +705,7 @@ static int source_post_handler(int fd, char *body)
 
 	int data_hd = source_parse_row_data_body(def, body);
 	if (data_hd < 0)
-		return respond_json_error(fd, 413,
-		                           "Field value too large");
+		return respond_json_error(fd, 413, "Field value too large");
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
 
@@ -762,23 +764,22 @@ static int source_put_handler(int fd, char *body)
 	/* Ownership check: require ownership for updates to existing items */
 	{
 		char doc_root[256] = { 0 };
-		const char *root = resolve_doc_root(fd, doc_root,
-		                                   sizeof(doc_root));
+		const char *root =
+		        resolve_doc_root(fd, doc_root, sizeof(doc_root));
 		char item_path[PATH_MAX];
-		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
-		         root, def->items_path, key);
+		snprintf(
+		        item_path, sizeof(item_path), "%s/%s/%s", root,
+		        def->items_path, key);
 		struct stat st;
 		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
 			if (!item_check_ownership(item_path, username))
-				return respond_json_error(fd, 403,
-				                           "Forbidden");
+				return respond_json_error(fd, 403, "Forbidden");
 		}
 	}
 
 	int data_hd = source_parse_row_data_body(def, body);
 	if (data_hd < 0)
-		return respond_json_error(fd, 413,
-		                           "Field value too large");
+		return respond_json_error(fd, 413, "Field value too large");
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
 
@@ -837,7 +838,8 @@ static int inv_guard_cb(const source_def_t *target, void *user)
 static int source_delete_handler(int fd, char *body)
 {
 	char dataset_id[128] = { 0 };
-	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(
+	        fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 
 	const source_def_t *def = source_find(dataset_id);
 	if (!def)
@@ -870,16 +872,16 @@ static int source_delete_handler(int fd, char *body)
 	/* Ownership check: require ownership for deleting existing items */
 	{
 		char doc_root[256] = { 0 };
-		const char *root = resolve_doc_root(fd, doc_root,
-		                                   sizeof(doc_root));
+		const char *root =
+		        resolve_doc_root(fd, doc_root, sizeof(doc_root));
 		char item_path[PATH_MAX];
-		snprintf(item_path, sizeof(item_path), "%s/%s/%s",
-		         root, def->items_path, key);
+		snprintf(
+		        item_path, sizeof(item_path), "%s/%s/%s", root,
+		        def->items_path, key);
 		struct stat st;
 		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
 			if (!item_check_ownership(item_path, username))
-				return respond_json_error(fd, 403,
-				                           "Forbidden");
+				return respond_json_error(fd, 403, "Forbidden");
 		}
 	}
 
@@ -1052,7 +1054,8 @@ static int source_get_item_handler(int fd, char *body)
 
 	(void)body;
 
-	axil_env_get(fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
+	axil_env_get(
+	        fd, dataset_id, sizeof(dataset_id), "PATTERN_PARAM_DATASET_ID");
 	axil_env_get(fd, item_id, sizeof(item_id), "PATTERN_PARAM_KEY");
 
 	rc = source_http_get_item_json(fd, dataset_id, item_id, &json);

@@ -53,16 +53,14 @@ static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	bud_node *form = poem_form_content(1, ctx->id, &meta, csrf_token);
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "poem", site_ui_module_icon("poem"),
-	        meta.title,
-	        ctx->id, form);
+	        meta.title, ctx->id, form);
 }
 
 static int poem_edit_get_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, "var/poem",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL,
-	        poem_edit_auth, NULL);
+	        fd, body, "var/poem", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        NULL, NULL, poem_edit_auth, NULL);
 }
 
 static int
@@ -100,8 +98,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		return server_error(fd, "OOM");
 
 	bud_node *layout = site_ui_layout(
-	        page_title, path, site_ui_module_icon("poem"),
-	        ctx->username,
+	        page_title, path, site_ui_module_icon("poem"), ctx->username,
 	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
 
 	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);
@@ -110,8 +107,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 static int poem_detail_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, "var/poem", 0, NULL, NULL, poem_detail_auth,
-	        NULL);
+	        fd, body, "var/poem", 0, NULL, NULL, poem_detail_auth, NULL);
 }
 
 /* GET /poem/:id/pt_PT.html — allowlisted body file, public read.
@@ -139,8 +135,7 @@ poem_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 static int poem_body_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, "var/poem", 0, NULL, NULL, poem_body_auth,
-	        NULL);
+	        fd, body, "var/poem", 0, NULL, NULL, poem_body_auth, NULL);
 }
 
 void xy_install(void)

@@ -120,7 +120,7 @@ async function findSongInListing(
   const url = `${filterUrl}${sep}per_page=1000`;
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
-  const link = page.locator(`a[href="/song/${songId}"]`);
+  const link = page.locator(`a[href="/song/${songId}"]`).first();
   return link.isVisible().catch(() => false);
 }
 

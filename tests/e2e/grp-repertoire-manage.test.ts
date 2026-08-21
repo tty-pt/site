@@ -40,10 +40,14 @@ Deno.test({
     await page.waitForURL(/\/grp\/[^/]+$/);
     grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
 
-    // 2. Add song to grp repertoire via the searchable input + datalist
-    await page.waitForSelector('input[name="song_id"]');
-    await page.fill('input[name="song_id"]', SONG_ID);
-    await page.click('button:has-text("Add Song")');
+    // 2. Add song to grp repertoire via the list-grade picker:
+    //    search (Enter submits — omni mode hides Apply), then click
+    //    the row (whole-row submit)
+    await page.waitForSelector('form.list-form input[name="q"]');
+    await page.fill('form.list-form input[name="q"]', SONG_TITLE);
+    await page.press('form.list-form input[name="q"]', "Enter");
+    await page.waitForSelector("button.hyle-row-action", { timeout: 8000 });
+    await page.click("button.hyle-row-action >> nth=0");
     // Wait for the remove button to appear (confirms song added + redirect complete)
     await page.waitForSelector('button:has-text("Remove")', { timeout: 8000 });
 

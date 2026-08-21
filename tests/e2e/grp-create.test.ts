@@ -112,13 +112,18 @@ Deno.test({ name: "grp: register → login → create grp → view detail → ed
       await page.waitForSelector("h1", { timeout: 5000 });
       await waitForText(page, "body", updatedTitle);
 
-      // ── 7. Add known song to grp repertoire via UI ────────────────────────
+      // ── 7. Add known song to grp repertoire via the list-grade picker ──────
+      // Omni mode hides Apply; Enter submits the search. The whole-row
+      // submit button carries the song id as its value.
       await page.goto(`${BASE}/grp/${grpId}`, GOTO);
-      await page.waitForSelector('input[name="song_id"]');
-      await page.fill('input[name="song_id"]', KNOWN_SONG_ID);
+      await page.waitForSelector('form.list-form input[name="q"]', { timeout: 5000 });
+      await page.fill('form.list-form input[name="q"]', KNOWN_SONG_TITLE);
+      await page.press('form.list-form input[name="q"]', "Enter");
+      const pickBtn = `button.hyle-row-action[value="${KNOWN_SONG_ID}"]`;
+      await page.waitForSelector(pickBtn, { timeout: 8000 });
       await Promise.all([
         page.waitForURL(new RegExp(`/grp/${grpId}(/|$)`), { timeout: 8000 }),
-        page.click('button:has-text("Add Song")'),
+        page.click(pickBtn),
       ]);
       await page.waitForSelector('button:has-text("Remove")', { timeout: 5000 });
 

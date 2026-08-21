@@ -42,63 +42,7 @@ static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
 
 #include "ux/all.c"
-
-/* Resolve filter options for a ref column into the state option pool.
- * Native-only (source/qmap) — the WASM unit must never see this. */
-static int idx_resolve_filter_options(
-        const char *target_source, unsigned target_hd, list_opt_t *pool,
-        int pool_avail)
-{
-	unsigned row_hd;
-	unsigned schema_hd;
-	char display_field[64] = "";
-	int nopts = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
-
-	if (!target_source || !target_source[0] || !target_hd)
-		return 0;
-
-	row_hd = source_get_data_hd(target_source);
-	if (!row_hd)
-		return 0;
-
-	schema_hd = source_get_schema_hd(target_source);
-	if (schema_hd) {
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (qmap_next(&key, &val, cur)) {
-			const char *fn = (const char *)key;
-			if (strcmp(fn, "id") == 0)
-				continue;
-			strncpy(display_field, fn, sizeof(display_field) - 1);
-			break;
-		}
-		qmap_fin(cur);
-	}
-
-	cur = qmap_iter(row_hd, NULL, 0);
-	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {
-		const char *row_id = (const char *)key;
-		const char *name = NULL;
-		if (display_field[0]) {
-			char name_key[320];
-			snprintf(
-			        name_key, sizeof(name_key), "%s:%s", row_id,
-			        display_field);
-			name = (const char *)qmap_get(target_hd, name_key);
-		}
-		strncpy(pool[nopts].id, row_id, sizeof(pool[nopts].id) - 1);
-		pool[nopts].id[sizeof(pool[nopts].id) - 1] = '\0';
-		strncpy(pool[nopts].label, name ? name : row_id,
-		        sizeof(pool[nopts].label) - 1);
-		pool[nopts].label[sizeof(pool[nopts].label) - 1] = '\0';
-		nopts++;
-	}
-	qmap_fin(cur);
-
-	return nopts;
-}
+#include "../common/list_fill.c"
 
 int index_update_json(const char *id, const char *title)
 {
@@ -214,203 +158,15 @@ XY_IMPL(int, index_add_item,
 	return 0;
 }
 
-/* ── Schema & data querying (native-only: axil, source, qmap) ── */
-
-static int idx_schema_collect(
-        const char *dataset_id, const char *select_csv, col_t *cols,
-        int max_cols)
-{
-	unsigned schema_hd;
-	int n = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
-
-	schema_hd = source_get_schema_hd(dataset_id);
-	if (!schema_hd)
-		return 0;
-
-	if (select_csv && select_csv[0]) {
-		char copy[256];
-		char *tok;
-		char *rest;
-
-		strncpy(copy, select_csv, sizeof(copy) - 1);
-		copy[sizeof(copy) - 1] = '\0';
-		rest = copy;
-		while ((tok = strtok_r(rest, ",", &rest)) && n < max_cols) {
-			strncpy(cols[n].key, tok, sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label), tok);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			val = qmap_get(schema_hd, tok);
-			cols[n].type = 0;
-			cols[n].target_source[0] = '\0';
-			cols[n].target_hd = 0;
-			cols[n].filter[0] = '\0';
-			if (val && ((const char *)val)[0] == '{') {
-				int t;
-				char ts[64] = "";
-				char fs[16] = "";
-				int m =
-				        sscanf((const char *)val,
-				               "{\"t\":%d,\"s\":\"%63[^\"]\","
-				               "\"f\":\"%15[^\"]\"",
-				               &t, ts, fs);
-				if (m >= 1)
-					cols[n].type = t;
-				if (m >= 2 && ts[0]) {
-					strncpy(cols[n].target_source, ts,
-					        sizeof(cols[n].target_source) -
-					                1);
-				}
-				if (m >= 3 && fs[0]) {
-					strncpy(cols[n].filter, fs,
-					        sizeof(cols[n].filter) - 1);
-				}
-			}
-			n++;
-		}
-	} else {
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (n < max_cols && qmap_next(&key, &val, cur)) {
-			strncpy(cols[n].key, (const char *)key,
-			        sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label),
-			        (const char *)key);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			cols[n].type = 0;
-			n++;
-		}
-		qmap_fin(cur);
-	}
-	return n;
-}
-
-static const char *idx_resolve_refs(const col_t *col, const char *raw)
-{
-	static char buf[4096];
-	static char last_target[64] = "";
-	static char display_field[64] = "";
-	const char *df;
-
-	if (!raw || !raw[0] || !col->target_hd)
-		return raw;
-
-	if (strcmp(last_target, col->target_source) != 0) {
-		unsigned shd = source_get_schema_hd(col->target_source);
-		display_field[0] = '\0';
-		if (shd) {
-			uint32_t ccur;
-			const void *ckey;
-			const void *cval;
-			ccur = qmap_iter(shd, NULL, 0);
-			while (qmap_next(&ckey, &cval, ccur)) {
-				const char *fn = (const char *)ckey;
-				if (strcmp(fn, "id") == 0)
-					continue;
-				strncpy(display_field, fn,
-				        sizeof(display_field) - 1);
-				break;
-			}
-			qmap_fin(ccur);
-		}
-		strncpy(last_target, col->target_source,
-		        sizeof(last_target) - 1);
-	}
-
-	df = display_field[0] ? display_field : NULL;
-	if (!df)
-		return raw;
-
-	buf[0] = '\0';
-	{
-		const char *p = raw;
-		while (*p) {
-			const char *nl = strchr(p, '\n');
-			size_t llen = nl ? (size_t)(nl - p) : strlen(p);
-			if (llen > 0) {
-				char num[32];
-				size_t cplen = llen < sizeof(num) - 1
-				                       ? llen
-				                       : sizeof(num) - 1;
-				memcpy(num, p, cplen);
-				num[cplen] = '\0';
-				const char *slug = NULL;
-				const char *name = NULL;
-				/* Try position lookup first */
-				if (num[0] >= '0' && num[0] <= '9') {
-					uint32_t pos = (uint32_t)atoi(num);
-					slug = qmap_get_key(
-					        col->target_hd, pos);
-				}
-				/* If not a position or not found, treat as raw
-				 * slug */
-				if (!slug)
-					slug = num;
-				if (slug) {
-					char name_key[320];
-					snprintf(
-					        name_key, sizeof(name_key),
-					        "%s:%s", slug, df);
-					name = (const char *)qmap_get(
-					        col->target_hd, name_key);
-					if (buf[0])
-						strncat(buf, ", ",
-						        sizeof(buf) -
-						                strlen(buf) -
-						                1);
-					strncat(buf, name ? name : slug,
-					        sizeof(buf) - strlen(buf) - 1);
-				}
-			}
-			if (!nl)
-				break;
-			p = nl + 1;
-		}
-	}
-
-	if (!buf[0])
-		return raw;
-
-	return buf;
-}
-
 static int idx_render_list_bud(
         int fd, const char *module, const char *query_str, const char *username)
 {
 	char dataset_id[256];
-	const char *select_csv;
-	col_t cols[32];
-	int ncols;
-	unsigned result_hd;
-	unsigned fields_hd;
-	const char *total_str;
-	uint32_t total = 0;
-	uint32_t page = 1;
-	uint32_t per_page = 10;
-	char page_buf[64] = { 0 };
-	char per_page_buf[64] = { 0 };
-	char sort_field[64];
-	int sort_asc;
-	const char *ids[1024];
-	int nids = 0;
-	const char **values = NULL;
-	int disp_nids = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
-	uint32_t offset;
-	uint32_t disp_count;
-	int i, j, rc;
 	list_state_t state;
 	bud_node *layout;
 	char title[128];
+	char *extra_head = NULL;
+	int rc;
 
 	memset(&state, 0, sizeof(state));
 	snprintf(
@@ -418,176 +174,12 @@ static int idx_render_list_bud(
 	snprintf(
 	        state.username, sizeof(state.username), "%s",
 	        username ? username : "");
-	snprintf(
-	        state.query, sizeof(state.query), "%s",
-	        query_str ? query_str : "");
-
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-	select_csv = idx_select_fields_for(module);
 
-	idx_query_param(query_str, "page", page_buf, sizeof(page_buf));
-	if (page_buf[0]) {
-		page = (uint32_t)atoi(page_buf);
-		state.has_page = 1;
-	}
-	idx_query_param(
-	        query_str, "per_page", per_page_buf, sizeof(per_page_buf));
-	if (per_page_buf[0])
-		per_page = (uint32_t)atoi(per_page_buf);
-	idx_parse_sort(query_str, sort_field, sizeof(sort_field), &sort_asc);
-	snprintf(state.sort_field, sizeof(state.sort_field), "%s", sort_field);
-	state.sort_asc = sort_asc;
-	state.page = (int)page;
-	state.per_page = (int)per_page;
-	{
-		char custom_buf[8] = "";
-
-		idx_query_param(
-		        query_str, "custom", custom_buf, sizeof(custom_buf));
-		state.custom = strcmp(custom_buf, "1") == 0;
-	}
-	idx_query_param(query_str, "q", state.q, sizeof(state.q));
-
-	ncols = idx_schema_collect(dataset_id, select_csv, cols, 32);
-	state.ncols = ncols;
-
-	/* Columns: copy into state, resolve ref targets, fill options pool. */
-	state.nopts = 0;
-	for (i = 0; i < ncols; i++) {
-		char cur_buf[512] = "";
-
-		snprintf(
-		        state.cols[i].key, sizeof(state.cols[i].key), "%s",
-		        cols[i].key);
-		snprintf(
-		        state.cols[i].label, sizeof(state.cols[i].label), "%s",
-		        cols[i].label);
-		state.cols[i].type = cols[i].type;
-		snprintf(
-		        state.cols[i].target_source,
-		        sizeof(state.cols[i].target_source), "%s",
-		        cols[i].target_source);
-		snprintf(
-		        state.cols[i].filter, sizeof(state.cols[i].filter),
-		        "%s", cols[i].filter);
-
-		if (cols[i].target_source[0] && !cols[i].target_hd)
-			cols[i].target_hd =
-			        source_get_fields_hd(cols[i].target_source);
-
-		{
-			int is_multi =
-			        cols[i].type == SOURCE_FIELD_MULTI_REFERENCE;
-
-			if (!is_multi &&
-			    cols[i].type == SOURCE_FIELD_REFERENCE &&
-			    (strcmp(cols[i].filter, "multiselect") == 0 ||
-			     strcmp(cols[i].filter, "grid") == 0))
-				is_multi = 1;
-			if (is_multi && cols[i].target_hd) {
-				idx_query_params_join(
-				        query_str, cols[i].key,
-				        state.cols[i].current,
-				        sizeof(state.cols[i].current));
-			} else {
-				idx_query_param(
-				        query_str, cols[i].key, cur_buf,
-				        sizeof(cur_buf));
-				snprintf(
-				        state.cols[i].current,
-				        sizeof(state.cols[i].current), "%s",
-				        cur_buf);
-			}
-		}
-
-		if (cols[i].target_hd &&
-		    (cols[i].type == SOURCE_FIELD_REFERENCE ||
-		     cols[i].type == SOURCE_FIELD_MULTI_REFERENCE))
-		{
-			int n = idx_resolve_filter_options(
-			        cols[i].target_source, cols[i].target_hd,
-			        state.opts + state.nopts,
-			        LIST_MAX_OPTS - state.nopts);
-			state.cols[i].opt_start = state.nopts;
-			state.cols[i].opt_count = n;
-			state.nopts += n;
-		}
-	}
-
-	result_hd = source_query(dataset_id, query_str);
-	if (!result_hd)
-		goto empty_page;
-
-	total_str = (const char *)qmap_get(result_hd, "__total__");
-	if (total_str)
-		total = (uint32_t)atoi(total_str);
-	state.total = (int)total;
-
-	cur = qmap_iter(result_hd, NULL, 0);
-	while (nids < 1024 && qmap_next(&key, &val, cur)) {
-		const char *ks = (const char *)key;
-		if (strcmp(ks, "__total__") == 0)
-			continue;
-		ids[nids] = strdup(ks);
-		if (!ids[nids])
-			break;
-		nids++;
-	}
-	qmap_fin(cur);
-
-	offset = 0;
-	disp_count = (uint32_t)nids;
-	if (!state.has_page) {
-		offset = (page - 1) * per_page;
-		if (offset > (uint32_t)nids)
-			offset = 0;
-		disp_count = per_page;
-		if (offset + disp_count > (uint32_t)nids)
-			disp_count = (uint32_t)nids - offset;
-	}
-
-	{
-		const char **disp_ids = ids + offset;
-
-		disp_nids = (int)disp_count;
-		fields_hd = source_get_fields_hd(dataset_id);
-
-		values = malloc((size_t)disp_nids * ncols * sizeof(char *));
-		if (!values) {
-			for (i = 0; i < nids; i++)
-				free((void *)ids[i]);
-			return respond_error(fd, 500, "OOM");
-		}
-
-		for (i = 0; i < disp_nids; i++) {
-			for (j = 0; j < ncols; j++) {
-				char fkey[256];
-				const char *fval;
-				snprintf(
-				        fkey, sizeof(fkey), "%s:%s",
-				        disp_ids[i], cols[j].key);
-				fval = (const char *)qmap_get(fields_hd, fkey);
-				if (!fval)
-					fval = "";
-				if (j > 0 &&
-				    cols[j].type ==
-				            SOURCE_FIELD_MULTI_REFERENCE &&
-				    cols[j].target_hd)
-				{
-					fval = idx_resolve_refs(&cols[j], fval);
-				}
-				values[i * ncols + j] = strdup(fval);
-			}
-		}
-
-		state.nids = disp_nids;
-		for (i = 0; i < disp_nids; i++)
-			state.ids[i] = disp_ids[i];
-		for (i = 0; i < disp_nids; i++)
-			for (j = 0; j < ncols; j++)
-				state.values[i * ncols + j] =
-				        values[i * ncols + j];
-	}
+	/* Filler parses params, whitelists the qs into state.query, queries
+	 * and slices. On query failure it leaves nids/total at 0 with the
+	 * column metadata intact so the chrome still renders (empty page). */
+	list_fill_state(&state, dataset_id, query_str, 1);
 
 	/* One render path: serialize state -> JSON, render, respond. */
 	{
@@ -596,82 +188,39 @@ static int idx_render_list_bud(
 		        (size_t)state.nids * (size_t)(state.ncols * 512 + 128) +
 		        (size_t)state.nopts * 256;
 		char *json = malloc(json_budget);
-		char *extra_head = NULL;
-		int json_rc = -1;
 
 		if (json) {
-			json_rc = list_state_to_json(&state, json, json_budget);
-			if (json_rc == 0) {
+			if (list_state_to_json(&state, json, json_budget) == 0)
+			{
 				size_t head_len = strlen(json) + 128;
 				extra_head = malloc(head_len);
-				if (extra_head) {
+				if (extra_head)
 					snprintf(
 					        extra_head, head_len,
 					        "<script "
 					        "type=\"application/json\" "
 					        "id=\"bud-state\">%s</script>",
 					        json);
-				}
 			}
 			free(json);
 		}
-
-		layout = list_render(&state);
-		rc = 0;
-		if (layout) {
-			snprintf(title, sizeof(title), "%ss", module);
-			if (title[0] >= 'a')
-				title[0] -= 32;
-			respond_html(
-			        fd, site_ui_page(
-			                    title, extra_head, "list", layout));
-		} else {
-			axil_respond(fd, 500, "Internal Server Error");
-		}
-		free(extra_head);
 	}
 
-	qmap_close(result_hd);
-
-	for (i = 0; i < disp_nids; i++)
-		for (j = 0; j < ncols; j++)
-			free((void *)values[i * ncols + j]);
-	free(values);
-	for (i = 0; i < nids; i++)
-		free((void *)ids[i]);
-	return rc;
-
-empty_page:
-	/* Zero-row result set — still through list_render (id alignment). */
-	state.nids = 0;
-	state.total = 0;
 	layout = list_render(&state);
+	rc = 0;
 	if (layout) {
-		size_t json_budget = 8192 + 128;
-		char *json = malloc(json_budget);
-		char *extra_head = NULL;
-		if (json) {
-			int jrc = list_state_to_json(&state, json, json_budget);
-			if (jrc == 0) {
-				size_t hlen = strlen(json) + 128;
-				extra_head = malloc(hlen);
-				if (extra_head)
-					snprintf(
-					        extra_head, hlen,
-					        "<script type=\"application/json\" "
-					        "id=\"bud-state\">%s</script>", json);
-			}
-			free(json);
-		}
 		snprintf(title, sizeof(title), "%ss", module);
 		if (title[0] >= 'a')
 			title[0] -= 32;
-		respond_html(fd, site_ui_page(title, extra_head, "list", layout));
-		free(extra_head);
+		respond_html(
+		        fd, site_ui_page(title, extra_head, "list", layout));
 	} else {
 		axil_respond(fd, 500, "Internal Server Error");
+		rc = -1;
 	}
-	return 0;
+	free(extra_head);
+	list_fill_free(&state);
+	return rc;
 }
 
 XY_IMPL(int, index_render_list,

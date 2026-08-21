@@ -105,7 +105,7 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
     }
 
     const firstHrefP1 = await rowsP1.nth(0)
-      .locator("td:first-child a")
+      .locator("td:first-child a:not(.hyle-row-action)")
       .getAttribute("href");
 
     // ---- Page 2: indicator, Prev enabled, rows Comunhão, ----
@@ -154,7 +154,7 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
     }
 
     const firstHrefP2 = await rowsP2.nth(0)
-      .locator("td:first-child a")
+      .locator("td:first-child a:not(.hyle-row-action)")
       .getAttribute("href");
 
     if (firstHrefP2 === firstHrefP1) {

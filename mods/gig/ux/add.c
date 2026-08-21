@@ -8,8 +8,7 @@
 
 #include "../../common/ux/site_ui.c"
 
-static bud_node *
-sb_render_add_form(const char *csrf_token, const char *grp_val)
+static bud_node *sb_render_add_form(const char *csrf_token, const char *grp_val)
 {
 	static const form_field_t ff[] = { { "title", "Title:", 0 },
 		                           { NULL, NULL, 0 } };
@@ -17,10 +16,10 @@ sb_render_add_form(const char *csrf_token, const char *grp_val)
 	bud_node *fields = site_ui_form_fields(ff, NULL, csrf_token);
 	if (grp_val[0]) {
 		bud_append(
-		        fields, lx_el("input", lx_attr("type", "hidden"),
-		                      lx_attr("name", "grp"),
-		                      lx_attr("value", grp_val))
-		                        .data.node);
+		        fields,
+		        lx_el("input", lx_attr("type", "hidden"),
+		              lx_attr("name", "grp"), lx_attr("value", grp_val))
+		                .data.node);
 	}
 	bud_append(fields, site_ui_form_actions("/gig/", "Add", NULL));
 

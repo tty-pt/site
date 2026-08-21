@@ -214,6 +214,27 @@ typedef struct {
 	const char *values[LIST_MAX_ROWS * LIST_MAX_COLS]; /* display strings */
 } list_state_t;
 
+/* True when the state carries an active search (omni q, any custom
+ * field selection, or a Content lookup term). Pure/wasm-safe; gates
+ * the picker result table on BOTH sides (id alignment). */
+int list_has_query(const list_state_t *s)
+{
+	int i;
+
+	if (!s)
+		return 0;
+	if (s->q[0])
+		return 1;
+	if (!s->custom)
+		return 0;
+	for (i = 0; i < s->ncols; i++)
+		if (s->cols[i].current[0])
+			return 1;
+	if (strncmp(s->query, "data=", 5) == 0 || strstr(s->query, "&data="))
+		return 1;
+	return 0;
+}
+
 /* ── Rendering functions ──────────────────────────────────── */
 
 static bud_node *idx_content_lookup(const char *qs)
@@ -233,8 +254,8 @@ static bud_node *idx_content_lookup(const char *qs)
 	        .data.node;
 }
 
-static void idx_mode_href(
-        char *out, size_t n, const list_state_t *s, int custom)
+static void
+idx_mode_href(char *out, size_t n, const list_state_t *s, int custom)
 {
 	size_t pos;
 	int first;
@@ -260,8 +281,9 @@ static void idx_mode_href(
 			return;
 	}
 	if (s && s->per_page > 0 && s->per_page != 10)
-		snprintf(out + pos, n - pos, "%sper_page=%d", first ? "" : "&",
-		         s->per_page);
+		snprintf(
+		        out + pos, n - pos, "%sper_page=%d", first ? "" : "&",
+		        s->per_page);
 }
 
 static bud_node *idx_omnisearch_field(const char *q)
@@ -272,10 +294,9 @@ static bud_node *idx_omnisearch_field(const char *q)
 	              lx_attr("placeholder", "Search\xe2\x80\xa6"),
 	              lx_attr("aria-label", "Search everything"),
 	              (q && q[0]) ? lx_attr("value", q) : lx_none())
-	               .data.node;
+	                .data.node;
 	return lx_el("label", lx_attr("class", "hyle-omnisearch"),
-	             lx_attr("data-hyle-omnisearch", "1"),
-	             lx_node(input))
+	             lx_attr("data-hyle-omnisearch", "1"), lx_node(input))
 	        .data.node;
 }
 
@@ -349,36 +370,37 @@ static bud_node *idx_filter_chrome(const list_state_t *state)
 	idx_mode_href(href, sizeof(href), state, omni ? 1 : 0);
 	toggle = lx_el("a", lx_attr("class", "hyle-mode-toggle"),
 	               lx_attr("data-hyle-mode-toggle", other),
-	               lx_attr("href", href),
-	               lx_attr("aria-label", aria), lx_text(icon))
+	               lx_attr("href", href), lx_attr("aria-label", aria),
+	               lx_text(icon))
 	                 .data.node;
 	if (toggle)
 		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		             lx_attr("data-hyle-mode", omni ? "omni" : "custom"),
+		             lx_attr("data-hyle-mode",
+		                     omni ? "omni" : "custom"),
 		             lx_node(toggle), lx_node(bar))
 		               .data.node;
 	else
 		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		             lx_attr("data-hyle-mode", omni ? "omni" : "custom"),
+		             lx_attr("data-hyle-mode",
+		                     omni ? "omni" : "custom"),
 		             lx_node(bar))
 		               .data.node;
 	if (!wrap)
 		return bar;
 	if (state->custom) {
 		hidden = lx_el("input", lx_attr("type", "hidden"),
-		               lx_attr("name", "custom"),
-		               lx_attr("value", "1"))
+		               lx_attr("name", "custom"), lx_attr("value", "1"))
 		                 .data.node;
 		if (hidden)
 			bud_append(wrap, hidden);
 	}
 	actions = lx_el("div", lx_attr("class", "hyle-filter-actions"),
-	                omni ? lx_none() :
-	                lx_el("button", lx_attr("type", "reset"),
-	                      lx_text("Clear")),
+	                omni ? lx_none()
+	                     : lx_el("button", lx_attr("type", "reset"),
+	                             lx_text("Clear")),
 	                lx_el("button", lx_attr("type", "submit"),
 	                      lx_text("Apply")))
-	                 .data.node;
+	                  .data.node;
 	if (actions)
 		bud_append(wrap, actions);
 	return wrap;
@@ -396,6 +418,7 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	bud_node *form;
 	bud_node *add_btn;
 	char href_buf[256];
+	hyle_bud_row_action_t act;
 	int i;
 
 	for (i = 0; i < state->ncols && i < LIST_MAX_COLS; i++) {
@@ -404,10 +427,17 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	}
 
 	filter_wrap = idx_filter_chrome(state);
-	table = hyle_bud_table(
+	act.kind = HYLE_ROW_ACTION_LINK;
+	act.css_class = NULL;
+	act.label = NULL;
+	act.aria_base = "Open";
+	act.href_base = NULL;
+	act.form_id = NULL;
+	act.field_name = NULL;
+	table = hyle_bud_table_actions(
 	        col_keys, col_labels, state->ncols, (const char **)state->ids,
 	        state->nids, (const char **)state->values, state->module,
-	        state->sort_field, state->sort_asc, state->query);
+	        state->sort_field, state->sort_asc, state->query, &act);
 	pagination = hyle_bud_pagination(
 	        state->page, state->per_page, state->total, state->nids,
 	        state->query);
@@ -419,8 +449,7 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	             pagination ? lx_node(pagination) : lx_none())
 	               .data.node;
 
-	snprintf(title, sizeof(title), "%ss",
-	        idx_display_name(state->module));
+	snprintf(title, sizeof(title), "%ss", idx_display_name(state->module));
 	if (title[0] >= 'a')
 		title[0] -= 32;
 	site_ui_collection_path(state->module, path, sizeof(path));
@@ -434,8 +463,7 @@ static bud_node *idx_list_layout(const list_state_t *state)
 
 	return site_ui_layout(
 	        title, path, site_ui_module_icon(state->module),
-	        state->username,
-	        add_btn,
+	        state->username, add_btn,
 	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
 }
@@ -466,15 +494,13 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	             lx_node(site_ui_empty_state("No items")))
 	               .data.node;
 
-	snprintf(title, sizeof(title), "%ss",
-	        idx_display_name(state->module));
+	snprintf(title, sizeof(title), "%ss", idx_display_name(state->module));
 	if (title[0] >= 'a')
 		title[0] -= 32;
 
 	return site_ui_layout(
 	        title, path, site_ui_module_icon(state->module),
-	        state->username,
-	        add_btn,
+	        state->username, add_btn,
 	        lx_el("div", lx_attr("class", "center"), lx_node(form))
 	                .data.node);
 }

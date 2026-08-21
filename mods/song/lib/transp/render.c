@@ -130,9 +130,10 @@ static void lyric_fill(
 		size_t start = st->q.pair[0];
 		size_t len = st->q.pair[1];
 		if (st->not_special) {
-			int inside_word = start > 0 && start < line_len &&
-			                  !isspace((unsigned char)line[start - 1]) &&
-			                  !isspace((unsigned char)line[start]);
+			int inside_word =
+			        start > 0 && start < line_len &&
+			        !isspace((unsigned char)line[start - 1]) &&
+			        !isspace((unsigned char)line[start]);
 			char filler = inside_word ? '-' : ' ';
 
 			while (*j < start + len) {
@@ -319,8 +320,8 @@ static int render_chord_line(
 		int idx = (root + semitones) % 12;
 		if (idx < 0)
 			idx += 12;
-		const char *new_cstr = chord_str(
-		        root_table, (size_t)idx, spell);
+		const char *new_cstr =
+		        chord_str(root_table, (size_t)idx, spell);
 		size_t new_len = strlen(new_cstr);
 		size_t mod_len = t->info.mod_len;
 		const char *mod = t->text + t->info.mod_off;
@@ -355,10 +356,8 @@ static int render_chord_line(
 		/* Compute the emitted width of this token so we can compare it
 		 * against the original width (t->len) for the signed delta.
 		 * Emitted: new root + suffix prefix + bass name (respelled). */
-		size_t emitted_bass =
-		        bass_name ? strlen(bass_name) : 0;
-		size_t emitted_len =
-		        new_len + prefix_len + emitted_bass;
+		size_t emitted_bass = bass_name ? strlen(bass_name) : 0;
+		size_t emitted_len = new_len + prefix_len + emitted_bass;
 
 		/* signed delta: positive = grew, negative = shrank */
 		int tok_delta = (int)emitted_len - (int)t->len;
@@ -384,8 +383,8 @@ static int render_chord_line(
 		if (latin_m) {
 			out_append(out, outsz, o, "-", 1);
 			if (prefix_len > 1)
-				out_append(out, outsz, o, mod + 1,
-				           prefix_len - 1);
+				out_append(
+				        out, outsz, o, mod + 1, prefix_len - 1);
 		} else if (prefix_len > 0) {
 			out_append(out, outsz, o, mod, prefix_len);
 		}
@@ -405,16 +404,16 @@ static int render_chord_line(
 			if (!next) {
 				i_absorb = grow;
 			} else {
-				i_absorb = grow < next->lead ? grow
-				                             : next->lead;
+				i_absorb =
+				        grow < next->lead ? grow : next->lead;
 				j += i_absorb;
 			}
 
 			/* If the following char is not space/slash/NUL, add one
-			 * space (does NOT advance j, like the old proc_line). */
+			 * space (does NOT advance j, like the old proc_line).
+			 */
 			if (next && next->lead - i_absorb == 0 &&
-			    next->text[0] != '/' &&
-			    next->text[0] != '\0')
+			    next->text[0] != '/' && next->text[0] != '\0')
 			{
 				out_append(out, outsz, o, " ", 1);
 				grow++;
@@ -426,9 +425,9 @@ static int render_chord_line(
 				j += grow - i_absorb;
 			}
 		} else if (tok_delta < 0 && next) {
-			/* Shrink: pad the chord line so the next chord keeps its
-			 * original column.  Only needed when there is a next
-			 * token (EOL shrink leaves no gap to protect). */
+			/* Shrink: pad the chord line so the next chord keeps
+			 * its original column.  Only needed when there is a
+			 * next token (EOL shrink leaves no gap to protect). */
 			size_t pad = (size_t)(-tok_delta);
 			size_t k;
 

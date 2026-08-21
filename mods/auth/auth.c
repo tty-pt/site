@@ -64,8 +64,8 @@ static int csrf_find_token(const char *cookie, char *out, size_t len)
 	return -1;
 }
 
-static int csrf_ct_compare(const char *a, size_t alen,
-	const char *b, size_t blen)
+static int
+csrf_ct_compare(const char *a, size_t alen, const char *b, size_t blen)
 {
 	unsigned char diff = 0;
 	size_t i;
@@ -141,8 +141,8 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 	if (csrf_find_token(cookie_hdr, cookie_val, sizeof(cookie_val)) != 0)
 		return -1;
 
-	return csrf_ct_compare(cookie_val, strlen(cookie_val),
-		submitted, strlen(submitted));
+	return csrf_ct_compare(
+	        cookie_val, strlen(cookie_val), submitted, strlen(submitted));
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,7 +244,9 @@ XY_IMPL(int, item_ctx_load,
 	axil_env_get(fd, ctx->id, sizeof(ctx->id), "PATTERN_PARAM_ID");
 
 	if (flags & ICTX_SONG_ID)
-		axil_env_get(fd, ctx->song_id, sizeof(ctx->song_id), "PATTERN_PARAM_SONG_ID");
+		axil_env_get(
+		        fd, ctx->song_id, sizeof(ctx->song_id),
+		        "PATTERN_PARAM_SONG_ID");
 
 	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
 		bad_request(fd, "Missing parameters");

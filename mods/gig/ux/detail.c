@@ -1,6 +1,7 @@
 #include "bud/bud.h"
 #include "bud/bud_jsx.h"
 #include "bud/bud_app.h"
+#include <hyle-bud/hyle-bud.h>
 #include "../fields.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,10 @@
 #include "../../common/ux/site_ui.c"
 #include "../../common/state_macros.h"
 
+/* List machinery for the song picker (site_ui.c must come first). */
+#include "../../index/ux/list.c"
+#include "../../common/list_fill.c"
+
 #include "../../song/lib/transp/transp_flags.h"
 
 #ifdef __wasm__
@@ -21,7 +26,6 @@ bud_host_log(const char *msg, size_t len);
 #endif
 
 #define MAX_SB_SONGS 128
-#define MAX_SB_OPTS 16
 
 /* ── WASM app state (gig WASM runtime) ────────────── */
 
@@ -38,18 +42,14 @@ bud_host_log(const char *msg, size_t len);
 
 BUD_STATE_STRUCT_EXT(sb_song_row_data_t, SB_SONG_ROW_SCHEMA, char *chord_html;)
 
-#define SB_SONG_OPTION_SCHEMA(F_STR, F_INT, st)                                \
-	F_STR(st, id, 128)                                                     \
-	F_STR(st, title, 256)
-
-BUD_STATE_STRUCT(sb_song_option_t, SB_SONG_OPTION_SCHEMA)
-
 typedef struct {
 	char sb_id[128];
 	char path[256];
 	int zoom;
 	int latin;
 	int show_media;
+	int t_pref;
+	int bemol;
 	int is_owner;
 	char title[256];
 	char user[64];
@@ -57,12 +57,11 @@ typedef struct {
 	char grp_id[128];
 	char owner[64];
 	int n_songs;
-	int n_song_options;
 } sb_app_state_t;
 
 static sb_app_state_t sb_app_state = { 0 };
 static sb_song_row_data_t g_sb_songs[MAX_SB_SONGS];
-static sb_song_option_t g_sb_options[MAX_SB_OPTS];
+static list_state_t g_sb_pick_state;
 static bud_node *g_sb_chord_nodes[MAX_SB_SONGS];
 static bud_node *g_sb_media_nodes[MAX_SB_SONGS];
 static int g_sb_n_chord_nodes;
@@ -77,6 +76,8 @@ static const bud_field_desc_t gig_app_fields[] = {
 	OVERLAY_INT(zoom, sb_app_state_t, zoom),
 	OVERLAY_INT(l, sb_app_state_t, latin),
 	OVERLAY_INT(m, sb_app_state_t, show_media),
+	OVERLAY_INT(t, sb_app_state_t, t_pref),
+	OVERLAY_INT(b, sb_app_state_t, bemol),
 	OVERLAY_INT(owner, sb_app_state_t, is_owner),
 	OVERLAY_STR(title, sb_app_state_t, title, 256),
 	OVERLAY_STR(user, sb_app_state_t, user, 64),
@@ -87,7 +88,6 @@ static const bud_field_desc_t gig_app_fields[] = {
 };
 
 BUD_STATE_FIELDS(sb_song_row_data_t, sb_song_row_fields, SB_SONG_ROW_SCHEMA)
-BUD_STATE_FIELDS(sb_song_option_t, sb_song_option_fields, SB_SONG_OPTION_SCHEMA)
 
 /* ── WASM state init (called by JS bridge before bud_app_mount) ── */
 
@@ -106,10 +106,7 @@ void wasm_init(const char *json, int len)
 	        json, "songs", g_sb_songs, sizeof(sb_song_row_data_t),
 	        &sb_app_state.n_songs, MAX_SB_SONGS, sb_song_row_fields);
 
-	bud_state_apply_array(
-	        json, "opts", g_sb_options, sizeof(sb_song_option_t),
-	        &sb_app_state.n_song_options, MAX_SB_OPTS,
-	        sb_song_option_fields);
+	list_state_from_json(&g_sb_pick_state, json);
 }
 
 /* ── Zoom slider event handler ──────────────────────────── */
@@ -120,8 +117,7 @@ static void fetch_sb_transpose(int song_index, int semitones)
 		return;
 	char url[1024];
 	snprintf(
-	        url, sizeof(url),
-	        "/api/gig/%s/transpose?n=%d&t=%d%s%s&z=%d",
+	        url, sizeof(url), "/api/gig/%s/transpose?n=%d&t=%d%s%s&z=%d",
 	        sb_app_state.sb_id, song_index, semitones,
 	        sb_app_state.latin ? "&l=1" : "",
 	        sb_app_state.show_media ? "&m=1" : "", sb_app_state.zoom);
@@ -331,8 +327,8 @@ bud_node *bud_app_render(void)
 	/* Page layout with proper Bud nodes */
 	bud_node *layout = site_ui_layout(
 	        sb_app_state.title, sb_app_state.path,
-	        site_ui_module_icon("gig"),
-	        sb_app_state.user, menu_items, body_content);
+	        site_ui_module_icon("gig"), sb_app_state.user, menu_items,
+	        body_content);
 
 	/* Main wrapper with zoom CSS custom property */
 	g_sb_main = lx_el("div", lx_attr("id", "sb-main"),
@@ -353,29 +349,105 @@ static bud_node *sb_render_empty_list(void)
 	        .data.node;
 }
 
-static bud_node *sb_render_add_song_form(
-        const char *add_action, const char *csrf_token, bud_node *song_options)
+/* List-grade song picker: omni ⇄ custom chrome, results table whose
+ * whole rows submit POST /api/gig/:id/songs via form= buttons, real
+ * pagination. Gated purely on state (is_owner / list_has_query) so the
+ * WASM tree stays node-id aligned with SSR. Hidden inputs mirror the
+ * viewer prefs (t/b/l/m/z) so pagination resubmits keep them. */
+static bud_node *sb_render_song_picker(void)
 {
-	return lx_el("form", lx_attr("method", "POST"),
+	char action[256], add_action[256], vb[8];
+	const char *col_keys[LIST_MAX_COLS];
+	const char *col_labels[LIST_MAX_COLS];
+	hyle_bud_row_action_t act;
+	bud_node *frag, *hint, *form, *chrome, *table, *pag, *post;
+	int i;
+
+	frag = bud_fragment();
+	if (!frag)
+		return NULL;
+	snprintf(action, sizeof(action), "/gig/%s", sb_app_state.sb_id);
+	snprintf(
+	        add_action, sizeof(add_action), "/api/gig/%s/songs",
+	        sb_app_state.sb_id);
+
+	for (i = 0; i < g_sb_pick_state.ncols && i < LIST_MAX_COLS; i++) {
+		col_keys[i] = g_sb_pick_state.cols[i].key;
+		col_labels[i] = g_sb_pick_state.cols[i].label;
+	}
+
+	if (list_has_query(&g_sb_pick_state)) {
+		hint = lx_el("div", lx_attr("class", "text-xs text-muted"),
+		             lx_text("Click a song to add it."))
+		               .data.node;
+		if (hint)
+			bud_append(frag, hint);
+	}
+
+	form = lx_el("form", lx_attr("method", "get"),
+	             lx_attr("action", action), lx_attr("class", "list-form"))
+	               .data.node;
+	chrome = idx_filter_chrome(&g_sb_pick_state);
+	if (form && chrome)
+		bud_append(form, chrome);
+
+	if (form) {
+		const char *pref_names[5] = { "t", "b", "l", "m", "z" };
+		int pref_vals[5];
+		int k;
+
+		pref_vals[0] = sb_app_state.t_pref;
+		pref_vals[1] = sb_app_state.bemol;
+		pref_vals[2] = sb_app_state.latin;
+		pref_vals[3] = sb_app_state.show_media;
+		pref_vals[4] = sb_app_state.zoom;
+		for (k = 0; k < 5; k++) {
+			bud_node *hid;
+			snprintf(vb, sizeof(vb), "%d", pref_vals[k]);
+			hid = lx_el("input", lx_attr("type", "hidden"),
+			            lx_attr("name", pref_names[k]),
+			            lx_attr("value", vb))
+			              .data.node;
+			if (hid)
+				bud_append(form, hid);
+		}
+	}
+
+	if (form && list_has_query(&g_sb_pick_state)) {
+		act.kind = HYLE_ROW_ACTION_SUBMIT;
+		act.css_class = NULL;
+		act.label = NULL;
+		act.aria_base = "Add";
+		act.href_base = NULL;
+		act.form_id = "sb-pick-post";
+		act.field_name = "song_id";
+		table = hyle_bud_table_actions(
+		        col_keys, col_labels, g_sb_pick_state.ncols,
+		        (const char **)g_sb_pick_state.ids,
+		        g_sb_pick_state.nids,
+		        (const char **)g_sb_pick_state.values, "song",
+		        g_sb_pick_state.sort_field, g_sb_pick_state.sort_asc,
+		        g_sb_pick_state.query, &act);
+		pag = hyle_bud_pagination(
+		        g_sb_pick_state.page, g_sb_pick_state.per_page,
+		        g_sb_pick_state.total, g_sb_pick_state.nids, "");
+		if (table)
+			bud_append(form, table);
+		if (pag)
+			bud_append(form, pag);
+	}
+	if (form)
+		bud_append(frag, form);
+	post = lx_el("form", lx_attr("id", "sb-pick-post"),
+	             lx_attr("method", "post"),
 	             lx_attr("action", add_action),
-	             lx_attr("class", "flex gap-2 items-center "
-	                              "mt-2 mb-4 p-2 "
-	                              "bg-surface rounded"),
 	             lx_el("input", lx_attr("type", "hidden"),
 	                   lx_attr("name", "csrf_token"),
-	                   lx_attr("value", csrf_token)),
-	             lx_el("input", lx_attr("type", "text"),
-	                   lx_attr("name", "song_id"),
-	                   lx_attr("list", "sb-song-datalist"),
-	                   lx_attr("placeholder", "Search songs..."),
-	                   lx_attr("autocomplete", "off"),
-	                   lx_attr("class", "border rounded p-1")),
-	             lx_el("datalist", lx_attr("id", "sb-song-datalist"),
-	                   song_options ? lx_node(song_options) : lx_none()),
-	             lx_el("button", lx_attr("type", "submit"),
-	                   lx_attr("class", "btn text-sm py-1 px-2"),
-	                   lx_text("Add Song")))
-	        .data.node;
+	                   lx_attr("value", sb_app_state.csrf_token)))
+	               .data.node;
+	if (post)
+		bud_append(frag, post);
+	return frag;
 }
 
 /* ── Song row helpers ──────────────────────────────── */
@@ -431,11 +503,10 @@ static bud_node *sb_render_song_row(
 		site_ui_build_media_html(
 		        yt, audio, pdf, media_html, sizeof(media_html));
 
-	bud_node *media_node =
-	        lx_el("div", lx_attr("data-gig-media", n_buf),
-	              lx_attr("class", "gig-media mt-1"),
-	              lx_node(bud_raw(media_html)))
-	                .data.node;
+	bud_node *media_node = lx_el("div", lx_attr("data-gig-media", n_buf),
+	                             lx_attr("class", "gig-media mt-1"),
+	                             lx_node(bud_raw(media_html)))
+	                               .data.node;
 
 	if (out_media)
 		*out_media = media_node;
@@ -554,12 +625,6 @@ static bud_node *sb_render_header(const char *grp_href, const char *owner)
 	return frag;
 }
 
-static bud_node *sb_render_song_option(const char *value, const char *text)
-{
-	return lx_el("option", lx_attr("value", value), lx_text(text))
-	        .data.node;
-}
-
 /* ── Body content builder (called from bud_app_render in shared.c) ── */
 
 static bud_node *sb_build_body_content(void)
@@ -573,35 +638,17 @@ static bud_node *sb_build_body_content(void)
 		        grp_href, sizeof(grp_href), "/grp/%s",
 		        sb_app_state.grp_id);
 	{
-		bud_node *hdr =
-		        sb_render_header(grp_href, sb_app_state.owner);
+		bud_node *hdr = sb_render_header(grp_href, sb_app_state.owner);
 		if (hdr)
 			bud_append(frag, hdr);
 	}
 
-	/* Add-song form (shown when logged in + grp + options available) */
-	if (sb_app_state.grp_id[0] && sb_app_state.user[0] &&
-	    sb_app_state.n_song_options > 0)
-	{
-		char add_action[256];
-		snprintf(
-		        add_action, sizeof(add_action),
-		        "/api/gig/%s/songs", sb_app_state.sb_id);
-
-		bud_node *song_options = NULL;
-		for (int j = 0; j < sb_app_state.n_song_options; j++) {
-			bud_node *opt = sb_render_song_option(
-			        g_sb_options[j].id, g_sb_options[j].title);
-			if (!song_options)
-				song_options = lx_frag(lx_node(opt)).data.node;
-			else
-				bud_append(song_options, opt);
-		}
-
-		bud_append(
-		        frag, sb_render_add_song_form(
-		                      add_action, sb_app_state.csrf_token,
-		                      song_options));
+	/* Song picker (owner only; gated on state so SSR and WASM stay
+	 * node-id aligned) */
+	if (sb_app_state.is_owner) {
+		bud_node *picker = sb_render_song_picker();
+		if (picker)
+			bud_append(frag, picker);
 	}
 
 	/* Song list */

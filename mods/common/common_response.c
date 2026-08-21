@@ -45,8 +45,10 @@ static void set_html_security_headers(int fd)
 {
 	axil_header_set(fd, "X-Content-Type-Options", "nosniff");
 	axil_header_set(fd, "X-Frame-Options", "DENY");
-	axil_header_set(fd, "Referrer-Policy", "strict-origin-when-cross-origin");
-	axil_header_set(fd, "Content-Security-Policy",
+	axil_header_set(
+	        fd, "Referrer-Policy", "strict-origin-when-cross-origin");
+	axil_header_set(
+	        fd, "Content-Security-Policy",
 	        "default-src 'self'; "
 	        "script-src 'self' 'wasm-unsafe-eval'; "
 	        "style-src 'self' 'unsafe-inline'; "
@@ -203,8 +205,8 @@ XY_IMPL(int, site_ui_respond_add_page,
 	bud_node *, form)
 {
 	char title[64], action[256];
-	snprintf(title, sizeof(title), "Add %s",
-	        site_ui_module_display(module));
+	snprintf(
+	        title, sizeof(title), "Add %s", site_ui_module_display(module));
 	snprintf(action, sizeof(action), "/%s/add", module);
 	return site_ui_respond_form_page(
 	        fd, user, title, action, icon, module, form);

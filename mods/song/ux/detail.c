@@ -274,8 +274,7 @@ bud_node *bud_app_render(void)
 
 	bud_node *inner = site_ui_layout(
 	        app_state.cache.title, app_state.path,
-	        site_ui_module_icon("song"),
-	        app_state.page_user, menu_items,
+	        site_ui_module_icon("song"), app_state.page_user, menu_items,
 	        lx_frag(lx_el("div",
 	                      lx_attr("class", "center flex flex-col gap-4"),
 	                      lx_node(g_main)))

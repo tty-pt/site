@@ -406,8 +406,7 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "song", site_ui_module_icon("song"),
-	        meta.title,
-	        ctx->id, form);
+	        meta.title, ctx->id, form);
 }
 
 static int song_edit_get_handler(int fd, char *body)

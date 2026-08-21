@@ -18,6 +18,7 @@
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
 #include "../song/song.h"
+#include "../grp/grp.h"
 #include "fields.h"
 #include "../index/index.h"
 
@@ -29,9 +30,9 @@ static char g_doc_root[256] = ".";
 	static int handle_sb_##name(int fd, char *body)                        \
 	{                                                                      \
 		return with_item_access(                                       \
-		        fd, body, GIG_ITEMS_PATH,                         \
+		        fd, body, GIG_ITEMS_PATH,                              \
 		        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | extra_flags,   \
-		        "Gig not found", forbidden_msg,                   \
+		        "Gig not found", forbidden_msg,                        \
 		        handle_sb_##name##_authorized, NULL);                  \
 	}
 
@@ -56,6 +57,21 @@ static void sb_append_song(
 	const char *n[3] = { "song", "transpose", "format" };
 	const char *v[3] = { song, transpose, format };
 	hyle_source_ordered_append(source_id, pval, n, v, 3);
+}
+
+/* Re-sync the auto-repertoire of the grp this gig belongs to. Cheap in
+ * the common case: rep_rebuild compares before writing. */
+static void gig_sync_repertoire(const char *sb_id)
+{
+	unsigned fhd;
+	const char *grp;
+
+	if (!sb_id || !sb_id[0])
+		return;
+	fhd = source_get_fields_hd("gig.items");
+	grp = fhd ? qmap_get_field_str(fhd, sb_id, "grp") : NULL;
+	if (grp && grp[0])
+		rep_rebuild(grp);
 }
 
 typedef void (*sb_song_cb)(
@@ -83,15 +99,12 @@ static void sb_for_each_song(const char *sb_id, sb_song_cb cb, void *user)
 static void gig_meta_read(const char *item_path, gig_cache_t *meta)
 {
 	source_meta_read(
-	        item_path, gig_fields, SB_FIELD_COUNT, meta,
-	        sizeof(*meta));
+	        item_path, gig_fields, SB_FIELD_COUNT, meta, sizeof(*meta));
 }
 
-static int
-gig_meta_write(const char *item_path, const gig_cache_t *meta)
+static int gig_meta_write(const char *item_path, const gig_cache_t *meta)
 {
-	return source_meta_write(
-	        item_path, gig_fields, SB_FIELD_COUNT, meta);
+	return source_meta_write(item_path, gig_fields, SB_FIELD_COUNT, meta);
 }
 
 /* Get a random repertoire entry for the given type from the
@@ -102,8 +115,8 @@ static int get_random_repertoire_by_type(
 	/* Read grp from gig metadata file */
 	char sb_item_path[PATH_MAX];
 	snprintf(
-	        sb_item_path, sizeof(sb_item_path),
-	        "%s/var/gig/%s", g_doc_root, sb_id);
+	        sb_item_path, sizeof(sb_item_path), "%s/var/gig/%s", g_doc_root,
+	        sb_id);
 	gig_cache_t meta;
 	gig_meta_read(sb_item_path, &meta);
 	if (!meta.grp[0])
@@ -120,8 +133,8 @@ static int get_random_repertoire_by_type(
 	size_t match_count = 0;
 
 	for (int i = 0; i < total; i++) {
-		const char *eid = hyle_source_ordered_key_at(
-		        "grp.songs", meta.grp, i);
+		const char *eid =
+		        hyle_source_ordered_key_at("grp.songs", meta.grp, i);
 		if (!eid)
 			continue;
 
@@ -180,6 +193,8 @@ static int handle_sb_transpose_authorized(
 	hyle_source_put("gig.songs", key, names, vals, 1);
 	hyle_source_ordered_save("gig.songs", ctx->id);
 
+	gig_sync_repertoire(ctx->id);
+
 	snprintf(location, sizeof(location), "/gig/%s", ctx->id);
 	return axil_redirect(fd, location);
 }
@@ -226,6 +241,8 @@ static int handle_sb_randomize_authorized(
 	hyle_source_put("gig.songs", key, s_names, s_vals, 3);
 	hyle_source_ordered_save("gig.songs", ctx->id);
 
+	gig_sync_repertoire(ctx->id);
+
 	snprintf(location, sizeof(location), "/gig/%s", ctx->id);
 	return axil_redirect(fd, location);
 }
@@ -267,6 +284,8 @@ static int handle_sb_song_add_authorized(
 
 	sb_append_song("gig.songs", ctx->id, s_id, "0", fmt_val);
 
+	gig_sync_repertoire(ctx->id);
+
 	return redirect_to_item(fd, "gig", ctx->id);
 }
 
@@ -282,6 +301,9 @@ static int handle_sb_song_remove_authorized(
 	idx = atoi(n_str);
 
 	hyle_source_ordered_remove_at("gig.songs", ctx->id, idx);
+	hyle_source_ordered_save("gig.songs", ctx->id);
+
+	gig_sync_repertoire(ctx->id);
 
 	return redirect_to_item(fd, "gig", ctx->id);
 }
@@ -300,16 +322,14 @@ static int handle_sb_add(int fd, char *body)
 		if (item_path_build(
 		            fd, "gig", id, sb_item_path,
 		            sizeof(sb_item_path)) != 0)
-			return server_error(
-			        fd, "Failed to resolve gig path");
+			return server_error(fd, "Failed to resolve gig path");
 
 		gig_cache_t meta;
 		gig_meta_read(sb_item_path, &meta);
 		snprintf(meta.grp, sizeof(meta.grp), "%s", grp);
 		int meta_wr = gig_meta_write(sb_item_path, &meta);
 		if (meta_wr != 0)
-			return server_error(
-			        fd, "Failed to write gig metadata");
+			return server_error(fd, "Failed to write gig metadata");
 
 		source_refresh_row(fd, "gig.items", id);
 
@@ -348,6 +368,9 @@ static int handle_sb_add(int fd, char *body)
 			}
 		}
 		hyle_source_ordered_save("gig.songs", id);
+
+		/* Seeded songs join the derived repertoire immediately. */
+		gig_sync_repertoire(id);
 	} else {
 		source_def_t *sb_def = source_find("gig.items");
 		if (sb_def) {
@@ -370,44 +393,28 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/add.c"
 #include "ux/edit.c"
 
-static void
-sb_load_song_options(unsigned grp_fhd, const char *grp_id, unsigned song_hd)
+/* Owner-only song search for the picker: fills the shared list state
+ * from the whitelisted query string (q, custom filters, sort,
+ * pagination — same machinery as the /song list page). */
+static void sb_load_song_picks(int fd)
 {
-	if (!grp_id || !grp_id[0] || !song_hd)
-		return;
-	uint32_t cp = qmap_pos(grp_fhd, grp_id);
-	if (cp == QM_MISS)
-		return;
+	char qs[1024] = { 0 };
 
-	int total = hyle_source_ordered_count("grp.songs", grp_id);
-	unsigned fhd = hyle_source_get_fields_hd("grp.songs");
-	if (!fhd)
-		return;
-
-	for (int j = 0; j < total && sb_app_state.n_song_options < MAX_SB_OPTS;
-	     j++)
-	{
-		const char *key =
-		        hyle_source_ordered_key_at("grp.songs", grp_id, j);
-		if (!key)
-			continue;
-		const char *rs = qmap_field_get(fhd, key, "song");
-		if (!rs)
-			continue;
-		const char *st = qmap_get_field_str(song_hd, rs, "title");
-		if (!st)
-			st = rs;
-		sb_song_option_t *o =
-		        &g_sb_options[sb_app_state.n_song_options];
-		snprintf(o->id, sizeof(o->id), "%s", rs);
-		snprintf(o->title, sizeof(o->title), "%s", st);
-		sb_app_state.n_song_options++;
-	}
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	memset(&g_sb_pick_state, 0, sizeof(g_sb_pick_state));
+	snprintf(
+	        g_sb_pick_state.module, sizeof(g_sb_pick_state.module), "song");
+	list_fill_state(&g_sb_pick_state, "song.items", qs, 0);
 }
 
 static char *sb_emit_state_json(void)
 {
 	json_object *j_root = json_object_new_object();
+	char pick_json[16384];
+	const char *json_str;
+	char *merged = NULL;
+	size_t mlen;
+	int req;
 
 	source_overlay_from_desc(
 	        j_root, &sb_app_state, gig_app_fields, BUD_OVERLAY_INT,
@@ -418,31 +425,54 @@ static char *sb_emit_state_json(void)
 	        source_overlay_array(
 	                g_sb_songs, sb_app_state.n_songs, sizeof(g_sb_songs[0]),
 	                sb_song_row_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR));
-	json_object_object_add(
-	        j_root, "opts",
-	        source_overlay_array(
-	                g_sb_options, sb_app_state.n_song_options,
-	                sizeof(g_sb_options[0]), sb_song_option_fields,
-	                BUD_OVERLAY_INT, BUD_OVERLAY_STR));
 
-	const char *json_str = json_object_to_json_string_ext(j_root, 0);
-	int req = snprintf(
+	json_str = json_object_to_json_string_ext(j_root, 0);
+	if (!json_str) {
+		json_object_put(j_root);
+		return NULL;
+	}
+	mlen = strlen(json_str);
+
+	/* Splice the picker's list-state keys into the blob: strip both
+	 * outer braces and insert the inner keys before the main object's
+	 * closing brace. Any failure/overflow = skip (additive). */
+	if (mlen > 2 &&
+	    list_state_to_json(
+	            &g_sb_pick_state, pick_json, sizeof(pick_json)) == 0)
+	{
+		size_t ilen = strlen(pick_json);
+		if (ilen > 2 && pick_json[0] == '{' &&
+		    pick_json[ilen - 1] == '}')
+		{
+			merged = malloc(mlen + ilen + 1);
+			if (merged) {
+				memcpy(merged, json_str, mlen - 1);
+				merged[mlen - 1] = ',';
+				memcpy(merged + mlen, pick_json + 1, ilen - 2);
+				merged[mlen + ilen - 2] = '}';
+				merged[mlen + ilen - 1] = '\0';
+				json_str = merged;
+			}
+		}
+	}
+
+	req = snprintf(
 	        NULL, 0,
 	        "<script type=\"application/json\" "
 	        "id=\"bud-state\">%s</script>",
 	        json_str);
-	char *sj = malloc(req + 1);
-	if (!sj) {
+	{
+		char *sj = malloc(req + 1);
+		if (sj)
+			snprintf(
+			        sj, req + 1,
+			        "<script type=\"application/json\" "
+			        "id=\"bud-state\">%s</script>",
+			        json_str);
+		free(merged);
 		json_object_put(j_root);
-		return NULL;
+		return sj;
 	}
-	snprintf(
-	        sj, req + 1,
-	        "<script type=\"application/json\" "
-	        "id=\"bud-state\">%s</script>",
-	        json_str);
-	json_object_put(j_root);
-	return sj;
 }
 
 /* GET /api/gig/:id/transpose - Return transposed chord HTML for
@@ -635,44 +665,6 @@ static void edit_song_cb(
 	(*c->n_songs)++;
 }
 
-struct migrate_song_ctx {
-	const char *grp_id;
-	int fd;
-};
-
-static void migrate_song_cb(
-        const char *key, const char *song_id, int transpose, const char *format,
-        void *user)
-{
-	(void)key;
-	(void)transpose;
-	struct migrate_song_ctx *c = user;
-
-	int total = hyle_source_ordered_count("grp.songs", c->grp_id);
-	int found = 0;
-	unsigned fhd = hyle_source_get_fields_hd("grp.songs");
-	if (fhd) {
-		for (int i = 0; i < total; i++) {
-			const char *k = hyle_source_ordered_key_at(
-			        "grp.songs", c->grp_id, i);
-			if (!k)
-				continue;
-			const char *sid = qmap_field_get(fhd, k, "song");
-			if (sid && strcmp(sid, song_id) == 0) {
-				found = 1;
-				break;
-			}
-		}
-	}
-
-	if (!found) {
-		const char *names[] = { "song", "transpose", "format" };
-		const char *vals[] = { song_id, "0", format };
-		hyle_source_ordered_append(
-		        "grp.songs", c->grp_id, names, vals, 3);
-	}
-}
-
 /* ── Edit data-loading helpers ──────────────────────────── */
 
 static int sb_load_edit_songs(
@@ -721,8 +713,7 @@ static int sb_load_edit_song_options(
 			if (grp_pos != UINT32_MAX) {
 				uint32_t repo_buf[512];
 				size_t n_repo = qmap_inv_get(
-				        repo_hd, "grp", grp_pos, repo_buf,
-				        512);
+				        repo_hd, "grp", grp_pos, repo_buf, 512);
 				for (size_t i = 0; i < n_repo && n < max; i++) {
 					const char *eid = qmap_get_key(
 					        repo_hd, repo_buf[i]);
@@ -763,8 +754,7 @@ static int sb_load_edit_song_options(
 	return n;
 }
 
-static int
-sb_load_user_grps(const char *user, sb_grp_opt_t *grps, int max)
+static int sb_load_user_grps(const char *user, sb_grp_opt_t *grps, int max)
 {
 	int n = 0;
 	source_def_t *cd = source_find("grp.items");
@@ -897,7 +887,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
 	(void)user;
-	unsigned sb_hd, song_hd, grp_fhd;
+	unsigned sb_hd, song_hd;
 	const char *title, *owner;
 	char fkey[512];
 	int is_owner = 0;
@@ -934,8 +924,6 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 			grp_id = strdup(grp_id_str);
 	}
 
-	grp_fhd = source_get_fields_hd("grp.items");
-
 	snprintf(page_title, sizeof(page_title), "gig: %s", title);
 
 	/* Open data handles we need throughout */
@@ -945,9 +933,10 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	csrf_token = csrf_setup(fd);
 
-	/* Add-song options */
+	/* Add-song picker search (owner only; fills state q + picks) */
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
-	sb_load_song_options(grp_fhd, grp_id, song_hd);
+	if (is_owner)
+		sb_load_song_picks(fd);
 
 	/* Load songs via ordered source */
 	{
@@ -962,6 +951,8 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	sb_app_state.zoom = zoom;
 	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
 	sb_app_state.show_media = show_media;
+	sb_app_state.t_pref = t;
+	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
 	sb_app_state.is_owner = is_owner;
 
 	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", ctx->id);
@@ -1010,20 +1001,9 @@ static int gig_detail_handler(int fd, char *body)
 	        gig_detail_auth, NULL);
 }
 
-/* ── Migrate gig songs to grp repertoire ── */
-
-static int
-migrate_gig_to_grp(int fd, const char *sb_id, const char *grp_id)
-{
-	struct migrate_song_ctx ctx = { grp_id, fd };
-	sb_for_each_song(sb_id, migrate_song_cb, &ctx);
-	hyle_source_ordered_save("grp.songs", grp_id);
-	return 0;
-}
 /* ── Edit GET handler ───────────────────────────────────── */
 
-static int
-gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
 	(void)user;
@@ -1069,8 +1049,7 @@ gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	/* Collect grps owned by current user */
 	sb_grp_opt_t user_grps[128];
-	int n_user_grps =
-	        sb_load_user_grps(ctx->username, user_grps, 128);
+	int n_user_grps = sb_load_user_grps(ctx->username, user_grps, 128);
 
 	/* Read format options from song.types */
 	char format_buf[128][128];
@@ -1091,17 +1070,15 @@ gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        format_opts, song_source);
 
 	return site_ui_respond_edit_page(
-	        fd, ctx->username, "gig",
-	        site_ui_module_icon("gig"), title, ctx->id,
-	        form);
+	        fd, ctx->username, "gig", site_ui_module_icon("gig"), title,
+	        ctx->id, form);
 }
 
 static int gig_edit_get_handler(int fd, char *body)
 {
 	return with_item_access(
-	        fd, body, GIG_ITEMS_PATH,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Gig not found",
-	        NULL, gig_edit_auth, NULL);
+	        fd, body, GIG_ITEMS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Gig not found", NULL, gig_edit_auth, NULL);
 }
 
 /* ── Add GET handler ─────────────────────────────────────── */
@@ -1126,16 +1103,26 @@ static int gig_add_get_handler(int fd, char *body)
 	bud_node *form = sb_render_add_form(csrf_token, grp_val);
 
 	return site_ui_respond_add_page(
-	        fd, user, "gig", site_ui_module_icon("gig"),
-	        form);
+	        fd, user, "gig", site_ui_module_icon("gig"), form);
 }
 
 /* ── Edit POST handler ───────────────────────────────────── */
 
-static int gig_edit_post_authorized(
-        int fd, char *body, const item_ctx_t *ctx, void *user)
+static int
+gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
+	char old_grp[128] = { 0 };
+
+	/* Capture the grp reference before it is rewritten so both the
+	 * old and the new group can be re-synced below. */
+	{
+		unsigned ohd = source_get_fields_hd("gig.items");
+		const char *og =
+		        ohd ? qmap_get_field_str(ohd, ctx->id, "grp") : NULL;
+		if (og && og[0])
+			snprintf(old_grp, sizeof(old_grp), "%s", og);
+	}
 
 	/* Hydrate standard fields */
 	{
@@ -1146,8 +1133,7 @@ static int gig_edit_post_authorized(
 				char grp_path[PATH_MAX];
 				snprintf(
 				        grp_path, sizeof(grp_path),
-				        "%s/var/grp/%s", g_doc_root,
-				        new_grp);
+				        "%s/var/grp/%s", g_doc_root, new_grp);
 				if (!item_check_ownership(
 				            grp_path, ctx->username))
 				{
@@ -1160,9 +1146,8 @@ static int gig_edit_post_authorized(
 
 			char sb_path[PATH_MAX];
 			snprintf(
-			        sb_path, sizeof(sb_path),
-			        "%s/var/gig/%s", g_doc_root,
-			        ctx->id);
+			        sb_path, sizeof(sb_path), "%s/var/gig/%s",
+			        g_doc_root, ctx->id);
 			item_record_ownership(sb_path, ctx->username);
 
 			source_update_item(fd, "gig.items", ctx->id, dh);
@@ -1198,9 +1183,8 @@ static int gig_edit_post_authorized(
 			            sizeof(remove_val)) > 0)
 				continue;
 
-			if (mpfd_get(
-			            song_field, song_val,
-			            sizeof(song_val)) <= 0)
+			if (mpfd_get(song_field, song_val, sizeof(song_val)) <=
+			    0)
 				continue;
 
 			/* Extract song ID from "Title [song_id]" format */
@@ -1215,12 +1199,8 @@ static int gig_edit_post_authorized(
 			{
 				char key_val[16] = { 0 };
 				char fmt_val[64] = { 0 };
-				mpfd_get(
-				        key_field, key_val,
-				        sizeof(key_val));
-				mpfd_get(
-				        fmt_field, fmt_val,
-				        sizeof(fmt_val));
+				mpfd_get(key_field, key_val, sizeof(key_val));
+				mpfd_get(fmt_field, fmt_val, sizeof(fmt_val));
 
 				sb_append_song(
 				        "gig.songs", ctx->id, extracted,
@@ -1231,16 +1211,15 @@ static int gig_edit_post_authorized(
 		hyle_source_ordered_save("gig.songs", ctx->id);
 	}
 
-	/* Migrate new songs to the grp's repertoire */
-	{
-		char sb_path[PATH_MAX];
-		snprintf(
-		        sb_path, sizeof(sb_path), "%s/var/gig/%s",
-		        g_doc_root, ctx->id);
-		gig_cache_t meta;
-		gig_meta_read(sb_path, &meta);
-		if (meta.grp[0])
-			migrate_gig_to_grp(fd, ctx->id, meta.grp);
+	/* Auto-repertoire: re-sync the old grp (songs may have left it)
+	 * and, on reassignment, the new one. */
+	gig_sync_repertoire(ctx->id);
+	if (old_grp[0]) {
+		unsigned nhd = source_get_fields_hd("gig.items");
+		const char *ng =
+		        nhd ? qmap_get_field_str(nhd, ctx->id, "grp") : NULL;
+		if (!ng || !ng[0] || strcmp(ng, old_grp) != 0)
+			rep_rebuild(old_grp);
 	}
 
 	return redirect_to_item(fd, "gig", ctx->id);
@@ -1268,8 +1247,8 @@ void xy_install(void)
 	xy_load("./mods/grp/grp");
 
 	source_setup(
-	        "gig.items", NULL, sizeof(gig_cache_t),
-	        "var/gig", gig_fields, SB_FIELD_COUNT, 0);
+	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", gig_fields,
+	        SB_FIELD_COUNT, 0);
 
 	/* Register ordered source for gig songs (data.txt persistence) */
 	{
@@ -1297,14 +1276,28 @@ void xy_install(void)
 		.edit_post = gig_edit_post_handler,
 	};
 	register_standard_item_handlers("gig", &handlers);
-	axil_register_handler(
-	        "POST:/gig/:id/randomize", handle_sb_randomize);
-	axil_register_handler(
-	        "POST:/gig/:id/transpose", handle_sb_transpose);
-	axil_register_handler(
-	        "POST:/api/gig/:id/songs", handle_sb_song_add);
+	axil_register_handler("POST:/gig/:id/randomize", handle_sb_randomize);
+	axil_register_handler("POST:/gig/:id/transpose", handle_sb_transpose);
+	axil_register_handler("POST:/api/gig/:id/songs", handle_sb_song_add);
 	axil_register_handler(
 	        "POST:/api/gig/:id/song/:n/remove", handle_sb_song_remove);
 	axil_register_handler(
 	        "GET:/api/gig/:id/transpose", api_sb_transpose_get);
+
+	/* Auto-repertoire: derive every grp's repertoire from its gigs.
+	 * This runs here because by the time gig.so's xy_install returns,
+	 * song.items, grp.items and gig.items are all registered and
+	 * filesystem-scanned (grp.so is loaded above; see AUTO-LIST.md
+	 * §9.1 for the load-order analysis). */
+	{
+		unsigned gh = source_get_fields_hd("grp.items");
+		unsigned dh = source_get_data_hd("grp.items");
+		if (gh && dh) {
+			uint32_t cur = qmap_iter(dh, NULL, 0);
+			const void *k, *v;
+			while (qmap_next(&k, &v, cur))
+				rep_rebuild((const char *)k);
+			qmap_fin(cur);
+		}
+	}
 }

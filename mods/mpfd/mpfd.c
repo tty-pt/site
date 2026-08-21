@@ -267,7 +267,8 @@ XY_IMPL(int, mpfd_parse, socket_t, fd, char *, body)
 	char content_type[512] = { 0 };
 	char clen_str[32] = { 0 };
 
-	axil_env_get(fd, content_type, sizeof(content_type), "HTTP_CONTENT_TYPE");
+	axil_env_get(
+	        fd, content_type, sizeof(content_type), "HTTP_CONTENT_TYPE");
 	axil_env_get(fd, clen_str, sizeof(clen_str), "HTTP_CONTENT_LENGTH");
 
 	/* Not multipart - not an error, just skip */
@@ -316,8 +317,8 @@ XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
 	if (!val)
 		return -1;
-	size_t to_copy = val->len < buf_len ? val->len
-	                                    : (buf_len > 0 ? buf_len - 1 : 0);
+	size_t to_copy =
+	        val->len < buf_len ? val->len : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data + val->filename_len, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';

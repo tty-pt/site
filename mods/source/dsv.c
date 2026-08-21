@@ -18,12 +18,12 @@ static void dsv_path(
 	if (dot) {
 		size_t plen = (size_t)(dot - source_id);
 		snprintf(
-		        buf, sz, "%s/var/%.*s/%s/data.txt", doc_root,
-		        (int)plen, source_id, pval);
+		        buf, sz, "%s/var/%.*s/%s/data.txt", doc_root, (int)plen,
+		        source_id, pval);
 	} else {
 		snprintf(
-		        buf, sz, "%s/var/%s/%s/data.txt", doc_root,
-		        source_id, pval);
+		        buf, sz, "%s/var/%s/%s/data.txt", doc_root, source_id,
+		        pval);
 	}
 }
 
@@ -72,7 +72,15 @@ XY_IMPL(int, source_dsv_load,
 				}
 				cur++;
 			}
-			if (nparts == (int)nfields) {
+			/* Accept legacy rows with one trailing column fewer
+			 * than the current field count: a schema extension
+			 * that appends a field must not silently drop rows
+			 * persisted before it (missing trailing columns load
+			 * as absent, i.e. ""/0). Anything shorter stays a
+			 * parse error. See AUTO-LIST.md §8.2. */
+			if (nparts == (int)nfields ||
+			    nparts == (int)nfields - 1)
+			{
 				char key[128];
 				vi = 0;
 				for (j = 0; j < nfields && vi < nparts; j++) {
@@ -85,8 +93,9 @@ XY_IMPL(int, source_dsv_load,
 					vals[vi] = parts[vi];
 					vi++;
 				}
-				snprintf(key, sizeof(key), "%s__%04d",
-				         pval, pos);
+				snprintf(
+				        key, sizeof(key), "%s__%04d", pval,
+				        pos);
 				hyle_source_put(
 				        source_id, key, names, vals, vi);
 				pos++;

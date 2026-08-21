@@ -135,8 +135,7 @@ XY_IMPL(int, user_path_build,
 	if (!username || !username[0] || !suffix || !suffix[0] || !out ||
 	    outlen == 0)
 		return -1;
-	if (username[0] == '/' || username[0] == '\\' ||
-	    username[0] == '.')
+	if (username[0] == '/' || username[0] == '\\' || username[0] == '.')
 		return -1;
 	if (strcmp(username, ".") == 0 || strcmp(username, "..") == 0)
 		return -1;
@@ -189,7 +188,8 @@ XY_IMPL(char *, slurp_file, const char *, path)
 
 XY_IMPL(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	if (fd > 0 && axil_env_get(fd, buf, len, "DOCUMENT_ROOT") == 0 && buf[0])
+	if (fd > 0 && axil_env_get(fd, buf, len, "DOCUMENT_ROOT") == 0 &&
+	    buf[0])
 		return 0;
 
 	snprintf(buf, len, ".");

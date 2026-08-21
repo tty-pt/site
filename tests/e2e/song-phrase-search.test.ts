@@ -64,7 +64,10 @@ Deno.test("song content lookup: quoted phrase requires contiguous tokens", async
         `Expected exactly "1 of 1 rows" for "minha alma tem sede", got "${await totalRows(page)}"`,
       );
     }
-    if (await page.locator('a[href="/song/sopra_em_nos"]').count() !== 1) {
+    if (
+      await page.locator('a[href="/song/sopra_em_nos"]:not(.hyle-row-action)')
+        .count() !== 1
+    ) {
       throw new Error(
         "sopra_em_nos must be the single quoted-phrase match",
       );
@@ -100,7 +103,10 @@ Deno.test("song content lookup: quoted phrase requires contiguous tokens", async
       );
     }
     for (const id of ["sopra_em_nos", "pra_te_adorar", "nao_podemos_caminhar"]) {
-      if (await page.locator(`a[href="/song/${id}"]`).count() !== 1) {
+      if (
+        await page.locator(`a[href="/song/${id}"]:not(.hyle-row-action)`)
+          .count() !== 1
+      ) {
         throw new Error(`unquoted AND must include ${id}`);
       }
     }
@@ -114,10 +120,16 @@ Deno.test("song content lookup: quoted phrase requires contiguous tokens", async
         `Expected exactly "1 of 1 rows" for "tem sede de ti", got "${await totalRows(page)}"`,
       );
     }
-    if (await page.locator('a[href="/song/pra_te_adorar"]').count() !== 1) {
+    if (
+      await page.locator('a[href="/song/pra_te_adorar"]:not(.hyle-row-action)')
+        .count() !== 1
+    ) {
       throw new Error("pra_te_adorar must be the single match");
     }
-    if (await page.locator('a[href="/song/sopra_em_nos"]').count() !== 0) {
+    if (
+      await page.locator('a[href="/song/sopra_em_nos"]:not(.hyle-row-action)')
+        .count() !== 0
+    ) {
       throw new Error(
         "sopra_em_nos must NOT match: the chord line 'D A' breaks 'tem sede de ti'",
       );

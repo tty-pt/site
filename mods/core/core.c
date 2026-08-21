@@ -47,7 +47,8 @@ static int alias_redirect(
 	{
 		size_t flen = strlen(from_prefix);
 		if (strncmp(uri, from_prefix, flen) != 0 ||
-		    (uri[flen] != '\0' && uri[flen] != '/')) {
+		    (uri[flen] != '\0' && uri[flen] != '/'))
+		{
 			axil_respond(fd, 404, "Not found");
 			return 1;
 		}

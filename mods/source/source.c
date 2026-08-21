@@ -423,12 +423,13 @@ static void clear_inv_refs_cb(const source_def_t *target, void *user)
 					str_trim(tok);
 					len = strlen(tok);
 					if (len > 0 &&
-					    strcmp(tok, ctx->item_id) != 0) {
+					    strcmp(tok, ctx->item_id) != 0)
+					{
 						if (!first)
 							remaining[rem_len++] =
 							        '\n';
-						memcpy(remaining + rem_len,
-						       tok, len);
+						memcpy(remaining + rem_len, tok,
+						       len);
 						rem_len += len;
 						first = 0;
 					}
@@ -446,15 +447,15 @@ static void clear_inv_refs_cb(const source_def_t *target, void *user)
 				names[0] = f->name;
 				values[0] = remaining;
 				hyle_source_put(
-				        target->id, ref_key, names, values,
-				        1);
+				        target->id, ref_key, names, values, 1);
 			}
 
 			if (f->file && ctx->doc_root) {
 				char dir[PATH_MAX];
-				snprintf(dir, sizeof(dir), "%s/%s/%s",
-				         ctx->doc_root, target->items_path,
-				         ref_key);
+				snprintf(
+				        dir, sizeof(dir), "%s/%s/%s",
+				        ctx->doc_root, target->items_path,
+				        ref_key);
 				write_item_child_file(
 				        dir, f->file, remaining, rem_len);
 			}
@@ -580,8 +581,9 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 		        (sf->type == SOURCE_FIELD_STRING ||
 		         sf->type == DATASET_FIELD_NULLABLE_STRING);
 		hf[i].combine =
-		        (sf->filter_mode &&
-		         strcmp(sf->filter_mode, "and") == 0) ? 1 : 0;
+		        (sf->filter_mode && strcmp(sf->filter_mode, "and") == 0)
+		                ? 1
+		                : 0;
 	}
 
 	/*
@@ -1135,12 +1137,12 @@ XY_IMPL(unsigned, source_query,
 				for (size_t sj = 0; sj < sdef->field_count;
 				     sj++)
 				{
-				if (strcmp(sdef->fields[sj].name,
-				           f->field) == 0 &&
-				    (sdef->fields[sj].type ==
-				             SOURCE_FIELD_MULTI_REFERENCE ||
-				     sdef->fields[sj].type ==
-				             SOURCE_FIELD_REFERENCE))
+					if (strcmp(sdef->fields[sj].name,
+					           f->field) == 0 &&
+					    (sdef->fields[sj].type ==
+					             SOURCE_FIELD_MULTI_REFERENCE ||
+					     sdef->fields[sj].type ==
+					             SOURCE_FIELD_REFERENCE))
 					{
 						char slug[256];
 						axil_slugify(
@@ -1202,12 +1204,14 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 
 			if (f->filter_mode &&
 			    strcmp(f->filter_mode, "and") == 0)
-				snprintf(mode_suf, sizeof(mode_suf),
-				         ",\"m\":\"and\"");
+				snprintf(
+				        mode_suf, sizeof(mode_suf),
+				        ",\"m\":\"and\"");
 			if (f->filter_style && f->filter_style[0]) {
 				snprintf(
 				        buf, sizeof(buf),
-				        "{\"t\":%d,\"s\":\"%s\",\"f\":\"%s\"%s}",
+				        "{\"t\":%d,\"s\":\"%s\",\"f\":\"%s\"%"
+				        "s}",
 				        (int)f->type,
 				        f->target_source ? f->target_source
 				                         : "",
@@ -1215,7 +1219,8 @@ static unsigned source_build_schema_hd(const source_def_t *def)
 			} else {
 				snprintf(
 				        buf, sizeof(buf),
-				        "{\"t\":%d,\"s\":\"%s\"%s}", (int)f->type,
+				        "{\"t\":%d,\"s\":\"%s\"%s}",
+				        (int)f->type,
 				        f->target_source ? f->target_source
 				                         : "",
 				        mode_suf);
@@ -1304,11 +1309,11 @@ static int impl_source_def_to_source_fields(
 			sf[n].max = 0;
 			sf[n].min_length = 0;
 			sf[n].max_length = 0;
-		sf[n].pattern = NULL;
-		sf[n].filter_style = NULL;
-		sf[n].filter_mode = NULL;
-		n++;
-		continue;
+			sf[n].pattern = NULL;
+			sf[n].filter_style = NULL;
+			sf[n].filter_mode = NULL;
+			n++;
+			continue;
 		}
 		if (!d->key || d->kind >= 3)
 			continue;
@@ -1519,15 +1524,16 @@ XY_IMPL(uint32_t, source_setup,
 		return 0;
 	n_sf = impl_source_def_to_source_fields(defs, field_count, sf);
 	if (source_register(&(source_def_t){
-	        .id = source_id,
-	        .key_field = kf,
-	        .items_path = items_path,
-	        .access_policy = SOURCE_ACCESS_PUBLIC,
-	        .fields = sf,
-	        .field_count = (size_t)n_sf,
-	        .record_id = record_id,
-	        .flags = flags,
-	}) != 0) {
+	            .id = source_id,
+	            .key_field = kf,
+	            .items_path = items_path,
+	            .access_policy = SOURCE_ACCESS_PUBLIC,
+	            .fields = sf,
+	            .field_count = (size_t)n_sf,
+	            .record_id = record_id,
+	            .flags = flags,
+	    }) != 0)
+	{
 		free(sf);
 		return 0;
 	}

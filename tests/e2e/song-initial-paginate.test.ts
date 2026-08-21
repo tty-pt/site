@@ -52,7 +52,7 @@ Deno.test("song list: initial page shows 10 rows with pagination", async () => {
     }
 
     const firstHref = await rows.nth(0)
-      .locator("td:first-child a")
+      .locator("td:first-child a:not(.hyle-row-action)")
       .getAttribute("href");
 
     await page.locator('button:has-text("Next")').click();
@@ -83,7 +83,7 @@ Deno.test("song list: initial page shows 10 rows with pagination", async () => {
     }
 
     const secondHref = await rows2.nth(0)
-      .locator("td:first-child a")
+      .locator("td:first-child a:not(.hyle-row-action)")
       .getAttribute("href");
 
     if (secondHref === firstHref) {

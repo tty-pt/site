@@ -63,7 +63,8 @@ void parent_path(const char *path, char *buf, size_t len)
 	buf[n] = '\0';
 }
 
-const char *site_ui_module_icon(const char *module) {
+const char *site_ui_module_icon(const char *module)
+{
 	if (!module || !module[0])
 		return "\xf0\x9f\x8f\xa0";
 	if (strcmp(module, "song") == 0)
@@ -77,7 +78,8 @@ const char *site_ui_module_icon(const char *module) {
 	return "\xf0\x9f\x8f\xa0";
 }
 
-const char *site_ui_module_display(const char *module) {
+const char *site_ui_module_display(const char *module)
+{
 	if (module && strcmp(module, "grp") == 0)
 		return "group";
 	return module;
@@ -150,10 +152,11 @@ int ui_on_zoom_change(
 	return 0;
 }
 
-static bud_arg menu_btn(const char *href, const char *icon, const char *label) {
-	return lx_el("a", lx_attr("class", "btn"), lx_attr("href", href),
-	              lx_el("span", lx_text(icon)),
-	              lx_el("span", lx_text(label)));
+static bud_arg menu_btn(const char *href, const char *icon, const char *label)
+{
+	return lx_el(
+	        "a", lx_attr("class", "btn"), lx_attr("href", href),
+	        lx_el("span", lx_text(icon)), lx_el("span", lx_text(label)));
 }
 
 bud_node *site_ui_menu(const char *user, const char *path)
@@ -173,11 +176,12 @@ bud_node *site_ui_menu(const char *user, const char *path)
 		auth_path("register", reg_href, sizeof(reg_href));
 	}
 
-	return lx_frag(is_home ? lx_none()
-	                       : menu_btn(up, "⬆️", "go up"),
+	return lx_frag(is_home ? lx_none() : menu_btn(up, "⬆️", "go up"),
 	               (user && user[0])
 	                       ? lx_frag(menu_btn(me_href, "😊", "me"),
-	                                 menu_btn("/auth/logout", "🚪", "logout"))
+	                                 menu_btn(
+	                                         "/auth/logout", "🚪",
+	                                         "logout"))
 	                       : lx_frag(menu_btn(login_buf, "🔑", "login"),
 	                                 menu_btn(reg_href, "📝", "register")))
 	        .data.node;
@@ -358,8 +362,8 @@ static int valid_yt_id(const char *s)
 	for (int i = 0; i < 11; i++)
 		if (!((s[i] >= 'A' && s[i] <= 'Z') ||
 		      (s[i] >= 'a' && s[i] <= 'z') ||
-		      (s[i] >= '0' && s[i] <= '9') ||
-		      s[i] == '_' || s[i] == '-'))
+		      (s[i] >= '0' && s[i] <= '9') || s[i] == '_' ||
+		      s[i] == '-'))
 			return 0;
 	return 1;
 }
@@ -410,7 +414,8 @@ int site_ui_build_media_html(
 		       "border-none\" title=\"YouTube video player\" "
 		       "allow=\"accelerometer; autoplay; clipboard-write; "
 		       "encrypted-media; gyroscope; picture-in-picture; "
-		       "web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" "
+		       "web-share\" "
+		       "referrerpolicy=\"strict-origin-when-cross-origin\" "
 		       "allowfullscreen></iframe></div>",
 		       src);
 		has = 1;
@@ -464,10 +469,10 @@ bud_node *site_ui_layout(
 	                                 lx_attr("class",
 	                                         "relative z-20 flex flex-col "
 	                                         "gap-2"),
-lx_el("strong", lx_text(icon), lx_text(" "), lx_text(title)),
-	                                 lx_node(site_ui_menu(
-	                                         user, path)),
-                                 menu_items
+	                                 lx_el("strong", lx_text(icon),
+	                                       lx_text(" "), lx_text(title)),
+	                                 lx_node(site_ui_menu(user, path)),
+	                                 menu_items
 	                                         ? lx_frag(lx_el("div",
 	                                                         lx_attr("clas"
 	                                                                 "s",
@@ -609,7 +614,9 @@ bud_node *site_ui_form_fields(
 			if (safe) {
 				size_t w = 0;
 				for (size_t i = 0; i < raw_len; i++) {
-					if (raw[i] == '<' && i + 1 < raw_len && raw[i + 1] == '/') {
+					if (raw[i] == '<' && i + 1 < raw_len &&
+					    raw[i + 1] == '/')
+					{
 						i++;
 						continue;
 					}
@@ -646,13 +653,26 @@ static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
 	const char *ent;
 	size_t elen;
 
-	if (!src) src = "";
+	if (!src)
+		src = "";
 	while (*src && w < dstsize - 1) {
 		switch (*src) {
-		case '&':  ent = "&amp;";  elen = 5; break;
-		case '<':  ent = "&lt;";   elen = 4; break;
-		case '>':  ent = "&gt;";   elen = 4; break;
-		case '"':  ent = "&quot;"; elen = 6; break;
+		case '&':
+			ent = "&amp;";
+			elen = 5;
+			break;
+		case '<':
+			ent = "&lt;";
+			elen = 4;
+			break;
+		case '>':
+			ent = "&gt;";
+			elen = 4;
+			break;
+		case '"':
+			ent = "&quot;";
+			elen = 6;
+			break;
 		default:
 			dst[w++] = *src++;
 			continue;
@@ -678,7 +698,7 @@ char *site_ui_page(
 	char title_esc[512];
 	int len;
 
-#define SITE_CSS_V "?v=18"
+#define SITE_CSS_V "?v=20"
 
 	if (!body)
 		return NULL;

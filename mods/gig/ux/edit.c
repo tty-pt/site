@@ -46,7 +46,7 @@ static bud_node *sb_render_edit_form(
 	        grp_opts,
 	        lx_el("option", lx_attr("value", ""),
 	              (!grp_id || !grp_id[0]) ? lx_attr("selected", "")
-	                                          : lx_none(),
+	                                      : lx_none(),
 	              lx_text("None"))
 	                .data.node);
 	for (int ci = 0; ci < n_grps; ci++) {
@@ -54,13 +54,12 @@ static bud_node *sb_render_edit_form(
 		if (!c->id)
 			break;
 		bud_append(
-		        grp_opts,
-		        lx_el("option", lx_attr("value", c->id),
-		              (grp_id && strcmp(grp_id, c->id) == 0)
-		                      ? lx_attr("selected", "")
-		                      : lx_none(),
-		              lx_text(c->title))
-		                .data.node);
+		        grp_opts, lx_el("option", lx_attr("value", c->id),
+		                        (grp_id && strcmp(grp_id, c->id) == 0)
+		                                ? lx_attr("selected", "")
+		                                : lx_none(),
+		                        lx_text(c->title))
+		                          .data.node);
 	}
 	bud_node *grp_select =
 	        lx_el("select", lx_attr("name", "grp"),
@@ -88,8 +87,8 @@ static bud_node *sb_render_edit_form(
 		/* Message when no songs are available for selection */
 		if (is_add_row && n_options == 0) {
 			if (song_source &&
-			    strcmp(song_source, "repertoire") == 0 &&
-			    grp_id && grp_id[0])
+			    strcmp(song_source, "repertoire") == 0 && grp_id &&
+			    grp_id[0])
 			{
 				bud_append(
 				        rows,

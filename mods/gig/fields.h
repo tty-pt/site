@@ -29,15 +29,12 @@ static const bud_field_desc_t gig_fields[] = {
 	REC_FIELD(id, gig_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(title, gig_cache_t, title, 256, 1, 0, 0, 1),
 	REF_FIELD_S(
-	        grp, gig_cache_t, grp, 128, "grp.items", "gigs",
-	        1, "dropdown"),
-	EXCL_FIELD_W(
-	        song_source, gig_cache_t, song_source, 16, BUD_QM_STR, 1),
+	        grp, gig_cache_t, grp, 128, "grp.items", "gigs", 1, "dropdown"),
+	EXCL_FIELD_W(song_source, gig_cache_t, song_source, 16, BUD_QM_STR, 1),
 	EXCL_FIELD(owner, gig_cache_t, owner, 32, BUD_QM_STR, 0),
 	FIELD_END
 };
 
-#define SB_FIELD_COUNT                                                         \
-	(sizeof(gig_fields) / sizeof(gig_fields[0]) - 1)
+#define SB_FIELD_COUNT (sizeof(gig_fields) / sizeof(gig_fields[0]) - 1)
 
 #endif

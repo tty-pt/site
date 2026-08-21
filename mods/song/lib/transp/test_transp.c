@@ -1028,7 +1028,8 @@ TEST(user_song_bold_exact)
 	assert(strcmp(result,
 	              "<div><b>F#m   C#m  Bm  A   G#º</b></div>"
 	              "<div>No Senhor  es-tá  a miseri-</div>"
-	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7  C#5</b></div>"
+	              "<div><b>F#m  G#m7(5º)  F#m  G#m7(5º)  F#m  Bm7  "
+	              "C#5</b></div>"
 	              "<div>có-rdia e a a-bundânte   re--den---ção. </div>") ==
 	       0);
 	assert(transp_get_key(ctx) == 5); /* F */
@@ -1258,7 +1259,8 @@ TEST(shrink_pads_chord_line)
 
 	/* Multi-shrink across a full stanza (the user's original example). */
 	transp_reset_key(ctx);
-	result = transp_buffer(ctx,
+	result = transp_buffer(
+	        ctx,
 	        "Eb  C4 Cm         Bb      Fm\n"
 	        "Caminhamos para o Vosso altar men-\n"
 	        "Bb              Cm      Bb4   Cm7 Bb Eb\n"
@@ -1270,16 +1272,15 @@ TEST(shrink_pads_chord_line)
 	        "vale por mais de mil\n",
 	        -3, 0);
 	assert(result != NULL);
-	assert(strcmp(result,
-	              "C   A4 Am         G       Dm\n"
-	              "Caminhamos para o Vosso altar men-\n"
-	              "G               Am      G4    Am7 G  C\n"
-	              "digos do vosso amor, aco-lhei-nos ó  Deus.\n"
-	              "\n"
-	              "   C            F    C  G\n"
-	              "7. Um dia em vossos átrios\n"
-	              "G           F    Dm\n"
-	              "vale por mais de mil\n") == 0);
+	assert(strcmp(result, "C   A4 Am         G       Dm\n"
+	                      "Caminhamos para o Vosso altar men-\n"
+	                      "G               Am      G4    Am7 G  C\n"
+	                      "digos do vosso amor, aco-lhei-nos ó  Deus.\n"
+	                      "\n"
+	                      "   C            F    C  G\n"
+	                      "7. Um dia em vossos átrios\n"
+	                      "G           F    Dm\n"
+	                      "vale por mais de mil\n") == 0);
 	free(result);
 
 	/* EOL shrink needs no trailing pad (no later chord to protect). */
@@ -1316,7 +1317,8 @@ TEST(alignment_fillers_follow_word_boundaries)
 	assert(str_contains(result, "Sol   Re\nfab  \n"));
 	free(result);
 
-	result = transp_buffer(ctx, "C  G\nfable", 7, TRANSP_LATIN | TRANSP_HTML);
+	result = transp_buffer(
+	        ctx, "C  G\nfable", 7, TRANSP_LATIN | TRANSP_HTML);
 	assert(result != NULL);
 	assert(str_contains(result, "<div>fab-le</div>"));
 	free(result);

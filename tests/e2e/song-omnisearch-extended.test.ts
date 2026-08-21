@@ -166,7 +166,7 @@ Deno.test({
       assert(total > 10, `total should be >10 for q=Deus, got ${total}`);
 
       const firstHrefP1 = await rowsP1.nth(0)
-        .locator("td:first-child a")
+        .locator("td:first-child a:not(.hyle-row-action)")
         .getAttribute("href");
 
       // Click Next
@@ -188,7 +188,7 @@ Deno.test({
       assert(countP2 <= 10, `page 2 should have ≤10 rows, got ${countP2}`);
 
       const firstHrefP2 = await rowsP2.nth(0)
-        .locator("td:first-child a")
+        .locator("td:first-child a:not(.hyle-row-action)")
         .getAttribute("href");
       assert(
         firstHrefP2 !== firstHrefP1,
@@ -239,7 +239,7 @@ Deno.test({
 
       const firstHrefCustom = await page.locator("tr.hyle-row-clickable")
         .nth(0)
-        .locator("td:first-child a")
+        .locator("td:first-child a:not(.hyle-row-action)")
         .getAttribute("href");
 
       // Toggle to omni — results should change (no longer restricted to natal)
@@ -265,7 +265,7 @@ Deno.test({
       // First result in omni should differ from natal-filtered first result
       const firstHrefOmni = await page.locator("tr.hyle-row-clickable")
         .nth(0)
-        .locator("td:first-child a")
+        .locator("td:first-child a:not(.hyle-row-action)")
         .getAttribute("href");
       assert(
         firstHrefOmni !== firstHrefCustom,
