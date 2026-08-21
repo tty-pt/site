@@ -86,6 +86,7 @@ the repo root (prereqs in `docs/BUILD.md`).
 
 | You want to… | Read |
 |--------------|------|
+| Understand what the architecture wants to be and what is currently broken | `docs/GOALS.md` |
 | Understand the architecture / load order / XY contract | `docs/ARCHITECTURE.md` |
 | Understand the design philosophy before designing anything | `docs/DESIGN.md` |
 | Build, rebuild, or hit a build gotcha | `docs/BUILD.md` |

@@ -14,6 +14,11 @@
 #include "../index/index.h"
 #include "source.h"
 
+#define SOURCE_API_DEFAULT_PAGE 1
+#define SOURCE_API_DEFAULT_PER_PAGE 25
+#define SOURCE_API_MAX_PER_PAGE 100
+#define SOURCE_API_MAX_PAGE (UINT32_MAX / SOURCE_API_MAX_PER_PAGE)
+
 /* -----------------------------------------------------------------------
  * Helpers
  * ----------------------------------------------------------------------- */
@@ -23,6 +28,110 @@ static int respond_json_error(int fd, int status, const char *msg)
 	char buf[512];
 	snprintf(buf, sizeof(buf), "{\"error\":\"%s\"}", msg);
 	return respond_json(fd, status, buf);
+}
+
+static int source_query_int(
+        const char *value, size_t value_len, int fallback, int max,
+        int clamp_overflow)
+{
+	char decoded[BUFSIZ];
+	char *end;
+	long parsed;
+
+	if (value_len >= sizeof(decoded))
+		return clamp_overflow ? max : fallback;
+	memcpy(decoded, value, value_len);
+	decoded[value_len] = '\0';
+	axil_url_decode(decoded, value_len, decoded, sizeof(decoded));
+
+	errno = 0;
+	end = NULL;
+	parsed = strtol(decoded, &end, 10);
+	if (!decoded[0] || !end || *end || parsed <= 0)
+		return fallback;
+	if (errno == ERANGE || parsed > max)
+		return clamp_overflow ? max : fallback;
+	return (int)parsed;
+}
+
+static int source_rewrite_query(
+        const char *raw, char *out, size_t out_len, int *page, int *per_page)
+{
+	const char *p;
+	size_t pos;
+	int first;
+	char pagination[64];
+	int pagination_len;
+
+	if (!out || out_len == 0 || !page || !per_page)
+		return -1;
+	*page = SOURCE_API_DEFAULT_PAGE;
+	*per_page = SOURCE_API_DEFAULT_PER_PAGE;
+	out[0] = '\0';
+	pos = 0;
+	first = 1;
+	p = raw ? raw : "";
+
+	while (*p) {
+		const char *amp;
+		const char *eq;
+		size_t part_len;
+		size_t key_len;
+		int is_page;
+		int is_per_page;
+
+		amp = strchr(p, '&');
+		part_len = amp ? (size_t)(amp - p) : strlen(p);
+		eq = memchr(p, '=', part_len);
+		key_len = eq ? (size_t)(eq - p) : part_len;
+		is_page = key_len == strlen("page") &&
+		          memcmp(p, "page", key_len) == 0;
+		is_per_page = key_len == strlen("per_page") &&
+		              memcmp(p, "per_page", key_len) == 0;
+
+		if (eq && (is_page || is_per_page)) {
+			const char *value;
+			size_t value_len;
+
+			value = eq + 1;
+			value_len = part_len - key_len - 1;
+			if (is_page)
+				*page = source_query_int(
+				        value, value_len,
+				        SOURCE_API_DEFAULT_PAGE,
+				        SOURCE_API_MAX_PAGE, 0);
+			else
+				*per_page = source_query_int(
+				        value, value_len,
+				        SOURCE_API_DEFAULT_PER_PAGE,
+				        SOURCE_API_MAX_PER_PAGE, 1);
+		} else if (part_len > 0) {
+			if ((!first && pos + 1 >= out_len) ||
+			    pos + part_len >= out_len)
+				return -1;
+			if (!first)
+				out[pos++] = '&';
+			memcpy(out + pos, p, part_len);
+			pos += part_len;
+			out[pos] = '\0';
+			first = 0;
+		}
+
+		p += part_len;
+		if (*p == '&')
+			p++;
+	}
+
+	pagination_len = snprintf(
+	        pagination, sizeof(pagination), "page=%d&per_page=%d", *page,
+	        *per_page);
+	if (pagination_len < 0 ||
+	    pos + (first ? 0 : 1) + (size_t)pagination_len >= out_len)
+		return -1;
+	if (!first)
+		out[pos++] = '&';
+	memcpy(out + pos, pagination, (size_t)pagination_len + 1);
+	return 0;
 }
 
 static const char *field_type_name(source_field_type_t type)
@@ -587,11 +696,11 @@ static int source_get_handler(int fd, char *body)
 	char dataset_id[128];
 	const source_def_t *def;
 	const char *username;
-	char qs[512];
+	char qs[BUFSIZ];
 	int page;
 	int per_page;
 	char include[256];
-	char qs_copy[512];
+	char qs_copy[BUFSIZ + 64];
 	char *json;
 
 	(void)body;
@@ -615,26 +724,14 @@ static int source_get_handler(int fd, char *body)
 	memset(qs, 0, sizeof(qs));
 	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
-	page = 1;
-	per_page = 0;
 	memset(include, 0, sizeof(include));
 	memset(qs_copy, 0, sizeof(qs_copy));
 
-	if (qs[0]) {
-		strncpy(qs_copy, qs, sizeof(qs_copy) - 1);
-		axil_query_parse(qs);
-		{
-			char buf[64];
-			if (axil_query_param("page", buf, sizeof(buf)) > 0)
-				page = atoi(buf);
-			if (axil_query_param("per_page", buf, sizeof(buf)) > 0)
-				per_page = atoi(buf);
-			axil_query_param("include", include, sizeof(include));
-		}
-	}
-
-	if (page < 1)
-		page = 1;
+	if (source_rewrite_query(
+	            qs, qs_copy, sizeof(qs_copy), &page, &per_page) != 0)
+		return respond_json_error(fd, 400, "Query string too long");
+	axil_query_parse(qs_copy);
+	axil_query_param("include", include, sizeof(include));
 
 	json = NULL;
 	if (source_build_json(def, qs_copy, include, page, per_page, &json) !=

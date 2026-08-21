@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <stdint.h>
 #include "bud/bud_jsx.h"
 
 static void url_encode(const char *src, char *dst, size_t dst_len)
@@ -286,6 +287,9 @@ bud_node *site_ui_checkbox(
 
 /* ── Shared media slot renderer ──────────────────────── */
 
+static int valid_yt_id(const char *s);
+static int safe_url(const char *s);
+
 bud_node *
 site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 {
@@ -294,10 +298,16 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	int has_media = 0;
 	if (!inner)
 		return NULL;
+	if (yt && yt[0] && !valid_yt_id(yt))
+		yt = NULL;
+	if (audio && audio[0] && !safe_url(audio))
+		audio = NULL;
+	if (pdf && pdf[0] && !safe_url(pdf))
+		pdf = NULL;
 
 	if (yt && yt[0]) {
 		snprintf(
-		        src, sizeof(src), "https://www.youtube.com/embed/%s",
+		        src, sizeof(src), "https://www.youtube.com/embed/%.11s",
 		        yt);
 		bud_append(
 		        inner,
@@ -357,13 +367,16 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 
 static int valid_yt_id(const char *s)
 {
-	if (!s || strlen(s) != 11)
+	if (!s)
 		return 0;
 	for (int i = 0; i < 11; i++)
 		if (!((s[i] >= 'A' && s[i] <= 'Z') ||
 		      (s[i] >= 'a' && s[i] <= 'z') ||
 		      (s[i] >= '0' && s[i] <= '9') || s[i] == '_' ||
 		      s[i] == '-'))
+			return 0;
+	for (const char *p = s + 11; *p; p++)
+		if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
 			return 0;
 	return 1;
 }
@@ -407,7 +420,7 @@ int site_ui_build_media_html(
 	if (yt && yt[0]) {
 		char src[1024];
 		snprintf(
-		        src, sizeof(src), "https://www.youtube.com/embed/%s",
+		        src, sizeof(src), "https://www.youtube.com/embed/%.11s",
 		        yt);
 		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
 		       "<iframe src=\"%s\" class=\"w-full aspect-video "
@@ -581,6 +594,51 @@ bud_node *site_ui_add_form(
 
 /* ── Generic form field builder ───────────────────── */
 
+static bud_node *site_ui_textarea_value(const char *value)
+{
+	const char *src = value ? value : "";
+	size_t len = strlen(src);
+	char *escaped;
+	char *dst;
+
+	if (len > (SIZE_MAX - 1) / 6)
+		return bud_raw("");
+	escaped = malloc(len * 6 + 1);
+	if (!escaped)
+		return bud_raw("");
+	dst = escaped;
+	while (*src) {
+		const char *entity = NULL;
+		size_t entity_len = 0;
+
+		switch (*src) {
+		case '&':
+			entity = "&amp;";
+			entity_len = 5;
+			break;
+		case '<':
+			entity = "&lt;";
+			entity_len = 4;
+			break;
+		case '>':
+			entity = "&gt;";
+			entity_len = 4;
+			break;
+		default:
+			*dst++ = *src++;
+			continue;
+		}
+		memcpy(dst, entity, entity_len);
+		dst += entity_len;
+		src++;
+	}
+	*dst = '\0';
+
+	bud_node *node = bud_raw(escaped);
+	free(escaped);
+	return node;
+}
+
 bud_node *site_ui_form_fields(
         const form_field_t *fields, const char **values, const char *csrf_token)
 {
@@ -604,33 +662,15 @@ bud_node *site_ui_form_fields(
 			                    lx_attr("name", f->name)))
 			                .data.node);
 		} else if (f->type == 1) {
-			bud_node *ta =
-			        lx_el("textarea", lx_attr("name", f->name),
-			              lx_attr("class", "font-mono w-full"))
-			                .data.node;
-			const char *raw = val ? val : "";
-			size_t raw_len = strlen(raw);
-			char *safe = malloc(raw_len + 1);
-			if (safe) {
-				size_t w = 0;
-				for (size_t i = 0; i < raw_len; i++) {
-					if (raw[i] == '<' && i + 1 < raw_len &&
-					    raw[i + 1] == '/')
-					{
-						i++;
-						continue;
-					}
-					safe[w++] = raw[i];
-				}
-				safe[w] = '\0';
-				bud_append(ta, bud_raw(safe));
-				free(safe);
-			} else {
-				bud_append(ta, bud_raw(raw));
-			}
 			bud_append(
 			        frag,
-			        lx_el("label", lx_text(f->label), lx_node(ta))
+			        lx_el("label", lx_text(f->label),
+			              lx_el("textarea",
+			                    lx_attr("name", f->name),
+			                    lx_attr("class",
+			                            "font-mono w-full"),
+			                    lx_node(site_ui_textarea_value(
+			                            val))))
 			                .data.node);
 		} else {
 			bud_append(

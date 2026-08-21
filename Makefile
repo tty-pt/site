@@ -44,12 +44,26 @@ unit-tests: all test-data-dirs
 		echo "=== TESTING $$d ==="; \
 		(cd mods/$$d && ./test.sh) || exit 1; \
 	done
+	@$(MAKE) standalone-unit-tests
+
+standalone-unit-tests:
+	@tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT HUP INT TERM; \
+	for test in mpfd_contract_test caller_contract_test; do \
+		echo "=== TESTING $$test ==="; \
+		$(CC) -Wall -Wextra -Werror -o "$$tmpdir/$$test" \
+			"tests/unit/$$test.c" || exit 1; \
+		"$$tmpdir/$$test" || exit 1; \
+	done
+	@sh tests/unit/run-mpfd-content-length.sh
+	@sh tests/unit/run-dsv-legacy.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
 	sh tests/pages/10-pages-render.sh
 	sh tests/pages/20-song-search.sh
 	sh tests/pages/30-song-multiselect.sh
+	sh tests/pages/40-traversal.sh
 
 unit-c-tests:
 	@sh tests/scripts/repro-matrix.sh --build
@@ -147,4 +161,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
+.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
