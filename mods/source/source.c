@@ -14,7 +14,6 @@
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/qmap.h>
-#include "bud/bud.h"
 #include "hyle/hyle.h"
 #include "hyle/source.h"
 #include "../mpfd/mpfd.h"
@@ -181,7 +180,7 @@ XY_IMPL(int, source_resolve_ref_display_str,
 XY_IMPL(int, source_resolve_meta_display,
 	const char *, dataset_id,
 	const char *, item_id,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	int, count,
 	void *, state)
 {
@@ -1113,13 +1112,13 @@ XY_IMPL(int, source_state_overlay,
 XY_IMPL(int, source_overlay_from_desc,
 	json_object *, jo,
 	const void *, state,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	int, int_kind,
 	int, str_kind)
 {
 	source_state_kv_t kvs[32];
 	int n = 0;
-	for (const bud_field_desc_t *f = fields; f->key && n < 31; f++) {
+	for (const source_desc_t *f = fields; f->key && n < 31; f++) {
 		if (f->kind == int_kind) {
 			kvs[n].key = f->key;
 			kvs[n].is_int = 1;
@@ -1143,7 +1142,7 @@ XY_IMPL(int, source_overlay_from_desc,
 
 XY_IMPL(json_object *, source_overlay_array,
 	const void *, items, int, count, size_t, elem_size,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	int, int_kind, int, str_kind)
 {
 	json_object *arr = json_object_new_array();
@@ -1316,13 +1315,13 @@ XY_MODULE_API void xy_install(void)
 /* ── Unified field schema generators ─────────────────────────── */
 
 static int
-impl_source_def_to_qmap(const bud_field_desc_t *defs, int count, void *out)
+impl_source_def_to_qmap(const source_desc_t *defs, int count, void *out)
 {
 	qmap_record_field_t *qf = (qmap_record_field_t *)out;
 	int n = 0;
 	int i;
 	for (i = 0; i < count; i++) {
-		const bud_field_desc_t *d = &defs[i];
+		const source_desc_t *d = &defs[i];
 		if (!d->key || d->kind >= 3)
 			continue;
 		qf[n].name = d->key;
@@ -1338,19 +1337,19 @@ impl_source_def_to_qmap(const bud_field_desc_t *defs, int count, void *out)
 }
 
 XY_IMPL(int, source_def_to_qmap,
-    const bud_field_desc_t *, defs, int, count, void *, out)
+    const source_desc_t *, defs, int, count, void *, out)
 {
 	return impl_source_def_to_qmap(defs, count, out);
 }
 
 static int impl_source_def_to_source_fields(
-        const bud_field_desc_t *defs, int count, void *out)
+        const source_desc_t *defs, int count, void *out)
 {
 	source_field_t *sf = (source_field_t *)out;
 	int n = 0;
 	int i;
 	for (i = 0; i < count; i++) {
-		const bud_field_desc_t *d = &defs[i];
+		const source_desc_t *d = &defs[i];
 		if (d->kind == SOURCE_FIELD_KIND_INVERSE) {
 			if (!d->key || !d->ref_source || !d->ref_inverse)
 				continue;
@@ -1393,19 +1392,19 @@ static int impl_source_def_to_source_fields(
 }
 
 XY_IMPL(int, source_def_to_source_fields,
-    const bud_field_desc_t *, defs, int, count, void *, out)
+    const source_desc_t *, defs, int, count, void *, out)
 {
 	return impl_source_def_to_source_fields(defs, count, out);
 }
 
 static int impl_source_def_to_meta_fields(
-        const bud_field_desc_t *defs, int count, const void *record, void *out)
+        const source_desc_t *defs, int count, const void *record, void *out)
 {
 	meta_field_t *mf = (meta_field_t *)out;
 	int n = 0;
 	int i;
 	for (i = 0; i < count; i++) {
-		const bud_field_desc_t *d = &defs[i];
+		const source_desc_t *d = &defs[i];
 		if (!d->key || d->kind >= 3 || !d->in_meta)
 			continue;
 		mf[n].name = d->key;
@@ -1417,18 +1416,18 @@ static int impl_source_def_to_meta_fields(
 }
 
 XY_IMPL(int, source_def_to_meta_fields,
-    const bud_field_desc_t *, defs, int, count,
+    const source_desc_t *, defs, int, count,
     const void *, record, void *, out)
 {
 	return impl_source_def_to_meta_fields(defs, count, record, out);
 }
 
 static int impl_source_build_state_specs(
-        const bud_field_desc_t *fields, source_state_field_t *specs,
+        const source_desc_t *fields, source_state_field_t *specs,
         int max_specs)
 {
 	int i = 0;
-	for (const bud_field_desc_t *f = fields; f->key && i < max_specs - 1;
+	for (const source_desc_t *f = fields; f->key && i < max_specs - 1;
 	     f++)
 	{
 		if (f->kind == SF_EXCLUDE || f->kind == SF_REF_DISPLAY) {
@@ -1443,7 +1442,7 @@ static int impl_source_build_state_specs(
 }
 
 XY_IMPL(int, source_build_state_specs,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	source_state_field_t *, specs,
 	int, max_specs)
 {
@@ -1452,7 +1451,7 @@ XY_IMPL(int, source_build_state_specs,
 
 XY_IMPL(int, source_meta_read,
 	const char *, path,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	int, count,
 	void *, record,
 	size_t, record_size)
@@ -1465,7 +1464,7 @@ XY_IMPL(int, source_meta_read,
 
 XY_IMPL(int, source_meta_write,
 	const char *, path,
-	const bud_field_desc_t *, fields,
+	const source_desc_t *, fields,
 	int, count,
 	const void *, record)
 {
@@ -1475,7 +1474,7 @@ XY_IMPL(int, source_meta_write,
 }
 
 static void impl_source_patch_qmap_targets(
-        qmap_record_field_t *qf, int n, const bud_field_desc_t *defs, int count)
+        qmap_record_field_t *qf, int n, const source_desc_t *defs, int count)
 {
 	int i;
 	for (i = 0; i < n && i < count; i++) {
@@ -1547,7 +1546,7 @@ XY_IMPL(uint32_t, source_setup,
 	const char *, key_field,
 	size_t, record_size,
 	const char *, items_path,
-	const bud_field_desc_t *, defs,
+	const source_desc_t *, defs,
 	int, field_count,
 	unsigned, flags,
 	const source_list_view_t *, list_view)
@@ -1620,7 +1619,7 @@ XY_IMPL(int, source_respond_page_state,
     const char *, item_id,
     const source_state_field_t *, specs,
     const void *, state_struct,
-    const struct bud_field_desc *, overlay_fields,
+    const source_desc_t *, overlay_fields,
     void *, custom_overlay_fn_ptr,
     void *, user_data)
 {

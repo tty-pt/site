@@ -92,20 +92,22 @@ BUD_STATE_FIELDS(sb_song_row_data_t, sb_song_row_fields, SB_SONG_ROW_SCHEMA)
 
 void wasm_init(const char *json, int len)
 {
-	(void)len;
+	size_t jlen = len >= 0 ? (size_t)len : 0;
+
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 
-	bud_state_apply(&sb_app_state, gig_app_fields, json);
+	bud_state_apply_len(&sb_app_state, gig_app_fields, json, jlen);
 
 	if (sb_app_state.zoom < VIEWER_ZOOM_MIN ||
 	    sb_app_state.zoom > VIEWER_ZOOM_MAX)
 		sb_app_state.zoom = VIEWER_ZOOM_DEFAULT;
 
-	bud_state_apply_array(
-	        json, "songs", g_sb_songs, sizeof(sb_song_row_data_t),
-	        &sb_app_state.n_songs, MAX_SB_SONGS, sb_song_row_fields);
+	bud_state_apply_array_len(
+	        json, jlen, "songs", g_sb_songs,
+	        sizeof(sb_song_row_data_t), &sb_app_state.n_songs,
+	        MAX_SB_SONGS, sb_song_row_fields);
 
-	list_state_from_json(&g_sb_pick_state, json);
+	list_state_from_json_len(&g_sb_pick_state, json, jlen);
 }
 
 /* ── Zoom slider event handler ──────────────────────────── */
@@ -129,15 +131,14 @@ extern void wasm_flush(void);
 void wasm_fetch_callback(int request_id, const char *data, int data_len)
 {
 	(void)request_id;
-	(void)data_len;
 	char chord_html[65536];
-	bud_json_str(data, "chord_html", chord_html, sizeof(chord_html));
+	size_t dlen = data_len >= 0 ? (size_t)data_len : 0;
+	bud_json_str_len(data, dlen, "chord_html", chord_html, sizeof(chord_html));
 	if (!chord_html[0])
 		return;
 
 	/* Extract song index from JSON */
-	const char *k = strstr(data, "\"index\":");
-	int idx = k ? atoi(k + 8) : 0;
+	int idx = bud_json_int_len(data, dlen, "index", 0);
 	if (idx < 0 || idx >= g_sb_n_chord_nodes || !g_sb_chord_nodes[idx])
 		return;
 

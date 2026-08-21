@@ -150,8 +150,28 @@ json_extract_strings(json_object *jo, const json_str_map_t *map)
 }
 
 /* ── Unified field schema generators ───────────────────────────── */
-
-struct bud_field_desc;
+/* Framework-neutral descriptor — binary compatible with bud_field_desc_t
+ * (bud/bud.h:159). Site data layer owns this; WASM/client uses bud.h.
+ * L02: source never includes bud/bud.h; cast is safe (static_assert in
+ * bud_adapter.c). */
+typedef struct source_desc {
+	const char *key;
+	size_t offset;
+	size_t size;
+	int is_int;
+	int kind;
+	int qm_type;
+	int source_type;
+	int writable;
+	int required;
+	size_t min_length;
+	const char *ref_source;
+	const char *ref_inverse;
+	int in_meta;
+	const char *file;
+	const char *filter_style;
+	const char *filter_mode;
+} source_desc_t;
 
 #ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
@@ -159,14 +179,14 @@ XY_DECL(int, source_clear_inverse_refs,
     const char *, dataset_id,
     const char *, item_id);
 XY_DECL(int, source_def_to_qmap,
-    const struct bud_field_desc *, defs, int, count, void *, out);
+    const source_desc_t *, defs, int, count, void *, out);
 XY_DECL(int, source_def_to_source_fields,
-    const struct bud_field_desc *, defs, int, count, void *, out);
+    const source_desc_t *, defs, int, count, void *, out);
 XY_DECL(int, source_def_to_meta_fields,
-    const struct bud_field_desc *, defs, int, count,
+    const source_desc_t *, defs, int, count,
     const void *, record, void *, out);
 XY_DECL(int, source_build_state_specs,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     source_state_field_t *, specs,
     int, max_specs);
 XY_DECL(source_def_t *, source_find, const char *, dataset_id);
@@ -206,7 +226,7 @@ XY_DECL(int, source_state_overlay,
 XY_DECL(int, source_overlay_from_desc,
     json_object *, jo,
     const void *, state,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, int_kind,
     int, str_kind);
 XY_DECL(int, source_respond_page_state,
@@ -215,12 +235,12 @@ XY_DECL(int, source_respond_page_state,
     const char *, item_id,
     const source_state_field_t *, specs,
     const void *, state_struct,
-    const struct bud_field_desc *, overlay_fields,
+    const source_desc_t *, overlay_fields,
     void *, custom_overlay_fn,
     void *, user_data);
 XY_DECL(json_object *, source_overlay_array,
     const void *, items, int, count, size_t, elem_size,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, int_kind, int, str_kind);
 XY_DECL(int, source_resolve_ref_display_str,
     const char *, dataset_id,
@@ -230,18 +250,18 @@ XY_DECL(int, source_resolve_ref_display_str,
 XY_DECL(int, source_resolve_meta_display,
     const char *, dataset_id,
     const char *, item_id,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     void *, state);
 XY_DECL(int, source_meta_read,
     const char *, path,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     void *, record,
     size_t, record_size);
 XY_DECL(int, source_meta_write,
     const char *, path,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     const void *, record);
 XY_DECL(uint32_t, source_setup,
@@ -249,7 +269,7 @@ XY_DECL(uint32_t, source_setup,
     const char *, key_field,
     size_t, record_size,
     const char *, items_path,
-    const struct bud_field_desc *, defs,
+    const source_desc_t *, defs,
     int, field_count,
     unsigned, flags,
     const source_list_view_t *, list_view);

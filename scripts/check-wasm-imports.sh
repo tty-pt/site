@@ -21,9 +21,8 @@ for wasm in htdocs/*.wasm; do
 			FAIL=1
 		fi
 	else
-		# strings fallback — less precise but catches leaked imports
+		# strings fallback — less precise; do not fail, just warn (install wabt for precise W06)
 		if strings "$wasm" 2>/dev/null | grep -qE 'qmap_|source_item|axil_|xy_call'; then
-			# allow that wasm may contain debug strings; check import section via strings + import name pattern
 			echo "WARN: $wasm contains native-like strings (no wasm-objdump) — manual check needed"
 		fi
 	fi

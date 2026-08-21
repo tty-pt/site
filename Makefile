@@ -1,11 +1,12 @@
 CC  ?= clang
 DEV ?= 0
+PROFILE ?= dev
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud mods modules clients
+all: stoma-lib hyle-lib bud-lib hyle-bud axil-lib qmap-lib xylem-lib mods modules clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -27,6 +28,15 @@ bud-lib:
 
 hyle-bud: hyle-lib bud-lib
 	$(MAKE) -C external/hyle/c/libhyle-bud
+
+axil-lib:
+	$(MAKE) -C external/axil
+
+qmap-lib:
+	$(MAKE) -C external/qmap
+
+xylem-lib:
+	$(MAKE) -C external/libxylem
 
 run:
 	$(MAKE) DEV=1 all
@@ -160,10 +170,11 @@ debug-clean:
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
+PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
 
 deploy-wasm: clients
-	scp htdocs/*.js htdocs/*.wasm htdocs/*.css \
+	scp $(addprefix htdocs/,$(PROD_ASSETS)) \
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
+.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check

@@ -8,16 +8,20 @@ static site_ui_chrome_state chrome_state;
 
 void wasm_init(const char *json, int len)
 {
-	(void)len;
+	size_t jlen = len >= 0 ? (size_t)len : 0;
 	memset(&chrome_state, 0, sizeof(chrome_state));
-	bud_json_str(
-	        json, "title", chrome_state.title, sizeof(chrome_state.title));
-	bud_json_str(
-	        json, "path", chrome_state.path, sizeof(chrome_state.path));
-	bud_json_str(
-	        json, "icon", chrome_state.icon, sizeof(chrome_state.icon));
-	bud_json_str(
-	        json, "user", chrome_state.user, sizeof(chrome_state.user));
+	bud_json_str_len(
+	        json, jlen, "title", chrome_state.title,
+	        sizeof(chrome_state.title));
+	bud_json_str_len(
+	        json, jlen, "path", chrome_state.path,
+	        sizeof(chrome_state.path));
+	bud_json_str_len(
+	        json, jlen, "icon", chrome_state.icon,
+	        sizeof(chrome_state.icon));
+	bud_json_str_len(
+	        json, jlen, "user", chrome_state.user,
+	        sizeof(chrome_state.user));
 }
 
 bud_node *bud_app_render(void)

@@ -17,8 +17,8 @@ make clean / make distclean
 - `make lint`/`make format` cover `mods` + `external/bud` only. Keep
   `external/hyle` + `external/hyle/c/libhyle-bud` code tidy manually (tabs,
   ≤4 nest) — the site Makefile does not tidy them.
-- Native CFLAGS are extended by `build.mk` line 23 with
-  `-I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include`.
+- Site `make` is GNU make; `build.mk:22` adds
+  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -Iexternal/libxylem/include -Iexternal/bud/include -Iexternal/hyle/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`). `build.mk:23` global `hyle-bud` include was removed (L01 fixed).
 
 ## CRITICAL: stale system headers shadow the repo for native builds
 
@@ -66,6 +66,12 @@ defaults to `all: dirs $(TARGET) $(WASM_TARGETS)` (was broken when
 make it the default goal, so `make -C mods/core` correctly builds
 `core.so`.
 
+## Profiles and bootstrap
+
+`PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS` (no `bud_demo.wasm`).
+
+WASM `W06` allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (now blocking in `make all`).
+
 ## CSS cache bust
 
 `mods/common/ux/version.gen.h` is content-hashed from `htdocs/styles.css` +
@@ -94,10 +100,9 @@ cp /bin/sh ./bin/sh
 
 ## Rebuild checklist after a code change
 
-1. `rm -f htdocs/<changed>.wasm` if the change compiles into a wasm.
-2. `make` (recompiles the affected `.so`; wasm too if forced above).
-3. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
-4. Bump `?v=` in site_ui.c if CSS changed, BEFORE the rebuild in step 2.
+1. `make` (recompiles affected `.so`; WASM `.d` deps from `build.mk:57` rebuild WASMs automatically when `filter.c`/`site_ui.c` changes; CSS/JS hash auto-regens `mods/common/ux/version.gen.h` via `scripts/gen-asset-version.sh` — no manual `?v=` bump).
+2. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
+3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` (now wired into `make all`).
 
 ## Related docs
 

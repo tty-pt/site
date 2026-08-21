@@ -263,7 +263,6 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 	list_state_t *state = ctx->state;
 	list_col_t *col;
 	char col_json[4096];
-	const char *opts_json;
 	size_t n;
 	int nopts;
 
@@ -287,18 +286,16 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 
 	nopts = bud_json_int(col_json, "noptions", 0);
 	if (nopts > 0) {
-		opts_json = strstr(col_json, "\"opts\":");
-		if (opts_json) {
-			list_fj_opts_ctx octx;
+		list_fj_opts_ctx octx;
 
-			octx.state = state;
-			octx.slot = state->nopts;
-			octx.max = LIST_MAX_OPTS;
-			opts_json += 7;
-			bud_json_array_for_each(opts_json, list_fj_opt, &octx);
-			col->opt_count = octx.slot - state->nopts;
-			state->nopts = octx.slot;
-		}
+		octx.state = state;
+		octx.slot = state->nopts;
+		octx.max = LIST_MAX_OPTS;
+		bud_json_array_for_each_key_len(
+		        col_json, strlen(col_json), "opts", list_fj_opt,
+		        &octx);
+		col->opt_count = octx.slot - state->nopts;
+		state->nopts = octx.slot;
 	}
 	state->ncols = ctx->col_index + 1;
 	ctx->col_index++;
@@ -350,72 +347,70 @@ static void list_fj_row(const char *elem, size_t len, void *user)
 	ctx->row++;
 }
 
-void list_state_from_json(list_state_t *state, const char *json)
+void list_state_from_json_len(
+        list_state_t *state, const char *json, size_t len)
 {
 	list_fj_col_ctx cctx;
 	list_fj_ids_ctx ictx;
 	list_fj_row_ctx rctx;
-	const char *p;
 
 	if (!state || !json)
 		return;
-
+	if (len == 0)
+		len = strlen(json);
 	memset(state, 0, sizeof(*state));
 
-	bud_json_str(json, "module", state->module, sizeof(state->module));
-	bud_json_str(
-	        json, "display_name", state->display_name,
+	bud_json_str_len(
+	        json, len, "module", state->module, sizeof(state->module));
+	bud_json_str_len(
+	        json, len, "display_name", state->display_name,
 	        sizeof(state->display_name));
-	bud_json_str(
-	        json, "content_field", state->content_field,
+	bud_json_str_len(
+	        json, len, "content_field", state->content_field,
 	        sizeof(state->content_field));
-	bud_json_str(
-	        json, "content_label", state->content_label,
+	bud_json_str_len(
+	        json, len, "content_label", state->content_label,
 	        sizeof(state->content_label));
-	bud_json_str(
-	        json, "content_placeholder", state->content_placeholder,
+	bud_json_str_len(
+	        json, len, "content_placeholder", state->content_placeholder,
 	        sizeof(state->content_placeholder));
-	bud_json_str(
-	        json, "username", state->username, sizeof(state->username));
-	bud_json_str(json, "query", state->query, sizeof(state->query));
-	state->custom = bud_json_int(json, "custom", 0) ? 1 : 0;
-	bud_json_str(json, "q", state->q, sizeof(state->q));
-	bud_json_str(
-	        json, "sort_field", state->sort_field,
+	bud_json_str_len(
+	        json, len, "username", state->username,
+	        sizeof(state->username));
+	bud_json_str_len(json, len, "query", state->query, sizeof(state->query));
+	state->custom = bud_json_int_len(json, len, "custom", 0) ? 1 : 0;
+	bud_json_str_len(json, len, "q", state->q, sizeof(state->q));
+	bud_json_str_len(
+	        json, len, "sort_field", state->sort_field,
 	        sizeof(state->sort_field));
-	state->sort_asc = bud_json_int(json, "sort_asc", 1);
-	state->page = bud_json_int(json, "page", 1);
-	state->per_page = bud_json_int(json, "per_page", 10);
-	state->total = bud_json_int(json, "total", 0);
-	state->has_page = bud_json_int(json, "has_page", 0);
+	state->sort_asc = bud_json_int_len(json, len, "sort_asc", 1);
+	state->page = bud_json_int_len(json, len, "page", 1);
+	state->per_page = bud_json_int_len(json, len, "per_page", 10);
+	state->total = bud_json_int_len(json, len, "total", 0);
+	state->has_page = bud_json_int_len(json, len, "has_page", 0);
 
 	cctx.state = state;
 	cctx.col_index = 0;
-	p = strstr(json, "\"cols\":");
-	if (p) {
-		p += 7;
-		bud_json_array_for_each(p, list_fj_col, &cctx);
-	}
+	bud_json_array_for_each_key_len(json, len, "cols", list_fj_col, &cctx);
 
-	state->nids = bud_json_int(json, "nids", 0);
+	state->nids = bud_json_int_len(json, len, "nids", 0);
 	ictx.ids = state->ids;
 	ictx.n = 0;
 	ictx.max = LIST_MAX_ROWS;
-	p = strstr(json, "\"ids\":");
-	if (p) {
-		p += 6;
-		bud_json_array_for_each(p, list_fj_id, &ictx);
+	bud_json_array_for_each_key_len(json, len, "ids", list_fj_id, &ictx);
+	if (ictx.n > 0 || state->nids == 0)
 		state->nids = ictx.n;
-	}
 
 	rctx.state = state;
 	rctx.row = 0;
 	rctx.ncols = state->ncols;
-	p = strstr(json, "\"rows\":");
-	if (p) {
-		p += 7;
-		bud_json_array_for_each(p, list_fj_row, &rctx);
-	}
+	bud_json_array_for_each_key_len(json, len, "rows", list_fj_row, &rctx);
+}
+
+void list_state_from_json(list_state_t *state, const char *json)
+{
+	size_t len = json ? strlen(json) : 0;
+	list_state_from_json_len(state, json, len);
 }
 
 #endif

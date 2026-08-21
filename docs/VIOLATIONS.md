@@ -24,20 +24,20 @@ are updated together.
 | M06 | Structural | Ownership has multiple authorities | Fixed (2026-08-21) |
 | M07 | Structural | `index` hardcodes module-specific fields | Fixed (2026-08-21) |
 | L01 | Structural | `hyle-bud` headers are exposed to every native module | Fixed (2026-08-22) — build.mk global removed, per-module EXTRA_CFLAGS |
-| L02 | Structural | `source` exposes bud component types in its data API | Open — scaffold mods/common/bud_adapter.{h,c} owns bud include; source still exposes bud_field_desc via XY (compat shim, next step neutral source_field) |
+| L02 | Structural | `source` exposes bud component types in its data API | Fixed (2026-08-22) — source.h neutral source_desc_t, source.c no bud include, bud_adapter cast + common XY for overlay (RTLD_LOCAL-safe) |
 | L03 | Structural | WASM consumers compile `hyle-bud` implementation sources | Fixed (2026-08-22) — single source decl in hyle-bud-wasm.mk, index/gig use shared var; artifact centralization closes drift |
 | W01 | Structural | Global/local runtime split is only half implemented | Fixed (2026-08-22) — site_chrome.wasm + site_chrome.h split, dual roots hydrate |
 | W02 | Structural | Loader supports one module/root/state/bridge | Fixed (2026-08-22) — bud-client.js moduleSpec + Promise.allSettled + __bud_bridges |
 | W03 | Operational | Page shell advertises an unavailable global module | Fixed (2026-08-22) — data-modules="site_chrome <local>" + independent 404 handling |
 | W04 | Structural | No global bundle or WASM-only module mode | Fixed (2026-08-22) — mods/site_chrome WASM_ONLY=1 + build.mk WASM_ONLY support |
 | W05 | Structural | Bud cannot bind global/window events | Fixed (2026-08-22) — bud-hydrate @window + passive scroll + rAF + scrollY |
-| W06 | Operational | `--allow-undefined` hides native WASM dependencies | Open (`AUDIT` D18) |
+| W06 | Operational | `--allow-undefined` hides native WASM dependencies | Fixed (2026-08-22) — allowlist scripts/wasm-allowed-imports.lst + check-wasm-imports wired into boundary-check |
 | W07 | Operational | WASM dependency tracking misses includes/headers | Fixed (2026-08-22) — build.mk -MM .d for native+WASM |
-| W08 | Structural | Bud state parsing is not a real JSON boundary | Open (`AUDIT` D14) — jsmn plan staged, helper-owned payload noted |
+| W08 | Structural | Bud state parsing is not a real JSON boundary | Fixed (2026-08-22) — jsmn vendored `external/bud/src/jsmn.h`, `libbud.c` now `jsmn_parse` + `tok.start/end` slices, `tmp[4096]` removed, `bud_json_*_len`/`bud_state_apply_len` + `list_state_from_json_len` + `bud_json_array_for_each_key_len`, WASM `wasm_init(len)` threaded |
 | D01 | Friction | Page enhancement needs magic strings and manual state scripts | Fixed (2026-08-22) — site_ui_state_head/_respond_with_state in site_page.c; index still migrates, pattern closes magic-string risk |
 | D02 | Friction | Asset cache busting is manual | Fixed (2026-08-22) — version.gen.h cksum via scripts/gen-asset-version.sh, mods/common/ux/version.gen.h + site_page.c __has_include, build.mk keeps `all` first (BSD-portable) |
 | D03 | Operational | Module hot reload is not real | Open (`AUDIT` F2) — RTLD_NODELETE still in libxylem; unique-inode plan documented |
-| D04 | Friction | Build profiles and bootstrapping are incomplete | Open (`AUDIT` F16) — VERSION_GEN now portable via mods/common; PROFILE dev/release reverted to keep GNU/BSD `make` both default to `all: dirs $(TARGET) $(WASM_TARGETS)` |
+| D04 | Friction | Build profiles and bootstrapping are incomplete | Fixed (2026-08-22) — PROFILE dev/release via build.mk, VERSION_GEN portable, axil/qmap/xylem bootstrap + PROD_ASSETS allowlist |
 | D05 | Friction | `bud_attr_fmt` has a hidden four-slot limit | Fixed (2026-08-22) — heap-owned BUD_ARG_ATTR_FMT in libbud.c, bud_el_impl frees |
 
 ## 1. Module encapsulation
@@ -165,21 +165,13 @@ switch for fields, labels, display names, or song content search.
 
 **Remaining lint parity:** per-module lint `EXTRA_CFLAGS` mirroring not yet automated; `make lint` now correctly requires explicit includes, matching `AGENTS.md:38`.
 
-### L02 — `source` exposes bud component types (scaffold 2026-08-22)
+### L02 — `source` exposes bud component types (fixed 2026-08-22)
 
-`mods/source/source.c:18` includes `bud/bud.h`; `mods/source/source.h:111-128,158-205` exposes
-`struct bud_field_desc` in public XY APIs.
+**Fix:** `mods/source/source.h:152` neutral `source_desc_t` (binary-compatible `bud_field_desc_t:159`), all `XY_DECL` use `source_desc_t` (`:184-255`); `mods/source/source.c:17` no `bud/bud.h`, impls `source_desc_t` (`:1318-1622`); `mods/source/Makefile:4` drops bud `EXTRA_CFLAGS`; `mods/common/bud_adapter.h:1` owns `bud/bud.h`+`source.h` with `_Static_assert` (`bud_adapter.c:8`), plain forwards for `def_to_*`/`meta_*`; `mods/common/common.h:187` now `XY_DECL(bud_adapter_overlay_from_desc/array)` and `mods/common/bud_adapter.c:85` `XY_IMPL` forwards `(const source_desc_t *)` to `source_overlay_*`, compiled into `common.so` via `common.c:8` unity include — `gig.c:411,417` calls via `XY` (not `UND`), so `RTLD_LOCAL` in `libxylem.c:813` no longer breaks `gig.so` (`nm -D gig.so` no `U bud_adapter`, `common.so` `T bud_adapter_overlay_*_adapter`); `mods/song/song.c:444` etc still cast `(const source_desc_t *)` for `source_setup`.
 
-**Consequence:** the data module cannot serve another component framework
-without carrying bud's schema type.
+**Previous:** `source.c:18` `bud/bud.h`, `source.h:111-128` `struct bud_field_desc` in XY; `common/bud_adapter` stub with plain `extern` (caused `gig.so: undefined symbol: bud_adapter_overlay_from_desc` with `RTLD_LOCAL`).
 
-**Fix scaffold:** `mods/common/bud_adapter.h:1` now owns bud include and declares
-`bud_adapter_def_to_*`; `mods/common/common.c:8` includes `bud_adapter.c`. Source still exposes
-`bud_field_desc` via XY for compat; next step removes `source.c:18` include and makes
-`source.h` neutral (`source_field_desc`) with adapter converting, closing L02 fully.
-
-**Target:** source accepts a framework-neutral field descriptor. Bud
-conversion belongs in common's bud adapter or `libhyle-bud`.
+**Target closed:** source data layer never includes `bud.h`; bud conversion belongs in `common` via `XY`.
 
 ### L03 — WASM bundles compile hyle-bud sources directly (fixed 2026-08-22)
 
@@ -207,11 +199,11 @@ conversion belongs in common's bud adapter or `libhyle-bud`.
 
 **Fix:** `htdocs/bud-hydrate.js:1` `parseListenerToken` supports `event@window`; `:161` `scrollY` payload; `:325` `passive:true` for scroll; `:330-341` window binding with `rAF` throttle and `cancelAnimationFrame` cleanup (`:403`). `NAV.md:1131-1306` satisfied.
 
-### W06 — `--allow-undefined` hides native dependencies (guard 2026-08-22)
+### W06 — `--allow-undefined` hides native dependencies (fixed 2026-08-22)
 
-**Fix guard:** `scripts/check-wasm-imports.sh:1` `wasm-objdump|strings` checks no `qmap_|source_|axil_|xy_` import; wired into `scripts/check-module-boundaries.sh:108`.
+**Fix:** `scripts/wasm-allowed-imports.lst:1` allowlists `env.bud_host_*`; `build.mk:37` `WASM_LDFLAGS` includes `-Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst`; `scripts/check-wasm-imports.sh:1` `wasm-objdump|strings` checks no `qmap_|source_|axil_|xy_` import and wired into `scripts/check-module-boundaries.sh:108` (now blocked in `make all`).
 
-**Previous:** `build.mk:38` `--export-all --allow-undefined` alone; allowlist + CI required.
+**Previous:** `build.mk:38` `--export-all --allow-undefined` alone.
 
 ### W07 — dependency tracking misses includes and headers (fixed 2026-08-22)
 
@@ -219,17 +211,15 @@ conversion belongs in common's bud adapter or `libhyle-bud`.
 
 **Previous:** `build.mk:44` listed only `$($*-src)`.
 
-### W08 — bud state parsing is not a real JSON boundary
+### W08 — bud state parsing is not a real JSON boundary (fixed 2026-08-22)
 
 **Audit:** D14 (`docs/AUDIT.md:465`).
 
-`external/bud/src/libbud.c:2371-2435` locates keys with `strstr`; array parsing
-uses a 4096-byte temporary at `:2578-2587`.
+**Previous:** `external/bud/src/libbud.c:2371-2435` `strstr` + `tmp[4096]` trunc at `:2606`.
 
-**Consequence:** key-like text inside values can be misread and large elements
-truncate. Every custom WASM page inherits this.
+**Fix:** `external/bud/src/jsmn.h` vendored (Serge Zaitsev MIT, 12k, header-only `JSMN_PARENT_LINKS|JSMN_STATIC`), `external/bud/src/libbud.c:2353` now `jsmn_parse` over `(json,len)` with `tok.start/end` slices, `bud__unescape_slice` handles `\"\\/bfnrt` + `\uXXXX` → UTF-8, heap fallback on `JSMN_ERROR_NOMEM`, `bud_json_str_len`/`bud_json_int_len`/`bud_json_data_len`/`bud_json_array_for_each_len`/`bud_json_array_for_each_key_len` + `bud_state_apply_len`/`bud_state_apply_array_len` (old wrappers keep `strlen` compat), `apply_array_cb` now `bud_state_apply_len(elem,len)` no `memcpy` trunc; callers `mods/song/ux/detail.c:70,90`, `mods/gig/ux/detail.c:93,129`, `mods/site_chrome/ux/chrome.c:9`, `mods/index/ux/list_fe.c:20` thread `len`, `mods/index/ux/list_json.c:350` `list_state_from_json_len` + `bud_json_array_for_each_key_len` for `cols/ids/rows`/`opts`, `mods/common/ux/list_state.h:55` adds prototypes. Verified `curl` + `list.wasm`/`gig_detail.wasm` still hydrate, `tmp[4096]` no longer truncates `chord_html[65536]`.
 
-**Target:** a real length-aware parser or documented length-prefixed format.
+**Target closed:** length-aware `jsmn` boundary; old `strstr` fallback removed.
 
 ## 4. Developer ergonomics
 
@@ -252,18 +242,17 @@ truncate. Every custom WASM page inherits this.
 `external/libxylem/src/libxylem.c:804-817` uses `RTLD_NODELETE`; glibc may
 reuse old mappings after rebuild.
 
+**Progress (2026-08-22):** unique-inode `copy_to_tmp` + `tmp_load_path` implemented in `external/libxylem` (`libxylem-internal.h:146`, `libxylem.c:828`, `papi.h:145`) with `mkstemp` + `fsync` + `dlopen(tmp)` and `unlink` on `module_free_entry`/`mod_load_abort`, but reverted after `axil -p 8080` startup regression (only `core` loaded, `common` `dlopen` failed via `LD_DEBUG` `undefined symbol: get_xy_ptr` on tmp without `RTLD_GLOBAL` host). Host `libxylem` (`/lib/libxylem.so`) remains in use via `start.sh:6` `LD_LIBRARY_PATH` now including site `libxylem` (clean) + `stoma`; unique-inode plan documented for follow-up with proper `RTLD_GLOBAL`/`dlmopen` or heap-copy adapters.
+
 **Consequence:** reload can report success while requests run old code.
 
-**Target:** safe removal of `RTLD_NODELETE` or unique-path/inode loading.
+**Target:** safe removal of `RTLD_NODELETE` or unique-path/inode loading (follow-up must keep `site` `libxylem` in `LD_LIBRARY_PATH` and handle `get_xy_ptr` visibility).
 
-### D04 — build profiles and bootstrapping are incomplete
+### D04 — build profiles and bootstrapping are incomplete (fixed 2026-08-22)
 
-**Audit:** F16 (`docs/AUDIT.md:751`).
+**Fix:** `build.mk:22` `PROFILE?=dev` → `-O0 -g` else `-O2 -DNDEBUG` (and `WASM_CFLAGS`); `Makefile:8` `PROFILE?=dev`, `all: stoma-lib hyle-lib bud-lib hyle-bud axil-lib qmap-lib xylem-lib mods modules clients boundary-check`; `axil-lib/qmap-lib/xylem-lib` bootstrap; `Makefile:173` `PROD_ASSETS` allowlist (`styles.css` `hyle.css` `bud-client.js` `site_chrome.wasm` only, drops `bud_demo.wasm`).
 
-The top-level `Makefile:8-29` assumes axil, libxylem, and qmap are prebuilt.
-`build.mk:22` currently pinned `-g -O0` (GNU/BSD portable); `PROFILE` dev/release via `portable.mk` not yet wired. `VERSION_GEN` now portable via `mods/common`; deploy allowlist next. `bmake`/`make` both default to `all` after `build.mk:52` `.MAIN: all` fix (was broken when `VERSION_GEN` preceded `all`).
-
-**Target:** complete prerequisites, dev/release profiles via `portable.mk`, and allowlisted production asset manifest.
+**Previous:** pinned `-g -O0`, no bootstrap, `deploy-wasm` copied `*.wasm`.
 
 ### D05 — `bud_attr_fmt` has a hidden four-slot limit (fixed 2026-08-22)
 

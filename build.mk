@@ -18,8 +18,12 @@ ifeq ($(SANITIZE),1)
 CFLAGS += -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address -fsanitize=undefined
 endif
-
+PROFILE ?= dev
+ifeq ($(PROFILE),release)
+CFLAGS += -O2 -DNDEBUG $(PICFLAGS)
+else
 CFLAGS += -g -O0 $(PICFLAGS)
+endif
 CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include
 CFLAGS += $(EXTRA_CFLAGS)
 
@@ -34,8 +38,12 @@ LDLIBS += $(EXTRA_LDLIBS-$(uname))
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= clang
 WASI_SYSROOT ?=
+ifeq ($(PROFILE),release)
+WASM_CFLAGS  ?= -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi
+else
 WASM_CFLAGS  ?= -g -O0 -D__wasm__ --target=wasm32-wasi
-WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--allow-undefined
+endif
+WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--allow-undefined -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/bud/src/libbud.c $(REPO_ROOT)/external/bud/src/bud_wasm_app.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/bud/include
 

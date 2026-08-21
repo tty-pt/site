@@ -13,6 +13,7 @@
 #include <hyle/source.h>
 
 #include "../common/common.h"
+#include "../common/bud_adapter.h"
 #include "../source/source.h"
 
 #include "../auth/auth.h"
@@ -97,12 +98,12 @@ static void sb_for_each_song(const char *sb_id, sb_song_cb cb, void *user)
 static void gig_meta_read(const char *item_path, gig_cache_t *meta)
 {
 	source_meta_read(
-	        item_path, gig_fields, SB_FIELD_COUNT, meta, sizeof(*meta));
+	        item_path, (const source_desc_t *)gig_fields, SB_FIELD_COUNT, meta, sizeof(*meta));
 }
 
 static int gig_meta_write(const char *item_path, const gig_cache_t *meta)
 {
-	return source_meta_write(item_path, gig_fields, SB_FIELD_COUNT, meta);
+	return source_meta_write(item_path, (const source_desc_t *)gig_fields, SB_FIELD_COUNT, meta);
 }
 
 /* Get a random repertoire entry for the given type from the
@@ -408,13 +409,13 @@ static char *sb_emit_state_json(void)
 	size_t mlen;
 	int req;
 
-	source_overlay_from_desc(
+	bud_adapter_overlay_from_desc(
 	        j_root, &sb_app_state, gig_app_fields, BUD_OVERLAY_INT,
 	        BUD_OVERLAY_STR);
 
 	json_object_object_add(
 	        j_root, "songs",
-	        source_overlay_array(
+	        bud_adapter_overlay_array(
 	                g_sb_songs, sb_app_state.n_songs, sizeof(g_sb_songs[0]),
 	                sb_song_row_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR));
 
@@ -1232,7 +1233,7 @@ void xy_install(void)
 	xy_load("./mods/grp/grp");
 
 	source_setup(
-	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", gig_fields,
+	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", (const source_desc_t *)gig_fields,
 	        SB_FIELD_COUNT, 0, &gig_list_view);
 
 	/* Register ordered source for gig songs (data.txt persistence) */

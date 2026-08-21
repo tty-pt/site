@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <ttypt/xy.h>
 #include <ttypt/axil.h>
+#include <json-c/json.h>
+#include "bud/bud.h"
 
 typedef struct bud_node bud_node;
 
@@ -187,6 +189,20 @@ XY_DECL(int, parse_transpose_qs,
 	int *, transpose,
 	int *, flags,
 	int *, show_media);
+
+XY_DECL(int, bud_adapter_overlay_from_desc,
+	json_object *, jo,
+	const void *, state,
+	const bud_field_desc_t *, fields,
+	int, int_kind,
+	int, str_kind);
+XY_DECL(json_object *, bud_adapter_overlay_array,
+	const void *, items,
+	int, count,
+	size_t, elem_size,
+	const bud_field_desc_t *, fields,
+	int, int_kind,
+	int, str_kind);
 
 #endif /* COMMON_IMPL — end of XY_DECL section */
 

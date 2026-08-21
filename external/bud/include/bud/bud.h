@@ -146,14 +146,27 @@ void bud_event_prevent_default(bud_event *event);
 void bud_free(bud_node *node);
 void bud_free_string(char *value);
 
-/* JSON field extraction helpers (no json-c dependency) */
+/* JSON field extraction helpers (no json-c dependency) — jsmn-backed */
 void bud_json_str(
         const char *json, const char *key, char *out, size_t out_size);
+void bud_json_str_len(
+        const char *json, size_t len, const char *key, char *out,
+        size_t out_size);
 int bud_json_int(const char *json, const char *key, int default_val);
+int bud_json_int_len(
+        const char *json, size_t len, const char *key, int default_val);
 void bud_json_data(const char *json, char *out, size_t out_size);
+void bud_json_data_len(
+        const char *json, size_t len, char *out, size_t out_size);
 int bud_json_array_for_each(
         const char *json, void (*fn)(const char *elem, size_t len, void *user),
         void *user);
+int bud_json_array_for_each_len(
+        const char *json, size_t len,
+        void (*fn)(const char *elem, size_t len, void *user), void *user);
+int bud_json_array_for_each_key_len(
+        const char *json, size_t len, const char *key,
+        void (*fn)(const char *elem, size_t len, void *user), void *user);
 
 /* Table-driven state: one field definition drives wasm_init, wasm_set_* */
 typedef struct bud_field_desc {
@@ -186,9 +199,16 @@ typedef struct bud_field_desc {
 
 void bud_state_apply(
         void *state, const bud_field_desc_t *fields, const char *json);
+void bud_state_apply_len(
+        void *state, const bud_field_desc_t *fields, const char *json,
+        size_t len);
 void bud_state_apply_array(
         const char *json, const char *key, void *array_out, size_t elem_size,
         int *count_out, int max_elems, const bud_field_desc_t *schema);
+void bud_state_apply_array_len(
+        const char *json, size_t len, const char *key, void *array_out,
+        size_t elem_size, int *count_out, int max_elems,
+        const bud_field_desc_t *schema);
 
 /* Debug helpers — available in all builds, most useful with BUD_DEBUG */
 void bud_node_set_src(bud_node *node, const char *file, int line);
