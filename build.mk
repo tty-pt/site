@@ -39,7 +39,11 @@ WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--allow-undefined
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/bud/src/libbud.c $(REPO_ROOT)/external/bud/src/bud_wasm_app.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/bud/include
 
+ifeq ($(WASM_ONLY),1)
+all: dirs $(WASM_TARGETS)
+else
 all: dirs $(TARGET) $(WASM_TARGETS)
+endif
 
 $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
@@ -61,7 +65,8 @@ wasm-debug:
 	$(MAKE) WASM_CFLAGS='$(WASM_CFLAGS) -DBUD_DEBUG' wasm
 
 clean:
-	rm -f $(TARGET) $(WASM_TARGETS)
+	if [ "$(WASM_ONLY)" != "1" ]; then rm -f $(TARGET); fi
+	rm -f $(WASM_TARGETS)
 
 distclean: clean
 

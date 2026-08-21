@@ -1,3 +1,14 @@
+function parseListenerToken(value) {
+	const parts = (value || '').split('@');
+	const target = parts[1] || 'node';
+	if (target !== 'node' && target !== 'window') return null;
+	return {
+		rawEvent: value || '',
+		event: parts[0] || '',
+		target
+	};
+}
+
 function parseListenerList(value) {
 	if (!value) {
 		return [];
@@ -5,11 +16,13 @@ function parseListenerList(value) {
 
 	return value.split(',').map((entry) => {
 		const parts = entry.split(':');
+		const token = parseListenerToken(parts[0]);
+		if (!token) return null;
 		return {
-			event: parts[0] || '',
+			...token,
 			bubbles: parts[1] === '1'
 		};
-	}).filter((entry) => entry.event.length > 0);
+	}).filter((entry) => entry && entry.event.length > 0);
 }
 
 function parseNodeId(value) {
@@ -141,8 +154,13 @@ function buildControlValue(target) {
 	return target.textContent || '';
 }
 
-function buildEventPayload(target) {
-	return buildControlValue(target);
+function buildEventPayload(info, event) {
+	if (info.target === 'window' && info.event === 'scroll') {
+		const doc = getDocumentForNode(info.node);
+		const view = doc && doc.defaultView;
+		return String(view ? view.scrollY || view.pageYOffset || 0 : 0);
+	}
+	return buildControlValue(event && event.target);
 }
 
 function getListenerSpec(node, event) {
@@ -152,7 +170,7 @@ function getListenerSpec(node, event) {
 
 	const specs = parseListenerList(node.getAttribute('data-bud-on'));
 	for (const spec of specs) {
-		if (spec.event === event) {
+		if (spec.rawEvent === event || spec.event === event) {
 			return spec;
 		}
 	}
@@ -212,6 +230,7 @@ class BudHostBase {
 		this.listenerResolver = listenerResolver;
 		this.rootListeners = new Map();
 		this.boundHandlers = new Map();
+		this.physicalListeners = [];
 		this.nodes = buildHydrationMap(root);
 		this._parentStack = [];
 		this._currentParent = root;
@@ -225,17 +244,19 @@ class BudHostBase {
 				if (attr) {
 					const list = parseListenerList(attr);
 					for (const spec of list) {
-						const key = `${id}:${spec.event}`;
+						const key = `${id}:${spec.rawEvent}:${spec.bubbles ? 1 : 0}`;
 						if (this.boundHandlers.has(key)) continue;
 						const handler = this.resolveListener({
 							id,
 							event: spec.event,
+							rawEvent: spec.rawEvent,
+							target: spec.target,
 							bubbles: spec.bubbles,
 							node,
 							root: this.root
 						});
 						if (typeof handler === 'function') {
-							this.bind(id, spec.event, handler, spec.bubbles);
+							this.bind(id, spec.rawEvent, handler, spec.bubbles);
 						}
 					}
 				}
@@ -256,9 +277,8 @@ class BudHostBase {
 	}
 
 	clearTrackedNodes() {
+		this.clearListeners();
 		this.nodes.clear();
-		this.boundHandlers.clear();
-		this.rootListeners.clear();
 	}
 
 	refreshTrackedSubtree(root) {
@@ -269,8 +289,8 @@ class BudHostBase {
 	}
 
 	removeTrackedNode(id) {
+		this.unbindNode(id);
 		this.nodes.delete(id);
-		this.boundHandlers.delete(`${id}:`);
 	}
 
 	resolveListener(info) {
@@ -281,23 +301,56 @@ class BudHostBase {
 		return this.listenerResolver(info);
 	}
 
-	bind(id, event, handler, isBubbling = false) {
+	bind(id, rawEvent, handler, isBubbling = false) {
 		const node = this.getNode(id);
-		if (!node || !event || typeof handler !== 'function') {
+		const spec = parseListenerToken(rawEvent);
+		let target;
+		let boundHandler;
+		let options;
+		let record;
+		if (!node || !spec || !spec.event || typeof handler !== 'function') {
 			return false;
 		}
 
-		const key = `${id}:${event}`;
+		const key = `${id}:${spec.rawEvent}:${isBubbling ? 1 : 0}`;
+		if (this.boundHandlers.has(key)) return true;
 		const listenerMap = this.boundHandlers.get(key) || new Map();
 		listenerMap.set(handler, true);
 		this.boundHandlers.set(key, listenerMap);
-
-		if (!isBubbling) {
-			node.addEventListener(event, handler);
+		if (spec.target === 'window') {
+			const doc = getDocumentForNode(node);
+			target = doc && doc.defaultView;
+			if (!target) return false;
+			record = { id, key, target, event: spec.event, handler: null,
+				options: spec.event === 'scroll' ? { passive: true } : false,
+				frameId: 0, lastEvent: null };
+			boundHandler = handler;
+			if (spec.event === 'scroll') {
+				boundHandler = (event) => {
+					record.lastEvent = event;
+					if (record.frameId) return;
+					record.frameId = target.requestAnimationFrame(() => {
+						record.frameId = 0;
+						handler(record.lastEvent);
+					});
+				};
+			}
+			record.handler = boundHandler;
+			target.addEventListener(spec.event, boundHandler, record.options);
+			this.physicalListeners.push(record);
 			return true;
 		}
 
-		if (!this.rootListeners.has(event)) {
+		if (!isBubbling) {
+			node.addEventListener(spec.event, handler);
+			this.physicalListeners.push({
+				id, key, target: node, event: spec.event, handler,
+				options: false, frameId: 0
+			});
+			return true;
+		}
+
+		if (!this.rootListeners.has(spec.event)) {
 			const rootHandler = (evt) => {
 				const path = typeof evt.composedPath === 'function'
 					? evt.composedPath()
@@ -313,7 +366,8 @@ class BudHostBase {
 						continue;
 					}
 
-					const handlers = this.boundHandlers.get(`${candidateId}:${event}`);
+					const handlers = this.boundHandlers.get(
+						`${candidateId}:${spec.rawEvent}:1`);
 					if (!handlers) {
 						continue;
 					}
@@ -325,11 +379,49 @@ class BudHostBase {
 				}
 			};
 
-			this.root.addEventListener(event, rootHandler);
-			this.rootListeners.set(event, rootHandler);
+			this.root.addEventListener(spec.event, rootHandler);
+			this.rootListeners.set(spec.event, rootHandler);
+			this.physicalListeners.push({
+				id: null, key: `root:${spec.event}`, target: this.root,
+				event: spec.event, handler: rootHandler, options: false,
+				frameId: 0
+			});
 		}
 
 		return true;
+	}
+
+	unbindNode(id) {
+		const keep = [];
+		for (const record of this.physicalListeners) {
+			if (record.id !== id) {
+				keep.push(record);
+				continue;
+			}
+			record.target.removeEventListener(
+				record.event, record.handler, record.options);
+			if (record.frameId && record.target.cancelAnimationFrame)
+				record.target.cancelAnimationFrame(record.frameId);
+			this.boundHandlers.delete(record.key);
+		}
+		this.physicalListeners = keep;
+	}
+
+	clearListeners() {
+		for (const record of this.physicalListeners) {
+			record.target.removeEventListener(
+				record.event, record.handler, record.options);
+			if (record.frameId && record.target.cancelAnimationFrame)
+				record.target.cancelAnimationFrame(record.frameId);
+		}
+		this.physicalListeners.length = 0;
+		this.boundHandlers.clear();
+		this.rootListeners.clear();
+	}
+
+	destroy() {
+		this.clearListeners();
+		this.nodes.clear();
 	}
 
 	clearRoot() {
@@ -368,6 +460,7 @@ class BudHostBase {
 		if (!node) {
 			return false;
 		}
+		this.unbindNode(id);
 
 		if (node.nodeType === Node.TEXT_NODE) {
 			removeTextWrapper(node, id);
@@ -379,6 +472,7 @@ class BudHostBase {
 				if (child.nodeType === Node.ELEMENT_NODE) {
 					textId = parseNodeId(child.getAttribute('data-bud-id'));
 					if (textId !== null) {
+						this.unbindNode(textId);
 						this.nodes.delete(textId);
 					}
 					return;
@@ -386,6 +480,7 @@ class BudHostBase {
 				if (child.nodeType === Node.TEXT_NODE) {
 					textId = nodeIdFromComment(child.previousSibling && child.previousSibling.textContent ? child.previousSibling.textContent : '');
 					if (textId !== null) {
+						this.unbindNode(textId);
 						this.nodes.delete(textId);
 					}
 				}
@@ -464,13 +559,18 @@ class BudHostBase {
 				throw new Error('bud: missing patch listener node');
 			}
 			bubbles = op.c === '1';
-			handler = this.resolveListener({
+			{
+				const spec = parseListenerToken(op.b);
+				handler = this.resolveListener({
 				id,
-				event: op.b,
+				event: spec.event,
+				rawEvent: spec.rawEvent,
+				target: spec.target,
 				bubbles,
 				node,
 				root: this.root
-			});
+				});
+			}
 			if (typeof handler === 'function') {
 				this.bind(id, op.b, handler, bubbles);
 			}
@@ -539,6 +639,12 @@ class BudHostBase {
 			if (id !== null) {
 				node = this.getNode(id);
 				if (node && node.nodeType === Node.ELEMENT_NODE) {
+					walkNodes(node, (child) => {
+						if (child === node || child.nodeType !== Node.ELEMENT_NODE)
+							return;
+						const childId = parseNodeId(child.getAttribute('data-bud-id'));
+						if (childId !== null) this.unbindNode(childId);
+					});
 					node.innerHTML = op.b || '';
 					this.refreshTrackedSubtree(node);
 				}
@@ -591,15 +697,18 @@ class BudHostBase {
 					throw new Error('bud: missing listener node');
 				}
 				const bubbles = typeof op.b === 'string' && op.b === '1';
+				const spec = parseListenerToken(op.a);
 				const handler = this.resolveListener({
 					id,
-					event: op.a,
+					event: spec.event,
+					rawEvent: spec.rawEvent,
+					target: spec.target,
 					bubbles,
 					node,
 					root: this.root
 				});
 				if (typeof handler === 'function') {
-					this.bind(id, op.a, handler);
+					this.bind(id, op.a, handler, bubbles);
 				}
 				break;
 			}
@@ -642,15 +751,18 @@ class BudHostBase {
 					throw new Error('bud: missing walk listener node');
 				}
 				const bubbles = op.c === '1';
+				const spec = parseListenerToken(op.b);
 				const handler = this.resolveListener({
 					id,
-					event: op.b,
+					event: spec.event,
+					rawEvent: spec.rawEvent,
+					target: spec.target,
 					bubbles,
 					node,
 					root: this.root
 				});
 				if (typeof handler === 'function') {
-					this.bind(id, op.b, handler);
+					this.bind(id, op.b, handler, bubbles);
 				}
 				break;
 			}
@@ -749,11 +861,10 @@ export class BudWasmBridge {
 
 	resolveListener(info) {
 		if (this.wasm && typeof this.wasm.bud_app_dispatch === 'function') {
-			return (evt, candidate) => {
-				const target = evt.target;
+			return (evt) => {
 				const malloc = getWasmExport(this.wasm, ['malloc']);
 				const free = getWasmExport(this.wasm, ['free']);
-				const value = buildEventPayload(target);
+				const value = buildEventPayload(info, evt);
 				let eventData = null;
 				let eventDataPtr = 0;
 
@@ -765,7 +876,9 @@ export class BudWasmBridge {
 						eventData = eventDataPtr;
 					}
 				}
-				this.dispatchEvent(info.id, info.event, info.bubbles, eventData);
+				this.dispatchEvent(
+					info.id, info.rawEvent || info.event, info.bubbles,
+					eventData);
 				if (free && eventDataPtr) {
 					free(eventDataPtr);
 				}
@@ -779,8 +892,7 @@ export class BudWasmBridge {
 		}
 
 		return (evt) => {
-			const target = evt && evt.target;
-			const value = buildEventPayload(target);
+			const value = buildEventPayload(info, evt);
 			let eventData = null;
 			if (value) {
 				const malloc = getWasmExport(this.wasm, ['malloc']);
@@ -793,7 +905,9 @@ export class BudWasmBridge {
 					}
 				}
 			}
-			this.dispatchEvent(info.id, info.event, info.bubbles, eventData);
+			this.dispatchEvent(
+				info.id, info.rawEvent || info.event, info.bubbles,
+				eventData);
 			if (eventData) {
 				const free = getWasmExport(this.wasm, ['free']);
 				if (free) free(eventData);
@@ -876,7 +990,12 @@ export class BudWasmBridge {
 		if (fn) {
 			fn();
 		}
+		if (this.host) this.host.destroy();
 		return this;
+	}
+
+	destroy() {
+		return this.unmount();
 	}
 
 	markDirty() {

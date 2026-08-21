@@ -15,3 +15,5 @@ gig_detail-cflags = -I$(REPO_ROOT)/mods/common \
 	-I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
 
 include ../../build.mk
+
+$(TARGET) $(WASM_PATH)/gig_detail.wasm: ../common/ux/site_ui.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h

@@ -7,7 +7,7 @@ set -eu
 #    with one real checkbox per option (no-JS baseline)
 #  - repeated-key union filtering: ?type=natal&type=comunhao returns songs of
 #    either type and excludes a song of neither
-#  - the WASM enhancement hooks: id="bud-state" + data-modules="list"
+#  - the WASM enhancement hooks: id="bud-state" + data-modules token list
 #  - filter round-trip: ?type=natal marks the natal checkbox checked and shows
 #    "Natal" in the trigger label
 # Usage: AXIL_HOST=127.0.0.1 AXIL_PORT=8080 sh tests/pages/30-song-multiselect.sh
@@ -53,9 +53,9 @@ printf '%s' "$song" | grep -q 'id="bud-state"' \
   || fail "/song/?custom=1 missing bud-state JSON"
 pass "/song/?custom=1 embeds id=\"bud-state\""
 
-printf '%s' "$song" | grep -q 'data-modules="list"' \
-  || fail "/song/?custom=1 missing data-modules=\"list\""
-pass "/song/?custom=1 opts into data-modules=\"list\""
+printf '%s' "$song" | grep -Eq 'data-modules="([^" ]+ )*list( [^"]+)*"' \
+  || fail "/song/?custom=1 missing data-modules token list"
+pass "/song/?custom=1 opts into data-modules token list"
 
 filtered=$(body_of "/song/?custom=1&type=natal&type=comunhao&type_op=or")
 count=$(row_count "$filtered")

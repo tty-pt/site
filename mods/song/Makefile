@@ -11,6 +11,8 @@ song_detail-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/song/lib/tra
 
 include ../../build.mk
 
+$(TARGET) $(WASM_PATH)/song_detail.wasm: ../common/ux/site_ui.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h
+
 all: transp.so
 
 transp.so:

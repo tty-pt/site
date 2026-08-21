@@ -79,7 +79,9 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 		              lx_text(" "), lx_text(msg ? msg : "Error"))
 		                .data.node);
 
-		html = site_ui_page(msg ? msg : status_str, NULL, NULL, body);
+		html = site_ui_page(
+		        msg ? msg : status_str, uri, "!", get_request_user(fd),
+		        NULL, NULL, body);
 		if (html) {
 			set_html_security_headers(fd);
 			axil_header_set(
@@ -150,11 +152,16 @@ XY_IMPL(int, redirect_to_item,
 XY_IMPL(int, site_ui_respond_page,
 	int, fd,
 	const char *, title,
+	const char *, path,
+	const char *, icon,
+	const char *, user,
 	const char *, extra_head,
 	const char *, module,
 	bud_node *, body)
 {
-	return respond_html(fd, site_ui_page(title, extra_head, module, body));
+	return respond_html(
+	        fd, site_ui_page(
+	                    title, path, icon, user, extra_head, module, body));
 }
 
 XY_IMPL(int, site_ui_respond_form_page,
@@ -168,7 +175,8 @@ XY_IMPL(int, site_ui_respond_form_page,
 {
 	bud_node *page =
 	        site_ui_form_page(user, title, action, icon, NULL, form);
-	return site_ui_respond_page(fd, title, NULL, module, page);
+	return site_ui_respond_page(
+	        fd, title, action, icon, user, NULL, module, page);
 }
 
 XY_IMPL(int, csrf_check_mpfd, int, fd)

@@ -101,7 +101,9 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	        page_title, path, site_ui_module_icon("poem"), ctx->username,
 	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
 
-	return site_ui_respond_page(fd, page_title, NULL, NULL, layout);
+	return site_ui_respond_page(
+	        fd, page_title, path, site_ui_module_icon("poem"),
+	        ctx->username, NULL, NULL, layout);
 }
 
 static int poem_detail_handler(int fd, char *body)

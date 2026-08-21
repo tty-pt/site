@@ -2,11 +2,12 @@
 #define SITE_UI_H
 
 #include "bud/bud.h"
+#include "site_chrome.h"
 #include <stddef.h>
 
 char *site_ui_page(
-        const char *title, const char *extra_head, const char *module,
-        bud_node *body);
+        const char *title, const char *path, const char *icon, const char *user,
+        const char *extra_head, const char *module, bud_node *body);
 bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children);

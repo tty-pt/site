@@ -311,10 +311,11 @@ XY_IMPL(int, with_item_access,
 
 /* ── HTTP response helper (moved from auth_fe.c) ───────────── */
 
-static void
-auth_send_html(int fd, uint16_t status, const char *title, bud_node *layout)
+static void auth_send_html(
+        int fd, uint16_t status, const char *title, const char *path,
+        const char *icon, const char *user, bud_node *layout)
 {
-	char *html = site_ui_page(title, NULL, NULL, layout);
+	char *html = site_ui_page(title, path, icon, user, NULL, NULL, layout);
 
 	if (html) {
 		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
@@ -337,7 +338,9 @@ int on_auth_login_error(
 	if (strstr(accept, "text/html")) {
 		const char *user = get_request_user(fd);
 		bud_node *layout = auth_render_login(user, redirect, msg);
-		auth_send_html(fd, (uint16_t)status, "Login", layout);
+		auth_send_html(
+		        fd, (uint16_t)status, "Login", "/auth/login", "🔑",
+		        user, layout);
 		return 1;
 	}
 	axil_header_set(fd, "Content-Type", "text/plain");
@@ -396,7 +399,8 @@ static int login_get_handler(int fd, char *body)
 	}
 	{
 		bud_node *layout = auth_render_login(user, ret, NULL);
-		auth_send_html(fd, 200, "Login", layout);
+		auth_send_html(
+		        fd, 200, "Login", "/auth/login", "🔑", user, layout);
 	}
 	return 0;
 }
@@ -405,7 +409,9 @@ static int register_get_handler(int fd, char *body)
 {
 	(void)body;
 	bud_node *layout = auth_render_register(get_request_user(fd));
-	auth_send_html(fd, 200, "Register", layout);
+	auth_send_html(
+	        fd, 200, "Register", "/auth/register", "📝",
+	        get_request_user(fd), layout);
 	return 0;
 }
 

@@ -19,6 +19,7 @@ make watch          # auto-rebuild + restart on :8080
 |-------|------|
 | 5-minute orientation: stack, framework-pair model, request path, unbreakable rules, repo layout — READ FIRST | `docs/OVERVIEW.md` |
 | Goals: module/lib/WASM invariants, what agents must not erode, current gaps — READ SECOND | `docs/GOALS.md` |
+| Known architecture violations: confirmed gaps, evidence, target state, deliberate exceptions | `docs/VIOLATIONS.md` |
 | Architecture, framework-pair model, module load order, XY contract, data-layer invariants | `docs/ARCHITECTURE.md` |
 | Design philosophy: encapsulation, "evoke, don't reimplement", abstraction limits | `docs/DESIGN.md` |
 | Build/rebuild: make, wasm rebuild trap, stale `/usr/include` headers, cache bust, chroot, server start | `docs/BUILD.md` |

@@ -371,8 +371,9 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 		free(trans);
 		return site_ui_respond_page(
-		        fd, app_state.cache.title, state_buf, "song_detail",
-		        layout);
+		        fd, app_state.cache.title, app_state.path,
+		        site_ui_module_icon("song"), app_state.page_user,
+		        state_buf, "song_detail", layout);
 	}
 }
 

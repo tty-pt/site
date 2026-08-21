@@ -582,6 +582,36 @@ static int test_detach(void)
 	return 0;
 }
 
+static int test_window_event_type(void)
+{
+	bud_node *root;
+	bud_node *button;
+	bud_runtime *runtime;
+	lifecycle_log lifecycle;
+	int rc;
+
+	memset(&lifecycle, 0, sizeof(lifecycle));
+	root = bud_fragment();
+	button = bud_element("button");
+	if (!root || !button) {
+		bud_free(root);
+		bud_free(button);
+		return 1;
+	}
+	bud_bind(button, "scroll@window", 0, on_submit);
+	bud_append(root, button);
+	runtime = bud_runtime_new(root);
+	rc = bud_runtime_dispatch(runtime, button, "scroll@window", &lifecycle);
+	if (rc == 0)
+		rc =
+		        check(strstr(lifecycle.buffer,
+		                     "submit:scroll:button") != NULL,
+		              "window target exposes logical event type");
+	bud_runtime_free(runtime);
+	bud_free(root);
+	return rc;
+}
+
 int main(void)
 {
 
@@ -596,6 +626,8 @@ int main(void)
 	if (test_class_helpers() != 0)
 		return 1;
 	if (test_detach() != 0)
+		return 1;
+	if (test_window_event_type() != 0)
 		return 1;
 	bud_node *root;
 	bud_node *main_el;

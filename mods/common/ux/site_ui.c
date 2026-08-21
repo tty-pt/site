@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include "bud/bud_jsx.h"
+#include "site_chrome.c"
 
 static void url_encode(const char *src, char *dst, size_t dst_len)
 {
@@ -162,14 +163,10 @@ static bud_arg menu_btn(const char *href, const char *icon, const char *label)
 
 bud_node *site_ui_menu(const char *user, const char *path)
 {
-	int is_home = (!path || strcmp(path, "/") == 0);
-	char up[PATH_MAX] = "";
 	char me_href[PATH_MAX] = "";
 	char login_buf[1024] = "";
 	char reg_href[PATH_MAX] = "";
 
-	if (!is_home)
-		parent_path(path, up, sizeof(up));
 	if (user && user[0])
 		snprintf(me_href, sizeof(me_href), "/%s/", user);
 	else {
@@ -177,8 +174,7 @@ bud_node *site_ui_menu(const char *user, const char *path)
 		auth_path("register", reg_href, sizeof(reg_href));
 	}
 
-	return lx_frag(is_home ? lx_none() : menu_btn(up, "⬆️", "go up"),
-	               (user && user[0])
+	return lx_frag((user && user[0])
 	                       ? lx_frag(menu_btn(me_href, "😊", "me"),
 	                                 menu_btn(
 	                                         "/auth/logout", "🚪",
@@ -461,68 +457,40 @@ bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children)
 {
-	return lx_frag(lx_el("main", lx_attr("class", "main"),
-	                     lx_el("h1", lx_text(title)),
-	                     children ? lx_node(children) : lx_none()),
-	               lx_el("nav", lx_attr("class", "menu"),
-	                     lx_el("input", lx_attr("id", "menu-functions"),
-	                           lx_attr("name", "functions"),
-	                           lx_attr("type", "checkbox"),
-	                           lx_attr("class", "hidden")),
-	                     lx_el("label", lx_attr("for", "menu-functions"),
-	                           lx_attr("class", "menu-overlay"),
-	                           lx_attr("aria-label", "Close Menu")),
-	                     lx_el("span",
-	                           lx_attr("class",
-	                                   "functions flex-1 fixed right-0 "
-	                                   "z-50 h-full overflow-y-auto "
-	                                   "text-sm capitalize flex flex-col "
-	                                   "p-4"),
-	                           lx_el("div",
-	                                 lx_attr("class",
-	                                         "relative z-20 flex flex-col "
-	                                         "gap-2"),
-	                                 lx_el("strong", lx_text(icon),
-	                                       lx_text(" "), lx_text(title)),
-	                                 lx_node(site_ui_menu(user, path)),
-	                                 menu_items
-	                                         ? lx_frag(lx_el("div",
-	                                                         lx_attr("clas"
-	                                                                 "s",
-	                                                                 "menu-"
-	                                                                 "separ"
-	                                                                 "ato"
-	                                                                 "r")),
-	                                                   lx_el("div",
-	                                                         lx_attr("clas"
-	                                                                 "s",
-	                                                                 "modul"
-	                                                                 "e-"
-	                                                                 "men"
-	                                                                 "u"),
-	                                                         lx_node(menu_items)))
-	                                         : lx_none()),
-	                           lx_el("label",
-	                                 lx_attr("for", "menu-functions"),
-	                                 lx_attr("class",
-	                                         "absolute inset-0 z-10 "
-	                                         "cursor-pointer"),
-	                                 lx_attr("aria-label", "Close Menu"))),
-	                     lx_el("span",
-	                           lx_attr("class",
-	                                   "fixed top-0 right-0 z-30 p-2 flex "
-	                                   "items-center gap-4"),
-	                           lx_el("label",
-	                                 lx_attr("for", "menu-functions"),
-	                                 lx_attr("class",
-	                                         "menu-toggle flex "
-	                                         "items-center justify-center "
-	                                         "cursor-pointer text-base "
-	                                         "btn"),
-	                                 lx_attr("aria-label", "Menu"),
-	                                 lx_attr("data-menu-toggle", "1"),
-	                                 lx_text(icon)))))
-	        .data.node;
+	bud_node *main_node;
+	bud_node *panel;
+	bud_node *menu;
+	bud_arg local_items;
+
+	(void)title;
+	(void)icon;
+	main_node = lx_el("main", lx_attr("class", "main"),
+	                  children ? lx_node(children) : lx_none())
+	                    .data.node;
+	local_items =
+	        menu_items
+	                ? lx_frag(lx_el("div",
+	                                lx_attr("class", "menu-separator")),
+	                          lx_el("div", lx_attr("class", "module-menu"),
+	                                lx_node(menu_items)))
+	                : lx_none();
+	panel = lx_el("span",
+	              lx_attr("class",
+	                      "functions flex-1 fixed top-0 right-0 z-50 h-full "
+	                      "overflow-y-auto text-sm capitalize flex "
+	                      "flex-col "
+	                      "p-4"),
+	              lx_el("div",
+	                    lx_attr("class",
+	                            "relative z-20 flex flex-col gap-2"),
+	                    lx_node(site_ui_menu(user, path)), local_items),
+	              lx_el("label", lx_attr("for", "menu-functions"),
+	                    lx_attr("class",
+	                            "absolute inset-0 z-10 cursor-pointer"),
+	                    lx_attr("aria-label", "Close Menu")))
+	                .data.node;
+	menu = lx_el("nav", lx_attr("class", "menu"), lx_node(panel)).data.node;
+	return lx_frag(lx_node(main_node), lx_node(menu)).data.node;
 }
 
 bud_node *site_ui_form_page(
@@ -727,38 +695,96 @@ static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
 	return w;
 }
 
+static size_t
+escape_json_script_into(const char *src, char *dst, size_t dstsize)
+{
+	static const char hex[] = "0123456789abcdef";
+	size_t w;
+	unsigned char c;
+
+	if (!src)
+		src = "";
+	w = 0;
+	while (*src && w + 1 < dstsize) {
+		c = (unsigned char)*src++;
+		if (c == '"' || c == '\\') {
+			if (w + 2 >= dstsize)
+				break;
+			dst[w++] = '\\';
+			dst[w++] = (char)c;
+		} else if (c == '\n' || c == '\r' || c == '\t') {
+			if (w + 2 >= dstsize)
+				break;
+			dst[w++] = '\\';
+			dst[w++] = c == '\n' ? 'n' : (c == '\r' ? 'r' : 't');
+		} else if (c < 0x20 || c == '<') {
+			if (w + 6 >= dstsize)
+				break;
+			dst[w++] = '\\';
+			dst[w++] = 'u';
+			dst[w++] = '0';
+			dst[w++] = '0';
+			dst[w++] = hex[c >> 4];
+			dst[w++] = hex[c & 15];
+		} else {
+			dst[w++] = (char)c;
+		}
+	}
+	dst[w] = '\0';
+	return w;
+}
+
 char *site_ui_page(
-        const char *title, const char *extra_head, const char *module,
-        bud_node *body)
+        const char *title, const char *path, const char *icon, const char *user,
+        const char *extra_head, const char *module, bud_node *body)
 {
 	char *body_html;
+	char *chrome_html;
 	char *page;
-	char module_attr[256];
-	char client_script[512];
+	char module_attr[320];
 	char title_esc[512];
+	char state_title[SITE_CHROME_TITLE_MAX * 6];
+	char state_path[SITE_CHROME_PATH_MAX * 6];
+	char state_icon[SITE_CHROME_ICON_MAX * 6];
+	char state_user[SITE_CHROME_USER_MAX * 6];
+	site_ui_chrome_state state;
+	bud_node *chrome;
 	int len;
 
-#define SITE_CSS_V "?v=20"
+#define SITE_CSS_V "?v=22"
+#define SITE_CLIENT_V "?v=1"
 
 	if (!body)
 		return NULL;
 	body_html = bud_render_hydrated_html(body);
 	if (!body_html)
 		return NULL;
+	memset(&state, 0, sizeof(state));
+	snprintf(state.title, sizeof(state.title), "%s", title ? title : "");
+	snprintf(state.path, sizeof(state.path), "%s", path ? path : "");
+	snprintf(state.icon, sizeof(state.icon), "%s", icon ? icon : "");
+	snprintf(state.user, sizeof(state.user), "%s", user ? user : "");
+	chrome = site_ui_chrome(&state);
+	chrome_html = chrome ? bud_render_hydrated_html(chrome) : NULL;
+	if (!chrome_html) {
+		bud_free_string(body_html);
+		return NULL;
+	}
 
 	escape_html_into(title, title_esc, sizeof(title_esc));
+	escape_json_script_into(state.title, state_title, sizeof(state_title));
+	escape_json_script_into(state.path, state_path, sizeof(state_path));
+	escape_json_script_into(state.icon, state_icon, sizeof(state_icon));
+	escape_json_script_into(state.user, state_user, sizeof(state_user));
 
 	if (module && module[0]) {
 		snprintf(
 		        module_attr, sizeof(module_attr),
-		        " data-modules=\"%s\"", module);
-		snprintf(
-		        client_script, sizeof(client_script),
-		        "<script type=\"module\" "
-		        "src=\"/bud-client.js\"></script>\n");
+		        " data-modules=\"site_chrome %s\"", module);
 	} else {
-		module_attr[0] = '\0';
-		client_script[0] = '\0';
+		snprintf(
+		        module_attr, sizeof(module_attr),
+		        " data-modules=\"site_chrome\"");
 	}
 
 	if (!extra_head)
@@ -773,12 +799,18 @@ char *site_ui_page(
 	        "<title>%s</title>\n"
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
-	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
-	        "%s</body>\n</html>\n",
-	        title_esc, extra_head, module_attr, body_html, client_script);
+	        "%s</head>\n<body style=\"margin:0\"%s>\n"
+	        "<script type=\"application/json\" id=\"chrome-state\">"
+	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
+	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
+	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
+	        "\"></script>\n</body>\n</html>\n",
+	        title_esc, extra_head, module_attr, state_title, state_path,
+	        state_icon, state_user, chrome_html, body_html);
 
 	page = (char *)malloc((size_t)len + 1);
 	if (!page) {
+		bud_free_string(chrome_html);
 		bud_free_string(body_html);
 		return NULL;
 	}
@@ -792,10 +824,16 @@ char *site_ui_page(
 	        "<title>%s</title>\n"
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
-	        "%s</head>\n<body style=\"margin:0\"%s>\n%s\n"
-	        "%s</body>\n</html>\n",
-	        title_esc, extra_head, module_attr, body_html, client_script);
+	        "%s</head>\n<body style=\"margin:0\"%s>\n"
+	        "<script type=\"application/json\" id=\"chrome-state\">"
+	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
+	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
+	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
+	        "\"></script>\n</body>\n</html>\n",
+	        title_esc, extra_head, module_attr, state_title, state_path,
+	        state_icon, state_user, chrome_html, body_html);
 
+	bud_free_string(chrome_html);
 	bud_free_string(body_html);
 	return page;
 }

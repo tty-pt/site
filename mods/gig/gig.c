@@ -980,7 +980,9 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	{
 		char *state_json = sb_emit_state_json();
 		site_ui_respond_page(
-		        fd, page_title, state_json, "gig_detail", layout);
+		        fd, page_title, sb_app_state.path,
+		        site_ui_module_icon("gig"), sb_app_state.user,
+		        state_json, "gig_detail", layout);
 		free(state_json);
 	}
 

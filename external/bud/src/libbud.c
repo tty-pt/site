@@ -2018,7 +2018,8 @@ void bud_event_prevent_default(bud_event *event)
 	event->default_prevented = 1;
 }
 
-static int bud_dispatch_event_node(bud_node *node, bud_event *event)
+static int bud_dispatch_event_node(
+        bud_node *node, bud_event *event, const char *listener_event)
 {
 	bud_listener *listener;
 	int allow_bubble;
@@ -2030,7 +2031,7 @@ static int bud_dispatch_event_node(bud_node *node, bud_event *event)
 	event->current_target = node;
 	allow_bubble = node != event->target;
 	for (listener = node->listeners; listener; listener = listener->next) {
-		if (strcmp(listener->event, event->type) != 0) {
+		if (strcmp(listener->event, listener_event) != 0) {
 			continue;
 		}
 		if (allow_bubble && !listener->bubbles) {
@@ -2055,22 +2056,34 @@ int bud_runtime_dispatch(
 {
 	bud_event ev;
 	bud_node *current;
+	char *logical_event;
+	char *target_suffix;
+	int rc;
 
 	if (!runtime || !target || !event) {
 		return -1;
 	}
+	logical_event = malloc(strlen(event) + 1);
+	if (!logical_event)
+		return -1;
+	strcpy(logical_event, event);
+	target_suffix = strchr(logical_event, '@');
+	if (target_suffix)
+		*target_suffix = '\0';
 
 	memset(&ev, 0, sizeof(ev));
-	ev.type = event;
+	ev.type = logical_event;
 	ev.target = target;
 	ev.current_target = target;
 	ev.user = event_user;
 	ev.bubbles = 1;
 
 	current = target;
+	rc = 0;
 	while (current) {
-		if (bud_dispatch_event_node(current, &ev) != 0) {
-			return -1;
+		if (bud_dispatch_event_node(current, &ev, event) != 0) {
+			rc = -1;
+			break;
 		}
 		if (!ev.bubbles || ev.stopped) {
 			break;
@@ -2078,7 +2091,8 @@ int bud_runtime_dispatch(
 		current = current->parent;
 	}
 
-	return 0;
+	free(logical_event);
+	return rc;
 }
 
 void bud_free(bud_node *node)

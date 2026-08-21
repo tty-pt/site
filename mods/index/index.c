@@ -165,6 +165,7 @@ static int idx_render_list_bud(
 	list_state_t state;
 	bud_node *layout;
 	char title[128];
+	char path[256];
 	char *extra_head = NULL;
 	int rc;
 
@@ -212,8 +213,11 @@ static int idx_render_list_bud(
 		snprintf(title, sizeof(title), "%ss", module);
 		if (title[0] >= 'a')
 			title[0] -= 32;
+		snprintf(path, sizeof(path), "/%s/", module);
 		respond_html(
-		        fd, site_ui_page(title, extra_head, "list", layout));
+		        fd, site_ui_page(
+		                    title, path, site_ui_module_icon(module),
+		                    username, extra_head, "list", layout));
 	} else {
 		axil_respond(fd, 500, "Internal Server Error");
 		rc = -1;
@@ -461,7 +465,9 @@ XY_IMPL(int, core_get, int, fd, char *, body)
 
 	if (layout) {
 		return respond_html(
-		        fd, site_ui_page("tty.pt", NULL, NULL, layout));
+		        fd, site_ui_page(
+		                    "tty.pt", "/", site_ui_module_icon(NULL),
+		                    username, NULL, NULL, layout));
 	}
 	axil_respond(fd, 500, "Internal Server Error");
 	return 0;
