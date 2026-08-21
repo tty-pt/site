@@ -969,15 +969,17 @@ int bud_set_attr(bud_node *node, const char *name, const char *value)
 
 bud_arg bud_attr_fmt(const char *name, const char *fmt, ...)
 {
-	static char buf[4][256];
-	static int idx = 0;
+	char tmp[512];
 	va_list ap;
-	idx = (idx + 1) % 4;
+	char *heap;
 	va_start(ap, fmt);
-	vsnprintf(buf[idx], sizeof(buf[idx]), fmt, ap);
+	vsnprintf(tmp, sizeof(tmp), fmt, ap);
 	va_end(ap);
-	return (bud_arg){ .type = BUD_ARG_ATTR,
-		          .data.attr = { name, buf[idx] } };
+	heap = bud_strdup(tmp);
+	if (!heap)
+		heap = bud_strdup("");
+	return (bud_arg){ .type = BUD_ARG_ATTR_FMT,
+		          .data.attr = { name, heap ? heap : "" } };
 }
 
 int bud_set_bool_attr(bud_node *node, const char *name)
@@ -2293,6 +2295,12 @@ bud_node *bud_el_impl(const char *tag, size_t count, const bud_arg *args)
 			bud_set_attr(
 			        node, args[i].data.attr.name,
 			        args[i].data.attr.value);
+			break;
+		case BUD_ARG_ATTR_FMT:
+			bud_set_attr(
+			        node, args[i].data.attr.name,
+			        args[i].data.attr.value);
+			free((void *)args[i].data.attr.value);
 			break;
 		case BUD_ARG_EVENT:
 			bud_on(node, args[i].data.ev.event,

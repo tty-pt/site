@@ -14,7 +14,8 @@ typedef enum bud_arg_type {
 	BUD_ARG_NODE = 1,
 	BUD_ARG_ATTR = 2,
 	BUD_ARG_EVENT = 3,
-	BUD_ARG_BIND = 4
+	BUD_ARG_BIND = 4,
+	BUD_ARG_ATTR_FMT = 5
 } bud_arg_type;
 
 typedef struct bud_arg {

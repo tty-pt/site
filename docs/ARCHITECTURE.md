@@ -65,20 +65,26 @@ Verify the boundary with a grep before committing: `external/hyle/src` and
 
 ## 3. Module load order
 
-Enforced by `mods/core/core.c` `xy_install`:
+Independent modules that explicitly declare immediate dependencies via `xy_load` in `xy_install` (cycle broken 2026-08-22). `mods/core/core.c` loads only host foundations (`common` + `source`; `common` itself `xy_load`s `mpfd`) then `mods.load`:
 
 ```
 core.so
  ├── common.so   response/page/CSRF/storage helpers (XY_DECL in common.h)
- │   └── mpfd.so multipart/form-data parser
- ├── source.so   dataset CRUD + /api/dataset/*
- └── mods.load → poem, gig, bud_demo, song, grp
-      ├── poem → index → auth, common, mpfd
-      ├── gig → index, mpfd, song, source, grp
-      ├── bud_demo (registers GET:/bud-demo)
+ │    └── mpfd.so     multipart/form-data parser (xy_load in common)
+ ├── source.so   dataset CRUD + /api/dataset/* (+ source_store_fs/mem adapters)
+ └── mods.load → poem, song, grp, gig, bud_demo  (order respects DAG)
+      ├── poem → index
       ├── song → index, mpfd
-      └── grp → index, mpfd, song
+      ├── grp  → index, mpfd, song
+      ├── gig  → index, mpfd, song, source, grp
+      └── bud_demo (no deps)
+
+ plus:
+  index → common, auth, mpfd
+  auth  → common, libaxil-auth (external, not ./mods/*)
 ```
+
+Previous `auth→index→auth` cycle removed: `auth` no longer `xy_load`s `index` (`mods/auth/auth.c:492` now `common` + external `libaxil-auth`; drops `../index/index.h`); site modules remain independent and declare their own immediate **true** `xy_load` deps (not centrally owned by `core` — maximally independent does not mean zero deps). `mods.load` order `poem→song→grp→gig` still respects `song→grp→gig`; `libxylem` deduplicates repeated loads. External deps like `libaxil-auth` are correctly marked external, not assumed in-project.
 
 - `index` registers `GET:/` and the default handler; `index_open()` adds the
   generic `/module/*` CRUD routes. `auth` registers `/api/csrf`,

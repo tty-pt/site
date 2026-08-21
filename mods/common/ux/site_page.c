@@ -2,6 +2,7 @@
 #define SITE_PAGE_C
 
 #include "site_ui.h"
+#include "../common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,8 +106,12 @@ char *site_ui_page(
 	bud_node *chrome;
 	int len;
 
+#if __has_include("version.gen.h")
+#include "version.gen.h"
+#else
 #define SITE_CSS_V "?v=22"
 #define SITE_CLIENT_V "?v=1"
+#endif
 
 	if (!body)
 		return NULL;
@@ -190,6 +195,43 @@ char *site_ui_page(
 	bud_free_string(chrome_html);
 	bud_free_string(body_html);
 	return page;
+}
+
+char *
+site_ui_state_head(const char *json)
+{
+	size_t len;
+	char *head;
+	if (!json || !json[0])
+		return NULL;
+	len = strlen(json) + 128;
+	head = (char *)malloc(len);
+	if (!head)
+		return NULL;
+	snprintf(
+	        head, len,
+	        "<script type=\"application/json\" id=\"bud-state\">%s</script>",
+	        json);
+	return head;
+}
+
+int
+site_ui_respond_with_state(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *state_json, const char *module,
+        bud_node *body)
+{
+	char *head = site_ui_state_head(state_json);
+	char *page = site_ui_page(title, path, icon, user, head, module, body);
+	int rc = 0;
+	if (page)
+		rc = respond_html(fd, page);
+	else
+		axil_respond(fd, 500, "Internal Server Error");
+	free(head);
+	/* respond_html takes ownership of page via axil_respond copy; free */
+	free(page);
+	return rc;
 }
 
 #endif

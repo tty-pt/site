@@ -37,28 +37,45 @@ initializers than the system `bud_field_desc_t`.
   7"). clang-tidy errors on include-only `mods/*/ux/*.c` files are pre-existing
   noise (they are not standalone TUs).
 
-## CRITICAL: the wasm rule has NO prerequisites — force rebuilds
+## WASM rebuilds and dependencies
 
-The `$(WASM_PATH)/%.wasm` rule in `build.mk` has **no prerequisites**: a
-`.wasm` only rebuilds when the target file is missing. Editing C sources that
-compile into a wasm (e.g. `external/hyle/c/libhyle-bud/src/filter.c` →
-`htdocs/list.wasm`) and re-running `make` **silently ships the stale wasm**.
+`build.mk:57` now generates `.d` files for WASM via `-MM` (`W07` fixed) and
+list `LIST_UX_DEPS` in each module `Makefile` as explicit fallback. The
+`$(WASM_PATH)/%.wasm` rule depends on `$($*-src)` + `$(WASM_COMMON_SRC)` via
+`.d` includes, so editing `filter.c`/`site_ui.c` rebuilds dependent WASMs
+automatically. No manual `rm -f htdocs/<t>.wasm && make` needed (still works
+as fallback).
 
-Always force the rebuild:
+The `make` probe still skips wasm silently if no WASI clang is available
+(silent 404 → pure SSR; harmless).
 
-```bash
-rm -f htdocs/<target>.wasm && make
-```
+## Portable `make` / `bmake`
 
-The `make` probe skips wasm silently if no WASI clang is available (silent 404
-→ pure SSR; harmless).
+Site `make` is **GNU make** (Linux). `external/*` libs use
+`$(HOME)/mk/portable.mk` which is BSD/`bmake` portable for `SYS`/`SO` detection.
+`build.mk` itself is GNU (`ifeq`, `!=`, pattern rules); `bmake -C mods/core`
+will error on `ifeq` — use `make` for the site, `bmake` only for the
+external libs if needed.
+
+`build.mk` now keeps `all` as the first target so `make -C mods/core`
+defaults to `all: dirs $(TARGET) $(WASM_TARGETS)` (was broken when
+`VERSION_GEN` preceded `all`). `VERSION_GEN`
+(`mods/common/ux/version.gen.h`) is generated only by `mods/common`
+(`ux/version.gen.h: ...; sh ../../scripts/gen-asset-version.sh`) and
+`site_page.c` uses `__has_include` fallback — `build.mk` does **not**
+make it the default goal, so `make -C mods/core` correctly builds
+`core.so`.
 
 ## CSS cache bust
 
-Any change to `htdocs/hyle.css` / `htdocs/styles.css` (or the CSS source, see
-`docs/STYLING.md`) requires bumping the `?v=` query on both stylesheet links in
-`mods/common/ux/site_ui.c` (two occurrences, both `site_ui_page` paths), then
-rebuild + restart. Forget this and browsers serve stale CSS.
+`mods/common/ux/version.gen.h` is content-hashed from `htdocs/styles.css` +
+`hyle.css` + `bud-client.js` + `bud-hydrate.js` via
+`scripts/gen-asset-version.sh` (`cksum | cksum → ?v=008d0370f`). 
+`mods/common/ux/site_page.c:108` includes it via `__has_include` fallback
+(`SITE_CSS_V`/`SITE_CLIENT_V`). Editing CSS/JS updates the hash on next
+`make` (only `common.so` rebuilds); no manual `?v=` bump.
+
+Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/common/ux/version.gen.h`.
 
 ## Running the server
 

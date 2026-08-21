@@ -90,7 +90,7 @@ lint:
 	find mods external/bud -name "*.c" -exec clang-tidy {} -- \
 		-Iexternal/axil/include -Iexternal/qmap/include \
 		-Iexternal/libxylem/include -Iexternal/bud/include \
-		-Iexternal/hyle/include -Iexternal/hyle/c/libhyle-bud/include \;
+		-Iexternal/hyle/include \;
 
 clean:
 	$(MAKE) -C external/bud clean

@@ -72,4 +72,11 @@ int site_ui_build_media_html(
         const char *yt, const char *audio, const char *pdf, char *out,
         size_t out_sz);
 
+/* ── WASM state helpers (D01) ─────────────────────────────────── */
+char *site_ui_state_head(const char *json);
+int site_ui_respond_with_state(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *state_json, const char *module,
+        bud_node *body);
+
 #endif

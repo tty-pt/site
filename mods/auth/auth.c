@@ -13,8 +13,6 @@
 #include <ttypt/axil.h>
 #include <ttypt/axil-xy.h>
 
-#include "../index/index.h"
-
 #include "../common/common.h"
 #include "../mpfd/mpfd.h"
 #include "../source/source.h"
@@ -491,9 +489,9 @@ static int register_get_handler(int fd, char *body)
 
 void xy_install(void)
 {
-	xy_load("./mods/index/index");
+	/* removed xy_load("./mods/index/index") to break auth↔index cycle; auth is independent but depends on common */
 	xy_load("./mods/common/common");
-	xy_load("libaxil-auth");
+	xy_load("libaxil-auth"); /* external — not in ./mods */
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);

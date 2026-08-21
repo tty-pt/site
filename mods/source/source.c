@@ -22,6 +22,7 @@
 
 #define SOURCE_IMPL
 #include "source.h"
+#include "source_internal.h"
 
 static int source_scan_item(int fd, const source_def_t *def, const char *id);
 static hyle_field_type_t source_to_hyle_type(source_field_type_t t);
@@ -236,8 +237,14 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 	ecount = ename ? 1 : 0;
 	hyle_source_put(target->id, slug, &ename, &evalue, ecount);
 
-	if (!(target->flags & SOURCE_FLAG_VOLATILE) && target->items_path &&
-	    target->items_path[0])
+	if (target->store.ops && target->store.ops->put_field) {
+		const char *fname =
+		        target->key_field ? target->key_field : "name";
+		target->store.ops->put_field(
+		        &target->store, target, slug, fname, display_name);
+	} else if (
+	        !(target->flags & SOURCE_FLAG_VOLATILE) && target->items_path &&
+	        target->items_path[0])
 	{
 		char dir[PATH_MAX];
 		char npath[PATH_MAX];
@@ -258,8 +265,38 @@ source_ensure_entity(const char *ref_source, const char *display_name)
 	}
 }
 
+static void
+source_ensure_tokens(const char *target_source, const char *val)
+{
+	if (!target_source || !val || !val[0])
+		return;
+	char buf[8192];
+	snprintf(buf, sizeof(buf), "%s", val);
+	char *tok, *sv;
+	tok = strtok_r(buf, "\r\n", &sv);
+	while (tok) {
+		str_trim(tok);
+		if (tok[0])
+			source_ensure_entity(target_source, tok);
+		tok = strtok_r(NULL, "\r\n", &sv);
+	}
+}
+
 static int source_scan_item(int fd, const source_def_t *def, const char *id)
 {
+	if (def && def->store.ops && def->store.ops->load) {
+		unsigned out = 0;
+		int r = def->store.ops->load(
+		        (source_store_t *)&def->store, def, id, &out);
+		/* FS adapter already does hyle_source_put; keep sync. */
+		if (r == 0)
+			return 0;
+		/* Fall through to legacy on -1 (e.g. not found) only if
+		 * we need validation error distinction; FS load returns
+		 * -1 on lstat fail which matches legacy -1. */
+		if (r < 0)
+			return -1;
+	}
 	char doc_root[256] = { 0 };
 	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));
 
@@ -302,23 +339,7 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 
 		char *data = slurp_file(file_path);
 		if (data) {
-			if (f->type == SOURCE_FIELD_MULTI_REFERENCE &&
-			    f->target_source)
-			{
-				char ebuf[8192];
-				snprintf(ebuf, sizeof(ebuf), "%s", data);
-				char *etok, *esv;
-				etok = strtok_r(ebuf, "\r\n", &esv);
-				while (etok) {
-					str_trim(etok);
-					if (etok[0])
-						source_ensure_entity(
-						        f->target_source, etok);
-					etok = strtok_r(NULL, "\r\n", &esv);
-				}
-			}
-			size_t len = strlen(data);
-			ref_normalize(def->id, f->name, &data, &len);
+			source_internal_process_multi_ref(f, def->id, &data);
 			names[k] = f->name;
 			values[k] = data;
 			k++;
@@ -339,18 +360,20 @@ XY_IMPL(int, source_delete_item,
 	const source_def_t *, def,
 	const char *, item_id)
 {
+	(void)fd;
 	if (!def || !item_id)
 		return -1;
-
-	char doc_root[256] = { 0 };
-	const char *root = resolve_doc_root(fd, doc_root, sizeof(doc_root));
-
-	char item_path[PATH_MAX];
-	snprintf(
-	        item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path,
-	        item_id);
-
-	item_remove_path_recursive(item_path);
+	if (def->store.ops && def->store.ops->del)
+		def->store.ops->del((source_store_t *)&def->store, def, item_id);
+	else {
+		char doc_root[256] = { 0 };
+		const char *root =
+		        resolve_doc_root(fd, doc_root, sizeof(doc_root));
+		char item_path[PATH_MAX];
+		snprintf(item_path, sizeof(item_path), "%s/%s/%s", root,
+		        def->items_path, item_id);
+		item_remove_path_recursive(item_path);
+	}
 	hyle_source_del(def->id, item_id);
 	return 0;
 }
@@ -438,7 +461,12 @@ static void clear_inv_refs_cb(const source_def_t *target, void *user)
 				        target->id, ref_key, names, values, 1);
 			}
 
-			if (f->file && ctx->doc_root) {
+			if (target->store.ops &&
+			    target->store.ops->put_field) {
+				target->store.ops->put_field(
+				        (source_store_t *)&target->store,
+				        target, ref_key, f->file, remaining);
+			} else if (f->file && ctx->doc_root) {
 				char dir[PATH_MAX];
 				snprintf(
 				        dir, sizeof(dir), "%s/%s/%s",
@@ -489,6 +517,8 @@ XY_IMPL(int, source_clear_inverse_refs,
 
 static int source_scan_items(source_def_t *def)
 {
+	if (def->store.ops && def->store.ops->scan)
+		return def->store.ops->scan(&def->store, def);
 	char doc_root[256] = { 0 };
 	const char *root = resolve_doc_root(0, doc_root, sizeof(doc_root));
 
@@ -585,6 +615,19 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 		return -1;
 	}
 	*copy = *def;
+	/* Phase 5 fallback: if caller did not supply a store, derive from
+	 * flags/items_path (preserves existing registration sites). */
+	if (!copy->store.ops) {
+		extern const source_store_ops_t *source_store_fs_ops(void);
+		extern const source_store_ops_t *source_store_mem_ops(void);
+		if (copy->flags & SOURCE_FLAG_VOLATILE) {
+			copy->store.ops = source_store_mem_ops();
+			copy->store.user = NULL;
+		} else {
+			copy->store.ops = source_store_fs_ops();
+			copy->store.user = (void *)copy->items_path;
+		}
+	}
 
 	fields_hd = hyle_source_register(
 	        def->id, hf, n, def->record_id, def->flags | QM_SORTED, copy);
@@ -616,9 +659,9 @@ XY_IMPL(int, source_register, const source_def_t *, def)
 		}
 	}
 
-	/* Scan filesystem items into the qmaps */
-	if (!(def->flags & SOURCE_FLAG_VOLATILE))
-		source_scan_items(copy);
+	/* Scan persisted items into the qmaps via the dataset's store */
+	if (copy->store.ops && copy->store.ops->scan)
+		copy->store.ops->scan(&copy->store, copy);
 
 	return 0;
 }
@@ -797,37 +840,44 @@ XY_IMPL(int, source_update_item,
 	snprintf(
 	        item_path, sizeof(item_path), "%s/%s/%s", root, def->items_path,
 	        id);
-	if (mkdir(item_path, 0755) != 0 && errno != EEXIST)
-		return -1;
+	if (def && def->store.ops && def->store.ops->put) {
+		if (def->store.ops->put(
+		            (source_store_t *)&def->store, def, id,
+		            data_handle) != 0)
+			return -1;
+	} else {
+		if (mkdir(item_path, 0755) != 0 && errno != EEXIST)
+			return -1;
 
-	for (size_t i = 0; i < def->field_count; i++) {
-		const source_field_t *f = &def->fields[i];
-		const char *val = qmap_get(data_handle, f->name);
-		if (strcmp(f->name, "owner") == 0)
-			continue;
+		for (size_t i = 0; i < def->field_count; i++) {
+			const source_field_t *f = &def->fields[i];
+			const char *val = qmap_get(data_handle, f->name);
+			if (strcmp(f->name, "owner") == 0)
+				continue;
 
-		if (val) {
-			if (f->file) {
-				if (write_item_child_file(
-				            item_path, f->file, val,
-				            strlen(val)) != 0)
-					return -1;
-			}
-		} else {
-			if (f->file) {
-				char file_path[PATH_MAX + 256];
-				snprintf(
-				        file_path, sizeof(file_path), "%s/%s",
-				        item_path, f->file);
-				char *content = slurp_file(file_path);
-				if (content) {
-					free(content);
-				} else if (!source_field_is_multi_reference(
-				                   f->type))
-				{
-					FILE *fp = fopen(file_path, "w");
-					if (fp)
-						fclose(fp);
+			if (val) {
+				if (f->file) {
+					if (write_item_child_file(
+					                item_path, f->file,
+					                val, strlen(val)) != 0)
+						return -1;
+				}
+			} else {
+				if (f->file) {
+					char file_path[PATH_MAX + 256];
+					snprintf(
+					        file_path, sizeof(file_path),
+					        "%s/%s", item_path, f->file);
+					char *content = slurp_file(file_path);
+					if (content) {
+						free(content);
+					} else if (!source_field_is_multi_reference(
+					                   f->type))
+					{
+						FILE *fp = fopen(file_path, "w");
+						if (fp)
+							fclose(fp);
+					}
 				}
 			}
 		}
@@ -839,18 +889,7 @@ XY_IMPL(int, source_update_item,
 		    !f->target_source)
 			continue;
 		const char *val = qmap_get(data_handle, f->name);
-		if (!val || !val[0])
-			continue;
-		char buf[8192];
-		snprintf(buf, sizeof(buf), "%s", val);
-		char *tok, *sv;
-		tok = strtok_r(buf, "\r\n", &sv);
-		while (tok) {
-			str_trim(tok);
-			if (tok[0])
-				source_ensure_entity(f->target_source, tok);
-			tok = strtok_r(NULL, "\r\n", &sv);
-		}
+		source_ensure_tokens(f->target_source, val);
 	}
 
 	int result = source_scan_item(fd, def, id);
@@ -868,8 +907,14 @@ XY_IMPL(int, source_update_item,
 				continue;
 			if (!display[0])
 				continue;
-			write_item_child_file(
-			        item_path, f->file, display, strlen(display));
+			if (def->store.ops && def->store.ops->put_field)
+				def->store.ops->put_field(
+				        (source_store_t *)&def->store, def, id,
+				        f->file, display);
+			else
+				write_item_child_file(
+				        item_path, f->file, display,
+				        strlen(display));
 		}
 	}
 
@@ -1001,6 +1046,22 @@ int ref_normalize(
 	}
 
 	return 0;
+}
+
+/* Single owner for multi-ref ensure+normalize — called from source.c
+ * fallback scan/update and from FS adapter so the strtok/slug pipeline
+ * lives in one place (no duplicate blocks). */
+int
+source_internal_process_multi_ref(
+        const source_field_t *f, const char *dataset_id, char **data)
+{
+	if (!f || !dataset_id || !data || !*data || !(*data)[0])
+		return 0;
+	if (f->type != SOURCE_FIELD_MULTI_REFERENCE || !f->target_source)
+		return 0;
+	source_ensure_tokens(f->target_source, *data);
+	size_t len = strlen(*data);
+	return ref_normalize(dataset_id, f->name, data, &len);
 }
 
 /* Functions implemented in source-http.c */
@@ -1519,6 +1580,21 @@ XY_IMPL(uint32_t, source_setup,
 	if (!sf)
 		return 0;
 	n_sf = impl_source_def_to_source_fields(defs, field_count, sf);
+	/* Phase 5: assign store adapter — volatile → mem, otherwise fs.
+	 * The adapter owns the filesystem-vs-memory decision; generic
+	 * source no longer switches on SOURCE_FLAG_VOLATILE directly
+	 * except for the scan guard (to be removed when store.scan
+	 * fully owns enumeration). */
+	extern const source_store_ops_t *source_store_fs_ops(void);
+	extern const source_store_ops_t *source_store_mem_ops(void);
+	source_store_t init_store;
+	if (flags & SOURCE_FLAG_VOLATILE) {
+		init_store.ops = source_store_mem_ops();
+		init_store.user = NULL;
+	} else {
+		init_store.ops = source_store_fs_ops();
+		init_store.user = (void *)items_path;
+	}
 	if (source_register(&(source_def_t){
 	            .id = source_id,
 	            .key_field = kf,
@@ -1529,6 +1605,7 @@ XY_IMPL(uint32_t, source_setup,
 	            .record_id = record_id,
 	            .flags = flags,
 	            .list_view = list_view,
+	            .store = init_store,
 	    }) != 0)
 	{
 		free(sf);

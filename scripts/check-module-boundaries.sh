@@ -39,4 +39,74 @@ done <<EOF
 $(CDPATH= cd -- "$root" && find mods -type f -name '*.c' -exec grep -n -H '^[[:space:]]*#include[[:space:]]*"[^"]*\.c"' {} +)
 EOF
 
+# -- var/ literals outside storage/registration ---------------------------------
+# Allowed: storage implementation + source adapter + registration declarations
+# (COMPLY §3.5 / §9.6). Feature modules declare their var/ only as
+# source_setup("…","var/<module>") — allow those files for now; M05 will
+# make the backend declaration explicit via source_store descriptor.
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	case "$file" in
+		mods/common/common_storage.c|mods/common/common_storage.h|mods/source/*|mods/poem/*|mods/song/*|mods/grp/*|mods/gig/*) continue ;;
+	esac
+	printf '%s:%s: prohibited var/ literal outside storage/registration: %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n '"[^"]*var/' mods --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
+# -- getpwuid must not appear in site modules (M06) -----------------------------
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	printf '%s:%s: prohibited getpwuid in site module (use auth owner API): %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n 'getpwuid' mods --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
+# -- xy_load allowlist: site modules may declare immediate true deps ------------
+# libxylem is the only cross-.so mechanism; ensure no hard-coded dlopen etc.
+# (Informational: current allowed set is core, common, auth, index, poem, song, grp, gig, mpfd, plus external libaxil-auth)
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	case "$file" in
+		mods/core/*|mods/common/*|mods/auth/*|mods/index/*|mods/poem/*|mods/song/*|mods/grp/*|mods/gig/*|mods/source/*|mods/mpfd/*) continue ;;
+	esac
+	printf '%s:%s: unexpected xy_load outside site modules: %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n 'xy_load' mods --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
+# -- module-name switch in index (M07) ---------------------------------------
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	printf '%s:%s: prohibited module-name switch in index (M07): %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n 'idx_select_fields_for|idx_display_name|strcmp\([^)]*"(song|poem|gig|grp)"' mods/index --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
+# -- direct hyle row writes bypassing source (M05) ----------------------------
+# Ordered sources (grp.songs, gig.songs) via hyle directly are sanctioned
+# until they migrate to DSV-style adapter; item sources must use source.
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	case "$file" in
+		mods/source/*|external/hyle/*|mods/grp/*|mods/gig/*) continue ;;
+	esac
+	printf '%s:%s: prohibited direct hyle_source_put/del outside source (use source ops): %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n 'hyle_source_(put|del|register)' mods --glob '*.c' --glob '*.h' 2>/dev/null | grep -v 'mods/source/source\.c:.*hyle_source_register' || true)
+EOF
+
+# -- W06 wasm-native leakage (D18) ------------------------------------------
+if ls "$root"/htdocs/*.wasm >/dev/null 2>&1; then
+	if ! sh "$root/scripts/check-wasm-imports.sh" >/dev/null 2>&1; then
+		printf 'W06: wasm imports native symbols (check scripts/check-wasm-imports.sh)\n' >&2
+		failed=1
+	fi
+fi
+
 exit "$failed"

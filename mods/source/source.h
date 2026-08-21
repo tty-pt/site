@@ -1,6 +1,7 @@
 #ifndef SOURCE_H
 #define SOURCE_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <json-c/json.h>
@@ -64,7 +65,29 @@ typedef struct {
 /* Source borrows list-view strings and fields for the registered source's
  * lifetime. Module declarations must therefore have static storage. */
 
+/* Persistence adapter — COMPLY.md §9.3 (M05). Generic source does not
+ * assume filesystem; each dataset declares a store. Stage 1: interface
+ * declared here, FS adapter in source_store_fs.c. */
+struct source_def_s;
+typedef struct source_store_s source_store_t;
 typedef struct {
+	int (*scan)(source_store_t *store, const struct source_def_s *def);
+	int (*load)(source_store_t *store, const struct source_def_s *def,
+	            const char *id, unsigned *row_out);
+	int (*put)(source_store_t *store, const struct source_def_s *def,
+	           const char *id, unsigned data_handle);
+	int (*put_field)(source_store_t *store,
+	                 const struct source_def_s *def, const char *id,
+	                 const char *field, const char *value);
+	int (*del)(source_store_t *store, const struct source_def_s *def,
+	           const char *id);
+} source_store_ops_t;
+struct source_store_s {
+	const source_store_ops_t *ops;
+	void *user;
+};
+
+typedef struct source_def_s {
 	const char *id;
 	const char *key_field;
 	const char *items_path;
@@ -78,6 +101,7 @@ typedef struct {
 	unsigned flags;
 	const source_list_view_t *list_view;
 	void *user;
+	source_store_t store;
 } source_def_t;
 
 typedef int (*source_each_cb_t)(const source_def_t *, void *);
