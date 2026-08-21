@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
-#include <pwd.h>
 
 #include "../auth/auth.h"
 #include "../common/common.h"
@@ -53,6 +52,20 @@ XY_IMPL(source_def_t *, source_find, const char *, dataset_id)
 	if (!dataset_id || !dataset_id[0])
 		return NULL;
 	return (source_def_t *)hyle_source_get_user(dataset_id);
+}
+
+XY_IMPL(int, source_item_exists,
+	const char *, dataset_id,
+	const char *, item_id)
+{
+	const source_def_t *def;
+
+	if (!item_id || !item_id[0])
+		return 0;
+	def = source_find(dataset_id);
+	if (!def || !def->fields_hd)
+		return 0;
+	return qmap_pos(def->fields_hd, item_id) != QM_MISS;
 }
 
 static void resolve_ref_append(
@@ -265,7 +278,6 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 	const char *names[64];
 	const char *values[64];
 	size_t k = 0;
-	int owner_read = 0;
 	char *bufs[64];
 	size_t nb = 0;
 
@@ -311,30 +323,6 @@ static int source_scan_item(int fd, const source_def_t *def, const char *id)
 			values[k] = data;
 			k++;
 			bufs[nb++] = data;
-			if (strcmp(f->name, "owner") == 0 && data[0])
-				owner_read = 1;
-		}
-	}
-
-	/* Fallback: if schema has an "owner" field but no owner file was
-	 * written (e.g. running as root — item_record_ownership uses chown
-	 * instead of writing a file), resolve from filesystem directory
-	 * owner via getpwuid. */
-	if (!owner_read && k < 64) {
-		int has_owner = 0;
-		for (size_t i = 0; i < def->field_count; i++) {
-			if (strcmp(def->fields[i].name, "owner") == 0) {
-				has_owner = 1;
-				break;
-			}
-		}
-		if (has_owner) {
-			struct passwd *pw = getpwuid(st.st_uid);
-			if (pw && pw->pw_name) {
-				names[k] = "owner";
-				values[k] = pw->pw_name;
-				k++;
-			}
 		}
 	}
 
@@ -815,6 +803,8 @@ XY_IMPL(int, source_update_item,
 	for (size_t i = 0; i < def->field_count; i++) {
 		const source_field_t *f = &def->fields[i];
 		const char *val = qmap_get(data_handle, f->name);
+		if (strcmp(f->name, "owner") == 0)
+			continue;
 
 		if (val) {
 			if (f->file) {
@@ -835,9 +825,6 @@ XY_IMPL(int, source_update_item,
 				} else if (!source_field_is_multi_reference(
 				                   f->type))
 				{
-					if (strcmp(f->name, "owner") == 0 &&
-					    geteuid() == 0)
-						continue;
 					FILE *fp = fopen(file_path, "w");
 					if (fp)
 						fclose(fp);
@@ -1252,6 +1239,14 @@ XY_IMPL(unsigned, source_get_schema_hd, const char *, dataset_id)
 	return def->schema_hd;
 }
 
+XY_IMPL(const source_list_view_t *, source_get_list_view,
+	const char *, dataset_id)
+{
+	const source_def_t *def = source_find(dataset_id);
+
+	return def ? def->list_view : NULL;
+}
+
 XY_MODULE_API void xy_install(void)
 {
 	source_install_routes();
@@ -1493,7 +1488,8 @@ XY_IMPL(uint32_t, source_setup,
 	const char *, items_path,
 	const bud_field_desc_t *, defs,
 	int, field_count,
-	unsigned, flags)
+	unsigned, flags,
+	const source_list_view_t *, list_view)
 {
 	char record_name[256];
 	const char *p;
@@ -1532,6 +1528,7 @@ XY_IMPL(uint32_t, source_setup,
 	            .field_count = (size_t)n_sf,
 	            .record_id = record_id,
 	            .flags = flags,
+	            .list_view = list_view,
 	    }) != 0)
 	{
 		free(sf);

@@ -10,7 +10,8 @@
 
 A feature should be *one call away*: `register_standard_item_handlers("song",
 &handlers)` registers five routes with auth, ownership, and CSRF baked in.
-`with_item_access(...)` wraps the entire request-preamble dance in one call.
+`with_module_item_access(...)` wraps the entire request-preamble dance in one
+call without exposing storage paths.
 `index_open("Song", "song.items", ...)` gives a module a full CRUD surface.
 `source_setup(...)` declares a dataset and the query/update machinery just
 works.
@@ -70,10 +71,11 @@ hooks mean "no custom handler; use the generic one". A module supplies only its
 novelty.
 
 ### 4.2 Flags for behavior
-`with_item_access(fd, body, path, ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|...,
-notfound, forbidden, cb, user)` — auth + lookup + error responses, one call;
-the handler receives a fully-populated `item_ctx_t`. `TPARAM_*`, `SOURCE_FLAG_*`
-follow the same pattern: a small flags word, not a dozen bool params.
+`with_module_item_access(fd, body, module,
+ICTX_NEED_LOGIN|ICTX_NEED_OWNERSHIP|..., notfound, forbidden, cb, user)` — path
+resolution + auth + lookup + error responses, one call; the handler receives a
+fully-populated `item_ctx_t`. `TPARAM_*`, `SOURCE_FLAG_*` follow the same
+pattern: a small flags word, not a dozen bool params.
 
 ### 4.3 Opaque handles + documented ownership
 - `qmap` handles are `unsigned`; **never `free()` a qmap value**; `qmap_put`
@@ -139,7 +141,7 @@ keeps search live.
 ## 7. Checklist: adding a feature/module
 
 - [ ] Reuse: `index_open` + `register_standard_item_handlers` +
-      `with_item_access` + `source_setup`/`source_query` cover 90% of it?
+      `with_module_item_access` + `source_setup`/`source_query` cover 90% of it?
 - [ ] If you wrote the same 10 lines twice, extract a helper instead.
 - [ ] New cross-module function? Header with `#ifndef MODULE_IMPL` guard,
       `XY_DECL`/`XY_IMPL`, shared constants outside the guard.
@@ -151,7 +153,8 @@ keeps search live.
 
 ## 8. Anti-patterns
 
-- 30-line preambles in handlers that should be a `with_item_access` call.
+- 30-line preambles in handlers that should be a
+  `with_module_item_access` call.
 - Writing qmap rows directly (FTS freezes).
 - Native-only symbols leaking into wasm units (`--allow-undefined` hides it
   until the browser crashes).

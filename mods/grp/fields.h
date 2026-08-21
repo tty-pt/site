@@ -34,4 +34,20 @@ static const bud_field_desc_t grp_fields[] = {
 
 #define GRP_FIELD_COUNT (sizeof(grp_fields) / sizeof(grp_fields[0]) - 1)
 
+#ifndef __wasm__
+static const source_list_field_t grp_list_fields[] = {
+	{ "title", "Title" },
+};
+
+static const source_list_view_t grp_list_view = {
+	"group",
+	grp_list_fields,
+	sizeof(grp_list_fields) / sizeof(grp_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+#endif
+
 #endif

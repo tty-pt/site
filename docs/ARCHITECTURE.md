@@ -121,8 +121,17 @@ the process chroots**. Consequences:
    MODULE_IMPL` guard.
 
 Handler registration helper: `register_standard_item_handlers()` in common;
-`with_item_access(fd, body, path, flags, notfound, forbidden, cb, user)` in
-auth.h handles login/ownership/CSRF.
+`with_module_item_access(fd, body, module, flags, notfound, forbidden, cb,
+user)` in auth.h resolves the validated item path and handles
+login/ownership/CSRF.
+
+Auth is the single ownership authority. `item_owner_record` always persists a
+registered site username in the item `owner` file and, when root, also applies
+the mapped UID to the directory. `item_owner_read` and `item_owner_check` use
+that file for both display and enforcement; host passwd lookup is not an
+identity fallback. Legacy root-created items are migrated offline with
+`scripts/migrate-owner-files.sh --apply`, then refreshed by restarting the
+server.
 
 ## 6. Data-layer invariants
 
@@ -136,6 +145,11 @@ auth.h handles login/ownership/CSRF.
 - Multi-ref field values are stored **newline-separated**; the C
   `hyle_parse_query` creates one filter per repeated `key=val` param (the Rust
   crate instead joins with commas — keep the discrepancy in mind).
+- Item sources may carry a borrowed, static `source_list_view_t`. Feature
+  modules own its ordered fields, labels, display name, default sort, and
+  optional content-search presentation. Native `list_fill_state` resolves the
+  descriptor and serializes only resolved strings into the SSR/WASM state;
+  index does not switch on feature module names.
 - Searchable/FTS pre-filtering and multi-ref pre-filtering happen in
   `hyle_source_query` before `hyle_apply_view`. See `docs/FILTERS.md`.
 
@@ -169,8 +183,8 @@ auth.h handles login/ownership/CSRF.
 
 Logs: `debug/builds/`, `debug/runtime/axil.log`, `debug/tests/`.
 
-Known pre-existing failure: `gig` unit-test step 6 (`data.txt empty`)
-fails on clean main — unrelated to any change.
+Gig unit-test step 6 (`data.txt` seeding) passes after the 2026-08-21 source
+data migration (`AUDIT` E9).
 
 ## 9. Related docs
 

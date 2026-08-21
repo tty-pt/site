@@ -38,27 +38,24 @@ explicit and minimal.
 2. **Static by default.** Non-static symbols are `XY_IMPL`'d API or
    documented exceptions (`docs/DESIGN.md:115`).
 3. **Own your `var/<you>`; delegate the rest.** Path helpers live in
-   `mods/common/common_storage.c:271` (`item_path_build_root`,
-   `module_path_build`, `build_owner_path`). Never hardcode
-   `"var/<mod>"` (`mods/poem/poem.c:62`, `mods/song/song.c:21`,
-   `mods/gig/gig.c:25`, `mods/grp/grp.c:23`, `mods/index/index.c:354`
-   all do) and never touch a sibling dataset's `var/` directory
-   (`mods/gig/gig.c:1136` checking `var/grp`). `source` owns scanning
-   and `var/` layout (`mods/source/source.c:544`); others call it.
+   `mods/common/common_storage.c` (`item_path_build_root`,
+   `module_path_build`, `build_owner_path`). Route handlers pass module names
+   to `with_module_item_access`; they never hardcode `"var/<mod>"` or touch a
+   sibling dataset's directory. `source` owns scanning and persistence layout;
+   others call it.
 4. **All row writes through hyle.** `source_update_item` /
    `source_delete_item` → `hyle_source_put`/`del` so `stoma_dirty`
    stays live (`docs/DESIGN.md:148`). Direct `write_meta_file` /
    `fopen("var/.../owner")` without the hyle path freezes FTS.
 5. **Single ownership for cross-cutting concerns.** `auth` owns
-   `item_check_ownership` (`mods/auth/auth.c:152`), `common_storage`
+   `item_owner_record`/`read`/`check` (`mods/auth/auth.c`), `common_storage`
    owns path building and safe-id checks (`mods/common/common_storage.c:17`
    `is_safe_id`), `source` owns scan/query. Do not reimplement owner
    path, safe-id, or CSRF checks in a second module.
-6. **No module hardcodes another's fields.** `mods/index/ux/list.c:3`
-   `idx_select_fields_for` switching on `song→"title,type,author"` must
-   become table-driven (`fields.h` / `bud_field_desc_t` per
-   `docs/DESIGN.md:87`). Adding a field is one row in that module's
-   table.
+6. **No module hardcodes another's fields.** Each module declares its ordered
+   list fields and labels in a framework-neutral `source_list_view_t` beside
+   its field table. `list_fill_state` consumes that registration without a
+   feature-name switch in index.
 
 ### 1.3 How we know we are failing today
 
@@ -75,10 +72,10 @@ explicit and minimal.
   now owns `#chrome-root`, while `mods/common/ux/site_ui.c:456` owns the
   local page tree. The corresponding `site_chrome.wasm` and multi-root
   loader do not exist, so the SSR contract is ahead of the runtime.
-- **Duplicate ownership / path logic:** owner check in `auth`, `index`,
-  and `source` (`mods/source/source.c:319` `getpwuid` fallback);
-  `is_safe_id` bypassed by direct `snprintf("var/%s",module)` in
-  `mods/index/index.c:354`.
+- **Ownership, path encapsulation, and list metadata were fixed on
+  2026-08-21:** auth is the identity authority, source no longer uses host
+  `getpwuid`, module/item IDs pass through common builders, and index consumes
+  module-owned list-view registrations.
 - **`source` writing sibling datasets:** `mods/source/source.c:236`
   `mkdir(dir)` for `target->items_path/slug` during ref ensure, and
   `mods/source/source.c:454` clearing inverse refs by walking all
@@ -91,8 +88,9 @@ explicit and minimal.
       guard.
 - [ ] No `#include "*.c"` from another module (except `ux/detail.c`
       including a WASM-safe `site_ui*.c`/`list.c` pair).
-- [ ] No `"var/` literal outside `common_storage` / `source`; use
-      `item_path_build_root` / `module_path_build`.
+- [ ] No `"var/` literal outside `common_storage` / `source` registration; use
+      `with_module_item_access`, `item_path_build_root`, or
+      `module_path_build`.
 - [ ] Writes go through `source_update_item`/`source_delete_item`.
 - [ ] Did not add a `switch(module)` in `index`/`common` to handle a
       per-module field.

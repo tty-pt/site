@@ -11,9 +11,9 @@
 /* ---------------------------------------------------------------------------
  * Item handler context.
  *
- * Standard preamble for handlers operating on items under
- * "<doc_root>/<items_path>/<PATTERN_PARAM_ID>". Populated by item_ctx_load()
- * which also enforces login/ownership and writes error responses on failure.
+ * Standard preamble for handlers operating on a module item. Populated by
+ * module_item_ctx_load(), which resolves the storage path and also enforces
+ * login/ownership and writes error responses on failure.
  * ------------------------------------------------------------------------- */
 
 typedef struct {
@@ -46,12 +46,27 @@ typedef int (*item_handler_cb)(
 
 #ifndef ITEM_IMPL
 
-/* Ownership helper */
-
-/* Check if username owns item_path.
- * When root: compare stat uid. When non-root: read owner file. */
-XY_DECL(int, item_check_ownership,
+/* Canonical ownership operations. The owner file stores the site username;
+ * filesystem UID is only an additional enforcement detail when root. */
+XY_DECL(int, item_owner_record,
 	const char *, item_path,
+	const char *, username);
+XY_DECL(int, item_owner_read,
+	const char *, item_path,
+	char *, out,
+	size_t, out_sz);
+XY_DECL(int, item_owner_check,
+	const char *, item_path,
+	const char *, username);
+XY_DECL(int, module_item_owner_record,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username);
+XY_DECL(int, module_item_owner_check,
+	int, fd,
+	const char *, module,
+	const char *, id,
 	const char *, username);
 
 XY_DECL(item_access_t, item_access_status,
@@ -69,16 +84,16 @@ XY_DECL(int, item_require_access,
 /* Populate an item_ctx_t from the request; enforces flags and responds
  * with an appropriate error on failure. Returns 0 on success, non-zero
  * if the handler should return (response already sent). */
-XY_DECL(int, item_ctx_load,
+XY_DECL(int, module_item_ctx_load,
 	item_ctx_t *, ctx,
 	int, fd,
-	const char *, items_path,
+	const char *, module,
 	unsigned, flags);
 
-XY_DECL(int, with_item_access,
+XY_DECL(int, with_module_item_access,
 	int, fd,
 	char *, body,
-	const char *, items_path,
+	const char *, module,
 	unsigned, flags,
 	const char *, not_found_msg,
 	const char *, forbidden_msg,

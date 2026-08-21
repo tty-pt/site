@@ -47,6 +47,10 @@ endif
 
 $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
+		rm -f $@.d; \
+		for src in $($*-src) $(WASM_COMMON_SRC); do \
+			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
+		done; \
 		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
@@ -56,7 +60,12 @@ dirs:
 	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
 $(TARGET): $(SRC) $(MAKEFILE_DEPS)
+	@rm -f $@.d; for src in $(SRC); do \
+		$(CC) $(CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
+	done
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
+
+-include $(TARGET).d $(addsuffix .d,$(WASM_TARGETS))
 
 wasm: $(WASM_TARGETS)
 
@@ -67,6 +76,7 @@ wasm-debug:
 clean:
 	if [ "$(WASM_ONLY)" != "1" ]; then rm -f $(TARGET); fi
 	rm -f $(WASM_TARGETS)
+	rm -f $(TARGET).d $(addsuffix .d,$(WASM_TARGETS))
 
 distclean: clean
 

@@ -85,4 +85,22 @@ static const bud_field_desc_t song_fields[] = {
 
 #define SONG_FIELD_COUNT (sizeof(song_fields) / sizeof(song_fields[0]) - 1)
 
+#ifndef __wasm__
+static const source_list_field_t song_list_fields[] = {
+	{ "title", "Title" },
+	{ "type", "Type" },
+	{ "author", "Author" },
+};
+
+static const source_list_view_t song_list_view = {
+	"song",
+	song_list_fields,
+	sizeof(song_list_fields) / sizeof(song_list_fields[0]),
+	NULL,
+	"data",
+	"Content",
+	"lyrics / chords... e.g. \"a quiet place\"",
+};
+#endif
+
 #endif

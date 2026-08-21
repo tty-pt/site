@@ -58,9 +58,9 @@ static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int poem_edit_get_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "var/poem", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        NULL, NULL, poem_edit_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "poem", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	        NULL, poem_edit_auth, NULL);
 }
 
 static int
@@ -70,6 +70,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	(void)user_data;
 	char path[256];
 	char page_title[512];
+	char owner[64] = { 0 };
 
 	poem_cache_t meta;
 	poem_meta_read(ctx->item_path, &meta);
@@ -85,13 +86,12 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	if (!body_content)
 		body_content = strdup("");
 
-	int is_owner =
-	        (ctx->username && ctx->username[0] &&
-	         strcmp(ctx->username, meta.owner) == 0);
+	item_owner_read(ctx->item_path, owner, sizeof(owner));
+	int is_owner = item_owner_check(ctx->item_path, ctx->username);
 	snprintf(path, sizeof(path), "/poem/%s", ctx->id);
 	snprintf(page_title, sizeof(page_title), "poem: %s", meta.title);
 
-	bud_node *frag = poem_render_detail_body(body_content, meta.owner);
+	bud_node *frag = poem_render_detail_body(body_content, owner);
 	free(body_content);
 
 	if (!frag)
@@ -108,8 +108,8 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 static int poem_detail_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "var/poem", 0, NULL, NULL, poem_detail_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "poem", 0, NULL, NULL, poem_detail_auth, NULL);
 }
 
 /* GET /poem/:id/pt_PT.html — allowlisted body file, public read.
@@ -136,8 +136,8 @@ poem_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 static int poem_body_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "var/poem", 0, NULL, NULL, poem_body_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "poem", 0, NULL, NULL, poem_body_auth, NULL);
 }
 
 void xy_install(void)
@@ -146,7 +146,7 @@ void xy_install(void)
 
 	source_setup(
 	        "poem.items", NULL, sizeof(poem_cache_t), "var/poem",
-	        poem_fields, POEM_FIELD_COUNT, 0);
+	        poem_fields, POEM_FIELD_COUNT, 0, &poem_list_view);
 
 	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL, NULL);
 	standard_item_handlers_t handlers = {

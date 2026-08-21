@@ -47,7 +47,8 @@ or hyle still sees 0), **F15** (root-doc deletion; user declined),
 
 - Framework-pair model and hyle neutrality are real and enforced.
 - No-JS works; wasm is additive.
-- HTML mutating routes generally use `with_item_access` + ownership + CSRF.
+- HTML mutating routes generally use `with_module_item_access` + ownership +
+  CSRF.
 - QSESSION: `HttpOnly; SameSite=Lax` (`libaxil-auth.c:34`); tokens from `/dev/urandom`.
 - Passwords: bcrypt `$2b$` cost 12; username allowlist `[A-Za-z0-9_-]` 2–32.
 - `get_cookie` tokenizes correctly at cookie boundaries (CSRF parser should reuse it).
@@ -87,15 +88,15 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 | ID | What | File |
 |---|---|---|
 | **A7** | Unchecked `realloc`/`malloc` — NULL checks on 6 alloc sites; safe fallback on global `input` realloc | `external/axil/src/libaxil.c:544,620,659,701,1243,2141` |
-| **C3** | Dataset POST ownership + mandatory CSRF — `item_check_ownership` before write/delete; CSRF always validated | `mods/source/source-http.c:164,678,738,840` |
+| **C3** | Dataset POST ownership + mandatory CSRF — `item_owner_check` before write/delete; CSRF always validated | `mods/source/source-http.c` |
 | **F9** | `core` ignores `xy_load` errors — warn on top-level failure, skip dependent modules; check `xy_load` in loop | `mods/core/core.c:13,27,89` |
 
 ### Fix batch 7 — 2026-08-20
 
 | ID | What | File |
 |---|---|---|
-| **C5** | Fail-closed ownership — removed stat-based uid fallback; `item_record_ownership` returns -1 on failure | `mods/auth/auth.c:140-159`, `mods/index/index.c:1032-1050` |
-| **C6** | ID sanitization — exposed `is_safe_id`; validate in `item_ctx_load`, `source_update_item`, POST/PUT/DELETE handlers | `mods/common/common.h`, `mods/common/common_storage.c:17`, `mods/auth/auth.c:228`, `mods/source/source.c:745`, `mods/source/source-http.c:669,740,845` |
+| **C5** | Fail-closed ownership — canonical owner operations return errors on missing/invalid metadata | `mods/auth/auth.c` |
+| **C6** | ID sanitization — exposed `is_safe_id`; validate module/item IDs in `module_item_ctx_load`, `source_update_item`, POST/PUT/DELETE handlers | `mods/common/common.h`, `mods/common/common_storage.c`, `mods/auth/auth.c`, `mods/source/source.c`, `mods/source/source-http.c` |
 | **D1** | Poem XSS — `bud_raw(content)` → `lx_text(content)` + `whitespace-pre-wrap` | `mods/poem/ux/detail.c:12` |
 | **D2** | Textarea XSS — strip `</` from values before `bud_raw` in textarea branch | `mods/common/ux/site_ui.c:555-580` |
 | **D4** | Media URL validation — YouTube ID allowlist `[A-Za-z0-9_-]{11}`, HTTPS-only URL check | `mods/common/ux/site_ui.c:340-370` |
@@ -131,6 +132,13 @@ Submodule + site fixes (axil, axil-auth, site call sites):
 | **E10** | DSV load: `hyle_source_put` only; no save from `load_fn` | `mods/source/dsv.c` |
 | **E15** | API body heap 256 KiB + 413 on truncation | `mods/source/source-http.c:97-133` |
 | **D13** | Stable gig media slot (always same `div > bud_raw`) | `mods/gig/ux/detail.c:428-445` |
+
+### Fix batch 10 — 2026-08-21
+
+| ID | What | File |
+|---|---|---|
+| **E9** | Gig repertoire seeding reads normalized group formats and repertoire rows from registered source data; no sibling file read | `mods/gig/gig.c` |
+| **C8** | One auth-owned identity source for recording, reading, enforcement, and display; UID is secondary enforcement only | `mods/auth/auth.c`, `scripts/migrate-owner-files.sh` |
 
 ---
 
@@ -444,20 +452,6 @@ client in the same change.
 
 **Land:** Site.
 
-#### C8 — Display owner ≠ enforcement owner
-
-**Severity:** Medium
-**Where:** `mods/poem/poem.c:89-91`; `mods/source/source.c:330-334`
-
-UI uses `meta.owner` / `getpwuid` of host passwd. Enforcement uses
-`item_check_ownership` (uid or owner file). Root mode never writes the
-file.
-
-**Fix:** One function for both UI and enforcement. Never `getpwuid` for
-site usernames.
-
-**Land:** Site.
-
 ---
 
 ### D. XSS / bud / WASM
@@ -511,21 +505,6 @@ Four 256-byte slots. Fifth formatted attr in one `lx_el` aliases.
 ---
 
 ### E. Data layer (site + hyle + stoma + qmap)
-
-#### E9 — Gig empty `data.txt`
-
-**Severity:** Medium (known pre-existing)
-**Where:** `mods/gig/gig.c:99-152`, `:316-350`;
-`mods/gig/test.sh:91-93`
-
-Save runs even when 0 songs matched → empty file. Format-line vs
-type-slug mismatch in `get_random_repertoire_by_type`. Test now WARNs
-instead of failing.
-
-**Fix:** Don't save empty partition / fail create on zero songs. Match
-via in-memory grp.songs. Restore hard fail in `test.sh`.
-
-**Land:** Site.
 
 #### E13 — `hyle_source_put` ignores `qmap_field_put` failure
 
@@ -789,14 +768,7 @@ open — bumping the define is still a manual step.
 | ID | What |
 |---|---|
 | **C7** | Prefs: POST + CSRF only (**deferred** — WASM depends on GET write) |
-| **C8** | One owner source (deferred) |
 | **B2** | CSRF on login/register; POST-only logout |
-
-### Phase 2 — Data layer correctness (site)
-
-| ID | What |
-|---|---|
-| **E9** | Gig empty `data.txt` |
 
 ### Phase 3 — WASM / build / infra (site)
 

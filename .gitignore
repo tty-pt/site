@@ -4,6 +4,7 @@
 /htdocs/*
 *.so
 *.o
+*.d
 *.swp
 /deno.lock
 /.cache

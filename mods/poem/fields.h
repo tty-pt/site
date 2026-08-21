@@ -33,4 +33,21 @@ static const bud_field_desc_t poem_fields[] = {
 
 #define POEM_FIELD_COUNT (sizeof(poem_fields) / sizeof(poem_fields[0]) - 1)
 
+#ifndef __wasm__
+static const source_list_field_t poem_list_fields[] = {
+	{ "title", "Title" },
+	{ "owner", "Owner" },
+};
+
+static const source_list_view_t poem_list_view = {
+	"poem",
+	poem_list_fields,
+	sizeof(poem_list_fields) / sizeof(poem_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+#endif
+
 #endif

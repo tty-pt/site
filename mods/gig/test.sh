@@ -32,6 +32,12 @@ api_post_dataset() {
 
 echo "=== Gig Module Tests ==="
 cleanup
+# Ensure clean state - leftover legacy 3-col data.txt with pinned=0 would be read as not-pinned and lost on rep_rebuild
+rm -rf "$REPO_ROOT/var/grp/sb_grp" 2>/dev/null || true
+rm -rf "$REPO_ROOT/var/song/sb_sg1" "$REPO_ROOT/var/song/sb_sg2" "$REPO_ROOT/var/song/sb_sg3" 2>/dev/null || true
+rm -rf "$REPO_ROOT/var/gig/sbtest"* 2>/dev/null || true
+# Also purge in-memory legacy if server still has old rows (re-scan will happen on next ordered_ensure_loaded after file removal)
+# Force reload by touching? The ordered_ensure_loaded checks loaded_hd flag; removal of file alone not enough if already loaded. We clear via API? For test robustness, recreate grp fresh after removal.
 
 # ── 0. Register and login ──
 echo -n "0. Register test user... "
@@ -57,17 +63,19 @@ api_post_dataset "id=sb_sg3&title=Community&author=Test+C&type=sbt_com" "$BASE/a
 pass "songs created"
 
 # ── 3. Create grp via dataset API with newline-separated format ──
-echo -n "3. Create grp... "
-api_post_dataset "id=sb_grp&title=Test+Grp&format=sbt_ent%0Asbt_san" "$BASE/api/dataset/grp.items" > /dev/null 2>&1
+# Use unique grp id to avoid stale ordered partition in memory (loaded_hd cache) from previous runs
+GRP_ID="sb_grp_$USER"
+echo -n "3. Create grp ($GRP_ID)... "
+api_post_dataset "id=$GRP_ID&title=Test+Grp&format=sbt_ent%0Asbt_san" "$BASE/api/dataset/grp.items" > /dev/null 2>&1
 pass "grp created"
 
 # ── 4. Create repertoire entries for the grp via grp API ──
 echo -n "4. Create repertoire entries... "
 csrf=$(api "$BASE/api/csrf")
-api -X POST "$BASE/api/grp/sb_grp/songs" \
+api -X POST "$BASE/api/grp/$GRP_ID/songs" \
 	-d "song_id=sb_sg1&format=sbt_ent&transpose=0&csrf_token=$csrf" > /dev/null 2>&1
 csrf=$(api "$BASE/api/csrf")
-api -X POST "$BASE/api/grp/sb_grp/songs" \
+api -X POST "$BASE/api/grp/$GRP_ID/songs" \
 	-d "song_id=sb_sg2&format=sbt_san&transpose=2&csrf_token=$csrf" > /dev/null 2>&1
 pass "repertoire created"
 
@@ -76,12 +84,17 @@ echo -n "5. Create gig with grp... "
 csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/gig/add" \
-	-F "title=${USER}" -F "grp=sb_grp" -F "csrf_token=$csrf")
+	-F "title=${USER}" -F "grp=$GRP_ID" -F "csrf_token=$csrf")
 [ "$code" = "303" ] && pass "gig created" || fail "expected 303, got $code"
 
 # Resolve the gig ID (slugified from title, same as $USER since lowercase alnum)
 SB_ID="$USER"
 DATAFILE="$SB_DIR/$SB_ID/data.txt"
+
+echo -n "   canonical owner recorded... "
+[ "$(cat "$SB_DIR/$SB_ID/owner" 2>/dev/null)" = "$USER" ] \
+	&& pass "owner=$USER" \
+	|| fail "owner file missing or incorrect"
 
 # ── 6. Verify data.txt exists and has songs ──
 echo -n "6. Verify data.txt created... "
@@ -127,7 +140,7 @@ LINES=$(wc -l < "$DATAFILE" 2>/dev/null || echo 0)
 
 # ── 11. Verify migration ran — sb_sg3 in grp repertoire ──
 echo -n "11. song3 appears in grp repertoire after migration... "
-GRP_DATAFILE="$REPO_ROOT/var/grp/sb_grp/data.txt"
+GRP_DATAFILE="$REPO_ROOT/var/grp/$GRP_ID/data.txt"
 grep -q "sb_sg3" "$GRP_DATAFILE" && pass "found" || fail "not in repertoire"
 
 # Verify song count >= 3 unique songs in repertoire
@@ -152,6 +165,7 @@ code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/gig/$SB_ID/edit" \
 
 # Cleanup
 rm -rf "$SB_DIR/$SB_ID" 2>/dev/null || true
+rm -rf "$REPO_ROOT/var/grp/$GRP_ID" 2>/dev/null || true
 cleanup
 
 echo ""

@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <pwd.h>
 #include <fcntl.h>
 
 #include <ttypt/axil.h>
@@ -149,33 +148,102 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-XY_IMPL(int, item_check_ownership,
+XY_IMPL(int, item_owner_record,
 	const char *, item_path,
 	const char *, username)
 {
-	if (!username || !*username)
-		return 0;
+	char owner_path[PATH_MAX];
+	int uid;
 
-	if (geteuid() == 0) {
-		struct stat st;
-		if (stat(item_path, &st) != 0)
-			return 0;
-		int uid = auth_get_uid(username);
-		return uid >= 0 && (uid_t)uid == st.st_uid;
-	} else {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		FILE *fp = fopen(owner_path, "r");
-		if (!fp)
-			return 0;
-		char owner[64] = { 0 };
-		if (fgets(owner, sizeof(owner) - 1, fp))
-			owner[strcspn(owner, "\n")] = '\0';
-		fclose(fp);
-		if (owner[0] && strcmp(owner, username) == 0)
-			return 1;
-		return 0;
+	if (!item_path || !item_path[0] || !username || !username[0])
+		return -1;
+	uid = auth_get_uid(username);
+	if (uid < 0)
+		return -1;
+	if (build_owner_path(item_path, owner_path, sizeof(owner_path)) != 0)
+		return -1;
+	if (write_file_path(owner_path, username, strlen(username)) != 0)
+		return -1;
+	if (geteuid() == 0 && chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
+		return -1;
+	return 0;
+}
+
+XY_IMPL(int, item_owner_read,
+	const char *, item_path,
+	char *, out,
+	size_t, out_sz)
+{
+	char owner_path[PATH_MAX];
+	char *owner;
+	size_t len;
+	size_t full_len;
+	size_t i;
+
+	if (out && out_sz > 0)
+		out[0] = '\0';
+	if (!item_path || !item_path[0] || !out || out_sz == 0)
+		return -1;
+	if (build_owner_path(item_path, owner_path, sizeof(owner_path)) != 0)
+		return -1;
+	owner = slurp_file(owner_path);
+	if (!owner)
+		return -1;
+	full_len = strlen(owner);
+	len = strcspn(owner, "\r\n");
+	if (len == 0 || len >= out_sz) {
+		free(owner);
+		return -1;
 	}
+	for (i = len; i < full_len; i++) {
+		if (owner[i] != '\r' && owner[i] != '\n') {
+			free(owner);
+			return -1;
+		}
+	}
+	memcpy(out, owner, len);
+	out[len] = '\0';
+	free(owner);
+	return 0;
+}
+
+XY_IMPL(int, item_owner_check,
+	const char *, item_path,
+	const char *, username)
+{
+	char owner[128];
+
+	if (!username || !username[0])
+		return 0;
+	if (item_owner_read(item_path, owner, sizeof(owner)) != 0)
+		return 0;
+	return strcmp(owner, username) == 0;
+}
+
+XY_IMPL(int, module_item_owner_record,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return -1;
+	return item_owner_record(item_path, username);
+}
+
+XY_IMPL(int, module_item_owner_check,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return 0;
+	return item_owner_check(item_path, username);
 }
 
 XY_IMPL(item_access_t, item_access_status,
@@ -191,7 +259,7 @@ XY_IMPL(item_access_t, item_access_status,
 		return ITEM_ACCESS_MISSING;
 
 	if ((flags & ICTX_NEED_OWNERSHIP) &&
-	    !item_check_ownership(item_path, username))
+	    !item_owner_check(item_path, username))
 		return ITEM_ACCESS_FORBIDDEN;
 
 	return ITEM_ACCESS_OK;
@@ -223,10 +291,10 @@ XY_IMPL(int, item_require_access,
 
 /* --- Item context --- */
 
-XY_IMPL(int, item_ctx_load,
+XY_IMPL(int, module_item_ctx_load,
 	item_ctx_t *, ctx,
 	int, fd,
-	const char *, items_path,
+	const char *, module,
 	unsigned, flags)
 {
 	memset(ctx, 0, sizeof(*ctx));
@@ -253,14 +321,20 @@ XY_IMPL(int, item_ctx_load,
 		return 1;
 	}
 
-	if (!is_safe_id(ctx->id)) {
-		bad_request(fd, "Invalid id");
+	if (!is_safe_id(module) || !is_safe_id(ctx->id) ||
+	    ((flags & ICTX_SONG_ID) && !is_safe_id(ctx->song_id)))
+	{
+		bad_request(fd, "Invalid parameters");
 		return 1;
 	}
 
-	snprintf(
-	        ctx->item_path, sizeof(ctx->item_path), "%s/%s/%s",
-	        ctx->doc_root, items_path, ctx->id);
+	if (item_path_build_root(
+	            ctx->doc_root, module, ctx->id, ctx->item_path,
+	            sizeof(ctx->item_path)) != 0)
+	{
+		server_error(fd, "Failed to resolve item path");
+		return 1;
+	}
 
 	if (flags & ICTX_NEED_OWNERSHIP) {
 		if (item_require_access(
@@ -272,10 +346,10 @@ XY_IMPL(int, item_ctx_load,
 	return 0;
 }
 
-XY_IMPL(int, with_item_access,
+XY_IMPL(int, with_module_item_access,
 	int, fd,
 	char *, body,
-	const char *, items_path,
+	const char *, module,
 	unsigned, flags,
 	const char *, not_found_msg,
 	const char *, forbidden_msg,
@@ -289,7 +363,7 @@ XY_IMPL(int, with_item_access,
 	if (!cb)
 		return respond_error(fd, 500, "Missing item handler");
 
-	if (item_ctx_load(&ctx, fd, items_path, load_flags))
+	if (module_item_ctx_load(&ctx, fd, module, load_flags))
 		return 1;
 
 	if (item_require_access(

@@ -70,8 +70,11 @@ Deno.test({
       const unique = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
       const grpSongTitle = `NoJS Communion ${unique}`;
       const gigSongTitle = `NoJS Entry ${unique}`;
-      const grpSongId = await createSong(page, grpSongTitle, "Communion");
-      const gigSongId = await createSong(page, gigSongTitle, "Entry");
+      // Use unique type slugs to avoid collision with leftover songs from previous runs (per_page=10 pagination would hide the unique song among many "communion" rows)
+      const grpTypeRaw = `communion${unique}`;
+      const gigTypeRaw = `entry${unique}`;
+      const grpSongId = await createSong(page, grpSongTitle, grpTypeRaw);
+      const gigSongId = await createSong(page, gigSongTitle, gigTypeRaw);
 
       await page.goto(`${BASE}/grp/add`, GOTO);
       await page.locator('input[name="title"]').fill(`NoJS Grp ${unique}`);
@@ -120,13 +123,13 @@ Deno.test({
         'details.hyle-multiselect[data-hyle-ms="type"] summary',
       ).click();
       const typeCheckbox = page.locator(
-        'details.hyle-multiselect[data-hyle-ms="type"] input[name="type"][value="communion"]',
+        `details.hyle-multiselect[data-hyle-ms="type"] input[name="type"][value="${grpTypeRaw}"]`,
       );
       await typeCheckbox.check();
       await Promise.all([
         page.waitForURL((url) =>
           url.searchParams.get("custom") === "1" &&
-          url.searchParams.getAll("type").includes("communion")
+          url.searchParams.getAll("type").includes(grpTypeRaw)
         ),
         page.locator('.hyle-filter-actions button[type="submit"]').click(),
       ]);

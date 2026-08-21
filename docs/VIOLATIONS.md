@@ -19,10 +19,10 @@ are updated together.
 | M01 | Structural | Cyclic and redundant module load graph | Open |
 | M02 | Operational | Missing module implementations can look successful | Open (`AUDIT` F1) |
 | M03 | Structural | Cross-module textual inclusion exceeds the C-isomorphic exception | Open |
-| M04 | Structural | Modules hardcode `var/` and reach into sibling storage | Open |
+| M04 | Structural | Modules hardcode `var/` and reach into sibling storage | Fixed (2026-08-21) |
 | M05 | Structural | `source` assumes every dataset is filesystem-backed | Open |
-| M06 | Structural | Ownership has multiple authorities | Open (`AUDIT` C8) |
-| M07 | Structural | `index` hardcodes module-specific fields | Open |
+| M06 | Structural | Ownership has multiple authorities | Fixed (2026-08-21) |
+| M07 | Structural | `index` hardcodes module-specific fields | Fixed (2026-08-21) |
 | L01 | Structural | `hyle-bud` headers are exposed to every native module | Open |
 | L02 | Structural | `source` exposes bud component types in its data API | Open |
 | L03 | Structural | WASM consumers compile `hyle-bud` implementation sources | Open |
@@ -100,24 +100,26 @@ accident; changes silently affect several modules.
 **Target:** retain only minimal pure renderer inclusion. Move native list fill
 behind an owned API and split common UI into small native/WASM-safe units.
 
-### M04 — modules hardcode `var/` and sibling storage
+### M04 — modules hardcode `var/` and sibling storage (fixed 2026-08-21)
 
 **Goal violated:** storage layout belongs to `common_storage`/`source`.
 
-- `mods/index/index.c:354` builds `"var/%s"` directly.
-- `mods/poem/poem.c:62,110,138,146` repeats `"var/poem"`.
-- `mods/song/song.c:21,450,456` hardcodes song paths.
-- `mods/grp/grp.c:23,523,634,660` hardcodes group paths.
-- `mods/gig/gig.c:118,1149,1250` hardcodes gig paths.
-- `mods/gig/gig.c:1136` reaches into `var/grp`.
+Route handlers now pass module names to `with_module_item_access`; auth resolves
+the validated item path through the common storage builders. The builders also
+validate module names. Gig uses `source_item_exists` and auth's module-aware
+ownership capability for group checks, and reads group formats from registered
+source data instead of group files.
 
-Canonical builders exist at `mods/common/common_storage.c:271-316`.
+The remaining `var/` literals are deliberate filesystem implementation or
+registration declarations in `common_storage`, `source/dsv.c`, and
+`source_setup` calls. They are not request-time path construction.
 
 **Consequence:** safe-ID, document-root, and backend changes require edits
 throughout the tree.
 
-**Target:** no `"var/` literals outside storage/source registration. Resolve
-items and sibling relationships through module/source capabilities.
+**Resolution:** no `"var/` literals remain outside storage/source
+implementation and registration. Items and sibling relationships resolve
+through common, source, and auth capabilities.
 
 ### M05 — `source` assumes filesystem-backed datasets
 
@@ -133,6 +135,8 @@ a filesystem adapter decides how to persist it.
 
 ### M06 — ownership has multiple authorities
 
+**Status:** Fixed (2026-08-21).
+
 **Audit:** C8 (`docs/AUDIT.md:447`).
 
 - Enforcement: `mods/auth/auth.c:148-178`.
@@ -144,18 +148,24 @@ a filesystem adapter decides how to persist it.
 **Consequence:** displayed and enforced owners can differ; root and non-root
 deployments use different truth sources.
 
-**Target:** one owner API provides read, record, enforce, and display. Never
-use host `getpwuid` for site usernames.
+**Resolution:** auth's owner API provides read, record, enforce, and display
+identity from the canonical `owner` file. Root mode also applies the mapped UID
+without treating it as identity. Index no longer records ownership, source
+does not overwrite it or call host `getpwuid`, and the explicit migration
+script reports unresolved legacy UIDs rather than assigning them silently.
 
-### M07 — `index` hardcodes module-specific fields
+### M07 — `index` hardcodes module-specific fields (fixed 2026-08-21)
 
-`mods/index/ux/list.c:3-20` switches on module names for fields and display
-labels.
+**Status:** Fixed (2026-08-21).
 
 **Consequence:** schema changes and new modules require editing index.
 
-**Target:** modules declare list columns/display labels in schema metadata or
-`fields.h`; index consumes the declaration opaquely.
+**Resolution:** each item source carries a framework-neutral
+`source_list_view_t` declared beside its module field table. It owns ordered
+columns, labels, singular display name, optional default sort, and optional
+content-search presentation. `list_fill_state` resolves this registration and
+serializes it into the pure SSR/WASM list state. Index contains no feature-name
+switch for fields, labels, display names, or song content search.
 
 ## 2. External-library independence
 

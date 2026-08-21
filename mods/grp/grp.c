@@ -20,8 +20,6 @@
 #include "../song/song.h"
 #include "fields.h"
 
-#define GRP_SONGS_PATH "var/grp"
-
 static char g_doc_root[256] = ".";
 
 /* ── Auto-repertoire (see AUTO-LIST.md) ─────────────────── */
@@ -288,8 +286,8 @@ handle_grp_song_add_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int handle_grp_song_add(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GRP_SONGS_PATH,
+	return with_module_item_access(
+	        fd, body, "grp",
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_CSRF_QUERY, NULL,
 	        NULL, handle_grp_song_add_auth, NULL);
 }
@@ -318,8 +316,8 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int handle_grp_song_key(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GRP_SONGS_PATH,
+	return with_module_item_access(
+	        fd, body, "grp",
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID |
 	                ICTX_CSRF_QUERY,
 	        NULL, NULL, handle_grp_song_key_auth, NULL);
@@ -341,8 +339,8 @@ handle_grp_song_del_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int handle_grp_song_delete(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GRP_SONGS_PATH,
+	return with_module_item_access(
+	        fd, body, "grp",
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID |
 	                ICTX_CSRF_QUERY,
 	        NULL, NULL, handle_grp_song_del_auth, NULL);
@@ -376,8 +374,8 @@ handle_grp_song_view_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int handle_grp_song_view(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GRP_SONGS_PATH, ICTX_SONG_ID, NULL, NULL,
+	return with_module_item_access(
+	        fd, body, "grp", ICTX_SONG_ID, NULL, NULL,
 	        handle_grp_song_view_auth, NULL);
 }
 
@@ -519,9 +517,9 @@ grp_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 static int grp_edit_get_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "var/grp", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        NULL, NULL, grp_edit_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "grp", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	        NULL, grp_edit_auth, NULL);
 }
 
 /* ── Detail handler ──────────────────────────────────────── */
@@ -533,6 +531,7 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	(void)user_data;
 	unsigned cf_hd, sf_hd;
 	const char *title, *owner;
+	char owner_buf[64] = { 0 };
 	char page_title[256];
 	char path[256];
 	bud_node *layout;
@@ -547,13 +546,9 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	if (!title)
 		return respond_error(fd, 404, "Group not found");
 
-	owner = qmap_get_field_str(cf_hd, ctx->id, "owner");
-	if (!owner)
-		owner = "";
-
-	is_owner =
-	        (ctx->username && ctx->username[0] &&
-	         strcmp(ctx->username, owner) == 0);
+	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
+	owner = owner_buf;
+	is_owner = item_owner_check(ctx->item_path, ctx->username);
 
 	/* Self-heal: recompute the repertoire from the gigs before
 	 * rendering. A no-op when in sync (compare-before-write); heals
@@ -632,8 +627,8 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 static int grp_detail_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "var/grp", 0, NULL, NULL, grp_detail_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "grp", 0, NULL, NULL, grp_detail_auth, NULL);
 }
 
 void xy_install(void)
@@ -660,7 +655,7 @@ void xy_install(void)
 
 	source_setup(
 	        "grp.items", NULL, sizeof(grp_cache_t), "var/grp", grp_fields,
-	        GRP_FIELD_COUNT, 0);
+	        GRP_FIELD_COUNT, 0, &grp_list_view);
 
 	/* Register ordered source for grp songs (data.txt persistence).
 	 * "pinned" marks user-owned rows that rep_rebuild never touches;

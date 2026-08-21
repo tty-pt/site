@@ -62,6 +62,7 @@ pages-test: all
 	@echo "Running pages smoke tests"
 	sh tests/pages/10-pages-render.sh
 	sh tests/pages/20-song-search.sh
+	sh tests/pages/25-list-metadata.sh
 	sh tests/pages/30-song-multiselect.sh
 	sh tests/pages/40-traversal.sh
 
@@ -75,6 +76,10 @@ e2e-tests: test-data-dirs
 	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
 
 test: unit-c-tests unit-tests pages-test e2e-tests
+
+boundary-check:
+	sh scripts/check-module-boundaries.sh
+
 watch:
 	./scripts/watch.sh
 

@@ -11,9 +11,12 @@ Two separate concepts, don't conflate them:
    layer (`external/hyle/src/source.c`, `qmap_record_field_t`). Parsed from
    record layouts / `bud_field_desc_t`, NOT from JSON strings.
 2. **The site's schema JSON strings** — built by `source_build_schema_hd`
-   (`mods/source/source.c:1119`) and consumed ONLY by `mods/index`
+   (`mods/source/source.c`) and consumed by the native list filler
    (`idx_schema_collect`, `idx_resolve_filter_options`, `idx_resolve_refs`).
    **hyle never parses these strings.** They are site-level metadata.
+3. **List-view registration** — a framework-neutral `source_list_view_t`
+   borrowed by an item source. It declares ordered columns and user-facing
+   labels without changing hyle's registry schema.
 
 This split is what lets UI hints ride along without touching the data layer.
 
@@ -31,7 +34,7 @@ This split is what lets UI hints ride along without touching the data layer.
 
 The map is exposed via `source_get_schema_hd(dataset_id)`.
 
-## 3. Parsing (`mods/index/index.c` `idx_schema_collect`)
+## 3. Parsing (`mods/common/list_fill.c` `idx_schema_collect`)
 
 ```c
 sscanf(val, "{\"t\":%d,\"s\":\"%63[^\"]\"", &t, ts);
@@ -44,7 +47,24 @@ sscanf(val, "{\"t\":%d,\"s\":\"%63[^\"]\"", &t, ts);
 - `target_hd` is resolved later from the target source's fields registry
   (`source_get_fields_hd`) — native-only.
 
-## 4. UI hints — carried opaquely, interpreted by the component layer
+## 4. List-view metadata
+
+Each feature module declares a static `source_list_view_t` beside its field
+table and passes it to `source_setup`. Source borrows the descriptor for the
+registration lifetime. It contains:
+
+- ordered `{name,label}` columns
+- singular display name
+- optional default sort
+- optional content-search field, label, and placeholder
+
+`list_fill_state` gets it through `source_get_list_view`, combines it with the
+field type/reference/filter schema strings, and serializes resolved values into
+`list_state_t`. The WASM renderer has no source, qmap, or XY dependency. If a
+source has no view descriptor, list filling safely prefers `title`, then falls
+back to generic non-ID schema fields.
+
+## 5. UI hints — carried opaquely, interpreted by the component layer
 
 Rule (see `docs/ARCHITECTURE.md`): **hyle carries metadata; it never
 interprets presentation.** A UI hint is an extra key in the site schema string;
@@ -73,7 +93,7 @@ Plumbing (all shipped):
 Guard: no `bud`/component symbols may appear in `external/hyle/src` or
 `include/hyle` — the hint is an opaque string there.
 
-## 5. Reference display
+## 6. Reference display
 
 - `idx_resolve_refs` (index.c:227) resolves stored positions → labels for table
   cells: split stored value on `\n`, treat numeric tokens as positions into the
@@ -83,7 +103,7 @@ Guard: no `bud`/component symbols may appear in `external/hyle/src` or
 - `idx_resolve_filter_options` (list.c:118) uses the same display-field logic
   to build filter options.
 
-## 6. Related docs
+## 7. Related docs
 
 - `docs/FILTERS.md` — how filters use this metadata (multi-ref, repeated keys).
 - `docs/ARCHITECTURE.md` — why the data layer stays neutral.

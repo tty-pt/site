@@ -2,6 +2,7 @@
 #define INDEX_MOD_H
 
 #include <ttypt/xy-mod.h>
+#include "ux/list_state.h"
 
 typedef void (*index_cleanup_fn)(const char *id);
 
@@ -36,17 +37,17 @@ XY_DECL(int, index_render_list,
 	int, fd,
 	unsigned, hd,
 	index_format_fn, fmt);
-/* Ownership helpers — moved from auth; they're item metadata ops, not auth */
-
-XY_DECL(int, item_record_ownership,
-	const char *, item_path,
-	const char *, username);
-
 XY_DECL(int, check_item_access,
 	int, fd,
 	const char *, module,
 	char *, id, size_t, id_sz,
 	const char **, user,
 	char *, item_path, size_t, path_sz);
+XY_DECL(int, list_fill_state,
+	list_state_t *, state,
+	const char *, dataset_id,
+	const char *, raw_qs,
+	int, allow_fields);
+XY_DECL(int, list_fill_free, list_state_t *, state);
 
 #endif

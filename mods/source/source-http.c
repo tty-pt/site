@@ -824,7 +824,15 @@ static int source_post_handler(int fd, char *body)
 	snprintf(
 	        owner_path, sizeof(owner_path), "%s/%s/%s", root,
 	        def->items_path, id);
-	item_record_ownership(owner_path, username);
+	if (item_owner_record(owner_path, username) != 0) {
+		source_delete_item(fd, def, id);
+		return respond_json_error(
+		        fd, 500, "Failed to record ownership");
+	}
+	if (source_refresh_row(fd, def->id, id) != 0) {
+		source_delete_item(fd, def, id);
+		return respond_json_error(fd, 500, "Failed to refresh owner");
+	}
 
 	char resp[256];
 	snprintf(resp, sizeof(resp), "{\"%s\":\"%s\"}", def->key_field, id);
@@ -835,6 +843,8 @@ static int source_put_handler(int fd, char *body)
 {
 	const source_def_t *def;
 	const char *username;
+	char item_path[PATH_MAX] = { 0 };
+	int item_exists = 0;
 
 	int init = source_write_init(fd, body, &def, &username);
 	switch (init) {
@@ -863,13 +873,13 @@ static int source_put_handler(int fd, char *body)
 		char doc_root[256] = { 0 };
 		const char *root =
 		        resolve_doc_root(fd, doc_root, sizeof(doc_root));
-		char item_path[PATH_MAX];
 		snprintf(
 		        item_path, sizeof(item_path), "%s/%s/%s", root,
 		        def->items_path, key);
 		struct stat st;
 		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-			if (!item_check_ownership(item_path, username))
+			item_exists = 1;
+			if (!item_owner_check(item_path, username))
 				return respond_json_error(fd, 403, "Forbidden");
 		}
 	}
@@ -887,6 +897,18 @@ static int source_put_handler(int fd, char *body)
 		return 0;
 	if (rc != 0)
 		return respond_json_error(fd, 500, "Update failed");
+	if (!item_exists) {
+		if (item_owner_record(item_path, username) != 0) {
+			source_delete_item(fd, def, key);
+			return respond_json_error(
+			        fd, 500, "Failed to record ownership");
+		}
+		if (source_refresh_row(fd, def->id, key) != 0) {
+			source_delete_item(fd, def, key);
+			return respond_json_error(
+			        fd, 500, "Failed to refresh owner");
+		}
+	}
 
 	return respond_json(fd, 200, "{\"status\":\"ok\"}");
 }
@@ -977,7 +999,7 @@ static int source_delete_handler(int fd, char *body)
 		        def->items_path, key);
 		struct stat st;
 		if (stat(item_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-			if (!item_check_ownership(item_path, username))
+			if (!item_owner_check(item_path, username))
 				return respond_json_error(fd, 403, "Forbidden");
 		}
 	}

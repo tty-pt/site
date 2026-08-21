@@ -18,8 +18,6 @@
 #include "../../lib/transp/transp.h"
 #include "fields.h"
 
-#define SONG_ITEMS_PATH "var/song"
-
 static transp_ctx_t *g_transp_ctx = NULL;
 static char g_doc_root[256] = ".";
 
@@ -220,10 +218,9 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	app_state_t tmp;
 	memset(&tmp, 0, sizeof(tmp));
-	tmp.is_owner =
-	        (ctx->username && ctx->username[0])
-	                ? item_check_ownership(ctx->item_path, ctx->username)
-	                : 0;
+	tmp.is_owner = (ctx->username && ctx->username[0])
+	                       ? item_owner_check(ctx->item_path, ctx->username)
+	                       : 0;
 	tmp.transpose = t;
 	tmp.zoom = v_z;
 	tmp.use_latin = (f & TRANSP_LATIN) != 0;
@@ -240,9 +237,8 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int api_song_transpose_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, SONG_ITEMS_PATH, 0, NULL, NULL, song_details_auth,
-	        NULL);
+	return with_module_item_access(
+	        fd, body, "song", 0, NULL, NULL, song_details_auth, NULL);
 }
 
 XY_IMPL(int, song_get_original_key_root,
@@ -302,7 +298,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	(void)body;
 	(void)user_data;
 
-	int is_owner = item_check_ownership(ctx->item_path, ctx->username);
+	int is_owner = item_owner_check(ctx->item_path, ctx->username);
 
 	int t = 0, f = 0, m = 0, zoom = 0;
 	char qs[1024] = { 0 };
@@ -379,9 +375,9 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 static int song_detail_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, SONG_ITEMS_PATH, 0, "Song not found", NULL,
-	        song_detail_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "song", 0, "Song not found", NULL, song_detail_auth,
+	        NULL);
 }
 
 static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
@@ -412,10 +408,9 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int song_edit_get_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, SONG_ITEMS_PATH,
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, "Song not found", NULL,
-	        song_edit_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "song", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Song not found", NULL, song_edit_auth, NULL);
 }
 
 static int song_add_get_handler(int fd, char *body)
@@ -449,13 +444,13 @@ void xy_install(void)
 	source_setup(
 	        "song.types", "name", sizeof(song_type_cache_t),
 	        "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT,
-	        SOURCE_FLAG_VOLATILE);
+	        SOURCE_FLAG_VOLATILE, NULL);
 
 	ref_field_register("song.items", "type");
 
 	source_setup(
 	        "song.items", NULL, sizeof(song_cache_t), "var/song",
-	        song_fields, SONG_FIELD_COUNT, 0);
+	        song_fields, SONG_FIELD_COUNT, 0, &song_list_view);
 
 	index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL, NULL);
 

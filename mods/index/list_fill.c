@@ -1,7 +1,7 @@
-/* Native companion to mods/index/ux/list.c: schema-driven column
+/* Native companion to ux/list.c: schema-driven column
  * collection, filter-option resolution, query whitelisting and the
  * source_query fill for any list-grade surface (index lists, grp/gig
- * song pickers). Textual include; compiled into each module .so.
+ * song pickers). Compiled once into index and exposed through XY.
  * NEVER include from a WASM TU (axil/qmap/source calls). */
 
 #ifndef __wasm__
@@ -67,12 +67,44 @@ static int idx_resolve_filter_options(
 	return nopts;
 }
 
+static void idx_schema_col_set(
+        col_t *col, const char *key, const char *label, const char *schema)
+{
+	int t;
+	char ts[64] = "";
+	char fs[16] = "";
+	int m;
+
+	memset(col, 0, sizeof(*col));
+	strncpy(col->key, key, sizeof(col->key) - 1);
+	if (label && label[0])
+		strncpy(col->label, label, sizeof(col->label) - 1);
+	else {
+		col_tok_label(col->label, sizeof(col->label), key);
+		if (col->label[0] >= 'a')
+			col->label[0] -= 32;
+	}
+
+	if (!schema || schema[0] != '{')
+		return;
+	m = sscanf(
+	        schema, "{\"t\":%d,\"s\":\"%63[^\"]\",\"f\":\"%15[^\"]\"", &t,
+	        ts, fs);
+	if (m >= 1)
+		col->type = t;
+	if (m >= 2 && ts[0])
+		strncpy(col->target_source, ts, sizeof(col->target_source) - 1);
+	if (m >= 3 && fs[0])
+		strncpy(col->filter, fs, sizeof(col->filter) - 1);
+}
+
 static int idx_schema_collect(
-        const char *dataset_id, const char *select_csv, col_t *cols,
+        const char *dataset_id, const source_list_view_t *view, col_t *cols,
         int max_cols)
 {
 	unsigned schema_hd;
 	int n = 0;
+	size_t i;
 	uint32_t cur;
 	const void *key;
 	const void *val;
@@ -81,61 +113,30 @@ static int idx_schema_collect(
 	if (!schema_hd)
 		return 0;
 
-	if (select_csv && select_csv[0]) {
-		char copy[256];
-		char *tok;
-		char *rest;
-
-		strncpy(copy, select_csv, sizeof(copy) - 1);
-		copy[sizeof(copy) - 1] = '\0';
-		rest = copy;
-		while ((tok = strtok_r(rest, ",", &rest)) && n < max_cols) {
-			strncpy(cols[n].key, tok, sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label), tok);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			val = qmap_get(schema_hd, tok);
-			cols[n].type = 0;
-			cols[n].target_source[0] = '\0';
-			cols[n].target_hd = 0;
-			cols[n].filter[0] = '\0';
-			if (val && ((const char *)val)[0] == '{') {
-				int t;
-				char ts[64] = "";
-				char fs[16] = "";
-				int m =
-				        sscanf((const char *)val,
-				               "{\"t\":%d,\"s\":\"%63[^\"]\","
-				               "\"f\":\"%15[^\"]\"",
-				               &t, ts, fs);
-				if (m >= 1)
-					cols[n].type = t;
-				if (m >= 2 && ts[0]) {
-					strncpy(cols[n].target_source, ts,
-					        sizeof(cols[n].target_source) -
-					                1);
-				}
-				if (m >= 3 && fs[0]) {
-					strncpy(cols[n].filter, fs,
-					        sizeof(cols[n].filter) - 1);
-				}
-			}
+	if (view && view->fields && view->field_count > 0) {
+		for (i = 0; i < view->field_count && n < max_cols; i++) {
+			val = qmap_get(schema_hd, view->fields[i].name);
+			if (!val)
+				continue;
+			idx_schema_col_set(
+			        &cols[n], view->fields[i].name,
+			        view->fields[i].label, val);
 			n++;
 		}
 	} else {
+		val = qmap_get(schema_hd, "title");
+		if (val) {
+			idx_schema_col_set(
+			        &cols[0], "title", "Title", (const char *)val);
+			return 1;
+		}
 		cur = qmap_iter(schema_hd, NULL, 0);
 		while (n < max_cols && qmap_next(&key, &val, cur)) {
-			strncpy(cols[n].key, (const char *)key,
-			        sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label),
-			        (const char *)key);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			cols[n].type = 0;
+			if (strcmp((const char *)key, "id") == 0)
+				continue;
+			idx_schema_col_set(
+			        &cols[n], (const char *)key, NULL,
+			        (const char *)val);
 			n++;
 		}
 		qmap_fin(cur);
@@ -241,8 +242,9 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
  *    (title=, author=, ...) ARE legitimate filters; strip only the
  *    reserved single-letter pref keys. */
 
-static const char *const LF_PREF_KEYS[] = { "t", "b", "f", "l", "m", "z",
-	                                        NULL };
+static const char *const LF_PREF_KEYS[] = {
+	"t", "b", "f", "l", "m", "z", NULL
+};
 
 static int lf_key_is(const char *k, size_t n, const char *name)
 {
@@ -276,7 +278,7 @@ static void lf_qs_rewrite_per_page(char *qs, size_t cap, unsigned v)
 	memcpy(p, val, vl);
 }
 
-void list_fill_qs_clean(const char *raw, char *out, size_t outlen)
+static void list_fill_qs_clean(const char *raw, char *out, size_t outlen)
 {
 	const char *p;
 	size_t pos = 0;
@@ -320,7 +322,7 @@ void list_fill_qs_clean(const char *raw, char *out, size_t outlen)
 	}
 }
 
-void list_fill_qs_strip_prefs(const char *raw, char *out, size_t outlen)
+static void list_fill_qs_strip_prefs(const char *raw, char *out, size_t outlen)
 {
 	const char *p;
 	size_t pos = 0;
@@ -373,9 +375,11 @@ void list_fill_qs_strip_prefs(const char *raw, char *out, size_t outlen)
  * Returns 0 ok; -1 when source_query failed (cols/q/custom remain
  * valid so the filter chrome still renders; nids=total=0).
  * Free with list_fill_free() after render. */
-int list_fill_state(
-        list_state_t *state, const char *dataset_id, const char *raw_qs,
-        int allow_fields)
+XY_IMPL(int, list_fill_state,
+	list_state_t *, state,
+	const char *, dataset_id,
+	const char *, raw_qs,
+	int, allow_fields)
 {
 	col_t cols[LIST_MAX_COLS];
 	const char *all_ids[1024];
@@ -392,6 +396,27 @@ int list_fill_state(
 	uint32_t offset, disp_count;
 	int disp_nids, i, j;
 	int per_page_clamped;
+	const source_list_view_t *view;
+
+	view = source_get_list_view(dataset_id);
+	snprintf(
+	        state->display_name, sizeof(state->display_name), "%s",
+	        view && view->display_name ? view->display_name
+	                                   : state->module);
+	if (view && view->content_field) {
+		snprintf(
+		        state->content_field, sizeof(state->content_field),
+		        "%s", view->content_field);
+		snprintf(
+		        state->content_label, sizeof(state->content_label),
+		        "%s",
+		        view->content_label ? view->content_label : "Content");
+		snprintf(
+		        state->content_placeholder,
+		        sizeof(state->content_placeholder), "%s",
+		        view->content_placeholder ? view->content_placeholder
+		                                  : "");
+	}
 
 	idx_query_param(raw_qs, "page", page_buf, sizeof(page_buf));
 	if (page_buf[0]) {
@@ -417,9 +442,7 @@ int list_fill_state(
 	state->custom = strcmp(custom_buf, "1") == 0;
 	idx_query_param(raw_qs, "q", state->q, sizeof(state->q));
 
-	ncols = idx_schema_collect(
-	        dataset_id, idx_select_fields_for(state->module), cols,
-	        LIST_MAX_COLS);
+	ncols = idx_schema_collect(dataset_id, view, cols, LIST_MAX_COLS);
 	state->ncols = ncols;
 
 	state->nopts = 0;
@@ -565,18 +588,19 @@ int list_fill_state(
 	return 0;
 }
 
-void list_fill_free(list_state_t *state)
+XY_IMPL(int, list_fill_free, list_state_t *, state)
 {
 	int i, j;
 
 	if (!state)
-		return;
+		return -1;
 	for (i = 0; i < state->nids; i++) {
 		free((void *)state->ids[i]);
 		for (j = 0; j < state->ncols; j++)
 			free((void *)state->values[i * state->ncols + j]);
 	}
 	state->nids = 0;
+	return 0;
 }
 
 #endif /* !__wasm__ */

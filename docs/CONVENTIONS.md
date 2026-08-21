@@ -16,7 +16,7 @@ The coding conventions and request-handler patterns. `clang-format` +
 
 ## Handler patterns
 
-### `with_item_access` (auth.h)
+### `with_module_item_access` (auth.h)
 
 ```c
 static int handle_edit_get_authorized(int fd, char *body,
@@ -26,7 +26,7 @@ static int handle_edit_get_authorized(int fd, char *body,
     ...
 }
 
-return with_item_access(fd, body, ITEMS_PATH,
+return with_module_item_access(fd, body, "song",
     ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
     "Item not found", "Forbidden",
     handle_edit_get_authorized, NULL);
@@ -34,6 +34,10 @@ return with_item_access(fd, body, ITEMS_PATH,
 
 Flags: `ICTX_NEED_LOGIN`, `ICTX_NEED_OWNERSHIP`, `ICTX_SONG_ID`,
 `ICTX_CSRF_MPFD`, `ICTX_CSRF_QUERY`.
+
+Ownership identity comes only from auth's `item_owner_record`,
+`item_owner_read`, and `item_owner_check`. Do not compare cached owner fields
+for authorization and do not derive site usernames from filesystem UIDs.
 
 ### Redirect
 

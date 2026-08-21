@@ -47,6 +47,24 @@ typedef struct {
 } source_field_t;
 
 typedef struct {
+	const char *name;
+	const char *label;
+} source_list_field_t;
+
+typedef struct {
+	const char *display_name;
+	const source_list_field_t *fields;
+	size_t field_count;
+	const char *default_sort;
+	const char *content_field;
+	const char *content_label;
+	const char *content_placeholder;
+} source_list_view_t;
+
+/* Source borrows list-view strings and fields for the registered source's
+ * lifetime. Module declarations must therefore have static storage. */
+
+typedef struct {
 	const char *id;
 	const char *key_field;
 	const char *items_path;
@@ -58,6 +76,7 @@ typedef struct {
 	unsigned schema_hd; /* lazily filled by source_get_schema_hd */
 	uint32_t record_id;
 	unsigned flags;
+	const source_list_view_t *list_view;
 	void *user;
 } source_def_t;
 
@@ -127,6 +146,9 @@ XY_DECL(int, source_build_state_specs,
     source_state_field_t *, specs,
     int, max_specs);
 XY_DECL(source_def_t *, source_find, const char *, dataset_id);
+XY_DECL(int, source_item_exists,
+    const char *, dataset_id,
+    const char *, item_id);
 XY_DECL(int, source_register, const source_def_t *, def);
 XY_DECL(int, source_refresh_row,
     int, fd, const char *, dataset_id, const char *, id);
@@ -147,6 +169,8 @@ XY_DECL(unsigned, source_query,
 XY_DECL(unsigned, source_get_data_hd, const char *, dataset_id);
 XY_DECL(unsigned, source_get_fields_hd, const char *, dataset_id);
 XY_DECL(unsigned, source_get_schema_hd, const char *, dataset_id);
+XY_DECL(const source_list_view_t *, source_get_list_view,
+	const char *, dataset_id);
 XY_DECL(int, source_build_state_json,
     const char *, dataset_id,
     const char *, item_id,
@@ -203,7 +227,8 @@ XY_DECL(uint32_t, source_setup,
     const char *, items_path,
     const struct bud_field_desc *, defs,
     int, field_count,
-    unsigned, flags);
+    unsigned, flags,
+    const source_list_view_t *, list_view);
 
 XY_DECL(size_t, source_inv_keys,
     const char *, dataset_id,

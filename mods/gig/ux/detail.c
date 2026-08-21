@@ -16,7 +16,6 @@
 
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
-#include "../../common/list_fill.c"
 
 #include "../../song/lib/transp/transp_flags.h"
 
@@ -439,8 +438,7 @@ static bud_node *sb_render_song_picker(void)
 	if (form)
 		bud_append(frag, form);
 	post = lx_el("form", lx_attr("id", "sb-pick-post"),
-	             lx_attr("method", "post"),
-	             lx_attr("action", add_action),
+	             lx_attr("method", "post"), lx_attr("action", add_action),
 	             lx_el("input", lx_attr("type", "hidden"),
 	                   lx_attr("name", "csrf_token"),
 	                   lx_attr("value", sb_app_state.csrf_token)))

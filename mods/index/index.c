@@ -2,7 +2,6 @@
 #include <limits.h>
 #include <dirent.h>
 #include <errno.h>
-#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -27,7 +26,6 @@ static int index_add_get_handler(int fd, char *body);
 static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
 int index_add_item(int fd, char *body, char *id_out, size_t id_len);
-int item_record_ownership(const char *item_path, const char *username);
 
 static char modules_json[256 * MAX_MODULES], *modules_json_end = modules_json;
 
@@ -42,7 +40,7 @@ static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
 
 #include "ux/all.c"
-#include "../common/list_fill.c"
+#include "list_fill.c"
 
 int index_update_json(const char *id, const char *title)
 {
@@ -142,16 +140,24 @@ XY_IMPL(int, index_add_item,
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
 
-	item_record_ownership(path, username);
+	if (module_item_owner_record(fd, module, id, username) != 0) {
+		item_remove_path_recursive(path);
+		return server_error(fd, "Failed to record ownership");
+	}
 
-	if (write_meta_file(path, "title", title, (size_t)title_len) != 0)
+	if (write_meta_file(path, "title", title, (size_t)title_len) != 0) {
+		item_remove_path_recursive(path);
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
+	}
 
 	{
 		char dataset_id[512];
 		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		source_refresh_row(fd, dataset_id, id);
+		if (source_refresh_row(fd, dataset_id, id) != 0) {
+			item_remove_path_recursive(path);
+			return server_error(fd, "Failed to refresh item");
+		}
 	}
 
 	snprintf(id_out, id_len, "%s", id);
@@ -210,7 +216,7 @@ static int idx_render_list_bud(
 	layout = list_render(&state);
 	rc = 0;
 	if (layout) {
-		snprintf(title, sizeof(title), "%ss", module);
+		snprintf(title, sizeof(title), "%ss", state.display_name);
 		if (title[0] >= 'a')
 			title[0] -= 32;
 		snprintf(path, sizeof(path), "/%s/", module);
@@ -291,15 +297,25 @@ static int index_generic_add_handler(int fd, char *body)
 		        fd, 403, "Failed to create item directory");
 	}
 
-	item_record_ownership(items_path, username);
-	write_meta_file(items_path, "title", title, (size_t)title_len);
+	if (module_item_owner_record(fd, module, id, username) != 0) {
+		item_remove_path_recursive(items_path);
+		return server_error(fd, "Failed to record ownership");
+	}
+	if (write_meta_file(items_path, "title", title, (size_t)title_len) != 0)
+	{
+		item_remove_path_recursive(items_path);
+		return server_error(fd, "Failed to write title");
+	}
 
 	unsigned data_handle = source_parse_form(dataset_id);
-	if (!data_handle)
+	if (!data_handle) {
+		item_remove_path_recursive(items_path);
 		return server_error(fd, "OOM");
+	}
 
 	if (source_update_item(fd, dataset_id, id, data_handle) != 0) {
 		qmap_close(data_handle);
+		item_remove_path_recursive(items_path);
 		return server_error(fd, "Failed to save item data");
 	}
 	qmap_close(data_handle);
@@ -354,12 +370,10 @@ static int index_generic_edit_authorized(
 static int index_generic_edit_handler(int fd, char *body)
 {
 	const char *module = index_name(fd);
-	char items_path[512];
-	snprintf(items_path, sizeof(items_path), "var/%s", module);
 
-	return with_item_access(
-	        fd, body, items_path, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        NULL, NULL, index_generic_edit_authorized, NULL);
+	return with_module_item_access(
+	        fd, body, module, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	        NULL, index_generic_edit_authorized, NULL);
 }
 
 XY_IMPL(unsigned, index_open,
@@ -589,46 +603,6 @@ static int index_delete_handler(int fd, char *body)
 	char location[256];
 	snprintf(location, sizeof(location), "/%s", module);
 	return axil_redirect(fd, location);
-}
-
-/* ------------------------------------------------------------------ */
-/* Ownership helpers — item metadata management                        */
-/* ------------------------------------------------------------------ */
-
-XY_IMPL(int, item_record_ownership,
-	const char *, item_path,
-	const char *, username)
-{
-	if (geteuid() == 0) {
-		int uid = auth_get_uid(username);
-		if (uid < 0)
-			return -1;
-		if (chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
-			return -1;
-	} else {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		FILE *fp = fopen(owner_path, "w");
-		if (!fp)
-			return -1;
-		fwrite(username, 1, strlen(username), fp);
-		if (ferror(fp)) {
-			fclose(fp);
-			return -1;
-		}
-		fclose(fp);
-	}
-	return 0;
-}
-
-static int item_unlink_owner(const char *item_path)
-{
-	if (geteuid() != 0) {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		unlink(owner_path);
-	}
-	return 0;
 }
 
 XY_IMPL(int, check_item_access,

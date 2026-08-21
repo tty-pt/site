@@ -22,15 +22,13 @@
 #include "fields.h"
 #include "../index/index.h"
 
-#define GIG_ITEMS_PATH "var/gig"
-
 static char g_doc_root[256] = ".";
 
 #define SB_OWNED_HANDLER(name, forbidden_msg, extra_flags)                     \
 	static int handle_sb_##name(int fd, char *body)                        \
 	{                                                                      \
-		return with_item_access(                                       \
-		        fd, body, GIG_ITEMS_PATH,                              \
+		return with_module_item_access(                                \
+		        fd, body, "gig",                                       \
 		        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | extra_flags,   \
 		        "Gig not found", forbidden_msg,                        \
 		        handle_sb_##name##_authorized, NULL);                  \
@@ -112,29 +110,30 @@ static int gig_meta_write(const char *item_path, const gig_cache_t *meta)
 static int get_random_repertoire_by_type(
         const char *sb_id, const char *type, char *out_id, size_t out_len)
 {
-	/* Read grp from gig metadata file */
-	char sb_item_path[PATH_MAX];
-	snprintf(
-	        sb_item_path, sizeof(sb_item_path), "%s/var/gig/%s", g_doc_root,
-	        sb_id);
-	gig_cache_t meta;
-	gig_meta_read(sb_item_path, &meta);
-	if (!meta.grp[0])
+	unsigned gig_fhd;
+	unsigned fhd;
+	const char *grp;
+	char ids[4096] = { 0 };
+	const char *p;
+	size_t id_pos = 0;
+	size_t match_count = 0;
+	int total;
+	int pick;
+
+	gig_fhd = source_get_fields_hd("gig.items");
+	grp = gig_fhd ? qmap_get_field_str(gig_fhd, sb_id, "grp") : NULL;
+	if (!grp || !grp[0])
 		return -1;
 
-	int total = hyle_source_ordered_count("grp.songs", meta.grp);
-	unsigned fhd = hyle_source_get_fields_hd("grp.songs");
+	total = hyle_source_ordered_count("grp.songs", grp);
+	fhd = hyle_source_get_fields_hd("grp.songs");
 	if (!fhd || total == 0)
 		return -1;
 
 	/* Collect matching entry IDs (null-terminated packed) */
-	char ids[4096] = { 0 };
-	size_t id_pos = 0;
-	size_t match_count = 0;
-
 	for (int i = 0; i < total; i++) {
 		const char *eid =
-		        hyle_source_ordered_key_at("grp.songs", meta.grp, i);
+		        hyle_source_ordered_key_at("grp.songs", grp, i);
 		if (!eid)
 			continue;
 
@@ -155,8 +154,8 @@ static int get_random_repertoire_by_type(
 		return -1;
 
 	/* Pick random */
-	int pick = rand() % match_count;
-	const char *p = ids;
+	pick = rand() % match_count;
+	p = ids;
 	for (int i = 0; i < pick; i++)
 		p += strlen(p) + 1;
 
@@ -264,6 +263,21 @@ static void resolve_song_id(char *s_id, size_t s_id_sz)
 	}
 }
 
+struct seed_song_ctx {
+	const char *gig_id;
+};
+
+static int seed_song_for_format(const char *format, void *user)
+{
+	struct seed_song_ctx *ctx = user;
+	char song_id[256] = { 0 };
+
+	if (get_random_repertoire_by_type(
+	            ctx->gig_id, format, song_id, sizeof(song_id)) == 0)
+		sb_append_song("gig.songs", ctx->gig_id, song_id, "0", format);
+	return 0;
+}
+
 /* POST /api/gig/:id/songs - Add a song to the gig */
 static int handle_sb_song_add_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
@@ -333,39 +347,17 @@ static int handle_sb_add(int fd, char *body)
 
 		source_refresh_row(fd, "gig.items", id);
 
-		/* Pre-populate with one random song per grp format type */
+		/* Pre-populate with one random song per grp format type. */
 		{
-			char grp_item_path[PATH_MAX];
-			char format_path[PATH_MAX];
-			FILE *ffp;
+			unsigned grp_fhd = source_get_fields_hd("grp.items");
+			const char *formats =
+			        grp_fhd ? qmap_get_field_str(
+			                          grp_fhd, grp, "format")
+			                : NULL;
+			struct seed_song_ctx seed_ctx = { id };
 
-			item_path_build(
-			        0, "grp", grp, grp_item_path,
-			        sizeof(grp_item_path));
-			item_child_path(
-			        grp_item_path, "format", format_path,
-			        sizeof(format_path));
-			ffp = fopen(format_path, "r");
-			if (ffp) {
-				char type[128];
-				while (fgets(type, sizeof(type), ffp)) {
-					size_t tlen = strlen(type);
-					while (tlen > 0 &&
-					       (type[tlen - 1] == '\n' ||
-					        type[tlen - 1] == '\r'))
-						type[--tlen] = '\0';
-					if (tlen == 0)
-						continue;
-					char song_id[256] = { 0 };
-					if (get_random_repertoire_by_type(
-					            id, type, song_id,
-					            sizeof(song_id)) == 0)
-						sb_append_song(
-						        "gig.songs", id,
-						        song_id, "0", type);
-				}
-				fclose(ffp);
-			}
+			str_list_for_each(
+			        formats, seed_song_for_format, &seed_ctx);
 		}
 		hyle_source_ordered_save("gig.songs", id);
 
@@ -889,6 +881,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	(void)user;
 	unsigned sb_hd, song_hd;
 	const char *title, *owner;
+	char owner_buf[64] = { 0 };
 	char fkey[512];
 	int is_owner = 0;
 	char *grp_id = NULL;
@@ -905,13 +898,9 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	if (!title)
 		return respond_error(fd, 404, "Gig not found");
 
-	owner = qmap_get_field_str(sb_hd, ctx->id, "owner");
-	if (!owner)
-		owner = "";
-
-	is_owner =
-	        (ctx->username && ctx->username[0] &&
-	         strcmp(ctx->username, owner) == 0);
+	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
+	owner = owner_buf;
+	is_owner = item_owner_check(ctx->item_path, ctx->username);
 
 	/* Parse query prefs + zoom */
 	sb_parse_detail_prefs(fd, ctx->username, &t, &f, &show_media, &zoom);
@@ -998,9 +987,9 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int gig_detail_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GIG_ITEMS_PATH, 0, "Gig not found", NULL,
-	        gig_detail_auth, NULL);
+	return with_module_item_access(
+	        fd, body, "gig", 0, "Gig not found", NULL, gig_detail_auth,
+	        NULL);
 }
 
 /* ── Edit GET handler ───────────────────────────────────── */
@@ -1078,8 +1067,8 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int gig_edit_get_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GIG_ITEMS_PATH, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	return with_module_item_access(
+	        fd, body, "gig", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
 	        "Gig not found", NULL, gig_edit_auth, NULL);
 }
 
@@ -1128,16 +1117,16 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	/* Hydrate standard fields */
 	{
-		unsigned dh = source_parse_form("gig.items");
+		unsigned dh;
+		const char *new_grp;
+
+		dh = source_parse_form("gig.items");
 		if (dh) {
-			const char *new_grp = qmap_get(dh, "grp");
+			new_grp = qmap_get(dh, "grp");
 			if (new_grp && new_grp[0]) {
-				char grp_path[PATH_MAX];
-				snprintf(
-				        grp_path, sizeof(grp_path),
-				        "%s/var/grp/%s", g_doc_root, new_grp);
-				if (!item_check_ownership(
-				            grp_path, ctx->username))
+				if (!source_item_exists("grp.items", new_grp) ||
+				    !module_item_owner_check(
+				            fd, "grp", new_grp, ctx->username))
 				{
 					qmap_close(dh);
 					return respond_error(
@@ -1145,12 +1134,6 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 					        "You don't own this group");
 				}
 			}
-
-			char sb_path[PATH_MAX];
-			snprintf(
-			        sb_path, sizeof(sb_path), "%s/var/gig/%s",
-			        g_doc_root, ctx->id);
-			item_record_ownership(sb_path, ctx->username);
 
 			source_update_item(fd, "gig.items", ctx->id, dh);
 			qmap_close(dh);
@@ -1229,8 +1212,8 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 static int gig_edit_post_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, GIG_ITEMS_PATH,
+	return with_module_item_access(
+	        fd, body, "gig",
 	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_CSRF_MPFD,
 	        "Gig not found", "You don't own this gig",
 	        gig_edit_post_authorized, NULL);
@@ -1250,7 +1233,7 @@ void xy_install(void)
 
 	source_setup(
 	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", gig_fields,
-	        SB_FIELD_COUNT, 0);
+	        SB_FIELD_COUNT, 0, &gig_list_view);
 
 	/* Register ordered source for gig songs (data.txt persistence) */
 	{
