@@ -787,10 +787,10 @@ open — bumping the define is still a manual step.
 | **A7** | axil: unchecked alloc | **DONE** |
 | **A1, A5, A8, A10–A20** | axil: decode-then-reject, strncpy NUL, header inject, privdrop, etc. | open |
 | **B2, B5–B12** | axil-auth: CSRF on login, session no-Secure, password min, etc. | open |
-| **F1–F4** | libxylem: missing-impl error, RTLD_NODELETE, error handling, logging | open |
+| **F1–F4** | libxylem: missing-impl error, RTLD_NODELETE, error handling, logging | **partially fixed 2026-08-22** `F1` `XY_ERR_NOTFOUND` + `F2` unique-inode `mkstemps` done; `F3` error-handling + `F4` `/tmp/xy_bind.log` remain open |
 | **E13, E18, E20** | hyle: field-put failure, incremental stoma, query parse | open |
 | **E25–E27** | stoma fold + libqmap abort/TODOs | open |
-| **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` | open |
+| **D14, D17, D21** | bud: JSON parse, attr/tag allowlist, `bud_attr_fmt` | **partially fixed 2026-08-22** `D14` `jsmn` + `D21` heap `bud_attr_fmt` done; `D17` attr/tag allowlist remains open |
 
 ### Phase 5 — Cleanup
 

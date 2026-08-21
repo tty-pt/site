@@ -22,8 +22,6 @@ pre-existing, and how to write e2e assertions that don't flake.
 
 ## Pre-existing failures (not caused by local changes)
 
-- The former gig step 6 empty-`data.txt` warning was fixed on 2026-08-21 by
-  seeding from registered group/repertoire source data (`AUDIT` E9).
 - `start.sh` and `scripts/watch.sh` always force `AUTH_SKIP_CONFIRM=1`
   (unconditional export). This is a development convenience, not production
   behavior. See `docs/AUDIT.md` F10.
@@ -33,6 +31,7 @@ pre-existing, and how to write e2e assertions that don't flake.
   valid-but-zero FTS result renders `<p class="text-muted">No items</p>` (the
   deliberate zero-row empty state) instead of a `0 of 0 rows` pagination line;
   `row_count` maps that marker to `0 of 0 rows`.
+- `make hyle-tests` / `make integration-tests` are not part of `make test` — run manually.
 
 ## Debug logging
 

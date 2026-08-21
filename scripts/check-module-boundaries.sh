@@ -101,6 +101,20 @@ done <<EOF
 $(CDPATH= cd -- "$root" && rg -n 'hyle_source_(put|del|register)' mods --glob '*.c' --glob '*.h' 2>/dev/null | grep -v 'mods/source/source\.c:.*hyle_source_register' || true)
 EOF
 
+# -- site-specific surface minimal (blocking): no hardcoded module names in common/index outside registration -----
+# Common is reusable within site; site-specific icons/CSP/menu must be per-module registration, not switch in common/index.
+# Grandfathered: mods/common/ux/site_paths.c:68 icon table is the only allowed site enumeration — do not add more.
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	case "$file" in
+		mods/common/ux/site_paths.c) continue ;;
+	esac
+	printf '%s:%s: site-specific surface in common/index (use per-module source_list_view_t / site registration, not hardcoded "poem"/"song"/"gig"/"grp"): %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n '"(poem|song|gig|grp)"' mods/common mods/index --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
 # -- W06 wasm-native leakage (D18) ------------------------------------------
 if ls "$root"/htdocs/*.wasm >/dev/null 2>&1; then
 	if ! sh "$root/scripts/check-wasm-imports.sh" >/dev/null 2>&1; then

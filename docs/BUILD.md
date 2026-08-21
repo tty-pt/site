@@ -18,7 +18,7 @@ make clean / make distclean
   `external/hyle` + `external/hyle/c/libhyle-bud` code tidy manually (tabs,
   ≤4 nest) — the site Makefile does not tidy them.
 - Site `make` is GNU make; `build.mk:22` adds
-  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -Iexternal/libxylem/include -Iexternal/bud/include -Iexternal/hyle/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`). `build.mk:23` global `hyle-bud` include was removed (L01 fixed).
+  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -Iexternal/libxylem/include -Iexternal/bud/include -Iexternal/hyle/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
 
 ## CRITICAL: stale system headers shadow the repo for native builds
 
@@ -39,12 +39,10 @@ initializers than the system `bud_field_desc_t`.
 
 ## WASM rebuilds and dependencies
 
-`build.mk:57` now generates `.d` files for WASM via `-MM` (`W07` fixed) and
-list `LIST_UX_DEPS` in each module `Makefile` as explicit fallback. The
-`$(WASM_PATH)/%.wasm` rule depends on `$($*-src)` + `$(WASM_COMMON_SRC)` via
-`.d` includes, so editing `filter.c`/`site_ui.c` rebuilds dependent WASMs
-automatically. No manual `rm -f htdocs/<t>.wasm && make` needed (still works
-as fallback).
+`build.mk:57` generates `.d` files for WASM via `-MM` and lists `LIST_UX_DEPS` in
+each module `Makefile` as explicit fallback. The `$(WASM_PATH)/%.wasm` rule depends on
+`$($*-src)` + `$(WASM_COMMON_SRC)` via `.d` includes, so editing `filter.c`/`site_ui.c`
+rebuilds dependent WASMs automatically.
 
 The `make` probe still skips wasm silently if no WASI clang is available
 (silent 404 → pure SSR; harmless).
@@ -57,20 +55,17 @@ Site `make` is **GNU make** (Linux). `external/*` libs use
 will error on `ifeq` — use `make` for the site, `bmake` only for the
 external libs if needed.
 
-`build.mk` now keeps `all` as the first target so `make -C mods/core`
-defaults to `all: dirs $(TARGET) $(WASM_TARGETS)` (was broken when
-`VERSION_GEN` preceded `all`). `VERSION_GEN`
+`build.mk` keeps `all` as the first target so `make -C mods/core`
+defaults to `all: dirs $(TARGET) $(WASM_TARGETS)`. `VERSION_GEN`
 (`mods/common/ux/version.gen.h`) is generated only by `mods/common`
 (`ux/version.gen.h: ...; sh ../../scripts/gen-asset-version.sh`) and
-`site_page.c` uses `__has_include` fallback — `build.mk` does **not**
-make it the default goal, so `make -C mods/core` correctly builds
-`core.so`.
+`site_page.c` uses `__has_include` fallback.
 
 ## Profiles and bootstrap
 
 `PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS` (no `bud_demo.wasm`).
 
-WASM `W06` allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (now blocking in `make all`).
+WASM allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (blocking in `make all`).
 
 ## CSS cache bust
 
@@ -100,9 +95,9 @@ cp /bin/sh ./bin/sh
 
 ## Rebuild checklist after a code change
 
-1. `make` (recompiles affected `.so`; WASM `.d` deps from `build.mk:57` rebuild WASMs automatically when `filter.c`/`site_ui.c` changes; CSS/JS hash auto-regens `mods/common/ux/version.gen.h` via `scripts/gen-asset-version.sh` — no manual `?v=` bump).
+1. `make` (recompiles affected `.so`; WASM `.d` deps from `build.mk:57` rebuild WASMs automatically when `filter.c`/`site_ui.c` changes; CSS/JS hash auto-regens `mods/common/ux/version.gen.h` via `scripts/gen-asset-version.sh`).
 2. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
-3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` (now wired into `make all`).
+3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` (wired into `make all` and `make test`).
 
 ## Related docs
 

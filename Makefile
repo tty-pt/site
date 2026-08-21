@@ -85,10 +85,10 @@ integration-tests: all
 e2e-tests: test-data-dirs
 	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
 
-test: unit-c-tests unit-tests pages-test e2e-tests
+test: boundary-check unit-c-tests unit-tests pages-test e2e-tests
 
 boundary-check:
-	sh scripts/check-module-boundaries.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh
 
 watch:
 	./scripts/watch.sh

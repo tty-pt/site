@@ -65,7 +65,7 @@ Verify the boundary with a grep before committing: `external/hyle/src` and
 
 ## 3. Module load order
 
-Independent modules that explicitly declare immediate dependencies via `xy_load` in `xy_install` (cycle broken 2026-08-22). `mods/core/core.c` loads only host foundations (`common` + `source`; `common` itself `xy_load`s `mpfd`) then `mods.load`:
+Independent modules that explicitly declare immediate dependencies via `xy_load` in `xy_install`. `mods/core/core.c` loads only host foundations (`common` + `source`; `common` itself `xy_load`s `mpfd`) then `mods.load`:
 
 ```
 core.so
@@ -84,7 +84,7 @@ core.so
   auth  → common, libaxil-auth (external, not ./mods/*)
 ```
 
-Previous `auth→index→auth` cycle removed: `auth` no longer `xy_load`s `index` (`mods/auth/auth.c:492` now `common` + external `libaxil-auth`; drops `../index/index.h`); site modules remain independent and declare their own immediate **true** `xy_load` deps (not centrally owned by `core` — maximally independent does not mean zero deps). `mods.load` order `poem→song→grp→gig` still respects `song→grp→gig`; `libxylem` deduplicates repeated loads. External deps like `libaxil-auth` are correctly marked external, not assumed in-project.
+Site modules declare their own immediate **true** `xy_load` deps (not centrally owned by `core` — maximally independent does not mean zero deps). `mods.load` order `poem→song→grp→gig` respects `song→grp→gig`; `libxylem` deduplicates repeated loads. External deps like `libaxil-auth` are marked external.
 
 - `index` registers `GET:/` and the default handler; `index_open()` adds the
   generic `/module/*` CRUD routes. `auth` registers `/api/csrf`,
@@ -93,11 +93,11 @@ Previous `auth→index→auth` cycle removed: `auth` no longer `xy_load`s `index
   were duplicated into `core.c`.
 
 Modules are `xy_load()` → `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` **before
-the process chroots**. Consequences:
+the process chroots**; `xy_reload()` `external/libxylem/src/libxylem.c:804,828` copies rebuilt `.so` to a unique inode via `mkstemps` (`dir/.xylem-XXXXXX.so` → `/tmp/...`) then `dlopen(tmp)` only when `xy_reloading==1` (`libxylem-module.c:226` `papi.h:145` `tmp_load_path` + `fchmod`/`fsync`), initial loads stay direct — `RTLD_NODELETE` kept for `sica_hd` adapter stability but reload no longer reuses old `link_map`. Consequences:
 - Cross-.so calls MUST use the XY dispatch mechanism (`XY_DECL`/`XY_IMPL`),
-  never plain `extern`.
+  never plain `extern` (`RTLD_LOCAL` in `libxylem.c:813` means `bud_adapter` etc. must be via `XY` in `common.so`).
 - Native deps (e.g. GNU libiconv for `axil_slugify`) resolve from the **host**
-  root, not the chroot.
+  root, not the chroot; `LD_LIBRARY_PATH` must put `site/external/libxylem/lib` first (`start.sh:6`) so tmp-dlopened modules resolve site `libxylem` not `/lib/libxylem.so`.
 
 ## 4. Runtime & request path
 

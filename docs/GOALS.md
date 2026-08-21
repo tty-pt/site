@@ -2,11 +2,9 @@
 
 > What the architecture *wants* to be. Read `docs/OVERVIEW.md` first,
 > then this file, then `docs/ARCHITECTURE.md` / `docs/DESIGN.md`.
-> Every other doc assumes these invariants. `NAV.md` is the worked
-> example of Goal 3; this file generalizes it.
+> Every other doc assumes these invariants.
 
-Current departures from these goals are cataloged in
-`docs/VIOLATIONS.md`. Do not copy a listed violation as precedent.
+Departures from these goals are cataloged in `docs/VIOLATIONS.md` (currently 0 open). Do not introduce new violations.
 
 No-JS must always work. hyle stays framework-neutral. Client enhancement
 is optional, additive, and framework-paired (bud↔WASM). SSR markup +
@@ -56,30 +54,6 @@ explicit and minimal.
    list fields and labels in a framework-neutral `source_list_view_t` beside
    its field table. `list_fill_state` consumes that registration without a
    feature-name switch in index.
-
-### 1.3 How we know we are failing today
-
-- **Cyclic `xy_load`:** `mods/auth/auth.c:414` loads `index` while
-  `mods/index/index.c:661` loads `auth` — no DAG; `mods/gig/gig.c:1243`
-  transitively loads `index+mpfd+song+source+grp` even though `core`
-  already did. `mods/core/core.c:27` warn-only hides a missing `.so`.
-- **Textual `.c` includes:** `mods/song/ux/detail.c:12`
-  `#include "../../common/ux/site_ui.c"` (762 lines), `mods/gig/ux/detail.c:19`
-  `#include "../../common/list_fill.c"` (60 `qmap_`/`source_` calls
-  marked `NEVER include from WASM TU`). The only sanctioned reuse is
-  C-isomorphic renderers; everything else must be `XY_DECL`.
-- **Global/local split is incomplete:** `mods/common/ux/site_chrome.c:89`
-  now owns `#chrome-root`, while `mods/common/ux/site_ui.c:456` owns the
-  local page tree. The corresponding `site_chrome.wasm` and multi-root
-  loader do not exist, so the SSR contract is ahead of the runtime.
-- **Ownership, path encapsulation, and list metadata were fixed on
-  2026-08-21:** auth is the identity authority, source no longer uses host
-  `getpwuid`, module/item IDs pass through common builders, and index consumes
-  module-owned list-view registrations.
-- **`source` writing sibling datasets:** `mods/source/source.c:236`
-  `mkdir(dir)` for `target->items_path/slug` during ref ensure, and
-  `mods/source/source.c:454` clearing inverse refs by walking all
-  datasets — generic but assumes every source is filesystem-backed.
 
 ### 1.4 Checklist before touching a module
 
@@ -138,20 +112,6 @@ before every commit (`docs/ARCHITECTURE.md:64`).
   including `bud/bud.h` for `bud_field_desc_t` converters is a layer
   blur; converters belong in `common` or `hyle-bud`.
 
-### 2.3 How we know we are failing today
-
-- **`build.mk:23` leaks the bridge header globally:**
-  `CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include` makes
-  every `mods/*.so` resolve `hyle-bud.h` even when its `Makefile`
-  does not declare the dep. Same leak in `Makefile:74` `lint` line.
-  This defeats `AGENTS.md:38`. Fix: remove that `-I` from `build.mk:23`
-  and keep it only as `EXTRA_CFLAGS` in `gig`/`grp`/`index`
-  (lint must mirror the same scoping).
-- **WASM bundling duplicates `hyle-bud` sources:** `mods/index/Makefile:11`
-  and `mods/gig/Makefile:10` compile `external/hyle/c/libhyle-bud/src/filter.c`
-  + `table.c` *into* each `.wasm` instead of linking a WASM `libhyle-bud.a`.
-  Drift risk; duplicates `WASM_COMMON_SRC` (`build.mk:39`).
-
 ## 3. WASM enhancements — easy to code, smart bundling
 
 ### 3.1 Easy to code (one renderer, two builds)
@@ -197,71 +157,28 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
   JSON with escaped `<`/`/`/control chars, emitting
   `data-modules="site_chrome"` alone or `data-modules="site_chrome <local>"`,
   and always loading `bud-client.js`. Route code stays
-  `site_ui_respond_page(fd,title,page_state_json,local_module,page_tree)`
-  (`NAV.md:486`).
-- `htdocs/bud-client.js:6` today only handles the first token + one
-  `#bud-root` and `htdocs/bud-hydrate.js:1` only parses `event`/`event:1`.
-  The smart system needs: parallel `fetch` per `data-modules` token,
-  per-bridge `BudWasmBridge` + `BudPatchApplier` scoped to its root,
-  `#chrome-state` fed only to `site_chrome.wasm` (`NAV.md:1037`),
-  `Promise.allSettled` so one 404 does not block the other
-  (`NAV.md:1099`), `window.__bud_bridges` map plus `__bud_bridge` alias,
+  `site_ui_respond_page(fd,title,page_state_json,local_module,page_tree)`.
+- `htdocs/bud-client.js:6` handles parallel `fetch` per `data-modules` token
+  via `moduleSpec` + per-bridge `BudWasmBridge`/`BudPatchApplier` scoped to its root,
+  `#chrome-state` fed only to `site_chrome.wasm`, `Promise.allSettled` so one 404
+  does not block the other, `window.__bud_bridges` + `__bud_bridge` alias,
   `event@window` parsing (`scroll@window`), `window.addEventListener`
   with `{passive:true}` and `requestAnimationFrame` throttle, and
-  `window.scrollY` payload (`NAV.md:1158`).
+  `window.scrollY` payload.
 - Roots are independent: numeric `data-bud-id` may overlap between
   bridges; each bridge builds its own hydration map from its root and
-  dispatches into its own runtime (`NAV.md:8.2`).
+  dispatches into its own runtime.
 
 **No-JS stays sticky, not hiding.** Hide-on-scroll is enrichment only;
-the bar is always visible without WASM (`NAV.md:1.1`). Patch ownership
+the bar is always visible without WASM. Patch ownership
 is strict: global handler patches only `#chrome-root` nodes.
 
 ### 3.3 Build — WASM concerns must not leak into native
 
-- `build.mk` must stay reusable: per-module Makefiles declare
-  `WASM_TARGETS`, `<name>-src`, `<name>-cflags` before
-  `include ../../build.mk` (`mods/song/Makefile:8`, `docs/C-ISOMORPHIC-BUD.md:194`).
-  For a WASM-only asset (global chrome), support `WASM_ONLY=1`
-  so `mods/site_chrome` or `mods/common` does not need a dummy `.so`
-  (`NAV.md:944`). Prefer reusing the generic
-  `$(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)` rule; do not
-  copy it.
-- Keep WASM-safe vs native-only files split. `site_ui.c` and
-  `mods/index/ux/list.c` are WASM-compilable; `mods/common/list_fill.c`
-  and `mods/source/source.c` are native-only (`docs/DESIGN.md:118`).
-  `mods/gig/ux/detail.c:19` textually includes `list_fill.c`; its body is
-  currently excluded under `__wasm__`, but the native cross-module
-  coupling remains and must not be copied.
-- Include-source reuse (`detail.c:12` `#include "../../common/ux/site_ui.c"`)
-  is sanctioned for id-alignment (`docs/DESIGN.md:124`) but must stay
-  minimal. Global chrome is now split into `site_chrome.c`; page-layout
-  helpers still arrive through the much larger `site_ui.c` inclusion.
-- Cache bust is build-owned: `SITE_CSS_V` and `SITE_CLIENT_V`
-  (`mods/common/ux/site_ui.c:761-762`) must be generated by the build,
-  not hand-edited (`docs/BUILD.md:57`, `NAV.md:837`).
-
-### 3.4 How we know we are failing today
-
-- **Single-module loader:** `htdocs/bud-client.js:10` `mod.split(/\s+/)[0]`
-  + `htdocs/bud-client.js:12` `#bud-root` only + `htdocs/bud-client.js:36`
-  `#bud-state` only + `htdocs/bud-client.js:53` singular
-  `window.__bud_bridge`. `data-modules="site_chrome list"` would drop
-  `list` (`NAV.md:181`).
-- **Half-migrated global contract:** `mods/common/ux/site_ui.c:787`
-  now emits `data-modules="site_chrome <local>"` on every page, but the
-  single-module loader takes only `site_chrome`, uses `#bud-root`, and
-  fetches a `site_chrome.wasm` that does not exist. Local WASM is skipped.
-- **No global artifact:** `htdocs/*.wasm` today is `bud_demo`, `gig_detail`,
-  `list`, `song_detail` only; no `site_chrome.wasm`, no
-  `mods/site_chrome/Makefile`, and `mods/common/Makefile:1` has no
-  `WASM_TARGETS`. `build.mk:34` silently skips missing WASI SDK.
-- **Stale-dep invisibility:** `build.mk:44` lists `$($*-src)` but not the
-  `#include`d `site_ui.c`; editing shared chrome does not rebuild local
-  WASMs unless forced (`docs/BUILD.md:40` `rm -f htdocs/<t>.wasm && make`).
-- **Size / event gaps:** no `@window` scroll dispatch
-  (`htdocs/bud-hydrate.js:1,284`), no rAF throttle, no `scrollY` payload
-  — blocks `NAV.md:6.1` hide-on-scroll through bud.
+- `build.mk` stays reusable: per-module Makefiles declare `WASM_TARGETS`, `<name>-src`, `<name>-cflags` before `include ../../build.mk` (`mods/song/Makefile:8`, `docs/C-ISOMORPHIC-BUD.md:194`). `WASM_ONLY=1` supported `build.mk:42` so `mods/site_chrome` has no dummy `.so`; generic `$(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)` reused.
+- WASM-safe vs native-only split holds: `site_ui.c` + `mods/index/ux/list.c` WASM-compilable; `mods/common/list_fill.c` + `mods/source/source.c` native-only (`docs/DESIGN.md:118`). `list_fill` lives once in `index` via `XY` (`mods/index/list_fill.c:4`); sanctioned includes limited to pure C-isomorphic `mods/common/ux/site_ui.c`/`mods/index/ux/list.c`/`mods/song/ux/music.c` `scripts/check-module-boundaries.sh:26`.
+- Include-source reuse (`detail.c:12` `#include "../../common/ux/site_ui.c"`) sanctioned for id-alignment (`docs/DESIGN.md:124`) and is minimal: `site_ui.c` is 14-line aggregator `site_paths.c`/`site_layout.c`/`site_forms.c`/`site_media.c` + native `site_chrome.c`/`site_page.c` under `#ifndef __wasm__`.
+- Cache bust is build-owned: `SITE_CSS_V`/`SITE_CLIENT_V` `mods/common/ux/version.gen.h` generated by `scripts/gen-asset-version.sh` cksum via `__has_include` fallback `mods/common/ux/site_page.c:108`; no hand edit `docs/BUILD.md:57`.
 
 ## 4. Dev ergonomics — custom SSR + WASM without too much trouble
 
@@ -280,48 +197,36 @@ The three goals above imply a fourth: a dev can ship a custom page
   `register_standard_item_handlers` with a struct-of-hooks
   (`docs/DESIGN.md:66`) — null = default. `site_ui_page` auto-injects
   global chrome/state.
-- **Current friction to reduce:** `site_ui_layout` (6 args) +
-  `site_ui_page` (4 args) + `site_ui_respond_page` (5 args) manual chain
-  with magic `module` string (`"song_detail"`→`"/song_detail.wasm"`,
-  typo = silent 404 at `htdocs/bud-client.js:17`), per-handler
-  `state_buf[16384]` + `snprintf("<script id=\"bud-state\">")`
-  (`mods/song/song.c:365`, `mods/gig/gig.c:410`, `mods/index/index.c:186`),
-  and manual `SITE_CSS_V` bump. The fix is helpers (`NAV.md:7.1.6`
-  `site_ui_page` auto `site_chrome` prefix, a `respond_with_state`
-  wrapper, a `wrap_bud_root` helper) rather than new concepts.
+- **Helpers:** `site_ui_layout`/`site_ui_page`/`site_ui_respond_page` via `mods/common/ux/site_page.c:195` `site_ui_state_head()` + `site_ui_respond_with_state()` owning `<script id="bud-state">` escape + `site_ui_page(...,module,…)` chrome/state plumbing; handlers supply `state_json+module`.
 
-## 5. Guardrails (check before commit)
+## 5. Guardrails (check before commit — must be 0 / pass)
 
 1. `grep -rn bud external/hyle/src include/hyle` must be empty
    (`docs/ARCHITECTURE.md:64`). Only `external/hyle/c/libhyle-bud` may
    mention `bud`.
 2. New `WASM` TU: `grep -E 'qmap_|source_|axil_|XY_' ux/<your>.c` must be
-   empty; any hit will be `--allow-undefined` at `build.mk:38` and crash
-   in the browser only.
+   empty; any hit will be `--allow-undefined` at `build.mk:37` and crash
+   in the browser only (`W06`). WASM-safe files are `site_ui.c`/`list.c`/`music.c` only; `list_fill.c`/`source.c` are native-only.
 3. New cross-module symbol: `XY_DECL` in header, `XY_IMPL` in owner,
-   shared constants outside `#ifndef MODULE_IMPL` (`docs/CONVENTIONS.md:72`).
-4. New field: one row in `fields.h`; no `switch(module)` in `index`.
-5. New write path: through `source_update_item`/`source_delete_item` only.
-6. `build.mk` `lint`/`format` use the same include set as the build;
-   do not add a global `-I` to make a TU compile — add `EXTRA_CFLAGS`
-   in that module's `Makefile`.
-7. Manual verification still required: `rm -f htdocs/<t>.wasm && make`,
-   restart `axil -C . -p 8080 -d -m mods/core/core`, and check
-   `#bud-root`/`data-bud-id` and `data-wasm-loaded` (`docs/C-ISOMORPHIC-BUD.md:216`).
+   shared constants outside `#ifndef MODULE_IMPL` (`docs/CONVENTIONS.md:72`, `docs/ARCHITECTURE.md:120`). Never plain `extern`.
+4. No `#include "*.c"` across modules except sanctioned pure C-isomorphic `mods/common/ux/site_ui.c|mods/index/ux/list.c|mods/song/ux/music.c` (`scripts/check-module-boundaries.sh:26`, `M03`). Keep `static` by default.
+5. No `"var/` literal outside `common_storage.c` / `source_store_fs.c` + `source_setup` registration; use `with_module_item_access` / `item_path_build_root` (`M04`).
+6. New write path: through `source_update_item`/`source_delete_item` → `hyle put/del` only (`ARCHITECTURE.md:144`). Direct `fopen("var/...")` freezes FTS.
+7. New field: one row in `fields.h`; no `switch(module)` in `index` — declare `source_list_view_t` beside field table (`M07`).
+8. `hyle-bud` is per-module: `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` in `mods/index,gig,grp/Makefile:3-4` only (`L01`); `hyle-bud-wasm.mk:1` is single `HYLE_BUD_WASM_SRC` declaration (`L03`). No global `-I` in `build.mk`.
+9. `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` must pass (now blocking `make all:boundary-check`). `wasm-allowed-imports.lst` allowlists `env.bud_host_*` only.
+10. Site-specific surface minimal (blocking): `grep -E '"(poem|song|gig|grp)"' mods/common mods/index --include="*.h" --include="*.c"` must be 0 outside `source_list_view_t` registration — per-module registration keeps `common/index` reusable within site, not a dumping ground. Adding a new module must not edit `common`.
+11. Feature placement — consider owning http server: choose owner `HTTP→axil`, `dataset/query/FTS→source→hyle`, `collection/list→index+hyle-bud`, `chrome/forms→common/ux`, `domain→song/gig/grp`. If 2+ callers need it, invent in the library; if handler >30 lines, extend abstraction.
+12. Manual verification still required: `make -j4`, restart `axil -C . -p 8080 -d -m mods/core/core`, and check `#bud-root`/`data-bud-id` and `data-wasm-loaded` (`docs/C-ISOMORPHIC-BUD.md:216`).
 
 ## 6. How this file relates to the others
 
-- `NAV.md` is the feature plan that **motivated** Goal 3. It defines the
-  two-root (`#chrome-root` + `#bud-root`) split, `body:has()` menu
-  state, and window-event bridge extension in detail. `GOALS` states the
-  invariants; `NAV` shows how they apply to the sticky chrome.
-- `docs/AUDIT.md` tracks security/correctness debt that also violates
-  these goals (e.g. `F12` CSS `?v=` manual, `D18` `--allow-undefined`).
-  Fix GOALS first, then AUDIT items stop recurring.
-- `docs/ARCHITECTURE.md` is the deployment truth (load order, XY
-  contract, data invariants). `docs/DESIGN.md` is the philosophy
+- `docs/ARCHITECTURE.md` is the deployment truth (load order `§3`, XY
+  contract `§5`, data invariants `§6`). `docs/DESIGN.md` is the philosophy
   (evoke, not reimplement). `GOALS` is the checklist that keeps both
   true.
+- `docs/AUDIT.md` tracks security/correctness debt. Fix GOALS first, then
+  AUDIT items stop recurring.
 
 ## 7. Related docs
 
@@ -332,4 +237,4 @@ The three goals above imply a fourth: a dev can ship a custom page
 - `docs/WASM-BRIDGE.md` — bridge/patch pitfalls
 - `docs/SSR-CONTRACT.md` — no-JS markup contract
 - `docs/BUILD.md` — wasm rebuild trap, stale headers, cache bust
-- `docs/VIOLATIONS.md` — current violations, exceptions, and stale claims
+- `docs/VIOLATIONS.md` — 0 open (archived `VIOLATIONS-ARCHIVE-2026-08-22.md`), deliberate exceptions + confirmed boundaries
