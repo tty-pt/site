@@ -54,7 +54,7 @@ static void set_html_security_headers(int fd)
 	        "style-src 'self' 'unsafe-inline'; "
 	        "img-src 'self' data:; "
 	        "media-src 'self'; "
-	        "frame-src https://www.youtube.com; "
+	        "frame-src 'self' https://www.youtube.com; "
 	        "frame-ancestors 'none'");
 }
 

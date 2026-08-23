@@ -29,7 +29,7 @@ axil-lib:
 	$(MAKE) -C external/axil
 
 qmap-lib:
-	$(MAKE) -C external/qmap
+	$(MAKE) -C external/libqmap
 
 xylem-lib:
 	$(MAKE) -C external/libxylem
