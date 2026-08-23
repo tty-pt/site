@@ -176,6 +176,14 @@ file outside `ux/` (`GOALS.md:§3`). Allowed only: `#ifndef *_C` include guards,
 - Ordered `gig.songs`/`grp.songs` via `hyle_source_ordered_*` are sanctioned
   until DSV migration; item sources must use `source`.
 
+## CSP headers
+
+Security headers (CSP, nosniff, X-Frame-Options, Referrer-Policy) are set in
+`mods/common/common_response.c:44-57` (`common_response_set_security_headers`)
+and CSP `script-src` is extended in `mods/common/ux/site_ui.c:700-723` to
+include the inline `<script id="bud-state">` hash for the current page.
+`site_core_build_csp_extra` in dead `mods/site_core/` is not used.
+
 ## Misc pitfalls
 
 - Do not commit `*.so`, `*.o`, `*.wasm`, swap files, or Rust `target/`.

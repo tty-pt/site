@@ -110,6 +110,8 @@ before every commit (`ARCHITECTURE.md:§2`).
   `hyle-bud` is pure `bud` + C (`filter.c`, `table.c` via `hyle-bud-wasm.mk`);
   its use in `mods/*/ux` for filters/tables **is** the sanctioned UX
   bridge (see `CONVENTIONS` WASM purity).
+  Note: `grp` uses `hyle-bud` for native SSR only (no `WASM_TARGETS` in its
+  Makefile); `index` and `gig` also produce WASM bundles.
 - No `hyle` crank should need `bud.h`. `mods/source/source.c`
   including `bud/bud.h` for `bud_field_desc_t` converters is a layer
   blur; converters belong in `common` or `hyle-bud`.

@@ -23,6 +23,7 @@ make watch          # auto-rebuild + restart on :8080
    `site_ui.c|list.c|music.c` (`scripts/check-module-boundaries.sh`).
    Check `grep -E 'qmap_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must
    be 0 and `sh scripts/check-wasm-imports.sh` must pass.
+   Note: `mods/site_chrome/ux` is WASM-only (`WASM_ONLY=1`) — not a native module.
 
 2. **UX avoids compile-time branching.** No `#if`/`#ifdef` for nodes.
    Branch on runtime `state`. Allowed only: `#ifndef *_C` guards,

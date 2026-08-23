@@ -10,7 +10,7 @@ A **C-isomorphic** renderer is a single C function tree that is compiled twice:
 
 The same source must therefore satisfy **both** environments. This doc is the
 rulebook. Reference implementations: `mods/song/ux/detail.c` →
-`htdocs/song_detail.wasm` (also `mods/gig/ux/detail.c`, `mods/bud_demo`),
+`htdocs/song_detail.wasm` (also `mods/gig/ux/detail.c`),
 and the **list page** `mods/index/ux/list.c` → `htdocs/list.wasm` (served on
 all four list pages via `data-modules="list"`; poem/grp load it too and the
 enhancement no-ops).

@@ -734,7 +734,6 @@ open — bumping the define is still a manual step.
 
 - `all` does not build axil/xylem/qmap — relies on prebuilt libs.
 - Always `-O0 -g`; no release profile.
-- `deploy-wasm` copies `bud_demo.js`.
 
 **Fix:** Depend on those libs; `DEV=1` vs release; exclude demo.
 

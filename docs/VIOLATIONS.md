@@ -61,6 +61,11 @@ missing `#bud-root` wrapper (demo excluded from `PROD_ASSETS`), `wabt`
 - **`bud_demo` is a non-isomorphic demo.** `mods/bud_demo/ux/bud_demo_fe.c` lacks
   `#bud-root`/`bud-state`/`wasm_init` — intentional, excluded from `PROD_ASSETS`
   (`Makefile:173`), not a prod violation; do not copy the pattern.
+- **`site_core` is dead code.** `mods/site_core/` exports `site_core_register_module`,
+  `site_core_module_icon`, `site_core_module_display`, `site_core_build_csp_extra`
+  via XY but is not in `mods.load`, never loaded, and its functions are never called.
+  CSP headers are set in `mods/common/common_response.c` and `mods/common/ux/site_ui.c`
+  instead. Keep or remove at will; do not add new callers.
 
 ## Confirmed boundaries that hold
 

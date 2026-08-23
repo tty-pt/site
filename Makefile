@@ -3,16 +3,12 @@ DEV ?= 0
 PROFILE ?= dev
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
-MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud axil-lib qmap-lib xylem-lib mods modules clients boundary-check
+all: stoma-lib hyle-lib bud-lib hyle-bud axil-lib qmap-lib xylem-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
-
-modules:
-	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done
 
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
@@ -104,11 +100,11 @@ lint:
 
 clean:
 	$(MAKE) -C external/bud clean
-	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
+	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
 
 distclean:
 	$(MAKE) -C external/bud distclean
-	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
+	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
 
 # Debug/compilation capture targets
 DEBUG_DIR := debug
@@ -177,4 +173,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check
+.PHONY: all mods clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check

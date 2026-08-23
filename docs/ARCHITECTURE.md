@@ -94,6 +94,11 @@ Site modules declare their own immediate **true** `xy_load` deps (not centrally 
 - `mods/redir/` exists but is never loaded; its `/sb` and `/chords` redirects
   were duplicated into `core.c`.
 
+- `mods/site_chrome/` is **WASM-only** (`WASM_ONLY=1` in its Makefile) — it
+  produces `htdocs/site_chrome.wasm` for global chrome enhancement but has no
+  native `.so` and is not in `mods.load`. It is not part of the native module
+  load order.
+
 Modules are `xy_load()` → `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` **before
 the process chroots**; `xy_reload()` `external/libxylem/src/libxylem.c:804,828` copies rebuilt `.so` to a unique inode via `mkstemps` (`dir/.xylem-XXXXXX.so` → `/tmp/...`) then `dlopen(tmp)` only when `xy_reloading==1` (`libxylem-module.c:226` `papi.h:145` `tmp_load_path` + `fchmod`/`fsync`), initial loads stay direct — `RTLD_NODELETE` kept for `sica_hd` adapter stability but reload no longer reuses old `link_map`. Consequences:
 - Cross-.so calls MUST use the XY dispatch mechanism (`XY_DECL`/`XY_IMPL`),
