@@ -2,6 +2,7 @@ EXTRA_CFLAGS += -I../common
 EXTRA_LDLIBS += -lbud -laxil-auth
 EXTRA_CFLAGS += -I./lib/transp
 EXTRA_LDLIBS += ./lib/transp/libtransp.a -ljson-c
+EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
 
 # WASM targets must be defined before including build.mk so the shared
 # all:/wasm: rules can see them during parse time.

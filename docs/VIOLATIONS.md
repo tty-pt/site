@@ -55,6 +55,7 @@ missing `#bud-root` wrapper (demo excluded from `PROD_ASSETS`), `wabt`
   `source_list_view_t` registration. Enforced by `scripts/check-module-boundaries.sh`.
 - **Missing WASI may degrade to SSR-only** (`build.mk`). CI/release
   should separately verify required assets.
+- **UX purity check enforced.** `scripts/check-ux-purity.sh` verifies: no XY hooks in UX (`XY_DECL`, `XY_IMPL`, `xy_load`, `xy_install`, `XY_MODULE_API`, `XY_CALL`), and no preprocessor conditionals except include guards, `site_ui.c:#ifndef __wasm__`, `gig/ux/detail.c:#ifdef __wasm__` (host imports), `site_page.c:#if __has_include("version.gen.h")`. Runs in `make boundary-check`.
 - **Search is accent-sensitive by design.** `pão` and `pao` differ.
 - **Node IDs may overlap across independent roots.** Each bridge owns its map.
 - **No-JS is mandatory.** Do not solve a WASM issue with JS-only controls.

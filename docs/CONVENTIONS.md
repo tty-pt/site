@@ -3,7 +3,7 @@
 The coding conventions and request-handler patterns. `clang-format` +
 `clang-tidy` enforce the mechanical parts (`make lint` / `make format`, see
 `docs/BUILD.md`). Encapsulation rules below are enforced by
-`scripts/check-module-boundaries.sh` + `scripts/check-wasm-imports.sh`
+`scripts/check-module-boundaries.sh` + `scripts/check-ux-purity.sh` + `scripts/check-wasm-imports.sh`
 (`make all:boundary-check`).
 
 ## C style (enforced)

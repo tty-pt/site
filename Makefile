@@ -84,7 +84,7 @@ e2e-tests: test-data-dirs
 test: boundary-check unit-c-tests unit-tests pages-test e2e-tests
 
 boundary-check:
-	sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh
 
 watch:
 	./scripts/watch.sh

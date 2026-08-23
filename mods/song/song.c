@@ -14,8 +14,10 @@
 
 #include "../common/common.h"
 #include "../source/source.h"
+#include "hyle/source.h"
 #include "../auth/auth.h"
 #include "../../lib/transp/transp.h"
+#include "../../lib/transp/parse.h"
 #include "fields.h"
 
 static transp_ctx_t *g_transp_ctx = NULL;
@@ -262,6 +264,26 @@ XY_IMPL(char *, song_get_pref, const char *, user, const char *, name)
 	return song_viewer_pref_read(user, name);
 }
 
+static const char *derive_song_lyrics(const void *ctx, const char *row_id, const char *field_name, void *user)
+{
+	(void)ctx; (void)field_name; (void)user;
+
+	char path[PATH_MAX];
+	item_path_build_root(g_doc_root, "song", row_id, path, sizeof(path));
+	item_child_path(path, "lyrics.txt", path, sizeof(path));
+
+	static __thread char buf[65536];
+	char *c = slurp_file(path);
+	if (!c) {
+		buf[0] = '\0';
+		return buf;
+	}
+	strncpy(buf, c, sizeof(buf) - 1);
+	buf[sizeof(buf) - 1] = '\0';
+	free(c);
+	return buf;
+}
+
 XY_IMPL(int, source_after_update,
         int, fd,
         const char *, dataset_id,
@@ -282,6 +304,34 @@ XY_IMPL(int, source_after_update,
 		char data_path[PATH_MAX];
 		item_child_path(path, "data.txt", data_path, sizeof(data_path));
 		write_file_path(data_path, data, strlen(data));
+
+		transp_song_t song = {0};
+		int key = -1;
+		if (transp_song_parse(data, &song, &key) == 0) {
+			size_t cap = strlen(data) + 1;
+			char *lyrics = malloc(cap);
+			if (lyrics) {
+				size_t pos = 0;
+				for (size_t i = 0; i < song.nlines; i++) {
+					transp_pline_t *pl = &song.lines[i];
+					if (!pl->is_chord_line && pl->len > 0) {
+						if (pos + pl->len + 1 < cap) {
+							memcpy(lyrics + pos, pl->text, pl->len);
+							pos += pl->len;
+							lyrics[pos++] = '\n';
+						}
+					}
+				}
+				if (pos > 0) pos--;
+				lyrics[pos] = '\0';
+
+				char lyrics_path[PATH_MAX];
+				item_child_path(path, "lyrics.txt", lyrics_path, sizeof(lyrics_path));
+				write_file_path(lyrics_path, lyrics, pos);
+				free(lyrics);
+			}
+			transp_song_free(&song);
+		}
 	}
 
 	return 0;
@@ -447,6 +497,8 @@ void xy_install(void)
 	        SOURCE_FLAG_VOLATILE, NULL);
 
 	ref_field_register("song.items", "type");
+
+	hyle_register_derive("song.lyrics_from_data", derive_song_lyrics, NULL);
 
 	source_setup(
 	        "song.items", NULL, sizeof(song_cache_t), "var/song",

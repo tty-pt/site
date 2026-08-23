@@ -97,7 +97,7 @@ cp /bin/sh ./bin/sh
 
 1. `make` (recompiles affected `.so`; WASM `.d` deps from `build.mk:57` rebuild WASMs automatically when `filter.c`/`site_ui.c` changes; CSS/JS hash auto-regens `mods/common/ux/version.gen.h` via `scripts/gen-asset-version.sh`).
 2. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
-3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` (wired into `make all` and `make test`).
+3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh` (wired into `make all` and `make test`).
 
 ## Related docs
 

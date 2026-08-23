@@ -192,7 +192,7 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 6. New write path: through `source_update_item`/`source_delete_item` → `hyle put/del` only (`ARCHITECTURE.md:§6`). Direct `fopen("var/...")` freezes FTS.
 7. New field: one row in `fields.h`; no `switch(module)` in `index` — declare `source_list_view_t` beside field table.
 8. `hyle-bud` is per-module: `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` in `mods/index,gig,grp/Makefile` only; `hyle-bud-wasm.mk` is single `HYLE_BUD_WASM_SRC` declaration. No global `-I` in `build.mk`.
-9. `sh scripts/check-module-boundaries.sh && sh scripts/check-wasm-imports.sh` must pass (blocking `make all:boundary-check`). `wasm-allowed-imports.lst` allowlists `env.bud_host_*` only.
+9. `sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh` must pass (blocking `make all:boundary-check`). `wasm-allowed-imports.lst` allowlists `env.bud_host_*` only.
 10. Site-specific surface minimal (blocking): `grep -E '"(poem|song|gig|grp)"' mods/common mods/index --include="*.h" --include="*.c"` must be 0 outside `source_list_view_t` registration — per-module registration keeps `common/index` reusable.
 11. Feature placement — consider owning http server: choose owner `HTTP→axil`, `dataset/query/FTS→source→hyle`, `collection/list→index+hyle-bud`, `chrome/forms→common/ux`, `domain→song/gig/grp`. If 2+ callers need it, invent in the library; if handler >30 lines, extend abstraction.
 12. Manual verification still required: `make -j4`, restart `axil -C . -p 8080 -d -m mods/core/core`, and check `#bud-root`/`data-bud-id` and `data-wasm-loaded` (`C-ISOMORPHIC-BUD.md:§7`).
