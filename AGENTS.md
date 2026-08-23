@@ -5,44 +5,66 @@ libxylem XY module system, and the bud HTML builder. SSR-first with
 progressive WASM enhancement; no Rust/Dioxus/Deno in the request path.
 
 **Read the relevant doc below before touching code.** Start with
-`docs/OVERVIEW.md` — read it first, always. Each doc lists its own related
-docs. Bootstrap:
+`docs/OVERVIEW.md` — read it first, always.
 
 ```bash
 make
 make watch          # auto-rebuild + restart on :8080
 ```
 
+## Guidelines — read this, 2 minutes
+
+1. **UX is pure & isomorphic.** `mods/*/ux` compiles twice: native `.so`
+   for SSR and `htdocs/*.wasm` for the browser. One `bud_app_render(state)`
+   + `bud-state` JSON + `#bud-root` / `#chrome-root` wrapper. Allowed:
+   `bud.h` / `bud_jsx.h` / `bud_app.h` + `hyle-bud/hyle-bud.h` + pure C.
+   Forbidden in UX: `XY_`/`xy_`/`qmap_`/`source_`/`axil_`/`stoma_`/
+   `hyle_source_`/`var/` literals. Sanctioned `#include "*.c"` only
+   `site_ui.c|list.c|music.c` (`scripts/check-module-boundaries.sh`).
+   Check `grep -E 'qmap_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must
+   be 0 and `sh scripts/check-wasm-imports.sh` must pass.
+
+2. **UX avoids compile-time branching.** No `#if`/`#ifdef` for nodes.
+   Branch on runtime `state`. Allowed only: `#ifndef *_C` guards,
+   `__attribute__((import_module("env")…))` host imports,
+   `site_ui.c:#ifndef __wasm__` aggregator,
+   `site_page.c:#if __has_include` fallback (`C-ISOMORPHIC-BUD §3`).
+
+3. **XY is the only cross-.so boundary.** `XY_DECL` in header behind
+   `#ifndef MODULE_IMPL`, `XY_IMPL` in owner, constants outside guard,
+   `static` by default, never `extern` or cross-module `#include "*.c"`.
+   Declare deps via `xy_load()` in `xy_install()` — modules are reusable;
+   maximally independent = explicit DAG, not zero edges
+   (`poem→index`, `song→index+mpfd`, `grp→index+mpfd+song`,
+   `gig→index+mpfd+song+source+grp`; `core` loads only `common+source`).
+   See `ARCHITECTURE §5`, `CONVENTIONS`.
+
+4. **hyle stays neutral; SSR is the contract.** No `bud` in
+   `external/hyle/src` or `include/hyle`; `hyle-bud` is the ONLY
+   bud-dependent bridge and **is** used in UX for filters (`index`/`gig`/
+   `grp`). SSR emits plain HTML + `data-*` hooks; `data-bud-*`/patch ops
+   are additive. See `SSR-CONTRACT`.
+
+5. **Data invariants.** All row writes via `source_update_item` /
+   `source_delete_item` → `hyle put/del` (FTS), never direct `var/`;
+   search accent-sensitive `pão≠pao` (no TRANSLIT, only `axil_slugify`);
+   No-JS must always work (`SSR-CONTRACT`).
+
 ## Topic index
 
 | Topic | Read |
 |-------|------|
-| 5-minute orientation: stack, framework-pair model, request path, unbreakable rules, repo layout — READ FIRST | `docs/OVERVIEW.md` |
-| Goals: module/lib/WASM invariants, what agents must not erode, current gaps — READ SECOND | `docs/GOALS.md` |
-| Well-made abstractions & minimal site surface — read before adding any feature | `docs/DESIGN.md:7` + `GOALS.md:5(11-12)` |
-| Known architecture violations: 0 open (archived 2026-08-22) — guardrails in `GOALS.md:§5` are the checklist, exceptions in `VIOLATIONS.md:§Deliberate` | `docs/VIOLATIONS.md` |
-| Architecture, framework-pair model, module load order, XY contract, data-layer invariants | `docs/ARCHITECTURE.md` |
-| Design philosophy: encapsulation, "evoke, don't reimplement", abstraction limits | `docs/DESIGN.md` |
-| Build/rebuild: make, wasm rebuild trap, stale `/usr/include` headers, cache bust, chroot, server start | `docs/BUILD.md` |
-| Testing: commands, e2e prereqs, known pre-existing failures, debug logs | `docs/TESTING.md` |
-| C style, handler patterns, form parsing, memory, XY gotchas | `docs/CONVENTIONS.md` |
-| Styling: CSS source of truth (hyle submodule), tokens, cache bust, specificity traps | `docs/STYLING.md` |
-| SSR contract (plain HTML + `data-*` hooks), incl. the multi-ref dropdown markup | `docs/SSR-CONTRACT.md` |
-| Writing one C renderer for SSR + wasm (dual-compile, id alignment, build wiring) | `docs/C-ISOMORPHIC-BUD.md` |
-| WASM bridge internals: bud-client.js, bud-hydrate.js, patch ops, patch-target pitfalls | `docs/WASM-BRIDGE.md` |
-| Filter semantics: multi-ref storage, query parsing, union/intersect, repeated-key wire format | `docs/FILTERS.md` |
-| Schema metadata strings and the opaque UI-hint mechanism (`"f":"dropdown"`) | `docs/SCHEMA.md` |
-| Chord syntax, transp internals, grammar + pipeline | `CHORDS.md` |
-| Deep audit: full issue catalog with proposed fixes (security, correctness, efficiency, architecture) | `docs/AUDIT.md` |
-
-## Rules that must never be eroded
-
-- hyle stays framework-neutral: no bud/component symbols in `external/hyle/src`
-  or `include/hyle`; only `external/hyle/c/libhyle-bud` may depend on bud.
-- Frameworks are pairs (bud↔WASM, React↔React); SSR markup + the hyle query
-  API are the ONLY cross-framework interface.
-- No-JS must always work; client-side enhancement (bud's WASM bridge) is
-  optional and additive.
-- Route all row writes through hyle `put`/`del` so the FTS index stays live.
-- Search is accent-sensitive by design (`pão` ≠ `pao`); no iconv TRANSLIT in
-  the fold.
+| 5-min orientation: stack, framework-pair model, request path, unbreakable rules | `docs/OVERVIEW.md` |
+| Invariants & checklists | `docs/GOALS.md` |
+| Encapsulation & abstractions — read before adding a feature | `docs/DESIGN.md` |
+| Module graph, load order, XY contract, data invariants | `docs/ARCHITECTURE.md` |
+| C style, handlers, form parsing, XY, hyle-bud, preprocessor | `docs/CONVENTIONS.md` |
+| Build, WASM rebuild, stale headers, chroot | `docs/BUILD.md` |
+| Tests & e2e prereqs | `docs/TESTING.md` |
+| Styling & CSS cache bust | `docs/STYLING.md` |
+| SSR contract (plain HTML + `data-*` hooks) | `docs/SSR-CONTRACT.md` |
+| Isomorphic BUD (one renderer for SSR+WASM) | `docs/C-ISOMORPHIC-BUD.md` |
+| WASM bridge | `docs/WASM-BRIDGE.md` |
+| Filters & schema hints | `docs/FILTERS.md` / `docs/SCHEMA.md` |
+| Known violations & deliberate exceptions | `docs/VIOLATIONS.md` |
+| Deep audit | `docs/AUDIT.md` |

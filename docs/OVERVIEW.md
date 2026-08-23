@@ -20,9 +20,9 @@ to wasm32-wasi for browser-side polish.
 | `external/libqmap` | opaque data store (never free values) |
 | `external/stoma` | tokenization / search fold (accent-sensitive) |
 | `external/hyle` | data layer: schema, records, query, filtering, FTS (submodule) |
-| `external/hyle/c/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud |
+| `external/hyle/c/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; sanctioned in UX for filters (`index`/`gig`/`grp` via `HYLE_BUD_WASM_SRC`) |
 | `external/bud` | C DOM scaffold (SSR) + WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
-| `mods/*` | site modules — thin composition layers wiring the libraries together |
+| `mods/*` | site modules — thin composition layers wiring the libraries together (reusable; declare deps via `xy_load()` in `xy_install()`, see `ARCHITECTURE.md:§3`) |
 
 ## Framework-pair model (the governing design rule)
 

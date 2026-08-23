@@ -21,12 +21,12 @@ abstraction is wrong. Push the boilerplate into the helper, not the caller.
 
 ### 1.6 Well-made abstractions & minimal site-specific surface (blocking)
 
-- **Thin feature modules:** `poem/song/gig/grp` target ≈150 lines, `xy_install` ≈15 lines (`poem.c:160` exemplar). If handler needs 30-line boilerplate, extend the abstraction — do not copy into the module.
-- **Evoke, don’t branch:** one row in `fields.h` → `source_def_to_qmap` + `META_READ` + `bud_state_apply` `§4.4`; `register_standard_item_handlers("song",&h)` + `ICTX_*` `§4.2`; `source_list_view_t` `source.h:50` consumed by `list_fill_state` `index/list_fill.c:378` — never `switch(module)` in `common/index` `GOALS.md:55` `M07`.
-- **We own the http server — invent well:** prefer extending `axil` (`axil_id_from_title`, `axil_csrf_*`, `axil_static`/`axil_sendfile`) / `hyle` (`hyle_source_query` pagination `ARCHITECTURE.md:143`) / `bud` (`bud_host_*`) over shimming in `common`. `external/*` libs must stay site-agnostic (`grep -rn bud external/hyle/src==0` `GOALS.md:5(1)`).
-- **Site-specific surface minimal (blocking):** `common` is reusable *within this site*, not a per-feature dumping ground. Hardcoded `site_paths.c:68` icon switch, CSP `common_response.c:51`, `TPARAM_*` `common.h:211` are site-specific smells — per-module registration (`source_list_view_t.icon` / `site_core_register_module` called from feature `xy_install`) keeps `common/index` generic. Adding a new module must not edit `common`. Enforced by `scripts/check-module-boundaries.sh` — `grep -E '"(poem|song|gig|grp)"' mods/common mods/index` must be 0 outside `source_list_view_t` registration.
+- **Thin feature modules:** `poem/song/gig/grp` target ≈150 lines, `xy_install` ≈15 lines (`poem.c` exemplar). If handler needs 30-line boilerplate, extend the abstraction — do not copy into the module.
+- **Evoke, don’t branch:** one row in `fields.h` → `source_def_to_qmap` + `META_READ` + `bud_state_apply` (`§4.4`); `register_standard_item_handlers("song",&h)` + `ICTX_*` (`§4.2`); `source_list_view_t` (`source.h:50`) consumed by `list_fill_state` — never `switch(module)` in `common/index` (`CONVENTIONS`).
+- **We own the http server — invent well:** prefer extending `axil` / `hyle` / `bud` over shimming in `common`. Libraries must stay site-agnostic (`grep -rn bud external/hyle/src` must be 0).
+- **Site-specific surface minimal (blocking):** `common` is reusable *within this site*, not a per-feature dumping ground. Adding a new module must not edit `common` — use per-module registration (`source_list_view_t`). Enforced by `scripts/check-module-boundaries.sh`.
 
-**Current open surface (grandfathered, next to clean):** `site_paths.c:68` icon table, `common_response.c:51` CSP `frame-src youtube`, `common.h:211` `TPARAM_*` song-flags in `common`, `source.c` fallback `mkdir`/`slurp` duplication (`source_store_t` already isolates FS — remove fallback branches), ordered `gig.songs`/`grp.songs` via `hyle_source_ordered_*` not `source_store_dsv`, pagination via `__total__` sentinel + manual slice `index/list_fill.c:534` (hyle should return `total` structurally).
+Grandfathered surface (`site_paths.c:68` icon table, etc.) is tracked in `VIOLATIONS.md` deliberate exceptions and `AUDIT.md`; do not add more.
 
 ## 2. Layering: who may call whom
 

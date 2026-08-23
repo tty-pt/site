@@ -196,25 +196,6 @@ static int on_sb_option_change(bud_event *event)
 	const char *value = (const char *)event->user;
 	const char *name = bud_get_attr(event->target, "name");
 
-#ifdef __wasm__
-	/* Always log on entry */
-	bud_host_log("ENTRY", 5);
-	bud_host_log("evtype=", 7);
-	if (event->type)
-		bud_host_log(event->type, strlen(event->type));
-	bud_host_log("name=", 5);
-	if (name)
-		bud_host_log(name, strlen(name));
-	bud_host_log("value=", 6);
-	if (value)
-		bud_host_log(value, strlen(value));
-	bud_host_log("g_sb_main=", 10);
-	if (g_sb_main)
-		bud_host_log("ok", 2);
-	else
-		bud_host_log("NULL", 4);
-#endif
-
 	if (!name || !value)
 		return 0;
 

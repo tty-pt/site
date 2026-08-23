@@ -55,7 +55,9 @@ stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
 hyle  ── data/schema/query layer, NO component symbols
         deps: stoma, qmap
 hyle-bud (external/hyle/c/libhyle-bud) ── the bud binding; ONLY place that
-        may depend on bud. deps: hyle, bud, qmap
+        may depend on bud. deps: hyle, bud, qmap. Used in UX for filters
+        (`index`/`gig`/`grp` link `HYLE_BUD_WASM_SRC` and include
+        `<hyle-bud/hyle-bud.h>` — sanctioned; see `CONVENTIONS` WASM purity)
 bud   ── C DOM scaffold + WASM bridge. deps: none of the above
 site mods ── assemble axil + XY + hyle(+hyle-bud) + bud
 ```
@@ -117,6 +119,8 @@ the process chroots**; `xy_reload()` `external/libxylem/src/libxylem.c:804,828` 
 
 ## 5. XY cross-.so convention (short form)
 
+See `CONVENTIONS` for the normative recipe. Summary:
+
 1. Shared header declares it behind `#ifndef MODULE_IMPL`: `XY_DECL(int,
    my_func, const char *, arg);` → static inline wrapper dispatching through
    `xy_call`.
@@ -175,18 +179,7 @@ server.
 
 ## 8. Build / test / debug quick reference
 
-| Command | What |
-|---------|------|
-| `make` | build everything |
-| `AUTH_SKIP_CONFIRM=1 make watch` | auto-rebuild + restart on :8080 |
-| `make unit-tests` | per-module test.sh (needs axil on :8080) |
-| `make pages-test` | page-render smoke tests (curl DOCTYPE) |
-| `make e2e-tests` | Playwright via Deno (needs server, `AUTH_SKIP_CONFIRM=1`) |
-| `make hyle-tests` | cargo test on external/hyle |
-| `make lint` / `make format` | clang-tidy (max 4 indent levels) / clang-format |
-| `make -C external/hyle` | hyle C tests |
-| `make wasm-debug` | rebuild wasm with `-DBUD_DEBUG` |
-
+See `docs/BUILD.md` and `docs/TESTING.md` for commands.
 Logs: `debug/builds/`, `debug/runtime/axil.log`, `debug/tests/`.
 
 Gig unit-test step 6 (`data.txt` seeding) passes after the 2026-08-21 source
