@@ -43,11 +43,14 @@ static int handle_sb_song_add_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user);
 static int handle_sb_song_remove_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user);
+static int handle_sb_song_replace_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user);
 
 SB_OWNED_HANDLER(transpose, "You don't own this gig", ICTX_CSRF_MPFD)
 SB_OWNED_HANDLER(randomize, "You don't own this gig", ICTX_CSRF_MPFD)
 SB_OWNED_HANDLER(song_add, "Forbidden", ICTX_CSRF_QUERY)
 SB_OWNED_HANDLER(song_remove, "Forbidden", ICTX_CSRF_QUERY)
+SB_OWNED_HANDLER(song_replace, "Forbidden", ICTX_CSRF_QUERY)
 
 static void sb_append_song(
         const char *source_id, const char *pval, const char *song,
@@ -72,6 +75,10 @@ static void gig_sync_repertoire(const char *sb_id)
 	if (grp && grp[0])
 		rep_rebuild(grp);
 }
+
+/* Owner-only song search for the edit-page picker (SSR only; the
+ * detail page fills its picker state via the bud-state JSON). */
+static void sb_load_edit_song_picks(int fd);
 
 typedef void (*sb_song_cb)(
         const char *key, const char *song_id, int transpose, const char *format,
@@ -286,6 +293,7 @@ static int handle_sb_song_add_authorized(
 	(void)user;
 	char s_id[128] = { 0 };
 	char fmt_val[64] = "any";
+	char back[256] = { 0 };
 
 	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0)
 		return bad_request(fd, "Missing song_id");
@@ -300,6 +308,12 @@ static int handle_sb_song_add_authorized(
 	sb_append_song("gig.songs", ctx->id, s_id, "0", fmt_val);
 
 	gig_sync_repertoire(ctx->id);
+
+	/* Picker may ask to come back to the page it was opened from
+	 * (e.g. the edit page); validate prefix to avoid open redirects. */
+	axil_query_param("back", back, sizeof(back) - 1);
+	if (back[0] && strncmp(back, "/gig/", 5) == 0)
+		return axil_redirect(fd, back);
 
 	return redirect_to_item(fd, "gig", ctx->id);
 }
@@ -319,6 +333,72 @@ static int handle_sb_song_remove_authorized(
 	hyle_source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
+
+	return redirect_to_item(fd, "gig", ctx->id);
+}
+
+/* POST /api/gig/:id/song/:n/replace - Replace a song in the gig.
+ * Only the song identity changes; the row's transpose and format are
+ * preserved (the picker submits song_id only). */
+static int handle_sb_song_replace_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)user;
+	(void)body;
+	char n_str[16] = { 0 };
+	char s_id[128] = { 0 };
+	char back[256] = { 0 };
+	int idx;
+	const char *key;
+	const char *names[3];
+	const char *vals[3];
+
+	axil_query_param("n", n_str, sizeof(n_str) - 1);
+	idx = atoi(n_str);
+
+	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0)
+		return bad_request(fd, "Missing song_id");
+	datalist_extract_id(s_id, s_id, sizeof(s_id));
+	resolve_song_id(s_id, sizeof(s_id));
+
+	key = hyle_source_ordered_key_at("gig.songs", ctx->id, idx);
+	if (!key)
+		return respond_error(fd, 404, "Song not found in gig");
+
+	/* Preserve the replaced row's key/format unless the request
+	 * carries explicit new values (kept for API compatibility). */
+	unsigned fhd = hyle_source_get_fields_hd("gig.songs");
+	const char *cur_t = qmap_field_get(fhd, key, "transpose");
+	const char *cur_f = qmap_field_get(fhd, key, "format");
+	char key_val[16] = { 0 };
+	char fmt_val[64] = { 0 };
+
+	axil_query_param("transpose", key_val, sizeof(key_val) - 1);
+	if (!key_val[0] && cur_t)
+		snprintf(key_val, sizeof(key_val), "%s", cur_t);
+
+	axil_query_param("format", fmt_val, sizeof(fmt_val) - 1);
+	if (!fmt_val[0] && cur_f)
+		snprintf(fmt_val, sizeof(fmt_val), "%s", cur_f);
+	if (!fmt_val[0])
+		snprintf(fmt_val, sizeof(fmt_val), "any");
+
+	names[0] = "song";
+	vals[0] = s_id;
+	names[1] = "transpose";
+	vals[1] = key_val[0] ? key_val : "0";
+	names[2] = "format";
+	vals[2] = fmt_val;
+	hyle_source_put("gig.songs", key, names, vals, 3);
+	hyle_source_ordered_save("gig.songs", ctx->id);
+
+	gig_sync_repertoire(ctx->id);
+
+	/* Picker may ask to come back to the page it was opened from
+	 * (e.g. the edit page); validate prefix to avoid open redirects. */
+	axil_query_param("back", back, sizeof(back) - 1);
+	if (back[0] && strncmp(back, "/gig/", 5) == 0)
+		return axil_redirect(fd, back);
 
 	return redirect_to_item(fd, "gig", ctx->id);
 }
@@ -398,6 +478,18 @@ static void sb_load_song_picks(int fd)
 	snprintf(
 	        g_sb_pick_state.module, sizeof(g_sb_pick_state.module), "song");
 	list_fill_state(&g_sb_pick_state, "song.items", qs, 0);
+}
+
+static void sb_load_edit_song_picks(int fd)
+{
+	char qs[1024] = { 0 };
+
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	memset(&g_edit_pick_state, 0, sizeof(g_edit_pick_state));
+	snprintf(
+	        g_edit_pick_state.module, sizeof(g_edit_pick_state.module),
+	        "song");
+	list_fill_state(&g_edit_pick_state, "song.items", qs, 0);
 }
 
 static char *sb_emit_state_json(void)
@@ -691,62 +783,6 @@ static void sb_resolve_edit_format_names(sb_edit_row_t *songs, int n_songs)
 	}
 }
 
-static int sb_load_edit_song_options(
-        unsigned song_hd, unsigned grp_fhd, const char *grp_id,
-        const char *song_source, sb_repo_opt_t *options, int max)
-{
-	int n = 0;
-	int use_repertoire =
-	        (song_source && strcmp(song_source, "repertoire") == 0);
-
-	if (use_repertoire && grp_id && song_hd && grp_fhd) {
-		unsigned repo_hd = source_get_fields_hd("grp.songs");
-		if (repo_hd) {
-			uint32_t grp_pos = qmap_pos(grp_fhd, grp_id);
-			if (grp_pos != UINT32_MAX) {
-				uint32_t repo_buf[512];
-				size_t n_repo = qmap_inv_get(
-				        repo_hd, "grp", grp_pos, repo_buf, 512);
-				for (size_t i = 0; i < n_repo && n < max; i++) {
-					const char *eid = qmap_get_key(
-					        repo_hd, repo_buf[i]);
-					if (!eid)
-						continue;
-					const char *repo_s = qmap_field_get(
-					        repo_hd, eid, "song");
-					if (!repo_s)
-						continue;
-					char fk[320];
-					snprintf(
-					        fk, sizeof(fk), "%s:title",
-					        repo_s);
-					const char *st = qmap_get(song_hd, fk);
-					options[n].id = repo_s;
-					options[n].title = st ? st : repo_s;
-					n++;
-				}
-			}
-		}
-	} else if (song_hd) {
-		unsigned song_data_hd = source_get_data_hd("song.items");
-		if (song_data_hd) {
-			uint32_t cur = qmap_iter(song_data_hd, NULL, 0);
-			const void *sk, *sv;
-			while (qmap_next(&sk, &sv, cur) && n < max) {
-				const char *song_id = (const char *)sk;
-				char fk[320];
-				snprintf(fk, sizeof(fk), "%s:title", song_id);
-				const char *st = qmap_get(song_hd, fk);
-				options[n].id = song_id;
-				options[n].title = st ? st : song_id;
-				n++;
-			}
-			qmap_fin(cur);
-		}
-	}
-	return n;
-}
-
 static int sb_load_user_grps(const char *user, sb_grp_opt_t *grps, int max)
 {
 	int n = 0;
@@ -775,7 +811,7 @@ static int sb_load_user_grps(const char *user, sb_grp_opt_t *grps, int max)
 	return n;
 }
 
-static int sb_load_format_options(char (*buf)[128], const char **opts, int max)
+int sb_load_format_options(char (*buf)[128], const char **opts, int max)
 {
 	int n = 0;
 	snprintf(buf[n], sizeof(buf[n]), "any");
@@ -937,7 +973,25 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
 	}
 
-	/* ── Populate sb_app_state with page data ────────────────── */
+	/* Parse ?replace=N query param and pre-fill replace state from hyle_source */
+	sb_app_state.replace_index = -1;
+	sb_app_state.replace_title[0] = '\0';
+	{
+		char replace_str[16] = { 0 };
+		axil_query_param("replace", replace_str, sizeof(replace_str) - 1);
+		if (replace_str[0]) {
+			int idx = atoi(replace_str);
+			if (idx >= 0 && idx < sb_app_state.n_songs) {
+				sb_app_state.replace_index = idx;
+				/* Title from already-loaded g_sb_songs (display only) */
+				strncpy(sb_app_state.replace_title,
+				        g_sb_songs[idx].title,
+				        sizeof(sb_app_state.replace_title) - 1);
+			}
+		}
+	}
+
+/* ── Populate sb_app_state with page data ────────────────── */
 	sb_app_state.zoom = zoom;
 	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
 	sb_app_state.show_media = show_media;
@@ -1033,12 +1087,6 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Map format values from type ID slugs to display names */
 	sb_resolve_edit_format_names(songs, n_songs);
 
-	/* Load song options for the select dropdowns */
-	unsigned grp_fhd = source_get_fields_hd("grp.items");
-	sb_repo_opt_t options[512];
-	int n_options = sb_load_edit_song_options(
-	        song_hd, grp_fhd, grp_id, song_source, options, 512);
-
 	/* Collect grps owned by current user */
 	sb_grp_opt_t user_grps[128];
 	int n_user_grps = sb_load_user_grps(ctx->username, user_grps, 128);
@@ -1049,6 +1097,30 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	int n_format_opts =
 	        sb_load_format_options(format_buf, format_opts, 128);
 
+	/* Load song picks for omnisearch picker */
+	sb_load_edit_song_picks(fd);
+
+	/* ?replace=N puts the picker in replace mode for row N */
+	{
+		char replace_str[16] = { 0 };
+		char qs[1024] = { 0 };
+		int replace_idx = -1;
+		const char *replace_title = NULL;
+
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+		if (qs[0])
+			axil_query_parse(qs);
+		axil_query_param("replace", replace_str, sizeof(replace_str) - 1);
+		if (replace_str[0]) {
+			int idx = atoi(replace_str);
+			if (idx >= 0 && idx < n_songs) {
+				replace_idx = idx;
+				replace_title = songs[idx].title;
+			}
+		}
+		sb_edit_set_replace(replace_idx, replace_title);
+	}
+
 	const char *csrf_token = csrf_setup(fd);
 
 	char action[256];
@@ -1057,8 +1129,8 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	snprintf(cancel_href, sizeof(cancel_href), "/gig/%s", ctx->id);
 
 	bud_node *form = sb_render_edit_form(
-	        action, csrf_token, title, grp_id, n_user_grps, user_grps,
-	        cancel_href, n_songs, songs, n_options, options, n_format_opts,
+	        action, csrf_token, title, ctx->id, grp_id, n_user_grps, user_grps,
+	        cancel_href, n_songs, songs, n_format_opts,
 	        format_opts, song_source);
 
 	return site_ui_respond_edit_page(
@@ -1173,11 +1245,14 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 			    0)
 				continue;
 
-			/* Extract song ID from "Title [song_id]" format */
+			/* Accept "Title [song_id]" datalist values and the
+			 * bare ids emitted by the picker row hidden fields
+			 * (datalist_extract_id copies bare input through
+			 * and returns -1). */
 			char extracted[128] = { 0 };
-			if (datalist_extract_id(
-			            song_val, extracted, sizeof(extracted)) !=
-			    0)
+			datalist_extract_id(song_val, extracted,
+			                    sizeof(extracted));
+			if (!extracted[0])
 				continue;
 
 			resolve_song_id(extracted, 128);
@@ -1267,6 +1342,8 @@ void xy_install(void)
 	axil_register_handler("POST:/api/gig/:id/songs", handle_sb_song_add);
 	axil_register_handler(
 	        "POST:/api/gig/:id/song/:n/remove", handle_sb_song_remove);
+	axil_register_handler(
+	        "POST:/api/gig/:id/song/:n/replace", handle_sb_song_replace);
 	axil_register_handler(
 	        "GET:/api/gig/:id/transpose", api_sb_transpose_get);
 

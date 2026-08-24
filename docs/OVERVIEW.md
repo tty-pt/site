@@ -66,7 +66,7 @@ AGENTS.md          doc index — route from here (read this first)
                     SCHEMA, AUDIT)
 external/          axil, libxylem, libqmap, stoma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
-                   gig, grp, bud_demo
+                   gig, grp
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
 var/<source>       data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)

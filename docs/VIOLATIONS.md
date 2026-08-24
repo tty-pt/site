@@ -20,8 +20,8 @@ No open violations. Guidelines in `docs/GOALS.md` + `docs/ARCHITECTURE.md:§3,§
 pattern (e.g. `#include "*.c"` across modules, global `hyle-bud` include, bare
 `--allow-undefined`) will fail `make all:boundary-check`.
 
-Deferred low-priority drifts (not counted as open, to address later): `bud_demo`
-missing `#bud-root` wrapper (demo excluded from `PROD_ASSETS`), `wabt`
+Deferred low-priority drifts (not counted as open, to address later):
+`wabt`
 `wasm-objdump` missing on host weakens `W06` to `strings` fallback, duplicate
 `VERSION_GEN` rule in `build.mk`/`mods/common/Makefile`, `cflags` declared after
 `include` in `mods/gig`/`mods/index` Makefiles. See `docs/AUDIT.md` and
@@ -59,9 +59,9 @@ missing `#bud-root` wrapper (demo excluded from `PROD_ASSETS`), `wabt`
 - **Search is accent-sensitive by design.** `pão` and `pao` differ.
 - **Node IDs may overlap across independent roots.** Each bridge owns its map.
 - **No-JS is mandatory.** Do not solve a WASM issue with JS-only controls.
-- **`bud_demo` is a non-isomorphic demo.** `mods/bud_demo/ux/bud_demo_fe.c` lacks
-  `#bud-root`/`bud-state`/`wasm_init` — intentional, excluded from `PROD_ASSETS`
-  (`Makefile:173`), not a prod violation; do not copy the pattern.
+- **`bud_demo` was retired.** The orphaned demo (dead `/bud_demo.js` loader,
+  no `#bud-root`/`bud-state`) was removed along with its e2e test after the
+  unified `bud-client.js` hydration landed.
 - **`site_core` is dead code.** `mods/site_core/` exports `site_core_register_module`,
   `site_core_module_icon`, `site_core_module_display`, `site_core_build_csp_extra`
   via XY but is not in `mods.load`, never loaded, and its functions are never called.

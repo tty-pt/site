@@ -17,6 +17,9 @@
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
 
+/* Shared omnisearch song picker (same module, allowed by boundary checker) */
+#include "song_picker.c"
+
 #include "../../song/lib/transp/transp_flags.h"
 
 #ifdef __wasm__
@@ -56,6 +59,8 @@ typedef struct {
 	char grp_id[128];
 	char owner[64];
 	int n_songs;
+	int replace_index;
+	char replace_title[256];
 } sb_app_state_t;
 
 static sb_app_state_t sb_app_state = { 0 };
@@ -83,6 +88,8 @@ static const bud_field_desc_t gig_app_fields[] = {
 	OVERLAY_STR(csrf, sb_app_state_t, csrf_token, 33),
 	OVERLAY_STR(grp, sb_app_state_t, grp_id, 128),
 	OVERLAY_STR(owner_name, sb_app_state_t, owner, 64),
+	OVERLAY_INT(replace, sb_app_state_t, replace_index),
+	OVERLAY_STR(reptitle, sb_app_state_t, replace_title, 256),
 	FIELD_END
 };
 
@@ -330,104 +337,48 @@ static bud_node *sb_render_empty_list(void)
 	        .data.node;
 }
 
-/* List-grade song picker: omni ⇄ custom chrome, results table whose
- * whole rows submit POST /api/gig/:id/songs via form= buttons, real
- * pagination. Gated purely on state (is_owner / list_has_query) so the
- * WASM tree stays node-id aligned with SSR. Hidden inputs mirror the
- * viewer prefs (t/b/l/m/z) so pagination resubmits keep them. */
+/* Song picker: shared omnisearch construct (song_picker.c), used for
+ * both adding a song and replacing one (?replace=N). Gated purely on
+ * state so the WASM tree stays node-id aligned with SSR. */
 static bud_node *sb_render_song_picker(void)
 {
-	char action[256], add_action[256], vb[8];
-	const char *col_keys[LIST_MAX_COLS];
-	const char *col_labels[LIST_MAX_COLS];
-	hyle_bud_row_action_t act;
-	bud_node *frag, *hint, *form, *chrome, *table, *pag, *post;
-	int i;
+	char action[256], post_action[256];
+	sb_picker_spec_t spec;
+	static const char *pref_names[5] = { "t", "b", "l", "m", "z" };
+	int pref_vals[5];
 
-	frag = bud_fragment();
-	if (!frag)
-		return NULL;
 	snprintf(action, sizeof(action), "/gig/%s", sb_app_state.sb_id);
-	snprintf(
-	        add_action, sizeof(add_action), "/api/gig/%s/songs",
-	        sb_app_state.sb_id);
+	if (sb_app_state.replace_index >= 0)
+		snprintf(post_action, sizeof(post_action),
+		         "/api/gig/%s/song/%d/replace",
+		         sb_app_state.sb_id, sb_app_state.replace_index);
+	else
+		snprintf(post_action, sizeof(post_action),
+		         "/api/gig/%s/songs", sb_app_state.sb_id);
 
-	for (i = 0; i < g_sb_pick_state.ncols && i < LIST_MAX_COLS; i++) {
-		col_keys[i] = g_sb_pick_state.cols[i].key;
-		col_labels[i] = g_sb_pick_state.cols[i].label;
-	}
+	pref_vals[0] = sb_app_state.t_pref;
+	pref_vals[1] = sb_app_state.bemol;
+	pref_vals[2] = sb_app_state.latin;
+	pref_vals[3] = sb_app_state.show_media;
+	pref_vals[4] = sb_app_state.zoom;
 
-	if (list_has_query(&g_sb_pick_state)) {
-		hint = lx_el("div", lx_attr("class", "text-xs text-muted"),
-		             lx_text("Click a song to add it."))
-		               .data.node;
-		if (hint)
-			bud_append(frag, hint);
-	}
+	memset(&spec, 0, sizeof(spec));
+	spec.get_action = action;
+	spec.post_action = post_action;
+	spec.form_id = "sb-pick-post";
+	spec.csrf = sb_app_state.csrf_token;
+	spec.aria_base = sb_app_state.replace_index >= 0 ? "Replace" : "Add";
+	spec.hint = sb_app_state.replace_index >= 0
+	                    ? "Click a song to swap it in \xe2\x80\x94 its key and format are kept."
+	                    : "Click a song to add it.";
+	spec.back = sb_app_state.replace_index >= 0 ? action : NULL;
+	spec.replace_index = sb_app_state.replace_index;
+	spec.replace_title = sb_app_state.replace_title;
+	spec.pref_names = pref_names;
+	spec.pref_vals = pref_vals;
+	spec.n_prefs = 5;
 
-	form = lx_el("form", lx_attr("method", "get"),
-	             lx_attr("action", action), lx_attr("class", "list-form"))
-	               .data.node;
-	chrome = idx_filter_chrome(&g_sb_pick_state);
-	if (form && chrome)
-		bud_append(form, chrome);
-
-	if (form) {
-		const char *pref_names[5] = { "t", "b", "l", "m", "z" };
-		int pref_vals[5];
-		int k;
-
-		pref_vals[0] = sb_app_state.t_pref;
-		pref_vals[1] = sb_app_state.bemol;
-		pref_vals[2] = sb_app_state.latin;
-		pref_vals[3] = sb_app_state.show_media;
-		pref_vals[4] = sb_app_state.zoom;
-		for (k = 0; k < 5; k++) {
-			bud_node *hid;
-			snprintf(vb, sizeof(vb), "%d", pref_vals[k]);
-			hid = lx_el("input", lx_attr("type", "hidden"),
-			            lx_attr("name", pref_names[k]),
-			            lx_attr("value", vb))
-			              .data.node;
-			if (hid)
-				bud_append(form, hid);
-		}
-	}
-
-	if (form && list_has_query(&g_sb_pick_state)) {
-		act.kind = HYLE_ROW_ACTION_SUBMIT;
-		act.css_class = NULL;
-		act.label = NULL;
-		act.aria_base = "Add";
-		act.href_base = NULL;
-		act.form_id = "sb-pick-post";
-		act.field_name = "song_id";
-		table = hyle_bud_table_actions(
-		        col_keys, col_labels, g_sb_pick_state.ncols,
-		        (const char **)g_sb_pick_state.ids,
-		        g_sb_pick_state.nids,
-		        (const char **)g_sb_pick_state.values, "song",
-		        g_sb_pick_state.sort_field, g_sb_pick_state.sort_asc,
-		        g_sb_pick_state.query, &act);
-		pag = hyle_bud_pagination(
-		        g_sb_pick_state.page, g_sb_pick_state.per_page,
-		        g_sb_pick_state.total, g_sb_pick_state.nids, "");
-		if (table)
-			bud_append(form, table);
-		if (pag)
-			bud_append(form, pag);
-	}
-	if (form)
-		bud_append(frag, form);
-	post = lx_el("form", lx_attr("id", "sb-pick-post"),
-	             lx_attr("method", "post"), lx_attr("action", add_action),
-	             lx_el("input", lx_attr("type", "hidden"),
-	                   lx_attr("name", "csrf_token"),
-	                   lx_attr("value", sb_app_state.csrf_token)))
-	               .data.node;
-	if (post)
-		bud_append(frag, post);
-	return frag;
+	return sb_picker_render(&spec, &g_sb_pick_state);
 }
 
 /* ── Song row helpers ──────────────────────────────── */
@@ -516,6 +467,11 @@ static bud_node *sb_render_song_row(
 	/* Owner action controls */
 	bud_node *owner_ctrl = NULL;
 	if (is_owner) {
+		/* Build replace action URL: /gig/:id?replace=N */
+		char repl_action[256];
+		snprintf(repl_action, sizeof(repl_action), "/gig/%s?replace=%s",
+		         sb_app_state.sb_id, n_buf);
+
 		owner_ctrl =
 		        lx_el("div", lx_attr("class", "flex gap-2"),
 		              lx_el("form", lx_attr("method", "POST"),
@@ -553,6 +509,9 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("class",
 		                                  "btn text-xs py-1 px-2"),
 		                          lx_text("🎲"))),
+		              lx_el("a", lx_attr("href", repl_action),
+		                    lx_attr("class", "btn text-xs py-1 px-2"),
+		                    lx_text("🔄")),
 		              lx_el("form", lx_attr("method", "POST"),
 		                    lx_attr("action", rem_action),
 		                    lx_el("input", lx_attr("type", "hidden"),

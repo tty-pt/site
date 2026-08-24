@@ -28,7 +28,7 @@ fi
 # Allowed patterns:
 #   1. Include guards: #ifndef FOO_H / #ifndef FOO_C (line 1)
 #   2. site_ui.c:#ifndef __wasm__ (native aggregator, line 9)
-#   3. gig/ux/detail.c:#ifdef __wasm__ (WASM host imports, line 22)
+#   3. gig/ux/detail.c:#ifdef __wasm__ (WASM host imports, line 25)
 #   4. site_page.c:#if __has_include("version.gen.h") (version fallback, line 109)
 echo ""
 echo "=== UX preprocessor check ==="
@@ -45,6 +45,7 @@ is_allowed() {
         "$root/mods/common/ux/site_paths.c:1") return 0 ;;
         "$root/mods/common/ux/site_chrome.c:1") return 0 ;;
         "$root/mods/index/ux/list.c:1") return 0 ;;
+        "$root/mods/gig/ux/song_picker.c:1") return 0 ;;
         "$root/mods/index/ux/list_filters.c:1") return 0 ;;
         "$root/mods/index/ux/list_json.c:1") return 0 ;;
         "$root/mods/index/ux/list_layout.c:1") return 0 ;;
@@ -53,7 +54,7 @@ is_allowed() {
         "$root/mods/song/ux/music.c:1") return 0 ;;
         # Specific allowed preprocessor uses
         "$root/mods/common/ux/site_ui.c:9") return 0 ;;
-        "$root/mods/gig/ux/detail.c:22") return 0 ;;
+        "$root/mods/gig/ux/detail.c:25") return 0 ;;
         "$root/mods/common/ux/site_page.c:109") return 0 ;;
     esac
     return 1

@@ -96,4 +96,3 @@ make debug-clean     # Clear debug logs
 - `/song` — song detail, transpose, chord charts
 - `/choir` — choirs (songbook owners, format categories)
 - `/songbook` — songbooks with per-song transpose and choir formats
-- `/bud-demo` — bud WASM bridge demo

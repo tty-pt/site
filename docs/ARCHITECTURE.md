@@ -74,12 +74,11 @@ core.so
  ├── common.so   response/page/CSRF/storage helpers (XY_DECL in common.h)
  │    └── mpfd.so     multipart/form-data parser (xy_load in common)
  ├── source.so   dataset CRUD + /api/dataset/* (+ source_store_fs/mem adapters)
- └── mods.load → poem, song, grp, gig, bud_demo  (order respects DAG)
+ └── mods.load → poem, song, grp, gig           (order respects DAG)
       ├── poem → index
       ├── song → index, mpfd
       ├── grp  → index, mpfd, song
       ├── gig  → index, mpfd, song, source, grp
-      └── bud_demo (no deps)
 
  plus:
   index → common, auth, mpfd

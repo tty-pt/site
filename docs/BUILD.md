@@ -63,7 +63,7 @@ defaults to `all: dirs $(TARGET) $(WASM_TARGETS)`. `VERSION_GEN`
 
 ## Profiles and bootstrap
 
-`PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS` (no `bud_demo.wasm`).
+`PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS`.
 
 WASM allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (blocking in `make all`).
 

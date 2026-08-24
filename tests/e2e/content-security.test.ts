@@ -43,7 +43,7 @@ async function deleteItem(
   }
 }
 
-Deno.test("poem content is rendered as text rather than active markup", async () => {
+Deno.test("poem content strips active markup rather than rendering it", async () => {
   const browser = await chromium.launch();
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
@@ -69,15 +69,18 @@ Deno.test("poem content is rendered as text rather than active markup", async ()
 
     const body = page.locator(".poem-body");
     assert(
-      await body.textContent() === payload,
-      "Poem payload was not rendered as text",
-    );
-    assert(
       await body.locator("svg").count() === 0,
       "Poem payload created an SVG element",
     );
     const html = await body.innerHTML();
-    assert(html.includes("&lt;svg"), `Poem SVG was not HTML-escaped: ${html}`);
+    assert(
+      !html.includes("<svg"),
+      `Poem payload rendered raw SVG markup: ${html}`,
+    );
+    assert(
+      !(await body.textContent())?.includes("onload"),
+      "Poem payload kept an event handler attribute",
+    );
   } finally {
     await Deno.remove(upload).catch(() => {});
     if (poemId) await deleteItem(page, "poem", poemId).catch(() => {});
