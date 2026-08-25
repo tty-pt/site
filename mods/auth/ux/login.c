@@ -26,5 +26,5 @@ auth_render_login(const char *user, const char *ret, const char *error)
 	                .data.node;
 
 	return site_ui_form_page(
-	        user, "Login", "/auth/login", "🔑", NULL, frag);
+	        user, "Login", "/auth/login", "🔑", NULL, NULL, frag);
 }

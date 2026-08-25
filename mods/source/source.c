@@ -682,6 +682,34 @@ static unsigned source_parse_row_data(const source_def_t *def)
 		if (!f->writable)
 			continue;
 
+		if (f->type == SOURCE_FIELD_MULTI_REFERENCE) {
+			/* Checked boxes arrive as repeated parts sharing
+			 * the field name; join them newline-separated so
+			 * ref_normalize() can split/slugify/dedup. */
+			int all_len = mpfd_get_all(f->name, NULL, 0);
+
+			if (all_len > 0) {
+				val = malloc((size_t)all_len + 1);
+				if (!val) {
+					qmap_close(hd);
+					return 0;
+				}
+				if (mpfd_get_all(f->name, val,
+				        (size_t)all_len + 1) != all_len)
+				{
+					free(val);
+					qmap_close(hd);
+					return 0;
+				}
+				qmap_put(hd, f->name, val);
+				continue;
+			}
+			if (all_len == 0)
+				continue;
+			/* Not posted as multipart parts — fall through to
+			 * the url-encoded query string below. */
+		}
+
 		fld_len = mpfd_len(f->name);
 		if (fld_len < 0) {
 			/* Not a multipart field — try the url-encoded query

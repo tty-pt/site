@@ -111,6 +111,7 @@ char *site_ui_page(
 #else
 #define SITE_CSS_V "?v=22"
 #define SITE_CLIENT_V "?v=1"
+#define SITE_FRAGMENTS_V "?v=1"
 #endif
 
 	if (!body)
@@ -162,6 +163,7 @@ char *site_ui_page(
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
 	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
+	        SITE_UI_FRAGMENTS_SCRIPT "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, state_title, state_path,
@@ -187,6 +189,7 @@ char *site_ui_page(
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
 	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
+	        SITE_UI_FRAGMENTS_SCRIPT "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, state_title, state_path,

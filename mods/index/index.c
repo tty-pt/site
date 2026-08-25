@@ -41,6 +41,7 @@ static size_t module_slot_count = 0;
 
 #include "ux/all.c"
 #include "list_fill.c"
+#include "pick.c"
 
 int index_update_json(const char *id, const char *title)
 {
@@ -644,5 +645,6 @@ void xy_install(void)
 	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
 
 	axil_register_handler("GET:/", core_get);
+	axil_register_handler("GET:/pick/:id/options", pick_options_handler);
 	axil_config.default_handler = core_get;
 }

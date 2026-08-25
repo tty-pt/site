@@ -102,7 +102,7 @@ bud_node *site_ui_layout(
 
 bud_node *site_ui_form_page(
         const char *user, const char *title, const char *path, const char *icon,
-        const char *heading, bud_node *children)
+        const char *heading, const char *extra_head, bud_node *children)
 {
 	bud_node *center =
 	        lx_el("div", lx_attr("class", "center"),
@@ -111,6 +111,7 @@ bud_node *site_ui_form_page(
 	              children ? lx_node(children) : lx_none())
 	                .data.node;
 
+	(void)extra_head;
 	return site_ui_layout(title, path, icon, user, NULL, center);
 }
 

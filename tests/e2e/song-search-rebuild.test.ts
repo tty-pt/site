@@ -45,7 +45,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', oldTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/song/${songId}`, { timeout: 5000 });
 
     // ---- 2. Search for the new song -> found ----
@@ -62,7 +62,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
     await page.fill('input[name="title"]', newTitle);
     await Promise.all([
       page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
-      page.click('button[type="submit"]'),
+      page.click('form[method="POST"] button[type="submit"]'),
     ]);
 
     // ---- 4. Old title no longer matches (stale token gone) ----

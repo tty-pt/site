@@ -32,7 +32,7 @@ Deno.test("song ownership: user B cannot edit or delete user A's song", async ()
     await pageA.goto(`${BASE}/song/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('button[type="submit"]');
+    await pageA.click('form[method="POST"] button[type="submit"]');
 
     await pageA.waitForURL(`${BASE}/song/**`, { timeout: 5000 });
     songId = pageA.url().split("/song/")[1].replace(/\/$/, "");

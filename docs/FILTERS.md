@@ -137,4 +137,5 @@ is generic (hint absent = grid).
 
 - `docs/SCHEMA.md` — the `"f"` hint and schema metadata.
 - `docs/SSR-CONTRACT.md` — the widget DOM contract.
+- `docs/PICKERS.md` — guidelines on the omnisearch picker component.
 - `docs/C-ISOMORPHIC-BUD.md` — how the enhancement ships as a wasm bundle.

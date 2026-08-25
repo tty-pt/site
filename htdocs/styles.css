@@ -269,7 +269,7 @@ label {
   font-size: 0.8em;
 }
 
-label:not(:has(> input[type="checkbox"])) {
+label:not(:has(> input[type="checkbox"])):not(.hyle-picker-option):not(.hyle-ms-option) {
   flex-direction: column;
 }
 

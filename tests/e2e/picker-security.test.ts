@@ -25,7 +25,7 @@ async function createItem(
 ) {
   await page.goto(`${BASE}/${module}/add`, GOTO);
   await page.fill('input[name="title"]', title);
-  await page.click('button[type="submit"]');
+  await page.click('form[method="POST"] button[type="submit"]');
   await page.waitForURL(new RegExp(`/${module}/[^/]+$`));
   return page.url().split(`/${module}/`)[1].replace(/\/$/, "");
 }

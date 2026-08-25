@@ -36,7 +36,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
     await page.goto(`${BASE}/poem/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', originalTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
     const url = page.url();
@@ -69,7 +69,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
     await page.fill('input[name="title"]', editedTitle);
     const fileInput = page.locator('input[type="file"][name="body_content"]');
     await fileInput.setInputFiles(tmpFile);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to /poem/<id> after save
     await page.waitForURL(`${BASE}/poem/${poemId}`, { timeout: 8000 });

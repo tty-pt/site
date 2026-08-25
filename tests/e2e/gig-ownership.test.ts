@@ -32,7 +32,7 @@ Deno.test("gig ownership: user B cannot edit or delete user A's gig", async () =
     await pageA.goto(`${BASE}/gig/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('button[type="submit"]');
+    await pageA.click('form[method="POST"] button[type="submit"]');
 
     await pageA.waitForURL(`${BASE}/gig/**`, { timeout: 5000 });
     sbId = pageA.url().split("/gig/")[1].replace(/\/$/, "");

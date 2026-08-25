@@ -2,7 +2,9 @@
 #define INDEX_MOD_H
 
 #include <ttypt/xy-mod.h>
+#include <hyle-bud/hyle-bud.h>
 #include "ux/list_state.h"
+#include "ux/site_ui.h"
 
 typedef void (*index_cleanup_fn)(const char *id);
 
@@ -49,5 +51,54 @@ XY_DECL(int, list_fill_state,
 	const char *, raw_qs,
 	int, allow_fields);
 XY_DECL(int, list_fill_free, list_state_t *, state);
+
+/* ── Omnisearch pickers (OMNI-DROPDOWN) ──────────────────────────── */
+
+typedef struct {
+	char q[256];
+	int page;      /* 0-based window index */
+	int per_page;
+} pick_ctx_t;
+
+/* Read pick_q_<key> / pick_page_<key> from the request query string.
+ * Returns 0 always (int, because XY_DECL cannot declare void). */
+XY_DECL(int, pick_ctx_load,
+	char *, qs,
+	const char *, key,
+	pick_ctx_t *, out);
+
+/* Paged id/label options via source_query; label = first non-id display
+ * field (same convention as idx_resolve_filter_options). Sets *total.
+ * Option strings are thread-local — valid until the next call. */
+XY_DECL(int, pick_options_fill,
+	const char *, dataset_id,
+	pick_ctx_t *, ctx,
+	hyle_bud_option_t *, opts, int, max,
+	int *, total);
+
+/* Resolve stored slugs -> {id,label} pairs for pinned rows. Option
+ * strings are thread-local — valid until the next call. */
+XY_DECL(int, pick_selected_fill,
+	const char *, dataset_id,
+	const char *, comma_slugs,
+	hyle_bud_option_t *, out, int, max);
+
+/* Per-form collector (native only): overlay draft mirrors from the
+ * query string onto vals_out (aliases vals_in unless overlaid) and
+ * fill pv entries for every ref field in the descriptor — options,
+ * pinned selections, ctx. WASM callers pass pv == NULL. */
+XY_DECL(int, pick_view_collect,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv);
+
+XY_DECL(int, pick_view_collect_fd,
+	int, fd,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv);
 
 #endif

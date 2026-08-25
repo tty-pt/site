@@ -47,7 +47,7 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', songId);
     await page.fill('textarea[name="data"]', longLyrics);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/song/${songId}`, { timeout: 5000 });
 
     // ── 2. Content box narrows the list; value is retained ────────────────

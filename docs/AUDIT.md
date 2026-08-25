@@ -1,5 +1,7 @@
 # Audit — leftover issues
 
+> **Agent Directive:** When addressing issues from this audit, do not just start modifying code. First, create an active task with `/task <issue-id>` (e.g. `/task fix-a5`) and copy the issue details into the `docs/current/<issue-id>.md` goal section.
+
 Read-only review of the stack (2026-08-17). Site-only batches 1–3 +
 batch 4 (submodules) + batch 5 (A6, A9, F8) + batch 6 (A7, C3, F9) +
 batch 7 (C5, C6, D1, D2, D4, D8, D10) +

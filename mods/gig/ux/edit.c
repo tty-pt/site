@@ -25,13 +25,16 @@ typedef struct {
 	char format[32];
 } sb_edit_row_t;
 
-typedef struct {
-	const char *id;
-	const char *title;
-} sb_grp_opt_t;
+/* grp is a pinned single-reference picker over the shared dataset
+ * (spec §2); descriptor shared by the edit form and its sibling GET
+ * draft form. */
+static const form_field_t sb_grp_ff[] = {
+        { "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
+        { NULL, NULL, 0, 0, NULL, 0 }
+};
 
 /* Edit page picker state (filled by gig.c; this page is SSR-only) */
-static list_state_t g_edit_pick_state;
+static pick_view_t g_edit_pv;
 static int g_edit_replace_index = -1;
 static char g_edit_replace_title[256];
 
@@ -74,12 +77,12 @@ static bud_node *sb_render_edit_picker(const char *sb_id, const char *csrf_token
 	spec.pref_vals = NULL;
 	spec.n_prefs = 0;
 
-	return sb_picker_render(&spec, &g_edit_pick_state);
+	return sb_picker_render(&spec, &g_edit_pv);
 }
 
 static bud_node *sb_render_edit_form(
         const char *action, const char *csrf_token, const char *title,
-        const char *sb_id, const char *grp_id, int n_grps, const sb_grp_opt_t *grps,
+        const char *sb_id, const char *grp_id, const pick_view_t *pv,
         const char *cancel_href, int n_songs, const sb_edit_row_t *songs,
         int n_format_opts, const char **format_opts, const char *song_source)
 {
@@ -87,32 +90,12 @@ static bud_node *sb_render_edit_form(
 	char amount_str[16];
 	snprintf(amount_str, sizeof(amount_str), "%d", n_songs);
 
-	/* Build grp dropdown options */
-	bud_node *grp_opts = bud_fragment();
-	bud_append(
-	        grp_opts,
-	        lx_el("option", lx_attr("value", ""),
-	              (!grp_id || !grp_id[0]) ? lx_attr("selected", "")
-	                                      : lx_none(),
-	              lx_text("None"))
-	                .data.node);
-	for (int ci = 0; ci < n_grps; ci++) {
-		const sb_grp_opt_t *c = &grps[ci];
-		if (!c->id)
-			break;
-		bud_append(
-		        grp_opts, lx_el("option", lx_attr("value", c->id),
-		                        (grp_id && strcmp(grp_id, c->id) == 0)
-		                                ? lx_attr("selected", "")
-		                                : lx_none(),
-		                        lx_text(c->title))
-		                          .data.node);
-	}
-	bud_node *grp_select =
-	        lx_el("select", lx_attr("name", "grp"),
-	              lx_attr("class", "border rounded p-1 w-60"),
-	              lx_node(grp_opts))
-	                .data.node;
+	/* grp picker (threshold select or omnisearch) via the shared
+	 * descriptor; pv carries options/pinned from the collector. */
+	const char *grp_vals[1];
+	grp_vals[0] = (grp_id && grp_id[0]) ? grp_id : "";
+	bud_node *grp_fields =
+	        site_ui_form_fields_ex(sb_grp_ff, grp_vals, NULL, pv);
 
 	/* Omnisearch song picker at the top (add mode, or replace mode
 	 * when ?replace=N is active) */
@@ -258,7 +241,8 @@ static bud_node *sb_render_edit_form(
 		bud_append(rows, row);
 	}
 
-	return lx_el("form", lx_attr("action", action),
+	bud_node *form = lx_el("form",
+	        lx_attr("action", action),
 	             lx_attr("method", "POST"),
 	             lx_attr("enctype", "multipart/form-data"),
 	             lx_attr("class", "flex flex-col gap-4"),
@@ -273,7 +257,7 @@ static bud_node *sb_render_edit_form(
 	                         lx_attr("name", "title"),
 	                         (title && title[0]) ? lx_attr("value", title)
 	                                             : lx_none())),
-	             lx_el("label", lx_text("Group:"), lx_node(grp_select)),
+	             lx_node(grp_fields),
 	             (grp_id && grp_id[0])
 	                     ? lx_el("label", lx_text("Song source:"),
 	                             lx_el("select",
@@ -312,4 +296,18 @@ static bud_node *sb_render_edit_form(
 	                         lx_attr("class", "btn btn-secondary"),
 	                         lx_text("Cancel"))))
 	            .data.node;
+
+	/* Sibling GET draft form (never nested in the POST form): Enter
+	 * / paging inside the picker round-trip mirrors of every sibling
+	 * field so no-JS edits survive (spec §1.3, §3.2). */
+	{
+		bud_node *sib = site_ui_sibling_get_form(
+		        action, sb_grp_ff, grp_vals, pv);
+		bud_node *both = bud_fragment();
+
+		bud_append(both, form);
+		if (sib)
+			bud_append(both, sib);
+		return both;
+	}
 }

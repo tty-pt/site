@@ -466,30 +466,20 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/add.c"
 #include "ux/edit.c"
 
-/* Owner-only song search for the picker: fills the shared list state
- * from the whitelisted query string (q, custom filters, sort,
- * pagination — same machinery as the /song list page). */
 static void sb_load_song_picks(int fd)
 {
-	char qs[1024] = { 0 };
-
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	memset(&g_sb_pick_state, 0, sizeof(g_sb_pick_state));
-	snprintf(
-	        g_sb_pick_state.module, sizeof(g_sb_pick_state.module), "song");
-	list_fill_state(&g_sb_pick_state, "song.items", qs, 0);
+	const char *vals_in[1] = { "" };
+	const char *vals_out[1];
+	pick_view_collect_fd(
+	        fd, sb_pick_song_ff, vals_in, vals_out, &g_sb_pick_state);
 }
 
 static void sb_load_edit_song_picks(int fd)
 {
-	char qs[1024] = { 0 };
-
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	memset(&g_edit_pick_state, 0, sizeof(g_edit_pick_state));
-	snprintf(
-	        g_edit_pick_state.module, sizeof(g_edit_pick_state.module),
-	        "song");
-	list_fill_state(&g_edit_pick_state, "song.items", qs, 0);
+	const char *vals_in[1] = { "" };
+	const char *vals_out[1];
+	pick_view_collect_fd(
+	        fd, sb_pick_song_ff, vals_in, vals_out, &g_edit_pv);
 }
 
 static char *sb_emit_state_json(void)
@@ -511,6 +501,10 @@ static char *sb_emit_state_json(void)
 	                g_sb_songs, sb_app_state.n_songs, sizeof(g_sb_songs[0]),
 	                sb_song_row_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR));
 
+	/* Picker rows are registry-driven; ship them so the WASM
+	 * hydration tree matches SSR exactly (C-ISOMORPHIC-BUD §3). */
+	site_ui_picker_state_to_json(&g_sb_pick_state, j_root);
+
 	json_str = json_object_to_json_string_ext(j_root, 0);
 	if (!json_str) {
 		json_object_put(j_root);
@@ -518,28 +512,6 @@ static char *sb_emit_state_json(void)
 	}
 	mlen = strlen(json_str);
 
-	/* Splice the picker's list-state keys into the blob: strip both
-	 * outer braces and insert the inner keys before the main object's
-	 * closing brace. Any failure/overflow = skip (additive). */
-	if (mlen > 2 &&
-	    list_state_to_json(
-	            &g_sb_pick_state, pick_json, sizeof(pick_json)) == 0)
-	{
-		size_t ilen = strlen(pick_json);
-		if (ilen > 2 && pick_json[0] == '{' &&
-		    pick_json[ilen - 1] == '}')
-		{
-			merged = malloc(mlen + ilen + 1);
-			if (merged) {
-				memcpy(merged, json_str, mlen - 1);
-				merged[mlen - 1] = ',';
-				memcpy(merged + mlen, pick_json + 1, ilen - 2);
-				merged[mlen + ilen - 2] = '}';
-				merged[mlen + ilen - 1] = '\0';
-				json_str = merged;
-			}
-		}
-	}
 
 	req = snprintf(
 	        NULL, 0,
@@ -783,34 +755,6 @@ static void sb_resolve_edit_format_names(sb_edit_row_t *songs, int n_songs)
 	}
 }
 
-static int sb_load_user_grps(const char *user, sb_grp_opt_t *grps, int max)
-{
-	int n = 0;
-	source_def_t *cd = source_find("grp.items");
-	if (!cd || !cd->source_hd)
-		return 0;
-
-	uint32_t cur = qmap_iter(cd->source_hd, NULL, 0);
-	const void *ck, *cv;
-	while (qmap_next(&ck, &cv, cur) && n < max) {
-		const char *cid = (const char *)ck;
-		char ok[144];
-		snprintf(ok, sizeof(ok), "%s:owner", cid);
-		const char *o = qmap_get(cd->fields_hd, ok);
-		if (!o || strcmp(o, user) != 0)
-			continue;
-		grps[n].id = cid;
-		char tk[144];
-		snprintf(tk, sizeof(tk), "%s:title", cid);
-		const char *ct = qmap_get(cd->fields_hd, tk);
-		grps[n].title = ct ? ct : cid;
-		n++;
-	}
-	qmap_fin(cur);
-	grps[n].id = NULL;
-	return n;
-}
-
 int sb_load_format_options(char (*buf)[128], const char **opts, int max)
 {
 	int n = 0;
@@ -1017,6 +961,12 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        grp_id ? grp_id : "");
 	snprintf(sb_app_state.owner, sizeof(sb_app_state.owner), "%s", owner);
 
+	snprintf(sb_app_state.pick_q, sizeof(sb_app_state.pick_q), "%s",
+	        g_sb_pick_state.entries[0].q
+	                ? g_sb_pick_state.entries[0].q
+	                : "");
+	sb_app_state.pick_page = g_sb_pick_state.entries[0].page;
+
 	/* ── Build page through isomorphic entry point ────────────── */
 	layout = bud_app_render();
 
@@ -1087,10 +1037,6 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Map format values from type ID slugs to display names */
 	sb_resolve_edit_format_names(songs, n_songs);
 
-	/* Collect grps owned by current user */
-	sb_grp_opt_t user_grps[128];
-	int n_user_grps = sb_load_user_grps(ctx->username, user_grps, 128);
-
 	/* Read format options from song.types */
 	char format_buf[128][128];
 	const char *format_opts[128];
@@ -1100,17 +1046,20 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Load song picks for omnisearch picker */
 	sb_load_edit_song_picks(fd);
 
-	/* ?replace=N puts the picker in replace mode for row N */
+	/* Query string drives both ?replace=N mode and the picker
+	 * draft/paging params (collected into pv). */
+	char qs[2048] = { 0 };
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	if (qs[0])
+		axil_query_parse(qs);
+
 	{
 		char replace_str[16] = { 0 };
-		char qs[1024] = { 0 };
 		int replace_idx = -1;
 		const char *replace_title = NULL;
 
-		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-		if (qs[0])
-			axil_query_parse(qs);
-		axil_query_param("replace", replace_str, sizeof(replace_str) - 1);
+		axil_query_param("replace", replace_str,
+		        sizeof(replace_str) - 1);
 		if (replace_str[0]) {
 			int idx = atoi(replace_str);
 			if (idx >= 0 && idx < n_songs) {
@@ -1121,6 +1070,15 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		sb_edit_set_replace(replace_idx, replace_title);
 	}
 
+	/* Collect grp picker view: options window, pinned selection and
+	 * draft overlays from the query string. */
+	const char *grp_vals_in[1];
+	const char *grp_vals_out[1];
+	pick_view_t edit_pv;
+	grp_vals_in[0] = (grp_id && grp_id[0]) ? grp_id : "";
+	pick_view_collect_fd(
+	        fd, sb_grp_ff, grp_vals_in, grp_vals_out, &edit_pv);
+
 	const char *csrf_token = csrf_setup(fd);
 
 	char action[256];
@@ -1129,7 +1087,7 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	snprintf(cancel_href, sizeof(cancel_href), "/gig/%s", ctx->id);
 
 	bud_node *form = sb_render_edit_form(
-	        action, csrf_token, title, ctx->id, grp_id, n_user_grps, user_grps,
+	        action, csrf_token, title, ctx->id, grp_vals_out[0], &edit_pv,
 	        cancel_href, n_songs, songs, n_format_opts,
 	        format_opts, song_source);
 
@@ -1156,15 +1114,22 @@ static int gig_add_get_handler(int fd, char *body)
 
 	const char *csrf_token = csrf_setup(fd);
 
-	char qs[512] = { 0 };
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	if (qs[0])
-		axil_query_parse(qs);
+	/* ?grp=<slug> preselect rides in as a draft overlay; the picker
+	 * renders it pinned and the main POST submits it natively. */
+	static const form_field_t add_ff[] = {
+	        { "title", "Title:", 0, 0, NULL, 0 },
+	        { "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
+	        { NULL, NULL, 0, 0, NULL, 0 }
+	};
+	const char *add_vals_in[2] = { "", "" };
+	const char *add_vals_out[2];
+	pick_view_t add_pv;
 
-	char grp_val[128] = { 0 };
-	axil_query_param("grp", grp_val, sizeof(grp_val) - 1);
+	pick_view_collect_fd(
+	        fd, add_ff, add_vals_in, add_vals_out, &add_pv);
 
-	bud_node *form = sb_render_add_form(csrf_token, grp_val);
+	bud_node *form = sb_render_add_form(
+	        csrf_token, add_vals_out, &add_pv);
 
 	return site_ui_respond_add_page(
 	        fd, user, "gig", site_ui_module_icon("gig"), form);

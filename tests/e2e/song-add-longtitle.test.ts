@@ -35,7 +35,7 @@ Deno.test("song: title longer than 256 bytes does not kill the server", async ()
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', title);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/song\/[^/]+$/, { timeout: 5000 });
     slug = page.url().split("/song/")[1]?.replace(/\/$/, "");

@@ -31,7 +31,7 @@ Deno.test("song: accented title add does not crash the server", async () => {
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', SONG_TITLE);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(`${BASE}/song/${expectedSlug}`, { timeout: 5000 });
 

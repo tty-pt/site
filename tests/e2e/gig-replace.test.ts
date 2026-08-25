@@ -42,7 +42,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
     grpId = page.url().split("/grp/")[1];
 
@@ -66,7 +66,7 @@ Deno.test({
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', sbTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
     sbId = page.url().split("/gig/")[1];
 
@@ -130,21 +130,33 @@ Deno.test({
       throw new Error(`Expected hidden back=/gig/... in picker post form, got ${backField}`);
     }
 
-    // ── 6. Search results for the replacement song ─────────────────────────
-    // Results render only with a q term; navigate directly so replace mode
-    // is preserved (submitting the search form would drop ?replace=0).
-    await page.goto(
-      `${BASE}/gig/${sbId}?replace=0&q=${encodeURIComponent("Abba")}`,
-      GOTO,
+    // ── 6. Search for the replacement song ─────────────────────────
+    await page.locator('details.hyle-picker-details summary').click();
+    await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
+    await page.fill('input[name="pick_q_song_id"]', REPLACEMENT_SONG_LABEL);
+
+    const rows = page.locator('.hyle-picker[data-hyle-picker-key="song_id"] .hyle-picker-rows').first();
+    await rows.waitFor({ state: "visible" });
+
+    let text = await rows.innerText();
+    while (!text.includes(REPLACEMENT_SONG_LABEL)) {
+      await page.waitForTimeout(500);
+      text = await rows.innerText();
+    }
+
+    // Radios are hidden by CSS; click the wrapping option label instead.
+    const opt = page.locator(
+      'label.hyle-picker-option:has(input[name="song_id"])',
     );
-    // Titles in the dataset carry a trailing newline, so match with *=
-    const replaceBtn = `button[aria-label*="Replace ${REPLACEMENT_SONG_LABEL}"]`;
-    await page.waitForSelector(replaceBtn, { timeout: 5000 });
+    await opt.first().waitFor();
+    await opt.first().click();
 
     // ── 7. Click the replacement row button (submits sb-pick-post) ─────────
+    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
+    if (!addBtn) throw new Error("gig picker missing submit button");
     await Promise.all([
-      page.waitForURL(new RegExp(`/gig/${sbId}$`), { timeout: 8000 }),
-      page.click(replaceBtn),
+      page.waitForNavigation(),
+      addBtn.click()
     ]);
 
     // ── 9. Verify redirect back to gig detail (no replace param) ───────────

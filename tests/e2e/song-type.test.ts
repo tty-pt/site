@@ -55,9 +55,37 @@ async function createSongViaForm(
   await page.goto(`${BASE}/song/add`);
   await page.waitForSelector('input[name="title"]', { timeout: 5000 });
   await page.fill('input[name="title"]', title);
-  await page.fill('textarea[name="type"]', type);
+  const typeTextarea = page.locator('textarea[name="type"]');
+  if (await typeTextarea.count() > 0) {
+    await page.fill('textarea[name="type"]', type);
+  } else {
+    const vals = type.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const details = page.locator('details.hyle-picker-details');
+    if (await details.count() > 0) {
+      const open = await details.first().getAttribute('open');
+      if (open === null) await details.locator('summary').first().click();
+    }
+    // also handle inline checkbox grid fallback (no details)
+    for (const v of vals) {
+      const slug = v.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      let cb = page.locator('label.hyle-picker-option').filter({ hasText: new RegExp(`^${v}$`, "i") }).locator('input[name="type"]');
+      if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${slug}"]`);
+      if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${v}"]`);
+      if (await cb.count() > 0) await cb.first().check();
+      else {
+        const search = page.locator('input.hyle-picker-search');
+        if (await search.count() > 0) {
+          await search.fill(v);
+          await page.waitForTimeout(400);
+          let cb2 = page.locator('label.hyle-picker-option').filter({ hasText: new RegExp(`^${v}$`, "i") }).locator('input[name="type"]');
+          if (await cb2.count() === 0) cb2 = page.locator(`input[name="type"][value="${slug}"]`);
+          if (await cb2.count() > 0) await cb2.first().check();
+        }
+      }
+    }
+  }
   await page.fill('input[name="author"]', author);
-  await page.click('button[type="submit"]');
+  await page.click('form[method="POST"] button[type="submit"]');
   await page.waitForURL(/\/song\/[^/]+$/, { timeout: 5000 });
   return extractSongId(page.url());
 }
@@ -213,17 +241,20 @@ Deno.test({
         );
       }
 
-      // ── 4. Edit form: type textarea should be pre-filled
+      // ── 4. Edit form: type should be pre-filled (textarea or picker)
       {
         await page.goto(`${BASE}/song/${songId}/edit`, {
           waitUntil: "domcontentloaded",
         });
-        await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
-        const typeValue = await page.inputValue('textarea[name="type"]');
-        assert(
-          typeValue.trim() === "Communion",
-          `Edit form type should contain "Communion", got: "${typeValue.trim()}"`,
-        );
+        const ta = page.locator('textarea[name="type"]');
+        if (await ta.count() > 0) {
+          await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
+          const typeValue = await page.inputValue('textarea[name="type"]');
+          assert(typeValue.trim() === "Communion", `Edit form type should contain "Communion", got: "${typeValue.trim()}"`);
+        } else {
+          const cb = page.locator('input[name="type"][value="communion"]');
+          assert(await cb.count() === 1 && await cb.isChecked(), "Edit form picker should have communion checked");
+        }
       }
 
       // ── 5. Filter by slug communion should return this song
@@ -332,18 +363,23 @@ Deno.test({
         assert(found, "Filter type=entry should include multi-type song");
       }
 
-      // ── 5. Edit form: type textarea should contain both types ─────────────
+      // ── 5. Edit form: type should contain both types (textarea or picker)
       {
         await page.goto(`${BASE}/song/${songId}/edit`, {
           waitUntil: "domcontentloaded",
         });
-        await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
-        const typeValue = await page.inputValue('textarea[name="type"]');
-        const normalized = typeValue.trim().replace(/\r?\n/g, "\n");
-        assert(
-          normalized.includes("Communion") && normalized.includes("Entry"),
-          `Edit form type should contain both types, got: "${typeValue.trim()}"`,
-        );
+        const ta = page.locator('textarea[name="type"]');
+        if (await ta.count() > 0) {
+          await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
+          const typeValue = await page.inputValue('textarea[name="type"]');
+          const normalized = typeValue.trim().replace(/\r?\n/g, "\n");
+          assert(normalized.includes("Communion") && normalized.includes("Entry"), `Edit form type should contain both types, got: "${typeValue.trim()}"`);
+        } else {
+          const c1 = page.locator('input[name="type"][value="communion"]');
+          const c2 = page.locator('input[name="type"][value="entry"]');
+          assert(await c1.count() === 1 && await c1.isChecked(), "communion should be checked");
+          assert(await c2.count() === 1 && await c2.isChecked(), "entry should be checked");
+        }
       }
     } finally {
       await browser.close();
@@ -705,15 +741,39 @@ Deno.test({
         );
       }
 
-      // ── Edit: replace Communion with Entry
+      // ── Edit: replace Communion with Entry (picker-aware)
       await page.goto(`${BASE}/song/${songId}/edit`, {
         waitUntil: "domcontentloaded",
       });
-      await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
-      await page.fill('textarea[name="type"]', "Entry");
+      {
+        const ta = page.locator('textarea[name="type"]');
+        if (await ta.count() > 0) {
+          await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
+          await page.fill('textarea[name="type"]', "Entry");
+        } else {
+          const details = page.locator('details.hyle-picker-details');
+          if (await details.count() > 0) {
+            const open = await details.first().getAttribute('open');
+            if (open === null) await details.locator('summary').first().click();
+          }
+          const cCom = page.locator('input[name="type"][value="communion"]');
+          if (await cCom.count() > 0 && await cCom.isChecked()) await cCom.uncheck();
+          let cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+          if (await cEntry.count() === 0) {
+            const search = page.locator('input.hyle-picker-search');
+            if (await search.count() > 0) {
+              await search.fill("Entry");
+              await page.waitForTimeout(400);
+            }
+            cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+            if (await cEntry.count() === 0) cEntry = page.locator('input[name="type"][value="entry"]');
+          }
+          if (await cEntry.count() > 0) await cEntry.first().check();
+        }
+      }
       await Promise.all([
         page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
-        page.click('button[type="submit"]'),
+        page.click('form[method="POST"] button[type="submit"]'),
       ]);
 
       // ── Detail page should show "Entry"
@@ -812,19 +872,38 @@ Deno.test({
         "Add Second Author",
       );
 
-      // ── Edit: append "Entry" on new line
+      // ── Edit: append "Entry" (picker-aware)
       await page.goto(`${BASE}/song/${songId}/edit`, {
         waitUntil: "domcontentloaded",
       });
-      await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
-      const current = await page.inputValue('textarea[name="type"]');
-      await page.fill(
-        'textarea[name="type"]',
-        current.trim() + "\nEntry",
-      );
+      {
+        const ta = page.locator('textarea[name="type"]');
+        if (await ta.count() > 0) {
+          await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
+          const current = await page.inputValue('textarea[name="type"]');
+          await page.fill('textarea[name="type"]', current.trim() + "\nEntry");
+        } else {
+          const details = page.locator('details.hyle-picker-details');
+          if (await details.count() > 0) {
+            const open = await details.first().getAttribute('open');
+            if (open === null) await details.locator('summary').first().click();
+          }
+          let cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+          if (await cEntry.count() === 0) {
+            const search = page.locator('input.hyle-picker-search');
+            if (await search.count() > 0) {
+              await search.fill("Entry");
+              await page.waitForTimeout(400);
+            }
+            cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+            if (await cEntry.count() === 0) cEntry = page.locator('input[name="type"][value="entry"]');
+          }
+          if (await cEntry.count() > 0) await cEntry.first().check();
+        }
+      }
       await Promise.all([
         page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
-        page.click('button[type="submit"]'),
+        page.click('form[method="POST"] button[type="submit"]'),
       ]);
 
       // ── Detail page should show both types

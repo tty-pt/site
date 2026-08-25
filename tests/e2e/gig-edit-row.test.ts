@@ -41,7 +41,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
     const grpId = page.url().split("/grp/")[1];
 
@@ -59,7 +59,7 @@ Deno.test({
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', `SB AddRemove Test ${Date.now()}`);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
     sbId = page.url().split("/gig/")[1];
 
@@ -74,16 +74,36 @@ Deno.test({
     }
     await waitForText(page, "body", "No songs yet");
 
-    // ── 3. Add a known song via the list-grade picker ────────────────────
-    // Omni mode hides Apply, so submit the search with Enter; then click
-    // the whole-row submit button carrying our song's id.
-    await page.waitForSelector('form.list-form input[name="q"]', { timeout: 5000 });
-    await page.fill('form.list-form input[name="q"]', KNOWN_SONG_TITLE);
-    await page.press('form.list-form input[name="q"]', "Enter");
-    const pickBtn = `button.hyle-row-action[value="${KNOWN_SONG_ID}"]`;
-    await page.waitForSelector(pickBtn, { timeout: 8000 });
-    await page.click(pickBtn);
-    await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
+    // ── 3. Add a known song via the omni-dropdown picker ────────────────────
+    await page.locator('details.hyle-picker-details summary').click();
+    await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
+    await page.fill('input[name="pick_q_song_id"]', KNOWN_SONG_TITLE);
+
+    // Wait for the dropdown options to refresh
+    const rows = page.locator('.hyle-picker[data-hyle-picker-key="song_id"] .hyle-picker-rows').first();
+    await rows.waitFor({ state: "visible" });
+    
+    let text = await rows.innerText();
+    while (!text.includes(KNOWN_SONG_TITLE)) {
+      await page.waitForTimeout(500);
+      text = await rows.innerText();
+    }
+    
+    // Click the song option row (radios are hidden; the label is the
+    // clickable target)
+    const opt = page.locator(
+      'label.hyle-picker-option:has(input[name="song_id"])',
+    );
+    await opt.first().waitFor();
+    await opt.first().click();
+    
+    // Submit the picker
+    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
+    if (!addBtn) throw new Error("gig picker missing submit button");
+    await Promise.all([
+      page.waitForNavigation(),
+      addBtn.click()
+    ]);
     await waitForText(page, "body", KNOWN_SONG_TITLE);
 
     // ── 4. Verify chord data renders ──────────────────────────────────────

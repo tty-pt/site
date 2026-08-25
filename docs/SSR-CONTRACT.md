@@ -32,7 +32,10 @@ Consequences:
    the form ignores.
 3. **Form submission works with zero JS.** The widget must sit in a real
    `<form>`; native controls submit the exact values the server understands
-   (see `docs/FILTERS.md` for the multi-ref repeated-keys wire format).
+   (see `docs/FILTERS.md` for the multi-ref repeated-keys wire format). Note:
+   When complex pickers require pagination/search, they utilize a sibling GET
+   form. Navigating via this sibling GET form without JS intentionally discards
+   unsaved drafts in the main POST form (acceptable progressive enhancement degradation).
 4. **`data-*` hooks** for everything the client needs to find/enhance:
    `data-hyle-ms`-style namespace attributes. They identify the widget, its
    parts, and its current state in a framework-agnostic way.

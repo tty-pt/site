@@ -70,10 +70,10 @@ WASM allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `
 ## CSS cache bust
 
 `mods/common/ux/version.gen.h` is content-hashed from `htdocs/styles.css` +
-`hyle.css` + `bud-client.js` + `bud-hydrate.js` via
-`scripts/gen-asset-version.sh` (`cksum | cksum → ?v=008d0370f`). 
+`hyle.css` + `bud-client.js` + `bud-hydrate.js` + `hyle-fragments.js` via
+`scripts/gen-asset-version.sh` (separate hashes for CSS, client, and fragments). 
 `mods/common/ux/site_page.c:108` includes it via `__has_include` fallback
-(`SITE_CSS_V`/`SITE_CLIENT_V`). Editing CSS/JS updates the hash on next
+(`SITE_CSS_V`/`SITE_CLIENT_V`/`SITE_FRAGMENTS_V`). Editing CSS/JS updates the hash on next
 `make` (only `common.so` rebuilds); no manual `?v=` bump.
 
 Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/common/ux/version.gen.h`.
@@ -82,9 +82,10 @@ Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/c
 
 - Modules are dlopen'd **before** the chroot; DT_NEEDED deps resolve from the
   host root — do not chase missing libs inside the chroot.
-- Start: `axil -C /home/quirinpa/site -p 8080 -d -m mods/core/core`. The
+- Start: `axil -C /home/quirinpa/site -p 8080 -d -m mods/core/core` or `AUTH_SKIP_CONFIRM=1 make watch`. The
   `-m mods/core/core` flag is **required** — without it no handlers register.
-- C frontend changes need module rebuild **+ server restart** to take effect.
+- C frontend and module changes need module rebuild **+ server restart** to take effect. If `axil` is already running when `.so` files are recompiled, kill the existing process (`ps aux | grep axil`, `kill -9 <pid>`) so `dlopen` loads the new binary objects.
+- When adding shared component libraries (like `libhyle-bud.so`), ensure native dependencies (e.g. `-ljson-c`) are listed in `LDLIBS` in `Makefile` so dynamic linking resolves all symbols cleanly upon startup (`ldd libhyle-bud.so`).
 - Chroot prerequisites (`sh` + libs):
 
 ```bash

@@ -59,6 +59,7 @@ Deferred low-priority drifts (not counted as open, to address later):
 - **Search is accent-sensitive by design.** `pão` and `pao` differ.
 - **Node IDs may overlap across independent roots.** Each bridge owns its map.
 - **No-JS is mandatory.** Do not solve a WASM issue with JS-only controls.
+- **JS-off fallback loses newly typed draft text in main form.** The HTML form API only serializes elements physically inside the GET form (or via form="..."). We cannot automatically copy main form state without JS. This is an ACCEPTABLE PROGRESSIVE ENHANCEMENT DEGRADATION.
 - **`bud_demo` was retired.** The orphaned demo (dead `/bud_demo.js` loader,
   no `#bud-root`/`bud-state`) was removed along with its e2e test after the
   unified `bud-client.js` hydration landed.

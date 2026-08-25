@@ -1,5 +1,6 @@
-EXTRA_CFLAGS += -I../common
+EXTRA_CFLAGS += -I../common -I$(shell cd .. && pwd)/../external/hyle/c/libhyle-bud/include
 EXTRA_LDLIBS := -laxil-auth -lbud
+EXTRA_LDLIBS += -L$(shell cd .. && pwd)/../external/hyle/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(shell cd .. && pwd)/../external/hyle/c/libhyle-bud/lib
 
 include ../../build.mk
 

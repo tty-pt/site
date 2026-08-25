@@ -62,6 +62,7 @@ standalone-unit-tests:
 		"$$tmpdir/$$test" || exit 1; \
 	done
 	@sh tests/unit/run-mpfd-content-length.sh
+	@sh tests/unit/run-mpfd-multivalue.sh
 	@sh tests/unit/run-dsv-legacy.sh
 
 pages-test: all
@@ -166,7 +167,7 @@ debug-clean:
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
-PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
+PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
 
 deploy-wasm: clients
 	scp $(addprefix htdocs/,$(PROD_ASSETS)) \

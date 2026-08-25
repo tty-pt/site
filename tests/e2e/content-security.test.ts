@@ -23,7 +23,7 @@ async function addSong(
   }
   await Promise.all([
     page.waitForURL(/\/song\/[^/?]+$/, { timeout: 5000 }),
-    page.click('button[type="submit"]'),
+    page.click('form[method="POST"] button[type="submit"]'),
   ]);
   return new URL(page.url()).pathname.split("/").filter(Boolean).at(-1) ?? "";
 }
@@ -60,7 +60,7 @@ Deno.test("poem content strips active markup rather than rendering it", async ()
     await page.locator('input[name="body_content"]').setInputFiles(upload);
     await Promise.all([
       page.waitForURL(/\/poem\/[^/?]+$/, { timeout: 5000 }),
-      page.click('button[type="submit"]'),
+      page.click('form[method="POST"] button[type="submit"]'),
     ]);
 
     poemId = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1) ??

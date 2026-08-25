@@ -35,7 +35,7 @@ Deno.test("gig: register → login → create gig → load edit page → save �
     await page.goto(`${BASE}/gig/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', sbTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
 

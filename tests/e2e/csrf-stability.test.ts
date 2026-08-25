@@ -59,7 +59,7 @@ Deno.test("csrf: token is stable across page loads — add form succeeds after n
 
     // 4. Submit the form — must reach the detail page, not a Forbidden page
     await page.fill('input[name="title"]', songTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/song/${expectedId}`, { timeout: 5000 });
 
     const h1 = await page.textContent("h1");

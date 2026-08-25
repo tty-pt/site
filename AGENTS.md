@@ -51,6 +51,19 @@ make watch          # auto-rebuild + restart on :8080
    search accent-sensitive `pão≠pao` (no TRANSLIT, only `axil_slugify`);
    No-JS must always work (`SSR-CONTRACT`).
 
+6. **Task Management.** All work MUST use the Task Journal workflow.
+   - Use `/task <name>` to start or resume active work (`docs/current/<name>.md`).
+   - The task file is your single source of truth for goals, status, and decisions. You must update it as you make progress and before context is compacted.
+   - Use `/task-draft <name>` to propose planned work in `docs/future/`.
+   - Completed work is archived to `docs/archive/` via `/task-del`.
+   - Never use ad-hoc scratchpads, `.todo` files, or try to keep the entire plan in your head.
+
+7. **Test-Driven Development (TDD) & Quality Gates.**
+   - **Build & Run First**: Discover how to build (`make`) and run (`make watch`) the project before editing feature code.
+   - **Write Tests First**: Develop unit/integration/E2E tests (`make test`) BEFORE writing feature code.
+   - **Iterative Loop**: Feature implementation $\rightarrow$ `make` $\rightarrow$ run/verify $\rightarrow$ test.
+   - **Final Quality Gates**: Build completes with zero errors, code contains zero debug artifacts (no temp logs or leftover debug code), and the full test suite (`make test`) passes with zero failures.
+
 ## Topic index
 
 | Topic | Read |
@@ -67,5 +80,7 @@ make watch          # auto-rebuild + restart on :8080
 | Isomorphic BUD (one renderer for SSR+WASM) | `docs/C-ISOMORPHIC-BUD.md` |
 | WASM bridge | `docs/WASM-BRIDGE.md` |
 | Filters & schema hints | `docs/FILTERS.md` / `docs/SCHEMA.md` |
+| Pickers & Omni-Dropdowns | `docs/PICKERS.md` |
 | Known violations & deliberate exceptions | `docs/VIOLATIONS.md` |
+| Extension guide & custom Pi workflows | `docs/EXTENSIONS.md` |
 | Deep audit | `docs/AUDIT.md` |

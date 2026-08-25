@@ -61,11 +61,14 @@ typedef struct {
 	int n_songs;
 	int replace_index;
 	char replace_title[256];
+	char pick_q[256];
+	int pick_page;
 } sb_app_state_t;
 
 static sb_app_state_t sb_app_state = { 0 };
 static sb_song_row_data_t g_sb_songs[MAX_SB_SONGS];
-static list_state_t g_sb_pick_state;
+static site_ui_picker_buffer_t g_sb_pick_buf;
+static pick_view_t g_sb_pick_state;
 static bud_node *g_sb_chord_nodes[MAX_SB_SONGS];
 static bud_node *g_sb_media_nodes[MAX_SB_SONGS];
 static int g_sb_n_chord_nodes;
@@ -90,6 +93,8 @@ static const bud_field_desc_t gig_app_fields[] = {
 	OVERLAY_STR(owner_name, sb_app_state_t, owner, 64),
 	OVERLAY_INT(replace, sb_app_state_t, replace_index),
 	OVERLAY_STR(reptitle, sb_app_state_t, replace_title, 256),
+	OVERLAY_STR(pick_q, sb_app_state_t, pick_q, 256),
+	OVERLAY_INT(pick_page, sb_app_state_t, pick_page),
 	FIELD_END
 };
 
@@ -114,7 +119,10 @@ void wasm_init(const char *json, int len)
 	        sizeof(sb_song_row_data_t), &sb_app_state.n_songs,
 	        MAX_SB_SONGS, sb_song_row_fields);
 
-	list_state_from_json_len(&g_sb_pick_state, json, jlen);
+	site_ui_picker_state_from_json(
+	        json, jlen, "song_id", "song.items", 0,
+	        sb_app_state.pick_q, sb_app_state.pick_page,
+	        &g_sb_pick_buf, &g_sb_pick_state);
 }
 
 /* ── Zoom slider event handler ──────────────────────────── */
@@ -250,8 +258,9 @@ static int on_sb_option_change(bud_event *event)
 	return 0;
 }
 
-/* ── Body builder (defined in detail.c, forward-declared here) ── */
+/* ── Body/picker builders (defined below, forward-declared here) ── */
 static bud_node *sb_build_body_content(void);
+static bud_node *sb_render_song_picker(void);
 
 /* ── WASM app entry point (isomorphic: server .so + WASM .wasm) ── */
 

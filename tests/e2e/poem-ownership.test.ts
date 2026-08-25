@@ -33,7 +33,7 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
     await pageA.goto(`${BASE}/poem/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('button[type="submit"]');
+    await pageA.click('form[method="POST"] button[type="submit"]');
 
     await pageA.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
     const url = pageA.url();

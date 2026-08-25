@@ -50,7 +50,7 @@ Deno.test({ name: "grp: register → login → create grp → view detail → ed
       await page.goto(`${BASE}/grp/add`, GOTO);
       await page.waitForSelector('input[name="title"]', { timeout: 5000 });
       await page.fill('input[name="title"]', grpTitle);
-      await page.click('button[type="submit"]');
+      await page.click('form[method="POST"] button[type="submit"]');
 
       // Should redirect to /grp/<id> after creation
       await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });

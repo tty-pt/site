@@ -262,29 +262,24 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 	list_fj_col_ctx *ctx = (list_fj_col_ctx *)user;
 	list_state_t *state = ctx->state;
 	list_col_t *col;
-	char col_json[4096];
-	size_t n;
 	int nopts;
 
 	if (ctx->col_index >= LIST_MAX_COLS)
 		return;
-	n = len < sizeof(col_json) - 1 ? len : sizeof(col_json) - 1;
-	memcpy(col_json, elem, n);
-	col_json[n] = '\0';
 
 	col = &state->cols[ctx->col_index];
-	bud_json_str(col_json, "key", col->key, sizeof(col->key));
-	bud_json_str(col_json, "label", col->label, sizeof(col->label));
-	col->type = bud_json_int(col_json, "type", 0);
-	bud_json_str(
-	        col_json, "target_source", col->target_source,
+	bud_json_str_len(elem, len, "key", col->key, sizeof(col->key));
+	bud_json_str_len(elem, len, "label", col->label, sizeof(col->label));
+	col->type = bud_json_int_len(elem, len, "type", 0);
+	bud_json_str_len(
+	        elem, len, "target_source", col->target_source,
 	        sizeof(col->target_source));
-	bud_json_str(col_json, "filter", col->filter, sizeof(col->filter));
-	bud_json_str(col_json, "current", col->current, sizeof(col->current));
+	bud_json_str_len(elem, len, "filter", col->filter, sizeof(col->filter));
+	bud_json_str_len(elem, len, "current", col->current, sizeof(col->current));
 	col->opt_start = state->nopts;
 	col->opt_count = 0;
 
-	nopts = bud_json_int(col_json, "noptions", 0);
+	nopts = bud_json_int_len(elem, len, "noptions", 0);
 	if (nopts > 0) {
 		list_fj_opts_ctx octx;
 
@@ -292,7 +287,7 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 		octx.slot = state->nopts;
 		octx.max = LIST_MAX_OPTS;
 		bud_json_array_for_each_key_len(
-		        col_json, strlen(col_json), "opts", list_fj_opt,
+		        elem, len, "opts", list_fj_opt,
 		        &octx);
 		col->opt_count = octx.slot - state->nopts;
 		state->nopts = octx.slot;

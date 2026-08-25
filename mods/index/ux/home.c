@@ -18,5 +18,5 @@ static bud_node *idx_home_layout(
 	}
 
 	return site_ui_form_page(
-	        user, "tty.pt", "/", "\xf0\x9f\x8f\xa0", NULL, frag);
+	        user, "tty.pt", "/", "\xf0\x9f\x8f\xa0", NULL, NULL, frag);
 }

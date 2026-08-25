@@ -173,10 +173,12 @@ XY_IMPL(int, site_ui_respond_form_page,
 	const char *, module,
 	bud_node *, form)
 {
-	bud_node *page =
-	        site_ui_form_page(user, title, action, icon, NULL, form);
+	bud_node *page = site_ui_form_page(
+	        user, title, action, icon, NULL, SITE_UI_FRAGMENTS_SCRIPT,
+	        form);
 	return site_ui_respond_page(
-	        fd, title, action, icon, user, NULL, module, page);
+	        fd, title, action, icon, user, SITE_UI_FRAGMENTS_SCRIPT,
+	        module, page);
 }
 
 XY_IMPL(int, csrf_check_mpfd, int, fd)

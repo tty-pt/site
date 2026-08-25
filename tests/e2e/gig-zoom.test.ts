@@ -50,7 +50,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/);
     const grpId = page.url().split("/grp/")[1];
 
@@ -80,7 +80,7 @@ Deno.test({
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', sbTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/);
     sbId = page.url().split("/gig/")[1].replace(/\/$/, "");
 
@@ -117,7 +117,7 @@ Deno.test({
     const slider = page.locator(
       'input[type="range"][data-detail-viewer-zoom]',
     );
-    await slider.waitFor({ state: "attached", timeout: 5000 });
+    await slider.waitFor({ state: "attached", timeout: 5000 }); await page.waitForTimeout(2000);
 
     // ── 4. Change zoom via slider event ───────────────────────────────────
     // Set the slider value and dispatch change event for WASM handler
@@ -127,7 +127,7 @@ Deno.test({
     });
 
     // Wait for UI update (WASM applies zoom to #sb-main style)
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
 
     const zoomAfter = await page.getAttribute("#sb-main", "data-zoom");
 

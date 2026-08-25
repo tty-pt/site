@@ -35,7 +35,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/grp\/[^/]+$/);
     grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
@@ -46,7 +46,7 @@ Deno.test({
     await waitForText(page, "body", grpTitle);
 
     // 3. Perform deletion
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to grp list
     await page.waitForURL(`${BASE}/grp`);

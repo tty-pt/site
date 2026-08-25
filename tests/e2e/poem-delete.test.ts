@@ -30,7 +30,7 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     await page.goto(`${BASE}/poem/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', title);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
     const url = page.url();
@@ -52,7 +52,7 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     }
 
     // ── 3. Confirm deletion ───────────────────────────────────────────────────
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/poem`, { timeout: 5000 });
 
     // ── 4. Verify poem is gone ────────────────────────────────────────────────

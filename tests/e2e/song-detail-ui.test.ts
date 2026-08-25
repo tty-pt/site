@@ -78,7 +78,7 @@ Deno.test({
     const authorInput = await page.$('input[name="author"], textarea[name="author"]');
     if (authorInput) await authorInput.fill("Test Author");
 
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/song\/[^/]+$/, { timeout: 5000 });
 
     const songId = page.url().split("/song/")[1]?.replace(/\/$/, "");

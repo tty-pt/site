@@ -42,7 +42,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
     const grpId = page.url().split("/grp/")[1];
 
@@ -69,7 +69,7 @@ Deno.test({
     // ── 1. Create a gig linked to the grp ──────────────────────────
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.fill('input[name="title"]', `MultiSong SB ${Date.now()}`);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/);
     sbId = page.url().split("/gig/")[1].replace(/\/$/, "");
 
@@ -84,24 +84,61 @@ Deno.test({
     }
     await waitForText(page, "body", "No songs yet");
 
-    // ── 3. Add song A via the list-grade picker (Enter submits the
-    //       omni search; whole-row button carries the song id) ───────────
-    await page.waitForSelector('form.list-form input[name="q"]', { timeout: 5000 });
-    await page.fill('form.list-form input[name="q"]', SONG_A_TITLE);
-    await page.press('form.list-form input[name="q"]', "Enter");
-    const pickA = `button.hyle-row-action[value="${SONG_A_ID}"]`;
-    await page.waitForSelector(pickA, { timeout: 8000 });
-    await page.click(pickA);
-    await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
+    // ── 3. Add song A via the new dropdown picker ───────────
+    await page.locator('details.hyle-picker-details summary').click();
+    await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
+    await page.fill('input[name="pick_q_song_id"]', SONG_A_TITLE);
+    
+    // Wait for the dropdown options to refresh
+    const rows = page.locator('.hyle-picker[data-hyle-picker-key="song_id"] .hyle-picker-rows').first();
+    await rows.waitFor({ state: "visible" });
+    
+    let text = await rows.innerText();
+    while (!text.includes(SONG_A_TITLE)) {
+      await page.waitForTimeout(500);
+      text = await rows.innerText();
+    }
+    
+    // Click the song option row (radios are hidden; the label is the
+    // clickable target)
+    const opt = page.locator(
+      'label.hyle-picker-option:has(input[name="song_id"])',
+    );
+    await opt.first().waitFor();
+    await opt.first().click();
+    
+    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
+    if (!addBtn) throw new Error("gig picker missing submit button");
+    
+    await Promise.all([
+      page.waitForNavigation(),
+      addBtn.click()
+    ]);
     await waitForText(page, "body", SONG_A_TITLE);
 
-    // ── 4. Add song B via the picker as well ─────────────────────────────
-    await page.fill('form.list-form input[name="q"]', SONG_B_TEXT);
-    await page.press('form.list-form input[name="q"]', "Enter");
-    const pickB = `button.hyle-row-action[value="${SONG_B_ID}"]`;
-    await page.waitForSelector(pickB, { timeout: 8000 });
-    await page.click(pickB);
-    await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 8000 });
+    // ── 4. Add song B ────────────────────────────────────────────────
+    await page.locator('details.hyle-picker-details summary').click();
+    await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
+    await page.fill('input[name="pick_q_song_id"]', SONG_B_TEXT);
+    
+    // Wait for the dropdown options to refresh
+    await rows.waitFor({ state: "visible" });
+    text = await rows.innerText();
+    while (!text.includes(SONG_B_TEXT)) {
+      await page.waitForTimeout(500);
+      text = await rows.innerText();
+    }
+    
+    await opt.first().waitFor();
+    await opt.first().click();
+    
+    const addBtn2 = await page.$('form[id="sb-pick-post"] button[type="submit"]');
+    if (!addBtn2) throw new Error("gig picker missing submit button");
+    
+    await Promise.all([
+      page.waitForNavigation(),
+      addBtn2.click()
+    ]);
     await waitForText(page, "body", SONG_A_TITLE);
     await waitForText(page, "body", SONG_B_TEXT);
 

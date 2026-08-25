@@ -299,7 +299,7 @@ Deno.test({
       await page.goto(`${BASE}/song/add`);
       await page.waitForSelector('input[name="title"]', { timeout: 5000 });
       await page.fill('input[name="title"]', songTitle);
-      await page.click('button[type="submit"]');
+      await page.click('form[method="POST"] button[type="submit"]');
       await page.waitForURL(/\/song\/[^/]+$/, { timeout: 10000 });
       songId = page.url().split("/song/")[1].replace(/\/$/, "");
 
@@ -315,7 +315,7 @@ Deno.test({
       // Delete via confirmation page
       await page.goto(`${BASE}/song/${songId}/delete`);
       await page.waitForSelector('button[type="submit"]', { timeout: 10000 });
-      await page.click('button[type="submit"]');
+      await page.click('form[method="POST"] button[type="submit"]');
       await page.waitForURL(`${BASE}/song`, { timeout: 10000 });
 
       // Search again — should find nothing

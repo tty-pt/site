@@ -32,17 +32,13 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
   const page = await browser.newPage();
 
   try {
-    console.log("Navigating to", `${BASE}/song/`);
     await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
-    console.log("Page URL after goto:", page.url());
 
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
-    console.log("Rows found!");
 
     // ---- Initial page: 10 rows, total > 0 ----
     const rowsInit = page.locator("tr.hyle-row-clickable");
     const countInit = await rowsInit.count();
-    console.log("Initial row count:", countInit);
     if (countInit !== 10) {
       throw new Error(
         `Expected exactly 10 rows on initial page, got ${countInit}`,
@@ -51,7 +47,6 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
 
     let initContent = await page.content();
     let totalInit = extractCount(initContent, "initial page");
-    console.log("Initial total:", totalInit);
     if (totalInit <= 0) {
       throw new Error(
         `Expected initial total > 0, got ${totalInit}`,
@@ -66,19 +61,15 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
     await page.locator(
       'details.hyle-multiselect input[name="type"][value="comunhao"]',
     ).check();
-    console.log("Type checkbox 'comunhao' checked");
 
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
-    console.log("Apply clicked, waiting for navigation...");
 
     await page.waitForURL(/type=comunhao/, { timeout: 10000 });
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
-    console.log("Filtered rows found, URL:", page.url());
 
     // ---- Page 1 filtered: 10 rows, total < unfiltered ----
     const rowsP1 = page.locator("tr.hyle-row-clickable");
     const countP1 = await rowsP1.count();
-    console.log("Filtered row count:", countP1);
     if (countP1 !== 10) {
       throw new Error(
         `Expected exactly 10 filtered rows on page 1, got ${countP1}`,
@@ -87,7 +78,6 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
 
     const p1Content = await page.content();
     const totalFiltered = extractCount(p1Content, "filtered page 1");
-    console.log("Filtered total:", totalFiltered);
     if (totalFiltered >= totalInit) {
       throw new Error(
         `Expected filtered total < initial total (${totalFiltered} >= ${totalInit})`,
@@ -110,10 +100,8 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
 
     // ---- Page 2: indicator, Prev enabled, rows Comunhão, ----
     await page.locator('button:has-text("Next")').click();
-    console.log("Next clicked, waiting for page 2...");
     await page.waitForURL(/page=2/, { timeout: 10000 });
     await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
-    console.log("Page 2 loaded, URL:", page.url());
 
     const p2Content = await page.content();
     if (!p2Content.includes("Page 2")) {
@@ -133,7 +121,6 @@ Deno.test("song list: filter by type and paginate across pages", async () => {
 
     const rowsP2 = page.locator("tr.hyle-row-clickable");
     const countP2 = await rowsP2.count();
-    console.log("Page 2 row count:", countP2);
     if (countP2 === 0) {
       throw new Error("Expected at least 1 filtered row on page 2");
     }

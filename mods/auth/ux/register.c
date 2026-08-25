@@ -24,5 +24,5 @@ bud_node *auth_render_register(const char *user)
 	                .data.node;
 
 	return site_ui_form_page(
-	        user, "Register", "/auth/register", "📝", NULL, frag);
+	        user, "Register", "/auth/register", "📝", NULL, NULL, frag);
 }

@@ -19,9 +19,8 @@ async function createSong(
   title: string,
   type: string,
 ): Promise<string> {
-  await page.goto(`${BASE}/song/add`, GOTO);
-  await page.locator('input[name="title"]').fill(title);
-  await page.locator('textarea[name="type"]').fill(type);
+  await page.goto(`${BASE}/song/add?type=${type}`, GOTO);
+  await page.locator('form[method="POST"] input[name="title"]').fill(title);
   await Promise.all([
     page.waitForURL(/\/song\/[^/]+$/, { timeout: 10000 }),
     page.locator('button[type="submit"]').click(),
@@ -34,23 +33,50 @@ async function pickSong(
   detailPath: string,
   title: string,
   songId: string,
+  isOmni: boolean
 ): Promise<void> {
-  const search = page.locator('form.list-form input[name="q"]');
-  await search.fill(title);
-  await search.press("Enter");
+  if (isOmni) {
+    const search = page.locator('input[name="pick_q_song_id"]');
+    await page.locator('details.hyle-picker-details summary').first().click();
+    await search.fill(title);
+    await Promise.all([
+      page.waitForNavigation(),
+      search.press("Enter")
+    ]);
 
-  const rowAction = page.locator(
-    `button.hyle-row-action[name="song_id"][value="${songId}"]`,
-  );
-  await rowAction.waitFor({ state: "visible", timeout: 10000 });
-  assert(
-    await rowAction.count() === 1,
-    `expected exactly one picker action for song ${songId}`,
-  );
-  await Promise.all([
-    page.waitForURL(`${BASE}${detailPath}`, { timeout: 10000 }),
-    rowAction.click(),
-  ]);
+    const rowOpt = page.locator(
+      `label.hyle-picker-option:has(input[name="song_id"][value="${songId}"])`,
+    );
+    await rowOpt.waitFor({ state: "visible", timeout: 10000 });
+    assert(
+      await page.locator(`input[name="song_id"][value="${songId}"]`).count() === 1,
+      `expected exactly one picker option for song ${songId}`,
+    );
+    await rowOpt.click();
+
+    const addBtn = page.locator('form[method="post"] button.hyle-picker-submit');
+    await Promise.all([
+      page.waitForURL(`${BASE}${detailPath}`, { timeout: 10000 }),
+      addBtn.first().click(),
+    ]);
+  } else {
+    const search = page.locator('form.list-form input[name="q"]');
+    await search.fill(title);
+    await search.press("Enter");
+
+    const rowAction = page.locator(
+      `button.hyle-row-action[name="song_id"][value="${songId}"]`,
+    );
+    await rowAction.waitFor({ state: "visible", timeout: 10000 });
+    assert(
+      await rowAction.count() === 1,
+      `expected exactly one picker action for song ${songId}`,
+    );
+    await Promise.all([
+      page.waitForURL(`${BASE}${detailPath}`, { timeout: 10000 }),
+      rowAction.click(),
+    ]);
+  }
 }
 
 Deno.test({
@@ -77,14 +103,14 @@ Deno.test({
       const gigSongId = await createSong(page, gigSongTitle, gigTypeRaw);
 
       await page.goto(`${BASE}/grp/add`, GOTO);
-      await page.locator('input[name="title"]').fill(`NoJS Grp ${unique}`);
+      await page.locator('form[method="POST"] input[name="title"]').fill(`NoJS Grp ${unique}`);
       await Promise.all([
         page.waitForURL(/\/grp\/[^/]+$/, { timeout: 10000 }),
         page.locator('button[type="submit"]').click(),
       ]);
       const grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
 
-      await pickSong(page, `/grp/${grpId}`, grpSongTitle, grpSongId);
+      await pickSong(page, `/grp/${grpId}`, grpSongTitle, grpSongId, false);
       const grpSong = page.locator(`a[href="/grp/${grpId}/song/${grpSongId}"]`);
       await grpSong.waitFor({ state: "visible" });
       const grpRow = grpSong.locator(
@@ -102,14 +128,14 @@ Deno.test({
       );
 
       await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
-      await page.locator('input[name="title"]').fill(`NoJS Gig ${unique}`);
+      await page.locator('form[method="POST"] input[name="title"]').fill(`NoJS Gig ${unique}`);
       await Promise.all([
         page.waitForURL(/\/gig\/[^/]+$/, { timeout: 10000 }),
         page.locator('button[type="submit"]').click(),
       ]);
       const gigId = page.url().split("/gig/")[1].replace(/\/$/, "");
 
-      await pickSong(page, `/gig/${gigId}`, gigSongTitle, gigSongId);
+      await pickSong(page, `/gig/${gigId}`, gigSongTitle, gigSongId, true);
       await waitForText(page, "body", gigSongTitle);
       assert(
         await page.locator(`[data-gig-item] a[href^="/song/${gigSongId}"]`)
@@ -117,8 +143,8 @@ Deno.test({
         "gig should contain the song selected by its exact picker action",
       );
 
-      await page.locator('a[data-hyle-mode-toggle="custom"]').click();
-      await page.waitForURL((url) => url.searchParams.get("custom") === "1");
+      await page.goto(`${BASE}/song/?custom=1`, GOTO);
+      await page.waitForSelector('tr.hyle-row-clickable', { timeout: 10000 });
       await page.locator(
         'details.hyle-multiselect[data-hyle-ms="type"] summary',
       ).click();
@@ -138,16 +164,13 @@ Deno.test({
         await typeCheckbox.isChecked(),
         "SSR should preserve the type checkbox",
       );
+      // song listing rows are <a href="/song/:id"> links, not picker buttons
       assert(
-        await page.locator(
-          `button.hyle-row-action[name="song_id"][value="${grpSongId}"]`,
-        ).count() === 1,
+        await page.locator(`a[href="/song/${grpSongId}"]`).count() >= 1,
         "custom type filter should return the matching unique song",
       );
       assert(
-        await page.locator(
-          `button.hyle-row-action[name="song_id"][value="${gigSongId}"]`,
-        ).count() === 0,
+        await page.locator(`a[href="/song/${gigSongId}"]`).count() === 0,
         "custom type filter should exclude the other unique song",
       );
     } finally {

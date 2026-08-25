@@ -1,7 +1,8 @@
-EXTRA_CFLAGS += -I../common
+EXTRA_CFLAGS += -I../common -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
 EXTRA_LDLIBS += -lbud
 EXTRA_LDLIBS-OpenBSD += -liconv
 EXTRA_LDLIBS += -laxil-auth
+EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
 
 include ../../build.mk
 

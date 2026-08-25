@@ -40,7 +40,7 @@ Deno.test({
       await page.goto(`${BASE}/song/add`);
       await page.waitForSelector('input[name="title"]');
       await page.fill('input[name="title"]', title);
-      await page.click('button[type="submit"]');
+      await page.click('form[method="POST"] button[type="submit"]');
       await page.waitForURL(/\/song\/[^/]+$/);
     }
 
@@ -48,7 +48,7 @@ Deno.test({
     await page.goto(`${BASE}/grp/add`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', `AutoRep Grp ${ts}`);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/);
     const grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
 
@@ -62,8 +62,8 @@ Deno.test({
 
     // ── 3. Search → table + hint; ROW CLICK adds; collapse ───────────
     // Omni mode hides the Apply button (CSS), so submit via Enter.
-    await page.fill('form.list-form input[name="q"]', songA);
-    await page.press('form.list-form input[name="q"]', "Enter");
+    await page.fill('input[name="q"]', songA);
+    await page.press('input[name="q"]', "Enter");
     await page.waitForSelector("button.hyle-row-action", { timeout: 8000 });
     await waitForText(page, "body", "Click a song to add it.");
 
@@ -92,24 +92,48 @@ Deno.test({
       throw new Error("custom mode shows no per-field checkbox widgets");
     }
 
-    // ── 5. Gig picker: row-click add + pref hidden inputs ────────────
+    // ── 5. Gig picker: dropdown search + add ────────────
     await page.goto(`${BASE}/gig/add?grp=${grpId}`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', `AutoRep SB ${ts}`);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/);
     const sbId = page.url().split("/gig/")[1].replace(/\/$/, "");
 
     await page.goto(`${BASE}/gig/${sbId}`);
-    await page.waitForSelector('form.list-form input[name="q"]');
-    const hidT = await page.$('form.list-form input[name="t"][type="hidden"]');
-    if (!hidT) throw new Error("gig picker missing t pref hidden input");
+    
+    // Open picker dropdown
+    await page.locator('details.hyle-picker-details summary').click();
 
-    await page.fill('form.list-form input[name="q"]', songB);
-    await page.press('form.list-form input[name="q"]', "Enter");
-    await page.waitForSelector("button.hyle-row-action", { timeout: 8000 });
-    await page.click("button.hyle-row-action >> nth=0");
-    await page.waitForURL(new RegExp(`/gig/${sbId}$`), { timeout: 8000 });
+    // The picker POST form must be present
+    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
+    if (!addBtn) throw new Error("gig picker missing submit button");
+
+    await page.fill('input[name="pick_q_song_id"]', songB);
+    
+    // Wait for the dropdown options to refresh
+    const rows = page.locator('.hyle-picker[data-hyle-picker-key="song_id"] .hyle-picker-rows').first();
+    await rows.waitFor({ state: "visible" });
+    
+    let text = await rows.innerText();
+    while (!text.includes(songB)) {
+      await page.waitForTimeout(500);
+      text = await rows.innerText();
+    }
+    
+    // Click the songB option row (radios are hidden; the label is the
+    // clickable target)
+    const opt = page.locator(
+      'label.hyle-picker-option:has(input[name="song_id"])',
+    );
+    await opt.first().waitFor();
+    await opt.first().click();
+    
+    // Submit the picker
+    await Promise.all([
+      page.waitForNavigation(),
+      addBtn.click()
+    ]);
     await waitForText(page, "body", songB);
 
     // ── 6. Auto-repertoire: gig membership derives grp repertoire ────

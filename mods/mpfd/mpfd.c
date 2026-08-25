@@ -375,6 +375,52 @@ XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 	return (int)to_copy;
 }
 
+/* All parts for `name` joined '\n'-separated. Repeated parts arrive
+ * when a form posts N checked boxes sharing one name; ref_normalize()
+ * downstream splits on newlines, slugifies and dedups. Returns -1 when
+ * the name is absent. With buf == NULL / buf_len == 0 returns the
+ * untruncated joined length. Duplicates iterate in sorted order, not
+ * document order — harmless: multi-ref storage is order-insensitive.
+ */
+XY_IMPL(int, mpfd_get_all, const char *, name, char *, buf, size_t,
+        buf_len)
+{
+	uint32_t cur = qmap_get_multi(mpfd_db, name);
+	const void *k;
+	const void *v;
+	size_t total = 0;
+	size_t pos = 0;
+
+	if (cur == QM_MISS)
+		return -1;
+
+	if (!buf || buf_len == 0) {
+		while (qmap_next(&k, &v, cur)) {
+			const struct mpfd_val *val = v;
+			total += val->len + 1; /* part + '\n' */
+		}
+		qmap_fin(cur);
+		return total ? (int)(total - 1) : 0;
+	}
+
+	while (qmap_next(&k, &v, cur)) {
+		const struct mpfd_val *val = v;
+		size_t len = val->len;
+
+		if (pos && pos < buf_len - 1)
+			buf[pos++] = '\n';
+		if (pos >= buf_len - 1)
+			break;
+		if (len > buf_len - 1 - pos)
+			len = buf_len - 1 - pos;
+		memcpy(buf + pos, val->data + val->filename_len, len);
+		pos += len;
+	}
+	qmap_fin(cur);
+	buf[pos] = '\0';
+	return (int)pos;
+}
+
 static int mpfd_save(const char *name, const char *path)
 {
 	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
@@ -399,5 +445,11 @@ static int mpfd_set_limits(size_t max_field_size, size_t max_total_size)
 XY_MODULE_API void xy_install(void)
 {
 	mpfd_val_type = qmap_mreg(mpfd_val_measure);
-	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
+	/* QM_SORTED | QM_MULTIVALUE: browsers submit N checked boxes as
+	 * N repeated parts named {key}; without MULTIVALUE each put
+	 * REPLACES and the last part silently wins. With it, parts
+	 * accumulate while qmap_get keeps returning the first match, so
+	 * every single-part reader behaves exactly as before. */
+	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF,
+	        QM_SORTED | QM_MULTIVALUE);
 }

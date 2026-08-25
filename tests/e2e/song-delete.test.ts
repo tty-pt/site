@@ -35,7 +35,7 @@ Deno.test({
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', songTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/song\/[^/]+$/);
     songId = page.url().split("/song/")[1].replace(/\/$/, "");
@@ -46,7 +46,7 @@ Deno.test({
     await waitForText(page, "body", songTitle);
 
     // 3. Perform deletion
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to song list
     await page.waitForURL(`${BASE}/song`);

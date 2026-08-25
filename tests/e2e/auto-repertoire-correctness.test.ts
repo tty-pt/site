@@ -141,7 +141,7 @@ Deno.test({
     async function createGig(grpId: string, title: string): Promise<string> {
       await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
       await page.fill('input[name="title"]', title);
-      await page.click('button[type="submit"]');
+      await page.click('form[method="POST"] button[type="submit"]');
       await page.waitForURL(/\/gig\/[^/]+$/);
       return page.url().split("/gig/")[1].replace(/\/$/, "");
     }
@@ -170,7 +170,7 @@ Deno.test({
     const grpTitle = `Auto repertoire correctness ${stamp}`;
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/);
     const grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
 

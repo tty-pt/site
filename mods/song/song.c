@@ -447,13 +447,24 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	const char *csrf_token = csrf_setup(fd);
 
-	bud_node *form =
-	        song_form_content(1, ctx->id, &meta, data_val, csrf_token);
-	free(data_val);
+	{
+		const char *vals_in[7];
+		const char *vals_out[7];
+		pick_view_t pv;
 
-	return site_ui_respond_edit_page(
-	        fd, ctx->username, "song", site_ui_module_icon("song"),
-	        meta.title, ctx->id, form);
+		song_form_values(&meta, data_val, vals_in);
+		pick_view_collect_fd(
+		        fd, song_ff, vals_in, vals_out, &pv);
+
+		bud_node *form = song_form_content(
+		        1, ctx->id, vals_out, csrf_token, &pv);
+		free(data_val);
+
+		return site_ui_respond_edit_page(
+		        fd, ctx->username, "song",
+		        site_ui_module_icon("song"), meta.title, ctx->id,
+		        form);
+	}
 }
 
 static int song_edit_get_handler(int fd, char *body)
@@ -472,9 +483,20 @@ static int song_add_get_handler(int fd, char *body)
 
 	const char *csrf_token = csrf_setup(fd);
 
-	bud_node *form = song_form_content(0, NULL, NULL, NULL, csrf_token);
-	return site_ui_respond_add_page(
-	        fd, user, "song", site_ui_module_icon("song"), form);
+	{
+		const char *vals_in[7];
+		const char *vals_out[7];
+		pick_view_t pv;
+
+		song_form_values(NULL, NULL, vals_in);
+		pick_view_collect_fd(
+		        fd, song_ff, vals_in, vals_out, &pv);
+
+		bud_node *form = song_form_content(
+		        0, NULL, vals_out, csrf_token, &pv);
+		return site_ui_respond_add_page(
+		        fd, user, "song", site_ui_module_icon("song"), form);
+	}
 }
 
 void xy_install(void)

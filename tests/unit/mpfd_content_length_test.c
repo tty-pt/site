@@ -93,6 +93,26 @@ const void *qmap_get(uint32_t hd, const void *const key)
 	return stored_key && strcmp(stored_key, key) == 0 ? stored_value : NULL;
 }
 
+uint32_t qmap_get_multi(uint32_t hd, const void *key)
+{
+	(void)hd;
+	(void)key;
+	return QM_MISS;
+}
+
+int qmap_next(const void **key, const void **value, uint32_t cur_id)
+{
+	(void)key;
+	(void)value;
+	(void)cur_id;
+	return 0;
+}
+
+void qmap_fin(uint32_t cur_id)
+{
+	(void)cur_id;
+}
+
 static int failures;
 
 #define CHECK(label, condition)                                                \

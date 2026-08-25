@@ -31,7 +31,7 @@ Deno.test("gig randomize: create gig → seed data → click randomize → stays
     await page.goto(`${BASE}/grp/add`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', grpTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/grp\/[^/]+$/, { timeout: 5000 });
     const grpId = page.url().split("/grp/")[1];
 
@@ -52,7 +52,7 @@ Deno.test("gig randomize: create gig → seed data → click randomize → stays
     await page.goto(`${BASE}/gig/add?grp=${grpId}`, GOTO);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', sbTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
 
     const sbUrl = page.url();

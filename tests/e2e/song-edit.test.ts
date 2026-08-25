@@ -28,7 +28,7 @@ Deno.test("song edit: login → add song → edit title → verify on detail pag
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', originalTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Wait for navigation to /song/<id> and extract the id from the URL
     await page.waitForURL(`${BASE}/song/**`, { timeout: 5000 });
@@ -55,7 +55,7 @@ Deno.test("song edit: login → add song → edit title → verify on detail pag
     await page.fill('input[name="title"]', editedTitle);
     await Promise.all([
       page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
-      page.click('button[type="submit"]'),
+      page.click('form[method="POST"] button[type="submit"]'),
     ]);
 
     // ── 4. Verify new title appears on the detail page ────────────────────────

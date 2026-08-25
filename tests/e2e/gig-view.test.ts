@@ -29,7 +29,7 @@ Deno.test("gig: register → login → create gig → view detail page", async (
     await page.goto(`${BASE}/gig/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', sbTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to /gig/<id> after creation
     await page.waitForURL(/\/gig\/[^/]+$/, { timeout: 5000 });
