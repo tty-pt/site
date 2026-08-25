@@ -68,17 +68,23 @@ async function createSongViaForm(
     // also handle inline checkbox grid fallback (no details)
     for (const v of vals) {
       const slug = v.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-      let cb = page.locator('label.hyle-picker-option').filter({ hasText: new RegExp(`^${v}$`, "i") }).locator('input[name="type"]');
-      if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${slug}"]`);
+      let cb = page.locator(`input[name="type"][value="${slug}"]`);
       if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${v}"]`);
-      if (await cb.count() > 0) await cb.first().check();
-      else {
+      if (await cb.count() > 0) {
+        await cb.first().check();
+      } else {
         const search = page.locator('input.hyle-picker-search');
         if (await search.count() > 0) {
           await search.fill(v);
-          await page.waitForTimeout(400);
-          let cb2 = page.locator('label.hyle-picker-option').filter({ hasText: new RegExp(`^${v}$`, "i") }).locator('input[name="type"]');
-          if (await cb2.count() === 0) cb2 = page.locator(`input[name="type"][value="${slug}"]`);
+          const rows = page.locator('.hyle-picker-rows').first();
+          await rows.waitFor({ state: "visible" });
+          let text = await rows.innerText();
+          for (let i = 0; i < 20 && !text.includes(v); i++) {
+            await page.waitForTimeout(100);
+            text = await rows.innerText();
+          }
+          let cb2 = page.locator(`input[name="type"][value="${slug}"]`);
+          if (await cb2.count() === 0) cb2 = page.locator(`input[name="type"][value="${v}"]`);
           if (await cb2.count() > 0) await cb2.first().check();
         }
       }
@@ -758,15 +764,20 @@ Deno.test({
           }
           const cCom = page.locator('input[name="type"][value="communion"]');
           if (await cCom.count() > 0 && await cCom.isChecked()) await cCom.uncheck();
-          let cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+          let cEntry = page.locator('input[name="type"][value="entry"]');
           if (await cEntry.count() === 0) {
             const search = page.locator('input.hyle-picker-search');
             if (await search.count() > 0) {
               await search.fill("Entry");
-              await page.waitForTimeout(400);
+              const rows = page.locator('.hyle-picker-rows').first();
+              await rows.waitFor({ state: "visible" });
+              let text = await rows.innerText();
+              for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
+                await page.waitForTimeout(100);
+                text = await rows.innerText();
+              }
             }
-            cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
-            if (await cEntry.count() === 0) cEntry = page.locator('input[name="type"][value="entry"]');
+            cEntry = page.locator('input[name="type"][value="entry"]');
           }
           if (await cEntry.count() > 0) await cEntry.first().check();
         }
@@ -888,15 +899,20 @@ Deno.test({
             const open = await details.first().getAttribute('open');
             if (open === null) await details.locator('summary').first().click();
           }
-          let cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
+          let cEntry = page.locator('input[name="type"][value="entry"]');
           if (await cEntry.count() === 0) {
             const search = page.locator('input.hyle-picker-search');
             if (await search.count() > 0) {
               await search.fill("Entry");
-              await page.waitForTimeout(400);
+              const rows = page.locator('.hyle-picker-rows').first();
+              await rows.waitFor({ state: "visible" });
+              let text = await rows.innerText();
+              for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
+                await page.waitForTimeout(100);
+                text = await rows.innerText();
+              }
             }
-            cEntry = page.locator('label.hyle-picker-option').filter({ hasText: /^Entry$/i }).locator('input[name="type"]');
-            if (await cEntry.count() === 0) cEntry = page.locator('input[name="type"][value="entry"]');
+            cEntry = page.locator('input[name="type"][value="entry"]');
           }
           if (await cEntry.count() > 0) await cEntry.first().check();
         }

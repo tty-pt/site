@@ -1,8 +1,9 @@
 /**
- * E2E test: gig replace song (inline flow)
+ * E2E test: gig replace song (title-as-trigger dropdown flow)
  *
- * Creates a gig with a song, then uses the inline replace feature
- * (triggered by ?replace=N query param) to swap it for a different song.
+ * In the gig detail (songbook), when you are the author, each song title
+ * acts as an omni-dropdown trigger. Clicking the title expands an inline
+ * picker right in place; picking a song and clicking Replace swaps that row.
  *
  * Requires: axil running on :8080 with AUTH_SKIP_CONFIRM=1.
  */
@@ -18,7 +19,7 @@ const REPLACEMENT_SONG_TITLE = "Abba (part. Frei Gilson)";
 const REPLACEMENT_SONG_LABEL = "Abba (part. Frei Gilson)";
 
 Deno.test({
-  name: "gig detail: replace a song via inline replace mode",
+  name: "gig detail: replace a song via song title dropdown trigger",
   sanitizeResources: false,
   sanitizeOps: false,
 }, async () => {
@@ -47,7 +48,7 @@ Deno.test({
     grpId = page.url().split("/grp/")[1];
 
     const { token: csrfSeed, cookieHeader: chSeed } = await getCsrfToken(cookieHeader, BASE);
-    
+
     // Seed both songs into repertoire
     for (const songId of [ORIGINAL_SONG_ID, REPLACEMENT_SONG_ID]) {
       const seedBody = new URLSearchParams({ song_id: songId, format: "any", csrf_token: csrfSeed });
@@ -89,53 +90,56 @@ Deno.test({
     await page.goto(`${BASE}/gig/${sbId}`, GOTO);
     await waitForText(page, "body", ORIGINAL_SONG_TITLE);
 
-    // ── 4. Click the replace button (🔄) on the first song row ─────────────
-    // The replace button is an anchor link: /gig/:id?replace=0
-    await page.waitForSelector('a[href*="replace=0"]', { timeout: 5000 });
-    await page.click('a[href*="replace=0"]');
-
-    // ── 5. Verify replace mode: chrome + hidden POST form contract ─────────
-    await page.waitForURL(/replace=0/, { timeout: 5000 });
-    const urlWithReplace = page.url();
-    if (!urlWithReplace.includes("replace=0")) {
-      throw new Error(`Expected URL with replace=0, got: ${urlWithReplace}`);
+    // ── 4. Verify the old replace link (🔁 / ?replace=0) is REMOVED ───────
+    const legacyReplaceLinks = await page.locator('a[href*="replace="]').count();
+    if (legacyReplaceLinks !== 0) {
+      throw new Error(`Expected 0 legacy replace links, found: ${legacyReplaceLinks}`);
     }
 
-    await page.waitForSelector('text=Replace Song #1', { timeout: 5000 });
-    await page.waitForSelector(`text=Replacing:`, { timeout: 5000 });
-    await waitForText(page, "body", ORIGINAL_SONG_TITLE);
-
-    // Key/format selects are gone: replacement keeps the row's values
-    const nModeSelects = await page.locator(
-      '#sb-pick-post select, select[name="transpose"], select[name="format"]',
-    ).count();
-    if (nModeSelects !== 0) {
-      throw new Error("Replace picker should not render transpose/format selects");
+    // ── 5. Verify song title acts as the omni-dropdown trigger ─────────────
+    const titleSummary = page.locator('#sb-pick-post-0 details.hyle-picker-details summary').first();
+    await titleSummary.waitFor({ state: "visible" });
+    const titleText = await titleSummary.innerText();
+    if (!titleText.includes(ORIGINAL_SONG_TITLE)) {
+      throw new Error(`Expected title summary to contain "${ORIGINAL_SONG_TITLE}", got: "${titleText}"`);
     }
 
-    // Hidden post form targets the replace endpoint for row 0
-    const postAction = await page.getAttribute("#sb-pick-post", "action");
-    if (
-      !postAction ||
-      postAction !== `/api/gig/${sbId}/song/0/replace`
-    ) {
-      throw new Error(`Expected #sb-pick-post action /api/gig/:id/song/0/replace, got ${postAction}`);
-    }
-    const nField = await page.getAttribute('#sb-pick-post input[name="n"]', "value");
-    if (nField !== "0") {
-      throw new Error(`Expected hidden n=0 in picker post form, got ${nField}`);
-    }
-    const backField = await page.getAttribute('#sb-pick-post input[name="back"]', "value");
-    if (!backField || !backField.startsWith("/gig/")) {
-      throw new Error(`Expected hidden back=/gig/... in picker post form, got ${backField}`);
+    // Verify row 0 POST form targets replace endpoint
+    const postAction = await page.getAttribute("#sb-pick-post-0", "action");
+    if (!postAction || postAction !== `/api/gig/${sbId}/song/0/replace`) {
+      throw new Error(`Expected #sb-pick-post-0 action /api/gig/${sbId}/song/0/replace, got ${postAction}`);
     }
 
-    // ── 6. Search for the replacement song ─────────────────────────
-    await page.locator('details.hyle-picker-details summary').click();
-    await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
-    await page.fill('input[name="pick_q_song_id"]', REPLACEMENT_SONG_LABEL);
+    // Verify sibling GET form exists for row 0
+    const siblingForm = await page.$('#pickq-song_id__0');
+    if (!siblingForm) {
+      throw new Error("Missing sibling GET form #pickq-song_id__0");
+    }
 
-    const rows = page.locator('.hyle-picker[data-hyle-picker-key="song_id"] .hyle-picker-rows').first();
+    // ── 6. Click title trigger to expand the row's dropdown ────────────────
+    await titleSummary.click();
+
+    // Verify search input is scoped to row 0
+    const searchInput = page.locator('input[name="pick_q_song_id__0"]');
+    await searchInput.waitFor({ state: "visible", timeout: 5000 });
+
+    // Verify clicking outside closes the picker
+    const rowDetails = page.locator('#sb-pick-post-0 details.hyle-picker-details');
+    await page.locator('h1').click();
+    await rowDetails.waitFor({ state: "attached" });
+    const isOpen = await rowDetails.getAttribute("open");
+    if (isOpen !== null) {
+      throw new Error("Expected details to close on click outside");
+    }
+
+    // Re-open picker by clicking summary again
+    await titleSummary.click();
+    await searchInput.waitFor({ state: "visible", timeout: 5000 });
+
+    // ── 7. Search for the replacement song ─────────────────────────────────
+    await searchInput.fill(REPLACEMENT_SONG_LABEL);
+
+    const rows = page.locator('#sb-pick-post-0 .hyle-picker-rows').first();
     await rows.waitFor({ state: "visible" });
 
     let text = await rows.innerText();
@@ -144,43 +148,62 @@ Deno.test({
       text = await rows.innerText();
     }
 
-    // Radios are hidden by CSS; click the wrapping option label instead.
-    const opt = page.locator(
-      'label.hyle-picker-option:has(input[name="song_id"])',
-    );
-    await opt.first().waitFor();
-    await opt.first().click();
-
-    // ── 7. Click the replacement row button (submits sb-pick-post) ─────────
-    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
-    if (!addBtn) throw new Error("gig picker missing submit button");
-    await Promise.all([
-      page.waitForNavigation(),
-      addBtn.click()
-    ]);
-
-    // ── 9. Verify redirect back to gig detail (no replace param) ───────────
-    const finalUrl = page.url();
-    if (finalUrl.includes("replace=")) {
-      throw new Error(`Expected URL without replace param, got: ${finalUrl}`);
+    // Verify Replace button is hidden when client scripts are active
+    const replaceBtn = page.locator('#sb-pick-post-0 button.gig-song-picker-submit');
+    const isBtnVisible = await replaceBtn.isVisible();
+    if (isBtnVisible) {
+      throw new Error("Expected Replace button to be hidden with client scripts active");
     }
 
-    // ── 8. Verify the replacement song appears and original is gone ─────────
-    await waitForText(page, "body", "Abba (part. Frei Gilson)");
+    // ── 8. Select replacement song option (auto-submits on change in JS mode without page reload) ───
+    const opt = page.locator(
+      `#sb-pick-post-0 label.hyle-picker-option:has(input[name="song_id"][value="${REPLACEMENT_SONG_ID}"])`,
+    );
+    await opt.first().waitFor();
+
+    let navigated = false;
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) {
+        console.log("NAVIGATED TO:", frame.url());
+        navigated = true;
+      }
+    });
+
+    await opt.first().click();
+
+    // ── 10. Verify NO full page navigation occurred in JS mode ────────────
+    await page.waitForTimeout(600);
+    if (navigated) {
+      throw new Error("Expected in-place replacement without full page reload/navigation");
+    }
+
+    // ── 11. Verify the replacement song appears and original is gone ───────
+    await waitForText(page, "body", REPLACEMENT_SONG_TITLE);
     const bodyText = await page.textContent("body");
     if (bodyText?.includes(ORIGINAL_SONG_TITLE)) {
       throw new Error("Original song still present after replace");
     }
-    // Also verify the song title is present
     if (!bodyText?.includes(REPLACEMENT_SONG_TITLE)) {
       throw new Error("Replacement song title not found in body");
     }
 
-    // ── 11. Verify chord data renders for the new song ──────────────────────
+    // ── 12. Verify chord data renders for the new song ─────────────────────
     await page.waitForSelector('[data-gig-chord-data]', { timeout: 5000 });
     const chordData = await page.textContent('[data-gig-chord-data]');
     if (!chordData || chordData.length < 10) {
       throw new Error("Chord data too short or missing for replacement song");
+    }
+
+    // ── 13. Test no-JS SSR query scoping (?pick_q_song_id__0=...) ─────────
+    const noJsResp = await fetch(`${BASE}/gig/${sbId}?pick_q_song_id__0=alegria`, {
+      headers: { Cookie: cookieHeader },
+    });
+    if (noJsResp.status !== 200) {
+      throw new Error(`No-JS query returned HTTP ${noJsResp.status}`);
+    }
+    const noJsHtml = await noJsResp.text();
+    if (!noJsHtml.includes('id="pickq-song_id__0"') || !noJsHtml.includes('id="sb-pick-post-0"')) {
+      throw new Error("No-JS SSR HTML missing row 0 picker forms");
     }
 
   } finally {

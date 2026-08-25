@@ -184,6 +184,14 @@ and CSP `script-src` is extended in `mods/common/ux/site_ui.c:700-723` to
 include the inline `<script id="bud-state">` hash for the current page.
 `site_core_build_csp_extra` in dead `mods/site_core/` is not used.
 
+## No Site-Specific JavaScript
+
+The site is pure C with progressive WASM enhancement. **No site-specific JavaScript is permitted.**
+- All client-side JavaScript files in `htdocs/*.js` (`hyle-fragments.js`, `bud-client.js`, `bud-hydrate.js`) are strictly generic, framework-level library transports.
+- JavaScript files must NEVER contain application-specific class names (e.g. `.gig-*`, `.song-*`, `#sb-*`), module names (`poem`, `song`, `gig`, `grp`), domain endpoints, or business logic.
+- Generic transports are driven exclusively by neutral data attributes (e.g. `[data-hyle-frag-url]`, `[data-hyle-auto-submit]`, `[data-hyle-slot]`).
+- All interactive application features, reactive state transitions, and custom client logic must be implemented in pure C (`mods/*/ux/*.c`) and compiled to WASM.
+
 ## Misc pitfalls
 
 - Do not commit `*.so`, `*.o`, `*.wasm`, swap files, or Rust `target/`.

@@ -101,4 +101,16 @@ XY_DECL(int, pick_view_collect_fd,
 	const char **, vals_out,
 	pick_view_t *, pv);
 
+/* Scoped variant: namespaces this collector's pick_q_/pick_page_
+ * params as `<key>__<scope>` so several picker instances for the same
+ * field can coexist on one page (docs/current/multi-omni-dropdown.md). */
+XY_DECL(int, pick_view_collect_scoped,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	const char *, scope);
+
+
 #endif

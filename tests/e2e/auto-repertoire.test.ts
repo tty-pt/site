@@ -121,18 +121,14 @@ Deno.test({
       text = await rows.innerText();
     }
     
-    // Click the songB option row (radios are hidden; the label is the
-    // clickable target)
+    // Click the songB option row (auto-submits on selection)
     const opt = page.locator(
       'label.hyle-picker-option:has(input[name="song_id"])',
     );
     await opt.first().waitFor();
-    await opt.first().click();
-    
-    // Submit the picker
     await Promise.all([
       page.waitForNavigation(),
-      addBtn.click()
+      opt.first().click(),
     ]);
     await waitForText(page, "body", songB);
 

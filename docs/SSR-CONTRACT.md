@@ -105,7 +105,11 @@ Removing all `data-bud-*` from the HTML must leave a fully functional widget.
    `data-bud-*` as free to change.
 5. hyle may become WASM-only later — SSR output must stay plain HTML with no
    hidden runtime dependency.
-6. Server writes still route through hyle `put`/`del` (`source_update_item` /
+6. Zero site-specific JavaScript: `htdocs/*.js` (`hyle-fragments.js`,
+   `bud-client.js`, `bud-hydrate.js`) must remain 100% generic transports
+   driven only by neutral `data-*` hooks. Never put domain selectors, classes,
+   or logic into JS.
+7. Server writes still route through hyle `put`/`del` (`source_update_item` /
    `source_delete_item`) so the FTS index stays live.
 
 ## 6. Related docs

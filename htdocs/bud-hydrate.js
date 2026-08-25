@@ -864,7 +864,7 @@ export class BudWasmBridge {
 			return (evt) => {
 				const malloc = getWasmExport(this.wasm, ['malloc']);
 				const free = getWasmExport(this.wasm, ['free']);
-				const value = buildEventPayload(info, evt); console.log("PAYLOAD:", value);
+				const value = buildEventPayload(info, evt);
 				let eventData = null;
 				let eventDataPtr = 0;
 
@@ -892,11 +892,10 @@ export class BudWasmBridge {
 		}
 
 		return (evt) => {
-			const value = buildEventPayload(info, evt); console.log("PAYLOAD:", value);
+			const value = buildEventPayload(info, evt);
 			let eventData = null;
 			if (value) {
 				const malloc = getWasmExport(this.wasm, ['malloc']);
-				console.log('MALLOC:', !!malloc, 'value:', value);
 				if (malloc) {
 					const bytes = new TextEncoder().encode(value + '\0');
 					const ptr = malloc(bytes.length);

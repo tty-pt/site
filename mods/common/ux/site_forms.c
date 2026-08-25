@@ -208,11 +208,7 @@ const char *site_ui_pick_form_id(const form_field_t *fields)
  * and the trailing ctx params carry the server-side defaults. */
 static const char *pick_url_tmpl(const pick_entry_t *e)
 {
-#ifndef __wasm__
-	static __thread char tmpl[512];
-#else
 	static char tmpl[512];
-#endif
 
 	snprintf(tmpl, sizeof(tmpl),
 	        "/pick/%s/options?key=%s&multi=%d&label=&sel={sel}"
@@ -220,6 +216,43 @@ static const char *pick_url_tmpl(const pick_entry_t *e)
 	        e->target ? e->target : "", e->key, e->multi, e->key,
 	        e->key);
 	return tmpl;
+}
+
+static int ascii_strcasecmp(const char *s1, const char *s2)
+{
+	if (!s1 || !s2)
+		return s1 == s2 ? 0 : (s1 ? 1 : -1);
+	while (*s1 && *s2) {
+		unsigned char c1 = (unsigned char)*s1;
+		unsigned char c2 = (unsigned char)*s2;
+		if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
+		if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+		if (c1 != c2)
+			return c1 - c2;
+		s1++;
+		s2++;
+	}
+	return (unsigned char)*s1 - (unsigned char)*s2;
+}
+
+static int ascii_strncasecmp(const char *s1, const char *s2, size_t n)
+{
+	if (!s1 || !s2 || n == 0)
+		return 0;
+	while (n && *s1 && *s2) {
+		unsigned char c1 = (unsigned char)*s1;
+		unsigned char c2 = (unsigned char)*s2;
+		if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
+		if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+		if (c1 != c2)
+			return c1 - c2;
+		s1++;
+		s2++;
+		n--;
+	}
+	if (n == 0)
+		return 0;
+	return (unsigned char)*s1 - (unsigned char)*s2;
 }
 
 static int pick_val_has_token(const char *vals, const char *token)
@@ -240,11 +273,42 @@ static int pick_val_has_token(const char *vals, const char *token)
 		}
 		while (seg && (vals[seg - 1] == ' ' || vals[seg - 1] == '\r'))
 			seg--;
-		if (seg == tlen && strncmp(vals, token, seg) == 0)
+		if (seg == tlen && (strncmp(vals, token, seg) == 0 ||
+		                    ascii_strncasecmp(vals, token, seg) == 0))
 			return 1;
 		if (!end)
 			break;
 		vals = end + 1;
+	}
+	return 0;
+}
+
+static int pick_is_selected_opt(const pick_entry_t *e, const char *id,
+        const char *label, const char *val)
+{
+	int j;
+
+	if (e && e->nsel > 0) {
+		for (j = 0; j < e->nsel; j++) {
+			if (e->sel[j].id && id &&
+			    (strcmp(e->sel[j].id, id) == 0 ||
+			     ascii_strcasecmp(e->sel[j].id, id) == 0))
+				return 1;
+			if (e->sel[j].label && label &&
+			    (strcmp(e->sel[j].label, label) == 0 ||
+			     ascii_strcasecmp(e->sel[j].label, label) == 0))
+				return 1;
+			if (e->sel[j].id && label &&
+			    (strcmp(e->sel[j].id, label) == 0 ||
+			     ascii_strcasecmp(e->sel[j].id, label) == 0))
+				return 1;
+		}
+	}
+	if (val && val[0]) {
+		if (id && pick_val_has_token(val, id))
+			return 1;
+		if (label && pick_val_has_token(val, label))
+			return 1;
 	}
 	return 0;
 }
@@ -262,8 +326,8 @@ static bud_node *pick_inline_single(const pick_entry_t *e,
 	                       lx_text("None"))
 	                         .data.node);
 	for (i = 0; i < e->npage; i++) {
-		int sel = val && val[0] && strcmp(val, e->page_opts[i].id)
-		                                  == 0;
+		int sel = pick_is_selected_opt(e, e->page_opts[i].id,
+		        e->page_opts[i].label, val);
 		if (sel)
 			matched = 1;
 		bud_append(opts,
@@ -297,8 +361,8 @@ static bud_node *pick_inline_multi(
                        lx_attr("name", e->key),
                        lx_attr("value", e->page_opts[i].id),
                        lx_attr("data-filter", e->page_opts[i].label),
-                       pick_val_has_token(val,
-                               e->page_opts[i].id)
+                       pick_is_selected_opt(e,
+                               e->page_opts[i].id, e->page_opts[i].label, val)
                                ? lx_attr("checked", "")
                                : lx_none()),
                 lx_text(e->page_opts[i].label))
@@ -321,7 +385,7 @@ static bud_node *pick_ref_node(const form_field_t *f, const char *val,
 		                              : lx_none())
 		            .data.node;
 
-	if (e->total <= eff)
+	if (eff > 0 && e->total <= eff)
 		return e->multi ? pick_inline_multi(e, val)
 		                : pick_inline_single(e, val);
 
@@ -470,26 +534,48 @@ bud_node *site_ui_action_picker(
 		               .data.node;
 	}
 
-	form_field_t ff[2] = {
-		{ spec->key, spec->label ? spec->label : spec->key, 0, FF_REF_SINGLE, spec->target, 0 },
-		{ NULL, NULL, 0, 0, NULL, 0 }
-	};
-	const char *vals[1] = { NULL };
-	bud_node *sibling = site_ui_sibling_get_form(
-	        spec->get_action, ff, vals, pv);
+	char form_id_buf[192];
+	char search_param_buf[192];
+	char page_param_buf[192];
+	const char *sp = spec->search_param;
+	const char *pp = spec->page_param;
 
-	if (sibling && spec->n_prefs > 0 && spec->pref_names && spec->pref_vals) {
+	if (spec->scope && spec->scope[0]) {
+		snprintf(form_id_buf, sizeof(form_id_buf), "pickq-%s__%s",
+		         spec->key, spec->scope);
+		if (!sp) {
+			snprintf(search_param_buf, sizeof(search_param_buf),
+			         "pick_q_%s__%s", spec->key, spec->scope);
+			sp = search_param_buf;
+		}
+		if (!pp) {
+			snprintf(page_param_buf, sizeof(page_param_buf),
+			         "pick_page_%s__%s", spec->key, spec->scope);
+			pp = page_param_buf;
+		}
+	} else {
+		snprintf(form_id_buf, sizeof(form_id_buf), "pickq-%s", spec->key);
+	}
+
+	bud_node *hiddens = bud_fragment();
+	if (spec->n_prefs > 0 && spec->pref_names && spec->pref_vals) {
 		for (int k = 0; k < spec->n_prefs; k++) {
 			char vb[16];
 			snprintf(vb, sizeof(vb), "%d", spec->pref_vals[k]);
 			bud_append(
-			        sibling,
+			        hiddens,
 			        lx_el("input", lx_attr("type", "hidden"),
 			              lx_attr("name", spec->pref_names[k]),
 			              lx_attr("value", vb))
 			                .data.node);
 		}
 	}
+	bud_node *sibling = lx_el("form", lx_attr("id", form_id_buf),
+	                          lx_attr("action", spec->get_action ? spec->get_action : ""),
+	                          lx_attr("method", "GET"),
+	                          lx_attr("class", "pick-sibling-form"),
+	                          lx_node(hiddens))
+	                            .data.node;
 
 	if (pv) {
 		for (int i = 0; i < pv->n; i++) {
@@ -503,32 +589,55 @@ bud_node *site_ui_action_picker(
 			e = &pv->entries[0];
 	}
 
-	char form_id_buf[192];
-	snprintf(form_id_buf, sizeof(form_id_buf), "pickq-%s", spec->key);
+	hyle_bud_option_t default_sel;
+	const hyle_bud_option_t *sel = NULL;
+	int nsel = 0;
 
-	if (e) {
-		picker = hyle_bud_picker_field(
-		        &(hyle_bud_picker_desc_t){ .key = spec->key,
-		                .label = spec->label ? spec->label : spec->key,
-		                .source = e->target ? e->target : spec->target,
-		                .multi = e->multi,
-		                .get_form_id = form_id_buf,
-		                .url_tmpl = pick_url_tmpl(e),
-		                .page_opts = e->page_opts,
-		                .npage = e->npage,
-		                .sel = e->sel,
-		                .nsel = e->nsel,
-		                .q = e->q,
-		                .page = e->page,
-		                .per_page = e->per_page,
-		                .total = e->total,
-		                .search_param = spec->search_param,
-		                .page_param = spec->page_param });
+	if (spec->default_id && spec->default_id[0]) {
+		default_sel.id = spec->default_id;
+		default_sel.label = (spec->default_label && spec->default_label[0])
+		        ? spec->default_label : spec->default_id;
+		sel = &default_sel;
+		nsel = 1;
+	} else if (e) {
+		sel = e->sel;
+		nsel = e->nsel;
+	}
+
+	char url_tmpl_buf[512];
+	snprintf(url_tmpl_buf, sizeof(url_tmpl_buf),
+	        "/pick/%s/options?key=%s&multi=0&label=&sel={sel}&pick_q_%s={q}&pick_page_%s={page}",
+	        (e && e->target) ? e->target : spec->target,
+	        spec->key, spec->key, spec->key);
+
+	hyle_bud_picker_desc_t d = {
+		.key = spec->key,
+		.label = spec->label ? spec->label : spec->key,
+		.source = (e && e->target) ? e->target : spec->target,
+		.multi = 0,
+		.get_form_id = form_id_buf,
+		.url_tmpl = url_tmpl_buf,
+		.page_opts = e ? e->page_opts : NULL,
+		.npage = e ? e->npage : 0,
+		.sel = sel,
+		.nsel = nsel,
+		.q = (e && e->q) ? e->q : "",
+		.page = e ? e->page : 0,
+		.per_page = (e && e->per_page > 0) ? e->per_page : 15,
+		.total = e ? e->total : 0,
+		.search_param = sp,
+		.page_param = pp
+	};
+
+	picker = hyle_bud_picker_field(&d);
+	if (picker && spec->auto_submit) {
+		bud_set_attr(picker, "data-hyle-auto-submit", "1");
 	}
 
 	post = lx_el("form",
 	             lx_attr("id", spec->form_id ? spec->form_id : "pick-post"),
 	             lx_attr("method", "post"),
+	             lx_attr("class", "flex-1 min-w-0"),
 	             lx_attr("action", spec->post_action ? spec->post_action : ""))
 	               .data.node;
 
@@ -545,10 +654,10 @@ bud_node *site_ui_action_picker(
 	}
 
 	bud_append(post,
-	           lx_el("div", lx_attr("class", "flex gap-2 items-start"),
+	           lx_el("div", lx_attr("class", "flex gap-2 items-center flex-1 min-w-0"),
 	                 picker ? lx_node(picker) : lx_none(),
 	                 lx_el("button", lx_attr("type", "submit"),
-	                       lx_attr("class", "btn btn-primary hyle-picker-submit mt-6"),
+	                       lx_attr("class", "btn btn-primary hyle-picker-submit"),
 	                       lx_text(spec->submit_label ? spec->submit_label : "Add")))
 	                   .data.node);
 
@@ -580,16 +689,11 @@ void site_ui_picker_state_from_json(
 	        (hyle_bud_picker_view_t *)pv_out);
 }
 
-#ifndef __wasm__
-#if __has_include(<json-c/json.h>)
-#include <json-c/json.h>
 void site_ui_picker_state_to_json(
         const pick_view_t *pv, struct json_object *j_root)
 {
 	hyle_bud_picker_state_to_json(
 	        (const hyle_bud_picker_view_t *)pv, j_root);
 }
-#endif
-#endif
 
 #endif

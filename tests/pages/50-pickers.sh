@@ -19,12 +19,12 @@ get(){ # get path [extra curl args...]
 
 post_multipart(){ # post_multipart path field=value...
   path=$1; shift
-  set --
+  args=()
   for kv in "$@"; do
-    set -- "$@" -F "$kv"
+    args+=("-F" "$kv")
   done
   code=$(curl -sS --max-time 5 -b "$JAR" -c "$JAR" -o "$BODY" \
-    -w '%{http_code}' "$@" "$BASE$path" || true)
+    -w '%{http_code}' "${args[@]}" "$BASE$path" || true)
 }
 
 api_csrf(){
@@ -34,20 +34,17 @@ api_csrf(){
 
 # ── auth (AUTH_SKIP_CONFIRM=1 dev server required) ────────────────────
 U="pick$(date +%s)"
-api_csrf
-post_multipart /auth/register \
-  "username=$U" "password=picktest-pass-1" "password2=picktest-pass-1" \
-  "csrf_token=$CSRF"
+code=$(curl -sS --max-time 5 -b "$JAR" -c "$JAR" -o "$BODY" -w '%{http_code}' -X POST "$BASE/auth/register" \
+  -d "username=$U&password=picktest-pass-1&password2=picktest-pass-1")
 case "$code" in 2*|3*) ;; *) fail "register failed (HTTP $code)" ;; esac
-api_csrf
-post_multipart /auth/login "username=$U" "password=picktest-pass-1" \
-  "csrf_token=$CSRF"
+code=$(curl -sS --max-time 5 -b "$JAR" -c "$JAR" -o "$BODY" -w '%{http_code}' -X POST "$BASE/auth/login" \
+  -d "username=$U&password=picktest-pass-1")
 case "$code" in 2*|3*) ;; *) fail "login failed (HTTP $code)" ;; esac
 pass "authenticated session established"
 
 # ── anon rejections ───────────────────────────────────────────────────
 anon_code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
-  "$BASE/pick/song.types/options?q=&page=1&sel=")
+  "$BASE/pick/song.types/options?key=type&q=&page=1&sel=")
 [ "$anon_code" = 401 ] || fail "anon fragment route returned $anon_code, want 401"
 pass "anon fragment route -> 401"
 
@@ -76,18 +73,18 @@ grep -q 'hyle-fragments.js' "$BODY" ||
 pass "song/add picker markup complete"
 
 # ── fragment envelope shape (logged in) ───────────────────────────────
-get "/pick/song.types/options?q=&page=1&sel="
+get "/pick/song.types/options?key=type&q=&page=1&sel=&more=1"
 [ "$code" = 200 ] || fail "fragment route returned $code"
 grep -q '"rows"' "$BODY" || fail "envelope missing rows"
 grep -q '"eof"' "$BODY" || fail "envelope missing eof"
 pass "fragment envelope shape OK"
 
 # ── repeated-key wire format: multi-ref accepts repeated parts ────────
-T1=$(curl -sS --max-time 5 \
+T1=$(curl -sS --max-time 5 -b "$JAR" \
   "$BASE/api/dataset/song.types?per_page=1" |
   grep -o '"id": *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
 [ -n "$T1" ] || fail "no song.types fixtures found"
-T2=$(curl -sS --max-time 5 \
+T2=$(curl -sS --max-time 5 -b "$JAR" \
   "$BASE/api/dataset/song.types?per_page=5" |
   grep -o '"id": *"[^"]*"' | sed -n 2p | sed 's/.*: *"//;s/"//')
 [ -n "$T2" ] || T2="$T1"
@@ -122,20 +119,20 @@ pass "pinned selections survive q/page variations"
 # sibling mirror carries values
 get "/song/$SONG_ID/edit"
 grep -q 'id="pickq-type"' "$BODY" || fail "edit missing sibling form"
-printf '%s' "$BODY" | grep -q 'name="type" value=' ||
+grep -q 'name="type" value=' "$BODY" ||
   fail "edit missing type mirrors"
 pass "GET-form mirrors present on edit"
 
 # ── gig single-ref draft preselect (?grp= kept visible) ───────────────
-GRP_ID=$(curl -sS --max-time 5 "$BASE/api/dataset/grp.items?per_page=1" |
+GRP_ID=$(curl -sS --max-time 5 -b "$JAR" "$BASE/api/dataset/grp.items?per_page=1" |
   grep -o '"id": *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
 if [ -n "$GRP_ID" ]; then
   get "/gig/add?grp=$GRP_ID"
   if grep -q 'select[^>]*name="grp"' "$BODY"; then
-    printf '%s' "$BODY" | grep -q "value=\"$GRP_ID\" selected" ||
+    grep -q "value=\"$GRP_ID\" selected" "$BODY" ||
       fail "draft grp not preselected in inline select"
   else
-    printf '%s' "$BODY" | grep -q "value=\"$GRP_ID\"" ||
+    grep -q "value=\"$GRP_ID\"" "$BODY" ||
       fail "draft grp option missing from picker"
   fi
   pass "?grp= draft preselect rendered"
@@ -149,7 +146,7 @@ get "/song/add?type=$BIGQS"
 if grep -q 'data-hyle-picker-key="type"' "$BODY"; then
   fail "budget cutoff did not engage (picker still bound to type)"
 fi
-printf '%s' "$BODY" | grep -qE '<(input|textarea)[^>]*name="type"' ||
+grep -qE '<(input|textarea)[^>]*name="type"' "$BODY" ||
   fail "fallback field missing after cutoff"
 pass "QS budget cutoff falls back to text input"
 

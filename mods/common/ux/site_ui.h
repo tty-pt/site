@@ -60,7 +60,7 @@ void login_href(const char *ret, char *buf, size_t len);
 #define FF_REF_MULTI 2
 /* Target total at or below this renders an inline select/checkbox grid;
  * above it, the omnisearch picker. Descriptor max_inline=0 → default. */
-#define FF_PICKER_THRESHOLD 50
+#define FF_PICKER_THRESHOLD 0
 
 typedef struct {
 	const char *name;
@@ -118,6 +118,8 @@ typedef struct {
 	const char *key;           /* field name, e.g. "song_id" */
 	const char *label;         /* field label, e.g. "Song:" */
 	const char *target;        /* target dataset, e.g. "song.items" */
+	const char *default_id;    /* optional pre-selected default value ID */
+	const char *default_label; /* optional pre-selected default value label */
 	const char *get_action;    /* action URL for sibling GET form */
 	const char *post_action;   /* action URL for POST form */
 	const char *form_id;       /* POST form ID, default "pick-post" */
@@ -127,6 +129,8 @@ typedef struct {
 	const char *cancel_href;   /* optional cancel link href */
 	const char *cancel_label;  /* optional cancel link label */
 	const char *header_text;   /* optional header text above picker */
+	const char *scope;         /* scope suffix, e.g. "0" for pick_q_<key>__0 */
+	int auto_submit;           /* 1 = auto-submit on radio change when scripts active */
 	const char *search_param;  /* custom search input name; NULL defaults to "pick_q_<key>" */
 	const char *page_param;    /* custom page input name; NULL defaults to "pick_page_<key>" */
 	const char **pref_names;   /* optional extra GET input names */

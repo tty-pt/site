@@ -64,6 +64,7 @@ interface StoredState {
 
 let state: StoredState = { active: null, saveCount: 0, compactCount: 0, prompts: [] };
 let lastPromptAt = Date.now();
+let pickerCancelledThisSession = false;
 
 // ---------------------------------------------------------------------------
 // State persistence (custom entries survive reloads and branching)
@@ -199,6 +200,7 @@ function installPromptCapture(pi: ExtensionAPI) {
 function installBeforeAgentStart(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (_event, ctx) => {
 		if (!state.active) return;
+		if (pickerCancelledThisSession) return; // user cancelled the boot picker — stay quiet until /task
 		if (compactionReady()) return; // file already freshly saved
 		if (withinCooldown()) return;
 		sendSaveRequest(pi, "Task-journal: before starting, refresh the active task file with the latest state.");
@@ -208,6 +210,7 @@ function installBeforeAgentStart(pi: ExtensionAPI) {
 
 function installTurnEnd(pi: ExtensionAPI) {
 	pi.on("turn_end", async (_event, ctx) => {
+		if (pickerCancelledThisSession) return; // user cancelled at boot — no routine save prompts
 		if (!state.active) return;
 		const pct = usagePercent(ctx);
 		if (pct >= COMPACT_WARN_PERCENT) {
@@ -293,7 +296,10 @@ async function offerTaskChoiceOnBoot(pi: ExtensionAPI, ctx: ExtensionContext, re
 	if (reason !== "startup") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const choice = await promptForTaskChoice(ctx, "What do you want to work on?");
-	if (!choice) return;
+	if (!choice) {
+		pickerCancelledThisSession = true; // user opted out — suppress task-journal prompts until /task
+		return;
+	}
 	pi.sendUserMessage(`/task ${choice}`);
 }
 
@@ -386,6 +392,7 @@ function installCommands(pi: ExtensionAPI) {
 			await cleanDraftIfExists(name);
 			// Switching tasks: new task starts with fresh prompt history.
 			const switching = state.active !== name;
+			pickerCancelledThisSession = false; // explicit /task re-enables journal prompts
 			state.active = name;
 			if (switching) state.prompts = [];
 			if (goal) {
@@ -398,7 +405,20 @@ function installCommands(pi: ExtensionAPI) {
 			pi.sendUserMessage([
 				{
 					type: "text",
-					text: `Now working on task **${name}**. Task file: \`${path}\`.${goalText}\n\nFill in its template with the goal, decisions, files, and current status first. Ensure ## Original request contains the verbatim user request (faithful if truncated). Keep it as the single source of truth for this work.\n\n**Mandatory TDD & Quality Workflow**:\n1. First find out how to build and run the project (e.g. read AGENTS.md, Makefile).\n2. Write one or multiple tests for the task BEFORE developing feature code.\n3. Develop feature -> build -> run project -> test.\n4. At the end: zero build errors, zero debug artifacts/temp logs, and run the FULL test suite (must pass with zero errors).`,
+					text: `Now working on task **${name}**. Task file: \`${path}\`.${goalText}
+
+**Mandatory Upfront Research & Planning Protocol**:
+1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
+2. Perform an in-depth codebase investigation: inspect relevant libraries, module boundaries, data flows, and root causes of complexity. Think ambitiously about clean abstractions.
+3. Formulate a comprehensive, multi-stage execution plan where each phase is self-contained with exact function signatures, touched files, and targeted test files.
+4. Fill \`${path}\` completely with the goal, decisions, analysis findings, multi-stage plan, acceptance checklist, and next recommended step.
+5. In your very first turn, present the complete analysis, architectural trade-offs, and multi-stage plan clearly to the user for confirmation.
+
+**Mandatory TDD & Quality Workflow**:
+1. Develop targeted test(s) for each stage BEFORE feature code.
+2. Develop feature -> build -> run -> verify targeted tests.
+3. Support end-of-task user feedback loops and polish iterations until final confirmation.
+4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`,
 				},
 			]);
 		},
@@ -592,8 +612,22 @@ function TASK_TEMPLATE(name: string, goal = ""): string {
 		`- [ ] **5. Clean Code**: Verified code has zero debug artifacts or leftover logs.`,
 		`- [ ] **6. Full Test Suite**: Executed FULL test suite with zero errors.`,
 		``,
-		`## Task Refinements & Iterations`,
-		`> Mid-workflow refinements or post-implementation requirements.`,
+		`## In-Depth Analysis & Findings`,
+		`> Root cause analysis, architectural friction, abstraction opportunities.`,
+		`- `,
+		``,
+		`## Detailed Multi-Stage Execution Plan`,
+		`> Each stage must be self-contained as if it were a single task, with exact signatures, touched files, and targeted tests.`,
+		`### Stage 1: `,
+		`- **Target**: `,
+		`- **Tasks**: `,
+		`- **Targeted Tests**: `,
+		``,
+		`## Acceptance Criteria & Polish Checklist`,
+		`- [ ] `,
+		``,
+		`## Task Refinements & User Feedback Loops`,
+		`> Mid-workflow refinements, post-implementation iterations, and user adjustments.`,
 		`- `,
 		``,
 		`## Why this matters`,
@@ -606,9 +640,6 @@ function TASK_TEMPLATE(name: string, goal = ""): string {
 		`- `,
 		``,
 		`## Files touched`,
-		`- `,
-		``,
-		`## Research / findings (enough to continue without re-reading)`,
 		`- `,
 		``,
 		`## Remaining work`,
@@ -628,26 +659,57 @@ function TASK_TEMPLATE(name: string, goal = ""): string {
 
 // ---------------------------------------------------------------------------
 
+async function loadActiveTaskResumeContext(): Promise<string> {
+	if (!state.active) return "";
+	const path = taskPath(state.active);
+	try {
+		const content = await readFile(path, "utf8");
+		if (!content) return "";
+		
+		// Extract key sections: Goal, Current Status, Remaining work, Next recommended step, Resume prompt
+		const sections = ["Goal", "Current Status", "Remaining work", "Next recommended step", "Resume prompt"];
+		const extracted: string[] = [];
+		for (const sec of sections) {
+			const regex = new RegExp(`## ${sec}\\n([\\s\\S]*?)(?=\\n## |$)`, "i");
+			const match = content.match(regex);
+			if (match && match[1].trim()) {
+				extracted.push(`### ${sec}\n${match[1].trim()}`);
+			}
+		}
+		if (extracted.length === 0) return "";
+		return `\n\n# Active Task Resume Context (from \`${path}\`)\n${extracted.join("\n\n")}`;
+	} catch {
+		return "";
+	}
+}
+
 function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
+		const resumeContext = await loadActiveTaskResumeContext();
 		const workflowInstructions = `\n\n# Mandatory Task Workflow Rules (TDD & Quality Gates)
 When working on tasks:
-1. **Build & Run Discovery**: Before editing feature code, find out how to build and run the project (e.g. check AGENTS.md, Makefile, scripts, package.json). If it is a website or server, understand how to run it.
-2. **Develop Tests First (TDD)**: Develop one or multiple tests for the task BEFORE developing each feature.
-3. **Iterative Build, Run & Test**: Develop feature -> build project -> run project -> execute tests.
-4. **Final Verification & Quality Gates**:
-   - The build must complete with ZERO errors or warnings.
-   - Code must have ZERO debug artifacts (e.g., temporary console.log, debug prints, leftover scratch code).
-   - Run the FULL test suite at the end — it must pass with ZERO errors.
+1. **Upfront Deep Research & Planning**:
+   - Before writing feature code, conduct a thorough architectural audit of the relevant codebase, understand constraints, and design an ambitious, multi-stage plan where each phase is self-contained.
+   - Present findings, trade-offs, and the plan in turn 1 for user confirmation.
+2. **Build & Run Discovery**: Discovered how to build and run the project before editing code.
+3. **Develop Tests First (TDD)**: Develop targeted test(s) BEFORE developing each feature phase.
+4. **Iterative Build, Run & Test**: Feature implementation -> build -> run -> verify targeted tests.
+5. **Post-Implementation & User Feedback Loops**:
+   - Expect and support user polish iterations at the end of a task.
+   - When the user provides feedback or refinements, log them under \`## Task Refinements & User Feedback Loops\`, update acceptance checklists, execute the changes, and verify with tests until the user confirms satisfaction.
+6. **Final Verification & Quality Gates**:
+   - Zero compiler errors or warnings.
+   - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
+   - Full test suite (\`make test\`) must pass with zero errors.
 
 # Task Management & Verbal Requests
 You maintain long-lived task state on disk in \`docs/current/<task>.md\`.
 When users ask in natural language to manage tasks (verbally refining, switching, drafting, archiving, or listing), apply these rules directly:
 
-1. **Refine Active Task** (e.g. "refine task", "add requirement X", "pivot goal to Y"):
+1. **Refine Active Task / User Feedback** (e.g. "refine task", "add requirement X", "tweak Y", "feedback: Z"):
    - Read and update \`docs/current/<active-task>.md\` immediately using \`edit\` or \`write\`.
-   - Update \`## Goal\` if changed, and add an entry under \`## Task Refinements & Iterations\` with the new requirements/date.
-   - Update \`## Remaining work\`, \`## TDD & Quality Checklist\`, \`## Decisions made\`, and \`## Next recommended step\`.
+   - Record the user feedback under \`## Task Refinements & User Feedback Loops\`.
+   - Update \`## Remaining work\`, \`## Acceptance Criteria & Polish Checklist\`, \`## Decisions made\`, and \`## Next recommended step\`.
    - Call \`task_journal_mark_saved\` after updating to keep journal staleness in sync.
 
 2. **Start / Switch Task** (e.g. "switch to task X", "start task Y"):
@@ -661,7 +723,7 @@ When users ask in natural language to manage tasks (verbally refining, switching
    - Move \`docs/current/<task>.md\` to \`docs/archive/<task>-<timestamp>.md\` and remove any matching draft in \`docs/future/\`.
 
 5. **List / Status** (e.g. "what are my tasks?", "show task status"):
-   - Inspect files in \`docs/current/\` and \`docs/future/\` to report task status.`;
+   - Inspect files in \`docs/current/\` and \`docs/future/\` to report task status.${resumeContext}`;
 
 		return { systemPrompt: `${event.systemPrompt}${workflowInstructions}` };
 	});

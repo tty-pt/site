@@ -85,7 +85,7 @@ Deno.test({
     await waitForText(page, "body", "No songs yet");
 
     // ── 3. Add song A via the new dropdown picker ───────────
-    await page.locator('details.hyle-picker-details summary').click();
+    await page.locator('#sb-pick-post details.hyle-picker-details summary').click();
     await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
     await page.fill('input[name="pick_q_song_id"]', SONG_A_TITLE);
     
@@ -99,25 +99,19 @@ Deno.test({
       text = await rows.innerText();
     }
     
-    // Click the song option row (radios are hidden; the label is the
-    // clickable target)
+    // Click the song option row (auto-submits on selection)
     const opt = page.locator(
       'label.hyle-picker-option:has(input[name="song_id"])',
     );
     await opt.first().waitFor();
-    await opt.first().click();
-    
-    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
-    if (!addBtn) throw new Error("gig picker missing submit button");
-    
     await Promise.all([
       page.waitForNavigation(),
-      addBtn.click()
+      opt.first().click(),
     ]);
     await waitForText(page, "body", SONG_A_TITLE);
 
     // ── 4. Add song B ────────────────────────────────────────────────
-    await page.locator('details.hyle-picker-details summary').click();
+    await page.locator('#sb-pick-post details.hyle-picker-details summary').click();
     await page.waitForSelector('input[name="pick_q_song_id"]', { timeout: 5000 });
     await page.fill('input[name="pick_q_song_id"]', SONG_B_TEXT);
     
@@ -130,14 +124,9 @@ Deno.test({
     }
     
     await opt.first().waitFor();
-    await opt.first().click();
-    
-    const addBtn2 = await page.$('form[id="sb-pick-post"] button[type="submit"]');
-    if (!addBtn2) throw new Error("gig picker missing submit button");
-    
     await Promise.all([
       page.waitForNavigation(),
-      addBtn2.click()
+      opt.first().click(),
     ]);
     await waitForText(page, "body", SONG_A_TITLE);
     await waitForText(page, "body", SONG_B_TEXT);

@@ -599,12 +599,13 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
 	}
 }
 
-XY_IMPL(int, pick_view_collect,
-	char *, body,
-	const form_field_t *, fields,
-	const char **, vals_in,
-	const char **, vals_out,
-	pick_view_t *, pv)
+/* Shared implementation; when `scope` is non-empty this collector's
+ * pick_q_/pick_page_ query params are namespaced as `<key>__<scope>`
+ * so multiple independent picker instances can coexist on one page.
+ * Entry value/radio names stay unscoped (e->key = field name). */
+static int pick_view_collect_impl(char *body, const form_field_t *fields,
+        const char **vals_in, const char **vals_out, pick_view_t *pv,
+        const char *scope)
 {
 	int arena_off = 0;
 	int ri = 0;
@@ -647,11 +648,14 @@ XY_IMPL(int, pick_view_collect,
 		pick_entry_t *e = &pv->entries[ri];
 		unsigned fields_hd;
 		char qs[1024];
+		char skey[192];
 		int total = 0, nopts = 0;
 		int eff = f->max_inline > 0 ? f->max_inline
 		                            : FF_PICKER_THRESHOLD;
 
 		if (f->ref == FF_REF_NONE || !f->target || !f->target[0])
+			continue;
+		if (body && strlen(body) > 2048)
 			continue;
 		if (!source_find(f->target))
 			continue;
@@ -661,6 +665,11 @@ XY_IMPL(int, pick_view_collect,
 
 		memset(e, 0, sizeof(*e));
 		e->key = f->name;
+		if (scope && scope[0])
+			snprintf(skey, sizeof(skey), "%s__%s", f->name,
+			        scope);
+		else
+			snprintf(skey, sizeof(skey), "%s", f->name);
 		e->multi = f->ref == FF_REF_MULTI;
 		e->target = f->target;
 		e->per_page = PICK_DEFAULT_PER_PAGE;
@@ -672,12 +681,12 @@ XY_IMPL(int, pick_view_collect,
 		{
 			static __thread pick_ctx_t ctx;
 
-			pick_ctx_load(body, f->name, &ctx);
+			pick_ctx_load(body, skey, &ctx);
 			e->q = ctx.q;
 			e->page = ctx.page;
 			e->per_page = ctx.per_page;
 
-			nopts = pick_fill(f->target, body, f->name, &ctx,
+			nopts = pick_fill(f->target, body, skey, &ctx,
 			        pick_v_ids[ri], pick_v_labels[ri],
 			        pick_v_opts[ri], PICK_VIEW_MAX_OPTS,
 			        &total);
@@ -689,7 +698,7 @@ XY_IMPL(int, pick_view_collect,
 			    (ctx.page != 0 || nopts < total)) {
 				pick_ctx_t full = { .per_page = total };
 
-				nopts = pick_fill(f->target, body, f->name,
+				nopts = pick_fill(f->target, body, skey,
 				        &full, pick_v_ids[ri],
 				        pick_v_labels[ri], pick_v_opts[ri],
 				        PICK_VIEW_MAX_OPTS, &total);
@@ -712,6 +721,29 @@ XY_IMPL(int, pick_view_collect,
 	return ri;
 }
 
+XY_IMPL(int, pick_view_collect,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv)
+{
+	return pick_view_collect_impl(body, fields, vals_in, vals_out, pv,
+	        NULL);
+}
+
+XY_IMPL(int, pick_view_collect_scoped,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	const char *, scope)
+{
+	return pick_view_collect_impl(body, fields, vals_in, vals_out, pv,
+	        scope);
+}
+
 int axil_env_get(int fd, char *target, size_t dest_len, char *key);
 int axil_query_parse(char *qs);
 
@@ -722,7 +754,7 @@ XY_IMPL(int, pick_view_collect_fd,
 	const char **, vals_out,
 	pick_view_t *, pv)
 {
-	char qs[2048] = { 0 };
+	char qs[16384] = { 0 };
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	return pick_view_collect(qs, fields, vals_in, vals_out, pv);

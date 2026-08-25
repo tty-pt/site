@@ -19,6 +19,8 @@
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
 #include "../song/song.h"
+#include "../song/lib/transp/transp_flags.h"
+#include "../song/ux/music.h"
 #include "../grp/grp.h"
 #include "fields.h"
 #include "../index/index.h"
@@ -326,7 +328,12 @@ static int handle_sb_song_remove_authorized(
 	char n_str[16] = { 0 };
 	int idx;
 
-	axil_query_param("n", n_str, sizeof(n_str) - 1);
+	/* Prefer an explicit query param; fall back to the :n path
+	 * parameter matched by the route (PATTERN_PARAM_N env). */
+	if (axil_query_param("n", n_str, sizeof(n_str) - 1) <= 0)
+		axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
+	if (!n_str[0])
+		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
 
 	hyle_source_ordered_remove_at("gig.songs", ctx->id, idx);
@@ -393,6 +400,68 @@ static int handle_sb_song_replace_authorized(
 	hyle_source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
+
+	/* Return JSON when requested by JS fetch / AJAX */
+	char accept[256] = { 0 };
+	axil_header_get(fd, "Accept", accept, sizeof(accept));
+	if (strstr(accept, "application/json")) {
+		char title_buf[256] = { 0 };
+		char type_buf[512] = { 0 };
+		char yt_buf[512] = { 0 };
+		char audio_buf[512] = { 0 };
+		char pdf_buf[512] = { 0 };
+		char *ch = NULL;
+		int dk = 0;
+		int flags = TRANSP_HTML;
+		char l_str[4] = { 0 }, b_str[4] = { 0 };
+		if (axil_query_param("l", l_str, sizeof(l_str)) >= 0 && l_str[0] == '1')
+			flags |= TRANSP_LATIN;
+		if (axil_query_param("b", b_str, sizeof(b_str)) >= 0 && b_str[0] == '1')
+			flags |= TRANSP_BEMOL;
+
+		int tr = key_val[0] ? atoi(key_val) : 0;
+		unsigned song_hd = source_get_fields_hd("song.items");
+		if (song_hd) {
+			const char *st = qmap_get_field_str(song_hd, s_id, "title");
+			if (st)
+				snprintf(title_buf, sizeof(title_buf), "%s", st);
+			else
+				snprintf(title_buf, sizeof(title_buf), "%s", s_id);
+
+			const char *_yt = qmap_get_field_str(song_hd, s_id, "yt");
+			const char *_audio = qmap_get_field_str(song_hd, s_id, "audio");
+			const char *_pdf = qmap_get_field_str(song_hd, s_id, "pdf");
+			if (_yt) snprintf(yt_buf, sizeof(yt_buf), "%s", _yt);
+			if (_audio) snprintf(audio_buf, sizeof(audio_buf), "%s", _audio);
+			if (_pdf) snprintf(pdf_buf, sizeof(pdf_buf), "%s", _pdf);
+
+			source_resolve_ref_display_str("song.items", s_id, "type", type_buf, sizeof(type_buf));
+		}
+
+		song_transpose_root(g_doc_root, s_id, tr, flags, &ch, &dk);
+		const char *tgt_key = target_key_name(
+		        dk, tr, (flags & TRANSP_LATIN) ? 1 : 0);
+
+		json_object *j_resp = json_object_new_object();
+		json_object_object_add(j_resp, "index", json_object_new_int(idx));
+		json_object_object_add(j_resp, "song_id", json_object_new_string(s_id));
+		json_object_object_add(j_resp, "title", json_object_new_string(title_buf));
+		json_object_object_add(j_resp, "type", json_object_new_string(type_buf));
+		json_object_object_add(j_resp, "original_key", json_object_new_int(dk));
+		json_object_object_add(j_resp, "target_key", json_object_new_string(tgt_key));
+		json_object_object_add(j_resp, "transpose", json_object_new_int(tr));
+		json_object_object_add(j_resp, "chord_html", json_object_new_string(ch ? ch : ""));
+		json_object_object_add(j_resp, "yt", json_object_new_string(yt_buf));
+		json_object_object_add(j_resp, "audio", json_object_new_string(audio_buf));
+		json_object_object_add(j_resp, "pdf", json_object_new_string(pdf_buf));
+
+		const char *json_str = json_object_to_json_string(j_resp);
+		free(ch);
+		axil_header_set(fd, "Content-Type", "application/json");
+		axil_respond(fd, 200, json_str);
+		json_object_put(j_resp);
+		return 1;
+	}
 
 	/* Picker may ask to come back to the page it was opened from
 	 * (e.g. the edit page); validate prefix to avoid open redirects. */
@@ -466,12 +535,27 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/add.c"
 #include "ux/edit.c"
 
-static void sb_load_song_picks(int fd)
+static void sb_load_song_picks(int fd, const char *scope)
 {
 	const char *vals_in[1] = { "" };
 	const char *vals_out[1];
-	pick_view_collect_fd(
-	        fd, sb_pick_song_ff, vals_in, vals_out, &g_sb_pick_state);
+
+	/* pick_view_collect_scoped takes the raw query string (char *),
+	 * NOT an fd — resolve QUERY_STRING here like collect_fd does,
+	 * otherwise the fd int is reinterpreted as a pointer (segfault). */
+	char qs[2048] = { 0 };
+
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	if (scope && scope[0])
+		pick_view_collect_scoped(
+		        qs, sb_pick_song_ff, vals_in, vals_out,
+		        &g_sb_pick_state, scope);
+	else
+		pick_view_collect_fd(
+		        fd, sb_pick_song_ff, vals_in, vals_out,
+		        &g_sb_pick_state);
 }
 
 static void sb_load_edit_song_picks(int fd)
@@ -903,12 +987,9 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	csrf_token = csrf_setup(fd);
 
-	/* Add-song picker search (owner only; fills state q + picks) */
+	/* Load songs via ordered source first so song count is known */
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
-	if (is_owner)
-		sb_load_song_picks(fd);
-
-	/* Load songs via ordered source */
+	sb_app_state.active_row_pick = -1;
 	{
 		struct detail_song_ctx {
 			unsigned song_hd;
@@ -917,21 +998,44 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
 	}
 
-	/* Parse ?replace=N query param and pre-fill replace state from hyle_source */
-	sb_app_state.replace_index = -1;
-	sb_app_state.replace_title[0] = '\0';
-	{
-		char replace_str[16] = { 0 };
-		axil_query_param("replace", replace_str, sizeof(replace_str) - 1);
-		if (replace_str[0]) {
-			int idx = atoi(replace_str);
-			if (idx >= 0 && idx < sb_app_state.n_songs) {
-				sb_app_state.replace_index = idx;
-				/* Title from already-loaded g_sb_songs (display only) */
-				strncpy(sb_app_state.replace_title,
-				        g_sb_songs[idx].title,
-				        sizeof(sb_app_state.replace_title) - 1);
+	/* Check if any row's scoped picker is active in the query string.
+	 * If so, collect options for that row's scope; otherwise collect
+	 * options for the top Add Song picker. */
+	if (is_owner) {
+		char qs[2048] = { 0 };
+		if (fd > 0)
+			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+		int active_scope = -1;
+		for (int i = 0; i < sb_app_state.n_songs; i++) {
+			char q_key[64], p_key[64];
+			snprintf(q_key, sizeof(q_key), "pick_q_song_id__%d=", i);
+			snprintf(p_key, sizeof(p_key), "pick_page_song_id__%d=", i);
+			if (strstr(qs, q_key) || strstr(qs, p_key)) {
+				active_scope = i;
+				break;
 			}
+		}
+		if (active_scope < 0) {
+			char replace_str[16] = { 0 };
+			axil_query_param("replace", replace_str,
+			        sizeof(replace_str) - 1);
+			if (replace_str[0]) {
+				int idx = atoi(replace_str);
+				if (idx >= 0 && idx < sb_app_state.n_songs)
+					active_scope = idx;
+			}
+		}
+
+		if (active_scope >= 0) {
+			sb_app_state.active_row_pick = active_scope;
+			char scope_str[16];
+			snprintf(scope_str, sizeof(scope_str), "%d",
+			        active_scope);
+			sb_load_song_picks(fd, scope_str);
+		} else {
+			sb_app_state.active_row_pick = -1;
+			sb_load_song_picks(fd, NULL);
 		}
 	}
 
@@ -1043,33 +1147,6 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	int n_format_opts =
 	        sb_load_format_options(format_buf, format_opts, 128);
 
-	/* Load song picks for omnisearch picker */
-	sb_load_edit_song_picks(fd);
-
-	/* Query string drives both ?replace=N mode and the picker
-	 * draft/paging params (collected into pv). */
-	char qs[2048] = { 0 };
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	if (qs[0])
-		axil_query_parse(qs);
-
-	{
-		char replace_str[16] = { 0 };
-		int replace_idx = -1;
-		const char *replace_title = NULL;
-
-		axil_query_param("replace", replace_str,
-		        sizeof(replace_str) - 1);
-		if (replace_str[0]) {
-			int idx = atoi(replace_str);
-			if (idx >= 0 && idx < n_songs) {
-				replace_idx = idx;
-				replace_title = songs[idx].title;
-			}
-		}
-		sb_edit_set_replace(replace_idx, replace_title);
-	}
-
 	/* Collect grp picker view: options window, pinned selection and
 	 * draft overlays from the query string. */
 	const char *grp_vals_in[1];
@@ -1078,6 +1155,42 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	grp_vals_in[0] = (grp_id && grp_id[0]) ? grp_id : "";
 	pick_view_collect_fd(
 	        fd, sb_grp_ff, grp_vals_in, grp_vals_out, &edit_pv);
+
+	/* Check if any row's song picker is active in the query string */
+	char qs[2048] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	int active_edit_row = -1;
+	for (int i = 0; i < n_songs; i++) {
+		char q_key[64], p_key[64];
+		snprintf(q_key, sizeof(q_key), "pick_q_song_%d=", i);
+		snprintf(p_key, sizeof(p_key), "pick_page_song_%d=", i);
+		if (strstr(qs, q_key) || strstr(qs, p_key)) {
+			active_edit_row = i;
+			break;
+		}
+	}
+
+	/* Load song picks for omnisearch add-picker only when no row is active */
+	if (active_edit_row < 0)
+		sb_load_edit_song_picks(fd);
+	else
+		memset(&g_edit_pv, 0, sizeof(g_edit_pv));
+
+	pick_view_t edit_row_pv;
+	memset(&edit_row_pv, 0, sizeof(edit_row_pv));
+	if (active_edit_row >= 0) {
+		char song_f[32];
+		snprintf(song_f, sizeof(song_f), "song_%d", active_edit_row);
+		form_field_t row_ff[] = {
+			{ song_f, "Song", 0, FF_REF_SINGLE, "song.items", 0 },
+			FIELD_END
+		};
+		const char *v_in[1] = { "" };
+		const char *v_out[1];
+		pick_view_collect(qs, row_ff, v_in, v_out, &edit_row_pv);
+	}
 
 	const char *csrf_token = csrf_setup(fd);
 
@@ -1089,7 +1202,8 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	bud_node *form = sb_render_edit_form(
 	        action, csrf_token, title, ctx->id, grp_vals_out[0], &edit_pv,
 	        cancel_href, n_songs, songs, n_format_opts,
-	        format_opts, song_source);
+	        format_opts, song_source, active_edit_row,
+	        active_edit_row >= 0 ? &edit_row_pv : NULL);
 
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "gig", site_ui_module_icon("gig"), title,

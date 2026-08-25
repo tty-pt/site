@@ -35,58 +35,45 @@ static const form_field_t sb_grp_ff[] = {
 
 /* Edit page picker state (filled by gig.c; this page is SSR-only) */
 static pick_view_t g_edit_pv;
-static int g_edit_replace_index = -1;
-static char g_edit_replace_title[256];
 
-static void sb_edit_set_replace(int idx, const char *title)
-{
-	g_edit_replace_index = idx;
-	snprintf(g_edit_replace_title, sizeof(g_edit_replace_title), "%s",
-	         title ? title : "");
-}
-
-/* Omnisearch picker: add mode by default, replace mode when
- * ?replace=N was requested (set via sb_edit_set_replace). Both modes
- * post straight to the API and come back to this page via back=. */
-static bud_node *sb_render_edit_picker(const char *sb_id, const char *csrf_token)
+/* Omnisearch picker: add mode to append a new song to the gig */
+static bud_node *sb_render_edit_picker(
+        const char *sb_id, const char *csrf_token, const pick_view_t *pv)
 {
 	char action[256], post_action[256], back[256];
 	sb_picker_spec_t spec;
 
 	snprintf(action, sizeof(action), "/gig/%s/edit", sb_id);
-	snprintf(back, sizeof(back), "/gig/%s", sb_id);
-	if (g_edit_replace_index >= 0)
-		snprintf(post_action, sizeof(post_action),
-		         "/api/gig/%s/song/%d/replace", sb_id, g_edit_replace_index);
-	else
-		snprintf(post_action, sizeof(post_action), "/api/gig/%s/songs", sb_id);
+	snprintf(back, sizeof(back), "/gig/%s/edit", sb_id);
+	snprintf(post_action, sizeof(post_action), "/api/gig/%s/songs", sb_id);
 
 	memset(&spec, 0, sizeof(spec));
 	spec.get_action = action;
 	spec.post_action = post_action;
 	spec.form_id = "edit-pick-post";
 	spec.csrf = csrf_token;
-	spec.aria_base = g_edit_replace_index >= 0 ? "Replace" : "Add";
-	spec.hint = g_edit_replace_index >= 0
-	                    ? "Click a song to swap it in \xe2\x80\x94 its key and format are kept."
-	                    : "Click a song to add it.";
+	spec.aria_base = "Add";
+	spec.hint = "Click a song to add it.";
 	spec.back = back;
-	spec.replace_index = g_edit_replace_index;
-	spec.replace_title = g_edit_replace_title;
+	spec.replace_index = -1;
+	spec.replace_title = NULL;
 	spec.pref_names = NULL;
 	spec.pref_vals = NULL;
 	spec.n_prefs = 0;
+	spec.auto_submit = 1;
 
-	return sb_picker_render(&spec, &g_edit_pv);
+	return sb_picker_render(&spec, (pick_view_t *)pv);
 }
 
 static bud_node *sb_render_edit_form(
         const char *action, const char *csrf_token, const char *title,
         const char *sb_id, const char *grp_id, const pick_view_t *pv,
         const char *cancel_href, int n_songs, const sb_edit_row_t *songs,
-        int n_format_opts, const char **format_opts, const char *song_source)
+        int n_format_opts, const char **format_opts, const char *song_source,
+        int active_edit_row, const pick_view_t *row_pv)
 {
 	bud_node *rows = bud_fragment();
+	bud_node *row_sibs = bud_fragment();
 	char amount_str[16];
 	snprintf(amount_str, sizeof(amount_str), "%d", n_songs);
 
@@ -97,47 +84,72 @@ static bud_node *sb_render_edit_form(
 	bud_node *grp_fields =
 	        site_ui_form_fields_ex(sb_grp_ff, grp_vals, NULL, pv);
 
-	/* Omnisearch song picker at the top (add mode, or replace mode
-	 * when ?replace=N is active) */
-	bud_node *picker = sb_render_edit_picker(sb_id, csrf_token);
-	if (picker)
-		bud_append(rows, picker);
+	/* Omnisearch song picker for adding songs (rendered outside main edit form) */
+	const pick_view_t *add_pv = (active_edit_row < 0) ? &g_edit_pv : NULL;
+	bud_node *picker = sb_render_edit_picker(sb_id, csrf_token, add_pv);
 
 	for (int i = 0; i < n_songs; i++) {
-		char song_f[32], key_f[32], fmt_f[32], remove_f[32], repl_f[32];
+		char song_f[32], key_f[32], fmt_f[32], remove_f[32];
 		snprintf(song_f, sizeof(song_f), "song_%d", i);
 		snprintf(key_f, sizeof(key_f), "key_%d", i);
 		snprintf(fmt_f, sizeof(fmt_f), "fmt_%d", i);
 		snprintf(remove_f, sizeof(remove_f), "remove_%d", i);
-		snprintf(repl_f, sizeof(repl_f), "?replace=%d", i);
 
 		int cur_key = atoi(songs[i].transpose);
 		const char *f_val = songs[i].format[0] ? songs[i].format : "";
 		int orig_key = songs[i].orig_key;
-		char change_href[320];
-		snprintf(change_href, sizeof(change_href), "/gig/%s/edit%s",
-		         sb_id, repl_f);
 
-		/* Song identity: read-only title link + hidden field so the
-		 * bulk Save keeps the current song unless replaced via the
-		 * omnisearch picker (?replace=N). */
 		char song_href[320];
 		song_href[0] = '\0';
 		if (songs[i].repo_id[0])
 			snprintf(song_href, sizeof(song_href), "/song/%s",
 			         songs[i].repo_id);
 
+		/* Per-row standard song picker with default selection */
+		char get_form_id[64];
+		snprintf(get_form_id, sizeof(get_form_id), "pickq-song_%d", i);
+
+		char search_param[64], page_param[64];
+		snprintf(search_param, sizeof(search_param), "pick_q_song_%d", i);
+		snprintf(page_param, sizeof(page_param), "pick_page_song_%d", i);
+
+		int is_active = (i == active_edit_row);
+		const pick_view_t *cur_row_pv = is_active ? row_pv : NULL;
+
+		bud_node *picker_node = sb_render_single_song_picker(
+		        song_f, songs[i].repo_id, songs[i].title, get_form_id,
+		        cur_row_pv, is_active, search_param, page_param);
+
+		bud_node *view_link = song_href[0]
+		        ? lx_el("a", lx_attr("href", song_href),
+		                lx_attr("class", "text-xs text-muted ml-1"),
+		                lx_attr("title", "View song"),
+		                lx_text("\xe2\x86\x97")).data.node
+		        : NULL;
+
 		bud_node *song_ctl =
-		        lx_el("span", lx_attr("class", "flex items-center gap-2 w-60"),
-		              lx_el("input", lx_attr("type", "hidden"),
-		                    lx_attr("name", song_f),
-		                    lx_attr("value", songs[i].repo_id)),
-		              lx_el("a",
-		                    song_href[0] ? lx_attr("href", song_href)
-		                                 : lx_none(),
-		                    lx_attr("class", "font-medium text-sm truncate"),
-		                    lx_text(songs[i].title)))
+		        lx_el("span", lx_attr("class", "flex items-center gap-1 flex-1 min-w-0"),
+		              picker_node ? lx_node(picker_node) : lx_none(),
+		              view_link ? lx_node(view_link) : lx_none())
 		                .data.node;
+
+		/* Sibling GET form for no-JS pagination/search of this row */
+		bud_node *row_sib =
+		        lx_el("form", lx_attr("id", get_form_id),
+		              lx_attr("action", action),
+		              lx_attr("method", "GET"),
+		              lx_attr("class", "pick-sibling-form"),
+		              lx_el("input", lx_attr("type", "hidden"),
+		                    lx_attr("name", "title"),
+		                    lx_attr("value", title ? title : "")),
+		              (grp_id && grp_id[0])
+		                      ? lx_el("input", lx_attr("type", "hidden"),
+		                              lx_attr("name", "grp"),
+		                              lx_attr("value", grp_id))
+		                      : lx_none())
+		                .data.node;
+		if (row_sibs && row_sib)
+			bud_append(row_sibs, row_sib);
 
 		/* Key selector: -11 to +11 with key name labels */
 		bud_node *key_opts = NULL;
@@ -223,15 +235,11 @@ static bud_node *sb_render_edit_form(
 
 		bud_node *row =
 		        lx_el("div",
-		              lx_attr("class", "flex gap-2 items-center"),
+		              lx_attr("class", "flex gap-2 items-center w-full"),
 		              lx_node(song_ctl),
-		              lx_el("a", lx_attr("href", change_href),
-		                    lx_attr("class", "btn text-xs py-1 px-2"),
-		                    lx_attr("aria-label", "Change song"),
-		                    lx_text("\xf0\x9f\x94\x84")),
 		              lx_node(key_select), lx_node(fmt_ctl),
 		              lx_el("label",
-		                    lx_attr("class", "text-sm cursor-pointer"),
+		                    lx_attr("class", "text-sm cursor-pointer flex-shrink-0"),
 		                    lx_el("input",
 		                          lx_attr("type", "checkbox"),
 		                          lx_attr("name", remove_f)),
@@ -305,9 +313,13 @@ static bud_node *sb_render_edit_form(
 		        action, sb_grp_ff, grp_vals, pv);
 		bud_node *both = bud_fragment();
 
+		if (picker)
+			bud_append(both, picker);
 		bud_append(both, form);
 		if (sib)
 			bud_append(both, sib);
+		if (row_sibs)
+			bud_append(both, row_sibs);
 		return both;
 	}
 }

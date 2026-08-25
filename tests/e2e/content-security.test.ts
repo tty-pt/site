@@ -135,7 +135,9 @@ Deno.test("invalid song media values do not render active embeds", async () => {
     });
     assert(songId !== "", `Could not extract song ID from ${page.url()}`);
 
-    await page.goto(`${BASE}/song/${songId}?m=1`);
+    await page.goto(`${BASE}/song/${songId}?m=1`, {
+      waitUntil: "domcontentloaded",
+    });
     const invalidMedia = page.locator('[data-song-media="1"]');
     assert(
       await invalidMedia.locator("iframe").count() === 0,
@@ -165,7 +167,9 @@ Deno.test("valid YouTube ID renders the expected iframe", async () => {
     songId = await addSong(page, validTitle, { yt: youtubeId });
     assert(songId !== "", `Could not extract song ID from ${page.url()}`);
 
-    await page.goto(`${BASE}/song/${songId}?m=1`);
+    await page.goto(`${BASE}/song/${songId}?m=1`, {
+      waitUntil: "domcontentloaded",
+    });
     const iframe = page.locator(
       `[data-song-media="1"] iframe[src="https://www.youtube.com/embed/${youtubeId}"]`,
     );

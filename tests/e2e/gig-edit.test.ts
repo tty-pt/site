@@ -4,8 +4,8 @@
  * Tests:
  *   1. Authenticated user can create a gig via /gig/add
  *   2. GET /gig/<id>/edit renders the edit form with the gig title,
- *      the omnisearch picker, and the read-only song row contract
- *      (hidden song_N + 🔄 Change link instead of per-row selects)
+ *      the omnisearch picker, and per-row song pickers with default values
+ *      (song_N picker with pre-selected default value, no legacy 🔁 Change link)
  *   3. Adding a song via the API shows up as a row; POST /gig/<id>/edit
  *      with that row (amount=N + song_i/key_i/fmt_i) redirects to view
  *   4. After save, the view page still shows the gig title and the song
@@ -83,7 +83,7 @@ Deno.test("gig: register → login → create gig → load edit page → save �
     await seedResp.body?.cancel();
 
     // Reload the edit page: the seeded song must render as a row with
-    // the new contract (hidden song_N + Change link, no <select>)
+    // a song picker having the seeded song as default value
     await page.goto(`${BASE}/gig/${sbId}/edit`);
     const amountEl2 = page.locator('input[name="amount"]');
     await amountEl2.waitFor({ state: "attached", timeout: 5000 });
@@ -93,19 +93,20 @@ Deno.test("gig: register → login → create gig → load edit page → save �
       throw new Error(`Expected amount=1 after seeding a song, got ${amountAfter}`);
     }
 
-    const songRow = await page.inputValue('input[name="song_0"]');
-    if (songRow !== SEED_SONG_ID) {
+    // Verify row 0 has a picker with SEED_SONG_ID checked
+    const songInput = page.locator('input[name="song_0"][type="radio"]:checked');
+    await songInput.waitFor({ state: "attached", timeout: 5000 });
+    const songVal = await songInput.getAttribute("value");
+    if (songVal !== SEED_SONG_ID) {
       throw new Error(
-        `Expected hidden song_0=${SEED_SONG_ID}, got "${songRow}"`,
+        `Expected checked song_0=${SEED_SONG_ID}, got "${songVal}"`,
       );
     }
 
-    const changeHref = await page.getAttribute(
-      'a[aria-label="Change song"]',
-      "href",
-    );
-    if (!changeHref || !changeHref.endsWith("?replace=0")) {
-      throw new Error(`Expected Change link to ?replace=0, got ${changeHref}`);
+    // Verify the legacy Change link (🔁 / ?replace=0) is REMOVED
+    const changeLinkCount = await page.locator('a[aria-label="Change song"], a[href*="replace="]').count();
+    if (changeLinkCount !== 0) {
+      throw new Error(`Expected 0 legacy Change links on edit page, got ${changeLinkCount}`);
     }
 
     const nSongSelects = await page.locator(
@@ -113,6 +114,22 @@ Deno.test("gig: register → login → create gig → load edit page → save �
     ).count();
     if (nSongSelects !== 0) {
       throw new Error("Per-row song <select> should be gone (omnisearch picker)");
+    }
+
+    // ── 3b. Test no-JS search scoping on edit page (?pick_q_song_0=...) ───
+    const noJsEditResp = await fetch(`${BASE}/gig/${sbId}/edit?pick_q_song_0=alegria`, {
+      headers: { Cookie: cookieHeader },
+    });
+    if (noJsEditResp.status !== 200) {
+      throw new Error(`No-JS edit query returned HTTP ${noJsEditResp.status}`);
+    }
+    const noJsEditHtml = await noJsEditResp.text();
+    if (!noJsEditHtml.includes('id="pickq-song_0"') || !noJsEditHtml.includes('name="song_0"')) {
+      throw new Error("No-JS edit SSR HTML missing row 0 picker form or input");
+    }
+    // Verify row 0 is open but the add-song picker is closed
+    if (noJsEditHtml.includes('id="edit-pick-post"') && noJsEditHtml.includes('<details class="hyle-picker-details" open="" data-hyle-picker-key="song_id"')) {
+      throw new Error("Add-song picker should NOT be open when a row picker is active in no-JS mode");
     }
 
     // POST edit form via fetch with the rendered row contract
@@ -148,11 +165,33 @@ Deno.test("gig: register → login → create gig → load edit page → save �
       );
     }
 
-    // ── 4. View page still shows the title and the saved song ──────────────
-    await page.goto(`${BASE}/gig/${sbId}`);
-    await page.waitForSelector("body", { timeout: 5000 });
-    await waitForText(page, "body", sbTitle);
-    await waitForText(page, "body", SEED_SONG_TITLE);
+    // ── 4. In-browser picker replacement on edit page: pick new song and Save ───
+    await page.goto(`${BASE}/gig/${sbId}/edit`);
+    await page.locator('span:has(input[name="song_0"]) details.hyle-picker-details summary').click();
+    const searchBox = page.locator('input[name="pick_q_song_0"]');
+    await searchBox.waitFor({ state: "visible", timeout: 5000 });
+    await searchBox.fill("Abba");
+
+    const rows = page.locator('span:has(input[name="song_0"]) .hyle-picker-rows').first();
+    await rows.waitFor({ state: "visible" });
+    let rowText = await rows.innerText();
+    while (!rowText.includes("Abba")) {
+      await page.waitForTimeout(500);
+      rowText = await rows.innerText();
+    }
+
+    const newOpt = page.locator('span:has(input[name="song_0"]) label.hyle-picker-option:has(input[value="abba_part_frei_gilson"])').first();
+    await newOpt.waitFor({ state: "visible" });
+    await newOpt.click();
+
+    // Click Save Changes on the main edit form
+    await Promise.all([
+      page.waitForNavigation(),
+      page.click("#edit-form-submit"),
+    ]);
+
+    // ── 5. View page shows the newly chosen song ─────────────────────────
+    await waitForText(page, "body", "Abba (part. Frei Gilson)");
   } finally {
     // Cleanup: remove the created gig directory
     if (sbId) {

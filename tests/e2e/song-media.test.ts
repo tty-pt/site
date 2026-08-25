@@ -15,7 +15,9 @@ Deno.test("song media: verify YouTube iframe in SSR", async () => {
     await createAndLoginUser(page, BASE);
 
     // 1. Navigate to song page with ?m=1 to show media
-    await page.goto(`${BASE}/song/${SONG_ID}?m=1`);
+    await page.goto(`${BASE}/song/${SONG_ID}?m=1`, {
+      waitUntil: "domcontentloaded",
+    });
     
     // 2. Verify YouTube iframe is present
     const iframe = page.locator('iframe[src*="' + YT_ID + '"]');

@@ -1,4 +1,4 @@
 #pragma once
-#define SITE_CSS_V "?v=ac36cca4"
-#define SITE_CLIENT_V "?v=ac36cca4"
-#define SITE_FRAGMENTS_V "?v=af8f469a"
+#define SITE_CSS_V "?v=13762ee1"
+#define SITE_CLIENT_V "?v=13762ee1"
+#define SITE_FRAGMENTS_V "?v=b36ed439"

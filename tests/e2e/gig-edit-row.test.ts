@@ -89,20 +89,14 @@ Deno.test({
       text = await rows.innerText();
     }
     
-    // Click the song option row (radios are hidden; the label is the
-    // clickable target)
+    // Click the song option row (auto-submits on selection)
     const opt = page.locator(
       'label.hyle-picker-option:has(input[name="song_id"])',
     );
     await opt.first().waitFor();
-    await opt.first().click();
-    
-    // Submit the picker
-    const addBtn = await page.$('form[id="sb-pick-post"] button[type="submit"]');
-    if (!addBtn) throw new Error("gig picker missing submit button");
     await Promise.all([
       page.waitForNavigation(),
-      addBtn.click()
+      opt.first().click(),
     ]);
     await waitForText(page, "body", KNOWN_SONG_TITLE);
 

@@ -516,7 +516,7 @@ void xy_install(void)
 	source_setup(
 	        "song.types", "name", sizeof(song_type_cache_t),
 	        "var/song.types", (const source_desc_t *)song_type_fields, SONG_TYPE_FIELD_COUNT,
-	        SOURCE_FLAG_VOLATILE, NULL);
+	        0, NULL);
 
 	ref_field_register("song.items", "type");
 
