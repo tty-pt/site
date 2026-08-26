@@ -744,6 +744,68 @@ XY_IMPL(int, pick_view_collect_scoped,
 	        scope);
 }
 
+static int pick_find_active_scope(const char *qs, char *scope_buf, size_t scope_sz)
+{
+	const char *p;
+	scope_buf[0] = '\0';
+	if (!qs || !qs[0])
+		return -1;
+
+	/* Check for replace=<scope> */
+	p = strstr(qs, "replace=");
+	if (p && (p == qs || p[-1] == '&' || p[-1] == '?')) {
+		p += 8;
+		const char *end = strchr(p, '&');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+		if (len > 0 && len < scope_sz) {
+			memcpy(scope_buf, p, len);
+			scope_buf[len] = '\0';
+			return atoi(scope_buf);
+		}
+	}
+
+	/* Check for pick_q_<key>__<scope>= or pick_page_<key>__<scope>= */
+	p = qs;
+	while ((p = strstr(p, "__")) != NULL) {
+		const char *start = p + 2;
+		const char *eq = strchr(start, '=');
+		if (eq && eq > start) {
+			const char *k = p;
+			while (k > qs && k[-1] != '&' && k[-1] != '?')
+				k--;
+			if (strncmp(k, "pick_q_", 7) == 0 || strncmp(k, "pick_page_", 10) == 0) {
+				size_t len = (size_t)(eq - start);
+				if (len > 0 && len < scope_sz) {
+					memcpy(scope_buf, start, len);
+					scope_buf[len] = '\0';
+					return atoi(scope_buf);
+				}
+			}
+		}
+		p += 2;
+	}
+	return -1;
+}
+
+XY_IMPL(int, pick_view_collect_auto,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	char scope_str[32] = { 0 };
+	int scope = pick_find_active_scope(body, scope_str, sizeof(scope_str));
+	if (active_scope_out)
+		*active_scope_out = scope;
+
+	if (scope >= 0 && scope_str[0]) {
+		return pick_view_collect_scoped(body, fields, vals_in, vals_out, pv, scope_str);
+	}
+	return pick_view_collect(body, fields, vals_in, vals_out, pv);
+}
+
 int axil_env_get(int fd, char *target, size_t dest_len, char *key);
 int axil_query_parse(char *qs);
 
@@ -758,6 +820,80 @@ XY_IMPL(int, pick_view_collect_fd,
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	return pick_view_collect(qs, fields, vals_in, vals_out, pv);
+}
+
+XY_IMPL(int, pick_view_collect_auto_fd,
+	int, fd,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	char qs[16384] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	return pick_view_collect_auto(qs, fields, vals_in, vals_out, pv, active_scope_out);
+}
+
+XY_IMPL(int, pick_view_collect_desc,
+	const char *, qs,
+	const source_desc_t *, defs,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	form_field_t ff[32];
+	const char *vals_in[32];
+	const char *vals_out[32];
+	int n = 0;
+
+	if (!defs)
+		return 0;
+
+	for (int i = 0; defs[i].key && n < 31; i++) {
+		const source_desc_t *d = &defs[i];
+		if (!d->writable || d->kind >= 3)
+			continue;
+		if (strcmp(d->key, "id") == 0 || strcmp(d->key, "owner") == 0)
+			continue;
+
+		ff[n].name = d->key;
+		ff[n].label = d->key;
+		ff[n].type = (d->qm_type == 8) ? 1 : 0;
+		if (d->source_type == 4) {
+			ff[n].ref = FF_REF_SINGLE;
+			ff[n].target = d->ref_source;
+		} else if (d->source_type == 5) {
+			ff[n].ref = FF_REF_MULTI;
+			ff[n].target = d->ref_source;
+		} else {
+			ff[n].ref = FF_REF_NONE;
+			ff[n].target = NULL;
+		}
+		ff[n].max_inline = 0;
+		vals_in[n] = "";
+		n++;
+	}
+	ff[n].name = NULL;
+	ff[n].label = NULL;
+	ff[n].type = 0;
+	ff[n].ref = FF_REF_NONE;
+	ff[n].target = NULL;
+	ff[n].max_inline = 0;
+
+	return pick_view_collect_auto((char *)qs, ff, vals_in, vals_out, pv, active_scope_out);
+}
+
+XY_IMPL(int, pick_view_collect_desc_fd,
+	int, fd,
+	const source_desc_t *, defs,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	char qs[16384] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	return pick_view_collect_desc(qs, defs, pv, active_scope_out);
 }
 
 #endif /* !__wasm__ */

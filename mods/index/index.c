@@ -23,6 +23,7 @@ typedef int (*index_handler_fn)(int fd, char *body);
 #define MAX_MODULES 64
 
 static int index_add_get_handler(int fd, char *body);
+static int index_generic_edit_get_handler(int fd, char *body);
 static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
 int index_add_item(int fd, char *body, char *id_out, size_t id_len);
@@ -442,10 +443,10 @@ XY_IMPL(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/delete", id);
 	axil_register_handler(buf, index_delete_handler);
 
-	if (edit_get_handler) {
-		snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
-		axil_register_handler(buf, edit_get_handler);
-	}
+	snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
+	axil_register_handler(
+	        buf, edit_get_handler ? edit_get_handler
+	                               : index_generic_edit_get_handler);
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
 	axil_register_handler(
 	        buf, edit_post_handler ? edit_post_handler
@@ -490,7 +491,95 @@ XY_IMPL(int, core_get, int, fd, char *, body)
 
 static int index_add_get_handler(int fd, char *body)
 {
-	return core_get(fd, body);
+	(void)body;
+	const char *user = require_user(fd);
+	if (!user)
+		return 1;
+
+	const char *module = index_name(fd);
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+
+	int count = 0;
+	const source_desc_t *defs = source_get_desc(dataset_id, &count);
+	if (!defs)
+		return core_get(fd, body);
+
+	const char *csrf_token = csrf_setup(fd);
+	char action[128], cancel_href[128];
+	snprintf(action, sizeof(action), "/%s/add", module);
+	snprintf(cancel_href, sizeof(cancel_href), "/%s/", module);
+
+	pick_view_t pv;
+	int active_scope = -1;
+	pick_view_collect_desc_fd(
+	        fd, defs, &pv, &active_scope);
+
+	bud_node *form = site_ui_form_from_desc(
+	        action, cancel_href, "Add", (const bud_field_desc_t *)defs,
+	        NULL, csrf_token, &pv, NULL);
+
+	return site_ui_respond_add_page(
+	        fd, user, module, site_ui_module_icon(module), form);
+}
+
+static int index_generic_edit_auth(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	(void)user;
+	const char *module = index_name(fd);
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+
+	int count = 0;
+	const source_desc_t *defs = source_get_desc(dataset_id, &count);
+	if (!defs)
+		return respond_error(fd, 404, "Module schema not found");
+
+	size_t rec_sz = source_get_record_size(dataset_id);
+	if (rec_sz == 0 || rec_sz > 65536)
+		rec_sz = 4096;
+
+	char *record = calloc(1, rec_sz);
+	if (!record)
+		return server_error(fd, "OOM");
+
+	source_meta_read(
+	        ctx->item_path, defs, count, record, rec_sz);
+	source_resolve_meta_display(
+	        dataset_id, ctx->id, defs, count, record);
+
+	char title[256] = { 0 };
+	read_meta_file(ctx->item_path, "title", title, sizeof(title));
+
+	const char *csrf_token = csrf_setup(fd);
+	char action[256], cancel_href[256];
+	snprintf(action, sizeof(action), "/%s/%s/edit", module, ctx->id);
+	snprintf(cancel_href, sizeof(cancel_href), "/%s/%s", module, ctx->id);
+
+	pick_view_t pv;
+	int active_scope = -1;
+	pick_view_collect_desc_fd(
+	        fd, defs, &pv, &active_scope);
+
+	bud_node *form = site_ui_form_from_desc(
+	        action, cancel_href, "Save Changes", (const bud_field_desc_t *)defs,
+	        record, csrf_token, &pv, NULL);
+
+	free(record);
+
+	return site_ui_respond_edit_page(
+	        fd, ctx->username, module, site_ui_module_icon(module),
+	        title[0] ? title : ctx->id, ctx->id, form);
+}
+
+static int index_generic_edit_get_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	return with_module_item_access(
+	        fd, body, module, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Not found", NULL, index_generic_edit_auth, NULL);
 }
 
 /* GET /<module>/:id/delete — confirmation page */

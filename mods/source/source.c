@@ -1629,6 +1629,9 @@ XY_IMPL(uint32_t, source_setup,
 	            .access_policy = SOURCE_ACCESS_PUBLIC,
 	            .fields = sf,
 	            .field_count = (size_t)n_sf,
+	            .defs = defs,
+	            .def_count = field_count,
+	            .record_size = record_size,
 	            .record_id = record_id,
 	            .flags = flags,
 	            .list_view = list_view,
@@ -1680,4 +1683,26 @@ XY_IMPL(int, source_respond_page_state,
 	rc = respond_json(fd, 200, json);
 	free(json);
 	return rc;
+}
+
+XY_IMPL(const source_desc_t *, source_get_desc,
+	const char *, dataset_id,
+	int *, count_out)
+{
+	const source_def_t *def = source_find(dataset_id);
+	if (!def) {
+		if (count_out)
+			*count_out = 0;
+		return NULL;
+	}
+	if (count_out)
+		*count_out = def->def_count;
+	return def->defs;
+}
+
+XY_IMPL(size_t, source_get_record_size,
+	const char *, dataset_id)
+{
+	const source_def_t *def = source_find(dataset_id);
+	return def ? def->record_size : 0;
 }

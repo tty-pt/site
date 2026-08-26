@@ -15,5 +15,3 @@
 #include "../../song/ux/music.c"
 
 #include "detail.c"
-#include "add.c"
-#include "edit.c"

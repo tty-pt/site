@@ -27,42 +27,6 @@ static void poem_meta_read(const char *path, poem_cache_t *m)
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
 
-static int poem_add_get_handler(int fd, char *body)
-{
-	(void)body;
-	const char *user = require_user(fd);
-	if (!user)
-		return 1;
-
-	const char *csrf_token = csrf_setup(fd);
-
-	bud_node *form = poem_form_content(0, NULL, NULL, csrf_token);
-	return site_ui_respond_add_page(
-	        fd, user, "poem", site_ui_module_icon("poem"), form);
-}
-
-static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-	poem_cache_t meta;
-	poem_meta_read(ctx->item_path, &meta);
-
-	const char *csrf_token = csrf_setup(fd);
-
-	bud_node *form = poem_form_content(1, ctx->id, &meta, csrf_token);
-	return site_ui_respond_edit_page(
-	        fd, ctx->username, "poem", site_ui_module_icon("poem"),
-	        meta.title, ctx->id, form);
-}
-
-static int poem_edit_get_handler(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "poem", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	        NULL, poem_edit_auth, NULL);
-}
-
 static int
 poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
@@ -238,8 +202,6 @@ void xy_install(void)
 	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL, NULL);
 	standard_item_handlers_t handlers = {
 		.detail = poem_detail_handler,
-		.add_get = poem_add_get_handler,
-		.edit_get = poem_edit_get_handler,
 	};
 	register_standard_item_handlers("poem", &handlers);
 

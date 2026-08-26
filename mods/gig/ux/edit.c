@@ -14,9 +14,6 @@
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
 
-/* Shared omnisearch song picker (same module, allowed by boundary checker) */
-#include "song_picker.c"
-
 typedef struct {
 	int orig_key;
 	char repo_id[256];
@@ -40,29 +37,61 @@ static pick_view_t g_edit_pv;
 static bud_node *sb_render_edit_picker(
         const char *sb_id, const char *csrf_token, const pick_view_t *pv)
 {
-	char action[256], post_action[256], back[256];
-	sb_picker_spec_t spec;
+	char action[256], post_action[256];
 
 	snprintf(action, sizeof(action), "/gig/%s/edit", sb_id);
-	snprintf(back, sizeof(back), "/gig/%s/edit", sb_id);
 	snprintf(post_action, sizeof(post_action), "/api/gig/%s/songs", sb_id);
 
-	memset(&spec, 0, sizeof(spec));
-	spec.get_action = action;
-	spec.post_action = post_action;
-	spec.form_id = "edit-pick-post";
-	spec.csrf = csrf_token;
-	spec.aria_base = "Add";
-	spec.hint = "Click a song to add it.";
-	spec.back = back;
-	spec.replace_index = -1;
-	spec.replace_title = NULL;
-	spec.pref_names = NULL;
-	spec.pref_vals = NULL;
-	spec.n_prefs = 0;
-	spec.auto_submit = 1;
+	site_ui_action_picker_spec_t spec = {
+		.key = "song_id",
+		.label = "Song:",
+		.target = "song.items",
+		.get_action = action,
+		.post_action = post_action,
+		.form_id = "edit-pick-post",
+		.csrf_token = csrf_token,
+		.submit_label = "Add",
+		.hint = "Click a song to add it.",
+		.auto_submit = 1,
+	};
 
-	return sb_picker_render(&spec, (pick_view_t *)pv);
+	return site_ui_action_picker(&spec, pv);
+}
+
+static bud_node *sb_render_single_song_picker(
+        const char *key, const char *cur_id, const char *cur_title,
+        const char *get_form_id, const pick_view_t *pv, int is_active,
+        const char *search_param, const char *page_param)
+{
+	const pick_entry_t *e =
+	        (is_active && pv && pv->n > 0) ? &pv->entries[0] : NULL;
+	hyle_bud_option_t sel_opt = {
+		.id = cur_id,
+		.label = (cur_title && cur_title[0]) ? cur_title : cur_id
+	};
+
+	hyle_bud_picker_desc_t d = {
+		.key = key ? key : "song_id",
+		.label = "song",
+		.source = "song.items",
+		.multi = 0,
+		.get_form_id = get_form_id,
+		.page_opts = e ? e->page_opts : NULL,
+		.npage = e ? e->npage : 0,
+		.sel = &sel_opt,
+		.nsel = (cur_id && cur_id[0]) ? 1 : 0,
+		.q = (e && e->q) ? e->q : "",
+		.page = e ? e->page : 0,
+		.per_page = e ? e->per_page : 15,
+		.total = e ? e->total : 0,
+		.search_param = search_param,
+		.page_param = page_param
+	};
+
+	bud_node *picker = hyle_bud_picker_field(&d);
+	if (picker)
+		bud_add_class(picker, "gig-song-title-picker");
+	return picker;
 }
 
 static bud_node *sb_render_edit_form(

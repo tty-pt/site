@@ -85,8 +85,7 @@ static bud_node *ch_render_song_row(
 {
 	bud_node *row =
 	        lx_el("div",
-	              lx_attr("class", "flex justify-between items-center "
-	                               "p-2 bg-surface rounded"),
+	              lx_attr("class", "flex justify-between items-center p-2 bg-surface rounded"),
 	              lx_el("div", lx_attr("class", "flex flex-col"),
 	                    lx_el("a", lx_attr("class", "font-bold"),
 	                          lx_attr("href", song_href), lx_text(s_title)),
@@ -114,9 +113,6 @@ static bud_node *ch_render_song_row(
 		                    lx_text("Set")))
 		                .data.node);
 
-		/* Only pinned rows can be removed: derived rows are
-		 * owned by the gigs and would reappear on the next
-		 * rep_rebuild. */
 		if (pinned) {
 			bud_append(
 			        controls,
@@ -126,12 +122,8 @@ static bud_node *ch_render_song_row(
 			                    lx_attr("name", "csrf_token"),
 			                    lx_attr("value", csrf_token)),
 			              lx_el("button", lx_attr("type", "submit"),
-			                    lx_attr("title",
-			                            "Pinned song — remove "
-			                            "stops pinning it"),
-			                    lx_attr("class",
-			                            "btn btn-danger "
-			                            "text-xs py-1 px-2"),
+			                    lx_attr("title", "Pinned song — remove stops pinning it"),
+			                    lx_attr("class", "btn btn-danger text-xs py-1 px-2"),
 			                    lx_text("Remove")))
 			                .data.node);
 		}

@@ -6,6 +6,8 @@
 #include "ux/list_state.h"
 #include "ux/site_ui.h"
 
+typedef struct source_desc source_desc_t;
+
 typedef void (*index_cleanup_fn)(const char *id);
 
 /* Optional serializer for index_render_list.
@@ -111,6 +113,36 @@ XY_DECL(int, pick_view_collect_scoped,
 	const char **, vals_out,
 	pick_view_t *, pv,
 	const char *, scope);
+
+/* Auto-resolves active scope from query string (e.g. ?replace=N or
+ * pick_q_<key>__N=...) and collects options for that scope. */
+XY_DECL(int, pick_view_collect_auto,
+	char *, body,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	int *, active_scope_out);
+
+XY_DECL(int, pick_view_collect_auto_fd,
+	int, fd,
+	const form_field_t *, fields,
+	const char **, vals_in,
+	const char **, vals_out,
+	pick_view_t *, pv,
+	int *, active_scope_out);
+
+XY_DECL(int, pick_view_collect_desc,
+	const char *, qs,
+	const source_desc_t *, defs,
+	pick_view_t *, pv,
+	int *, active_scope_out);
+
+XY_DECL(int, pick_view_collect_desc_fd,
+	int, fd,
+	const source_desc_t *, defs,
+	pick_view_t *, pv,
+	int *, active_scope_out);
 
 
 #endif

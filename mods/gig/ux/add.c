@@ -11,34 +11,14 @@
 static bud_node *sb_render_add_form(
         const char *csrf_token, const char **vals, const pick_view_t *pv)
 {
-	static const form_field_t ff[] = {
-	        { "title", "Title:", 0, 0, NULL, 0 },
-	        { "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
-	        { NULL, NULL, 0, 0, NULL, 0 }
-	};
+	gig_cache_t meta;
+	memset(&meta, 0, sizeof(meta));
+	if (vals && vals[0] && vals[0][0])
+		snprintf(meta.title, sizeof(meta.title), "%s", vals[0]);
+	if (vals && vals[1] && vals[1][0])
+		snprintf(meta.grp, sizeof(meta.grp), "%s", vals[1]);
 
-	/* grp renders as a pinned picker (?grp=<slug> preselect arrives
-	 * as a draft overlay via pick_view_collect); title stays plain.
-	 * The ?grp= passthrough hidden input is gone — the pinned row
-	 * submits natively through this POST form (spec §2). */
-	bud_node *fields = site_ui_form_fields_ex(ff, vals, csrf_token, pv);
-	bud_append(fields, site_ui_form_actions("/gig/", "Add", NULL));
-
-	bud_node *form = lx_el("form", lx_attr("action", "/gig/add"),
-	                       lx_attr("method", "POST"),
-	                       lx_attr("enctype", "multipart/form-data"),
-	                       lx_attr("class", "flex flex-col gap-4"),
-	                       lx_node(fields))
-	                          .data.node;
-
-	{
-		bud_node *sib = site_ui_sibling_get_form("/gig/add", ff,
-		        vals, pv);
-		bud_node *both = bud_fragment();
-
-		bud_append(both, form);
-		if (sib)
-			bud_append(both, sib);
-		return both;
-	}
+	return site_ui_form_from_desc(
+	        "/gig/add", "/gig/", "Add", gig_fields, vals ? &meta : NULL,
+	        csrf_token, pv, NULL);
 }

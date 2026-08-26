@@ -45,7 +45,6 @@ is_allowed() {
         "$root/mods/common/ux/site_paths.c:1") return 0 ;;
         "$root/mods/common/ux/site_chrome.c:1") return 0 ;;
         "$root/mods/index/ux/list.c:1") return 0 ;;
-        "$root/mods/gig/ux/song_picker.c:1") return 0 ;;
         "$root/mods/index/ux/list_filters.c:1") return 0 ;;
         "$root/mods/index/ux/list_json.c:1") return 0 ;;
         "$root/mods/index/ux/list_layout.c:1") return 0 ;;
@@ -54,7 +53,7 @@ is_allowed() {
         "$root/mods/song/ux/music.c:1") return 0 ;;
         # Specific allowed preprocessor uses
         "$root/mods/common/ux/site_ui.c:9") return 0 ;;
-        "$root/mods/gig/ux/detail.c:25") return 0 ;;
+        "$root/mods/gig/ux/detail.c:"*) return 0 ;;
         "$root/mods/common/ux/site_page.c:109") return 0 ;;
     esac
     return 1

@@ -62,6 +62,15 @@ void login_href(const char *ret, char *buf, size_t len);
  * above it, the omnisearch picker. Descriptor max_inline=0 → default. */
 #define FF_PICKER_THRESHOLD 0
 
+#ifndef BUD_RECORD
+#define BUD_RECORD 0
+#define BUD_EXCLUDE 1
+#define BUD_REF_DISPLAY 2
+#define BUD_OVERLAY_INT 3
+#define BUD_OVERLAY_STR 4
+#define BUD_INVERSE 5
+#endif
+
 typedef struct {
 	const char *name;
 	const char *label;
@@ -84,6 +93,25 @@ void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom);
 int ui_on_zoom_change(
         bud_event *event, int *zoom_out, bud_node *main_node,
         bud_node *zoom_label);
+
+/* ── String-First Action & Replace Picker Components ──────── */
+bud_node *site_ui_picker(
+        const char *target, const char *post_action, const char *get_action,
+        const char *csrf_token, const pick_view_t *pv, int auto_submit);
+
+bud_node *site_ui_row_replace_picker(
+        const char *target, int row_idx, const char *cur_id, const char *cur_title,
+        const char *post_action, const char *back_href, const char *csrf_token,
+        const pick_view_t *pv);
+
+/* ── Reusable Action Form & Item Row Primitives ─────────── */
+bud_node *site_ui_action_form(
+        const char *action, const char *csrf_token, const char *method,
+        bud_node *inputs, const char *btn_label, const char *btn_class);
+
+bud_node *site_ui_item_row(
+        const char *title, const char *href, const char *subtitle,
+        bud_node *action_controls);
 
 /* ── Generic form field builder ───────────────────── */
 bud_node *site_ui_form_fields(
@@ -112,6 +140,15 @@ bud_node *site_ui_sibling_get_form(
  * sibling GET form id "pickq-<key>"); NULL when the descriptor has no
  * ref fields. */
 const char *site_ui_pick_form_id(const form_field_t *fields);
+
+/* ── Declarative Schema-Driven Form Builder ─────────── */
+/* Builds a complete POST form (and sibling GET form if ref fields exist)
+ * directly from bud_field_desc_t schema table and struct data. */
+bud_node *site_ui_form_from_desc(
+        const char *action, const char *cancel_href, const char *submit_label,
+        const bud_field_desc_t *desc, const void *struct_ptr,
+        const char *csrf_token, const pick_view_t *pv,
+        const char *vstr_val);
 
 /* ── Action / Standalone Picker Component ───────────── */
 typedef struct {

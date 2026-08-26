@@ -23,31 +23,48 @@ At its core, a picker consists of two synchronized components on any given page:
 
 ## Usage & API
 
-Server-side, modules use a unified `source_list_view_t` and `pick_view_collect` API to coordinate picker instances.
+Server-side, modules use unified declarative form builders and string-first picker APIs.
 
-1.  **Define a target schema property as a reference** in the model `fields.h`:
-    ```c
-    MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and")
-    ```
+### 1. Declarative Form Integration (Automatic Pickers & Sibling Forms)
+Define target schema properties as references in `fields.h`:
+```c
+MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and")
+```
+Render the entire form with a single call to `site_ui_form_from_desc`:
+```c
+bud_node *form = site_ui_form_from_desc(
+    action, cancel_href, "Save", song_fields, &meta, csrf_token, &pv, data_val);
+```
+`site_ui_form_from_desc` automatically extracts values from the struct, renders text inputs, textareas, or pickers based on field types, and automatically attaches sibling GET forms for No-JS compatibility.
 
-2.  **In the route handler for the form**, process incoming GET query parameters using `pick_view_collect` prior to rendering the UI:
-    ```c
-    pick_view_t pv;
-    pick_view_collect(&pv, req_qs, (const source_desc_t *)song_fields,
-            vals /* current model values */);
-    ```
+### 2. Standalone / Action Pickers (String Target)
+To render an action picker for adding an item from a target dataset:
+```c
+bud_node *picker = site_ui_picker(
+    "song.items", post_action, get_action, csrf_token, &pv, 1);
+```
+Target strings (e.g. `"song.items"`, `"grp.items"`) automatically configure field keys, display labels, form IDs, URL templates, and query parameters with zero boilerplate.
 
-3.  **Render the form fields** via `site_ui_form_fields_ex`, which inspects the schema and the `pick_view_t` structure. If the target dataset exceeds `FF_PICKER_THRESHOLD`, `hyle_bud_picker_field` is dynamically invoked:
-    ```c
-    bud_node *form = site_ui_form_fields_ex(song_fields, vals, csrf_token, &pv);
-    ```
+### 3. Inline Row Replacement Pickers
+To render an inline picker for replacing row `row_idx` in a table or list:
+```c
+bud_node *replace_picker = site_ui_row_replace_picker(
+    "song.items", row_idx, current_song_id, current_title,
+    post_action, back_href, csrf_token, is_active ? &pv : NULL);
+```
+Row scoping (`pick_q_song_id__N`), hidden `n` inputs, header text, and cancel triggers are handled automatically.
 
-4.  **Render the sibling GET form** directly adjacent to the main POST form in the DOM:
-    ```c
-    bud_node *sibling = site_ui_sibling_get_form(action, song_fields, vals, &pv);
-    ```
+### 4. Automated Query Collection & Scope Resolution in Handlers
+In route handlers, use `pick_view_collect_desc_fd` or `pick_view_collect_auto_fd`:
+```c
+pick_view_t pv;
+int active_scope = -1;
+pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
+```
+This single call automatically detects if a scoped picker (`?replace=N` or `pick_q_<key>__N=`) or top picker is active and collects options accordingly.
 
 ## Naming Conventions
 - Sibling forms take the ID `pickq-<first_ref_key>` (e.g. `id="pickq-type"`).
 - Sibling form inputs take the names `pick_q_<key>` and `pick_page_<key>`.
+- Scoped row pickers take names `pick_q_<key>__<scope>` and `pick_page_<key>__<scope>`.
 - The picker fragment endpoint routes to `/pick/<dataset>/options`.

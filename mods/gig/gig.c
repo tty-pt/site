@@ -308,6 +308,7 @@ static int handle_sb_song_add_authorized(
 		snprintf(fmt_val, sizeof(fmt_val), "any");
 
 	sb_append_song("gig.songs", ctx->id, s_id, "0", fmt_val);
+	hyle_source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -534,6 +535,11 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/detail.c"
 #include "ux/add.c"
 #include "ux/edit.c"
+
+static const form_field_t sb_pick_song_ff[] = {
+	{ "song_id", "Song", 0, FF_REF_SINGLE, "song.items", 0 },
+	FIELD_END
+};
 
 static void sb_load_song_picks(int fd, const char *scope)
 {
@@ -998,45 +1004,14 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
 	}
 
-	/* Check if any row's scoped picker is active in the query string.
-	 * If so, collect options for that row's scope; otherwise collect
-	 * options for the top Add Song picker. */
+	/* Auto-collect scoped picker if active (?replace=N or pick_q_song_id__N),
+	 * otherwise collect options for the top Add Song picker. */
 	if (is_owner) {
-		char qs[2048] = { 0 };
-		if (fd > 0)
-			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-
-		int active_scope = -1;
-		for (int i = 0; i < sb_app_state.n_songs; i++) {
-			char q_key[64], p_key[64];
-			snprintf(q_key, sizeof(q_key), "pick_q_song_id__%d=", i);
-			snprintf(p_key, sizeof(p_key), "pick_page_song_id__%d=", i);
-			if (strstr(qs, q_key) || strstr(qs, p_key)) {
-				active_scope = i;
-				break;
-			}
-		}
-		if (active_scope < 0) {
-			char replace_str[16] = { 0 };
-			axil_query_param("replace", replace_str,
-			        sizeof(replace_str) - 1);
-			if (replace_str[0]) {
-				int idx = atoi(replace_str);
-				if (idx >= 0 && idx < sb_app_state.n_songs)
-					active_scope = idx;
-			}
-		}
-
-		if (active_scope >= 0) {
-			sb_app_state.active_row_pick = active_scope;
-			char scope_str[16];
-			snprintf(scope_str, sizeof(scope_str), "%d",
-			        active_scope);
-			sb_load_song_picks(fd, scope_str);
-		} else {
-			sb_app_state.active_row_pick = -1;
-			sb_load_song_picks(fd, NULL);
-		}
+		const char *vals_in[1] = { "" };
+		const char *vals_out[1];
+		pick_view_collect_auto_fd(
+		        fd, sb_pick_song_ff, vals_in, vals_out,
+		        &g_sb_pick_state, &sb_app_state.active_row_pick);
 	}
 
 /* ── Populate sb_app_state with page data ────────────────── */

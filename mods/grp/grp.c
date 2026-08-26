@@ -464,64 +464,6 @@ static void ch_load_repertoire(
 
 /* ── HTTP handlers ──────────────────────────────────────── */
 
-static int grp_add_get_handler(int fd, char *body)
-{
-	(void)body;
-	const char *user = require_user(fd);
-	if (!user)
-		return 1;
-
-	const char *csrf_token = csrf_setup(fd);
-
-	bud_node *form = ch_render_add_form(csrf_token);
-	return site_ui_respond_add_page(
-	        fd, user, "grp", site_ui_module_icon("grp"), form);
-}
-
-/* ── Edit GET handler ────────────────────────────────────── */
-
-static int
-grp_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
-{
-	(void)body;
-	(void)user_data;
-	unsigned fields_hd;
-	const char *title, *format;
-
-	fields_hd = source_get_fields_hd("grp.items");
-	if (!fields_hd)
-		return server_error(fd, "No fields_hd");
-
-	title = qmap_get_field_str(fields_hd, ctx->id, "title");
-	if (!title)
-		title = "";
-
-	format = qmap_get_field_str(fields_hd, ctx->id, "format");
-	if (!format)
-		format = "";
-
-	const char *csrf_token = csrf_setup(fd);
-
-	char action[256];
-	char cancel_href[256];
-	snprintf(action, sizeof(action), "/grp/%s/edit", ctx->id);
-	snprintf(cancel_href, sizeof(cancel_href), "/grp/%s", ctx->id);
-
-	bud_node *form = ch_render_edit_form(
-	        action, csrf_token, title, format, cancel_href);
-
-	return site_ui_respond_edit_page(
-	        fd, ctx->username, "grp", site_ui_module_icon("grp"), title,
-	        ctx->id, form);
-}
-
-static int grp_edit_get_handler(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "grp", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
-	        NULL, grp_edit_auth, NULL);
-}
-
 /* ── Detail handler ──────────────────────────────────────── */
 
 static int
@@ -582,16 +524,14 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		}
 	}
 
-	if (grp_pos != QM_MISS) {
-		sf_hd = source_get_fields_hd("song.items");
-		if (sf_hd) {
-			ch_load_repertoire(
-			        ctx->id, sf_hd, repertoire, &n_repertoire);
-			bud_append(
-			        body_frag, ch_render_repertoire_section(
-			                           repertoire, n_repertoire,
-			                           is_owner, csrf_token));
-		}
+	sf_hd = source_get_fields_hd("song.items");
+	if (sf_hd) {
+		ch_load_repertoire(
+		        ctx->id, sf_hd, repertoire, &n_repertoire);
+		bud_append(
+		        body_frag, ch_render_repertoire_section(
+		                           repertoire, n_repertoire,
+		                           is_owner, csrf_token));
 	}
 
 	if (is_owner) {
@@ -681,8 +621,6 @@ void xy_install(void)
 	index_open("Group", "grp.items", NULL, NULL, NULL, NULL, NULL, "grp");
 	standard_item_handlers_t handlers = {
 		.detail = grp_detail_handler,
-		.add_get = grp_add_get_handler,
-		.edit_get = grp_edit_get_handler,
 	};
 	register_standard_item_handlers("grp", &handlers);
 }

@@ -17,9 +17,6 @@
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
 
-/* Shared omnisearch song picker (same module, allowed by boundary checker) */
-#include "song_picker.c"
-
 #include "../../song/lib/transp/transp_flags.h"
 
 #ifdef __wasm__
@@ -349,12 +346,10 @@ static bud_node *sb_render_empty_list(void)
  * node-id aligned with SSR. */
 static bud_node *sb_render_song_picker(const pick_view_t *pv)
 {
-	char action[256], post_action[256];
-	sb_picker_spec_t spec;
+	char post_action[256];
 	const char *pref_names[5] = { "t", "b", "l", "m", "z" };
 	int pref_vals[5];
 
-	snprintf(action, sizeof(action), "/gig/%s", sb_app_state.sb_id);
 	snprintf(post_action, sizeof(post_action),
 	         "/api/gig/%s/songs", sb_app_state.sb_id);
 
@@ -364,22 +359,23 @@ static bud_node *sb_render_song_picker(const pick_view_t *pv)
 	pref_vals[3] = sb_app_state.show_media;
 	pref_vals[4] = sb_app_state.zoom;
 
-	memset(&spec, 0, sizeof(spec));
-	spec.get_action = action;
-	spec.post_action = post_action;
-	spec.form_id = "sb-pick-post";
-	spec.csrf = sb_app_state.csrf_token;
-	spec.aria_base = "Add";
-	spec.hint = "Click a song to add it.";
-	spec.back = NULL;
-	spec.replace_index = -1;
-	spec.replace_title = NULL;
-	spec.pref_names = pref_names;
-	spec.pref_vals = pref_vals;
-	spec.n_prefs = 5;
-	spec.auto_submit = 1;
+	site_ui_action_picker_spec_t spec = {
+		.key = "song_id",
+		.label = "Song:",
+		.target = "song.items",
+		.get_action = sb_app_state.path,
+		.post_action = post_action,
+		.form_id = "sb-pick-post",
+		.csrf_token = sb_app_state.csrf_token,
+		.submit_label = "Add",
+		.hint = "Click a song to add it.",
+		.auto_submit = 1,
+		.pref_names = pref_names,
+		.pref_vals = pref_vals,
+		.n_prefs = 5,
+	};
 
-	return sb_picker_render(&spec, (pick_view_t *)pv);
+	return site_ui_action_picker(&spec, pv);
 }
 
 /* ── Per-row song picker with default value ─────────── */
@@ -562,15 +558,12 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("value", n_buf)),
 		                    lx_el("select", lx_attr("name", "t"),
 		                          lx_attr("data-n", n_buf),
-		                          lx_attr("class", "border rounded p-1 "
-		                                           "text-xs"),
-		                          lx_bind("change", 0,
-		                                  on_sb_transpose_change),
+		                          lx_attr("class", "border rounded p-1 text-xs"),
+		                          lx_bind("change", 0, on_sb_transpose_change),
 		                          lx_node(key_opts)),
 		                    lx_el("button", lx_attr("type", "submit"),
 		                          lx_attr("data-wasm-hide", ""),
-		                          lx_attr("class",
-		                                  "btn text-xs py-1 px-2"),
+		                          lx_attr("class", "btn text-xs py-1 px-2"),
 		                          lx_text("Set Key"))),
 		              lx_el("form", lx_attr("method", "POST"),
 		                    lx_attr("action", rand_action),
@@ -583,8 +576,7 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("name", "n"),
 		                          lx_attr("value", n_buf)),
 		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("class",
-		                                  "btn text-xs py-1 px-2"),
+		                          lx_attr("class", "btn text-xs py-1 px-2"),
 		                          lx_text("\xf0\x9f\x8e\xb2"))),
 		              lx_el("form", lx_attr("method", "POST"),
 		                    lx_attr("action", rem_action),
@@ -592,10 +584,8 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("name", "csrf_token"),
 		                          lx_attr("value", csrf_token)),
 		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("data-testid",
-		                                  "remove-song-btn"),
-		                          lx_attr("class", "btn btn-danger "
-		                                           "text-xs py-1 px-2"),
+		                          lx_attr("data-testid", "remove-song-btn"),
+		                          lx_attr("class", "btn btn-danger text-xs py-1 px-2"),
 		                          lx_text("\xf0\x9f\x97\x91"))))
 		                .data.node;
 	}

@@ -69,6 +69,7 @@ typedef struct {
  * assume filesystem; each dataset declares a store. Stage 1: interface
  * declared here, FS adapter in source_store_fs.c. */
 struct source_def_s;
+typedef struct source_desc source_desc_t;
 typedef struct source_store_s source_store_t;
 typedef struct {
 	int (*scan)(source_store_t *store, const struct source_def_s *def);
@@ -100,6 +101,9 @@ typedef struct source_def_s {
 	uint32_t record_id;
 	unsigned flags;
 	const source_list_view_t *list_view;
+	const source_desc_t *defs;
+	int def_count;
+	size_t record_size;
 	void *user;
 	source_store_t store;
 } source_def_t;
@@ -302,5 +306,10 @@ XY_DECL(int, source_dsv_save,
     const char *, pval,
     unsigned, fhd,
     void *, user);
+XY_DECL(const source_desc_t *, source_get_desc,
+    const char *, dataset_id,
+    int *, count_out);
+XY_DECL(size_t, source_get_record_size,
+    const char *, dataset_id);
 #endif /* SOURCE_IMPL */
 #endif
