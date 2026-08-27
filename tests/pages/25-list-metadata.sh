@@ -33,9 +33,9 @@ check_view "/grp?custom=1" "group" \
   "group display metadata"
 
 song=$(curl -fsS "$BASE/song?custom=1") || fail "/song fetch failed"
-printf '%s' "$song" | grep -q '"content_field":"data"' ||
+printf '%s' "$song" | grep -q '"content_field":"lyrics"' ||
   fail "/song missing source-owned content field"
-printf '%s' "$song" | grep -q 'name="data"' ||
+printf '%s' "$song" | grep -q 'name="lyrics"' ||
   fail "/song did not render source-owned content field"
 
 if grep -E 'idx_select_fields_for|idx_display_name|strcmp\([^)]*"(song|poem|gig|grp)"' \

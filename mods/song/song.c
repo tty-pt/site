@@ -243,19 +243,39 @@ static const char *derive_song_lyrics(const void *ctx, const char *row_id, const
 {
 	(void)ctx; (void)field_name; (void)user;
 
+	char doc_root[256] = { 0 };
+	const char *r = resolve_doc_root(0, doc_root, sizeof(doc_root));
+
 	char path[PATH_MAX];
-	item_path_build_root(g_doc_root, "song", row_id, path, sizeof(path));
-	item_child_path(path, "lyrics.txt", path, sizeof(path));
+	snprintf(path, sizeof(path), "%s/var/song/%s/data.txt", (r && r[0]) ? r : ".", row_id);
 
 	static __thread char buf[65536];
-	char *c = slurp_file(path);
-	if (!c) {
+	char *data = slurp_file(path);
+	if (!data) {
 		buf[0] = '\0';
 		return buf;
 	}
-	strncpy(buf, c, sizeof(buf) - 1);
-	buf[sizeof(buf) - 1] = '\0';
-	free(c);
+
+	buf[0] = '\0';
+	transp_song_t song = {0};
+	int key = -1;
+	if (transp_song_parse(data, &song, &key) == 0) {
+		size_t pos = 0;
+		for (size_t i = 0; i < song.nlines; i++) {
+			transp_pline_t *pl = &song.lines[i];
+			if (!pl->is_chord_line && !pl->is_comment && !pl->is_empty && pl->len > 0) {
+				if (pos + pl->len + 1 < sizeof(buf)) {
+					memcpy(buf + pos, pl->text, pl->len);
+					pos += pl->len;
+					buf[pos++] = '\n';
+				}
+			}
+		}
+		if (pos > 0) pos--;
+		buf[pos] = '\0';
+		transp_song_free(&song);
+	}
+	free(data);
 	return buf;
 }
 
@@ -279,34 +299,6 @@ XY_IMPL(int, source_after_update,
 		char data_path[PATH_MAX];
 		item_child_path(path, "data.txt", data_path, sizeof(data_path));
 		write_file_path(data_path, data, strlen(data));
-
-		transp_song_t song = {0};
-		int key = -1;
-		if (transp_song_parse(data, &song, &key) == 0) {
-			size_t cap = strlen(data) + 1;
-			char *lyrics = malloc(cap);
-			if (lyrics) {
-				size_t pos = 0;
-				for (size_t i = 0; i < song.nlines; i++) {
-					transp_pline_t *pl = &song.lines[i];
-					if (!pl->is_chord_line && pl->len > 0) {
-						if (pos + pl->len + 1 < cap) {
-							memcpy(lyrics + pos, pl->text, pl->len);
-							pos += pl->len;
-							lyrics[pos++] = '\n';
-						}
-					}
-				}
-				if (pos > 0) pos--;
-				lyrics[pos] = '\0';
-
-				char lyrics_path[PATH_MAX];
-				item_child_path(path, "lyrics.txt", lyrics_path, sizeof(lyrics_path));
-				write_file_path(lyrics_path, lyrics, pos);
-				free(lyrics);
-			}
-			transp_song_free(&song);
-		}
 	}
 
 	return 0;
@@ -352,6 +344,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
+	snprintf(app_state.cache.title, sizeof(app_state.cache.title), "%s", title);
 	app_state.transpose = t;
 	app_state.use_latin = (f & TRANSP_LATIN) != 0;
 	app_state.show_media = m;
@@ -374,11 +367,13 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	}
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
 
-	source_overlay_from_desc(
-	        jo, &app_state, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
+	bud_adapter_overlay_from_desc(
+	        jo, &app_state, song_app_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
 	hyle_bud_state_apply(
-	        &app_state, song_fields, json_object_to_json_string(jo));
+	        &app_state.cache, song_fields, json_object_to_json_string(jo));
+	bud_state_apply(
+	        &app_state, song_app_fields, json_object_to_json_string(jo));
 
 	bud_node *layout = bud_app_render();
 	{
@@ -425,8 +420,8 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	{
 		pick_view_t pv;
 
-		pick_view_collect_desc_fd(
-		        fd, song_fields, &pv, NULL);
+		pick_view_collect_desc_values_fd(
+		        fd, song_fields, &meta, &pv, NULL);
 
 		bud_node *form = song_form_content(
 		        1, ctx->id, &meta, data_val, csrf_token, &pv);

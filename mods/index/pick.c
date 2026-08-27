@@ -219,7 +219,7 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 	        sizeof(display_field));
 
 	while (*p && n < max) {
-		const char *comma = strchr(p, ',');
+		const char *comma = strpbrk(p, ",\n\r");
 		size_t len = comma ? (size_t)(comma - p) : strlen(p);
 		char token[128];
 		const char *slug = NULL;
@@ -228,16 +228,38 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 			len = sizeof(token) - 1;
 		memcpy(token, p, len);
 		token[len] = '\0';
-		if (token[0]) {
-			if (strspn(token, "0123456789") == strlen(token))
+		char *ttrim = token;
+		while (*ttrim == ' ' || *ttrim == '\t') ttrim++;
+		size_t tlen = strlen(ttrim);
+		while (tlen > 0 && (ttrim[tlen - 1] == ' ' || ttrim[tlen - 1] == '\t' || ttrim[tlen - 1] == '\r'))
+			ttrim[--tlen] = '\0';
+
+		if (ttrim[0]) {
+			if (strspn(ttrim, "0123456789") == strlen(ttrim))
 			{
 				slug = qmap_get_key(fields_hd,
-				        (uint32_t)atoi(token));
+				        (uint32_t)atoi(ttrim));
 				if (slug && !slug[0])
 					slug = NULL;
 			}
+			if (!slug) {
+				char slug_buf[128];
+				axil_slugify(ttrim, strlen(ttrim), slug_buf, sizeof(slug_buf));
+				if (slug_buf[0] && qmap_pos(fields_hd, slug_buf) != UINT32_MAX)
+					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, slug_buf));
+			}
+			if (!slug) {
+				if (qmap_pos(fields_hd, ttrim) != UINT32_MAX)
+					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, ttrim));
+			}
+			if (!slug) {
+				char slug_buf[128];
+				axil_slugify(ttrim, strlen(ttrim), slug_buf, sizeof(slug_buf));
+				if (slug_buf[0])
+					slug = slug_buf;
+			}
 			if (!slug)
-				slug = token;
+				slug = ttrim;
 
 			snprintf(id_buf[n], sizeof(id_buf[n]), "%.60s",
 			        slug);
@@ -262,7 +284,9 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 		}
 		if (!comma)
 			break;
-		p = comma + 1;
+		while (*comma && (*comma == ',' || *comma == '\n' || *comma == '\r' || *comma == ' '))
+			comma++;
+		p = comma;
 	}
 	return n;
 }
@@ -567,22 +591,28 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
 			}
 			/* Fallback reverse-lookup by display name */
 			if (!slug && display_field[0]) {
-				unsigned result_hd;
-				char qs[512];
-				snprintf(qs, sizeof(qs), "%s=%s", display_field, token);
-				result_hd = source_query(dataset, qs);
-				if (result_hd) {
-					uint32_t cur = qmap_iter(result_hd, NULL, 0);
-					const void *rk;
-					const void *rv;
-					while (qmap_next(&rk, &rv, cur)) {
-						if (strcmp((const char *)rk, "__total__") != 0) {
-							slug = (const char *)rk;
-							break;
+				char slug_buf[128];
+				axil_slugify(token, strlen(token), slug_buf, sizeof(slug_buf));
+				if (slug_buf[0] && qmap_pos(fields_hd, slug_buf) != UINT32_MAX) {
+					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, slug_buf));
+				} else {
+					unsigned result_hd;
+					char qs[512];
+					snprintf(qs, sizeof(qs), "%s=%s", display_field, token);
+					result_hd = source_query(dataset, qs);
+					if (result_hd) {
+						uint32_t cur = qmap_iter(result_hd, NULL, 0);
+						const void *rk;
+						const void *rv;
+						while (qmap_next(&rk, &rv, cur)) {
+							if (strcmp((const char *)rk, "__total__") != 0) {
+								slug = (const char *)rk;
+								break;
+							}
 						}
+						qmap_fin(cur);
+						qmap_close(result_hd);
 					}
-					qmap_fin(cur);
-					qmap_close(result_hd);
 				}
 			}
 			if (!slug)
@@ -798,9 +828,10 @@ XY_IMPL(int, pick_view_collect_auto_fd,
 	return pick_view_collect_auto(qs, fields, vals_in, vals_out, pv, active_scope_out);
 }
 
-XY_IMPL(int, pick_view_collect_desc,
+XY_IMPL(int, pick_view_collect_desc_values,
 	const char *, qs,
 	const source_desc_t *, defs,
+	const void *, record,
 	pick_view_t *, pv,
 	int *, active_scope_out)
 {
@@ -833,7 +864,11 @@ XY_IMPL(int, pick_view_collect_desc,
 			ff[n].target = NULL;
 		}
 		ff[n].max_inline = 0;
-		vals_in[n] = "";
+		if (record && d->offset && d->size) {
+			vals_in[n] = (const char *)record + d->offset;
+		} else {
+			vals_in[n] = "";
+		}
 		n++;
 	}
 	ff[n].name = NULL;
@@ -844,6 +879,28 @@ XY_IMPL(int, pick_view_collect_desc,
 	ff[n].max_inline = 0;
 
 	return pick_view_collect_auto((char *)qs, ff, vals_in, vals_out, pv, active_scope_out);
+}
+
+XY_IMPL(int, pick_view_collect_desc_values_fd,
+	int, fd,
+	const source_desc_t *, defs,
+	const void *, record,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	char qs[16384] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	return pick_view_collect_desc_values(qs, defs, record, pv, active_scope_out);
+}
+
+XY_IMPL(int, pick_view_collect_desc,
+	const char *, qs,
+	const source_desc_t *, defs,
+	pick_view_t *, pv,
+	int *, active_scope_out)
+{
+	return pick_view_collect_desc_values(qs, defs, NULL, pv, active_scope_out);
 }
 
 XY_IMPL(int, pick_view_collect_desc_fd,

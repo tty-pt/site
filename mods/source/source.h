@@ -26,6 +26,7 @@ typedef hyle_source_field_type_t source_field_type_t;
 #define SOURCE_FIELD_REFERENCE HYLE_SOURCE_FIELD_REFERENCE
 #define SOURCE_FIELD_MULTI_REFERENCE HYLE_SOURCE_FIELD_MULTI_REFERENCE
 #define SOURCE_FIELD_INVERSE HYLE_SOURCE_FIELD_INVERSE
+#define SOURCE_FIELD_DERIVED HYLE_SOURCE_FIELD_DERIVED
 
 typedef hyle_source_field_t source_field_t;
 typedef hyle_source_list_field_t source_list_field_t;

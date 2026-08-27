@@ -34,20 +34,23 @@
 #define SOURCE_FIELD_STRING 0
 #define SOURCE_FIELD_REFERENCE 4
 #define SOURCE_FIELD_MULTI_REFERENCE 5
+#define SOURCE_FIELD_DERIVED 99
 #endif
 
 /* ── Record field (string, backed by struct member) ───────────── */
 #define REC_FIELD(name, st, mb, sz, wr, rq, ml, im)                            \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_STR,        \
-		        SOURCE_FIELD_STRING, wr, rq, ml, NULL, NULL, im, NULL  \
+		        SOURCE_FIELD_STRING, wr, rq, ml, NULL, NULL, im, NULL, \
+		        NULL, NULL, NULL                                       \
 	}
 
 /* Single reference field */
 #define REF_FIELD(name, st, mb, sz, src, inv, im)                              \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_REFERENCE,  \
-		        SOURCE_FIELD_REFERENCE, 1, 0, 0, src, inv, im, NULL    \
+		        SOURCE_FIELD_REFERENCE, 1, 0, 0, src, inv, im, NULL,   \
+		        NULL, NULL, NULL                                       \
 	}
 
 /* Single reference field with a filter style hint (e.g. "dropdown") */
@@ -55,7 +58,7 @@
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_REFERENCE,  \
 		        SOURCE_FIELD_REFERENCE, 1, 0, 0, src, inv, im, NULL,   \
-		        style, NULL                                            \
+		        style, NULL, NULL                                      \
 	}
 
 /* Multi-reference field (resolves to display names) */
@@ -63,7 +66,7 @@
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
 		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
-		        0, src, inv, im, NULL                                  \
+		        0, src, inv, im, #name, NULL, NULL, NULL               \
 	}
 
 /* Multi-reference field with an explicit filter style hint */
@@ -71,7 +74,7 @@
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
 		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
-		        0, src, inv, im, NULL, style                           \
+		        0, src, inv, im, #name, style, NULL, NULL              \
 	}
 
 /* Multi-reference field with style + combine-mode hint ("and"/"or"/NULL) */
@@ -79,41 +82,59 @@
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_REF_DISPLAY,               \
 		        BUD_QM_MULTI_REF, SOURCE_FIELD_MULTI_REFERENCE, 1, 0,  \
-		        0, src, inv, im, NULL, style, mode                     \
+		        0, src, inv, im, #name, style, mode, NULL              \
 	}
 
 /* Inverse field (virtual, computed from reference) */
 #define INVERSE_FIELD(name, src, inv)                                          \
 	{                                                                      \
-		#name, 0, 0, 0, BUD_INVERSE, 0, 0, 0, 0, 0, src, inv, 0, NULL  \
+		#name, 0, 0, 0, BUD_INVERSE, 0, 0, 0, 0, 0, src, inv, 0, NULL, \
+		        NULL, NULL, NULL                                       \
 	}
 
 /* Excluded field (backed by struct member) */
 #define EXCL_FIELD(name, st, mb, sz, qt, im)                                   \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_EXCLUDE, qt, 0, 0, 0, 0,   \
-		        NULL, NULL, im, NULL                                   \
+		        NULL, NULL, im, NULL, NULL, NULL, NULL                 \
 	}
 
 /* Excluded field, writable (backed by struct member) */
 #define EXCL_FIELD_W(name, st, mb, sz, qt, im)                                 \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_EXCLUDE, qt,               \
-		        SOURCE_FIELD_STRING, 1, 0, 0, NULL, NULL, im, NULL     \
+		        SOURCE_FIELD_STRING, 1, 0, 0, NULL, NULL, im, NULL,     \
+		        NULL, NULL, NULL                                       \
 	}
 
 /* Excluded virtual field (no struct backing) */
 #define EXCL_FIELD_V(name, qt, wr, im)                                         \
 	{                                                                      \
 		#name, 0, 0, 0, BUD_EXCLUDE, qt, 0, wr, 0, 0, NULL, NULL, im,  \
-		        NULL                                                   \
+		        NULL, NULL, NULL, NULL                                 \
 	}
 
 /* Excluded virtual field with file path */
 #define EXCL_FIELD_VF(name, qt, wr, im, fl)                                    \
 	{                                                                      \
 		#name, 0, 0, 0, BUD_EXCLUDE, qt, 0, wr, 0, 0, NULL, NULL, im,  \
-		        fl                                                     \
+		        fl, NULL, NULL, NULL                                   \
+	}
+
+/* Derived virtual field (computed in-memory for FTS/indexing) */
+#define DERIVED_FIELD(name, dkey)                                              \
+	{                                                                      \
+		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR,                       \
+		        SOURCE_FIELD_DERIVED, 0, 0, 0, NULL, NULL, 0, NULL,    \
+		        NULL, NULL, dkey                                       \
+	}
+
+/* Derived virtual field (computed in-memory for FTS/indexing) */
+#define DERIVED_FIELD(name, dkey)                                              \
+	{                                                                      \
+		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR,                       \
+		        SOURCE_FIELD_DERIVED, 0, 0, 0, NULL, NULL, 0, NULL,    \
+		        NULL, NULL, dkey                                       \
 	}
 
 /* Integer overlay (computed, stored in app_state) */

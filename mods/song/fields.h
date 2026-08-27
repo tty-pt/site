@@ -15,6 +15,7 @@
 #include <hyle/schema.h>
 #include <stddef.h>
 #include "../common/field_macros.h"
+#include "../common/state_macros.h"
 
 typedef struct {
 	char id[128];
@@ -71,19 +72,24 @@ static const hyle_schema_desc_t song_fields[] = {
 	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
 	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
 	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
-	OVERLAY_INT(transpose, app_state_t, transpose),
-	OVERLAY_INT(use_latin, app_state_t, use_latin),
-	OVERLAY_INT(show_media, app_state_t, show_media),
-	OVERLAY_INT(zoom, app_state_t, zoom),
-	OVERLAY_INT(original_key, app_state_t, original_key),
-	OVERLAY_INT(is_owner, app_state_t, is_owner),
-	OVERLAY_STR(page_user, app_state_t, page_user, 64),
-	OVERLAY_STR(path, app_state_t, path, 256),
-	OVERLAY_STR(save_url, app_state_t, save_url, 512),
+	DERIVED_FIELD(lyrics, "song.lyrics_from_data"),
 	FIELD_END
 };
 
 #define SONG_FIELD_COUNT (sizeof(song_fields) / sizeof(song_fields[0]) - 1)
+
+#define SONG_APP_SCHEMA(F_STR, F_INT, st)                                      \
+	F_STR(st, save_url, 512)                                               \
+	F_STR(st, page_user, 64)                                               \
+	F_STR(st, path, 256)                                                   \
+	F_INT(st, transpose)                                                   \
+	F_INT(st, use_latin)                                                   \
+	F_INT(st, show_media)                                                  \
+	F_INT(st, zoom)                                                        \
+	F_INT(st, original_key)                                                \
+	F_INT(st, is_owner)
+
+BUD_STATE_FIELDS(app_state_t, song_app_fields, SONG_APP_SCHEMA)
 
 #ifndef __wasm__
 static const source_list_field_t song_list_fields[] = {
@@ -97,9 +103,9 @@ static const source_list_view_t song_list_view = {
 	song_list_fields,
 	sizeof(song_list_fields) / sizeof(song_list_fields[0]),
 	NULL,
-	"data",
-	"Content",
-	"lyrics / chords... e.g. \"a quiet place\"",
+	"lyrics",
+	"Lyrics",
+	"e.g. \"a quiet place\"",
 };
 #endif
 

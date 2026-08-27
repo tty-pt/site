@@ -3,7 +3,7 @@
  */
 
 #include "transp.h"
-#include "token.h"
+#include "parse.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1396,6 +1396,49 @@ TEST(model_slash_bass)
 	assert(info.bass_len == 0);
 }
 
+TEST(lyrics_extraction_from_song)
+{
+	const char *chart =
+		"% Intro\n"
+		"C G Am F\n"
+		"Amazing Grace, how sweet the sound\n"
+		"C G\n"
+		"That saved a wretch like me\n"
+		"|: Dm7 G7 :|\n"
+		"I once was lost but now am found\n";
+
+	transp_song_t song = {0};
+	int key = -1;
+	assert(transp_song_parse(chart, &song, &key) == 0);
+	assert(song.nlines > 0);
+
+	char lyrics[1024] = {0};
+	size_t pos = 0;
+	for (size_t i = 0; i < song.nlines; i++) {
+		transp_pline_t *pl = &song.lines[i];
+		if (!pl->is_chord_line && !pl->is_comment && !pl->is_empty && pl->len > 0) {
+			if (pos + pl->len + 1 < sizeof(lyrics)) {
+				memcpy(lyrics + pos, pl->text, pl->len);
+				pos += pl->len;
+				lyrics[pos++] = '\n';
+			}
+		}
+	}
+	if (pos > 0) pos--;
+	lyrics[pos] = '\0';
+
+	assert(str_contains(lyrics, "Amazing Grace, how sweet the sound"));
+	assert(str_contains(lyrics, "That saved a wretch like me"));
+	assert(str_contains(lyrics, "I once was lost but now am found"));
+
+	/* Chords and comments must NOT appear in extracted lyrics */
+	assert(!str_contains(lyrics, "C G Am F"));
+	assert(!str_contains(lyrics, "Dm7"));
+	assert(!str_contains(lyrics, "Intro"));
+
+	transp_song_free(&song);
+}
+
 int main(void)
 {
 	printf("=== Transp Library Unit Tests ===\n\n");
@@ -1474,6 +1517,7 @@ int main(void)
 	RUN_TEST(model_quality_matrix);
 	RUN_TEST(model_first_quality_atom_wins);
 	RUN_TEST(model_slash_bass);
+	RUN_TEST(lyrics_extraction_from_song);
 
 	printf("\nAll tests passed!\n");
 	return 0;

@@ -2873,7 +2873,7 @@ void bud_state_apply_stride_len(
 		if (!f->key)
 			break;
 		int vidx;
-		if (f->kind == 1)
+		if (f->kind == 1 || f->kind == 5)
 			continue;
 		if (!bud__find_key(json, toks, ntoks, f->key, &vidx))
 			continue;

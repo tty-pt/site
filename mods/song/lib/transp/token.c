@@ -97,7 +97,7 @@ static int paren_group(const char *s, size_t len, size_t *pos)
 		unsigned char c = (unsigned char)s[i];
 		if (c >= '0' && c <= '9') {
 			i++;
-		} else if (c == '#' || c == 'b') {
+		} else if (c == '#' || c == 'b' || c == '-' || c == '+') {
 			i++;
 		} else if (
 		        c == 0xC2 && i + 1 < len &&

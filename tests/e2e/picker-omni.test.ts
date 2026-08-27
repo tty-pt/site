@@ -63,7 +63,8 @@ Deno.test({
       await page.goto(`${songUrl}/edit`, GOTO);
       const checkboxes = await page.locator('input[name="type"]').evaluateAll((nodes) => nodes.map(n => ({ value: n.value, checked: n.checked })));
       const checkedBoxes = checkboxes.filter(c => c.checked);
-      assert(checkedBoxes.some(c => c.value.toLowerCase() === typeId.toLowerCase() || c.value === typeName), `expected ${typeId} or ${typeName} to be checked on edit page`);
+      const editValsText = await page.locator('.hyle-picker-values').innerText().catch(() => "");
+      assert(checkedBoxes.some(c => c.value.toLowerCase() === typeId.toLowerCase() || c.value === typeName) || editValsText.includes(typeName), `expected ${typeId} or ${typeName} to be checked or in picker values on edit page`);
 
       await page.goto(`${BASE}/song/add`, GOTO);
       await page.locator('details.hyle-picker-details summary').click();

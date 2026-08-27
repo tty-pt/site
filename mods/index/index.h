@@ -156,6 +156,20 @@ XY_DECL(int, pick_view_collect_desc,
 	pick_view_t *, pv,
 	int *, active_scope_out);
 
+XY_DECL(int, pick_view_collect_desc_values,
+	const char *, qs,
+	const source_desc_t *, defs,
+	const void *, record,
+	pick_view_t *, pv,
+	int *, active_scope_out);
+
+XY_DECL(int, pick_view_collect_desc_values_fd,
+	int, fd,
+	const source_desc_t *, defs,
+	const void *, record,
+	pick_view_t *, pv,
+	int *, active_scope_out);
+
 XY_DECL(int, pick_view_collect_desc_fd,
 	int, fd,
 	const source_desc_t *, defs,

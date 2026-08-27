@@ -264,7 +264,7 @@ static int pick_val_has_token(const char *vals, const char *token)
 	tlen = strlen(token);
 	while (*vals) {
 		size_t seg;
-		const char *end = strpbrk(vals, ",\n");
+		const char *end = strpbrk(vals, ",\n\r");
 
 		seg = end ? (size_t)(end - vals) : strlen(vals);
 		while (seg && (vals[0] == ' ' || vals[0] == '\r')) {
@@ -279,6 +279,8 @@ static int pick_val_has_token(const char *vals, const char *token)
 		if (!end)
 			break;
 		vals = end + 1;
+		while (*vals && (*vals == ',' || *vals == '\n' || *vals == '\r' || *vals == ' '))
+			vals++;
 	}
 	return 0;
 }
@@ -355,7 +357,7 @@ static bud_node *pick_inline_multi(
 
 	for (i = 0; i < e->npage; i++)
 		bud_append(grid,
-		        lx_el("label", lx_attr("class", "picker-inline"),
+		        lx_el("label", lx_attr("class", "picker-inline hyle-picker-option"),
                 lx_el("input",
                        lx_attr("type", "checkbox"),
                        lx_attr("name", e->key),
@@ -597,7 +599,7 @@ bud_node *site_ui_form_from_desc(
 			vals[n] = NULL;
 		} else if (d->qm_type == BUD_QM_VSTR && d->offset == 0) {
 			vals[n] = vstr_val ? vstr_val : "";
-		} else if (struct_ptr) {
+		} else if (struct_ptr && d->source_type != HYLE_BUD_DERIVED) {
 			vals[n] = (const char *)struct_ptr + d->offset;
 		} else {
 			vals[n] = "";
