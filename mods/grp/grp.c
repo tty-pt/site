@@ -555,14 +555,7 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	/* ── Assemble page ──────────────────────────────────── */
 
-	snprintf(path, sizeof(path), "/grp/%s", ctx->id);
-	layout = site_ui_layout(
-	        page_title, path, site_ui_module_icon("grp"), ctx->username,
-	        site_ui_item_menu("grp", ctx->id, is_owner), body_frag);
-
-	return site_ui_respond_page(
-	        fd, page_title, path, site_ui_module_icon("grp"), ctx->username,
-	        NULL, NULL, layout);
+	return site_ui_respond_item_detail(fd, ctx, "grp", title, body_frag);
 }
 
 static int grp_detail_handler(int fd, char *body)

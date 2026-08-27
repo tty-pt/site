@@ -66,4 +66,30 @@ uint32_t stoma_query_phrase(stoma_db_t *db,
 	const char *field, const char *query,
 	uint32_t out_hd, int *handled);
 
+/*
+ * Iterates non-whitespace word tokens in `text` and invokes cb(token, len, user).
+ */
+void stoma_tokenize(
+        const char *folded, void (*cb)(const char *tok, size_t len, void *user),
+        void *user);
+
+/*
+ * Line/token normalization utility: splits on newlines/CR, trims tokens,
+ * and appends deduplicated non-empty tokens into `out` separated by '\n'.
+ * Returns 0 on success, -1 on buffer overflow.
+ */
+int stoma_list_normalize(const char *input, char *out, size_t out_sz);
+
+/*
+ * Check if a newline-separated list contains `token`.
+ * Returns 1 if present, 0 otherwise.
+ */
+int stoma_list_contains(const char *list, const char *token);
+
+/*
+ * Append a token to a newline-separated list if not already present.
+ * Returns 0 on success, -1 on buffer overflow.
+ */
+int stoma_list_append(char *out, size_t out_sz, const char *token);
+
 #endif

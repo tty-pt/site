@@ -10,6 +10,9 @@
 #include <json-c/json.h>
 #include "bud/bud.h"
 
+struct item_ctx_s;
+typedef struct item_ctx_s item_ctx_t;
+
 typedef struct bud_node bud_node;
 
 typedef struct {
@@ -113,6 +116,16 @@ XY_DECL(int, item_child_path,
 	const char *, name,
 	char *, out,
 	size_t, outlen);
+XY_DECL(int, user_pref_read,
+	const char *, username,
+	const char *, name,
+	char *, out,
+	size_t, out_sz);
+XY_DECL(int, user_pref_write,
+	const char *, username,
+	const char *, name,
+	const char *, val);
+
 XY_DECL(int, item_remove_path_recursive, const char *, item_path);
 
 XY_DECL(int, is_safe_id, const char *, id);
@@ -145,6 +158,19 @@ XY_DECL(int, datalist_extract_id,
 	const char *, in,
 	char *, id_out,
 	size_t, outlen);
+
+XY_DECL(int, respond_item_file,
+	int, fd,
+	const char *, item_path,
+	const char *, filename,
+	const char *, allowed_exts);
+
+XY_DECL(int, site_ui_respond_item_detail,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	bud_node *, body);
 
 XY_DECL(int, site_ui_respond_page,
 	int, fd,

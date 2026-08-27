@@ -16,7 +16,7 @@
  * login/ownership and writes error responses on failure.
  * ------------------------------------------------------------------------- */
 
-typedef struct {
+typedef struct item_ctx_s {
 	int fd;
 	const char *username;
 	char doc_root[256];

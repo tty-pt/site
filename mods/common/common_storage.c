@@ -143,6 +143,50 @@ XY_IMPL(int, user_path_build,
 	return 0;
 }
 
+XY_IMPL(int, user_pref_read,
+	const char *, username,
+	const char *, name,
+	char *, out,
+	size_t, out_sz)
+{
+	char s[PATH_MAX], p[PATH_MAX];
+	char *c;
+
+	if (!username || !username[0] || !name || !name[0] || !out || out_sz == 0)
+		return -1;
+
+	snprintf(s, sizeof(s), ".tty/%s", name);
+	if (user_path_build(username, s, p, sizeof(p)) != 0)
+		return -1;
+
+	c = slurp_file(p);
+	if (!c) {
+		out[0] = '\0';
+		return -1;
+	}
+	snprintf(out, out_sz, "%s", c);
+	free(c);
+	return 0;
+}
+
+XY_IMPL(int, user_pref_write,
+	const char *, username,
+	const char *, name,
+	const char *, val)
+{
+	char d[PATH_MAX], s[PATH_MAX], p[PATH_MAX];
+
+	if (!username || !username[0] || !name || !name[0])
+		return -1;
+
+	user_path_build(username, ".tty", d, sizeof(d));
+	ensure_dir_path(d);
+
+	snprintf(s, sizeof(s), ".tty/%s", name);
+	user_path_build(username, s, p, sizeof(p));
+	return write_file_path(p, val, val ? strlen(val) : 0);
+}
+
 XY_IMPL(int, write_item_child_file,
 	const char *, item_path,
 	const char *, name,

@@ -1226,6 +1226,50 @@ static int gig_add_get_handler(int fd, char *body)
 
 /* ── Edit POST handler ───────────────────────────────────── */
 
+static void sb_save_edit_songs_from_form(const char *gig_id)
+{
+	char amount_str[16] = { 0 };
+	int amount = 0, i;
+
+	if (mpfd_get("amount", amount_str, sizeof(amount_str)) > 0)
+		amount = atoi(amount_str);
+
+	hyle_source_ordered_clear("gig.songs", gig_id);
+
+	for (i = 0; i < amount; i++) {
+		char song_field[32], key_field[32], fmt_field[32], remove_field[32];
+		char remove_val[8] = { 0 };
+		char song_val[256] = { 0 };
+		char extracted[128] = { 0 };
+		char key_val[16] = { 0 };
+		char fmt_val[64] = { 0 };
+
+		snprintf(song_field, sizeof(song_field), "song_%d", i);
+		snprintf(key_field, sizeof(key_field), "key_%d", i);
+		snprintf(fmt_field, sizeof(fmt_field), "fmt_%d", i);
+		snprintf(remove_field, sizeof(remove_field), "remove_%d", i);
+
+		if (mpfd_get(remove_field, remove_val, sizeof(remove_val)) > 0)
+			continue;
+		if (mpfd_get(song_field, song_val, sizeof(song_val)) <= 0)
+			continue;
+
+		datalist_extract_id(song_val, extracted, sizeof(extracted));
+		if (!extracted[0])
+			continue;
+
+		resolve_song_id(extracted, sizeof(extracted));
+		mpfd_get(key_field, key_val, sizeof(key_val));
+		mpfd_get(fmt_field, fmt_val, sizeof(fmt_val));
+
+		sb_append_song(
+		        "gig.songs", gig_id, extracted,
+		        key_val[0] ? key_val : "0",
+		        fmt_val[0] ? fmt_val : "any");
+	}
+	hyle_source_ordered_save("gig.songs", gig_id);
+}
+
 static int
 gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
@@ -1244,12 +1288,9 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	/* Hydrate standard fields */
 	{
-		unsigned dh;
-		const char *new_grp;
-
-		dh = source_parse_form("gig.items");
+		unsigned dh = source_parse_form("gig.items");
 		if (dh) {
-			new_grp = qmap_get(dh, "grp");
+			const char *new_grp = qmap_get(dh, "grp");
 			if (new_grp && new_grp[0]) {
 				if (!source_item_exists("grp.items", new_grp) ||
 				    !module_item_owner_check(
@@ -1268,63 +1309,7 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	}
 
 	/* Write songs via ordered source */
-	{
-		char amount_str[16] = { 0 };
-		int amount = 0, i;
-
-		if (mpfd_get("amount", amount_str, sizeof(amount_str)) > 0)
-			amount = atoi(amount_str);
-
-		hyle_source_ordered_clear("gig.songs", ctx->id);
-
-		for (i = 0; i < amount; i++) {
-			char song_field[32], key_field[32], fmt_field[32],
-			        remove_field[32];
-			char remove_val[8] = { 0 };
-			char song_val[256] = { 0 };
-
-			snprintf(song_field, sizeof(song_field), "song_%d", i);
-			snprintf(key_field, sizeof(key_field), "key_%d", i);
-			snprintf(fmt_field, sizeof(fmt_field), "fmt_%d", i);
-			snprintf(
-			        remove_field, sizeof(remove_field), "remove_%d",
-			        i);
-
-			if (mpfd_get(
-			            remove_field, remove_val,
-			            sizeof(remove_val)) > 0)
-				continue;
-
-			if (mpfd_get(song_field, song_val, sizeof(song_val)) <=
-			    0)
-				continue;
-
-			/* Accept "Title [song_id]" datalist values and the
-			 * bare ids emitted by the picker row hidden fields
-			 * (datalist_extract_id copies bare input through
-			 * and returns -1). */
-			char extracted[128] = { 0 };
-			datalist_extract_id(song_val, extracted,
-			                    sizeof(extracted));
-			if (!extracted[0])
-				continue;
-
-			resolve_song_id(extracted, 128);
-
-			{
-				char key_val[16] = { 0 };
-				char fmt_val[64] = { 0 };
-				mpfd_get(key_field, key_val, sizeof(key_val));
-				mpfd_get(fmt_field, fmt_val, sizeof(fmt_val));
-
-				sb_append_song(
-				        "gig.songs", ctx->id, extracted,
-				        key_val[0] ? key_val : "0",
-				        fmt_val[0] ? fmt_val : "any");
-			}
-		}
-		hyle_source_ordered_save("gig.songs", ctx->id);
-	}
+	sb_save_edit_songs_from_form(ctx->id);
 
 	/* Auto-repertoire: re-sync the old grp (songs may have left it)
 	 * and, on reassignment, the new one. */

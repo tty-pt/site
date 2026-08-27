@@ -1,6 +1,9 @@
+BUD_DIR := $(shell cd ../.. && pwd)/external/bud
+STOMA_DIR := $(shell cd ../.. && pwd)/external/stoma
 HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
-EXTRA_CFLAGS += -I../../external/bud/include -I$(HYLE_DIR)/c/libhyle-bud/include
-EXTRA_LDLIBS += -L../../external/bud/lib -lbud
+EXTRA_CFLAGS += -I../../external/bud/include -I$(HYLE_DIR)/c/libhyle-bud/include -I$(STOMA_DIR)/include
+EXTRA_LDLIBS += -L$(BUD_DIR)/lib -lbud -Wl,-rpath,$(BUD_DIR)/lib
+EXTRA_LDLIBS += -L$(STOMA_DIR)/lib -lstoma -Wl,-rpath,$(STOMA_DIR)/lib
 EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
 
 include ../../build.mk

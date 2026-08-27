@@ -25,5 +25,10 @@ int respond_json(int fd, int status, const char *msg);
 int get_doc_root(int fd, char *buf, size_t len);
 int item_remove_path_recursive(const char *item_path);
 int build_owner_path(const char *ip, char *out, size_t len);
+int is_safe_id(const char *id);
+int site_ui_respond_page(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *extra_head, const char *module,
+        bud_node *body);
 
 #endif

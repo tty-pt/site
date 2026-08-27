@@ -32,8 +32,6 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
 	(void)user_data;
-	char path[256];
-	char page_title[512];
 	char owner[64] = { 0 };
 
 	poem_cache_t meta;
@@ -51,9 +49,6 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		body_content = strdup("");
 
 	item_owner_read(ctx->item_path, owner, sizeof(owner));
-	int is_owner = item_owner_check(ctx->item_path, ctx->username);
-	snprintf(path, sizeof(path), "/poem/%s", ctx->id);
-	snprintf(page_title, sizeof(page_title), "poem: %s", meta.title);
 
 	bud_node *frag = poem_render_detail_body(body_content, owner, ctx->id);
 	free(body_content);
@@ -61,13 +56,7 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	if (!frag)
 		return server_error(fd, "OOM");
 
-	bud_node *layout = site_ui_layout(
-	        page_title, path, site_ui_module_icon("poem"), ctx->username,
-	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
-
-	return site_ui_respond_page(
-	        fd, page_title, path, site_ui_module_icon("poem"),
-	        ctx->username, NULL, NULL, layout);
+	return site_ui_respond_item_detail(fd, ctx, "poem", meta.title, frag);
 }
 
 static int poem_detail_handler(int fd, char *body)
@@ -83,19 +72,7 @@ poem_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
 	(void)user_data;
-
-	char content_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "pt_PT.html", content_path,
-	        sizeof(content_path));
-	char *content = slurp_file(content_path);
-	if (!content)
-		return respond_error(fd, 404, "Not found");
-
-	axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
-	axil_respond(fd, 200, content);
-	free(content);
-	return 0;
+	return respond_item_file(fd, ctx->item_path, "pt_PT.html", "html");
 }
 
 static int poem_body_handler(int fd, char *body)
@@ -112,77 +89,9 @@ poem_media_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
 	(void)user_data;
-
-	static const struct {
-		const char *ext;
-		const char *mime;
-	} allowed[] = {
-		{ ".jpeg", "image/jpeg" },
-		{ ".jpg", "image/jpeg" },
-		{ ".png", "image/png" },
-	};
-
 	char file[256] = { 0 };
-	char stem[256];
-	char path[PATH_MAX];
-	char len_buf[32];
-	size_t flen;
-	size_t slen = 0;
-	const char *mime = NULL;
-	FILE *fp;
-	struct stat st;
-	char *buf;
-
 	axil_env_get(fd, file, sizeof(file), "PATTERN_PARAM_FILE");
-	flen = strlen(file);
-
-	for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
-		size_t elen = strlen(allowed[i].ext);
-		if (flen > elen &&
-		    strcasecmp(file + flen - elen, allowed[i].ext) == 0)
-		{
-			mime = allowed[i].mime;
-			slen = flen - elen;
-			break;
-		}
-	}
-	if (!mime || slen == 0 || slen >= sizeof(stem))
-		return respond_error(fd, 404, "Not found");
-
-	memcpy(stem, file, slen);
-	stem[slen] = '\0';
-	if (!is_safe_id(stem))
-		return respond_error(fd, 404, "Not found");
-
-	item_child_path(ctx->item_path, file, path, sizeof(path));
-	fp = fopen(path, "rb");
-	if (!fp)
-		return respond_error(fd, 404, "Not found");
-	if (fstat(fileno(fp), &st) != 0 || !S_ISREG(st.st_mode) ||
-	    st.st_size <= 0)
-	{
-		fclose(fp);
-		return respond_error(fd, 404, "Not found");
-	}
-	buf = malloc((size_t)st.st_size);
-	if (!buf) {
-		fclose(fp);
-		return server_error(fd, "OOM");
-	}
-	if (fread(buf, 1, (size_t)st.st_size, fp) != (size_t)st.st_size) {
-		fclose(fp);
-		free(buf);
-		return server_error(fd, "short read");
-	}
-	fclose(fp);
-
-	snprintf(len_buf, sizeof(len_buf), "%ld", (long)st.st_size);
-	axil_header_set(fd, "Content-Type", mime);
-	axil_header_set(fd, "Content-Length", len_buf);
-	axil_respond(fd, 200, NULL);
-	axil_write(fd, buf, (size_t)st.st_size);
-	free(buf);
-	return 0;
+	return respond_item_file(fd, ctx->item_path, file, "jpeg,jpg,png");
 }
 
 static int poem_media_handler(int fd, char *body)

@@ -117,8 +117,9 @@ to satisfy.
 
 ### 4.6 Centralized response/page helpers
 `respond_html/json/error`, `bad_request`, `server_error`, `not_found`,
-`site_ui_respond_page`, `site_ui_respond_form_page` — handlers never hand-roll
-HTTP or page shells.
+`site_ui_respond_page`, `site_ui_respond_form_page`, `site_ui_respond_item_detail`,
+and `respond_item_file` — handlers never hand-roll HTTP, media asset streaming,
+or page shells.
 
 ### 4.7 The only sanctioned write path
 All row writes go through hyle `put`/`del` → `source_update_item` /

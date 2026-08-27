@@ -8,17 +8,6 @@
 #include "../../common/ux/site_ui.c"
 #include "../fields.h"
 
-static const form_field_t song_ff[] = {
-        { "title", "Title:", 0, 0, NULL, 0 },
-        { "type", "Type:", 0, FF_REF_MULTI, "song.types", 0 },
-        { "author", "Author:", 0, 0, NULL, 0 },
-        { "yt", "Youtube ID:", 0, 0, NULL, 0 },
-        { "audio", "Audio URL:", 0, 0, NULL, 0 },
-        { "pdf", "PDF URL:", 0, 0, NULL, 0 },
-        { "data", "Chords/Lyrics:", 1, 0, NULL, 0 },
-        { NULL, NULL, 0, 0, NULL, 0 }
-};
-
 bud_node *song_form_content(
         int is_edit, const char *id, const song_cache_t *meta,
         const char *data_val, const char *csrf_token, const pick_view_t *pv)

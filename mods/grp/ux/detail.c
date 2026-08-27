@@ -83,58 +83,26 @@ static bud_node *ch_render_song_row(
         int is_owner, int orig_key, int transpose, const char *csrf_token,
         const char *key_action, const char *rem_action, int pinned)
 {
-	bud_node *row =
-	        lx_el("div",
-	              lx_attr("class", "flex justify-between items-center p-2 bg-surface rounded"),
-	              lx_el("div", lx_attr("class", "flex flex-col"),
-	                    lx_el("a", lx_attr("class", "font-bold"),
-	                          lx_attr("href", song_href), lx_text(s_title)),
-	                    lx_el("span",
-	                          lx_attr("class", "text-xs text-muted"),
-	                          lx_text(key_label))))
-	                .data.node;
+	bud_node *controls = NULL;
 
 	if (is_owner) {
-		bud_node *controls = bud_fragment();
-
 		bud_node *key_sel = ch_render_key_selector(orig_key, transpose);
+		bud_node *set_form = site_ui_action_form(
+		        key_action, csrf_token, "POST", key_sel, "Set",
+		        "btn text-xs py-1 px-2");
+		bud_node *rem_form = pinned
+		        ? site_ui_action_form(
+		                  rem_action, csrf_token, "POST", NULL,
+		                  "Remove", "btn btn-danger text-xs py-1 px-2")
+		        : NULL;
 
-		bud_append(
-		        controls,
-		        lx_el("form", lx_attr("method", "POST"),
-		              lx_attr("action", key_action),
-		              lx_attr("class", "flex gap-1 items-center"),
-		              lx_el("input", lx_attr("type", "hidden"),
-		                    lx_attr("name", "csrf_token"),
-		                    lx_attr("value", csrf_token)),
-		              lx_node(key_sel),
-		              lx_el("button", lx_attr("type", "submit"),
-		                    lx_attr("class", "btn text-xs py-1 px-2"),
-		                    lx_text("Set")))
-		                .data.node);
-
-		if (pinned) {
-			bud_append(
-			        controls,
-			        lx_el("form", lx_attr("method", "POST"),
-			              lx_attr("action", rem_action),
-			              lx_el("input", lx_attr("type", "hidden"),
-			                    lx_attr("name", "csrf_token"),
-			                    lx_attr("value", csrf_token)),
-			              lx_el("button", lx_attr("type", "submit"),
-			                    lx_attr("title", "Pinned song — remove stops pinning it"),
-			                    lx_attr("class", "btn btn-danger text-xs py-1 px-2"),
-			                    lx_text("Remove")))
-			                .data.node);
-		}
-
-		bud_append(
-		        row, lx_el("div", lx_attr("class", "flex gap-2"),
-		                   lx_node(controls))
-		                     .data.node);
+		controls = lx_el("div", lx_attr("class", "flex gap-2"),
+		                 lx_node(set_form),
+		                 rem_form ? lx_node(rem_form) : lx_none())
+		                   .data.node;
 	}
 
-	return row;
+	return site_ui_item_row(s_title, song_href, key_label, controls);
 }
 
 static bud_node *ch_render_add_gig_link(const char *href)

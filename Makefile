@@ -85,6 +85,14 @@ integration-tests: all
 e2e-tests: test-data-dirs
 	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
 
+restart:
+	@pkill -f 'axil -C .* mods/core/core' || true
+	@sleep 0.5
+	@./start.sh &
+	@sleep 1
+	@curl -s --max-time 3 http://localhost:8080/ > /dev/null 2>&1 || { echo "Failed to start server"; exit 1; }
+	@echo "Server restarted on :8080"
+
 test: boundary-check unit-c-tests unit-tests pages-test e2e-tests
 
 boundary-check:

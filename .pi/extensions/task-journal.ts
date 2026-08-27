@@ -608,9 +608,9 @@ function TASK_TEMPLATE(name: string, goal = ""): string {
 		`- [ ] **1. Discovery**: Discovered how to build and run the project.`,
 		`- [ ] **2. Write Tests First**: Developed test(s) for the task BEFORE feature code.`,
 		`- [ ] **3. Feature Implementation**: Developed feature to satisfy tests.`,
-		`- [ ] **4. Build & Run**: Built and ran project with zero build errors.`,
+		`- [ ] **4. Build & Run**: Built and ran project with zero build errors. Restart server/process to verify clean boot.`,
 		`- [ ] **5. Clean Code**: Verified code has zero debug artifacts or leftover logs.`,
-		`- [ ] **6. Full Test Suite**: Executed FULL test suite with zero errors.`,
+		`- [ ] **6. Server Restart & Full Test Suite**: Restarted fresh server instance (e.g. \`make restart\` / kill and restart daemon) and executed FULL test suite with zero errors.`,
 		``,
 		`## In-Depth Analysis & Findings`,
 		`> Root cause analysis, architectural friction, abstraction opportunities.`,
@@ -707,6 +707,7 @@ When working on tasks:
 7. **Final Verification & Quality Gates**:
    - Zero compiler errors or warnings.
    - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
+   - **Server / Daemon Restart**: Always ensure a fresh instance of the server / test daemon is running (e.g. restart background servers or run clean boot test) before running final tests, so tests never run against stale in-memory state.
    - Full test suite (\`make test\`) must pass with zero errors.
 
 # Task Management & Verbal Requests

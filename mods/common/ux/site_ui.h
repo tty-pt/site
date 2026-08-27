@@ -210,6 +210,9 @@ int site_ui_build_media_html(
         const char *yt, const char *audio, const char *pdf, char *out,
         size_t out_sz);
 
+/* ── HTML sanitization for safe user markup ──────────────────── */
+char *site_ui_sanitize_html(const char *raw);
+
 /* ── WASM state helpers (D01) ─────────────────────────────────── */
 char *site_ui_state_head(const char *json);
 int site_ui_respond_with_state(

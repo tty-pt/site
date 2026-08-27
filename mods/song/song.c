@@ -29,37 +29,12 @@ static void song_meta_read(const char *path, song_cache_t *m)
 	str_list_normalize(m->type, m->type, sizeof(m->type));
 }
 
-static int
-song_viewer_pref_path(const char *user, const char *name, char *out, size_t sz)
-{
-	char s[PATH_MAX];
-	snprintf(s, sizeof(s), ".tty/%s", name);
-	return user_path_build(user, s, out, sz);
-}
-
-static int
-song_viewer_pref_write(const char *user, const char *name, const char *val)
-{
-	char d[PATH_MAX], p[PATH_MAX];
-	user_path_build(user, ".tty", d, sizeof(d));
-	ensure_dir_path(d);
-	song_viewer_pref_path(user, name, p, sizeof(p));
-	return write_file_path(p, val, val ? strlen(val) : 0);
-}
-
-static char *song_viewer_pref_read(const char *user, const char *name)
-{
-	char p[PATH_MAX];
-	if (song_viewer_pref_path(user, name, p, sizeof(p)) != 0)
-		return NULL;
-	return slurp_file(p);
-}
-
 XY_IMPL(int, song_get_viewer_zoom, const char *, user)
 {
-	char *r = song_viewer_pref_read(user, "chords-zoom");
-	int v = r ? atoi(r) : VIEWER_ZOOM_DEFAULT;
-	free(r);
+	char r[32] = { 0 };
+	if (user_pref_read(user, "chords-zoom", r, sizeof(r)) != 0)
+		return VIEWER_ZOOM_DEFAULT;
+	int v = atoi(r);
 	return (v < VIEWER_ZOOM_MIN || v > VIEWER_ZOOM_MAX)
 	               ? VIEWER_ZOOM_DEFAULT
 	               : v;
@@ -69,7 +44,7 @@ XY_IMPL(int, song_set_viewer_zoom, const char *, user, int, zoom)
 {
 	char b[16];
 	snprintf(b, sizeof(b), "%d", zoom);
-	return song_viewer_pref_write(user, "chords-zoom", b);
+	return user_pref_write(user, "chords-zoom", b);
 }
 
 XY_IMPL(int, song_transpose_root,
@@ -97,16 +72,13 @@ XY_IMPL(int, song_transpose_root,
 
 static void song_load_saved_prefs(const char *user, int *f, int *m)
 {
+	char buf[32] = { 0 };
 	if (!user || !user[0])
 		return;
-	char *rl = song_viewer_pref_read(user, "chords-latin");
-	char *rm = song_viewer_pref_read(user, "chords-media");
-	if (rl && atoi(rl))
+	if (user_pref_read(user, "chords-latin", buf, sizeof(buf)) == 0 && atoi(buf))
 		*f |= TRANSP_LATIN;
-	if (rm && atoi(rm))
+	if (user_pref_read(user, "chords-media", buf, sizeof(buf)) == 0 && atoi(buf))
 		*m = 1;
-	free(rl);
-	free(rm);
 }
 
 static void song_parse_prefs(
@@ -125,9 +97,9 @@ static void song_parse_prefs(
 		char pv[2];
 		pv[0] = (*f & TRANSP_LATIN) ? '1' : '0';
 		pv[1] = '\0';
-		song_viewer_pref_write(username, "chords-latin", pv);
+		user_pref_write(username, "chords-latin", pv);
 		pv[0] = (*m) ? '1' : '0';
-		song_viewer_pref_write(username, "chords-media", pv);
+		user_pref_write(username, "chords-media", pv);
 	}
 	if (qs[0]) {
 		char zb[16];
@@ -166,11 +138,11 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 	if (axil_query_param("v", b, sizeof(b)) >= 0)
 		song_set_viewer_zoom(u, atoi(b));
 	if (axil_query_param("b", b, sizeof(b)) >= 0)
-		song_viewer_pref_write(u, "chords-bemol", b);
+		user_pref_write(u, "chords-bemol", b);
 	if (axil_query_param("l", b, sizeof(b)) >= 0)
-		song_viewer_pref_write(u, "chords-latin", b);
+		user_pref_write(u, "chords-latin", b);
 	if (axil_query_param("m", b, sizeof(b)) >= 0)
-		song_viewer_pref_write(u, "chords-media", b);
+		user_pref_write(u, "chords-media", b);
 	if (axil_query_param("z", b, sizeof(b)) >= 0)
 		song_set_viewer_zoom(u, atoi(b));
 	axil_respond(fd, 204, "");
@@ -261,7 +233,10 @@ XY_IMPL(int, song_get_original_key, const char *, id)
 
 XY_IMPL(char *, song_get_pref, const char *, user, const char *, name)
 {
-	return song_viewer_pref_read(user, name);
+	char buf[1024];
+	if (user_pref_read(user, name, buf, sizeof(buf)) != 0)
+		return NULL;
+	return strdup(buf);
 }
 
 static const char *derive_song_lyrics(const void *ctx, const char *row_id, const char *field_name, void *user)
@@ -448,12 +423,10 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	const char *csrf_token = csrf_setup(fd);
 
 	{
-		const char *vals_in[7] = { meta.title, meta.type, meta.author, meta.yt, meta.audio, meta.pdf, data_val };
-		const char *vals_out[7];
 		pick_view_t pv;
 
-		pick_view_collect_fd(
-		        fd, song_ff, vals_in, vals_out, &pv);
+		pick_view_collect_desc_fd(
+		        fd, song_fields, &pv, NULL);
 
 		bud_node *form = song_form_content(
 		        1, ctx->id, &meta, data_val, csrf_token, &pv);
@@ -483,12 +456,10 @@ static int song_add_get_handler(int fd, char *body)
 	const char *csrf_token = csrf_setup(fd);
 
 	{
-		const char *vals_in[7] = { 0 };
-		const char *vals_out[7];
 		pick_view_t pv;
 
-		pick_view_collect_fd(
-		        fd, song_ff, vals_in, vals_out, &pv);
+		pick_view_collect_desc_fd(
+		        fd, song_fields, &pv, NULL);
 
 		bud_node *form = song_form_content(
 		        0, NULL, NULL, NULL, csrf_token, &pv);

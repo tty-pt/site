@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 #include "stoma/stoma.h"
@@ -76,4 +77,95 @@ void stoma_tokenize(
 		}
 		cb(start, (size_t)(p - start), user);
 	}
+}
+
+int stoma_list_contains(const char *list, const char *token)
+{
+	if (!list || !list[0] || !token || !token[0])
+		return 0;
+
+	char copy[8192];
+	char *tok;
+	char *saveptr;
+
+	snprintf(copy, sizeof(copy), "%s", list);
+	tok = strtok_r(copy, "\n", &saveptr);
+	while (tok) {
+		if (strcmp(tok, token) == 0)
+			return 1;
+		tok = strtok_r(NULL, "\n", &saveptr);
+	}
+	return 0;
+}
+
+int stoma_list_append(char *out, size_t out_sz, const char *token)
+{
+	size_t used;
+	size_t len;
+
+	if (!out || !token || !token[0])
+		return 0;
+	if (stoma_list_contains(out, token))
+		return 0;
+
+	used = strlen(out);
+	len = strlen(token);
+	if (used && used + 1 >= out_sz)
+		return -1;
+	if (used)
+		out[used++] = '\n';
+	if (used + len >= out_sz)
+		return -1;
+	memcpy(out + used, token, len);
+	used += len;
+	out[used] = '\0';
+	return 0;
+}
+
+static void str_trim_internal(char *s)
+{
+	char *p;
+	size_t len;
+
+	if (!s || !*s)
+		return;
+	p = s;
+	while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+		p++;
+	if (p != s)
+		memmove(s, p, strlen(p) + 1);
+	len = strlen(s);
+	while (len > 0 &&
+	       (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' ||
+	        s[len - 1] == '\n')) {
+		s[--len] = '\0';
+	}
+}
+
+int stoma_list_normalize(const char *input, char *out, size_t out_sz)
+{
+	char copy[8192];
+	char *tok;
+	char *saveptr;
+
+	if (!out || out_sz == 0)
+		return 0;
+
+	copy[0] = '\0';
+	if (input && input[0])
+		snprintf(copy, sizeof(copy), "%s", input);
+	out[0] = '\0';
+	if (!copy[0])
+		return 0;
+
+	tok = strtok_r(copy, "\r\n", &saveptr);
+	while (tok) {
+		char t[256];
+		snprintf(t, sizeof(t), "%s", tok);
+		str_trim_internal(t);
+		if (t[0])
+			stoma_list_append(out, out_sz, t);
+		tok = strtok_r(NULL, "\r\n", &saveptr);
+	}
+	return 0;
 }

@@ -87,84 +87,33 @@ XY_IMPL(int, source_refresh_row,
 	return hyle_source_refresh_row(fd, dataset_id, id);
 }
 
+static int get_single_field_cb(const char *name, char *buf, size_t sz, void *user)
+{
+	(void)user;
+	int fld_len = mpfd_len(name);
+	if (fld_len < 0) {
+		if (!buf || sz == 0) {
+			char tmp[1024];
+			int rl = axil_query_param(name, tmp, sizeof(tmp));
+			return (rl > 0 && rl < (int)(sizeof(tmp) - 1)) ? rl : -1;
+		}
+		return axil_query_param(name, buf, sz);
+	}
+	if (!buf || sz == 0)
+		return fld_len;
+	return mpfd_get(name, buf, sz);
+}
+
+static int get_multi_field_cb(const char *name, char *buf, size_t sz, void *user)
+{
+	(void)user;
+	return mpfd_get_all(name, buf, sz);
+}
+
 static unsigned source_parse_row_data(const source_def_t *def)
 {
-	unsigned hd;
-	size_t i;
-
-	hd = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
-	if (hd == 0)
-		return 0;
-
-	for (i = 0; i < def->field_count; i++) {
-		const source_field_t *f = &def->fields[i];
-		int fld_len;
-		char *val;
-
-		if (!f->writable)
-			continue;
-
-		if (f->type == SOURCE_FIELD_MULTI_REFERENCE) {
-			int all_len = mpfd_get_all(f->name, NULL, 0);
-
-			if (all_len > 0) {
-				val = malloc((size_t)all_len + 1);
-				if (!val) {
-					qmap_close(hd);
-					return 0;
-				}
-				if (mpfd_get_all(f->name, val,
-				        (size_t)all_len + 1) != all_len)
-				{
-					free(val);
-					qmap_close(hd);
-					return 0;
-				}
-				qmap_put(hd, f->name, val);
-				continue;
-			}
-			if (all_len == 0)
-				continue;
-		}
-
-		fld_len = mpfd_len(f->name);
-		if (fld_len < 0) {
-			char tmp[1024];
-			int rl = axil_query_param(f->name, tmp, sizeof(tmp));
-
-			if (rl <= 0 || rl >= (int)(sizeof(tmp) - 1))
-				continue;
-			val = malloc((size_t)rl + 1);
-			if (!val) {
-				qmap_close(hd);
-				return 0;
-			}
-			if (axil_query_param(f->name, val, (size_t)rl + 1) !=
-			    rl)
-			{
-				free(val);
-				qmap_close(hd);
-				return 0;
-			}
-			qmap_put(hd, f->name, val);
-			continue;
-		}
-		if (fld_len == 0)
-			continue;
-
-		val = malloc((size_t)fld_len + 1);
-		if (!val) {
-			qmap_close(hd);
-			return 0;
-		}
-		if (mpfd_get(f->name, val, (size_t)fld_len + 1) != fld_len) {
-			free(val);
-			qmap_close(hd);
-			return 0;
-		}
-		qmap_put(hd, f->name, val);
-	}
-	return hd;
+	return hyle_source_parse_row_data_custom(
+	        def, get_single_field_cb, get_multi_field_cb, NULL);
 }
 
 XY_IMPL(unsigned, source_parse_form, const char *, dataset_id)

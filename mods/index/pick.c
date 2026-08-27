@@ -746,45 +746,7 @@ XY_IMPL(int, pick_view_collect_scoped,
 
 static int pick_find_active_scope(const char *qs, char *scope_buf, size_t scope_sz)
 {
-	const char *p;
-	scope_buf[0] = '\0';
-	if (!qs || !qs[0])
-		return -1;
-
-	/* Check for replace=<scope> */
-	p = strstr(qs, "replace=");
-	if (p && (p == qs || p[-1] == '&' || p[-1] == '?')) {
-		p += 8;
-		const char *end = strchr(p, '&');
-		size_t len = end ? (size_t)(end - p) : strlen(p);
-		if (len > 0 && len < scope_sz) {
-			memcpy(scope_buf, p, len);
-			scope_buf[len] = '\0';
-			return atoi(scope_buf);
-		}
-	}
-
-	/* Check for pick_q_<key>__<scope>= or pick_page_<key>__<scope>= */
-	p = qs;
-	while ((p = strstr(p, "__")) != NULL) {
-		const char *start = p + 2;
-		const char *eq = strchr(start, '=');
-		if (eq && eq > start) {
-			const char *k = p;
-			while (k > qs && k[-1] != '&' && k[-1] != '?')
-				k--;
-			if (strncmp(k, "pick_q_", 7) == 0 || strncmp(k, "pick_page_", 10) == 0) {
-				size_t len = (size_t)(eq - start);
-				if (len > 0 && len < scope_sz) {
-					memcpy(scope_buf, start, len);
-					scope_buf[len] = '\0';
-					return atoi(scope_buf);
-				}
-			}
-		}
-		p += 2;
-	}
-	return -1;
+	return hyle_bud_pick_find_active_scope(qs, scope_buf, scope_sz);
 }
 
 XY_IMPL(int, pick_view_collect_auto,

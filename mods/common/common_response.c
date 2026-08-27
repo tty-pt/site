@@ -1,5 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
@@ -147,6 +151,68 @@ XY_IMPL(int, redirect_to_item,
 	char loc[256];
 	snprintf(loc, sizeof(loc), "/%s/%s", module, id);
 	return axil_redirect(fd, loc);
+}
+
+XY_IMPL(int, respond_item_file,
+	int, fd,
+	const char *, item_path,
+	const char *, filename,
+	const char *, allowed_exts)
+{
+	char full_path[PATH_MAX];
+	char stem[256];
+	size_t flen, slen = 0;
+	const char *dot;
+
+	if (!item_path || !filename || !filename[0])
+		return respond_error(fd, 404, "Not found");
+
+	dot = strrchr(filename, '.');
+	flen = strlen(filename);
+	slen = dot ? (size_t)(dot - filename) : flen;
+	if (slen >= sizeof(stem))
+		return respond_error(fd, 404, "Not found");
+	memcpy(stem, filename, slen);
+	stem[slen] = '\0';
+	if (!is_safe_id(stem))
+		return respond_error(fd, 404, "Not found");
+
+	item_child_path(item_path, filename, full_path, sizeof(full_path));
+	return axil_respond_file(fd, full_path, allowed_exts);
+}
+
+XY_IMPL(int, site_ui_respond_item_detail,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	bud_node *, body)
+{
+	char path[256];
+	char page_title[512];
+	int is_owner;
+	bud_node *layout;
+
+	if (!ctx || !module || !body)
+		return server_error(fd, "Invalid detail context");
+
+	is_owner = (ctx->username && ctx->username[0])
+	        ? item_owner_check(ctx->item_path, ctx->username)
+	        : 0;
+
+	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
+	if (title && title[0])
+		snprintf(page_title, sizeof(page_title), "%s: %s", module, title);
+	else
+		snprintf(page_title, sizeof(page_title), "%s: %s", module, ctx->id);
+
+	layout = site_ui_layout(
+	        page_title, path, site_ui_module_icon(module), ctx->username,
+	        site_ui_item_menu(module, ctx->id, is_owner), body);
+
+	return site_ui_respond_page(
+	        fd, page_title, path, site_ui_module_icon(module),
+	        ctx->username, NULL, module, layout);
 }
 
 XY_IMPL(int, site_ui_respond_page,
