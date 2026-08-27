@@ -206,8 +206,6 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
   contract `§5`, data invariants `§6`). `docs/DESIGN.md` is the philosophy
   (evoke, not reimplement). `GOALS` is the checklist that keeps both
   true.
-- `docs/AUDIT.md` tracks security/correctness debt. Fix GOALS first, then
-  AUDIT items stop recurring.
 
 ## 7. Related docs
 
@@ -218,5 +216,4 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 - `docs/WASM-BRIDGE.md` — bridge/patch pitfalls
 - `docs/SSR-CONTRACT.md` — no-JS markup contract
 - `docs/BUILD.md` — wasm rebuild trap, stale headers, cache bust
-- `docs/AUDIT.md` — technical debt backlog and security audit
 

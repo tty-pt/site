@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,15 +108,44 @@ XY_IMPL(int, write_file_path,
 	const char *, buf,
 	size_t, sz)
 {
-	FILE *fp = fopen(path, "w");
+	char tmp_path[PATH_MAX];
+	int fd;
+	ssize_t written;
 
-	if (!fp)
+	if (!path || !path[0])
 		return -1;
-	if (sz > 0 && fwrite(buf, 1, sz, fp) != sz) {
-		fclose(fp);
+
+	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d", path, (int)getpid());
+
+	fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+	if (fd < 0)
+		return -1;
+
+	if (sz > 0) {
+		written = write(fd, buf, sz);
+		if (written < 0 || (size_t)written != sz) {
+			close(fd);
+			unlink(tmp_path);
+			return -1;
+		}
+	}
+
+	if (fsync(fd) != 0) {
+		close(fd);
+		unlink(tmp_path);
 		return -1;
 	}
-	fclose(fp);
+
+	if (close(fd) != 0) {
+		unlink(tmp_path);
+		return -1;
+	}
+
+	if (rename(tmp_path, path) != 0) {
+		unlink(tmp_path);
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -305,9 +335,37 @@ static int remove_path_recursive(const char *path)
 	return rmdir(path);
 }
 
+static int is_safe_var_subpath(const char *path)
+{
+	char resolved[PATH_MAX];
+	char var_root[PATH_MAX];
+
+	if (!path || !path[0])
+		return 0;
+
+	if (!realpath(path, resolved))
+		return 0;
+
+	if (!realpath("var", var_root) && !realpath("./var", var_root)) {
+		/* Fallback if var doesn't resolve directly */
+		return (strstr(resolved, "/var/") != NULL);
+	}
+
+	size_t vlen = strlen(var_root);
+	if (strncmp(resolved, var_root, vlen) != 0)
+		return 0;
+
+	if (resolved[vlen] != '/' && resolved[vlen] != '\0')
+		return 0;
+
+	return 1;
+}
+
 XY_IMPL(int, item_remove_path_recursive, const char *, item_path)
 {
 	if (!item_path || !item_path[0])
+		return -1;
+	if (!is_safe_var_subpath(item_path))
 		return -1;
 	return remove_path_recursive(item_path);
 }

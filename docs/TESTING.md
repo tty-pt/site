@@ -41,9 +41,8 @@ task complete.
 
 ## Pre-existing failures (not caused by local changes)
 
-- `start.sh` and `scripts/watch.sh` always force `AUTH_SKIP_CONFIRM=1`
-  (unconditional export). This is a development convenience, not production
-  behavior. See `docs/AUDIT.md` F10.
+- `start.sh` and `scripts/watch.sh` enable `AUTH_SKIP_CONFIRM=1` in dev
+  mode. This is a development convenience, not production behavior.
 - `make -C external/hyle test` `zig-test` step fails when `zig` is not
   installed (unrelated to the C suite).
 - `tests/pages/20-song-search.sh` expects the "No items" empty state: a

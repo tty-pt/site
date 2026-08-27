@@ -16,12 +16,14 @@ if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
 	exit 1
 fi
 
-# Check for AUTH_SKIP_CONFIRM environment variable
+# Check for AUTH_SKIP_CONFIRM environment variable or dev environment
+if [ "$AUTH_ENV" = "dev" ] && [ -z "$AUTH_SKIP_CONFIRM" ]; then
+    export AUTH_SKIP_CONFIRM=1
+fi
+
 if [ -n "$AUTH_SKIP_CONFIRM" ]; then
     echo "Starting axil with AUTH_SKIP_CONFIRM=$AUTH_SKIP_CONFIRM"
 fi
-
-export AUTH_SKIP_CONFIRM=1
 if test ! -z "$GDB"; then
   gdb --args axil -C "$SCRIPT_DIR" -p 8080 -d -m mods/core/core
 else

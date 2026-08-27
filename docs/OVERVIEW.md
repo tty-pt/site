@@ -99,4 +99,3 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Touch the WASM bridge / patch ops | `docs/WASM-BRIDGE.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |
-| Deep audit: full issue catalog, proposed fixes, and technical debt backlog | `docs/AUDIT.md` |

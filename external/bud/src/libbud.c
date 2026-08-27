@@ -917,6 +917,25 @@ bud_component_render(const bud_component *component, const void *props)
 	return component->render(component->ctx, props);
 }
 
+static int bud_is_valid_name(const char *name)
+{
+	const char *p;
+	if (!name || !name[0])
+		return 0;
+	if (!((name[0] >= 'a' && name[0] <= 'z') ||
+	      (name[0] >= 'A' && name[0] <= 'Z') ||
+	      name[0] == '_'))
+		return 0;
+	for (p = name + 1; *p; p++) {
+		char c = *p;
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		    (c >= '0' && c <= '9') || c == '_' || c == '-' || c == ':')
+			continue;
+		return 0;
+	}
+	return 1;
+}
+
 int bud_set_attr(bud_node *node, const char *name, const char *value)
 {
 	bud_attr *attr;
@@ -924,7 +943,7 @@ int bud_set_attr(bud_node *node, const char *name, const char *value)
 	char *name_copy;
 	char *value_copy;
 
-	if (!node || node->kind != BUD_NODE_ELEMENT || !name) {
+	if (!node || node->kind != BUD_NODE_ELEMENT || !name || !bud_is_valid_name(name)) {
 		return -1;
 	}
 
