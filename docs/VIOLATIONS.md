@@ -9,8 +9,7 @@ correctness, and performance. This file is limited to module encapsulation,
 external-library independence, WASM architecture/bundling, and developer
 ergonomics. Related audit IDs are noted below.
 
-Reviewed: **2026-08-24** — **0 open violations**. Last fixed batch
-2026-08-22 `M01-M07` `L01-L03` `W01-W08` `D01-D05` (24/24 Fixed). Full detail
+Reviewed: **2026-08-27** — **0 open violations**. All encapsulation boundaries verified: `external/bud` (pure UI, 0 DB), `external/hyle` (pure schema/query, 0 DOM), `libhyle-source` (persistence engine, pluggable drivers), `libhyle-bud` (pure component bridge). Full detail
 archived in `git log -- docs/VIOLATIONS.md`.
 
 ## Summary

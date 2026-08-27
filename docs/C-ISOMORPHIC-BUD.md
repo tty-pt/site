@@ -54,22 +54,35 @@ guarantees the native tree and the WASM tree are structurally identical — see
 
 ## 2. The state table (fields.h pattern)
 
-`mods/song/fields.h` and `mods/gig/fields.h` define an `app_state_t` plus a
-`bud_field_desc_t` table (in bud.h) that drives BOTH environments:
+`mods/song/fields.h`, `mods/gig/fields.h`, `mods/grp/fields.h`, and `mods/poem/fields.h`
+define module schemas using canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`)
+and `field_macros.h` macros:
 
-- server: the table feeds the `source_def_to_qmap` generators (mods/source),
-- WASM: `bud_state_apply(&app_state, fields, json)` fills the struct from the
-  `bud-state` JSON by key.
+- server: the table feeds `hyle_source_register_def` (storage, validation, persistence),
+- WASM: `hyle_bud_state_apply_len(&app_state, fields, json, len)` fills the struct from the
+  `bud-state` JSON by key using stride-aware unpackers (`bud_state_apply_stride_len`).
 
 Pattern:
 
 ```c
-typedef struct { char title[256]; int transpose; /* … */ } app_state_t;
-#define OVERLAY_STR(field, type, dest, size) \
-	{ #field, offsetof(type, field), size, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0, NULL }
-#define OVERLAY_INT(field, type, dest) \
-	{ #field, offsetof(type, field), sizeof(int), 1, 0, 0, 0, 0, 0, 0, NULL, NULL, 0, NULL }
-static const bud_field_desc_t song_fields[] = { … };
+#include <hyle/schema.h>
+#include "../../common/field_macros.h"
+
+typedef struct {
+    char id[64];
+    char title[256];
+    char type[2048];
+    int transpose;
+    char data[65536];
+} song_cache_t;
+
+static const hyle_schema_desc_t song_fields[] = {
+    REC_FIELD(id, song_cache_t, id, 64),
+    REC_FIELD(title, song_cache_t, title, 256),
+    MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and"),
+    EXCL_FIELD_VF(data, song_cache_t, data, 65536, "data.txt"),
+    FIELD_END
+};
 ```
 
 Use `bud_json_str` / `bud_json_int` / `bud_json_data` /

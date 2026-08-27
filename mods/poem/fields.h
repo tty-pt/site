@@ -12,7 +12,7 @@
 #ifndef POEM_FIELDS_H
 #define POEM_FIELDS_H
 
-#include "bud/bud.h"
+#include <hyle/schema.h>
 #include <stddef.h>
 #include "../common/field_macros.h"
 
@@ -24,7 +24,7 @@ typedef struct {
 
 /* ── Poem record fields ──────────────────────────────────────── */
 
-static const bud_field_desc_t poem_fields[] = {
+static const hyle_schema_desc_t poem_fields[] = {
 	REC_FIELD(id, poem_cache_t, id, 128, 1, 0, 0, 0),
 	REC_FIELD(title, poem_cache_t, title, 256, 1, 1, 1, 1),
 	EXCL_FIELD(owner, poem_cache_t, owner, 32, BUD_QM_STR, 1),

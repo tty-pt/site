@@ -168,44 +168,25 @@ int bud_json_array_for_each_key_len(
         const char *json, size_t len, const char *key,
         void (*fn)(const char *elem, size_t len, void *user), void *user);
 
-/* Table-driven state: one field definition drives wasm_init, wasm_set_* */
-#ifndef HYLE_SCHEMA_DESC_DEFINED
-#define HYLE_SCHEMA_DESC_DEFINED 1
-typedef struct hyle_schema_desc {
+/* Table-driven state: one field definition drives wasm_init, wasm_set_*
+ * Pure UI binder — only key/offset/size/is_int/kind. Zero DB/storage concepts. */
+typedef struct bud_field_desc {
 	const char *key;
 	size_t offset;
 	size_t size;
 	int is_int;
-	int kind; /* 0=include, 1=exclude */
-	/* Server-side extensions (unused by WASM, used by source generators) */
-	int qm_type;
-	int source_type;
-	int writable;
-	int required;
-	size_t min_length;
-	const char *ref_source;
-	const char *ref_inverse;
-	int in_meta;
-	const char *file;
-	/* Server-side filter-style UI hint (e.g. "dropdown"); unused by WASM.
-	 */
-	const char *filter_style;
-	/* Server-side combine-mode hint ("and"/NULL); unused by WASM. */
-	const char *filter_mode;
-} hyle_schema_desc_t;
-#endif
-
-typedef struct hyle_schema_desc bud_field_desc_t;
-
-/* Server-side qmap type constants — must match qmap.h QM_* values */
-#define BUD_QM_STR 2
-#define BUD_QM_VSTR 8
-#define BUD_QM_MULTI_REF 7
+	int kind;
+} bud_field_desc_t;
 
 void bud_state_apply(
         void *state, const bud_field_desc_t *fields, const char *json);
 void bud_state_apply_len(
         void *state, const bud_field_desc_t *fields, const char *json,
+        size_t len);
+void bud_state_apply_stride(
+        void *state, const void *fields, size_t field_stride, const char *json);
+void bud_state_apply_stride_len(
+        void *state, const void *fields, size_t field_stride, const char *json,
         size_t len);
 void bud_state_apply_array(
         const char *json, const char *key, void *array_out, size_t elem_size,
@@ -214,6 +195,10 @@ void bud_state_apply_array_len(
         const char *json, size_t len, const char *key, void *array_out,
         size_t elem_size, int *count_out, int max_elems,
         const bud_field_desc_t *schema);
+void bud_state_apply_array_stride_len(
+        const char *json, size_t len, const char *key, void *array_out,
+        size_t elem_size, int *count_out, int max_elems,
+        const void *schema, size_t schema_stride);
 
 /* Debug helpers — available in all builds, most useful with BUD_DEBUG */
 void bud_node_set_src(bud_node *node, const char *file, int line);

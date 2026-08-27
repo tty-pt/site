@@ -12,20 +12,21 @@ The grp module provides:
 
 ## Architecture
 
-- **Backend:** `grp.c` - C module with axil HTTP handlers
-- **Frontend:** `ux/` directory handles HTML rendering via `libbud` (e.g. `detail.c`, `edit.c`)
-- **Storage:** Filesystem + qmap index database
-- **Dependencies:** auth, common, mpfd
+- **Backend:** `grp.c` - C module with axil HTTP handlers; generic Add/Edit CRUD handled via `mods/index` (`index_open`)
+- **Frontend:** `ux/` directory handles detail and repertoire rendering (`detail.c`, `all.c`) using `site_ui_item_row` and `site_ui_action_form`
+- **Storage:** Filesystem persistence via `libhyle-source` (`store_fs`)
+- **Dependencies:** auth, common, mpfd, index, song
 
 ## Storage
 
 ### Directory Structure
 ```
 var/grp/
-├── index.db              # qmap database: grp_id → title
 └── {grp_id}/
-    ├── .owner            # Plain text username
-    └── data.txt          # Grp metadata (title, formats)
+    ├── owner             # Plain text username
+    ├── title             # Group title
+    ├── formats           # Song format categories
+    └── songs             # Repertoire song IDs
 ```
 
 ## Troubleshooting

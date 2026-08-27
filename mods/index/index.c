@@ -14,11 +14,8 @@
 #include "./../mpfd/mpfd.h"
 #include "./../auth/auth.h"
 
-typedef void (*index_cleanup_fn)(const char *id);
-typedef size_t (*index_format_fn)(
-        const char *id, const char *val, char *out, size_t out_sz);
-typedef int (*index_detail_handler_fn)(int fd, char *body);
-typedef int (*index_handler_fn)(int fd, char *body);
+#define INDEX_IMPL
+#include "index.h"
 
 #define MAX_MODULES 64
 
@@ -303,11 +300,6 @@ static int index_generic_add_handler(int fd, char *body)
 		item_remove_path_recursive(items_path);
 		return server_error(fd, "Failed to record ownership");
 	}
-	if (write_meta_file(items_path, "title", title, (size_t)title_len) != 0)
-	{
-		item_remove_path_recursive(items_path);
-		return server_error(fd, "Failed to write title");
-	}
 
 	unsigned data_handle = source_parse_form(dataset_id);
 	if (!data_handle) {
@@ -346,24 +338,9 @@ static int index_generic_edit_authorized(
 		return server_error(fd, "OOM");
 
 	int rc = source_update_item(fd, dataset_id, ctx->id, data_handle);
-	if (rc != 0) {
-		qmap_close(data_handle);
-		return server_error(fd, "Failed to update item data");
-	}
-
 	qmap_close(data_handle);
-
-	/* Update title in meta file if provided */
-	char title[256];
-	int title_len = mpfd_get("title", title, sizeof(title));
-	if (title_len > 0) {
-		if (item_path_build(
-		            fd, module, ctx->id, items_path,
-		            sizeof(items_path)) == 0)
-		{
-			write_meta_file(
-			        items_path, "title", title, (size_t)title_len);
-		}
+	if (rc != 0) {
+		return server_error(fd, "Failed to update item data");
 	}
 
 	return redirect_to_item(fd, module, ctx->id);
@@ -723,6 +700,28 @@ XY_IMPL(int, check_item_access,
 		return -1;
 
 	return 0;
+}
+
+XY_IMPL(uint32_t, index_module_init, const index_module_def_t *, def)
+{
+	if (!def || !def->name)
+		return 0;
+
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", def->name);
+
+	uint32_t rid = source_setup(
+	        dataset_id, def->key_field, def->record_size,
+	        def->items_path ? def->items_path : "",
+	        def->schema, def->field_count, def->flags, def->list_view);
+
+	index_open(
+	        def->display_name ? def->display_name : def->name,
+	        dataset_id, NULL, NULL, NULL, NULL, NULL, NULL);
+
+	register_standard_item_handlers(def->name, &def->handlers);
+
+	return rid;
 }
 
 void xy_install(void)

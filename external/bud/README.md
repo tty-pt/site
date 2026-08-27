@@ -20,9 +20,9 @@ It provides:
 - host-driven event dispatch with bubbling and stop-propagation
 - mount, update, and unmount lifecycle hooks
 - a raw WASM host bridge shape for patch emission and event forwarding
-- JSON field extraction helpers (no json-c dependency) and a table-driven state
-  binder (`bud_state_apply` / `bud_field_desc_t`) that drives both server-side
-  field generators and WASM `wasm_init`
+- JSON field extraction helpers (no json-c dependency) and a table-driven 5-field UI state
+  binder (`bud_state_apply_stride_len` / `bud_field_desc_t`: `key`, `offset`, `size`, `is_int`, `kind`)
+  for WASM `wasm_init` and UI hydration with zero database or storage dependencies
 
 ## Framework-pair model
 

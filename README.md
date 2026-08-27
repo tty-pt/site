@@ -1,7 +1,7 @@
 # Site
 
-Pure-C music site (poem, song, songbook, choir) on top of the axil HTTP library,
-the libxylem XY module system, and the bud HTML builder.
+Pure-C music site (poem, song, gig, grp) on top of the axil HTTP library,
+the libxylem XY module system, the hyle data engine, and the bud HTML builder.
 
 > For development conventions, see [AGENTS.md](./AGENTS.md).
 
@@ -11,6 +11,10 @@ the libxylem XY module system, and the bud HTML builder.
 - All request handlers are C functions compiled into `mods/*/*.so`, loaded via
   the libxylem XY module system (`RTLD_LOCAL` — cross-module calls go through
   XY dispatch only).
+- `hyle` provides the pure schema, query, and full-text search (FTS) engine.
+- `libhyle-source` (`external/hyle/c/libhyle-source`) provides dataset persistence,
+  metadata I/O, and pluggable storage drivers (`store_fs`, `store_mem`, custom stores).
+- `libhyle-bud` (`external/hyle/c/libhyle-bud`) bridges Hyle data components to Bud DOM rendering.
 - HTML is built server-side with **bud** (a C DOM/SSR scaffold). There is no
   Rust SSR / Dioxus / Fresh / Deno proxy in the request path.
 - The only WASM is C compiled to `wasm32-wasi` from the same sources as the
@@ -22,7 +26,7 @@ the libxylem XY module system, and the bud HTML builder.
 ## Quick Start
 
 ```bash
-mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items
+mkdir -p var/poem var/song var/gig var/grp var/song.types
 
 make
 make watch
@@ -86,13 +90,18 @@ make debug-clean     # Clear debug logs
 ## Requirements
 
 - C compiler (`clang` for WASM builds)
-- `axil`, `xy`, `qmap` (git submodules under `external/`)
+- `axil`, `libxylem`, `libqmap`, `stoma`, `hyle`, `bud` (submodules under `external/`)
 - Deno, only for the Playwright e2e test runner
 
 ## Modules
 
-- `/auth` — registration, login, sessions
-- `/poem` — poem upload/listing
-- `/song` — song detail, transpose, chord charts
-- `/choir` — choirs (songbook owners, format categories)
-- `/songbook` — songbooks with per-song transpose and choir formats
+- `/auth` — registration, login, sessions, and CSRF protection
+- `/common` — shared response, storage, and declarative UI builders (`site_ui_form_from_desc`, `site_ui_picker`)
+- `/source` — dataset registration and HTTP API transport over `libhyle-source`
+- `/index` — generic CRUD routes, list views, and picker option endpoints
+- `/poem` — poem upload and listing
+- `/song` — song detail, chord charts, transposition, and media attachments
+- `/grp` — group repertoire management and format categories
+- `/gig` — gigs / setlists with ordered songs, transpose settings, and formats
+- `/mpfd` — multipart/form-data parser
+- `/site_chrome` — WASM client chrome enhancement (`htdocs/site_chrome.wasm`)

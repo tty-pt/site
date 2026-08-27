@@ -3,11 +3,27 @@
 
 #include <ttypt/xy-mod.h>
 #include <hyle-bud/hyle-bud.h>
+#include <hyle-source/hyle_source.h>
+#include "../common/common.h"
+#include "../source/source.h"
 #include "ux/list_state.h"
 #include "ux/site_ui.h"
 
 #include <hyle/schema.h>
 typedef hyle_schema_desc_t source_desc_t;
+
+typedef struct {
+	const char *name;
+	const char *display_name;
+	const source_desc_t *schema;
+	int field_count;
+	size_t record_size;
+	const char *key_field;
+	const char *items_path;
+	unsigned flags;
+	const source_list_view_t *list_view;
+	standard_item_handlers_t handlers;
+} index_module_def_t;
 
 typedef void (*index_cleanup_fn)(const char *id);
 
@@ -21,6 +37,7 @@ typedef size_t (*index_format_fn)(
 typedef int (*index_handler_fn)(int fd, char *body);
 typedef int (*index_detail_handler_fn)(int fd, char *body);
 
+#ifndef INDEX_IMPL
 XY_DECL(unsigned, index_open,
 	const char *, name,
 	const char *, dataset_name,
@@ -145,5 +162,7 @@ XY_DECL(int, pick_view_collect_desc_fd,
 	pick_view_t *, pv,
 	int *, active_scope_out);
 
+XY_DECL(uint32_t, index_module_init, const index_module_def_t *, def);
+#endif /* INDEX_IMPL */
 
 #endif

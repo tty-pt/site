@@ -5,16 +5,23 @@ through the data layer.
 
 ## 1. Where the schema strings live
 
-Two separate concepts, don't conflate them:
+Three separate concepts, don't conflate them:
 
-1. **hyle's registry schema** — the real data schema used by the query/FT S
-   layer (`external/hyle/src/source.c`, `qmap_record_field_t`). Parsed from
-   record layouts / `bud_field_desc_t`, NOT from JSON strings.
-2. **The site's schema JSON strings** — built by `source_build_schema_hd`
-   (`mods/source/source.c`) and consumed by the native list filler
+1. **Canonical data schema (`hyle_schema_desc_t`)** — defined in
+   `external/hyle/include/hyle/schema.h`. Pure C descriptor specifying data types
+   (`qm_type`, `source_type`), struct offsets/sizes, validation rules (`required`,
+   `min_length`), persistence targets (`in_meta`, `file`), and foreign keys
+   (`ref_source`, `ref_inverse`). Used by `libhyle-source`, `hyle`, and
+   declarative form builders.
+2. **UI state binder (`bud_field_desc_t`)** — defined in `external/bud/include/bud/bud.h`.
+   Contains **only 5 UI layout fields** (`key`, `offset`, `size`, `is_int`, `kind`).
+   Purely used by `libbud` / WASM hydration (`bud_state_apply_stride_len`) with
+   zero database or storage concepts.
+3. **The site's schema JSON strings** — built by `source_build_schema_hd`
+   (`mods/source/source.c` / `libhyle-source`) and consumed by the native list filler
    (`idx_schema_collect`, `idx_resolve_filter_options`, `idx_resolve_refs`).
    **hyle never parses these strings.** They are site-level metadata.
-3. **List-view registration** — a framework-neutral `source_list_view_t`
+4. **List-view registration** — a framework-neutral `source_list_view_t`
    borrowed by an item source. It declares ordered columns and user-facing
    labels without changing hyle's registry schema.
 

@@ -18,7 +18,7 @@ make clean / make distclean
   `external/hyle` + `external/hyle/c/libhyle-bud` code tidy manually (tabs,
   ≤4 nest) — the site Makefile does not tidy them.
 - Site `make` is GNU make; `build.mk:22` adds
-  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -Iexternal/libxylem/include -Iexternal/bud/include -Iexternal/hyle/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
+  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
 
 ## CRITICAL: stale system headers shadow the repo for native builds
 
@@ -63,7 +63,7 @@ defaults to `all: dirs $(TARGET) $(WASM_TARGETS)`. `VERSION_GEN`
 
 ## Profiles and bootstrap
 
-`PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS`.
+`PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/stoma`, `hyle`, `hyle-source`, `bud`, `hyle-bud`, `axil`, `qmap`, `libxylem` (`axil-lib`/`qmap-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS`.
 
 WASM allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (blocking in `make all`).
 

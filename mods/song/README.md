@@ -13,11 +13,11 @@ The song module provides functionality for:
 ## Architecture
 
 - **Backend:** `song.c` - C module with axil HTTP handlers
-- **SSR:** Server-side HTML built with bud (via `mods/index` + common layout)
-- **Dataset:** Uses the common dataset system for loading song data
-- **Storage:** Filesystem + qmap index database
+- **SSR & Forms:** Server-side HTML built with bud and `site_ui_form_from_desc` (via `mods/index` + common layout)
+- **Dataset & Storage:** `libhyle-source` filesystem driver (`store_fs`) storing `var/song/{id}/`
+- **Schema:** Defined in `fields.h` using `hyle_schema_desc_t` and `field_macros.h`
 - **Transposition:** C library (`lib/transp/`) for chord transposition
-- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`)
+- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
 
 ### SSR Route Pattern
 

@@ -143,10 +143,10 @@ const char *site_ui_pick_form_id(const form_field_t *fields);
 
 /* ── Declarative Schema-Driven Form Builder ─────────── */
 /* Builds a complete POST form (and sibling GET form if ref fields exist)
- * directly from bud_field_desc_t schema table and struct data. */
+ * directly from hyle_schema_desc_t schema table and struct data. */
 bud_node *site_ui_form_from_desc(
         const char *action, const char *cancel_href, const char *submit_label,
-        const bud_field_desc_t *desc, const void *struct_ptr,
+        const hyle_schema_desc_t *desc, const void *struct_ptr,
         const char *csrf_token, const pick_view_t *pv,
         const char *vstr_val);
 

@@ -78,43 +78,46 @@ Libraries are independent, small-surface, and do not know about the
 site or each other except documented deps.
 
 ```
-qmap            bottom leaf
-stoma  → qmap   fold only
-hyle   → stoma+qmap
-hyle-bud → hyle+bud+qmap   ONLY bridge that may depend on bud
-bud             depends on nothing
-libxylem → qmap+qsys
-axil     → xylem+qmap+qsys+ssl
-site mods → assemble axil+XY+hyle(+hyle-bud)+bud
+qmap                    bottom leaf
+stoma          → qmap   fold only
+hyle           → stoma+qmap (canonical schema, query, FTS)
+libhyle-source → hyle+qmap+stoma+json-c (persistence, store drivers, DSV, JSON)
+hyle-bud       → hyle+bud+qmap   ONLY bridge that may depend on bud
+bud                     pure DOM/JSX/WASM, 5-field UI binder, depends on nothing
+libxylem       → qmap+qsys
+axil           → xylem+qmap+qsys+ssl
+site mods      → assemble axil+XY+hyle(+libhyle-source+libhyle-bud)+bud
 ```
 
 Verify with `grep -r bud external/hyle/src include/hyle` must be `0`
-before every commit (`ARCHITECTURE.md:§2`).
+before every commit (`ARCHITECTURE.md:§2`). `external/bud/include` and `external/bud/src`
+must contain `0` database/storage includes.
 
 ### 2.2 Rules
 
 - `external/hyle/src` + `include/hyle` contain **no** `bud`/`lx_`/`bud_`
-  symbols. Only `external/hyle/c/libhyle-bud` may include
-  `bud/bud.h` (`external/hyle/c/libhyle-bud/include/hyle-bud/hyle-bud.h`).
-  It links `LDLIBS = -lhyle -lbud -lqmap` and nothing else.
+  symbols. `external/hyle/include/hyle/schema.h` defines canonical data schemas
+  (`hyle_schema_desc_t`) independently of any UI renderer.
 - `external/bud` contains **no** `qmap_`/`hyle`/`xy_`/`stoma`/`axil`
-  includes (`external/bud/src/libbud.c` only `bud.h`/`bud_app.h`).
+  includes (`external/bud/src/libbud.c` only `bud.h`/`bud_app.h`). `bud_field_desc_t`
+  is a pure 5-field UI state binder (`key`, `offset`, `size`, `is_int`, `kind`).
+- Only `external/hyle/c/libhyle-bud` may include `bud/bud.h`
+  (`external/hyle/c/libhyle-bud/include/hyle-bud/hyle-bud.h`). It links
+  `LDLIBS = -lhyle -lbud -lqmap` and nothing else.
+- `external/hyle/c/libhyle-source` is the standalone persistence engine, linking
+  `-lhyle -lqmap -lstoma -ljson-c`.
 - `stoma` exposes `stoma_fold` as pure `string.h`/`ctype.h`
   (`external/stoma/src/token.c:11`); its `libstoma` TU may use `qmap`
   but `token.c` does not.
 - Site modules that need `hyle-bud` rendering (`gig`, `grp`, `index`)
   declare it explicitly:
   `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include`
-  and `EXTRA_LDLIBS += -lhyle-bud`. Every other module must fail to
-  `#include <hyle-bud/hyle-bud.h>` — that failure is the guard.
+  and `EXTRA_LDLIBS += -lhyle-bud`.
   `hyle-bud` is pure `bud` + C (`filter.c`, `table.c` via `hyle-bud-wasm.mk`);
   its use in `mods/*/ux` for filters/tables **is** the sanctioned UX
   bridge (see `CONVENTIONS` WASM purity).
   Note: `grp` uses `hyle-bud` for native SSR only (no `WASM_TARGETS` in its
   Makefile); `index` and `gig` also produce WASM bundles.
-- No `hyle` crank should need `bud.h`. `mods/source/source.c`
-  including `bud/bud.h` for `bud_field_desc_t` converters is a layer
-  blur; converters belong in `common` or `hyle-bud`.
 
 ## 3. WASM enhancements — easy to code, smart bundling
 

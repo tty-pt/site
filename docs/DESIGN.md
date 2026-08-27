@@ -22,7 +22,7 @@ abstraction is wrong. Push the boilerplate into the helper, not the caller.
 ### 1.6 Well-made abstractions & minimal site-specific surface (blocking)
 
 - **Thin feature modules:** `poem/song/gig/grp` target ≈150 lines, `xy_install` ≈15 lines (`poem.c` exemplar). If handler needs 30-line boilerplate, extend the abstraction — do not copy into the module.
-- **Evoke, don’t branch:** one row in `fields.h` → `source_def_to_qmap` + `META_READ` + `bud_state_apply` (`§4.4`); `register_standard_item_handlers("song",&h)` + `ICTX_*` (`§4.2`); `source_list_view_t` (`source.h:50`) consumed by `list_fill_state` — never `switch(module)` in `common/index` (`CONVENTIONS`).
+- **Evoke, don’t branch:** one row in `fields.h` → `hyle_source_register_def` + `hyle_bud_state_apply` (`§4.4`); `index_module_init` + `register_standard_item_handlers("song",&h)` + `ICTX_*` (`§4.2`); `source_list_view_t` (`source.h:50`) consumed by `list_fill_state` — never `switch(module)` in `common/index` (`CONVENTIONS`).
 - **We own the http server — invent well:** prefer extending `axil` / `hyle` / `bud` over shimming in `common`. Libraries must stay site-agnostic (`grep -rn bud external/hyle/src` must be 0).
 - **Site-specific surface minimal (blocking):** `common` is reusable *within this site*, not a per-feature dumping ground. Adding a new module must not edit `common` — use per-module registration (`source_list_view_t`). Enforced by `scripts/check-module-boundaries.sh`.
 
@@ -34,9 +34,10 @@ Grandfathered surface (`site_paths.c:68` icon table, etc.) is tracked in `VIOLAT
 external libraries (neutral, self-contained)
    axil   HTTP primitives            libxylem  XY dispatch (dlopen hidden)
    qmap   opaque data store          stoma     tokenization/search
-   hyle   data layer (NO component symbols)
-   hyle-bud  the ONLY bud-dependent binding (external/hyle/c/libhyle-bud)
-   bud    C DOM scaffold + WASM bridge (depends on nothing above)
+   hyle   pure data layer (canonical hyle_schema_desc_t, NO component symbols)
+   libhyle-source  dataset persistence, DSV, JSON overlays, pluggable drivers
+   hyle-bud  the ONLY bud-dependent bridge (external/hyle/c/libhyle-bud)
+   bud    pure C DOM scaffold, 5-field UI binder, WASM bridge (depends on nothing above)
 site modules (thin composition)
    core → common → source → index → song/poem/gig/grp (+ auth, mpfd)
 ```
@@ -72,11 +73,13 @@ Consequences:
 
 ## 4. Evoking complex features (the patterns that make it one-line)
 
-### 4.1 Struct-of-hooks + NULL = default
+### 4.1 Struct-of-hooks + NULL = default & Declarative Init
 `standard_item_handlers_t { detail, add_get, add_post, edit_get, edit_post }`;
 `register_standard_item_handlers("song", &h)` registers only the non-NULL ones.
 `index_open(name, dataset, cleanup, detail, add, edit_get, edit_post)` — NULL
-hooks mean "no custom handler; use the generic one". A module supplies only its
+hooks mean "no custom handler; use the generic one".
+`index_module_init(&(index_module_def_t){...})` packages schema declaration, dataset
+setup, and standard route registration into a single call. A module supplies only its
 novelty.
 
 ### 4.2 Flags for behavior
@@ -96,10 +99,12 @@ pattern: a small flags word, not a dozen bool params.
   `NULL` on "nothing here" and callers check it.
 
 ### 4.4 Data-driven tables: one source of truth
-`fields.h` (`bud_field_desc_t[]` per module) drives everything:
-- server field generators (`source_def_to_qmap`),
-- metadata I/O (`source_meta_read/write`, `META_READ`/`META_WRITE` macros),
-- WASM state (`bud_state_apply`).
+`fields.h` (`hyle_schema_desc_t[]` per module, defined in `external/hyle/include/hyle/schema.h`) drives everything:
+- server field generators (`hyle_source_register_def`),
+- persistence file/meta attributes (`in_meta`, `file`),
+- validation (`required`, `min_length`),
+- declarative form generation (`site_ui_form_from_desc`),
+- WASM state unpacking (`hyle_bud_state_apply`).
 
 Adding a field = adding a row to the table. No per-field boilerplate anywhere.
 
@@ -117,7 +122,20 @@ HTTP or page shells.
 
 ### 4.7 The only sanctioned write path
 All row writes go through hyle `put`/`del` → `source_update_item` /
-`source_delete_item`. Writing qmaps directly bypasses `stoma_dirty` and freezes
+`source_delete_item`. Storage drivers in `libhyle-source` (`store_fs`) automatically
+persist item files and sync FTS indices.
+
+### 4.8 Declarative Forms & Action Helpers
+`site_ui_form_from_desc(action, cancel_href, submit_label, desc, struct_ptr, csrf_token, pv, vstr_val)`:
+builds complete HTML forms from schema descriptors with automated input extraction, CSRF tokens,
+and sibling GET forms for No-JS picker support.
+`site_ui_action_form(action, button_label, csrf_token, hidden_inputs)`: one-line CSRF-protected action forms.
+`site_ui_item_row(title, badge, action_forms, count)`: uniform child/item row builder.
+
+### 4.9 String-First Pickers & Scoped Collection
+`site_ui_picker(target_source, ...)` and `site_ui_row_replace_picker(target_source, row_idx, ...)`:
+evoke searchable dropdown pickers and inline row replacers using simple dataset strings (e.g. `"song.items"`).
+`pick_view_collect_desc_fd(fd, defs, &pv, &active_scope)`: collects query parameters and active scopes in one call.
 the FTS index. The abstraction is not a suggestion — it is the invariant that
 keeps search live.
 

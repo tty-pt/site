@@ -10,9 +10,12 @@ data layer depends on a component framework, and no component framework is the
 "platform's" client runtime.
 
 ```
-        hyle ── data layer (schema, records, query, filtering, FTS)
+        hyle ── data layer (canonical schema hyle_schema_desc_t, query, filtering, FTS)
            │         framework-neutral. No bud/React/dioxus symbols.
            │         Server contract: query API + schema metadata strings.
+           ▼
+ libhyle-source ── dataset persistence, DSV, JSON state, pluggable store drivers
+           │
            ▼
    SSR contract ── plain HTML + native form controls + data-* hooks.
            │         The ONLY cross-framework interface.
@@ -52,18 +55,24 @@ axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
 qmap ── the data store (qmap_put copies key and value; caller frees originals)
 stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
-hyle  ── data/schema/query layer, NO component symbols
+hyle  ── pure data/schema/query layer, canonical hyle_schema_desc_t, NO component symbols
         deps: stoma, qmap
+libhyle-source (external/hyle/c/libhyle-source) ── standalone persistence engine:
+        dataset registration, CRUD, DSV, JSON state overlays, pluggable drivers
+        (hyle_source_store_ops_t: store_fs, store_mem, custom stores).
+        deps: hyle, qmap, stoma, json-c
 hyle-bud (external/hyle/c/libhyle-bud) ── the bud binding; ONLY place that
-        may depend on bud. deps: hyle, bud, qmap. Used in UX for filters
-        (`index`/`gig`/`grp` link `HYLE_BUD_WASM_SRC` and include
-        `<hyle-bud/hyle-bud.h>` — sanctioned; see `CONVENTIONS` WASM purity)
-bud   ── C DOM scaffold + WASM bridge. deps: none of the above
-site mods ── assemble axil + XY + hyle(+hyle-bud) + bud
+        may depend on bud. Bridges Hyle schemas to Bud UI components.
+        deps: hyle, bud, qmap. Used in UX for filters/tables (`index`/`gig`/`grp`
+        link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`)
+bud   ── pure C DOM scaffold, 5-field UI state binder (bud_field_desc_t),
+        and WASM bridge. deps: none of the above
+site mods ── assemble axil + XY + hyle(+libhyle-source+libhyle-bud) + bud
 ```
 
 Verify the boundary with a grep before committing: `external/hyle/src` and
-`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols.
+`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols. `external/bud/include`
+and `external/bud/src` must contain no database/storage symbols.
 
 ## 3. Module load order
 
@@ -71,9 +80,9 @@ Independent modules that explicitly declare immediate dependencies via `xy_load`
 
 ```
 core.so
- ├── common.so   response/page/CSRF/storage helpers (XY_DECL in common.h)
+ ├── common.so   response/page/CSRF/storage helpers, declarative forms (XY_DECL in common.h)
  │    └── mpfd.so     multipart/form-data parser (xy_load in common)
- ├── source.so   dataset CRUD + /api/dataset/* (+ source_store_fs/mem adapters)
+ ├── source.so   thin XY/HTTP transport wrapper over libhyle-source
  └── mods.load → poem, song, grp, gig           (order respects DAG)
       ├── poem → index
       ├── song → index, mpfd
@@ -81,14 +90,15 @@ core.so
       ├── gig  → index, mpfd, song, source, grp
 
  plus:
-  index → common, auth, mpfd
+  index → common, auth, mpfd, source
   auth  → common, libaxil-auth (external, not ./mods/*)
 ```
 
 Site modules declare their own immediate **true** `xy_load` deps (not centrally owned by `core` — maximally independent does not mean zero deps). `mods.load` order `poem→song→grp→gig` respects `song→grp→gig`; `libxylem` deduplicates repeated loads. External deps like `libaxil-auth` are marked external.
 
-- `index` registers `GET:/` and the default handler; `index_open()` adds the
-  generic `/module/*` CRUD routes. `auth` registers `/api/csrf`,
+- `index` registers `GET:/` and default handlers; `index_open()` or `index_module_init()`
+  adds the generic `/module/*` CRUD routes (add GET/POST, edit GET/POST, detail, list)
+  automatically from schema descriptors. `auth` registers `/api/csrf`,
   `/auth/login`, `/auth/register` and dlopens `libaxil-auth.so`.
 - `mods/redir/` exists but is never loaded; its `/sb` and `/chords` redirects
   were duplicated into `core.c`.
@@ -150,8 +160,12 @@ server.
 ## 6. Data-layer invariants
 
 - Route ALL row writes through hyle `put`/`del` (`mods/source`
-  `source_update_item`/`source_delete_item`). Writing rows directly into shared
+  `source_update_item`/`source_delete_item` $\rightarrow$ `libhyle-source`
+  `hyle_source_put`/`hyle_source_del`). Writing rows directly into shared
   qmaps bypasses `stoma_dirty` and freezes the FTS index.
+- Pluggable storage drivers: `libhyle-source` operates through `hyle_source_store_ops_t`
+  (`scan`, `load`, `put`, `put_field`, `del`), allowing filesystem persistence (`store_fs`),
+  memory persistence (`store_mem`), or custom database engines.
 - Search is **accent-sensitive** by design: `stoma_fold` lowercases ASCII and
   Latin-1 uppercase, preserving accents; `pão` ≠ `pao`. No iconv TRANSLIT in the
   search fold; don't make it accent-insensitive. (TRANSLIT survives ONLY in

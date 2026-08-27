@@ -12,7 +12,7 @@
 #ifndef SONG_FIELDS_H
 #define SONG_FIELDS_H
 
-#include "bud/bud.h"
+#include <hyle/schema.h>
 #include <stddef.h>
 #include "../common/field_macros.h"
 
@@ -48,7 +48,7 @@ typedef struct {
 	char name[256];
 } song_type_cache_t;
 
-static const bud_field_desc_t song_type_fields[] = {
+static const hyle_schema_desc_t song_type_fields[] = {
 	REC_FIELD(id, song_type_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(name, song_type_cache_t, name, 256, 1, 0, 0, 1),
 	INVERSE_FIELD(songs, "song.items", "type"), FIELD_END
@@ -59,7 +59,7 @@ static const bud_field_desc_t song_type_fields[] = {
 
 /* ── Song record fields ──────────────────────────────────────── */
 
-static const bud_field_desc_t song_fields[] = {
+static const hyle_schema_desc_t song_fields[] = {
 	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
 	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
 	MULTI_REF_FIELD_SM(

@@ -402,7 +402,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	source_overlay_from_desc(
 	        jo, &app_state, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
-	bud_state_apply(
+	hyle_bud_state_apply(
 	        &app_state, song_fields, json_object_to_json_string(jo));
 
 	bud_node *layout = bud_app_render();

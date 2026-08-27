@@ -533,7 +533,7 @@ static const char *site_ui_default_field_label(const char *key)
 
 bud_node *site_ui_form_from_desc(
         const char *action, const char *cancel_href, const char *submit_label,
-        const bud_field_desc_t *desc, const void *struct_ptr,
+        const hyle_schema_desc_t *desc, const void *struct_ptr,
         const char *csrf_token, const pick_view_t *pv,
         const char *vstr_val)
 {
@@ -546,7 +546,7 @@ bud_node *site_ui_form_from_desc(
 	if (!desc)
 		return NULL;
 
-	for (const bud_field_desc_t *d = desc; d->key && n < 31; d++) {
+	for (const hyle_schema_desc_t *d = desc; d->key && n < 31; d++) {
 		if (strcmp(d->key, "id") == 0 || strcmp(d->key, "owner") == 0 ||
 		    strcmp(d->key, "song_source") == 0)
 			continue;

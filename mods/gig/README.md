@@ -13,19 +13,20 @@ The gig module provides:
 ## Architecture
 
 - **Backend:** `gig.c` - C module with axil HTTP handlers
-- **Frontend:** `ux/` directory handles HTML rendering via `libbud` (e.g. `detail.c`, `edit.c`, `add.c`)
-- **Storage:** Filesystem using `hyle_source_ordered` and `data.txt`
-- **Dependencies:** auth, common, mpfd, grp
+- **Frontend & UI:** `ux/` directory handles HTML rendering via `libbud` (`detail.c`, `edit.c`, `add.c`) with declarative forms (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`), and inline row replacement (`site_ui_row_replace_picker`)
+- **Storage:** Filesystem using `libhyle-source` ordered DSV (`data.txt`)
+- **Dependencies:** auth, common, mpfd, grp, song, index, source
 
 ## Storage
 
 ### Directory Structure
 ```
 var/gig/
-├── index.db              # qmap database: gig_id → title
 └── {gig_id}/
-    ├── .owner            # Plain text username
-    └── data.txt          # Gig list (DSV format via hyle_source_ordered)
+    ├── owner             # Plain text username
+    ├── title             # Display title
+    ├── grp               # Associated group slug
+    └── data.txt          # Ordered gig songs (DSV format: {song_id}:{transpose}:{format})
 ```
 
 ### Data Format (`data.txt`)

@@ -51,15 +51,19 @@ axil_respond(fd, 303, "");
 Every 303 needs `Connection: close` + `DF_TO_CLOSE` before `axil_head` if
 headers haven't been sent yet.
 
-### Handler registration
+### Handler registration & Lifecycle
 
 `register_standard_item_handlers(name, &handlers)` (struct-of-hooks, NULL =
 default) and `index_open(...)` register the generic CRUD routes.
+`index_module_init(&(index_module_def_t){...})` collapses dataset setup, schema
+registration, list-view descriptor, and standard CRUD handlers into a single call.
 `axil_register_handler` is **last-registration-wins** — registering twice
 replaces, it does not append.
 
-## Form parsing
+## Form building & parsing
 
+- **Declarative Form Generation:** Use `site_ui_form_from_desc(action, cancel_href, submit_label, desc, struct_ptr, csrf_token, pv, vstr_val)`
+  to render complete HTML forms with CSRF tokens and automated sibling GET forms for No-JS pickers.
 - `axil_query_parse` + `axil_query_param` for `application/x-www-form-urlencoded`.
 - `call_mpfd_parse` + `call_mpfd_get` for `multipart/form-data` ONLY. Do not
   mix the two.
@@ -68,6 +72,17 @@ replaces, it does not append.
 - `mpfd_get` contract: returns the **copied** byte count (not the field
   length) and NUL-terminates whenever there's room. Size buffers to the field
   and trust the return value as the count.
+
+## Field Schemas (`field_macros.h`)
+
+Module schemas use canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`) and `field_macros.h`:
+- `REC_FIELD(name, type, dest, size)` — standard text / scalar field.
+- `REF_FIELD(name, type, dest, size, target)` — single reference.
+- `MULTI_REF_FIELD(name, type, dest, size, target)` — multi-reference field.
+- `MULTI_REF_FIELD_SM(name, type, dest, size, target, inv, req, style, mode)` — multi-reference with UI style and filter mode hints.
+- `EXCL_FIELD_V(name, type, dest, size, target)` — virtual display reference (unwritable, excluded from storage).
+- `EXCL_FIELD_VF(name, type, dest, size, file)` — file attachment (e.g. `data.txt` body content).
+- `FIELD_END` — terminates descriptor array.
 
 ## Memory
 

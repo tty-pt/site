@@ -91,16 +91,11 @@ Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
 
 ## Implementation Details
 
-**Backend:** `poem.c` (lines 14-99: `handle_poem_add()`)
-- Parses multipart form data using mpfd
-- Creates directory at `{DOCUMENT_ROOT}/var/poem/{id}/`
-- Writes poem content to `pt_PT.html`
-- Creates empty `comments.txt` file
-- Redirects to listing page on success
-
-Pages (list/add/detail) are server-rendered by `mods/index` (generic `/module/*`
-CRUD routes) + the common page layout; the poem module registers its add/detail
-handlers with `register_standard_item_handlers()`.
+**Backend:** `poem.c`
+- Declarative module initialization via `index_module_init(&(index_module_def_t){...})`
+- Schema defined in `fields.h` with `hyle_schema_desc_t` (`poem_fields`)
+- Standard Add/Edit forms and routes managed by `mods/index` via `site_ui_form_from_desc`
+- File persistence handled automatically by `libhyle-source` (`store_fs`) to `var/poem/{id}/pt_PT.html` and `comments.txt`
 
 ## Testing
 

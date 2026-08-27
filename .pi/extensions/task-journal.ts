@@ -697,7 +697,14 @@ When working on tasks:
 5. **Post-Implementation & User Feedback Loops**:
    - Expect and support user polish iterations at the end of a task.
    - When the user provides feedback or refinements, log them under \`## Task Refinements & User Feedback Loops\`, update acceptance checklists, execute the changes, and verify with tests until the user confirms satisfaction.
-6. **Final Verification & Quality Gates**:
+6. **Task Completion & Wrap-Up Flow**:
+   - When a task is completed (all features, acceptance criteria, and quality gates pass), ALWAYS prompt the user via \`ask_questions\` with the following structured options:
+     1. **Refine anything**: Keep active task open to make further adjustments or address feedback.
+     2. **Archive task and auto-compact**: Archive the task (\`/task-del\` / move to \`docs/archive/\`), clear the active task state, and trigger session compaction (\`/compact\`).
+     3. **Archive task without auto-compact**: Archive the task to \`docs/archive/\` and keep the current session context intact without compaction.
+     4. **Change to manual mode**: Switch workflow / compaction to manual mode.
+   - Execute the exact action corresponding to the user's choice.
+7. **Final Verification & Quality Gates**:
    - Zero compiler errors or warnings.
    - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
    - Full test suite (\`make test\`) must pass with zero errors.
@@ -729,7 +736,27 @@ When users ask in natural language to manage tasks (verbally refining, switching
 	});
 }
 
+function registerTaskJournalCRBHook() {
+	if (typeof globalThis !== "undefined") {
+		const g = globalThis as any;
+		if (!g.__pi_crb_providers) {
+			g.__pi_crb_providers = [];
+		}
+		g.__pi_crb_providers.push((_ctx: ExtensionContext, tools: string[]) => {
+			const set = new Set(tools.map((t) => t.toLowerCase()));
+			if (set.has("task_journal_mark_saved") || state.active) {
+				return [
+					"Call `task_journal_mark_saved` after updating active task files.",
+					"When completing a task, prompt via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
+				];
+			}
+			return [];
+		});
+	}
+}
+
 export default function (pi: ExtensionAPI) {
+	registerTaskJournalCRBHook();
 	pi.on("session_start", async (event, ctx) => {
 		reconstruct(ctx);
 		await offerTaskChoiceOnBoot(pi, ctx, event.reason);

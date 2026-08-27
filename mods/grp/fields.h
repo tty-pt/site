@@ -9,7 +9,7 @@
 #ifndef GRP_FIELDS_H
 #define GRP_FIELDS_H
 
-#include "bud/bud.h"
+#include <hyle/schema.h>
 #include <stddef.h>
 #include "../common/field_macros.h"
 
@@ -22,7 +22,7 @@ typedef struct {
 	char owner[32];
 } grp_cache_t;
 
-static const bud_field_desc_t grp_fields[] = {
+static const hyle_schema_desc_t grp_fields[] = {
 	REC_FIELD(id, grp_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(title, grp_cache_t, title, 256, 1, 0, 0, 1),
 	REC_FIELD(format, grp_cache_t, format, 2048, 1, 0, 0, 1),

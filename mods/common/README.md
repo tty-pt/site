@@ -11,7 +11,8 @@ Shared C utilities used by every site module. Not a standalone XY module —
 | `common_response.c` | HTTP response helpers, CSRF, `site_ui_respond_*` page renderers |
 | `common_storage.c` | File I/O, path building, item CRUD, `slurp_file`, `write_file_path` |
 | `common_strlist.c` | Comma-separated list helpers: `str_list_contains`, `str_list_append`, `str_list_normalize`, `str_list_for_each` |
-| `ux/site_ui.c` | Page layout, form builders (`site_ui_form_fields`), `escape_html_into`, CSS/cache-bust, `parse_transpose_qs` |
+| `ux/site_ui.c` | Page layout, `site_ui_action_form`, `site_ui_item_row`, `escape_html_into`, CSS/cache-bust, `parse_transpose_qs` |
+| `ux/site_forms.c` | Declarative form generation (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`, `site_ui_row_replace_picker`) |
 
 ## Public API (via XY_DECL in `common.h`)
 
@@ -32,8 +33,8 @@ Other modules call these via `call_<name>()`. Key grps:
 **Page rendering:** `site_ui_respond_page`, `site_ui_respond_form_page`,
 `site_ui_respond_add_page`, `site_ui_respond_edit_page`.
 
-**Misc:** `str_trim`, `str_list_*`, `register_standard_item_handlers`,
-`datalist_extract_id`, `parse_transpose_qs`.
+**Declarative UI Builders:** `site_ui_form_from_desc`, `site_ui_picker`,
+`site_ui_row_replace_picker`, `site_ui_action_form`, `site_ui_item_row`.
 
 ## Related docs
 

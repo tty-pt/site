@@ -1,7 +1,7 @@
 # AGENTS.md — documentation index
 
 Pure-C music site (poem, song, gig, grp) on the axil HTTP library, the
-libxylem XY module system, and the bud HTML builder. SSR-first with
+libxylem XY module system, the hyle data engine, and the bud HTML builder. SSR-first with
 progressive WASM enhancement; no Rust/Dioxus/Deno in the request path.
 
 **Read the relevant doc below before touching code.** Start with
@@ -40,11 +40,14 @@ make watch          # auto-rebuild + restart on :8080
    `gig→index+mpfd+song+source+grp`; `core` loads only `common+source`).
    See `ARCHITECTURE §5`, `CONVENTIONS`.
 
-4. **hyle stays neutral; SSR is the contract.** No `bud` in
-   `external/hyle/src` or `include/hyle`; `hyle-bud` is the ONLY
-   bud-dependent bridge and **is** used in UX for filters (`index`/`gig`/
-   `grp`). SSR emits plain HTML + `data-*` hooks; `data-bud-*`/patch ops
-   are additive. See `SSR-CONTRACT`.
+4. **hyle stays neutral; SSR is the contract.** `external/hyle` owns
+   canonical data schemas (`hyle_schema_desc_t`) without any DOM concepts;
+   `external/bud` is a pure 5-field UI binder (`bud_field_desc_t`) without
+   any database/storage concepts. `external/hyle/c/libhyle-source` owns
+   persistence and storage drivers (`hyle_source_store_ops_t`). `libhyle-bud`
+   is the ONLY bud-dependent bridge and **is** used in UX for filters/tables
+   (`index`/`gig`/`grp`). SSR emits plain HTML + `data-*` hooks;
+   `data-bud-*`/patch ops are additive. See `SSR-CONTRACT`.
 
 5. **Data invariants.** All row writes via `source_update_item` /
    `source_delete_item` → `hyle put/del` (FTS), never direct `var/`;

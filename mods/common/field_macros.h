@@ -8,17 +8,23 @@
 #define FIELD_MACROS_H
 
 #include <stddef.h>
-#include "bud/bud.h"
-
-/* Field kind constants (numeric values consistent across all modules) */
+#include <hyle/schema.h>
+/* bud constants for WASM binder kind values — keep independent of bud.h */
+#ifndef BUD_RECORD
 #define BUD_RECORD 0
 #define BUD_EXCLUDE 1
 #define BUD_REF_DISPLAY 2
 #define BUD_OVERLAY_INT 3
 #define BUD_OVERLAY_STR 4
 #define BUD_INVERSE 5
+#endif
+#ifndef BUD_QM_STR
+#define BUD_QM_STR 2
+#define BUD_QM_VSTR 8
+#define BUD_QM_MULTI_REF 7
+#endif
 
-/* QM type constants — BUD_QM_VSTR from bud.h; BUD_QM_REFERENCE from qmap.h */
+/* QM type constants — BUD_QM_REFERENCE from qmap.h */
 #ifndef BUD_QM_REFERENCE
 #define BUD_QM_REFERENCE 6
 #endif

@@ -24,7 +24,8 @@ task complete.
 
 | Command | What |
 |---------|------|
-| `make unit-tests` | Runs `test.sh` in each module directory. Needs axil on :8080. |
+| `make unit-tests` | Runs `test.sh` in each module directory + standalone C unit tests (`run-dsv-legacy.sh`). Needs axil on :8080. |
+| `make matrix-tests` | Runs C cross-library memory/matrix tests under ASAN. |
 | `make pages-test` | Page-render HTTP smoke test (curls :8080 for DOCTYPE/markup). |
 | `make e2e-tests` | Playwright via Deno. Needs server + `AUTH_SKIP_CONFIRM=1`. |
 | `AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file execution. |

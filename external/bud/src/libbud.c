@@ -2838,8 +2838,8 @@ int bud_json_array_for_each_key_len(
 
 /* ── Table-driven state ── */
 
-void bud_state_apply_len(
-        void *state, const bud_field_desc_t *fields, const char *json,
+void bud_state_apply_stride_len(
+        void *state, const void *fields, size_t field_stride, const char *json,
         size_t len)
 {
 	jsmntok_t stack[BUD_JSON_MAX_TOKS];
@@ -2847,10 +2847,11 @@ void bud_state_apply_len(
 	jsmntok_t *heap = NULL;
 	unsigned ntoks = 0;
 	int r;
-	const bud_field_desc_t *f;
 
 	if (!state || !fields || !json)
 		return;
+	if (field_stride < sizeof(bud_field_desc_t))
+		field_stride = sizeof(bud_field_desc_t);
 	if (len == 0)
 		len = strlen(json);
 	if (len == 0)
@@ -2867,7 +2868,10 @@ void bud_state_apply_len(
 			free(heap);
 		return;
 	}
-	for (f = fields; f->key; f++) {
+	for (const char *p = (const char *)fields; ; p += field_stride) {
+		const bud_field_desc_t *f = (const bud_field_desc_t *)p;
+		if (!f->key)
+			break;
 		int vidx;
 		if (f->kind == 1)
 			continue;
@@ -2886,13 +2890,13 @@ void bud_state_apply_len(
 			memcpy(buf, s, n);
 			buf[n] = '\0';
 			if (vt->type == JSMN_STRING) {
-				char *p = buf;
-				while (*p &&
-				       (*p < '0' || *p > '9') && *p != '-')
-					p++;
-				if (!*p)
+				char *pstr = buf;
+				while (*pstr &&
+				       (*pstr < '0' || *pstr > '9') && *pstr != '-')
+					pstr++;
+				if (!*pstr)
 					continue;
-				v = strtol(p, &end, 10);
+				v = strtol(pstr, &end, 10);
 			} else {
 				v = strtol(buf, &end, 10);
 				if (end == buf)
@@ -2930,6 +2934,21 @@ void bud_state_apply_len(
 		free(heap);
 }
 
+void bud_state_apply_stride(
+        void *state, const void *fields, size_t field_stride, const char *json)
+{
+	size_t len = json ? strlen(json) : 0;
+	bud_state_apply_stride_len(state, fields, field_stride, json, len);
+}
+
+void bud_state_apply_len(
+        void *state, const bud_field_desc_t *fields, const char *json,
+        size_t len)
+{
+	bud_state_apply_stride_len(
+	        state, fields, sizeof(bud_field_desc_t), json, len);
+}
+
 void bud_state_apply(
         void *state, const bud_field_desc_t *fields, const char *json)
 {
@@ -2942,7 +2961,8 @@ struct apply_array_ctx {
 	size_t elem_size;
 	int count;
 	int max_elems;
-	const bud_field_desc_t *schema;
+	const void *schema;
+	size_t schema_stride;
 };
 
 static void apply_array_cb(const char *elem, size_t len, void *user)
@@ -2954,14 +2974,14 @@ static void apply_array_cb(const char *elem, size_t len, void *user)
 		return;
 	dest = ctx->array_out + (ctx->count * ctx->elem_size);
 	memset(dest, 0, ctx->elem_size);
-	bud_state_apply_len(dest, ctx->schema, elem, len);
+	bud_state_apply_stride_len(dest, ctx->schema, ctx->schema_stride, elem, len);
 	ctx->count++;
 }
 
-void bud_state_apply_array_len(
+void bud_state_apply_array_stride_len(
         const char *json, size_t len, const char *key, void *array_out,
         size_t elem_size, int *count_out, int max_elems,
-        const bud_field_desc_t *schema)
+        const void *schema, size_t schema_stride)
 {
 	jsmntok_t stack[BUD_JSON_MAX_TOKS];
 	jsmntok_t *toks = NULL;
@@ -2973,6 +2993,8 @@ void bud_state_apply_array_len(
 
 	if (!json || !key || !array_out || !schema)
 		return;
+	if (schema_stride < sizeof(bud_field_desc_t))
+		schema_stride = sizeof(bud_field_desc_t);
 	if (len == 0)
 		len = strlen(json);
 	ctx.array_out = (char *)array_out;
@@ -2980,6 +3002,7 @@ void bud_state_apply_array_len(
 	ctx.count = 0;
 	ctx.max_elems = max_elems;
 	ctx.schema = schema;
+	ctx.schema_stride = schema_stride;
 	r = bud__parse_tokens(
 	        json, len, stack, BUD_JSON_MAX_TOKS, &toks, &ntoks, &heap);
 	if (r < 0)
@@ -3038,6 +3061,16 @@ done:
 		free(heap);
 	if (count_out)
 		*count_out = ctx.count;
+}
+
+void bud_state_apply_array_len(
+        const char *json, size_t len, const char *key, void *array_out,
+        size_t elem_size, int *count_out, int max_elems,
+        const bud_field_desc_t *schema)
+{
+	bud_state_apply_array_stride_len(
+	        json, len, key, array_out, elem_size, count_out, max_elems,
+	        schema, sizeof(bud_field_desc_t));
 }
 
 void bud_state_apply_array(

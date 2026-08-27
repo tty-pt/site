@@ -67,7 +67,7 @@ static int on_zoom_change(bud_event *event)
 void wasm_fetch_callback(int request_id, const char *data, int data_len)
 {
 	(void)request_id;
-	bud_state_apply_len(
+	hyle_bud_state_apply_len(
 	        &app_state, song_fields, data, (size_t)data_len);
 	bud_json_data_len(
 	        data, (size_t)data_len, app_state.chord_html,
@@ -91,7 +91,7 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 
 void wasm_init(const char *json, int len)
 {
-	bud_state_apply_len(
+	hyle_bud_state_apply_len(
 	        &app_state, song_fields, json,
 	        len >= 0 ? (size_t)len : 0);
 }
