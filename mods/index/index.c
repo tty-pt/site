@@ -516,7 +516,7 @@ static int index_add_get_handler(int fd, char *body)
 	        fd, defs, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
-	        action, cancel_href, "Add", (const bud_field_desc_t *)defs,
+	        action, cancel_href, "Add", defs,
 	        NULL, csrf_token, &pv, NULL);
 
 	return site_ui_respond_add_page(
@@ -564,7 +564,7 @@ static int index_generic_edit_auth(
 	        fd, defs, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
-	        action, cancel_href, "Save Changes", (const bud_field_desc_t *)defs,
+	        action, cancel_href, "Save Changes", defs,
 	        record, csrf_token, &pv, NULL);
 
 	free(record);

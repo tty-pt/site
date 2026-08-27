@@ -107,12 +107,12 @@ static void sb_for_each_song(const char *sb_id, sb_song_cb cb, void *user)
 static void gig_meta_read(const char *item_path, gig_cache_t *meta)
 {
 	source_meta_read(
-	        item_path, (const source_desc_t *)gig_fields, SB_FIELD_COUNT, meta, sizeof(*meta));
+	        item_path, gig_fields, SB_FIELD_COUNT, meta, sizeof(*meta));
 }
 
 static int gig_meta_write(const char *item_path, const gig_cache_t *meta)
 {
-	return source_meta_write(item_path, (const source_desc_t *)gig_fields, SB_FIELD_COUNT, meta);
+	return source_meta_write(item_path, gig_fields, SB_FIELD_COUNT, meta);
 }
 
 /* Get a random repertoire entry for the given type from the
@@ -1362,7 +1362,7 @@ void xy_install(void)
 	xy_load("./mods/grp/grp");
 
 	source_setup(
-	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", (const source_desc_t *)gig_fields,
+	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", gig_fields,
 	        SB_FIELD_COUNT, 0, &gig_list_view);
 
 	/* Register ordered source for gig songs (data.txt persistence) */

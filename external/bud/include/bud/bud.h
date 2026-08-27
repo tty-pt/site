@@ -169,7 +169,9 @@ int bud_json_array_for_each_key_len(
         void (*fn)(const char *elem, size_t len, void *user), void *user);
 
 /* Table-driven state: one field definition drives wasm_init, wasm_set_* */
-typedef struct bud_field_desc {
+#ifndef HYLE_SCHEMA_DESC_DEFINED
+#define HYLE_SCHEMA_DESC_DEFINED 1
+typedef struct hyle_schema_desc {
 	const char *key;
 	size_t offset;
 	size_t size;
@@ -190,7 +192,10 @@ typedef struct bud_field_desc {
 	const char *filter_style;
 	/* Server-side combine-mode hint ("and"/NULL); unused by WASM. */
 	const char *filter_mode;
-} bud_field_desc_t;
+} hyle_schema_desc_t;
+#endif
+
+typedef struct hyle_schema_desc bud_field_desc_t;
 
 /* Server-side qmap type constants — must match qmap.h QM_* values */
 #define BUD_QM_STR 2

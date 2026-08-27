@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud axil-lib qmap-lib xylem-lib mods clients boundary-check
+all: stoma-lib hyle-lib bud-lib hyle-bud hyle-source axil-lib qmap-lib xylem-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -24,6 +24,9 @@ bud-lib:
 
 hyle-bud: hyle-lib bud-lib
 	$(MAKE) -C external/hyle/c/libhyle-bud
+
+hyle-source: hyle-lib qmap-lib stoma-lib
+	$(MAKE) -C external/hyle/c/libhyle-source
 
 axil-lib:
 	$(MAKE) -C external/axil

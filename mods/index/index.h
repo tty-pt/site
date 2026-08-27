@@ -6,7 +6,8 @@
 #include "ux/list_state.h"
 #include "ux/site_ui.h"
 
-typedef struct source_desc source_desc_t;
+#include <hyle/schema.h>
+typedef hyle_schema_desc_t source_desc_t;
 
 typedef void (*index_cleanup_fn)(const char *id);
 

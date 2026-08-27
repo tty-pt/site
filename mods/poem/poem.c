@@ -22,7 +22,7 @@
 
 static void poem_meta_read(const char *path, poem_cache_t *m)
 {
-	source_meta_read(path, (const source_desc_t *)poem_fields, POEM_FIELD_COUNT, m, sizeof(*m));
+	source_meta_read(path, poem_fields, POEM_FIELD_COUNT, m, sizeof(*m));
 }
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
@@ -197,7 +197,7 @@ void xy_install(void)
 
 	source_setup(
 	        "poem.items", NULL, sizeof(poem_cache_t), "var/poem",
-	        (const source_desc_t *)poem_fields, POEM_FIELD_COUNT, 0, &poem_list_view);
+	        poem_fields, POEM_FIELD_COUNT, 0, &poem_list_view);
 
 	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL, NULL);
 	standard_item_handlers_t handlers = {

@@ -594,7 +594,7 @@ void xy_install(void)
 	        handle_grp_song_delete);
 
 	source_setup(
-	        "grp.items", NULL, sizeof(grp_cache_t), "var/grp", (const source_desc_t *)grp_fields,
+	        "grp.items", NULL, sizeof(grp_cache_t), "var/grp", grp_fields,
 	        GRP_FIELD_COUNT, 0, &grp_list_view);
 
 	/* Register ordered source for grp songs (data.txt persistence).

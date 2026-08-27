@@ -14,7 +14,11 @@ typedef enum {
 	HYLE_FIELD_INVERSE,
 } hyle_field_type_t;
 
-char *slurp_file(const char *path);
+char *source_util_slurp_file(const char *path);
+#define slurp_file source_util_slurp_file
+#define source_dsv_load hyle_source_dsv_load
+#define source_dsv_save hyle_source_dsv_save
+
 size_t hyle_source_get_field_count(const char *source_id);
 const char *hyle_source_get_field_name(const char *source_id, size_t idx);
 hyle_field_type_t hyle_source_get_field_type(const char *source_id, size_t idx);
@@ -31,10 +35,8 @@ qmap_field_get(unsigned hd, const char *item_id, const char *field_name);
 #define QMAP_H
 #define HYLE_SOURCE_H
 #define SOURCE_H
-#define XY_IMPL(ftype, fname, t1, n1, t2, n2, t3, n3, t4, n4)                  \
-	ftype fname(t1 n1, t2 n2, t3 n3, t4 n4)
 
-#include "../../mods/source/dsv.c"
+#include "../../external/hyle/c/libhyle-source/src/dsv.c"
 
 #define TEST_SOURCE "grp.songs"
 #define TEST_PARTITION "legacy-grp"

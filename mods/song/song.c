@@ -25,7 +25,7 @@ static char g_doc_root[256] = ".";
 
 static void song_meta_read(const char *path, song_cache_t *m)
 {
-	source_meta_read(path, (const source_desc_t *)song_fields, SONG_FIELD_COUNT, m, sizeof(*m));
+	source_meta_read(path, song_fields, SONG_FIELD_COUNT, m, sizeof(*m));
 	str_list_normalize(m->type, m->type, sizeof(m->type));
 }
 
@@ -230,7 +230,7 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	tmp.original_key = k;
 
 	int rc = source_respond_page_state(
-	        fd, "song.items", ctx->id, song_state_specs, &tmp, (const source_desc_t *)song_fields,
+	        fd, "song.items", ctx->id, song_state_specs, &tmp, song_fields,
 	        song_custom_overlay_fn, &custom_data);
 
 	free(trans);
@@ -400,7 +400,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
 
 	source_overlay_from_desc(
-	        jo, &app_state, (const source_desc_t *)song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
+	        jo, &app_state, song_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
 
 	bud_state_apply(
 	        &app_state, song_fields, json_object_to_json_string(jo));
@@ -438,7 +438,7 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	song_meta_read(ctx->item_path, &meta);
 	source_resolve_meta_display(
-	        "song.items", ctx->id, (const source_desc_t *)song_fields, SONG_FIELD_COUNT, &meta);
+	        "song.items", ctx->id, song_fields, SONG_FIELD_COUNT, &meta);
 
 	char data_path[PATH_MAX];
 	item_child_path(
@@ -509,11 +509,11 @@ void xy_install(void)
 
 	/* Precompute state specs from field table */
 	source_build_state_specs(
-	        (const source_desc_t *)song_fields, song_state_specs, SONG_FIELD_COUNT);
+	        song_fields, song_state_specs, SONG_FIELD_COUNT);
 
 	source_setup(
 	        "song.types", "name", sizeof(song_type_cache_t),
-	        "var/song.types", (const source_desc_t *)song_type_fields, SONG_TYPE_FIELD_COUNT,
+	        "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT,
 	        0, NULL);
 
 	ref_field_register("song.items", "type");
@@ -522,7 +522,7 @@ void xy_install(void)
 
 	source_setup(
 	        "song.items", NULL, sizeof(song_cache_t), "var/song",
-	        (const source_desc_t *)song_fields, SONG_FIELD_COUNT, 0, &song_list_view);
+	        song_fields, SONG_FIELD_COUNT, 0, &song_list_view);
 
 	index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL, NULL);
 

@@ -24,7 +24,7 @@ CFLAGS += -O2 -DNDEBUG $(PICFLAGS)
 else
 CFLAGS += -g -O0 $(PICFLAGS)
 endif
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared

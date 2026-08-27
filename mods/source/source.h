@@ -6,176 +6,46 @@
 #include <stdint.h>
 #include <json-c/json.h>
 #include <ttypt/xy.h>
+#include <hyle-source/hyle_source.h>
+#include <hyle-source/store.h>
 
-typedef enum {
-	SOURCE_ACCESS_PUBLIC = 0,
-	DATASET_ACCESS_LOGIN,
-} source_access_policy_t;
+typedef hyle_source_access_policy_t source_access_policy_t;
+typedef hyle_source_access_result_t source_access_result_t;
+#define SOURCE_ACCESS_PUBLIC HYLE_SOURCE_ACCESS_PUBLIC
+#define DATASET_ACCESS_LOGIN HYLE_SOURCE_ACCESS_LOGIN
+#define DATASET_ACCESS_RESULT_ALLOW HYLE_SOURCE_ACCESS_RESULT_ALLOW
+#define DATASET_ACCESS_RESULT_UNAUTHORIZED HYLE_SOURCE_ACCESS_RESULT_UNAUTHORIZED
+#define DATASET_ACCESS_RESULT_FORBIDDEN HYLE_SOURCE_ACCESS_RESULT_FORBIDDEN
 
-typedef enum {
-	DATASET_ACCESS_RESULT_ALLOW = 0,
-	DATASET_ACCESS_RESULT_UNAUTHORIZED,
-	DATASET_ACCESS_RESULT_FORBIDDEN,
-} source_access_result_t;
+#define SOURCE_FIELD_KIND_INVERSE HYLE_SOURCE_FIELD_KIND_INVERSE
+typedef hyle_source_field_type_t source_field_type_t;
+#define SOURCE_FIELD_STRING HYLE_SOURCE_FIELD_STRING
+#define DATASET_FIELD_INT HYLE_SOURCE_FIELD_INT
+#define DATASET_FIELD_BOOL HYLE_SOURCE_FIELD_BOOL
+#define DATASET_FIELD_NULLABLE_STRING HYLE_SOURCE_FIELD_NULLABLE_STRING
+#define SOURCE_FIELD_REFERENCE HYLE_SOURCE_FIELD_REFERENCE
+#define SOURCE_FIELD_MULTI_REFERENCE HYLE_SOURCE_FIELD_MULTI_REFERENCE
+#define SOURCE_FIELD_INVERSE HYLE_SOURCE_FIELD_INVERSE
 
-#define SOURCE_FIELD_KIND_INVERSE 5
+typedef hyle_source_field_t source_field_t;
+typedef hyle_source_list_field_t source_list_field_t;
+typedef hyle_source_list_view_t source_list_view_t;
+typedef hyle_source_store_ops_t source_store_ops_t;
+typedef hyle_source_store_t source_store_t;
+typedef hyle_source_def_t source_def_t;
+typedef hyle_source_each_cb_t source_each_cb_t;
 
-typedef enum {
-	SOURCE_FIELD_STRING = 0,
-	DATASET_FIELD_INT,
-	DATASET_FIELD_BOOL,
-	DATASET_FIELD_NULLABLE_STRING,
-	SOURCE_FIELD_REFERENCE,
-	SOURCE_FIELD_MULTI_REFERENCE,
-	SOURCE_FIELD_INVERSE,
-} source_field_type_t;
+#define SOURCE_FLAG_VOLATILE HYLE_SOURCE_FLAG_VOLATILE
+#define SOURCE_ERR_VALIDATION HYLE_SOURCE_ERR_VALIDATION
 
-typedef struct {
-	const char *name;
-	const char *file;
-	source_field_type_t type;
-	int writable;
-	const char *target_source;
-	const char *inverse_name;
-	int required;
-	int64_t min;
-	int64_t max;
-	size_t min_length;
-	size_t max_length;
-	const char *pattern;
-	const char *filter_style;
-	const char *filter_mode;
-} source_field_t;
-
-typedef struct {
-	const char *name;
-	const char *label;
-} source_list_field_t;
-
-typedef struct {
-	const char *display_name;
-	const source_list_field_t *fields;
-	size_t field_count;
-	const char *default_sort;
-	const char *content_field;
-	const char *content_label;
-	const char *content_placeholder;
-} source_list_view_t;
-
-/* Source borrows list-view strings and fields for the registered source's
- * lifetime. Module declarations must therefore have static storage. */
-
-/* Persistence adapter — COMPLY.md §9.3 (M05). Generic source does not
- * assume filesystem; each dataset declares a store. Stage 1: interface
- * declared here, FS adapter in source_store_fs.c. */
-struct source_def_s;
-typedef struct source_desc source_desc_t;
-typedef struct source_store_s source_store_t;
-typedef struct {
-	int (*scan)(source_store_t *store, const struct source_def_s *def);
-	int (*load)(source_store_t *store, const struct source_def_s *def,
-	            const char *id, unsigned *row_out);
-	int (*put)(source_store_t *store, const struct source_def_s *def,
-	           const char *id, unsigned data_handle);
-	int (*put_field)(source_store_t *store,
-	                 const struct source_def_s *def, const char *id,
-	                 const char *field, const char *value);
-	int (*del)(source_store_t *store, const struct source_def_s *def,
-	           const char *id);
-} source_store_ops_t;
-struct source_store_s {
-	const source_store_ops_t *ops;
-	void *user;
-};
-
-typedef struct source_def_s {
-	const char *id;
-	const char *key_field;
-	const char *items_path;
-	source_access_policy_t access_policy;
-	const source_field_t *fields;
-	size_t field_count;
-	unsigned source_hd;
-	unsigned fields_hd;
-	unsigned schema_hd; /* lazily filled by source_get_schema_hd */
-	uint32_t record_id;
-	unsigned flags;
-	const source_list_view_t *list_view;
-	const source_desc_t *defs;
-	int def_count;
-	size_t record_size;
-	void *user;
-	source_store_t store;
-} source_def_t;
-
-typedef int (*source_each_cb_t)(const source_def_t *, void *);
-
-#define SOURCE_FLAG_VOLATILE 64u
-#define SOURCE_ERR_VALIDATION -2
-
-/* ── State JSON builder ─────────────────────────────────────────── */
-
-typedef enum {
-	SF_RECORD,
-	SF_EXCLUDE,
-	SF_REF_DISPLAY,
-} source_state_kind_t;
-
-typedef struct {
-	const char *name;
-	source_state_kind_t kind;
-} source_state_field_t;
-
-typedef struct {
-	const char *key;
-	int is_int;
-	int int_val;
-	const char *str_val;
-} source_state_kv_t;
-
-typedef struct {
-	const char *key;
-	char *dest;
-	size_t dest_size;
-} json_str_map_t;
-
-static inline void
-json_extract_strings(json_object *jo, const json_str_map_t *map)
-{
-	if (!jo || !map)
-		return;
-	json_object *jval;
-	for (const json_str_map_t *m = map; m->key; m++) {
-		if (json_object_object_get_ex(jo, m->key, &jval))
-			snprintf(
-			        m->dest, m->dest_size, "%s",
-			        json_object_get_string(jval));
-	}
-}
-
-/* ── Unified field schema generators ───────────────────────────── */
-/* Framework-neutral descriptor — binary compatible with bud_field_desc_t
- * (bud/bud.h:159). Site data layer owns this; WASM/client uses bud.h.
- * L02: source never includes bud/bud.h; cast is safe (static_assert in
- * bud_adapter.c). */
-typedef struct source_desc {
-	const char *key;
-	size_t offset;
-	size_t size;
-	int is_int;
-	int kind;
-	int qm_type;
-	int source_type;
-	int writable;
-	int required;
-	size_t min_length;
-	const char *ref_source;
-	const char *ref_inverse;
-	int in_meta;
-	const char *file;
-	const char *filter_style;
-	const char *filter_mode;
-} source_desc_t;
+typedef hyle_source_state_kind_t source_state_kind_t;
+#define SF_RECORD HYLE_SF_RECORD
+#define SF_EXCLUDE HYLE_SF_EXCLUDE
+#define SF_REF_DISPLAY HYLE_SF_REF_DISPLAY
+typedef hyle_source_state_field_t source_state_field_t;
+typedef hyle_source_state_kv_t source_state_kv_t;
+typedef hyle_json_str_map_t json_str_map_t;
+#define json_extract_strings hyle_json_extract_strings
 
 #ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
