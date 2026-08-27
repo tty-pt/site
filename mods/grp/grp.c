@@ -76,76 +76,179 @@ static int rep_row_find(rep_row_t *rows, int n_rows, const char *song_id)
 	return -1;
 }
 
-XY_IMPL(int, rep_rebuild, const char *, grp_id)
+static int rep_collect_merged(
+        const char *grp_id, rep_row_t *rows, int max_rows)
 {
 	source_def_t *sb_def;
 	unsigned rfhd, gfhd;
 	rep_tally_t tally[REP_MAX_SONGS];
-	rep_row_t cur[REP_MAX_SONGS], want[REP_MAX_SONGS];
-	int n_tally = 0, n_cur = 0, n_want = 0;
+	int n_tally = 0, n_rows = 0;
 	uint32_t inv_buf[REP_MAX_GIGS];
 	size_t n_inv;
 	uint32_t grp_pos;
+
+	if (!grp_id || !grp_id[0] || !rows || max_rows <= 0)
+		return 0;
+
+	/* Pinned pass: collect pinned rows first from grp.songs partition */
+	rfhd = hyle_source_get_fields_hd("grp.songs");
+	if (rfhd) {
+		int total = hyle_source_ordered_count("grp.songs", grp_id);
+		for (int i = 0; i < total && n_rows < max_rows; i++) {
+			const char *k = hyle_source_ordered_key_at(
+			        "grp.songs", grp_id, i);
+			const char *sid, *ts, *fm, *pv;
+			rep_row_t *r;
+
+			if (!k)
+				continue;
+			sid = qmap_field_get(rfhd, k, "song");
+			if (!sid)
+				continue;
+			pv = qmap_field_get(rfhd, k, "pinned");
+			if (pv && atoi(pv) == 0)
+				continue; /* only pinned rows */
+
+			if (rep_row_find(rows, n_rows, sid) >= 0)
+				continue;
+
+			r = &rows[n_rows++];
+			memset(r, 0, sizeof(*r));
+			snprintf(r->song, sizeof(r->song), "%s", sid);
+			ts = qmap_field_get(rfhd, k, "transpose");
+			r->transpose = ts ? atoi(ts) : 0;
+			fm = qmap_field_get(rfhd, k, "format");
+			snprintf(
+			        r->format, sizeof(r->format), "%s",
+			        fm && fm[0] ? fm : "any");
+			r->pinned = 1;
+		}
+	}
+
+	/* Tally pass: across gigs, tally transposes per song */
+	sb_def = source_find("gig.items");
+	gfhd = hyle_source_get_fields_hd("gig.songs");
+	if (sb_def && sb_def->fields_hd && gfhd) {
+		grp_pos = qmap_pos(
+		        hyle_source_get_fields_hd("grp.items"), grp_id);
+		if (grp_pos != QM_MISS) {
+			n_inv = qmap_inv_get(
+			        sb_def->fields_hd, "grp", grp_pos, inv_buf,
+			        REP_MAX_GIGS);
+			for (size_t gi = 0; gi < n_inv; gi++) {
+				const char *sb_id = qmap_get_key(
+				        sb_def->fields_hd, inv_buf[gi]);
+				int total;
+
+				if (!sb_id)
+					continue;
+				total = hyle_source_ordered_count(
+				        "gig.songs", sb_id);
+				for (int i = 0; i < total; i++) {
+					const char *k =
+					        hyle_source_ordered_key_at(
+					                "gig.songs", sb_id, i);
+					const char *sid, *ts, *fm;
+					rep_tally_t *t;
+					int ti;
+
+					if (!k)
+						continue;
+					sid = qmap_field_get(gfhd, k, "song");
+					if (!sid)
+						continue;
+					ti = rep_tally_find(tally, n_tally, sid);
+					if (ti < 0) {
+						if (n_tally >= REP_MAX_SONGS)
+							break;
+						ti = n_tally++;
+						t = &tally[ti];
+						memset(t, 0, sizeof(*t));
+						snprintf(
+						        t->song, sizeof(t->song),
+						        "%s", sid);
+						fm = qmap_field_get(
+						        gfhd, k, "format");
+						snprintf(
+						        t->format,
+						        sizeof(t->format), "%s",
+						        fm && fm[0] ? fm
+						                    : "any");
+					}
+					t = &tally[ti];
+					ts = qmap_field_get(
+					        gfhd, k, "transpose");
+					rep_tally_bump(t, ts ? atoi(ts) : 0);
+				}
+			}
+		}
+	}
+
+	/* Append derived rows in tally order (first-seen), resolving majority key */
+	for (int i = 0; i < n_tally && n_rows < max_rows; i++) {
+		rep_tally_t *t = &tally[i];
+		int best = 0;
+
+		if (rep_row_find(rows, n_rows, t->song) >= 0)
+			continue;
+
+		for (int ki = 1; ki < t->n_keys; ki++) {
+			if (t->counts[ki] > t->counts[best])
+				best = ki;
+		}
+
+		memset(&rows[n_rows], 0, sizeof(rows[n_rows]));
+		snprintf(
+		        rows[n_rows].song, sizeof(rows[n_rows].song), "%s",
+		        t->song);
+		snprintf(
+		        rows[n_rows].format, sizeof(rows[n_rows].format), "%s",
+		        t->format);
+		rows[n_rows].transpose = t->keys[best];
+		rows[n_rows].pinned = 0;
+		n_rows++;
+	}
+
+	return n_rows;
+}
+
+typedef void (*rep_entry_cb)(
+        const char *song_id, int transpose, const char *format, int pinned,
+        void *user);
+
+XY_IMPL(int, rep_for_each_merged,
+        const char *, grp_id,
+        rep_entry_cb, cb,
+        void *, user)
+{
+	rep_row_t rows[REP_MAX_SONGS];
+	int n_rows;
+
+	if (!grp_id || !grp_id[0] || !cb)
+		return -1;
+
+	n_rows = rep_collect_merged(grp_id, rows, REP_MAX_SONGS);
+	for (int i = 0; i < n_rows; i++) {
+		cb(rows[i].song, rows[i].transpose, rows[i].format,
+		   rows[i].pinned, user);
+	}
+	return 0;
+}
+
+XY_IMPL(int, rep_rebuild, const char *, grp_id)
+{
+	unsigned rfhd;
+	rep_row_t cur[REP_MAX_SONGS], want[REP_MAX_SONGS];
+	int n_cur = 0, n_want = 0;
 	int changed;
 
 	if (!grp_id || !grp_id[0])
 		return -1;
-	sb_def = source_find("gig.items");
 	rfhd = hyle_source_get_fields_hd("grp.songs");
-	if (!sb_def || !rfhd)
-		return -1;
-	/* Inverse-index positions are keyed by the grp's own row position
-	 * in grp.items (same lookup as ch_load_gigs), NOT by the id inside
-	 * gig.items. */
-	grp_pos = qmap_pos(hyle_source_get_fields_hd("grp.items"), grp_id);
-	if (grp_pos == QM_MISS)
+	if (!rfhd)
 		return -1;
 
-	/* Tally pass: per song across the grp's gigs, count distinct
-	 * transposes (first-seen order wins ties) and keep the format. */
-	gfhd = hyle_source_get_fields_hd("gig.songs");
-	n_inv = qmap_inv_get(
-	        sb_def->fields_hd, "grp", grp_pos, inv_buf, REP_MAX_GIGS);
-	for (size_t gi = 0; gi < n_inv; gi++) {
-		const char *sb_id =
-		        qmap_get_key(sb_def->fields_hd, inv_buf[gi]);
-		int total;
-
-		if (!sb_id || !gfhd)
-			continue;
-		total = hyle_source_ordered_count("gig.songs", sb_id);
-		for (int i = 0; i < total; i++) {
-			const char *k = hyle_source_ordered_key_at(
-			        "gig.songs", sb_id, i);
-			const char *sid, *ts, *fm;
-			rep_tally_t *t;
-			int ti;
-
-			if (!k)
-				continue;
-			sid = qmap_field_get(gfhd, k, "song");
-			if (!sid)
-				continue;
-			ti = rep_tally_find(tally, n_tally, sid);
-			if (ti < 0) {
-				if (n_tally >= REP_MAX_SONGS)
-					return -1;
-				ti = n_tally++;
-				t = &tally[ti];
-				memset(t, 0, sizeof(*t));
-				snprintf(t->song, sizeof(t->song), "%s", sid);
-				fm = qmap_field_get(gfhd, k, "format");
-				snprintf(
-				        t->format, sizeof(t->format), "%s",
-				        fm && fm[0] ? fm : "any");
-			}
-			t = &tally[ti];
-			ts = qmap_field_get(gfhd, k, "transpose");
-			rep_tally_bump(t, ts ? atoi(ts) : 0);
-		}
-	}
-
-	/* Current partition snapshot */
+	/* Current partition snapshot: read what's currently in grp.songs */
 	{
 		int total = hyle_source_ordered_count("grp.songs", grp_id);
 		for (int i = 0; i < total; i++) {
@@ -175,7 +278,7 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 		}
 	}
 
-	/* Desired list: pinned rows verbatim (deduped), then derived */
+	/* Desired list: ONLY pinned rows (pinned=1) hit the disk partition */
 	for (int i = 0; i < n_cur; i++) {
 		if (!cur[i].pinned)
 			continue;
@@ -185,30 +288,8 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 			return -1;
 		want[n_want++] = cur[i];
 	}
-	for (int i = 0; i < n_tally; i++) {
-		rep_tally_t *t = &tally[i];
-		int best = 0;
 
-		if (rep_row_find(want, n_want, t->song) >= 0)
-			continue;
-		if (n_want >= REP_MAX_SONGS)
-			return -1;
-		for (int ki = 1; ki < t->n_keys; ki++)
-			if (t->counts[ki] > t->counts[best])
-				best = ki;
-		memset(&want[n_want], 0, sizeof(want[n_want]));
-		snprintf(
-		        want[n_want].song, sizeof(want[n_want].song), "%s",
-		        t->song);
-		snprintf(
-		        want[n_want].format, sizeof(want[n_want].format), "%s",
-		        t->format);
-		want[n_want].transpose = t->keys[best];
-		want[n_want].pinned = 0;
-		n_want++;
-	}
-
-	/* Compare-before-write: redundant calls must stay free */
+	/* Compare-before-write: if stored partition already matches want exactly, done */
 	changed = (n_want != n_cur);
 	for (int i = 0; !changed && i < n_want; i++) {
 		if (want[i].pinned != cur[i].pinned ||
@@ -309,6 +390,21 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		const char *vals[] = { k_s, "1" };
 		hyle_source_put("grp.songs", key, names, vals, 2);
 		hyle_source_ordered_save("grp.songs", ctx->id);
+	} else {
+		/* Song was derived, not yet in grp.songs: pin it with the chosen key */
+		char fmt[64] = "any";
+		rep_row_t rows[REP_MAX_SONGS];
+		int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
+		for (int i = 0; i < n_rows; i++) {
+			if (strcmp(rows[i].song, ctx->song_id) == 0) {
+				snprintf(fmt, sizeof(fmt), "%s", rows[i].format);
+				break;
+			}
+		}
+		const char *names[] = { "song", "transpose", "format", "pinned" };
+		const char *vals[] = { ctx->song_id, k_s, fmt, "1" };
+		hyle_source_ordered_append("grp.songs", ctx->id, names, vals, 4);
+		hyle_source_ordered_save("grp.songs", ctx->id);
 	}
 
 	return redirect_to_item(fd, "grp", ctx->id);
@@ -353,14 +449,13 @@ handle_grp_song_view_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	(void)user;
 	int pk = 0;
 
-	int idx = grp_song_index(ctx->id, ctx->song_id);
-	if (idx >= 0) {
-		unsigned fhd = hyle_source_get_fields_hd("grp.songs");
-		const char *key =
-		        hyle_source_ordered_key_at("grp.songs", ctx->id, idx);
-		const char *tv = qmap_field_get(fhd, key, "transpose");
-		if (tv)
-			pk = atoi(tv);
+	rep_row_t rows[REP_MAX_SONGS];
+	int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
+	for (int i = 0; i < n_rows; i++) {
+		if (strcmp(rows[i].song, ctx->song_id) == 0) {
+			pk = rows[i].transpose;
+			break;
+		}
 	}
 
 	int t = 0;
@@ -403,63 +498,63 @@ static void ch_load_gigs(
 	}
 }
 
+struct rep_load_ctx {
+	const char *grp_id;
+	unsigned sf_hd;
+	ch_rep_entry_t *repertoire;
+	int *n_repertoire;
+};
+
+static void ch_load_rep_cb(
+        const char *song_id, int transpose, const char *format, int pinned,
+        void *user)
+{
+	struct rep_load_ctx *ctx = user;
+	if (*ctx->n_repertoire >= CH_MAX_REP_SONGS)
+		return;
+
+	const char *st = song_id;
+	if (ctx->sf_hd) {
+		const char *s = qmap_get_field_str(ctx->sf_hd, song_id, "title");
+		if (s)
+			st = s;
+	}
+
+	int ok = song_get_original_key(song_id);
+	const char *tg = target_key_name(ok, transpose, 0);
+
+	ch_rep_entry_t *e = &ctx->repertoire[(*ctx->n_repertoire)++];
+	snprintf(e->title, sizeof(e->title), "%s", st);
+	snprintf(
+	        e->song_href, sizeof(e->song_href), "/grp/%s/song/%s",
+	        ctx->grp_id, song_id);
+	snprintf(
+	        e->key_label, sizeof(e->key_label),
+	        "%s \xe2\x80\xa2 Key: %s%s", format ? format : "any", tg,
+	        pinned ? " \xe2\x80\xa2 pinned" : "");
+	e->orig_key = ok;
+	e->transpose = transpose;
+	e->pinned = pinned;
+	snprintf(
+	        e->key_action, sizeof(e->key_action),
+	        "/api/grp/%s/song/%s/key", ctx->grp_id, song_id);
+	snprintf(
+	        e->rem_action, sizeof(e->rem_action),
+	        "/api/grp/%s/song/%s/remove", ctx->grp_id, song_id);
+}
+
 static void ch_load_repertoire(
         const char *grp_id, unsigned sf_hd, ch_rep_entry_t *repertoire,
         int *n_repertoire)
 {
 	*n_repertoire = 0;
-	int total = hyle_source_ordered_count("grp.songs", grp_id);
-	unsigned fhd = hyle_source_get_fields_hd("grp.songs");
-	if (!fhd)
-		return;
-
-	for (int i = 0; i < total && *n_repertoire < CH_MAX_REP_SONGS; i++) {
-		const char *rk =
-		        hyle_source_ordered_key_at("grp.songs", grp_id, i);
-		if (!rk)
-			continue;
-
-		const char *sr = qmap_field_get(fhd, rk, "song");
-		const char *ts = qmap_field_get(fhd, rk, "transpose");
-		const char *fm = qmap_field_get(fhd, rk, "format");
-		const char *pv = qmap_field_get(fhd, rk, "pinned");
-		if (!sr)
-			continue;
-		if (!fm)
-			fm = "any";
-
-		int tp = ts ? atoi(ts) : 0;
-		int pinned = pv ? atoi(pv) : 0;
-
-		const char *st = sr;
-		if (sf_hd) {
-			const char *s = qmap_get_field_str(sf_hd, sr, "title");
-			if (s)
-				st = s;
-		}
-
-		int ok = song_get_original_key(sr);
-		const char *tg = target_key_name(ok, tp, 0);
-
-		ch_rep_entry_t *e = &repertoire[(*n_repertoire)++];
-		snprintf(e->title, sizeof(e->title), "%s", st);
-		snprintf(
-		        e->song_href, sizeof(e->song_href), "/grp/%s/song/%s",
-		        grp_id, sr);
-		snprintf(
-		        e->key_label, sizeof(e->key_label),
-		        "%s \xe2\x80\xa2 Key: %s%s", fm, tg,
-		        pinned ? " \xe2\x80\xa2 pinned" : "");
-		e->orig_key = ok;
-		e->transpose = tp;
-		e->pinned = pinned;
-		snprintf(
-		        e->key_action, sizeof(e->key_action),
-		        "/api/grp/%s/song/%s/key", grp_id, sr);
-		snprintf(
-		        e->rem_action, sizeof(e->rem_action),
-		        "/api/grp/%s/song/%s/remove", grp_id, sr);
-	}
+	struct rep_load_ctx ctx = {
+		.grp_id = grp_id,
+		.sf_hd = sf_hd,
+		.repertoire = repertoire,
+		.n_repertoire = n_repertoire,
+	};
+	rep_for_each_merged(grp_id, ch_load_rep_cb, &ctx);
 }
 
 /* ── HTTP handlers ──────────────────────────────────────── */

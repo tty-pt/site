@@ -115,19 +115,39 @@ static int gig_meta_write(const char *item_path, const gig_cache_t *meta)
 	return source_meta_write(item_path, gig_fields, SB_FIELD_COUNT, meta);
 }
 
+struct grp_rand_match_ctx {
+	const char *type;
+	char ids[4096];
+	size_t id_pos;
+	size_t match_count;
+};
+
+static void grp_rand_match_cb(
+        const char *song_id, int transpose, const char *format, int pinned,
+        void *user)
+{
+	(void)transpose;
+	(void)pinned;
+	struct grp_rand_match_ctx *ctx = user;
+	const char *ftype = (format && format[0]) ? format : "any";
+
+	if (strcmp(ftype, ctx->type) == 0 || strcmp(ctx->type, "any") == 0) {
+		if (song_id && ctx->id_pos + strlen(song_id) + 1 < sizeof(ctx->ids)) {
+			strcpy(ctx->ids + ctx->id_pos, song_id);
+			ctx->id_pos += strlen(song_id) + 1;
+			ctx->match_count++;
+		}
+	}
+}
+
 /* Get a random repertoire entry for the given type from the
  * gig's grp. sb_id is the gig item ID. */
 static int get_random_repertoire_by_type(
         const char *sb_id, const char *type, char *out_id, size_t out_len)
 {
 	unsigned gig_fhd;
-	unsigned fhd;
 	const char *grp;
-	char ids[4096] = { 0 };
 	const char *p;
-	size_t id_pos = 0;
-	size_t match_count = 0;
-	int total;
 	int pick;
 
 	gig_fhd = source_get_fields_hd("gig.items");
@@ -135,37 +155,21 @@ static int get_random_repertoire_by_type(
 	if (!grp || !grp[0])
 		return -1;
 
-	total = hyle_source_ordered_count("grp.songs", grp);
-	fhd = hyle_source_get_fields_hd("grp.songs");
-	if (!fhd || total == 0)
-		return -1;
+	struct grp_rand_match_ctx ctx = {
+		.type = type,
+		.id_pos = 0,
+		.match_count = 0,
+	};
+	memset(ctx.ids, 0, sizeof(ctx.ids));
 
-	/* Collect matching entry IDs (null-terminated packed) */
-	for (int i = 0; i < total; i++) {
-		const char *eid =
-		        hyle_source_ordered_key_at("grp.songs", grp, i);
-		if (!eid)
-			continue;
+	rep_for_each_merged(grp, grp_rand_match_cb, &ctx);
 
-		const char *fmt = qmap_field_get(fhd, eid, "format");
-		const char *ftype = (fmt && fmt[0]) ? fmt : "any";
-
-		if (strcmp(ftype, type) == 0 || strcmp(type, "any") == 0) {
-			const char *rs = qmap_field_get(fhd, eid, "song");
-			if (rs && id_pos + strlen(rs) + 1 < sizeof(ids)) {
-				strcpy(ids + id_pos, rs);
-				id_pos += strlen(rs) + 1;
-				match_count++;
-			}
-		}
-	}
-
-	if (match_count == 0)
+	if (ctx.match_count == 0)
 		return -1;
 
 	/* Pick random */
-	pick = rand() % match_count;
-	p = ids;
+	pick = rand() % ctx.match_count;
+	p = ctx.ids;
 	for (int i = 0; i < pick; i++)
 		p += strlen(p) + 1;
 
@@ -481,23 +485,20 @@ static int handle_sb_add(int fd, char *body)
 		return 1;
 
 	int grp_len = mpfd_get("grp", grp, sizeof(grp));
-	if (grp_len > 0) {
-		grp[grp_len] = '\0';
-		char sb_item_path[512];
-		if (item_path_build(
-		            fd, "gig", id, sb_item_path,
-		            sizeof(sb_item_path)) != 0)
-			return server_error(fd, "Failed to resolve gig path");
+	if (grp_len < 0)
+		grp_len = 0;
+	grp[grp_len] = '\0';
 
-		gig_cache_t meta;
-		gig_meta_read(sb_item_path, &meta);
-		snprintf(meta.grp, sizeof(meta.grp), "%s", grp);
-		int meta_wr = gig_meta_write(sb_item_path, &meta);
-		if (meta_wr != 0)
-			return server_error(fd, "Failed to write gig metadata");
+	source_def_t *sb_def = source_find("gig.items");
+	if (sb_def) {
+		unsigned dh = qmap_open(
+		        NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
+		qmap_put(dh, "grp", grp);
+		source_update_item(fd, "gig.items", id, dh);
+		qmap_close(dh);
+	}
 
-		source_refresh_row(fd, "gig.items", id);
-
+	if (grp[0]) {
 		/* Pre-populate with one random song per grp format type. */
 		{
 			unsigned grp_fhd = source_get_fields_hd("grp.items");
@@ -514,18 +515,7 @@ static int handle_sb_add(int fd, char *body)
 
 		/* Seeded songs join the derived repertoire immediately. */
 		gig_sync_repertoire(id);
-	} else {
-		source_def_t *sb_def = source_find("gig.items");
-		if (sb_def) {
-			unsigned dh = qmap_open(
-			        NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
-			qmap_put(dh, "grp", "");
-			source_update_item(fd, "gig.items", id, dh);
-			qmap_close(dh);
-		}
 	}
-
-	source_refresh_row(fd, "gig.items", id);
 
 	char location[512];
 	snprintf(location, sizeof(location), "/gig/%s", id);
@@ -1386,11 +1376,35 @@ void xy_install(void)
 	axil_register_handler(
 	        "GET:/api/gig/:id/transpose", api_sb_transpose_get);
 
-	/* Auto-repertoire: derive every grp's repertoire from its gigs.
-	 * This runs here because by the time gig.so's xy_install returns,
-	 * song.items, grp.items and gig.items are all registered and
-	 * filesystem-scanned (grp.so is loaded above; see AUTO-LIST.md
-	 * §9.1 for the load-order analysis). */
+	/* Backfill / heal: ensure any gigs that have a grp in their metadata file
+	 * on disk are correctly indexed in gig.items in memory. */
+	{
+		unsigned gh = source_get_fields_hd("gig.items");
+		unsigned dh = source_get_data_hd("gig.items");
+		if (gh && dh) {
+			uint32_t cur = qmap_iter(dh, NULL, 0);
+			const void *k, *v;
+			while (qmap_next(&k, &v, cur)) {
+				const char *gig_id = (const char *)k;
+				const char *grp_in_mem = qmap_get_field_str(gh, gig_id, "grp");
+				char item_path[512];
+				if (item_path_build(0, "gig", gig_id, item_path, sizeof(item_path)) == 0) {
+					gig_cache_t meta;
+					gig_meta_read(item_path, &meta);
+					if (meta.grp[0] && (!grp_in_mem || strcmp(grp_in_mem, meta.grp) != 0)) {
+						unsigned row_dh = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
+						qmap_put(row_dh, "grp", meta.grp);
+						source_update_item(0, "gig.items", gig_id, row_dh);
+						qmap_close(row_dh);
+					}
+				}
+			}
+			qmap_fin(cur);
+		}
+	}
+
+	/* Auto-repertoire: sanitize every grp's stored partition (prune non-pinned rows)
+	 * and sync in-memory state. */
 	{
 		unsigned gh = source_get_fields_hd("grp.items");
 		unsigned dh = source_get_data_hd("grp.items");

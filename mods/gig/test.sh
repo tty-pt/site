@@ -138,18 +138,19 @@ echo -n "    data.txt has 2 songs... "
 LINES=$(wc -l < "$DATAFILE" 2>/dev/null || echo 0)
 [ "$LINES" = "2" ] && pass "(got $LINES)" || fail "expected 2, got $LINES"
 
-# ── 11. Verify migration ran — sb_sg3 in grp repertoire ──
-echo -n "11. song3 appears in grp repertoire after migration... "
-GRP_DATAFILE="$REPO_ROOT/var/grp/$GRP_ID/data.txt"
-grep -q "sb_sg3" "$GRP_DATAFILE" && pass "found" || fail "not in repertoire"
+# ── 11. Verify derived repertoire — sb_sg3 appears in grp detail page ──
+echo -n "11. song3 appears in grp repertoire view... "
+GRP_HTML=$(curl -sb "$COOKIE" "$BASE/grp/$GRP_ID")
+echo "$GRP_HTML" | grep -q "sb_sg3" && pass "found" || fail "not in repertoire HTML"
 
-# Verify song count >= 3 unique songs in repertoire
-echo -n "    Repertoire has >=3 unique songs... "
-SONG_COUNT=$(cut -d: -f1 "$GRP_DATAFILE" | sort -u | wc -l | tr -d ' ')
-[ "$SONG_COUNT" -ge 3 ] && pass "($SONG_COUNT songs)" || {
+# Verify pinned items in data.txt (only explicit adds: sb_sg1, sb_sg2)
+echo -n "    grp/data.txt only stores pinned items... "
+GRP_DATAFILE="$REPO_ROOT/var/grp/$GRP_ID/data.txt"
+PINNED_COUNT=$(wc -l < "$GRP_DATAFILE" 2>/dev/null || echo 0)
+[ "$PINNED_COUNT" = "2" ] && pass "(pinned count $PINNED_COUNT)" || {
 	echo "DEBUG: data.txt content:"
 	cat "$GRP_DATAFILE"
-	fail "got $SONG_COUNT, expected >=3"
+	fail "got $PINNED_COUNT, expected 2"
 }
 
 # ── 12. Unauthenticated access rejected ──
