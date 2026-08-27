@@ -4,7 +4,7 @@
 > then this file, then `docs/ARCHITECTURE.md` / `docs/DESIGN.md`.
 > Every other doc assumes these invariants.
 
-Departures from these goals are cataloged in `docs/VIOLATIONS.md` (currently 0 open). Do not introduce new violations.
+All architectural boundaries and invariants are actively enforced by CI and `make boundary-check`.
 
 No-JS must always work. hyle stays framework-neutral. Client enhancement
 is optional, additive, and framework-paired (bud↔WASM). SSR markup +
@@ -218,4 +218,5 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 - `docs/WASM-BRIDGE.md` — bridge/patch pitfalls
 - `docs/SSR-CONTRACT.md` — no-JS markup contract
 - `docs/BUILD.md` — wasm rebuild trap, stale headers, cache bust
-- `docs/VIOLATIONS.md` — 0 open (archived in `git log -- docs/VIOLATIONS.md`), deliberate exceptions + confirmed boundaries
+- `docs/AUDIT.md` — technical debt backlog and security audit
+

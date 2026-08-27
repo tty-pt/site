@@ -26,7 +26,7 @@ abstraction is wrong. Push the boilerplate into the helper, not the caller.
 - **We own the http server — invent well:** prefer extending `axil` / `hyle` / `bud` over shimming in `common`. Libraries must stay site-agnostic (`grep -rn bud external/hyle/src` must be 0).
 - **Site-specific surface minimal (blocking):** `common` is reusable *within this site*, not a per-feature dumping ground. Adding a new module must not edit `common` — use per-module registration (`source_list_view_t`). Enforced by `scripts/check-module-boundaries.sh`.
 
-Grandfathered surface (`site_paths.c:68` icon table, etc.) is tracked in `VIOLATIONS.md` deliberate exceptions and `AUDIT.md`; do not add more.
+Grandfathered surface (`site_paths.c:68` icon table, etc.) is allowlisted in `scripts/check-module-boundaries.sh`; do not add more.
 
 ## 2. Layering: who may call whom
 

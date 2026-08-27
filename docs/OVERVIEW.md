@@ -88,7 +88,6 @@ the repo root (prereqs in `docs/BUILD.md`).
 | You want to… | Read |
 |--------------|------|
 | Understand what the architecture wants to be | `docs/GOALS.md` |
-| Check all known departures from those goals | `docs/VIOLATIONS.md` |
 | Understand the architecture / load order / XY contract | `docs/ARCHITECTURE.md` |
 | Understand the design philosophy before designing anything | `docs/DESIGN.md` |
 | Build, rebuild, or hit a build gotcha | `docs/BUILD.md` |
@@ -100,4 +99,4 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Touch the WASM bridge / patch ops | `docs/WASM-BRIDGE.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |
-| Deep audit: full issue catalog, proposed fixes, and phased roadmap | `docs/AUDIT.md` |
+| Deep audit: full issue catalog, proposed fixes, and technical debt backlog | `docs/AUDIT.md` |

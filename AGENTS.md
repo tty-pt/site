@@ -90,6 +90,5 @@ make watch          # auto-rebuild + restart on :8080
 | WASM bridge | `docs/WASM-BRIDGE.md` |
 | Filters & schema hints | `docs/FILTERS.md` / `docs/SCHEMA.md` |
 | Pickers & Omni-Dropdowns | `docs/PICKERS.md` |
-| Known violations & deliberate exceptions | `docs/VIOLATIONS.md` |
 | Extension guide & custom Pi workflows | `docs/EXTENSIONS.md` |
-| Deep audit | `docs/AUDIT.md` |
+| Deep audit & technical debt backlog | `docs/AUDIT.md` |
