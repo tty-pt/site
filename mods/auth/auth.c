@@ -408,8 +408,28 @@ int on_auth_login_error(
 	char accept[256] = { 0 };
 	axil_header_get(fd, "Accept", accept, sizeof(accept));
 	if (strstr(accept, "text/html")) {
+		char full_target[768] = { 0 };
+		const char *target = redirect;
+
+		if (!target || !*target) {
+			char uri[512] = { 0 };
+			char qs[256] = { 0 };
+			axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+			if (uri[0] == '/' && strncmp(uri, "/auth/login", 11) != 0 &&
+			    strncmp(uri, "/auth/logout", 12) != 0 &&
+			    strncmp(uri, "/auth/register", 14) != 0) {
+				axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+				if (qs[0]) {
+					snprintf(full_target, sizeof(full_target), "%s?%s", uri, qs);
+				} else {
+					strncpy(full_target, uri, sizeof(full_target) - 1);
+				}
+				target = full_target;
+			}
+		}
+
 		const char *user = get_request_user(fd);
-		bud_node *layout = auth_render_login(user, redirect, msg);
+		bud_node *layout = auth_render_login(user, target, msg);
 		auth_send_html(
 		        fd, (uint16_t)status, "Login", "/auth/login", "🔑",
 		        user, layout);
