@@ -54,7 +54,13 @@ make watch          # auto-rebuild + restart on :8080
    search accent-sensitive `pão≠pao` (no TRANSLIT, only `axil_slugify`);
    No-JS must always work (`SSR-CONTRACT`).
 
-6. **Task Management.** All work MUST use the Task Journal workflow.
+6. **No Site-Specific JavaScript.** JavaScript (`htdocs/*.js`) must remain
+   strictly generic library infrastructure (`hyle` slot transport, `bud` hydration).
+   Zero domain-specific identifiers, URLs, module names (`song`, `gig`, `poem`, `grp`),
+   or custom client logic in JS. All rich client behaviors belong in isomorphic
+   WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
+
+7. **Task Management.** All work MUST use the Task Journal workflow.
    - Use `/task <name>` to start or resume active work (`docs/current/<name>.md`).
    - The task file is your single source of truth for goals, status, and decisions. You must update it as you make progress and before context is compacted.
    - Use `/task-draft <name>` to propose planned work in `docs/future/`.

@@ -206,6 +206,8 @@ The site is pure C with progressive WASM enhancement. **No site-specific JavaScr
 - JavaScript files must NEVER contain application-specific class names (e.g. `.gig-*`, `.song-*`, `#sb-*`), module names (`poem`, `song`, `gig`, `grp`), domain endpoints, or business logic.
 - Generic transports are driven exclusively by neutral data attributes (e.g. `[data-hyle-frag-url]`, `[data-hyle-auto-submit]`, `[data-hyle-slot]`).
 - All interactive application features, reactive state transitions, and custom client logic must be implemented in pure C (`mods/*/ux/*.c`) and compiled to WASM.
+- Enforced automatically in CI and test runs via `scripts/check-no-site-specific-js.sh` (`make boundary-check`).
+
 
 ## Misc pitfalls
 

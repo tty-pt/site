@@ -155,29 +155,18 @@ Deno.test({
       throw new Error("Expected Replace button to be hidden with client scripts active");
     }
 
-    // ── 8. Select replacement song option (auto-submits on change in JS mode without page reload) ───
+    // ── 8. Select replacement song option (auto-submits form natively on selection) ───
     const opt = page.locator(
       `#sb-pick-post-0 label.hyle-picker-option:has(input[name="song_id"][value="${REPLACEMENT_SONG_ID}"])`,
     );
     await opt.first().waitFor();
 
-    let navigated = false;
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) {
-        console.log("NAVIGATED TO:", frame.url());
-        navigated = true;
-      }
-    });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      opt.first().click(),
+    ]);
 
-    await opt.first().click();
-
-    // ── 10. Verify NO full page navigation occurred in JS mode ────────────
-    await page.waitForTimeout(600);
-    if (navigated) {
-      throw new Error("Expected in-place replacement without full page reload/navigation");
-    }
-
-    // ── 11. Verify the replacement song appears and original is gone ───────
+    // ── 9. Verify the replacement song appears and original is gone ───────
     await waitForText(page, "body", REPLACEMENT_SONG_TITLE);
     const bodyText = await page.textContent("body");
     if (bodyText?.includes(ORIGINAL_SONG_TITLE)) {
@@ -187,14 +176,14 @@ Deno.test({
       throw new Error("Replacement song title not found in body");
     }
 
-    // ── 12. Verify chord data renders for the new song ─────────────────────
+    // ── 10. Verify chord data renders for the new song ─────────────────────
     await page.waitForSelector('[data-gig-chord-data]', { timeout: 5000 });
     const chordData = await page.textContent('[data-gig-chord-data]');
     if (!chordData || chordData.length < 10) {
       throw new Error("Chord data too short or missing for replacement song");
     }
 
-    // ── 13. Test no-JS SSR query scoping (?pick_q_song_id__0=...) ─────────
+    // ── 11. Test no-JS SSR query scoping (?pick_q_song_id__0=...) ─────────
     const noJsResp = await fetch(`${BASE}/gig/${sbId}?pick_q_song_id__0=alegria`, {
       headers: { Cookie: cookieHeader },
     });
