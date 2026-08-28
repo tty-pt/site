@@ -317,6 +317,32 @@ a.btn:hover {
   filter: brightness(110%);
 }
 
+.btn-sm,
+a.btn-sm {
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
+
+.btn-icon,
+a.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.media-buttons {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 a {
   color: var(--link);
   text-decoration: none;
@@ -525,6 +551,7 @@ body:has(#menu-functions:checked) .functions {
 .flex-col { flex-direction: column; }
 .items-center { align-items: center; }
 .justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
 .gap-2 { gap: 0.5rem; }
 .gap-4 { gap: 1rem; }
 .h-full { height: 100%; }

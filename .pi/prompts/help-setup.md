@@ -5,31 +5,31 @@ argument-hint: "[section]"
 
 # Custom Setup Quick Reference
 
-## Task Workflow (task-journal.ts)
+## Quest Workflow (quest-journal.ts)
 
 | Command | What it does |
 |---------|-------------|
-| `/task <name>` | Set active task (promotes drafts or creates new) |
-| `/task-save` | Force-save current task state to disk now |
-| `/task-refine <text>` | Add mid-workflow requirements to active task |
-| `/task-del` | Archive completed task to `docs/archive/` |
-| `/task-draft <name>` | Draft a future task in `docs/future/` |
-| `/task-status` | Check if task file is fresh or stale |
-| `/tasks` | List all current and future tasks |
+| `/quest <name>` | Set active quest (promotes drafts or creates new) |
+| `/quest-save` | Force-save current quest state to disk now |
+| `/quest-refine <text>` | Add mid-workflow requirements to active quest |
+| `/quest-del` | Archive completed quest to `docs/archive/` |
+| `/quest-draft <name>` | Draft a future quest in `docs/future/` |
+| `/quest-status` | Check if quest file is fresh or stale |
+| `/quests` | List all current and future quests |
 
 ### How it works
-- Each task lives at `docs/current/<name>.md` — the single source of truth.
-- On startup, you're prompted to pick or create a task.
-- The task file is auto-saved before compaction and on context fill-up.
-- Compaction is **blocked** until the task file has been saved — protecting your work.
-- `docs/future/` holds proposals/backlog; `/task` promotes them to current.
+- Each quest lives at `docs/current/<name>.md` — the single source of truth.
+- On startup, you're prompted to pick or create a quest.
+- The quest file is auto-saved before compaction and on context fill-up.
+- Compaction is **blocked** until the quest file has been saved — protecting your work.
+- `docs/future/` holds proposals/backlog; `/quest` promotes them to current.
 
 ## Session Awareness (context-awareness.ts)
 
 Auto-injected into every system prompt turn:
 - Current date/time and working directory
 - Git branch (read from `.git/HEAD`)
-- Active task name and freshness status
+- Active quest name and freshness status
 - Project guidelines from `AGENTS.md` (auto-detected)
 - Standing notes from `.pi/context.md` (create freely)
 

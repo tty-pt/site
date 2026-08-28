@@ -60,11 +60,11 @@ make watch          # auto-rebuild + restart on :8080
    or custom client logic in JS. All rich client behaviors belong in isomorphic
    WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
 
-7. **Task Management.** All work MUST use the Task Journal workflow.
-   - Use `/task <name>` to start or resume active work (`docs/current/<name>.md`).
-   - The task file is your single source of truth for goals, status, and decisions. You must update it as you make progress and before context is compacted.
-   - Use `/task-draft <name>` to propose planned work in `docs/future/`.
-   - Completed work is archived to `docs/archive/` via `/task-del`.
+7. **Quest Management.** All work MUST use the Quest Journal workflow.
+   - Use `/quest <name>` to start or resume active work (`docs/current/<name>.md`).
+   - The quest file is your single source of truth for goals, status, and decisions. You must update it as you make progress and before context is compacted.
+   - Use `/quest-draft <name>` to propose planned work in `docs/future/`.
+   - Completed work is archived to `docs/archive/` via `/quest-del`.
    - Never use ad-hoc scratchpads, `.todo` files, or try to keep the entire plan in your head.
 
 7. **Test-Driven Development (TDD) & Quality Gates.**

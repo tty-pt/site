@@ -176,28 +176,22 @@ extern void (*bud_host_set_location_fn)(const char *url, size_t len);
 
 static void sb_toggle_media(int show)
 {
+	(void)show;
 	if (!bud_host_set_location_fn)
 		return;
 	for (int i = 0; i < sb_app_state.n_songs && i < g_sb_n_chord_nodes; i++)
 	{
 		if (!g_sb_media_nodes[i])
 			continue;
-		if (show) {
-			char html[8192];
-			sb_song_row_data_t *s = &g_sb_songs[i];
-			site_ui_build_media_html(
-			        s->yt, s->audio, s->pdf, html, sizeof(html));
-			extern void bud_patch_innerhtml(
-			        unsigned int node_id, const char *html);
-			bud_patch_innerhtml(
-			        bud_node_id(g_sb_media_nodes[i]),
-			        html[0] ? html : "");
-		} else {
-			extern void bud_patch_innerhtml(
-			        unsigned int node_id, const char *html);
-			bud_patch_innerhtml(
-			        bud_node_id(g_sb_media_nodes[i]), "");
-		}
+		char html[8192];
+		sb_song_row_data_t *s = &g_sb_songs[i];
+		site_ui_build_media_html(
+		        s->yt, s->audio, s->pdf, html, sizeof(html));
+		extern void bud_patch_innerhtml(
+		        unsigned int node_id, const char *html);
+		bud_patch_innerhtml(
+		        bud_node_id(g_sb_media_nodes[i]),
+		        html[0] ? html : "");
 	}
 }
 
@@ -282,9 +276,6 @@ bud_node *bud_app_render(void)
 	              lx_attr("data-viewer-opts", "gig"),
 	              lx_node(site_ui_checkbox(
 	                      "l", "Latin", sb_app_state.latin,
-	                      on_sb_option_change)),
-	              lx_node(site_ui_checkbox(
-	                      "m", "Video", sb_app_state.show_media,
 	                      on_sb_option_change)),
 	              lx_el("label", lx_text("Zoom"),
 	                    lx_el("input", lx_attr("type", "range"),
@@ -479,12 +470,12 @@ static bud_node *sb_render_song_row(
 
 	/* Media container (always rendered, patched by WASM) */
 	char media_html[8192] = { 0 };
-	if (sb_app_state.show_media && (s->yt[0] || s->audio[0] || s->pdf[0]))
+	if (s->yt[0] || s->audio[0] || s->pdf[0])
 		site_ui_build_media_html(
 		        s->yt, s->audio, s->pdf, media_html, sizeof(media_html));
 
 	bud_node *media_node = lx_el("div", lx_attr("data-gig-media", n_buf),
-	                             lx_attr("class", "gig-media mt-1"),
+	                             lx_attr("class", "gig-media flex justify-end items-center flex-shrink-0 ml-auto"),
 	                             lx_node(bud_raw(media_html)))
 	                               .data.node;
 
@@ -592,16 +583,16 @@ static bud_node *sb_render_song_row(
 
 	bud_node *header =
 	        lx_el("div",
-	              lx_attr("class", "flex justify-between items-center"),
+	              lx_attr("class", "flex justify-between items-center gap-2"),
 	              lx_node(title_col),
+	              lx_node(media_node),
 	              owner_ctrl ? lx_node(owner_ctrl) : lx_none())
 	                .data.node;
 
 	return lx_el("div", lx_attr("data-gig-item", ""),
 	             lx_attr("class",
 	                     "flex flex-col gap-1 p-2 bg-surface rounded"),
-	             lx_node(header), lx_node(chord_pre),
-	             lx_node(media_node))
+	             lx_node(header), lx_node(chord_pre))
 	        .data.node;
 }
 

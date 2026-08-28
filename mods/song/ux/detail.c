@@ -26,16 +26,12 @@ static void toggle_media(void)
 	if (!g_media_node)
 		return;
 	extern void bud_patch_innerhtml(unsigned int node_id, const char *html);
-	if (app_state.show_media) {
-		char html[8192];
-		site_ui_build_media_html(
-		        app_state.cache.yt, app_state.cache.audio,
-		        app_state.cache.pdf, html, sizeof(html));
-		bud_patch_innerhtml(
-		        bud_node_id(g_media_node), html[0] ? html : "");
-	} else {
-		bud_patch_innerhtml(bud_node_id(g_media_node), "");
-	}
+	char html[8192];
+	site_ui_build_media_html(
+	        app_state.cache.yt, app_state.cache.audio,
+	        app_state.cache.pdf, html, sizeof(html));
+	bud_patch_innerhtml(
+	        bud_node_id(g_media_node), html[0] ? html : "");
 }
 
 extern void wasm_mark_dirty(void);
@@ -147,9 +143,6 @@ static bud_node *render_transpose_form(bud_node *key_options)
 	             lx_node(site_ui_checkbox(
 	                     "l", "Latin", app_state.use_latin,
 	                     bud_api_action_handler)),
-	             lx_node(site_ui_checkbox(
-	                     "m", "Video", app_state.show_media,
-	                     bud_api_action_handler)),
 	             lx_el("label", lx_text("Zoom"),
 	                   lx_el("input", lx_attr("type", "range"),
 	                         lx_attr("name", "z"),
@@ -188,11 +181,43 @@ static void render_chord_viewer(void)
 	char media_val[2] = { app_state.show_media ? '1' : '0', '\0' };
 	char owner_val[2] = { app_state.is_owner ? '1' : '0', '\0' };
 
-	bud_node *media_slot = NULL;
-	if (app_state.show_media)
-		media_slot = site_ui_render_media_slot(
-		        app_state.cache.yt, app_state.cache.audio,
-		        app_state.cache.pdf);
+	bud_node *media_slot = site_ui_render_media_slot(
+	        app_state.cache.yt, app_state.cache.audio,
+	        app_state.cache.pdf);
+
+	g_media_node =
+	        lx_el("div",
+	              lx_attr("class",
+	                      "flex justify-end items-center gap-2 flex-shrink-0 ml-auto"),
+	              lx_attr("data-song-media", "1"),
+	              media_slot ? lx_node(media_slot) : lx_none())
+	                .data.node;
+
+	/* Detail body with type/author on the left and media buttons on the right */
+	bud_node *left_meta =
+	        lx_el("div", lx_attr("class", "flex flex-col gap-1 min-w-0"),
+	              app_state.cache.type[0]
+	                      ? lx_el("div",
+	                              lx_attr("class",
+	                                      "italic whitespace-pre-wrap text-xs "
+	                                      "text-muted"),
+	                              lx_text(app_state.cache.type))
+	                      : lx_none(),
+	              app_state.cache.author[0]
+	                      ? lx_el("div",
+	                              lx_attr("class", "text-xs text-muted"),
+	                              lx_text(app_state.cache.author))
+	                      : lx_none())
+	                .data.node;
+
+	bud_node *detail_header =
+	        lx_el("div", lx_attr("id", "song-detail-body"),
+	              lx_attr("class",
+	                      "flex justify-between items-center w-full "
+	                      "max-w-xl text-xs text-muted gap-2"),
+	              lx_attr("data-detail-viewer-scope", "1"),
+	              lx_node(left_meta), lx_node(g_media_node))
+	                .data.node;
 
 	g_chord_raw = bud_raw(app_state.chord_html);
 	g_chord_pre = lx_el("pre", lx_attr("id", "chord-data"),
@@ -206,44 +231,13 @@ static void render_chord_viewer(void)
 	bud_node *g_main_inner =
 	        lx_el("div",
 	              lx_attr("class", "flex flex-col gap-4 w-full max-w-xl"),
+	              lx_node(detail_header),
 	              lx_el("div",
 	                    lx_attr("class", "detail-viewer-scroll w-full "
 	                                     "max-w-xl"),
 	                    lx_attr("data-detail-viewer-scroll", "1"),
 	                    lx_node(g_chord_pre)))
 	                .data.node;
-
-	g_media_node =
-	        lx_el("div",
-	              lx_attr("class", "flex flex-col gap-4 w-full max-w-xl"),
-	              lx_attr("data-song-media", "1"),
-	              media_slot ? lx_node(media_slot) : lx_none())
-	                .data.node;
-
-	/* Detail body with type/author */
-	bud_node *detail_body = NULL;
-	if (app_state.cache.type[0] || app_state.cache.author[0]) {
-		detail_body =
-		        lx_el("div", lx_attr("id", "song-detail-body"),
-		              lx_attr("class", "contents"),
-		              lx_attr("data-detail-viewer-scope", "1"),
-		              lx_el("div",
-		                    lx_attr("class",
-		                            "flex justify-between items-start "
-		                            "w-full max-w-xl text-xs "
-		                            "text-muted"),
-		                    lx_el("div",
-		                          lx_attr("class",
-		                                  "italic whitespace-pre-wrap"),
-		                          lx_text(app_state.cache.type)),
-		                    lx_el("div", lx_attr("class", "text-right"),
-		                          lx_text(app_state.cache.author[0]
-		                                          ? app_state.cache
-		                                                    .author
-		                                          : "N/A"))))
-		                .data.node;
-		bud_append(g_main_inner, detail_body);
-	}
 
 	g_main = lx_el("div", lx_attr("id", "main"),
 	               lx_attr("data-song-id", app_state.cache.id),
@@ -261,7 +255,7 @@ static void render_chord_viewer(void)
 	               lx_attr("style", zoom_style),
 	               lx_attr("data-type-display", app_state.cache.type),
 	               lx_attr("data-author", app_state.cache.author),
-	               lx_node(g_main_inner), lx_node(g_media_node))
+	               lx_node(g_main_inner))
 	                 .data.node;
 }
 

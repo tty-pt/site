@@ -1,6 +1,6 @@
 # Project Extensions (`.pi/extensions/`)
 
-This repository includes custom TypeScript extensions located in `.pi/extensions/` that extend Pi's functionality for task persistence, context awareness, and project workflows.
+This repository includes custom TypeScript extensions located in `.pi/extensions/` that extend Pi's functionality for quest persistence, session awareness, and project workflows.
 
 ---
 
@@ -13,66 +13,63 @@ Project-local extensions are loaded automatically by Pi when opening this reposi
 
 ---
 
-## 2. Task Journal (`.pi/extensions/task-journal.ts`)
+## 2. Quest Journal & Context Awareness (`.pi/extensions/quest-journal.ts`)
 
 ### Purpose
-Maintains long-lived task state on disk (`docs/current/<task>.md`) so work survives across Pi sessions, context resets, and auto-compactions without re-researching or losing context.
+Maintains long-lived quest state on disk (`docs/current/<quest>.md`), auto-injects persistent session awareness (timestamp, git branch, active quest freshness, standing project notes, auto-detected guidelines), and enforces strict TDD & quality gates across compaction and context resets.
 
 ### Commands
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/task` | `/task [name]` | Sets the active task. When starting a new task, prompts for a goal description, pre-populating `## Goal` in the template. When called without arguments, opens an interactive selector listing active tasks, drafts, and an option for a new task. |
-| `/task-refine` | `/task-refine <instructions...>` | Refines the active task mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update task file goals, checklist, and `## Task Refinements & Iterations`. |
-| `/task-save` | `/task-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active task file. |
-| `/task-del` | `/task-del [name]` | Archives the active or named task file. When called without arguments, opens an interactive task selector. Moves file to `docs/archive/<name>-<timestamp>.md` and cleans up any leftover draft. |
-| `/task-draft` | `/task-draft <name>` | Creates a proposal draft in `docs/future/<name>.md` without making it active. Blocks creation if `<name>` is already active in `docs/current/`. |
-| `/task-status` | `/task-status` | Displays the active task name, file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
-| `/tasks` | `/tasks` | Displays active tasks in `docs/current/` and proposals in `docs/future/` in a widget panel. |
+| `/quest` | `/quest [name]` | Sets the active quest. When starting a new quest, prompts for a goal description, pre-populating `## Goal` in the template. When called without arguments, opens an interactive selector listing active quests, drafts, and an option for a new quest. (Alias: `/task`) |
+| `/quest-refine` | `/quest-refine <instructions...>` | Refines the active quest mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update quest file goals, checklist, and `## Quest Refinements & User Feedback Loops`. (Alias: `/task-refine`) |
+| `/quest-save` | `/quest-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active quest file. (Alias: `/task-save`) |
+| `/quest-del` | `/quest-del [name]` | Archives the active or named quest file. When called without arguments, opens an interactive quest selector. Moves file to `docs/archive/<name>-<timestamp>.md` and cleans up any leftover draft. (Alias: `/task-del`) |
+| `/quest-draft` | `/quest-draft <name>` | Creates a proposal draft in `docs/future/<name>.md` without making it active. Blocks creation if `<name>` is already active in `docs/current/`. (Alias: `/task-draft`) |
+| `/quest-status` | `/quest-status` | Displays the active quest name, file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. (Alias: `/task-status`) |
+| `/quests` | `/quests` | Displays active quests in `docs/current/` and proposals in `docs/future/` in a widget panel. (Alias: `/tasks`) |
 
 ### Custom Tools
 
-- **`task_journal_mark_saved`**: A custom tool that records that the active task file was written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`.
+- **`quest_journal_mark_saved`**: A custom tool that records that the active quest file was written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`. (Legacy alias: `task_journal_mark_saved`)
+- **`quest_journal_archive`**: A custom tool to archive the active (or specified) quest from `docs/current/` to `docs/archive/` and optionally trigger session context compaction. (Legacy alias: `task_journal_archive`)
+
+### Session Awareness & Context Injection
+
+On every agent turn, the extension automatically injects into the system prompt:
+- **Timestamp & Directory**: Current ISO timestamp and `ctx.cwd`.
+- **Git Branch**: Active git branch read directly from `.git/HEAD` (zero subprocess overhead).
+- **Active Quest State**: The active quest file path (`docs/current/<active>.md`) and whether its status is fresh or `SAVE PENDING`.
+- **Active Quest Resume Context**: Summary of active goal, status, remaining work, and next step parsed directly from disk.
+- **Project Guidelines**: Auto-detected mandatory project rules parsed from `AGENTS.md`, `CLAUDE.md`, or `SYSTEM.md` (extracts `## Guidelines`, `## Rules`, `## Invariants`, etc.).
+- **Standing Notes**: Optional persistent project notes read from `.pi/context.md` (if the file exists).
 
 ### Mandatory TDD & Quality Workflow Rules
 
-The extension automatically injects system prompt instructions and template sections forcing a strict TDD & Quality workflow for all tasks:
+The extension automatically injects system prompt instructions and template sections forcing a strict TDD & Quality workflow for all quests:
 
 1. **Build & Run Discovery**: Before editing feature code, the agent must discover how to build and run the project (e.g. read `AGENTS.md`, `Makefile`, scripts).
-2. **Develop Tests First (TDD)**: One or multiple tests must be written for the task **BEFORE** developing feature code.
+2. **Develop Tests First (TDD)**: One or multiple tests must be written for the quest **BEFORE** developing feature code.
 3. **Iterative Build, Run & Test**: Implement feature -> Build project -> Run project -> Execute tests.
 4. **Final Verification & Quality Gates**:
    - Build completes with **zero errors or warnings**.
    - Code contains **zero debug artifacts** (e.g., leftover `console.log`, debug prints, temporary comments).
    - The **full test suite** is executed at the end and passes with **zero errors**.
 
-The task template automatically includes a `## Build & Run Commands` section and a `## TDD & Quality Checklist` tracking these phases.
+The quest template automatically includes a `## Build & Run Commands` section and a `## TDD & Quality Checklist` tracking these phases.
 
 ### Auto-behaviors & Compaction Gate
 
-- **Prompt Capture**: Verbatim user prompts are automatically captured in session state and injected into save requests so the `## Original request` section in the task file stays faithful.
-- **Context Escalation**: Reminds the model to save the task file as context fills up (>= 70% usage) and prompts for a save + `/compact` at >= 85% usage.
-- **Compaction Gate**: Blocks `/compact` or auto-compaction unless the active task file has been saved since the last compaction (`saveCount > compactCount`).
-- **Startup Picker**: On TUI interactive startup, presents an interactive menu to choose an existing task, promote a draft, start a new task, or skip.
+- **Prompt Capture**: Verbatim user prompts are automatically captured in session state and injected into save requests so the `## Original request` section in the quest file stays faithful.
+- **Context Escalation**: Reminds the model to save the quest file as context fills up (>= 70% usage) and prompts for a save + `/compact` at >= 85% usage.
+- **Compaction Gate**: Blocks `/compact` or auto-compaction unless the active quest file has been saved since the last compaction (`saveCount > compactCount`).
+- **Startup Picker**: On TUI interactive startup, presents an interactive menu to choose an existing quest, promote a draft, start a new quest, or skip.
 - **Session Shutdown / Switch**: Prompts for a state snapshot before switching sessions or exiting.
 
 ---
 
-## 3. Context Awareness (`.pi/extensions/context-awareness.ts`)
-
-### Purpose
-Models have no persistent awareness of your environment outside of what is in their request context payload. This extension appends a compact `# Session awareness` block to the system prompt before every agent turn via `before_agent_start`.
-
-### Auto-Injected Facts
-
-On every agent turn, the model automatically sees:
-- **Timestamp & Directory**: Current ISO timestamp and `ctx.cwd`.
-- **Git Branch**: Active git branch read directly from `.git/HEAD` (zero subprocess overhead).
-- **Task Journal State**: The active task file path (`docs/current/<active>.md`) and whether its status is fresh or `SAVE PENDING`.
-- **Project Guidelines**: Auto-detected mandatory project rules parsed from `AGENTS.md`, `CLAUDE.md`, or `SYSTEM.md` (extracts `## Guidelines`, `## Rules`, `## Invariants`, etc.).
-- **Standing Notes**: Optional persistent project notes read from `.pi/context.md` (if the file exists).
-
-### Standing Project Notes (`.pi/context.md`)
+## 3. Standing Project Notes (`.pi/context.md`)
 
 You can create or edit `.pi/context.md` at any time to give Pi standing facts or rules that should be injected into every request payload (e.g., "Always test with `make watch` after editing UX modules").
 
@@ -86,10 +83,9 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 ## 4. Summary Table
 
-| Extension File | Primary Hook | Key Commands / Tools | Responsibility |
-|----------------|--------------|----------------------|----------------|
-| `.pi/extensions/task-journal.ts` | `before_agent_start`, `turn_end`, `session_before_compact`, `tool_result` | `/task`, `/task-refine`, `/task-save`, `/task-del`, `/task-draft`, `/task-status`, `/tasks`, `task_journal_mark_saved` | Disk-backed state persistence, task refinement, compaction protection, prompt capture |
-| `.pi/extensions/context-awareness.ts` | `before_agent_start` | Read `AGENTS.md`/`CLAUDE.md`/`SYSTEM.md`, `.pi/context.md`, `.git/HEAD` | Per-turn system prompt context injection (date, branch, active task, project guidelines, standing notes) |
+| Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
+|----------------|---------------|----------------------|----------------|
+| `.pi/extensions/quest-journal.ts` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_journal_mark_saved`, `quest_journal_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
 
 ---
 

@@ -108,7 +108,6 @@ static int safe_url(const char *s);
 bud_node *
 site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 {
-	char src[1024];
 	bud_node *inner = bud_fragment();
 	int has_media = 0;
 	if (!inner)
@@ -120,27 +119,48 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	if (pdf && pdf[0] && !safe_url(pdf))
 		pdf = NULL;
 
-	if (yt && yt[0]) {
-		snprintf(
-		        src, sizeof(src), "https://www.youtube.com/embed/%.11s",
-		        yt);
-		bud_append(
-		        inner,
+	int has_btns = (yt && yt[0]) || (pdf && pdf[0]);
+	if (has_btns) {
+		bud_node *btn_row =
 		        lx_el("div",
-		              lx_attr("class", "flex flex-col gap-4 w-full"),
-		              lx_el("iframe", lx_attr("src", src),
-		                    lx_attr("class", "w-full aspect-video "
-		                                     "border-none"),
-		                    lx_attr("title", "YouTube video player"),
-		                    lx_attr("allow",
-		                            "accelerometer; autoplay; "
-		                            "clipboard-write; encrypted-media; "
-		                            "gyroscope; picture-in-picture; "
-		                            "web-share"),
-		                    lx_attr("referrerpolicy",
-		                            "strict-origin-when-cross-origin"),
-		                    lx_attr("allowfullscreen", "")))
-		                .data.node);
+		              lx_attr("class",
+		                      "media-buttons flex flex-row items-center "
+		                      "justify-end gap-2"))
+		                .data.node;
+		if (yt && yt[0]) {
+			char yt_url[1024];
+			snprintf(
+			        yt_url, sizeof(yt_url),
+			        "https://www.youtube.com/watch?v=%.11s", yt);
+			bud_append(
+			        btn_row,
+			        lx_el("a",
+			              lx_attr("href", yt_url),
+			              lx_attr("target", "_blank"),
+			              lx_attr("rel", "noopener noreferrer"),
+			              lx_attr("class",
+			                      "btn btn-icon btn-sm"),
+			              lx_attr("title", "Watch on YouTube"),
+			              lx_attr("aria-label",
+			                      "Watch on YouTube"),
+			              lx_text("\xe2\x96\xb6"))
+			                .data.node);
+		}
+		if (pdf && pdf[0]) {
+			bud_append(
+			        btn_row,
+			        lx_el("a",
+			              lx_attr("href", pdf),
+			              lx_attr("target", "_blank"),
+			              lx_attr("rel", "noopener noreferrer"),
+			              lx_attr("class",
+			                      "btn btn-icon btn-sm"),
+			              lx_attr("title", "View PDF"),
+			              lx_attr("aria-label", "View PDF"),
+			              lx_text("\xf0\x9f\x93\x84"))
+			                .data.node);
+		}
+		bud_append(inner, btn_row);
 		has_media = 1;
 	}
 
@@ -148,7 +168,7 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		bud_append(
 		        inner,
 		        lx_el("div",
-		              lx_attr("class", "flex flex-col gap-4 w-full"),
+		              lx_attr("class", "audio-slot flex flex-col gap-2 w-full"),
 		              lx_el("audio", lx_attr("controls", ""),
 		                    lx_attr("class", "w-full"),
 		                    lx_el("source", lx_attr("src", audio),
@@ -157,25 +177,11 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		has_media = 1;
 	}
 
-	if (pdf && pdf[0]) {
-		bud_append(
-		        inner,
-		        lx_el("div",
-		              lx_attr("class", "flex flex-col gap-4 w-full"),
-		              lx_el("a", lx_attr("href", pdf),
-		                    lx_attr("target", "_blank"),
-		                    lx_attr("rel", "noopener"),
-		                    lx_attr("class", "text-blue-600"),
-		                    lx_text("View PDF")))
-		                .data.node);
-		has_media = 1;
-	}
-
 	if (!has_media)
 		return NULL;
 
 	return lx_el("div",
-	             lx_attr("class", "media-slot flex flex-col gap-4 w-full"),
+	             lx_attr("class", "media-slot flex flex-col gap-2 w-full"),
 	             lx_node(inner))
 	        .data.node;
 }
@@ -232,35 +238,40 @@ int site_ui_build_media_html(
 			goto done;                                             \
 	} while (0)
 
-	if (yt && yt[0]) {
-		char src[1024];
-		snprintf(
-		        src, sizeof(src), "https://www.youtube.com/embed/%.11s",
-		        yt);
-		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
-		       "<iframe src=\"%s\" class=\"w-full aspect-video "
-		       "border-none\" title=\"YouTube video player\" "
-		       "allow=\"accelerometer; autoplay; clipboard-write; "
-		       "encrypted-media; gyroscope; picture-in-picture; "
-		       "web-share\" "
-		       "referrerpolicy=\"strict-origin-when-cross-origin\" "
-		       "allowfullscreen></iframe></div>",
-		       src);
+	int has_btns = (yt && yt[0]) || (pdf && pdf[0]);
+	if (has_btns) {
+		APPEND("<div class=\"media-buttons flex flex-row items-center justify-end gap-2\">");
+		if (yt && yt[0]) {
+			char yt_url[1024];
+			snprintf(
+			        yt_url, sizeof(yt_url),
+			        "https://www.youtube.com/watch?v=%.11s", yt);
+			APPEND("<a href=\"%s\" target=\"_blank\" "
+			       "rel=\"noopener noreferrer\" "
+			       "class=\"btn btn-icon btn-sm\" "
+			       "title=\"Watch on YouTube\" "
+			       "aria-label=\"Watch on YouTube\">"
+			       "\xe2\x96\xb6</a>",
+			       yt_url);
+		}
+		if (pdf && pdf[0]) {
+			APPEND("<a href=\"%s\" target=\"_blank\" "
+			       "rel=\"noopener noreferrer\" "
+			       "class=\"btn btn-icon btn-sm\" "
+			       "title=\"View PDF\" "
+			       "aria-label=\"View PDF\">"
+			       "\xf0\x9f\x93\x84</a>",
+			       pdf);
+		}
+		APPEND("</div>");
 		has = 1;
 	}
 	if (audio && audio[0]) {
-		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
+		APPEND("<div class=\"audio-slot flex flex-col gap-2 w-full\">"
 		       "<audio controls class=\"w-full\">"
 		       "<source src=\"%s\" type=\"audio/mpeg\">"
 		       "</audio></div>",
 		       audio);
-		has = 1;
-	}
-	if (pdf && pdf[0]) {
-		APPEND("<div class=\"flex flex-col gap-4 w-full\">"
-		       "<a href=\"%s\" target=\"_blank\" rel=\"noopener\" "
-		       "class=\"text-blue-600\">View PDF</a></div>",
-		       pdf);
 		has = 1;
 	}
 #undef APPEND

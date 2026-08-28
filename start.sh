@@ -17,7 +17,9 @@ if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
 fi
 
 # Check for AUTH_SKIP_CONFIRM environment variable or dev environment
-if [ "$AUTH_ENV" = "dev" ] && [ -z "$AUTH_SKIP_CONFIRM" ]; then
+if [ "$AUTH_ENV" = "prod" ]; then
+    export AUTH_SKIP_CONFIRM=
+else
     export AUTH_SKIP_CONFIRM=1
 fi
 

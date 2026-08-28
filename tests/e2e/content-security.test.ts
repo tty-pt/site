@@ -153,7 +153,7 @@ Deno.test("invalid song media values do not render active embeds", async () => {
   }
 });
 
-Deno.test("valid YouTube ID renders the expected iframe", async () => {
+Deno.test("valid YouTube ID renders the expected link button", async () => {
   const browser = await chromium.launch();
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
@@ -170,12 +170,16 @@ Deno.test("valid YouTube ID renders the expected iframe", async () => {
     await page.goto(`${BASE}/song/${songId}?m=1`, {
       waitUntil: "domcontentloaded",
     });
-    const iframe = page.locator(
-      `[data-song-media="1"] iframe[src="https://www.youtube.com/embed/${youtubeId}"]`,
+    const ytBtn = page.locator(
+      `[data-song-media="1"] a[href="https://www.youtube.com/watch?v=${youtubeId}"][target="_blank"]`,
     );
     assert(
-      await iframe.count() === 1,
-      "Valid 11-character YouTube ID did not create the expected iframe",
+      await ytBtn.count() === 1,
+      "Valid 11-character YouTube ID did not create the expected link button",
+    );
+    assert(
+      await page.locator('[data-song-media="1"] iframe').count() === 0,
+      "Found unexpected iframe in media slot",
     );
   } finally {
     if (songId) await deleteItem(page, "song", songId).catch(() => {});

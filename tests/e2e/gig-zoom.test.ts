@@ -158,9 +158,9 @@ Deno.test({
     }
 
     // ── 6. Cross-module: gig → song page ─────────────────────────────
-    // Toggle latin/video on the gig page; the WASM persists all
-    // settings (l/m/z) via GET /api/song/prefs.
-    for (const name of ["l", "m"]) {
+    // Toggle latin on the gig page; the WASM persists all
+    // settings (l/z) via GET /api/song/prefs.
+    for (const name of ["l"]) {
       await page.locator(`input[type="checkbox"][name="${name}"]`)
         .evaluate((el) => {
           (el as unknown as { checked: boolean }).checked = true;
@@ -170,7 +170,7 @@ Deno.test({
     await page.waitForTimeout(600);
 
     // ── 6.1 Remove URL params and reload (JS enabled): saved prefs must
-    // come back. The WASM rewrote the URL to ?l=&m=&z= after the toggles;
+    // come back. The WASM rewrote the URL to ?l=&z= after the toggles;
     // stripping them and reloading must restore the saved settings via SSR.
     const paramUrl = page.url();
     if (!paramUrl.includes("?"))
@@ -181,12 +181,10 @@ Deno.test({
     const noParamZoom = await page.getAttribute("#sb-main", "data-zoom");
     const noParamLatin = await page.locator(
       'input[type="checkbox"][name="l"]').isChecked();
-    const noParamMedia = await page.locator(
-      'input[type="checkbox"][name="m"]').isChecked();
-    if (noParamZoom !== "150" || !noParamLatin || !noParamMedia) {
+    if (noParamZoom !== "150" || !noParamLatin) {
       throw new Error(
         `Removing URL params lost saved prefs: zoom=${noParamZoom} ` +
-        `latin=${noParamLatin} media=${noParamMedia}`,
+        `latin=${noParamLatin}`,
       );
     }
 
@@ -194,18 +192,17 @@ Deno.test({
     await pageSong.goto(`${BASE}/song/${SONG_ID}`, GOTO);
     const songZoom = await pageSong.getAttribute("#main", "data-zoom");
     const songLatin = await pageSong.getAttribute("#main", "data-use-latin");
-    const songMedia = await pageSong.getAttribute("#main", "data-show-media");
-    if (songZoom !== "150" || songLatin !== "1" || songMedia !== "1") {
+    if (songZoom !== "150" || songLatin !== "1") {
       throw new Error(
         `Song page not synced from gig: zoom=${songZoom} ` +
-        `latin=${songLatin} media=${songMedia}`,
+        `latin=${songLatin}`,
       );
     }
 
     // ── 7. Cross-module: song page → gig ─────────────────────────────
-    // The song transpose endpoint persists z/l/m prefs for the user.
+    // The song transpose endpoint persists z/l prefs for the user.
     const syncResp = await fetch(
-      `${BASE}/api/song/${SONG_ID}/transpose?z=110&l=0&m=0`,
+      `${BASE}/api/song/${SONG_ID}/transpose?z=110&l=0`,
       { headers: { Cookie: cookieHeader }, redirect: "manual" },
     );
     if (syncResp.status >= 400)
