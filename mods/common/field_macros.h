@@ -103,7 +103,7 @@
 #define EXCL_FIELD_W(name, st, mb, sz, qt, im)                                 \
 	{                                                                      \
 		#name, offsetof(st, mb), sz, 0, BUD_EXCLUDE, qt,               \
-		        SOURCE_FIELD_STRING, 1, 0, 0, NULL, NULL, im, NULL,     \
+		        SOURCE_FIELD_STRING, 1, 0, 0, NULL, NULL, im, NULL,    \
 		        NULL, NULL, NULL                                       \
 	}
 
@@ -124,17 +124,15 @@
 /* Derived virtual field (computed in-memory for FTS/indexing) */
 #define DERIVED_FIELD(name, dkey)                                              \
 	{                                                                      \
-		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR,                       \
-		        SOURCE_FIELD_DERIVED, 0, 0, 0, NULL, NULL, 0, NULL,    \
-		        NULL, NULL, dkey                                       \
+		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR, SOURCE_FIELD_DERIVED, \
+		        0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, dkey         \
 	}
 
 /* Derived virtual field (computed in-memory for FTS/indexing) */
 #define DERIVED_FIELD(name, dkey)                                              \
 	{                                                                      \
-		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR,                       \
-		        SOURCE_FIELD_DERIVED, 0, 0, 0, NULL, NULL, 0, NULL,    \
-		        NULL, NULL, dkey                                       \
+		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR, SOURCE_FIELD_DERIVED, \
+		        0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, dkey         \
 	}
 
 /* Integer overlay (computed, stored in app_state) */

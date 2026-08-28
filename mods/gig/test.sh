@@ -2,7 +2,7 @@
 set -e
 
 BASE="http://localhost:8080"
-REPO_ROOT="$(cd ../.. && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SB_DIR="$REPO_ROOT/var/gig"
 COOKIE="/tmp/sb_test_cookie_$$"
 USER="sbtest$$"

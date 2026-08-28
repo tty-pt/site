@@ -122,10 +122,9 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	int has_btns = (yt && yt[0]) || (pdf && pdf[0]);
 	if (has_btns) {
 		bud_node *btn_row =
-		        lx_el("div",
-		              lx_attr("class",
-		                      "media-buttons flex flex-row items-center "
-		                      "justify-end gap-2"))
+		        lx_el("div", lx_attr("class", "media-buttons flex "
+		                                      "flex-row items-center "
+		                                      "justify-end gap-2"))
 		                .data.node;
 		if (yt && yt[0]) {
 			char yt_url[1024];
@@ -134,27 +133,22 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 			        "https://www.youtube.com/watch?v=%.11s", yt);
 			bud_append(
 			        btn_row,
-			        lx_el("a",
-			              lx_attr("href", yt_url),
+			        lx_el("a", lx_attr("href", yt_url),
 			              lx_attr("target", "_blank"),
 			              lx_attr("rel", "noopener noreferrer"),
-			              lx_attr("class",
-			                      "btn btn-icon btn-sm"),
+			              lx_attr("class", "btn btn-icon btn-sm"),
 			              lx_attr("title", "Watch on YouTube"),
-			              lx_attr("aria-label",
-			                      "Watch on YouTube"),
+			              lx_attr("aria-label", "Watch on YouTube"),
 			              lx_text("\xe2\x96\xb6"))
 			                .data.node);
 		}
 		if (pdf && pdf[0]) {
 			bud_append(
 			        btn_row,
-			        lx_el("a",
-			              lx_attr("href", pdf),
+			        lx_el("a", lx_attr("href", pdf),
 			              lx_attr("target", "_blank"),
 			              lx_attr("rel", "noopener noreferrer"),
-			              lx_attr("class",
-			                      "btn btn-icon btn-sm"),
+			              lx_attr("class", "btn btn-icon btn-sm"),
 			              lx_attr("title", "View PDF"),
 			              lx_attr("aria-label", "View PDF"),
 			              lx_text("\xf0\x9f\x93\x84"))
@@ -168,7 +162,8 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 		bud_append(
 		        inner,
 		        lx_el("div",
-		              lx_attr("class", "audio-slot flex flex-col gap-2 w-full"),
+		              lx_attr("class",
+		                      "audio-slot flex flex-col gap-2 w-full"),
 		              lx_el("audio", lx_attr("controls", ""),
 		                    lx_attr("class", "w-full"),
 		                    lx_el("source", lx_attr("src", audio),
@@ -240,7 +235,8 @@ int site_ui_build_media_html(
 
 	int has_btns = (yt && yt[0]) || (pdf && pdf[0]);
 	if (has_btns) {
-		APPEND("<div class=\"media-buttons flex flex-row items-center justify-end gap-2\">");
+		APPEND("<div class=\"media-buttons flex flex-row items-center "
+		       "justify-end gap-2\">");
 		if (yt && yt[0]) {
 			char yt_url[1024];
 			snprintf(

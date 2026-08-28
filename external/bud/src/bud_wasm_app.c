@@ -190,7 +190,9 @@ __attribute__((export_name("bud_app_dispatch"))) int wasm_dispatch_event(
 		snprintf(html, sizeof(html), "node %d not found", node_id);
 		char idstr[16];
 		snprintf(idstr, sizeof(idstr), "%u", bud_node_id(root));
-		bud_host_emit_patch("patch-raw", 9, html, strlen(html), idstr, strlen(idstr), NULL, 0);
+		bud_host_emit_patch(
+		        "patch-raw", 9, html, strlen(html), idstr,
+		        strlen(idstr), NULL, 0);
 		wasm_printf("dispatch: node=%d NOT FOUND\n", node_id);
 		return -2;
 	}

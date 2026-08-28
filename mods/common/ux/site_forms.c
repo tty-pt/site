@@ -175,16 +175,14 @@ bud_node *site_ui_form_fields(
 
 #define PICK_QS_BUDGET 2048
 
-static const pick_entry_t *pick_entry_of(
-        const pick_view_t *pv, const char *key)
+static const pick_entry_t *pick_entry_of(const pick_view_t *pv, const char *key)
 {
 	int i;
 
 	if (!pv)
 		return NULL;
 	for (i = 0; i < pv->n; i++) {
-		if (pv->entries[i].key && strcmp(pv->entries[i].key, key)
-		                == 0)
+		if (pv->entries[i].key && strcmp(pv->entries[i].key, key) == 0)
 			return &pv->entries[i];
 	}
 	return NULL;
@@ -210,11 +208,11 @@ static const char *pick_url_tmpl(const pick_entry_t *e)
 {
 	static char tmpl[512];
 
-	snprintf(tmpl, sizeof(tmpl),
+	snprintf(
+	        tmpl, sizeof(tmpl),
 	        "/pick/%s/options?key=%s&multi=%d&label=&sel={sel}"
 	        "&pick_q_%s={q}&pick_page_%s={page}",
-	        e->target ? e->target : "", e->key, e->multi, e->key,
-	        e->key);
+	        e->target ? e->target : "", e->key, e->multi, e->key, e->key);
 	return tmpl;
 }
 
@@ -225,8 +223,10 @@ static int ascii_strcasecmp(const char *s1, const char *s2)
 	while (*s1 && *s2) {
 		unsigned char c1 = (unsigned char)*s1;
 		unsigned char c2 = (unsigned char)*s2;
-		if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
-		if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+		if (c1 >= 'A' && c1 <= 'Z')
+			c1 += ('a' - 'A');
+		if (c2 >= 'A' && c2 <= 'Z')
+			c2 += ('a' - 'A');
 		if (c1 != c2)
 			return c1 - c2;
 		s1++;
@@ -242,8 +242,10 @@ static int ascii_strncasecmp(const char *s1, const char *s2, size_t n)
 	while (n && *s1 && *s2) {
 		unsigned char c1 = (unsigned char)*s1;
 		unsigned char c2 = (unsigned char)*s2;
-		if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
-		if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+		if (c1 >= 'A' && c1 <= 'Z')
+			c1 += ('a' - 'A');
+		if (c2 >= 'A' && c2 <= 'Z')
+			c2 += ('a' - 'A');
 		if (c1 != c2)
 			return c1 - c2;
 		s1++;
@@ -279,14 +281,16 @@ static int pick_val_has_token(const char *vals, const char *token)
 		if (!end)
 			break;
 		vals = end + 1;
-		while (*vals && (*vals == ',' || *vals == '\n' || *vals == '\r' || *vals == ' '))
+		while (*vals && (*vals == ',' || *vals == '\n' ||
+		                 *vals == '\r' || *vals == ' '))
 			vals++;
 	}
 	return 0;
 }
 
-static int pick_is_selected_opt(const pick_entry_t *e, const char *id,
-        const char *label, const char *val)
+static int pick_is_selected_opt(
+        const pick_entry_t *e, const char *id, const char *label,
+        const char *val)
 {
 	int j;
 
@@ -315,65 +319,68 @@ static int pick_is_selected_opt(const pick_entry_t *e, const char *id,
 	return 0;
 }
 
-static bud_node *pick_inline_single(const pick_entry_t *e,
-        const char *val)
+static bud_node *pick_inline_single(const pick_entry_t *e, const char *val)
 {
 	bud_node *opts = bud_fragment();
 	int i;
 	int matched = 0;
 
-	bud_append(opts, lx_el("option", lx_attr("value", ""),
-	                       (!val || !val[0]) ? lx_attr("selected", "")
-	                                         : lx_none(),
-	                       lx_text("None"))
-	                         .data.node);
+	bud_append(
+	        opts,
+	        lx_el("option", lx_attr("value", ""),
+	              (!val || !val[0]) ? lx_attr("selected", "") : lx_none(),
+	              lx_text("None"))
+	                .data.node);
 	for (i = 0; i < e->npage; i++) {
-		int sel = pick_is_selected_opt(e, e->page_opts[i].id,
-		        e->page_opts[i].label, val);
+		int sel = pick_is_selected_opt(
+		        e, e->page_opts[i].id, e->page_opts[i].label, val);
 		if (sel)
 			matched = 1;
-		bud_append(opts,
+		bud_append(
+		        opts,
 		        lx_el("option", lx_attr("value", e->page_opts[i].id),
-		                sel ? lx_attr("selected", "") : lx_none(),
-		                lx_text(e->page_opts[i].label))
+		              sel ? lx_attr("selected", "") : lx_none(),
+		              lx_text(e->page_opts[i].label))
 		                .data.node);
 	}
 	/* Current value missing from the list: keep it visible. */
 	if (val && val[0] && !matched)
-		bud_append(opts,
-		        lx_el("option", lx_attr("value", val),
-		                lx_attr("selected", ""), lx_text(val))
-		                .data.node);
-	return lx_el("select", lx_attr("name", e->key),
-	             lx_node(opts))
-	            .data.node;
+		bud_append(
+		        opts, lx_el("option", lx_attr("value", val),
+		                    lx_attr("selected", ""), lx_text(val))
+		                      .data.node);
+	return lx_el("select", lx_attr("name", e->key), lx_node(opts))
+	        .data.node;
 }
 
-static bud_node *pick_inline_multi(
-        const pick_entry_t *e, const char *val)
+static bud_node *pick_inline_multi(const pick_entry_t *e, const char *val)
 {
 	bud_node *grid = bud_fragment();
 	int i;
 
 	for (i = 0; i < e->npage; i++)
-		bud_append(grid,
-		        lx_el("label", lx_attr("class", "picker-inline hyle-picker-option"),
-                lx_el("input",
-                       lx_attr("type", "checkbox"),
-                       lx_attr("name", e->key),
-                       lx_attr("value", e->page_opts[i].id),
-                       lx_attr("data-filter", e->page_opts[i].label),
-                       pick_is_selected_opt(e,
-                               e->page_opts[i].id, e->page_opts[i].label, val)
-                               ? lx_attr("checked", "")
-                               : lx_none()),
-                lx_text(e->page_opts[i].label))
-                .data.node);
+		bud_append(
+		        grid, lx_el("label",
+		                    lx_attr("class",
+		                            "picker-inline hyle-picker-option"),
+		                    lx_el("input", lx_attr("type", "checkbox"),
+		                          lx_attr("name", e->key),
+		                          lx_attr("value", e->page_opts[i].id),
+		                          lx_attr("data-filter",
+		                                  e->page_opts[i].label),
+		                          pick_is_selected_opt(
+		                                  e, e->page_opts[i].id,
+		                                  e->page_opts[i].label, val)
+		                                  ? lx_attr("checked", "")
+		                                  : lx_none()),
+		                    lx_text(e->page_opts[i].label))
+		                      .data.node);
 	return grid;
 }
 
-static bud_node *pick_ref_node(const form_field_t *f, const char *val,
-        const pick_view_t *pv, const char *form_id)
+static bud_node *pick_ref_node(
+        const form_field_t *f, const char *val, const pick_view_t *pv,
+        const char *form_id)
 {
 	const pick_entry_t *e = pick_entry_of(pv, f->name);
 	int eff = f->max_inline > 0 ? f->max_inline : FF_PICKER_THRESHOLD;
@@ -382,10 +389,10 @@ static bud_node *pick_ref_node(const form_field_t *f, const char *val,
 	 * input — no dead dropdowns, ever. */
 	if (!e || !e->key || !e->target || !e->target[0])
 		return lx_el("input", lx_attr("type", "text"),
-		              lx_attr("name", f->name),
-		              (val && val[0]) ? lx_attr("value", val)
-		                              : lx_none())
-		            .data.node;
+		             lx_attr("name", f->name),
+		             (val && val[0]) ? lx_attr("value", val)
+		                             : lx_none())
+		        .data.node;
 
 	if (eff > 0 && e->total <= eff)
 		return e->multi ? pick_inline_multi(e, val)
@@ -393,24 +400,24 @@ static bud_node *pick_ref_node(const form_field_t *f, const char *val,
 
 	return hyle_bud_picker_field(
 	        &(hyle_bud_picker_desc_t){ .key = f->name,
-	                .label = f->label,
-	                .source = e->target,
-	                .multi = e->multi,
-	                .get_form_id = form_id,
-	                .url_tmpl = pick_url_tmpl(e),
-	                .page_opts = e->page_opts,
-	                .npage = e->npage,
-	                .sel = e->sel,
-	                .nsel = e->nsel,
-	                .q = e->q,
-	                .page = e->page,
-	                .per_page = e->per_page,
-	                .total = e->total });
+	                                   .label = f->label,
+	                                   .source = e->target,
+	                                   .multi = e->multi,
+	                                   .get_form_id = form_id,
+	                                   .url_tmpl = pick_url_tmpl(e),
+	                                   .page_opts = e->page_opts,
+	                                   .npage = e->npage,
+	                                   .sel = e->sel,
+	                                   .nsel = e->nsel,
+	                                   .q = e->q,
+	                                   .page = e->page,
+	                                   .per_page = e->per_page,
+	                                   .total = e->total });
 }
 
 bud_node *site_ui_form_fields_ex(
-        const form_field_t *fields, const char **values,
-        const char *csrf_token, const pick_view_t *pv)
+        const form_field_t *fields, const char **values, const char *csrf_token,
+        const pick_view_t *pv)
 {
 	bud_node *frag = bud_fragment();
 	char pick_form_id_buf[192];
@@ -420,8 +427,9 @@ bud_node *site_ui_form_fields_ex(
 		return NULL;
 	pick_form_id_buf[0] = '\0';
 	if (first_ref)
-		snprintf(pick_form_id_buf, sizeof(pick_form_id_buf),
-		        "pickq-%s", first_ref);
+		snprintf(
+		        pick_form_id_buf, sizeof(pick_form_id_buf), "pickq-%s",
+		        first_ref);
 
 	/* Pages that manage their own CSRF embed it themselves; NULL
 	 * skips the hidden input here. */
@@ -437,34 +445,33 @@ bud_node *site_ui_form_fields_ex(
 		bud_node *ctl;
 
 		if (f->ref != FF_REF_NONE && pv)
-			ctl = pick_ref_node(f, val, pv,
-			        pick_form_id_buf);
+			ctl = pick_ref_node(f, val, pv, pick_form_id_buf);
 		else if (f->type == 2)
 			ctl = lx_el("input", lx_attr("type", "file"),
-			              lx_attr("name", f->name))
-			            .data.node;
+			            lx_attr("name", f->name))
+			              .data.node;
 		else if (f->type == 1)
 			ctl = lx_el("textarea", lx_attr("name", f->name),
-			              lx_attr("class", "font-mono w-full"),
-			              lx_node(site_ui_textarea_value(val)))
-			            .data.node;
+			            lx_attr("class", "font-mono w-full"),
+			            lx_node(site_ui_textarea_value(val)))
+			              .data.node;
 		else
 			ctl = lx_el("input", lx_attr("type", "text"),
-			              lx_attr("name", f->name),
-			              (val && val[0]) ? lx_attr("value", val)
-			                              : lx_none())
-			            .data.node;
+			            lx_attr("name", f->name),
+			            (val && val[0]) ? lx_attr("value", val)
+			                            : lx_none())
+			              .data.node;
 
-		bud_append(frag, lx_el("label", lx_text(f->label),
-		                              lx_node(ctl))
-		                        .data.node);
+		bud_append(
+		        frag, lx_el("label", lx_text(f->label), lx_node(ctl))
+		                      .data.node);
 	}
 	return frag;
 }
 
 bud_node *site_ui_sibling_get_form(
-        const char *action, const form_field_t *fields,
-        const char **values, const pick_view_t *pv)
+        const char *action, const form_field_t *fields, const char **values,
+        const pick_view_t *pv)
 {
 	bud_node *hiddens = bud_fragment();
 	size_t budget = PICK_QS_BUDGET;
@@ -485,23 +492,23 @@ bud_node *site_ui_sibling_get_form(
 		budget -= strlen(f->name) + strlen(val) + 16;
 		if (budget < 0)
 			break;
-		bud_append(hiddens,
+		bud_append(
+		        hiddens,
 		        lx_el("input", lx_attr("type", "hidden"),
-		                lx_attr("name", f->name),
-		                lx_attr("value", val))
+		              lx_attr("name", f->name), lx_attr("value", val))
 		                .data.node);
 	}
-	bud_append(hiddens,
+	bud_append(
+	        hiddens,
 	        lx_el("input", lx_attr("type", "hidden"),
 	              lx_attr("name", "per_page"), lx_attr("value", "50"))
 	                .data.node);
 
 	return lx_el("form", lx_attr("id", form_id),
-	              lx_attr("action", action ? action : ""),
-	              lx_attr("method", "GET"),
-	              lx_attr("class", "pick-sibling-form"),
-	              lx_node(hiddens))
-	            .data.node;
+	             lx_attr("action", action ? action : ""),
+	             lx_attr("method", "GET"),
+	             lx_attr("class", "pick-sibling-form"), lx_node(hiddens))
+	        .data.node;
 }
 
 /* ── Declarative Schema-Driven Form Builder ──────────────────────── */
@@ -526,7 +533,8 @@ static const char *site_ui_default_field_label(const char *key)
 		return "Chords/Lyrics:";
 	if (strcmp(key, "format") == 0)
 		return "Format (one per line):";
-	if (strcmp(key, "group") == 0 || (key[0] == 'g' && key[1] == 'r' && key[2] == 'p' && !key[3]))
+	if (strcmp(key, "group") == 0 ||
+	    (key[0] == 'g' && key[1] == 'r' && key[2] == 'p' && !key[3]))
 		return "Group:";
 	if (strcmp(key, "body_content") == 0)
 		return "body_content";
@@ -536,8 +544,7 @@ static const char *site_ui_default_field_label(const char *key)
 bud_node *site_ui_form_from_desc(
         const char *action, const char *cancel_href, const char *submit_label,
         const hyle_schema_desc_t *desc, const void *struct_ptr,
-        const char *csrf_token, const pick_view_t *pv,
-        const char *vstr_val)
+        const char *csrf_token, const pick_view_t *pv, const char *vstr_val)
 {
 	form_field_t ff[32];
 	const char *vals[32];
@@ -561,8 +568,11 @@ bud_node *site_ui_form_from_desc(
 		const char *lbl = site_ui_default_field_label(d->key);
 		if (lbl == d->key) {
 			/* Auto-capitalize */
-			snprintf(labels[n], sizeof(labels[n]), "%c%s:",
-			        (d->key[0] >= 'a' && d->key[0] <= 'z') ? d->key[0] - 32 : d->key[0],
+			snprintf(
+			        labels[n], sizeof(labels[n]), "%c%s:",
+			        (d->key[0] >= 'a' && d->key[0] <= 'z')
+			                ? d->key[0] - 32
+			                : d->key[0],
 			        d->key + 1);
 			ff[n].label = labels[n];
 		} else {
@@ -571,9 +581,13 @@ bud_node *site_ui_form_from_desc(
 
 		/* Determine input type */
 		if (strcmp(d->key, "body_content") == 0 ||
-		    (d->file && strstr(d->file, ".html"))) {
+		    (d->file && strstr(d->file, ".html")))
+		{
 			ff[n].type = 2; /* file */
-		} else if (d->qm_type == BUD_QM_VSTR || strcmp(d->key, "format") == 0) {
+		} else if (
+		        d->qm_type == BUD_QM_VSTR ||
+		        strcmp(d->key, "format") == 0)
+		{
 			ff[n].type = 1; /* textarea */
 		} else {
 			ff[n].type = 0; /* text */
@@ -617,14 +631,17 @@ bud_node *site_ui_form_from_desc(
 	vals[n] = NULL;
 
 	bud_node *fields = site_ui_form_fields_ex(ff, vals, csrf_token, pv);
-	bud_append(fields, site_ui_form_actions(cancel_href, submit_label ? submit_label : "Save", NULL));
+	bud_append(
+	        fields, site_ui_form_actions(
+	                        cancel_href,
+	                        submit_label ? submit_label : "Save", NULL));
 
-	bud_node *form = lx_el("form", lx_attr("action", action ? action : ""),
-	                       lx_attr("method", "POST"),
-	                       lx_attr("enctype", "multipart/form-data"),
-	                       lx_attr("class", "flex flex-col gap-4"),
-	                       lx_node(fields))
-	                          .data.node;
+	bud_node *form =
+	        lx_el("form", lx_attr("action", action ? action : ""),
+	              lx_attr("method", "POST"),
+	              lx_attr("enctype", "multipart/form-data"),
+	              lx_attr("class", "flex flex-col gap-4"), lx_node(fields))
+	                .data.node;
 
 	if (has_ref) {
 		bud_node *sib = site_ui_sibling_get_form(action, ff, vals, pv);
@@ -644,7 +661,8 @@ bud_node *site_ui_action_picker(
         const site_ui_action_picker_spec_t *spec, const pick_view_t *pv)
 {
 	bud_node *frag = bud_fragment();
-	bud_node *head = NULL, *cancel = NULL, *hint = NULL, *picker = NULL, *post = NULL;
+	bud_node *head = NULL, *cancel = NULL, *hint = NULL, *picker = NULL,
+	         *post = NULL;
 	const pick_entry_t *e = NULL;
 
 	if (!frag || !spec || !spec->key || !spec->target)
@@ -658,9 +676,10 @@ bud_node *site_ui_action_picker(
 
 	if (spec->cancel_href && spec->cancel_href[0]) {
 		cancel = lx_el("a", lx_attr("href", spec->cancel_href),
-		               lx_attr("class",
-		                       "btn btn-secondary text-xs mb-3 inline-block"),
-		               lx_text(spec->cancel_label ? spec->cancel_label : "Cancel"))
+		               lx_attr("class", "btn btn-secondary text-xs "
+		                                "mb-3 inline-block"),
+		               lx_text(spec->cancel_label ? spec->cancel_label
+		                                          : "Cancel"))
 		                 .data.node;
 	}
 
@@ -677,20 +696,25 @@ bud_node *site_ui_action_picker(
 	const char *pp = spec->page_param;
 
 	if (spec->scope && spec->scope[0]) {
-		snprintf(form_id_buf, sizeof(form_id_buf), "pickq-%s__%s",
-		         spec->key, spec->scope);
+		snprintf(
+		        form_id_buf, sizeof(form_id_buf), "pickq-%s__%s",
+		        spec->key, spec->scope);
 		if (!sp) {
-			snprintf(search_param_buf, sizeof(search_param_buf),
-			         "pick_q_%s__%s", spec->key, spec->scope);
+			snprintf(
+			        search_param_buf, sizeof(search_param_buf),
+			        "pick_q_%s__%s", spec->key, spec->scope);
 			sp = search_param_buf;
 		}
 		if (!pp) {
-			snprintf(page_param_buf, sizeof(page_param_buf),
-			         "pick_page_%s__%s", spec->key, spec->scope);
+			snprintf(
+			        page_param_buf, sizeof(page_param_buf),
+			        "pick_page_%s__%s", spec->key, spec->scope);
 			pp = page_param_buf;
 		}
 	} else {
-		snprintf(form_id_buf, sizeof(form_id_buf), "pickq-%s", spec->key);
+		snprintf(
+		        form_id_buf, sizeof(form_id_buf), "pickq-%s",
+		        spec->key);
 	}
 
 	bud_node *hiddens = bud_fragment();
@@ -706,17 +730,19 @@ bud_node *site_ui_action_picker(
 			                .data.node);
 		}
 	}
-	bud_node *sibling = lx_el("form", lx_attr("id", form_id_buf),
-	                          lx_attr("action", spec->get_action ? spec->get_action : ""),
-	                          lx_attr("method", "GET"),
-	                          lx_attr("class", "pick-sibling-form"),
-	                          lx_node(hiddens))
-	                            .data.node;
+	bud_node *sibling =
+	        lx_el("form", lx_attr("id", form_id_buf),
+	              lx_attr("action",
+	                      spec->get_action ? spec->get_action : ""),
+	              lx_attr("method", "GET"),
+	              lx_attr("class", "pick-sibling-form"), lx_node(hiddens))
+	                .data.node;
 
 	if (pv) {
 		for (int i = 0; i < pv->n; i++) {
 			if (pv->entries[i].key &&
-			    strcmp(pv->entries[i].key, spec->key) == 0) {
+			    strcmp(pv->entries[i].key, spec->key) == 0)
+			{
 				e = &pv->entries[i];
 				break;
 			}
@@ -731,8 +757,10 @@ bud_node *site_ui_action_picker(
 
 	if (spec->default_id && spec->default_id[0]) {
 		default_sel.id = spec->default_id;
-		default_sel.label = (spec->default_label && spec->default_label[0])
-		        ? spec->default_label : spec->default_id;
+		default_sel.label =
+		        (spec->default_label && spec->default_label[0])
+		                ? spec->default_label
+		                : spec->default_id;
 		sel = &default_sel;
 		nsel = 1;
 	} else if (e) {
@@ -741,10 +769,13 @@ bud_node *site_ui_action_picker(
 	}
 
 	char url_tmpl_buf[512];
-	snprintf(url_tmpl_buf, sizeof(url_tmpl_buf),
-	        "/pick/%s/options?key=%s&multi=0&label=&sel={sel}&pick_q_%s={q}&pick_page_%s={page}",
-	        (e && e->target) ? e->target : spec->target,
-	        spec->key, spec->key, spec->key);
+	snprintf(
+	        url_tmpl_buf, sizeof(url_tmpl_buf),
+	        "/pick/%s/"
+	        "options?key=%s&multi=0&label=&sel={sel}&pick_q_%s={q}&pick_"
+	        "page_%s={page}",
+	        (e && e->target) ? e->target : spec->target, spec->key,
+	        spec->key, spec->key);
 
 	hyle_bud_picker_desc_t d = {
 		.key = spec->key,
@@ -774,28 +805,34 @@ bud_node *site_ui_action_picker(
 	             lx_attr("id", spec->form_id ? spec->form_id : "pick-post"),
 	             lx_attr("method", "post"),
 	             lx_attr("class", "flex-1 min-w-0"),
-	             lx_attr("action", spec->post_action ? spec->post_action : ""))
+	             lx_attr("action",
+	                     spec->post_action ? spec->post_action : ""))
 	               .data.node;
 
 	if (spec->csrf_token) {
-		bud_append(post,
-		           lx_el("input", lx_attr("type", "hidden"),
-		                 lx_attr("name", "csrf_token"),
-		                 lx_attr("value", spec->csrf_token))
-		                   .data.node);
+		bud_append(
+		        post, lx_el("input", lx_attr("type", "hidden"),
+		                    lx_attr("name", "csrf_token"),
+		                    lx_attr("value", spec->csrf_token))
+		                      .data.node);
 	}
 
 	if (spec->extra_post_inputs) {
 		bud_append(post, spec->extra_post_inputs);
 	}
 
-	bud_append(post,
-	           lx_el("div", lx_attr("class", "flex gap-2 items-center flex-1 min-w-0"),
-	                 picker ? lx_node(picker) : lx_none(),
-	                 lx_el("button", lx_attr("type", "submit"),
-	                       lx_attr("class", "btn btn-primary hyle-picker-submit"),
-	                       lx_text(spec->submit_label ? spec->submit_label : "Add")))
-	                   .data.node);
+	bud_append(
+	        post,
+	        lx_el("div",
+	              lx_attr("class",
+	                      "flex gap-2 items-center flex-1 min-w-0"),
+	              picker ? lx_node(picker) : lx_none(),
+	              lx_el("button", lx_attr("type", "submit"),
+	                    lx_attr("class",
+	                            "btn btn-primary hyle-picker-submit"),
+	                    lx_text(spec->submit_label ? spec->submit_label
+	                                               : "Add")))
+	                .data.node);
 
 	if (head)
 		bud_append(frag, head);
@@ -828,13 +865,17 @@ static void derive_target_key_label(
 	if (strcmp(stem, "types") == 0) {
 		snprintf(key_out, key_sz, "type");
 		snprintf(lbl_out, lbl_sz, "Type:");
-	} else if (stem[0] == 'g' && stem[1] == 'r' && stem[2] == 'p' && !stem[3]) {
+	} else if (
+	        stem[0] == 'g' && stem[1] == 'r' && stem[2] == 'p' && !stem[3])
+	{
 		snprintf(key_out, key_sz, "%s", stem);
 		snprintf(lbl_out, lbl_sz, "Group:");
 	} else {
 		snprintf(key_out, key_sz, "%s_id", stem);
-		snprintf(lbl_out, lbl_sz, "%c%s:",
-		        (stem[0] >= 'a' && stem[0] <= 'z') ? stem[0] - 32 : stem[0],
+		snprintf(
+		        lbl_out, lbl_sz, "%c%s:",
+		        (stem[0] >= 'a' && stem[0] <= 'z') ? stem[0] - 32
+		                                           : stem[0],
 		        stem + 1);
 	}
 }
@@ -866,9 +907,9 @@ bud_node *site_ui_picker(
 }
 
 bud_node *site_ui_row_replace_picker(
-        const char *target, int row_idx, const char *cur_id, const char *cur_title,
-        const char *post_action, const char *back_href, const char *csrf_token,
-        const pick_view_t *pv)
+        const char *target, int row_idx, const char *cur_id,
+        const char *cur_title, const char *post_action, const char *back_href,
+        const char *csrf_token, const pick_view_t *pv)
 {
 	char n_str[16];
 	char form_id[64];
@@ -886,30 +927,30 @@ bud_node *site_ui_row_replace_picker(
 
 	bud_node *extra = bud_fragment();
 	bud_append(
-	        extra,
-	        lx_el("input", lx_attr("type", "hidden"),
-	              lx_attr("name", "n"),
-	              lx_attr("value", n_str))
-	                .data.node);
+	        extra, lx_el("input", lx_attr("type", "hidden"),
+	                     lx_attr("name", "n"), lx_attr("value", n_str))
+	                       .data.node);
 	if (back_href && back_href[0]) {
 		bud_append(
-		        extra,
-		        lx_el("input", lx_attr("type", "hidden"),
-		              lx_attr("name", "back"),
-		              lx_attr("value", back_href))
-		                .data.node);
+		        extra, lx_el("input", lx_attr("type", "hidden"),
+		                     lx_attr("name", "back"),
+		                     lx_attr("value", back_href))
+		                       .data.node);
 	}
 
-	snprintf(header_buf, sizeof(header_buf),
-	        "Replace #%d  \xe2\x80\x94  Replacing: %s",
-	        row_idx + 1, (cur_title && cur_title[0]) ? cur_title : (cur_id ? cur_id : ""));
+	snprintf(
+	        header_buf, sizeof(header_buf),
+	        "Replace #%d  \xe2\x80\x94  Replacing: %s", row_idx + 1,
+	        (cur_title && cur_title[0]) ? cur_title
+	                                    : (cur_id ? cur_id : ""));
 
 	site_ui_action_picker_spec_t spec = {
 		.key = key,
 		.label = label,
 		.target = target,
 		.default_id = cur_id,
-		.default_label = (cur_title && cur_title[0]) ? cur_title : cur_id,
+		.default_label =
+		        (cur_title && cur_title[0]) ? cur_title : cur_id,
 		.get_action = back_href,
 		.post_action = post_action,
 		.form_id = form_id,
@@ -932,18 +973,17 @@ bud_node *site_ui_action_form(
         const char *action, const char *csrf_token, const char *method,
         bud_node *inputs, const char *btn_label, const char *btn_class)
 {
-	bud_node *form = lx_el("form",
-	                       lx_attr("action", action ? action : ""),
-	                       lx_attr("method", (method && method[0]) ? method : "POST"),
+	bud_node *form = lx_el("form", lx_attr("action", action ? action : ""),
+	                       lx_attr("method",
+	                               (method && method[0]) ? method : "POST"),
 	                       lx_attr("class", "flex gap-1 items-center"))
 	                         .data.node;
 	if (csrf_token) {
 		bud_append(
-		        form,
-		        lx_el("input", lx_attr("type", "hidden"),
-		              lx_attr("name", "csrf_token"),
-		              lx_attr("value", csrf_token))
-		                .data.node);
+		        form, lx_el("input", lx_attr("type", "hidden"),
+		                    lx_attr("name", "csrf_token"),
+		                    lx_attr("value", csrf_token))
+		                      .data.node);
 	}
 	if (inputs) {
 		bud_append(form, inputs);
@@ -952,7 +992,9 @@ bud_node *site_ui_action_form(
 		bud_append(
 		        form,
 		        lx_el("button", lx_attr("type", "submit"),
-		              lx_attr("class", btn_class ? btn_class : "btn text-xs py-1 px-2"),
+		              lx_attr("class",
+		                      btn_class ? btn_class
+		                                : "btn text-xs py-1 px-2"),
 		              lx_text(btn_label))
 		                .data.node);
 	}
@@ -969,17 +1011,19 @@ bud_node *site_ui_item_row(
 	              lx_text(title ? title : ""))
 	                .data.node;
 
-	bud_node *left_col = lx_el("div", lx_attr("class", "flex flex-col"),
-	                           lx_node(title_link),
-	                           (subtitle && subtitle[0])
-	                                   ? lx_el("span",
-	                                           lx_attr("class", "text-xs text-muted"),
-	                                           lx_text(subtitle))
-	                                   : lx_none())
-	                               .data.node;
+	bud_node *left_col =
+	        lx_el("div", lx_attr("class", "flex flex-col"),
+	              lx_node(title_link),
+	              (subtitle && subtitle[0])
+	                      ? lx_el("span",
+	                              lx_attr("class", "text-xs text-muted"),
+	                              lx_text(subtitle))
+	                      : lx_none())
+	                .data.node;
 
 	return lx_el("div",
-	             lx_attr("class", "flex justify-between items-center p-2 bg-surface rounded"),
+	             lx_attr("class", "flex justify-between items-center p-2 "
+	                              "bg-surface rounded"),
 	             lx_node(left_col),
 	             action_controls ? lx_node(action_controls) : lx_none())
 	        .data.node;
@@ -988,10 +1032,9 @@ bud_node *site_ui_item_row(
 /* ── WASM / SSR Picker State JSON Serialization ──────────────────── */
 
 void site_ui_picker_state_from_json(
-        const char *json, size_t jlen,
-        const char *key, const char *target, int multi,
-        const char *q, int page,
-        site_ui_picker_buffer_t *buf, pick_view_t *pv_out)
+        const char *json, size_t jlen, const char *key, const char *target,
+        int multi, const char *q, int page, site_ui_picker_buffer_t *buf,
+        pick_view_t *pv_out)
 {
 	hyle_bud_picker_state_from_json(
 	        json, jlen, key, target, multi, q, page,
@@ -1083,8 +1126,8 @@ static int is_safe_attr(const char *name, const char *val)
 	return 1;
 }
 
-static void
-append_sanitized_str(char **buf, size_t *cap, size_t *len, const char *s, size_t slen)
+static void append_sanitized_str(
+        char **buf, size_t *cap, size_t *len, const char *s, size_t slen)
 {
 	if (*len + slen + 1 >= *cap) {
 		*cap = *cap ? *cap * 2 : 1024;
@@ -1112,7 +1155,8 @@ static char *sanitize_html_tags(const char *html)
 		if (*p == '<') {
 			tag_end = strchr(p, '>');
 			if (!tag_end) {
-				append_sanitized_str(&out, &cap, &len, p, strlen(p));
+				append_sanitized_str(
+				        &out, &cap, &len, p, strlen(p));
 				break;
 			}
 			int closing = (p[1] == '/');
@@ -1247,18 +1291,21 @@ static char *sanitize_html_tags(const char *html)
 
 			if (closing) {
 				append_sanitized_str(&out, &cap, &len, "</", 2);
-				append_sanitized_str(&out, &cap, &len, tagname, name_len);
+				append_sanitized_str(
+				        &out, &cap, &len, tagname, name_len);
 				append_sanitized_str(&out, &cap, &len, ">", 1);
 			} else {
 				append_sanitized_str(&out, &cap, &len, "<", 1);
-				append_sanitized_str(&out, &cap, &len, tagname, name_len);
+				append_sanitized_str(
+				        &out, &cap, &len, tagname, name_len);
 				if (attr_out && attr_len > 0) {
 					append_sanitized_str(
 					        &out, &cap, &len, attr_out,
 					        attr_len);
 				}
 				if (tag_end[-1] == '/')
-					append_sanitized_str(&out, &cap, &len, " /", 2);
+					append_sanitized_str(
+					        &out, &cap, &len, " /", 2);
 				append_sanitized_str(&out, &cap, &len, ">", 1);
 			}
 			free(attr_out);
@@ -1279,7 +1326,8 @@ char *site_ui_sanitize_html(const char *raw)
 	if (!raw)
 		return strdup("");
 	char *body = extract_body(raw);
-	char *sanitized = body ? sanitize_html_tags(body) : sanitize_html_tags(raw);
+	char *sanitized =
+	        body ? sanitize_html_tags(body) : sanitize_html_tags(raw);
 	if (body)
 		free(body);
 	if (!sanitized)

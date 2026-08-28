@@ -75,9 +75,11 @@ static void song_load_saved_prefs(const char *user, int *f, int *m)
 	char buf[32] = { 0 };
 	if (!user || !user[0])
 		return;
-	if (user_pref_read(user, "chords-latin", buf, sizeof(buf)) == 0 && atoi(buf))
+	if (user_pref_read(user, "chords-latin", buf, sizeof(buf)) == 0 &&
+	    atoi(buf))
 		*f |= TRANSP_LATIN;
-	if (user_pref_read(user, "chords-media", buf, sizeof(buf)) == 0 && atoi(buf))
+	if (user_pref_read(user, "chords-media", buf, sizeof(buf)) == 0 &&
+	    atoi(buf))
 		*m = 1;
 }
 
@@ -239,15 +241,20 @@ XY_IMPL(char *, song_get_pref, const char *, user, const char *, name)
 	return strdup(buf);
 }
 
-static const char *derive_song_lyrics(const void *ctx, const char *row_id, const char *field_name, void *user)
+static const char *derive_song_lyrics(
+        const void *ctx, const char *row_id, const char *field_name, void *user)
 {
-	(void)ctx; (void)field_name; (void)user;
+	(void)ctx;
+	(void)field_name;
+	(void)user;
 
 	char doc_root[256] = { 0 };
 	const char *r = resolve_doc_root(0, doc_root, sizeof(doc_root));
 
 	char path[PATH_MAX];
-	snprintf(path, sizeof(path), "%s/var/song/%s/data.txt", (r && r[0]) ? r : ".", row_id);
+	snprintf(
+	        path, sizeof(path), "%s/var/song/%s/data.txt",
+	        (r && r[0]) ? r : ".", row_id);
 
 	static __thread char buf[65536];
 	char *data = slurp_file(path);
@@ -257,13 +264,15 @@ static const char *derive_song_lyrics(const void *ctx, const char *row_id, const
 	}
 
 	buf[0] = '\0';
-	transp_song_t song = {0};
+	transp_song_t song = { 0 };
 	int key = -1;
 	if (transp_song_parse(data, &song, &key) == 0) {
 		size_t pos = 0;
 		for (size_t i = 0; i < song.nlines; i++) {
 			transp_pline_t *pl = &song.lines[i];
-			if (!pl->is_chord_line && !pl->is_comment && !pl->is_empty && pl->len > 0) {
+			if (!pl->is_chord_line && !pl->is_comment &&
+			    !pl->is_empty && pl->len > 0)
+			{
 				if (pos + pl->len + 1 < sizeof(buf)) {
 					memcpy(buf + pos, pl->text, pl->len);
 					pos += pl->len;
@@ -271,7 +280,8 @@ static const char *derive_song_lyrics(const void *ctx, const char *row_id, const
 				}
 			}
 		}
-		if (pos > 0) pos--;
+		if (pos > 0)
+			pos--;
 		buf[pos] = '\0';
 		transp_song_free(&song);
 	}
@@ -344,7 +354,9 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
-	snprintf(app_state.cache.title, sizeof(app_state.cache.title), "%s", title);
+	snprintf(
+	        app_state.cache.title, sizeof(app_state.cache.title), "%s",
+	        title);
 	app_state.transpose = t;
 	app_state.use_latin = (f & TRANSP_LATIN) != 0;
 	app_state.show_media = m;
@@ -368,7 +380,8 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
 
 	bud_adapter_overlay_from_desc(
-	        jo, &app_state, song_app_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR);
+	        jo, &app_state, song_app_fields, BUD_OVERLAY_INT,
+	        BUD_OVERLAY_STR);
 
 	hyle_bud_state_apply(
 	        &app_state.cache, song_fields, json_object_to_json_string(jo));
@@ -428,9 +441,8 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		free(data_val);
 
 		return site_ui_respond_edit_page(
-		        fd, ctx->username, "song",
-		        site_ui_module_icon("song"), meta.title, ctx->id,
-		        form);
+		        fd, ctx->username, "song", site_ui_module_icon("song"),
+		        meta.title, ctx->id, form);
 	}
 }
 
@@ -453,11 +465,10 @@ static int song_add_get_handler(int fd, char *body)
 	{
 		pick_view_t pv;
 
-		pick_view_collect_desc_fd(
-		        fd, song_fields, &pv, NULL);
+		pick_view_collect_desc_fd(fd, song_fields, &pv, NULL);
 
-		bud_node *form = song_form_content(
-		        0, NULL, NULL, NULL, csrf_token, &pv);
+		bud_node *form =
+		        song_form_content(0, NULL, NULL, NULL, csrf_token, &pv);
 		return site_ui_respond_add_page(
 		        fd, user, "song", site_ui_module_icon("song"), form);
 	}
@@ -479,8 +490,8 @@ void xy_install(void)
 
 	source_setup(
 	        "song.types", "name", sizeof(song_type_cache_t),
-	        "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT,
-	        0, NULL);
+	        "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT, 0,
+	        NULL);
 
 	ref_field_register("song.items", "type");
 

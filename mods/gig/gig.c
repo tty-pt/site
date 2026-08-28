@@ -132,7 +132,9 @@ static void grp_rand_match_cb(
 	const char *ftype = (format && format[0]) ? format : "any";
 
 	if (strcmp(ftype, ctx->type) == 0 || strcmp(ctx->type, "any") == 0) {
-		if (song_id && ctx->id_pos + strlen(song_id) + 1 < sizeof(ctx->ids)) {
+		if (song_id &&
+		    ctx->id_pos + strlen(song_id) + 1 < sizeof(ctx->ids))
+		{
 			strcpy(ctx->ids + ctx->id_pos, song_id);
 			ctx->id_pos += strlen(song_id) + 1;
 			ctx->match_count++;
@@ -368,7 +370,14 @@ static int handle_sb_song_replace_authorized(
 	axil_query_param("n", n_str, sizeof(n_str) - 1);
 	idx = atoi(n_str);
 
-	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0)
+	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0) {
+		/* If song_id is not provided, keep current song_id */
+		unsigned cur_fhd = hyle_source_get_fields_hd("gig.songs");
+		const char *cur_s = qmap_field_get(cur_fhd, key, "song");
+		if (cur_s)
+			snprintf(s_id, sizeof(s_id), "%s", cur_s);
+	}
+	if (!s_id[0])
 		return bad_request(fd, "Missing song_id");
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 	resolve_song_id(s_id, sizeof(s_id));
@@ -419,46 +428,74 @@ static int handle_sb_song_replace_authorized(
 		int dk = 0;
 		int flags = TRANSP_HTML;
 		char l_str[4] = { 0 }, b_str[4] = { 0 };
-		if (axil_query_param("l", l_str, sizeof(l_str)) >= 0 && l_str[0] == '1')
+		if (axil_query_param("l", l_str, sizeof(l_str)) >= 0 &&
+		    l_str[0] == '1')
 			flags |= TRANSP_LATIN;
-		if (axil_query_param("b", b_str, sizeof(b_str)) >= 0 && b_str[0] == '1')
+		if (axil_query_param("b", b_str, sizeof(b_str)) >= 0 &&
+		    b_str[0] == '1')
 			flags |= TRANSP_BEMOL;
 
 		int tr = key_val[0] ? atoi(key_val) : 0;
 		unsigned song_hd = source_get_fields_hd("song.items");
 		if (song_hd) {
-			const char *st = qmap_get_field_str(song_hd, s_id, "title");
+			const char *st =
+			        qmap_get_field_str(song_hd, s_id, "title");
 			if (st)
-				snprintf(title_buf, sizeof(title_buf), "%s", st);
+				snprintf(
+				        title_buf, sizeof(title_buf), "%s", st);
 			else
-				snprintf(title_buf, sizeof(title_buf), "%s", s_id);
+				snprintf(
+				        title_buf, sizeof(title_buf), "%s",
+				        s_id);
 
-			const char *_yt = qmap_get_field_str(song_hd, s_id, "yt");
-			const char *_audio = qmap_get_field_str(song_hd, s_id, "audio");
-			const char *_pdf = qmap_get_field_str(song_hd, s_id, "pdf");
-			if (_yt) snprintf(yt_buf, sizeof(yt_buf), "%s", _yt);
-			if (_audio) snprintf(audio_buf, sizeof(audio_buf), "%s", _audio);
-			if (_pdf) snprintf(pdf_buf, sizeof(pdf_buf), "%s", _pdf);
+			const char *_yt =
+			        qmap_get_field_str(song_hd, s_id, "yt");
+			const char *_audio =
+			        qmap_get_field_str(song_hd, s_id, "audio");
+			const char *_pdf =
+			        qmap_get_field_str(song_hd, s_id, "pdf");
+			if (_yt)
+				snprintf(yt_buf, sizeof(yt_buf), "%s", _yt);
+			if (_audio)
+				snprintf(
+				        audio_buf, sizeof(audio_buf), "%s",
+				        _audio);
+			if (_pdf)
+				snprintf(pdf_buf, sizeof(pdf_buf), "%s", _pdf);
 
-			source_resolve_ref_display_str("song.items", s_id, "type", type_buf, sizeof(type_buf));
+			source_resolve_ref_display_str(
+			        "song.items", s_id, "type", type_buf,
+			        sizeof(type_buf));
 		}
 
 		song_transpose_root(g_doc_root, s_id, tr, flags, &ch, &dk);
-		const char *tgt_key = target_key_name(
-		        dk, tr, (flags & TRANSP_LATIN) ? 1 : 0);
+		const char *tgt_key =
+		        target_key_name(dk, tr, (flags & TRANSP_LATIN) ? 1 : 0);
 
 		json_object *j_resp = json_object_new_object();
-		json_object_object_add(j_resp, "index", json_object_new_int(idx));
-		json_object_object_add(j_resp, "song_id", json_object_new_string(s_id));
-		json_object_object_add(j_resp, "title", json_object_new_string(title_buf));
-		json_object_object_add(j_resp, "type", json_object_new_string(type_buf));
-		json_object_object_add(j_resp, "original_key", json_object_new_int(dk));
-		json_object_object_add(j_resp, "target_key", json_object_new_string(tgt_key));
-		json_object_object_add(j_resp, "transpose", json_object_new_int(tr));
-		json_object_object_add(j_resp, "chord_html", json_object_new_string(ch ? ch : ""));
-		json_object_object_add(j_resp, "yt", json_object_new_string(yt_buf));
-		json_object_object_add(j_resp, "audio", json_object_new_string(audio_buf));
-		json_object_object_add(j_resp, "pdf", json_object_new_string(pdf_buf));
+		json_object_object_add(
+		        j_resp, "index", json_object_new_int(idx));
+		json_object_object_add(
+		        j_resp, "song_id", json_object_new_string(s_id));
+		json_object_object_add(
+		        j_resp, "title", json_object_new_string(title_buf));
+		json_object_object_add(
+		        j_resp, "type", json_object_new_string(type_buf));
+		json_object_object_add(
+		        j_resp, "original_key", json_object_new_int(dk));
+		json_object_object_add(
+		        j_resp, "target_key", json_object_new_string(tgt_key));
+		json_object_object_add(
+		        j_resp, "transpose", json_object_new_int(tr));
+		json_object_object_add(
+		        j_resp, "chord_html",
+		        json_object_new_string(ch ? ch : ""));
+		json_object_object_add(
+		        j_resp, "yt", json_object_new_string(yt_buf));
+		json_object_object_add(
+		        j_resp, "audio", json_object_new_string(audio_buf));
+		json_object_object_add(
+		        j_resp, "pdf", json_object_new_string(pdf_buf));
 
 		const char *json_str = json_object_to_json_string(j_resp);
 		free(ch);
@@ -491,8 +528,8 @@ static int handle_sb_add(int fd, char *body)
 
 	source_def_t *sb_def = source_find("gig.items");
 	if (sb_def) {
-		unsigned dh = qmap_open(
-		        NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
+		unsigned dh =
+		        qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
 		qmap_put(dh, "grp", grp);
 		source_update_item(fd, "gig.items", id, dh);
 		qmap_close(dh);
@@ -527,8 +564,11 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/edit.c"
 
 static const form_field_t sb_pick_song_ff[] = {
-	{ "song_id", "Song", 0, FF_REF_SINGLE, "song.items", 0 },
-	FIELD_END
+	{ "song_id", "Song", 0, FF_REF_SINGLE, "song.items", 0 }, FIELD_END
+};
+
+static const form_field_t sb_pick_fmt_ff[] = {
+	{ "format", "Format", 0, FF_REF_SINGLE, "song.types", 0 }, FIELD_END
 };
 
 static void sb_load_song_picks(int fd, const char *scope)
@@ -584,6 +624,7 @@ static char *sb_emit_state_json(void)
 	/* Picker rows are registry-driven; ship them so the WASM
 	 * hydration tree matches SSR exactly (C-ISOMORPHIC-BUD §3). */
 	site_ui_picker_state_to_json(&g_sb_pick_state, j_root);
+	site_ui_picker_state_to_json(&g_sb_fmt_pick_state, j_root);
 
 	json_str = json_object_to_json_string_ext(j_root, 0);
 	if (!json_str) {
@@ -591,7 +632,6 @@ static char *sb_emit_state_json(void)
 		return NULL;
 	}
 	mlen = strlen(json_str);
-
 
 	req = snprintf(
 	        NULL, 0,
@@ -768,13 +808,27 @@ static void detail_song_cb(
         void *user)
 {
 	(void)key;
-	(void)format;
 	struct detail_song_ctx *c = user;
 	if (sb_app_state.n_songs >= MAX_SB_SONGS)
 		return;
 	sb_song_row_data_t *sd = &g_sb_songs[sb_app_state.n_songs];
-	if (sb_load_song_row(song_id, transpose, c->song_hd, c->f, sd) == 0)
+	if (sb_load_song_row(song_id, transpose, c->song_hd, c->f, sd) == 0) {
+		if (format && format[0] && strcmp(format, "any") != 0) {
+			char resolved_fmt[512] = { 0 };
+			source_resolve_ref_display_str(
+			        "song.types", format, "name", resolved_fmt,
+			        sizeof(resolved_fmt));
+			if (resolved_fmt[0])
+				snprintf(
+				        sd->type, sizeof(sd->type), "%s",
+				        resolved_fmt);
+			else
+				snprintf(
+				        sd->type, sizeof(sd->type), "%s",
+				        format);
+		}
 		sb_app_state.n_songs++;
+	}
 }
 
 struct edit_song_ctx {
@@ -994,17 +1048,31 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
 	}
 
-	/* Auto-collect scoped picker if active (?replace=N or pick_q_song_id__N),
-	 * otherwise collect options for the top Add Song picker. */
+	/* Auto-collect scoped picker if active (?replace=N or
+	 * pick_q_song_id__N), otherwise collect options for the top Add Song
+	 * picker. */
 	if (is_owner) {
 		const char *vals_in[1] = { "" };
 		const char *vals_out[1];
 		pick_view_collect_auto_fd(
 		        fd, sb_pick_song_ff, vals_in, vals_out,
 		        &g_sb_pick_state, &sb_app_state.active_row_pick);
+		pick_view_collect_auto_fd(
+		        fd, sb_pick_fmt_ff, vals_in, vals_out,
+		        &g_sb_fmt_pick_state, &sb_app_state.active_fmt_pick);
+		/* For No-JS top add picker when search query is present (pick_q_song_id=),
+		 * ensure top picker is populated */
+		if (sb_app_state.active_row_pick < 0 && sb_app_state.active_fmt_pick < 0) {
+			char qs[2048] = { 0 };
+			if (fd > 0)
+				axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+			if (strstr(qs, "pick_q_song_id=") || strstr(qs, "pick_page_song_id=")) {
+				pick_view_collect(qs, sb_pick_song_ff, vals_in, vals_out, &g_sb_pick_state);
+			}
+		}
 	}
 
-/* ── Populate sb_app_state with page data ────────────────── */
+	/* ── Populate sb_app_state with page data ────────────────── */
 	sb_app_state.zoom = zoom;
 	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
 	sb_app_state.show_media = show_media;
@@ -1030,11 +1098,18 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        grp_id ? grp_id : "");
 	snprintf(sb_app_state.owner, sizeof(sb_app_state.owner), "%s", owner);
 
-	snprintf(sb_app_state.pick_q, sizeof(sb_app_state.pick_q), "%s",
-	        g_sb_pick_state.entries[0].q
-	                ? g_sb_pick_state.entries[0].q
-	                : "");
+	snprintf(
+	        sb_app_state.pick_q, sizeof(sb_app_state.pick_q), "%s",
+	        g_sb_pick_state.entries[0].q ? g_sb_pick_state.entries[0].q
+	                                     : "");
 	sb_app_state.pick_page = g_sb_pick_state.entries[0].page;
+
+	snprintf(
+	        sb_app_state.pick_fmt_q, sizeof(sb_app_state.pick_fmt_q), "%s",
+	        g_sb_fmt_pick_state.entries[0].q
+	                ? g_sb_fmt_pick_state.entries[0].q
+	                : "");
+	sb_app_state.pick_fmt_page = g_sb_fmt_pick_state.entries[0].page;
 
 	/* ── Build page through isomorphic entry point ────────────── */
 	layout = bud_app_render();
@@ -1121,7 +1196,8 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	pick_view_collect_fd(
 	        fd, sb_grp_ff, grp_vals_in, grp_vals_out, &edit_pv);
 
-	/* Check if any row's song picker is active in the query string */
+	/* Check if any row's song picker or format picker is active in the
+	 * query string */
 	char qs[2048] = { 0 };
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
@@ -1137,8 +1213,20 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		}
 	}
 
-	/* Load song picks for omnisearch add-picker only when no row is active */
-	if (active_edit_row < 0)
+	int active_edit_fmt_row = -1;
+	for (int i = 0; i < n_songs; i++) {
+		char q_key[64], p_key[64];
+		snprintf(q_key, sizeof(q_key), "pick_q_fmt_%d=", i);
+		snprintf(p_key, sizeof(p_key), "pick_page_fmt_%d=", i);
+		if (strstr(qs, q_key) || strstr(qs, p_key)) {
+			active_edit_fmt_row = i;
+			break;
+		}
+	}
+
+	/* Load song picks for omnisearch add-picker only when no row is active
+	 */
+	if (active_edit_row < 0 && active_edit_fmt_row < 0)
 		sb_load_edit_song_picks(fd);
 	else
 		memset(&g_edit_pv, 0, sizeof(g_edit_pv));
@@ -1148,13 +1236,25 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	if (active_edit_row >= 0) {
 		char song_f[32];
 		snprintf(song_f, sizeof(song_f), "song_%d", active_edit_row);
-		form_field_t row_ff[] = {
-			{ song_f, "Song", 0, FF_REF_SINGLE, "song.items", 0 },
-			FIELD_END
-		};
+		form_field_t row_ff[] = { { song_f, "Song", 0, FF_REF_SINGLE,
+			                    "song.items", 0 },
+			                  FIELD_END };
 		const char *v_in[1] = { "" };
 		const char *v_out[1];
 		pick_view_collect(qs, row_ff, v_in, v_out, &edit_row_pv);
+	}
+
+	pick_view_t edit_fmt_row_pv;
+	memset(&edit_fmt_row_pv, 0, sizeof(edit_fmt_row_pv));
+	if (active_edit_fmt_row >= 0) {
+		char fmt_f[32];
+		snprintf(fmt_f, sizeof(fmt_f), "fmt_%d", active_edit_fmt_row);
+		form_field_t fmt_ff[] = { { fmt_f, "Format", 0, FF_REF_SINGLE,
+			                    "song.types", 0 },
+			                  FIELD_END };
+		const char *v_in[1] = { "" };
+		const char *v_out[1];
+		pick_view_collect(qs, fmt_ff, v_in, v_out, &edit_fmt_row_pv);
 	}
 
 	const char *csrf_token = csrf_setup(fd);
@@ -1166,9 +1266,10 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	bud_node *form = sb_render_edit_form(
 	        action, csrf_token, title, ctx->id, grp_vals_out[0], &edit_pv,
-	        cancel_href, n_songs, songs, n_format_opts,
-	        format_opts, song_source, active_edit_row,
-	        active_edit_row >= 0 ? &edit_row_pv : NULL);
+	        cancel_href, n_songs, songs, n_format_opts, format_opts,
+	        song_source, active_edit_row,
+	        active_edit_row >= 0 ? &edit_row_pv : NULL, active_edit_fmt_row,
+	        active_edit_fmt_row >= 0 ? &edit_fmt_row_pv : NULL);
 
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "gig", site_ui_module_icon("gig"), title,
@@ -1196,19 +1297,17 @@ static int gig_add_get_handler(int fd, char *body)
 	/* ?grp=<slug> preselect rides in as a draft overlay; the picker
 	 * renders it pinned and the main POST submits it natively. */
 	static const form_field_t add_ff[] = {
-	        { "title", "Title:", 0, 0, NULL, 0 },
-	        { "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
-	        { NULL, NULL, 0, 0, NULL, 0 }
+		{ "title", "Title:", 0, 0, NULL, 0 },
+		{ "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
+		{ NULL, NULL, 0, 0, NULL, 0 }
 	};
 	const char *add_vals_in[2] = { "", "" };
 	const char *add_vals_out[2];
 	pick_view_t add_pv;
 
-	pick_view_collect_fd(
-	        fd, add_ff, add_vals_in, add_vals_out, &add_pv);
+	pick_view_collect_fd(fd, add_ff, add_vals_in, add_vals_out, &add_pv);
 
-	bud_node *form = sb_render_add_form(
-	        csrf_token, add_vals_out, &add_pv);
+	bud_node *form = sb_render_add_form(csrf_token, add_vals_out, &add_pv);
 
 	return site_ui_respond_add_page(
 	        fd, user, "gig", site_ui_module_icon("gig"), form);
@@ -1227,7 +1326,8 @@ static void sb_save_edit_songs_from_form(const char *gig_id)
 	hyle_source_ordered_clear("gig.songs", gig_id);
 
 	for (i = 0; i < amount; i++) {
-		char song_field[32], key_field[32], fmt_field[32], remove_field[32];
+		char song_field[32], key_field[32], fmt_field[32],
+		        remove_field[32];
 		char remove_val[8] = { 0 };
 		char song_val[256] = { 0 };
 		char extracted[128] = { 0 };
@@ -1376,8 +1476,8 @@ void xy_install(void)
 	axil_register_handler(
 	        "GET:/api/gig/:id/transpose", api_sb_transpose_get);
 
-	/* Backfill / heal: ensure any gigs that have a grp in their metadata file
-	 * on disk are correctly indexed in gig.items in memory. */
+	/* Backfill / heal: ensure any gigs that have a grp in their metadata
+	 * file on disk are correctly indexed in gig.items in memory. */
 	{
 		unsigned gh = source_get_fields_hd("gig.items");
 		unsigned dh = source_get_data_hd("gig.items");
@@ -1386,15 +1486,29 @@ void xy_install(void)
 			const void *k, *v;
 			while (qmap_next(&k, &v, cur)) {
 				const char *gig_id = (const char *)k;
-				const char *grp_in_mem = qmap_get_field_str(gh, gig_id, "grp");
+				const char *grp_in_mem =
+				        qmap_get_field_str(gh, gig_id, "grp");
 				char item_path[512];
-				if (item_path_build(0, "gig", gig_id, item_path, sizeof(item_path)) == 0) {
+				if (item_path_build(
+				            0, "gig", gig_id, item_path,
+				            sizeof(item_path)) == 0)
+				{
 					gig_cache_t meta;
 					gig_meta_read(item_path, &meta);
-					if (meta.grp[0] && (!grp_in_mem || strcmp(grp_in_mem, meta.grp) != 0)) {
-						unsigned row_dh = qmap_open(NULL, "row_data", QM_STR, QM_STR, 0x1F, 0);
-						qmap_put(row_dh, "grp", meta.grp);
-						source_update_item(0, "gig.items", gig_id, row_dh);
+					if (meta.grp[0] &&
+					    (!grp_in_mem ||
+					     strcmp(grp_in_mem, meta.grp) != 0))
+					{
+						unsigned row_dh = qmap_open(
+						        NULL, "row_data",
+						        QM_STR, QM_STR, 0x1F,
+						        0);
+						qmap_put(
+						        row_dh, "grp",
+						        meta.grp);
+						source_update_item(
+						        0, "gig.items", gig_id,
+						        row_dh);
 						qmap_close(row_dh);
 					}
 				}
@@ -1403,8 +1517,8 @@ void xy_install(void)
 		}
 	}
 
-	/* Auto-repertoire: sanitize every grp's stored partition (prune non-pinned rows)
-	 * and sync in-memory state. */
+	/* Auto-repertoire: sanitize every grp's stored partition (prune
+	 * non-pinned rows) and sync in-memory state. */
 	{
 		unsigned gh = source_get_fields_hd("grp.items");
 		unsigned dh = source_get_data_hd("grp.items");

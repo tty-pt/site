@@ -54,8 +54,7 @@ static __thread const char *pick_req_key;
 
 /* First non-id schema key = display label convention (same as
  * idx_resolve_filter_options). */
-static void pick_display_field(
-        const char *dataset_id, char *out, size_t sz)
+static void pick_display_field(const char *dataset_id, char *out, size_t sz)
 {
 	unsigned schema_hd;
 	uint32_t cur;
@@ -76,16 +75,15 @@ static void pick_display_field(
 	qmap_fin(cur);
 }
 
-static const char *pick_label_of(unsigned fields_hd, const char *row_id,
-        const char *display_field)
+static const char *
+pick_label_of(unsigned fields_hd, const char *row_id, const char *display_field)
 {
 	char name_key[320];
 	const char *name;
 
 	if (!display_field[0])
 		return row_id;
-	snprintf(name_key, sizeof(name_key), "%s:%s", row_id,
-	        display_field);
+	snprintf(name_key, sizeof(name_key), "%s:%s", row_id, display_field);
 	name = (const char *)qmap_get(fields_hd, name_key);
 	return name ? name : row_id;
 }
@@ -93,8 +91,9 @@ static const char *pick_label_of(unsigned fields_hd, const char *row_id,
 /* Copy the still-url-encoded `pick_q_<key>` segment out of the raw
  * query string, renamed to `q=`, plus page/per_page — byte-preserving
  * splice so accents survive without a decode/re-encode round trip. */
-static void pick_qs_shape(const char *raw_qs, const char *key,
-        int page0, int per_page, char *out, size_t out_sz)
+static void pick_qs_shape(
+        const char *raw_qs, const char *key, int page0, int per_page, char *out,
+        size_t out_sz)
 {
 	char pname[192];
 	size_t plen;
@@ -109,12 +108,11 @@ static void pick_qs_shape(const char *raw_qs, const char *key,
 			p = strstr(p, pname);
 			if (!p)
 				break;
-			if ((p == raw_qs || p[-1] == '&') &&
-			    p[plen] == '=' && p[plen + 1])
+			if ((p == raw_qs || p[-1] == '&') && p[plen] == '=' &&
+			    p[plen + 1])
 			{
 				const char *end = strchr(p + plen + 1, '&');
-				size_t vlen = end ? (size_t)(end -
-				                          p - plen - 1)
+				size_t vlen = end ? (size_t)(end - p - plen - 1)
 				                  : strlen(p + plen + 1);
 				int off;
 				if (vlen > out_sz - 64)
@@ -123,7 +121,8 @@ static void pick_qs_shape(const char *raw_qs, const char *key,
 				memcpy(out + 2, p + plen + 1, vlen);
 				out[vlen + 2] = '\0';
 				off = (int)(vlen + 2);
-				snprintf(out + off, out_sz - (size_t)off,
+				snprintf(
+				        out + off, out_sz - (size_t)off,
 				        "&page=%d&per_page=%d", page0 + 1,
 				        per_page);
 				return;
@@ -131,15 +130,14 @@ static void pick_qs_shape(const char *raw_qs, const char *key,
 			p++;
 		}
 	}
-	snprintf(out, out_sz, "page=%d&per_page=%d", page0 + 1,
-	        per_page);
+	snprintf(out, out_sz, "page=%d&per_page=%d", page0 + 1, per_page);
 }
 
 /* Fill opts[] from one source_query window; strings land in caller
  * buffers so multi-field callers avoid pool collisions. */
-static int pick_fill(const char *dataset_id, const char *req_qs,
-        const char *key, const pick_ctx_t *ctx,
-        char (*id_buf)[64], char (*label_buf)[256],
+static int pick_fill(
+        const char *dataset_id, const char *req_qs, const char *key,
+        const pick_ctx_t *ctx, char (*id_buf)[64], char (*label_buf)[256],
         hyle_bud_option_t *opts, int max, int *total)
 {
 	char qs[1024];
@@ -155,8 +153,7 @@ static int pick_fill(const char *dataset_id, const char *req_qs,
 	if (!dataset_id || !dataset_id[0] || max <= 0)
 		return 0;
 
-	pick_qs_shape(req_qs, key, ctx->page, ctx->per_page, qs,
-	        sizeof(qs));
+	pick_qs_shape(req_qs, key, ctx->page, ctx->per_page, qs, sizeof(qs));
 
 	result_hd = source_query(dataset_id, qs);
 	if (!result_hd)
@@ -166,8 +163,7 @@ static int pick_fill(const char *dataset_id, const char *req_qs,
 	*total = total_str ? atoi(total_str) : 0;
 
 	fields_hd = source_get_fields_hd(dataset_id);
-	pick_display_field(dataset_id, display_field,
-	        sizeof(display_field));
+	pick_display_field(dataset_id, display_field, sizeof(display_field));
 
 	cur = qmap_iter(result_hd, NULL, 0);
 	while (n < max && qmap_next(&rkey, &rval, cur)) {
@@ -198,16 +194,18 @@ XY_IMPL(int, pick_options_fill,
 {
 	if (max > PICK_MAX_OPTS)
 		max = PICK_MAX_OPTS;
-	return pick_fill(dataset_id, pick_req_qs, pick_req_key, ctx,
-	        pick_opt_ids, pick_opt_labels, opts, max, total);
+	return pick_fill(
+	        dataset_id, pick_req_qs, pick_req_key, ctx, pick_opt_ids,
+	        pick_opt_labels, opts, max, total);
 }
 
 /* Split comma slugs and resolve each to {id,label}: stored tokens may
  * be positions OR raw slugs (idx_resolve_refs precedent — position-
  * first lookup via qmap_get_key, slug fallback). */
-static int pick_resolve(const char *dataset_id, unsigned fields_hd,
-        const char *comma_slugs, char (*id_buf)[64],
-        char (*label_buf)[256], hyle_bud_option_t *out, int max)
+static int pick_resolve(
+        const char *dataset_id, unsigned fields_hd, const char *comma_slugs,
+        char (*id_buf)[64], char (*label_buf)[256], hyle_bud_option_t *out,
+        int max)
 {
 	char display_field[64];
 	const char *p = comma_slugs;
@@ -215,8 +213,7 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 
 	if (!fields_hd || !p || !p[0] || max <= 0)
 		return 0;
-	pick_display_field(dataset_id, display_field,
-	        sizeof(display_field));
+	pick_display_field(dataset_id, display_field, sizeof(display_field));
 
 	while (*p && n < max) {
 		const char *comma = strpbrk(p, ",\n\r");
@@ -229,54 +226,64 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 		memcpy(token, p, len);
 		token[len] = '\0';
 		char *ttrim = token;
-		while (*ttrim == ' ' || *ttrim == '\t') ttrim++;
+		while (*ttrim == ' ' || *ttrim == '\t')
+			ttrim++;
 		size_t tlen = strlen(ttrim);
-		while (tlen > 0 && (ttrim[tlen - 1] == ' ' || ttrim[tlen - 1] == '\t' || ttrim[tlen - 1] == '\r'))
+		while (tlen > 0 &&
+		       (ttrim[tlen - 1] == ' ' || ttrim[tlen - 1] == '\t' ||
+		        ttrim[tlen - 1] == '\r'))
 			ttrim[--tlen] = '\0';
 
 		if (ttrim[0]) {
-			if (strspn(ttrim, "0123456789") == strlen(ttrim))
-			{
-				slug = qmap_get_key(fields_hd,
-				        (uint32_t)atoi(ttrim));
+			if (strspn(ttrim, "0123456789") == strlen(ttrim)) {
+				slug = qmap_get_key(
+				        fields_hd, (uint32_t)atoi(ttrim));
 				if (slug && !slug[0])
 					slug = NULL;
 			}
 			if (!slug) {
 				char slug_buf[128];
-				axil_slugify(ttrim, strlen(ttrim), slug_buf, sizeof(slug_buf));
-				if (slug_buf[0] && qmap_pos(fields_hd, slug_buf) != UINT32_MAX)
-					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, slug_buf));
+				axil_slugify(
+				        ttrim, strlen(ttrim), slug_buf,
+				        sizeof(slug_buf));
+				if (slug_buf[0] &&
+				    qmap_pos(fields_hd, slug_buf) != UINT32_MAX)
+					slug = qmap_get_key(
+					        fields_hd,
+					        qmap_pos(fields_hd, slug_buf));
 			}
 			if (!slug) {
 				if (qmap_pos(fields_hd, ttrim) != UINT32_MAX)
-					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, ttrim));
+					slug = qmap_get_key(
+					        fields_hd,
+					        qmap_pos(fields_hd, ttrim));
 			}
 			if (!slug) {
 				char slug_buf[128];
-				axil_slugify(ttrim, strlen(ttrim), slug_buf, sizeof(slug_buf));
+				axil_slugify(
+				        ttrim, strlen(ttrim), slug_buf,
+				        sizeof(slug_buf));
 				if (slug_buf[0])
 					slug = slug_buf;
 			}
 			if (!slug)
 				slug = ttrim;
 
-			snprintf(id_buf[n], sizeof(id_buf[n]), "%.60s",
-			        slug);
+			snprintf(id_buf[n], sizeof(id_buf[n]), "%.60s", slug);
 			{
 				char name_key[320];
 				const char *name = NULL;
 
 				if (display_field[0]) {
-					snprintf(name_key,
-					        sizeof(name_key), "%s:%s",
-					        slug, display_field);
+					snprintf(
+					        name_key, sizeof(name_key),
+					        "%s:%s", slug, display_field);
 					name = (const char *)qmap_get(
 					        fields_hd, name_key);
 				}
-				snprintf(label_buf[n],
-				        sizeof(label_buf[n]), "%s",
-				        name ? name : slug);
+				snprintf(
+				        label_buf[n], sizeof(label_buf[n]),
+				        "%s", name ? name : slug);
 			}
 			out[n].id = id_buf[n];
 			out[n].label = label_buf[n];
@@ -284,7 +291,8 @@ static int pick_resolve(const char *dataset_id, unsigned fields_hd,
 		}
 		if (!comma)
 			break;
-		while (*comma && (*comma == ',' || *comma == '\n' || *comma == '\r' || *comma == ' '))
+		while (*comma && (*comma == ',' || *comma == '\n' ||
+		                  *comma == '\r' || *comma == ' '))
 			comma++;
 		p = comma;
 	}
@@ -304,8 +312,9 @@ XY_IMPL(int, pick_selected_fill,
 	if (max > PICK_MAX_SEL)
 		max = PICK_MAX_SEL;
 	fields_hd = source_get_fields_hd(dataset_id);
-	return pick_resolve(dataset_id, fields_hd, comma_slugs,
-	        pick_sel_ids, pick_sel_labels, out, max);
+	return pick_resolve(
+	        dataset_id, fields_hd, comma_slugs, pick_sel_ids,
+	        pick_sel_labels, out, max);
 }
 
 /* Read pick_q_<key> / pick_page_<key> / per_page from the request
@@ -444,8 +453,7 @@ static int pick_options_handler(int fd, char *body)
 		return not_found(fd, "Unknown dataset");
 
 	nsel = pick_selected_fill(dataset, sel_raw, sel, PICK_MAX_SEL);
-	nopts = pick_options_fill(dataset, &ctx, opts, PICK_MAX_OPTS,
-	        &total);
+	nopts = pick_options_fill(dataset, &ctx, opts, PICK_MAX_OPTS, &total);
 
 	if (is_append) {
 		hyle_bud_picker_desc_t d;
@@ -456,12 +464,12 @@ static int pick_options_handler(int fd, char *body)
 		 * stop feeding rows and hand back a refinement hint so
 		 * DOM size stays bounded (spec §3.1/R6). */
 		if (ctx.page >= PICK_MAX_SCROLL_PAGES &&
-		        (ctx.page + 1) * ctx.per_page < total)
+		    (ctx.page + 1) * ctx.per_page < total)
 		{
-			return pick_respond_jsonf(fd,
-			        "{\"rows\":\"<div class=\\\"hyle-picker-"
-			        "refine\\\">Too many results \xe2\x80\x94 "
-			        "refine your search.</div>\",\"eof\":1}");
+			return pick_respond_jsonf(
+			        fd, "{\"rows\":\"<div class=\\\"hyle-picker-"
+			            "refine\\\">Too many results \xe2\x80\x94 "
+			            "refine your search.</div>\",\"eof\":1}");
 		}
 
 		memset(&d, 0, sizeof(d));
@@ -478,16 +486,15 @@ static int pick_options_handler(int fd, char *body)
 		d.sel = sel;
 		d.nsel = nsel;
 
-		hyle_bud_picker_rows(&d, pick_rows_buf,
-		        sizeof(pick_rows_buf));
+		hyle_bud_picker_rows(&d, pick_rows_buf, sizeof(pick_rows_buf));
 		eof = (ctx.page + 1) * ctx.per_page >= total;
 
 		rows_esc = pick_json_escape(pick_rows_buf);
 		if (!rows_esc)
 			return server_error(fd, "Out of memory");
 		{
-			int rc = pick_respond_jsonf(fd,
-			        "{\"rows\":\"%s\",\"eof\":%d}", rows_esc,
+			int rc = pick_respond_jsonf(
+			        fd, "{\"rows\":\"%s\",\"eof\":%d}", rows_esc,
 			        eof ? 1 : 0);
 			free(rows_esc);
 			return rc;
@@ -514,9 +521,9 @@ static int pick_options_handler(int fd, char *body)
 		d.sel = sel;
 		d.nsel = nsel;
 
-		hyle_bud_picker_slots(&d, pick_panel_buf,
-		        sizeof(pick_panel_buf), pick_values_buf,
-		        sizeof(pick_values_buf));
+		hyle_bud_picker_slots(
+		        &d, pick_panel_buf, sizeof(pick_panel_buf),
+		        pick_values_buf, sizeof(pick_values_buf));
 
 		panel_esc = pick_json_escape(pick_panel_buf);
 		values_esc = pick_json_escape(pick_values_buf);
@@ -525,8 +532,8 @@ static int pick_options_handler(int fd, char *body)
 			free(values_esc);
 			return server_error(fd, "Out of memory");
 		}
-		rc = pick_respond_jsonf(fd,
-		        "{\"slots\":{\"panel\":\"%s\",\"values\":\"%s\"}}",
+		rc = pick_respond_jsonf(
+		        fd, "{\"slots\":{\"panel\":\"%s\",\"values\":\"%s\"}}",
 		        panel_esc, values_esc);
 		free(panel_esc);
 		free(values_esc);
@@ -541,17 +548,16 @@ static int pick_options_handler(int fd, char *body)
 #define PICK_OVERLAY_ARENA 16384
 
 static __thread hyle_bud_option_t pick_v_opts[FF_PICKER_MAX_FIELDS]
-        [PICK_VIEW_MAX_OPTS];
-static __thread char pick_v_ids[FF_PICKER_MAX_FIELDS]
-        [PICK_VIEW_MAX_OPTS][64];
-static __thread char pick_v_labels[FF_PICKER_MAX_FIELDS]
-        [PICK_VIEW_MAX_OPTS][256];
-static __thread hyle_bud_option_t
-        pick_v_sel[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_SEL];
-static __thread char pick_v_sel_ids[FF_PICKER_MAX_FIELDS]
-        [PICK_VIEW_MAX_SEL][64];
-static __thread char pick_v_sel_labels[FF_PICKER_MAX_FIELDS]
-        [PICK_VIEW_MAX_SEL][256];
+                                             [PICK_VIEW_MAX_OPTS];
+static __thread char pick_v_ids[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_OPTS][64];
+static __thread char pick_v_labels[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_OPTS]
+                                  [256];
+static __thread hyle_bud_option_t pick_v_sel[FF_PICKER_MAX_FIELDS]
+                                            [PICK_VIEW_MAX_SEL];
+static __thread char pick_v_sel_ids[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_SEL]
+                                   [64];
+static __thread char pick_v_sel_labels[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_SEL]
+                                      [256];
 static __thread char pick_v_raw[FF_PICKER_MAX_FIELDS][1024];
 static __thread char pick_v_slugs[FF_PICKER_MAX_FIELDS][1024];
 static __thread char pick_overlay[PICK_OVERLAY_ARENA];
@@ -559,8 +565,9 @@ static __thread char pick_overlay[PICK_OVERLAY_ARENA];
 /* Normalize a stored multi-ref value (newline/comma tokens that may be
  * positions OR slugs) into a comma-joined slug list for
  * pick_selected_fill/pick_resolve. */
-static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const char *raw,
-        char *out, size_t out_sz)
+static void pick_tokens_to_slugs(
+        const char *dataset, unsigned fields_hd, const char *raw, char *out,
+        size_t out_sz)
 {
 	char display_field[64];
 	const char *p = raw;
@@ -569,7 +576,7 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
 	out[0] = '\0';
 	if (!raw)
 		return;
-	
+
 	pick_display_field(dataset, display_field, sizeof(display_field));
 
 	while (*p && off + 2 < out_sz) {
@@ -584,29 +591,46 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
 		token[len] = '\0';
 		if (token[0]) {
 			if (strspn(token, "0123456789") == strlen(token)) {
-				slug = qmap_get_key(fields_hd,
-				        (uint32_t)atoi(token));
+				slug = qmap_get_key(
+				        fields_hd, (uint32_t)atoi(token));
 				if (slug && !slug[0])
 					slug = NULL;
 			}
 			/* Fallback reverse-lookup by display name */
 			if (!slug && display_field[0]) {
 				char slug_buf[128];
-				axil_slugify(token, strlen(token), slug_buf, sizeof(slug_buf));
-				if (slug_buf[0] && qmap_pos(fields_hd, slug_buf) != UINT32_MAX) {
-					slug = qmap_get_key(fields_hd, qmap_pos(fields_hd, slug_buf));
+				axil_slugify(
+				        token, strlen(token), slug_buf,
+				        sizeof(slug_buf));
+				if (slug_buf[0] &&
+				    qmap_pos(fields_hd, slug_buf) != UINT32_MAX)
+				{
+					slug = qmap_get_key(
+					        fields_hd,
+					        qmap_pos(fields_hd, slug_buf));
 				} else {
 					unsigned result_hd;
 					char qs[512];
-					snprintf(qs, sizeof(qs), "%s=%s", display_field, token);
+					snprintf(
+					        qs, sizeof(qs), "%s=%s",
+					        display_field, token);
 					result_hd = source_query(dataset, qs);
 					if (result_hd) {
-						uint32_t cur = qmap_iter(result_hd, NULL, 0);
+						uint32_t cur = qmap_iter(
+						        result_hd, NULL, 0);
 						const void *rk;
 						const void *rv;
-						while (qmap_next(&rk, &rv, cur)) {
-							if (strcmp((const char *)rk, "__total__") != 0) {
-								slug = (const char *)rk;
+						while (qmap_next(&rk, &rv, cur))
+						{
+							if (strcmp((const char
+							                    *)
+							                   rk,
+							           "__total_"
+							           "_") != 0)
+							{
+								slug = (const char
+								                *)
+								        rk;
 								break;
 							}
 						}
@@ -619,8 +643,8 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
 				slug = token;
 			if (off)
 				out[off++] = ',';
-			snprintf(out + off, out_sz - (size_t)off, "%.60s",
-			        slug);
+			snprintf(
+			        out + off, out_sz - (size_t)off, "%.60s", slug);
 			off = strlen(out);
 		}
 		if (!end)
@@ -633,9 +657,9 @@ static void pick_tokens_to_slugs(const char *dataset, unsigned fields_hd, const 
  * pick_q_/pick_page_ query params are namespaced as `<key>__<scope>`
  * so multiple independent picker instances can coexist on one page.
  * Entry value/radio names stay unscoped (e->key = field name). */
-static int pick_view_collect_impl(char *body, const form_field_t *fields,
-        const char **vals_in, const char **vals_out, pick_view_t *pv,
-        const char *scope)
+static int pick_view_collect_impl(
+        char *body, const form_field_t *fields, const char **vals_in,
+        const char **vals_out, pick_view_t *pv, const char *scope)
 {
 	int arena_off = 0;
 	int ri = 0;
@@ -664,7 +688,7 @@ static int pick_view_collect_impl(char *body, const form_field_t *fields,
 				arena_off += snprintf(
 				        pick_overlay + arena_off,
 				        (size_t)(PICK_OVERLAY_ARENA -
-				                arena_off),
+				                 arena_off),
 				        "%s", tmp);
 				continue;
 			}
@@ -672,16 +696,16 @@ static int pick_view_collect_impl(char *body, const form_field_t *fields,
 		vals_out[i] = val;
 	}
 
-	for (i = 0; fields && fields[i].name && ri < FF_PICKER_MAX_FIELDS;
-	        i++) {
+	for (i = 0; fields && fields[i].name && ri < FF_PICKER_MAX_FIELDS; i++)
+	{
 		const form_field_t *f = &fields[i];
 		pick_entry_t *e = &pv->entries[ri];
 		unsigned fields_hd;
 		char qs[1024];
 		char skey[192];
 		int total = 0, nopts = 0;
-		int eff = f->max_inline > 0 ? f->max_inline
-		                            : FF_PICKER_THRESHOLD;
+		int eff =
+		        f->max_inline > 0 ? f->max_inline : FF_PICKER_THRESHOLD;
 
 		if (f->ref == FF_REF_NONE || !f->target || !f->target[0])
 			continue;
@@ -696,8 +720,7 @@ static int pick_view_collect_impl(char *body, const form_field_t *fields,
 		memset(e, 0, sizeof(*e));
 		e->key = f->name;
 		if (scope && scope[0])
-			snprintf(skey, sizeof(skey), "%s__%s", f->name,
-			        scope);
+			snprintf(skey, sizeof(skey), "%s__%s", f->name, scope);
 		else
 			snprintf(skey, sizeof(skey), "%s", f->name);
 		e->multi = f->ref == FF_REF_MULTI;
@@ -705,8 +728,9 @@ static int pick_view_collect_impl(char *body, const form_field_t *fields,
 		e->per_page = PICK_DEFAULT_PER_PAGE;
 		pick_v_raw[ri][0] = '\0';
 		if (vals_out[i] && vals_out[i][0])
-			snprintf(pick_v_raw[ri], sizeof(pick_v_raw[ri]),
-			        "%s", vals_out[i]);
+			snprintf(
+			        pick_v_raw[ri], sizeof(pick_v_raw[ri]), "%s",
+			        vals_out[i]);
 
 		{
 			static __thread pick_ctx_t ctx;
@@ -716,34 +740,37 @@ static int pick_view_collect_impl(char *body, const form_field_t *fields,
 			e->page = ctx.page;
 			e->per_page = ctx.per_page;
 
-			nopts = pick_fill(f->target, body, skey, &ctx,
-			        pick_v_ids[ri], pick_v_labels[ri],
-			        pick_v_opts[ri], PICK_VIEW_MAX_OPTS,
-			        &total);
+			nopts = pick_fill(
+			        f->target, body, skey, &ctx, pick_v_ids[ri],
+			        pick_v_labels[ri], pick_v_opts[ri],
+			        PICK_VIEW_MAX_OPTS, &total);
 			e->total = total;
 			/* At or below threshold the inline widget needs
 			 * the FULL option list: re-fetch page 1 sized to
 			 * total when the ctx window truncated it. */
 			if (total > 0 && total <= eff &&
-			    (ctx.page != 0 || nopts < total)) {
+			    (ctx.page != 0 || nopts < total))
+			{
 				pick_ctx_t full = { .per_page = total };
 
-				nopts = pick_fill(f->target, body, skey,
-				        &full, pick_v_ids[ri],
-				        pick_v_labels[ri], pick_v_opts[ri],
-				        PICK_VIEW_MAX_OPTS, &total);
+				nopts = pick_fill(
+				        f->target, body, skey, &full,
+				        pick_v_ids[ri], pick_v_labels[ri],
+				        pick_v_opts[ri], PICK_VIEW_MAX_OPTS,
+				        &total);
 				e->page = 0;
 			}
 		}
 		e->page_opts = pick_v_opts[ri];
 		e->npage = nopts;
 
-		pick_tokens_to_slugs(f->target, fields_hd, pick_v_raw[ri],
-		        pick_v_slugs[ri], sizeof(pick_v_slugs[ri]));
-		e->nsel = pick_resolve(f->target, fields_hd,
-		        pick_v_slugs[ri], pick_v_sel_ids[ri],
-		        pick_v_sel_labels[ri], pick_v_sel[ri],
-		        PICK_VIEW_MAX_SEL);
+		pick_tokens_to_slugs(
+		        f->target, fields_hd, pick_v_raw[ri], pick_v_slugs[ri],
+		        sizeof(pick_v_slugs[ri]));
+		e->nsel = pick_resolve(
+		        f->target, fields_hd, pick_v_slugs[ri],
+		        pick_v_sel_ids[ri], pick_v_sel_labels[ri],
+		        pick_v_sel[ri], PICK_VIEW_MAX_SEL);
 		e->sel = pick_v_sel[ri];
 		ri++;
 	}
@@ -758,8 +785,8 @@ XY_IMPL(int, pick_view_collect,
 	const char **, vals_out,
 	pick_view_t *, pv)
 {
-	return pick_view_collect_impl(body, fields, vals_in, vals_out, pv,
-	        NULL);
+	return pick_view_collect_impl(
+	        body, fields, vals_in, vals_out, pv, NULL);
 }
 
 XY_IMPL(int, pick_view_collect_scoped,
@@ -770,11 +797,12 @@ XY_IMPL(int, pick_view_collect_scoped,
 	pick_view_t *, pv,
 	const char *, scope)
 {
-	return pick_view_collect_impl(body, fields, vals_in, vals_out, pv,
-	        scope);
+	return pick_view_collect_impl(
+	        body, fields, vals_in, vals_out, pv, scope);
 }
 
-static int pick_find_active_scope(const char *qs, char *scope_buf, size_t scope_sz)
+static int
+pick_find_active_scope(const char *qs, char *scope_buf, size_t scope_sz)
 {
 	return hyle_bud_pick_find_active_scope(qs, scope_buf, scope_sz);
 }
@@ -793,7 +821,8 @@ XY_IMPL(int, pick_view_collect_auto,
 		*active_scope_out = scope;
 
 	if (scope >= 0 && scope_str[0]) {
-		return pick_view_collect_scoped(body, fields, vals_in, vals_out, pv, scope_str);
+		return pick_view_collect_scoped(
+		        body, fields, vals_in, vals_out, pv, scope_str);
 	}
 	return pick_view_collect(body, fields, vals_in, vals_out, pv);
 }
@@ -825,7 +854,8 @@ XY_IMPL(int, pick_view_collect_auto_fd,
 	char qs[16384] = { 0 };
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	return pick_view_collect_auto(qs, fields, vals_in, vals_out, pv, active_scope_out);
+	return pick_view_collect_auto(
+	        qs, fields, vals_in, vals_out, pv, active_scope_out);
 }
 
 XY_IMPL(int, pick_view_collect_desc_values,
@@ -878,7 +908,8 @@ XY_IMPL(int, pick_view_collect_desc_values,
 	ff[n].target = NULL;
 	ff[n].max_inline = 0;
 
-	return pick_view_collect_auto((char *)qs, ff, vals_in, vals_out, pv, active_scope_out);
+	return pick_view_collect_auto(
+	        (char *)qs, ff, vals_in, vals_out, pv, active_scope_out);
 }
 
 XY_IMPL(int, pick_view_collect_desc_values_fd,
@@ -891,7 +922,8 @@ XY_IMPL(int, pick_view_collect_desc_values_fd,
 	char qs[16384] = { 0 };
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	return pick_view_collect_desc_values(qs, defs, record, pv, active_scope_out);
+	return pick_view_collect_desc_values(
+	        qs, defs, record, pv, active_scope_out);
 }
 
 XY_IMPL(int, pick_view_collect_desc,
@@ -900,7 +932,8 @@ XY_IMPL(int, pick_view_collect_desc,
 	pick_view_t *, pv,
 	int *, active_scope_out)
 {
-	return pick_view_collect_desc_values(qs, defs, NULL, pv, active_scope_out);
+	return pick_view_collect_desc_values(
+	        qs, defs, NULL, pv, active_scope_out);
 }
 
 XY_IMPL(int, pick_view_collect_desc_fd,

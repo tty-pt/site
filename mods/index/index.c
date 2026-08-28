@@ -423,7 +423,7 @@ XY_IMPL(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
 	axil_register_handler(
 	        buf, edit_get_handler ? edit_get_handler
-	                               : index_generic_edit_get_handler);
+	                              : index_generic_edit_get_handler);
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
 	axil_register_handler(
 	        buf, edit_post_handler ? edit_post_handler
@@ -489,19 +489,17 @@ static int index_add_get_handler(int fd, char *body)
 
 	pick_view_t pv;
 	int active_scope = -1;
-	pick_view_collect_desc_fd(
-	        fd, defs, &pv, &active_scope);
+	pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
-	        action, cancel_href, "Add", defs,
-	        NULL, csrf_token, &pv, NULL);
+	        action, cancel_href, "Add", defs, NULL, csrf_token, &pv, NULL);
 
 	return site_ui_respond_add_page(
 	        fd, user, module, site_ui_module_icon(module), form);
 }
 
-static int index_generic_edit_auth(
-        int fd, char *body, const item_ctx_t *ctx, void *user)
+static int
+index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
 	(void)user;
@@ -522,10 +520,8 @@ static int index_generic_edit_auth(
 	if (!record)
 		return server_error(fd, "OOM");
 
-	source_meta_read(
-	        ctx->item_path, defs, count, record, rec_sz);
-	source_resolve_meta_display(
-	        dataset_id, ctx->id, defs, count, record);
+	source_meta_read(ctx->item_path, defs, count, record, rec_sz);
+	source_resolve_meta_display(dataset_id, ctx->id, defs, count, record);
 
 	char title[256] = { 0 };
 	read_meta_file(ctx->item_path, "title", title, sizeof(title));
@@ -537,12 +533,11 @@ static int index_generic_edit_auth(
 
 	pick_view_t pv;
 	int active_scope = -1;
-	pick_view_collect_desc_fd(
-	        fd, defs, &pv, &active_scope);
+	pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
-	        action, cancel_href, "Save Changes", defs,
-	        record, csrf_token, &pv, NULL);
+	        action, cancel_href, "Save Changes", defs, record, csrf_token,
+	        &pv, NULL);
 
 	free(record);
 
@@ -712,12 +707,12 @@ XY_IMPL(uint32_t, index_module_init, const index_module_def_t *, def)
 
 	uint32_t rid = source_setup(
 	        dataset_id, def->key_field, def->record_size,
-	        def->items_path ? def->items_path : "",
-	        def->schema, def->field_count, def->flags, def->list_view);
+	        def->items_path ? def->items_path : "", def->schema,
+	        def->field_count, def->flags, def->list_view);
 
 	index_open(
-	        def->display_name ? def->display_name : def->name,
-	        dataset_id, NULL, NULL, NULL, NULL, NULL, NULL);
+	        def->display_name ? def->display_name : def->name, dataset_id,
+	        NULL, NULL, NULL, NULL, NULL, NULL);
 
 	register_standard_item_handlers(def->name, &def->handlers);
 

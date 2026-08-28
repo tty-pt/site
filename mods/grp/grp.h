@@ -16,9 +16,8 @@ typedef void (*rep_entry_cb)(
 
 /* Iterate over a group's complete merged repertoire:
  * Pinned rows (pinned=1 from grp.songs) are yielded first, followed by
- * derived rows tallied from the group's gigs (majority transpose, first-seen tie-breaker)
- * that are not already pinned.
- * Returns 0 on success.
+ * derived rows tallied from the group's gigs (majority transpose, first-seen
+ * tie-breaker) that are not already pinned. Returns 0 on success.
  */
 XY_DECL(int, rep_for_each_merged,
         const char *, grp_id,

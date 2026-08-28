@@ -162,8 +162,8 @@ char *site_ui_page(
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
-	        SITE_UI_FRAGMENTS_SCRIPT "\n"
+	        "\"user\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, state_title, state_path,
@@ -188,8 +188,8 @@ char *site_ui_page(
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\"}</script>\n%s\n%s\n"
-	        SITE_UI_FRAGMENTS_SCRIPT "\n"
+	        "\"user\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        title_esc, extra_head, module_attr, state_title, state_path,
@@ -200,8 +200,7 @@ char *site_ui_page(
 	return page;
 }
 
-char *
-site_ui_state_head(const char *json)
+char *site_ui_state_head(const char *json)
 {
 	size_t len;
 	char *head;
@@ -213,13 +212,13 @@ site_ui_state_head(const char *json)
 		return NULL;
 	snprintf(
 	        head, len,
-	        "<script type=\"application/json\" id=\"bud-state\">%s</script>",
+	        "<script type=\"application/json\" "
+	        "id=\"bud-state\">%s</script>",
 	        json);
 	return head;
 }
 
-int
-site_ui_respond_with_state(
+int site_ui_respond_with_state(
         int fd, const char *title, const char *path, const char *icon,
         const char *user, const char *state_json, const char *module,
         bud_node *body)

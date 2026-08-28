@@ -3,7 +3,8 @@
 
 #include <stddef.h>
 
-/* Neutral, framework-free list state — COMPLY.md §6.3. No axil/qmap/source/hyle/XY. */
+/* Neutral, framework-free list state — COMPLY.md §6.3. No
+ * axil/qmap/source/hyle/XY. */
 typedef struct {
 	char key[64];
 	char label[64];

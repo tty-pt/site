@@ -105,14 +105,14 @@ void xy_install(void)
 	xy_load("./mods/index/index");
 
 	index_module_init(&(index_module_def_t){
-		.name = "poem",
-		.display_name = "Poem",
-		.schema = poem_fields,
-		.field_count = POEM_FIELD_COUNT,
-		.record_size = sizeof(poem_cache_t),
-		.items_path = "var/poem",
-		.list_view = &poem_list_view,
-		.handlers = { .detail = poem_detail_handler },
+	        .name = "poem",
+	        .display_name = "Poem",
+	        .schema = poem_fields,
+	        .field_count = POEM_FIELD_COUNT,
+	        .record_size = sizeof(poem_cache_t),
+	        .items_path = "var/poem",
+	        .list_view = &poem_list_view,
+	        .handlers = { .detail = poem_detail_handler },
 	});
 
 	axil_register_handler("GET:/poem/:id/pt_PT.html", poem_body_handler);

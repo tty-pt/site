@@ -90,11 +90,12 @@ static bud_node *ch_render_song_row(
 		bud_node *set_form = site_ui_action_form(
 		        key_action, csrf_token, "POST", key_sel, "Set",
 		        "btn text-xs py-1 px-2");
-		bud_node *rem_form = pinned
-		        ? site_ui_action_form(
-		                  rem_action, csrf_token, "POST", NULL,
-		                  "Remove", "btn btn-danger text-xs py-1 px-2")
-		        : NULL;
+		bud_node *rem_form =
+		        pinned ? site_ui_action_form(
+		                         rem_action, csrf_token, "POST", NULL,
+		                         "Remove",
+		                         "btn btn-danger text-xs py-1 px-2")
+		               : NULL;
 
 		controls = lx_el("div", lx_attr("class", "flex gap-2"),
 		                 lx_node(set_form),
@@ -251,8 +252,7 @@ ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 	if (form)
 		bud_append(frag, form);
 	post = lx_el("form", lx_attr("id", "ch-pick-post"),
-	             lx_attr("method", "post"),
-	             lx_attr("action", add_action),
+	             lx_attr("method", "post"), lx_attr("action", add_action),
 	             lx_el("input", lx_attr("type", "hidden"),
 	                   lx_attr("name", "csrf_token"),
 	                   lx_attr("value", csrf_token)))

@@ -182,7 +182,8 @@ XY_IMPL(int, user_pref_read,
 	char s[PATH_MAX], p[PATH_MAX];
 	char *c;
 
-	if (!username || !username[0] || !name || !name[0] || !out || out_sz == 0)
+	if (!username || !username[0] || !name || !name[0] || !out ||
+	    out_sz == 0)
 		return -1;
 
 	snprintf(s, sizeof(s), ".tty/%s", name);

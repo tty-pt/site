@@ -415,14 +415,21 @@ int on_auth_login_error(
 			char uri[512] = { 0 };
 			char qs[256] = { 0 };
 			axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
-			if (uri[0] == '/' && strncmp(uri, "/auth/login", 11) != 0 &&
+			if (uri[0] == '/' &&
+			    strncmp(uri, "/auth/login", 11) != 0 &&
 			    strncmp(uri, "/auth/logout", 12) != 0 &&
-			    strncmp(uri, "/auth/register", 14) != 0) {
-				axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+			    strncmp(uri, "/auth/register", 14) != 0)
+			{
+				axil_env_get(
+				        fd, qs, sizeof(qs), "QUERY_STRING");
 				if (qs[0]) {
-					snprintf(full_target, sizeof(full_target), "%s?%s", uri, qs);
+					snprintf(
+					        full_target,
+					        sizeof(full_target), "%s?%s",
+					        uri, qs);
 				} else {
-					strncpy(full_target, uri, sizeof(full_target) - 1);
+					strncpy(full_target, uri,
+					        sizeof(full_target) - 1);
 				}
 				target = full_target;
 			}
@@ -509,7 +516,8 @@ static int register_get_handler(int fd, char *body)
 
 void xy_install(void)
 {
-	/* removed xy_load("./mods/index/index") to break auth↔index cycle; auth is independent but depends on common */
+	/* removed xy_load("./mods/index/index") to break auth↔index cycle; auth
+	 * is independent but depends on common */
 	xy_load("./mods/common/common");
 	xy_load("libaxil-auth"); /* external — not in ./mods */
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);

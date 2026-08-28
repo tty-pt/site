@@ -28,10 +28,9 @@ static void toggle_media(void)
 	extern void bud_patch_innerhtml(unsigned int node_id, const char *html);
 	char html[8192];
 	site_ui_build_media_html(
-	        app_state.cache.yt, app_state.cache.audio,
-	        app_state.cache.pdf, html, sizeof(html));
-	bud_patch_innerhtml(
-	        bud_node_id(g_media_node), html[0] ? html : "");
+	        app_state.cache.yt, app_state.cache.audio, app_state.cache.pdf,
+	        html, sizeof(html));
+	bud_patch_innerhtml(bud_node_id(g_media_node), html[0] ? html : "");
 }
 
 extern void wasm_mark_dirty(void);
@@ -90,10 +89,8 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 void wasm_init(const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
-	hyle_bud_state_apply_len(
-	        &app_state.cache, song_fields, json, jlen);
-	bud_state_apply_len(
-	        &app_state, song_app_fields, json, jlen);
+	hyle_bud_state_apply_len(&app_state.cache, song_fields, json, jlen);
+	bud_state_apply_len(&app_state, song_app_fields, json, jlen);
 }
 
 /* ── Page builder helpers ──────────────────────────── */
@@ -182,24 +179,24 @@ static void render_chord_viewer(void)
 	char owner_val[2] = { app_state.is_owner ? '1' : '0', '\0' };
 
 	bud_node *media_slot = site_ui_render_media_slot(
-	        app_state.cache.yt, app_state.cache.audio,
-	        app_state.cache.pdf);
+	        app_state.cache.yt, app_state.cache.audio, app_state.cache.pdf);
 
-	g_media_node =
-	        lx_el("div",
-	              lx_attr("class",
-	                      "flex justify-end items-center gap-2 flex-shrink-0 ml-auto"),
-	              lx_attr("data-song-media", "1"),
-	              media_slot ? lx_node(media_slot) : lx_none())
-	                .data.node;
+	g_media_node = lx_el("div",
+	                     lx_attr("class", "flex justify-end items-center "
+	                                      "gap-2 flex-shrink-0 ml-auto"),
+	                     lx_attr("data-song-media", "1"),
+	                     media_slot ? lx_node(media_slot) : lx_none())
+	                       .data.node;
 
-	/* Detail body with type/author on the left and media buttons on the right */
+	/* Detail body with type/author on the left and media buttons on the
+	 * right */
 	bud_node *left_meta =
 	        lx_el("div", lx_attr("class", "flex flex-col gap-1 min-w-0"),
 	              app_state.cache.type[0]
 	                      ? lx_el("div",
 	                              lx_attr("class",
-	                                      "italic whitespace-pre-wrap text-xs "
+	                                      "italic whitespace-pre-wrap "
+	                                      "text-xs "
 	                                      "text-muted"),
 	                              lx_text(app_state.cache.type))
 	                      : lx_none(),

@@ -450,6 +450,7 @@ XY_MODULE_API void xy_install(void)
 	 * REPLACES and the last part silently wins. With it, parts
 	 * accumulate while qmap_get keeps returning the first match, so
 	 * every single-part reader behaves exactly as before. */
-	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF,
+	mpfd_db = qmap_open(
+	        NULL, NULL, QM_STR, mpfd_val_type, 0xFF,
 	        QM_SORTED | QM_MULTIVALUE);
 }

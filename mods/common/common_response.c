@@ -197,14 +197,18 @@ XY_IMPL(int, site_ui_respond_item_detail,
 		return server_error(fd, "Invalid detail context");
 
 	is_owner = (ctx->username && ctx->username[0])
-	        ? item_owner_check(ctx->item_path, ctx->username)
-	        : 0;
+	                   ? item_owner_check(ctx->item_path, ctx->username)
+	                   : 0;
 
 	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
 	if (title && title[0])
-		snprintf(page_title, sizeof(page_title), "%s: %s", module, title);
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        title);
 	else
-		snprintf(page_title, sizeof(page_title), "%s: %s", module, ctx->id);
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        ctx->id);
 
 	layout = site_ui_layout(
 	        page_title, path, site_ui_module_icon(module), ctx->username,
@@ -243,8 +247,8 @@ XY_IMPL(int, site_ui_respond_form_page,
 	        user, title, action, icon, NULL, SITE_UI_FRAGMENTS_SCRIPT,
 	        form);
 	return site_ui_respond_page(
-	        fd, title, action, icon, user, SITE_UI_FRAGMENTS_SCRIPT,
-	        module, page);
+	        fd, title, action, icon, user, SITE_UI_FRAGMENTS_SCRIPT, module,
+	        page);
 }
 
 XY_IMPL(int, csrf_check_mpfd, int, fd)

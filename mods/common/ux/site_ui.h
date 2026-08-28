@@ -15,9 +15,9 @@
 #ifndef SITE_FRAGMENTS_V
 #define SITE_FRAGMENTS_V "?v=1"
 #endif
-#define SITE_UI_FRAGMENTS_SCRIPT \
-	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V \
-	"\"></script>"
+#define SITE_UI_FRAGMENTS_SCRIPT                                               \
+	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V "\"></"      \
+	                                                          "script>"
 
 char *site_ui_page(
         const char *title, const char *path, const char *icon, const char *user,
@@ -74,10 +74,10 @@ void login_href(const char *ret, char *buf, size_t len);
 typedef struct {
 	const char *name;
 	const char *label;
-	int type;                /* 0=text, 1=textarea, 2=file */
-	int ref;                 /* FF_REF_NONE | SINGLE | MULTI */
-	const char *target;      /* dataset id when ref != FF_REF_NONE */
-	int max_inline;          /* 0 = default FF_PICKER_THRESHOLD */
+	int type;           /* 0=text, 1=textarea, 2=file */
+	int ref;            /* FF_REF_NONE | SINGLE | MULTI */
+	const char *target; /* dataset id when ref != FF_REF_NONE */
+	int max_inline;     /* 0 = default FF_PICKER_THRESHOLD */
 } form_field_t;
 
 /* ── Omnisearch picker view (filled native-side by index's
@@ -100,9 +100,9 @@ bud_node *site_ui_picker(
         const char *csrf_token, const pick_view_t *pv, int auto_submit);
 
 bud_node *site_ui_row_replace_picker(
-        const char *target, int row_idx, const char *cur_id, const char *cur_title,
-        const char *post_action, const char *back_href, const char *csrf_token,
-        const pick_view_t *pv);
+        const char *target, int row_idx, const char *cur_id,
+        const char *cur_title, const char *post_action, const char *back_href,
+        const char *csrf_token, const pick_view_t *pv);
 
 /* ── Reusable Action Form & Item Row Primitives ─────────── */
 bud_node *site_ui_action_form(
@@ -123,8 +123,8 @@ bud_node *site_ui_form_fields(
  * runtime threshold (inline select/grid below, picker above). pv may
  * be NULL (no picker data — ref fields degrade to text inputs). */
 bud_node *site_ui_form_fields_ex(
-        const form_field_t *fields, const char **values,
-        const char *csrf_token, const pick_view_t *pv);
+        const form_field_t *fields, const char **values, const char *csrf_token,
+        const pick_view_t *pv);
 
 /* Sibling GET form for no-JS draft round-trips (search/paging controls
  * bind to it via the HTML5 form= attribute): hidden mirrors of every
@@ -133,8 +133,8 @@ bud_node *site_ui_form_fields_ex(
  * form. Tracks the ~2KB query-string budget; mirrors beyond it are
  * dropped (degrades to saved-state behavior). */
 bud_node *site_ui_sibling_get_form(
-        const char *action, const form_field_t *fields,
-        const char **values, const pick_view_t *pv);
+        const char *action, const form_field_t *fields, const char **values,
+        const pick_view_t *pv);
 
 /* Name key of the page's first ref field (used to derive the shared
  * sibling GET form id "pickq-<key>"); NULL when the descriptor has no
@@ -147,33 +147,37 @@ const char *site_ui_pick_form_id(const form_field_t *fields);
 bud_node *site_ui_form_from_desc(
         const char *action, const char *cancel_href, const char *submit_label,
         const hyle_schema_desc_t *desc, const void *struct_ptr,
-        const char *csrf_token, const pick_view_t *pv,
-        const char *vstr_val);
+        const char *csrf_token, const pick_view_t *pv, const char *vstr_val);
 
 /* ── Action / Standalone Picker Component ───────────── */
 typedef struct {
-	const char *key;           /* field name, e.g. "song_id" */
-	const char *label;         /* field label, e.g. "Song:" */
-	const char *target;        /* target dataset, e.g. "song.items" */
-	const char *default_id;    /* optional pre-selected default value ID */
-	const char *default_label; /* optional pre-selected default value label */
-	const char *get_action;    /* action URL for sibling GET form */
-	const char *post_action;   /* action URL for POST form */
-	const char *form_id;       /* POST form ID, default "pick-post" */
-	const char *csrf_token;    /* CSRF token for POST form */
-	const char *submit_label;  /* submit button text, default "Add" */
-	const char *hint;          /* optional hint text above picker */
-	const char *cancel_href;   /* optional cancel link href */
-	const char *cancel_label;  /* optional cancel link label */
-	const char *header_text;   /* optional header text above picker */
-	const char *scope;         /* scope suffix, e.g. "0" for pick_q_<key>__0 */
-	int auto_submit;           /* 1 = auto-submit on radio change when scripts active */
-	const char *search_param;  /* custom search input name; NULL defaults to "pick_q_<key>" */
-	const char *page_param;    /* custom page input name; NULL defaults to "pick_page_<key>" */
-	const char **pref_names;   /* optional extra GET input names */
-	const int *pref_vals;      /* optional extra GET input integer values */
-	int n_prefs;               /* number of pref entries */
-	bud_node *extra_post_inputs; /* optional extra hidden inputs for POST form */
+	const char *key;        /* field name, e.g. "song_id" */
+	const char *label;      /* field label, e.g. "Song:" */
+	const char *target;     /* target dataset, e.g. "song.items" */
+	const char *default_id; /* optional pre-selected default value ID */
+	const char
+	        *default_label;  /* optional pre-selected default value label */
+	const char *get_action;  /* action URL for sibling GET form */
+	const char *post_action; /* action URL for POST form */
+	const char *form_id;     /* POST form ID, default "pick-post" */
+	const char *csrf_token;  /* CSRF token for POST form */
+	const char *submit_label; /* submit button text, default "Add" */
+	const char *hint;         /* optional hint text above picker */
+	const char *cancel_href;  /* optional cancel link href */
+	const char *cancel_label; /* optional cancel link label */
+	const char *header_text;  /* optional header text above picker */
+	const char *scope; /* scope suffix, e.g. "0" for pick_q_<key>__0 */
+	int auto_submit; /* 1 = auto-submit on radio change when scripts active
+	                  */
+	const char *search_param; /* custom search input name; NULL defaults to
+	                             "pick_q_<key>" */
+	const char *page_param;   /* custom page input name; NULL defaults to
+	                             "pick_page_<key>" */
+	const char **pref_names;  /* optional extra GET input names */
+	const int *pref_vals;     /* optional extra GET input integer values */
+	int n_prefs;              /* number of pref entries */
+	bud_node *extra_post_inputs; /* optional extra hidden inputs for POST
+	                                form */
 } site_ui_action_picker_spec_t;
 
 bud_node *site_ui_action_picker(
@@ -185,10 +189,9 @@ bud_node *site_ui_action_picker(
 typedef hyle_bud_picker_buffer_t site_ui_picker_buffer_t;
 
 void site_ui_picker_state_from_json(
-        const char *json, size_t jlen,
-        const char *key, const char *target, int multi,
-        const char *q, int page,
-        site_ui_picker_buffer_t *buf, pick_view_t *pv_out);
+        const char *json, size_t jlen, const char *key, const char *target,
+        int multi, const char *q, int page, site_ui_picker_buffer_t *buf,
+        pick_view_t *pv_out);
 
 #ifndef __wasm__
 struct json_object;

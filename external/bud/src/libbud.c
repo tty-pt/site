@@ -923,8 +923,7 @@ static int bud_is_valid_name(const char *name)
 	if (!name || !name[0])
 		return 0;
 	if (!((name[0] >= 'a' && name[0] <= 'z') ||
-	      (name[0] >= 'A' && name[0] <= 'Z') ||
-	      name[0] == '_'))
+	      (name[0] >= 'A' && name[0] <= 'Z') || name[0] == '_'))
 		return 0;
 	for (p = name + 1; *p; p++) {
 		char c = *p;
@@ -943,7 +942,9 @@ int bud_set_attr(bud_node *node, const char *name, const char *value)
 	char *name_copy;
 	char *value_copy;
 
-	if (!node || node->kind != BUD_NODE_ELEMENT || !name || !bud_is_valid_name(name)) {
+	if (!node || node->kind != BUD_NODE_ELEMENT || !name ||
+	    !bud_is_valid_name(name))
+	{
 		return -1;
 	}
 
@@ -2377,13 +2378,12 @@ bud_node *bud_frag_impl(size_t count, const bud_arg *args)
 
 #define BUD_JSON_MAX_TOKS 512
 
-static int bud__jsoneq(
-        const char *js, const jsmntok_t *tok, const char *s)
+static int bud__jsoneq(const char *js, const jsmntok_t *tok, const char *s)
 {
 	size_t slen = strlen(s);
 	return tok->type == JSMN_STRING &&
-	    (size_t)(tok->end - tok->start) == slen &&
-	    strncmp(js + tok->start, s, slen) == 0;
+	       (size_t)(tok->end - tok->start) == slen &&
+	       strncmp(js + tok->start, s, slen) == 0;
 }
 
 static int bud__hex_val(char c)
@@ -2398,8 +2398,8 @@ static int bud__hex_val(char c)
 }
 
 /* Unescape a jsmn string slice (without outer quotes) into out. */
-static void bud__unescape_slice(
-        const char *src, size_t slen, char *out, size_t out_sz)
+static void
+bud__unescape_slice(const char *src, size_t slen, char *out, size_t out_sz)
 {
 	size_t i = 0;
 	size_t o = 0;
@@ -2450,42 +2450,40 @@ static void bud__unescape_slice(
 					int h1 = bud__hex_val(src[i + 3]);
 					int h2 = bud__hex_val(src[i + 4]);
 					int h3 = bud__hex_val(src[i + 5]);
-					if (h0 >= 0 && h1 >= 0 &&
-					    h2 >= 0 && h3 >= 0) {
+					if (h0 >= 0 && h1 >= 0 && h2 >= 0 &&
+					    h3 >= 0)
+					{
 						unsigned cp =
-						    (unsigned)(
-						        (h0 << 12) |
-						        (h1 << 8) |
-						        (h2 << 4) | h3);
+						        (unsigned)((h0 << 12) |
+						                   (h1 << 8) |
+						                   (h2 << 4) |
+						                   h3);
 						if (cp < 0x80) {
-							out[o++] =
-							    (char)cp;
+							out[o++] = (char)cp;
 						} else if (
-						    cp < 0x800 &&
-						    o + 2 < out_sz) {
+						        cp < 0x800 &&
+						        o + 2 < out_sz)
+						{
+							out[o++] = (char)(0xC0 |
+							                  (cp >>
+							                   6));
 							out[o++] =
-							    (char)(0xC0 |
-							           (cp >>
-							            6));
+							        (char)(0x80 |
+							               (cp &
+							                0x3F));
+						} else if (o + 3 < out_sz) {
+							out[o++] = (char)(0xE0 |
+							                  (cp >>
+							                   12));
 							out[o++] =
-							    (char)(0x80 |
-							           (cp &
-							            0x3F));
-						} else if (
-						    o + 3 < out_sz) {
+							        (char)(0x80 |
+							               ((cp >>
+							                 6) &
+							                0x3F));
 							out[o++] =
-							    (char)(0xE0 |
-							           (cp >>
-							            12));
-							out[o++] =
-							    (char)(0x80 |
-							           ((cp >>
-							             6) &
-							            0x3F));
-							out[o++] =
-							    (char)(0x80 |
-							           (cp &
-							            0x3F));
+							        (char)(0x80 |
+							               (cp &
+							                0x3F));
 						}
 						i += 5;
 						break;
@@ -2507,9 +2505,8 @@ static void bud__unescape_slice(
 }
 
 static int bud__parse_tokens(
-        const char *js, size_t len, jsmntok_t *stack_buf,
-        unsigned stack_n, jsmntok_t **out_toks, unsigned *out_ntoks,
-        jsmntok_t **heap_toks)
+        const char *js, size_t len, jsmntok_t *stack_buf, unsigned stack_n,
+        jsmntok_t **out_toks, unsigned *out_ntoks, jsmntok_t **heap_toks)
 {
 	jsmn_parser p;
 	int r;
@@ -2526,7 +2523,7 @@ static int bud__parse_tokens(
 		unsigned cap = stack_n * 2;
 		while (cap < 8192) {
 			jsmntok_t *heap =
-			    (jsmntok_t *)malloc(cap * sizeof(jsmntok_t));
+			        (jsmntok_t *)malloc(cap * sizeof(jsmntok_t));
 			if (!heap)
 				return JSMN_ERROR_NOMEM;
 			jsmn_init(&p);
@@ -2606,15 +2603,14 @@ void bud_json_str_len(
 		jsmntok_t *vt = &toks[vidx];
 		if (vt->type == JSMN_STRING) {
 			bud__unescape_slice(
-			        json + vt->start,
-			        (size_t)(vt->end - vt->start), out, out_size);
+			        json + vt->start, (size_t)(vt->end - vt->start),
+			        out, out_size);
 		} else if (vt->type == JSMN_PRIMITIVE) {
 			size_t slen = (size_t)(vt->end - vt->start);
 			size_t n = slen < out_size - 1 ? slen : out_size - 1;
 			memcpy(out, json + vt->start, n);
 			out[n] = '\0';
-		} else if (
-		    vt->type == JSMN_OBJECT || vt->type == JSMN_ARRAY) {
+		} else if (vt->type == JSMN_OBJECT || vt->type == JSMN_ARRAY) {
 			size_t slen = (size_t)(vt->end - vt->start);
 			size_t n = slen < out_size - 1 ? slen : out_size - 1;
 			memcpy(out, json + vt->start, n);
@@ -2753,13 +2749,15 @@ int bud_json_array_for_each_len(
 			if (toks[idx].start > 0 &&
 			    json[toks[idx].start - 1] == '"' &&
 			    (size_t)toks[idx].end < len &&
-			    json[toks[idx].end] == '"') {
+			    json[toks[idx].end] == '"')
+			{
 				elem = json + toks[idx].start - 1;
 				elen += 2;
 			}
 		} else if (
-		    toks[idx].type == JSMN_OBJECT ||
-		    toks[idx].type == JSMN_ARRAY) {
+		        toks[idx].type == JSMN_OBJECT ||
+		        toks[idx].type == JSMN_ARRAY)
+		{
 			elem = json + toks[idx].start;
 			elen = (size_t)(toks[idx].end - toks[idx].start);
 		}
@@ -2833,13 +2831,15 @@ int bud_json_array_for_each_key_len(
 			if (toks[idx].start > 0 &&
 			    json[toks[idx].start - 1] == '"' &&
 			    (size_t)toks[idx].end < len &&
-			    json[toks[idx].end] == '"') {
+			    json[toks[idx].end] == '"')
+			{
 				elem = json + toks[idx].start - 1;
 				elen += 2;
 			}
 		} else if (
-		    toks[idx].type == JSMN_OBJECT ||
-		    toks[idx].type == JSMN_ARRAY) {
+		        toks[idx].type == JSMN_OBJECT ||
+		        toks[idx].type == JSMN_ARRAY)
+		{
 			elem = json + toks[idx].start;
 			elen = (size_t)(toks[idx].end - toks[idx].start);
 		}
@@ -2887,7 +2887,7 @@ void bud_state_apply_stride_len(
 			free(heap);
 		return;
 	}
-	for (const char *p = (const char *)fields; ; p += field_stride) {
+	for (const char *p = (const char *)fields;; p += field_stride) {
 		const bud_field_desc_t *f = (const bud_field_desc_t *)p;
 		if (!f->key)
 			break;
@@ -2903,15 +2903,15 @@ void bud_state_apply_stride_len(
 			size_t slen = (size_t)(vt->end - vt->start);
 			char buf[64];
 			size_t n =
-			    slen < sizeof(buf) - 1 ? slen : sizeof(buf) - 1;
+			        slen < sizeof(buf) - 1 ? slen : sizeof(buf) - 1;
 			char *end = NULL;
 			long v;
 			memcpy(buf, s, n);
 			buf[n] = '\0';
 			if (vt->type == JSMN_STRING) {
 				char *pstr = buf;
-				while (*pstr &&
-				       (*pstr < '0' || *pstr > '9') && *pstr != '-')
+				while (*pstr && (*pstr < '0' || *pstr > '9') &&
+				       *pstr != '-')
 					pstr++;
 				if (!*pstr)
 					continue;
@@ -2931,19 +2931,18 @@ void bud_state_apply_stride_len(
 				        (size_t)(vt->end - vt->start), dest,
 				        f->size);
 			} else if (vt->type == JSMN_PRIMITIVE) {
-				size_t slen =
-				    (size_t)(vt->end - vt->start);
+				size_t slen = (size_t)(vt->end - vt->start);
 				size_t n =
-				    slen < f->size - 1 ? slen : f->size - 1;
+				        slen < f->size - 1 ? slen : f->size - 1;
 				memcpy(dest, json + vt->start, n);
 				dest[n] = '\0';
 			} else if (
-			    vt->type == JSMN_OBJECT ||
-			    vt->type == JSMN_ARRAY) {
-				size_t slen =
-				    (size_t)(vt->end - vt->start);
+			        vt->type == JSMN_OBJECT ||
+			        vt->type == JSMN_ARRAY)
+			{
+				size_t slen = (size_t)(vt->end - vt->start);
 				size_t n =
-				    slen < f->size - 1 ? slen : f->size - 1;
+				        slen < f->size - 1 ? slen : f->size - 1;
 				memcpy(dest, json + vt->start, n);
 				dest[n] = '\0';
 			}
@@ -2993,14 +2992,15 @@ static void apply_array_cb(const char *elem, size_t len, void *user)
 		return;
 	dest = ctx->array_out + (ctx->count * ctx->elem_size);
 	memset(dest, 0, ctx->elem_size);
-	bud_state_apply_stride_len(dest, ctx->schema, ctx->schema_stride, elem, len);
+	bud_state_apply_stride_len(
+	        dest, ctx->schema, ctx->schema_stride, elem, len);
 	ctx->count++;
 }
 
 void bud_state_apply_array_stride_len(
         const char *json, size_t len, const char *key, void *array_out,
-        size_t elem_size, int *count_out, int max_elems,
-        const void *schema, size_t schema_stride)
+        size_t elem_size, int *count_out, int max_elems, const void *schema,
+        size_t schema_stride)
 {
 	jsmntok_t stack[BUD_JSON_MAX_TOKS];
 	jsmntok_t *toks = NULL;
@@ -3051,15 +3051,17 @@ void bud_state_apply_array_stride_len(
 			elem = json + toks[idx].start;
 			elen = (size_t)(toks[idx].end - toks[idx].start);
 			if (toks[idx].type == JSMN_OBJECT ||
-			    toks[idx].type == JSMN_ARRAY) {
+			    toks[idx].type == JSMN_ARRAY)
+			{
 				elem = json + toks[idx].start;
-				elen = (size_t)(
-				        toks[idx].end - toks[idx].start);
+				elen = (size_t)(toks[idx].end -
+				                toks[idx].start);
 			} else if (toks[idx].type == JSMN_STRING) {
 				if (toks[idx].start > 0 &&
 				    json[toks[idx].start - 1] == '"' &&
 				    (size_t)toks[idx].end < len &&
-				    json[toks[idx].end] == '"') {
+				    json[toks[idx].end] == '"')
+				{
 					elem = json + toks[idx].start - 1;
 					elen += 2;
 				}
@@ -3068,8 +3070,7 @@ void bud_state_apply_array_stride_len(
 			(void)arr_len;
 			apply_array_cb(elem, elen, &ctx);
 			next = idx + 1;
-			while (next < ntoks &&
-			       toks[next].start != -1 &&
+			while (next < ntoks && toks[next].start != -1 &&
 			       toks[next].start < toks[idx].end)
 				next++;
 			idx = next;

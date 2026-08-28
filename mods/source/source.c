@@ -87,7 +87,8 @@ XY_IMPL(int, source_refresh_row,
 	return hyle_source_refresh_row(fd, dataset_id, id);
 }
 
-static int get_single_field_cb(const char *name, char *buf, size_t sz, void *user)
+static int
+get_single_field_cb(const char *name, char *buf, size_t sz, void *user)
 {
 	(void)user;
 	int fld_len = mpfd_len(name);
@@ -95,7 +96,8 @@ static int get_single_field_cb(const char *name, char *buf, size_t sz, void *use
 		if (!buf || sz == 0) {
 			char tmp[1024];
 			int rl = axil_query_param(name, tmp, sizeof(tmp));
-			return (rl > 0 && rl < (int)(sizeof(tmp) - 1)) ? rl : -1;
+			return (rl > 0 && rl < (int)(sizeof(tmp) - 1)) ? rl
+			                                               : -1;
 		}
 		return axil_query_param(name, buf, sz);
 	}
@@ -104,7 +106,8 @@ static int get_single_field_cb(const char *name, char *buf, size_t sz, void *use
 	return mpfd_get(name, buf, sz);
 }
 
-static int get_multi_field_cb(const char *name, char *buf, size_t sz, void *user)
+static int
+get_multi_field_cb(const char *name, char *buf, size_t sz, void *user)
 {
 	(void)user;
 	return mpfd_get_all(name, buf, sz);

@@ -76,8 +76,7 @@ static int rep_row_find(rep_row_t *rows, int n_rows, const char *song_id)
 	return -1;
 }
 
-static int rep_collect_merged(
-        const char *grp_id, rep_row_t *rows, int max_rows)
+static int rep_collect_merged(const char *grp_id, rep_row_t *rows, int max_rows)
 {
 	source_def_t *sb_def;
 	unsigned rfhd, gfhd;
@@ -157,7 +156,8 @@ static int rep_collect_merged(
 					sid = qmap_field_get(gfhd, k, "song");
 					if (!sid)
 						continue;
-					ti = rep_tally_find(tally, n_tally, sid);
+					ti = rep_tally_find(
+					        tally, n_tally, sid);
 					if (ti < 0) {
 						if (n_tally >= REP_MAX_SONGS)
 							break;
@@ -165,8 +165,9 @@ static int rep_collect_merged(
 						t = &tally[ti];
 						memset(t, 0, sizeof(*t));
 						snprintf(
-						        t->song, sizeof(t->song),
-						        "%s", sid);
+						        t->song,
+						        sizeof(t->song), "%s",
+						        sid);
 						fm = qmap_field_get(
 						        gfhd, k, "format");
 						snprintf(
@@ -184,7 +185,8 @@ static int rep_collect_merged(
 		}
 	}
 
-	/* Append derived rows in tally order (first-seen), resolving majority key */
+	/* Append derived rows in tally order (first-seen), resolving majority
+	 * key */
 	for (int i = 0; i < n_tally && n_rows < max_rows; i++) {
 		rep_tally_t *t = &tally[i];
 		int best = 0;
@@ -289,7 +291,8 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 		want[n_want++] = cur[i];
 	}
 
-	/* Compare-before-write: if stored partition already matches want exactly, done */
+	/* Compare-before-write: if stored partition already matches want
+	 * exactly, done */
 	changed = (n_want != n_cur);
 	for (int i = 0; !changed && i < n_want; i++) {
 		if (want[i].pinned != cur[i].pinned ||
@@ -391,19 +394,23 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		hyle_source_put("grp.songs", key, names, vals, 2);
 		hyle_source_ordered_save("grp.songs", ctx->id);
 	} else {
-		/* Song was derived, not yet in grp.songs: pin it with the chosen key */
+		/* Song was derived, not yet in grp.songs: pin it with the
+		 * chosen key */
 		char fmt[64] = "any";
 		rep_row_t rows[REP_MAX_SONGS];
 		int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
 		for (int i = 0; i < n_rows; i++) {
 			if (strcmp(rows[i].song, ctx->song_id) == 0) {
-				snprintf(fmt, sizeof(fmt), "%s", rows[i].format);
+				snprintf(
+				        fmt, sizeof(fmt), "%s", rows[i].format);
 				break;
 			}
 		}
-		const char *names[] = { "song", "transpose", "format", "pinned" };
+		const char *names[] = { "song", "transpose", "format",
+			                "pinned" };
 		const char *vals[] = { ctx->song_id, k_s, fmt, "1" };
-		hyle_source_ordered_append("grp.songs", ctx->id, names, vals, 4);
+		hyle_source_ordered_append(
+		        "grp.songs", ctx->id, names, vals, 4);
 		hyle_source_ordered_save("grp.songs", ctx->id);
 	}
 
@@ -515,7 +522,8 @@ static void ch_load_rep_cb(
 
 	const char *st = song_id;
 	if (ctx->sf_hd) {
-		const char *s = qmap_get_field_str(ctx->sf_hd, song_id, "title");
+		const char *s =
+		        qmap_get_field_str(ctx->sf_hd, song_id, "title");
 		if (s)
 			st = s;
 	}
@@ -529,15 +537,15 @@ static void ch_load_rep_cb(
 	        e->song_href, sizeof(e->song_href), "/grp/%s/song/%s",
 	        ctx->grp_id, song_id);
 	snprintf(
-	        e->key_label, sizeof(e->key_label),
-	        "%s \xe2\x80\xa2 Key: %s%s", format ? format : "any", tg,
+	        e->key_label, sizeof(e->key_label), "%s \xe2\x80\xa2 Key: %s%s",
+	        format ? format : "any", tg,
 	        pinned ? " \xe2\x80\xa2 pinned" : "");
 	e->orig_key = ok;
 	e->transpose = transpose;
 	e->pinned = pinned;
 	snprintf(
-	        e->key_action, sizeof(e->key_action),
-	        "/api/grp/%s/song/%s/key", ctx->grp_id, song_id);
+	        e->key_action, sizeof(e->key_action), "/api/grp/%s/song/%s/key",
+	        ctx->grp_id, song_id);
 	snprintf(
 	        e->rem_action, sizeof(e->rem_action),
 	        "/api/grp/%s/song/%s/remove", ctx->grp_id, song_id);
@@ -621,12 +629,11 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	sf_hd = source_get_fields_hd("song.items");
 	if (sf_hd) {
-		ch_load_repertoire(
-		        ctx->id, sf_hd, repertoire, &n_repertoire);
+		ch_load_repertoire(ctx->id, sf_hd, repertoire, &n_repertoire);
 		bud_append(
 		        body_frag, ch_render_repertoire_section(
-		                           repertoire, n_repertoire,
-		                           is_owner, csrf_token));
+		                           repertoire, n_repertoire, is_owner,
+		                           csrf_token));
 	}
 
 	if (is_owner) {

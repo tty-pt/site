@@ -1398,25 +1398,26 @@ TEST(model_slash_bass)
 
 TEST(lyrics_extraction_from_song)
 {
-	const char *chart =
-		"% Intro\n"
-		"C G Am F\n"
-		"Amazing Grace, how sweet the sound\n"
-		"C G\n"
-		"That saved a wretch like me\n"
-		"|: Dm7 G7 :|\n"
-		"I once was lost but now am found\n";
+	const char *chart = "% Intro\n"
+	                    "C G Am F\n"
+	                    "Amazing Grace, how sweet the sound\n"
+	                    "C G\n"
+	                    "That saved a wretch like me\n"
+	                    "|: Dm7 G7 :|\n"
+	                    "I once was lost but now am found\n";
 
-	transp_song_t song = {0};
+	transp_song_t song = { 0 };
 	int key = -1;
 	assert(transp_song_parse(chart, &song, &key) == 0);
 	assert(song.nlines > 0);
 
-	char lyrics[1024] = {0};
+	char lyrics[1024] = { 0 };
 	size_t pos = 0;
 	for (size_t i = 0; i < song.nlines; i++) {
 		transp_pline_t *pl = &song.lines[i];
-		if (!pl->is_chord_line && !pl->is_comment && !pl->is_empty && pl->len > 0) {
+		if (!pl->is_chord_line && !pl->is_comment && !pl->is_empty &&
+		    pl->len > 0)
+		{
 			if (pos + pl->len + 1 < sizeof(lyrics)) {
 				memcpy(lyrics + pos, pl->text, pl->len);
 				pos += pl->len;
@@ -1424,7 +1425,8 @@ TEST(lyrics_extraction_from_song)
 			}
 		}
 	}
-	if (pos > 0) pos--;
+	if (pos > 0)
+		pos--;
 	lyrics[pos] = '\0';
 
 	assert(str_contains(lyrics, "Amazing Grace, how sweet the sound"));

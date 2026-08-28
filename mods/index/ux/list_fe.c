@@ -19,8 +19,7 @@ static list_state_t g_state = { 0 };
 
 void wasm_init(const char *json, int len)
 {
-	list_state_from_json_len(
-	        &g_state, json, len >= 0 ? (size_t)len : 0);
+	list_state_from_json_len(&g_state, json, len >= 0 ? (size_t)len : 0);
 }
 
 bud_node *bud_app_render(void)

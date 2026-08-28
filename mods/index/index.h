@@ -76,7 +76,7 @@ XY_DECL(int, list_fill_free, list_state_t *, state);
 
 typedef struct {
 	char q[256];
-	int page;      /* 0-based window index */
+	int page; /* 0-based window index */
 	int per_page;
 } pick_ctx_t;
 

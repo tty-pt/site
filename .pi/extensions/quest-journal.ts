@@ -77,12 +77,36 @@ let pickerCancelledThisSession = false;
 // State persistence (custom entries survive reloads and branching)
 // ---------------------------------------------------------------------------
 
-function persist(pi: ExtensionAPI) {
+function persist(pi: ExtensionAPI, ctx?: ExtensionContext) {
 	try {
 		pi.appendEntry<StoredState>(CUSTOM_TYPE, state);
 	} catch {
 		// ephemeral / unsupported session: stay in-memory only
 	}
+	updateUIStatus(ctx);
+}
+
+/** Update the persistent status bar above the prompt box. */
+function updateUIStatus(ctx?: ExtensionContext) {
+	if (ctx?.hasUI) {
+		const fresh = compactionReady();
+		const text = state.active
+			? `✨ quest: ${state.active}${fresh ? "" : " (save pending)"}`
+			: undefined;
+		ctx.ui.setStatus("quest", text);
+	}
+}
+
+/** Auto-detect active quest from docs/current/ if not explicitly set in session. */
+async function syncActiveQuestFromDisk(pi?: ExtensionAPI, ctx?: ExtensionContext) {
+	if (!state.active) {
+		const current = await listQuestFiles(QUEST_DIR);
+		if (current.length === 1) {
+			state.active = current[0].replace(/\.md$/, "");
+			if (pi) persist(pi, ctx);
+		}
+	}
+	updateUIStatus(ctx);
 }
 
 /** Rebuild `state` from the latest `quest_journal` (or legacy `task_journal`) entry in the active branch. */
@@ -97,6 +121,7 @@ function reconstruct(ctx: ExtensionContext) {
 		? { active: latest.active, saveCount: latest.saveCount || 0, compactCount: latest.compactCount || 0, prompts: Array.isArray(latest.prompts) ? latest.prompts : [] }
 		: { active: null, saveCount: 0, compactCount: 0, prompts: [] };
 	lastPromptAt = Date.now();
+	void syncActiveQuestFromDisk(undefined, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,12 +420,24 @@ function installShutdownSave(pi: ExtensionAPI) {
 
 /** A write/edit to the active quest file counts as a save (lowers the compaction gate). */
 function installFileWatch(pi: ExtensionAPI) {
-	pi.on("tool_result", async (event) => {
-		if (!state.active) return;
+	pi.on("tool_result", async (event, ctx) => {
 		if (event.toolName !== "write" && event.toolName !== "edit") return;
 		const p = event.input.path as string | undefined;
-		if (typeof p === "string" && normalizePath(p) === questPath(state.active)) {
+		if (typeof p !== "string") return;
+		const norm = normalizePath(p);
+		if (norm.startsWith(`${QUEST_DIR}/`) && norm.endsWith(".md")) {
+			const slug = basename(norm).replace(/\.md$/, "");
+			if (slug && (!state.active || state.active !== slug)) {
+				state.active = slug;
+				state.saveCount += 1;
+				lastPromptAt = Date.now();
+				persist(pi, ctx);
+				return;
+			}
+		}
+		if (state.active && norm === questPath(state.active)) {
 			markSaved(pi);
+			updateUIStatus(ctx);
 		}
 	});
 }
@@ -1013,6 +1050,7 @@ export default function (pi: ExtensionAPI) {
 	registerQuestJournalCRBHook();
 	pi.on("session_start", async (event, ctx) => {
 		reconstruct(ctx);
+		await syncActiveQuestFromDisk(pi, ctx);
 		await offerQuestChoiceOnBoot(pi, ctx, event.reason);
 	});
 	pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));

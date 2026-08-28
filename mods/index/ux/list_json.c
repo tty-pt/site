@@ -275,7 +275,8 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 	        elem, len, "target_source", col->target_source,
 	        sizeof(col->target_source));
 	bud_json_str_len(elem, len, "filter", col->filter, sizeof(col->filter));
-	bud_json_str_len(elem, len, "current", col->current, sizeof(col->current));
+	bud_json_str_len(
+	        elem, len, "current", col->current, sizeof(col->current));
 	col->opt_start = state->nopts;
 	col->opt_count = 0;
 
@@ -287,8 +288,7 @@ static void list_fj_col(const char *elem, size_t len, void *user)
 		octx.slot = state->nopts;
 		octx.max = LIST_MAX_OPTS;
 		bud_json_array_for_each_key_len(
-		        elem, len, "opts", list_fj_opt,
-		        &octx);
+		        elem, len, "opts", list_fj_opt, &octx);
 		col->opt_count = octx.slot - state->nopts;
 		state->nopts = octx.slot;
 	}
@@ -342,8 +342,7 @@ static void list_fj_row(const char *elem, size_t len, void *user)
 	ctx->row++;
 }
 
-void list_state_from_json_len(
-        list_state_t *state, const char *json, size_t len)
+void list_state_from_json_len(list_state_t *state, const char *json, size_t len)
 {
 	list_fj_col_ctx cctx;
 	list_fj_ids_ctx ictx;
@@ -372,7 +371,8 @@ void list_state_from_json_len(
 	bud_json_str_len(
 	        json, len, "username", state->username,
 	        sizeof(state->username));
-	bud_json_str_len(json, len, "query", state->query, sizeof(state->query));
+	bud_json_str_len(
+	        json, len, "query", state->query, sizeof(state->query));
 	state->custom = bud_json_int_len(json, len, "custom", 0) ? 1 : 0;
 	bud_json_str_len(json, len, "q", state->q, sizeof(state->q));
 	bud_json_str_len(

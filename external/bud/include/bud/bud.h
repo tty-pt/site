@@ -169,7 +169,8 @@ int bud_json_array_for_each_key_len(
         void (*fn)(const char *elem, size_t len, void *user), void *user);
 
 /* Table-driven state: one field definition drives wasm_init, wasm_set_*
- * Pure UI binder — only key/offset/size/is_int/kind. Zero DB/storage concepts. */
+ * Pure UI binder — only key/offset/size/is_int/kind. Zero DB/storage concepts.
+ */
 typedef struct bud_field_desc {
 	const char *key;
 	size_t offset;
@@ -197,8 +198,8 @@ void bud_state_apply_array_len(
         const bud_field_desc_t *schema);
 void bud_state_apply_array_stride_len(
         const char *json, size_t len, const char *key, void *array_out,
-        size_t elem_size, int *count_out, int max_elems,
-        const void *schema, size_t schema_stride);
+        size_t elem_size, int *count_out, int max_elems, const void *schema,
+        size_t schema_stride);
 
 /* Debug helpers — available in all builds, most useful with BUD_DEBUG */
 void bud_node_set_src(bud_node *node, const char *file, int line);

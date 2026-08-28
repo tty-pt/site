@@ -59,12 +59,17 @@ typedef struct {
 	int active_row_pick;
 	char pick_q[256];
 	int pick_page;
+	int active_fmt_pick;
+	char pick_fmt_q[256];
+	int pick_fmt_page;
 } sb_app_state_t;
 
 static sb_app_state_t sb_app_state = { 0 };
 static sb_song_row_data_t g_sb_songs[MAX_SB_SONGS];
 static site_ui_picker_buffer_t g_sb_pick_buf;
 static pick_view_t g_sb_pick_state;
+static site_ui_picker_buffer_t g_sb_fmt_pick_buf;
+static pick_view_t g_sb_fmt_pick_state;
 static bud_node *g_sb_chord_nodes[MAX_SB_SONGS];
 static bud_node *g_sb_media_nodes[MAX_SB_SONGS];
 static int g_sb_n_chord_nodes;
@@ -90,6 +95,9 @@ static const bud_field_desc_t gig_app_fields[] = {
 	OVERLAY_INT(active_row, sb_app_state_t, active_row_pick),
 	OVERLAY_STR(pick_q, sb_app_state_t, pick_q, 256),
 	OVERLAY_INT(pick_page, sb_app_state_t, pick_page),
+	OVERLAY_INT(active_fmt, sb_app_state_t, active_fmt_pick),
+	OVERLAY_STR(pick_fmt_q, sb_app_state_t, pick_fmt_q, 256),
+	OVERLAY_INT(pick_fmt_page, sb_app_state_t, pick_fmt_page),
 	FIELD_END
 };
 
@@ -110,14 +118,17 @@ void wasm_init(const char *json, int len)
 		sb_app_state.zoom = VIEWER_ZOOM_DEFAULT;
 
 	bud_state_apply_array_len(
-	        json, jlen, "songs", g_sb_songs,
-	        sizeof(sb_song_row_data_t), &sb_app_state.n_songs,
-	        MAX_SB_SONGS, sb_song_row_fields);
+	        json, jlen, "songs", g_sb_songs, sizeof(sb_song_row_data_t),
+	        &sb_app_state.n_songs, MAX_SB_SONGS, sb_song_row_fields);
 
 	site_ui_picker_state_from_json(
-	        json, jlen, "song_id", "song.items", 0,
-	        sb_app_state.pick_q, sb_app_state.pick_page,
-	        &g_sb_pick_buf, &g_sb_pick_state);
+	        json, jlen, "song_id", "song.items", 0, sb_app_state.pick_q,
+	        sb_app_state.pick_page, &g_sb_pick_buf, &g_sb_pick_state);
+
+	site_ui_picker_state_from_json(
+	        json, jlen, "format", "song.types", 0, sb_app_state.pick_fmt_q,
+	        sb_app_state.pick_fmt_page, &g_sb_fmt_pick_buf,
+	        &g_sb_fmt_pick_state);
 }
 
 /* ── Zoom slider event handler ──────────────────────────── */
@@ -143,7 +154,8 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 	(void)request_id;
 	char chord_html[65536];
 	size_t dlen = data_len >= 0 ? (size_t)data_len : 0;
-	bud_json_str_len(data, dlen, "chord_html", chord_html, sizeof(chord_html));
+	bud_json_str_len(
+	        data, dlen, "chord_html", chord_html, sizeof(chord_html));
 	if (!chord_html[0])
 		return;
 
@@ -190,8 +202,7 @@ static void sb_toggle_media(int show)
 		extern void bud_patch_innerhtml(
 		        unsigned int node_id, const char *html);
 		bud_patch_innerhtml(
-		        bud_node_id(g_sb_media_nodes[i]),
-		        html[0] ? html : "");
+		        bud_node_id(g_sb_media_nodes[i]), html[0] ? html : "");
 	}
 }
 
@@ -341,8 +352,9 @@ static bud_node *sb_render_song_picker(const pick_view_t *pv)
 	const char *pref_names[5] = { "t", "b", "l", "m", "z" };
 	int pref_vals[5];
 
-	snprintf(post_action, sizeof(post_action),
-	         "/api/gig/%s/songs", sb_app_state.sb_id);
+	snprintf(
+	        post_action, sizeof(post_action), "/api/gig/%s/songs",
+	        sb_app_state.sb_id);
 
 	pref_vals[0] = sb_app_state.t_pref;
 	pref_vals[1] = sb_app_state.bemol;
@@ -379,26 +391,21 @@ static bud_node *sb_render_song_title_picker(
 	char n_str[16];
 	char form_id[64];
 	const char *pref_names[5] = { "t", "b", "l", "m", "z" };
-	int pref_vals[5] = {
-		sb_app_state.t_pref,
-		sb_app_state.bemol,
-		sb_app_state.latin,
-		sb_app_state.show_media,
-		sb_app_state.zoom
-	};
+	int pref_vals[5] = { sb_app_state.t_pref, sb_app_state.bemol,
+		             sb_app_state.latin, sb_app_state.show_media,
+		             sb_app_state.zoom };
 
-	snprintf(post_action, sizeof(post_action),
-	         "/api/gig/%s/song/%d/replace", sb_app_state.sb_id, row_idx);
+	snprintf(
+	        post_action, sizeof(post_action), "/api/gig/%s/song/%d/replace",
+	        sb_app_state.sb_id, row_idx);
 	snprintf(n_str, sizeof(n_str), "%d", row_idx);
 	snprintf(form_id, sizeof(form_id), "sb-pick-post-%d", row_idx);
 
 	bud_node *extra = bud_fragment();
 	bud_append(
-	        extra,
-	        lx_el("input", lx_attr("type", "hidden"),
-	              lx_attr("name", "n"),
-	              lx_attr("value", n_str))
-	                .data.node);
+	        extra, lx_el("input", lx_attr("type", "hidden"),
+	                     lx_attr("name", "n"), lx_attr("value", n_str))
+	                       .data.node);
 
 	site_ui_action_picker_spec_t spec = {
 		.key = "song_id",
@@ -420,6 +427,62 @@ static bud_node *sb_render_song_title_picker(
 	};
 
 	return site_ui_action_picker(&spec, is_active ? pv : NULL);
+}
+
+static bud_node *sb_render_format_picker(
+        int row_idx, const sb_song_row_data_t *s, const pick_view_t *pv,
+        int is_active)
+{
+	char post_action[256];
+	char n_str[16];
+	char form_id[64];
+	const char *pref_names[5] = { "t", "b", "l", "m", "z" };
+	int pref_vals[5] = { sb_app_state.t_pref, sb_app_state.bemol,
+		             sb_app_state.latin, sb_app_state.show_media,
+		             sb_app_state.zoom };
+
+	snprintf(
+	        post_action, sizeof(post_action), "/api/gig/%s/song/%d/replace",
+	        sb_app_state.sb_id, row_idx);
+	snprintf(n_str, sizeof(n_str), "%d", row_idx);
+	snprintf(form_id, sizeof(form_id), "sb-fmt-pick-post-%d", row_idx);
+
+	bud_node *extra = bud_fragment();
+	bud_append(
+	        extra, lx_el("input", lx_attr("type", "hidden"),
+	                     lx_attr("name", "n"), lx_attr("value", n_str))
+	                       .data.node);
+	if (s->song_id[0]) {
+		bud_append(
+		        extra, lx_el("input", lx_attr("type", "hidden"),
+		                     lx_attr("name", "song_id"),
+		                     lx_attr("value", s->song_id))
+		                       .data.node);
+	}
+
+	site_ui_action_picker_spec_t spec = {
+		.key = "format",
+		.label = "format",
+		.target = "song.types",
+		.default_id = s->type,
+		.default_label = s->type[0] ? s->type : "any",
+		.get_action = sb_app_state.path,
+		.post_action = post_action,
+		.form_id = form_id,
+		.csrf_token = sb_app_state.csrf_token,
+		.submit_label = "Set Format",
+		.scope = n_str,
+		.auto_submit = 1,
+		.pref_names = pref_names,
+		.pref_vals = pref_vals,
+		.n_prefs = 5,
+		.extra_post_inputs = extra,
+	};
+
+	bud_node *p = site_ui_action_picker(&spec, is_active ? pv : NULL);
+	if (p)
+		bud_add_class(p, "gig-format-picker-wrap text-xs");
+	return p;
 }
 
 /* ── Song row helpers ──────────────────────────────── */
@@ -444,12 +507,12 @@ static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 }
 
 static bud_node *sb_render_song_row(
-        int row_idx, const sb_song_row_data_t *s,
-        const char *tgt_key, int is_owner, const char *csrf_token,
-        const char *rem_action, const char *tpose_action,
-        const char *rand_action, const char *t_str, const char *chord_html,
-        const char *n_buf, bud_node **out_pre,
-        bud_node **out_media, const pick_view_t *row_pv, int is_active)
+        int row_idx, const sb_song_row_data_t *s, const char *tgt_key,
+        int is_owner, const char *csrf_token, const char *rem_action,
+        const char *tpose_action, const char *rand_action, const char *t_str,
+        const char *chord_html, const char *n_buf, bud_node **out_pre,
+        bud_node **out_media, const pick_view_t *row_pv, int is_active,
+        const pick_view_t *fmt_row_pv, int is_fmt_active)
 {
 	int t = t_str ? atoi(t_str) : 0;
 	bud_node *key_opts = sb_render_key_options(t, s->orig_key, s->flags);
@@ -472,12 +535,15 @@ static bud_node *sb_render_song_row(
 	char media_html[8192] = { 0 };
 	if (s->yt[0] || s->audio[0] || s->pdf[0])
 		site_ui_build_media_html(
-		        s->yt, s->audio, s->pdf, media_html, sizeof(media_html));
+		        s->yt, s->audio, s->pdf, media_html,
+		        sizeof(media_html));
 
-	bud_node *media_node = lx_el("div", lx_attr("data-gig-media", n_buf),
-	                             lx_attr("class", "gig-media flex justify-end items-center flex-shrink-0 ml-auto"),
-	                             lx_node(bud_raw(media_html)))
-	                               .data.node;
+	bud_node *media_node =
+	        lx_el("div", lx_attr("data-gig-media", n_buf),
+	              lx_attr("class", "gig-media flex justify-end "
+	                               "items-center flex-shrink-0 ml-auto"),
+	              lx_node(bud_raw(media_html)))
+	                .data.node;
 
 	if (out_media)
 		*out_media = media_node;
@@ -486,50 +552,64 @@ static bud_node *sb_render_song_row(
 	bud_node *title_elem = NULL;
 	char song_href[320];
 	if (s->song_id[0])
-		snprintf(
-		        song_href, sizeof(song_href),
-		        "/song/%s", s->song_id);
+		snprintf(song_href, sizeof(song_href), "/song/%s", s->song_id);
 	else
 		song_href[0] = '\0';
 
 	if (is_owner) {
 		bud_node *picker = sb_render_song_title_picker(
 		        row_idx, s, row_pv, is_active);
-		bud_node *view_link = song_href[0]
-		        ? lx_el("a", lx_attr("href", song_href),
-		                lx_attr("class", "text-xs text-muted ml-1 flex-shrink-0"),
-		                lx_attr("title", "View song"),
-		                lx_text("\xe2\x86\x97"))
-		                .data.node
-		        : NULL;
+		bud_node *view_link =
+		        song_href[0]
+		                ? lx_el("a", lx_attr("href", song_href),
+		                        lx_attr("class", "text-xs text-muted "
+		                                         "ml-1 flex-shrink-0"),
+		                        lx_attr("title", "View song"),
+		                        lx_text("\xe2\x86\x97"))
+		                          .data.node
+		                : NULL;
 
-		title_elem = lx_el("div", lx_attr("class", "flex items-center gap-2 flex-1 min-w-0"),
-		                   picker ? lx_node(picker) : lx_none(),
-		                   view_link ? lx_node(view_link) : lx_none())
-		                   .data.node;
+		title_elem =
+		        lx_el("div",
+		              lx_attr("class",
+		                      "flex items-center gap-2 flex-1 min-w-0"),
+		              picker ? lx_node(picker) : lx_none(),
+		              view_link ? lx_node(view_link) : lx_none())
+		                .data.node;
 	} else {
 		title_elem = lx_el("a", lx_attr("class", "font-bold"),
 		                   song_href[0] ? lx_attr("href", song_href)
 		                                : lx_none(),
 		                   lx_text(s->title))
-		                   .data.node;
+		                     .data.node;
+	}
+
+	bud_node *format_badge = NULL;
+	if (is_owner) {
+		format_badge = sb_render_format_picker(
+		        row_idx, s, fmt_row_pv, is_fmt_active);
+	} else if (s->type[0]) {
+		format_badge =
+		        lx_el("span",
+		              lx_attr("class", "text-xs italic text-muted"),
+		              lx_text(s->type))
+		                .data.node;
 	}
 
 	bud_node *title_col =
-	        lx_el("div", lx_attr("class", "flex gap-4 justify-between items-center flex-1 min-w-0"),
-	              lx_el("div", lx_attr("class", "flex flex-col flex-1 min-w-0"),
-	                    s->type[0]
-	                            ? lx_el("span",
-	                                    lx_attr("class", "text-xs italic "
-	                                                     "text-muted"),
-	                                    lx_text(s->type))
-	                            : lx_none(),
+	        lx_el("div",
+	              lx_attr("class", "flex gap-4 justify-between "
+	                               "items-center flex-1 min-w-0"),
+	              lx_el("div",
+	                    lx_attr("class", "flex flex-col flex-1 min-w-0"),
+	                    format_badge ? lx_node(format_badge) : lx_none(),
 	                    title_elem ? lx_node(title_elem) : lx_none()),
 	              sb_app_state.user[0]
 	                      ? lx_none()
 	                      : lx_el("span",
 	                              lx_attr("data-gig-target-key", ""),
-	                              lx_attr("class", "text-xs text-muted flex-shrink-0"),
+	                              lx_attr("class", "text-xs text-muted "
+	                                               "flex-shrink-0"),
 	                              lx_text(tgt_key)))
 	                .data.node;
 
@@ -549,12 +629,15 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("value", n_buf)),
 		                    lx_el("select", lx_attr("name", "t"),
 		                          lx_attr("data-n", n_buf),
-		                          lx_attr("class", "border rounded p-1 text-xs"),
-		                          lx_bind("change", 0, on_sb_transpose_change),
+		                          lx_attr("class",
+		                                  "border rounded p-1 text-xs"),
+		                          lx_bind("change", 0,
+		                                  on_sb_transpose_change),
 		                          lx_node(key_opts)),
 		                    lx_el("button", lx_attr("type", "submit"),
 		                          lx_attr("data-wasm-hide", ""),
-		                          lx_attr("class", "btn text-xs py-1 px-2"),
+		                          lx_attr("class",
+		                                  "btn text-xs py-1 px-2"),
 		                          lx_text("Set Key"))),
 		              lx_el("form", lx_attr("method", "POST"),
 		                    lx_attr("action", rand_action),
@@ -567,7 +650,8 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("name", "n"),
 		                          lx_attr("value", n_buf)),
 		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("class", "btn text-xs py-1 px-2"),
+		                          lx_attr("class",
+		                                  "btn text-xs py-1 px-2"),
 		                          lx_text("\xf0\x9f\x8e\xb2"))),
 		              lx_el("form", lx_attr("method", "POST"),
 		                    lx_attr("action", rem_action),
@@ -575,17 +659,19 @@ static bud_node *sb_render_song_row(
 		                          lx_attr("name", "csrf_token"),
 		                          lx_attr("value", csrf_token)),
 		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("data-testid", "remove-song-btn"),
-		                          lx_attr("class", "btn btn-danger text-xs py-1 px-2"),
+		                          lx_attr("data-testid",
+		                                  "remove-song-btn"),
+		                          lx_attr("class", "btn btn-danger "
+		                                           "text-xs py-1 px-2"),
 		                          lx_text("\xf0\x9f\x97\x91"))))
 		                .data.node;
 	}
 
 	bud_node *header =
 	        lx_el("div",
-	              lx_attr("class", "flex justify-between items-center gap-2"),
-	              lx_node(title_col),
-	              lx_node(media_node),
+	              lx_attr("class",
+	                      "flex justify-between items-center gap-2"),
+	              lx_node(title_col), lx_node(media_node),
 	              owner_ctrl ? lx_node(owner_ctrl) : lx_none())
 	                .data.node;
 
@@ -641,8 +727,8 @@ static bud_node *sb_build_body_content(void)
 	/* Top Add Song picker (owner only) */
 	if (sb_app_state.is_owner) {
 		const pick_view_t *add_pv = (sb_app_state.active_row_pick < 0)
-		        ? &g_sb_pick_state
-		        : NULL;
+		                                    ? &g_sb_pick_state
+		                                    : NULL;
 		bud_node *picker = sb_render_song_picker(add_pv);
 
 		if (picker)
@@ -686,13 +772,16 @@ static bud_node *sb_build_body_content(void)
 			int is_active = (i == sb_app_state.active_row_pick);
 			const pick_view_t *row_pv =
 			        is_active ? &g_sb_pick_state : NULL;
+			int is_fmt_active = (i == sb_app_state.active_fmt_pick);
+			const pick_view_t *fmt_pv =
+			        is_fmt_active ? &g_sb_fmt_pick_state : NULL;
 
 			bud_node *row = sb_render_song_row(
-			        i, s, tgt_key,
-			        sb_app_state.is_owner, sb_app_state.csrf_token,
-			        rem_action, tpose_action, rand_action, t_str,
-			        s->chord_html, n_buf,
-			        &pre_ptr, &media_ptr, row_pv, is_active);
+			        i, s, tgt_key, sb_app_state.is_owner,
+			        sb_app_state.csrf_token, rem_action,
+			        tpose_action, rand_action, t_str, s->chord_html,
+			        n_buf, &pre_ptr, &media_ptr, row_pv, is_active,
+			        fmt_pv, is_fmt_active);
 
 			if (pre_ptr && g_sb_n_chord_nodes < MAX_SB_SONGS)
 				g_sb_chord_nodes[g_sb_n_chord_nodes++] =
