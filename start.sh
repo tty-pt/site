@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
-export LD_LIBRARY_PATH="/home/quirinpa/site/external/libxylem/lib:/home/quirinpa/site/external/axil/lib:/home/quirinpa/site/external/hyle/lib:/home/quirinpa/site/external/hyle/c/libhyle-bud/lib:/home/quirinpa/site/external/bud/lib:/home/quirinpa/site/external/qmap/lib:/home/quirinpa/site/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="/home/quirinpa/site/external/libxylem/lib:/home/quirinpa/site/external/axil/lib:/home/quirinpa/site/external/axil-hyle/lib:/home/quirinpa/site/external/hyle/lib:/home/quirinpa/site/external/hyle/c/libhyle-bud/lib:/home/quirinpa/site/external/hyle/c/libhyle-source/lib:/home/quirinpa/site/external/bud/lib:/home/quirinpa/site/external/qmap/lib:/home/quirinpa/site/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"

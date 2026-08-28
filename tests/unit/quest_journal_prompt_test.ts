@@ -60,6 +60,7 @@ async function testQuestJournalPromptInjection() {
 	assert.ok(injected.includes("Auto-Refine Active Quest"), "Should include Auto-Refine Active Quest rule");
 	assert.ok(injected.includes("Auto-Create Sub-Quests"), "Should include Auto-Create Sub-Quests rule");
 	assert.ok(injected.includes("Auto-Archive Upon Completion"), "Should include Auto-Archive rule");
+	assert.ok(injected.includes("Sub-Quest Completion (Autonomous Continuation)") || injected.includes("For Sub-Quests"), "Should mention autonomous sub-quest completion");
 	assert.ok(injected.includes("quest_mark_saved") || injected.includes("quest_journal_mark_saved"), "Should reference quest_mark_saved tool");
 	assert.ok(injected.includes("quest_subquest") || injected.includes("quest_journal_subquest"), "Should reference quest_subquest tool");
 

@@ -6,7 +6,6 @@
 #include "common_response.c"
 #include "common_storage.c"
 #include "common_strlist.c"
-#include "bud_adapter.c"
 #include "ux/site_ui.c"
 
 XY_MODULE_API void xy_install(void)

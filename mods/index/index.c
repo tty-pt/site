@@ -39,7 +39,6 @@ static size_t module_slot_count = 0;
 
 #include "ux/all.c"
 #include "list_fill.c"
-#include "pick.c"
 
 int index_update_json(const char *id, const char *title)
 {
@@ -489,7 +488,10 @@ static int index_add_get_handler(int fd, char *body)
 
 	pick_view_t pv;
 	int active_scope = -1;
-	pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
+	char qs[4096] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	hyle_bud_picker_view_collect_schema(qs, defs, NULL, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
 	        action, cancel_href, "Add", defs, NULL, csrf_token, &pv, NULL);
@@ -545,7 +547,10 @@ index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	pick_view_t pv;
 	int active_scope = -1;
-	pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
+	char qs[4096] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	hyle_bud_picker_view_collect_schema(qs, defs, record, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
 	        action, cancel_href, "Save Changes", defs, record, csrf_token,
@@ -742,6 +747,5 @@ void xy_install(void)
 	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
 
 	axil_register_handler("GET:/", core_get);
-	axil_register_handler("GET:/pick/:id/options", pick_options_handler);
 	axil_config.default_handler = core_get;
 }

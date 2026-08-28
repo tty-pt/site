@@ -13,7 +13,6 @@
 #include <hyle/source.h>
 
 #include "../common/common.h"
-#include "../common/bud_adapter.h"
 #include "../source/source.h"
 
 #include "../auth/auth.h"
@@ -563,46 +562,44 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/add.c"
 #include "ux/edit.c"
 
-static const form_field_t sb_pick_song_ff[] = {
-	{ "song_id", "Song", 0, FF_REF_SINGLE, "song.items", 0 }, FIELD_END
+static const hyle_schema_desc_t sb_pick_song_schema[] = {
+	{ .key = "song_id", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.items", .writable = 1 },
+	{ 0 }
 };
 
-static const form_field_t sb_pick_fmt_ff[] = {
-	{ "format", "Format", 0, FF_REF_SINGLE, "song.types", 0 }, FIELD_END
+static const hyle_schema_desc_t sb_pick_fmt_schema[] = {
+	{ .key = "format", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.types", .writable = 1 },
+	{ 0 }
 };
 
 static void sb_load_song_picks(int fd, const char *scope)
 {
-	const char *vals_in[1] = { "" };
-	const char *vals_out[1];
-
-	/* pick_view_collect_scoped takes the raw query string (char *),
-	 * NOT an fd — resolve QUERY_STRING here like collect_fd does,
-	 * otherwise the fd int is reinterpreted as a pointer (segfault). */
 	char qs[2048] = { 0 };
 
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
 	if (scope && scope[0])
-		pick_view_collect_scoped(
-		        qs, sb_pick_song_ff, vals_in, vals_out,
+		hyle_bud_picker_view_collect_scoped(
+		        qs, sb_pick_song_schema, NULL,
 		        &g_sb_pick_state, scope);
 	else
-		pick_view_collect_fd(
-		        fd, sb_pick_song_ff, vals_in, vals_out,
-		        &g_sb_pick_state);
+		hyle_bud_picker_view_collect_schema(
+		        qs, sb_pick_song_schema, NULL,
+		        &g_sb_pick_state, NULL);
 }
 
 static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out)
 {
-	static const form_field_t edit_song_ff[] = {
-		{ "song", "Song", 0, FF_REF_SINGLE, "song.items", 0 }, FIELD_END
+	static const hyle_schema_desc_t edit_song_schema[] = {
+		{ .key = "song", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.items", .writable = 1 },
+		{ 0 }
 	};
-	const char *vals_in[1] = { "" };
-	const char *vals_out[1];
-	pick_view_collect_fd(
-	        fd, edit_song_ff, vals_in, vals_out, pv_out);
+	char qs[2048] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	hyle_bud_picker_view_collect_schema(
+	        qs, edit_song_schema, NULL, pv_out, NULL);
 }
 
 static char *sb_emit_state_json(void)
@@ -614,13 +611,13 @@ static char *sb_emit_state_json(void)
 	size_t mlen;
 	int req;
 
-	bud_adapter_overlay_from_desc(
+	hyle_bud_state_overlay_from_desc(
 	        j_root, &sb_app_state, gig_app_fields, BUD_OVERLAY_INT,
 	        BUD_OVERLAY_STR);
 
 	json_object_object_add(
 	        j_root, "songs",
-	        bud_adapter_overlay_array(
+	        hyle_bud_state_overlay_array(
 	                g_sb_songs, sb_app_state.n_songs, sizeof(g_sb_songs[0]),
 	                sb_song_row_fields, BUD_OVERLAY_INT, BUD_OVERLAY_STR));
 
@@ -1055,22 +1052,22 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	 * pick_q_song_id__N), otherwise collect options for the top Add Song
 	 * picker. */
 	if (is_owner) {
-		const char *vals_in[1] = { "" };
-		const char *vals_out[1];
-		pick_view_collect_auto_fd(
-		        fd, sb_pick_song_ff, vals_in, vals_out,
+		char qs[2048] = { 0 };
+		if (fd > 0)
+			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+		hyle_bud_picker_view_collect_schema(
+		        qs, sb_pick_song_schema, NULL,
 		        &g_sb_pick_state, &sb_app_state.active_row_pick);
-		pick_view_collect_auto_fd(
-		        fd, sb_pick_fmt_ff, vals_in, vals_out,
+		hyle_bud_picker_view_collect_schema(
+		        qs, sb_pick_fmt_schema, NULL,
 		        &g_sb_fmt_pick_state, &sb_app_state.active_fmt_pick);
 		/* For No-JS top add picker when search query is present (pick_q_song_id=),
 		 * ensure top picker is populated */
 		if (sb_app_state.active_row_pick < 0 && sb_app_state.active_fmt_pick < 0) {
-			char qs[2048] = { 0 };
-			if (fd > 0)
-				axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 			if (strstr(qs, "pick_q_song_id=") || strstr(qs, "pick_page_song_id=")) {
-				pick_view_collect(qs, sb_pick_song_ff, vals_in, vals_out, &g_sb_pick_state);
+				hyle_bud_picker_view_collect_schema(
+				        qs, sb_pick_song_schema, NULL, &g_sb_pick_state, NULL);
 			}
 		}
 	}
@@ -1192,31 +1189,42 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	/* Collect grp picker view: options window, pinned selection and
 	 * draft overlays from the query string. */
-	const char *grp_vals_in[1];
-	const char *grp_vals_out[1];
 	pick_view_t edit_pv;
-	grp_vals_in[0] = (grp_id && grp_id[0]) ? grp_id : "";
-	static const form_field_t grp_field_def[] = {
-		{ "grp", "Group", 0, FF_REF_SINGLE, "grp.items", 0 },
-		FIELD_END
+	gig_cache_t grp_rec;
+	memset(&grp_rec, 0, sizeof(grp_rec));
+	if (grp_id && grp_id[0])
+		snprintf(grp_rec.grp, sizeof(grp_rec.grp), "%s", grp_id);
+
+	static const hyle_schema_desc_t grp_field_schema[] = {
+		{ .key = "grp", .qm_type = BUD_QM_STR,
+		  .source_type = HYLE_BUD_REFERENCE, .ref_source = "grp.items",
+		  .offset = offsetof(gig_cache_t, grp), .size = sizeof(grp_rec.grp),
+		  .writable = 1 },
+		{ 0 }
 	};
-	pick_view_collect_fd(
-	        fd, grp_field_def, grp_vals_in, grp_vals_out, &edit_pv);
+	char qs[2048] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	hyle_bud_picker_view_collect_schema(
+	        qs, grp_field_schema, &grp_rec, &edit_pv, NULL);
 
 	/* Check if any row's song picker or format picker is active using
 	 * unified multi-field auto-collector */
-	static const form_field_t row_candidate_ff[] = {
-		{ "song", "Song", 0, FF_REF_SINGLE, "song.items", 0 },
-		{ "fmt", "Format", 0, FF_REF_SINGLE, "song.types", 0 },
-		FIELD_END
+	static const hyle_schema_desc_t row_candidate_schema[] = {
+		{ .key = "song", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "song.items", .writable = 1 },
+		{ .key = "fmt", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "song.types", .writable = 1 },
+		{ 0 }
 	};
 	pick_view_t active_row_pv;
 	memset(&active_row_pv, 0, sizeof(active_row_pv));
 	int active_field_idx = -1;
 	int active_scope = -1;
 
-	pick_view_collect_auto_fields(
-	        fd, row_candidate_ff, 2, &active_row_pv, &active_field_idx,
+	hyle_bud_picker_view_collect_auto_fields_schema(
+	        qs, row_candidate_schema, &active_row_pv, &active_field_idx,
 	        &active_scope);
 
 	int active_edit_row = (active_field_idx == 0) ? active_scope : -1;
@@ -1237,7 +1245,7 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	snprintf(cancel_href, sizeof(cancel_href), "/gig/%s", ctx->id);
 
 	bud_node *form = sb_render_edit_form(
-	        action, csrf_token, title, ctx->id, grp_vals_out[0], &edit_pv,
+	        action, csrf_token, title, ctx->id, grp_rec.grp, &edit_pv,
 	        cancel_href, n_songs, songs, n_format_opts, format_opts,
 	        song_source, active_edit_row,
 	        active_edit_row >= 0 ? &active_row_pv : NULL, active_edit_fmt_row,
@@ -1267,20 +1275,14 @@ static int gig_add_get_handler(int fd, char *body)
 
 	const char *csrf_token = csrf_setup(fd);
 
-	/* ?grp=<slug> preselect rides in as a draft overlay; the picker
-	 * renders it pinned and the main POST submits it natively. */
-	static const form_field_t add_ff[] = {
-		{ "title", "Title:", 0, 0, NULL, 0 },
-		{ "grp", "Group:", 0, FF_REF_SINGLE, "grp.items", 0 },
-		{ NULL, NULL, 0, 0, NULL, 0 }
-	};
-	const char *add_vals_in[2] = { "", "" };
-	const char *add_vals_out[2];
+	char qs[2048] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
 	pick_view_t add_pv;
+	hyle_bud_picker_view_collect_schema(qs, gig_fields, NULL, &add_pv, NULL);
 
-	pick_view_collect_fd(fd, add_ff, add_vals_in, add_vals_out, &add_pv);
-
-	bud_node *form = sb_render_add_form(csrf_token, add_vals_out, &add_pv);
+	bud_node *form = sb_render_add_form(csrf_token, NULL, &add_pv);
 
 	return site_ui_respond_add_page(
 	        fd, user, "gig", site_ui_module_icon("gig"), form);

@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud hyle-source axil-lib qmap-lib xylem-lib mods clients boundary-check
+all: stoma-lib hyle-lib bud-lib hyle-bud hyle-source axil-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -30,6 +30,9 @@ hyle-source: hyle-lib qmap-lib stoma-lib
 
 axil-lib:
 	$(MAKE) -C external/axil
+
+axil-hyle: axil-lib hyle-source hyle-bud
+	$(MAKE) -C external/axil-hyle
 
 qmap-lib:
 	$(MAKE) -C external/libqmap
@@ -67,6 +70,10 @@ standalone-unit-tests:
 	@sh tests/unit/run-mpfd-content-length.sh
 	@sh tests/unit/run-mpfd-multivalue.sh
 	@sh tests/unit/run-dsv-legacy.sh
+	@sh tests/unit/run-source-options.sh
+	@sh tests/unit/run-bud-picker-collect.sh
+	@sh tests/unit/run-bud-form.sh
+	@sh tests/unit/run-source-utils.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"

@@ -10,24 +10,13 @@
 
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
+#include <hyle-source/hyle_source.h>
 
 #include "common_internal.h"
 
-static int remove_path_recursive(const char *path);
-
 XY_IMPL(int, is_safe_id, const char *, id)
 {
-	const char *p;
-	if (!id || !id[0])
-		return 0;
-	for (p = id; *p; p++) {
-		char c = *p;
-		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-		    (c >= '0' && c <= '9') || c == '_' || c == '-')
-			continue;
-		return 0;
-	}
-	return 1;
+	return hyle_source_is_safe_id(id);
 }
 
 XY_IMPL(int, read_meta_file,
@@ -108,45 +97,7 @@ XY_IMPL(int, write_file_path,
 	const char *, buf,
 	size_t, sz)
 {
-	char tmp_path[PATH_MAX];
-	int fd;
-	ssize_t written;
-
-	if (!path || !path[0])
-		return -1;
-
-	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d", path, (int)getpid());
-
-	fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
-	if (fd < 0)
-		return -1;
-
-	if (sz > 0) {
-		written = write(fd, buf, sz);
-		if (written < 0 || (size_t)written != sz) {
-			close(fd);
-			unlink(tmp_path);
-			return -1;
-		}
-	}
-
-	if (fsync(fd) != 0) {
-		close(fd);
-		unlink(tmp_path);
-		return -1;
-	}
-
-	if (close(fd) != 0) {
-		unlink(tmp_path);
-		return -1;
-	}
-
-	if (rename(tmp_path, path) != 0) {
-		unlink(tmp_path);
-		return -1;
-	}
-
-	return 0;
+	return hyle_source_write_file(path, buf, sz);
 }
 
 XY_IMPL(int, ensure_dir_path, const char *, path)
@@ -231,34 +182,9 @@ XY_IMPL(int, write_item_child_file,
 	return write_file_path(p, buf, sz);
 }
 
-#define SLURP_MAX (10 * 1024 * 1024)
-
 XY_IMPL(char *, slurp_file, const char *, path)
 {
-	FILE *fp = fopen(path, "r");
-	struct stat st;
-	char *buf;
-	size_t got;
-
-	if (!fp)
-		return NULL;
-	if (fstat(fileno(fp), &st) != 0 || !S_ISREG(st.st_mode)) {
-		fclose(fp);
-		return strdup("");
-	}
-	if (st.st_size <= 0 || (size_t)st.st_size > SLURP_MAX) {
-		fclose(fp);
-		return (st.st_size <= 0) ? strdup("") : NULL;
-	}
-	buf = malloc((size_t)st.st_size + 1);
-	if (!buf) {
-		fclose(fp);
-		return NULL;
-	}
-	got = fread(buf, 1, (size_t)st.st_size, fp);
-	fclose(fp);
-	buf[got] = '\0';
-	return buf;
+	return hyle_source_slurp_file(path);
 }
 
 XY_IMPL(int, get_doc_root, int, fd, char *, buf, size_t, len)
@@ -292,50 +218,6 @@ XY_IMPL(int, item_child_path,
 	return 0;
 }
 
-static int remove_path_recursive(const char *path)
-{
-	struct stat st;
-	DIR *dir;
-	struct dirent *entry;
-	int rc = 0;
-
-	if (lstat(path, &st) != 0) {
-		return -1;
-	}
-	if (!S_ISDIR(st.st_mode)) {
-		return unlink(path);
-	}
-
-	dir = opendir(path);
-	if (!dir) {
-		return -1;
-	}
-
-	while ((entry = readdir(dir)) != NULL) {
-		char child[PATH_MAX];
-
-		if (strcmp(entry->d_name, ".") == 0 ||
-		    strcmp(entry->d_name, "..") == 0)
-			continue;
-		if (snprintf(
-		            child, sizeof(child), "%s/%s", path,
-		            entry->d_name) >= (int)sizeof(child))
-		{
-			rc = -1;
-			break;
-		}
-		if (remove_path_recursive(child) != 0) {
-			rc = -1;
-			break;
-		}
-	}
-	closedir(dir);
-
-	if (rc != 0)
-		return -1;
-	return rmdir(path);
-}
-
 static int is_safe_var_subpath(const char *path)
 {
 	char resolved[PATH_MAX];
@@ -348,7 +230,6 @@ static int is_safe_var_subpath(const char *path)
 		return 0;
 
 	if (!realpath("var", var_root) && !realpath("./var", var_root)) {
-		/* Fallback if var doesn't resolve directly */
 		return (strstr(resolved, "/var/") != NULL);
 	}
 
@@ -368,7 +249,7 @@ XY_IMPL(int, item_remove_path_recursive, const char *, item_path)
 		return -1;
 	if (!is_safe_var_subpath(item_path))
 		return -1;
-	return remove_path_recursive(item_path);
+	return hyle_source_remove_path_recursive(item_path);
 }
 
 XY_IMPL(int, module_path_build,

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <hyle-source/hyle_source.h>
 
 /* ── moved verbatim from mods/index/index.c ────────────────── */
 
@@ -17,49 +18,30 @@ static int idx_resolve_filter_options(
         int pool_avail)
 {
 	unsigned row_hd;
-	unsigned schema_hd;
 	char display_field[64] = "";
 	int nopts = 0;
 	uint32_t cur;
 	const void *key;
 	const void *val;
 
-	if (!target_source || !target_source[0] || !target_hd)
+	(void)target_hd;
+	if (!target_source || !target_source[0])
 		return 0;
 
 	row_hd = source_get_data_hd(target_source);
 	if (!row_hd)
 		return 0;
 
-	schema_hd = source_get_schema_hd(target_source);
-	if (schema_hd) {
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (qmap_next(&key, &val, cur)) {
-			const char *fn = (const char *)key;
-			if (strcmp(fn, "id") == 0)
-				continue;
-			strncpy(display_field, fn, sizeof(display_field) - 1);
-			break;
-		}
-		qmap_fin(cur);
-	}
+	hyle_source_get_display_field(target_source, display_field, sizeof(display_field));
 
 	cur = qmap_iter(row_hd, NULL, 0);
 	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {
 		const char *row_id = (const char *)key;
-		const char *name = NULL;
-		if (display_field[0]) {
-			char name_key[320];
-			snprintf(
-			        name_key, sizeof(name_key), "%s:%s", row_id,
-			        display_field);
-			name = (const char *)qmap_get(target_hd, name_key);
-		}
 		strncpy(pool[nopts].id, row_id, sizeof(pool[nopts].id) - 1);
 		pool[nopts].id[sizeof(pool[nopts].id) - 1] = '\0';
-		strncpy(pool[nopts].label, name ? name : row_id,
-		        sizeof(pool[nopts].label) - 1);
-		pool[nopts].label[sizeof(pool[nopts].label) - 1] = '\0';
+		hyle_source_get_item_label(
+		        target_source, row_id, display_field, pool[nopts].label,
+		        sizeof(pool[nopts].label));
 		nopts++;
 	}
 	qmap_fin(cur);

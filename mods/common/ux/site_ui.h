@@ -55,13 +55,6 @@ void auth_path(const char *action, char *buf, size_t len);
 void login_href(const char *ret, char *buf, size_t len);
 
 /* ── Form field descriptor for generic form builder ── */
-#define FF_REF_NONE 0
-#define FF_REF_SINGLE 1
-#define FF_REF_MULTI 2
-/* Target total at or below this renders an inline select/checkbox grid;
- * above it, the omnisearch picker. Descriptor max_inline=0 → default. */
-#define FF_PICKER_THRESHOLD 0
-
 #ifndef BUD_RECORD
 #define BUD_RECORD 0
 #define BUD_EXCLUDE 1
@@ -71,18 +64,9 @@ void login_href(const char *ret, char *buf, size_t len);
 #define BUD_INVERSE 5
 #endif
 
-typedef struct {
-	const char *name;
-	const char *label;
-	int type;           /* 0=text, 1=textarea, 2=file */
-	int ref;            /* FF_REF_NONE | SINGLE | MULTI */
-	const char *target; /* dataset id when ref != FF_REF_NONE */
-	int max_inline;     /* 0 = default FF_PICKER_THRESHOLD */
-} form_field_t;
-
-/* ── Omnisearch picker view (filled native-side by index's
- * pick_view_collect; WASM callers pass NULL and ref fields degrade to
- * plain text inputs) ── */
+/* ── Omnisearch picker view (filled native-side by
+ * hyle_bud_picker_view_collect_schema; WASM callers pass NULL and ref
+ * fields degrade to plain text inputs) ── */
 #define FF_PICKER_MAX_FIELDS HYLE_BUD_PICKER_MAX_FIELDS
 
 typedef hyle_bud_picker_entry_t pick_entry_t;
@@ -112,34 +96,6 @@ bud_node *site_ui_action_form(
 bud_node *site_ui_item_row(
         const char *title, const char *href, const char *subtitle,
         bud_node *action_controls);
-
-/* ── Generic form field builder ───────────────────── */
-bud_node *site_ui_form_fields(
-        const form_field_t *fields, const char **values,
-        const char *csrf_token);
-
-/* Descriptor-driven builder with omnisearch picker support: text/
- * textarea/file exactly as site_ui_form_fields; ref fields render by
- * runtime threshold (inline select/grid below, picker above). pv may
- * be NULL (no picker data — ref fields degrade to text inputs). */
-bud_node *site_ui_form_fields_ex(
-        const form_field_t *fields, const char **values, const char *csrf_token,
-        const pick_view_t *pv);
-
-/* Sibling GET form for no-JS draft round-trips (search/paging controls
- * bind to it via the HTML5 form= attribute): hidden mirrors of every
- * non-file field's current value plus each ref field's slugs and the
- * per_page default. Emitted adjacent to — never inside — the main POST
- * form. Tracks the ~2KB query-string budget; mirrors beyond it are
- * dropped (degrades to saved-state behavior). */
-bud_node *site_ui_sibling_get_form(
-        const char *action, const form_field_t *fields, const char **values,
-        const pick_view_t *pv);
-
-/* Name key of the page's first ref field (used to derive the shared
- * sibling GET form id "pickq-<key>"); NULL when the descriptor has no
- * ref fields. */
-const char *site_ui_pick_form_id(const form_field_t *fields);
 
 /* ── Declarative Schema-Driven Form Builder ─────────── */
 /* Builds a complete POST form (and sibling GET form if ref fields exist)

@@ -9,13 +9,17 @@
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/qmap.h>
+#include <ttypt/axil-hyle.h>
 #include <hyle/hyle.h>
 #include <hyle/source.h>
 
 #define SOURCE_IMPL
 #include "source.h"
 
-void source_install_routes(void);
+void source_install_routes(void)
+{
+	axil_hyle_install_routes();
+}
 
 XY_DECL(int, source_after_update,
 	int, fd, const char *, dataset_id,

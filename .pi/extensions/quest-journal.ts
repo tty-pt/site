@@ -61,6 +61,8 @@ const SAVE_PERCENT = 70; // context-usage % that escalates the reminder
 const COMPACT_WARN_PERCENT = 85; // instruct save + compact when this close to auto-compact
 const PROMPT_MAX_CHARS = 4000;
 const PROMPT_MAX_COUNT = 10;
+const DEFAULT_ECONOMY_TOKENS = 140_000; // 140K default auto-compaction threshold
+const DEFAULT_PRE_COMPACT_WARNING_TOKENS = 30_000; // 30K default pre-compaction warning margin
 
 interface StoredState {
 	active: string | null;
@@ -68,17 +70,141 @@ interface StoredState {
 	compactCount: number;
 	prompts: string[];
 	stack: string[];
+	economyTokens?: number | null;
+	warningMarginTokens?: number | null;
 }
 
-let state: StoredState = { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [] };
+let state: StoredState = { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [], economyTokens: undefined, warningMarginTokens: undefined };
 let lastPromptAt = Date.now();
 let pickerCancelledThisSession = false;
+let currentContext: ExtensionContext | undefined;
+
+// ---------------------------------------------------------------------------
+// Format & Token Economy Helpers
+// ---------------------------------------------------------------------------
+
+function formatTokens(num: number): string {
+	if (num >= 1_000_000) {
+		const m = num / 1_000_000;
+		return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+	}
+	if (num >= 1_000) {
+		const k = num / 1_000;
+		return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`;
+	}
+	return `${num}`;
+}
+
+function parseTokenAmount(val: unknown, defaultVal: number = DEFAULT_ECONOMY_TOKENS): number | null {
+	if (typeof val === "number" && !Number.isNaN(val)) {
+		return val > 0 ? Math.round(val) : 0;
+	}
+	if (typeof val !== "string") return null;
+	const s = val.trim().toLowerCase();
+	if (!s) return null;
+	if (s === "off" || s === "disable" || s === "disabled" || s === "0") return 0;
+	if (s === "default") return defaultVal;
+
+	// Matches "140k", "140 k", "1.5m", "140000", "140000 tokens", "140,000"
+	const cleaned = s.replace(/,/g, "");
+	const match = cleaned.match(/^([\d.]+)\s*([km])?(?:\s*tokens)?$/i);
+	if (!match) return null;
+	const base = Number.parseFloat(match[1]);
+	if (Number.isNaN(base) || base <= 0) return null;
+	const unit = match[2]?.toLowerCase();
+	if (unit === "k") return Math.round(base * 1000);
+	if (unit === "m") return Math.round(base * 1000000);
+	return Math.round(base);
+}
+
+function readSettingsEconomyThreshold(): number | null {
+	for (const p of [".pi/settings.json", "~/.pi/agent/settings.json"]) {
+		try {
+			const resolved = p.startsWith("~") ? p.replace(/^~/, process.env.HOME || "") : p;
+			const raw = readFileSync(resolved, "utf8");
+			const json = JSON.parse(raw);
+			const val = json?.questJournal?.economyTokens ?? json?.questJournal?.autoCompactTokens ?? json?.compaction?.economyTokens;
+			const parsed = parseTokenAmount(val);
+			if (parsed !== null) return parsed;
+		} catch {
+			// ignore missing or unreadable config
+		}
+	}
+	return null;
+}
+
+function getEconomyThreshold(): number {
+	if (typeof state.economyTokens === "number") {
+		return state.economyTokens;
+	}
+	const envVal = process.env.PI_QUEST_AUTO_COMPACT_TOKENS ?? process.env.QUEST_AUTO_COMPACT_TOKENS;
+	const parsedEnv = parseTokenAmount(envVal);
+	if (parsedEnv !== null) return parsedEnv;
+
+	const parsedSettings = readSettingsEconomyThreshold();
+	if (parsedSettings !== null) return parsedSettings;
+
+	return DEFAULT_ECONOMY_TOKENS;
+}
+
+function readSettingsWarningMargin(): number | null {
+	for (const p of [".pi/settings.json", "~/.pi/agent/settings.json"]) {
+		try {
+			const resolved = p.startsWith("~") ? p.replace(/^~/, process.env.HOME || "") : p;
+			const raw = readFileSync(resolved, "utf8");
+			const json = JSON.parse(raw);
+			const val = json?.questJournal?.preCompactWarningTokens ?? json?.questJournal?.warningTokens ?? json?.compaction?.warningMarginTokens;
+			const parsed = parseTokenAmount(val, DEFAULT_PRE_COMPACT_WARNING_TOKENS);
+			if (parsed !== null) return parsed;
+		} catch {
+			// ignore missing or unreadable config
+		}
+	}
+	return null;
+}
+
+function getWarningMargin(): number {
+	if (typeof state.warningMarginTokens === "number") {
+		return state.warningMarginTokens;
+	}
+	const envVal = process.env.PI_QUEST_PRE_COMPACT_WARNING_TOKENS ?? process.env.QUEST_PRE_COMPACT_WARNING_TOKENS;
+	const parsedEnv = parseTokenAmount(envVal, DEFAULT_PRE_COMPACT_WARNING_TOKENS);
+	if (parsedEnv !== null) return parsedEnv;
+
+	const parsedSettings = readSettingsWarningMargin();
+	if (parsedSettings !== null) return parsedSettings;
+
+	return DEFAULT_PRE_COMPACT_WARNING_TOKENS;
+}
+
+function formatQuestHierarchy(active: string | null, stack?: string[]): string {
+	if (!active) return "(none)";
+	if (!stack || stack.length === 0) return active;
+
+	// Clean up duplicate consecutive entries and ensure active is at tail
+	const cleanStack: string[] = [];
+	for (const item of stack) {
+		if (item && (cleanStack.length === 0 || cleanStack[cleanStack.length - 1] !== item)) {
+			cleanStack.push(item);
+		}
+	}
+	if (!cleanStack.includes(active)) {
+		cleanStack.push(active);
+	} else if (cleanStack[cleanStack.length - 1] !== active) {
+		const idx = cleanStack.lastIndexOf(active);
+		cleanStack.splice(idx + 1);
+	}
+
+	if (cleanStack.length <= 1) return active;
+	return cleanStack.join(" ↳ ");
+}
 
 // ---------------------------------------------------------------------------
 // State persistence (custom entries survive reloads and branching)
 // ---------------------------------------------------------------------------
 
 function persist(pi: ExtensionAPI, ctx?: ExtensionContext) {
+	if (ctx) currentContext = ctx;
 	try {
 		pi.appendEntry<StoredState>(CUSTOM_TYPE, state);
 	} catch {
@@ -89,18 +215,43 @@ function persist(pi: ExtensionAPI, ctx?: ExtensionContext) {
 
 /** Update the persistent status bar above the prompt box. */
 function updateUIStatus(ctx?: ExtensionContext) {
-	if (ctx?.hasUI) {
+	const c = ctx || currentContext;
+	if (c?.hasUI) {
 		const fresh = compactionReady();
-		const stackInfo = state.stack && state.stack.length > 1 ? ` (stack: ${state.stack.length})` : "";
+		const hier = formatQuestHierarchy(state.active, state.stack);
+		const usage = typeof c.getContextUsage === "function" ? c.getContextUsage() : undefined;
+		const threshold = getEconomyThreshold();
+
+		let tokenInfo = "";
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+
+		if (tokens !== null && tokens > 0) {
+			if (threshold > 0) {
+				tokenInfo = ` [${formatTokens(tokens)}/${formatTokens(threshold)}]`;
+			} else {
+				tokenInfo = ` [${formatTokens(tokens)}]`;
+			}
+		} else if (typeof usage?.percent === "number" && usage.percent > 0) {
+			tokenInfo = ` [${Math.round(usage.percent)}%]`;
+		}
+
+		let stateTag = "";
+		if (!fresh) {
+			stateTag = " (save pending)";
+		} else if (threshold > 0 && tokens !== null && tokens >= threshold) {
+			stateTag = " (compaction ready)";
+		}
+
 		const text = state.active
-			? `✨ quest: ${state.active}${stackInfo}${fresh ? "" : " (save pending)"}`
+			? `✨ quest: ${hier}${tokenInfo}${stateTag}`
 			: undefined;
-		ctx.ui.setStatus("quest", text);
+		c.ui.setStatus("quest", text);
 	}
 }
 
 /** Auto-detect active quest from docs/current/ if not explicitly set in session. */
 async function syncActiveQuestFromDisk(pi?: ExtensionAPI, ctx?: ExtensionContext) {
+	if (ctx) currentContext = ctx;
 	if (!state.active) {
 		const current = await listQuestFiles(QUEST_DIR);
 		if (current.length === 1) {
@@ -114,6 +265,7 @@ async function syncActiveQuestFromDisk(pi?: ExtensionAPI, ctx?: ExtensionContext
 
 /** Rebuild `state` from the latest `quest_journal` (or legacy `task_journal`) entry in the active branch. */
 function reconstruct(ctx: ExtensionContext) {
+	currentContext = ctx;
 	let latest: StoredState | undefined;
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type === "custom" && (entry.customType === CUSTOM_TYPE || entry.customType === LEGACY_CUSTOM_TYPE) && entry.data) {
@@ -127,8 +279,10 @@ function reconstruct(ctx: ExtensionContext) {
 				compactCount: latest.compactCount || 0,
 				prompts: Array.isArray(latest.prompts) ? latest.prompts : [],
 				stack: Array.isArray(latest.stack) ? latest.stack : (latest.active ? [latest.active] : []),
+				economyTokens: typeof latest.economyTokens === "number" ? latest.economyTokens : undefined,
+				warningMarginTokens: typeof latest.warningMarginTokens === "number" ? latest.warningMarginTokens : undefined,
 		  }
-		: { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [] };
+		: { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [], economyTokens: undefined, warningMarginTokens: undefined };
 	lastPromptAt = Date.now();
 	void syncActiveQuestFromDisk(undefined, ctx);
 }
@@ -291,7 +445,7 @@ function projectGuidelines(): string | null {
 
 /** Context usage as a number 0..100, 0 if unknown. */
 function usagePercent(ctx: ExtensionContext): number {
-	const u = ctx.getContextUsage();
+	const u = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
 	if (u && typeof u.percent === "number" && Number.isFinite(u.percent)) return u.percent;
 	return 0;
 }
@@ -326,7 +480,7 @@ function promptsBlock(): string {
 	return state.prompts.map((p, i) => `${i + 1}. ${p}`).join("\n\n---\n\n");
 }
 
-/** Queue a user message asking the model to update the quest file. */
+/** Queue a user message asking the model to update the quest file with standard prompt. */
 function sendSaveRequest(pi: ExtensionAPI, message: string) {
 	if (!state.active) return;
 	const promptReminder = `Original user request(s) for this quest — keep VERBATIM (or very faithful if truncated) under ## Original request in the quest file. This section MUST be present and faithful; do not summarize away details:\n${promptsBlock()}`;
@@ -334,6 +488,18 @@ function sendSaveRequest(pi: ExtensionAPI, message: string) {
 		{
 			type: "text",
 			text: `${message}\n\n${promptReminder}\n\nActive quest file: \`${questPath(state.active)}\`\n\nFinish current work, then update that file with the latest state (goal, progress, decisions, files touched, findings, TDD & Quality checklist, remaining work, next step). The file MUST contain a ## Original request section with the verbatim/faithful user request(s) above. Ensure TDD (tests written first), build/run verification, clean code (no debug artifacts), and full test suite passing are checked off. Make it complete enough to resume without re-research, then reply with a one-line confirmation.`,
+		},
+	]);
+}
+
+/** Queue a user message asking the model to perform an exhaustive context dump before compaction. */
+function sendDeepSaveRequest(pi: ExtensionAPI, message: string) {
+	if (!state.active) return;
+	const promptReminder = `Original user request(s) for this quest — keep VERBATIM (or very faithful if truncated) under ## Original request in the quest file:\n${promptsBlock()}`;
+	pi.sendUserMessage([
+		{
+			type: "text",
+			text: `${message}\n\n${promptReminder}\n\nActive quest file: \`${questPath(state.active)}\`\n\n**PRE-COMPACTION EXHAUSTIVE CONTEXT PRESERVATION PROTOCOL**:\nBefore context compaction resets working memory, update \`${questPath(state.active)}\` with an exhaustive dump so the next iteration requires ZERO re-research:\n1. ## Original request: Keep user prompts verbatim.\n2. ## Current Status & Progress: Complete checklist of what's done, in progress, or pending.\n3. ## In-Depth Analysis & Findings: All technical findings, root cause analysis, architecture discoveries, data flows, exact function signatures, and explored trade-offs.\n4. ## Files touched: Complete list of touched and examined files.\n5. ## Decisions made: Every architectural and design decision with rationale.\n6. ## Sub-Quests: Current status of all sub-quests and parent links.\n7. ## Remaining work: Exact actionable checklist of remaining tasks.\n8. ## Resume prompt: A comprehensive multi-paragraph briefing giving the next agent iteration complete context so it resumes seamlessly with ZERO re-research.\n\nEnsure build/run verification, clean code (no debug artifacts), and tests are up to date. Once written, call \`quest_mark_saved\`.`,
 		},
 	]);
 }
@@ -350,9 +516,14 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 
 	if (state.active) {
 		const fresh = compactionReady();
+		const hier = formatQuestHierarchy(state.active, state.stack);
+		const usage = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
+		const threshold = getEconomyThreshold();
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+		const tokenStr = tokens !== null ? ` | tokens: ${formatTokens(tokens)}${threshold > 0 ? `/${formatTokens(threshold)}` : ""}` : "";
 		const stackInfo = state.stack && state.stack.length > 1 ? ` | LIFO stack: [${state.stack.join(" → ")}]` : "";
 		lines.push(
-			`- Active quest: \`docs/current/${state.active}.md\` (${fresh ? "fresh" : "SAVE PENDING — update it before compaction"}${stackInfo}); manage with /quest, /subquest, /quests.`,
+			`- Active quest: \`docs/current/${state.active}.md\` [${hier}] (${fresh ? "fresh" : "SAVE PENDING — update it before compaction"}${tokenStr}${stackInfo}); manage with /quest, /subquest, /quests, /quest-economy.`,
 		);
 	} else {
 		lines.push("- Active quest: none (use /quest <name> before starting real work).");
@@ -374,7 +545,7 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 // ---------------------------------------------------------------------------
 
 function installPromptCapture(pi: ExtensionAPI) {
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event: any) => {
 		if (!state.active) return;
 		const raw = (event as { prompt?: unknown }).prompt;
 		if (typeof raw !== "string" || !shouldCapturePrompt(raw)) return;
@@ -387,7 +558,8 @@ function installPromptCapture(pi: ExtensionAPI) {
 }
 
 function installBeforeAgentStart(pi: ExtensionAPI) {
-	pi.on("before_agent_start", async (_event, _ctx) => {
+	pi.on("before_agent_start", async (_event: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (!state.active) return;
 		if (pickerCancelledThisSession) return; // user cancelled the boot picker — stay quiet until /quest
 		if (compactionReady()) return; // file already freshly saved
@@ -398,12 +570,48 @@ function installBeforeAgentStart(pi: ExtensionAPI) {
 }
 
 function installTurnEnd(pi: ExtensionAPI) {
-	pi.on("turn_end", async (_event, ctx) => {
+	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (pickerCancelledThisSession) return; // user cancelled at boot — no routine save prompts
 		if (!state.active) return;
+
+		const usage = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
+		const threshold = getEconomyThreshold();
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
 		const pct = usagePercent(ctx);
+
+		if (threshold > 0 && tokens !== null) {
+			const warningMargin = getWarningMargin();
+			const warningTokens = Math.max(0, threshold - warningMargin);
+			if (tokens >= warningTokens) {
+				if (compactionReady()) {
+					// Quest file is updated and saved: trigger auto-compaction immediately!
+					ctx.compact({
+						customInstructions: `Economy auto-compaction at ${formatTokens(tokens)} tokens (threshold: ${formatTokens(threshold)}). Focus summary on active quest '${state.active}', key architectural decisions, modified files, and immediate next steps. All deep context and research findings have been permanently persisted to disk in docs/current/${state.active}.md.`,
+						onComplete: () => {
+							if (ctx.hasUI) ctx.ui.notify(`Economy auto-compaction completed at ${formatTokens(tokens)} tokens.`, "info");
+							updateUIStatus(ctx);
+						},
+						onError: (err: any) => {
+							if (ctx.hasUI) ctx.ui.notify(`Economy auto-compaction failed: ${err?.message || err}`, "error");
+						},
+					});
+					lastPromptAt = Date.now();
+					return;
+				} else {
+					// In the pre-compaction warning window with save pending: send explicit directive
+					sendDeepSaveRequest(
+						pi,
+						`🚨 Quest-journal economy: token usage is at ${formatTokens(tokens)} (within ${formatTokens(warningMargin)} of the ${formatTokens(threshold)} auto-compaction limit). AUTO-COMPACTION WILL OCCUR SOON to reset working memory. You MUST update \`${questPath(state.active)}\` now with an exhaustive context snapshot (all technical findings, architecture discoveries, decisions made, touched files, test status, and comprehensive ## Resume prompt) so that the subsequent iteration does not re-research. After updating the quest files, compaction will immediately trigger.`,
+					);
+					lastPromptAt = Date.now();
+					return;
+				}
+			}
+		}
+
 		if (pct >= COMPACT_WARN_PERCENT) {
-			sendSaveRequest(pi, `Quest-journal: context at ~${Math.round(pct)}% (near auto-compact: tokens > contextWindow - reserveTokens). Write a thorough state snapshot to the active quest file (must include faithful ## Original request), then run /compact immediately to free context.`);
+			sendDeepSaveRequest(pi, `Quest-journal: context at ~${Math.round(pct)}% (near auto-compact: tokens > contextWindow - reserveTokens). Write an exhaustive state snapshot to the active quest file (must include faithful ## Original request and comprehensive resume context), then run /compact immediately to free context.`);
 			lastPromptAt = Date.now();
 			return;
 		}
@@ -419,25 +627,28 @@ function installTurnEnd(pi: ExtensionAPI) {
 }
 
 function installBeforeCompact(pi: ExtensionAPI) {
-	pi.on("session_before_compact", async (_event, ctx) => {
+	pi.on("session_before_compact", async (_event: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (!state.active) return; // nothing to protect
 		if (compactionReady()) return; // file is fresh since last compaction — allow
 		ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
-		sendSaveRequest(pi, "Quest-journal: save is required before compaction. Write the full quest state to disk now (must include faithful ## Original request), then allow compaction to proceed.");
+		sendDeepSaveRequest(pi, "Quest-journal: save is REQUIRED before compaction. Write the full exhaustive quest state to disk now (must include faithful ## Original request and comprehensive resume context), then allow compaction to proceed.");
 		return { cancel: true };
 	});
 }
 
 function installAfterCompact(pi: ExtensionAPI) {
-	pi.on("session_compact", async (_event, _ctx) => {
+	pi.on("session_compact", async (_event: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (!state.active) return;
 		state.compactCount = state.saveCount; // a compaction happened; next save re-arms the gate
-		persist(pi);
+		persist(pi, ctx);
 	});
 }
 
 function installBeforeSwitch(pi: ExtensionAPI) {
-	pi.on("session_before_switch", async (_event, _ctx) => {
+	pi.on("session_before_switch", async (_event: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (!state.active) return;
 		if (withinCooldown()) return;
 		sendSaveRequest(pi, "Quest-journal: persisting before we switch sessions.");
@@ -537,6 +748,26 @@ function installFileWatch(pi: ExtensionAPI) {
 		if (state.active && norm === questPath(state.active)) {
 			markSaved(pi);
 			updateUIStatus(ctx);
+
+			const c = ctx || currentContext;
+			const usage = typeof c?.getContextUsage === "function" ? c.getContextUsage() : undefined;
+			const threshold = getEconomyThreshold();
+			const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+			const warningMargin = getWarningMargin();
+			const warningTokens = Math.max(0, threshold - warningMargin);
+
+			if (state.active && threshold > 0 && tokens !== null && tokens >= warningTokens && typeof c?.compact === "function") {
+				c.compact({
+					customInstructions: `Economy auto-compaction at ${formatTokens(tokens)} tokens (threshold: ${formatTokens(threshold)}). Focus summary on active quest '${state.active}', key architectural decisions, modified files, and immediate next steps. All deep context and research findings have been permanently persisted to disk in docs/current/${state.active}.md.`,
+					onComplete: () => {
+						if (c.hasUI) c.ui.notify(`Economy auto-compaction completed at ${formatTokens(tokens)} tokens.`, "info");
+						updateUIStatus(c);
+					},
+					onError: (err: any) => {
+						if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${err?.message || err}`, "error");
+					},
+				});
+			}
 		}
 	});
 }
@@ -562,7 +793,8 @@ async function markSubQuestCompletedInParent(parentSlug: string, childSlug: stri
 const normalizePath = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
 
 /** Helper to archive a quest file and update journal state (LIFO stack pop) */
-async function archiveQuestFile(name: string, pi: ExtensionAPI): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null }> {
+async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null }> {
+	if (ctx) currentContext = ctx;
 	const path = questPath(name);
 	if (!(await fileExists(path))) {
 		return { success: false, message: `No quest file found at ${path}` };
@@ -614,10 +846,10 @@ async function archiveQuestFile(name: string, pi: ExtensionAPI): Promise<{ succe
 		state.active = nextActive;
 		state.stack = stack;
 		state.prompts = [];
-		persist(pi);
+		persist(pi, ctx);
 	} else {
 		state.stack = stack;
-		persist(pi);
+		persist(pi, ctx);
 	}
 
 	const returnMsg = nextActive ? ` Resumed parent/previous quest '${nextActive}' (LIFO stack).` : "";
@@ -627,6 +859,7 @@ async function archiveQuestFile(name: string, pi: ExtensionAPI): Promise<{ succe
 /** Tool allowing the model to explicitly archive the active (or named) quest and trigger auto-compaction. */
 function installArchiveTool(pi: ExtensionAPI) {
 	const archiveHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		const targetName = slugify(params.questName || state.active || "");
 		if (!targetName) {
 			return {
@@ -635,7 +868,7 @@ function installArchiveTool(pi: ExtensionAPI) {
 			};
 		}
 
-		const res = await archiveQuestFile(targetName, pi);
+		const res = await archiveQuestFile(targetName, pi, ctx);
 		if (!res.success) {
 			return {
 				content: [{ type: "text", text: res.message }],
@@ -649,9 +882,10 @@ function installArchiveTool(pi: ExtensionAPI) {
 				customInstructions: `Quest '${targetName}' completed and archived. Focus summary on key architecture decisions, completed work, and remaining roadmap.`,
 				onComplete: () => {
 					if (ctx.hasUI) ctx.ui.notify(`Compacted context following archive of '${targetName}'`, "info");
+					updateUIStatus(ctx);
 				},
-				onError: (err) => {
-					if (ctx.hasUI) ctx.ui.notify(`Post-archive compaction failed: ${err.message}`, "error");
+				onError: (err: any) => {
+					if (ctx.hasUI) ctx.ui.notify(`Post-archive compaction failed: ${err?.message || err}`, "error");
 				},
 			});
 		}
@@ -839,9 +1073,42 @@ function installSubQuestTool(pi: ExtensionAPI) {
 }
 
 function installMarkTool(pi: ExtensionAPI) {
-	const markHandler = async () => {
+	const markHandler = async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
+		if (ctx) currentContext = ctx;
 		markSaved(pi);
-		return { content: [{ type: "text", text: "Quest file marked as saved in the journal." }], details: {} };
+		updateUIStatus(ctx);
+
+		const c = ctx || currentContext;
+		const usage = typeof c?.getContextUsage === "function" ? c.getContextUsage() : undefined;
+		const threshold = getEconomyThreshold();
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+		const warningMargin = getWarningMargin();
+		const warningTokens = Math.max(0, threshold - warningMargin);
+
+		let compactTriggered = false;
+		if (state.active && threshold > 0 && tokens !== null && tokens >= warningTokens && typeof c?.compact === "function") {
+			compactTriggered = true;
+			c.compact({
+				customInstructions: `Economy auto-compaction at ${formatTokens(tokens)} tokens (threshold: ${formatTokens(threshold)}). Focus summary on active quest '${state.active}', key architectural decisions, modified files, and immediate next steps. All deep context and research findings have been permanently persisted to disk in docs/current/${state.active}.md.`,
+				onComplete: () => {
+					if (c.hasUI) c.ui.notify(`Economy auto-compaction completed at ${formatTokens(tokens)} tokens.`, "info");
+					updateUIStatus(c);
+				},
+				onError: (err: any) => {
+					if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${err?.message || err}`, "error");
+				},
+			});
+		}
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Quest file marked as saved in the journal.${compactTriggered ? " Quest state updated — triggering auto-compaction now." : ""}`,
+				},
+			],
+			details: { compacted: compactTriggered },
+		};
 	};
 
 	pi.registerTool({
@@ -894,6 +1161,9 @@ function installCommands(pi: ExtensionAPI) {
 
 			if ((await fileExists(fullPath)) || (await fileExists(fullFuturePath))) {
 				name = fullSlug;
+				if (spaceIdx > 0) {
+					goal = trimmed;
+				}
 			} else if (spaceIdx > 0 && ((await fileExists(firstPath)) || (await fileExists(firstFuturePath)))) {
 				name = firstSlug;
 				goal = trimmed.slice(spaceIdx + 1).trim();
@@ -956,7 +1226,7 @@ function installCommands(pi: ExtensionAPI) {
 			state.prompts.push(`Goal: ${goal}`);
 		}
 		state.saveCount += 1;
-		persist(pi);
+		persist(pi, ctx);
 		// Initial turn: ask the model to fill the file before doing real work.
 		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
 		pi.sendUserMessage([
@@ -1023,7 +1293,7 @@ function installCommands(pi: ExtensionAPI) {
 		}
 		const entry = `Refinement: ${refinement}`;
 		state.prompts.push(entry);
-		persist(pi);
+		persist(pi, ctx);
 
 		sendSaveRequest(
 			pi,
@@ -1041,13 +1311,14 @@ function installCommands(pi: ExtensionAPI) {
 	const questDelHandler = async (args: string, ctx: ExtensionContext) => {
 		let name = slugify(args);
 		if (!name) {
-			name = (await promptForQuestChoice(ctx, "Select quest to archive:")) ?? "";
+			const choice = await promptForQuestChoice(ctx, "Select quest to archive:");
+			name = choice?.name ? slugify(choice.name) : "";
 		}
 		if (!name) {
 			ctx.ui.notify("No quest selected for archiving.", "warning");
 			return;
 		}
-		const res = await archiveQuestFile(name, pi);
+		const res = await archiveQuestFile(name, pi, ctx);
 		if (!res.success) {
 			ctx.ui.notify(res.message, "warning");
 			return;
@@ -1090,7 +1361,126 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questDraftHandler,
 	});
 
+	const questEconomyHandler = async (args: string, ctx: ExtensionContext) => {
+		currentContext = ctx;
+		const trimmed = args.trim();
+		const currentThreshold = getEconomyThreshold();
+		const currentWarning = getWarningMargin();
+		const usage = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+		const tokenStr = tokens !== null ? formatTokens(tokens) : "unknown";
+
+		if (!trimmed) {
+			const thresholdStr = currentThreshold > 0 ? `${formatTokens(currentThreshold)} tokens (${currentThreshold.toLocaleString()})` : "disabled";
+			const warnStr = `${formatTokens(currentWarning)} tokens (${currentWarning.toLocaleString()})`;
+			const effectiveWarn = currentThreshold > 0 ? `${formatTokens(Math.max(0, currentThreshold - currentWarning))}` : "N/A";
+			const msg = `Quest Economy: threshold = ${thresholdStr}, pre-compact warning = ${warnStr} (warns at ${effectiveWarn}, compacts on save or at ${thresholdStr}). Current usage = ${tokenStr} tokens. Usage: /quest-economy <threshold> [warning] (e.g. /quest-economy 140k 30k, /quest-economy off)`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "info");
+			return;
+		}
+
+		if (trimmed.toLowerCase() === "default") {
+			state.economyTokens = null;
+			state.warningMarginTokens = null;
+			persist(pi, ctx);
+			const newThreshold = getEconomyThreshold();
+			const newWarning = getWarningMargin();
+			const msg = `Quest Economy: reset to default (threshold = ${formatTokens(newThreshold)}, warning = ${formatTokens(newWarning)}). Current usage: ${tokenStr}.`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "info");
+			return;
+		}
+
+		if (trimmed.toLowerCase() === "off" || trimmed.toLowerCase() === "disable" || trimmed.toLowerCase() === "disabled" || trimmed === "0") {
+			state.economyTokens = 0;
+			persist(pi, ctx);
+			const msg = `Quest Economy: auto-compaction disabled. Current usage: ${tokenStr}.`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "info");
+			return;
+		}
+
+		const parts = trimmed.split(/\s+/);
+		const parsedThreshold = parseTokenAmount(parts[0]);
+		if (parsedThreshold === null || parsedThreshold <= 0) {
+			if (ctx.hasUI) ctx.ui.notify(`Invalid token amount: "${parts[0]}". Examples: 140k, 140k 30k, 120000, off, default`, "warning");
+			return;
+		}
+
+		state.economyTokens = parsedThreshold;
+		if (parts.length > 1) {
+			const parsedWarn = parseTokenAmount(parts[1], DEFAULT_PRE_COMPACT_WARNING_TOKENS);
+			if (parsedWarn !== null && parsedWarn > 0) {
+				state.warningMarginTokens = parsedWarn;
+			}
+		}
+		persist(pi, ctx);
+
+		const activeThreshold = getEconomyThreshold();
+		const activeWarning = getWarningMargin();
+		const msg = `Quest Economy: threshold set to ${formatTokens(activeThreshold)} tokens (${activeThreshold.toLocaleString()}), warning margin = ${formatTokens(activeWarning)} tokens. Current usage: ${tokenStr}.`;
+		if (ctx.hasUI) ctx.ui.notify(msg, "info");
+	};
+
+	const questWarningHandler = async (args: string, ctx: ExtensionContext) => {
+		currentContext = ctx;
+		const trimmed = args.trim();
+		const currentWarning = getWarningMargin();
+		const currentThreshold = getEconomyThreshold();
+
+		if (!trimmed) {
+			const warnStr = `${formatTokens(currentWarning)} tokens (${currentWarning.toLocaleString()})`;
+			const effectiveWarn = currentThreshold > 0 ? ` (warns at ${formatTokens(Math.max(0, currentThreshold - currentWarning))})` : "";
+			const msg = `Quest Pre-Compaction Warning Margin: ${warnStr}${effectiveWarn}. Usage: /quest-warning <tokens> (e.g. /quest-warning 30k, /quest-warning default)`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "info");
+			return;
+		}
+
+		if (trimmed.toLowerCase() === "default") {
+			state.warningMarginTokens = null;
+			persist(pi, ctx);
+			const newWarning = getWarningMargin();
+			const msg = `Quest Pre-Compaction Warning: reset to default (${formatTokens(newWarning)} tokens).`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "info");
+			return;
+		}
+
+		const parsed = parseTokenAmount(trimmed, DEFAULT_PRE_COMPACT_WARNING_TOKENS);
+		if (parsed === null || parsed <= 0) {
+			if (ctx.hasUI) ctx.ui.notify(`Invalid warning token amount: "${trimmed}". Examples: 30k, 25000, default`, "warning");
+			return;
+		}
+
+		state.warningMarginTokens = parsed;
+		persist(pi, ctx);
+		const msg = `Quest Pre-Compaction Warning: margin set to ${formatTokens(parsed)} tokens (${parsed.toLocaleString()}).`;
+		if (ctx.hasUI) ctx.ui.notify(msg, "info");
+	};
+
+	const economyCompletions = async (prefix: string) => {
+		const options = ["100k", "120k", "140k", "160k", "180k", "200k", "off", "default"];
+		const filtered = options.filter((o) => o.toLowerCase().startsWith(prefix.toLowerCase()));
+		return filtered.map((value) => ({ value, label: value }));
+	};
+
+	const warningCompletions = async (prefix: string) => {
+		const options = ["15k", "20k", "25k", "30k", "35k", "40k", "default"];
+		const filtered = options.filter((o) => o.toLowerCase().startsWith(prefix.toLowerCase()));
+		return filtered.map((value) => ({ value, label: value }));
+	};
+
+	pi.registerCommand("quest-economy", {
+		description: "Configure or check token economy auto-compaction threshold (e.g. /quest-economy 140k, /quest-economy 140k 30k, /quest-economy off).",
+		getArgumentCompletions: economyCompletions,
+		handler: questEconomyHandler,
+	});
+
+	pi.registerCommand("quest-warning", {
+		description: "Configure pre-compaction warning margin (e.g. /quest-warning 30k).",
+		getArgumentCompletions: warningCompletions,
+		handler: questWarningHandler,
+	});
+
 	const questStatusHandler = async (_args: string, ctx: ExtensionContext) => {
+		currentContext = ctx;
 		if (!state.active) {
 			if (ctx.hasUI) ctx.ui.notify("No active quest.", "info");
 			return;
@@ -1098,7 +1488,11 @@ function installCommands(pi: ExtensionAPI) {
 		const path = questPath(state.active);
 		const exists = await fileExists(path);
 		const fresh = compactionReady();
-		const pct = usagePercent(ctx);
+		const hier = formatQuestHierarchy(state.active, state.stack);
+		const usage = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
+		const threshold = getEconomyThreshold();
+		const tokens = usage?.tokens ?? (usage?.percent && usage?.contextWindow ? Math.round((usage.percent * usage.contextWindow) / 100) : null);
+		const tokenStr = tokens !== null ? `${formatTokens(tokens)}${threshold > 0 ? `/${formatTokens(threshold)}` : ""}` : `~${Math.round(usagePercent(ctx))}%`;
 		let parentInfo = "";
 		let subInfo = "";
 
@@ -1115,7 +1509,7 @@ function installCommands(pi: ExtensionAPI) {
 		}
 
 		const line = exists
-			? `${path}${parentInfo} — ${fresh ? "fresh" : "SAVE PENDING"}, context ~${Math.round(pct)}%, prompts ${state.prompts.length}${subInfo}`
+			? `${path}${parentInfo} [${hier}] — ${fresh ? "fresh" : "SAVE PENDING"}, tokens ${tokenStr}, prompts ${state.prompts.length}${subInfo}`
 			: `${path} — MISSING on disk!`;
 		if (ctx.hasUI) ctx.ui.notify(`Active quest: ${line}`, fresh ? "info" : "warning");
 	};
@@ -1404,12 +1798,13 @@ When working on quests:
    - Expect and support user polish iterations at the end of a quest.
    - When the user provides feedback or refinements, log them under \`## Quest Refinements & User Feedback Loops\`, update acceptance checklists, execute the changes, and verify with tests until the user confirms satisfaction.
 6. **Quest Completion & Wrap-Up Flow**:
-   - When a quest is completed (all features, acceptance criteria, and quality gates pass), ALWAYS prompt the user via \`ask_questions\` with the following structured options:
+   - **Root / Top-Level Quest Completion**: When the main/top-level quest is completed (all features, acceptance criteria, and quality gates pass), ALWAYS prompt the user via \`ask_questions\` with the following structured options:
      1. **Refine anything**: Keep active quest open to make further adjustments or address feedback.
      2. **Archive quest and auto-compact**: Call \`quest_journal_archive({ compact: true })\` to archive the quest and automatically compact session context.
      3. **Archive quest without auto-compact**: Call \`quest_journal_archive({ compact: false })\` to archive the quest while keeping the current session context intact.
      4. **Change to manual mode**: Switch workflow / compaction to manual mode.
-   - Execute the exact action corresponding to the user's choice.
+     Execute the exact action corresponding to the user's choice.
+   - **Sub-Quest Completion (Autonomous Continuation)**: When finishing a child sub-quest, you do NOT need to ask for user input. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\`—deciding \`compact: true\` if context is elevated or \`compact: false\` if context is low—then seamlessly continue working on the parent quest.
 7. **Final Verification & Quality Gates**:
    - Zero compiler errors or warnings.
    - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
@@ -1444,7 +1839,16 @@ You manage quests completely autonomously on disk in \`docs/current/<quest>.md\`
    - When the sub-quest is finished and archived with \`quest_archive\`, it automatically pops from the stack and seamlessly returns to the parent quest!
 
 4. **Auto-Archive Upon Completion (LIFO Pop)**:
-   - When a quest is complete, prompt the user via \`ask_questions\` (Refine, Archive with auto-compact, Archive without auto-compact, Manual mode) and execute \`quest_archive\` based on their choice. If returning to a parent quest on the LIFO stack, resume the parent quest cleanly.${resumeContext}`;
+   - **For Sub-Quests**: Do NOT prompt the user with interactive modal questions. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\` (choosing \`compact: true\` if context is high or \`compact: false\` if context is low) and immediately continue parent quest execution.
+   - **For Root / Top-Level Quests**: Prompt the user via \`ask_questions\` (Refine, Archive with auto-compact, Archive without auto-compact, Manual mode) and execute \`quest_archive\` based on their choice. If returning to a parent quest on the LIFO stack, resume the parent quest cleanly.
+
+# Economy Auto-Compaction & Zero Re-Research Protocol
+Context automatically compacts every ~140k tokens (or configured economy threshold) to preserve speed, minimize cost, and prevent attention drift.
+1. **30k Pre-Compaction Warning Window**: When context reaches ~30k tokens before the limit (~110k for a 140k target), you will receive an explicit alert that auto-compaction is imminent.
+2. **Exhaustive Context Dump Before Compaction**: Upon receiving this alert, you MUST immediately update \`docs/current/<quest>.md\` with an exhaustive dump of all context knowledge, discoveries, architecture decisions, modified files, data structures, and a comprehensive resume prompt.
+3. **Auto-Compaction After Update**: After updating the quest files, context compaction will immediately trigger to reset working memory.
+4. **No Re-Research Across Compactions**: The quest file in \`docs/current/<quest>.md\` is the single source of truth on disk. After compaction, read \`docs/current/<quest>.md\` immediately to resume execution seamlessly with ZERO re-research.
+5. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.${resumeContext}`;
 
 			return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${workflowInstructions}` };
 		} catch {
@@ -1464,7 +1868,8 @@ function registerQuestJournalCRBHook() {
 			if (set.has("quest_journal_mark_saved") || state.active) {
 				return [
 					"Call `quest_journal_mark_saved` after updating active quest files.",
-					"When completing a quest, prompt via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
+					"For sub-quests, complete and archive autonomously (`quest_archive({ compact: boolean })`) without asking modal questions.",
+					"When completing a top-level quest, prompt via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
 				];
 			}
 			return [];
@@ -1498,8 +1903,9 @@ export default function (pi: ExtensionAPI) {
 	const renderEntry = (entry: any, _o: any, theme: any) => {
 		const data = entry.data ?? ({} as StoredState);
 		const fresh = data.saveCount > data.compactCount;
+		const hier = formatQuestHierarchy(data.active, data.stack);
 		return new Text(
-			`${theme.fg("accent", "✨ ")}${theme.fg("muted", "quest:")} ${data.active ?? "(none)"}${
+			`${theme.fg("accent", "✨ ")}${theme.fg("muted", "quest:")} ${hier}${
 				fresh ? "" : theme.fg("warning", " (save pending)")
 			}`,
 			0,

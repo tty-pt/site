@@ -379,7 +379,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	}
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
 
-	bud_adapter_overlay_from_desc(
+	hyle_bud_state_overlay_from_desc(
 	        jo, &app_state, song_app_fields, BUD_OVERLAY_INT,
 	        BUD_OVERLAY_STR);
 
@@ -432,9 +432,12 @@ static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	{
 		pick_view_t pv;
+		char qs[4096] = { 0 };
+		if (fd > 0)
+			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
-		pick_view_collect_desc_values_fd(
-		        fd, song_fields, &meta, &pv, NULL);
+		hyle_bud_picker_view_collect_schema(
+		        qs, song_fields, &meta, &pv, NULL);
 
 		bud_node *form = song_form_content(
 		        1, ctx->id, &meta, data_val, csrf_token, &pv);
@@ -464,8 +467,12 @@ static int song_add_get_handler(int fd, char *body)
 
 	{
 		pick_view_t pv;
+		char qs[4096] = { 0 };
+		if (fd > 0)
+			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
-		pick_view_collect_desc_fd(fd, song_fields, &pv, NULL);
+		hyle_bud_picker_view_collect_schema(
+		        qs, song_fields, NULL, &pv, NULL);
 
 		bud_node *form =
 		        song_form_content(0, NULL, NULL, NULL, csrf_token, &pv);
