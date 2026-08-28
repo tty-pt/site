@@ -18,7 +18,7 @@ static bud_node *g_main = NULL;
 
 static bud_node *g_chord_raw = NULL;
 static bud_node *g_chord_pre = NULL;
-static bud_node *g_key_options[23] = { NULL };
+static bud_node *g_key_options[12] = { NULL };
 static bud_node *g_media_node = NULL;
 
 static void toggle_media(void)
@@ -77,11 +77,11 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 		bud_patch_innerhtml(
 		        bud_node_id(g_chord_pre), app_state.chord_html);
 
-	for (int i = -11; i <= 11; i++) {
+	for (int i = 0; i < 12; i++) {
 		const char *name = key_name(
 		        i, app_state.original_key, app_state.use_latin);
-		if (g_key_options[i + 11])
-			bud_patch_text(g_key_options[i + 11], name);
+		if (g_key_options[i])
+			bud_patch_text(g_key_options[i], name);
 	}
 	toggle_media();
 }
@@ -98,18 +98,19 @@ void wasm_init(const char *json, int len)
 static bud_node *render_key_options(void)
 {
 	bud_node *key_opts = NULL;
-	for (int i = -11; i <= 11; i++) {
+	int cur_t = ((app_state.transpose % 12) + 12) % 12;
+	for (int i = 0; i < 12; i++) {
 		char val_str[16];
 		snprintf(val_str, sizeof(val_str), "%d", i);
 		bud_node *opt =
 		        lx_el("option", lx_attr("value", val_str),
-		              i == app_state.transpose ? lx_attr("selected", "")
-		                                       : lx_none(),
+		              i == cur_t ? lx_attr("selected", "")
+		                         : lx_none(),
 		              lx_text(key_name(
 		                      i, app_state.original_key,
 		                      app_state.use_latin)))
 		                .data.node;
-		g_key_options[i + 11] = (bud_node *)bud_node_child(opt, 0);
+		g_key_options[i] = (bud_node *)bud_node_child(opt, 0);
 		if (!key_opts)
 			key_opts = lx_frag(lx_node(opt)).data.node;
 		else

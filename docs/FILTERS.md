@@ -81,22 +81,21 @@ single-value unchanged, accent-sensitivity preserved.
   `hyle_bud_checkbox_fieldset`).
 - Keep `idx_query_param` for single-value params.
 
-## 7. Filter UI options
+## 7. Filter UI options & `hyle_bud_filter`
 
 - `idx_resolve_filter_options(target_source, target_hd, opts, max)`
   (`mods/index/index.c:48`): builds `hyle_bud_option_t {id,label}[]` — id =
   row_id (slug), label = the target source's first non-`id` display field value
   (via `"<row>:<display_field>"` lookup). Native-only (qmap).
-- `idx_filter_bar` (list.c:222) reads `cur`, resolves options for
-  REFERENCE/MULTI_REFERENCE columns, calls `hyle_bud_filter_field(key, label,
-  type, cur, opts, nopts)`.
+- Universal component: `hyle_bud_filter` / `hyle_bud_filter_group` (`external/hyle/c/libhyle-bud/include/hyle-bud/hyle-bud.h`) is the single schema-driven dispatcher for all filters, dropdowns, and reference selectors across SSR and WASM.
 - Renderers live in `external/hyle/c/libhyle-bud/src/filter.c`:
-  - `hyle_bud_checkbox_fieldset` — the current full-width multi-ref grid;
+  - `hyle_bud_filter` — universal schema field dispatcher.
+  - `hyle_bud_filter_scoped` — scoped/indexed row dispatcher.
+  - `hyle_bud_checkbox_fieldset` — the full-width multi-ref grid;
     comma-splits `current_value` for checked state.
-  - `hyle_bud_reference_select` — single-value `<select>`.
+  - `hyle_bud_reference_select` — single-value `<select>` or dropdown.
   - `hyle_bud_text_input` — text field.
-  - `hyle_bud_filter_field` — dispatch switch; MULTI_REFERENCE → grid (text
-    input fallback when no options).
+  - `hyle_bud_filter_field` — low-level type switch.
 
 ## 8. The multi-ref dropdown widget (shipped)
 

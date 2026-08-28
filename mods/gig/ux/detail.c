@@ -491,12 +491,13 @@ static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 {
 	int latin = (flags & TRANSP_LATIN) ? 1 : 0;
 	bud_node *key_opts = NULL;
-	for (int i = -11; i <= 11; i++) {
+	int cur_t = ((t % 12) + 12) % 12;
+	for (int i = 0; i < 12; i++) {
 		char v[16];
 		snprintf(v, sizeof(v), "%d", i);
 		bud_node *o =
 		        lx_el("option", lx_attr("value", v),
-		              i == t ? lx_attr("selected", "") : lx_none(),
+		              i == cur_t ? lx_attr("selected", "") : lx_none(),
 		              lx_text(key_name(i, orig_key, latin)))
 		                .data.node;
 		if (!key_opts)

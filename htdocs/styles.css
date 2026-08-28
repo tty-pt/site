@@ -64,7 +64,11 @@ ul, menu, .list-none {
   padding: 0;
 }
 
-textarea { resize: vertical; }
+textarea {
+  resize: vertical;
+  width: 100%;
+  min-height: 20rem;
+}
 
 input::placeholder,
 textarea::placeholder {
@@ -276,6 +280,7 @@ label:not(:has(> input[type="checkbox"])):not(.hyle-picker-option):not(.hyle-ms-
 label > input,
 label > textarea {
   display: block;
+  width: 100%;
 }
 
 input,

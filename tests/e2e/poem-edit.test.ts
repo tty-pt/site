@@ -65,10 +65,9 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
       );
     }
 
-    // ── 3. Edit title and upload file ─────────────────────────────────────────
+    // ── 3. Edit title and fill content ─────────────────────────────────────────
     await page.fill('input[name="title"]', editedTitle);
-    const fileInput = page.locator('input[type="file"][name="body_content"]');
-    await fileInput.setInputFiles(tmpFile);
+    await page.fill('textarea[name="body_content"]', poemContent);
     await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to /poem/<id> after save

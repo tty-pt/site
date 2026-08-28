@@ -42,7 +42,18 @@ Deno.test("song detail SSR: verify original key and bolded chords", async () => 
         }
     }
 
-    // 2. Verify "(Original)" label is present in the select options
+    // 2. Verify exactly 12 unique options exist in the key selector (no duplicates)
+    const options = page.locator('select[name="t"] option');
+    const optionCount = await options.count();
+    if (optionCount !== 12) {
+        throw new Error(`Expected exactly 12 key options, but found ${optionCount}`);
+    }
+    const optionTexts = await options.allTextContents();
+    const uniqueKeys = new Set(optionTexts.map(t => t.replace(/\s*\(\+?\-?\d+\)|\s*\(Original\)/g, '').trim()));
+    if (uniqueKeys.size !== 12) {
+        throw new Error(`Duplicate keys detected in key selector options: ${JSON.stringify(optionTexts)} (found ${uniqueKeys.size} unique keys)`);
+    }
+
     const originalOption = page.locator('select[name="t"] option:has-text("(Original)")');
     const count = await originalOption.count();
     if (count === 0) {

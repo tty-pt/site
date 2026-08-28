@@ -22,18 +22,20 @@ Maintains long-lived quest state on disk (`docs/current/<quest>.md`), auto-injec
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/quest` | `/quest [name]` | Sets the active quest. When starting a new quest, prompts for a goal description, pre-populating `## Goal` in the template. When called without arguments, opens an interactive selector listing active quests, drafts, and an option for a new quest. (Alias: `/task`) |
-| `/quest-refine` | `/quest-refine <instructions...>` | Refines the active quest mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update quest file goals, checklist, and `## Quest Refinements & User Feedback Loops`. (Alias: `/task-refine`) |
-| `/quest-save` | `/quest-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active quest file. (Alias: `/task-save`) |
-| `/quest-del` | `/quest-del [name]` | Archives the active or named quest file. When called without arguments, opens an interactive quest selector. Moves file to `docs/archive/<name>-<timestamp>.md` and cleans up any leftover draft. (Alias: `/task-del`) |
-| `/quest-draft` | `/quest-draft <name>` | Creates a proposal draft in `docs/future/<name>.md` without making it active. Blocks creation if `<name>` is already active in `docs/current/`. (Alias: `/task-draft`) |
-| `/quest-status` | `/quest-status` | Displays the active quest name, file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. (Alias: `/task-status`) |
-| `/quests` | `/quests` | Displays active quests in `docs/current/` and proposals in `docs/future/` in a widget panel. (Alias: `/tasks`) |
+| `/quest` | `/quest [description|name]` | Sets the active quest. When initializing a new quest, the name is automatically inferred from the description without asking separately. When called without arguments, opens an interactive selector where selecting "New quest…" prompts directly for the description. |
+| `/subquest` | `/subquest <description...>` | Creates a child sub-quest linked to the active quest with name inferred from description, updates parent's `## Sub-Quests` list, sets `## Parent Quest`, and activates the sub-quest. (Alias: `/sub-quest`) |
+| `/quest-refine` | `/quest-refine <instructions...>` | Refines the active quest mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update quest file goals, checklist, and `## Quest Refinements & User Feedback Loops`. |
+| `/quest-save` | `/quest-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active quest file. |
+| `/quest-del` | `/quest-del [name]` | Archives the active or named quest file. When called without arguments, opens an interactive quest selector. Moves file to `docs/archive/<name>-<timestamp>.md` and cleans up any leftover draft. |
+| `/quest-draft` | `/quest-draft <description>` | Creates a proposal draft in `docs/future/<name>.md` with name inferred from description without making it active. Blocks creation if `<name>` is already active in `docs/current/`. |
+| `/quest-status` | `/quest-status` | Displays the active quest name, file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
+| `/quests` | `/quests` | Displays active quests in `docs/current/` and proposals in `docs/future/` in a widget panel. |
 
 ### Custom Tools
 
-- **`quest_journal_mark_saved`**: A custom tool that records that the active quest file was written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`. (Legacy alias: `task_journal_mark_saved`)
-- **`quest_journal_archive`**: A custom tool to archive the active (or specified) quest from `docs/current/` to `docs/archive/` and optionally trigger session context compaction. (Legacy alias: `task_journal_archive`)
+- **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`. (Alias: `quest_journal_mark_saved`)
+- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Creates its own quest file in `docs/current/<sub-quest>.md`, links it into the parent quest, and records parent reference. (Alias: `quest_journal_subquest`)
+- **`quest_archive`**: Archive the active (or specified) quest from `docs/current/` to `docs/archive/` and optionally trigger session context compaction. (Alias: `quest_journal_archive`)
 
 ### Session Awareness & Context Injection
 
@@ -85,7 +87,7 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 | Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
 |----------------|---------------|----------------------|----------------|
-| `.pi/extensions/quest-journal.ts` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_journal_mark_saved`, `quest_journal_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
+| `.pi/extensions/quest-journal.ts` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_journal_mark_saved`, `quest_journal_subquest`, `quest_journal_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
 
 ---
 

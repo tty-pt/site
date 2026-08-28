@@ -537,7 +537,7 @@ static const char *site_ui_default_field_label(const char *key)
 	    (key[0] == 'g' && key[1] == 'r' && key[2] == 'p' && !key[3]))
 		return "Group:";
 	if (strcmp(key, "body_content") == 0)
-		return "body_content";
+		return "Content:";
 	return key;
 }
 
@@ -580,15 +580,15 @@ bud_node *site_ui_form_from_desc(
 		}
 
 		/* Determine input type */
-		if (strcmp(d->key, "body_content") == 0 ||
-		    (d->file && strstr(d->file, ".html")))
-		{
-			ff[n].type = 2; /* file */
-		} else if (
-		        d->qm_type == BUD_QM_VSTR ||
-		        strcmp(d->key, "format") == 0)
+		if (d->qm_type == BUD_QM_VSTR ||
+		    strcmp(d->key, "format") == 0)
 		{
 			ff[n].type = 1; /* textarea */
+		} else if (
+		        d->file && !strstr(d->file, ".txt") &&
+		        !strstr(d->file, ".html"))
+		{
+			ff[n].type = 2; /* file */
 		} else {
 			ff[n].type = 0; /* text */
 		}
@@ -1027,6 +1027,83 @@ bud_node *site_ui_item_row(
 	             lx_node(left_col),
 	             action_controls ? lx_node(action_controls) : lx_none())
 	        .data.node;
+}
+
+/* ── Generic Row / Cell Picker Primitives (Entity Pattern) ───────── */
+
+bud_node *site_ui_cell_picker(
+        const char *target, const char *key, int row_idx, const char *cur_id,
+        const char *cur_title, const char *get_action, const char *post_action,
+        const char *csrf_token, const pick_view_t *pv, int is_active,
+        const char *extra_class, bud_node **sibling_out)
+{
+	(void)post_action;
+	(void)csrf_token;
+	/* Delegate directly to canonical hyle-bud filter */
+	return hyle_bud_filter_scoped(
+	        NULL, key ? key : target, row_idx, cur_id, cur_title, get_action,
+	        pv, is_active, extra_class, sibling_out);
+}
+
+/* ── Generic Customizable Filter Bar ──────────────────────────────── */
+
+bud_node *site_ui_filter_bar(
+        const site_ui_filter_spec_t *specs, int n_specs, const char *action,
+        const char *current_q, const pick_view_t *pv)
+{
+	bud_node *bar = lx_el("form",
+	                      lx_attr("class", "hyle-filter-bar flex flex-wrap gap-2 items-center"),
+	                      lx_attr("method", "GET"),
+	                      lx_attr("action", action ? action : ""))
+	                        .data.node;
+
+	for (int i = 0; i < n_specs; i++) {
+		const site_ui_filter_spec_t *s = &specs[i];
+		if (!s->field || !s->field[0])
+			continue;
+
+		if (s->kind == FILTER_SEARCH) {
+			bud_append(
+			        bar,
+			        lx_el("input",
+			              lx_attr("type", "search"),
+			              lx_attr("name", s->field),
+			              lx_attr("placeholder", s->label ? s->label : "Search\xe2\x80\xa6"),
+			              lx_attr("class", "border rounded px-2 py-1 text-sm"),
+			              (current_q && current_q[0])
+			                      ? lx_attr("value", current_q)
+			                      : lx_none())
+			                .data.node);
+		} else if (s->kind == FILTER_SINGLE_DROPDOWN || s->kind == FILTER_MULTISELECT) {
+			const pick_entry_t *e = NULL;
+			if (pv) {
+				for (int pi = 0; pi < pv->n; pi++) {
+					if (pv->entries[pi].key && strcmp(pv->entries[pi].key, s->field) == 0) {
+						e = &pv->entries[pi];
+						break;
+					}
+				}
+			}
+			bud_node *f_node = hyle_bud_filter_field(
+			        s->field, s->label ? s->label : s->field,
+			        (s->kind == FILTER_MULTISELECT) ? HYLE_BUD_MULTI_REFERENCE : HYLE_BUD_REFERENCE,
+			        s->current_val ? s->current_val : "",
+			        e ? e->page_opts : NULL, e ? e->npage : 0,
+			        s->filter_style ? s->filter_style : "dropdown");
+			if (f_node)
+				bud_append(bar, f_node);
+		}
+	}
+
+	bud_append(
+	        bar,
+	        lx_el("button",
+	              lx_attr("type", "submit"),
+	              lx_attr("class", "btn btn-primary text-sm py-1 px-3"),
+	              lx_text("Filter"))
+	                .data.node);
+
+	return bar;
 }
 
 /* ── WASM / SSR Picker State JSON Serialization ──────────────────── */

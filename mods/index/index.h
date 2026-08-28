@@ -176,6 +176,14 @@ XY_DECL(int, pick_view_collect_desc_fd,
 	pick_view_t *, pv,
 	int *, active_scope_out);
 
+XY_DECL(int, pick_view_collect_auto_fields,
+	int, fd,
+	const form_field_t *, fields,
+	int, n_fields,
+	pick_view_t *, pv_out,
+	int *, active_field_idx_out,
+	int *, active_scope_out);
+
 XY_DECL(uint32_t, index_module_init, const index_module_def_t *, def);
 #endif /* INDEX_IMPL */
 

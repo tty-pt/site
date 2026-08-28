@@ -21,47 +21,75 @@ At its core, a picker consists of two synchronized components on any given page:
 - Checkbox selections are summarized via `syncSummary()` directly inside the `data-hyle-slot="values"`.
 - The `IntersectionObserver` auto-appends paginated chunks to the `data-hyle-slot="rows"`.
 
-## Usage & API
+## Universal Component: `hyle_bud_filter`
 
-Server-side, modules use unified declarative form builders and string-first picker APIs.
+All reference selection, omni-dropdowns, facets, and filter controls across the entire platform **MUST** use the universal **`hyle_bud_filter`** or **`hyle_bud_filter_scoped`** component (`<hyle-bud/hyle-bud.h>`).
 
-### 1. Declarative Form Integration (Automatic Pickers & Sibling Forms)
+There are no separate ad-hoc picker widgets. `hyle_bud_filter` inspects the schema field descriptor (`hyle_schema_desc_t`) and renders the exact control needed:
+- Single-reference dropdown / omnisearch picker (e.g. `grp`, `song`, `format`)
+- Multi-reference facet / multiselect (e.g. `type`)
+- Boolean switch or text filter
+
+### API
+
+```c
+/* Standard field filter / picker: */
+bud_node *hyle_bud_filter(
+    const hyle_schema_desc_t *schema,
+    const char *field_name,
+    const char *current_value,
+    const hyle_bud_picker_view_t *pv
+);
+
+/* Scoped / Indexed field filter (for repeated row cells, e.g. row 0 -> song_0, pickq-song_0): */
+bud_node *hyle_bud_filter_scoped(
+    const hyle_schema_desc_t *schema,
+    const char *field_name,
+    int scope,
+    const char *current_value,
+    const char *current_label,
+    const char *get_action,
+    const hyle_bud_picker_view_t *pv,
+    int is_active,
+    const char *extra_class,
+    bud_node **sibling_forms_out
+);
+```
+
+## Usage in Forms & Views
+
+### 1. Declarative Form Integration
 Define target schema properties as references in `fields.h`:
 ```c
 MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and")
+REF_FIELD_S(grp, gig_cache_t, grp, 128, "grp.items", "gigs", 1, "dropdown")
 ```
-Render the entire form with a single call to `site_ui_form_from_desc`:
+Render forms declaratively with `site_ui_form_from_desc` (which delegates directly to `hyle_bud_filter`):
 ```c
 bud_node *form = site_ui_form_from_desc(
     action, cancel_href, "Save", song_fields, &meta, csrf_token, &pv, data_val);
 ```
-`site_ui_form_from_desc` automatically extracts values from the struct, renders text inputs, textareas, or pickers based on field types, and automatically attaches sibling GET forms for No-JS compatibility.
 
-### 2. Standalone / Action Pickers (String Target)
-To render an action picker for adding an item from a target dataset:
+### 2. Standalone Reference Selection (e.g. Add Form / Edit Form Header)
 ```c
-bud_node *picker = site_ui_picker(
-    "song.items", post_action, get_action, csrf_token, &pv, 1);
+bud_node *grp_field = hyle_bud_filter(gig_fields, "grp", grp_id, pv);
 ```
-Target strings (e.g. `"song.items"`, `"grp.items"`) automatically configure field keys, display labels, form IDs, URL templates, and query parameters with zero boilerplate.
 
-### 3. Inline Row Replacement Pickers
-To render an inline picker for replacing row `row_idx` in a table or list:
+### 3. Inline / Table Row Reference Selection
 ```c
-bud_node *replace_picker = site_ui_row_replace_picker(
-    "song.items", row_idx, current_song_id, current_title,
-    post_action, back_href, csrf_token, is_active ? &pv : NULL);
+bud_node *song_picker = hyle_bud_filter_scoped(
+    gig_song_fields, "song", row_idx, current_song_id, current_title,
+    action, is_active ? pv : NULL, is_active,
+    "gig-song-title-picker", &row_sibs);
 ```
-Row scoping (`pick_q_song_id__N`), hidden `n` inputs, header text, and cancel triggers are handled automatically.
 
-### 4. Automated Query Collection & Scope Resolution in Handlers
-In route handlers, use `pick_view_collect_desc_fd` or `pick_view_collect_auto_fd`:
+### 4. Automated Query Collection in Handlers
+In route handlers, use `pick_view_collect_desc_fd`, `pick_view_collect_fd`, or `pick_view_collect_auto_fields`:
 ```c
 pick_view_t pv;
-int active_scope = -1;
-pick_view_collect_desc_fd(fd, defs, &pv, &active_scope);
+pick_view_collect_fd(fd, field_defs, vals_in, vals_out, &pv);
 ```
-This single call automatically detects if a scoped picker (`?replace=N` or `pick_q_<key>__N=`) or top picker is active and collects options accordingly.
+Multiple pickers collected within the same HTTP request automatically receive isolated thread-local buffer slots in `pick.c` without cross-clobbering.
 
 ## Naming Conventions
 - Sibling forms take the ID `pickq-<first_ref_key>` (e.g. `id="pickq-type"`).

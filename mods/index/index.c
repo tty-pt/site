@@ -526,6 +526,18 @@ index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char title[256] = { 0 };
 	read_meta_file(ctx->item_path, "title", title, sizeof(title));
 
+	char *vstr_val = NULL;
+	for (int i = 0; i < count; i++) {
+		if (defs[i].qm_type == BUD_QM_VSTR && defs[i].file) {
+			char vstr_path[PATH_MAX];
+			item_child_path(
+			        ctx->item_path, defs[i].file, vstr_path,
+			        sizeof(vstr_path));
+			vstr_val = slurp_file(vstr_path);
+			break;
+		}
+	}
+
 	const char *csrf_token = csrf_setup(fd);
 	char action[256], cancel_href[256];
 	snprintf(action, sizeof(action), "/%s/%s/edit", module, ctx->id);
@@ -537,8 +549,10 @@ index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	bud_node *form = site_ui_form_from_desc(
 	        action, cancel_href, "Save Changes", defs, record, csrf_token,
-	        &pv, NULL);
+	        &pv, vstr_val);
 
+	if (vstr_val)
+		free(vstr_val);
 	free(record);
 
 	return site_ui_respond_edit_page(

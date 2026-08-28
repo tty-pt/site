@@ -80,7 +80,7 @@ static void gig_sync_repertoire(const char *sb_id)
 
 /* Owner-only song search for the edit-page picker (SSR only; the
  * detail page fills its picker state via the bud-state JSON). */
-static void sb_load_edit_song_picks(int fd);
+static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out);
 
 typedef void (*sb_song_cb)(
         const char *key, const char *song_id, int transpose, const char *format,
@@ -594,12 +594,15 @@ static void sb_load_song_picks(int fd, const char *scope)
 		        &g_sb_pick_state);
 }
 
-static void sb_load_edit_song_picks(int fd)
+static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out)
 {
+	static const form_field_t edit_song_ff[] = {
+		{ "song", "Song", 0, FF_REF_SINGLE, "song.items", 0 }, FIELD_END
+	};
 	const char *vals_in[1] = { "" };
 	const char *vals_out[1];
 	pick_view_collect_fd(
-	        fd, sb_pick_song_ff, vals_in, vals_out, &g_edit_pv);
+	        fd, edit_song_ff, vals_in, vals_out, pv_out);
 }
 
 static char *sb_emit_state_json(void)
@@ -1193,69 +1196,38 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	const char *grp_vals_out[1];
 	pick_view_t edit_pv;
 	grp_vals_in[0] = (grp_id && grp_id[0]) ? grp_id : "";
+	static const form_field_t grp_field_def[] = {
+		{ "grp", "Group", 0, FF_REF_SINGLE, "grp.items", 0 },
+		FIELD_END
+	};
 	pick_view_collect_fd(
-	        fd, sb_grp_ff, grp_vals_in, grp_vals_out, &edit_pv);
+	        fd, grp_field_def, grp_vals_in, grp_vals_out, &edit_pv);
 
-	/* Check if any row's song picker or format picker is active in the
-	 * query string */
-	char qs[2048] = { 0 };
-	if (fd > 0)
-		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	/* Check if any row's song picker or format picker is active using
+	 * unified multi-field auto-collector */
+	static const form_field_t row_candidate_ff[] = {
+		{ "song", "Song", 0, FF_REF_SINGLE, "song.items", 0 },
+		{ "fmt", "Format", 0, FF_REF_SINGLE, "song.types", 0 },
+		FIELD_END
+	};
+	pick_view_t active_row_pv;
+	memset(&active_row_pv, 0, sizeof(active_row_pv));
+	int active_field_idx = -1;
+	int active_scope = -1;
 
-	int active_edit_row = -1;
-	for (int i = 0; i < n_songs; i++) {
-		char q_key[64], p_key[64];
-		snprintf(q_key, sizeof(q_key), "pick_q_song_%d=", i);
-		snprintf(p_key, sizeof(p_key), "pick_page_song_%d=", i);
-		if (strstr(qs, q_key) || strstr(qs, p_key)) {
-			active_edit_row = i;
-			break;
-		}
-	}
+	pick_view_collect_auto_fields(
+	        fd, row_candidate_ff, 2, &active_row_pv, &active_field_idx,
+	        &active_scope);
 
-	int active_edit_fmt_row = -1;
-	for (int i = 0; i < n_songs; i++) {
-		char q_key[64], p_key[64];
-		snprintf(q_key, sizeof(q_key), "pick_q_fmt_%d=", i);
-		snprintf(p_key, sizeof(p_key), "pick_page_fmt_%d=", i);
-		if (strstr(qs, q_key) || strstr(qs, p_key)) {
-			active_edit_fmt_row = i;
-			break;
-		}
-	}
+	int active_edit_row = (active_field_idx == 0) ? active_scope : -1;
+	int active_edit_fmt_row = (active_field_idx == 1) ? active_scope : -1;
 
-	/* Load song picks for omnisearch add-picker only when no row is active
-	 */
+	pick_view_t add_pv;
+	memset(&add_pv, 0, sizeof(add_pv));
+
+	/* Load song picks for omnisearch add-picker only when no row is active */
 	if (active_edit_row < 0 && active_edit_fmt_row < 0)
-		sb_load_edit_song_picks(fd);
-	else
-		memset(&g_edit_pv, 0, sizeof(g_edit_pv));
-
-	pick_view_t edit_row_pv;
-	memset(&edit_row_pv, 0, sizeof(edit_row_pv));
-	if (active_edit_row >= 0) {
-		char song_f[32];
-		snprintf(song_f, sizeof(song_f), "song_%d", active_edit_row);
-		form_field_t row_ff[] = { { song_f, "Song", 0, FF_REF_SINGLE,
-			                    "song.items", 0 },
-			                  FIELD_END };
-		const char *v_in[1] = { "" };
-		const char *v_out[1];
-		pick_view_collect(qs, row_ff, v_in, v_out, &edit_row_pv);
-	}
-
-	pick_view_t edit_fmt_row_pv;
-	memset(&edit_fmt_row_pv, 0, sizeof(edit_fmt_row_pv));
-	if (active_edit_fmt_row >= 0) {
-		char fmt_f[32];
-		snprintf(fmt_f, sizeof(fmt_f), "fmt_%d", active_edit_fmt_row);
-		form_field_t fmt_ff[] = { { fmt_f, "Format", 0, FF_REF_SINGLE,
-			                    "song.types", 0 },
-			                  FIELD_END };
-		const char *v_in[1] = { "" };
-		const char *v_out[1];
-		pick_view_collect(qs, fmt_ff, v_in, v_out, &edit_fmt_row_pv);
-	}
+		sb_load_edit_song_picks(fd, &add_pv);
 
 	const char *csrf_token = csrf_setup(fd);
 
@@ -1268,8 +1240,9 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        action, csrf_token, title, ctx->id, grp_vals_out[0], &edit_pv,
 	        cancel_href, n_songs, songs, n_format_opts, format_opts,
 	        song_source, active_edit_row,
-	        active_edit_row >= 0 ? &edit_row_pv : NULL, active_edit_fmt_row,
-	        active_edit_fmt_row >= 0 ? &edit_fmt_row_pv : NULL);
+	        active_edit_row >= 0 ? &active_row_pv : NULL, active_edit_fmt_row,
+	        active_edit_fmt_row >= 0 ? &active_row_pv : NULL,
+	        (active_edit_row < 0 && active_edit_fmt_row < 0) ? &add_pv : NULL);
 
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "gig", site_ui_module_icon("gig"), title,

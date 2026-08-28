@@ -183,6 +183,34 @@ typedef struct {
 bud_node *site_ui_action_picker(
         const site_ui_action_picker_spec_t *spec, const pick_view_t *pv);
 
+/* ── Generic Row / Cell Picker Primitives ─────────────────── */
+bud_node *site_ui_cell_picker(
+        const char *target, const char *key, int row_idx, const char *cur_id,
+        const char *cur_title, const char *get_action, const char *post_action,
+        const char *csrf_token, const pick_view_t *pv, int is_active,
+        const char *extra_class, bud_node **sibling_out);
+
+/* ── Generic Customizable Filter Bar ──────────────────────── */
+#define FILTER_SEARCH 0
+#define FILTER_SINGLE_DROPDOWN 1
+#define FILTER_MULTISELECT 2
+#define FILTER_CUSTOM 3
+
+typedef struct {
+	const char *field;
+	const char *label;
+	const char *target;
+	const char *current_val;
+	const char *filter_style;
+	int kind;
+	int default_op;
+	int collapsible;
+} site_ui_filter_spec_t;
+
+bud_node *site_ui_filter_bar(
+        const site_ui_filter_spec_t *specs, int n_specs, const char *action,
+        const char *current_q, const pick_view_t *pv);
+
 /* ── WASM / SSR Picker State JSON Serialization ───────── */
 #define SITE_UI_PICKER_MAX_OPTS HYLE_BUD_PICKER_MAX_OPTS
 

@@ -25,6 +25,20 @@ typedef struct {
 	char owner[32];
 } gig_cache_t;
 
+/* Ordered list song item schema (for row-level pickers) */
+typedef struct {
+	char song[64];
+	int transpose;
+	char format[64];
+} gig_song_item_t;
+
+static const hyle_schema_desc_t gig_song_fields[] = {
+	REF_FIELD_S(song, gig_song_item_t, song, 64, "song.items", "songs", 1, "dropdown"),
+	REC_FIELD(transpose, gig_song_item_t, transpose, sizeof(int), 1, 0, 0, 1),
+	REF_FIELD_S(fmt, gig_song_item_t, format, 64, "song.types", "types", 1, "dropdown"),
+	FIELD_END
+};
+
 static const hyle_schema_desc_t gig_fields[] = {
 	REC_FIELD(id, gig_cache_t, id, 64, 1, 0, 0, 0),
 	REC_FIELD(title, gig_cache_t, title, 256, 1, 0, 0, 1),

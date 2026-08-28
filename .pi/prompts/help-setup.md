@@ -10,6 +10,7 @@ argument-hint: "[section]"
 | Command | What it does |
 |---------|-------------|
 | `/quest <name>` | Set active quest (promotes drafts or creates new) |
+| `/subquest <name>` | Create a child sub-quest linked to the parent quest |
 | `/quest-save` | Force-save current quest state to disk now |
 | `/quest-refine <text>` | Add mid-workflow requirements to active quest |
 | `/quest-del` | Archive completed quest to `docs/archive/` |

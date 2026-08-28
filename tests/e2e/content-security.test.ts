@@ -57,7 +57,7 @@ Deno.test("poem content strips active markup rather than rendering it", async ()
     await createAndLoginUser(page, BASE);
     await page.goto(`${BASE}/poem/add`);
     await page.fill('input[name="title"]', title);
-    await page.locator('input[name="body_content"]').setInputFiles(upload);
+    await page.fill('textarea[name="body_content"]', payload);
     await Promise.all([
       page.waitForURL(/\/poem\/[^/?]+$/, { timeout: 5000 }),
       page.click('form[method="POST"] button[type="submit"]'),

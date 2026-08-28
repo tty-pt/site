@@ -543,24 +543,27 @@ static int pick_options_handler(int fd, char *body)
 
 /* ── per-form pick view (native only) ───────────────────────────── */
 
+#define PICK_VIEW_MAX_POOLS 16
 #define PICK_VIEW_MAX_OPTS 128
 #define PICK_VIEW_MAX_SEL 64
-#define PICK_OVERLAY_ARENA 16384
+#define PICK_OVERLAY_ARENA 32768
 
-static __thread hyle_bud_option_t pick_v_opts[FF_PICKER_MAX_FIELDS]
+static __thread hyle_bud_option_t pick_v_opts[PICK_VIEW_MAX_POOLS]
                                              [PICK_VIEW_MAX_OPTS];
-static __thread char pick_v_ids[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_OPTS][64];
-static __thread char pick_v_labels[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_OPTS]
+static __thread char pick_v_ids[PICK_VIEW_MAX_POOLS][PICK_VIEW_MAX_OPTS][64];
+static __thread char pick_v_labels[PICK_VIEW_MAX_POOLS][PICK_VIEW_MAX_OPTS]
                                   [256];
-static __thread hyle_bud_option_t pick_v_sel[FF_PICKER_MAX_FIELDS]
+static __thread hyle_bud_option_t pick_v_sel[PICK_VIEW_MAX_POOLS]
                                             [PICK_VIEW_MAX_SEL];
-static __thread char pick_v_sel_ids[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_SEL]
+static __thread char pick_v_sel_ids[PICK_VIEW_MAX_POOLS][PICK_VIEW_MAX_SEL]
                                    [64];
-static __thread char pick_v_sel_labels[FF_PICKER_MAX_FIELDS][PICK_VIEW_MAX_SEL]
+static __thread char pick_v_sel_labels[PICK_VIEW_MAX_POOLS][PICK_VIEW_MAX_SEL]
                                       [256];
-static __thread char pick_v_raw[FF_PICKER_MAX_FIELDS][1024];
-static __thread char pick_v_slugs[FF_PICKER_MAX_FIELDS][1024];
+static __thread char pick_v_raw[PICK_VIEW_MAX_POOLS][1024];
+static __thread char pick_v_slugs[PICK_VIEW_MAX_POOLS][1024];
 static __thread char pick_overlay[PICK_OVERLAY_ARENA];
+static __thread size_t pick_overlay_cursor = 0;
+static __thread int pick_pool_cursor = 0;
 
 /* Normalize a stored multi-ref value (newline/comma tokens that may be
  * positions OR slugs) into a comma-joined slug list for
@@ -661,12 +664,10 @@ static int pick_view_collect_impl(
         char *body, const form_field_t *fields, const char **vals_in,
         const char **vals_out, pick_view_t *pv, const char *scope)
 {
-	int arena_off = 0;
 	int ri = 0;
 	int i;
 
 	memset(pv, 0, sizeof(*pv));
-	pick_overlay[0] = '\0';
 
 	for (i = 0; fields && fields[i].name; i++) {
 		const form_field_t *f = &fields[i];
@@ -676,20 +677,21 @@ static int pick_view_collect_impl(
 			break; /* vals_out caller contract */
 
 		/* Overlay: query param (draft mirror) wins over stored. */
-		if (body && body[0] && f->type != 2 &&
-		    arena_off < PICK_OVERLAY_ARENA - 4)
+		if (body && body[0] && f->type != 2)
 		{
 			char tmp[2048];
 
 			tmp[0] = '\0';
 			idx_query_param(body, f->name, tmp, sizeof(tmp));
 			if (tmp[0]) {
-				vals_out[i] = pick_overlay + arena_off;
-				arena_off += snprintf(
-				        pick_overlay + arena_off,
-				        (size_t)(PICK_OVERLAY_ARENA -
-				                 arena_off),
-				        "%s", tmp);
+				if (pick_overlay_cursor + 2048 >= PICK_OVERLAY_ARENA)
+					pick_overlay_cursor = 0;
+				char *dest = pick_overlay + pick_overlay_cursor;
+				vals_out[i] = dest;
+				pick_overlay_cursor += snprintf(
+				        dest,
+				        (size_t)(PICK_OVERLAY_ARENA - pick_overlay_cursor),
+				        "%s", tmp) + 1;
 				continue;
 			}
 		}
@@ -717,6 +719,8 @@ static int pick_view_collect_impl(
 		if (!fields_hd)
 			continue;
 
+		int slot = (pick_pool_cursor++) % PICK_VIEW_MAX_POOLS;
+
 		memset(e, 0, sizeof(*e));
 		e->key = f->name;
 		if (scope && scope[0])
@@ -726,10 +730,10 @@ static int pick_view_collect_impl(
 		e->multi = f->ref == FF_REF_MULTI;
 		e->target = f->target;
 		e->per_page = PICK_DEFAULT_PER_PAGE;
-		pick_v_raw[ri][0] = '\0';
+		pick_v_raw[slot][0] = '\0';
 		if (vals_out[i] && vals_out[i][0])
 			snprintf(
-			        pick_v_raw[ri], sizeof(pick_v_raw[ri]), "%s",
+			        pick_v_raw[slot], sizeof(pick_v_raw[slot]), "%s",
 			        vals_out[i]);
 
 		{
@@ -741,8 +745,8 @@ static int pick_view_collect_impl(
 			e->per_page = ctx.per_page;
 
 			nopts = pick_fill(
-			        f->target, body, skey, &ctx, pick_v_ids[ri],
-			        pick_v_labels[ri], pick_v_opts[ri],
+			        f->target, body, skey, &ctx, pick_v_ids[slot],
+			        pick_v_labels[slot], pick_v_opts[slot],
 			        PICK_VIEW_MAX_OPTS, &total);
 			e->total = total;
 			/* At or below threshold the inline widget needs
@@ -755,23 +759,23 @@ static int pick_view_collect_impl(
 
 				nopts = pick_fill(
 				        f->target, body, skey, &full,
-				        pick_v_ids[ri], pick_v_labels[ri],
-				        pick_v_opts[ri], PICK_VIEW_MAX_OPTS,
+				        pick_v_ids[slot], pick_v_labels[slot],
+				        pick_v_opts[slot], PICK_VIEW_MAX_OPTS,
 				        &total);
 				e->page = 0;
 			}
 		}
-		e->page_opts = pick_v_opts[ri];
+		e->page_opts = pick_v_opts[slot];
 		e->npage = nopts;
 
 		pick_tokens_to_slugs(
-		        f->target, fields_hd, pick_v_raw[ri], pick_v_slugs[ri],
-		        sizeof(pick_v_slugs[ri]));
+		        f->target, fields_hd, pick_v_raw[slot], pick_v_slugs[slot],
+		        sizeof(pick_v_slugs[slot]));
 		e->nsel = pick_resolve(
-		        f->target, fields_hd, pick_v_slugs[ri],
-		        pick_v_sel_ids[ri], pick_v_sel_labels[ri],
-		        pick_v_sel[ri], PICK_VIEW_MAX_SEL);
-		e->sel = pick_v_sel[ri];
+		        f->target, fields_hd, pick_v_slugs[slot],
+		        pick_v_sel_ids[slot], pick_v_sel_labels[slot],
+		        pick_v_sel[slot], PICK_VIEW_MAX_SEL);
+		e->sel = pick_v_sel[slot];
 		ri++;
 	}
 	pv->n = ri;
@@ -947,5 +951,123 @@ XY_IMPL(int, pick_view_collect_desc_fd,
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	return pick_view_collect_desc(qs, defs, pv, active_scope_out);
 }
+
+XY_IMPL(int, pick_view_collect_auto_fields,
+	int, fd,
+	const form_field_t *, fields,
+	int, n_fields,
+	pick_view_t *, pv_out,
+	int *, active_field_idx_out,
+	int *, active_scope_out)
+{
+	char qs[16384] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	if (active_field_idx_out)
+		*active_field_idx_out = -1;
+	if (active_scope_out)
+		*active_scope_out = -1;
+
+	if (!fields || n_fields <= 0 || !pv_out)
+		return 0;
+
+	/* 1. Check for indexed or scoped params across all candidate fields:
+	 *    pick_q_<name>_<idx>=, pick_q_<name>__<scope>=, or ?replace=<scope> */
+	for (int i = 0; i < n_fields; i++) {
+		const char *fname = fields[i].name;
+		if (!fname || !fname[0])
+			continue;
+
+		/* Scan for pick_q_<fname>_<idx>= or pick_page_<fname>_<idx>= */
+		char prefix_q[64], prefix_p[64];
+		snprintf(prefix_q, sizeof(prefix_q), "pick_q_%s_", fname);
+		snprintf(prefix_p, sizeof(prefix_p), "pick_page_%s_", fname);
+
+		const char *p = strstr(qs, prefix_q);
+		if (p && p != qs && p[-1] != '&' && p[-1] != '?')
+			p = NULL;
+		if (!p) {
+			p = strstr(qs, prefix_p);
+			if (p && p != qs && p[-1] != '&' && p[-1] != '?')
+				p = NULL;
+		}
+
+		if (p) {
+			const char *matched_prefix = (strstr(qs, prefix_q) == p) ? prefix_q : prefix_p;
+			p += strlen(matched_prefix);
+			if (*p >= '0' && *p <= '9') {
+				int idx = atoi(p);
+				if (active_field_idx_out)
+					*active_field_idx_out = i;
+				if (active_scope_out)
+					*active_scope_out = idx;
+
+				char dyn_name[64];
+				snprintf(dyn_name, sizeof(dyn_name), "%s_%d", fname, idx);
+				form_field_t row_ff[] = {
+					{ dyn_name, fields[i].label, fields[i].type,
+					  fields[i].ref, fields[i].target, fields[i].max_inline },
+					{ NULL, NULL, 0, 0, NULL, 0 }
+				};
+				const char *v_in[1] = { "" };
+				const char *v_out[1];
+				return pick_view_collect(qs, row_ff, v_in, v_out, pv_out);
+			}
+		}
+
+		/* Scan for pick_q_<fname>__<scope>= or pick_page_<fname>__<scope>= */
+		char scoped_q[64], scoped_p[64];
+		snprintf(scoped_q, sizeof(scoped_q), "pick_q_%s__", fname);
+		snprintf(scoped_p, sizeof(scoped_p), "pick_page_%s__", fname);
+
+		p = strstr(qs, scoped_q);
+		if (p && p != qs && p[-1] != '&' && p[-1] != '?')
+			p = NULL;
+		if (!p) {
+			p = strstr(qs, scoped_p);
+			if (p && p != qs && p[-1] != '&' && p[-1] != '?')
+				p = NULL;
+		}
+
+		if (p) {
+			const char *matched_scoped = (strstr(qs, scoped_q) == p) ? scoped_q : scoped_p;
+			p += strlen(matched_scoped);
+			int scope = atoi(p);
+			if (active_field_idx_out)
+				*active_field_idx_out = i;
+			if (active_scope_out)
+				*active_scope_out = scope;
+
+			char scope_str[32];
+			snprintf(scope_str, sizeof(scope_str), "%d", scope);
+			form_field_t row_ff[] = {
+				{ fname, fields[i].label, fields[i].type,
+				  fields[i].ref, fields[i].target, fields[i].max_inline },
+				{ NULL, NULL, 0, 0, NULL, 0 }
+			};
+			const char *v_in[1] = { "" };
+			const char *v_out[1];
+			return pick_view_collect_scoped(qs, row_ff, v_in, v_out, pv_out, scope_str);
+		}
+	}
+
+	/* 2. Check for general ?replace=<scope> */
+	char scope_str[32] = { 0 };
+	int scope = pick_find_active_scope(qs, scope_str, sizeof(scope_str));
+	if (scope >= 0 && scope_str[0]) {
+		if (active_scope_out)
+			*active_scope_out = scope;
+		if (active_field_idx_out)
+			*active_field_idx_out = 0;
+		const char *v_in[1] = { "" };
+		const char *v_out[1];
+		return pick_view_collect_scoped(qs, fields, v_in, v_out, pv_out, scope_str);
+	}
+
+	/* 3. Fallback: return 0 if no active field matched (do NOT clobber pv_out) */
+	return 0;
+}
+
 
 #endif /* !__wasm__ */

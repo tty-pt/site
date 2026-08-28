@@ -67,9 +67,10 @@ interface StoredState {
 	saveCount: number;
 	compactCount: number;
 	prompts: string[];
+	stack: string[];
 }
 
-let state: StoredState = { active: null, saveCount: 0, compactCount: 0, prompts: [] };
+let state: StoredState = { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [] };
 let lastPromptAt = Date.now();
 let pickerCancelledThisSession = false;
 
@@ -90,8 +91,9 @@ function persist(pi: ExtensionAPI, ctx?: ExtensionContext) {
 function updateUIStatus(ctx?: ExtensionContext) {
 	if (ctx?.hasUI) {
 		const fresh = compactionReady();
+		const stackInfo = state.stack && state.stack.length > 1 ? ` (stack: ${state.stack.length})` : "";
 		const text = state.active
-			? `✨ quest: ${state.active}${fresh ? "" : " (save pending)"}`
+			? `✨ quest: ${state.active}${stackInfo}${fresh ? "" : " (save pending)"}`
 			: undefined;
 		ctx.ui.setStatus("quest", text);
 	}
@@ -103,6 +105,7 @@ async function syncActiveQuestFromDisk(pi?: ExtensionAPI, ctx?: ExtensionContext
 		const current = await listQuestFiles(QUEST_DIR);
 		if (current.length === 1) {
 			state.active = current[0].replace(/\.md$/, "");
+			state.stack = [state.active];
 			if (pi) persist(pi, ctx);
 		}
 	}
@@ -118,8 +121,14 @@ function reconstruct(ctx: ExtensionContext) {
 		}
 	}
 	state = latest && latest.active
-		? { active: latest.active, saveCount: latest.saveCount || 0, compactCount: latest.compactCount || 0, prompts: Array.isArray(latest.prompts) ? latest.prompts : [] }
-		: { active: null, saveCount: 0, compactCount: 0, prompts: [] };
+		? {
+				active: latest.active,
+				saveCount: latest.saveCount || 0,
+				compactCount: latest.compactCount || 0,
+				prompts: Array.isArray(latest.prompts) ? latest.prompts : [],
+				stack: Array.isArray(latest.stack) ? latest.stack : (latest.active ? [latest.active] : []),
+		  }
+		: { active: null, saveCount: 0, compactCount: 0, prompts: [], stack: [] };
 	lastPromptAt = Date.now();
 	void syncActiveQuestFromDisk(undefined, ctx);
 }
@@ -128,16 +137,21 @@ function reconstruct(ctx: ExtensionContext) {
 // Helpers & Environment Inspection
 // ---------------------------------------------------------------------------
 
-function slugify(name: string): string {
+function slugify(name: string, maxLen = 80): string {
 	if (!name || typeof name !== "string") return "";
-	return (
-		name
-			.trim()
-			.toLowerCase()
-			.replace(/[^a-z0-9.\-_]+/g, "-")
-			.replace(/-{2,}/g, "-")
-			.replace(/^-+|-+$/g, "")
-	);
+	let slug = name
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9.\-_]+/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^-+|-+$/g, "");
+	if (slug.length > maxLen) {
+		const cut = slug.slice(0, maxLen);
+		const lastHyphen = cut.lastIndexOf("-");
+		slug = lastHyphen > 20 ? cut.slice(0, lastHyphen) : cut;
+		slug = slug.replace(/-+$/, "");
+	}
+	return slug;
 }
 
 const questPath = (slug: string | null) => (slug ? `${QUEST_DIR}/${slug}.md` : "");
@@ -161,6 +175,74 @@ async function cleanDraftIfExists(slug: string) {
 			// ignore cleanup errors
 		}
 	}
+}
+
+/** Link a child sub-quest into the parent quest markdown file under ## Sub-Quests. */
+async function linkSubQuestInParent(parentSlug: string, childSlug: string, description = ""): Promise<boolean> {
+	if (!parentSlug || !childSlug || parentSlug === childSlug) return false;
+	const currentPath = questPath(parentSlug);
+	const futurePath = `docs/future/${parentSlug}.md`;
+	const targetPath = (await fileExists(currentPath)) ? currentPath : (await fileExists(futurePath)) ? futurePath : null;
+	if (!targetPath) return false;
+
+	try {
+		let content = await readFile(targetPath, "utf8");
+		const linkEntry = description ? `- [ ] [[${childSlug}]] — ${description}` : `- [ ] [[${childSlug}]]`;
+
+		// If child already referenced in the file, don't duplicate
+		if (content.includes(`[[${childSlug}]]`)) return true;
+
+		const subQuestsSectionRegex = /^(##\s+Sub-Quests\s*\n)([\s\S]*?)(?=\n##\s+|$)/m;
+		const match = content.match(subQuestsSectionRegex);
+
+		if (match) {
+			const sectionBody = match[2];
+			// If body only has empty checkbox `- [ ] \n` or placeholder, replace or append
+			const cleanedBody = sectionBody.replace(/- \[\s*\]\s*(\n|$)/g, "").trimEnd();
+			const newSectionBody = cleanedBody ? `${cleanedBody}\n${linkEntry}\n` : `> Sub-quests, follow-ups, or tangent quests spawned from this quest.\n${linkEntry}\n`;
+			content = content.replace(subQuestsSectionRegex, `$1${newSectionBody}`);
+		} else {
+			// Insert ## Sub-Quests section before ## Why this matters or ## Decisions made or at end
+			const insertBeforeRegex = /\n(##\s+(?:Why this matters|Decisions made|Constraints & Rules|Remaining work))/;
+			const newSection = `\n## Sub-Quests\n> Sub-quests, follow-ups, or tangent quests spawned from this quest.\n${linkEntry}\n`;
+			if (insertBeforeRegex.test(content)) {
+				content = content.replace(insertBeforeRegex, `${newSection}\n$1`);
+			} else {
+				content = `${content.trimEnd()}\n${newSection}`;
+			}
+		}
+
+		await writeFile(targetPath, content, "utf8");
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Extract parent quest slug from quest markdown file, if present. */
+function extractParentFromQuest(content: string): string | null {
+	const parentRegex = /##\s+Parent Quest\s*\n+(?:>.*?\n+)*\s*(?:\[\[([^\]]+)\]\]|([a-zA-Z0-9_\-\.]+))/i;
+	const match = content.match(parentRegex);
+	if (match) {
+		const raw = match[1] || match[2];
+		return raw ? slugify(raw) : null;
+	}
+	return null;
+}
+
+/** Extract sub-quests list from quest markdown file. */
+function extractSubQuestsFromQuest(content: string): string[] {
+	const subRegex = /##\s+Sub-Quests\s*\n([\s\S]*?)(?=\n##\s+|$)/i;
+	const match = content.match(subRegex);
+	if (!match) return [];
+	const body = match[1];
+	const results: string[] = [];
+	const linkRegex = /\[\[([^\]]+)\]\]/g;
+	let m: RegExpExecArray | null;
+	while ((m = linkRegex.exec(body)) !== null) {
+		if (m[1]) results.push(m[1].trim());
+	}
+	return results;
 }
 
 function gitBranch(): string | null {
@@ -233,8 +315,8 @@ function compactionReady(): boolean {
 function shouldCapturePrompt(text: string): boolean {
 	const t = text.trim();
 	if (!t) return false;
-	if (t.startsWith("/quest") || t.startsWith("/task")) return false;
-	if (t.startsWith("Quest-journal:") || t.startsWith("Task-journal:")) return false;
+	if (t.startsWith("/quest") || t.startsWith("/subquest")) return false;
+	if (t.startsWith("Quest-journal:")) return false;
 	if (t.length < 2) return false;
 	return true;
 }
@@ -268,8 +350,9 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 
 	if (state.active) {
 		const fresh = compactionReady();
+		const stackInfo = state.stack && state.stack.length > 1 ? ` | LIFO stack: [${state.stack.join(" → ")}]` : "";
 		lines.push(
-			`- Active quest: \`docs/current/${state.active}.md\` (${fresh ? "fresh" : "SAVE PENDING — update it before compaction"}); manage with /quest, /quest-save, /quests.`,
+			`- Active quest: \`docs/current/${state.active}.md\` (${fresh ? "fresh" : "SAVE PENDING — update it before compaction"}${stackInfo}); manage with /quest, /subquest, /quests.`,
 		);
 	} else {
 		lines.push("- Active quest: none (use /quest <name> before starting real work).");
@@ -361,8 +444,13 @@ function installBeforeSwitch(pi: ExtensionAPI) {
 	});
 }
 
+interface QuestChoiceResult {
+	name: string;
+	goal?: string;
+}
+
 /** Prompt the user with an interactive selector to choose an existing quest, draft, or create a new quest. */
-async function promptForQuestChoice(ctx: ExtensionContext, title = "Select quest:"): Promise<string | null> {
+async function promptForQuestChoice(ctx: ExtensionContext, title = "Select quest:"): Promise<QuestChoiceResult | null> {
 	if (!ctx.hasUI || ctx.mode !== "tui") return null;
 	const current = await listQuestFiles(QUEST_DIR);
 	const future = await listQuestFiles("docs/future");
@@ -384,12 +472,19 @@ async function promptForQuestChoice(ctx: ExtensionContext, title = "Select quest
 	if (!choice || choice === "Cancel") return null;
 
 	if (choice === "New quest…") {
-		const inputName = await ctx.ui.input("New quest name (e.g. migrate-ftp):");
-		return inputName && slugify(inputName) ? slugify(inputName) : null;
+		const nameInput = (await ctx.ui.input("Enter short quest name / slug (e.g. expand-editor-textarea):")) ?? "";
+		const trimmedName = nameInput.trim();
+		if (!trimmedName) return null;
+		const name = slugify(trimmedName, 45);
+		if (!name) return null;
+		const goalInput = (await ctx.ui.input("Describe what you want to accomplish (optional):")) ?? "";
+		const trimmedGoal = goalInput.trim();
+		return { name, goal: trimmedGoal || trimmedName };
 	}
 
 	const clean = choice.replace(/ \(active\)$/, "").replace(/ \(draft\)$/, "");
-	return slugify(clean);
+	const name = slugify(clean);
+	return name ? { name } : null;
 }
 
 /**
@@ -406,7 +501,11 @@ async function offerQuestChoiceOnBoot(pi: ExtensionAPI, ctx: ExtensionContext, r
 		pickerCancelledThisSession = true; // user opted out — suppress quest-journal prompts until /quest
 		return;
 	}
-	pi.sendUserMessage(`/quest ${choice}`);
+	if (choice.goal && choice.goal !== choice.name) {
+		pi.sendUserMessage(`/quest ${choice.name} ${choice.goal}`);
+	} else {
+		pi.sendUserMessage(`/quest ${choice.name}`);
+	}
 }
 
 /** On quit, ask the model for a final snapshot of the active quest file. */
@@ -442,30 +541,93 @@ function installFileWatch(pi: ExtensionAPI) {
 	});
 }
 
+/** Mark a sub-quest as completed in parent quest markdown file. */
+async function markSubQuestCompletedInParent(parentSlug: string, childSlug: string): Promise<boolean> {
+	const parentPath = questPath(parentSlug);
+	if (!(await fileExists(parentPath))) return false;
+	try {
+		let content = await readFile(parentPath, "utf8");
+		const regex = new RegExp(`(-\\s*\\[)\\s*(\\]\\s*\\[\\[${childSlug}\\]\\])`, "g");
+		if (regex.test(content)) {
+			content = content.replace(regex, "$1x$2");
+			await writeFile(parentPath, content, "utf8");
+			return true;
+		}
+	} catch {
+		// ignore
+	}
+	return false;
+}
+
 const normalizePath = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
 
-/** Helper to archive a quest file and update journal state */
-async function archiveQuestFile(name: string, pi: ExtensionAPI): Promise<{ success: boolean; message: string; dest?: string }> {
+/** Helper to archive a quest file and update journal state (LIFO stack pop) */
+async function archiveQuestFile(name: string, pi: ExtensionAPI): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null }> {
 	const path = questPath(name);
 	if (!(await fileExists(path))) {
 		return { success: false, message: `No quest file found at ${path}` };
 	}
+
+	let parentSlug: string | null = null;
+	try {
+		const content = await readFile(path, "utf8");
+		parentSlug = extractParentFromQuest(content);
+	} catch {
+		// ignore
+	}
+
 	await mkdir("docs/archive", { recursive: true });
 	const dest = `docs/archive/${basename(path).replace(/\.md$/, "")}-${Date.now().toString(36)}.md`;
 	await rename(path, dest);
 	await cleanDraftIfExists(name);
+
+	// LIFO stack management: remove archived quest from stack
+	const stack = Array.isArray(state.stack) ? [...state.stack] : (state.active ? [state.active] : []);
+	const idx = stack.lastIndexOf(name);
+	if (idx >= 0) {
+		stack.splice(idx, 1);
+	}
+
+	// Find the top valid quest remaining on the LIFO stack
+	let nextActive: string | null = null;
+	while (stack.length > 0) {
+		const candidate = stack[stack.length - 1];
+		if (await fileExists(questPath(candidate))) {
+			nextActive = candidate;
+			break;
+		}
+		stack.pop();
+	}
+
+	// Fallback to parent from file if stack had no active candidate
+	if (!nextActive && parentSlug && (await fileExists(questPath(parentSlug)))) {
+		nextActive = parentSlug;
+		stack.push(parentSlug);
+	}
+
+	// Mark sub-quest completed (- [x]) in parent quest file
+	if (parentSlug) {
+		await markSubQuestCompletedInParent(parentSlug, name);
+	}
+
 	if (state.active === name) {
-		state.active = null;
+		state.active = nextActive;
+		state.stack = stack;
 		state.prompts = [];
 		persist(pi);
+	} else {
+		state.stack = stack;
+		persist(pi);
 	}
-	return { success: true, message: `Archived ${path} → ${dest}`, dest };
+
+	const returnMsg = nextActive ? ` Resumed parent/previous quest '${nextActive}' (LIFO stack).` : "";
+	return { success: true, message: `Archived ${path} → ${dest}.${returnMsg}`, dest, nextActive };
 }
 
 /** Tool allowing the model to explicitly archive the active (or named) quest and trigger auto-compaction. */
 function installArchiveTool(pi: ExtensionAPI) {
 	const archiveHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
-		const targetName = slugify(params.questName || params.taskName || state.active || "");
+		const targetName = slugify(params.questName || state.active || "");
 		if (!targetName) {
 			return {
 				content: [{ type: "text", text: "Error: No active quest to archive and no questName provided." }],
@@ -507,8 +669,8 @@ function installArchiveTool(pi: ExtensionAPI) {
 	};
 
 	pi.registerTool({
-		name: "quest_journal_archive",
-		label: "Archive Quest Journal",
+		name: "quest_archive",
+		label: "Archive Quest",
 		description: "Archive the active (or specified) quest from docs/current/ to docs/archive/ and optionally trigger session context compaction.",
 		parameters: {
 			type: "object",
@@ -516,10 +678,6 @@ function installArchiveTool(pi: ExtensionAPI) {
 				questName: {
 					type: "string",
 					description: "Quest name to archive. Defaults to currently active quest.",
-				},
-				taskName: {
-					type: "string",
-					description: "Alias for questName.",
 				},
 				compact: {
 					type: "boolean",
@@ -531,30 +689,152 @@ function installArchiveTool(pi: ExtensionAPI) {
 		execute: archiveHandler,
 	});
 
-	// Register task_journal_archive alias for backwards compatibility
 	pi.registerTool({
-		name: "task_journal_archive",
-		label: "Archive Task Journal (legacy alias for quest_journal_archive)",
+		name: "quest_journal_archive",
+		label: "Archive Quest (alias for quest_archive)",
 		description: "Archive the active (or specified) quest from docs/current/ to docs/archive/ and optionally trigger session context compaction.",
 		parameters: {
 			type: "object",
 			properties: {
 				questName: {
 					type: "string",
-					description: "Quest name to archive.",
-				},
-				taskName: {
-					type: "string",
-					description: "Alias for questName.",
+					description: "Quest name to archive. Defaults to currently active quest.",
 				},
 				compact: {
 					type: "boolean",
-					description: "Whether to immediately trigger session context compaction after archiving.",
+					description: "Whether to immediately trigger session context compaction after archiving (defaults to true).",
 				},
 			},
 			additionalProperties: false,
 		},
 		execute: archiveHandler,
+	});
+}
+
+function installSubQuestTool(pi: ExtensionAPI) {
+	const subquestHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
+		const goal = (params.goal || params.name || "").trim();
+		const name = slugify(params.name || goal || "");
+		const parentName = slugify(params.parentName || state.active || "");
+		const switchNow = params.switchNow === true;
+
+		if (!name) {
+			return {
+				content: [{ type: "text", text: "Error: Sub-quest name or goal description is required." }],
+				details: { error: "missing_name" },
+			};
+		}
+		if (!goal) {
+			return {
+				content: [{ type: "text", text: "Error: Sub-quest goal description is required." }],
+				details: { error: "missing_goal" },
+			};
+		}
+
+		await mkdir(QUEST_DIR, { recursive: true });
+		const path = questPath(name);
+
+		if (await fileExists(path)) {
+			// Sub-quest file already exists — link in parent if not already linked
+			if (parentName) {
+				await linkSubQuestInParent(parentName, name, goal);
+			}
+			return {
+				content: [{ type: "text", text: `Sub-quest '${name}' already exists at ${path}.${parentName ? ` Verified link in parent '${parentName}'.` : ""}` }],
+				details: { subquest: name, path, existing: true, parent: parentName },
+			};
+		}
+
+		await writeFile(path, QUEST_TEMPLATE(name, goal, parentName), "utf8");
+		if (parentName) {
+			await linkSubQuestInParent(parentName, name, goal);
+		}
+
+		if (switchNow) {
+			pickerCancelledThisSession = false;
+			if (!Array.isArray(state.stack)) state.stack = [];
+			if (parentName && !state.stack.includes(parentName)) {
+				state.stack.push(parentName);
+			}
+			if (!state.stack.includes(name)) {
+				state.stack.push(name);
+			} else {
+				const idx = state.stack.lastIndexOf(name);
+				state.stack = state.stack.slice(0, idx + 1);
+			}
+			state.active = name;
+			state.prompts = [goal ? `Goal: ${goal}` : `Sub-quest: ${name}`];
+			state.saveCount += 1;
+			persist(pi, ctx);
+		}
+
+		const msg = `Created sub-quest **${name}** at \`${path}\`${parentName ? ` (parent: **${parentName}**)` : ""}.${switchNow ? " Switched active quest to this sub-quest." : " Kept parent quest active; sub-quest added to tracker."}`;
+		if (ctx.hasUI) ctx.ui.notify(msg, "info");
+
+		return {
+			content: [{ type: "text", text: msg }],
+			details: { subquest: name, path, parent: parentName, switched: switchNow },
+		};
+	};
+
+	pi.registerTool({
+		name: "quest_subquest",
+		label: "Create Sub-Quest",
+		description: "Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Creates its own quest file in docs/current/<sub-quest>.md, links it into the parent quest, and records parent reference.",
+		parameters: {
+			type: "object",
+			properties: {
+				name: {
+					type: "string",
+					description: "Sub-quest name/slug. Optional if goal is provided.",
+				},
+				goal: {
+					type: "string",
+					description: "Goal or description of what this sub-quest will accomplish.",
+				},
+				parentName: {
+					type: "string",
+					description: "Parent quest name. Defaults to currently active quest.",
+				},
+				switchNow: {
+					type: "boolean",
+					description: "Whether to immediately switch the active session quest to this sub-quest (default: false).",
+				},
+			},
+			required: ["goal"],
+			additionalProperties: false,
+		},
+		execute: subquestHandler,
+	});
+
+	pi.registerTool({
+		name: "quest_journal_subquest",
+		label: "Create Sub-Quest (alias for quest_subquest)",
+		description: "Create a sub-quest for mid-quest remarks, tangents, or follow-ups.",
+		parameters: {
+			type: "object",
+			properties: {
+				name: {
+					type: "string",
+					description: "Sub-quest name/slug. Optional if goal is provided.",
+				},
+				goal: {
+					type: "string",
+					description: "Goal or description of what this sub-quest will accomplish.",
+				},
+				parentName: {
+					type: "string",
+					description: "Parent quest name.",
+				},
+				switchNow: {
+					type: "boolean",
+					description: "Whether to immediately switch active quest to this sub-quest.",
+				},
+			},
+			required: ["goal"],
+			additionalProperties: false,
+		},
+		execute: subquestHandler,
 	});
 }
 
@@ -565,17 +845,16 @@ function installMarkTool(pi: ExtensionAPI) {
 	};
 
 	pi.registerTool({
-		name: "quest_journal_mark_saved",
+		name: "quest_mark_saved",
 		label: "Mark Quest Saved",
 		description: "Record that the active quest file has been written to disk. Call after updating the quest file.",
 		parameters: { type: "object", properties: {}, additionalProperties: false },
 		execute: markHandler,
 	});
 
-	// Register task_journal_mark_saved alias for backwards compatibility
 	pi.registerTool({
-		name: "task_journal_mark_saved",
-		label: "Mark Task Saved (legacy alias for quest_journal_mark_saved)",
+		name: "quest_journal_mark_saved",
+		label: "Mark Quest Saved (alias for quest_mark_saved)",
 		description: "Record that the active quest file has been written to disk. Call after updating the quest file.",
 		parameters: { type: "object", properties: {}, additionalProperties: false },
 		execute: markHandler,
@@ -596,27 +875,65 @@ async function listQuestFiles(dir = QUEST_DIR): Promise<string[]> {
 
 function installCommands(pi: ExtensionAPI) {
 	const questHandler = async (args: string, ctx: ExtensionContext) => {
-		let name = slugify(args);
-		if (!name) {
-			name = (await promptForQuestChoice(ctx, "Which quest do you want to work on?")) ?? "";
+		let name = "";
+		let goal = "";
+
+		const trimmed = args.trim();
+		if (trimmed) {
+			const spaceIdx = trimmed.indexOf(" ");
+			const firstToken = spaceIdx > 0 ? trimmed.slice(0, spaceIdx) : trimmed;
+			const isFirstTokenSlug = firstToken.includes("-") || firstToken.includes("_");
+
+			const fullSlug = slugify(trimmed, 45);
+			const firstSlug = slugify(firstToken, 45);
+
+			const fullPath = questPath(fullSlug);
+			const fullFuturePath = `docs/future/${fullSlug}.md`;
+			const firstPath = questPath(firstSlug);
+			const firstFuturePath = `docs/future/${firstSlug}.md`;
+
+			if ((await fileExists(fullPath)) || (await fileExists(fullFuturePath))) {
+				name = fullSlug;
+			} else if (spaceIdx > 0 && ((await fileExists(firstPath)) || (await fileExists(firstFuturePath)))) {
+				name = firstSlug;
+				goal = trimmed.slice(spaceIdx + 1).trim();
+			} else if (spaceIdx > 0 && isFirstTokenSlug) {
+				name = firstSlug;
+				goal = trimmed.slice(spaceIdx + 1).trim();
+			} else {
+				name = fullSlug;
+				goal = trimmed;
+			}
+		} else {
+			const choice = await promptForQuestChoice(ctx, "Which quest do you want to work on?");
+			if (!choice) {
+				ctx.ui.notify("No quest selected.", "warning");
+				return;
+			}
+			name = choice.name;
+			goal = choice.goal || "";
 		}
+
 		if (!name) {
 			ctx.ui.notify("No quest selected.", "warning");
 			return;
 		}
+
 		await mkdir(QUEST_DIR, { recursive: true });
 		const path = questPath(name);
 		const futurePath = `docs/future/${name}.md`;
 		
-		let goal = "";
 		if (!(await fileExists(path))) {
 			if (await fileExists(futurePath)) {
 				// Promote future quest to current
 				await rename(futurePath, path);
 				if (ctx.hasUI) ctx.ui.notify(`Promoted ${futurePath} → ${path}`, "info");
 			} else {
-				if (ctx.hasUI && ctx.mode === "tui") {
-					goal = ((await ctx.ui.input(`Describe the goal for quest '${name}':`)) ?? "").trim();
+				if (!goal && ctx.hasUI && ctx.mode === "tui") {
+					goal = ((await ctx.ui.input("Describe the goal for this quest:")) ?? "").trim();
+				}
+				if (!goal) {
+					goal = name.replace(/-/g, " ");
 				}
 				await writeFile(path, QUEST_TEMPLATE(name, goal), "utf8");
 			}
@@ -627,6 +944,13 @@ function installCommands(pi: ExtensionAPI) {
 		const switching = state.active !== name;
 		pickerCancelledThisSession = false; // explicit /quest re-enables journal prompts
 		state.active = name;
+		if (!Array.isArray(state.stack)) state.stack = [];
+		if (!state.stack.includes(name)) {
+			state.stack.push(name);
+		} else {
+			const idx = state.stack.lastIndexOf(name);
+			state.stack = state.stack.slice(0, idx + 1);
+		}
 		if (switching) state.prompts = [];
 		if (goal) {
 			state.prompts.push(`Goal: ${goal}`);
@@ -670,12 +994,6 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questHandler,
 	});
 
-	pi.registerCommand("task", {
-		description: "Alias for /quest.",
-		getArgumentCompletions: questCompletions,
-		handler: questHandler,
-	});
-
 	const questSaveHandler = async (_args: string, ctx: ExtensionContext) => {
 		if (!state.active) {
 			ctx.ui.notify("No active quest — use /quest <name> first.", "warning");
@@ -687,11 +1005,6 @@ function installCommands(pi: ExtensionAPI) {
 
 	pi.registerCommand("quest-save", {
 		description: "Persist the active quest file now.",
-		handler: questSaveHandler,
-	});
-
-	pi.registerCommand("task-save", {
-		description: "Alias for /quest-save.",
 		handler: questSaveHandler,
 	});
 
@@ -725,11 +1038,6 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questRefineHandler,
 	});
 
-	pi.registerCommand("task-refine", {
-		description: "Alias for /quest-refine.",
-		handler: questRefineHandler,
-	});
-
 	const questDelHandler = async (args: string, ctx: ExtensionContext) => {
 		let name = slugify(args);
 		if (!name) {
@@ -752,20 +1060,16 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questDelHandler,
 	});
 
-	pi.registerCommand("task-del", {
-		description: "Alias for /quest-del.",
-		handler: questDelHandler,
-	});
-
 	const questDraftHandler = async (args: string, ctx: ExtensionContext) => {
-		let name = slugify(args);
-		if (!name && ctx.mode === "tui") {
-			name = slugify((await ctx.ui.input("Future quest name (e.g. cx-ergonomics):")) ?? "");
+		let desc = args.trim();
+		if (!desc && ctx.mode === "tui") {
+			desc = ((await ctx.ui.input("Describe the future quest / proposal (e.g. cx ergonomics):")) ?? "").trim();
 		}
-		if (!name) {
-			ctx.ui.notify("Usage: /quest-draft <name>", "warning");
+		if (!desc) {
+			ctx.ui.notify("Usage: /quest-draft <description>", "warning");
 			return;
 		}
+		const name = slugify(desc);
 		const currentPath = questPath(name);
 		if (await fileExists(currentPath)) {
 			ctx.ui.notify(`Quest '${name}' is already active/current in ${currentPath}. Cannot create a draft for an active quest.`, "warning");
@@ -774,7 +1078,7 @@ function installCommands(pi: ExtensionAPI) {
 		await mkdir("docs/future", { recursive: true });
 		const path = `docs/future/${name}.md`;
 		if (!(await fileExists(path))) {
-			await writeFile(path, FUTURE_QUEST_TEMPLATE(name), "utf8");
+			await writeFile(path, FUTURE_QUEST_TEMPLATE(name, desc), "utf8");
 			if (ctx.hasUI) ctx.ui.notify(`Created draft proposal at ${path}`, "info");
 		} else {
 			if (ctx.hasUI) ctx.ui.notify(`Draft already exists at ${path}`, "warning");
@@ -783,11 +1087,6 @@ function installCommands(pi: ExtensionAPI) {
 
 	pi.registerCommand("quest-draft", {
 		description: "Draft a future quest or proposal without making it active.",
-		handler: questDraftHandler,
-	});
-
-	pi.registerCommand("task-draft", {
-		description: "Alias for /quest-draft.",
 		handler: questDraftHandler,
 	});
 
@@ -800,8 +1099,23 @@ function installCommands(pi: ExtensionAPI) {
 		const exists = await fileExists(path);
 		const fresh = compactionReady();
 		const pct = usagePercent(ctx);
+		let parentInfo = "";
+		let subInfo = "";
+
+		if (exists) {
+			try {
+				const content = await readFile(path, "utf8");
+				const parent = extractParentFromQuest(content);
+				if (parent) parentInfo = ` (parent: [[${parent}]])`;
+				const subQuests = extractSubQuestsFromQuest(content);
+				if (subQuests.length > 0) subInfo = ` | sub-quests: ${subQuests.join(", ")}`;
+			} catch {
+				// ignore read error
+			}
+		}
+
 		const line = exists
-			? `${path} — ${fresh ? "fresh" : "SAVE PENDING"}, context ~${Math.round(pct)}%, prompts ${state.prompts.length}`
+			? `${path}${parentInfo} — ${fresh ? "fresh" : "SAVE PENDING"}, context ~${Math.round(pct)}%, prompts ${state.prompts.length}${subInfo}`
 			: `${path} — MISSING on disk!`;
 		if (ctx.hasUI) ctx.ui.notify(`Active quest: ${line}`, fresh ? "info" : "warning");
 	};
@@ -811,17 +1125,44 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questStatusHandler,
 	});
 
-	pi.registerCommand("task-status", {
-		description: "Alias for /quest-status.",
-		handler: questStatusHandler,
-	});
-
 	const questsHandler = async (_args: string, ctx: ExtensionContext) => {
 		const current = await listQuestFiles(QUEST_DIR);
 		const future = await listQuestFiles("docs/future");
-		const rows = current.length
-			? current.map((f) => `  ${f.replace(/\.md$/, "")}${state.active === f.replace(/\.md$/, "") ? "  ◀ active" : ""}`)
-			: ["  (none — use /quest <name>)"];
+
+		// Build parent-child map
+		const parentOf = new Map<string, string>();
+		const childrenOf = new Map<string, string[]>();
+
+		for (const f of current) {
+			const slug = f.replace(/\.md$/, "");
+			try {
+				const content = await readFile(`${QUEST_DIR}/${f}`, "utf8");
+				const p = extractParentFromQuest(content);
+				if (p && current.includes(`${p}.md`)) {
+					parentOf.set(slug, p);
+					const list = childrenOf.get(p) || [];
+					list.push(slug);
+					childrenOf.set(p, list);
+				}
+			} catch {
+				// ignore
+			}
+		}
+
+		const renderedCurrent: string[] = [];
+		for (const f of current) {
+			const slug = f.replace(/\.md$/, "");
+			if (parentOf.has(slug)) continue; // rendered under parent
+
+			const isActive = state.active === slug;
+			renderedCurrent.push(`  ${slug}${isActive ? "  ◀ active" : ""}`);
+			const subs = childrenOf.get(slug) || [];
+			for (const sub of subs) {
+				const isSubActive = state.active === sub;
+				renderedCurrent.push(`    ↳ ${sub}${isSubActive ? "  ◀ active" : ""}`);
+			}
+		}
+
 		const futureRows = future.length
 			? future.map((f) => `  ${f.replace(/\.md$/, "")}`)
 			: ["  (none — use /quest-draft <name>)"];
@@ -830,7 +1171,7 @@ function installCommands(pi: ExtensionAPI) {
 			`Active: ${state.active ? questPath(state.active) : "(none)"}`, 
 			"",
 			"Current quests:",
-			...rows,
+			...(renderedCurrent.length ? renderedCurrent : ["  (none — use /quest <name>)"]),
 			"",
 			"Future / Backlog quests:",
 			...futureRows
@@ -842,20 +1183,89 @@ function installCommands(pi: ExtensionAPI) {
 		handler: questsHandler,
 	});
 
-	pi.registerCommand("tasks", {
-		description: "Alias for /quests.",
-		handler: questsHandler,
+	const subquestHandler = async (args: string, ctx: ExtensionContext) => {
+		let desc = args.trim();
+		if (!desc && ctx.mode === "tui") {
+			desc = ((await ctx.ui.input("Describe the sub-quest (e.g. handle auth edge cases):")) ?? "").trim();
+		}
+		if (!desc) {
+			ctx.ui.notify("Usage: /subquest <description...>", "warning");
+			return;
+		}
+
+		const goal = desc;
+		const name = slugify(desc);
+
+		await mkdir(QUEST_DIR, { recursive: true });
+		const path = questPath(name);
+		const parentName = state.active || "";
+
+		if (!(await fileExists(path))) {
+			await writeFile(path, QUEST_TEMPLATE(name, goal, parentName), "utf8");
+		}
+		if (parentName) {
+			await linkSubQuestInParent(parentName, name, goal);
+		}
+
+		pickerCancelledThisSession = false;
+		if (!Array.isArray(state.stack)) state.stack = [];
+		if (parentName && !state.stack.includes(parentName)) {
+			state.stack.push(parentName);
+		}
+		if (!state.stack.includes(name)) {
+			state.stack.push(name);
+		} else {
+			const idx = state.stack.lastIndexOf(name);
+			state.stack = state.stack.slice(0, idx + 1);
+		}
+		state.active = name;
+		state.prompts = goal ? [`Goal: ${goal}`] : [`Sub-quest: ${name}`];
+		state.saveCount += 1;
+		persist(pi, ctx);
+
+		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
+		pi.sendUserMessage([
+			{
+				type: "text",
+				text: `Now working on sub-quest **${name}**${parentName ? ` (parent: **${parentName}**)` : ""}. Sub-quest file: \`${path}\`.${goalText}
+
+**Mandatory Upfront Research & Planning Protocol**:
+1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
+2. Perform an in-depth codebase investigation for this sub-quest: inspect relevant libraries, module boundaries, data flows, and root causes of complexity. Think ambitiously about clean abstractions.
+3. Formulate a comprehensive, multi-stage execution plan where each phase is self-contained with exact function signatures, touched files, and targeted test files.
+4. Fill \`${path}\` completely with the goal, parent reference, findings, multi-stage plan, acceptance checklist, and next recommended step.
+5. In your very first turn, present the complete analysis, architectural trade-offs, and multi-stage plan clearly to the user for confirmation.
+
+**Mandatory TDD & Quality Workflow**:
+1. Develop targeted test(s) for each stage BEFORE feature code.
+2. Develop feature -> build -> run -> verify targeted tests.
+3. Support end-of-task user feedback loops and polish iterations until final confirmation.
+4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`,
+			},
+		]);
+	};
+
+	pi.registerCommand("subquest", {
+		description: "Create and switch to a sub-quest linked to the current active quest (e.g. /subquest error-handling Handle network disconnects).",
+		getArgumentCompletions: questCompletions,
+		handler: subquestHandler,
+	});
+
+	pi.registerCommand("sub-quest", {
+		description: "Alias for /subquest.",
+		getArgumentCompletions: questCompletions,
+		handler: subquestHandler,
 	});
 }
 
-function FUTURE_QUEST_TEMPLATE(name: string): string {
+function FUTURE_QUEST_TEMPLATE(name: string, goal = ""): string {
 	return [
 		`# Proposal / Future Quest: ${name}`,
 		``,
 		`Status: **proposal**`,
 		``,
 		`## Goals & Scope`,
-		`> What are we proposing to change and why?`,
+		goal ? goal : `> What are we proposing to change and why?`,
 		``,
 		`## Requirements`,
 		`- `,
@@ -869,7 +1279,11 @@ function FUTURE_QUEST_TEMPLATE(name: string): string {
 	].join("\n");
 }
 
-function QUEST_TEMPLATE(name: string, goal = ""): string {
+function QUEST_TEMPLATE(name: string, goal = "", parent = ""): string {
+	const parentSec = parent
+		? `## Parent Quest\n[[${parent}]]\n`
+		: `## Parent Quest\n> If this is a sub-quest, reference the parent quest here (e.g. [[parent-quest-name]]).\n`;
+
 	return [
 		`# Quest: ${name}`,
 		``,
@@ -880,6 +1294,7 @@ function QUEST_TEMPLATE(name: string, goal = ""): string {
 		goal ? `> Goal: ${goal}` : `> Paste the verbatim user prompt here (or very faithful summary if truncated). This section MUST stay faithful — it is enforced by the extension.`,
 		`>`,
 		``,
+		parentSec,
 		`## Current Status`,
 		`- [ ] not started · in progress · blocked · done`,
 		``,
@@ -909,6 +1324,10 @@ function QUEST_TEMPLATE(name: string, goal = ""): string {
 		`- **Targeted Tests**: `,
 		``,
 		`## Acceptance Criteria & Polish Checklist`,
+		`- [ ] `,
+		``,
+		`## Sub-Quests`,
+		`> Sub-quests, follow-ups, or tangent quests spawned from this quest.`,
 		`- [ ] `,
 		``,
 		`## Quest Refinements & User Feedback Loops`,
@@ -951,8 +1370,8 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 		const content = await readFile(path, "utf8");
 		if (!content) return "";
 		
-		// Extract key sections: Goal, Current Status, Remaining work, Next recommended step, Resume prompt
-		const sections = ["Goal", "Current Status", "Remaining work", "Next recommended step", "Resume prompt"];
+		// Extract key sections: Goal, Parent Quest, Sub-Quests, Current Status, Remaining work, Next recommended step, Resume prompt
+		const sections = ["Goal", "Parent Quest", "Sub-Quests", "Current Status", "Remaining work", "Next recommended step", "Resume prompt"];
 		const extracted: string[] = [];
 		for (const sec of sections) {
 			const regex = new RegExp(`## ${sec}\\n([\\s\\S]*?)(?=\\n## |$)`, "i");
@@ -997,28 +1416,35 @@ When working on quests:
    - **Server / Daemon Restart**: Always ensure a fresh instance of the server / test daemon is running (e.g. restart background servers or run clean boot test) before running final tests, so tests never run against stale in-memory state.
    - Full test suite (\`make test\`) must pass with zero errors.
 
-# Quest Management & Verbal Requests
-You maintain long-lived quest state on disk in \`docs/current/<quest>.md\`.
-When users ask in natural language to manage quests (verbally refining, switching, drafting, archiving, or listing), apply these rules directly:
+# Autonomous Quest Management (Zero Manual User Commands Needed)
+You manage quests completely autonomously on disk in \`docs/current/<quest>.md\`. The user should NEVER need to type manual slash commands.
 
-1. **Refine Active Quest / User Feedback** (e.g. "refine quest", "add requirement X", "tweak Y", "feedback: Z"):
-   - Read and update \`docs/current/<active-quest>.md\` immediately using \`edit\` or \`write\`.
-   - Record the user feedback under \`## Quest Refinements & User Feedback Loops\`.
-   - Update \`## Remaining work\`, \`## Acceptance Criteria & Polish Checklist\`, \`## Decisions made\`, and \`## Next recommended step\`.
-   - Call \`quest_journal_mark_saved\` after updating to keep journal staleness in sync.
+1. **Auto-Initialize New Quest on Any User Request**:
+   - Do not ask questions to the user initially on startup. Let the user type as usual.
+   - When the user describes an issue, feature, or bug they want fixed:
+     - Automatically engage in deep research and brainstorming on the codebase.
+     - Infer a clean, concise quest slug (e.g. \`docs/current/<inferred-slug>.md\`).
+     - Immediately create/fill \`docs/current/<inferred-slug>.md\` using the quest template with the stated goal, initial analysis, TDD checklist, and verbatim request.
+     - Call \`quest_mark_saved\` to activate and track the quest.
+     - Present the complete analysis findings, architectural trade-offs, and multi-stage plan in your very first turn.
+   - If the user mentions continuing or resuming a quest without specifying which one:
+     - Check current quests in \`docs/current/\` and prompt the user via \`ask_questions\` with the available choices.
 
-2. **Start / Switch Quest** (e.g. "switch to quest X", "start quest Y"):
-   - Maintain/create \`docs/current/<quest>.md\`. If a proposal exists at \`docs/future/<quest>.md\`, promote it by moving it to \`docs/current/<quest>.md\`.
-   - Fill initial Goal, Current Status, and TDD checklist before feature work.
+2. **Auto-Refine Active Quest on User Feedback**:
+   - When the user provides feedback, tweaks, or new requirements mid-quest or post-implementation:
+     - Immediately read and update \`docs/current/<active-quest>.md\`.
+     - Log the feedback under \`## Quest Refinements & User Feedback Loops\`.
+     - Update \`## Remaining work\`, \`## Acceptance Criteria & Polish Checklist\`, \`## Decisions made\`, and \`## Next recommended step\`.
+     - Call \`quest_journal_mark_saved\`.
 
-3. **Draft Future Quest** (e.g. "draft quest X", "propose quest Y for later"):
-   - Create \`docs/future/<quest>.md\` using proposal format (Goals & Scope, Requirements, Implementation Plan). Do not make it active.
+3. **Auto-Create Sub-Quests for Tangents or Follow-ups (LIFO Stack)**:
+   - Quests operate on a **LIFO (Last-In, First-Out) stack**.
+   - When user remarks, tangents, or follow-ups arise during a quest, call \`quest_subquest({ goal: "..." })\` immediately (pushes the sub-quest onto the stack).
+   - Link it under \`## Sub-Quests\` in the parent quest file.
+   - When the sub-quest is finished and archived with \`quest_archive\`, it automatically pops from the stack and seamlessly returns to the parent quest!
 
-4. **Archive Quest** (e.g. "archive quest X", "finish quest Y"):
-   - Use tool \`quest_journal_archive({ questName: "...", compact: boolean })\` or move \`docs/current/<quest>.md\` to \`docs/archive/<quest>-<timestamp>.md\` and remove any matching draft in \`docs/future/\`.
-
-5. **List / Status** (e.g. "what are my quests?", "show quest status"):
-   - Inspect files in \`docs/current/\` and \`docs/future/\` to report quest status.${resumeContext}`;
+4. **Auto-Archive Upon Completion (LIFO Pop)**:
+   - When a quest is complete, prompt the user via \`ask_questions\` (Refine, Archive with auto-compact, Archive without auto-compact, Manual mode) and execute \`quest_archive\` based on their choice. If returning to a parent quest on the LIFO stack, resume the parent quest cleanly.${resumeContext}`;
 
 			return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${workflowInstructions}` };
 		} catch {
@@ -1035,7 +1461,7 @@ function registerQuestJournalCRBHook() {
 		}
 		g.__pi_crb_providers.push((_ctx: ExtensionContext, tools: string[]) => {
 			const set = new Set(tools.map((t) => t.toLowerCase()));
-			if (set.has("quest_journal_mark_saved") || set.has("task_journal_mark_saved") || state.active) {
+			if (set.has("quest_journal_mark_saved") || state.active) {
 				return [
 					"Call `quest_journal_mark_saved` after updating active quest files.",
 					"When completing a quest, prompt via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
@@ -1051,7 +1477,6 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (event, ctx) => {
 		reconstruct(ctx);
 		await syncActiveQuestFromDisk(pi, ctx);
-		await offerQuestChoiceOnBoot(pi, ctx, event.reason);
 	});
 	pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
 
@@ -1065,6 +1490,7 @@ export default function (pi: ExtensionAPI) {
 	installFileWatch(pi);
 	installMarkTool(pi);
 	installArchiveTool(pi);
+	installSubQuestTool(pi);
 	installCommands(pi);
 	installShutdownSave(pi);
 
