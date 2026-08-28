@@ -119,7 +119,7 @@ async function testQuestJournalCommandInference() {
 	assert.strictEqual(inputPrompted, false, "Should not prompt user for input when description is provided");
 	assert.ok(userMessages.length > 0, "Should send user message to initialize quest");
 	const lastMsg = userMessages[userMessages.length - 1];
-	const text = Array.isArray(lastMsg) ? lastMsg[0].text : lastMsg.text || "";
+	const text = typeof lastMsg === "string" ? lastMsg : (Array.isArray(lastMsg) ? lastMsg[0].text : lastMsg.text || "");
 	assert.ok(text.includes("improve-the-search-bar-responsiveness"), "Should infer slug from description");
 	assert.ok(text.includes("Improve the search bar responsiveness"), "Should include stated goal in message");
 
@@ -186,13 +186,8 @@ async function testQuestJournalSessionStartNoModal() {
 	console.log("PASS: quest_journal_session_start_no_modal_test");
 }
 
-async function runAllTests() {
+Deno.test("quest_journal_prompt: prompt injection and session start", async () => {
 	await testQuestJournalPromptInjection();
 	await testQuestJournalCommandInference();
 	await testQuestJournalSessionStartNoModal();
-}
-
-runAllTests().catch((err) => {
-	console.error("FAIL: quest_journal tests", err);
-	process.exit(1);
 });

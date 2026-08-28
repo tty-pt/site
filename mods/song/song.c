@@ -14,10 +14,11 @@
 
 #include "../common/common.h"
 #include "../source/source.h"
-#include "hyle/source.h"
 #include "../auth/auth.h"
-#include "../../lib/transp/transp.h"
-#include "../../lib/transp/parse.h"
+#include <transp/transp.h>
+#include <transp/parse.h>
+#define SONG_IMPL
+#include "song.h"
 #include "fields.h"
 
 static transp_ctx_t *g_transp_ctx = NULL;
@@ -27,24 +28,6 @@ static void song_meta_read(const char *path, song_cache_t *m)
 {
 	source_meta_read(path, song_fields, SONG_FIELD_COUNT, m, sizeof(*m));
 	str_list_normalize(m->type, m->type, sizeof(m->type));
-}
-
-XY_IMPL(int, song_get_viewer_zoom, const char *, user)
-{
-	char r[32] = { 0 };
-	if (user_pref_read(user, "chords-zoom", r, sizeof(r)) != 0)
-		return VIEWER_ZOOM_DEFAULT;
-	int v = atoi(r);
-	return (v < VIEWER_ZOOM_MIN || v > VIEWER_ZOOM_MAX)
-	               ? VIEWER_ZOOM_DEFAULT
-	               : v;
-}
-
-XY_IMPL(int, song_set_viewer_zoom, const char *, user, int, zoom)
-{
-	char b[16];
-	snprintf(b, sizeof(b), "%d", zoom);
-	return user_pref_write(user, "chords-zoom", b);
 }
 
 XY_IMPL(int, song_transpose_root,
@@ -70,54 +53,106 @@ XY_IMPL(int, song_transpose_root,
 	return 0;
 }
 
-static void song_load_saved_prefs(const char *user, int *f, int *m)
+XY_IMPL(int, song_get_viewer_zoom, const char *, username)
 {
-	char buf[32] = { 0 };
-	if (!user || !user[0])
-		return;
-	if (user_pref_read(user, "chords-latin", buf, sizeof(buf)) == 0 &&
-	    atoi(buf))
-		*f |= TRANSP_LATIN;
-	if (user_pref_read(user, "chords-media", buf, sizeof(buf)) == 0 &&
-	    atoi(buf))
-		*m = 1;
+	char r[32] = { 0 };
+	if (!username || !username[0] ||
+	    user_pref_read(username, "chords-zoom", r, sizeof(r)) != 0)
+		return VIEWER_ZOOM_DEFAULT;
+	int v = atoi(r);
+	return (v < VIEWER_ZOOM_MIN || v > VIEWER_ZOOM_MAX)
+	               ? VIEWER_ZOOM_DEFAULT
+	               : v;
 }
 
-static void song_parse_prefs(
-        int fd, const char *username, char *qs, int *t, int *f, int *m,
-        int *zoom)
+XY_IMPL(int, song_set_viewer_zoom, const char *, username, int, zoom)
 {
-	int pf;
-	*zoom = 0;
-	parse_transpose_qs(qs, t, &pf, m);
-	if (pf & TPARAM_LATIN)
-		*f |= TRANSP_LATIN;
-	if (pf & TPARAM_HTML)
-		*f |= TRANSP_HTML;
+	if (!username || !username[0])
+		return -1;
+	char b[16];
+	snprintf(b, sizeof(b), "%d", zoom);
+	return user_pref_write(username, "chords-zoom", b);
+}
 
-	if (qs[0] && username && username[0]) {
-		char pv[2];
-		pv[0] = (*f & TRANSP_LATIN) ? '1' : '0';
-		pv[1] = '\0';
-		user_pref_write(username, "chords-latin", pv);
-		pv[0] = (*m) ? '1' : '0';
-		user_pref_write(username, "chords-media", pv);
+XY_IMPL(int, song_parse_viewer_prefs,
+	int, fd,
+	const char *, username,
+	song_viewer_prefs_t *, out)
+{
+	if (!out)
+		return -1;
+	char qs[1024] = { 0 };
+	out->transpose = 0;
+	out->flags = TRANSP_HTML;
+	out->show_media = 0;
+	out->zoom = song_get_viewer_zoom(username);
+
+	if (username && username[0]) {
+		char buf[32] = { 0 };
+		if (user_pref_read(
+		            username, "chords-latin", buf, sizeof(buf)) == 0 &&
+		    atoi(buf))
+			out->flags |= TRANSP_LATIN;
+		if (user_pref_read(
+		            username, "chords-media", buf, sizeof(buf)) == 0 &&
+		    atoi(buf))
+			out->show_media = 1;
 	}
+
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	if (qs[0]) {
-		char zb[16];
+		int t = 0, pf = 0, sm = 0;
+		char copy[1024];
+		snprintf(copy, sizeof(copy), "%s", qs);
+		axil_query_parse(copy);
+		char buf[32];
+		if (axil_query_param("t", buf, sizeof(buf)) > 0)
+			t = atoi(buf);
+		if (axil_query_param("b", buf, sizeof(buf)) >= 0 &&
+		    atoi(buf) != 0)
+			pf |= TRANSP_BEMOL;
+		if (axil_query_param("l", buf, sizeof(buf)) >= 0 &&
+		    atoi(buf) != 0)
+			pf |= TRANSP_LATIN;
+		if (axil_query_param("h", buf, sizeof(buf)) >= 0 &&
+		    atoi(buf) != 0)
+			pf |= TRANSP_HTML;
+		if (axil_query_param("m", buf, sizeof(buf)) >= 0 &&
+		    atoi(buf) != 0)
+			sm = 1;
+
+		out->transpose = t;
+		if (pf & TRANSP_BEMOL)
+			out->flags |= TRANSP_BEMOL;
+		if (pf & TRANSP_LATIN)
+			out->flags |= TRANSP_LATIN;
+		if (pf & TRANSP_HTML)
+			out->flags |= TRANSP_HTML;
+		if (sm)
+			out->show_media = 1;
+
+		char zb[16] = { 0 };
 		if (axil_query_param("z", zb, sizeof(zb)) > 0) {
-			*zoom = atoi(zb);
-			if (*zoom < VIEWER_ZOOM_MIN)
-				*zoom = VIEWER_ZOOM_MIN;
-			if (*zoom > VIEWER_ZOOM_MAX)
-				*zoom = VIEWER_ZOOM_MAX;
+			int zv = atoi(zb);
+			if (zv < VIEWER_ZOOM_MIN)
+				zv = VIEWER_ZOOM_MIN;
+			if (zv > VIEWER_ZOOM_MAX)
+				zv = VIEWER_ZOOM_MAX;
+			out->zoom = zv;
 			if (username && username[0])
-				song_set_viewer_zoom(username, *zoom);
+				song_set_viewer_zoom(username, zv);
+		}
+
+		if (username && username[0]) {
+			char pv[2];
+			pv[0] = (out->flags & TRANSP_LATIN) ? '1' : '0';
+			pv[1] = '\0';
+			user_pref_write(username, "chords-latin", pv);
+			pv[0] = out->show_media ? '1' : '0';
+			user_pref_write(username, "chords-media", pv);
 		}
 	}
-
-	if (!qs[0])
-		song_load_saved_prefs(username, f, m);
+	return 0;
 }
 
 static int api_song_viewer_prefs_handler(int fd, char *body)
@@ -169,26 +204,18 @@ static void song_custom_overlay_fn(struct json_object *jo, void *user_data)
 }
 
 static int
-
 song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)body;
 	(void)user;
-	int t = 0, f = 0, m = 0, v_z = 0;
-	char qs[1024] = { 0 };
+	song_viewer_prefs_t prefs;
 	char *trans = NULL;
 	int k = 0;
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &v_z);
+	song_parse_viewer_prefs(fd, ctx->username, &prefs);
 
-	if (v_z == 0) {
-		if (ctx->username && ctx->username[0])
-			v_z = song_get_viewer_zoom(ctx->username);
-		else
-			v_z = VIEWER_ZOOM_DEFAULT;
-	}
-
-	song_transpose_root(ctx->doc_root, ctx->id, t, f, &trans, &k);
+	song_transpose_root(
+	        ctx->doc_root, ctx->id, prefs.transpose, prefs.flags, &trans,
+	        &k);
 
 	struct song_custom_overlay custom_data = { trans };
 
@@ -197,10 +224,10 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	tmp.is_owner = (ctx->username && ctx->username[0])
 	                       ? item_owner_check(ctx->item_path, ctx->username)
 	                       : 0;
-	tmp.transpose = t;
-	tmp.zoom = v_z;
-	tmp.use_latin = (f & TRANSP_LATIN) != 0;
-	tmp.show_media = m;
+	tmp.transpose = prefs.transpose;
+	tmp.zoom = prefs.zoom;
+	tmp.use_latin = (prefs.flags & TRANSP_LATIN) != 0;
+	tmp.show_media = prefs.show_media;
 	tmp.original_key = k;
 
 	int rc = source_respond_page_state(
@@ -327,17 +354,14 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 
 	int is_owner = item_owner_check(ctx->item_path, ctx->username);
 
-	int t = 0, f = 0, m = 0, zoom = 0;
-	char qs[1024] = { 0 };
+	song_viewer_prefs_t prefs;
 	char *trans = NULL;
 	int k = 0;
 	json_object *jo = NULL;
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	song_parse_prefs(fd, ctx->username, qs, &t, &f, &m, &zoom);
+	song_parse_viewer_prefs(fd, ctx->username, &prefs);
 
-	f |= TRANSP_HTML;
-
-	song_transpose_root(g_doc_root, ctx->id, t, f, &trans, &k);
+	song_transpose_root(
+	        g_doc_root, ctx->id, prefs.transpose, prefs.flags, &trans, &k);
 
 	source_build_state_json("song.items", ctx->id, song_state_specs, &jo);
 	if (!jo)
@@ -357,15 +381,12 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	snprintf(
 	        app_state.cache.title, sizeof(app_state.cache.title), "%s",
 	        title);
-	app_state.transpose = t;
-	app_state.use_latin = (f & TRANSP_LATIN) != 0;
-	app_state.show_media = m;
+	app_state.transpose = prefs.transpose;
+	app_state.use_latin = (prefs.flags & TRANSP_LATIN) != 0;
+	app_state.show_media = prefs.show_media;
 	app_state.original_key = k;
 	app_state.is_owner = is_owner;
-	if (zoom)
-		app_state.zoom = zoom;
-	else
-		app_state.zoom = song_get_viewer_zoom(ctx->username);
+	app_state.zoom = prefs.zoom;
 	snprintf(
 	        app_state.chord_html, sizeof(app_state.chord_html), "%s",
 	        trans ? trans : "");
@@ -502,7 +523,8 @@ void xy_install(void)
 
 	ref_field_register("song.items", "type");
 
-	hyle_register_derive("song.lyrics_from_data", derive_song_lyrics, NULL);
+	source_register_derive(
+	        "song.lyrics_from_data", derive_song_lyrics, NULL);
 
 	source_setup(
 	        "song.items", NULL, sizeof(song_cache_t), "var/song",

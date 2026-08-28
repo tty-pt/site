@@ -38,8 +38,9 @@ Flags: `ICTX_NEED_LOGIN`, `ICTX_NEED_OWNERSHIP`, `ICTX_SONG_ID`,
 `ICTX_CSRF_MPFD`, `ICTX_CSRF_QUERY`.
 
 Ownership identity comes only from auth's `item_owner_record`,
-`item_owner_read`, and `item_owner_check`. Do not compare cached owner fields
-for authorization and do not derive site usernames from filesystem UIDs.
+`item_owner_read`, and `item_owner_check`. In production, these strictly follow
+POSIX disk permissions (UID); in dev, owner files are used as local fallback.
+Do not compare cached owner fields for authorization.
 
 ### Redirect
 
@@ -105,9 +106,9 @@ Full contract in `docs/ARCHITECTURE.md` §5.
   **outside** the `#ifndef MODULE_IMPL` guard — inside it, callers would never
   see them.
 - Keep the exported set minimal: `static` by default.
-- Do not `#include "*.c"` across modules except the three sanctioned pure
-  C-isomorphic files `mods/common/ux/site_ui.c|mods/index/ux/list.c|
-  mods/song/ux/music.c` (`scripts/check-module-boundaries.sh:26`). Keep
+- Do not `#include "*.c"` across modules except the sanctioned pure
+  C-isomorphic files `mods/common/ux/site_ui.c|mods/index/ux/list.c`
+  (`scripts/check-module-boundaries.sh:26`). Keep
   `static` by default.
 
 ## Module dependencies — declare immediate `xy_load` deps
@@ -213,7 +214,7 @@ The site is pure C with progressive WASM enhancement. **No site-specific JavaScr
 
 - Do not commit `*.so`, `*.o`, `*.wasm`, swap files, or Rust `target/`.
 - Include-source reuse is sanctioned for C-isomorphic units (see
-  `docs/C-ISOMORPHIC-BUD.md`): only `site_ui.c|list.c|music.c`.
+  `docs/C-ISOMORPHIC-BUD.md`): only `site_ui.c|list.c`.
 - `bud_patch_text` must target a TEXT node, not an element (`WASM-BRIDGE.md:§6`).
 
 ## Related docs

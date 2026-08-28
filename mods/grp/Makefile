@@ -1,6 +1,7 @@
 HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
-EXTRA_CFLAGS += -I../common -I../song/lib/transp -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
-EXTRA_LDLIBS += -lbud -laxil-auth
+TRANSP_DIR := $(shell cd ../.. && pwd)/external/libtransp
+EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_DIR)/c/libhyle-bud/include
+EXTRA_LDLIBS += -lbud -laxil-auth -L$(TRANSP_DIR)/lib -ltransp -Wl,-rpath,$(TRANSP_DIR)/lib
 EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
 EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
 LIST_UX_DEPS = ../index/ux/list.c ../index/ux/list_state.h \

@@ -23,7 +23,7 @@ check_include(){
 		return 0
 	fi
 	case "$target_rel" in
-	mods/common/ux/site_ui.c|mods/index/ux/list.c|mods/song/ux/music.c)
+	mods/common/ux/site_ui.c|mods/index/ux/list.c)
 		return 0
 		;;
 	esac
@@ -88,12 +88,11 @@ $(CDPATH= cd -- "$root" && rg -n 'idx_select_fields_for|idx_display_name|strcmp\
 EOF
 
 # -- direct hyle row writes bypassing source (M05) ----------------------------
-# Ordered sources (grp.songs, gig.songs) via hyle directly are sanctioned
-# until they migrate to DSV-style adapter; item sources must use source.
+# All item and ordered source writes must use source module operations.
 while IFS=: read -r file line text; do
 	[ -z "$file" ] && continue
 	case "$file" in
-		mods/source/*|external/hyle/*|mods/grp/*|mods/gig/*) continue ;;
+		mods/source/*|external/hyle/*) continue ;;
 	esac
 	printf '%s:%s: prohibited direct hyle_source_put/del outside source (use source ops): %s\n' "$file" "$line" "$text" >&2
 	failed=1

@@ -396,3 +396,189 @@ XY_IMPL(size_t, source_get_record_size,
 {
 	return hyle_source_get_record_size(dataset_id);
 }
+
+XY_IMPL(int, source_dataset_collect_options,
+	const char *, dataset_id,
+	const char *, label_field,
+	const char *, default_opt,
+	source_opt_buf_t *, buf,
+	const char **, opts,
+	int, max)
+{
+	int n = 0;
+	if (default_opt && max > 0 && buf && opts) {
+		snprintf(buf[n], 128, "%s", default_opt);
+		opts[n] = buf[n];
+		n++;
+	}
+	unsigned data_hd = source_get_data_hd(dataset_id);
+	if (!data_hd || !buf || !opts)
+		return n;
+
+	unsigned fhd = source_get_fields_hd(dataset_id);
+	uint32_t cur = qmap_iter(data_hd, NULL, 0);
+	const void *tk, *tv;
+	while (qmap_next(&tk, &tv, cur) && n < max) {
+		const char *id = (const char *)tk;
+		const char *name = NULL;
+		if (fhd && label_field) {
+			char nk[320];
+			snprintf(nk, sizeof(nk), "%s:%s", id, label_field);
+			name = qmap_get(fhd, nk);
+		}
+		const char *label = name ? name : id;
+		int dup = 0;
+		for (int di = 0; di < n; di++) {
+			if (strcmp(opts[di], label) == 0) {
+				dup = 1;
+				break;
+			}
+		}
+		if (!dup) {
+			snprintf(buf[n], 128, "%s", label);
+			opts[n] = buf[n];
+			n++;
+		}
+	}
+	qmap_fin(cur);
+	return n;
+}
+
+XY_IMPL(int, source_resolve_partition_key,
+	const char *, primary_dataset,
+	const char *, partition_dataset,
+	const char *, target_field,
+	char *, id_inout,
+	size_t, id_sz)
+{
+	if (!id_inout || !id_inout[0])
+		return -1;
+	source_def_t *prim_def = source_find(primary_dataset);
+	source_def_t *part_def = source_find(partition_dataset);
+	if (prim_def && part_def &&
+	    qmap_pos(prim_def->fields_hd, id_inout) == QM_MISS)
+	{
+		uint32_t rp = qmap_pos(part_def->fields_hd, id_inout);
+		if (rp != QM_MISS) {
+			const char *rs = qmap_field_get(
+			        part_def->fields_hd, id_inout, target_field);
+			if (rs && rs[0]) {
+				snprintf(id_inout, id_sz, "%s", rs);
+				return 0;
+			}
+		}
+	}
+	return 0;
+}
+
+static int mpfd_field_getter(const char *name, char *buf, size_t sz, void *user)
+{
+	(void)user;
+	return mpfd_get(name, buf, sz);
+}
+
+XY_IMPL(int, source_ordered_sync_form,
+	const char *, source_id,
+	const char *, partition_id,
+	const char *, amount_param,
+	const char *, remove_param_prefix,
+	const source_ordered_field_sync_t *, fields,
+	size_t, n_fields)
+{
+	return hyle_source_ordered_sync_form_custom(
+	        source_id, partition_id, amount_param, remove_param_prefix,
+	        (const hyle_ordered_field_sync_t *)fields, n_fields,
+	        mpfd_field_getter, NULL);
+}
+
+XY_IMPL(unsigned, source_register_ordered,
+	const source_ordered_def_t *, def)
+{
+	if (!def)
+		return 0;
+	return hyle_source_register_ordered(
+	        def->source_id, def->fields, def->field_count,
+	        def->partition_field, def->record_id, def->flags, def->load_fn,
+	        def->save_fn, def->persist_user);
+}
+
+XY_IMPL(int, source_ordered_count,
+	const char *, source_id,
+	const char *, partition_val)
+{
+	return hyle_source_ordered_count(source_id, partition_val);
+}
+
+XY_IMPL(const char *, source_ordered_key_at,
+	const char *, source_id,
+	const char *, partition_val,
+	int, pos)
+{
+	return hyle_source_ordered_key_at(source_id, partition_val, pos);
+}
+
+XY_IMPL(int, source_ordered_append,
+	const char *, source_id,
+	const char *, partition_val,
+	const char **, names,
+	const char **, values,
+	size_t, count)
+{
+	return hyle_source_ordered_append(
+	        source_id, partition_val, names, values, count);
+}
+
+XY_IMPL(int, source_ordered_insert_at,
+	const char *, source_id,
+	const char *, partition_val,
+	int, pos,
+	const char **, names,
+	const char **, values,
+	size_t, count)
+{
+	return hyle_source_ordered_insert_at(
+	        source_id, partition_val, pos, names, values, count);
+}
+
+XY_IMPL(int, source_ordered_remove_at,
+	const char *, source_id,
+	const char *, partition_val,
+	int, pos)
+{
+	hyle_source_ordered_remove_at(source_id, partition_val, pos);
+	return 0;
+}
+
+XY_IMPL(int, source_ordered_clear,
+	const char *, source_id,
+	const char *, partition_val)
+{
+	hyle_source_ordered_clear(source_id, partition_val);
+	return 0;
+}
+
+XY_IMPL(int, source_ordered_save,
+	const char *, source_id,
+	const char *, partition_val)
+{
+	hyle_source_ordered_save(source_id, partition_val);
+	return 0;
+}
+
+XY_IMPL(int, source_put_row,
+	const char *, source_id,
+	const char *, row_id,
+	const char **, names,
+	const char **, values,
+	size_t, count)
+{
+	return hyle_source_put(source_id, row_id, names, values, count);
+}
+
+XY_IMPL(int, source_register_derive,
+	const char *, derive_key,
+	source_derive_fn_t, fn,
+	void *, user)
+{
+	return hyle_register_derive(derive_key, fn, user);
+}

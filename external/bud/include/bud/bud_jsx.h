@@ -57,6 +57,8 @@ typedef struct bud_arg {
 #define lx_text(str)                                                           \
 	((bud_arg){ .type = BUD_ARG_NODE, .data.node = bud_text(str) })
 #define lx_node(n) ((bud_arg){ .type = BUD_ARG_NODE, .data.node = (n) })
+#define lx_tpl(...)                                                            \
+	((bud_arg){ .type = BUD_ARG_NODE, .data.node = bud_tpl(__VA_ARGS__) })
 #define lx_on(e, b)                                                            \
 	((bud_arg){ .type = BUD_ARG_EVENT, .data.ev = { (e), (b) } })
 #define lx_bind(e, b, h)                                                       \

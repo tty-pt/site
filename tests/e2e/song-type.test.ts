@@ -151,11 +151,17 @@ async function findSongInListing(
   filterUrl: string,
 ): Promise<boolean> {
   const sep = filterUrl.includes("?") ? "&" : "?";
-  const url = `${filterUrl}${sep}per_page=1000`;
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
-  const link = page.locator(`a[href="/song/${songId}"]`).first();
-  return link.isVisible().catch(() => false);
+  for (let p = 0; p < 10; p++) {
+    const url = `${filterUrl}${sep}per_page=100&page=${p}`;
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    const hasRows = await page.locator("tr.hyle-row-clickable").count();
+    if (hasRows === 0) break;
+    const link = page.locator(`a[href="/song/${songId}"]`).first();
+    if (await link.isVisible().catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

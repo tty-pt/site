@@ -11,7 +11,6 @@
 #include <ttypt/qmap.h>
 
 #include "../index/index.h"
-#include <hyle/source.h>
 #include "../common/common.h"
 #include "../source/source.h"
 
@@ -90,12 +89,12 @@ static int rep_collect_merged(const char *grp_id, rep_row_t *rows, int max_rows)
 		return 0;
 
 	/* Pinned pass: collect pinned rows first from grp.songs partition */
-	rfhd = hyle_source_get_fields_hd("grp.songs");
+	rfhd = source_get_fields_hd("grp.songs");
 	if (rfhd) {
-		int total = hyle_source_ordered_count("grp.songs", grp_id);
+		int total = source_ordered_count("grp.songs", grp_id);
 		for (int i = 0; i < total && n_rows < max_rows; i++) {
-			const char *k = hyle_source_ordered_key_at(
-			        "grp.songs", grp_id, i);
+			const char *k =
+			        source_ordered_key_at("grp.songs", grp_id, i);
 			const char *sid, *ts, *fm, *pv;
 			rep_row_t *r;
 
@@ -126,10 +125,9 @@ static int rep_collect_merged(const char *grp_id, rep_row_t *rows, int max_rows)
 
 	/* Tally pass: across gigs, tally transposes per song */
 	sb_def = source_find("gig.items");
-	gfhd = hyle_source_get_fields_hd("gig.songs");
+	gfhd = source_get_fields_hd("gig.songs");
 	if (sb_def && sb_def->fields_hd && gfhd) {
-		grp_pos = qmap_pos(
-		        hyle_source_get_fields_hd("grp.items"), grp_id);
+		grp_pos = qmap_pos(source_get_fields_hd("grp.items"), grp_id);
 		if (grp_pos != QM_MISS) {
 			n_inv = qmap_inv_get(
 			        sb_def->fields_hd, "grp", grp_pos, inv_buf,
@@ -141,12 +139,11 @@ static int rep_collect_merged(const char *grp_id, rep_row_t *rows, int max_rows)
 
 				if (!sb_id)
 					continue;
-				total = hyle_source_ordered_count(
+				total = source_ordered_count(
 				        "gig.songs", sb_id);
 				for (int i = 0; i < total; i++) {
-					const char *k =
-					        hyle_source_ordered_key_at(
-					                "gig.songs", sb_id, i);
+					const char *k = source_ordered_key_at(
+					        "gig.songs", sb_id, i);
 					const char *sid, *ts, *fm;
 					rep_tally_t *t;
 					int ti;
@@ -246,16 +243,16 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 
 	if (!grp_id || !grp_id[0])
 		return -1;
-	rfhd = hyle_source_get_fields_hd("grp.songs");
+	rfhd = source_get_fields_hd("grp.songs");
 	if (!rfhd)
 		return -1;
 
 	/* Current partition snapshot: read what's currently in grp.songs */
 	{
-		int total = hyle_source_ordered_count("grp.songs", grp_id);
+		int total = source_ordered_count("grp.songs", grp_id);
 		for (int i = 0; i < total; i++) {
-			const char *k = hyle_source_ordered_key_at(
-			        "grp.songs", grp_id, i);
+			const char *k =
+			        source_ordered_key_at("grp.songs", grp_id, i);
 			const char *sid, *ts, *fm, *pv;
 			rep_row_t *r;
 
@@ -304,7 +301,7 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 	if (!changed)
 		return 0;
 
-	hyle_source_ordered_clear("grp.songs", grp_id);
+	source_ordered_clear("grp.songs", grp_id);
 	for (int i = 0; i < n_want; i++) {
 		const char *names[] = { "song", "transpose", "format",
 			                "pinned" };
@@ -317,21 +314,20 @@ XY_IMPL(int, rep_rebuild, const char *, grp_id)
 		vals[1] = tr;
 		vals[2] = want[i].format;
 		vals[3] = pv;
-		hyle_source_ordered_append("grp.songs", grp_id, names, vals, 4);
+		source_ordered_append("grp.songs", grp_id, names, vals, 4);
 	}
-	hyle_source_ordered_save("grp.songs", grp_id);
+	source_ordered_save("grp.songs", grp_id);
 	return 0;
 }
 
 static int grp_song_index(const char *grp_id, const char *song_id)
 {
-	int total = hyle_source_ordered_count("grp.songs", grp_id);
-	unsigned fhd = hyle_source_get_fields_hd("grp.songs");
+	int total = source_ordered_count("grp.songs", grp_id);
+	unsigned fhd = source_get_fields_hd("grp.songs");
 	if (!fhd)
 		return -1;
 	for (int i = 0; i < total; i++) {
-		const char *key =
-		        hyle_source_ordered_key_at("grp.songs", grp_id, i);
+		const char *key = source_ordered_key_at("grp.songs", grp_id, i);
 		if (!key)
 			continue;
 		const char *sid = qmap_field_get(fhd, key, "song");
@@ -362,8 +358,8 @@ handle_grp_song_add_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Manual adds are pinned: they survive rep_rebuild. */
 	const char *names[] = { "song", "transpose", "format", "pinned" };
 	const char *vals[] = { s_id, tr, fmt, "1" };
-	hyle_source_ordered_append("grp.songs", ctx->id, names, vals, 4);
-	hyle_source_ordered_save("grp.songs", ctx->id);
+	source_ordered_append("grp.songs", ctx->id, names, vals, 4);
+	source_ordered_save("grp.songs", ctx->id);
 
 	return redirect_to_item(fd, "grp", ctx->id);
 }
@@ -383,16 +379,16 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char k_s[32] = { 0 };
 	axil_query_param("key", k_s, sizeof(k_s) - 1);
 
-	int idx = grp_song_index(ctx->id, ctx->song_id);
+	int idx = grp_song_index(ctx->id, ctx->sub_id);
 	if (idx >= 0) {
 		const char *key =
-		        hyle_source_ordered_key_at("grp.songs", ctx->id, idx);
+		        source_ordered_key_at("grp.songs", ctx->id, idx);
 		/* Setting a key pins the entry: the preferred key is a
 		 * group setting that rep_rebuild preserves. */
 		const char *names[] = { "transpose", "pinned" };
 		const char *vals[] = { k_s, "1" };
-		hyle_source_put("grp.songs", key, names, vals, 2);
-		hyle_source_ordered_save("grp.songs", ctx->id);
+		source_put_row("grp.songs", key, names, vals, 2);
+		source_ordered_save("grp.songs", ctx->id);
 	} else {
 		/* Song was derived, not yet in grp.songs: pin it with the
 		 * chosen key */
@@ -400,7 +396,7 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		rep_row_t rows[REP_MAX_SONGS];
 		int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
 		for (int i = 0; i < n_rows; i++) {
-			if (strcmp(rows[i].song, ctx->song_id) == 0) {
+			if (strcmp(rows[i].song, ctx->sub_id) == 0) {
 				snprintf(
 				        fmt, sizeof(fmt), "%s", rows[i].format);
 				break;
@@ -408,10 +404,9 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		}
 		const char *names[] = { "song", "transpose", "format",
 			                "pinned" };
-		const char *vals[] = { ctx->song_id, k_s, fmt, "1" };
-		hyle_source_ordered_append(
-		        "grp.songs", ctx->id, names, vals, 4);
-		hyle_source_ordered_save("grp.songs", ctx->id);
+		const char *vals[] = { ctx->sub_id, k_s, fmt, "1" };
+		source_ordered_append("grp.songs", ctx->id, names, vals, 4);
+		source_ordered_save("grp.songs", ctx->id);
 	}
 
 	return redirect_to_item(fd, "grp", ctx->id);
@@ -421,7 +416,7 @@ static int handle_grp_song_key(int fd, char *body)
 {
 	return with_module_item_access(
 	        fd, body, "grp",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID |
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SUB_ID |
 	                ICTX_CSRF_QUERY,
 	        NULL, NULL, handle_grp_song_key_auth, NULL);
 }
@@ -431,10 +426,10 @@ handle_grp_song_del_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
 
-	int idx = grp_song_index(ctx->id, ctx->song_id);
+	int idx = grp_song_index(ctx->id, ctx->sub_id);
 	if (idx >= 0) {
-		hyle_source_ordered_remove_at("grp.songs", ctx->id, idx);
-		hyle_source_ordered_save("grp.songs", ctx->id);
+		source_ordered_remove_at("grp.songs", ctx->id, idx);
+		source_ordered_save("grp.songs", ctx->id);
 	}
 
 	return redirect_to_item(fd, "grp", ctx->id);
@@ -444,7 +439,7 @@ static int handle_grp_song_delete(int fd, char *body)
 {
 	return with_module_item_access(
 	        fd, body, "grp",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SONG_ID |
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SUB_ID |
 	                ICTX_CSRF_QUERY,
 	        NULL, NULL, handle_grp_song_del_auth, NULL);
 }
@@ -459,7 +454,7 @@ handle_grp_song_view_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	rep_row_t rows[REP_MAX_SONGS];
 	int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
 	for (int i = 0; i < n_rows; i++) {
-		if (strcmp(rows[i].song, ctx->song_id) == 0) {
+		if (strcmp(rows[i].song, ctx->sub_id) == 0) {
 			pk = rows[i].transpose;
 			break;
 		}
@@ -467,17 +462,16 @@ handle_grp_song_view_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	int t = 0;
 	if (pk != 0)
-		t = pk -
-		    song_get_original_key_root(ctx->doc_root, ctx->song_id);
+		t = pk - song_get_original_key_root(ctx->doc_root, ctx->sub_id);
 	char loc[512];
-	snprintf(loc, sizeof(loc), "/song/%s?t=%d", ctx->song_id, t);
+	snprintf(loc, sizeof(loc), "/song/%s?t=%d", ctx->sub_id, t);
 	return axil_redirect(fd, loc);
 }
 
 static int handle_grp_song_view(int fd, char *body)
 {
 	return with_module_item_access(
-	        fd, body, "grp", ICTX_SONG_ID, NULL, NULL,
+	        fd, body, "grp", ICTX_SUB_ID, NULL, NULL,
 	        handle_grp_song_view_auth, NULL);
 }
 
@@ -636,6 +630,17 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		                           csrf_token));
 	}
 
+	{
+		char members_buf[1024] = { 0 };
+		auth_group_get_members(
+		        ctx->id, members_buf, sizeof(members_buf));
+		bud_append(
+		        body_frag,
+		        ch_render_members_section(
+		                ctx->id, members_buf, is_owner, owner,
+		                csrf_token));
+	}
+
 	if (is_owner) {
 		char qs[1024] = { 0 };
 
@@ -660,6 +665,60 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	return site_ui_respond_item_detail(fd, ctx, "grp", title, body_frag);
 }
 
+static int handle_grp_member_action_authorized(
+        int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)user;
+	char action[32] = { 0 };
+	char member[64] = { 0 };
+	char back[512] = { 0 };
+
+	axil_query_parse(body);
+	axil_query_param("action", action, sizeof(action));
+	axil_query_param("member", member, sizeof(member));
+	axil_query_param("back", back, sizeof(back));
+
+	if (!member[0])
+		return respond_error(fd, 400, "Missing member username");
+
+	if (strcmp(action, "del") == 0 || strcmp(action, "remove") == 0) {
+		auth_group_del_member(ctx->id, member);
+	} else {
+		auth_group_add_member(ctx->id, member);
+	}
+
+	if (back[0] && strncmp(back, "/grp/", 5) == 0)
+		return axil_redirect(fd, back);
+
+	return redirect_to_item(fd, "grp", ctx->id);
+}
+
+static int handle_grp_members(int fd, char *body)
+{
+	return with_module_item_access(
+	        fd, body, "grp",
+	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_CSRF_QUERY,
+	        "Group not found", "Only group owner can manage members",
+	        handle_grp_member_action_authorized, NULL);
+}
+
+static int handle_grp_add(int fd, char *body)
+{
+	char id[256] = { 0 };
+	const char *user = get_request_user(fd);
+	if (index_add_item(fd, body, id, sizeof(id)) != 0)
+		return 1;
+
+	auth_create_group(id);
+	if (user && *user)
+		auth_group_add_member(id, user);
+	module_item_group_record(fd, "grp", id, id);
+
+	char location[512];
+	snprintf(location, sizeof(location), "/grp/%s", id);
+	return axil_redirect(fd, location);
+}
+
 static int grp_detail_handler(int fd, char *body)
 {
 	return with_module_item_access(
@@ -680,6 +739,7 @@ void xy_install(void)
 	axil_register_handler(
 	        "GET:/grp/:id/song/:song_id", handle_grp_song_view);
 	axil_register_handler("POST:/api/grp/:id/songs", handle_grp_song_add);
+	axil_register_handler("POST:/api/grp/:id/members", handle_grp_members);
 	axil_register_handler(
 	        "POST:/api/grp/:id/song/:song_id/key", handle_grp_song_key);
 	axil_register_handler(
@@ -707,15 +767,20 @@ void xy_install(void)
 			{ "pinned", HYLE_FIELD_INT, 1, NULL, NULL, 0, 0, 0, 0,
 			  0, NULL },
 		};
-		hyle_source_register_ordered(
-		        "grp.songs", ch_song_fields, 4, "grp", 0,
-		        HYLE_AUTO_RECORD, source_dsv_load, source_dsv_save,
-		        g_doc_root);
+		source_register_ordered(&(source_ordered_def_t){
+		        .source_id = "grp.songs",
+		        .fields = ch_song_fields,
+		        .field_count = 4,
+		        .partition_field = "grp",
+		        .record_id = 0,
+		        .flags = SOURCE_AUTO_RECORD,
+		        .load_fn = source_dsv_load,
+		        .save_fn = source_dsv_save,
+		        .persist_user = g_doc_root,
+		});
 	}
 
-	index_open("Group", "grp.items", NULL, NULL, NULL, NULL, NULL, "grp");
-	standard_item_handlers_t handlers = {
-		.detail = grp_detail_handler,
-	};
-	register_standard_item_handlers("grp", &handlers);
+	index_open(
+	        "Group", "grp.items", NULL, grp_detail_handler, handle_grp_add,
+	        NULL, NULL, "grp");
 }

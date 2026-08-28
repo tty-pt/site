@@ -178,11 +178,102 @@ async function testSubQuestFeature() {
 	await rm(bareParentPath, { force: true });
 	await rm(bareChildPath, { force: true });
 
+	// 8b. Test upfront planning of multiple sub-quests at the beginning of a quest (switchNow: false)
+	// Switch to parent quest to test planning subquests on parent
+	await commands["quest"].handler("parent-test-quest", mockCtx);
+
+	const planSub1Path = "docs/current/planned-sub-stage-1.md";
+	const planSub2Path = "docs/current/stage-2-verification-and-benchmarks.md";
+	await rm(planSub1Path, { force: true });
+	await rm(planSub2Path, { force: true });
+
+	// Plan stage 1 sub-quest upfront
+	const plan1Res = await subquestTool.execute(
+		"call_plan1",
+		{
+			name: "planned-sub-stage-1",
+			goal: "Stage 1: Architecture refactor",
+			parentName: "parent-test-quest",
+			switchNow: false,
+		},
+		null,
+		null,
+		mockCtx,
+	);
+	assert.ok(plan1Res.content[0].text.includes("Kept parent quest active"), "switchNow: false should keep parent active");
+	const plan1File = await readFile(planSub1Path, "utf8");
+	assert.ok(plan1File.includes("Stage 1: Architecture refactor"), "Planned subquest file created");
+
+	// Plan stage 2 sub-quest via command `/subquest --plan`
+	await commands["subquest"].handler("--plan Stage 2: Verification and benchmarks", mockCtx);
+	const plan2File = await readFile(planSub2Path, "utf8");
+	assert.ok(plan2File.includes("Stage 2: Verification and benchmarks"), "Planned subquest 2 created via /subquest --plan");
+
+	// Verify parent quest file links both planned subquests
+	const parentWithPlans = await readFile(parentPath, "utf8");
+	assert.ok(parentWithPlans.includes("[[planned-sub-stage-1]]"), "Parent quest links planned subquest 1");
+	assert.ok(parentWithPlans.includes("[[stage-2-verification-and-benchmarks]]"), "Parent quest links planned subquest 2");
+
+	await rm(planSub1Path, { force: true });
+	await rm(planSub2Path, { force: true });
+
+	// 8c. Test switchNow default: calling quest_subquest with switchNow omitted should default to switchNow: true
+	const switchDefaultChildPath = "docs/current/switch-default-subquest.md";
+	await rm(switchDefaultChildPath, { force: true });
+
+	await subquestTool.execute(
+		"call_switch_default",
+		{
+			name: "switch-default-subquest",
+			goal: "Test switchNow defaults to true when omitted",
+			parentName: "parent-test-quest",
+			// switchNow is intentionally omitted
+		},
+		null,
+		null,
+		mockCtx,
+	);
+
+	const statusDefault = await commands["quest-status"].handler("", mockCtx);
+	assert.ok(
+		statusDefault.includes("switch-default-subquest"),
+		`Omitting switchNow should default to switching to the subquest, got status: ${statusDefault}`,
+	);
+
+	// 8d. Test linkSubQuestInParent when parent quest file does not exist on disk at all
+	const unwrittenParentPath = "docs/current/unwritten-parent-quest.md";
+	const unwrittenChildPath = "docs/current/unwritten-child-quest.md";
+	await rm(unwrittenParentPath, { force: true });
+	await rm(unwrittenChildPath, { force: true });
+
+	await subquestTool.execute(
+		"call_unwritten_parent",
+		{
+			name: "unwritten-child-quest",
+			goal: "Child of unwritten parent",
+			parentName: "unwritten-parent-quest",
+			switchNow: false,
+		},
+		null,
+		null,
+		mockCtx,
+	);
+
+	// Verify unwritten-parent-quest.md was auto-created and has child linked
+	const autoCreatedParent = await readFile(unwrittenParentPath, "utf8");
+	assert.ok(autoCreatedParent.includes("unwritten-parent-quest"), "Parent file should be auto-created");
+	assert.ok(autoCreatedParent.includes("[[unwritten-child-quest]]"), "Auto-created parent should link child quest");
+
+	await rm(unwrittenParentPath, { force: true });
+	await rm(unwrittenChildPath, { force: true });
+	await rm(switchDefaultChildPath, { force: true });
+
 	// 9. Test LIFO archival: archiving active child quest should pop and return to parent quest
 	const archiveTool = tools["quest_archive"];
 	assert.ok(archiveTool, "quest_archive tool should be registered");
 
-	// Currently implement-second-follow-up-feature is active with parent parent-test-quest
+	// Switch to child sub-quest on top of stack
+	await commands["quest"].handler("implement-second-follow-up-feature", mockCtx);
 	const archiveRes = await archiveTool.execute("call_arch", { compact: false }, null, null, mockCtx);
 	assert.ok(archiveRes && archiveRes.content[0].text.includes("Resumed parent/previous quest 'parent-test-quest'"), "Archiving child should resume parent quest via LIFO stack");
 
@@ -208,7 +299,6 @@ async function testSubQuestFeature() {
 	console.log("PASS: quest_journal_subquest_test");
 }
 
-testSubQuestFeature().catch((err) => {
-	console.error("FAIL: quest_journal_subquest_test", err);
-	process.exit(1);
+Deno.test("quest_journal_subquest: subquest lifecycle and LIFO stack", async () => {
+	await testSubQuestFeature();
 });

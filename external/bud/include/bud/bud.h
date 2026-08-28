@@ -2,6 +2,7 @@
 #define BUD_BUD_H
 
 #include <stddef.h>
+#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,6 +81,8 @@ bud_node *bud_fragment(void);
 bud_node *bud_element(const char *tag);
 bud_node *bud_text(const char *text);
 bud_node *bud_raw(const char *html);
+bud_node *bud_tpl(const char *fmt, ...);
+bud_node *bud_vtpl(const char *fmt, va_list ap);
 void bud_raw_set_text(bud_node *node, const char *text);
 bud_node *
 bud_component_render(const bud_component *component, const void *props);
@@ -122,6 +125,9 @@ int bud_render_ops(const bud_node *root, bud_emit_fn emit, void *user);
 int bud_render_hydration_ops(
         const bud_node *root, bud_emit_fn emit, void *user);
 int bud_render_patch_ops(const bud_node *root, bud_emit_fn emit, void *user);
+int bud_vdom_diff(
+        bud_node *old_root, bud_node *new_root, bud_emit_fn emit, void *user);
+void bud_app_set_state(void);
 int bud_render_walk_ops(const bud_node *root, bud_emit_fn emit, void *user);
 int bud_hydrate(const bud_node *root, bud_hydrate_lookup_fn lookup, void *user);
 int bud_walk(const bud_node *root, const bud_walk_ops *ops);

@@ -9,14 +9,13 @@ static bud_node *idx_content_lookup(
 
 	idx_query_param(qs, field, cur, sizeof(cur));
 
-	return lx_el("label", lx_attr("class", "filter-field filter-lookup"),
-	             lx_text(label), lx_text(":"),
-	             lx_el("input", lx_attr("type", "text"),
-	                   lx_attr("name", field),
-	                   lx_attr("class", "filter-lookup"),
-	                   lx_attr("placeholder", placeholder),
-	                   lx_attr("value", cur)))
-	        .data.node;
+	return bud_tpl(
+	        "<label class='filter-field filter-lookup'>%s:"
+	        "  <input type='text' name='%s' class='filter-lookup' "
+	        "placeholder='%s' value='%s'/>"
+	        "</label>",
+	        label ? label : "", field ? field : "",
+	        placeholder ? placeholder : "", cur);
 }
 
 static void
@@ -53,16 +52,12 @@ idx_mode_href(char *out, size_t n, const list_state_t *s, int custom)
 
 static bud_node *idx_omnisearch_field(const char *q)
 {
-	bud_node *input;
-
-	input = lx_el("input", lx_attr("type", "search"), lx_attr("name", "q"),
-	              lx_attr("placeholder", "Search\xe2\x80\xa6"),
-	              lx_attr("aria-label", "Search everything"),
-	              (q && q[0]) ? lx_attr("value", q) : lx_none())
-	                .data.node;
-	return lx_el("label", lx_attr("class", "hyle-omnisearch"),
-	             lx_attr("data-hyle-omnisearch", "1"), lx_node(input))
-	        .data.node;
+	return bud_tpl(
+	        "<label class='hyle-omnisearch' data-hyle-omnisearch='1'>"
+	        "  <input type='search' name='q' placeholder='Search…' "
+	        "aria-label='Search everything' value='%s'/>"
+	        "</label>",
+	        q ? q : "");
 }
 
 static bud_node *idx_filter_bar(const list_state_t *state)
@@ -129,47 +124,40 @@ static bud_node *idx_filter_chrome(const list_state_t *state)
 	omni = !state->custom;
 	if (omni) {
 		other = "custom";
-		icon = "\xe2\x9a\x99";
+		icon = "⚙";
 		aria = "Advanced filters";
 	} else {
 		other = "omni";
-		icon = "\xe2\x8c\x95";
+		icon = "⌕";
 		aria = "Search everything";
 	}
 	idx_mode_href(href, sizeof(href), state, omni ? 1 : 0);
-	toggle = lx_el("a", lx_attr("class", "hyle-mode-toggle"),
-	               lx_attr("data-hyle-mode-toggle", other),
-	               lx_attr("href", href), lx_attr("aria-label", aria),
-	               lx_text(icon))
-	                 .data.node;
-	if (toggle)
-		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		             lx_attr("data-hyle-mode",
-		                     omni ? "omni" : "custom"),
-		             lx_node(toggle), lx_node(bar))
-		               .data.node;
-	else
-		wrap = lx_el("div", lx_attr("class", "hyle-filter-bar"),
-		             lx_attr("data-hyle-mode",
-		                     omni ? "omni" : "custom"),
-		             lx_node(bar))
-		               .data.node;
+	toggle = bud_tpl(
+	        "<a class='hyle-mode-toggle' data-hyle-mode-toggle='%s' "
+	        "href='%s' aria-label='%s'>%s</a>",
+	        other, href, aria, icon);
+
+	wrap =
+	        bud_tpl("<div class='hyle-filter-bar' data-hyle-mode='%s'>"
+	                "  %node"
+	                "  %node"
+	                "</div>",
+	                omni ? "omni" : "custom", toggle, bar);
 	if (!wrap)
 		return bar;
+
 	if (state->custom) {
-		hidden = lx_el("input", lx_attr("type", "hidden"),
-		               lx_attr("name", "custom"), lx_attr("value", "1"))
-		                 .data.node;
+		hidden = bud_tpl(
+		        "<input type='hidden' name='custom' value='1'/>");
 		if (hidden)
 			bud_append(wrap, hidden);
 	}
-	actions = lx_el("div", lx_attr("class", "hyle-filter-actions"),
-	                omni ? lx_none()
-	                     : lx_el("button", lx_attr("type", "reset"),
-	                             lx_text("Clear")),
-	                lx_el("button", lx_attr("type", "submit"),
-	                      lx_text("Apply")))
-	                  .data.node;
+	actions = bud_tpl(
+	        "<div class='hyle-filter-actions'>"
+	        "  %node"
+	        "  <button type='submit'>Apply</button>"
+	        "</div>",
+	        omni ? NULL : bud_tpl("<button type='reset'>Clear</button>"));
 	if (actions)
 		bud_append(wrap, actions);
 	return wrap;

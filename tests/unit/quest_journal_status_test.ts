@@ -11,10 +11,12 @@ async function testStatusHierarchyAndFormatting() {
 	const parentPath = "docs/current/parent-hierarchy-quest.md";
 	const childPath = "docs/current/child-sub-quest.md";
 	const grandChildPath = "docs/current/grandchild-sub-quest.md";
+	const longChildPath = "docs/current/very-long-subquest-name-exceeding-display-limit.md";
 
 	await rm(parentPath, { force: true });
 	await rm(childPath, { force: true });
 	await rm(grandChildPath, { force: true });
+	await rm(longChildPath, { force: true });
 
 	const handlers: Record<string, EventCallback[]> = {};
 	const tools: Record<string, any> = {};
@@ -74,9 +76,9 @@ async function testStatusHierarchyAndFormatting() {
 
 	assert.ok(lastStatusText, "Status text should be set");
 	assert.ok(lastStatusText.includes("parent-hierarchy-quest"), "Status should contain active quest name");
-	assert.ok(lastStatusText.includes("45k/140k") || lastStatusText.includes("45k"), "Status should contain token economy stats");
+	assert.ok(lastStatusText.includes("45k"), "Status should contain token economy stats");
 
-	// 2. Create child sub-quest and verify hierarchy formatting: parent ↳ child
+	// 2. Create child sub-quest and verify depth-based compact formatting: d2: child-sub-quest (no full path)
 	const subquestTool = tools["quest_subquest"];
 	await subquestTool.execute(
 		"call_sub1",
@@ -93,12 +95,15 @@ async function testStatusHierarchyAndFormatting() {
 
 	assert.ok(lastStatusText, "Status text should be set after switching to sub-quest");
 	assert.ok(
-		lastStatusText.includes("parent-hierarchy-quest ↳ child-sub-quest") ||
-		lastStatusText.includes("parent-hierarchy-quest → child-sub-quest"),
-		`Status should clearly represent subquest hierarchy, got: ${lastStatusText}`,
+		lastStatusText.includes("d2: child-sub-quest"),
+		`Status should show depth 2 prefix and subquest name, got: ${lastStatusText}`,
+	);
+	assert.ok(
+		!lastStatusText.includes("parent-hierarchy-quest ↳ child-sub-quest"),
+		`Status should NOT show full path across ancestors to save space, got: ${lastStatusText}`,
 	);
 
-	// 3. Create grandchild sub-quest and verify multi-level hierarchy: parent ↳ child ↳ grandchild
+	// 3. Create grandchild sub-quest and verify depth 3 formatting: d3: grandchild-sub-quest
 	await subquestTool.execute(
 		"call_sub2",
 		{
@@ -113,19 +118,41 @@ async function testStatusHierarchyAndFormatting() {
 	);
 
 	assert.ok(
-		lastStatusText.includes("parent-hierarchy-quest ↳ child-sub-quest ↳ grandchild-sub-quest") ||
-		lastStatusText.includes("parent-hierarchy-quest → child-sub-quest → grandchild-sub-quest"),
-		`Status should represent multi-level hierarchy, got: ${lastStatusText}`,
+		lastStatusText.includes("d3: grandchild-sub-quest"),
+		`Status should represent depth 3 with d3: prefix, got: ${lastStatusText}`,
+	);
+	assert.ok(
+		!lastStatusText.includes("parent-hierarchy-quest ↳ child-sub-quest ↳ grandchild-sub-quest"),
+		`Status should NOT show full nested path, got: ${lastStatusText}`,
 	);
 
-	// 4. Test status display when tokens is null or unknown
+	// 4. Test max length truncation with ellipsis on very long quest name
+	await subquestTool.execute(
+		"call_sub3",
+		{
+			name: "very-long-subquest-name-exceeding-display-limit",
+			goal: "Long name goal",
+			parentName: "grandchild-sub-quest",
+			switchNow: true,
+		},
+		null,
+		null,
+		mockCtx,
+	);
+	assert.ok(
+		lastStatusText.includes("d4: very-long-subquest-name…"),
+		`Status should truncate long sub-quest name at depth 4 with ellipsis, got: ${lastStatusText}`,
+	);
+	await rm(longChildPath, { force: true });
+
+	// 5. Test status display when tokens is null or unknown
 	currentTokens = null;
 	currentPercent = null as any;
 	// Mark saved to trigger UI update
 	await tools["quest_mark_saved"].execute("call_saved", {}, null, null, mockCtx);
-	assert.ok(lastStatusText.includes("grandchild-sub-quest"), "Status should still show hierarchy when tokens is null");
+	assert.ok(lastStatusText.includes("very-long-subquest-name…"), "Status should still show hierarchy when tokens is null");
 
-	// 5. Test status display when save pending vs fresh
+	// 6. Test status display when save pending vs fresh
 	// Simulate unsaved state
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({}, mockCtx);
@@ -139,7 +166,6 @@ async function testStatusHierarchyAndFormatting() {
 	console.log("PASS: quest_journal_status_test");
 }
 
-testStatusHierarchyAndFormatting().catch((err) => {
-	console.error("FAIL: quest_journal_status_test", err);
-	process.exit(1);
+Deno.test("quest_journal_status: hierarchy and formatting", async () => {
+	await testStatusHierarchyAndFormatting();
 });

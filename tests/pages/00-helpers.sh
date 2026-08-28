@@ -31,3 +31,13 @@ curl_status_body(){
   echo "$code"
   printf "%s" "$body"
 }
+
+curl_status_body_html(){
+  url=$1
+  tmp=$(mktemp)
+  code=$(curl -sS -L -H "Accept: text/html" -w "%{http_code}" -o "$tmp" "$BASE$url" || true)
+  body=$(cat "$tmp" || true)
+  rm -f "$tmp"
+  echo "$code"
+  printf "%s" "$body"
+}

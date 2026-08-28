@@ -273,14 +273,24 @@ label {
   font-size: 0.8em;
 }
 
-label:not(:has(> input[type="checkbox"])):not(.hyle-picker-option):not(.hyle-ms-option) {
+label:not(:has(> input[type="checkbox"])):not(:has(> input[type="radio"])):not(.hyle-picker-option):not(.hyle-ms-option) {
   flex-direction: column;
 }
 
-label > input,
+label > input:not([type="checkbox"]):not([type="radio"]),
 label > textarea {
   display: block;
   width: 100%;
+}
+
+label > input[type="checkbox"],
+label > input[type="radio"] {
+  width: auto;
+  flex: none;
+  flex-shrink: 0;
+  flex-grow: 0;
+  margin: 0;
+  cursor: pointer;
 }
 
 input,

@@ -19,7 +19,8 @@ LDFLAGS-libaxil-hyle := -L$(shell cd .. && pwd)/axil/lib \
 	-L$(shell cd .. && pwd)/axil-auth/lib \
 	-Wl,-rpath,$(shell cd .. && pwd)/axil/lib \
 	-Wl,-rpath,$(shell cd .. && pwd)/hyle/c/libhyle-source/lib \
-	-Wl,-rpath,$(shell cd .. && pwd)/hyle/c/libhyle-bud/lib
+	-Wl,-rpath,$(shell cd .. && pwd)/hyle/c/libhyle-bud/lib \
+	-Wl,-rpath,$(shell cd .. && pwd)/bud/lib
 
 CFLAGS += -fPIC $(EXTRA_CFLAGS)
 

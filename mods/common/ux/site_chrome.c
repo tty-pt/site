@@ -90,49 +90,47 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	const char *path;
 	const char *icon;
 	char up[SITE_CHROME_PATH_MAX];
-	bud_arg back;
+	bud_node *back = NULL;
 	bud_node *bar;
 
 	path = state ? state->path : "";
-	icon = state && state->icon[0] ? state->icon : "\xf0\x9f\x8f\xa0";
+	icon = state && state->icon[0] ? state->icon : "🏠";
 	up[0] = '\0';
 	if (path[0] && strcmp(path, "/") != 0)
 		site_chrome_parent_path(path, up, sizeof(up));
-	back = up[0] ? lx_el("a", lx_attr("class", "btn nav-back"),
-	                     lx_attr("href", up), lx_attr("aria-label", "Back"),
-	                     lx_el("span", lx_attr("aria-hidden", "true"),
-	                           lx_text("\xe2\x86\xa9\xef\xb8\x8f")))
-	             : lx_none();
+	if (up[0]) {
+		back = bud_tpl(
+		        "<a class='btn nav-back' href='%s' aria-label='Back'>"
+		        "  <span aria-hidden='true'>↩️</span>"
+		        "</a>",
+		        up);
+	}
 
-	bar = lx_el("header", lx_attr("class", "nav-bar"),
-	            lx_attr("data-site-chrome", "1"),
-	            lx_bind("scroll@window", 0, site_chrome_on_scroll),
-	            lx_el("span", lx_attr("class", "nav-bar-slot"), back),
-	            lx_el("h1", lx_attr("class", "nav-bar-title"),
-	                  lx_text(state ? state->title : "")),
-	            lx_el("span", lx_attr("class", "nav-bar-slot"),
-	                  lx_el("label", lx_attr("for", "menu-functions"),
-	                        lx_attr("class", "menu-toggle btn"),
-	                        lx_attr("aria-label", "Menu"),
-	                        lx_attr("data-menu-toggle", "1"),
-	                        lx_text(icon))))
-	              .data.node;
+	bar =
+	        bud_tpl("<header class='nav-bar' data-site-chrome='1' %bind>"
+	                "  <span class='nav-bar-slot'>%node</span>"
+	                "  <h1 class='nav-bar-title'>%s</h1>"
+	                "  <span class='nav-bar-slot'>"
+	                "    <label for='menu-functions' class='menu-toggle "
+	                "btn' aria-label='Menu' data-menu-toggle='1'>%s</label>"
+	                "  </span>"
+	                "</header>",
+	                "scroll@window", site_chrome_on_scroll, back,
+	                state ? state->title : "", icon);
 	site_chrome_nav_bar = bar;
 	site_chrome_scroll_y = 0;
 	site_chrome_scroll_ready = 0;
 	site_chrome_hidden = 0;
 
-	return lx_el("div", lx_attr("id", "chrome-root"),
-	             lx_el("input", lx_attr("id", "menu-functions"),
-	                   lx_attr("name", "functions"),
-	                   lx_attr("type", "checkbox"),
-	                   lx_attr("class", "menu-control"),
-	                   lx_attr("aria-label", "Menu")),
-	             lx_el("label", lx_attr("for", "menu-functions"),
-	                   lx_attr("class", "menu-overlay"),
-	                   lx_attr("aria-label", "Close Menu")),
-	             lx_node(bar))
-	        .data.node;
+	return bud_tpl(
+	        "<div id='chrome-root'>"
+	        "  <input id='menu-functions' name='functions' type='checkbox' "
+	        "class='menu-control' aria-label='Menu'/>"
+	        "  <label for='menu-functions' class='menu-overlay' "
+	        "aria-label='Close Menu'></label>"
+	        "  %node"
+	        "</div>",
+	        bar);
 }
 
 #endif

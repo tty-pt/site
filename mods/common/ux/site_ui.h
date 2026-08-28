@@ -17,7 +17,7 @@
 #endif
 #define SITE_UI_FRAGMENTS_SCRIPT                                               \
 	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V "\"></"      \
-	                                                          "script>"
+	"script>"
 
 char *site_ui_page(
         const char *title, const char *path, const char *icon, const char *user,

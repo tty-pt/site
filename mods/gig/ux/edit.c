@@ -1,5 +1,4 @@
 #include "bud/bud.h"
-#include "bud/bud_jsx.h"
 #include "bud/bud_app.h"
 #include <hyle-bud/hyle-bud.h>
 #include "../fields.h"
@@ -7,11 +6,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../../song/ux/music.c"
-
+#include <transp/music.h>
 #include "../../common/ux/site_ui.c"
-
-/* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
 
 typedef struct {
@@ -22,6 +18,68 @@ typedef struct {
 	char format[32];
 } sb_edit_row_t;
 
+static bud_node *render_key_options(int cur_key, int orig_key)
+{
+	bud_node *opts = bud_fragment();
+	int norm_key = ((cur_key % 12) + 12) % 12;
+	for (int si = 0; si < 12; si++) {
+		bud_append(
+		        opts, bud_tpl("<option value='%d' %b>%s</option>", si,
+		                      si == norm_key ? "selected" : NULL,
+		                      key_name(si, orig_key, 0)));
+	}
+	return opts;
+}
+
+static bud_node *render_song_row(
+        int i, const sb_edit_row_t *song, const char *action,
+        int active_edit_row, const pick_view_t *row_pv, int active_edit_fmt_row,
+        const pick_view_t *fmt_row_pv, bud_node **row_sibs)
+{
+	char key_f[32], remove_f[32], song_href[320] = { 0 };
+	snprintf(key_f, sizeof(key_f), "key_%d", i);
+	snprintf(remove_f, sizeof(remove_f), "remove_%d", i);
+	if (song->repo_id[0])
+		snprintf(
+		        song_href, sizeof(song_href), "/song/%s",
+		        song->repo_id);
+
+	int is_active = (i == active_edit_row);
+	bud_node *picker_node = hyle_bud_filter_scoped(
+	        gig_song_fields, "song", i, song->repo_id, song->title, action,
+	        is_active ? row_pv : NULL, is_active, "gig-song-title-picker",
+	        row_sibs);
+
+	bud_node *view_link =
+	        song_href[0] ? bud_tpl("<a href='%s' class='text-xs text-muted "
+	                               "ml-1' title='View song'>↗</a>",
+	                               song_href)
+	                     : NULL;
+
+	int is_fmt_active = (i == active_edit_fmt_row);
+	const char *f_val = song->format[0] ? song->format : "";
+	bud_node *fmt_picker = hyle_bud_filter_scoped(
+	        gig_song_fields, "fmt", i, f_val, f_val, action,
+	        is_fmt_active ? fmt_row_pv : NULL, is_fmt_active,
+	        "gig-format-picker", row_sibs);
+
+	return bud_tpl(
+	        "<div class='flex gap-2 items-center w-full'>"
+	        "  <span class='flex items-center gap-1 flex-1 min-w-0'>%node "
+	        "%node</span>"
+	        "  <select name='%s' class='border rounded p-1 "
+	        "w-24'>%node</select>"
+	        "  <span class='flex items-center gap-1 flex-1 "
+	        "min-w-0'>%node</span>"
+	        "  <label class='text-sm cursor-pointer flex-shrink-0'>"
+	        "    <input type='checkbox' name='%s'/> Remove"
+	        "  </label>"
+	        "</div>",
+	        picker_node, view_link, key_f,
+	        render_key_options(atoi(song->transpose), song->orig_key),
+	        fmt_picker, remove_f);
+}
+
 static bud_node *sb_render_edit_form(
         const char *action, const char *csrf_token, const char *title,
         const char *sb_id, const char *grp_id, const pick_view_t *pv,
@@ -30,219 +88,109 @@ static bud_node *sb_render_edit_form(
         int active_edit_row, const pick_view_t *row_pv, int active_edit_fmt_row,
         const pick_view_t *fmt_row_pv, const pick_view_t *add_pv)
 {
+	(void)n_format_opts;
+	(void)format_opts;
 	bud_node *rows = bud_fragment();
 	bud_node *row_sibs = bud_fragment();
 	char amount_str[16];
 	snprintf(amount_str, sizeof(amount_str), "%d", n_songs);
 
-	/* grp picker (threshold select or omnisearch) via canonical hyle_bud_filter */
-	bud_node *grp_field_node = hyle_bud_filter(
-	        gig_fields, "grp", grp_id ? grp_id : "", pv);
-	bud_node *grp_fields = lx_el("label", lx_text("Group:"), grp_field_node ? lx_node(grp_field_node) : lx_none()).data.node;
+	/* grp picker via canonical hyle_bud_filter */
+	bud_node *grp_field_node =
+	        hyle_bud_filter(gig_fields, "grp", grp_id ? grp_id : "", pv);
+	bud_node *grp_fields =
+	        bud_tpl("<label>Group:"
+	                "  %node"
+	                "</label>",
+	                grp_field_node);
 
-	/* Omnisearch picker for adding songs rendered via canonical hyle_bud_filter */
+	/* Omnisearch picker for adding songs rendered via canonical
+	 * hyle_bud_filter */
 	bud_node *picker = NULL;
 	if (active_edit_row < 0 && active_edit_fmt_row < 0 && add_pv) {
-		picker = hyle_bud_filter(
-		        gig_song_fields, "song", "", add_pv);
+		picker = hyle_bud_filter(gig_song_fields, "song", "", add_pv);
 		if (picker) {
 			char post_action[256];
-			snprintf(post_action, sizeof(post_action), "/api/gig/%s/songs", sb_id);
-			bud_node *post_form = lx_el(
-			        "form",
-			        lx_attr("id", "edit-pick-post"),
-			        lx_attr("method", "post"),
-			        lx_attr("action", post_action),
-			        lx_attr("class", "flex gap-2 items-center mb-4"),
-			        lx_el("input", lx_attr("type", "hidden"),
-			              lx_attr("name", "csrf_token"),
-			              lx_attr("value", csrf_token ? csrf_token : "")),
-			        lx_node(picker),
-			        lx_el("button", lx_attr("type", "submit"),
-			              lx_attr("class", "btn btn-primary hyle-picker-submit"),
-			              lx_text("Add Song")))
-			        .data.node;
-			picker = post_form;
+			snprintf(
+			        post_action, sizeof(post_action),
+			        "/api/gig/%s/songs", sb_id);
+			picker =
+			        bud_tpl("<form id='edit-pick-post' "
+			                "method='post' action='%s' class='flex "
+			                "gap-2 items-center mb-4'>"
+			                "  <input type='hidden' "
+			                "name='csrf_token' value='%s'/>"
+			                "  %node"
+			                "  <button type='submit' class='btn "
+			                "btn-primary hyle-picker-submit'>Add "
+			                "Song</button>"
+			                "</form>",
+			                post_action,
+			                csrf_token ? csrf_token : "", picker);
 		}
 	}
 
 	for (int i = 0; i < n_songs; i++) {
-		char key_f[32], remove_f[32];
-		snprintf(key_f, sizeof(key_f), "key_%d", i);
-		snprintf(remove_f, sizeof(remove_f), "remove_%d", i);
-
-		int cur_key = atoi(songs[i].transpose);
-		const char *f_val = songs[i].format[0] ? songs[i].format : "";
-		int orig_key = songs[i].orig_key;
-
-		char song_href[320];
-		song_href[0] = '\0';
-		if (songs[i].repo_id[0])
-			snprintf(
-			        song_href, sizeof(song_href), "/song/%s",
-			        songs[i].repo_id);
-
-		/* Per-row standard song picker via canonical hyle_bud_filter_scoped */
-		int is_active = (i == active_edit_row);
-		const pick_view_t *cur_row_pv = is_active ? row_pv : NULL;
-
-		bud_node *picker_node = hyle_bud_filter_scoped(
-		        gig_song_fields, "song", i, songs[i].repo_id, songs[i].title,
-		        action, cur_row_pv, is_active,
-		        "gig-song-title-picker", &row_sibs);
-
-		bud_node *view_link =
-		        song_href[0] ? lx_el("a", lx_attr("href", song_href),
-		                             lx_attr("class",
-		                                     "text-xs text-muted ml-1"),
-		                             lx_attr("title", "View song"),
-		                             lx_text("\xe2\x86\x97"))
-		                               .data.node
-		                     : NULL;
-
-		bud_node *song_ctl =
-		        lx_el("span",
-		              lx_attr("class",
-		                      "flex items-center gap-1 flex-1 min-w-0"),
-		              picker_node ? lx_node(picker_node) : lx_none(),
-		              view_link ? lx_node(view_link) : lx_none())
-		                .data.node;
-
-		/* Key selector: 0 to 11 with key name labels */
-		bud_node *key_opts = NULL;
-		int norm_key = ((cur_key % 12) + 12) % 12;
-		for (int si = 0; si < 12; si++) {
-			char v[16];
-			snprintf(v, sizeof(v), "%d", si);
-			bud_node *o =
-			        lx_el("option", lx_attr("value", v),
-			              si == norm_key ? lx_attr("selected", "")
-			                             : lx_none(),
-			              lx_text(key_name(si, orig_key, 0)))
-			                .data.node;
-			if (!key_opts)
-				key_opts = bud_fragment();
-			bud_append(key_opts, o);
-		}
-
-		bud_node *key_select =
-		        lx_el("select", lx_attr("name", key_f),
-		              lx_attr("class", "border rounded p-1 w-24"),
-		              lx_node(key_opts))
-		                .data.node;
-
-		/* Format selector via canonical hyle_bud_filter_scoped */
-		int is_fmt_active = (i == active_edit_fmt_row);
-		const pick_view_t *cur_fmt_pv =
-		        is_fmt_active ? fmt_row_pv : NULL;
-
-		bud_node *fmt_picker_node = hyle_bud_filter_scoped(
-		        gig_song_fields, "fmt", i, f_val, f_val, action,
-		        cur_fmt_pv, is_fmt_active,
-		        "gig-format-picker", &row_sibs);
-
-		bud_node *fmt_ctl =
-		        lx_el("span",
-		              lx_attr("class",
-		                      "flex items-center gap-1 flex-1 min-w-0"),
-		              fmt_picker_node ? lx_node(fmt_picker_node)
-		                              : lx_none())
-		                .data.node;
-
-		bud_node *row =
-		        lx_el("div",
-		              lx_attr("class",
-		                      "flex gap-2 items-center w-full"),
-		              lx_node(song_ctl), lx_node(key_select),
-		              lx_node(fmt_ctl),
-		              lx_el("label",
-		                    lx_attr("class", "text-sm cursor-pointer "
-		                                     "flex-shrink-0"),
-		                    lx_el("input", lx_attr("type", "checkbox"),
-		                          lx_attr("name", remove_f)),
-		                    lx_text(" Remove")))
-		                .data.node;
-
-		bud_append(rows, row);
+		bud_node *row = render_song_row(
+		        i, &songs[i], action, active_edit_row, row_pv,
+		        active_edit_fmt_row, fmt_row_pv, &row_sibs);
+		if (row)
+			bud_append(rows, row);
 	}
 
-	bud_node *form =
-	        lx_el("form", lx_attr("action", action),
-	              lx_attr("method", "POST"),
-	              lx_attr("enctype", "multipart/form-data"),
-	              lx_attr("class", "flex flex-col gap-4"),
-	              lx_el("input", lx_attr("type", "hidden"),
-	                    lx_attr("name", "csrf_token"),
-	                    lx_attr("value", csrf_token)),
-	              lx_el("input", lx_attr("type", "hidden"),
-	                    lx_attr("name", "amount"),
-	                    lx_attr("value", amount_str)),
-	              lx_el("label", lx_text("Title:"),
-	                    lx_el("input", lx_attr("type", "text"),
-	                          lx_attr("name", "title"),
-	                          (title && title[0]) ? lx_attr("value", title)
-	                                              : lx_none())),
-	              lx_node(grp_fields),
-	              (grp_id && grp_id[0])
-	                      ? lx_el("label", lx_text("Song source:"),
-	                              lx_el("select",
-	                                    lx_attr("name", "song_source"),
-	                                    lx_attr("class", "border rounded "
-	                                                     "p-1 w-48"),
-	                                    lx_el("option",
-	                                          lx_attr("value", "all"),
-	                                          (!song_source ||
-	                                           strcmp(song_source, "all") ==
-	                                                   0)
-	                                                  ? lx_attr("selected",
-	                                                            "")
-	                                                  : lx_none(),
-	                                          lx_text("All "
-	                                                  "songs")),
-	                                    lx_el("option",
-	                                          lx_attr("value",
-	                                                  "repertoire"),
-	                                          (song_source &&
-	                                           strcmp(song_source,
-	                                                  "repertoire") == 0)
-	                                                  ? lx_attr("selected",
-	                                                            "")
-	                                                  : lx_none(),
-	                                          lx_text("Repertoire "
-	                                                  "only"))))
-	                      : lx_none(),
-	              lx_el("h3", lx_attr("class", "mt-2"), lx_text("Songs")),
-	              lx_node(rows),
-	              lx_el("div", lx_attr("class", "flex gap-2"),
-	                    lx_el("button", lx_attr("type", "submit"),
-	                          lx_attr("class", "btn btn-primary"),
-	                          lx_attr("id", "edit-form-submit"),
-	                          lx_text("Save Changes")),
-	                    lx_el("a", lx_attr("href", cancel_href),
-	                          lx_attr("class", "btn btn-secondary"),
-	                          lx_text("Cancel"))))
-	                .data.node;
+	bud_node *form = bud_tpl(
+	        "<form action='%s' method='POST' enctype='multipart/form-data' "
+	        "class='flex flex-col gap-4'>"
+	        "  <input type='hidden' name='csrf_token' value='%s'/>"
+	        "  <input type='hidden' name='amount' value='%s'/>"
+	        "  <label>Title:"
+	        "    <input type='text' name='title' value='%s'/>"
+	        "  </label>"
+	        "  %node"
+	        "  %node"
+	        "  <h3 class='mt-2'>Songs</h3>"
+	        "  %node"
+	        "  <div class='flex gap-2'>"
+	        "    <button type='submit' class='btn btn-primary' "
+	        "id='edit-form-submit'>Save Changes</button>"
+	        "    <a href='%s' class='btn btn-secondary'>Cancel</a>"
+	        "  </div>"
+	        "</form>",
+	        action, csrf_token ? csrf_token : "", amount_str,
+	        title ? title : "", grp_fields,
+	        (grp_id && grp_id[0])
+	                ? bud_tpl("<label>Song source:"
+	                          "  <select name='song_source' class='border "
+	                          "rounded p-1 w-48'>"
+	                          "    <option value='all' %b>All "
+	                          "songs</option>"
+	                          "    <option value='repertoire' "
+	                          "%b>Repertoire only</option>"
+	                          "  </select>"
+	                          "</label>",
+	                          (!song_source ||
+	                           strcmp(song_source, "all") == 0)
+	                                  ? "selected"
+	                                  : NULL,
+	                          (song_source &&
+	                           strcmp(song_source, "repertoire") == 0)
+	                                  ? "selected"
+	                                  : NULL)
+	                : NULL,
+	        rows, cancel_href ? cancel_href : "");
 
 	/* Sibling GET draft form */
-	{
-		bud_node *grp_sib = lx_el("form",
-		                          lx_attr("id", "pickq-grp"),
-		                          lx_attr("action", action),
-		                          lx_attr("method", "GET"),
-		                          lx_attr("class", "pick-sibling-form"),
-		                          lx_el("input", lx_attr("type", "hidden"),
-		                                lx_attr("name", "title"),
-		                                lx_attr("value", title ? title : "")))
-		                            .data.node;
-		bud_node *both = bud_fragment();
+	bud_node *grp_sib =
+	        bud_tpl("<form id='pickq-grp' action='%s' method='GET' "
+	                "class='pick-sibling-form'>"
+	                "  <input type='hidden' name='title' value='%s'/>"
+	                "</form>",
+	                action, title ? title : "");
 
-		if (picker)
-			bud_append(both, picker);
-		bud_append(both, form);
-		if (grp_sib)
-			bud_append(both, grp_sib);
-		if (row_sibs)
-			bud_append(both, row_sibs);
-		return both;
-	}
+	return bud_tpl(
+	        "%node"
+	        "%node"
+	        "%node"
+	        "%node",
+	        picker, form, grp_sib, row_sibs);
 }

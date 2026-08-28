@@ -21,6 +21,7 @@ bud_host_emit_patch(
 
 void bud_patch_attr(bud_node *node, const char *name, const char *value);
 void bud_patch_text(bud_node *node, const char *value);
+void bud_app_set_state(void);
 bud_runtime *wasm_get_runtime(void);
 
 #else
@@ -32,6 +33,7 @@ void bud_host_emit_patch(
 
 void bud_patch_attr(bud_node *node, const char *name, const char *value);
 void bud_patch_text(bud_node *node, const char *value);
+void bud_app_set_state(void);
 bud_runtime *wasm_get_runtime(void);
 
 #endif

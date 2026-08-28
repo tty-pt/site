@@ -151,7 +151,7 @@ keeps search live.
 4. **Composition over copy.** Repeated logic in 2+ modules belongs in
    `common`/`source`/`hyle` as a helper — do not fork it.
 5. **Include-source reuse is sanctioned** for C-isomorphic units
-   (`ux/detail.c` `#include`s `site_ui.c`, `music.c`) — reuse without a second
+   (`ux/detail.c` `#include`s `site_ui.c`) — reuse without a second
    compilation unit, keeping ids aligned across native/WASM.
 6. **Every module owns its tests** (`test.sh`, invoked by `make unit-tests` in
    the same way) — one command runs the whole suite.

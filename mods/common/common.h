@@ -9,6 +9,8 @@
 #include <ttypt/axil.h>
 #include <json-c/json.h>
 #include "bud/bud.h"
+#include <hyle/schema.h>
+#include "hyle-bud/hyle-bud.h"
 
 struct item_ctx_s;
 typedef struct item_ctx_s item_ctx_t;
@@ -210,20 +212,40 @@ XY_DECL(int, site_ui_respond_edit_page,
 	const char *, id,
 	bud_node *, form);
 
-XY_DECL(int, parse_transpose_qs,
-	const char *, qs,
-	int *, transpose,
-	int *, flags,
-	int *, show_media);
+XY_DECL(int, site_ui_respond_isomorphic,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	const char *, state_json,
+	const char *, wasm_module,
+	bud_node *, body);
+
+struct site_entity_def_s;
+typedef struct site_entity_def_s site_entity_def_t;
+
+XY_DECL(int, site_entity_register, const site_entity_def_t *, def);
 
 #endif /* COMMON_IMPL — end of XY_DECL section */
 
-/* Transpose viewer query-string parser — outside COMMON_IMPL guard so the
- * implementation (common) can see it too. Callers also see it by inclusion. */
-#define TPARAM_BEMOL 1
-#define TPARAM_LATIN 2
-#define TPARAM_HTML 4
-
 #include "viewer_zoom.h"
+
+typedef hyle_bud_picker_view_t pick_view_t;
+
+typedef struct site_entity_def_s {
+	const char *name;
+	const char *display_name;
+	const hyle_schema_desc_t *schema;
+	size_t field_count;
+	size_t record_size;
+	const char *items_path;
+	const char *file_attachment;
+	int (*detail_auth)(
+	        int fd, char *body, const item_ctx_t *ctx, void *user);
+	bud_node *(*form_render)(
+	        int is_edit, const char *id, const void *meta,
+	        const char *file_val, const char *csrf_token,
+	        const pick_view_t *pv);
+} site_entity_def_t;
 
 #endif /* COMMON_H */

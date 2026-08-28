@@ -10,16 +10,14 @@
 #include <ttypt/xy-mod.h>
 #include <ttypt/qmap.h>
 
-#include <hyle/source.h>
-
 #include "../common/common.h"
 #include "../source/source.h"
 
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
 #include "../song/song.h"
-#include "../song/lib/transp/transp_flags.h"
-#include "../song/ux/music.h"
+#include <transp/transp_flags.h>
+#include <transp/music.h>
 #include "../grp/grp.h"
 #include "fields.h"
 #include "../index/index.h"
@@ -59,7 +57,7 @@ static void sb_append_song(
 {
 	const char *n[3] = { "song", "transpose", "format" };
 	const char *v[3] = { song, transpose, format };
-	hyle_source_ordered_append(source_id, pval, n, v, 3);
+	source_ordered_append(source_id, pval, n, v, 3);
 }
 
 /* Re-sync the auto-repertoire of the grp this gig belongs to. Cheap in
@@ -87,11 +85,10 @@ typedef void (*sb_song_cb)(
 
 static void sb_for_each_song(const char *sb_id, sb_song_cb cb, void *user)
 {
-	int total = hyle_source_ordered_count("gig.songs", sb_id);
-	unsigned fhd = hyle_source_get_fields_hd("gig.songs");
+	int total = source_ordered_count("gig.songs", sb_id);
+	unsigned fhd = source_get_fields_hd("gig.songs");
 	for (int i = 0; i < total; i++) {
-		const char *key =
-		        hyle_source_ordered_key_at("gig.songs", sb_id, i);
+		const char *key = source_ordered_key_at("gig.songs", sb_id, i);
 		if (!key)
 			continue;
 		const char *sid = qmap_field_get(fhd, key, "song");
@@ -197,15 +194,15 @@ static int handle_sb_transpose_authorized(
 		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
 
-	key = hyle_source_ordered_key_at("gig.songs", ctx->id, idx);
+	key = source_ordered_key_at("gig.songs", ctx->id, idx);
 	if (!key)
 		return respond_error(fd, 404, "Song not found in gig");
 	char location[256];
 
 	names[0] = "transpose";
 	vals[0] = t_str;
-	hyle_source_put("gig.songs", key, names, vals, 1);
-	hyle_source_ordered_save("gig.songs", ctx->id);
+	source_put_row("gig.songs", key, names, vals, 1);
+	source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -233,10 +230,10 @@ static int handle_sb_randomize_authorized(
 		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
 
-	key = hyle_source_ordered_key_at("gig.songs", ctx->id, idx);
+	key = source_ordered_key_at("gig.songs", ctx->id, idx);
 	if (!key)
 		return respond_error(fd, 404, "Song not found in gig");
-	fhd = hyle_source_get_fields_hd("gig.songs");
+	fhd = source_get_fields_hd("gig.songs");
 	fmt_val = qmap_field_get(fhd, key, "format");
 	if (!fmt_val || !fmt_val[0])
 		fmt_val = "any";
@@ -252,8 +249,8 @@ static int handle_sb_randomize_authorized(
 	s_vals[1] = "0";
 	s_names[2] = "format";
 	s_vals[2] = fmt_val;
-	hyle_source_put("gig.songs", key, s_names, s_vals, 3);
-	hyle_source_ordered_save("gig.songs", ctx->id);
+	source_put_row("gig.songs", key, s_names, s_vals, 3);
+	source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -263,19 +260,8 @@ static int handle_sb_randomize_authorized(
 
 static void resolve_song_id(char *s_id, size_t s_id_sz)
 {
-	source_def_t *song_def = source_find("song.items");
-	source_def_t *repo_def = source_find("grp.songs");
-	if (song_def && repo_def &&
-	    qmap_pos(song_def->fields_hd, s_id) == QM_MISS)
-	{
-		uint32_t rp = qmap_pos(repo_def->fields_hd, s_id);
-		if (rp != QM_MISS) {
-			const char *rs = qmap_field_get(
-			        repo_def->fields_hd, s_id, "song");
-			if (rs)
-				snprintf(s_id, s_id_sz, "%s", rs);
-		}
-	}
+	source_resolve_partition_key(
+	        "song.items", "grp.songs", "song", s_id, s_id_sz);
 }
 
 struct seed_song_ctx {
@@ -313,7 +299,7 @@ static int handle_sb_song_add_authorized(
 		snprintf(fmt_val, sizeof(fmt_val), "any");
 
 	sb_append_song("gig.songs", ctx->id, s_id, "0", fmt_val);
-	hyle_source_ordered_save("gig.songs", ctx->id);
+	source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -342,8 +328,8 @@ static int handle_sb_song_remove_authorized(
 		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
 
-	hyle_source_ordered_remove_at("gig.songs", ctx->id, idx);
-	hyle_source_ordered_save("gig.songs", ctx->id);
+	source_ordered_remove_at("gig.songs", ctx->id, idx);
+	source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -371,7 +357,7 @@ static int handle_sb_song_replace_authorized(
 
 	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0) {
 		/* If song_id is not provided, keep current song_id */
-		unsigned cur_fhd = hyle_source_get_fields_hd("gig.songs");
+		unsigned cur_fhd = source_get_fields_hd("gig.songs");
 		const char *cur_s = qmap_field_get(cur_fhd, key, "song");
 		if (cur_s)
 			snprintf(s_id, sizeof(s_id), "%s", cur_s);
@@ -381,13 +367,13 @@ static int handle_sb_song_replace_authorized(
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 	resolve_song_id(s_id, sizeof(s_id));
 
-	key = hyle_source_ordered_key_at("gig.songs", ctx->id, idx);
+	key = source_ordered_key_at("gig.songs", ctx->id, idx);
 	if (!key)
 		return respond_error(fd, 404, "Song not found in gig");
 
 	/* Preserve the replaced row's key/format unless the request
 	 * carries explicit new values (kept for API compatibility). */
-	unsigned fhd = hyle_source_get_fields_hd("gig.songs");
+	unsigned fhd = source_get_fields_hd("gig.songs");
 	const char *cur_t = qmap_field_get(fhd, key, "transpose");
 	const char *cur_f = qmap_field_get(fhd, key, "format");
 	char key_val[16] = { 0 };
@@ -409,8 +395,8 @@ static int handle_sb_song_replace_authorized(
 	vals[1] = key_val[0] ? key_val : "0";
 	names[2] = "format";
 	vals[2] = fmt_val;
-	hyle_source_put("gig.songs", key, names, vals, 3);
-	hyle_source_ordered_save("gig.songs", ctx->id);
+	source_put_row("gig.songs", key, names, vals, 3);
+	source_ordered_save("gig.songs", ctx->id);
 
 	gig_sync_repertoire(ctx->id);
 
@@ -535,6 +521,8 @@ static int handle_sb_add(int fd, char *body)
 	}
 
 	if (grp[0]) {
+		module_item_group_record(fd, "gig", id, grp);
+
 		/* Pre-populate with one random song per grp format type. */
 		{
 			unsigned grp_fhd = source_get_fields_hd("grp.items");
@@ -547,7 +535,7 @@ static int handle_sb_add(int fd, char *body)
 			str_list_for_each(
 			        formats, seed_song_for_format, &seed_ctx);
 		}
-		hyle_source_ordered_save("gig.songs", id);
+		source_ordered_save("gig.songs", id);
 
 		/* Seeded songs join the derived repertoire immediately. */
 		gig_sync_repertoire(id);
@@ -563,12 +551,20 @@ static int handle_sb_add(int fd, char *body)
 #include "ux/edit.c"
 
 static const hyle_schema_desc_t sb_pick_song_schema[] = {
-	{ .key = "song_id", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.items", .writable = 1 },
+	{ .key = "song_id",
+	  .qm_type = BUD_QM_STR,
+	  .source_type = HYLE_BUD_REFERENCE,
+	  .ref_source = "song.items",
+	  .writable = 1 },
 	{ 0 }
 };
 
 static const hyle_schema_desc_t sb_pick_fmt_schema[] = {
-	{ .key = "format", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.types", .writable = 1 },
+	{ .key = "format",
+	  .qm_type = BUD_QM_STR,
+	  .source_type = HYLE_BUD_REFERENCE,
+	  .ref_source = "song.types",
+	  .writable = 1 },
 	{ 0 }
 };
 
@@ -581,18 +577,20 @@ static void sb_load_song_picks(int fd, const char *scope)
 
 	if (scope && scope[0])
 		hyle_bud_picker_view_collect_scoped(
-		        qs, sb_pick_song_schema, NULL,
-		        &g_sb_pick_state, scope);
+		        qs, sb_pick_song_schema, NULL, &g_sb_pick_state, scope);
 	else
 		hyle_bud_picker_view_collect_schema(
-		        qs, sb_pick_song_schema, NULL,
-		        &g_sb_pick_state, NULL);
+		        qs, sb_pick_song_schema, NULL, &g_sb_pick_state, NULL);
 }
 
 static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out)
 {
 	static const hyle_schema_desc_t edit_song_schema[] = {
-		{ .key = "song", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "song.items", .writable = 1 },
+		{ .key = "song",
+		  .qm_type = BUD_QM_STR,
+		  .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "song.items",
+		  .writable = 1 },
 		{ 0 }
 	};
 	char qs[2048] = { 0 };
@@ -698,10 +696,10 @@ static int api_sb_transpose_get(int fd, char *body)
 		unsigned fhd;
 		const char *sid, *db_tr;
 
-		key = hyle_source_ordered_key_at("gig.songs", id, idx);
+		key = source_ordered_key_at("gig.songs", id, idx);
 		if (!key)
 			return respond_error(fd, 404, "Song not found");
-		fhd = hyle_source_get_fields_hd("gig.songs");
+		fhd = source_get_fields_hd("gig.songs");
 		sid = qmap_field_get(fhd, key, "song");
 		if (!sid)
 			return respond_error(fd, 404, "Song not found");
@@ -891,101 +889,12 @@ static void sb_resolve_edit_format_names(sb_edit_row_t *songs, int n_songs)
 
 int sb_load_format_options(char (*buf)[128], const char **opts, int max)
 {
-	int n = 0;
-	snprintf(buf[n], sizeof(buf[n]), "any");
-	opts[n] = buf[n];
-	n++;
-
-	unsigned type_data_hd = source_get_data_hd("song.types");
-	if (!type_data_hd)
-		return n;
-
-	unsigned type_fhd = source_get_fields_hd("song.types");
-	uint32_t cur = qmap_iter(type_data_hd, NULL, 0);
-	const void *tk, *tv;
-	while (qmap_next(&tk, &tv, cur) && n < max) {
-		const char *type_id = (const char *)tk;
-		const char *name = NULL;
-		if (type_fhd) {
-			char nk[320];
-			snprintf(nk, sizeof(nk), "%s:name", type_id);
-			name = qmap_get(type_fhd, nk);
-		}
-		const char *label = name ? name : type_id;
-		int dup = 0;
-		for (int di = 0; di < n; di++) {
-			if (strcmp(opts[di], label) == 0) {
-				dup = 1;
-				break;
-			}
-		}
-		if (!dup) {
-			snprintf(buf[n], sizeof(buf[n]), "%s", label);
-			opts[n] = buf[n];
-			n++;
-		}
-	}
-	qmap_fin(cur);
-	return n;
+	return source_dataset_collect_options(
+	        "song.types", "name", "any", (source_opt_buf_t *)buf, opts,
+	        max);
 }
 
 /* ── HTTP handlers ──────────────────────────────────────── */
-
-static void sb_parse_detail_prefs(
-        int fd, const char *user, int *t, int *f, int *show_media, int *zoom)
-{
-	char qs[1024] = { 0 };
-	*t = 0;
-	*f = TRANSP_HTML;
-	*show_media = 0;
-	*zoom = VIEWER_ZOOM_DEFAULT;
-
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	if (qs[0]) {
-		int pf;
-		parse_transpose_qs(qs, t, &pf, show_media);
-		if (pf & TPARAM_BEMOL)
-			*f |= TRANSP_BEMOL;
-		if (pf & TPARAM_LATIN)
-			*f |= TRANSP_LATIN;
-		{
-			char tmp[16] = { 0 };
-			axil_query_param("z", tmp, sizeof(tmp));
-			if (tmp[0]) {
-				int zv = atoi(tmp);
-				if (zv < VIEWER_ZOOM_MIN)
-					zv = VIEWER_ZOOM_MIN;
-				if (zv > VIEWER_ZOOM_MAX)
-					zv = VIEWER_ZOOM_MAX;
-				if (user && user[0])
-					song_set_viewer_zoom(user, zv);
-				*zoom = zv;
-			} else if (user && user[0]) {
-				*zoom = song_get_viewer_zoom(user);
-				if (*zoom < VIEWER_ZOOM_MIN ||
-				    *zoom > VIEWER_ZOOM_MAX)
-					*zoom = VIEWER_ZOOM_DEFAULT;
-			}
-		}
-	} else if (user && user[0]) {
-		char *v;
-		v = song_get_pref(user, "chords-latin");
-		if (v) {
-			if (atoi(v))
-				*f |= TRANSP_LATIN;
-			free(v);
-		}
-		v = song_get_pref(user, "chords-media");
-		if (v) {
-			if (atoi(v))
-				*show_media = 1;
-			free(v);
-		}
-		*zoom = song_get_viewer_zoom(user);
-		if (*zoom < VIEWER_ZOOM_MIN || *zoom > VIEWER_ZOOM_MAX)
-			*zoom = VIEWER_ZOOM_DEFAULT;
-	}
-}
 
 /* ── Detail handler ──────────────────────────────────────── */
 
@@ -1000,7 +909,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char fkey[512];
 	int is_owner = 0;
 	char *grp_id = NULL;
-	int t, f, show_media, zoom;
+	song_viewer_prefs_t prefs;
 	char page_title[256];
 	bud_node *layout;
 	const char *csrf_token;
@@ -1018,7 +927,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	is_owner = item_owner_check(ctx->item_path, ctx->username);
 
 	/* Parse query prefs + zoom */
-	sb_parse_detail_prefs(fd, ctx->username, &t, &f, &show_media, &zoom);
+	song_parse_viewer_prefs(fd, ctx->username, &prefs);
 
 	/* Resolve grp ID from gig reference field */
 	{
@@ -1044,7 +953,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		struct detail_song_ctx {
 			unsigned song_hd;
 			int f;
-		} detail_ctx = { song_hd, f };
+		} detail_ctx = { song_hd, prefs.flags };
 		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
 	}
 
@@ -1057,27 +966,32 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
 		hyle_bud_picker_view_collect_schema(
-		        qs, sb_pick_song_schema, NULL,
-		        &g_sb_pick_state, &sb_app_state.active_row_pick);
+		        qs, sb_pick_song_schema, NULL, &g_sb_pick_state,
+		        &sb_app_state.active_row_pick);
 		hyle_bud_picker_view_collect_schema(
-		        qs, sb_pick_fmt_schema, NULL,
-		        &g_sb_fmt_pick_state, &sb_app_state.active_fmt_pick);
-		/* For No-JS top add picker when search query is present (pick_q_song_id=),
-		 * ensure top picker is populated */
-		if (sb_app_state.active_row_pick < 0 && sb_app_state.active_fmt_pick < 0) {
-			if (strstr(qs, "pick_q_song_id=") || strstr(qs, "pick_page_song_id=")) {
+		        qs, sb_pick_fmt_schema, NULL, &g_sb_fmt_pick_state,
+		        &sb_app_state.active_fmt_pick);
+		/* For No-JS top add picker when search query is present
+		 * (pick_q_song_id=), ensure top picker is populated */
+		if (sb_app_state.active_row_pick < 0 &&
+		    sb_app_state.active_fmt_pick < 0)
+		{
+			if (strstr(qs, "pick_q_song_id=") ||
+			    strstr(qs, "pick_page_song_id="))
+			{
 				hyle_bud_picker_view_collect_schema(
-				        qs, sb_pick_song_schema, NULL, &g_sb_pick_state, NULL);
+				        qs, sb_pick_song_schema, NULL,
+				        &g_sb_pick_state, NULL);
 			}
 		}
 	}
 
 	/* ── Populate sb_app_state with page data ────────────────── */
-	sb_app_state.zoom = zoom;
-	sb_app_state.latin = (f & TRANSP_LATIN) ? 1 : 0;
-	sb_app_state.show_media = show_media;
-	sb_app_state.t_pref = t;
-	sb_app_state.bemol = (f & TRANSP_BEMOL) ? 1 : 0;
+	sb_app_state.zoom = prefs.zoom;
+	sb_app_state.latin = (prefs.flags & TRANSP_LATIN) ? 1 : 0;
+	sb_app_state.show_media = prefs.show_media;
+	sb_app_state.t_pref = prefs.transpose;
+	sb_app_state.bemol = (prefs.flags & TRANSP_BEMOL) ? 1 : 0;
 	sb_app_state.is_owner = is_owner;
 
 	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", ctx->id);
@@ -1196,9 +1110,12 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		snprintf(grp_rec.grp, sizeof(grp_rec.grp), "%s", grp_id);
 
 	static const hyle_schema_desc_t grp_field_schema[] = {
-		{ .key = "grp", .qm_type = BUD_QM_STR,
-		  .source_type = HYLE_BUD_REFERENCE, .ref_source = "grp.items",
-		  .offset = offsetof(gig_cache_t, grp), .size = sizeof(grp_rec.grp),
+		{ .key = "grp",
+		  .qm_type = BUD_QM_STR,
+		  .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "grp.items",
+		  .offset = offsetof(gig_cache_t, grp),
+		  .size = sizeof(grp_rec.grp),
 		  .writable = 1 },
 		{ 0 }
 	};
@@ -1212,10 +1129,16 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Check if any row's song picker or format picker is active using
 	 * unified multi-field auto-collector */
 	static const hyle_schema_desc_t row_candidate_schema[] = {
-		{ .key = "song", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE,
-		  .ref_source = "song.items", .writable = 1 },
-		{ .key = "fmt", .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE,
-		  .ref_source = "song.types", .writable = 1 },
+		{ .key = "song",
+		  .qm_type = BUD_QM_STR,
+		  .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "song.items",
+		  .writable = 1 },
+		{ .key = "fmt",
+		  .qm_type = BUD_QM_STR,
+		  .source_type = HYLE_BUD_REFERENCE,
+		  .ref_source = "song.types",
+		  .writable = 1 },
 		{ 0 }
 	};
 	pick_view_t active_row_pv;
@@ -1233,7 +1156,8 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	pick_view_t add_pv;
 	memset(&add_pv, 0, sizeof(add_pv));
 
-	/* Load song picks for omnisearch add-picker only when no row is active */
+	/* Load song picks for omnisearch add-picker only when no row is active
+	 */
 	if (active_edit_row < 0 && active_edit_fmt_row < 0)
 		sb_load_edit_song_picks(fd, &add_pv);
 
@@ -1248,9 +1172,11 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	        action, csrf_token, title, ctx->id, grp_rec.grp, &edit_pv,
 	        cancel_href, n_songs, songs, n_format_opts, format_opts,
 	        song_source, active_edit_row,
-	        active_edit_row >= 0 ? &active_row_pv : NULL, active_edit_fmt_row,
+	        active_edit_row >= 0 ? &active_row_pv : NULL,
+	        active_edit_fmt_row,
 	        active_edit_fmt_row >= 0 ? &active_row_pv : NULL,
-	        (active_edit_row < 0 && active_edit_fmt_row < 0) ? &add_pv : NULL);
+	        (active_edit_row < 0 && active_edit_fmt_row < 0) ? &add_pv
+	                                                         : NULL);
 
 	return site_ui_respond_edit_page(
 	        fd, ctx->username, "gig", site_ui_module_icon("gig"), title,
@@ -1280,7 +1206,8 @@ static int gig_add_get_handler(int fd, char *body)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
 	pick_view_t add_pv;
-	hyle_bud_picker_view_collect_schema(qs, gig_fields, NULL, &add_pv, NULL);
+	hyle_bud_picker_view_collect_schema(
+	        qs, gig_fields, NULL, &add_pv, NULL);
 
 	bud_node *form = sb_render_add_form(csrf_token, NULL, &add_pv);
 
@@ -1290,49 +1217,26 @@ static int gig_add_get_handler(int fd, char *body)
 
 /* ── Edit POST handler ───────────────────────────────────── */
 
+static const source_ordered_field_sync_t gig_song_sync_fields[] = {
+	{ .form_field_prefix = "song",
+	  .schema_field_name = "song",
+	  .default_value = "",
+	  .is_primary_key = 1 },
+	{ .form_field_prefix = "key",
+	  .schema_field_name = "transpose",
+	  .default_value = "0",
+	  .is_primary_key = 0 },
+	{ .form_field_prefix = "fmt",
+	  .schema_field_name = "format",
+	  .default_value = "any",
+	  .is_primary_key = 0 }
+};
+
 static void sb_save_edit_songs_from_form(const char *gig_id)
 {
-	char amount_str[16] = { 0 };
-	int amount = 0, i;
-
-	if (mpfd_get("amount", amount_str, sizeof(amount_str)) > 0)
-		amount = atoi(amount_str);
-
-	hyle_source_ordered_clear("gig.songs", gig_id);
-
-	for (i = 0; i < amount; i++) {
-		char song_field[32], key_field[32], fmt_field[32],
-		        remove_field[32];
-		char remove_val[8] = { 0 };
-		char song_val[256] = { 0 };
-		char extracted[128] = { 0 };
-		char key_val[16] = { 0 };
-		char fmt_val[64] = { 0 };
-
-		snprintf(song_field, sizeof(song_field), "song_%d", i);
-		snprintf(key_field, sizeof(key_field), "key_%d", i);
-		snprintf(fmt_field, sizeof(fmt_field), "fmt_%d", i);
-		snprintf(remove_field, sizeof(remove_field), "remove_%d", i);
-
-		if (mpfd_get(remove_field, remove_val, sizeof(remove_val)) > 0)
-			continue;
-		if (mpfd_get(song_field, song_val, sizeof(song_val)) <= 0)
-			continue;
-
-		datalist_extract_id(song_val, extracted, sizeof(extracted));
-		if (!extracted[0])
-			continue;
-
-		resolve_song_id(extracted, sizeof(extracted));
-		mpfd_get(key_field, key_val, sizeof(key_val));
-		mpfd_get(fmt_field, fmt_val, sizeof(fmt_val));
-
-		sb_append_song(
-		        "gig.songs", gig_id, extracted,
-		        key_val[0] ? key_val : "0",
-		        fmt_val[0] ? fmt_val : "any");
-	}
-	hyle_source_ordered_save("gig.songs", gig_id);
+	source_ordered_sync_form(
+	        "gig.songs", gig_id, "amount", "remove", gig_song_sync_fields,
+	        3);
 }
 
 static int
@@ -1366,6 +1270,7 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 					        fd, 403,
 					        "You don't own this group");
 				}
+				module_item_group_record(fd, "gig", ctx->id, new_grp);
 			}
 
 			source_update_item(fd, "gig.items", ctx->id, dh);
@@ -1425,10 +1330,17 @@ void xy_install(void)
 			{ "format", HYLE_FIELD_STRING, 1, NULL, NULL, 1, 0, 0,
 			  0, 16, NULL },
 		};
-		hyle_source_register_ordered(
-		        "gig.songs", sb_song_fields, 3, "sb", 0,
-		        HYLE_AUTO_RECORD, source_dsv_load, source_dsv_save,
-		        g_doc_root);
+		source_register_ordered(&(source_ordered_def_t){
+		        .source_id = "gig.songs",
+		        .fields = sb_song_fields,
+		        .field_count = 3,
+		        .partition_field = "sb",
+		        .record_id = 0,
+		        .flags = SOURCE_AUTO_RECORD,
+		        .load_fn = source_dsv_load,
+		        .save_fn = source_dsv_save,
+		        .persist_user = g_doc_root,
+		});
 	}
 
 	index_open("Gig", "gig.items", NULL, NULL, NULL, NULL, NULL, NULL);

@@ -1,66 +1,119 @@
 static bud_node *ch_render_detail_header(const char *title, const char *owner)
 {
-	bud_node *frag = bud_fragment();
-	if (!frag)
-		return NULL;
-
+	(void)title;
 	if (owner && owner[0]) {
-		char owner_buf[256];
-		snprintf(owner_buf, sizeof(owner_buf), "By %s", owner);
-		bud_append(
-		        frag,
-		        lx_el("div", lx_attr("class", "flex justify-end"),
-		              lx_el("a", lx_attr("href", "/"),
-		                    lx_attr("class", "text-xs text-muted"),
-		                    lx_text(owner_buf)))
-		                .data.node);
+		return bud_tpl(
+		        "<div class='flex justify-end'>"
+		        "  <a href='/' class='text-xs text-muted'>By %s</a>"
+		        "</div>",
+		        owner);
 	}
-
-	return frag;
+	return NULL;
 }
 
 static bud_node *ch_render_gigs_header(void)
 {
-	return lx_el("h3", lx_text("Gigs")).data.node;
+	return bud_tpl("<h3>Gigs</h3>");
 }
 
 static bud_node *ch_render_gigs_empty(void)
 {
-	return lx_el("p", lx_attr("class", "text-muted"),
-	             lx_text("No gigs yet."))
-	        .data.node;
+	return bud_tpl("<p class='text-muted'>No gigs yet.</p>");
 }
 
 static bud_node *ch_render_gig_link(const char *title, const char *href)
 {
-	return lx_el("a", lx_attr("class", "btn"), lx_attr("href", href),
-	             lx_text(title))
-	        .data.node;
+	return bud_tpl("<a class='btn' href='%s'>%s</a>", href, title);
 }
 
 static bud_node *ch_render_repertoire_header(void)
 {
-	return lx_el("h3", lx_text("Repertoire")).data.node;
+	return bud_tpl("<h3>Repertoire</h3>");
+}
+
+static bud_node *ch_render_members_section(
+        const char *grp_id, const char *members, int is_owner,
+        const char *owner, const char *csrf_token)
+{
+	bud_node *frag = bud_fragment();
+	bud_append(frag, bud_tpl("<h3>Members</h3>"));
+	if (!members || !members[0]) {
+		bud_append(frag, bud_tpl("<p class='text-muted'>No members yet.</p>"));
+	} else {
+		bud_node *list = bud_tpl("<ul class='list-disc pl-5'></ul>");
+		const char *p = members;
+		while (*p) {
+			while (*p == ' ' || *p == ',')
+				p++;
+			if (!*p)
+				break;
+			const char *end = p;
+			while (*end && *end != ',')
+				end++;
+			char m[64] = { 0 };
+			size_t len = (size_t)(end - p);
+			if (len >= sizeof(m))
+				len = sizeof(m) - 1;
+			memcpy(m, p, len);
+			m[len] = '\0';
+			if (is_owner && owner && strcmp(m, owner) != 0) {
+				bud_append(
+				        list,
+				        bud_tpl(
+				                "<li class='flex items-center justify-between py-1'>"
+				                "  <span>%s</span>"
+				                "  <form method='post' action='/api/grp/%s/members' class='inline'>"
+				                "    <input type='hidden' name='csrf_token' value='%s'/>"
+				                "    <input type='hidden' name='action' value='del'/>"
+				                "    <input type='hidden' name='member' value='%s'/>"
+				                "    <button type='submit' class='btn btn-xs text-danger'>Dismiss</button>"
+				                "  </form>"
+				                "</li>",
+				                m, grp_id, csrf_token ? csrf_token : "", m));
+			} else if (owner && strcmp(m, owner) == 0) {
+				bud_append(
+				        list,
+				        bud_tpl(
+				                "<li class='flex items-center justify-between py-1'>"
+				                "  <span>%s <span class='text-xs text-muted'>(owner)</span></span>"
+				                "</li>",
+				                m));
+			} else {
+				bud_append(list, bud_tpl("<li class='py-1'>%s</li>", m));
+			}
+			p = end;
+		}
+		bud_append(frag, list);
+	}
+	if (is_owner) {
+		bud_append(
+		        frag,
+		        bud_tpl(
+		                "<form method='post' action='/api/grp/%s/members' class='mt-2 flex gap-2 items-center'>"
+		                "  <input type='hidden' name='csrf_token' value='%s'/>"
+		                "  <input type='hidden' name='action' value='add'/>"
+		                "  <input type='text' name='member' placeholder='Username' class='input input-sm' required/>"
+		                "  <button type='submit' class='btn btn-sm'>Add Member</button>"
+		                "</form>",
+		                grp_id, csrf_token ? csrf_token : ""));
+	}
+	return frag;
 }
 
 static bud_node *ch_render_repertoire_empty(void)
 {
-	return lx_el("p", lx_attr("class", "text-muted"),
-	             lx_text("No songs in repertoire yet."))
-	        .data.node;
+	return bud_tpl("<p class='text-muted'>No songs in repertoire yet.</p>");
 }
 
 static bud_node *ch_render_key_selector(int orig_key, int transpose)
 {
 	static const char *CH_KEYS[] = { "C",  "C#", "D",  "D#", "E",  "F",
 		                         "F#", "G",  "G#", "A",  "A#", "B" };
-	bud_node *sel = lx_el("select", lx_attr("name", "key"),
-	                      lx_attr("class", "text-xs p-1"))
-	                        .data.node;
+	bud_node *sel =
+	        bud_tpl("<select name='key' class='text-xs p-1'></select>");
 	for (int k = 0; k < 12; k++) {
 		int semitones = ((k - orig_key) % 12 + 12) % 12;
-		char val[8], label[32];
-		snprintf(val, sizeof(val), "%d", semitones);
+		char label[32];
 		if (semitones == 0)
 			snprintf(
 			        label, sizeof(label), "%s (Original)",
@@ -68,12 +121,10 @@ static bud_node *ch_render_key_selector(int orig_key, int transpose)
 		else
 			snprintf(label, sizeof(label), "%s", CH_KEYS[k]);
 		bud_append(
-		        sel, lx_el("option", lx_attr("value", val),
-		                   semitones == transpose
-		                           ? lx_attr("selected", "selected")
-		                           : lx_none(),
-		                   lx_text(label))
-		                     .data.node);
+		        sel,
+		        bud_tpl("<option value='%d' %b>%s</option>", semitones,
+		                (semitones == transpose) ? "selected" : NULL,
+		                label));
 	}
 	return sel;
 }
@@ -97,10 +148,9 @@ static bud_node *ch_render_song_row(
 		                         "btn btn-danger text-xs py-1 px-2")
 		               : NULL;
 
-		controls = lx_el("div", lx_attr("class", "flex gap-2"),
-		                 lx_node(set_form),
-		                 rem_form ? lx_node(rem_form) : lx_none())
-		                   .data.node;
+		controls =
+		        bud_tpl("<div class='flex gap-2'>%node %node</div>",
+		                set_form, rem_form);
 	}
 
 	return site_ui_item_row(s_title, song_href, key_label, controls);
@@ -108,10 +158,10 @@ static bud_node *ch_render_song_row(
 
 static bud_node *ch_render_add_gig_link(const char *href)
 {
-	return lx_el("div", lx_attr("class", "mt-4"),
-	             lx_el("a", lx_attr("href", href), lx_attr("class", "btn"),
-	                   lx_text("\xe2\x9e\x95 add gig")))
-	        .data.node;
+	return bud_tpl(
+	        "<div class='mt-4'><a href='%s' class='btn'>\xe2\x9e\x95 add "
+	        "gig</a></div>",
+	        href);
 }
 
 /* ── Data-driven section builders (WASM-safe: no site headers) ── */
@@ -165,11 +215,9 @@ static bud_node *ch_render_repertoire_section(
 	bud_append(frag, ch_render_repertoire_header());
 	if (is_owner)
 		bud_append(
-		        frag,
-		        lx_el("p", lx_attr("class", "text-xs text-muted"),
-		              lx_text("Built from your gigs. Set a key to "
-		                      "pin a song; pinned songs stay."))
-		                .data.node);
+		        frag, bud_tpl("<p class='text-xs text-muted'>Built "
+		                      "from your gigs. Set a key to pin a "
+		                      "song; pinned songs stay.</p>"));
 	if (n_repertoire == 0) {
 		bud_append(frag, ch_render_repertoire_empty());
 	} else {
@@ -212,16 +260,15 @@ ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 	}
 
 	if (list_has_query(&g_ch_pick_state)) {
-		hint = lx_el("div", lx_attr("class", "text-xs text-muted"),
-		             lx_text("Click a song to add it."))
-		               .data.node;
+		hint = bud_tpl("<div class='text-xs text-muted'>Click a song "
+		               "to add it.</div>");
 		if (hint)
 			bud_append(frag, hint);
 	}
 
-	form = lx_el("form", lx_attr("method", "get"),
-	             lx_attr("action", action), lx_attr("class", "list-form"))
-	               .data.node;
+	form = bud_tpl(
+	        "<form method='get' action='%s' class='list-form'></form>",
+	        action);
 	chrome = idx_filter_chrome(&g_ch_pick_state);
 	if (form && chrome)
 		bud_append(form, chrome);
@@ -251,12 +298,11 @@ ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 	}
 	if (form)
 		bud_append(frag, form);
-	post = lx_el("form", lx_attr("id", "ch-pick-post"),
-	             lx_attr("method", "post"), lx_attr("action", add_action),
-	             lx_el("input", lx_attr("type", "hidden"),
-	                   lx_attr("name", "csrf_token"),
-	                   lx_attr("value", csrf_token)))
-	               .data.node;
+	post =
+	        bud_tpl("<form id='ch-pick-post' method='post' action='%s'>"
+	                "  <input type='hidden' name='csrf_token' value='%s'/>"
+	                "</form>",
+	                add_action, csrf_token ? csrf_token : "");
 	if (post)
 		bud_append(frag, post);
 

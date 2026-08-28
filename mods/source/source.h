@@ -49,6 +49,41 @@ typedef hyle_source_state_kv_t source_state_kv_t;
 typedef hyle_json_str_map_t json_str_map_t;
 #define json_extract_strings hyle_json_extract_strings
 
+typedef char source_opt_buf_t[128];
+
+typedef struct {
+	const char *form_field_prefix;
+	const char *schema_field_name;
+	const char *default_value;
+	int is_primary_key;
+} source_ordered_field_sync_t;
+
+#include <hyle/field.h>
+
+#define SOURCE_AUTO_RECORD 0x01
+
+typedef int (*source_persist_load_fn)(
+        const char *source_id, const char *partition_val, unsigned fields_hd,
+        void *user);
+typedef int (*source_persist_save_fn)(
+        const char *source_id, const char *partition_val, unsigned fields_hd,
+        void *user);
+typedef const char *(*source_derive_fn_t)(
+        const void *def, const char *row_id, const char *field_name,
+        void *user);
+
+typedef struct {
+	const char *source_id;
+	const hyle_field_t *fields;
+	size_t field_count;
+	const char *partition_field;
+	uint32_t record_id;
+	unsigned flags;
+	source_persist_load_fn load_fn;
+	source_persist_save_fn save_fn;
+	void *persist_user;
+} source_ordered_def_t;
+
 #ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
     int, fd,
@@ -183,5 +218,77 @@ XY_DECL(const source_desc_t *, source_get_desc,
     int *, count_out);
 XY_DECL(size_t, source_get_record_size,
     const char *, dataset_id);
+XY_DECL(int, source_dataset_collect_options,
+    const char *, dataset_id,
+    const char *, label_field,
+    const char *, default_opt,
+    source_opt_buf_t *, buf,
+    const char **, opts,
+    int, max);
+XY_DECL(int, source_resolve_partition_key,
+    const char *, primary_dataset,
+    const char *, partition_dataset,
+    const char *, target_field,
+    char *, id_inout,
+    size_t, id_sz);
+XY_DECL(int, source_ordered_sync_form,
+    const char *, source_id,
+    const char *, partition_id,
+    const char *, amount_param,
+    const char *, remove_param_prefix,
+    const source_ordered_field_sync_t *, fields,
+    size_t, n_fields);
+
+XY_DECL(unsigned, source_register_ordered,
+    const source_ordered_def_t *, def);
+
+XY_DECL(int, source_ordered_count,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(const char *, source_ordered_key_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos);
+
+XY_DECL(int, source_ordered_append,
+    const char *, source_id,
+    const char *, partition_val,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(int, source_ordered_insert_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(int, source_ordered_remove_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos);
+
+XY_DECL(int, source_ordered_clear,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(int, source_ordered_save,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(int, source_put_row,
+    const char *, source_id,
+    const char *, row_id,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(int, source_register_derive,
+    const char *, derive_key,
+    source_derive_fn_t, fn,
+    void *, user);
 #endif /* SOURCE_IMPL */
 #endif

@@ -111,7 +111,7 @@ fi
 # ── pinned selections present under any q/page on edit ────────────────
 for QS in "" "?pick_q_type=zzzznomatch&page=1" "?pick_q_type=&page=3"; do
   get "/song/$SONG_ID/edit$QS"
-  grep -q 'checked=""' "$BODY" ||
+  grep -q -E 'checked(="")?' "$BODY" ||
     fail "edit$QS lost pinned selection"
 done
 pass "pinned selections survive q/page variations"

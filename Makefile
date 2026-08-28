@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud hyle-source axil-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
+all: stoma-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -19,6 +19,9 @@ stoma-lib:
 hyle-lib:
 	$(MAKE) -C external/hyle
 
+transp-lib:
+	$(MAKE) -C external/libtransp
+
 bud-lib:
 	$(MAKE) -C external/bud
 
@@ -31,7 +34,10 @@ hyle-source: hyle-lib qmap-lib stoma-lib
 axil-lib:
 	$(MAKE) -C external/axil
 
-axil-hyle: axil-lib hyle-source hyle-bud
+axil-auth-lib: axil-lib qmap-lib xylem-lib
+	$(MAKE) -C external/axil-auth
+
+axil-hyle: axil-lib hyle-source hyle-bud axil-auth-lib
 	$(MAKE) -C external/axil-hyle
 
 qmap-lib:
@@ -73,7 +79,12 @@ standalone-unit-tests:
 	@sh tests/unit/run-source-options.sh
 	@sh tests/unit/run-bud-picker-collect.sh
 	@sh tests/unit/run-bud-form.sh
+	@sh tests/unit/run-bud-table.sh
 	@sh tests/unit/run-source-utils.sh
+	@sh tests/unit/run-auth-disk-permissions.sh
+	@sh tests/unit/run-axil-auth-groups.sh
+	@sh tests/unit/run-auth-group-permissions.sh
+	@sh tests/unit/run-site-media.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -176,7 +187,7 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-qmap)
 hyle-tests:
-	RUSTFLAGS="-l qmap" cargo test --workspace \
+	RUSTFLAGS="-l qmap -l stoma -L $(shell pwd)/external/libqmap/lib -L $(shell pwd)/external/stoma/lib" cargo test --workspace \
 		--manifest-path external/hyle/Cargo.toml 2>&1
 
 debug-clean:
@@ -192,4 +203,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check
+.PHONY: all mods clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check

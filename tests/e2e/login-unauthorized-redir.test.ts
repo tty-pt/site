@@ -36,7 +36,7 @@ Deno.test({
     };
     await registerUser(BASE, user);
 
-    // ── 1. Load protected page without being logged in ────────────────────────
+    // ── 1. Load protected edit page without being logged in ────────────────────────
     // /song/test_item/edit or /poem/test_item/edit
     const targetPath = "/song/test_item/edit";
     const response = await page.goto(`${BASE}${targetPath}`, GOTO);
@@ -55,12 +55,26 @@ Deno.test({
       );
     }
 
-    // ── 2. Submit login and verify redirect target is targetPath ──────────────
+    // ── 1b. Load protected add page without being logged in ─────────────────────────
+    const addPath = "/song/add";
+    const addResp = await page.goto(`${BASE}${addPath}`, GOTO);
+    if (addResp && addResp.status() !== 401) {
+      throw new Error(`Expected HTTP 401 on /song/add when unauthenticated, got ${addResp?.status()}`);
+    }
+    await page.waitForSelector('input[name="ret"]', { state: "attached", timeout: 5000 });
+    const addRetValue = await page.inputValue('input[name="ret"]');
+    if (addRetValue !== addPath) {
+      throw new Error(
+        `Expected hidden ret input on /song/add to be "${addPath}", got "${addRetValue}"`,
+      );
+    }
+
+    // ── 2. Submit login and verify redirect target is addPath ──────────────
     await page.fill('input[name="username"]', user.username);
     await page.fill('input[name="password"]', user.password);
     await page.click('form[method="POST"] button[type="submit"]');
 
-    await page.waitForURL((url) => url.pathname === targetPath, { timeout: 8000 });
+    await page.waitForURL((url) => url.pathname === addPath, { timeout: 8000 });
   } finally {
     await browser.close();
   }

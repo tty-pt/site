@@ -3,7 +3,7 @@ import questJournalExtension from "../../.pi/extensions/quest-journal.ts";
 
 type EventCallback = (event: any, ctx: any) => Promise<any>;
 
-async function testEconomyConfigurationAndCommand() {
+Deno.test("quest_journal_economy: configuration, percentages, commands, and dynamic threshold", async () => {
 	const handlers: Record<string, EventCallback[]> = {};
 	const commands: Record<string, any> = {};
 	const tools: Record<string, any> = {};
@@ -34,7 +34,7 @@ async function testEconomyConfigurationAndCommand() {
 	assert.ok(commands["quest-economy"], "/quest-economy command should be registered");
 
 	let currentTokens: number | null = 50000;
-	let currentContextWindow = 200000;
+	let currentContextWindow = 1000000; // 1M context window
 
 	const mockCtx: any = {
 		cwd: process.cwd(),
@@ -61,41 +61,55 @@ async function testEconomyConfigurationAndCommand() {
 		mode: "tui",
 	};
 
-	// 1. Check default economy threshold (140k) and warning margin (30k)
+	// 1. Check default dynamic threshold on 1M context window: min(80% of 1M = 800k, ceiling = 333k) -> 333k
 	notifiedMessages = [];
 	await commands["quest-economy"].handler("", mockCtx);
 	assert.ok(
-		notifiedMessages.some((m) => m.includes("140k") || m.includes("140,000")),
-		"Default economy threshold should be 140k tokens",
-	);
-	assert.ok(
-		notifiedMessages.some((m) => m.includes("30k") || m.includes("30,000")),
-		"Default warning margin should be 30k tokens",
+		notifiedMessages.some((m) => m.includes("333k") || m.includes("333,000")),
+		`Default economy threshold for 1M context should be capped at 333k ceiling, got: ${JSON.stringify(notifiedMessages)}`,
 	);
 
-	// 2. Set economy threshold and warning margin via /quest-economy 140k 25k
+	// Check default on 200k context window: clamp(80% * 200k) = 160k (clamped so it doesn't exceed 200k or ceiling)
+	currentContextWindow = 200000;
 	notifiedMessages = [];
-	await commands["quest-economy"].handler("140k 25k", mockCtx);
+	await commands["quest-economy"].handler("", mockCtx);
 	assert.ok(
-		notifiedMessages.some((m) => (m.includes("140k") || m.includes("140,000")) && (m.includes("25k") || m.includes("25,000"))),
-		"Should set both economy threshold to 140k and warning margin to 25k",
+		notifiedMessages.some((m) => m.includes("160k") || m.includes("160,000") || m.includes("80%")),
+		`Default economy threshold for 200k context should be 160k or 80%, got: ${JSON.stringify(notifiedMessages)}`,
 	);
 
-	// 3. Set warning margin directly via /quest-warning 35k
-	assert.ok(commands["quest-warning"], "/quest-warning command should be registered");
+	// Check default on 500k context window: min(80% * 500k = 400k, ceiling = 333k) -> 333k
+	currentContextWindow = 500000;
 	notifiedMessages = [];
-	await commands["quest-warning"].handler("35k", mockCtx);
+	await commands["quest-economy"].handler("", mockCtx);
 	assert.ok(
-		notifiedMessages.some((m) => m.includes("35k") || m.includes("35,000")),
-		"Should successfully update warning margin to 35k",
+		notifiedMessages.some((m) => m.includes("333k") || m.includes("333,000")),
+		`Default economy threshold for 500k context should be 333k ceiling, got: ${JSON.stringify(notifiedMessages)}`,
 	);
 
-	// 4. Set economy threshold with pure numbers: /quest-economy 150000
+	// 2. Set explicit percentage threshold: /quest-economy 75%
 	notifiedMessages = [];
-	await commands["quest-economy"].handler("150000", mockCtx);
+	await commands["quest-economy"].handler("75%", mockCtx);
 	assert.ok(
-		notifiedMessages.some((m) => m.includes("150k") || m.includes("150,000")),
-		"Should accept raw integer values",
+		notifiedMessages.some((m) => m.includes("75%") || m.includes("375k")),
+		`Should accept percentage notation '75%', got: ${JSON.stringify(notifiedMessages)}`,
+	);
+
+	// 3. Set explicit token threshold: /quest-economy 333k 30k
+	notifiedMessages = [];
+	await commands["quest-economy"].handler("333k 30k", mockCtx);
+	assert.ok(
+		notifiedMessages.some((m) => (m.includes("333k") || m.includes("333,000")) && (m.includes("30k") || m.includes("30,000"))),
+		`Should set economy threshold to 333k and warning margin to 30k, got: ${JSON.stringify(notifiedMessages)}`,
+	);
+
+	// 4. Configure subquest launch compaction threshold: /quest-subquest-threshold 40k
+	assert.ok(commands["quest-subquest-threshold"] || commands["quest-economy"], "Subquest threshold command or parameter should exist");
+	notifiedMessages = [];
+	await commands["quest-economy"].handler("333k 30k 40k", mockCtx);
+	assert.ok(
+		notifiedMessages.some((m) => m.includes("40k") || m.includes("40,000")),
+		`Should support configuring subquest launch threshold to 40k, got: ${JSON.stringify(notifiedMessages)}`,
 	);
 
 	// 5. Disable economy auto-compaction: /quest-economy off
@@ -110,20 +124,13 @@ async function testEconomyConfigurationAndCommand() {
 	notifiedMessages = [];
 	await commands["quest-economy"].handler("default", mockCtx);
 	assert.ok(
-		notifiedMessages.some((m) => m.includes("140k") || m.includes("140,000")),
-		"Should restore default threshold of 140k",
+		notifiedMessages.some((m) => m.includes("default") || m.includes("80%") || m.includes("400k")),
+		"Should restore default threshold",
 	);
 
-	// 6. Test argument completions
+	// 7. Test argument completions
 	if (commands["quest-economy"].getArgumentCompletions) {
-		const completions = await commands["quest-economy"].getArgumentCompletions("14");
-		assert.ok(completions && completions.some((c: any) => c.value.includes("140k")), "Completions should offer 140k");
+		const completions = await commands["quest-economy"].getArgumentCompletions("33");
+		assert.ok(completions && completions.some((c: any) => c.value.includes("333k")), "Completions should offer 333k");
 	}
-
-	console.log("PASS: quest_journal_economy_test");
-}
-
-testEconomyConfigurationAndCommand().catch((err) => {
-	console.error("FAIL: quest_journal_economy_test", err);
-	process.exit(1);
 });

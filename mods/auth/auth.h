@@ -21,7 +21,7 @@ typedef struct item_ctx_s {
 	const char *username;
 	char doc_root[256];
 	char id[128];
-	char song_id[128];
+	char sub_id[128];
 	char item_path[PATH_MAX - 512];
 } item_ctx_t;
 
@@ -37,17 +37,26 @@ typedef int (*item_handler_cb)(
 
 #define ICTX_NEED_LOGIN 0x1     /* require logged-in user; else 401 */
 #define ICTX_NEED_OWNERSHIP 0x2 /* require item ownership; else 403/404 */
-#define ICTX_SONG_ID 0x4        /* also read PATTERN_PARAM_SONG_ID */
+#define ICTX_SUB_ID                                                            \
+	0x4                /* also read secondary pattern param                \
+	                      (PATTERN_PARAM_SUB_ID/CHILD_ID/SONG_ID) */
 #define ICTX_CSRF_MPFD 0x8 /* validate CSRF token from multipart form data */
 #define ICTX_CSRF_QUERY                                                        \
 	0x10 /* validate CSRF token from query string / url-encoded body */
+#define ICTX_NEED_READ_ACCESS 0x20 /* explicitly require read access (owner or group member if private) */
 
 #include <ttypt/auth.h>
 
 #ifndef ITEM_IMPL
 
-/* Canonical ownership operations. The owner file stores the site username;
- * filesystem UID is only an additional enforcement detail when root. */
+/* Canonical ownership operations. In production (chrooted / root /
+ * AUTH_ENV=prod), ownership is determined strictly by POSIX disk permissions
+ * (stat st_uid / chown). In dev mode (unprivileged non-root), owner files are
+ * used as a fallback. */
+XY_DECL(int, auth_get_username_by_uid,
+	int, uid,
+	char *, out,
+	size_t, len);
 XY_DECL(int, item_owner_record,
 	const char *, item_path,
 	const char *, username);
@@ -64,6 +73,47 @@ XY_DECL(int, module_item_owner_record,
 	const char *, id,
 	const char *, username);
 XY_DECL(int, module_item_owner_check,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username);
+
+/* Canonical group operations. In production, groups map to POSIX GIDs (/etc/group). */
+XY_DECL(int, item_group_record,
+	const char *, item_path,
+	const char *, grp_name);
+XY_DECL(int, item_group_read,
+	const char *, item_path,
+	char *, out,
+	size_t, out_sz);
+XY_DECL(int, item_group_check,
+	const char *, item_path,
+	const char *, username);
+XY_DECL(int, item_is_private,
+	const char *, item_path);
+XY_DECL(int, item_can_read,
+	const char *, item_path,
+	const char *, username);
+XY_DECL(int, item_can_write,
+	const char *, item_path,
+	const char *, username);
+
+XY_DECL(int, module_item_group_record,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, grp_name);
+XY_DECL(int, module_item_group_check,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username);
+XY_DECL(int, module_item_can_read,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username);
+XY_DECL(int, module_item_can_write,
 	int, fd,
 	const char *, module,
 	const char *, id,

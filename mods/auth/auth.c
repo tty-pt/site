@@ -146,6 +146,31 @@ XY_IMPL(int, csrf_validate, int, fd, const char *, submitted)
 /* Ownership helpers                                                    */
 /* ------------------------------------------------------------------ */
 
+static int is_disk_permission_mode(void)
+{
+	const char *disk_perms = getenv("AUTH_DISK_PERMS");
+	if (disk_perms)
+		return (strcmp(disk_perms, "1") == 0 ||
+		        strcmp(disk_perms, "true") == 0);
+
+	if (geteuid() == 0)
+		return 1;
+
+	const char *env = getenv("AUTH_ENV");
+	if (env && strcmp(env, "prod") == 0)
+		return 1;
+
+	return 0;
+}
+
+XY_IMPL(int, auth_get_username_by_uid,
+	int, uid,
+	char *, out,
+	size_t, len)
+{
+	return auth_get_username(uid, out, len);
+}
+
 XY_IMPL(int, item_owner_record,
 	const char *, item_path,
 	const char *, username)
@@ -158,11 +183,23 @@ XY_IMPL(int, item_owner_record,
 	uid = auth_get_uid(username);
 	if (uid < 0)
 		return -1;
+
+	if (is_disk_permission_mode()) {
+		if (geteuid() == 0) {
+			if (chown(item_path, (uid_t)uid,
+			          (gid_t)auth_config.www_gid) != 0 &&
+			    chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
+				return -1;
+		}
+		if (build_owner_path(
+		            item_path, owner_path, sizeof(owner_path)) == 0)
+			unlink(owner_path);
+		return 0;
+	}
+
 	if (build_owner_path(item_path, owner_path, sizeof(owner_path)) != 0)
 		return -1;
 	if (write_file_path(owner_path, username, strlen(username)) != 0)
-		return -1;
-	if (geteuid() == 0 && chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
 		return -1;
 	return 0;
 }
@@ -177,11 +214,19 @@ XY_IMPL(int, item_owner_read,
 	size_t len;
 	size_t full_len;
 	size_t i;
+	struct stat st;
 
 	if (out && out_sz > 0)
 		out[0] = '\0';
 	if (!item_path || !item_path[0] || !out || out_sz == 0)
 		return -1;
+
+	if (is_disk_permission_mode()) {
+		if (stat(item_path, &st) != 0)
+			return -1;
+		return auth_get_username((int)st.st_uid, out, out_sz);
+	}
+
 	if (build_owner_path(item_path, owner_path, sizeof(owner_path)) != 0)
 		return -1;
 	owner = slurp_file(owner_path);
@@ -209,13 +254,25 @@ XY_IMPL(int, item_owner_check,
 	const char *, item_path,
 	const char *, username)
 {
+	struct stat st;
+	int uid;
 	char owner[128];
 
-	if (!username || !username[0])
+	if (!username || !username[0] || !item_path || !item_path[0])
 		return 0;
+
+	if (is_disk_permission_mode()) {
+		if (stat(item_path, &st) != 0)
+			return 0;
+		uid = auth_get_uid(username);
+		if (uid < 0)
+			return 0;
+		return ((uid_t)uid == st.st_uid) ? 1 : 0;
+	}
+
 	if (item_owner_read(item_path, owner, sizeof(owner)) != 0)
 		return 0;
-	return strcmp(owner, username) == 0;
+	return (strcmp(owner, username) == 0) ? 1 : 0;
 }
 
 XY_IMPL(int, module_item_owner_record,
@@ -244,6 +301,196 @@ XY_IMPL(int, module_item_owner_check,
 	return item_owner_check(item_path, username);
 }
 
+/* ------------------------------------------------------------------ */
+/* Group helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+XY_IMPL(int, item_group_record,
+	const char *, item_path,
+	const char *, grp_name)
+{
+	char group_path[PATH_MAX];
+	int gid;
+
+	if (!item_path || !item_path[0] || !grp_name || !grp_name[0])
+		return -1;
+
+	gid = auth_get_gid(grp_name);
+	if (gid < 0)
+		gid = auth_create_group(grp_name);
+
+	if (is_disk_permission_mode()) {
+		if (gid > 0 && geteuid() == 0) {
+			if (chown(item_path, (uid_t)-1, (gid_t)gid) != 0)
+				return -1;
+		}
+		snprintf(group_path, sizeof(group_path), "%s/group", item_path);
+		unlink(group_path);
+		return 0;
+	}
+
+	snprintf(group_path, sizeof(group_path), "%s/group", item_path);
+	if (write_file_path(group_path, grp_name, strlen(grp_name)) != 0)
+		return -1;
+	return 0;
+}
+
+XY_IMPL(int, item_group_read,
+	const char *, item_path,
+	char *, out,
+	size_t, out_sz)
+{
+	char group_path[PATH_MAX];
+	char *grp;
+	size_t len;
+	struct stat st;
+
+	if (out && out_sz > 0)
+		out[0] = '\0';
+	if (!item_path || !item_path[0] || !out || out_sz == 0)
+		return -1;
+
+	if (is_disk_permission_mode()) {
+		if (stat(item_path, &st) != 0)
+			return -1;
+		return auth_get_grpname((int)st.st_gid, out, out_sz);
+	}
+
+	snprintf(group_path, sizeof(group_path), "%s/group", item_path);
+	grp = slurp_file(group_path);
+	if (!grp)
+		return -1;
+	len = strcspn(grp, "\r\n");
+	if (len == 0 || len >= out_sz) {
+		free(grp);
+		return -1;
+	}
+	memcpy(out, grp, len);
+	out[len] = '\0';
+	free(grp);
+	return 0;
+}
+
+XY_IMPL(int, item_group_check,
+	const char *, item_path,
+	const char *, username)
+{
+	char grp_name[128];
+	if (!item_path || !item_path[0] || !username || !username[0])
+		return 0;
+	if (item_group_read(item_path, grp_name, sizeof(grp_name)) != 0)
+		return 0;
+	return auth_user_in_group(username, grp_name);
+}
+
+XY_IMPL(int, item_is_private,
+	const char *, item_path)
+{
+	char priv_path[PATH_MAX];
+	struct stat st;
+
+	if (!item_path || !item_path[0])
+		return 0;
+
+	if (is_disk_permission_mode()) {
+		if (stat(item_path, &st) != 0)
+			return 0;
+		return ((st.st_mode & 0007) == 0) ? 1 : 0;
+	}
+
+	snprintf(priv_path, sizeof(priv_path), "%s/private", item_path);
+	if (access(priv_path, F_OK) == 0)
+		return 1;
+
+	if (stat(item_path, &st) == 0 && (st.st_mode & 0007) == 0)
+		return 1;
+
+	return 0;
+}
+
+XY_IMPL(int, item_can_write,
+	const char *, item_path,
+	const char *, username)
+{
+	if (!username || !username[0])
+		return 0;
+	return item_owner_check(item_path, username);
+}
+
+XY_IMPL(int, item_can_read,
+	const char *, item_path,
+	const char *, username)
+{
+	if (!item_path || !item_path[0])
+		return 0;
+
+	if (!item_is_private(item_path))
+		return 1;
+
+	if (!username || !username[0])
+		return 0;
+
+	if (item_owner_check(item_path, username))
+		return 1;
+
+	if (item_group_check(item_path, username))
+		return 1;
+
+	return 0;
+}
+
+XY_IMPL(int, module_item_group_record,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, grp_name)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return -1;
+	return item_group_record(item_path, grp_name);
+}
+
+XY_IMPL(int, module_item_group_check,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return 0;
+	return item_group_check(item_path, username);
+}
+
+XY_IMPL(int, module_item_can_read,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return 0;
+	return item_can_read(item_path, username);
+}
+
+XY_IMPL(int, module_item_can_write,
+	int, fd,
+	const char *, module,
+	const char *, id,
+	const char *, username)
+{
+	char item_path[PATH_MAX];
+
+	if (item_path_build(fd, module, id, item_path, sizeof(item_path)) != 0)
+		return 0;
+	return item_can_write(item_path, username);
+}
+
 XY_IMPL(item_access_t, item_access_status,
 	const char *, item_path,
 	const char *, username,
@@ -257,8 +504,11 @@ XY_IMPL(item_access_t, item_access_status,
 		return ITEM_ACCESS_MISSING;
 
 	if ((flags & ICTX_NEED_OWNERSHIP) &&
-	    !item_owner_check(item_path, username))
+	    !item_can_write(item_path, username))
 		return ITEM_ACCESS_FORBIDDEN;
+
+	if (!item_can_read(item_path, username))
+		return (username && *username) ? ITEM_ACCESS_FORBIDDEN : ITEM_ACCESS_UNAUTHENTICATED;
 
 	return ITEM_ACCESS_OK;
 }
@@ -309,18 +559,27 @@ XY_IMPL(int, module_item_ctx_load,
 	resolve_doc_root(fd, ctx->doc_root, sizeof(ctx->doc_root));
 	axil_env_get(fd, ctx->id, sizeof(ctx->id), "PATTERN_PARAM_ID");
 
-	if (flags & ICTX_SONG_ID)
+	if (flags & ICTX_SUB_ID) {
 		axil_env_get(
-		        fd, ctx->song_id, sizeof(ctx->song_id),
-		        "PATTERN_PARAM_SONG_ID");
+		        fd, ctx->sub_id, sizeof(ctx->sub_id),
+		        "PATTERN_PARAM_SUB_ID");
+		if (!ctx->sub_id[0])
+			axil_env_get(
+			        fd, ctx->sub_id, sizeof(ctx->sub_id),
+			        "PATTERN_PARAM_CHILD_ID");
+		if (!ctx->sub_id[0])
+			axil_env_get(
+			        fd, ctx->sub_id, sizeof(ctx->sub_id),
+			        "PATTERN_PARAM_SONG_ID");
+	}
 
-	if (!ctx->id[0] || ((flags & ICTX_SONG_ID) && !ctx->song_id[0])) {
+	if (!ctx->id[0] || ((flags & ICTX_SUB_ID) && !ctx->sub_id[0])) {
 		bad_request(fd, "Missing parameters");
 		return 1;
 	}
 
 	if (!is_safe_id(module) || !is_safe_id(ctx->id) ||
-	    ((flags & ICTX_SONG_ID) && !is_safe_id(ctx->song_id)))
+	    ((flags & ICTX_SUB_ID) && !is_safe_id(ctx->sub_id)))
 	{
 		bad_request(fd, "Invalid parameters");
 		return 1;
@@ -407,7 +666,7 @@ int on_auth_login_error(
 {
 	char accept[256] = { 0 };
 	axil_header_get(fd, "Accept", accept, sizeof(accept));
-	if (strstr(accept, "text/html")) {
+	if (strstr(accept, "text/html") || strstr(accept, "*/*") || accept[0] == '\0') {
 		char full_target[768] = { 0 };
 		const char *target = redirect;
 

@@ -37,12 +37,13 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	        state->page, state->per_page, state->total, state->nids,
 	        state->query);
 
-	form = lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
-	             lx_attr("class", "list-form"),
-	             filter_wrap ? lx_node(filter_wrap) : lx_none(),
-	             table ? lx_node(table) : lx_none(),
-	             pagination ? lx_node(pagination) : lx_none())
-	               .data.node;
+	form =
+	        bud_tpl("<form method='get' action='' class='list-form'>"
+	                "  %node"
+	                "  %node"
+	                "  %node"
+	                "</form>",
+	                filter_wrap, table, pagination);
 
 	snprintf(title, sizeof(title), "%ss", state->display_name);
 	if (title[0] >= 'a')
@@ -51,16 +52,14 @@ static bud_node *idx_list_layout(const list_state_t *state)
 
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", state->module);
 	add_btn = (state->username[0])
-	                  ? lx_el("a", lx_attr("href", href_buf),
-	                          lx_attr("class", "btn"), lx_text("+ add"))
-	                            .data.node
+	                  ? bud_tpl("<a href='%s' class='btn'>+ add</a>",
+	                            href_buf)
 	                  : NULL;
 
 	return site_ui_layout(
 	        title, path, site_ui_module_icon(state->module),
 	        state->username, add_btn,
-	        lx_el("div", lx_attr("class", "center"), lx_node(form))
-	                .data.node);
+	        bud_tpl("<div class='center'>%node</div>", form));
 }
 
 #endif
@@ -78,18 +77,18 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", state->module);
 	add_btn = (state->username[0])
-	                  ? lx_el("a", lx_attr("href", href_buf),
-	                          lx_attr("class", "btn"), lx_text("+ add"))
-	                            .data.node
+	                  ? bud_tpl("<a href='%s' class='btn'>+ add</a>",
+	                            href_buf)
 	                  : NULL;
 
 	filter_wrap = idx_filter_chrome(state);
 
-	form = lx_el("form", lx_attr("method", "get"), lx_attr("action", ""),
-	             lx_attr("class", "list-form"),
-	             filter_wrap ? lx_node(filter_wrap) : lx_none(),
-	             lx_node(site_ui_empty_state("No items")))
-	               .data.node;
+	form =
+	        bud_tpl("<form method='get' action='' class='list-form'>"
+	                "  %node"
+	                "  %node"
+	                "</form>",
+	                filter_wrap, site_ui_empty_state("No items"));
 
 	snprintf(title, sizeof(title), "%ss", state->display_name);
 	if (title[0] >= 'a')
@@ -98,6 +97,5 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	return site_ui_layout(
 	        title, path, site_ui_module_icon(state->module),
 	        state->username, add_btn,
-	        lx_el("div", lx_attr("class", "center"), lx_node(form))
-	                .data.node);
+	        bud_tpl("<div class='center'>%node</div>", form));
 }

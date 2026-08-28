@@ -907,6 +907,604 @@ void bud_raw_set_text(bud_node *node, const char *text)
 	node->text = bud_strdup(text ? text : "");
 }
 
+static int is_html_void_tag(const char *tag)
+{
+	static const char *void_tags[] = { "area",  "base", "br",    "col",
+		                           "embed", "hr",   "img",   "input",
+		                           "link",  "meta", "param", "source",
+		                           "track", "wbr",  NULL };
+	if (!tag)
+		return 0;
+	for (int i = 0; void_tags[i]; i++) {
+		if (strcmp(tag, void_tags[i]) == 0)
+			return 1;
+	}
+	return 0;
+}
+
+static void bud_tpl_flush_text(bud_node *parent, char *buf, size_t *len)
+{
+	if (*len == 0 || !parent)
+		return;
+	buf[*len] = '\0';
+	int all_ws = 1;
+	for (size_t i = 0; i < *len; i++) {
+		if (buf[i] != ' ' && buf[i] != '\t' && buf[i] != '\n' &&
+		    buf[i] != '\r')
+		{
+			all_ws = 0;
+			break;
+		}
+	}
+	if (!all_ws) {
+		bud_node *txt = bud_text(buf);
+		if (txt)
+			bud_append(parent, txt);
+	}
+	*len = 0;
+}
+
+bud_node *bud_vtpl(const char *fmt, va_list ap)
+{
+	if (!fmt)
+		return NULL;
+
+	bud_node *stack[64];
+	int depth = 0;
+
+	bud_node *root = bud_fragment();
+	if (!root)
+		return NULL;
+	stack[depth++] = root;
+
+	char text_buf[4096];
+	size_t text_len = 0;
+
+	const char *p = fmt;
+
+	while (*p) {
+		if (*p == '<') {
+			/* If comment: <!-- ... --> */
+			if (p[1] == '!' && p[2] == '-' && p[3] == '-') {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 4;
+				while (*p && !(*p == '-' && p[1] == '-' &&
+				               p[2] == '>'))
+				{
+					p++;
+				}
+				if (*p)
+					p += 3;
+				continue;
+			}
+
+			/* If closing tag: </tag> */
+			if (p[1] == '/') {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 2;
+				const char *tag_start = p;
+				while (*p && *p != '>' && *p != ' ' &&
+				       *p != '\t' && *p != '\n' && *p != '\r')
+				{
+					p++;
+				}
+				char tag_name[64];
+				size_t tlen = (size_t)(p - tag_start);
+				if (tlen >= sizeof(tag_name))
+					tlen = sizeof(tag_name) - 1;
+				memcpy(tag_name, tag_start, tlen);
+				tag_name[tlen] = '\0';
+
+				while (*p && *p != '>')
+					p++;
+				if (*p == '>')
+					p++;
+
+				if (depth > 1) {
+					for (int d = depth - 1; d >= 1; d--) {
+						const char *st_tag =
+						        bud_node_tag(stack[d]);
+						if (st_tag &&
+						    strcmp(st_tag, tag_name) ==
+						            0)
+						{
+							depth = d;
+							break;
+						}
+					}
+				}
+				continue;
+			}
+
+			/* Opening tag: <tag ... > */
+			if ((p[1] >= 'a' && p[1] <= 'z') ||
+			    (p[1] >= 'A' && p[1] <= 'Z'))
+			{
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p++; /* skip '<' */
+				const char *tag_start = p;
+				while (*p && *p != '>' && *p != '/' &&
+				       *p != ' ' && *p != '\t' && *p != '\n' &&
+				       *p != '\r')
+				{
+					p++;
+				}
+				char tag_name[64];
+				size_t tlen = (size_t)(p - tag_start);
+				if (tlen >= sizeof(tag_name))
+					tlen = sizeof(tag_name) - 1;
+				memcpy(tag_name, tag_start, tlen);
+				tag_name[tlen] = '\0';
+
+				bud_node *elem = bud_element(tag_name);
+				if (!elem)
+					break;
+
+				bud_append(stack[depth - 1], elem);
+
+				int self_closing = is_html_void_tag(tag_name);
+
+				/* Parse attributes */
+				while (*p && *p != '>' && *p != '/') {
+					while (*p == ' ' || *p == '\t' ||
+					       *p == '\n' || *p == '\r')
+						p++;
+					if (!*p || *p == '>' || *p == '/')
+						break;
+
+					/* Check for %bind */
+					if (strncmp(p, "%bind", 5) == 0) {
+						p += 5;
+						const char *ev_name = va_arg(
+						        ap, const char *);
+						bud_event_handler_fn handler = va_arg(
+						        ap,
+						        bud_event_handler_fn);
+						if (ev_name && handler) {
+							bud_bind(
+							        elem, ev_name,
+							        0, handler);
+						}
+						continue;
+					}
+
+					/* Check for %b (boolean attribute e.g.
+					 * "selected", "checked", "disabled", or
+					 * NULL) */
+					if (strncmp(p, "%b", 2) == 0 &&
+					    (p[2] == ' ' || p[2] == '\t' ||
+					     p[2] == '\n' || p[2] == '\r' ||
+					     p[2] == '>' || p[2] == '/'))
+					{
+						p += 2;
+						const char *b_name = va_arg(
+						        ap, const char *);
+						if (b_name && b_name[0]) {
+							bud_set_bool_attr(
+							        elem, b_name);
+						}
+						continue;
+					}
+
+					/* Parse attribute name */
+					const char *attr_start = p;
+					while (*p && *p != '=' && *p != '>' &&
+					       *p != '/' && *p != ' ' &&
+					       *p != '\t' && *p != '\n' &&
+					       *p != '\r')
+					{
+						p++;
+					}
+					char attr_name[64];
+					size_t alen = (size_t)(p - attr_start);
+					if (alen >= sizeof(attr_name))
+						alen = sizeof(attr_name) - 1;
+					memcpy(attr_name, attr_start, alen);
+					attr_name[alen] = '\0';
+
+					while (*p == ' ' || *p == '\t' ||
+					       *p == '\n' || *p == '\r')
+						p++;
+
+					if (*p == '=') {
+						p++;
+						while (*p == ' ' ||
+						       *p == '\t' ||
+						       *p == '\n' || *p == '\r')
+							p++;
+						char attr_val[2048];
+						size_t vlen = 0;
+
+						if (*p == '"' || *p == '\'') {
+							char quote = *p++;
+							while (*p &&
+							       *p != quote)
+							{
+								if (*p == '%') {
+									if (p[1] ==
+									    's')
+									{
+										const char *s = va_arg(
+										        ap,
+										        const char
+										                *);
+										if (s)
+										{
+											size_t sl = strlen(
+											        s);
+											if (vlen + sl <
+											    sizeof(attr_val))
+											{
+												memcpy(attr_val +
+												               vlen,
+												       s,
+												       sl);
+												vlen += sl;
+											}
+										}
+										p += 2;
+										continue;
+									} else if (
+									        p[1] == 'd' ||
+									        p[1] == 'i')
+									{
+										int d = va_arg(
+										        ap,
+										        int);
+										char num[32];
+										int nl = snprintf(
+										        num,
+										        sizeof(num),
+										        "%d",
+										        d);
+										if (nl > 0 &&
+										    vlen + (size_t)nl <
+										            sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       num,
+											       (size_t)nl);
+											vlen += (size_t)
+											        nl;
+										}
+										p += 2;
+										continue;
+									} else if (
+									        strncmp(p,
+									                "%zu",
+									                3) ==
+									        0)
+									{
+										size_t z = va_arg(
+										        ap,
+										        size_t);
+										char num[32];
+										int nl = snprintf(
+										        num,
+										        sizeof(num),
+										        "%zu",
+										        z);
+										if (nl > 0 &&
+										    vlen + (size_t)nl <
+										            sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       num,
+											       (size_t)nl);
+											vlen += (size_t)
+											        nl;
+										}
+										p += 3;
+										continue;
+									} else if (
+									        strncmp(p,
+									                "%lu",
+									                3) ==
+									        0)
+									{
+										unsigned long lu = va_arg(
+										        ap,
+										        unsigned long);
+										char num[32];
+										int nl = snprintf(
+										        num,
+										        sizeof(num),
+										        "%lu",
+										        lu);
+										if (nl > 0 &&
+										    vlen + (size_t)nl <
+										            sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       num,
+											       (size_t)nl);
+											vlen += (size_t)
+											        nl;
+										}
+										p += 3;
+										continue;
+									} else if (
+									        strncmp(p,
+									                "%ld",
+									                3) ==
+									        0)
+									{
+										long ld = va_arg(
+										        ap,
+										        long);
+										char num[32];
+										int nl = snprintf(
+										        num,
+										        sizeof(num),
+										        "%ld",
+										        ld);
+										if (nl > 0 &&
+										    vlen + (size_t)nl <
+										            sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       num,
+											       (size_t)nl);
+											vlen += (size_t)
+											        nl;
+										}
+										p += 3;
+										continue;
+									} else if (
+									        p[1] ==
+									        'u')
+									{
+										unsigned int u = va_arg(
+										        ap,
+										        unsigned int);
+										char num[32];
+										int nl = snprintf(
+										        num,
+										        sizeof(num),
+										        "%u",
+										        u);
+										if (nl > 0 &&
+										    vlen + (size_t)nl <
+										            sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       num,
+											       (size_t)nl);
+											vlen += (size_t)
+											        nl;
+										}
+										p += 2;
+										continue;
+									} else if (
+									        p[1] ==
+									        '%')
+									{
+										if (vlen + 1 <
+										    sizeof(attr_val))
+											attr_val[vlen++] =
+											        '%';
+										p += 2;
+										continue;
+									}
+								}
+								if (vlen + 1 <
+								    sizeof(attr_val))
+								{
+									attr_val[vlen++] =
+									        *p;
+								}
+								p++;
+							}
+							if (*p == quote)
+								p++;
+						} else {
+							while (*p &&
+							       *p != ' ' &&
+							       *p != '\t' &&
+							       *p != '\n' &&
+							       *p != '\r' &&
+							       *p != '>' &&
+							       *p != '/')
+							{
+								if (*p == '%' &&
+								    p[1] == 's')
+								{
+									const char *s = va_arg(
+									        ap,
+									        const char
+									                *);
+									if (s) {
+										size_t sl = strlen(
+										        s);
+										if (vlen + sl <
+										    sizeof(attr_val))
+										{
+											memcpy(attr_val +
+											               vlen,
+											       s,
+											       sl);
+											vlen += sl;
+										}
+									}
+									p += 2;
+									continue;
+								}
+								if (vlen + 1 <
+								    sizeof(attr_val))
+								{
+									attr_val[vlen++] =
+									        *p;
+								}
+								p++;
+							}
+						}
+						attr_val[vlen] = '\0';
+						bud_set_attr(
+						        elem, attr_name,
+						        attr_val);
+					} else {
+						bud_set_bool_attr(
+						        elem, attr_name);
+					}
+				}
+
+				while (*p == ' ' || *p == '\t' || *p == '\n' ||
+				       *p == '\r')
+					p++;
+				if (*p == '/' && p[1] == '>') {
+					self_closing = 1;
+					p += 2;
+				} else if (*p == '>') {
+					p++;
+				}
+
+				if (!self_closing && depth < 63) {
+					stack[depth++] = elem;
+				}
+				continue;
+			}
+		}
+
+		/* Check for body specifiers: %s, %d, %i, %u, %node, %raw, %% */
+		if (*p == '%') {
+			if (strncmp(p, "%node", 5) == 0) {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 5;
+				bud_node *child = va_arg(ap, bud_node *);
+				if (child) {
+					bud_append(stack[depth - 1], child);
+				}
+				continue;
+			} else if (strncmp(p, "%raw", 4) == 0) {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 4;
+				const char *raw_html = va_arg(ap, const char *);
+				if (raw_html) {
+					bud_node *rnode = bud_raw(raw_html);
+					if (rnode)
+						bud_append(
+						        stack[depth - 1],
+						        rnode);
+				}
+				continue;
+			} else if (p[1] == 's') {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 2;
+				const char *str = va_arg(ap, const char *);
+				if (str && str[0]) {
+					bud_node *tn = bud_text(str);
+					if (tn)
+						bud_append(
+						        stack[depth - 1], tn);
+				}
+				continue;
+			} else if (p[1] == 'd' || p[1] == 'i') {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 2;
+				int val = va_arg(ap, int);
+				char num[32];
+				snprintf(num, sizeof(num), "%d", val);
+				bud_node *tn = bud_text(num);
+				if (tn)
+					bud_append(stack[depth - 1], tn);
+				continue;
+			} else if (strncmp(p, "%zu", 3) == 0) {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 3;
+				size_t val = va_arg(ap, size_t);
+				char num[32];
+				snprintf(num, sizeof(num), "%zu", val);
+				bud_node *tn = bud_text(num);
+				if (tn)
+					bud_append(stack[depth - 1], tn);
+				continue;
+			} else if (strncmp(p, "%lu", 3) == 0) {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 3;
+				unsigned long val = va_arg(ap, unsigned long);
+				char num[32];
+				snprintf(num, sizeof(num), "%lu", val);
+				bud_node *tn = bud_text(num);
+				if (tn)
+					bud_append(stack[depth - 1], tn);
+				continue;
+			} else if (strncmp(p, "%ld", 3) == 0) {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 3;
+				long val = va_arg(ap, long);
+				char num[32];
+				snprintf(num, sizeof(num), "%ld", val);
+				bud_node *tn = bud_text(num);
+				if (tn)
+					bud_append(stack[depth - 1], tn);
+				continue;
+			} else if (p[1] == 'u') {
+				bud_tpl_flush_text(
+				        stack[depth - 1], text_buf, &text_len);
+				p += 2;
+				unsigned int val = va_arg(ap, unsigned int);
+				char num[32];
+				snprintf(num, sizeof(num), "%u", val);
+				bud_node *tn = bud_text(num);
+				if (tn)
+					bud_append(stack[depth - 1], tn);
+				continue;
+			} else if (p[1] == '%') {
+				if (text_len + 1 < sizeof(text_buf)) {
+					text_buf[text_len++] = '%';
+				}
+				p += 2;
+				continue;
+			}
+		}
+
+		if (text_len + 1 < sizeof(text_buf)) {
+			text_buf[text_len++] = *p;
+		}
+		p++;
+	}
+
+	bud_tpl_flush_text(stack[depth - 1], text_buf, &text_len);
+
+	if (bud_node_child_count(root) == 1) {
+		bud_node *first = (bud_node *)bud_node_child(root, 0);
+		if (first && bud_node_kind_of(first) == BUD_NODE_ELEMENT) {
+			bud_detach(first);
+			bud_free(root);
+			return first;
+		}
+	}
+
+	return root;
+}
+
+bud_node *bud_tpl(const char *fmt, ...)
+{
+	va_list ap;
+	bud_node *result;
+
+	va_start(ap, fmt);
+	result = bud_vtpl(fmt, ap);
+	va_end(ap);
+
+	return result;
+}
+
 bud_node *
 bud_component_render(const bud_component *component, const void *props)
 {
@@ -1692,6 +2290,235 @@ int bud_render_patch_ops(const bud_node *root, bud_emit_fn emit, void *user)
 		return -1;
 	}
 	return bud_render_patch_ops_node(root, emit, user);
+}
+
+static const char *bud_get_node_key(const bud_node *node)
+{
+	if (!node || node->kind != BUD_NODE_ELEMENT)
+		return NULL;
+	const bud_attr *attr = bud_attr_find((bud_node *)node, "data-key");
+	if (attr && attr->value && attr->value[0])
+		return attr->value;
+	attr = bud_attr_find((bud_node *)node, "key");
+	if (attr && attr->value && attr->value[0])
+		return attr->value;
+	return NULL;
+}
+
+static int bud_vdom_diff_node(
+        bud_node *old_node, bud_node *new_node, bud_emit_fn emit, void *user)
+{
+	char id_buf[32];
+	const bud_attr *new_attr, *old_attr;
+	const bud_node *old_child, *new_child;
+	int len;
+
+	if (!old_node && !new_node)
+		return 0;
+
+	if (!old_node && new_node) {
+		return bud_render_patch_ops_node(new_node, emit, user);
+	}
+
+	if (old_node && !new_node) {
+		len = snprintf(id_buf, sizeof(id_buf), "%u", old_node->id);
+		if (len < 0)
+			return -1;
+		return emit(user, "patch-remove", id_buf, NULL, NULL);
+	}
+
+	new_node->id = old_node->id;
+	len = snprintf(id_buf, sizeof(id_buf), "%u", old_node->id);
+	if (len < 0)
+		return -1;
+
+	if (old_node->kind != new_node->kind ||
+	    (old_node->kind == BUD_NODE_ELEMENT &&
+	     strcmp(old_node->tag, new_node->tag) != 0))
+	{
+		char *html = bud_render_html(new_node);
+		if (!html)
+			return -1;
+		int rc = emit(user, "patch-replace", id_buf, html, NULL);
+		bud_free_string(html);
+		return rc;
+	}
+
+	if (old_node->kind == BUD_NODE_TEXT) {
+		const char *ot = old_node->text ? old_node->text : "";
+		const char *nt = new_node->text ? new_node->text : "";
+		if (strcmp(ot, nt) != 0) {
+			return emit(user, "patch-text", nt, id_buf, NULL);
+		}
+		return 0;
+	}
+
+	if (old_node->kind == BUD_NODE_RAW_HTML) {
+		const char *ot = old_node->text ? old_node->text : "";
+		const char *nt = new_node->text ? new_node->text : "";
+		if (strcmp(ot, nt) != 0) {
+			return emit(user, "patch-innerhtml", id_buf, nt, NULL);
+		}
+		return 0;
+	}
+
+	if (old_node->kind == BUD_NODE_ELEMENT) {
+		for (new_attr = new_node->attrs; new_attr;
+		     new_attr = new_attr->next)
+		{
+			old_attr = bud_attr_find(old_node, new_attr->name);
+			const char *nv = new_attr->value ? new_attr->value : "";
+			if (!old_attr ||
+			    strcmp(old_attr->value ? old_attr->value : "",
+			           nv) != 0)
+			{
+				if (emit(user, "patch-attr", id_buf,
+				         new_attr->name, nv) != 0)
+					return -1;
+			}
+		}
+		for (old_attr = old_node->attrs; old_attr;
+		     old_attr = old_attr->next)
+		{
+			if (!bud_attr_find(new_node, old_attr->name)) {
+				if (emit(user, "patch-attr", id_buf,
+				         old_attr->name, "") != 0)
+					return -1;
+			}
+		}
+
+		/* If this element contains raw HTML, emit patch-innerhtml on
+		 * this element directly */
+		if (old_node->first_child &&
+		    old_node->first_child->kind == BUD_NODE_RAW_HTML &&
+		    new_node->first_child &&
+		    new_node->first_child->kind == BUD_NODE_RAW_HTML &&
+		    !old_node->first_child->next_sibling &&
+		    !new_node->first_child->next_sibling)
+		{
+			const char *ot = old_node->first_child->text
+			                         ? old_node->first_child->text
+			                         : "";
+			const char *nt = new_node->first_child->text
+			                         ? new_node->first_child->text
+			                         : "";
+			if (strcmp(ot, nt) != 0) {
+				return emit(
+				        user, "patch-innerhtml", id_buf, nt,
+				        NULL);
+			}
+			return 0;
+		}
+	}
+
+	int has_keys = 0;
+	for (const bud_node *c = old_node->first_child; c; c = c->next_sibling)
+	{
+		if (bud_get_node_key(c)) {
+			has_keys = 1;
+			break;
+		}
+	}
+	if (!has_keys) {
+		for (const bud_node *c = new_node->first_child; c;
+		     c = c->next_sibling)
+		{
+			if (bud_get_node_key(c)) {
+				has_keys = 1;
+				break;
+			}
+		}
+	}
+
+	if (has_keys) {
+#define BUD_MAX_DIFF_CHILDREN 256
+		const bud_node *old_children[BUD_MAX_DIFF_CHILDREN];
+		int matched[BUD_MAX_DIFF_CHILDREN] = { 0 };
+		int n_old = 0;
+
+		for (const bud_node *c = old_node->first_child;
+		     c && n_old < BUD_MAX_DIFF_CHILDREN; c = c->next_sibling)
+		{
+			old_children[n_old++] = c;
+		}
+
+		for (const bud_node *nc = new_node->first_child; nc;
+		     nc = nc->next_sibling)
+		{
+			const char *nkey = bud_get_node_key(nc);
+			int found_idx = -1;
+			if (nkey) {
+				for (int i = 0; i < n_old; i++) {
+					if (!matched[i]) {
+						const char *okey =
+						        bud_get_node_key(
+						                old_children
+						                        [i]);
+						if (okey &&
+						    strcmp(okey, nkey) == 0)
+						{
+							found_idx = i;
+							break;
+						}
+					}
+				}
+			}
+
+			if (found_idx >= 0) {
+				matched[found_idx] = 1;
+				if (bud_vdom_diff_node(
+				            (bud_node *)old_children[found_idx],
+				            (bud_node *)nc, emit, user) != 0)
+					return -1;
+			} else {
+				if (bud_vdom_diff_node(
+				            NULL, (bud_node *)nc, emit, user) !=
+				    0)
+					return -1;
+			}
+		}
+
+		for (int i = 0; i < n_old; i++) {
+			if (!matched[i]) {
+				if (bud_vdom_diff_node(
+				            (bud_node *)old_children[i], NULL,
+				            emit, user) != 0)
+					return -1;
+			}
+		}
+		return 0;
+	}
+
+	old_child = old_node->first_child;
+	new_child = new_node->first_child;
+	while (old_child || new_child) {
+		const bud_node *next_old =
+		        old_child ? old_child->next_sibling : NULL;
+		const bud_node *next_new =
+		        new_child ? new_child->next_sibling : NULL;
+		if (bud_vdom_diff_node(
+		            (bud_node *)old_child, (bud_node *)new_child, emit,
+		            user) != 0)
+			return -1;
+		old_child = next_old;
+		new_child = next_new;
+	}
+
+	return 0;
+}
+
+int bud_vdom_diff(
+        bud_node *old_root, bud_node *new_root, bud_emit_fn emit, void *user)
+{
+	if (!emit)
+		return -1;
+	if (!old_root && !new_root)
+		return 0;
+	if (old_root)
+		bud_prepare_render(old_root);
+	if (new_root)
+		bud_prepare_render(new_root);
+	return bud_vdom_diff_node(old_root, new_root, emit, user);
 }
 
 static const char *bud_kind_name(bud_node_kind kind)

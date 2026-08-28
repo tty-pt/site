@@ -1087,6 +1087,245 @@ int main(void)
 		goto cleanup;
 	}
 
+	/* ── Test bud_tpl HTML Template Engine ── */
+	{
+		bud_node *badge =
+		        bud_tpl("<span class='badge'>%s</span>", "Featured");
+		bud_node *card = bud_tpl(
+		        "<div id='%s' class='card %s'>"
+		        "  <div class='header'>"
+		        "    <h1>%s</h1>"
+		        "    %node"
+		        "  </div>"
+		        "  <p class='lead'>Count: %d (owner: %s)</p>"
+		        "  <pre class='chord-data'>%raw</pre>"
+		        "  <form action='/song/123/edit' method='POST' "
+		        "class='flex flex-col gap-2'>"
+		        "    <input type='text' name='title' value='%s' "
+		        "required/>"
+		        "    <button type='submit' class='btn "
+		        "btn-primary'>Save</button>"
+		        "  </form>"
+		        "</div>",
+		        "song-card", "shadow-sm", "My Song Title", badge, 42,
+		        "admin", "<span class='chord'>Am</span> text",
+		        "My Song Title");
+
+		char *card_html = bud_render_html(card);
+		if (!card_html) {
+			fprintf(stderr,
+			        "bud test failed: bud_tpl card_html null\n");
+			bud_free(card);
+			return 1;
+		}
+
+		rc = check(
+		        strstr(card_html, "<div class=\"card shadow-sm\" "
+		                          "id=\"song-card\">") != NULL ||
+		                strstr(card_html, "id=\"song-card\"") != NULL,
+		        "bud_tpl card wrapper");
+		if (rc == 0)
+			rc =
+			        check(strstr(card_html,
+			                     "<h1>My Song Title</h1>") != NULL,
+			              "bud_tpl h1 text");
+		if (rc == 0)
+			rc = check(
+			        strstr(card_html,
+			               "<span "
+			               "class=\"badge\">Featured</span>") !=
+			                NULL,
+			        "bud_tpl %node badge");
+		if (rc == 0)
+			rc = check(
+			        strstr(card_html, "<p class=\"lead\">Count: 42 "
+			                          "(owner: admin)</p>") != NULL,
+			        "bud_tpl %d %s lead");
+		if (rc == 0)
+			rc = check(
+			        strstr(card_html,
+			               "<pre class=\"chord-data\"><span "
+			               "class='chord'>Am</span> text</pre>") !=
+			                NULL,
+			        "bud_tpl %raw pre");
+		if (rc == 0)
+			rc =
+			        check(strstr(card_html,
+			                     "<input name=\"title\" required "
+			                     "type=\"text\" value=\"My Song "
+			                     "Title\">") != NULL ||
+			                      strstr(card_html,
+			                             "name=\"title\"") != NULL,
+			              "bud_tpl input void tag");
+		if (rc == 0)
+			rc = check(
+			        strstr(card_html,
+			               "<button class=\"btn btn-primary\" "
+			               "type=\"submit\">Save</button>") !=
+			                        NULL ||
+			                strstr(card_html, ">Save</button>") !=
+			                        NULL,
+			        "bud_tpl button");
+
+		bud_free_string(card_html);
+		bud_free(card);
+		if (rc != 0)
+			return rc;
+
+		/* Test fragment return for multi-root template */
+		bud_node *options =
+		        bud_tpl("<option value='0' %b>Key 0</option>"
+		                "<option value='1' %b>Key 1</option>"
+		                "<option value='2' %b>Key 2</option>",
+		                "selected", NULL, "disabled");
+		char *opt_html = bud_render_html(options);
+		if (!opt_html) {
+			fprintf(stderr,
+			        "bud test failed: bud_tpl opt_html null\n");
+			bud_free(options);
+			return 1;
+		}
+		rc = check(
+		        strstr(opt_html,
+		               "<option selected value=\"0\">Key 0</option>") !=
+		                        NULL ||
+		                strstr(opt_html, "value=\"0\"") != NULL,
+		        "bud_tpl multi-option fragment with %%b selected");
+		if (rc == 0)
+			rc =
+			        check(strstr(opt_html, "disabled") != NULL,
+			              "bud_tpl %%b disabled attribute");
+		if (rc == 0)
+			rc = check(
+			        strstr(opt_html,
+			               "<option value=\"1\">Key 1</option>") !=
+			                        NULL ||
+			                strstr(opt_html, "value=\"1\"") != NULL,
+			        "bud_tpl %%b NULL omitted");
+		bud_free_string(opt_html);
+		bud_free(options);
+		if (rc != 0)
+			return rc;
+
+		/* Test option with %d, %b, and %s */
+		bud_node *opt_test =
+		        bud_tpl("<option value='%d' %b>%s</option>", 5,
+		                "selected", "C (Original)");
+		char *opt_test_html = bud_render_html(opt_test);
+		if (!opt_test_html) {
+			fprintf(stderr,
+			        "bud test failed: opt_test_html null\n");
+			return 1;
+		}
+		rc =
+		        check(strstr(opt_test_html, "value=\"5\"") != NULL,
+		              "opt_test value");
+		if (rc == 0)
+			rc =
+			        check(strstr(opt_test_html, "selected") != NULL,
+			              "opt_test selected");
+		if (rc == 0)
+			rc = check(
+			        strstr(opt_test_html, "C (Original)") != NULL,
+			        "opt_test text");
+		bud_free_string(opt_test_html);
+		bud_free(opt_test);
+		if (rc != 0)
+			return rc;
+
+		/* ── Test bud_vdom_diff ── */
+		bud_node *tree1 =
+		        bud_tpl("<div id='main' class='old'>"
+		                "  <h1 id='title'>Old Title</h1>"
+		                "  <p id='count'>Count: 1</p>"
+		                "  <pre id='data'>%raw</pre>"
+		                "</div>",
+		                "<span>Chord A</span>");
+
+		bud_node *tree2 =
+		        bud_tpl("<div id='main' class='new'>"
+		                "  <h1 id='title'>New Title</h1>"
+		                "  <p id='count'>Count: 2</p>"
+		                "  <pre id='data'>%raw</pre>"
+		                "</div>",
+		                "<span>Chord B</span>");
+
+		test_ops diff_ops = { { 0 }, 0 };
+		rc = bud_vdom_diff(tree1, tree2, test_emit, &diff_ops);
+		if (rc != 0) {
+			fprintf(stderr,
+			        "bud test failed: bud_vdom_diff failed\n");
+			bud_free(tree1);
+			bud_free(tree2);
+			return 1;
+		}
+
+		rc = check(
+		        strstr(diff_ops.buffer, "patch-attr:") != NULL &&
+		                strstr(diff_ops.buffer, "class:new") != NULL,
+		        "diff attr class");
+		if (rc == 0)
+			rc =
+			        check(strstr(diff_ops.buffer,
+			                     "patch-text:New Title:") != NULL,
+			              "diff text title");
+		if (rc == 0)
+			rc =
+			        check(strstr(diff_ops.buffer,
+			                     "patch-text:Count: 2:") != NULL,
+			              "diff text count");
+		if (rc == 0)
+			rc = check(
+			        strstr(diff_ops.buffer, "patch-innerhtml:") !=
+			                        NULL &&
+			                strstr(diff_ops.buffer,
+			                       "<span>Chord B</span>") != NULL,
+			        "diff innerhtml data");
+
+		bud_free(tree1);
+		bud_free(tree2);
+		if (rc != 0)
+			return rc;
+
+		/* ── Test Keyed Children Diffing ── */
+		bud_node *list1 = bud_tpl("<ul id='list'>"
+		                          "  <li data-key='k1'>Item 1</li>"
+		                          "  <li data-key='k2'>Item 2</li>"
+		                          "  <li data-key='k3'>Item 3</li>"
+		                          "</ul>");
+
+		bud_node *list2 =
+		        bud_tpl("<ul id='list'>"
+		                "  <li data-key='k1'>Item 1 Updated</li>"
+		                "  <li data-key='k3'>Item 3</li>"
+		                "</ul>");
+
+		test_ops list_ops = { { 0 }, 0 };
+		rc = bud_vdom_diff(list1, list2, test_emit, &list_ops);
+		if (rc != 0) {
+			fprintf(stderr, "bud test failed: bud_vdom_diff keyed "
+			                "list failed\n");
+			bud_free(list1);
+			bud_free(list2);
+			return 1;
+		}
+
+		rc =
+		        check(strstr(list_ops.buffer,
+		                     "patch-text:Item 1 Updated:") != NULL,
+		              "keyed diff updated item text");
+		if (rc == 0)
+			rc =
+			        check(strstr(list_ops.buffer,
+			                     "patch-remove:") != NULL,
+			              "keyed diff removed item k2");
+
+		bud_free(list1);
+		bud_free(list2);
+		if (rc != 0)
+			return rc;
+	}
+
 	rc = 0;
 
 cleanup:

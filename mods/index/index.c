@@ -267,8 +267,8 @@ static int index_generic_add_handler(int fd, char *body)
 	char dataset_id[512];
 
 	const char *username = get_request_user(fd);
-	if (!username || !username[0])
-		return respond_error(fd, 401, "Unauthorized");
+	if (require_login(fd, username))
+		return 1;
 
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
@@ -444,6 +444,11 @@ XY_IMPL(unsigned, index_open,
 XY_IMPL(int, core_get, int, fd, char *, body)
 {
 	(void)body;
+	char uri[1024] = { 0 };
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+	if (uri[0] && strcmp(uri, "/") != 0)
+		return not_found(fd, "Not found");
+
 	const char *username = get_request_user(fd);
 	const char *mod_names[MAX_MODULES];
 	const char *mod_titles_p[MAX_MODULES];
@@ -550,7 +555,8 @@ index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	char qs[4096] = { 0 };
 	if (fd > 0)
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	hyle_bud_picker_view_collect_schema(qs, defs, record, &pv, &active_scope);
+	hyle_bud_picker_view_collect_schema(
+	        qs, defs, record, &pv, &active_scope);
 
 	bud_node *form = site_ui_form_from_desc(
 	        action, cancel_href, "Save Changes", defs, record, csrf_token,

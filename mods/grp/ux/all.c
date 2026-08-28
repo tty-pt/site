@@ -12,6 +12,6 @@
 
 #include "../../index/ux/list.c"
 
-#include "../../song/ux/music.c"
+#include <transp/music.h>
 
 #include "detail.c"

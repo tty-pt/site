@@ -32,7 +32,8 @@ static int idx_resolve_filter_options(
 	if (!row_hd)
 		return 0;
 
-	hyle_source_get_display_field(target_source, display_field, sizeof(display_field));
+	hyle_source_get_display_field(
+	        target_source, display_field, sizeof(display_field));
 
 	cur = qmap_iter(row_hd, NULL, 0);
 	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {

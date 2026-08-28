@@ -11,8 +11,7 @@ bud_node *list_render(const list_state_t *state)
 	                         : idx_list_layout(state);
 	if (!inner)
 		return NULL;
-	return lx_el("div", lx_attr("id", "bud-root"), lx_node(inner))
-	        .data.node;
+	return bud_tpl("<div id='bud-root'>%node</div>", inner);
 }
 
 #endif

@@ -56,4 +56,28 @@ check "/auth/register" "name=\"email\"|<form[^>]*action=\"/auth/register\"" "reg
 check_cache_headers "/styles.css" "css cache validators"
 check_cache_headers "/hyle.css" "css cache validators"
 
+# Error page spacing check (HTML error response has space between code and message)
+err_out=$(curl_status_body "/nonexistent_route_for_error_test")
+err_code=$(printf '%s\n' "$err_out" | sed -n '1p')
+err_body=$(printf '%s\n' "$err_out" | sed -n '2,$p') || true
+if [ "$err_code" != "404" ]; then
+  fail "expected 404 for nonexistent route, got $err_code"
+fi
+if ! printf '%s' "$err_body" | grep -q -E "<strong>404</strong>[[:space:]]+Not found|<!--bud-text:[0-9]+-->[[:space:]]+Not found"; then
+  fail "404 error page missing whitespace between status code and message"
+fi
+pass "/nonexistent: 404 spacing test OK"
+
+# Unauthenticated /song/add check (should render login form on HTML 401)
+add_html_out=$(curl_status_body_html "/song/add")
+add_html_code=$(printf '%s\n' "$add_html_out" | sed -n '1p')
+add_html_body=$(printf '%s\n' "$add_html_out" | sed -n '2,$p') || true
+if [ "$add_html_code" != "401" ]; then
+  fail "expected 401 for unauthenticated HTML /song/add, got $add_html_code"
+fi
+if ! printf '%s' "$add_html_body" | grep -q "action=\"/auth/login\""; then
+  fail "/song/add did not render login form on HTML 401"
+fi
+pass "/song/add: unauthorized renders login screen on HTML OK"
+
 pass "pages smoke tests all OK"

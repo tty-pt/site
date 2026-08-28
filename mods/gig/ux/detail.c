@@ -9,15 +9,14 @@
 
 #include "../../common/viewer_zoom.h"
 
-#include "../../song/ux/music.c"
+#include <transp/music.h>
+#include <transp/transp_flags.h>
 
 #include "../../common/ux/site_ui.c"
 #include "../../common/state_macros.h"
 
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
-
-#include "../../song/lib/transp/transp_flags.h"
 
 #ifdef __wasm__
 __attribute__((import_module("env"), import_name("bud_host_log"))) void
@@ -280,28 +279,22 @@ bud_node *bud_app_render(void)
 	        sb_app_state.zoom);
 
 	/* Option checkboxes + zoom slider inside a form */
-	bud_node *opts =
-	        lx_el("form", lx_attr("class", "viewer-controls"),
-	              lx_attr("method", "GET"),
-	              lx_attr("action", sb_app_state.path),
-	              lx_attr("data-viewer-opts", "gig"),
-	              lx_node(site_ui_checkbox(
-	                      "l", "Latin", sb_app_state.latin,
-	                      on_sb_option_change)),
-	              lx_el("label", lx_text("Zoom"),
-	                    lx_el("input", lx_attr("type", "range"),
-	                          lx_attr("name", "z"),
-	                          lx_attr("min", "%d", VIEWER_ZOOM_MIN),
-	                          lx_attr("max", "%d", VIEWER_ZOOM_MAX),
-	                          lx_attr("step", "10"),
-	                          lx_attr("value", zoom_str),
-	                          lx_attr("data-detail-viewer-zoom", "1"),
-	                          lx_bind("input", 0, on_sb_option_change),
-	                          lx_bind("change", 0, on_sb_option_change))),
-	              lx_el("button", lx_attr("type", "submit"),
-	                    lx_attr("class", "btn"),
-	                    lx_attr("data-wasm-hide", "1"), lx_text("Apply")))
-	                .data.node;
+	bud_node *opts = bud_tpl(
+	        "<form class='viewer-controls' method='GET' action='%s' "
+	        "data-viewer-opts='gig'>"
+	        "  %node"
+	        "  <label>Zoom"
+	        "    <input type='range' name='z' min='%d' max='%d' step='10' "
+	        "value='%s' data-detail-viewer-zoom='1' %bind %bind/>"
+	        "  </label>"
+	        "  <button type='submit' class='btn' "
+	        "data-wasm-hide='1'>Apply</button>"
+	        "</form>",
+	        sb_app_state.path,
+	        site_ui_checkbox(
+	                "l", "Latin", sb_app_state.latin, on_sb_option_change),
+	        VIEWER_ZOOM_MIN, VIEWER_ZOOM_MAX, zoom_str, "input",
+	        on_sb_option_change, "change", on_sb_option_change);
 
 	/* Item menu (edit/delete, owner only) */
 	bud_node *item_menu = site_ui_item_menu(
@@ -309,9 +302,9 @@ bud_node *bud_app_render(void)
 
 	/* Menu items fragment */
 	bud_node *menu_items =
-	        lx_frag(lx_node(opts),
-	                item_menu ? lx_node(item_menu) : lx_none())
-	                .data.node;
+	        bud_tpl("%node"
+	                "%node",
+	                opts, item_menu);
 
 	/* Build body content from state (proper Bud nodes for hydration) */
 	g_sb_n_chord_nodes = 0;
@@ -324,23 +317,19 @@ bud_node *bud_app_render(void)
 	        body_content);
 
 	/* Main wrapper with zoom CSS custom property */
-	g_sb_main = lx_el("div", lx_attr("id", "sb-main"),
-	                  lx_attr("data-zoom", zoom_str),
-	                  lx_attr("style", zoom_style), lx_node(layout))
-	                    .data.node;
+	g_sb_main = bud_tpl(
+	        "<div id='sb-main' data-zoom='%s' style='%s'>%node</div>",
+	        zoom_str, zoom_style, layout);
 
 	/* Root div */
-	g_sb_root = lx_el("div", lx_attr("id", "bud-root"), lx_node(g_sb_main))
-	                    .data.node;
+	g_sb_root = bud_tpl("<div id='bud-root'>%node</div>", g_sb_main);
 
 	return g_sb_root;
 }
 
 static bud_node *sb_render_empty_list(void)
 {
-	return lx_el("p", lx_attr("class", "text-muted"),
-	             lx_text("No songs yet."))
-	        .data.node;
+	return bud_tpl("<p class='text-muted'>No songs yet.</p>");
 }
 
 /* Song picker: shared omnisearch construct (song_picker.c), used for
@@ -490,19 +479,15 @@ static bud_node *sb_render_format_picker(
 static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 {
 	int latin = (flags & TRANSP_LATIN) ? 1 : 0;
-	bud_node *key_opts = NULL;
+	bud_node *key_opts = bud_fragment();
 	int cur_t = ((t % 12) + 12) % 12;
 	for (int i = 0; i < 12; i++) {
-		char v[16];
-		snprintf(v, sizeof(v), "%d", i);
 		bud_node *o =
-		        lx_el("option", lx_attr("value", v),
-		              i == cur_t ? lx_attr("selected", "") : lx_none(),
-		              lx_text(key_name(i, orig_key, latin)))
-		                .data.node;
-		if (!key_opts)
-			key_opts = bud_fragment();
-		bud_append(key_opts, o);
+		        bud_tpl("<option value='%d' %b>%s</option>", i,
+		                i == cur_t ? "selected" : NULL,
+		                key_name(i, orig_key, latin));
+		if (o)
+			bud_append(key_opts, o);
 	}
 	return key_opts;
 }
@@ -521,14 +506,10 @@ static bud_node *sb_render_song_row(
 	/* Always create the <pre> node and its raw child (even with empty
 	 * content on WASM) so the hydrated tree structure matches the
 	 * server-rendered DOM and node IDs stay aligned. */
-	bud_node *chord_pre =
-	        lx_el("pre", lx_attr("data-gig-chord-data", n_buf),
-	              lx_attr("class", "whitespace-pre-wrap "
-	                               "font-mono text-xs "
-	                               "mt-1 p-2 rounded "
-	                               "chord-data"),
-	              lx_node(bud_raw(chord_html ? chord_html : "")))
-	                .data.node;
+	bud_node *chord_pre = bud_tpl(
+	        "<pre data-gig-chord-data='%s' class='whitespace-pre-wrap "
+	        "font-mono text-xs mt-1 p-2 rounded chord-data'>%raw</pre>",
+	        n_buf, chord_html ? chord_html : "");
 	if (out_pre)
 		*out_pre = chord_pre;
 
@@ -539,12 +520,10 @@ static bud_node *sb_render_song_row(
 		        s->yt, s->audio, s->pdf, media_html,
 		        sizeof(media_html));
 
-	bud_node *media_node =
-	        lx_el("div", lx_attr("data-gig-media", n_buf),
-	              lx_attr("class", "gig-media flex justify-end "
-	                               "items-center flex-shrink-0 ml-auto"),
-	              lx_node(bud_raw(media_html)))
-	                .data.node;
+	bud_node *media_node = bud_tpl(
+	        "<div data-gig-media='%s' class='gig-media flex justify-end "
+	        "items-center flex-shrink-0 ml-auto'>%raw</div>",
+	        n_buf, media_html);
 
 	if (out_media)
 		*out_media = media_node;
@@ -561,28 +540,25 @@ static bud_node *sb_render_song_row(
 		bud_node *picker = sb_render_song_title_picker(
 		        row_idx, s, row_pv, is_active);
 		bud_node *view_link =
-		        song_href[0]
-		                ? lx_el("a", lx_attr("href", song_href),
-		                        lx_attr("class", "text-xs text-muted "
-		                                         "ml-1 flex-shrink-0"),
-		                        lx_attr("title", "View song"),
-		                        lx_text("\xe2\x86\x97"))
-		                          .data.node
-		                : NULL;
+		        song_href[0] ? bud_tpl("<a href='%s' class='text-xs "
+		                               "text-muted ml-1 flex-shrink-0' "
+		                               "title='View song'>↗</a>",
+		                               song_href)
+		                     : NULL;
 
-		title_elem =
-		        lx_el("div",
-		              lx_attr("class",
-		                      "flex items-center gap-2 flex-1 min-w-0"),
-		              picker ? lx_node(picker) : lx_none(),
-		              view_link ? lx_node(view_link) : lx_none())
-		                .data.node;
+		title_elem = bud_tpl(
+		        "<div class='flex items-center gap-2 flex-1 min-w-0'>"
+		        "  %node"
+		        "  %node"
+		        "</div>",
+		        picker, view_link);
 	} else {
-		title_elem = lx_el("a", lx_attr("class", "font-bold"),
-		                   song_href[0] ? lx_attr("href", song_href)
-		                                : lx_none(),
-		                   lx_text(s->title))
-		                     .data.node;
+		title_elem = song_href[0]
+		                     ? bud_tpl("<a class='font-bold' "
+		                               "href='%s'>%s</a>",
+		                               song_href, s->title)
+		                     : bud_tpl("<a class='font-bold'>%s</a>",
+		                               s->title);
 	}
 
 	bud_node *format_badge = NULL;
@@ -590,121 +566,97 @@ static bud_node *sb_render_song_row(
 		format_badge = sb_render_format_picker(
 		        row_idx, s, fmt_row_pv, is_fmt_active);
 	} else if (s->type[0]) {
-		format_badge =
-		        lx_el("span",
-		              lx_attr("class", "text-xs italic text-muted"),
-		              lx_text(s->type))
-		                .data.node;
+		format_badge = bud_tpl(
+		        "<span class='text-xs italic text-muted'>%s</span>",
+		        s->type);
 	}
 
-	bud_node *title_col =
-	        lx_el("div",
-	              lx_attr("class", "flex gap-4 justify-between "
-	                               "items-center flex-1 min-w-0"),
-	              lx_el("div",
-	                    lx_attr("class", "flex flex-col flex-1 min-w-0"),
-	                    format_badge ? lx_node(format_badge) : lx_none(),
-	                    title_elem ? lx_node(title_elem) : lx_none()),
-	              sb_app_state.user[0]
-	                      ? lx_none()
-	                      : lx_el("span",
-	                              lx_attr("data-gig-target-key", ""),
-	                              lx_attr("class", "text-xs text-muted "
-	                                               "flex-shrink-0"),
-	                              lx_text(tgt_key)))
-	                .data.node;
+	bud_node *title_col = bud_tpl(
+	        "<div class='flex gap-4 justify-between items-center flex-1 "
+	        "min-w-0'>"
+	        "  <div class='flex flex-col flex-1 min-w-0'>"
+	        "    %node"
+	        "    %node"
+	        "  </div>"
+	        "  %node"
+	        "</div>",
+	        format_badge, title_elem,
+	        sb_app_state.user[0]
+	                ? NULL
+	                : bud_tpl("<span data-gig-target-key='' class='text-xs "
+	                          "text-muted flex-shrink-0'>%s</span>",
+	                          tgt_key ? tgt_key : ""));
 
 	/* Owner action controls */
 	bud_node *owner_ctrl = NULL;
 	if (is_owner) {
-		owner_ctrl =
-		        lx_el("div", lx_attr("class", "flex gap-2"),
-		              lx_el("form", lx_attr("method", "POST"),
-		                    lx_attr("action", tpose_action),
-		                    lx_attr("class", "flex gap-1 items-center"),
-		                    lx_el("input", lx_attr("type", "hidden"),
-		                          lx_attr("name", "csrf_token"),
-		                          lx_attr("value", csrf_token)),
-		                    lx_el("input", lx_attr("type", "hidden"),
-		                          lx_attr("name", "n"),
-		                          lx_attr("value", n_buf)),
-		                    lx_el("select", lx_attr("name", "t"),
-		                          lx_attr("data-n", n_buf),
-		                          lx_attr("class",
-		                                  "border rounded p-1 text-xs"),
-		                          lx_bind("change", 0,
-		                                  on_sb_transpose_change),
-		                          lx_node(key_opts)),
-		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("data-wasm-hide", ""),
-		                          lx_attr("class",
-		                                  "btn text-xs py-1 px-2"),
-		                          lx_text("Set Key"))),
-		              lx_el("form", lx_attr("method", "POST"),
-		                    lx_attr("action", rand_action),
-		                    lx_attr("enctype", "multipart/form-data"),
-		                    lx_attr("style", "display:inline"),
-		                    lx_el("input", lx_attr("type", "hidden"),
-		                          lx_attr("name", "csrf_token"),
-		                          lx_attr("value", csrf_token)),
-		                    lx_el("input", lx_attr("type", "hidden"),
-		                          lx_attr("name", "n"),
-		                          lx_attr("value", n_buf)),
-		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("class",
-		                                  "btn text-xs py-1 px-2"),
-		                          lx_text("\xf0\x9f\x8e\xb2"))),
-		              lx_el("form", lx_attr("method", "POST"),
-		                    lx_attr("action", rem_action),
-		                    lx_el("input", lx_attr("type", "hidden"),
-		                          lx_attr("name", "csrf_token"),
-		                          lx_attr("value", csrf_token)),
-		                    lx_el("button", lx_attr("type", "submit"),
-		                          lx_attr("data-testid",
-		                                  "remove-song-btn"),
-		                          lx_attr("class", "btn btn-danger "
-		                                           "text-xs py-1 px-2"),
-		                          lx_text("\xf0\x9f\x97\x91"))))
-		                .data.node;
+		owner_ctrl = bud_tpl(
+		        "<div class='flex gap-2'>"
+		        "  <form method='POST' action='%s' class='flex gap-1 "
+		        "items-center'>"
+		        "    <input type='hidden' name='csrf_token' "
+		        "value='%s'/>"
+		        "    <input type='hidden' name='n' value='%s'/>"
+		        "    <select name='t' data-n='%s' class='border "
+		        "rounded p-1 text-xs' %bind>"
+		        "      %node"
+		        "    </select>"
+		        "    <button type='submit' data-wasm-hide='' "
+		        "class='btn text-xs py-1 px-2'>Set Key</button>"
+		        "  </form>"
+		        "  <form method='POST' action='%s' "
+		        "enctype='multipart/form-data' style='display:inline'>"
+		        "    <input type='hidden' name='csrf_token' "
+		        "value='%s'/>"
+		        "    <input type='hidden' name='n' value='%s'/>"
+		        "    <button type='submit' class='btn text-xs py-1 "
+		        "px-2'>🎲</button>"
+		        "  </form>"
+		        "  <form method='POST' action='%s'>"
+		        "    <input type='hidden' name='csrf_token' "
+		        "value='%s'/>"
+		        "    <button type='submit' "
+		        "data-testid='remove-song-btn' class='btn btn-danger "
+		        "text-xs py-1 px-2'>🗑️</button>"
+		        "  </form>"
+		        "</div>",
+		        tpose_action, csrf_token ? csrf_token : "", n_buf,
+		        n_buf, "change", on_sb_transpose_change, key_opts,
+		        rand_action, csrf_token ? csrf_token : "", n_buf,
+		        rem_action, csrf_token ? csrf_token : "");
 	}
 
 	bud_node *header =
-	        lx_el("div",
-	              lx_attr("class",
-	                      "flex justify-between items-center gap-2"),
-	              lx_node(title_col), lx_node(media_node),
-	              owner_ctrl ? lx_node(owner_ctrl) : lx_none())
-	                .data.node;
+	        bud_tpl("<div class='flex justify-between items-center gap-2'>"
+	                "  %node"
+	                "  %node"
+	                "  %node"
+	                "</div>",
+	                title_col, media_node, owner_ctrl);
 
-	return lx_el("div", lx_attr("data-gig-item", ""),
-	             lx_attr("class",
-	                     "flex flex-col gap-1 p-2 bg-surface rounded"),
-	             lx_node(header), lx_node(chord_pre))
-	        .data.node;
+	return bud_tpl(
+	        "<div data-gig-item='' class='flex flex-col gap-1 p-2 "
+	        "bg-surface rounded'>"
+	        "  %node"
+	        "  %node"
+	        "</div>",
+	        header, chord_pre);
 }
 
 static bud_node *sb_render_header(const char *grp_href, const char *owner)
 {
-	bud_node *frag = bud_fragment();
-	if (!frag)
-		return NULL;
-
-	if (owner && owner[0]) {
-		bud_append(
-		        frag, lx_el("p", lx_attr("class", "text-sm text-muted"),
-		                    lx_frag(lx_text("by "), lx_text(owner)))
-		                      .data.node);
-	}
-
-	if (grp_href && grp_href[0]) {
-		bud_append(
-		        frag, lx_el("a", lx_attr("href", grp_href),
-		                    lx_attr("class", "text-sm text-link"),
-		                    lx_text("\xe2\x86\xa9 back to group"))
-		                      .data.node);
-	}
-
-	return frag;
+	return bud_tpl(
+	        "%node"
+	        "%node",
+	        (owner && owner[0])
+	                ? bud_tpl("<p class='text-sm text-muted'>by %s</p>",
+	                          owner)
+	                : NULL,
+	        (grp_href && grp_href[0])
+	                ? bud_tpl("<a href='%s' class='text-sm text-link'>↩ "
+	                          "back to group</a>",
+	                          grp_href)
+	                : NULL);
 }
 
 /* ── Body content builder (called from bud_app_render in shared.c) ── */

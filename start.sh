@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
-export LD_LIBRARY_PATH="/home/quirinpa/site/external/libxylem/lib:/home/quirinpa/site/external/axil/lib:/home/quirinpa/site/external/axil-hyle/lib:/home/quirinpa/site/external/hyle/lib:/home/quirinpa/site/external/hyle/c/libhyle-bud/lib:/home/quirinpa/site/external/hyle/c/libhyle-source/lib:/home/quirinpa/site/external/bud/lib:/home/quirinpa/site/external/qmap/lib:/home/quirinpa/site/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="/home/quirinpa/site/external/libxylem/lib:/home/quirinpa/site/external/axil/lib:/home/quirinpa/site/external/axil-auth/lib:/home/quirinpa/site/external/axil-hyle/lib:/home/quirinpa/site/external/hyle/lib:/home/quirinpa/site/external/libtransp/lib:/home/quirinpa/site/external/hyle/c/libhyle-bud/lib:/home/quirinpa/site/external/hyle/c/libhyle-source/lib:/home/quirinpa/site/external/bud/lib:/home/quirinpa/site/external/qmap/lib:/home/quirinpa/site/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"
@@ -26,8 +26,13 @@ fi
 if [ -n "$AUTH_SKIP_CONFIRM" ]; then
     echo "Starting axil with AUTH_SKIP_CONFIRM=$AUTH_SKIP_CONFIRM"
 fi
+AXIL_BIN="$SCRIPT_DIR/external/axil/bin/axil"
+if [ ! -x "$AXIL_BIN" ]; then
+    AXIL_BIN="axil"
+fi
+
 if test ! -z "$GDB"; then
-  gdb --args axil -C "$SCRIPT_DIR" -p 8080 -d -m mods/core/core
+  gdb --args "$AXIL_BIN" -C "$SCRIPT_DIR" -p 8080 -d -m mods/core/core
 else
-  axil -C "$SCRIPT_DIR" -p "$PORT" -d -m mods/core/core 2>&1 | tee "$LOG_OUT"
+  "$AXIL_BIN" -C "$SCRIPT_DIR" -p "$PORT" -d -m mods/core/core 2>&1 | tee "$LOG_OUT"
 fi

@@ -33,9 +33,14 @@ typedef struct {
 } gig_song_item_t;
 
 static const hyle_schema_desc_t gig_song_fields[] = {
-	REF_FIELD_S(song, gig_song_item_t, song, 64, "song.items", "songs", 1, "dropdown"),
-	REC_FIELD(transpose, gig_song_item_t, transpose, sizeof(int), 1, 0, 0, 1),
-	REF_FIELD_S(fmt, gig_song_item_t, format, 64, "song.types", "types", 1, "dropdown"),
+	REF_FIELD_S(
+	        song, gig_song_item_t, song, 64, "song.items", "songs", 1,
+	        "dropdown"),
+	REC_FIELD(
+	        transpose, gig_song_item_t, transpose, sizeof(int), 1, 0, 0, 1),
+	REF_FIELD_S(
+	        fmt, gig_song_item_t, format, 64, "song.types", "types", 1,
+	        "dropdown"),
 	FIELD_END
 };
 

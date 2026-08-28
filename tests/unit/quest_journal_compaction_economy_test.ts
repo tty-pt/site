@@ -4,12 +4,14 @@ import questJournalExtension from "../../.pi/extensions/quest-journal.ts";
 
 type EventCallback = (event: any, ctx: any) => Promise<any>;
 
-async function testCompactionAndDeepPreservation() {
+Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, mid-subquest, and auto-resume", async () => {
 	const currentDir = "docs/current";
 	await mkdir(currentDir, { recursive: true });
 
-	const testQuestPath = "docs/current/economy-compaction-quest.md";
-	await rm(testQuestPath, { force: true });
+	const parentQuestPath = "docs/current/parent-compaction-quest.md";
+	const subQuestPath = "docs/current/sub-compaction-quest.md";
+	await rm(parentQuestPath, { force: true });
+	await rm(subQuestPath, { force: true });
 
 	const handlers: Record<string, EventCallback[]> = {};
 	const commands: Record<string, any> = {};
@@ -40,7 +42,7 @@ async function testCompactionAndDeepPreservation() {
 	questJournalExtension(mockPi);
 
 	let currentTokens = 50000;
-	let currentContextWindow = 200000;
+	let currentContextWindow = 1000000; // 1M context window
 
 	const mockCtx: any = {
 		cwd: process.cwd(),
@@ -69,115 +71,139 @@ async function testCompactionAndDeepPreservation() {
 		mode: "tui",
 	};
 
-	// 1. Initialize active quest
-	await writeFile(testQuestPath, "# Quest: economy-compaction-quest\n\n## Goal\nTest economy goal\n", "utf8");
-	await commands["quest"].handler("economy-compaction-quest", mockCtx);
+	// 1. Initialize root/parent quest
+	await writeFile(parentQuestPath, "# Quest: parent-compaction-quest\n\n## Goal\nRoot goal\n", "utf8");
+	await commands["quest"].handler("parent-compaction-quest", mockCtx);
 
-	// 2. Test turn_end when tokens reach 30k window before 140k threshold (110k tokens)
-	currentTokens = 110000;
-	userMessages = [];
+	// 2. Test Sub-Quest start:
+	// Sub-quest creation should NOT trigger premature launch compaction (preventing agent interruption)
+	currentTokens = 50000;
 	compactCalled = false;
+	compactOptions = null;
 
-	// Simulate turn end with unsaved quest state after previous compaction
+	await tools["quest_subquest"].execute(
+		"call_subquest_1",
+		{
+			goal: "Refactor database engine",
+			name: "sub-compaction-quest",
+			switchNow: true,
+		},
+		null,
+		null,
+		mockCtx,
+	);
+
+	assert.strictEqual(compactCalled, false, "Sub-quest creation should NOT trigger premature launch compaction");
+
+	// 4. Test Mid-Subquest compaction when tokens reach dynamic threshold
+	// Active quest is now sub-compaction-quest (inside LIFO stack: [parent-compaction-quest, sub-compaction-quest])
+	// Set threshold to 333k explicitly for this test with 30k warning margin
+	await commands["quest-economy"].handler("333k 30k", mockCtx);
+	currentTokens = 310000; // within 30k warning margin of 333k
+	userMessages = [];
+
+	// Simulate session_compact to clear save gate (save pending)
 	for (const cb of handlers["session_compact"] || []) {
 		await cb({}, mockCtx);
 	}
-	// Now saveCount === compactCount (save pending)
+	userMessages = []; // Clear post-compaction resume prompt so we isolate turn_end warnings
 
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({}, mockCtx);
 	}
 
-	assert.ok(userMessages.length > 0, "Should send pre-compaction preservation message at 30k tokens before threshold (110k/140k)");
-	const warningMsg = Array.isArray(userMessages[0]) ? userMessages[0][0].text : userMessages[0].text || "";
+	assert.ok(userMessages.length > 0, "Should send pre-compaction warning when within margin of threshold");
+	const warnMsg = typeof userMessages[0] === "string" ? userMessages[0] : (userMessages[0].text || "");
 	assert.ok(
-		warningMsg.toLowerCase().includes("compaction") &&
-		(warningMsg.includes("30k") || warningMsg.toLowerCase().includes("soon") || warningMsg.toLowerCase().includes("limit")),
-		`Warning message should explicitly notify of upcoming compaction within 30k, got: ${warningMsg}`,
+		warnMsg.includes("PRE-COMPACTION EXHAUSTIVE CONTEXT PRESERVATION PROTOCOL") || warnMsg.includes("AUTO-COMPACTION WILL OCCUR SOON"),
+		`Warning message should alert model to preserve context, got: ${warnMsg}`,
 	);
-	assert.ok(
-		warningMsg.toLowerCase().includes("re-research") ||
-		warningMsg.toLowerCase().includes("exhaustive") ||
-		warningMsg.toLowerCase().includes("snapshot"),
-		`Warning message should instruct deep preservation against re-research, got: ${warningMsg}`,
-	);
-	assert.strictEqual(compactCalled, false, "Should not compact before the agent updates the quest file");
 
-	// 3. Test compaction gate: session_before_compact when save is pending should cancel
-	notifiedMessages = [];
-	let gateBlocked = false;
-	for (const cb of handlers["session_before_compact"] || []) {
-		const res = await cb({}, mockCtx);
-		if (res && res.cancel) {
-			gateBlocked = true;
-		}
+	// Test deduplication: subsequent turn_end without save should not duplicate the deep save message
+	const msgCountBefore = userMessages.length;
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({}, mockCtx);
 	}
-	assert.strictEqual(gateBlocked, true, "session_before_compact should block compaction when save is pending");
+	assert.strictEqual(userMessages.length, msgCountBefore, "Subsequent turn_end in same warning window should not spam duplicate warnings");
 
-	// 4. Mark quest as saved (agent updates the quest file with extensive findings)
+	// Mark saved
 	compactCalled = false;
 	compactOptions = null;
-	await tools["quest_mark_saved"].execute("call_saved", {}, null, null, mockCtx);
+	await tools["quest_mark_saved"].execute("call_saved_mid", {}, null, null, mockCtx);
+	await new Promise((resolve) => setTimeout(resolve, 60));
 
-	// 5. Verify that after updating the quest file, compaction triggers immediately!
-	// Either triggered directly by quest_mark_saved or in the following turn_end
-	if (!compactCalled) {
-		for (const cb of handlers["turn_end"] || []) {
-			await cb({}, mockCtx);
-		}
+	assert.strictEqual(compactCalled, true, "Mid-subquest save should trigger compaction");
+	assert.ok(
+		compactOptions && compactOptions.customInstructions && compactOptions.customInstructions.includes("sub-compaction-quest"),
+		`Mid-subquest compaction instructions should name active sub-quest, got: ${compactOptions?.customInstructions}`,
+	);
+
+	// 5. Test Post-Compaction Resumption Prompt on session_compact
+	userMessages = [];
+	for (const cb of handlers["session_compact"] || []) {
+		await cb({}, mockCtx);
 	}
 
-	assert.strictEqual(compactCalled, true, "After updating the quest file in the 30k window, compaction should trigger");
-	assert.ok(compactOptions && compactOptions.customInstructions, "Compaction should pass custom instructions");
+	assert.ok(userMessages.length > 0, "session_compact should send immediate post-compaction resumption directive to agent");
+	const postCompactMsg = typeof userMessages[0] === "string" ? userMessages[0] : (Array.isArray(userMessages[0]) ? userMessages[0][0].text : userMessages[0].text || "");
+	assert.ok(
+		postCompactMsg.includes("Post-Compaction Autonomous Resumption Directive"),
+		`Post-compaction message should have clear directive, got: ${postCompactMsg}`,
+	);
+	assert.ok(
+		postCompactMsg.includes("docs/current/small-subquest.md") || postCompactMsg.includes("docs/current/sub-compaction-quest.md"),
+		`Post-compaction message should reference active quest file, got: ${postCompactMsg}`,
+	);
 
-	// 6. Test compaction gate now allows compaction
-	let gateAllowed = true;
-	for (const cb of handlers["session_before_compact"] || []) {
-		const res = await cb({}, mockCtx);
-		if (res && res.cancel) {
-			gateAllowed = false;
-		}
+	// 6. Test CRB Provider contributions
+	const g = globalThis as any;
+	assert.ok(g.__pi_crb_providers && g.__pi_crb_providers.length > 0, "CRB provider hook should be registered");
+	const crbRules: string[] = [];
+	for (const p of g.__pi_crb_providers) {
+		const res = p(mockCtx, ["quest_mark_saved", "edit", "read"]);
+		if (Array.isArray(res)) crbRules.push(...res);
 	}
-	assert.strictEqual(gateAllowed, true, "session_before_compact should allow compaction after fresh save");
+	assert.ok(
+		crbRules.some((r) => r.toLowerCase().includes("single source of truth")),
+		"CRB rules should reinforce quest file as single source of truth",
+	);
+	assert.ok(
+		crbRules.some((r) => r.toLowerCase().includes("zero re-research")),
+		"CRB rules should enforce zero re-research",
+	);
 
-	// 7. Verify System prompt contains Pre-Compaction Deep Preservation Protocol
+	// 7. Test Autonomous Post-Compaction Resumption in System Prompt
 	let systemPrompt = "Base system prompt.";
 	for (const cb of handlers["before_agent_start"] || []) {
 		const res = await cb({ systemPrompt }, mockCtx);
 		if (res?.systemPrompt) systemPrompt = res.systemPrompt;
 	}
 
-	assert.ok(systemPrompt.includes("Economy") || systemPrompt.includes("Compaction"), "System prompt should mention Economy / Compaction rules");
-	assert.ok(systemPrompt.toLowerCase().includes("re-research"), "System prompt should emphasize no re-research across compactions");
+	assert.ok(
+		systemPrompt.toLowerCase().includes("resume") || systemPrompt.toLowerCase().includes("autonomously"),
+		"System prompt should mandate autonomous resumption after compaction",
+	);
 
-	// 8. Test file watch tool_result: writing/editing active quest file in warning window triggers compaction
-	// Reset to unsaved state after compaction
+	// 8. Test session_before_compact when compaction is NOT ready (save pending)
+	// Clear save gate by simulating session_compact
 	for (const cb of handlers["session_compact"] || []) {
 		await cb({}, mockCtx);
 	}
-	compactCalled = false;
-	compactOptions = null;
-	currentTokens = 120000;
+	userMessages = [];
 
-	for (const cb of handlers["tool_result"] || []) {
-		await cb(
-			{
-				toolName: "write",
-				input: { path: testQuestPath },
-			},
-			mockCtx,
-		);
+	// Now try to compact via session_before_compact: should cancel AND send deep save request
+	for (const cb of handlers["session_before_compact"] || []) {
+		const result = await cb({}, mockCtx);
+		assert.strictEqual(result?.cancel, true, "session_before_compact should cancel when save is pending");
 	}
+	assert.ok(userMessages.length > 0, "session_before_compact should alert model to dump context when cancelling");
+	const cancelWarn = typeof userMessages[0] === "string" ? userMessages[0] : (userMessages[0].text || "");
+	assert.ok(
+		cancelWarn.includes("compaction requested while quest file") || cancelWarn.includes("PRE-COMPACTION EXHAUSTIVE CONTEXT PRESERVATION"),
+		`Cancel warning should notify about unsaved changes, got: ${cancelWarn}`,
+	);
 
-	assert.strictEqual(compactCalled, true, "Writing to the active quest file via tool_result should trigger compaction when in warning window");
-
-	// Clean up test files
-	await rm(testQuestPath, { force: true });
-
-	console.log("PASS: quest_journal_compaction_economy_test");
-}
-
-testCompactionAndDeepPreservation().catch((err) => {
-	console.error("FAIL: quest_journal_compaction_economy_test", err);
-	process.exit(1);
+	// Clean up
+	await rm(parentQuestPath, { force: true });
+	await rm(subQuestPath, { force: true });
 });

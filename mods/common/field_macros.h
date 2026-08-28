@@ -32,6 +32,8 @@
 /* Source type constants (from source_field_type_t) */
 #ifndef SOURCE_FIELD_STRING
 #define SOURCE_FIELD_STRING 0
+#define SOURCE_FIELD_INT 1
+#define SOURCE_FIELD_BOOL 2
 #define SOURCE_FIELD_REFERENCE 4
 #define SOURCE_FIELD_MULTI_REFERENCE 5
 #define SOURCE_FIELD_DERIVED 99
@@ -128,11 +130,43 @@
 		        0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, dkey         \
 	}
 
-/* Derived virtual field (computed in-memory for FTS/indexing) */
-#define DERIVED_FIELD(name, dkey)                                              \
+/* Typed integer field */
+#define INT_FIELD(name, st, mb, wr)                                            \
 	{                                                                      \
-		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_STR, SOURCE_FIELD_DERIVED, \
-		        0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, dkey         \
+		#name, offsetof(st, mb), sizeof(int), 1, BUD_RECORD, 0,        \
+		        SOURCE_FIELD_INT, wr, 0, 0, NULL, NULL, 0, NULL, NULL, \
+		        NULL, NULL                                             \
+	}
+
+/* Typed boolean field */
+#define BOOL_FIELD(name, st, mb, wr)                                           \
+	{                                                                      \
+		#name, offsetof(st, mb), sizeof(int), 0, BUD_RECORD, 0,        \
+		        SOURCE_FIELD_BOOL, wr, 0, 0, NULL, NULL, 0, NULL,      \
+		        NULL, NULL, NULL                                       \
+	}
+
+/* Required string record field */
+#define REQ_FIELD(name, st, mb, sz)                                            \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_STR,        \
+		        SOURCE_FIELD_STRING, 1, 1, 0, NULL, NULL, 0, NULL,     \
+		        NULL, NULL, NULL                                       \
+	}
+
+/* Required string record field with min_length */
+#define REQ_FIELD_MIN(name, st, mb, sz, ml)                                    \
+	{                                                                      \
+		#name, offsetof(st, mb), sz, 0, BUD_RECORD, BUD_QM_STR,        \
+		        SOURCE_FIELD_STRING, 1, 1, ml, NULL, NULL, 0, NULL,    \
+		        NULL, NULL, NULL                                       \
+	}
+
+/* Virtual multi-line file / data field */
+#define VSTR_FIELD(name, fl)                                                   \
+	{                                                                      \
+		#name, 0, 0, 0, BUD_EXCLUDE, BUD_QM_VSTR, SOURCE_FIELD_STRING, \
+		        1, 0, 0, NULL, NULL, 0, fl, NULL, NULL, NULL           \
 	}
 
 /* Integer overlay (computed, stored in app_state) */
@@ -150,7 +184,7 @@
 /* Sentinel — terminates the field array */
 #define FIELD_END                                                              \
 	{                                                                      \
-		NULL, 0, 0, 0, 0                                               \
+		0                                                              \
 	}
 
 #endif

@@ -20,7 +20,7 @@ make watch          # auto-rebuild + restart on :8080
    `bud.h` / `bud_jsx.h` / `bud_app.h` + `hyle-bud/hyle-bud.h` + pure C.
    Forbidden in UX: `XY_`/`xy_`/`qmap_`/`source_`/`axil_`/`stoma_`/
    `hyle_source_`/`var/` literals. Sanctioned `#include "*.c"` only
-   `site_ui.c|list.c|music.c` (`scripts/check-module-boundaries.sh`).
+   `site_ui.c|list.c` (`scripts/check-module-boundaries.sh`).
    Check `grep -E 'qmap_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must
    be 0 and `sh scripts/check-wasm-imports.sh` must pass.
    Note: `mods/site_chrome/ux` is WASM-only (`WASM_ONLY=1`) — not a native module.

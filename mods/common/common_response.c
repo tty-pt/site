@@ -9,41 +9,12 @@
 #include <ttypt/xy-mod.h>
 
 #include "common_internal.h"
+#include <hyle/schema.h>
+#include "hyle-bud/hyle-bud.h"
 #include "ux/site_ui.h"
 #include "bud/bud_jsx.h"
 #include "../mpfd/mpfd.h"
 #include "../auth/auth.h"
-
-XY_IMPL(int, parse_transpose_qs,
-	const char *, qs,
-	int *, transpose,
-	int *, flags,
-	int *, show_media);
-
-int parse_transpose_qs(
-        const char *qs, int *transpose, int *flags, int *show_media)
-{
-	*transpose = 0;
-	*flags = 0;
-	*show_media = 0;
-	if (!qs || !*qs)
-		return 0;
-	char copy[1024];
-	snprintf(copy, sizeof(copy), "%s", qs);
-	axil_query_parse(copy);
-	char buf[32];
-	if (axil_query_param("t", buf, sizeof(buf)) > 0)
-		*transpose = atoi(buf);
-	if (axil_query_param("b", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_BEMOL;
-	if (axil_query_param("l", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_LATIN;
-	if (axil_query_param("h", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_HTML;
-	if (axil_query_param("m", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*show_media = 1;
-	return 0;
-}
 
 static void set_html_security_headers(int fd)
 {
@@ -67,21 +38,24 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 	char accept[256] = { 0 };
 
 	axil_header_get(fd, "Accept", accept, sizeof(accept));
-	if (strstr(accept, "text/html")) {
+	if (strstr(accept, "text/html") || strstr(accept, "*/*") || accept[0] == '\0') {
 		char status_str[16];
+		char msg_with_space[256];
 		char uri[512] = { 0 };
 		char *html;
 		bud_node *body;
 
 		snprintf(status_str, sizeof(status_str), "%d", status);
+		snprintf(
+		        msg_with_space, sizeof(msg_with_space), " %s",
+		        msg ? msg : "Error");
 		axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 
 		body = site_ui_layout(
 		        msg ? msg : status_str, uri, "!", get_request_user(fd),
 		        NULL,
-		        lx_el("p", lx_el("strong", lx_text(status_str)),
-		              lx_text(" "), lx_text(msg ? msg : "Error"))
-		                .data.node);
+		        bud_tpl("<p><strong>%s</strong>%s</p>", status_str,
+		                msg_with_space));
 
 		html = site_ui_page(
 		        msg ? msg : status_str, uri, "!", get_request_user(fd),
@@ -118,7 +92,7 @@ XY_IMPL(const char *, require_user, int, fd)
 {
 	const char *user = get_request_user(fd);
 	if (!user || !user[0]) {
-		respond_error(fd, 401, "Unauthorized");
+		require_login(fd, user);
 		return NULL;
 	}
 	return user;
@@ -290,6 +264,55 @@ XY_IMPL(int, site_ui_respond_add_page,
 	snprintf(action, sizeof(action), "/%s/add", module);
 	return site_ui_respond_form_page(
 	        fd, user, title, action, icon, module, form);
+}
+
+XY_IMPL(int, site_ui_respond_isomorphic,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	const char *, state_json,
+	const char *, wasm_module,
+	bud_node *, body)
+{
+	char path[256];
+	char page_title[512];
+	char state_script[16384];
+
+	if (!ctx || !module || !body)
+		return server_error(fd, "Invalid isomorphic context");
+
+	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
+	if (title && title[0])
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        title);
+	else
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        ctx->id);
+
+	if (state_json && state_json[0])
+		snprintf(
+		        state_script, sizeof(state_script),
+		        "<script type=\"application/json\" "
+		        "id=\"bud-state\">%s</script>",
+		        state_json);
+	else
+		state_script[0] = '\0';
+
+	return site_ui_respond_page(
+	        fd, page_title, path, site_ui_module_icon(module),
+	        ctx->username ? ctx->username : "",
+	        state_script[0] ? state_script : NULL,
+	        wasm_module ? wasm_module : module, body);
+}
+
+XY_IMPL(int, site_entity_register, const site_entity_def_t *, def)
+{
+	if (!def || !def->name)
+		return -1;
+	return 0;
 }
 
 XY_IMPL(int, site_ui_respond_edit_page,

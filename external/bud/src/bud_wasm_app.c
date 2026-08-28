@@ -85,15 +85,24 @@ __attribute__((export_name("bud_app_mount"))) void wasm_mount(void)
 	}
 }
 
-__attribute__((export_name("bud_app_update"))) void wasm_update(void)
+void bud_app_set_state(void)
 {
 	if (!runtime)
 		return;
+	bud_node *old_root = bud_runtime_root(runtime);
+	bud_node *new_root = bud_app_render();
+	if (!new_root)
+		return;
+
+	bud_vdom_diff(old_root, new_root, emit_patch_wrapper, NULL);
+
 	bud_runtime_free(runtime);
-	bud_node *app = bud_app_render();
-	runtime = bud_runtime_new(app);
-	bud_runtime_mount(runtime);
-	bud_runtime_mark_dirty(runtime);
+	runtime = bud_runtime_new(new_root);
+}
+
+__attribute__((export_name("bud_app_update"))) void wasm_update(void)
+{
+	bud_app_set_state();
 }
 
 __attribute__((export_name("bud_app_unmount"))) void wasm_unmount(void)
@@ -354,5 +363,8 @@ const char *wasm_get_src(unsigned int node_id)
 	(void)node_id;
 	return "";
 }
+
+void bud_app_set_state(void)
+{}
 
 #endif

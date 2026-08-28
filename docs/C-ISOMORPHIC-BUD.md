@@ -215,7 +215,7 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
 - `X-src` may list multiple files; relative paths are relative to the module
   dir. `X-cflags` receives include paths for anything the unit pulls in.
 - Include-source composition is the established pattern: `detail.c` does
-  `#include "music.c"` and `#include "../../common/ux/site_ui.c"`. `site_ui.c`
+  `#include "../../common/ux/site_ui.c"`. `site_ui.c`
   and `mods/index/ux/list.c` are written to be WASM-compilable — keep them that
   way.
 - Native-only helpers (qmap/source/axil) must live in a DIFFERENT file (e.g.

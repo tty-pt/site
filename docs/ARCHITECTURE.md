@@ -149,13 +149,15 @@ Handler registration helper: `register_standard_item_handlers()` in common;
 user)` in auth.h resolves the validated item path and handles
 login/ownership/CSRF.
 
-Auth is the single ownership authority. `item_owner_record` always persists a
-registered site username in the item `owner` file and, when root, also applies
-the mapped UID to the directory. `item_owner_read` and `item_owner_check` use
-that file for both display and enforcement; host passwd lookup is not an
-identity fallback. Legacy root-created items are migrated offline with
-`scripts/migrate-owner-files.sh --apply`, then refreshed by restarting the
-server.
+Auth is the single ownership authority. In production (`geteuid() == 0` /
+chrooted / `AUTH_ENV=prod`), ownership follows POSIX filesystem disk permissions
+(`stat` `st_uid` and `chown`) strictly without creating or checking owner
+files. `item_owner_read` resolves the username from the directory's UID via
+`auth_get_username_by_uid`, and `item_owner_check` validates against the user's
+registered UID. In dev mode (unprivileged non-root), owner files are used as a
+local multi-user simulation fallback. Legacy root-created items are migrated
+offline with `scripts/migrate-owner-files.sh --apply`, then refreshed by
+restarting the server.
 
 ## 6. Data-layer invariants
 

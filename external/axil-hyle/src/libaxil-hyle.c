@@ -300,6 +300,19 @@ static int source_collect_query_values(
 	return found ? (int)strlen(buf) : -1;
 }
 
+static int source_get_param(const char *body, const char *key, char *buf, size_t sz)
+{
+	if (!key || !buf || sz == 0)
+		return -1;
+	buf[0] = '\0';
+	if (body && body[0]) {
+		int len = source_collect_query_values(body, key, buf, sz);
+		if (len > 0)
+			return len;
+	}
+	return axil_query_param(key, buf, sz - 1);
+}
+
 static int source_parse_row_data_body(const hyle_source_def_t *def, const char *body)
 {
 #define PARSE_BUF_CAP (256 * 1024)
@@ -317,14 +330,7 @@ static int source_parse_row_data_body(const hyle_source_def_t *def, const char *
 			qmap_close(hd);
 			return 0;
 		}
-		int ret_len;
-
-		if (f->type == HYLE_SOURCE_FIELD_MULTI_REFERENCE)
-			ret_len = source_collect_query_values(
-			        body, f->name, val, PARSE_BUF_CAP);
-		else
-			ret_len = axil_query_param(
-			        f->name, val, PARSE_BUF_CAP - 1);
+		int ret_len = source_get_param(body, f->name, val, PARSE_BUF_CAP);
 
 		if (ret_len <= 0) {
 			free(val);
@@ -380,9 +386,8 @@ static int source_write_init(
 	    HYLE_SOURCE_ACCESS_RESULT_ALLOW)
 		return SOURCE_INIT_FORBIDDEN;
 
-	axil_query_parse(body ? body : "");
 	char csrf[33] = { 0 };
-	axil_query_param("csrf_token", csrf, sizeof(csrf));
+	source_get_param(body, "csrf_token", csrf, sizeof(csrf));
 	if (csrf_validate(fd, csrf) != 0)
 		return SOURCE_INIT_FORBIDDEN;
 
@@ -890,13 +895,15 @@ static int source_post_handler(int fd, char *body)
 	}
 
 	char id_buf[128] = { 0 };
-	axil_query_param(def->key_field, id_buf, sizeof(id_buf));
+	source_get_param(body, "id", id_buf, sizeof(id_buf));
 
 	if (!id_buf[0]) {
 		char src[512] = { 0 };
-		axil_query_param("title", src, sizeof(src));
+		source_get_param(body, "title", src, sizeof(src));
 		if (!src[0])
-			axil_query_param("name", src, sizeof(src));
+			source_get_param(body, "name", src, sizeof(src));
+		if (!src[0] && def->key_field)
+			source_get_param(body, def->key_field, src, sizeof(src));
 		if (!src[0])
 			return respond_json_error(fd, 400, "Missing id");
 		axil_slugify(src, strlen(src), id_buf, sizeof(id_buf));
@@ -1021,6 +1028,24 @@ static int source_put_handler(int fd, char *body)
 	if (data_hd == 0)
 		return respond_json_error(fd, 500, "Failed to parse row data");
 
+	if (item_exists && def->fields_hd) {
+		for (size_t i = 0; i < def->field_count; i++) {
+			const hyle_source_field_t *f = &def->fields[i];
+			if (!qmap_get(data_hd, f->name)) {
+				const char *cur_val = NULL;
+				if (def->record_id > 0) {
+					cur_val = qmap_field_get(def->fields_hd, key, f->name);
+				} else {
+					char k[1024];
+					snprintf(k, sizeof(k), "%s:%s", key, f->name);
+					cur_val = qmap_get(def->fields_hd, k);
+				}
+				if (cur_val && cur_val[0])
+					qmap_put(data_hd, f->name, cur_val);
+			}
+		}
+	}
+
 	char *err_json = NULL;
 	if (hyle_source_validate_row(def, data_hd, &err_json)) {
 		if (err_json) {
@@ -1116,9 +1141,8 @@ static int source_delete_handler(int fd, char *body)
 		return respond_json_error(fd, 403, "Forbidden");
 	}
 
-	axil_query_parse(body ? body : "");
 	char csrf[33] = { 0 };
-	axil_query_param("csrf_token", csrf, sizeof(csrf));
+	source_get_param(body, "csrf_token", csrf, sizeof(csrf));
 	if (csrf_validate(fd, csrf) != 0)
 		return respond_json_error(fd, 403, "Forbidden");
 

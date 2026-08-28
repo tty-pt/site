@@ -1,4 +1,5 @@
-EXTRA_CFLAGS += -I../common -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include
+HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
+EXTRA_CFLAGS += -I../common -I$(HYLE_DIR)/c/libhyle-bud/include
 EXTRA_LDLIBS += -lbud
 EXTRA_LDLIBS-OpenBSD += -liconv
 EXTRA_LDLIBS += -laxil-auth

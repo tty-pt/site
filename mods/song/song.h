@@ -1,28 +1,17 @@
-#ifndef CHORDS_API_H
-#define CHORDS_API_H
+#ifndef SONG_MOD_H
+#define SONG_MOD_H
 
 #include <ttypt/xy-mod.h>
 
-/*
- * Transpose chord chart text
- *
- * Parameters:
- *   input: Input chord chart text
- *   semitones: Number of semitones to transpose (-11 to +11)
- *   flags: Bitwise OR of TRANSP_* flags (see transp.h)
- *   output: Pointer to receive allocated result string (caller must free)
- *   key: Pointer to receive detected original key (0-11, chromatic index)
- *
- * Returns: 0 on success, -1 on error
- *
- * Example:
- *   char *result;
- *   int key;
- *   if (song_transpose("C G Am F\n", 2, 0, &result, &key) == 0) {
- *       printf("Original key: %d, Result: %s", key, result);
- *       free(result);
- *   }
- */
+typedef struct {
+	int transpose;
+	int flags;
+	int show_media;
+	int zoom;
+} song_viewer_prefs_t;
+
+#ifndef SONG_IMPL
+
 /* Read and transpose a song's data.txt from the given doc root.
  * If output is non-NULL, receives an allocated result the caller must free.
  * key receives the detected original key when non-NULL. */
@@ -57,4 +46,13 @@ XY_DECL(int, song_get_original_key, const char *, song_id);
 XY_DECL(int, song_get_viewer_zoom, const char *, username);
 XY_DECL(int, song_set_viewer_zoom, const char *, username, int, zoom);
 
-#endif /* CHORDS_API_H */
+/* Parse viewer preferences from request query parameters and user preferences
+ */
+XY_DECL(int, song_parse_viewer_prefs,
+	int, fd,
+	const char *, username,
+	song_viewer_prefs_t *, out);
+
+#endif /* SONG_IMPL */
+
+#endif /* SONG_MOD_H */

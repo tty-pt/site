@@ -2,6 +2,11 @@
   "compaction": {
     "enabled": true,
     "reserveTokens": 4096,
-    "keepRecentTokens": 40000
+    "keepRecentTokens": 20000
+  },
+  "questJournal": {
+    "economyTokens": "200k",
+    "warningTokens": "30k",
+    "subquestCompactTokens": "60k"
   }
 }
