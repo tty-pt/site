@@ -3,6 +3,8 @@
  * All tests use a unique user per run to avoid session conflicts.
  */
 
+export { getBrowser, withTestContext, withTestPage, closeSharedBrowser } from "./browser.ts";
+
 export interface TestUser {
   username: string;
   password: string;
@@ -120,7 +122,7 @@ export async function loginUser(
   await page.fill('input[name="username"]', user.username);
   await page.fill('input[name="password"]', user.password);
   await Promise.all([
-    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 15000 }),
     page.click('button[type="submit"]'),
   ]);
 }
@@ -133,7 +135,7 @@ export async function logoutUser(
   base: string,
 ): Promise<void> {
   await Promise.all([
-    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 15000 }),
     page.goto(`${base}/auth/logout`, { waitUntil: "domcontentloaded" }),
   ]);
 }

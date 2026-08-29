@@ -38,8 +38,8 @@
  *   - `before_agent_start`: inspects prompt, auto-creates root quest for substantive
  *     requests before execution begins, captures user refinements, injects session awareness.
  *   - `turn_end`: tracks progress/dirty state and arms the pre-compaction warning state when appropriate.
- *   - `session_before_compact`: performs the explicit final durable-save intervention and blocks
- *     compaction until the save is verified.
+ *   - `session_before_compact`: acts as the final compaction safety gate and blocks
+ *     compaction unless the active quest has a verified fresh save.
  *   - `session_compact`: records completed compaction and resumes autonomously.
  *   - `tool_result`: edits to active quest file count as saves; edits/commands mark state dirty.
  *   - `session_before_switch`: reminds to persist before leaving.
@@ -88,6 +88,7 @@ export interface ExtensionAPI {
 	registerTool(tool: any): void;
 	registerCommand(name: string, command: any): void;
 	sendUserMessage(msg: any, options?: any): void;
+	sendMessage?(message: any, options?: any): void;
 }
 
 export interface ExtensionContext {
@@ -581,10 +582,7 @@ function reconstruct(ctx: ExtensionContext) {
 					typeof latest.subquestLaunchCompactionPending === "boolean"
 						? latest.subquestLaunchCompactionPending
 						: false,
-				preCompactionCheckpointPending:
-					typeof latest.preCompactionCheckpointPending === "boolean"
-						? latest.preCompactionCheckpointPending
-						: false,
+				preCompactionCheckpointPending: false,
 				preCompactionSaveRequestPending: false,
 				saveGeneration: latest.saveGeneration || null,
 				lastSavedHash: latest.lastSavedHash || null,
@@ -592,7 +590,7 @@ function reconstruct(ctx: ExtensionContext) {
 				economyPercent: typeof latest.economyPercent === "number" ? latest.economyPercent : undefined,
 				warningMarginTokens: typeof latest.warningMarginTokens === "number" ? latest.warningMarginTokens : undefined,
 				subquestCompactTokens: typeof latest.subquestCompactTokens === "number" ? latest.subquestCompactTokens : undefined,
-				lastWarnedCompactionTokens: typeof latest.lastWarnedCompactionTokens === "number" ? latest.lastWarnedCompactionTokens : undefined,
+				lastWarnedCompactionTokens: undefined,
 				lastPromptAt: typeof latest.lastPromptAt === "number" ? latest.lastPromptAt : Date.now(),
 				lastResumePromptAt: typeof latest.lastResumePromptAt === "number" ? latest.lastResumePromptAt : 0,
 				lastResumeTarget: typeof latest.lastResumeTarget === "string" ? latest.lastResumeTarget : null,
@@ -1324,9 +1322,18 @@ function requestPreCompactionCheckpoint(
 	state.preCompactionCheckpointPending = true;
 	persist(pi, ctx);
 
+	const queued = sendDeepSaveRequest(pi);
+
+	if (!queued) {
+		state.preCompactionCheckpointPending = false;
+		state.lastWarnedCompactionTokens = undefined;
+		persist(pi, ctx);
+		return false;
+	}
+
 	if (ctx?.hasUI) {
 		ctx.ui.notify(
-			`Quest-journal: context approaching compaction threshold for '${state.active}'.`,
+			`Quest-journal: context approaching compaction threshold for '${state.active}' (queued durable save).`,
 			"info",
 		);
 	}
@@ -1334,60 +1341,7 @@ function requestPreCompactionCheckpoint(
 	return true;
 }
 
-function checkAndTriggerEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionContext, reason = "economy"): boolean {
-	const c = getActiveContext(ctx);
-	if (!c) return false;
-	if (!state.active) return false;
-	if (state.compactionPending) return false;
-	const compactFn = c.compact;
-	if (typeof compactFn !== "function") return false;
-
-	const threshold = getEconomyThreshold(c);
-	const tokens = calculateCurrentTokens(c);
-
-	const isCompactionDue = threshold > 0 && tokens !== null && tokens >= threshold;
-
-	if (isCompactionDue) {
-		const activeSlug = state.active || "";
-		const targetSessionId = getSessionId(c);
-		state.compactionPending = true;
-		setTimeout(() => {
-			asyncContext.run(c, () => {
-				const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
-				try {
-					compactFn({
-						customInstructions: getCompactionInstructions(activeSlug, tokens, threshold),
-						onComplete: () => {},
-						onError: (err: any) => {
-							sessionState.compactionPending = false;
-							sessionState.lastWarnedCompactionTokens = null;
-							sessionState.preCompactionCheckpointPending = false;
-							sessionState.preCompactionSaveRequestPending = false;
-							const msg = err?.message || String(err);
-							if (msg.includes("Nothing to compact") || msg.includes("Already compacted") || msg.includes("cancelled") || msg.includes("session too small")) {
-								sessionState.compactCount = sessionState.saveCount;
-								return;
-							}
-							if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${msg}`, "error");
-						},
-					});
-				} catch (err: any) {
-					sessionState.compactionPending = false;
-					sessionState.lastWarnedCompactionTokens = null;
-					sessionState.preCompactionCheckpointPending = false;
-					sessionState.preCompactionSaveRequestPending = false;
-					logError("Economy compaction scheduling failed", err, c);
-				}
-			});
-		}, 50);
-		state.lastPromptAt = Date.now();
-		return true;
-	}
-
-	return false;
-}
-
-function checkAndTriggerDeferredOrEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
+function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
 	const c = getActiveContext(ctx);
 	if (!c) return false;
 	if (state.pickerCancelled) return false;
@@ -1492,15 +1446,6 @@ function checkAndTriggerDeferredOrEconomyCompaction(pi: ExtensionAPI, ctx?: Exte
 			}, 50);
 			return true;
 		}
-	}
-
-	// 3. Normal Economy Compaction
-	if (!state.active) return false;
-	const threshold = getEconomyThreshold(c);
-	const tokens = calculateCurrentTokens(c);
-
-	if (threshold > 0 && tokens !== null && tokens >= threshold) {
-		return checkAndTriggerEconomyCompaction(pi, c);
 	}
 
 	return false;
@@ -1639,14 +1584,13 @@ function sendSaveRequest(pi: ExtensionAPI, message: string) {
 	sendInternalAgentMessage(pi, text, "followUp");
 }
 
-/** Queue a user message asking the model to perform an exhaustive execution snapshot before compaction. */
-function sendDeepSaveRequest(pi: ExtensionAPI, reason?: string, deliverAs: "steer" | "followUp" = "steer") {
-	if (!state.active) return;
+function buildDeepSavePrompt(reason?: string): string {
+	if (!state.active) return "";
 	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
 		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
 	}`;
 	const prefix = reason ? `${reason}\n\n` : "";
-	const text = `${prefix}⚡ Context compaction is now being requested.
+	return `${prefix}⚡ Context compaction is imminent.
 
 Before the current context is discarded, perform a FINAL EXHAUSTIVE DURABLE STATE SAVE.
 
@@ -1691,8 +1635,35 @@ The \`EXACT NEXT ACTION\` must be concrete enough for a fresh agent to execute i
 After updating the quest file, call \`quest_mark_saved\` so the save can be verified.
 
 Do not wait for the user after saving.`;
+}
 
-	sendInternalAgentMessage(pi, text, deliverAs);
+/** Queue an internal message asking the model to perform an exhaustive execution snapshot before compaction. */
+function sendDeepSaveRequest(pi: ExtensionAPI, reason?: string): boolean {
+	if (!state.active) return false;
+	const text = buildDeepSavePrompt(reason);
+	if (!text) return false;
+
+	if (typeof pi.sendMessage !== "function") {
+		logError("Pi sendMessage() is required for automatic pre-compaction save follow-up");
+		return false;
+	}
+
+	try {
+		pi.sendMessage(
+			{
+				customType: "quest_journal",
+				content: text,
+				display: false,
+			},
+			{
+				deliverAs: "followUp",
+			},
+		);
+		return true;
+	} catch (err: any) {
+		logError("Failed to queue pre-compaction deep save follow-up", err);
+		return false;
+	}
 }
 
 function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
@@ -1743,7 +1714,7 @@ function installTurnEnd(pi: ExtensionAPI) {
 
 			// Handle deferred archive compaction even if active quest is now null
 			if (state.archiveCompactionPending) {
-				checkAndTriggerDeferredOrEconomyCompaction(pi, ctx);
+				checkAndTriggerDeferredCompaction(pi, ctx);
 				return;
 			}
 
@@ -1816,11 +1787,11 @@ function installTurnEnd(pi: ExtensionAPI) {
 				updateUIStatus(ctx);
 			}
 
-			// Proactive context-pressure checkpoint before compaction
+			// Proactive context-pressure save request before compaction
 			requestPreCompactionCheckpoint(pi, ctx);
 
-			// Check deferred (archive / subquest launch) and economy compaction
-			checkAndTriggerDeferredOrEconomyCompaction(pi, ctx);
+			// Check deferred (archive / subquest launch) compaction
+			checkAndTriggerDeferredCompaction(pi, ctx);
 		}),
 	);
 }
@@ -1833,12 +1804,8 @@ function installBeforeCompact(pi: ExtensionAPI) {
 			if (compactionReady()) return;
 
 			state.compactionPending = false;
-			if (!state.preCompactionSaveRequestPending) {
-				state.preCompactionSaveRequestPending = true;
-				persist(pi, ctx);
-
-				sendDeepSaveRequest(pi, undefined, "steer");
-				if (ctx?.hasUI) ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
+			if (ctx?.hasUI) {
+				ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
 			}
 			return { cancel: true };
 		}),

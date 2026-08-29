@@ -39,6 +39,9 @@ Deno.test("quest_journal_state_machine: deterministic lifecycle, no implicit act
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
 		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
+		},
 	};
 
 	questJournalExtension(mockPi);
@@ -146,7 +149,7 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 	const tools: Record<string, any> = {};
 	const commands: Record<string, any> = {};
 	const handlers: Record<string, EventCallback[]> = {};
-	const userMessages: Array<{ msg: any; options?: any }> = [];
+	const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
 	let compactInvocationCount = 0;
 	let lastCompactOptions: any = null;
 
@@ -165,6 +168,9 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		},
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
+		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
 		},
 	};
 
@@ -220,7 +226,7 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 	assert.strictEqual(incMsgs.length, 0, "No incremental checkpoint during normal execution");
 
 	// -----------------------------------------------------------------------
-	// Case C: Now tokens reach 303k (warning threshold) while quest is dirty -> records marker without synthetic message
+	// Case C: Now tokens reach 303k (warning threshold) while quest is dirty -> sends final save instruction
 	// -----------------------------------------------------------------------
 	currentTokens = 303000;
 	userMessages.length = 0;
@@ -229,21 +235,25 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
 
-	// Case C assertion: No model-visible checkpoint message inside warning window
-	assert.strictEqual(userMessages.length, 0, "Case C: No disruptive messages inside warning window");
+	// Case C assertion: Explicit save instruction issued at turn boundary in warning window
+	const finalSaveMsgsC = userMessages.filter((m) =>
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+	);
+	assert.strictEqual(finalSaveMsgsC.length, 1, "Case C: Final save instruction must be sent when entering warning window");
 
 	// -----------------------------------------------------------------------
-	// Case B: Subsequent turns in the warning window below 333k do NOT send messages
+	// Case B: Subsequent turns in the warning window below 333k do NOT send duplicate messages
 	// -----------------------------------------------------------------------
 	currentTokens = 315000;
 	userMessages.length = 0;
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
-	assert.strictEqual(userMessages.length, 0, "Case B: Repeated turn in warning window must not send messages");
+	assert.strictEqual(userMessages.length, 0, "Case B: Repeated turn in warning window must not send duplicate messages");
 
 	// -----------------------------------------------------------------------
-	// Case D: Compaction threshold reached (>= 333k) while dirty -> session_before_compact triggers final save instruction
+	// Case D: Compaction threshold reached (>= 333k) while dirty -> session_before_compact cancels as a safety gate
 	// -----------------------------------------------------------------------
 	currentTokens = 334000;
 	userMessages.length = 0;
@@ -252,31 +262,27 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		beforeCompactRes = await cb({}, mockCtx);
 	}
 	assert.strictEqual(beforeCompactRes?.cancel, true, "Case D: Compaction must cancel when dirty");
-
-	const finalSaveMsgsD = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-	);
-	assert.strictEqual(finalSaveMsgsD.length, 1, "Case D: session_before_compact must issue final save instruction");
+	assert.strictEqual(userMessages.length, 0, "Case D: session_before_compact must NOT send prompts from inside the hook");
 
 	// -----------------------------------------------------------------------
 	// Case E: The deep save succeeds and quest_mark_saved verifies the file
 	// -----------------------------------------------------------------------
 	await tools["quest_mark_saved"].execute("save_1", {}, null, null, mockCtx);
 	userMessages.length = 0;
-	compactInvocationCount = 0;
 
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
-	// Wait for setTimeout in checkAndTriggerEconomyCompaction
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	assert.strictEqual(compactInvocationCount, 1, "Case E: Automatic compaction proceeds when threshold reached and quest is clean");
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	assert.strictEqual(compactInvocationCount, 1, "Case E: Automatic compaction proceeds when threshold reached and quest is clean");
+
+	// When clean, Pi's native auto-compaction safety gate allows compaction
+	let cleanBeforeCompactRes: any;
+	for (const cb of handlers["session_before_compact"] || []) {
+		cleanBeforeCompactRes = await cb({}, mockCtx);
+	}
+	assert.notStrictEqual(cleanBeforeCompactRes?.cancel, true, "Case E: session_before_compact must allow compaction when clean");
 
 	// -----------------------------------------------------------------------
-	// Case F: Actual threshold reached and quest is dirty -> session_before_compact blocks
+	// Case F: Actual threshold reached and quest is dirty -> session_before_compact cancels as a safety gate
 	// -----------------------------------------------------------------------
 	// Reset compaction state by simulating session_compact
 	for (const cb of handlers["session_compact"] || []) {
@@ -292,11 +298,7 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		beforeCompactResult = await cb({}, mockCtx);
 	}
 	assert.strictEqual(beforeCompactResult?.cancel, true, "Case F: session_before_compact must cancel when dirty");
-	const beforeCompactMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-	);
-	assert.strictEqual(beforeCompactMsgs.length, 1, "Case F: session_before_compact must request deep save");
+	assert.strictEqual(userMessages.length, 0, "Case F: session_before_compact must NOT send prompts from inside the hook");
 
 	// -----------------------------------------------------------------------
 	// Case G & H: Compaction succeeds (session_compact fires)
@@ -334,6 +336,8 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 				preCompactionCheckpointPending: true,
 				preCompactionSaveRequestPending: true, // Persisted as true before crash/interruption
 				saveGeneration: null,
+				economyTokens: 333000,
+				warningMarginTokens: 30000,
 			},
 		},
 	];
@@ -345,19 +349,63 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		await cb({}, mockCtx);
 	}
 
-	// Verify that in-flight request was reset to false upon reconstruction
+	// Verify that in-flight and warning flags were reset to false upon reconstruction
 	userMessages.length = 0;
 	let restartCompactRes: any;
 	for (const cb of handlers["session_before_compact"] || []) {
 		restartCompactRes = await cb({}, mockCtx);
 	}
 	assert.strictEqual(restartCompactRes?.cancel, true, "Case I: session_before_compact must block dirty compaction after reconstruction");
+	assert.strictEqual(userMessages.length, 0, "Case I: session_before_compact must not submit prompts");
 
-	const finalSaveMsgsRestart = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
+	// Now verify recovery: turn_end in warning window safely queues ONE new save follow-up without deadlock
+	currentTokens = 310000;
+	userMessages.length = 0;
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({ toolResults: [] }, mockCtx);
+	}
+	const recoveredSaveMsgs = userMessages.filter((m) =>
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
 		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
 	);
-	assert.strictEqual(finalSaveMsgsRestart.length, 1, "Case I: session_before_compact MUST re-send final save instruction after session reconstruction");
+	assert.strictEqual(recoveredSaveMsgs.length, 1, "Case I: turn_end must queue a new save follow-up after reconstruction");
+
+	// -----------------------------------------------------------------------
+	// Case J: sendMessage failure rolls back pending state so it can be retried without deadlock
+	// -----------------------------------------------------------------------
+	const originalSendMessage = mockPi.sendMessage;
+	mockPi.sendMessage = () => {
+		throw new Error("Simulated transport failure");
+	};
+
+	// Mark dirty and reset warning state
+	for (const cb of handlers["session_compact"] || []) {
+		await cb({}, mockCtx);
+	}
+	for (const cb of handlers["tool_result"] || []) {
+		await cb({ toolName: "edit", input: { path: "mods/gig/gig.c" } }, mockCtx);
+	}
+	userMessages.length = 0;
+
+	// Turn end runs with failed sendMessage -> must roll back and not leave state pending
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({ toolResults: [] }, mockCtx);
+	}
+	assert.strictEqual(userMessages.length, 0, "Case J: No message should be recorded on sendMessage failure");
+
+	// Restore working sendMessage
+	mockPi.sendMessage = originalSendMessage;
+
+	// On next turn_end, it successfully retries and queues the save message!
+	userMessages.length = 0;
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({ toolResults: [] }, mockCtx);
+	}
+	const retrySaveMsgs = userMessages.filter((m) =>
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+	);
+	assert.strictEqual(retrySaveMsgs.length, 1, "Case J: turn_end must successfully retry queueing save after previous sendMessage failure");
 
 	// Clean up
 	await rm(questFilePath, { force: true });

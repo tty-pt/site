@@ -38,8 +38,7 @@ BIN_CALLER="$OUT/caller_contract_test"
 BIN_FUZZ="$OUT/slug_fuzz"
 VG_OPTS="--error-exitcode=42 --quiet"
 
-step=$1
-[ -z "$step" ] && step=all
+step=${1:-all}
 
 build()
 {

@@ -15,7 +15,7 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 	const handlers: Record<string, EventCallback[]> = {};
 	const commands: Record<string, any> = {};
 	const tools: Record<string, any> = {};
-	const userMessages: Array<{ msg: any; options?: any }> = [];
+	const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
 	const uiNotifications: Array<{ msg: string; level?: string }> = [];
 	let compactInvocationCount = 0;
 	let lastCompactOptions: any = null;
@@ -35,6 +35,9 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 		},
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
+		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
 		},
 	};
 
@@ -115,7 +118,7 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 	assert.strictEqual(incMsgs.length, 0, "Step 4: No artificial incremental checkpoint during normal execution");
 
 	// -----------------------------------------------------------------------
-	// Step 5 & 6: Tokens enter warning window (no message) -> Compaction Boundary triggers Final Save Directive
+	// Step 5 & 6: Tokens enter warning window -> Final Save Directive issued at turn boundary
 	// -----------------------------------------------------------------------
 	await commands["quest-economy"].handler("333k 30k", mockCtx); // Warning threshold: 303k, Compaction: 333k
 	currentTokens = 310000; // >= 303k, < 333k
@@ -125,23 +128,11 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
 
-	assert.strictEqual(userMessages.length, 0, "Step 5: Warning window must NOT send disruptive messages");
-
-	// Now tokens reach 335k (compaction threshold)
-	currentTokens = 335000;
-	userMessages.length = 0;
-
-	let beforeCompactRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		beforeCompactRes = await cb({}, mockCtx);
-	}
-	assert.strictEqual(beforeCompactRes?.cancel, true, "Step 6: session_before_compact must cancel when dirty");
-
 	const preCompactMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
 		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
 	);
-	assert.strictEqual(preCompactMsgs.length, 1, "Step 6: Pre-compaction deep save protocol must be sent at compaction boundary");
+	assert.strictEqual(preCompactMsgs.length, 1, "Step 6: Pre-compaction deep save protocol must be sent in warning window");
 	assert.ok(
 		preCompactMsgs[0].msg.includes("EXACT NEXT ACTION"),
 		"Step 6: Protocol must mandate 'EXACT NEXT ACTION'",
@@ -227,19 +218,21 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 	assert.ok(markRes.content[0].text.includes("verified and marked as saved"), "Step 7: Quest must be verified and marked saved");
 
 	// -----------------------------------------------------------------------
-	// Step 8, 9, 10: Tokens reach 335k -> Auto economy compaction -> onComplete sends resume directive
+	// Step 8, 9, 10: Tokens reach 335k -> Auto economy compaction -> session_compact sends resume directive
 	// -----------------------------------------------------------------------
 	currentTokens = 335000; // >= 333k threshold
-	compactInvocationCount = 0;
 	userMessages.length = 0;
 
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
 
-	// Wait for setTimeout in checkAndTriggerEconomyCompaction
-	await new Promise((resolve) => setTimeout(resolve, 80));
-	assert.strictEqual(compactInvocationCount, 1, "Step 8: Economy auto-compaction must be triggered");
+	// Verify session_before_compact allows compaction when clean
+	let beforeCompactRes: any;
+	for (const cb of handlers["session_before_compact"] || []) {
+		beforeCompactRes = await cb({}, mockCtx);
+	}
+	assert.notStrictEqual(beforeCompactRes?.cancel, true, "Step 8: session_before_compact must allow compaction when clean");
 
 	// Simulate Pi emitting session_compact event (single authoritative completion path)
 	for (const cb of handlers["session_compact"] || []) {
@@ -293,7 +286,7 @@ Deno.test("quest_journal_lifecycle_e2e: subquest launch compaction and archive c
 	const handlers: Record<string, EventCallback[]> = {};
 	const commands: Record<string, any> = {};
 	const tools: Record<string, any> = {};
-	const userMessages: Array<{ msg: any; options?: any }> = [];
+	const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
 	let compactInvocationCount = 0;
 	let lastCompactOptions: any = null;
 
@@ -312,6 +305,9 @@ Deno.test("quest_journal_lifecycle_e2e: subquest launch compaction and archive c
 		},
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
+		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
 		},
 	};
 

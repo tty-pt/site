@@ -149,55 +149,62 @@ static int bud_buf_append_char(bud_buf *buf, char ch)
 static int bud_buf_append_escaped(bud_buf *buf, const char *text, int attr)
 {
 	const char *p;
+	const char *start;
 
 	if (!text) {
 		return 0;
 	}
 
+	start = text;
 	for (p = text; *p; p++) {
+		const char *rep = NULL;
+		size_t replen = 0;
+
 		switch (*p) {
 		case '&':
-			if (bud_buf_append(buf, "&amp;") != 0) {
-				return -1;
-			}
+			rep = "&amp;";
+			replen = 5;
 			break;
 		case '<':
-			if (bud_buf_append(buf, "&lt;") != 0) {
-				return -1;
-			}
+			rep = "&lt;";
+			replen = 4;
 			break;
 		case '>':
-			if (bud_buf_append(buf, "&gt;") != 0) {
-				return -1;
-			}
+			rep = "&gt;";
+			replen = 4;
 			break;
 		case '"':
 			if (attr) {
-				if (bud_buf_append(buf, "&quot;") != 0) {
-					return -1;
-				}
-			} else {
-				if (bud_buf_append_char(buf, *p) != 0) {
-					return -1;
-				}
+				rep = "&quot;";
+				replen = 6;
 			}
 			break;
 		case '\'':
 			if (attr) {
-				if (bud_buf_append(buf, "&#39;") != 0) {
-					return -1;
-				}
-			} else {
-				if (bud_buf_append_char(buf, *p) != 0) {
-					return -1;
-				}
+				rep = "&#39;";
+				replen = 5;
 			}
 			break;
 		default:
-			if (bud_buf_append_char(buf, *p) != 0) {
+			break;
+		}
+
+		if (rep) {
+			if (p > start) {
+				if (bud_buf_append_n(buf, start, (size_t)(p - start)) != 0) {
+					return -1;
+				}
+			}
+			if (bud_buf_append_n(buf, rep, replen) != 0) {
 				return -1;
 			}
-			break;
+			start = p + 1;
+		}
+	}
+
+	if (p > start) {
+		if (bud_buf_append_n(buf, start, (size_t)(p - start)) != 0) {
+			return -1;
 		}
 	}
 

@@ -40,16 +40,20 @@ Deno.test({
       await page.goto(`${BASE}/song/add`);
       await page.waitForSelector('input[name="title"]');
       await page.fill('input[name="title"]', title);
-      await page.click('form[method="POST"] button[type="submit"]');
-      await page.waitForURL(/\/song\/[^/]+$/);
+      await Promise.all([
+        page.waitForURL(/\/song\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+        page.click('form[method="POST"] button[type="submit"]'),
+      ]);
     }
 
     // ── 1. Create a grp ──────────────────────────────────────────────
     await page.goto(`${BASE}/grp/add`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', `AutoRep Grp ${ts}`);
-    await page.click('form[method="POST"] button[type="submit"]');
-    await page.waitForURL(/\/grp\/[^/]+$/);
+    await Promise.all([
+      page.waitForURL(/\/grp\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const grpId = page.url().split("/grp/")[1].replace(/\/$/, "");
 
     // ── 2. Picker default view: chrome only, no results table ────────

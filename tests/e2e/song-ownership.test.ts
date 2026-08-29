@@ -18,8 +18,10 @@ const BASE = "http://localhost:8080";
 
 Deno.test("song ownership: user B cannot edit or delete user A's song", async () => {
   const browser = await chromium.launch();
-  const pageA = await browser.newPage();
-  const pageB = await browser.newPage();
+  const contextA = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const contextB = await browser.newContext();
+  const pageB = await contextB.newPage();
 
   const ts = Date.now();
   const title = `Song Ownership Test ${ts}`;
@@ -32,15 +34,17 @@ Deno.test("song ownership: user B cannot edit or delete user A's song", async ()
     await pageA.goto(`${BASE}/song/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('form[method="POST"] button[type="submit"]');
-
-    await pageA.waitForURL(`${BASE}/song/**`, { timeout: 5000 });
+    await Promise.all([
+      pageA.waitForURL(/\/song\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      pageA.click('form[method="POST"] button[type="submit"]'),
+    ]);
     songId = pageA.url().split("/song/")[1].replace(/\/$/, "");
 
     // ── User B: register + login ──────────────────────────────────────────────
     await createAndLoginUser(pageB, BASE);
-    const cookies = await pageB.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const cookies = await contextB.cookies();
+    const sessionCookie = cookies.find((c) => c.name === "QSESSION");
+    const cookieHeader = sessionCookie ? `QSESSION=${sessionCookie.value}` : "";
 
     // ── 2. User B: GET /song/<id>/edit → expect 403 ───────────────────────────
     const editGetResp = await fetch(`${BASE}/song/${songId}/edit`, {

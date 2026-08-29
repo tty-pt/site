@@ -47,9 +47,10 @@ Deno.test("editor textareas: song add/edit and poem edit are big and fit horizon
     // Submit song
     await page.fill('input[name="title"]', songTitle);
     await page.fill('textarea[name="data"]', songLyrics);
-    await page.click('form[action="/song/add"] button[type="submit"]');
-
-    await page.waitForURL(`${BASE}/song/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/song\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[action="/song/add"] button[type="submit"]'),
+    ]);
     songId = page.url().replace(`${BASE}/song/`, "").replace(/\/$/, "");
 
     // ── 2. Song Edit (/song/:id/edit) ────────────────────────────────────────

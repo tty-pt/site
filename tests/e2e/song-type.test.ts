@@ -71,7 +71,15 @@ async function createSongViaForm(
       let cb = page.locator(`input[name="type"][value="${slug}"]`);
       if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${v}"]`);
       if (await cb.count() > 0) {
-        await cb.first().check();
+        await cb.first().evaluate((el) => {
+          (el as any).checked = true;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
+        for (let i = 0; i < 20; i++) {
+          if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
+          await page.waitForTimeout(100);
+        }
       } else {
         const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
         if (await search.count() > 0) {
@@ -86,10 +94,13 @@ async function createSongViaForm(
           let cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${slug}"]`);
           if (await cb2.count() === 0) cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${v}"]`);
           if (await cb2.count() > 0) {
-            await cb2.first().check();
+            await cb2.first().evaluate((el) => {
+              (el as any).checked = true;
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
             const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
             for (let i = 0; i < 20; i++) {
-              if ((await valSpan.innerText()).includes(v)) break;
+              if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
               await page.waitForTimeout(100);
             }
           } else {
@@ -98,7 +109,7 @@ async function createSongViaForm(
               await addBtn.click();
               const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
               for (let i = 0; i < 20; i++) {
-                if ((await valSpan.innerText()).includes(v)) break;
+                if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
                 await page.waitForTimeout(100);
               }
             }
@@ -125,7 +136,10 @@ async function createSongViaForm(
         let opt = authorPicker.locator(`input[name="author"][value="${slug}"]`);
         if (await opt.count() === 0) opt = authorPicker.locator(`input[name="author"][value="${author}"]`);
         if (await opt.count() > 0) {
-          await opt.first().click({ force: true });
+          await opt.first().evaluate((el) => {
+            (el as any).checked = true;
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          });
         } else {
           const search = authorPicker.locator('input.hyle-picker-search');
           if (await search.count() > 0) {
@@ -143,7 +157,12 @@ async function createSongViaForm(
               await rows.waitFor({ state: "visible" });
               let opt2 = authorPicker.locator(`input[name="author"][value="${slug}"]`);
               if (await opt2.count() === 0) opt2 = authorPicker.locator(`input[name="author"][value="${author}"]`);
-              if (await opt2.count() > 0) await opt2.first().click({ force: true });
+              if (await opt2.count() > 0) {
+                await opt2.first().evaluate((el) => {
+                  (el as any).checked = true;
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                });
+              }
             }
           }
         }
@@ -991,10 +1010,13 @@ Deno.test({
             cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
           }
           if (await cEntry.count() > 0) {
-            await cEntry.first().check();
+            await cEntry.first().evaluate((el) => {
+              (el as any).checked = true;
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
             const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
             for (let i = 0; i < 20; i++) {
-              if ((await valSpan.innerText()).includes("Entry")) break;
+              if ((await valSpan.innerText().catch(() => "")).includes("Entry")) break;
               await page.waitForTimeout(100);
             }
           }

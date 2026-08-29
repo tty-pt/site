@@ -38,7 +38,8 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const browser = await chromium.launch();
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
     try {
       await createAndLoginUser(page, BASE);
@@ -103,7 +104,8 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const browser = await chromium.launch();
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
     try {
       await createAndLoginUser(page, BASE);

@@ -14,7 +14,7 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 		const handlers: Record<string, EventCallback[]> = {};
 		const tools: Record<string, any> = {};
 		const commands: Record<string, any> = {};
-		const userMessages: Array<{ msg: any; options?: any }> = [];
+		const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
 		let compactInvocationCount = 0;
 		let lastCompactOptions: any = null;
 
@@ -33,6 +33,9 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 			},
 			sendUserMessage(msg: any, options?: any) {
 				userMessages.push({ msg, options });
+			},
+			sendMessage(msg: any, options?: any) {
+				userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
 			},
 		};
 
@@ -212,47 +215,42 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 		harness.setTokens(310000);
 		harness.userMessages.length = 0;
 
-		// On turn_end in warning window, requestPreCompactionCheckpoint records state without synthetic messages
+		// On turn_end in warning window, requestPreCompactionCheckpoint sends ONE explicit save instruction
 		for (const cb of harness.handlers["turn_end"] || []) {
 			await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/gig/gig.c" } }] }, harness.mockCtx);
 		}
 
-		assert.strictEqual(harness.userMessages.length, 0, "Entering warning window must NOT inject disruptive checkpoint conversation");
+		const finalSaveMsgs = harness.userMessages.filter((m) =>
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		);
+		assert.strictEqual(finalSaveMsgs.length, 1, "Entering warning window on turn_end must issue final save instruction");
 
-		// Repeated turns inside warning window must also NOT send messages
+		// Repeated turns inside warning window must NOT duplicate messages
 		for (let i = 0; i < 3; i++) {
 			for (const cb of harness.handlers["turn_end"] || []) {
 				await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/gig/gig.c" } }] }, harness.mockCtx);
 			}
 		}
-		assert.strictEqual(harness.userMessages.length, 0, "Repeated turns in warning window must not send checkpoint messages");
+		const finalSaveMsgsRepeated = harness.userMessages.filter((m) =>
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		);
+		assert.strictEqual(finalSaveMsgsRepeated.length, 1, "Repeated turns in warning window must not spam duplicate save requests");
 
-		// Tokens reach full compaction threshold (335k >= 333k) - actual compaction boundary
+		// Tokens reach full compaction threshold (335k >= 333k) - dirty state blocks compaction
 		harness.setTokens(335000);
-		harness.userMessages.length = 0;
+		for (const cb of harness.handlers["turn_end"] || []) {
+			await cb({ toolResults: [] }, harness.mockCtx);
+		}
+		assert.strictEqual(harness.getCompactCount(), 0, "Compaction must NOT trigger while state is dirty");
 
-		// Explicit session_before_compact gate must cancel AND issue FINAL explicit save instruction
+		// Explicit session_before_compact gate must cancel without sending prompts
 		let cancelRes: any;
 		for (const cb of harness.handlers["session_before_compact"] || []) {
 			cancelRes = await cb({}, harness.mockCtx);
 		}
 		assert.strictEqual(cancelRes?.cancel, true, "session_before_compact must block/cancel when dirty");
-
-		const finalSaveMsgs = harness.userMessages.filter((m) =>
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		);
-		assert.strictEqual(finalSaveMsgs.length, 1, "session_before_compact must send the final explicit save instruction");
-
-		// Repeated session_before_compact while in-flight must NOT duplicate message
-		for (const cb of harness.handlers["session_before_compact"] || []) {
-			await cb({}, harness.mockCtx);
-		}
-		const finalSaveMsgsRepeated = harness.userMessages.filter((m) =>
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is now being requested") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		);
-		assert.strictEqual(finalSaveMsgsRepeated.length, 1, "session_before_compact must not spam duplicate save requests");
 
 		// Clean up
 		await rm(questFilePath, { force: true });
@@ -276,8 +274,11 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 			await cb({ toolResults: [] }, harness.mockCtx);
 		}
 
-		await new Promise((r) => setTimeout(r, 60));
-		assert.strictEqual(harness.getCompactCount(), 1, "Clean state at threshold must trigger compaction");
+		let beforeCompactRes: any;
+		for (const cb of harness.handlers["session_before_compact"] || []) {
+			beforeCompactRes = await cb({}, harness.mockCtx);
+		}
+		assert.notStrictEqual(beforeCompactRes?.cancel, true, "Clean state at threshold must allow compaction");
 
 		// Clean up
 		await rm(questFilePath, { force: true });

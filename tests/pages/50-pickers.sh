@@ -221,4 +221,17 @@ grep -qE '<(input|textarea)[^>]*name="type"' "$BODY" ||
   fail "fallback field missing after cutoff"
 pass "QS budget cutoff falls back to text input"
 
+# ── cleanup test fixtures ─────────────────────────────────────────────
+if [ -n "${NEW_AUTH_ID:-}" ]; then
+  api_csrf
+  curl -sS --max-time 5 -b "$JAR" -c "$JAR" -X DELETE "$BASE/api/dataset/song.authors/$NEW_AUTH_ID?csrf_token=$CSRF" >/dev/null 2>&1 || true
+fi
+if [ -n "${NEW_TYPE_ID:-}" ]; then
+  api_csrf
+  curl -sS --max-time 5 -b "$JAR" -c "$JAR" -X DELETE "$BASE/api/dataset/song.types/$NEW_TYPE_ID?csrf_token=$CSRF" >/dev/null 2>&1 || true
+fi
+if [ -n "${SONG_ID:-}" ]; then
+  rm -rf "var/song/$SONG_ID" 2>/dev/null || true
+fi
+
 pass "50-pickers: all OK"

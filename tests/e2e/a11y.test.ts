@@ -30,7 +30,7 @@ Deno.test("accessibility: home page", async () => {
   const page = await context.newPage();
 
   try {
-    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
     await checkA11y(page, "Home Page");
   } finally {
     await browser.close();
@@ -43,7 +43,7 @@ Deno.test("accessibility: song list", async () => {
   const page = await context.newPage();
 
   try {
-    await page.goto(`${BASE}/song/`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/song/`, { waitUntil: "domcontentloaded" });
     await checkA11y(page, "Song List");
   } finally {
     await browser.close();
@@ -56,7 +56,7 @@ Deno.test("accessibility: login page", async () => {
   const page = await context.newPage();
 
   try {
-    await page.goto(`${BASE}/auth/login`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/auth/login`, { waitUntil: "domcontentloaded" });
     await checkA11y(page, "Login Page");
   } finally {
     await browser.close();

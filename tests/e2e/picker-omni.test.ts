@@ -27,10 +27,11 @@ Deno.test({
       await createAndLoginUser(page, BASE);
 
       // Fetch a valid type ID and Name
-      const response = await page.request.get(`${BASE}/api/dataset/song.types?per_page=1`);
+      const response = await page.request.get(`${BASE}/api/dataset/song.types?per_page=10`);
       const typesData = await response.json();
-      typeId = typesData.rows[0].id;
-      typeName = typesData.rows[0].name;
+      const validRow = typesData.rows.find((r: { id: string; name: string }) => r.id && r.name && r.name.length > 2 && isNaN(Number(r.name))) || typesData.rows[0];
+      typeId = validRow.id;
+      typeName = validRow.name;
 
       await page.goto(`${BASE}/song/add`, GOTO);
       await page.locator('.hyle-picker[data-hyle-picker-key="type"] details summary').click();

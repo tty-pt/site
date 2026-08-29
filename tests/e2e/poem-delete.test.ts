@@ -30,9 +30,10 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     await page.goto(`${BASE}/poem/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', title);
-    await page.click('form[method="POST"] button[type="submit"]');
-
-    await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/poem\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const url = page.url();
     poemId = url.replace(`${BASE}/poem/`, "").replace(/\/$/, "");
 

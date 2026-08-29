@@ -18,8 +18,10 @@ const BASE = "http://localhost:8080";
 
 Deno.test("gig ownership: user B cannot edit or delete user A's gig", async () => {
   const browser = await chromium.launch();
-  const pageA = await browser.newPage();
-  const pageB = await browser.newPage();
+  const contextA = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const contextB = await browser.newContext();
+  const pageB = await contextB.newPage();
 
   const ts = Date.now();
   const title = `Gig Ownership Test ${ts}`;
@@ -32,15 +34,17 @@ Deno.test("gig ownership: user B cannot edit or delete user A's gig", async () =
     await pageA.goto(`${BASE}/gig/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('form[method="POST"] button[type="submit"]');
-
-    await pageA.waitForURL(`${BASE}/gig/**`, { timeout: 5000 });
+    await Promise.all([
+      pageA.waitForURL(/\/gig\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      pageA.click('form[method="POST"] button[type="submit"]'),
+    ]);
     sbId = pageA.url().split("/gig/")[1].replace(/\/$/, "");
 
     // ── User B: register + login ──────────────────────────────────────────────
     await createAndLoginUser(pageB, BASE);
-    const cookies = await pageB.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const cookies = await contextB.cookies();
+    const sessionCookie = cookies.find((c) => c.name === "QSESSION");
+    const cookieHeader = sessionCookie ? `QSESSION=${sessionCookie.value}` : "";
 
     // ── 2. User B: GET /gig/<id>/edit → expect 403 ───────────────────────
     const editGetResp = await fetch(`${BASE}/gig/${sbId}/edit`, {

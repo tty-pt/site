@@ -85,6 +85,10 @@ standalone-unit-tests:
 	@sh tests/unit/run-axil-auth-groups.sh
 	@sh tests/unit/run-auth-group-permissions.sh
 	@sh tests/unit/run-site-media.sh
+	@sh tests/unit/run-ordered-sync.sh
+	@sh tests/unit/run-source-dataset-options.sh
+	@sh tests/unit/run-viewer-prefs.sh
+	@sh tests/unit/run-slugify.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -93,6 +97,7 @@ pages-test: all
 	sh tests/pages/25-list-metadata.sh
 	sh tests/pages/30-song-multiselect.sh
 	sh tests/pages/40-traversal.sh
+	sh tests/pages/50-pickers.sh
 
 unit-c-tests:
 	@sh tests/scripts/repro-matrix.sh --build
@@ -101,7 +106,7 @@ integration-tests: all
 	@sh tests/integration/run_all.sh
 
 e2e-tests: test-data-dirs
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
 
 restart:
 	@pkill -f 'axil -C .* mods/core/core' || true
@@ -111,7 +116,7 @@ restart:
 	@curl -s --max-time 3 http://localhost:8080/ > /dev/null 2>&1 || { echo "Failed to start server"; exit 1; }
 	@echo "Server restarted on :8080"
 
-test: boundary-check unit-c-tests unit-tests pages-test e2e-tests
+test: boundary-check unit-c-tests unit-tests pages-test integration-tests e2e-tests
 
 boundary-check:
 	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh
@@ -158,7 +163,7 @@ test-capture: test-data-dirs
 	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
 	touch $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests started at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log; \
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all --parallel tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests completed at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log
 	@echo "Test log saved to $(TEST_LOG_DIR)/test_$$timestamp.log"
 

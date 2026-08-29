@@ -18,6 +18,7 @@ static int idx_resolve_filter_options(
         int pool_avail)
 {
 	unsigned row_hd;
+	unsigned fields_hd;
 	char display_field[64] = "";
 	int nopts = 0;
 	uint32_t cur;
@@ -25,24 +26,45 @@ static int idx_resolve_filter_options(
 	const void *val;
 
 	(void)target_hd;
-	if (!target_source || !target_source[0])
+	if (!target_source || !target_source[0] || pool_avail <= 0)
 		return 0;
 
 	row_hd = source_get_data_hd(target_source);
 	if (!row_hd)
 		return 0;
 
+	fields_hd = source_get_fields_hd(target_source);
 	hyle_source_get_display_field(
 	        target_source, display_field, sizeof(display_field));
+
+	size_t df_len = strlen(display_field);
 
 	cur = qmap_iter(row_hd, NULL, 0);
 	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {
 		const char *row_id = (const char *)key;
-		strncpy(pool[nopts].id, row_id, sizeof(pool[nopts].id) - 1);
-		pool[nopts].id[sizeof(pool[nopts].id) - 1] = '\0';
-		hyle_source_get_item_label(
-		        target_source, row_id, display_field, pool[nopts].label,
-		        sizeof(pool[nopts].label));
+		size_t id_len = strlen(row_id);
+		if (id_len >= sizeof(pool[nopts].id))
+			id_len = sizeof(pool[nopts].id) - 1;
+		memcpy(pool[nopts].id, row_id, id_len);
+		pool[nopts].id[id_len] = '\0';
+
+		const char *name = NULL;
+		if (fields_hd && df_len > 0) {
+			char name_key[320];
+			if (id_len + 1 + df_len < sizeof(name_key)) {
+				memcpy(name_key, row_id, id_len);
+				name_key[id_len] = ':';
+				memcpy(name_key + id_len + 1, display_field, df_len);
+				name_key[id_len + 1 + df_len] = '\0';
+				name = (const char *)qmap_get(fields_hd, name_key);
+			}
+		}
+		const char *label = name ? name : row_id;
+		size_t label_len = strlen(label);
+		if (label_len >= sizeof(pool[nopts].label))
+			label_len = sizeof(pool[nopts].label) - 1;
+		memcpy(pool[nopts].label, label, label_len);
+		pool[nopts].label[label_len] = '\0';
 		nopts++;
 	}
 	qmap_fin(cur);
@@ -138,23 +160,9 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 		return raw;
 
 	if (strcmp(last_target, col->target_source) != 0) {
-		unsigned shd = source_get_schema_hd(col->target_source);
 		display_field[0] = '\0';
-		if (shd) {
-			uint32_t ccur;
-			const void *ckey;
-			const void *cval;
-			ccur = qmap_iter(shd, NULL, 0);
-			while (qmap_next(&ckey, &cval, ccur)) {
-				const char *fn = (const char *)ckey;
-				if (strcmp(fn, "id") == 0)
-					continue;
-				strncpy(display_field, fn,
-				        sizeof(display_field) - 1);
-				break;
-			}
-			qmap_fin(ccur);
-		}
+		hyle_source_get_display_field(
+		        col->target_source, display_field, sizeof(display_field));
 		strncpy(last_target, col->target_source,
 		        sizeof(last_target) - 1);
 	}
@@ -163,6 +171,8 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 	if (!df)
 		return raw;
 
+	size_t df_len = strlen(df);
+	size_t buf_pos = 0;
 	buf[0] = '\0';
 	{
 		const char *p = raw;
@@ -190,18 +200,26 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 					slug = num;
 				if (slug) {
 					char name_key[320];
-					snprintf(
-					        name_key, sizeof(name_key),
-					        "%s:%s", slug, df);
-					name = (const char *)qmap_get(
-					        col->target_hd, name_key);
-					if (buf[0])
-						strncat(buf, ", ",
-						        sizeof(buf) -
-						                strlen(buf) -
-						                1);
-					strncat(buf, name ? name : slug,
-					        sizeof(buf) - strlen(buf) - 1);
+					size_t slen = strlen(slug);
+					if (slen + 1 + df_len < sizeof(name_key)) {
+						memcpy(name_key, slug, slen);
+						name_key[slen] = ':';
+						memcpy(name_key + slen + 1, df, df_len);
+						name_key[slen + 1 + df_len] = '\0';
+						name = (const char *)qmap_get(
+						        col->target_hd, name_key);
+					}
+					const char *val_str = name ? name : slug;
+					size_t vlen = strlen(val_str);
+					if (buf_pos > 0 && buf_pos + 2 < sizeof(buf)) {
+						buf[buf_pos++] = ',';
+						buf[buf_pos++] = ' ';
+					}
+					if (buf_pos + vlen < sizeof(buf)) {
+						memcpy(buf + buf_pos, val_str, vlen);
+						buf_pos += vlen;
+						buf[buf_pos] = '\0';
+					}
 				}
 			}
 			if (!nl)
@@ -549,14 +567,20 @@ XY_IMPL(int, list_fill_state,
 	state->nids = disp_nids;
 
 	for (i = 0; i < disp_nids; i++) {
+		size_t id_len = state->ids[i] ? strlen(state->ids[i]) : 0;
 		for (j = 0; j < ncols; j++) {
-			char fkey[256];
-			const char *fval;
+			char fkey[320];
+			const char *fval = NULL;
+			size_t klen = strlen(cols[j].key);
 
-			snprintf(
-			        fkey, sizeof(fkey), "%s:%s", state->ids[i],
-			        cols[j].key);
-			fval = (const char *)qmap_get(fields_hd, fkey);
+			if (id_len + 1 + klen < sizeof(fkey)) {
+				memcpy(fkey, state->ids[i], id_len);
+				fkey[id_len] = ':';
+				memcpy(fkey + id_len + 1, cols[j].key, klen);
+				fkey[id_len + 1 + klen] = '\0';
+				fval = (const char *)qmap_get(fields_hd, fkey);
+			}
+
 			if (!fval || !fval[0]) {
 				if (j == 0 && state->ids[i])
 					fval = state->ids[i];

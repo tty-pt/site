@@ -80,4 +80,19 @@ if ! printf '%s' "$add_html_body" | grep -q "action=\"/auth/login\""; then
 fi
 pass "/song/add: unauthorized renders login screen on HTML OK"
 
+# HEAD request / curl -I checks
+head_root=$(curl -sS -I --max-time 3 "$BASE/" | tr -d '\r')
+printf '%s' "$head_root" | grep -q '^HTTP/1.1 200 OK' || fail "HEAD / did not return 200 OK"
+printf '%s' "$head_root" | grep -q '^Content-Type: text/html' || fail "HEAD / missing Content-Type"
+pass "HEAD /: 200 OK with headers"
+
+head_css=$(curl -sS -I --max-time 3 "$BASE/styles.css" | tr -d '\r')
+printf '%s' "$head_css" | grep -q '^HTTP/1.1 200 OK' || fail "HEAD /styles.css did not return 200 OK"
+printf '%s' "$head_css" | grep -q '^Content-Length:' || fail "HEAD /styles.css missing Content-Length"
+pass "HEAD /styles.css: 200 OK with Content-Length"
+
+head_404=$(curl -sS -I --max-time 3 "$BASE/nonexistent" | tr -d '\r')
+printf '%s' "$head_404" | grep -q '^HTTP/1.1 404 Not Found' || fail "HEAD /nonexistent did not return 404"
+pass "HEAD /nonexistent: 404 Not Found"
+
 pass "pages smoke tests all OK"

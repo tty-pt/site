@@ -37,6 +37,9 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
 		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
+		},
 	};
 
 	questJournalExtension(mockPi);
@@ -106,57 +109,45 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 	for (const cb of handlers["session_compact"] || []) {
 		await cb({}, mockCtx);
 	}
-	userMessages = []; // Clear post-compaction resume prompt so we isolate turn_end warnings
-
-	// Turn end inside warning window does NOT send disruptive messages
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({}, mockCtx);
-	}
-	assert.strictEqual(userMessages.length, 0, "Warning window should not send disruptive messages");
-
-	// Now tokens reach 335k (threshold reached) - dirty state blocks compaction at session_before_compact
-	currentTokens = 335000;
 	// Mark dirty
 	for (const cb of handlers["tool_result"] || []) {
 		await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
 	}
 	userMessages = [];
-	let cancelRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		cancelRes = await cb({}, mockCtx);
-	}
-	assert.strictEqual(cancelRes?.cancel, true, "session_before_compact must cancel when dirty");
 
-	assert.ok(userMessages.length > 0, "Should send final save instruction at compaction boundary");
-	const lastEntry = userMessages[userMessages.length - 1];
-	const warnMsg = typeof lastEntry.msg === "string" ? lastEntry.msg : (lastEntry.msg.text || "");
-	assert.strictEqual(lastEntry.options?.deliverAs, "steer", "Final save directive must use deliverAs: 'steer'");
-	assert.ok(
-		warnMsg.includes("Context compaction is now being requested") || warnMsg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		`Steer message should instruct final save before compaction, got: ${warnMsg}`,
-	);
-
-	// Test deduplication: repeated session_before_compact while in-flight should not duplicate the deep save message
-	const msgCountBefore = userMessages.length;
-	for (const cb of handlers["session_before_compact"] || []) {
+	// Turn end inside warning window sends explicit final-save instruction
+	for (const cb of handlers["turn_end"] || []) {
 		await cb({}, mockCtx);
 	}
-	assert.strictEqual(userMessages.length, msgCountBefore, "Subsequent session_before_compact should not spam duplicate warnings");
+	assert.ok(userMessages.length > 0, "Warning window at turn_end should send final save instruction");
+	const lastEntry = userMessages[userMessages.length - 1];
+	const warnMsg = typeof lastEntry.msg === "string" ? lastEntry.msg : (lastEntry.msg.text || "");
+	assert.strictEqual(lastEntry.options?.deliverAs, "followUp", "Final save directive must use deliverAs: 'followUp'");
+	assert.ok(
+		warnMsg.includes("Context compaction is imminent") || warnMsg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		`FollowUp message should instruct final save before compaction, got: ${warnMsg}`,
+	);
+
+	// Test deduplication: subsequent turn_end without save should not duplicate the deep save message
+	const msgCountBefore = userMessages.length;
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({}, mockCtx);
+	}
+	assert.strictEqual(userMessages.length, msgCountBefore, "Subsequent turn_end in same warning window should not spam duplicate warnings");
 
 	// Mark saved when threshold reached
-	compactCalled = false;
-	compactOptions = null;
+	currentTokens = 335000; // >= 333k threshold
 	await tools["quest_mark_saved"].execute("call_saved_mid", {}, null, null, mockCtx);
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [{ toolName: "quest_mark_saved" }] }, mockCtx);
 	}
-	await new Promise((resolve) => setTimeout(resolve, 60));
 
-	assert.strictEqual(compactCalled, true, "Mid-subquest save should trigger compaction");
-	assert.ok(
-		compactOptions && compactOptions.customInstructions && compactOptions.customInstructions.includes("sub-compaction-quest"),
-		`Mid-subquest compaction instructions should name active sub-quest, got: ${compactOptions?.customInstructions}`,
-	);
+	// Verify session_before_compact allows compaction when clean
+	let beforeCompactRes: any;
+	for (const cb of handlers["session_before_compact"] || []) {
+		beforeCompactRes = await cb({}, mockCtx);
+	}
+	assert.notStrictEqual(beforeCompactRes?.cancel, true, "Mid-subquest clean save should allow compaction");
 
 	// 5. Test Post-Compaction Resumption Prompt on session_compact
 	userMessages = [];
@@ -216,18 +207,12 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 	}
 	userMessages = [];
 
-	// Now try to compact via session_before_compact: should cancel AND send deep save request
+	// Now try to compact via session_before_compact: should cancel as a safety gate
 	for (const cb of handlers["session_before_compact"] || []) {
 		const result = await cb({}, mockCtx);
 		assert.strictEqual(result?.cancel, true, "session_before_compact should cancel when save is pending");
 	}
-	assert.ok(userMessages.length > 0, "session_before_compact should alert model to dump context when cancelling");
-	const cancelWarnEntry = userMessages[0];
-	const cancelWarn = typeof cancelWarnEntry.msg === "string" ? cancelWarnEntry.msg : (cancelWarnEntry.msg.text || "");
-	assert.ok(
-		cancelWarn.includes("Context compaction is now being requested") || cancelWarn.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		`Cancel warning should notify about unsaved changes, got: ${cancelWarn}`,
-	);
+	assert.strictEqual(userMessages.length, 0, "session_before_compact must not submit prompts from inside the hook");
 
 	// Clean up
 	await rm(parentQuestPath, { force: true });

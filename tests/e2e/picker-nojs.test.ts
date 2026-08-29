@@ -87,6 +87,8 @@ Deno.test({
     const browser = await chromium.launch();
     const context = await browser.newContext({ javaScriptEnabled: false });
     const page = await context.newPage();
+    let grpTypeRaw = "";
+    let gigTypeRaw = "";
 
     try {
       page.setDefaultNavigationTimeout(15000);
@@ -97,8 +99,8 @@ Deno.test({
       const grpSongTitle = `NoJS Communion ${unique}`;
       const gigSongTitle = `NoJS Entry ${unique}`;
       // Use unique type slugs to avoid collision with leftover songs from previous runs (per_page=10 pagination would hide the unique song among many "communion" rows)
-      const grpTypeRaw = `communion${unique}`;
-      const gigTypeRaw = `entry${unique}`;
+      grpTypeRaw = `communion${unique}`;
+      gigTypeRaw = `entry${unique}`;
       const grpSongId = await createSong(page, grpSongTitle, grpTypeRaw);
       const gigSongId = await createSong(page, gigSongTitle, gigTypeRaw);
 
@@ -175,6 +177,12 @@ Deno.test({
       );
     } finally {
       await browser.close();
+      try {
+        await Deno.remove(`var/song.types/${grpTypeRaw}`, { recursive: true });
+      } catch {}
+      try {
+        await Deno.remove(`var/song.types/${gigTypeRaw}`, { recursive: true });
+      } catch {}
     }
   },
 });

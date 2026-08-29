@@ -160,14 +160,14 @@ Deno.test({
     // ── 6. Cross-module: gig → song page ─────────────────────────────
     // Toggle latin on the gig page; the WASM persists all
     // settings (l/z) via GET /api/song/prefs.
-    for (const name of ["l"]) {
-      await page.locator(`input[type="checkbox"][name="${name}"]`)
-        .evaluate((el) => {
-          (el as unknown as { checked: boolean }).checked = true;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        });
-    }
-    await page.waitForTimeout(600);
+    await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/song/prefs") && res.status() < 400, { timeout: 10000 }).catch(() => null),
+      page.locator('input[type="checkbox"][name="l"]').evaluate((el) => {
+        (el as unknown as { checked: boolean }).checked = true;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }),
+    ]);
+    await page.waitForTimeout(500);
 
     // ── 6.1 Remove URL params and reload (JS enabled): saved prefs must
     // come back. The WASM rewrote the URL to ?l=&z= after the toggles;

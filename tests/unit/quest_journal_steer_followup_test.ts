@@ -19,7 +19,7 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 	const handlers: Record<string, EventCallback[]> = {};
 	const commands: Record<string, any> = {};
 	const tools: Record<string, any> = {};
-	const userMessages: Array<{ msg: any; options?: any }> = [];
+	const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
 	let compactInvocationCount = 0;
 	let lastCompactOptions: any = null;
 
@@ -38,6 +38,9 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 		},
 		sendUserMessage(msg: any, options?: any) {
 			userMessages.push({ msg, options });
+		},
+		sendMessage(msg: any, options?: any) {
+			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
 		},
 	};
 
@@ -103,7 +106,7 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 		"Healthy context must not trigger in-flight steer regardless of tool count",
 	);
 
-	// 3. Warning window records state without message; compaction boundary triggers in-flight steer
+	// 3. Pre-compaction warning window at turn_end issues in-flight save instruction
 	await commands["quest-economy"].handler("333k 30k", mockCtx);
 	currentTokens = 310000; // >= 303k warning threshold
 	userMessages.length = 0;
@@ -113,45 +116,33 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 		await cb({ toolName: "write", input: { path: "mods/song/song.c" } }, mockCtx);
 	}
 
-	// Trigger agent_start for next turn
-	for (const cb of handlers["agent_start"] || []) {
-		await cb({}, mockCtx);
+	// Turn ends in warning window -> requestPreCompactionCheckpoint sends save instruction
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({ toolResults: [{ toolName: "write", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
 
-	// Model is reasoning without calling tools yet: context event fires in warning window
-	for (const cb of handlers["context"] || []) {
-		await cb({ messages: [] }, mockCtx);
-	}
-
-	assert.strictEqual(userMessages.length, 0, "Warning window must NOT inject steer messages");
-
-	// Context reaches compaction threshold (335k >= 333k) - compaction is requested
-	currentTokens = 335000;
-	let cancelRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		cancelRes = await cb({}, mockCtx);
-	}
-	assert.strictEqual(cancelRes?.cancel, true, "session_before_compact must block dirty compaction");
-
-	assert.ok(userMessages.length > 0, "session_before_compact must trigger steer at compaction boundary");
-	const steerEntry = userMessages[userMessages.length - 1];
-	assert.strictEqual(steerEntry.options?.deliverAs, "steer", "In-flight intervention must use deliverAs: 'steer'");
+	assert.ok(userMessages.length > 0, "Warning window at turn_end must trigger follow-up before compaction");
+	const followUpEntry = userMessages[userMessages.length - 1];
+	assert.strictEqual(followUpEntry.options?.deliverAs, "followUp", "In-flight warning must use deliverAs: 'followUp'");
 	assert.ok(
-		steerEntry.msg.includes("Context compaction is now being requested") ||
-			steerEntry.msg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		`Steer message must instruct saving before turn ends, got: ${steerEntry.msg}`,
+		followUpEntry.msg.includes("Context compaction is imminent") ||
+			followUpEntry.msg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		`FollowUp message must instruct saving before compaction, got: ${followUpEntry.msg}`,
 	);
 
 	// 4. In-flight save by the agent: marks journal clean and ready for compaction
 	await tools["quest_mark_saved"].execute("call_saved", { name: rootQuestSlug }, null, null, mockCtx);
 
-	// 5. Turn naturally ends -> compaction triggers at turn_end
-	compactInvocationCount = 0;
+	// 5. Context reaches compaction threshold (335k >= 333k) -> session_before_compact allows compaction
+	currentTokens = 335000; // >= 333k threshold
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
-	await new Promise((r) => setTimeout(r, 60));
-	assert.strictEqual(compactInvocationCount, 1, "Compaction must trigger after verified save on turn_end");
+	let beforeCompactRes: any;
+	for (const cb of handlers["session_before_compact"] || []) {
+		beforeCompactRes = await cb({}, mockCtx);
+	}
+	assert.notStrictEqual(beforeCompactRes?.cancel, true, "session_before_compact must allow compaction after verified save");
 
 	// 6. Post-compaction continuation: session_compact sends followUp
 	userMessages.length = 0;

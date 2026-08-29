@@ -28,10 +28,10 @@ Deno.test("song edit: login → add song → edit title → verify on detail pag
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', originalTitle);
-    await page.click('form[method="POST"] button[type="submit"]');
-
-    // Wait for navigation to /song/<id> and extract the id from the URL
-    await page.waitForURL(`${BASE}/song/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/song\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const url = page.url();
     songId = url.replace(`${BASE}/song/`, "").replace(/\/$/, "");
 

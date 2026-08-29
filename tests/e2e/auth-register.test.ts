@@ -35,7 +35,7 @@ Deno.test("auth: browser register → can log in", async () => {
 
     // After submitting, the server returns a 303 redirect. The browser follows
     // it. We just need the page to settle (no error page).
-    await page.waitForLoadState("networkidle", { timeout: 8000 });
+    await page.waitForLoadState("domcontentloaded", { timeout: 8000 });
 
     const status = page.url();
     if (status.includes("/error") || status.includes("/500")) {

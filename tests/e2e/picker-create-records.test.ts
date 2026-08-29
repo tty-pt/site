@@ -340,6 +340,18 @@ Deno.test({
     } finally {
       await context.close();
       await browser.close();
+      try {
+        for await (const entry of Deno.readDir("var/song.types")) {
+          if (entry.isDirectory && (entry.name.startsWith("genrejazz") || entry.name.startsWith("nojstype") || entry.name.startsWith("keyentertype"))) {
+            await Deno.remove(`var/song.types/${entry.name}`, { recursive: true }).catch(() => {});
+          }
+        }
+        for await (const entry of Deno.readDir("var/song.authors")) {
+          if (entry.isDirectory && (entry.name.startsWith("composertom") || entry.name.startsWith("nojsauthor") || entry.name.startsWith("keytabauthor"))) {
+            await Deno.remove(`var/song.authors/${entry.name}`, { recursive: true }).catch(() => {});
+          }
+        }
+      } catch {}
     }
   },
 });

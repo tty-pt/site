@@ -14,6 +14,7 @@ const BASE = "http://localhost:8080";
 async function clickRowCellNavigates(
   page: import("npm:playwright").Page,
   module: string,
+  useOverlay = false,
 ): Promise<boolean> {
   await page.goto(`${BASE}/${module}/`, { waitUntil: "domcontentloaded" });
   // Live locators only: element handles grabbed via page.$$ go stale
@@ -33,13 +34,18 @@ async function clickRowCellNavigates(
     .getAttribute("href");
   if (!href) throw new Error(`${module}: row link missing`);
 
-  // Click the SECOND cell (not the title link inside cell 1).
-  // The stretched row-action overlay covers the whole row and wins
-  // the hit-test, so Playwright refuses a plain click ("intercepts
-  // pointer events"). Force it: the click lands on the overlay and
-  // navigates — that IS the designed row-navigation behavior.
-  await cells.nth(1).click({ force: true });
-  await page.waitForLoadState("domcontentloaded");
+  const targetPattern = href.replace(/\/$/, "");
+  if (useOverlay) {
+    await Promise.all([
+      page.waitForURL((url) => url.href.includes(targetPattern), { timeout: 10000 }),
+      firstRow.locator("a.hyle-row-action").first().click(),
+    ]);
+  } else {
+    await Promise.all([
+      page.waitForURL((url) => url.href.includes(targetPattern), { timeout: 10000 }),
+      cells.nth(1).click({ force: true }),
+    ]);
+  }
 
   if (!page.url().includes(href.replace(/\/$/, ""))) {
     throw new Error(
@@ -88,7 +94,7 @@ Deno.test({
 
   try {
     page.setDefaultNavigationTimeout(10000);
-    const ok = await clickRowCellNavigates(page, "song");
+    const ok = await clickRowCellNavigates(page, "song", true);
     if (!ok) throw new Error("no song rows to test no-JS navigation on");
   } finally {
     await browser.close();

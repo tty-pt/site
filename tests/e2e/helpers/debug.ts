@@ -5,7 +5,8 @@
  * All output is written to the debug/ directory.
  */
 
-import { chromium, Page } from "npm:playwright";
+import { Page } from "npm:playwright";
+import { getBrowser } from "./browser.ts";
 
 const DEBUG_DIR = "../../debug/tests";
 
@@ -167,8 +168,9 @@ export async function runWithLogging(
   testName: string,
   testFn: (page: Page) => Promise<void>
 ): Promise<void> {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const browser = await getBrowser();
+  const context = await browser.newContext();
+  const page = await context.newPage();
   
   setupRequestLogging(page);
   
@@ -177,6 +179,6 @@ export async function runWithLogging(
       await testFn(page);
     });
   } finally {
-    await browser.close();
+    await context.close().catch(() => {});
   }
 }
