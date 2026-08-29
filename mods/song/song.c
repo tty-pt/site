@@ -523,6 +523,13 @@ void xy_install(void)
 
 	ref_field_register("song.items", "type");
 
+	source_setup(
+	        "song.authors", "name", sizeof(song_author_cache_t),
+	        "var/song.authors", song_author_fields, SONG_AUTHOR_FIELD_COUNT,
+	        0, NULL);
+
+	ref_field_register("song.items", "author");
+
 	source_register_derive(
 	        "song.lyrics_from_data", derive_song_lyrics, NULL);
 

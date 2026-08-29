@@ -16,7 +16,7 @@ typedef struct {
 
 #define LIST_MAX_COLS 32
 #define LIST_MAX_ROWS 256
-#define LIST_MAX_OPTS 256
+#define LIST_MAX_OPTS 1024
 
 typedef struct {
 	char id[64];

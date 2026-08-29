@@ -33,7 +33,7 @@ Deno.test({
       typeName = typesData.rows[0].name;
 
       await page.goto(`${BASE}/song/add`, GOTO);
-      await page.locator('details.hyle-picker-details summary').click();
+      await page.locator('.hyle-picker[data-hyle-picker-key="type"] details summary').click();
 
       const search = page.locator('input[name="pick_q_type"]');
       await search.fill(typeName);
@@ -47,10 +47,10 @@ Deno.test({
       }
 
       await page.locator(`input[type="checkbox"][name="type"][value="${typeId}"]`).check();
-      let valsText = await page.locator('.hyle-picker-values').innerText();
+      let valsText = await page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values').innerText();
       while (!valsText.includes(typeName)) {
         await page.waitForTimeout(100);
-        valsText = await page.locator('.hyle-picker-values').innerText();
+        valsText = await page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values').innerText();
       }
 
       await page.locator('form[method="POST"] input[name="title"]').fill("Omni JS test song " + Date.now());
@@ -63,15 +63,15 @@ Deno.test({
       await page.goto(`${songUrl}/edit`, GOTO);
       const checkboxes = await page.locator('input[name="type"]').evaluateAll((nodes) => nodes.map(n => ({ value: n.value, checked: n.checked })));
       const checkedBoxes = checkboxes.filter(c => c.checked);
-      const editValsText = await page.locator('.hyle-picker-values').innerText().catch(() => "");
+      const editValsText = await page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values').innerText().catch(() => "");
       assert(checkedBoxes.some(c => c.value.toLowerCase() === typeId.toLowerCase() || c.value === typeName) || editValsText.includes(typeName), `expected ${typeId} or ${typeName} to be checked or in picker values on edit page`);
 
       await page.goto(`${BASE}/song/add`, GOTO);
-      await page.locator('details.hyle-picker-details summary').click();
+      await page.locator('.hyle-picker[data-hyle-picker-key="type"] details summary').click();
       
       const initialCount = await page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows input[name="type"]').count();
       
-      await page.locator('.hyle-picker-panel').evaluate((node) => {
+      await page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-panel').evaluate((node) => {
         node.scrollTop = node.scrollHeight;
       });
       
@@ -107,7 +107,7 @@ Deno.test({
       await page.goto(`${BASE}/song/add`, GOTO);
       await page.locator('form[method="POST"] input[name="title"]').fill(uniqueTitle);
       
-      await page.locator('details.hyle-picker-details summary').click();
+      await page.locator('.hyle-picker[data-hyle-picker-key="type"] details summary').click();
       await page.locator('input[name="pick_q_type"]').fill(typeName);
       await Promise.all([
         page.waitForNavigation(),

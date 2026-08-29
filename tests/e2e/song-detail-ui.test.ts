@@ -75,8 +75,21 @@ Deno.test({
     await page.fill('input[name="title"]', songTitle);
 
     // Fill author if the form has it
-    const authorInput = await page.$('input[name="author"], textarea[name="author"]');
-    if (authorInput) await authorInput.fill("Test Author");
+    const authorInput = await page.$('input[type="text"][name="author"], textarea[name="author"]');
+    if (authorInput) {
+      await authorInput.fill("Test Author");
+    } else {
+      const authorPicker = page.locator('.hyle-picker[data-hyle-picker-key="author"]');
+      if (await authorPicker.count() > 0) {
+        await authorPicker.locator('summary').click();
+        const search = authorPicker.locator('input.hyle-picker-search');
+        if (await search.count() > 0) {
+          await search.fill("Test Author");
+          const addBtn = authorPicker.locator('button[data-hyle-picker-add]');
+          if (await addBtn.count() > 0) await addBtn.click();
+        }
+      }
+    }
 
     await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(/\/song\/[^/]+$/, { timeout: 5000 });

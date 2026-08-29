@@ -772,7 +772,8 @@ static int source_http_get_item_json(
 
 	for (size_t i = 0; i < def->field_count; i++) {
 		const hyle_source_field_t *f = &def->fields[i];
-		if (f->type == HYLE_SOURCE_FIELD_MULTI_REFERENCE &&
+		if ((f->type == HYLE_SOURCE_FIELD_MULTI_REFERENCE ||
+		     f->type == HYLE_SOURCE_FIELD_REFERENCE) &&
 		    f->target_source)
 			source_resolve_ref_display(jo, def, f, item_id);
 	}
@@ -895,15 +896,15 @@ static int source_post_handler(int fd, char *body)
 	}
 
 	char id_buf[128] = { 0 };
+	char src[512] = { 0 };
 	source_get_param(body, "id", id_buf, sizeof(id_buf));
+	source_get_param(body, "title", src, sizeof(src));
+	if (!src[0])
+		source_get_param(body, "name", src, sizeof(src));
+	if (!src[0] && def->key_field)
+		source_get_param(body, def->key_field, src, sizeof(src));
 
 	if (!id_buf[0]) {
-		char src[512] = { 0 };
-		source_get_param(body, "title", src, sizeof(src));
-		if (!src[0])
-			source_get_param(body, "name", src, sizeof(src));
-		if (!src[0] && def->key_field)
-			source_get_param(body, def->key_field, src, sizeof(src));
 		if (!src[0])
 			return respond_json_error(fd, 400, "Missing id");
 		axil_slugify(src, strlen(src), id_buf, sizeof(id_buf));
@@ -973,8 +974,24 @@ static int source_post_handler(int fd, char *body)
 		return respond_json_error(fd, 500, "Failed to refresh owner");
 	}
 
-	char resp[256];
-	snprintf(resp, sizeof(resp), "{\"%s\":\"%s\"}", def->key_field, id);
+	const char *display_name = src[0] ? src : id;
+	char *esc_disp = pick_json_escape(display_name);
+	char resp[512];
+	if (def->key_field && strcmp(def->key_field, "id") != 0) {
+		snprintf(
+		        resp, sizeof(resp),
+		        "{\"id\":\"%s\",\"%s\":\"%s\",\"ok\":true}", id,
+		        def->key_field, esc_disp ? esc_disp : id);
+	} else if (src[0]) {
+		snprintf(
+		        resp, sizeof(resp),
+		        "{\"id\":\"%s\",\"title\":\"%s\",\"ok\":true}", id,
+		        esc_disp ? esc_disp : id);
+	} else {
+		snprintf(resp, sizeof(resp), "{\"id\":\"%s\",\"ok\":true}", id);
+	}
+	if (esc_disp)
+		free(esc_disp);
 	return respond_json(fd, 201, resp);
 }
 
@@ -1338,6 +1355,14 @@ static int pick_options_handler(int fd, char *body)
 		d.npage = nopts;
 		d.sel = sel;
 		d.nsel = nsel;
+		int allow_add = 0;
+		buf[0] = '\0';
+		hyle_bud_query_param(qs, "add", buf, sizeof(buf));
+		if (!buf[0])
+			hyle_bud_query_param(qs, "allow_add", buf, sizeof(buf));
+		if (buf[0] == '1' && hyle_source_is_creatable(dataset))
+			allow_add = 1;
+		d.allow_add = allow_add;
 
 		hyle_bud_picker_slots(
 		        &d, pick_panel_buf, sizeof(pick_panel_buf),

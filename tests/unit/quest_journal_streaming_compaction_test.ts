@@ -90,6 +90,11 @@ Deno.test("quest_journal_streaming_compaction: safe message queueing and deferre
 	);
 
 	assert.ok(archiveResult && archiveResult.content[0].text.includes("Archived docs/current/"), "quest_archive must succeed");
+
+	// Post-tool turn_end triggers deferred archive compaction
+	for (const cb of handlers["turn_end"] || []) {
+		await cb({ message: { role: "assistant" }, toolResults: [{ toolName: "quest_archive" }] }, mockCtx);
+	}
 	
 	// Wait a tick for deferred compaction to trigger
 	await new Promise((resolve) => setTimeout(resolve, 60));

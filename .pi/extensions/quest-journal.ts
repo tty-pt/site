@@ -21,35 +21,34 @@
  *
  * Commands
  * --------
- *   /quest <name>      – set active quest (creates docs/current/<name>.md if missing)
+ *   /quest [name]      – set active quest (creates docs/current/<name>.md if missing)
  *   /quest-save        – persist current state now
  *   /quest-refine      – add mid-workflow or post-implementation requirements
  *   /quest-del [name]  – archive (rename to docs/archive/) the current/named quest
  *   /quest-draft <name>– draft a future quest in docs/future/
+ *   /quest-economy     – configure token economy compaction threshold
+ *   /quest-warning     – configure pre-compaction warning margin
+ *   /quest-subquest-threshold – configure sub-quest launch compaction threshold
  *   /quest-status      – show active quest and staleness
  *   /quests            – list docs/current/*.md and docs/future/*.md
+ *   /subquest          – create or plan a sub-quest linked to active parent
  *
  * Auto-behaviour
  * --------------
- *   - `before_agent_start`: injects session awareness + active quest context +
- *     TDD & workflow rules; captures verbatim user prompt; and, if a save is
- *     pending and we haven't asked in a while, reminds the model to refresh the file.
- *   - `turn_end`: after each completed turn, ask the model to update the file;
- *     at >=85% context also instructs save + /compact (auto-compact fires at
- *     contextTokens > contextWindow - reserveTokens).
- *   - `session_before_compact`: block unless the file was saved since the last
- *     compaction -- guarantees persistence before context is lost. Save request
- *     explicitly requires ## Original request to be faithful.
- *   - `session_compact`: record that a compaction happened (next save gate).
- *   - `tool_result` (edit/write on the active file): counts as a save.
- *   - `session_before_switch`: remind to persist before leaving so a parallel
- *     quest is also captured.
+ *   - `before_agent_start`: inspects prompt, auto-creates root quest for substantive
+ *     requests before execution begins, captures user refinements, injects session awareness.
+ *   - `turn_end`: tracks progress/dirty state and arms the pre-compaction warning state when appropriate.
+ *   - `session_before_compact`: performs the explicit final durable-save intervention and blocks
+ *     compaction until the save is verified.
+ *   - `session_compact`: records completed compaction and resumes autonomously.
+ *   - `tool_result`: edits to active quest file count as saves; edits/commands mark state dirty.
+ *   - `session_before_switch`: reminds to persist before leaving.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 const ANSI_SGR = /\u001B\[[0-9;]*m/g;
@@ -108,31 +107,33 @@ const ARCHIVE_DIR = "docs/archive";
 const NOTES_FILE = ".pi/context.md";
 const CUSTOM_TYPE = "quest_journal";
 const LEGACY_CUSTOM_TYPE = "task_journal";
-const MIN_PROMPT_MS = 45_000; // never nag more often than this
-const SAVE_PERCENT = 70; // context-usage % that escalates the reminder
-const COMPACT_WARN_PERCENT = 85; // instruct save + compact when this close to auto-compact
 const PROMPT_MAX_CHARS = 4000;
 const PROMPT_MAX_COUNT = 10;
-const DEFAULT_CEILING_TOKENS = 200_000; // 200K default ceiling
+const DEFAULT_CEILING_TOKENS = 333_000; // 333K default ceiling
 const DEFAULT_PERCENT = 80; // 80% default context percentage
 const DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS = 60_000; // 60K default subquest launch compaction threshold
 const DEFAULT_PRE_COMPACT_WARNING_TOKENS = 30_000; // 30K default pre-compaction warning margin
 
-interface SaveGeneration {
+export interface SaveGeneration {
 	count: number;
 	path: string;
 	hash: string;
 	savedAt: number;
 }
 
-interface StoredState {
+export interface StoredState {
 	active: string | null;
 	saveCount: number;
 	compactCount: number;
 	prompts: string[];
+	refinements?: string[];
 	stack: string[];
 	dirty?: boolean;
 	compactionPending?: boolean;
+	archiveCompactionPending?: string | null;
+	subquestLaunchCompactionPending?: boolean;
+	preCompactionCheckpointPending?: boolean;
+	preCompactionSaveRequestPending?: boolean;
 	saveGeneration?: SaveGeneration | null;
 	lastSavedHash?: string | null;
 	economyTokens?: number | null;
@@ -140,6 +141,11 @@ interface StoredState {
 	warningMarginTokens?: number | null;
 	subquestCompactTokens?: number | null;
 	lastWarnedCompactionTokens?: number | null;
+	lastPromptAt?: number;
+	lastResumePromptAt?: number;
+	lastResumeTarget?: string | null;
+	lastResumeCompactCount?: number;
+	pickerCancelled?: boolean;
 }
 
 const sessionStates = new Map<string, StoredState>();
@@ -155,8 +161,14 @@ function createDefaultState(): StoredState {
 		saveCount: 0,
 		compactCount: 0,
 		prompts: [],
+		refinements: [],
 		stack: [],
 		dirty: false,
+		compactionPending: false,
+		archiveCompactionPending: null,
+		subquestLaunchCompactionPending: false,
+		preCompactionCheckpointPending: false,
+		preCompactionSaveRequestPending: false,
 		saveGeneration: null,
 		lastSavedHash: null,
 		economyTokens: undefined,
@@ -164,6 +176,41 @@ function createDefaultState(): StoredState {
 		warningMarginTokens: undefined,
 		subquestCompactTokens: undefined,
 		lastWarnedCompactionTokens: undefined,
+		lastPromptAt: Date.now(),
+		lastResumePromptAt: 0,
+		lastResumeTarget: null,
+		lastResumeCompactCount: undefined,
+		pickerCancelled: false,
+	};
+}
+
+function snapshotState(ctx?: ExtensionContext): StoredState {
+	const s = getState(ctx);
+	return {
+		active: s.active,
+		saveCount: s.saveCount || 0,
+		compactCount: s.compactCount || 0,
+		prompts: Array.isArray(s.prompts) ? [...s.prompts] : [],
+		refinements: Array.isArray(s.refinements) ? [...s.refinements] : [],
+		stack: Array.isArray(s.stack) ? [...s.stack] : [],
+		dirty: !!s.dirty,
+		compactionPending: !!s.compactionPending,
+		archiveCompactionPending: s.archiveCompactionPending ?? null,
+		subquestLaunchCompactionPending: !!s.subquestLaunchCompactionPending,
+		preCompactionCheckpointPending: !!s.preCompactionCheckpointPending,
+		preCompactionSaveRequestPending: !!s.preCompactionSaveRequestPending,
+		saveGeneration: s.saveGeneration ? { ...s.saveGeneration } : null,
+		lastSavedHash: s.lastSavedHash ?? null,
+		economyTokens: s.economyTokens ?? null,
+		economyPercent: s.economyPercent ?? null,
+		warningMarginTokens: s.warningMarginTokens ?? null,
+		subquestCompactTokens: s.subquestCompactTokens ?? null,
+		lastWarnedCompactionTokens: s.lastWarnedCompactionTokens ?? null,
+		lastPromptAt: s.lastPromptAt ?? Date.now(),
+		lastResumePromptAt: s.lastResumePromptAt ?? 0,
+		lastResumeTarget: s.lastResumeTarget ?? null,
+		lastResumeCompactCount: s.lastResumeCompactCount,
+		pickerCancelled: !!s.pickerCancelled,
 	};
 }
 
@@ -204,9 +251,6 @@ const state = new Proxy({} as StoredState, {
 		return true;
 	},
 });
-
-let lastPromptAt = Date.now();
-let pickerCancelledThisSession = false;
 
 /** Wrap async handlers with session AsyncLocalStorage context */
 function withContext<T extends (...args: any[]) => any>(fn: T): T {
@@ -270,7 +314,6 @@ function parseTokenAmount(val: unknown, defaultVal: number = DEFAULT_CEILING_TOK
 	if (s === "off" || s === "disable" || s === "disabled" || s === "0") return 0;
 	if (s === "default") return defaultVal;
 
-	// Matches "333k", "333 k", "1.5m", "333000", "333000 tokens", "333,000"
 	const cleaned = s.replace(/,/g, "");
 	const match = cleaned.match(/^([\d.]+)\s*([km])?(?:\s*tokens)?$/i);
 	if (!match) return null;
@@ -316,15 +359,13 @@ function getEconomyThreshold(ctx?: ExtensionContext): number {
 	const c = getActiveContext(ctx);
 	const usage = typeof c?.getContextUsage === "function" ? c.getContextUsage() : undefined;
 	const contextWindow = usage?.contextWindow ?? 0;
-	const maxByWindow = contextWindow > 0 ? Math.round(contextWindow * (DEFAULT_PERCENT / 100)) : DEFAULT_CEILING_TOKENS;
 
 	// 1. Explicit state overrides
 	if (typeof state.economyPercent === "number" && state.economyPercent > 0) {
-		const val = contextWindow > 0 ? Math.round((contextWindow * state.economyPercent) / 100) : DEFAULT_CEILING_TOKENS;
-		return Math.min(val, DEFAULT_CEILING_TOKENS);
+		return contextWindow > 0 ? Math.round((contextWindow * state.economyPercent) / 100) : DEFAULT_CEILING_TOKENS;
 	}
 	if (typeof state.economyTokens === "number") {
-		return Math.min(state.economyTokens, maxByWindow);
+		return state.economyTokens;
 	}
 
 	// 2. Environment variables
@@ -332,26 +373,24 @@ function getEconomyThreshold(ctx?: ExtensionContext): number {
 	if (envVal) {
 		const envPct = parsePercentage(envVal);
 		if (envPct !== null && envPct > 0) {
-			const val = contextWindow > 0 ? Math.round((contextWindow * envPct) / 100) : DEFAULT_CEILING_TOKENS;
-			return Math.min(val, DEFAULT_CEILING_TOKENS);
+			return contextWindow > 0 ? Math.round((contextWindow * envPct) / 100) : DEFAULT_CEILING_TOKENS;
 		}
 		const parsedEnvTokens = parseTokenAmount(envVal);
-		if (parsedEnvTokens !== null) return Math.min(parsedEnvTokens, maxByWindow);
+		if (parsedEnvTokens !== null) return parsedEnvTokens;
 	}
 
 	// 3. Settings file
 	const settingsConfig = readSettingsEconomyThreshold();
 	if (settingsConfig) {
 		if (typeof settingsConfig.percent === "number" && settingsConfig.percent > 0) {
-			const val = contextWindow > 0 ? Math.round((contextWindow * settingsConfig.percent) / 100) : DEFAULT_CEILING_TOKENS;
-			return Math.min(val, DEFAULT_CEILING_TOKENS);
+			return contextWindow > 0 ? Math.round((contextWindow * settingsConfig.percent) / 100) : DEFAULT_CEILING_TOKENS;
 		}
 		if (typeof settingsConfig.tokens === "number") {
-			return Math.min(settingsConfig.tokens, maxByWindow);
+			return settingsConfig.tokens;
 		}
 	}
 
-	// 4. Default: 80% of context window, capped at DEFAULT_CEILING_TOKENS (200k)
+	// 4. Default: 80% of context window, capped at DEFAULT_CEILING_TOKENS (333k)
 	if (contextWindow > 0) {
 		const pctValue = Math.round(contextWindow * (DEFAULT_PERCENT / 100));
 		return Math.min(pctValue, DEFAULT_CEILING_TOKENS);
@@ -432,7 +471,7 @@ function getCompactionInstructions(activeQuest: string, tokens: number | null, t
 		return `Economy auto-compaction${tokenLabel} during sub-quest '${activeQuest}' (parent: '${parentName}'). Focus summary on active sub-quest progress, key architectural decisions, modified files, and immediate sub-quest next steps. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, autonomously read docs/current/${activeQuest}.md and proceed with the next step with zero re-research.`;
 	}
 
-	return `Economy auto-compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', key architectural decisions, modified files, and immediate next steps. All deep context and research findings have been permanently persisted to disk in docs/current/${activeQuest}.md. Following compaction, autonomously read docs/current/${activeQuest}.md and proceed with the next step with zero re-research.`;
+	return `Economy auto-compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', key architectural decisions, modified files, and immediate next steps. The latest durable quest state is persisted in docs/current/${activeQuest}.md. Following compaction, autonomously read docs/current/${activeQuest}.md and proceed with the next step with zero re-research.`;
 }
 
 const MAX_QUEST_NAME_DISPLAY_LENGTH = 24;
@@ -447,7 +486,6 @@ function formatQuestHierarchy(active: string | null, stack?: string[], maxNameLe
 	if (!active) return "(none)";
 	if (!stack || stack.length === 0) return truncateQuestName(active, maxNameLength);
 
-	// Clean up duplicate consecutive entries and ensure active is at tail
 	const cleanStack: string[] = [];
 	for (const item of stack) {
 		if (item && (cleanStack.length === 0 || cleanStack[cleanStack.length - 1] !== item)) {
@@ -465,7 +503,6 @@ function formatQuestHierarchy(active: string | null, stack?: string[], maxNameLe
 	const activeTruncated = truncateQuestName(active, maxNameLength);
 
 	if (depth <= 1) return activeTruncated;
-	// In a sub-quest: show only depth then name (e.g. "d2: my-sub-quest", "d3: child-sub-quest")
 	return `d${depth}: ${activeTruncated}`;
 }
 
@@ -475,7 +512,8 @@ function formatQuestHierarchy(active: string | null, stack?: string[], maxNameLe
 
 function persist(pi: ExtensionAPI, ctx?: ExtensionContext) {
 	try {
-		pi.appendEntry<StoredState>(CUSTOM_TYPE, state);
+		const snapshot = snapshotState(ctx);
+		pi.appendEntry<StoredState>(CUSTOM_TYPE, snapshot);
 	} catch {
 		// ephemeral / unsupported session: stay in-memory only
 	}
@@ -520,19 +558,6 @@ function updateUIStatus(ctx?: ExtensionContext) {
 	}
 }
 
-/** Auto-detect active quest from docs/current/ if not explicitly set in session. */
-async function syncActiveQuestFromDisk(pi?: ExtensionAPI, ctx?: ExtensionContext) {
-	if (!state.active) {
-		const current = await listQuestFiles(QUEST_DIR);
-		if (current.length === 1) {
-			state.active = current[0].replace(/\.md$/, "");
-			state.stack = [state.active];
-			if (pi) persist(pi, ctx);
-		}
-	}
-	updateUIStatus(ctx);
-}
-
 /** Rebuild `state` from the latest `quest_journal` (or legacy `task_journal`) entry in the active branch. */
 function reconstruct(ctx: ExtensionContext) {
 	let latest: StoredState | undefined;
@@ -547,9 +572,20 @@ function reconstruct(ctx: ExtensionContext) {
 				saveCount: latest.saveCount || 0,
 				compactCount: latest.compactCount || 0,
 				prompts: Array.isArray(latest.prompts) ? latest.prompts : [],
+				refinements: Array.isArray(latest.refinements) ? latest.refinements : [],
 				stack: Array.isArray(latest.stack) ? latest.stack : (latest.active ? [latest.active] : []),
 				dirty: typeof latest.dirty === "boolean" ? latest.dirty : false,
 				compactionPending: false,
+				archiveCompactionPending: null,
+				subquestLaunchCompactionPending:
+					typeof latest.subquestLaunchCompactionPending === "boolean"
+						? latest.subquestLaunchCompactionPending
+						: false,
+				preCompactionCheckpointPending:
+					typeof latest.preCompactionCheckpointPending === "boolean"
+						? latest.preCompactionCheckpointPending
+						: false,
+				preCompactionSaveRequestPending: false,
 				saveGeneration: latest.saveGeneration || null,
 				lastSavedHash: latest.lastSavedHash || null,
 				economyTokens: typeof latest.economyTokens === "number" ? latest.economyTokens : undefined,
@@ -557,11 +593,15 @@ function reconstruct(ctx: ExtensionContext) {
 				warningMarginTokens: typeof latest.warningMarginTokens === "number" ? latest.warningMarginTokens : undefined,
 				subquestCompactTokens: typeof latest.subquestCompactTokens === "number" ? latest.subquestCompactTokens : undefined,
 				lastWarnedCompactionTokens: typeof latest.lastWarnedCompactionTokens === "number" ? latest.lastWarnedCompactionTokens : undefined,
+				lastPromptAt: typeof latest.lastPromptAt === "number" ? latest.lastPromptAt : Date.now(),
+				lastResumePromptAt: typeof latest.lastResumePromptAt === "number" ? latest.lastResumePromptAt : 0,
+				lastResumeTarget: typeof latest.lastResumeTarget === "string" ? latest.lastResumeTarget : null,
+				lastResumeCompactCount: typeof latest.lastResumeCompactCount === "number" ? latest.lastResumeCompactCount : undefined,
+				pickerCancelled: typeof latest.pickerCancelled === "boolean" ? latest.pickerCancelled : false,
 		  }
 		: createDefaultState();
 	setSessionState(ctx, reconstructedState);
-	lastPromptAt = Date.now();
-	void syncActiveQuestFromDisk(undefined, ctx);
+	updateUIStatus(ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +623,137 @@ function slugify(name: string, maxLen = 80): string {
 		slug = slug.replace(/-+$/, "");
 	}
 	return slug;
+}
+
+function generateSlugFromPrompt(prompt: string, maxLen = 45): string {
+	if (!prompt || typeof prompt !== "string") return "quest";
+
+	// Strip code blocks and backticks
+	let text = prompt.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
+
+	// Strip polite/preamble prefixes
+	text = text.replace(/^(please\s+|can\s+you\s+|could\s+you\s+|help\s+me\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|we\s+need\s+to\s+|let'?s\s+)+/i, "");
+
+	const stopWords = new Set([
+		"a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from",
+		"about", "into", "through", "during", "before", "after", "above", "below",
+		"and", "or", "but", "so", "as", "is", "are", "was", "were", "be", "been",
+		"being", "have", "has", "had", "do", "does", "did", "can", "could", "should",
+		"would", "will", "shall", "may", "might", "must", "that", "this", "these",
+		"those", "my", "your", "our", "their", "it", "its"
+	]);
+
+	const rawWords = text
+		.toLowerCase()
+		.replace(/[^a-z0-9\s-_]/g, " ")
+		.split(/\s+/)
+		.filter((w) => w.length > 1 && !stopWords.has(w));
+
+	const selectedWords = rawWords.slice(0, 6);
+	let slug = selectedWords.join("-");
+
+	if (!slug || slug.length < 3) {
+		slug = slugify(prompt, maxLen);
+	}
+	if (!slug) {
+		slug = `quest-${Date.now().toString(36)}`;
+	}
+
+	return slugify(slug, maxLen);
+}
+
+function shouldStartPersistentQuest(prompt: string): boolean {
+	if (!prompt || typeof prompt !== "string") return false;
+	const trimmed = prompt.trim();
+	if (trimmed.length < 10) return false;
+	if (trimmed.startsWith("/")) return false;
+
+	const lower = trimmed.toLowerCase();
+
+	// Pure conversational greetings / acknowledgments / short remarks
+	const conversationalOnly = /^(hi|hello|hey|greetings|thanks|thank you|thx|ok|okay|k|yes|no|yep|nope|sure|sounds good|looks good|lgtm|continue|go ahead|proceed|approved|got it|cool|nice|great|good|fine|done|quit|exit)[.!?\s]*$/i;
+	if (conversationalOnly.test(lower)) return false;
+
+	// Simple non-action factual / informational queries
+	const isInformationalQuery =
+		/^(what is|what are|what does|where is|where are|who is|how do i|how does|how can i|can you explain|explain to me|tell me about|is there a|are there any|why is|why does|why do)\b/i.test(lower);
+
+	if (isInformationalQuery && trimmed.length < 150) {
+		const hasActionKeywords = /\b(implement|build|refactor|fix|debug|rewrite|migrate|redesign|create feature|add feature)\b/i.test(lower);
+		if (!hasActionKeywords) return false;
+	}
+
+	// Syntax questions, quick one-liners
+	if (/^(is this valid|is this correct|check this syntax|how to write|how do i write)\b/i.test(lower) && trimmed.length < 120) {
+		return false;
+	}
+
+	// Explicit action keywords that indicate substantive work
+	const actionKeywords = [
+		"implement", "build", "refactor", "fix", "investigate", "debug",
+		"migrate", "redesign", "analyze", "create", "add", "update",
+		"modify", "rewrite", "optimize", "integrate", "support",
+		"resolve", "patch", "architecture", "benchmark", "cleanup",
+		"clean up", "develop", "repertoire", "feature", "test suite",
+		"e2e", "passkey", "auth", "picker", "endpoint", "handler"
+	];
+
+	for (const kw of actionKeywords) {
+		const regex = new RegExp(`\\b${kw.replace(/\s+/g, "\\s+")}\\b`, "i");
+		if (regex.test(lower)) return true;
+	}
+
+	// Substantial multi-word prompt describing requirements or tasks
+	const words = trimmed.split(/\s+/).filter(Boolean);
+	if (trimmed.length >= 50 && words.length >= 6) {
+		return true;
+	}
+
+	return false;
+}
+
+async function ensureRootQuestForPrompt(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	prompt: string,
+): Promise<boolean> {
+	if (state.active) return false;
+	const trimmed = prompt.trim();
+	if (!trimmed) return false;
+
+	const slug = generateSlugFromPrompt(trimmed, 45);
+	if (!slug) return false;
+
+	await mkdir(QUEST_DIR, { recursive: true });
+	const path = questPath(slug);
+	const futurePath = `${FUTURE_DIR}/${slug}.md`;
+
+	if (await fileExists(path)) {
+		// Existing quest on disk
+	} else if (await fileExists(futurePath)) {
+		await rename(futurePath, path);
+		if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
+	} else {
+		const template = QUEST_TEMPLATE(slug, trimmed, "", trimmed, []);
+		await writeFile(path, template, "utf8");
+	}
+
+	await cleanDraftIfExists(slug, ctx);
+
+	state.pickerCancelled = false;
+	state.active = slug;
+	state.stack = [slug];
+	state.prompts = [trimmed];
+	state.refinements = [];
+	state.dirty = false;
+	state.saveGeneration = null;
+	state.lastSavedHash = null;
+
+	await verifyAndMarkSaved(pi, ctx, slug);
+	persist(pi, ctx);
+	updateUIStatus(ctx);
+
+	return true;
 }
 
 const questPath = (slug: string | null) => (slug ? `${QUEST_DIR}/${slug}.md` : "");
@@ -625,6 +796,48 @@ function parseMarkdownSections(content: string): Map<string, MarkdownSection> {
 				body,
 				raw: `## ${currentHeading}\n${body}`,
 			});
+
+			if (currentLevel <= 2 && body.includes("###")) {
+				const subLines = body.split(/\r?\n/);
+				let subHeading: string | null = null;
+				let subLevel = 0;
+				let subBodyLines: string[] = [];
+				let subInCode = false;
+
+				const flushSub = () => {
+					if (subHeading !== null) {
+						const subNorm = subHeading.trim().toLowerCase();
+						const subBody = subBodyLines.join("\n").trim();
+						if (!sections.has(subNorm)) {
+							sections.set(subNorm, {
+								heading: subHeading,
+								normalized: subNorm,
+								level: subLevel,
+								body: subBody,
+								raw: `### ${subHeading}\n${subBody}`,
+							});
+						}
+					}
+					subBodyLines = [];
+				};
+
+				for (const sLine of subLines) {
+					if (/^\s*(```|~~~)/.test(sLine)) {
+						subInCode = !subInCode;
+						subBodyLines.push(sLine);
+						continue;
+					}
+					const subMatch = sLine.match(/^(#{3,6})\s+(.+)$/);
+					if (subMatch && !subInCode) {
+						flushSub();
+						subLevel = subMatch[1].length;
+						subHeading = subMatch[2].trim();
+					} else {
+						subBodyLines.push(sLine);
+					}
+				}
+				flushSub();
+			}
 		}
 		currentBodyLines = [];
 	};
@@ -636,7 +849,7 @@ function parseMarkdownSections(content: string): Map<string, MarkdownSection> {
 			continue;
 		}
 
-		const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+		const headingMatch = line.match(/^(#{1,2})\s+(.+)$/);
 		if (headingMatch && !inCodeBlock) {
 			flush();
 			currentLevel = headingMatch[1].length;
@@ -686,7 +899,6 @@ async function linkSubQuestInParent(parentSlug: string, childSlug: string, descr
 		let content = await readFile(targetPath, "utf8");
 		const linkEntry = description ? `- [ ] [[${childSlug}]] - ${description}` : `- [ ] [[${childSlug}]]`;
 
-		// If child already referenced in the file, don't duplicate
 		if (content.includes(`[[${childSlug}]]`)) return true;
 
 		const sections = parseMarkdownSections(content);
@@ -775,13 +987,11 @@ function projectGuidelines(): string | null {
 			const content = readFileSync(file, "utf8").trim();
 			if (!content) continue;
 
-			// Look for a Guidelines / Rules / Invariants section
 			const match = content.match(/(##\s+(?:Guidelines|Rules|Invariants|Mandatory Guidelines)[\s\S]*?)(?=\n##\s+|$)/i);
 			if (match && match[1].trim()) {
 				return `### Project Guidelines (auto-detected from \`${file}\`)\n\n${match[1].trim()}`;
 			}
 
-			// Fallback: if file is small (< 2500 chars), return full file content
 			if (content.length <= 2500) {
 				return `### Project Guidelines (auto-detected from \`${file}\`)\n\n${content}`;
 			}
@@ -792,15 +1002,10 @@ function projectGuidelines(): string | null {
 	return null;
 }
 
-/** Context usage as a number 0..100, 0 if unknown. */
 function usagePercent(ctx: ExtensionContext): number {
 	const u = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
 	if (u && typeof u.percent === "number" && Number.isFinite(u.percent)) return u.percent;
 	return 0;
-}
-
-function withinCooldown(): boolean {
-	return Date.now() - lastPromptAt < MIN_PROMPT_MS;
 }
 
 interface MarkdownBlock {
@@ -859,7 +1064,7 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
 			continue;
 		}
 
-		const match = line.match(/^(##\s+)(.+)$/);
+		const match = line.match(/^(#{1,6}\s+)(.+)$/);
 		if (match && !inCodeBlock) {
 			flush();
 			hasSeenFirstSection = true;
@@ -879,12 +1084,24 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
 const SECTION_ALIASES: Record<string, string[]> = {
 	"goal": ["goal", "goals", "goals & scope"],
 	"original request": ["original request", "original user request", "request"],
+	"parent quest": ["parent quest", "parent", "parentquest"],
 	"current status": ["current status", "status"],
-	"in-depth analysis & findings": ["in-depth analysis & findings", "findings", "analysis & findings", "research / findings", "research & findings"],
+	"execution snapshot": ["execution snapshot", "execution state", "snapshot", "state"],
+	"execution state": ["execution state"],
+	"build & run commands": ["build & run commands", "build & run", "commands"],
+	"in-depth analysis & findings": ["in-depth analysis & findings", "important findings", "findings", "analysis & findings", "research / findings", "research & findings", "important discoveries", "discoveries"],
 	"decisions made": ["decisions made", "decisions"],
-	"files touched": ["files touched", "touched files", "files modified", "files"],
+	"constraints & rules": ["constraints & rules", "constraints", "rules"],
+	"files examined": ["files examined", "examined files"],
+	"files touched": ["files touched", "files modified", "touched files", "modified files", "files"],
+	"test / build status": ["test / build status", "tdd & quality checklist", "test status", "build & test status"],
+	"detailed multi-stage execution plan": ["detailed multi-stage execution plan", "execution plan", "plan"],
+	"acceptance criteria & polish checklist": ["acceptance criteria & polish checklist", "acceptance criteria", "polish checklist"],
+	"sub-quests": ["sub-quests", "subquests", "sub quests"],
+	"quest refinements & user feedback loops": ["quest refinements & user feedback loops", "refinements", "user refinements", "feedback loops"],
 	"remaining work": ["remaining work", "remaining tasks", "remaining", "checklist"],
-	"next recommended step": ["next recommended step", "next step", "next steps"],
+	"next recommended step": ["next recommended step", "next action", "next step", "next steps", "exact next action"],
+	"resume prompt": ["resume prompt", "resume context", "resume briefing"],
 };
 
 function matchCanonicalKey(normalizedTitle: string): string | null {
@@ -919,12 +1136,10 @@ function spliceMarkdownSections(originalContent: string, updates: Map<string, st
 			const newBody = updates.get(block.normalizedTitle)!.trim();
 			renderedBlocks.push(`${block.heading}\n${newBody}`);
 		} else {
-			// 100% PRESERVE unmanaged section exactly as-is!
 			renderedBlocks.push(`${block.heading}\n${block.body.trim()}`);
 		}
 	}
 
-	// Any requested updates that were not present in the original document:
 	const uninsertedKeys = Array.from(updates.keys()).filter(
 		(k) => !usedCanonicalKeys.has(k) && !usedCanonicalKeys.has(matchCanonicalKey(k) || "")
 	);
@@ -945,7 +1160,9 @@ function spliceMarkdownSections(originalContent: string, updates: Map<string, st
 				(b) =>
 					b.startsWith("## Remaining work") ||
 					b.startsWith("## Next recommended step") ||
-					b.startsWith("## Resume prompt")
+					b.startsWith("## Next action") ||
+					b.startsWith("## Resume prompt") ||
+					b.startsWith("## Resume context")
 			);
 			if (insertIdx >= 0) {
 				renderedBlocks.splice(insertIdx, 0, ...newSections);
@@ -993,7 +1210,19 @@ async function verifyAndMarkSaved(
 		};
 	}
 
-	state.saveCount += 1;
+	const isSameAsLastSave =
+		state.saveGeneration &&
+		state.saveGeneration.path === p &&
+		state.saveGeneration.hash === fp.hash &&
+		state.saveCount > state.compactCount;
+
+	if (isSameAsLastSave && !state.dirty) {
+		state.lastPromptAt = Date.now();
+		updateUIStatus(ctx);
+		return { success: true, hash: fp.hash, count: state.saveCount };
+	}
+
+	state.saveCount = Math.max(state.saveCount + 1, state.compactCount + 1);
 	state.lastSavedHash = fp.hash;
 	state.saveGeneration = {
 		count: state.saveCount,
@@ -1002,7 +1231,9 @@ async function verifyAndMarkSaved(
 		savedAt: Date.now(),
 	};
 	state.dirty = false;
-	lastPromptAt = Date.now();
+	state.preCompactionCheckpointPending = false;
+	state.preCompactionSaveRequestPending = false;
+	state.lastPromptAt = Date.now();
 	persist(pi, ctx);
 	updateUIStatus(ctx);
 
@@ -1026,7 +1257,13 @@ function getLifecycleState(ctx?: ExtensionContext): QuestLifecycleState {
 		const threshold = getEconomyThreshold(c);
 		const tokens = calculateCurrentTokens(c);
 		const warningMargin = getWarningMargin();
-		if (threshold > 0 && tokens !== null && tokens >= Math.max(0, threshold - warningMargin) && !compactionReady()) {
+		if (
+			threshold > 0 &&
+			tokens !== null &&
+			tokens >= Math.max(0, threshold - warningMargin) &&
+			tokens < threshold &&
+			state.dirty
+		) {
 			return QuestLifecycleState.PRE_COMPACT_DUMP_PENDING;
 		}
 	}
@@ -1037,19 +1274,80 @@ function getLifecycleState(ctx?: ExtensionContext): QuestLifecycleState {
 	return QuestLifecycleState.ACTIVE_CLEAN;
 }
 
+function shouldRequestPreCompactionCheckpoint(
+	ctx?: ExtensionContext,
+): boolean {
+	if (!state.active) return false;
+	if (state.compactionPending) return false;
+	if (state.preCompactionCheckpointPending) return false;
+
+	const c = getActiveContext(ctx);
+	if (!c) return false;
+
+	const threshold = getEconomyThreshold(c);
+	const tokens = calculateCurrentTokens(c);
+	const warningMargin = getWarningMargin();
+
+	if (threshold <= 0 || tokens === null) return false;
+
+	const warningThreshold = Math.max(0, threshold - warningMargin);
+
+	// Only fire inside the warning window, not after the actual threshold.
+	if (tokens < warningThreshold || tokens >= threshold) return false;
+
+	// If the quest is already clean and compaction-ready, no pre-compaction dump needed.
+	if (compactionReady() && !state.dirty) return false;
+
+	// A warning has already been issued during this compaction cycle.
+	if (typeof state.lastWarnedCompactionTokens === "number") {
+		return false;
+	}
+
+	return true;
+}
+
+function requestPreCompactionCheckpoint(
+	pi: ExtensionAPI,
+	ctx?: ExtensionContext,
+): boolean {
+	if (!shouldRequestPreCompactionCheckpoint(ctx)) {
+		return false;
+	}
+
+	const c = getActiveContext(ctx);
+	if (!c || !state.active) return false;
+
+	const tokens = calculateCurrentTokens(c);
+	if (tokens === null) return false;
+
+	state.lastWarnedCompactionTokens = tokens;
+	state.preCompactionCheckpointPending = true;
+	persist(pi, ctx);
+
+	if (ctx?.hasUI) {
+		ctx.ui.notify(
+			`Quest-journal: context approaching compaction threshold for '${state.active}'.`,
+			"info",
+		);
+	}
+
+	return true;
+}
+
 function checkAndTriggerEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionContext, reason = "economy"): boolean {
 	const c = getActiveContext(ctx);
 	if (!c) return false;
 	if (!state.active) return false;
 	if (state.compactionPending) return false;
-	if (!compactionReady()) return false;
 	const compactFn = c.compact;
 	if (typeof compactFn !== "function") return false;
 
 	const threshold = getEconomyThreshold(c);
 	const tokens = calculateCurrentTokens(c);
 
-	if (threshold > 0 && tokens !== null && tokens >= threshold) {
+	const isCompactionDue = threshold > 0 && tokens !== null && tokens >= threshold;
+
+	if (isCompactionDue) {
 		const activeSlug = state.active || "";
 		const targetSessionId = getSessionId(c);
 		state.compactionPending = true;
@@ -1059,13 +1357,12 @@ function checkAndTriggerEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionConte
 				try {
 					compactFn({
 						customInstructions: getCompactionInstructions(activeSlug, tokens, threshold),
-						onComplete: () => {
-							sessionState.compactionPending = false;
-							if (c.hasUI) c.ui.notify(`Economy auto-compaction completed at ${formatTokens(tokens)} tokens.`, "info");
-							updateUIStatus(c);
-						},
+						onComplete: () => {},
 						onError: (err: any) => {
 							sessionState.compactionPending = false;
+							sessionState.lastWarnedCompactionTokens = null;
+							sessionState.preCompactionCheckpointPending = false;
+							sessionState.preCompactionSaveRequestPending = false;
 							const msg = err?.message || String(err);
 							if (msg.includes("Nothing to compact") || msg.includes("Already compacted") || msg.includes("cancelled") || msg.includes("session too small")) {
 								sessionState.compactCount = sessionState.saveCount;
@@ -1076,41 +1373,234 @@ function checkAndTriggerEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionConte
 					});
 				} catch (err: any) {
 					sessionState.compactionPending = false;
+					sessionState.lastWarnedCompactionTokens = null;
+					sessionState.preCompactionCheckpointPending = false;
+					sessionState.preCompactionSaveRequestPending = false;
 					logError("Economy compaction scheduling failed", err, c);
 				}
 			});
 		}, 50);
-		lastPromptAt = Date.now();
+		state.lastPromptAt = Date.now();
 		return true;
 	}
 
 	return false;
 }
 
-/** A fresh save of the quest file -- increments the save gate so compaction may run. */
-function markSaved(pi: ExtensionAPI) {
-	state.saveCount += 1;
-	lastPromptAt = Date.now();
-	persist(pi);
+function checkAndTriggerDeferredOrEconomyCompaction(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
+	const c = getActiveContext(ctx);
+	if (!c) return false;
+	if (state.pickerCancelled) return false;
+	if (state.compactionPending) return false;
+	if (typeof c.compact !== "function") return false;
+
+	// 1. Check if archive compaction was requested (e.g. sub-quest finished and returning to parent)
+	if (state.archiveCompactionPending) {
+		const targetName = state.archiveCompactionPending;
+		state.compactionPending = true;
+		persist(pi, c);
+
+		const targetSessionId = getSessionId(c);
+		const parentName = state.active;
+		const instructions = parentName
+			? `Sub-quest '${targetName}' completed and archived. Returning to parent quest '${parentName}'. Focus summary on key architecture decisions, completed sub-quest work, and remaining parent roadmap. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, autonomously read docs/current/${parentName}.md and proceed with the next parent task with zero pause and zero re-research.`
+			: `Quest '${targetName}' completed and archived. Focus summary on key architecture decisions, completed work, and remaining roadmap.`;
+
+		setTimeout(() => {
+			asyncContext.run(c, () => {
+				const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
+				try {
+					c.compact!({
+						customInstructions: instructions,
+						onComplete: () => {},
+						onError: (err: any) => {
+							sessionState.compactionPending = false;
+							sessionState.archiveCompactionPending = null;
+							sessionState.preCompactionCheckpointPending = false;
+							sessionState.preCompactionSaveRequestPending = false;
+							const msg = err?.message || String(err);
+							if (msg.includes("Nothing to compact") || msg.includes("Already compacted") || msg.includes("cancelled") || msg.includes("session too small")) {
+								if (parentName) {
+									sendPostCompactionResumePrompt(pi, parentName, false, c);
+								}
+								return;
+							}
+							if (c.hasUI) c.ui.notify(`Post-archive compaction failed: ${msg}`, "error");
+							if (parentName) {
+								sendPostCompactionResumePrompt(pi, parentName, false, c);
+							}
+						},
+					});
+				} catch (err: any) {
+					sessionState.compactionPending = false;
+					sessionState.archiveCompactionPending = null;
+					sessionState.preCompactionCheckpointPending = false;
+					sessionState.preCompactionSaveRequestPending = false;
+					logError("Compaction error following archive", err, c);
+					if (parentName) {
+						sendPostCompactionResumePrompt(pi, parentName, false, c);
+					}
+				}
+			});
+		}, 50);
+		return true;
+	}
+
+	// 2. Check if sub-quest launch compaction is pending
+	if (state.subquestLaunchCompactionPending) {
+		const childName = state.active;
+		const subLaunchThreshold = getSubquestCompactThreshold();
+		const tokens = calculateCurrentTokens(c);
+
+		if (childName && compactionReady(childName) && subLaunchThreshold > 0 && tokens !== null && tokens >= subLaunchThreshold) {
+			state.compactionPending = true;
+			persist(pi, c);
+
+			const isSubQuest = Array.isArray(state.stack) && state.stack.length > 1;
+			const parentName = isSubQuest ? state.stack[state.stack.length - 2] : null;
+			const instructions = parentName
+				? `Launching sub-quest '${childName}' (parent: '${parentName}'). Focus summary on parent quest status, key architectural decisions, and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, autonomously read docs/current/${childName}.md and execute the sub-quest with zero re-research.`
+				: `Launching sub-quest '${childName}'. Focus summary on key architectural decisions and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, autonomously read docs/current/${childName}.md and execute the sub-quest with zero re-research.`;
+
+			const targetSessionId = getSessionId(c);
+			setTimeout(() => {
+				asyncContext.run(c, () => {
+					const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
+					try {
+						c.compact!({
+							customInstructions: instructions,
+							onComplete: () => {},
+							onError: (err: any) => {
+								sessionState.compactionPending = false;
+								sessionState.subquestLaunchCompactionPending = false;
+								sessionState.preCompactionCheckpointPending = false;
+								sessionState.preCompactionSaveRequestPending = false;
+								const msg = err?.message || String(err);
+								if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
+									if (c.hasUI) c.ui.notify(`Sub-quest launch compaction failed: ${msg}`, "error");
+								}
+							},
+						});
+					} catch (err: any) {
+						sessionState.compactionPending = false;
+						sessionState.subquestLaunchCompactionPending = false;
+						sessionState.preCompactionCheckpointPending = false;
+						sessionState.preCompactionSaveRequestPending = false;
+						logError("Sub-quest launch compaction scheduling failed", err, c);
+					}
+				});
+			}, 50);
+			return true;
+		}
+	}
+
+	// 3. Normal Economy Compaction
+	if (!state.active) return false;
+	const threshold = getEconomyThreshold(c);
+	const tokens = calculateCurrentTokens(c);
+
+	if (threshold > 0 && tokens !== null && tokens >= threshold) {
+		return checkAndTriggerEconomyCompaction(pi, c);
+	}
+
+	return false;
 }
 
-/** True when compaction should be allowed: at least one save since the last compaction. */
-function compactionReady(): boolean {
-	return state.saveCount > state.compactCount;
+/** A fresh save of the quest file -- increments the save gate so compaction may run. */
+async function markSaved(pi: ExtensionAPI, ctx?: ExtensionContext) {
+	await verifyAndMarkSaved(pi, ctx);
 }
+
+/** True when compaction should be allowed: active quest has a fresh save matching its current path since last compaction. */
+function compactionReady(expectedSlug?: string): boolean {
+	const target = expectedSlug || state.active;
+	if (!target) return false;
+	const p = questPath(target);
+	const hasValidGen = Boolean(state.saveGeneration && state.saveGeneration.path === p);
+	const hasSaveSinceCompact = state.saveCount > state.compactCount;
+	return hasValidGen && hasSaveSinceCompact && !state.dirty;
+}
+
+const SYNTHETIC_PROMPT_PREFIXES = [
+	"/quest",
+	"/subquest",
+	"/sub-quest",
+	"/quest-save",
+	"/quest-refine",
+	"/quest-del",
+	"/quest-draft",
+	"/quest-economy",
+	"/quest-warning",
+	"/quest-subquest-threshold",
+	"/quest-status",
+	"/quests",
+	"quest-journal:",
+	"quest-journal economy:",
+	"quest-journal in-flight steer:",
+	"quest-journal in-flight budget steer:",
+	"⚡",
+	"[questjournal]",
+	"**post-compaction",
+	"⚡ **post-compaction",
+	"now working on quest",
+	"now working on sub-quest",
+	"finish current work, then update that file",
+	"before context compaction resets",
+	"original user request(s) for this quest",
+	"original user request --",
+	"sub-quest '",
+	"quest '",
+	"economy auto-compaction",
+	"turn has performed",
+	"turn 1 protocol",
+	"mandatory upfront research",
+	"mandatory tdd & quality",
+	"context is approaching the configured compaction threshold",
+	"context compaction is now being requested",
+	"context compaction is imminent",
+];
+
+const INTERNAL_MESSAGE_PREFIX = "[QuestJournal internal]";
 
 function shouldCapturePrompt(text: string): boolean {
 	const t = text.trim();
-	if (!t) return false;
-	if (t.startsWith("/quest") || t.startsWith("/subquest")) return false;
-	if (t.startsWith("Quest-journal:")) return false;
-	if (t.length < 2) return false;
+	if (!t || t.length < 2) return false;
+	if (t.startsWith("/")) return false;
+	const lower = t.toLowerCase();
+	if (lower.startsWith(INTERNAL_MESSAGE_PREFIX.toLowerCase())) return false;
+	for (const p of SYNTHETIC_PROMPT_PREFIXES) {
+		if (lower.startsWith(p)) return false;
+	}
+	if (lower.includes("post-compaction autonomous resumption directive")) return false;
+	if (lower.includes("pre-compaction exhaustive context preservation protocol")) return false;
+	if (lower.includes("context is approaching the configured compaction threshold")) return false;
+	if (lower.includes("context compaction is now being requested")) return false;
+	if (lower.includes("context compaction is imminent")) return false;
+	if (lower.includes("final exhaustive durable state save")) return false;
 	return true;
 }
 
+function originalRequestText(): string {
+	if (!state.prompts || state.prompts.length === 0) {
+		return "(none captured yet -- this is the first substantive request; use the current user message)";
+	}
+	return state.prompts[0];
+}
+
+function refinementsBlock(): string {
+	if (!state.refinements || state.refinements.length === 0) {
+		return "(none captured yet)";
+	}
+	return state.refinements.map((r, i) => `${i + 1}. ${r}`).join("\n\n");
+}
+
 function promptsBlock(): string {
-	if (!state.prompts || state.prompts.length === 0) return "(none captured yet -- this is the first substantive request; use the current user message)";
-	return state.prompts.map((p, i) => `${i + 1}. ${p}`).join("\n\n---\n\n");
+	const orig = originalRequestText();
+	if (!state.refinements || state.refinements.length === 0) {
+		return orig;
+	}
+	const refs = state.refinements.map((r, i) => `Refinement ${i + 1}: ${r}`).join("\n");
+	return `Original Request:\n${orig}\n\nUser Refinements:\n${refs}`;
 }
 
 function safeSendUserMessage(pi: ExtensionAPI, text: string, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; expandPromptTemplates?: boolean }) {
@@ -1121,28 +1611,88 @@ function safeSendUserMessage(pi: ExtensionAPI, text: string, options?: { deliver
 			pi.sendUserMessage(text);
 		}
 	} catch (err: any) {
-		try {
-			pi.sendUserMessage(text, { deliverAs: "followUp" });
-		} catch (fallbackErr: any) {
-			logError("Failed to send user message to agent", fallbackErr);
-		}
+		logError("Failed to send user message to agent", err);
 	}
+}
+
+function sendInternalAgentMessage(
+	pi: ExtensionAPI,
+	text: string,
+	deliverAs: "steer" | "followUp" | "nextTurn" = "followUp",
+) {
+	const marked = text.startsWith(INTERNAL_MESSAGE_PREFIX) ? text : `${INTERNAL_MESSAGE_PREFIX}\n${text}`;
+	safeSendUserMessage(pi, marked, { deliverAs });
+}
+
+function sendInternalUserMessage(pi: ExtensionAPI, text: string, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; expandPromptTemplates?: boolean }) {
+	const marked = text.startsWith(INTERNAL_MESSAGE_PREFIX) ? text : `${INTERNAL_MESSAGE_PREFIX}\n${text}`;
+	safeSendUserMessage(pi, marked, options);
 }
 
 /** Queue a user message asking the model to update the quest file with standard prompt. */
 function sendSaveRequest(pi: ExtensionAPI, message: string) {
 	if (!state.active) return;
-	const promptReminder = `Original user request(s) for this quest -- keep VERBATIM (or very faithful if truncated) under ## Original request in the quest file. This section MUST be present and faithful; do not summarize away details:\n${promptsBlock()}`;
-	const text = `${message}\n\n${promptReminder}\n\nActive quest file: \`${questPath(state.active)}\`\n\nFinish current work, then update that file with the latest state (goal, progress, decisions, files touched, findings, TDD & Quality checklist, remaining work, next step). The file MUST contain a ## Original request section with the verbatim/faithful user request(s) above. Ensure TDD (tests written first), build/run verification, clean code (no debug artifacts), and full test suite passing are checked off. Make it complete enough to resume without re-research, then reply with a one-line confirmation.`;
-	safeSendUserMessage(pi, text);
+	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
+		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
+	}`;
+	const text = `${message}\n\n${promptReminder}\n\nActive quest file: \`${questPath(state.active)}\`\n\nUpdate that file with the latest state (goal, progress, decisions, files touched, findings, Test / Build Status, remaining work, next step). Ensure external working memory is updated accurately, then call \`quest_mark_saved\`.`;
+	sendInternalAgentMessage(pi, text, "followUp");
 }
 
-/** Queue a user message asking the model to perform an exhaustive context dump before compaction. */
-function sendDeepSaveRequest(pi: ExtensionAPI, message: string) {
+/** Queue a user message asking the model to perform an exhaustive execution snapshot before compaction. */
+function sendDeepSaveRequest(pi: ExtensionAPI, reason?: string, deliverAs: "steer" | "followUp" = "steer") {
 	if (!state.active) return;
-	const promptReminder = `Original user request(s) for this quest -- keep VERBATIM (or very faithful if truncated) under ## Original request in the quest file:\n${promptsBlock()}`;
-	const text = `${message}\n\n${promptReminder}\n\nActive quest file: \`${questPath(state.active)}\`\n\n**PRE-COMPACTION EXHAUSTIVE CONTEXT PRESERVATION PROTOCOL**:\nBefore context compaction resets working memory, update \`${questPath(state.active)}\` with an exhaustive dump so the next iteration requires ZERO re-research:\n1. ## Original request: Keep user prompts verbatim.\n2. ## Current Status & Progress: Complete checklist of what's done, in progress, or pending.\n3. ## In-Depth Analysis & Findings: All technical findings, root cause analysis, architecture discoveries, data flows, exact function signatures, and explored trade-offs.\n4. ## Files touched: Complete list of touched and examined files.\n5. ## Decisions made: Every architectural and design decision with rationale.\n6. ## Sub-Quests: Current status of all sub-quests and parent links.\n7. ## Remaining work: Exact actionable checklist of remaining tasks.\n8. ## Resume prompt: A comprehensive multi-paragraph briefing giving the next agent iteration complete context so it resumes seamlessly with ZERO re-research.\n\nEnsure build/run verification, clean code (no debug artifacts), and tests are up to date. Once written, call \`quest_mark_saved\`.`;
-	safeSendUserMessage(pi, text);
+	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
+		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
+	}`;
+	const prefix = reason ? `${reason}\n\n` : "";
+	const text = `${prefix}⚡ Context compaction is now being requested.
+
+Before the current context is discarded, perform a FINAL EXHAUSTIVE DURABLE STATE SAVE.
+
+Review the work performed during this context and update:
+
+\`${questPath(state.active)}\`
+
+so that a fresh agent context can continue the user's objective without reconstructing lost reasoning.
+
+${promptReminder}
+
+The quest file MUST accurately contain, as applicable:
+
+- Original Request
+- Current Status
+- Objective
+- Completed Work
+- In-Progress Work
+- Important Discoveries / Research Findings
+- Architecture / Data Flow
+- Decisions and Rationale
+- Constraints and User Requirements
+- Files Examined
+- Files Modified
+- Test / Build Status
+- Failed Approaches and What They Established
+- Known Problems / Uncertainties
+- Remaining Work
+- EXACT NEXT ACTION
+- Resume Context
+
+Do not merely append a generic summary.
+
+Correct stale information.
+
+Preserve important existing information.
+
+Do not omit important information because it was already mentioned earlier in the conversation.
+
+The \`EXACT NEXT ACTION\` must be concrete enough for a fresh agent to execute immediately.
+
+After updating the quest file, call \`quest_mark_saved\` so the save can be verified.
+
+Do not wait for the user after saving.`;
+
+	sendInternalAgentMessage(pi, text, deliverAs);
 }
 
 function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
@@ -1166,7 +1716,7 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 			`- Active quest: \`docs/current/${state.active}.md\` [${hier}] (${fresh ? "fresh" : "SAVE PENDING - update it before compaction"}${tokenStr}${stackInfo}); manage with /quest, /subquest, /quests, /quest-economy.`,
 		);
 	} else {
-		lines.push("- Active quest: none (use /quest <name> before starting real work).");
+		lines.push("- Active quest: none (substantive requests will automatically receive a persistent quest context in docs/current/).");
 	}
 
 	const guidelines = projectGuidelines();
@@ -1184,75 +1734,93 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 // Hooks
 // ---------------------------------------------------------------------------
 
-function installPromptCapture(pi: ExtensionAPI) {
-	pi.on(
-		"before_agent_start",
-		withContext(async (event: any) => {
-			if (!state.active) return;
-			const raw = (event as { prompt?: unknown }).prompt;
-			if (typeof raw !== "string" || !shouldCapturePrompt(raw)) return;
-			const trimmed = raw.trim().slice(0, PROMPT_MAX_CHARS);
-			if (state.prompts.length > 0 && state.prompts[state.prompts.length - 1] === trimmed) return;
-			state.prompts.push(trimmed);
-			if (state.prompts.length > PROMPT_MAX_COUNT) state.prompts = state.prompts.slice(-PROMPT_MAX_COUNT);
-			persist(pi);
-		}),
-	);
-}
-
-function installBeforeAgentStart(pi: ExtensionAPI) {
-	pi.on(
-		"before_agent_start",
-		withContext(async (_event: any, ctx: ExtensionContext) => {
-			if (!state.active) return;
-			// Passive awareness is already injected via buildSessionAwarenessBlock
-			// Do not inject synthetic user messages before agent start to prevent message spam.
-		}),
-	);
-}
-
 function installTurnEnd(pi: ExtensionAPI) {
 	pi.on(
 		"turn_end",
-		withContext(async (_event: any, ctx: ExtensionContext) => {
-			if (pickerCancelledThisSession) return;
+		withContext(async (event: any, ctx: ExtensionContext) => {
+			if (state.pickerCancelled) return;
+			if (state.compactionPending) return;
+
+			// Handle deferred archive compaction even if active quest is now null
+			if (state.archiveCompactionPending) {
+				checkAndTriggerDeferredOrEconomyCompaction(pi, ctx);
+				return;
+			}
+
 			if (!state.active) return;
 
-			const threshold = getEconomyThreshold(ctx);
-			const tokens = calculateCurrentTokens(ctx);
+			const toolResults: any[] = Array.isArray(event.toolResults) ? event.toolResults : [];
+			let didUpdateQuestThisTurn = false;
+			let isSubstantiveTurn = false;
 
-			if (threshold > 0 && tokens !== null) {
-				const warningMargin = getWarningMargin();
-				const warningTokens = Math.max(0, threshold - warningMargin);
+			for (const tr of toolResults) {
+				const toolName = (tr?.toolName || tr?.name || "").toLowerCase();
 
-				if (tokens >= threshold) {
-					if (compactionReady() && typeof ctx.compact === "function") {
-						checkAndTriggerEconomyCompaction(pi, ctx);
-						return;
+				const toolFailed =
+					!!tr?.isError ||
+					!!tr?.error ||
+					!!(tr?.details && (
+						tr.details.error ||
+						tr.details.success === false
+					));
+
+				if (
+					!toolFailed &&
+					(
+						toolName.includes("quest_update_state") ||
+						toolName.includes("quest_mark_saved") ||
+						toolName.includes("quest_journal_mark_saved") ||
+						toolName.includes("quest_archive") ||
+						toolName.includes("quest_subquest") ||
+						toolName.includes("quest_journal_archive") ||
+						toolName.includes("quest_journal_subquest")
+					)
+				) {
+					didUpdateQuestThisTurn = true;
+				}
+
+				if (toolName === "edit" || toolName === "write") {
+					const targetPath = tr?.args?.path || tr?.input?.path || "";
+
+					if (
+						targetPath &&
+						targetPath.includes(`docs/current/${state.active}.md`)
+					) {
+						if (!toolFailed) {
+							didUpdateQuestThisTurn = true;
+						}
+					} else if (!toolFailed) {
+						isSubstantiveTurn = true;
 					}
-				} else if (tokens >= warningTokens && !compactionReady()) {
-
-					// In the pre-compaction warning window with save pending:
-					// Send a single deep save warning if we haven't warned yet for this compaction cycle
-					const alreadyWarned =
-						typeof state.lastWarnedCompactionTokens === "number" &&
-						Math.abs(tokens - state.lastWarnedCompactionTokens) < warningMargin;
-
-					if (!alreadyWarned) {
-						state.lastWarnedCompactionTokens = tokens;
-						persist(pi, ctx);
-						sendDeepSaveRequest(
-							pi,
-							`🚨 Quest-journal economy: token usage is at ${formatTokens(tokens)} (within ${formatTokens(warningMargin)} of the ${formatTokens(threshold)} auto-compaction limit). AUTO-COMPACTION WILL OCCUR SOON to reset working memory. You MUST update \`${questPath(state.active)}\` now with an exhaustive context snapshot (all technical findings, architecture discoveries, decisions made, touched files, test status, and comprehensive ## Resume prompt) so that the subsequent iteration does not re-research. After updating the quest files, compaction will immediately trigger.`,
-						);
-						lastPromptAt = Date.now();
-						return;
-					}
+				} else if (
+					!toolFailed &&
+					(
+						toolName === "bash" ||
+						toolName === "user_bash" ||
+						toolName === "subagent" ||
+						toolName.startsWith("bg_run") ||
+						toolName.startsWith("fusion_") ||
+						toolName === "doc_to_md"
+					)
+				) {
+					isSubstantiveTurn = true;
 				}
 			}
 
-			// Routine turns do not inject synthetic follow-up messages into the conversation.
-			// Quest status and compaction readiness are communicated via session awareness & UI widgets.
+			if (didUpdateQuestThisTurn) {
+				persist(pi, ctx);
+				updateUIStatus(ctx);
+			} else if (isSubstantiveTurn) {
+				state.dirty = true;
+				persist(pi, ctx);
+				updateUIStatus(ctx);
+			}
+
+			// Proactive context-pressure checkpoint before compaction
+			requestPreCompactionCheckpoint(pi, ctx);
+
+			// Check deferred (archive / subquest launch) and economy compaction
+			checkAndTriggerDeferredOrEconomyCompaction(pi, ctx);
 		}),
 	);
 }
@@ -1261,29 +1829,69 @@ function installBeforeCompact(pi: ExtensionAPI) {
 	pi.on(
 		"session_before_compact",
 		withContext(async (_event: any, ctx: ExtensionContext) => {
-			if (!state.active) return; // nothing to protect
-			if (compactionReady()) return; // file is fresh since last compaction -- allow
+			if (!state.active) return;
+			if (compactionReady()) return;
 
-			sendDeepSaveRequest(
-				pi,
-				`🚨 Quest-journal economy: compaction requested while quest file \`${questPath(state.active)}\` has unsaved changes. You MUST update \`${questPath(state.active)}\` now with an exhaustive context dump before compaction resets working memory.`,
-			);
-			if (ctx.hasUI) ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
+			state.compactionPending = false;
+			if (!state.preCompactionSaveRequestPending) {
+				state.preCompactionSaveRequestPending = true;
+				persist(pi, ctx);
+
+				sendDeepSaveRequest(pi, undefined, "steer");
+				if (ctx?.hasUI) ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
+			}
 			return { cancel: true };
 		}),
 	);
 }
 
-function sendPostCompactionResumePrompt(pi: ExtensionAPI, activeQuest: string) {
-	if (!activeQuest) return;
-	const isSubQuest = Array.isArray(state.stack) && state.stack.length > 1;
-	const parentQuest = isSubQuest ? state.stack[state.stack.length - 2] : null;
+function handleCompactionCompleted(
+	pi: ExtensionAPI,
+	ctx?: ExtensionContext,
+	completedAtTokens?: number | null,
+): void {
+	const c = getActiveContext(ctx);
+	const targetSessionId = getSessionId(c);
+	const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
+
+	const tokens = typeof completedAtTokens === "number" ? completedAtTokens : calculateCurrentTokens(c);
+
+	sessionState.compactionPending = false;
+	sessionState.dirty = false;
+	sessionState.lastWarnedCompactionTokens = null;
+	sessionState.preCompactionCheckpointPending = false;
+	sessionState.preCompactionSaveRequestPending = false;
+	sessionState.subquestLaunchCompactionPending = false;
+	sessionState.archiveCompactionPending = null;
+	sessionState.compactCount = sessionState.saveCount;
+
+	persist(pi, c);
+
+	if (c?.hasUI) {
+		if (typeof tokens === "number" && tokens > 0) {
+			c.ui.notify(`Economy auto-compaction completed at ${formatTokens(tokens)} tokens.`, "info");
+		}
+		updateUIStatus(c);
+	}
+
+	if (sessionState.active) {
+		sendPostCompactionResumePrompt(pi, sessionState.active, true, c);
+	}
+}
+
+function buildPostCompactionResumeDirective(
+	activeQuest: string,
+	targetState: StoredState,
+): string {
+	const isSubQuest = Array.isArray(targetState.stack) && targetState.stack.length > 1;
+	const parentQuest = isSubQuest ? targetState.stack[targetState.stack.length - 2] : null;
 
 	const subquestContext = isSubQuest
-		? `You are inside sub-quest **${activeQuest}** (parent: **${parentQuest}**).`
+		? `You are inside sub-quest **${activeQuest}** (parent: **${parentQuest}**).
+This sub-quest is temporary work in service of the parent/root objective. Completing this sub-quest does not mean the overall objective is complete. After finishing it, return to the parent quest and continue its remaining work.`
 		: `You are working on active quest **${activeQuest}**.`;
 
-	const directiveText = `⚡ **Post-Compaction Autonomous Resumption Directive**:
+	return `⚡ **Post-Compaction Autonomous Resumption Directive**:
 Context compaction has finished. Working memory has been cleanly reset.
 
 ${subquestContext}
@@ -1291,29 +1899,74 @@ The single authoritative source of truth on disk is \`docs/current/${activeQuest
 
 **Action Required Now**:
 1. Read \`docs/current/${activeQuest}.md\` using your \`read\` tool.
-2. Check \`## Current Status\`, \`## Detailed Multi-Stage Execution Plan\`, \`## Remaining work\`, and \`## Next recommended step\`.
-3. If the plan has not yet been confirmed by the user in Turn 1, present the complete analysis findings and multi-stage plan clearly to the user for confirmation before touching code.
-4. If the plan is already confirmed, proceed directly with implementing the next step without waiting for user commands, without asking modal questions, and without re-researching solved context.`;
+2. Recover current status, execution snapshot, remaining work, and EXACT NEXT ACTION.
+3. If the plan was not yet established, formulate the plan and proceed. If the plan is established, proceed directly with implementing the EXACT NEXT ACTION without waiting for user commands, without asking modal questions, and without re-researching solved context. Continue continuously toward the user's objective.`;
+}
 
-	safeSendUserMessage(pi, directiveText);
+function sendPostCompactionUserMessage(
+	pi: ExtensionAPI,
+	ctx?: ExtensionContext,
+	text: string = "",
+): void {
+	try {
+		pi.sendUserMessage(
+			`${INTERNAL_MESSAGE_PREFIX}\n${text}`,
+		);
+	} catch (err: any) {
+		logError("Failed to trigger post-compaction resume", err, ctx);
+	}
+}
+
+function sendPostCompactionResumePrompt(pi: ExtensionAPI, activeQuest: string, isCompaction = true, ctx?: ExtensionContext) {
+	if (!activeQuest) return;
+	const c = getActiveContext(ctx);
+	const targetSessionId = getSessionId(c);
+	const targetState = sessionStates.get(targetSessionId) ?? getState(c);
+
+	if (isCompaction && typeof targetState.lastResumeCompactCount === "number" && targetState.lastResumeCompactCount === targetState.compactCount) {
+		return;
+	}
+	const now = Date.now();
+	if (!isCompaction && targetState.lastResumeTarget === activeQuest && typeof targetState.lastResumePromptAt === "number" && now - targetState.lastResumePromptAt < 1000) {
+		return;
+	}
+	targetState.lastResumePromptAt = now;
+	targetState.lastResumeTarget = activeQuest;
+	if (isCompaction) {
+		targetState.lastResumeCompactCount = targetState.compactCount;
+	}
+	persist(pi, c);
+
+	const directiveText = buildPostCompactionResumeDirective(activeQuest, targetState);
+	sendPostCompactionUserMessage(pi, c, directiveText);
 }
 
 function installAfterCompact(pi: ExtensionAPI) {
 	pi.on(
 		"session_compact",
 		withContext(async (_event: any, ctx: ExtensionContext) => {
-			state.compactionPending = false;
-			if (!state.active) return;
-			state.compactCount = state.saveCount; // a compaction happened; next save re-arms the gate
-			state.lastWarnedCompactionTokens = null; // reset warning flag for next compaction cycle
-			persist(pi, ctx);
-			sendPostCompactionResumePrompt(pi, state.active);
+			handleCompactionCompleted(pi, ctx);
 		}),
 	);
 	pi.on(
 		"session_compact_failed",
 		withContext(async (_event: any, _ctx: ExtensionContext) => {
 			state.compactionPending = false;
+			state.lastWarnedCompactionTokens = null;
+			state.preCompactionCheckpointPending = false;
+			state.preCompactionSaveRequestPending = false;
+			state.subquestLaunchCompactionPending = false;
+		}),
+	);
+}
+
+function installContextListener(pi: ExtensionAPI) {
+	pi.on(
+		"context",
+		withContext(async (_event: any, ctx: ExtensionContext) => {
+			if (!state.active) return;
+			if (state.pickerCancelled) return;
+			requestPreCompactionCheckpoint(pi, ctx);
 		}),
 	);
 }
@@ -1373,27 +2026,6 @@ async function promptForQuestChoice(ctx: ExtensionContext, title = "Select quest
 	return name ? { name } : null;
 }
 
-/**
- * On interactive startup, ask the user what to work on: pick a current quest,
- * promote a draft from docs/future/, start a new quest, or skip.
- * Reuses the /quest command by queueing it as a user message (extension
- * commands are checked first in input processing).
- */
-async function offerQuestChoiceOnBoot(pi: ExtensionAPI, ctx: ExtensionContext, reason: string) {
-	if (reason !== "startup") return;
-	if (!ctx.hasUI || ctx.mode !== "tui") return;
-	const choice = await promptForQuestChoice(ctx, "What do you want to work on?");
-	if (!choice) {
-		pickerCancelledThisSession = true; // user opted out -- suppress quest-journal prompts until /quest
-		return;
-	}
-	if (choice.goal && choice.goal !== choice.name) {
-		pi.sendUserMessage(`/quest ${choice.name} ${choice.goal}`);
-	} else {
-		pi.sendUserMessage(`/quest ${choice.name}`);
-	}
-}
-
 /** On quit, notify if the active quest has unsaved changes. */
 function installShutdownSave(pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event: any, ctx: any) => {
@@ -1405,17 +2037,19 @@ function installShutdownSave(pi: ExtensionAPI) {
 	});
 }
 
-/** A write/edit to the active quest file counts as a save (lowers the compaction gate). */
 function installFileWatch(pi: ExtensionAPI) {
 	pi.on("tool_result", async (event: any, ctx: any) => {
-		// Tool execution failure check: failed writes/edits must NOT count as saves!
 		if (event.isError || event.error || (event.details && (event.details.error || event.details.success === false))) {
 			return;
 		}
 
 		if (event.toolName !== "write" && event.toolName !== "edit") {
-			// Commands and subagent tasks mark state dirty
-			if (event.toolName === "bash" || event.toolName === "subagent") {
+			if (
+				event.toolName === "bash" ||
+				event.toolName === "user_bash" ||
+				event.toolName === "subagent" ||
+				(typeof event.toolName === "string" && (event.toolName.startsWith("bg_run") || event.toolName.startsWith("fusion_") || event.toolName === "doc_to_md"))
+			) {
 				state.dirty = true;
 			}
 			return;
@@ -1425,7 +2059,6 @@ function installFileWatch(pi: ExtensionAPI) {
 		if (typeof p !== "string") return;
 		const norm = normalizePath(p);
 
-		// If writing to the active quest file, verify and fingerprint it
 		if (state.active && norm === questPath(state.active)) {
 			await verifyAndMarkSaved(pi, ctx, state.active);
 		} else if (!state.active && norm.startsWith(`${QUEST_DIR}/`) && norm.endsWith(".md")) {
@@ -1435,8 +2068,6 @@ function installFileWatch(pi: ExtensionAPI) {
 			else if (!state.stack.includes(slug)) state.stack.push(slug);
 			await verifyAndMarkSaved(pi, ctx, slug);
 		} else {
-			// Write or edit to any other file marks quest state dirty.
-			// Never implicitly activate or switch quests based on file writes!
 			state.dirty = true;
 		}
 	});
@@ -1447,7 +2078,7 @@ async function markSubQuestCompletedInParent(parentSlug: string, childSlug: stri
 	if (!(await fileExists(parentPath))) return false;
 	try {
 		let content = await readFile(parentPath, "utf8");
-		const regex = new RegExp(`(-\\s*\\[)\\s*(\\]\\s*\\[\\[${childSlug}\\]\\])`, "g");
+		const regex = new RegExp(`(-\\s*\\[)\\s*(\\]\\s*(?:\\[\\[|\\[)?${childSlug}(?:\\]\\]|\\])?)`, "g");
 		if (regex.test(content)) {
 			content = content.replace(regex, "$1x$2");
 			await writeFile(parentPath, content, "utf8");
@@ -1460,6 +2091,34 @@ async function markSubQuestCompletedInParent(parentSlug: string, childSlug: stri
 }
 
 const normalizePath = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
+
+async function loadExistingQuestIntent(slug: string): Promise<{ originalRequest: string; refinements: string[] }> {
+	const path = questPath(slug);
+	if (!(await fileExists(path))) return { originalRequest: "", refinements: [] };
+	try {
+		const content = await readFile(path, "utf8");
+		const sections = parseMarkdownSections(content);
+		let originalRequest = "";
+		const reqSec = sections.get("original request") || sections.get("original user request");
+		if (reqSec) {
+			const rawText = reqSec.body.replace(/^>\s*/gm, "").trim();
+			if (rawText && !rawText.startsWith("Paste the verbatim user prompt") && !rawText.startsWith("Goal:")) {
+				originalRequest = rawText;
+			}
+		}
+		const refinements: string[] = [];
+		const refSec = sections.get("quest refinements & user feedback loops") || sections.get("refinements");
+		if (refSec) {
+			const lines = refSec.body.split(/\r?\n/).map(l => l.replace(/^[-*]\s*/, "").replace(/^\d+\.\s*/, "").trim()).filter(l => l && l !== "-" && !l.startsWith(">"));
+			if (lines.length > 0) {
+				refinements.push(...lines);
+			}
+		}
+		return { originalRequest, refinements };
+	} catch {
+		return { originalRequest: "", refinements: [] };
+	}
+}
 
 /** Helper to archive a quest file and update journal state (LIFO stack pop) */
 async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null }> {
@@ -1513,11 +2172,22 @@ async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionC
 	if (state.active === name) {
 		state.active = nextActive;
 		state.stack = stack;
-		state.prompts = [];
+		if (nextActive) {
+			const parentIntent = await loadExistingQuestIntent(nextActive);
+			state.prompts = parentIntent.originalRequest ? [parentIntent.originalRequest] : [];
+			state.refinements = parentIntent.refinements;
+		} else {
+			state.prompts = [];
+			state.refinements = [];
+		}
 		persist(pi, ctx);
 	} else {
 		state.stack = stack;
 		persist(pi, ctx);
+	}
+
+	if (nextActive) {
+		await verifyAndMarkSaved(pi, ctx, nextActive);
 	}
 
 	const returnMsg = nextActive ? ` Resumed parent/previous quest '${nextActive}' (LIFO stack).` : "";
@@ -1546,6 +2216,9 @@ function installArchiveTool(pi: ExtensionAPI) {
 		const shouldCompact = params.compact !== false;
 		if (shouldCompact && typeof ctx.compact === "function") {
 			state.archiveCompactionPending = targetName;
+			persist(pi, ctx);
+		} else if (res.nextActive) {
+			sendPostCompactionResumePrompt(pi, res.nextActive);
 		}
 
 		if (ctx.hasUI) ctx.ui.notify(res.message, "info");
@@ -1556,7 +2229,7 @@ function installArchiveTool(pi: ExtensionAPI) {
 					text: `${res.message}${shouldCompact ? " Context compaction queued for turn end." : ""}`,
 				},
 			],
-			details: { archived: targetName, dest: res.dest, compacted: shouldCompact },
+			details: { archived: targetName, dest: res.dest, compacted: shouldCompact, nextActive: res.nextActive },
 		};
 	};
 
@@ -1625,25 +2298,18 @@ function installSubQuestTool(pi: ExtensionAPI) {
 
 		await mkdir(QUEST_DIR, { recursive: true });
 		const path = questPath(name);
+		const isExisting = await fileExists(path);
 
-		if (await fileExists(path)) {
-			// Sub-quest file already exists -- link in parent if not already linked
-			if (parentName) {
-				await linkSubQuestInParent(parentName, name, goal);
-			}
-			return {
-				content: [{ type: "text", text: `Sub-quest '${name}' already exists at ${path}.${parentName ? ` Verified link in parent '${parentName}'.` : ""}` }],
-				details: { subquest: name, path, existing: true, parent: parentName },
-			};
+		if (!isExisting) {
+			await writeFile(path, QUEST_TEMPLATE(name, goal, parentName, ""), "utf8");
 		}
-
-		await writeFile(path, QUEST_TEMPLATE(name, goal, parentName), "utf8");
 		if (parentName) {
-			await linkSubQuestInParent(parentName, name, goal);
+			await linkSubQuestInParent(parentName, name, goal, ctx);
+			await verifyAndMarkSaved(pi, ctx, parentName);
 		}
 
 		if (switchNow) {
-			pickerCancelledThisSession = false;
+			state.pickerCancelled = false;
 			if (!Array.isArray(state.stack)) state.stack = [];
 			if (parentName && !state.stack.includes(parentName)) {
 				state.stack.push(parentName);
@@ -1655,13 +2321,28 @@ function installSubQuestTool(pi: ExtensionAPI) {
 				state.stack = state.stack.slice(0, idx + 1);
 			}
 			state.active = name;
-			state.prompts = [goal ? `Goal: ${goal}` : `Sub-quest: ${name}`];
-			state.saveCount += 1;
+			const subIntent = await loadExistingQuestIntent(name);
+			state.prompts = subIntent.originalRequest ? [subIntent.originalRequest] : [goal];
+			state.refinements = subIntent.refinements;
+			state.saveGeneration = null;
+			state.lastSavedHash = null;
+			state.dirty = false;
+			await verifyAndMarkSaved(pi, ctx, name);
+
+			// Subquest Launch Compaction: defer compaction to turn end if threshold is exceeded
+			const subLaunchThreshold = getSubquestCompactThreshold();
+			const tokens = calculateCurrentTokens(ctx);
+
+			if (subLaunchThreshold > 0 && tokens !== null && tokens >= subLaunchThreshold) {
+				state.subquestLaunchCompactionPending = true;
+			}
 			persist(pi, ctx);
 			updateUIStatus(ctx);
 		}
 
-		const msg = `Created sub-quest **${name}** at \`${path}\`${parentName ? ` (parent: **${parentName}**)` : ""}.${switchNow ? " Switched active quest to this sub-quest." : " Kept parent quest active; sub-quest added to tracker."}`;
+		const msg = isExisting
+			? `Sub-quest '${name}' already exists at \`${path}\`.${parentName ? ` Verified link in parent '${parentName}'.` : ""}${switchNow ? " Switched active quest to this sub-quest." : ""}`
+			: `Created sub-quest **${name}** at \`${path}\`${parentName ? ` (parent: **${parentName}**)` : ""}.${switchNow ? " Switched active quest to this sub-quest." : " Kept parent quest active; sub-quest added to tracker."}`;
 		if (ctx.hasUI) ctx.ui.notify(msg, "info");
 
 		return {
@@ -1854,8 +2535,9 @@ function installMarkTool(pi: ExtensionAPI) {
 				updates.set("current status", params.status);
 			}
 
-			if (Array.isArray(params.findings) && params.findings.length > 0) {
-				const findingsText = params.findings.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
+			const findingsList = params.findings || params.importantFindings;
+			if (Array.isArray(findingsList) && findingsList.length > 0) {
+				const findingsText = findingsList.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
 				updates.set("in-depth analysis & findings", findingsText);
 			}
 
@@ -1864,9 +2546,24 @@ function installMarkTool(pi: ExtensionAPI) {
 				updates.set("decisions made", decisionsText);
 			}
 
-			if (Array.isArray(params.filesTouched) && params.filesTouched.length > 0) {
-				const filesText = params.filesTouched.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
+			if (Array.isArray(params.constraints) && params.constraints.length > 0) {
+				const constraintsText = params.constraints.map((c: string) => (c.startsWith("- ") ? c : `- ${c}`)).join("\n");
+				updates.set("constraints & rules", constraintsText);
+			}
+
+			if (Array.isArray(params.filesExamined) && params.filesExamined.length > 0) {
+				const examinedText = params.filesExamined.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
+				updates.set("files examined", examinedText);
+			}
+
+			const filesTouchedList = params.filesTouched || params.filesModified;
+			if (Array.isArray(filesTouchedList) && filesTouchedList.length > 0) {
+				const filesText = filesTouchedList.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
 				updates.set("files touched", filesText);
+			}
+
+			if (params.testStatus) {
+				updates.set("test / build status", typeof params.testStatus === "string" ? params.testStatus : JSON.stringify(params.testStatus));
 			}
 
 			if (Array.isArray(params.remaining) && params.remaining.length > 0) {
@@ -1874,8 +2571,19 @@ function installMarkTool(pi: ExtensionAPI) {
 				updates.set("remaining work", remainingText);
 			}
 
-			if (params.nextStep) {
-				updates.set("next recommended step", params.nextStep);
+			const executionSnapshotVal = params.executionSnapshot || params.snapshot;
+			if (executionSnapshotVal) {
+				updates.set("execution snapshot", executionSnapshotVal);
+			}
+
+			const nextStepVal = params.nextStep || params.nextAction || params.exactNextAction;
+			if (nextStepVal) {
+				updates.set("next recommended step", nextStepVal);
+			}
+
+			const resumeContextVal = params.resumeContext || params.resumePrompt;
+			if (resumeContextVal) {
+				updates.set("resume prompt", resumeContextVal);
 			}
 
 			const updatedMarkdown = spliceMarkdownSections(content, updates);
@@ -1925,19 +2633,54 @@ function installMarkTool(pi: ExtensionAPI) {
 					items: { type: "string" },
 					description: "Key architectural decisions made.",
 				},
+				constraints: {
+					type: "array",
+					items: { type: "string" },
+					description: "Constraints and rules to adhere to.",
+				},
+				filesExamined: {
+					type: "array",
+					items: { type: "string" },
+					description: "List of files examined during research.",
+				},
 				filesTouched: {
 					type: "array",
 					items: { type: "string" },
 					description: "List of files modified or examined.",
+				},
+				filesModified: {
+					type: "array",
+					items: { type: "string" },
+					description: "List of files modified.",
+				},
+				testStatus: {
+					type: "string",
+					description: "Current build and test status.",
 				},
 				remaining: {
 					type: "array",
 					items: { type: "string" },
 					description: "List of remaining tasks / checklist items.",
 				},
+				executionSnapshot: {
+					type: "string",
+					description: "Comprehensive execution snapshot containing objective, completed, in progress, discoveries, decisions, files, test status, remaining work, and exact next action.",
+				},
+				exactNextAction: {
+					type: "string",
+					description: "Concrete next action to be performed immediately by a fresh agent.",
+				},
 				nextStep: {
 					type: "string",
 					description: "Next recommended action or step.",
+				},
+				nextAction: {
+					type: "string",
+					description: "Next recommended action or step.",
+				},
+				resumeContext: {
+					type: "string",
+					description: "Concise briefing giving the next agent iteration complete context.",
 				},
 			},
 			additionalProperties: false,
@@ -2013,7 +2756,6 @@ function installCommands(pi: ExtensionAPI) {
 		
 		if (!(await fileExists(path))) {
 			if (await fileExists(futurePath)) {
-				// Promote future quest to current
 				await rename(futurePath, path);
 				if (ctx.hasUI) ctx.ui.notify(`Promoted ${futurePath} → ${path}`, "info");
 			} else {
@@ -2023,14 +2765,13 @@ function installCommands(pi: ExtensionAPI) {
 				if (!goal) {
 					goal = name.replace(/-/g, " ");
 				}
-				await writeFile(path, QUEST_TEMPLATE(name, goal), "utf8");
+				await writeFile(path, QUEST_TEMPLATE(name, goal, "", ""), "utf8");
 			}
 		}
-		// Clean up any remaining draft file in docs/future/ so no duplicate stays behind
 		await cleanDraftIfExists(name);
-		// Switching quests: new quest starts with fresh prompt history.
+
 		const switching = state.active !== name;
-		pickerCancelledThisSession = false; // explicit /quest re-enables journal prompts
+		state.pickerCancelled = false;
 		state.active = name;
 		if (!Array.isArray(state.stack)) state.stack = [];
 		if (!state.stack.includes(name)) {
@@ -2039,29 +2780,40 @@ function installCommands(pi: ExtensionAPI) {
 			const idx = state.stack.lastIndexOf(name);
 			state.stack = state.stack.slice(0, idx + 1);
 		}
-		if (switching) state.prompts = [];
-		if (goal) {
-			state.prompts.push(`Goal: ${goal}`);
+		const intent = await loadExistingQuestIntent(name);
+		if (intent.originalRequest) {
+			state.prompts = [intent.originalRequest];
+			state.refinements = intent.refinements;
+		} else if (switching && state.prompts.length === 0) {
+			state.prompts = [goal || name];
+			state.refinements = [];
 		}
-		state.saveCount += 1;
+		if (switching) {
+			state.saveGeneration = null;
+			state.lastSavedHash = null;
+			state.dirty = false;
+		}
+		if (await fileExists(path)) {
+			await verifyAndMarkSaved(pi, ctx, name);
+		}
 		persist(pi, ctx);
-		// Initial turn: ask the model to fill the file before doing real work.
+
 		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
 		const startMsg = `Now working on quest **${name}**. Quest file: \`${path}\`.${goalText}
 
-**Mandatory Upfront Research & Planning Protocol**:
+**Upfront Research, Planning & Confirmation Protocol (Turn 1)**:
 1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
-2. Perform an in-depth codebase investigation: inspect relevant libraries, module boundaries, data flows, and root causes of complexity. Think ambitiously about clean abstractions.
-3. Formulate a comprehensive, multi-stage execution plan where each phase is self-contained with exact function signatures, touched files, and targeted test files.
-4. Fill \`${path}\` completely with the goal, decisions, analysis findings, multi-stage plan, acceptance checklist, and next recommended step.
-5. In your very first turn, present the complete analysis, architectural trade-offs, and multi-stage plan clearly to the user for confirmation.
+2. Perform an in-depth codebase investigation: inspect relevant libraries, module boundaries, data flows, and root causes of complexity.
+3. Formulate a concrete execution plan capturing phase objectives, touched files, approach, and targeted tests.
+4. Fill \`${path}\` with the goal, decisions, analysis findings, execution plan, and next actionable step.
+5. In Turn 1 of this root/main quest, present your research findings, architectural trade-offs, and plan clearly to the user, and ASK FOR USER CONFIRMATION before writing or modifying feature code. Once confirmed, proceed autonomously.
 
-**Mandatory TDD & Quality Workflow**:
-1. Develop targeted test(s) for each stage BEFORE feature code.
+**TDD & Quality Workflow**:
+1. For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
 2. Develop feature -> build -> run -> verify targeted tests.
 3. Support end-of-task user feedback loops and polish iterations until final confirmation.
 4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`;
-		safeSendUserMessage(pi, startMsg);
+		sendInternalAgentMessage(pi, startMsg, "followUp");
 	};
 
 	const questCompletions = async (prefix: string) => {
@@ -2084,7 +2836,7 @@ function installCommands(pi: ExtensionAPI) {
 			return;
 		}
 		sendSaveRequest(pi, "Quest-journal: /quest-save -- write a full state snapshot to the active quest file now.");
-		lastPromptAt = Date.now();
+		state.lastPromptAt = Date.now();
 	};
 
 	pi.registerCommand("quest-save", {
@@ -2105,15 +2857,16 @@ function installCommands(pi: ExtensionAPI) {
 			ctx.ui.notify("Usage: /quest-refine <instructions...>", "warning");
 			return;
 		}
-		const entry = `Refinement: ${refinement}`;
-		state.prompts.push(entry);
+		if (!Array.isArray(state.refinements)) state.refinements = [];
+		state.refinements.push(refinement);
+		state.dirty = true;
 		persist(pi, ctx);
 
 		sendSaveRequest(
 			pi,
-			`Quest-journal: /quest-refine -- User quest refinement received:\n"${refinement}"\n\nUpdate \`docs/current/${state.active}.md\` now: expand ## Goal if needed, add entry under ## Quest Refinements & User Feedback Loops, update ## Remaining work and ## TDD & Quality Checklist, and record any new decisions.`
+			`Quest-journal: /quest-refine -- User quest refinement received:\n"${refinement}"\n\nUpdate \`docs/current/${state.active}.md\` now: expand ## Goal if needed, add entry under ## Quest Refinements & User Feedback Loops, update ## Remaining work and ## Test / Build Status, and record any new decisions.`
 		);
-		lastPromptAt = Date.now();
+		state.lastPromptAt = Date.now();
 		if (ctx.hasUI) ctx.ui.notify(`Refinement queued for active quest '${state.active}'`, "info");
 	};
 
@@ -2399,7 +3152,6 @@ function installCommands(pi: ExtensionAPI) {
 		const current = await listQuestFiles(QUEST_DIR);
 		const future = await listQuestFiles(FUTURE_DIR);
 
-		// Build parent-child map
 		const parentOf = new Map<string, string>();
 		const childrenOf = new Map<string, string[]>();
 
@@ -2422,7 +3174,7 @@ function installCommands(pi: ExtensionAPI) {
 		const renderedCurrent: string[] = [];
 		for (const f of current) {
 			const slug = f.replace(/\.md$/, "");
-			if (parentOf.has(slug)) continue; // rendered under parent
+			if (parentOf.has(slug)) continue;
 
 			const isActive = state.active === slug;
 			renderedCurrent.push(`  ${slug}${isActive ? "  ◀ active" : ""}`);
@@ -2475,12 +3227,14 @@ function installCommands(pi: ExtensionAPI) {
 		await mkdir(QUEST_DIR, { recursive: true });
 		const path = questPath(name);
 		const parentName = state.active || "";
+		const isExisting = await fileExists(path);
 
-		if (!(await fileExists(path))) {
-			await writeFile(path, QUEST_TEMPLATE(name, goal, parentName), "utf8");
+		if (!isExisting) {
+			await writeFile(path, QUEST_TEMPLATE(name, goal, parentName, ""), "utf8");
 		}
 		if (parentName) {
-			await linkSubQuestInParent(parentName, name, goal);
+			await linkSubQuestInParent(parentName, name, goal, ctx);
+			await verifyAndMarkSaved(pi, ctx, parentName);
 		}
 
 		if (!switchNow) {
@@ -2489,7 +3243,7 @@ function installCommands(pi: ExtensionAPI) {
 			return;
 		}
 
-		pickerCancelledThisSession = false;
+		state.pickerCancelled = false;
 		if (!Array.isArray(state.stack)) state.stack = [];
 		if (parentName && !state.stack.includes(parentName)) {
 			state.stack.push(parentName);
@@ -2501,28 +3255,32 @@ function installCommands(pi: ExtensionAPI) {
 			state.stack = state.stack.slice(0, idx + 1);
 		}
 		state.active = name;
-		state.prompts = goal ? [`Goal: ${goal}`] : [`Sub-quest: ${name}`];
-		state.saveCount += 1;
+		const subIntent = await loadExistingQuestIntent(name);
+		state.prompts = subIntent.originalRequest ? [subIntent.originalRequest] : [goal];
+		state.refinements = subIntent.refinements;
+		state.saveGeneration = null;
+		state.lastSavedHash = null;
+		state.dirty = false;
+		await verifyAndMarkSaved(pi, ctx, name);
 		persist(pi, ctx);
 		updateUIStatus(ctx);
 
 		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
 		const subquestMsg = `Now working on sub-quest **${name}**${parentName ? ` (parent: **${parentName}**)` : ""}. Sub-quest file: \`${path}\`.${goalText}
 
-**Mandatory Upfront Research & Planning Protocol**:
+**Upfront Research, Planning & Execution Protocol (Sub-Quest)**:
 1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
-2. Perform an in-depth codebase investigation for this sub-quest: inspect relevant libraries, module boundaries, data flows, and root causes of complexity. Think ambitiously about clean abstractions.
-3. Formulate a comprehensive, multi-stage execution plan where each phase is self-contained with exact function signatures, touched files, and targeted test files.
-4. Fill \`${path}\` completely with the goal, parent reference, findings, multi-stage plan, acceptance checklist, and next recommended step.
-5. In your very first turn, present the complete analysis, architectural trade-offs, and multi-stage plan clearly to the user for confirmation.
+2. Perform an in-depth codebase investigation for this sub-quest: inspect relevant libraries, module boundaries, data flows, and root causes of complexity.
+3. Formulate a concrete plan and fill \`${path}\` with the goal, parent reference, findings, plan, and next actionable step.
+4. As a child sub-quest under an active quest, proceed autonomously into implementation without requiring separate user confirmation.
 
-**Mandatory TDD & Quality Workflow**:
-1. Develop targeted test(s) for each stage BEFORE feature code.
+**TDD & Quality Workflow**:
+1. For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
 2. Develop feature -> build -> run -> verify targeted tests.
 3. Support end-of-task user feedback loops and polish iterations until final confirmation.
 4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`;
 
-		safeSendUserMessage(pi, subquestMsg);
+		sendInternalUserMessage(pi, subquestMsg);
 	};
 
 	pi.registerCommand("subquest", {
@@ -2559,10 +3317,18 @@ function FUTURE_QUEST_TEMPLATE(name: string, goal = ""): string {
 	].join("\n");
 }
 
-function QUEST_TEMPLATE(name: string, goal = "", parent = ""): string {
+function QUEST_TEMPLATE(name: string, goal = "", parent = "", originalRequest = "", refinements: string[] = []): string {
 	const parentSec = parent
 		? `## Parent Quest\n[[${parent}]]\n`
 		: `## Parent Quest\n> If this is a sub-quest, reference the parent quest here (e.g. [[parent-quest-name]]).\n`;
+
+	const requestBody = originalRequest
+		? `> ${originalRequest}`
+		: `> Paste the verbatim user prompt here (or very faithful summary if truncated). This section MUST stay faithful -- it is enforced by the extension.`;
+
+	const refinementsBody = refinements && refinements.length > 0
+		? refinements.map((r) => `- ${r}`).join("\n")
+		: `- `;
 
 	return [
 		`# Quest: ${name}`,
@@ -2571,40 +3337,53 @@ function QUEST_TEMPLATE(name: string, goal = "", parent = ""): string {
 		goal ? goal : `> What we are trying to accomplish.`,
 		``,
 		`## Original request`,
-		goal ? `> Goal: ${goal}` : `> Paste the verbatim user prompt here (or very faithful summary if truncated). This section MUST stay faithful -- it is enforced by the extension.`,
+		requestBody,
 		`>`,
 		``,
 		parentSec,
 		`## Current Status`,
 		`- [ ] not started · in progress · blocked · done`,
 		``,
-		`## Build & Run Commands`,
-		`> Commands to build, run, and test the project (discovered BEFORE modifying feature code).`,
-		`- Build: `,
-		`- Run: `,
-		`- Test: `,
+		`## Execution Snapshot`,
 		``,
-		`## TDD & Quality Checklist`,
-		`- [ ] **1. Discovery**: Discovered how to build and run the project.`,
-		`- [ ] **2. Write Tests First**: Developed test(s) for the quest BEFORE feature code.`,
-		`- [ ] **3. Feature Implementation**: Developed feature to satisfy tests.`,
-		`- [ ] **4. Build & Run**: Built and ran project with zero build errors. Restart server/process to verify clean boot.`,
-		`- [ ] **5. Clean Code**: Verified code has zero debug artifacts or leftover logs.`,
-		`- [ ] **6. Server Restart & Full Test Suite**: Restarted fresh server instance (e.g. \`make restart\` / kill and restart daemon) and executed FULL test suite with zero errors.`,
+		`### Objective`,
+		goal ? `> ${goal}` : `> What we are trying to accomplish.`,
 		``,
-		`## In-Depth Analysis & Findings`,
-		`> Root cause analysis, architectural friction, abstraction opportunities.`,
+		`### Completed`,
 		`- `,
 		``,
-		`## Detailed Multi-Stage Execution Plan`,
-		`> Each stage must be self-contained as if it were a single quest, with exact signatures, touched files, and targeted tests.`,
-		`### Stage 1: `,
-		`- **Target**: `,
-		`- **Tasks**: `,
-		`- **Targeted Tests**: `,
+		`### In Progress`,
+		`- `,
 		``,
-		`## Acceptance Criteria & Polish Checklist`,
+		`### Important Discoveries`,
+		`- `,
+		``,
+		`### Decisions`,
+		`- `,
+		``,
+		`### Constraints`,
+		`- `,
+		``,
+		`### Files Examined`,
+		`- `,
+		``,
+		`### Files Modified`,
+		`- `,
+		``,
+		`### Test / Build Status`,
+		`- `,
+		``,
+		`### Known Problems / Uncertainties`,
+		`- `,
+		``,
+		`### Remaining Work`,
 		`- [ ] `,
+		``,
+		`### Exact Next Action`,
+		`> `,
+		``,
+		`### Resume Context`,
+		`> `,
 		``,
 		`## Sub-Quests`,
 		`> Planned sub-quests, follow-ups, or tangent quests linked to this quest.`,
@@ -2612,31 +3391,10 @@ function QUEST_TEMPLATE(name: string, goal = "", parent = ""): string {
 		``,
 		`## Quest Refinements & User Feedback Loops`,
 		`> Mid-workflow refinements, post-implementation iterations, and user adjustments.`,
-		`- `,
+		refinementsBody,
 		``,
-		`## Why this matters`,
-		`> Context, motivation, stakeholders.`,
-		``,
-		`## Decisions made`,
-		`- `,
-		``,
-		`## Constraints & Rules`,
-		`- `,
-		``,
-		`## Files touched`,
-		`- `,
-		``,
-		`## Remaining work`,
-		`- [ ] `,
-		``,
-		`## Open questions / risks`,
-		`- `,
-		``,
-		`## Next recommended step`,
-		`1. `,
-		``,
-		`## Resume prompt`,
-		`> A paragraph an agent should read before resuming.`,
+		`## Resume Context`,
+		`> A concise briefing for continuing this quest without re-researching.`,
 		``,
 	].join("\n");
 }
@@ -2652,20 +3410,61 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 
 		const sections = parseMarkdownSections(content);
 		const targetSections = [
-			{ key: "goal", title: "Goal" },
-			{ key: "parent quest", title: "Parent Quest" },
-			{ key: "sub-quests", title: "Sub-Quests" },
-			{ key: "current status", title: "Current Status" },
-			{ key: "remaining work", title: "Remaining work" },
-			{ key: "next recommended step", title: "Next recommended step" },
-			{ key: "resume prompt", title: "Resume prompt" },
+			{ key: "original request", title: "Original Request", maxChars: 4000 },
+			{ key: "current status", title: "Current Status", maxChars: 2000 },
+			{ key: "execution snapshot", title: "Execution Snapshot", maxChars: 8000 },
+			{ key: "remaining work", title: "Remaining Work", maxChars: 4000 },
+			{ key: "next recommended step", title: "Next Action", maxChars: 3000 },
+			{ key: "resume prompt", title: "Resume Context", maxChars: 5000 },
 		];
 
+		const fallbackSections = [
+			{ key: "goal", title: "Goal", maxChars: 800 },
+			{ key: "parent quest", title: "Parent Quest", maxChars: 400 },
+			{ key: "in-depth analysis & findings", title: "Important Findings", maxChars: 3000 },
+			{ key: "decisions made", title: "Decisions", maxChars: 3000 },
+			{ key: "constraints & rules", title: "Constraints & Rules", maxChars: 1000 },
+			{ key: "files examined", title: "Files Examined", maxChars: 1000 },
+			{ key: "files touched", title: "Files Modified", maxChars: 2000 },
+			{ key: "test / build status", title: "Test / Build Status", maxChars: 2000 },
+			{ key: "sub-quests", title: "Sub-Quests", maxChars: 1000 },
+			{ key: "quest refinements & user feedback loops", title: "Quest Refinements & User Feedback Loops", maxChars: 2000 },
+		];
+
+		const seenTitles = new Set<string>();
+		const usedRawSections = new Set<MarkdownSection>();
 		const extracted: string[] = [];
+
+		const tryExtract = (target: { key: string; title: string; maxChars: number }) => {
+			if (seenTitles.has(target.title)) return;
+			const aliases = [target.key, ...(SECTION_ALIASES[target.key] || [])];
+			let sec: MarkdownSection | undefined;
+			for (const alias of aliases) {
+				const found = sections.get(alias);
+				if (found && !usedRawSections.has(found)) {
+					sec = found;
+					break;
+				}
+			}
+			if (sec && sec.body && sec.body.trim() && sec.body.trim() !== "-" && !sec.body.trim().startsWith("> Paste the verbatim user prompt here") && !sec.body.trim().startsWith("> What we are trying to accomplish.")) {
+				let body = sec.body.trim();
+				if (target.maxChars && body.length > target.maxChars) {
+					body = body.slice(0, target.maxChars).trim() + "… [see quest file for full section]";
+				}
+				seenTitles.add(target.title);
+				usedRawSections.add(sec);
+				extracted.push(`### ${target.title}\n${body}`);
+			}
+		};
+
 		for (const target of targetSections) {
-			const sec = sections.get(target.key);
-			if (sec && sec.body) {
-				extracted.push(`### ${target.title}\n${sec.body}`);
+			tryExtract(target);
+		}
+
+		// If execution snapshot was not present, fall back to legacy individual sections
+		if (!seenTitles.has("Execution Snapshot")) {
+			for (const fallback of fallbackSections) {
+				tryExtract(fallback);
 			}
 		}
 
@@ -2677,85 +3476,109 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 	}
 }
 
-function installWorkflowSystemPrompt(pi: ExtensionAPI) {
-	pi.on("before_agent_start", async (event: any, ctx: any) => {
-		try {
-			const awarenessBlock = buildSessionAwarenessBlock(ctx);
-			const resumeContext = await loadActiveQuestResumeContext();
-			const workflowInstructions = `\n\n# Mandatory Quest Workflow Rules (TDD & Quality Gates)
+function getWorkflowInstructions(resumeContext: string): string {
+	return `\n\n# Mandatory Quest Workflow Rules (TDD & Quality Gates)
 When working on quests:
 1. **Upfront Deep Research, Planning & Confirmation (Turn 1 Protocol)**:
-   - Before writing or editing feature code, conduct a thorough architectural audit of the relevant codebase, understand constraints, read related files, and design an ambitious, multi-stage plan where each phase is self-contained.
-   - Infer a clean quest slug, create and fill the quest file on disk in \`docs/current/<inferred-slug>.md\`, and call \`quest_mark_saved\`.
-   - **MANDATORY TURN 1 STOP**: In your very first turn, present the complete analysis findings, architectural trade-offs, and multi-stage plan clearly to the user, and ASK FOR USER CONFIRMATION BEFORE modifying any project code!
-2. **Build & Run Discovery**: Discovered how to build and run the project before editing code (\`make\`, \`make watch\`).
-3. **Develop Tests First (TDD)**: Develop targeted test(s) BEFORE developing each feature phase.
+   - Before writing or editing feature code, conduct a thorough architectural audit of the relevant codebase, understand constraints, read related files, and design a concrete execution plan.
+   - For a newly created root quest, fill \`docs/current/<quest>.md\` with findings, plan, and next step, and call \`quest_mark_saved\`.
+   - In Turn 1 of any main/root quest, present the research findings, architectural trade-offs, and multi-stage plan clearly to the user, and ASK FOR USER CONFIRMATION before writing or modifying feature code. Do not begin feature implementation before confirmation. Once confirmed (and during child sub-quests), execution is autonomous across turns and tools without requiring manual user slash commands.
+2. **Build & Run Discovery**: Discover how to build and run the project before editing code (\`make\`, \`make watch\`).
+3. **Verification Strategy**: For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
 4. **Iterative Build, Run & Test**: Feature implementation -> build -> run -> verify targeted tests.
 5. **Post-Implementation & User Feedback Loops**:
    - Expect and support user polish iterations at the end of a quest or sub-quest.
-   - When the user provides feedback, refinements, or tweaks mid-quest or post-implementation, log them under \`## Quest Refinements & User Feedback Loops\`, update acceptance checklists, execute the changes, and verify with tests until the user confirms satisfaction.
+   - When the user provides feedback, refinements, or tweaks mid-quest or post-implementation, log them under \`## Quest Refinements & User Feedback Loops\`, update acceptance checklists, execute changes, and verify with tests until the user confirms satisfaction.
 6. **Quest Completion & Wrap-Up Flow**:
-   - **Root / Top-Level Quest Completion**: When all stages, features, and acceptance criteria are completed, you MUST restart the test daemon/server and execute the FULL test suite (\`make test\`) to verify zero errors or regressions. Only after the full test suite passes with zero failures, prompt the user via \`ask_questions\` with the following structured options:
-     1. **Refine anything**: Keep active quest open to make further adjustments or address feedback.
-     2. **Archive quest and auto-compact**: Call \`quest_journal_archive({ compact: true })\` to archive the quest and automatically compact session context.
-     3. **Archive quest without auto-compact**: Call \`quest_journal_archive({ compact: false })\` to archive the quest while keeping the current session context intact.
-     4. **Change to manual mode**: Switch workflow / compaction to manual mode.
-     Execute the exact action corresponding to the user's choice.
-   - **Sub-Quest Completion (Autonomous Continuation)**: When finishing a child sub-quest, you do NOT need to ask for user input. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\`--deciding \`compact: true\` if context is elevated or \`compact: false\` if context is low--then seamlessly continue working on the parent quest.
+   - **Root / Top-Level Quest Completion**: When all stages, features, and acceptance criteria are completed, restart the test daemon/server and execute the FULL test suite (\`make test\`) to verify zero errors or regressions. Only after the full test suite passes with zero failures, prompt the user via \`ask_questions\` with structured options (Refine anything, Archive quest and auto-compact, Archive quest without auto-compact, Change to manual mode).
+   - **Sub-Quest Completion (Autonomous Continuation)**: When finishing a child sub-quest, you do NOT need to ask for user input. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\` (deciding \`compact: true\` if context is elevated or \`compact: false\` if context is low), then seamlessly continue working on the parent quest.
 7. **Final Verification & Quality Gates**:
    - Zero compiler errors or warnings.
    - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
-   - **Server / Daemon Restart**: Always ensure a fresh instance of the server / test daemon is running (e.g. restart background servers or run clean boot test) before running final tests, so tests never run against stale in-memory state.
    - Full test suite (\`make test\`) must pass with zero errors.
 
 # Autonomous Quest Management (Zero Manual User Commands Needed)
-You manage quests completely autonomously on disk in \`docs/current/<quest>.md\`. The user should NEVER need to type manual slash commands.
+You manage quests autonomously on disk in \`docs/current/<quest>.md\`. The user should NEVER need to type manual slash commands.
 
-1. **Auto-Initialize New Quest on Any User Request**:
-   - Do not ask questions to the user initially on startup. Let the user type as usual.
-   - When the user describes an issue, feature, or bug they want fixed:
-     - Automatically engage in deep research and brainstorming on the codebase.
-     - Infer a clean, concise quest slug (e.g. \`docs/current/<inferred-slug>.md\`).
-     - Immediately create/fill \`docs/current/<inferred-slug>.md\` using the quest template with the stated goal, initial analysis, TDD checklist, and verbatim request.
-     - Call \`quest_mark_saved\` to activate and track the quest.
-     - **Upfront Sub-Quest Planning**: When a quest consists of multiple distinct stages or components, plan and pre-create sub-quests at the beginning of the quest (e.g. using \`quest_subquest({ name, goal, switchNow: false })\` and linking them under \`## Sub-Quests\` in the parent quest file).
-     - Present the complete analysis findings, architectural trade-offs, and multi-stage plan in your very first turn, and PROPOSE the plan for user confirmation before touching code.
-   - If the user mentions continuing or resuming a quest without specifying which one:
-     - Check current quests in \`docs/current/\` and prompt the user via \`ask_questions\` with the available choices.
+1. **Continuous Durable Working Memory**:
+   - Treat \`docs/current/<quest>.md\` as your durable working memory.
+   - During normal execution, whenever you discover information that would be expensive to reconstruct after context loss, update the active quest file as part of your normal workflow.
+   - Persist high-value information: important discoveries, architecture/data flow, constraints, decisions and rationale, failed approaches, key files/symbols, test/build status, requirements, completed/in-progress/remaining work, and the exact next action.
+   - Criterion: *Would losing the current context force a fresh agent to repeat significant investigation, reconsider a decision, or guess what to do next?* If yes, persist it.
+   - Use \`quest_update_state\` or \`edit\` + \`quest_mark_saved\`.
+   - Do NOT wait for artificial checkpoint reminders. There are no periodic turn-count checkpoint messages during normal execution.
 
-2. **Auto-Refine Active Quest on User Feedback**:
-   - When the user provides feedback, tweaks, or new requirements mid-quest or post-implementation:
-     - Immediately read and update \`docs/current/<active-quest>.md\` using \`quest_update_state\` (or edit + \`quest_journal_mark_saved\`).
-     - Log the feedback under \`## Quest Refinements & User Feedback Loops\`.
-     - Update \`## Remaining work\`, \`## Acceptance Criteria & Polish Checklist\`, \`## Decisions made\`, and \`## Next recommended step\`.
-     - Call \`quest_journal_mark_saved\`.
+2. **Auto-Initialize New Quest on Substantive Requests**:
+   - When the user gives a substantive objective (feature, bug fix, refactor, investigation), a persistent quest is automatically initialized.
+   - Investigate the codebase, establish a concrete plan, persist it in \`docs/current/<quest>.md\`, and call \`quest_mark_saved\`.
+   - Present research findings and plan to user, and confirm before editing feature code. Once confirmed, execute autonomously.
 
-3. **Auto-Create Sub-Quests for Planned Work, Tangents, Follow-ups, Checks & Side Tasks (LIFO Stack)**:
+3. **Auto-Refine Active Quest on User Feedback**:
+   - When the user provides feedback or new requirements while a quest is active, it is automatically captured as a refinement.
+   - Incorporate the refinement into \`docs/current/<active-quest>.md\` using \`quest_update_state\` (or edit + \`quest_mark_saved\`).
+
+4. **Auto-Create Sub-Quests for Planned Work, Tangents & Side Tasks (LIFO Stack)**:
    - Quests operate on a **LIFO (Last-In, First-Out) stack**.
-   - Sub-quests can be planned upfront (\`switchNow: false\`) or switched into immediately (\`switchNow: true\`).
-   - When user remarks, tangents, syntax checks (e.g. 'Can you check syntax?'), side investigations, code audits, or follow-ups arise during a quest: IMMEDIATELY invoke \`quest_subquest({ goal: "..." })\` (pushes sub-quest onto stack with fresh focus).
-   - Perform the task inside the sub-quest, document findings in \`docs/current/<subquest>.md\`, and when finished call \`quest_archive({ compact: false })\` to pop the stack and resume the parent quest seamlessly!
-   - Link it under \`## Sub-Quests\` in the parent quest file.
+   - For small incidental actions or simple checks, perform them directly in the current quest without creating sub-quests.
+   - For meaningful independent investigations, complex multi-stage branches, or separate follow-up workstreams that need independent durable context, invoke \`quest_subquest({ goal: "..." })\` (or \`quest_journal_subquest\`).
+   - When the sub-quest is finished, call \`quest_archive()\` (or \`quest_journal_archive\`) to pop the stack and autonomously resume parent quest execution!
 
-4. **Auto-Archive Upon Completion (LIFO Pop)**:
-   - **For Sub-Quests**: Do NOT prompt the user with interactive modal questions. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\` (choosing \`compact: true\` if context is high or \`compact: false\` if context is low) and immediately continue parent quest execution.
-   - **For Root / Top-Level Quests**: Prompt the user via \`ask_questions\` (Refine, Archive with auto-compact, Archive without auto-compact, Manual mode) and execute \`quest_archive\` based on their choice. If returning to a parent quest on the LIFO stack, resume the parent quest cleanly.
+5. **Auto-Archive Upon Completion (LIFO Pop)**:
+   - **For Sub-Quests**: Autonomously archive via \`quest_archive({ compact: boolean })\` and continue parent quest.
+   - **For Root Quests**: When finished, prompt user via \`ask_questions\` to refine or archive.
 
-# Economy Auto-Compaction & Autonomous Resumption Protocol
-Context automatically compacts dynamically (default: max(80% of context window, 333k tokens) or configured threshold) to preserve speed, maximize reasoning bandwidth, and prevent attention drift.
-1. **Dynamic Threshold**: Auto-compacts dynamically (default: max(80%, 333k tokens)).
-2. **Pre-Compaction Warning Window**: When context approaches within the warning margin (~30k tokens) of the threshold, you will receive an explicit alert.
-3. **Pre-Compaction Exhaustive Context Dump**: Upon receiving this alert, you MUST immediately update \`docs/current/<quest>.md\` with an exhaustive dump of all context knowledge, discoveries, architecture decisions, modified files, data structures, and a comprehensive resume prompt.
-4. **Auto-Compaction After Update**: After updating the quest files, context compaction will immediately trigger to reset working memory.
-5. **Autonomous Post-Compaction Resumption (Zero Interruption & Zero Re-Research)**: Following ANY compaction:
-   - You MUST immediately read \`docs/current/<active-quest>.md\` (the single source of truth on disk).
-   - Autonomously proceed with the next recommended step with ZERO re-research and ZERO pause.
-   - Do NOT ask modal questions or wait for manual user commands. Continue execution directly.
-6. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.${resumeContext}`;
+6. **Auto-Compaction & Autonomous Resumption**:
+   - Context automatically compacts dynamically when approaching threshold.
+   - When context approaches the compaction threshold, an explicit pre-compaction final save directive will instruct you to perform a final exhaustive state save before compaction.
+   - Following ANY compaction:
+     - Immediately read \`docs/current/<active-quest>.md\` (the single source of truth on disk).
+     - Trust the persisted execution state; resume the next actionable step with ZERO re-research and ZERO pause.
+     - Do NOT ask the user "What were we doing?" or wait for manual commands.
+7. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.${resumeContext}`;
+}
 
-			return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${workflowInstructions}` };
-		} catch {
-			return; // never break turn on prompt injection failure
+function installWorkflowSystemPrompt(pi: ExtensionAPI) {
+	pi.on("before_agent_start", async (event: any, ctx: ExtensionContext) => {
+		try {
+			const raw = (event as { prompt?: unknown })?.prompt;
+			if (typeof raw === "string" && shouldCapturePrompt(raw)) {
+				const trimmed = raw.trim().slice(0, PROMPT_MAX_CHARS);
+
+				if (state.active) {
+					if (!Array.isArray(state.refinements)) state.refinements = [];
+					if (!Array.isArray(state.prompts)) state.prompts = [];
+
+					const isOriginal = state.prompts.length > 0 && state.prompts[0] === trimmed;
+					const isLatestRefinement = state.refinements.length > 0 && state.refinements[state.refinements.length - 1] === trimmed;
+
+					if (!isOriginal && !isLatestRefinement) {
+						state.refinements.push(trimmed);
+						state.prompts.push(trimmed);
+						if (state.prompts.length > PROMPT_MAX_COUNT) {
+							state.prompts = [state.prompts[0], ...state.prompts.slice(-(PROMPT_MAX_COUNT - 1))];
+						}
+						if (state.refinements.length > PROMPT_MAX_COUNT) {
+							state.refinements = state.refinements.slice(-PROMPT_MAX_COUNT);
+						}
+						state.dirty = true;
+						persist(pi, ctx);
+						updateUIStatus(ctx);
+					}
+				} else if (shouldStartPersistentQuest(trimmed)) {
+					await ensureRootQuestForPrompt(pi, ctx, trimmed);
+				}
+			}
+
+			const awarenessBlock = buildSessionAwarenessBlock(ctx);
+			const resumeContext = await loadActiveQuestResumeContext();
+			const workflowInstructions = getWorkflowInstructions(resumeContext);
+
+			if (event && typeof event.systemPrompt === "string") {
+				return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${workflowInstructions}` };
+			}
+		} catch (err: any) {
+			logError("Failed in before_agent_start hook", err, ctx);
+			return;
 		}
 	});
 }
@@ -2771,11 +3594,11 @@ function registerQuestJournalCRBHook() {
 			if (set.has("quest_journal_mark_saved") || set.has("quest_mark_saved") || set.has("quest_update_state") || state.active) {
 				return [
 					"Never propose anything without doing your homework first: thoroughly investigate codebase architecture, read files, discover build/run commands, and evaluate constraints before proposing plans or code changes.",
-					"Turn 1 Confirmation: In turn 1 of any quest, present the research findings, architectural trade-offs, and multi-stage plan clearly to the user, and ask for confirmation BEFORE writing code.",
-					"Active Quest: `docs/current/<quest>.md` is the single source of truth on disk. Update it proactively using `quest_update_state` (or `edit` + `quest_mark_saved`).",
+					"Turn 1 Confirmation: In turn 1 of any root quest, present the research findings, architectural trade-offs, and multi-stage plan clearly to the user, and ask for confirmation BEFORE writing code.",
+					"Continuous Durable Working Memory: `docs/current/<quest>.md` is your durable working memory and single source of truth on disk. Proactively update it during normal execution whenever expensive-to-reconstruct discoveries, decisions, or progress occur.",
 					"Zero Re-Research: Never re-read or re-search context already documented in active/archived quest files.",
 					"Autonomous Continuation: Following compaction or sub-quest return, read `docs/current/<active-quest>.md` and proceed immediately without user interruption.",
-					"Sub-quests: Create sub-quests immediately for side tasks/tangents (`quest_subquest({ goal })`); complete and archive autonomously (`quest_archive({ compact })`) without modal questions.",
+					"Sub-quests: Create sub-quests for independent workstreams/tangents (`quest_subquest({ goal })`); complete and archive autonomously (`quest_archive({ compact })`) without modal questions.",
 					"Full Test Suite Quality Gate: Before completing/archiving a top-level quest, restart the test server/daemon, run the fresh FULL test suite (`make test`), and verify zero errors.",
 					"Top-level Quest Completion: When root quest is done, prompt user via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
 				];
@@ -2811,13 +3634,12 @@ export default function (pi: ExtensionAPI) {
 	registerQuestJournalCRBHook();
 	pi.on("session_start", async (event: any, ctx: any) => {
 		reconstruct(ctx);
-		await syncActiveQuestFromDisk(pi, ctx);
+		updateUIStatus(ctx);
 	});
 	pi.on("session_tree", async (_event: any, ctx: any) => reconstruct(ctx));
 
 	installWorkflowSystemPrompt(pi);
-	installPromptCapture(pi);
-	installBeforeAgentStart(pi);
+	installContextListener(pi);
 	installTurnEnd(pi);
 	installBeforeCompact(pi);
 	installAfterCompact(pi);

@@ -244,13 +244,15 @@ bud_node *site_ui_action_picker(
 		nsel = e->nsel;
 	}
 
+	int allow_add = spec->allow_add ? (e ? e->allow_add : 1) : 0;
 	char url_tmpl_buf[512];
 	snprintf(
 	        url_tmpl_buf, sizeof(url_tmpl_buf),
 	        "/pick/%s/"
-	        "options?key=%s&multi=0&label=&sel={sel}&pick_q_%s={q}&pick_"
+	        "options?key=%s&multi=0&add=%d&label=&sel={sel}&pick_q_%s={q}&pick_"
 	        "page_%s={page}",
 	        (e && e->target) ? e->target : spec->target, spec->key,
+	        allow_add ? 1 : 0,
 	        spec->key, spec->key);
 
 	hyle_bud_picker_desc_t d = {
@@ -269,7 +271,8 @@ bud_node *site_ui_action_picker(
 		.per_page = (e && e->per_page > 0) ? e->per_page : 15,
 		.total = e ? e->total : 0,
 		.search_param = sp,
-		.page_param = pp
+		.page_param = pp,
+		.allow_add = allow_add
 	};
 
 	picker = hyle_bud_picker_field(&d);

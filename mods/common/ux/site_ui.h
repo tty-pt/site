@@ -125,6 +125,7 @@ typedef struct {
 	const char *scope; /* scope suffix, e.g. "0" for pick_q_<key>__0 */
 	int auto_submit; /* 1 = auto-submit on radio change when scripts active
 	                  */
+	int allow_add;   /* 1 = enable inline creation, 0 = selection only */
 	const char *search_param; /* custom search input name; NULL defaults to
 	                             "pick_q_<key>" */
 	const char *page_param;   /* custom page input name; NULL defaults to

@@ -773,6 +773,36 @@ tbody tr:last-child td {
   width: 100%;
 }
 
+.hyle-picker-add {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hyle-color-border, #e5e7eb);
+}
+
+.hyle-picker-add-btn {
+  background: transparent;
+  border: 1px dashed var(--hyle-color-primary, #3b82f6);
+  border-radius: 4px;
+  color: var(--hyle-color-primary, #3b82f6);
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: block;
+}
+
+.hyle-picker-add-btn:hover {
+  background: var(--hyle-surface-hover, #f3f4f6);
+}
+
+.hyle-picker-add-btn:focus,
+.hyle-picker-add-btn:focus-visible {
+  background: var(--hyle-surface-hover, #f3f4f6);
+  outline: 2px solid var(--hyle-color-primary, #3b82f6);
+  outline-offset: 1px;
+}
+
 .hyle-picker-submit {
   height: 36px;
   min-height: 36px;

@@ -60,7 +60,7 @@ async function createSongViaForm(
     await page.fill('textarea[name="type"]', type);
   } else {
     const vals = type.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    const details = page.locator('details.hyle-picker-details');
+    const details = page.locator('.hyle-picker[data-hyle-picker-key="type"] details.hyle-picker-details');
     if (await details.count() > 0) {
       const open = await details.first().getAttribute('open');
       if (open === null) await details.locator('summary').first().click();
@@ -73,24 +73,83 @@ async function createSongViaForm(
       if (await cb.count() > 0) {
         await cb.first().check();
       } else {
-        const search = page.locator('input.hyle-picker-search');
+        const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
         if (await search.count() > 0) {
           await search.fill(v);
-          const rows = page.locator('.hyle-picker-rows').first();
+          const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
           await rows.waitFor({ state: "visible" });
           let text = await rows.innerText();
           for (let i = 0; i < 20 && !text.includes(v); i++) {
             await page.waitForTimeout(100);
             text = await rows.innerText();
           }
-          let cb2 = page.locator(`input[name="type"][value="${slug}"]`);
-          if (await cb2.count() === 0) cb2 = page.locator(`input[name="type"][value="${v}"]`);
-          if (await cb2.count() > 0) await cb2.first().check();
+          let cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${slug}"]`);
+          if (await cb2.count() === 0) cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${v}"]`);
+          if (await cb2.count() > 0) {
+            await cb2.first().check();
+            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
+            for (let i = 0; i < 20; i++) {
+              if ((await valSpan.innerText()).includes(v)) break;
+              await page.waitForTimeout(100);
+            }
+          } else {
+            const addBtn = page.locator('.hyle-picker[data-hyle-picker-key="type"] button[data-hyle-picker-add]');
+            if (await addBtn.count() > 0) {
+              await addBtn.click();
+              const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
+              for (let i = 0; i < 20; i++) {
+                if ((await valSpan.innerText()).includes(v)) break;
+                await page.waitForTimeout(100);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (await details.count() > 0 && (await details.first().getAttribute('open')) !== null) {
+      await details.locator('summary').first().click();
+    }
+  }
+  if (author) {
+    const authorText = page.locator('input[type="text"][name="author"], textarea[name="author"]');
+    if (await authorText.count() > 0) {
+      await authorText.fill(author);
+    } else {
+      const authorPicker = page.locator('.hyle-picker[data-hyle-picker-key="author"]');
+      if (await authorPicker.count() > 0) {
+        const details = authorPicker.locator('details.hyle-picker-details');
+        if (await details.count() > 0 && (await details.getAttribute('open')) === null) {
+          await details.locator('summary').click();
+        }
+        const slug = author.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+        let opt = authorPicker.locator(`input[name="author"][value="${slug}"]`);
+        if (await opt.count() === 0) opt = authorPicker.locator(`input[name="author"][value="${author}"]`);
+        if (await opt.count() > 0) {
+          await opt.first().click({ force: true });
+        } else {
+          const search = authorPicker.locator('input.hyle-picker-search');
+          if (await search.count() > 0) {
+            await search.fill(author);
+            const addBtn = authorPicker.locator('button[data-hyle-picker-add]');
+            if (await addBtn.count() > 0) {
+              await addBtn.click();
+              const valSpan = authorPicker.locator('.hyle-picker-values');
+              for (let i = 0; i < 20; i++) {
+                if ((await valSpan.innerText()).includes(author)) break;
+                await page.waitForTimeout(100);
+              }
+            } else {
+              const rows = authorPicker.locator('.hyle-picker-rows').first();
+              await rows.waitFor({ state: "visible" });
+              let opt2 = authorPicker.locator(`input[name="author"][value="${slug}"]`);
+              if (await opt2.count() === 0) opt2 = authorPicker.locator(`input[name="author"][value="${author}"]`);
+              if (await opt2.count() > 0) await opt2.first().click({ force: true });
+            }
+          }
         }
       }
     }
   }
-  await page.fill('input[name="author"]', author);
   await page.click('form[method="POST"] button[type="submit"]');
   await page.waitForURL(/\/song\/[^/]+$/, { timeout: 5000 });
   return extractSongId(page.url());
@@ -767,19 +826,19 @@ Deno.test({
           await page.waitForSelector('textarea[name="type"]', { timeout: 5000 });
           await page.fill('textarea[name="type"]', "Entry");
         } else {
-          const details = page.locator('details.hyle-picker-details');
+          const details = page.locator('.hyle-picker[data-hyle-picker-key="type"] details.hyle-picker-details');
           if (await details.count() > 0) {
             const open = await details.first().getAttribute('open');
             if (open === null) await details.locator('summary').first().click();
           }
           const cCom = page.locator('input[name="type"][value="communion"]');
           if (await cCom.count() > 0 && await cCom.isChecked()) await cCom.uncheck();
-          let cEntry = page.locator('input[name="type"][value="entry"]');
+          let cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
           if (await cEntry.count() === 0) {
-            const search = page.locator('input.hyle-picker-search');
+            const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
             if (await search.count() > 0) {
               await search.fill("Entry");
-              const rows = page.locator('.hyle-picker-rows').first();
+              const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
               await rows.waitFor({ state: "visible" });
               let text = await rows.innerText();
               for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
@@ -787,9 +846,16 @@ Deno.test({
                 text = await rows.innerText();
               }
             }
-            cEntry = page.locator('input[name="type"][value="entry"]');
+            cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
           }
-          if (await cEntry.count() > 0) await cEntry.first().check();
+          if (await cEntry.count() > 0) {
+            await cEntry.first().check();
+            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
+            for (let i = 0; i < 20; i++) {
+              if ((await valSpan.innerText()).includes("Entry")) break;
+              await page.waitForTimeout(100);
+            }
+          }
         }
       }
       await Promise.all([
@@ -904,17 +970,17 @@ Deno.test({
           const current = await page.inputValue('textarea[name="type"]');
           await page.fill('textarea[name="type"]', current.trim() + "\nEntry");
         } else {
-          const details = page.locator('details.hyle-picker-details');
+          const details = page.locator('.hyle-picker[data-hyle-picker-key="type"] details.hyle-picker-details');
           if (await details.count() > 0) {
             const open = await details.first().getAttribute('open');
             if (open === null) await details.locator('summary').first().click();
           }
-          let cEntry = page.locator('input[name="type"][value="entry"]');
+          let cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
           if (await cEntry.count() === 0) {
-            const search = page.locator('input.hyle-picker-search');
+            const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
             if (await search.count() > 0) {
               await search.fill("Entry");
-              const rows = page.locator('.hyle-picker-rows').first();
+              const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
               await rows.waitFor({ state: "visible" });
               let text = await rows.innerText();
               for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
@@ -922,9 +988,16 @@ Deno.test({
                 text = await rows.innerText();
               }
             }
-            cEntry = page.locator('input[name="type"][value="entry"]');
+            cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
           }
-          if (await cEntry.count() > 0) await cEntry.first().check();
+          if (await cEntry.count() > 0) {
+            await cEntry.first().check();
+            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
+            for (let i = 0; i < 20; i++) {
+              if ((await valSpan.innerText()).includes("Entry")) break;
+              await page.waitForTimeout(100);
+            }
+          }
         }
       }
       await Promise.all([

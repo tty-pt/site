@@ -557,10 +557,15 @@ XY_IMPL(int, list_fill_state,
 			        fkey, sizeof(fkey), "%s:%s", state->ids[i],
 			        cols[j].key);
 			fval = (const char *)qmap_get(fields_hd, fkey);
-			if (!fval)
-				fval = "";
+			if (!fval || !fval[0]) {
+				if (j == 0 && state->ids[i])
+					fval = state->ids[i];
+				else
+					fval = "";
+			}
 			if (j > 0 &&
-			    cols[j].type == SOURCE_FIELD_MULTI_REFERENCE &&
+			    (cols[j].type == SOURCE_FIELD_MULTI_REFERENCE ||
+			     cols[j].type == SOURCE_FIELD_REFERENCE) &&
 			    cols[j].target_hd)
 				fval = idx_resolve_refs(&cols[j], fval);
 			state->values[i * ncols + j] = strdup(fval);

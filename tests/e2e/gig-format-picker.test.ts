@@ -114,6 +114,17 @@ Deno.test({
       throw new Error(`Expected fmt_0 to be sbt_ent or Entrada, got ${fmtVal}`);
     }
 
+    // Verify format picker does NOT have inline add capability on edit page
+    const editFmtPicker = page.locator('.gig-format-picker').first();
+    const editAddableAttr = await editFmtPicker.getAttribute("data-hyle-picker-addable");
+    if (editFmtPicker && editAddableAttr !== null) {
+      throw new Error("Gig edit format picker must NOT have data-hyle-picker-addable attribute");
+    }
+    const editAddBtn = editFmtPicker.locator('button[data-hyle-picker-add], .hyle-picker-add');
+    if (await editAddBtn.count() > 0) {
+      throw new Error("Gig edit format picker must NOT display + Add button");
+    }
+
     // Verify sibling GET form exists for fmt_0
     const fmtSibling = await page.$('#pickq-fmt_0');
     if (!fmtSibling) {
@@ -134,6 +145,13 @@ Deno.test({
       throw new Error("Missing sibling GET form #pickq-format__0 on detail page");
     }
 
+    // Verify detail format picker does NOT have inline add capability
+    const detailFmtPicker = page.locator('#sb-fmt-pick-post-0 .hyle-picker').first();
+    const detailAddableAttr = await detailFmtPicker.getAttribute("data-hyle-picker-addable");
+    if (detailAddableAttr !== null) {
+      throw new Error("Gig detail format picker must NOT have data-hyle-picker-addable attribute");
+    }
+
     // ── 5. Interact with Detail Page Format Picker: search and switch to Comunhao ──
     await fmtTrigger.click();
 
@@ -141,8 +159,14 @@ Deno.test({
     await fmtSearchInput.waitFor({ state: "visible", timeout: 5000 });
     await fmtSearchInput.fill("Comunhao");
 
+    // Ensure + Add button is NOT shown in search results on detail page
+    const detailAddBtn = page.locator('#sb-fmt-pick-post-0 button[data-hyle-picker-add], #sb-fmt-pick-post-0 .hyle-picker-add');
+    if (await detailAddBtn.count() > 0) {
+      throw new Error("Gig detail format picker must NOT display + Add button during search");
+    }
+
     const fmtOption = page.locator(
-      '#sb-fmt-pick-post-0 label.hyle-picker-option:has(input[name="format"][value="sbt_com"]), #sb-fmt-pick-post-0 label.hyle-picker-option:has(input[name="format"][value="Comunhao"])',
+      '#sb-fmt-pick-post-0 label.hyle-picker-option:has(input[name="format"][value="sbt_com"]), #sb-fmt-pick-post-0 label.hyle-picker-option:has(input[name="format"][value="Comunhao"]), #sb-fmt-pick-post-0 label.hyle-picker-option:has(input[name="format"][value="comunhao"])',
     );
     await fmtOption.first().waitFor({ state: "visible", timeout: 5000 });
 
@@ -152,7 +176,20 @@ Deno.test({
     ]);
 
     // Verify page updated with new format
-    await waitForText(page, "#sb-fmt-pick-post-0", "Comunhao");
+    const deadline = Date.now() + 5000;
+    let found = false;
+    while (Date.now() < deadline) {
+      const text = (await page.textContent("#sb-fmt-pick-post-0") || "").toLowerCase();
+      if (text.includes("comunhao") || text.includes("comunhão") || text.includes("sbt_com")) {
+        found = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!found) {
+      const actual = await page.textContent("#sb-fmt-pick-post-0");
+      throw new Error(`Expected comunhao in #sb-fmt-pick-post-0, got: ${actual}`);
+    }
 
   } finally {
     await page.close();

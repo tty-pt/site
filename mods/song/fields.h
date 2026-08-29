@@ -58,15 +58,33 @@ static const hyle_schema_desc_t song_type_fields[] = {
 #define SONG_TYPE_FIELD_COUNT                                                  \
 	(sizeof(song_type_fields) / sizeof(song_type_fields[0]) - 1)
 
+/* ── Song author entity ──────────────────────────────────────── */
+
+typedef struct {
+	char id[64];
+	char name[256];
+} song_author_cache_t;
+
+static const hyle_schema_desc_t song_author_fields[] = {
+	REC_FIELD(id, song_author_cache_t, id, 64, 1, 0, 0, 0),
+	REC_FIELD(name, song_author_cache_t, name, 256, 1, 0, 0, 1),
+	INVERSE_FIELD(songs, "song.items", "author"), FIELD_END
+};
+
+#define SONG_AUTHOR_FIELD_COUNT                                                \
+	(sizeof(song_author_fields) / sizeof(song_author_fields[0]) - 1)
+
 /* ── Song record fields ──────────────────────────────────────── */
 
 static const hyle_schema_desc_t song_fields[] = {
 	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
 	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
-	MULTI_REF_FIELD_SM(
+	MULTI_REF_FIELD_SMA(
 	        type, song_cache_t, type, 2048, "song.types", "songs", 1,
-	        "dropdown", "and"),
-	REC_FIELD(author, song_cache_t, author, 256, 1, 0, 0, 1),
+	        "dropdown", "and", 1),
+	REF_FIELD_SA(
+	        author, song_cache_t, author, 256, "song.authors", "songs", 1,
+	        "dropdown", 1),
 	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
 	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
 	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
