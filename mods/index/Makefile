@@ -1,4 +1,4 @@
-HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
+HYLE_DIR = $(REPO_ROOT)/external/hyle
 EXTRA_CFLAGS += -I../common -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include
 EXTRA_LDLIBS += -lbud
 EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib

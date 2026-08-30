@@ -232,22 +232,22 @@ static int source_rewrite_query(
 	return 0;
 }
 
-static const char *field_type_name(hyle_source_field_type_t type)
+static const char *field_type_name(hyle_field_type_t type)
 {
 	switch (type) {
-	case HYLE_SOURCE_FIELD_STRING:
+	case HYLE_FIELD_STRING:
 		return "string";
-	case HYLE_SOURCE_FIELD_INT:
+	case HYLE_FIELD_INT:
 		return "int";
-	case HYLE_SOURCE_FIELD_BOOL:
+	case HYLE_FIELD_BOOL:
 		return "bool";
-	case HYLE_SOURCE_FIELD_NULLABLE_STRING:
+	case HYLE_FIELD_NULLABLE_STRING:
 		return "nullable_string";
-	case HYLE_SOURCE_FIELD_REFERENCE:
+	case HYLE_FIELD_REFERENCE:
 		return "reference";
-	case HYLE_SOURCE_FIELD_MULTI_REFERENCE:
+	case HYLE_FIELD_MULTI_REFERENCE:
 		return "multi_reference";
-	case HYLE_SOURCE_FIELD_INVERSE:
+	case HYLE_FIELD_INVERSE:
 		return "inverse";
 	default:
 		return "string";
@@ -595,25 +595,25 @@ static int source_build_rows_json(
 			val = hyle_qmap_get_field_str(def->fields_hd, item_id, f->name);
 
 			switch (f->type) {
-			case HYLE_SOURCE_FIELD_STRING:
+			case HYLE_FIELD_STRING:
 				if (val)
 					json_object_object_add(
 					        jo, f->name,
 					        json_object_new_string(val));
 				break;
-			case HYLE_SOURCE_FIELD_NULLABLE_STRING:
+			case HYLE_FIELD_NULLABLE_STRING:
 				if (val && val[0])
 					json_object_object_add(
 					        jo, f->name,
 					        json_object_new_string(val));
 				break;
-			case HYLE_SOURCE_FIELD_INT:
+			case HYLE_FIELD_INT:
 				if (val)
 					json_object_object_add(
 					        jo, f->name,
 					        json_object_new_int(atoi(val)));
 				break;
-			case HYLE_SOURCE_FIELD_BOOL:
+			case HYLE_FIELD_BOOL:
 				if (val)
 					json_object_object_add(
 					        jo, f->name,
@@ -622,13 +622,13 @@ static int source_build_rows_json(
 					                strcmp(val, "true") ==
 					                        0));
 				break;
-			case HYLE_SOURCE_FIELD_REFERENCE:
+			case HYLE_FIELD_REFERENCE:
 				if (val)
 					json_object_object_add(
 					        jo, f->name,
 					        json_object_new_string(val));
 				break;
-			case HYLE_SOURCE_FIELD_MULTI_REFERENCE: {
+			case HYLE_FIELD_MULTI_REFERENCE: {
 				json_object *arr;
 				arr = source_build_string_array(val);
 				json_object_object_add(
@@ -636,7 +636,7 @@ static int source_build_rows_json(
 				        arr ? arr : json_object_new_array());
 				break;
 			}
-			case HYLE_SOURCE_FIELD_INVERSE: {
+			case HYLE_FIELD_INVERSE: {
 				json_object *arr;
 				arr = source_build_inverse_array(
 				        def, f, item_id);
@@ -772,8 +772,8 @@ static int source_http_get_item_json(
 
 	for (size_t i = 0; i < def->field_count; i++) {
 		const hyle_source_field_t *f = &def->fields[i];
-		if ((f->type == HYLE_SOURCE_FIELD_MULTI_REFERENCE ||
-		     f->type == HYLE_SOURCE_FIELD_REFERENCE) &&
+		if ((f->type == HYLE_FIELD_MULTI_REFERENCE ||
+		     f->type == HYLE_FIELD_REFERENCE) &&
 		    f->target_source)
 			source_resolve_ref_display(jo, def, f, item_id);
 	}
@@ -1115,8 +1115,8 @@ static int inv_guard_cb(const hyle_source_def_t *target, void *user)
 
 	for (size_t i = 0; i < target->field_count; i++) {
 		const hyle_source_field_t *f = &target->fields[i];
-		if (f->type != HYLE_SOURCE_FIELD_REFERENCE &&
-		    f->type != HYLE_SOURCE_FIELD_MULTI_REFERENCE)
+		if (f->type != HYLE_FIELD_REFERENCE &&
+		    f->type != HYLE_FIELD_MULTI_REFERENCE)
 			continue;
 		if (!f->target_source)
 			continue;

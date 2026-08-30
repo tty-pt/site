@@ -96,15 +96,34 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 			await cb({ prompt: substantivePrompt, systemPrompt: "Base prompt." }, harness.mockCtx);
 		}
 
-		// Verify active quest is set and status
-		const status = await harness.commands["quest-status"].handler("", harness.mockCtx);
-		assert.ok(status && !status.includes("No active quest"), "Root quest must be created and active");
-		assert.ok(status.includes("refactor-authentication-system") || status.includes("passkeys"), `Active quest slug should reflect prompt: ${status}`);
+		// Verify provisional root quest is initialized
+		const statusProvisional = await harness.commands["quest-status"].handler("", harness.mockCtx);
+		assert.ok(statusProvisional && statusProvisional.includes("PROVISIONAL ROOT INITIALIZATION"), "Root quest must enter provisional state");
 
-		// Extract quest slug from status
-		const match = status.match(/docs\/current\/([^.\s]+)\.md/);
-		assert.ok(match && match[1], "Active quest path must be present in docs/current/");
-		const slug = match[1];
+		// Initialize durable quest with research-grounded semantic name
+		const slug = "passkey-auth-migration";
+		await harness.tools["quest_update_state"].execute(
+			"call_init",
+			{
+				name: slug,
+				goal: "Support passkeys in authentication system",
+				status: "Research complete",
+				understanding: "Authentication system is in mods/auth and uses axil session cookies.",
+				assumptions: ["Existing login fallback remains functional"],
+				openQuestions: ["None"],
+				findings: ["Passkey public key credentials can be verified with libcrypto"],
+				plan: ["1. Add WebAuthn challenge endpoint", "2. Add passkey verify handler"],
+				planConfidence: "high",
+				exactNextAction: "Implement WebAuthn endpoint",
+				researchComplete: true,
+			},
+			null,
+			null,
+			harness.mockCtx,
+		);
+
+		const status = await harness.commands["quest-status"].handler("", harness.mockCtx);
+		assert.ok(status.includes(slug), `Active quest slug should be active: ${status}`);
 
 		// Verify quest file content on disk
 		const questFilePath = `docs/current/${slug}.md`;
@@ -136,10 +155,28 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 			await cb({ prompt: rootPrompt, systemPrompt: "Base prompt." }, harness.mockCtx);
 		}
 
+		const slug = "song-volume-normalization";
+		await harness.tools["quest_update_state"].execute(
+			"call_init",
+			{
+				name: slug,
+				goal: rootPrompt,
+				status: "Research complete",
+				understanding: "Audio player normalizes volume in audio pipeline.",
+				assumptions: ["Replaygain tags supported"],
+				openQuestions: ["None"],
+				findings: ["Normalizer fits in player buffer loop"],
+				plan: ["1. Implement volume scaling"],
+				planConfidence: "high",
+				exactNextAction: "Add gain scaling",
+				researchComplete: true,
+			},
+			null,
+			null,
+			harness.mockCtx,
+		);
+
 		const status1 = await harness.commands["quest-status"].handler("", harness.mockCtx);
-		const match = status1.match(/docs\/current\/([^.\s]+)\.md/);
-		assert.ok(match && match[1], "Active quest must exist");
-		const slug = match[1];
 		const questFilePath = `docs/current/${slug}.md`;
 
 		// Verify initially marked clean
@@ -226,17 +263,19 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 		);
 		assert.strictEqual(finalSaveMsgs.length, 1, "Entering warning window on turn_end must issue final save instruction");
 
-		// Repeated turns inside warning window must NOT duplicate messages
+		// Repeated turns inside warning window continue to receive escalated warning steering
 		for (let i = 0; i < 3; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 60));
 			for (const cb of harness.handlers["turn_end"] || []) {
 				await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/gig/gig.c" } }] }, harness.mockCtx);
 			}
 		}
 		const finalSaveMsgsRepeated = harness.userMessages.filter((m) =>
 			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
 		);
-		assert.strictEqual(finalSaveMsgsRepeated.length, 1, "Repeated turns in warning window must not spam duplicate save requests");
+		assert.strictEqual(finalSaveMsgsRepeated.length, 4, "Repeated turns in warning window must continue to issue escalated steering");
 
 		// Tokens reach full compaction threshold (335k >= 333k) - dirty state blocks compaction
 		harness.setTokens(335000);

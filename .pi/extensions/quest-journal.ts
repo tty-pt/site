@@ -147,6 +147,33 @@ export interface StoredState {
 	lastResumeTarget?: string | null;
 	lastResumeCompactCount?: number;
 	pickerCancelled?: boolean;
+
+	// Iterative research & reassessment epistemic state
+	pendingRootQuest?: boolean;
+	pendingRootRequest?: string | null;
+	questIdentityEstablished?: boolean;
+	researchRound?: number;
+	researchComplete?: boolean;
+	researchRequired?: boolean;
+	reassessmentRequired?: boolean;
+	reassessmentReason?: string | null;
+	reassessmentEvidence?: string | null;
+	reassessmentVersion?: number;
+	resolvedReassessmentVersion?: number;
+	lastPlanRevisionsText?: string | null;
+	confirmedQuests?: string[];
+	lastReassessmentPromptAt?: number;
+	lastReassessmentReason?: string | null;
+	lastCheckpointPromptAt?: number;
+	planVersion?: number;
+	planConfidence?: "low" | "medium" | "high";
+	lastResearchAt?: number;
+	lastPlanRevisionAt?: number;
+	lastPromptedReassessmentVersion?: number;
+	implementationAllowed?: boolean;
+	awaitingUserConfirmation?: boolean;
+	consecutiveFailures?: number;
+	substantiveTurnsSinceCheckpoint?: number;
 }
 
 const sessionStates = new Map<string, StoredState>();
@@ -182,6 +209,31 @@ function createDefaultState(): StoredState {
 		lastResumeTarget: null,
 		lastResumeCompactCount: undefined,
 		pickerCancelled: false,
+		pendingRootQuest: false,
+		pendingRootRequest: null,
+		questIdentityEstablished: false,
+		researchRound: 1,
+		researchComplete: false,
+		researchRequired: true,
+		reassessmentRequired: false,
+		reassessmentReason: null,
+		reassessmentEvidence: null,
+		reassessmentVersion: 0,
+		resolvedReassessmentVersion: 0,
+		lastPlanRevisionsText: null,
+		confirmedQuests: [],
+		lastReassessmentPromptAt: 0,
+		lastReassessmentReason: null,
+		lastCheckpointPromptAt: 0,
+		planVersion: 1,
+		planConfidence: "low",
+		lastResearchAt: Date.now(),
+		lastPlanRevisionAt: Date.now(),
+		lastPromptedReassessmentVersion: 0,
+		implementationAllowed: false,
+		awaitingUserConfirmation: false,
+		consecutiveFailures: 0,
+		substantiveTurnsSinceCheckpoint: 0,
 	};
 }
 
@@ -212,6 +264,31 @@ function snapshotState(ctx?: ExtensionContext): StoredState {
 		lastResumeTarget: s.lastResumeTarget ?? null,
 		lastResumeCompactCount: s.lastResumeCompactCount,
 		pickerCancelled: !!s.pickerCancelled,
+		pendingRootQuest: !!s.pendingRootQuest,
+		pendingRootRequest: s.pendingRootRequest ?? null,
+		questIdentityEstablished: !!s.questIdentityEstablished,
+		researchRound: typeof s.researchRound === "number" ? s.researchRound : 1,
+		researchComplete: !!s.researchComplete,
+		researchRequired: typeof s.researchRequired === "boolean" ? s.researchRequired : !s.researchComplete,
+		reassessmentRequired: !!s.reassessmentRequired,
+		reassessmentReason: s.reassessmentReason ?? null,
+		reassessmentEvidence: s.reassessmentEvidence ?? null,
+		reassessmentVersion: typeof s.reassessmentVersion === "number" ? s.reassessmentVersion : 0,
+		resolvedReassessmentVersion: typeof s.resolvedReassessmentVersion === "number" ? s.resolvedReassessmentVersion : 0,
+		lastPlanRevisionsText: s.lastPlanRevisionsText ?? null,
+		confirmedQuests: Array.isArray(s.confirmedQuests) ? [...s.confirmedQuests] : [],
+		lastReassessmentPromptAt: s.lastReassessmentPromptAt ?? 0,
+		lastReassessmentReason: s.lastReassessmentReason ?? null,
+		lastCheckpointPromptAt: s.lastCheckpointPromptAt ?? 0,
+		planVersion: typeof s.planVersion === "number" ? s.planVersion : 1,
+		planConfidence: s.planConfidence ?? "low",
+		lastResearchAt: s.lastResearchAt ?? Date.now(),
+		lastPlanRevisionAt: s.lastPlanRevisionAt ?? Date.now(),
+		lastPromptedReassessmentVersion: s.lastPromptedReassessmentVersion ?? 0,
+		implementationAllowed: canImplement(s),
+		awaitingUserConfirmation: !!s.awaitingUserConfirmation,
+		consecutiveFailures: typeof s.consecutiveFailures === "number" ? s.consecutiveFailures : 0,
+		substantiveTurnsSinceCheckpoint: typeof s.substantiveTurnsSinceCheckpoint === "number" ? s.substantiveTurnsSinceCheckpoint : 0,
 	};
 }
 
@@ -356,17 +433,18 @@ function readSettingsEconomyThreshold(): { tokens?: number | null; percent?: num
 	return null;
 }
 
-function getEconomyThreshold(ctx?: ExtensionContext): number {
+function getEconomyThreshold(ctx?: ExtensionContext, targetState?: StoredState): number {
 	const c = getActiveContext(ctx);
+	const s = targetState || getState(c);
 	const usage = typeof c?.getContextUsage === "function" ? c.getContextUsage() : undefined;
 	const contextWindow = usage?.contextWindow ?? 0;
 
 	// 1. Explicit state overrides
-	if (typeof state.economyPercent === "number" && state.economyPercent > 0) {
-		return contextWindow > 0 ? Math.round((contextWindow * state.economyPercent) / 100) : DEFAULT_CEILING_TOKENS;
+	if (typeof s.economyPercent === "number" && s.economyPercent > 0) {
+		return contextWindow > 0 ? Math.round((contextWindow * s.economyPercent) / 100) : DEFAULT_CEILING_TOKENS;
 	}
-	if (typeof state.economyTokens === "number") {
-		return state.economyTokens;
+	if (typeof s.economyTokens === "number") {
+		return s.economyTokens;
 	}
 
 	// 2. Environment variables
@@ -419,9 +497,11 @@ function readSettingsSubquestThreshold(): number | null {
 	return null;
 }
 
-function getSubquestCompactThreshold(): number {
-	if (typeof state.subquestCompactTokens === "number") {
-		return state.subquestCompactTokens;
+function getSubquestCompactThreshold(ctx?: ExtensionContext, targetState?: StoredState): number {
+	const c = getActiveContext(ctx);
+	const s = targetState || getState(c);
+	if (typeof s.subquestCompactTokens === "number") {
+		return s.subquestCompactTokens;
 	}
 	const envVal = process.env.PI_QUEST_SUBQUEST_COMPACT_TOKENS ?? process.env.QUEST_SUBQUEST_COMPACT_TOKENS;
 	const parsedEnv = parseTokenAmount(envVal, DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS);
@@ -449,9 +529,11 @@ function readSettingsWarningMargin(): number | null {
 	return null;
 }
 
-function getWarningMargin(): number {
-	if (typeof state.warningMarginTokens === "number") {
-		return state.warningMarginTokens;
+function getWarningMargin(ctx?: ExtensionContext, targetState?: StoredState): number {
+	const c = getActiveContext(ctx);
+	const s = targetState || getState(c);
+	if (typeof s.warningMarginTokens === "number") {
+		return s.warningMarginTokens;
 	}
 	const envVal = process.env.PI_QUEST_PRE_COMPACT_WARNING_TOKENS ?? process.env.QUEST_PRE_COMPACT_WARNING_TOKENS;
 	const parsedEnv = parseTokenAmount(envVal, DEFAULT_PRE_COMPACT_WARNING_TOKENS);
@@ -469,10 +551,10 @@ function getCompactionInstructions(activeQuest: string, tokens: number | null, t
 	const tokenLabel = tokens !== null ? ` at ${formatTokens(tokens)} tokens (threshold: ${formatTokens(threshold)})` : "";
 
 	if (isSubQuest && parentName) {
-		return `Economy auto-compaction${tokenLabel} during sub-quest '${activeQuest}' (parent: '${parentName}'). Focus summary on active sub-quest progress, key architectural decisions, modified files, and immediate sub-quest next steps. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, autonomously read docs/current/${activeQuest}.md and proceed with the next step with zero re-research.`;
+		return `Economy auto-compaction${tokenLabel} during sub-quest '${activeQuest}' (parent: '${parentName}'). Focus summary on active sub-quest progress, tested hypotheses, key architectural decisions, modified files, and immediate sub-quest next steps. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, autonomously read docs/current/${activeQuest}.md, validate current understanding against the recovered state, and proceed with the most justified next action.`;
 	}
 
-	return `Economy auto-compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', key architectural decisions, modified files, and immediate next steps. The latest durable quest state is persisted in docs/current/${activeQuest}.md. Following compaction, autonomously read docs/current/${activeQuest}.md and proceed with the next step with zero re-research.`;
+	return `Economy auto-compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', tested hypotheses, key architectural decisions, modified files, and immediate next steps. The latest durable quest state is persisted in docs/current/${activeQuest}.md. Following compaction, autonomously read docs/current/${activeQuest}.md, validate current understanding against the recovered state, and proceed with the most justified next action.`;
 }
 
 const MAX_QUEST_NAME_DISPLAY_LENGTH = 24;
@@ -505,6 +587,421 @@ function formatQuestHierarchy(active: string | null, stack?: string[], maxNameLe
 
 	if (depth <= 1) return activeTruncated;
 	return `d${depth}: ${activeTruncated}`;
+}
+
+export enum CompactionPressure {
+	NONE = "NONE",
+	WARNING = "WARNING",
+	CRITICAL = "CRITICAL",
+}
+
+export function getCompactionPressure(ctx?: ExtensionContext, targetState?: StoredState): {
+	pressure: CompactionPressure;
+	tokens: number | null;
+	threshold: number;
+	warningThreshold: number;
+	warningMargin: number;
+	fraction: number;
+} {
+	const c = getActiveContext(ctx);
+	const s = targetState || getState(c);
+	if (!c || !s.active || s.compactionPending) {
+		return {
+			pressure: CompactionPressure.NONE,
+			tokens: null,
+			threshold: 0,
+			warningThreshold: 0,
+			warningMargin: 0,
+			fraction: 0,
+		};
+	}
+
+	const threshold = getEconomyThreshold(c, s);
+	const tokens = calculateCurrentTokens(c);
+	const warningMargin = getWarningMargin(c, s);
+
+	if (threshold <= 0 || tokens === null) {
+		return {
+			pressure: CompactionPressure.NONE,
+			tokens,
+			threshold,
+			warningThreshold: 0,
+			warningMargin,
+			fraction: 0,
+		};
+	}
+
+	const warningThreshold = Math.max(0, threshold - warningMargin);
+
+	if (tokens >= threshold) {
+		const span = Math.max(1, warningMargin);
+		const fraction = 1 + (tokens - threshold) / span;
+		return {
+			pressure: CompactionPressure.CRITICAL,
+			tokens,
+			threshold,
+			warningThreshold,
+			warningMargin,
+			fraction,
+		};
+	}
+
+	if (tokens >= warningThreshold) {
+		const span = Math.max(1, threshold - warningThreshold);
+		const fraction = (tokens - warningThreshold) / span;
+		return {
+			pressure: CompactionPressure.WARNING,
+			tokens,
+			threshold,
+			warningThreshold,
+			warningMargin,
+			fraction,
+		};
+	}
+
+	return {
+		pressure: CompactionPressure.NONE,
+		tokens,
+		threshold,
+		warningThreshold,
+		warningMargin,
+		fraction: 0,
+	};
+}
+
+function isRootQuest(targetState?: StoredState): boolean {
+	const s = targetState || state;
+	return !Array.isArray(s.stack) || s.stack.length <= 1;
+}
+
+function canImplement(targetState?: StoredState, ctx?: ExtensionContext): boolean {
+	const s = targetState || state;
+	if (s.pendingRootQuest) return false;
+	if (!s.active) return true;
+	const c = getActiveContext(ctx);
+	if (c) {
+		const pressureInfo = getCompactionPressure(c, s);
+		if (pressureInfo.pressure === CompactionPressure.CRITICAL && !compactionReady(s.active)) {
+			return false;
+		}
+	}
+	if (s.researchRequired) return false;
+	if (!s.researchComplete) return false;
+	if (s.reassessmentRequired) return false;
+	if (isRootQuest(s) && s.awaitingUserConfirmation) return false;
+	return true;
+}
+
+function syncImplementationPermission(targetState?: StoredState, ctx?: ExtensionContext): boolean {
+	const s = targetState || state;
+	s.implementationAllowed = canImplement(s, ctx);
+	return s.implementationAllowed;
+}
+
+function getImplementationBlockReason(targetState?: StoredState, ctx?: ExtensionContext): {
+	blocked: boolean;
+	stateName: string;
+	reason: string;
+	requiredAction: string;
+} {
+	const s = targetState || state;
+	const c = getActiveContext(ctx);
+	if (c && s.active) {
+		const pressureInfo = getCompactionPressure(c, s);
+		if (pressureInfo.pressure === CompactionPressure.CRITICAL && !compactionReady(s.active)) {
+			return {
+				blocked: true,
+				stateName: "CRITICAL_COMPACTION_CHECKPOINT_REQUIRED",
+				reason: `Context usage (${formatTokens(pressureInfo.tokens || 0)} tokens) has reached or exceeded the compaction threshold (${formatTokens(pressureInfo.threshold)} tokens) and no fresh verified durable checkpoint exists.`,
+				requiredAction: `Perform an exhaustive durable state update in docs/current/${s.active}.md and call quest_mark_saved before modifying project code.`
+			};
+		}
+	}
+	if (s.pendingRootQuest) {
+		return {
+			blocked: true,
+			stateName: "PROVISIONAL_RESEARCH_PENDING",
+			reason: "Initial orientation & research required to understand the objective and establish the quest identity before modifying project code.",
+			requiredAction: "Investigate relevant architecture and code paths using read/search/bash tools, establish a concise semantic quest identity, and call quest_update_state to initialize the durable quest with your research findings."
+		};
+	}
+	if (!s.active) {
+		return { blocked: false, stateName: "IDLE", reason: "", requiredAction: "" };
+	}
+	if (s.reassessmentRequired) {
+		return {
+			blocked: true,
+			stateName: "REASSESSMENT_PENDING",
+			reason: s.reassessmentReason || "The current plan has been invalidated by contradictory evidence or test failure.",
+			requiredAction: `Investigate the contradiction, challenge prior assumptions, update docs/current/${s.active}.md, and complete reassessment via quest_update_state({ reassessmentComplete: true, reassessmentConclusion: "..." }) before modifying project code.`
+		};
+	}
+	if (s.researchRequired || !s.researchComplete) {
+		return {
+			blocked: true,
+			stateName: "RESEARCH_PENDING",
+			reason: `Research & falsification pass is pending (Round ${s.researchRound || 1}). Key architecture, module boundaries, and assumptions must be verified first.`,
+			requiredAction: `Perform targeted read/search investigation, update docs/current/${s.active}.md with verified understanding and plan, and call quest_update_state({ researchComplete: true }) with medium or high confidence.`
+		};
+	}
+	if (isRootQuest(s) && s.awaitingUserConfirmation) {
+		return {
+			blocked: true,
+			stateName: "CONFIRMATION_PENDING",
+			reason: "Root quest research is complete, but user confirmation is required before modifying project code.",
+			requiredAction: "Present your research findings, tested assumptions, and proposed plan clearly to the user (using ask_questions or a plain text question), and wait for user confirmation before editing code."
+		};
+	}
+	return { blocked: false, stateName: "IMPLEMENTATION_ALLOWED", reason: "", requiredAction: "" };
+}
+
+export enum UserMessageClassification {
+	CONVERSATIONAL_ACK = "CONVERSATIONAL_ACK",
+	CONFIRMATION = "CONFIRMATION",
+	QUESTION_OR_DISCUSSION = "QUESTION_OR_DISCUSSION",
+	REFINEMENT_OR_REQUIREMENT = "REFINEMENT_OR_REQUIREMENT",
+}
+
+function hasRequirementKeyword(text: string): boolean {
+	const lower = text.toLowerCase();
+	return /\b(also add|change requirement|instead of|new requirement|must also|must not|actually need|do not|please change|refactor|fix|bug|broken|error|fail)\b/i.test(lower);
+}
+
+function classifyUserMessage(text: string): UserMessageClassification {
+	const trimmed = text.trim();
+	if (!trimmed) return UserMessageClassification.CONVERSATIONAL_ACK;
+
+	const lower = trimmed.toLowerCase();
+	const clean = lower.replace(/[.,!?;:]+/g, " ").trim();
+	const words = clean.split(/\s+/).filter(Boolean);
+
+	const hasReq = hasRequirementKeyword(lower);
+
+	// 1. Explicit user confirmations (standalone or combination of confirmation phrases)
+	const confirmPhrases = [
+		"yes", "yep", "yeah", "sure", "go ahead", "proceed", "approved", "approve",
+		"do it", "confirm", "confirmed", "lgtm", "looks good", "sounds good",
+		"start", "implement", "implement it", "let's do it", "lets do it", "let's go", "lets go",
+		"continue", "fine by me", "go for it", "go", "please proceed", "please implement",
+		"go ahead and implement", "looks good to me", "sounds good to me", "all good"
+	];
+
+	const matchesConfirmationPattern = confirmPhrases.some((phrase) => {
+		if (clean === phrase) return true;
+		if (clean.startsWith(phrase + " ") || clean.endsWith(" " + phrase) || clean.includes(" " + phrase + " ")) {
+			if (!hasReq && clean.length < 120) return true;
+		}
+		return false;
+	});
+
+	if (matchesConfirmationPattern) {
+		return UserMessageClassification.CONFIRMATION;
+	}
+
+	// 2. Pure conversational acknowledgments / greetings / closures
+	const ackWords = new Set(["hi", "hello", "hey", "greetings", "thanks", "thank", "you", "thx", "ok", "okay", "k", "got", "it", "cool", "nice", "great", "good", "fine", "done", "quit", "exit", "no", "nope", "bye"]);
+	const allAckWords = words.length > 0 && words.every((w) => ackWords.has(w));
+	if (allAckWords && !hasReq) {
+		return UserMessageClassification.CONVERSATIONAL_ACK;
+	}
+
+	// 3. Informational questions / inquiries about status, files, syntax
+	const isQuestion = /^(what|where|who|how|why|is there|are there|can you explain|explain|tell me|show me|which|status|how does|what is|what are)\b/i.test(lower) || lower.endsWith("?");
+	if (isQuestion && trimmed.length < 250) {
+		if (!hasReq) {
+			return UserMessageClassification.QUESTION_OR_DISCUSSION;
+		}
+	}
+
+	// 4. Material requirements / refinements
+	return UserMessageClassification.REFINEMENT_OR_REQUIREMENT;
+}
+
+function acceptRootConfirmation(pi: ExtensionAPI, ctx?: ExtensionContext): void {
+	if (!state.awaitingUserConfirmation) return;
+	state.awaitingUserConfirmation = false;
+	if (state.active) {
+		if (!Array.isArray(state.confirmedQuests)) state.confirmedQuests = [];
+		if (!state.confirmedQuests.includes(state.active)) {
+			state.confirmedQuests.push(state.active);
+		}
+	}
+	syncImplementationPermission(state);
+	persist(pi, ctx);
+	updateUIStatus(ctx);
+}
+
+function isConfirmationQuestion(
+	questionText = "",
+	headerText = "",
+	inputQuestions?: any[],
+	optionsList?: any[],
+): boolean {
+	const qLower = questionText.toLowerCase();
+	const hLower = headerText.toLowerCase();
+	const combined = `${hLower} ${qLower}`;
+
+	const confirmKeywords = [
+		"proceed", "confirm", "approve", "approval", "implement", "implementation",
+		"start", "begin", "go ahead", "apply changes", "ready to proceed",
+		"shall i", "should i", "permission", "authorization", "execute plan",
+		"next action", "next step", "wrap up", "wrap-up"
+	];
+
+	if (confirmKeywords.some((kw) => combined.includes(kw))) {
+		return true;
+	}
+
+	const checkOptions = (opts?: any[]) => {
+		if (!Array.isArray(opts)) return false;
+		for (const opt of opts) {
+			const optText = (typeof opt === "string" ? opt : opt?.label || opt?.description || "").toLowerCase();
+			if (
+				optText.includes("proceed") ||
+				optText.includes("implement") ||
+				optText.includes("go ahead") ||
+				optText.includes("approve") ||
+				optText.includes("confirm") ||
+				optText.includes("start")
+			) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	if (checkOptions(optionsList)) return true;
+
+	if (Array.isArray(inputQuestions)) {
+		for (const q of inputQuestions) {
+			if (checkOptions(q?.options)) return true;
+		}
+	}
+
+	return false;
+}
+
+function handleAskQuestionsResult(pi: ExtensionAPI, event: any, ctx: ExtensionContext) {
+	if (event.isError || event.error) return;
+	const details = event.details;
+	if (details && (details.status === "cancelled" || details.status === "unavailable" || details.error)) {
+		return;
+	}
+
+	const answers: Array<{ question: string; header: string; answer: string; options?: any[] }> = [];
+
+	if (Array.isArray(details?.answers)) {
+		for (const a of details.answers) {
+			if (typeof a?.answer === "string") {
+				const qIndex = typeof a.questionIndex === "number" ? a.questionIndex : -1;
+				const matchedQ = qIndex >= 0 && Array.isArray(details.questions) ? details.questions[qIndex] : null;
+				answers.push({
+					question: typeof a.question === "string" ? a.question : (matchedQ?.question || ""),
+					header: typeof a.header === "string" ? a.header : (matchedQ?.header || ""),
+					answer: a.answer.trim(),
+					options: matchedQ?.options || (Array.isArray(event.input?.questions) && qIndex >= 0 ? event.input.questions[qIndex]?.options : undefined),
+				});
+			}
+		}
+	} else if (Array.isArray(event.content)) {
+		for (const item of event.content) {
+			if (item?.type === "text" && typeof item.text === "string") {
+				const lines = item.text.split(/\r?\n/);
+				let currentQ = "";
+				for (const line of lines) {
+					const qMatch = line.match(/Question:\s*(.+)$/i);
+					if (qMatch) currentQ = qMatch[1].trim();
+					const aMatch = line.match(/Answer:\s*(.+)$/i);
+					if (aMatch) {
+						answers.push({
+							question: currentQ,
+							header: "",
+							answer: aMatch[1].trim(),
+						});
+						currentQ = "";
+					}
+				}
+			}
+		}
+	}
+
+	if (answers.length === 0) return;
+
+	for (const item of answers) {
+		const answerText = item.answer;
+		if (!answerText) continue;
+
+		const qText = item.question || "";
+		const hText = item.header || "";
+		const isConfirmQ = isConfirmationQuestion(qText, hText, event.input?.questions, item.options);
+
+		const classification = classifyUserMessage(answerText);
+
+		if (isConfirmQ && classification === UserMessageClassification.CONFIRMATION) {
+			acceptRootConfirmation(pi, ctx);
+		} else if (
+			classification === UserMessageClassification.REFINEMENT_OR_REQUIREMENT &&
+			hasRequirementKeyword(answerText)
+		) {
+			if (state.active) {
+				if (!Array.isArray(state.refinements)) state.refinements = [];
+				state.refinements.push(answerText);
+				if (!Array.isArray(state.prompts)) state.prompts = [];
+				state.prompts.push(answerText);
+				if (state.prompts.length > PROMPT_MAX_COUNT) {
+					state.prompts = [state.prompts[0], ...state.prompts.slice(-(PROMPT_MAX_COUNT - 1))];
+				}
+				if (state.refinements.length > PROMPT_MAX_COUNT) {
+					state.refinements = state.refinements.slice(-PROMPT_MAX_COUNT);
+				}
+				triggerReassessment(state, `User refinement received via ask_questions: "${answerText.slice(0, 100)}..."`, answerText);
+				persist(pi, ctx);
+				updateUIStatus(ctx);
+			}
+		}
+	}
+}
+
+function isMutationTool(toolName: string, input?: any): boolean {
+	const normName = (toolName || "").toLowerCase();
+	if (normName === "edit" || normName === "write" || normName === "user_edit" || normName === "user_write") {
+		const rawPath = typeof input?.path === "string" ? input.path : "";
+		const normPath = rawPath.replace(/^\.\//, "").replace(/\\/g, "/");
+		// Allow updating the active quest file or future drafts during research
+		if (state.active && normPath === questPath(state.active)) {
+			return false;
+		}
+		if (normPath.startsWith(`${QUEST_DIR}/`) || normPath.startsWith(`${FUTURE_DIR}/`)) {
+			return false;
+		}
+		return true; // Any other file write/edit is an implementation mutation!
+	}
+	return false;
+}
+
+function installToolCallGate(pi: ExtensionAPI) {
+	pi.on(
+		"tool_call",
+		withContext(async (event: any, ctx: ExtensionContext) => {
+			if (!state.active && !state.pendingRootQuest) return;
+			const toolName = event?.toolName || "";
+			const isMutation = isMutationTool(toolName, event?.input);
+			if (!isMutation) return;
+
+			const gate = getImplementationBlockReason(state, ctx);
+			if (gate.blocked) {
+				const questLabel = state.active ? `docs/current/${state.active}.md` : "(Provisional Root Quest Initializing)";
+				const blockMessage = `[Quest Journal Gate: Blocked] Implementation tool '${toolName}' is forbidden while ${gate.stateName}.\n\nQuest: ${questLabel}\nReason: ${gate.reason}\nRequired next step: ${gate.requiredAction}`;
+				if (ctx?.hasUI) {
+					ctx.ui.notify(`Blocked ${toolName}: ${gate.stateName}`, "warning");
+				}
+				return {
+					block: true,
+					reason: blockMessage,
+				};
+			}
+		}),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +1043,9 @@ function updateUIStatus(ctx?: ExtensionContext) {
 		}
 
 		let stateTag = "";
-		if (!fresh) {
+		if (state.pendingRootQuest) {
+			stateTag = " [PROVISIONAL RESEARCH]";
+		} else if (!fresh) {
 			stateTag = " (save pending)";
 		} else if (threshold > 0 && tokens !== null && tokens >= threshold) {
 			stateTag = " (compaction ready)";
@@ -554,6 +1053,8 @@ function updateUIStatus(ctx?: ExtensionContext) {
 
 		const text = state.active
 			? `✨ quest: ${hier}${tokenInfo}${stateTag}`
+			: state.pendingRootQuest
+			? `✨ quest: [provisional root]${tokenInfo}${stateTag}`
 			: undefined;
 		c.ui.setStatus("quest", text);
 	}
@@ -567,9 +1068,12 @@ function reconstruct(ctx: ExtensionContext) {
 			latest = entry.data as unknown as StoredState;
 		}
 	}
-	const reconstructedState: StoredState = latest && latest.active
+	const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest)
 		? {
-				active: latest.active,
+				active: latest.active || null,
+				pendingRootQuest: typeof latest.pendingRootQuest === "boolean" ? latest.pendingRootQuest : false,
+				pendingRootRequest: typeof latest.pendingRootRequest === "string" ? latest.pendingRootRequest : null,
+				questIdentityEstablished: typeof latest.questIdentityEstablished === "boolean" ? latest.questIdentityEstablished : false,
 				saveCount: latest.saveCount || 0,
 				compactCount: latest.compactCount || 0,
 				prompts: Array.isArray(latest.prompts) ? latest.prompts : [],
@@ -596,8 +1100,31 @@ function reconstruct(ctx: ExtensionContext) {
 				lastResumeTarget: typeof latest.lastResumeTarget === "string" ? latest.lastResumeTarget : null,
 				lastResumeCompactCount: typeof latest.lastResumeCompactCount === "number" ? latest.lastResumeCompactCount : undefined,
 				pickerCancelled: typeof latest.pickerCancelled === "boolean" ? latest.pickerCancelled : false,
+				researchRound: typeof latest.researchRound === "number" ? latest.researchRound : 1,
+				researchComplete: typeof latest.researchComplete === "boolean" ? latest.researchComplete : false,
+				researchRequired: typeof latest.researchRequired === "boolean" ? latest.researchRequired : (!latest.researchComplete),
+				reassessmentRequired: typeof latest.reassessmentRequired === "boolean" ? latest.reassessmentRequired : false,
+				reassessmentReason: typeof latest.reassessmentReason === "string" ? latest.reassessmentReason : null,
+				reassessmentEvidence: typeof latest.reassessmentEvidence === "string" ? latest.reassessmentEvidence : null,
+				reassessmentVersion: typeof latest.reassessmentVersion === "number" ? latest.reassessmentVersion : 0,
+				resolvedReassessmentVersion: typeof latest.resolvedReassessmentVersion === "number" ? latest.resolvedReassessmentVersion : 0,
+				lastPlanRevisionsText: typeof latest.lastPlanRevisionsText === "string" ? latest.lastPlanRevisionsText : null,
+				confirmedQuests: Array.isArray(latest.confirmedQuests) ? latest.confirmedQuests : [],
+				lastReassessmentPromptAt: typeof latest.lastReassessmentPromptAt === "number" ? latest.lastReassessmentPromptAt : 0,
+				lastReassessmentReason: typeof latest.lastReassessmentReason === "string" ? latest.lastReassessmentReason : null,
+				lastCheckpointPromptAt: typeof latest.lastCheckpointPromptAt === "number" ? latest.lastCheckpointPromptAt : 0,
+				planVersion: typeof latest.planVersion === "number" ? latest.planVersion : 1,
+				planConfidence: (latest.planConfidence as any) || "low",
+				lastResearchAt: typeof latest.lastResearchAt === "number" ? latest.lastResearchAt : Date.now(),
+				lastPlanRevisionAt: typeof latest.lastPlanRevisionAt === "number" ? latest.lastPlanRevisionAt : Date.now(),
+				lastPromptedReassessmentVersion: typeof latest.lastPromptedReassessmentVersion === "number" ? latest.lastPromptedReassessmentVersion : 0,
+				implementationAllowed: false,
+				awaitingUserConfirmation: typeof latest.awaitingUserConfirmation === "boolean" ? latest.awaitingUserConfirmation : false,
+				consecutiveFailures: typeof latest.consecutiveFailures === "number" ? latest.consecutiveFailures : 0,
+				substantiveTurnsSinceCheckpoint: typeof latest.substantiveTurnsSinceCheckpoint === "number" ? latest.substantiveTurnsSinceCheckpoint : 0,
 		  }
 		: createDefaultState();
+	syncImplementationPermission(reconstructedState);
 	setSessionState(ctx, reconstructedState);
 	updateUIStatus(ctx);
 }
@@ -710,6 +1237,106 @@ function shouldStartPersistentQuest(prompt: string): boolean {
 	return false;
 }
 
+function initProvisionalRootQuest(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string): void {
+	state.pendingRootQuest = true;
+	state.pendingRootRequest = prompt;
+	state.questIdentityEstablished = false;
+	state.active = null;
+	state.stack = [];
+	state.prompts = [prompt];
+	state.refinements = [];
+	state.dirty = false;
+	state.saveGeneration = null;
+	state.lastSavedHash = null;
+	state.consecutiveFailures = 0;
+	state.substantiveTurnsSinceCheckpoint = 0;
+	state.lastReassessmentPromptAt = 0;
+	state.lastReassessmentReason = null;
+	state.lastCheckpointPromptAt = 0;
+	state.researchRound = 1;
+	state.researchComplete = false;
+	state.researchRequired = true;
+	state.reassessmentRequired = false;
+	state.reassessmentReason = null;
+	state.reassessmentEvidence = null;
+	state.reassessmentVersion = 0;
+	state.resolvedReassessmentVersion = 0;
+	state.lastPlanRevisionsText = null;
+	state.planVersion = 1;
+	state.planConfidence = "low";
+	state.lastResearchAt = Date.now();
+	state.lastPlanRevisionAt = Date.now();
+	state.awaitingUserConfirmation = false;
+
+	syncImplementationPermission(state);
+	persist(pi, ctx);
+	updateUIStatus(ctx);
+}
+
+async function activateExistingQuest(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	slug: string,
+	promptText?: string,
+): Promise<boolean> {
+	if (!slug) return false;
+	const path = questPath(slug);
+	const futurePath = `${FUTURE_DIR}/${slug}.md`;
+
+	const isExistingOnDisk = await fileExists(path);
+	if (!isExistingOnDisk && (await fileExists(futurePath))) {
+		await mkdir(QUEST_DIR, { recursive: true });
+		await rename(futurePath, path);
+		if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
+	} else if (!isExistingOnDisk) {
+		return false;
+	}
+
+	await cleanDraftIfExists(slug, ctx);
+
+	state.pendingRootQuest = false;
+	state.pendingRootRequest = null;
+	state.questIdentityEstablished = true;
+	state.pickerCancelled = false;
+	state.active = slug;
+	state.stack = [slug];
+	state.dirty = false;
+	state.saveGeneration = null;
+	state.lastSavedHash = null;
+	state.consecutiveFailures = 0;
+	state.substantiveTurnsSinceCheckpoint = 0;
+	state.lastReassessmentPromptAt = 0;
+	state.lastReassessmentReason = null;
+	state.lastCheckpointPromptAt = 0;
+
+	const loaded = await loadExistingQuestEpistemicState(slug);
+	if (loaded && loaded.exists) {
+		state.prompts = loaded.originalRequest ? [loaded.originalRequest] : promptText ? [promptText] : [];
+		state.refinements = loaded.refinements;
+		state.researchRound = loaded.researchRound;
+		state.researchComplete = loaded.researchComplete;
+		state.researchRequired = loaded.researchRequired;
+		state.planVersion = loaded.planVersion;
+		state.planConfidence = loaded.planConfidence;
+		state.lastPlanRevisionsText = loaded.lastPlanRevisionsText;
+		state.reassessmentRequired = loaded.reassessmentRequired;
+		state.reassessmentReason = loaded.reassessmentReason;
+		state.reassessmentEvidence = loaded.reassessmentEvidence;
+		state.reassessmentVersion = loaded.reassessmentVersion;
+		state.resolvedReassessmentVersion = loaded.resolvedReassessmentVersion;
+		state.lastResearchAt = loaded.lastResearchAt ?? Date.now();
+		state.lastPlanRevisionAt = loaded.lastPlanRevisionAt ?? Date.now();
+		state.awaitingUserConfirmation = !loaded.researchComplete;
+	}
+
+	syncImplementationPermission(state);
+	await verifyAndMarkSaved(pi, ctx, slug);
+	persist(pi, ctx);
+	updateUIStatus(ctx);
+
+	return true;
+}
+
 async function ensureRootQuestForPrompt(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
@@ -719,38 +1346,22 @@ async function ensureRootQuestForPrompt(
 	const trimmed = prompt.trim();
 	if (!trimmed) return false;
 
-	const slug = generateSlugFromPrompt(trimmed, 45);
-	if (!slug) return false;
-
-	await mkdir(QUEST_DIR, { recursive: true });
-	const path = questPath(slug);
-	const futurePath = `${FUTURE_DIR}/${slug}.md`;
-
-	if (await fileExists(path)) {
-		// Existing quest on disk
-	} else if (await fileExists(futurePath)) {
-		await rename(futurePath, path);
-		if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
-	} else {
-		const template = QUEST_TEMPLATE(slug, trimmed, "", trimmed, []);
-		await writeFile(path, template, "utf8");
+	const currentFiles = await listQuestFiles(QUEST_DIR);
+	for (const f of currentFiles) {
+		const s = f.replace(/\.md$/, "");
+		if (s.length >= 3 && trimmed.toLowerCase().includes(s.toLowerCase())) {
+			return await activateExistingQuest(pi, ctx, s, trimmed);
+		}
+	}
+	const futureFiles = await listQuestFiles(FUTURE_DIR);
+	for (const f of futureFiles) {
+		const s = f.replace(/\.md$/, "");
+		if (s.length >= 3 && trimmed.toLowerCase().includes(s.toLowerCase())) {
+			return await activateExistingQuest(pi, ctx, s, trimmed);
+		}
 	}
 
-	await cleanDraftIfExists(slug, ctx);
-
-	state.pickerCancelled = false;
-	state.active = slug;
-	state.stack = [slug];
-	state.prompts = [trimmed];
-	state.refinements = [];
-	state.dirty = false;
-	state.saveGeneration = null;
-	state.lastSavedHash = null;
-
-	await verifyAndMarkSaved(pi, ctx, slug);
-	persist(pi, ctx);
-	updateUIStatus(ctx);
-
+	initProvisionalRootQuest(pi, ctx, trimmed);
 	return true;
 }
 
@@ -897,13 +1508,15 @@ async function linkSubQuestInParent(parentSlug: string, childSlug: string, descr
 		let content = await readFile(targetPath, "utf8");
 		const linkEntry = description ? `- [ ] [[${childSlug}]] - ${description}` : `- [ ] [[${childSlug}]]`;
 
-		if (content.includes(`[[${childSlug}]]`)) return true;
-
 		const sections = parseMarkdownSections(content);
 		const subSec = sections.get("sub-quests") || sections.get("subquests") || sections.get("sub quests");
 
+		if (subSec && subSec.body && subSec.body.includes(`[[${childSlug}]]`)) {
+			return true;
+		}
+
 		if (subSec) {
-			const cleanedBody = subSec.body.replace(/- \[\s*\]\s*(\n|$)/g, "").trimEnd();
+			const cleanedBody = subSec.body.replace(/- \[\s*\]\s*(\n|$)/g, "").replace(/^-\s*(\n|$)/gm, "").trimEnd();
 			const newSectionBody = cleanedBody ? `${cleanedBody}\n${linkEntry}` : `> Sub-quests, follow-ups, or tangent quests spawned from this quest.\n${linkEntry}`;
 			const regex = new RegExp(`(##\\s+${subSec.heading}\\s*\\n)([\\s\\S]*?)(?=\\n##\\s+|$)`, "i");
 			content = content.replace(regex, `$1${newSectionBody}\n\n`);
@@ -987,11 +1600,11 @@ function projectGuidelines(): string | null {
 
 			const match = content.match(/(##\s+(?:Guidelines|Rules|Invariants|Mandatory Guidelines)[\s\S]*?)(?=\n##\s+|$)/i);
 			if (match && match[1].trim()) {
-				return `### Project Guidelines (auto-detected from \`${file}\`)\n\n${match[1].trim()}`;
+				return `# MANDATORY PROJECT INVARIANTS & GUIDELINES (Strictly Enforced from \`${file}\`)\nCRITICAL: The following guidelines are absolute architectural invariants. You MUST strictly adhere to them across all turns without exception.\n\n${match[1].trim()}`;
 			}
 
 			if (content.length <= 2500) {
-				return `### Project Guidelines (auto-detected from \`${file}\`)\n\n${content}`;
+				return `# MANDATORY PROJECT INVARIANTS & GUIDELINES (Strictly Enforced from \`${file}\`)\nCRITICAL: The following guidelines are absolute architectural invariants. You MUST strictly adhere to them across all turns without exception.\n\n${content}`;
 			}
 		} catch {
 			// file unreadable or missing
@@ -1084,21 +1697,36 @@ const SECTION_ALIASES: Record<string, string[]> = {
 	"original request": ["original request", "original user request", "request"],
 	"parent quest": ["parent quest", "parent", "parentquest"],
 	"current status": ["current status", "status"],
+	"current understanding": ["current understanding", "understanding", "architectural understanding"],
+	"key assumptions": ["key assumptions", "assumptions", "working assumptions"],
+	"open questions & uncertainties": ["open questions & uncertainties", "open questions", "uncertainties", "known problems / uncertainties"],
+	"research findings": ["research findings", "in-depth analysis & findings", "important findings", "findings", "analysis & findings", "research / findings", "research & findings", "important discoveries", "discoveries"],
+	"plan": ["plan", "detailed multi-stage execution plan", "execution plan", "provisional plan", "plan (provisional)"],
+	"plan confidence": ["plan confidence", "confidence"],
+	"plan version": ["plan version", "version"],
+	"plan revisions": ["plan revisions", "plan revision history", "revisions", "plan history"],
+	"last research at": ["last research at", "last research timestamp", "research at", "last research"],
+	"last plan revision at": ["last plan revision at", "last plan revision timestamp", "plan revision at", "last plan revision"],
+	"research round": ["research round", "research cycle"],
+	"reassessment status": ["reassessment status", "reassessment state"],
+	"reassessment version": ["reassessment version"],
+	"resolved reassessment version": ["resolved reassessment version"],
+	"reassessment evidence": ["reassessment evidence"],
+	"rejected approaches": ["rejected approaches", "discarded approaches", "failed approaches", "disproved hypotheses"],
+	"latest reassessment": ["latest reassessment", "reassessment conclusion", "reassessment", "reassessment findings"],
 	"execution snapshot": ["execution snapshot", "execution state", "snapshot", "state"],
 	"execution state": ["execution state"],
 	"build & run commands": ["build & run commands", "build & run", "commands"],
-	"in-depth analysis & findings": ["in-depth analysis & findings", "important findings", "findings", "analysis & findings", "research / findings", "research & findings", "important discoveries", "discoveries"],
 	"decisions made": ["decisions made", "decisions"],
 	"constraints & rules": ["constraints & rules", "constraints", "rules"],
 	"files examined": ["files examined", "examined files"],
 	"files touched": ["files touched", "files modified", "touched files", "modified files", "files"],
 	"test / build status": ["test / build status", "tdd & quality checklist", "test status", "build & test status"],
-	"detailed multi-stage execution plan": ["detailed multi-stage execution plan", "execution plan", "plan"],
 	"acceptance criteria & polish checklist": ["acceptance criteria & polish checklist", "acceptance criteria", "polish checklist"],
 	"sub-quests": ["sub-quests", "subquests", "sub quests"],
 	"quest refinements & user feedback loops": ["quest refinements & user feedback loops", "refinements", "user refinements", "feedback loops"],
 	"remaining work": ["remaining work", "remaining tasks", "remaining", "checklist"],
-	"next recommended step": ["next recommended step", "next action", "next step", "next steps", "exact next action"],
+	"exact next action": ["exact next action", "next recommended step", "next action", "next step", "next steps"],
 	"resume prompt": ["resume prompt", "resume context", "resume briefing"],
 };
 
@@ -1238,8 +1866,108 @@ async function verifyAndMarkSaved(
 	return { success: true, hash: fp.hash, count: state.saveCount };
 }
 
+function isPlaceholderOrEmpty(text: string | undefined): boolean {
+	if (!text) return true;
+	const trimmed = text.trim();
+	if (!trimmed || trimmed === "-" || trimmed === "- [ ]" || trimmed === "- [ ] not started · in progress · blocked · done") return true;
+
+	const placeholderPrefixes = [
+		"> Core architectural facts",
+		"> Material assumptions",
+		"> Material uncertainties",
+		"> Factual discoveries",
+		"> Multi-stage execution plan",
+		"> low · medium · high",
+		"> Most justified immediate action",
+		"> What we are trying to accomplish",
+		"> Paste the verbatim user prompt",
+		"> Concise epistemic briefing",
+		"> A concise briefing",
+		"> What are we proposing to change",
+	];
+
+	for (const prefix of placeholderPrefixes) {
+		if (trimmed.toLowerCase().startsWith(prefix.toLowerCase())) {
+			return true;
+		}
+	}
+
+	const lines = trimmed
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter((l) => l && !l.startsWith(">") && l !== "-" && l !== "- [ ]" && l !== "1." && l !== "- [ ] not started · in progress · blocked · done");
+
+	return lines.length === 0;
+}
+
+function validateResearchPrerequisites(
+	markdownContent: string,
+	planConfidence?: string,
+	allowLowConfidence = false,
+	planConfidenceReason?: string,
+): {
+	valid: boolean;
+	missingSections: string[];
+	confidenceIssue?: string;
+} {
+	const sections = parseMarkdownSections(markdownContent);
+	const missingSections: string[] = [];
+
+	const requiredEpistemicKeys: Array<{ key: string; label: string }> = [
+		{ key: "current understanding", label: "Current Understanding" },
+		{ key: "key assumptions", label: "Key Assumptions" },
+		{ key: "research findings", label: "Research Findings" },
+		{ key: "open questions & uncertainties", label: "Open Questions & Uncertainties" },
+		{ key: "plan", label: "Plan" },
+		{ key: "plan confidence", label: "Plan Confidence" },
+		{ key: "exact next action", label: "Exact Next Action" },
+	];
+
+	for (const req of requiredEpistemicKeys) {
+		const aliases = [req.key, ...(SECTION_ALIASES[req.key] || [])];
+		let foundSec: MarkdownSection | undefined;
+		for (const alias of aliases) {
+			const s = sections.get(alias);
+			if (s && !isPlaceholderOrEmpty(s.body)) {
+				foundSec = s;
+				break;
+			}
+		}
+		if (!foundSec) {
+			missingSections.push(req.label);
+		}
+	}
+
+	let confidenceIssue: string | undefined;
+	const confSec = sections.get("plan confidence") || sections.get("confidence");
+	const confBody = confSec?.body || "";
+	const confText = (planConfidence || confBody).toLowerCase();
+	const hasLow = confText.includes("low");
+	const hasMediumOrHigh = confText.includes("medium") || confText.includes("high");
+
+	if (hasLow && !hasMediumOrHigh) {
+		const reasonText = (planConfidenceReason || confBody).trim();
+		const reasonSubstantive =
+			reasonText.length > 0 &&
+			(reasonText.includes("Reason:") || reasonText.includes("justif") || reasonText.includes("acceptable") || (planConfidenceReason && planConfidenceReason.trim().length > 5)) &&
+			!isPlaceholderOrEmpty(reasonText);
+
+		if (!allowLowConfidence || !reasonSubstantive) {
+			confidenceIssue = "Plan confidence is 'low'. To complete research with low confidence, you must pass allowLowConfidence: true AND provide explicit justification in planConfidenceReason.";
+		}
+	}
+
+	return {
+		valid: missingSections.length === 0 && !confidenceIssue,
+		missingSections,
+		confidenceIssue,
+	};
+}
+
 export enum QuestLifecycleState {
 	IDLE = "IDLE",
+	RESEARCH_PENDING = "RESEARCH_PENDING",
+	REASSESSMENT_PENDING = "REASSESSMENT_PENDING",
 	ACTIVE_CLEAN = "ACTIVE_CLEAN",
 	ACTIVE_DIRTY = "ACTIVE_DIRTY",
 	PRE_COMPACT_DUMP_PENDING = "PRE_COMPACT_DUMP_PENDING",
@@ -1266,79 +1994,168 @@ function getLifecycleState(ctx?: ExtensionContext): QuestLifecycleState {
 		}
 	}
 
+	if (state.reassessmentRequired) {
+		return QuestLifecycleState.REASSESSMENT_PENDING;
+	}
+
+	if (state.researchRequired || !state.researchComplete) {
+		return QuestLifecycleState.RESEARCH_PENDING;
+	}
+
 	if (state.dirty || !compactionReady()) {
 		return QuestLifecycleState.ACTIVE_DIRTY;
 	}
 	return QuestLifecycleState.ACTIVE_CLEAN;
 }
 
-function shouldRequestPreCompactionCheckpoint(
-	ctx?: ExtensionContext,
-): boolean {
-	if (!state.active) return false;
-	if (state.compactionPending) return false;
-	if (state.preCompactionCheckpointPending) return false;
+function buildWarningSavePrompt(
+	activeQuest: string,
+	fraction: number,
+	tokens: number,
+	threshold: number,
+): string {
+	const isClose = fraction >= 0.5;
+	const escalationLabel = isClose ? "Close to Threshold" : "Approaching Threshold";
+	const escalationAdvice = isClose
+		? "Context is close to the compaction threshold. Prioritize an exhaustive durable checkpoint now. Avoid unnecessary further work."
+		: "Context is approaching the compaction threshold. Keep the quest file current and prepare an exhaustive checkpoint.";
 
-	const c = getActiveContext(ctx);
-	if (!c) return false;
+	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
+		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
+	}`;
 
-	const threshold = getEconomyThreshold(c);
-	const tokens = calculateCurrentTokens(c);
-	const warningMargin = getWarningMargin();
+	return `⚡ **Context Compaction Warning (${escalationLabel}: ${formatTokens(tokens)} / ${formatTokens(threshold)} tokens)**:
+Context compaction is imminent. ${escalationAdvice}
 
-	if (threshold <= 0 || tokens === null) return false;
+Before auto-compaction occurs and resets conversation working memory, perform an EXHAUSTIVE DURABLE STATE SAVE in:
+\`${questPath(activeQuest)}\`
 
-	const warningThreshold = Math.max(0, threshold - warningMargin);
+${promptReminder}
 
-	// Only fire inside the warning window, not after the actual threshold.
-	if (tokens < warningThreshold || tokens >= threshold) return false;
+**Epistemic & Execution State Checklist**:
+- Current Status
+- Discoveries & Learnings (architectural facts, verified invariants)
+- Tested Assumptions (validated / invalidated / uncertain)
+- Contradictions & Plan Revisions (if any)
+- Files Touched / Examined
+- Test / Build Status
+- Remaining Work
+- EXACT NEXT ACTION (concrete and immediate)
 
-	// If the quest is already clean and compaction-ready, no pre-compaction dump needed.
-	if (compactionReady() && !state.dirty) return false;
-
-	// A warning has already been issued during this compaction cycle.
-	if (typeof state.lastWarnedCompactionTokens === "number") {
-		return false;
-	}
-
-	return true;
+Update the quest file and call \`quest_mark_saved\` to ensure your state is verified before compaction.`;
 }
+
+function buildCriticalSavePrompt(
+	activeQuest: string,
+	tokens: number,
+	threshold: number,
+): string {
+	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
+		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
+	}`;
+
+	return `🚨 **CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE** 🚨
+
+Context usage (${formatTokens(tokens)} tokens) has reached or exceeded the configured compaction threshold (${formatTokens(threshold)} tokens).
+
+Before doing ANY further substantive work, you MUST perform a FINAL EXHAUSTIVE DURABLE STATE SAVE.
+
+Do NOT continue implementation merely because the current task is unfinished.
+Do NOT defer the checkpoint. STOP treating checkpointing as optional.
+Do NOT assume the existing quest file is sufficient.
+Do NOT provide a short summary in place of the checkpoint.
+
+FIRST:
+1. Reconstruct the current state of the work.
+2. Update the active quest file exhaustively in \`${questPath(activeQuest)}\`.
+3. Preserve discoveries, assumptions, contradictions, decisions, rejected approaches, files touched, verification state, remaining work, and the EXACT NEXT ACTION.
+4. Call quest_mark_saved.
+5. Ensure the save is actually verified.
+
+${promptReminder}
+
+ONLY AFTER THE DURABLE SAVE IS VERIFIED may you continue ordinary work.`;
+}
+
+function buildCriticalCompactionReadyPrompt(
+	activeQuest: string,
+	tokens: number,
+	threshold: number,
+): string {
+	return `🚨 **CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE (DURABLE STATE SAVED)** 🚨
+
+Context usage (${formatTokens(tokens)} tokens) remains at or above the configured compaction threshold (${formatTokens(threshold)} tokens).
+
+Your durable quest checkpoint in \`${questPath(activeQuest)}\` is VERIFIED and ready.
+
+Context auto-compaction is now required. Stand by for auto-compaction across the turn boundary.
+Do NOT begin large new implementation streams before compaction resets working memory.
+Ensure your exact next action is fully documented so execution can resume cleanly post-compaction.`;
+}
+
+let lastPreCompactionSteerTime = 0;
 
 function requestPreCompactionCheckpoint(
 	pi: ExtensionAPI,
 	ctx?: ExtensionContext,
+	force = false,
 ): boolean {
-	if (!shouldRequestPreCompactionCheckpoint(ctx)) {
-		return false;
-	}
-
 	const c = getActiveContext(ctx);
 	if (!c || !state.active) return false;
+	if (state.compactionPending) return false;
+	if (state.pickerCancelled) return false;
 
-	const tokens = calculateCurrentTokens(c);
-	if (tokens === null) return false;
-
-	state.lastWarnedCompactionTokens = tokens;
-	state.preCompactionCheckpointPending = true;
-	persist(pi, ctx);
-
-	const queued = sendDeepSaveRequest(pi);
-
-	if (!queued) {
-		state.preCompactionCheckpointPending = false;
-		state.lastWarnedCompactionTokens = undefined;
-		persist(pi, ctx);
+	const now = Date.now();
+	if (!force && now - lastPreCompactionSteerTime < 50) {
 		return false;
 	}
 
-	if (ctx?.hasUI) {
-		ctx.ui.notify(
-			`Quest-journal: context approaching compaction threshold for '${state.active}' (queued durable save).`,
-			"info",
-		);
+	const { pressure, tokens, threshold, fraction } = getCompactionPressure(c);
+	if (pressure === CompactionPressure.NONE || tokens === null) {
+		return false;
 	}
 
-	return true;
+	lastPreCompactionSteerTime = now;
+	state.lastWarnedCompactionTokens = tokens;
+	persist(pi, c);
+
+	if (pressure === CompactionPressure.CRITICAL) {
+		state.preCompactionCheckpointPending = true;
+		state.preCompactionSaveRequestPending = true;
+		const isReady = compactionReady();
+		const text = isReady
+			? buildCriticalCompactionReadyPrompt(state.active, tokens, threshold)
+			: buildCriticalSavePrompt(state.active, tokens, threshold);
+
+		sendInternalAgentMessage(pi, text, "followUp");
+
+		if (c.hasUI) {
+			const saveStatus = isReady ? "saved & ready for compaction" : "SAVE REQUIRED IMMEDIATELY";
+			c.ui.notify(
+				`🚨 Quest-journal: CRITICAL context pressure (${formatTokens(tokens)}/${formatTokens(threshold)}) for '${state.active}' [${saveStatus}].`,
+				"error",
+			);
+		}
+		return true;
+	}
+
+	if (pressure === CompactionPressure.WARNING) {
+		state.preCompactionCheckpointPending = true;
+		const text = buildWarningSavePrompt(state.active, fraction, tokens, threshold);
+
+		sendInternalAgentMessage(pi, text, "followUp");
+
+		if (c.hasUI) {
+			const levelStr = fraction < 0.5 ? "approaching" : "close to";
+			c.ui.notify(
+				`Quest-journal: context ${levelStr} compaction threshold for '${state.active}' (${formatTokens(tokens)}/${formatTokens(threshold)}).`,
+				"warning",
+			);
+		}
+		return true;
+	}
+
+	return false;
 }
 
 function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
@@ -1357,7 +2174,7 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 		const targetSessionId = getSessionId(c);
 		const parentName = state.active;
 		const instructions = parentName
-			? `Sub-quest '${targetName}' completed and archived. Returning to parent quest '${parentName}'. Focus summary on key architecture decisions, completed sub-quest work, and remaining parent roadmap. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, autonomously read docs/current/${parentName}.md and proceed with the next parent task with zero pause and zero re-research.`
+			? `Sub-quest '${targetName}' completed and archived. Returning to parent quest '${parentName}'. Focus summary on key architecture decisions, completed sub-quest findings, and remaining parent roadmap. Parent quest state is safely preserved on disk in docs/current/${parentName}.md. Following compaction, read docs/current/${parentName}.md first to recover established knowledge, validate the plan against recovered evidence, re-investigate if uncertainty or contradictions exist, and proceed with the most justified parent action.`
 			: `Quest '${targetName}' completed and archived. Focus summary on key architecture decisions, completed work, and remaining roadmap.`;
 
 		setTimeout(() => {
@@ -1413,8 +2230,8 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 			const isSubQuest = Array.isArray(state.stack) && state.stack.length > 1;
 			const parentName = isSubQuest ? state.stack[state.stack.length - 2] : null;
 			const instructions = parentName
-				? `Launching sub-quest '${childName}' (parent: '${parentName}'). Focus summary on parent quest status, key architectural decisions, and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, autonomously read docs/current/${childName}.md and execute the sub-quest with zero re-research.`
-				: `Launching sub-quest '${childName}'. Focus summary on key architectural decisions and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, autonomously read docs/current/${childName}.md and execute the sub-quest with zero re-research.`;
+				? `Launching sub-quest '${childName}' (parent: '${parentName}'). Focus summary on parent quest status, key architectural decisions, and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, read docs/current/${childName}.md first to recover established knowledge, validate the plan against recovered evidence, re-investigate if uncertainty or contradictions exist, and proceed with the most justified next action.`
+				: `Launching sub-quest '${childName}'. Focus summary on key architectural decisions and why sub-quest '${childName}' was launched. Child sub-quest state is safely saved on disk in docs/current/${childName}.md. Following compaction, read docs/current/${childName}.md first to recover established knowledge, validate the plan against recovered evidence, re-investigate if uncertainty or contradictions exist, and proceed with the most justified next action.`;
 
 			const targetSessionId = getSessionId(c);
 			setTimeout(() => {
@@ -1433,6 +2250,9 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 								if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
 									if (c.hasUI) c.ui.notify(`Sub-quest launch compaction failed: ${msg}`, "error");
 								}
+								if (childName) {
+									sendPostCompactionResumePrompt(pi, childName, false, c);
+								}
 							},
 						});
 					} catch (err: any) {
@@ -1441,6 +2261,9 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 						sessionState.preCompactionCheckpointPending = false;
 						sessionState.preCompactionSaveRequestPending = false;
 						logError("Sub-quest launch compaction scheduling failed", err, c);
+						if (childName) {
+							sendPostCompactionResumePrompt(pi, childName, false, c);
+						}
 					}
 				});
 			}, 50);
@@ -1503,6 +2326,11 @@ const SYNTHETIC_PROMPT_PREFIXES = [
 	"context is approaching the configured compaction threshold",
 	"context compaction is now being requested",
 	"context compaction is imminent",
+	"🚨",
+	"🚨 **critical",
+	"critical quest journal compaction",
+	"context compaction warning",
+	"context usage has reached or exceeded",
 ];
 
 const INTERNAL_MESSAGE_PREFIX = "[QuestJournal internal]";
@@ -1522,6 +2350,10 @@ function shouldCapturePrompt(text: string): boolean {
 	if (lower.includes("context compaction is now being requested")) return false;
 	if (lower.includes("context compaction is imminent")) return false;
 	if (lower.includes("final exhaustive durable state save")) return false;
+	if (lower.includes("critical quest journal compaction safety state")) return false;
+	if (lower.includes("context compaction warning")) return false;
+	if (lower.includes("context usage has reached or exceeded")) return false;
+	if (lower.includes("compaction safety state")) return false;
 	return true;
 }
 
@@ -1565,6 +2397,23 @@ function sendInternalAgentMessage(
 	text: string,
 	deliverAs: "steer" | "followUp" | "nextTurn" = "followUp",
 ) {
+	if (typeof pi.sendMessage === "function") {
+		try {
+			pi.sendMessage(
+				{
+					customType: "quest_journal",
+					content: text,
+					display: false,
+				},
+				{
+					deliverAs,
+				},
+			);
+			return;
+		} catch (err: any) {
+			logError("Failed to send internal custom message", err);
+		}
+	}
 	const marked = text.startsWith(INTERNAL_MESSAGE_PREFIX) ? text : `${INTERNAL_MESSAGE_PREFIX}\n${text}`;
 	safeSendUserMessage(pi, marked, { deliverAs });
 }
@@ -1584,86 +2433,79 @@ function sendSaveRequest(pi: ExtensionAPI, message: string) {
 	sendInternalAgentMessage(pi, text, "followUp");
 }
 
-function buildDeepSavePrompt(reason?: string): string {
-	if (!state.active) return "";
-	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
-		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
-	}`;
-	const prefix = reason ? `${reason}\n\n` : "";
-	return `${prefix}⚡ Context compaction is imminent.
-
-Before the current context is discarded, perform a FINAL EXHAUSTIVE DURABLE STATE SAVE.
-
-Review the work performed during this context and update:
-
-\`${questPath(state.active)}\`
-
-so that a fresh agent context can continue the user's objective without reconstructing lost reasoning.
-
-${promptReminder}
-
-The quest file MUST accurately contain, as applicable:
-
-- Original Request
-- Current Status
-- Objective
-- Completed Work
-- In-Progress Work
-- Important Discoveries / Research Findings
-- Architecture / Data Flow
-- Decisions and Rationale
-- Constraints and User Requirements
-- Files Examined
-- Files Modified
-- Test / Build Status
-- Failed Approaches and What They Established
-- Known Problems / Uncertainties
-- Remaining Work
-- EXACT NEXT ACTION
-- Resume Context
-
-Do not merely append a generic summary.
-
-Correct stale information.
-
-Preserve important existing information.
-
-Do not omit important information because it was already mentioned earlier in the conversation.
-
-The \`EXACT NEXT ACTION\` must be concrete enough for a fresh agent to execute immediately.
-
-After updating the quest file, call \`quest_mark_saved\` so the save can be verified.
-
-Do not wait for the user after saving.`;
+function triggerReassessment(
+	targetState: StoredState,
+	reason: string,
+	evidence?: string | null,
+) {
+	targetState.reassessmentVersion = (targetState.reassessmentVersion || 0) + 1;
+	targetState.reassessmentRequired = true;
+	targetState.reassessmentReason = reason;
+	targetState.reassessmentEvidence = evidence ?? null;
+	targetState.researchRequired = true;
+	targetState.researchComplete = false;
+	targetState.planConfidence = "low";
+	targetState.researchRound = (targetState.researchRound || 1) + 1;
+	targetState.dirty = true;
+	targetState.awaitingUserConfirmation = false;
+	if (Array.isArray(targetState.confirmedQuests) && targetState.active) {
+		targetState.confirmedQuests = targetState.confirmedQuests.filter((q) => q !== targetState.active);
+	}
+	syncImplementationPermission(targetState);
 }
 
-/** Queue an internal message asking the model to perform an exhaustive execution snapshot before compaction. */
-function sendDeepSaveRequest(pi: ExtensionAPI, reason?: string): boolean {
-	if (!state.active) return false;
-	const text = buildDeepSavePrompt(reason);
-	if (!text) return false;
+function buildReassessmentPrompt(
+	activeQuest: string,
+	reason: string,
+	evidence?: string | null,
+	planVersion?: number,
+): string {
+	const evidenceBlock = evidence ? `\n\n**Contradictory Evidence & Observed Output**:\n\`\`\`\n${evidence.slice(0, 1500)}\n\`\`\`` : "";
+	const versionStr = typeof planVersion === "number" ? ` (current plan: v${planVersion})` : "";
 
-	if (typeof pi.sendMessage !== "function") {
-		logError("Pi sendMessage() is required for automatic pre-compaction save follow-up");
-		return false;
-	}
+	return `⚡ **Quest Reassessment Required**: Evidence has been encountered that challenges or invalidates the current plan for **${activeQuest}**${versionStr}.
 
-	try {
-		pi.sendMessage(
-			{
-				customType: "quest_journal",
-				content: text,
-				display: false,
-			},
-			{
-				deliverAs: "followUp",
-			},
-		);
-		return true;
-	} catch (err: any) {
-		logError("Failed to queue pre-compaction deep save follow-up", err);
-		return false;
-	}
+**Trigger Reason**: ${reason}${evidenceBlock}
+
+**Reassessment & Falsification Directive**:
+Do not blindly push forward with the current plan, and do not merely declare the plan valid without investigation.
+
+1. **Recover Prior Belief**: What did we assume or expect to happen?
+2. **Inspect New Evidence**: What specific contradiction, test failure, unexpected execution path, or child finding occurred?
+3. **Perform Targeted Fresh Investigation**: Use \`read\` / \`search_graph\` to investigate the specific contradiction. Determine where the mental model diverged from reality.
+4. **Validate or Falsify Assumptions**: Determine whether previous assumptions were invalid or need reformulation.
+5. **Decide Plan Validity & Revise**: Decide whether the plan survives or requires revision. If revising, record the previous plan, invalidating evidence, and new plan under \`## Plan Revisions\` and \`## Rejected Approaches\`.
+6. **Persist & Explicitly Complete Reassessment**:
+   Do not call \`reassessmentComplete\` merely because the quest file was updated.
+   Reassessment is complete only after you have:
+   - investigated the triggering contradiction;
+   - established what was actually true;
+   - validated, invalidated, or reformulated the relevant assumptions;
+   - determined whether the current plan survives;
+   - revised the plan if necessary;
+   - persisted the new evidence and reasoning in \`docs/current/${activeQuest}.md\`;
+   - provided a justified confidence level and concrete next action via \`quest_update_state({ reassessmentComplete: true, ... })\`.
+7. **Continue Execution**: Proceed autonomously with the revised Exact Next Action.`;
+}
+
+function buildResearchCheckpointPrompt(activeQuest: string, planVersion?: number, planConfidence?: string): string {
+	const verStr = typeof planVersion === "number" ? `v${planVersion}` : "v1";
+	const confStr = planConfidence || "unspecified";
+
+	return `⚡ **Periodic Durable Memory & Reasoning Checkpoint**: Substantial execution has occurred on **${activeQuest}** (Current Plan: ${verStr}, Confidence: ${confStr}).
+
+**Reasoning & Decision Questions**:
+1. **Discoveries & Learnings**: What concrete facts or data paths have been established in recent turns?
+2. **Assumption Verification**: Have any key assumptions been disproved or weakened?
+3. **Plan Evaluation & Epistemic Action**: Choose the most justified path and act accordingly:
+   - **If current understanding is well supported** -> Save durable state and continue execution.
+   - **If an important uncertainty exists** -> Perform targeted research pass before continuing to write code.
+   - **If evidence contradicts current model** -> Enter reassessment and update \`## Rejected Approaches\`.
+   - **If plan changed** -> Update plan and record the revision in \`## Plan Revisions\` (auto-increments planVersion).
+4. **Exact Next Action**: What is the most justified immediate execution step?
+
+**Action Required**:
+Update \`docs/current/${activeQuest}.md\` (using \`quest_update_state\` or edit + \`quest_mark_saved\`), then proceed autonomously.`;
 }
 
 function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
@@ -1685,6 +2527,10 @@ function buildSessionAwarenessBlock(ctx: ExtensionContext): string {
 		const stackInfo = state.stack && state.stack.length > 1 ? ` | LIFO stack: [${state.stack.join(" → ")}]` : "";
 		lines.push(
 			`- Active quest: \`docs/current/${state.active}.md\` [${hier}] (${fresh ? "fresh" : "SAVE PENDING - update it before compaction"}${tokenStr}${stackInfo}); manage with /quest, /subquest, /quests, /quest-economy.`,
+		);
+	} else if (state.pendingRootQuest) {
+		lines.push(
+			`- Active quest: [PROVISIONAL ROOT INITIALIZATION] Research required to establish quest identity and plan. Use read/search/bash tools to investigate, determine a concise semantic quest name (e.g. 'persistent-agent-research', 'oauth-login-flow'), and call quest_update_state to initialize the durable quest with your research findings. Original user request is captured in session state.`,
 		);
 	} else {
 		lines.push("- Active quest: none (substantive requests will automatically receive a persistent quest context in docs/current/).");
@@ -1723,6 +2569,10 @@ function installTurnEnd(pi: ExtensionAPI) {
 			const toolResults: any[] = Array.isArray(event.toolResults) ? event.toolResults : [];
 			let didUpdateQuestThisTurn = false;
 			let isSubstantiveTurn = false;
+			let meaningfulFailureDetected = false;
+			let failureReason = "";
+
+			let failureEvidence = "";
 
 			for (const tr of toolResults) {
 				const toolName = (tr?.toolName || tr?.name || "").toLowerCase();
@@ -1734,6 +2584,31 @@ function installTurnEnd(pi: ExtensionAPI) {
 						tr.details.error ||
 						tr.details.success === false
 					));
+
+				// Detect command/test failure in bash tools
+				if (toolName === "bash" || toolName === "user_bash") {
+					const output = typeof tr?.content === "string" ? tr.content :
+						Array.isArray(tr?.content) ? tr.content.map((c: any) => c.text || "").join("\n") :
+						typeof tr?.output === "string" ? tr.output : "";
+					const cmd = tr?.args?.command || tr?.input?.command || tr?.command || "";
+
+					const isTestOrBuild =
+						/make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b/i.test(cmd);
+
+					const hasFailureSignals =
+						toolFailed ||
+						/\b(?:FAIL|FAILED|assertion failed|panic:|Segmentation fault|make:\s*\*\*\*|TypeError|SyntaxError)\b/i.test(output);
+
+					if (hasFailureSignals && isTestOrBuild) {
+						meaningfulFailureDetected = true;
+						failureReason = `Test/build command failed: ${cmd || "test execution"}`;
+						failureEvidence = output ? output.slice(0, 1500) : `Command '${cmd}' failed`;
+					} else if (toolFailed) {
+						meaningfulFailureDetected = true;
+						failureReason = `Command failed with error: ${cmd || "bash command"}`;
+						failureEvidence = output ? output.slice(0, 1500) : `Command '${cmd}' failed with error`;
+					}
+				}
 
 				if (
 					!toolFailed &&
@@ -1778,11 +2653,18 @@ function installTurnEnd(pi: ExtensionAPI) {
 				}
 			}
 
-			if (didUpdateQuestThisTurn) {
+			if (meaningfulFailureDetected) {
+				state.consecutiveFailures = (state.consecutiveFailures || 0) + 1;
+				triggerReassessment(state, failureReason, failureEvidence);
+				persist(pi, ctx);
+				updateUIStatus(ctx);
+			} else if (didUpdateQuestThisTurn) {
+				state.substantiveTurnsSinceCheckpoint = 0;
 				persist(pi, ctx);
 				updateUIStatus(ctx);
 			} else if (isSubstantiveTurn) {
 				state.dirty = true;
+				state.substantiveTurnsSinceCheckpoint = (state.substantiveTurnsSinceCheckpoint || 0) + 1;
 				persist(pi, ctx);
 				updateUIStatus(ctx);
 			}
@@ -1801,13 +2683,31 @@ function installBeforeCompact(pi: ExtensionAPI) {
 		"session_before_compact",
 		withContext(async (_event: any, ctx: ExtensionContext) => {
 			if (!state.active) return;
-			if (compactionReady()) return;
+			if (!compactionReady()) {
+				state.compactionPending = false;
+				state.preCompactionCheckpointPending = true;
+				state.preCompactionSaveRequestPending = true;
+				persist(pi, ctx);
 
-			state.compactionPending = false;
-			if (ctx?.hasUI) {
-				ctx.ui.notify(`Quest-journal: blocking compaction until '${questPath(state.active)}' is saved.`, "warning");
+				const activeFile = questPath(state.active);
+				const msg = `⚡ **Compaction Blocked (Unsaved Working Memory)**:
+Compaction is blocked because the active quest file \`${activeFile}\` contains unsaved changes or unverified state.
+
+To allow auto-compaction and preserve continuity across the boundary:
+1. Update \`${activeFile}\` with your current understanding, decisions, plan confidence, remaining work, and exact next step.
+2. Call \`quest_mark_saved\` to persist the state.
+Once saved, auto-compaction will safely proceed.`;
+
+				sendInternalAgentMessage(pi, msg, "followUp");
+
+				if (ctx?.hasUI) {
+					ctx.ui.notify(`Quest-journal: blocking compaction until '${activeFile}' is saved.`, "warning");
+				}
+				return { cancel: true };
 			}
-			return { cancel: true };
+
+			// Just before compaction: queue the post-compaction resumption follow-up
+			sendPostCompactionResumePrompt(pi, state.active, true, ctx);
 		}),
 	);
 }
@@ -1841,7 +2741,7 @@ function handleCompactionCompleted(
 		updateUIStatus(c);
 	}
 
-	if (sessionState.active) {
+	if (sessionState.active && sessionState.lastResumeCompactCount !== sessionState.compactCount) {
 		sendPostCompactionResumePrompt(pi, sessionState.active, true, c);
 	}
 }
@@ -1858,6 +2758,27 @@ function buildPostCompactionResumeDirective(
 This sub-quest is temporary work in service of the parent/root objective. Completing this sub-quest does not mean the overall objective is complete. After finishing it, return to the parent quest and continue its remaining work.`
 		: `You are working on active quest **${activeQuest}**.`;
 
+	let specificAction = "";
+	if (targetState.reassessmentRequired) {
+		specificAction = `⚡ **State: REASSESSMENT_PENDING** (Reason: ${targetState.reassessmentReason || "Unresolved contradiction"}).
+1. Read \`docs/current/${activeQuest}.md\` using \`read\`.
+2. Do NOT jump into implementation. First investigate the contradiction, challenge previous assumptions, and evaluate whether the current plan is still valid.
+3. Update the quest file with the revised plan and call \`quest_update_state({ reassessmentComplete: true })\`.
+4. Proceed with the revised Exact Next Action.`;
+	} else if (targetState.researchRequired || !targetState.researchComplete) {
+		specificAction = `⚡ **State: RESEARCH_PENDING** (Research Round: ${targetState.researchRound || 1}).
+1. Read \`docs/current/${activeQuest}.md\` using \`read\`.
+2. Complete the required research & falsification pass before writing feature code.
+3. Establish Current Understanding, Key Assumptions, and provisional Plan with medium/high confidence.
+4. Update the quest file and call \`quest_update_state({ researchComplete: true })\`.
+5. Only then proceed to implementation / confirmation.`;
+	} else {
+		specificAction = `⚡ **State: PLAN_ESTABLISHED** (Plan: v${targetState.planVersion || 1}, Confidence: ${targetState.planConfidence || "high"}).
+1. Read \`docs/current/${activeQuest}.md\` using \`read\`.
+2. Validate whether the current plan is still supported by the recovered state. Do not repeat research merely to reconstruct lost context; use the quest file to recover established knowledge. However, if an important assumption is uncertain, tests disagree with the model, or the plan no longer explains observed behavior, re-investigate that specific aspect before executing.
+3. If the plan is established and supported, proceed directly with executing the justified EXACT NEXT ACTION without waiting for user commands and without modal questions.`;
+	}
+
 	return `⚡ **Post-Compaction Autonomous Resumption Directive**:
 Context compaction has finished. Working memory has been cleanly reset.
 
@@ -1865,9 +2786,7 @@ ${subquestContext}
 The single authoritative source of truth on disk is \`docs/current/${activeQuest}.md\`.
 
 **Action Required Now**:
-1. Read \`docs/current/${activeQuest}.md\` using your \`read\` tool.
-2. Recover current status, execution snapshot, remaining work, and EXACT NEXT ACTION.
-3. If the plan was not yet established, formulate the plan and proceed. If the plan is established, proceed directly with implementing the EXACT NEXT ACTION without waiting for user commands, without asking modal questions, and without re-researching solved context. Continue continuously toward the user's objective.`;
+${specificAction}`;
 }
 
 function sendPostCompactionUserMessage(
@@ -1890,7 +2809,7 @@ function sendPostCompactionResumePrompt(pi: ExtensionAPI, activeQuest: string, i
 	const targetSessionId = getSessionId(c);
 	const targetState = sessionStates.get(targetSessionId) ?? getState(c);
 
-	if (isCompaction && typeof targetState.lastResumeCompactCount === "number" && targetState.lastResumeCompactCount === targetState.compactCount) {
+	if (isCompaction && typeof targetState.lastResumeCompactCount === "number" && (targetState.lastResumeCompactCount === targetState.saveCount || targetState.lastResumeCompactCount === targetState.compactCount)) {
 		return;
 	}
 	const now = Date.now();
@@ -1900,12 +2819,12 @@ function sendPostCompactionResumePrompt(pi: ExtensionAPI, activeQuest: string, i
 	targetState.lastResumePromptAt = now;
 	targetState.lastResumeTarget = activeQuest;
 	if (isCompaction) {
-		targetState.lastResumeCompactCount = targetState.compactCount;
+		targetState.lastResumeCompactCount = targetState.saveCount;
 	}
 	persist(pi, c);
 
 	const directiveText = buildPostCompactionResumeDirective(activeQuest, targetState);
-	sendPostCompactionUserMessage(pi, c, directiveText);
+	sendInternalAgentMessage(pi, directiveText, "followUp");
 }
 
 function installAfterCompact(pi: ExtensionAPI) {
@@ -2010,6 +2929,11 @@ function installFileWatch(pi: ExtensionAPI) {
 			return;
 		}
 
+		if (event.toolName === "ask_questions" || (typeof event.toolName === "string" && event.toolName.toLowerCase().includes("ask_question"))) {
+			handleAskQuestionsResult(pi, event, ctx);
+			return;
+		}
+
 		if (event.toolName !== "write" && event.toolName !== "edit") {
 			if (
 				event.toolName === "bash" ||
@@ -2044,11 +2968,18 @@ async function markSubQuestCompletedInParent(parentSlug: string, childSlug: stri
 	const parentPath = questPath(parentSlug);
 	if (!(await fileExists(parentPath))) return false;
 	try {
-		let content = await readFile(parentPath, "utf8");
-		const regex = new RegExp(`(-\\s*\\[)\\s*(\\]\\s*(?:\\[\\[|\\[)?${childSlug}(?:\\]\\]|\\])?)`, "g");
-		if (regex.test(content)) {
-			content = content.replace(regex, "$1x$2");
-			await writeFile(parentPath, content, "utf8");
+		const content = await readFile(parentPath, "utf8");
+		const lines = content.split(/\r?\n/);
+		let matched = false;
+		const updatedLines = lines.map((line) => {
+			if (line.includes(childSlug) && /^\s*-\s*\[\s*\]/.test(line)) {
+				matched = true;
+				return line.replace(/^(\s*-\s*\[)\s*(\]\s*.*)$/, "$1x$2");
+			}
+			return line;
+		});
+		if (matched) {
+			await writeFile(parentPath, updatedLines.join("\n"), "utf8");
 			return true;
 		}
 	} catch (err: any) {
@@ -2059,9 +2990,46 @@ async function markSubQuestCompletedInParent(parentSlug: string, childSlug: stri
 
 const normalizePath = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
 
-async function loadExistingQuestIntent(slug: string): Promise<{ originalRequest: string; refinements: string[] }> {
+interface LoadedQuestState {
+	originalRequest: string;
+	refinements: string[];
+	exists: boolean;
+	researchRound: number;
+	researchComplete: boolean;
+	researchRequired: boolean;
+	planVersion: number;
+	planConfidence: "low" | "medium" | "high";
+	lastResearchAt?: number;
+	lastPlanRevisionAt?: number;
+	awaitingUserConfirmation?: boolean;
+	reassessmentRequired: boolean;
+	reassessmentReason: string | null;
+	reassessmentEvidence: string | null;
+	reassessmentVersion: number;
+	resolvedReassessmentVersion: number;
+	lastPlanRevisionsText: string | null;
+}
+
+async function loadExistingQuestEpistemicState(slug: string): Promise<LoadedQuestState> {
 	const path = questPath(slug);
-	if (!(await fileExists(path))) return { originalRequest: "", refinements: [] };
+	if (!(await fileExists(path))) {
+		return {
+			originalRequest: "",
+			refinements: [],
+			exists: false,
+			researchRound: 1,
+			researchComplete: false,
+			researchRequired: true,
+			planVersion: 1,
+			planConfidence: "low",
+			reassessmentRequired: false,
+			reassessmentReason: null,
+			reassessmentEvidence: null,
+			reassessmentVersion: 0,
+			resolvedReassessmentVersion: 0,
+			lastPlanRevisionsText: null,
+		};
+	}
 	try {
 		const content = await readFile(path, "utf8");
 		const sections = parseMarkdownSections(content);
@@ -2076,28 +3044,268 @@ async function loadExistingQuestIntent(slug: string): Promise<{ originalRequest:
 		const refinements: string[] = [];
 		const refSec = sections.get("quest refinements & user feedback loops") || sections.get("refinements");
 		if (refSec) {
-			const lines = refSec.body.split(/\r?\n/).map(l => l.replace(/^[-*]\s*/, "").replace(/^\d+\.\s*/, "").trim()).filter(l => l && l !== "-" && !l.startsWith(">"));
+			const lines = refSec.body
+				.split(/\r?\n/)
+				.map((l) => l.replace(/^[-*]\s*/, "").replace(/^\d+\.\s*/, "").trim())
+				.filter((l) => l && l !== "-" && !l.startsWith(">"));
 			if (lines.length > 0) {
 				refinements.push(...lines);
 			}
 		}
-		return { originalRequest, refinements };
+
+		let planConfidence: "low" | "medium" | "high" = "low";
+		const confSec = sections.get("plan confidence") || sections.get("confidence");
+		if (confSec && !isPlaceholderOrEmpty(confSec.body)) {
+			const lower = confSec.body.toLowerCase();
+			if (lower.includes("high")) planConfidence = "high";
+			else if (lower.includes("medium")) planConfidence = "medium";
+		}
+
+		let planVersion = 1;
+		const verSec = sections.get("plan version") || sections.get("version");
+		if (verSec && !isPlaceholderOrEmpty(verSec.body)) {
+			const parsed = Number.parseInt(verSec.body.replace(/\D/g, ""), 10);
+			if (!Number.isNaN(parsed) && parsed >= 1) {
+				planVersion = parsed;
+			}
+		}
+
+		let researchRound = 1;
+		const roundSec = sections.get("research round") || sections.get("research cycle");
+		if (roundSec && !isPlaceholderOrEmpty(roundSec.body)) {
+			const parsed = Number.parseInt(roundSec.body.replace(/\D/g, ""), 10);
+			if (!Number.isNaN(parsed) && parsed >= 1) {
+				researchRound = parsed;
+			}
+		}
+
+		let lastResearchAt: number | undefined;
+		const researchAtSec = sections.get("last research at") || sections.get("last research timestamp") || sections.get("last research");
+		if (researchAtSec && !isPlaceholderOrEmpty(researchAtSec.body)) {
+			const raw = researchAtSec.body.trim();
+			const parsed = Number.parseInt(raw, 10);
+			if (!Number.isNaN(parsed) && parsed > 0) {
+				lastResearchAt = parsed;
+			} else {
+				const dateParsed = Date.parse(raw);
+				if (!Number.isNaN(dateParsed) && dateParsed > 0) {
+					lastResearchAt = dateParsed;
+				}
+			}
+		}
+
+		let lastPlanRevisionAt: number | undefined;
+		const planRevAtSec = sections.get("last plan revision at") || sections.get("last plan revision timestamp") || sections.get("last plan revision");
+		if (planRevAtSec && !isPlaceholderOrEmpty(planRevAtSec.body)) {
+			const raw = planRevAtSec.body.trim();
+			const parsed = Number.parseInt(raw, 10);
+			if (!Number.isNaN(parsed) && parsed > 0) {
+				lastPlanRevisionAt = parsed;
+			} else {
+				const dateParsed = Date.parse(raw);
+				if (!Number.isNaN(dateParsed) && dateParsed > 0) {
+					lastPlanRevisionAt = dateParsed;
+				}
+			}
+		}
+
+		let reassessmentVersion = 0;
+		const reassessVerSec = sections.get("reassessment version");
+		if (reassessVerSec && !isPlaceholderOrEmpty(reassessVerSec.body)) {
+			const parsed = Number.parseInt(reassessVerSec.body.replace(/\D/g, ""), 10);
+			if (!Number.isNaN(parsed) && parsed >= 0) {
+				reassessmentVersion = parsed;
+			}
+		}
+
+		let resolvedReassessmentVersion = 0;
+		const resolvedVerSec = sections.get("resolved reassessment version");
+		if (resolvedVerSec && !isPlaceholderOrEmpty(resolvedVerSec.body)) {
+			const parsed = Number.parseInt(resolvedVerSec.body.replace(/\D/g, ""), 10);
+			if (!Number.isNaN(parsed) && parsed >= 0) {
+				resolvedReassessmentVersion = parsed;
+			}
+		}
+
+		let reassessmentRequired = false;
+		let reassessmentReason: string | null = null;
+		let reassessmentEvidence: string | null = null;
+
+		const statusSec = sections.get("reassessment status") || sections.get("reassessment state");
+		if (statusSec && !isPlaceholderOrEmpty(statusSec.body)) {
+			if (statusSec.body.toUpperCase().includes("REQUIRED")) {
+				reassessmentRequired = true;
+				const match = statusSec.body.match(/REQUIRED[^-]*-(.*)$/i);
+				if (match && match[1]) {
+					reassessmentReason = match[1].trim();
+				}
+			}
+		} else if (reassessmentVersion > resolvedReassessmentVersion) {
+			reassessmentRequired = true;
+		}
+
+		const evidenceSec = sections.get("reassessment evidence");
+		if (evidenceSec && !isPlaceholderOrEmpty(evidenceSec.body)) {
+			reassessmentEvidence = evidenceSec.body.trim();
+		}
+
+		let lastPlanRevisionsText: string | null = null;
+		const revSec = sections.get("plan revisions") || sections.get("plan revision history") || sections.get("revisions");
+		if (revSec && !isPlaceholderOrEmpty(revSec.body)) {
+			lastPlanRevisionsText = revSec.body.trim();
+		}
+
+		const validation = validateResearchPrerequisites(content, planConfidence, true);
+		const researchComplete = validation.valid && !reassessmentRequired;
+		const researchRequired = !researchComplete;
+
+		let awaitingUserConfirmation = false;
+		const currentStatusSec = sections.get("current status") || sections.get("status");
+		if (currentStatusSec && !isPlaceholderOrEmpty(currentStatusSec.body)) {
+			const bodyLower = currentStatusSec.body.toLowerCase();
+			if (bodyLower.includes("plan provisional") || bodyLower.includes("research pending") || bodyLower.includes("confirmation pending") || bodyLower.includes("research complete") || bodyLower.includes("provisional")) {
+				awaitingUserConfirmation = true;
+			} else if (bodyLower.includes("plan confirmed") || bodyLower.includes("in progress") || bodyLower.includes("done")) {
+				awaitingUserConfirmation = false;
+			}
+		}
+
+		return {
+			originalRequest,
+			refinements,
+			exists: true,
+			researchRound,
+			researchComplete,
+			researchRequired,
+			planVersion,
+			planConfidence,
+			lastResearchAt,
+			lastPlanRevisionAt,
+			awaitingUserConfirmation,
+			reassessmentRequired,
+			reassessmentReason,
+			reassessmentEvidence,
+			reassessmentVersion,
+			resolvedReassessmentVersion,
+			lastPlanRevisionsText,
+		};
 	} catch {
-		return { originalRequest: "", refinements: [] };
+		return {
+			originalRequest: "",
+			refinements: [],
+			exists: false,
+			researchRound: 1,
+			researchComplete: false,
+			researchRequired: true,
+			planVersion: 1,
+			planConfidence: "low",
+			reassessmentRequired: false,
+			reassessmentReason: null,
+			reassessmentEvidence: null,
+			reassessmentVersion: 0,
+			resolvedReassessmentVersion: 0,
+			lastPlanRevisionsText: null,
+		};
 	}
 }
 
+async function loadExistingQuestIntent(slug: string): Promise<{ originalRequest: string; refinements: string[] }> {
+	const loaded = await loadExistingQuestEpistemicState(slug);
+	return { originalRequest: loaded.originalRequest, refinements: loaded.refinements };
+}
+
+function extractChildResultSummary(content: string, name: string): string {
+	const sections = parseMarkdownSections(content);
+	const lines: string[] = [];
+
+	const goalSec = sections.get("goal");
+	if (goalSec && goalSec.body) {
+		lines.push(`- **Goal**: ${goalSec.body.trim()}`);
+	}
+
+	const understandingSec = sections.get("current understanding");
+	if (understandingSec && understandingSec.body && !understandingSec.body.startsWith(">")) {
+		lines.push(`- **Established Understanding**:\n${understandingSec.body.trim()}`);
+	}
+
+	const findingsSec = sections.get("research findings") || sections.get("in-depth analysis & findings");
+	if (findingsSec && findingsSec.body) {
+		lines.push(`- **Findings & Discoveries**:\n${findingsSec.body.trim()}`);
+	}
+
+	const assumptionsSec = sections.get("key assumptions") || sections.get("assumptions");
+	if (assumptionsSec && assumptionsSec.body) {
+		lines.push(`- **Assumptions Evaluated**:\n${assumptionsSec.body.trim()}`);
+	}
+
+	const rejectedSec = sections.get("rejected approaches");
+	if (rejectedSec && rejectedSec.body && !rejectedSec.body.startsWith(">")) {
+		lines.push(`- **Rejected Approaches**:\n${rejectedSec.body.trim()}`);
+	}
+
+	const reassessSec = sections.get("latest reassessment") || sections.get("reassessment conclusion");
+	if (reassessSec && reassessSec.body && !reassessSec.body.startsWith(">")) {
+		lines.push(`- **Latest Reassessment Conclusion**:\n${reassessSec.body.trim()}`);
+	}
+
+	const decisionsSec = sections.get("decisions made") || sections.get("decisions");
+	if (decisionsSec && decisionsSec.body) {
+		lines.push(`- **Decisions Made**:\n${decisionsSec.body.trim()}`);
+	}
+
+	const filesSec = sections.get("files touched") || sections.get("files modified");
+	if (filesSec && filesSec.body) {
+		lines.push(`- **Files Touched**:\n${filesSec.body.trim()}`);
+	}
+
+	return lines.length > 0 ? lines.join("\n\n") : `- Completed sub-quest ${name}.`;
+}
+
+function sendChildReturnParentPrompt(
+	pi: ExtensionAPI,
+	parentName: string,
+	childName: string,
+	childSummary: string,
+	ctx?: ExtensionContext,
+) {
+	const directiveText = `⚡ **Sub-Quest '${childName}' Completed — Parent Evaluation Directive**:
+Child sub-quest **${childName}** has completed and been archived. You have returned to parent quest **${parentName}**.
+
+**Child Sub-Quest Results & Established Findings**:
+${childSummary}
+
+**Parent Evaluation & Resumption Protocol**:
+Do not blindly resume the parent's previous Exact Next Action without evaluating whether the child's findings changed anything.
+1. **Inspect Child Findings**: Review what sub-quest **${childName}** established.
+2. **Determine Impact on Parent**: Determine whether parent assumptions or current plan were affected.
+3. **If Affected**:
+   - Trigger/enter reassessment (investigate the contradiction or unexpected findings).
+   - Perform targeted investigation into affected areas.
+   - Revise or re-validate the plan under \`## Plan Revisions\` in \`docs/current/${parentName}.md\`.
+   - Update \`docs/current/${parentName}.md\` with \`quest_update_state({ reassessmentComplete: true, reassessmentConclusion: "...", ... })\`.
+4. **If Not Affected**:
+   - Record the child result under \`## Research Findings\` and mark the sub-quest completed in \`docs/current/${parentName}.md\`.
+   - Preserve the existing parent plan and confidence.
+   - Save the quest file via \`quest_mark_saved\` or \`quest_update_state\` (do NOT pass \`reassessmentComplete: true\` unless reassessment was actually required).
+   - Continue with the justified next action.
+5. Proceed autonomously with parent quest execution.`;
+
+	sendInternalAgentMessage(pi, directiveText, "followUp");
+}
+
 /** Helper to archive a quest file and update journal state (LIFO stack pop) */
-async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null }> {
+async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null; childSummary?: string }> {
 	const path = questPath(name);
 	if (!(await fileExists(path))) {
 		return { success: false, message: `No quest file found at ${path}` };
 	}
 
 	let parentSlug: string | null = null;
+	let childSummary = "";
 	try {
 		const content = await readFile(path, "utf8");
 		parentSlug = extractParentFromQuest(content);
+		childSummary = extractChildResultSummary(content, name);
 	} catch (err: any) {
 		logError(`Failed to read quest file for parent extraction at ${path}`, err, ctx);
 	}
@@ -2140,31 +3348,49 @@ async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionC
 		state.active = nextActive;
 		state.stack = stack;
 		if (nextActive) {
-			const parentIntent = await loadExistingQuestIntent(nextActive);
-			state.prompts = parentIntent.originalRequest ? [parentIntent.originalRequest] : [];
-			state.refinements = parentIntent.refinements;
+			const parentLoaded = await loadExistingQuestEpistemicState(nextActive);
+			state.prompts = parentLoaded.originalRequest ? [parentLoaded.originalRequest] : [];
+			state.refinements = parentLoaded.refinements;
+			state.researchRound = parentLoaded.researchRound;
+			state.researchComplete = parentLoaded.researchComplete;
+			state.researchRequired = parentLoaded.researchRequired;
+			state.reassessmentRequired = parentLoaded.reassessmentRequired;
+			state.reassessmentReason = parentLoaded.reassessmentReason;
+			state.reassessmentEvidence = parentLoaded.reassessmentEvidence;
+			state.reassessmentVersion = parentLoaded.reassessmentVersion;
+			state.resolvedReassessmentVersion = parentLoaded.resolvedReassessmentVersion;
+			state.planVersion = parentLoaded.planVersion;
+			state.planConfidence = parentLoaded.planConfidence;
+			state.lastPlanRevisionsText = parentLoaded.lastPlanRevisionsText;
+			state.lastResearchAt = parentLoaded.lastResearchAt ?? Date.now();
+			state.lastPlanRevisionAt = parentLoaded.lastPlanRevisionAt ?? Date.now();
+			state.awaitingUserConfirmation = false;
+			syncImplementationPermission(state);
 		} else {
 			state.prompts = [];
 			state.refinements = [];
+			state.awaitingUserConfirmation = false;
+			syncImplementationPermission(state);
 		}
-		persist(pi, ctx);
 	} else {
 		state.stack = stack;
-		persist(pi, ctx);
 	}
 
 	if (nextActive) {
 		await verifyAndMarkSaved(pi, ctx, nextActive);
+		persist(pi, ctx);
+	} else {
+		persist(pi, ctx);
 	}
 
 	const returnMsg = nextActive ? ` Resumed parent/previous quest '${nextActive}' (LIFO stack).` : "";
-	return { success: true, message: `Archived ${path} → ${dest}.${returnMsg}`, dest, nextActive };
+	return { success: true, message: `Archived ${path} → ${dest}.${returnMsg}`, dest, nextActive, childSummary };
 }
 
 /** Tool allowing the model to explicitly archive the active (or named) quest and trigger auto-compaction. */
 function installArchiveTool(pi: ExtensionAPI) {
 	const archiveHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
-		const targetName = slugify(params.questName || state.active || "");
+		const targetName = slugify(params.questName || params.name || state.active || "");
 		if (!targetName) {
 			return {
 				content: [{ type: "text", text: "Error: No active quest to archive and no questName provided." }],
@@ -2185,7 +3411,7 @@ function installArchiveTool(pi: ExtensionAPI) {
 			state.archiveCompactionPending = targetName;
 			persist(pi, ctx);
 		} else if (res.nextActive) {
-			sendPostCompactionResumePrompt(pi, res.nextActive);
+			sendChildReturnParentPrompt(pi, res.nextActive, targetName, res.childSummary || `- Completed sub-quest ${targetName}.`, ctx);
 		}
 
 		if (ctx.hasUI) ctx.ui.notify(res.message, "info");
@@ -2288,9 +3514,40 @@ function installSubQuestTool(pi: ExtensionAPI) {
 				state.stack = state.stack.slice(0, idx + 1);
 			}
 			state.active = name;
-			const subIntent = await loadExistingQuestIntent(name);
-			state.prompts = subIntent.originalRequest ? [subIntent.originalRequest] : [goal];
-			state.refinements = subIntent.refinements;
+			const subLoaded = await loadExistingQuestEpistemicState(name);
+			if (subLoaded.exists && isExisting) {
+				state.prompts = subLoaded.originalRequest ? [subLoaded.originalRequest] : [goal];
+				state.refinements = subLoaded.refinements;
+				state.researchRound = subLoaded.researchRound;
+				state.researchComplete = subLoaded.researchComplete;
+				state.researchRequired = subLoaded.researchRequired;
+				state.planVersion = subLoaded.planVersion;
+				state.planConfidence = subLoaded.planConfidence;
+				state.lastPlanRevisionsText = subLoaded.lastPlanRevisionsText;
+				state.reassessmentRequired = subLoaded.reassessmentRequired;
+				state.reassessmentReason = subLoaded.reassessmentReason;
+				state.reassessmentEvidence = subLoaded.reassessmentEvidence;
+				state.reassessmentVersion = subLoaded.reassessmentVersion;
+				state.resolvedReassessmentVersion = subLoaded.resolvedReassessmentVersion;
+				state.lastResearchAt = subLoaded.lastResearchAt ?? Date.now();
+				state.lastPlanRevisionAt = subLoaded.lastPlanRevisionAt ?? Date.now();
+			} else {
+				state.prompts = [goal];
+				state.refinements = [];
+				state.researchRound = 1;
+				state.researchComplete = false;
+				state.researchRequired = true;
+				state.reassessmentRequired = false;
+				state.reassessmentReason = null;
+				state.reassessmentEvidence = null;
+				state.reassessmentVersion = 0;
+				state.resolvedReassessmentVersion = 0;
+				state.lastPlanRevisionsText = null;
+				state.planVersion = 1;
+				state.planConfidence = "low";
+				state.lastResearchAt = Date.now();
+				state.lastPlanRevisionAt = Date.now();
+			}
 			state.saveGeneration = null;
 			state.lastSavedHash = null;
 			state.dirty = false;
@@ -2302,6 +3559,23 @@ function installSubQuestTool(pi: ExtensionAPI) {
 
 			if (subLaunchThreshold > 0 && tokens !== null && tokens >= subLaunchThreshold) {
 				state.subquestLaunchCompactionPending = true;
+			} else {
+				const enterMsg = `Now working on sub-quest **${name}**${parentName ? ` (parent: **${parentName}**)` : ""}. Sub-quest file: \`${path}\`.
+
+**Stated Goal**: ${goal}
+
+**Sub-Quest Iterative Research & Execution Protocol**:
+Sub-quests do NOT inherit the parent's conclusions as immutable facts; treat them as context and hypotheses to independently verify.
+
+1. Read \`${path}\` to inspect inherited context and goal.
+2. Independently investigate the relevant subsystem, execution paths, and dependencies.
+3. Identify assumptions inherited or required, and test high-risk assumptions directly.
+4. Formulate a provisional plan, challenge it against potential failure modes, and revise if needed.
+5. Update \`${path}\` (Current Understanding, Key Assumptions, Plan, Plan Confidence, Exact Next Action) and call \`quest_mark_saved\`.
+6. Autonomously execute implementation and verify with tests without waiting for user confirmation.
+7. Upon completion, archive via \`quest_archive()\` to return findings to the parent quest.`;
+
+				sendInternalAgentMessage(pi, enterMsg, "followUp");
 			}
 			persist(pi, ctx);
 			updateUIStatus(ctx);
@@ -2321,7 +3595,7 @@ function installSubQuestTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "quest_subquest",
 		label: "Create Sub-Quest",
-		description: "Create or plan a sub-quest. Use switchNow: false during initial quest planning to pre-create planned sub-quests without switching away from the active parent quest, or switchNow: true (default) to create and immediately switch focus to the sub-quest. Creates docs/current/<sub-quest>.md, links it into the parent quest, and records parent reference.",
+		description: "Create or plan a sub-quest for a genuinely separable workstream, distinct architectural subsystem, self-contained investigation, or independent verification boundary. Use switchNow: false during initial quest planning to pre-create planned sub-quests and link them into the parent coordination plan without switching away from the active parent quest, or switchNow: true (default) to create and immediately switch focus to the sub-quest. Creates docs/current/<sub-quest>.md, links it into the parent quest, and records parent reference.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -2469,29 +3743,51 @@ function installMarkTool(pi: ExtensionAPI) {
 		execute: markHandler,
 	});
 
-	const updateStateHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
-		const targetName = slugify(params.name || params.questName || state.active || "");
+	function getEpistemicSectionBody(updates: Map<string, string>, existingSections: Map<string, MarkdownSection>, canonicalKey: string): string | undefined {
+	if (updates.has(canonicalKey)) return updates.get(canonicalKey);
+	const aliases = [canonicalKey, ...(SECTION_ALIASES[canonicalKey] || [])];
+	for (const alias of aliases) {
+		if (updates.has(alias)) return updates.get(alias);
+		const sec = existingSections.get(alias);
+		if (sec && sec.body) return sec.body;
+	}
+	return undefined;
+}
+
+const updateStateHandler = async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: ExtensionContext) => {
+		const rawName = (params.name || params.questName || "").trim();
+		const targetName = slugify(rawName || state.active || "");
 		if (!targetName) {
 			return {
-				content: [{ type: "text", text: "Error: No active quest to update and no quest name provided." }],
+				content: [{ type: "text", text: "Error: No active quest to update and no quest name provided. Please specify a concise semantic quest name (e.g. name: 'persistent-agent-research')." }],
 				details: { error: "no_active_quest" },
 			};
 		}
 
-		if (!state.active) {
+		const originalReq = state.pendingRootRequest || (state.prompts && state.prompts.length > 0 ? state.prompts[0] : "");
+
+		if (!state.active || state.pendingRootQuest) {
 			state.active = targetName;
-			if (!Array.isArray(state.stack)) state.stack = [targetName];
+			state.pendingRootQuest = false;
+			state.questIdentityEstablished = true;
+			state.pendingRootRequest = null;
+			if (!Array.isArray(state.stack) || state.stack.length === 0) state.stack = [targetName];
 			else if (!state.stack.includes(targetName)) state.stack.push(targetName);
+			if (originalReq && (!state.prompts || state.prompts.length === 0)) {
+				state.prompts = [originalReq];
+			}
 			persist(pi, ctx);
 		}
 
+		await mkdir(QUEST_DIR, { recursive: true });
 		const path = questPath(targetName);
 		if (!(await fileExists(path))) {
-			await writeFile(path, QUEST_TEMPLATE(targetName, params.goal || ""), "utf8");
+			await writeFile(path, QUEST_TEMPLATE(targetName, params.goal || "", "", originalReq, state.refinements || []), "utf8");
 		}
 
 		try {
 			const content = await readFile(path, "utf8");
+			const existingSections = parseMarkdownSections(content);
 			const updates = new Map<string, string>();
 
 			if (params.goal) {
@@ -2502,10 +3798,70 @@ function installMarkTool(pi: ExtensionAPI) {
 				updates.set("current status", params.status);
 			}
 
-			const findingsList = params.findings || params.importantFindings;
+			if (params.understanding || params.currentUnderstanding) {
+				const val = params.understanding || params.currentUnderstanding;
+				const text = Array.isArray(val) ? val.map((u: string) => (u.startsWith("- ") ? u : `- ${u}`)).join("\n") : String(val);
+				updates.set("current understanding", text);
+			}
+
+			if (params.assumptions || params.keyAssumptions) {
+				const val = params.assumptions || params.keyAssumptions;
+				const text = Array.isArray(val) ? val.map((a: string) => (a.startsWith("- [") || a.startsWith("- ") ? a : `- [ ] ${a}`)).join("\n") : String(val);
+				updates.set("key assumptions", text);
+			}
+
+			if (params.openQuestions || params.uncertainties) {
+				const val = params.openQuestions || params.uncertainties;
+				const text = Array.isArray(val) ? val.map((q: string) => (q.startsWith("- [") || q.startsWith("- ") ? q : `- [ ] ${q}`)).join("\n") : String(val);
+				updates.set("open questions & uncertainties", text);
+			}
+
+			const findingsList = params.findings || params.researchFindings || params.importantFindings;
 			if (Array.isArray(findingsList) && findingsList.length > 0) {
 				const findingsText = findingsList.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
+				updates.set("research findings", findingsText);
 				updates.set("in-depth analysis & findings", findingsText);
+			}
+
+			if (params.plan || params.executionPlan) {
+				const val = params.plan || params.executionPlan;
+				const text = Array.isArray(val) ? val.map((p: string, i: number) => (/^\d+\./.test(p) ? p : `${i + 1}. ${p}`)).join("\n") : String(val);
+				updates.set("plan", text);
+				updates.set("detailed multi-stage execution plan", text);
+			}
+
+			if (params.planConfidence) {
+				const confStr = String(params.planConfidence);
+				const reasonStr = params.planConfidenceReason ? `\nReason:\n${params.planConfidenceReason}` : "";
+				updates.set("plan confidence", `${confStr}${reasonStr}`);
+				const lowerConf = confStr.toLowerCase();
+				if (lowerConf.includes("high")) state.planConfidence = "high";
+				else if (lowerConf.includes("medium")) state.planConfidence = "medium";
+				else if (lowerConf.includes("low")) state.planConfidence = "low";
+			}
+
+			if (params.planRevisions || params.revisions) {
+				const val = params.planRevisions || params.revisions;
+				const text = Array.isArray(val) ? val.map((r: string) => (r.startsWith("- ") ? r : `- ${r}`)).join("\n") : String(val);
+				updates.set("plan revisions", text);
+				if (text.trim() !== (state.lastPlanRevisionsText || "").trim()) {
+					state.planVersion = Math.max(typeof params.planVersion === "number" ? params.planVersion : 0, (state.planVersion || 1) + 1);
+					state.lastPlanRevisionAt = Date.now();
+					state.lastPlanRevisionsText = text.trim();
+				}
+			} else if (typeof params.planVersion === "number" && params.planVersion > (state.planVersion || 1)) {
+				state.planVersion = params.planVersion;
+				state.lastPlanRevisionAt = Date.now();
+			}
+
+			if (params.rejectedApproaches) {
+				const val = params.rejectedApproaches;
+				const text = Array.isArray(val) ? val.map((r: string) => (r.startsWith("- ") ? r : `- ${r}`)).join("\n") : String(val);
+				updates.set("rejected approaches", text);
+			}
+
+			if (params.reassessmentConclusion) {
+				updates.set("latest reassessment", params.reassessmentConclusion);
 			}
 
 			if (Array.isArray(params.decisions) && params.decisions.length > 0) {
@@ -2545,6 +3901,7 @@ function installMarkTool(pi: ExtensionAPI) {
 
 			const nextStepVal = params.nextStep || params.nextAction || params.exactNextAction;
 			if (nextStepVal) {
+				updates.set("exact next action", nextStepVal);
 				updates.set("next recommended step", nextStepVal);
 			}
 
@@ -2553,14 +3910,99 @@ function installMarkTool(pi: ExtensionAPI) {
 				updates.set("resume prompt", resumeContextVal);
 			}
 
+			let reassessmentTransitionNote = "";
+			if (params.reassessmentComplete === true) {
+				const conclusionVal = params.reassessmentConclusion || updates.get("latest reassessment") || (existingSections.get("latest reassessment")?.body);
+				// Test with provisional markdown
+				const provisionalMarkdown = spliceMarkdownSections(content, updates);
+				const validation = validateResearchPrerequisites(provisionalMarkdown, params.planConfidence || state.planConfidence, params.allowLowConfidence === true, params.planConfidenceReason);
+
+				if (isPlaceholderOrEmpty(conclusionVal)) {
+					state.reassessmentRequired = true;
+					state.researchRequired = true;
+					state.researchComplete = false;
+					state.planConfidence = "low";
+					reassessmentTransitionNote = " (Note: reassessmentComplete refused -- requires a non-empty reassessmentConclusion stating what fresh investigation established about the contradiction)";
+				} else if (!validation.valid) {
+					state.reassessmentRequired = true;
+					state.researchRequired = true;
+					state.researchComplete = false;
+					state.planConfidence = "low";
+					reassessmentTransitionNote = ` (Note: reassessmentComplete refused -- replacement epistemic state invalid or missing: [${validation.missingSections.join(", ")}]${validation.confidenceIssue ? `; ${validation.confidenceIssue}` : ""})`;
+				} else {
+					state.resolvedReassessmentVersion = state.reassessmentVersion || 1;
+					state.reassessmentRequired = false;
+					state.reassessmentReason = null;
+					state.reassessmentEvidence = null;
+					state.lastReassessmentPromptAt = 0;
+					state.lastReassessmentReason = null;
+					state.consecutiveFailures = 0;
+					state.researchRequired = false;
+					state.researchComplete = true;
+					state.lastResearchAt = Date.now();
+					state.awaitingUserConfirmation = false;
+					if (!Array.isArray(state.confirmedQuests)) state.confirmedQuests = [];
+					if (!state.confirmedQuests.includes(targetName)) state.confirmedQuests.push(targetName);
+					syncImplementationPermission(state);
+					reassessmentTransitionNote = " Reassessment marked complete and resolved.";
+				}
+			}
+
+			let researchTransitionNote = "";
+			if (params.researchComplete === true) {
+				if (state.reassessmentRequired) {
+					researchTransitionNote = " (Note: researchComplete ignored because reassessment is pending; call with reassessmentComplete: true and reassessmentConclusion to resolve)";
+				} else {
+					const provisionalMarkdown = spliceMarkdownSections(content, updates);
+					const validation = validateResearchPrerequisites(provisionalMarkdown, params.planConfidence || state.planConfidence, params.allowLowConfidence === true, params.planConfidenceReason);
+					if (validation.valid) {
+						state.researchComplete = true;
+						state.researchRequired = false;
+						state.lastResearchAt = Date.now();
+						const isAlreadyConfirmed = Array.isArray(state.confirmedQuests) && state.confirmedQuests.includes(targetName);
+						state.awaitingUserConfirmation = isRootQuest(state) && !isAlreadyConfirmed;
+						syncImplementationPermission(state);
+					} else {
+						state.researchComplete = false;
+						state.researchRequired = true;
+						syncImplementationPermission(state);
+						researchTransitionNote = ` (Note: researchComplete refused -- missing or placeholder: [${validation.missingSections.join(", ")}]${validation.confidenceIssue ? `; ${validation.confidenceIssue}` : ""})`;
+					}
+				}
+			} else if (params.researchComplete === false) {
+				state.researchComplete = false;
+				state.researchRequired = true;
+				syncImplementationPermission(state);
+			}
+
+			updates.set("plan version", String(state.planVersion || 1));
+			updates.set("research round", String(state.researchRound || 1));
+			updates.set("reassessment version", String(state.reassessmentVersion || 0));
+			updates.set("resolved reassessment version", String(state.resolvedReassessmentVersion || 0));
+			if (state.lastResearchAt) {
+				updates.set("last research at", String(state.lastResearchAt));
+			}
+			if (state.lastPlanRevisionAt) {
+				updates.set("last plan revision at", String(state.lastPlanRevisionAt));
+			}
+			if (state.reassessmentRequired) {
+				updates.set("reassessment status", `REQUIRED (v${state.reassessmentVersion || 1}) - ${state.reassessmentReason || "contradiction detected"}`);
+			} else {
+				updates.set("reassessment status", `RESOLVED (v${state.resolvedReassessmentVersion || 0})`);
+			}
+			if (state.reassessmentEvidence) {
+				updates.set("reassessment evidence", state.reassessmentEvidence);
+			}
+
 			const updatedMarkdown = spliceMarkdownSections(content, updates);
+
 			await writeFile(path, updatedMarkdown, "utf8");
 
 			const saveRes = await verifyAndMarkSaved(pi, ctx, targetName);
 
 			return {
-				content: [{ type: "text", text: `Successfully updated quest state for **${targetName}** at \`${path}\` (gen #${saveRes.count}, hash: ${saveRes.hash}).` }],
-				details: { quest: targetName, path, status: params.status, hash: saveRes.hash, generation: saveRes.count },
+				content: [{ type: "text", text: `Successfully updated quest state for **${targetName}** at \`${path}\` (gen #${saveRes.count}, hash: ${saveRes.hash}, plan v${state.planVersion || 1}).${researchTransitionNote}${reassessmentTransitionNote}` }],
+				details: { quest: targetName, path, status: params.status, hash: saveRes.hash, generation: saveRes.count, planVersion: state.planVersion, researchComplete: state.researchComplete, reassessmentRequired: state.reassessmentRequired },
 			};
 		} catch (err: any) {
 			logError(`Failed to update quest state at ${path}`, err, ctx);
@@ -2594,6 +4036,64 @@ function installMarkTool(pi: ExtensionAPI) {
 					type: "array",
 					items: { type: "string" },
 					description: "Key findings or architectural discoveries.",
+				},
+				understanding: {
+					type: "string",
+					description: "Core architectural facts and verified execution paths.",
+				},
+				assumptions: {
+					type: "array",
+					items: { type: "string" },
+					description: "Key assumptions supporting the approach.",
+				},
+				openQuestions: {
+					type: "array",
+					items: { type: "string" },
+					description: "Material uncertainties to investigate.",
+				},
+				plan: {
+					type: "array",
+					items: { type: "string" },
+					description: "Multi-stage execution plan steps.",
+				},
+				planConfidence: {
+					type: "string",
+					enum: ["low", "medium", "high"],
+					description: "Confidence level in the current plan.",
+				},
+				planConfidenceReason: {
+					type: "string",
+					description: "Justification for the confidence level (verified execution paths, validated assumptions, remaining uncertainties).",
+				},
+				reassessmentConclusion: {
+					type: "string",
+					description: "What the fresh investigation established about the triggering contradiction, whether the previous assumption was validated/invalidated/reformulated, and whether the current plan survived or changed.",
+				},
+				planRevisions: {
+					type: "array",
+					items: { type: "string" },
+					description: "Record of plan revisions with invalidating evidence.",
+				},
+				rejectedApproaches: {
+					type: "array",
+					items: { type: "string" },
+					description: "Disproved hypotheses or abandoned approaches.",
+				},
+				researchComplete: {
+					type: "boolean",
+					description: "Whether initial research cycle is complete.",
+				},
+				allowLowConfidence: {
+					type: "boolean",
+					description: "Allow completing research even if plan confidence is low (requires justification).",
+				},
+				reassessmentComplete: {
+					type: "boolean",
+					description: "Whether pending reassessment has been completed and resolved.",
+				},
+				planVersion: {
+					type: "number",
+					description: "Version number of the current plan.",
 				},
 				decisions: {
 					type: "array",
@@ -2717,6 +4217,11 @@ function installCommands(pi: ExtensionAPI) {
 			return;
 		}
 
+		const originalReq = state.pendingRootRequest || (state.prompts && state.prompts.length > 0 ? state.prompts[0] : "");
+		state.pendingRootQuest = false;
+		state.questIdentityEstablished = true;
+		state.pendingRootRequest = null;
+
 		await mkdir(QUEST_DIR, { recursive: true });
 		const path = questPath(name);
 		const futurePath = `${FUTURE_DIR}/${name}.md`;
@@ -2732,7 +4237,7 @@ function installCommands(pi: ExtensionAPI) {
 				if (!goal) {
 					goal = name.replace(/-/g, " ");
 				}
-				await writeFile(path, QUEST_TEMPLATE(name, goal, "", ""), "utf8");
+				await writeFile(path, QUEST_TEMPLATE(name, goal, "", originalReq, state.refinements || []), "utf8");
 			}
 		}
 		await cleanDraftIfExists(name);
@@ -2759,6 +4264,47 @@ function installCommands(pi: ExtensionAPI) {
 			state.saveGeneration = null;
 			state.lastSavedHash = null;
 			state.dirty = false;
+			state.consecutiveFailures = 0;
+			state.substantiveTurnsSinceCheckpoint = 0;
+			state.lastReassessmentPromptAt = 0;
+			state.lastReassessmentReason = null;
+			state.lastCheckpointPromptAt = 0;
+
+			const loaded = await loadExistingQuestEpistemicState(name);
+			if (loaded.exists) {
+				state.researchRound = loaded.researchRound;
+				state.researchComplete = loaded.researchComplete;
+				state.researchRequired = loaded.researchRequired;
+				state.planVersion = loaded.planVersion;
+				state.planConfidence = loaded.planConfidence;
+				state.lastPlanRevisionsText = loaded.lastPlanRevisionsText;
+				state.reassessmentRequired = loaded.reassessmentRequired;
+				state.reassessmentReason = loaded.reassessmentReason;
+				state.reassessmentEvidence = loaded.reassessmentEvidence;
+				state.reassessmentVersion = loaded.reassessmentVersion;
+				state.resolvedReassessmentVersion = loaded.resolvedReassessmentVersion;
+				state.lastResearchAt = loaded.lastResearchAt ?? Date.now();
+				state.lastPlanRevisionAt = loaded.lastPlanRevisionAt ?? Date.now();
+				const isTargetConfirmed = Array.isArray(state.confirmedQuests) && state.confirmedQuests.includes(name);
+				state.awaitingUserConfirmation = isRootQuest(state) ? (!isTargetConfirmed && (loaded.awaitingUserConfirmation ?? false)) : false;
+				syncImplementationPermission(state);
+			} else {
+				state.researchRound = 1;
+				state.researchComplete = false;
+				state.researchRequired = true;
+				state.reassessmentRequired = false;
+				state.reassessmentReason = null;
+				state.reassessmentEvidence = null;
+				state.reassessmentVersion = 0;
+				state.resolvedReassessmentVersion = 0;
+				state.lastPlanRevisionsText = null;
+				state.planVersion = 1;
+				state.planConfidence = "low";
+				state.lastResearchAt = Date.now();
+				state.lastPlanRevisionAt = Date.now();
+				state.awaitingUserConfirmation = false;
+				syncImplementationPermission(state);
+			}
 		}
 		if (await fileExists(path)) {
 			await verifyAndMarkSaved(pi, ctx, name);
@@ -2768,18 +4314,20 @@ function installCommands(pi: ExtensionAPI) {
 		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
 		const startMsg = `Now working on quest **${name}**. Quest file: \`${path}\`.${goalText}
 
-**Upfront Research, Planning & Confirmation Protocol (Turn 1)**:
-1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
-2. Perform an in-depth codebase investigation: inspect relevant libraries, module boundaries, data flows, and root causes of complexity.
-3. Formulate a concrete execution plan capturing phase objectives, touched files, approach, and targeted tests.
-4. Fill \`${path}\` with the goal, decisions, analysis findings, execution plan, and next actionable step.
-5. In Turn 1 of this root/main quest, present your research findings, architectural trade-offs, and plan clearly to the user, and ASK FOR USER CONFIRMATION before writing or modifying feature code. Once confirmed, proceed autonomously.
+**Iterative Research, Planning & Falsification Protocol (Turn 1)**:
+1. Discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
+2. Perform targeted codebase investigation: inspect relevant libraries, module boundaries, data flows, and execution paths.
+3. Identify key assumptions and material uncertainties. Specifically investigate the highest-risk assumptions and consider plausible alternative architectures.
+4. Formulate a provisional execution plan in \`${path}\`. For any discrete phase taking more than one step, use \`quest_subquest({ goal: '...', switchNow: false })\` to queue it without losing your current focus.
+5. Actively challenge the plan: what evidence or test could prove it wrong? If unresolved uncertainties remain, perform a targeted research pass.
+6. In Turn 1 of this root/main quest, present your research findings, assumptions evaluated, architectural trade-offs, and revised plan clearly to the user, and ASK FOR USER CONFIRMATION before writing or modifying feature code. Once confirmed, proceed autonomously.
 
 **TDD & Quality Workflow**:
 1. For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
 2. Develop feature -> build -> run -> verify targeted tests.
-3. Support end-of-task user feedback loops and polish iterations until final confirmation.
-4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`;
+3. Dynamic Reassessment: Re-evaluate and revise the plan if tests fail or unexpected code paths are uncovered.
+4. Support end-of-task user feedback loops and polish iterations until final confirmation.
+5. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`;
 		sendInternalAgentMessage(pi, startMsg, "followUp");
 	};
 
@@ -2794,7 +4342,7 @@ function installCommands(pi: ExtensionAPI) {
 	pi.registerCommand("quest", {
 		description: `Set the active quest (e.g. /quest cx). Promotes from ${FUTURE_DIR}/ if it exists, or creates docs/current/<name>.md.`,
 		getArgumentCompletions: questCompletions,
-		handler: questHandler,
+		handler: withContext(questHandler),
 	});
 
 	const questSaveHandler = async (_args: string, ctx: ExtensionContext) => {
@@ -2808,7 +4356,7 @@ function installCommands(pi: ExtensionAPI) {
 
 	pi.registerCommand("quest-save", {
 		description: "Persist the active quest file now.",
-		handler: questSaveHandler,
+		handler: withContext(questSaveHandler),
 	});
 
 	const questRefineHandler = async (args: string, ctx: ExtensionContext) => {
@@ -2826,7 +4374,7 @@ function installCommands(pi: ExtensionAPI) {
 		}
 		if (!Array.isArray(state.refinements)) state.refinements = [];
 		state.refinements.push(refinement);
-		state.dirty = true;
+		triggerReassessment(state, `User refinement received: "${refinement.slice(0, 100)}..."`, refinement);
 		persist(pi, ctx);
 
 		sendSaveRequest(
@@ -2839,7 +4387,7 @@ function installCommands(pi: ExtensionAPI) {
 
 	pi.registerCommand("quest-refine", {
 		description: "Refine the active quest mid-workflow or add post-implementation requirements (e.g. /quest-refine Add edge case handling).",
-		handler: questRefineHandler,
+		handler: withContext(questRefineHandler),
 	});
 
 	const questDelHandler = async (args: string, ctx: ExtensionContext) => {
@@ -2862,7 +4410,7 @@ function installCommands(pi: ExtensionAPI) {
 
 	pi.registerCommand("quest-del", {
 		description: `Archive (rename to ${ARCHIVE_DIR}/) the current or named quest file.`,
-		handler: questDelHandler,
+		handler: withContext(questDelHandler),
 	});
 
 	const questDraftHandler = async (args: string, ctx: ExtensionContext) => {
@@ -3061,22 +4609,28 @@ function installCommands(pi: ExtensionAPI) {
 	pi.registerCommand("quest-economy", {
 		description: "Configure or check token economy auto-compaction threshold (e.g. /quest-economy 80%, /quest-economy 333k 30k, /quest-economy off).",
 		getArgumentCompletions: economyCompletions,
-		handler: questEconomyHandler,
+		handler: withContext(questEconomyHandler),
 	});
 
 	pi.registerCommand("quest-warning", {
 		description: "Configure pre-compaction warning margin (e.g. /quest-warning 30k).",
 		getArgumentCompletions: warningCompletions,
-		handler: questWarningHandler,
+		handler: withContext(questWarningHandler),
 	});
 
 	pi.registerCommand("quest-subquest-threshold", {
 		description: "Configure the minimum token threshold for auto-compacting when launching a sub-quest (e.g. /quest-subquest-threshold 40k).",
 		getArgumentCompletions: subquestThresholdCompletions,
-		handler: questSubquestThresholdHandler,
+		handler: withContext(questSubquestThresholdHandler),
 	});
 
 	const questStatusHandler = async (_args: string, ctx: ExtensionContext) => {
+		if (state.pendingRootQuest) {
+			const reqPreview = (state.pendingRootRequest || "").slice(0, 100);
+			const line = `[PROVISIONAL ROOT INITIALIZATION] - Research required to establish quest identity and plan. Original request: "${reqPreview}..."`;
+			if (ctx.hasUI) ctx.ui.notify(line, "info");
+			return line;
+		}
 		if (!state.active) {
 			if (ctx.hasUI) ctx.ui.notify("No active quest.", "info");
 			return "No active quest.";
@@ -3222,9 +4776,40 @@ function installCommands(pi: ExtensionAPI) {
 			state.stack = state.stack.slice(0, idx + 1);
 		}
 		state.active = name;
-		const subIntent = await loadExistingQuestIntent(name);
-		state.prompts = subIntent.originalRequest ? [subIntent.originalRequest] : [goal];
-		state.refinements = subIntent.refinements;
+		const subLoaded = await loadExistingQuestEpistemicState(name);
+		if (subLoaded.exists && isExisting) {
+			state.prompts = subLoaded.originalRequest ? [subLoaded.originalRequest] : [goal];
+			state.refinements = subLoaded.refinements;
+			state.researchRound = subLoaded.researchRound;
+			state.researchComplete = subLoaded.researchComplete;
+			state.researchRequired = subLoaded.researchRequired;
+			state.planVersion = subLoaded.planVersion;
+			state.planConfidence = subLoaded.planConfidence;
+			state.lastPlanRevisionsText = subLoaded.lastPlanRevisionsText;
+			state.reassessmentRequired = subLoaded.reassessmentRequired;
+			state.reassessmentReason = subLoaded.reassessmentReason;
+			state.reassessmentEvidence = subLoaded.reassessmentEvidence;
+			state.reassessmentVersion = subLoaded.reassessmentVersion;
+			state.resolvedReassessmentVersion = subLoaded.resolvedReassessmentVersion;
+			state.lastResearchAt = subLoaded.lastResearchAt ?? Date.now();
+			state.lastPlanRevisionAt = subLoaded.lastPlanRevisionAt ?? Date.now();
+		} else {
+			state.prompts = [goal];
+			state.refinements = [];
+			state.researchRound = 1;
+			state.researchComplete = false;
+			state.researchRequired = true;
+			state.reassessmentRequired = false;
+			state.reassessmentReason = null;
+			state.reassessmentEvidence = null;
+			state.reassessmentVersion = 0;
+			state.resolvedReassessmentVersion = 0;
+			state.lastPlanRevisionsText = null;
+			state.planVersion = 1;
+			state.planConfidence = "low";
+			state.lastResearchAt = Date.now();
+			state.lastPlanRevisionAt = Date.now();
+		}
 		state.saveGeneration = null;
 		state.lastSavedHash = null;
 		state.dirty = false;
@@ -3235,17 +4820,16 @@ function installCommands(pi: ExtensionAPI) {
 		const goalText = goal ? `\n\n**Stated Goal**: ${goal}` : "";
 		const subquestMsg = `Now working on sub-quest **${name}**${parentName ? ` (parent: **${parentName}**)` : ""}. Sub-quest file: \`${path}\`.${goalText}
 
-**Upfront Research, Planning & Execution Protocol (Sub-Quest)**:
-1. First, discover how to build, run, and test the project (e.g. read AGENTS.md, Makefile, scripts).
-2. Perform an in-depth codebase investigation for this sub-quest: inspect relevant libraries, module boundaries, data flows, and root causes of complexity.
-3. Formulate a concrete plan and fill \`${path}\` with the goal, parent reference, findings, plan, and next actionable step.
-4. As a child sub-quest under an active quest, proceed autonomously into implementation without requiring separate user confirmation.
+**Sub-Quest Iterative Research & Execution Protocol**:
+Sub-quests do NOT inherit the parent's conclusions as immutable facts; treat them as context and hypotheses to independently verify.
 
-**TDD & Quality Workflow**:
-1. For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
-2. Develop feature -> build -> run -> verify targeted tests.
-3. Support end-of-task user feedback loops and polish iterations until final confirmation.
-4. Final Quality Gates: zero build errors/warnings, zero debug artifacts, and full test suite passing with zero errors.`;
+1. Read \`${path}\` to inspect inherited context and goal.
+2. Independently investigate the relevant subsystem, execution paths, and dependencies.
+3. Identify assumptions inherited or required, and test high-risk assumptions directly.
+4. Formulate a provisional plan, challenge it against potential failure modes, and revise if needed.
+5. Update \`${path}\` (Current Understanding, Key Assumptions, Plan, Plan Confidence, Exact Next Action) and call \`quest_mark_saved\`.
+6. Autonomously execute implementation and verify with tests without waiting for user confirmation.
+7. Upon completion, archive via \`quest_archive()\` to return findings to the parent quest.`;
 
 		sendInternalUserMessage(pi, subquestMsg);
 	};
@@ -3309,7 +4893,54 @@ function QUEST_TEMPLATE(name: string, goal = "", parent = "", originalRequest = 
 		``,
 		parentSec,
 		`## Current Status`,
-		`- [ ] not started · in progress · blocked · done`,
+		`- [ ] research pending · plan provisional · plan confirmed · in progress · blocked · done`,
+		``,
+		`## Current Understanding`,
+		`> Core architectural facts, execution paths, and component boundaries established by research.`,
+		`- `,
+		``,
+		`## Key Assumptions`,
+		`> Material assumptions supporting the approach (unverified | validated | invalidated).`,
+		`- [ ] `,
+		``,
+		`## Open Questions & Uncertainties`,
+		`> Material uncertainties to resolve through targeted investigation or testing.`,
+		`- [ ] `,
+		``,
+		`## Research Findings`,
+		`> Factual discoveries, data flow analysis, and tested hypotheses.`,
+		`- `,
+		``,
+		`## Plan Version`,
+		`1`,
+		``,
+		`## Research Round`,
+		`1`,
+		``,
+		`## Last Research At`,
+		`${Date.now()}`,
+		``,
+		`## Last Plan Revision At`,
+		`${Date.now()}`,
+		``,
+		`## Plan`,
+		`> Multi-stage execution plan (treat as provisional until falsification pass completes).`,
+		`1. `,
+		``,
+		`## Plan Confidence`,
+		`> low · medium · high (justify confidence based on verified assumptions and evidence).`,
+		``,
+		`## Plan Revisions`,
+		`> Record of plan changes: previous plan -> invalidating evidence -> new finding -> revised plan.`,
+		`- Initial plan formulated.`,
+		``,
+		`## Latest Reassessment`,
+		`> Records findings from the most recent fresh investigation when reassessment is triggered.`,
+		`- `,
+		``,
+		`## Rejected Approaches`,
+		`> Disproved hypotheses, failed attempts, and why they were abandoned.`,
+		`- `,
 		``,
 		`## Execution Snapshot`,
 		``,
@@ -3352,6 +4983,18 @@ function QUEST_TEMPLATE(name: string, goal = "", parent = "", originalRequest = 
 		`### Resume Context`,
 		`> `,
 		``,
+		`## Decisions Made`,
+		`- `,
+		``,
+		`## Constraints & Rules`,
+		`- `,
+		``,
+		`## Files Touched`,
+		`- `,
+		``,
+		`## Test / Build Status`,
+		`- `,
+		``,
 		`## Sub-Quests`,
 		`> Planned sub-quests, follow-ups, or tangent quests linked to this quest.`,
 		`- [ ] `,
@@ -3360,8 +5003,14 @@ function QUEST_TEMPLATE(name: string, goal = "", parent = "", originalRequest = 
 		`> Mid-workflow refinements, post-implementation iterations, and user adjustments.`,
 		refinementsBody,
 		``,
+		`## Remaining Work`,
+		`- [ ] `,
+		``,
+		`## Exact Next Action`,
+		`> Most justified immediate action (investigate, verify assumption, revise plan, implement, run tests).`,
+		``,
 		`## Resume Context`,
-		`> A concise briefing for continuing this quest without re-researching.`,
+		`> Concise epistemic briefing for continuing this quest without repeating solved research.`,
 		``,
 	].join("\n");
 }
@@ -3379,21 +5028,28 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 		const targetSections = [
 			{ key: "original request", title: "Original Request", maxChars: 4000 },
 			{ key: "current status", title: "Current Status", maxChars: 2000 },
+			{ key: "current understanding", title: "Current Understanding", maxChars: 4000 },
+			{ key: "key assumptions", title: "Key Assumptions", maxChars: 3000 },
+			{ key: "open questions & uncertainties", title: "Open Questions & Uncertainties", maxChars: 3000 },
+			{ key: "plan", title: "Plan", maxChars: 5000 },
+			{ key: "plan confidence", title: "Plan Confidence", maxChars: 1000 },
+			{ key: "plan revisions", title: "Plan Revisions", maxChars: 3000 },
+			{ key: "rejected approaches", title: "Rejected Approaches", maxChars: 3000 },
 			{ key: "execution snapshot", title: "Execution Snapshot", maxChars: 8000 },
 			{ key: "remaining work", title: "Remaining Work", maxChars: 4000 },
-			{ key: "next recommended step", title: "Next Action", maxChars: 3000 },
+			{ key: "exact next action", title: "Exact Next Action", maxChars: 3000 },
+			{ key: "test / build status", title: "Test / Build Status", maxChars: 2000 },
 			{ key: "resume prompt", title: "Resume Context", maxChars: 5000 },
 		];
 
 		const fallbackSections = [
 			{ key: "goal", title: "Goal", maxChars: 800 },
 			{ key: "parent quest", title: "Parent Quest", maxChars: 400 },
-			{ key: "in-depth analysis & findings", title: "Important Findings", maxChars: 3000 },
+			{ key: "research findings", title: "Important Findings", maxChars: 3000 },
 			{ key: "decisions made", title: "Decisions", maxChars: 3000 },
 			{ key: "constraints & rules", title: "Constraints & Rules", maxChars: 1000 },
 			{ key: "files examined", title: "Files Examined", maxChars: 1000 },
 			{ key: "files touched", title: "Files Modified", maxChars: 2000 },
-			{ key: "test / build status", title: "Test / Build Status", maxChars: 2000 },
 			{ key: "sub-quests", title: "Sub-Quests", maxChars: 1000 },
 			{ key: "quest refinements & user feedback loops", title: "Quest Refinements & User Feedback Loops", maxChars: 2000 },
 		];
@@ -3444,22 +5100,41 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 }
 
 function getWorkflowInstructions(resumeContext: string): string {
-	return `\n\n# Mandatory Quest Workflow Rules (TDD & Quality Gates)
+	return `\n\n# MANDATORY QUEST WORKFLOW RULES & QUALITY GATES (STRICTLY ENFORCED)
+Mandatory Quest Workflow Rules:
+CRITICAL INSTRUCTION: You MUST strictly adhere to these workflow rules and project quality gates on every turn. Do not take shortcuts, do not invent unverified assumptions, and do not bypass verification steps.
+
 When working on quests:
-1. **Upfront Deep Research, Planning & Confirmation (Turn 1 Protocol)**:
-   - Before writing or editing feature code, conduct a thorough architectural audit of the relevant codebase, understand constraints, read related files, and design a concrete execution plan.
-   - For a newly created root quest, fill \`docs/current/<quest>.md\` with findings, plan, and next step, and call \`quest_mark_saved\`.
-   - In Turn 1 of any main/root quest, present the research findings, architectural trade-offs, and multi-stage plan clearly to the user, and ASK FOR USER CONFIRMATION before writing or modifying feature code. Do not begin feature implementation before confirmation. Once confirmed (and during child sub-quests), execution is autonomous across turns and tools without requiring manual user slash commands.
-2. **Build & Run Discovery**: Discover how to build and run the project before editing code (\`make\`, \`make watch\`).
+1. **Iterative Research, Provisional Planning & Falsification Protocol (Turn 1 Protocol)**:
+   - Before writing or editing feature code, follow the iterative research protocol:
+     \`research -> provisional understanding -> provisional plan -> challenge plan -> targeted research -> revised plan -> implementation\`.
+   - **Research & Understand**: Establish relevant architecture, library contracts, module boundaries, and execution paths through targeted reading and call tracing.
+   - **Discover Actual Problem Structure**: Discover how the problem naturally divides during research rather than inventing an artificial flat list of bullets. If the task breaks down into distinct subsystems, architectural concerns, or separable investigations, identify those workstreams early and map them as sub-quests linked into the parent coordination plan (\`[[subquest-name]]\`).
+   - **Identify Assumptions & Uncertainties**: Explicitly list key assumptions your approach relies on and identify unresolved questions. Identify highest-risk assumptions and investigate them specifically.
+   - **Formulate Provisional Plan**: Produce a provisional multi-stage plan and record it under \`## Plan\` in \`docs/current/<quest>.md\`. Explicitly treat initial plans as provisional.
+   - **Actively Challenge & Falsify the Plan**: Ask what evidence could prove this plan wrong. Inspect relevant tests/code to test critical assumptions. If the plan depends on unresolved uncertainties, perform another targeted research pass.
+   - **Stopping Condition**: Research continues until relevant architecture is understood, important execution paths are verified, material assumptions are tested, plausible alternatives are considered, and major uncertainties are resolved or explicitly accepted (do NOT stop based on arbitrary file counts).
+   - **Turn 1 Confirmation & Asking User Questions Protocol**:
+     - In Turn 1 of a root/main quest (and whenever asking the user for input or confirmation):
+       1. First perform research and update the quest file via \`quest_update_state\` during the tool execution phase.
+       2. If research revealed natural workstreams, explain the decomposition clearly (e.g. "The problem breaks naturally into [N] independent areas: A, B... I'm separating those into sub-quests because each requires different investigation and can be verified independently.") and create sub-quests with \`quest_subquest({ switchNow: false })\`.
+       3. Then present your research findings, key assumptions evaluated, and revised parent plan clearly to the user.
+       4. To ask for user confirmation or input: either invoke the \`ask_questions\` tool (with structured options), OR emit your final question in plain text with **ZERO accompanying tool calls**.
+       5. **CRITICAL**: NEVER emit tool calls (such as \`quest_update_state\`, \`quest_mark_saved\`, \`edit\`, \`write\`, \`bash\`) in the same turn that you ask a question to the user. Emitting tool calls causes the agent harness to execute the tool and immediately run another turn, blowing past the question without waiting for the user's answer. Once confirmed by the user (and inside child sub-quests), execution is autonomous across turns and tools without requiring manual user slash commands.
+2. **Build & Run Discovery**: Discover how to build and run the project before editing code (\`make\`, \`make watch\`, test runners).
 3. **Verification Strategy**: For each implementation stage, establish an appropriate verification strategy before implementation. Prefer tests-first when practical, but do not create artificial tests merely to satisfy this workflow.
 4. **Iterative Build, Run & Test**: Feature implementation -> build -> run -> verify targeted tests.
-5. **Post-Implementation & User Feedback Loops**:
+5. **Dynamic Reassessment on Contradictory Evidence**:
+   - The quest file is external working memory, not an infallible dogma.
+   - Whenever execution encounters contradictory evidence (failed tests/commands, unexpected execution paths, undiscovered architecture, unexpected complexity, or user refinements), trigger a targeted reassessment before continuing.
+   - Investigate the contradiction, challenge whether the current plan remains valid, record revisions in \`## Plan Revisions\` and \`## Rejected Approaches\`, update \`docs/current/<quest>.md\`, and proceed with the revised Exact Next Action.
+6. **Post-Implementation & User Feedback Loops**:
    - Expect and support user polish iterations at the end of a quest or sub-quest.
    - When the user provides feedback, refinements, or tweaks mid-quest or post-implementation, log them under \`## Quest Refinements & User Feedback Loops\`, update acceptance checklists, execute changes, and verify with tests until the user confirms satisfaction.
-6. **Quest Completion & Wrap-Up Flow**:
+7. **Quest Completion & Wrap-Up Flow**:
    - **Root / Top-Level Quest Completion**: When all stages, features, and acceptance criteria are completed, restart the test daemon/server and execute the FULL test suite (\`make test\`) to verify zero errors or regressions. Only after the full test suite passes with zero failures, prompt the user via \`ask_questions\` with structured options (Refine anything, Archive quest and auto-compact, Archive quest without auto-compact, Change to manual mode).
-   - **Sub-Quest Completion (Autonomous Continuation)**: When finishing a child sub-quest, you do NOT need to ask for user input. Autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\` (deciding \`compact: true\` if context is elevated or \`compact: false\` if context is low), then seamlessly continue working on the parent quest.
-7. **Final Verification & Quality Gates**:
+   - **Sub-Quest Completion (Autonomous Continuation & Parent Reassessment)**: When finishing a child sub-quest, autonomously archive the sub-quest via \`quest_archive({ compact: boolean })\`. The parent quest receives the child's established findings, evaluates whether parent assumptions changed, updates its plan, and seamlessly resumes execution.
+8. **Final Verification & Quality Gates**:
    - Zero compiler errors or warnings.
    - Zero debug artifacts (no leftover console.logs, prints, or scratch code).
    - Full test suite (\`make test\`) must pass with zero errors.
@@ -3467,40 +5142,77 @@ When working on quests:
 # Autonomous Quest Management (Zero Manual User Commands Needed)
 You manage quests autonomously on disk in \`docs/current/<quest>.md\`. The user should NEVER need to type manual slash commands.
 
-1. **Continuous Durable Working Memory**:
-   - Treat \`docs/current/<quest>.md\` as your durable working memory.
-   - During normal execution, whenever you discover information that would be expensive to reconstruct after context loss, update the active quest file as part of your normal workflow.
-   - Persist high-value information: important discoveries, architecture/data flow, constraints, decisions and rationale, failed approaches, key files/symbols, test/build status, requirements, completed/in-progress/remaining work, and the exact next action.
-   - Criterion: *Would losing the current context force a fresh agent to repeat significant investigation, reconsider a decision, or guess what to do next?* If yes, persist it.
+1. **Continuous Durable Epistemic Memory**:
+   - Treat \`docs/current/<quest>.md\` as your durable working memory and epistemic record.
+   - Proactively update it during normal execution whenever expensive-to-reconstruct discoveries, decisions, tested assumptions, plan revisions, or progress occur.
+   - Persist: Current Understanding, Key Assumptions, Open Questions, Research Findings, Plan, Plan Confidence, Plan Revisions, Rejected Approaches, Files Touched, Test/Build Status, and Exact Next Action.
+   - Criterion: *Would losing the current context force a fresh agent to repeat significant investigation, reconsider a rejected approach, or guess what to do next?* If yes, persist it.
    - Use \`quest_update_state\` or \`edit\` + \`quest_mark_saved\`.
-   - Do NOT wait for artificial checkpoint reminders. There are no periodic turn-count checkpoint messages during normal execution.
 
-2. **Auto-Initialize New Quest on Substantive Requests**:
-   - When the user gives a substantive objective (feature, bug fix, refactor, investigation), a persistent quest is automatically initialized.
-   - Investigate the codebase, establish a concrete plan, persist it in \`docs/current/<quest>.md\`, and call \`quest_mark_saved\`.
-   - Present research findings and plan to user, and confirm before editing feature code. Once confirmed, execute autonomously.
+2. **Auto-Initialize New Quest on Substantive Requests (Research-Grounded Formation)**:
+   - When a substantive request arrives, the system enters provisional root initialization.
+   - Do NOT immediately create a generic quest file with raw prompt slugification.
+   - **Initial Investigation & Orientation**: First investigate relevant architecture, execution paths, constraints, and conventions using read/search/bash tools.
+   - **Semantic Quest Identity**: Based on what you learned during research, establish a concise, intelligible semantic name for the body of work (e.g. 'persistent-agent-research', 'oauth-login-flow', 'editor-rendering-crash' — NOT words mechanically copied from the user's prompt).
+   - **Initialize Durable Quest**: Call \`quest_update_state({ name: "<semantic-name>", goal: "...", understanding: "...", assumptions: [...], openQuestions: [...], findings: [...], plan: [...], planConfidence: "medium"|"high", exactNextAction: "...", researchComplete: true })\`. This creates \`docs/current/<semantic-slug>.md\` populated with your actual research findings, preserves the verbatim user prompt in \`## Original request\`, and validates the epistemic state.
+   - **First-Turn Response**: Summarize your research findings, the newly established architectural facts, why the chosen quest identity fits, and the proposed plan to the user.
+   - **Turn 1 Confirmation**: Ask for user confirmation (using \`ask_questions\` or plain text with ZERO accompanying tool calls) before editing feature code. Once confirmed, execute autonomously.
 
 3. **Auto-Refine Active Quest on User Feedback**:
    - When the user provides feedback or new requirements while a quest is active, it is automatically captured as a refinement.
-   - Incorporate the refinement into \`docs/current/<active-quest>.md\` using \`quest_update_state\` (or edit + \`quest_mark_saved\`).
+   - Reassess whether the refinement changes the current plan, record changes in \`## Quest Refinements & User Feedback Loops\` and \`## Plan Revisions\`, and update the quest file.
 
-4. **Auto-Create Sub-Quests for Planned Work, Tangents & Side Tasks (LIFO Stack)**:
-   - Quests operate on a **LIFO (Last-In, First-Out) stack**.
-   - For small incidental actions or simple checks, perform them directly in the current quest without creating sub-quests.
-   - For meaningful independent investigations, complex multi-stage branches, or separate follow-up workstreams that need independent durable context, invoke \`quest_subquest({ goal: "..." })\` (or \`quest_journal_subquest\`).
-   - When the sub-quest is finished, call \`quest_archive()\` (or \`quest_journal_archive\`) to pop the stack and autonomously resume parent quest execution!
+4. **Auto-Create Sub-Quests & Meaningful Decomposition (LIFO Stack)**:
+   - **Mental Model**: Decompose according to the discovered structure of the problem, not according to the number of bullets in the plan:
+     \`research -> discover actual problem structure -> identify independently investigable/executable workstreams -> create sub-quests for useful separable work -> establish parent plan around them -> execute\`.
+   - **When to Create Sub-Quests**: During initial research, explicitly look for work that has one or more of these properties:
+     * a distinct subsystem, architectural concern, or execution path;
+     * a self-contained investigation that could produce durable findings for the parent;
+     * a task with its own assumptions and verification strategy;
+     * a component that may require several implementation/verification steps;
+     * a parallel or weakly coupled workstream;
+     * a risky unknown that deserves independent investigation;
+     * a side problem that would otherwise pollute the parent quest's context;
+     * work that can be completed and then summarized back to the parent.
+   - **When NOT to Create Sub-Quests (Avoid Over-Decomposition)**:
+     Do NOT create sub-quests for:
+     * a trivial one-command task;
+     * a tiny edit;
+     * an obvious sequential step that does not benefit from independent context;
+     * every item in a checklist;
+     * every file touched;
+     * every test command.
+   - **The Golden Criterion**:
+     *Would this unit benefit from having its own durable research state, assumptions, findings, execution history, and context boundary?*
+     If yes, create a sub-quest (\`quest_subquest({ name: "...", goal: "...", switchNow: false })\`). If no, keep it within the parent quest.
+   - **Meaningful Decomposition**: Choose concise, semantic names (e.g. \`auth-callback-flow\`, \`session-persistence\`, \`frontend-auth-state\`).
+   - **Allow Sub-Quests to Emerge from Research**: Begin with PROVISIONAL ROOT RESEARCH, discover during investigation how the work naturally divides into separate concerns, create the appropriate sub-quests, and structure the parent coordination plan around them.
+   - **Sub-Quest Creation During Initial Planning**: If research reveals multiple genuinely separable workstreams, create sub-quests for them even when there are only two or three. If the work is tightly coupled, keep it within the parent quest even if there are several plan steps. (A plan with >3 distinct phases or complex components serves as a strong heuristic signal to evaluate for decomposition).
+   - **Parent Plan Expressed in Terms of Sub-Quests**: The root plan should reference the actual sub-quests (\`[[sub-quest-name]]\`) rather than duplicating all child reasoning:
+     \`\`\`text
+     ## Plan
+     1. Investigate and resolve [[sub-quest-1]]
+     2. Investigate and resolve [[sub-quest-2]]
+     3. Integrate the resulting changes and verify end-to-end
+     \`\`\`
+     The parent retains only coordination-level reasoning; detailed reasoning belongs in the child quest. This protects context economy in the parent.
+   - **LIFO Execution Model & Context Inheritance**: Sub-quests operate on a LIFO stack. The parent remains the durable owner of the overall objective. The child inherits context as hypotheses to independently verify:
+     \`read inherited context -> independently investigate -> identify assumptions -> test high-risk assumptions -> form provisional plan -> challenge plan -> targeted research if needed -> persist plan -> implement -> verify -> archive -> return findings to parent\`.
+   - **Epistemic Hard Gates & Autonomous Child Execution**: Sub-quest creation does NOT bypass epistemic enforcement: a child cannot modify project code until its required research state is established in its own quest file. Once research requirements are satisfied, the child proceeds autonomously without a redundant human confirmation.
+   - **Sub-Quest Completion**: When finishing a child sub-quest, call \`quest_archive()\` to pop the stack and autonomously return to the parent quest with a child-result summary!
 
 5. **Auto-Archive Upon Completion (LIFO Pop)**:
-   - **For Sub-Quests**: Autonomously archive via \`quest_archive({ compact: boolean })\` and continue parent quest.
+   - **For Sub-Quests**: Autonomously archive via \`quest_archive({ compact: boolean })\` and return to parent.
    - **For Root Quests**: When finished, prompt user via \`ask_questions\` to refine or archive.
 
 6. **Auto-Compaction & Autonomous Resumption**:
    - Context automatically compacts dynamically when approaching threshold.
    - When context approaches the compaction threshold, an explicit pre-compaction final save directive will instruct you to perform a final exhaustive state save before compaction.
-   - Following ANY compaction:
+   - **Durable Epistemic Recovery Following ANY Compaction**:
      - Immediately read \`docs/current/<active-quest>.md\` (the single source of truth on disk).
-     - Trust the persisted execution state; resume the next actionable step with ZERO re-research and ZERO pause.
-     - Do NOT ask the user "What were we doing?" or wait for manual commands.
+     - Recover Current Understanding, Key Assumptions, Plan, Plan Confidence, and Exact Next Action.
+     - Validate whether the current plan is still supported by the recovered evidence. Do not repeat research merely to reconstruct lost context; use the quest file to recover established knowledge. However, if an important assumption remains unverified, tests disagree, or new evidence contradicts the model, re-investigate that specific aspect before continuing.
+     - Proceed directly with executing the justified Exact Next Action without waiting for user commands or modal questions.
 7. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.${resumeContext}`;
 }
 
@@ -3519,15 +5231,32 @@ function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 					const isLatestRefinement = state.refinements.length > 0 && state.refinements[state.refinements.length - 1] === trimmed;
 
 					if (!isOriginal && !isLatestRefinement) {
+						const classification = classifyUserMessage(trimmed);
+
+						if (classification === UserMessageClassification.CONFIRMATION) {
+							acceptRootConfirmation(pi, ctx);
+						} else if (classification === UserMessageClassification.REFINEMENT_OR_REQUIREMENT) {
+							state.refinements.push(trimmed);
+							state.prompts.push(trimmed);
+							if (state.prompts.length > PROMPT_MAX_COUNT) {
+								state.prompts = [state.prompts[0], ...state.prompts.slice(-(PROMPT_MAX_COUNT - 1))];
+							}
+							if (state.refinements.length > PROMPT_MAX_COUNT) {
+								state.refinements = state.refinements.slice(-PROMPT_MAX_COUNT);
+							}
+							triggerReassessment(state, `User refinement received: "${trimmed.slice(0, 100)}..."`, trimmed);
+							persist(pi, ctx);
+							updateUIStatus(ctx);
+						}
+					}
+				} else if (state.pendingRootQuest) {
+					const classification = classifyUserMessage(trimmed);
+					if (classification === UserMessageClassification.REFINEMENT_OR_REQUIREMENT) {
+						if (!Array.isArray(state.refinements)) state.refinements = [];
 						state.refinements.push(trimmed);
-						state.prompts.push(trimmed);
-						if (state.prompts.length > PROMPT_MAX_COUNT) {
-							state.prompts = [state.prompts[0], ...state.prompts.slice(-(PROMPT_MAX_COUNT - 1))];
+						if (!state.prompts.includes(trimmed)) {
+							state.prompts.push(trimmed);
 						}
-						if (state.refinements.length > PROMPT_MAX_COUNT) {
-							state.refinements = state.refinements.slice(-PROMPT_MAX_COUNT);
-						}
-						state.dirty = true;
 						persist(pi, ctx);
 						updateUIStatus(ctx);
 					}
@@ -3558,14 +5287,15 @@ function registerQuestJournalCRBHook() {
 		}
 		g.__pi_crb_providers.push((_ctx: ExtensionContext, tools: string[]) => {
 			const set = new Set(tools.map((t) => t.toLowerCase()));
-			if (set.has("quest_journal_mark_saved") || set.has("quest_mark_saved") || set.has("quest_update_state") || state.active) {
+			if (set.has("quest_journal_mark_saved") || set.has("quest_mark_saved") || set.has("quest_update_state") || state.active || state.pendingRootQuest) {
 				return [
 					"Never propose anything without doing your homework first: thoroughly investigate codebase architecture, read files, discover build/run commands, and evaluate constraints before proposing plans or code changes.",
-					"Turn 1 Confirmation: In turn 1 of any root quest, present the research findings, architectural trade-offs, and multi-stage plan clearly to the user, and ask for confirmation BEFORE writing code.",
-					"Continuous Durable Working Memory: `docs/current/<quest>.md` is your durable working memory and single source of truth on disk. Proactively update it during normal execution whenever expensive-to-reconstruct discoveries, decisions, or progress occur.",
-					"Zero Re-Research: Never re-read or re-search context already documented in active/archived quest files.",
-					"Autonomous Continuation: Following compaction or sub-quest return, read `docs/current/<active-quest>.md` and proceed immediately without user interruption.",
-					"Sub-quests: Create sub-quests for independent workstreams/tangents (`quest_subquest({ goal })`); complete and archive autonomously (`quest_archive({ compact })`) without modal questions.",
+					"Research-Grounded Quest Formation: Investigate first to understand the actual problem, establish a short intelligible semantic quest identity, and initialize the durable quest with research findings via quest_update_state.",
+					"Turn 1 Confirmation: In turn 1 of any root quest, present research findings, key assumptions tested, architectural trade-offs, and revised plan clearly to the user, and ask for confirmation BEFORE writing code.",
+					"Continuous Durable Epistemic Memory: `docs/current/<quest>.md` is your durable working memory and single source of truth on disk. Proactively record understanding, assumptions, plan confidence, plan revisions, and exact next action whenever discoveries occur.",
+					"Dynamic Epistemic Re-Investigation: Use the quest file to recover established knowledge without repeating routine research (no unnecessary re-research). Re-investigate whenever new evidence contradicts an assumption, tests fail, or the plan fails to explain observed behavior.",
+					"Autonomous Continuation: Following compaction or sub-quest return, read `docs/current/<active-quest>.md`, validate the plan against recovered state, and proceed immediately without user interruption.",
+					"Meaningful Sub-Quest Decomposition: Decompose according to the discovered structure of the problem, not arbitrary bullet counts. During research, identify genuinely separable workstreams (distinct subsystems, independent investigations, separate verification boundaries) and create sub-quests (`quest_subquest({ switchNow: false })`) linked into the parent plan (`[[subquest-name]]`). Avoid artificial fragmentation for trivial or tightly coupled steps. Sub-quests independently verify inherited context.",
 					"Full Test Suite Quality Gate: Before completing/archiving a top-level quest, restart the test server/daemon, run the fresh FULL test suite (`make test`), and verify zero errors.",
 					"Top-level Quest Completion: When root quest is done, prompt user via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
 				];
@@ -3606,6 +5336,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_tree", async (_event: any, ctx: any) => reconstruct(ctx));
 
 	installWorkflowSystemPrompt(pi);
+	installToolCallGate(pi);
 	installContextListener(pi);
 	installTurnEnd(pi);
 	installBeforeCompact(pi);

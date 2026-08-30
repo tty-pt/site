@@ -33,6 +33,9 @@ wait_for_server() {
 echo "=== Generic Record-to-JSON Tests ==="
 wait_for_server
 
+# ── Cleanup previous test fixtures ──
+rm -rf "$REPO_ROOT"/var/grp/gj_* "$REPO_ROOT"/var/song/gj_* "$REPO_ROOT"/var/gig/gj_* "$REPO_ROOT"/var/song.types/gj_* 2>/dev/null || true
+
 # ── Auth ──
 rm -f "$COOKIE"
 curl -sw "" -o /dev/null -c "$COOKIE" -X POST "$BASE/auth/register" \

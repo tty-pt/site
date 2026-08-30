@@ -46,6 +46,9 @@ qmap-lib:
 xylem-lib:
 	$(MAKE) -C external/libxylem
 
+dev:
+	@./scripts/dev.sh
+
 run:
 	$(MAKE) DEV=1 all
 	./start.sh
@@ -56,12 +59,11 @@ test-data-dirs:
 	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors
 
 unit-tests: all test-data-dirs
-	@curl -s --max-time 2 http://localhost:8080/ > /dev/null 2>&1 || \
-		{ echo "ERROR: axil not running on :8080 — start the server before running unit-tests"; exit 1; }
-	@for d in $(MODS); do \
-		echo "=== TESTING $$d ==="; \
-		(cd mods/$$d && ./test.sh) || exit 1; \
-	done
+	@./scripts/run-with-server.sh sh -c '\
+		for d in $(MODS); do \
+			echo "=== TESTING $$d ==="; \
+			(cd mods/$$d && ./test.sh) || exit 1; \
+		done'
 	@$(MAKE) standalone-unit-tests
 
 standalone-unit-tests:
@@ -92,18 +94,38 @@ standalone-unit-tests:
 
 pages-test: all
 	@echo "Running pages smoke tests"
-	sh tests/pages/10-pages-render.sh
-	sh tests/pages/20-song-search.sh
-	sh tests/pages/25-list-metadata.sh
-	sh tests/pages/30-song-multiselect.sh
-	sh tests/pages/40-traversal.sh
-	sh tests/pages/50-pickers.sh
+	@./scripts/run-with-server.sh sh -c '\
+		sh tests/pages/10-pages-render.sh && \
+		sh tests/pages/20-song-search.sh && \
+		sh tests/pages/25-list-metadata.sh && \
+		sh tests/pages/30-song-multiselect.sh && \
+		sh tests/pages/40-traversal.sh && \
+		sh tests/pages/50-pickers.sh'
 
 unit-c-tests:
 	@sh tests/scripts/repro-matrix.sh --build
 
 integration-tests: all
-	@sh tests/integration/run_all.sh
+	@./scripts/run-with-server.sh sh tests/integration/run_all.sh
+
+test-mod: all test-data-dirs
+	@if [ -z "$(MOD)" ]; then \
+		echo "Error: MOD is required. Example: make test-mod MOD=song"; \
+		exit 1; \
+	fi
+	@echo "=== Running targeted tests for module: $(MOD) ==="
+	@./scripts/run-with-server.sh sh -c '\
+		if [ -f "mods/$(MOD)/test.sh" ]; then (cd mods/$(MOD) && ./test.sh); fi'
+
+test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test
+	@echo "Fast test suite passed!"
+
+test-e2e: test-data-dirs
+	@if [ -n "$(FILE)" ]; then \
+		./scripts/run-with-server.sh deno test --allow-all "tests/e2e/$(FILE)"; \
+	else \
+		./scripts/run-with-server.sh deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/; \
+	fi
 
 e2e-tests: test-data-dirs
 	AUTH_SKIP_CONFIRM=1 deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
@@ -192,11 +214,24 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-qmap)
 hyle-tests:
-	RUSTFLAGS="-l qmap -l stoma -L $(shell pwd)/external/libqmap/lib -L $(shell pwd)/external/stoma/lib" cargo test --workspace \
+	RUSTFLAGS="-l qmap -l stoma -L $$(pwd)/external/libqmap/lib -L $$(pwd)/external/stoma/lib" cargo test --workspace \
 		--manifest-path external/hyle/Cargo.toml 2>&1
 
 debug-clean:
 	rm -rf $(DEBUG_DIR)/*
+
+doctor:
+	@./scripts/doctor.sh
+
+compile_commands.json:
+	@./scripts/gen-compile-commands.sh
+
+new-mod:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME is required. Example: make new-mod NAME=artist DISPLAY=Artist"; \
+		exit 1; \
+	fi
+	@./scripts/scaffold-module.sh "$(NAME)" "$(DISPLAY)"
 
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
@@ -204,8 +239,8 @@ DEPLOY_PATH ?= /var/www/htdocs
 PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
 
 deploy-wasm: clients
-	scp $(addprefix htdocs/,$(PROD_ASSETS)) \
+	scp $(PROD_ASSETS:%=htdocs/%) \
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e

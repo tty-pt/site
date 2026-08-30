@@ -1,7 +1,7 @@
 #ifndef STATE_MACROS_H
 #define STATE_MACROS_H
 
-#include "field_macros.h"
+#include <hyle/schema.h>
 
 /*
  * X-Macro Generators for bud app state.

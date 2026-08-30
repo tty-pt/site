@@ -74,16 +74,26 @@ replaces, it does not append.
   length) and NUL-terminates whenever there's room. Size buffers to the field
   and trust the return value as the count.
 
-## Field Schemas (`field_macros.h`)
+## Field Schemas (`<hyle/schema.h>`)
 
-Module schemas use canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`) and `field_macros.h`:
-- `REC_FIELD(name, type, dest, size)` — standard text / scalar field.
-- `REF_FIELD(name, type, dest, size, target)` — single reference.
-- `MULTI_REF_FIELD(name, type, dest, size, target)` — multi-reference field.
-- `MULTI_REF_FIELD_SM(name, type, dest, size, target, inv, req, style, mode)` — multi-reference with UI style and filter mode hints.
-- `EXCL_FIELD_V(name, type, dest, size, target)` — virtual display reference (unwritable, excluded from storage).
-- `EXCL_FIELD_VF(name, type, dest, size, file)` — file attachment (e.g. `data.txt` body content).
+Module schemas use canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`):
+- `FIELD_TEXT(name, struct_t, member, ...)` — string record field with automatic `sizeof`/`offsetof`, optional designated initializers (`.required=1`, `.min_length=1`, `.in_meta=1`). If `member` is omitted, it defaults to `name`.
+- `FIELD_INT(name, struct_t, member, ...)` — integer record field with automatic `sizeof`/`offsetof`.
+- `FIELD_BOOL(name, struct_t, member, ...)` — boolean record field.
+- `FIELD_REF(name, struct_t, member, target_dataset, ...)` — single reference with automatic display resolution (supports `.filter_style="dropdown"`, `.allow_add=1`, `.ref_inverse="songs"`).
+- `FIELD_ARRAY(type_macro, ...)` — higher-order array combinator: transforms ANY base field macro into an array/collection field (`.is_array = 1`).
+  - Array of ints: `FIELD_ARRAY(FIELD_INT, scores, struct_t, scores)` (or `FIELD_INT(scores, struct_t, scores, .is_array = 1)` / `FIELD_ARRAY_INT(...)`).
+  - Array of references: `FIELD_ARRAY(FIELD_REF, type, struct_t, type, "song.types", ...)` (or `FIELD_REF(type, struct_t, type, "song.types", .is_array = 1, ...)` / `FIELD_ARRAY_REF(...)`).
+  - Array of text: `FIELD_ARRAY(FIELD_TEXT, tags, struct_t, tags)` (or `FIELD_ARRAY_TEXT(...)`).
+  - Array of booleans: `FIELD_ARRAY(FIELD_BOOL, flags, struct_t, flags)` (or `FIELD_ARRAY_BOOL(...)`).
+- `FIELD_MULTI_REF(name, struct_t, member, target_dataset, ...)` — alias for `FIELD_ARRAY_REF(...)`.
+- `FIELD_FILE(name, file_path)` — file attachment (e.g. `data.txt`, `pt_PT.html`).
+- `FIELD_DERIVED(name, derive_key)` — virtual derived search/indexing field.
+- `FIELD_INVERSE(name, target_dataset, inverse_field)` — virtual inverse relationship.
+- `FIELD_EXCL(name, struct_t, member, ...)` — struct-backed field excluded from state JSON (e.g. `owner`).
 - `FIELD_END` — terminates descriptor array.
+
+WASM and state serialization use `BUD_STATE_FIELDS` (from `mods/common/state_macros.h`) to unpack state JSON into C structs without boilerplate.
 
 ## Memory
 

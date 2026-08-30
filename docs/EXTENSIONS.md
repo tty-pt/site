@@ -33,9 +33,17 @@ Maintains long-lived quest state on disk (`docs/current/<quest>.md`), auto-injec
 
 ### Custom Tools
 
+- **`quest_update_state`**: Update the active quest state on disk with structured fields (`status`, `findings`, `decisions`, `remaining`, `nextStep`, `plan`, `planConfidence`, `openQuestions`, `assumptions`, `exactNextAction`, etc.). Automatically formats, validates epistemic consistency, and deterministically writes `docs/current/<active>.md`.
 - **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`. (Alias: `quest_journal_mark_saved`)
-- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Creates its own quest file in `docs/current/<sub-quest>.md`, links it into the parent quest, and records parent reference. (Alias: `quest_journal_subquest`)
+- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Creates its own quest file in `docs/current/<sub-quest>.md`, links it into the parent quest, and manages LIFO sub-quest stack activation. (Alias: `quest_journal_subquest`)
 - **`quest_archive`**: Archive the active (or specified) quest from `docs/current/` to `docs/archive/` and optionally trigger session context compaction. (Alias: `quest_journal_archive`)
+
+### Autonomous Quest Management & Epistemic Memory
+
+1. **Research-Grounded Formation**: When substantive requests arrive, the assistant investigates the codebase first, infers a semantic identity, and calls `quest_update_state` to establish durable epistemic memory before writing code.
+2. **LIFO Sub-Quest Stack**: Deep work or multi-phase tasks use nested sub-quests (`quest_subquest`). When child sub-quests finish and archive (`quest_archive`), findings pop back to the parent quest for seamless continuation.
+3. **Dynamic Epistemic Reassessment**: If unexpected complexity, failed tests, or contradictory evidence occurs, the assistant dynamically challenges its assumptions, updates `planRevisions` and `rejectedApproaches`, and updates the quest state before continuing.
+4. **Autonomous Continuation**: Following compaction or context reset, the assistant immediately re-reads `docs/current/<active>.md` to resume without manual user commands.
 
 ### Session Awareness & Context Injection
 

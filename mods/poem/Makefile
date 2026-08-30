@@ -1,4 +1,4 @@
-HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
+HYLE_DIR = $(REPO_ROOT)/external/hyle
 EXTRA_CFLAGS += -I../common -I$(HYLE_DIR)/c/libhyle-bud/include
 EXTRA_LDLIBS += -lbud
 EXTRA_LDLIBS-OpenBSD += -liconv

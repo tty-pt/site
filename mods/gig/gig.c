@@ -553,7 +553,7 @@ static int handle_sb_add(int fd, char *body)
 static const hyle_schema_desc_t sb_pick_song_schema[] = {
 	{ .key = "song_id",
 	  .qm_type = BUD_QM_STR,
-	  .source_type = HYLE_BUD_REFERENCE,
+	  .type = HYLE_FIELD_REFERENCE,
 	  .ref_source = "song.items",
 	  .writable = 1 },
 	{ 0 }
@@ -562,7 +562,7 @@ static const hyle_schema_desc_t sb_pick_song_schema[] = {
 static const hyle_schema_desc_t sb_pick_fmt_schema[] = {
 	{ .key = "format",
 	  .qm_type = BUD_QM_STR,
-	  .source_type = HYLE_BUD_REFERENCE,
+	  .type = HYLE_FIELD_REFERENCE,
 	  .ref_source = "song.types",
 	  .writable = 1 },
 	{ 0 }
@@ -588,7 +588,7 @@ static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out)
 	static const hyle_schema_desc_t edit_song_schema[] = {
 		{ .key = "song",
 		  .qm_type = BUD_QM_STR,
-		  .source_type = HYLE_BUD_REFERENCE,
+		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.items",
 		  .writable = 1 },
 		{ 0 }
@@ -1112,7 +1112,7 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	static const hyle_schema_desc_t grp_field_schema[] = {
 		{ .key = "grp",
 		  .qm_type = BUD_QM_STR,
-		  .source_type = HYLE_BUD_REFERENCE,
+		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "grp.items",
 		  .offset = offsetof(gig_cache_t, grp),
 		  .size = sizeof(grp_rec.grp),
@@ -1131,12 +1131,12 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	static const hyle_schema_desc_t row_candidate_schema[] = {
 		{ .key = "song",
 		  .qm_type = BUD_QM_STR,
-		  .source_type = HYLE_BUD_REFERENCE,
+		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.items",
 		  .writable = 1 },
 		{ .key = "fmt",
 		  .qm_type = BUD_QM_STR,
-		  .source_type = HYLE_BUD_REFERENCE,
+		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.types",
 		  .writable = 1 },
 		{ 0 }

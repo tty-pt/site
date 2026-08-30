@@ -14,7 +14,6 @@
 
 #include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
 #include "../common/state_macros.h"
 
 typedef struct {
@@ -50,9 +49,10 @@ typedef struct {
 } song_type_cache_t;
 
 static const hyle_schema_desc_t song_type_fields[] = {
-	REC_FIELD(id, song_type_cache_t, id, 64, 1, 0, 0, 0),
-	REC_FIELD(name, song_type_cache_t, name, 256, 1, 0, 0, 1),
-	INVERSE_FIELD(songs, "song.items", "type"), FIELD_END
+	FIELD_TEXT(id, song_type_cache_t),
+	FIELD_TEXT(name, song_type_cache_t, .in_meta = 1),
+	FIELD_INVERSE(songs, "song.items", "type"),
+	FIELD_END
 };
 
 #define SONG_TYPE_FIELD_COUNT                                                  \
@@ -66,9 +66,10 @@ typedef struct {
 } song_author_cache_t;
 
 static const hyle_schema_desc_t song_author_fields[] = {
-	REC_FIELD(id, song_author_cache_t, id, 64, 1, 0, 0, 0),
-	REC_FIELD(name, song_author_cache_t, name, 256, 1, 0, 0, 1),
-	INVERSE_FIELD(songs, "song.items", "author"), FIELD_END
+	FIELD_TEXT(id, song_author_cache_t),
+	FIELD_TEXT(name, song_author_cache_t, .in_meta = 1),
+	FIELD_INVERSE(songs, "song.items", "author"),
+	FIELD_END
 };
 
 #define SONG_AUTHOR_FIELD_COUNT                                                \
@@ -77,20 +78,22 @@ static const hyle_schema_desc_t song_author_fields[] = {
 /* ── Song record fields ──────────────────────────────────────── */
 
 static const hyle_schema_desc_t song_fields[] = {
-	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
-	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
-	MULTI_REF_FIELD_SMA(
-	        type, song_cache_t, type, 2048, "song.types", "songs", 1,
-	        "dropdown", "and", 1),
-	REF_FIELD_SA(
-	        author, song_cache_t, author, 256, "song.authors", "songs", 1,
-	        "dropdown", 1),
-	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
-	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
-	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
-	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
-	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
-	DERIVED_FIELD(lyrics, "song.lyrics_from_data"),
+	FIELD_TEXT(id, song_cache_t),
+	FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+	FIELD_ARRAY(
+	        FIELD_REF, type, song_cache_t, "song.types",
+	        .ref_inverse = "songs", .filter_style = "dropdown",
+	        .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+	FIELD_REF(
+	        author, song_cache_t, "song.authors",
+	        .ref_inverse = "songs", .filter_style = "dropdown",
+	        .allow_add = 1, .in_meta = 1),
+	FIELD_TEXT(yt, song_cache_t, .in_meta = 1),
+	FIELD_TEXT(audio, song_cache_t, .in_meta = 1),
+	FIELD_TEXT(pdf, song_cache_t, .in_meta = 1),
+	FIELD_FILE(data, "data.txt"),
+	FIELD_EXCL(owner, song_cache_t),
+	FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
 	FIELD_END
 };
 

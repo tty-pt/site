@@ -35,9 +35,9 @@ static const hyle_schema_desc_t test_song_desc[] = {
 	{ .key = "id", .offset = offsetof(test_song_record_t, id), .size = 64, .qm_type = BUD_QM_STR, .writable = 0 },
 	{ .key = "title", .offset = offsetof(test_song_record_t, title), .size = 128, .qm_type = BUD_QM_STR, .required = 1, .min_length = 2, .writable = 1 },
 	{ .key = "author", .offset = offsetof(test_song_record_t, author), .size = 128, .qm_type = BUD_QM_STR, .writable = 1 },
-	{ .key = "type", .offset = offsetof(test_song_record_t, type), .size = 256, .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_MULTI_REFERENCE, .ref_source = "song.types", .writable = 1 },
-	{ .key = "tempo", .offset = offsetof(test_song_record_t, tempo), .size = sizeof(int), .is_int = 1, .source_type = HYLE_BUD_INT, .writable = 1 },
-	{ .key = "is_public", .offset = offsetof(test_song_record_t, is_public), .size = sizeof(int), .source_type = HYLE_BUD_BOOL, .writable = 1 },
+	{ .key = "type", .offset = offsetof(test_song_record_t, type), .size = 256, .qm_type = BUD_QM_STR, .type = HYLE_FIELD_MULTI_REFERENCE, .ref_source = "song.types", .writable = 1 },
+	{ .key = "tempo", .offset = offsetof(test_song_record_t, tempo), .size = sizeof(int), .is_int = 1, .type = HYLE_FIELD_INT, .writable = 1 },
+	{ .key = "is_public", .offset = offsetof(test_song_record_t, is_public), .size = sizeof(int), .type = HYLE_FIELD_BOOL, .writable = 1 },
 	{ .key = "event_date", .offset = offsetof(test_song_record_t, event_date), .size = 32, .qm_type = BUD_QM_STR, .writable = 1 },
 	{ .key = "data", .offset = offsetof(test_song_record_t, data), .size = 1024, .qm_type = BUD_QM_VSTR, .file = "data.txt", .writable = 1 },
 	{ 0 }

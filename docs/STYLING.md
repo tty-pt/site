@@ -34,12 +34,22 @@ site-wide sheet in `htdocs/`.)
 and `.dark`; primary/danger are the consumer's responsibility. **New widget
 styles must use these tokens** so dark mode keeps working.
 
-## Cache bust — mandatory after any CSS change
+## Cache bust — automated content hashing
 
-Both `site_ui_page` paths in `mods/common/ux/site_ui.c` emit the stylesheet
-links with `?v=N` (four lines total: `styles.css?v=` + `hyle.css?v=`, twice).
-Bump `?v=7`→`?v=8` on all four, then rebuild + restart (see
-`docs/BUILD.md`). Forget this and browsers serve stale CSS.
+Asset versioning is fully automated via `scripts/gen-asset-version.sh`.
+On every build, `mods/common/ux/version.gen.h` is generated from sha256 content
+hashes of `htdocs/styles.css`, `hyle.css`, `bud-client.js`, `bud-hydrate.js`,
+and `hyle-fragments.js`.
+
+`mods/common/ux/site_page.c` includes `version.gen.h` via `__has_include` fallback
+and emits the cache-busting query strings (`SITE_CSS_V`, `SITE_CLIENT_V`,
+`SITE_FRAGMENTS_V`). No manual `?v=` bumping is required. After modifying CSS or JS,
+running `make` automatically re-hashes the assets and recompiles `common.so`.
+
+To inspect current asset hashes:
+```bash
+sh scripts/gen-asset-version.sh && cat mods/common/ux/version.gen.h
+```
 
 ## Filter-bar specificity traps (the widget gotchas)
 

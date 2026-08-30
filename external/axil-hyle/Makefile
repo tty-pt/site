@@ -1,26 +1,28 @@
 all := libaxil-hyle
 SONAME-libaxil-hyle := axil-hyle
 
-EXTRA_CFLAGS += -I$(shell cd .. && pwd)/axil/include \
-	-I$(shell cd .. && pwd)/libqmap/include \
-	-I$(shell cd .. && pwd)/hyle/include \
-	-I$(shell cd .. && pwd)/hyle/c/libhyle-source/include \
-	-I$(shell cd .. && pwd)/hyle/c/libhyle-bud/include \
-	-I$(shell cd .. && pwd)/bud/include \
-	-I$(shell cd .. && pwd)/axil-auth/include
+PARENT != cd .. && pwd
+
+EXTRA_CFLAGS += -I${PARENT}/axil/include \
+	-I${PARENT}/libqmap/include \
+	-I${PARENT}/hyle/include \
+	-I${PARENT}/hyle/c/libhyle-source/include \
+	-I${PARENT}/hyle/c/libhyle-bud/include \
+	-I${PARENT}/bud/include \
+	-I${PARENT}/axil-auth/include
 
 LDLIBS-libaxil-hyle := -laxil -lqmap -lhyle -lhyle-source -lhyle-bud -lbud -ljson-c -laxil-auth
-LDFLAGS-libaxil-hyle := -L$(shell cd .. && pwd)/axil/lib \
-	-L$(shell cd .. && pwd)/libqmap/lib \
-	-L$(shell cd .. && pwd)/hyle/lib \
-	-L$(shell cd .. && pwd)/hyle/c/libhyle-source/lib \
-	-L$(shell cd .. && pwd)/hyle/c/libhyle-bud/lib \
-	-L$(shell cd .. && pwd)/bud/lib \
-	-L$(shell cd .. && pwd)/axil-auth/lib \
-	-Wl,-rpath,$(shell cd .. && pwd)/axil/lib \
-	-Wl,-rpath,$(shell cd .. && pwd)/hyle/c/libhyle-source/lib \
-	-Wl,-rpath,$(shell cd .. && pwd)/hyle/c/libhyle-bud/lib \
-	-Wl,-rpath,$(shell cd .. && pwd)/bud/lib
+LDFLAGS-libaxil-hyle := -L${PARENT}/axil/lib \
+	-L${PARENT}/libqmap/lib \
+	-L${PARENT}/hyle/lib \
+	-L${PARENT}/hyle/c/libhyle-source/lib \
+	-L${PARENT}/hyle/c/libhyle-bud/lib \
+	-L${PARENT}/bud/lib \
+	-L${PARENT}/axil-auth/lib \
+	-Wl,-rpath,${PARENT}/axil/lib \
+	-Wl,-rpath,${PARENT}/hyle/c/libhyle-source/lib \
+	-Wl,-rpath,${PARENT}/hyle/c/libhyle-bud/lib \
+	-Wl,-rpath,${PARENT}/bud/lib
 
 CFLAGS += -fPIC $(EXTRA_CFLAGS)
 

@@ -11,7 +11,6 @@
 
 #include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
 
 /* ── Grp item ──────────────────────────────────────────── */
 
@@ -23,12 +22,12 @@ typedef struct {
 } grp_cache_t;
 
 static const hyle_schema_desc_t grp_fields[] = {
-	REC_FIELD(id, grp_cache_t, id, 64, 1, 0, 0, 0),
-	REC_FIELD(title, grp_cache_t, title, 256, 1, 0, 0, 1),
-	REC_FIELD(format, grp_cache_t, format, 2048, 1, 0, 0, 1),
-	EXCL_FIELD(owner, grp_cache_t, owner, 32, BUD_QM_STR, 1),
-	INVERSE_FIELD(gigs, "gig.items", "grp"),
-	INVERSE_FIELD(repertoire, "grp.songs", "grp"),
+	FIELD_TEXT(id, grp_cache_t),
+	FIELD_TEXT(title, grp_cache_t, .in_meta = 1),
+	FIELD_TEXT(format, grp_cache_t, .in_meta = 1),
+	FIELD_EXCL(owner, grp_cache_t, .in_meta = 1),
+	FIELD_INVERSE(gigs, "gig.items", "grp"),
+	FIELD_INVERSE(repertoire, "grp.songs", "grp"),
 	FIELD_END
 };
 

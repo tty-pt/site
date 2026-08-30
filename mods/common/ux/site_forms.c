@@ -565,8 +565,8 @@ bud_node *site_ui_filter_bar(
 			bud_node *f_node = hyle_bud_filter_field(
 			        s->field, s->label ? s->label : s->field,
 			        (s->kind == FILTER_MULTISELECT)
-			                ? HYLE_BUD_MULTI_REFERENCE
-			                : HYLE_BUD_REFERENCE,
+			                ? HYLE_FIELD_MULTI_REFERENCE
+			                : HYLE_FIELD_REFERENCE,
 			        s->current_val ? s->current_val : "",
 			        e ? e->page_opts : NULL, e ? e->npage : 0,
 			        s->filter_style ? s->filter_style : "dropdown");

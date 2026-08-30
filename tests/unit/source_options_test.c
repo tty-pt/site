@@ -23,9 +23,9 @@ static int failures = 0;
 
 /* Test data definitions */
 static const hyle_source_field_t tag_fields[] = {
-	{ .name = "id", .type = HYLE_SOURCE_FIELD_STRING, .writable = 0 },
-	{ .name = "title", .type = HYLE_SOURCE_FIELD_STRING, .writable = 1 },
-	{ .name = "color", .type = HYLE_SOURCE_FIELD_STRING, .writable = 1 },
+	{ .name = "id", .type = HYLE_FIELD_STRING, .writable = 0 },
+	{ .name = "title", .type = HYLE_FIELD_STRING, .writable = 1 },
+	{ .name = "color", .type = HYLE_FIELD_STRING, .writable = 1 },
 	{ 0 }
 };
 

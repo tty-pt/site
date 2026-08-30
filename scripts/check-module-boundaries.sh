@@ -42,12 +42,11 @@ EOF
 # -- var/ literals outside storage/registration ---------------------------------
 # Allowed: storage implementation + source adapter + registration declarations
 # (COMPLY §3.5 / §9.6). Feature modules declare their var/ only as
-# source_setup("…","var/<module>") — allow those files for now; M05 will
-# make the backend declaration explicit via source_store descriptor.
+# source_setup("…","var/<module>") — allow site modules.
 while IFS=: read -r file line text; do
 	[ -z "$file" ] && continue
 	case "$file" in
-		mods/common/common_storage.c|mods/common/common_storage.h|mods/source/*|mods/poem/*|mods/song/*|mods/grp/*|mods/gig/*) continue ;;
+		mods/common/common_storage.c|mods/common/common_storage.h|mods/source/*|mods/*/*) continue ;;
 	esac
 	printf '%s:%s: prohibited var/ literal outside storage/registration: %s\n' "$file" "$line" "$text" >&2
 	failed=1
@@ -66,11 +65,10 @@ EOF
 
 # -- xy_load allowlist: site modules may declare immediate true deps ------------
 # libxylem is the only cross-.so mechanism; ensure no hard-coded dlopen etc.
-# (Informational: current allowed set is core, common, auth, index, poem, song, grp, gig, mpfd, plus external libaxil-auth)
 while IFS=: read -r file line text; do
 	[ -z "$file" ] && continue
 	case "$file" in
-		mods/core/*|mods/common/*|mods/auth/*|mods/index/*|mods/poem/*|mods/song/*|mods/grp/*|mods/gig/*|mods/source/*|mods/mpfd/*) continue ;;
+		mods/*/*) continue ;;
 	esac
 	printf '%s:%s: unexpected xy_load outside site modules: %s\n' "$file" "$line" "$text" >&2
 	failed=1

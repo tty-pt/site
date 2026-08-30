@@ -26,15 +26,21 @@ the libxylem XY module system, the hyle data engine, and the bud HTML builder.
 ## Quick Start
 
 ```bash
-mkdir -p var/poem var/song var/gig var/grp var/song.types
-
 make
-make watch
+make dev            # starts dev server on :8080 (auto-cleans stale server & builds)
 ```
 
-Then open `http://localhost:8080`.
+Alternatively:
+```bash
+make watch          # auto-rebuild + restart on :8080 (requires entr)
+```
 
-`make watch` automatically captures build and runtime logs to `debug/` directory.
+Useful developer tools:
+```bash
+make doctor         # verify toolchains, chroot, ports, and boundaries
+make compile_commands.json  # generate LSP compilation database for clangd
+make new-mod NAME=xyz DISPLAY="Xyz"  # scaffold a complete CRUD module in 1s
+```
 
 If port `8080` is already in use:
 
@@ -95,6 +101,7 @@ make debug-clean     # Clear debug logs
 
 ## Modules
 
+- `/core` — module loader, root router, bootstrap DAG, and core redirects
 - `/auth` — registration, login, sessions, and CSRF protection
 - `/common` — shared response, storage, and declarative UI builders (`site_ui_form_from_desc`, `site_ui_picker`)
 - `/source` — dataset registration and HTTP API transport over `libhyle-source`

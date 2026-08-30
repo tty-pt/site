@@ -80,24 +80,47 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 	assert.ok(initialStatus.includes("No active quest"), "Step 1: Must start with no active quest");
 
 	// -----------------------------------------------------------------------
-	// Step 2: Substantial coding objective initializes quest with Execution Snapshot template
+	// Step 2: Substantial coding objective enters provisional state, then agent initializes quest
 	// -----------------------------------------------------------------------
 	const objective = "Refactor song multi-select filter and implement strict type bounds in mods/song/song.c";
 	for (const cb of handlers["before_agent_start"] || []) {
 		await cb({ prompt: objective, systemPrompt: "Base prompt." }, mockCtx);
 	}
 
-	const statusAfterPrompt = await commands["quest-status"].handler("", mockCtx);
-	const activeSlugMatch = statusAfterPrompt.match(/docs\/current\/([^.\s]+)\.md/);
-	assert.ok(activeSlugMatch, "Step 2: Substantive prompt must automatically create active quest");
-	const activeSlug = activeSlugMatch[1];
+	const statusProvisional = await commands["quest-status"].handler("", mockCtx);
+	assert.ok(statusProvisional.includes("PROVISIONAL ROOT INITIALIZATION"), "Step 2: Must enter provisional root initialization");
+
+	// Agent performs initial research and initializes durable quest with semantic name
+	const activeSlug = "song-filter-type-bounds";
 	const activeQuestPath = `docs/current/${activeSlug}.md`;
+	await tools["quest_update_state"].execute(
+		"call_init",
+		{
+			name: activeSlug,
+			goal: objective,
+			status: "Research complete",
+			understanding: "Song multi-select filter requires type-bound checks in mods/song/song.c.",
+			assumptions: ["All song filters use standard state macros"],
+			openQuestions: ["None"],
+			findings: ["Buffer handling is type-safe"],
+			plan: ["1. Add strict bounds", "2. Run tests"],
+			planConfidence: "high",
+			exactNextAction: "Add type-bounds checks to mods/song/song.c",
+			researchComplete: true,
+		},
+		null,
+		null,
+		mockCtx,
+	);
+
+	const statusAfterPrompt = await commands["quest-status"].handler("", mockCtx);
+	assert.ok(statusAfterPrompt.includes(activeSlug), "Step 2: Quest state initialized on disk");
 
 	const diskContentInitial = await readFile(activeQuestPath, "utf8");
-	assert.ok(diskContentInitial.includes("## Execution Snapshot"), "Step 2: Template must include '## Execution Snapshot'");
-	assert.ok(diskContentInitial.includes("### Objective"), "Step 2: Template must include '### Objective'");
-	assert.ok(diskContentInitial.includes("### Important Discoveries"), "Step 2: Template must include '### Important Discoveries'");
-	assert.ok(diskContentInitial.includes("### Exact Next Action"), "Step 2: Template must include '### Exact Next Action'");
+	assert.ok(diskContentInitial.includes("## Goal"), "Step 2: Template must include '## Goal'");
+	assert.ok(diskContentInitial.includes("## Original request"), "Step 2: Template must include '## Original request'");
+	assert.ok(diskContentInitial.includes("## Current Understanding"), "Step 2: Template must include '## Current Understanding'");
+	assert.ok(diskContentInitial.includes("## Exact Next Action"), "Step 2: Template must include '## Exact Next Action'");
 
 	// -----------------------------------------------------------------------
 	// Step 3 & 4: Agent works across substantive turns (continuous durable memory without artificial checkpoints)

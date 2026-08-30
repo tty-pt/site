@@ -14,7 +14,6 @@
 
 #include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
 
 typedef struct {
 	char id[128];
@@ -25,10 +24,11 @@ typedef struct {
 /* ── Poem record fields ──────────────────────────────────────── */
 
 static const hyle_schema_desc_t poem_fields[] = {
-	REC_FIELD(id, poem_cache_t, id, 128, 1, 0, 0, 0),
-	REC_FIELD(title, poem_cache_t, title, 256, 1, 1, 1, 1),
-	EXCL_FIELD(owner, poem_cache_t, owner, 32, BUD_QM_STR, 1),
-	EXCL_FIELD_VF(body_content, BUD_QM_VSTR, 1, 0, "pt_PT.html"), FIELD_END
+	FIELD_TEXT(id, poem_cache_t),
+	FIELD_TEXT(title, poem_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+	FIELD_EXCL(owner, poem_cache_t, .in_meta = 1),
+	FIELD_FILE(body_content, "pt_PT.html"),
+	FIELD_END
 };
 
 #define POEM_FIELD_COUNT (sizeof(poem_fields) / sizeof(poem_fields[0]) - 1)

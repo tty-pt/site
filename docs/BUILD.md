@@ -8,7 +8,14 @@ Read before touching any build files (`Makefile`, `build.mk`, module
 
 ```bash
 make                      # build everything (native .so + wasm assets)
-AUTH_SKIP_CONFIRM=1 make watch   # auto-rebuild + restart on :8080
+make dev                  # one-command dev server (auto-cleans stale axil, builds, starts)
+make watch                # auto-rebuild + restart on :8080 with entr
+make doctor               # verify toolchain, chroot, ports, and boundaries
+make compile_commands.json# generate LSP compilation database for clangd / IDEs
+make new-mod NAME=xyz DISPLAY="Xyz" # scaffold complete CRUD module in 1 second
+make test-mod MOD=song    # run targeted test suite for a specific module
+make test-fast            # run standalone unit + matrix + pages smoke tests
+make test-e2e FILE=...    # run targeted e2e test with auto-server
 make lint                 # clang-tidy (max 4 indent levels enforced)
 make format               # clang-format on all .c/.h
 make clean / make distclean

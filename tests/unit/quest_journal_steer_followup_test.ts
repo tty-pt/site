@@ -133,24 +133,24 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 	// 4. In-flight save by the agent: marks journal clean and ready for compaction
 	await tools["quest_mark_saved"].execute("call_saved", { name: rootQuestSlug }, null, null, mockCtx);
 
-	// 5. Context reaches compaction threshold (335k >= 333k) -> session_before_compact allows compaction
+	// 5. Context reaches compaction threshold (335k >= 333k) -> session_before_compact allows compaction and queues resumption
 	currentTokens = 335000; // >= 333k threshold
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
+	userMessages.length = 0;
 	let beforeCompactRes: any;
 	for (const cb of handlers["session_before_compact"] || []) {
 		beforeCompactRes = await cb({}, mockCtx);
 	}
 	assert.notStrictEqual(beforeCompactRes?.cancel, true, "session_before_compact must allow compaction after verified save");
 
-	// 6. Post-compaction continuation: session_compact sends followUp
-	userMessages.length = 0;
+	// 6. Post-compaction continuation: verified just before compaction / on session_compact
 	for (const cb of handlers["session_compact"] || []) {
 		await cb({}, mockCtx);
 	}
 
-	assert.ok(userMessages.length > 0, "session_compact must send post-compaction continuation");
+	assert.ok(userMessages.length > 0, "session_compact / session_before_compact must send post-compaction continuation");
 	const postCompactEntry = userMessages[0];
 	assert.ok(
 		postCompactEntry.options?.deliverAs === "followUp" || !postCompactEntry.options,

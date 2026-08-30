@@ -55,10 +55,9 @@ guarantees the native tree and the WASM tree are structurally identical — see
 ## 2. The state table (fields.h pattern)
 
 `mods/song/fields.h`, `mods/gig/fields.h`, `mods/grp/fields.h`, and `mods/poem/fields.h`
-define module schemas using canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`)
-and `field_macros.h` macros:
+define module schemas using canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`):
 
-- server: the table feeds `hyle_source_register_def` (storage, validation, persistence),
+- server: the table feeds `source_setup` / `index_module_init` (storage, validation, persistence),
 - WASM: `hyle_bud_state_apply_len(&app_state, fields, json, len)` fills the struct from the
   `bud-state` JSON by key using stride-aware unpackers (`bud_state_apply_stride_len`).
 
@@ -66,23 +65,43 @@ Pattern:
 
 ```c
 #include <hyle/schema.h>
-#include "../../common/field_macros.h"
+#include "../common/state_macros.h"
 
 typedef struct {
-    char id[64];
+    char id[128];
     char title[256];
     char type[2048];
-    int transpose;
-    char data[65536];
+    char author[256];
+    char owner[32];
 } song_cache_t;
 
+typedef struct {
+    song_cache_t cache;
+    int transpose;
+    int use_latin;
+    char chord_html[65536];
+} app_state_t;
+
 static const hyle_schema_desc_t song_fields[] = {
-    REC_FIELD(id, song_cache_t, id, 64),
-    REC_FIELD(title, song_cache_t, title, 256),
-    MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and"),
-    EXCL_FIELD_VF(data, song_cache_t, data, 65536, "data.txt"),
+    FIELD_TEXT(id, song_cache_t),
+    FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+    FIELD_ARRAY(FIELD_REF, type, song_cache_t, "song.types",
+                .ref_inverse = "songs", .filter_style = "dropdown",
+                .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+    FIELD_REF(author, song_cache_t, "song.authors",
+              .ref_inverse = "songs", .filter_style = "dropdown",
+              .allow_add = 1, .in_meta = 1),
+    FIELD_FILE(data, "data.txt"),
+    FIELD_EXCL(owner, song_cache_t),
+    FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
     FIELD_END
 };
+
+#define SONG_APP_SCHEMA(F_STR, F_INT, st) \
+    F_INT(st, transpose) \
+    F_INT(st, use_latin)
+
+BUD_STATE_FIELDS(app_state_t, song_app_fields, SONG_APP_SCHEMA)
 ```
 
 Use `bud_json_str` / `bud_json_int` / `bud_json_data` /

@@ -61,8 +61,12 @@ bud_node *hyle_bud_filter_scoped(
 ### 1. Declarative Form Integration
 Define target schema properties as references in `fields.h`:
 ```c
-MULTI_REF_FIELD_SM(type, song_cache_t, type, 2048, "song.types", "songs", 1, "dropdown", "and")
-REF_FIELD_S(grp, gig_cache_t, grp, 128, "grp.items", "gigs", 1, "dropdown")
+FIELD_ARRAY(FIELD_REF, type, song_cache_t, "song.types",
+            .ref_inverse = "songs", .filter_style = "dropdown",
+            .filter_mode = "and", .allow_add = 1, .in_meta = 1)
+FIELD_REF(grp, gig_cache_t, "grp.items",
+          .ref_inverse = "gigs", .filter_style = "dropdown",
+          .allow_add = 1, .in_meta = 1)
 ```
 Render forms declaratively with `site_ui_form_from_desc` (which delegates directly to `hyle_bud_filter`):
 ```c

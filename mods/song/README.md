@@ -15,7 +15,7 @@ The song module provides functionality for:
 - **Backend:** `song.c` - C module with axil HTTP handlers
 - **SSR & Forms:** Server-side HTML built with bud and `site_ui_form_from_desc` (via `mods/index` + common layout)
 - **Dataset & Storage:** `libhyle-source` filesystem driver (`store_fs`) storing `var/song/{id}/`
-- **Schema:** Defined in `fields.h` using `hyle_schema_desc_t` and `field_macros.h`
+- **Schema:** Defined in `fields.h` using canonical `<hyle/schema.h>` descriptors (`hyle_schema_desc_t`)
 - **Transposition:** C library (`lib/transp/`) for chord transposition
 - **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
 
@@ -160,46 +160,45 @@ Song types are categories used for organizing songs and filtering. Default types
 - saida (Closing)
 - any (General use)
 
-## Dataset System
+## Schema and Dataset Architecture
 
-The song module uses the common dataset system for loading song data across the application.
-
-### Data Flow
-
-```
-index_hd (qmap) ← populated at startup by index_open
-       ↓
-dataset_def.source_hd = index_hd
-       ↓
-dataset_rows_json_build iterates over source_hd
-       ↓
-For each ID, looks up JSON from source_hd
-       ↓
-If JSON empty, calls dataset_scan_item to read from disk
-```
-
-### Dataset Definition (song.c)
+The song module defines its schema in `fields.h` using canonical `<hyle/schema.h>` macros:
 
 ```c
-static const dataset_field_t fields[] = {
-    { "id", NULL, DATASET_FIELD_STRING, 0 },
-    { "title", "title", DATASET_FIELD_STRING, 1 },
-    { "type", "type", DATASET_FIELD_STRING, 1 },
-    { "author", "author", DATASET_FIELD_STRING, 1 },
-    { "yt", "yt", DATASET_FIELD_STRING, 1 },
-    { "audio", "audio", DATASET_FIELD_STRING, 1 },
-    { "pdf", "pdf", DATASET_FIELD_STRING, 1 },
-    { "data", "data.txt", DATASET_FIELD_STRING, 1 },
-    { "owner", "owner", DATASET_FIELD_STRING, 0 },
+static const hyle_schema_desc_t song_fields[] = {
+    FIELD_TEXT(id, song_cache_t),
+    FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+    FIELD_ARRAY(FIELD_REF, type, song_cache_t, "song.types",
+                .ref_inverse = "songs", .filter_style = "dropdown",
+                .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+    FIELD_REF(author, song_cache_t, "song.authors",
+              .ref_inverse = "songs", .filter_style = "dropdown",
+              .allow_add = 1, .in_meta = 1),
+    FIELD_TEXT(yt, song_cache_t, .in_meta = 1),
+    FIELD_TEXT(audio, song_cache_t, .in_meta = 1),
+    FIELD_TEXT(pdf, song_cache_t, .in_meta = 1),
+    FIELD_FILE(data, "data.txt"),
+    FIELD_EXCL(owner, song_cache_t),
+    FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
+    FIELD_END
 };
+```
 
-dataset_def_t def = {
-    .id = "song.items",
-    .items_path = "var/song",
-    .source_hd = index_hd,
-    // ...
-};
-dataset_register(&def);
+In `song.c` `xy_install()`, the module registers datasets and standard handlers:
+
+```c
+source_setup("song.types", "name", sizeof(song_type_cache_t),
+             "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT, 0, NULL);
+ref_field_register("song.items", "type");
+
+source_setup("song.authors", "name", sizeof(song_author_cache_t),
+             "var/song.authors", song_author_fields, SONG_AUTHOR_FIELD_COUNT, 0, NULL);
+ref_field_register("song.items", "author");
+
+source_setup("song.items", NULL, sizeof(song_cache_t),
+             "var/song", song_fields, SONG_FIELD_COUNT, 0, &song_list_view);
+
+index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL, NULL);
 ```
 
 ## Testing

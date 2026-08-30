@@ -13,7 +13,6 @@
 
 #include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
 
 /* ── Gig item ──────────────────────────────────────── */
 
@@ -29,28 +28,31 @@ typedef struct {
 typedef struct {
 	char song[64];
 	int transpose;
-	char format[64];
+	char fmt[64];
 } gig_song_item_t;
 
 static const hyle_schema_desc_t gig_song_fields[] = {
-	REF_FIELD_S(
-	        song, gig_song_item_t, song, 64, "song.items", "songs", 1,
-	        "dropdown"),
-	REC_FIELD(
-	        transpose, gig_song_item_t, transpose, sizeof(int), 1, 0, 0, 1),
-	REF_FIELD_S(
-	        fmt, gig_song_item_t, format, 64, "song.types", "types", 1,
-	        "dropdown"),
+	FIELD_REF(
+	        song, gig_song_item_t, "song.items",
+	        .ref_inverse = "songs", .filter_style = "dropdown",
+	        .in_meta = 1),
+	FIELD_INT(transpose, gig_song_item_t, .in_meta = 1),
+	FIELD_REF(
+	        fmt, gig_song_item_t, "song.types",
+	        .ref_inverse = "types", .filter_style = "dropdown",
+	        .in_meta = 1),
 	FIELD_END
 };
 
 static const hyle_schema_desc_t gig_fields[] = {
-	REC_FIELD(id, gig_cache_t, id, 64, 1, 0, 0, 0),
-	REC_FIELD(title, gig_cache_t, title, 256, 1, 0, 0, 1),
-	REF_FIELD_S(
-	        grp, gig_cache_t, grp, 128, "grp.items", "gigs", 1, "dropdown"),
-	EXCL_FIELD_W(song_source, gig_cache_t, song_source, 16, BUD_QM_STR, 1),
-	EXCL_FIELD(owner, gig_cache_t, owner, 32, BUD_QM_STR, 0),
+	FIELD_TEXT(id, gig_cache_t),
+	FIELD_TEXT(title, gig_cache_t, .in_meta = 1),
+	FIELD_REF(
+	        grp, gig_cache_t, "grp.items",
+	        .ref_inverse = "gigs", .filter_style = "dropdown",
+	        .in_meta = 1),
+	FIELD_EXCL(song_source, gig_cache_t, .writable = 1, .in_meta = 1),
+	FIELD_EXCL(owner, gig_cache_t),
 	FIELD_END
 };
 

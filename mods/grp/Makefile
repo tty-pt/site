@@ -1,5 +1,5 @@
-HYLE_DIR := $(shell cd ../.. && pwd)/external/hyle
-TRANSP_DIR := $(shell cd ../.. && pwd)/external/libtransp
+HYLE_DIR = $(REPO_ROOT)/external/hyle
+TRANSP_DIR = $(REPO_ROOT)/external/libtransp
 EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_DIR)/c/libhyle-bud/include
 EXTRA_LDLIBS += -lbud -laxil-auth -L$(TRANSP_DIR)/lib -ltransp -Wl,-rpath,$(TRANSP_DIR)/lib
 EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib

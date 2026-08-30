@@ -3,16 +3,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-typedef enum {
-	HYLE_FIELD_STRING = 0,
-	HYLE_FIELD_INT,
-	HYLE_FIELD_BOOL,
-	HYLE_FIELD_NULLABLE_STRING,
-	HYLE_FIELD_REFERENCE,
-	HYLE_FIELD_MULTI_REFERENCE,
-	HYLE_FIELD_INVERSE,
-} hyle_field_type_t;
+#include <hyle/field.h>
 
 char *source_util_slurp_file(const char *path);
 #define slurp_file source_util_slurp_file

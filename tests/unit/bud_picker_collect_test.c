@@ -24,8 +24,8 @@ static int failures = 0;
 
 /* Category dataset definitions */
 static const hyle_source_field_t cat_fields[] = {
-	{ .name = "id", .type = HYLE_SOURCE_FIELD_STRING, .writable = 0 },
-	{ .name = "title", .type = HYLE_SOURCE_FIELD_STRING, .writable = 1 },
+	{ .name = "id", .type = HYLE_FIELD_STRING, .writable = 0 },
+	{ .name = "title", .type = HYLE_FIELD_STRING, .writable = 1 },
 	{ 0 }
 };
 
@@ -46,8 +46,8 @@ typedef struct {
 static const hyle_source_desc_t item_desc[] = {
 	{ .key = "id", .offset = offsetof(item_record_t, id), .size = sizeof(((item_record_t *)0)->id), .qm_type = BUD_QM_STR, .writable = 0 },
 	{ .key = "title", .offset = offsetof(item_record_t, title), .size = sizeof(((item_record_t *)0)->title), .qm_type = BUD_QM_STR, .writable = 1 },
-	{ .key = "category", .offset = offsetof(item_record_t, category), .size = sizeof(((item_record_t *)0)->category), .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_REFERENCE, .ref_source = "test.cats", .writable = 1 },
-	{ .key = "tags", .offset = offsetof(item_record_t, tags), .size = sizeof(((item_record_t *)0)->tags), .qm_type = BUD_QM_STR, .source_type = HYLE_BUD_MULTI_REFERENCE, .ref_source = "test.cats", .writable = 1 },
+	{ .key = "category", .offset = offsetof(item_record_t, category), .size = sizeof(((item_record_t *)0)->category), .qm_type = BUD_QM_STR, .type = HYLE_FIELD_REFERENCE, .ref_source = "test.cats", .writable = 1 },
+	{ .key = "tags", .offset = offsetof(item_record_t, tags), .size = sizeof(((item_record_t *)0)->tags), .qm_type = BUD_QM_STR, .type = HYLE_FIELD_MULTI_REFERENCE, .ref_source = "test.cats", .writable = 1 },
 	{ 0 }
 };
 

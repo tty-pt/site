@@ -128,12 +128,13 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 		`FollowUp message should instruct final save before compaction, got: ${warnMsg}`,
 	);
 
-	// Test deduplication: subsequent turn_end without save should not duplicate the deep save message
+	// Test repeated turn steering: subsequent turn_end in warning window issues escalated warning steering
 	const msgCountBefore = userMessages.length;
+	await new Promise((resolve) => setTimeout(resolve, 60));
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({}, mockCtx);
 	}
-	assert.strictEqual(userMessages.length, msgCountBefore, "Subsequent turn_end in same warning window should not spam duplicate warnings");
+	assert.strictEqual(userMessages.length, msgCountBefore + 1, "Subsequent turn_end in same warning window should continue to steer towards checkpoint");
 
 	// Mark saved when threshold reached
 	currentTokens = 335000; // >= 333k threshold
@@ -184,8 +185,8 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 		"CRB rules should reinforce quest file as single source of truth",
 	);
 	assert.ok(
-		crbRules.some((r) => r.toLowerCase().includes("zero re-research")),
-		"CRB rules should enforce zero re-research",
+		crbRules.some((r) => r.toLowerCase().includes("re-investigate") || r.toLowerCase().includes("no unnecessary re-research")),
+		"CRB rules should enforce dynamic epistemic re-investigation",
 	);
 
 	// 7. Test Autonomous Post-Compaction Resumption in System Prompt
@@ -212,7 +213,8 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 		const result = await cb({}, mockCtx);
 		assert.strictEqual(result?.cancel, true, "session_before_compact should cancel when save is pending");
 	}
-	assert.strictEqual(userMessages.length, 0, "session_before_compact must not submit prompts from inside the hook");
+	assert.strictEqual(userMessages.length, 1, "session_before_compact must request deep save when compaction is blocked due to stale quest");
+	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Should inform model that compaction is blocked until save completes");
 
 	// Clean up
 	await rm(parentQuestPath, { force: true });

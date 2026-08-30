@@ -243,14 +243,20 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 	assert.strictEqual(finalSaveMsgsC.length, 1, "Case C: Final save instruction must be sent when entering warning window");
 
 	// -----------------------------------------------------------------------
-	// Case B: Subsequent turns in the warning window below 333k do NOT send duplicate messages
+	// Case B: Subsequent turns in the warning window below 333k receive repeated warning steering
 	// -----------------------------------------------------------------------
 	currentTokens = 315000;
 	userMessages.length = 0;
+	await new Promise((resolve) => setTimeout(resolve, 60));
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
-	assert.strictEqual(userMessages.length, 0, "Case B: Repeated turn in warning window must not send duplicate messages");
+	assert.strictEqual(userMessages.length, 1, "Case B: Repeated turn in warning window must continue to receive escalated warning steering");
+	assert.ok(
+		userMessages[0].msg.includes("Context Compaction Warning") ||
+		userMessages[0].msg.includes("Context compaction is imminent"),
+		"Case B: Warning message must be delivered",
+	);
 
 	// -----------------------------------------------------------------------
 	// Case D: Compaction threshold reached (>= 333k) while dirty -> session_before_compact cancels as a safety gate
@@ -262,7 +268,8 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		beforeCompactRes = await cb({}, mockCtx);
 	}
 	assert.strictEqual(beforeCompactRes?.cancel, true, "Case D: Compaction must cancel when dirty");
-	assert.strictEqual(userMessages.length, 0, "Case D: session_before_compact must NOT send prompts from inside the hook");
+	assert.strictEqual(userMessages.length, 1, "Case D: session_before_compact must queue a deep save when canceled");
+	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Case D: Message should inform that compaction is blocked until save completes");
 
 	// -----------------------------------------------------------------------
 	// Case E: The deep save succeeds and quest_mark_saved verifies the file
@@ -298,7 +305,7 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		beforeCompactResult = await cb({}, mockCtx);
 	}
 	assert.strictEqual(beforeCompactResult?.cancel, true, "Case F: session_before_compact must cancel when dirty");
-	assert.strictEqual(userMessages.length, 0, "Case F: session_before_compact must NOT send prompts from inside the hook");
+	assert.strictEqual(userMessages.length, 1, "Case F: session_before_compact must queue a deep save when canceled");
 
 	// -----------------------------------------------------------------------
 	// Case G & H: Compaction succeeds (session_compact fires)
@@ -356,17 +363,28 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 		restartCompactRes = await cb({}, mockCtx);
 	}
 	assert.strictEqual(restartCompactRes?.cancel, true, "Case I: session_before_compact must block dirty compaction after reconstruction");
-	assert.strictEqual(userMessages.length, 0, "Case I: session_before_compact must not submit prompts");
+	assert.strictEqual(userMessages.length, 1, "Case I: session_before_compact must queue a deep save when canceled");
+	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Case I: Message should inform that compaction is blocked until save completes");
+
+	// Simulate session_compact to clear compaction flags, mark dirty, then verify turn_end warning save
+	for (const cb of handlers["session_compact"] || []) {
+		await cb({}, mockCtx);
+	}
+	for (const cb of handlers["tool_result"] || []) {
+		await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
+	}
 
 	// Now verify recovery: turn_end in warning window safely queues ONE new save follow-up without deadlock
 	currentTokens = 310000;
 	userMessages.length = 0;
+	await new Promise((resolve) => setTimeout(resolve, 60));
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
 	const recoveredSaveMsgs = userMessages.filter((m) =>
 		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
 	);
 	assert.strictEqual(recoveredSaveMsgs.length, 1, "Case I: turn_end must queue a new save follow-up after reconstruction");
 
@@ -374,7 +392,11 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 	// Case J: sendMessage failure rolls back pending state so it can be retried without deadlock
 	// -----------------------------------------------------------------------
 	const originalSendMessage = mockPi.sendMessage;
+	const originalSendUserMessage = mockPi.sendUserMessage;
 	mockPi.sendMessage = () => {
+		throw new Error("Simulated transport failure");
+	};
+	mockPi.sendUserMessage = () => {
 		throw new Error("Simulated transport failure");
 	};
 
@@ -388,6 +410,7 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 	userMessages.length = 0;
 
 	// Turn end runs with failed sendMessage -> must roll back and not leave state pending
+	await new Promise((resolve) => setTimeout(resolve, 60));
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
@@ -395,15 +418,18 @@ Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verifi
 
 	// Restore working sendMessage
 	mockPi.sendMessage = originalSendMessage;
+	mockPi.sendUserMessage = originalSendUserMessage;
 
 	// On next turn_end, it successfully retries and queues the save message!
 	userMessages.length = 0;
+	await new Promise((resolve) => setTimeout(resolve, 60));
 	for (const cb of handlers["turn_end"] || []) {
 		await cb({ toolResults: [] }, mockCtx);
 	}
 	const retrySaveMsgs = userMessages.filter((m) =>
 		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
 	);
 	assert.strictEqual(retrySaveMsgs.length, 1, "Case J: turn_end must successfully retry queueing save after previous sendMessage failure");
 

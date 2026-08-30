@@ -84,16 +84,19 @@ int stoma_list_contains(const char *list, const char *token)
 	if (!list || !list[0] || !token || !token[0])
 		return 0;
 
-	char copy[8192];
-	char *tok;
-	char *saveptr;
+	size_t tlen = strlen(token);
+	const char *p = list;
 
-	snprintf(copy, sizeof(copy), "%s", list);
-	tok = strtok_r(copy, "\n", &saveptr);
-	while (tok) {
-		if (strcmp(tok, token) == 0)
+	while (*p) {
+		const char *end = strchr(p, '\n');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+
+		if (len == tlen && memcmp(p, token, tlen) == 0)
 			return 1;
-		tok = strtok_r(NULL, "\n", &saveptr);
+
+		if (!end)
+			break;
+		p = end + 1;
 	}
 	return 0;
 }

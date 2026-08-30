@@ -1,6 +1,16 @@
 #ifndef SOURCE_H
 #define SOURCE_H
 
+/*
+ * mods/source — XY dispatch interface over libhyle-source.
+ *
+ * Provides cross-.so functions for:
+ * - Dataset registration (source_setup, source_register)
+ * - Record queries, full-text search, and pre-filtering (source_query)
+ * - Row CRUD operations (source_update_item, source_delete_item)
+ * - Schema descriptor conversion and state serialization helpers
+ */
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,17 +27,6 @@ typedef hyle_source_access_result_t source_access_result_t;
 #define DATASET_ACCESS_RESULT_UNAUTHORIZED                                     \
 	HYLE_SOURCE_ACCESS_RESULT_UNAUTHORIZED
 #define DATASET_ACCESS_RESULT_FORBIDDEN HYLE_SOURCE_ACCESS_RESULT_FORBIDDEN
-
-#define SOURCE_FIELD_KIND_INVERSE HYLE_SOURCE_FIELD_KIND_INVERSE
-typedef hyle_source_field_type_t source_field_type_t;
-#define SOURCE_FIELD_STRING HYLE_SOURCE_FIELD_STRING
-#define DATASET_FIELD_INT HYLE_SOURCE_FIELD_INT
-#define DATASET_FIELD_BOOL HYLE_SOURCE_FIELD_BOOL
-#define DATASET_FIELD_NULLABLE_STRING HYLE_SOURCE_FIELD_NULLABLE_STRING
-#define SOURCE_FIELD_REFERENCE HYLE_SOURCE_FIELD_REFERENCE
-#define SOURCE_FIELD_MULTI_REFERENCE HYLE_SOURCE_FIELD_MULTI_REFERENCE
-#define SOURCE_FIELD_INVERSE HYLE_SOURCE_FIELD_INVERSE
-#define SOURCE_FIELD_DERIVED HYLE_SOURCE_FIELD_DERIVED
 
 typedef hyle_source_field_t source_field_t;
 typedef hyle_source_list_field_t source_list_field_t;

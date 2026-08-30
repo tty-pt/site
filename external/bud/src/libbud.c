@@ -552,14 +552,12 @@ static int bud_render_hydrated_html_node(const bud_node *node, bud_buf *buf)
 	const bud_attr *attr;
 	const bud_node *child;
 	char id_buf[32];
-	int len;
 
 	if (!node) {
 		return 0;
 	}
 
-	len = snprintf(id_buf, sizeof(id_buf), "%u", node->id);
-	if (len < 0) {
+	if (snprintf(id_buf, sizeof(id_buf), "%u", node->id) < 0) {
 		return -1;
 	}
 
