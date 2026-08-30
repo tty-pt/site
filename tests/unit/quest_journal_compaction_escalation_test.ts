@@ -22,6 +22,8 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 	let compactCallCount = 0;
 	let shouldFailCompaction = false;
 
+	const uiNotifications: Array<{ msg: string; type: string }> = [];
+
 	const mockCtx: any = {
 		cwd: process.cwd(),
 		getContextUsage: () => ({
@@ -47,7 +49,9 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 			}
 		},
 		ui: {
-			notify: () => {},
+			notify: (msg: string, type = "info") => {
+				uiNotifications.push({ msg, type });
+			},
 			setStatus: () => {},
 		},
 		hasUI: true,
@@ -117,11 +121,12 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 2: Enter warning window -> steering is issued
+	// Scenario 2: Enter warning window -> steering is issued (and exactly 1 UI notification)
 	// -----------------------------------------------------------------------
 	await t.step("2. Enter warning window: steering is issued", async () => {
 		currentTokens = 260000; // In lower warning window (250k - 300k, fraction = 0.2 < 0.5)
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		const pressureInfo = getCompactionPressure(mockCtx);
 		assert.strictEqual(pressureInfo.pressure, CompactionPressure.WARNING);
@@ -129,6 +134,8 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Warning steering must be issued when entering warning window");
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer", "Warning must be delivered as steer");
+		assert.strictEqual(uiNotifications.length, 1, "UI must notify once on NONE -> WARNING state transition");
 		const msg = userMessages[0].msg;
 		assert.ok(msg.includes("Context Compaction Warning"), "Message header must identify warning");
 		assert.ok(msg.includes("Approaching Threshold"), "Escalation label must indicate approaching threshold");
@@ -136,11 +143,12 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 3: Next turn while still in warning window -> steering is issued again
+	// Scenario 3: Next turn while still in warning window -> steering is issued again (0 extra UI notifications)
 	// -----------------------------------------------------------------------
 	await t.step("3. Next turn while still in warning window: steering is issued again", async () => {
 		currentTokens = 280000; // In upper warning window (fraction = 0.6 >= 0.5)
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		const pressureInfo = getCompactionPressure(mockCtx);
 		assert.strictEqual(pressureInfo.pressure, CompactionPressure.WARNING);
@@ -148,64 +156,78 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Warning steering must be issued again on next turn");
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer", "Warning must be delivered as steer");
+		assert.strictEqual(uiNotifications.length, 0, "No duplicate UI notifications within same pressure state");
 		const msg = userMessages[0].msg;
 		assert.ok(msg.includes("Close to Threshold"), "Escalation label must indicate close to threshold");
 		assert.ok(msg.includes("Prioritize an exhaustive durable checkpoint now"), "Advice must escalate urgency");
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 4: Several turns in warning window -> steering continues
+	// Scenario 4: Several turns in warning window -> steering continues (0 UI spam)
 	// -----------------------------------------------------------------------
 	await t.step("4. Several turns in warning window: steering continues", async () => {
 		currentTokens = 290000;
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		for (let i = 0; i < 3; i++) {
 			await emitTurnEnd();
 		}
 
 		assert.strictEqual(userMessages.length, 3, "Steering must continue on every turn inside warning window");
+		assert.ok(userMessages.every((m) => m.options?.deliverAs === "steer"), "All warnings must use steer");
+		assert.strictEqual(uiNotifications.length, 0, "Zero UI notification spam across repeated warning turns");
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 5: Cross threshold -> critical directive is issued
+	// Scenario 5: Cross threshold -> critical directive is issued (exactly 1 UI notification)
 	// -----------------------------------------------------------------------
 	await t.step("5. Cross threshold: critical directive is issued", async () => {
 		currentTokens = 310000; // >= 300k threshold
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		const pressureInfo = getCompactionPressure(mockCtx);
 		assert.strictEqual(pressureInfo.pressure, CompactionPressure.CRITICAL);
 
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Critical directive must be issued");
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer", "Critical directive must be delivered as steer");
+		assert.strictEqual(uiNotifications.length, 1, "UI must notify once on WARNING -> CRITICAL transition");
 		const msg = userMessages[0].msg;
-		assert.ok(msg.includes("CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE"), "Must use critical header");
+		assert.ok(msg.includes("CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE"), "Must use critical header");
 		assert.ok(msg.includes("STOP treating checkpointing as optional"), "Must establish top-priority directive");
+		assert.ok(msg.includes("This directive supersedes your current implementation plan"), "Must explicitly supersede plan");
 		assert.ok(msg.includes("ONLY AFTER THE DURABLE SAVE IS VERIFIED"), "Must instruct that save is required before ordinary work");
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 6: Next turn still above threshold -> critical directive is issued again
+	// Scenario 6: Next turn still above threshold -> critical directive is issued again (0 extra UI notifications)
 	// -----------------------------------------------------------------------
 	await t.step("6. Next turn still above threshold: critical directive is issued again", async () => {
 		currentTokens = 315000;
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Critical directive must repeat on next turn");
-		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE"));
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer", "Must be delivered as steer");
+		assert.strictEqual(uiNotifications.length, 0, "No duplicate UI notifications within CRITICAL");
+		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE"));
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 6b: Code mutations are blocked while in CRITICAL without verified save
+	// Scenario 6b: Code mutations are blocked while in CRITICAL without verified save (0 UI notifications)
 	// -----------------------------------------------------------------------
 	await t.step("6b. Code mutations are blocked while in CRITICAL without verified save", async () => {
-		// Project code edit must be blocked
+		uiNotifications.length = 0;
+		// Project code edit must be blocked silently to UI and return reason to model
 		const blockRes = await emitToolCall("edit", { path: "mods/song/player.c" });
 		assert.ok(blockRes, "Must block project code edit");
 		assert.strictEqual(blockRes.block, true);
 		assert.ok(blockRes.reason.includes("CRITICAL_COMPACTION_CHECKPOINT_REQUIRED"));
+		assert.strictEqual(uiNotifications.length, 0, "Blocked tool call must not spam UI notifications");
 
 		// Quest file edit must NOT be blocked
 		const allowQuestEdit = await emitToolCall("edit", { path: `docs/current/${questSlug}.md` });
@@ -213,19 +235,27 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 	});
 
 	// -----------------------------------------------------------------------
-	// Scenario 7: Save succeeds but context is still above threshold -> critical compaction steering continues
+	// Scenario 7: Save succeeds but context is still above threshold -> critical compaction steering continues and initiates c.compact
 	// -----------------------------------------------------------------------
-	await t.step("7. Save succeeds but context is still above threshold: critical compaction steering continues", async () => {
+	await t.step("7. Save succeeds but context is still above threshold: critical compaction steering continues and initiates c.compact", async () => {
 		// Perform verified save
 		await tools["quest_mark_saved"].execute("save_esc_1", {}, null, null, mockCtx);
 		userMessages.length = 0;
+		uiNotifications.length = 0;
+		const compactCountBefore = compactCallCount;
 
 		// Next turn_end: tokens are still 315k >= 300k
 		await emitTurnEnd([{ toolName: "quest_mark_saved" }]);
 		assert.strictEqual(userMessages.length, 1, "Critical compaction steering must continue even after save");
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer", "Must use deliverAs: steer");
+		assert.strictEqual(uiNotifications.length, 0, "No extra UI notifications when remaining in CRITICAL");
 		const msg = userMessages[0].msg;
 		assert.ok(msg.includes("DURABLE STATE SAVED"), "Must indicate durable state is saved and ready for compaction");
-		assert.ok(msg.includes("Context auto-compaction is now required"), "Must insist on compaction");
+		assert.ok(msg.includes("auto-compaction is now being initiated") || msg.includes("Context auto-compaction is now required"), "Must insist on compaction");
+
+		// Wait for scheduled c.compact call (50ms timeout)
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		assert.strictEqual(compactCallCount, compactCountBefore + 1, "c.compact() must be directly invoked by extension when verified save exists above threshold");
 	});
 
 	// -----------------------------------------------------------------------
@@ -270,7 +300,8 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 		userMessages.length = 0;
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Critical directive continues to be emitted");
-		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE"));
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer");
+		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE"));
 	});
 
 	// -----------------------------------------------------------------------
@@ -283,6 +314,7 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 		}
 		currentTokens = 100000; // Low
 		userMessages.length = 0;
+		uiNotifications.length = 0;
 
 		// Sudden massive context jump (e.g. large file reads / tool output) straight to 350k
 		currentTokens = 350000;
@@ -292,7 +324,27 @@ Deno.test("quest_journal_compaction_escalation: complete verification of all 10 
 
 		await emitTurnEnd();
 		assert.strictEqual(userMessages.length, 1, "Critical steering fires immediately on sudden jump");
-		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE"));
+		assert.strictEqual(userMessages[0].options?.deliverAs, "steer");
+		assert.strictEqual(uiNotifications.length, 1, "UI notifies on rapid NONE -> CRITICAL jump");
+		assert.ok(userMessages[0].msg.includes("CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE"));
+	});
+
+	// -----------------------------------------------------------------------
+	// Scenario 11: Turn-aware deduplication: multiple context events in same turn do NOT duplicate steer
+	// -----------------------------------------------------------------------
+	await t.step("11. Turn-aware deduplication: multiple context events in same turn do NOT duplicate steer", async () => {
+		userMessages.length = 0;
+		uiNotifications.length = 0;
+
+		// Fire multiple context events in the same turn without pressure change
+		for (const cb of handlers["context"] || []) {
+			await cb({}, mockCtx);
+			await cb({}, mockCtx);
+			await cb({}, mockCtx);
+		}
+
+		assert.strictEqual(userMessages.length, 0, "No duplicate steering messages should be emitted for same turn without change");
+		assert.strictEqual(uiNotifications.length, 0, "No extra UI notifications on repeated context events");
 	});
 
 	// Clean up

@@ -89,9 +89,10 @@ escape_json_script_into(const char *src, char *dst, size_t dstsize)
 	return w;
 }
 
-char *site_ui_page(
+char *site_ui_page_lang(
         const char *title, const char *path, const char *icon, const char *user,
-        const char *extra_head, const char *module, bud_node *body)
+        const char *extra_head, const char *module, bud_node *body,
+        const char *lang)
 {
 	char *body_html;
 	char *chrome_html;
@@ -102,8 +103,10 @@ char *site_ui_page(
 	char state_path[SITE_CHROME_PATH_MAX * 6];
 	char state_icon[SITE_CHROME_ICON_MAX * 6];
 	char state_user[SITE_CHROME_USER_MAX * 6];
+	char state_lang[32 * 6];
 	site_ui_chrome_state state;
 	bud_node *chrome;
+	const char *locale = (lang && lang[0]) ? lang : site_ui_get_locale();
 	int len;
 
 #if __has_include("version.gen.h")
@@ -124,6 +127,7 @@ char *site_ui_page(
 	snprintf(state.path, sizeof(state.path), "%s", path ? path : "");
 	snprintf(state.icon, sizeof(state.icon), "%s", icon ? icon : "");
 	snprintf(state.user, sizeof(state.user), "%s", user ? user : "");
+	snprintf(state.lang, sizeof(state.lang), "%s", locale);
 	chrome = site_ui_chrome(&state);
 	chrome_html = chrome ? bud_render_hydrated_html(chrome) : NULL;
 	if (!chrome_html) {
@@ -136,6 +140,7 @@ char *site_ui_page(
 	escape_json_script_into(state.path, state_path, sizeof(state_path));
 	escape_json_script_into(state.icon, state_icon, sizeof(state_icon));
 	escape_json_script_into(state.user, state_user, sizeof(state_user));
+	escape_json_script_into(state.lang, state_lang, sizeof(state_lang));
 
 	if (module && module[0]) {
 		snprintf(
@@ -152,7 +157,7 @@ char *site_ui_page(
 
 	len = snprintf(
 	        NULL, 0,
-	        "<!DOCTYPE html>\n<html lang=\"pt\">\n<head>\n"
+	        "<!DOCTYPE html>\n<html lang=\"%s\">\n<head>\n"
 	        "<meta charset=\"utf-8\">\n"
 	        "<meta name=\"viewport\" content=\"width=device-width, "
 	        "initial-scale=1.0\">\n"
@@ -162,12 +167,12 @@ char *site_ui_page(
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
-	        title_esc, extra_head, module_attr, state_title, state_path,
-	        state_icon, state_user, chrome_html, body_html);
+	        locale, title_esc, extra_head, module_attr, state_title, state_path,
+	        state_icon, state_user, state_lang, chrome_html, body_html);
 
 	page = (char *)malloc((size_t)len + 1);
 	if (!page) {
@@ -178,7 +183,7 @@ char *site_ui_page(
 
 	snprintf(
 	        page, (size_t)len + 1,
-	        "<!DOCTYPE html>\n<html lang=\"pt\">\n<head>\n"
+	        "<!DOCTYPE html>\n<html lang=\"%s\">\n<head>\n"
 	        "<meta charset=\"utf-8\">\n"
 	        "<meta name=\"viewport\" content=\"width=device-width, "
 	        "initial-scale=1.0\">\n"
@@ -188,16 +193,25 @@ char *site_ui_page(
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
 	        "<script type=\"application/json\" id=\"chrome-state\">"
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
 	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
-	        title_esc, extra_head, module_attr, state_title, state_path,
-	        state_icon, state_user, chrome_html, body_html);
+	        locale, title_esc, extra_head, module_attr, state_title, state_path,
+	        state_icon, state_user, state_lang, chrome_html, body_html);
 
 	bud_free_string(chrome_html);
 	bud_free_string(body_html);
 	return page;
+}
+
+char *site_ui_page(
+        const char *title, const char *path, const char *icon, const char *user,
+        const char *extra_head, const char *module, bud_node *body)
+{
+	return site_ui_page_lang(
+	        title, path, icon, user, extra_head, module, body,
+	        site_ui_get_locale());
 }
 
 char *site_ui_state_head(const char *json)

@@ -14,14 +14,16 @@
 bud_node *site_ui_form_actions(
         const char *cancel_href, const char *submit_label, bud_node *extra)
 {
+	const char *sub = submit_label ? ui_t(submit_label) : ui_t("Submit");
+	const char *canc = ui_t("Cancel");
 	return bud_tpl(
 	        "<div class='flex gap-2'>"
 	        "  <button type='submit' class='btn btn-primary'>%s</button>"
 	        "  %node"
-	        "  <a href='%s' class='btn btn-secondary'>Cancel</a>"
+	        "  <a href='%s' class='btn btn-secondary'>%s</a>"
 	        "</div>",
-	        submit_label ? submit_label : "Submit", extra,
-	        cancel_href ? cancel_href : "");
+	        sub, extra,
+	        cancel_href ? cancel_href : "", canc);
 }
 
 bud_node *site_ui_delete_confirm(
@@ -34,15 +36,18 @@ bud_node *site_ui_delete_confirm(
 	        module, id, "delete", action_path, sizeof(action_path));
 	site_ui_item_path(module, id, cancel_path, sizeof(cancel_path));
 
+	const char *prompt = ui_t("Are you sure you want to delete");
+
 	return bud_tpl(
 	        "<div class='center'>"
-	        "  <p>Are you sure you want to delete <strong>%s</strong>?</p>"
+	        "  <p>%s <strong>%s</strong>?</p>"
 	        "  <form method='POST' action='%s' "
 	        "enctype='multipart/form-data'>"
 	        "    <input type='hidden' name='csrf_token' value='%s'/>"
 	        "    %node"
 	        "  </form>"
 	        "</div>",
+	        prompt,
 	        (title && title[0]) ? title : (id ? id : ""), action_path,
 	        csrf_token ? csrf_token : "",
 	        site_ui_form_actions(cancel_path, "Delete", NULL));
@@ -57,12 +62,14 @@ bud_node *site_ui_add_form(
 	snprintf(action, sizeof(action), "/%s/add", module);
 	snprintf(cancel_href, sizeof(cancel_href), "/%s/", module);
 
+	const char *title_lbl = ui_t("Title:");
+
 	return bud_tpl(
 	        "%node"
 	        "<form action='%s' method='POST' enctype='multipart/form-data' "
 	        "class='flex flex-col gap-4'>"
 	        "  <input type='hidden' name='csrf_token' value='%s'/>"
-	        "  <label>Title:"
+	        "  <label>%s"
 	        "    <input name='title'/>"
 	        "  </label>"
 	        "  %node"
@@ -71,6 +78,7 @@ bud_node *site_ui_add_form(
 	                ? bud_tpl("<p class='text-error'>%s</p>", error_msg)
 	                : NULL,
 	        action, csrf_token ? csrf_token : "",
+	        title_lbl,
 	        site_ui_form_actions(cancel_href, "Add", NULL));
 }
 
@@ -538,8 +546,8 @@ bud_node *site_ui_filter_bar(
 			        lx_el("input", lx_attr("type", "search"),
 			              lx_attr("name", s->field),
 			              lx_attr("placeholder",
-			                      s->label ? s->label
-			                               : "Search\xe2\x80\xa6"),
+			                      s->label ? ui_t(s->label)
+			                               : ui_t("Search…")),
 			              lx_attr("class", "border rounded px-2 "
 			                               "py-1 text-sm"),
 			              (current_q && current_q[0])
@@ -563,7 +571,7 @@ bud_node *site_ui_filter_bar(
 				}
 			}
 			bud_node *f_node = hyle_bud_filter_field(
-			        s->field, s->label ? s->label : s->field,
+			        s->field, s->label ? ui_t(s->label) : s->field,
 			        (s->kind == FILTER_MULTISELECT)
 			                ? HYLE_FIELD_MULTI_REFERENCE
 			                : HYLE_FIELD_REFERENCE,
@@ -579,7 +587,7 @@ bud_node *site_ui_filter_bar(
 	        bar,
 	        lx_el("button", lx_attr("type", "submit"),
 	              lx_attr("class", "btn btn-primary text-sm py-1 px-3"),
-	              lx_text("Filter"))
+	              lx_text(ui_t("Filter")))
 	                .data.node);
 
 	return bar;

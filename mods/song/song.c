@@ -20,6 +20,7 @@
 #define SONG_IMPL
 #include "song.h"
 #include "fields.h"
+#include "dict.h"
 
 static transp_ctx_t *g_transp_ctx = NULL;
 static char g_doc_root[256] = ".";
@@ -376,11 +377,15 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		return respond_error(fd, 404, "Song not found");
 	}
 
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
 	snprintf(
 	        app_state.cache.title, sizeof(app_state.cache.title), "%s",
 	        title);
+	snprintf(app_state.lang, sizeof(app_state.lang), "%s", lang);
 	app_state.transpose = prefs.transpose;
 	app_state.use_latin = (prefs.flags & TRANSP_LATIN) != 0;
 	app_state.show_media = prefs.show_media;
@@ -511,6 +516,8 @@ void xy_install(void)
 	g_transp_ctx = transp_init();
 	xy_load("./mods/index/index");
 	xy_load("./mods/mpfd/mpfd");
+
+	i18n_register_dict(song_dict, SONG_DICT_COUNT);
 
 	/* Precompute state specs from field table */
 	source_build_state_specs(

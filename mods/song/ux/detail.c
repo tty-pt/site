@@ -50,6 +50,7 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 	bud_json_data_len(
 	        data, (size_t)data_len, app_state.chord_html,
 	        sizeof(app_state.chord_html));
+	site_ui_set_locale(app_state.lang);
 	bud_app_set_state();
 }
 
@@ -58,6 +59,8 @@ void wasm_init(const char *json, int len)
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 	hyle_bud_state_apply_len(&app_state.cache, song_fields, json, jlen);
 	bud_state_apply_len(&app_state, song_app_fields, json, jlen);
+	site_ui_set_locale(app_state.lang);
+	hyle_bud_set_translator(ui_t);
 }
 
 /* ── Page builder helpers ──────────────────────────── */
@@ -81,9 +84,9 @@ static bud_node *render_transpose_form(bud_node *key_options)
 	return bud_tpl(
 	        "<form id='transpose-form' method='GET' action='%s' "
 	        "data-song-id='%s' data-action='/api/song/%s/transpose?h=1'>"
-	        "  <label>Key: <select name='t' %bind>%node</select></label>"
+	        "  <label>%s: <select name='t' %bind>%node</select></label>"
 	        "  %node"
-	        "  <label>Zoom <input type='range' name='z' min='" STR(
+	        "  <label>%s <input type='range' name='z' min='" STR(
 	                VIEWER_ZOOM_MIN) "' "
 	                                 "max='" STR(
 	                                         VIEWER_ZOOM_MAX) "' step='10' "
@@ -99,16 +102,16 @@ static bud_node *render_transpose_form(bud_node *key_options)
 	                                                          "class='btn' "
 	                                                          "data-wasm-"
 	                                                          "hide='1'>"
-	                                                          "Apply</"
+	                                                          "%s</"
 	                                                          "button>"
 	                                                          "</form>",
 	        app_state.path, app_state.cache.id, app_state.cache.id,
-	        "change", bud_api_action_handler, key_options,
+	        ui_t("Key"), "change", bud_api_action_handler, key_options,
 	        site_ui_checkbox(
-	                "l", "Latin", app_state.use_latin,
+	                "l", ui_t("Latin"), app_state.use_latin,
 	                bud_api_action_handler),
-	        app_state.zoom, "input", on_zoom_change, "change",
-	        on_zoom_change);
+	        ui_t("Zoom"), app_state.zoom, "input", on_zoom_change, "change",
+	        on_zoom_change, ui_t("Apply"));
 }
 
 static bud_node *render_chord_viewer(void)

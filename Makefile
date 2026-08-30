@@ -91,6 +91,7 @@ standalone-unit-tests:
 	@sh tests/unit/run-source-dataset-options.sh
 	@sh tests/unit/run-viewer-prefs.sh
 	@sh tests/unit/run-slugify.sh
+	@sh tests/unit/run-i18n.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -138,7 +139,7 @@ restart:
 	@curl -s --max-time 3 http://localhost:8080/ > /dev/null 2>&1 || { echo "Failed to start server"; exit 1; }
 	@echo "Server restarted on :8080"
 
-test: boundary-check unit-c-tests unit-tests pages-test integration-tests e2e-tests
+test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e2e
 
 boundary-check:
 	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh

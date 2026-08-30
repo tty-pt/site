@@ -14,8 +14,8 @@ static bud_node *idx_content_lookup(
 	        "  <input type='text' name='%s' class='filter-lookup' "
 	        "placeholder='%s' value='%s'/>"
 	        "</label>",
-	        label ? label : "", field ? field : "",
-	        placeholder ? placeholder : "", cur);
+	        label ? ui_t(label) : "", field ? field : "",
+	        placeholder ? ui_t(placeholder) : "", cur);
 }
 
 static void
@@ -54,10 +54,10 @@ static bud_node *idx_omnisearch_field(const char *q)
 {
 	return bud_tpl(
 	        "<label class='hyle-omnisearch' data-hyle-omnisearch='1'>"
-	        "  <input type='search' name='q' placeholder='Search…' "
-	        "aria-label='Search everything' value='%s'/>"
+	        "  <input type='search' name='q' placeholder='%s' "
+	        "aria-label='%s' value='%s'/>"
 	        "</label>",
-	        q ? q : "");
+	        ui_t("Search…"), ui_t("Search everything"), q ? q : "");
 }
 
 static bud_node *idx_filter_bar(const list_state_t *state)
@@ -88,7 +88,7 @@ static bud_node *idx_filter_bar(const list_state_t *state)
 		}
 
 		field = hyle_bud_filter_field(
-		        col->key, col->label, col->type, col->current,
+		        col->key, ui_t(col->label), col->type, col->current,
 		        nopts > 0 ? opts : NULL, nopts, col->filter);
 
 		if (field)
@@ -125,11 +125,11 @@ static bud_node *idx_filter_chrome(const list_state_t *state)
 	if (omni) {
 		other = "custom";
 		icon = "⚙";
-		aria = "Advanced filters";
+		aria = ui_t("Advanced filters");
 	} else {
 		other = "omni";
 		icon = "⌕";
-		aria = "Search everything";
+		aria = ui_t("Search everything");
 	}
 	idx_mode_href(href, sizeof(href), state, omni ? 1 : 0);
 	toggle = bud_tpl(
@@ -155,9 +155,10 @@ static bud_node *idx_filter_chrome(const list_state_t *state)
 	actions = bud_tpl(
 	        "<div class='hyle-filter-actions'>"
 	        "  %node"
-	        "  <button type='submit'>Apply</button>"
+	        "  <button type='submit'>%s</button>"
 	        "</div>",
-	        omni ? NULL : bud_tpl("<button type='reset'>Clear</button>"));
+	        omni ? NULL : bud_tpl("<button type='reset'>%s</button>", ui_t("Clear")),
+	        ui_t("Apply"));
 	if (actions)
 		bud_append(wrap, actions);
 	return wrap;

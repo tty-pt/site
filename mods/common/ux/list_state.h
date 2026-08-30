@@ -45,6 +45,7 @@ typedef struct {
 	int custom;
 	char q[512];
 	char sort_field[64];
+	char lang[32];
 	int sort_asc;
 	int page, per_page, total, has_page;
 	int ncols;

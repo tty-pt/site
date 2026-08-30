@@ -110,9 +110,12 @@ static int grp_url_redirect_handler(int fd, char *body)
 
 void xy_install(void)
 {
+	int i18n_ok = (xy_load("./mods/i18n/i18n") == XY_OK);
 	int common_ok = (xy_load("./mods/common/common") == XY_OK);
 	int source_ok = (xy_load("./mods/source/source") == XY_OK);
 
+	if (!i18n_ok)
+		fprintf(stderr, "warning: i18n module failed to load\n");
 	if (!common_ok)
 		fprintf(stderr, "warning: common module failed to load\n");
 	if (!source_ok)

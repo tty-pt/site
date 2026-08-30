@@ -122,10 +122,10 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 	assert.ok(userMessages.length > 0, "Warning window at turn_end should send final save instruction");
 	const lastEntry = userMessages[userMessages.length - 1];
 	const warnMsg = typeof lastEntry.msg === "string" ? lastEntry.msg : (lastEntry.msg.text || "");
-	assert.strictEqual(lastEntry.options?.deliverAs, "followUp", "Final save directive must use deliverAs: 'followUp'");
+	assert.strictEqual(lastEntry.options?.deliverAs, "steer", "Final save directive must use deliverAs: 'steer'");
 	assert.ok(
-		warnMsg.includes("Context compaction is imminent") || warnMsg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		`FollowUp message should instruct final save before compaction, got: ${warnMsg}`,
+		warnMsg.includes("Context compaction is imminent") || warnMsg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") || warnMsg.includes("Context Compaction Warning"),
+		`Steer message should instruct final save before compaction, got: ${warnMsg}`,
 	);
 
 	// Test repeated turn steering: subsequent turn_end in warning window issues escalated warning steering

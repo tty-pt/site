@@ -15,6 +15,7 @@
 #include "../source/source.h"
 #include "../auth/auth.h"
 #include "fields.h"
+#include "dict.h"
 
 #include "ux/all.c"
 
@@ -103,6 +104,8 @@ static int poem_media_handler(int fd, char *body)
 void xy_install(void)
 {
 	xy_load("./mods/index/index");
+
+	i18n_register_dict(poem_dict, POEM_DICT_COUNT);
 
 	index_module_init(&(index_module_def_t){
 	        .name = "poem",

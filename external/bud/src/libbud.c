@@ -3353,7 +3353,7 @@ static int bud__parse_tokens(
 	}
 	{
 		unsigned cap = stack_n * 2;
-		while (cap < 8192) {
+		while (cap <= 65536) {
 			jsmntok_t *heap =
 			        (jsmntok_t *)malloc(cap * sizeof(jsmntok_t));
 			if (!heap)

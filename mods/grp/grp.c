@@ -18,6 +18,7 @@
 
 #include "../song/song.h"
 #include "fields.h"
+#include "dict.h"
 
 static char g_doc_root[256] = ".";
 
@@ -730,6 +731,8 @@ void xy_install(void)
 	xy_load("./mods/index/index");
 	xy_load("./mods/mpfd/mpfd");
 	xy_load("./mods/song/song");
+
+	i18n_register_dict(grp_dict, GRP_DICT_COUNT);
 
 	{
 		char doc_root[256] = { 0 };

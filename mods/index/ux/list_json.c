@@ -121,6 +121,8 @@ int list_state_to_json(const list_state_t *state, char *out, size_t out_sz)
 	ljw_put(&w, ",");
 	ljw_str_key(&w, "sort_field", state->sort_field);
 	ljw_put(&w, ",");
+	ljw_str_key(&w, "lang", state->lang);
+	ljw_put(&w, ",");
 	ljw_int(&w, "sort_asc", state->sort_asc);
 	ljw_put(&w, ",");
 	ljw_int(&w, "page", state->page);
@@ -378,6 +380,9 @@ void list_state_from_json_len(list_state_t *state, const char *json, size_t len)
 	bud_json_str_len(
 	        json, len, "sort_field", state->sort_field,
 	        sizeof(state->sort_field));
+	bud_json_str_len(
+	        json, len, "lang", state->lang,
+	        sizeof(state->lang));
 	state->sort_asc = bud_json_int_len(json, len, "sort_asc", 1);
 	state->page = bud_json_int_len(json, len, "page", 1);
 	state->per_page = bud_json_int_len(json, len, "per_page", 10);

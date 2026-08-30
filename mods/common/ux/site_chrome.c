@@ -8,6 +8,7 @@
 #include "bud/bud_app.h"
 #include "bud/bud_jsx.h"
 #include "site_chrome.h"
+#include "../../i18n/i18n_dict.h"
 
 #define NAV_SCROLL_TOP 24
 #define NAV_SCROLL_HIDE_AT 48
@@ -99,12 +100,16 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	if (path[0] && strcmp(path, "/") != 0)
 		site_chrome_parent_path(path, up, sizeof(up));
 	if (up[0]) {
+		const char *back_label = i18n_t(state ? state->lang : NULL, "Back");
 		back = bud_tpl(
-		        "<a class='btn nav-back' href='%s' aria-label='Back'>"
+		        "<a class='btn nav-back' href='%s' aria-label='%s'>"
 		        "  <span aria-hidden='true'>↩️</span>"
 		        "</a>",
-		        up);
+		        up, back_label);
 	}
+
+	const char *menu_label = i18n_t(state ? state->lang : NULL, "Menu");
+	const char *close_menu_label = i18n_t(state ? state->lang : NULL, "Close Menu");
 
 	bar =
 	        bud_tpl("<header class='nav-bar' data-site-chrome='1' %bind>"
@@ -112,11 +117,11 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	                "  <h1 class='nav-bar-title'>%s</h1>"
 	                "  <span class='nav-bar-slot'>"
 	                "    <label for='menu-functions' class='menu-toggle "
-	                "btn' aria-label='Menu' data-menu-toggle='1'>%s</label>"
+	                "btn' aria-label='%s' data-menu-toggle='1'>%s</label>"
 	                "  </span>"
 	                "</header>",
 	                "scroll@window", site_chrome_on_scroll, back,
-	                state ? state->title : "", icon);
+	                state ? state->title : "", menu_label, icon);
 	site_chrome_nav_bar = bar;
 	site_chrome_scroll_y = 0;
 	site_chrome_scroll_ready = 0;
@@ -125,11 +130,12 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	return bud_tpl(
 	        "<div id='chrome-root'>"
 	        "  <input id='menu-functions' name='functions' type='checkbox' "
-	        "class='menu-control' aria-label='Menu'/>"
+	        "class='menu-control' aria-label='%s'/>"
 	        "  <label for='menu-functions' class='menu-overlay' "
-	        "aria-label='Close Menu'></label>"
+	        "aria-label='%s'></label>"
 	        "  %node"
 	        "</div>",
+	        menu_label, close_menu_label,
 	        bar);
 }
 

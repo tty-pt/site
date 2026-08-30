@@ -22,6 +22,7 @@
 #undef ITEM_IMPL
 
 #include "../common/common.h"
+#include "dict.h"
 #include "ux/all.c"
 
 /* ------------------------------------------------------------------ */
@@ -620,6 +621,8 @@ XY_IMPL(int, with_module_item_access,
 	if (!cb)
 		return respond_error(fd, 500, "Missing item handler");
 
+	site_ui_set_locale(i18n_resolve_locale(fd));
+
 	if (module_item_ctx_load(&ctx, fd, module, load_flags))
 		return 1;
 
@@ -646,7 +649,9 @@ static void auth_send_html(
         int fd, uint16_t status, const char *title, const char *path,
         const char *icon, const char *user, bud_node *layout)
 {
-	char *html = site_ui_page(title, path, icon, user, NULL, NULL, layout);
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+	char *html = site_ui_page_lang(title, path, icon, user, NULL, NULL, layout, lang);
 
 	if (html) {
 		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
@@ -695,6 +700,7 @@ int on_auth_login_error(
 		}
 
 		const char *user = get_request_user(fd);
+		site_ui_set_locale(i18n_resolve_locale(fd));
 		bud_node *layout = auth_render_login(user, target, msg);
 		auth_send_html(
 		        fd, (uint16_t)status, "Login", "/auth/login", "🔑",
@@ -756,6 +762,7 @@ static int login_get_handler(int fd, char *body)
 		}
 	}
 	{
+		site_ui_set_locale(i18n_resolve_locale(fd));
 		bud_node *layout = auth_render_login(user, ret, NULL);
 		auth_send_html(
 		        fd, 200, "Login", "/auth/login", "🔑", user, layout);
@@ -766,6 +773,7 @@ static int login_get_handler(int fd, char *body)
 static int register_get_handler(int fd, char *body)
 {
 	(void)body;
+	site_ui_set_locale(i18n_resolve_locale(fd));
 	bud_node *layout = auth_render_register(get_request_user(fd));
 	auth_send_html(
 	        fd, 200, "Register", "/auth/register", "📝",
@@ -779,6 +787,7 @@ void xy_install(void)
 	 * is independent but depends on common */
 	xy_load("./mods/common/common");
 	xy_load("libaxil-auth"); /* external — not in ./mods */
+	i18n_register_dict(auth_dict, AUTH_DICT_COUNT);
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);

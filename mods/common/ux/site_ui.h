@@ -3,8 +3,17 @@
 
 #include "bud/bud.h"
 #include "site_chrome.h"
+#include "../../i18n/i18n_dict.h"
 #include <stddef.h>
 #include <hyle-bud/hyle-bud.h>
+
+const char *site_ui_get_locale(void);
+void site_ui_set_locale(const char *lang);
+
+static inline const char *ui_t(const char *msgid)
+{
+	return i18n_t(site_ui_get_locale(), msgid);
+}
 
 /* Progressive-enhancement transport for pickers (always-on,
  * self-gating; see docs/SSR-CONTRACT.md). Versioned via the generated
@@ -22,6 +31,10 @@
 char *site_ui_page(
         const char *title, const char *path, const char *icon, const char *user,
         const char *extra_head, const char *module, bud_node *body);
+char *site_ui_page_lang(
+        const char *title, const char *path, const char *icon, const char *user,
+        const char *extra_head, const char *module, bud_node *body,
+        const char *lang);
 bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children);

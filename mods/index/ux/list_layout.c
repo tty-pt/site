@@ -18,14 +18,14 @@ static bud_node *idx_list_layout(const list_state_t *state)
 
 	for (i = 0; i < state->ncols && i < LIST_MAX_COLS; i++) {
 		col_keys[i] = state->cols[i].key;
-		col_labels[i] = state->cols[i].label;
+		col_labels[i] = ui_t(state->cols[i].label);
 	}
 
 	filter_wrap = idx_filter_chrome(state);
 	act.kind = HYLE_ROW_ACTION_LINK;
 	act.css_class = NULL;
 	act.label = NULL;
-	act.aria_base = "Open";
+	act.aria_base = ui_t("Open");
 	act.href_base = NULL;
 	act.form_id = NULL;
 	act.field_name = NULL;
@@ -52,12 +52,12 @@ static bud_node *idx_list_layout(const list_state_t *state)
 
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", state->module);
 	add_btn = (state->username[0])
-	                  ? bud_tpl("<a href='%s' class='btn'>+ add</a>",
-	                            href_buf)
+	                  ? bud_tpl("<a href='%s' class='btn'>+ %s</a>",
+	                            href_buf, ui_t("Add"))
 	                  : NULL;
 
 	return site_ui_layout(
-	        title, path, site_ui_module_icon(state->module),
+	        ui_t(title), path, site_ui_module_icon(state->module),
 	        state->username, add_btn,
 	        bud_tpl("<div class='center'>%node</div>", form));
 }
@@ -77,8 +77,8 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", state->module);
 	add_btn = (state->username[0])
-	                  ? bud_tpl("<a href='%s' class='btn'>+ add</a>",
-	                            href_buf)
+	                  ? bud_tpl("<a href='%s' class='btn'>+ %s</a>",
+	                            href_buf, ui_t("Add"))
 	                  : NULL;
 
 	filter_wrap = idx_filter_chrome(state);
@@ -88,14 +88,14 @@ static bud_node *idx_list_empty_layout(const list_state_t *state)
 	                "  %node"
 	                "  %node"
 	                "</form>",
-	                filter_wrap, site_ui_empty_state("No items"));
+	                filter_wrap, site_ui_empty_state(ui_t("No items found")));
 
 	snprintf(title, sizeof(title), "%ss", state->display_name);
 	if (title[0] >= 'a')
 		title[0] -= 32;
 
 	return site_ui_layout(
-	        title, path, site_ui_module_icon(state->module),
+	        ui_t(title), path, site_ui_module_icon(state->module),
 	        state->username, add_btn,
 	        bud_tpl("<div class='center'>%node</div>", form));
 }

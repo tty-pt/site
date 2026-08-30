@@ -68,8 +68,8 @@ async function createSongViaForm(
     // also handle inline checkbox grid fallback (no details)
     for (const v of vals) {
       const slug = v.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-      let cb = page.locator(`input[name="type"][value="${slug}"]`);
-      if (await cb.count() === 0) cb = page.locator(`input[name="type"][value="${v}"]`);
+      let cb = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${slug}"]`);
+      if (await cb.count() === 0) cb = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${v}"]`);
       if (await cb.count() > 0) {
         await cb.first().evaluate((el) => {
           (el as any).checked = true;
@@ -83,6 +83,7 @@ async function createSongViaForm(
       } else {
         const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
         if (await search.count() > 0) {
+          await search.fill("");
           await search.fill(v);
           const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
           await rows.waitFor({ state: "visible" });

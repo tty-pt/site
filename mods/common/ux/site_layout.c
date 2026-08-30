@@ -29,16 +29,16 @@ bud_node *site_ui_menu(const char *user, const char *path)
 		return bud_tpl(
 		        "%node"
 		        "%node",
-		        menu_btn(me_href, "👤", "me"),
-		        menu_btn("/auth/logout", "🚪", "logout"));
+		        menu_btn(me_href, "👤", ui_t("Me")),
+		        menu_btn("/auth/logout", "🚪", ui_t("Logout")));
 	} else {
 		login_href(path, login_buf, sizeof(login_buf));
 		auth_path("register", reg_href, sizeof(reg_href));
 		return bud_tpl(
 		        "%node"
 		        "%node",
-		        menu_btn(login_buf, "🔑", "login"),
-		        menu_btn(reg_href, "📝", "register"));
+		        menu_btn(login_buf, "🔑", ui_t("Login")),
+		        menu_btn(reg_href, "📝", ui_t("Register")));
 	}
 }
 
@@ -55,8 +55,8 @@ bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
 	return bud_tpl(
 	        "%node"
 	        "%node",
-	        menu_btn(edit_href, "✏️", "edit"),
-	        menu_btn(del_href, "🗑️", "delete"));
+	        menu_btn(edit_href, "✏️", ui_t("Edit")),
+	        menu_btn(del_href, "🗑️", ui_t("Delete")));
 }
 
 bud_node *site_ui_empty_state(const char *message)
@@ -85,9 +85,9 @@ bud_node *site_ui_layout(
 	        "    %node"
 	        "  </div>"
 	        "  <label for='menu-functions' class='absolute inset-0 z-10 "
-	        "cursor-pointer' aria-label='Close Menu'></label>"
+	        "cursor-pointer' aria-label='%s'></label>"
 	        "</span>",
-	        site_ui_menu(user, path), local_items);
+	        site_ui_menu(user, path), local_items, ui_t("Close Menu"));
 
 	return bud_tpl(
 	        "<main class='main'>%node</main>"

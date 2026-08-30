@@ -58,25 +58,25 @@ bud_node *site_ui_viewer_controls(
 		        "<div class='viewer-controls' "
 		        "data-detail-viewer-controls='%s' "
 		        "data-detail-viewer-save-url='%s'>"
-		        "  <label>Zoom"
+		        "  <label>%s"
 		        "    <input type='range' min='" STR(
 		                VIEWER_ZOOM_MIN) "' max='" STR(VIEWER_ZOOM_MAX) "' step='10' value='%d' data-detail-viewer-zoom='1' %bind %bind/>"
 		                                                                "  </label>"
 		                                                                "  <p class='text-xs text-muted' data-detail-viewer-zoom-label='1'>%node</p>"
 		                                                                "  <label>"
 		                                                                "    <input type='checkbox' checked data-detail-viewer-wrap='1'/>"
-		                                                                "    Wrap lines"
+		                                                                "    %s"
 		                                                                "  </label>"
 		                                                                "</div>",
-		        module ? module : "", save_url ? save_url : "", zoom,
+		        module ? module : "", save_url ? save_url : "", ui_t("Zoom"), zoom,
 		        "input", on_zoom_change, "change", on_zoom_change,
-		        zoom_text_node);
+		        zoom_text_node, ui_t("Wrap lines"));
 	}
 
 	return bud_tpl(
 	        "<div class='viewer-controls' data-detail-viewer-controls='%s' "
 	        "data-detail-viewer-save-url='%s'>"
-	        "  <label>Zoom"
+	        "  <label>%s"
 	        "    <input type='range' min='" STR(
 	                VIEWER_ZOOM_MIN) "' max='" STR(VIEWER_ZOOM_MAX) "' "
 	                                                                "step='"
@@ -124,15 +124,14 @@ bud_node *site_ui_viewer_controls(
 	                                                                "wrap='"
 	                                                                "1'/>"
 	                                                                "    "
-	                                                                "Wrap "
-	                                                                "lines"
+	                                                                "%s"
 	                                                                "  "
 	                                                                "</"
 	                                                                "label>"
 	                                                                "</"
 	                                                                "div>",
-	        module ? module : "", save_url ? save_url : "", zoom,
-	        zoom_text_node);
+	        module ? module : "", save_url ? save_url : "", ui_t("Zoom"), zoom,
+	        zoom_text_node, ui_t("Wrap lines"));
 }
 
 bud_node *site_ui_checkbox(
@@ -375,20 +374,17 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	                                           "target='_blank' "
 	                                           "rel='noopener noreferrer' "
 	                                           "class='btn btn-icon "
-	                                           "btn-sm' title='Watch on "
-	                                           "YouTube' aria-label='Watch "
-	                                           "on "
-	                                           "YouTube'>\xe2\x96\xb6</a>",
-	                                           yt_url)
+	                                           "btn-sm' title='%s' "
+	                                           "aria-label='%s'>\xe2\x96\xb6</a>",
+	                                           yt_url, ui_t("Watch on YouTube"), ui_t("Watch on YouTube"))
 	                                 : NULL,
 	                          has_pdf ? bud_tpl("<a href='%s' "
 	                                            "target='_blank' "
 	                                            "rel='noopener noreferrer' "
 	                                            "class='btn btn-icon "
-	                                            "btn-sm' title='View PDF' "
-	                                            "aria-label='View "
-	                                            "PDF'>\xf0\x9f\x93\x84</a>",
-	                                            pdf_url)
+	                                            "btn-sm' title='%s' "
+	                                            "aria-label='%s'>\xf0\x9f\x93\x84</a>",
+	                                            pdf_url, ui_t("View PDF"), ui_t("View PDF"))
 	                                  : NULL)
 	                : NULL;
 

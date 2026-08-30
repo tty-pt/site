@@ -173,12 +173,16 @@ static int idx_render_list_bud(
 	char *extra_head = NULL;
 	int rc;
 
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+
 	memset(&state, 0, sizeof(state));
 	snprintf(
 	        state.module, sizeof(state.module), "%s", module ? module : "");
 	snprintf(
 	        state.username, sizeof(state.username), "%s",
 	        username ? username : "");
+	snprintf(state.lang, sizeof(state.lang), "%s", lang);
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
 
 	/* Filler parses params, whitelists the qs into state.query, queries
@@ -220,7 +224,7 @@ static int idx_render_list_bud(
 		snprintf(path, sizeof(path), "/%s/", module);
 		respond_html(
 		        fd, site_ui_page(
-		                    title, path, site_ui_module_icon(module),
+		                    ui_t(title), path, site_ui_module_icon(module),
 		                    username, extra_head, "list", layout));
 	} else {
 		axil_respond(fd, 500, "Internal Server Error");
@@ -241,6 +245,8 @@ XY_IMPL(int, index_render_list,
 
 	(void)hd;
 	(void)fmt;
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
 	axil_env_get(fd, query, sizeof(query), "QUERY_STRING");
 	username = get_request_user(fd);
 	return idx_render_list_bud(
@@ -444,6 +450,8 @@ XY_IMPL(unsigned, index_open,
 XY_IMPL(int, core_get, int, fd, char *, body)
 {
 	(void)body;
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
 	char uri[1024] = { 0 };
 	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 	if (uri[0] && strcmp(uri, "/") != 0)

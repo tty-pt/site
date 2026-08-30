@@ -8,7 +8,9 @@ gcc -Wall -Wextra -Werror -I"$ROOT/external/bud/include" -I"$ROOT/external/hyle/
     -I"$ROOT/external/hyle/c/libhyle" -I"$ROOT/external/hyle/c/libhyle-source/include" \
     "$DIR/bud_table_test.c" \
     "$ROOT/external/bud/src/libbud.c" \
+    "$ROOT/external/hyle/c/libhyle-bud/src/libhyle-bud.c" \
     "$ROOT/external/hyle/c/libhyle-bud/src/table.c" \
+    -ljson-c \
     -o "$DIR/bud_table_test"
 
 "$DIR/bud_table_test"

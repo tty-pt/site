@@ -54,6 +54,7 @@ typedef struct {
 	char csrf_token[33];
 	char grp_id[128];
 	char owner[64];
+	char lang[32];
 	int n_songs;
 	int active_row_pick;
 	char pick_q[256];
@@ -91,6 +92,7 @@ static const bud_field_desc_t gig_app_fields[] = {
 	OVERLAY_STR(csrf, sb_app_state_t, csrf_token, 33),
 	OVERLAY_STR(grp, sb_app_state_t, grp_id, 128),
 	OVERLAY_STR(owner_name, sb_app_state_t, owner, 64),
+	OVERLAY_STR(lang, sb_app_state_t, lang, 32),
 	OVERLAY_INT(active_row, sb_app_state_t, active_row_pick),
 	OVERLAY_STR(pick_q, sb_app_state_t, pick_q, 256),
 	OVERLAY_INT(pick_page, sb_app_state_t, pick_page),
@@ -111,6 +113,9 @@ void wasm_init(const char *json, int len)
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 
 	bud_state_apply_len(&sb_app_state, gig_app_fields, json, jlen);
+
+	site_ui_set_locale(sb_app_state.lang);
+	hyle_bud_set_translator(ui_t);
 
 	if (sb_app_state.zoom < VIEWER_ZOOM_MIN ||
 	    sb_app_state.zoom > VIEWER_ZOOM_MAX)

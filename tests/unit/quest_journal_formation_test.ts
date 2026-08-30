@@ -112,7 +112,7 @@ Deno.test("quest_journal_formation: research-grounded quest formation & verbatim
 		const searchRes = await emitToolCall("search_code", { pattern: "flac_stream_chunk" });
 		assert.strictEqual(searchRes?.block, undefined, "search tool must be allowed");
 
-		const bashRes = await emitToolCall("bash", { command: "make -C mods/song" });
+		const bashRes = await emitToolCall("bash", { command: "find mods/song -name '*.c'" });
 		assert.strictEqual(bashRes?.block, undefined, "bash discovery tool must be allowed");
 	});
 

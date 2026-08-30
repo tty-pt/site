@@ -39,6 +39,7 @@ typedef struct {
 	char page_user[64];
 	char path[256];
 	int zoom;
+	char lang[32];
 } app_state_t;
 
 /* ── Song type entity ────────────────────────────────────────── */
@@ -103,6 +104,7 @@ static const hyle_schema_desc_t song_fields[] = {
 	F_STR(st, save_url, 512)                                               \
 	F_STR(st, page_user, 64)                                               \
 	F_STR(st, path, 256)                                                   \
+	F_STR(st, lang, 32)                                                    \
 	F_INT(st, transpose)                                                   \
 	F_INT(st, use_latin)                                                   \
 	F_INT(st, show_media)                                                  \

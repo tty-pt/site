@@ -46,20 +46,23 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 		bud_node *body;
 
 		snprintf(status_str, sizeof(status_str), "%d", status);
+		const char *lang = i18n_resolve_locale(fd);
+		site_ui_set_locale(lang);
+		const char *trans_msg = msg ? ui_t(msg) : ui_t("Error");
 		snprintf(
 		        msg_with_space, sizeof(msg_with_space), " %s",
-		        msg ? msg : "Error");
+		        trans_msg);
 		axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 
 		body = site_ui_layout(
-		        msg ? msg : status_str, uri, "!", get_request_user(fd),
+		        trans_msg, uri, "!", get_request_user(fd),
 		        NULL,
 		        bud_tpl("<p><strong>%s</strong>%s</p>", status_str,
 		                msg_with_space));
 
-		html = site_ui_page(
-		        msg ? msg : status_str, uri, "!", get_request_user(fd),
-		        NULL, NULL, body);
+		html = site_ui_page_lang(
+		        trans_msg, uri, "!", get_request_user(fd),
+		        NULL, NULL, body, lang);
 		if (html) {
 			set_html_security_headers(fd);
 			axil_header_set(
@@ -166,9 +169,13 @@ XY_IMPL(int, site_ui_respond_item_detail,
 	char page_title[512];
 	int is_owner;
 	bud_node *layout;
+	const char *lang;
 
 	if (!ctx || !module || !body)
 		return server_error(fd, "Invalid detail context");
+
+	lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
 
 	is_owner = (ctx->username && ctx->username[0])
 	                   ? item_owner_check(ctx->item_path, ctx->username)
@@ -203,9 +210,11 @@ XY_IMPL(int, site_ui_respond_page,
 	const char *, module,
 	bud_node *, body)
 {
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
 	return respond_html(
-	        fd, site_ui_page(
-	                    title, path, icon, user, extra_head, module, body));
+	        fd, site_ui_page_lang(
+	                    title, path, icon, user, extra_head, module, body, lang));
 }
 
 XY_IMPL(int, site_ui_respond_form_page,

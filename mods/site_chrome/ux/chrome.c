@@ -22,6 +22,9 @@ void wasm_init(const char *json, int len)
 	bud_json_str_len(
 	        json, jlen, "user", chrome_state.user,
 	        sizeof(chrome_state.user));
+	bud_json_str_len(
+	        json, jlen, "lang", chrome_state.lang,
+	        sizeof(chrome_state.lang));
 }
 
 bud_node *bud_app_render(void)

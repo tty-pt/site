@@ -11,6 +11,7 @@
 #include "bud/bud.h"
 #include <hyle/schema.h>
 #include "hyle-bud/hyle-bud.h"
+#include "../i18n/i18n.h"
 
 struct item_ctx_s;
 typedef struct item_ctx_s item_ctx_t;

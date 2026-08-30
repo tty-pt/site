@@ -20,6 +20,7 @@
 #include <transp/music.h>
 #include "../grp/grp.h"
 #include "fields.h"
+#include "dict.h"
 #include "../index/index.h"
 
 static char g_doc_root[256] = ".";
@@ -986,6 +987,9 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		}
 	}
 
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+
 	/* ── Populate sb_app_state with page data ────────────────── */
 	sb_app_state.zoom = prefs.zoom;
 	sb_app_state.latin = (prefs.flags & TRANSP_LATIN) ? 1 : 0;
@@ -995,6 +999,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	sb_app_state.is_owner = is_owner;
 
 	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", ctx->id);
+	snprintf(sb_app_state.lang, sizeof(sb_app_state.lang), "%s", lang);
 	snprintf(
 	        sb_app_state.path, sizeof(sb_app_state.path), "/gig/%s",
 	        ctx->id);
@@ -1315,6 +1320,8 @@ void xy_install(void)
 	xy_load("./mods/song/song");
 	xy_load("./mods/source/source");
 	xy_load("./mods/grp/grp");
+
+	i18n_register_dict(gig_dict, GIG_DICT_COUNT);
 
 	source_setup(
 	        "gig.items", NULL, sizeof(gig_cache_t), "var/gig", gig_fields,

@@ -10,7 +10,8 @@ static bud_node *idx_home_layout(
 		char href[256];
 		site_ui_collection_path(mod_names[i], href, sizeof(href));
 		bud_node *link = bud_tpl(
-		        "<a href='%s' class='btn'>%s</a>", href, mod_titles[i]);
+		        "<a href='%s' class='btn'>%s</a>", href,
+		        ui_t(mod_titles[i]));
 		if (link)
 			bud_append(frag, link);
 	}

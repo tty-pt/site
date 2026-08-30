@@ -133,6 +133,7 @@ export interface StoredState {
 	compactionPending?: boolean;
 	archiveCompactionPending?: string | null;
 	subquestLaunchCompactionPending?: boolean;
+	pendingSubquestResume?: string | null;
 	preCompactionCheckpointPending?: boolean;
 	preCompactionSaveRequestPending?: boolean;
 	saveGeneration?: SaveGeneration | null;
@@ -174,6 +175,9 @@ export interface StoredState {
 	awaitingUserConfirmation?: boolean;
 	consecutiveFailures?: number;
 	substantiveTurnsSinceCheckpoint?: number;
+	sessionModifiedFiles?: string[];
+	lastNotifiedPressure?: CompactionPressure;
+	lastContinuationTransitionKey?: string | null;
 }
 
 const sessionStates = new Map<string, StoredState>();
@@ -195,6 +199,7 @@ function createDefaultState(): StoredState {
 		compactionPending: false,
 		archiveCompactionPending: null,
 		subquestLaunchCompactionPending: false,
+		pendingSubquestResume: null,
 		preCompactionCheckpointPending: false,
 		preCompactionSaveRequestPending: false,
 		saveGeneration: null,
@@ -234,6 +239,9 @@ function createDefaultState(): StoredState {
 		awaitingUserConfirmation: false,
 		consecutiveFailures: 0,
 		substantiveTurnsSinceCheckpoint: 0,
+		sessionModifiedFiles: [],
+		lastNotifiedPressure: CompactionPressure.NONE,
+		lastContinuationTransitionKey: null,
 	};
 }
 
@@ -250,6 +258,7 @@ function snapshotState(ctx?: ExtensionContext): StoredState {
 		compactionPending: !!s.compactionPending,
 		archiveCompactionPending: s.archiveCompactionPending ?? null,
 		subquestLaunchCompactionPending: !!s.subquestLaunchCompactionPending,
+		pendingSubquestResume: s.pendingSubquestResume ?? null,
 		preCompactionCheckpointPending: !!s.preCompactionCheckpointPending,
 		preCompactionSaveRequestPending: !!s.preCompactionSaveRequestPending,
 		saveGeneration: s.saveGeneration ? { ...s.saveGeneration } : null,
@@ -289,6 +298,9 @@ function snapshotState(ctx?: ExtensionContext): StoredState {
 		awaitingUserConfirmation: !!s.awaitingUserConfirmation,
 		consecutiveFailures: typeof s.consecutiveFailures === "number" ? s.consecutiveFailures : 0,
 		substantiveTurnsSinceCheckpoint: typeof s.substantiveTurnsSinceCheckpoint === "number" ? s.substantiveTurnsSinceCheckpoint : 0,
+		sessionModifiedFiles: Array.isArray(s.sessionModifiedFiles) ? [...s.sessionModifiedFiles] : [],
+		lastNotifiedPressure: s.lastNotifiedPressure || CompactionPressure.NONE,
+		lastContinuationTransitionKey: s.lastContinuationTransitionKey ?? null,
 	};
 }
 
@@ -300,7 +312,7 @@ function getSessionId(ctx?: ExtensionContext): string {
 	return id && typeof id === "string" ? id : "default";
 }
 
-function getState(ctx?: ExtensionContext): StoredState {
+export function getState(ctx?: ExtensionContext): StoredState {
 	const c = getActiveContext(ctx);
 	const id = getSessionId(c);
 	let s = sessionStates.get(id);
@@ -674,7 +686,7 @@ function isRootQuest(targetState?: StoredState): boolean {
 	return !Array.isArray(s.stack) || s.stack.length <= 1;
 }
 
-function canImplement(targetState?: StoredState, ctx?: ExtensionContext): boolean {
+export function canImplement(targetState?: StoredState, ctx?: ExtensionContext): boolean {
 	const s = targetState || state;
 	if (s.pendingRootQuest) return false;
 	if (!s.active) return true;
@@ -817,8 +829,102 @@ function classifyUserMessage(text: string): UserMessageClassification {
 	return UserMessageClassification.REFINEMENT_OR_REQUIREMENT;
 }
 
+function checkAndEmitGateContinuationSteer(
+	pi: ExtensionAPI,
+	ctx?: ExtensionContext,
+	targetSlug?: string,
+	contextReason?: {
+		wasReassessmentPending?: boolean;
+		wasResearchPending?: boolean;
+		wasAwaitingConfirmation?: boolean;
+	},
+) {
+	const c = getActiveContext(ctx);
+	const s = state;
+	const slug = targetSlug || s.active;
+	if (!slug) return;
+
+	const transitionKey = `${slug}:v${s.planVersion || 1}:r${s.researchRound || 1}:rv${s.resolvedReassessmentVersion || 0}:conf${s.confirmedQuests?.includes(slug) ? "1" : "0"}:impl${canImplement(s, c) ? "1" : "0"}`;
+
+	if (s.lastContinuationTransitionKey === transitionKey) {
+		return;
+	}
+	s.lastContinuationTransitionKey = transitionKey;
+	persist(pi, c);
+
+	const qPath = questPath(slug);
+
+	if (contextReason?.wasReassessmentPending) {
+		const steerMsg = `⚡ **REASSESSMENT RESOLVED — IMPLEMENTATION GATE OPEN** ⚡
+
+The required reassessment has been completed and the replacement epistemic state has been validated.
+
+Your implementation gate is now OPEN for \`${qPath}\`.
+
+Do not stop after updating the quest file.
+Re-read the current quest state if necessary and continue autonomously with the newly justified EXACT NEXT ACTION.
+
+Do not blindly repeat the action that was previously blocked if the reassessment changed the plan; follow the revised plan and current Exact Next Action.`;
+
+		sendInternalAgentMessage(pi, steerMsg, "steer");
+		logDebug(`Quest Journal: STEER emitted | type=reassessment_resolved | quest=${slug} | deliverAs=steer`);
+		return;
+	}
+
+	if (contextReason?.wasAwaitingConfirmation) {
+		const steerMsg = `⚡ **CONFIRMATION ACCEPTED — IMPLEMENTATION GATE OPEN** ⚡
+
+User confirmation has been recorded for active quest \`${qPath}\`.
+Your implementation gate is now OPEN.
+
+Proceed autonomously with the justified EXACT NEXT ACTION from your execution plan.`;
+
+		sendInternalAgentMessage(pi, steerMsg, "steer");
+		logDebug(`Quest Journal: STEER emitted | type=confirmation_accepted | quest=${slug} | deliverAs=steer`);
+		return;
+	}
+
+	if (contextReason?.wasResearchPending) {
+		const isRoot = isRootQuest(s);
+		const isConfirmed = Array.isArray(s.confirmedQuests) && s.confirmedQuests.includes(slug);
+		if (isRoot && !isConfirmed) {
+			const steerMsg = `⚡ **RESEARCH COMPLETE — PRESENT PLAN FOR CONFIRMATION** ⚡
+
+Initial research prerequisites have been satisfied and recorded in \`${qPath}\`.
+
+Present your research findings, key assumptions evaluated, and revised execution plan clearly to the user, and request confirmation before editing feature code.`;
+
+			sendInternalAgentMessage(pi, steerMsg, "steer");
+			logDebug(`Quest Journal: STEER emitted | type=research_complete_root | quest=${slug} | deliverAs=steer`);
+		} else {
+			const steerMsg = `⚡ **RESEARCH COMPLETE — AUTONOMOUS EXECUTION OPEN** ⚡
+
+Initial research prerequisites have been satisfied and verified for \`${qPath}\`.
+Your implementation gate is now OPEN.
+
+Proceed autonomously with the justified EXACT NEXT ACTION from your execution plan.`;
+
+			sendInternalAgentMessage(pi, steerMsg, "steer");
+			logDebug(`Quest Journal: STEER emitted | type=research_complete_autonomous | quest=${slug} | deliverAs=steer`);
+		}
+		return;
+	}
+
+	// Generic implementation gate open steer
+	const steerMsg = `⚡ **IMPLEMENTATION GATE OPEN** ⚡
+
+Prerequisites have been satisfied for \`${qPath}\`.
+Your implementation gate is now OPEN.
+
+Proceed autonomously with the justified EXACT NEXT ACTION from your execution plan.`;
+
+	sendInternalAgentMessage(pi, steerMsg, "steer");
+	logDebug(`Quest Journal: STEER emitted | type=gate_open | quest=${slug} | deliverAs=steer`);
+}
+
 function acceptRootConfirmation(pi: ExtensionAPI, ctx?: ExtensionContext): void {
 	if (!state.awaitingUserConfirmation) return;
+	const wasImplementable = canImplement(state, ctx);
 	state.awaitingUserConfirmation = false;
 	if (state.active) {
 		if (!Array.isArray(state.confirmedQuests)) state.confirmedQuests = [];
@@ -829,6 +935,11 @@ function acceptRootConfirmation(pi: ExtensionAPI, ctx?: ExtensionContext): void 
 	syncImplementationPermission(state);
 	persist(pi, ctx);
 	updateUIStatus(ctx);
+
+	const isImplementable = canImplement(state, ctx);
+	if (!wasImplementable && isImplementable) {
+		checkAndEmitGateContinuationSteer(pi, ctx, state.active || undefined, { wasAwaitingConfirmation: true });
+	}
 }
 
 function isConfirmationQuestion(
@@ -962,21 +1073,616 @@ function handleAskQuestionsResult(pi: ExtensionAPI, event: any, ctx: ExtensionCo
 	}
 }
 
-function isMutationTool(toolName: string, input?: any): boolean {
-	const normName = (toolName || "").toLowerCase();
-	if (normName === "edit" || normName === "write" || normName === "user_edit" || normName === "user_write") {
+export type ToolPermission =
+	| "read"
+	| "research"
+	| "journal"
+	| "implementation"
+	| "interaction"
+	| "unknown";
+
+function splitBashCommandChain(cmd: string): string[] {
+	const segments: string[] = [];
+	let current = "";
+	let inSingleQuote = false;
+	let inDoubleQuote = false;
+	let escaped = false;
+
+	for (let i = 0; i < cmd.length; i++) {
+		const ch = cmd[i];
+		if (escaped) {
+			current += ch;
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\") {
+			escaped = true;
+			current += ch;
+			continue;
+		}
+		if (ch === "'" && !inDoubleQuote) {
+			inSingleQuote = !inSingleQuote;
+			current += ch;
+			continue;
+		}
+		if (ch === '"' && !inSingleQuote) {
+			inDoubleQuote = !inDoubleQuote;
+			current += ch;
+			continue;
+		}
+		if (!inSingleQuote && !inDoubleQuote) {
+			if (ch === "\n" || ch === ";") {
+				if (current.trim()) segments.push(current.trim());
+				current = "";
+				continue;
+			}
+			if (ch === "&" && cmd[i + 1] === "&") {
+				if (current.trim()) segments.push(current.trim());
+				current = "";
+				i++;
+				continue;
+			}
+			if (ch === "|" && cmd[i + 1] === "|") {
+				if (current.trim()) segments.push(current.trim());
+				current = "";
+				i++;
+				continue;
+			}
+			// Do not split if & is part of >&, <&, &>, 2>&1, etc.
+			if (ch === "&") {
+				const prev = i > 0 ? cmd[i - 1] : "";
+				const next = i + 1 < cmd.length ? cmd[i + 1] : "";
+				if (prev === ">" || prev === "<" || next === ">") {
+					current += ch;
+					continue;
+				}
+				if (current.trim()) segments.push(current.trim());
+				current = "";
+				continue;
+			}
+			// Do not split if | is part of >| (clobber redirection)
+			if (ch === "|") {
+				const prev = i > 0 ? cmd[i - 1] : "";
+				if (prev === ">") {
+					current += ch;
+					continue;
+				}
+				if (current.trim()) segments.push(current.trim());
+				current = "";
+				continue;
+			}
+		}
+		current += ch;
+	}
+	if (current.trim()) segments.push(current.trim());
+	return segments;
+}
+
+function hasFileRedirection(segment: string): boolean {
+	// Strip quoted strings first so quotes containing > are not treated as file redirection
+	let stripped = "";
+	let inSingleQuote = false;
+	let inDoubleQuote = false;
+	let escaped = false;
+
+	for (let i = 0; i < segment.length; i++) {
+		const ch = segment[i];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (ch === "'" && !inDoubleQuote) {
+			inSingleQuote = !inSingleQuote;
+			continue;
+		}
+		if (ch === '"' && !inSingleQuote) {
+			inDoubleQuote = !inDoubleQuote;
+			continue;
+		}
+		if (!inSingleQuote && !inDoubleQuote) {
+			stripped += ch;
+		}
+	}
+
+	// Remove safe redirections: 2>&1, 1>&2, 2>&-, >/dev/null, 2>/dev/null, &>/dev/null, >>/dev/null, 2>>/dev/null
+	const step1 = stripped.replace(/[0-9&]*>>?\s*\/dev\/null/g, " ");
+	const step2 = step1.replace(/[0-9&]*>>?&[0-9\-]+/g, " ");
+	const step3 = step2.replace(/[0-9&]*<&[0-9\-]+/g, " ");
+
+	// Check if any output redirection remains (> or >> or >| or &>)
+	return />/.test(step3);
+}
+
+function classifySingleBashCommand(cmdSegment: string): ToolPermission {
+	const trimmed = cmdSegment.trim();
+	if (!trimmed) return "read";
+
+	if (hasFileRedirection(trimmed)) {
+		return "implementation";
+	}
+
+	// Clean up leading env variables e.g. "FOO=1 BAR=2 cmd"
+	let cleaned = trimmed;
+	while (/^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S+)\s+/.test(cleaned)) {
+		cleaned = cleaned.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S+)\s+/, "");
+	}
+	cleaned = cleaned.trim();
+
+	// Strip common prefixes: sudo, time, nice, nohup, env, command, builtin, exec
+	while (/^(?:sudo|time|nice|nohup|env|command|builtin|exec)\s+/.test(cleaned)) {
+		cleaned = cleaned.replace(/^(?:sudo|time|nice|nohup|env|command|builtin|exec)\s+/, "").trim();
+	}
+
+	// Split into tokens (quotes-aware for arguments)
+	const tokens: string[] = [];
+	let token = "";
+	let inSingle = false;
+	let inDouble = false;
+	let escaped = false;
+	for (let i = 0; i < cleaned.length; i++) {
+		const ch = cleaned[i];
+		if (escaped) {
+			token += ch;
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\") {
+			escaped = true;
+			token += ch;
+			continue;
+		}
+		if (ch === "'" && !inDouble) {
+			inSingle = !inSingle;
+			token += ch;
+			continue;
+		}
+		if (ch === '"' && !inSingle) {
+			inDouble = !inDouble;
+			token += ch;
+			continue;
+		}
+		if (!inSingle && !inDouble && /\s/.test(ch)) {
+			if (token) {
+				tokens.push(token);
+				token = "";
+			}
+			continue;
+		}
+		token += ch;
+	}
+	if (token) tokens.push(token);
+
+	if (tokens.length === 0) return "read";
+
+	const bin = basename(tokens[0]).toLowerCase();
+
+	// If xargs is used, examine the target binary
+	if (bin === "xargs") {
+		const nonFlagTokens = tokens.slice(1).filter((t) => !t.startsWith("-"));
+		if (nonFlagTokens.length > 0) {
+			return classifySingleBashCommand(nonFlagTokens.join(" "));
+		}
+		return "unknown";
+	}
+
+	// Check if this is a harmless --version / -v / --help / -h call
+	const hasHelpOrVersion = tokens.slice(1).some((t) => t === "--version" || t === "-v" || t === "-V" || t === "--help" || t === "-h");
+	if (hasHelpOrVersion) {
+		return "read";
+	}
+
+	// 1. Explicit mutating binaries / commands
+	const mutatingBinaries = new Set([
+		"rm",
+		"rmdir",
+		"unlink",
+		"cp",
+		"mv",
+		"mkdir",
+		"touch",
+		"chmod",
+		"chown",
+		"chgrp",
+		"truncate",
+		"dd",
+		"patch",
+		"install",
+		"ln",
+		"tee",
+		"split",
+		"sponge",
+		"make",
+		"cmake",
+		"ninja",
+		"gcc",
+		"clang",
+		"cc",
+		"c++",
+		"g++",
+		"ld",
+		"ar",
+		"as",
+		"rustc",
+		"cargo",
+		"npm",
+		"npx",
+		"yarn",
+		"pnpm",
+		"pip",
+		"pip3",
+		"pipenv",
+		"poetry",
+		"bundle",
+		"gem",
+		"nano",
+		"vim",
+		"nvim",
+		"emacs",
+		"ed",
+		"ex",
+	]);
+
+	if (mutatingBinaries.has(bin)) {
+		return "implementation";
+	}
+
+	// 2. Stream editors with in-place flags
+	if (bin === "sed") {
+		const hasInPlace = tokens.some((t) => t === "-i" || t.startsWith("-i") || t.startsWith("--in-place"));
+		if (hasInPlace) return "implementation";
+		return "read";
+	}
+
+	if (bin === "perl") {
+		const hasInPlace = tokens.some((t) => t === "-i" || t.startsWith("-i") || t.includes("-pi") || t.includes("-i"));
+		if (hasInPlace) return "implementation";
+		return "unknown";
+	}
+
+	// 3. Git commands
+	if (bin === "git") {
+		const nonFlagSubcommands = tokens.slice(1).filter((t) => !t.startsWith("-"));
+		const gitSub = (nonFlagSubcommands[0] || "").toLowerCase();
+
+		const readGit = new Set([
+			"status",
+			"diff",
+			"log",
+			"show",
+			"branch",
+			"tag",
+			"rev-parse",
+			"remote",
+			"describe",
+			"config",
+			"ls-files",
+			"ls-tree",
+			"cat-file",
+			"blame",
+			"shortlog",
+			"check-ref-format",
+			"version",
+			"help",
+		]);
+
+		const mutatingGit = new Set([
+			"add",
+			"commit",
+			"rm",
+			"mv",
+			"checkout",
+			"switch",
+			"reset",
+			"clean",
+			"restore",
+			"revert",
+			"merge",
+			"rebase",
+			"cherry-pick",
+			"pull",
+			"push",
+			"stash",
+			"apply",
+			"init",
+			"clone",
+			"fetch",
+			"submodule",
+		]);
+
+		if (mutatingGit.has(gitSub)) {
+			return "implementation";
+		}
+
+		if (gitSub === "branch") {
+			const hasDeleteOrRename = tokens.some((t) => t === "-d" || t === "-D" || t === "-m" || t === "-M");
+			if (hasDeleteOrRename) return "implementation";
+			return "read";
+		}
+
+		if (gitSub === "tag") {
+			const hasDelete = tokens.some((t) => t === "-d" || t === "--delete");
+			if (hasDelete) return "implementation";
+			return "read";
+		}
+
+		if (gitSub === "remote") {
+			const hasModify = tokens.some((t) => t === "add" || t === "remove" || t === "rm" || t === "rename" || t === "set-url");
+			if (hasModify) return "implementation";
+			return "read";
+		}
+
+		if (gitSub === "config") {
+			const hasGetOrList = tokens.some((t) => t === "--get" || t === "--list" || t === "-l" || t.startsWith("--get-"));
+			if (hasGetOrList) return "read";
+			return "unknown";
+		}
+
+		if (readGit.has(gitSub)) {
+			return "read";
+		}
+
+		return "unknown";
+	}
+
+	// 4. Interpreters (python, node, deno, ruby, php, bash, sh)
+	const interpreters = new Set(["python", "python3", "node", "deno", "ruby", "php", "bash", "sh", "zsh"]);
+	if (interpreters.has(bin)) {
+		const inlineScript = tokens.slice(1).join(" ");
+		if (
+			/open\s*\([^)]*['"][waWA+]/.test(inlineScript) ||
+			/fs\.(?:write|append|unlink|rm|mkdir|copy)/.test(inlineScript) ||
+			/writeFileSync|appendFileSync|writeFile|appendFile|unlinkSync|rmSync|mkdirSync/.test(inlineScript) ||
+			/os\.(?:remove|unlink|rmdir|mkdir|rename)/.test(inlineScript) ||
+			/shutil\.(?:rmtree|copy|move)/.test(inlineScript) ||
+			/write_text|write_bytes/.test(inlineScript)
+		) {
+			return "implementation";
+		}
+		return "unknown";
+	}
+
+	// 5. Read-only inspection / search / format binaries
+	const readBinaries = new Set([
+		"pwd",
+		"cd",
+		"ls",
+		"dir",
+		"tree",
+		"find",
+		"which",
+		"whereis",
+		"type",
+		"whatis",
+		"file",
+		"stat",
+		"du",
+		"df",
+		"grep",
+		"rg",
+		"egrep",
+		"fgrep",
+		"ag",
+		"ack",
+		"cat",
+		"head",
+		"tail",
+		"less",
+		"more",
+		"nl",
+		"wc",
+		"diff",
+		"cmp",
+		"comm",
+		"sort",
+		"uniq",
+		"cut",
+		"paste",
+		"column",
+		"fold",
+		"fmt",
+		"pr",
+		"strings",
+		"od",
+		"hexdump",
+		"xxd",
+		"jq",
+		"yq",
+		"tr",
+		"awk",
+		"gawk",
+		"mawk",
+		"echo",
+		"printf",
+		"date",
+		"uptime",
+		"hostname",
+		"uname",
+		"whoami",
+		"id",
+		"groups",
+		"env",
+		"printenv",
+		"test",
+		"[",
+		"[[",
+		"true",
+		"false",
+		"sleep",
+	]);
+
+	if (readBinaries.has(bin)) {
+		if (bin === "awk" || bin === "gawk" || bin === "mawk") {
+			const awkProg = tokens.slice(1).join(" ");
+			if (/>\s*['"]?[a-zA-Z0-9_\-\.\/]+['"]?/.test(awkProg) || /system\s*\(/.test(awkProg)) {
+				return "implementation";
+			}
+		}
+		return "read";
+	}
+
+	return "unknown";
+}
+
+export function classifyBashCommand(commandStr: string): ToolPermission {
+	if (!commandStr || typeof commandStr !== "string" || !commandStr.trim()) {
+		return "read";
+	}
+
+	const segments = splitBashCommandChain(commandStr);
+	if (segments.length === 0) return "read";
+
+	let hasUnknown = false;
+	for (const segment of segments) {
+		const perm = classifySingleBashCommand(segment);
+		if (perm === "implementation") {
+			return "implementation";
+		}
+		if (perm === "unknown") {
+			hasUnknown = true;
+		}
+	}
+
+	if (hasUnknown) {
+		return "unknown";
+	}
+
+	return "read";
+}
+
+export function classifyToolCall(toolName: string, input?: any): ToolPermission {
+	const norm = (toolName || "").toLowerCase().trim();
+
+	// 1. File editing and creation
+	if (norm === "edit" || norm === "write" || norm === "user_edit" || norm === "user_write") {
 		const rawPath = typeof input?.path === "string" ? input.path : "";
 		const normPath = rawPath.replace(/^\.\//, "").replace(/\\/g, "/");
-		// Allow updating the active quest file or future drafts during research
+
+		// Journal files are exempt from the implementation gate
 		if (state.active && normPath === questPath(state.active)) {
-			return false;
+			return "journal";
 		}
-		if (normPath.startsWith(`${QUEST_DIR}/`) || normPath.startsWith(`${FUTURE_DIR}/`)) {
-			return false;
+		if (
+			normPath.startsWith(`${QUEST_DIR}/`) ||
+			normPath.startsWith(`${FUTURE_DIR}/`) ||
+			normPath.startsWith(`${ARCHIVE_DIR}/`) ||
+			normPath === NOTES_FILE ||
+			normPath === "MEMORY.md" ||
+			normPath === "SCRATCHPAD.md" ||
+			normPath.startsWith("daily/")
+		) {
+			return "journal";
 		}
-		return true; // Any other file write/edit is an implementation mutation!
+		return "implementation";
 	}
-	return false;
+
+	// 2. Quest journal tools
+	if (
+		norm === "quest_update_state" ||
+		norm === "quest_mark_saved" ||
+		norm === "quest_journal_mark_saved" ||
+		norm === "quest_subquest" ||
+		norm === "quest_journal_subquest" ||
+		norm === "quest_archive" ||
+		norm === "quest_refine" ||
+		norm === "quest_draft" ||
+		norm === "quest_save" ||
+		norm === "quest_status" ||
+		norm === "quests" ||
+		norm === "quest"
+	) {
+		return "journal";
+	}
+
+	// 3. Memory persistence tools
+	if (
+		norm === "memory_write" ||
+		norm === "memory_forget" ||
+		norm === "memory_restore" ||
+		norm === "scratchpad"
+	) {
+		return "journal";
+	}
+
+	// 4. Interactive questions
+	if (norm === "ask_questions") {
+		return "interaction";
+	}
+
+	// 5. Read-only inspection / fetch / memory read tools
+	if (
+		norm === "read" ||
+		norm === "doc_to_md" ||
+		norm === "fetch" ||
+		norm === "fetch_content" ||
+		norm === "get_search_content" ||
+		norm === "memory_read" ||
+		norm === "memory_search" ||
+		norm === "memory_status" ||
+		norm === "search_graph" ||
+		norm === "query_graph" ||
+		norm === "trace_path" ||
+		norm === "get_code_snippet" ||
+		norm === "get_graph_schema" ||
+		norm === "get_architecture" ||
+		norm === "search_code" ||
+		norm === "list_projects" ||
+		norm === "index_status" ||
+		norm === "check_index_coverage" ||
+		norm === "detect_changes" ||
+		norm === "bg_status" ||
+		norm === "bg_logs" ||
+		norm === "bg_result"
+	) {
+		return "read";
+	}
+
+	// 6. Research and analysis tools
+	if (
+		norm === "web_search" ||
+		norm === "source_check" ||
+		norm === "bg_delegate" ||
+		norm === "fusion_reason" ||
+		norm === "fusion_investigate" ||
+		norm === "fusion_research" ||
+		norm === "fusion_validate"
+	) {
+		return "research";
+	}
+
+	// 7. Subagent tool
+	if (norm === "subagent") {
+		const action = input?.action;
+		if (action === "list" || action === "get" || action === "doctor" || action === "status") {
+			return "read";
+		}
+		return "implementation";
+	}
+
+	// 8. Bash command
+	if (norm === "bash") {
+		const cmd = typeof input?.command === "string" ? input.command : "";
+		return classifyBashCommand(cmd);
+	}
+
+	// 9. Mutating process / codebase management tools
+	if (
+		norm === "bg_run" ||
+		norm === "bg_run_pi_attested" ||
+		norm === "bg_kill" ||
+		norm === "manage_adr" ||
+		norm === "ingest_traces" ||
+		norm === "delete_project" ||
+		norm === "index_repository"
+	) {
+		return "implementation";
+	}
+
+	// 10. Default to unknown for unclassified tools
+	return "unknown";
 }
 
 function installToolCallGate(pi: ExtensionAPI) {
@@ -985,16 +1691,36 @@ function installToolCallGate(pi: ExtensionAPI) {
 		withContext(async (event: any, ctx: ExtensionContext) => {
 			if (!state.active && !state.pendingRootQuest) return;
 			const toolName = event?.toolName || "";
-			const isMutation = isMutationTool(toolName, event?.input);
-			if (!isMutation) return;
+			const permission = classifyToolCall(toolName, event?.input);
+
+			// Allow all read, research, journal, and interaction operations
+			if (permission === "read" || permission === "research" || permission === "journal" || permission === "interaction") {
+				return;
+			}
 
 			const gate = getImplementationBlockReason(state, ctx);
-			if (gate.blocked) {
+			if (gate.blocked && (permission === "implementation" || permission === "unknown")) {
 				const questLabel = state.active ? `docs/current/${state.active}.md` : "(Provisional Root Quest Initializing)";
-				const blockMessage = `[Quest Journal Gate: Blocked] Implementation tool '${toolName}' is forbidden while ${gate.stateName}.\n\nQuest: ${questLabel}\nReason: ${gate.reason}\nRequired next step: ${gate.requiredAction}`;
-				if (ctx?.hasUI) {
-					ctx.ui.notify(`Blocked ${toolName}: ${gate.stateName}`, "warning");
-				}
+				const blockMessage = `[Quest Journal Gate: Blocked]
+
+Tool: ${toolName}
+Permission: ${permission}
+State: ${gate.stateName}
+
+This operation may modify project state, but implementation is currently forbidden.
+
+Quest: ${questLabel}
+Reason: ${gate.reason}
+Required next step: ${gate.requiredAction}
+
+Allowed now:
+- read/search/investigate
+- inspect architecture
+- update the quest journal
+
+Required:
+complete the current research/reassessment prerequisite and reopen the implementation gate.`;
+
 				return {
 					block: true,
 					reason: blockMessage,
@@ -1056,7 +1782,9 @@ function updateUIStatus(ctx?: ExtensionContext) {
 			: state.pendingRootQuest
 			? `✨ quest: [provisional root]${tokenInfo}${stateTag}`
 			: undefined;
-		c.ui.setStatus("quest", text);
+		if (typeof c.ui?.setStatus === "function") {
+			c.ui.setStatus("quest", text);
+		}
 	}
 }
 
@@ -1086,6 +1814,8 @@ function reconstruct(ctx: ExtensionContext) {
 					typeof latest.subquestLaunchCompactionPending === "boolean"
 						? latest.subquestLaunchCompactionPending
 						: false,
+				pendingSubquestResume:
+					typeof latest.pendingSubquestResume === "string" ? latest.pendingSubquestResume : null,
 				preCompactionCheckpointPending: false,
 				preCompactionSaveRequestPending: false,
 				saveGeneration: latest.saveGeneration || null,
@@ -1716,12 +2446,15 @@ const SECTION_ALIASES: Record<string, string[]> = {
 	"latest reassessment": ["latest reassessment", "reassessment conclusion", "reassessment", "reassessment findings"],
 	"execution snapshot": ["execution snapshot", "execution state", "snapshot", "state"],
 	"execution state": ["execution state"],
+	"completed": ["completed", "completed tasks", "completed work", "done", "accomplished", "finished"],
+	"in progress": ["in progress", "active work", "current work", "working on"],
 	"build & run commands": ["build & run commands", "build & run", "commands"],
 	"decisions made": ["decisions made", "decisions"],
 	"constraints & rules": ["constraints & rules", "constraints", "rules"],
 	"files examined": ["files examined", "examined files"],
 	"files touched": ["files touched", "files modified", "touched files", "modified files", "files"],
-	"test / build status": ["test / build status", "tdd & quality checklist", "test status", "build & test status"],
+	"files modified": ["files modified", "files touched", "modified files", "touched files", "files"],
+	"test / build status": ["test / build status", "tdd & quality checklist", "test status", "build & test status", "build status", "test / build", "test & build status"],
 	"acceptance criteria & polish checklist": ["acceptance criteria & polish checklist", "acceptance criteria", "polish checklist"],
 	"sub-quests": ["sub-quests", "subquests", "sub quests"],
 	"quest refinements & user feedback loops": ["quest refinements & user feedback loops", "refinements", "user refinements", "feedback loops"],
@@ -1821,7 +2554,7 @@ async function verifyAndMarkSaved(
 	pi: ExtensionAPI,
 	ctx?: ExtensionContext,
 	expectedSlug?: string,
-): Promise<{ success: boolean; hash?: string; count: number; error?: string }> {
+): Promise<{ success: boolean; hash?: string; count: number; error?: string; consistency?: ConsistencyAuditResult }> {
 	const targetSlug = expectedSlug || state.active;
 	if (!targetSlug) {
 		return { success: false, count: state.saveCount, error: "No active quest is set." };
@@ -1836,6 +2569,15 @@ async function verifyAndMarkSaved(
 		};
 	}
 
+	let audit: ConsistencyAuditResult | undefined;
+	try {
+		const content = await readFile(p, "utf8");
+		audit = auditQuestConsistency(content, { recentModifiedFiles: state.sessionModifiedFiles });
+		if (!audit.consistent) {
+			logError(`Consistency audit issues in ${p}: ${audit.issues.join("; ")}`, undefined, ctx);
+		}
+	} catch {}
+
 	const isSameAsLastSave =
 		state.saveGeneration &&
 		state.saveGeneration.path === p &&
@@ -1845,7 +2587,7 @@ async function verifyAndMarkSaved(
 	if (isSameAsLastSave && !state.dirty) {
 		state.lastPromptAt = Date.now();
 		updateUIStatus(ctx);
-		return { success: true, hash: fp.hash, count: state.saveCount };
+		return { success: true, hash: fp.hash, count: state.saveCount, consistency: audit };
 	}
 
 	state.saveCount = Math.max(state.saveCount + 1, state.compactCount + 1);
@@ -1863,7 +2605,7 @@ async function verifyAndMarkSaved(
 	persist(pi, ctx);
 	updateUIStatus(ctx);
 
-	return { success: true, hash: fp.hash, count: state.saveCount };
+	return { success: true, hash: fp.hash, count: state.saveCount, consistency: audit };
 }
 
 function isPlaceholderOrEmpty(text: string | undefined): boolean {
@@ -1964,6 +2706,270 @@ function validateResearchPrerequisites(
 	};
 }
 
+export interface ConsistencyAuditResult {
+	consistent: boolean;
+	issues: string[];
+	warnings: string[];
+}
+
+export function auditQuestConsistency(
+	markdownContent: string,
+	options?: {
+		recentModifiedFiles?: string[];
+		strict?: boolean;
+	},
+): ConsistencyAuditResult {
+	const issues: string[] = [];
+	const warnings: string[] = [];
+	if (!markdownContent) {
+		return { consistent: true, issues, warnings };
+	}
+
+	const sections = parseMarkdownSections(markdownContent);
+
+	const getSecBody = (key: string): string => {
+		const aliases = [key, ...(SECTION_ALIASES[key] || [])];
+		for (const a of aliases) {
+			const s = sections.get(a);
+			if (s && s.body) return s.body;
+		}
+		return "";
+	};
+
+	const completedBody = getSecBody("completed");
+	const reassessmentBody = getSecBody("latest reassessment");
+	const nextActionBody = getSecBody("exact next action");
+	const remainingBody = getSecBody("remaining work");
+	const filesModifiedBody = getSecBody("files modified");
+	const testStatusBody = getSecBody("test / build status");
+	const planVersionBody = getSecBody("plan version");
+	const planRevisionsBody = getSecBody("plan revisions");
+	const assumptionsBody = getSecBody("key assumptions");
+	const uncertaintiesBody = getSecBody("open questions & uncertainties");
+	const currentStatusBody = getSecBody("current status");
+
+	const hasCompleted = !isPlaceholderOrEmpty(completedBody);
+	const hasReassessment = !isPlaceholderOrEmpty(reassessmentBody);
+	const hasFilesModified = !isPlaceholderOrEmpty(filesModifiedBody);
+	const hasTestStatus = !isPlaceholderOrEmpty(testStatusBody);
+	const hasRemaining = !isPlaceholderOrEmpty(remainingBody);
+
+	// Helper to extract non-comment, non-empty lines
+	const extractLines = (body: string): string[] => {
+		return body
+			.split(/\r?\n/)
+			.map((l) => l.replace(/^>\s*/, "").replace(/^[-*]\s*/, "").replace(/^\[[ xX]\]\s*/, "").trim())
+			.filter((l) => l && l !== "-" && !l.startsWith(">") && !l.startsWith("not started ·") && !isPlaceholderOrEmpty(l));
+	};
+
+	// Helper to extract file references (e.g. i18n_dict.h, song.c, etc.)
+	const extractFileNames = (text: string): string[] => {
+		const matches = text.match(/\b[a-zA-Z0-9_\-\.\/]+\.(?:c|h|ts|js|json|mk|sh|md|txt|html|css|wasm)\b/gi) || [];
+		const cleaned: string[] = [];
+		for (const m of matches) {
+			const norm = m.toLowerCase().replace(/^\.\//, "");
+			if (!norm.includes("quest") && !cleaned.includes(norm)) {
+				cleaned.push(norm);
+			}
+		}
+		return cleaned;
+	};
+
+	// Helper to extract key identifiers (like I18N_LOCALE_EN, constants, etc.)
+	const extractIdentifiers = (text: string): string[] => {
+		const matches = text.match(/\b[A-Z0-9_]{3,}\b/g) || [];
+		const cleaned: string[] = [];
+		for (const m of matches) {
+			if (!["THE", "AND", "FOR", "NOT", "YES", "ALL", "SET", "NEW", "ADD", "RUN", "GET", "PUT", "DEL"].includes(m) && !cleaned.includes(m)) {
+				cleaned.push(m);
+			}
+		}
+		return cleaned;
+	};
+
+	const completedLines = extractLines(completedBody);
+	const reassessmentLines = extractLines(reassessmentBody);
+	const remainingLines = extractLines(remainingBody);
+	const nextActionText = nextActionBody.replace(/^>\s*/gm, "").trim();
+
+	// 1. Check: Exact Next Action repeats completed action or reassessment conclusion
+	if (nextActionText && !isPlaceholderOrEmpty(nextActionText)) {
+		const nextActionLower = nextActionText.toLowerCase();
+		const nextActionFiles = extractFileNames(nextActionText);
+		const nextActionIdents = extractIdentifiers(nextActionText);
+
+		// Verb mapping from past to imperative/present
+		const pastToPresentVerbs: Record<string, string[]> = {
+			"added": ["add", "adding", "define", "include"],
+			"created": ["create", "creating", "make"],
+			"implemented": ["implement", "implementing", "write"],
+			"fixed": ["fix", "fixing", "resolve"],
+			"defined": ["define", "defining", "add"],
+			"updated": ["update", "updating", "edit", "modify"],
+			"modified": ["modify", "modifying", "update", "edit"],
+			"configured": ["configure", "configuring", "set up"],
+			"registered": ["register", "registering"],
+			"removed": ["remove", "removing", "delete"],
+			"deleted": ["delete", "deleting", "remove"],
+			"built": ["build", "building", "compile"],
+			"compiled": ["compile", "compiling", "build"],
+			"verified": ["verify", "verifying", "check"],
+			"tested": ["test", "testing"],
+		};
+
+		const completedStatements = [...completedLines, ...reassessmentLines];
+		for (const stmt of completedStatements) {
+			const stmtLower = stmt.toLowerCase();
+			const stmtFiles = extractFileNames(stmt);
+			const stmtIdents = extractIdentifiers(stmt);
+
+			const sharedFiles = stmtFiles.filter((f) => nextActionFiles.includes(f));
+			const sharedIdents = stmtIdents.filter((id) => nextActionIdents.includes(id));
+
+			let verbConflict = false;
+			for (const [pastVerb, presVerbs] of Object.entries(pastToPresentVerbs)) {
+				if (stmtLower.includes(pastVerb)) {
+					for (const presVerb of presVerbs) {
+						if (nextActionLower.startsWith(presVerb) || nextActionLower.includes(` ${presVerb} `)) {
+							verbConflict = true;
+							break;
+						}
+					}
+				}
+				if (verbConflict) break;
+			}
+
+			// If verb conflict and shared file or identifier, or phrase match
+			if (
+				(verbConflict && (sharedFiles.length > 0 || sharedIdents.length > 0)) ||
+				(stmtLower.length > 15 && nextActionLower.includes(stmtLower.replace(/^added\s+|^implemented\s+|^fixed\s+/, "")))
+			) {
+				issues.push(
+					`Exact Next Action ('${nextActionText.slice(0, 80)}') repeats work already recorded as completed in Latest Reassessment / Completed ('${stmt.slice(0, 80)}'). Advance Exact Next Action to the live next step (e.g. rerun unit tests, verify integration, or proceed to next stage).`
+				);
+				break;
+			}
+		}
+	}
+
+	// 2. Check: Files Modified empty or omitting files mentioned in completed / reassessment / session
+	const filesMentionedInCompleted: string[] = [];
+	for (const stmt of [...completedLines, ...reassessmentLines]) {
+		for (const f of extractFileNames(stmt)) {
+			if (!filesMentionedInCompleted.includes(f)) {
+				filesMentionedInCompleted.push(f);
+			}
+		}
+	}
+	const sessionFiles = (options?.recentModifiedFiles || []).map((f) => f.toLowerCase().replace(/^\.\//, ""));
+	const allExpectedFiles = Array.from(new Set([...filesMentionedInCompleted, ...sessionFiles]));
+
+	if (allExpectedFiles.length > 0) {
+		if (!hasFilesModified) {
+			issues.push(
+				`Files Modified is empty or placeholder, but substantive changes to [${allExpectedFiles.join(", ")}] were recorded in Latest Reassessment / Completed / tool history. List modified files under Files Modified.`
+			);
+		} else {
+			const modFilesList = extractFileNames(filesModifiedBody);
+			const missingFiles = allExpectedFiles.filter((f) => !modFilesList.includes(f) && !filesModifiedBody.toLowerCase().includes(f));
+			if (missingFiles.length > 0 && filesMentionedInCompleted.some((f) => missingFiles.includes(f))) {
+				issues.push(
+					`Files Modified omits file(s) [${missingFiles.join(", ")}] that were modified according to Completed / Reassessment. Include all modified files in Files Modified.`
+				);
+			}
+		}
+	}
+
+	// 3. Check: Completed empty despite completed implementation recorded in Reassessment
+	if (!hasCompleted && hasReassessment) {
+		const actionVerbs = ["added", "implemented", "created", "fixed", "defined", "updated", "modified", "configured"];
+		const hasCompletedAction = reassessmentLines.some((l) => actionVerbs.some((v) => l.toLowerCase().includes(v)));
+		if (hasCompletedAction) {
+			issues.push(
+				"Completed section is empty despite completed implementation recorded in Latest Reassessment. Move completed work into Completed and remove from Remaining Work."
+			);
+		}
+	}
+
+	// 4. Check: Plan Version > 1 with only Initial plan in Plan Revisions
+	const planVersionNum = Number.parseInt(planVersionBody.replace(/\D/g, ""), 10) || 1;
+	if (planVersionNum > 1) {
+		const revBody = planRevisionsBody.trim();
+		const isOnlyInitial =
+			isPlaceholderOrEmpty(revBody) ||
+			revBody === "- Initial plan formulated." ||
+			revBody === "Initial plan formulated." ||
+			revBody === "- Initial plan formulated" ||
+			revBody === "-";
+		if (isOnlyInitial) {
+			issues.push(
+				`Plan Version is ${planVersionNum} but Plan Revisions only lists initial plan formulation. Plan Revisions must explain what triggered the revision (Previous plan -> Evidence/contradiction -> New understanding -> Revised plan).`
+			);
+		}
+	}
+
+	// 5. Check: User confirmation claimed as eliminating all engineering uncertainties
+	const uncLower = uncertaintiesBody.toLowerCase();
+	if (
+		uncLower.includes("none remaining - user confirmed") ||
+		uncLower.includes("no uncertainties remaining - user confirmed") ||
+		uncLower.includes("none - user confirmed") ||
+		uncLower.includes("user confirmed language defaults") ||
+		uncLower.includes("user confirmed negotiation strategy")
+	) {
+		const hasUncheckedAssumptions = assumptionsBody.includes("- [ ]") || assumptionsBody.includes("unverified");
+		if (hasUncheckedAssumptions) {
+			issues.push(
+				"Open Questions & Uncertainties claims no uncertainties based solely on user requirement confirmation, but unverified engineering assumptions remain in Key Assumptions. User requirement decisions must be separated from verified engineering facts."
+			);
+		}
+	}
+
+	// 6. Check: Test / Build Status reflects recent modifications
+	if ((hasFilesModified || (options?.recentModifiedFiles && options.recentModifiedFiles.length > 0)) && !hasTestStatus) {
+		issues.push(
+			"Files were modified but Test / Build Status is empty. Test / Build Status must explicitly state whether tests have been run or are pending rerun after changes (e.g. '- Unit tests pending rerun after file edits')."
+		);
+	}
+
+	// 7. Check: Completed items duplicated as open in Remaining Work
+	if (hasCompleted && hasRemaining) {
+		for (const comp of completedLines) {
+			const compClean = comp.toLowerCase().replace(/^(added|implemented|created|fixed|defined)\s+/, "");
+			for (const rem of remainingLines) {
+				const remClean = rem.toLowerCase().replace(/^(add|implement|create|fix|define)\s+/, "");
+				if (
+					(compClean === remClean ||
+						(compClean.length > 10 && remClean.includes(compClean)) ||
+						(remClean.length > 10 && compClean.includes(remClean))) &&
+					compClean.length > 5
+				) {
+					issues.push(
+						`Remaining Work still lists item ('${rem.slice(0, 60)}') that is already recorded in Completed. Remove it from Remaining Work or mark it completed.`
+					);
+				}
+			}
+		}
+	}
+
+	// 8. Check: Current Status vs Remaining Work alignment
+	const statusLower = currentStatusBody.toLowerCase();
+	const isStatusTemplatePlaceholder = statusLower.includes("research pending ·") || isPlaceholderOrEmpty(currentStatusBody);
+	if (!isStatusTemplatePlaceholder && (statusLower.startsWith("- [x] done") || statusLower === "done" || statusLower.startsWith("done") || statusLower === "completed" || statusLower.startsWith("- [x] completed"))) {
+		if (remainingBody.includes("- [ ]")) {
+			issues.push(
+				"Current Status is marked done/completed, but Remaining Work still contains unchecked items."
+			);
+		}
+	}
+
+	return {
+		consistent: issues.length === 0,
+		issues,
+		warnings,
+	};
+}
+
 export enum QuestLifecycleState {
 	IDLE = "IDLE",
 	RESEARCH_PENDING = "RESEARCH_PENDING",
@@ -2054,23 +3060,25 @@ function buildCriticalSavePrompt(
 		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
 	}`;
 
-	return `🚨 **CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE** 🚨
+	return `🚨 **CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE** 🚨
 
 Context usage (${formatTokens(tokens)} tokens) has reached or exceeded the configured compaction threshold (${formatTokens(threshold)} tokens).
 
-Before doing ANY further substantive work, you MUST perform a FINAL EXHAUSTIVE DURABLE STATE SAVE.
+This directive supersedes your current implementation plan for the next action.
 
-Do NOT continue implementation merely because the current task is unfinished.
+STOP ordinary implementation.
 Do NOT defer the checkpoint. STOP treating checkpointing as optional.
-Do NOT assume the existing quest file is sufficient.
-Do NOT provide a short summary in place of the checkpoint.
 
-FIRST:
+Your next action MUST be the durable checkpoint procedure:
 1. Reconstruct the current state of the work.
 2. Update the active quest file exhaustively in \`${questPath(activeQuest)}\`.
-3. Preserve discoveries, assumptions, contradictions, decisions, rejected approaches, files touched, verification state, remaining work, and the EXACT NEXT ACTION.
+3. Preserve discoveries, assumptions, contradictions, decisions, rejected approaches, files touched, verification status, remaining work, and the EXACT NEXT ACTION.
 4. Call quest_mark_saved.
-5. Ensure the save is actually verified.
+5. Ensure the save is verified.
+6. Prepare for immediate compaction.
+
+Do not start another implementation action first.
+Do not defer checkpointing.
 
 ${promptReminder}
 
@@ -2082,10 +3090,11 @@ function buildCriticalCompactionReadyPrompt(
 	tokens: number,
 	threshold: number,
 ): string {
-	return `🚨 **CRITICAL QUEST JOURNAL COMPACTION SAFETY STATE (DURABLE STATE SAVED)** 🚨
+	return `🚨 **CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE (DURABLE STATE SAVED)** 🚨
 
 Context usage (${formatTokens(tokens)} tokens) remains at or above the configured compaction threshold (${formatTokens(threshold)} tokens).
 
+This directive supersedes your current implementation plan for the next action.
 Your durable quest checkpoint in \`${questPath(activeQuest)}\` is VERIFIED and ready.
 
 Context auto-compaction is now required. Stand by for auto-compaction across the turn boundary.
@@ -2093,12 +3102,23 @@ Do NOT begin large new implementation streams before compaction resets working m
 Ensure your exact next action is fully documented so execution can resume cleanly post-compaction.`;
 }
 
+let lastSteerTurnCounter = 0;
+let lastSteeredTurn = -1;
+let lastSteeredPressureState: CompactionPressure | null = null;
+let lastSteeredReadyState: boolean | null = null;
 let lastPreCompactionSteerTime = 0;
+
+function logDebug(msg: string) {
+	if (process.env.DEBUG || process.env.PI_DEBUG || process.env.QUEST_DEBUG) {
+		console.log(`[QuestJournal] ${msg}`);
+	}
+}
 
 function requestPreCompactionCheckpoint(
 	pi: ExtensionAPI,
 	ctx?: ExtensionContext,
 	force = false,
+	triggerSource: "turn_end" | "context" | "manual" = "turn_end",
 ): boolean {
 	const c = getActiveContext(ctx);
 	if (!c || !state.active) return false;
@@ -2112,25 +3132,97 @@ function requestPreCompactionCheckpoint(
 
 	const { pressure, tokens, threshold, fraction } = getCompactionPressure(c);
 	if (pressure === CompactionPressure.NONE || tokens === null) {
+		if (state.lastNotifiedPressure !== CompactionPressure.NONE) {
+			state.lastNotifiedPressure = CompactionPressure.NONE;
+			lastSteeredPressureState = null;
+			lastSteeredReadyState = null;
+			persist(pi, c);
+		}
+		return false;
+	}
+
+	const isReady = compactionReady();
+	const isPressureTransition = state.lastNotifiedPressure !== pressure;
+	const isReadinessTransition = lastSteeredReadyState !== null && lastSteeredReadyState !== isReady;
+	const isNewTurn = lastSteeredTurn !== lastSteerTurnCounter;
+
+	// In context events, deduplicate unless pressure transitioned, readiness changed, or it is a new turn
+	if (triggerSource === "context" && !force && !isPressureTransition && !isReadinessTransition && !isNewTurn) {
 		return false;
 	}
 
 	lastPreCompactionSteerTime = now;
+	lastSteeredTurn = lastSteerTurnCounter;
+	lastSteeredPressureState = pressure;
+	lastSteeredReadyState = isReady;
 	state.lastWarnedCompactionTokens = tokens;
+
+	if (isPressureTransition) {
+		state.lastNotifiedPressure = pressure;
+	}
 	persist(pi, c);
 
 	if (pressure === CompactionPressure.CRITICAL) {
+		if (isReady) {
+			const text = buildCriticalCompactionReadyPrompt(state.active, tokens, threshold);
+			sendInternalAgentMessage(pi, text, "steer");
+			logDebug(`Quest Journal: STEER emitted | pressure=CRITICAL | tokens=${tokens}/${threshold} | quest=${state.active} | deliverAs=steer | action=initiating_compaction`);
+
+			state.compactionPending = true;
+			state.preCompactionCheckpointPending = false;
+			state.preCompactionSaveRequestPending = false;
+			persist(pi, c);
+
+			if (isPressureTransition && c.hasUI) {
+				c.ui.notify(
+					`🚨 Quest-journal: CRITICAL context pressure (${formatTokens(tokens)}/${formatTokens(threshold)}) for '${state.active}' [saved & ready for compaction].`,
+					"info",
+				);
+			}
+
+			if (typeof c.compact === "function") {
+				const instructions = getCompactionInstructions(state.active, tokens, threshold);
+				const targetSessionId = getSessionId(c);
+				setTimeout(() => {
+					asyncContext.run(c, () => {
+						const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
+						try {
+							c.compact!({
+								customInstructions: instructions,
+								onComplete: () => {},
+								onError: (err: any) => {
+									sessionState.compactionPending = false;
+									sessionState.lastWarnedCompactionTokens = null;
+									sessionState.preCompactionCheckpointPending = false;
+									sessionState.preCompactionSaveRequestPending = false;
+									const msg = err?.message || String(err);
+									if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
+										if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${msg}`, "error");
+									}
+								},
+							});
+						} catch (err: any) {
+							sessionState.compactionPending = false;
+							sessionState.lastWarnedCompactionTokens = null;
+							sessionState.preCompactionCheckpointPending = false;
+							sessionState.preCompactionSaveRequestPending = false;
+							logError("Economy auto-compaction scheduling failed", err, c);
+						}
+					});
+				}, 50);
+			}
+			return true;
+		}
+
 		state.preCompactionCheckpointPending = true;
 		state.preCompactionSaveRequestPending = true;
-		const isReady = compactionReady();
-		const text = isReady
-			? buildCriticalCompactionReadyPrompt(state.active, tokens, threshold)
-			: buildCriticalSavePrompt(state.active, tokens, threshold);
+		const text = buildCriticalSavePrompt(state.active, tokens, threshold);
 
-		sendInternalAgentMessage(pi, text, "followUp");
+		sendInternalAgentMessage(pi, text, "steer");
+		logDebug(`Quest Journal: STEER emitted | pressure=CRITICAL | tokens=${tokens}/${threshold} | quest=${state.active} | deliverAs=steer | action=save_required`);
 
-		if (c.hasUI) {
-			const saveStatus = isReady ? "saved & ready for compaction" : "SAVE REQUIRED IMMEDIATELY";
+		if (isPressureTransition && c.hasUI) {
+			const saveStatus = "SAVE REQUIRED IMMEDIATELY";
 			c.ui.notify(
 				`🚨 Quest-journal: CRITICAL context pressure (${formatTokens(tokens)}/${formatTokens(threshold)}) for '${state.active}' [${saveStatus}].`,
 				"error",
@@ -2143,9 +3235,10 @@ function requestPreCompactionCheckpoint(
 		state.preCompactionCheckpointPending = true;
 		const text = buildWarningSavePrompt(state.active, fraction, tokens, threshold);
 
-		sendInternalAgentMessage(pi, text, "followUp");
+		sendInternalAgentMessage(pi, text, "steer");
+		logDebug(`Quest Journal: STEER emitted | pressure=WARNING | tokens=${tokens}/${threshold} | quest=${state.active} | deliverAs=steer`);
 
-		if (c.hasUI) {
+		if (isPressureTransition && c.hasUI) {
 			const levelStr = fraction < 0.5 ? "approaching" : "close to";
 			c.ui.notify(
 				`Quest-journal: context ${levelStr} compaction threshold for '${state.active}' (${formatTokens(tokens)}/${formatTokens(threshold)}).`,
@@ -2250,6 +3343,22 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 								if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
 									if (c.hasUI) c.ui.notify(`Sub-quest launch compaction failed: ${msg}`, "error");
 								}
+								if (sessionState.pendingSubquestResume) {
+									const pendingChild = sessionState.pendingSubquestResume;
+									if (sessionState.active === pendingChild) {
+										console.log(
+											`[QuestJournal] SUBQUEST RESUME:\nchild=${pendingChild}\nreason=post-launch-compaction-fallback\ndeliverAs=followUp`,
+										);
+										try {
+											sendSubquestLaunchPostCompactionDirective(pi, pendingChild, sessionState, c);
+											sessionState.pendingSubquestResume = null;
+											persist(pi, c);
+										} catch (sendErr: any) {
+											logError(`Failed to dispatch fallback subquest resume directive for ${pendingChild}`, sendErr, c);
+										}
+										return;
+									}
+								}
 								if (childName) {
 									sendPostCompactionResumePrompt(pi, childName, false, c);
 								}
@@ -2261,6 +3370,22 @@ function checkAndTriggerDeferredCompaction(pi: ExtensionAPI, ctx?: ExtensionCont
 						sessionState.preCompactionCheckpointPending = false;
 						sessionState.preCompactionSaveRequestPending = false;
 						logError("Sub-quest launch compaction scheduling failed", err, c);
+						if (sessionState.pendingSubquestResume) {
+							const pendingChild = sessionState.pendingSubquestResume;
+							if (sessionState.active === pendingChild) {
+								console.log(
+									`[QuestJournal] SUBQUEST RESUME:\nchild=${pendingChild}\nreason=post-launch-compaction-fallback\ndeliverAs=followUp`,
+								);
+								try {
+									sendSubquestLaunchPostCompactionDirective(pi, pendingChild, sessionState, c);
+									sessionState.pendingSubquestResume = null;
+									persist(pi, c);
+								} catch (sendErr: any) {
+									logError(`Failed to dispatch fallback subquest resume directive for ${pendingChild}`, sendErr, c);
+								}
+								return;
+							}
+						}
 						if (childName) {
 							sendPostCompactionResumePrompt(pi, childName, false, c);
 						}
@@ -2670,7 +3795,8 @@ function installTurnEnd(pi: ExtensionAPI) {
 			}
 
 			// Proactive context-pressure save request before compaction
-			requestPreCompactionCheckpoint(pi, ctx);
+			lastSteerTurnCounter++;
+			requestPreCompactionCheckpoint(pi, ctx, false, "turn_end");
 
 			// Check deferred (archive / subquest launch) compaction
 			checkAndTriggerDeferredCompaction(pi, ctx);
@@ -2698,7 +3824,7 @@ To allow auto-compaction and preserve continuity across the boundary:
 2. Call \`quest_mark_saved\` to persist the state.
 Once saved, auto-compaction will safely proceed.`;
 
-				sendInternalAgentMessage(pi, msg, "followUp");
+				sendInternalAgentMessage(pi, msg, "steer");
 
 				if (ctx?.hasUI) {
 					ctx.ui.notify(`Quest-journal: blocking compaction until '${activeFile}' is saved.`, "warning");
@@ -2707,7 +3833,11 @@ Once saved, auto-compaction will safely proceed.`;
 			}
 
 			// Just before compaction: queue the post-compaction resumption follow-up
-			sendPostCompactionResumePrompt(pi, state.active, true, ctx);
+			// If subquest launch compaction is pending with pendingSubquestResume,
+			// the child launch continuation directive will be dispatched on session_compact completion.
+			if (!state.pendingSubquestResume && !state.subquestLaunchCompactionPending) {
+				sendPostCompactionResumePrompt(pi, state.active, true, ctx);
+			}
 		}),
 	);
 }
@@ -2728,11 +3858,9 @@ function handleCompactionCompleted(
 	sessionState.lastWarnedCompactionTokens = null;
 	sessionState.preCompactionCheckpointPending = false;
 	sessionState.preCompactionSaveRequestPending = false;
-	sessionState.subquestLaunchCompactionPending = false;
 	sessionState.archiveCompactionPending = null;
 	sessionState.compactCount = sessionState.saveCount;
-
-	persist(pi, c);
+	sessionState.lastNotifiedPressure = CompactionPressure.NONE;
 
 	if (c?.hasUI) {
 		if (typeof tokens === "number" && tokens > 0) {
@@ -2741,9 +3869,97 @@ function handleCompactionCompleted(
 		updateUIStatus(c);
 	}
 
+	// 1. Consume pending sub-quest resume if launch compaction occurred
+	if (sessionState.pendingSubquestResume) {
+		const childName = sessionState.pendingSubquestResume;
+		sessionState.active = childName;
+		sessionState.subquestLaunchCompactionPending = false;
+
+		console.log(
+			`[QuestJournal] SUBQUEST RESUME:\nchild=${childName}\nreason=post-launch-compaction\ndeliverAs=followUp`,
+		);
+
+		try {
+			sendSubquestLaunchPostCompactionDirective(pi, childName, sessionState, c);
+			sessionState.pendingSubquestResume = null;
+			persist(pi, c);
+		} catch (err: any) {
+			logError(`Failed to dispatch post-compaction subquest resume directive for ${childName}`, err, c);
+		}
+		return;
+	}
+
+	sessionState.subquestLaunchCompactionPending = false;
+	persist(pi, c);
+
 	if (sessionState.active && sessionState.lastResumeCompactCount !== sessionState.compactCount) {
 		sendPostCompactionResumePrompt(pi, sessionState.active, true, c);
 	}
+}
+
+function buildSubquestLaunchPostCompactionDirective(
+	childName: string,
+	targetState: StoredState,
+): string {
+	const isSubQuest = Array.isArray(targetState.stack) && targetState.stack.length > 1;
+	const parentQuest = isSubQuest ? targetState.stack[targetState.stack.length - 2] : null;
+	const parentInfo = parentQuest ? ` (parent: **${parentQuest}**)` : "";
+
+	let specificAction = "";
+	if (targetState.reassessmentRequired) {
+		specificAction = `⚡ **State: REASSESSMENT_PENDING** (Reason: ${targetState.reassessmentReason || "Unresolved contradiction"}).
+1. Read \`docs/current/${childName}.md\` using \`read\`.
+2. Do NOT jump into implementation. First investigate the contradiction, challenge previous assumptions, and evaluate whether the child plan is still valid.
+3. Update the quest file with the revised plan and call \`quest_update_state({ reassessmentComplete: true })\`.
+4. Proceed with the revised Exact Next Action.`;
+	} else if (targetState.researchRequired || !targetState.researchComplete) {
+		specificAction = `⚡ **State: RESEARCH_PENDING** (Research Round: ${targetState.researchRound || 1}).
+1. Read \`docs/current/${childName}.md\` using \`read\` to inspect inherited context and goal.
+2. Independently investigate the relevant subsystem, execution paths, and dependencies.
+3. Identify assumptions inherited or required, and test high-risk assumptions directly.
+4. Formulate a provisional plan, challenge it against potential failure modes, and revise if needed.
+5. Update \`docs/current/${childName}.md\` (Current Understanding, Key Assumptions, Plan, Plan Confidence, Exact Next Action) and call \`quest_update_state({ researchComplete: true })\`.
+6. Once the child research gate is satisfied, continue autonomously with implementation without waiting for user confirmation.`;
+	} else {
+		specificAction = `⚡ **State: PLAN_ESTABLISHED** (Plan: v${targetState.planVersion || 1}, Confidence: ${targetState.planConfidence || "high"}).
+1. Read \`docs/current/${childName}.md\` using \`read\`.
+2. Validate whether the current plan is still supported by the recovered state.
+3. Proceed directly with executing the justified EXACT NEXT ACTION without waiting for user commands.`;
+	}
+
+	return `⚡ **Post-Compaction Autonomous Resumption Directive**:
+Compaction finished after launching sub-quest \`${childName}\`${parentInfo}.
+
+You are now working on that sub-quest.
+
+The single authoritative source of truth on disk is \`docs/current/${childName}.md\`.
+Sub-quests do NOT inherit parent conclusions as immutable facts; treat them as hypotheses to independently verify.
+
+Read docs/current/${childName}.md.
+Independently verify inherited context.
+Perform the child's required research.
+Once the child research gate is satisfied, continue autonomously.
+Do not return to the parent until this sub-quest is actually complete.
+
+**Action Required Now**:
+${specificAction}`;
+}
+
+function sendSubquestLaunchPostCompactionDirective(
+	pi: ExtensionAPI,
+	childName: string,
+	targetState: StoredState,
+	ctx?: ExtensionContext,
+): void {
+	if (!childName) return;
+	const c = getActiveContext(ctx);
+	const text = buildSubquestLaunchPostCompactionDirective(childName, targetState);
+
+	targetState.lastResumePromptAt = Date.now();
+	targetState.lastResumeTarget = childName;
+	targetState.lastResumeCompactCount = targetState.compactCount;
+
+	sendInternalAgentMessage(pi, text, "followUp");
 }
 
 function buildPostCompactionResumeDirective(
@@ -2836,12 +4052,30 @@ function installAfterCompact(pi: ExtensionAPI) {
 	);
 	pi.on(
 		"session_compact_failed",
-		withContext(async (_event: any, _ctx: ExtensionContext) => {
-			state.compactionPending = false;
-			state.lastWarnedCompactionTokens = null;
-			state.preCompactionCheckpointPending = false;
-			state.preCompactionSaveRequestPending = false;
-			state.subquestLaunchCompactionPending = false;
+		withContext(async (_event: any, ctx: ExtensionContext) => {
+			const c = getActiveContext(ctx);
+			const targetSessionId = getSessionId(c);
+			const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
+			sessionState.compactionPending = false;
+			sessionState.lastWarnedCompactionTokens = null;
+			sessionState.preCompactionCheckpointPending = false;
+			sessionState.preCompactionSaveRequestPending = false;
+			sessionState.subquestLaunchCompactionPending = false;
+			if (sessionState.pendingSubquestResume) {
+				const childName = sessionState.pendingSubquestResume;
+				if (sessionState.active === childName) {
+					console.log(
+						`[QuestJournal] SUBQUEST RESUME:\nchild=${childName}\nreason=post-launch-compaction-failed\ndeliverAs=followUp`,
+					);
+					try {
+						sendSubquestLaunchPostCompactionDirective(pi, childName, sessionState, c);
+						sessionState.pendingSubquestResume = null;
+						persist(pi, c);
+					} catch (sendErr: any) {
+						logError(`Failed to dispatch fallback subquest resume directive for ${childName}`, sendErr, c);
+					}
+				}
+			}
 		}),
 	);
 }
@@ -2852,7 +4086,7 @@ function installContextListener(pi: ExtensionAPI) {
 		withContext(async (_event: any, ctx: ExtensionContext) => {
 			if (!state.active) return;
 			if (state.pickerCancelled) return;
-			requestPreCompactionCheckpoint(pi, ctx);
+			requestPreCompactionCheckpoint(pi, ctx, false, "context");
 		}),
 	);
 }
@@ -2960,6 +4194,12 @@ function installFileWatch(pi: ExtensionAPI) {
 			await verifyAndMarkSaved(pi, ctx, slug);
 		} else {
 			state.dirty = true;
+			if (!Array.isArray(state.sessionModifiedFiles)) {
+				state.sessionModifiedFiles = [];
+			}
+			if (!state.sessionModifiedFiles.includes(norm)) {
+				state.sessionModifiedFiles.push(norm);
+			}
 		}
 	});
 }
@@ -3559,7 +4799,10 @@ function installSubQuestTool(pi: ExtensionAPI) {
 
 			if (subLaunchThreshold > 0 && tokens !== null && tokens >= subLaunchThreshold) {
 				state.subquestLaunchCompactionPending = true;
+				state.pendingSubquestResume = name;
+				console.log(`[QuestJournal] SUBQUEST LAUNCH:\nchild=${name}\nlaunchCompaction=true\npendingSubquestResume=${name}`);
 			} else {
+				state.pendingSubquestResume = null;
 				const enterMsg = `Now working on sub-quest **${name}**${parentName ? ` (parent: **${parentName}**)` : ""}. Sub-quest file: \`${path}\`.
 
 **Stated Goal**: ${goal}
@@ -3698,14 +4941,19 @@ function installMarkTool(pi: ExtensionAPI) {
 			};
 		}
 
+		let auditWarning = "";
+		if (res.consistency && !res.consistency.consistent && res.consistency.issues.length > 0) {
+			auditWarning = `\n\n⚠️ Consistency Audit Notice: Stale or contradictory state detected in '${questPath(targetName)}':\n${res.consistency.issues.map((i: string) => `  - ${i}`).join("\n")}\nPlease reconcile these fields (update Completed, Files Modified, Test Status, and advance Exact Next Action) so the journal reflects live reality.`;
+		}
+
 		return {
 			content: [
 				{
 					type: "text",
-					text: `Quest file '${questPath(targetName)}' verified and marked as saved in the journal (gen #${res.count}, hash: ${res.hash}).`,
+					text: `Quest file '${questPath(targetName)}' verified and marked as saved in the journal (gen #${res.count}, hash: ${res.hash}).${auditWarning}`,
 				},
 			],
-			details: { hash: res.hash, generation: res.count },
+			details: { hash: res.hash, generation: res.count, consistency: res.consistency },
 		};
 	};
 
@@ -3766,13 +5014,14 @@ const updateStateHandler = async (_toolCallId: string, params: any, _signal: any
 
 		const originalReq = state.pendingRootRequest || (state.prompts && state.prompts.length > 0 ? state.prompts[0] : "");
 
-		if (!state.active || state.pendingRootQuest) {
+		if (!state.active || state.pendingRootQuest || targetName !== state.active) {
 			state.active = targetName;
 			state.pendingRootQuest = false;
 			state.questIdentityEstablished = true;
 			state.pendingRootRequest = null;
-			if (!Array.isArray(state.stack) || state.stack.length === 0) state.stack = [targetName];
-			else if (!state.stack.includes(targetName)) state.stack.push(targetName);
+			if (!Array.isArray(state.stack) || state.stack.length === 0 || !state.stack.includes(targetName)) {
+				state.stack = [targetName];
+			}
 			if (originalReq && (!state.prompts || state.prompts.length === 0)) {
 				state.prompts = [originalReq];
 			}
@@ -3789,6 +5038,11 @@ const updateStateHandler = async (_toolCallId: string, params: any, _signal: any
 			const content = await readFile(path, "utf8");
 			const existingSections = parseMarkdownSections(content);
 			const updates = new Map<string, string>();
+
+			const wasImplementable = canImplement(state, ctx);
+			const wasReassessmentPending = !!state.reassessmentRequired;
+			const wasResearchPending = !!state.researchRequired || !state.researchComplete;
+			const wasAwaitingConfirmation = !!state.awaitingUserConfirmation;
 
 			if (params.goal) {
 				updates.set("goal", params.goal);
@@ -3879,10 +5133,26 @@ const updateStateHandler = async (_toolCallId: string, params: any, _signal: any
 				updates.set("files examined", examinedText);
 			}
 
+			if (params.completed) {
+				const val = params.completed;
+				const text = Array.isArray(val) ? val.map((c: string) => (c.startsWith("- ") ? c : `- ${c}`)).join("\n") : String(val);
+				updates.set("completed", text);
+			}
+
+			if (params.inProgress) {
+				const val = params.inProgress;
+				const text = Array.isArray(val) ? val.map((ip: string) => (ip.startsWith("- ") ? ip : `- ${ip}`)).join("\n") : String(val);
+				updates.set("in progress", text);
+			}
+
 			const filesTouchedList = params.filesTouched || params.filesModified;
 			if (Array.isArray(filesTouchedList) && filesTouchedList.length > 0) {
 				const filesText = filesTouchedList.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
 				updates.set("files touched", filesText);
+				updates.set("files modified", filesText);
+			} else if (typeof filesTouchedList === "string" && filesTouchedList.trim()) {
+				updates.set("files touched", filesTouchedList.trim());
+				updates.set("files modified", filesTouchedList.trim());
 			}
 
 			if (params.testStatus) {
@@ -4000,9 +5270,23 @@ const updateStateHandler = async (_toolCallId: string, params: any, _signal: any
 
 			const saveRes = await verifyAndMarkSaved(pi, ctx, targetName);
 
+			const isImplementable = canImplement(state, ctx);
+			if (!wasImplementable && isImplementable) {
+				checkAndEmitGateContinuationSteer(pi, ctx, targetName, {
+					wasReassessmentPending,
+					wasResearchPending,
+					wasAwaitingConfirmation,
+				});
+			}
+
+			let consistencyNote = "";
+			if (saveRes.consistency && !saveRes.consistency.consistent && saveRes.consistency.issues.length > 0) {
+				consistencyNote = `\n\n⚠️ Consistency Audit Notice:\n${saveRes.consistency.issues.map((i: string) => `  - ${i}`).join("\n")}`;
+			}
+
 			return {
-				content: [{ type: "text", text: `Successfully updated quest state for **${targetName}** at \`${path}\` (gen #${saveRes.count}, hash: ${saveRes.hash}, plan v${state.planVersion || 1}).${researchTransitionNote}${reassessmentTransitionNote}` }],
-				details: { quest: targetName, path, status: params.status, hash: saveRes.hash, generation: saveRes.count, planVersion: state.planVersion, researchComplete: state.researchComplete, reassessmentRequired: state.reassessmentRequired },
+				content: [{ type: "text", text: `Successfully updated quest state for **${targetName}** at \`${path}\` (gen #${saveRes.count}, hash: ${saveRes.hash}, plan v${state.planVersion || 1}).${researchTransitionNote}${reassessmentTransitionNote}${consistencyNote}` }],
+				details: { quest: targetName, path, status: params.status, hash: saveRes.hash, generation: saveRes.count, planVersion: state.planVersion, researchComplete: state.researchComplete, reassessmentRequired: state.reassessmentRequired, consistency: saveRes.consistency },
 			};
 		} catch (err: any) {
 			logError(`Failed to update quest state at ${path}`, err, ctx);
@@ -4109,6 +5393,16 @@ const updateStateHandler = async (_toolCallId: string, params: any, _signal: any
 					type: "array",
 					items: { type: "string" },
 					description: "List of files examined during research.",
+				},
+				completed: {
+					type: "array",
+					items: { type: "string" },
+					description: "List of completed tasks / steps.",
+				},
+				inProgress: {
+					type: "array",
+					items: { type: "string" },
+					description: "List of tasks currently in progress.",
 				},
 				filesTouched: {
 					type: "array",
@@ -4652,6 +5946,10 @@ function installCommands(pi: ExtensionAPI) {
 				if (parent) parentInfo = ` (parent: [[${parent}]])`;
 				const subQuests = extractSubQuestsFromQuest(content);
 				if (subQuests.length > 0) subInfo = ` | sub-quests: ${subQuests.join(", ")}`;
+				const audit = auditQuestConsistency(content, { recentModifiedFiles: state.sessionModifiedFiles });
+				if (!audit.consistent && audit.issues.length > 0) {
+					subInfo += ` | ⚠️ ${audit.issues.length} consistency issue(s)`;
+				}
 			} catch (err: any) {
 				logError(`Failed to read quest file for status at ${path}`, err, ctx);
 			}
@@ -5034,8 +6332,12 @@ async function loadActiveQuestResumeContext(): Promise<string> {
 			{ key: "plan", title: "Plan", maxChars: 5000 },
 			{ key: "plan confidence", title: "Plan Confidence", maxChars: 1000 },
 			{ key: "plan revisions", title: "Plan Revisions", maxChars: 3000 },
+			{ key: "latest reassessment", title: "Latest Reassessment", maxChars: 3000 },
 			{ key: "rejected approaches", title: "Rejected Approaches", maxChars: 3000 },
 			{ key: "execution snapshot", title: "Execution Snapshot", maxChars: 8000 },
+			{ key: "completed", title: "Completed", maxChars: 3000 },
+			{ key: "in progress", title: "In Progress", maxChars: 2000 },
+			{ key: "files modified", title: "Files Modified", maxChars: 2000 },
 			{ key: "remaining work", title: "Remaining Work", maxChars: 4000 },
 			{ key: "exact next action", title: "Exact Next Action", maxChars: 3000 },
 			{ key: "test / build status", title: "Test / Build Status", maxChars: 2000 },
@@ -5213,7 +6515,18 @@ You manage quests autonomously on disk in \`docs/current/<quest>.md\`. The user 
      - Recover Current Understanding, Key Assumptions, Plan, Plan Confidence, and Exact Next Action.
      - Validate whether the current plan is still supported by the recovered evidence. Do not repeat research merely to reconstruct lost context; use the quest file to recover established knowledge. However, if an important assumption remains unverified, tests disagree, or new evidence contradicts the model, re-investigate that specific aspect before continuing.
      - Proceed directly with executing the justified Exact Next Action without waiting for user commands or modal questions.
-7. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.${resumeContext}`;
+7. **Faithful User Request**: The \`## Original request\` section MUST remain verbatim.
+
+8. **Durable-State Reconciliation Protocol (Semantic Freshness & Invariant Sync)**:
+   - **The Governing Invariant**: The quest file MUST describe what is true NOW, not what was true several turns ago, and not merely what was intended.
+   - **Reconcile After Substantive Work**: After every substantive implementation, investigation, test/build run, reassessment, or sub-quest return, reconcile the entire execution snapshot:
+     * **Dominance of Verified Events**: If a change was completed (e.g. constants added, function written, test fixed), remove it from \`Remaining Work\`, record it under \`Completed\`, list all modified files in \`Files Modified\`, update \`Test / Build Status\` (e.g. "Unit tests pending rerun after edits"), and advance \`Exact Next Action\` to the next step. Never leave completed tasks in \`Exact Next Action\` or \`Remaining Work\`.
+     * **Exact Next Action is a Live Pointer**: Must answer: *"If a fresh agent opened this quest right now, what is the single most justified thing it should do next?"* Never repeat what was already done.
+     * **Evidence-Calibrated Plan Confidence**: Plan confidence reflects evidence across the entire architecture (build system, module boundaries, SSR, WASM, UX integration), NOT just the simplicity of the immediate next edit. If overall integration remains unverified, keep confidence lower and explain why.
+     * **Distinguish User Decisions from Engineering Conclusions**: User requirement answers only establish user intent; they do NOT prove engineering feasibility or correctness. Explicitly separate: *User decision*, *Verified engineering fact*, *Unverified assumption*, and *Open question*. Never claim "no uncertainties remaining" merely because the user answered a question.
+     * **Meaningful Plan Versions**: When Plan Version increments, explain the revision in \`## Plan Revisions\` (\`Previous plan -> Evidence/contradiction -> New understanding -> Revised plan\`).
+     * **Synchronize Epistemic & Execution Layers**: When execution produces evidence, update both epistemic state (understanding, assumptions, findings, confidence, plan) and execution state (completed, in progress, files modified, tests, remaining work, exact next action).
+     * **Pre-Save Consistency Audit**: Immediately before calling \`quest_mark_saved\`, perform an internal audit (Does Completed contradict Remaining Work? Does Files Modified omit changed files? Does Exact Next Action repeat completed work? Does Plan Version have a revision? Does Test Status reflect recent edits?). Correct stale facts before marking saved.${resumeContext}`;
 }
 
 function installWorkflowSystemPrompt(pi: ExtensionAPI) {
@@ -5296,6 +6609,7 @@ function registerQuestJournalCRBHook() {
 					"Dynamic Epistemic Re-Investigation: Use the quest file to recover established knowledge without repeating routine research (no unnecessary re-research). Re-investigate whenever new evidence contradicts an assumption, tests fail, or the plan fails to explain observed behavior.",
 					"Autonomous Continuation: Following compaction or sub-quest return, read `docs/current/<active-quest>.md`, validate the plan against recovered state, and proceed immediately without user interruption.",
 					"Meaningful Sub-Quest Decomposition: Decompose according to the discovered structure of the problem, not arbitrary bullet counts. During research, identify genuinely separable workstreams (distinct subsystems, independent investigations, separate verification boundaries) and create sub-quests (`quest_subquest({ switchNow: false })`) linked into the parent plan (`[[subquest-name]]`). Avoid artificial fragmentation for trivial or tightly coupled steps. Sub-quests independently verify inherited context.",
+					"Durable-State Reconciliation: The quest file must describe what is true NOW. After substantive changes, synchronize Completed, Files Modified, Test Status, Remaining Work, and Exact Next Action. Exact Next Action is a live pointer to the next justified action, never a repeat of completed work. Calibrate plan confidence against evidence and explain plan revisions.",
 					"Full Test Suite Quality Gate: Before completing/archiving a top-level quest, restart the test server/daemon, run the fresh FULL test suite (`make test`), and verify zero errors.",
 					"Top-level Quest Completion: When root quest is done, prompt user via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
 				];

@@ -121,13 +121,14 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 		await cb({ toolResults: [{ toolName: "write", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
 
-	assert.ok(userMessages.length > 0, "Warning window at turn_end must trigger follow-up before compaction");
+	assert.ok(userMessages.length > 0, "Warning window at turn_end must trigger steer before compaction");
 	const followUpEntry = userMessages[userMessages.length - 1];
-	assert.strictEqual(followUpEntry.options?.deliverAs, "followUp", "In-flight warning must use deliverAs: 'followUp'");
+	assert.strictEqual(followUpEntry.options?.deliverAs, "steer", "In-flight warning must use deliverAs: 'steer'");
 	assert.ok(
 		followUpEntry.msg.includes("Context compaction is imminent") ||
-			followUpEntry.msg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-		`FollowUp message must instruct saving before compaction, got: ${followUpEntry.msg}`,
+			followUpEntry.msg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
+			followUpEntry.msg.includes("Context Compaction Warning"),
+		`Steer message must instruct saving before compaction, got: ${followUpEntry.msg}`,
 	);
 
 	// 4. In-flight save by the agent: marks journal clean and ready for compaction

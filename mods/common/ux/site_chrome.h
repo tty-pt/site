@@ -13,6 +13,7 @@ typedef struct {
 	char path[SITE_CHROME_PATH_MAX];
 	char icon[SITE_CHROME_ICON_MAX];
 	char user[SITE_CHROME_USER_MAX];
+	char lang[32];
 } site_ui_chrome_state;
 
 bud_node *site_ui_chrome(const site_ui_chrome_state *state);
