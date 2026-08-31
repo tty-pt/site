@@ -108,10 +108,21 @@ export async function linkSubQuestInParent(parentSlug: string, childSlug: string
 		targetPath = questPath(state.questId);
 	}
 	const futurePath = `${FUTURE_DIR}/${parentSlug}.md`;
-	if (!(await fileExists(targetPath)) && (await fileExists(futurePath))) {
-		targetPath = futurePath;
+	let effectivePath = targetPath;
+	try {
+		if (!effectivePath) throw new Error("empty");
+		await readFile(effectivePath, "utf8");
+	} catch {
+		effectivePath = "";
+		try {
+			await readFile(futurePath, "utf8");
+			effectivePath = futurePath;
+		} catch {
+			effectivePath = "";
+		}
 	}
-	if (!targetPath || !(await fileExists(targetPath))) {
+	targetPath = effectivePath;
+	if (!targetPath) {
 		const qid = generateQuestId();
 		await mkdir(questDirPath(qid), { recursive: true });
 		targetPath = questPath(qid);
@@ -155,7 +166,11 @@ export async function linkSubQuestInParent(parentSlug: string, childSlug: string
 export async function markSubQuestCompletedInParent(parentSlug: string, childSlug: string, ctx?: ExtensionContext): Promise<boolean> {
 	const parentRecord = await resolveQuestRecordBySlug(parentSlug);
 	const parentPath = parentRecord ? parentRecord.path : questPath(state.questId || parentSlug);
-	if (!(await fileExists(parentPath))) return false;
+	try {
+		await readFile(parentPath, "utf8");
+	} catch {
+		return false;
+	}
 	try {
 		const content = await readFile(parentPath, "utf8");
 		const lines = content.split(/\r?\n/);
@@ -269,6 +284,7 @@ export function applyLoadedSubquestState(
 		targetState.planConfidence = "low";
 		targetState.lastResearchAt = Date.now();
 		targetState.lastPlanRevisionAt = Date.now();
+		targetState.awaitingUserConfirmation = false;
 		startResearchEpoch(targetState, "research");
 	}
 	targetState.saveGeneration = null;

@@ -236,57 +236,31 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 		assert.ok(cleanStatus.includes("fresh"), "quest_mark_saved must clear dirty state");
 	});
 
-	await t.step("Test 5 & 7 — pre-compaction warning records state and compaction gate sends final save instruction", async () => {
+	await t.step("Test 5 & 7 — periodic checkpoint records state and compaction gate blocks dirty", async () => {
 		await rm(currentDir, { recursive: true, force: true });
 		await mkdir(currentDir, { recursive: true });
 
 		const harness = setupHarness(10000, 1000000, "session_test_5");
 		const rootSlug = "test-compaction-gate-quest";
 		await harness.commands["quest"].handler(rootSlug, harness.mockCtx);
-		await harness.commands["quest-economy"].handler("333k 30k", harness.mockCtx);
 
-		// Mark state dirty by modifying a source file
-		for (const cb of harness.handlers["tool_result"] || []) {
-			await cb({ toolName: "edit", input: { path: "mods/gig/gig.c" } }, harness.mockCtx);
-		}
-
-		// Token pressure enters warning window (310k >= 303k warning threshold)
-		harness.setTokens(310000);
+		// 6 substantive turns → periodic checkpoint
 		harness.userMessages.length = 0;
-
-		// On turn_end in warning window, requestPreCompactionCheckpoint sends ONE explicit save instruction
-		for (const cb of harness.handlers["turn_end"] || []) {
-			await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/gig/gig.c" } }] }, harness.mockCtx);
+		for (let i = 0; i < 6; i++) {
+			for (const cb of harness.handlers["tool_result"] || []) {
+				await cb({ toolName: "edit", input: { path: `mods/gig/gig${i}.c` } }, harness.mockCtx);
+			}
+			for (const cb of harness.handlers["turn_end"] || []) {
+				await cb({ toolResults: [{ toolName: "edit", input: { path: `mods/gig/gig${i}.c` } }] }, harness.mockCtx);
+			}
 		}
 
 		const finalSaveMsgs = harness.userMessages.filter((m) =>
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Periodic Durable Checkpoint"),
 		);
-		assert.strictEqual(finalSaveMsgs.length, 1, "Entering warning window on turn_end must issue final save instruction");
+		assert.strictEqual(finalSaveMsgs.length, 1, "6 substantive turns must issue periodic checkpoint");
 
-		// Repeated turns inside warning window continue to receive escalated warning steering
-		for (let i = 0; i < 3; i++) {
-			await new Promise((resolve) => setTimeout(resolve, 60));
-			for (const cb of harness.handlers["turn_end"] || []) {
-				await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/gig/gig.c" } }] }, harness.mockCtx);
-			}
-		}
-		const finalSaveMsgsRepeated = harness.userMessages.filter((m) =>
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
-			(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
-		);
-		assert.strictEqual(finalSaveMsgsRepeated.length, 4, "Repeated turns in warning window must continue to issue escalated steering");
-
-		// Tokens reach full compaction threshold (335k >= 333k) - dirty state blocks compaction
-		harness.setTokens(335000);
-		for (const cb of harness.handlers["turn_end"] || []) {
-			await cb({ toolResults: [] }, harness.mockCtx);
-		}
-		assert.strictEqual(harness.getCompactCount(), 0, "Compaction must NOT trigger while state is dirty");
-
-		// Explicit session_before_compact gate must cancel without sending prompts
+		// Explicit session_before_compact gate must cancel when dirty
 		let cancelRes: any;
 		for (const cb of harness.handlers["session_before_compact"] || []) {
 			cancelRes = await cb({}, harness.mockCtx);
@@ -295,7 +269,6 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 	});
 
 	await t.step("Test 6 — safe compaction when threshold reached and quest is clean", async () => {
-		await rm(currentDir, { recursive: true, force: true });
 		await mkdir(currentDir, { recursive: true });
 
 		const harness = setupHarness(10000, 1000000, "session_test_6");
@@ -321,7 +294,6 @@ Deno.test("quest_journal_persistent_execution: all 12 lifecycle scenarios", asyn
 	});
 
 	await t.step("Test 8 — post-compaction autonomous resume", async () => {
-		await rm(currentDir, { recursive: true, force: true });
 		await mkdir(currentDir, { recursive: true });
 
 		const harness = setupHarness(10000, 1000000, "session_test_8");

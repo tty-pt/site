@@ -130,22 +130,175 @@ export interface PendingSubquestResumeResolution {
 
 export type SubquestReconciliationStatus = "still-valid" | "obsolete" | "adopted" | "inconsistent";
 
-export interface PendingAgentNotification {
+export type CompactionState =
+	| { kind: "idle" }
+	| { kind: "prepared"; id: string; quest: string; saveCount: number; hash: string }
+	| { kind: "in-flight"; id: string; quest: string; reason: ResumeReason }
+	| { kind: "completed"; id: string; quest: string }
+	| { kind: "resume_pending"; id: string; quest: string; reason: ResumeReason }
+	| { kind: "failed"; id: string; quest: string; reason: string }
+	| { kind: "inconsistent"; id: string; quest: string; reason: string };
+
+export type EpistemicPhaseKind =
+	| "idle"
+	| "provisional_root"
+	| "research_pending"
+	| "confirmation_pending"
+	| "reassessment_pending"
+	| "implementation_allowed";
+
+export interface EpistemicPhase {
+	kind: EpistemicPhaseKind;
+	round?: number;
+	planVersion?: number;
+	reassessmentVersion?: number;
+	reason?: string;
+	evidence?: string;
+}
+
+export type ObligationKind =
+	| "error"
+	| "steer"
+	| "resume"
+	| "checkpoint_required"
+	| "reassessment"
+	| "confirmation"
+	| "critical_review"
+	| "custom";
+
+export type ObligationStatus =
+	| "pending"
+	| "delivering"
+	| "fulfilled"
+	| "superseded"
+	| "cancelled"
+	| "failed";
+
+export interface AgentObligation {
 	id: string;
-	code: string;
-	correlationId?: string;
+	questId?: string;
+	kind?: ObligationKind;
+	code?: QuestErrorCode | string;
 	message: string;
+	status?: ObligationStatus;
 	deliverAs?: "steer" | "followUp" | "nextTurn";
 	requiredNextAction?: string;
 	details?: Record<string, any> | string;
-	attempts: number;
+	stateGeneration?: number;
+	planVersion?: number;
+	reassessmentVersion?: number;
+	correlationId?: string;
+	dedupKey?: string;
 	createdAt: number;
+	attempts: number;
 	lastAttemptAt?: number;
+	deliveredAt?: number;
+	fulfilledAt?: number;
+	fulfilledReason?: string;
+	supersededAt?: number;
+	supersededReason?: string;
+	cancelledAt?: number;
+	cancelledReason?: string;
+	failedAt?: number;
+	failedReason?: string;
+	superseded?: boolean;
+	isCurrent?: (currentState: StoredState) => boolean;
+	isFulfilled?: (currentState: StoredState) => boolean;
 }
 
-export type CriticalReviewKind = "direction" | "final_acceptance";
-export type CriticalReviewVerdict = "PASS" | "FAIL" | "UNCERTAIN";
+export interface PendingAgentNotification extends AgentObligation {}
+
+export type CriticalReviewKind = "direction" | "plan_review" | "final_acceptance";
+export type CriticalReviewVerdict = "APPROVE" | "REVISE" | "UNCERTAIN" | "PASS" | "FAIL";
 export type CriticalReviewSeverity = "NONE" | "MINOR" | "MAJOR" | "CRITICAL";
+
+export type ReviewTimeoutLayer =
+	| "quest_journal_deadline"
+	| "subagent_bridge_deadline"
+	| "child_process_deadline"
+	| "provider_model_timeout";
+
+export interface ReviewActivityStats {
+	turns: number;
+	tools: number;
+	reads: number;
+	searches: number;
+	writes: number;
+	commands: number;
+	files: number;
+	lastActivityAt: number;
+	lastTool?: string;
+	observedFilePaths?: string[];
+}
+
+export interface ReviewSnapshot {
+	questId: string;
+	sessionId: string;
+	reviewId: string;
+	reviewKind: CriticalReviewKind;
+	planVersion: number;
+	boundaryKey?: string | null;
+	saveGeneration: number;
+	stateHash: string | null;
+	originalUserRequest: string;
+	currentUnderstanding: string;
+	assumptions: string;
+	plan: string;
+	planRevisions: string;
+	findings: string;
+	filesChanged: string;
+	relevantDiff: string;
+	testStatus: string;
+	nextAction: string;
+	createdAt: number;
+	refinements?: string[];
+	executionSnapshot?: string;
+	remainingWork?: string;
+	status?: string;
+}
+
+export interface ActiveReview {
+	reviewId: string;
+	childSessionId?: string;
+	parentSessionId: string;
+	questId: string;
+	questSlug: string;
+	kind: CriticalReviewKind;
+	triggerReason?: string;
+	snapshot: ReviewSnapshot;
+	startedAt: number;
+	activity: ReviewActivityStats;
+	status: "starting" | "running" | "completed" | "failed" | "timed_out" | "superseded" | "cancelled";
+	verdict?: CriticalReviewVerdict;
+	error?: string;
+	timeoutLayer?: ReviewTimeoutLayer;
+	promise?: Promise<any>;
+	// Explicit cancellation tracking
+	cancelled?: boolean;
+	cancellationRequested?: boolean;
+	cancellationReason?: string;
+	cancelledAt?: number;
+	abortController?: AbortController;
+	asyncGeneration?: number;
+}
+
+export interface PendingReviewRequest {
+	questSlug: string;
+	kind: CriticalReviewKind;
+	triggerReason?: string;
+	planVersion: number;
+	stateHash?: string | null;
+	boundaryKey?: string | null;
+	saveCount?: number;
+	requestedAt: number;
+	rebuttal?: string;
+	model?: string;
+	timeoutMs?: number;
+	force?: boolean;
+	asyncGeneration?: number;
+	superseded?: boolean;
+	cancelledAt?: number;
+}
 
 export interface CriticalReviewFinding {
 	issue: string;
@@ -158,20 +311,98 @@ export interface CriticalReviewSelfCritique {
 	revisedJudgment: CriticalReviewVerdict;
 }
 
+export interface CriticalReviewPromptComplianceItem {
+	requirement: string;
+	planHandling?: string;
+	status: "SATISFIED" | "UNSATISFIED" | "UNCERTAIN" | "YES" | "NO";
+}
+
 export interface CriticalReviewOriginalRequestCheck {
 	satisfied: string[];
 	unsatisfied: string[];
+	items?: CriticalReviewPromptComplianceItem[];
+}
+
+export interface QuestReviewContext {
+	originalRequest: string;
+	refinements: string[];
+	currentUnderstanding: string;
+	keyAssumptions: string;
+	openQuestions: string;
+	plan: string;
+	planConfidence: string;
+	planRevisions: string;
+	findings: string;
+	filesModified: string;
+	testStatus: string;
+	executionSnapshot: string;
+	exactNextAction: string;
+	remainingWork: string;
+	status: string;
+}
+
+export interface ReviewInput {
+	kind: CriticalReviewKind;
+	questSlug: string;
+	triggerReason?: string;
+	boundaryKey?: string | null;
+	context: QuestReviewContext;
+	snapshot?: ReviewSnapshot;
+	rebuttal?: string;
+	model?: string;
+	reviewId?: string;
+	childSessionId?: string;
+	parentSessionId?: string;
+	onActivity?: (activity: ReviewActivityStats) => void;
+	timeoutMs?: number;
+	signal?: AbortSignal;
+	asyncGeneration?: number;
+}
+
+export interface ReviewResult {
+	verdict: CriticalReviewVerdict;
+	severity: CriticalReviewSeverity;
+	findings: CriticalReviewFinding[];
+	requiredActions: string[];
+	originalRequestCheck: CriticalReviewOriginalRequestCheck;
+	selfCritique?: CriticalReviewSelfCritique;
+	parseError?: string;
+	rawText?: string;
+	childSessionId?: string;
+	childTranscriptRef?: string;
+	activity?: ReviewActivityStats;
+	durationMs?: number;
+	timeoutLayer?: ReviewTimeoutLayer;
+}
+
+export interface CriticalReviewer {
+	isAvailable(): boolean;
+	review(input: ReviewInput): Promise<ReviewResult>;
+}
+
+export interface PlanReviewApproval {
+	questId: string;
+	planVersion: number;
+	reviewId: string;
+	boundaryKey?: string | null;
+	saveHash?: string | null;
+	saveCount?: number;
+	timestamp: number;
 }
 
 export interface CriticalReviewState {
 	id: string;
 	questId: string;
 	kind: CriticalReviewKind;
+	reviewId?: string;
+	childSessionId?: string;
+	parentSessionId?: string;
 	reviewedStateVersion: {
 		planVersion: number;
 		saveHash?: string | null;
 		saveCount?: number;
 	};
+	snapshot?: ReviewSnapshot;
 	verdict: CriticalReviewVerdict;
 	severity: CriticalReviewSeverity;
 	findings: CriticalReviewFinding[];
@@ -179,9 +410,20 @@ export interface CriticalReviewState {
 	originalRequestCheck?: CriticalReviewOriginalRequestCheck;
 	selfCritique?: CriticalReviewSelfCritique;
 	resolved: boolean;
+	superseded?: boolean;
+	supersededBy?: {
+		planVersion: number;
+		saveHash?: string | null;
+		saveCount?: number;
+		reason?: string;
+	};
+	durationMs?: number;
+	activity?: ReviewActivityStats;
+	childTranscriptRef?: string;
 	timestamp: number;
 	correlationId?: string;
 	error?: string;
+	timeoutLayer?: ReviewTimeoutLayer;
 }
 
 export interface StoredState {
@@ -209,12 +451,18 @@ export interface StoredState {
 	warningPercent?: number | null;
 	warningTokens?: number | null;
 	subquestCompactTokens?: number | null;
+	/** @deprecated compaction pressure removed — retained for migration compat */
 	lastWarnedCompactionTokens?: number | null;
 	lastPromptAt?: number;
 	lastResumePromptAt?: number;
 	lastResumeTarget?: string | null;
 	lastResumeCompactCount?: number;
 	pickerCancelled?: boolean;
+	// Periodic heartbeat checkpoint tracking (decoupled from direction review)
+	lastPeriodicCheckpointAt?: number;
+	lastPeriodicCheckpointTurn?: number;
+	lastPeriodicSteerTurn?: number;
+	lastPeriodicSteerAt?: number;
 
 	// Compaction & resume transaction tracking
 	activeTransaction?: CompactionTransaction | null;
@@ -222,6 +470,7 @@ export interface StoredState {
 	lastDeliveredCompactionId?: string | null;
 	pendingResume?: PendingResume | null;
 	pendingNotifications?: PendingAgentNotification[];
+	obligationHistory?: AgentObligation[];
 
 	// Iterative research & reassessment epistemic state
 	pendingRootQuest?: boolean;
@@ -251,6 +500,13 @@ export interface StoredState {
 	substantiveTurnsSinceCheckpoint?: number;
 	currentTurn?: number;
 	currentTurnCorrelationId?: string;
+	// Auto-draft accumulation state (future/ while user still talking)
+	activeDraft?: string | null;
+	draftPrompts?: string[];
+	draftCreatedAt?: number | null;
+	draftLastSavedHash?: string | null;
+	draftLastReviewKey?: string | null;
+
 	// Critical Review Subagent State
 	inCriticalReview?: boolean;
 	lastCriticalReview?: CriticalReviewState | null;
@@ -259,13 +515,28 @@ export interface StoredState {
 	lastReviewedSaveHash?: string | null;
 	lastReviewedPlanVersion?: number | null;
 	lastReviewedSaveCount?: number | null;
+	lastPlanReviewApproval?: PlanReviewApproval | null;
+	lastPlanReviewRequestedVersion?: number | null;
+	lastPlanReviewBoundaryKey?: string | null;
+	lastPlanReviewRequestKey?: string | null;
+	lastDraftReviewRequestKey?: string | null;
+	lastDirectionReviewKey?: string | null;
+	lastDirectionReviewAt?: number | null;
+
+	// Async generation epoch
+	asyncGeneration?: number;
+
+	// Turn-stop gate: scalar awaiting review (plan_review / final_acceptance only, survives compaction)
+	awaitingReview?: { kind: CriticalReviewKind; reviewId: string; triggerReason?: string; since: number } | null;
 
 	sessionModifiedFiles?: string[];
+	/** @deprecated compaction pressure removed */
 	lastNotifiedPressure?: CompactionPressure;
 	lastContinuationTransitionKey?: string | null;
 
 	// Observed investigation receipts & epochs
 	investigationEpoch?: number;
+	logCursor?: number;
 	currentReceipt?: InvestigationReceipt | null;
 	lastCompletedReceipt?: InvestigationReceipt | null;
 }
@@ -355,5 +626,21 @@ export interface AgentErrorOptions {
 	deliverAs?: "steer" | "followUp" | "nextTurn";
 	requiredNextAction?: string;
 	details?: Record<string, any> | string;
+}
+
+export interface ScheduledTask {
+	taskId: string;
+	taskType: string;
+	questSlug: string;
+	sessionId: string;
+	transactionId?: string | null;
+	asyncGeneration: number;
+	timer: any;
+	scheduledAt: number;
+	delayMs: number;
+	fn: () => void | Promise<void>;
+	cancelled: boolean;
+	cancellationReason?: string;
+	cancelledAt?: number;
 }
 

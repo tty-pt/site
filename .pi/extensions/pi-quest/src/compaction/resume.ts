@@ -1,6 +1,7 @@
 import { INTERNAL_MESSAGE_PREFIX } from "../constants.ts";
 import { syncImplementationPermission } from "../gates.ts";
 import { logEvent, logResumeTransition } from "../logging.ts";
+import { readQuestLog } from "../logging/summary/helpers.ts";
 import { drainPendingAgentNotifications, logDebug, logError, reportAgentError, safeSendUserMessage, sendInternalAgentMessage } from "../messaging.ts";
 import { questPath } from "../paths.ts";
 import { persist } from "../persistence.ts";
@@ -117,14 +118,26 @@ The single authoritative source of truth on disk is \`${qp}\`.
 ${specificAction}`;
 }
 
+function getRecentLogTail(targetState: StoredState): string {
+	try {
+		const raw = readQuestLog(targetState.questId || "", 10);
+		if (!raw) return "";
+		const trimmed = raw.slice(-1200);
+		return `\n\n**Recent execution log tail (last 10):**\n\`\`\`\n${trimmed}\n\`\`\``;
+	} catch {
+		return "";
+	}
+}
+
 function resolvePostCompactionStateAction(targetState: StoredState, activeQuest: string): string {
 	const qp = questPath(targetState.questId);
+	const logTail = targetState.reassessmentRequired ? getRecentLogTail(targetState) : "";
 	if (targetState.reassessmentRequired) {
 		return `⚡ **State: REASSESSMENT_PENDING** (Reason: ${targetState.reassessmentReason || "Unresolved contradiction"}).
 1. Read \`${qp}\` using \`read\`.
 2. Do NOT jump into implementation. First investigate the contradiction, challenge previous assumptions, and evaluate whether the current plan is still valid.
 3. Update the quest file with the revised plan and call \`quest_update_state({ reassessmentComplete: true })\`.
-4. Proceed with the revised Exact Next Action.`;
+4. Proceed with the revised Exact Next Action.${logTail}`;
 	}
 	if (targetState.researchRequired || !targetState.researchComplete) {
 		return `⚡ **State: RESEARCH_PENDING** (Research Round: ${targetState.researchRound || 1}).

@@ -32,6 +32,7 @@ export * from "./context.ts";
 export * from "./validation.ts";
 export * from "./reconstruction.ts";
 export * from "./messaging.ts";
+export * from "./obligations.ts";
 export * from "./research.ts";
 export * from "./persistence.ts";
 export * from "./compaction.ts";

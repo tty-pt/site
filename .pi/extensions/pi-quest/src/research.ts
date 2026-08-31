@@ -226,6 +226,8 @@ export function triggerReassessment(
 		reassessmentVersion: targetState.reassessmentVersion,
 		version: targetState.reassessmentVersion,
 		round: targetState.researchRound,
+		failureId: (targetState as any).lastFailureId || undefined,
+		consequence: "GATE_BLOCKED_REASSESSMENT_PENDING",
 	});
 }
 

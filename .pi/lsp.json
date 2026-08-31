@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "clangd",
+      "enabled": true,
+      "include": ["**/*.c", "**/*.h"],
+      "exclude": ["external/**", "build/**", ".cache/**", "var/**", "htdocs/**"],
+      "rootMarkers": ["compile_commands.json", ".clangd", "Makefile", ".git"],
+      "bin": "clangd",
+      "args": ["--background-index", "--clang-tidy", "--header-insertion=never"],
+      "cwd": "{root}",
+      "languageIdByExtension": { ".c": "c", ".h": "c" },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500
+    }
+  ]
+}

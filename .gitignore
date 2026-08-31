@@ -31,6 +31,8 @@ tests/unit/mpfd_contract_test
 !/.pi/extensions
 !/.pi/prompts
 !/.pi/settings.json
+!/.pi/lsp.json
 /build
 /debug
 *.zip
+/compile_commands.json

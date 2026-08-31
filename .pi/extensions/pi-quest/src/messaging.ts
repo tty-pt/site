@@ -1,7 +1,10 @@
-import { CUSTOM_TYPE, INTERNAL_MESSAGE_PREFIX, QuestErrorCode, SYNTHETIC_PROMPT_PREFIXES } from "./constants.ts";
+import { INTERNAL_MESSAGE_PREFIX, QuestErrorCode, SYNTHETIC_PROMPT_PREFIXES } from "./constants.ts";
 import { logAgentMessageTransition, logEvent } from "./logging.ts";
+import { createAgentObligation, getPendingObligations, queueAgentObligation, reconcileObligations } from "./obligations.ts";
 import { questPath } from "./paths.ts";
+import { persist } from "./persistence.ts";
 import { getActiveContext, getSessionId, getState, sessionStates, setSessionState, snapshotState, state } from "./state.ts";
+import { getQuestLockKey, isQuestLocked } from "./utils/mutex.ts";
 import { AgentErrorOptions, ExtensionAPI, ExtensionContext, PendingAgentNotification } from "./types.ts";
 
 /**
@@ -141,47 +144,17 @@ export function reportAgentError(
 		const targetSessionId = getSessionId(c);
 		const targetState = sessionStates.get(targetSessionId) ?? getState(c);
 
-		if (!Array.isArray(targetState.pendingNotifications)) {
-			targetState.pendingNotifications = [];
-		}
-
-		const existing = targetState.pendingNotifications.find(
-			(n) => n.code === options.code && n.message === message,
-		);
-		if (existing) {
-			existing.attempts = (existing.attempts || 0) + 1;
-			existing.lastAttemptAt = Date.now();
-			if (options.correlationId) {
-				existing.correlationId = options.correlationId;
-			}
-		} else {
-			const pendingNotif: PendingAgentNotification = {
-				id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-				code: typeof options.code === "string" ? options.code : String(options.code),
-				correlationId: options.correlationId,
-				message,
-				deliverAs,
-				requiredNextAction: options.requiredNextAction,
-				details: options.details,
-				attempts: 1,
-				createdAt: Date.now(),
-				lastAttemptAt: Date.now(),
-			};
-			targetState.pendingNotifications.push(pendingNotif);
-			if (targetState.pendingNotifications.length > 20) {
-				targetState.pendingNotifications = targetState.pendingNotifications.slice(-20);
-			}
-			logAgentMessageTransition("AGENT_MESSAGE_QUEUED", `agent notification queued: [${options.code}]`, {
-				code: typeof options.code === "string" ? options.code : String(options.code),
-				correlationId: options.correlationId,
-				deliverAs,
-			});
-		}
-
-		if (typeof pi?.appendEntry === "function") {
-			pi.appendEntry(CUSTOM_TYPE, snapshotState(c));
-		}
-		setSessionState(c, targetState);
+		const obligation = createAgentObligation(targetState, {
+			kind: "error",
+			code: options.code,
+			message,
+			deliverAs,
+			requiredNextAction: options.requiredNextAction,
+			details: options.details,
+			correlationId: options.correlationId,
+		});
+		queueAgentObligation(targetState, obligation);
+		persist(pi, ctx);
 	} catch (err: any) {
 		logError("Failed to persist pending agent notification", err, ctx, QuestErrorCode.PERSISTENCE_FAILURE, options.correlationId);
 	}
@@ -189,7 +162,7 @@ export function reportAgentError(
 	return false;
 }
 
-export function drainPendingAgentNotifications(
+export function drainAgentObligations(
 	pi: ExtensionAPI,
 	ctx?: ExtensionContext,
 ): boolean {
@@ -199,44 +172,77 @@ export function drainPendingAgentNotifications(
 		const targetState = sessionStates.get(targetSessionId) ?? getState(c);
 
 		if (!Array.isArray(targetState.pendingNotifications) || targetState.pendingNotifications.length === 0) {
-			return true;
+			return false;
 		}
 
-		const remaining: PendingAgentNotification[] = [];
+		const lockKey = getQuestLockKey(targetState.questId || targetState.active || "quest", targetSessionId);
+		if (isQuestLocked(lockKey)) {
+			return false;
+		}
+
+		reconcileObligations(targetState);
+
+		const actionable = getPendingObligations(targetState);
+		if (actionable.length === 0) {
+			return false;
+		}
+
 		let anyDelivered = false;
 
-		for (const notif of targetState.pendingNotifications) {
-			const messageType = typeof notif.code === "string" ? notif.code.toLowerCase() : "notification";
-			logAgentMessageTransition("AGENT_MESSAGE_RETRIED", `retrying pending notification: [${notif.code}]`, {
-				code: notif.code,
-				correlationId: notif.correlationId,
-				type: messageType,
-				attempt: (notif.attempts || 0) + 1,
-				deliverAs: notif.deliverAs || "followUp",
-			});
-			const text = formatAgentErrorMessage(notif.code, notif.message, notif.requiredNextAction, notif.details);
-			const delivered = sendInternalAgentMessage(pi, text, notif.deliverAs || "followUp", messageType, notif.correlationId);
+		for (const obligation of actionable) {
+			const text = formatAgentErrorMessage(
+				String(obligation.code || "NOTIFICATION"),
+				obligation.message,
+				obligation.requiredNextAction,
+				obligation.details,
+			);
+			const deliverAs = obligation.deliverAs || "followUp";
+			const delivered = sendInternalAgentMessage(
+				pi,
+				text,
+				deliverAs,
+				String(obligation.code || "notification").toLowerCase(),
+				obligation.correlationId,
+			);
+
+			obligation.attempts = (obligation.attempts || 0) + 1;
+			obligation.lastAttemptAt = Date.now();
+
 			if (delivered) {
+				obligation.deliveredAt = Date.now();
+				obligation.status = "delivering";
 				anyDelivered = true;
+				logAgentMessageTransition("AGENT_MESSAGE_RETRIED", `agent obligation delivered (${deliverAs}): [${obligation.code || obligation.kind}]`, {
+					code: String(obligation.code || obligation.kind),
+					correlationId: obligation.correlationId,
+					attempts: obligation.attempts,
+					obligationId: obligation.id,
+				});
 			} else {
-				notif.attempts = (notif.attempts || 0) + 1;
-				notif.lastAttemptAt = Date.now();
-				remaining.push(notif);
+				logAgentMessageTransition("AGENT_MESSAGE_FAILED", `agent obligation delivery failed (${deliverAs}): [${obligation.code || obligation.kind}]`, {
+					code: String(obligation.code || obligation.kind),
+					correlationId: obligation.correlationId,
+					attempts: obligation.attempts,
+					obligationId: obligation.id,
+				});
 			}
 		}
 
-		targetState.pendingNotifications = remaining;
-		if (anyDelivered || remaining.length > 0) {
-			if (typeof pi?.appendEntry === "function") {
-				pi.appendEntry(CUSTOM_TYPE, snapshotState(c));
-			}
-			setSessionState(c, targetState);
+		if (anyDelivered) {
+			persist(pi, ctx);
 		}
-		return remaining.length === 0;
-	} catch (err: any) {
-		logError("Failed while draining pending agent notifications", err);
+
+		return anyDelivered;
+	} catch {
 		return false;
 	}
+}
+
+export function drainPendingAgentNotifications(
+	pi: ExtensionAPI,
+	ctx?: ExtensionContext,
+): boolean {
+	return drainAgentObligations(pi, ctx);
 }
 
 export function sendInternalUserMessage(pi: ExtensionAPI, text: string, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; expandPromptTemplates?: boolean }): boolean {
@@ -283,18 +289,16 @@ export function shouldCapturePrompt(text: string): boolean {
 	if (t.startsWith("/")) return false;
 	const lower = t.toLowerCase();
 	if (lower.startsWith(INTERNAL_MESSAGE_PREFIX.toLowerCase())) return false;
+	// Explicit STARTS_WITH list — precise directives only
 	for (const p of SYNTHETIC_PROMPT_PREFIXES) {
-		if (lower.startsWith(p)) return false;
+		if (lower.startsWith(p.toLowerCase())) return false;
 	}
+	// Explicit CONTAINS_PHRASES — exact multi-word synthetic directives (not generic discussion)
 	if (lower.includes("post-compaction autonomous resumption directive")) return false;
 	if (lower.includes("pre-compaction exhaustive context preservation protocol")) return false;
 	if (lower.includes("context is approaching the configured compaction threshold")) return false;
 	if (lower.includes("context compaction is now being requested")) return false;
 	if (lower.includes("context compaction is imminent")) return false;
-	if (lower.includes("final exhaustive durable state save")) return false;
 	if (lower.includes("critical quest journal compaction safety state")) return false;
-	if (lower.includes("context compaction warning")) return false;
-	if (lower.includes("context usage has reached or exceeded")) return false;
-	if (lower.includes("compaction safety state")) return false;
 	return true;
 }

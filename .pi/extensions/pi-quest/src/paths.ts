@@ -37,6 +37,36 @@ export function questLogPath(qid?: string | null, baseDir?: string): string {
 	return dir ? join(dir, "execution.log") : "";
 }
 
+export function questMetaPath(qid?: string | null, baseDir?: string): string {
+	const dir = questDirPath(qid, baseDir);
+	return dir ? join(dir, "meta.json") : "";
+}
+
+export function questPlanPath(qid?: string | null, baseDir?: string): string {
+	const dir = questDirPath(qid, baseDir);
+	return dir ? join(dir, "plan.md") : "";
+}
+
+export function questResearchPath(qid?: string | null, baseDir?: string): string {
+	const dir = questDirPath(qid, baseDir);
+	return dir ? join(dir, "research.md") : "";
+}
+
+export function questExecutionPath(qid?: string | null, baseDir?: string): string {
+	const dir = questDirPath(qid, baseDir);
+	return dir ? join(dir, "execution.md") : "";
+}
+
+export function listShardPaths(qid?: string | null, baseDir?: string): string[] {
+	return [
+		questPath(qid, baseDir),
+		questPlanPath(qid, baseDir),
+		questResearchPath(qid, baseDir),
+		questExecutionPath(qid, baseDir),
+		questMetaPath(qid, baseDir),
+	].filter(Boolean);
+}
+
 export function questArchivePath(qid: string, projectRoot?: string): string {
 	const root = projectRoot || "";
 	return root ? join(root, QUEST_ARCHIVE_DIR, `${qid}.zip`) : `${QUEST_ARCHIVE_DIR}/${qid}.zip`;
@@ -247,9 +277,63 @@ export async function listQuestFiles(dir: string = QUEST_CURRENT_DIR): Promise<s
 	return Array.from(files).sort();
 }
 
+export function futureDraftPath(slug: string): string {
+	return `${FUTURE_DIR}/${slug}.md`;
+}
+
+export async function appendToFutureDraft(slug: string, promptText: string): Promise<boolean> {
+	try {
+		const path = futureDraftPath(slug);
+		if (!(await fileExists(path))) return false;
+		let content = await readFile(path, "utf8");
+		const trimmed = promptText.trim().slice(0, 4000);
+		if (!trimmed) return false;
+		if (content.includes(trimmed.slice(0, 80))) return false;
+		// Append to ## Requirements section
+		if (content.includes("## Requirements")) {
+			content = content.replace(
+				/(## Requirements[^\n]*\n)([\s\S]*?)(\n## |\n$)/,
+				(_m: string, header: string, body: string, next: string) => {
+					let newBody = body.trimEnd();
+					if (!newBody.endsWith("\n")) newBody += "\n";
+					// Convert placeholder "- " alone to real content
+					if (newBody.trim() === "-" || newBody.trim() === "- ") newBody = "";
+					else if (newBody && !newBody.endsWith("\n")) newBody += "\n";
+					newBody += `- ${trimmed}\n`;
+					return header + newBody + next;
+				},
+			);
+			// Fallback if regex didn't match (body until next section)
+			if (!content.includes(trimmed.slice(0, 30))) {
+				content = content.replace("## Requirements", `## Requirements\n- ${trimmed}`);
+			}
+		} else {
+			content += `\n## Requirements\n- ${trimmed}\n`;
+		}
+		const { writeFile } = await import("node:fs/promises");
+		await writeFile(path, content, "utf8");
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export async function createFutureDraftFromPrompt(slug: string, promptText: string): Promise<string> {
+	const { mkdir, writeFile } = await import("node:fs/promises");
+	const { FUTURE_QUEST_TEMPLATE } = await import("./markdown.ts");
+	await mkdir(FUTURE_DIR, { recursive: true });
+	const path = futureDraftPath(slug);
+	if (await fileExists(path)) {
+		await appendToFutureDraft(slug, promptText);
+		return path;
+	}
+	await writeFile(path, FUTURE_QUEST_TEMPLATE(slug, promptText), "utf8");
+	return path;
+}
+
 export async function cleanDraftIfExists(slug: string, ctx?: ExtensionContext) {
 	try {
-		const futurePath = `${FUTURE_DIR}/${slug}.md`;
+		const futurePath = futureDraftPath(slug);
 		if (await fileExists(futurePath)) {
 			await unlink(futurePath);
 		}

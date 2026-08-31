@@ -12,14 +12,12 @@ sources.
 
 ## Hard requirements
 1. **Know the quest up front.** At the start of a quest, read its file (or
-   `/quest <name>` to create it) and fill the template **before** doing real work.
+    `/quest <name>` to create it) and fill the template **before** doing real work.
 2. **Keep it current.** As you make decisions, change files, hit blockers, or
-   finish steps, update `.pi/quest/current/<qid>/quest.md`. It must never fall behind the
-   conversation by more than one logical step.
+    finish steps, update `.pi/quest/current/<qid>/quest.md`. Persist every ~6 substantive turns (edits/builds) or before any compaction — not on token thresholds. Execution log tail provides factual `Files Modified / Test Status`.
 3. **Before compaction / before stopping.** When asked to save, or before context
-   is collapsed, write the full current state (progress, decisions, findings,
-   remaining work, next step) to the file. The quest journal may block compaction
-   until you do.
+    is collapsed, write the full current state (progress, decisions, findings,
+    remaining work, next step) to the file. The quest journal blocks compaction until `quest_mark_saved`.
 4. **Avoid duplication.** Once a quest file exists, continue it — never create a
    near-identical copy. Active quests live in `.pi/quest/current/<qid>/`,
    and archived quests live in `.pi/quest/archive/<qid>.zip`.

@@ -144,21 +144,20 @@ Deno.test("quest_journal_lifecycle_e2e: complete 12-step autonomous compaction a
 	assert.strictEqual(incMsgs.length, 0, "Step 4: No artificial incremental checkpoint during normal execution");
 
 	// -----------------------------------------------------------------------
-	// Step 5 & 6: Tokens enter warning window -> Final Save Directive issued at turn boundary
+	// Step 5 & 6: Periodic checkpoint after 6 substantive turns
 	// -----------------------------------------------------------------------
-	await commands["quest-economy"].handler("333k 30k", mockCtx); // Warning threshold: 303k, Compaction: 333k
-	currentTokens = 310000; // >= 303k, < 333k
 	userMessages.length = 0;
-
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
+	for (let i = 0; i < 6; i++) {
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: `mods/song/song${i}.c` } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) {
+			await cb({ toolResults: [{ toolName: "edit", input: { path: `mods/song/song${i}.c` } }] }, mockCtx);
+		}
 	}
 
 	const preCompactMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
+		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Periodic Durable Checkpoint"),
 	);
-	assert.strictEqual(preCompactMsgs.length, 1, "Step 6: Pre-compaction deep save protocol must be sent in warning window");
+	assert.strictEqual(preCompactMsgs.length, 1, "Step 6: Periodic checkpoint must be sent after 6 turns");
 	assert.ok(
 		preCompactMsgs[0].msg.includes("EXACT NEXT ACTION"),
 		"Step 6: Protocol must mandate 'EXACT NEXT ACTION'",

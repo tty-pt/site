@@ -404,11 +404,10 @@ Deno.test("quest_journal_agent_error_messaging: uniform model-visible error and 
 	// -----------------------------------------------------------------------
 	// 10. Checkpoint/compaction gate produces CHECKPOINT_REQUIRED message
 	// -----------------------------------------------------------------------
-	await t.step("10. Critical compaction threshold without save produces CHECKPOINT_REQUIRED message on edit", async () => {
+	await t.step("10. Periodic checkpoint does NOT block edits on high token usage (pressure removed)", async () => {
 		const api = createMockExtensionAPI();
 		plugin(api.mockPi as any);
 
-		// Tokens exceed threshold (450k > 400k threshold)
 		const ctx = createMockContext(450000, "session_agent_msg_checkpoint");
 		const commands: Record<string, any> = {};
 		for (const cmd of api.registeredCommands) commands[cmd.name] = cmd;
@@ -422,7 +421,6 @@ Deno.test("quest_journal_agent_error_messaging: uniform model-visible error and 
 			await cb({ toolName: "read", input: { path: "mods/song/song.c" } }, ctx);
 		}
 
-		// Satisfy research
 		await tools["quest_update_state"].execute("call_1", {
 			findings: ["Discovered"],
 			understanding: "Verified",
@@ -438,7 +436,7 @@ Deno.test("quest_journal_agent_error_messaging: uniform model-visible error and 
 		const state = getState(ctx as any);
 		state.confirmedQuests = [slug];
 		state.awaitingUserConfirmation = false;
-		state.dirty = true; // Mark dirty so compaction is not ready
+		state.dirty = true;
 		state.saveGeneration = null;
 
 		api.agentMessages.length = 0;
@@ -446,14 +444,15 @@ Deno.test("quest_journal_agent_error_messaging: uniform model-visible error and 
 
 		for (const cb of api.handlers["tool_call"] || []) {
 			const res = await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, ctx);
-			assert.strictEqual(res?.block, true, "Must block edit when checkpoint is required in CRITICAL");
+			// Periodic checkpoint does not block on token threshold; allow any block for other gates
+			if (res?.block) {
+				assert.ok(!String(res.reason || "").includes("CRITICAL_COMPACTION_CHECKPOINT_REQUIRED"), "Token pressure no longer blocks via CRITICAL");
+			}
 		}
 
 		const messages = getAllModelMessages(api);
-		assert.ok(messages.length >= 1, "Agent must receive CHECKPOINT_REQUIRED message");
 		const joined = messages.join("\n\n");
-		assert.ok(joined.includes(QuestErrorCode.CHECKPOINT_REQUIRED), "Message must contain CHECKPOINT_REQUIRED code");
-		assert.ok(joined.includes("State: CRITICAL_COMPACTION_CHECKPOINT_REQUIRED"), "Message must indicate CRITICAL state");
+		assert.ok(!joined.includes("CRITICAL_COMPACTION_CHECKPOINT_REQUIRED"), "Token pressure no longer blocks");
 	});
 
 	// Cleanup test artifacts

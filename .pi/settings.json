@@ -4,9 +4,14 @@
     "reserveTokens": 4096,
     "keepRecentTokens": 20000
   },
-  "questJournal": {
-    "economyTokens": "400k",
-    "warningTokens": "30k",
+  "pi-quest": {
+    "economyCeiling": "400k",
+    "warningDeltaPct": 10,
+    "economyTiers": [
+      { "upTo": "250k", "pct": 75 },
+      { "upTo": "500k", "pct": 60 },
+      { "upTo": "1M", "pct": 40 }
+    ],
     "subquestCompactTokens": "60k"
   }
 }

@@ -18,11 +18,21 @@ export const PROMPT_MAX_CHARS = 4000;
 
 export const PROMPT_MAX_COUNT = 10;
 
-export const DEFAULT_CEILING_TOKENS = 333_000;
+export const DEFAULT_CEILING_TOKENS = 400_000;
 
 export const DEFAULT_PERCENT = 50;
 
 export const DEFAULT_WARNING_PERCENT = 40;
+
+export const MAX_CONTEXT_PCT = 90;
+
+export const DEFAULT_WARNING_DELTA_PCT = 10;
+
+export const DEFAULT_ADAPTIVE_TIERS: Array<{ upTo: number; pct: number }> = [
+	{ upTo: 250_000, pct: 75 },
+	{ upTo: 500_000, pct: 60 },
+	{ upTo: 1_000_000, pct: 40 },
+];
 
 export const DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS = 60_000;
 
@@ -89,7 +99,14 @@ export const SYNTHETIC_PROMPT_PREFIXES = [
 	"quest-journal in-flight steer:",
 	"quest-journal in-flight budget steer:",
 	"⚡",
+	"⚖",
+	"[quest journal]",
 	"[questjournal]",
+	"<background-task-notification>",
+	"background task completed",
+	"reviewer:",
+	"pass 1",
+	"pass 2",
 	"**post-compaction",
 	"⚡ **post-compaction",
 	"now working on quest",
@@ -117,6 +134,15 @@ export const SYNTHETIC_PROMPT_PREFIXES = [
 
 export const INTERNAL_MESSAGE_PREFIX = "[QuestJournal internal]";
 
+export const DIRECTION_REVIEW_COOLDOWN_MS = 45_000;
+export const SUBSTANTIVE_TURNS_PER_DIRECTION_REVIEW = 5;
+export const GLOBAL_REVIEW_CAP = 1;
+export const STALENESS_ON_DIRTY = false;
+
+export const DEFAULT_CHECKPOINT_INTERVAL_TURNS = 6;
+export const DEFAULT_CHECKPOINT_INTERVAL_MS = 0; // timer disabled (turn-count deterministic)
+export const PERIODIC_CHECKPOINT_BURST_MS = 50;
+
 export const QuestErrorCode = {
 	IMPLEMENTATION_BLOCKED: "IMPLEMENTATION_BLOCKED",
 	UNKNOWN_TOOL_BLOCKED: "UNKNOWN_TOOL_BLOCKED",
@@ -125,6 +151,7 @@ export const QuestErrorCode = {
 	REASSESSMENT_REQUIRED: "REASSESSMENT_REQUIRED",
 	REASSESSMENT_EVIDENCE_REQUIRED: "REASSESSMENT_EVIDENCE_REQUIRED",
 	CONFIRMATION_REQUIRED: "CONFIRMATION_REQUIRED",
+	DRAFT_REVIEW_REQUIRED: "DRAFT_REVIEW_REQUIRED",
 	CHECKPOINT_REQUIRED: "CHECKPOINT_REQUIRED",
 	PERSISTENCE_FAILURE: "PERSISTENCE_FAILURE",
 	SAVE_VERIFICATION_FAILURE: "SAVE_VERIFICATION_FAILURE",
@@ -139,6 +166,10 @@ export const QuestErrorCode = {
 	CRITICAL_REVIEW_FAILED: "CRITICAL_REVIEW_FAILED",
 	CRITICAL_REVIEW_UNCERTAIN: "CRITICAL_REVIEW_UNCERTAIN",
 	CRITICAL_REVIEW_ERROR: "CRITICAL_REVIEW_ERROR",
+	PLAN_REVIEW_REQUIRED: "PLAN_REVIEW_REQUIRED",
+	PLAN_REVIEW_FAILED: "PLAN_REVIEW_FAILED",
+	PLAN_REVIEW_UNCERTAIN: "PLAN_REVIEW_UNCERTAIN",
+	PLAN_REVIEW_ERROR: "PLAN_REVIEW_ERROR",
 } as const;
 
 export type QuestErrorCode = typeof QuestErrorCode[keyof typeof QuestErrorCode];

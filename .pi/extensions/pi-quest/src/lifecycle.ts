@@ -3,19 +3,26 @@ import { readFile, writeFile, rename, mkdir, unlink, rm, stat } from "node:fs/pr
 import { basename, resolve } from "node:path";
 import { FUTURE_DIR, QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR, QuestErrorCode } from "./constants.ts";
 import { isCriticalReviewValidForCompletion, isSubagentAvailable, runCriticalReview } from "./critical_agent.ts";
-import { appendChangelogEntry, calculateAuthoritativeTerminalStatus, createRunArchive, findProjectRoot, resolveActiveRunHierarchy } from "./diagnostic.ts";
+import { appendChangelogEntry, findProjectRoot } from "./diagnostic.ts";
 import { syncImplementationPermission } from "./gates.ts";
-import { logEvent, logImplementationOutcome, logQuestTransition, logSubquestTransition, pinQuestLog, summarizeQuestJournalLog } from "./logging.ts";
-import { extractParentFromQuest, parseMarkdownSections, spliceMarkdownSections } from "./markdown.ts";
+import { logEvent, logQuestTransition } from "./logging.ts";
+import { extractParentFromQuest, parseMarkdownSections } from "./markdown.ts";
 import { logError } from "./messaging.ts";
-import { cleanDraftIfExists, fileExists, listActiveQuestRecords, listQuestFiles, questArchivePath, questDirPath, questLogPath, questPath, resolveQuestRecordBySlug, slugify } from "./paths.ts";
+import { cleanDraftIfExists, fileExists, listActiveQuestRecords, listQuestFiles, questArchivePath, questDirPath, questPath, resolveQuestRecordBySlug, slugify } from "./paths.ts";
+import { supersedeObligation } from "./obligations.ts";
 import { persist, verifyAndMarkSaved } from "./persistence.ts";
-import { extractChildResultSummary, loadExistingQuestEpistemicState } from "./reconstruction.ts";
+import { loadExistingQuestEpistemicState } from "./reconstruction.ts";
 import { startResearchEpoch } from "./research.ts";
 import { createDefaultState, generateQuestId, getState, state } from "./state.ts";
-import { markSubQuestCompletedInParent } from "./subquest.ts";
 import { ExtensionAPI, ExtensionContext, QuestChoiceResult } from "./types.ts";
 import { updateUIStatus } from "./ui.ts";
+import { resolveArchiveContext } from "./lifecycle/archive/context.ts";
+import { runRootCompletionGates } from "./lifecycle/archive/gates.ts";
+import { finalizeTerminalState } from "./lifecycle/archive/terminal.ts";
+import { pinLogToFinalized, removeActiveDirectory } from "./lifecycle/archive/removal.ts";
+import { createArchiveZip } from "./lifecycle/archive/zip.ts";
+import { hydrateNextActive, popArchivedAndFindNextActive } from "./lifecycle/archive/stack.ts";
+import { applyLoadedEpistemicState } from "./lifecycle/epistemic_init.ts";
 
 export type LifecycleStage = "terminal_commit" | "active_removal" | "zip_creation" | "changelog_appended";
 export type LifecycleStageObserver = (stage: LifecycleStage, details: any) => void;
@@ -118,48 +125,8 @@ export async function activateExistingQuest(
 	state.lastCheckpointPromptAt = 0;
 
 	const loaded = await loadExistingQuestEpistemicState(targetQid);
-	if (loaded && loaded.exists) {
-		if (loaded.questId) {
-			state.questId = loaded.questId;
-		}
-		state.prompts = loaded.originalRequest ? [loaded.originalRequest] : promptText ? [promptText] : [];
-		state.refinements = loaded.refinements;
-		state.researchRound = loaded.researchRound;
-		state.researchComplete = loaded.researchComplete;
-		state.researchRequired = loaded.researchRequired;
-		state.planVersion = loaded.planVersion;
-		state.planConfidence = loaded.planConfidence;
-		state.lastPlanRevisionsText = loaded.lastPlanRevisionsText;
-		state.reassessmentRequired = loaded.reassessmentRequired;
-		state.reassessmentReason = loaded.reassessmentReason;
-		state.reassessmentEvidence = loaded.reassessmentEvidence;
-		state.reassessmentVersion = loaded.reassessmentVersion;
-		state.resolvedReassessmentVersion = loaded.resolvedReassessmentVersion;
-		state.lastResearchAt = loaded.lastResearchAt ?? Date.now();
-		state.lastPlanRevisionAt = loaded.lastPlanRevisionAt ?? Date.now();
-		state.awaitingUserConfirmation = !loaded.researchComplete;
-		if (loaded.researchComplete) {
-			state.currentReceipt = null;
-			state.lastCompletedReceipt = {
-				epoch: 0,
-				epochType: "historical",
-				startedAt: loaded.lastResearchAt || Date.now(),
-				completedAt: loaded.lastResearchAt || Date.now(),
-				toolCalls: 0,
-				readTargets: [],
-				searchTargets: [],
-				commands: [],
-				evidenceCount: 0,
-				isHistorical: true,
-			};
-		} else {
-			startResearchEpoch(state, state.reassessmentRequired ? "reassessment" : "research");
-		}
-	} else {
-		startResearchEpoch(state, "research");
-	}
-
-	syncImplementationPermission(state);
+	if (loaded.questId) state.questId = loaded.questId;
+	applyLoadedEpistemicState(state, loaded, promptText || undefined);
 	await verifyAndMarkSaved(pi, ctx, questName);
 	persist(pi, ctx);
 	updateUIStatus(ctx);
@@ -241,108 +208,36 @@ export function checkOrdinaryCompletionConditions(
 
 export async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null; childSummary?: string }> {
 	const s = getState(ctx);
-	let targetQid = s.questId || name;
-	let path = questPath(targetQid);
-	let questName = name;
-
-	const record = await resolveQuestRecordBySlug(name);
-	if (record) {
-		targetQid = record.qid;
-		path = record.path;
-		questName = record.name;
-	} else if (!(await fileExists(path))) {
-		return { success: false, message: `No quest file found at ${path}` };
-	}
-
-	let parentSlug: string | null = null;
+	const ctxRes = await resolveArchiveContext(name, ctx);
+	if ((ctxRes as any).error) return { success: false, message: (ctxRes as any).error };
+	const { targetQid, path, questName, parentSlug, questContent, childSummary } = ctxRes as any;
 	const stack = Array.isArray(s.stack) ? [...s.stack] : (s.active ? [s.active] : []);
-	const idx = stack.lastIndexOf(questName);
-	if (idx > 0) {
-		parentSlug = stack[idx - 1];
-	}
-	if (!parentSlug) {
-		const targetRec = await resolveQuestRecordBySlug(questName);
-		if (targetRec && targetRec.parent) {
-			parentSlug = targetRec.parent;
-		}
-	}
-	let childSummary = "";
-	let questContent = "";
-	try {
-		questContent = await readFile(path, "utf8");
-		if (!parentSlug) {
-			parentSlug = extractParentFromQuest(questContent);
-		}
-		childSummary = extractChildResultSummary(questContent, questName);
-	} catch (err: any) {
-		logError(`Failed to read quest file for parent extraction at ${path}`, err, ctx, QuestErrorCode.STATE_RECONSTRUCTION_FAILURE);
-	}
 
 	if (!parentSlug) {
-		// 1. Check ordinary completion conditions first (applies to root quests)
-		const ordinaryCheck = checkOrdinaryCompletionConditions(questContent, s);
-		if (!ordinaryCheck.satisfied) {
-			return {
-				success: false,
-				message: `Quest completion blocked by unmet completion conditions: ${ordinaryCheck.reason}`,
-			};
-		}
-
-		// 2. Root quest completion gate: Final Acceptance Review
-		if (isSubagentAvailable(pi, ctx)) {
-			const isValidPass = isCriticalReviewValidForCompletion(s);
-			if (!isValidPass) {
-				const reviewRes = await runCriticalReview(pi, ctx!, { kind: "final_acceptance", questSlug: questName });
-				if (reviewRes.available && (!reviewRes.success || reviewRes.review?.verdict !== "PASS")) {
-					const reason = reviewRes.review?.findings?.map((f) => f.issue).join("; ") || reviewRes.error || "Acceptance criteria unmet";
-					return {
-						success: false,
-						message: `Final critical acceptance review failed (${reviewRes.review?.verdict || "ERROR"}${reviewRes.review?.severity ? ` / ${reviewRes.review.severity}` : ""}): ${reason}. Resolve findings before completing quest.`,
-					};
-				}
-			}
-
-			// Re-verify that critical review is STILL valid after review execution and that no state mutation occurred
-			if (!isCriticalReviewValidForCompletion(s)) {
-				return {
-					success: false,
-					message: "Final critical acceptance review PASS is missing or invalidated by subsequent state changes.",
-				};
-			}
-		}
+		const gateRes = await runRootCompletionGates(questContent, s, pi, ctx as ExtensionContext, questName);
+		if (gateRes.blocked) return { success: false, message: gateRes.message! };
 	}
 
-	// 3. Establish and persist authoritative terminal state
 	const isRoot = !parentSlug;
 	const questId = targetQid;
 	let finalArchiveZipPath = questArchivePath(questId);
 
-	// Invalidate any pending compaction transactions or resume obligations for the quest being archived
 	if (s.activeTransaction && (s.activeTransaction.activeQuest === questName || s.activeTransaction.questPath === path)) {
-		s.activeTransaction = null;
-		s.activeCompactionId = null;
+		s.activeTransaction = null; s.activeCompactionId = null;
 	}
 	if (state.activeTransaction && (state.activeTransaction.activeQuest === questName || state.activeTransaction.questPath === path)) {
-		state.activeTransaction = null;
-		state.activeCompactionId = null;
+		state.activeTransaction = null; state.activeCompactionId = null;
 	}
-	if (s.pendingResume && (s.pendingResume.activeQuest === questName || s.pendingResume.checkpointQuestPath === path)) {
-		s.pendingResume = null;
-	}
-	if (state.pendingResume && (state.pendingResume.activeQuest === questName || state.pendingResume.checkpointQuestPath === path)) {
-		state.pendingResume = null;
-	}
-	s.archiveCompactionPending = null;
-	state.archiveCompactionPending = null;
-	s.compactionPending = false;
-	state.compactionPending = false;
-	s.preCompactionCheckpointPending = false;
-	state.preCompactionCheckpointPending = false;
-	s.preCompactionSaveRequestPending = false;
-	state.preCompactionSaveRequestPending = false;
+	if (s.pendingResume && (s.pendingResume.activeQuest === questName || s.pendingResume.checkpointQuestPath === path)) s.pendingResume = null;
+	if (state.pendingResume && (state.pendingResume.activeQuest === questName || state.pendingResume.checkpointQuestPath === path)) state.pendingResume = null;
+	supersedeObligation(s, (obl) => obl.questId === questName || obl.questId === questId, "Quest archived");
+	if (s !== state) supersedeObligation(state, (obl) => obl.questId === questName || obl.questId === questId, "Quest archived");
+	s.archiveCompactionPending = null; state.archiveCompactionPending = null;
+	s.compactionPending = false; state.compactionPending = false;
+	s.preCompactionCheckpointPending = false; state.preCompactionCheckpointPending = false;
+	s.preCompactionSaveRequestPending = false; state.preCompactionSaveRequestPending = false;
 
 	const projectRoot = findProjectRoot(ctx?.cwd);
-
 	let verifiedLogContent = "";
 	let verifiedQuestContent = questContent;
 	let finalizedHierarchy: any = null;
@@ -350,277 +245,44 @@ export async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: Ext
 	let isCompleted = true;
 
 	if (isRoot) {
-		// Explicitly write terminal quest state to disk using existing template sections
-		const terminalUpdates = new Map<string, string>();
-		terminalUpdates.set("current status", "Completed");
-		terminalUpdates.set("final status", "COMPLETED");
-		terminalUpdates.set("exact next action", "None");
-		terminalUpdates.set("remaining work", "- [x] All tasks completed");
-		const terminalQuestContent = spliceMarkdownSections(questContent, terminalUpdates);
-		try {
-			await writeFile(path, terminalQuestContent, "utf8");
-		} catch (err: any) {
-			return {
-				success: false,
-				message: `Failed to write terminal quest state to disk at ${path}: ${err?.message || String(err)}`,
-			};
-		}
-
-		// Log terminal completion events to the live execution log
-		logImplementationOutcome("IMPLEMENTATION_COMPLETED", `quest '${questName}' completed successfully`, {
-			quest: questName,
-			status: "COMPLETED",
-		});
-		logSubquestTransition("ARCHIVE", `archived quest ${questName}`, {
-			quest: questName,
-			subquest: questName,
-			dest: finalArchiveZipPath,
-			status: "COMPLETED",
-		});
-
-		// Durably verify persisted terminal state on disk before destructive removal
-		const saveVerification = await verifyAndMarkSaved(pi, ctx, questName);
-		if (!saveVerification.success) {
-			return {
-				success: false,
-				message: `Failed to durably verify terminal quest state on disk: ${saveVerification.error}`,
-			};
-		}
-
-		// Read the committed, verified disk state
-		try {
-			verifiedLogContent = await readFile(questLogPath(targetQid), "utf8");
-		} catch {
-			verifiedLogContent = "";
-		}
-		try {
-			verifiedQuestContent = await readFile(path, "utf8");
-		} catch {
-			verifiedQuestContent = terminalQuestContent;
-		}
-
-		// Snapshot finalized run hierarchy from verified live state
-		finalizedHierarchy = await resolveActiveRunHierarchy(projectRoot, { questId });
-
-		// Derive authoritative terminal outcome from verified disk state and execution log
-		let logSummaryInfo: ReturnType<typeof summarizeQuestJournalLog> | null = null;
-		try {
-			if (existsSync(questLogPath(targetQid))) {
-				logSummaryInfo = summarizeQuestJournalLog(questLogPath(targetQid));
-			}
-		} catch {}
-
-		const calculatedStatus = calculateAuthoritativeTerminalStatus(finalizedHierarchy, logSummaryInfo, "COMPLETED");
-		authoritativeTerminalStatus = calculatedStatus === "FAILED" ? "FAILED" : "COMPLETED";
+		const termRes = await finalizeTerminalState(pi, ctx, questName, questId, path, questContent, projectRoot,
+			() => existsSync(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid)) || existsSync(questDirPath(targetQid)),
+			() => existsSync(questArchivePath(questId, projectRoot)) || existsSync(questArchivePath(questId)));
+		if (termRes.error) return { success: false, message: termRes.error };
+		verifiedLogContent = termRes.verifiedLogContent;
+		verifiedQuestContent = termRes.verifiedQuestContent;
+		finalizedHierarchy = termRes.finalizedHierarchy;
+		authoritativeTerminalStatus = termRes.authoritativeTerminalStatus;
 		isCompleted = authoritativeTerminalStatus === "COMPLETED";
 
-		const checkActiveDirExists = () => existsSync(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid)) || existsSync(questDirPath(targetQid));
-		const checkZipExists = () => existsSync(questArchivePath(questId, projectRoot)) || existsSync(questArchivePath(questId));
+		await pinLogToFinalized(targetQid, verifiedLogContent, projectRoot);
+		await removeActiveDirectory(targetQid, questName, projectRoot, ctx,
+			() => existsSync(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid)) || existsSync(questDirPath(targetQid)),
+			() => existsSync(questArchivePath(questId, projectRoot)) || existsSync(questArchivePath(questId)));
 
-		onLifecycleStageTransition?.("terminal_commit", {
-			questId,
-			questName,
-			authoritativeTerminalStatus,
-			verifiedQuestContent,
-			verifiedLogContent,
-			activeDirExists: checkActiveDirExists(),
-			zipExists: checkZipExists(),
-		});
+		finalArchiveZipPath = await createArchiveZip(projectRoot, questId, questName, authoritativeTerminalStatus, finalizedHierarchy, verifiedLogContent, verifiedQuestContent,
+			() => existsSync(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid)) || existsSync(questDirPath(targetQid)),
+			() => existsSync(questArchivePath(questId, projectRoot)) || existsSync(questArchivePath(questId)), ctx);
 
-		// Pin log target to finalized sink before active directory removal
-		const finalizedLogDir = resolve(projectRoot, ".pi/quest/finalized_logs");
-		await mkdir(finalizedLogDir, { recursive: true });
-		const pinnedLogPath = resolve(finalizedLogDir, `${targetQid}.log`);
-		if (verifiedLogContent) {
-			await writeFile(pinnedLogPath, verifiedLogContent, "utf8");
-		}
-		pinQuestLog(targetQid, pinnedLogPath);
-
-		// 4. Archive / remove active quest directory from disk
-		await rm(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid), { recursive: true, force: true });
-		if (existsSync(questDirPath(targetQid))) {
-			await rm(questDirPath(targetQid), { recursive: true, force: true });
-		}
-		await cleanDraftIfExists(questName, ctx);
-
-		onLifecycleStageTransition?.("active_removal", {
-			questId,
-			questName,
-			activeDirExists: checkActiveDirExists(),
-			zipExists: checkZipExists(),
-		});
-
-		// 5. Create diagnostic run zip from the finalized archived/run state (post-completion artifact)
-		try {
-			const archiveRes = await createRunArchive({
-				projectRoot,
-				questId,
-				status: authoritativeTerminalStatus,
-				hierarchy: finalizedHierarchy,
-				finalizedLogContent: verifiedLogContent,
-				finalizedQuestContent: verifiedQuestContent,
-			});
-			finalArchiveZipPath = archiveRes.zipPath;
-		} catch (err: any) {
-			logError(`Automatic run archive generation failed for quest '${questName}'`, err, ctx);
-		}
-
-		onLifecycleStageTransition?.("zip_creation", {
-			questId,
-			questName,
-			zipPath: finalArchiveZipPath,
-			activeDirExists: checkActiveDirExists(),
-			zipExists: checkZipExists(),
-		});
-
-		// 6. Append changelog entry using the already-established authoritative outcome
-		await appendChangelogEntry(
-			projectRoot,
-			questName,
-			childSummary || questName,
-			authoritativeTerminalStatus.toLowerCase(),
-			isCompleted,
-			questId,
-		);
-
+		await appendChangelogEntry(projectRoot, questName, childSummary || questName, authoritativeTerminalStatus.toLowerCase(), isCompleted, questId);
 		onLifecycleStageTransition?.("changelog_appended", {
-			questId,
-			questName,
-			zipExists: checkZipExists(),
-			activeDirExists: checkActiveDirExists(),
+			questId, questName,
+			zipExists: existsSync(questArchivePath(questId, projectRoot)) || existsSync(questArchivePath(questId)),
+			activeDirExists: existsSync(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid)) || existsSync(questDirPath(targetQid)),
 		});
 	} else {
-		// Subquest archival
-		if (path.endsWith(".md") && !path.endsWith("quest.md")) {
-			await rm(path, { force: true });
-		}
+		const { rm } = await import("node:fs/promises");
+		if (path.endsWith(".md") && !path.endsWith("quest.md")) await rm(path, { force: true });
 		await cleanDraftIfExists(questName, ctx);
-
-		logSubquestTransition("ARCHIVE", `archived quest ${questName}`, {
-			quest: questName,
-			subquest: questName,
-			parent: parentSlug || undefined,
-			dest: finalArchiveZipPath,
-		});
+		const { logSubquestTransition } = await import("./logging.ts");
+		logSubquestTransition("ARCHIVE", `archived quest ${questName}`, { quest: questName, subquest: questName, parent: parentSlug || undefined, dest: finalArchiveZipPath });
 	}
 
-	// LIFO stack management: remove archived quest from stack
-	if (idx >= 0) {
-		stack.splice(idx, 1);
-	}
-
-	// Find the top valid quest remaining on the LIFO stack
-	let nextActive: string | null = null;
-	while (stack.length > 0) {
-		const candidate = stack[stack.length - 1];
-		const candRecord = await resolveQuestRecordBySlug(candidate);
-		if (candRecord && (await fileExists(candRecord.path))) {
-			nextActive = candidate;
-			s.questId = candRecord.qid;
-			break;
-		} else if (await fileExists(questPath(candidate))) {
-			nextActive = candidate;
-			s.questId = candidate;
-			break;
-		}
-		stack.pop();
-	}
-
-	// Fallback to parent from file if stack had no active candidate
-	if (!nextActive && parentSlug) {
-		const parentRecord = await resolveQuestRecordBySlug(parentSlug);
-		if (parentRecord && (await fileExists(parentRecord.path))) {
-			nextActive = parentSlug;
-			s.questId = parentRecord.qid;
-			stack.push(parentSlug);
-		} else if (await fileExists(questPath(parentSlug))) {
-			nextActive = parentSlug;
-			s.questId = parentSlug;
-			stack.push(parentSlug);
-		}
-	}
-
-	// Mark sub-quest completed (- [x]) in parent quest file
-	if (parentSlug) {
-		await markSubQuestCompletedInParent(parentSlug, questName, ctx);
-	}
-
-	if (s.active === questName || state.active === questName) {
-		s.active = nextActive;
-		s.stack = stack;
-		state.active = nextActive;
-		state.stack = stack;
-		if (nextActive) {
-			const parentLoaded = await loadExistingQuestEpistemicState(s.questId || nextActive);
-			s.prompts = parentLoaded.originalRequest ? [parentLoaded.originalRequest] : [];
-			s.refinements = parentLoaded.refinements;
-			s.researchRound = parentLoaded.researchRound;
-			s.researchComplete = parentLoaded.researchComplete;
-			s.researchRequired = parentLoaded.researchRequired;
-			s.reassessmentRequired = parentLoaded.reassessmentRequired;
-			s.reassessmentReason = parentLoaded.reassessmentReason;
-			s.reassessmentEvidence = parentLoaded.reassessmentEvidence;
-			s.reassessmentVersion = parentLoaded.reassessmentVersion;
-			s.resolvedReassessmentVersion = parentLoaded.resolvedReassessmentVersion;
-			s.planVersion = parentLoaded.planVersion;
-			s.planConfidence = parentLoaded.planConfidence;
-			s.lastPlanRevisionsText = parentLoaded.lastPlanRevisionsText;
-			s.lastResearchAt = parentLoaded.lastResearchAt ?? Date.now();
-			s.lastPlanRevisionAt = parentLoaded.lastPlanRevisionAt ?? Date.now();
-			s.awaitingUserConfirmation = false;
-			if (parentLoaded.reassessmentRequired) {
-				startResearchEpoch(s, "reassessment");
-			} else if (parentLoaded.researchComplete) {
-				s.currentReceipt = null;
-				s.lastCompletedReceipt = {
-					epoch: 0,
-					epochType: "historical",
-					startedAt: parentLoaded.lastResearchAt || Date.now(),
-					completedAt: parentLoaded.lastResearchAt || Date.now(),
-					toolCalls: 0,
-					readTargets: [],
-					searchTargets: [],
-					commands: [],
-					evidenceCount: 0,
-					isHistorical: true,
-				};
-			} else {
-				startResearchEpoch(s, "research");
-			}
-			syncImplementationPermission(s);
-		} else {
-			s.prompts = [];
-			s.refinements = [];
-			s.researchRequired = false;
-			s.researchComplete = false;
-			s.reassessmentRequired = false;
-			s.reassessmentReason = null;
-			s.reassessmentEvidence = null;
-			s.reassessmentVersion = 0;
-			s.resolvedReassessmentVersion = 0;
-			s.awaitingUserConfirmation = false;
-			syncImplementationPermission(s);
-		}
-		if (state !== s) {
-			Object.assign(state, s);
-		}
-	} else {
-		s.stack = stack;
-		state.stack = stack;
-	}
-
-	if (nextActive) {
-		await verifyAndMarkSaved(pi, ctx, nextActive);
-		persist(pi, ctx);
-		logSubquestTransition("SUBQUEST_RETURN", `returned to quest '${nextActive}' (LIFO stack)`, { quest: nextActive, parent: nextActive, child: questName });
-	} else {
-		persist(pi, ctx);
-	}
+	const { nextActive, stack: newStack } = await popArchivedAndFindNextActive(stack, questName, parentSlug, s);
+	await hydrateNextActive(nextActive, newStack, s, questName, parentSlug, pi, ctx as ExtensionContext);
 
 	const returnMsg = nextActive ? ` Resumed parent/previous quest '${nextActive}' (LIFO stack).` : "";
-	const message = !parentSlug
-		? `Quest archived\nid: ${questId}\narchive: ${finalArchiveZipPath}`
-		: `Archived sub-quest ${questName} [${questId}].${returnMsg}`;
+	const message = !parentSlug ? `Quest archived\nid: ${questId}\narchive: ${finalArchiveZipPath}` : `Archived sub-quest ${questName} [${questId}].${returnMsg}`;
 	return { success: true, message, dest: finalArchiveZipPath, nextActive, childSummary };
 }
 

@@ -8,6 +8,7 @@ import { questPath, resolveQuestRecordBySlug } from "./paths.ts";
 import { getState, setSessionState, snapshotState, state } from "./state.ts";
 import { ConsistencyAuditResult, ExtensionAPI, ExtensionContext, QuestErrorCode, StoredState } from "./types.ts";
 import { computeFileFingerprint } from "./utils.ts";
+import { memoFileFingerprint } from "./utils/cache.ts";
 import { auditQuestConsistency } from "./validation.ts";
 
 export function persist(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
@@ -80,7 +81,8 @@ export async function verifyAndMarkSaved(
 		return { success: false, count: s.saveCount, error: errMsg };
 	}
 	const p = questPath(targetQid);
-	const fp = await computeFileFingerprint(p);
+	let fp = await memoFileFingerprint(p);
+	if (!fp) fp = await computeFileFingerprint(p) as any;
 	if (!fp) {
 		const errMsg = `Save verification failed: Quest file not found or unreadable at \`${p}\`.`;
 		logPersistenceTransition("SAVE_FAILED", errMsg, { quest: targetSlug || targetQid || "", path: p, reason: "file_not_found" });
@@ -105,13 +107,15 @@ export async function verifyAndMarkSaved(
 	}
 
 	let audit: ConsistencyAuditResult | undefined;
-	try {
-		const content = await readFile(p, "utf8");
-		audit = auditQuestConsistency(content, { recentModifiedFiles: s.sessionModifiedFiles || state.sessionModifiedFiles });
-		if (!audit.consistent) {
-			logError(`Consistency audit issues in ${p}: ${audit.issues.join("; ")}`, undefined, ctx, QuestErrorCode.SAVE_VERIFICATION_FAILURE);
-		}
-	} catch {}
+	if (fp.hash !== s.lastSavedHash) {
+		try {
+			const content = await readFile(p, "utf8");
+			audit = auditQuestConsistency(content, { recentModifiedFiles: s.sessionModifiedFiles || state.sessionModifiedFiles });
+			if (!audit.consistent) {
+				logError(`Consistency audit issues in ${p}: ${audit.issues.join("; ")}`, undefined, ctx, QuestErrorCode.SAVE_VERIFICATION_FAILURE);
+			}
+		} catch {}
+	}
 
 	const isSameAsLastSave =
 		s.saveGeneration &&

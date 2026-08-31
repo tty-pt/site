@@ -1,4 +1,4 @@
-import { originalRequestText, refinementsBlock, reportAgentError } from "../messaging.ts";
+import { reportAgentError } from "../messaging.ts";
 import { questPath } from "../paths.ts";
 import { persist } from "../persistence.ts";
 import { triggerReassessment } from "../research.ts";
@@ -29,98 +29,60 @@ export function getCompactionInstructions(activeQuest: string, tokens: number | 
 
 	if (isSubQuest && parentName) {
 		const parentPath = questPath(state.questId);
-		return `Economy auto-compaction${tokenLabel} during sub-quest '${activeQuest}' (parent: '${parentName}'). Focus summary on active sub-quest progress, tested hypotheses, key architectural decisions, modified files, and immediate sub-quest next steps. Parent quest state is safely preserved on disk in ${parentPath}. Following compaction, autonomously read ${activePath}, validate current understanding against the recovered state, and proceed with the most justified next action.`;
+		return `Compaction${tokenLabel} during sub-quest '${activeQuest}' (parent: '${parentName}'). Focus summary on active sub-quest progress, tested hypotheses, key architectural decisions, modified files, and immediate sub-quest next steps. Parent quest state is safely preserved on disk in ${parentPath}. Following compaction, autonomously read ${activePath}, validate current understanding against the recovered state, and proceed with the most justified next action.`;
 	}
 
-	return `Economy auto-compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', tested hypotheses, key architectural decisions, modified files, and immediate next steps. The latest durable quest state is persisted in ${activePath}. Following compaction, autonomously read ${activePath}, validate current understanding against the recovered state, and proceed with the most justified next action.`;
+	return `Compaction${tokenLabel}. Focus summary on active quest '${activeQuest}', tested hypotheses, key architectural decisions, modified files, and immediate next steps. The latest durable quest state is persisted in ${activePath}. Following compaction, autonomously read ${activePath}, validate current understanding against the recovered state, and proceed with the most justified next action.`;
 }
 
-export function buildWarningSavePrompt(
+export function buildPeriodicCheckpointPrompt(
 	activeQuest: string,
-	fraction: number,
-	tokens: number,
-	threshold: number,
+	opts: { turnsSinceCheckpoint: number; filesModified?: string[]; logTail?: string } = { turnsSinceCheckpoint: 0 },
 ): string {
-	const isClose = fraction >= 0.5;
-	const escalationLabel = isClose ? "Close to Threshold" : "Approaching Threshold";
-	const escalationAdvice = isClose
-		? "Context is close to the compaction threshold. Prioritize an exhaustive durable checkpoint now. Avoid unnecessary further work."
-		: "Context is approaching the compaction threshold. Keep the quest file current and prepare an exhaustive checkpoint.";
+	const qp = questPath(state.questId);
+	const files = Array.isArray(opts.filesModified) && opts.filesModified.length > 0 ? opts.filesModified.slice(-6).join(", ") : "(none)";
+	const tailBlock = opts.logTail ? `\n\nRecent execution log tail (last 10):\n\`\`\`\n${opts.logTail.slice(0, 1200)}\n\`\`\`` : "";
+	if (!activeQuest || activeQuest === "provisional" || state.pendingRootQuest || state.activeDraft) {
+		const draft = state.activeDraft ? `.pi/quest/future/${state.activeDraft}.md` : (qp || `.pi/quest/current/${state.questId || "<qid>"}/quest.md`);
+		const idTag = state.questId ? ` (id: ${state.questId})` : "";
+		const slug = activeQuest && activeQuest !== "provisional" ? activeQuest : (state.activeDraft || "provisional");
+		return `💾 **Periodic Durable Checkpoint (Draft/Provisional${idTag})** — ${opts.turnsSinceCheckpoint} substantive turns since last save for '${slug}'. Persist \`${draft}\` + call \`quest_update_state\` (or \`quest_mark_saved\`).
 
-	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
-		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
-	}`;
+Checklist: Current Understanding & Plan, Files Modified (${files}), Test / Build Status, EXACT NEXT ACTION (live pointer).
 
-	return `⚡ **Context Compaction Warning (${escalationLabel}: ${formatTokens(tokens)} / ${formatTokens(threshold)} tokens)**:
-Context compaction is imminent. ${escalationAdvice}
+Original request — keep VERBATIM under ## Original request in \`${draft}\`.${tailBlock}`;
+	}
+	return `💾 **Periodic Durable Checkpoint** — ${opts.turnsSinceCheckpoint} substantive turns since last save for '${activeQuest}'. Update \`${qp}\` + \`quest_mark_saved\`.
 
-Before auto-compaction occurs and resets conversation working memory, perform an EXHAUSTIVE DURABLE STATE SAVE in:
-\`${questPath(state.questId)}\`
+Checklist: Current Understanding & Plan, Files Modified (${files}), Test / Build Status, EXACT NEXT ACTION (live pointer).
 
-${promptReminder}
-
-**Epistemic & Execution State Checklist**:
-- Current Status
-- Discoveries & Learnings (architectural facts, verified invariants)
-- Tested Assumptions (validated / invalidated / uncertain)
-- Contradictions & Plan Revisions (if any)
-- Files Touched / Examined
-- Test / Build Status
-- Remaining Work
-- EXACT NEXT ACTION (concrete and immediate)
-
-Update the quest file and call \`quest_mark_saved\` to ensure your state is verified before compaction.`;
+Original request — keep VERBATIM under ## Original request in \`${qp}\`.${tailBlock}`;
 }
 
-export function buildCriticalSavePrompt(
-	activeQuest: string,
-	tokens: number,
-	threshold: number,
-): string {
-	const promptReminder = `Original user request -- keep VERBATIM under ## Original request in the quest file:\n"${originalRequestText()}"${
-		state.refinements && state.refinements.length > 0 ? `\n\nUser refinements -- list under ## Quest Refinements & User Feedback Loops:\n${refinementsBlock()}` : ""
-	}`;
-
-	return `🚨 **CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE** 🚨
-
-Context usage (${formatTokens(tokens)} tokens) has reached or exceeded the configured compaction threshold (${formatTokens(threshold)} tokens).
-
-This directive supersedes your current implementation plan for the next action.
-
-STOP ordinary implementation.
-Do NOT defer the checkpoint. STOP treating checkpointing as optional.
-
-Your next action MUST be the durable checkpoint procedure:
-1. Reconstruct the current state of the work.
-2. Update the active quest file exhaustively in \`${questPath(state.questId)}\`.
-3. Preserve discoveries, assumptions, contradictions, decisions, rejected approaches, files touched, verification status, remaining work, and the EXACT NEXT ACTION.
-4. Call quest_mark_saved.
-5. Ensure the save is verified.
-6. Prepare for immediate compaction.
-
-Do not start another implementation action first.
-Do not defer checkpointing.
-
-${promptReminder}
-
-ONLY AFTER THE DURABLE SAVE IS VERIFIED may you continue ordinary work.`;
+// @deprecated pressure prompts retained as aliases for compat (unused)
+export function buildWarningSavePrompt(activeQuest: string, _fraction: number, _tokens: number, _threshold: number): string {
+	return buildPeriodicCheckpointPrompt(activeQuest, { turnsSinceCheckpoint: (state as any).substantiveTurnsSinceCheckpoint || 0 });
+}
+export function buildCriticalSavePrompt(activeQuest: string, _tokens: number, _threshold: number): string {
+	return buildPeriodicCheckpointPrompt(activeQuest, { turnsSinceCheckpoint: (state as any).substantiveTurnsSinceCheckpoint || 0 });
+}
+export function buildCriticalCompactionReadyPrompt(activeQuest: string, _tokens: number, _threshold: number): string {
+	return buildPeriodicCheckpointPrompt(activeQuest, { turnsSinceCheckpoint: (state as any).substantiveTurnsSinceCheckpoint || 0 });
 }
 
-export function buildCriticalCompactionReadyPrompt(
-	activeQuest: string,
-	tokens: number,
-	threshold: number,
-): string {
-	return `⚡ **CRITICAL QUEST JOURNAL EXECUTION DIRECTIVE (DURABLE STATE SAVED)** ⚡
-
-Context usage (${formatTokens(tokens)} tokens) remains at or above the configured compaction threshold (${formatTokens(threshold)} tokens).
-
-This directive supersedes your current implementation plan for the next action.
-Your durable quest checkpoint in \`${questPath(state.questId)}\` is VERIFIED and ready.
-
-Context auto-compaction is now required. Stand by for auto-compaction across the turn boundary.
-Do NOT begin large new implementation streams before compaction resets working memory.
-Ensure your exact next action is fully documented so execution can resume cleanly post-compaction.`;
+export function validatePhasedPlan(content: string): boolean {
+	const planMatch = content.match(/##\s*Plan\s*\n([\s\S]*?)(?=\n##\s+|$)/i);
+	if (!planMatch) return false;
+	const planBody = planMatch[1];
+	const lines = planBody.split(/\r?\n/).filter((l) => l.trim().length > 0);
+	const hasNumbered = lines.some((l) => /^\s*\d+\.\s+/.test(l) || /^\s*-\s*\[[ xX]\]/.test(l) || /^\s*-\s+/.test(l));
+	const hasVerification = /verification|verify|test|check|gate/i.test(planBody);
+	const hasSubquest = /\[\[.+?\]\]/.test(planBody);
+	const exactIdx = content.search(/##\s*Exact Next Action/i);
+	if (exactIdx === -1) return false;
+	const exactBody = content.slice(exactIdx, exactIdx + 800);
+	if (/>\s*Paste/i.test(exactBody) || exactBody.trim().length < 30) return false;
+	return hasNumbered && (hasVerification || hasSubquest) && exactBody.length > 30;
 }
 
 export function validateCheckpointMatching(

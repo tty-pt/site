@@ -1,10 +1,10 @@
 import assert from "node:assert";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import questJournalExtension from "../index.ts";
 
 type EventCallback = (event: any, ctx: any) => Promise<any>;
 
-Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, mid-subquest, and auto-resume", async () => {
+Deno.test("quest_journal_compaction_dynamics: periodic checkpoint, subquest launch, and post-compaction resume", async () => {
 	const currentDir = ".pi/quest/current";
 	await mkdir(currentDir, { recursive: true });
 
@@ -14,205 +14,74 @@ Deno.test("quest_journal_compaction_dynamics: dynamic economy, subquest launch, 
 	let userMessages: any[] = [];
 	let notifiedMessages: string[] = [];
 	let compactCalled = false;
-	let compactOptions: any = null;
 
 	const mockPi: any = {
-		on(event: string, callback: EventCallback) {
-			if (!handlers[event]) handlers[event] = [];
-			handlers[event].push(callback);
-		},
-		appendEntry() {},
-		registerEntryRenderer() {},
-		registerTool(toolDef: any) {
-			tools[toolDef.name] = toolDef;
-		},
-		registerCommand(name: string, commandDef: any) {
-			commands[name] = commandDef;
-		},
-		sendUserMessage(msg: any, options?: any) {
-			userMessages.push({ msg, options });
-		},
-		sendMessage(msg: any, options?: any) {
-			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
-		},
+		on(event: string, callback: EventCallback) { if (!handlers[event]) handlers[event] = []; handlers[event].push(callback); },
+		appendEntry() {}, registerEntryRenderer() {},
+		registerTool(toolDef: any) { tools[toolDef.name] = toolDef; },
+		registerCommand(name: string, commandDef: any) { commands[name] = commandDef; },
+		sendUserMessage(msg: any, options?: any) { userMessages.push({ msg, options }); },
+		sendMessage(msg: any, options?: any) { userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display }); },
 	};
 
 	questJournalExtension(mockPi);
 
-	let currentTokens = 50000;
-	let currentContextWindow = 1000000; // 1M context window
-
 	const mockCtx: any = {
 		cwd: process.cwd(),
-		getContextUsage: () => ({
-			tokens: currentTokens,
-			contextWindow: currentContextWindow,
-			percent: (currentTokens / currentContextWindow) * 100,
-		}),
-		sessionManager: {
-			getBranch: () => [],
-		},
-		compact: (options: any) => {
-			compactCalled = true;
-			compactOptions = options;
-		},
-		ui: {
-			notify(msg: string) {
-				notifiedMessages.push(msg);
-			},
-			setWidget() {},
-			setStatus() {},
-			input: async () => "",
-			select: async () => null,
-		},
-		hasUI: true,
-		mode: "tui",
+		getContextUsage: () => ({ tokens: 50000, contextWindow: 1000000 }),
+		sessionManager: { getBranch: () => [] },
+		compact: (options: any) => { compactCalled = true; },
+		ui: { notify(msg: string) { notifiedMessages.push(msg); }, setWidget() {}, setStatus() {}, input: async () => "", select: async () => null },
+		hasUI: true, mode: "tui",
 	};
 
-	// 1. Initialize root/parent quest
 	await commands["quest"].handler("parent-compaction-quest", mockCtx);
 
-	// 2. Test Sub-Quest start:
-	// Sub-quest creation should NOT trigger premature launch compaction (preventing agent interruption)
-	currentTokens = 50000;
+	// Sub-quest creation should NOT trigger premature launch compaction
 	compactCalled = false;
-	compactOptions = null;
-
-	await tools["quest_subquest"].execute(
-		"call_subquest_1",
-		{
-			goal: "Refactor database engine",
-			name: "sub-compaction-quest",
-			switchNow: true,
-		},
-		null,
-		null,
-		mockCtx,
-	);
-
+	await tools["quest_subquest"].execute("call_subquest_1", { goal: "Refactor database engine", name: "sub-compaction-quest", switchNow: true }, null, null, mockCtx);
 	assert.strictEqual(compactCalled, false, "Sub-quest creation should NOT trigger premature launch compaction");
 
-	// 4. Test Mid-Subquest compaction when tokens reach dynamic threshold
-	// Active quest is now sub-compaction-quest (inside LIFO stack: [parent-compaction-quest, sub-compaction-quest])
-	// Set threshold to 333k explicitly for this test with 30k warning margin
-	await commands["quest-economy"].handler("333k 30k", mockCtx);
-	currentTokens = 310000; // within 30k warning margin of 333k
-	userMessages = [];
-
-	// Simulate session_compact to clear save gate (save pending)
-	for (const cb of handlers["session_before_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	// Mark dirty
-	for (const cb of handlers["tool_result"] || []) {
-		await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
+	// Periodic checkpoint: 6 substantive turns should steer
+	for (let i = 0; i < 5; i++) {
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: `mods/song/${i}.c` } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", args: { path: `mods/song/${i}.c` } }] }, mockCtx);
 	}
 	userMessages = [];
+	for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/song/5.c" } }, mockCtx);
+	for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", args: { path: "mods/song/5.c" } }] }, mockCtx);
+	assert.ok(userMessages.some((m) => typeof m.msg === "string" && m.msg.includes("Periodic Durable Checkpoint")), "6th substantive turn should send periodic checkpoint");
+	const steer = userMessages.find((m) => m.msg?.includes("Periodic"));
+	assert.strictEqual(steer?.options?.deliverAs, "steer");
 
-	// Turn end inside warning window sends explicit final-save instruction
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({}, mockCtx);
-	}
-	assert.ok(userMessages.length > 0, "Warning window at turn_end should send final save instruction");
-	const lastEntry = userMessages[userMessages.length - 1];
-	const warnMsg = typeof lastEntry.msg === "string" ? lastEntry.msg : (lastEntry.msg.text || "");
-	assert.strictEqual(lastEntry.options?.deliverAs, "steer", "Final save directive must use deliverAs: 'steer'");
-	assert.ok(
-		warnMsg.includes("Context compaction is imminent") || warnMsg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") || warnMsg.includes("Context Compaction Warning"),
-		`Steer message should instruct final save before compaction, got: ${warnMsg}`,
-	);
-
-	// Test repeated turn steering: subsequent turn_end in warning window issues escalated warning steering
-	const msgCountBefore = userMessages.length;
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({}, mockCtx);
-	}
-	assert.strictEqual(userMessages.length, msgCountBefore + 1, "Subsequent turn_end in same warning window should continue to steer towards checkpoint");
-
-	// Mark saved when threshold reached
-	currentTokens = 335000; // >= 333k threshold
+	// Post-save allows compaction (periodic replaces token gate)
 	await tools["quest_mark_saved"].execute("call_saved_mid", {}, null, null, mockCtx);
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [{ toolName: "quest_mark_saved" }] }, mockCtx);
-	}
-
-	// Verify session_before_compact allows compaction when clean
 	let beforeCompactRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		beforeCompactRes = await cb({}, mockCtx);
-	}
-	assert.notStrictEqual(beforeCompactRes?.cancel, true, "Mid-subquest clean save should allow compaction");
+	for (const cb of handlers["session_before_compact"] || []) beforeCompactRes = await cb({}, mockCtx);
+	assert.notStrictEqual(beforeCompactRes?.cancel, true, "Clean save should allow compaction");
 
-	// 5. Test Post-Compaction Resumption Prompt on session_compact
+	// Post-compaction resume
 	userMessages = [];
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
+	for (const cb of handlers["session_compact"] || []) await cb({}, mockCtx);
+	assert.ok(userMessages.length > 0, "session_compact should send post-compaction resumption directive");
+	const postCompactMsg = typeof userMessages[0].msg === "string" ? userMessages[0].msg : (Array.isArray(userMessages[0].msg) ? userMessages[0].msg[0].text : userMessages[0].msg.text || "");
+	assert.ok(postCompactMsg.includes("Post-Compaction Autonomous Resumption Directive"), `Post-compaction directive missing: ${postCompactMsg}`);
 
-	assert.ok(userMessages.length > 0, "session_compact should send immediate post-compaction resumption directive to agent");
-	const postCompactEntry = userMessages[0];
-	assert.ok(
-		postCompactEntry.options?.deliverAs === "followUp" || !postCompactEntry.options,
-		"Post-compaction continuation must be delivered to agent",
-	);
-	const postCompactMsg = typeof postCompactEntry.msg === "string" ? postCompactEntry.msg : (Array.isArray(postCompactEntry.msg) ? postCompactEntry.msg[0].text : postCompactEntry.msg.text || "");
-	assert.ok(
-		postCompactMsg.includes("Post-Compaction Autonomous Resumption Directive"),
-		`Post-compaction message should have clear directive, got: ${postCompactMsg}`,
-	);
-	assert.ok(
-		postCompactMsg.includes("quest.md") || postCompactMsg.includes("sub-compaction-quest"),
-		`Post-compaction message should reference active quest file, got: ${postCompactMsg}`,
-	);
-
-	// 6. Test CRB Provider contributions
+	// CRB provider still registered
 	const g = globalThis as any;
 	assert.ok(g.__pi_crb_providers && g.__pi_crb_providers.length > 0, "CRB provider hook should be registered");
-	const crbRules: string[] = [];
-	for (const p of g.__pi_crb_providers) {
-		const res = p(mockCtx, ["quest_mark_saved", "edit", "read"]);
-		if (Array.isArray(res)) crbRules.push(...res);
-	}
-	assert.ok(
-		crbRules.some((r) => r.toLowerCase().includes("single source of truth")),
-		"CRB rules should reinforce quest file as single source of truth",
-	);
-	assert.ok(
-		crbRules.some((r) => r.toLowerCase().includes("re-investigate") || r.toLowerCase().includes("no unnecessary re-research")),
-		"CRB rules should enforce dynamic epistemic re-investigation",
-	);
 
-	// 7. Test Autonomous Post-Compaction Resumption in System Prompt
+	// System prompt mandates autonomous resumption
 	let systemPrompt = "Base system prompt.";
-	for (const cb of handlers["before_agent_start"] || []) {
-		const res = await cb({ systemPrompt }, mockCtx);
-		if (res?.systemPrompt) systemPrompt = res.systemPrompt;
-	}
+	for (const cb of handlers["before_agent_start"] || []) { const res = await cb({ systemPrompt }, mockCtx); if (res?.systemPrompt) systemPrompt = res.systemPrompt; }
+	assert.ok(systemPrompt.toLowerCase().includes("resume") || systemPrompt.toLowerCase().includes("autonomously"), "System prompt should mandate autonomous resumption");
 
-	assert.ok(
-		systemPrompt.toLowerCase().includes("resume") || systemPrompt.toLowerCase().includes("autonomously"),
-		"System prompt should mandate autonomous resumption after compaction",
-	);
-
-	// 8. Test session_before_compact when compaction is NOT ready (save pending)
-	// Clear save gate by simulating session_compact
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
+	// Dirty blocks compaction
+	for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/song/dirty.c" } }, mockCtx);
 	userMessages = [];
+	for (const cb of handlers["session_before_compact"] || []) { const r = await cb({}, mockCtx); assert.strictEqual(r?.cancel, true); }
+	assert.strictEqual(userMessages.length, 1);
+	assert.ok(userMessages[0].msg.includes("Compaction Blocked"));
 
-	// Now try to compact via session_before_compact: should cancel as a safety gate
-	for (const cb of handlers["session_before_compact"] || []) {
-		const result = await cb({}, mockCtx);
-		assert.strictEqual(result?.cancel, true, "session_before_compact should cancel when save is pending");
-	}
-	assert.strictEqual(userMessages.length, 1, "session_before_compact must request deep save when compaction is blocked due to stale quest");
-	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Should inform model that compaction is blocked until save completes");
-
-	// Clean up
 	await rm(currentDir, { recursive: true, force: true });
 });

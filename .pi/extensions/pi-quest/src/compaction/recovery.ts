@@ -5,6 +5,7 @@ import { questPath } from "../paths.ts";
 import { persist } from "../persistence.ts";
 import { triggerReassessment } from "../research.ts";
 import { getActiveContext, getSessionId, getState, sessionStates } from "../state.ts";
+import { reconcileObligations } from "../obligations.ts";
 import { reconcilePendingSubquestResume } from "../subquest.ts";
 import { CompactionPressure, CompactionTransaction, ExtensionAPI, ExtensionContext, QuestErrorCode, ResumeReason, StoredState } from "../types.ts";
 import { formatTokens } from "../utils.ts";
@@ -176,6 +177,7 @@ function finalizeCompactionSuccess(
 	});
 
 	sessionState.pendingResume = createCompactionResumeObligation(tx, sessionState, activeQuest, reason);
+	reconcileObligations(sessionState, pi, c);
 	persist(pi, c);
 
 	dispatchCompactionResume(pi, {

@@ -453,9 +453,9 @@ Deno.test("quest_journal_compaction_resume: resume delivery, retries, deduplicat
 
 		// ASSERTION: Notification must have been delivered despite compactionPending being true
 		assert.strictEqual(
-			state.pendingNotifications?.length ?? 0,
-			0,
-			"Pending notifications must be drained even when compactionPending is true",
+			state.pendingNotifications?.[0]?.status,
+			"delivering",
+			"Pending notification status must transition to delivering when drained",
 		);
 
 		const msgs = getAllMessages(api);

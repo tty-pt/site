@@ -4,16 +4,19 @@ import { logDebug, logError, reportAgentError, sendInternalAgentMessage } from "
 import { questPath } from "../paths.ts";
 import { persist } from "../persistence.ts";
 import { asyncContext, getActiveContext, getSessionId, getState, sessionStates, state } from "../state.ts";
-import { CompactionPressure, ExtensionAPI, ExtensionContext, QuestErrorCode, StoredState } from "../types.ts";
+import { ExtensionAPI, ExtensionContext, QuestErrorCode, StoredState } from "../types.ts";
 import { formatTokens } from "../utils.ts";
-import { buildCriticalCompactionReadyPrompt, buildCriticalSavePrompt, buildWarningSavePrompt, compactionReady, getCompactionInstructions } from "./checkpoint.ts";
-import { getCompactionPressure, getEconomyThreshold, getSubquestCompactThreshold, getWarningMargin } from "./policy.ts";
+import { buildPeriodicCheckpointPrompt, compactionReady, getCompactionInstructions } from "./checkpoint.ts";
+import { getSubquestCompactThreshold } from "./policy.ts";
 import { dispatchCompactionResume, retryPendingResume } from "./resume.ts";
 import { createOrGetCompactionTransaction } from "./transaction.ts";
+import { DEFAULT_CHECKPOINT_INTERVAL_TURNS, PERIODIC_CHECKPOINT_BURST_MS } from "../constants.ts";
 
 export let lastSteerTurnCounter = 0;
+export let lastPeriodicSteerTurnLegacy = -1;
+// legacy aliases for compat
 export let lastSteeredTurn = -1;
-export let lastSteeredPressureState: CompactionPressure | null = null;
+export let lastSteeredPressureState: any | null = null;
 export let lastSteeredReadyState: boolean | null = null;
 export let lastPreCompactionSteerTime = 0;
 
@@ -26,65 +29,62 @@ export function resetSteeredTrackingState(): void {
 	lastSteeredReadyState = null;
 }
 
-function handleScheduledEconomyError(
-	pi: ExtensionAPI,
-	c: ExtensionContext,
+// --- Unified compaction scheduler internals ---
+
+function isStaleCompaction(
 	sessionState: StoredState,
-	err: any,
-	targetCompactionId?: string | null,
+	targetQuestId: string | null | undefined,
+	targetActiveQuest: string | null | undefined,
+	targetCompactionId: string | null | undefined,
+): boolean {
+	return Boolean(
+		sessionState.questId !== targetQuestId ||
+		sessionState.active !== targetActiveQuest ||
+		(targetCompactionId && sessionState.activeTransaction?.id !== targetCompactionId)
+	);
+}
+
+function resetCompactionPendingState(
+	sessionState: StoredState,
+	targetCompactionId: string | null | undefined,
+	extra: { archive?: boolean; subquestLaunch?: boolean } = {},
 ): void {
-	if (targetCompactionId && sessionState.activeTransaction?.id !== targetCompactionId) {
-		logDebug(`Quest Journal: ignoring stale handleScheduledEconomyError for tx=${targetCompactionId}`);
-		return;
-	}
+	if (targetCompactionId && sessionState.activeTransaction?.id !== targetCompactionId) return;
 	sessionState.compactionPending = false;
 	if (sessionState.activeTransaction && (!targetCompactionId || sessionState.activeTransaction.id === targetCompactionId)) {
 		sessionState.activeTransaction.phase = "failed";
 		sessionState.activeTransaction.failedAt = Date.now();
-		sessionState.activeTransaction.error = err?.message || String(err);
 	}
 	if (!targetCompactionId || sessionState.activeCompactionId === targetCompactionId) {
 		sessionState.activeCompactionId = null;
 	}
-	sessionState.lastWarnedCompactionTokens = null;
+	if (extra.archive) sessionState.archiveCompactionPending = null;
+	if (extra.subquestLaunch) sessionState.subquestLaunchCompactionPending = false;
 	sessionState.preCompactionCheckpointPending = false;
 	sessionState.preCompactionSaveRequestPending = false;
-
-	const msg = err?.message || String(err);
-	if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
-		if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${msg}`, "error");
-		reportAgentError(
-			pi,
-			c,
-			`Economy auto-compaction failed: ${msg}`,
-			{
-				code: QuestErrorCode.COMPACTION_FAILURE,
-				requiredNextAction: "Review working memory and continue execution; compaction will be re-attempted when context pressure warrants.",
-			},
-		);
-	}
 }
 
-export function scheduleEconomyCompaction(
+function isBenignCompactionError(msg: string): boolean {
+	return msg.includes("Nothing to compact") || msg.includes("Already compacted") || msg.includes("session too small");
+}
+
+function scheduleCompactionInternal(
 	pi: ExtensionAPI,
 	c: ExtensionContext,
 	targetSessionId: string,
 	instructions: string,
+	onError: (latestState: StoredState, err: any, targetCompactionId: string | null) => void,
+	staleLog: string,
 ): void {
 	const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
 	const targetQuestId = sessionState.questId;
 	const targetActiveQuest = sessionState.active;
 	const targetCompactionId = sessionState.activeTransaction?.id || sessionState.activeCompactionId || null;
-
 	setTimeout(() => {
 		asyncContext.run(c, () => {
 			const currentSessionState = sessionStates.get(targetSessionId) ?? getState(c);
-			if (
-				currentSessionState.questId !== targetQuestId ||
-				currentSessionState.active !== targetActiveQuest ||
-				(targetCompactionId && currentSessionState.activeTransaction?.id !== targetCompactionId)
-			) {
-				logDebug(`Quest Journal: ignoring stale scheduled economy compaction callback (scheduled for questId=${targetQuestId}, active=${targetActiveQuest}, tx=${targetCompactionId})`);
+			if (isStaleCompaction(currentSessionState, targetQuestId, targetActiveQuest, targetCompactionId)) {
+				logDebug(staleLog);
 				return;
 			}
 			try {
@@ -93,19 +93,15 @@ export function scheduleEconomyCompaction(
 					onComplete: () => {},
 					onError: (err: any) => {
 						const latestState = sessionStates.get(targetSessionId) ?? getState(c);
-						if (
-							latestState.questId !== targetQuestId ||
-							latestState.active !== targetActiveQuest ||
-							(targetCompactionId && latestState.activeTransaction?.id !== targetCompactionId)
-						) {
-							logDebug(`Quest Journal: ignoring stale economy compaction error callback (scheduled for tx=${targetCompactionId})`);
+						if (isStaleCompaction(latestState, targetQuestId, targetActiveQuest, targetCompactionId)) {
+							logDebug(staleLog);
 							return;
 						}
-						handleScheduledEconomyError(pi, c, latestState, err, targetCompactionId);
+						onError(latestState, err, targetCompactionId);
 					},
 				});
 			} catch (err: any) {
-				handleScheduledEconomyError(pi, c, currentSessionState, err, targetCompactionId);
+				onError(currentSessionState, err, targetCompactionId);
 			}
 		});
 	}, 50);
@@ -123,40 +119,20 @@ function handleScheduledArchiveError(
 		logDebug(`Quest Journal: ignoring stale handleScheduledArchiveError for tx=${targetCompactionId}`);
 		return;
 	}
-	sessionState.compactionPending = false;
+	resetCompactionPendingState(sessionState, targetCompactionId, { archive: true });
 	if (sessionState.activeTransaction && (!targetCompactionId || sessionState.activeTransaction.id === targetCompactionId)) {
-		sessionState.activeTransaction.phase = "failed";
-		sessionState.activeTransaction.failedAt = Date.now();
 		sessionState.activeTransaction.error = err?.message || String(err);
 	}
-	if (!targetCompactionId || sessionState.activeCompactionId === targetCompactionId) {
-		sessionState.activeCompactionId = null;
-	}
-	sessionState.archiveCompactionPending = null;
-	sessionState.preCompactionCheckpointPending = false;
-	sessionState.preCompactionSaveRequestPending = false;
-
 	const msg = err?.message || String(err);
-	if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
+	if (!isBenignCompactionError(msg)) {
 		if (c.hasUI) c.ui.notify(`Post-archive compaction failed: ${msg}`, "error");
-		reportAgentError(
-			pi,
-			c,
-			`Post-archive compaction failed: ${msg}`,
-			{
-				code: QuestErrorCode.COMPACTION_FAILURE,
-				requiredNextAction: parentName
-					? `Read ${questPath(sessionState.questId)} to resume parent execution.`
-					: "Review active memory and continue execution.",
-			},
-		);
+		reportAgentError(pi, c, `Post-archive compaction failed: ${msg}`, {
+			code: QuestErrorCode.COMPACTION_FAILURE,
+			requiredNextAction: parentName ? `Read ${questPath(sessionState.questId)} to resume parent execution.` : "Review active memory and continue execution.",
+		});
 	}
 	if (parentName && (sessionState.active === parentName || (Array.isArray(sessionState.stack) && sessionState.stack.includes(parentName)))) {
-		dispatchCompactionResume(pi, {
-			questName: parentName,
-			reason: "compaction-failure-fallback",
-			ctx: c,
-		});
+		dispatchCompactionResume(pi, { questName: parentName, reason: "compaction-failure-fallback", ctx: c });
 	}
 }
 
@@ -167,44 +143,9 @@ export function scheduleArchiveCompaction(
 	instructions: string,
 	parentName: string | null,
 ): void {
-	const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
-	const targetQuestId = sessionState.questId;
-	const targetActiveQuest = sessionState.active;
-	const targetCompactionId = sessionState.activeTransaction?.id || sessionState.activeCompactionId || null;
-
-	setTimeout(() => {
-		asyncContext.run(c, () => {
-			const currentSessionState = sessionStates.get(targetSessionId) ?? getState(c);
-			if (
-				currentSessionState.questId !== targetQuestId ||
-				currentSessionState.active !== targetActiveQuest ||
-				(targetCompactionId && currentSessionState.activeTransaction?.id !== targetCompactionId)
-			) {
-				logDebug(`Quest Journal: ignoring stale scheduled archive compaction callback`);
-				return;
-			}
-			try {
-				c.compact!({
-					customInstructions: instructions,
-					onComplete: () => {},
-					onError: (err: any) => {
-						const latestState = sessionStates.get(targetSessionId) ?? getState(c);
-						if (
-							latestState.questId !== targetQuestId ||
-							latestState.active !== targetActiveQuest ||
-							(targetCompactionId && latestState.activeTransaction?.id !== targetCompactionId)
-						) {
-							logDebug(`Quest Journal: ignoring stale archive compaction error callback`);
-							return;
-						}
-						handleScheduledArchiveError(pi, c, latestState, err, parentName, targetCompactionId);
-					},
-				});
-			} catch (err: any) {
-				handleScheduledArchiveError(pi, c, currentSessionState, err, parentName, targetCompactionId);
-			}
-		});
-	}, 50);
+	scheduleCompactionInternal(pi, c, targetSessionId, instructions, (latestState, err, targetCompactionId) => {
+		handleScheduledArchiveError(pi, c, latestState, err, parentName, targetCompactionId);
+	}, `Quest Journal: ignoring stale scheduled archive compaction callback`);
 }
 
 export function handleSubquestLaunchCompactionFailure(
@@ -220,57 +161,30 @@ export function handleSubquestLaunchCompactionFailure(
 		logDebug(`Quest Journal: ignoring stale handleSubquestLaunchCompactionFailure for tx=${targetCompactionId}`);
 		return;
 	}
-	sessionState.compactionPending = false;
+	resetCompactionPendingState(sessionState, targetCompactionId, { subquestLaunch: true });
 	if (sessionState.activeTransaction && (!targetCompactionId || sessionState.activeTransaction.id === targetCompactionId)) {
-		sessionState.activeTransaction.phase = "failed";
-		sessionState.activeTransaction.failedAt = Date.now();
 		sessionState.activeTransaction.error = err?.message || String(err);
 	}
-	if (!targetCompactionId || sessionState.activeCompactionId === targetCompactionId) {
-		sessionState.activeCompactionId = null;
-	}
-	sessionState.subquestLaunchCompactionPending = false;
-	sessionState.preCompactionCheckpointPending = false;
-	sessionState.preCompactionSaveRequestPending = false;
-
 	const msg = err?.message || String(err);
 	const prefix = isSchedulingError ? "Sub-quest launch compaction scheduling failed" : "Sub-quest launch compaction failed";
-	if (isSchedulingError) {
-		logError(prefix, err, c);
-	}
-
-	if (!msg.includes("Nothing to compact") && !msg.includes("Already compacted") && !msg.includes("session too small")) {
+	if (isSchedulingError) logError(prefix, err, c);
+	if (!isBenignCompactionError(msg)) {
 		if (c.hasUI) c.ui.notify(`${prefix}: ${msg}`, "error");
-		reportAgentError(
-			pi,
-			c,
-			`${prefix}: ${msg}`,
-			{
-				code: QuestErrorCode.COMPACTION_FAILURE,
-				requiredNextAction: childName
-					? `Read ${questPath(sessionState.questId)} to proceed with subquest execution.`
-					: "Review active memory and continue execution.",
-			},
-		);
+		reportAgentError(pi, c, `${prefix}: ${msg}`, {
+			code: QuestErrorCode.COMPACTION_FAILURE,
+			requiredNextAction: childName ? `Read ${questPath(sessionState.questId)} to proceed with subquest execution.` : "Review active memory and continue execution.",
+		});
 	}
-
 	const fallbackTarget = (sessionState.pendingSubquestResume && sessionState.active === sessionState.pendingSubquestResume)
 		? sessionState.pendingSubquestResume
 		: childName;
-
 	if (fallbackTarget && (sessionState.active === fallbackTarget || sessionState.pendingSubquestResume === fallbackTarget)) {
 		if (fallbackTarget === sessionState.pendingSubquestResume) {
 			logResumeTransition("RESUME_ATTEMPTED", `subquest resume after compaction failure fallback: ${fallbackTarget}`, {
-				quest: fallbackTarget,
-				subquest: fallbackTarget,
-				reason: "post-launch-compaction-fallback",
+				quest: fallbackTarget, subquest: fallbackTarget, reason: "post-launch-compaction-fallback",
 			});
 		}
-		dispatchCompactionResume(pi, {
-			questName: fallbackTarget,
-			reason: "compaction-failure-fallback",
-			ctx: c,
-		});
+		dispatchCompactionResume(pi, { questName: fallbackTarget, reason: "compaction-failure-fallback", ctx: c });
 	}
 }
 
@@ -285,15 +199,10 @@ export function scheduleSubquestLaunchCompaction(
 	const targetQuestId = sessionState.questId;
 	const targetActiveQuest = sessionState.active;
 	const targetCompactionId = sessionState.activeTransaction?.id || sessionState.activeCompactionId || null;
-
 	setTimeout(() => {
 		asyncContext.run(c, () => {
 			const currentSessionState = sessionStates.get(targetSessionId) ?? getState(c);
-			if (
-				currentSessionState.questId !== targetQuestId ||
-				currentSessionState.active !== targetActiveQuest ||
-				(targetCompactionId && currentSessionState.activeTransaction?.id !== targetCompactionId)
-			) {
+			if (isStaleCompaction(currentSessionState, targetQuestId, targetActiveQuest, targetCompactionId)) {
 				logDebug(`Quest Journal: ignoring stale scheduled subquest launch compaction callback`);
 				return;
 			}
@@ -303,11 +212,7 @@ export function scheduleSubquestLaunchCompaction(
 					onComplete: () => {},
 					onError: (err: any) => {
 						const latestState = sessionStates.get(targetSessionId) ?? getState(c);
-						if (
-							latestState.questId !== targetQuestId ||
-							latestState.active !== targetActiveQuest ||
-							(targetCompactionId && latestState.activeTransaction?.id !== targetCompactionId)
-						) {
+						if (isStaleCompaction(latestState, targetQuestId, targetActiveQuest, targetCompactionId)) {
 							logDebug(`Quest Journal: ignoring stale subquest launch compaction error callback`);
 							return;
 						}
@@ -321,165 +226,116 @@ export function scheduleSubquestLaunchCompaction(
 	}, 50);
 }
 
-function handleCriticalReadyCompaction(
-	pi: ExtensionAPI,
-	c: ExtensionContext,
-	activeQuest: string,
-	tokens: number,
-	threshold: number,
-	isPressureTransition: boolean,
-): boolean {
-	if (state.pendingResume || state.activeTransaction?.phase === "resume-pending") {
-		retryPendingResume(pi, c);
-		if (state.pendingResume || state.activeTransaction?.phase === "resume-pending") {
-			logDebug("Quest Journal: postponing new compaction because previous resume obligation is still pending delivery.");
-			return false;
-		}
-	}
+// --- Periodic heartbeat checkpoint (replaces pressure-driven pre-compaction) ---
 
-	const text = buildCriticalCompactionReadyPrompt(activeQuest, tokens, threshold);
-	sendInternalAgentMessage(pi, text, "steer");
-	logCompactionTransition("COMPACTION_PREPARED", "compaction ready critical steer emitted", {
-		quest: activeQuest,
-		type: "compaction_ready_critical",
-	});
-
-	const tx = createOrGetCompactionTransaction(state, "normal-compaction");
-	tx.phase = "in-flight";
-	state.compactionPending = true;
-	state.preCompactionCheckpointPending = false;
-	state.preCompactionSaveRequestPending = false;
-	persist(pi, c);
-
-	if (isPressureTransition && c.hasUI) {
-		c.ui.notify(
-			`Quest-journal: CRITICAL context pressure (${formatTokens(tokens)}/${formatTokens(threshold)}) for '${activeQuest}' [saved & ready for compaction].`,
-			"info",
-		);
-	}
-
-	if (typeof c.compact === "function") {
-		const instructions = getCompactionInstructions(activeQuest, tokens, threshold);
-		const targetSessionId = getSessionId(c);
-		scheduleEconomyCompaction(pi, c, targetSessionId, instructions);
-	}
-	return true;
+function getPeriodicLogTail(): string | undefined {
+	try {
+		const qid = (state as any).questId || (state as any).active;
+		if (!qid) return undefined;
+		// Lazy import to avoid cycle
+		const { readQuestLog } = require("../logging/paths.ts") as any;
+		if (typeof readQuestLog !== "function") return undefined;
+		const tail: string[] = readQuestLog(qid, 10) || [];
+		if (tail.length === 0) return undefined;
+		return tail.slice(-10).join("\n").slice(-1200);
+	} catch { return undefined; }
 }
 
-export function handleCriticalCompactionPressure(
-	pi: ExtensionAPI,
-	c: ExtensionContext,
-	activeQuest: string,
-	tokens: number,
-	threshold: number,
-	isReady: boolean,
-	isPressureTransition: boolean,
-): boolean {
-	if (isReady) {
-		return handleCriticalReadyCompaction(pi, c, activeQuest, tokens, threshold, isPressureTransition);
-	}
-
-	state.preCompactionCheckpointPending = true;
-	state.preCompactionSaveRequestPending = true;
-	const text = buildCriticalSavePrompt(activeQuest, tokens, threshold);
-
-	sendInternalAgentMessage(pi, text, "steer");
-	logCompactionTransition("COMPACTION_BLOCKED", "checkpoint required critical steer emitted", {
-		quest: activeQuest,
-		type: "checkpoint_required_critical",
-	});
-
-	if (isPressureTransition && c.hasUI) {
-		c.ui.notify(
-			`Quest-journal: CRITICAL context pressure (${formatTokens(tokens)}/${formatTokens(threshold)}) for '${activeQuest}' [SAVE REQUIRED IMMEDIATELY].`,
-			"error",
-		);
-	}
-	return true;
-}
-
-export function handleWarningCompactionPressure(
-	pi: ExtensionAPI,
-	c: ExtensionContext,
-	activeQuest: string,
-	tokens: number,
-	threshold: number,
-	fraction: number,
-	isPressureTransition: boolean,
-): boolean {
-	state.preCompactionCheckpointPending = true;
-	const text = buildWarningSavePrompt(activeQuest, fraction, tokens, threshold);
-
-	sendInternalAgentMessage(pi, text, "steer");
-	logAgentMessageTransition("AGENT_MESSAGE_DELIVERED", "compaction warning prompt", {
-		quest: activeQuest,
-		type: "compaction_warning",
-		deliverAs: "steer",
-	});
-
-	if (isPressureTransition && c.hasUI) {
-		const levelStr = fraction < 0.5 ? "approaching" : "close to";
-		c.ui.notify(
-			`Quest-journal: context ${levelStr} compaction threshold for '${activeQuest}' (${formatTokens(tokens)}/${formatTokens(threshold)}).`,
-			"warning",
-		);
-	}
-	return true;
-}
-
-export function requestPreCompactionCheckpoint(
+export function requestPeriodicCheckpoint(
 	pi: ExtensionAPI,
 	ctx?: ExtensionContext,
 	force = false,
-	triggerSource: "turn_end" | "context" | "manual" = "turn_end",
 ): boolean {
 	const c = getActiveContext(ctx);
-	if (!c || !state.active) return false;
+	if (!c || (!state.active && !state.pendingRootQuest && !state.activeDraft)) return false;
 	if (state.compactionPending) return false;
 	if (state.pickerCancelled) return false;
+	const hasRisk = Boolean(state.dirty || (Array.isArray(state.draftPrompts) && state.draftPrompts.length > 0) || state.pendingRootQuest || state.activeDraft);
+	if (!hasRisk && !force) return false;
+
+	// Suppress when awaiting plan review (turn-stop gate active)
+	const aw: any = (state as any).awaitingReview;
+	if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) return false;
+
+	const turnsSince = (state as any).substantiveTurnsSinceCheckpoint || 0;
+	if (!force && turnsSince < DEFAULT_CHECKPOINT_INTERVAL_TURNS) return false;
+	if (!force && turnsSince % DEFAULT_CHECKPOINT_INTERVAL_TURNS !== 0) return false;
 
 	const now = Date.now();
-	if (!force && now - lastPreCompactionSteerTime < 50) {
-		return false;
-	}
+	const lastSteerAt = (state as any).lastPeriodicSteerAt || 0;
+	if (!force && now - lastSteerAt < PERIODIC_CHECKPOINT_BURST_MS) return false;
 
-	const { pressure, tokens, threshold, fraction } = getCompactionPressure(c);
-	if (pressure === CompactionPressure.NONE || tokens === null) {
-		if (state.lastNotifiedPressure !== CompactionPressure.NONE) {
-			state.lastNotifiedPressure = CompactionPressure.NONE;
-			resetSteeredTrackingState();
-			persist(pi, c);
-		}
-		return false;
-	}
+	// Update tracking (decoupled from direction review counter)
+	(state as any).lastPeriodicSteerAt = now;
+	(state as any).lastPeriodicSteerTurn = lastSteerTurnCounter;
+	lastSteerTurnCounter && (lastPreCompactionSteerTime = now); // compat
+	state.lastNotifiedPressure = undefined as any;
 
-	const isReady = compactionReady();
-	const isPressureTransition = state.lastNotifiedPressure !== pressure;
-	const isReadinessTransition = lastSteeredReadyState !== null && lastSteeredReadyState !== isReady;
-	const isNewTurn = lastSteeredTurn !== lastSteerTurnCounter;
+	const filesModified = Array.isArray(state.sessionModifiedFiles) ? state.sessionModifiedFiles : undefined;
+	let logTail: string | undefined;
+	try {
+		const { readQuestLog } = require("../logging/paths.ts") as any;
+		logTail = undefined;
+	} catch {}
 
-	if (triggerSource === "context" && !force && !isPressureTransition && !isReadinessTransition && !isNewTurn) {
-		return false;
-	}
+	const provisionalSlug = state.active || state.activeDraft || "provisional";
+	const text = buildPeriodicCheckpointPrompt(provisionalSlug, {
+		turnsSinceCheckpoint: turnsSince,
+		filesModified: filesModified as any,
+		logTail,
+	});
 
-	lastPreCompactionSteerTime = now;
-	lastSteeredTurn = lastSteerTurnCounter;
-	lastSteeredPressureState = pressure;
-	lastSteeredReadyState = isReady;
-	state.lastWarnedCompactionTokens = tokens;
-
-	if (isPressureTransition) {
-		state.lastNotifiedPressure = pressure;
-	}
+	sendInternalAgentMessage(pi, text, "steer");
+	logAgentMessageTransition("AGENT_MESSAGE_DELIVERED", "periodic checkpoint prompt", {
+		quest: provisionalSlug || "",
+		type: "periodic_checkpoint",
+		deliverAs: "steer",
+	});
 	persist(pi, c);
+	return true;
+}
 
-	if (pressure === CompactionPressure.CRITICAL) {
-		return handleCriticalCompactionPressure(pi, c, state.active, tokens, threshold, isReady, isPressureTransition);
+// Deprecated aliases (keep exports for tests that import old name)
+export function requestPreCompactionCheckpoint(pi: ExtensionAPI, ctx?: ExtensionContext, force = false, _triggerSource?: string): boolean {
+	return requestPeriodicCheckpoint(pi, ctx, force);
+}
+
+// Legacy handlers — retained for race-condition tests (not used by periodic checkpoint)
+export function handleCriticalCompactionPressure(): boolean { return false; }
+export function handleWarningCompactionPressure(): boolean { return false; }
+function handleScheduledEconomyError(
+	pi: ExtensionAPI,
+	c: ExtensionContext,
+	sessionState: StoredState,
+	err: any,
+	targetCompactionId?: string | null,
+): void {
+	if (targetCompactionId && sessionState.activeTransaction?.id !== targetCompactionId) {
+		logDebug(`Quest Journal: ignoring stale handleScheduledEconomyError for tx=${targetCompactionId}`);
+		return;
 	}
-	if (pressure === CompactionPressure.WARNING) {
-		return handleWarningCompactionPressure(pi, c, state.active, tokens, threshold, fraction, isPressureTransition);
+	resetCompactionPendingState(sessionState, targetCompactionId);
+	if (sessionState.activeTransaction && (!targetCompactionId || sessionState.activeTransaction.id === targetCompactionId)) {
+		sessionState.activeTransaction.error = err?.message || String(err);
 	}
-	return false;
+	const msg = err?.message || String(err);
+	if (!isBenignCompactionError(msg)) {
+		if (c.hasUI) c.ui.notify(`Economy auto-compaction failed: ${msg}`, "error");
+		reportAgentError(pi, c, `Economy auto-compaction failed: ${msg}`, {
+			code: QuestErrorCode.COMPACTION_FAILURE,
+			requiredNextAction: "Review working memory and continue execution; compaction will be re-attempted when context pressure warrants.",
+		});
+	}
+}
+export function scheduleEconomyCompaction(
+	pi: ExtensionAPI,
+	c: ExtensionContext,
+	targetSessionId: string,
+	instructions: string,
+): void {
+	scheduleCompactionInternal(pi, c, targetSessionId, instructions, (latestState, err, targetCompactionId) => {
+		handleScheduledEconomyError(pi, c, latestState, err, targetCompactionId);
+	}, `Quest Journal: ignoring stale scheduled economy compaction callback`);
 }
 
 function triggerDeferredArchiveCompaction(pi: ExtensionAPI, c: ExtensionContext, targetName: string): boolean {

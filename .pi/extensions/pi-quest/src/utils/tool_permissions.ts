@@ -403,7 +403,7 @@ export function isCriticalReviewSubagentInvocation(input?: any): boolean {
 	if (!input) return false;
 	if (input.isCriticalReview === true || input.review === true) return true;
 	const kind = input.reviewKind || input.kind;
-	if (kind === "direction" || kind === "final_acceptance" || kind === "critical_review") return true;
+	if (kind === "direction" || kind === "plan_review" || kind === "final_acceptance" || kind === "critical_review") return true;
 
 	const agent = String(input.agent || "").toLowerCase().trim();
 	if (
@@ -489,6 +489,14 @@ export function classifyToolCall(toolName: string, input?: any): ToolPermission 
 	}
 
 	if (MUTATING_TOOL_NAMES.has(norm)) {
+		return "implementation";
+	}
+
+	// Hallucinated `grep`/`rg` tool — treat as read (search) not unknown, to avoid UNKNOWN_TOOL spam
+	if (READ_BINARIES.has(norm)) {
+		return "read";
+	}
+	if (MUTATING_BINARIES.has(norm)) {
 		return "implementation";
 	}
 

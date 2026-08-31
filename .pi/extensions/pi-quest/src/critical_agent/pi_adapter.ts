@@ -1,0 +1,297 @@
+import { buildCriticalReviewPrompt, parseCriticalReviewResponse } from "./prompt.ts";
+import {
+	CriticalReviewer,
+	ExtensionAPI,
+	ExtensionContext,
+	ReviewActivityStats,
+	ReviewInput,
+	ReviewResult,
+	ReviewTimeoutLayer,
+} from "../types.ts";
+
+export type SubagentExecutorFn = (
+	task: string,
+	options?: {
+		agent?: string;
+		isCriticalReview?: boolean;
+		reviewKind?: string;
+		triggerReason?: string;
+		model?: string;
+		tools?: string[];
+		async?: boolean;
+		reviewId?: string;
+		timeoutMs?: number;
+		onActivity?: (activityEvent: any) => void;
+	}
+) => Promise<string | { text?: string; content?: any; isError?: boolean; error?: any; childSessionId?: string; transcriptRef?: string }>;
+
+export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
+	const msg = (errMessage || "").toLowerCase();
+	if (msg.includes("bridge") || msg.includes("event bridge")) {
+		return "subagent_bridge_deadline";
+	}
+	if (msg.includes("process") || msg.includes("killed") || msg.includes("sigterm") || msg.includes("sigkill") || msg.includes("spawn")) {
+		return "child_process_deadline";
+	}
+	if (msg.includes("model") || msg.includes("provider") || msg.includes("rate limit") || msg.includes("context") || msg.includes("429") || msg.includes("504") || msg.includes("quota")) {
+		return "provider_model_timeout";
+	}
+	return "quest_journal_deadline";
+}
+
+export function resolveDefaultReviewModel(ctx?: ExtensionContext): string {
+	if (typeof process !== "undefined" && process.env) {
+		const explicitReviewModel = process.env.PI_CRITICAL_REVIEW_MODEL || process.env.PI_REVIEW_MODEL;
+		if (explicitReviewModel) return String(explicitReviewModel);
+
+		const provider = process.env.PI_PROVIDER;
+		const model = process.env.PI_MODEL;
+		if (provider && model) {
+			return `${provider}/${model}`;
+		}
+		if (model) {
+			return String(model);
+		}
+	}
+	const ctxModel = (ctx as any)?.model;
+	if (typeof ctxModel === "string") {
+		return ctxModel;
+	}
+	if (ctxModel && typeof ctxModel === "object") {
+		if (ctxModel.provider && ctxModel.id) {
+			return `${ctxModel.provider}/${ctxModel.id}`;
+		}
+		if (ctxModel.id) return String(ctxModel.id);
+		if (ctxModel.name) return String(ctxModel.name);
+	}
+	return "";
+}
+
+// In-memory or custom runner registry for dependency injection & testing
+let customSubagentRunner: SubagentExecutorFn | null = null;
+
+export function setCustomSubagentRunner(runner: SubagentExecutorFn | null): void {
+	customSubagentRunner = runner;
+}
+
+export function getCustomSubagentRunner(): SubagentExecutorFn | null {
+	return customSubagentRunner;
+}
+
+export function isSubagentToolRegistered(pi?: ExtensionAPI, _ctx?: ExtensionContext): boolean {
+	if (customSubagentRunner) return true;
+	if (typeof pi?.getAllTools === "function") {
+		try {
+			const tools = pi.getAllTools();
+			if (Array.isArray(tools)) {
+				return tools.some((t: any) => t?.name === "subagent");
+			}
+		} catch {}
+	}
+	return false;
+}
+
+export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContext): SubagentExecutorFn | null {
+	if (customSubagentRunner) return customSubagentRunner;
+
+	// Subagent extension supported bridge mechanism (pi.events bridge registered by pi-cohort)
+	if (pi?.events && typeof pi.events.on === "function" && typeof pi.events.emit === "function") {
+		if (!isSubagentToolRegistered(pi, ctx)) {
+			return null;
+		}
+		return async (task: string, options?: any) => {
+			return new Promise((resolve, reject) => {
+				const requestId = options?.reviewId || `slash_subagent_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+				let unsubs: Array<(() => void) | void> = [];
+
+				const maxDuration = options?.timeoutMs || 300000; // 5 minutes default
+				const inactivityLimit = 60000; // 60 seconds of zero activity
+				let lastActivityAt = Date.now();
+				let childSessionId: string | undefined = undefined;
+
+				const checkInactivity = () => {
+					const now = Date.now();
+					if (now - lastActivityAt > inactivityLimit && (now - startTime) > inactivityLimit) {
+						cleanup();
+						const err: any = new Error("Subagent execution timed out (quest_journal_deadline: inactivity)");
+						err.timeoutLayer = "quest_journal_deadline";
+						reject(err);
+						return;
+					}
+				};
+
+				const startTime = Date.now();
+				const inactivityInterval = setInterval(checkInactivity, 15000);
+
+				const maxTimer = setTimeout(() => {
+					cleanup();
+					const err: any = new Error("Subagent execution timed out (quest_journal_deadline: max_duration)");
+					err.timeoutLayer = "quest_journal_deadline";
+					reject(err);
+				}, maxDuration);
+
+				const cleanup = () => {
+					clearTimeout(maxTimer);
+					clearInterval(inactivityInterval);
+					for (const u of unsubs) {
+						if (typeof u === "function") u();
+					}
+					unsubs = [];
+				};
+
+				const handleActivity = (data: any) => {
+					if (data && (data.requestId === requestId || data.id === requestId || !data.requestId)) {
+						lastActivityAt = Date.now();
+						if (data.childSessionId) childSessionId = data.childSessionId;
+						if (typeof options?.onActivity === "function") {
+							options.onActivity({ ...data, childSessionId });
+						}
+					}
+				};
+
+				const handleResponse = (data: any) => {
+					if (data && (data.requestId === requestId || data.id === requestId)) {
+						cleanup();
+						if (data.isError) {
+							const errorText = data.errorText || data.result?.content?.[0]?.text || "Subagent execution error";
+							const err: any = new Error(errorText);
+							err.timeoutLayer = classifyTimeoutLayer(errorText);
+							reject(err);
+						} else {
+							const text = data.contentText || data.text || data.result?.content?.[0]?.text || data.result;
+							const transcriptRef = data.transcriptRef || data.sessionPath || (childSessionId ? `.pi/sessions/${childSessionId}.jsonl` : undefined);
+							resolve({
+								text: text || data.result,
+								childSessionId: data.childSessionId || childSessionId,
+								transcriptRef,
+							});
+						}
+					}
+				};
+
+				if (typeof pi.events!.on === "function") {
+					unsubs.push(pi.events!.on("prompt-template:subagent:response", handleResponse));
+					unsubs.push(pi.events!.on("subagent:slash:response", handleResponse));
+					unsubs.push(pi.events!.on("subagent:response", handleResponse));
+
+					unsubs.push(pi.events!.on("subagent:activity", handleActivity));
+					unsubs.push(pi.events!.on("subagent:started", handleActivity));
+					unsubs.push(pi.events!.on("subagent:tool_call", handleActivity));
+					unsubs.push(pi.events!.on("subagent:tool_result", handleActivity));
+					unsubs.push(pi.events!.on("subagent:turn_start", handleActivity));
+					unsubs.push(pi.events!.on("subagent:turn_end", handleActivity));
+					unsubs.push(pi.events!.on("prompt-template:subagent:activity", handleActivity));
+				}
+
+				const targetModel = (options?.model !== undefined && typeof options?.model === "string" && options.model !== "")
+					? options.model
+					: resolveDefaultReviewModel(ctx);
+
+				// Emit prompt-template:subagent:request (pi-cohort standard) and subagent:slash:request (legacy/test mock)
+				pi.events!.emit("prompt-template:subagent:request", {
+					requestId,
+					agent: options?.agent || "reviewer",
+					task,
+					context: "fresh",
+					model: targetModel,
+					async: true,
+					cwd: ctx?.cwd || (typeof process !== "undefined" ? process.cwd() : ""),
+				});
+
+				pi.events!.emit("subagent:slash:request", {
+					requestId,
+					params: {
+						agent: options?.agent || "reviewer",
+						task,
+						isCriticalReview: true,
+						reviewKind: options?.reviewKind || "direction",
+						model: targetModel,
+						tools: ["read", "grep", "find", "ls"],
+						async: true,
+						clarify: false,
+					},
+				});
+			});
+		};
+	}
+
+	return null;
+}
+
+export function isSubagentAvailable(pi?: ExtensionAPI, ctx?: ExtensionContext): boolean {
+	if (customSubagentRunner) return true;
+	const registered = isSubagentToolRegistered(pi, ctx);
+	if (!registered) return false;
+	const executor = resolveSubagentExecutor(pi, ctx);
+	return executor !== null;
+}
+
+/**
+ * PiSubagentReviewer: The Pi-specific reviewer adapter.
+ * Handles subagent discovery, invocation, timeouts, and read-only tool restrictions.
+ * Implements the domain CriticalReviewer interface.
+ */
+export class PiSubagentReviewer implements CriticalReviewer {
+	constructor(
+		private pi?: ExtensionAPI,
+		private ctx?: ExtensionContext,
+		private explicitRunner?: SubagentExecutorFn | null,
+	) {}
+
+	isAvailable(): boolean {
+		if (this.explicitRunner || customSubagentRunner) return true;
+		return isSubagentToolRegistered(this.pi, this.ctx) && resolveSubagentExecutor(this.pi, this.ctx) !== null;
+	}
+
+	async review(input: ReviewInput): Promise<ReviewResult> {
+		const executor = this.explicitRunner || customSubagentRunner || resolveSubagentExecutor(this.pi, this.ctx);
+		if (!executor) {
+			throw new Error("subagent_tool_not_executable");
+		}
+		const prompt = buildCriticalReviewPrompt(input.kind, input.questSlug, input.context, input.rebuttal, input.triggerReason, input.boundaryKey);
+		const targetModel = (input.model && typeof input.model === "string")
+			? input.model
+			: resolveDefaultReviewModel(this.ctx);
+
+		const startTime = Date.now();
+		let rawRes: any;
+		try {
+			rawRes = await executor(prompt, {
+				agent: "reviewer",
+				isCriticalReview: true,
+				reviewKind: input.kind,
+				triggerReason: input.triggerReason || input.kind,
+				model: targetModel,
+				tools: ["read", "grep", "find", "ls"],
+				async: true,
+				reviewId: input.reviewId,
+				timeoutMs: input.timeoutMs,
+				onActivity: input.onActivity,
+			});
+		} catch (err: any) {
+			const timeoutLayer = err?.timeoutLayer || classifyTimeoutLayer(err?.message || "");
+			err.timeoutLayer = timeoutLayer;
+			throw err;
+		}
+
+		const durationMs = Date.now() - startTime;
+		const rawResponseText = typeof rawRes === "string"
+			? rawRes
+			: rawRes?.text || (Array.isArray(rawRes?.content) ? rawRes.content.map((c: any) => c.text || "").join("\n") : "");
+
+		const childSessionId = typeof rawRes === "object" ? rawRes?.childSessionId : undefined;
+		const childTranscriptRef = typeof rawRes === "object" ? (rawRes?.transcriptRef || rawRes?.childTranscriptRef) : undefined;
+
+		const parsed = parseCriticalReviewResponse(rawResponseText);
+		return {
+			...parsed,
+			rawText: rawResponseText,
+			childSessionId,
+			childTranscriptRef,
+			durationMs,
+		};
+	}
+}
+
+// Default export alias for backward compatibility
+export { PiSubagentReviewer as DefaultCriticalReviewer };

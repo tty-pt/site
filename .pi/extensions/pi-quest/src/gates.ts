@@ -1,13 +1,13 @@
-import { compactionReady, getCompactionPressure, getEconomyThreshold, getWarningMargin } from "./compaction.ts";
-import { calculateCurrentTokens } from "./context.ts";
+import { compactionReady } from "./compaction.ts";
+import { getCustomSubagentRunner, isPlanReviewValidForState, isSubagentToolRegistered } from "./critical_agent/index.ts";
 import { questPath } from "./paths.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
-import { CompactionPressure, ExtensionContext, QuestErrorCode, QuestLifecycleState, StoredState } from "./types.ts";
-import { formatTokens } from "./utils.ts";
+import { ExtensionContext, QuestErrorCode, QuestLifecycleState, StoredState } from "./types.ts";
 
 export function canImplement(targetState?: StoredState, ctx?: ExtensionContext): boolean {
 	const s = targetState || state;
 	if (s.pendingRootQuest) return false;
+	if (s.activeDraft) return false;
 	if (!s.active) return true;
 	if (s.activeTransaction && (s.activeTransaction.phase === "inconsistent" || s.activeTransaction.phase === "failed")) {
 		return false;
@@ -18,16 +18,16 @@ export function canImplement(targetState?: StoredState, ctx?: ExtensionContext):
 	if (s.compactionPending) {
 		return false;
 	}
-	const c = getActiveContext(ctx);
-	if (c) {
-		const pressureInfo = getCompactionPressure(c, s);
-		if (pressureInfo.pressure === CompactionPressure.CRITICAL && !compactionReady(s.active)) {
-			return false;
-		}
-	}
+	// Periodic heartbeat does not gate implementation on token pressure; dirty-state safety is enforced via session_before_compact.
 	if (s.researchRequired) return false;
 	if (!s.researchComplete) return false;
 	if (s.reassessmentRequired) return false;
+	if (isRootQuest(s) && (isSubagentToolRegistered(undefined, ctx) || Boolean(getCustomSubagentRunner())) && !isPlanReviewValidForState(s)) {
+		return false;
+	}
+	if ((s as any).awaitingReview && ((s as any).awaitingReview.kind === "plan_review" || (s as any).awaitingReview.kind === "final_acceptance")) {
+		return false;
+	}
 	if (isRootQuest(s) && s.awaitingUserConfirmation) return false;
 	return true;
 }
@@ -40,20 +40,16 @@ export function getImplementationBlockReason(targetState?: StoredState, ctx?: Ex
 	requiredAction: string;
 } {
 	const s = targetState || state;
-	const c = getActiveContext(ctx);
-	if (c && s.active) {
-		const pressureInfo = getCompactionPressure(c, s);
-		if (pressureInfo.pressure === CompactionPressure.CRITICAL && !compactionReady(s.active)) {
-			return {
-				blocked: true,
-				code: QuestErrorCode.CHECKPOINT_REQUIRED,
-				stateName: "CRITICAL_COMPACTION_CHECKPOINT_REQUIRED",
-				reason: `Context usage (${formatTokens(pressureInfo.tokens || 0)} tokens) has reached or exceeded the compaction threshold (${formatTokens(pressureInfo.threshold)} tokens) and no fresh verified durable checkpoint exists.`,
-				requiredAction: `Perform an exhaustive durable state update in ${questPath(s.questId)} and call quest_mark_saved before modifying project code.`
-			};
-		}
-	}
 	if (s.pendingRootQuest) {
+		return {
+			blocked: true,
+			code: QuestErrorCode.RESEARCH_REQUIRED,
+			stateName: "PROVISIONAL_RESEARCH_PENDING",
+			reason: "Initial orientation & research required to understand the objective and establish the quest identity before modifying project code.",
+			requiredAction: "Investigate relevant architecture and code paths using read/search/bash tools, establish a concise semantic quest identity, and call quest_update_state to initialize the durable quest with your research findings."
+		};
+	}
+	if (s.activeDraft) {
 		return {
 			blocked: true,
 			code: QuestErrorCode.RESEARCH_REQUIRED,
@@ -110,6 +106,26 @@ export function getImplementationBlockReason(targetState?: StoredState, ctx?: Ex
 			requiredAction: `Investigate the contradiction, challenge prior assumptions, update ${questPath(s.questId)}, and complete reassessment via quest_update_state({ reassessmentComplete: true, reassessmentConclusion: "..." }) before modifying project code.`
 		};
 	}
+	if (isRootQuest(s) && (isSubagentToolRegistered(undefined, ctx) || Boolean(getCustomSubagentRunner())) && !isPlanReviewValidForState(s)) {
+		return {
+			blocked: true,
+			code: QuestErrorCode.PLAN_REVIEW_REQUIRED,
+			stateName: "PLAN_REVIEW_PENDING",
+			reason: "The current plan draft has not been approved by an independent adversarial review against the original user request.",
+			requiredAction: "Submit the plan draft for independent critical review and obtain an explicit APPROVE verdict before modifying project code."
+		};
+	}
+	// Turn-stop gate A: awaitingReview scalar (plan_review / final_acceptance only, survives compaction)
+	const aw = (s as any).awaitingReview as { kind: string; reviewId: string; triggerReason?: string; since: number } | null | undefined;
+	if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
+		return {
+			blocked: true,
+			code: QuestErrorCode.PLAN_REVIEW_REQUIRED,
+			stateName: "AWAITING_REVIEW",
+			reason: `Plan review ${aw.reviewId} running — await verdict.`,
+			requiredAction: "No writes until verdict; reads and quest_mark_saved allowed."
+		};
+	}
 	if (s.researchRequired || !s.researchComplete) {
 		return {
 			blocked: true,
@@ -137,25 +153,9 @@ export function syncImplementationPermission(targetState?: StoredState, ctx?: Ex
 	return s.implementationAllowed;
 }
 
-export function getLifecycleState(ctx?: ExtensionContext): QuestLifecycleState {
+export function getLifecycleState(_ctx?: ExtensionContext): QuestLifecycleState {
 	if (!state.active) return QuestLifecycleState.IDLE;
 	if (state.compactionPending) return QuestLifecycleState.COMPACTING;
-
-	const c = getActiveContext(ctx);
-	if (c) {
-		const threshold = getEconomyThreshold(c);
-		const tokens = calculateCurrentTokens(c);
-		const warningMargin = getWarningMargin();
-		if (
-			threshold > 0 &&
-			tokens !== null &&
-			tokens >= Math.max(0, threshold - warningMargin) &&
-			tokens < threshold &&
-			state.dirty
-		) {
-			return QuestLifecycleState.PRE_COMPACT_DUMP_PENDING;
-		}
-	}
 
 	if (state.reassessmentRequired) {
 		return QuestLifecycleState.REASSESSMENT_PENDING;

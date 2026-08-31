@@ -1,18 +1,38 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { existsSync } from "node:fs";
 import { CompactionPressure, ExtensionContext, StoredState } from "./types.ts";
+import { QUEST_CURRENT_DIR } from "./constants.ts";
 
 export const sessionStates = new Map<string, StoredState>();
 
 export const asyncContext = new AsyncLocalStorage<ExtensionContext>();
 
-export function generateQuestId(): string {
-	const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
-	let id = "";
-	const bytes = crypto.getRandomValues(new Uint8Array(10));
-	for (let i = 0; i < 10; i++) {
-		id += chars[bytes[i] % chars.length];
+let lastGeneratedSec: number | null = null;
+
+export function generateQuestId(now: number = Date.now()): string {
+	let sec = Math.floor(now / 1000);
+	// increment by one on same-second / monotonic collision (in-memory)
+	if (lastGeneratedSec !== null && sec <= lastGeneratedSec) {
+		sec = lastGeneratedSec + 1;
 	}
-	return id;
+	// increment by one on collision with existing quest dir (keep existing dirs)
+	try {
+		while (existsSync(`${QUEST_CURRENT_DIR}/${String(sec)}`)) {
+			sec += 1;
+			// safety guard against infinite loop
+			if (sec > Math.floor(now / 1000) + 100000) break;
+		}
+	} catch {}
+	// ensure monotonic across filesystem bumps too
+	if (lastGeneratedSec !== null && sec <= lastGeneratedSec) {
+		sec = lastGeneratedSec + 1;
+	}
+	lastGeneratedSec = sec;
+	return String(sec);
+}
+
+export function __resetQuestIdSequenceForTests(): void {
+	lastGeneratedSec = null;
 }
 
 export function getActiveContext(ctx?: ExtensionContext): ExtensionContext | undefined {
@@ -43,6 +63,10 @@ export function createDefaultState(): StoredState {
 		warningMarginTokens: undefined,
 		subquestCompactTokens: undefined,
 		lastWarnedCompactionTokens: undefined,
+		lastPeriodicCheckpointAt: 0,
+		lastPeriodicCheckpointTurn: 0,
+		lastPeriodicSteerTurn: -1,
+		lastPeriodicSteerAt: 0,
 		lastPromptAt: Date.now(),
 		lastResumePromptAt: 0,
 		lastResumeTarget: null,
@@ -52,6 +76,7 @@ export function createDefaultState(): StoredState {
 		lastDeliveredCompactionId: null,
 		pendingResume: null,
 		pendingNotifications: [],
+		obligationHistory: [],
 		pickerCancelled: false,
 		pendingRootQuest: false,
 		pendingRootRequest: null,
@@ -81,7 +106,21 @@ export function createDefaultState(): StoredState {
 		sessionModifiedFiles: [],
 		lastNotifiedPressure: CompactionPressure.NONE,
 		lastContinuationTransitionKey: null,
+		activeDraft: null,
+		draftPrompts: [],
+		draftCreatedAt: null,
+		draftLastSavedHash: null,
+		draftLastReviewKey: null,
+		lastPlanReviewApproval: null,
+		lastPlanReviewRequestedVersion: null,
+		lastPlanReviewBoundaryKey: null,
+		lastPlanReviewRequestKey: null,
+		lastDraftReviewRequestKey: null,
+		lastDirectionReviewKey: null,
+		lastDirectionReviewAt: null,
+		awaitingReview: null,
 		investigationEpoch: 1,
+		logCursor: 0,
 		currentReceipt: {
 			epoch: 1,
 			epochType: "research",
@@ -124,6 +163,10 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
 		warningMarginTokens: s.warningMarginTokens,
 		subquestCompactTokens: s.subquestCompactTokens,
 		lastWarnedCompactionTokens: s.lastWarnedCompactionTokens,
+		lastPeriodicCheckpointAt: (s as any).lastPeriodicCheckpointAt || 0,
+		lastPeriodicCheckpointTurn: (s as any).lastPeriodicCheckpointTurn || 0,
+		lastPeriodicSteerTurn: (s as any).lastPeriodicSteerTurn ?? -1,
+		lastPeriodicSteerAt: (s as any).lastPeriodicSteerAt || 0,
 		lastPromptAt: s.lastPromptAt,
 		lastResumePromptAt: s.lastResumePromptAt,
 		lastResumeTarget: s.lastResumeTarget,
@@ -146,6 +189,7 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
 			  }
 			: null,
 		pendingNotifications: Array.isArray(s.pendingNotifications) ? s.pendingNotifications.map((n) => ({ ...n })) : [],
+		obligationHistory: Array.isArray(s.obligationHistory) ? s.obligationHistory.map((n) => ({ ...n })) : [],
 		pickerCancelled: s.pickerCancelled,
 		researchRound: s.researchRound,
 		researchComplete: s.researchComplete,
@@ -176,7 +220,21 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
 		lastReviewedSaveHash: s.lastReviewedSaveHash || null,
 		lastReviewedPlanVersion: s.lastReviewedPlanVersion || null,
 		lastReviewedSaveCount: s.lastReviewedSaveCount || null,
+		activeDraft: s.activeDraft || null,
+		draftPrompts: Array.isArray(s.draftPrompts) ? [...s.draftPrompts] : [],
+		draftCreatedAt: s.draftCreatedAt || null,
+		draftLastSavedHash: s.draftLastSavedHash || null,
+		draftLastReviewKey: s.draftLastReviewKey || null,
+		lastPlanReviewApproval: s.lastPlanReviewApproval ? { ...s.lastPlanReviewApproval } : null,
+		lastPlanReviewRequestedVersion: s.lastPlanReviewRequestedVersion || null,
+		lastPlanReviewBoundaryKey: s.lastPlanReviewBoundaryKey || null,
+		lastPlanReviewRequestKey: (s as any).lastPlanReviewRequestKey || null,
+		lastDraftReviewRequestKey: (s as any).lastDraftReviewRequestKey || null,
+		lastDirectionReviewKey: (s as any).lastDirectionReviewKey || null,
+		lastDirectionReviewAt: (s as any).lastDirectionReviewAt || null,
+		awaitingReview: (s as any).awaitingReview ? { ...(s as any).awaitingReview } : null,
 		investigationEpoch: s.investigationEpoch || 1,
+		logCursor: s.logCursor || 0,
 		currentReceipt: s.currentReceipt
 			? {
 					epoch: s.currentReceipt.epoch,

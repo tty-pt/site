@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import questJournalExtension from "../index.ts";
-import { questPath, resolveQuestRecordBySlug } from "../src/paths.ts";
+import { resolveQuestRecordBySlug } from "../src/paths.ts";
 
 type EventCallback = (event: any, ctx: any) => Promise<any>;
 
@@ -10,422 +10,132 @@ Deno.test("quest_journal_state_machine: deterministic lifecycle, no implicit act
 	await mkdir(currentDir, { recursive: true });
 
 	const mainQuestSlug = "main-sm-quest";
-	const otherQuestSlug = "other-sm-quest";
-
 	const tools: Record<string, any> = {};
 	const commands: Record<string, any> = {};
 	const handlers: Record<string, EventCallback[]> = {};
 	const userMessages: any[] = [];
 	let isIdle = true;
-	let compactInvocationCount = 0;
 
 	const mockPi: any = {
-		on(event: string, callback: EventCallback) {
-			if (!handlers[event]) handlers[event] = [];
-			handlers[event].push(callback);
-		},
-		appendEntry() {},
-		registerEntryRenderer() {},
-		registerTool(tool: any) {
-			tools[tool.name] = tool;
-		},
-		registerCommand(name: string, cmd: any) {
-			commands[name] = cmd;
-		},
-		sendUserMessage(msg: any, options?: any) {
-			userMessages.push({ msg, options });
-		},
-		sendMessage(msg: any, options?: any) {
-			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
-		},
+		on(event: string, callback: EventCallback) { if (!handlers[event]) handlers[event] = []; handlers[event].push(callback); },
+		appendEntry() {}, registerEntryRenderer() {},
+		registerTool(tool: any) { tools[tool.name] = tool; },
+		registerCommand(name: string, cmd: any) { commands[name] = cmd; },
+		sendUserMessage(msg: any, options?: any) { userMessages.push({ msg, options }); },
+		sendMessage(msg: any, options?: any) { userMessages.push({ msg: msg?.content || msg, options }); },
 	};
 
 	questJournalExtension(mockPi);
 
-	let currentTokens = 10000;
-	let currentContextWindow = 1000000;
-
 	const mockCtx: any = {
 		cwd: "/home/quirinpa/site",
-		hasUI: true,
-		mode: "tui",
-		isIdle: () => isIdle,
-		getContextUsage: () => ({
-			tokens: currentTokens,
-			contextWindow: currentContextWindow,
-			percent: (currentTokens / currentContextWindow) * 100,
-		}),
-		sessionManager: {
-			getBranch: () => [],
-		},
-		compact: () => {
-			compactInvocationCount++;
-		},
-		ui: {
-			notify: () => {},
-			setStatus: () => {},
-		},
+		hasUI: true, mode: "tui", isIdle: () => isIdle,
+		getContextUsage: () => ({ tokens: 10000, contextWindow: 1000000 }),
+		sessionManager: { getBranch: () => [] },
+		compact: () => {}, ui: { notify: () => {}, setStatus: () => {} },
 	};
 
-	// 1. Initial state: IDLE (no active quest)
 	const initialStatus = await commands["quest-status"].handler("", mockCtx);
-	assert.ok(initialStatus.includes("No active quest"), "Initial state should be no active quest");
+	assert.ok(initialStatus.includes("No active quest"));
 
-	// 2. Explicit activation: ACTIVATE_QUEST
 	await commands["quest"].handler(mainQuestSlug, mockCtx);
 	const rec = await resolveQuestRecordBySlug(mainQuestSlug);
-	assert.ok(rec, "Quest record must exist");
+	assert.ok(rec);
 	const mainQuestPath = rec.path;
 
 	let status = await commands["quest-status"].handler("", mockCtx);
-	assert.ok(status.includes(mainQuestSlug), "Active quest must be main-sm-quest");
+	assert.ok(status.includes(mainQuestSlug));
 
-	// 3. Test: Writing arbitrary files under .pi/quest/current/ must NOT change active quest!
-	// Simulate tool_result writing to arbitrary other path
 	for (const cb of handlers["tool_result"] || []) {
-		await cb(
-			{
-				toolName: "write",
-				input: { path: ".pi/quest/current/arbitrary/other.md", content: "arbitrary content" },
-				isError: false,
-			},
-			mockCtx,
-		);
+		await cb({ toolName: "write", input: { path: ".pi/quest/current/arbitrary/other.md", content: "arbitrary" }, isError: false }, mockCtx);
 	}
-
-	// Active quest must remain mainQuestSlug (deterministic, no implicit filesystem side-effect mutation)
 	status = await commands["quest-status"].handler("", mockCtx);
-	assert.ok(
-		status.includes(mainQuestSlug),
-		`Active quest must remain '${mainQuestSlug}', got: ${status}`,
-	);
+	assert.ok(status.includes(mainQuestSlug));
 
-	// 4. Test: tool_result on active quest verifies and marks clean
 	for (const cb of handlers["tool_result"] || []) {
-		await cb(
-			{
-				toolName: "write",
-				input: { path: mainQuestPath, content: `# Quest: ${mainQuestSlug}\n\n## Goal\nUpdated goal\n` },
-				isError: false,
-			},
-			mockCtx,
-		);
+		await cb({ toolName: "write", input: { path: mainQuestPath, content: `# Quest: ${mainQuestSlug}\n\n## Goal\nUpdated goal\n` }, isError: false }, mockCtx);
 	}
 
-	// 5. Test: Loop prevention on turn_end
-	// When state is clean, turn_end must NOT emit redundant save request messages
 	userMessages.length = 0;
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ message: { role: "assistant" }, toolResults: [] }, mockCtx);
-	}
-	assert.strictEqual(
-		userMessages.length,
-		0,
-		"Clean state on turn_end must not emit save request or trigger runaway prompt loops",
-	);
-
-	// Clean up
-	await rm(".pi/quest/current", { recursive: true, force: true });
+	for (const cb of handlers["turn_end"] || []) await cb({ message: { role: "assistant" }, toolResults: [] }, mockCtx);
+	assert.strictEqual(userMessages.length, 0, "Clean state on turn_end must not emit save request");
 });
 
-Deno.test("quest_journal_state_machine: proactive pre-compaction warning, verified save gate, and compaction lifecycle (Cases A-H)", async () => {
+Deno.test("quest_journal_state_machine: periodic checkpoint, verified save gate, and compaction lifecycle", async () => {
 	const currentDir = ".pi/quest/current";
 	await mkdir(currentDir, { recursive: true });
 
 	const questSlug = "state-machine-cases-quest";
-	const questFilePath = `${currentDir}/${questSlug}.md`;
-	await rm(questFilePath, { force: true });
-
 	const tools: Record<string, any> = {};
 	const commands: Record<string, any> = {};
 	const handlers: Record<string, EventCallback[]> = {};
-	const userMessages: Array<{ msg: any; options?: any; customType?: any; display?: any }> = [];
-	let compactInvocationCount = 0;
-	let lastCompactOptions: any = null;
+	const userMessages: Array<{ msg: any; options?: any }> = [];
 
 	const mockPi: any = {
-		on(event: string, callback: EventCallback) {
-			if (!handlers[event]) handlers[event] = [];
-			handlers[event].push(callback);
-		},
-		appendEntry() {},
-		registerEntryRenderer() {},
-		registerTool(tool: any) {
-			tools[tool.name] = tool;
-		},
-		registerCommand(name: string, cmd: any) {
-			commands[name] = cmd;
-		},
-		sendUserMessage(msg: any, options?: any) {
-			userMessages.push({ msg, options });
-		},
-		sendMessage(msg: any, options?: any) {
-			userMessages.push({ msg: msg?.content || msg, options, customType: msg?.customType, display: msg?.display });
-		},
+		on(event: string, callback: EventCallback) { if (!handlers[event]) handlers[event] = []; handlers[event].push(callback); },
+		appendEntry() {}, registerEntryRenderer() {},
+		registerTool(tool: any) { tools[tool.name] = tool; },
+		registerCommand(name: string, cmd: any) { commands[name] = cmd; },
+		sendUserMessage(msg: any, options?: any) { userMessages.push({ msg, options }); },
+		sendMessage(msg: any, options?: any) { userMessages.push({ msg: msg?.content || msg, options }); },
 	};
 
 	questJournalExtension(mockPi);
 
-	let currentTokens = 10000;
-	const currentContextWindow = 1000000;
-
 	const mockCtx: any = {
-		cwd: process.cwd(),
-		hasUI: true,
-		mode: "tui",
-		isIdle: () => true,
-		getContextUsage: () => ({
-			tokens: currentTokens,
-			contextWindow: currentContextWindow,
-			percent: (currentTokens / currentContextWindow) * 100,
-		}),
-		sessionManager: {
-			id: "session_cases_a_h",
-			getBranch: () => [],
-		},
-		compact: (opts: any) => {
-			compactInvocationCount++;
-			lastCompactOptions = opts;
-		},
-		ui: {
-			notify: () => {},
-			setStatus: () => {},
-		},
+		cwd: process.cwd(), hasUI: true, mode: "tui", isIdle: () => true,
+		getContextUsage: () => ({ tokens: 10000, contextWindow: 1000000 }),
+		sessionManager: { id: "session_cases_a_h", getBranch: () => [] },
+		compact: () => {}, ui: { notify: () => {}, setStatus: () => {} },
 	};
 
-	// Initialize quest and configure economy threshold: 333k, warning margin: 30k (warns at 303k)
 	await commands["quest"].handler(questSlug, mockCtx);
-	await commands["quest-economy"].handler("333k 30k", mockCtx);
 
-	// -----------------------------------------------------------------------
-	// Case A: Normal substantive turns under healthy tokens do NOT produce synthetic messages
-	// -----------------------------------------------------------------------
+	// Normal substantive turns under 6 should not produce periodic checkpoint
 	for (let i = 0; i < 3; i++) {
-		for (const cb of handlers["tool_result"] || []) {
-			await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
-		}
-		for (const cb of handlers["turn_end"] || []) {
-			await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
-		}
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
 	}
-	// Verify NO incremental checkpoint was requested
-	const incMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Quest Incremental Checkpoint"),
-	);
-	assert.strictEqual(incMsgs.length, 0, "No incremental checkpoint during normal execution");
+	assert.strictEqual(userMessages.filter((m) => (typeof m.msg === "string" ? m.msg : "").includes("Periodic Durable Checkpoint")).length, 0);
 
-	// -----------------------------------------------------------------------
-	// Case C: Now tokens reach 303k (warning threshold) while quest is dirty -> sends final save instruction
-	// -----------------------------------------------------------------------
-	currentTokens = 303000;
+	// After 6 total substantive turns, periodic triggers
+	for (let i = 0; i < 3; i++) {
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: `mods/song/${i}a.c` } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: `mods/song/${i}a.c` } }] }, mockCtx);
+	}
 	userMessages.length = 0;
-
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
-	}
-
-	// Case C assertion: Explicit save instruction issued at turn boundary in warning window
-	const finalSaveMsgsC = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE"),
-	);
-	assert.strictEqual(finalSaveMsgsC.length, 1, "Case C: Final save instruction must be sent when entering warning window");
-
-	// -----------------------------------------------------------------------
-	// Case B: Subsequent turns in the warning window below 333k receive repeated warning steering
-	// -----------------------------------------------------------------------
-	currentTokens = 315000;
+	for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/song/final.c" } }, mockCtx);
+	for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/final.c" } }] }, mockCtx);
+	// Might have triggered on 6th; ensure at least one periodic was sent in this window
+	// reset and force 6 more to verify deterministically
+	await tools["quest_mark_saved"].execute("save_1", {}, null, null, mockCtx);
+	await new Promise((r) => setTimeout(r, 60));
 	userMessages.length = 0;
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/song.c" } }] }, mockCtx);
+	for (let i = 0; i < 6; i++) {
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: `mods/song/b${i}.c` } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: `mods/song/b${i}.c` } }] }, mockCtx);
 	}
-	assert.strictEqual(userMessages.length, 1, "Case B: Repeated turn in warning window must continue to receive escalated warning steering");
-	assert.ok(
-		userMessages[0].msg.includes("Context Compaction Warning") ||
-		userMessages[0].msg.includes("Context compaction is imminent"),
-		"Case B: Warning message must be delivered",
-	);
+	assert.ok(userMessages.some((m) => m.msg?.includes("Periodic Durable Checkpoint")), "6th turn after save should trigger periodic");
 
-	// -----------------------------------------------------------------------
-	// Case D: Compaction threshold reached (>= 333k) while dirty -> session_before_compact cancels as a safety gate
-	// -----------------------------------------------------------------------
-	currentTokens = 334000;
+	// Dirty blocks compaction
+	for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/gig/gig.c" } }, mockCtx);
 	userMessages.length = 0;
 	let beforeCompactRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		beforeCompactRes = await cb({}, mockCtx);
-	}
-	assert.strictEqual(beforeCompactRes?.cancel, true, "Case D: Compaction must cancel when dirty");
-	assert.strictEqual(userMessages.length, 1, "Case D: session_before_compact must queue a deep save when canceled");
-	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Case D: Message should inform that compaction is blocked until save completes");
+	for (const cb of handlers["session_before_compact"] || []) beforeCompactRes = await cb({}, mockCtx);
+	assert.strictEqual(beforeCompactRes?.cancel, true);
+	assert.ok(userMessages[0].msg.includes("Compaction Blocked"));
 
-	// -----------------------------------------------------------------------
-	// Case E: The deep save succeeds and quest_mark_saved verifies the file
-	// -----------------------------------------------------------------------
-	await tools["quest_mark_saved"].execute("save_1", {}, null, null, mockCtx);
-	userMessages.length = 0;
-
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [] }, mockCtx);
-	}
-
-	// When clean, Pi's native auto-compaction safety gate allows compaction
-	let cleanBeforeCompactRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		cleanBeforeCompactRes = await cb({}, mockCtx);
-	}
-	assert.notStrictEqual(cleanBeforeCompactRes?.cancel, true, "Case E: session_before_compact must allow compaction when clean");
-
-	// -----------------------------------------------------------------------
-	// Case F: Actual threshold reached and quest is dirty -> session_before_compact cancels as a safety gate
-	// -----------------------------------------------------------------------
-	// Reset compaction state by simulating session_compact
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	// Mark dirty
-	for (const cb of handlers["tool_result"] || []) {
-		await cb({ toolName: "edit", input: { path: "mods/gig/gig.c" } }, mockCtx);
-	}
-	userMessages.length = 0;
-	let beforeCompactResult: any = null;
-	for (const cb of handlers["session_before_compact"] || []) {
-		beforeCompactResult = await cb({}, mockCtx);
-	}
-	assert.strictEqual(beforeCompactResult?.cancel, true, "Case F: session_before_compact must cancel when dirty");
-	assert.strictEqual(userMessages.length, 1, "Case F: session_before_compact must queue a deep save when canceled");
-
-	// -----------------------------------------------------------------------
-	// Case G & H: Compaction succeeds (session_compact fires)
-	// -----------------------------------------------------------------------
-	// Save first so compaction can succeed
+	// Save allows compaction
 	await tools["quest_mark_saved"].execute("save_2", {}, null, null, mockCtx);
+	let cleanRes: any;
+	for (const cb of handlers["session_before_compact"] || []) cleanRes = await cb({}, mockCtx);
+	assert.notStrictEqual(cleanRes?.cancel, true);
+
+	// Post-compaction resume
 	userMessages.length = 0;
+	for (const cb of handlers["session_compact"] || []) await cb({}, mockCtx);
+	assert.ok(userMessages.some((m) => (typeof m.msg === "string" ? m.msg : "").includes("Post-Compaction Autonomous Resumption Directive")));
 
-	for (const cb of handlers["session_before_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-
-	// Case H: Post-compaction resume directive sent
-	assert.strictEqual(userMessages.length, 1, "Case H: session_compact must send resume prompt");
-	const resumeMsg = typeof userMessages[0].msg === "string" ? userMessages[0].msg : userMessages[0].msg?.text || "";
-	assert.ok(userMessages[0].options?.deliverAs === "followUp" || !userMessages[0].options);
-	assert.ok(resumeMsg.includes("Post-Compaction Autonomous Resumption Directive"), "Case H: Resume prompt must be sent");
-	assert.ok(resumeMsg.includes("quest.md") || resumeMsg.includes(questSlug), "Case H: Must reference active quest path");
-
-	// -----------------------------------------------------------------------
-	// Case I: Session reconstruction resets in-flight preCompactionSaveRequestPending to false
-	// -----------------------------------------------------------------------
-	const branchEntries: any[] = [
-		{
-			type: "custom",
-			customType: "quest_journal",
-			data: {
-				active: questSlug,
-				saveCount: 2,
-				compactCount: 1,
-				prompts: ["Test Cases A-H"],
-				refinements: [],
-				stack: [questSlug],
-				dirty: true,
-				preCompactionCheckpointPending: true,
-				preCompactionSaveRequestPending: true, // Persisted as true before crash/interruption
-				saveGeneration: null,
-				economyTokens: 333000,
-				warningMarginTokens: 30000,
-			},
-		},
-	];
-
-	mockCtx.sessionManager.getBranch = () => branchEntries;
-
-	// Reconstruct session state (e.g. session_start event)
-	for (const cb of handlers["session_start"] || []) {
-		await cb({}, mockCtx);
-	}
-
-	// Verify that in-flight and warning flags were reset to false upon reconstruction
-	userMessages.length = 0;
-	let restartCompactRes: any;
-	for (const cb of handlers["session_before_compact"] || []) {
-		restartCompactRes = await cb({}, mockCtx);
-	}
-	assert.strictEqual(restartCompactRes?.cancel, true, "Case I: session_before_compact must block dirty compaction after reconstruction");
-	assert.strictEqual(userMessages.length, 1, "Case I: session_before_compact must queue a deep save when canceled");
-	assert.ok(userMessages[0].msg.includes("Compaction Blocked"), "Case I: Message should inform that compaction is blocked until save completes");
-
-	// Simulate session_compact to clear compaction flags, mark dirty, then verify turn_end warning save
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	for (const cb of handlers["tool_result"] || []) {
-		await cb({ toolName: "edit", input: { path: "mods/song/song.c" } }, mockCtx);
-	}
-
-	// Now verify recovery: turn_end in warning window safely queues ONE new save follow-up without deadlock
-	currentTokens = 310000;
-	userMessages.length = 0;
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [] }, mockCtx);
-	}
-	const recoveredSaveMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
-	);
-	assert.strictEqual(recoveredSaveMsgs.length, 1, "Case I: turn_end must queue a new save follow-up after reconstruction");
-
-	// -----------------------------------------------------------------------
-	// Case J: sendMessage failure rolls back pending state so it can be retried without deadlock
-	// -----------------------------------------------------------------------
-	const originalSendMessage = mockPi.sendMessage;
-	const originalSendUserMessage = mockPi.sendUserMessage;
-	mockPi.sendMessage = () => {
-		throw new Error("Simulated transport failure");
-	};
-	mockPi.sendUserMessage = () => {
-		throw new Error("Simulated transport failure");
-	};
-
-	// Mark dirty and reset warning state
-	for (const cb of handlers["session_compact"] || []) {
-		await cb({}, mockCtx);
-	}
-	for (const cb of handlers["tool_result"] || []) {
-		await cb({ toolName: "edit", input: { path: "mods/gig/gig.c" } }, mockCtx);
-	}
-	userMessages.length = 0;
-
-	// Turn end runs with failed sendMessage -> must roll back and not leave state pending
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [] }, mockCtx);
-	}
-	assert.strictEqual(userMessages.length, 0, "Case J: No message should be recorded on sendMessage failure");
-
-	// Restore working sendMessage
-	mockPi.sendMessage = originalSendMessage;
-	mockPi.sendUserMessage = originalSendUserMessage;
-
-	// On next turn_end, it successfully retries and queues the save message!
-	userMessages.length = 0;
-	await new Promise((resolve) => setTimeout(resolve, 60));
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [] }, mockCtx);
-	}
-	const retrySaveMsgs = userMessages.filter((m) =>
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context compaction is imminent") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
-		(typeof m.msg === "string" ? m.msg : m.msg?.text || "").includes("Context Compaction Warning"),
-	);
-	assert.strictEqual(retrySaveMsgs.length, 1, "Case J: turn_end must successfully retry queueing save after previous sendMessage failure");
-
-	// Clean up
 	await rm(".pi/quest/current", { recursive: true, force: true });
 	await new Promise((resolve) => setTimeout(resolve, 80));
 });

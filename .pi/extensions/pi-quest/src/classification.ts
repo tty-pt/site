@@ -19,6 +19,10 @@ export function classifyUserMessage(text: string): UserMessageClassification {
 	if (!trimmed) return UserMessageClassification.CONVERSATIONAL_ACK;
 
 	const lower = trimmed.toLowerCase();
+	// Defense in depth: synthetic post-compaction directives must never be refinements
+	if (lower.includes("post-compaction") || lower.includes("post-compaction autonomous resumption directive")) {
+		return UserMessageClassification.CONVERSATIONAL_ACK;
+	}
 	const clean = lower.replace(/[.,!?;:]+/g, " ").trim();
 	const words = clean.split(/\s+/).filter(Boolean);
 

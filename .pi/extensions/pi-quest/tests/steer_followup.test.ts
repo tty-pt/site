@@ -106,29 +106,22 @@ Deno.test("quest_journal_steer_followup: in-flight steering, post-compaction con
 		"Healthy context must not trigger in-flight steer regardless of tool count",
 	);
 
-	// 3. Pre-compaction warning window at turn_end issues in-flight save instruction
-	await commands["quest-economy"].handler("333k 30k", mockCtx);
-	currentTokens = 310000; // >= 303k warning threshold
+	// 3. Periodic checkpoint after 6 substantive turns
 	userMessages.length = 0;
-
-	// Simulate work in the codebase that marks the journal dirty
-	for (const cb of handlers["tool_result"] || []) {
-		await cb({ toolName: "write", input: { path: "mods/song/song.c" } }, mockCtx);
+	for (let i = 0; i < 5; i++) {
+		for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: `mods/song/${i}.c` } }, mockCtx);
+		for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: `mods/song/${i}.c` } }] }, mockCtx);
 	}
+	// 6th turn
+	for (const cb of handlers["tool_result"] || []) await cb({ toolName: "edit", input: { path: "mods/song/5.c" } }, mockCtx);
+	for (const cb of handlers["turn_end"] || []) await cb({ toolResults: [{ toolName: "edit", input: { path: "mods/song/5.c" } }] }, mockCtx);
 
-	// Turn ends in warning window -> requestPreCompactionCheckpoint sends save instruction
-	for (const cb of handlers["turn_end"] || []) {
-		await cb({ toolResults: [{ toolName: "write", input: { path: "mods/song/song.c" } }] }, mockCtx);
-	}
-
-	assert.ok(userMessages.length > 0, "Warning window at turn_end must trigger steer before compaction");
+	assert.ok(userMessages.length > 0, "Periodic checkpoint must trigger steer");
 	const followUpEntry = userMessages[userMessages.length - 1];
-	assert.strictEqual(followUpEntry.options?.deliverAs, "steer", "In-flight warning must use deliverAs: 'steer'");
+	assert.strictEqual(followUpEntry.options?.deliverAs, "steer", "Periodic checkpoint must use deliverAs: 'steer'");
 	assert.ok(
-		followUpEntry.msg.includes("Context compaction is imminent") ||
-			followUpEntry.msg.includes("FINAL EXHAUSTIVE DURABLE STATE SAVE") ||
-			followUpEntry.msg.includes("Context Compaction Warning"),
-		`Steer message must instruct saving before compaction, got: ${followUpEntry.msg}`,
+		followUpEntry.msg.includes("Periodic Durable Checkpoint"),
+		`Steer message must be periodic checkpoint, got: ${followUpEntry.msg}`,
 	);
 
 	// 4. In-flight save by the agent: marks journal clean and ready for compaction

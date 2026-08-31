@@ -218,6 +218,66 @@ Allowed for critical review:
 				return;
 			}
 
+			// AWAITING_REVIEW scalar gate (A): plan_review / final_acceptance only, blocks writes but allows reads + quest_mark_saved
+			const awGate = (state as any).awaitingReview as { kind: string; reviewId: string; triggerReason?: string; since: number } | null | undefined;
+			const isAwaitingReview = Boolean(awGate && (awGate.kind === "plan_review" || awGate.kind === "final_acceptance"));
+			if (isAwaitingReview) {
+				const normTool = (toolName || "").toLowerCase().trim();
+				// Allow reads, research, interaction, and quest_mark_saved (journal save marker)
+				if (normTool === "quest_mark_saved") {
+					return;
+				}
+				// Allow read/research/interaction
+				if (permission === "read" || permission === "research" || permission === "interaction") {
+					return;
+				}
+				// For journal, only quest_mark_saved is allowed above; quest_update_state and other journals block
+				// Fall through to GATE_BLOCKED for implementation/unknown/journal(edit/write) when awaiting
+				const isBlockedJournal = permission === "journal" && normTool !== "quest_mark_saved";
+				if (isBlockedJournal || permission === "implementation" || permission === "unknown") {
+					const gate = getImplementationBlockReason(state, ctx);
+					// If gates already says AWAITING_REVIEW, use it; otherwise synthesize
+					const gateState = gate.blocked && gate.stateName === "AWAITING_REVIEW" ? gate : { blocked: true, code: QuestErrorCode.PLAN_REVIEW_REQUIRED, stateName: "AWAITING_REVIEW", reason: `Plan review ${awGate!.reviewId} running — await verdict.`, requiredAction: "No writes until verdict; reads and quest_mark_saved allowed." };
+					const correlationId = `await_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+					const blockMessage = `[Quest Journal Gate: Blocked]
+
+Tool: ${toolName}
+Permission: ${permission}
+State: ${gateState.stateName}
+
+This operation may modify project state, but implementation is currently forbidden.
+
+Quest: ${state.questId ? questPath(state.questId) : "(Provisional)"}
+Reason: ${gateState.reason}
+Required next step: ${gateState.requiredAction}
+
+Allowed now:
+- read/search/investigate
+- quest_mark_saved
+
+Required: await review verdict.`;
+					logGateTransition("GATE_BLOCKED", `gate blocked: ${gateState.stateName}`, {
+						quest: state.active || "",
+						gate: gateState.stateName,
+						activeGate: gateState.stateName,
+						reason: gateState.reason,
+						requiredAction: gateState.requiredAction,
+						correlationId,
+						consequence: "OPERATION_BLOCKED",
+					});
+					reportAgentError(pi, ctx, `Tool '${toolName}' execution blocked in state ${gateState.stateName}: ${gateState.reason}`, {
+						code: gateState.code as any,
+						correlationId,
+						deliverAs: "steer",
+						requiredNextAction: gateState.requiredAction,
+						details: { Tool: toolName, Permission: permission, State: gateState.stateName, Reason: gateState.reason },
+					});
+					return { block: true, reason: blockMessage };
+				}
+				// Non-blocked journal (none) already returned; otherwise allow
+				return;
+			}
+
 			// Allow all read, research, journal, and interaction operations
 			if (permission === "read" || permission === "research" || permission === "journal" || permission === "interaction") {
 				return;
@@ -257,12 +317,18 @@ Allowed now:
 Required:
 complete the current research/reassessment prerequisite and reopen the implementation gate.`;
 
+				const failureId = `block_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+				(state as any).lastFailureId = failureId;
+
 				logGateTransition("GATE_BLOCKED", `gate blocked: ${gate.stateName}`, {
 					quest: state.active || "",
 					gate: gate.stateName,
+					activeGate: gate.stateName,
 					reason: gate.reason,
 					requiredAction: gate.requiredAction,
 					correlationId,
+					failureId,
+					consequence: "OPERATION_BLOCKED",
 				});
 
 				logImplementationOutcome("IMPLEMENTATION_ATTEMPT", `attempted ${toolName} ${targetPath ? `(${targetPath})` : ""}`.trim(), {
@@ -271,26 +337,34 @@ complete the current research/reassessment prerequisite and reopen the implement
 					path: targetPath,
 					allowed: false,
 					correlationId,
+					failureId,
+					consequence: "OPERATION_BLOCKED",
 				});
 				logImplementationOutcome("IMPLEMENTATION_BLOCKED", `blocked by gate ${gate.stateName}: ${gate.reason}`, {
 					quest: state.active || "",
 					tool: toolName,
 					gate: gate.stateName,
+					activeGate: gate.stateName,
 					code: errorCode,
 					reason: gate.reason,
 					correlationId,
+					failureId,
+					consequence: "OPERATION_BLOCKED",
 				});
 
 				const cmd = event?.input?.command || event?.input?.cmd || "";
 				logToolActivity(toolName, "blocked", {
 					quest: state.active || "",
 					gate: gate.stateName,
+					activeGate: gate.stateName,
 					phase: "implementation",
 					path: targetPath ? normalizeLogPath(targetPath) : undefined,
 					command: cmd ? String(cmd).slice(0, 150) : undefined,
 					reason: gate.reason,
 					turn: state.currentTurn,
 					correlationId,
+					failureId,
+					consequence: "OPERATION_BLOCKED",
 				});
 
 				reportAgentError(
