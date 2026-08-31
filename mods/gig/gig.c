@@ -353,10 +353,19 @@ static int handle_sb_song_replace_authorized(
 	const char *names[3];
 	const char *vals[3];
 
-	axil_query_param("n", n_str, sizeof(n_str) - 1);
+	if (axil_query_param("n", n_str, sizeof(n_str) - 1) <= 0)
+		axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
+	if (!n_str[0])
+		return bad_request(fd, "Missing n");
 	idx = atoi(n_str);
 
-	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0) {
+	key = source_ordered_key_at("gig.songs", ctx->id, idx);
+	if (!key)
+		return respond_error(fd, 404, "Song not found in gig");
+
+	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0 ||
+	    !s_id[0])
+	{
 		/* If song_id is not provided, keep current song_id */
 		unsigned cur_fhd = source_get_fields_hd("gig.songs");
 		const char *cur_s = qmap_field_get(cur_fhd, key, "song");
@@ -367,10 +376,6 @@ static int handle_sb_song_replace_authorized(
 		return bad_request(fd, "Missing song_id");
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 	resolve_song_id(s_id, sizeof(s_id));
-
-	key = source_ordered_key_at("gig.songs", ctx->id, idx);
-	if (!key)
-		return respond_error(fd, 404, "Song not found in gig");
 
 	/* Preserve the replaced row's key/format unless the request
 	 * carries explicit new values (kept for API compatibility). */
@@ -813,18 +818,18 @@ static void detail_song_cb(
 	sb_song_row_data_t *sd = &g_sb_songs[sb_app_state.n_songs];
 	if (sb_load_song_row(song_id, transpose, c->song_hd, c->f, sd) == 0) {
 		if (format && format[0] && strcmp(format, "any") != 0) {
-			char resolved_fmt[512] = { 0 };
-			source_resolve_ref_display_str(
-			        "song.types", format, "name", resolved_fmt,
-			        sizeof(resolved_fmt));
-			if (resolved_fmt[0])
+			unsigned thd = source_get_fields_hd("song.types");
+			const char *name = thd ? qmap_get_field_str(thd, format, "name") : NULL;
+			if (name && name[0])
 				snprintf(
 				        sd->type, sizeof(sd->type), "%s",
-				        resolved_fmt);
+				        name);
 			else
 				snprintf(
 				        sd->type, sizeof(sd->type), "%s",
 				        format);
+		} else {
+			sd->type[0] = '\0';
 		}
 		sb_app_state.n_songs++;
 	}

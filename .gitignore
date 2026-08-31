@@ -27,3 +27,10 @@
 /external/*/lib
 tests/unit/mpfd_contract_test
 .opencode
+/.pi/*
+!/.pi/extensions
+!/.pi/prompts
+!/.pi/settings.json
+/build
+/debug
+*.zip

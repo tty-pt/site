@@ -1,0 +1,19 @@
+{
+  "name": "pi-quest",
+  "version": "1.0.0",
+  "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent",
+  "keywords": [
+    "pi-package"
+  ],
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "test": "deno test --allow-all --node-modules-dir=none tests/",
+    "zip": "deno run --allow-all scripts/zip_bundle.ts"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  }
+}

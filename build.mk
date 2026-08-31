@@ -29,11 +29,11 @@ CFLAGS-PROFILE-dev = -g -O0 $(PICFLAGS)
 CFLAGS-PROFILE- = -g -O0 $(PICFLAGS)
 CFLAGS += ${CFLAGS-PROFILE-${PROFILE}}
 
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
-LDFLAGS += -L$(REPO_ROOT)/external/axil/lib -L$(REPO_ROOT)/external/qmap/lib
+LDFLAGS += -L$(REPO_ROOT)/external/axil/lib -L$(REPO_ROOT)/external/libqmap/lib
 LDFLAGS += -L$(REPO_ROOT)/external/axil-auth/lib -Wl,-rpath,$(REPO_ROOT)/external/axil-auth/lib
 LDFLAGS += -L$(REPO_ROOT)/external/bud/lib -Wl,-rpath,$(REPO_ROOT)/external/bud/lib
 

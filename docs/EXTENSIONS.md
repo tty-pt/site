@@ -13,10 +13,10 @@ Project-local extensions are loaded automatically by Pi when opening this reposi
 
 ---
 
-## 2. Quest Journal & Context Awareness (`.pi/extensions/quest-journal.ts`)
+## 2. Quest Journal & Context Awareness (`.pi/extensions/pi-quest/`)
 
 ### Purpose
-Maintains long-lived quest state on disk (`docs/current/<quest>.md`), auto-injects persistent session awareness (timestamp, git branch, active quest freshness, standing project notes, auto-detected guidelines), and enforces strict TDD & quality gates across compaction and context resets.
+Maintains long-lived quest state on disk (`.pi/quest/current/<qid>/quest.md`), auto-injects persistent session awareness (timestamp, git branch, active quest freshness, standing project notes, auto-detected guidelines), and enforces strict TDD & quality gates across compaction and context resets.
 
 ### Commands
 
@@ -26,31 +26,31 @@ Maintains long-lived quest state on disk (`docs/current/<quest>.md`), auto-injec
 | `/subquest` | `/subquest <description...>` | Creates a child sub-quest linked to the active quest with name inferred from description, updates parent's `## Sub-Quests` list, sets `## Parent Quest`, and activates the sub-quest. (Alias: `/sub-quest`) |
 | `/quest-refine` | `/quest-refine <instructions...>` | Refines the active quest mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update quest file goals, checklist, and `## Quest Refinements & User Feedback Loops`. |
 | `/quest-save` | `/quest-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active quest file. |
-| `/quest-del` | `/quest-del [name]` | Archives the active or named quest file. When called without arguments, opens an interactive quest selector. Moves file to `docs/archive/<name>-<timestamp>.md` and cleans up any leftover draft. |
-| `/quest-draft` | `/quest-draft <description>` | Creates a proposal draft in `docs/future/<name>.md` with name inferred from description without making it active. Blocks creation if `<name>` is already active in `docs/current/`. |
-| `/quest-status` | `/quest-status` | Displays the active quest name, file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
-| `/quests` | `/quests` | Displays active quests in `docs/current/` and proposals in `docs/future/` in a widget panel. |
+| `/quest-del` | `/quest-del [name]` | Archives the active or named quest. Moves runtime artifacts to `.pi/quest/archive/<qid>.zip`. |
+| `/quest-draft` | `/quest-draft <description>` | Creates a proposal draft with name inferred from description without making it active. |
+| `/quest-status` | `/quest-status` | Displays the active quest name, ID (`qid`), file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
+| `/quests` | `/quests` | Displays active quests in `.pi/quest/current/` in a widget panel. |
 
 ### Custom Tools
 
-- **`quest_update_state`**: Update the active quest state on disk with structured fields (`status`, `findings`, `decisions`, `remaining`, `nextStep`, `plan`, `planConfidence`, `openQuestions`, `assumptions`, `exactNextAction`, etc.). Automatically formats, validates epistemic consistency, and deterministically writes `docs/current/<active>.md`.
-- **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `docs/current/<active>.md`. (Alias: `quest_journal_mark_saved`)
-- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Creates its own quest file in `docs/current/<sub-quest>.md`, links it into the parent quest, and manages LIFO sub-quest stack activation. (Alias: `quest_journal_subquest`)
-- **`quest_archive`**: Archive the active (or specified) quest from `docs/current/` to `docs/archive/` and optionally trigger session context compaction. (Alias: `quest_journal_archive`)
+- **`quest_update_state`**: Update the active quest state on disk with structured fields (`status`, `findings`, `decisions`, `remaining`, `nextStep`, `plan`, `planConfidence`, `openQuestions`, `assumptions`, `exactNextAction`, etc.). Automatically formats, validates epistemic consistency, and deterministically writes `.pi/quest/current/<qid>/quest.md`.
+- **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `.pi/quest/current/<qid>/quest.md`.
+- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Inherits parent's `<qid>`, links it into the parent quest, and manages LIFO sub-quest stack activation.
+- **`quest_archive`**: Archive the active (or specified) quest from `.pi/quest/current/<qid>/` to `.pi/quest/archive/<qid>.zip` and optionally trigger session context compaction.
 
 ### Autonomous Quest Management & Epistemic Memory
 
 1. **Research-Grounded Formation**: When substantive requests arrive, the assistant investigates the codebase first, infers a semantic identity, and calls `quest_update_state` to establish durable epistemic memory before writing code.
 2. **LIFO Sub-Quest Stack**: Deep work or multi-phase tasks use nested sub-quests (`quest_subquest`). When child sub-quests finish and archive (`quest_archive`), findings pop back to the parent quest for seamless continuation.
 3. **Dynamic Epistemic Reassessment**: If unexpected complexity, failed tests, or contradictory evidence occurs, the assistant dynamically challenges its assumptions, updates `planRevisions` and `rejectedApproaches`, and updates the quest state before continuing.
-4. **Autonomous Continuation**: Following compaction or context reset, the assistant immediately re-reads `docs/current/<active>.md` to resume without manual user commands.
+4. **Autonomous Continuation**: Following compaction or context reset, the assistant immediately re-reads `.pi/quest/current/<qid>/quest.md` to resume without manual user commands.
 
 ### Session Awareness & Context Injection
 
 On every agent turn, the extension automatically injects into the system prompt:
 - **Timestamp & Directory**: Current ISO timestamp and `ctx.cwd`.
 - **Git Branch**: Active git branch read directly from `.git/HEAD` (zero subprocess overhead).
-- **Active Quest State**: The active quest file path (`docs/current/<active>.md`) and whether its status is fresh or `SAVE PENDING`.
+- **Active Quest State**: The active quest file path (`.pi/quest/current/<qid>/quest.md`), quest ID (`qid`), and whether its status is fresh or `SAVE PENDING`.
 - **Active Quest Resume Context**: Summary of active goal, status, remaining work, and next step parsed directly from disk.
 - **Project Guidelines**: Auto-detected mandatory project rules parsed from `AGENTS.md`, `CLAUDE.md`, or `SYSTEM.md` (extracts `## Guidelines`, `## Rules`, `## Invariants`, etc.).
 - **Standing Notes**: Optional persistent project notes read from `.pi/context.md` (if the file exists).
@@ -68,6 +68,29 @@ The extension automatically injects system prompt instructions and template sect
    - The **full test suite** is executed at the end and passes with **zero errors**.
 
 The quest template automatically includes a `## Build & Run Commands` section and a `## TDD & Quality Checklist` tracking these phases.
+
+### Uniform Model Error & Enforcement Messaging Architecture
+
+`pi-quest` enforces a strict architectural invariant:
+> **Any extension event that changes what the agent is permitted or required to do must produce a model-visible message describing the state change, the standardized `QuestErrorCode`, and the required next action.**
+> UI notifications and diagnostic logs are never considered sufficient model feedback.
+
+1. **Centralized Error Dispatch**: All enforcement blocks, gate rejections, persistence errors, save verification failures, and compaction directives pass through `reportAgentError()` and `sendInternalAgentMessage()`.
+2. **Standardized Error Codes**:
+   - `IMPLEMENTATION_BLOCKED`
+   - `UNKNOWN_TOOL_BLOCKED`
+   - `RESEARCH_REQUIRED`
+   - `REASSESSMENT_REQUIRED`
+   - `CONFIRMATION_REQUIRED`
+   - `CHECKPOINT_REQUIRED`
+   - `PERSISTENCE_FAILURE`
+   - `SAVE_VERIFICATION_FAILURE`
+   - `COMPACTION_FAILURE`
+   - `CONTINUATION_FAILURE`
+   - `STATE_RECONSTRUCTION_FAILURE`
+   - `SUBQUEST_FAILURE`
+   - `ARCHIVE_FAILURE`
+3. **Explicit Degraded Durability**: If session persistence encounters an error, an explicit `PERSISTENCE_FAILURE` message is delivered to the agent warning that state will not survive compaction until persistence is restored and verified.
 
 ### Auto-behaviors & Compaction Gate
 
@@ -95,7 +118,7 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 | Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
 |----------------|---------------|----------------------|----------------|
-| `.pi/extensions/quest-journal.ts` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_journal_mark_saved`, `quest_journal_subquest`, `quest_journal_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
+| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_update_state`, `quest_mark_saved`, `quest_subquest`, `quest_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
 
 ---
 

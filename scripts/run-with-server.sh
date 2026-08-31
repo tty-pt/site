@@ -27,7 +27,7 @@ fi
 mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors"
 
 export AUTH_SKIP_CONFIRM=1
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/libxylem/lib:${REPO_ROOT}/external/axil/lib:${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/axil-hyle/lib:${REPO_ROOT}/external/hyle/lib:${REPO_ROOT}/external/libtransp/lib:${REPO_ROOT}/external/hyle/c/libhyle-bud/lib:${REPO_ROOT}/external/hyle/c/libhyle-source/lib:${REPO_ROOT}/external/bud/lib:${REPO_ROOT}/external/qmap/lib:${REPO_ROOT}/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${REPO_ROOT}/external/libxylem/lib:${REPO_ROOT}/external/axil/lib:${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/axil-hyle/lib:${REPO_ROOT}/external/hyle/lib:${REPO_ROOT}/external/libtransp/lib:${REPO_ROOT}/external/hyle/c/libhyle-bud/lib:${REPO_ROOT}/external/hyle/c/libhyle-source/lib:${REPO_ROOT}/external/bud/lib:${REPO_ROOT}/external/libqmap/lib:${REPO_ROOT}/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 AXIL_BIN="${REPO_ROOT}/external/axil/bin/axil"
 if [ ! -x "$AXIL_BIN" ]; then

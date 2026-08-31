@@ -13,17 +13,17 @@ argument-hint: "[section]"
 | `/subquest <name>` | Create a child sub-quest linked to the parent quest |
 | `/quest-save` | Force-save current quest state to disk now |
 | `/quest-refine <text>` | Add mid-workflow requirements to active quest |
-| `/quest-del` | Archive completed quest to `docs/archive/` |
-| `/quest-draft <name>` | Draft a future quest in `docs/future/` |
-| `/quest-status` | Check if quest file is fresh or stale |
-| `/quests` | List all current and future quests |
+| `/quest-del` | Archive completed quest to `.pi/quest/archive/<qid>.zip` |
+| `/quest-draft <name>` | Draft a proposal for a future quest |
+| `/quest-status` | Check if quest file is fresh or stale and show quest ID (`qid`) |
+| `/quests` | List all current quests |
 
 ### How it works
-- Each quest lives at `docs/current/<name>.md` — the single source of truth.
+- Each quest lives at `.pi/quest/current/<qid>/quest.md` — the single source of truth.
 - On startup, you're prompted to pick or create a quest.
 - The quest file is auto-saved before compaction and on context fill-up.
 - Compaction is **blocked** until the quest file has been saved — protecting your work.
-- `docs/future/` holds proposals/backlog; `/quest` promotes them to current.
+- Terminal completed quests are archived into `.pi/quest/archive/<qid>.zip`.
 
 ## Session Awareness (context-awareness.ts)
 

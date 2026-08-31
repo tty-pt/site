@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
-export LD_LIBRARY_PATH="/home/quirinpa/site/external/libxylem/lib:/home/quirinpa/site/external/axil/lib:/home/quirinpa/site/external/axil-auth/lib:/home/quirinpa/site/external/axil-hyle/lib:/home/quirinpa/site/external/hyle/lib:/home/quirinpa/site/external/libtransp/lib:/home/quirinpa/site/external/hyle/c/libhyle-bud/lib:/home/quirinpa/site/external/hyle/c/libhyle-source/lib:/home/quirinpa/site/external/bud/lib:/home/quirinpa/site/external/qmap/lib:/home/quirinpa/site/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$SCRIPT_DIR/external/libxylem/lib:$SCRIPT_DIR/external/axil/lib:$SCRIPT_DIR/external/axil-auth/lib:$SCRIPT_DIR/external/axil-hyle/lib:$SCRIPT_DIR/external/hyle/lib:$SCRIPT_DIR/external/libtransp/lib:$SCRIPT_DIR/external/hyle/c/libhyle-bud/lib:$SCRIPT_DIR/external/hyle/c/libhyle-source/lib:$SCRIPT_DIR/external/bud/lib:$SCRIPT_DIR/external/libqmap/lib:$SCRIPT_DIR/external/stoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"

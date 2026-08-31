@@ -152,7 +152,7 @@ format:
 
 lint:
 	find mods external/bud -name "*.c" -exec clang-tidy {} -- \
-		-Iexternal/axil/include -Iexternal/qmap/include \
+		-Iexternal/axil/include -Iexternal/libqmap/include \
 		-Iexternal/libxylem/include -Iexternal/bud/include \
 		-Iexternal/hyle/include \;
 

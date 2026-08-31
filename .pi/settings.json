@@ -5,7 +5,7 @@
     "keepRecentTokens": 20000
   },
   "questJournal": {
-    "economyTokens": "200k",
+    "economyTokens": "400k",
     "warningTokens": "30k",
     "subquestCompactTokens": "60k"
   }

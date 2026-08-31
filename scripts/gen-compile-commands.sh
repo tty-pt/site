@@ -10,7 +10,6 @@ COMMON_INCLUDES=(
   "-I${REPO_ROOT}/external/axil/include"
   "-I${REPO_ROOT}/external/axil-auth/include"
   "-I${REPO_ROOT}/external/axil-hyle/include"
-  "-I${REPO_ROOT}/external/qmap/include"
   "-I${REPO_ROOT}/external/libqmap/include"
   "-I${REPO_ROOT}/external/libxylem/include"
   "-I${REPO_ROOT}/external/bud/include"

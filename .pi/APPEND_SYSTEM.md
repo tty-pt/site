@@ -4,7 +4,7 @@ You maintain long-lived state on **disk** so work survives compaction, context
 reset, and new sessions without re-research. These rules are non-negotiable.
 
 ## Core rule
-Every quest you work on has a markdown file in `docs/current/<quest>.md`, created
+Every quest you work on has a markdown file in `.pi/quest/current/<qid>/quest.md`, created
 with `/quest <name>`. That file is the **single source of truth** for the quest:
 goal, decisions, files touched, findings, remaining work, next step. Keep it
 complete enough that you (or a future agent) can resume without re-reading
@@ -14,15 +14,15 @@ sources.
 1. **Know the quest up front.** At the start of a quest, read its file (or
    `/quest <name>` to create it) and fill the template **before** doing real work.
 2. **Keep it current.** As you make decisions, change files, hit blockers, or
-   finish steps, update `docs/current/<quest>.md`. It must never fall behind the
+   finish steps, update `.pi/quest/current/<qid>/quest.md`. It must never fall behind the
    conversation by more than one logical step.
 3. **Before compaction / before stopping.** When asked to save, or before context
    is collapsed, write the full current state (progress, decisions, findings,
    remaining work, next step) to the file. The quest journal may block compaction
    until you do.
 4. **Avoid duplication.** Once a quest file exists, continue it — never create a
-   near-identical copy. Prefer `docs/current/<quest>.md` for active work,
-   `docs/future/` for planned work, and `docs/archive/` for archived/completed quests.
+   near-identical copy. Active quests live in `.pi/quest/current/<qid>/`,
+   and archived quests live in `.pi/quest/archive/<qid>.zip`.
 5. **Switch cleanly.** When starting a different quest (`/quest other`), the
    previous quest's file must already be saved.
 

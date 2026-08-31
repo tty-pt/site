@@ -25,7 +25,7 @@ make clean / make distclean
   `external/hyle` + `external/hyle/c/libhyle-bud` code tidy manually (tabs,
   ≤4 nest) — the site Makefile does not tidy them.
 - Site `make` is GNU make; `build.mk:22` adds
-  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/qmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
+  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
 
 ## CRITICAL: stale system headers shadow the repo for native builds
 

@@ -61,11 +61,18 @@ make watch          # auto-rebuild + restart on :8080
    WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
 
 7. **Autonomous Quest Management.** All work MUST use the Quest Journal workflow.
-   - The assistant automatically creates and maintains active quests on disk (`docs/current/<inferred-name>.md`) from user requests. The user does not need to invoke quest commands manually.
+   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/current/<qid>/quest.md`) from user requests. The user does not need to invoke quest commands manually.
    - The quest file is your single source of truth for goals, status, and decisions. Update it proactively as you make progress and before context is compacted.
    - Sub-quests are created automatically via `quest_subquest` when tangent remarks or follow-ups arise.
-   - Completed work is archived to `docs/archive/` via `quest_archive`.
+   - Completed work is archived to `.pi/quest/archive/<qid>.zip` via `quest_archive`.
    - Never use ad-hoc scratchpads, `.todo` files, or try to keep the entire plan in your head.
+   - **Unified Bundle Packaging**:
+     ```text
+     After testing or making changes:
+         npm --prefix .pi/extensions/pi-quest run zip
+
+     Send pi-quest-bundle.zip containing current code and latest run diagnostics.
+     ```
 
 8. **Test-Driven Development (TDD) & Quality Gates.**
    - **Build & Run First**: Discover how to build (`make`) and run (`make watch`) the project before editing feature code.
