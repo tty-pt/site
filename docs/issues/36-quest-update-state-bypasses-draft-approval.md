@@ -1,7 +1,7 @@
 ---
 id: 36
 title: "quest_update_state bypasses draft approval — syncQuestIdentity clears activeDraft without isDraftReviewValid"
-state: ready
+state: done
 severity: high
 requires: []
 blocked_by: []

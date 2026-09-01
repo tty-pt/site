@@ -23,6 +23,7 @@ import { capturePostUpdatePlanningSnapshot, capturePreUpdatePlanningSnapshot } f
 import {
 	checkAndTriggerDirectionReview,
 	getCustomSubagentRunner,
+	isDraftReviewValid,
 	isPlanReviewValidForState,
 	isSubagentToolRegistered,
 	requestPlanReview,
@@ -367,6 +368,38 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 		return targetResolution.errorResponse;
 	}
 	const { targetName } = targetResolution;
+
+	// #36 gate: quest_update_state must not realize activeDraft without reviewer APPROVE
+	if (state.activeDraft) {
+		const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi as any, ctx as any);
+		if (hasReviewer && !isDraftReviewValid(state as any)) {
+			const draftSlug = state.activeDraft;
+			let hash = "unknown";
+			try {
+				const c = readFileSync(`${FUTURE_DIR}/${draftSlug}.md`, "utf8");
+				hash = createHash("sha256").update(c).digest("hex").slice(0, 12);
+			} catch {
+				try { hash = createHash("sha256").update(draftSlug).digest("hex").slice(0, 12); } catch {}
+			}
+			const boundaryKey = `draft:${draftSlug}:${hash}`;
+			try {
+				logEvent("REVIEW_DEDUP_HIT" as any, `draft not yet reviewer-approved`, {
+					quest: draftSlug,
+					shard: "draft",
+					reason: "draft_not_approved",
+					hash,
+					boundaryKey,
+				} as any);
+			} catch {}
+			const msg = `Draft '${draftSlug}' not yet reviewer-approved — present plan via future/${draftSlug}.md and await plan_review APPROVE (boundaryKey ${boundaryKey}) before promoting. Accumulate requirements or wait for auto-review; only promotion via 'go' after APPROVE may realize the draft.`;
+			// Agent-visible steer (AGENTS.md invariant 1) + tool result (both model-visible)
+			try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg}`, "steer"); } catch {}
+			return {
+				content: [{ type: "text", text: msg }],
+				details: { error: "draft_not_approved", success: false, shard: "draft", boundaryKey, hash, quest: draftSlug },
+			};
+		}
+	}
 
 	syncQuestIdentity(targetName, pi, ctx);
 	const path = await ensureQuestFileExists(targetName, params?.goal || "");

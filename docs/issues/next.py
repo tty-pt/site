@@ -69,11 +69,12 @@ def main():
         print(json.dumps(items, indent=2))
         return
     if "--ready" in sys.argv:
-        ready = [it for it in items if it["state"]=="ready"]
-        # same FIX_ORDER prioritization for --ready
+        # DAG-aware: state != done/deferred and no remaining requires
+        ready = [it for it in items if it["state"] not in ("done","deferred","in_progress") and not it["blocked_by_computed"]]
         ready.sort(key=lambda x: (FIX_ORDER_RANK.get(x["id"], 9), SEV_ORDER.get(x["severity"],9), x["id"]))
         for it in ready:
-            print(f"{it['id']} [{it['severity']}] {it['file']} — {it['title']}")
+            # show file state for audit, but filtered by computed ready
+            print(f"{it['id']:02} [{it['severity']}] {it['file']} — {it['title']} (state:{it['state']})")
         return
 
     # default: full table sorted deterministically: ready first (FIX_ORDER priority), then blocked, then deferred, then done
@@ -92,14 +93,19 @@ def main():
             bb = "-"
         print(f"{it['id']:<4} {it['state']:<10} {it['severity']:<6} {bb:<18} {it['file']}")
     print()
-    ready = [it for it in items if it["state"]=="ready"]
-    ready.sort(key=lambda x: (FIX_ORDER_RANK.get(x["id"], 9), SEV_ORDER.get(x["severity"],9), x["id"]))
-    if ready:
-        print("NEXT (deterministic):", ready[0]["id"], ready[0]["file"])
-        if not done and ready[0]["id"]!="36":
+    # NEXT is DAG-aware ready (requires - done == 0) prioritizing FIX_ORDER
+    dag_ready = [it for it in items if it["state"] not in ("done","deferred","in_progress") and not it["blocked_by_computed"]]
+    dag_ready.sort(key=lambda x: (FIX_ORDER_RANK.get(x["id"], 9), SEV_ORDER.get(x["severity"],9), x["id"]))
+    if dag_ready:
+        print("NEXT (deterministic):", dag_ready[0]["id"], dag_ready[0]["file"])
+        if not done and dag_ready[0]["id"]!="36":
             print("WARN: expected 36 as first ready per FIX_ORDER.md step 1 — ensure 04,06,08,10,11,16 are ready but 36 has FIX_ORDER priority")
-        if len(ready)>1:
-            print("ALSO READY:", ", ".join(f"{r['id']}" for r in ready[1:5]), "..." if len(ready)>5 else "")
+        if len(dag_ready)>1:
+            print("ALSO READY:", ", ".join(f"{r['id']}" for r in dag_ready[1:5]), "..." if len(dag_ready)>5 else "")
+    # legacy state==ready list for audit
+    state_ready = [it for it in items if it["state"]=="ready"]
+    if state_ready and dag_ready and state_ready[0]["id"]!=dag_ready[0]["id"]:
+        print(f"NOTE: state==ready NEXT would be {state_ready[0]['id']} — DAG-aware NEXT is {dag_ready[0]['id']} (FIX_ORDER priority)")
 
 if __name__=="__main__":
     main()

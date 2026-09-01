@@ -41,8 +41,8 @@ These 39 files describe issues **in the `pi-quest` extension** (`.pi/extensions/
 | 33 | `33-verification-matrix.md` | `§11.4+§11.6.4+§11.7.4` `grep` matrix | blocked | 18,19,20,21,22,23,24,25,26,27,28,29,32 | Medium |
 | 34 | `34-rollout-order.md` | `§5` ordered stages `55→57→58→62` | deferred | 33 | Low |
 | 35 | `35-archive-map.md` | `§7` 8 to-be-removed docs → `docs/archive/` | ready | - | Low |
-| 36 | `36-quest-update-state-bypasses-draft-approval.md` | `executor.ts:syncQuestIdentity` | **ready** | - | High |
-| 37 | `37-cross-session-mutex-ram-only.md` | `utils/mutex.ts` RAM-only | blocked | 36 | High |
+| 36 | `36-quest-update-state-bypasses-draft-approval.md` | `executor.ts:syncQuestIdentity` | done | - | High |
+| 37 | `37-cross-session-mutex-ram-only.md` | `utils/mutex.ts` RAM-only | ready | 36 | High |
 | 38 | `38-draft-followup-does-not-invalidate-pending-review.md` | `hooks/index.ts:draft` | blocked | 36,37 | Medium |
 | 39 | `39-human-early-approve-must-not-block-re-draft.md` | `gates.ts:31` per-boundary | blocked | 36,37,38 | Medium |
 
