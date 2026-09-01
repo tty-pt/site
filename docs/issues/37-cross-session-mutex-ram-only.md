@@ -4,9 +4,9 @@ title: "Cross-session mutex is RAM-only — no global maxConcurrency=1 per quest
 state: done
 severity: high
 requires: [36]
-blocked_by: []
 validates: "pi: 2 sessions same quest => 1 active, second GLOBAL_REVIEW_CAP_HIT + coalesced"
-area: "37-cross-session-mutex-ram-only.md"
+area: "utils/mutex.ts:questLockChains, getQuestLockKey, getGlobalReviewLockKey"
+parent: 44
 ---
 # Issue: Cross-session mutex is RAM-only — no global `maxConcurrency=1` per `questId`
 

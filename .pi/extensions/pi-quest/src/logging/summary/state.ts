@@ -40,6 +40,9 @@ export interface SummaryState {
   coalesceCount: number;
   attemptIncrementCount: number;
   opencodeSessionId?: string | null;
+  piSessionIds: Set<string>;
+  dialogueCount: number;
+  thoughtCount: number;
   startMs?: number | null;
   elapsedMaxMs?: number | null;
   semanticSummaryEnabled: boolean;
@@ -87,6 +90,9 @@ export function createInitialState(): SummaryState {
     coalesceCount: 0,
     attemptIncrementCount: 0,
     opencodeSessionId: null,
+    piSessionIds: new Set(),
+    dialogueCount: 0,
+    thoughtCount: 0,
     startMs: null,
     elapsedMaxMs: null,
     semanticSummaryEnabled: false,

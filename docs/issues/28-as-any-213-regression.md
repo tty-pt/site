@@ -1,12 +1,12 @@
 ---
 id: 28
 title: "as any regression 213 hits — reassess from scratch, target 0"
-state: blocked
+state: ready
 severity: low
 requires: [27]
-blocked_by: [27]
 validates: "grep as any 0 (allow state.ts proxy)"
-area: "28-as-any-213-regression.md"
+area: "grep -rn 'as any' src --include='*.ts' | wc -l, as unknown, unknown bare"
+parent: 44
 ---
 # Issue: `as any` regression 213 hits — reassess from scratch, target 0
 

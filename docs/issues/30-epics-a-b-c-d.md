@@ -4,9 +4,9 @@ title: "Epics A/B/C/D remaining per CONFIGURABLE_REVIEWER — 1-line refs not fi
 state: deferred
 severity: low
 requires: [33]
-blocked_by: [33]
 validates: "archive/CONFIGURABLE_REVIEWER 1-line refs present"
-area: "30-epics-a-b-c-d.md"
+area: "config.ts, gates.ts, policy.ts"
+parent: 45
 ---
 # Issue: Epics A/B/C/D remaining per CONFIGURABLE_REVIEWER — 1-line refs not filed
 

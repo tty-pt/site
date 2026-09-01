@@ -4,9 +4,9 @@ title: "quest_update_state bypasses draft approval — syncQuestIdentity clears 
 state: done
 severity: high
 requires: []
-blocked_by: []
 validates: "pi: quest_update_state while activeDraft && !isDraftReviewValid => rejected draft_not_approved"
-area: "36-quest-update-state-bypasses-draft-approval.md"
+area: "tools/update/executor.ts:syncQuestIdentity, executeUpdateStateTool, commands/promote.ts:isDraftReviewValid"
+parent: 43
 ---
 # Issue: `quest_update_state` bypasses draft approval — `syncQuestIdentity` clears `activeDraft` without `isDraftReviewValid`
 

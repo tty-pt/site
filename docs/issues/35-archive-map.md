@@ -4,9 +4,9 @@ title: "8 to-be-removed docs → archive map not preserved"
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "docs/archive move map 8 files documented"
-area: "35-archive-map.md"
+area: ".pi/extensions/pi-quest/docs/, docs/archive/"
+parent: 45
 ---
 # Issue: 8 to-be-removed docs → archive map not preserved
 

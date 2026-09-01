@@ -4,9 +4,9 @@ title: "draftLastSavedHash is defined but never set"
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "state.draftLastSavedHash == sha256(future file) slice12"
-area: "03-draft-last-saved-hash-never-set.md"
+area: "state.ts:111-114,228-232, hooks/index.ts:391-408, persistence.ts:19"
+parent: 43
 ---
 # Issue: `draftLastSavedHash` is defined but never set
 

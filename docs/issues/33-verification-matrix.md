@@ -1,12 +1,12 @@
 ---
 id: 33
 title: "§11.4 + §11.6.4 + §11.7.4 verification matrix not captured as single audit"
-state: blocked
+state: ready
 severity: medium
 requires: [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 32]
-blocked_by: [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 32]
 validates: "unzip -l pi-quest-bundle.zip has current-run/future/* + manifest 9"
-area: "33-verification-matrix.md"
+area: "diagnostic/packaging.ts, diagnostic/summary.ts, diagnostic/hierarchy/resolve.ts"
+parent: 45
 ---
 # Issue: §11.4 + §11.6.4 + §11.7.4 verification matrix not captured as single audit
 

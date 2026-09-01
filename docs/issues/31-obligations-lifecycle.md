@@ -4,9 +4,9 @@ title: "Obligations lifecycle cross-link missing"
 state: deferred
 severity: low
 requires: [33]
-blocked_by: [33]
 validates: "obligations doc cross-link present"
-area: "31-obligations-lifecycle.md"
+area: "types.ts, transitions.ts, state.ts"
+parent: 45
 ---
 # Issue: Obligations lifecycle cross-link missing
 

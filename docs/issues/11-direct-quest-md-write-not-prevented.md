@@ -4,9 +4,9 @@ title: "Agent can attempt a direct quest.md write before being told to use quest
 state: ready
 severity: high
 requires: []
-blocked_by: []
 validates: "direct cat > quest.md blocked with requires:quest_update_state"
-area: "11-direct-quest-md-write-not-prevented.md"
+area: "gates.ts: PROVISIONAL_RESEARCH_PENDING, tool_gating.ts, messaging.ts"
+parent: 43
 ---
 # Issue: Agent can attempt a direct `quest.md` write before being told to use `quest_update_state`
 

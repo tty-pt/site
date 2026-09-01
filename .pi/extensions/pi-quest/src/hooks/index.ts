@@ -251,7 +251,18 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 		withContext(async (event: any, ctx: ExtensionContext) => {
 			try {
 				const raw = (event as { prompt?: unknown })?.prompt;
-				if (typeof raw === "string" && shouldCapturePrompt(raw)) {
+				if (typeof raw === "string") {
+					const sid = (() => { try { const { getActiveContext, getSessionId } = require("../state.ts") as any; return getSessionId(getActiveContext(ctx as any)); } catch { return "default"; } })();
+					const tHash = createHash("sha256").update(raw).digest("hex").slice(0, 12);
+					const tSlice = raw.trim().slice(0, 200);
+					const tLen = raw.length;
+					// always-on dialogue: every turn's user utterance, 200-char slice + hash, piSessionId for cross-log correlation
+					try { logEvent("DIALOGUE" as any, `user: ${tSlice.slice(0, 80)}`, { quest: state.activeDraft || state.active || "", dialogueRole: "user", dialogueSlice: tSlice, dialogueHash: tHash, dialogueLen: tLen, piSessionId: sid, opencodeSessionId: sid, hash: tHash } as any); } catch {}
+					if (!shouldCapturePrompt(raw)) {
+						// synthetic already logged above, still count as dialogue, skip draft/active handling
+						try { const hash = tHash; logEvent("DRAFT_CONVERSATIONAL_IGNORED" as any, `draft conversational ignored`, { quest: state.activeDraft || state.active || "", slug: state.activeDraft || state.active || "", hash, draftPromptsCount: (state.draftPrompts?.length || 0), dialogueHash: hash } as any); } catch {}
+						// still continue? synthetic should not enter draft/active branches
+					} else {
 					const trimmed = raw.trim().slice(0, PROMPT_MAX_CHARS);
 
 					if (state.activeDraft) {
@@ -458,7 +469,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 							sendInternalAgentMessage(pi, `📝 **Draft auto-created**: \`.pi/quest/future/${slug}.md\` — accumulating requirements while you talk. Requirements stay in draft (not yet part of active quest). When ready, the reviewer will validate compliance before the plan is presented; then say "go" to promote.`, "steer");
 						}
 					}
-				}
+					} // close else { shouldCapturePrompt }
+				} // close if typeof raw === string
 
 				drainPendingResumesAndNotifications(pi, ctx);
 				// Phase 22: orphan awaitingReview re-queue + turn-stop steer (A: plan_review/final_acceptance only) — 3-case CRITICAL_REVIEW_ORPHAN_CLEARED

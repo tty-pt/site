@@ -4,9 +4,9 @@ title: "Execution log is duplicated and its location state is RAM-only"
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "runs/ empty + finalized_logs deleted on archive, current first"
-area: "05-execution-log-duplication-and-ram-only-state.md"
+area: "logging/paths.ts:19-55, logging/core.ts:27, lifecycle/archive/removal.ts:9-14"
+parent: 44
 ---
 # Issue: Execution log is duplicated and its location state is RAM-only
 

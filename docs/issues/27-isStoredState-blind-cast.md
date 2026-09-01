@@ -1,12 +1,12 @@
 ---
 id: 27
 title: "isStoredState guard missing — blind as unknown as StoredState cast + any details + ArchiveContext|{error}"
-state: blocked
+state: ready
 severity: medium
-requires: [06, 26]
-blocked_by: [06, 26]
+requires: [26]
 validates: "grep isStoredState 1 hit, Record<string,unknown>"
-area: "27-isStoredState-blind-cast.md"
+area: "reconstruction.ts:18-19, types.ts:186,188, lifecycle.ts:212,220"
+parent: 44
 ---
 # Issue: `isStoredState` guard missing — blind `as unknown as StoredState` cast + `any` details + `ArchiveContext|{error}`
 

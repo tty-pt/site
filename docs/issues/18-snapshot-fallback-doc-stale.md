@@ -4,9 +4,9 @@ title: "SNAPSHOT_FALLBACK doc stale — captureSnapshot gone, 2 emitters now exi
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "grep SNAPSHOT_FALLBACK 2 emitters at snapshot.ts"
-area: "18-snapshot-fallback-doc-stale.md"
+area: "critical_agent/snapshot.ts:37,57, logging/types.ts:163, logging/summary/reducers.ts:137,162"
+parent: 45
 ---
 # Issue: `SNAPSHOT_FALLBACK` doc stale — `captureSnapshot:49` gone, 2 emitters now exist
 

@@ -1,12 +1,12 @@
 ---
 id: 07
 title: "Diagnostic hierarchy and packaging miss future-archive and compaction artifacts"
-state: blocked
+state: ready
 severity: medium
 requires: [04]
-blocked_by: [04]
 validates: "hierarchy futureCount includes future-archive, zip has future/*"
-area: "07-diagnostic-hierarchy-misses-future-archive.md"
+area: "diagnostic/hierarchy/resolve.ts:16-95,268-282, diagnostic/packaging.ts:98-203,296-340, diagnostic/hierarchy/project.ts:4"
+parent: 45
 ---
 # Issue: Diagnostic hierarchy and packaging miss `future-archive` and compaction artifacts
 

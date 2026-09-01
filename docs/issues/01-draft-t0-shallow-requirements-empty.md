@@ -4,9 +4,9 @@ title: "Draft at t=0 is shallow — Requirements stays empty"
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "future/<slug>.md Requirements prefilled from prompt slice"
-area: "01-draft-t0-shallow-requirements-empty.md"
+area: "markdown/template/header.ts:36, paths.ts:300,321"
+parent: 43
 ---
 # Issue: Draft at t=0 is shallow — Requirements stays empty
 

@@ -1,12 +1,12 @@
 ---
 id: 20
 title: "Manifest filteredCount/opencodeSessionId/startMs/elapsedMaxMs null until log parsed"
-state: blocked
+state: ready
 severity: medium
 requires: [25]
-blocked_by: [25]
 validates: "manifest.txt 9 fields even on cold start"
-area: "20-manifest-filteredCount-null.md"
+area: "diagnostic/hierarchy/resolve.ts:268-293, diagnostic/summary.ts:209-258, generateRunManifest"
+parent: 45
 ---
 # Issue: Manifest `filteredCount/opencodeSessionId/startMs/elapsedMaxMs` null until log parsed
 

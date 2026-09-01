@@ -4,9 +4,9 @@ title: "Concurrent sessions on the same quest are not coalesced"
 state: ready
 severity: high
 requires: []
-blocked_by: []
 validates: "single flight: 2 sessions same quest => 1 active + coalesced pending"
-area: "16-concurrent-sessions-not-coalesced.md"
+area: "critical_agent/policy/launch_guard.ts, critical_agent/policy/pending_coalesce.ts, critical_agent/tracker.ts"
+parent: 44
 ---
 # Issue: Concurrent sessions on the same quest are not coalesced
 

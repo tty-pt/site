@@ -1,12 +1,12 @@
 ---
 id: 24
 title: "5th promotion path commands/quest.ts bare rename without archive (extends #04)"
-state: blocked
+state: ready
 severity: high
 requires: [04]
-blocked_by: [04]
 validates: "grep DRAFT_DISCARDED src/commands/quest.ts 1 hit + future-archive in zip"
-area: "24-fifth-promotion-path-bare-rename.md"
+area: "commands/quest.ts:49-65, 55, lifecycle.ts:99-110"
+parent: 44
 ---
 # Issue: 5th promotion path `commands/quest.ts:55` bare `rename` without archive (extends #04)
 

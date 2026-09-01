@@ -4,9 +4,9 @@ title: "Rollout order for remaining fixes not sequenced"
 state: deferred
 severity: low
 requires: [33]
-blocked_by: [33]
 validates: "docs/FIX_ORDER.md stages 1-5 present"
-area: "34-rollout-order.md"
+area: "§2.1-2.14, §4, scripts/check-pi-quest-dag.ts"
+parent: 45
 ---
 # Issue: Rollout order for remaining fixes not sequenced
 

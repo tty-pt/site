@@ -4,9 +4,9 @@ title: "ATTEMPT_INCREMENTED is under-enriched"
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "ATTEMPT_INCREMENTED has boundaryKey/saveHash/saveCount"
-area: "14-attempt-incremented-under-enriched.md"
+area: "critical_agent/policy/launch_guard.ts:50-64, critical_agent/policy.ts, critical_agent/snapshot.ts:50"
+parent: 44
 ---
 # Issue: `ATTEMPT_INCREMENTED` is under-enriched
 

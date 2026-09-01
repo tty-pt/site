@@ -4,9 +4,9 @@ title: "Promotion paths delete the only copy of future/<slug>.md (5 paths; D nul
 state: ready
 severity: high
 requires: []
-blocked_by: []
 validates: "all 5 paths archive-before-unlink + DRAFT_DISCARDED"
-area: "04-promotion-paths-delete-without-archive.md"
+area: "tools/update/executor.ts, lifecycle.ts, commands/promote.ts"
+parent: 44
 ---
 # Issue: Promotion paths delete the only copy of `future/<slug>.md` (5 paths; D null-qid edge)
 

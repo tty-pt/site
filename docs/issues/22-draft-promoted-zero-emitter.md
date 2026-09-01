@@ -4,9 +4,9 @@ title: "DRAFT_PROMOTED type exists, 0 emitter — 23/24 types emitted"
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "grep DRAFT_PROMOTED 3 emitters"
-area: "22-draft-promoted-zero-emitter.md"
+area: "logging/types.ts:148, logging/summary/reducers.ts:127,161, commands/promote.ts:58-66"
+parent: 44
 ---
 # Issue: `DRAFT_PROMOTED` type exists, 0 emitter — 23/24 types emitted
 

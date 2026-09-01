@@ -4,9 +4,9 @@ title: "MUTEX_WAIT still await import with empty catch{} swallowing logger failu
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "grep await import src/utils/mutex.ts 0 after static import"
-area: "23-mutex-wait-dynamic-import-swallow.md"
+area: "utils/mutex.ts:20,30, logging/core.ts, logging/summary/reducers.ts:138"
+parent: 44
 ---
 # Issue: `MUTEX_WAIT` still `await import` with empty `catch{}` swallowing logger failure
 

@@ -4,9 +4,9 @@ title: "10 silent return null without REVIEW_DEDUP_HIT / CRITICAL_REVIEW_SUPPRES
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "grep return null 0 silent (each has REVIEW_DEDUP_HIT etc)"
-area: "21-silent-return-null-without-dedup-hit.md"
+area: "critical_agent/policy.ts:405,440,441,444,511,512,515,548, critical_agent/policy/pending_coalesce.ts:32,64, logging/types"
+parent: 44
 ---
 # Issue: 10 silent `return null` without `REVIEW_DEDUP_HIT` / `CRITICAL_REVIEW_SUPPRESSED`
 

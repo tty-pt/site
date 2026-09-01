@@ -4,9 +4,9 @@ title: "pi restart drops draft lineage even though the journal persists it"
 state: ready
 severity: high
 requires: []
-blocked_by: []
 validates: "kill pi with future/<slug>.md → reconstruct activeDraft"
-area: "06-restart-drops-draft-lineage.md"
+area: "persistence.ts:15-46, state.ts:111-132,228-243, reconstruction.ts:14-114"
+parent: 43
 ---
 # Issue: `pi` restart drops draft lineage even though the journal persists it
 

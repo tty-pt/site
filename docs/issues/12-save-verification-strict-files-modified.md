@@ -4,9 +4,9 @@ title: "Save verification Files Modified check is too strict for research-only q
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "Files Modified check not ERROR on planVersion=1 research-only"
-area: "12-save-verification-strict-files-modified.md"
+area: "validation/consistency/audit.ts, validation/consistency/checks.ts, validation/helpers.ts"
+parent: 44
 ---
 # Issue: Save verification `Files Modified` check is too strict for research-only quests
 

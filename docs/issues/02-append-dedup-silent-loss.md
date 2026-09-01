@@ -4,9 +4,9 @@ title: "Refinement dedup is silent"
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "execution.log:DRAFT_APPEND_DEDUPED on duplicate slice"
-area: "02-append-dedup-silent-loss.md"
+area: "paths.ts:291-319, hooks/index.ts:284-292"
+parent: 43
 ---
 # Issue: Refinement dedup is silent
 

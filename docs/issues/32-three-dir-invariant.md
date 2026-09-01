@@ -1,12 +1,12 @@
 ---
 id: 32
 title: "3-dir invariant not stated as single normative table"
-state: blocked
+state: ready
 severity: medium
 requires: [05, 06, 07, 17]
-blocked_by: [05, 06, 07, 17]
 validates: "ls .pi/quest 3 dirs only, no QUEST_RUN_DIR"
-area: "32-three-dir-invariant.md"
+area: "constants.ts, diagnostic/packaging.ts, diagnostic/hierarchy/*"
+parent: 45
 ---
 # Issue: 3-dir invariant not stated as single normative table
 

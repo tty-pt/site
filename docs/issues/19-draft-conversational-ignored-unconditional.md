@@ -4,9 +4,9 @@ title: "DRAFT_CONVERSATIONAL_IGNORED logged unconditionally while activeDraft ho
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "DRAFT_CONVERSATIONAL_IGNORED only when activeDraft && CONVERSATIONAL_ACK"
-area: "19-draft-conversational-ignored-unconditional.md"
+area: "hooks/index.ts:280-337, 336, classification.ts:17"
+parent: 43
 ---
 # Issue: `DRAFT_CONVERSATIONAL_IGNORED` logged unconditionally while `activeDraft` holds
 

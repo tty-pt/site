@@ -29,6 +29,7 @@ function buildFormattedLines(s: SummaryState, formattedExtra: { lastTestStatus: 
   const lines: string[] = [
     `=== Quest Journal Run Summary ===`,
     `Quests Tracked (${quests.length}): ${quests.join(", ") || "(none)"}`,
+    `Dialogue Turns: ${s.dialogueCount} (thoughts: ${s.thoughtCount}) Sessions: ${Array.from(s.piSessionIds).join(", ") || s.opencodeSessionId || "(none)"}`,
     `Phases Observed: ${majorPhases.join(", ") || "(none)"}`,
     `Research Rounds: ${s.researchCycles}`,
     `Reassessment Cycles: ${s.reassessmentCycles}`,

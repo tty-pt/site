@@ -4,9 +4,9 @@ title: "Plan-review suppression is silent — PLAN_REVIEW_SUPPRESSED_MATERIAL_CH
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE logged when material change suppressed"
-area: "13-plan-review-suppression-not-audited.md"
+area: "tools/update/executor.ts:223-250 maybeTriggerPlanReview, logging/types.ts:156, logging/summary/reducers.ts:162"
+parent: 44
 ---
 # Issue: Plan-review suppression is silent — `PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE` never emitted
 

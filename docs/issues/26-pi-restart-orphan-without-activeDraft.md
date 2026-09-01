@@ -1,12 +1,12 @@
 ---
 id: 26
 title: "pi-restart orphan future/<slug>.md without activeDraft irretrievable (extends #06)"
-state: blocked
+state: ready
 severity: high
 requires: [06]
-blocked_by: [06]
 validates: "reconstruction orphan activeDraft==slug when future file exists"
-area: "26-pi-restart-orphan-without-activeDraft.md"
+area: "reconstruction.ts:24-148, 28-37, 137-141"
+parent: 43
 ---
 # Issue: pi-restart orphan `future/<slug>.md` without `activeDraft` irretrievable (extends #06)
 

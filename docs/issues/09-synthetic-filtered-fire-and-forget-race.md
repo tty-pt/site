@@ -4,9 +4,9 @@ title: "SYNTHETIC_FILTERED is fire-and-forget and racy"
 state: ready
 severity: medium
 requires: []
-blocked_by: []
 validates: "SYNTHETIC_FILTERED sync with hash slice12"
-area: "09-synthetic-filtered-fire-and-forget-race.md"
+area: "messaging.ts:286-327 shouldCapturePrompt, logging/types.ts, logging/summary/reducers.ts:135"
+parent: 43
 ---
 # Issue: `SYNTHETIC_FILTERED` is fire-and-forget and racy
 

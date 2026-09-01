@@ -67,8 +67,8 @@ export async function handleTurnStart(event: any, _ctx: ExtensionContext): Promi
 		logEvent("INITIAL_PROMPT", "initial prompt captured", { quest: state.active || "", hash: intentHash, intentLen, ref: "run/initial-prompt.txt", opencodeSessionId: ctxSessionId, elapsedMs } as any);
 	}
 
-	logTurnBoundary("TURN_START", "agent turn started", {
-		quest: state.active || "",
+	logTurnBoundary("TURN_START", `agent turn started — phase ${phase} gate ${activeGate} plan v${state.planVersion || 1} round ${state.researchRound || 1}`, {
+		quest: state.active || state.activeDraft || "",
 		turn: state.currentTurn,
 		correlationId: state.currentTurnCorrelationId,
 		intentHash,
@@ -82,18 +82,17 @@ export async function handleTurnStart(event: any, _ctx: ExtensionContext): Promi
 		implementationAllowed: Boolean(state.implementationAllowed),
 		elapsedMs,
 		opencodeSessionId: ctxSessionId,
+		piSessionId: ctxSessionId,
 	} as any);
 
-	// inference-free semantic snapshot ≤1/turn on phase change (also handled in TurnEnd/executor)
+	// inference-free semantic snapshot — always 1 line/turn for readability (no tokens), human sentence
 	try {
 		const prevKey = (state as any)._lastSemanticKey;
 		const curKey = `${phase}:${state.planVersion || 1}:${activeGate}`;
-		if (prevKey !== curKey) {
-			(state as any)._lastSemanticKey = curKey;
-			if (prevKey !== undefined) {
-				logEvent("SEMANTIC_SNAPSHOT", `${prevKey}→${curKey}`, { quest: state.active || "", from: prevKey, to: curKey, planVersion: state.planVersion || 1, activeGate, elapsedMs, opencodeSessionId: ctxSessionId } as any);
-			}
-		}
+		const isChange = prevKey !== curKey;
+		(state as any)._lastSemanticKey = curKey;
+		const readable = `phase ${phase} gate ${activeGate} plan v${state.planVersion || 1} round ${state.researchRound || 1}${isChange && prevKey ? ` (changed from ${prevKey})` : ""}`;
+		logEvent("SEMANTIC_SNAPSHOT", isChange && prevKey ? `${prevKey}→${curKey} — ${readable}` : `${curKey} — ${readable}`, { quest: state.active || state.activeDraft || "", from: prevKey || curKey, to: curKey, planVersion: state.planVersion || 1, activeGate, elapsedMs, opencodeSessionId: ctxSessionId, piSessionId: ctxSessionId } as any);
 	} catch {}
 }
 
@@ -180,7 +179,7 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 
 	const turnElapsedMs = (() => { try { const sid = getSessionId(getActiveContext(ctx)); const st = sessionStartMap.get(sid); return st ? Date.now() - st : undefined; } catch { return undefined; } })();
 	const turnOpSess = (() => { try { return getSessionId(getActiveContext(ctx)); } catch { return undefined; } })();
-	logTurnBoundary("TURN_END", "turn execution completed", {
+	logTurnBoundary("TURN_END", `turn completed — phase ${state.reassessmentRequired ? "reassessment" : (state.researchRequired || !state.researchComplete ? "research" : (state.awaitingUserConfirmation ? "confirmation" : "implementation"))} gate ${state.reassessmentRequired ? "REASSESSMENT_PENDING" : (state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : (state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"))} tools ${toolResults.length}`, {
 		quest: state.active || "",
 		turn: state.currentTurn,
 		correlationId: state.currentTurnCorrelationId,
@@ -202,21 +201,33 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 		opencodeSessionId: turnOpSess,
 	} as any);
 
-	// L4 optional STEP_SUMMARY ≤1/turn when enabled
+	// always-on semantic STEP_SUMMARY 1/turn (no tokens) — human sentence of what turn did; thought as proxy if enabled or harness provides text
 	try {
-		if (isSemanticSummaryEnabled(state)) {
-			const curGate = state.reassessmentRequired ? "REASSESSMENT_PENDING" : (state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : (state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"));
-			const curPhase = state.reassessmentRequired ? "reassessing" : (state.researchRequired || !state.researchComplete ? "research" : (state.awaitingUserConfirmation ? "confirmation" : "implementation"));
-			const intent = curGate === "RESEARCH_PENDING" ? "research" : curGate === "CONFIRMATION_PENDING" ? "awaiting-review" : curGate === "REASSESSMENT_PENDING" ? "revising" : curPhase as any;
-			const line = `${intent} planVersion${state.planVersion || 1} gate=${curGate}`;
-			logEvent("STEP_SUMMARY", line.slice(0, 120), { quest: state.active || "", intent, planVersion: state.planVersion || 1, activeGate: curGate, elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess } as any);
-		}
-		if (isThoughtLoggingEnabled(state)) {
-			// thoughtLoggingEnabled: hash/slice of last thought if available (not token spend)
-			const lastThought = (state as any).lastThought as string | undefined;
-			if (lastThought) {
+		const curGate = state.reassessmentRequired ? "REASSESSMENT_PENDING" : (state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : (state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"));
+		const curPhase = state.reassessmentRequired ? "reassessing" : (state.researchRequired || !state.researchComplete ? "research" : (state.awaitingUserConfirmation ? "confirmation" : "implementation"));
+		const semanticEnabled = isSemanticSummaryEnabled(state);
+		const intent = curGate === "RESEARCH_PENDING" ? "research" : curGate === "CONFIRMATION_PENDING" ? "awaiting-review" : curGate === "REASSESSMENT_PENDING" ? "revising" : curPhase as any;
+		const summaryLine = `${intent} planVersion${state.planVersion || 1} gate=${curGate} tools=${toolResults.length} reads=${readsCount} writes=${writesCount} failures=${failuresCount}${turnConsequence ? ` consequence=${turnConsequence}` : ""}`;
+		// unconditional: execution.log must be semantically legible without flag
+		logEvent("STEP_SUMMARY", summaryLine.slice(0, 300), { quest: state.active || state.activeDraft || "", intent, planVersion: state.planVersion || 1, activeGate: curGate, elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess, piSessionId: turnOpSess } as any);
+		// verbose variant behind flag still emitted but deduped above? keep single line
+		if (!semanticEnabled) { /* already logged */ }
+		// thought proxy: harness text if available, else toolResult summary slice
+		const shouldLogThought = isThoughtLoggingEnabled(state) || Boolean((event as any)?.response || (event as any)?.output || (event as any)?.messages);
+		if (shouldLogThought) {
+			let lastThought: string | undefined = (state as any).lastThought as string | undefined;
+			try {
+				const cand = (event as any)?.response ?? (event as any)?.output ?? (Array.isArray((event as any)?.messages) ? (event as any).messages[(event as any).messages.length - 1]?.content ?? (event as any).messages[(event as any).messages.length - 1]?.text : undefined);
+				if (typeof cand === "string" && cand.trim()) lastThought = cand;
+				else if (cand && typeof cand === "object") lastThought = String((cand as any).content || (cand as any).text || "");
+			} catch {}
+			if (!lastThought && toolResults.length > 0) {
+				// proxy: last tool's truncated output as thought slice
+				try { const last = toolResults[toolResults.length - 1]; const proxy = String((last as any)?.content || (last as any)?.output || last?.toolName || ""); if (proxy.trim()) lastThought = proxy.slice(0, 500); } catch {}
+			}
+			if (lastThought && lastThought.trim()) {
 				const th = createHash("sha256").update(lastThought, "utf8").digest("hex").slice(0, 12);
-				logEvent("STEP_SUMMARY", `thought ${th}`, { quest: state.active || "", thoughtHash: th, thoughtLen: lastThought.length, thoughtSlice: sanitizeLogString(lastThought, 80), elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess } as any);
+				logEvent("AGENT_THOUGHT", `thought ${th} ${sanitizeLogString(lastThought, 80)}`, { quest: state.active || state.activeDraft || "", thoughtHash: th, thoughtLen: lastThought.length, thoughtSlice: sanitizeLogString(lastThought, 200), elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess, piSessionId: turnOpSess } as any);
 			}
 		}
 	} catch {}

@@ -1,12 +1,12 @@
 ---
 id: 29
 title: "121 bare catch{} swallow — needs tryLog helper, keep only existsSync guards"
-state: blocked
+state: ready
 severity: low
 requires: [23]
-blocked_by: [23]
 validates: "grep catch {} <10 (only existsSync)"
-area: "29-bare-catch-swallow.md"
+area: "grep -rn 'catch {}' src | wc -l, try{, grep -P 'catch/s*/{/s*/}'"
+parent: 44
 ---
 # Issue: 121 bare `catch{}` swallow — needs `tryLog` helper, keep only `existsSync` guards
 

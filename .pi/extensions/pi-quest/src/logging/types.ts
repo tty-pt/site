@@ -167,6 +167,8 @@ export type QuestLogEventType =
 	| "USER_PROMPT"
 	| "SEMANTIC_SNAPSHOT"
 	| "STEP_SUMMARY"
+	| "DIALOGUE"
+	| "AGENT_THOUGHT"
 	// 19. Unknown/inconsistent states
 	| "STATE_INCONSISTENT"
 	| "RECOVERY_STARTED"
@@ -262,6 +264,12 @@ export interface QuestLogContext {
 	thoughtLen?: number;
 	thoughtSlice?: string;
 	ref?: string;
+	dialogueRole?: string;
+	dialogueHash?: string;
+	dialogueSlice?: string;
+	dialogueLen?: number;
+	transcriptRef?: string;
+	piSessionId?: string;
 	// Causal Chain & Observability properties
 	intent?: string;
 	intentHash?: string;

@@ -4,9 +4,9 @@ title: "Allowlisted DAG cycles and project-root discovery pollute the extension"
 state: ready
 severity: low
 requires: []
-blocked_by: []
 validates: "check-pi-quest-dag passed, findProjectRoot skips extensions/"
-area: "17-dag-allowlisted-cycles-and-project-root-pollution.md"
+area: "constants.ts, diagnostic/hierarchy/project.ts:4 findProjectRoot, diagnostic/packaging.ts:230"
+parent: 45
 ---
 # Issue: Allowlisted DAG cycles and project-root discovery pollute the extension
 

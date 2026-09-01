@@ -1,12 +1,12 @@
 ---
 id: 25
 title: "futureCount 0 when disk has drafts — Array.isArray([]) shadows readdir, misses future-archive, e.isFile"
-state: blocked
+state: ready
 severity: medium
 requires: [07]
-blocked_by: [07]
 validates: "resolve.ts readdir + future-archive => futureCount==5 on fixture"
-area: "25-futureCount-shadow-and-isFile-bug.md"
+area: "diagnostic/hierarchy/resolve.ts:268-293, 273, diagnostic/packaging.ts:157-196,297-340"
+parent: 45
 ---
 # Issue: `futureCount` 0 when disk has drafts — `Array.isArray([])` shadows `readdir`, misses `future-archive`, `e.isFile` property not call
 
