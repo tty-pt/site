@@ -12,6 +12,15 @@ export interface ActiveRunHierarchy {
 	startTime?: string;
 	endTime?: string;
 	questHash?: string | null;
+	draftCaptured?: boolean;
+	futureCount?: number;
+	compactionResumeHash?: string | null;
+	semanticSummaryEnabled?: boolean;
+	thoughtLoggingEnabled?: boolean;
+	filteredCount?: number;
+	opencodeSessionId?: string | null;
+	startMs?: number | null;
+	elapsedMaxMs?: number | null;
 	resolutionMethod: string;
 	confidence: "high" | "medium" | "low" | "ambiguous";
 	ambiguityDetails?: string;

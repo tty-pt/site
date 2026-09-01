@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CUSTOM_TYPE, QUEST_CURRENT_DIR } from "./constants.ts";
+import { CUSTOM_TYPE, FUTURE_DIR, QUEST_CURRENT_DIR } from "./constants.ts";
 import { invalidatePreparedCompactionTransaction } from "./compaction/transaction.ts";
 import { logPersistenceTransition } from "./logging.ts";
 import { logError, reportAgentError } from "./messaging.ts";
@@ -84,15 +85,19 @@ export async function verifyAndMarkSaved(
 	let fp = await memoFileFingerprint(p);
 	if (!fp) fp = await computeFileFingerprint(p) as any;
 	if (!fp) {
-		const errMsg = `Save verification failed: Quest file not found or unreadable at \`${p}\`.`;
-		logPersistenceTransition("SAVE_FAILED", errMsg, { quest: targetSlug || targetQid || "", path: p, reason: "file_not_found" });
+		const futureDraftExists = (() => { try { const slug = targetSlug || targetQid || ""; return slug ? existsSync(join(FUTURE_DIR, `${slug}.md`)) : false; } catch { return false; } })();
+		const reason = futureDraftExists ? "file_not_found+future_draft_exists" : "file_not_found";
+		const requiredAction = futureDraftExists ? "quest_update_state" : undefined;
+		const draftHint = futureDraftExists ? ` Draft exists in \`${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)}\` — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true` : "";
+		const errMsg = `Save verification failed: Quest file not found or unreadable at \`${p}\`.${draftHint}`;
+		logPersistenceTransition("SAVE_FAILED", errMsg, { quest: targetSlug || targetQid || "", path: p, reason, ...(requiredAction ? { requiredAction } : {}) });
 		reportAgentError(
 			pi,
 			ctx,
 			errMsg,
 			{
 				code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
-				requiredNextAction: `Ensure the file is written to disk at \`${p}\` before calling quest_mark_saved.`,
+				requiredNextAction: futureDraftExists ? `Draft exists in ${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)} — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true to create the durable quest file.` : `Ensure the file is written to disk at \`${p}\` before calling quest_mark_saved.`,
 				details: {
 					Quest: targetSlug || targetQid || "(none)",
 					Path: p,
@@ -102,7 +107,7 @@ export async function verifyAndMarkSaved(
 		return {
 			success: false,
 			count: s.saveCount,
-			error: `Quest file not found or unreadable at \`${p}\`. Ensure the file is written to disk before marking as saved.`,
+			error: `Quest file not found or unreadable at \`${p}\`.${draftHint} Ensure the file is written to disk before marking as saved.`,
 		};
 	}
 

@@ -13,7 +13,8 @@ import { checkAndTriggerDirectionReview } from "../critical_agent.ts";
 import { PROMPT_MAX_CHARS, PROMPT_MAX_COUNT, QUEST_CURRENT_DIR } from "../constants.ts";
 import { withContext } from "../context.ts";
 import { ensureRootQuestForPrompt } from "../lifecycle.ts";
-import { logCompactionTransition, logCriticalReviewTransition, logUserInteraction } from "../logging.ts";
+import { createHash } from "node:crypto";
+import { logCompactionTransition, logCriticalReviewTransition, logEvent, logUserInteraction } from "../logging.ts";
 import { readFileSync } from "node:fs";
 import { getGuidelinesFingerprint } from "../context.ts";
 import { validatePhasedPlan } from "../compaction/checkpoint.ts";
@@ -129,6 +130,7 @@ Once saved, auto-compaction will safely proceed.`;
 					} as any);
 				}
 				if (active.length === 0 && targetState.inCriticalReview) {
+					try { logCriticalReviewTransition("CRITICAL_REVIEW_ORPHAN_CLEARED" as any, `orphan flag no awaiting`, { quest: targetState.active || state.active || "", reason: "orphan_flag_no_awaiting" } as any); } catch {}
 					targetState.inCriticalReview = false;
 					try { persist(pi, ctx); } catch {}
 				}
@@ -252,6 +254,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 
 					if (state.activeDraft) {
 						const classification = classifyUserMessage(trimmed);
+						try { logEvent("CLASSIFICATION_RESULT", `classification ${classification}`, { classification, quest: state.activeDraft || "" } as any); } catch {}
+						try { if (classification !== UserMessageClassification.CONVERSATIONAL_ACK) { const slice = trimmed.slice(0, 120); const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); logEvent("USER_PROMPT", `user prompt`, { classification, quest: state.activeDraft || "", slice, hash, intentHash: hash } as any); } } catch {}
 						if (classification === UserMessageClassification.CONFIRMATION) {
 							const { isDraftReviewValid } = await import("../critical_agent/policy.ts");
 							const { getCustomSubagentRunner, isSubagentToolRegistered } = await import("../critical_agent/index.ts");
@@ -285,7 +289,15 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 									state.draftPrompts = [state.draftPrompts[0], ...state.draftPrompts.slice(-(PROMPT_MAX_COUNT - 1))];
 								}
 							}
-							await appendToFutureDraft(state.activeDraft, trimmed);
+							const appended = await appendToFutureDraft(state.activeDraft, trimmed);
+							try {
+								const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+								if (appended) {
+									logEvent("DRAFT_APPENDED" as any, `draft appended`, { quest: state.activeDraft || "", slug: state.activeDraft, hash, draftPromptsCount: state.draftPrompts.length } as any);
+								} else {
+									logEvent("DRAFT_APPEND_DEDUPED" as any, `draft append deduped`, { quest: state.activeDraft || "", slug: state.activeDraft, hash, draftPromptsCount: state.draftPrompts.length } as any);
+								}
+							} catch {}
 							logUserInteraction("USER_REFINEMENT_RECEIVED", `draft requirement accumulated for '${state.activeDraft}'`, { quest: state.activeDraft || "" });
 							persist(pi, ctx);
 							updateUIStatus(ctx);
@@ -301,6 +313,10 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 								} catch {}
 							}
 						}
+						try {
+								const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+								logEvent("DRAFT_CONVERSATIONAL_IGNORED" as any, `draft conversational ignored`, { quest: state.activeDraft || "", slug: state.activeDraft, hash, draftPromptsCount: (state.draftPrompts?.length || 0) } as any);
+							} catch {}
 						// CONVERSATIONAL_ACK ignored while drafting
 					} else if (state.active) {
 						if (!Array.isArray(state.refinements)) state.refinements = [];
@@ -311,6 +327,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 
 						if (!isOriginal && !isLatestRefinement) {
 							const classification = classifyUserMessage(trimmed);
+							try { logEvent("CLASSIFICATION_RESULT", `classification ${classification}`, { classification, quest: state.active || "" } as any); } catch {}
+							try { if (classification !== UserMessageClassification.CONVERSATIONAL_ACK) { const slice = trimmed.slice(0, 120); const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); logEvent("USER_PROMPT", `user prompt`, { classification, quest: state.active || "", slice, hash, intentHash: hash } as any); } } catch {}
 
 							if (classification === UserMessageClassification.CONFIRMATION) {
 								logUserInteraction("CONFIRMATION_RECEIVED", "user confirmation received", { quest: state.active || "" });
@@ -332,6 +350,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 						}
 					} else if (state.pendingRootQuest) {
 						const classification = classifyUserMessage(trimmed);
+						try { logEvent("CLASSIFICATION_RESULT", `classification ${classification}`, { classification, quest: state.active || "" } as any); } catch {}
+						try { if (classification !== UserMessageClassification.CONVERSATIONAL_ACK) { const slice = trimmed.slice(0, 120); const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); logEvent("USER_PROMPT", `user prompt`, { classification, quest: state.active || "", slice, hash, intentHash: hash } as any); } } catch {}
 						if (classification === UserMessageClassification.REFINEMENT_OR_REQUIREMENT) {
 							if (!Array.isArray(state.refinements)) state.refinements = [];
 							state.refinements.push(trimmed);
@@ -393,16 +413,25 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 				}
 
 				drainPendingResumesAndNotifications(pi, ctx);
-				// Phase 22: orphan awaitingReview re-queue + turn-stop steer (A: plan_review/final_acceptance only)
+				// Phase 22: orphan awaitingReview re-queue + turn-stop steer (A: plan_review/final_acceptance only) — 3-case CRITICAL_REVIEW_ORPHAN_CLEARED
 				try {
 					const c = getActiveContext(ctx);
 					const targetSessionId = getSessionId(c);
 					const targetState = sessionStates.get(targetSessionId) ?? getState(c);
 					const aw = (targetState as any).awaitingReview as { kind: string; reviewId: string; triggerReason?: string } | null | undefined;
-					if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
+					// case A: reviewer disabled
+					let reviewerDisabled = false;
+					try { const { getCustomSubagentRunner, isSubagentToolRegistered } = await import("../critical_agent/index.ts"); reviewerDisabled = !Boolean(getCustomSubagentRunner()) && !isSubagentToolRegistered(pi as any, ctx as any); } catch {}
+					if (aw && reviewerDisabled) {
+						try { logCriticalReviewTransition("CRITICAL_REVIEW_ORPHAN_CLEARED" as any, `orphan reviewer disabled`, { quest: targetState.active || state.active || "", reason: "reviewer_disabled", reviewId: aw.reviewId, triggerReason: aw.triggerReason } as any); } catch {}
+						(targetState as any).awaitingReview = null;
+						targetState.inCriticalReview = false;
+						try { persist(pi, ctx); } catch {}
+					} else if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
 						const { getActiveReviews } = await import("../critical_agent/tracker.ts");
 						const hasActive = getActiveReviews().has(aw.reviewId);
 						if (!hasActive) {
+							try { logCriticalReviewTransition("CRITICAL_REVIEW_ORPHAN_CLEARED" as any, `orphan awaiting pending requeue`, { quest: targetState.active || state.active || "", reason: "orphan_awaiting_pending_requeue", reviewId: aw.reviewId, triggerReason: aw.triggerReason } as any); } catch {}
 							// Orphan: re-queue as pending coalesced if not already pending
 							try {
 								const { getPendingReview, setPendingReview } = await import("../critical_agent/tracker.ts");

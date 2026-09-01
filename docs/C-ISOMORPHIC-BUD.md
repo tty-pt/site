@@ -240,10 +240,7 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
 - Native-only helpers (qmap/source/axil) must live in a DIFFERENT file (e.g.
   `mods/index/index.c`, `mods/source/source.c`) so they never end up in the
   wasm translation unit.
-- **The wasm rule has NO prerequisites** — a `.wasm` only rebuilds when the
-  target file is missing. After any change to a wasm-compiled source, force it:
-  `rm -f htdocs/<target>.wasm && make`. Plain `make` silently ships the stale
-  wasm (see `docs/BUILD.md`).
+- **WASM deps are now tracked via `build.mk:57` `.d` + `LIST_UX_DEPS`** — editing `filter.c`/`site_ui.c` rebuilds dependent WASMs automatically (see `docs/BUILD.md` §WASM rebuilds). Historical trap: the rule once had NO prerequisites and `rm -f htdocs/<target>.wasm && make` was required; plain `make` then silently shipped stale WASM. If `WASI_CC` probe fails (`Skipping WASM build`), the `.wasm` is *absent not stale* — SSR still works. Verify with `make -n`.
 
 ## 7. Checklist: add a new dual-compiled page
 

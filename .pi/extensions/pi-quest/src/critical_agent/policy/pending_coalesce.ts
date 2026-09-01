@@ -1,3 +1,4 @@
+import { logEvent } from "../../logging.ts";
 import { clearPendingReview, getAllPendingForSlug, getPendingReview, getPendingReviews } from "../tracker.ts";
 import { state } from "../../state.ts";
 
@@ -29,6 +30,16 @@ export function dequeuePendingIfNeeded(
 ): any | null {
   const pendings = getAllPendingForSlug(slug);
   if (pendings.length === 0) return null;
+  const firstPlanReviewFired = (targetState as any).firstPlanReviewFired || (targetState as any).planReviewAlreadyFired || !!(targetState as any).lastPlanReviewApproval;
+  if (firstPlanReviewFired && pendings.some((p: any) => p.kind === "plan_review")) {
+    logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (first plan review already fired)`, {
+      quest: slug,
+      shard: "plan_review",
+      staleCount: pendings.length,
+      candidateCount: 0,
+    });
+    return null;
+  }
   const latestPlanVersion = targetState.planVersion || 1;
   const latestHash = targetState.lastSavedHash || (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
   const latestBoundaryKey = targetState.lastPlanReviewBoundaryKey;
@@ -54,6 +65,12 @@ export function dequeuePendingIfNeeded(
   // Prefer most recent requestedAt; if tie, last
   candidates.sort((a, b) => (b.requestedAt || 0) - (a.requestedAt || 0));
   const chosen = candidates[0];
+  logEvent("PENDING_COALESCED_RESOLVED", `pending coalesced resolved (chosen=${chosen.kind})`, {
+    quest: slug,
+    chosenKind: chosen.kind,
+    staleCount: stale.length,
+    candidateCount: candidates.length,
+  });
   clearPendingReview(slug, chosen.kind);
   // Also clear other stale candidates? keep one chosen; clear remaining candidates that are not chosen but still stale? They are not stale, but we coalesce to one.
   // Remove remaining candidates for same slug to avoid duplicate launches

@@ -141,6 +141,32 @@ export type QuestLogEventType =
 	| "REMEDIATION_REQUIRED"
 	| "SELF_CRITIQUE_STARTED"
 	| "SELF_CRITIQUE_REVISED"
+	// 18b. B2 Logging maturity
+	| "DRAFT_APPENDED"
+	| "DRAFT_APPEND_DEDUPED"
+	| "DRAFT_CONVERSATIONAL_IGNORED"
+	| "DRAFT_PROMOTED"
+	| "DRAFT_DISCARDED"
+	| "SYNTHETIC_FILTERED"
+	| "CLASSIFICATION_RESULT"
+	| "REQUIRE_CONFIRM_DECISION"
+	| "ATTEMPT_INCREMENTED"
+	| "PENDING_COALESCED_DROPPED"
+	| "PENDING_COALESCED_RESOLVED"
+	| "PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE"
+	| "CRITICAL_REVIEW_FORCED"
+	| "FIRST_PLAN_REVIEW_ALREADY_FIRED"
+	| "REVIEW_DEDUP_HIT"
+	| "MUTEX_WAIT"
+	| "MUTEX_ACQUIRED"
+	| "CRITICAL_REVIEW_ORPHAN_CLEARED"
+	| "SNAPSHOT_FALLBACK"
+	| "RESUME_DIRECTIVE_SENT"
+	// 18c. B3 dedup+user+semantic
+	| "INITIAL_PROMPT"
+	| "USER_PROMPT"
+	| "SEMANTIC_SNAPSHOT"
+	| "STEP_SUMMARY"
 	// 19. Unknown/inconsistent states
 	| "STATE_INCONSISTENT"
 	| "RECOVERY_STARTED"
@@ -225,8 +251,34 @@ export interface QuestLogContext {
 	error?: string;
 	severity?: string;
 	verdict?: string;
+	// B2/B3 Observability context
+	draftPromptsCount?: number;
+	attemptKey?: string;
+	attempts?: number;
+	requireConfirm?: boolean;
+	syntheticPrefix?: string;
+	classification?: string;
+	thoughtHash?: string;
+	thoughtLen?: number;
+	thoughtSlice?: string;
+	ref?: string;
 	// Causal Chain & Observability properties
 	intent?: string;
+	intentHash?: string;
+	intentLen?: number;
+	slice?: string;
+	elapsedMs?: number;
+	opencodeSessionId?: string;
+	semanticSummaryEnabled?: boolean;
+	thoughtLoggingEnabled?: boolean;
+	lockKey?: string;
+	waitMs?: number;
+	holdMs?: number;
+	contention?: boolean;
+	shard?: string;
+	staleCount?: number;
+	candidateCount?: number;
+	chosenKind?: string;
 	targetAction?: string;
 	result?: string;
 	consequence?: string;

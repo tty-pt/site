@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { FUTURE_DIR } from "../constants.ts";
-import { logCriticalReviewTransition } from "../logging.ts";
+import { logCriticalReviewTransition, logEvent } from "../logging.ts";
 import { logError } from "../messaging.ts";
 import { getActiveContext, getSessionId, getState, isRootQuest, state } from "../state.ts";
 import {
@@ -278,7 +278,20 @@ export async function runCriticalReview(
 				resolveExecution = res;
 			});
 
-			registerActiveReview(correlationId, slug, sessionId, options.kind, provisionalSnapshot, executionPromise, options.triggerReason);
+			try {
+				registerActiveReview(correlationId, slug, sessionId, options.kind, provisionalSnapshot, executionPromise, options.triggerReason);
+			} catch (e: any) {
+				logCriticalReviewTransition("CRITICAL_REVIEW_ERROR", `critical review registration error: ${e?.message || String(e)}`, {
+					quest: slug,
+					questId,
+					sessionId,
+					reviewId: correlationId,
+					parentSessionId: sessionId,
+					reviewKind: options.kind,
+					reason: e?.message || String(e),
+				});
+				throw e;
+			}
 			// Phase 20/21: scalar awaitingReview gate (A: plan_review + final_acceptance only)
 			if (options.kind === "plan_review" || options.kind === "final_acceptance") {
 				(targetState as any).awaitingReview = { kind: options.kind, reviewId: correlationId, triggerReason: options.triggerReason, since: Date.now() };
@@ -380,7 +393,14 @@ export async function checkAndTriggerPlanReview(
 	const c = getActiveContext(ctx);
 	const s = getState(c);
 	if (s.activeDraft) {
-		if (isDraftReviewValid(s)) return null;
+		if (isDraftReviewValid(s)) {
+			logEvent("FIRST_PLAN_REVIEW_ALREADY_FIRED", `first plan review already fired (draft valid)`, {
+				quest: s.activeDraft,
+				shard: "draft",
+				reason: "draft_review_valid",
+			});
+			return null;
+		}
 		const registered = isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
 		if (!registered) return null;
 		const draftSlug = s.activeDraft;
@@ -388,7 +408,15 @@ export async function checkAndTriggerPlanReview(
 		let hash = "clean";
 		try { const content = readFileSync(path, "utf8"); hash = createHash("sha256").update(content).digest("hex").slice(0, 12); } catch {}
 		const key = `draft_review:${draftSlug}:h${hash}`;
-		if ((s as any).lastDraftReviewRequestKey === key) return null;
+		if ((s as any).lastDraftReviewRequestKey === key) {
+			logEvent("REVIEW_DEDUP_HIT", `review dedup hit (draft shard key=${key})`, {
+				quest: draftSlug,
+				shard: "draft",
+				key,
+				reviewKind: "plan_review",
+			});
+			return null;
+		}
 		const result = await runCriticalReview(pi, ctx, { kind: "plan_review", questSlug: draftSlug, triggerReason: triggerReason || "draft", boundaryKey: `draft:${draftSlug}:${hash}` } as any);
 		if (result?.review?.verdict) {
 			(s as any).lastDraftReviewRequestKey = key;
@@ -421,6 +449,29 @@ export async function checkAndTriggerPlanReview(
 	const key = `plan_review:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
 
 	if (isPlanReviewValidForState(s) && (s as any).lastPlanReviewRequestKey === key) {
+		logEvent("FIRST_PLAN_REVIEW_ALREADY_FIRED", `first plan review already fired (key=${key})`, {
+			quest: s.active,
+			shard: "root",
+			key,
+			planVersion: currentPlanVersion,
+			stateHash: String(currentHash),
+		});
+		logEvent("REVIEW_DEDUP_HIT", `review dedup hit (root shard key=${key})`, {
+			quest: s.active!,
+			shard: "root",
+			key,
+			reviewKind: "plan_review",
+		});
+		logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE", `review suppressed duplicate: ${key}`, {
+			quest: s.active!,
+			questId: s.questId || s.active!,
+			sessionId: getSessionId(c),
+			reviewId: key,
+			parentSessionId: getSessionId(c),
+			reviewKind: "plan_review",
+			reason: "dedup_hit_root",
+			triggerReason: triggerReason || "root",
+		});
 		return null;
 	}
 
@@ -506,6 +557,28 @@ export async function checkAndTriggerDirectionReview(
 		: `dir:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
 
 	if (s.lastCriticalReview?.kind === "direction" && (s as any).lastDirectionReviewKey === key) {
+		logEvent("REVIEW_DEDUP_HIT", `review dedup hit (direction shard key=${key})`, {
+			quest: s.active!,
+			shard: "direction",
+			key,
+			reviewKind: "direction",
+		});
+		logEvent("REVIEW_DEDUP_HIT", `review dedup hit (root shard key=${key})`, {
+			quest: s.active!,
+			shard: "root",
+			key,
+			reviewKind: "direction",
+		});
+		logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE", `review suppressed duplicate: ${key}`, {
+			quest: s.active!,
+			questId: s.questId || s.active!,
+			sessionId: getSessionId(c),
+			reviewId: key,
+			parentSessionId: getSessionId(c),
+			reviewKind: "direction",
+			reason: "dedup_hit_direction",
+			triggerReason: triggerReason || "direction",
+		});
 		return null;
 	}
 

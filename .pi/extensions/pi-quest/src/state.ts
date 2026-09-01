@@ -5,6 +5,8 @@ import { QUEST_CURRENT_DIR } from "./constants.ts";
 
 export const sessionStates = new Map<string, StoredState>();
 
+export const sessionStartMap = new Map<string, number>();
+
 export const asyncContext = new AsyncLocalStorage<ExtensionContext>();
 
 let lastGeneratedSec: number | null = null;
@@ -111,6 +113,9 @@ export function createDefaultState(): StoredState {
 		draftCreatedAt: null,
 		draftLastSavedHash: null,
 		draftLastReviewKey: null,
+		semanticSummaryEnabled: undefined,
+		thoughtLoggingEnabled: undefined,
+		initialPromptLogged: false,
 		lastPlanReviewApproval: null,
 		lastPlanReviewRequestedVersion: null,
 		lastPlanReviewBoundaryKey: null,
@@ -225,6 +230,9 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
 		draftCreatedAt: s.draftCreatedAt || null,
 		draftLastSavedHash: s.draftLastSavedHash || null,
 		draftLastReviewKey: s.draftLastReviewKey || null,
+		semanticSummaryEnabled: (s as any).semanticSummaryEnabled,
+		thoughtLoggingEnabled: (s as any).thoughtLoggingEnabled,
+		initialPromptLogged: !!(s as any).initialPromptLogged,
 		lastPlanReviewApproval: s.lastPlanReviewApproval ? { ...s.lastPlanReviewApproval } : null,
 		lastPlanReviewRequestedVersion: s.lastPlanReviewRequestedVersion || null,
 		lastPlanReviewBoundaryKey: s.lastPlanReviewBoundaryKey || null,

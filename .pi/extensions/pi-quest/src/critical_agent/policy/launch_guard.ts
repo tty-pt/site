@@ -51,6 +51,17 @@ export function checkAttemptLimit(
   if (!targetState.criticalReviewAttempts) targetState.criticalReviewAttempts = {};
   const attempts = (targetState.criticalReviewAttempts[attemptKey] || 0) + 1;
   targetState.criticalReviewAttempts[attemptKey] = attempts;
+  logEvent("ATTEMPT_INCREMENTED", `attempt incremented (attempts=${attempts})`, {
+    quest: slug,
+    questId,
+    sessionId,
+    reviewId: correlationId,
+    reviewKind: kind,
+    attemptKey,
+    attempts,
+    planVersion: currentPlanVersion,
+    stateHash: currentHash,
+  });
   if (!options.force && attempts > 3) {
     const isPlanRev = kind === "plan_review";
     const eventType = isPlanRev ? "PLAN_REVIEW_FAILED" : "CRITICAL_REVIEW_FAILED";

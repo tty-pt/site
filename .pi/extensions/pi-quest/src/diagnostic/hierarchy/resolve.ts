@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "../../constants.ts";
+import { existsSync as existsSyncFs } from "node:fs";
+import { FUTURE_DIR, QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "../../constants.ts";
 import { extractParentFromQuest, extractSubQuestsFromQuest, parseMarkdownSections, parseQuestId } from "../../markdown.ts";
 import { fileExists } from "../../paths.ts";
 import { parseOriginalRequest } from "../../reconstruction.ts";
@@ -264,6 +265,33 @@ export async function resolveActiveRunHierarchy(
 	}
 	const initialPrompt = rootInfo?.initialPrompt || (state?.prompts && state.prompts.length > 0 ? state.prompts[0] : null);
 
+	// B2/B3 observability: draft/future/compaction flags
+	let draftCaptured = false;
+	let futureCount = 0;
+	try {
+		if (state?.activeDraft) draftCaptured = true;
+		if (Array.isArray(state?.draftPrompts)) futureCount = state.draftPrompts.length;
+		else {
+			const futDir = resolve(projectRoot, FUTURE_DIR);
+			if (existsSyncFs(futDir)) {
+				const ents = await readdir(futDir, { withFileTypes: true }).catch(() => [] as any);
+				futureCount = ents.filter((e: any) => e.isFile && e.name.endsWith(".md")).length;
+			}
+		}
+	} catch {}
+	let compactionResumeHash: string | null = null;
+	try {
+		const pid = (state as any)?.pendingResume?.compactionId || (state as any)?.activeTransaction?.id;
+		if (pid) compactionResumeHash = createHash("sha256").update(String(pid), "utf8").digest("hex").slice(0, 12);
+	} catch {}
+	const semanticSummaryEnabled = typeof (state as any)?.semanticSummaryEnabled === "boolean" ? (state as any).semanticSummaryEnabled : false;
+	const thoughtLoggingEnabled = typeof (state as any)?.thoughtLoggingEnabled === "boolean" ? (state as any).thoughtLoggingEnabled : false;
+	// filteredCount/opencodeSessionId/startMs/elapsedMaxMs will be filled from log summary when available; fallback to state sessionStartMap
+	let filteredCount: number | undefined = undefined;
+	let opencodeSessionId: string | null = null;
+	let startMs: number | null = null;
+	let elapsedMaxMs: number | null = null;
+
 	return {
 		questId: resolvedQuestId,
 		initialPrompt,
@@ -278,6 +306,15 @@ export async function resolveActiveRunHierarchy(
 		startTime: selectedRunLog?.startTime,
 		endTime: selectedRunLog?.endTime,
 		questHash,
+		draftCaptured,
+		futureCount,
+		compactionResumeHash,
+		semanticSummaryEnabled,
+		thoughtLoggingEnabled,
+		filteredCount,
+		opencodeSessionId,
+		startMs,
+		elapsedMaxMs,
 		resolutionMethod,
 		confidence,
 		ambiguityDetails,

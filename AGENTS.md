@@ -98,3 +98,4 @@ make watch          # auto-rebuild + restart on :8080
 | Filters & schema hints | `docs/FILTERS.md` / `docs/SCHEMA.md` |
 | Pickers & Omni-Dropdowns | `docs/PICKERS.md` |
 | Extension guide & custom Pi workflows | `docs/EXTENSIONS.md` |
+| Advanced Git Recovery | `docs/ADVANCED_GIT_RECOVERY.md` |

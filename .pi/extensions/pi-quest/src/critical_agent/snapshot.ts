@@ -4,6 +4,7 @@ import { parseMarkdownSections } from "../markdown.ts";
 import { fileExists, questPath, resolveQuestRecordBySlug } from "../paths.ts";
 import { parseOriginalRequest, parseRefinements } from "../reconstruction.ts";
 import { state } from "../state.ts";
+import { logEvent } from "../logging.ts";
 import { CriticalReviewKind, ReviewSnapshot, StoredState } from "../types.ts";
 import { extractQuestReviewContext } from "./prompt.ts";
 import { computePlanReviewBoundaryKey } from "./tracker.ts";
@@ -33,6 +34,12 @@ export async function createReviewSnapshot(
 			stdio: ["ignore", "pipe", "ignore"],
 		});
 	} catch {
+		logEvent("SNAPSHOT_FALLBACK", `snapshot fallback: git diff failed, using filesModified`, {
+			quest: slugOrQid,
+			reviewId,
+			reviewKind: kind,
+			reason: "git_diff_failed",
+		});
 		relevantDiff = context.filesModified || "";
 	}
 
@@ -47,6 +54,13 @@ export async function createReviewSnapshot(
 				const fContent = await readFile(fPath, "utf8");
 				boundaryKey = `draft:${slugOrQid}:${createHash("sha256").update(fContent).digest("hex").slice(0, 12)}`;
 			} catch {
+				logEvent("SNAPSHOT_FALLBACK", `snapshot fallback: draft boundary compute failed`, {
+					quest: slugOrQid,
+					reviewId,
+					reviewKind: kind,
+					reason: "draft_boundary_fallback",
+					boundaryKey: activeState.lastPlanReviewBoundaryKey || undefined,
+				});
 				boundaryKey = activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(
 					activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
 				);

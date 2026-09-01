@@ -1,4 +1,7 @@
-import { INTERNAL_MESSAGE_PREFIX } from "../constants.ts";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { QUEST_CURRENT_DIR, INTERNAL_MESSAGE_PREFIX } from "../constants.ts";
 import { syncImplementationPermission } from "../gates.ts";
 import { logEvent, logResumeTransition } from "../logging.ts";
 import { readQuestLog } from "../logging/summary/helpers.ts";
@@ -352,6 +355,13 @@ export function dispatchCompactionResume(
 	}
 
 	const directiveText = resolveResumeDirectiveText(options.reason, activeQuest, targetState);
+	try {
+		const hash = createHash("sha256").update(directiveText, "utf8").digest("hex").slice(0, 12);
+		const qDir = join(QUEST_CURRENT_DIR, targetState.questId || "quest");
+		const runCompPath = join(qDir, "compaction-resume.txt");
+		try { if (!existsSync(qDir)) mkdirSync(qDir, { recursive: true }); writeFileSync(runCompPath, directiveText, "utf8"); } catch {}
+		try { logEvent("RESUME_DIRECTIVE_SENT" as any, `resume directive sent`, { quest: activeQuest, hash, compactionId, reason: options.reason } as any); } catch {}
+	} catch {}
 	logResumeTransition("RESUME_ATTEMPTED", `attempting resume delivery for '${activeQuest}'`, {
 		quest: activeQuest,
 		compactionId,

@@ -1,11 +1,13 @@
-import { existsSync, unlinkSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FUTURE_DIR } from "../../constants.ts";
 import { canImplement, syncImplementationPermission } from "../../gates.ts";
 import { populateEpistemicUpdates } from "../update_populators.ts";
 import { logError, reportAgentError } from "../../messaging.ts";
-import { logStateUpdateTransition } from "../../logging.ts";
+import { logEvent, logQuestTransition, logStateUpdateTransition } from "../../logging.ts";
+import { getActiveContext, getSessionId, sessionStartMap } from "../../state.ts";
 import { ensureQuestIdInContent, parseMarkdownSections, QUEST_TEMPLATE, spliceMarkdownSections } from "../../markdown.ts";
 import { fileExists, listActiveQuestRecords, questDirPath, questPath, resolveQuestRecordBySlug, slugify } from "../../paths.ts";
 import { syncMetaJson } from "../../markdown/template/metadata.ts";
@@ -84,6 +86,36 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 		state.draftCreatedAt = null;
 		state.draftLastSavedHash = null;
 		persist(pi, ctx);
+		try {
+			const p = `${FUTURE_DIR}/${draftSlug}.md`;
+			if (existsSync(p)) {
+				let content: string | null = null;
+				try { content = readFileSync(p, "utf8"); } catch {}
+				const hash = createHash("sha256").update(content || draftSlug).digest("hex").slice(0, 12);
+				const archDir = `.pi/quest/current/${state.questId}/future-archive`;
+				try { if (!existsSync(archDir)) mkdirSync(archDir, { recursive: true }); } catch {}
+				try {
+					const dest = `${archDir}/${draftSlug}.md`;
+					try {
+						copyFileSync(p, dest);
+					} catch {
+						// fallback to async copyFile if sync fails (fire-and-forget)
+						try { copyFile(p, dest).catch(() => {}); } catch {}
+					}
+				} catch {}
+				try {
+					logQuestTransition("DRAFT_DISCARDED", `draft discarded ${draftSlug}`, {
+						quest: state.active || draftSlug,
+						slug: draftSlug,
+						hash,
+						reviewId: (state as any).awaitingReview?.reviewId,
+						boundaryKey: (state as any).lastPlanReviewBoundaryKey,
+						questId: (state as any).questId || undefined,
+						reason: "quest_update_state",
+					});
+				} catch {}
+			}
+		} catch {}
 		try {
 			const p = `${FUTURE_DIR}/${draftSlug}.md`;
 			if (existsSync(p)) unlinkSync(p);
@@ -238,6 +270,15 @@ async function maybeTriggerPlanReview(
 		targetState.awaitingUserConfirmation = false;
 		planReviewNote = ` [Adversarial Plan Review: ERROR (${planRevRes.error})]`;
 	}
+	try {
+		logEvent("REQUIRE_CONFIRM_DECISION", `requireConfirm=${!!targetState.awaitingUserConfirmation}`, {
+			quest: targetState.active || "",
+			requireConfirm: !!targetState.awaitingUserConfirmation,
+			boundaryKey: postPlanning.boundaryKey,
+			planVersion: targetState.planVersion,
+			verdict: (planRevRes as any)?.review?.verdict || (planRevRes as any)?.error || "none",
+		});
+	} catch {}
 	syncImplementationPermission(targetState, ctx);
 	persist(pi, ctx);
 	return planReviewNote;
@@ -326,6 +367,23 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 		persist(pi, ctx);
 
 		const postPlanning = capturePostUpdatePlanningSnapshot(targetName, updatedMarkdown, targetState);
+
+		try {
+			if (prePlanning.boundaryKey !== postPlanning.boundaryKey) {
+				const activeGate = targetState.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : targetState.reassessmentRequired ? "REASSESSMENT_PENDING" : targetState.researchRequired || !targetState.researchComplete ? "RESEARCH_PENDING" : "IMPLEMENTATION_ALLOWED";
+				const sessId = getSessionId(getActiveContext(ctx));
+				const startMs = sessionStartMap.get(sessId) || Date.now();
+				logEvent("SEMANTIC_SNAPSHOT", `${prePlanning.boundaryKey}→${postPlanning.boundaryKey}`, {
+					quest: targetName,
+					from: prePlanning.boundaryKey?.slice(0, 8),
+					to: postPlanning.boundaryKey?.slice(0, 8),
+					planVersion: targetState.planVersion,
+					activeGate,
+					elapsedMs: Date.now() - startMs,
+					opencodeSessionId: sessId,
+				});
+			}
+		} catch {}
 
 		const planReviewNote = await maybeTriggerPlanReview(prePlanning, postPlanning, targetState, params, pi, ctx);
 

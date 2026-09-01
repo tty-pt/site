@@ -288,17 +288,41 @@ export function shouldCapturePrompt(text: string): boolean {
 	if (!t || t.length < 2) return false;
 	if (t.startsWith("/")) return false;
 	const lower = t.toLowerCase();
-	if (lower.startsWith(INTERNAL_MESSAGE_PREFIX.toLowerCase())) return false;
+	if (lower.startsWith(INTERNAL_MESSAGE_PREFIX.toLowerCase())) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: INTERNAL_MESSAGE_PREFIX, classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
 	// Explicit STARTS_WITH list — precise directives only
 	for (const p of SYNTHETIC_PROMPT_PREFIXES) {
-		if (lower.startsWith(p.toLowerCase())) return false;
+		if (lower.startsWith(p.toLowerCase())) {
+			try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: p, classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+			return false;
+		}
 	}
 	// Explicit CONTAINS_PHRASES — exact multi-word synthetic directives (not generic discussion)
-	if (lower.includes("post-compaction autonomous resumption directive")) return false;
-	if (lower.includes("pre-compaction exhaustive context preservation protocol")) return false;
-	if (lower.includes("context is approaching the configured compaction threshold")) return false;
-	if (lower.includes("context compaction is now being requested")) return false;
-	if (lower.includes("context compaction is imminent")) return false;
-	if (lower.includes("critical quest journal compaction safety state")) return false;
+	if (lower.includes("post-compaction autonomous resumption directive")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "post-compaction autonomous resumption directive", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
+	if (lower.includes("pre-compaction exhaustive context preservation protocol")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "pre-compaction exhaustive context preservation protocol", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
+	if (lower.includes("context is approaching the configured compaction threshold")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "context is approaching the configured compaction threshold", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
+	if (lower.includes("context compaction is now being requested")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "context compaction is now being requested", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
+	if (lower.includes("context compaction is imminent")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "context compaction is imminent", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
+	if (lower.includes("critical quest journal compaction safety state")) {
+		try { void (async () => { try { const { logEvent } = await import("./logging/core.ts"); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "critical quest journal compaction safety state", classification: "SYNTHETIC", quest: "" } as any); } catch {} })(); } catch {}
+		return false;
+	}
 	return true;
 }

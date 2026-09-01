@@ -506,6 +506,9 @@ export interface StoredState {
 	draftCreatedAt?: number | null;
 	draftLastSavedHash?: string | null;
 	draftLastReviewKey?: string | null;
+	semanticSummaryEnabled?: boolean;
+	thoughtLoggingEnabled?: boolean;
+	initialPromptLogged?: boolean;
 
 	// Critical Review Subagent State
 	inCriticalReview?: boolean;

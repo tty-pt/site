@@ -123,6 +123,30 @@ export function handleCriticalReviewEntry(entry: QuestLogEntry, s: SummaryState)
   }
 }
 
+export function handleDraftEntry(entry: QuestLogEntry, s: SummaryState): void {
+  if (entry.type === "DRAFT_APPENDED" || entry.type === "DRAFT_PROMOTED") { s.draftCaptured = true; s.futureCount++; }
+  else if (entry.type === "DRAFT_DISCARDED") { s.draftCaptured = false; }
+  else if (entry.type === "DRAFT_APPEND_DEDUPED" || entry.type === "DRAFT_CONVERSATIONAL_IGNORED") { /* counted but no increment */ }
+}
+
+export function handlePendingEntry(entry: QuestLogEntry, s: SummaryState): void {
+  if (entry.type === "PENDING_COALESCED_DROPPED" || entry.type === "PENDING_COALESCED_RESOLVED") s.coalesceCount++;
+  else if (entry.type === "ATTEMPT_INCREMENTED") s.attemptIncrementCount++;
+  else if (entry.type === "SYNTHETIC_FILTERED" || entry.type === "CLASSIFICATION_RESULT") s.filteredCount++;
+  else if (entry.type === "CRITICAL_REVIEW_ORPHAN_CLEARED") s.coalesceCount++;
+  else if (entry.type === "SNAPSHOT_FALLBACK" || entry.type === "RESUME_DIRECTIVE_SENT") s.coalesceCount++;
+  else if (entry.type === "MUTEX_WAIT" || entry.type === "MUTEX_ACQUIRED") { /* timing only */ }
+  else if (entry.type === "INITIAL_PROMPT" || entry.type === "USER_PROMPT" || entry.type === "SEMANTIC_SNAPSHOT" || entry.type === "STEP_SUMMARY") {
+    if (entry.context.opencodeSessionId && !s.opencodeSessionId) s.opencodeSessionId = entry.context.opencodeSessionId;
+    const e = parseInt(entry.context.elapsedMs || "", 10);
+    if (!isNaN(e) && (s.elapsedMaxMs === null || e > (s.elapsedMaxMs as number))) s.elapsedMaxMs = e;
+    if (entry.type === "INITIAL_PROMPT" && entry.context.opencodeSessionId) {
+      const ts = Date.parse(entry.timestamp);
+      if (!isNaN(ts) && (s.startMs === null || ts < (s.startMs as number))) s.startMs = ts;
+    }
+  }
+}
+
 export function routeEntry(entry: QuestLogEntry, s: SummaryState): void {
   switch (entry.type) {
     case "RESEARCH_REQUIRED": case "RESEARCH_EVIDENCE": case "RESEARCH_COMPLETED": handleResearchEntry(entry, s); break;
@@ -134,6 +158,8 @@ export function routeEntry(entry: QuestLogEntry, s: SummaryState): void {
     case "RESUME_OBLIGATION_CREATED": case "RESUME_ATTEMPTED": case "RESUME_DELIVERED": case "RESUME_FAILED": case "RESUME_RETRIED": case "RESUME_RECONCILIATION_REQUIRED": case "RESUME_OBSOLETED": handleResumeEntry(entry, s); break;
     case "CRITICAL_REVIEW_PASSED": case "CRITICAL_REVIEW_FAILED": case "CRITICAL_REVIEW_UNCERTAIN": case "CRITICAL_REVIEW_ERROR": case "DIRECTION_REVIEW_THROTTLED": case "GLOBAL_REVIEW_CAP_HIT": case "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE": case "CRITICAL_REVIEW_COALESCED": handleCriticalReviewEntry(entry, s); break;
     case "NO_PROGRESS": case "REPEATED_BLOCK": case "REPEATED_FAILURE": s.deadlockWarnings.push(`${entry.type}: ${entry.message}`); break;
+    case "DRAFT_APPENDED": case "DRAFT_APPEND_DEDUPED": case "DRAFT_CONVERSATIONAL_IGNORED": case "DRAFT_PROMOTED": case "DRAFT_DISCARDED": handleDraftEntry(entry, s); break;
+    case "PENDING_COALESCED_DROPPED": case "PENDING_COALESCED_RESOLVED": case "ATTEMPT_INCREMENTED": case "SYNTHETIC_FILTERED": case "CLASSIFICATION_RESULT": case "CRITICAL_REVIEW_ORPHAN_CLEARED": case "SNAPSHOT_FALLBACK": case "RESUME_DIRECTIVE_SENT": case "MUTEX_WAIT": case "MUTEX_ACQUIRED": case "INITIAL_PROMPT": case "USER_PROMPT": case "SEMANTIC_SNAPSHOT": case "STEP_SUMMARY": case "FIRST_PLAN_REVIEW_ALREADY_FIRED": case "REVIEW_DEDUP_HIT": case "PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE": case "CRITICAL_REVIEW_FORCED": case "REQUIRE_CONFIRM_DECISION": handlePendingEntry(entry, s); break;
     default: break;
   }
 }

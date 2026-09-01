@@ -32,6 +32,7 @@ tests/unit/mpfd_contract_test
 !/.pi/prompts
 !/.pi/settings.json
 !/.pi/lsp.json
+!/.pi/skills
 /build
 /debug
 *.zip

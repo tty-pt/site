@@ -5,7 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "../constants.ts";
+import { FUTURE_DIR, QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "../constants.ts";
 import { summarizeQuestJournalLog } from "../logging.ts";
 import { fileExists } from "../paths.ts";
 import { state } from "../state.ts";
@@ -152,6 +152,43 @@ export async function createRunDirectory(
 	const initialPromptPath = resolve(runDir, "initial-prompt.txt");
 	const promptContent = hierarchy.initialPrompt || (state?.prompts && state.prompts.length > 0 ? state.prompts[0] : "") || "(none)";
 	await writeFile(initialPromptPath, promptContent, "utf8");
+
+	// L0: copy future drafts dir clearest run/future/<slug>.md
+	try {
+		const futSrc = resolve(projectRoot, FUTURE_DIR);
+		if (existsSync(futSrc)) {
+			const futEntries = await readdir(futSrc, { withFileTypes: true }).catch(() => [] as any);
+			if (futEntries.length > 0) {
+				const futDest = resolve(runDir, "future");
+				await mkdir(futDest, { recursive: true });
+				for (const e of futEntries) if (e.isFile && e.name.endsWith(".md")) {
+					try { await copyFile(resolve(futSrc, e.name), resolve(futDest, e.name)); } catch {}
+				}
+			}
+		}
+		// future-archive dir from current quest run
+		const archSrc = resolve(projectRoot, QUEST_CURRENT_DIR, qId, "future-archive");
+		if (existsSync(archSrc)) {
+			const archEntries = await readdir(archSrc, { withFileTypes: true }).catch(() => [] as any);
+			if (archEntries.length > 0) {
+				const archDest = resolve(runDir, "future-archive");
+				await mkdir(archDest, { recursive: true });
+				for (const e of archEntries) if (e.isFile && e.name.endsWith(".md")) {
+					try { await copyFile(resolve(archSrc, e.name), resolve(archDest, e.name)); } catch {}
+				}
+			}
+		}
+		// compaction-resume.txt file-only
+		const compSrc = resolve(projectRoot, QUEST_CURRENT_DIR, qId, "compaction-resume.txt");
+		if (existsSync(compSrc)) {
+			try { await copyFile(compSrc, resolve(runDir, "compaction-resume.txt")); } catch {}
+		} else {
+			const altComp = resolve(runDir, "compaction-resume.txt");
+			if (!existsSync(altComp) && (state as any)?.pendingResume) {
+				// placeholder will be written by resume.ts when needed
+			}
+		}
+	} catch {}
 
 	const summaryContent = options?.summaryContent || (await generateRunSummary(hierarchy, projectRoot, { status: options?.status, logSummaryInfo, questContent: options?.finalizedQuestContent }));
 	const summaryPath = resolve(runDir, "summary.md");

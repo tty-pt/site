@@ -242,6 +242,20 @@ export function generateRunManifest(
 	if (hierarchy.questHash) {
 		lines.push(`questHash: ${hierarchy.questHash}`);
 	}
+	lines.push(`draftCaptured: ${hierarchy.draftCaptured ? "true" : "false"}`);
+	lines.push(`futureCount: ${hierarchy.futureCount ?? 0}`);
+	if (hierarchy.compactionResumeHash) lines.push(`compactionResumeHash: ${hierarchy.compactionResumeHash}`);
+	lines.push(`semanticSummaryEnabled: ${hierarchy.semanticSummaryEnabled ? "true" : "false"}`);
+	lines.push(`thoughtLoggingEnabled: ${hierarchy.thoughtLoggingEnabled ? "true" : "false"}`);
+	// filteredCount from log summary if available, else hierarchy fallback
+	const filtered = (logSummaryInfo as any)?.filteredCount ?? hierarchy.filteredCount;
+	if (filtered !== undefined && filtered !== null) lines.push(`filteredCount: ${filtered}`);
+	const opSess = (logSummaryInfo as any)?.opencodeSessionId ?? hierarchy.opencodeSessionId;
+	if (opSess) lines.push(`opencodeSessionId: ${opSess}`);
+	const sMs = (logSummaryInfo as any)?.startMs ?? hierarchy.startMs;
+	if (sMs !== null && sMs !== undefined) lines.push(`startMs: ${sMs}`);
+	const eMs = (logSummaryInfo as any)?.elapsedMaxMs ?? hierarchy.elapsedMaxMs;
+	if (eMs !== null && eMs !== undefined) lines.push(`elapsedMaxMs: ${eMs}`);
 	if (extra?.bundleHash) {
 		lines.push(`bundleHash: ${extra.bundleHash}`);
 	}

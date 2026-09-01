@@ -139,6 +139,11 @@ export const SUBSTANTIVE_TURNS_PER_DIRECTION_REVIEW = 5;
 export const GLOBAL_REVIEW_CAP = 1;
 export const STALENESS_ON_DIRTY = false;
 
+export const SEMANTIC_SUMMARY_ENABLED_DEFAULT = false;
+export const THOUGHT_LOGGING_ENABLED_DEFAULT = false;
+export const ENV_SEMANTIC_SUMMARY = "PI_QUEST_SEMANTIC_SUMMARY";
+export const ENV_THOUGHT_LOGGING = "PI_QUEST_THOUGHT_LOGGING";
+
 export const DEFAULT_CHECKPOINT_INTERVAL_TURNS = 6;
 export const DEFAULT_CHECKPOINT_INTERVAL_MS = 0; // timer disabled (turn-count deterministic)
 export const PERIODIC_CHECKPOINT_BURST_MS = 50;

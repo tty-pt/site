@@ -33,6 +33,17 @@ export interface SummaryState {
   lastFailureReason?: string;
   lastTestStatus: "PASSED" | "FAILED" | "NOT_RUN";
   failureIdMap: Map<string, number>;
+  draftCaptured: boolean;
+  futureCount: number;
+  compactionResumeHash?: string | null;
+  filteredCount: number;
+  coalesceCount: number;
+  attemptIncrementCount: number;
+  opencodeSessionId?: string | null;
+  startMs?: number | null;
+  elapsedMaxMs?: number | null;
+  semanticSummaryEnabled: boolean;
+  thoughtLoggingEnabled: boolean;
 }
 
 export function createInitialState(): SummaryState {
@@ -69,5 +80,16 @@ export function createInitialState(): SummaryState {
     lastFailureReason: undefined,
     lastTestStatus: "NOT_RUN" as const,
     failureIdMap: new Map(),
+    draftCaptured: false,
+    futureCount: 0,
+    compactionResumeHash: null,
+    filteredCount: 0,
+    coalesceCount: 0,
+    attemptIncrementCount: 0,
+    opencodeSessionId: null,
+    startMs: null,
+    elapsedMaxMs: null,
+    semanticSummaryEnabled: false,
+    thoughtLoggingEnabled: false,
   };
 }

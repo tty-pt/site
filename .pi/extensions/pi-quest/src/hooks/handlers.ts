@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { acceptRootConfirmation, classifyUserMessage, handleAskQuestionsResult } from "../classification.ts";
+import { isSemanticSummaryEnabled, isThoughtLoggingEnabled } from "../config.ts";
 import {
 	advanceSteerTurnCounter,
 	checkAndTriggerDeferredCompaction,
@@ -33,7 +35,7 @@ import { questPath, shouldStartPersistentQuest } from "../paths.ts";
 import { persist, verifyAndMarkSaved } from "../persistence.ts";
 import { loadActiveQuestResumeContext } from "../reconstruction.ts";
 import { recordObservedInvestigation, triggerReassessment } from "../research.ts";
-import { getActiveContext, getSessionId, getState, sessionStates, state } from "../state.ts";
+import { getActiveContext, getSessionId, getState, sessionStartMap, sessionStates, state } from "../state.ts";
 import { reconcilePendingSubquestResume } from "../subquest.ts";
 import { ExtensionAPI, ExtensionContext, QuestErrorCode, UserMessageClassification } from "../types.ts";
 import { buildSessionAwarenessBlock, updateUIStatus } from "../ui.ts";
@@ -51,18 +53,48 @@ export async function handleTurnStart(event: any, _ctx: ExtensionContext): Promi
 	const intent = state.prompts && state.prompts.length > 0 ? state.prompts[state.prompts.length - 1] : state.pendingRootRequest || state.active || "";
 	const activeGate = state.reassessmentRequired ? "REASSESSMENT_PENDING" : (state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : (state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"));
 	const phase = state.reassessmentRequired ? "reassessment" : (state.researchRequired || !state.researchComplete ? "research" : (state.awaitingUserConfirmation ? "confirmation" : "implementation"));
+	const ctxSessionId = getSessionId(getActiveContext(_ctx));
+	if (!sessionStartMap.has(ctxSessionId)) sessionStartMap.set(ctxSessionId, Date.now());
+	if (sessionStartMap.size > 100) { const first = sessionStartMap.keys().next().value; if (first) sessionStartMap.delete(first); }
+	const elapsedMs = Date.now() - (sessionStartMap.get(ctxSessionId) || Date.now());
+	const intentHash = createHash("sha256").update(intent || "", "utf8").digest("hex").slice(0, 12);
+	const intentLen = (intent || "").length;
+	const slice = sanitizeLogString(intent, 80);
+
+	// INITIAL_PROMPT once per run
+	if (!(state as any).initialPromptLogged) {
+		(state as any).initialPromptLogged = true;
+		logEvent("INITIAL_PROMPT", "initial prompt captured", { quest: state.active || "", hash: intentHash, intentLen, ref: "run/initial-prompt.txt", opencodeSessionId: ctxSessionId, elapsedMs } as any);
+	}
 
 	logTurnBoundary("TURN_START", "agent turn started", {
 		quest: state.active || "",
 		turn: state.currentTurn,
 		correlationId: state.currentTurnCorrelationId,
-		intent: sanitizeLogString(intent, 200),
+		intentHash,
+		intentLen,
+		slice,
+		intent: slice,
 		phase,
 		activeGate,
 		planVersion: state.planVersion || 1,
 		round: state.researchRound || 1,
 		implementationAllowed: Boolean(state.implementationAllowed),
-	});
+		elapsedMs,
+		opencodeSessionId: ctxSessionId,
+	} as any);
+
+	// inference-free semantic snapshot ≤1/turn on phase change (also handled in TurnEnd/executor)
+	try {
+		const prevKey = (state as any)._lastSemanticKey;
+		const curKey = `${phase}:${state.planVersion || 1}:${activeGate}`;
+		if (prevKey !== curKey) {
+			(state as any)._lastSemanticKey = curKey;
+			if (prevKey !== undefined) {
+				logEvent("SEMANTIC_SNAPSHOT", `${prevKey}→${curKey}`, { quest: state.active || "", from: prevKey, to: curKey, planVersion: state.planVersion || 1, activeGate, elapsedMs, opencodeSessionId: ctxSessionId } as any);
+			}
+		}
+	} catch {}
 }
 
 export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, event: any): Promise<void> {
@@ -146,6 +178,8 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 		turnConsequence = "CHECKPOINT_SAVED";
 	}
 
+	const turnElapsedMs = (() => { try { const sid = getSessionId(getActiveContext(ctx)); const st = sessionStartMap.get(sid); return st ? Date.now() - st : undefined; } catch { return undefined; } })();
+	const turnOpSess = (() => { try { return getSessionId(getActiveContext(ctx)); } catch { return undefined; } })();
 	logTurnBoundary("TURN_END", "turn execution completed", {
 		quest: state.active || "",
 		turn: state.currentTurn,
@@ -164,7 +198,28 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 		categories: analysis.failureCategories.length > 0 ? analysis.failureCategories.join(",") : undefined,
 		questDirty: Boolean(state.dirty),
 		implementationAllowed: Boolean(state.implementationAllowed),
-	});
+		elapsedMs: turnElapsedMs,
+		opencodeSessionId: turnOpSess,
+	} as any);
+
+	// L4 optional STEP_SUMMARY ≤1/turn when enabled
+	try {
+		if (isSemanticSummaryEnabled(state)) {
+			const curGate = state.reassessmentRequired ? "REASSESSMENT_PENDING" : (state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : (state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"));
+			const curPhase = state.reassessmentRequired ? "reassessing" : (state.researchRequired || !state.researchComplete ? "research" : (state.awaitingUserConfirmation ? "confirmation" : "implementation"));
+			const intent = curGate === "RESEARCH_PENDING" ? "research" : curGate === "CONFIRMATION_PENDING" ? "awaiting-review" : curGate === "REASSESSMENT_PENDING" ? "revising" : curPhase as any;
+			const line = `${intent} planVersion${state.planVersion || 1} gate=${curGate}`;
+			logEvent("STEP_SUMMARY", line.slice(0, 120), { quest: state.active || "", intent, planVersion: state.planVersion || 1, activeGate: curGate, elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess } as any);
+		}
+		if (isThoughtLoggingEnabled(state)) {
+			// thoughtLoggingEnabled: hash/slice of last thought if available (not token spend)
+			const lastThought = (state as any).lastThought as string | undefined;
+			if (lastThought) {
+				const th = createHash("sha256").update(lastThought, "utf8").digest("hex").slice(0, 12);
+				logEvent("STEP_SUMMARY", `thought ${th}`, { quest: state.active || "", thoughtHash: th, thoughtLen: lastThought.length, thoughtSlice: sanitizeLogString(lastThought, 80), elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess } as any);
+			}
+		}
+	} catch {}
 
 	if (state.consecutiveFailures === 3) {
 		logContinuationAnomaly("REPEATED_FAILURE", `consecutive failures reached threshold (count=3)`, {

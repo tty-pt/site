@@ -10,10 +10,26 @@ export async function withQuestLock<T>(key: string, fn: () => T | Promise<T>): P
 	const chain = prev.then(() => next);
 	questLockChains.set(key, chain);
 	chain.catch(() => {});
-	if (existing) await prev;
+	const hadContention = !!existing;
+	let waitMs = 0;
+	if (existing) {
+		const start = Date.now();
+		await prev;
+		waitMs = Date.now() - start;
+		try {
+			const { logEvent } = await import("../logging/core.ts");
+			logEvent("MUTEX_WAIT", `mutex wait ${key}`, { lockKey: key, waitMs } as any);
+		} catch {}
+	}
+	const holdStart = Date.now();
 	try {
 		return await fn();
 	} finally {
+		const holdMs = Date.now() - holdStart;
+		try {
+			const { logEvent } = await import("../logging/core.ts");
+			logEvent("MUTEX_ACQUIRED", `mutex acquired ${key}`, { lockKey: key, holdMs, waitMs, contention: hadContention } as any);
+		} catch {}
 		release();
 		if (questLockChains.get(key) === chain) {
 			questLockChains.delete(key);

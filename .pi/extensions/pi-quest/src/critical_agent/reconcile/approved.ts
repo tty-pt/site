@@ -1,4 +1,4 @@
-import { logCriticalReviewTransition } from "../../logging.ts";
+import { logCriticalReviewTransition, logEvent } from "../../logging.ts";
 import { persist } from "../../persistence.ts";
 import { ExtensionAPI, ExtensionContext, ReviewSnapshot } from "../../types.ts";
 
@@ -26,6 +26,15 @@ export function handleApprovedVerdict(
 	targetState.lastReviewedSaveHash = snapshot.stateHash;
 	targetState.lastReviewedSaveCount = targetState.saveCount;
 	if (isPlanReviewKind) {
+		logEvent("REQUIRE_CONFIRM_DECISION", `requireConfirm decision: plan_review approval`, {
+			quest: slug,
+			questId,
+			sessionId,
+			reviewId: correlationId,
+			reviewKind: snapshot.reviewKind,
+			requireConfirm: !!(targetState as any).awaitingUserConfirmation,
+			boundaryKey: snapshot.boundaryKey || undefined,
+		});
 		targetState.lastPlanReviewApproval = {
 			questId, planVersion: snapshot.planVersion, reviewId: correlationId,
 			boundaryKey: snapshot.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
