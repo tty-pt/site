@@ -7,11 +7,18 @@ import { cleanDraftIfExists, questDirPath } from "../../paths.ts";
 import { onLifecycleStageTransition } from "../../lifecycle.ts";
 
 export async function pinLogToFinalized(targetQid: string, verifiedLogContent: string, projectRoot: string): Promise<void> {
+	const currentLogPath = resolve(projectRoot, QUEST_CURRENT_DIR, targetQid, "execution.log");
 	const finalizedLogDir = resolve(projectRoot, ".pi/quest/finalized_logs");
-	await mkdir(finalizedLogDir, { recursive: true });
-	const pinnedLogPath = resolve(finalizedLogDir, `${targetQid}.log`);
-	if (verifiedLogContent) await writeFile(pinnedLogPath, verifiedLogContent, "utf8");
-	pinQuestLog(targetQid, pinnedLogPath);
+	const finalizedLogPath = resolve(finalizedLogDir, `${targetQid}.log`);
+	try {
+		await mkdir(resolve(projectRoot, QUEST_CURRENT_DIR, targetQid), { recursive: true });
+		if (verifiedLogContent) await writeFile(currentLogPath, verifiedLogContent, "utf8");
+	} catch {}
+	try {
+		await mkdir(finalizedLogDir, { recursive: true });
+		if (verifiedLogContent) await writeFile(finalizedLogPath, verifiedLogContent, "utf8");
+	} catch {}
+	pinQuestLog(targetQid, finalizedLogPath);
 }
 
 export async function removeActiveDirectory(targetQid: string, questName: string, projectRoot: string, ctx: any, checkActiveDirExists: () => boolean, checkZipExists: () => boolean): Promise<void> {

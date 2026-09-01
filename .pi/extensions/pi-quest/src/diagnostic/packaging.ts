@@ -188,6 +188,11 @@ export async function createRunDirectory(
 				// placeholder will be written by resume.ts when needed
 			}
 		}
+		// draft-prompts.jsonl verbatim
+		const promptsSrc = resolve(projectRoot, QUEST_CURRENT_DIR, qId, "draft-prompts.jsonl");
+		if (existsSync(promptsSrc)) {
+			try { await copyFile(promptsSrc, resolve(runDir, "draft-prompts.jsonl")); } catch {}
+		}
 	} catch {}
 
 	const summaryContent = options?.summaryContent || (await generateRunSummary(hierarchy, projectRoot, { status: options?.status, logSummaryInfo, questContent: options?.finalizedQuestContent }));
@@ -328,6 +333,21 @@ export async function verifyDiagnosticZip(
 		const legacyLogEntry = "diagnostic/current-run/run.log";
 		if (!entries.includes(logEntry) && !entries.includes(legacyLogEntry)) {
 			errors.push(`Execution log exists on disk but is missing from archive (${logEntry})`);
+		}
+	}
+
+	const needsFuture = (expected as any).draftCaptured || ((expected as any).futureCount || 0) > 0;
+	if (needsFuture) {
+		const hasFuture = entries.some((e) => e.includes("future/") && e.endsWith(".md"));
+		if (!hasFuture) {
+			errors.push("Future draft file missing from bundle (run/future/*.md) despite activeDraft/draftCaptured");
+		}
+	}
+	const hasResumeHash = (expected as any).compactionResumeHash;
+	if (hasResumeHash) {
+		const hasCompResume = entries.some((e) => e.includes("compaction-resume.txt"));
+		if (!hasCompResume) {
+			errors.push("compaction-resume.txt missing despite compactionResumeHash");
 		}
 	}
 
@@ -502,7 +522,10 @@ export async function createUnifiedBundleZip(
 			activeRootQuest: hierarchy.activeRootQuest,
 			capturedSubQuests: hierarchy.capturedSubQuests.map((s) => s.name),
 			logExists: hierarchy.logExists,
-		});
+			draftCaptured: (hierarchy as any).draftCaptured,
+			futureCount: (hierarchy as any).futureCount,
+			compactionResumeHash: (hierarchy as any).compactionResumeHash,
+		} as any);
 
 		if (!options.skipVerification && !verification.valid) {
 			await rm(outputZipPath, { force: true });

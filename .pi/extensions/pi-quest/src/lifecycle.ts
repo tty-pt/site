@@ -1,6 +1,7 @@
-import { existsSync } from "node:fs";
-import { readFile, writeFile, rename, mkdir, unlink, rm, stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync } from "node:fs";
+import { copyFile, readFile, writeFile, rename, mkdir, unlink, rm, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { FUTURE_DIR, QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR, QuestErrorCode } from "./constants.ts";
 import { isCriticalReviewValidForCompletion, isSubagentAvailable, runCriticalReview } from "./critical_agent.ts";
 import { appendChangelogEntry, findProjectRoot } from "./diagnostic.ts";
@@ -99,6 +100,13 @@ export async function activateExistingQuest(
 		targetQid = generateQuestId();
 		path = questPath(targetQid);
 		await mkdir(questDirPath(targetQid), { recursive: true });
+		try {
+			const archDir = join(questDirPath(targetQid), "future-archive");
+			try { if (!existsSync(archDir)) { const { mkdirSync } = await import("node:fs"); mkdirSync(archDir, { recursive: true }); } } catch {}
+			const destArch = join(archDir, basename(futurePath));
+			try { copyFileSync(futurePath, destArch); } catch { try { await copyFile(futurePath, destArch); } catch {} }
+			try { const content = await readFile(futurePath, "utf8"); const h = createHash("sha256").update(content).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: state.active || slug, slug, hash: h, dest: destArch, reason: "activateExistingQuest" } as any); } catch {}
+		} catch {}
 		await rename(futurePath, path);
 		if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
 	} else if (!isExistingOnDisk) {

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { CompactionPressure, ExtensionContext, StoredState } from "./types.ts";
-import { QUEST_CURRENT_DIR } from "./constants.ts";
+import { QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "./constants.ts";
 
 export const sessionStates = new Map<string, StoredState>();
 
@@ -17,9 +17,9 @@ export function generateQuestId(now: number = Date.now()): string {
 	if (lastGeneratedSec !== null && sec <= lastGeneratedSec) {
 		sec = lastGeneratedSec + 1;
 	}
-	// increment by one on collision with existing quest dir (keep existing dirs)
+	// increment by one on collision with existing quest dir or archive (keep existing dirs/zips)
 	try {
-		while (existsSync(`${QUEST_CURRENT_DIR}/${String(sec)}`)) {
+		while (existsSync(`${QUEST_CURRENT_DIR}/${String(sec)}`) || existsSync(`${QUEST_ARCHIVE_DIR}/${String(sec)}.zip`)) {
 			sec += 1;
 			// safety guard against infinite loop
 			if (sec > Math.floor(now / 1000) + 100000) break;

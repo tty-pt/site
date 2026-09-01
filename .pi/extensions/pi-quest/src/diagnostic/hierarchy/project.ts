@@ -3,6 +3,9 @@ import { dirname, join, resolve } from "node:path";
 
 export function findProjectRoot(startDir?: string): string {
 	let current = resolve(startDir || (typeof process !== "undefined" ? process.cwd() : "."));
+	while (current.includes("/.pi/extensions/")) {
+		current = current.slice(0, current.indexOf("/.pi/extensions/"));
+	}
 
 	const piIdx = current.indexOf("/.pi/");
 	if (piIdx !== -1) {

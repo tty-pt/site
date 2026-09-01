@@ -1,4 +1,5 @@
-import { CUSTOM_TYPE, LEGACY_CUSTOM_TYPE, QuestErrorCode } from "./constants.ts";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { CUSTOM_TYPE, FUTURE_DIR, LEGACY_CUSTOM_TYPE, QuestErrorCode } from "./constants.ts";
 import { syncImplementationPermission } from "./gates.ts";
 import { logError } from "./messaging.ts";
 import { createDefaultState, setSessionState } from "./state.ts";
@@ -24,6 +25,17 @@ export function loadPersistedJournalSnapshot(ctx: ExtensionContext): StoredState
 export function restoreSessionState(latest: StoredState): StoredState {
 	const txData = latest.activeTransaction && typeof latest.activeTransaction === "object" ? (latest.activeTransaction as any) : null;
 	const isCompacting = txData ? (txData.phase === "in-flight" || txData.phase === "prepared") : false;
+	let activeDraft: string | null = typeof (latest as any).activeDraft === "string" ? (latest as any).activeDraft : null;
+	let draftPrompts: string[] = Array.isArray((latest as any).draftPrompts) ? (latest as any).draftPrompts : [];
+	let draftCreatedAt: number | null = typeof (latest as any).draftCreatedAt === "number" ? (latest as any).draftCreatedAt : null;
+	if (activeDraft && draftPrompts.length === 0) {
+		try {
+			const c = readFileSync(`${FUTURE_DIR}/${activeDraft}.md`, "utf8");
+			const req = c.match(/## Requirements([\s\S]*?)(?:\n## |\n$)/)?.[1] || "";
+			const items = req.split("\n").filter((l) => l.trim().startsWith("- ")).map((l) => l.replace(/^-+\s*/, "").trim()).filter(Boolean);
+			if (items.length) draftPrompts = items;
+		} catch {}
+	}
 	return {
 		questId: typeof latest.questId === "string" ? latest.questId : null,
 		active: typeof latest.active === "string" ? latest.active : null,
@@ -96,6 +108,19 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		lastPlanReviewApproval: latest.lastPlanReviewApproval ? { ...latest.lastPlanReviewApproval } : null,
 		lastPlanReviewBoundaryKey: (latest as any).lastPlanReviewBoundaryKey || null,
 		lastPlanReviewRequestedVersion: (latest as any).lastPlanReviewRequestedVersion || null,
+		activeDraft,
+		draftPrompts,
+		draftCreatedAt,
+		draftLastSavedHash: typeof (latest as any).draftLastSavedHash === "string" ? (latest as any).draftLastSavedHash : null,
+		draftLastReviewKey: typeof (latest as any).draftLastReviewKey === "string" ? (latest as any).draftLastReviewKey : null,
+		semanticSummaryEnabled: (latest as any).semanticSummaryEnabled,
+		thoughtLoggingEnabled: (latest as any).thoughtLoggingEnabled,
+		initialPromptLogged: typeof (latest as any).initialPromptLogged === "boolean" ? (latest as any).initialPromptLogged : false,
+		lastPlanReviewRequestKey: (latest as any).lastPlanReviewRequestKey || null,
+		lastDraftReviewRequestKey: (latest as any).lastDraftReviewRequestKey || null,
+		lastDirectionReviewKey: (latest as any).lastDirectionReviewKey || null,
+		lastDirectionReviewAt: typeof (latest as any).lastDirectionReviewAt === "number" ? (latest as any).lastDirectionReviewAt : null,
+		awaitingReview: (latest as any).awaitingReview ? { ...(latest as any).awaitingReview } : null,
 		investigationEpoch: typeof latest.investigationEpoch === "number" ? latest.investigationEpoch : 1,
 		currentReceipt: latest.currentReceipt || null,
 		lastCompletedReceipt: latest.lastCompletedReceipt || null,
@@ -112,7 +137,8 @@ export function reconcileDerivedState(reconstructedState: StoredState, ctx: Exte
 export function reconstruct(ctx: ExtensionContext): StoredState {
 	try {
 		const latest = loadPersistedJournalSnapshot(ctx);
-		const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest) ? restoreSessionState(latest) : createDefaultState();
+		const hasDraft = !!(latest as any)?.activeDraft || !!((latest as any)?.draftPrompts?.length);
+		const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest || hasDraft) ? restoreSessionState(latest) : createDefaultState();
 		return reconcileDerivedState(reconstructedState, ctx);
 	} catch (err: any) {
 		logError("Failed to reconstruct state from session history", err, ctx, QuestErrorCode.STATE_RECONSTRUCTION_FAILURE);

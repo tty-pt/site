@@ -3,11 +3,12 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "n
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FUTURE_DIR } from "../../constants.ts";
-import { canImplement, syncImplementationPermission } from "../../gates.ts";
+import { canImplement, getLifecycleState, syncImplementationPermission } from "../../gates.ts";
 import { populateEpistemicUpdates } from "../update_populators.ts";
 import { logError, reportAgentError } from "../../messaging.ts";
 import { logEvent, logQuestTransition, logStateUpdateTransition } from "../../logging.ts";
 import { getActiveContext, getSessionId, sessionStartMap } from "../../state.ts";
+import { isSemanticSummaryEnabled } from "../../config.ts";
 import { ensureQuestIdInContent, parseMarkdownSections, QUEST_TEMPLATE, spliceMarkdownSections } from "../../markdown.ts";
 import { fileExists, listActiveQuestRecords, questDirPath, questPath, resolveQuestRecordBySlug, slugify } from "../../paths.ts";
 import { syncMetaJson } from "../../markdown/template/metadata.ts";
@@ -241,13 +242,36 @@ async function maybeTriggerPlanReview(
 
 	const alreadyApprovedForBoundary = isPlanReviewValidForState(targetState) && targetState.lastPlanReviewBoundaryKey === postPlanning.boundaryKey;
 	const alreadyRequestedForBoundary = targetState.lastPlanReviewBoundaryKey === postPlanning.boundaryKey;
+	const firstPlanReviewFired = !!(targetState as any).firstPlanReviewFired || !!(targetState as any).lastPlanReviewApproval;
 
 	const shouldTriggerReview =
 		!alreadyApprovedForBoundary &&
 		!alreadyRequestedForBoundary &&
 		(isInitialResearchCompletion || isFirstPlanDraft || isMaterialPlanChange || isRevisionAfterRejection);
 
-	if (!shouldTriggerReview) return "";
+	if (!shouldTriggerReview) {
+		if (firstPlanReviewFired && isMaterialPlanChange) {
+			try {
+				logEvent("PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE" as any, `plan review suppressed material change`, {
+					quest: targetState.active || "",
+					questId: (targetState as any).questId || undefined,
+					preBoundaryKey: prePlanning.boundaryKey?.slice(0, 8),
+					postBoundaryKey: postPlanning.boundaryKey?.slice(0, 8),
+					boundaryKey: postPlanning.boundaryKey,
+					planVersion: targetState.planVersion,
+				} as any);
+			} catch {}
+		} else if (alreadyRequestedForBoundary || alreadyApprovedForBoundary) {
+			try {
+				logEvent("FIRST_PLAN_REVIEW_ALREADY_FIRED" as any, `first plan review already fired`, {
+					quest: targetState.active || "",
+					shard: "root",
+					boundaryKey: postPlanning.boundaryKey?.slice(0, 8),
+				} as any);
+			} catch {}
+		}
+		return "";
+	}
 
 	targetState.lastPlanReviewBoundaryKey = postPlanning.boundaryKey;
 	try{const qp=questPath(targetState.questId||state.questId);const cc=await readFile(qp,"utf8");if(!cc.includes(`[[review-v${targetState.planVersion}]]`)){const e=`- [ ] [[review-v${targetState.planVersion}]] - review ${postPlanning.boundaryKey.slice(0,8)}`;await writeFile(qp,cc.includes("## Sub-Quests")?cc.replace(/(##\s*Sub-Quests[\s\S]*?)(\n##\s+|$)/i,`$1${e}\n$2`):`${cc.trimEnd()}\n\n## Sub-Quests\n${e}\n`,"utf8")}}catch{}
@@ -382,6 +406,18 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 					elapsedMs: Date.now() - startMs,
 					opencodeSessionId: sessId,
 				});
+			}
+		} catch {}
+		try {
+			if (isSemanticSummaryEnabled(targetState)) {
+				if (prePlanning.boundaryKey !== postPlanning.boundaryKey || prePlanning.researchComplete !== (targetState as any).researchComplete) {
+					const curGate = (targetState as any).reassessmentRequired ? "REASSESSMENT_PENDING" : (targetState as any).researchRequired || !(targetState as any).researchComplete ? "RESEARCH_PENDING" : (targetState as any).awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED";
+					const lifecycle = getLifecycleState(targetState as any, undefined);
+					const intentMap: Record<string, string> = { RESEARCH_PENDING: "research", ACTIVE_DIRTY: "plan-draft", AWAITING_REVIEW: "awaiting-review", REASSESSMENT_PENDING: "revising", IMPLEMENTATION_ALLOWED: "implementing", ACTIVE_CLEAN: "verifying" };
+					const intent = (intentMap as any)[lifecycle as any] || "research";
+					const line = `${intent} planVersion${(targetState as any).planVersion || 1} gate=${curGate} prompts=${(targetState as any).prompts?.length || 0} draft=${(targetState as any).draftPrompts?.length || 0}`;
+					logEvent("STEP_SUMMARY" as any, line.slice(0, 120), { quest: targetName, intent, planVersion: (targetState as any).planVersion || 1, activeGate: curGate, elapsedMs: Date.now() - (sessionStartMap.get(getSessionId(getActiveContext(ctx))) || Date.now()), opencodeSessionId: getSessionId(getActiveContext(ctx)) } as any);
+				}
 			}
 		} catch {}
 

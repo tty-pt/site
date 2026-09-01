@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { FUTURE_DIR } from "../constants.ts";
 import { isDraftReviewValid } from "../critical_agent/policy.ts";
 import { isSubagentToolRegistered, getCustomSubagentRunner } from "../critical_agent/index.ts";
 import { futureDraftPath, questPath, questDirPath } from "../paths.ts";
+import { logEvent } from "../logging.ts";
 import { ensureQuestIdInContent } from "../markdown/template/header.ts";
 import { persist, verifyAndMarkSaved } from "../persistence.ts";
 import { startResearchEpoch } from "../research.ts";
@@ -52,6 +55,14 @@ export async function promoteDraft(
 
 	const destPath = questPath(qid);
 	await writeFile(destPath, content, "utf8");
+	try {
+		const archDir = join(questDirPath(qid), "future-archive");
+		await mkdir(archDir, { recursive: true });
+		const destArch = join(archDir, basename(futurePath));
+		try { await copyFile(futurePath, destArch); } catch {}
+		const h = createHash("sha256").update(content).digest("hex").slice(0, 12);
+		try { logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: s.active || targetSlug, slug: targetSlug, hash: h, dest: destArch, reason: "promote" } as any); } catch {}
+	} catch {}
 	try { await unlink(futurePath); } catch {}
 
 	// Carry prompts

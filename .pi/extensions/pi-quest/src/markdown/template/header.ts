@@ -34,6 +34,7 @@ export function extractSubQuestsFromQuest(content: string): string[] {
 }
 
 export function FUTURE_QUEST_TEMPLATE(name: string, goal = ""): string {
+	const req = goal ? goal.trim().slice(0, 120) : "";
 	return [
 		`# Proposal / Future Quest: ${name}`,
 		``,
@@ -43,10 +44,11 @@ export function FUTURE_QUEST_TEMPLATE(name: string, goal = ""): string {
 		goal ? goal : `> What are we proposing to change and why?`,
 		``,
 		`## Requirements`,
-		`- `,
+		req ? `- ${req}` : `- `,
 		``,
 		`## Implementation Plan`,
-		`1. `,
+		`1. Investigate via read/search`,
+		`2. Plan confidence low → revise`,
 		``,
 		`## Out of scope`,
 		`- `,

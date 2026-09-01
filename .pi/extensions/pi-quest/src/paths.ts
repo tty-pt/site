@@ -1,6 +1,7 @@
-import { existsSync } from "node:fs";
-import { stat, unlink, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync } from "node:fs";
+import { copyFile, stat, unlink, readdir, readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { FUTURE_DIR, QUEST_ARCHIVE_DIR, QUEST_CURRENT_DIR } from "./constants.ts";
 import { getQuestId } from "./state.ts";
 import { ExtensionContext } from "./types.ts";
@@ -335,6 +336,15 @@ export async function cleanDraftIfExists(slug: string, ctx?: ExtensionContext) {
 	try {
 		const futurePath = futureDraftPath(slug);
 		if (await fileExists(futurePath)) {
+			try {
+				const content = await readFile(futurePath, "utf8").catch(() => "");
+				const qid = getQuestId(ctx as any);
+				if (qid) {
+					const archDir = join(questDirPath(qid), "future-archive");
+					try { await copyFile(futurePath, join(archDir, basename(futurePath))).catch(async () => { const { mkdir } = await import("node:fs/promises"); await mkdir(archDir, { recursive: true }); await copyFile(futurePath, join(archDir, basename(futurePath))); }); } catch { try { copyFileSync(futurePath, join(archDir, basename(futurePath))); } catch {} }
+					try { const { logEvent } = await import("./logging.ts"); const h = createHash("sha256").update(content || slug).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: slug, slug, hash: h, dest: join(archDir, basename(futurePath)), reason: "cleanDraftIfExists" } as any); } catch {}
+				}
+			} catch {}
 			await unlink(futurePath);
 		}
 	} catch (err) {

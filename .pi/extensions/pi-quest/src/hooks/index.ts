@@ -10,19 +10,21 @@ import {
 	retryPendingResume,
 } from "../compaction.ts";
 import { checkAndTriggerDirectionReview } from "../critical_agent.ts";
-import { PROMPT_MAX_CHARS, PROMPT_MAX_COUNT, QUEST_CURRENT_DIR } from "../constants.ts";
+import { FUTURE_DIR, PROMPT_MAX_CHARS, PROMPT_MAX_COUNT, QUEST_CURRENT_DIR } from "../constants.ts";
 import { withContext } from "../context.ts";
 import { ensureRootQuestForPrompt } from "../lifecycle.ts";
 import { createHash } from "node:crypto";
 import { logCompactionTransition, logCriticalReviewTransition, logEvent, logUserInteraction } from "../logging.ts";
 import { readFileSync } from "node:fs";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { getGuidelinesFingerprint } from "../context.ts";
 import { validatePhasedPlan } from "../compaction/checkpoint.ts";
 import { COMPACT_WORKFLOW_RULES } from "../markdown/template/rules.ts";
 import { getCompactWorkflowInstructions, getFullWorkflowInstructions, getWorkflowInstructions } from "../markdown.ts";
 import { getCachedWorkflow, setCachedWorkflow } from "../utils/cache.ts";
 import { logDebug, logError, sendInternalAgentMessage, sendSaveRequest, shouldCapturePrompt } from "../messaging.ts";
-import { appendToFutureDraft, createFutureDraftFromPrompt, futureDraftPath, generateSlugFromPrompt, questPath, shouldStartPersistentQuest } from "../paths.ts";
+import { appendToFutureDraft, createFutureDraftFromPrompt, futureDraftPath, generateSlugFromPrompt, questDirPath, questPath, shouldStartPersistentQuest } from "../paths.ts";
 import { persist, verifyAndMarkSaved } from "../persistence.ts";
 import { loadActiveQuestResumeContext } from "../reconstruction.ts";
 import { triggerReassessment } from "../research.ts";
@@ -288,10 +290,26 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 								if (state.draftPrompts.length > PROMPT_MAX_COUNT) {
 									state.draftPrompts = [state.draftPrompts[0], ...state.draftPrompts.slice(-(PROMPT_MAX_COUNT - 1))];
 								}
+								try {
+									const qid = (state as any).questId || state.questId;
+									if (qid) {
+										const jPath = join(questDirPath(qid), "draft-prompts.jsonl");
+										await mkdir(dirname(jPath), { recursive: true });
+										const rec = JSON.stringify({ ts: Date.now(), hash: createHash("sha256").update(trimmed).digest("hex").slice(0, 12), slice: trimmed.slice(0, 200), len: trimmed.length }) + "\n";
+										await appendFile(jPath, rec, "utf8");
+									}
+								} catch {}
 							}
 							const appended = await appendToFutureDraft(state.activeDraft, trimmed);
 							try {
-								const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+								const full = await readFile(futureDraftPath(state.activeDraft), "utf8");
+								state.draftLastSavedHash = createHash("sha256").update(full).digest("hex").slice(0, 12);
+								persist(pi, ctx);
+							} catch {
+								try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); persist(pi, ctx); } catch {}
+							}
+							try {
+								const hash = state.draftLastSavedHash || createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
 								if (appended) {
 									logEvent("DRAFT_APPENDED" as any, `draft appended`, { quest: state.activeDraft || "", slug: state.activeDraft, hash, draftPromptsCount: state.draftPrompts.length } as any);
 								} else {
@@ -299,7 +317,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 								}
 							} catch {}
 							logUserInteraction("USER_REFINEMENT_RECEIVED", `draft requirement accumulated for '${state.activeDraft}'`, { quest: state.activeDraft || "" });
-							persist(pi, ctx);
+							try { persist(pi, ctx); } catch {}
 							updateUIStatus(ctx);
 							// Efficient: auto-trigger draft compliance review once we have at least 2 requirements and not already approved
 							if ((state.draftPrompts?.length || 0) >= 2) {
@@ -390,6 +408,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 						} else {
 							const slug = generateSlugFromPrompt(trimmed, 45);
 							await createFutureDraftFromPrompt(slug, trimmed);
+							try { const c = await readFile(join(FUTURE_DIR, `${slug}.md`), "utf8"); state.draftLastSavedHash = createHash("sha256").update(c).digest("hex").slice(0, 12); } catch { try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); } catch {} }
 							state.activeDraft = slug;
 							state.draftPrompts = [trimmed];
 							state.draftCreatedAt = Date.now();

@@ -153,19 +153,20 @@ export function syncImplementationPermission(targetState?: StoredState, ctx?: Ex
 	return s.implementationAllowed;
 }
 
-export function getLifecycleState(_ctx?: ExtensionContext): QuestLifecycleState {
-	if (!state.active) return QuestLifecycleState.IDLE;
-	if (state.compactionPending) return QuestLifecycleState.COMPACTING;
+export function getLifecycleState(targetState?: StoredState | ExtensionContext, _ctx?: ExtensionContext): QuestLifecycleState {
+	const s = (targetState && typeof (targetState as any).active !== "undefined" ? targetState as StoredState : state);
+	if (!s.active) return QuestLifecycleState.IDLE;
+	if (s.compactionPending) return QuestLifecycleState.COMPACTING;
 
-	if (state.reassessmentRequired) {
+	if (s.reassessmentRequired) {
 		return QuestLifecycleState.REASSESSMENT_PENDING;
 	}
 
-	if (state.researchRequired || !state.researchComplete) {
+	if (s.researchRequired || !s.researchComplete) {
 		return QuestLifecycleState.RESEARCH_PENDING;
 	}
 
-	if (state.dirty || !compactionReady()) {
+	if (s.dirty || !compactionReady()) {
 		return QuestLifecycleState.ACTIVE_DIRTY;
 	}
 	return QuestLifecycleState.ACTIVE_CLEAN;
