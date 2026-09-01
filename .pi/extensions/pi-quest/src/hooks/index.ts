@@ -446,6 +446,10 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 						if (activated) {
 							// existing quest resumed, no draft
 						} else {
+							if (!state.questId) {
+								const { ensureQuestId } = await import("../state.ts");
+								ensureQuestId(ctx as any);
+							}
 							const slug = generateSlugFromPrompt(trimmed, 45);
 							await createFutureDraftFromPrompt(slug, trimmed);
 							try { const c = await readFile(join(FUTURE_DIR, `${slug}.md`), "utf8"); state.draftLastSavedHash = createHash("sha256").update(c).digest("hex").slice(0, 12); } catch { try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); } catch {} }
@@ -454,10 +458,6 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 							state.draftCreatedAt = Date.now();
 							state.pendingRootQuest = true;
 							state.pendingRootRequest = trimmed;
-							if (!state.questId) {
-								const { ensureQuestId } = await import("../state.ts");
-								ensureQuestId(ctx as any);
-							}
 							// 08: durable verbatim log for t=0 — mirrors refinement branch 307-310
 							try {
 								const qid0 = (state as any).questId || state.questId;
@@ -543,12 +543,14 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 					: getFullWorkflowInstructions(resumeContext);
 				setCachedWorkflow(state.saveGeneration?.hash || "", pressureKey, workflowInstructions);
 
-				// 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal
+				// 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal (top, imperative, like vim ftplugin)
 				const skillHint = (!state.active && (state.pendingRootQuest || state.activeDraft))
-					? `\n\nSkill trigger: quest_journal — durable quest not yet established. Use quest_journal skill: investigate, establish quest via quest_update_state on turn 1.\n`
+					? `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`
 					: "";
+				// steer so execution.log grep-able within turn0
+				if (skillHint) { try { sendInternalAgentMessage(pi, "📝 Skill quest_journal: establish durable quest via quest_update_state now", "steer"); } catch {} }
 				if (event && typeof event.systemPrompt === "string") {
-					return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${skillHint}${workflowInstructions}` };
+					return { systemPrompt: `${event.systemPrompt}\n\n${skillHint}${awarenessBlock}${workflowInstructions}` };
 				}
 			} catch (err: any) {
 				logError("Failed in before_agent_start hook", err, ctx);

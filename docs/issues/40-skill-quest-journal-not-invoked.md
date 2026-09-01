@@ -1,17 +1,17 @@
 ---
 id: 40
 title: "Skill quest_journal not invoked — agent runs without durable quest establishment"
-state: done
+state: ready
 severity: high
 requires: []
-validates: "pi: initial prompt => DIALOGUE + SEMANTIC_SNAPSHOT + skill hint steer within turn0"
-area: "hooks/index.ts:546 registerQuestJournalCRBHook, markdown.ts getFullWorkflowInstructions/getCompactWorkflowInstructions, "
+validates: "pi: initial prompt => DIALOGUE + SEMANTIC_SNAPSHOT + skill hint steer within turn0 + quest_update_state on turn1 (1788304908 dumb loop)"
+area: "hooks/index.ts:546 registerQuestJournalCRBHook, markdown.ts getFullWorkflowInstructions/getCompactWorkflowInstructions, index.ts self-install"
 parent: 43
 ---
 # Issue: Skill `quest_journal` not invoked — agent runs without durable quest establishment
 
 - **Area:** `pi-quest` skill/workflow — `hooks/index.ts:546 registerQuestJournalCRBHook`, `markdown.ts getFullWorkflowInstructions/getCompactWorkflowInstructions`, `context.ts buildSessionAwarenessBlock`, `messaging.ts shouldCapturePrompt`, `.pi/skills/quest-journal/SKILL.md`
-- **Runs observed:** `1788299416` 21:50 `01a05ef3` `look-consumer-side-code-lot-complexity` — 21 `TURN_START` `phase research gate RESEARCH_PENDING plan v1 round 1` with 10 `RESEARCH_EVIDENCE` `read future/...md` `bash ls mods/ external/bud/hyle`, never called `quest_update_state` to establish `current/1788299416/quest.md` (`RESUME_STATE_INCONSISTENT ENOENT` + `SAVE_FAILED file_not_found` 17×). No `Skill: quest_journal` trigger in `before_agent_start` systemPrompt, `TURN_START intent="Look at the consumer side code..."` repeated without CRB `quest_journal` tools hint. Same pattern `1788298649` and `1788280759`.
+- **Runs observed:** `1788299416` 21:50 `01a05ef3` `look-consumer-side-code-lot-complexity` — 21 `TURN_START` `phase research gate RESEARCH_PENDING plan v1 round 1` with 10 `RESEARCH_EVIDENCE` `read future/...md` `bash ls mods/ external/bud/hyle`, never called `quest_update_state` to establish `current/1788299416/quest.md` (`RESUME_STATE_INCONSISTENT ENOENT` + `SAVE_FAILED file_not_found` 17×). No `Skill: quest_journal` trigger in `before_agent_start` systemPrompt, `TURN_START intent="Look at the consumer side code..."` repeated without CRB `quest_journal` tools hint. Same pattern `1788298649` and `1788280759`. **Re-open 2026-09-02:** `1788304908` same dumb loop 8 turns `evidence 1→6` `NO_PROGRESS 5→6` `GATE_BLOCKED write future/...md` never `quest_update_state`, despite `40` prior `Skill trigger` at `hooks/index.ts:547` — skill moved to `.pi/extensions/pi-quest/skills/` not discoverable without global `.pi/skills/` copy, model ignored buried hint after `awarenessBlock`.
 - **Severity:** High — without skill, durable `quest.md` never created, `NO_PROGRESS turns 5→15` + `periodic_checkpoint` steer loops, `PROVISIONAL_RESEARCH_PENDING` blocks `bash cat << 'EOF' > quest.md` as `TOOL_FAILURE` → `REASSESSMENT_REQUIRED round2→6`.
 
 ## Current behavior
@@ -21,7 +21,8 @@ parent: 43
 
 ## Desired behavior
 
-- `before_agent_start` systemPrompt must prepend `Skill: quest_journal` when `!state.active && (state.pendingRootQuest || state.activeDraft)` so model invokes `quest_journal` skill on turn 0. Minimal: add `Skill trigger: quest_journal` line to `buildSessionAwarenessBlock` or to workflow instructions header (template, no LLM). No token spend beyond prompt template.
+- **Self-install like vim plugin:** `index.ts` `session_start` ensures `skills/quest-journal/SKILL.md` copied from `.pi/extensions/pi-quest/skills/quest-journal/SKILL.md` to `.pi/skills/quest-journal/SKILL.md` (cwd-relative, mkdir recursive) so `pi --list-skills` discovers it without manual global install. Single source remains extension; global is mirror.
+- `before_agent_start` systemPrompt must prepend `Skill: quest_journal — CALL quest_update_state on turn 1…` **before** `awarenessBlock` (top, imperative) when `!state.active && (state.pendingRootQuest || state.activeDraft)` so model invokes `quest_journal` skill on turn 0, plus `sendInternalAgentMessage steer "📝 Skill quest_journal: establish durable quest via quest_update_state now"` so `execution.log` grep-able within turn0.
 - Keep `DIALOGUE dialogueRole=user slice 200 piSessionId` + `SEMANTIC_SNAPSHOT phase research gate RESEARCH_PENDING` always-on (done) so `execution.log` shows skill hint steer `AGENT_MESSAGE_DELIVERED` within turn 0.
 
 ## Manual validation in `pi`

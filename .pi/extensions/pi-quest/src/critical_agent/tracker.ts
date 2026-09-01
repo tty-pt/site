@@ -125,7 +125,14 @@ export function canLaunchReview(
 	stateHash?: string | null,
 	targetState?: StoredState,
 ): { allowed: boolean; reason?: string; existingReview?: ActiveReview } {
-	// 1. Consult inCriticalReview flag on the quest state
+	// INVARIANT: ONE QUEST -> ZERO OR ONE ACTIVE CRITICAL REVIEW
+	// State hashes, plan versions, save counts, and boundary keys are NEVER reasons
+	// to allow concurrent reviews of the same quest. They are different snapshots
+	// of the same reasoning process and must be serialized. Planning updates are
+	// cheap; multiple autonomous reviewer agents researching the same repository
+	// are not.
+
+	// 1. Consult inCriticalReview flag on the quest state (primary gate)
 	if (targetState && (targetState.active === questSlug || targetState.questId === questSlug) && targetState.inCriticalReview) {
 		const existing = findActiveReviewForQuest(questSlug);
 		return {
@@ -136,6 +143,9 @@ export function canLaunchReview(
 	}
 
 	// 2. Strict Invariant: ONE QUEST -> ZERO OR ONE ACTIVE CRITICAL REVIEW
+	// Regardless of kind, plan version, state hash, or boundary key — any active
+	// review for this quest blocks new launches. "maxConcurrency per hash" is
+	// not a valid concept; there is only zero or one active per quest.
 	const existing = findActiveReviewForQuest(questSlug);
 	if (existing) {
 		return {
@@ -289,10 +299,14 @@ export function formatActiveReviewsUIStatus(): string | undefined {
 	if (running.length === 0) {
 		if (pendingReviews.size > 0) {
 			const pendingLabels = [...pendingReviews.values()].map((p) => `${p.kind}/${p.triggerReason || p.kind}`).join(", ");
-			return `⚖ Critical: queued (${pendingLabels})`;
+			return `⏳ queued (${pendingLabels})`;
 		}
 		if (latestCompletedStatus && (Date.now() - latestCompletedStatus.updatedAt) < 15000) {
-			return latestCompletedStatus.text;
+			// hide meaningless "? UNCERTAIN" — icon already conveys it via quest slot ↺
+			if (latestCompletedStatus.text.includes("? UNCERTAIN") || latestCompletedStatus.text.includes("?")) {
+				return undefined;
+			}
+			return latestCompletedStatus.text.replace("⚖ Critical: reviewer", "⏳ reviewer");
 		}
 		return undefined;
 	}
@@ -301,8 +315,7 @@ export function formatActiveReviewsUIStatus(): string | undefined {
 		const r = running[0];
 		const triggerLabel = r.triggerReason ? `${r.kind}/${r.triggerReason}` : r.kind;
 		if (r.activity.turns === 0 && r.activity.tools === 0) {
-			// Preserve "reviewer ⟳ starting" substring for backward compat, append trigger detail
-			return `⚖ Critical: reviewer ⟳ starting (${triggerLabel})`;
+			return `⏳ reviewer ⟳ starting (${triggerLabel})`;
 		}
 		const parts: string[] = [];
 		if (r.activity.turns > 0) parts.push(`${r.activity.turns} turns`);
@@ -310,12 +323,11 @@ export function formatActiveReviewsUIStatus(): string | undefined {
 		if (r.activity.files > 0) parts.push(`${r.activity.files} files`);
 		else if (r.activity.reads > 0) parts.push(`${r.activity.reads} reads`);
 		const detail = parts.length > 0 ? ` ⟳ ${parts.join(" · ")}` : " ⟳ running";
-		return `⚖ Critical: reviewer ${triggerLabel}${detail}`;
+		return `⏳ reviewer ${triggerLabel}${detail}`;
 	}
 
-	// Multiple active reviews — list all kind/trigger
 	const labels = running.map((r) => `${r.reviewId.slice(0, 7)}:${r.kind}/${r.triggerReason || r.kind}`).join(", ");
-	return `⚖ Critical: ${running.length} active · ${labels}`;
+	return `⏳ ${running.length} active · ${labels}`;
 }
 
 export function updateReviewerUIStatus(ctx?: ExtensionContext, customText?: string | null): void {

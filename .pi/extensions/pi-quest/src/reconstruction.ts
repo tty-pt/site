@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { CUSTOM_TYPE, FUTURE_DIR, LEGACY_CUSTOM_TYPE, QuestErrorCode } from "./constants.ts";
 import { syncImplementationPermission } from "./gates.ts";
 import { logError } from "./messaging.ts";
-import { createDefaultState, setSessionState } from "./state.ts";
+import { createDefaultState, generateQuestId, setSessionState } from "./state.ts";
 import type { ExtensionContext, StoredState } from "./types.ts";
 import { updateUIStatus } from "./ui.ts";
 import { reconstructActiveTransaction, reconstructObligationHistory, reconstructPendingNotifications, reconstructPendingResume, reconstructPendingSubquestResolution } from "./reconstruction/transaction.ts";
@@ -136,6 +136,10 @@ export function restoreSessionState(latest: StoredState): StoredState {
 }
 
 export function reconcileDerivedState(reconstructedState: StoredState, ctx: ExtensionContext): StoredState {
+	// invariant: questId never null while drafting/active/pending — fix 2026-09-02
+	if ((reconstructedState.active || (reconstructedState as any).activeDraft || reconstructedState.pendingRootQuest) && !reconstructedState.questId) {
+		(reconstructedState as any).questId = generateQuestId();
+	}
 	syncImplementationPermission(reconstructedState);
 	setSessionState(ctx, reconstructedState);
 	updateUIStatus(ctx);

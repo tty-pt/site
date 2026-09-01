@@ -112,3 +112,36 @@ export function formatQuestHierarchy(active: string | null, stack?: string[], ma
 }
 
 export const normalizePath = (p: string) => p.replace(/^\.\//, "").replace(/\\/g, "/");
+
+export function truncateToThreeWords(name: string): string {
+	if (!name) return "";
+	const words = name.split(/[-_\s]+/).filter(Boolean);
+	const isDash = name.includes("-");
+	const isUnderscore = !isDash && name.includes("_");
+	const sep = isDash ? "-" : isUnderscore ? "_" : " ";
+	if (words.length <= 3) return words.join(sep);
+	return words.slice(0, 3).join(sep) + "…";
+}
+
+export function barIcon(state: any, fresh: boolean): string {
+	if (state?.reassessmentRequired) return "↺";
+	if (state?.awaitingReview) return "⏳";
+	if (state?.pendingRootQuest || state?.activeDraft) return "📝";
+	if (!fresh) return "💾";
+	if (state?.researchRequired) return "🔍";
+	return "✅";
+}
+
+export function formatQuestShort(state: any, fresh: boolean): string {
+	const icon = barIcon(state, fresh);
+	const raw = state?.active ? state.active : (state?.activeDraft || "");
+	let nome: string;
+	if (state?.stack && Array.isArray(state.stack) && state.stack.length > 1 && state?.active) {
+		nome = formatQuestHierarchy(state.active, state.stack, 24);
+	} else {
+		nome = truncateToThreeWords(raw);
+	}
+	if (!nome) nome = "(none)";
+	const qid = state?.questId ? ` #${state.questId}` : " #—";
+	return `${icon} ${nome}${qid}`;
+}

@@ -87,6 +87,11 @@ export function recordObservedInvestigation(
 			evidence: receipt.evidenceCount,
 		});
 
+		// 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
+		if (receipt.evidenceCount >= 10 && !targetState.active && (targetState as any).activeDraft) {
+			(targetState as any).substantiveTurnsSinceCheckpoint = 0;
+		}
+
 		return true;
 	}
 
@@ -118,6 +123,11 @@ export function recordObservedInvestigation(
 			searches: receipt.searchTargets.length,
 			evidence: receipt.evidenceCount,
 		});
+
+		// 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
+		if (receipt.evidenceCount >= 10 && !targetState.active && (targetState as any).activeDraft) {
+			(targetState as any).substantiveTurnsSinceCheckpoint = 0;
+		}
 
 		return true;
 	}

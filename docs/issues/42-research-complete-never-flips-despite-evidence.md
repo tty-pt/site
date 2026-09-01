@@ -1,7 +1,7 @@
 ---
 id: 42
 title: "ResearchComplete never flips despite 10 evidences — NO_PROGRESS flood without checkpoint"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "10 evidences => researchComplete or NO_PROGRESS cleared"

@@ -3,7 +3,7 @@ import { withContext } from "./context.ts";
 import { reconstruct } from "./reconstruction.ts";
 import { registerStateChangeHandler } from "./state.ts";
 import { updateUIStatus } from "./ui.ts";
-import { Text, formatQuestHierarchy } from "./utils.ts";
+import { Text, formatQuestShort } from "./utils.ts";
 import { CUSTOM_TYPE, LEGACY_CUSTOM_TYPE } from "./constants.ts";
 import { installToolCallGate } from "./tool_gating.ts";
 import { installArchiveTool, installSubQuestTool, installMarkTool } from "./tools.ts";
@@ -77,6 +77,19 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (event: any, ctx: any) => {
 		reconstruct(ctx);
 		updateUIStatus(ctx);
+		// vim-plugin style self-install: ensure quest-journal skill is discoverable via global .pi/skills (like vim pack)
+		try {
+			const { existsSync, mkdirSync, copyFileSync, readFileSync } = await import("node:fs");
+			const { join, dirname } = await import("node:path");
+			const extSkill = join(dirname(new URL(import.meta.url).pathname), "../skills/quest-journal/SKILL.md");
+			const globalSkill = join((ctx as any)?.cwd || (globalThis as any).process?.cwd?.() || ".", ".pi/skills/quest-journal/SKILL.md");
+			if (existsSync(extSkill)) {
+				const src = readFileSync(extSkill, "utf8");
+				let needCopy = true;
+				try { needCopy = readFileSync(globalSkill, "utf8") !== src; } catch { needCopy = true; }
+				if (needCopy) { mkdirSync(dirname(globalSkill), { recursive: true }); copyFileSync(extSkill, globalSkill); }
+			}
+		} catch {}
 	});
 	pi.on("session_tree", async (_event: any, ctx: any) => reconstruct(ctx));
 
@@ -99,16 +112,10 @@ export default function (pi: ExtensionAPI) {
 	// Durable in-session marker, not sent to the LLM.
 	const renderEntry = (entry: any, _o: any, theme: any) => {
 		const data = entry.data ?? ({} as StoredState);
-		const fresh = data.saveCount > data.compactCount;
-		const hier = formatQuestHierarchy(data.active, data.stack);
-		const idStr = data.questId ? ` ${theme.fg("muted", "id:")} ${data.questId}` : "";
-		return new Text(
-			`${theme.fg("accent", "✨ ")}${theme.fg("muted", "quest:")} ${hier}${idStr}${
-				fresh ? "" : theme.fg("warning", " (save pending)")
-			}`,
-			0,
-			0,
-		);
+		const fresh = (data.saveCount ?? 0) > (data.compactCount ?? 0);
+		// reuse short token — icon conveys fresh/dirty/research etc.
+		const short = formatQuestShort(data as any, fresh);
+		return new Text(short, 0, 0);
 	};
 	pi.registerEntryRenderer<StoredState>(CUSTOM_TYPE, renderEntry);
 	pi.registerEntryRenderer<StoredState>(LEGACY_CUSTOM_TYPE, renderEntry);

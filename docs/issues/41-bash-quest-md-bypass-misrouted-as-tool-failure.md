@@ -1,7 +1,7 @@
 ---
 id: 41
 title: "Bash cat > quest.md bypass misrouted as TOOL_FAILURE and triggers reassessment"
-state: ready
+state: done
 severity: high
 requires: [10]
 validates: "bash cat > quest.md while RESEARCH_PENDING => GATE_BLOCKED not TOOL_FAILURE, no REASSESSMENT bump"

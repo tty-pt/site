@@ -272,9 +272,14 @@ export async function handleToolResult(event: any, _ctx: ExtensionContext): Prom
 	const toolOutput = event?.content || event?.output || "";
 	const rawIsError = Boolean(event?.isError || event?.error || (event?.details && (event?.details?.error || event?.details?.success === false)));
 	const normName = (toolName || "").toLowerCase().trim();
+	// 41: bash cat > quest.md gate-blocked while PROVISIONAL_RESEARCH_PENDING must be GATE_BLOCKED not TOOL_FAILURE
+	const rawCmdForGate = typeof toolInput === "string" ? toolInput : toolInput?.command || toolInput?.cmd || "";
+	const isQuestWriteBlocked = rawIsError && (normName === "bash" || normName === "user_bash") && /quest\.md|\.pi\/quest\/(current|future)/.test(rawCmdForGate);
 	// Whitelist rg/grep exit 1 (no matches) — not an error, still counts as investigation
 	let effectiveIsError = rawIsError;
-	if ((normName === "bash" || normName === "user_bash") && rawIsError) {
+	if (isQuestWriteBlocked) {
+		effectiveIsError = false;
+	} else if ((normName === "bash" || normName === "user_bash") && rawIsError) {
 		const bashFailure = detectBashToolFailure(event);
 		if (!bashFailure.hasFailure) {
 			effectiveIsError = false;
@@ -287,7 +292,9 @@ export async function handleToolResult(event: any, _ctx: ExtensionContext): Prom
 	let isFailure = effectiveIsError;
 	let failureReason: string | undefined = undefined;
 
-	if (normName === "bash" || normName === "user_bash") {
+	if (isQuestWriteBlocked) {
+		isFailure = false;
+	} else if (normName === "bash" || normName === "user_bash") {
 		const bashFailure = detectBashToolFailure(event);
 		if (bashFailure.hasFailure) {
 			isFailure = true;

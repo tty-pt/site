@@ -2,9 +2,9 @@ import { compactionReady } from "./compaction.ts";
 import { NOTES_FILE } from "./constants.ts";
 import { getGuidelinesFingerprint, gitBranch, projectGuidelines, standingNotes } from "./context.ts";
 import { questPath } from "./paths.ts";
-import { getActiveContext, state } from "./state.ts";
+import { generateQuestId, getActiveContext, state } from "./state.ts";
 import { ExtensionContext } from "./types.ts";
-import { formatQuestHierarchy } from "./utils.ts";
+import { formatQuestHierarchy, formatQuestShort } from "./utils.ts";
 import { updateReviewerUIStatus } from "./critical_agent/tracker.ts";
 
 let lastAwarenessKey = "";
@@ -16,24 +16,14 @@ export function updateUIStatus(ctx?: ExtensionContext) {
 	const c = getActiveContext(ctx);
 	if (c?.hasUI) {
 		const fresh = compactionReady();
-		const hier = formatQuestHierarchy(state.active, state.stack);
 
-		let stateTag = "";
-		if (state.pendingRootQuest || state.activeDraft) {
-			stateTag = " [PROVISIONAL RESEARCH]";
-		} else if (!fresh) {
-			stateTag = " (save pending)";
-		} else {
-			stateTag = " (compaction ready)";
+		// invariant: never null during quest — synthesize if needed (covers same-turn race)
+		if ((state.active || (state as any).activeDraft || state.pendingRootQuest) && !state.questId) {
+			try { (state as any).questId = generateQuestId(); } catch {}
 		}
 
-		const idTag = state.questId ? ` | id: ${state.questId}` : "";
-		const draftTag = state.activeDraft ? ` | draft: ${state.activeDraft}` : "";
-
-		const text = state.active
-			? `✨ quest: ${hier}${idTag}${draftTag}${stateTag}`
-			: (state.pendingRootQuest || state.activeDraft)
-			? `✨ quest: [provisional root]${idTag}${draftTag}${stateTag}`
+		const text = (state.active || (state as any).activeDraft || state.pendingRootQuest)
+			? formatQuestShort(state as any, fresh)
 			: undefined;
 		if (typeof c.ui?.setStatus === "function") {
 			c.ui.setStatus("quest", text);
