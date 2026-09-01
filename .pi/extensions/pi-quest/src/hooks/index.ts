@@ -319,6 +319,35 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 							logUserInteraction("USER_REFINEMENT_RECEIVED", `draft requirement accumulated for '${state.activeDraft}'`, { quest: state.activeDraft || "" });
 							try { persist(pi, ctx); } catch {}
 							updateUIStatus(ctx);
+							// 38: if a plan_review draft review is already awaiting/running, supersede-candidate + eager coalesce new boundary
+							try {
+								const newHash = state.draftLastSavedHash || createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+								const slug = state.activeDraft;
+								if (slug) {
+									const newBoundary = `draft:${slug}:${newHash}`;
+									let hasActive = !!(state as any).awaitingReview && (state as any).awaitingReview.kind === "plan_review";
+									try {
+										const { findActiveReviewForQuest } = await import("../critical_agent/tracker.ts");
+										if (findActiveReviewForQuest(slug)?.kind === "plan_review") hasActive = true;
+									} catch {}
+									if (hasActive) {
+										try {
+											const { setPendingReview } = await import("../critical_agent/tracker.ts");
+											setPendingReview(slug, {
+												questSlug: slug,
+												kind: "plan_review" as any,
+												triggerReason: "draft_followup",
+												planVersion: state.planVersion || 1,
+												stateHash: state.lastSavedHash || (state.saveGeneration ? state.saveGeneration.hash : null),
+												boundaryKey: newBoundary,
+												saveCount: state.saveCount || 0,
+												requestedAt: Date.now(),
+											} as any);
+											logEvent("PENDING_COALESCED_RESOLVED" as any, `pending coalesced resolved (draft followup hash=${newHash})`, { quest: slug, chosenKind: "plan_review", boundaryKey: newBoundary, hash: newHash } as any);
+										} catch {}
+									}
+								}
+							} catch {}
 							// Efficient: auto-trigger draft compliance review once we have at least 2 requirements and not already approved
 							if ((state.draftPrompts?.length || 0) >= 2) {
 								try {

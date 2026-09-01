@@ -1,4 +1,4 @@
-import { ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
+import { ENV_REVIEW_LOCK_STALE_MS, ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, REVIEW_LOCK_STALE_MS_DEFAULT, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
 import { getCachedSettingsJson } from "./utils/cache.ts";
 import { join } from "node:path";
 
@@ -39,4 +39,21 @@ export function isThoughtLoggingEnabled(state?: any): boolean {
 	const s = readSettingsFlag("pi-quest.thoughtLogging.enabled");
 	if (s !== undefined) return s;
 	return THOUGHT_LOGGING_ENABLED_DEFAULT;
+}
+
+export function getReviewLockStaleMs(): number {
+	const envRaw = process.env[ENV_REVIEW_LOCK_STALE_MS];
+	if (envRaw !== undefined) {
+		const n = parseInt(envRaw, 10);
+		if (Number.isFinite(n)) return Math.min(300_000, Math.max(1_000, n));
+	}
+	try {
+		const j = getCachedSettingsJson(join(process.cwd(), ".pi/settings.json"));
+		if (j) {
+			const raw = (j as any)["pi-quest"]?.reviewLock?.staleMs ?? (j as any)["pi-quest.reviewLock.staleMs"];
+			const n = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
+			if (Number.isFinite(n)) return Math.min(300_000, Math.max(1_000, n));
+		}
+	} catch {}
+	return REVIEW_LOCK_STALE_MS_DEFAULT;
 }

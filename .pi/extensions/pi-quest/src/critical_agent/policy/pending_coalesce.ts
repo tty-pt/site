@@ -31,7 +31,9 @@ export function dequeuePendingIfNeeded(
   const pendings = getAllPendingForSlug(slug);
   if (pendings.length === 0) return null;
   const firstPlanReviewFired = (targetState as any).firstPlanReviewFired || (targetState as any).planReviewAlreadyFired || !!(targetState as any).lastPlanReviewApproval;
-  if (firstPlanReviewFired && pendings.some((p: any) => p.kind === "plan_review")) {
+  // 38: keep draft follow-up pending even after first approval — live draft hash drift supersedes old boundary
+  const hasDraftPending = pendings.some((p: any) => String(p.boundaryKey || "").startsWith("draft:") || String(p.kind || "") === "plan_review" && targetState.activeDraft);
+  if (firstPlanReviewFired && !hasDraftPending && pendings.some((p: any) => p.kind === "plan_review")) {
     logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (first plan review already fired)`, {
       quest: slug,
       shard: "plan_review",
@@ -51,8 +53,12 @@ export function dequeuePendingIfNeeded(
     const isPlanRev = pending.kind === "plan_review";
     let needsFollowUp = false;
     if (isPlanRev) {
-      const boundaryChanged = snapshot.boundaryKey ? (latestBoundaryKey !== snapshot.boundaryKey) : stateChanged;
-      needsFollowUp = (!isPlanReviewValidForStateLocal(targetState) || boundaryChanged);
+      // 38: draft hash drift counts as boundary change even when lastPlanReviewBoundaryKey stale
+      const pendingIsDraft = String(pending.boundaryKey || "").startsWith("draft:");
+      const snapshotIsDraft = String(snapshot?.boundaryKey || "").startsWith("draft:");
+      const draftDrift = pendingIsDraft && snapshotIsDraft && pending.boundaryKey !== snapshot.boundaryKey;
+      const boundaryChanged = draftDrift || (snapshot.boundaryKey ? (latestBoundaryKey !== snapshot.boundaryKey) : stateChanged);
+      needsFollowUp = (!isPlanReviewValidForStateLocal(targetState) || boundaryChanged || draftDrift);
     } else {
       needsFollowUp = stateChanged;
     }

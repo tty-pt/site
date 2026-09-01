@@ -1,10 +1,10 @@
 ---
 id: 38
 title: "Draft follow-up does not invalidate pending plan_review — stale boundary runs to verdict"
-state: blocked
+state: done
 severity: medium
 requires: [36, 37]
-blocked_by: [36, 37]
+blocked_by: []
 validates: "pi: refinement while awaitingReview plan_review => superseded + PENDING_COALESCED_RESOLVED new hash"
 area: "38-draft-followup-does-not-invalidate-pending-review.md"
 ---

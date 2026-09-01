@@ -1,7 +1,7 @@
 ---
 id: 37
 title: "Cross-session mutex is RAM-only — no global maxConcurrency=1 per questId"
-state: ready
+state: done
 severity: high
 requires: [36]
 blocked_by: []

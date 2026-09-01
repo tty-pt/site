@@ -22,7 +22,7 @@ import { findActiveReviewForQuest, getActiveReviews, getPendingReview, registerA
 import { checkAttemptLimit, checkLaunchGuard } from "./policy/launch_guard.ts";
 import { dequeuePendingIfNeeded } from "./policy/pending_coalesce.ts";
 import { executeReviewBackground } from "./policy/background.ts";
-import { getGlobalReviewLockKey, getQuestLockKey, withQuestLock } from "../utils/mutex.ts";
+import { acquireReviewFileLock, getGlobalReviewLockKey, getGlobalReviewLockKeyForQuest, getQuestLockKey, getReviewLockKey, getReviewLockPath, releaseReviewFileLock, withQuestLock } from "../utils/mutex.ts";
 import { GLOBAL_REVIEW_CAP } from "../constants.ts";
 
 export { reconcileReviewResult } from "./policy/reconcile.ts";
@@ -168,15 +168,65 @@ export async function runCriticalReview(
 	const currentHash = targetState.lastSavedHash || (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
 	const currentSaveCount = targetState.saveCount || 0;
 
-	const questLockKey = getQuestLockKey(slug, sessionId);
-	const globalLockKey = getGlobalReviewLockKey(sessionId);
+	const questLockKey = getReviewLockKey(questId || slug);
+	const globalLockKey = getGlobalReviewLockKeyForQuest(questId);
 	let provisionalSnapshot!: ReviewSnapshot;
 	let executionPromise!: Promise<CriticalReviewExecutionResult>;
 	let resolveExecution!: (res: CriticalReviewExecutionResult) => void;
 	let lockResult: { blocked?: boolean; limited?: boolean; response?: any } | null = null;
+	let reviewFileLockPath: string | null = null;
+	let reviewFileLockOwned = false;
 
 	await withQuestLock(globalLockKey, async () =>
 		await withQuestLock(questLockKey, async () => {
+			// Filesystem witness (cross-process) — O_EXCL per questId, held only for check+register section
+			const fsLock = acquireReviewFileLock(questId || slug);
+			reviewFileLockPath = fsLock.path;
+			if (!fsLock.acquired) {
+				setPendingReview(slug, {
+					questSlug: slug,
+					kind: options.kind,
+					triggerReason: options.triggerReason,
+					planVersion: currentPlanVersion,
+					stateHash: currentHash,
+					boundaryKey: options.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
+					saveCount: currentSaveCount,
+					requestedAt: Date.now(),
+					rebuttal: options.rebuttal,
+					model: options.model,
+					timeoutMs: options.timeoutMs,
+					force: options.force,
+				} as any);
+				logCriticalReviewTransition("GLOBAL_REVIEW_CAP_HIT", `global review cap hit (filesystem lock, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`, {
+					quest: slug,
+					questId,
+					sessionId,
+					reviewId: correlationId,
+					parentSessionId: sessionId,
+					reviewKind: options.kind,
+					triggerReason: options.triggerReason || options.kind,
+					boundaryKey: options.boundaryKey || undefined,
+					activeCount: [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length,
+					cap: GLOBAL_REVIEW_CAP,
+					lockPath: fsLock.path,
+					reason: "filesystem_lock_held",
+				});
+				logCriticalReviewTransition("CRITICAL_REVIEW_COALESCED", `review coalesced: pending ${slug}:${options.kind} (filesystem lock)`, {
+					quest: slug,
+					questId,
+					sessionId,
+					reviewId: correlationId,
+					parentSessionId: sessionId,
+					reviewKind: options.kind,
+					triggerReason: options.triggerReason || options.kind,
+					boundaryKey: options.boundaryKey || undefined,
+				});
+				lockResult = { blocked: true, response: { success: true, available: true, inProgress: true, skipped: true, error: "global_review_cap_filesystem" } };
+				return;
+			}
+			reviewFileLockOwned = true;
+			let fsHeld = true;
+			try {
 			// Global burst cap check inside hierarchical lock (global → per-quest)
 			const globalActive = [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length;
 			if (globalActive >= GLOBAL_REVIEW_CAP) {
@@ -324,10 +374,24 @@ export async function runCriticalReview(
 				boundaryKey: options.boundaryKey || undefined,
 				reviewedVersion: currentPlanVersion,
 			});
+			} finally {
+				if (fsHeld && reviewFileLockPath) {
+					try { releaseReviewFileLock(reviewFileLockPath, reviewFileLockOwned); } catch {}
+					reviewFileLockOwned = false;
+					fsHeld = false;
+				}
+			}
 		})
 	);
 
-	if ((lockResult as any)?.blocked || (lockResult as any)?.limited) return (lockResult as any).response;
+	if ((lockResult as any)?.blocked || (lockResult as any)?.limited) {
+		// Release FS lock held only for check+register path (blocked/limited never registered)
+		if (reviewFileLockOwned && reviewFileLockPath) {
+			try { releaseReviewFileLock(reviewFileLockPath, true); } catch {}
+			reviewFileLockOwned = false;
+		}
+		return (lockResult as any).response;
+	}
 
 	(async () => {
 		await executeReviewBackground(pi, ctx, {
@@ -345,9 +409,9 @@ export async function runCriticalReview(
 			reviewer,
 			resolveExecution,
 			onPending: async (snapshot) => {
-				// Phase 10: atomic dequeue under hierarchical lock, no setTimeout gap
-				const globalKey = getGlobalReviewLockKey(sessionId);
-				const questKey = getQuestLockKey(slug, sessionId);
+				// Phase 10: atomic dequeue under hierarchical lock, no setTimeout gap — qid-only keys for cross-session
+				const globalKey = getGlobalReviewLockKeyForQuest(questId);
+				const questKey = getReviewLockKey(questId || slug);
 				let pendingToRun: any = null;
 				await withQuestLock(globalKey, async () =>
 					await withQuestLock(questKey, async () => {

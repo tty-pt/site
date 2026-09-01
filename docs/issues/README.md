@@ -42,8 +42,8 @@ These 39 files describe issues **in the `pi-quest` extension** (`.pi/extensions/
 | 34 | `34-rollout-order.md` | `§5` ordered stages `55→57→58→62` | deferred | 33 | Low |
 | 35 | `35-archive-map.md` | `§7` 8 to-be-removed docs → `docs/archive/` | ready | - | Low |
 | 36 | `36-quest-update-state-bypasses-draft-approval.md` | `executor.ts:syncQuestIdentity` | done | - | High |
-| 37 | `37-cross-session-mutex-ram-only.md` | `utils/mutex.ts` RAM-only | ready | 36 | High |
-| 38 | `38-draft-followup-does-not-invalidate-pending-review.md` | `hooks/index.ts:draft` | blocked | 36,37 | Medium |
-| 39 | `39-human-early-approve-must-not-block-re-draft.md` | `gates.ts:31` per-boundary | blocked | 36,37,38 | Medium |
+| 37 | `37-cross-session-mutex-ram-only.md` | `utils/mutex.ts` RAM-only | done | 36 | High |
+| 38 | `38-draft-followup-does-not-invalidate-pending-review.md` | `hooks/index.ts:draft` | done | 36,37 | Medium |
+| 39 | `39-human-early-approve-must-not-block-re-draft.md` | `gates.ts:31` per-boundary | ready | 36,37,38 | Medium |
 
 Deterministic next: `python docs/issues/next.py` → `36` first (FIX_ORDER step 1), then `37` after `36:done`, etc.; `python docs/issues/next.py --ready` lists all `ready` sorted `FIX_ORDER` → severity → id. After marking `36 state:done`, `37` becomes `ready` (blocked_by cleared). Manual fix order (testable in `pi`): `docs/FIX_ORDER.md` — 1: #36 draft gate, 2: #37 filesystem mutex, 3: #38 draft invalidation, 4: #39 per-boundary, 5: #20/#25/#26/#27 greppability. Detailed `rg`/`unzip`/`deno` in `#33`. Original gaps: Gaps 1-6 cover #13,#14,#03,#09,#15,#07; Gap 7 covers #06; persistence §3 covers #01,#04,#05,#08; remaining (#02,#10,#11,#12,#16,#17) tracked here. `REMAINING_WORK.md` §2.8-2.14 (18-29), §2.6-2.7 (30-31), §3 (32), §4 (33), §5 (34), §7 (35), plus manual gaps 36-39 — single source guarantee restored.

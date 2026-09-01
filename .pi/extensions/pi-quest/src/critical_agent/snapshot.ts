@@ -1,6 +1,9 @@
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { parseMarkdownSections } from "../markdown.ts";
+import { FUTURE_DIR } from "../constants.ts";
 import { fileExists, questPath, resolveQuestRecordBySlug } from "../paths.ts";
 import { parseOriginalRequest, parseRefinements } from "../reconstruction.ts";
 import { state } from "../state.ts";
@@ -112,7 +115,32 @@ export function isReviewSnapshotCurrent(
 	}
 
 	if (snapshot.reviewKind === "plan_review") {
-		if (snapshot.boundaryKey && currentState.lastPlanReviewBoundaryKey && snapshot.boundaryKey !== currentState.lastPlanReviewBoundaryKey) {
+		// Draft boundary: compare live draft hash (or draftLastSavedHash/draftLastReviewKey), not lastPlanReviewBoundaryKey
+		if (snapshot.boundaryKey?.startsWith("draft:")) {
+			const parts = snapshot.boundaryKey.split(":");
+			const slug = parts[1] || (currentState as any).activeDraft || "";
+			let liveHash: string | null = (currentState as any).draftLastSavedHash || null;
+			try {
+				if (slug) {
+					const p = `${FUTURE_DIR}/${slug}.md`;
+					if (existsSync(p)) {
+						const c = readFileSync(p, "utf8");
+						liveHash = createHash("sha256").update(c).digest("hex").slice(0, 12);
+					}
+				}
+			} catch {}
+			const curKey = liveHash && slug ? `draft:${slug}:${liveHash}` : null;
+			const lastReviewKey = (currentState as any).draftLastReviewKey || null;
+			if (curKey && snapshot.boundaryKey !== curKey) {
+				// If snapshot matches the last approved review key we still supersede when live hash moved
+				if (snapshot.boundaryKey !== lastReviewKey || curKey !== lastReviewKey) {
+					return {
+						current: false,
+						reason: `Draft boundary changed from ${snapshot.boundaryKey} to ${curKey}`,
+					};
+				}
+			}
+		} else if (snapshot.boundaryKey && currentState.lastPlanReviewBoundaryKey && snapshot.boundaryKey !== currentState.lastPlanReviewBoundaryKey) {
 			return {
 				current: false,
 				reason: `Plan content boundary changed from ${snapshot.boundaryKey} to ${currentState.lastPlanReviewBoundaryKey}`,
