@@ -12,6 +12,7 @@ const CODE_SEARCH_BINARIES = new Set([
 	"ag",
 	"ack",
 	"find",
+	"fd",
 ]);
 
 const FILE_READ_BINARIES = new Set([
@@ -25,6 +26,13 @@ const FILE_READ_BINARIES = new Set([
 	"od",
 	"hexdump",
 	"xxd",
+	"wc",
+	"ls",
+	"stat",
+	"file",
+	"du",
+	"df",
+	"tree",
 ]);
 
 function classifyGitInvestigation(tokens: string[], trimmed: string): { kind: InvestigationKind; target?: string; command?: string } {

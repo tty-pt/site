@@ -458,6 +458,16 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 								const { ensureQuestId } = await import("../state.ts");
 								ensureQuestId(ctx as any);
 							}
+							// 08: durable verbatim log for t=0 — mirrors refinement branch 307-310
+							try {
+								const qid0 = (state as any).questId || state.questId;
+								if (qid0) {
+									const jPath0 = join(questDirPath(qid0), "draft-prompts.jsonl");
+									await mkdir(dirname(jPath0), { recursive: true });
+									const rec0 = JSON.stringify({ ts: Date.now(), hash: createHash("sha256").update(trimmed).digest("hex").slice(0, 12), slice: trimmed.slice(0, 200), len: trimmed.length }) + "\n";
+									await appendFile(jPath0, rec0, "utf8");
+								}
+							} catch {}
 							if (!Array.isArray(state.prompts)) state.prompts = [];
 							if (!state.prompts.includes(trimmed)) state.prompts.push(trimmed);
 							const { logQuestTransition } = await import("../logging.ts");
@@ -533,8 +543,12 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 					: getFullWorkflowInstructions(resumeContext);
 				setCachedWorkflow(state.saveGeneration?.hash || "", pressureKey, workflowInstructions);
 
+				// 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal
+				const skillHint = (!state.active && (state.pendingRootQuest || state.activeDraft))
+					? `\n\nSkill trigger: quest_journal — durable quest not yet established. Use quest_journal skill: investigate, establish quest via quest_update_state on turn 1.\n`
+					: "";
 				if (event && typeof event.systemPrompt === "string") {
-					return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${workflowInstructions}` };
+					return { systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${skillHint}${workflowInstructions}` };
 				}
 			} catch (err: any) {
 				logError("Failed in before_agent_start hook", err, ctx);
@@ -567,6 +581,7 @@ export function registerQuestJournalCRBHook() {
 					"Meaningful Sub-Quest Decomposition: Decompose according to the discovered structure of the problem, not arbitrary bullet counts. During research, identify genuinely separable workstreams (distinct subsystems, independent investigations, separate verification boundaries) and create sub-quests (`quest_subquest({ switchNow: false })`) linked into the parent plan (`[[subquest-name]]`). Avoid artificial fragmentation for trivial or tightly coupled steps. Sub-quests independently verify inherited context.",
 					"Durable-State Reconciliation: The quest file must describe what is true NOW. After substantive changes, synchronize Completed, Files Modified, Test Status, Remaining Work, and Exact Next Action. Exact Next Action is a live pointer to the next justified action, never a repeat of completed work. Calibrate plan confidence against evidence and explain plan revisions.",
 					"Full Test Suite Quality Gate: Before completing/archiving a top-level quest, restart the test server/daemon, run the fresh FULL test suite (`make test`), and verify zero errors.",
+					"Never write .pi/quest/current/**/quest.md via bash (cat > quest.md / echo > quest.md) — use quest_update_state to initialize the durable quest with research findings. Direct bash writes to quest.md are blocked before execution and must be replaced by quest_update_state.",
 					"Top-level Quest Completion: When root quest is done, prompt user via `ask_questions`: refine, archive & auto-compact, archive without auto-compact, or manual mode.",
 				];
 			}

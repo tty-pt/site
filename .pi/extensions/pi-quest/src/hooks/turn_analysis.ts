@@ -106,9 +106,9 @@ export function detectBashToolFailure(tr: any): { hasFailure: boolean; reason: s
 		typeof tr?.output === "string" ? tr.output : "";
 	const cmd = tr?.args?.command || tr?.input?.command || tr?.command || "";
 
-	// SEARCH binaries: rg/grep exit 1 = "no matches" not an error. Host marks it isError.
-	// Must not escalate to REASSESSMENT. Distinguish from real errors (exit 2, permission denied, etc.).
-	if (toolFailed && /\b(rg|grep|egrep|fgrep|ag|ack|fd)\b/i.test(cmd)) {
+	// SEARCH/investigative binaries: rg/grep exit 1 = "no matches" not an error; wc/ls/fd/etc with empty output must not escalate.
+	// 10: wc -l/ls/fd investigation whitelisted — do not trigger TOOL_FAILURE/REASSESSMENT
+	if (toolFailed && /\b(rg|grep|egrep|fgrep|ag|ack|fd|find|wc|ls|stat|file|du|df|tree|cat|head|tail)\b/i.test(cmd)) {
 		const exitCode = (tr as any)?.details?.exitCode ?? (tr as any)?.exitCode ?? (tr as any)?.details?.code;
 		if (exitCode === 1) {
 			return { hasFailure: false, reason: "", evidence: "" };

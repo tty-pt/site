@@ -1,7 +1,7 @@
 ---
 id: 06
 title: "pi restart drops draft lineage even though the journal persists it"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "kill pi with future/<slug>.md → reconstruct activeDraft"

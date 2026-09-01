@@ -1,7 +1,7 @@
 ---
 id: 11
 title: "Agent can attempt a direct quest.md write before being told to use quest_update_state"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "direct cat > quest.md blocked with requires:quest_update_state"

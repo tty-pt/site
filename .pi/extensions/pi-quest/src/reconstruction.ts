@@ -28,6 +28,14 @@ export function restoreSessionState(latest: StoredState): StoredState {
 	let activeDraft: string | null = typeof (latest as any).activeDraft === "string" ? (latest as any).activeDraft : null;
 	let draftPrompts: string[] = Array.isArray((latest as any).draftPrompts) ? (latest as any).draftPrompts : [];
 	let draftCreatedAt: number | null = typeof (latest as any).draftCreatedAt === "number" ? (latest as any).draftCreatedAt : null;
+	// 26: orphan fallback — if journal missed activeDraft (killed before flush) scan FUTURE_DIR for any .md
+	if (!activeDraft) {
+		try {
+			const ents = readdirSync(FUTURE_DIR, { withFileTypes: true });
+			const md = ents.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => e.name.replace(/\.md$/, "")).sort();
+			if (md.length) activeDraft = md[0];
+		} catch {}
+	}
 	if (activeDraft && draftPrompts.length === 0) {
 		try {
 			const c = readFileSync(`${FUTURE_DIR}/${activeDraft}.md`, "utf8");
@@ -113,8 +121,8 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		draftCreatedAt,
 		draftLastSavedHash: typeof (latest as any).draftLastSavedHash === "string" ? (latest as any).draftLastSavedHash : null,
 		draftLastReviewKey: typeof (latest as any).draftLastReviewKey === "string" ? (latest as any).draftLastReviewKey : null,
-		semanticSummaryEnabled: (latest as any).semanticSummaryEnabled,
-		thoughtLoggingEnabled: (latest as any).thoughtLoggingEnabled,
+		semanticSummaryEnabled: typeof (latest as any).semanticSummaryEnabled === "boolean" ? (latest as any).semanticSummaryEnabled : undefined,
+		thoughtLoggingEnabled: typeof (latest as any).thoughtLoggingEnabled === "boolean" ? (latest as any).thoughtLoggingEnabled : undefined,
 		initialPromptLogged: typeof (latest as any).initialPromptLogged === "boolean" ? (latest as any).initialPromptLogged : false,
 		lastPlanReviewRequestKey: (latest as any).lastPlanReviewRequestKey || null,
 		lastDraftReviewRequestKey: (latest as any).lastDraftReviewRequestKey || null,
@@ -137,8 +145,10 @@ export function reconcileDerivedState(reconstructedState: StoredState, ctx: Exte
 export function reconstruct(ctx: ExtensionContext): StoredState {
 	try {
 		const latest = loadPersistedJournalSnapshot(ctx);
-		const hasDraft = !!(latest as any)?.activeDraft || !!((latest as any)?.draftPrompts?.length);
-		const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest || hasDraft) ? restoreSessionState(latest) : createDefaultState();
+		// 26: hasDraft includes disk scan — orphan future/<slug>.md without journal
+		const hasDraftOnDisk = (() => { try { return readdirSync(FUTURE_DIR).filter((f) => f.endsWith(".md")).length > 0; } catch { return false; } })();
+		const hasDraft = !!(latest as any)?.activeDraft || !!((latest as any)?.draftPrompts?.length) || hasDraftOnDisk;
+		const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest || hasDraft) ? restoreSessionState(latest) : hasDraftOnDisk ? restoreSessionState((latest || {}) as StoredState) : createDefaultState();
 		return reconcileDerivedState(reconstructedState, ctx);
 	} catch (err: any) {
 		logError("Failed to reconstruct state from session history", err, ctx, QuestErrorCode.STATE_RECONSTRUCTION_FAILURE);

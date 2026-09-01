@@ -1,7 +1,7 @@
 ---
 id: 08
 title: "Verbatim draftPrompts are not durably stored"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "current/<qid>/draft-prompts.jsonl + future-archive copy exists"

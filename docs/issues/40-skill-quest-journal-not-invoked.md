@@ -1,7 +1,7 @@
 ---
 id: 40
 title: "Skill quest_journal not invoked — agent runs without durable quest establishment"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "pi: initial prompt => DIALOGUE + SEMANTIC_SNAPSHOT + skill hint steer within turn0"

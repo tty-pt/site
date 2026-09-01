@@ -77,6 +77,7 @@ export const READ_BINARIES = new Set([
 	"dir",
 	"tree",
 	"find",
+	"fd",
 	"which",
 	"whereis",
 	"type",

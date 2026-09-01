@@ -293,6 +293,13 @@ Required: await review verdict.`;
 
 			const gate = getImplementationBlockReason(state, ctx);
 			const targetPath = event?.input?.path || event?.input?.file || "";
+			// 11: direct quest.md write via bash must be steered to quest_update_state before attempt burns failures
+			const rawCmd = (event?.input?.command || event?.input?.cmd || "") as string;
+			const isDirectQuestWrite = gate.stateName === "PROVISIONAL_RESEARCH_PENDING" && (toolName || "").toLowerCase() === "bash" && hasFileRedirection(rawCmd) && /quest\.md/.test(rawCmd);
+			const effectiveRequiredAction = isDirectQuestWrite
+				? `Do NOT write ${/\S*quest\.md/.exec(rawCmd)?.[0] || "quest.md"} via bash/cat/echo — use quest_update_state to initialize the durable quest with research findings (see Required next step).`
+				: gate.requiredAction;
+			const effectiveReason = isDirectQuestWrite ? `${gate.reason} Direct bash write to quest.md is forbidden before quest_update_state.` : gate.reason;
 			if (gate.blocked && (permission === "implementation" || permission === "unknown")) {
 				const correlationId = `gate_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 				const questLabel = state.questId ? questPath(state.questId) : "(Provisional Root Quest Initializing)";
@@ -306,8 +313,8 @@ State: ${gate.stateName}
 This operation may modify project state, but implementation is currently forbidden.
 
 Quest: ${questLabel}
-Reason: ${gate.reason}
-Required next step: ${gate.requiredAction}
+Reason: ${effectiveReason}
+Required next step: ${effectiveRequiredAction}
 
 Allowed now:
 - read/search/investigate
@@ -324,8 +331,8 @@ complete the current research/reassessment prerequisite and reopen the implement
 					quest: state.active || "",
 					gate: gate.stateName,
 					activeGate: gate.stateName,
-					reason: gate.reason,
-					requiredAction: gate.requiredAction,
+					reason: effectiveReason,
+					requiredAction: effectiveRequiredAction,
 					correlationId,
 					failureId,
 					consequence: "OPERATION_BLOCKED",
@@ -340,13 +347,13 @@ complete the current research/reassessment prerequisite and reopen the implement
 					failureId,
 					consequence: "OPERATION_BLOCKED",
 				});
-				logImplementationOutcome("IMPLEMENTATION_BLOCKED", `blocked by gate ${gate.stateName}: ${gate.reason}`, {
+				logImplementationOutcome("IMPLEMENTATION_BLOCKED", `blocked by gate ${gate.stateName}: ${effectiveReason}`, {
 					quest: state.active || "",
 					tool: toolName,
 					gate: gate.stateName,
 					activeGate: gate.stateName,
 					code: errorCode,
-					reason: gate.reason,
+					reason: effectiveReason,
 					correlationId,
 					failureId,
 					consequence: "OPERATION_BLOCKED",
@@ -360,7 +367,7 @@ complete the current research/reassessment prerequisite and reopen the implement
 					phase: "implementation",
 					path: targetPath ? normalizeLogPath(targetPath) : undefined,
 					command: cmd ? String(cmd).slice(0, 150) : undefined,
-					reason: gate.reason,
+					reason: effectiveReason,
 					turn: state.currentTurn,
 					correlationId,
 					failureId,
@@ -370,18 +377,18 @@ complete the current research/reassessment prerequisite and reopen the implement
 				reportAgentError(
 					pi,
 					ctx,
-					`Tool '${toolName}' execution blocked in state ${gate.stateName}: ${gate.reason}`,
+					`Tool '${toolName}' execution blocked in state ${gate.stateName}: ${effectiveReason}`,
 					{
 						code: errorCode,
 						correlationId,
 						deliverAs: "steer",
-						requiredNextAction: gate.requiredAction,
+						requiredNextAction: effectiveRequiredAction,
 						details: {
 							Tool: toolName,
 							Permission: permission,
 							State: gate.stateName,
 							Quest: questLabel,
-							Reason: gate.reason,
+							Reason: effectiveReason,
 						},
 					},
 				);

@@ -1,7 +1,7 @@
 ---
 id: 10
 title: "Investigation bash commands are misclassified as TOOL_FAILURE and trigger reassessment"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "wc -l/fd not TOOL_FAILURE when investigation"

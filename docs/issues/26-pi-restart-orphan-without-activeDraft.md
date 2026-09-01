@@ -1,7 +1,7 @@
 ---
 id: 26
 title: "pi-restart orphan future/<slug>.md without activeDraft irretrievable (extends #06)"
-state: ready
+state: done
 severity: high
 requires: [06]
 validates: "reconstruction orphan activeDraft==slug when future file exists"
