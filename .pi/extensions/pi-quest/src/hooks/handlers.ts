@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { acceptRootConfirmation, classifyUserMessage, handleAskQuestionsResult } from "../classification.ts";
-import { isSemanticSummaryEnabled, isThoughtLoggingEnabled } from "../config.ts";
+import { isSemanticSummaryEnabled, isThoughtLoggingEnabled, getRetryDeliverAs, getRetryMaxTurns } from "../config.ts";
 import {
 	advanceSteerTurnCounter,
 	checkAndTriggerDeferredCompaction,
@@ -94,6 +94,109 @@ export async function handleTurnStart(event: any, _ctx: ExtensionContext): Promi
 		const readable = `phase ${phase} gate ${activeGate} plan v${state.planVersion || 1} round ${state.researchRound || 1}${isChange && prevKey ? ` (changed from ${prevKey})` : ""}`;
 		logEvent("SEMANTIC_SNAPSHOT", isChange && prevKey ? `${prevKey}→${curKey} — ${readable}` : `${curKey} — ${readable}`, { quest: state.active || state.activeDraft || "", from: prevKey || curKey, to: curKey, planVersion: state.planVersion || 1, activeGate, elapsedMs, opencodeSessionId: ctxSessionId, piSessionId: ctxSessionId } as any);
 	} catch {}
+}
+
+function turnTerminalText(event: any): string {
+	try {
+		const cand = (event as any)?.response ?? (event as any)?.output ?? (Array.isArray((event as any)?.messages) ? (event as any).messages[(event as any).messages.length - 1]?.content ?? (event as any).messages[(event as any).messages.length - 1]?.text : undefined);
+		if (typeof cand === "string") return cand;
+		if (Array.isArray(cand)) return cand.map((x: any) => typeof x === "string" ? x : (x?.text ?? x?.content ?? "")).join(" ");
+		if (cand && typeof cand === "object") return String((cand as any).content ?? (cand as any).text ?? (cand as any).message ?? "");
+		return "";
+	} catch {
+		return "";
+	}
+}
+
+function handleTurnContinuationRetry(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	event: any,
+	analysis: ReturnType<typeof analyzeTurnToolResults>,
+): void {
+	if (!state.active && !state.activeDraft) return;
+	// A retry re-entry must not fire twice for the same turn.
+	const turnIndex = state.currentTurn || 0;
+	if (state.retryLastStalledTurn === turnIndex) return;
+
+	const toolResults: any[] = Array.isArray(event.toolResults) ? event.toolResults : [];
+	const terminalText = turnTerminalText(event).trim();
+
+	// A truncated/interrupted turn: the assistant message carries an explicit
+	// truncation/interruption stop-reason, no tool calls ran, and the response
+	// produced no terminal text (i.e. it was cut off before completing output or
+	// a tool call). Requiring an explicit stop-reason keeps clean empty turns
+	// (stopReason undefined) from being mistaken for truncation.
+	const stop = (event as any)?.message?.stopReason ?? (event as any)?.stopReason;
+	const truncated = stop === "length" || stop === "error" || stop === "aborted";
+	const stalled = truncated && toolResults.length === 0 && terminalText.length === 0;
+	if (!stalled) {
+		// A real, substantive/incomplete-but-produced turn resets the budget.
+		state.retryTurnsUsed = 0;
+		state.retryLastStalledTurn = null;
+		return;
+	}
+
+	const maxTurns = getRetryMaxTurns(state);
+	if (maxTurns <= 0) {
+		state.retryTurnsUsed = 0;
+		state.retryLastStalledTurn = null;
+		return;
+	}
+
+	const used = state.retryTurnsUsed || 0;
+	const qp = questPath(state.active || state.activeDraft || "");
+	if (used >= maxTurns || analysis.meaningfulFailureDetected) {
+		logContinuationAnomaly("TURN_RETRY_EXHAUSTED", `turn retry budget exhausted (${used}/${maxTurns}) — truncation not resolved`, {
+			quest: state.active || "",
+			turn: turnIndex,
+			attempt: used,
+			max: maxTurns,
+		});
+		logEvent("TURN_RETRY_EXHAUSTED", `turn retry budget exhausted (${used}/${maxTurns})`, {
+			quest: state.active || state.activeDraft || "",
+			turn: turnIndex,
+			attempt: used,
+			max: maxTurns,
+		} as any);
+		reportAgentError(
+			pi,
+			ctx,
+			`[Quest Journal] A turn ended without producing any tool calls or response text (repeated ${used} consecutive retr${used === 1 ? "y" : "ies"}). This likely indicates a truncated or interrupted response.\n\nThe durable quest state remains authoritative.`,
+			{
+				code: QuestErrorCode.CONTINUATION_FAILURE,
+				requiredNextAction: `Read ${qp}, reconcile working memory from the durable quest state if necessary, and continue from the recorded Exact Next Action.`,
+				details: { TurnsRetried: used, MaxRetries: maxTurns },
+			},
+		);
+		state.retryTurnsUsed = 0;
+		state.retryLastStalledTurn = null;
+		return;
+	}
+
+	const next = used + 1;
+	state.retryTurnsUsed = next;
+	state.retryLastStalledTurn = turnIndex;
+	logContinuationAnomaly("TURN_RETRY", `truncated/stalled turn detected — auto-retrying continuation (${next}/${maxTurns})`, {
+		quest: state.active || "",
+		turn: turnIndex,
+		attempt: next,
+		max: maxTurns,
+	});
+	logEvent("TURN_RETRY_ATTEMPTED", `truncated turn retry ${next}/${maxTurns}`, {
+		quest: state.active || state.activeDraft || "",
+		turn: turnIndex,
+		attempt: next,
+		max: maxTurns,
+	} as any);
+	const directive = `⚡ **Turn Continuation Retry (${next}/${maxTurns})**:
+The previous turn ended without producing any output or tool calls — it appears to have been truncated or interrupted mid-completion.
+
+Read \`${qp}\` to recover the durable quest state, then continue directly from the recorded **Exact Next Action**.
+
+Do not restart research or re-read sources unnecessarily; use the durable quest state as the single source of truth.`;
+	sendInternalAgentMessage(pi, directive, getRetryDeliverAs(state));
+	persist(pi, ctx);
 }
 
 export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, event: any): Promise<void> {
@@ -289,6 +392,7 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 			count: 3,
 		});
 	}
+	handleTurnContinuationRetry(pi, ctx, event, analysis);
 	if ((state.substantiveTurnsSinceCheckpoint || 0) >= SUBSTANTIVE_TURNS_PER_DIRECTION_REVIEW) {
 		logContinuationAnomaly("NO_PROGRESS", `turns without state checkpoint reached threshold (turns=${state.substantiveTurnsSinceCheckpoint})`, {
 			quest: state.active || "",

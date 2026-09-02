@@ -111,6 +111,8 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		awaitingUserConfirmation: typeof latest.awaitingUserConfirmation === "boolean" ? latest.awaitingUserConfirmation : false,
 		consecutiveFailures: typeof latest.consecutiveFailures === "number" ? latest.consecutiveFailures : 0,
 		substantiveTurnsSinceCheckpoint: typeof latest.substantiveTurnsSinceCheckpoint === "number" ? latest.substantiveTurnsSinceCheckpoint : 0,
+		retryTurnsUsed: typeof (latest as any).retryTurnsUsed === "number" ? (latest as any).retryTurnsUsed : 0,
+		retryLastStalledTurn: typeof (latest as any).retryLastStalledTurn === "number" ? (latest as any).retryLastStalledTurn : null,
 		lastCriticalReview: latest.lastCriticalReview ? { ...latest.lastCriticalReview } : null,
 		criticalReviews: Array.isArray(latest.criticalReviews) ? latest.criticalReviews.map((r) => ({ ...r })) : [],
 		criticalReviewAttempts: latest.criticalReviewAttempts ? { ...latest.criticalReviewAttempts } : {},

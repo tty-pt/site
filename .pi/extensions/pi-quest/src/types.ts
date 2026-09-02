@@ -500,6 +500,10 @@ export interface StoredState {
 	substantiveTurnsSinceCheckpoint?: number;
 	currentTurn?: number;
 	currentTurnCorrelationId?: string;
+	retryTurnsUsed?: number;
+	retryLastStalledTurn?: number | null;
+	retryMaxTurns?: number;
+	retryDeliverAs?: "steer" | "nextTurn";
 	// Auto-draft accumulation state (future/ while user still talking)
 	activeDraft?: string | null;
 	draftPrompts?: string[];

@@ -104,6 +104,9 @@ export type QuestLogEventType =
 	| "NO_PROGRESS"
 	| "REPEATED_BLOCK"
 	| "REPEATED_FAILURE"
+	| "TURN_RETRY"
+	| "TURN_RETRY_ATTEMPTED"
+	| "TURN_RETRY_EXHAUSTED"
 	// 16. User interaction lifecycle
 	| "CONFIRMATION_REQUESTED"
 	| "CONFIRMATION_RECEIVED"

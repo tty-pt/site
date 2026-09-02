@@ -1,4 +1,4 @@
-import { AUTONOMOUS_SUBQUEST_DURING_DRAFTING_DEFAULT, ENV_AQM_SUBQUEST_DRAFT, ENV_REVIEW_LOCK_STALE_MS, ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, REVIEW_LOCK_STALE_MS_DEFAULT, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
+import { AUTONOMOUS_SUBQUEST_DURING_DRAFTING_DEFAULT, ENV_AQM_SUBQUEST_DRAFT, ENV_REVIEW_LOCK_STALE_MS, ENV_RETRY_DELIVER_AS, ENV_RETRY_MAX_TURNS, ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, RETRY_DELIVER_AS_DEFAULT, RETRY_MAX_TURNS_DEFAULT, REVIEW_LOCK_STALE_MS_DEFAULT, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
 import { getCachedSettingsJson } from "./utils/cache.ts";
 import { join } from "node:path";
 
@@ -65,4 +65,43 @@ export function getReviewLockStaleMs(): number {
 		}
 	} catch {}
 	return REVIEW_LOCK_STALE_MS_DEFAULT;
+}
+
+export function getRetryMaxTurns(state?: any): number {
+	const st = (state as any)?.retryMaxTurns;
+	if (typeof st === "number" && Number.isFinite(st)) return clampRetry(st);
+	const envRaw = process.env[ENV_RETRY_MAX_TURNS];
+	if (envRaw !== undefined) {
+		const n = parseInt(envRaw, 10);
+		if (Number.isFinite(n)) return clampRetry(n);
+	}
+	try {
+		const j = getCachedSettingsJson(join(process.cwd(), ".pi/settings.json"));
+		if (j) {
+			const raw = (j as any)["pi-quest"]?.retry?.maxTurns ?? (j as any)["pi-quest.retry.maxTurns"];
+			const n = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
+			if (Number.isFinite(n)) return clampRetry(n);
+		}
+	} catch {}
+	return RETRY_MAX_TURNS_DEFAULT;
+}
+
+export function getRetryDeliverAs(state?: any): "steer" | "nextTurn" {
+	const st = (state as any)?.retryDeliverAs;
+	if (st === "steer" || st === "nextTurn") return st;
+	const envRaw = (process.env[ENV_RETRY_DELIVER_AS] || "").trim().toLowerCase() as "steer" | "nextTurn";
+	if (envRaw === "steer" || envRaw === "nextTurn") return envRaw;
+	try {
+		const j = getCachedSettingsJson(join(process.cwd(), ".pi/settings.json"));
+		if (j) {
+			const raw = (j as any)["pi-quest"]?.retry?.deliverAs;
+			if (raw === "steer" || raw === "nextTurn") return raw;
+		}
+	} catch {}
+	return RETRY_DELIVER_AS_DEFAULT;
+}
+
+function clampRetry(n: number): number {
+	if (!Number.isFinite(n)) return RETRY_MAX_TURNS_DEFAULT;
+	return Math.min(50, Math.max(0, Math.floor(n)));
 }
