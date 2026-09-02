@@ -1,7 +1,7 @@
 ---
 id: 12
 title: "Save verification Files Modified check is too strict for research-only quests"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "Files Modified check not ERROR on planVersion=1 research-only"

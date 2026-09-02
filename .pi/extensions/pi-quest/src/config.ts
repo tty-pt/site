@@ -1,4 +1,4 @@
-import { ENV_REVIEW_LOCK_STALE_MS, ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, REVIEW_LOCK_STALE_MS_DEFAULT, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
+import { AUTONOMOUS_SUBQUEST_DURING_DRAFTING_DEFAULT, ENV_AQM_SUBQUEST_DRAFT, ENV_REVIEW_LOCK_STALE_MS, ENV_SEMANTIC_SUMMARY, ENV_THOUGHT_LOGGING, REVIEW_LOCK_STALE_MS_DEFAULT, SEMANTIC_SUMMARY_ENABLED_DEFAULT, THOUGHT_LOGGING_ENABLED_DEFAULT } from "./constants.ts";
 import { getCachedSettingsJson } from "./utils/cache.ts";
 import { join } from "node:path";
 
@@ -39,6 +39,15 @@ export function isThoughtLoggingEnabled(state?: any): boolean {
 	const s = readSettingsFlag("pi-quest.thoughtLogging.enabled");
 	if (s !== undefined) return s;
 	return THOUGHT_LOGGING_ENABLED_DEFAULT;
+}
+
+export function isAutonomousSubquestDuringDraftingEnabled(state?: any): boolean {
+	if (state && typeof state.autonomousSubquestDuringDrafting === "boolean") return state.autonomousSubquestDuringDrafting;
+	const env = parseBoolEnv(process.env[ENV_AQM_SUBQUEST_DRAFT]);
+	if (env !== undefined) return env;
+	const s = readSettingsFlag("pi-quest.aqm.subquestDuringDrafting.enabled");
+	if (s !== undefined) return s;
+	return AUTONOMOUS_SUBQUEST_DURING_DRAFTING_DEFAULT;
 }
 
 export function getReviewLockStaleMs(): number {

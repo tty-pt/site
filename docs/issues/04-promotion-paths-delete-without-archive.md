@@ -1,7 +1,7 @@
 ---
 id: 04
 title: "Promotion paths delete the only copy of future/<slug>.md (5 paths; D null-qid edge)"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "all 5 paths archive-before-unlink + DRAFT_DISCARDED"

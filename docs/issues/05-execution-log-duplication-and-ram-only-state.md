@@ -1,7 +1,7 @@
 ---
 id: 05
 title: "Execution log is duplicated and its location state is RAM-only"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "runs/ empty + finalized_logs deleted on archive, current first"

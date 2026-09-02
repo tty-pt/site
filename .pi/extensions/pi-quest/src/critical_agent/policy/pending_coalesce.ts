@@ -29,7 +29,10 @@ export function dequeuePendingIfNeeded(
   originalKind: any,
 ): any | null {
   const pendings = getAllPendingForSlug(slug);
-  if (pendings.length === 0) return null;
+  if (pendings.length === 0) {
+    try { logEvent("PENDING_COALESCED_DROPPED" as any, `pending coalesced dropped (no pendings)`, { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 } as any); } catch {}
+    return null;
+  }
   const firstPlanReviewFired = (targetState as any).firstPlanReviewFired || (targetState as any).planReviewAlreadyFired || !!(targetState as any).lastPlanReviewApproval;
   // 38: keep draft follow-up pending even after first approval — live draft hash drift supersedes old boundary
   const hasDraftPending = pendings.some((p: any) => String(p.boundaryKey || "").startsWith("draft:") || String(p.kind || "") === "plan_review" && targetState.activeDraft);
@@ -67,7 +70,10 @@ export function dequeuePendingIfNeeded(
   }
   // Clear stale ones
   for (const s of stale) clearPendingReview(slug, s.kind);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    try { logEvent("PENDING_COALESCED_DROPPED" as any, `pending coalesced dropped (all stale)`, { quest: slug, shard: "all_stale", staleCount: stale.length, candidateCount: 0 } as any); } catch {}
+    return null;
+  }
   // Prefer most recent requestedAt; if tie, last
   candidates.sort((a, b) => (b.requestedAt || 0) - (a.requestedAt || 0));
   const chosen = candidates[0];

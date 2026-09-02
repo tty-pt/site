@@ -183,7 +183,7 @@ export interface AgentObligation {
 	status?: ObligationStatus;
 	deliverAs?: "steer" | "followUp" | "nextTurn";
 	requiredNextAction?: string;
-	details?: Record<string, any> | string;
+	details?: Record<string, unknown> | string;
 	stateGeneration?: number;
 	planVersion?: number;
 	reassessmentVersion?: number;
@@ -508,6 +508,7 @@ export interface StoredState {
 	draftLastReviewKey?: string | null;
 	semanticSummaryEnabled?: boolean;
 	thoughtLoggingEnabled?: boolean;
+	autonomousSubquestDuringDrafting?: boolean;
 	initialPromptLogged?: boolean;
 
 	// Critical Review Subagent State
@@ -628,7 +629,7 @@ export interface AgentErrorOptions {
 	correlationId?: string;
 	deliverAs?: "steer" | "followUp" | "nextTurn";
 	requiredNextAction?: string;
-	details?: Record<string, any> | string;
+	details?: Record<string, unknown> | string;
 }
 
 export interface ScheduledTask {

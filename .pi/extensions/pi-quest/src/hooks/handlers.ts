@@ -216,16 +216,30 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 		const shouldLogThought = isThoughtLoggingEnabled(state) || Boolean((event as any)?.response || (event as any)?.output || (event as any)?.messages);
 		if (shouldLogThought) {
 			let lastThought: string | undefined = (state as any).lastThought as string | undefined;
+			// Guard existing lastThought if it is the "[object Object]" placeholder
+			if (lastThought === "[object Object]" || (typeof lastThought === "string" && lastThought.trim() === "[object Object]")) lastThought = undefined;
 			try {
 				const cand = (event as any)?.response ?? (event as any)?.output ?? (Array.isArray((event as any)?.messages) ? (event as any).messages[(event as any).messages.length - 1]?.content ?? (event as any).messages[(event as any).messages.length - 1]?.text : undefined);
-				if (typeof cand === "string" && cand.trim()) lastThought = cand;
-				else if (cand && typeof cand === "object") lastThought = String((cand as any).content || (cand as any).text || "");
+				if (typeof cand === "string" && cand.trim() && cand.trim() !== "[object Object]") lastThought = cand;
+				else if (cand && typeof cand === "object") {
+					const raw = (cand as any).content ?? (cand as any).text ?? (cand as any).message ?? "";
+					if (typeof raw === "string" && raw.trim() && raw.trim() !== "[object Object]") lastThought = raw;
+					else if (raw && typeof raw === "object") {
+						// Handle nested content: {content: {text:"..."}} or {content:[{text:"..."}]}
+						const nested = (raw as any).text ?? (Array.isArray(raw) ? raw.map((x:any)=> (typeof x==="string"?x: (x?.text || x?.content || ""))).join(" ") : (raw as any).content ?? "");
+						if (typeof nested === "string" && nested.trim() && nested.trim() !== "[object Object]") lastThought = nested;
+						else {
+							const js = JSON.stringify(cand);
+							if (js && js !== "{}" && js !== '"[object Object]"') lastThought = js.slice(0, 500);
+						}
+					} else if (raw && String(raw).trim() !== "[object Object]") lastThought = String(raw);
+				}
 			} catch {}
 			if (!lastThought && toolResults.length > 0) {
 				// proxy: last tool's truncated output as thought slice
-				try { const last = toolResults[toolResults.length - 1]; const proxy = String((last as any)?.content || (last as any)?.output || last?.toolName || ""); if (proxy.trim()) lastThought = proxy.slice(0, 500); } catch {}
+				try { const last = toolResults[toolResults.length - 1]; let proxyRaw:any = (last as any)?.content ?? (last as any)?.output ?? last?.toolName ?? ""; let proxyStr = typeof proxyRaw==="string"?proxyRaw : (proxyRaw && typeof proxyRaw==="object" ? JSON.stringify(proxyRaw).slice(0,500) : String(proxyRaw)); if (proxyStr.trim() && proxyStr.trim()!=="[object Object]") lastThought = proxyStr.slice(0, 500); } catch {}
 			}
-			if (lastThought && lastThought.trim()) {
+			if (lastThought && lastThought.trim() && lastThought.trim()!=="[object Object]") {
 				const th = createHash("sha256").update(lastThought, "utf8").digest("hex").slice(0, 12);
 				logEvent("AGENT_THOUGHT", `thought ${th} ${sanitizeLogString(lastThought, 80)}`, { quest: state.active || state.activeDraft || "", thoughtHash: th, thoughtLen: lastThought.length, thoughtSlice: sanitizeLogString(lastThought, 200), elapsedMs: turnElapsedMs, opencodeSessionId: turnOpSess, piSessionId: turnOpSess } as any);
 			}

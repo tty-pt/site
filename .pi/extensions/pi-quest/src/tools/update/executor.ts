@@ -94,17 +94,21 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 				let content: string | null = null;
 				try { content = readFileSync(p, "utf8"); } catch {}
 				const hash = createHash("sha256").update(content || draftSlug).digest("hex").slice(0, 12);
-				const archDir = `.pi/quest/current/${state.questId}/future-archive`;
-				try { if (!existsSync(archDir)) mkdirSync(archDir, { recursive: true }); } catch {}
-				try {
-					const dest = `${archDir}/${draftSlug}.md`;
+				// D null-qid edge: guard before building archDir (questDirPath(null)->"" yields ./future-archive)
+				const qidForArch = (state.questId || (state as any).questId) as string | null;
+				if (qidForArch) {
+					const archDir = `.pi/quest/current/${qidForArch}/future-archive`;
+					try { if (!existsSync(archDir)) mkdirSync(archDir, { recursive: true }); } catch {}
 					try {
-						copyFileSync(p, dest);
-					} catch {
-						// fallback to async copyFile if sync fails (fire-and-forget)
-						try { copyFile(p, dest).catch(() => {}); } catch {}
-					}
-				} catch {}
+						const dest = join(archDir, `${draftSlug}.md`);
+						try {
+							copyFileSync(p, dest);
+						} catch {
+							// fallback to async copyFile if sync fails (fire-and-forget)
+							try { copyFile(p, dest).catch(() => {}); } catch {}
+						}
+					} catch {}
+				}
 				try {
 					logQuestTransition("DRAFT_DISCARDED", `draft discarded ${draftSlug}`, {
 						quest: state.active || draftSlug,
@@ -370,49 +374,56 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 	const { targetName } = targetResolution;
 
 	// #36 gate: quest_update_state must not realize activeDraft without reviewer APPROVE; 51: while REASSESSMENT_PENDING gateBlocked not TOOL_FAILURE; 54: enrich details
+	// Recommendation A: allow first quest_update_state that provides plan/findings to create current/quest.md (draft → durable), review then gates implementation, not writing
 	if (state.activeDraft) {
 		const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi as any, ctx as any);
 		const isValid = (()=>{ try{ return isDraftReviewValid(state as any); } catch{ return false; }})();
 		if (hasReviewer && !isValid) {
-			const draftSlug = state.activeDraft;
-			let hash = "unknown";
-			try {
-				const c = readFileSync(`${FUTURE_DIR}/${draftSlug}.md`, "utf8");
-				hash = createHash("sha256").update(c).digest("hex").slice(0, 12);
-			} catch {
-				try { hash = createHash("sha256").update(draftSlug).digest("hex").slice(0, 12); } catch {}
-			}
-			const boundaryKey = `draft:${draftSlug}:${hash}`;
-			const dpLen = (state as any).draftPrompts?.length || 0;
+			const providesPlan = Boolean(params?.plan || params?.findings || params?.understanding || params?.assumptions || params?.goal || params?.planConfidence);
 			const evidence = (state as any).currentReceipt?.evidenceCount || 0;
-			try {
-				logEvent("REVIEW_DEDUP_HIT" as any, `draft not yet reviewer-approved`, {
-					quest: draftSlug,
-					shard: "draft",
-					reason: "draft_not_approved",
-					hash,
-					boundaryKey,
-					dpLen,
-					evidence,
-					hasReviewer,
-					isDraftReviewValid: isValid,
-					reassessmentRequired: Boolean((state as any).reassessmentRequired),
-				} as any);
-			} catch {}
-			const msg = `Draft '${draftSlug}' not yet reviewer-approved — present plan via future/${draftSlug}.md and await plan_review APPROVE (boundaryKey ${boundaryKey}) before promoting. Accumulate requirements or wait for auto-review; only promotion via 'go' after APPROVE may realize the draft.`;
-			if ((state as any).reassessmentRequired) {
-				try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg} — awaiting coalesced plan_review, do not retry quest_update_state.`, "steer"); } catch {}
+			const allowsInitialDraftWrite = providesPlan && evidence >= 5;
+			if (allowsInitialDraftWrite) {
+				try { logEvent("DRAFT_PROMOTION_ALLOWED" as any, `draft promotion allowed despite review pending (initial write)`, { quest: state.activeDraft, evidence, providesPlan } as any); } catch {}
+			} else {
+				const draftSlug = state.activeDraft;
+				let hash = "unknown";
+				try {
+					const c = readFileSync(`${FUTURE_DIR}/${draftSlug}.md`, "utf8");
+					hash = createHash("sha256").update(c).digest("hex").slice(0, 12);
+				} catch {
+					try { hash = createHash("sha256").update(draftSlug).digest("hex").slice(0, 12); } catch {}
+				}
+				const boundaryKey = `draft:${draftSlug}:${hash}`;
+				const dpLen = (state as any).draftPrompts?.length || 0;
+				try {
+					logEvent("REVIEW_DEDUP_HIT" as any, `draft not yet reviewer-approved`, {
+						quest: draftSlug,
+						shard: "draft",
+						reason: "draft_not_approved",
+						hash,
+						boundaryKey,
+						dpLen,
+						evidence,
+						hasReviewer,
+						isDraftReviewValid: isValid,
+						reassessmentRequired: Boolean((state as any).reassessmentRequired),
+					} as any);
+				} catch {}
+				const msg = `Draft '${draftSlug}' not yet reviewer-approved — present plan via future/${draftSlug}.md and await plan_review APPROVE (boundaryKey ${boundaryKey}) before promoting. Accumulate requirements or wait for auto-review; only promotion via 'go' after APPROVE may realize the draft.`;
+				if ((state as any).reassessmentRequired) {
+					try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg} — awaiting coalesced plan_review, do not retry quest_update_state.`, "steer"); } catch {}
+					return {
+						content: [{ type: "text", text: msg }],
+						details: { error: "draft_not_approved", success: false, shard: "draft", boundaryKey, hash, quest: draftSlug, gateBlocked: true, code: "REVIEW_COALESCENCE_PENDING", dpLen, evidence },
+					};
+				}
+				// Agent-visible steer (AGENTS.md invariant 1) + tool result (both model-visible)
+				try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg}`, "steer"); } catch {}
 				return {
 					content: [{ type: "text", text: msg }],
-					details: { error: "draft_not_approved", success: false, shard: "draft", boundaryKey, hash, quest: draftSlug, gateBlocked: true, code: "REVIEW_COALESCENCE_PENDING", dpLen, evidence },
+					details: { error: "draft_not_approved", success: false, shard: "draft", boundaryKey, hash, quest: draftSlug, dpLen, evidence },
 				};
 			}
-			// Agent-visible steer (AGENTS.md invariant 1) + tool result (both model-visible)
-			try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg}`, "steer"); } catch {}
-			return {
-				content: [{ type: "text", text: msg }],
-				details: { error: "draft_not_approved", success: false, shard: "draft", boundaryKey, hash, quest: draftSlug, dpLen, evidence },
-			};
 		}
 	}
 

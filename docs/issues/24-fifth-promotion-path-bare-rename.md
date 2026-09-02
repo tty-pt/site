@@ -1,7 +1,7 @@
 ---
 id: 24
 title: "5th promotion path commands/quest.ts bare rename without archive (extends #04)"
-state: ready
+state: done
 severity: high
 requires: [04]
 validates: "grep DRAFT_DISCARDED src/commands/quest.ts 1 hit + future-archive in zip"

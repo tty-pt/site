@@ -1,7 +1,7 @@
 ---
 id: 16
 title: "Concurrent sessions on the same quest are not coalesced"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "single flight: 2 sessions same quest => 1 active + coalesced pending"

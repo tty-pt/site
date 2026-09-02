@@ -12,11 +12,15 @@ export * from "./reconstruction/resume.ts";
 export * from "./reconstruction/transaction.ts";
 export * from "./reconstruction/codecs.ts";
 
+export function isStoredState(v: unknown): v is StoredState {
+	return typeof v === "object" && v !== null && ("active" in v || "pendingRootQuest" in v || "activeDraft" in v);
+}
+
 export function loadPersistedJournalSnapshot(ctx: ExtensionContext): StoredState | undefined {
 	let latest: StoredState | undefined;
 	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type === "custom" && (entry.customType === CUSTOM_TYPE || entry.customType === LEGACY_CUSTOM_TYPE) && entry.data) {
-			latest = entry.data as unknown as StoredState;
+		if (entry.type === "custom" && (entry.customType === CUSTOM_TYPE || entry.customType === LEGACY_CUSTOM_TYPE) && entry.data && isStoredState(entry.data)) {
+			latest = entry.data as StoredState;
 		}
 	}
 	return latest;

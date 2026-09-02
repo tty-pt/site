@@ -88,8 +88,14 @@ export function recordObservedInvestigation(
 		});
 
 		// 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
-		if (receipt.evidenceCount >= 10 && !targetState.active && (targetState as any).activeDraft) {
+		if (receipt.evidenceCount >= 5 && !targetState.active && (targetState as any).activeDraft) {
 			(targetState as any).substantiveTurnsSinceCheckpoint = 0;
+			if (!targetState.researchComplete) {
+				targetState.researchComplete = true;
+				(targetState as any).researchRequired = false;
+				try { syncImplementationPermission(targetState); } catch {}
+				try { logResearchTransition("RESEARCH_COMPLETED", `research completed after ${receipt.evidenceCount} evidences`, { quest: (targetState as any).activeDraft || "", round: targetState.researchRound || 1, evidence: receipt.evidenceCount } as any); } catch {}
+			}
 		}
 
 		return true;
@@ -125,8 +131,14 @@ export function recordObservedInvestigation(
 		});
 
 		// 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
-		if (receipt.evidenceCount >= 10 && !targetState.active && (targetState as any).activeDraft) {
+		if (receipt.evidenceCount >= 5 && !targetState.active && (targetState as any).activeDraft) {
 			(targetState as any).substantiveTurnsSinceCheckpoint = 0;
+			if (!targetState.researchComplete) {
+				targetState.researchComplete = true;
+				(targetState as any).researchRequired = false;
+				try { syncImplementationPermission(targetState); } catch {}
+				try { logResearchTransition("RESEARCH_COMPLETED", `research completed after ${receipt.evidenceCount} evidences`, { quest: (targetState as any).activeDraft || "", round: targetState.researchRound || 1, evidence: receipt.evidenceCount } as any); } catch {}
+			}
 		}
 
 		return true;

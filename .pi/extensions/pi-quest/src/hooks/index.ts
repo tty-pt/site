@@ -378,7 +378,9 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 								} catch{ return false; }
 							})();
 							try { const { logEvent } = await import("../logging.ts"); const valid = (()=>{ try{ const { isDraftReviewValid } = require("../critical_agent/policy.ts") as any; return isDraftReviewValid(state); } catch{ return false; } })(); logEvent("DRAFT_AUTO_REVIEW_CHECK" as any, `check dpLen=${dpLen} evidence=${evidence} valid=${valid} hasPlan=${hasActionablePlanDraft}`, { quest: state.activeDraft || "", dpLen, evidence, isDraftReviewValid: valid, hasActionablePlanDraft } as any); if(!hasActionablePlanDraft && (dpLen>=1 && evidence>=7)){ logEvent("PLAN_NOT_DRAFTED_YET" as any, `plan not drafted yet — draft plan via quest_update_state {goal,plan,findings}`, { quest: state.activeDraft || "" } as any); try{ const { sendInternalAgentMessage } = await import("../messaging.ts"); sendInternalAgentMessage(pi, `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — draft a concise plan (goal, 2-3 stages, findings) via \`quest_update_state\` before review.`, "steer"); }catch{} } } catch {}
-							if (((dpLen >= 2) || (dpLen >= 1 && evidence >= 7)) && hasActionablePlanDraft) {
+							// AQM: when evidence >=7 and dpLen>=1, allow review even with placeholder plan to avoid deadlock (reviewer will REVISE with guidance)
+							const canAutoReviewDespitePlaceholder = (dpLen>=1 && evidence>=7);
+							if (((dpLen >= 2) || (dpLen >= 1 && evidence >= 7)) && (hasActionablePlanDraft || canAutoReviewDespitePlaceholder)) {
 								try {
 									const { isDraftReviewValid } = await import("../critical_agent/policy.ts");
 									if (!isDraftReviewValid(state)) {

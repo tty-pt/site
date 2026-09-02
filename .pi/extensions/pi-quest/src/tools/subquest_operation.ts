@@ -15,6 +15,9 @@ import { ExtensionAPI, ExtensionContext } from "../types.ts";
 import { updateUIStatus } from "../ui.ts";
 import { formatSubquestResponse } from "./formatting.ts";
 import { validateSubquestParams } from "./validation.ts";
+import { isDraftReviewValid } from "../critical_agent/policy.ts";
+import { isAutonomousSubquestDuringDraftingEnabled } from "../config.ts";
+import { getCustomSubagentRunner, isSubagentToolRegistered } from "../critical_agent/index.ts";
 
 export async function ensureSubquestFileExists(
 	name: string,
@@ -62,6 +65,29 @@ export function handleSubquestLaunchCompactionOrPrompt(
 }
 
 export async function executeSubquestTool(params: any, pi: ExtensionAPI, ctx: ExtensionContext) {
+	// AQM: subquest blocked during drafting by default (off), configurable on
+	if (!isAutonomousSubquestDuringDraftingEnabled(state as any)) {
+		const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi as any, ctx as any);
+		const pendingDraft = Boolean(state.pendingRootQuest) || Boolean(state.activeDraft);
+		// Only block if draft is relevant to current parent/active (avoid stale draft from previous test/session pollution)
+		const draftSlug = state.activeDraft || null;
+		const activeSlug = state.active || null;
+		// Stale draft check: if activeDraft exists but active is different and not pendingRootQuest, treat as stale
+		const isRelevantDraft = !draftSlug || draftSlug === activeSlug || Boolean(state.pendingRootQuest);
+		const isDraftPending = pendingDraft && (isRelevantDraft || Boolean(state.pendingRootQuest));
+		const isDraftNotApproved = Boolean(draftSlug) && hasReviewer && !isDraftReviewValid(state as any) && isDraftPending;
+		const isResearchPendingDraft = Boolean(state.researchRequired) && (state.planVersion || 1) === 1 && isDraftPending;
+		if (isDraftPending && (isDraftNotApproved || isResearchPendingDraft)) {
+			const slug = state.activeDraft || state.pendingRootRequest || "draft";
+			try { logEvent("REVIEW_DEDUP_HIT" as any, `subquest blocked while drafting`, { quest: slug, shard: "draft", reason: "subquest_while_draft_pending", hasReviewer, isDraftReviewValid: !isDraftNotApproved, autonomousFlag: false } as any); } catch {}
+			try { sendInternalAgentMessage(pi, `⚠️ Subquest '${params?.name || params?.goal || slug}' blocked — Autonomous Quest Management during drafting is off by default. Finish draft via quest_update_state and obtain plan_review APPROVE before creating subquests. Enable via PI_QUEST_AQM_SUBQUEST_DRAFT=1 or settings pi-quest.aqm.subquestDuringDrafting.enabled true to allow autonomous subquests while drafting.`, "steer"); } catch {}
+			return {
+				content: [{ type: "text", text: `Subquest blocked while drafting: Autonomous Quest Management during drafting is off by default. Complete the draft via quest_update_state and await draft review APPROVE before creating subquests. Set PI_QUEST_AQM_SUBQUEST_DRAFT=1 to enable.` }],
+				details: { error: "subquest_while_draft_pending", shard: "draft", autonomousFlag: false, blocked: true },
+			};
+		}
+	}
+
 	const parsed = validateSubquestParams(params, pi, ctx);
 	if (!parsed) {
 		const errorKey = !params?.name && !params?.goal ? "missing_name" : "missing_goal";

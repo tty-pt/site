@@ -34,9 +34,13 @@ export function auditQuestConsistency(
   const hasRemaining = !isPlaceholderOrEmpty(remainingBody);
 
   const reassessmentLines = extractLines(reassessmentBody);
+  const planVersionNumForFiles = Number.parseInt(planVersionBody.replace(/\D/g, ""), 10) || 1;
+  const isResearchOnly = planVersionNumForFiles === 1 && isPlaceholderOrEmpty(completedBody) && isPlaceholderOrEmpty(reassessmentBody);
 
   checkNextAction({ completedBody, reassessmentBody, nextActionBody }, issues);
-  checkFilesModified({ completedBody, reassessmentBody, filesModifiedBody }, options, hasFilesModified, issues);
+  if (!isResearchOnly) {
+    checkFilesModified({ completedBody, reassessmentBody, filesModifiedBody }, options, hasFilesModified, issues);
+  }
   checkCompletedEmpty(hasCompleted, hasReassessment, reassessmentLines, issues);
   checkPlanVersion(planVersionBody, planRevisionsBody, issues);
   checkStatusAndRemaining({ uncertaintiesBody, assumptionsBody, testStatusBody, filesModifiedBody, completedBody, remainingBody, currentStatusBody }, hasFilesModified, hasTestStatus, hasCompleted, hasRemaining, options, issues);

@@ -17,7 +17,7 @@ import { startResearchEpoch } from "./research.ts";
 import { createDefaultState, generateQuestId, getState, state } from "./state.ts";
 import { ExtensionAPI, ExtensionContext, QuestChoiceResult } from "./types.ts";
 import { updateUIStatus } from "./ui.ts";
-import { resolveArchiveContext } from "./lifecycle/archive/context.ts";
+import { resolveArchiveContext, type ArchiveContext } from "./lifecycle/archive/context.ts";
 import { runRootCompletionGates } from "./lifecycle/archive/gates.ts";
 import { finalizeTerminalState } from "./lifecycle/archive/terminal.ts";
 import { pinLogToFinalized, removeActiveDirectory } from "./lifecycle/archive/removal.ts";
@@ -217,8 +217,8 @@ export function checkOrdinaryCompletionConditions(
 export async function archiveQuestFile(name: string, pi: ExtensionAPI, ctx?: ExtensionContext): Promise<{ success: boolean; message: string; dest?: string; nextActive?: string | null; childSummary?: string }> {
 	const s = getState(ctx);
 	const ctxRes = await resolveArchiveContext(name, ctx);
-	if ((ctxRes as any).error) return { success: false, message: (ctxRes as any).error };
-	const { targetQid, path, questName, parentSlug, questContent, childSummary } = ctxRes as any;
+	if ("error" in ctxRes) return { success: false, message: ctxRes.error };
+	const { targetQid, path, questName, parentSlug, questContent, childSummary } = ctxRes as ArchiveContext;
 	const stack = Array.isArray(s.stack) ? [...s.stack] : (s.active ? [s.active] : []);
 
 	if (!parentSlug) {

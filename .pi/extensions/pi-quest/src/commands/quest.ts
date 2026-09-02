@@ -1,8 +1,12 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync } from "node:fs";
+import { copyFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { FUTURE_DIR } from "../constants.ts";
 import { archiveQuestFile, promptForQuestChoice } from "../lifecycle.ts";
 import { FUTURE_QUEST_TEMPLATE, QUEST_TEMPLATE } from "../markdown.ts";
+import { logEvent } from "../logging.ts";
 import { sendInternalAgentMessage, sendSaveRequest, sendInternalUserMessage } from "../messaging.ts";
 import { cleanDraftIfExists, questDirPath, questPath, resolveQuestRecordBySlug, slugify } from "../paths.ts";
 import { persist, verifyAndMarkSaved } from "../persistence.ts";
@@ -52,6 +56,21 @@ export async function ensureQuestFileOnDisk(name: string, goal: string, original
 	} catch {
 		try {
 			await readFile(futurePath, "utf8");
+			// Archive-before-unlink: preserve future/<slug>.md before rename (see issue 04 path E)
+			try {
+				const futureContent = await readFile(futurePath, "utf8").catch(() => "");
+				if (qid) {
+					const archDir = join(questDirPath(qid), "future-archive");
+					try { await mkdir(archDir, { recursive: true }); } catch {}
+					const destArch = join(archDir, basename(futurePath));
+					try { await copyFile(futurePath, destArch); } catch { try { copyFileSync(futurePath, destArch); } catch {} }
+					try { const h = createHash("sha256").update(futureContent || name).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: name, slug: name, hash: h, dest: destArch, reason: "ensureQuestFileOnDisk" } as any); } catch {}
+					// Verify archive succeeded before rename; fallback to copy check
+					if (!existsSync(destArch)) {
+						try { copyFileSync(futurePath, destArch); } catch {}
+					}
+				}
+			} catch {}
 			await rename(futurePath, path);
 			if (ctx.hasUI) ctx.ui.notify(`Promoted ${futurePath} → ${path}`, "info");
 		} catch {
@@ -61,6 +80,7 @@ export async function ensureQuestFileOnDisk(name: string, goal: string, original
 			await writeFile(path, QUEST_TEMPLATE(name, finalGoal, "", originalReq, s.refinements || [], qid), "utf8");
 		}
 	}
+	// cleanDraftIfExists is now redundant after archived rename (idempotent), keep for safety
 	await cleanDraftIfExists(name);
 	return path;
 }

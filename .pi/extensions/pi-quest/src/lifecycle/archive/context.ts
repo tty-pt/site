@@ -16,7 +16,7 @@ export interface ArchiveContext {
 	isRoot: boolean;
 }
 
-export async function resolveArchiveContext(name: string, ctx?: any): Promise<ArchiveContext & { error?: string }> {
+export async function resolveArchiveContext(name: string, ctx?: any): Promise<ArchiveContext | { error: string }> {
 	const s = getState(ctx);
 	let targetQid = s.questId || name;
 	let path = questPath(targetQid);

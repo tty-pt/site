@@ -143,6 +143,8 @@ export async function runCriticalReview(
 
 	const registered = Boolean(options.subagentRunner) || Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi, ctx);
 	if (!registered) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, { quest: slug, shard: "global", reason: "not_registered", reviewKind: options.kind } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_registered`, { quest: slug, questId, sessionId, reviewId: correlationId, parentSessionId: sessionId, reviewKind: options.kind, reason: "not_registered" } as any); } catch {}
 		return { success: true, available: false, skipped: true };
 	}
 
@@ -501,11 +503,23 @@ export async function checkAndTriggerPlanReview(
 		}
 		return result;
 	}
-	if (!s.active || !isRootQuest(s)) return null;
-	if (s.reassessmentRequired) return null;
+	if (!s.active || !isRootQuest(s)) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not root)`, { quest: (s.active || "") as string, shard: "root", reason: !s.active ? "no_active" : "not_root", reviewKind: "plan_review" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_root`, { quest: s.active || "quest", questId: s.questId || s.active || "quest", sessionId: getSessionId(c), reviewId: "no_active", parentSessionId: getSessionId(c), reviewKind: "plan_review", reason: !s.active ? "no_active" : "not_root" } as any); } catch {}
+		return null;
+	}
+	if (s.reassessmentRequired) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (reassessmentRequired)`, { quest: s.active!, shard: "root", reason: "reassessmentRequired", reviewKind: "plan_review" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: reassessmentRequired`, { quest: s.active!, questId: s.questId || s.active!, sessionId: getSessionId(c), reviewId: "reassessment", parentSessionId: getSessionId(c), reviewKind: "plan_review", reason: "reassessmentRequired" } as any); } catch {}
+		return null;
+	}
 
 	const registered = isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
-	if (!registered) return null;
+	if (!registered) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, { quest: s.active!, shard: "root", reason: "not_registered", reviewKind: "plan_review" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_registered`, { quest: s.active!, questId: s.questId || s.active!, sessionId: getSessionId(c), reviewId: "not_registered", parentSessionId: getSessionId(c), reviewKind: "plan_review", reason: "not_registered" } as any); } catch {}
+		return null;
+	}
 
 	const currentPlanVersion = s.planVersion || 1;
 	const currentHash = s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : "clean");
@@ -572,11 +586,24 @@ export async function checkAndTriggerDirectionReview(
 ): Promise<CriticalReviewExecutionResult | null> {
 	const c = getActiveContext(ctx);
 	const s = getState(c);
-	if (!s.active || !isRootQuest(s)) return null;
-	if (s.reassessmentRequired || s.researchRequired || s.awaitingUserConfirmation) return null;
+	if (!s.active || !isRootQuest(s)) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not root direction)`, { quest: (s.active || "") as string, shard: "direction", reason: !s.active ? "no_active" : "not_root", reviewKind: "direction" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_root`, { quest: s.active || "quest", questId: s.questId || s.active || "quest", sessionId: getSessionId(c), reviewId: "no_active", parentSessionId: getSessionId(c), reviewKind: "direction", reason: !s.active ? "no_active" : "not_root" } as any); } catch {}
+		return null;
+	}
+	if (s.reassessmentRequired || s.researchRequired || s.awaitingUserConfirmation) {
+		const reason = s.reassessmentRequired ? "reassessmentRequired" : s.researchRequired ? "researchRequired" : "awaitingUserConfirmation";
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (${reason})`, { quest: s.active!, shard: "direction", reason, reviewKind: "direction" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: ${reason}`, { quest: s.active!, questId: s.questId || s.active!, sessionId: getSessionId(c), reviewId: reason, parentSessionId: getSessionId(c), reviewKind: "direction", reason } as any); } catch {}
+		return null;
+	}
 
 	const registered = isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
-	if (!registered) return null;
+	if (!registered) {
+		try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered direction)`, { quest: s.active!, shard: "direction", reason: "not_registered", reviewKind: "direction" } as any); } catch {}
+		try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_registered`, { quest: s.active!, questId: s.questId || s.active!, sessionId: getSessionId(c), reviewId: "not_registered", parentSessionId: getSessionId(c), reviewKind: "direction", reason: "not_registered" } as any); } catch {}
+		return null;
+	}
 
 	// Throttle no_progress during cooldown / pending / plan-block
 	if (triggerReason === "no_progress") {
@@ -608,6 +635,8 @@ export async function checkAndTriggerDirectionReview(
 			return null;
 		}
 		if (getPendingReview(s.active!, "direction")) {
+			try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (pending direction)`, { quest: s.active!, shard: "direction", reason: "pending", reviewKind: "direction" } as any); } catch {}
+			try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: pending direction`, { quest: s.active!, questId: s.questId || s.active!, sessionId: getSessionId(c), reviewId: "pending", parentSessionId: getSessionId(c), reviewKind: "direction", reason: "pending" } as any); } catch {}
 			s.substantiveTurnsSinceCheckpoint = 0;
 			return null;
 		}
