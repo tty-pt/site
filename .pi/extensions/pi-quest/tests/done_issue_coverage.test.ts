@@ -707,4 +707,42 @@ Add constants
 		assert.ok(reassessmentSrc.includes("REASSESSMENT_EVIDENCE_REQUIRED"), "must use the evidence-required code when freshness blocks");
 		assert.ok(researchSrc.includes("records a fresh receipt automatically while reassessment is pending"), "freshness reason must be actionable");
 	});
+
+	// =====================================================================
+	// #58 Subagent reads extension source instead of site — wrong working
+	// directory / search path on QUEST_REUSED mount.
+	// validates: QUEST_REUSED subagent reads only repo-root site files, never
+	// .pi/extensions/pi-quest/src, and does not emit ENOENT/fd thrash.
+	// Behavioral coverage lives in tests/subagent_working_dir.test.ts; this
+	// source guard asserts the cwd-anchoring resolver + event exist.
+	// =====================================================================
+	await t.step("#58 subagent cwd must be anchored to project root (resolveSubagentCwd) with SUBAGENT_CWD_REANCHORED event", async () => {
+		const readSrc = async (rel: string) => {
+			try { return await readFile(rel, "utf8"); } catch { return await readFile(".pi/extensions/pi-quest/" + rel, "utf8"); }
+		};
+		const adapterSrc = await readSrc("src/critical_agent/pi_adapter.ts");
+		const typesSrc = await readSrc("src/logging/types.ts");
+		assert.ok(adapterSrc.includes("resolveSubagentCwd"), "must define resolveSubagentCwd resolver");
+		assert.ok(adapterSrc.includes("findProjectRoot"), "must anchor cwd via findProjectRoot");
+		assert.ok(adapterSrc.includes("cwd: resolveSubagentCwd(ctx)"), "must use resolveSubagentCwd at the launch emit site");
+		assert.ok(adapterSrc.includes("SUBAGENT_CWD_REANCHORED"), "must emit SUBAGENT_CWD_REANCHORED on re-anchor");
+		assert.ok(typesSrc.includes("SUBAGENT_CWD_REANCHORED"), "SUBAGENT_CWD_REANCHORED must be a QuestLogEventType");
+	});
+
+	// =====================================================================
+	// #27 isStoredState guard missing — already fixed at HEAD; guard as
+	// bookkeeping marker only (no source change needed).
+	// validates: grep isStoredState 1 hit, Record<string,unknown>.
+	// =====================================================================
+	await t.step("#27 isStoredState runtime guard present + no blind as unknown as StoredState cast", async () => {
+		const readSrc = async (rel: string) => {
+			try { return await readFile(rel, "utf8"); } catch { return await readFile(".pi/extensions/pi-quest/" + rel, "utf8"); }
+		};
+		const reconSrc = await readSrc("src/reconstruction.ts");
+		const typesSrc = await readSrc("src/types.ts");
+		assert.ok(/export function isStoredState\(/.test(reconSrc), "isStoredState guard must exist");
+		assert.ok(reconSrc.includes("isStoredState(entry.data)"), "isStoredState must guard the journal snapshot cast");
+		assert.ok(!reconSrc.includes("as unknown as StoredState"), "no blind as unknown as StoredState cast");
+		assert.ok(typesSrc.includes("Record<string, unknown>"), "details must be Record<string, unknown> (not any)");
+	});
 });

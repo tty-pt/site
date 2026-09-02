@@ -1,11 +1,13 @@
-# pi-quest issues — index (from run 1788280759, extended 2026-09-01 with REMAINING_WORK.md + manual pi testing 2026)
+# pi-quest + site issues — index (from run 1788280759, extended 2026-09-01 with REMAINING_WORK.md + manual pi testing 2026, 2026-09-02 with consumer-complexity analysis quest #1788359911)
 
-These 45 files describe issues **in the `pi-quest` extension** (`.pi/extensions/pi-quest`), not in the host site (`mods/*/ux`). All were observed during run `1788280759` plus `REMAINING_WORK.md` §2 (18-29), §2.6-2.7 & §3-§5+§7 (30-35), manual pi drafting gaps 36-39, `1788299416` gaps 40-42, and phases 43-45. `REMAINING_WORK.md` can be deleted — this directory is now the single source.
+These files describe issues **in the `pi-quest` extension** (`.pi/extensions/pi-quest`) and the host site (`mods/*/ux`). All were observed during run `1788280759` plus `REMAINING_WORK.md` §2 (18-29), §2.6-2.7 & §3-§5+§7 (30-35), manual pi drafting gaps 36-39, `1788299416` gaps 40-42, and phases 43-45. `REMAINING_WORK.md` can be deleted — this directory is now the single source.
 
 **Deterministic next:** each file has YAML frontmatter `state` (`ready`/`blocked`/`deferred`/`in_progress`/`done`), `requires`/`blocked_by`/`validates`, `severity`, `parent`. Run `python docs/issues/next.py` for the DAG-aware `NEXT` — `requires ⊆ done` and parents require children (`parent` blocked until all children `done`; children inherit ancestor requires — `44 requires [43]` blocks all Parent 44 leaves until drafting done; strict phase gate) sorted `severity High→Medium→Low` then `id`; single-parent tree. Mark `state: done` when verified in `pi`, then re-run. `docs/FIX_ORDER.md` (steps 1→7) is the human test script.
 
 | # | File | Area | State | Requires | Parent | Severity |
 |---|------|------|-------|----------|--------|----------|
+| 59 | `59-pi-adapter-legacy-delegation-payload.md` | `critical_agent/pi_adapter.ts:22…` | ready | - | 43 | High |
+| 60 | `60-consumer-complexity-dead-code-and-statics.md` | `htdocs/bud-hydrate.js, libbud…` | ready | - | - | Medium |
 | 01 | `01-draft-t0-shallow-requirements-empty.md` | `markdown/template/header.ts:36…` | ready | - | 43 | Medium |
 | 02 | `02-append-dedup-silent-loss.md` | `paths.ts:291-319, hooks/index.…` | ready | - | 43 | Low |
 | 03 | `03-draft-last-saved-hash-never-set.md` | `state.ts:111-114,228-232, hook…` | ready | - | 43 | Medium |

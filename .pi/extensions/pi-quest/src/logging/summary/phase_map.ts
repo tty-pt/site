@@ -142,6 +142,7 @@ export function mapEventTypeToMajorPhase(type: QuestLogEventType | string, conte
     case "REMEDIATION_REQUIRED":
     case "SELF_CRITIQUE_STARTED":
     case "SELF_CRITIQUE_REVISED":
+    case "SUBAGENT_CWD_REANCHORED":
       return "VERIFICATION";
 
     case "GATE_BLOCKED":

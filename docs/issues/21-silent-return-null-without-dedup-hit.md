@@ -1,7 +1,7 @@
 ---
 id: 21
 title: "10 silent return null without REVIEW_DEDUP_HIT / CRITICAL_REVIEW_SUPPRESSED"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "grep return null 0 silent (each has REVIEW_DEDUP_HIT etc)"

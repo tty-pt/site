@@ -1,4 +1,7 @@
 import { buildCriticalReviewPrompt, parseCriticalReviewResponse } from "./prompt.ts";
+import { findProjectRoot } from "../diagnostic.ts";
+import { logEvent } from "../logging.ts";
+import { getQuestId, getSessionId } from "../state.ts";
 import {
 	CriticalReviewer,
 	ExtensionAPI,
@@ -89,6 +92,31 @@ export function isSubagentToolRegistered(pi?: ExtensionAPI, _ctx?: ExtensionCont
 		} catch {}
 	}
 	return false;
+}
+
+/**
+ * Resolve the working directory / search root for a launched subagent.
+ *
+ * #58: the Pi subagent's read/grep/search tools are rooted at the cwd passed on launch. On a stray
+ * QUEST_REUSED mount the session cwd can point at the extension directory (.pi/extensions/pi-quest),
+ * which makes the subagent search the extension's own source instead of the site repo and ENOENT-thrash.
+ * Always anchor to the repository root (findProjectRoot strips trailing .pi/extensions/ paths).
+ * A transparent re-anchor diagnostic is logged when the incoming cwd differs from the resolved root.
+ */
+export function resolveSubagentCwd(ctx?: ExtensionContext): string {
+	const from = ctx?.cwd || (typeof process !== "undefined" ? process.cwd() : "");
+	const to = findProjectRoot(from);
+	if (from && from !== to) {
+		try {
+			logEvent("SUBAGENT_CWD_REANCHORED" as any, `subagent cwd re-anchored to project root`, {
+				quest: getQuestId(ctx) || "",
+				from,
+				to,
+				reason: "wrong_search_root",
+			} as any, ctx);
+		} catch {}
+	}
+	return to;
 }
 
 export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContext): SubagentExecutorFn | null {
@@ -195,7 +223,7 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 					context: "fresh",
 					model: targetModel,
 					async: true,
-					cwd: ctx?.cwd || (typeof process !== "undefined" ? process.cwd() : ""),
+					cwd: resolveSubagentCwd(ctx),
 				});
 
 				pi.events!.emit("subagent:slash:request", {

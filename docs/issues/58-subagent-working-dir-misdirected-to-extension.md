@@ -1,7 +1,7 @@
 ---
 id: 58
 title: "Subagent reads extension source instead of site — wrong working directory / search path on QUEST_REUSED mount"
-state: ready
+state: done
 severity: medium
 requires: [56]
 validates: "QUEST_REUSED subagent reads only repo-root site files, never .pi/extensions/pi-quest/src, and does not emit ENOENT/fd thrash"

@@ -1,7 +1,7 @@
 ---
 id: 27
 title: "isStoredState guard missing — blind as unknown as StoredState cast + any details + ArchiveContext|{error}"
-state: ready
+state: done
 severity: medium
 requires: [26]
 validates: "grep isStoredState 1 hit, Record<string,unknown>"

@@ -1,7 +1,7 @@
 ---
 id: 22
 title: "DRAFT_PROMOTED type exists, 0 emitter — 23/24 types emitted"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "grep DRAFT_PROMOTED 3 emitters"
