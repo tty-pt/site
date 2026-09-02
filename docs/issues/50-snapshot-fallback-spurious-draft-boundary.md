@@ -1,7 +1,7 @@
 ---
 id: 50
 title: "Snapshot fallback draft_boundary_fallback fires spuriously when future file slug mismatched"
-state: ready
+state: done
 severity: medium
 requires: [47, 49]
 validates: "grep SNAPSHOT_FALLBACK execution.log must be 0 during drafting unless git diff fails"

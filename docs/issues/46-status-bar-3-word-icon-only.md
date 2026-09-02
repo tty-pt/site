@@ -1,7 +1,7 @@
 ---
 id: 46
 title: "Status bar icon + 3-word nome + #full qid — hide Critical reviewer phrase"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "formatQuestShort == 'icon 3-word-nome #full qid' without Critical reviewer or receiving word"

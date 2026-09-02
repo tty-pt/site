@@ -1,7 +1,7 @@
 ---
 id: 43
 title: "Phase: drafting"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "pi: drafting children done"

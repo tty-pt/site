@@ -551,21 +551,21 @@ Deno.test("Parallel Critical Reviewer Suite: Complete Verification of All 15 Con
 
 		registerActiveReview("rev_stat_1", "status-quest", "session_test_par_9", "direction", snapshot);
 
-		// Initial status
+		// 46: critical_review slot hidden — icon in quest slot already conveys status
 		updateReviewerUIStatus(ctx);
 		let statusText = (ctx.ui as any).getStatus("critical_review");
-		assert.ok(statusText.includes("reviewer ⟳ starting"), `Expected starting status, got: ${statusText}`);
+		assert.strictEqual(statusText, undefined, `Expected hidden critical_review slot, got: ${statusText}`);
 
-		// Turn & tool activity updates
+		// Turn & tool activity updates still tracked internally but not surfaced in bar
 		updateReviewActivity("rev_stat_1", { type: "turn_start", turnIndex: 6 }, ctx);
 		for (let i = 0; i < 11; i++) {
 			updateReviewActivity("rev_stat_1", { type: "tool_result", toolName: "read", path: `file_${i % 4}.ts` }, ctx);
 		}
 
 		statusText = (ctx.ui as any).getStatus("critical_review");
-		assert.ok(statusText.includes("6 turns"), `Expected 6 turns in: ${statusText}`);
-		assert.ok(statusText.includes("11 tools"), `Expected 11 tools in: ${statusText}`);
-		assert.ok(statusText.includes("4 files"), `Expected 4 files in: ${statusText}`);
+		assert.strictEqual(statusText, undefined, `Expected still hidden, got: ${statusText}`);
+		assert.strictEqual((getActiveReviews().get("rev_stat_1") as any).activity.turns, 6);
+		assert.strictEqual((getActiveReviews().get("rev_stat_1") as any).activity.tools, 11);
 
 		clearActiveReviews();
 	});

@@ -1,7 +1,7 @@
 ---
 id: 03
 title: "draftLastSavedHash is defined but never set"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "state.draftLastSavedHash == sha256(future file) slice12"

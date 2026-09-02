@@ -1,7 +1,7 @@
 ---
 id: 19
 title: "DRAFT_CONVERSATIONAL_IGNORED logged unconditionally while activeDraft holds"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "DRAFT_CONVERSATIONAL_IGNORED only when activeDraft && CONVERSATIONAL_ACK"

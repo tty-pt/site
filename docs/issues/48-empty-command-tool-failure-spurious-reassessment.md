@@ -1,7 +1,7 @@
 ---
 id: 48
 title: "Empty-command TOOL_FAILURE triggers spurious REASSESSMENT"
-state: ready
+state: done
 severity: high
 requires: [47]
 validates: "TOOL_FAILURE command=\"\" must not trigger REASSESSMENT_REQUIRED"

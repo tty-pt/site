@@ -111,8 +111,9 @@ Deno.test("Reviewer naming and synthetic isolation (T40-T44)", async (t) => {
 		};
 		registerActiveReview("rev_ui_1", "ui-quest-41", "session_ui_41", "direction", snap, undefined, "no_progress");
 		const status = formatActiveReviewsUIStatus();
-		assert.ok(status?.includes("reviewer"), `status must include reviewer: ${status}`);
-		assert.ok(status?.includes("direction/no_progress"), `status must include trigger label: ${status}`);
+		// 46: critical_review slot hidden — quest slot icon already conveys status
+		assert.strictEqual(status, undefined, `status must be hidden, got: ${status}`);
+		assert.ok(getActiveReviews().has("rev_ui_1"), "review still tracked internally");
 		clearActiveReviews();
 	});
 

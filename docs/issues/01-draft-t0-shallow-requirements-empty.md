@@ -1,7 +1,7 @@
 ---
 id: 01
 title: "Draft at t=0 is shallow — Requirements stays empty"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "future/<slug>.md Requirements prefilled from prompt slice"

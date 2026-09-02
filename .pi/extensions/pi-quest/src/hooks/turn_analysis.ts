@@ -104,7 +104,8 @@ export function detectBashToolFailure(tr: any): { hasFailure: boolean; reason: s
 	const output = typeof tr?.content === "string" ? tr.content :
 		Array.isArray(tr?.content) ? tr.content.map((c: any) => c.text || "").join("\n") :
 		typeof tr?.output === "string" ? tr.output : "";
-	const cmd = tr?.args?.command || tr?.input?.command || tr?.command || "";
+	const cmd = tr?.args?.command || tr?.input?.command || tr?.command || tr?.args?.cmd || tr?.input?.cmd || "";
+	if (!cmd.trim()) return { hasFailure: false, reason: "", evidence: "" };
 
 	// SEARCH/investigative binaries: rg/grep exit 1 = "no matches" not an error; wc/ls/fd/etc with empty output must not escalate.
 	// 10: wc -l/ls/fd investigation whitelisted — do not trigger TOOL_FAILURE/REASSESSMENT
@@ -180,6 +181,14 @@ export function classifyToolResultForTurn(
 	isSubstantive: boolean;
 	failure: { hasFailure: boolean; reason: string; evidence: string } | null;
 } {
+	// 51: coalescence gateBlocked not failure
+	if ((tr as any)?.details?.gateBlocked && (tr as any)?.details?.code === "REVIEW_COALESCENCE_PENDING") {
+		const toolFailed = isToolExecutionError(tr);
+		let isQuestUpdate = false;
+		let isSubstantive = false;
+		if (!toolFailed && isQuestUpdateTool((tr?.toolName || tr?.name || "").toLowerCase())) isQuestUpdate = true;
+		return { isQuestUpdate, isSubstantive, failure: null };
+	}
 	const toolName = (tr?.toolName || tr?.name || "").toLowerCase();
 	let failure = null;
 

@@ -282,6 +282,24 @@ export function futureDraftPath(slug: string): string {
 	return `${FUTURE_DIR}/${slug}.md`;
 }
 
+export async function resolveFutureDraftPath(slug: string): Promise<string> {
+	const direct = futureDraftPath(slug);
+	if (await fileExists(direct)) return direct;
+	try {
+		const files = await readdir(FUTURE_DIR);
+		const mds = files.filter((f) => f.endsWith(".md")).sort();
+		const hit = mds.find((f) => f.includes(slug) || slug.includes(f.replace(/\.md$/, "")));
+		if (hit) return `${FUTURE_DIR}/${hit}`;
+		if (mds.length === 1) return `${FUTURE_DIR}/${mds[0]}`;
+	} catch {}
+	return direct;
+}
+
+export async function readFutureDraft(slug: string): Promise<string> {
+	const p = await resolveFutureDraftPath(slug);
+	return readFile(p, "utf8");
+}
+
 export async function appendToFutureDraft(slug: string, promptText: string): Promise<boolean> {
 	try {
 		const path = futureDraftPath(slug);

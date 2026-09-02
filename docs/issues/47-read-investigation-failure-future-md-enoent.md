@@ -1,7 +1,7 @@
 ---
 id: 47
 title: "Read investigation failure future md ENOENT misclassified as FAILURE_RECORDED"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "read .pi/quest/future/...md ENOENT must not be FAILURE_RECORDED"

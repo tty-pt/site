@@ -1,7 +1,7 @@
 ---
 id: 52
 title: "Skill hint CALL quest_update_state shown while gate blocks it (REASSESSMENT_PENDING + draft_not_approved)"
-state: ready
+state: done
 severity: low
 requires: [51]
 validates: "Skill: quest_journal CALL quest_update_state must not show when reassessmentRequired"

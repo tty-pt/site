@@ -6,6 +6,7 @@ import { generateQuestId, getActiveContext, state } from "./state.ts";
 import { ExtensionContext } from "./types.ts";
 import { formatQuestHierarchy, formatQuestShort } from "./utils.ts";
 import { updateReviewerUIStatus } from "./critical_agent/tracker.ts";
+import { logEvent } from "./logging.ts";
 
 let lastAwarenessKey = "";
 let lastAwarenessValue = "";
@@ -25,6 +26,7 @@ export function updateUIStatus(ctx?: ExtensionContext) {
 		const text = (state.active || (state as any).activeDraft || state.pendingRootQuest)
 			? formatQuestShort(state as any, fresh)
 			: undefined;
+		try { logEvent("UI_STATUS" as any, text || "(none)", { quest: (state as any).active || (state as any).activeDraft || "", text: text || "(none)", fresh } as any); } catch {}
 		if (typeof c.ui?.setStatus === "function") {
 			c.ui.setStatus("quest", text);
 		}

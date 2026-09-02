@@ -313,8 +313,11 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 							}
 							const appended = await appendToFutureDraft(state.activeDraft, trimmed);
 							try {
-								const full = await readFile(futureDraftPath(state.activeDraft), "utf8");
+								const { readFutureDraft, resolveFutureDraftPath } = await import("../paths.ts");
+								const full = await readFutureDraft(state.activeDraft);
 								state.draftLastSavedHash = createHash("sha256").update(full).digest("hex").slice(0, 12);
+								// 49: correct activeDraft if disk slug differs
+								try { const resolved = await resolveFutureDraftPath(state.activeDraft); const base = resolved.split("/").pop()?.replace(/\.md$/, ""); if (base && base !== state.activeDraft) { const old = state.activeDraft; state.activeDraft = base; try { const { logEvent } = await import("../logging.ts"); logEvent("DRAFT_SLUG_CORRECTED" as any, `draft slug corrected ${old} -> ${base}`, { quest: base, slug: base } as any); } catch {} } } catch {}
 								persist(pi, ctx);
 							} catch {
 								try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); persist(pi, ctx); } catch {}
@@ -359,8 +362,23 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 									}
 								}
 							} catch {}
-							// Efficient: auto-trigger draft compliance review once we have at least 2 requirements and not already approved
-							if ((state.draftPrompts?.length || 0) >= 2) {
+							// 53: auto-trigger when 7 evidences (perfection) even with 1 requirement; 54: log check; 55: only if plan drafted
+							const dpLen = (state.draftPrompts?.length || 0);
+							const evidence = (state as any).currentReceipt?.evidenceCount || 0;
+							const hasActionablePlanDraft = await (async ()=>{
+								try{
+									const slug = state.activeDraft; if(!slug) return false;
+									const { readFutureDraft } = await import("../paths.ts");
+									const c = await readFutureDraft(slug);
+									const m = c.match(/##\s*Plan[\s\S]*?(?=\n##\s+|$)/i);
+									if(!m) return false;
+									const body = m[0].replace(/##\s*Plan[^\n]*\n/i,"").trim();
+									if(!body || body==="1." || body==="-" || body.length<10) return false;
+									return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(body);
+								} catch{ return false; }
+							})();
+							try { const { logEvent } = await import("../logging.ts"); const valid = (()=>{ try{ const { isDraftReviewValid } = require("../critical_agent/policy.ts") as any; return isDraftReviewValid(state); } catch{ return false; } })(); logEvent("DRAFT_AUTO_REVIEW_CHECK" as any, `check dpLen=${dpLen} evidence=${evidence} valid=${valid} hasPlan=${hasActionablePlanDraft}`, { quest: state.activeDraft || "", dpLen, evidence, isDraftReviewValid: valid, hasActionablePlanDraft } as any); if(!hasActionablePlanDraft && (dpLen>=1 && evidence>=7)){ logEvent("PLAN_NOT_DRAFTED_YET" as any, `plan not drafted yet — draft plan via quest_update_state {goal,plan,findings}`, { quest: state.activeDraft || "" } as any); try{ const { sendInternalAgentMessage } = await import("../messaging.ts"); sendInternalAgentMessage(pi, `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — draft a concise plan (goal, 2-3 stages, findings) via \`quest_update_state\` before review.`, "steer"); }catch{} } } catch {}
+							if (((dpLen >= 2) || (dpLen >= 1 && evidence >= 7)) && hasActionablePlanDraft) {
 								try {
 									const { isDraftReviewValid } = await import("../critical_agent/policy.ts");
 									if (!isDraftReviewValid(state)) {
@@ -452,7 +470,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 							}
 							const slug = generateSlugFromPrompt(trimmed, 45);
 							await createFutureDraftFromPrompt(slug, trimmed);
-							try { const c = await readFile(join(FUTURE_DIR, `${slug}.md`), "utf8"); state.draftLastSavedHash = createHash("sha256").update(c).digest("hex").slice(0, 12); } catch { try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); } catch {} }
+							try { const { readFutureDraft } = await import("../paths.ts"); const c = await readFutureDraft(slug); state.draftLastSavedHash = createHash("sha256").update(c).digest("hex").slice(0, 12); } catch { try { state.draftLastSavedHash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12); } catch {} }
 							state.activeDraft = slug;
 							state.draftPrompts = [trimmed];
 							state.draftCreatedAt = Date.now();
@@ -543,8 +561,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
 					: getFullWorkflowInstructions(resumeContext);
 				setCachedWorkflow(state.saveGeneration?.hash || "", pressureKey, workflowInstructions);
 
-				// 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal (top, imperative, like vim ftplugin)
-				const skillHint = (!state.active && (state.pendingRootQuest || state.activeDraft))
+				// 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal (top, imperative, like vim ftplugin); 52: not while REASSESSMENT_PENDING blocks quest_update_state
+				const skillHint = (!state.active && (state.pendingRootQuest || state.activeDraft) && !(state as any).reassessmentRequired)
 					? `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`
 					: "";
 				// steer so execution.log grep-able within turn0

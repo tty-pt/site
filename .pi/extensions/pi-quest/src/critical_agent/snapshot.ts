@@ -51,22 +51,28 @@ export async function createReviewSnapshot(
 		if (activeState.activeDraft === slugOrQid) {
 			try {
 				const { createHash } = await import("node:crypto");
-				const { readFile } = await import("node:fs/promises");
-				const { FUTURE_DIR } = await import("../constants.ts");
-				const fPath = `${FUTURE_DIR}/${slugOrQid}.md`;
-				const fContent = await readFile(fPath, "utf8");
+				const { readFutureDraft, resolveFutureDraftPath } = await import("../paths.ts");
+				const fContent = await readFutureDraft(slugOrQid);
 				boundaryKey = `draft:${slugOrQid}:${createHash("sha256").update(fContent).digest("hex").slice(0, 12)}`;
+				try { const rp = await resolveFutureDraftPath(slugOrQid); const base = rp.split("/").pop()?.replace(/\.md$/, ""); if (base && base !== slugOrQid) slugOrQid = base; } catch {}
 			} catch {
-				logEvent("SNAPSHOT_FALLBACK", `snapshot fallback: draft boundary compute failed`, {
-					quest: slugOrQid,
-					reviewId,
-					reviewKind: kind,
-					reason: "draft_boundary_fallback",
-					boundaryKey: activeState.lastPlanReviewBoundaryKey || undefined,
-				});
-				boundaryKey = activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(
-					activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
-				);
+				if (!(activeState as any).activeDraft) {
+					logEvent("SNAPSHOT_FALLBACK", `snapshot fallback: draft boundary compute failed`, {
+						quest: slugOrQid,
+						reviewId,
+						reviewKind: kind,
+						reason: "draft_boundary_fallback",
+						boundaryKey: activeState.lastPlanReviewBoundaryKey || undefined,
+					});
+					boundaryKey = activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(
+						activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
+					);
+				} else {
+					const h = (activeState as any).draftLastSavedHash || (activeState as any).draftLastReviewKey?.split(":")[2] || null;
+					boundaryKey = h ? `draft:${slugOrQid}:${h}` : activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(
+						activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
+					);
+				}
 			}
 		} else {
 			boundaryKey = activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(

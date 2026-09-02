@@ -295,39 +295,8 @@ function shortBoundary(boundaryKey?: string | null): string | undefined {
 }
 
 export function formatActiveReviewsUIStatus(): string | undefined {
-	const running = Array.from(activeReviews.values()).filter((r) => r.status === "starting" || r.status === "running");
-	if (running.length === 0) {
-		if (pendingReviews.size > 0) {
-			const pendingLabels = [...pendingReviews.values()].map((p) => `${p.kind}/${p.triggerReason || p.kind}`).join(", ");
-			return `⏳ queued (${pendingLabels})`;
-		}
-		if (latestCompletedStatus && (Date.now() - latestCompletedStatus.updatedAt) < 15000) {
-			// hide meaningless "? UNCERTAIN" — icon already conveys it via quest slot ↺
-			if (latestCompletedStatus.text.includes("? UNCERTAIN") || latestCompletedStatus.text.includes("?")) {
-				return undefined;
-			}
-			return latestCompletedStatus.text.replace("⚖ Critical: reviewer", "⏳ reviewer");
-		}
-		return undefined;
-	}
-
-	if (running.length === 1) {
-		const r = running[0];
-		const triggerLabel = r.triggerReason ? `${r.kind}/${r.triggerReason}` : r.kind;
-		if (r.activity.turns === 0 && r.activity.tools === 0) {
-			return `⏳ reviewer ⟳ starting (${triggerLabel})`;
-		}
-		const parts: string[] = [];
-		if (r.activity.turns > 0) parts.push(`${r.activity.turns} turns`);
-		if (r.activity.tools > 0) parts.push(`${r.activity.tools} tools`);
-		if (r.activity.files > 0) parts.push(`${r.activity.files} files`);
-		else if (r.activity.reads > 0) parts.push(`${r.activity.reads} reads`);
-		const detail = parts.length > 0 ? ` ⟳ ${parts.join(" · ")}` : " ⟳ running";
-		return `⏳ reviewer ${triggerLabel}${detail}`;
-	}
-
-	const labels = running.map((r) => `${r.reviewId.slice(0, 7)}:${r.kind}/${r.triggerReason || r.kind}`).join(", ");
-	return `⏳ ${running.length} active · ${labels}`;
+	// 46: icon in quest slot (formatQuestShort ↺/⏳/📝) already conveys status — hide duplicate critical_review second │ segment
+	return undefined;
 }
 
 export function updateReviewerUIStatus(ctx?: ExtensionContext, customText?: string | null): void {
@@ -338,8 +307,7 @@ export function updateReviewerUIStatus(ctx?: ExtensionContext, customText?: stri
 		} else if (customText !== undefined) {
 			c.ui.setStatus("critical_review", customText);
 		} else {
-			const text = formatActiveReviewsUIStatus();
-			c.ui.setStatus("critical_review", text);
+			c.ui.setStatus("critical_review", undefined);
 		}
 	}
 }

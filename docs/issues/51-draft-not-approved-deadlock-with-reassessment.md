@@ -1,7 +1,7 @@
 ---
 id: 51
 title: "draft_not_approved blocks quest_update_state while REASSESSMENT_PENDING requires it — deadlock"
-state: ready
+state: done
 severity: high
 requires: [46, 50]
 validates: "quest_update_state during REASSESSMENT_PENDING+draft_not_approved must be GATE_BLOCKED not TOOL_FAILURE"

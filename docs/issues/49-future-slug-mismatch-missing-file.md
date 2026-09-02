@@ -1,7 +1,7 @@
 ---
 id: 49
 title: "Future file slug mismatch: probe look-consumer… vs actual task-adversarial…"
-state: ready
+state: done
 severity: high
 requires: []
 validates: "ls future slug == state.activeDraft"

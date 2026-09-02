@@ -1,7 +1,7 @@
 ---
 id: 02
 title: "Refinement dedup is silent"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "execution.log:DRAFT_APPEND_DEDUPED on duplicate slice"

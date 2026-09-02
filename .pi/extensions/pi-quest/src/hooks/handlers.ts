@@ -275,9 +275,21 @@ export async function handleToolResult(event: any, _ctx: ExtensionContext): Prom
 	// 41: bash cat > quest.md gate-blocked while PROVISIONAL_RESEARCH_PENDING must be GATE_BLOCKED not TOOL_FAILURE
 	const rawCmdForGate = typeof toolInput === "string" ? toolInput : toolInput?.command || toolInput?.cmd || "";
 	const isQuestWriteBlocked = rawIsError && (normName === "bash" || normName === "user_bash") && /quest\.md|\.pi\/quest\/(current|future)/.test(rawCmdForGate);
+	// 51: draft_not_approved while REASSESSMENT_PENDING is GATE_BLOCKED not TOOL_FAILURE
+	const isCoalescenceGateBlocked = Boolean((event as any)?.details?.gateBlocked && (event as any)?.details?.code === "REVIEW_COALESCENCE_PENDING");
 	// Whitelist rg/grep exit 1 (no matches) — not an error, still counts as investigation
+	// 47: read future/current *.md ENOENT while pendingRootQuest/activeDraft is investigation, not failure
+	const readPathForWhitelist = typeof toolInput?.path === "string" ? toolInput.path : (toolInput as any)?.file || "";
+	const isFutureReadENOENT = (normName === "read" || normName === "doc_to_md") &&
+		/\.pi\/quest\/(current|future)\/.*\.md/.test(readPathForWhitelist) &&
+		/ENOENT|no such file/i.test(String((event as any)?.error?.message || (event as any)?.message || (event as any)?.details?.error || toolOutput || "")) &&
+		Boolean((state as any).pendingRootQuest || (state as any).activeDraft);
 	let effectiveIsError = rawIsError;
-	if (isQuestWriteBlocked) {
+	if (isCoalescenceGateBlocked) {
+		effectiveIsError = false;
+	} else if (isFutureReadENOENT) {
+		effectiveIsError = false;
+	} else if (isQuestWriteBlocked) {
 		effectiveIsError = false;
 	} else if ((normName === "bash" || normName === "user_bash") && rawIsError) {
 		const bashFailure = detectBashToolFailure(event);
@@ -292,7 +304,16 @@ export async function handleToolResult(event: any, _ctx: ExtensionContext): Prom
 	let isFailure = effectiveIsError;
 	let failureReason: string | undefined = undefined;
 
-	if (isQuestWriteBlocked) {
+	// 54: enrich no_active_quest with params keys for diagnostics
+	if (normName.includes("quest_update_state") && effectiveIsError) {
+		try { const keys = Object.keys(toolInput || {}).join(","); if (!keys) failureReason = `no_active_quest paramsKeys=[] raw=${JSON.stringify(toolInput).slice(0,120)}`; } catch {}
+	}
+
+	if (isCoalescenceGateBlocked) {
+		isFailure = false;
+	} else if (isFutureReadENOENT) {
+		isFailure = false;
+	} else if (isQuestWriteBlocked) {
 		isFailure = false;
 	} else if (normName === "bash" || normName === "user_bash") {
 		const bashFailure = detectBashToolFailure(event);

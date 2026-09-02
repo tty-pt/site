@@ -1,7 +1,7 @@
 ---
 id: 39
 title: "Human early go must not block re-draft, but must require re-confirm after REVISE"
-state: ready
+state: done
 severity: medium
 requires: [36, 37, 38]
 validates: "pi: early go before agent => stored but REVISE clears, needs re-go (two sub-tests)"

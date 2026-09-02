@@ -1,7 +1,7 @@
 ---
 id: 09
 title: "SYNTHETIC_FILTERED is fire-and-forget and racy"
-state: ready
+state: done
 severity: medium
 requires: []
 validates: "SYNTHETIC_FILTERED sync with hash slice12"
