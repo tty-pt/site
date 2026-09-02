@@ -17,70 +17,67 @@ export function validateReassessmentPrerequisites(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 ): { valid: boolean; note: string } {
-	if (isPlaceholderOrEmpty(conclusionVal)) {
-		st.reassessmentRequired = true;
-		st.researchRequired = true;
-		st.researchComplete = false;
-		st.planConfidence = "low";
-		reportAgentError(
-			pi,
-			ctx,
-			"Reassessment cannot be completed yet. A non-empty reassessmentConclusion is required stating what fresh investigation established about the contradiction.",
-			{
-				code: QuestErrorCode.REASSESSMENT_REQUIRED,
-				requiredNextAction: "Provide a detailed reassessmentConclusion stating what was investigated and what was disproved or confirmed, then retry reassessmentComplete.",
-				details: { Quest: targetName },
-			},
-		);
-		return {
-			valid: false,
-			note: " (Note: reassessmentComplete refused -- requires a non-empty reassessmentConclusion stating what fresh investigation established about the contradiction)",
-		};
+	const conclusionMissing = isPlaceholderOrEmpty(conclusionVal);
+	const evidenceInsufficient = !evidenceCheck.sufficient;
+
+	if (!conclusionMissing && validation.valid && !evidenceInsufficient) {
+		return { valid: true, note: "" };
 	}
 
-	if (!validation.valid) {
-		st.reassessmentRequired = true;
-		st.researchRequired = true;
-		st.researchComplete = false;
-		st.planConfidence = "low";
-		reportAgentError(
-			pi,
-			ctx,
-			`Reassessment cannot be completed yet. Replacement epistemic state invalid or missing: [${validation.missingSections.join(", ")}]${validation.confidenceIssue ? `; ${validation.confidenceIssue}` : ""}`,
-			{
-				code: QuestErrorCode.REASSESSMENT_REQUIRED,
-				requiredNextAction: "Update the missing or invalid sections in the quest state, then retry reassessmentComplete.",
-				details: { Quest: targetName, Missing: validation.missingSections.join(", ") },
-			},
+	// Everything below is the REJECTION path. Reassessment completion requires the
+	// agent to satisfy the whole contract; the previous sequential early-returns
+	// surfaced only one reason per turn, so the agent never assembled a valid payload.
+	// Set the reassessment-incomplete flags the same way regardless of which condition
+	// failed, then report ALL failing fields in a single aggregated message.
+	st.reassessmentRequired = true;
+	st.researchRequired = true;
+	st.researchComplete = false;
+	st.planConfidence = "low";
+
+	const missingSections = (validation.missingSections || []).join(", ");
+	const parts: string[] = [];
+	if (conclusionMissing) {
+		parts.push(
+			'reassessmentConclusion is required -- provide a non-empty reassessmentConclusion stating what your fresh investigation established about the contradiction',
 		);
-		return {
-			valid: false,
-			note: ` (Note: reassessmentComplete refused -- replacement epistemic state invalid or missing: [${validation.missingSections.join(", ")}]${validation.confidenceIssue ? `; ${validation.confidenceIssue}` : ""})`,
-		};
+	}
+	if (missingSections) {
+		parts.push(`the replacement epistemic state is invalid or missing: [${missingSections}]`);
+	}
+	if (validation.confidenceIssue) {
+		parts.push(validation.confidenceIssue);
+	}
+	if (evidenceInsufficient) {
+		parts.push(
+			`a fresh investigation is required: run a read/code-search NOW (after the trigger). ${evidenceCheck.reason}`,
+		);
+	}
+	if (parts.length === 0) {
+		parts.push("reassessment prerequisites were not met");
 	}
 
-	if (!evidenceCheck.sufficient) {
-		st.reassessmentRequired = true;
-		st.researchRequired = true;
-		st.researchComplete = false;
-		st.planConfidence = "low";
-		reportAgentError(
-			pi,
-			ctx,
-			`Reassessment cannot be completed yet. A contradiction triggered a fresh reassessment epoch, but the extension has not observed the required investigation after that trigger. (${evidenceCheck.reason})`,
-			{
-				code: QuestErrorCode.REASSESSMENT_EVIDENCE_REQUIRED,
-				requiredNextAction: "Investigate the contradiction and its underlying assumptions using read/search tools, then record the established facts and revised/revalidated plan before completing reassessment.",
-				details: { Quest: targetName, Reason: evidenceCheck.reason },
-			},
-		);
-		return {
-			valid: false,
-			note: ` (Note: reassessmentComplete refused -- ${evidenceCheck.reason})`,
-		};
-	}
+	const message =
+		`Reassessment cannot be completed yet. Complete ALL of the following, then retry reassessmentComplete:\n• ` +
+		parts.join("\n• ") +
+		`\nAlso ensure <quest>.md epistemic sections are valid; resolve any Files Modified save-verification first.`;
 
-	return { valid: true, note: "" };
+	reportAgentError(pi, ctx, message, {
+		code: evidenceInsufficient ? QuestErrorCode.REASSESSMENT_EVIDENCE_REQUIRED : QuestErrorCode.REASSESSMENT_REQUIRED,
+		requiredNextAction:
+			"Run one read/code-search in this state, update <quest>.md, then retry reassessmentComplete with the assembled payload above.",
+		details: {
+			Quest: targetName,
+			MissingConclusion: conclusionMissing,
+			Missing: missingSections,
+			ConfidenceIssue: validation.confidenceIssue || "",
+			EvidenceReason: evidenceCheck.reason || "",
+		},
+	});
+
+	return {
+		valid: false,
+		note: ` (Note: reassessmentComplete refused -- ${parts.join("; ")})`,
+	};
 }
 
 export function resolveReassessmentState(targetName: string, evidenceCheck: any): void {

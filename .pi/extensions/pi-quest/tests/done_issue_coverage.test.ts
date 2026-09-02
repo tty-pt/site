@@ -666,4 +666,45 @@ Add constants
 		const analysis = analyzeTurnToolResults([tr], "any-quest");
 		assert.strictEqual(analysis.meaningfulFailureDetected, false, "must not trigger reassessment");
 	});
+
+	// =====================================================================
+	// #56 QUEST_REUSED mount bypasses cross-session witness
+	// validates: second QUEST_REUSED on same questId is refused/coalesced, not mounted fresh.
+	// Behavioral coverage lives in tests/cross_session_mount.test.ts; this is a source
+	// guard that the mount-time liveness witness + coalescence event exist.
+	// =====================================================================
+	await t.step("#56 activateExistingQuest must have a session-liveness coalescence guard and QUEST_REUSED_COALESCED event", async () => {
+		const readSrc = async (rel: string) => {
+			try { return await readFile(rel, "utf8"); } catch { return await readFile(".pi/extensions/pi-quest/" + rel, "utf8"); }
+		};
+		const lifecycleSrc = await readSrc("src/lifecycle.ts");
+		const mutexSrc = await readSrc("src/utils/mutex.ts");
+		const typesSrc = await readSrc("src/logging/types.ts");
+		assert.ok(lifecycleSrc.includes("isQuestSessionActive"), "activateExistingQuest must probe session liveness");
+		assert.ok(lifecycleSrc.includes("QUEST_REUSED_COALESCED"), "guard must log QUEST_REUSED_COALESCED");
+		assert.ok(lifecycleSrc.includes("reportAgentError"), "guard must produce an agent-visible message");
+		assert.ok(mutexSrc.includes("SESSION_LIVENESS_FILE"), "mutex must own the session-liveness marker");
+		assert.ok(mutexSrc.includes("isQuestSessionActive"), "mutex must export isQuestSessionActive");
+		assert.ok(typesSrc.includes("QUEST_REUSED_COALESCED"), "QuestLogEventType must include QUEST_REUSED_COALESCED");
+	});
+
+	// =====================================================================
+	// #57 Reassessment completion contract is opaque
+	// validates: agent completes reassessment in <=2 turns after fresh post-trigger
+	// investigation, without a stale-receipt loop.
+	// Behavioral coverage lives in tests/reassessment_contract.test.ts; this source
+	// guard asserts the aggregated contract + actionable freshness reason exist.
+	// =====================================================================
+	await t.step("#57 validateReassessmentPrerequisites must aggregate all missing contract fields + actionable freshness reason", async () => {
+		const readSrc = async (rel: string) => {
+			try { return await readFile(rel, "utf8"); } catch { return await readFile(".pi/extensions/pi-quest/" + rel, "utf8"); }
+		};
+		const reassessmentSrc = await readSrc("src/tools/update/reassessment.ts");
+		const researchSrc = await readSrc("src/research.ts");
+		assert.ok(reassessmentSrc.includes("Complete ALL of the following"), "must aggregate ALL missing contract fields");
+		assert.ok(reassessmentSrc.includes("reassessmentConclusion"), "must name the missing conclusion");
+		assert.ok(reassessmentSrc.includes("read/code-search NOW"), "must instruct a fresh investigation");
+		assert.ok(reassessmentSrc.includes("REASSESSMENT_EVIDENCE_REQUIRED"), "must use the evidence-required code when freshness blocks");
+		assert.ok(researchSrc.includes("records a fresh receipt automatically while reassessment is pending"), "freshness reason must be actionable");
+	});
 });

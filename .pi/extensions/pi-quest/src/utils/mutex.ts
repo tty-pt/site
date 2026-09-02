@@ -1,6 +1,6 @@
 // Per-quest async mutex — promise chain. Clear, predictable, efficient.
 // Ensures state mutations for the same quest are serialized even when reviewers complete concurrently.
-import { existsSync, openSync, closeSync, unlinkSync, mkdirSync, statSync, writeSync, utimesSync } from "node:fs";
+import { existsSync, openSync, closeSync, unlinkSync, mkdirSync, statSync, writeSync, utimesSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { QUEST_CURRENT_DIR, REVIEW_LOCK_STALE_MS_DEFAULT } from "../constants.ts";
 import { questDirPath } from "../paths.ts";
@@ -251,3 +251,113 @@ export async function withReviewFileLock<T>(questId: string | null | undefined, 
 		}
 	});
 }
+
+// ---------------------------------------------------------------------------
+// Durable session-liveness witness (#56)
+//
+// QUEST_REUSED mount coalescence needs to know whether ANOTHER live session is
+// already actively working on the same quest. The in-process questLockChains and
+// the `.review.lock` file only serialize concurrent mounts; neither refutes a
+// second pi process re-mounting the same quest across separate invocations. So we
+// write a durable per-session liveness marker under current/<qid>/ at mount time,
+// mirroring the `.review.lock`/`getStaleMs()` staleness idiom so a crashed session's
+// stale marker does not permanently block a legitimate remount.
+// ---------------------------------------------------------------------------
+export const SESSION_LIVENESS_FILE = ".session.liveness";
+
+export function getSessionLivenessPath(questId?: string | null): string {
+	const dir = questDirPath(questId);
+	return dir ? join(dir, SESSION_LIVENESS_FILE) : "";
+}
+
+export function getSessionLivenessStaleMs(): number {
+	return getStaleMs();
+}
+
+/** Writes (or refreshes) the durable per-session liveness marker for a quest. */
+export function writeSessionLiveness(questId?: string | null, sessionId?: string | null): void {
+	const path = getSessionLivenessPath(questId);
+	if (!path) return;
+	const dir = path.slice(0, path.lastIndexOf("/"));
+	try { if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true }); } catch {}
+	try {
+		const payload = `sessionId=${sessionId || ""}\n`;
+		const fd = openSync(path, "w");
+		try { writeSync(fd, payload); } finally { closeSync(fd); }
+	} catch {}
+}
+
+/** Heartbeats the liveness marker so a long-lived session isn't treated as stale. */
+export function touchSessionLiveness(questId?: string | null): void {
+	const path = getSessionLivenessPath(questId);
+	if (!path) return;
+	try { utimesSync(path, new Date(), new Date()); } catch {}
+}
+
+/** Starts a heartbeat interval for the session-liveness marker; returns stop(). */
+export function startSessionLivenessHeartbeat(questId?: string | null): () => void {
+	const iv = setInterval(() => touchSessionLiveness(questId), REVIEW_LOCK_HEARTBEAT_MS);
+	return () => { clearInterval(iv); };
+}
+
+export interface SessionLivenessInfo {
+	sessionId: string;
+	ts: number;
+	fresh: boolean;
+}
+
+/**
+ * Reads the durable liveness marker. `fresh` is false if the marker is absent,
+ * unreadable, or older than the stale threshold (crash recovery). Mirrors the
+ * stale-recovery semantics of `acquireReviewFileLock`.
+ */
+export function readSessionLiveness(questId?: string | null): SessionLivenessInfo | null {
+	const path = getSessionLivenessPath(questId);
+	if (!path || !existsSync(path)) return null;
+	try {
+		const st = statSync(path);
+		const ts = st.mtimeMs;
+		const age = Date.now() - ts;
+		const fresh = age <= getStaleMs();
+		let sessionId = "";
+		try {
+			const raw = readFileSync(path, "utf8") as string;
+			const m = raw.match(/sessionId=([^\n]*)/);
+			if (m) sessionId = m[1].trim();
+		} catch {}
+		return { sessionId, ts, fresh };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * True when a FRESH liveness marker exists for a DIFFERENT live session than
+ * `mySessionId`. Used at mount time to refuse/coalesce a second session. A stale
+ * marker (crashed session) or the same session's own marker never blocks.
+ */
+export function isQuestSessionActive(questId?: string | null, mySessionId?: string | null): boolean {
+	const info = readSessionLiveness(questId);
+	if (!info || !info.fresh) return false;
+	if (!info.sessionId || !mySessionId) return info.fresh && !!info.sessionId;
+	if (info.sessionId === mySessionId) return false;
+	return true;
+}
+
+/** Force-ages the liveness marker (test + crash-recovery helper). */
+export function setSessionLivenessAsStale(questId?: string | null): void {
+	const path = getSessionLivenessPath(questId);
+	if (!path) return;
+	try {
+		const old = new Date(Date.now() - getStaleMs() - 60_000);
+		utimesSync(path, old, old);
+	} catch {}
+}
+
+/** Removes the liveness marker (clean teardown). */
+export function removeSessionLiveness(questId?: string | null): void {
+	const path = getSessionLivenessPath(questId);
+	if (!path) return;
+	try { if (existsSync(path)) unlinkSync(path); } catch {}
+}
+

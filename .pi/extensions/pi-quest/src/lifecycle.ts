@@ -8,13 +8,13 @@ import { appendChangelogEntry, findProjectRoot } from "./diagnostic.ts";
 import { syncImplementationPermission } from "./gates.ts";
 import { logEvent, logQuestTransition } from "./logging.ts";
 import { extractParentFromQuest, parseMarkdownSections } from "./markdown.ts";
-import { logError } from "./messaging.ts";
+import { logError, reportAgentError } from "./messaging.ts";
 import { cleanDraftIfExists, fileExists, listActiveQuestRecords, listQuestFiles, questArchivePath, questDirPath, questPath, resolveQuestRecordBySlug, slugify } from "./paths.ts";
 import { supersedeObligation } from "./obligations.ts";
 import { persist, verifyAndMarkSaved } from "./persistence.ts";
 import { loadExistingQuestEpistemicState } from "./reconstruction.ts";
 import { startResearchEpoch } from "./research.ts";
-import { createDefaultState, generateQuestId, getState, state } from "./state.ts";
+import { createDefaultState, generateQuestId, getSessionId, getState, state } from "./state.ts";
 import { ExtensionAPI, ExtensionContext, QuestChoiceResult } from "./types.ts";
 import { updateUIStatus } from "./ui.ts";
 import { resolveArchiveContext, type ArchiveContext } from "./lifecycle/archive/context.ts";
@@ -24,7 +24,12 @@ import { pinLogToFinalized, removeActiveDirectory } from "./lifecycle/archive/re
 import { createArchiveZip } from "./lifecycle/archive/zip.ts";
 import { hydrateNextActive, popArchivedAndFindNextActive } from "./lifecycle/archive/stack.ts";
 import { applyLoadedEpistemicState } from "./lifecycle/epistemic_init.ts";
-import { withReviewFileLock } from "./utils/mutex.ts";
+import {
+	isQuestSessionActive,
+	readSessionLiveness,
+	writeSessionLiveness,
+	withReviewFileLock,
+} from "./utils/mutex.ts";
 
 export type LifecycleStage = "terminal_commit" | "active_removal" | "zip_creation" | "changelog_appended";
 export type LifecycleStageObserver = (stage: LifecycleStage, details: any) => void;
@@ -118,6 +123,27 @@ export async function activateExistingQuest(
 		}
 
 		await cleanDraftIfExists(slug, ctx);
+
+		// #56: durable session-liveness witness. Refuse/coalesce a second live
+		// session re-mounting the same quest across separate invocations instead of
+		// letting it spawn a fresh SAVE_VERIFIED gen1 + TURN_START 0.
+		const sessionId = getSessionId(ctx);
+		if (isQuestSessionActive(targetQid, sessionId)) {
+			const activeInfo = readSessionLiveness(targetQid);
+			logEvent("QUEST_REUSED_COALESCED" as any, `quest already active in another live session; refusing duplicate mount`, {
+				quest: targetQid, questId: targetQid, slug, sessionId, activeSession: activeInfo?.sessionId || "",
+			} as any);
+			reportAgentError(pi, ctx,
+				`Quest '${questName}' is already active in another live session (${activeInfo?.sessionId || "unknown"}). This session will not mount a duplicate; no fresh turns, generation resets, or saved-state changes will be emitted here.`,
+				{
+					code: QuestErrorCode.QUEST_REUSED_COALESCED,
+					requiredNextAction: `Do not mount '${questName}' again while the owning session is active. Continue with research-reads only, or if you must act on it, do so in the owning session.`,
+					details: { Quest: questName, ActiveSession: activeInfo?.sessionId || "", Slug: slug },
+				},
+			);
+			return false;
+		}
+		writeSessionLiveness(targetQid, sessionId);
 
 		state.questId = targetQid;
 		state.pendingRootQuest = false;

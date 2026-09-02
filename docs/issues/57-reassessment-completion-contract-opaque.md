@@ -1,7 +1,7 @@
 ---
 id: 57
 title: "Reassessment completion contract is opaque — agent loops with stale investigation receipt and never escapes REASSESSMENT_PENDING"
-state: ready
+state: done
 severity: high
 requires: [51]
 validates: "agent completes reassessment in ≤2 turns after fresh post-trigger investigation, without stale-receipt loop"

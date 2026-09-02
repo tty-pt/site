@@ -186,6 +186,7 @@ export const QuestErrorCode = {
 	PLAN_REVIEW_FAILED: "PLAN_REVIEW_FAILED",
 	PLAN_REVIEW_UNCERTAIN: "PLAN_REVIEW_UNCERTAIN",
 	PLAN_REVIEW_ERROR: "PLAN_REVIEW_ERROR",
+	QUEST_REUSED_COALESCED: "QUEST_REUSED_COALESCED",
 } as const;
 
 export type QuestErrorCode = typeof QuestErrorCode[keyof typeof QuestErrorCode];

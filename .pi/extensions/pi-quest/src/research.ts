@@ -180,7 +180,7 @@ export function hasSufficientInvestigation(
 	if (expectedType === "reassessment" && targetState.reassessmentRequired && r.epochType !== "reassessment") {
 		return {
 			sufficient: false,
-			reason: `Investigation receipt was for initial research, but fresh investigation is required after the reassessment trigger.`,
+			reason: `Investigation receipt was for initial research (epoch ${r.epoch}), but a fresh post-trigger investigation is required for reassessment epoch ${requiredEpoch}. Run a read/code-search now; the extension records a fresh receipt automatically while reassessment is pending.`,
 			receipt: r,
 		};
 	}

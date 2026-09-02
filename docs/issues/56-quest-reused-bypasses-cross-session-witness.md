@@ -1,7 +1,7 @@
 ---
 id: 56
 title: "QUEST_REUSED mount bypasses cross-session filesystem witness — new sessions spawn against in-flight quest"
-state: ready
+state: done
 severity: high
 requires: [37]
 validates: "second QUEST_REUSED on same questId while REASSESSMENT_PENDING is refused/coalesced, not mounted as fresh session"

@@ -20,6 +20,7 @@ export function mapEventTypeToMajorPhase(type: QuestLogEventType | string, conte
 
     case "QUEST_DETECTED":
     case "QUEST_REUSED":
+    case "QUEST_REUSED_COALESCED":
     case "QUEST_CREATED":
     case "QUEST_START":
     case "QUEST_SWITCH":

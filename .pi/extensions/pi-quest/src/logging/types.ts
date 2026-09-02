@@ -18,6 +18,7 @@ export type QuestLogEventType =
 	// 1. Quest initialization decisions
 	| "QUEST_DETECTED"
 	| "QUEST_REUSED"
+	| "QUEST_REUSED_COALESCED"
 	| "QUEST_CREATED"
 	| "QUEST_START"
 	| "QUEST_SWITCH"
