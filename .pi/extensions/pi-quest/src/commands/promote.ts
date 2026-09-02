@@ -61,7 +61,7 @@ export async function promoteDraft(
 		const destArch = join(archDir, basename(futurePath));
 		try { await copyFile(futurePath, destArch); } catch {}
 		const h = createHash("sha256").update(content).digest("hex").slice(0, 12);
-		try { logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: s.active || targetSlug, slug: targetSlug, hash: h, dest: destArch, reason: "promote" } as any); } catch {}
+		try { logEvent("DRAFT_PROMOTED" as any, `draft promoted`, { quest: s.active || targetSlug, slug: targetSlug, hash: h, dest: destArch, reason: "promote" } as any); } catch {}
 	} catch {}
 	try { await unlink(futurePath); } catch {}
 

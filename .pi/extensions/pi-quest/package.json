@@ -11,6 +11,18 @@
     "test": "deno test --allow-all --node-modules-dir=none tests/",
     "zip": "deno run --allow-all scripts/zip_bundle.ts"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "pi-subagents": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": { "optional": true },
+    "@earendil-works/pi-agent-core": { "optional": true },
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "pi-subagents": { "optional": true }
+  },
   "pi": {
     "extensions": [
       "index.ts"

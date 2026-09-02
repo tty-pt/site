@@ -1,6 +1,6 @@
 // Per-quest async mutex — promise chain. Clear, predictable, efficient.
 // Ensures state mutations for the same quest are serialized even when reviewers complete concurrently.
-import { existsSync, openSync, closeSync, unlinkSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, openSync, closeSync, unlinkSync, mkdirSync, statSync, writeSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { QUEST_CURRENT_DIR, REVIEW_LOCK_STALE_MS_DEFAULT } from "../constants.ts";
 import { questDirPath } from "../paths.ts";
@@ -8,15 +8,52 @@ import { logEvent } from "../logging.ts";
 import { getReviewLockStaleMs } from "../config.ts";
 
 export const REVIEW_LOCK_FILE = ".review.lock";
+export const REVIEW_ACTIVE_FILE = ".review.active";
 export const REVIEW_LOCK_STALE_MS = REVIEW_LOCK_STALE_MS_DEFAULT;
+
+export const REVIEW_LOCK_HEARTBEAT_MS = 10_000;
+
+/** Refreshes the mtime of the lock file to prevent stale-lock recovery during a long review. */
+export function touchReviewLockFile(lockPath: string): void {
+	try { utimesSync(lockPath, new Date(), new Date()); } catch {}
+}
+
+/**
+ * Starts heartbeating the .review.lock file so it outlives the 30 s stale threshold
+ * for the full duration of the review. Returns a stop() function.
+ */
+export function startReviewLockHeartbeat(
+	questId: string | null | undefined,
+	lockPath: string,
+): () => void {
+	logEvent("REVIEW_LOCK_HEARTBEAT_STARTED" as any, `review lock heartbeat started lockPath=${lockPath}`, {
+		quest: questId || "",
+		lockPath,
+		intervalMs: REVIEW_LOCK_HEARTBEAT_MS,
+	} as any);
+	const iv = setInterval(() => touchReviewLockFile(lockPath), REVIEW_LOCK_HEARTBEAT_MS);
+	return () => {
+		clearInterval(iv);
+		logEvent("REVIEW_LOCK_HEARTBEAT_STOPPED" as any, `review lock heartbeat stopped lockPath=${lockPath}`, {
+			quest: questId || "",
+			lockPath,
+		} as any);
+	};
+}
 
 function getStaleMs(): number {
 	try { return getReviewLockStaleMs(); } catch { return REVIEW_LOCK_STALE_MS_DEFAULT; }
 }
 
 const questLockChains = new Map<string, Promise<void>>();
+const heldQuestLocks = new Set<string>();
+const heldFileLocks = new Set<string>();
 
-export async function withQuestLock<T>(key: string, fn: () => T | Promise<T>): Promise<T> {
+export async function withQuestLock<T>(key: string, fn: () => T | Promise<T>, getActiveCount?: () => number): Promise<T> {
+	// re-entrant: if already held in this async chain, just run
+	if (heldQuestLocks.has(key)) {
+		return await fn();
+	}
 	const existing = questLockChains.get(key);
 	const prev = existing ?? Promise.resolve();
 	let release!: () => void;
@@ -33,11 +70,24 @@ export async function withQuestLock<T>(key: string, fn: () => T | Promise<T>): P
 		logEvent("MUTEX_WAIT", `mutex wait ${key}`, { lockKey: key, waitMs } as any);
 	}
 	const holdStart = Date.now();
+	heldQuestLocks.add(key);
 	try {
 		return await fn();
 	} finally {
 		const holdMs = Date.now() - holdStart;
-		logEvent("MUTEX_ACQUIRED", `mutex acquired ${key}`, { lockKey: key, holdMs, waitMs, contention: hadContention } as any);
+		let activeCount = 0;
+		try { if (getActiveCount) activeCount = getActiveCount(); } catch {}
+		let questForLog = "";
+		try {
+			if (key.startsWith("review:")) questForLog = key.slice("review:".length).split(":")[0];
+			else if (key.startsWith("global:")) questForLog = "";
+		} catch {}
+		const logCtx: any = { lockKey: key, holdMs, waitMs, contention: hadContention, activeCount };
+		if (questForLog) logCtx.quest = questForLog;
+		// Explicit questId ensures log goes to correct quest file even when global state is stale
+		if (questForLog) logCtx.questId = questForLog;
+		logEvent("MUTEX_ACQUIRED", `mutex acquired ${key}`, logCtx);
+		heldQuestLocks.delete(key);
 		release();
 		if (questLockChains.get(key) === chain) {
 			questLockChains.delete(key);
@@ -67,6 +117,33 @@ export function getReviewLockPath(questId: string | null | undefined): string {
 	const qid = questId || "quest";
 	const dir = questDirPath(qid);
 	return dir ? join(dir, REVIEW_LOCK_FILE) : `${QUEST_CURRENT_DIR}/${qid}/${REVIEW_LOCK_FILE}`;
+}
+
+export function getReviewActivePath(questId: string | null | undefined): string {
+	const qid = questId || "quest";
+	const dir = questDirPath(qid);
+	return dir ? join(dir, REVIEW_ACTIVE_FILE) : `${QUEST_CURRENT_DIR}/${qid}/${REVIEW_ACTIVE_FILE}`;
+}
+
+export function isReviewActive(questId: string | null | undefined): boolean {
+	const p = getReviewActivePath(questId);
+	try { return existsSync(p); } catch { return false; }
+}
+
+export function createReviewActiveFile(questId: string | null | undefined, reviewId: string): void {
+	const p = getReviewActivePath(questId);
+	try {
+		const dir = p.slice(0, p.lastIndexOf("/"));
+		if (dir && !existsSync(dir)) try { mkdirSync(dir, { recursive: true }); } catch {}
+		const fd = openSync(p, "w");
+		try { writeSync(fd, reviewId); } catch {}
+		try { closeSync(fd); } catch {}
+	} catch {}
+}
+
+export function removeReviewActiveFile(questId: string | null | undefined): void {
+	const p = getReviewActivePath(questId);
+	try { if (existsSync(p)) unlinkSync(p); } catch {}
 }
 
 export function isQuestLocked(key: string): boolean {
@@ -127,4 +204,50 @@ export function acquireReviewFileLock(questId: string | null | undefined): { acq
 export function releaseReviewFileLock(lockPath: string, owned: boolean): void {
 	if (!owned || !lockPath) return;
 	try { if (existsSync(lockPath)) unlinkSync(lockPath); } catch {}
+}
+
+export async function withReviewFileLock<T>(questId: string | null | undefined, fn: () => T | Promise<T>, opts?: { waitMs?: number; retries?: number }): Promise<T> {
+	const qKey = getReviewLockKey(questId);
+	const lockPath = getReviewLockPath(questId);
+	// re-entrant: if already held, just run
+	if (heldFileLocks.has(lockPath) || heldQuestLocks.has(qKey)) {
+		return await fn();
+	}
+	// per-process promise chain first
+	return await withQuestLock(qKey, async () => {
+		const maxRetries = opts?.retries ?? 100;
+		const waitPerRetry = opts?.waitMs ?? 20;
+		let attempts = 0;
+		let acquiredPath: string | null = null;
+		let owned = false;
+		const startWait = Date.now();
+		while (attempts <= maxRetries) {
+			const res = acquireReviewFileLock(questId);
+			if (res.acquired) {
+				acquiredPath = res.path;
+				owned = true;
+				heldFileLocks.add(acquiredPath);
+				if (attempts > 0) {
+					const waitMs = Date.now() - startWait;
+					try { logEvent("MUTEX_WAIT" as any, `mutex wait file ${res.path} retries=${attempts}`, { lockKey: qKey, waitMs, retries: attempts, lockPath: res.path } as any); } catch {}
+				}
+				break;
+			}
+			// not acquired, check stale already handled inside acquire; if still EEXIST, wait
+			if (attempts === maxRetries) {
+				try { logEvent("MUTEX_WAIT" as any, `mutex wait file timeout ${res.path}`, { lockKey: qKey, waitMs: Date.now() - startWait, retries: attempts, lockPath: res.path } as any); } catch {}
+				throw new Error(`Review file lock timeout for ${questId}: ${res.path}`);
+			}
+			attempts++;
+			await new Promise((r) => setTimeout(r, waitPerRetry));
+		}
+		if (!owned || !acquiredPath) throw new Error(`Failed to acquire review file lock for ${questId}`);
+		try {
+			const result = await fn();
+			return result;
+		} finally {
+			try { releaseReviewFileLock(acquiredPath!, owned); } catch {}
+			try { heldFileLocks.delete(acquiredPath!); } catch {}
+		}
+	});
 }

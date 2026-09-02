@@ -24,6 +24,7 @@ import { pinLogToFinalized, removeActiveDirectory } from "./lifecycle/archive/re
 import { createArchiveZip } from "./lifecycle/archive/zip.ts";
 import { hydrateNextActive, popArchivedAndFindNextActive } from "./lifecycle/archive/stack.ts";
 import { applyLoadedEpistemicState } from "./lifecycle/epistemic_init.ts";
+import { withReviewFileLock } from "./utils/mutex.ts";
 
 export type LifecycleStage = "terminal_commit" | "active_removal" | "zip_creation" | "changelog_appended";
 export type LifecycleStageObserver = (stage: LifecycleStage, details: any) => void;
@@ -82,66 +83,69 @@ export async function activateExistingQuest(
 	promptText?: string,
 ): Promise<boolean> {
 	if (!slug) return false;
-	let targetQid = slug;
-	let path = questPath(slug);
-	let questName = slug;
+	// review+save: serialize concurrent QUEST_REUSED for same slug/qid
+	return await withReviewFileLock(slug, async () => {
+		let targetQid = slug;
+		let path = questPath(slug);
+		let questName = slug;
 
-	const record = await resolveQuestRecordBySlug(slug);
-	if (record) {
-		targetQid = record.qid;
-		path = record.path;
-		questName = record.name;
-	}
+		const record = await resolveQuestRecordBySlug(slug);
+		if (record) {
+			targetQid = record.qid;
+			path = record.path;
+			questName = record.name;
+		}
 
-	const futurePath = `${FUTURE_DIR}/${slug}.md`;
-	const isExistingOnDisk = await fileExists(path);
+		const futurePath = `${FUTURE_DIR}/${slug}.md`;
+		const isExistingOnDisk = await fileExists(path);
 
-	if (!isExistingOnDisk && (await fileExists(futurePath))) {
-		targetQid = generateQuestId();
-		path = questPath(targetQid);
-		await mkdir(questDirPath(targetQid), { recursive: true });
-		try {
-			const archDir = join(questDirPath(targetQid), "future-archive");
-			try { if (!existsSync(archDir)) { const { mkdirSync } = await import("node:fs"); mkdirSync(archDir, { recursive: true }); } } catch {}
-			const destArch = join(archDir, basename(futurePath));
-			try { copyFileSync(futurePath, destArch); } catch { try { await copyFile(futurePath, destArch); } catch {} }
-			try { const content = await readFile(futurePath, "utf8"); const h = createHash("sha256").update(content).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: state.active || slug, slug, hash: h, dest: destArch, reason: "activateExistingQuest" } as any); } catch {}
-		} catch {}
-		await rename(futurePath, path);
-		if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
-	} else if (!isExistingOnDisk) {
-		logQuestTransition("QUEST_ACTIVATION_FAILED", `failed to activate quest '${slug}': file not found`, { quest: slug, reason: "file_not_found" });
-		return false;
-	}
+		if (!isExistingOnDisk && (await fileExists(futurePath))) {
+			targetQid = generateQuestId();
+			path = questPath(targetQid);
+			await mkdir(questDirPath(targetQid), { recursive: true });
+			try {
+				const archDir = join(questDirPath(targetQid), "future-archive");
+				try { if (!existsSync(archDir)) { const { mkdirSync } = await import("node:fs"); mkdirSync(archDir, { recursive: true }); } } catch {}
+				const destArch = join(archDir, basename(futurePath));
+				try { copyFileSync(futurePath, destArch); } catch { try { await copyFile(futurePath, destArch); } catch {} }
+				try { const content = await readFile(futurePath, "utf8"); const h = createHash("sha256").update(content).digest("hex").slice(0, 12); logEvent("DRAFT_PROMOTED" as any, `draft promoted`, { quest: state.active || slug, slug, hash: h, dest: destArch, reason: "activateExistingQuest" } as any); } catch {}
+			} catch {}
+			await rename(futurePath, path);
+			if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
+		} else if (!isExistingOnDisk) {
+			logQuestTransition("QUEST_ACTIVATION_FAILED", `failed to activate quest '${slug}': file not found`, { quest: slug, reason: "file_not_found" });
+			return false;
+		}
 
-	await cleanDraftIfExists(slug, ctx);
+		await cleanDraftIfExists(slug, ctx);
 
-	state.questId = targetQid;
-	state.pendingRootQuest = false;
-	state.pendingRootRequest = null;
-	state.questIdentityEstablished = true;
-	state.pickerCancelled = false;
-	state.active = questName;
-	state.stack = [questName];
-	state.dirty = false;
-	state.saveGeneration = null;
-	state.lastSavedHash = null;
-	state.consecutiveFailures = 0;
-	state.substantiveTurnsSinceCheckpoint = 0;
-	state.lastReassessmentPromptAt = 0;
-	state.lastReassessmentReason = null;
-	state.lastCheckpointPromptAt = 0;
+		state.questId = targetQid;
+		state.pendingRootQuest = false;
+		state.pendingRootRequest = null;
+		state.questIdentityEstablished = true;
+		state.pickerCancelled = false;
+		state.active = questName;
+		state.stack = [questName];
+		state.dirty = false;
+		state.saveGeneration = null;
+		state.lastSavedHash = null;
+		state.consecutiveFailures = 0;
+		state.substantiveTurnsSinceCheckpoint = 0;
+		state.lastReassessmentPromptAt = 0;
+		state.lastReassessmentReason = null;
+		state.lastCheckpointPromptAt = 0;
 
-	const loaded = await loadExistingQuestEpistemicState(targetQid);
-	if (loaded.questId) state.questId = loaded.questId;
-	applyLoadedEpistemicState(state, loaded, promptText || undefined);
-	await verifyAndMarkSaved(pi, ctx, questName);
-	persist(pi, ctx);
-	updateUIStatus(ctx);
+		const loaded = await loadExistingQuestEpistemicState(targetQid);
+		if (loaded.questId) state.questId = loaded.questId;
+		applyLoadedEpistemicState(state, loaded, promptText || undefined);
+		await verifyAndMarkSaved(pi, ctx, questName);
+		persist(pi, ctx);
+		updateUIStatus(ctx);
 
-	logQuestTransition("QUEST_REUSED", `reusing existing quest '${questName}'`, { quest: questName });
+		logQuestTransition("QUEST_REUSED", `reusing existing quest '${questName}'`, { quest: questName });
 
-	return true;
+		return true;
+	});
 }
 
 export async function ensureRootQuestForPrompt(

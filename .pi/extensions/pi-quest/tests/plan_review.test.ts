@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import plugin, {
 	acceptRootConfirmation,
+	asyncContext,
 	buildCriticalReviewPrompt,
 	canImplement,
 	canToolExecuteInCriticalReview,
@@ -594,6 +595,51 @@ REQUIRED REVISIONS:
 		assert.strictEqual(reviewRes.available, false);
 		assert.strictEqual(reviewRes.skipped, true);
 		assert.strictEqual(reviewRes.success, true);
+	});
+
+	// -----------------------------------------------------------------------
+	// 10b. Draft branch with no registered reviewer returns null AND emits audit
+	// log (covers #21: silent return null). The !registered early-return in the
+	// draft shard must log REVIEW_DEDUP_HIT + CRITICAL_REVIEW_SUPPRESSED_DUPLICATE
+	// -----------------------------------------------------------------------
+	await t.step("10b. checkAndTriggerPlanReview draft !registered returns null and logs REVIEW_DEDUP_HIT", async () => {
+		const { mockPi } = createMockExtensionAPI();
+		const ctx = createMockContext(50000, "session_plan_10b");
+		plugin(mockPi);
+		setCustomSubagentRunner(null);
+
+		const s = getState(ctx);
+		const slug = "draft-unregistered-audit";
+		const qid = `qid_10b_${slug}`;
+		s.questId = qid;
+		s.activeDraft = slug;
+		s.active = "";
+		s.stack = [];
+		s.draftPrompts = ["prompt one"];
+
+		// checkAndTriggerPlanReview reads the future draft to compute the hash
+		const futureDir = ".pi/quest/future";
+		await mkdir(futureDir, { recursive: true });
+		await writeFile(`${futureDir}/${slug}.md`, `# Draft: ${slug}\n\n## Requirements\n- prompt one\n`, "utf8");
+
+		// Ensure the quest log dir exists so logEvent writes to a real file (path derives from s.questId)
+		await mkdir(`${currentDir}/${qid}`, { recursive: true });
+		const logPath = getQuestLogPath(qid, currentDir);
+		await rm(logPath, { force: true });
+
+		// No reviewer registered -> draft !registered branch returns null.
+		// Wrap in asyncContext.run so the bare logEvent calls (which resolve the
+		// log path from getActiveContext()) route to this session's questId,
+		// matching how the framework invokes handlers via withContext (context.ts).
+		const result = await asyncContext.run(ctx, () => checkAndTriggerPlanReview(mockPi, ctx));
+		assert.strictEqual(result, null, "must return null when no reviewer is registered");
+
+		// The previously-silent return must now emit structured audit events (#21)
+		const logContent = await readFile(logPath, "utf8");
+		assert.ok(logContent.includes("REVIEW_DEDUP_HIT"), "must log REVIEW_DEDUP_HIT for draft !registered");
+		assert.ok(logContent.includes("reason=not_registered"), "REVIEW_DEDUP_HIT must carry reason=not_registered");
+		assert.ok(logContent.includes("shard=draft"), "REVIEW_DEDUP_HIT must carry shard=draft");
+		assert.ok(logContent.includes("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE"), "must log CRITICAL_REVIEW_SUPPRESSED_DUPLICATE");
 	});
 
 	// -----------------------------------------------------------------------

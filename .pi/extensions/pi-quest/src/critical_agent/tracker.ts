@@ -6,6 +6,7 @@ import { clearAllQuestLocks } from "../utils/mutex.ts";
 const activeReviews = new Map<string, ActiveReview>();
 const pendingReviews = new Map<string, PendingReviewRequest>();
 let latestCompletedStatus: { text: string; updatedAt: number } | null = null;
+export const reviewPromiseByKey = new Map<string, Promise<any>>();
 
 export function getActiveReviews(): Map<string, ActiveReview> {
 	return activeReviews;
@@ -179,6 +180,7 @@ export function registerActiveReview(
 	snapshot: ReviewSnapshot,
 	promise?: Promise<any>,
 	triggerReason?: string,
+	abortController?: AbortController,
 ): ActiveReview {
 	const existing = findActiveReviewForQuest(questSlug);
 	if (existing) {
@@ -196,6 +198,7 @@ export function registerActiveReview(
 		activity: createEmptyActivityStats(),
 		status: "starting",
 		promise,
+		abortController,
 	};
 	activeReviews.set(reviewId, active);
 	return active;
@@ -253,6 +256,26 @@ export function updateReviewActivity(
 
 	updateReviewerUIStatus(ctx);
 	return rev.activity;
+}
+
+export function cancelActiveReview(
+	reviewId: string,
+	reason: string,
+	ctx?: ExtensionContext,
+): void {
+	const rev = activeReviews.get(reviewId);
+	if (!rev) return;
+	if (rev.cancelled || rev.status === "cancelled" || rev.status === "completed" || rev.status === "failed") return;
+	rev.cancelled = true;
+	rev.cancellationRequested = true;
+	rev.cancellationReason = reason;
+	rev.cancelledAt = Date.now();
+	rev.status = "cancelled";
+	if (rev.abortController) {
+		try { rev.abortController.abort(reason); } catch {}
+	}
+	activeReviews.delete(reviewId);
+	updateReviewerUIStatus(ctx);
 }
 
 export function completeActiveReview(

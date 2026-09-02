@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { QUEST_CURRENT_DIR } from "../src/constants.ts";
 import {
 	assert,
@@ -27,6 +28,9 @@ Deno.test("lifecycle_consistency: authoritative completion, diagnostic archive o
 	const currentDir = ".pi/quest/current";
 	const archiveDir = ".pi/quest/archive";
 	await mkdir(currentDir, { recursive: true });
+	await mkdir(archiveDir, { recursive: true });
+	// Clean any leftover zips from prior full-suite runs to ensure step 4 isolation
+	try { await rm(archiveDir, { recursive: true, force: true }); } catch {}
 	await mkdir(archiveDir, { recursive: true });
 
 	// -----------------------------------------------------------------------
@@ -320,6 +324,8 @@ Archive quest
 	// Scenario 4: Strict Terminal Ordering & Post-Completion Diagnostic Artifact
 	// -----------------------------------------------------------------------
 	await t.step("4. Terminal ordering: commit/verify state -> remove active quest -> diagnostic zip post-completion -> changelog -> completion", async () => {
+		const tempArchiveBase = await mkdtemp(join(tmpdir(), "pi-quest-archive-"));
+		try {
 		const { api, ctx, commands, tools } = setupCompactionTestHarness(10000, "session_terminal_ordering_proof");
 		const questName = "terminal-ordering-proof-quest";
 
@@ -329,6 +335,9 @@ Archive quest
 		const qPath = questPath(qid);
 		const qDir = questDirPath(qid);
 		const projectRoot = findProjectRoot(ctx?.cwd);
+		// Ensure no leftover zip for this qid (fix full-suite flake where prior run left zip)
+		try { await rm(questArchivePath(qid, projectRoot), { force: true }); } catch {}
+		try { await rm(questArchivePath(qid), { force: true }); } catch {}
 
 		recordObservedInvestigation(state, "read", { path: "src/engine.c" }, "code", false);
 		await tools["quest_update_state"].execute(
@@ -447,6 +456,9 @@ Archive
 		}
 
 		await rm(zipPath, { force: true });
+		} finally {
+			try { await rm(tempArchiveBase, { recursive: true, force: true }); } catch {}
+		}
 	});
 
 	// -----------------------------------------------------------------------

@@ -33,18 +33,6 @@ export function dequeuePendingIfNeeded(
     try { logEvent("PENDING_COALESCED_DROPPED" as any, `pending coalesced dropped (no pendings)`, { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 } as any); } catch {}
     return null;
   }
-  const firstPlanReviewFired = (targetState as any).firstPlanReviewFired || (targetState as any).planReviewAlreadyFired || !!(targetState as any).lastPlanReviewApproval;
-  // 38: keep draft follow-up pending even after first approval — live draft hash drift supersedes old boundary
-  const hasDraftPending = pendings.some((p: any) => String(p.boundaryKey || "").startsWith("draft:") || String(p.kind || "") === "plan_review" && targetState.activeDraft);
-  if (firstPlanReviewFired && !hasDraftPending && pendings.some((p: any) => p.kind === "plan_review")) {
-    logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (first plan review already fired)`, {
-      quest: slug,
-      shard: "plan_review",
-      staleCount: pendings.length,
-      candidateCount: 0,
-    });
-    return null;
-  }
   const latestPlanVersion = targetState.planVersion || 1;
   const latestHash = targetState.lastSavedHash || (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
   const latestBoundaryKey = targetState.lastPlanReviewBoundaryKey;

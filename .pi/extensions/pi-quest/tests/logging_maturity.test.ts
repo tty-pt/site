@@ -37,12 +37,14 @@ Deno.test("logging_maturity: B2/B2.5/B3 observability", async (t) => {
 				logEvent("DRAFT_APPEND_DEDUPED", "deduped", { logPath, questId: qid, slug: "my-feature", hash: h, draftPromptsCount: 1 } as any);
 				logEvent("DRAFT_CONVERSATIONAL_IGNORED", "ignored", { logPath, questId: qid, slug: "my-feature", hash: h } as any);
 				logEvent("DRAFT_DISCARDED", "discarded", { logPath, questId: qid, slug: "my-feature", hash: h, reviewId: "rev_1", boundaryKey: "bk123" } as any);
+			logEvent("DRAFT_PROMOTED", "promoted", { logPath, questId: qid, slug: "my-feature", hash: h, dest: "/arch/my-feature.md", reason: "promote" } as any);
 			});
 			const content = await readFile(logPath, "utf8");
 			assert.ok(content.includes("DRAFT_APPENDED"));
 			assert.ok(content.includes("DRAFT_APPEND_DEDUPED"));
 			assert.ok(content.includes("DRAFT_CONVERSATIONAL_IGNORED"));
 			assert.ok(content.includes("DRAFT_DISCARDED"));
+			assert.ok(content.includes("DRAFT_PROMOTED"));
 			// formatters priority includes new keys
 			const ctxStr = formatContextFields({ draftPromptsCount: 1, hash: "abc", attemptKey: "k", syntheticPrefix: "pre" } as any);
 			assert.ok(ctxStr.includes("draftPromptsCount="));

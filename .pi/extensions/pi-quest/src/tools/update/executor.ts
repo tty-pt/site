@@ -17,6 +17,7 @@ import { ensureQuestId, getState, isRootQuest, state } from "../../state.ts";
 import { checkAndEmitGateContinuationSteer } from "../../tool_gating.ts";
 import { QuestErrorCode } from "../../types.ts";
 import type { ExtensionAPI, ExtensionContext, StoredState } from "../../types.ts";
+import { withReviewFileLock } from "../../utils/mutex.ts";
 import { handleReassessmentCompletion } from "./reassessment.ts";
 import { applyEpistemicMetadataToUpdates, handleResearchCompletion } from "./research.ts";
 import { capturePostUpdatePlanningSnapshot, capturePreUpdatePlanningSnapshot } from "./planning.ts";
@@ -131,7 +132,11 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 
 export function resolveUpdateTarget(params: any): { targetName: string } | { errorResponse: any } {
 	const rawName = (params?.name || params?.questName || "").trim();
-	const targetName = slugify(rawName || state.active || "");
+	// Fallback to activeDraft slug when drafting and providesPlan (P1) — avoids no_active_quest extra turn
+	const fallbackDraft = (state as any).activeDraft as string | null;
+	const providesPlan = Boolean(params?.plan || params?.findings || params?.understanding || params?.assumptions || params?.goal || params?.planConfidence);
+	const fallback = providesPlan && fallbackDraft ? fallbackDraft : "";
+	const targetName = slugify(rawName || state.active || fallback || "");
 	if (!targetName) {
 		return {
 			errorResponse: {
@@ -444,12 +449,18 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 			ctx,
 		);
 
-		await writeFile(path, updatedMarkdown, "utf8");
-		if (path.endsWith("quest.md")) await syncMetaJson((targetState.questId || state.questId || "") as string, targetState);
-		const saveRes = await verifyAndMarkSaved(pi, ctx, targetName);
-		persist(pi, ctx);
-
-		const postPlanning = capturePostUpdatePlanningSnapshot(targetName, updatedMarkdown, targetState);
+		// review+save: file lock for durable write+verify (P2) — re-entrant with persistence lock
+		let saveRes: any;
+		let postPlanning: ReturnType<typeof capturePostUpdatePlanningSnapshot>;
+		await withReviewFileLock(targetState.questId || state.questId || targetName, async () => {
+			await writeFile(path, updatedMarkdown, "utf8");
+			if (path.endsWith("quest.md")) await syncMetaJson((targetState.questId || state.questId || "") as string, targetState);
+			saveRes = await verifyAndMarkSaved(pi, ctx, targetName);
+			persist(pi, ctx);
+			postPlanning = capturePostUpdatePlanningSnapshot(targetName, updatedMarkdown, targetState);
+		});
+		// fallback if lock wrapper didn't set (should not happen)
+		if (!postPlanning!) postPlanning = capturePostUpdatePlanningSnapshot(targetName, updatedMarkdown, targetState);
 
 		try {
 			if (prePlanning.boundaryKey !== postPlanning.boundaryKey) {

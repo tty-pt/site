@@ -24,10 +24,11 @@ export async function executeReviewBackground(
 		options: any;
 		reviewer: PiSubagentReviewer;
 		resolveExecution: (res: any) => void;
+		abortController?: AbortController;
 		onPending?: (snapshot: ReviewSnapshot) => void | Promise<void>;
 	},
 ): Promise<void> {
-	const { slug, questId, sessionId, correlationId, targetState, currentPlanVersion, currentHash, provisionalSnapshot, kind, options, reviewer, resolveExecution, onPending } = params;
+	const { slug, questId, sessionId, correlationId, targetState, currentPlanVersion, currentHash, provisionalSnapshot, kind, options, reviewer, resolveExecution, abortController, onPending } = params;
 
 	let childSessionIdRecorded: string | undefined = undefined;
 	const activityStats: ReviewActivityStats = {
@@ -117,8 +118,19 @@ export async function executeReviewBackground(
 			childSessionId: childSessionIdRecorded,
 			parentSessionId: sessionId,
 			timeoutMs: options.timeoutMs,
+			signal: abortController?.signal,
 			onActivity,
 		});
+
+		// If aborted after review returned normally, discard result (runner didn't throw)
+		if (abortController?.signal.aborted) {
+			logCriticalReviewTransition("REVIEW_CANCELLED" as any, `review execution cancelled: ${String(abortController.signal.reason || "aborted")}`, {
+				quest: slug, questId, sessionId, reviewId: correlationId,
+				reason: String(abortController.signal.reason || "aborted"),
+			} as any);
+			resolveExecution({ success: false, available: true, skipped: true, error: "cancelled" });
+			return;
+		}
 
 		logToolActivity("subagent", "success", {
 			quest: slug,
@@ -164,6 +176,16 @@ export async function executeReviewBackground(
 		const res = await reconcileReviewResult(snapshot, parsedResult, targetState, correlationId, pi, ctx);
 		resolveExecution(res);
 	} catch (err: any) {
+		// If the review was cancelled (superseded), discard result silently
+		const { getActiveReviews } = await import("../tracker.ts");
+		if ((err?.name === "AbortError") || abortController?.signal.aborted || (getActiveReviews().get(correlationId) as any)?.cancelled) {
+			logCriticalReviewTransition("REVIEW_CANCELLED" as any, `review execution cancelled: ${err?.message || "aborted"}`, {
+				quest: slug, questId, sessionId, reviewId: correlationId,
+				reason: err?.message || "aborted",
+			} as any);
+			resolveExecution({ success: false, available: true, skipped: true, error: "cancelled" });
+			return;
+		}
 		const timeoutLayer = err?.timeoutLayer || "quest_journal_deadline";
 		logToolActivity("subagent", "failure", {
 			quest: slug,

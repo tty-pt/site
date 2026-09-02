@@ -94,7 +94,7 @@ export function isSubagentToolRegistered(pi?: ExtensionAPI, _ctx?: ExtensionCont
 export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContext): SubagentExecutorFn | null {
 	if (customSubagentRunner) return customSubagentRunner;
 
-	// Subagent extension supported bridge mechanism (pi.events bridge registered by pi-cohort)
+	// Subagent extension supported bridge mechanism (pi.events bridge registered by pi-subagents)
 	if (pi?.events && typeof pi.events.on === "function" && typeof pi.events.emit === "function") {
 		if (!isSubagentToolRegistered(pi, ctx)) {
 			return null;
@@ -187,7 +187,7 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 					? options.model
 					: resolveDefaultReviewModel(ctx);
 
-				// Emit prompt-template:subagent:request (pi-cohort standard) and subagent:slash:request (legacy/test mock)
+				// Emit prompt-template:subagent:request (pi-subagents structured delegation) and subagent:slash:request (legacy/test mock)
 				pi.events!.emit("prompt-template:subagent:request", {
 					requestId,
 					agent: options?.agent || "reviewer",
@@ -244,6 +244,11 @@ export class PiSubagentReviewer implements CriticalReviewer {
 	}
 
 	async review(input: ReviewInput): Promise<ReviewResult> {
+		if (input.signal?.aborted) {
+			const err: any = new Error(`review cancelled: ${String((input.signal as any).reason || "aborted")}`);
+			err.name = "AbortError";
+			throw err;
+		}
 		const executor = this.explicitRunner || customSubagentRunner || resolveSubagentExecutor(this.pi, this.ctx);
 		if (!executor) {
 			throw new Error("subagent_tool_not_executable");

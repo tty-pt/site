@@ -12,6 +12,13 @@
       { "upTo": "500k", "pct": 60 },
       { "upTo": "1M", "pct": 40 }
     ],
-    "subquestCompactTokens": "60k"
+    "subquestCompactTokens": "60k",
+    "semanticSummary": { "enabled": true },
+    "thoughtLogging": { "enabled": true },
+    "reviewLock": { "staleMs": 30000 },
+    "aqm": { "subquestDuringDrafting": { "enabled": false } },
+    "checkpointIntervalTurns": 6,
+    "directionReviewCooldownMs": 45000,
+    "substantiveTurnsPerDirectionReview": 5
   }
 }

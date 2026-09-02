@@ -18,11 +18,11 @@ import {
 	isSubagentToolRegistered,
 	PiSubagentReviewer,
 } from "./pi_adapter.ts";
-import { findActiveReviewForQuest, getActiveReviews, getPendingReview, registerActiveReview, setPendingReview } from "./tracker.ts";
+import { findActiveReviewForQuest, getActiveReviews, getPendingReview, registerActiveReview, reviewPromiseByKey, setPendingReview } from "./tracker.ts";
 import { checkAttemptLimit, checkLaunchGuard } from "./policy/launch_guard.ts";
 import { dequeuePendingIfNeeded } from "./policy/pending_coalesce.ts";
 import { executeReviewBackground } from "./policy/background.ts";
-import { acquireReviewFileLock, getGlobalReviewLockKey, getGlobalReviewLockKeyForQuest, getQuestLockKey, getReviewLockKey, getReviewLockPath, releaseReviewFileLock, withQuestLock } from "../utils/mutex.ts";
+import { acquireReviewFileLock, createReviewActiveFile, getGlobalReviewLockKey, getGlobalReviewLockKeyForQuest, getQuestLockKey, getReviewLockKey, getReviewLockPath, isReviewActive, releaseReviewFileLock, removeReviewActiveFile, withQuestLock } from "../utils/mutex.ts";
 import { GLOBAL_REVIEW_CAP } from "../constants.ts";
 
 export { reconcileReviewResult } from "./policy/reconcile.ts";
@@ -170,6 +170,67 @@ export async function runCriticalReview(
 	const currentHash = targetState.lastSavedHash || (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
 	const currentSaveCount = targetState.saveCount || 0;
 
+	// Single-flight per quest:kind:boundaryKey — return existing promise instead of launching second subagent (A2)
+	const singleKey = `${questId}:${options.kind}:${options.boundaryKey || currentPlanVersion || currentHash}`;
+	if (!options.force && reviewPromiseByKey.has(singleKey)) {
+		const existingPromise = reviewPromiseByKey.get(singleKey)!;
+		logCriticalReviewTransition("GLOBAL_REVIEW_CAP_HIT" as any, `global review cap hit (single-flight, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`, {
+			quest: slug,
+			questId,
+			sessionId,
+			reviewId: correlationId,
+			parentSessionId: sessionId,
+			reviewKind: options.kind,
+			triggerReason: options.triggerReason || options.kind,
+			boundaryKey: options.boundaryKey || undefined,
+			activeCount: [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length,
+			cap: GLOBAL_REVIEW_CAP,
+			reason: "single_flight",
+		} as any);
+		return { success: true, available: true, inProgress: true, skipped: true, reviewPromise: existingPromise, error: "global_review_cap_single_flight" };
+	}
+	// Cross-process active file check (filesystem witness for .review.active persisting for whole review)
+	if (!options.force && isReviewActive(questId)) {
+		setPendingReview(slug, {
+			questSlug: slug,
+			kind: options.kind,
+			triggerReason: options.triggerReason,
+			planVersion: currentPlanVersion,
+			stateHash: currentHash,
+			boundaryKey: options.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
+			saveCount: currentSaveCount,
+			requestedAt: Date.now(),
+			rebuttal: options.rebuttal,
+			model: options.model,
+			timeoutMs: options.timeoutMs,
+			force: options.force,
+		} as any);
+		logCriticalReviewTransition("GLOBAL_REVIEW_CAP_HIT", `global review cap hit (active file, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`, {
+			quest: slug,
+			questId,
+			sessionId,
+			reviewId: correlationId,
+			parentSessionId: sessionId,
+			reviewKind: options.kind,
+			triggerReason: options.triggerReason || options.kind,
+			boundaryKey: options.boundaryKey || undefined,
+			activeCount: [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length,
+			cap: GLOBAL_REVIEW_CAP,
+			reason: "active_file",
+		} as any);
+		logCriticalReviewTransition("CRITICAL_REVIEW_COALESCED", `review coalesced: pending ${slug}:${options.kind} (active file)`, {
+			quest: slug,
+			questId,
+			sessionId,
+			reviewId: correlationId,
+			parentSessionId: sessionId,
+			reviewKind: options.kind,
+			triggerReason: options.triggerReason || options.kind,
+			boundaryKey: options.boundaryKey || undefined,
+		} as any);
+		return { success: true, available: true, inProgress: true, skipped: true, error: "global_review_cap_active_file" };
+	}
+
 	const questLockKey = getReviewLockKey(questId || slug);
 	const globalLockKey = getGlobalReviewLockKeyForQuest(questId);
 	let provisionalSnapshot!: ReviewSnapshot;
@@ -178,6 +239,7 @@ export async function runCriticalReview(
 	let lockResult: { blocked?: boolean; limited?: boolean; response?: any } | null = null;
 	let reviewFileLockPath: string | null = null;
 	let reviewFileLockOwned = false;
+	let abortController: AbortController | null = null;
 
 	await withQuestLock(globalLockKey, async () =>
 		await withQuestLock(questLockKey, async () => {
@@ -229,6 +291,48 @@ export async function runCriticalReview(
 			reviewFileLockOwned = true;
 			let fsHeld = true;
 			try {
+			// Cross-process active file check inside lock (second concurrent sees first's .review.active)
+			if (isReviewActive(questId)) {
+				setPendingReview(slug, {
+					questSlug: slug,
+					kind: options.kind,
+					triggerReason: options.triggerReason,
+					planVersion: currentPlanVersion,
+					stateHash: currentHash,
+					boundaryKey: options.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
+					saveCount: currentSaveCount,
+					requestedAt: Date.now(),
+					rebuttal: options.rebuttal,
+					model: options.model,
+					timeoutMs: options.timeoutMs,
+					force: options.force,
+				} as any);
+				logCriticalReviewTransition("GLOBAL_REVIEW_CAP_HIT", `global review cap hit (active file inside lock, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`, {
+					quest: slug,
+					questId,
+					sessionId,
+					reviewId: correlationId,
+					parentSessionId: sessionId,
+					reviewKind: options.kind,
+					triggerReason: options.triggerReason || options.kind,
+					boundaryKey: options.boundaryKey || undefined,
+					activeCount: [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length,
+					cap: GLOBAL_REVIEW_CAP,
+					reason: "active_file_inside_lock",
+				} as any);
+				logCriticalReviewTransition("CRITICAL_REVIEW_COALESCED", `review coalesced: pending ${slug}:${options.kind} (active file inside lock)`, {
+					quest: slug,
+					questId,
+					sessionId,
+					reviewId: correlationId,
+					parentSessionId: sessionId,
+					reviewKind: options.kind,
+					triggerReason: options.triggerReason || options.kind,
+					boundaryKey: options.boundaryKey || undefined,
+				} as any);
+				lockResult = { blocked: true, response: { success: true, available: true, inProgress: true, skipped: true, error: "global_review_cap_active_file_inside" } };
+				return;
+			}
 			// Global burst cap check inside hierarchical lock (global → per-quest)
 			const globalActive = [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length;
 			if (globalActive >= GLOBAL_REVIEW_CAP) {
@@ -326,12 +430,21 @@ export async function runCriticalReview(
 				createdAt: Date.now(),
 			};
 
+			abortController = new AbortController();
 			executionPromise = new Promise<CriticalReviewExecutionResult>((res) => {
 				resolveExecution = res;
 			});
+			// single-flight map (A2)
+			reviewPromiseByKey.set(singleKey, executionPromise);
+			executionPromise.finally(() => {
+				try { reviewPromiseByKey.delete(singleKey); } catch {}
+				try { removeReviewActiveFile(questId); } catch {}
+			});
 
 			try {
-				registerActiveReview(correlationId, slug, sessionId, options.kind, provisionalSnapshot, executionPromise, options.triggerReason);
+				registerActiveReview(correlationId, slug, sessionId, options.kind, provisionalSnapshot, executionPromise, options.triggerReason, abortController);
+				// cross-process active witness persisting for whole review (A1 extended hold)
+				try { createReviewActiveFile(questId, correlationId); } catch {}
 			} catch (e: any) {
 				logCriticalReviewTransition("CRITICAL_REVIEW_ERROR", `critical review registration error: ${e?.message || String(e)}`, {
 					quest: slug,
@@ -342,6 +455,8 @@ export async function runCriticalReview(
 					reviewKind: options.kind,
 					reason: e?.message || String(e),
 				});
+				try { reviewPromiseByKey.delete(singleKey); } catch {}
+				try { removeReviewActiveFile(questId); } catch {}
 				throw e;
 			}
 			// Phase 20/21: scalar awaitingReview gate (A: plan_review + final_acceptance only)
@@ -383,8 +498,8 @@ export async function runCriticalReview(
 					fsHeld = false;
 				}
 			}
-		})
-	);
+		}, () => [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length)
+	, () => [...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length);
 
 	if ((lockResult as any)?.blocked || (lockResult as any)?.limited) {
 		// Release FS lock held only for check+register path (blocked/limited never registered)
@@ -410,6 +525,7 @@ export async function runCriticalReview(
 			options,
 			reviewer,
 			resolveExecution,
+			abortController: abortController || undefined,
 			onPending: async (snapshot) => {
 				// Phase 10: atomic dequeue under hierarchical lock, no setTimeout gap — qid-only keys for cross-session
 				const globalKey = getGlobalReviewLockKeyForQuest(questId);
@@ -468,7 +584,11 @@ export async function checkAndTriggerPlanReview(
 			return null;
 		}
 		const registered = isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
-		if (!registered) return null;
+		if (!registered) {
+			try { logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, { quest: s.activeDraft || "", shard: "draft", reason: "not_registered", reviewKind: "plan_review" } as any); } catch {}
+			try { logCriticalReviewTransition("CRITICAL_REVIEW_SUPPRESSED_DUPLICATE" as any, `review suppressed duplicate: not_registered`, { quest: s.activeDraft || "quest", questId: "", sessionId: getSessionId(c), reviewId: "not_registered", parentSessionId: getSessionId(c), reviewKind: "plan_review", reason: "not_registered" } as any); } catch {}
+			return null;
+		}
 		const draftSlug = s.activeDraft;
 		const path = `${FUTURE_DIR}/${draftSlug}.md`;
 		let hash = "clean";

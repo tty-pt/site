@@ -46,6 +46,7 @@ export * from "./hooks.ts";
 export * from "./logging.ts";
 export * from "./diagnostic.ts";
 export * from "./critical_agent.ts";
+export * from "./utils/mutex.ts";
 export * from "./tools.ts";
 export * from "./commands.ts";
 

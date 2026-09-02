@@ -221,23 +221,60 @@ export async function handleTurnEnd(pi: ExtensionAPI, ctx: ExtensionContext, eve
 			try {
 				const cand = (event as any)?.response ?? (event as any)?.output ?? (Array.isArray((event as any)?.messages) ? (event as any).messages[(event as any).messages.length - 1]?.content ?? (event as any).messages[(event as any).messages.length - 1]?.text : undefined);
 				if (typeof cand === "string" && cand.trim() && cand.trim() !== "[object Object]") lastThought = cand;
-				else if (cand && typeof cand === "object") {
+				else if (Array.isArray(cand)) {
+					const arrStr = (cand as any[]).map((x:any)=> typeof x==="string"?x : (x?.text ?? x?.content ?? "")).join(" ");
+					if (arrStr.trim() && arrStr.trim()!=="[object Object]") lastThought = arrStr.slice(0,500);
+				} else if (cand && typeof cand === "object") {
 					const raw = (cand as any).content ?? (cand as any).text ?? (cand as any).message ?? "";
 					if (typeof raw === "string" && raw.trim() && raw.trim() !== "[object Object]") lastThought = raw;
-					else if (raw && typeof raw === "object") {
+					else if (Array.isArray(raw)) {
+						const arrStr = (raw as any[]).map((x:any)=> typeof x==="string"?x : (x?.text ?? x?.content ?? "")).join(" ");
+						if (arrStr.trim() && arrStr.trim()!=="[object Object]") lastThought = arrStr.slice(0,500);
+					} else if (raw && typeof raw === "object") {
 						// Handle nested content: {content: {text:"..."}} or {content:[{text:"..."}]}
 						const nested = (raw as any).text ?? (Array.isArray(raw) ? raw.map((x:any)=> (typeof x==="string"?x: (x?.text || x?.content || ""))).join(" ") : (raw as any).content ?? "");
 						if (typeof nested === "string" && nested.trim() && nested.trim() !== "[object Object]") lastThought = nested;
 						else {
 							const js = JSON.stringify(cand);
-							if (js && js !== "{}" && js !== '"[object Object]"') lastThought = js.slice(0, 500);
+							if (js && js !== "{}" && js !== '"[object Object]"') {
+								// try to extract text from JSON wrapper
+								try { const parsed = JSON.parse(js); if (Array.isArray(parsed)) { const t = parsed.map((x:any)=> x?.text ?? "").join(" "); if (t.trim()) lastThought = t.slice(0,500); else lastThought = js.slice(0, 500); } else lastThought = js.slice(0,500); } catch { lastThought = js.slice(0, 500); }
+							}
 						}
 					} else if (raw && String(raw).trim() !== "[object Object]") lastThought = String(raw);
+					else {
+						// cand itself is {type:"text",text:"..."} without content wrapper
+						const direct = (cand as any).text ?? "";
+						if (typeof direct==="string" && direct.trim() && direct.trim()!=="[object Object]") lastThought = direct.slice(0,500);
+						else {
+							const js2 = JSON.stringify(cand);
+							try { const parsed2 = JSON.parse(js2); if (Array.isArray(parsed2)) { const t2 = parsed2.map((x:any)=> x?.text ?? "").join(" "); if (t2.trim()) lastThought = t2.slice(0,500); } } catch {}
+						}
+					}
 				}
 			} catch {}
 			if (!lastThought && toolResults.length > 0) {
-				// proxy: last tool's truncated output as thought slice
-				try { const last = toolResults[toolResults.length - 1]; let proxyRaw:any = (last as any)?.content ?? (last as any)?.output ?? last?.toolName ?? ""; let proxyStr = typeof proxyRaw==="string"?proxyRaw : (proxyRaw && typeof proxyRaw==="object" ? JSON.stringify(proxyRaw).slice(0,500) : String(proxyRaw)); if (proxyStr.trim() && proxyStr.trim()!=="[object Object]") lastThought = proxyStr.slice(0, 500); } catch {}
+				// proxy: last tool's truncated output as thought slice — extract plain text from content arrays
+				try {
+					const last = toolResults[toolResults.length - 1];
+					let proxyRaw:any = (last as any)?.content ?? (last as any)?.output ?? (last as any)?.text ?? last?.toolName ?? "";
+					let proxyStr:string;
+					if (typeof proxyRaw==="string") proxyStr = proxyRaw;
+					else if (Array.isArray(proxyRaw)) {
+						proxyStr = proxyRaw.map((x:any)=> typeof x==="string"?x : (x?.text ?? x?.content ?? (typeof x==="object"?JSON.stringify(x):String(x)))).join(" ");
+					} else if (proxyRaw && typeof proxyRaw==="object") {
+						// {type:"text",text:"..."} or {content:"..."}
+						proxyStr = (proxyRaw as any).text ?? (proxyRaw as any).content ?? JSON.stringify(proxyRaw);
+						if (Array.isArray((proxyRaw as any).content)) {
+							proxyStr = (proxyRaw as any).content.map((x:any)=> typeof x==="string"?x : (x?.text ?? x?.content ?? "")).join(" ");
+						}
+					} else proxyStr = String(proxyRaw);
+					// strip outer JSON wrapper if still like [{"type":"text","text":"..."}]
+					if (proxyStr.trim().startsWith("[") && proxyStr.includes('"text"')) {
+						try { const arr = JSON.parse(proxyStr); if (Array.isArray(arr)) proxyStr = arr.map((x:any)=> x?.text ?? x?.content ?? "").join(" "); } catch {}
+					}
+					if (proxyStr.trim() && proxyStr.trim()!=="[object Object]") lastThought = proxyStr.slice(0, 500);
+				} catch {}
 			}
 			if (lastThought && lastThought.trim() && lastThought.trim()!=="[object Object]") {
 				const th = createHash("sha256").update(lastThought, "utf8").digest("hex").slice(0, 12);

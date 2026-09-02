@@ -37,3 +37,11 @@ parent: 44
 4. After A finishes (APPROVE/REVISE), B’s pending dequeues and runs once — no flood of `NO_PROGRESS`.
 
 Related: #16, #21, #23, #29, #30, #33. Requires #36 first so draft gate is already enforced.
+
+## Re-open evidence — `1788349108` (2026-09-02 11:38–11:45, build-mode run)
+
+3 sessions on the same `questId 1788349108` interleaved: `01a061e9-8e27…` (479 lines, main research→revising), `01a061ed-9daf-77cf…` (120), `01a061ed-9f79…` (118). Each `01a061ed-*` did `QUEST_REUSED` (`execution.log:231,238`) + `SAVE_VERIFIED gen1 hash=a515d2be` (`:229,236`) + `INITIAL_PROMPT turn0` (`:232,239`) against the already-running quest.
+
+**Key residual gap vs this issue's Desired behavior:** the filesystem witness added under Option B (`utils/mutex.ts` `REVIEW_LOCK_FILE .review.lock` / `REVIEW_ACTIVE_FILE .review.active`, used at `policy.ts:247/294/447`) guards only the **review-launch section**. It does **not** prevent a brand-new top-level session from `QUEST_REUSED`-ing an in-flight questId and mounting a fresh, misdirected investigation. In this run those stray sessions were not `runCriticalReview` launches at all, so the lock never engaged — the "global maxConcurrency=1 per questId" still does not cover the `QUEST_REUSED`/initial-prompt mount path. Consequence: second/third sessions ran unchecked (see the misdirection loop in updated #16/#52), and the main session deadlocked in `REASSESSMENT_PENDING` (see updated #12/#51).
+
+See `FRICTION_REPORT.md` in the quest dir: §4 (Cluster B), §7 (relationship to Option B filesystem witness), §8 findings 3–4.

@@ -11,6 +11,7 @@ import { ConsistencyAuditResult, ExtensionAPI, ExtensionContext, QuestErrorCode,
 import { computeFileFingerprint } from "./utils.ts";
 import { memoFileFingerprint } from "./utils/cache.ts";
 import { auditQuestConsistency } from "./validation.ts";
+import { withReviewFileLock } from "./utils/mutex.ts";
 
 export function persist(pi: ExtensionAPI, ctx?: ExtensionContext): boolean {
 	try {
@@ -81,95 +82,107 @@ export async function verifyAndMarkSaved(
 		);
 		return { success: false, count: s.saveCount, error: errMsg };
 	}
-	const p = questPath(targetQid);
-	let fp = await memoFileFingerprint(p);
-	if (!fp) fp = await computeFileFingerprint(p) as any;
-	if (!fp) {
-		const futureDraftExists = (() => { try { const slug = targetSlug || targetQid || ""; return slug ? existsSync(join(FUTURE_DIR, `${slug}.md`)) : false; } catch { return false; } })();
-		const reason = futureDraftExists ? "file_not_found+future_draft_exists" : "file_not_found";
-		const requiredAction = futureDraftExists ? "quest_update_state" : undefined;
-		const draftHint = futureDraftExists ? ` Draft exists in \`${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)}\` — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true` : "";
-		const errMsg = `Save verification failed: Quest file not found or unreadable at \`${p}\`.${draftHint}`;
-		logPersistenceTransition("SAVE_FAILED", errMsg, { quest: targetSlug || targetQid || "", path: p, reason, ...(requiredAction ? { requiredAction } : {}) });
-		reportAgentError(
-			pi,
-			ctx,
-			errMsg,
-			{
-				code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
-				requiredNextAction: futureDraftExists ? `Draft exists in ${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)} — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true to create the durable quest file.` : `Ensure the file is written to disk at \`${p}\` before calling quest_mark_saved.`,
-				details: {
-					Quest: targetSlug || targetQid || "(none)",
-					Path: p,
+	const doVerify = async (): Promise<{ success: boolean; hash?: string; count: number; error?: string; consistency?: ConsistencyAuditResult }> => {
+		const p = questPath(targetQid);
+		let fp = await memoFileFingerprint(p);
+		if (!fp) fp = await computeFileFingerprint(p) as any;
+		if (!fp) {
+			const futureDraftExists = (() => { try { const slug = targetSlug || targetQid || ""; return slug ? existsSync(join(FUTURE_DIR, `${slug}.md`)) : false; } catch { return false; } })();
+			const reason = futureDraftExists ? "file_not_found+future_draft_exists" : "file_not_found";
+			const requiredAction = futureDraftExists ? "quest_update_state" : undefined;
+			const draftHint = futureDraftExists ? ` Draft exists in \`${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)}\` — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true` : "";
+			const errMsg = `Save verification failed: Quest file not found or unreadable at \`${p}\`.${draftHint}`;
+			logPersistenceTransition("SAVE_FAILED", errMsg, { quest: targetSlug || targetQid || "", path: p, reason, ...(requiredAction ? { requiredAction } : {}) });
+			reportAgentError(
+				pi,
+				ctx,
+				errMsg,
+				{
+					code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
+					requiredNextAction: futureDraftExists ? `Draft exists in ${join(FUTURE_DIR, `${targetSlug || targetQid}.md`)} — call quest_update_state (not quest_mark_saved or bash mkdir) with researchComplete:true to create the durable quest file.` : `Ensure the file is written to disk at \`${p}\` before calling quest_mark_saved.`,
+					details: {
+						Quest: targetSlug || targetQid || "(none)",
+						Path: p,
+					},
 				},
-			},
-		);
-		return {
-			success: false,
-			count: s.saveCount,
-			error: `Quest file not found or unreadable at \`${p}\`.${draftHint} Ensure the file is written to disk before marking as saved.`,
-		};
-	}
+			);
+			return {
+				success: false,
+				count: s.saveCount,
+				error: `Quest file not found or unreadable at \`${p}\`.${draftHint} Ensure the file is written to disk before marking as saved.`,
+			};
+		}
 
-	let audit: ConsistencyAuditResult | undefined;
-	if (fp.hash !== s.lastSavedHash) {
-		try {
-			const content = await readFile(p, "utf8");
-			audit = auditQuestConsistency(content, { recentModifiedFiles: s.sessionModifiedFiles || state.sessionModifiedFiles });
-			if (!audit.consistent) {
-				logError(`Consistency audit issues in ${p}: ${audit.issues.join("; ")}`, undefined, ctx, QuestErrorCode.SAVE_VERIFICATION_FAILURE);
+		let audit: ConsistencyAuditResult | undefined;
+		if (fp.hash !== s.lastSavedHash) {
+			try {
+				const content = await readFile(p, "utf8");
+				audit = auditQuestConsistency(content, { recentModifiedFiles: s.sessionModifiedFiles || state.sessionModifiedFiles });
+				if (!audit.consistent) {
+					logError(`Consistency audit issues in ${p}: ${audit.issues.join("; ")}`, undefined, ctx, QuestErrorCode.SAVE_VERIFICATION_FAILURE);
+				}
+			} catch {}
+		}
+
+		const isSameAsLastSave =
+			s.saveGeneration &&
+			s.saveGeneration.path === p &&
+			s.saveGeneration.hash === fp.hash &&
+			s.saveCount > s.compactCount;
+
+		if (isSameAsLastSave && !s.dirty) {
+			if (s.activeTransaction && s.activeTransaction.phase === "resume-delivered") {
+				s.activeTransaction = null;
+				s.activeCompactionId = null;
+				persist(pi, ctx);
 			}
-		} catch {}
-	}
+			s.lastPromptAt = Date.now();
+			if (state !== s) Object.assign(state, s);
+			return { success: true, hash: fp.hash, count: s.saveCount, consistency: audit };
+		}
 
-	const isSameAsLastSave =
-		s.saveGeneration &&
-		s.saveGeneration.path === p &&
-		s.saveGeneration.hash === fp.hash &&
-		s.saveCount > s.compactCount;
+		// Invalidate any prepared compaction transaction capturing the prior checkpoint
+		invalidatePreparedCompactionTransaction(s, "new_save_verified");
 
-	if (isSameAsLastSave && !s.dirty) {
+		s.saveCount = Math.max(s.saveCount + 1, s.compactCount + 1);
+		s.lastSavedHash = fp.hash;
+		s.saveGeneration = {
+			count: s.saveCount,
+			path: p,
+			hash: fp.hash,
+			savedAt: Date.now(),
+		};
+		s.dirty = false;
+		s.preCompactionCheckpointPending = false;
+		s.preCompactionSaveRequestPending = false;
 		if (s.activeTransaction && s.activeTransaction.phase === "resume-delivered") {
 			s.activeTransaction = null;
 			s.activeCompactionId = null;
-			persist(pi, ctx);
 		}
 		s.lastPromptAt = Date.now();
-		if (state !== s) Object.assign(state, s);
+		// Clear files modified after successful save to silence audit noise for next research-only cycles (B hygiene)
+		s.sessionModifiedFiles = [];
+		if (state !== s) {
+			Object.assign(state, s);
+			(state as any).sessionModifiedFiles = [];
+		} else {
+			state.sessionModifiedFiles = [];
+		}
+		persist(pi, ctx);
+
+		logPersistenceTransition("SAVE_VERIFIED", `save verified for '${targetSlug || targetQid}' (gen ${s.saveCount})`, {
+			quest: targetSlug || targetQid || "",
+			gen: s.saveCount,
+			hash: fp.hash.slice(0, 8),
+		});
+
 		return { success: true, hash: fp.hash, count: s.saveCount, consistency: audit };
-	}
-
-	// Invalidate any prepared compaction transaction capturing the prior checkpoint
-	invalidatePreparedCompactionTransaction(s, "new_save_verified");
-
-	s.saveCount = Math.max(s.saveCount + 1, s.compactCount + 1);
-	s.lastSavedHash = fp.hash;
-	s.saveGeneration = {
-		count: s.saveCount,
-		path: p,
-		hash: fp.hash,
-		savedAt: Date.now(),
 	};
-	s.dirty = false;
-	s.preCompactionCheckpointPending = false;
-	s.preCompactionSaveRequestPending = false;
-	if (s.activeTransaction && s.activeTransaction.phase === "resume-delivered") {
-		s.activeTransaction = null;
-		s.activeCompactionId = null;
+	if (targetQid) {
+		return await withReviewFileLock(targetQid, doVerify);
+	} else {
+		return await doVerify();
 	}
-	s.lastPromptAt = Date.now();
-	if (state !== s) {
-		Object.assign(state, s);
-	}
-	persist(pi, ctx);
-
-	logPersistenceTransition("SAVE_VERIFIED", `save verified for '${targetSlug || targetQid}' (gen ${s.saveCount})`, {
-		quest: targetSlug || targetQid || "",
-		gen: s.saveCount,
-		hash: fp.hash.slice(0, 8),
-	});
-
-	return { success: true, hash: fp.hash, count: s.saveCount, consistency: audit };
 }
 
 export async function markSaved(pi: ExtensionAPI, ctx?: ExtensionContext) {

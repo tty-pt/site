@@ -15,3 +15,12 @@ parent: 43
 - **Severity:** Low — opposite of #40 never shown; this is shown at wrong gate, should be `await reviewer verdict, reads allowed`.
 
 Related: #40 (skill not invoked ready), #51, #46.
+
+## Re-open evidence — `1788349108` (2026-09-02 11:38–11:45)
+
+Same wrong-gate class, **additional blocked tool** not covered by the original fix. While `REASSESSMENT_PENDING` the agent's investigation tool was blocked:
+
+- `:703 UNKNOWN_TOOL tool=bash` + `:704 GATE_BLOCKED gate=REASSESSMENT_PENDING` + `:706 IMPLEMENTATION_BLOCKED tool=bash code=UNKNOWN_TOOL_BLOCKED` + `:708 ERROR … [UNKNOWN_TOOL_BLOCKED] Tool 'bash' execution blocked in state REASSESSMENT_PENDING` (turn 40).
+- Earlier: `:442/444 GATE_BLOCKED` + `IMPLEMENTATION_BLOCKED tool=edit` (turn 24) — `edit` on `quest.md` was also blocked (`:446`).
+
+The agent was told to complete reassessment (which requires a fresh investigation), but `bash` — its investigation tool — was disallowed in the `revising` gate, so it had no way to satisfy `:565/629/667 "fresh investigation is required after the reassessment trigger"`. Even if the skill hint is now suppressed, the gate still needs to allow `bash` (read/search) and the sanctioned `quest_update_state` path in this state. See new #57.

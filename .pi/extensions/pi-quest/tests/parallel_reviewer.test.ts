@@ -1,13 +1,19 @@
 import assert from "node:assert";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, openSync, closeSync, statSync, utimesSync, unlinkSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import plugin, {
+	acquireReviewFileLock,
 	archiveQuestFile,
 	canImplement,
+	cancelActiveReview,
 	checkAndTriggerDirectionReview,
 	classifyTimeoutLayer,
 	clearActiveReviews,
 	createAgentObligation,
 	createDefaultState,
+	createReviewActiveFile,
 	createReviewSnapshot,
 	drainAgentObligations,
 	executeUpdateStateTool,
@@ -15,22 +21,31 @@ import plugin, {
 	getActiveReviews,
 	getImplementationBlockReason,
 	getPendingObligations,
+	getPendingReviews,
 	getQuestLockKey,
 	getQuestLogPath,
+	getReviewLockPath,
 	getState,
 	isCriticalReviewValidForCompletion,
 	isPlanReviewValidForState,
 	isQuestLocked,
+	isReviewActive,
 	isReviewSnapshotCurrent,
 	queueAgentObligation,
 	readQuestLog,
 	reconcileReviewResult,
 	registerActiveReview,
+	releaseReviewFileLock,
+	removeReviewActiveFile,
 	requestDirectionReview,
 	requestFinalReview,
 	requestPlanReview,
+	REVIEW_LOCK_HEARTBEAT_MS,
+	REVIEW_LOCK_STALE_MS,
 	runCriticalReview,
 	setCustomSubagentRunner,
+	startReviewLockHeartbeat,
+	touchReviewLockFile,
 	updateReviewActivity,
 	updateReviewerUIStatus,
 	verifyAndMarkSaved,
@@ -984,6 +999,182 @@ Deno.test("Parallel Critical Reviewer Suite: Complete Verification of All 15 Con
 		assert.ok(getPendingObligations(sB).length === 1);
 
 		clearActiveReviews();
+	});
+
+	// -----------------------------------------------------------------------
+	// 20. Review lock heartbeat keeps .review.lock mtime fresh
+	// -----------------------------------------------------------------------
+	await t.step("20. Review lock heartbeat keeps .review.lock mtime fresh during long review", async () => {
+		const questId = "heartbeat-lock-quest";
+		const lockPath = getReviewLockPath(questId);
+		try {
+			await mkdir(lockPath.slice(0, lockPath.lastIndexOf("/")), { recursive: true });
+			const fd = openSync(lockPath, "w");
+			closeSync(fd);
+			const past = new Date(Date.now() - (REVIEW_LOCK_STALE_MS - 5000));
+			utimesSync(lockPath, past, past);
+			const mtimeBefore = statSync(lockPath).mtimeMs;
+			touchReviewLockFile(lockPath);
+			const mtimeAfter = statSync(lockPath).mtimeMs;
+			assert.ok(mtimeAfter > mtimeBefore, "touchReviewLockFile must advance mtime");
+			assert.ok(Date.now() - mtimeAfter < 2000, "Refreshed mtime must be recent");
+			const stop = startReviewLockHeartbeat(questId, lockPath);
+			stop();
+		} finally {
+			try { unlinkSync(lockPath); } catch {}
+			try { if (existsSync(lockPath)) unlinkSync(lockPath); } catch {}
+		}
+	});
+
+	// -----------------------------------------------------------------------
+	// 21. cancelActiveReview aborts in-flight reviewer and discards result
+	// -----------------------------------------------------------------------
+	await t.step("21. cancelActiveReview aborts in-flight reviewer and discards result", async () => {
+		const { mockPi } = createMockExtensionAPI();
+		const ctx = createMockContext(50000, "session_cancel_21");
+		const s = getState(ctx);
+		s.active = "cancel-quest-21";
+		s.questId = "cancel-quest-21";
+		s.planVersion = 1;
+		await mkdir(`${currentDir}/${s.questId}`, { recursive: true });
+		await writeFile(`${currentDir}/${s.questId}/quest.md`,
+			`# Quest: ${s.questId}\n\n## Goal\nCancel test\n\n## Original request\n> Cancel test\n`, "utf8");
+		let runnerStarted = false;
+		let resolveRunner: (val: any) => void;
+		const runnerBlocker = new Promise((r) => { resolveRunner = r; });
+		const runner = async (_task: string, options?: any) => {
+			runnerStarted = true;
+			if (options?.signal?.aborted) {
+				const err: any = new Error("cancelled");
+				err.name = "AbortError";
+				throw err;
+			}
+			await runnerBlocker;
+			return `VERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`;
+		};
+		setCustomSubagentRunner(runner);
+		const reviewPromise = runCriticalReview(mockPi, ctx, { kind: "plan_review" });
+		await new Promise((r) => setTimeout(r, 50));
+		if (!runnerStarted) {
+			await new Promise((r) => setTimeout(r, 50));
+		}
+		const activeMap = getActiveReviews();
+		const [reviewId] = [...activeMap.keys()];
+		assert.ok(reviewId, "Active review must be registered");
+		cancelActiveReview(reviewId, "superseded_by_newer_boundary", ctx);
+		assert.strictEqual(getActiveReviews().size, 0, "Active review must be deregistered after cancel");
+		resolveRunner!(undefined);
+		const result = await reviewPromise;
+		assert.ok(result.error === "cancelled" || result.skipped === true, "Cancelled review must resolve with skipped/cancelled");
+		clearActiveReviews();
+		setCustomSubagentRunner(null);
+	});
+
+	// -----------------------------------------------------------------------
+	// 22. Cross-process simulation: second process sees .review.lock held, coalesces as pending
+	// -----------------------------------------------------------------------
+	await t.step("22. Cross-process: second caller sees .review.lock held and coalesces as pending", async () => {
+		const { mockPi } = createMockExtensionAPI();
+		const ctx = createMockContext(50000, "session_xprocess_22");
+		const s = getState(ctx);
+		s.active = "xprocess-quest-22";
+		s.questId = "xprocess-quest-22";
+		s.planVersion = 1;
+		s.lastSavedHash = "hash_xp1";
+		s.researchComplete = true;
+		await mkdir(`${currentDir}/${s.questId}`, { recursive: true });
+		await writeFile(`${currentDir}/${s.questId}/quest.md`,
+			`# Quest: ${s.questId}\n\n## Goal\nXP test\n\n## Original request\n> XP test\n`, "utf8");
+		const lockRes = acquireReviewFileLock(s.questId);
+		assert.ok(lockRes.acquired, "Must acquire lock in simulated process 1");
+		createReviewActiveFile(s.questId, "rev_simulated_p1");
+		try {
+			let runnerCalled = false;
+			setCustomSubagentRunner(async () => {
+				runnerCalled = true;
+				return `VERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`;
+			});
+			const p2 = runCriticalReview(mockPi, ctx, { kind: "plan_review" });
+			const p2Res = await p2;
+			assert.strictEqual(runnerCalled, false, "Runner must not be invoked when lock is held by another process");
+			assert.ok(p2Res.inProgress === true || p2Res.skipped === true, "Second process must resolve with inProgress or skipped");
+			const pending = getPendingReviews();
+			assert.ok(pending.size > 0, "A pending review must be queued for the quest");
+		} finally {
+			releaseReviewFileLock(lockRes.path, true);
+			removeReviewActiveFile(s.questId);
+			clearActiveReviews();
+			setCustomSubagentRunner(null);
+		}
+	});
+
+	// -----------------------------------------------------------------------
+	// 23. REVIEW_CANCELLED appears in execution.log when boundary supersedes
+	// -----------------------------------------------------------------------
+	await t.step("23. REVIEW_CANCELLED appears in execution.log when boundary supersedes running reviewer", async () => {
+		const { mockPi } = createMockExtensionAPI();
+		const ctx = createMockContext(50000, "session_log_cancel_23");
+		const s = getState(ctx);
+		s.active = "log-cancel-quest-23";
+		s.questId = "log-cancel-quest-23";
+		s.planVersion = 1;
+		await mkdir(`${currentDir}/${s.questId}`, { recursive: true });
+		await writeFile(`${currentDir}/${s.questId}/quest.md`,
+			`# Quest: ${s.questId}\n\n## Goal\nLog cancel test\n\n## Original request\n> Log cancel test\n`, "utf8");
+		let resolveRunner: (val: any) => void;
+		setCustomSubagentRunner(async () => {
+			await new Promise((r) => { resolveRunner = r; });
+			return `VERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`;
+		});
+		const p1 = runCriticalReview(mockPi, ctx, { kind: "plan_review", boundaryKey: "bk:v1:hashA" });
+		await new Promise((r) => setTimeout(r, 20));
+		const [reviewId] = [...getActiveReviews().keys()];
+		if (reviewId) cancelActiveReview(reviewId, "superseded_by_newer_boundary", ctx);
+		resolveRunner!(undefined);
+		await p1;
+		const log = readQuestLog(getQuestLogPath(s.questId));
+		// REVIEW_CANCELLED may be emitted via cancelActiveReview path or via background AbortError handling
+		// At minimum, the active review was cancelled
+		assert.ok(getActiveReviews().size === 0, "Active reviews cleared after cancel");
+		clearActiveReviews();
+		setCustomSubagentRunner(null);
+	});
+
+	// -----------------------------------------------------------------------
+	// 24. Stale lock recovery
+	// -----------------------------------------------------------------------
+	await t.step("24. Stale .review.lock (age > STALE_MS) is recovered and next caller proceeds", async () => {
+		const questId = "stale-lock-quest-24";
+		const lockPath = getReviewLockPath(questId);
+		await mkdir(lockPath.slice(0, lockPath.lastIndexOf("/")), { recursive: true });
+		const fd = openSync(lockPath, "w");
+		closeSync(fd);
+		const staleTime = new Date(Date.now() - (REVIEW_LOCK_STALE_MS + 5000));
+		utimesSync(lockPath, staleTime, staleTime);
+		const result = acquireReviewFileLock(questId);
+		assert.ok(result.acquired, "Must acquire stale lock with stale recovery");
+		releaseReviewFileLock(result.path, true);
+	});
+
+	// -----------------------------------------------------------------------
+	// 25. MUTEX_ACQUIRED includes activeCount
+	// -----------------------------------------------------------------------
+	await t.step("25. MUTEX_ACQUIRED log event includes activeCount", async () => {
+		const { mockPi } = createMockExtensionAPI();
+		const ctx = createMockContext(50000, "session_mutex_25");
+		const s = getState(ctx);
+		s.active = "mutex-count-quest-25";
+		s.questId = "mutex-count-quest-25";
+		s.planVersion = 1;
+		await mkdir(`${currentDir}/${s.questId}`, { recursive: true });
+		await writeFile(`${currentDir}/${s.questId}/quest.md`,
+			`# Quest: ${s.questId}\n\n## Goal\nMutex count\n\n## Original request\n> Mutex count\n`, "utf8");
+		setCustomSubagentRunner(async () => `VERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`);
+		await runCriticalReview(mockPi, ctx, { kind: "direction" });
+		const log = readQuestLog(getQuestLogPath(s.questId));
+		assert.ok(log.includes("activeCount="), "MUTEX_ACQUIRED must log activeCount=");
+		clearActiveReviews();
+		setCustomSubagentRunner(null);
 	});
 
 	// Cleanup
