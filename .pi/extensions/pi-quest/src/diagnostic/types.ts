@@ -40,6 +40,9 @@ export interface DiagnosticExpectedState {
 	capturedSubQuests?: string[];
 	subquests?: string[];
 	logExists: boolean;
+	draftCaptured?: boolean;
+	futureCount?: number;
+	compactionResumeHash?: string | null;
 }
 
 export interface VerificationResult {

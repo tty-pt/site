@@ -85,8 +85,8 @@ export async function reconcileReviewResult(
 		}
 
 		// Superseded path: clear stale awaitingReview gate if still pointing at this correlationId
-		if ((targetState as any).awaitingReview?.reviewId === correlationId) {
-			(targetState as any).awaitingReview = null;
+		if (targetState.awaitingReview?.reviewId === correlationId) {
+			targetState.awaitingReview = null;
 		}
 		persist(pi, ctx);
 		return { success: false, available: true, superseded: true, review: reviewState };

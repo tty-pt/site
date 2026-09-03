@@ -1,7 +1,7 @@
 ---
 id: 23
 title: "MUTEX_WAIT still await import with empty catch{} swallowing logger failure"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "grep await import src/utils/mutex.ts 0 after static import"

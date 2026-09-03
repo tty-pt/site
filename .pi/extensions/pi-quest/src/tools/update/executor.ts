@@ -96,7 +96,7 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 				try { content = readFileSync(p, "utf8"); } catch {}
 				const hash = createHash("sha256").update(content || draftSlug).digest("hex").slice(0, 12);
 				// D null-qid edge: guard before building archDir (questDirPath(null)->"" yields ./future-archive)
-				const qidForArch = (state.questId || (state as any).questId) as string | null;
+				const qidForArch = state.questId as string | null;
 				if (qidForArch) {
 					const archDir = `.pi/quest/current/${qidForArch}/future-archive`;
 					try { if (!existsSync(archDir)) mkdirSync(archDir, { recursive: true }); } catch {}
@@ -115,9 +115,9 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 						quest: state.active || draftSlug,
 						slug: draftSlug,
 						hash,
-						reviewId: (state as any).awaitingReview?.reviewId,
-						boundaryKey: (state as any).lastPlanReviewBoundaryKey,
-						questId: (state as any).questId || undefined,
+						reviewId: state.awaitingReview?.reviewId,
+						boundaryKey: state.lastPlanReviewBoundaryKey ?? undefined,
+						questId: state.questId || undefined,
 						reason: "quest_update_state",
 					});
 				} catch {}
@@ -133,7 +133,7 @@ function syncQuestIdentity(targetName: string, pi: ExtensionAPI, ctx: ExtensionC
 export function resolveUpdateTarget(params: any): { targetName: string } | { errorResponse: any } {
 	const rawName = (params?.name || params?.questName || "").trim();
 	// Fallback to activeDraft slug when drafting and providesPlan (P1) — avoids no_active_quest extra turn
-	const fallbackDraft = (state as any).activeDraft as string | null;
+	const fallbackDraft = state.activeDraft as string | null;
 	const providesPlan = Boolean(params?.plan || params?.findings || params?.understanding || params?.assumptions || params?.goal || params?.planConfidence);
 	const fallback = providesPlan && fallbackDraft ? fallbackDraft : "";
 	const targetName = slugify(rawName || state.active || fallback || "");
@@ -170,7 +170,7 @@ export async function ensureQuestFileExists(targetName: string, goal = ""): Prom
 	const originalReq = state.pendingRootRequest || (state.prompts && state.prompts.length > 0 ? state.prompts[0] : "");
 	if (!(await fileExists(path))) {
 		await writeFile(path, QUEST_TEMPLATE(targetName, goal, "", originalReq, state.refinements || [], qId), "utf8");
-		if (path.endsWith("quest.md")) try { await syncMetaJson(qId || "", state as any); } catch {}
+		if (path.endsWith("quest.md")) try { await syncMetaJson(qId || "", state); } catch {}
 	}
 	return path;
 }
@@ -252,7 +252,7 @@ async function maybeTriggerPlanReview(
 
 	const alreadyApprovedForBoundary = isPlanReviewValidForState(targetState) && targetState.lastPlanReviewBoundaryKey === postPlanning.boundaryKey;
 	const alreadyRequestedForBoundary = targetState.lastPlanReviewBoundaryKey === postPlanning.boundaryKey;
-	const firstPlanReviewFired = !!(targetState as any).firstPlanReviewFired || !!(targetState as any).lastPlanReviewApproval;
+	const firstPlanReviewFired = !!targetState.firstPlanReviewFired || !!targetState.lastPlanReviewApproval;
 
 	const shouldTriggerReview =
 		!alreadyApprovedForBoundary &&
@@ -262,22 +262,22 @@ async function maybeTriggerPlanReview(
 	if (!shouldTriggerReview) {
 		if (firstPlanReviewFired && isMaterialPlanChange) {
 			try {
-				logEvent("PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE" as any, `plan review suppressed material change`, {
-					quest: targetState.active || "",
-					questId: (targetState as any).questId || undefined,
-					preBoundaryKey: prePlanning.boundaryKey?.slice(0, 8),
-					postBoundaryKey: postPlanning.boundaryKey?.slice(0, 8),
-					boundaryKey: postPlanning.boundaryKey,
-					planVersion: targetState.planVersion,
-				} as any);
+			logEvent("PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE", `plan review suppressed material change`, {
+				quest: targetState.active || "",
+				questId: targetState.questId || undefined,
+				preBoundaryKey: prePlanning.boundaryKey?.slice(0, 8),
+				postBoundaryKey: postPlanning.boundaryKey?.slice(0, 8),
+				boundaryKey: postPlanning.boundaryKey,
+				planVersion: targetState.planVersion,
+			});
 			} catch {}
 		} else if (alreadyRequestedForBoundary || alreadyApprovedForBoundary) {
 			try {
-				logEvent("FIRST_PLAN_REVIEW_ALREADY_FIRED" as any, `first plan review already fired`, {
-					quest: targetState.active || "",
-					shard: "root",
-					boundaryKey: postPlanning.boundaryKey?.slice(0, 8),
-				} as any);
+			logEvent("FIRST_PLAN_REVIEW_ALREADY_FIRED", `first plan review already fired`, {
+				quest: targetState.active || "",
+				shard: "root",
+				boundaryKey: postPlanning.boundaryKey?.slice(0, 8),
+			});
 			} catch {}
 		}
 		return "";
@@ -310,7 +310,7 @@ async function maybeTriggerPlanReview(
 			requireConfirm: !!targetState.awaitingUserConfirmation,
 			boundaryKey: postPlanning.boundaryKey,
 			planVersion: targetState.planVersion,
-			verdict: (planRevRes as any)?.review?.verdict || (planRevRes as any)?.error || "none",
+			verdict: planRevRes?.review?.verdict || planRevRes?.error || "none",
 		});
 	} catch {}
 	syncImplementationPermission(targetState, ctx);
@@ -336,7 +336,7 @@ function logStateUpdate(
 		status: params?.status,
 		planVersion: targetState.planVersion || 1,
 		consequence: "STATE_UPDATED",
-		recoveryFor: (targetState as any).lastFailureId || undefined,
+		recoveryFor: targetState.lastFailureId || undefined,
 		filesModified: filesMod,
 		completedTasks: completedCount,
 		remainingTasks: remainingCount,
@@ -381,14 +381,14 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 	// #36 gate: quest_update_state must not realize activeDraft without reviewer APPROVE; 51: while REASSESSMENT_PENDING gateBlocked not TOOL_FAILURE; 54: enrich details
 	// Recommendation A: allow first quest_update_state that provides plan/findings to create current/quest.md (draft → durable), review then gates implementation, not writing
 	if (state.activeDraft) {
-		const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi as any, ctx as any);
-		const isValid = (()=>{ try{ return isDraftReviewValid(state as any); } catch{ return false; }})();
+		const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi, ctx);
+		const isValid = (()=>{ try{ return isDraftReviewValid(state); } catch{ return false; }})();
 		if (hasReviewer && !isValid) {
 			const providesPlan = Boolean(params?.plan || params?.findings || params?.understanding || params?.assumptions || params?.goal || params?.planConfidence);
-			const evidence = (state as any).currentReceipt?.evidenceCount || 0;
+			const evidence = state.currentReceipt?.evidenceCount || 0;
 			const allowsInitialDraftWrite = providesPlan && evidence >= 5;
 			if (allowsInitialDraftWrite) {
-				try { logEvent("DRAFT_PROMOTION_ALLOWED" as any, `draft promotion allowed despite review pending (initial write)`, { quest: state.activeDraft, evidence, providesPlan } as any); } catch {}
+				try { logEvent("DRAFT_PROMOTION_ALLOWED", `draft promotion allowed despite review pending (initial write)`, { quest: state.activeDraft, evidence, providesPlan }); } catch {}
 			} else {
 				const draftSlug = state.activeDraft;
 				let hash = "unknown";
@@ -399,23 +399,23 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 					try { hash = createHash("sha256").update(draftSlug).digest("hex").slice(0, 12); } catch {}
 				}
 				const boundaryKey = `draft:${draftSlug}:${hash}`;
-				const dpLen = (state as any).draftPrompts?.length || 0;
+				const dpLen = state.draftPrompts?.length || 0;
 				try {
-					logEvent("REVIEW_DEDUP_HIT" as any, `draft not yet reviewer-approved`, {
-						quest: draftSlug,
-						shard: "draft",
-						reason: "draft_not_approved",
-						hash,
-						boundaryKey,
-						dpLen,
-						evidence,
-						hasReviewer,
-						isDraftReviewValid: isValid,
-						reassessmentRequired: Boolean((state as any).reassessmentRequired),
-					} as any);
+				logEvent("REVIEW_DEDUP_HIT", `draft not yet reviewer-approved`, {
+					quest: draftSlug,
+					shard: "draft",
+					reason: "draft_not_approved",
+					hash,
+					boundaryKey,
+					dpLen,
+					evidence,
+					hasReviewer,
+					isDraftReviewValid: isValid,
+					reassessmentRequired: Boolean(state.reassessmentRequired),
+				});
 				} catch {}
 				const msg = `Draft '${draftSlug}' not yet reviewer-approved — present plan via future/${draftSlug}.md and await plan_review APPROVE (boundaryKey ${boundaryKey}) before promoting. Accumulate requirements or wait for auto-review; only promotion via 'go' after APPROVE may realize the draft.`;
-				if ((state as any).reassessmentRequired) {
+				if (state.reassessmentRequired) {
 					try { const { sendInternalAgentMessage } = await import("../../messaging.ts"); sendInternalAgentMessage(pi, `⚠️ ${msg} — awaiting coalesced plan_review, do not retry quest_update_state.`, "steer"); } catch {}
 					return {
 						content: [{ type: "text", text: msg }],
@@ -480,13 +480,13 @@ export async function executeUpdateStateTool(params: any, pi: ExtensionAPI, ctx:
 		} catch {}
 		try {
 			if (isSemanticSummaryEnabled(targetState)) {
-				if (prePlanning.boundaryKey !== postPlanning.boundaryKey || prePlanning.researchComplete !== (targetState as any).researchComplete) {
-					const curGate = (targetState as any).reassessmentRequired ? "REASSESSMENT_PENDING" : (targetState as any).researchRequired || !(targetState as any).researchComplete ? "RESEARCH_PENDING" : (targetState as any).awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED";
-					const lifecycle = getLifecycleState(targetState as any, undefined);
+				if (prePlanning.boundaryKey !== postPlanning.boundaryKey || prePlanning.researchComplete !== targetState.researchComplete) {
+					const curGate = targetState.reassessmentRequired ? "REASSESSMENT_PENDING" : targetState.researchRequired || !targetState.researchComplete ? "RESEARCH_PENDING" : targetState.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED";
+					const lifecycle = getLifecycleState(targetState, undefined);
 					const intentMap: Record<string, string> = { RESEARCH_PENDING: "research", ACTIVE_DIRTY: "plan-draft", AWAITING_REVIEW: "awaiting-review", REASSESSMENT_PENDING: "revising", IMPLEMENTATION_ALLOWED: "implementing", ACTIVE_CLEAN: "verifying" };
-					const intent = (intentMap as any)[lifecycle as any] || "research";
-					const line = `${intent} planVersion${(targetState as any).planVersion || 1} gate=${curGate} prompts=${(targetState as any).prompts?.length || 0} draft=${(targetState as any).draftPrompts?.length || 0}`;
-					logEvent("STEP_SUMMARY" as any, line.slice(0, 120), { quest: targetName, intent, planVersion: (targetState as any).planVersion || 1, activeGate: curGate, elapsedMs: Date.now() - (sessionStartMap.get(getSessionId(getActiveContext(ctx))) || Date.now()), opencodeSessionId: getSessionId(getActiveContext(ctx)) } as any);
+					const intent = intentMap[lifecycle as string] || "research";
+					const line = `${intent} planVersion${targetState.planVersion || 1} gate=${curGate} prompts=${targetState.prompts?.length || 0} draft=${targetState.draftPrompts?.length || 0}`;
+					logEvent("STEP_SUMMARY", line.slice(0, 120), { quest: targetName, intent, planVersion: targetState.planVersion || 1, activeGate: curGate, elapsedMs: Date.now() - (sessionStartMap.get(getSessionId(getActiveContext(ctx))) || Date.now()), opencodeSessionId: getSessionId(getActiveContext(ctx)) });
 				}
 			}
 		} catch {}

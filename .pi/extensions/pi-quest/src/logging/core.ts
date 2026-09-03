@@ -58,9 +58,9 @@ export function logEvent(
 
 	const targetRoot = s?.rootQuest || (s?.stack && s.stack.length > 0 ? s.stack[0] : (context?.root || context?.rootQuest || s?.active || ""));
 
-	const piSid = targetSessionId || (context as any)?.piSessionId || (context as any)?.opencodeSessionId;
+	const piSid = targetSessionId || context?.piSessionId || context?.opencodeSessionId;
 	const basePi = piSid || targetSessionId;
-	const baseOpen = (context as any)?.opencodeSessionId || piSid || targetSessionId;
+	const baseOpen = context?.opencodeSessionId || piSid || targetSessionId;
 	const enrichedContext: QuestLogContext = {
 		questId: s?.questId || context?.questId || "default",
 		root: targetRoot,
@@ -70,8 +70,8 @@ export function logEvent(
 		turn: context?.turn !== undefined ? context.turn : s?.currentTurn,
 		correlationId: context?.correlationId || s?.currentTurnCorrelationId,
 		...context,
-		piSessionId: (context as any)?.piSessionId || basePi,
-		opencodeSessionId: (context as any)?.opencodeSessionId || baseOpen,
+		piSessionId: context?.piSessionId || basePi,
+		opencodeSessionId: context?.opencodeSessionId || baseOpen,
 	} as QuestLogContext;
 
 	const targetLogPath = enrichedContext.logPath || getQuestLogPath(enrichedContext.questId || s?.questId);

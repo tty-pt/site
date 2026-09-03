@@ -148,7 +148,7 @@ export function parseCriticalReviewResponse(responseText: string): {
 				promptComplianceItems.push({
 					requirement: reqText,
 					planHandling,
-					status: statusVal as any,
+					status: statusVal as "SATISFIED" | "UNSATISFIED" | "UNCERTAIN" | "YES" | "NO",
 				});
 			}
 		}

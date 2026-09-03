@@ -157,11 +157,11 @@ export async function createRunDirectory(
 	try {
 		const futSrc = resolve(projectRoot, FUTURE_DIR);
 		if (existsSync(futSrc)) {
-			const futEntries = await readdir(futSrc, { withFileTypes: true }).catch(() => [] as any);
+			const futEntries = await readdir(futSrc, { withFileTypes: true }).catch(() => []);
 			if (futEntries.length > 0) {
 				const futDest = resolve(runDir, "future");
 				await mkdir(futDest, { recursive: true });
-				for (const e of futEntries) if (e.isFile && e.name.endsWith(".md")) {
+				for (const e of futEntries) if (e.isFile() && e.name.endsWith(".md")) {
 					try { await copyFile(resolve(futSrc, e.name), resolve(futDest, e.name)); } catch {}
 				}
 			}
@@ -169,11 +169,11 @@ export async function createRunDirectory(
 		// future-archive dir from current quest run
 		const archSrc = resolve(projectRoot, QUEST_CURRENT_DIR, qId, "future-archive");
 		if (existsSync(archSrc)) {
-			const archEntries = await readdir(archSrc, { withFileTypes: true }).catch(() => [] as any);
+			const archEntries = await readdir(archSrc, { withFileTypes: true }).catch(() => []);
 			if (archEntries.length > 0) {
 				const archDest = resolve(runDir, "future-archive");
 				await mkdir(archDest, { recursive: true });
-				for (const e of archEntries) if (e.isFile && e.name.endsWith(".md")) {
+				for (const e of archEntries) if (e.isFile() && e.name.endsWith(".md")) {
 					try { await copyFile(resolve(archSrc, e.name), resolve(archDest, e.name)); } catch {}
 				}
 			}
@@ -184,7 +184,7 @@ export async function createRunDirectory(
 			try { await copyFile(compSrc, resolve(runDir, "compaction-resume.txt")); } catch {}
 		} else {
 			const altComp = resolve(runDir, "compaction-resume.txt");
-			if (!existsSync(altComp) && (state as any)?.pendingResume) {
+			if (!existsSync(altComp) && state?.pendingResume) {
 				// placeholder will be written by resume.ts when needed
 			}
 		}
@@ -336,14 +336,14 @@ export async function verifyDiagnosticZip(
 		}
 	}
 
-	const needsFuture = (expected as any).draftCaptured || ((expected as any).futureCount || 0) > 0;
+	const needsFuture = expected.draftCaptured || (expected.futureCount || 0) > 0;
 	if (needsFuture) {
 		const hasFuture = entries.some((e) => e.includes("future/") && e.endsWith(".md"));
 		if (!hasFuture) {
 			errors.push("Future draft file missing from bundle (run/future/*.md) despite activeDraft/draftCaptured");
 		}
 	}
-	const hasResumeHash = (expected as any).compactionResumeHash;
+	const hasResumeHash = expected.compactionResumeHash;
 	if (hasResumeHash) {
 		const hasCompResume = entries.some((e) => e.includes("compaction-resume.txt"));
 		if (!hasCompResume) {
@@ -522,10 +522,10 @@ export async function createUnifiedBundleZip(
 			activeRootQuest: hierarchy.activeRootQuest,
 			capturedSubQuests: hierarchy.capturedSubQuests.map((s) => s.name),
 			logExists: hierarchy.logExists,
-			draftCaptured: (hierarchy as any).draftCaptured,
-			futureCount: (hierarchy as any).futureCount,
-			compactionResumeHash: (hierarchy as any).compactionResumeHash,
-		} as any);
+			draftCaptured: hierarchy.draftCaptured,
+			futureCount: hierarchy.futureCount,
+			compactionResumeHash: hierarchy.compactionResumeHash,
+		});
 
 		if (!options.skipVerification && !verification.valid) {
 			await rm(outputZipPath, { force: true });

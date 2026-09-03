@@ -83,7 +83,7 @@ export default function (pi: ExtensionAPI) {
 			const { existsSync, mkdirSync, copyFileSync, readFileSync } = await import("node:fs");
 			const { join, dirname } = await import("node:path");
 			const extSkill = join(dirname(new URL(import.meta.url).pathname), "../skills/quest-journal/SKILL.md");
-			const globalSkill = join((ctx as any)?.cwd || (globalThis as any).process?.cwd?.() || ".", ".pi/skills/quest-journal/SKILL.md");
+			const globalSkill = join(ctx?.cwd || (globalThis as any).process?.cwd?.() || ".", ".pi/skills/quest-journal/SKILL.md");
 			if (existsSync(extSkill)) {
 				const src = readFileSync(extSkill, "utf8");
 				let needCopy = true;
@@ -115,7 +115,7 @@ export default function (pi: ExtensionAPI) {
 		const data = entry.data ?? ({} as StoredState);
 		const fresh = (data.saveCount ?? 0) > (data.compactCount ?? 0);
 		// reuse short token — icon conveys fresh/dirty/research etc.
-		const short = formatQuestShort(data as any, fresh);
+		const short = formatQuestShort(data, fresh);
 		return new Text(short, 0, 0);
 	};
 	pi.registerEntryRenderer<StoredState>(CUSTOM_TYPE, renderEntry);

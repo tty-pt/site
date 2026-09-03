@@ -64,7 +64,7 @@ export async function ensureQuestFileOnDisk(name: string, goal: string, original
 					try { await mkdir(archDir, { recursive: true }); } catch {}
 					const destArch = join(archDir, basename(futurePath));
 					try { await copyFile(futurePath, destArch); } catch { try { copyFileSync(futurePath, destArch); } catch {} }
-					try { const h = createHash("sha256").update(futureContent || name).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: name, slug: name, hash: h, dest: destArch, reason: "ensureQuestFileOnDisk" } as any); } catch {}
+					try { const h = createHash("sha256").update(futureContent || name).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED", `draft discarded`, { quest: name, slug: name, hash: h, dest: destArch, reason: "ensureQuestFileOnDisk" }); } catch {}
 					// Verify archive succeeded before rename; fallback to copy check
 					if (!existsSync(destArch)) {
 						try { copyFileSync(futurePath, destArch); } catch {}
@@ -139,7 +139,7 @@ export async function handleQuestCommand(args: string, ctx: ExtensionContext, pi
 	const switching = s.active !== name;
 	s.pickerCancelled = false; s.active = name;
 	const targetRecord = await resolveQuestRecordBySlug(name);
-	if (targetRecord && (targetRecord as any).parent) pushSubquestToStack(s, (targetRecord as any).parent, name);
+	if (targetRecord && targetRecord.parent) pushSubquestToStack(s, targetRecord.parent, name);
 	else {
 		if (!Array.isArray(s.stack)) s.stack = [];
 		if (!s.stack.includes(name)) s.stack.push(name);

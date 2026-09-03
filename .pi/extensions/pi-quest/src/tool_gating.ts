@@ -219,7 +219,7 @@ Allowed for critical review:
 			}
 
 			// AWAITING_REVIEW scalar gate (A): plan_review / final_acceptance only, blocks writes but allows reads + quest_mark_saved
-			const awGate = (state as any).awaitingReview as { kind: string; reviewId: string; triggerReason?: string; since: number } | null | undefined;
+			const awGate = state.awaitingReview as { kind: string; reviewId: string; triggerReason?: string; since: number } | null | undefined;
 			const isAwaitingReview = Boolean(awGate && (awGate.kind === "plan_review" || awGate.kind === "final_acceptance"));
 			if (isAwaitingReview) {
 				const normTool = (toolName || "").toLowerCase().trim();
@@ -266,7 +266,7 @@ Required: await review verdict.`;
 						consequence: "OPERATION_BLOCKED",
 					});
 					reportAgentError(pi, ctx, `Tool '${toolName}' execution blocked in state ${gateState.stateName}: ${gateState.reason}`, {
-						code: gateState.code as any,
+						code: gateState.code,
 						correlationId,
 						deliverAs: "steer",
 						requiredNextAction: gateState.requiredAction,
@@ -325,7 +325,7 @@ Required:
 complete the current research/reassessment prerequisite and reopen the implementation gate.`;
 
 				const failureId = `block_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-				(state as any).lastFailureId = failureId;
+				state.lastFailureId = failureId;
 
 				logGateTransition("GATE_BLOCKED", `gate blocked: ${gate.stateName}`, {
 					quest: state.active || "",

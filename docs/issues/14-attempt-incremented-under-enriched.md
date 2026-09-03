@@ -1,7 +1,7 @@
 ---
 id: 14
 title: "ATTEMPT_INCREMENTED is under-enriched"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "ATTEMPT_INCREMENTED has boundaryKey/saveHash/saveCount"

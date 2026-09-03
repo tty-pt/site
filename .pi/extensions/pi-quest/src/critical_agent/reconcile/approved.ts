@@ -32,7 +32,7 @@ export function handleApprovedVerdict(
 			sessionId,
 			reviewId: correlationId,
 			reviewKind: snapshot.reviewKind,
-			requireConfirm: !!(targetState as any).awaitingUserConfirmation,
+			requireConfirm: !!targetState.awaitingUserConfirmation,
 			boundaryKey: snapshot.boundaryKey || undefined,
 		});
 		targetState.lastPlanReviewApproval = {

@@ -25,7 +25,7 @@ export function canImplement(targetState?: StoredState, ctx?: ExtensionContext):
 	if (isRootQuest(s) && (isSubagentToolRegistered(undefined, ctx) || Boolean(getCustomSubagentRunner())) && !isPlanReviewValidForState(s)) {
 		return false;
 	}
-	if ((s as any).awaitingReview && ((s as any).awaitingReview.kind === "plan_review" || (s as any).awaitingReview.kind === "final_acceptance")) {
+	if (s.awaitingReview && (s.awaitingReview.kind === "plan_review" || s.awaitingReview.kind === "final_acceptance")) {
 		return false;
 	}
 	if (isRootQuest(s) && s.awaitingUserConfirmation) return false;
@@ -116,7 +116,7 @@ export function getImplementationBlockReason(targetState?: StoredState, ctx?: Ex
 		};
 	}
 	// Turn-stop gate A: awaitingReview scalar (plan_review / final_acceptance only, survives compaction)
-	const aw = (s as any).awaitingReview as { kind: string; reviewId: string; triggerReason?: string; since: number } | null | undefined;
+	const aw = s.awaitingReview;
 	if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
 		return {
 			blocked: true,
@@ -154,7 +154,7 @@ export function syncImplementationPermission(targetState?: StoredState, ctx?: Ex
 }
 
 export function getLifecycleState(targetState?: StoredState | ExtensionContext, _ctx?: ExtensionContext): QuestLifecycleState {
-	const s = (targetState && typeof (targetState as any).active !== "undefined" ? targetState as StoredState : state);
+	const s = (targetState && 'active' in targetState ? targetState as StoredState : state);
 	if (!s.active) return QuestLifecycleState.IDLE;
 	if (s.compactionPending) return QuestLifecycleState.COMPACTING;
 

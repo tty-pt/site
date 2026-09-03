@@ -9,6 +9,13 @@ import { findProjectRoot } from "./hierarchy.ts";
 import { calculateAuthoritativeTerminalStatus } from "./status.ts";
 import { ActiveRunHierarchy, DiagnosticReportResult, ExtractedJournalState } from "./types.ts";
 
+type RunSummaryLogInfo = ReturnType<typeof summarizeQuestJournalLog> & {
+	filteredCount?: number;
+	opencodeSessionId?: string | null;
+	startMs?: number | null;
+	elapsedMaxMs?: number | null;
+};
+
 export function extractJournalStateFromContent(content: string): ExtractedJournalState {
 	const sections = parseMarkdownSections(content);
 	const getSec = (key: string): string => {
@@ -44,7 +51,7 @@ export function extractJournalStateFromContent(content: string): ExtractedJourna
 export async function generateRunSummary(
 	hierarchy: ActiveRunHierarchy,
 	projectRoot?: string,
-	options?: { status?: string; logSummaryInfo?: ReturnType<typeof summarizeQuestJournalLog> | null; questContent?: string },
+	options?: { status?: string; logSummaryInfo?: RunSummaryLogInfo | null; questContent?: string },
 ): Promise<string> {
 	const root = projectRoot || findProjectRoot();
 	let rootQuestContent = options?.questContent || "";
@@ -54,7 +61,7 @@ export async function generateRunSummary(
 		} catch {}
 	}
 
-	let logSummaryInfo: ReturnType<typeof summarizeQuestJournalLog> | null = options?.logSummaryInfo || null;
+	let logSummaryInfo: RunSummaryLogInfo | null = options?.logSummaryInfo || null;
 	if (!logSummaryInfo && hierarchy.logExists && (await fileExists(hierarchy.logPath))) {
 		try {
 			logSummaryInfo = summarizeQuestJournalLog(hierarchy.logPath);
@@ -210,7 +217,7 @@ export function generateRunManifest(
 	hierarchy: ActiveRunHierarchy,
 	customTimestamp?: string,
 	projectRoot?: string,
-	extra?: { bundleHash?: string; zipPath?: string; zipSha256?: string; status?: string; logSummaryInfo?: ReturnType<typeof summarizeQuestJournalLog> | null },
+	extra?: { bundleHash?: string; zipPath?: string; zipSha256?: string; status?: string; logSummaryInfo?: RunSummaryLogInfo | null },
 ): string {
 	const timestamp = customTimestamp || new Date().toISOString();
 	const root = projectRoot || findProjectRoot();
@@ -218,7 +225,7 @@ export function generateRunManifest(
 		? hierarchy.capturedSubQuests.map((s) => s.name).join(", ")
 		: "(none)";
 
-	let logSummaryInfo = extra?.logSummaryInfo || null;
+	let logSummaryInfo: RunSummaryLogInfo | null = extra?.logSummaryInfo || null;
 	if (!logSummaryInfo && hierarchy.logExists && existsSync(hierarchy.logPath)) {
 		try {
 			logSummaryInfo = summarizeQuestJournalLog(hierarchy.logPath);
@@ -248,13 +255,13 @@ export function generateRunManifest(
 	lines.push(`semanticSummaryEnabled: ${hierarchy.semanticSummaryEnabled ? "true" : "false"}`);
 	lines.push(`thoughtLoggingEnabled: ${hierarchy.thoughtLoggingEnabled ? "true" : "false"}`);
 	// filteredCount from log summary if available, else hierarchy fallback
-	const filtered = (logSummaryInfo as any)?.filteredCount ?? hierarchy.filteredCount;
+	const filtered = logSummaryInfo?.filteredCount ?? hierarchy.filteredCount;
 	if (filtered !== undefined && filtered !== null) lines.push(`filteredCount: ${filtered}`);
-	const opSess = (logSummaryInfo as any)?.opencodeSessionId ?? hierarchy.opencodeSessionId;
+	const opSess = logSummaryInfo?.opencodeSessionId ?? hierarchy.opencodeSessionId;
 	if (opSess) lines.push(`opencodeSessionId: ${opSess}`);
-	const sMs = (logSummaryInfo as any)?.startMs ?? hierarchy.startMs;
+	const sMs = logSummaryInfo?.startMs ?? hierarchy.startMs;
 	if (sMs !== null && sMs !== undefined) lines.push(`startMs: ${sMs}`);
-	const eMs = (logSummaryInfo as any)?.elapsedMaxMs ?? hierarchy.elapsedMaxMs;
+	const eMs = logSummaryInfo?.elapsedMaxMs ?? hierarchy.elapsedMaxMs;
 	if (eMs !== null && eMs !== undefined) lines.push(`elapsedMaxMs: ${eMs}`);
 	if (extra?.bundleHash) {
 		lines.push(`bundleHash: ${extra.bundleHash}`);
@@ -270,7 +277,7 @@ export async function generateDiagnosticReport(
 	hierarchy: ActiveRunHierarchy,
 	options?: { status?: string },
 ): Promise<DiagnosticReportResult> {
-	let logSummaryInfo: ReturnType<typeof summarizeQuestJournalLog> | null = null;
+	let logSummaryInfo: RunSummaryLogInfo | null = null;
 	let logStats = {
 		exists: hierarchy.logExists,
 		size: hierarchy.logSize || 0,

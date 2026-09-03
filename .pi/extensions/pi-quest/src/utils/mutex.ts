@@ -26,18 +26,18 @@ export function startReviewLockHeartbeat(
 	questId: string | null | undefined,
 	lockPath: string,
 ): () => void {
-	logEvent("REVIEW_LOCK_HEARTBEAT_STARTED" as any, `review lock heartbeat started lockPath=${lockPath}`, {
+	logEvent("REVIEW_LOCK_HEARTBEAT_STARTED", `review lock heartbeat started lockPath=${lockPath}`, {
 		quest: questId || "",
 		lockPath,
 		intervalMs: REVIEW_LOCK_HEARTBEAT_MS,
-	} as any);
+	});
 	const iv = setInterval(() => touchReviewLockFile(lockPath), REVIEW_LOCK_HEARTBEAT_MS);
 	return () => {
 		clearInterval(iv);
-		logEvent("REVIEW_LOCK_HEARTBEAT_STOPPED" as any, `review lock heartbeat stopped lockPath=${lockPath}`, {
+		logEvent("REVIEW_LOCK_HEARTBEAT_STOPPED", `review lock heartbeat stopped lockPath=${lockPath}`, {
 			quest: questId || "",
 			lockPath,
-		} as any);
+		});
 	};
 }
 
@@ -67,7 +67,7 @@ export async function withQuestLock<T>(key: string, fn: () => T | Promise<T>, ge
 		const start = Date.now();
 		await prev;
 		waitMs = Date.now() - start;
-		logEvent("MUTEX_WAIT", `mutex wait ${key}`, { lockKey: key, waitMs } as any);
+		logEvent("MUTEX_WAIT", `mutex wait ${key}`, { lockKey: key, waitMs });
 	}
 	const holdStart = Date.now();
 	heldQuestLocks.add(key);
@@ -168,7 +168,7 @@ export function acquireReviewFileLock(questId: string | null | undefined): { acq
 				const staleMs = getStaleMs();
 				if (age > staleMs) {
 					try { unlinkSync(lockPath); } catch {}
-					logEvent("REVIEW_LOCK_STALE_RECOVERED" as any, `review lock stale recovered age=${Math.round(age)}`, { quest: questId || "", lockPath, ageMs: age, staleMs } as any);
+					logEvent("REVIEW_LOCK_STALE_RECOVERED", `review lock stale recovered age=${Math.round(age)}`, { quest: questId || "", lockPath, ageMs: age, staleMs });
 					// retry acquire once after stale unlink
 				} else {
 					return { acquired: false, path: lockPath, error: "EEXIST" };
@@ -189,7 +189,7 @@ export function acquireReviewFileLock(questId: string | null | undefined): { acq
 				const age = Date.now() - st.mtimeMs;
 				const staleMs = getStaleMs();
 				if (age > staleMs) {
-					try { unlinkSync(lockPath); logEvent("REVIEW_LOCK_STALE_RECOVERED" as any, `review lock stale recovered (race) age=${Math.round(age)}`, { quest: questId || "", lockPath, ageMs: age, staleMs } as any); } catch {}
+					try { unlinkSync(lockPath); logEvent("REVIEW_LOCK_STALE_RECOVERED", `review lock stale recovered (race) age=${Math.round(age)}`, { quest: questId || "", lockPath, ageMs: age, staleMs }); } catch {}
 					const fd2 = openSync(lockPath, "wx");
 					try { closeSync(fd2); } catch {}
 					return { acquired: true, path: lockPath, staleRecovered: true };
@@ -229,13 +229,13 @@ export async function withReviewFileLock<T>(questId: string | null | undefined, 
 				heldFileLocks.add(acquiredPath);
 				if (attempts > 0) {
 					const waitMs = Date.now() - startWait;
-					try { logEvent("MUTEX_WAIT" as any, `mutex wait file ${res.path} retries=${attempts}`, { lockKey: qKey, waitMs, retries: attempts, lockPath: res.path } as any); } catch {}
+					try { logEvent("MUTEX_WAIT", `mutex wait file ${res.path} retries=${attempts}`, { lockKey: qKey, waitMs, retries: attempts, lockPath: res.path }); } catch {}
 				}
 				break;
 			}
 			// not acquired, check stale already handled inside acquire; if still EEXIST, wait
 			if (attempts === maxRetries) {
-				try { logEvent("MUTEX_WAIT" as any, `mutex wait file timeout ${res.path}`, { lockKey: qKey, waitMs: Date.now() - startWait, retries: attempts, lockPath: res.path } as any); } catch {}
+				try { logEvent("MUTEX_WAIT", `mutex wait file timeout ${res.path}`, { lockKey: qKey, waitMs: Date.now() - startWait, retries: attempts, lockPath: res.path }); } catch {}
 				throw new Error(`Review file lock timeout for ${questId}: ${res.path}`);
 			}
 			attempts++;

@@ -20,13 +20,13 @@ export function getSettingsCeiling(_ctx?: ExtensionContext): number {
 export function readSettingsSubquestThreshold(ctx?: ExtensionContext): number | null {
 	const pj=getProjectJson(ctx);
 	if(pj){
-		const piQ = (pj as any)["pi-quest"] ?? (pj as any).piQuest;
+		const piQ = pj["pi-quest"] ?? pj.piQuest;
 		if(piQ){const v=piQ?.subquestCompactTokens??piQ?.subquestThreshold;const parsed=parseTokenAmount(v,DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS);if(parsed!==null)return parsed}
 		const v=pj?.questJournal?.subquestCompactTokens??pj?.questJournal?.subquestThreshold??pj?.compaction?.subquestTokens;const parsed=parseTokenAmount(v,DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS);if(parsed!==null)return parsed
 	}
 	const hj=getHomeJson();
 	if(hj){
-		const piQ = (hj as any)["pi-quest"] ?? (hj as any).piQuest;
+		const piQ = hj["pi-quest"] ?? hj.piQuest;
 		if(piQ){const v=piQ?.subquestCompactTokens??piQ?.subquestThreshold;const parsed=parseTokenAmount(v,DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS);if(parsed!==null)return parsed}
 		const v=hj?.questJournal?.subquestCompactTokens??hj?.questJournal?.subquestThreshold??hj?.compaction?.subquestTokens;const parsed=parseTokenAmount(v,DEFAULT_SUBQUEST_LAUNCH_MIN_TOKENS);if(parsed!==null)return parsed
 	}

@@ -25,8 +25,8 @@ function transitionObligations(
 	for (const obl of state.pendingNotifications) {
 		if (predicate(obl)) {
 			obl.status = config.status;
-			(obl as any)[config.timestampField] = Date.now();
-			(obl as any)[config.reasonField] = reason;
+			obl[config.timestampField] = Date.now();
+			obl[config.reasonField] = reason;
 			if (config.extra) config.extra(obl);
 			pushToObligationHistory(state, obl);
 			any = true;

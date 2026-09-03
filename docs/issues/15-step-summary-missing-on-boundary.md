@@ -1,7 +1,7 @@
 ---
 id: 15
 title: "STEP_SUMMARY is not emitted on quest_update_state boundary flips"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "STEP_SUMMARY on boundary flip when semanticSummaryEnabled"

@@ -30,7 +30,7 @@ export function dequeuePendingIfNeeded(
 ): any | null {
   const pendings = getAllPendingForSlug(slug);
   if (pendings.length === 0) {
-    try { logEvent("PENDING_COALESCED_DROPPED" as any, `pending coalesced dropped (no pendings)`, { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 } as any); } catch {}
+    try { logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (no pendings)`, { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 }); } catch {}
     return null;
   }
   const latestPlanVersion = targetState.planVersion || 1;
@@ -59,7 +59,7 @@ export function dequeuePendingIfNeeded(
   // Clear stale ones
   for (const s of stale) clearPendingReview(slug, s.kind);
   if (candidates.length === 0) {
-    try { logEvent("PENDING_COALESCED_DROPPED" as any, `pending coalesced dropped (all stale)`, { quest: slug, shard: "all_stale", staleCount: stale.length, candidateCount: 0 } as any); } catch {}
+    try { logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (all stale)`, { quest: slug, shard: "all_stale", staleCount: stale.length, candidateCount: 0 }); } catch {}
     return null;
   }
   // Prefer most recent requestedAt; if tie, last

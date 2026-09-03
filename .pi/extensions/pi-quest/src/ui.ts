@@ -19,14 +19,14 @@ export function updateUIStatus(ctx?: ExtensionContext) {
 		const fresh = compactionReady();
 
 		// invariant: never null during quest — synthesize if needed (covers same-turn race)
-		if ((state.active || (state as any).activeDraft || state.pendingRootQuest) && !state.questId) {
-			try { (state as any).questId = generateQuestId(); } catch {}
+		if ((state.active || state.activeDraft || state.pendingRootQuest) && !state.questId) {
+			try { state.questId = generateQuestId(); } catch {}
 		}
 
-		const text = (state.active || (state as any).activeDraft || state.pendingRootQuest)
-			? formatQuestShort(state as any, fresh)
+		const text = (state.active || state.activeDraft || state.pendingRootQuest)
+			? formatQuestShort(state, fresh)
 			: undefined;
-		try { logEvent("UI_STATUS" as any, text || "(none)", { quest: (state as any).active || (state as any).activeDraft || "", text: text || "(none)", fresh } as any); } catch {}
+		try { logEvent("UI_STATUS", text || "(none)", { quest: state.active || state.activeDraft || "", text: text || "(none)", fresh }); } catch {}
 		if (typeof c.ui?.setStatus === "function") {
 			c.ui.setStatus("quest", text);
 		}

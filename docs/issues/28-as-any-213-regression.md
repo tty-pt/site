@@ -1,7 +1,7 @@
 ---
 id: 28
 title: "as any regression 213 hits — reassess from scratch, target 0"
-state: ready
+state: done
 severity: low
 requires: [27]
 validates: "grep as any 0 (allow state.ts proxy)"

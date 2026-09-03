@@ -356,11 +356,11 @@ export async function cleanDraftIfExists(slug: string, ctx?: ExtensionContext) {
 		if (await fileExists(futurePath)) {
 			try {
 				const content = await readFile(futurePath, "utf8").catch(() => "");
-				const qid = getQuestId(ctx as any);
+				const qid = getQuestId(ctx);
 				if (qid) {
 					const archDir = join(questDirPath(qid), "future-archive");
 					try { await copyFile(futurePath, join(archDir, basename(futurePath))).catch(async () => { const { mkdir } = await import("node:fs/promises"); await mkdir(archDir, { recursive: true }); await copyFile(futurePath, join(archDir, basename(futurePath))); }); } catch { try { copyFileSync(futurePath, join(archDir, basename(futurePath))); } catch {} }
-					try { const { logEvent } = await import("./logging.ts"); const h = createHash("sha256").update(content || slug).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED" as any, `draft discarded`, { quest: slug, slug, hash: h, dest: join(archDir, basename(futurePath)), reason: "cleanDraftIfExists" } as any); } catch {}
+					try { const { logEvent } = await import("./logging.ts"); const h = createHash("sha256").update(content || slug).digest("hex").slice(0, 12); logEvent("DRAFT_DISCARDED", `draft discarded`, { quest: slug, slug, hash: h, dest: join(archDir, basename(futurePath)), reason: "cleanDraftIfExists" }); } catch {}
 				}
 			} catch {}
 			await unlink(futurePath);

@@ -288,21 +288,21 @@ export function shouldCapturePrompt(text: string): boolean {
 	const t = text.trim();
 	if (!t || t.length < 2) return false;
 	if (t.startsWith("/")) {
-		try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "/", slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" } as any); } catch {}
+		try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: "/", slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" }); } catch {}
 		return false;
 	}
 	const lower = t.toLowerCase();
 	if (lower.startsWith(INTERNAL_MESSAGE_PREFIX.toLowerCase())) {
-		try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: INTERNAL_MESSAGE_PREFIX, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" } as any); } catch {}
+		try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: INTERNAL_MESSAGE_PREFIX, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" }); } catch {}
 		return false;
 	}
 	for (const p of SYNTHETIC_PROMPT_PREFIXES) {
 		if (lower.startsWith(p.toLowerCase())) {
-			try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: p, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" } as any); } catch {}
+			try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: p, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" }); } catch {}
 			return false;
 		}
 	}
 	const contains = ["post-compaction autonomous resumption directive","pre-compaction exhaustive context preservation protocol","context is approaching the configured compaction threshold","context compaction is now being requested","context compaction is imminent","critical quest journal compaction safety state"];
-	for (const c of contains) if (lower.includes(c)) { try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: c, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" } as any); } catch {} return false; }
+	for (const c of contains) if (lower.includes(c)) { try { const h = createHash("sha256").update(t).digest("hex").slice(0, 12); logEvent("SYNTHETIC_FILTERED", `synthetic filtered`, { syntheticPrefix: c, slice: t.slice(0, 80), hash: h, classification: "SYNTHETIC", quest: "" }); } catch {} return false; }
 	return true;
 }

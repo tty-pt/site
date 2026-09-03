@@ -56,7 +56,7 @@ export async function createReviewSnapshot(
 				boundaryKey = `draft:${slugOrQid}:${createHash("sha256").update(fContent).digest("hex").slice(0, 12)}`;
 				try { const rp = await resolveFutureDraftPath(slugOrQid); const base = rp.split("/").pop()?.replace(/\.md$/, ""); if (base && base !== slugOrQid) slugOrQid = base; } catch {}
 			} catch {
-				if (!(activeState as any).activeDraft) {
+				if (!activeState.activeDraft) {
 					logEvent("SNAPSHOT_FALLBACK", `snapshot fallback: draft boundary compute failed`, {
 						quest: slugOrQid,
 						reviewId,
@@ -68,7 +68,7 @@ export async function createReviewSnapshot(
 						activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
 					);
 				} else {
-					const h = (activeState as any).draftLastSavedHash || (activeState as any).draftLastReviewKey?.split(":")[2] || null;
+					const h = activeState.draftLastSavedHash || activeState.draftLastReviewKey?.split(":")[2] || null;
 					boundaryKey = h ? `draft:${slugOrQid}:${h}` : activeState.lastPlanReviewBoundaryKey || computePlanReviewBoundaryKey(
 						activeState.questId || slugOrQid, planVersion, context.plan || "", context.planRevisions || "",
 					);
@@ -124,8 +124,8 @@ export function isReviewSnapshotCurrent(
 		// Draft boundary: compare live draft hash (or draftLastSavedHash/draftLastReviewKey), not lastPlanReviewBoundaryKey
 		if (snapshot.boundaryKey?.startsWith("draft:")) {
 			const parts = snapshot.boundaryKey.split(":");
-			const slug = parts[1] || (currentState as any).activeDraft || "";
-			let liveHash: string | null = (currentState as any).draftLastSavedHash || null;
+		const slug = parts[1] || currentState.activeDraft || "";
+		let liveHash: string | null = currentState.draftLastSavedHash || null;
 			try {
 				if (slug) {
 					const p = `${FUTURE_DIR}/${slug}.md`;
@@ -136,7 +136,7 @@ export function isReviewSnapshotCurrent(
 				}
 			} catch {}
 			const curKey = liveHash && slug ? `draft:${slug}:${liveHash}` : null;
-			const lastReviewKey = (currentState as any).draftLastReviewKey || null;
+			const lastReviewKey = currentState.draftLastReviewKey || null;
 			if (curKey && snapshot.boundaryKey !== curKey) {
 				// If snapshot matches the last approved review key we still supersede when live hash moved
 				if (snapshot.boundaryKey !== lastReviewKey || curKey !== lastReviewKey) {

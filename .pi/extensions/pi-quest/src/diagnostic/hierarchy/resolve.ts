@@ -274,18 +274,18 @@ export async function resolveActiveRunHierarchy(
 		else {
 			const futDir = resolve(projectRoot, FUTURE_DIR);
 			if (existsSyncFs(futDir)) {
-				const ents = await readdir(futDir, { withFileTypes: true }).catch(() => [] as any);
-				futureCount = ents.filter((e: any) => e.isFile && e.name.endsWith(".md")).length;
+				const ents = await readdir(futDir, { withFileTypes: true }).catch(() => []);
+				futureCount = ents.filter((e) => e.isFile() && e.name.endsWith(".md")).length;
 			}
 		}
 	} catch {}
 	let compactionResumeHash: string | null = null;
 	try {
-		const pid = (state as any)?.pendingResume?.compactionId || (state as any)?.activeTransaction?.id;
+		const pid = state?.pendingResume?.compactionId || state?.activeTransaction?.id;
 		if (pid) compactionResumeHash = createHash("sha256").update(String(pid), "utf8").digest("hex").slice(0, 12);
 	} catch {}
-	const semanticSummaryEnabled = typeof (state as any)?.semanticSummaryEnabled === "boolean" ? (state as any).semanticSummaryEnabled : false;
-	const thoughtLoggingEnabled = typeof (state as any)?.thoughtLoggingEnabled === "boolean" ? (state as any).thoughtLoggingEnabled : false;
+	const semanticSummaryEnabled = typeof state?.semanticSummaryEnabled === "boolean" ? state.semanticSummaryEnabled : false;
+	const thoughtLoggingEnabled = typeof state?.thoughtLoggingEnabled === "boolean" ? state.thoughtLoggingEnabled : false;
 	// filteredCount/opencodeSessionId/startMs/elapsedMaxMs will be filled from log summary when available; fallback to state sessionStartMap
 	let filteredCount: number | undefined = undefined;
 	let opencodeSessionId: string | null = null;

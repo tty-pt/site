@@ -9,7 +9,7 @@ import { questPath, resolveQuestRecordBySlug } from "./paths.ts";
 import { getState, setSessionState, snapshotState, state } from "./state.ts";
 import { ConsistencyAuditResult, ExtensionAPI, ExtensionContext, QuestErrorCode, StoredState } from "./types.ts";
 import { computeFileFingerprint } from "./utils.ts";
-import { memoFileFingerprint } from "./utils/cache.ts";
+import { memoFileFingerprint, type FileFingerprint } from "./utils/cache.ts";
 import { auditQuestConsistency } from "./validation.ts";
 import { withReviewFileLock } from "./utils/mutex.ts";
 
@@ -85,7 +85,7 @@ export async function verifyAndMarkSaved(
 	const doVerify = async (): Promise<{ success: boolean; hash?: string; count: number; error?: string; consistency?: ConsistencyAuditResult }> => {
 		const p = questPath(targetQid);
 		let fp = await memoFileFingerprint(p);
-		if (!fp) fp = await computeFileFingerprint(p) as any;
+		if (!fp) fp = (await computeFileFingerprint(p)) as FileFingerprint | null;
 		if (!fp) {
 			const futureDraftExists = (() => { try { const slug = targetSlug || targetQid || ""; return slug ? existsSync(join(FUTURE_DIR, `${slug}.md`)) : false; } catch { return false; } })();
 			const reason = futureDraftExists ? "file_not_found+future_draft_exists" : "file_not_found";
@@ -164,7 +164,7 @@ export async function verifyAndMarkSaved(
 		s.sessionModifiedFiles = [];
 		if (state !== s) {
 			Object.assign(state, s);
-			(state as any).sessionModifiedFiles = [];
+			state.sessionModifiedFiles = [];
 		} else {
 			state.sessionModifiedFiles = [];
 		}

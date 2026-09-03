@@ -18,14 +18,14 @@ export function hasRequirementKeyword(text: string): boolean {
 export function classifyUserMessage(text: string): UserMessageClassification {
 	const trimmed = text.trim();
 	if (!trimmed) {
-		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" } as any); } catch {}
+		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" }); } catch {}
 		return UserMessageClassification.CONVERSATIONAL_ACK;
 	}
 
 	const lower = trimmed.toLowerCase();
 	// Defense in depth: synthetic post-compaction directives must never be refinements
 	if (lower.includes("post-compaction") || lower.includes("post-compaction autonomous resumption directive")) {
-		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" } as any); } catch {}
+		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" }); } catch {}
 		return UserMessageClassification.CONVERSATIONAL_ACK;
 	}
 	const clean = lower.replace(/[.,!?;:]+/g, " ").trim();
@@ -51,7 +51,7 @@ export function classifyUserMessage(text: string): UserMessageClassification {
 	});
 
 	if (matchesConfirmationPattern) {
-		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONFIRMATION}`, { classification: UserMessageClassification.CONFIRMATION, quest: state?.active || "" } as any); } catch {}
+		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONFIRMATION}`, { classification: UserMessageClassification.CONFIRMATION, quest: state?.active || "" }); } catch {}
 		return UserMessageClassification.CONFIRMATION;
 	}
 
@@ -59,7 +59,7 @@ export function classifyUserMessage(text: string): UserMessageClassification {
 	const ackWords = new Set(["hi", "hello", "hey", "greetings", "thanks", "thank", "you", "thx", "ok", "okay", "k", "got", "it", "cool", "nice", "great", "good", "fine", "done", "quit", "exit", "no", "nope", "bye"]);
 	const allAckWords = words.length > 0 && words.every((w) => ackWords.has(w));
 	if (allAckWords && !hasReq) {
-		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" } as any); } catch {}
+		try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.CONVERSATIONAL_ACK}`, { classification: UserMessageClassification.CONVERSATIONAL_ACK, quest: state?.active || "" }); } catch {}
 		return UserMessageClassification.CONVERSATIONAL_ACK;
 	}
 
@@ -67,13 +67,13 @@ export function classifyUserMessage(text: string): UserMessageClassification {
 	const isQuestion = /^(what|where|who|how|why|is there|are there|can you explain|explain|tell me|show me|which|status|how does|what is|what are)\b/i.test(lower) || lower.endsWith("?");
 	if (isQuestion && trimmed.length < 250) {
 		if (!hasReq) {
-			try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.QUESTION_OR_DISCUSSION}`, { classification: UserMessageClassification.QUESTION_OR_DISCUSSION, quest: state?.active || "" } as any); } catch {}
+			try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.QUESTION_OR_DISCUSSION}`, { classification: UserMessageClassification.QUESTION_OR_DISCUSSION, quest: state?.active || "" }); } catch {}
 			return UserMessageClassification.QUESTION_OR_DISCUSSION;
 		}
 	}
 
 	// 4. Material requirements / refinements
-	try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.REFINEMENT_OR_REQUIREMENT}`, { classification: UserMessageClassification.REFINEMENT_OR_REQUIREMENT, quest: state?.active || "" } as any); } catch {}
+	try { logEvent("CLASSIFICATION_RESULT", `classification ${UserMessageClassification.REFINEMENT_OR_REQUIREMENT}`, { classification: UserMessageClassification.REFINEMENT_OR_REQUIREMENT, quest: state?.active || "" }); } catch {}
 	return UserMessageClassification.REFINEMENT_OR_REQUIREMENT;
 }
 

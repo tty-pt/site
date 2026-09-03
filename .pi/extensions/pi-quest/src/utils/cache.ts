@@ -13,7 +13,7 @@ let lastWorkflowCache: { saveHash: string; pressure: string; prompt: string } | 
 let resumeCache: { saveHash: string; value: string } = { saveHash: "", value: "" };
 
 function hashContent(content: string | Uint8Array): string {
-	return createHash("sha256").update(content as any).digest("hex");
+	return createHash("sha256").update(content).digest("hex");
 }
 
 export async function memoFileFingerprint(p: string): Promise<FileFingerprint | null> {

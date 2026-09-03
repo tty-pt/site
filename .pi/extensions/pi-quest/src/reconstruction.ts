@@ -27,11 +27,11 @@ export function loadPersistedJournalSnapshot(ctx: ExtensionContext): StoredState
 }
 
 export function restoreSessionState(latest: StoredState): StoredState {
-	const txData = latest.activeTransaction && typeof latest.activeTransaction === "object" ? (latest.activeTransaction as any) : null;
+	const txData = latest.activeTransaction && typeof latest.activeTransaction === "object" ? latest.activeTransaction : null;
 	const isCompacting = txData ? (txData.phase === "in-flight" || txData.phase === "prepared") : false;
-	let activeDraft: string | null = typeof (latest as any).activeDraft === "string" ? (latest as any).activeDraft : null;
-	let draftPrompts: string[] = Array.isArray((latest as any).draftPrompts) ? (latest as any).draftPrompts : [];
-	let draftCreatedAt: number | null = typeof (latest as any).draftCreatedAt === "number" ? (latest as any).draftCreatedAt : null;
+	let activeDraft: string | null = typeof latest.activeDraft === "string" ? latest.activeDraft : null;
+	let draftPrompts: string[] = Array.isArray(latest.draftPrompts) ? latest.draftPrompts : [];
+	let draftCreatedAt: number | null = typeof latest.draftCreatedAt === "number" ? latest.draftCreatedAt : null;
 	// 26: orphan fallback — if journal missed activeDraft (killed before flush) scan FUTURE_DIR for any .md
 	if (!activeDraft) {
 		try {
@@ -67,17 +67,17 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		pendingSubquestResumeResolution: reconstructPendingSubquestResolution(latest.pendingSubquestResumeResolution),
 		preCompactionCheckpointPending: false,
 		preCompactionSaveRequestPending: false,
-		saveGeneration: (latest as any).saveGeneration || null,
-		lastSavedHash: (latest as any).lastSavedHash || null,
+		saveGeneration: latest.saveGeneration || null,
+		lastSavedHash: latest.lastSavedHash || null,
 		economyTokens: typeof latest.economyTokens === "number" ? latest.economyTokens : undefined,
 		economyPercent: typeof latest.economyPercent === "number" ? latest.economyPercent : undefined,
 		warningMarginTokens: typeof latest.warningMarginTokens === "number" ? latest.warningMarginTokens : undefined,
 		subquestCompactTokens: typeof latest.subquestCompactTokens === "number" ? latest.subquestCompactTokens : undefined,
 		lastWarnedCompactionTokens: undefined,
-		lastPeriodicCheckpointAt: typeof (latest as any).lastPeriodicCheckpointAt === "number" ? (latest as any).lastPeriodicCheckpointAt : 0,
-		lastPeriodicCheckpointTurn: typeof (latest as any).lastPeriodicCheckpointTurn === "number" ? (latest as any).lastPeriodicCheckpointTurn : 0,
-		lastPeriodicSteerTurn: typeof (latest as any).lastPeriodicSteerTurn === "number" ? (latest as any).lastPeriodicSteerTurn : -1,
-		lastPeriodicSteerAt: typeof (latest as any).lastPeriodicSteerAt === "number" ? (latest as any).lastPeriodicSteerAt : 0,
+		lastPeriodicCheckpointAt: typeof latest.lastPeriodicCheckpointAt === "number" ? latest.lastPeriodicCheckpointAt : 0,
+		lastPeriodicCheckpointTurn: typeof latest.lastPeriodicCheckpointTurn === "number" ? latest.lastPeriodicCheckpointTurn : 0,
+		lastPeriodicSteerTurn: typeof latest.lastPeriodicSteerTurn === "number" ? latest.lastPeriodicSteerTurn : -1,
+		lastPeriodicSteerAt: typeof latest.lastPeriodicSteerAt === "number" ? latest.lastPeriodicSteerAt : 0,
 		lastPromptAt: typeof latest.lastPromptAt === "number" ? latest.lastPromptAt : Date.now(),
 		lastResumePromptAt: typeof latest.lastResumePromptAt === "number" ? latest.lastResumePromptAt : 0,
 		lastResumeTarget: typeof latest.lastResumeTarget === "string" ? latest.lastResumeTarget : null,
@@ -103,7 +103,7 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		lastReassessmentReason: typeof latest.lastReassessmentReason === "string" ? latest.lastReassessmentReason : null,
 		lastCheckpointPromptAt: typeof latest.lastCheckpointPromptAt === "number" ? latest.lastCheckpointPromptAt : 0,
 		planVersion: typeof latest.planVersion === "number" ? latest.planVersion : 1,
-		planConfidence: (latest.planConfidence as any) || "low",
+		planConfidence: latest.planConfidence || "low",
 		lastResearchAt: typeof latest.lastResearchAt === "number" ? latest.lastResearchAt : Date.now(),
 		lastPlanRevisionAt: typeof latest.lastPlanRevisionAt === "number" ? latest.lastPlanRevisionAt : Date.now(),
 		lastPromptedReassessmentVersion: typeof latest.lastPromptedReassessmentVersion === "number" ? latest.lastPromptedReassessmentVersion : 0,
@@ -111,30 +111,30 @@ export function restoreSessionState(latest: StoredState): StoredState {
 		awaitingUserConfirmation: typeof latest.awaitingUserConfirmation === "boolean" ? latest.awaitingUserConfirmation : false,
 		consecutiveFailures: typeof latest.consecutiveFailures === "number" ? latest.consecutiveFailures : 0,
 		substantiveTurnsSinceCheckpoint: typeof latest.substantiveTurnsSinceCheckpoint === "number" ? latest.substantiveTurnsSinceCheckpoint : 0,
-		retryTurnsUsed: typeof (latest as any).retryTurnsUsed === "number" ? (latest as any).retryTurnsUsed : 0,
-		retryLastStalledTurn: typeof (latest as any).retryLastStalledTurn === "number" ? (latest as any).retryLastStalledTurn : null,
+		retryTurnsUsed: typeof latest.retryTurnsUsed === "number" ? latest.retryTurnsUsed : 0,
+		retryLastStalledTurn: typeof latest.retryLastStalledTurn === "number" ? latest.retryLastStalledTurn : null,
 		lastCriticalReview: latest.lastCriticalReview ? { ...latest.lastCriticalReview } : null,
 		criticalReviews: Array.isArray(latest.criticalReviews) ? latest.criticalReviews.map((r) => ({ ...r })) : [],
 		criticalReviewAttempts: latest.criticalReviewAttempts ? { ...latest.criticalReviewAttempts } : {},
-		lastReviewedSaveHash: (latest as any).lastReviewedSaveHash || null,
-		lastReviewedPlanVersion: (latest as any).lastReviewedPlanVersion || null,
-		lastReviewedSaveCount: (latest as any).lastReviewedSaveCount || null,
+		lastReviewedSaveHash: latest.lastReviewedSaveHash || null,
+		lastReviewedPlanVersion: latest.lastReviewedPlanVersion || null,
+		lastReviewedSaveCount: latest.lastReviewedSaveCount || null,
 		lastPlanReviewApproval: latest.lastPlanReviewApproval ? { ...latest.lastPlanReviewApproval } : null,
-		lastPlanReviewBoundaryKey: (latest as any).lastPlanReviewBoundaryKey || null,
-		lastPlanReviewRequestedVersion: (latest as any).lastPlanReviewRequestedVersion || null,
+		lastPlanReviewBoundaryKey: latest.lastPlanReviewBoundaryKey || null,
+		lastPlanReviewRequestedVersion: latest.lastPlanReviewRequestedVersion || null,
 		activeDraft,
 		draftPrompts,
 		draftCreatedAt,
-		draftLastSavedHash: typeof (latest as any).draftLastSavedHash === "string" ? (latest as any).draftLastSavedHash : null,
-		draftLastReviewKey: typeof (latest as any).draftLastReviewKey === "string" ? (latest as any).draftLastReviewKey : null,
-		semanticSummaryEnabled: typeof (latest as any).semanticSummaryEnabled === "boolean" ? (latest as any).semanticSummaryEnabled : undefined,
-		thoughtLoggingEnabled: typeof (latest as any).thoughtLoggingEnabled === "boolean" ? (latest as any).thoughtLoggingEnabled : undefined,
-		initialPromptLogged: typeof (latest as any).initialPromptLogged === "boolean" ? (latest as any).initialPromptLogged : false,
-		lastPlanReviewRequestKey: (latest as any).lastPlanReviewRequestKey || null,
-		lastDraftReviewRequestKey: (latest as any).lastDraftReviewRequestKey || null,
-		lastDirectionReviewKey: (latest as any).lastDirectionReviewKey || null,
-		lastDirectionReviewAt: typeof (latest as any).lastDirectionReviewAt === "number" ? (latest as any).lastDirectionReviewAt : null,
-		awaitingReview: (latest as any).awaitingReview ? { ...(latest as any).awaitingReview } : null,
+		draftLastSavedHash: typeof latest.draftLastSavedHash === "string" ? latest.draftLastSavedHash : null,
+		draftLastReviewKey: typeof latest.draftLastReviewKey === "string" ? latest.draftLastReviewKey : null,
+		semanticSummaryEnabled: typeof latest.semanticSummaryEnabled === "boolean" ? latest.semanticSummaryEnabled : undefined,
+		thoughtLoggingEnabled: typeof latest.thoughtLoggingEnabled === "boolean" ? latest.thoughtLoggingEnabled : undefined,
+		initialPromptLogged: typeof latest.initialPromptLogged === "boolean" ? latest.initialPromptLogged : false,
+		lastPlanReviewRequestKey: latest.lastPlanReviewRequestKey || null,
+		lastDraftReviewRequestKey: latest.lastDraftReviewRequestKey || null,
+		lastDirectionReviewKey: latest.lastDirectionReviewKey || null,
+		lastDirectionReviewAt: typeof latest.lastDirectionReviewAt === "number" ? latest.lastDirectionReviewAt : null,
+		awaitingReview: latest.awaitingReview ? { ...latest.awaitingReview } : null,
 		investigationEpoch: typeof latest.investigationEpoch === "number" ? latest.investigationEpoch : 1,
 		currentReceipt: latest.currentReceipt || null,
 		lastCompletedReceipt: latest.lastCompletedReceipt || null,
@@ -143,8 +143,8 @@ export function restoreSessionState(latest: StoredState): StoredState {
 
 export function reconcileDerivedState(reconstructedState: StoredState, ctx: ExtensionContext): StoredState {
 	// invariant: questId never null while drafting/active/pending — fix 2026-09-02
-	if ((reconstructedState.active || (reconstructedState as any).activeDraft || reconstructedState.pendingRootQuest) && !reconstructedState.questId) {
-		(reconstructedState as any).questId = generateQuestId();
+	if ((reconstructedState.active || reconstructedState.activeDraft || reconstructedState.pendingRootQuest) && !reconstructedState.questId) {
+		reconstructedState.questId = generateQuestId();
 	}
 	syncImplementationPermission(reconstructedState);
 	setSessionState(ctx, reconstructedState);
@@ -157,7 +157,7 @@ export function reconstruct(ctx: ExtensionContext): StoredState {
 		const latest = loadPersistedJournalSnapshot(ctx);
 		// 26: hasDraft includes disk scan — orphan future/<slug>.md without journal
 		const hasDraftOnDisk = (() => { try { return readdirSync(FUTURE_DIR).filter((f) => f.endsWith(".md")).length > 0; } catch { return false; } })();
-		const hasDraft = !!(latest as any)?.activeDraft || !!((latest as any)?.draftPrompts?.length) || hasDraftOnDisk;
+		const hasDraft = !!latest?.activeDraft || !!(latest?.draftPrompts?.length) || hasDraftOnDisk;
 		const reconstructedState: StoredState = latest && (latest.active || latest.pendingRootQuest || hasDraft) ? restoreSessionState(latest) : hasDraftOnDisk ? restoreSessionState((latest || {}) as StoredState) : createDefaultState();
 		return reconcileDerivedState(reconstructedState, ctx);
 	} catch (err: any) {

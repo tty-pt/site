@@ -1,7 +1,7 @@
 ---
 id: 13
 title: "Plan-review suppression is silent — PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE never emitted"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "PLAN_REVIEW_SUPPRESSED_MATERIAL_CHANGE logged when material change suppressed"

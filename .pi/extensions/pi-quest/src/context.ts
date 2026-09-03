@@ -11,7 +11,7 @@ let cachedNotesHash = "";
 let cachedNotesValue: string | null | undefined = undefined;
 
 function hashContent(content: string | Uint8Array): string {
-	return createHash("sha256").update(content as any).digest("hex").slice(0, 16);
+	return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 
 export function withContext<T extends (...args: any[]) => any>(fn: T): T {

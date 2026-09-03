@@ -27,7 +27,7 @@ export async function promoteDraft(
 	try { await readFile(futurePath, "utf8"); } catch { return { success: false, message: `Draft not found: ${futurePath}` }; }
 
 	// Review gate: require APPROVE unless no reviewer available
-	const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi as any, ctx as any);
+	const hasReviewer = Boolean(getCustomSubagentRunner()) || isSubagentToolRegistered(pi, ctx);
 	if (hasReviewer && !isDraftReviewValid(s)) {
 		return {
 			success: false,
@@ -37,7 +37,7 @@ export async function promoteDraft(
 
 	const qid = generateQuestId();
 	s.questId = qid;
-	(state as any).questId = qid;
+	state.questId = qid;
 	await mkdir(questDirPath(qid), { recursive: true });
 
 	let content: string;
@@ -61,7 +61,7 @@ export async function promoteDraft(
 		const destArch = join(archDir, basename(futurePath));
 		try { await copyFile(futurePath, destArch); } catch {}
 		const h = createHash("sha256").update(content).digest("hex").slice(0, 12);
-		try { logEvent("DRAFT_PROMOTED" as any, `draft promoted`, { quest: s.active || targetSlug, slug: targetSlug, hash: h, dest: destArch, reason: "promote" } as any); } catch {}
+		try { logEvent("DRAFT_PROMOTED", `draft promoted`, { quest: s.active || targetSlug, slug: targetSlug, hash: h, dest: destArch, reason: "promote" }); } catch {}
 	} catch {}
 	try { await unlink(futurePath); } catch {}
 
@@ -83,12 +83,14 @@ export async function promoteDraft(
 	s.researchRequired = true;
 	s.researchComplete = false;
 	s.reassessmentRequired = false;
-	startResearchEpoch(s as any, "research");
-	syncImplementationPermission(s as any);
-	persist(pi as any, ctx as any);
-	updateUIStatus(ctx as any);
+	startResearchEpoch(s, "research");
+	syncImplementationPermission(s);
+	updateUIStatus(ctx);
 
-	try { await verifyAndMarkSaved(pi as any, ctx as any, targetSlug); } catch {}
+	if (pi) {
+		persist(pi, ctx);
+		try { await verifyAndMarkSaved(pi, ctx, targetSlug); } catch {}
+	}
 
 	return { success: true, qid, message: `Promoted draft '${targetSlug}' → ${destPath} (qid ${qid})` };
 }

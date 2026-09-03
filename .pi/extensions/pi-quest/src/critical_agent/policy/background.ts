@@ -83,7 +83,7 @@ export async function executeReviewBackground(
 
 	let snapshot: ReviewSnapshot = provisionalSnapshot;
 	try {
-		snapshot = await createReviewSnapshot(slug, correlationId, kind as any, sessionId, targetState, {
+		snapshot = await createReviewSnapshot(slug, correlationId, kind, sessionId, targetState, {
 			planVersion: currentPlanVersion,
 			saveGeneration: params.currentSaveCount,
 			stateHash: currentHash,
@@ -124,10 +124,10 @@ export async function executeReviewBackground(
 
 		// If aborted after review returned normally, discard result (runner didn't throw)
 		if (abortController?.signal.aborted) {
-			logCriticalReviewTransition("REVIEW_CANCELLED" as any, `review execution cancelled: ${String(abortController.signal.reason || "aborted")}`, {
+			logCriticalReviewTransition("REVIEW_CANCELLED", `review execution cancelled: ${String(abortController.signal.reason || "aborted")}`, {
 				quest: slug, questId, sessionId, reviewId: correlationId,
 				reason: String(abortController.signal.reason || "aborted"),
-			} as any);
+			});
 			resolveExecution({ success: false, available: true, skipped: true, error: "cancelled" });
 			return;
 		}
@@ -178,11 +178,11 @@ export async function executeReviewBackground(
 	} catch (err: any) {
 		// If the review was cancelled (superseded), discard result silently
 		const { getActiveReviews } = await import("../tracker.ts");
-		if ((err?.name === "AbortError") || abortController?.signal.aborted || (getActiveReviews().get(correlationId) as any)?.cancelled) {
-			logCriticalReviewTransition("REVIEW_CANCELLED" as any, `review execution cancelled: ${err?.message || "aborted"}`, {
+		if ((err?.name === "AbortError") || abortController?.signal.aborted || getActiveReviews().get(correlationId)?.cancelled) {
+			logCriticalReviewTransition("REVIEW_CANCELLED", `review execution cancelled: ${err?.message || "aborted"}`, {
 				quest: slug, questId, sessionId, reviewId: correlationId,
 				reason: err?.message || "aborted",
-			} as any);
+			});
 			resolveExecution({ success: false, available: true, skipped: true, error: "cancelled" });
 			return;
 		}
@@ -233,8 +233,8 @@ export async function executeReviewBackground(
 		});
 	} finally {
 		targetState.inCriticalReview = false;
-		if ((targetState as any).awaitingReview?.reviewId === correlationId) {
-			(targetState as any).awaitingReview = null;
+		if (targetState.awaitingReview?.reviewId === correlationId) {
+			targetState.awaitingReview = null;
 		}
 		updateReviewerUIStatus(ctx);
 		if (onPending) await onPending(snapshot);

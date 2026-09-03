@@ -360,7 +360,7 @@ export function dispatchCompactionResume(
 		const qDir = join(QUEST_CURRENT_DIR, targetState.questId || "quest");
 		const runCompPath = join(qDir, "compaction-resume.txt");
 		try { if (!existsSync(qDir)) mkdirSync(qDir, { recursive: true }); writeFileSync(runCompPath, directiveText, "utf8"); } catch {}
-		try { logEvent("RESUME_DIRECTIVE_SENT" as any, `resume directive sent`, { quest: activeQuest, hash, compactionId, reason: options.reason } as any); } catch {}
+		try { logEvent("RESUME_DIRECTIVE_SENT", `resume directive sent`, { quest: activeQuest, hash, compactionId, reason: options.reason }); } catch {}
 	} catch {}
 	logResumeTransition("RESUME_ATTEMPTED", `attempting resume delivery for '${activeQuest}'`, {
 		quest: activeQuest,

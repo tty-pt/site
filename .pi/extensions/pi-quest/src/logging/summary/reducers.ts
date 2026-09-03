@@ -137,13 +137,13 @@ export function handlePendingEntry(entry: QuestLogEntry, s: SummaryState): void 
   else if (entry.type === "SNAPSHOT_FALLBACK" || entry.type === "RESUME_DIRECTIVE_SENT") s.coalesceCount++;
   else if (entry.type === "MUTEX_WAIT" || entry.type === "MUTEX_ACQUIRED") { /* timing only */ }
   else if (entry.type === "INITIAL_PROMPT" || entry.type === "USER_PROMPT" || entry.type === "SEMANTIC_SNAPSHOT" || entry.type === "STEP_SUMMARY" || entry.type === "DIALOGUE" || entry.type === "AGENT_THOUGHT") {
-    if ((entry.context.opencodeSessionId || (entry.context as any).piSessionId) && !s.opencodeSessionId) s.opencodeSessionId = entry.context.opencodeSessionId || (entry.context as any).piSessionId;
-    if ((entry.context as any).piSessionId) s.piSessionIds.add((entry.context as any).piSessionId);
+    if ((entry.context.opencodeSessionId || entry.context.piSessionId) && !s.opencodeSessionId) s.opencodeSessionId = entry.context.opencodeSessionId || entry.context.piSessionId;
+    if (entry.context.piSessionId) s.piSessionIds.add(entry.context.piSessionId);
     if (entry.type === "DIALOGUE") s.dialogueCount++;
     if (entry.type === "AGENT_THOUGHT") s.thoughtCount++;
     const e = parseInt(entry.context.elapsedMs || "", 10);
     if (!isNaN(e) && (s.elapsedMaxMs === null || e > (s.elapsedMaxMs as number))) s.elapsedMaxMs = e;
-    if (entry.type === "INITIAL_PROMPT" && (entry.context.opencodeSessionId || (entry.context as any).piSessionId)) {
+    if (entry.type === "INITIAL_PROMPT" && (entry.context.opencodeSessionId || entry.context.piSessionId)) {
       const ts = Date.parse(entry.timestamp);
       if (!isNaN(ts) && (s.startMs === null || ts < (s.startMs as number))) s.startMs = ts;
     }

@@ -113,7 +113,7 @@ export async function activateExistingQuest(
 				try { if (!existsSync(archDir)) { const { mkdirSync } = await import("node:fs"); mkdirSync(archDir, { recursive: true }); } } catch {}
 				const destArch = join(archDir, basename(futurePath));
 				try { copyFileSync(futurePath, destArch); } catch { try { await copyFile(futurePath, destArch); } catch {} }
-				try { const content = await readFile(futurePath, "utf8"); const h = createHash("sha256").update(content).digest("hex").slice(0, 12); logEvent("DRAFT_PROMOTED" as any, `draft promoted`, { quest: state.active || slug, slug, hash: h, dest: destArch, reason: "activateExistingQuest" } as any); } catch {}
+				try { const content = await readFile(futurePath, "utf8"); const h = createHash("sha256").update(content).digest("hex").slice(0, 12); logEvent("DRAFT_PROMOTED", `draft promoted`, { quest: state.active || slug, slug, hash: h, dest: destArch, reason: "activateExistingQuest" }); } catch {}
 			} catch {}
 			await rename(futurePath, path);
 			if (ctx?.hasUI) ctx.ui.notify(`Promoted draft ${futurePath} → ${path}`, "info");
@@ -130,9 +130,9 @@ export async function activateExistingQuest(
 		const sessionId = getSessionId(ctx);
 		if (isQuestSessionActive(targetQid, sessionId)) {
 			const activeInfo = readSessionLiveness(targetQid);
-			logEvent("QUEST_REUSED_COALESCED" as any, `quest already active in another live session; refusing duplicate mount`, {
+			logEvent("QUEST_REUSED_COALESCED", `quest already active in another live session; refusing duplicate mount`, {
 				quest: targetQid, questId: targetQid, slug, sessionId, activeSession: activeInfo?.sessionId || "",
-			} as any);
+			});
 			reportAgentError(pi, ctx,
 				`Quest '${questName}' is already active in another live session (${activeInfo?.sessionId || "unknown"}). This session will not mount a duplicate; no fresh turns, generation resets, or saved-state changes will be emitted here.`,
 				{
