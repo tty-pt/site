@@ -129,7 +129,13 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 		}
 		return async (task: string, options?: any) => {
 			return new Promise((resolve, reject) => {
-				const requestId = options?.reviewId || `slash_subagent_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+				// Fresh, per-invocation-unique identity for the structured delegation transport.
+				// The pi-subagents bridge keys active nodes by [ownerRunId, nodeId] and settles by
+				// [requestId, ownerRunId, nodeId]; two reviews in the same turn must not collide, so
+				// neither requestId nor nodeId may be reused (options.reviewId == correlationId ==
+				// currentTurnCorrelationId is per-turn, not per-invocation).
+				const requestId = `quest_review_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+				const nodeId = `review_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 				let unsubs: Array<(() => void) | void> = [];
 
 				const maxDuration = options?.timeoutMs || 300000; // 5 minutes default
@@ -168,7 +174,7 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 				};
 
 				const handleActivity = (data: any) => {
-					if (data && (data.requestId === requestId || data.id === requestId || !data.requestId)) {
+					if (data && (data.requestId === requestId || data.runId === requestId || data.id === requestId || !data.requestId)) {
 						lastActivityAt = Date.now();
 						if (data.childSessionId) childSessionId = data.childSessionId;
 						if (typeof options?.onActivity === "function") {
@@ -178,18 +184,35 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 				};
 
 				const handleResponse = (data: any) => {
-					if (data && (data.requestId === requestId || data.id === requestId)) {
+					if (data && data.requestId === requestId) {
 						cleanup();
-						if (data.isError) {
-							const errorText = data.errorText || data.result?.content?.[0]?.text || "Subagent execution error";
+						const status = data.status as string | undefined;
+						// Structured delegation response: errors are signaled by status !== "completed"
+						// (no isError/contentText on the structured wire). A "completed" text result is
+						// carried in result.text.
+						if (status && status !== "completed") {
+							const errorText = data.error
+								|| (status === "invalid_request"
+									? "Subagent delegation request was invalid"
+									: `Subagent delegation failed (${status})`);
 							const err: any = new Error(errorText);
 							err.timeoutLayer = classifyTimeoutLayer(errorText);
 							reject(err);
 						} else {
-							const text = data.contentText || data.text || data.result?.content?.[0]?.text || data.result;
-							const transcriptRef = data.transcriptRef || data.sessionPath || (childSessionId ? `.pi/sessions/${childSessionId}.jsonl` : undefined);
+							let text = "";
+							if (data.result?.kind === "text" && typeof data.result.text === "string") {
+								text = data.result.text;
+							} else if (data.result?.kind === "structured" && data.result.value !== undefined) {
+								try { text = JSON.stringify(data.result.value); } catch { text = ""; }
+							} else {
+								text = data.contentText || data.text || "";
+							}
+							const transcriptRef = data.transcriptRef
+								|| data.sessionPath
+								|| (data.runId ? `.pi/sessions/${data.runId}.jsonl` : undefined)
+								|| (childSessionId ? `.pi/sessions/${childSessionId}.jsonl` : undefined);
 							resolve({
-								text: text || data.result,
+								text,
 								childSessionId: data.childSessionId || childSessionId,
 								transcriptRef,
 							});
@@ -199,45 +222,38 @@ export function resolveSubagentExecutor(pi?: ExtensionAPI, ctx?: ExtensionContex
 
 				if (typeof pi.events!.on === "function") {
 					unsubs.push(pi.events!.on("prompt-template:subagent:response", handleResponse));
-					unsubs.push(pi.events!.on("subagent:slash:response", handleResponse));
-					unsubs.push(pi.events!.on("subagent:response", handleResponse));
 
+					// Structured delegation progress heartbeats (prompt-template:subagent:update).
+					unsubs.push(pi.events!.on("prompt-template:subagent:update", handleActivity));
+
+					// Legacy host activity events retained for activity/heartbeat observability.
 					unsubs.push(pi.events!.on("subagent:activity", handleActivity));
 					unsubs.push(pi.events!.on("subagent:started", handleActivity));
 					unsubs.push(pi.events!.on("subagent:tool_call", handleActivity));
 					unsubs.push(pi.events!.on("subagent:tool_result", handleActivity));
 					unsubs.push(pi.events!.on("subagent:turn_start", handleActivity));
 					unsubs.push(pi.events!.on("subagent:turn_end", handleActivity));
-					unsubs.push(pi.events!.on("prompt-template:subagent:activity", handleActivity));
 				}
 
 				const targetModel = (options?.model !== undefined && typeof options?.model === "string" && options.model !== "")
 					? options.model
 					: resolveDefaultReviewModel(ctx);
 
-				// Emit prompt-template:subagent:request (pi-subagents structured delegation) and subagent:slash:request (legacy/test mock)
+				// Emit a structured delegation request (pi-subagents bridge). Without ownerRunId/nodeId/
+				// result the bridge routes to the legacy path, which rejects "Legacy prompt-template
+				// direct delegation was removed". async is intentionally omitted: it is not a supported
+				// delegation field and would cause an "Unsupported delegation field" parse rejection.
 				pi.events!.emit("prompt-template:subagent:request", {
 					requestId,
+					ownerRunId: getQuestId(ctx) || getSessionId(ctx),
+					nodeId,
 					agent: options?.agent || "reviewer",
 					task,
 					context: "fresh",
-					model: targetModel,
-					async: true,
 					cwd: resolveSubagentCwd(ctx),
-				});
-
-				pi.events!.emit("subagent:slash:request", {
-					requestId,
-					params: {
-						agent: options?.agent || "reviewer",
-						task,
-						isCriticalReview: true,
-						reviewKind: options?.reviewKind || "direction",
-						model: targetModel,
-						tools: ["read", "grep", "find", "ls"],
-						async: true,
-						clarify: false,
-					},
+					...(targetModel ? { model: targetModel } : {}),
+					...(maxDuration !== 300000 ? { timeoutMs: maxDuration } : {}),
+					result: { kind: "text" },
 				});
 			});
 		};

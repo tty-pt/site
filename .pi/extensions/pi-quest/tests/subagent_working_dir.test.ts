@@ -126,8 +126,12 @@ Deno.test("Subagent Working Dir Suite: subagent cwd is anchored to project root 
 			model: "x/y",
 			async: true,
 		});
-		// Resolve the pending bridge promise after emit, using the requestId the executor generated
-		bus.events.emit("subagent:slash:response", { requestId: emittedRequestId, contentText: "VERDICT: PASS", isError: false });
+		// Resolve the pending structured bridge promise after emit, using the requestId the executor generated
+		bus.events.emit("prompt-template:subagent:response", {
+			requestId: emittedRequestId,
+			status: "completed",
+			result: { kind: "text", text: "VERDICT: PASS" },
+		});
 		await promise;
 
 		assert.strictEqual(emittedCwd, projectRoot, `emitted cwd must be project root, got ${emittedCwd}`);

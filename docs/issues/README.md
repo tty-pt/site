@@ -6,7 +6,7 @@ These files describe issues **in the `pi-quest` extension** (`.pi/extensions/pi-
 
 | # | File | Area | State | Requires | Parent | Severity |
 |---|------|------|-------|----------|--------|----------|
-| 59 | `59-pi-adapter-legacy-delegation-payload.md` | `critical_agent/pi_adapter.ts:22…` | ready | - | 43 | High |
+| 59 | `59-pi-adapter-legacy-delegation-payload.md` | `critical_agent/pi_adapter.ts:22…` | done | - | 43 | High |
 | 60 | `60-consumer-complexity-dead-code-and-statics.md` | `htdocs/bud-hydrate.js, libbud…` | ready | - | - | Medium |
 | 01 | `01-draft-t0-shallow-requirements-empty.md` | `markdown/template/header.ts:36…` | ready | - | 43 | Medium |
 | 02 | `02-append-dedup-silent-loss.md` | `paths.ts:291-319, hooks/index.…` | ready | - | 43 | Low |

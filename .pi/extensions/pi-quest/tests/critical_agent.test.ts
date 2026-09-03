@@ -1497,20 +1497,17 @@ REQUIRED ACTIONS:
 		// Tool listed in getAllTools()
 		setAllTools([{ name: "subagent", description: "Delegate to subagents" }]);
 
-		// Set up event bridge response listener
-		events.on("subagent:slash:request", (data: any) => {
-			const req = data as { requestId: string; params: any };
-			events.emit("subagent:slash:response", {
-				requestId: req.requestId,
+		// Set up structured delegation bridge response listener
+		events.on("prompt-template:subagent:request", (data: any) => {
+			events.emit("prompt-template:subagent:response", {
+				requestId: data.requestId,
+				ownerRunId: data.ownerRunId,
+				nodeId: data.nodeId,
+				status: "completed",
 				result: {
-					content: [
-						{
-							type: "text",
-							text: `PASS 1:\nProvisional Judgment: PASS\nPASS 2:\n- Tested assumptions: clean\n- Revised Judgment: PASS\nVERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`,
-						},
-					],
+					kind: "text",
+					text: `PASS 1:\nProvisional Judgment: PASS\nPASS 2:\n- Tested assumptions: clean\n- Revised Judgment: PASS\nVERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`,
 				},
-				isError: false,
 			});
 		});
 
@@ -1547,15 +1544,18 @@ REQUIRED ACTIONS:
 
 		setAllTools([{ name: "subagent", description: "Delegate to subagents" }]);
 
-		let capturedParams: any = null;
-		events.on("subagent:slash:request", (data: any) => {
-			capturedParams = data.params;
-			events.emit("subagent:slash:response", {
+		let capturedRequest: any = null;
+		events.on("prompt-template:subagent:request", (data: any) => {
+			capturedRequest = data;
+			events.emit("prompt-template:subagent:response", {
 				requestId: data.requestId,
+				ownerRunId: data.ownerRunId,
+				nodeId: data.nodeId,
+				status: "completed",
 				result: {
-					content: [{ type: "text", text: `PASS 1:\nProvisional Judgment: PASS\nPASS 2:\nRevised Judgment: PASS\nVERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None` }],
+					kind: "text",
+					text: `PASS 1:\nProvisional Judgment: PASS\nPASS 2:\nRevised Judgment: PASS\nVERDICT: PASS\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED ACTIONS:\n- None`,
 				},
-				isError: false,
 			});
 		});
 
@@ -1570,11 +1570,13 @@ REQUIRED ACTIONS:
 
 		await runCriticalReview(mockPi, ctx, { kind: "direction", questSlug: slug });
 
-		assert.ok(capturedParams, "Subagent bridge must have been invoked");
-		assert.strictEqual(capturedParams.agent, "reviewer", "Must use configured reviewer agent ('reviewer')");
-		assert.deepStrictEqual(capturedParams.tools, ["read", "grep", "find", "ls"], "Critic must receive only read-only tools");
-		assert.ok(!capturedParams.tools.includes("edit"), "Critic must NOT receive edit tool");
-		assert.ok(!capturedParams.tools.includes("write"), "Critic must NOT receive write tool");
+		assert.ok(capturedRequest, "Subagent bridge must have been invoked");
+		assert.strictEqual(capturedRequest.agent, "reviewer", "Must use configured reviewer agent ('reviewer')");
+		assert.deepStrictEqual(capturedRequest.result, { kind: "text" }, "Critic must request a plain text result");
+		// Structured delegation does not carry a tools allow-list on the wire: the read-only
+		// reviewer profile + acceptance gate (pi-subagents treats 'reviewer' as read-only) enforce it.
+		assert.ok(!Object.hasOwn(capturedRequest, "tools"), "Structured request must not inject a tools array");
+		assert.ok(!Object.hasOwn(capturedRequest, "async"), "Structured request must not carry unsupported async field");
 	});
 
 	// -----------------------------------------------------------------------
@@ -1604,14 +1606,15 @@ REQUIRED ACTIONS:
 
 		setAllTools([{ name: "subagent" }]);
 
-		events.on("subagent:slash:request", (data: any) => {
-			events.emit("subagent:slash:response", {
+		events.on("prompt-template:subagent:request", (data: any) => {
+			events.emit("prompt-template:subagent:response", {
 				requestId: data.requestId,
+				ownerRunId: data.ownerRunId,
+				nodeId: data.nodeId,
+				status: "completed",
 				result: {
-					content: [
-						{
-							type: "text",
-							text: `PASS 1 (Provisional Inspection):
+					kind: "text",
+					text: `PASS 1 (Provisional Inspection):
 Provisional Judgment: PASS
 Provisional Summary: Looks initial pass ok.
 
@@ -1630,10 +1633,7 @@ FINDINGS:
 
 REQUIRED ACTIONS:
 - Continue`,
-						},
-					],
 				},
-				isError: false,
 			});
 		});
 
