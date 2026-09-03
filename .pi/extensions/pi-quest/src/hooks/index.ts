@@ -28,6 +28,7 @@ import {
   logCriticalReviewTransition,
   logEvent,
   logUserInteraction,
+  tryLog,
 } from "../logging.ts";
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
@@ -206,10 +207,11 @@ Once saved, auto-compaction will safely proceed.`;
             ?.id ||
           getSessionId(getActiveContext(ctx)) ||
           "default";
-        const targetState =
-          sessionStates.get(targetSessionId) ?? getState(ctx) ?? state;
-        const { getActiveReviews } =
-          await import("../critical_agent/tracker.ts");
+        const targetState = sessionStates.get(targetSessionId) ??
+          getState(ctx) ?? state;
+        const { getActiveReviews } = await import(
+          "../critical_agent/tracker.ts"
+        );
         const active = [...getActiveReviews().values()].filter(
           (r) => r.status === "starting" || r.status === "running",
         );
@@ -225,16 +227,14 @@ Once saved, auto-compaction will safely proceed.`;
           );
         }
         if (active.length === 0 && targetState.inCriticalReview) {
-          try {
-            logCriticalReviewTransition(
-              "CRITICAL_REVIEW_ORPHAN_CLEARED",
-              `orphan flag no awaiting`,
-              {
-                quest: targetState.active || state.active || "",
-                reason: "orphan_flag_no_awaiting",
-              },
-            );
-          } catch {}
+          tryLog(
+            "CRITICAL_REVIEW_ORPHAN_CLEARED",
+            "orphan flag no awaiting",
+            {
+              quest: targetState.active || state.active || "",
+              reason: "orphan_flag_no_awaiting",
+            },
+          );
           targetState.inCriticalReview = false;
           try {
             persist(pi, ctx);
@@ -395,78 +395,73 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
           const tSlice = raw.trim().slice(0, 200);
           const tLen = raw.length;
           // always-on dialogue: every turn's user utterance, 200-char slice + hash, piSessionId for cross-log correlation
-          try {
-            logEvent("DIALOGUE", `user: ${tSlice.slice(0, 80)}`, {
-              quest: state.activeDraft || state.active || "",
-              dialogueRole: "user",
-              dialogueSlice: tSlice,
-              dialogueHash: tHash,
-              dialogueLen: tLen,
-              piSessionId: sid,
-              opencodeSessionId: sid,
-              hash: tHash,
-            });
-          } catch {}
+          tryLog("DIALOGUE", `user: ${tSlice.slice(0, 80)}`, {
+            quest: state.activeDraft || state.active || "",
+            dialogueRole: "user",
+            dialogueSlice: tSlice,
+            dialogueHash: tHash,
+            dialogueLen: tLen,
+            piSessionId: sid,
+            opencodeSessionId: sid,
+            hash: tHash,
+          });
           if (!shouldCapturePrompt(raw)) {
             // synthetic already logged above, still count as dialogue, skip draft/active handling
-            try {
-              const hash = tHash;
-              logEvent(
-                "DRAFT_CONVERSATIONAL_IGNORED",
-                `draft conversational ignored`,
-                {
-                  quest: state.activeDraft || state.active || "",
-                  slug: state.activeDraft || state.active || "",
-                  hash,
-                  draftPromptsCount: state.draftPrompts?.length || 0,
-                  dialogueHash: hash,
-                },
-              );
-            } catch {}
+            const hash = tHash;
+            tryLog(
+              "DRAFT_CONVERSATIONAL_IGNORED",
+              `draft conversational ignored`,
+              {
+                quest: state.activeDraft || state.active || "",
+                slug: state.activeDraft || state.active || "",
+                hash,
+                draftPromptsCount: state.draftPrompts?.length || 0,
+                dialogueHash: hash,
+              },
+            );
             // still continue? synthetic should not enter draft/active branches
           } else {
             const trimmed = raw.trim().slice(0, PROMPT_MAX_CHARS);
 
             if (state.activeDraft) {
               const classification = classifyUserMessage(trimmed);
-              try {
-                logEvent(
-                  "CLASSIFICATION_RESULT",
-                  `classification ${classification}`,
-                  { classification, quest: state.activeDraft || "" },
-                );
-              } catch {}
-              try {
-                if (
-                  classification !==
-                  UserMessageClassification.CONVERSATIONAL_ACK
-                ) {
-                  const slice = trimmed.slice(0, 120);
-                  const hash = createHash("sha256")
-                    .update(trimmed)
-                    .digest("hex")
-                    .slice(0, 12);
-                  logEvent("USER_PROMPT", `user prompt`, {
-                    classification,
-                    quest: state.activeDraft || "",
-                    slice,
-                    hash,
-                    intentHash: hash,
-                  });
-                }
-              } catch {}
+              tryLog(
+                "CLASSIFICATION_RESULT",
+                `classification ${classification}`,
+                {
+                  classification,
+                  quest: state.activeDraft || "",
+                },
+              );
+              if (
+                classification !== UserMessageClassification.CONVERSATIONAL_ACK
+              ) {
+                const slice = trimmed.slice(0, 120);
+                const hash = createHash("sha256")
+                  .update(trimmed)
+                  .digest("hex")
+                  .slice(0, 12);
+                tryLog("USER_PROMPT", `user prompt`, {
+                  classification,
+                  quest: state.activeDraft || "",
+                  slice,
+                  hash,
+                  intentHash: hash,
+                });
+              }
               if (classification === UserMessageClassification.CONFIRMATION) {
-                const { isDraftReviewValid } =
-                  await import("../critical_agent/policy.ts");
+                const { isDraftReviewValid } = await import(
+                  "../critical_agent/policy.ts"
+                );
                 const { getCustomSubagentRunner, isSubagentToolRegistered } =
                   await import("../critical_agent/index.ts");
-                const hasReviewer =
-                  Boolean(getCustomSubagentRunner()) ||
+                const hasReviewer = Boolean(getCustomSubagentRunner()) ||
                   isSubagentToolRegistered(pi, ctx);
                 const valid = hasReviewer ? isDraftReviewValid(state) : true;
                 if (valid) {
-                  const { promoteDraft } =
-                    await import("../commands/promote.ts");
+                  const { promoteDraft } = await import(
+                    "../commands/promote.ts"
+                  );
                   const res = await promoteDraft(state.activeDraft, ctx, pi);
                   if (res.success) {
                     logUserInteraction(
@@ -500,8 +495,9 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   );
                   // Trigger draft review now if not yet run
                   try {
-                    const { checkAndTriggerPlanReview } =
-                      await import("../critical_agent/policy.ts");
+                    const { checkAndTriggerPlanReview } = await import(
+                      "../critical_agent/policy.ts"
+                    );
                     await checkAndTriggerPlanReview(pi, ctx);
                   } catch {}
                 }
@@ -530,16 +526,15 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                         "draft-prompts.jsonl",
                       );
                       await mkdir(dirname(jPath), { recursive: true });
-                      const rec =
-                        JSON.stringify({
-                          ts: Date.now(),
-                          hash: createHash("sha256")
-                            .update(trimmed)
-                            .digest("hex")
-                            .slice(0, 12),
-                          slice: trimmed.slice(0, 200),
-                          len: trimmed.length,
-                        }) + "\n";
+                      const rec = JSON.stringify({
+                        ts: Date.now(),
+                        hash: createHash("sha256")
+                          .update(trimmed)
+                          .digest("hex")
+                          .slice(0, 12),
+                        slice: trimmed.slice(0, 200),
+                        len: trimmed.length,
+                      }) + "\n";
                       await appendFile(jPath, rec, "utf8");
                     }
                   } catch {}
@@ -568,14 +563,14 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     if (base && base !== state.activeDraft) {
                       const old = state.activeDraft;
                       state.activeDraft = base;
-                      try {
-                        const { logEvent } = await import("../logging.ts");
-                        logEvent(
+                      {
+                        const { tryLog } = await import("../logging.ts");
+                        tryLog(
                           "DRAFT_SLUG_CORRECTED",
                           `draft slug corrected ${old} -> ${base}`,
                           { quest: base, slug: base },
                         );
-                      } catch {}
+                      }
                     }
                   } catch {}
                   persist(pi, ctx);
@@ -588,29 +583,26 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     persist(pi, ctx);
                   } catch {}
                 }
-                try {
-                  const hash =
-                    state.draftLastSavedHash ||
-                    createHash("sha256")
-                      .update(trimmed)
-                      .digest("hex")
-                      .slice(0, 12);
-                  if (appended) {
-                    logEvent("DRAFT_APPENDED", `draft appended`, {
-                      quest: state.activeDraft || "",
-                      slug: state.activeDraft,
-                      hash,
-                      draftPromptsCount: state.draftPrompts.length,
-                    });
-                  } else {
-                    logEvent("DRAFT_APPEND_DEDUPED", `draft append deduped`, {
-                      quest: state.activeDraft || "",
-                      slug: state.activeDraft,
-                      hash,
-                      draftPromptsCount: state.draftPrompts.length,
-                    });
-                  }
-                } catch {}
+                const hash = state.draftLastSavedHash ||
+                  createHash("sha256")
+                    .update(trimmed)
+                    .digest("hex")
+                    .slice(0, 12);
+                if (appended) {
+                  tryLog("DRAFT_APPENDED", `draft appended`, {
+                    quest: state.activeDraft || "",
+                    slug: state.activeDraft,
+                    hash,
+                    draftPromptsCount: state.draftPrompts.length,
+                  });
+                } else {
+                  tryLog("DRAFT_APPEND_DEDUPED", `draft append deduped`, {
+                    quest: state.activeDraft || "",
+                    slug: state.activeDraft,
+                    hash,
+                    draftPromptsCount: state.draftPrompts.length,
+                  });
+                }
                 logUserInteraction(
                   "USER_REFINEMENT_RECEIVED",
                   `draft requirement accumulated for '${state.activeDraft}'`,
@@ -622,8 +614,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                 updateUIStatus(ctx);
                 // 38: if a plan_review draft review is already awaiting/running, supersede-candidate + eager coalesce new boundary
                 try {
-                  const newHash =
-                    state.draftLastSavedHash ||
+                  const newHash = state.draftLastSavedHash ||
                     createHash("sha256")
                       .update(trimmed)
                       .digest("hex")
@@ -631,46 +622,43 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   const slug = state.activeDraft;
                   if (slug) {
                     const newBoundary = `draft:${slug}:${newHash}`;
-                    let hasActive =
-                      !!state.awaitingReview &&
+                    let hasActive = !!state.awaitingReview &&
                       state.awaitingReview.kind === "plan_review";
-                    try {
-                      const { findActiveReviewForQuest } =
-                        await import("../critical_agent/tracker.ts");
-                      if (
-                        findActiveReviewForQuest(slug)?.kind === "plan_review"
-                      )
-                        hasActive = true;
-                    } catch {}
+                    const { findActiveReviewForQuest } = await import(
+                      "../critical_agent/tracker.ts"
+                    );
+                    if (
+                      findActiveReviewForQuest(slug)?.kind === "plan_review"
+                    ) {
+                      hasActive = true;
+                    }
                     if (hasActive) {
-                      try {
-                        const { setPendingReview } =
-                          await import("../critical_agent/tracker.ts");
-                        setPendingReview(slug, {
-                          questSlug: slug,
-                          kind: "plan_review",
-                          triggerReason: "draft_followup",
-                          planVersion: state.planVersion || 1,
-                          stateHash:
-                            state.lastSavedHash ||
-                            (state.saveGeneration
-                              ? state.saveGeneration.hash
-                              : null),
+                      const { setPendingReview } = await import(
+                        "../critical_agent/tracker.ts"
+                      );
+                      setPendingReview(slug, {
+                        questSlug: slug,
+                        kind: "plan_review",
+                        triggerReason: "draft_followup",
+                        planVersion: state.planVersion || 1,
+                        stateHash: state.lastSavedHash ||
+                          (state.saveGeneration
+                            ? state.saveGeneration.hash
+                            : null),
+                        boundaryKey: newBoundary,
+                        saveCount: state.saveCount || 0,
+                        requestedAt: Date.now(),
+                      });
+                      tryLog(
+                        "PENDING_COALESCED_RESOLVED",
+                        `pending coalesced resolved (draft followup hash=${newHash})`,
+                        {
+                          quest: slug,
+                          chosenKind: "plan_review",
                           boundaryKey: newBoundary,
-                          saveCount: state.saveCount || 0,
-                          requestedAt: Date.now(),
-                        });
-                        logEvent(
-                          "PENDING_COALESCED_RESOLVED",
-                          `pending coalesced resolved (draft followup hash=${newHash})`,
-                          {
-                            quest: slug,
-                            chosenKind: "plan_review",
-                            boundaryKey: newBoundary,
-                            hash: newHash,
-                          },
-                        );
-                      } catch {}
+                          hash: newHash,
+                        },
+                      );
                     }
                   }
                 } catch {}
@@ -691,128 +679,122 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                       body === "1." ||
                       body === "-" ||
                       body.length < 10
-                    )
+                    ) {
                       return false;
+                    }
                     return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(body);
                   } catch {
                     return false;
                   }
                 })();
-                try {
-                  const { logEvent } = await import("../logging.ts");
-                  const { isDraftReviewValid } =
-                    (await import("../critical_agent/policy.ts")) as {
-                      isDraftReviewValid: (s: unknown) => boolean;
-                    };
-                  const valid = (() => {
-                    try {
-                      return isDraftReviewValid(state);
-                    } catch {
-                      return false;
-                    }
-                  })();
-                  logEvent(
-                    "DRAFT_AUTO_REVIEW_CHECK",
-                    `check dpLen=${dpLen} evidence=${evidence} valid=${valid} hasPlan=${hasActionablePlanDraft}`,
-                    {
-                      quest: state.activeDraft || "",
-                      dpLen,
-                      evidence,
-                      isDraftReviewValid: valid,
-                      hasActionablePlanDraft,
-                    },
-                  );
-                  if (!hasActionablePlanDraft && dpLen >= 1 && evidence >= 7) {
-                    logEvent(
-                      "PLAN_NOT_DRAFTED_YET",
-                      `plan not drafted yet — draft plan via quest_update_state {goal,plan,findings}`,
-                      { quest: state.activeDraft || "" },
-                    );
-                    try {
-                      const { sendInternalAgentMessage } =
-                        await import("../messaging.ts");
-                      sendInternalAgentMessage(
-                        pi,
-                        `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — draft a concise plan (goal, 2-3 stages, findings) via \`quest_update_state\` before review.`,
-                        "steer",
-                      );
-                    } catch {}
+                const { isDraftReviewValid } =
+                  (await import("../critical_agent/policy.ts")) as {
+                    isDraftReviewValid: (s: unknown) => boolean;
+                  };
+                const valid = (() => {
+                  try {
+                    return isDraftReviewValid(state);
+                  } catch {
+                    return false;
                   }
-                } catch {}
+                })();
+                tryLog(
+                  "DRAFT_AUTO_REVIEW_CHECK",
+                  `check dpLen=${dpLen} evidence=${evidence} valid=${valid} hasPlan=${hasActionablePlanDraft}`,
+                  {
+                    quest: state.activeDraft || "",
+                    dpLen,
+                    evidence,
+                    isDraftReviewValid: valid,
+                    hasActionablePlanDraft,
+                  },
+                );
+                if (!hasActionablePlanDraft && dpLen >= 1 && evidence >= 7) {
+                  tryLog(
+                    "PLAN_NOT_DRAFTED_YET",
+                    `plan not drafted yet — draft plan via quest_update_state {goal,plan,findings}`,
+                    { quest: state.activeDraft || "" },
+                  );
+                  try {
+                    const { sendInternalAgentMessage } = await import(
+                      "../messaging.ts"
+                    );
+                    sendInternalAgentMessage(
+                      pi,
+                      `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — draft a concise plan (goal, 2-3 stages, findings) via \`quest_update_state\` before review.`,
+                      "steer",
+                    );
+                  } catch {}
+                }
                 // AQM: when evidence >=7 and dpLen>=1, allow review even with placeholder plan to avoid deadlock (reviewer will REVISE with guidance)
-                const canAutoReviewDespitePlaceholder =
-                  dpLen >= 1 && evidence >= 7;
+                const canAutoReviewDespitePlaceholder = dpLen >= 1 &&
+                  evidence >= 7;
                 if (
                   (dpLen >= 2 || (dpLen >= 1 && evidence >= 7)) &&
                   (hasActionablePlanDraft || canAutoReviewDespitePlaceholder)
                 ) {
                   try {
-                    const { isDraftReviewValid } =
-                      await import("../critical_agent/policy.ts");
+                    const { isDraftReviewValid } = await import(
+                      "../critical_agent/policy.ts"
+                    );
                     if (!isDraftReviewValid(state)) {
-                      const { checkAndTriggerPlanReview } =
-                        await import("../critical_agent/policy.ts");
+                      const { checkAndTriggerPlanReview } = await import(
+                        "../critical_agent/policy.ts"
+                      );
                       // fire-and-forget, deduped via __lastDraftReviewKey
                       checkAndTriggerPlanReview(pi, ctx).catch(() => {});
                     }
                   } catch {}
                 }
               }
-              try {
-                const hash = createHash("sha256")
-                  .update(trimmed)
-                  .digest("hex")
-                  .slice(0, 12);
-                logEvent(
-                  "DRAFT_CONVERSATIONAL_IGNORED",
-                  `draft conversational ignored`,
-                  {
-                    quest: state.activeDraft || "",
-                    slug: state.activeDraft,
-                    hash,
-                    draftPromptsCount: state.draftPrompts?.length || 0,
-                  },
-                );
-              } catch {}
+              const hash = createHash("sha256")
+                .update(trimmed)
+                .digest("hex")
+                .slice(0, 12);
+              tryLog(
+                "DRAFT_CONVERSATIONAL_IGNORED",
+                `draft conversational ignored`,
+                {
+                  quest: state.activeDraft || "",
+                  slug: state.activeDraft,
+                  hash,
+                  draftPromptsCount: state.draftPrompts?.length || 0,
+                },
+              );
               // CONVERSATIONAL_ACK ignored while drafting
             } else if (state.active) {
               if (!Array.isArray(state.refinements)) state.refinements = [];
               if (!Array.isArray(state.prompts)) state.prompts = [];
 
-              const isOriginal =
-                state.prompts.length > 0 && state.prompts[0] === trimmed;
-              const isLatestRefinement =
-                state.refinements.length > 0 &&
+              const isOriginal = state.prompts.length > 0 &&
+                state.prompts[0] === trimmed;
+              const isLatestRefinement = state.refinements.length > 0 &&
                 state.refinements[state.refinements.length - 1] === trimmed;
 
               if (!isOriginal && !isLatestRefinement) {
                 const classification = classifyUserMessage(trimmed);
-                try {
-                  logEvent(
-                    "CLASSIFICATION_RESULT",
-                    `classification ${classification}`,
-                    { classification, quest: state.active || "" },
-                  );
-                } catch {}
-                try {
-                  if (
-                    classification !==
+                tryLog(
+                  "CLASSIFICATION_RESULT",
+                  `classification ${classification}`,
+                  { classification, quest: state.active || "" },
+                );
+                if (
+                  classification !==
                     UserMessageClassification.CONVERSATIONAL_ACK
-                  ) {
-                    const slice = trimmed.slice(0, 120);
-                    const hash = createHash("sha256")
-                      .update(trimmed)
-                      .digest("hex")
-                      .slice(0, 12);
-                    logEvent("USER_PROMPT", `user prompt`, {
-                      classification,
-                      quest: state.active || "",
-                      slice,
-                      hash,
-                      intentHash: hash,
-                    });
-                  }
-                } catch {}
+                ) {
+                  const slice = trimmed.slice(0, 120);
+                  const hash = createHash("sha256")
+                    .update(trimmed)
+                    .digest("hex")
+                    .slice(0, 12);
+                  tryLog("USER_PROMPT", `user prompt`, {
+                    classification,
+                    quest: state.active || "",
+                    slice,
+                    hash,
+                    intentHash: hash,
+                  });
+                }
 
                 if (classification === UserMessageClassification.CONFIRMATION) {
                   logUserInteraction(
@@ -823,7 +805,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   acceptRootConfirmation(pi, ctx);
                 } else if (
                   classification ===
-                  UserMessageClassification.REFINEMENT_OR_REQUIREMENT
+                    UserMessageClassification.REFINEMENT_OR_REQUIREMENT
                 ) {
                   logUserInteraction(
                     "USER_REFINEMENT_RECEIVED",
@@ -839,8 +821,9 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     ];
                   }
                   if (state.refinements.length > PROMPT_MAX_COUNT) {
-                    state.refinements =
-                      state.refinements.slice(-PROMPT_MAX_COUNT);
+                    state.refinements = state.refinements.slice(
+                      -PROMPT_MAX_COUNT,
+                    );
                   }
                   triggerReassessment(
                     state,
@@ -853,35 +836,31 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
               }
             } else if (state.pendingRootQuest) {
               const classification = classifyUserMessage(trimmed);
-              try {
-                logEvent(
-                  "CLASSIFICATION_RESULT",
-                  `classification ${classification}`,
-                  { classification, quest: state.active || "" },
-                );
-              } catch {}
-              try {
-                if (
-                  classification !==
+              tryLog(
+                "CLASSIFICATION_RESULT",
+                `classification ${classification}`,
+                { classification, quest: state.active || "" },
+              );
+              if (
+                classification !==
                   UserMessageClassification.CONVERSATIONAL_ACK
-                ) {
-                  const slice = trimmed.slice(0, 120);
-                  const hash = createHash("sha256")
-                    .update(trimmed)
-                    .digest("hex")
-                    .slice(0, 12);
-                  logEvent("USER_PROMPT", `user prompt`, {
-                    classification,
-                    quest: state.active || "",
-                    slice,
-                    hash,
-                    intentHash: hash,
-                  });
-                }
-              } catch {}
+              ) {
+                const slice = trimmed.slice(0, 120);
+                const hash = createHash("sha256")
+                  .update(trimmed)
+                  .digest("hex")
+                  .slice(0, 12);
+                tryLog("USER_PROMPT", `user prompt`, {
+                  classification,
+                  quest: state.active || "",
+                  slice,
+                  hash,
+                  intentHash: hash,
+                });
+              }
               if (
                 classification ===
-                UserMessageClassification.REFINEMENT_OR_REQUIREMENT
+                  UserMessageClassification.REFINEMENT_OR_REQUIREMENT
               ) {
                 if (!Array.isArray(state.refinements)) state.refinements = [];
                 state.refinements.push(trimmed);
@@ -893,8 +872,9 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
               }
             } else if (shouldStartPersistentQuest(trimmed)) {
               // First try to resume existing quest (substring match) like ensureRootQuestForPrompt
-              const { listActiveQuestRecords, listQuestFiles } =
-                await import("../paths.ts");
+              const { listActiveQuestRecords, listQuestFiles } = await import(
+                "../paths.ts"
+              );
               const { FUTURE_DIR } = await import("../constants.ts");
               let activated = false;
               try {
@@ -969,22 +949,22 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                       "draft-prompts.jsonl",
                     );
                     await mkdir(dirname(jPath0), { recursive: true });
-                    const rec0 =
-                      JSON.stringify({
-                        ts: Date.now(),
-                        hash: createHash("sha256")
-                          .update(trimmed)
-                          .digest("hex")
-                          .slice(0, 12),
-                        slice: trimmed.slice(0, 200),
-                        len: trimmed.length,
-                      }) + "\n";
+                    const rec0 = JSON.stringify({
+                      ts: Date.now(),
+                      hash: createHash("sha256")
+                        .update(trimmed)
+                        .digest("hex")
+                        .slice(0, 12),
+                      slice: trimmed.slice(0, 200),
+                      len: trimmed.length,
+                    }) + "\n";
                     await appendFile(jPath0, rec0, "utf8");
                   }
                 } catch {}
                 if (!Array.isArray(state.prompts)) state.prompts = [];
-                if (!state.prompts.includes(trimmed))
+                if (!state.prompts.includes(trimmed)) {
                   state.prompts.push(trimmed);
+                }
                 const { logQuestTransition } = await import("../logging.ts");
                 logQuestTransition(
                   "QUEST_DETECTED",
@@ -1025,23 +1005,20 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
           try {
             const { getCustomSubagentRunner, isSubagentToolRegistered } =
               await import("../critical_agent/index.ts");
-            reviewerDisabled =
-              !Boolean(getCustomSubagentRunner()) &&
+            reviewerDisabled = !Boolean(getCustomSubagentRunner()) &&
               !isSubagentToolRegistered(pi, ctx);
           } catch {}
           if (aw && reviewerDisabled) {
-            try {
-              logCriticalReviewTransition(
-                "CRITICAL_REVIEW_ORPHAN_CLEARED",
-                `orphan reviewer disabled`,
-                {
-                  quest: targetState.active || state.active || "",
-                  reason: "reviewer_disabled",
-                  reviewId: aw.reviewId,
-                  triggerReason: aw.triggerReason,
-                },
-              );
-            } catch {}
+            tryLog(
+              "CRITICAL_REVIEW_ORPHAN_CLEARED",
+              `orphan reviewer disabled`,
+              {
+                quest: targetState.active || state.active || "",
+                reason: "reviewer_disabled",
+                reviewId: aw.reviewId,
+                triggerReason: aw.triggerReason,
+              },
+            );
             targetState.awaitingReview = null;
             targetState.inCriticalReview = false;
             try {
@@ -1051,42 +1028,41 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
             aw &&
             (aw.kind === "plan_review" || aw.kind === "final_acceptance")
           ) {
-            const { getActiveReviews } =
-              await import("../critical_agent/tracker.ts");
+            const { getActiveReviews } = await import(
+              "../critical_agent/tracker.ts"
+            );
             const hasActive = getActiveReviews().has(aw.reviewId);
             if (!hasActive) {
-              try {
-                logCriticalReviewTransition(
-                  "CRITICAL_REVIEW_ORPHAN_CLEARED",
-                  `orphan awaiting pending requeue`,
-                  {
-                    quest: targetState.active || state.active || "",
-                    reason: "orphan_awaiting_pending_requeue",
-                    reviewId: aw.reviewId,
-                    triggerReason: aw.triggerReason,
-                  },
-                );
-              } catch {}
+              tryLog(
+                "CRITICAL_REVIEW_ORPHAN_CLEARED",
+                `orphan awaiting pending requeue`,
+                {
+                  quest: targetState.active || state.active || "",
+                  reason: "orphan_awaiting_pending_requeue",
+                  reviewId: aw.reviewId,
+                  triggerReason: aw.triggerReason,
+                },
+              );
               // Orphan: re-queue as pending coalesced if not already pending
               try {
-                const { getPendingReview, setPendingReview } =
-                  await import("../critical_agent/tracker.ts");
+                const { getPendingReview, setPendingReview } = await import(
+                  "../critical_agent/tracker.ts"
+                );
                 if (!getPendingReview(targetState.active || "", aw.kind)) {
                   setPendingReview(
                     targetState.active || targetState.questId || "quest",
                     {
-                      questSlug:
-                        targetState.active || targetState.questId || "quest",
+                      questSlug: targetState.active || targetState.questId ||
+                        "quest",
                       kind: aw.kind,
                       triggerReason: aw.triggerReason,
                       planVersion: targetState.planVersion || 1,
-                      stateHash:
-                        targetState.lastSavedHash ||
+                      stateHash: targetState.lastSavedHash ||
                         (targetState.saveGeneration
                           ? targetState.saveGeneration.hash
                           : null),
-                      boundaryKey:
-                        targetState.lastPlanReviewBoundaryKey || null,
+                      boundaryKey: targetState.lastPlanReviewBoundaryKey ||
+                        null,
                       saveCount: targetState.saveCount || 0,
                       requestedAt: Date.now(),
                     },
@@ -1096,14 +1072,18 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
               // Re-assert steer so model stops turn
               sendInternalAgentMessage(
                 pi,
-                `⏸ Awaiting ${aw.kind}/${aw.triggerReason || aw.kind} ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
+                `⏸ Awaiting ${aw.kind}/${
+                  aw.triggerReason || aw.kind
+                } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
                 "steer",
               );
             } else {
               // Active exists, still assert turn-stop
               sendInternalAgentMessage(
                 pi,
-                `⏸ Awaiting ${aw.kind}/${aw.triggerReason || aw.kind} ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
+                `⏸ Awaiting ${aw.kind}/${
+                  aw.triggerReason || aw.kind
+                } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
                 "steer",
               );
             }
@@ -1113,7 +1093,9 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
         const guidelineFp = getGuidelinesFingerprint();
         const awarenessBlock = buildSessionAwarenessBlock(ctx);
         const resumeContext = await loadActiveQuestResumeContext();
-        const pressureKey = `${state.saveGeneration?.hash || ""}:${state.researchRound || 1}:${state.pendingRootQuest ? "pending" : "active"}:${guidelineFp}`;
+        const pressureKey = `${state.saveGeneration?.hash || ""}:${
+          state.researchRound || 1
+        }:${state.pendingRootQuest ? "pending" : "active"}:${guidelineFp}`;
         const cached = getCachedWorkflow(
           state.saveGeneration?.hash || "",
           pressureKey,
@@ -1121,12 +1103,12 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
         if (cached) {
           if (event && typeof event.systemPrompt === "string") {
             return {
-              systemPrompt: `${event.systemPrompt}\n\n${awarenessBlock}${cached}`,
+              systemPrompt:
+                `${event.systemPrompt}\n\n${awarenessBlock}${cached}`,
             };
           }
         }
-        const isSteadyState =
-          !state.pendingRootQuest &&
+        const isSteadyState = !state.pendingRootQuest &&
           !state.researchRequired &&
           !state.reassessmentRequired &&
           (() => {
@@ -1147,12 +1129,11 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
         );
 
         // 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal (top, imperative, like vim ftplugin); 52: not while REASSESSMENT_PENDING blocks quest_update_state
-        const skillHint =
-          !state.active &&
-          (state.pendingRootQuest || state.activeDraft) &&
-          !state.reassessmentRequired
-            ? `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`
-            : "";
+        const skillHint = !state.active &&
+            (state.pendingRootQuest || state.activeDraft) &&
+            !state.reassessmentRequired
+          ? `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`
+          : "";
         // steer so execution.log grep-able within turn0
         if (skillHint) {
           try {
@@ -1165,7 +1146,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
         }
         if (event && typeof event.systemPrompt === "string") {
           return {
-            systemPrompt: `${event.systemPrompt}\n\n${skillHint}${awarenessBlock}${workflowInstructions}`,
+            systemPrompt:
+              `${event.systemPrompt}\n\n${skillHint}${awarenessBlock}${workflowInstructions}`,
           };
         }
       } catch (err: any) {
@@ -1184,8 +1166,7 @@ export function registerQuestJournalCRBHook() {
     }
     g.__pi_crb_providers.push((_ctx: ExtensionContext, tools: string[]) => {
       const set = new Set(tools.map((t) => t.toLowerCase()));
-      const isSteadyState =
-        !state.pendingRootQuest &&
+      const isSteadyState = !state.pendingRootQuest &&
         !state.researchRequired &&
         !state.reassessmentRequired &&
         (() => {

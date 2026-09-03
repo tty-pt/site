@@ -6,10 +6,10 @@ import {
   handleAskQuestionsResult,
 } from "../classification.ts";
 import {
-  isSemanticSummaryEnabled,
-  isThoughtLoggingEnabled,
   getRetryDeliverAs,
   getRetryMaxTurns,
+  isSemanticSummaryEnabled,
+  isThoughtLoggingEnabled,
 } from "../config.ts";
 import {
   advanceSteerTurnCounter,
@@ -46,6 +46,7 @@ import {
   logUserInteraction,
   normalizeLogPath,
   sanitizeLogString,
+  tryLog,
 } from "../logging.ts";
 import { getWorkflowInstructions } from "../markdown.ts";
 import {
@@ -93,40 +94,60 @@ export async function handleTurnStart(
   if (state.pickerCancelled) return;
   if (!state.active && !state.pendingRootQuest && !state.activeDraft) return;
 
-  const turnIndex =
-    typeof event?.turnIndex === "number"
-      ? event.turnIndex
-      : (state.currentTurn || 0) + 1;
+  // B4: stale inCriticalReview recovery — clear orphaned flag if no active review exists
+  if (state.inCriticalReview) {
+    try {
+      const active = findActiveReviewForQuest(
+        state.active || state.questId || "",
+      );
+      const anyActive = [...getActiveReviews().values()].some((r) =>
+        r.status === "starting" || r.status === "running"
+      );
+      if (!active && !anyActive) {
+        tryLog(
+          "CRITICAL_REVIEW_STALE_CLEARED",
+          "stale inCriticalReview cleared (no active review)",
+          { quest: state.active || "" },
+        );
+        state.inCriticalReview = false;
+      }
+    } catch {}
+  }
+  const turnIndex = typeof event?.turnIndex === "number"
+    ? event.turnIndex
+    : (state.currentTurn || 0) + 1;
   state.currentTurn = turnIndex;
-  state.currentTurnCorrelationId = `turn_${turnIndex}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  state.currentTurnCorrelationId = `turn_${turnIndex}_${
+    Date.now().toString(36)
+  }_${Math.random().toString(36).slice(2, 6)}`;
 
-  const intent =
-    state.prompts && state.prompts.length > 0
-      ? state.prompts[state.prompts.length - 1]
-      : state.pendingRootRequest || state.active || "";
+  const intent = state.prompts && state.prompts.length > 0
+    ? state.prompts[state.prompts.length - 1]
+    : state.pendingRootRequest || state.active || "";
   const activeGate = state.reassessmentRequired
     ? "REASSESSMENT_PENDING"
     : state.researchRequired || !state.researchComplete
-      ? "RESEARCH_PENDING"
-      : state.awaitingUserConfirmation
-        ? "CONFIRMATION_PENDING"
-        : "IMPLEMENTATION_ALLOWED";
+    ? "RESEARCH_PENDING"
+    : state.awaitingUserConfirmation
+    ? "CONFIRMATION_PENDING"
+    : "IMPLEMENTATION_ALLOWED";
   const phase = state.reassessmentRequired
     ? "reassessment"
     : state.researchRequired || !state.researchComplete
-      ? "research"
-      : state.awaitingUserConfirmation
-        ? "confirmation"
-        : "implementation";
+    ? "research"
+    : state.awaitingUserConfirmation
+    ? "confirmation"
+    : "implementation";
   const ctxSessionId = getSessionId(getActiveContext(_ctx));
-  if (!sessionStartMap.has(ctxSessionId))
+  if (!sessionStartMap.has(ctxSessionId)) {
     sessionStartMap.set(ctxSessionId, Date.now());
+  }
   if (sessionStartMap.size > 100) {
     const first = sessionStartMap.keys().next().value;
     if (first) sessionStartMap.delete(first);
   }
-  const elapsedMs =
-    Date.now() - (sessionStartMap.get(ctxSessionId) || Date.now());
+  const elapsedMs = Date.now() -
+    (sessionStartMap.get(ctxSessionId) || Date.now());
   const intentHash = createHash("sha256")
     .update(intent || "", "utf8")
     .digest("hex")
@@ -149,7 +170,9 @@ export async function handleTurnStart(
 
   logTurnBoundary(
     "TURN_START",
-    `agent turn started — phase ${phase} gate ${activeGate} plan v${state.planVersion || 1} round ${state.researchRound || 1}`,
+    `agent turn started — phase ${phase} gate ${activeGate} plan v${
+      state.planVersion || 1
+    } round ${state.researchRound || 1}`,
     {
       quest: state.active || state.activeDraft || "",
       turn: state.currentTurn,
@@ -170,47 +193,49 @@ export async function handleTurnStart(
   );
 
   // inference-free semantic snapshot — always 1 line/turn for readability (no tokens), human sentence
-  try {
-    const prevKey = state._lastSemanticKey;
-    const curKey = `${phase}:${state.planVersion || 1}:${activeGate}`;
-    const isChange = prevKey !== curKey;
-    state._lastSemanticKey = curKey;
-    const readable = `phase ${phase} gate ${activeGate} plan v${state.planVersion || 1} round ${state.researchRound || 1}${isChange && prevKey ? ` (changed from ${prevKey})` : ""}`;
-    logEvent(
-      "SEMANTIC_SNAPSHOT",
-      isChange && prevKey
-        ? `${prevKey}→${curKey} — ${readable}`
-        : `${curKey} — ${readable}`,
-      {
-        quest: state.active || state.activeDraft || "",
-        from: prevKey || curKey,
-        to: curKey,
-        planVersion: state.planVersion || 1,
-        activeGate,
-        elapsedMs,
-        opencodeSessionId: ctxSessionId,
-        piSessionId: ctxSessionId,
-      },
-    );
-  } catch {}
+  const prevKey = state._lastSemanticKey;
+  const curKey = `${phase}:${state.planVersion || 1}:${activeGate}`;
+  const isChange = prevKey !== curKey;
+  state._lastSemanticKey = curKey;
+  const readable = `phase ${phase} gate ${activeGate} plan v${
+    state.planVersion || 1
+  } round ${state.researchRound || 1}${
+    isChange && prevKey ? ` (changed from ${prevKey})` : ""
+  }`;
+  logEvent(
+    "SEMANTIC_SNAPSHOT",
+    isChange && prevKey
+      ? `${prevKey}→${curKey} — ${readable}`
+      : `${curKey} — ${readable}`,
+    {
+      quest: state.active || state.activeDraft || "",
+      from: prevKey || curKey,
+      to: curKey,
+      planVersion: state.planVersion || 1,
+      activeGate,
+      elapsedMs,
+      opencodeSessionId: ctxSessionId,
+      piSessionId: ctxSessionId,
+    },
+  );
 }
 
 function turnTerminalText(event: any): string {
   try {
-    const cand =
-      event?.response ??
+    const cand = event?.response ??
       event?.output ??
       (Array.isArray(event?.messages)
         ? (event.messages[event.messages.length - 1]?.content ??
           event.messages[event.messages.length - 1]?.text)
         : undefined);
     if (typeof cand === "string") return cand;
-    if (Array.isArray(cand))
+    if (Array.isArray(cand)) {
       return cand
         .map((x: any) =>
-          typeof x === "string" ? x : (x?.text ?? x?.content ?? ""),
+          typeof x === "string" ? x : (x?.text ?? x?.content ?? "")
         )
         .join(" ");
+    }
     if (cand && typeof cand === "object") {
       const o = cand as {
         content?: unknown;
@@ -248,8 +273,8 @@ function handleTurnContinuationRetry(
   // (stopReason undefined) from being mistaken for truncation.
   const stop = event?.message?.stopReason ?? event?.stopReason;
   const truncated = stop === "length" || stop === "error" || stop === "aborted";
-  const stalled =
-    truncated && toolResults.length === 0 && terminalText.length === 0;
+  const stalled = truncated && toolResults.length === 0 &&
+    terminalText.length === 0;
   if (!stalled) {
     // A real, substantive/incomplete-but-produced turn resets the budget.
     state.retryTurnsUsed = 0;
@@ -290,10 +315,13 @@ function handleTurnContinuationRetry(
     reportAgentError(
       pi,
       ctx,
-      `[Quest Journal] A turn ended without producing any tool calls or response text (repeated ${used} consecutive retr${used === 1 ? "y" : "ies"}). This likely indicates a truncated or interrupted response.\n\nThe durable quest state remains authoritative.`,
+      `[Quest Journal] A turn ended without producing any tool calls or response text (repeated ${used} consecutive retr${
+        used === 1 ? "y" : "ies"
+      }). This likely indicates a truncated or interrupted response.\n\nThe durable quest state remains authoritative.`,
       {
         code: QuestErrorCode.CONTINUATION_FAILURE,
-        requiredNextAction: `Read ${qp}, reconcile working memory from the durable quest state if necessary, and continue from the recorded Exact Next Action.`,
+        requiredNextAction:
+          `Read ${qp}, reconcile working memory from the durable quest state if necessary, and continue from the recorded Exact Next Action.`,
         details: { TurnsRetried: used, MaxRetries: maxTurns },
       },
     );
@@ -351,7 +379,9 @@ export async function handleTurnEnd(
     if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
       sendInternalAgentMessage(
         pi,
-        `⏸ Awaiting ${aw.kind}/${aw.triggerReason || aw.kind} ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
+        `⏸ Awaiting ${aw.kind}/${
+          aw.triggerReason || aw.kind
+        } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
         "steer",
       );
     }
@@ -370,7 +400,9 @@ export async function handleTurnEnd(
     state.currentTurn = event.turnIndex;
   }
   if (!state.currentTurnCorrelationId) {
-    state.currentTurnCorrelationId = `turn_${state.currentTurn || 1}_${Date.now().toString(36)}`;
+    state.currentTurnCorrelationId = `turn_${state.currentTurn || 1}_${
+      Date.now().toString(36)
+    }`;
   }
 
   const toolResults: any[] = Array.isArray(event.toolResults)
@@ -461,7 +493,23 @@ export async function handleTurnEnd(
   })();
   logTurnBoundary(
     "TURN_END",
-    `turn completed — phase ${state.reassessmentRequired ? "reassessment" : state.researchRequired || !state.researchComplete ? "research" : state.awaitingUserConfirmation ? "confirmation" : "implementation"} gate ${state.reassessmentRequired ? "REASSESSMENT_PENDING" : state.researchRequired || !state.researchComplete ? "RESEARCH_PENDING" : state.awaitingUserConfirmation ? "CONFIRMATION_PENDING" : "IMPLEMENTATION_ALLOWED"} tools ${toolResults.length}`,
+    `turn completed — phase ${
+      state.reassessmentRequired
+        ? "reassessment"
+        : state.researchRequired || !state.researchComplete
+        ? "research"
+        : state.awaitingUserConfirmation
+        ? "confirmation"
+        : "implementation"
+    } gate ${
+      state.reassessmentRequired
+        ? "REASSESSMENT_PENDING"
+        : state.researchRequired || !state.researchComplete
+        ? "RESEARCH_PENDING"
+        : state.awaitingUserConfirmation
+        ? "CONFIRMATION_PENDING"
+        : "IMPLEMENTATION_ALLOWED"
+    } tools ${toolResults.length}`,
     {
       quest: state.active || "",
       turn: state.currentTurn,
@@ -474,23 +522,21 @@ export async function handleTurnEnd(
       commands: commandsCount,
       mutations: mutationsCount,
       failures: failuresCount,
-      filesModified:
-        Array.isArray(state.sessionModifiedFiles) &&
-        state.sessionModifiedFiles.length > 0
-          ? state.sessionModifiedFiles.slice(-5).join(",")
-          : undefined,
+      filesModified: Array.isArray(state.sessionModifiedFiles) &&
+          state.sessionModifiedFiles.length > 0
+        ? state.sessionModifiedFiles.slice(-5).join(",")
+        : undefined,
       consequence: turnConsequence,
       activeGate: state.reassessmentRequired
         ? "REASSESSMENT_PENDING"
         : state.researchRequired || !state.researchComplete
-          ? "RESEARCH_PENDING"
-          : state.awaitingUserConfirmation
-            ? "CONFIRMATION_PENDING"
-            : "IMPLEMENTATION_ALLOWED",
-      categories:
-        analysis.failureCategories.length > 0
-          ? analysis.failureCategories.join(",")
-          : undefined,
+        ? "RESEARCH_PENDING"
+        : state.awaitingUserConfirmation
+        ? "CONFIRMATION_PENDING"
+        : "IMPLEMENTATION_ALLOWED",
+      categories: analysis.failureCategories.length > 0
+        ? analysis.failureCategories.join(",")
+        : undefined,
       questDirty: Boolean(state.dirty),
       implementationAllowed: Boolean(state.implementationAllowed),
       elapsedMs: turnElapsedMs,
@@ -503,29 +549,32 @@ export async function handleTurnEnd(
     const curGate = state.reassessmentRequired
       ? "REASSESSMENT_PENDING"
       : state.researchRequired || !state.researchComplete
-        ? "RESEARCH_PENDING"
-        : state.awaitingUserConfirmation
-          ? "CONFIRMATION_PENDING"
-          : "IMPLEMENTATION_ALLOWED";
+      ? "RESEARCH_PENDING"
+      : state.awaitingUserConfirmation
+      ? "CONFIRMATION_PENDING"
+      : "IMPLEMENTATION_ALLOWED";
     const curPhase = state.reassessmentRequired
       ? "reassessing"
       : state.researchRequired || !state.researchComplete
-        ? "research"
-        : state.awaitingUserConfirmation
-          ? "confirmation"
-          : "implementation";
+      ? "research"
+      : state.awaitingUserConfirmation
+      ? "confirmation"
+      : "implementation";
     const semanticEnabled = isSemanticSummaryEnabled(state);
-    const intent =
-      curGate === "RESEARCH_PENDING"
-        ? "research"
-        : curGate === "CONFIRMATION_PENDING"
-          ? "awaiting-review"
-          : curGate === "REASSESSMENT_PENDING"
-            ? "revising"
-            : curPhase;
-    const summaryLine = `${intent} planVersion${state.planVersion || 1} gate=${curGate} tools=${toolResults.length} reads=${readsCount} writes=${writesCount} failures=${failuresCount}${turnConsequence ? ` consequence=${turnConsequence}` : ""}`;
+    const intent = curGate === "RESEARCH_PENDING"
+      ? "research"
+      : curGate === "CONFIRMATION_PENDING"
+      ? "awaiting-review"
+      : curGate === "REASSESSMENT_PENDING"
+      ? "revising"
+      : curPhase;
+    const summaryLine = `${intent} planVersion${
+      state.planVersion || 1
+    } gate=${curGate} tools=${toolResults.length} reads=${readsCount} writes=${writesCount} failures=${failuresCount}${
+      turnConsequence ? ` consequence=${turnConsequence}` : ""
+    }`;
     // unconditional: execution.log must be semantically legible without flag
-    logEvent("STEP_SUMMARY", summaryLine.slice(0, 300), {
+    tryLog("STEP_SUMMARY", summaryLine.slice(0, 300), {
       quest: state.active || state.activeDraft || "",
       intent,
       planVersion: state.planVersion || 1,
@@ -539,8 +588,7 @@ export async function handleTurnEnd(
       /* already logged */
     }
     // thought proxy: harness text if available, else toolResult summary slice
-    const shouldLogThought =
-      isThoughtLoggingEnabled(state) ||
+    const shouldLogThought = isThoughtLoggingEnabled(state) ||
       Boolean(event?.response || event?.output || event?.messages);
     if (shouldLogThought) {
       let lastThought: string | undefined = state.lastThought;
@@ -549,11 +597,11 @@ export async function handleTurnEnd(
         lastThought === "[object Object]" ||
         (typeof lastThought === "string" &&
           lastThought.trim() === "[object Object]")
-      )
+      ) {
         lastThought = undefined;
+      }
       try {
-        const cand =
-          event?.response ??
+        const cand = event?.response ??
           event?.output ??
           (Array.isArray(event?.messages)
             ? (event.messages[event.messages.length - 1]?.content ??
@@ -563,16 +611,17 @@ export async function handleTurnEnd(
           typeof cand === "string" &&
           cand.trim() &&
           cand.trim() !== "[object Object]"
-        )
+        ) {
           lastThought = cand;
-        else if (Array.isArray(cand)) {
+        } else if (Array.isArray(cand)) {
           const arrStr = cand
             .map((x: any) =>
-              typeof x === "string" ? x : (x?.text ?? x?.content ?? ""),
+              typeof x === "string" ? x : (x?.text ?? x?.content ?? "")
             )
             .join(" ");
-          if (arrStr.trim() && arrStr.trim() !== "[object Object]")
+          if (arrStr.trim() && arrStr.trim() !== "[object Object]") {
             lastThought = arrStr.slice(0, 500);
+          }
         } else if (cand && typeof cand === "object") {
           const o = cand as {
             content?: unknown;
@@ -584,35 +633,35 @@ export async function handleTurnEnd(
             typeof raw === "string" &&
             raw.trim() &&
             raw.trim() !== "[object Object]"
-          )
+          ) {
             lastThought = raw;
-          else if (Array.isArray(raw)) {
+          } else if (Array.isArray(raw)) {
             const arrStr = raw
               .map((x: any) =>
-                typeof x === "string" ? x : (x?.text ?? x?.content ?? ""),
+                typeof x === "string" ? x : (x?.text ?? x?.content ?? "")
               )
               .join(" ");
-            if (arrStr.trim() && arrStr.trim() !== "[object Object]")
+            if (arrStr.trim() && arrStr.trim() !== "[object Object]") {
               lastThought = arrStr.slice(0, 500);
+            }
           } else if (raw && typeof raw === "object") {
             // Handle nested content: {content: {text:"..."}} or {content:[{text:"..."}]}
             const nestedRaw = raw as { text?: unknown; content?: unknown };
-            const nested =
-              nestedRaw.text ??
+            const nested = nestedRaw.text ??
               (Array.isArray(nestedRaw.content)
                 ? nestedRaw.content
-                    .map((x: any) =>
-                      typeof x === "string" ? x : x?.text || x?.content || "",
-                    )
-                    .join(" ")
+                  .map((x: any) =>
+                    typeof x === "string" ? x : x?.text || x?.content || ""
+                  )
+                  .join(" ")
                 : (nestedRaw.content ?? ""));
             if (
               typeof nested === "string" &&
               nested.trim() &&
               nested.trim() !== "[object Object]"
-            )
+            ) {
               lastThought = nested;
-            else {
+            } else {
               const js = JSON.stringify(cand);
               if (js && js !== "{}" && js !== '"[object Object]"') {
                 // try to extract text from JSON wrapper
@@ -628,18 +677,18 @@ export async function handleTurnEnd(
                 }
               }
             }
-          } else if (raw && String(raw).trim() !== "[object Object]")
+          } else if (raw && String(raw).trim() !== "[object Object]") {
             lastThought = String(raw);
-          else {
+          } else {
             // cand itself is {type:"text",text:"..."} without content wrapper
             const direct = (cand as { text?: unknown }).text ?? "";
             if (
               typeof direct === "string" &&
               direct.trim() &&
               direct.trim() !== "[object Object]"
-            )
+            ) {
               lastThought = direct.slice(0, 500);
-            else {
+            } else {
               const js2 = JSON.stringify(cand);
               try {
                 const parsed2 = JSON.parse(js2);
@@ -662,8 +711,7 @@ export async function handleTurnEnd(
             text?: unknown;
             toolName?: unknown;
           };
-          let proxyRaw: any =
-            lastObj?.content ??
+          let proxyRaw: any = lastObj?.content ??
             lastObj?.output ??
             lastObj?.text ??
             last?.toolName ??
@@ -673,25 +721,22 @@ export async function handleTurnEnd(
           else if (Array.isArray(proxyRaw)) {
             proxyStr = proxyRaw
               .map((x: any) =>
-                typeof x === "string"
-                  ? x
-                  : (x?.text ??
-                    x?.content ??
-                    (typeof x === "object" ? JSON.stringify(x) : String(x))),
+                typeof x === "string" ? x : (x?.text ??
+                  x?.content ??
+                  (typeof x === "object" ? JSON.stringify(x) : String(x)))
               )
               .join(" ");
           } else if (proxyRaw && typeof proxyRaw === "object") {
             // {type:"text",text:"..."} or {content:"..."}
             const pr = proxyRaw as { text?: string; content?: unknown };
-            proxyStr =
-              pr.text ??
+            proxyStr = pr.text ??
               (typeof pr.content === "string"
                 ? pr.content
                 : JSON.stringify(proxyRaw));
             if (Array.isArray(pr.content)) {
               proxyStr = pr.content
                 .map((x: any) =>
-                  typeof x === "string" ? x : (x?.text ?? x?.content ?? ""),
+                  typeof x === "string" ? x : (x?.text ?? x?.content ?? "")
                 )
                 .join(" ");
             }
@@ -700,14 +745,16 @@ export async function handleTurnEnd(
           if (proxyStr.trim().startsWith("[") && proxyStr.includes('"text"')) {
             try {
               const arr = JSON.parse(proxyStr);
-              if (Array.isArray(arr))
+              if (Array.isArray(arr)) {
                 proxyStr = arr
                   .map((x: any) => x?.text ?? x?.content ?? "")
                   .join(" ");
+              }
             } catch {}
           }
-          if (proxyStr.trim() && proxyStr.trim() !== "[object Object]")
+          if (proxyStr.trim() && proxyStr.trim() !== "[object Object]") {
             lastThought = proxyStr.slice(0, 500);
+          }
         } catch {}
       }
       if (
@@ -719,7 +766,7 @@ export async function handleTurnEnd(
           .update(lastThought, "utf8")
           .digest("hex")
           .slice(0, 12);
-        logEvent(
+        tryLog(
           "AGENT_THOUGHT",
           `thought ${th} ${sanitizeLogString(lastThought, 80)}`,
           {
@@ -749,7 +796,7 @@ export async function handleTurnEnd(
   handleTurnContinuationRetry(pi, ctx, event, analysis);
   if (
     (state.substantiveTurnsSinceCheckpoint || 0) >=
-    SUBSTANTIVE_TURNS_PER_DIRECTION_REVIEW
+      SUBSTANTIVE_TURNS_PER_DIRECTION_REVIEW
   ) {
     logContinuationAnomaly(
       "NO_PROGRESS",
@@ -760,9 +807,8 @@ export async function handleTurnEnd(
       },
     );
     // Plan-block throttle at handler layer to avoid even entering review launch path
-    const hasActivePlan =
-      (state.active &&
-        findActiveReviewForQuest(state.active)?.kind === "plan_review") ||
+    const hasActivePlan = (state.active &&
+      findActiveReviewForQuest(state.active)?.kind === "plan_review") ||
       [...getActiveReviews().values()].some(
         (r) =>
           r.kind === "plan_review" &&
@@ -802,31 +848,28 @@ export async function handleToolResult(
   const toolOutput = event?.content || event?.output || "";
   const rawIsError = Boolean(
     event?.isError ||
-    event?.error ||
-    (event?.details &&
-      (event?.details?.error || event?.details?.success === false)),
+      event?.error ||
+      (event?.details &&
+        (event?.details?.error || event?.details?.success === false)),
   );
   const normName = (toolName || "").toLowerCase().trim();
   // 41: bash cat > quest.md gate-blocked while PROVISIONAL_RESEARCH_PENDING must be GATE_BLOCKED not TOOL_FAILURE
-  const rawCmdForGate =
-    typeof toolInput === "string"
-      ? toolInput
-      : toolInput?.command || toolInput?.cmd || "";
-  const isQuestWriteBlocked =
-    rawIsError &&
+  const rawCmdForGate = typeof toolInput === "string"
+    ? toolInput
+    : toolInput?.command || toolInput?.cmd || "";
+  const isQuestWriteBlocked = rawIsError &&
     (normName === "bash" || normName === "user_bash") &&
     /quest\.md|\.pi\/quest\/(current|future)/.test(rawCmdForGate);
   // 51: draft_not_approved while REASSESSMENT_PENDING is GATE_BLOCKED not TOOL_FAILURE
   const isCoalescenceGateBlocked = Boolean(
     event?.details?.gateBlocked &&
-    event?.details?.code === "REVIEW_COALESCENCE_PENDING",
+      event?.details?.code === "REVIEW_COALESCENCE_PENDING",
   );
   // Whitelist rg/grep exit 1 (no matches) — not an error, still counts as investigation
   // 47: read future/current *.md ENOENT while pendingRootQuest/activeDraft is investigation, not failure
-  const readPathForWhitelist =
-    typeof toolInput?.path === "string"
-      ? toolInput.path
-      : (toolInput as { file?: string })?.file || "";
+  const readPathForWhitelist = typeof toolInput?.path === "string"
+    ? toolInput.path
+    : (toolInput as { file?: string })?.file || "";
   const isFutureReadENOENT =
     (normName === "read" || normName === "doc_to_md") &&
     /\.pi\/quest\/(current|future)\/.*\.md/.test(readPathForWhitelist) &&
@@ -870,8 +913,11 @@ export async function handleToolResult(
   if (normName.includes("quest_update_state") && effectiveIsError) {
     try {
       const keys = Object.keys(toolInput || {}).join(",");
-      if (!keys)
-        failureReason = `no_active_quest paramsKeys=[] raw=${JSON.stringify(toolInput).slice(0, 120)}`;
+      if (!keys) {
+        failureReason = `no_active_quest paramsKeys=[] raw=${
+          JSON.stringify(toolInput).slice(0, 120)
+        }`;
+      }
     } catch {}
   }
 
@@ -891,8 +937,7 @@ export async function handleToolResult(
       isFailure = false;
     }
   } else if (effectiveIsError) {
-    failureReason =
-      event?.error?.message ||
+    failureReason = event?.error?.message ||
       event?.message ||
       (event?.details && event.details.error) ||
       "tool execution error";
@@ -937,10 +982,9 @@ export async function handleToolResult(
     normName === "user_bash" ||
     normName.startsWith("bg_run")
   ) {
-    const rawCmd =
-      typeof toolInput === "string"
-        ? toolInput
-        : toolInput?.command || toolInput?.cmd || "";
+    const rawCmd = typeof toolInput === "string"
+      ? toolInput
+      : toolInput?.command || toolInput?.cmd || "";
     command = sanitizeLogString(rawCmd, 150);
   } else if (
     normName === "search_graph" ||
@@ -949,18 +993,18 @@ export async function handleToolResult(
     normName === "source_check"
   ) {
     query = sanitizeLogString(
-      typeof toolInput === "string"
-        ? toolInput
-        : toolInput?.query ||
-            toolInput?.name_pattern ||
-            toolInput?.name ||
-            toolInput?.pattern ||
-            "",
+      typeof toolInput === "string" ? toolInput : toolInput?.query ||
+        toolInput?.name_pattern ||
+        toolInput?.name ||
+        toolInput?.pattern ||
+        "",
     );
   }
 
   if (isFailure) {
-    failureId = `fail_${state.currentTurn || 1}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    failureId = `fail_${state.currentTurn || 1}_${Date.now().toString(36)}_${
+      Math.random().toString(36).slice(2, 6)
+    }`;
     state.lastFailureId = failureId;
     consequence = "FAILURE_RECORDED";
   } else if (state.lastFailureId) {
@@ -1018,7 +1062,10 @@ export function reportCompactionFailure(
   reportAgentError(pi, c, `Context compaction failed: ${errorMsg}`, {
     code: QuestErrorCode.COMPACTION_FAILURE,
     requiredNextAction: sessionState.active
-      ? `Read ${questPath(sessionState.questId) || `.pi/quest/current/${sessionState.questId || "<qid>"}/quest.md`} and continue execution. Compaction will be re-attempted when context pressure warrants.`
+      ? `Read ${
+        questPath(sessionState.questId) ||
+        `.pi/quest/current/${sessionState.questId || "<qid>"}/quest.md`
+      } and continue execution. Compaction will be re-attempted when context pressure warrants.`
       : "Review active memory and continue execution.",
     details: { ActiveQuest: sessionState.active || "(none)" },
   });
@@ -1073,8 +1120,7 @@ export async function handleCompactionFailure(
     sessionState.compactionPending = false;
     return;
   }
-  const errorMsg =
-    event?.error?.message ||
+  const errorMsg = event?.error?.message ||
     event?.message ||
     "Session context compaction failed. Context has not been compacted.";
 

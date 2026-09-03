@@ -1,7 +1,7 @@
 ---
 id: 18
 title: "SNAPSHOT_FALLBACK doc stale — captureSnapshot gone, 2 emitters now exist"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "grep SNAPSHOT_FALLBACK 2 emitters at snapshot.ts"

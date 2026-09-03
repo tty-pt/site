@@ -1,7 +1,7 @@
 ---
 id: 25
 title: "futureCount 0 when disk has drafts — Array.isArray([]) shadows readdir, misses future-archive, e.isFile"
-state: ready
+state: done
 severity: medium
 requires: [07]
 validates: "resolve.ts readdir + future-archive => futureCount==5 on fixture"

@@ -1,7 +1,7 @@
 ---
 id: 35
 title: "8 to-be-removed docs → archive map not preserved"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "docs/archive move map 8 files documented"

@@ -129,27 +129,29 @@ You manage quests autonomously on disk in \`.pi/quest/current/<qid>/quest.md\`. 
      * **Pre-Save Consistency Audit**: Immediately before calling \`quest_mark_saved\`, perform an internal audit (Does Completed contradict Remaining Work? Does Files Modified omit changed files? Does Exact Next Action repeat completed work? Does Plan Version have a revision? Does Test Status reflect recent edits?). Correct stale facts before marking saved.`;
 
 export const COMPACT_WORKFLOW_RULES = [
-	"Never propose without homework: investigate architecture, read files, discover build/run commands before proposing plans/code.",
-	"Research-Grounded Quest Formation: investigate first, establish semantic quest identity, init via quest_update_state.",
-	"Turn 1 Confirmation: present research, assumptions, plan, ask confirmation BEFORE writing code (ask_questions, zero tools in same turn).",
-	"Continuous Durable Epistemic Memory: .pi/quest/current/<qid>/quest.md is durable memory; proactively record understanding/assumptions/plan confidence/revisions/next action.",
-	"Dynamic Re-Investigation: reuse quest file to recover knowledge; re-investigate when evidence contradicts assumptions/tests fail.",
-	"Autonomous Continuation: post-compaction/sub-quest return, read quest.md, validate plan, proceed without user interruption.",
-	"Meaningful Sub-Quest Decomposition: discover structure, create sub-quests [[name]] when separable; LIFO stack.",
-	"Durable-State Reconciliation: file must describe NOW — sync Completed/Files Modified/Test/Remaining/Next Action; Next Action is live pointer.",
-	"Full Test Suite Gate: restart daemon, make test zero failures before top-level completion.",
-	"Top-level Completion: ask_questions refine / archive & auto-compact / archive without compact / manual.",
+  "Never propose without homework: investigate architecture, read files, discover build/run commands before proposing plans/code.",
+  "Research-Grounded Quest Formation: investigate first, establish semantic quest identity, init via quest_update_state.",
+  "Turn 1 Confirmation: present research, assumptions, plan, ask confirmation BEFORE writing code (ask_questions, zero tools in same turn).",
+  "Continuous Durable Epistemic Memory: .pi/quest/current/<qid>/quest.md is durable memory; proactively record understanding/assumptions/plan confidence/revisions/next action.",
+  "Dynamic Re-Investigation: reuse quest file to recover knowledge; re-investigate when evidence contradicts assumptions/tests fail.",
+  "Autonomous Continuation: post-compaction/sub-quest return, read quest.md, validate plan, proceed without user interruption.",
+  "Meaningful Sub-Quest Decomposition: discover structure, create sub-quests [[name]] when separable; LIFO stack.",
+  "Durable-State Reconciliation: file must describe NOW — sync Completed/Files Modified/Test/Remaining/Next Action; Next Action is live pointer.",
+  "Full Test Suite Gate: restart daemon, make test zero failures before top-level completion.",
+  "Top-level Completion: ask_questions refine / archive & auto-compact / archive without compact / manual.",
 ];
 
 export function getWorkflowInstructions(resumeContext: string): string {
-	return `${MANDATORY_WORKFLOW_RULES}${AUTONOMOUS_QUEST_MANAGEMENT_RULES}${resumeContext}`;
+  return `${MANDATORY_WORKFLOW_RULES}${AUTONOMOUS_QUEST_MANAGEMENT_RULES}${resumeContext}`;
 }
 
 export function getCompactWorkflowInstructions(resumeContext: string): string {
-	const compactBlock = `\n\n# Compact Quest Workflow (Steady-State)\n` + COMPACT_WORKFLOW_RULES.map((r, i) => `${i + 1}. ${r}`).join("\n") + `\n\nFull rules: .pi/extensions/pi-quest/src/markdown/template/rules.ts\n`;
-	return `${compactBlock}${resumeContext}`;
+  const compactBlock = `\n\n# Compact Quest Workflow (Steady-State)\n` +
+    COMPACT_WORKFLOW_RULES.map((r, i) => `${i + 1}. ${r}`).join("\n") +
+    `\n\nFull rules: .pi/extensions/pi-quest/src/markdown/template/rules.ts\n`;
+  return `${compactBlock}${resumeContext}`;
 }
 
 export function getFullWorkflowInstructions(resumeContext: string): string {
-	return getWorkflowInstructions(resumeContext);
+  return getWorkflowInstructions(resumeContext);
 }

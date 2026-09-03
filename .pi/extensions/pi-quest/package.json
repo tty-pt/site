@@ -26,6 +26,9 @@
   "pi": {
     "extensions": [
       "index.ts"
+    ],
+    "skills": [
+      "skills/quest-journal/SKILL.md"
     ]
   }
 }

@@ -44,10 +44,10 @@ export interface ExtensionContext {
   isIdle?: () => boolean;
   getContextUsage?: () =>
     | {
-        tokens?: number | null;
-        contextWindow?: number | null;
-        percent?: number | null;
-      }
+      tokens?: number | null;
+      contextWindow?: number | null;
+      percent?: number | null;
+    }
     | undefined;
   compact?: (options: any) => void;
 }
@@ -150,17 +150,20 @@ export interface PendingSubquestResumeResolution {
 }
 
 export type SubquestReconciliationStatus =
-  "still-valid" | "obsolete" | "adopted" | "inconsistent";
+  | "still-valid"
+  | "obsolete"
+  | "adopted"
+  | "inconsistent";
 
 export type CompactionState =
   | { kind: "idle" }
   | {
-      kind: "prepared";
-      id: string;
-      quest: string;
-      saveCount: number;
-      hash: string;
-    }
+    kind: "prepared";
+    id: string;
+    quest: string;
+    saveCount: number;
+    hash: string;
+  }
   | { kind: "in-flight"; id: string; quest: string; reason: ResumeReason }
   | { kind: "completed"; id: string; quest: string }
   | { kind: "resume_pending"; id: string; quest: string; reason: ResumeReason }
@@ -237,9 +240,15 @@ export interface AgentObligation {
 export interface PendingAgentNotification extends AgentObligation {}
 
 export type CriticalReviewKind =
-  "direction" | "plan_review" | "final_acceptance";
+  | "direction"
+  | "plan_review"
+  | "final_acceptance";
 export type CriticalReviewVerdict =
-  "APPROVE" | "REVISE" | "UNCERTAIN" | "PASS" | "FAIL";
+  | "APPROVE"
+  | "REVISE"
+  | "UNCERTAIN"
+  | "PASS"
+  | "FAIL";
 export type CriticalReviewSeverity = "NONE" | "MINOR" | "MAJOR" | "CRITICAL";
 
 export type ReviewTimeoutLayer =
@@ -552,6 +561,18 @@ export interface StoredState {
   thoughtLoggingEnabled?: boolean;
   autonomousSubquestDuringDrafting?: boolean;
   initialPromptLogged?: boolean;
+
+  // Review Dialogue — unlimited stateful discourse (B1')
+  reviewDialogue?: Array<{
+    round: number;
+    timestamp: number;
+    reviewerFindings: string;
+    implementerRebuttal: string;
+    reviewerResponse?: string;
+    verdictBefore?: CriticalReviewVerdict;
+    verdictAfter?: CriticalReviewVerdict;
+    resolved?: boolean;
+  }>;
 
   // Critical Review Subagent State
   inCriticalReview?: boolean;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { FUTURE_DIR } from "../constants.ts";
-import { logCriticalReviewTransition, logEvent } from "../logging.ts";
+import { logCriticalReviewTransition, logEvent, tryLog } from "../logging.ts";
 import { logError } from "../messaging.ts";
 import {
   getActiveContext,
@@ -11,9 +11,9 @@ import {
   state,
 } from "../state.ts";
 import {
+  CriticalReviewer,
   CriticalReviewKind,
   CriticalReviewState,
-  CriticalReviewer,
   ExtensionAPI,
   ExtensionContext,
   ReviewSnapshot,
@@ -69,13 +69,13 @@ export interface CriticalReviewOptions {
   ) => Promise<
     | string
     | {
-        text?: string;
-        content?: any;
-        isError?: boolean;
-        error?: any;
-        childSessionId?: string;
-        transcriptRef?: string;
-      }
+      text?: string;
+      content?: any;
+      isError?: boolean;
+      error?: any;
+      childSessionId?: string;
+      transcriptRef?: string;
+    }
   >;
 }
 
@@ -138,8 +138,8 @@ export function isPlanReviewValidForState(targetState?: StoredState): boolean {
     return true;
   }
 
-  const currentHash =
-    s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : null);
+  const currentHash = s.lastSavedHash ||
+    (s.saveGeneration ? s.saveGeneration.hash : null);
   if (currentHash && approval.saveHash && approval.saveHash !== currentHash) {
     return false;
   }
@@ -162,8 +162,8 @@ export function isCriticalReviewValidForCompletion(
   if (rev.superseded) return false;
 
   const currentPlanVersion = s.planVersion || 1;
-  const currentHash =
-    s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : null);
+  const currentHash = s.lastSavedHash ||
+    (s.saveGeneration ? s.saveGeneration.hash : null);
 
   if (rev.reviewedStateVersion.planVersion !== currentPlanVersion) {
     return false;
@@ -189,7 +189,9 @@ export async function runCriticalReview(
   const slug = options.questSlug || targetState.active || "quest";
   const questId = targetState.questId || slug;
   const sessionId = getSessionId(c);
-  const correlationId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const correlationId = `rev_${Date.now().toString(36)}_${
+    Math.random().toString(36).slice(2, 6)
+  }`;
 
   const reviewer: CriticalReviewer = new PiSubagentReviewer(
     pi,
@@ -197,34 +199,29 @@ export async function runCriticalReview(
     options.subagentRunner,
   );
 
-  const registered =
-    Boolean(options.subagentRunner) ||
+  const registered = Boolean(options.subagentRunner) ||
     Boolean(getCustomSubagentRunner()) ||
     isSubagentToolRegistered(pi, ctx);
   if (!registered) {
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
+      quest: slug,
+      shard: "global",
+      reason: "not_registered",
+      reviewKind: options.kind,
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: not_registered`,
+      {
         quest: slug,
-        shard: "global",
-        reason: "not_registered",
+        questId,
+        sessionId,
+        reviewId: correlationId,
+        parentSessionId: sessionId,
         reviewKind: options.kind,
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: not_registered`,
-        {
-          quest: slug,
-          questId,
-          sessionId,
-          reviewId: correlationId,
-          parentSessionId: sessionId,
-          reviewKind: options.kind,
-          reason: "not_registered",
-        },
-      );
-    } catch {}
+        reason: "not_registered",
+      },
+    );
     return { success: true, available: false, skipped: true };
   }
 
@@ -251,18 +248,23 @@ export async function runCriticalReview(
   }
 
   const currentPlanVersion = targetState.planVersion || 1;
-  const currentHash =
-    targetState.lastSavedHash ||
+  const currentHash = targetState.lastSavedHash ||
     (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
   const currentSaveCount = targetState.saveCount || 0;
 
   // Single-flight per quest:kind:boundaryKey — return existing promise instead of launching second subagent (A2)
-  const singleKey = `${questId}:${options.kind}:${options.boundaryKey || currentPlanVersion || currentHash}`;
+  const singleKey = `${questId}:${options.kind}:${
+    options.boundaryKey || currentPlanVersion || currentHash
+  }`;
   if (!options.force && reviewPromiseByKey.has(singleKey)) {
     const existingPromise = reviewPromiseByKey.get(singleKey)!;
     logCriticalReviewTransition(
       "GLOBAL_REVIEW_CAP_HIT",
-      `global review cap hit (single-flight, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`,
+      `global review cap hit (single-flight, active=${
+        [...getActiveReviews().values()].filter((r) =>
+          r.status === "starting" || r.status === "running"
+        ).length
+      }, cap=${GLOBAL_REVIEW_CAP})`,
       {
         quest: slug,
         questId,
@@ -296,8 +298,8 @@ export async function runCriticalReview(
       triggerReason: options.triggerReason,
       planVersion: currentPlanVersion,
       stateHash: currentHash,
-      boundaryKey:
-        options.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
+      boundaryKey: options.boundaryKey ||
+        targetState.lastPlanReviewBoundaryKey || null,
       saveCount: currentSaveCount,
       requestedAt: Date.now(),
       rebuttal: options.rebuttal,
@@ -307,7 +309,11 @@ export async function runCriticalReview(
     });
     logCriticalReviewTransition(
       "GLOBAL_REVIEW_CAP_HIT",
-      `global review cap hit (active file, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`,
+      `global review cap hit (active file, active=${
+        [...getActiveReviews().values()].filter((r) =>
+          r.status === "starting" || r.status === "running"
+        ).length
+      }, cap=${GLOBAL_REVIEW_CAP})`,
       {
         quest: slug,
         questId,
@@ -374,8 +380,7 @@ export async function runCriticalReview(
               triggerReason: options.triggerReason,
               planVersion: currentPlanVersion,
               stateHash: currentHash,
-              boundaryKey:
-                options.boundaryKey ||
+              boundaryKey: options.boundaryKey ||
                 targetState.lastPlanReviewBoundaryKey ||
                 null,
               saveCount: currentSaveCount,
@@ -387,7 +392,11 @@ export async function runCriticalReview(
             });
             logCriticalReviewTransition(
               "GLOBAL_REVIEW_CAP_HIT",
-              `global review cap hit (filesystem lock, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`,
+              `global review cap hit (filesystem lock, active=${
+                [...getActiveReviews().values()].filter((r) =>
+                  r.status === "starting" || r.status === "running"
+                ).length
+              }, cap=${GLOBAL_REVIEW_CAP})`,
               {
                 quest: slug,
                 questId,
@@ -442,8 +451,7 @@ export async function runCriticalReview(
                 triggerReason: options.triggerReason,
                 planVersion: currentPlanVersion,
                 stateHash: currentHash,
-                boundaryKey:
-                  options.boundaryKey ||
+                boundaryKey: options.boundaryKey ||
                   targetState.lastPlanReviewBoundaryKey ||
                   null,
                 saveCount: currentSaveCount,
@@ -455,7 +463,11 @@ export async function runCriticalReview(
               });
               logCriticalReviewTransition(
                 "GLOBAL_REVIEW_CAP_HIT",
-                `global review cap hit (active file inside lock, active=${[...getActiveReviews().values()].filter((r) => r.status === "starting" || r.status === "running").length}, cap=${GLOBAL_REVIEW_CAP})`,
+                `global review cap hit (active file inside lock, active=${
+                  [...getActiveReviews().values()].filter((r) =>
+                    r.status === "starting" || r.status === "running"
+                  ).length
+                }, cap=${GLOBAL_REVIEW_CAP})`,
                 {
                   quest: slug,
                   questId,
@@ -509,8 +521,7 @@ export async function runCriticalReview(
                 triggerReason: options.triggerReason,
                 planVersion: currentPlanVersion,
                 stateHash: currentHash,
-                boundaryKey:
-                  options.boundaryKey ||
+                boundaryKey: options.boundaryKey ||
                   targetState.lastPlanReviewBoundaryKey ||
                   null,
                 saveCount: currentSaveCount,
@@ -561,7 +572,9 @@ export async function runCriticalReview(
             if (launchGuard.blocked) {
               logCriticalReviewTransition(
                 "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-                `review suppressed duplicate: ${launchGuard.response?.error || "active review exists"}`,
+                `review suppressed duplicate: ${
+                  launchGuard.response?.error || "active review exists"
+                }`,
                 {
                   quest: slug,
                   questId,
@@ -689,7 +702,9 @@ export async function runCriticalReview(
             } catch (e: any) {
               logCriticalReviewTransition(
                 "CRITICAL_REVIEW_ERROR",
-                `critical review registration error: ${e?.message || String(e)}`,
+                `critical review registration error: ${
+                  e?.message || String(e)
+                }`,
                 {
                   quest: slug,
                   questId,
@@ -770,10 +785,9 @@ export async function runCriticalReview(
             }
           }
         },
-        () =>
-          [...getActiveReviews().values()].filter(
-            (r) => r.status === "starting" || r.status === "running",
-          ).length,
+        () => [...getActiveReviews().values()].filter(
+          (r) => r.status === "starting" || r.status === "running",
+        ).length,
       ),
     () =>
       [...getActiveReviews().values()].filter(
@@ -882,32 +896,28 @@ export async function checkAndTriggerPlanReview(
       );
       return null;
     }
-    const registered =
-      isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
+    const registered = isSubagentToolRegistered(pi, ctx) ||
+      Boolean(getCustomSubagentRunner());
     if (!registered) {
-      try {
-        logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
-          quest: s.activeDraft || "",
-          shard: "draft",
-          reason: "not_registered",
+      tryLog("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
+        quest: s.activeDraft || "",
+        shard: "draft",
+        reason: "not_registered",
+        reviewKind: "plan_review",
+      });
+      tryLog(
+        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+        `review suppressed duplicate: not_registered`,
+        {
+          quest: s.activeDraft || "quest",
+          questId: "",
+          sessionId: getSessionId(c),
+          reviewId: "not_registered",
+          parentSessionId: getSessionId(c),
           reviewKind: "plan_review",
-        });
-      } catch {}
-      try {
-        logCriticalReviewTransition(
-          "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-          `review suppressed duplicate: not_registered`,
-          {
-            quest: s.activeDraft || "quest",
-            questId: "",
-            sessionId: getSessionId(c),
-            reviewId: "not_registered",
-            parentSessionId: getSessionId(c),
-            reviewKind: "plan_review",
-            reason: "not_registered",
-          },
-        );
-      } catch {}
+          reason: "not_registered",
+        },
+      );
       return null;
     }
     const draftSlug = s.activeDraft;
@@ -950,7 +960,9 @@ export async function checkAndTriggerPlanReview(
           const { sendInternalAgentMessage } = await import("../messaging.ts");
           sendInternalAgentMessage(
             pi,
-            `✅ **Draft '${draftSlug}' reviewer APPROVED** (compliance check vs ${s.draftPrompts?.length || 0} requirements). Present the finalized plan to the user now and await explicit "go" / confirmation before promoting to current quest.`,
+            `✅ **Draft '${draftSlug}' reviewer APPROVED** (compliance check vs ${
+              s.draftPrompts?.length || 0
+            } requirements). Present the finalized plan to the user now and await explicit "go" / confirmation before promoting to current quest.`,
             "steer",
           );
         } catch {}
@@ -959,7 +971,11 @@ export async function checkAndTriggerPlanReview(
           const { sendInternalAgentMessage } = await import("../messaging.ts");
           sendInternalAgentMessage(
             pi,
-            `⚠️ **Draft '${draftSlug}' reviewer ${result.review.verdict}**: ${result.review.requiredActions?.join("; ") || result.review.findings?.map((f: any) => f.issue).join("; ") || "needs revision"} — update .pi/quest/future/${draftSlug}.md and re-submit for review before presenting to user.`,
+            `⚠️ **Draft '${draftSlug}' reviewer ${result.review.verdict}**: ${
+              result.review.requiredActions?.join("; ") ||
+              result.review.findings?.map((f: any) => f.issue).join("; ") ||
+              "needs revision"
+            } — update .pi/quest/future/${draftSlug}.md and re-submit for review before presenting to user.`,
             "steer",
           );
         } catch {}
@@ -968,92 +984,81 @@ export async function checkAndTriggerPlanReview(
     return result;
   }
   if (!s.active || !isRootQuest(s)) {
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not root)`, {
-        quest: (s.active || "") as string,
-        shard: "root",
-        reason: !s.active ? "no_active" : "not_root",
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (not root)`, {
+      quest: (s.active || "") as string,
+      shard: "root",
+      reason: !s.active ? "no_active" : "not_root",
+      reviewKind: "plan_review",
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: not_root`,
+      {
+        quest: s.active || "quest",
+        questId: s.questId || s.active || "quest",
+        sessionId: getSessionId(c),
+        reviewId: "no_active",
+        parentSessionId: getSessionId(c),
         reviewKind: "plan_review",
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: not_root`,
-        {
-          quest: s.active || "quest",
-          questId: s.questId || s.active || "quest",
-          sessionId: getSessionId(c),
-          reviewId: "no_active",
-          parentSessionId: getSessionId(c),
-          reviewKind: "plan_review",
-          reason: !s.active ? "no_active" : "not_root",
-        },
-      );
-    } catch {}
+        reason: !s.active ? "no_active" : "not_root",
+      },
+    );
     return null;
   }
   if (s.reassessmentRequired) {
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (reassessmentRequired)`, {
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (reassessmentRequired)`, {
+      quest: s.active!,
+      shard: "root",
+      reason: "reassessmentRequired",
+      reviewKind: "plan_review",
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: reassessmentRequired`,
+      {
         quest: s.active!,
-        shard: "root",
-        reason: "reassessmentRequired",
+        questId: s.questId || s.active!,
+        sessionId: getSessionId(c),
+        reviewId: "reassessment",
+        parentSessionId: getSessionId(c),
         reviewKind: "plan_review",
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: reassessmentRequired`,
-        {
-          quest: s.active!,
-          questId: s.questId || s.active!,
-          sessionId: getSessionId(c),
-          reviewId: "reassessment",
-          parentSessionId: getSessionId(c),
-          reviewKind: "plan_review",
-          reason: "reassessmentRequired",
-        },
-      );
-    } catch {}
+        reason: "reassessmentRequired",
+      },
+    );
     return null;
   }
 
-  const registered =
-    isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
+  const registered = isSubagentToolRegistered(pi, ctx) ||
+    Boolean(getCustomSubagentRunner());
   if (!registered) {
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (not registered)`, {
+      quest: s.active!,
+      shard: "root",
+      reason: "not_registered",
+      reviewKind: "plan_review",
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: not_registered`,
+      {
         quest: s.active!,
-        shard: "root",
-        reason: "not_registered",
+        questId: s.questId || s.active!,
+        sessionId: getSessionId(c),
+        reviewId: "not_registered",
+        parentSessionId: getSessionId(c),
         reviewKind: "plan_review",
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: not_registered`,
-        {
-          quest: s.active!,
-          questId: s.questId || s.active!,
-          sessionId: getSessionId(c),
-          reviewId: "not_registered",
-          parentSessionId: getSessionId(c),
-          reviewKind: "plan_review",
-          reason: "not_registered",
-        },
-      );
-    } catch {}
+        reason: "not_registered",
+      },
+    );
     return null;
   }
 
   const currentPlanVersion = s.planVersion || 1;
-  const currentHash =
-    s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : "clean");
+  const currentHash = s.lastSavedHash ||
+    (s.saveGeneration ? s.saveGeneration.hash : "clean");
   const currentSaveCount = s.saveCount || 0;
-  const key = `plan_review:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
+  const key =
+    `plan_review:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
 
   if (isPlanReviewValidForState(s) && s.lastPlanReviewRequestKey === key) {
     logEvent(
@@ -1126,29 +1131,25 @@ export async function checkAndTriggerDirectionReview(
   const c = getActiveContext(ctx);
   const s = getState(c);
   if (!s.active || !isRootQuest(s)) {
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (not root direction)`, {
-        quest: (s.active || "") as string,
-        shard: "direction",
-        reason: !s.active ? "no_active" : "not_root",
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (not root direction)`, {
+      quest: (s.active || "") as string,
+      shard: "direction",
+      reason: !s.active ? "no_active" : "not_root",
+      reviewKind: "direction",
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: not_root`,
+      {
+        quest: s.active || "quest",
+        questId: s.questId || s.active || "quest",
+        sessionId: getSessionId(c),
+        reviewId: "no_active",
+        parentSessionId: getSessionId(c),
         reviewKind: "direction",
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: not_root`,
-        {
-          quest: s.active || "quest",
-          questId: s.questId || s.active || "quest",
-          sessionId: getSessionId(c),
-          reviewId: "no_active",
-          parentSessionId: getSessionId(c),
-          reviewKind: "direction",
-          reason: !s.active ? "no_active" : "not_root",
-        },
-      );
-    } catch {}
+        reason: !s.active ? "no_active" : "not_root",
+      },
+    );
     return null;
   }
   if (
@@ -1159,64 +1160,56 @@ export async function checkAndTriggerDirectionReview(
     const reason = s.reassessmentRequired
       ? "reassessmentRequired"
       : s.researchRequired
-        ? "researchRequired"
-        : "awaitingUserConfirmation";
-    try {
-      logEvent("REVIEW_DEDUP_HIT", `review dedup hit (${reason})`, {
+      ? "researchRequired"
+      : "awaitingUserConfirmation";
+    tryLog("REVIEW_DEDUP_HIT", `review dedup hit (${reason})`, {
+      quest: s.active!,
+      shard: "direction",
+      reason,
+      reviewKind: "direction",
+    });
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: ${reason}`,
+      {
         quest: s.active!,
-        shard: "direction",
-        reason,
+        questId: s.questId || s.active!,
+        sessionId: getSessionId(c),
+        reviewId: reason,
+        parentSessionId: getSessionId(c),
         reviewKind: "direction",
-      });
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: ${reason}`,
-        {
-          quest: s.active!,
-          questId: s.questId || s.active!,
-          sessionId: getSessionId(c),
-          reviewId: reason,
-          parentSessionId: getSessionId(c),
-          reviewKind: "direction",
-          reason,
-        },
-      );
-    } catch {}
+        reason,
+      },
+    );
     return null;
   }
 
-  const registered =
-    isSubagentToolRegistered(pi, ctx) || Boolean(getCustomSubagentRunner());
+  const registered = isSubagentToolRegistered(pi, ctx) ||
+    Boolean(getCustomSubagentRunner());
   if (!registered) {
-    try {
-      logEvent(
-        "REVIEW_DEDUP_HIT",
-        `review dedup hit (not registered direction)`,
-        {
-          quest: s.active!,
-          shard: "direction",
-          reason: "not_registered",
-          reviewKind: "direction",
-        },
-      );
-    } catch {}
-    try {
-      logCriticalReviewTransition(
-        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-        `review suppressed duplicate: not_registered`,
-        {
-          quest: s.active!,
-          questId: s.questId || s.active!,
-          sessionId: getSessionId(c),
-          reviewId: "not_registered",
-          parentSessionId: getSessionId(c),
-          reviewKind: "direction",
-          reason: "not_registered",
-        },
-      );
-    } catch {}
+    tryLog(
+      "REVIEW_DEDUP_HIT",
+      `review dedup hit (not registered direction)`,
+      {
+        quest: s.active!,
+        shard: "direction",
+        reason: "not_registered",
+        reviewKind: "direction",
+      },
+    );
+    tryLog(
+      "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+      `review suppressed duplicate: not_registered`,
+      {
+        quest: s.active!,
+        questId: s.questId || s.active!,
+        sessionId: getSessionId(c),
+        reviewId: "not_registered",
+        parentSessionId: getSessionId(c),
+        reviewKind: "direction",
+        reason: "not_registered",
+      },
+    );
     return null;
   }
 
@@ -1265,42 +1258,37 @@ export async function checkAndTriggerDirectionReview(
       return null;
     }
     if (getPendingReview(s.active!, "direction")) {
-      try {
-        logEvent("REVIEW_DEDUP_HIT", `review dedup hit (pending direction)`, {
+      tryLog("REVIEW_DEDUP_HIT", `review dedup hit (pending direction)`, {
+        quest: s.active!,
+        shard: "direction",
+        reason: "pending",
+        reviewKind: "direction",
+      });
+      tryLog(
+        "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
+        `review suppressed duplicate: pending direction`,
+        {
           quest: s.active!,
-          shard: "direction",
-          reason: "pending",
+          questId: s.questId || s.active!,
+          sessionId: getSessionId(c),
+          reviewId: "pending",
+          parentSessionId: getSessionId(c),
           reviewKind: "direction",
-        });
-      } catch {}
-      try {
-        logCriticalReviewTransition(
-          "CRITICAL_REVIEW_SUPPRESSED_DUPLICATE",
-          `review suppressed duplicate: pending direction`,
-          {
-            quest: s.active!,
-            questId: s.questId || s.active!,
-            sessionId: getSessionId(c),
-            reviewId: "pending",
-            parentSessionId: getSessionId(c),
-            reviewKind: "direction",
-            reason: "pending",
-          },
-        );
-      } catch {}
+          reason: "pending",
+        },
+      );
       s.substantiveTurnsSinceCheckpoint = 0;
       return null;
     }
   }
 
   const currentPlanVersion = s.planVersion || 1;
-  const currentHash =
-    s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : "clean");
+  const currentHash = s.lastSavedHash ||
+    (s.saveGeneration ? s.saveGeneration.hash : "clean");
   const currentSaveCount = s.saveCount || 0;
-  const key =
-    triggerReason === "no_progress"
-      ? `dir:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}:no_progress`
-      : `dir:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
+  const key = triggerReason === "no_progress"
+    ? `dir:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}:no_progress`
+    : `dir:${s.active}:v${currentPlanVersion}:h${currentHash}:s${currentSaveCount}`;
 
   if (
     s.lastCriticalReview?.kind === "direction" &&

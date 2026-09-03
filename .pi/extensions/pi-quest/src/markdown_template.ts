@@ -9,15 +9,25 @@ import { buildTemplateHeader } from "./markdown/template/header.ts";
 import { buildTemplateEpistemicSections } from "./markdown/template/epistemic.ts";
 import { buildTemplateMetadataSections } from "./markdown/template/metadata.ts";
 import { buildTemplatePlanSections } from "./markdown/template/plan.ts";
-import { buildTemplateExecutionSnapshot, buildTemplateFooterSections } from "./markdown/template/execution.ts";
+import {
+  buildTemplateExecutionSnapshot,
+  buildTemplateFooterSections,
+} from "./markdown/template/execution.ts";
 
-export function QUEST_TEMPLATE(name: string, goal = "", parent = "", originalRequest = "", refinements: string[] = [], questId = ""): string {
-	return [
-		...buildTemplateHeader(name, goal, parent, originalRequest, questId),
-		...buildTemplateEpistemicSections(),
-		...buildTemplateMetadataSections(),
-		...buildTemplatePlanSections(),
-		...buildTemplateExecutionSnapshot(goal),
-		...buildTemplateFooterSections(refinements),
-	].join("\n");
+export function QUEST_TEMPLATE(
+  name: string,
+  goal = "",
+  parent = "",
+  originalRequest = "",
+  refinements: string[] = [],
+  questId = "",
+): string {
+  return [
+    ...buildTemplateHeader(name, goal, parent, originalRequest, questId),
+    ...buildTemplateEpistemicSections(),
+    ...buildTemplateMetadataSections(),
+    ...buildTemplatePlanSections(),
+    ...buildTemplateExecutionSnapshot(goal),
+    ...buildTemplateFooterSections(refinements),
+  ].join("\n");
 }

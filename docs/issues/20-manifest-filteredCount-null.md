@@ -1,7 +1,7 @@
 ---
 id: 20
 title: "Manifest filteredCount/opencodeSessionId/startMs/elapsedMaxMs null until log parsed"
-state: ready
+state: done
 severity: medium
 requires: [25]
 validates: "manifest.txt 9 fields even on cold start"

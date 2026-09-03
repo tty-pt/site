@@ -54,8 +54,8 @@ export function parseReassessmentState(
   let reassessmentReason: string | null = null;
   let reassessmentEvidence: string | null = null;
 
-  const statusSec =
-    sections.get("reassessment status") || sections.get("reassessment state");
+  const statusSec = sections.get("reassessment status") ||
+    sections.get("reassessment state");
   if (statusSec && !isPlaceholderOrEmpty(statusSec.body)) {
     if (statusSec.body.toUpperCase().includes("REQUIRED")) {
       reassessmentRequired = true;
@@ -67,8 +67,9 @@ export function parseReassessmentState(
   }
 
   const evidenceSec = sections.get("reassessment evidence");
-  if (evidenceSec && !isPlaceholderOrEmpty(evidenceSec.body))
+  if (evidenceSec && !isPlaceholderOrEmpty(evidenceSec.body)) {
     reassessmentEvidence = evidenceSec.body.trim();
+  }
 
   return { reassessmentRequired, reassessmentReason, reassessmentEvidence };
 }
@@ -93,22 +94,22 @@ export function createDefaultEpistemicState(exists = false): LoadedQuestState {
 }
 
 export function parseOriginalRequest(sections: Map<string, any>): string {
-  const reqSec =
-    sections.get("original request") || sections.get("original user request");
+  const reqSec = sections.get("original request") ||
+    sections.get("original user request");
   if (!reqSec) return "";
   const rawText = reqSec.body.replace(/^>\s*/gm, "").trim();
   if (
     rawText &&
     !rawText.startsWith("Paste the verbatim user prompt") &&
     !rawText.startsWith("Goal:")
-  )
+  ) {
     return rawText;
+  }
   return "";
 }
 
 export function parseRefinements(sections: Map<string, any>): string[] {
-  const refSec =
-    sections.get("quest refinements & user feedback loops") ||
+  const refSec = sections.get("quest refinements & user feedback loops") ||
     sections.get("refinements");
   if (!refSec) return [];
   return refSec.body
@@ -117,7 +118,7 @@ export function parseRefinements(sections: Map<string, any>): string[] {
       l
         .replace(/^[-*]\s*/, "")
         .replace(/^\d+\.\s*/, "")
-        .trim(),
+        .trim()
     )
     .filter((l: string) => l && l !== "-" && !l.startsWith(">"));
 }
@@ -125,8 +126,7 @@ export function parseRefinements(sections: Map<string, any>): string[] {
 export function parsePlanRevisionsText(
   sections: Map<string, any>,
 ): string | null {
-  const revSec =
-    sections.get("plan revisions") ||
+  const revSec = sections.get("plan revisions") ||
     sections.get("plan revision history") ||
     sections.get("revisions");
   if (revSec && !isPlaceholderOrEmpty(revSec.body)) return revSec.body.trim();
@@ -136,8 +136,8 @@ export function parsePlanRevisionsText(
 export function parseAwaitingUserConfirmation(
   sections: Map<string, any>,
 ): boolean {
-  const currentStatusSec =
-    sections.get("current status") || sections.get("status");
+  const currentStatusSec = sections.get("current status") ||
+    sections.get("status");
   if (currentStatusSec && !isPlaceholderOrEmpty(currentStatusSec.body)) {
     const bodyLower = currentStatusSec.body.toLowerCase();
     if (
@@ -146,14 +146,16 @@ export function parseAwaitingUserConfirmation(
       bodyLower.includes("confirmation pending") ||
       bodyLower.includes("research complete") ||
       bodyLower.includes("provisional")
-    )
+    ) {
       return true;
+    }
     if (
       bodyLower.includes("plan confirmed") ||
       bodyLower.includes("in progress") ||
       bodyLower.includes("done")
-    )
+    ) {
       return false;
+    }
   }
   return false;
 }
@@ -261,26 +263,24 @@ export async function loadExistingQuestEpistemicState(
     );
     const planConfidence = meta?.planConfidence
       ? parseSectionConfidence({
-          heading: "",
-          normalized: "",
-          level: 0,
-          body: String(meta.planConfidence),
-          raw: "",
-        })
+        heading: "",
+        normalized: "",
+        level: 0,
+        body: String(meta.planConfidence),
+        raw: "",
+      })
       : parseSectionConfidence(
-          sections.get("plan confidence") || sections.get("confidence"),
-        );
-    const planVersion =
-      meta?.planVersion !== undefined
-        ? Math.max(mdPlanVersion, Math.max(1, Number(meta.planVersion) || 1))
-        : mdPlanVersion;
-    const researchRound =
-      meta?.researchRound !== undefined
-        ? Math.max(
-            mdResearchRound,
-            Math.max(1, Number(meta.researchRound) || 1),
-          )
-        : mdResearchRound;
+        sections.get("plan confidence") || sections.get("confidence"),
+      );
+    const planVersion = meta?.planVersion !== undefined
+      ? Math.max(mdPlanVersion, Math.max(1, Number(meta.planVersion) || 1))
+      : mdPlanVersion;
+    const researchRound = meta?.researchRound !== undefined
+      ? Math.max(
+        mdResearchRound,
+        Math.max(1, Number(meta.researchRound) || 1),
+      )
+      : mdResearchRound;
     const lastResearchAt =
       meta?.lastResearchAt !== undefined && meta.lastResearchAt
         ? Math.max(mdLastResearchAt || 0, Number(meta.lastResearchAt) || 0) ||
@@ -289,23 +289,22 @@ export async function loadExistingQuestEpistemicState(
     const lastPlanRevisionAt =
       meta?.lastPlanRevisionAt !== undefined && meta.lastPlanRevisionAt
         ? Math.max(
-            mdLastPlanRevisionAt || 0,
-            Number(meta.lastPlanRevisionAt) || 0,
-          ) || mdLastPlanRevisionAt
+          mdLastPlanRevisionAt || 0,
+          Number(meta.lastPlanRevisionAt) || 0,
+        ) || mdLastPlanRevisionAt
         : mdLastPlanRevisionAt;
-    const reassessmentVersion =
-      meta?.reassessmentVersion !== undefined
-        ? Math.max(
-            mdReassessmentVersion,
-            Math.max(0, Number(meta.reassessmentVersion) || 0),
-          )
-        : mdReassessmentVersion;
+    const reassessmentVersion = meta?.reassessmentVersion !== undefined
+      ? Math.max(
+        mdReassessmentVersion,
+        Math.max(0, Number(meta.reassessmentVersion) || 0),
+      )
+      : mdReassessmentVersion;
     const resolvedReassessmentVersion =
       meta?.resolvedReassessmentVersion !== undefined
         ? Math.max(
-            mdResolvedReassessmentVersion,
-            Math.max(0, Number(meta.resolvedReassessmentVersion) || 0),
-          )
+          mdResolvedReassessmentVersion,
+          Math.max(0, Number(meta.resolvedReassessmentVersion) || 0),
+        )
         : mdResolvedReassessmentVersion;
     const { reassessmentRequired, reassessmentReason, reassessmentEvidence } =
       parseReassessmentState(
@@ -370,37 +369,42 @@ export function extractChildResultSummary(
     understandingSec &&
     understandingSec.body &&
     !understandingSec.body.startsWith(">")
-  )
+  ) {
     lines.push(
       `- **Established Understanding**:\n${understandingSec.body.trim()}`,
     );
-  const findingsSec =
-    sections.get("research findings") ||
+  }
+  const findingsSec = sections.get("research findings") ||
     sections.get("in-depth analysis & findings");
-  if (findingsSec && findingsSec.body)
+  if (findingsSec && findingsSec.body) {
     lines.push(`- **Findings & Discoveries**:\n${findingsSec.body.trim()}`);
-  const assumptionsSec =
-    sections.get("key assumptions") || sections.get("assumptions");
-  if (assumptionsSec && assumptionsSec.body)
+  }
+  const assumptionsSec = sections.get("key assumptions") ||
+    sections.get("assumptions");
+  if (assumptionsSec && assumptionsSec.body) {
     lines.push(`- **Assumptions Evaluated**:\n${assumptionsSec.body.trim()}`);
+  }
   const rejectedSec = sections.get("rejected approaches");
-  if (rejectedSec && rejectedSec.body && !rejectedSec.body.startsWith(">"))
+  if (rejectedSec && rejectedSec.body && !rejectedSec.body.startsWith(">")) {
     lines.push(`- **Rejected Approaches**:\n${rejectedSec.body.trim()}`);
-  const reassessSec =
-    sections.get("latest reassessment") ||
+  }
+  const reassessSec = sections.get("latest reassessment") ||
     sections.get("reassessment conclusion");
-  if (reassessSec && reassessSec.body && !reassessSec.body.startsWith(">"))
+  if (reassessSec && reassessSec.body && !reassessSec.body.startsWith(">")) {
     lines.push(
       `- **Latest Reassessment Conclusion**:\n${reassessSec.body.trim()}`,
     );
-  const decisionsSec =
-    sections.get("decisions made") || sections.get("decisions");
-  if (decisionsSec && decisionsSec.body)
+  }
+  const decisionsSec = sections.get("decisions made") ||
+    sections.get("decisions");
+  if (decisionsSec && decisionsSec.body) {
     lines.push(`- **Decisions Made**:\n${decisionsSec.body.trim()}`);
-  const filesSec =
-    sections.get("files touched") || sections.get("files modified");
-  if (filesSec && filesSec.body)
+  }
+  const filesSec = sections.get("files touched") ||
+    sections.get("files modified");
+  if (filesSec && filesSec.body) {
     lines.push(`- **Files Touched**:\n${filesSec.body.trim()}`);
+  }
   return lines.length > 0
     ? lines.join("\n\n")
     : `- Completed sub-quest ${name}.`;

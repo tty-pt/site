@@ -132,6 +132,7 @@ export function createDefaultState(): StoredState {
     lastDirectionReviewKey: null,
     lastDirectionReviewAt: null,
     awaitingReview: null,
+    reviewDialogue: [],
     investigationEpoch: 1,
     logCursor: 0,
     currentReceipt: {
@@ -188,25 +189,25 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
     lastResumeCompactCount: s.lastResumeCompactCount,
     activeTransaction: s.activeTransaction
       ? {
-          ...s.activeTransaction,
-          stack: [...(s.activeTransaction.stack || [])],
-        }
+        ...s.activeTransaction,
+        stack: [...(s.activeTransaction.stack || [])],
+      }
       : null,
     activeCompactionId: s.activeCompactionId,
     lastDeliveredCompactionId: s.lastDeliveredCompactionId,
     pendingResume: s.pendingResume
       ? {
-          compactionId: s.pendingResume.compactionId,
-          activeQuest: s.pendingResume.activeQuest,
-          reason: s.pendingResume.reason,
-          checkpointSaveCount: s.pendingResume.checkpointSaveCount,
-          checkpointHash: s.pendingResume.checkpointHash,
-          checkpointQuestPath: s.pendingResume.checkpointQuestPath,
-          attempts: s.pendingResume.attempts,
-          createdAt: s.pendingResume.createdAt,
-          lastAttemptAt: s.pendingResume.lastAttemptAt,
-          deliveredAt: s.pendingResume.deliveredAt,
-        }
+        compactionId: s.pendingResume.compactionId,
+        activeQuest: s.pendingResume.activeQuest,
+        reason: s.pendingResume.reason,
+        checkpointSaveCount: s.pendingResume.checkpointSaveCount,
+        checkpointHash: s.pendingResume.checkpointHash,
+        checkpointQuestPath: s.pendingResume.checkpointQuestPath,
+        attempts: s.pendingResume.attempts,
+        createdAt: s.pendingResume.createdAt,
+        lastAttemptAt: s.pendingResume.lastAttemptAt,
+        deliveredAt: s.pendingResume.deliveredAt,
+      }
       : null,
     pendingNotifications: Array.isArray(s.pendingNotifications)
       ? s.pendingNotifications.map((n) => ({ ...n }))
@@ -241,10 +242,9 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
     consecutiveFailures: s.consecutiveFailures || 0,
     substantiveTurnsSinceCheckpoint: s.substantiveTurnsSinceCheckpoint || 0,
     retryTurnsUsed: s.retryTurnsUsed || 0,
-    retryLastStalledTurn:
-      typeof s.retryLastStalledTurn === "number"
-        ? s.retryLastStalledTurn
-        : null,
+    retryLastStalledTurn: typeof s.retryLastStalledTurn === "number"
+      ? s.retryLastStalledTurn
+      : null,
     lastCriticalReview: s.lastCriticalReview
       ? { ...s.lastCriticalReview }
       : null,
@@ -276,35 +276,38 @@ export function snapshotState(ctx?: ExtensionContext): StoredState {
     lastDirectionReviewKey: s.lastDirectionReviewKey || null,
     lastDirectionReviewAt: s.lastDirectionReviewAt || null,
     awaitingReview: s.awaitingReview ? { ...s.awaitingReview } : null,
+    reviewDialogue: Array.isArray(s.reviewDialogue)
+      ? s.reviewDialogue.map((d) => ({ ...d }))
+      : [],
     investigationEpoch: s.investigationEpoch || 1,
     logCursor: s.logCursor || 0,
     currentReceipt: s.currentReceipt
       ? {
-          epoch: s.currentReceipt.epoch,
-          epochType: s.currentReceipt.epochType,
-          startedAt: s.currentReceipt.startedAt,
-          toolCalls: s.currentReceipt.toolCalls,
-          readTargets: [...(s.currentReceipt.readTargets || [])],
-          searchTargets: [...(s.currentReceipt.searchTargets || [])],
-          commands: [...(s.currentReceipt.commands || [])],
-          evidenceCount: s.currentReceipt.evidenceCount,
-          lastEvidenceAt: s.currentReceipt.lastEvidenceAt,
-          completedAt: s.currentReceipt.completedAt,
-        }
+        epoch: s.currentReceipt.epoch,
+        epochType: s.currentReceipt.epochType,
+        startedAt: s.currentReceipt.startedAt,
+        toolCalls: s.currentReceipt.toolCalls,
+        readTargets: [...(s.currentReceipt.readTargets || [])],
+        searchTargets: [...(s.currentReceipt.searchTargets || [])],
+        commands: [...(s.currentReceipt.commands || [])],
+        evidenceCount: s.currentReceipt.evidenceCount,
+        lastEvidenceAt: s.currentReceipt.lastEvidenceAt,
+        completedAt: s.currentReceipt.completedAt,
+      }
       : null,
     lastCompletedReceipt: s.lastCompletedReceipt
       ? {
-          epoch: s.lastCompletedReceipt.epoch,
-          epochType: s.lastCompletedReceipt.epochType,
-          startedAt: s.lastCompletedReceipt.startedAt,
-          toolCalls: s.lastCompletedReceipt.toolCalls,
-          readTargets: [...(s.lastCompletedReceipt.readTargets || [])],
-          searchTargets: [...(s.lastCompletedReceipt.searchTargets || [])],
-          commands: [...(s.lastCompletedReceipt.commands || [])],
-          evidenceCount: s.lastCompletedReceipt.evidenceCount,
-          lastEvidenceAt: s.lastCompletedReceipt.lastEvidenceAt,
-          completedAt: s.lastCompletedReceipt.completedAt,
-        }
+        epoch: s.lastCompletedReceipt.epoch,
+        epochType: s.lastCompletedReceipt.epochType,
+        startedAt: s.lastCompletedReceipt.startedAt,
+        toolCalls: s.lastCompletedReceipt.toolCalls,
+        readTargets: [...(s.lastCompletedReceipt.readTargets || [])],
+        searchTargets: [...(s.lastCompletedReceipt.searchTargets || [])],
+        commands: [...(s.lastCompletedReceipt.commands || [])],
+        evidenceCount: s.lastCompletedReceipt.evidenceCount,
+        lastEvidenceAt: s.lastCompletedReceipt.lastEvidenceAt,
+        completedAt: s.lastCompletedReceipt.completedAt,
+      }
       : null,
   };
 }
@@ -313,8 +316,7 @@ export function getSessionId(ctx?: ExtensionContext): string {
   const c = getActiveContext(ctx);
   if (!c) return "default";
   const sm = c.sessionManager;
-  const id =
-    sm?.id ||
+  const id = sm?.id ||
     sm?.sessionId ||
     (typeof sm?.getSessionId === "function" ? sm.getSessionId() : null) ||
     (c as { sessionId?: unknown }).sessionId;

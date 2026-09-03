@@ -1,93 +1,123 @@
 import { readFile } from "node:fs/promises";
 import { parseMarkdownSections } from "../../markdown.ts";
-import { fileExists, questPath, resolveQuestRecordBySlug } from "../../paths.ts";
-import { parseOriginalRequest, parseRefinements } from "../../reconstruction.ts";
+import {
+  fileExists,
+  questPath,
+  resolveQuestRecordBySlug,
+} from "../../paths.ts";
+import {
+  parseOriginalRequest,
+  parseRefinements,
+} from "../../reconstruction.ts";
 import { state } from "../../state.ts";
 import {
-	CriticalReviewKind,
-	QuestReviewContext,
-	StoredState,
+  CriticalReviewKind,
+  QuestReviewContext,
+  StoredState,
 } from "../../types.ts";
 
-export async function extractQuestReviewContext(slugOrQid: string, s?: StoredState): Promise<QuestReviewContext> {
-	const activeState = s || state;
-	// Draft-aware: if activeDraft matches slug, prefer future draft file
-	const { FUTURE_DIR } = await import("../../constants.ts");
-	const futurePath = `${FUTURE_DIR}/${slugOrQid}.md`;
-	let path = questPath(slugOrQid);
-	if (activeState.activeDraft === slugOrQid && (await fileExists(futurePath))) {
-		path = futurePath;
-	} else if (!(await fileExists(path))) {
-		if (await fileExists(futurePath)) path = futurePath;
-		else {
-			const rec = await resolveQuestRecordBySlug(slugOrQid);
-			if (rec) path = rec.path;
-		}
-	}
+export async function extractQuestReviewContext(
+  slugOrQid: string,
+  s?: StoredState,
+): Promise<QuestReviewContext> {
+  const activeState = s || state;
+  // Draft-aware: if activeDraft matches slug, prefer future draft file
+  const { FUTURE_DIR } = await import("../../constants.ts");
+  const futurePath = `${FUTURE_DIR}/${slugOrQid}.md`;
+  let path = questPath(slugOrQid);
+  if (activeState.activeDraft === slugOrQid && (await fileExists(futurePath))) {
+    path = futurePath;
+  } else if (!(await fileExists(path))) {
+    if (await fileExists(futurePath)) path = futurePath;
+    else {
+      const rec = await resolveQuestRecordBySlug(slugOrQid);
+      if (rec) path = rec.path;
+    }
+  }
 
-	let content = "";
-	if (await fileExists(path)) {
-		try {
-			content = await readFile(path, "utf8");
-		} catch {}
-	}
+  let content = "";
+  if (await fileExists(path)) {
+    try {
+      content = await readFile(path, "utf8");
+    } catch {}
+  }
 
-	const sections = parseMarkdownSections(content);
-	const getSec = (key: string): string => {
-		const sec = sections.get(key.toLowerCase());
-		if (!sec || !sec.body || sec.body.trim().startsWith(">")) return "";
-		return sec.body.trim();
-	};
+  const sections = parseMarkdownSections(content);
+  const getSec = (key: string): string => {
+    const sec = sections.get(key.toLowerCase());
+    if (!sec || !sec.body || sec.body.trim().startsWith(">")) return "";
+    return sec.body.trim();
+  };
 
-	let originalRequest = parseOriginalRequest(sections);
-	if (!originalRequest && activeState.prompts && activeState.prompts.length > 0) {
-		originalRequest = activeState.prompts[0];
-	}
+  let originalRequest = parseOriginalRequest(sections);
+  if (
+    !originalRequest && activeState.prompts && activeState.prompts.length > 0
+  ) {
+    originalRequest = activeState.prompts[0];
+  }
 
-	let refinements = parseRefinements(sections);
-	if (refinements.length === 0 && Array.isArray(activeState.refinements) && activeState.refinements.length > 0) {
-		refinements = [...activeState.refinements];
-	}
+  let refinements = parseRefinements(sections);
+  if (
+    refinements.length === 0 && Array.isArray(activeState.refinements) &&
+    activeState.refinements.length > 0
+  ) {
+    refinements = [...activeState.refinements];
+  }
 
-	return {
-		originalRequest: originalRequest || "(No verbatim prompt recorded)",
-		refinements,
-		currentUnderstanding: getSec("current understanding") || getSec("understanding"),
-		keyAssumptions: getSec("key assumptions") || getSec("assumptions"),
-		openQuestions: getSec("open questions & uncertainties") || getSec("open questions") || getSec("uncertainties"),
-		plan: getSec("plan") || getSec("detailed multi-stage execution plan"),
-		planConfidence: getSec("plan confidence") || activeState.planConfidence || "medium",
-		planRevisions: getSec("plan revisions") || getSec("plan revision history"),
-		findings: getSec("research findings") || getSec("important findings") || getSec("in-depth analysis & findings"),
-		filesModified: getSec("files touched") || getSec("files modified"),
-		testStatus: getSec("test / build status") || getSec("test status") || getSec("build & test status"),
-		executionSnapshot: getSec("execution snapshot") || getSec("execution state"),
-		exactNextAction: getSec("exact next action") || getSec("next recommended step") || getSec("next step"),
-		remainingWork: getSec("remaining work") || getSec("remaining tasks"),
-		status: getSec("current status") || getSec("status"),
-	};
+  return {
+    originalRequest: originalRequest || "(No verbatim prompt recorded)",
+    refinements,
+    currentUnderstanding: getSec("current understanding") ||
+      getSec("understanding"),
+    keyAssumptions: getSec("key assumptions") || getSec("assumptions"),
+    openQuestions: getSec("open questions & uncertainties") ||
+      getSec("open questions") || getSec("uncertainties"),
+    plan: getSec("plan") || getSec("detailed multi-stage execution plan"),
+    planConfidence: getSec("plan confidence") || activeState.planConfidence ||
+      "medium",
+    planRevisions: getSec("plan revisions") || getSec("plan revision history"),
+    findings: getSec("research findings") || getSec("important findings") ||
+      getSec("in-depth analysis & findings"),
+    filesModified: getSec("files touched") || getSec("files modified"),
+    testStatus: getSec("test / build status") || getSec("test status") ||
+      getSec("build & test status"),
+    executionSnapshot: getSec("execution snapshot") ||
+      getSec("execution state"),
+    exactNextAction: getSec("exact next action") ||
+      getSec("next recommended step") || getSec("next step"),
+    remainingWork: getSec("remaining work") || getSec("remaining tasks"),
+    status: getSec("current status") || getSec("status"),
+  };
 }
 
 export function buildCriticalReviewPrompt(
-	kind: CriticalReviewKind,
-	questSlug: string,
-	context: QuestReviewContext,
-	rebuttal?: string,
-	triggerReason?: string,
-	boundaryKey?: string | null,
+  kind: CriticalReviewKind,
+  questSlug: string,
+  context: QuestReviewContext,
+  rebuttal?: string,
+  triggerReason?: string,
+  boundaryKey?: string | null,
 ): string {
-	const trig = triggerReason ? ` — ${triggerReason}` : "";
-	const boundaryLabel = boundaryKey ? ` — ${boundaryKey.startsWith("draft:") ? `draft h${boundaryKey.split(":")[2]?.slice(0,5)||""}` : boundaryKey}` : "";
-	const header = kind === "plan_review"
-		? `ADVERSARIAL PLAN REVIEW: ${questSlug} (PLAN REVIEW${trig})${boundaryLabel}`
-		: kind === "direction"
-		? `CRITICAL DIRECTION & RESEARCH REVIEW: ${questSlug} (DIRECTION REVIEW${trig})`
-		: `CRITICAL FINAL ACCEPTANCE & COMPLETION REVIEW: ${questSlug} (FINAL ACCEPTANCE REVIEW${trig})`;
+  const trig = triggerReason ? ` — ${triggerReason}` : "";
+  const boundaryLabel = boundaryKey
+    ? ` — ${
+      boundaryKey.startsWith("draft:")
+        ? `draft h${boundaryKey.split(":")[2]?.slice(0, 5) || ""}`
+        : boundaryKey
+    }`
+    : "";
+  const header = kind === "plan_review"
+    ? `ADVERSARIAL PLAN REVIEW: ${questSlug} (PLAN REVIEW${trig})${boundaryLabel}`
+    : kind === "direction"
+    ? `CRITICAL DIRECTION & RESEARCH REVIEW: ${questSlug} (DIRECTION REVIEW${trig})`
+    : `CRITICAL FINAL ACCEPTANCE & COMPLETION REVIEW: ${questSlug} (FINAL ACCEPTANCE REVIEW${trig})`;
 
-	const rebuttalSection = rebuttal ? `\n--- MAIN AGENT EVIDENCE-BASED REBUTTAL / CLARIFICATION ---\n${rebuttal}\n` : "";
+  const rebuttalSection = rebuttal
+    ? `\n--- MAIN AGENT EVIDENCE-BASED REBUTTAL / CLARIFICATION ---\n${rebuttal}\n`
+    : "";
 
-	const planEvaluationGuidance = kind === "plan_review" || kind === "direction"
-		? `
+  const planEvaluationGuidance = kind === "plan_review" || kind === "direction"
+    ? `
 WHAT YOU MUST EVALUATE (PLAN REVIEW):
 You are reviewing the PLAN, not the final implementation code.
 You must compare the draft plan against the exact recorded original user request.
@@ -143,9 +173,9 @@ Planning updates are frequent and cheap. They must not cause three expensive aut
 
 Also make sure the existing \`inCriticalReview\` / active-review state is actually consulted by the launch path; do not leave it as an informational flag while \`canLaunchReview()\` independently permits additional reviewers.
 `
-		: "";
+    : "";
 
-	return `# ${header}
+  return `# ${header}
 
 You are the Critical Reviewer subagent for the Quest Journal.
 Your sole job is adversarial falsification: find unverified assumptions, plan contradictions, missing evidence, scope drift, or unmet requirements before changes proceed or before completion is accepted.

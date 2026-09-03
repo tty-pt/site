@@ -30,8 +30,8 @@ export function checkLaunchGuard(
         kind,
         planVersion: currentPlanVersion,
         stateHash: currentHash,
-        boundaryKey:
-          options.boundaryKey || targetState.lastPlanReviewBoundaryKey || null,
+        boundaryKey: options.boundaryKey ||
+          targetState.lastPlanReviewBoundaryKey || null,
         saveCount: currentSaveCount,
         requestedAt: Date.now(),
         rebuttal: options.rebuttal,
@@ -74,8 +74,9 @@ export function checkAttemptLimit(
     currentHash,
     currentSaveCount,
   );
-  if (!targetState.criticalReviewAttempts)
+  if (!targetState.criticalReviewAttempts) {
     targetState.criticalReviewAttempts = {};
+  }
   const attempts = (targetState.criticalReviewAttempts[attemptKey] || 0) + 1;
   targetState.criticalReviewAttempts[attemptKey] = attempts;
   logEvent(

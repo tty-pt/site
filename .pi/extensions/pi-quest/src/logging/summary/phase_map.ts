@@ -1,6 +1,9 @@
 import { MajorPhaseName, QuestLogEventType } from "../types.ts";
 
-export function mapEventTypeToMajorPhase(type: QuestLogEventType | string, context?: Record<string, string>): MajorPhaseName | null {
+export function mapEventTypeToMajorPhase(
+  type: QuestLogEventType | string,
+  context?: Record<string, string>,
+): MajorPhaseName | null {
   switch (type) {
     case "TOOL_ACTIVITY":
       if (context?.phase) {

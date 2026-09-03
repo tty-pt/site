@@ -1,9 +1,9 @@
 import {
-  isJournalPath,
   classifyToolCall,
   isCriticalReviewSubagentInvocation,
+  isJournalPath,
 } from "../utils.ts";
-import { logVerificationTransition, logToolFailure } from "../logging.ts";
+import { logToolFailure, logVerificationTransition } from "../logging.ts";
 import { triggerReassessment } from "../research.ts";
 import { persist } from "../persistence.ts";
 import { updateUIStatus } from "../ui.ts";
@@ -18,18 +18,18 @@ export function classifyActivityPhase(
 ): string | undefined {
   const norm = (toolName || "").toLowerCase().trim();
 
-  const cmd =
-    typeof input === "string"
-      ? input
-      : typeof input?.command === "string"
-        ? input.command
-        : typeof input?.cmd === "string"
-          ? input.cmd
-          : "";
+  const cmd = typeof input === "string"
+    ? input
+    : typeof input?.command === "string"
+    ? input.command
+    : typeof input?.cmd === "string"
+    ? input.cmd
+    : "";
   const isTestOrBuild =
-    /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i.test(
-      cmd,
-    );
+    /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i
+      .test(
+        cmd,
+      );
 
   if (isTestOrBuild) {
     return "verification";
@@ -147,16 +147,14 @@ export function detectBashToolFailure(tr: any): {
   evidence: string;
 } {
   const toolFailed = isToolExecutionError(tr);
-  const output =
-    typeof tr?.content === "string"
-      ? tr.content
-      : Array.isArray(tr?.content)
-        ? tr.content.map((c: any) => c.text || "").join("\n")
-        : typeof tr?.output === "string"
-          ? tr.output
-          : "";
-  const cmd =
-    tr?.args?.command ||
+  const output = typeof tr?.content === "string"
+    ? tr.content
+    : Array.isArray(tr?.content)
+    ? tr.content.map((c: any) => c.text || "").join("\n")
+    : typeof tr?.output === "string"
+    ? tr.output
+    : "";
+  const cmd = tr?.args?.command ||
     tr?.input?.command ||
     tr?.command ||
     tr?.args?.cmd ||
@@ -168,9 +166,10 @@ export function detectBashToolFailure(tr: any): {
   // 10: wc -l/ls/fd investigation whitelisted — do not trigger TOOL_FAILURE/REASSESSMENT
   if (
     toolFailed &&
-    /\b(rg|grep|egrep|fgrep|ag|ack|fd|find|wc|ls|stat|file|du|df|tree|cat|head|tail)\b/i.test(
-      cmd,
-    )
+    /\b(rg|grep|egrep|fgrep|ag|ack|fd|find|wc|ls|stat|file|du|df|tree|cat|head|tail)\b/i
+      .test(
+        cmd,
+      )
   ) {
     const exitCode = tr?.details?.exitCode ?? tr?.exitCode ?? tr?.details?.code;
     if (exitCode === 1) {
@@ -180,23 +179,25 @@ export function detectBashToolFailure(tr: any): {
       return { hasFailure: false, reason: "", evidence: "" };
     }
     const hasRealErrorSignal =
-      /\b(?:error:|FAILED|panic:|Segmentation fault|permission denied|no such file|cannot open|failed to)\b/i.test(
-        output,
-      );
+      /\b(?:error:|FAILED|panic:|Segmentation fault|permission denied|no such file|cannot open|failed to)\b/i
+        .test(
+          output,
+        );
     if (!hasRealErrorSignal) {
       return { hasFailure: false, reason: "", evidence: "" };
     }
   }
 
   const isTestOrBuild =
-    /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i.test(
-      cmd,
-    );
-  const hasFailureSignals =
-    toolFailed ||
-    /\b(?:FAIL|FAILED|assertion failed|panic:|Segmentation fault|make:\s*\*\*\*|TypeError|SyntaxError)\b/i.test(
-      output,
-    );
+    /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i
+      .test(
+        cmd,
+      );
+  const hasFailureSignals = toolFailed ||
+    /\b(?:FAIL|FAILED|assertion failed|panic:|Segmentation fault|make:\s*\*\*\*|TypeError|SyntaxError)\b/i
+      .test(
+        output,
+      );
 
   if (hasFailureSignals && isTestOrBuild) {
     return {
@@ -233,9 +234,9 @@ export function isPathToActiveQuest(
   const activeQid = state.questId;
   return Boolean(
     targetPath &&
-    ((activeQid && targetPath.includes(`.pi/quest/current/${activeQid}/`)) ||
-      targetPath.includes(".pi/quest/current/") ||
-      targetPath.endsWith("quest.md")),
+      ((activeQid && targetPath.includes(`.pi/quest/current/${activeQid}/`)) ||
+        targetPath.includes(".pi/quest/current/") ||
+        targetPath.endsWith("quest.md")),
   );
 }
 
@@ -269,8 +270,9 @@ export function classifyToolResultForTurn(
     if (
       !toolFailed &&
       isQuestUpdateTool((tr?.toolName || tr?.name || "").toLowerCase())
-    )
+    ) {
       isQuestUpdate = true;
+    }
     return { isQuestUpdate, isSubstantive, failure: null };
   }
   const toolName = (tr?.toolName || tr?.name || "").toLowerCase();
@@ -341,20 +343,20 @@ export function analyzeTurnToolResults(
     const classified = classifyToolResultForTurn(tr, activeQuest);
     const cmd = tr?.args?.command || tr?.input?.command || tr?.command || "";
     const isTestOrBuild =
-      /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i.test(
-        cmd,
-      );
+      /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i
+        .test(
+          cmd,
+        );
     const isBuildOnly =
-      /make\b(?!.*test)|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i.test(
-        cmd,
-      );
+      /make\b(?!.*test)|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i
+        .test(
+          cmd,
+        );
 
     if (classified.failure) {
       failureCount++;
       const category = isTestOrBuild
-        ? isBuildOnly
-          ? "BUILD_FAILED"
-          : "TEST_FAILED"
+        ? isBuildOnly ? "BUILD_FAILED" : "TEST_FAILED"
         : "TOOL_FAILURE";
       failureCategoriesSet.add(category);
       failures.push({
@@ -371,9 +373,10 @@ export function analyzeTurnToolResults(
         failureEvidences.push(classified.failure.evidence.slice(0, 500));
       }
 
-      const failureId =
-        state.lastFailureId ||
-        `fail_${state.currentTurn || 1}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const failureId = state.lastFailureId ||
+        `fail_${state.currentTurn || 1}_${Date.now().toString(36)}_${
+          Math.random().toString(36).slice(2, 6)
+        }`;
       state.lastFailureId = failureId;
 
       if (isTestOrBuild) {
@@ -424,10 +427,11 @@ export function analyzeTurnToolResults(
 
   const meaningfulFailureDetected = failureCount > 0;
   const failureCategories = Array.from(failureCategoriesSet);
-  const failureReason =
-    failureCount > 1
-      ? `${failureCount} failures detected (${failureCategories.join(", ")}): ${firstFailureReason}`
-      : firstFailureReason;
+  const failureReason = failureCount > 1
+    ? `${failureCount} failures detected (${
+      failureCategories.join(", ")
+    }): ${firstFailureReason}`
+    : firstFailureReason;
   const failureEvidence = failureEvidences.join("\n---\n");
 
   return {
@@ -449,8 +453,8 @@ export function applyTurnEndStateTransitions(
   ctx: ExtensionContext,
 ): void {
   if (analysis.meaningfulFailureDetected) {
-    targetState.consecutiveFailures =
-      (targetState.consecutiveFailures || 0) + analysis.failureCount;
+    targetState.consecutiveFailures = (targetState.consecutiveFailures || 0) +
+      analysis.failureCount;
     triggerReassessment(
       targetState,
       analysis.failureReason,

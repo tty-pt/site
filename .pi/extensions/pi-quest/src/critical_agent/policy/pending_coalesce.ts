@@ -1,5 +1,10 @@
-import { logEvent } from "../../logging.ts";
-import { clearPendingReview, getAllPendingForSlug, getPendingReview, getPendingReviews } from "../tracker.ts";
+import { logEvent, tryLog } from "../../logging.ts";
+import {
+  clearPendingReview,
+  getAllPendingForSlug,
+  getPendingReview,
+  getPendingReviews,
+} from "../tracker.ts";
 import { state } from "../../state.ts";
 
 function isPlanReviewValidForStateLocal(targetState?: any): boolean {
@@ -11,12 +16,19 @@ function isPlanReviewValidForStateLocal(targetState?: any): boolean {
   if (approval.planVersion !== currentPlanVersion) return false;
   if (approval.boundaryKey) {
     const currentBoundaryKey = s.lastPlanReviewBoundaryKey;
-    if (currentBoundaryKey && approval.boundaryKey !== currentBoundaryKey) return false;
+    if (currentBoundaryKey && approval.boundaryKey !== currentBoundaryKey) {
+      return false;
+    }
     return true;
   }
-  const currentHash = s.lastSavedHash || (s.saveGeneration ? s.saveGeneration.hash : null);
-  if (currentHash && approval.saveHash && approval.saveHash !== currentHash) return false;
-  if (s.saveCount && approval.saveCount && approval.saveCount !== s.saveCount) return false;
+  const currentHash = s.lastSavedHash ||
+    (s.saveGeneration ? s.saveGeneration.hash : null);
+  if (currentHash && approval.saveHash && approval.saveHash !== currentHash) {
+    return false;
+  }
+  if (s.saveCount && approval.saveCount && approval.saveCount !== s.saveCount) {
+    return false;
+  }
   return true;
 }
 
@@ -30,13 +42,19 @@ export function dequeuePendingIfNeeded(
 ): any | null {
   const pendings = getAllPendingForSlug(slug);
   if (pendings.length === 0) {
-    try { logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (no pendings)`, { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 }); } catch {}
+    tryLog(
+      "PENDING_COALESCED_DROPPED",
+      `pending coalesced dropped (no pendings)`,
+      { quest: slug, shard: "none", staleCount: 0, candidateCount: 0 },
+    );
     return null;
   }
   const latestPlanVersion = targetState.planVersion || 1;
-  const latestHash = targetState.lastSavedHash || (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
+  const latestHash = targetState.lastSavedHash ||
+    (targetState.saveGeneration ? targetState.saveGeneration.hash : null);
   const latestBoundaryKey = targetState.lastPlanReviewBoundaryKey;
-  const stateChanged = (latestPlanVersion !== currentPlanVersion) || (latestHash !== currentHash);
+  const stateChanged = (latestPlanVersion !== currentPlanVersion) ||
+    (latestHash !== currentHash);
   // Evaluate each pending per-kind; collect those that need follow-up
   const candidates: any[] = [];
   const stale: any[] = [];
@@ -45,11 +63,20 @@ export function dequeuePendingIfNeeded(
     let needsFollowUp = false;
     if (isPlanRev) {
       // 38: draft hash drift counts as boundary change even when lastPlanReviewBoundaryKey stale
-      const pendingIsDraft = String(pending.boundaryKey || "").startsWith("draft:");
-      const snapshotIsDraft = String(snapshot?.boundaryKey || "").startsWith("draft:");
-      const draftDrift = pendingIsDraft && snapshotIsDraft && pending.boundaryKey !== snapshot.boundaryKey;
-      const boundaryChanged = draftDrift || (snapshot.boundaryKey ? (latestBoundaryKey !== snapshot.boundaryKey) : stateChanged);
-      needsFollowUp = (!isPlanReviewValidForStateLocal(targetState) || boundaryChanged || draftDrift);
+      const pendingIsDraft = String(pending.boundaryKey || "").startsWith(
+        "draft:",
+      );
+      const snapshotIsDraft = String(snapshot?.boundaryKey || "").startsWith(
+        "draft:",
+      );
+      const draftDrift = pendingIsDraft && snapshotIsDraft &&
+        pending.boundaryKey !== snapshot.boundaryKey;
+      const boundaryChanged = draftDrift ||
+        (snapshot.boundaryKey
+          ? (latestBoundaryKey !== snapshot.boundaryKey)
+          : stateChanged);
+      needsFollowUp = !isPlanReviewValidForStateLocal(targetState) ||
+        boundaryChanged || draftDrift;
     } else {
       needsFollowUp = stateChanged;
     }
@@ -59,18 +86,31 @@ export function dequeuePendingIfNeeded(
   // Clear stale ones
   for (const s of stale) clearPendingReview(slug, s.kind);
   if (candidates.length === 0) {
-    try { logEvent("PENDING_COALESCED_DROPPED", `pending coalesced dropped (all stale)`, { quest: slug, shard: "all_stale", staleCount: stale.length, candidateCount: 0 }); } catch {}
+    tryLog(
+      "PENDING_COALESCED_DROPPED",
+      `pending coalesced dropped (all stale)`,
+      {
+        quest: slug,
+        shard: "all_stale",
+        staleCount: stale.length,
+        candidateCount: 0,
+      },
+    );
     return null;
   }
   // Prefer most recent requestedAt; if tie, last
   candidates.sort((a, b) => (b.requestedAt || 0) - (a.requestedAt || 0));
   const chosen = candidates[0];
-  logEvent("PENDING_COALESCED_RESOLVED", `pending coalesced resolved (chosen=${chosen.kind})`, {
-    quest: slug,
-    chosenKind: chosen.kind,
-    staleCount: stale.length,
-    candidateCount: candidates.length,
-  });
+  logEvent(
+    "PENDING_COALESCED_RESOLVED",
+    `pending coalesced resolved (chosen=${chosen.kind})`,
+    {
+      quest: slug,
+      chosenKind: chosen.kind,
+      staleCount: stale.length,
+      candidateCount: candidates.length,
+    },
+  );
   clearPendingReview(slug, chosen.kind);
   // Also clear other stale candidates? keep one chosen; clear remaining candidates that are not chosen but still stale? They are not stale, but we coalesce to one.
   // Remove remaining candidates for same slug to avoid duplicate launches

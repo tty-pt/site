@@ -1,7 +1,7 @@
 ---
 id: 32
 title: "3-dir invariant not stated as single normative table"
-state: ready
+state: done
 severity: medium
 requires: [05, 06, 07, 17]
 validates: "ls .pi/quest 3 dirs only, no QUEST_RUN_DIR"

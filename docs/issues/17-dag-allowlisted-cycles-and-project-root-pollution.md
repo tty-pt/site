@@ -1,7 +1,7 @@
 ---
 id: 17
 title: "Allowlisted DAG cycles and project-root discovery pollute the extension"
-state: ready
+state: done
 severity: low
 requires: []
 validates: "check-pi-quest-dag passed, findProjectRoot skips extensions/"

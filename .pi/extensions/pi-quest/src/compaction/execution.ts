@@ -69,9 +69,9 @@ function isStaleCompaction(
 ): boolean {
   return Boolean(
     sessionState.questId !== targetQuestId ||
-    sessionState.active !== targetActiveQuest ||
-    (targetCompactionId &&
-      sessionState.activeTransaction?.id !== targetCompactionId),
+      sessionState.active !== targetActiveQuest ||
+      (targetCompactionId &&
+        sessionState.activeTransaction?.id !== targetCompactionId),
   );
 }
 
@@ -83,8 +83,9 @@ function resetCompactionPendingState(
   if (
     targetCompactionId &&
     sessionState.activeTransaction?.id !== targetCompactionId
-  )
+  ) {
     return;
+  }
   sessionState.compactionPending = false;
   if (
     sessionState.activeTransaction &&
@@ -101,8 +102,9 @@ function resetCompactionPendingState(
     sessionState.activeCompactionId = null;
   }
   if (extra.archive) sessionState.archiveCompactionPending = null;
-  if (extra.subquestLaunch)
+  if (extra.subquestLaunch) {
     sessionState.subquestLaunchCompactionPending = false;
+  }
   sessionState.preCompactionCheckpointPending = false;
   sessionState.preCompactionSaveRequestPending = false;
 }
@@ -130,14 +132,13 @@ function scheduleCompactionInternal(
   const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
   const targetQuestId = sessionState.questId;
   const targetActiveQuest = sessionState.active;
-  const targetCompactionId =
-    sessionState.activeTransaction?.id ||
+  const targetCompactionId = sessionState.activeTransaction?.id ||
     sessionState.activeCompactionId ||
     null;
   setTimeout(() => {
     asyncContext.run(c, () => {
-      const currentSessionState =
-        sessionStates.get(targetSessionId) ?? getState(c);
+      const currentSessionState = sessionStates.get(targetSessionId) ??
+        getState(c);
       if (
         isStaleCompaction(
           currentSessionState,
@@ -154,8 +155,8 @@ function scheduleCompactionInternal(
           customInstructions: instructions,
           onComplete: () => {},
           onError: (err: any) => {
-            const latestState =
-              sessionStates.get(targetSessionId) ?? getState(c);
+            const latestState = sessionStates.get(targetSessionId) ??
+              getState(c);
             if (
               isStaleCompaction(
                 latestState,
@@ -292,15 +293,16 @@ export function handleSubquestLaunchCompactionFailure(
     reportAgentError(pi, c, `${prefix}: ${msg}`, {
       code: QuestErrorCode.COMPACTION_FAILURE,
       requiredNextAction: childName
-        ? `Read ${questPath(sessionState.questId)} to proceed with subquest execution.`
+        ? `Read ${
+          questPath(sessionState.questId)
+        } to proceed with subquest execution.`
         : "Review active memory and continue execution.",
     });
   }
-  const fallbackTarget =
-    sessionState.pendingSubquestResume &&
-    sessionState.active === sessionState.pendingSubquestResume
-      ? sessionState.pendingSubquestResume
-      : childName;
+  const fallbackTarget = sessionState.pendingSubquestResume &&
+      sessionState.active === sessionState.pendingSubquestResume
+    ? sessionState.pendingSubquestResume
+    : childName;
   if (
     fallbackTarget &&
     (sessionState.active === fallbackTarget ||
@@ -335,14 +337,13 @@ export function scheduleSubquestLaunchCompaction(
   const sessionState = sessionStates.get(targetSessionId) ?? getState(c);
   const targetQuestId = sessionState.questId;
   const targetActiveQuest = sessionState.active;
-  const targetCompactionId =
-    sessionState.activeTransaction?.id ||
+  const targetCompactionId = sessionState.activeTransaction?.id ||
     sessionState.activeCompactionId ||
     null;
   setTimeout(() => {
     asyncContext.run(c, () => {
-      const currentSessionState =
-        sessionStates.get(targetSessionId) ?? getState(c);
+      const currentSessionState = sessionStates.get(targetSessionId) ??
+        getState(c);
       if (
         isStaleCompaction(
           currentSessionState,
@@ -361,8 +362,8 @@ export function scheduleSubquestLaunchCompaction(
           customInstructions: instructions,
           onComplete: () => {},
           onError: (err: any) => {
-            const latestState =
-              sessionStates.get(targetSessionId) ?? getState(c);
+            const latestState = sessionStates.get(targetSessionId) ??
+              getState(c);
             if (
               isStaleCompaction(
                 latestState,
@@ -424,27 +425,30 @@ export function requestPeriodicCheckpoint(
   force = false,
 ): boolean {
   const c = getActiveContext(ctx);
-  if (!c || (!state.active && !state.pendingRootQuest && !state.activeDraft))
+  if (!c || (!state.active && !state.pendingRootQuest && !state.activeDraft)) {
     return false;
+  }
   if (state.compactionPending) return false;
   if (state.pickerCancelled) return false;
   const hasRisk = Boolean(
     state.dirty ||
-    (Array.isArray(state.draftPrompts) && state.draftPrompts.length > 0) ||
-    state.pendingRootQuest ||
-    state.activeDraft,
+      (Array.isArray(state.draftPrompts) && state.draftPrompts.length > 0) ||
+      state.pendingRootQuest ||
+      state.activeDraft,
   );
   if (!hasRisk && !force) return false;
 
   // Suppress when awaiting plan review (turn-stop gate active)
   const aw = state.awaitingReview;
-  if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance"))
+  if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
     return false;
+  }
 
   const turnsSince = state.substantiveTurnsSinceCheckpoint || 0;
   if (!force && turnsSince < DEFAULT_CHECKPOINT_INTERVAL_TURNS) return false;
-  if (!force && turnsSince % DEFAULT_CHECKPOINT_INTERVAL_TURNS !== 0)
+  if (!force && turnsSince % DEFAULT_CHECKPOINT_INTERVAL_TURNS !== 0) {
     return false;
+  }
 
   const now = Date.now();
   const lastSteerAt = state.lastPeriodicSteerAt || 0;

@@ -1,7 +1,8 @@
 ---
 id: 33
 title: "§11.4 + §11.6.4 + §11.7.4 verification matrix not captured as single audit"
-state: ready
+state: done
+note: "Diagnostic cluster rows verified PASSED 2026-09-03 (futureCount 1, manifest 9 fields). Bare-catch row landed via #29 (2026-09-03): all logging swallows → tryLog, 214→155 guards, DAG passed, bundle SHA 82e21675."
 severity: medium
 requires: [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 32]
 validates: "unzip -l pi-quest-bundle.zip has current-run/future/* + manifest 9"

@@ -1,8 +1,18 @@
 import { parseMarkdownSections } from "../../markdown.ts";
 import { ConsistencyAuditResult } from "../../types.ts";
 import { isPlaceholderOrEmpty } from "../../utils.ts";
-import { extractLines, getSecBody } from "../helpers.ts";
-import { checkCompletedEmpty, checkFilesModified, checkNextAction, checkPlanVersion, checkStatusAndRemaining } from "./checks.ts";
+import {
+  extractLines,
+  getSecBody,
+  isModificationStatement,
+} from "../helpers.ts";
+import {
+  checkCompletedEmpty,
+  checkFilesModified,
+  checkNextAction,
+  checkPlanVersion,
+  checkStatusAndRemaining,
+} from "./checks.ts";
 
 export function auditQuestConsistency(
   markdownContent: string,
@@ -34,16 +44,46 @@ export function auditQuestConsistency(
   const hasRemaining = !isPlaceholderOrEmpty(remainingBody);
 
   const reassessmentLines = extractLines(reassessmentBody);
-  const planVersionNumForFiles = Number.parseInt(planVersionBody.replace(/\D/g, ""), 10) || 1;
-  const isResearchOnly = planVersionNumForFiles === 1 && isPlaceholderOrEmpty(completedBody) && isPlaceholderOrEmpty(reassessmentBody);
+  const completedLines = extractLines(completedBody);
+  const planVersionNumForFiles =
+    Number.parseInt(planVersionBody.replace(/\D/g, ""), 10) || 1;
+  // A quest is research-only when no Completed/Reassessment statement actually
+  // describes a file modification (reads/reviews do not modify files). Uses the
+  // verb-aware classifier, so a substantive read-only Completed section (all the
+  // files merely examined) no longer defeats the research-only guard.
+  const hasModificationStatement = [...completedLines, ...reassessmentLines]
+    .some((l) => isModificationStatement(l));
+  const isResearchOnly = planVersionNumForFiles === 1 &&
+    !hasModificationStatement;
 
   checkNextAction({ completedBody, reassessmentBody, nextActionBody }, issues);
   if (!isResearchOnly) {
-    checkFilesModified({ completedBody, reassessmentBody, filesModifiedBody }, options, hasFilesModified, issues);
+    checkFilesModified(
+      { completedBody, reassessmentBody, filesModifiedBody },
+      options,
+      hasFilesModified,
+      issues,
+    );
   }
   checkCompletedEmpty(hasCompleted, hasReassessment, reassessmentLines, issues);
   checkPlanVersion(planVersionBody, planRevisionsBody, issues);
-  checkStatusAndRemaining({ uncertaintiesBody, assumptionsBody, testStatusBody, filesModifiedBody, completedBody, remainingBody, currentStatusBody }, hasFilesModified, hasTestStatus, hasCompleted, hasRemaining, options, issues);
+  checkStatusAndRemaining(
+    {
+      uncertaintiesBody,
+      assumptionsBody,
+      testStatusBody,
+      filesModifiedBody,
+      completedBody,
+      remainingBody,
+      currentStatusBody,
+    },
+    hasFilesModified,
+    hasTestStatus,
+    hasCompleted,
+    hasRemaining,
+    options,
+    issues,
+  );
 
   return { consistent: issues.length === 0, issues, warnings };
 }

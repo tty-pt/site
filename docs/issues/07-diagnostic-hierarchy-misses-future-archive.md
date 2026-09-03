@@ -1,7 +1,7 @@
 ---
 id: 07
 title: "Diagnostic hierarchy and packaging miss future-archive and compaction artifacts"
-state: ready
+state: done
 severity: medium
 requires: [04]
 validates: "hierarchy futureCount includes future-archive, zip has future/*"

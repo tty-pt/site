@@ -51,8 +51,8 @@ export async function resolveArchiveContext(
   const stack = Array.isArray(s.stack)
     ? [...s.stack]
     : s.active
-      ? [s.active]
-      : [];
+    ? [s.active]
+    : [];
   const idx = stack.lastIndexOf(questName);
   if (idx > 0) parentSlug = stack[idx - 1];
   if (!parentSlug) {

@@ -1,10 +1,10 @@
 ---
 id: 29
-title: "121 bare catch{} swallow — needs tryLog helper, keep only existsSync guards"
-state: ready
+title: "bare catch{} swallow → tryLog helper; keep only IO/existsSync guards"
+state: done
 severity: low
 requires: [23]
-validates: "grep catch {} <10 (only existsSync)"
+validates: "grep catch {} no logging-swallows remain; tryLog rolls out to 12 files; DAG passed"
 area: "grep -rn 'catch {}' src | wc -l, try{, grep -P 'catch/s*/{/s*/}'"
 parent: 44
 ---
@@ -27,3 +27,18 @@ Doc lies: `167 bare` high by 46 (actual 121), `167→<10` only for `existsSync` 
 Verification: `grep -rn "catch {}" src | wc -l` `121→<10` (only `existsSync` guards) + `grep PERSISTENCE_DEGRADED .pi/quest/current/*/execution.log` on injected `logEvent` failure + `deno test` still `54→60 passed`. Hash helper already `diagnostic/packaging.ts:computeFileSha256` reuse, file-already rule §11.5 preserved.
 
 Related: #23, #27, #28, #33.
+
+## RESOLUTION (2026-09-03)
+
+**Reality check during implementation:** the true bare `catch {}` count at HEAD was **214** (issue's `121`/`167` both stale). A precise scan showed only **~64/214 (30%)** wrapped a logging call, and only **44** were *clean* log-only swallows. The remaining ~147 are legitimate best-effort IO/import/defensive guards (existsSync, readFile/writeFile, persist, dynamic `await import`, mutex lock-touch, JSON.parse, etc.) that must stay.
+
+**User decision:** fix all logging swallows, keep IO guards. Not feasible to reach the issue's original `<10` target without unsafe restructuring.
+
+**Delivered:**
+- New `src/logging/safe.ts` with `tryLog(type, message, context?, ctx?)` that calls `logEvent` inside a try and, on failure, surfaces via `ui.notify` (logging-local, mirrors `core.ts:41`) — **never re-enters logEvent, no messaging import, no DAG edge**.
+- `src/logging/index.ts` += `export * from "./safe.ts"`.
+- Converted all **pure logging swallows** to `tryLog` across 12 src files (hooks, policy, executor, classification, research, pi_adapter, subquest_operation, messaging, handlers, pending_coalesce); flattened `paths.ts` triple-nested copy (kept dynamic import to avoid the `paths↔logging` DAG cycle — `logging/summary/helpers.ts:3` already imports `../paths.ts`).
+- Result: `catch {}` **214 → 155** (remainder all IO/defensive guards), **zero pure logging swallows left**.
+- New tests: `tests/logging_safe.test.ts` (5: success write, non-throw on success, non-throw on blocked-write, repeated failure) and `tests/bare_catch_audit.test.ts` (2: no pure logging swallow remains; count held < 170 baseline-regression guard).
+- Gate: `check-pi-quest-dag.ts` **passed** (131 files, 702 edges, 1 allowlisted cycle); `deno test` **83 passed / 0 failed**; `as any` stays **4**; `deno fmt --check` clean; `npm run zip` **Verification PASSED (234 entries)**, SHA-256 `82e21675…`, Content SHA `fc8f712f…`.
+

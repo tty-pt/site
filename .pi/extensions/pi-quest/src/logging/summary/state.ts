@@ -10,11 +10,41 @@ export interface SummaryState {
   implementationBlockedCount: number;
   blockedGates: Set<string>;
   failureCount: number;
-  failures: Array<{ type: string; code?: string; reason?: string; failureId?: string; recovered?: boolean; recoveryAction?: string }>;
-  unrecoveredFailures: Array<{ type: string; code?: string; reason?: string; failureId?: string }>;
-  compactionsMap: Map<string, { id: string; status: string; phases: Set<string>; success: boolean; failed: boolean; inconsistent: boolean }>;
+  failures: Array<
+    {
+      type: string;
+      code?: string;
+      reason?: string;
+      failureId?: string;
+      recovered?: boolean;
+      recoveryAction?: string;
+    }
+  >;
+  unrecoveredFailures: Array<
+    { type: string; code?: string; reason?: string; failureId?: string }
+  >;
+  compactionsMap: Map<
+    string,
+    {
+      id: string;
+      status: string;
+      phases: Set<string>;
+      success: boolean;
+      failed: boolean;
+      inconsistent: boolean;
+    }
+  >;
   anonCompactionCounter: number;
-  resumesMap: Map<string, { id: string; success: boolean; failed: boolean; retried: number; obsolete: boolean }>;
+  resumesMap: Map<
+    string,
+    {
+      id: string;
+      success: boolean;
+      failed: boolean;
+      retried: number;
+      obsolete: boolean;
+    }
+  >;
   anonResumeCounter: number;
   hasUnresolvedError: boolean;
   hasCriticalReviewFailure: boolean;

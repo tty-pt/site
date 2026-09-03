@@ -3,7 +3,7 @@ import {
   parseCriticalReviewResponse,
 } from "./prompt.ts";
 import { findProjectRoot } from "../diagnostic.ts";
-import { logEvent } from "../logging.ts";
+import { logEvent, tryLog } from "../logging.ts";
 import { getQuestId, getSessionId } from "../state.ts";
 import {
   CriticalReviewer,
@@ -32,13 +32,13 @@ export type SubagentExecutorFn = (
 ) => Promise<
   | string
   | {
-      text?: string;
-      content?: any;
-      isError?: boolean;
-      error?: any;
-      childSessionId?: string;
-      transcriptRef?: string;
-    }
+    text?: string;
+    content?: any;
+    isError?: boolean;
+    error?: any;
+    childSessionId?: string;
+    transcriptRef?: string;
+  }
 >;
 
 export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
@@ -71,8 +71,8 @@ export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
 
 export function resolveDefaultReviewModel(ctx?: ExtensionContext): string {
   if (typeof process !== "undefined" && process.env) {
-    const explicitReviewModel =
-      process.env.PI_CRITICAL_REVIEW_MODEL || process.env.PI_REVIEW_MODEL;
+    const explicitReviewModel = process.env.PI_CRITICAL_REVIEW_MODEL ||
+      process.env.PI_REVIEW_MODEL;
     if (explicitReviewModel) return String(explicitReviewModel);
 
     const provider = process.env.PI_PROVIDER;
@@ -138,23 +138,21 @@ export function isSubagentToolRegistered(
  * A transparent re-anchor diagnostic is logged when the incoming cwd differs from the resolved root.
  */
 export function resolveSubagentCwd(ctx?: ExtensionContext): string {
-  const from =
-    ctx?.cwd || (typeof process !== "undefined" ? process.cwd() : "");
+  const from = ctx?.cwd ||
+    (typeof process !== "undefined" ? process.cwd() : "");
   const to = findProjectRoot(from);
   if (from && from !== to) {
-    try {
-      logEvent(
-        "SUBAGENT_CWD_REANCHORED",
-        `subagent cwd re-anchored to project root`,
-        {
-          quest: getQuestId(ctx) || "",
-          from,
-          to,
-          reason: "wrong_search_root",
-        },
-        ctx,
-      );
-    } catch {}
+    tryLog(
+      "SUBAGENT_CWD_REANCHORED",
+      `subagent cwd re-anchored to project root`,
+      {
+        quest: getQuestId(ctx) || "",
+        from,
+        to,
+        reason: "wrong_search_root",
+      },
+      ctx,
+    );
   }
   return to;
 }
@@ -181,8 +179,12 @@ export function resolveSubagentExecutor(
         // [requestId, ownerRunId, nodeId]; two reviews in the same turn must not collide, so
         // neither requestId nor nodeId may be reused (options.reviewId == correlationId ==
         // currentTurnCorrelationId is per-turn, not per-invocation).
-        const requestId = `quest_review_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        const nodeId = `review_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const requestId = `quest_review_${Date.now().toString(36)}_${
+          Math.random().toString(36).slice(2, 8)
+        }`;
+        const nodeId = `review_${Date.now().toString(36)}_${
+          Math.random().toString(36).slice(2, 8)
+        }`;
         let unsubs: Array<(() => void) | void> = [];
 
         const maxDuration = options?.timeoutMs || 300000; // 5 minutes default
@@ -251,8 +253,7 @@ export function resolveSubagentExecutor(
             // (no isError/contentText on the structured wire). A "completed" text result is
             // carried in result.text.
             if (status && status !== "completed") {
-              const errorText =
-                data.error ||
+              const errorText = data.error ||
                 (status === "invalid_request"
                   ? "Subagent delegation request was invalid"
                   : `Subagent delegation failed (${status})`);
@@ -278,8 +279,7 @@ export function resolveSubagentExecutor(
               } else {
                 text = data.contentText || data.text || "";
               }
-              const transcriptRef =
-                data.transcriptRef ||
+              const transcriptRef = data.transcriptRef ||
                 data.sessionPath ||
                 (data.runId ? `.pi/sessions/${data.runId}.jsonl` : undefined) ||
                 (childSessionId
@@ -313,12 +313,11 @@ export function resolveSubagentExecutor(
           unsubs.push(pi.events!.on("subagent:turn_end", handleActivity));
         }
 
-        const targetModel =
-          options?.model !== undefined &&
-          typeof options?.model === "string" &&
-          options.model !== ""
-            ? options.model
-            : resolveDefaultReviewModel(ctx);
+        const targetModel = options?.model !== undefined &&
+            typeof options?.model === "string" &&
+            options.model !== ""
+          ? options.model
+          : resolveDefaultReviewModel(ctx);
 
         // Emit a structured delegation request (pi-subagents bridge). Without ownerRunId/nodeId/
         // result the bridge routes to the legacy path, which rejects "Legacy prompt-template
@@ -377,13 +376,14 @@ export class PiSubagentReviewer implements CriticalReviewer {
   async review(input: ReviewInput): Promise<ReviewResult> {
     if (input.signal?.aborted) {
       const err: any = new Error(
-        `review cancelled: ${String((input.signal as { reason?: unknown }).reason || "aborted")}`,
+        `review cancelled: ${
+          String((input.signal as { reason?: unknown }).reason || "aborted")
+        }`,
       );
       err.name = "AbortError";
       throw err;
     }
-    const executor =
-      this.explicitRunner ||
+    const executor = this.explicitRunner ||
       customSubagentRunner ||
       resolveSubagentExecutor(this.pi, this.ctx);
     if (!executor) {
@@ -397,10 +397,9 @@ export class PiSubagentReviewer implements CriticalReviewer {
       input.triggerReason,
       input.boundaryKey,
     );
-    const targetModel =
-      input.model && typeof input.model === "string"
-        ? input.model
-        : resolveDefaultReviewModel(this.ctx);
+    const targetModel = input.model && typeof input.model === "string"
+      ? input.model
+      : resolveDefaultReviewModel(this.ctx);
 
     const startTime = Date.now();
     let rawRes: any;
@@ -418,27 +417,26 @@ export class PiSubagentReviewer implements CriticalReviewer {
         onActivity: input.onActivity,
       });
     } catch (err: any) {
-      const timeoutLayer =
-        err?.timeoutLayer || classifyTimeoutLayer(err?.message || "");
+      const timeoutLayer = err?.timeoutLayer ||
+        classifyTimeoutLayer(err?.message || "");
       err.timeoutLayer = timeoutLayer;
       throw err;
     }
 
     const durationMs = Date.now() - startTime;
-    const rawResponseText =
-      typeof rawRes === "string"
-        ? rawRes
-        : rawRes?.text ||
-          (Array.isArray(rawRes?.content)
-            ? rawRes.content.map((c: any) => c.text || "").join("\n")
-            : "");
+    const rawResponseText = typeof rawRes === "string"
+      ? rawRes
+      : rawRes?.text ||
+        (Array.isArray(rawRes?.content)
+          ? rawRes.content.map((c: any) => c.text || "").join("\n")
+          : "");
 
-    const childSessionId =
-      typeof rawRes === "object" ? rawRes?.childSessionId : undefined;
-    const childTranscriptRef =
-      typeof rawRes === "object"
-        ? rawRes?.transcriptRef || rawRes?.childTranscriptRef
-        : undefined;
+    const childSessionId = typeof rawRes === "object"
+      ? rawRes?.childSessionId
+      : undefined;
+    const childTranscriptRef = typeof rawRes === "object"
+      ? rawRes?.transcriptRef || rawRes?.childTranscriptRef
+      : undefined;
 
     const parsed = parseCriticalReviewResponse(rawResponseText);
     return {

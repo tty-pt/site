@@ -3,7 +3,12 @@
 // Handles barrel re-exports and relative .ts imports.
 
 import { walk } from "https://deno.land/std@0.224.0/fs/walk.ts";
-import { dirname, join, normalize, resolve } from "https://deno.land/std@0.224.0/path/mod.ts";
+import {
+  dirname,
+  join,
+  normalize,
+  resolve,
+} from "https://deno.land/std@0.224.0/path/mod.ts";
 
 const SRC = new URL("../src", import.meta.url).pathname;
 
@@ -32,7 +37,8 @@ function resolveImport(fromFile: string, spec: string): string | null {
   return null;
 }
 
-const importRe = /(?:import\s+[^'"]*from\s*['"]([^'"]+)['"]|export\s+\*\s+from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+const importRe =
+  /(?:import\s+[^'"]*from\s*['"]([^'"]+)['"]|export\s+\*\s+from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
 
 async function collectFiles(): Promise<string[]> {
   const files: string[] = [];
@@ -42,7 +48,10 @@ async function collectFiles(): Promise<string[]> {
   return files;
 }
 
-function buildGraph(files: string[], fileContentMap: Map<string,string>): Map<string, Set<string>> {
+function buildGraph(
+  files: string[],
+  fileContentMap: Map<string, string>,
+): Map<string, Set<string>> {
   const fileSet = new Set(files);
   const graph = new Map<string, Set<string>>();
   for (const f of files) graph.set(f, new Set());
@@ -68,7 +77,10 @@ function findCycle(graph: Map<string, Set<string>>): string[] | null {
   const color = new Map<string, number>();
   const parent = new Map<string, string | null>();
   const stack: string[] = [];
-  for (const n of graph.keys()) { color.set(n, WHITE); parent.set(n, null); }
+  for (const n of graph.keys()) {
+    color.set(n, WHITE);
+    parent.set(n, null);
+  }
 
   let cycle: string[] | null = null;
 
@@ -101,7 +113,7 @@ function findCycle(graph: Map<string, Set<string>>): string[] | null {
 }
 
 const files = await collectFiles();
-const contentMap = new Map<string,string>();
+const contentMap = new Map<string, string>();
 for (const f of files) contentMap.set(f, await Deno.readTextFile(f));
 
 const graph = buildGraph(files, contentMap);
@@ -114,14 +126,17 @@ const KNOWN_CYCLES: string[][] = [
 ];
 
 function isKnownCycle(cycle: string[]): boolean {
-  const normalized = cycle.map(p => p.replace(SRC, "src"));
+  const normalized = cycle.map((p) => p.replace(SRC, "src"));
   for (const known of KNOWN_CYCLES) {
     // cycle contains known edge in either direction
-    const hasAll = known.every(k => normalized.includes(k));
+    const hasAll = known.every((k) => normalized.includes(k));
     if (hasAll && normalized.length === known.length + 1) return true; // e.g. A->B->A
     // also allow B->A->B variant
     const rev = [...known].reverse();
-    if (rev.every(k => normalized.includes(k)) && normalized.length === known.length + 1) return true;
+    if (
+      rev.every((k) => normalized.includes(k)) &&
+      normalized.length === known.length + 1
+    ) return true;
   }
   return false;
 }
@@ -129,21 +144,34 @@ function isKnownCycle(cycle: string[]): boolean {
 const cycle = findCycle(graph);
 if (cycle) {
   if (isKnownCycle(cycle)) {
-    const pretty = cycle.map(p => p.replace(SRC, "src")).join(" -> ");
-    console.warn(`DAG gate: known cycle allowlisted (Pass 3 fix: obligations/types indirection):\n  ${pretty}`);
-    const edgeCount = Array.from(graph.values()).reduce((a,s)=>a+s.size,0);
-    console.log(`DAG gate: passed with allowlist (${files.length} files, ${edgeCount} edges, 1 known cycle)`);
+    const pretty = cycle.map((p) => p.replace(SRC, "src")).join(" -> ");
+    console.warn(
+      `DAG gate: known cycle allowlisted (Pass 3 fix: obligations/types indirection):\n  ${pretty}`,
+    );
+    const edgeCount = Array.from(graph.values()).reduce(
+      (a, s) => a + s.size,
+      0,
+    );
+    console.log(
+      `DAG gate: passed with allowlist (${files.length} files, ${edgeCount} edges, 1 known cycle)`,
+    );
   } else {
-    const pretty = cycle.map(p => p.replace(SRC, "src")).join(" -> ");
+    const pretty = cycle.map((p) => p.replace(SRC, "src")).join(" -> ");
     console.error(`DAG violation: circular import detected:\n  ${pretty}`);
     console.error("\nGraph edges (relative):");
     for (const [from, tos] of graph.entries()) {
       if (tos.size === 0) continue;
-      for (const to of tos) console.error(`  ${from.replace(SRC,"src")} -> ${to.replace(SRC,"src")}`);
+      for (const to of tos) {
+        console.error(
+          `  ${from.replace(SRC, "src")} -> ${to.replace(SRC, "src")}`,
+        );
+      }
     }
     Deno.exit(1);
   }
 } else {
-  const edgeCount = Array.from(graph.values()).reduce((a,s)=>a+s.size,0);
-  console.log(`DAG gate: passed (${files.length} files, ${edgeCount} edges, acyclic)`);
+  const edgeCount = Array.from(graph.values()).reduce((a, s) => a + s.size, 0);
+  console.log(
+    `DAG gate: passed (${files.length} files, ${edgeCount} edges, acyclic)`,
+  );
 }

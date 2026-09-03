@@ -48,7 +48,7 @@ export function getPendingReview(
   if (kind) return pendingReviews.get(pendingKey(questSlug, kind));
   return (
     pendingReviews.get(questSlug) ??
-    [...pendingReviews.values()].find((r) => r.questSlug === questSlug)
+      [...pendingReviews.values()].find((r) => r.questSlug === questSlug)
   );
 }
 
@@ -74,8 +74,9 @@ export function clearPendingReview(
     return;
   }
   for (const k of [...pendingReviews.keys()]) {
-    if (k === questSlug || k.startsWith(`${questSlug}:`))
+    if (k === questSlug || k.startsWith(`${questSlug}:`)) {
       pendingReviews.delete(k);
+    }
   }
 }
 
@@ -170,7 +171,8 @@ export function canLaunchReview(
     const existing = findActiveReviewForQuest(questSlug);
     return {
       allowed: false,
-      reason: `Quest ${questSlug} is already in active critical review (inCriticalReview=true)`,
+      reason:
+        `Quest ${questSlug} is already in active critical review (inCriticalReview=true)`,
       existingReview: existing,
     };
   }
@@ -183,7 +185,8 @@ export function canLaunchReview(
   if (existing) {
     return {
       allowed: false,
-      reason: `Active review ${existing.reviewId} (${existing.kind}, v${existing.snapshot.planVersion}) is already running for quest ${questSlug}`,
+      reason:
+        `Active review ${existing.reviewId} (${existing.kind}, v${existing.snapshot.planVersion}) is already running for quest ${questSlug}`,
       existingReview: existing,
     };
   }
@@ -259,8 +262,7 @@ export function updateReviewActivity(
     eventData?.tool ||
     ""
   ).toLowerCase();
-  const filePath =
-    eventData?.path ||
+  const filePath = eventData?.path ||
     eventData?.file ||
     eventData?.input?.path ||
     eventData?.args?.path;
@@ -329,8 +331,9 @@ export function cancelActiveReview(
     rev.status === "cancelled" ||
     rev.status === "completed" ||
     rev.status === "failed"
-  )
+  ) {
     return;
+  }
   rev.cancelled = true;
   rev.cancellationRequested = true;
   rev.cancellationReason = reason;
@@ -363,12 +366,11 @@ export function completeActiveReview(
     } else {
       rev.status = "completed";
       rev.verdict = verdict;
-      const symbol =
-        verdict === "APPROVE" || verdict === "PASS"
-          ? "✓"
-          : verdict === "REVISE" || verdict === "FAIL"
-            ? "✗"
-            : "?";
+      const symbol = verdict === "APPROVE" || verdict === "PASS"
+        ? "✓"
+        : verdict === "REVISE" || verdict === "FAIL"
+        ? "✗"
+        : "?";
       latestCompletedStatus = {
         text: `⚖ Critical: reviewer ${symbol} ${verdict || "COMPLETE"}`,
         updatedAt: Date.now(),
