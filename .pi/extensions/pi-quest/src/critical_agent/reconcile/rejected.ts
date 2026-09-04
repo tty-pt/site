@@ -120,7 +120,7 @@ export async function handleRejectedVerdict(
         ? QuestErrorCode.PLAN_REVIEW_REQUIRED
         : QuestErrorCode.CRITICAL_REVIEW_FAILED,
       message: errorMsg,
-      deliverAs: "steer",
+      deliverAs: "followUp",
       requiredNextAction: actionsSummary ||
         "Revise plan/implementation to address critical review findings.",
       correlationId,
@@ -130,9 +130,10 @@ export async function handleRejectedVerdict(
     sendInternalAgentMessage(
       pi,
       errorMsg,
-      "steer",
+      "followUp",
       isPlanReviewKind ? "plan_review_failed" : "critical_review_failed",
       correlationId,
+      { triggerTurn: true, display: true },
     );
   }
 
@@ -183,6 +184,10 @@ export async function handleRejectedVerdict(
     } catch {}
   }
 
+  targetState.inCriticalReview = false;
+  if (targetState.awaitingReview?.reviewId === correlationId) {
+    targetState.awaitingReview = null;
+  }
   persist(pi, ctx);
   return { success: false, available: true, review: reviewState };
 }

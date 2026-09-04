@@ -7,6 +7,7 @@ import {
 } from "./constants.ts";
 import { syncImplementationPermission } from "./gates.ts";
 import { logError } from "./messaging.ts";
+import { futureDraftPath, questDirPath } from "./paths.ts";
 import {
   createDefaultState,
   generateQuestId,
@@ -27,6 +28,19 @@ export * from "./reconstruction/resume.ts";
 export * from "./reconstruction/transaction.ts";
 export * from "./reconstruction/codecs.ts";
 
+function isCorruptedSlugQuestId(qid: unknown, activeDraft?: string | null): boolean {
+  if (typeof qid !== "string" || !qid) return false;
+  if (activeDraft && (qid === activeDraft || qid.startsWith(activeDraft))) return true;
+  if (qid.includes("-")) {
+    try {
+      if (existsSync(futureDraftPath(qid)) && !existsSync(questDirPath(qid))) {
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
 export function isStoredState(v: unknown): v is StoredState {
   return typeof v === "object" && v !== null &&
     ("active" in v || "pendingRootQuest" in v || "activeDraft" in v);
@@ -36,6 +50,8 @@ export function loadPersistedJournalSnapshot(
   ctx: ExtensionContext,
 ): StoredState | undefined {
   let latest: StoredState | undefined;
+  let lastNumericQid: string | null = null;
+  let lastValidQid: string | null = null;
   for (const entry of ctx.sessionManager.getBranch()) {
     if (
       entry.type === "custom" &&
@@ -44,7 +60,18 @@ export function loadPersistedJournalSnapshot(
       entry.data && isStoredState(entry.data)
     ) {
       latest = entry.data as StoredState;
+      if (typeof latest.questId === "string") {
+        if (/^\d+$/.test(latest.questId)) {
+          lastNumericQid = latest.questId;
+        }
+        if (!isCorruptedSlugQuestId(latest.questId, latest.activeDraft)) {
+          lastValidQid = latest.questId;
+        }
+      }
     }
+  }
+  if (latest && isCorruptedSlugQuestId(latest.questId, latest.activeDraft)) {
+    latest.questId = lastNumericQid || lastValidQid || null;
   }
   return latest;
 }
@@ -85,8 +112,12 @@ export function restoreSessionState(latest: StoredState): StoredState {
       if (items.length) draftPrompts = items;
     } catch {}
   }
+  const isCorruptedQid = typeof latest.questId === "string" &&
+    isCorruptedSlugQuestId(latest.questId, activeDraft);
   return {
-    questId: typeof latest.questId === "string" ? latest.questId : null,
+    questId: (typeof latest.questId === "string" && !isCorruptedQid)
+      ? latest.questId
+      : null,
     active: typeof latest.active === "string" ? latest.active : null,
     pendingRootQuest: typeof latest.pendingRootQuest === "boolean"
       ? latest.pendingRootQuest
@@ -310,10 +341,13 @@ export function reconcileDerivedState(
   reconstructedState: StoredState,
   ctx: ExtensionContext,
 ): StoredState {
-  // invariant: questId never null while drafting/active/pending — fix 2026-09-02
+  const isCorruptedQid = typeof reconstructedState.questId === "string" &&
+    isCorruptedSlugQuestId(reconstructedState.questId, reconstructedState.activeDraft);
+  // invariant: questId never null or corrupted while drafting/active/pending — fix 2026-09-02
   if (
     (reconstructedState.active || reconstructedState.activeDraft ||
-      reconstructedState.pendingRootQuest) && !reconstructedState.questId
+      reconstructedState.pendingRootQuest) &&
+    (!reconstructedState.questId || isCorruptedQid)
   ) {
     reconstructedState.questId = generateQuestId();
   }

@@ -16,7 +16,7 @@ import { updateUIStatus } from "./ui.ts";
 
 export function hasRequirementKeyword(text: string): boolean {
   const lower = text.toLowerCase();
-  return /\b(also add|change requirement|instead of|new requirement|must also|must not|actually need|do not|please change|refactor|fix|bug|broken|error|fail)\b/i
+  return /\b(also add|change requirement|instead of|new requirement|must also|must not|actually need|do not|please change|refactor|fix|bug|broken|error|fail|make sure|ensure)\b/i
     .test(lower);
 }
 

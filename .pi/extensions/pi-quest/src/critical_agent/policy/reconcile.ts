@@ -118,6 +118,11 @@ export async function reconcileReviewResult(
       targetState.criticalReviews = targetState.criticalReviews.slice(-20);
     }
 
+    targetState.inCriticalReview = false;
+    if (targetState.awaitingReview?.reviewId === correlationId) {
+      targetState.awaitingReview = null;
+    }
+
     if (isApproved) {
       return handleApprovedVerdict(
         snapshot,

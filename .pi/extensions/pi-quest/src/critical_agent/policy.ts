@@ -1056,14 +1056,14 @@ export async function checkAndTriggerPlanReview(
       boundaryKey: `draft:${draftSlug}:${hash}`,
     });
     const shouldRecordDraftKey = Boolean(
-      result && !result.inProgress && !result.skipped &&
+      result && !result.inProgress && !result.skipped && !result.superseded &&
         (result.review?.verdict || result.error),
     );
     if (shouldRecordDraftKey) {
       s.lastDraftReviewRequestKey = key;
       s.__lastDraftReviewKey = key;
     }
-    if (result?.review?.verdict) {
+    if (result?.review?.verdict && !result.superseded) {
       if (
         result.review.verdict === "APPROVE" ||
         result.review.verdict === "PASS"
@@ -1084,11 +1084,33 @@ export async function checkAndTriggerPlanReview(
               sendInternalAgentMessage(
                 pi,
                 `✅ **Draft '${draftSlug}' auto-promoted** to current quest (${res.qid || "new"}) after reviewer APPROVE. Research phase begins.`,
-                "steer",
+                "followUp",
+                "draft_auto_promoted",
+                undefined,
+                { triggerTurn: true, display: true },
+              );
+            } else {
+              tryLog(
+                "AUTO_PROMOTE_FAILED",
+                `draft '${draftSlug}' auto-promote failed: ${res.message || "unknown"}`,
+                { quest: draftSlug, error: res.message },
+              );
+              sendInternalAgentMessage(
+                pi,
+                `⚠️ **Draft '${draftSlug}' reviewer APPROVED**, but auto-promote could not complete: ${res.message || "validation failed"}. Say "go" to confirm promotion or review the draft manually.`,
+                "followUp",
+                "draft_promote_failed",
+                undefined,
+                { triggerTurn: true, display: true },
               );
             }
-            // If promoteDraft failed, leave draft in place for next review cycle
-          } catch {}
+          } catch (e: any) {
+            tryLog(
+              "AUTO_PROMOTE_FAILED",
+              `draft '${draftSlug}' auto-promote threw error: ${e?.message || String(e)}`,
+              { quest: draftSlug, error: e?.message },
+            );
+          }
         } else {
           // Notify agent to present approved draft plan to user for final "go"
           try {
@@ -1098,7 +1120,10 @@ export async function checkAndTriggerPlanReview(
               `✅ **Draft '${draftSlug}' reviewer APPROVED** (compliance check vs ${
                 s.draftPrompts?.length || 0
               } requirements). Present the finalized plan to the user now and await explicit "go" / confirmation before promoting to current quest.`,
-              "steer",
+              "followUp",
+              "draft_approved",
+              undefined,
+              { triggerTurn: true, display: true },
             );
           } catch {}
         }
@@ -1112,7 +1137,10 @@ export async function checkAndTriggerPlanReview(
               result.review.findings?.map((f: any) => f.issue).join("; ") ||
               "needs revision"
             } — edit .pi/quest/future/${draftSlug}.md (the \`## Implementation Plan\` section) and save; re-review triggers automatically. Do not use \`quest_update_state\` to modify a draft before APPROVE.`,
-            "steer",
+            "followUp",
+            "draft_revised",
+            undefined,
+            { triggerTurn: true, display: true },
           );
         } catch {}
       }

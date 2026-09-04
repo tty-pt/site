@@ -6,7 +6,7 @@ import {
   QUEST_CURRENT_DIR,
   QUEST_ROOT,
 } from "../constants.ts";
-import { questPath } from "../paths.ts";
+import { isFutureDraftPath, questPath } from "../paths.ts";
 import { state } from "../state.ts";
 import { ToolPermission } from "../types.ts";
 import {
@@ -500,20 +500,31 @@ export function isCriticalReviewSubagentInvocation(input?: any): boolean {
 }
 
 export function isJournalPath(normPath: string): boolean {
+  if (!normPath) return false;
+  const p = normPath.replace(/\\/g, "/");
   const activePath = state.questId ? questPath(state.questId) : "";
-  if (activePath && normPath === activePath) {
+  if (activePath && (p === activePath || p.endsWith(activePath))) {
+    return true;
+  }
+  if (isFutureDraftPath(p, state.activeDraft)) {
+    return true;
+  }
+  if (/(?:^|\/)\.pi\/quest\//.test(p)) {
     return true;
   }
   return (
-    normPath.startsWith(`${QUEST_CURRENT_DIR}/`) ||
-    normPath.startsWith(`${FUTURE_DIR}/`) ||
-    normPath.startsWith(`${QUEST_ARCHIVE_DIR}/`) ||
-    normPath.startsWith(`${QUEST_ROOT}/`) ||
-    normPath.startsWith(".pi/quest/") ||
-    normPath === NOTES_FILE ||
-    normPath === "MEMORY.md" ||
-    normPath === "SCRATCHPAD.md" ||
-    normPath.startsWith("daily/")
+    p.startsWith(`${QUEST_CURRENT_DIR}/`) ||
+    p.startsWith(`${FUTURE_DIR}/`) ||
+    p.startsWith(`${QUEST_ARCHIVE_DIR}/`) ||
+    p.startsWith(`${QUEST_ROOT}/`) ||
+    p.startsWith(".pi/quest/") ||
+    p === NOTES_FILE ||
+    p === "MEMORY.md" ||
+    p === "SCRATCHPAD.md" ||
+    p.startsWith("daily/") ||
+    p.endsWith("/MEMORY.md") ||
+    p.endsWith("/SCRATCHPAD.md") ||
+    p.endsWith(`/${NOTES_FILE}`)
   );
 }
 
@@ -527,7 +538,13 @@ export function classifyToolCall(
     norm === "edit" || norm === "write" || norm === "user_edit" ||
     norm === "user_write"
   ) {
-    const rawPath = typeof input?.path === "string" ? input.path : "";
+    const rawPath = typeof input?.path === "string"
+      ? input.path
+      : typeof input?.file === "string"
+      ? input.file
+      : typeof input?.target === "string"
+      ? input.target
+      : "";
     const normPath = rawPath.replace(/^\.\//, "").replace(/\\/g, "/");
     return isJournalPath(normPath) ? "journal" : "implementation";
   }

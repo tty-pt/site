@@ -489,13 +489,6 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     "user confirmed before draft reviewer approval",
                     { quest: state.activeDraft || "" },
                   );
-                  // Best-effort fire review (fire-and-forget, don't await)
-                  try {
-                    const { checkAndTriggerPlanReview } = await import(
-                      "../critical_agent/policy.ts"
-                    );
-                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
-                  } catch {}
                   // Force-promote: user's explicit "go" is an override
                   const { promoteDraft } = await import(
                     "../commands/promote.ts"
@@ -673,11 +666,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                         clearPendingReview(slug, "plan_review");
                       } catch {}
                     }
-                    // 3. Fire fresh review for new hash
-                    const { checkAndTriggerPlanReview } = await import(
-                      "../critical_agent/policy.ts"
-                    );
-                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
+                    // Note: Fresh review is NOT launched on user prompt;
+                    // draft reviews are only triggered by draft-file edits (handlers.ts).
                   }
                 } catch {}
                 // 53: auto-trigger when 7 evidences (perfection) even with 1 requirement; 54: log check; 55: only if plan drafted
@@ -736,25 +726,15 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     );
                   } catch {}
                 }
-                // AQM: when evidence >=7 and dpLen>=1, allow review even with placeholder plan to avoid deadlock (reviewer will REVISE with guidance)
+                // Retain threshold constants for observability and backward compatibility (#53)
                 const canAutoReviewDespitePlaceholder = dpLen >= 1 &&
                   evidence >= 7;
                 if (
                   (dpLen >= 2 || (dpLen >= 1 && evidence >= 7)) &&
                   (hasActionablePlanDraft || canAutoReviewDespitePlaceholder)
                 ) {
-                  try {
-                    const { isDraftReviewValid } = await import(
-                      "../critical_agent/policy.ts"
-                    );
-                    if (!isDraftReviewValid(state)) {
-                      const { checkAndTriggerPlanReview } = await import(
-                        "../critical_agent/policy.ts"
-                      );
-                      // fire-and-forget, deduped via __lastDraftReviewKey
-                      checkAndTriggerPlanReview(pi, ctx).catch(() => {});
-                    }
-                  } catch {}
+                  // Note: User prompt does NOT boot up draft reviewer.
+                  // Draft reviews are strictly triggered by draft-file edits (handlers.ts).
                 }
               }
               const hash = createHash("sha256")
@@ -998,18 +978,8 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   `📝 **Draft auto-created**: \`.pi/quest/future/${slug}.md\` — accumulating requirements while you talk. Requirements stay in draft (not yet part of active quest). When ready, the reviewer will validate compliance before the plan is presented; then say "go" to promote.`,
                   "steer",
                 );
-                // Change A: auto-launch reviewer if draft has actionable plan
-                try {
-                  const { isActionableDraftPlan } = await import(
-                    "../critical_agent/policy.ts"
-                  );
-                  if (isActionableDraftPlan(slug)) {
-                    const { checkAndTriggerPlanReview } = await import(
-                      "../critical_agent/policy.ts"
-                    );
-                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
-                  }
-                } catch {}
+                // Note: Reviewer is NOT booted up on draft creation;
+                // draft reviews are only triggered by draft-file edits (handlers.ts).
               }
             }
           } // close else { shouldCapturePrompt }
@@ -1105,46 +1075,47 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
           state.saveGeneration?.hash || "",
           pressureKey,
         );
-        if (cached) {
-          if (event && typeof event.systemPrompt === "string") {
-            return {
-              systemPrompt:
-                `${event.systemPrompt}\n\n${awarenessBlock}${cached}`,
-            };
-          }
+        let workflowInstructions = cached;
+        if (!workflowInstructions) {
+          const isSteadyState = !state.pendingRootQuest &&
+            !state.researchRequired &&
+            !state.reassessmentRequired &&
+            (() => {
+              try {
+                return compactionReady();
+              } catch {
+                return false;
+              }
+            })();
+          workflowInstructions =
+            isSteadyState && (state.researchRound || 1) > 1
+              ? getCompactWorkflowInstructions(resumeContext)
+              : getFullWorkflowInstructions(resumeContext);
+          setCachedWorkflow(
+            state.saveGeneration?.hash || "",
+            pressureKey,
+            workflowInstructions,
+          );
         }
-        const isSteadyState = !state.pendingRootQuest &&
-          !state.researchRequired &&
-          !state.reassessmentRequired &&
-          (() => {
-            try {
-              return compactionReady();
-            } catch {
-              return false;
-            }
-          })();
-        const workflowInstructions =
-          isSteadyState && (state.researchRound || 1) > 1
-            ? getCompactWorkflowInstructions(resumeContext)
-            : getFullWorkflowInstructions(resumeContext);
-        setCachedWorkflow(
-          state.saveGeneration?.hash || "",
-          pressureKey,
-          workflowInstructions,
-        );
 
         // 40: skill trigger — when no active quest but draft/pending exists, hint quest_journal (top, imperative, like vim ftplugin); 52: not while REASSESSMENT_PENDING blocks quest_update_state
-        const skillHint = !state.active &&
-            (state.pendingRootQuest || state.activeDraft) &&
-            !state.reassessmentRequired
-          ? `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`
-          : "";
+        let skillHint = "";
+        let steerMsg = "";
+        if (!state.active && !state.reassessmentRequired) {
+          if (state.activeDraft) {
+            skillHint = `Skill: quest_journal — DRAFT ACTIVE for '${state.activeDraft}'. Research requirements and author your proposal & implementation plan in \`.pi/quest/future/${state.activeDraft}.md\` (using edit, write, or quest_update_state). Saving the plan triggers the adversarial plan reviewer automatically. Code implementation is blocked until reviewer APPROVE and draft promotion.\n`;
+            steerMsg = `📝 Draft active for '${state.activeDraft}'. Author proposal & implementation plan in \`.pi/quest/future/${state.activeDraft}.md\` (via edit, write, or quest_update_state).`;
+          } else if (state.pendingRootQuest) {
+            skillHint = `Skill: quest_journal — CALL quest_update_state on turn 1 with research findings (goal, plan, findings). Do not run bash loops without establishing durable quest.\n`;
+            steerMsg = "📝 Skill quest_journal: establish durable quest via quest_update_state now";
+          }
+        }
         // steer so execution.log grep-able within turn0
-        if (skillHint) {
+        if (steerMsg) {
           try {
             sendInternalAgentMessage(
               pi,
-              "📝 Skill quest_journal: establish durable quest via quest_update_state now",
+              steerMsg,
               "steer",
             );
           } catch {}

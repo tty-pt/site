@@ -89,6 +89,7 @@ export function sendInternalAgentMessage(
   deliverAs: "steer" | "followUp" | "nextTurn" = "followUp",
   type?: string,
   correlationId?: string,
+  options?: { triggerTurn?: boolean; display?: boolean },
 ): boolean {
   logAgentMessageTransition(
     "AGENT_MESSAGE_ATTEMPTED",
@@ -97,19 +98,22 @@ export function sendInternalAgentMessage(
   );
   if (typeof pi.sendMessage === "function") {
     try {
+      const triggerTurn = options?.triggerTurn ?? false;
+      const display = options?.display ?? false;
       pi.sendMessage(
         {
           customType: "quest_journal",
           content: text,
-          display: false,
+          display,
         },
         {
           deliverAs,
+          triggerTurn,
         },
       );
       logAgentMessageTransition(
         "AGENT_MESSAGE_DELIVERED",
-        `agent message delivered (${deliverAs})`,
+        `agent message delivered (${deliverAs}, triggerTurn=${triggerTurn})`,
         { deliverAs, type, correlationId },
       );
       return true;

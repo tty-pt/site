@@ -14,7 +14,7 @@ import {
   reportAgentError,
   sendInternalAgentMessage,
 } from "./messaging.ts";
-import { fileExists, futureDraftPath, questPath } from "./paths.ts";
+import { fileExists, futureDraftPath, isFutureDraftPath, questPath } from "./paths.ts";
 import { persist } from "./persistence.ts";
 import { resolveActiveRole, resolveCallerSelf } from "./roles.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
@@ -378,6 +378,24 @@ Allowed for critical review:
         return;
       }
 
+      // Future draft file authoring/editing must NEVER be blocked under any gate or state.
+      // Modifying .pi/quest/future/*.md is plan proposal authoring/revision, NEVER code implementation.
+      if (
+        normTool === "write" || normTool === "edit" ||
+        normTool === "user_write" || normTool === "user_edit"
+      ) {
+        const toolPath = typeof event?.input?.path === "string"
+          ? event.input.path
+          : typeof event?.input?.file === "string"
+          ? event.input.file
+          : typeof event?.input?.target === "string"
+          ? event.input.target
+          : "";
+        if (isFutureDraftPath(toolPath, state.activeDraft)) {
+          return;
+        }
+      }
+
       // AWAITING_REVIEW scalar gate (A): plan_review / final_acceptance only, blocks writes but allows reads + quest_mark_saved
       const awGate = state.awaitingReview as
         | {
@@ -493,18 +511,16 @@ Required: await review verdict.`;
       // draft even when the implementation gate returns PROVISIONAL_RESEARCH_PENDING.
       // Without this, gates.ts blocks ALL writes while activeDraft is set, which
       // prevents the agent from authoring/revising the very plan it needs to approve.
-      if (state.activeDraft) {
-        const normTool = (toolName || "").toLowerCase().trim();
-        if (normTool === "write" || normTool === "edit" || normTool === "user_edit" || normTool === "user_write") {
-          const toolPath = typeof event?.input?.path === "string"
-            ? event.input.path
-            : typeof event?.input?.file === "string"
-            ? event.input.file
-            : "";
-          const normalizedPath = toolPath.replace(/\\/g, "/");
-          if (normalizedPath.endsWith(`future/${state.activeDraft}.md`)) {
-            return;
-          }
+      if (normTool === "write" || normTool === "edit" || normTool === "user_edit" || normTool === "user_write") {
+        const toolPath = typeof event?.input?.path === "string"
+          ? event.input.path
+          : typeof event?.input?.file === "string"
+          ? event.input.file
+          : typeof event?.input?.target === "string"
+          ? event.input.target
+          : "";
+        if (isFutureDraftPath(toolPath, state.activeDraft)) {
+          return;
         }
       }
 

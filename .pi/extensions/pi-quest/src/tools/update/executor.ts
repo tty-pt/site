@@ -36,6 +36,7 @@ import {
 } from "../../markdown.ts";
 import {
   fileExists,
+  futureDraftPath,
   listActiveQuestRecords,
   questDirPath,
   questPath,
@@ -64,6 +65,7 @@ import {
 } from "./planning.ts";
 import {
   checkAndTriggerDirectionReview,
+  checkAndTriggerPlanReview,
   getCustomSubagentRunner,
   isDraftReviewValid,
   isPlanReviewValidForState,
@@ -76,6 +78,7 @@ import {
 } from "../formatting.ts";
 
 async function resolveMarkTargetName(params: any): Promise<string | null> {
+  if (state.activeDraft) return state.activeDraft;
   const direct = params?.name
     ? slugify(params.name)
     : params?.questName
@@ -105,7 +108,8 @@ export async function executeMarkTool(
       details: { error: "no_active_quest", success: false },
     };
   }
-  if (!state.active) {
+  const isDraft = Boolean(state.activeDraft);
+  if (!state.active && !isDraft) {
     state.active = targetName;
     if (!Array.isArray(state.stack)) state.stack = [targetName];
     else if (!state.stack.includes(targetName)) state.stack.push(targetName);
@@ -113,6 +117,7 @@ export async function executeMarkTool(
   }
   const res = await verifyAndMarkSaved(pi, ctx, targetName);
   if (!res.success) {
+    const errorPath = isDraft ? futureDraftPath(targetName) : questPath(targetName);
     return {
       content: [
         {
@@ -123,12 +128,12 @@ export async function executeMarkTool(
       ],
       details: {
         error: "file_missing_or_unreadable",
-        path: questPath(targetName),
+        path: errorPath,
         success: false,
       },
     };
   }
-  return formatMarkSavedResponse(targetName, res);
+  return formatMarkSavedResponse(targetName, res, isDraft);
 }
 
 function syncQuestIdentity(
@@ -601,6 +606,90 @@ export async function executeUpdateStateTool(
     })();
     if (hasReviewer && !isValid) {
       const draftSlug = state.activeDraft;
+      const draftPath = futureDraftPath(draftSlug);
+
+      const hasDraftContent = Boolean(
+        params?.plan || params?.findings || params?.goal ||
+          params?.requirements || params?.assumptions || params?.openQuestions ||
+          params?.decisions || params?.remaining || params?.nextStep || params?.exactNextAction,
+      );
+
+      if (hasDraftContent) {
+        let content = "";
+        try {
+          if (existsSync(draftPath)) {
+            content = readFileSync(draftPath, "utf8");
+          } else {
+            const { FUTURE_QUEST_TEMPLATE } = await import("../../markdown.ts");
+            content = FUTURE_QUEST_TEMPLATE(draftSlug, params?.goal || "");
+          }
+        } catch {
+          const { FUTURE_QUEST_TEMPLATE } = await import("../../markdown.ts");
+          content = FUTURE_QUEST_TEMPLATE(draftSlug, params?.goal || "");
+        }
+
+        const updates = new Map<string, string>();
+        if (params?.goal) updates.set("Goals & Scope", String(params.goal).trim());
+        if (params?.requirements) {
+          const reqText = Array.isArray(params.requirements)
+            ? params.requirements.map((r: any) => `- ${r}`).join("\n")
+            : String(params.requirements).trim();
+          updates.set("Requirements", reqText);
+        }
+        if (params?.plan) {
+          const planText = Array.isArray(params.plan)
+            ? params.plan.map((s: any, i: number) => `${i + 1}. ${s}`).join("\n")
+            : String(params.plan).trim();
+          updates.set("Implementation Plan", planText);
+        }
+        if (params?.findings) {
+          const findingsText = Array.isArray(params.findings)
+            ? params.findings.map((f: any) => `- ${f}`).join("\n")
+            : String(params.findings).trim();
+          updates.set("Research Findings", findingsText);
+        }
+        if (params?.assumptions) {
+          const assumptionsText = Array.isArray(params.assumptions)
+            ? params.assumptions.map((a: any) => `- ${a}`).join("\n")
+            : String(params.assumptions).trim();
+          updates.set("Key Assumptions", assumptionsText);
+        }
+        if (params?.openQuestions) {
+          const questionsText = Array.isArray(params.openQuestions)
+            ? params.openQuestions.map((q: any) => `- ${q}`).join("\n")
+            : String(params.openQuestions).trim();
+          updates.set("Open Questions", questionsText);
+        }
+
+        const updated = spliceMarkdownSections(content, updates);
+        await writeFile(draftPath, updated, "utf8");
+        const newHash = createHash("sha256").update(updated).digest("hex").slice(0, 12);
+        state.draftLastSavedHash = newHash;
+
+        logQuestTransition(
+          "DRAFT_PLAN_EDITED",
+          `draft '${draftSlug}' updated via quest_update_state`,
+          { quest: draftSlug, hash: newHash },
+        );
+
+        await checkAndTriggerPlanReview(pi, ctx, "draft");
+        persist(pi, ctx);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Draft proposal '.pi/quest/future/${draftSlug}.md' updated with implementation plan & research findings. Independent adversarial plan review has been triggered. Awaiting reviewer verdict before draft can be promoted to active quest.`,
+          }],
+          details: {
+            success: true,
+            draft: draftSlug,
+            path: draftPath,
+            hash: newHash,
+            reviewTriggered: true,
+          },
+        };
+      }
+
       let hash = "unknown";
       try {
         const c = readFileSync(`${FUTURE_DIR}/${draftSlug}.md`, "utf8");
@@ -629,7 +718,7 @@ export async function executeUpdateStateTool(
         reassessmentRequired: Boolean(state.reassessmentRequired),
       });
       const msg =
-        `Draft '${draftSlug}' not yet reviewer-approved — author or revise the plan by editing .pi/quest/future/${draftSlug}.md (the \`## Implementation Plan\` section) directly. \`quest_update_state\` cannot modify or realize a draft before APPROVE. Only promotion via 'go' after APPROVE realizes the draft.`;
+        `Draft '${draftSlug}' not yet reviewer-approved — author or revise the plan by editing .pi/quest/future/${draftSlug}.md directly or via quest_update_state({ goal, plan, findings }). \`quest_update_state\` cannot realize a draft before APPROVE. Only promotion via 'go' after APPROVE realizes the draft.`;
       if (state.reassessmentRequired) {
         try {
           const { sendInternalAgentMessage } = await import(

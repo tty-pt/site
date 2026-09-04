@@ -91,7 +91,7 @@ export function handleUncertainVerdict(
       ? QuestErrorCode.PLAN_REVIEW_REQUIRED
       : QuestErrorCode.CRITICAL_REVIEW_FAILED,
     message: uncertainMsg,
-    deliverAs: "steer",
+    deliverAs: "followUp",
     requiredNextAction: actionsSummary ||
       "Perform targeted read/search investigation to establish conclusive evidence.",
     correlationId,
@@ -101,10 +101,15 @@ export function handleUncertainVerdict(
   sendInternalAgentMessage(
     pi,
     uncertainMsg,
-    "steer",
+    "followUp",
     isPlanReviewKind ? "plan_review_uncertain" : "critical_review_uncertain",
     correlationId,
+    { triggerTurn: true, display: true },
   );
+  targetState.inCriticalReview = false;
+  if (targetState.awaitingReview?.reviewId === correlationId) {
+    targetState.awaitingReview = null;
+  }
   persist(pi, ctx);
   return { success: false, available: true, review: reviewState };
 }

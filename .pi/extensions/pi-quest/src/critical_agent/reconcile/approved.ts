@@ -1,4 +1,5 @@
 import { logCriticalReviewTransition, logEvent } from "../../logging.ts";
+import { sendInternalAgentMessage } from "../../messaging.ts";
 import { persist } from "../../persistence.ts";
 import { ExtensionAPI, ExtensionContext, ReviewSnapshot } from "../../types.ts";
 
@@ -66,6 +67,10 @@ export function handleApprovedVerdict(
       targetState.lastPlanReviewBoundaryKey = snapshot.boundaryKey;
     }
   }
+  targetState.inCriticalReview = false;
+  if (targetState.awaitingReview?.reviewId === correlationId) {
+    targetState.awaitingReview = null;
+  }
   persist(pi, ctx);
   targetState.lastReviewedSaveCount = targetState.saveCount;
   reviewState.reviewedStateVersion.saveCount = targetState.saveCount;
@@ -75,6 +80,14 @@ export function handleApprovedVerdict(
     targetState.lastPlanReviewApproval.saveCount = targetState.saveCount;
     targetState.lastPlanReviewApproval.saveHash = targetState.lastSavedHash ||
       snapshot.stateHash;
+    sendInternalAgentMessage(
+      pi,
+      `✅ **Plan review APPROVED** for quest '${slug}' (plan version ${snapshot.planVersion}). Plan gate cleared; proceed with implementation.`,
+      "followUp",
+      "plan_review_approved",
+      correlationId,
+      { triggerTurn: true, display: true },
+    );
   }
   return { success: true, available: true, review: reviewState };
 }

@@ -6,7 +6,7 @@ import { invalidatePreparedCompactionTransaction } from "./compaction/transactio
 import { logPersistenceTransition } from "./logging.ts";
 import { logError, reportAgentError } from "./messaging.ts";
 import { futureDraftPath, questPath, resolveQuestRecordBySlug } from "./paths.ts";
-import { getState, setSessionState, snapshotState, state } from "./state.ts";
+import { ensureQuestId, getState, setSessionState, snapshotState, state } from "./state.ts";
 import {
   ConsistencyAuditResult,
   ExtensionAPI,
@@ -77,17 +77,22 @@ export async function verifyAndMarkSaved(
   let targetQid: string | null = null;
   if (expectedSlug) {
     const record = await resolveQuestRecordBySlug(expectedSlug);
-    const cand = record
-      ? record.qid
-      : ((s.active === expectedSlug || state.active === expectedSlug) &&
-          (s.questId || state.questId)
-        ? (s.questId || state.questId)
-        : expectedSlug);
-    targetQid = cand || null;
+    if (record) {
+      targetQid = record.qid;
+    } else if (s.active === expectedSlug || state.active === expectedSlug) {
+      targetQid = s.questId || state.questId || ensureQuestId(ctx);
+    } else {
+      targetQid = s.questId || state.questId || null;
+    }
   } else {
     targetQid = s.questId || state.questId || null;
   }
-  if (targetQid) {
+  const isDraftSlug = Boolean(
+    (s.activeDraft && s.activeDraft === expectedSlug) ||
+    (state.activeDraft && state.activeDraft === expectedSlug) ||
+    (expectedSlug && existsSync(futureDraftPath(expectedSlug)))
+  );
+  if (targetQid && !isDraftSlug) {
     s.questId = targetQid;
     state.questId = targetQid;
   }
@@ -125,9 +130,11 @@ export async function verifyAndMarkSaved(
       consistency?: ConsistencyAuditResult;
     }
   > => {
-    const isDraft = Boolean(state.activeDraft);
+    const draftName = s.activeDraft || state.activeDraft ||
+      (expectedSlug && (expectedSlug === s.activeDraft || expectedSlug === state.activeDraft || existsSync(futureDraftPath(expectedSlug))) ? expectedSlug : null);
+    const isDraft = Boolean(draftName);
     const p = isDraft
-      ? futureDraftPath(state.activeDraft!)
+      ? futureDraftPath(draftName!)
       : questPath(targetQid);
     let fp = await memoFileFingerprint(p);
     if (!fp) fp = (await computeFileFingerprint(p)) as FileFingerprint | null;

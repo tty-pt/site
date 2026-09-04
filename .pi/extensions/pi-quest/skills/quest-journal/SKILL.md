@@ -20,7 +20,7 @@ Per `AGENTS.md:63` §7, `.pi/quest/current/<qid>/quest.md` is the single source 
    })
    ```
    Include `## Original request` verbatim + `## Build & Run Commands` + `## TDD & Quality Checklist`. Validates `QUEST_TEMPLATE`. This call deterministically writes `.pi/quest/current/<qid>/quest.md`.
-3. **Implement against the quest** — gate `GATE_BLOCKED PROVISIONAL_RESEARCH_PENDING` (`persistence.ts:87`) rejects edits until the quest is RESEARCH_COMPLETE. If you see `Draft exists in .pi/quest/future/<slug>.md — call quest_update_state (not quest_mark_saved or bash mkdir)` then single-call `quest_update_state({researchComplete:true})` → `STATE_UPDATE_ACCEPTED` + `DRAFT_DISCARDED` + `future-archive/` (`executor.ts:63 syncQuestIdentity`).
+3. **Implement against the quest** — gate `GATE_BLOCKED PROVISIONAL_RESEARCH_PENDING` (`persistence.ts:87`) rejects code edits until the quest is RESEARCH_COMPLETE. When a draft exists in `.pi/quest/future/<slug>.md`, author the proposal & implementation plan in that draft (via `edit`, `write`, or `quest_update_state`). The draft plan is reviewed by an adversarial subagent and promoted after reviewer APPROVE.
 4. **Archive when done** — `quest_archive({questName, compact:true})` on `COMPLETED`/`FAILED` → `.pi/quest/archive/<qid>.zip` + `quest/diagnostic/current-run/`. Bundle with `npm --prefix .pi/extensions/pi-quest run zip [--quest=<qid>]`.
 
 ## Commands (14 — `src/commands/install.ts`)
@@ -60,7 +60,7 @@ See `docs/EXTENSIONS.md §2` for command reference.
 
 ## Guardrails
 
-- Forbid `.todo`/scratchpads/`bash mkdir` for quest files; enforce `quest_update_state` when `FUTURE_DIR/*.md` exists.
+- Forbid `.todo`/scratchpads/`bash mkdir` for quest files; drafts are authored in `.pi/quest/future/*.md` and active quests in `.pi/quest/current/<qid>/quest.md`.
 - Remind `SAVE PENDING` before `70%/85%` context escalation and compaction (`saveCount > compactCount`).
 - Session injection every turn: timestamp, `ctx.cwd`, `.git/HEAD` branch, active quest `qid`/freshness, resume context, `AGENTS.md` guidelines.
 - Compaction safety: `session_start` self-installs this skill (`src/index.ts:84` copies `skills/quest-journal/SKILL.md` → `.pi/skills/quest-journal/SKILL.md`).

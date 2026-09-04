@@ -1,4 +1,4 @@
-import { questPath } from "../paths.ts";
+import { futureDraftPath, questPath } from "../paths.ts";
 
 export function formatMarkSavedResponse(
   targetName: string,
@@ -7,7 +7,9 @@ export function formatMarkSavedResponse(
     hash?: string;
     consistency?: { consistent: boolean; issues: string[] };
   },
+  isDraft = false,
 ): { content: Array<{ type: "text"; text: string }>; details: any } {
+  const filePath = isDraft ? futureDraftPath(targetName) : questPath(targetName);
   let auditWarning = "";
   if (
     res.consistency && !res.consistency.consistent &&
@@ -15,7 +17,7 @@ export function formatMarkSavedResponse(
   ) {
     auditWarning =
       `\n\n⚠️ Consistency Audit Notice: Stale or contradictory state detected in '${
-        questPath(targetName)
+        filePath
       }':\n${
         res.consistency.issues.map((i: string) => `  - ${i}`).join("\n")
       }\nTo fix: ensure Files Modified lists every file mentioned in Completed/Latest Reassessment (e.g. quest_update_state({ filesModified: ["path/to/file.c", ...] })). This is advisory only — saves still succeed.`;
@@ -26,7 +28,7 @@ export function formatMarkSavedResponse(
       {
         type: "text",
         text: `Quest file '${
-          questPath(targetName)
+          filePath
         }' verified and marked as saved in the journal (gen #${res.count}, hash: ${
           res.hash || ""
         }).${auditWarning}`,

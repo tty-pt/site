@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import plugin, {
   acceptRootConfirmation,
   asyncContext,
+  barIcon,
   buildCriticalReviewPrompt,
   canImplement,
   canToolExecuteInCriticalReview,
@@ -11,7 +12,9 @@ import plugin, {
   classifyToolCall,
   clearActiveReviews,
   ensureQuestId,
+  executeMarkTool,
   executeUpdateStateTool,
+  formatQuestShort,
   type ExtensionAPI,
   type ExtensionContext,
   getActiveReviews,
@@ -22,6 +25,7 @@ import plugin, {
   isActionableDraftPlan,
   isActionablePlanContent,
   isDraftRevisionOutstanding,
+  isFutureDraftPath,
   isPlanReviewValidForState,
   isSubagentAvailable,
   isSubagentToolRegistered,
@@ -29,6 +33,7 @@ import plugin, {
   promoteDraft,
   QuestErrorCode,
   readQuestLog,
+  reconstruct,
   requestPlanReview,
   setCustomSubagentRunner,
   snapshotState,
@@ -2598,6 +2603,856 @@ REQUIRED REVISIONS:
     },
   );
 
+  // -----------------------------------------------------------------------
+  // T-DRAFT-PROMPT-ISOLATION: User prompt during drafting does NOT trigger plan_review; draft-file edit DOES
+  // -----------------------------------------------------------------------
+  await t.step(
+    "28. user prompt during drafting does NOT trigger plan_review, but draft-file edit DOES",
+    async () => {
+      const { mockPi, setAllTools, handlers } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_28");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "prompt-vs-edit-test";
+      const qid = `qid_28_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+      s.draftPrompts = ["initial prompt"];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(
+        draftPath,
+        `# Draft: ${slug}\n\n## Requirements\n- req 1\n\n## Implementation Plan\n1. Initial plan step\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      let reviewCalls = 0;
+      setCustomSubagentRunner(async () => {
+        reviewCalls++;
+        return `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      });
+
+      // 1. Send a user prompt (refinement / discussion) during drafting via before_agent_start
+      const beforeHandlers = handlers["before_agent_start"] || [];
+      for (const handler of beforeHandlers) {
+        await asyncContext.run(ctx, () =>
+          handler({ prompt: "Also make sure to handle edge cases" }, ctx)
+        );
+      }
+
+      // Wait a moment for any async calls to potentially fire
+      await new Promise((r) => setTimeout(r, 100));
+
+      // User prompt must NOT have triggered plan_review
+      assert.strictEqual(
+        reviewCalls,
+        0,
+        "user prompt during drafting must NOT trigger plan reviewer",
+      );
+
+      // 2. Now simulate editing the draft file via handleToolResult
+      await asyncContext.run(ctx, () =>
+        handleToolResult(
+          {
+            toolName: "edit",
+            input: { path: draftPath, oldString: "Initial plan step", newString: "Updated plan step" },
+            content: "edited",
+            isError: false,
+          },
+          ctx,
+          mockPi as any,
+        )
+      );
+
+      // Wait for review to trigger from draft-file edit
+      for (let i = 0; i < 50; i++) {
+        if (reviewCalls >= 1) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      assert.ok(
+        reviewCalls >= 1,
+        "draft-file edit MUST trigger plan reviewer",
+      );
+
+      setCustomSubagentRunner(null);
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-REVIEWER-TURN-RESUMPTION: Reviewer completion wakes idle main agent
+  // -----------------------------------------------------------------------
+  await t.step(
+    "29. reviewer completion dispatches message with triggerTurn: true and deliverAs: followUp to wake idle agent",
+    async () => {
+      const { mockPi, setAllTools, agentMessages } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_29");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "turn-resumption-test";
+      const qid = `qid_29_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(
+        draftPath,
+        `# Draft: ${slug}\n\n## Requirements\n- req 1\n\n## Implementation Plan\n1. Step one\n2. Step two\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      // Case A: Reviewer APPROVE triggers turn resumption with deliverAs: followUp and triggerTurn: true
+      agentMessages.length = 0;
+      setCustomSubagentRunner(async () => {
+        return `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      });
+
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+
+      // Wait for review completion and message delivery
+      for (let i = 0; i < 50; i++) {
+        if (agentMessages.length >= 1) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      assert.ok(
+        agentMessages.length >= 1,
+        "completion message must be delivered to agentMessages",
+      );
+      const approveMsg = agentMessages.find((m) =>
+        String(m.msg).includes("auto-promoted") || String(m.msg).includes("APPROVED")
+      );
+      assert.ok(approveMsg, "must deliver approval message");
+      assert.strictEqual(
+        approveMsg.options?.deliverAs,
+        "followUp",
+        "approval completion must use deliverAs: 'followUp'",
+      );
+      assert.strictEqual(
+        approveMsg.options?.triggerTurn,
+        true,
+        "approval completion must set triggerTurn: true to wake idle agent",
+      );
+      assert.strictEqual(
+        approveMsg.display,
+        true,
+        "approval completion must set display: true for visibility in chat",
+      );
+
+      // Case B: Reviewer REVISE triggers turn resumption with deliverAs: followUp and triggerTurn: true
+      const reviseSlug = "turn-resumption-revise";
+      const reviseQid = `qid_29_${reviseSlug}`;
+      s.questId = reviseQid;
+      s.activeDraft = reviseSlug;
+      s.lastDraftReviewRequestKey = null;
+      s.lastPlanReviewApproval = null;
+      s.draftLastReviewKey = null;
+      const reviseDraftPath = `${futureDir}/${reviseSlug}.md`;
+      await writeFile(
+        reviseDraftPath,
+        `# Draft: ${reviseSlug}\n\n## Requirements\n- req 1\n\n## Implementation Plan\n1. Incomplete step\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${reviseQid}`, { recursive: true });
+
+      agentMessages.length = 0;
+      setCustomSubagentRunner(async () => {
+        return `PASS 1:\nProvisional Judgment: REVISE\nPASS 2:\n- Revised Judgment: REVISE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: UNSATISFIED\nVERDICT: REVISE\nSEVERITY: CRITICAL\nFINDINGS:\n- Missing validation\nREQUIRED REVISIONS:\n- Add validation`;
+      });
+
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+
+      for (let i = 0; i < 50; i++) {
+        if (agentMessages.some((m) => String(m.msg).includes("REVISE"))) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      const reviseMsg = agentMessages.find((m) =>
+        String(m.msg).includes("REVISE")
+      );
+      assert.ok(reviseMsg, "must deliver revise message");
+      assert.strictEqual(
+        reviseMsg.options?.deliverAs,
+        "followUp",
+        "revise completion must use deliverAs: 'followUp'",
+      );
+      assert.strictEqual(
+        reviseMsg.options?.triggerTurn,
+        true,
+        "revise completion must set triggerTurn: true to wake idle agent",
+      );
+      assert.strictEqual(
+        reviseMsg.display,
+        true,
+        "revise completion must set display: true for visibility in chat",
+      );
+
+      // Case C: sendInternalAgentMessage default behavior across deliverAs modes
+      const testTransport: any = {
+        messages: [] as any[],
+        sendMessage(msg: any, opts: any) {
+          this.messages.push({ msg, opts });
+        },
+      };
+
+      const { sendInternalAgentMessage } = await import("../src/messaging.ts");
+      sendInternalAgentMessage(testTransport, "followUp msg", "followUp");
+      sendInternalAgentMessage(testTransport, "steer msg", "steer");
+      sendInternalAgentMessage(testTransport, "nextTurn msg", "nextTurn");
+      sendInternalAgentMessage(testTransport, "explicit true", "followUp", undefined, undefined, { triggerTurn: true });
+      sendInternalAgentMessage(testTransport, "explicit false", "followUp", undefined, undefined, { triggerTurn: false });
+
+      assert.strictEqual(testTransport.messages[0].opts.triggerTurn, false, "followUp defaults safely to triggerTurn: false");
+      assert.strictEqual(testTransport.messages[1].opts.triggerTurn, false, "steer defaults safely to triggerTurn: false");
+      assert.strictEqual(testTransport.messages[2].opts.triggerTurn, false, "nextTurn defaults safely to triggerTurn: false");
+      assert.strictEqual(testTransport.messages[3].opts.triggerTurn, true, "explicit triggerTurn: true is respected");
+      assert.strictEqual(testTransport.messages[4].opts.triggerTurn, false, "explicit triggerTurn: false is respected");
+
+      setCustomSubagentRunner(null);
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(`${currentDir}/${reviseQid}`, { recursive: true, force: true });
+      await rm(draftPath, { force: true });
+      await rm(reviseDraftPath, { force: true });
+      await mkdir(futureDir, { recursive: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  await t.step(
+    "30. draft plan review is not superseded by session saveCount/stateHash advance, and genuine supersede notifies agent",
+    async () => {
+      const { mockPi, setAllTools, agentMessages } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_30");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-not-superseded-test";
+      const qid = `qid_30_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+      s.lastPlanReviewApproval = null;
+      s.draftLastReviewKey = null;
+      s.lastDraftReviewRequestKey = null;
+      s.saveCount = 1;
+      s.lastSavedHash = "hash_initial";
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(
+        draftPath,
+        `# Draft: ${slug}\n\n## Requirements\n- req 1\n\n## Implementation Plan\n1. Step one\n2. Step two\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+
+      // Simulate: while the subagent runs, main agent increments saveCount and updates lastSavedHash
+      let ranSubagent = false;
+      setCustomSubagentRunner(async () => {
+        ranSubagent = true;
+        // Main agent called quest_mark_saved in background
+        s.saveCount = 5;
+        s.lastSavedHash = "hash_advanced_by_quest_mark_saved";
+        return `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      });
+
+      agentMessages.length = 0;
+      const result = await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+
+      assert.ok(ranSubagent, "subagent must run");
+      assert.strictEqual(result?.superseded, undefined, "review must not be superseded by session save count advance");
+      assert.strictEqual(result?.review?.verdict, "APPROVE", "verdict must be APPROVE");
+
+      // Auto-promote should have succeeded
+      assert.ok(
+        agentMessages.some((m) => String(m.msg).includes("auto-promoted")),
+        "draft must be auto-promoted after APPROVE despite saveCount advance",
+      );
+
+      // Part B: Genuine draft file change DOES supersede and DISPATCHES notification
+      const genSlug = "genuine-supersede-test";
+      const genQid = `qid_30_${genSlug}`;
+      s.questId = genQid;
+      s.activeDraft = genSlug;
+      s.lastPlanReviewApproval = null;
+      s.draftLastReviewKey = null;
+      s.lastDraftReviewRequestKey = null;
+
+      const genDraftPath = `${futureDir}/${genSlug}.md`;
+      await writeFile(
+        genDraftPath,
+        `# Draft: ${genSlug}\n\n## Implementation Plan\n1. Step A\n`,
+        "utf8",
+      );
+
+      const snapshot: any = {
+        questId: genSlug,
+        sessionId: "sess_30",
+        reviewId: "rev_test_30_gen",
+        reviewKind: "plan_review",
+        planVersion: 1,
+        boundaryKey: `draft:${genSlug}:oldhash12345`,
+        saveGeneration: 1,
+        stateHash: "somehash",
+      };
+
+      const { isReviewSnapshotCurrent } = await import("../src/critical_agent/snapshot.ts");
+      const currentness = isReviewSnapshotCurrent(snapshot, s);
+      assert.strictEqual(currentness.current, false, "draft review must be superseded when draft boundary drifted");
+
+      // Reconcile path must mark review as superseded and NOT deliver stale findings to agent (Invariant 4)
+      agentMessages.length = 0;
+      const { reconcileReviewResult } = await import("../src/critical_agent/policy/reconcile.ts");
+      s.awaitingReview = {
+        kind: "plan_review",
+        reviewId: "rev_test_30_gen",
+        since: Date.now(),
+      };
+
+      const recRes = await reconcileReviewResult(
+        snapshot,
+        { verdict: "APPROVE", confidence: 9, reasoning: "looks good", issues: [] },
+        s,
+        "rev_test_30_gen",
+        mockPi,
+        ctx,
+      );
+
+      assert.strictEqual(recRes.superseded, true, "reconcile must flag review as superseded");
+      assert.strictEqual(s.awaitingReview, null, "awaitingReview must be cleared");
+      assert.strictEqual(agentMessages.length, 0, "stale findings must not be delivered to agent messages");
+
+      // Cleanup
+      setCustomSubagentRunner(null);
+      await rm(draftPath, { force: true });
+      await rm(genDraftPath, { force: true });
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(`${currentDir}/${genQid}`, { recursive: true, force: true });
+      await mkdir(".pi/quest/future", { recursive: true });
+    },
+  );
+
+  await t.step(
+    "31. draft file write permissions, absolute path classification, and draft_revision phase preservation",
+    async () => {
+      const { mockPi, handlers } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_31");
+      plugin(mockPi);
+
+      const emitToolCall = async (toolName: string, input: any) => {
+        for (const cb of handlers["tool_call"] || []) {
+          const res = await cb({ toolName, input }, ctx);
+          if (res?.block) return res;
+        }
+        return undefined;
+      };
+
+      const s = getState(ctx);
+      const slug = "test-draft-perms";
+      const qid = `qid_31_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const absDraftPath = `/home/quirinpa/site/.pi/quest/future/${slug}.md`;
+      const relDraftPath = `.pi/quest/future/${slug}.md`;
+
+      // 1. isFutureDraftPath helper checks
+      assert.strictEqual(isFutureDraftPath(relDraftPath, slug), true, "relative path must match");
+      assert.strictEqual(isFutureDraftPath(absDraftPath, slug), true, "absolute path must match");
+      assert.strictEqual(isFutureDraftPath(absDraftPath, null), true, "absolute path must match even with null activeDraft");
+      assert.strictEqual(isFutureDraftPath("src/main.c", slug), false, "code path must not match");
+
+      // 2. classifyToolCall checks
+      assert.strictEqual(
+        classifyToolCall("edit", { path: absDraftPath }),
+        "journal",
+        "absolute draft path edit must be classified as journal",
+      );
+      assert.strictEqual(
+        classifyToolCall("write", { file: absDraftPath }),
+        "journal",
+        "absolute draft path write via file prop must be classified as journal",
+      );
+      assert.strictEqual(
+        classifyToolCall("edit", { path: "src/main.c" }),
+        "implementation",
+        "regular code edit must remain implementation",
+      );
+
+      // 3. Tool gating: draft edits allowed during AWAITING_REVIEW
+      s.awaitingReview = {
+        kind: "plan_review",
+        reviewId: "rev_31_active",
+        since: Date.now(),
+      };
+
+      const awaitingBlock = await asyncContext.run(
+        ctx,
+        () => emitToolCall("edit", { path: absDraftPath }),
+      );
+      assert.strictEqual(
+        awaitingBlock,
+        undefined,
+        "draft edit must NOT be blocked during AWAITING_REVIEW",
+      );
+
+      // Verify code edit IS blocked during AWAITING_REVIEW
+      const codeBlock = await asyncContext.run(
+        ctx,
+        () => emitToolCall("edit", { path: "src/main.c" }),
+      );
+      assert.ok(codeBlock && codeBlock.block, "code edit must still be blocked during AWAITING_REVIEW");
+
+      // 4. Tool gating: draft edits allowed during RESEARCH_PENDING / when promoted
+      s.awaitingReview = null;
+      s.activeDraft = null;
+      s.active = "other-quest";
+      s.researchRequired = true;
+      s.researchComplete = false;
+
+      const researchBlock = await asyncContext.run(
+        ctx,
+        () => emitToolCall("edit", { path: absDraftPath }),
+      );
+      assert.strictEqual(
+        researchBlock,
+        undefined,
+        "draft edit must NOT be blocked during RESEARCH_PENDING",
+      );
+
+      // 5. Gating state: DRAFT_PENDING vs DRAFT_REVISION_PENDING
+      s.active = "";
+      s.activeDraft = slug;
+      s.lastCriticalReview = null;
+      s.lastPlanReviewApproval = null;
+
+      const draftPendingReason = getImplementationBlockReason(s, ctx);
+      assert.strictEqual(
+        draftPendingReason.stateName,
+        "DRAFT_PENDING",
+        "unreviewed draft must return DRAFT_PENDING",
+      );
+      assert.strictEqual(
+        draftPendingReason.code,
+        QuestErrorCode.DRAFT_REVIEW_REQUIRED,
+        "code must be DRAFT_REVIEW_REQUIRED",
+      );
+
+      // Simulate reviewer returning REVISE
+      s.lastCriticalReview = {
+        id: "rev_31_revised",
+        questId: qid,
+        kind: "plan_review",
+        reviewedStateVersion: { planVersion: 1, saveHash: null, saveCount: 0 },
+        verdict: "REVISE",
+        severity: "MAJOR",
+        findings: [{ issue: "Needs concrete targets", evidence: "index.c:42" }],
+        requiredActions: ["Add targets"],
+        resolved: false,
+        timestamp: Date.now(),
+        snapshot: {
+          questId: qid, sessionId: "s", reviewId: "rev_31_revised",
+          reviewKind: "plan_review", planVersion: 1,
+          boundaryKey: `draft:${slug}:initialhash`, saveGeneration: 0,
+          stateHash: null, originalUserRequest: "test",
+          currentUnderstanding: "", assumptions: "", plan: "",
+          planRevisions: "", findings: "", filesChanged: "",
+          relevantDiff: "", testStatus: "", nextAction: "",
+          createdAt: Date.now(),
+        },
+      };
+
+      const reviseReason = getImplementationBlockReason(s, ctx);
+      assert.strictEqual(
+        reviseReason.stateName,
+        "DRAFT_REVISION_PENDING",
+        "draft after REVISE must return DRAFT_REVISION_PENDING",
+      );
+
+      // Simulate file edit (hash changes, snapshot is no longer current)
+      // Must still remain DRAFT_REVISION_PENDING until an approval arrives!
+      if (s.lastCriticalReview?.snapshot) {
+        s.lastCriticalReview.snapshot.boundaryKey = `draft:${slug}:old_stale_hash`;
+      }
+      const afterEditReason = getImplementationBlockReason(s, ctx);
+      assert.strictEqual(
+        afterEditReason.stateName,
+        "DRAFT_REVISION_PENDING",
+        "draft must remain DRAFT_REVISION_PENDING even after file edit drift until approved",
+      );
+
+      // Once approved, revision is no longer outstanding
+      s.lastPlanReviewApproval = {
+        questId: qid,
+        planVersion: 1,
+        reviewId: "rev_31_approved",
+        boundaryKey: `draft:${slug}:newhash`,
+        saveHash: "newhash",
+        saveCount: 1,
+        timestamp: Date.now(),
+      };
+      const approvedReason = getImplementationBlockReason(s, ctx);
+      assert.strictEqual(
+        approvedReason.stateName,
+        "DRAFT_PENDING",
+        "draft after approval must return DRAFT_PENDING, not DRAFT_REVISION_PENDING",
+      );
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // 32. quest_update_state authors draft content directly into future/
+  // without promoting to active, triggers draft review, and quest_mark_saved preserves activeDraft
+  // -----------------------------------------------------------------------
+  await t.step(
+    "32. quest_update_state authors draft content in future/ without promoting to active, triggers draft review, and quest_mark_saved preserves activeDraft",
+    async () => {
+      const { mockPi, handlers, agentMessages } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_32");
+      plugin(mockPi);
+
+      const s = getState(ctx);
+      const slug = "author-draft-test";
+      const qid = "1788550749";
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+      s.reassessmentRequired = false;
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(
+        draftPath,
+        `# Draft: ${slug}\n\n## Implementation Plan\n1. Initial skeleton\n`,
+        "utf8",
+      );
+
+      let reviewerCalled = false;
+      setCustomSubagentRunner(async () => {
+        reviewerCalled = true;
+        return `PASS 1:\nProvisional Judgment: REVISE\nPASS 2:\n- Revised Judgment: REVISE\nPROMPT-COMPLIANCE:\n- Requirement: error handling -> Status: UNSATISFIED\nVERDICT: REVISE\nSEVERITY: MAJOR\nFINDINGS:\n- Plan missing error handling\nREQUIRED REVISIONS:\n- Add error handling`;
+      });
+
+      // 1. Verify before_agent_start does NOT emit "establish durable quest" when drafting
+      const beforeHandlers = handlers["before_agent_start"] || [];
+      agentMessages.length = 0;
+      let promptRes: any = null;
+      for (const h of beforeHandlers) {
+        promptRes = await asyncContext.run(ctx, () =>
+          h({ systemPrompt: "base prompt" }, ctx)
+        );
+      }
+      assert.strictEqual(
+        agentMessages.some((m) =>
+          typeof m.msg === "string" &&
+          m.msg.includes("establish durable quest via quest_update_state now")
+        ),
+        false,
+        "before_agent_start must not tell agent to establish durable quest when activeDraft is set",
+      );
+      assert.ok(
+        agentMessages.some((m) =>
+          typeof m.msg === "string" &&
+          m.msg.includes(`Draft active for '${slug}'`)
+        ),
+        "before_agent_start should steer agent to author proposal in future draft file",
+      );
+      assert.ok(
+        promptRes?.systemPrompt?.includes(`DRAFT ACTIVE for '${slug}'`),
+        "before_agent_start should include draft skill hint in system prompt",
+      );
+
+      // 2. Call quest_update_state with draft implementation plan and research findings
+      const updateRes = await asyncContext.run(ctx, () =>
+        executeUpdateStateTool(
+          {
+            name: slug,
+            goal: "Refactor consumer side complexity",
+            requirements: ["Decouple renderer", "Pure C state"],
+            plan: [
+              "1. Inspect consumer dependencies",
+              "2. Introduce boundary abstraction",
+              "3. Verify SSR rendering",
+            ],
+            findings: [
+              "Renderer calls axil directly in 3 places",
+              "Boundary abstraction reduces coupling",
+            ],
+          },
+          mockPi,
+          ctx,
+        )
+      );
+
+      assert.strictEqual(
+        updateRes.details?.success,
+        true,
+        `quest_update_state should succeed for draft: ${JSON.stringify(updateRes)}`,
+      );
+      assert.strictEqual(
+        s.activeDraft,
+        slug,
+        "state.activeDraft must remain set to draft slug",
+      );
+      assert.strictEqual(
+        s.active,
+        "",
+        "state.active must NOT be set or promoted before approval",
+      );
+
+      // Verify draft file content on disk has updated sections
+      const updatedContent = await readFile(draftPath, "utf8");
+      assert.ok(
+        updatedContent.includes("## Goals & Scope"),
+        "draft file must contain Goals & Scope",
+      );
+      assert.ok(
+        updatedContent.includes("Refactor consumer side complexity"),
+        "draft file must contain updated goal",
+      );
+      assert.ok(
+        updatedContent.includes("## Implementation Plan"),
+        "draft file must contain Implementation Plan",
+      );
+      assert.ok(
+        updatedContent.includes("1. Inspect consumer dependencies"),
+        "draft file must contain updated plan steps",
+      );
+      assert.ok(
+        updatedContent.includes("## Research Findings"),
+        "draft file must contain Research Findings",
+      );
+      assert.ok(
+        updatedContent.includes("Renderer calls axil directly in 3 places"),
+        "draft file must contain research findings",
+      );
+
+      // Verify reviewer was triggered
+      assert.strictEqual(
+        reviewerCalled,
+        true,
+        "adversarial plan review must be triggered when draft plan is authored via quest_update_state",
+      );
+
+      // 3. Call executeMarkTool and verify activeDraft is preserved and state.active is not corrupted
+      const markRes = await asyncContext.run(ctx, () =>
+        executeMarkTool(
+          { name: "consumer-complexity-abstraction" },
+          mockPi,
+          ctx,
+        )
+      );
+
+      assert.ok(
+        !markRes.details?.error,
+        `executeMarkTool must not fail for draft: ${JSON.stringify(markRes)}`,
+      );
+      assert.ok(
+        markRes.details?.hash,
+        "executeMarkTool must return hash for draft",
+      );
+      assert.ok(
+        markRes.content[0]?.text?.includes(slug),
+        "executeMarkTool response must reference draft slug",
+      );
+      assert.strictEqual(
+        s.activeDraft,
+        slug,
+        "state.activeDraft must remain set after quest_mark_saved",
+      );
+      assert.strictEqual(
+        s.active,
+        "",
+        "state.active must NOT be corrupted to arbitrary name during drafting",
+      );
+
+      // Cleanup
+      setCustomSubagentRunner(null);
+      await rm(draftPath, { force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // 33. awaitingReview cleared on review approval (no persistent hourglass)
+  // and questId strictly protected as numeric timestamp against slug corruption
+  // -----------------------------------------------------------------------
+  await t.step(
+    "33. awaitingReview cleared on review approval (no persistent hourglass) and questId strictly protected as numeric timestamp against slug corruption",
+    async () => {
+      const { mockPi } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_33");
+      plugin(mockPi);
+
+      const s = getState(ctx);
+      const slug = "look-consumer-side-code-lot-complexity";
+      const qid = "1788552255";
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(
+        draftPath,
+        `# Draft: ${slug}\n\n## Implementation Plan\n1. Step A\n`,
+        "utf8",
+      );
+
+      // Part A: executeMarkTool on draft does NOT mutate questId to the draft slug
+      const markRes = await asyncContext.run(ctx, () =>
+        executeMarkTool({ name: slug }, mockPi, ctx)
+      );
+      assert.ok(!markRes.details?.error, "executeMarkTool should succeed for draft");
+      assert.strictEqual(
+        s.questId,
+        qid,
+        "s.questId must remain the numeric timestamp and not be overwritten by the draft slug",
+      );
+      const formattedStatus = formatQuestShort(s, true, ctx);
+      assert.ok(
+        formattedStatus.includes(`#${qid}`),
+        `status bar must format with numeric qid #${qid}: got ${formattedStatus}`,
+      );
+      assert.strictEqual(
+        formattedStatus.includes(`#${slug}`),
+        false,
+        `status bar must NOT format with draft slug: got ${formattedStatus}`,
+      );
+
+      // Part B: Review reconciliation clears awaitingReview and inCriticalReview
+      const revId = "rev_test_33_approval";
+      s.inCriticalReview = true;
+      s.awaitingReview = {
+        kind: "plan_review",
+        reviewId: revId,
+        since: Date.now(),
+      };
+
+      // While awaiting review, barIcon must return hourglass ⏳
+      assert.strictEqual(barIcon(s, true), "⏳", "barIcon must be hourglass while awaiting review");
+
+      const { createHash } = await import("node:crypto");
+      const draftHash = createHash("sha256")
+        .update(`# Draft: ${slug}\n\n## Implementation Plan\n1. Step A\n`)
+        .digest("hex")
+        .slice(0, 12);
+
+      const snapshot: any = {
+        questId: slug,
+        sessionId: "sess_33",
+        reviewId: revId,
+        reviewKind: "plan_review",
+        planVersion: 1,
+        boundaryKey: `draft:${slug}:${draftHash}`,
+        saveGeneration: 1,
+        stateHash: draftHash,
+      };
+
+      const { reconcileReviewResult } = await import(
+        "../src/critical_agent/policy/reconcile.ts"
+      );
+      const recRes = await reconcileReviewResult(
+        snapshot,
+        {
+          verdict: "APPROVE",
+          severity: "NONE",
+          confidence: 9,
+          reasoning: "plan looks solid",
+          findings: [],
+          requiredActions: [],
+        },
+        s,
+        revId,
+        mockPi,
+        ctx,
+      );
+
+      assert.strictEqual(recRes.success, true, "reconciliation must succeed for APPROVE");
+      assert.strictEqual(s.awaitingReview, null, "awaitingReview must be cleared to null upon APPROVE");
+      assert.strictEqual(s.inCriticalReview, false, "inCriticalReview must be false upon APPROVE");
+
+      // Once cleared, barIcon must NOT be hourglass ⏳; it must be 📝 for approved draft
+      const postApprovalIcon = barIcon(s, true);
+      assert.strictEqual(
+        postApprovalIcon,
+        "📝",
+        `barIcon must be 📝 for approved draft, not ⏳: got ${postApprovalIcon}`,
+      );
+      const postApprovalStatus = formatQuestShort(s, true, ctx);
+      assert.strictEqual(
+        postApprovalStatus.includes("⏳"),
+        false,
+        `post-approval status must NOT contain hourglass ⏳: got ${postApprovalStatus}`,
+      );
+
+      // Part C: Session reconstruction heals corrupted slug questId
+      const branchCtx = createMockContext(50000, "session_plan_33_reconstruct");
+      const branchManager = branchCtx.sessionManager;
+      // Append initial entry with valid numeric questId
+      branchManager.appendCustomEntry("quest_journal", {
+        questId: "1788552255",
+        activeDraft: slug,
+        active: null,
+      });
+      // Append subsequent corrupted entry with slug as questId
+      branchManager.appendCustomEntry("quest_journal", {
+        questId: slug,
+        activeDraft: slug,
+        active: null,
+      });
+
+      const reconstructed = reconstruct(branchCtx);
+      assert.strictEqual(
+        reconstructed.questId,
+        "1788552255",
+        "reconstruct must heal corrupted slug questId to the latest numeric timestamp from branch history",
+      );
+
+      // Cleanup
+      await rm(draftPath, { force: true });
+    },
+  );
+
   // Clean up
   await rm(currentDir, { recursive: true, force: true });
+  await mkdir(".pi/quest/future", { recursive: true });
 });
+

@@ -99,28 +99,32 @@ export function getImplementationBlockReason(
     };
   }
   if (s.activeDraft) {
-    // F3(ii): hard throttle while REVISE outstanding
-    try {
-      if (isDraftRevisionOutstanding(s)) {
-        return {
-          blocked: true,
-          code: QuestErrorCode.DRAFT_REVIEW_REQUIRED,
-          stateName: "DRAFT_REVISION_PENDING",
-          reason:
-            "A draft plan review returned REVISE \u2014 research and non-quest reads are blocked until you revise the plan.",
-          requiredAction:
-            `Edit \`.pi/quest/future/${s.activeDraft}.md\` (the \`## Implementation Plan\` section) to address the reviewer's findings, then save. Saving triggers re-review automatically.`,
-        };
-      }
-    } catch {}
+    const hasOutstandingRevision = !s.lastPlanReviewApproval && Boolean(
+      isDraftRevisionOutstanding(s) ||
+        (s.lastCriticalReview?.kind === "plan_review" &&
+          (s.lastCriticalReview?.verdict === "REVISE" ||
+            s.lastCriticalReview?.verdict === "FAIL" ||
+            s.lastCriticalReview?.verdict === "UNCERTAIN")),
+    );
+    if (hasOutstandingRevision) {
+      return {
+        blocked: true,
+        code: QuestErrorCode.DRAFT_REVIEW_REQUIRED,
+        stateName: "DRAFT_REVISION_PENDING",
+        reason:
+          "A draft plan review returned REVISE — address reviewer findings in the draft plan.",
+        requiredAction:
+          `Edit \`.pi/quest/future/${s.activeDraft}.md\` (the \`## Implementation Plan\` section) to address the reviewer's findings, then save. Saving triggers re-review automatically.`,
+      };
+    }
     return {
       blocked: true,
-      code: QuestErrorCode.RESEARCH_REQUIRED,
-      stateName: "PROVISIONAL_RESEARCH_PENDING",
+      code: QuestErrorCode.DRAFT_REVIEW_REQUIRED,
+      stateName: "DRAFT_PENDING",
       reason:
-        "Initial orientation & research required to understand the objective and establish the quest identity before modifying project code.",
+        `Authoring draft plan for '${s.activeDraft}' — edit \`.pi/quest/future/${s.activeDraft}.md\` to define the plan.`,
       requiredAction:
-        "Investigate relevant architecture and code paths using read/search/bash tools, establish a concise semantic quest identity, and call quest_update_state to initialize the durable quest with your research findings.",
+        `Edit \`.pi/quest/future/${s.activeDraft}.md\` to define the implementation plan. Review will run automatically.`,
     };
   }
   if (!s.active) {

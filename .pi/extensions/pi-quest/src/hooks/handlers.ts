@@ -130,9 +130,17 @@ export async function handleTurnStart(
   // Fix 2: Sync implementationAllowed before logging so TURN_START always reflects fresh value
   syncImplementationPermission(state, _ctx);
 
-  // Fix 1: Check draft-revision-pending state before falling through to research gate
+  // Check draft-revision-pending state: active draft with outstanding revision needed
+  const _lastReviewNeedsRevision = Boolean(
+    !state.lastPlanReviewApproval &&
+      state.lastCriticalReview?.kind === "plan_review" &&
+      (state.lastCriticalReview?.verdict === "REVISE" ||
+        state.lastCriticalReview?.verdict === "FAIL" ||
+        state.lastCriticalReview?.verdict === "UNCERTAIN"),
+  );
   const _draftRevisionPending = !!(
-    state.activeDraft && isDraftRevisionOutstanding(state)
+    state.activeDraft && !state.lastPlanReviewApproval &&
+    (isDraftRevisionOutstanding(state) || _lastReviewNeedsRevision)
   );
   const _isAwaitingReview = Boolean(
     state.awaitingReview &&
@@ -145,6 +153,8 @@ export async function handleTurnStart(
     ? "AWAITING_REVIEW"
     : _draftRevisionPending
     ? "DRAFT_REVISION_PENDING"
+    : state.activeDraft
+    ? "DRAFT_PENDING"
     : state.researchRequired || !state.researchComplete
     ? "RESEARCH_PENDING"
     : state.awaitingUserConfirmation
@@ -156,6 +166,8 @@ export async function handleTurnStart(
     ? "awaiting_review"
     : _draftRevisionPending
     ? "draft_revision"
+    : state.activeDraft
+    ? "drafting"
     : state.researchRequired || !state.researchComplete
     ? "research"
     : state.awaitingUserConfirmation
@@ -916,15 +928,58 @@ export async function handleToolResult(
     !effectiveIsError
   ) {
     const normTool = (toolName || "").toLowerCase().trim();
-    if (normTool === "edit" || normTool === "write" || normTool === "user_edit" || normTool === "user_write") {
+    if (
+      normTool === "edit" ||
+      normTool === "write" ||
+      normTool === "user_edit" ||
+      normTool === "user_write" ||
+      normTool === "replace_file_content" ||
+      normTool === "write_to_file"
+    ) {
       const toolPath = typeof toolInput?.path === "string"
         ? toolInput.path
         : typeof toolInput?.file === "string"
         ? toolInput.file
+        : typeof toolInput?.targetFile === "string"
+        ? toolInput.targetFile
+        : typeof toolInput?.TargetFile === "string"
+        ? toolInput.TargetFile
         : "";
       if (toolPath.replace(/\\/g, "/").endsWith(`future/${state.activeDraft}.md`)) {
         try {
-          tryLog("DRAFT_PLAN_EDITED", `draft file edited: ${toolPath}`, { quest: state.activeDraft });
+          const slug = state.activeDraft;
+          tryLog("DRAFT_PLAN_EDITED", `draft file edited: ${toolPath}`, { quest: slug });
+          // If a review is running for this draft, cancel it so the fresh one runs immediately
+          try {
+            const {
+              findActiveReviewForQuest,
+              cancelActiveReview,
+              clearPendingReview,
+              reviewPromiseByKey,
+            } = await import("../critical_agent/tracker.ts");
+            const active = findActiveReviewForQuest(slug);
+            if (active?.kind === "plan_review" && active.reviewId) {
+              cancelActiveReview(active.reviewId, "draft_revised", _ctx);
+              tryLog(
+                "REVIEW_CANCELLED_DRAFT_REVISED",
+                `cancelled review ${active.reviewId} for draft revision`,
+                { quest: slug, reviewId: active.reviewId },
+              );
+              const { removeReviewActiveFile } = await import(
+                "../utils/mutex.ts"
+              );
+              const questId = state.questId || "";
+              if (questId) removeReviewActiveFile(questId);
+              const oldBoundary = active.snapshot?.boundaryKey || "";
+              const oldHash = oldBoundary.split(":").pop() || "";
+              if (questId && oldHash) {
+                reviewPromiseByKey.delete(
+                  `${questId}:plan_review:draft:${slug}:${oldHash}`,
+                );
+              }
+              clearPendingReview(slug, "plan_review");
+            }
+          } catch {}
           const { checkAndTriggerPlanReview } = await import("../critical_agent/policy.ts");
           checkAndTriggerPlanReview(pi, _ctx).catch(() => {});
         } catch {}

@@ -193,6 +193,7 @@ export function isReviewSnapshotCurrent(
           };
         }
       }
+      return { current: true };
     } else if (
       snapshot.boundaryKey && currentState.lastPlanReviewBoundaryKey &&
       snapshot.boundaryKey !== currentState.lastPlanReviewBoundaryKey
@@ -251,6 +252,7 @@ export function isReviewSnapshotCurrent(
 export function isDraftRevisionOutstanding(s: StoredState): boolean {
   try {
     if (!s.activeDraft) return false;
+    if (s.lastPlanReviewApproval) return false;
     const lcr = s.lastCriticalReview;
     if (!lcr) return false;
     if (lcr.kind !== "plan_review") return false;

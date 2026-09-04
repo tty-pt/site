@@ -410,6 +410,22 @@ export function futureDraftPath(slug: string): string {
   return `${FUTURE_DIR}/${slug}.md`;
 }
 
+export function isFutureDraftPath(
+  path?: string | null,
+  activeDraft?: string | null,
+): boolean {
+  if (!path || typeof path !== "string") return false;
+  const norm = path.replace(/\\/g, "/");
+  if (/(?:^|\/)\.pi\/quest\/future\/[^/]+\.md$/i.test(norm)) return true;
+  if (/(?:^|\/)future\/[^/]+\.md$/i.test(norm)) return true;
+  if (activeDraft) {
+    if (norm.endsWith(`future/${activeDraft}.md`)) return true;
+    if (norm.endsWith(`/${activeDraft}.md`)) return true;
+    if (norm === activeDraft || norm === `${activeDraft}.md`) return true;
+  }
+  return false;
+}
+
 export async function resolveFutureDraftPath(slug: string): Promise<string> {
   const direct = futureDraftPath(slug);
   if (await fileExists(direct)) return direct;
