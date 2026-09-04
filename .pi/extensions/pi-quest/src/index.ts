@@ -5,20 +5,9 @@ import { installSubQuests } from "./subquests";
 import { installHumanAbsence } from "./absence";
 import { installDurability } from "./durability";
 import { installSurface } from "./surface";
+import type { Pi } from "./hooks/events";
 
-export interface ExtensionContext {
-  cwd?: string;
-  [key: string]: unknown;
-}
-
-export interface ExtensionAPI {
-  on(
-    event: string,
-    handler: (event: unknown, ctx: ExtensionContext) => unknown,
-  ): void;
-}
-
-export default function install(pi: ExtensionAPI): void {
+export default function install(pi: Pi): void {
   installDrafting(pi);
   installImplementing(pi);
   installValidation(pi);

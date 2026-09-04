@@ -2,12 +2,11 @@
 // HIGH_LEVEL: #tools (main agent) — six quest tools.
 // HIGH_LEVEL: #commands — three manual handles.
 // HIGH_LEVEL: #skill — workflow rules text.
-// SPEC: slices 2-3 (tool contracts, commands, skill text).
-import { installTools } from "./tools";
 import { installCommands } from "./commands";
-import type { ExtensionAPI } from "../index.ts";
+import { installTools } from "./tools";
+import type { Pi } from "../hooks/events";
 
-export function installSurface(pi: ExtensionAPI): void {
+export function installSurface(pi: Pi): void {
   installTools(pi);
   installCommands(pi);
 }

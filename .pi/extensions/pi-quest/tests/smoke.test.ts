@@ -1,7 +1,17 @@
 import install from "../index.ts";
+import type { Pi } from "../src/hooks/events.ts";
 
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
+}
+
+function fakePi(): Pi {
+  return {
+    on(_event: never, _handler: never): void {},
+    appendEntry(_customType: string, _data: unknown): void {},
+    registerTool(_tool: never): void {},
+    registerCommand(_name: string, _options: never): void {},
+  } as unknown as Pi;
 }
 
 Deno.test("manifest declares the pi extension entry point", async () => {
@@ -33,9 +43,17 @@ Deno.test("entry default-exports an installer function", () => {
   check(typeof install === "function", "default export must be a function");
 });
 
-Deno.test("installer runs without side effects yet", () => {
-  // Slices subscribe their events here; the skeleton must stay inert.
-  install({
-    on(_event: string, _handler: unknown): void {},
-  });
+Deno.test("installer subscribes without side effects yet", () => {
+  const seen: string[] = [];
+  const pi = fakePi();
+  const origOn = pi.on.bind(pi);
+  (pi as { on: unknown }).on = (event: string, handler: unknown) => {
+    seen.push(event);
+    return origOn(event as never, handler as never);
+  };
+  install(pi);
+  check(seen.includes("session_start"), "subscribes session_start");
+  check(seen.includes("turn_end"), "subscribes turn_end");
+  check(seen.includes("tool_call"), "subscribes tool_call");
+  check(seen.includes("before_agent_start"), "subscribes before_agent_start");
 });
