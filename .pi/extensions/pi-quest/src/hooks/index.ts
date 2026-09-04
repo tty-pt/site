@@ -483,23 +483,47 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     );
                   }
                 } else {
+                  // Change D: user "go" overrides missing reviewer approval
                   logUserInteraction(
                     "CONFIRMATION_REJECTED",
                     "user confirmed before draft reviewer approval",
                     { quest: state.activeDraft || "" },
                   );
-                  sendInternalAgentMessage(
-                    pi,
-                    `⚠️ Draft '${state.activeDraft}' not yet reviewer-approved. Accumulate requirements first, then submit draft for review; promotion requires APPROVE before "go". Trigger review via plan_review or wait for auto-review.`,
-                    "steer",
-                  );
-                  // Trigger draft review now if not yet run
+                  // Best-effort fire review (fire-and-forget, don't await)
                   try {
                     const { checkAndTriggerPlanReview } = await import(
                       "../critical_agent/policy.ts"
                     );
-                    await checkAndTriggerPlanReview(pi, ctx);
+                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
                   } catch {}
+                  // Force-promote: user's explicit "go" is an override
+                  const { promoteDraft } = await import(
+                    "../commands/promote.ts"
+                  );
+                  const res = await promoteDraft(state.activeDraft, ctx, pi, { force: true });
+                  if (res.success) {
+                    logUserInteraction(
+                      "QUEST_CREATED",
+                      `draft '${state.active}' force-promoted after user go`,
+                      { quest: state.active || "" },
+                    );
+                    sendInternalAgentMessage(
+                      pi,
+                      `✅ Draft '${state.activeDraft}' promoted to current quest (${res.qid || "new"}) despite pending/absent reviewer approval (user override).`,
+                      "steer",
+                    );
+                  } else {
+                    logUserInteraction(
+                      "GATE_BLOCKED",
+                      res.message || "draft force-promotion blocked",
+                      { quest: state.activeDraft || "" },
+                    );
+                    sendInternalAgentMessage(
+                      pi,
+                      res.message || "Draft promotion failed.",
+                      "steer",
+                    );
+                  }
                 }
                 persist(pi, ctx);
                 updateUIStatus(ctx);
@@ -612,54 +636,48 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   persist(pi, ctx);
                 } catch {}
                 updateUIStatus(ctx);
-                // 38: if a plan_review draft review is already awaiting/running, supersede-candidate + eager coalesce new boundary
+                // Change C: true-teardown of running reviewer on draft revision
                 try {
-                  const newHash = state.draftLastSavedHash ||
-                    createHash("sha256")
-                      .update(trimmed)
-                      .digest("hex")
-                      .slice(0, 12);
                   const slug = state.activeDraft;
                   if (slug) {
-                    const newBoundary = `draft:${slug}:${newHash}`;
-                    let hasActive = !!state.awaitingReview &&
-                      state.awaitingReview.kind === "plan_review";
-                    const { findActiveReviewForQuest } = await import(
+                    const { findActiveReviewForQuest, cancelActiveReview, clearPendingReview, reviewPromiseByKey } = await import(
                       "../critical_agent/tracker.ts"
                     );
-                    if (
-                      findActiveReviewForQuest(slug)?.kind === "plan_review"
-                    ) {
-                      hasActive = true;
-                    }
-                    if (hasActive) {
-                      const { setPendingReview } = await import(
-                        "../critical_agent/tracker.ts"
-                      );
-                      setPendingReview(slug, {
-                        questSlug: slug,
-                        kind: "plan_review",
-                        triggerReason: "draft_followup",
-                        planVersion: state.planVersion || 1,
-                        stateHash: state.lastSavedHash ||
-                          (state.saveGeneration
-                            ? state.saveGeneration.hash
-                            : null),
-                        boundaryKey: newBoundary,
-                        saveCount: state.saveCount || 0,
-                        requestedAt: Date.now(),
-                      });
+                    const active = findActiveReviewForQuest(slug);
+                    if (active?.kind === "plan_review" && active.reviewId) {
+                      // 1. Cancel the in-flight reviewer (emits cancel event via pi_adapter wiring)
+                      cancelActiveReview(active.reviewId, "draft_revised", ctx);
                       tryLog(
-                        "PENDING_COALESCED_RESOLVED",
-                        `pending coalesced resolved (draft followup hash=${newHash})`,
-                        {
-                          quest: slug,
-                          chosenKind: "plan_review",
-                          boundaryKey: newBoundary,
-                          hash: newHash,
-                        },
+                        "REVIEW_CANCELLED_DRAFT_REVISED",
+                        `cancelled review ${active.reviewId} for draft revision`,
+                        { quest: slug, reviewId: active.reviewId },
                       );
+                      // 2. Belt-and-suspenders: clear all stacking guards
+                      try {
+                        const { removeReviewActiveFile } = await import(
+                          "../utils/mutex.ts"
+                        );
+                        const { getActiveContext, getState: getStateFn } = await import(
+                          "../state.ts"
+                        );
+                        const c2 = getActiveContext(ctx);
+                        const s2 = getStateFn(c2);
+                        const questId = s2.questId || "";
+                        if (questId) removeReviewActiveFile(questId);
+                        // Compute old singleKey: ${questId}:plan_review:draft:${slug}:${oldHash}
+                        const oldBoundary = active.snapshot?.boundaryKey || "";
+                        const oldHash = oldBoundary.split(":").pop() || "";
+                        if (questId && oldHash) {
+                          reviewPromiseByKey.delete(`${questId}:plan_review:draft:${slug}:${oldHash}`);
+                        }
+                        clearPendingReview(slug, "plan_review");
+                      } catch {}
                     }
+                    // 3. Fire fresh review for new hash
+                    const { checkAndTriggerPlanReview } = await import(
+                      "../critical_agent/policy.ts"
+                    );
+                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
                   }
                 } catch {}
                 // 53: auto-trigger when 7 evidences (perfection) even with 1 requirement; 54: log check; 55: only if plan drafted
@@ -988,6 +1006,18 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   `📝 **Draft auto-created**: \`.pi/quest/future/${slug}.md\` — accumulating requirements while you talk. Requirements stay in draft (not yet part of active quest). When ready, the reviewer will validate compliance before the plan is presented; then say "go" to promote.`,
                   "steer",
                 );
+                // Change A: auto-launch reviewer if draft has actionable plan
+                try {
+                  const { isActionableDraftPlan } = await import(
+                    "../critical_agent/policy.ts"
+                  );
+                  if (isActionableDraftPlan(slug)) {
+                    const { checkAndTriggerPlanReview } = await import(
+                      "../critical_agent/policy.ts"
+                    );
+                    checkAndTriggerPlanReview(pi, ctx).catch(() => {});
+                  }
+                } catch {}
               }
             }
           } // close else { shouldCapturePrompt }

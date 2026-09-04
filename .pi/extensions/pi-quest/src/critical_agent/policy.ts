@@ -117,6 +117,26 @@ export function isDraftReviewValid(targetState?: StoredState): boolean {
   }
 }
 
+/**
+ * Check whether the draft has a substantive plan section (not a template placeholder).
+ * Used by auto-promote (Change B) and auto-draft review trigger (Change A).
+ * Mirrors the inline `hasActionablePlanDraft` in hooks/index.ts:668-689 but
+ * uses readFileSync (sync) since policy.ts already imports it.
+ */
+export function isActionableDraftPlan(slug: string): boolean {
+  try {
+    const path = `${FUTURE_DIR}/${slug}.md`;
+    const data = readFileSync(path, "utf8");
+    const m = data.match(/##\s*Plan[\s\S]*?(?=\n##\s+|$)/i);
+    if (!m) return false;
+    const body = m[0].replace(/##\s*Plan[^\n]*\n/i, "").trim();
+    if (!body || body === "1." || body === "-" || body.length < 10) return false;
+    return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(body);
+  } catch {
+    return false;
+  }
+}
+
 export function isPlanReviewValidForState(targetState?: StoredState): boolean {
   const s = targetState || state;
   if (s.activeDraft) return isDraftReviewValid(s);
@@ -961,17 +981,39 @@ export async function checkAndTriggerPlanReview(
         result.review.verdict === "PASS"
       ) {
         s.draftLastReviewKey = `draft:${draftSlug}:${hash}`;
-        // Notify agent to present approved draft plan to user for final "go"
-        try {
-          const { sendInternalAgentMessage } = await import("../messaging.ts");
-          sendInternalAgentMessage(
-            pi,
-            `✅ **Draft '${draftSlug}' reviewer APPROVED** (compliance check vs ${
-              s.draftPrompts?.length || 0
-            } requirements). Present the finalized plan to the user now and await explicit "go" / confirmation before promoting to current quest.`,
-            "steer",
-          );
-        } catch {}
+        // Auto-promote if draft is actionable (Change B)
+        if (isActionableDraftPlan(draftSlug) && s.activeDraft === draftSlug) {
+          try {
+            const { promoteDraft } = await import("../commands/promote.ts");
+            const { sendInternalAgentMessage } = await import("../messaging.ts");
+            const res = await promoteDraft(draftSlug, ctx, pi);
+            if (res.success) {
+              tryLog(
+                "AUTO_PROMOTED",
+                `draft '${draftSlug}' auto-promoted after reviewer APPROVE`,
+                { quest: draftSlug, qid: res.qid || "" },
+              );
+              sendInternalAgentMessage(
+                pi,
+                `✅ **Draft '${draftSlug}' auto-promoted** to current quest (${res.qid || "new"}) after reviewer APPROVE. Research phase begins.`,
+                "steer",
+              );
+            }
+            // If promoteDraft failed, leave draft in place for next review cycle
+          } catch {}
+        } else {
+          // Notify agent to present approved draft plan to user for final "go"
+          try {
+            const { sendInternalAgentMessage } = await import("../messaging.ts");
+            sendInternalAgentMessage(
+              pi,
+              `✅ **Draft '${draftSlug}' reviewer APPROVED** (compliance check vs ${
+                s.draftPrompts?.length || 0
+              } requirements). Present the finalized plan to the user now and await explicit "go" / confirmation before promoting to current quest.`,
+              "steer",
+            );
+          } catch {}
+        }
       } else {
         try {
           const { sendInternalAgentMessage } = await import("../messaging.ts");

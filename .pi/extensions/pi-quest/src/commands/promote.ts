@@ -22,6 +22,7 @@ export async function promoteDraft(
   slug: string,
   ctx?: ExtensionContext,
   pi?: ExtensionAPI,
+  options?: { force?: boolean },
 ): Promise<{ success: boolean; message?: string; qid?: string }> {
   const s = getState(ctx);
   const targetSlug = slug || s.activeDraft || "";
@@ -35,10 +36,10 @@ export async function promoteDraft(
     return { success: false, message: `Draft not found: ${futurePath}` };
   }
 
-  // Review gate: require APPROVE unless no reviewer available
+  // Review gate: require APPROVE unless no reviewer available or force=true
   const hasReviewer = Boolean(getCustomSubagentRunner()) ||
     isSubagentToolRegistered(pi, ctx);
-  if (hasReviewer && !isDraftReviewValid(s)) {
+  if (!options?.force && hasReviewer && !isDraftReviewValid(s)) {
     return {
       success: false,
       message:

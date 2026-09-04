@@ -15,6 +15,19 @@ import {
   ReviewTimeoutLayer,
 } from "../types.ts";
 
+/**
+ * Module-level map storing cancel identity (requestId, nodeId, ownerRunId)
+ * keyed by reviewId (correlationId). Populated by the executor closure at
+ * spawn time, consumed by PiSubagentReviewer.review() to wire the abort
+ * signal to the host bridge cancel event.
+ *
+ * pi-subagents version: read from package.json at implementation time.
+ */
+export const cancelIdentityMap = new Map<
+  string,
+  { requestId: string; nodeId: string; ownerRunId: string }
+>();
+
 export type SubagentExecutorFn = (
   task: string,
   options?: {
@@ -185,6 +198,14 @@ export function resolveSubagentExecutor(
         const nodeId = `review_${Date.now().toString(36)}_${
           Math.random().toString(36).slice(2, 8)
         }`;
+        // Record cancel identity for signal→cancel wiring in PiSubagentReviewer.review()
+        if (options?.reviewId) {
+          cancelIdentityMap.set(options.reviewId, {
+            requestId,
+            nodeId,
+            ownerRunId: getQuestId(ctx) || getSessionId(ctx),
+          });
+        }
         let unsubs: Array<(() => void) | void> = [];
 
         const maxDuration = options?.timeoutMs || 300000; // 5 minutes default
@@ -227,6 +248,8 @@ export function resolveSubagentExecutor(
             if (typeof u === "function") u();
           }
           unsubs = [];
+          // Clear cancel identity from map on settle
+          if (options?.reviewId) cancelIdentityMap.delete(options.reviewId);
         };
 
         const handleActivity = (data: any) => {
@@ -403,6 +426,21 @@ export class PiSubagentReviewer implements CriticalReviewer {
 
     const startTime = Date.now();
     let rawRes: any;
+
+    // Wire cancel signal BEFORE executor call — listener looks up Map at emit
+    // time (not capture time) so it always uses the latest identity, handling
+    // the fallback retry case correctly.
+    if (input.reviewId && input.signal) {
+      input.signal.addEventListener("abort", () => {
+        const id = cancelIdentityMap.get(input.reviewId!);
+        if (id) {
+          try {
+            this.pi?.events?.emit("prompt-template:subagent:cancel", id);
+          } catch {}
+        }
+      }, { once: true });
+    }
+
     try {
       rawRes = await executor(prompt, {
         agent: "reviewer",

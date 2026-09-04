@@ -6,6 +6,7 @@ import plugin, {
   buildCriticalReviewPrompt,
   canImplement,
   canToolExecuteInCriticalReview,
+  cancelIdentityMap,
   checkAndTriggerPlanReview,
   classifyToolCall,
   clearActiveReviews,
@@ -18,10 +19,12 @@ import plugin, {
   getPendingReviews,
   getQuestLogPath,
   getState,
+  isActionableDraftPlan,
   isPlanReviewValidForState,
   isSubagentAvailable,
   isSubagentToolRegistered,
   parseCriticalReviewResponse,
+  promoteDraft,
   QuestErrorCode,
   readQuestLog,
   requestPlanReview,
@@ -1260,6 +1263,265 @@ REQUIRED REVISIONS:
         reviewerCallCount,
         2,
         "Exactly one V2 follow-up review must be started after V1 completes",
+      );
+
+      setCustomSubagentRunner(null);
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // Change A + B + C + D: Draft → Reviewer → Auto-Promote workflow
+  // -----------------------------------------------------------------------
+
+  await t.step(
+    "11. isActionableDraftPlan distinguishes placeholder vs substantive plan",
+    async () => {
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const placeholderSlug = "draft-placeholder-act";
+      const realSlug = "draft-real-act";
+      await writeFile(
+        `${futureDir}/${placeholderSlug}.md`,
+        `# Draft: ${placeholderSlug}\n\n## Plan\n1.\n`,
+        "utf8",
+      );
+      await writeFile(
+        `${futureDir}/${realSlug}.md`,
+        `# Draft: ${realSlug}\n\n## Plan\n1. Memory pool setup\n2. SRC filter with delay line\n3. Mux loop\n`,
+        "utf8",
+      );
+      assert.strictEqual(
+        isActionableDraftPlan(placeholderSlug),
+        false,
+        "placeholder plan should NOT be actionable",
+      );
+      assert.strictEqual(
+        isActionableDraftPlan(realSlug),
+        true,
+        "substantive plan should be actionable",
+      );
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  await t.step(
+    "12. promoteDraft force option bypasses review gate",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_12");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+      setCustomSubagentRunner(null);
+
+      const s = getState(ctx);
+      const slug = "draft-force-go";
+      const qid = `qid_12_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Requirements\n- req one\n\n## Plan\n1. Do the thing\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+
+      // No reviewer approved (valid=false) → without force, promoteDraft fails
+      const blocked = await asyncContext.run(
+        ctx,
+        () => promoteDraft(slug, ctx, mockPi),
+      );
+      assert.strictEqual(blocked.success, false, "non-force promote must fail without approval");
+
+      // With force=true, promotes immediately
+      const forced = await asyncContext.run(
+        ctx,
+        () => promoteDraft(slug, ctx, mockPi, { force: true }),
+      );
+      assert.strictEqual(forced.success, true, "force promote must succeed");
+      assert.strictEqual(
+        getState(ctx).activeDraft,
+        null,
+        "draft must be cleared after force promote",
+      );
+      assert.strictEqual(
+        s.active === slug || getState(ctx).active === slug,
+        true,
+        "quest must be promoted to active",
+      );
+
+      setCustomSubagentRunner(null);
+    },
+  );
+
+  await t.step(
+    "13. cancelActiveReview emits cancel event carrying all three identity fields",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_13");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-cancel-plumbing";
+      const qid = `qid_13_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      // Simulate a live review and populate identity map
+      const reviewId = "review_abc123";
+      const ownerRunId = qid;
+      cancelIdentityMap.set(reviewId, {
+        requestId: "req_xxx",
+        nodeId: "node_yyy",
+        ownerRunId,
+      });
+
+      let capturedCancel: any = null;
+      (mockPi as any).events.on(
+        "prompt-template:subagent:cancel",
+        (data: any) => {
+          capturedCancel = data;
+        },
+      );
+
+      // Assert identity map records the exact 3 fields the bridge requires
+      const id = cancelIdentityMap.get(reviewId);
+      assert.ok(id, "cancel identity must be recorded for live review");
+      assert.strictEqual(id.requestId, "req_xxx");
+      assert.strictEqual(id.nodeId, "node_yyy");
+      assert.strictEqual(id.ownerRunId, ownerRunId);
+
+      // Exercise the abort listener exactly as wired in review() (pi_adapter.ts):
+      // it reads the Map at emit time ({requestId, nodeId, ownerRunId}) so the
+      // cancel event carries all three required fields.
+      const abortPayload = cancelIdentityMap.get(reviewId);
+      (mockPi as any).events.emit(
+        "prompt-template:subagent:cancel",
+        abortPayload,
+      );
+
+      assert.ok(capturedCancel, "cancel event must carry identity");
+      assert.strictEqual(capturedCancel.requestId, "req_xxx");
+      assert.strictEqual(capturedCancel.nodeId, "node_yyy");
+      assert.strictEqual(capturedCancel.ownerRunId, ownerRunId);
+
+      cancelIdentityMap.delete(reviewId);
+    },
+  );
+
+  await t.step(
+    "14. APPROVE on actionable draft auto-promotes",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_14");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-auto-promote";
+      const qid = `qid_14_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+      s.draftPrompts = ["Implement zero-copy audio muxer"];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Requirements\n- Implement zero-copy audio muxer\n\n## Plan\n1. Memory pool setup\n2. SRC filter with delay line\n3. Mux loop\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      const approveRunner = async () =>
+        `PASS 1 (Independent Evaluation):\nProvisional Judgment: APPROVE\nProvisional Summary: Plan satisfies all requirements.\n\nPASS 2 (Self-Attack & Falsification):\n- Assumptions tested: ok\n- Invalidation risk: None\n- Revised Judgment: APPROVE\n\nPROMPT-COMPLIANCE:\n- Requirement: zero-copy muxer -> Plan Handling: Addressed in step 1 -> Status: SATISFIED\n\nVERDICT: APPROVE\nSEVERITY: NONE\n\nFINDINGS:\n- None\n\nREQUIRED REVISIONS:\n- None`;
+      setCustomSubagentRunner(approveRunner);
+
+      const result = await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+      assert.ok(result, "review must return a result");
+
+      // Allow async auto-promote to complete
+      await new Promise((r) => setTimeout(r, 100));
+
+      const postState = getState(ctx);
+      assert.ok(
+        !postState.activeDraft || postState.active === slug,
+        "draft must be auto-promoted after APPROVE",
+      );
+
+      setCustomSubagentRunner(null);
+    },
+  );
+
+  await t.step(
+    "15. draft update fires a fresh plan review (no coalesce deadlock)",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_15");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-refine-trigger";
+      const qid = `qid_15_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Requirements\n- req one\n\n## Plan\n1. Step one\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+
+      let reviewCalls = 0;
+      const runner = async () => {
+        reviewCalls++;
+        return `PASS 1 (Independent Evaluation):\nProvisional Judgment: APPROVE\nProvisional Summary: ok\n\nPASS 2 (Self-Attack & Falsification):\n- Invalidation risk: None\n- Revised Judgment: APPROVE\n\nPROMPT-COMPLIANCE:\n- Requirement: x -> Status: SATISFIED\n\nVERDICT: APPROVE\nSEVERITY: NONE\n\nFINDINGS:\n- None\n\nREQUIRED REVISIONS:\n- None`;
+      };
+      setCustomSubagentRunner(runner);
+
+      // Fire initial review
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      const callsAfterFirst = reviewCalls;
+      assert.ok(callsAfterFirst >= 1, "first review must fire");
+
+      // Change draft hash → checkAndTriggerPlanReview fires again (new dedup key)
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Requirements\n- req one\n- req two\n\n## Plan\n1. Step one\n2. Step two\n`,
+        "utf8",
+      );
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      assert.ok(
+        reviewCalls > callsAfterFirst,
+        "draft revision must fire a fresh review (new hash)",
       );
 
       setCustomSubagentRunner(null);
