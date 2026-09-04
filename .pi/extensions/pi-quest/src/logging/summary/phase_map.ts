@@ -35,6 +35,7 @@ export function mapEventTypeToMajorPhase(
     case "RESEARCH_EVIDENCE":
     case "RESEARCH_REJECTED":
     case "RESEARCH_COMPLETED":
+    case "RESEARCH_DRAFT_GATED":
       return "RESEARCH";
 
     case "STATE_UPDATE_REJECTED":

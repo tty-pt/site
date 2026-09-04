@@ -316,6 +316,7 @@ export function routeEntry(entry: QuestLogEntry, s: SummaryState): void {
     case "RESEARCH_REQUIRED":
     case "RESEARCH_EVIDENCE":
     case "RESEARCH_COMPLETED":
+    case "RESEARCH_DRAFT_GATED":
       handleResearchEntry(entry, s);
       break;
     case "REASSESSMENT_REQUIRED":

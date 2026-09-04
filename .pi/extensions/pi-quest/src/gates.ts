@@ -5,6 +5,7 @@ import {
   isSubagentToolRegistered,
 } from "./critical_agent/index.ts";
 import { questPath } from "./paths.ts";
+import { resolveCallerSelf } from "./roles.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
 import {
   ExtensionContext,
@@ -17,6 +18,10 @@ export function canImplement(
   targetState?: StoredState,
   ctx?: ExtensionContext,
 ): boolean {
+  // Reviewer children are never subject to implementer gating: they run
+  // read-only in their own isolated session. A child session can never attain
+  // implementation permission on the main quest.
+  if (resolveCallerSelf(ctx).isChild) return false;
   const s = targetState || state;
   if (s.pendingRootQuest) return false;
   if (s.activeDraft) return false;
@@ -68,6 +73,19 @@ export function getImplementationBlockReason(
   requiredAction: string;
 } {
   const s = targetState || state;
+  // Reviewer children run read-only in their own session; report a distinct role-based
+  // reason instead of main-agent implementation reasons.
+  if (resolveCallerSelf(ctx).isChild) {
+    return {
+      blocked: true,
+      code: QuestErrorCode.IMPLEMENTATION_BLOCKED,
+      stateName: "REVIEWER_READ_ONLY",
+      reason:
+        "Reviewer child agents are strictly read-only and never granted implementation permission.",
+      requiredAction:
+        "Use read/search tools only; report findings via the review verdict.",
+    };
+  }
   if (s.pendingRootQuest) {
     return {
       blocked: true,

@@ -81,7 +81,7 @@ export function auditQuestConsistency(
     hasTestStatus,
     hasCompleted,
     hasRemaining,
-    options,
+    { ...options, isResearchOnly },
     issues,
   );
 

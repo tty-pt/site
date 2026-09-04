@@ -46,7 +46,6 @@ export function populateCoreEpistemicUpdates(
       f: string,
     ) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
     updates.set("research findings", findingsText);
-    updates.set("in-depth analysis & findings", findingsText);
   }
 }
 
@@ -65,7 +64,6 @@ export function populatePlanAndReassessmentUpdates(
       ) => (/^\d+\./.test(p) ? p : `${i + 1}. ${p}`)).join("\n")
       : String(val);
     updates.set("plan", text);
-    updates.set("detailed multi-stage execution plan", text);
   }
 
   if (params.planConfidence) {
@@ -162,16 +160,22 @@ export function populateProgressAndArtifactUpdates(
     );
   }
 
-  const filesTouchedList = params.filesTouched || params.filesModified;
-  if (Array.isArray(filesTouchedList) && filesTouchedList.length > 0) {
-    const filesText = filesTouchedList.map((
-      f: string,
-    ) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n");
-    updates.set("files touched", filesText);
-    updates.set("files modified", filesText);
-  } else if (typeof filesTouchedList === "string" && filesTouchedList.trim()) {
-    updates.set("files touched", filesTouchedList.trim());
-    updates.set("files modified", filesTouchedList.trim());
+  // Files Touched vs Files Modified are distinct: never conflate examined files into modified.
+  const rawTouched = params.filesTouched;
+  const rawModified = params.filesModified;
+  const hasTouched = Array.isArray(rawTouched) ? rawTouched.length > 0 : typeof rawTouched === "string" && rawTouched.trim().length > 0;
+  const hasModified = Array.isArray(rawModified) ? rawModified.length > 0 : typeof rawModified === "string" && rawModified.trim().length > 0;
+  if (hasTouched) {
+    const txt = Array.isArray(rawTouched)
+      ? rawTouched.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n")
+      : String(rawTouched).trim();
+    updates.set("files touched", txt);
+  }
+  if (hasModified) {
+    const txt = Array.isArray(rawModified)
+      ? rawModified.map((f: string) => (f.startsWith("- ") ? f : `- ${f}`)).join("\n")
+      : String(rawModified).trim();
+    updates.set("files modified", txt);
   }
 
   if (params.testStatus) {
@@ -197,7 +201,6 @@ export function populateProgressAndArtifactUpdates(
     params.exactNextAction;
   if (nextStep) {
     updates.set("exact next action", nextStep);
-    updates.set("next recommended step", nextStep);
   }
   const resumeContext = params.resumeContext || params.resumePrompt;
   if (resumeContext) updates.set("resume prompt", resumeContext);

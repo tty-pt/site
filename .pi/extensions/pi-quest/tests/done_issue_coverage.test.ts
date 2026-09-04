@@ -1224,6 +1224,28 @@ Add constants
         src.includes("REVIEW_COALESCENCE_PENDING"),
         "must use REVIEW_COALESCENCE_PENDING code",
       );
+      // Draft must stay in future/ until reviewer APPROVE: NO evidence-count escape hatch allowed.
+      assert.ok(
+        !src.includes("allowsInitialDraftWrite"),
+        "must not bypass draft approval via evidence-count escape hatch",
+      );
+      assert.ok(
+        !src.includes("DRAFT_PROMOTION_ALLOWED"),
+        "must not log a draft-promotion-allowed bypass",
+      );
+      // When a reviewer is registered, the gate must unconditionally block an unapproved draft.
+      const gateRegion = src.slice(
+        src.indexOf("if (state.activeDraft)"),
+        src.lastIndexOf("syncQuestIdentity("),
+      );
+      assert.ok(
+        gateRegion.includes("draft_not_approved"),
+        "gate must block unapproved draft before syncQuestIdentity",
+      );
+      assert.ok(
+        !gateRegion.includes("allowsInitialDraftWrite"),
+        "gate region must not contain evidence bypass",
+      );
     },
   );
 

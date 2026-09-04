@@ -947,9 +947,15 @@ export async function checkAndTriggerPlanReview(
       triggerReason: triggerReason || "draft",
       boundaryKey: `draft:${draftSlug}:${hash}`,
     });
-    if (result?.review?.verdict) {
+    const shouldRecordDraftKey = Boolean(
+      result && !result.inProgress && !result.skipped &&
+        (result.review?.verdict || result.error),
+    );
+    if (shouldRecordDraftKey) {
       s.lastDraftReviewRequestKey = key;
       s.__lastDraftReviewKey = key;
+    }
+    if (result?.review?.verdict) {
       if (
         result.review.verdict === "APPROVE" ||
         result.review.verdict === "PASS"
@@ -1100,7 +1106,11 @@ export async function checkAndTriggerPlanReview(
     questSlug: s.active,
     triggerReason: triggerReason || "root",
   });
-  if (result?.review?.verdict) {
+  const shouldRecordRootKey = Boolean(
+    result && !result.inProgress && !result.skipped &&
+      (result.review?.verdict || result.error),
+  );
+  if (shouldRecordRootKey) {
     s.lastPlanReviewRequestKey = key;
     s.__lastPlanReviewKey = key;
   }

@@ -109,27 +109,21 @@ export function recordObservedInvestigation(
     );
 
     // 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
+    // Draft must not self-complete research: research phases only apply after the draft is approved/realized.
     if (
       receipt.evidenceCount >= 5 && !targetState.active &&
       targetState.activeDraft
     ) {
       targetState.substantiveTurnsSinceCheckpoint = 0;
-      if (!targetState.researchComplete) {
-        targetState.researchComplete = true;
-        targetState.researchRequired = false;
-        try {
-          syncImplementationPermission(targetState);
-        } catch {}
-        tryLog(
-          "RESEARCH_COMPLETED",
-          `research completed after ${receipt.evidenceCount} evidences`,
-          {
-            quest: targetState.activeDraft || "",
-            round: targetState.researchRound || 1,
-            evidence: receipt.evidenceCount,
-          },
-        );
-      }
+      tryLog(
+        "RESEARCH_DRAFT_GATED",
+        `research not completed while draft active (requires reviewer APPROVE)`,
+        {
+          quest: targetState.activeDraft || "",
+          round: targetState.researchRound || 1,
+          evidence: receipt.evidenceCount,
+        },
+      );
     }
 
     return true;
@@ -169,27 +163,21 @@ export function recordObservedInvestigation(
     );
 
     // 42: after sufficient evidence while drafting, clear NO_PROGRESS so gate can open via quest_update_state
+    // Draft must not self-complete research: research phases only apply after the draft is approved/realized.
     if (
       receipt.evidenceCount >= 5 && !targetState.active &&
       targetState.activeDraft
     ) {
       targetState.substantiveTurnsSinceCheckpoint = 0;
-      if (!targetState.researchComplete) {
-        targetState.researchComplete = true;
-        targetState.researchRequired = false;
-        try {
-          syncImplementationPermission(targetState);
-        } catch {}
-        tryLog(
-          "RESEARCH_COMPLETED",
-          `research completed after ${receipt.evidenceCount} evidences`,
-          {
-            quest: targetState.activeDraft || "",
-            round: targetState.researchRound || 1,
-            evidence: receipt.evidenceCount,
-          },
-        );
-      }
+      tryLog(
+        "RESEARCH_DRAFT_GATED",
+        `research not completed while draft active (requires reviewer APPROVE)`,
+        {
+          quest: targetState.activeDraft || "",
+          round: targetState.researchRound || 1,
+          evidence: receipt.evidenceCount,
+        },
+      );
     }
 
     return true;

@@ -71,6 +71,39 @@ Deno.test("quest_journal_verification: verified save generation, fingerprinting,
   // Remove file so we can test that quest_mark_saved rejects when file is missing
   await rm(testQuestPath, { force: true });
 
+  // 0a. GATE-level: quest_mark_saved with a missing file on disk must HARD-BLOCK
+  // (not merely error-and-get-masked by a later successful save).
+  const emitToolCall = async (toolName: string, input?: any) => {
+    for (const cb of handlers["tool_call"] || []) {
+      const res = await cb({ toolName, input }, mockCtx);
+      if (res) return res;
+    }
+    return null;
+  };
+  const gateMissing = await emitToolCall("quest_mark_saved", {});
+  assert.ok(
+    gateMissing?.block === true,
+    `quest_mark_saved must hard-block when quest file is missing, got: ${
+      JSON.stringify(gateMissing)
+    }`,
+  );
+  assert.ok(
+    (gateMissing.reason as string).toLowerCase().includes("quest_update_state"),
+    "Block reason must direct the agent to quest_update_state to create the file",
+  );
+  assert.ok(
+    (gateMissing.reason as string).toLowerCase().includes("missing"),
+    "Block reason must identify the missing file",
+  );
+
+  // 0b. quest_update_state with a missing file stays allowed (it creates the file)
+  const gateUpdateAllowed = await emitToolCall("quest_update_state", {});
+  assert.notStrictEqual(
+    gateUpdateAllowed?.block,
+    true,
+    "quest_update_state must not be blocked when the quest file is missing",
+  );
+
   // 1. Test quest_mark_saved when file does NOT exist on disk -> must return error / reject
   const resMissing = await tools["quest_mark_saved"].execute(
     "call_missing",
@@ -121,6 +154,14 @@ Deno.test("quest_journal_verification: verified save generation, fingerprinting,
   ].join("\n");
 
   await writeFile(testQuestPath, initialContent, "utf8");
+
+  // GATE-level: once the file exists, quest_mark_saved must NOT be blocked
+  const gateExists = await emitToolCall("quest_mark_saved", {});
+  assert.notStrictEqual(
+    gateExists?.block,
+    true,
+    "quest_mark_saved must be allowed once the quest file exists on disk",
+  );
 
   const resSuccess = await tools["quest_mark_saved"].execute(
     "call_valid",

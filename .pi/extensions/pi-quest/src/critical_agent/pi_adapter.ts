@@ -417,10 +417,47 @@ export class PiSubagentReviewer implements CriticalReviewer {
         onActivity: input.onActivity,
       });
     } catch (err: any) {
-      const timeoutLayer = err?.timeoutLayer ||
-        classifyTimeoutLayer(err?.message || "");
-      err.timeoutLayer = timeoutLayer;
-      throw err;
+      const msg = String(err?.message || "");
+      const isMutationAllowlistError = msg.toLowerCase().includes("mutation-capable") ||
+        (msg.toLowerCase().includes("implementation task") && msg.toLowerCase().includes("tool allowlist"));
+      if (isMutationAllowlistError) {
+        tryLog(
+          "CRITICAL_REVIEW_FALLBACK",
+          `reviewer agent rejected as implementation task; retrying with explore`,
+          {
+            quest: input.questSlug || "",
+            reviewKind: input.kind,
+            originalAgent: "reviewer",
+            fallbackAgent: "explore",
+            reason: "mutation_allowlist_mismatch",
+          },
+          this.ctx,
+        );
+        try {
+          rawRes = await executor(prompt, {
+            agent: "explore",
+            isCriticalReview: true,
+            reviewKind: input.kind,
+            triggerReason: input.triggerReason || input.kind,
+            model: targetModel,
+            tools: ["read", "grep", "find", "ls"],
+            async: true,
+            reviewId: input.reviewId,
+            timeoutMs: input.timeoutMs,
+            onActivity: input.onActivity,
+          });
+        } catch (fallbackErr: any) {
+          const timeoutLayer = fallbackErr?.timeoutLayer ||
+            classifyTimeoutLayer(fallbackErr?.message || "");
+          fallbackErr.timeoutLayer = timeoutLayer;
+          throw fallbackErr;
+        }
+      } else {
+        const timeoutLayer = err?.timeoutLayer ||
+          classifyTimeoutLayer(err?.message || "");
+        err.timeoutLayer = timeoutLayer;
+        throw err;
+      }
     }
 
     const durationMs = Date.now() - startTime;

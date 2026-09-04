@@ -43,6 +43,7 @@ export * from "./research.ts";
 export * from "./persistence.ts";
 export * from "./compaction.ts";
 export * from "./gates.ts";
+export * from "./roles.ts";
 export * from "./ui.ts";
 export * from "./tool_gating.ts";
 export * from "./subquest.ts";

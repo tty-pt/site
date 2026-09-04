@@ -9,10 +9,12 @@ import plugin, {
   checkAndTriggerDirectionReview,
   checkOrdinaryCompletionConditions,
   classifyToolCall,
+  clearActiveReviews,
   ensureQuestId,
   executeUpdateStateTool,
   type ExtensionAPI,
   type ExtensionContext,
+  getActiveReviews,
   getQuestLogPath,
   getState,
   initProvisionalRootQuest,
@@ -25,6 +27,7 @@ import plugin, {
   QuestErrorCode,
   readQuestLog,
   reconstruct,
+  registerActiveReview,
   resolveSubagentExecutor,
   restoreSessionState,
   runCriticalReview,
@@ -1378,6 +1381,10 @@ REQUIRED ACTIONS:
       s.questId = "read-only-guard-quest";
       s.stack = [s.active];
       s.implementationAllowed = true; // Main agent implementation gate is open
+      // Open the research/implementation gate so the ONLY potential blocker during
+      // the review window is the (role-based) read-only gate — isolating its behavior.
+      s.researchComplete = true;
+      s.researchRequired = false;
 
       const qPath = `${currentDir}/${s.active}/quest.md`;
       await mkdir(`${currentDir}/${s.active}`, { recursive: true });
@@ -1435,44 +1442,103 @@ REQUIRED ACTIONS:
         false,
       );
 
-      // Test tool_call gate enforcement while inCriticalReview is active
+      // Test tool_call gate enforcement: read-only enforcement is now ROLE-BASED.
+      // The main (parent) session is NEVER read-only gated by inCriticalReview: it
+      // may draft/research freely while a background review runs.
       s.inCriticalReview = true;
       const toolCallHandler = handlers["tool_call"]?.[0];
       assert.ok(toolCallHandler, "tool_call handler must be registered");
 
-      const editAttempt = await toolCallHandler({
+      // Main session edit/mutating calls are NOT blocked, even inCriticalReview is set.
+      const mainEditAttempt = await toolCallHandler({
         toolName: "edit",
         input: { path: "src/foo.ts" },
       }, ctx);
-      assert.strictEqual(
-        editAttempt?.block,
-        true,
-        "Edit call during critical review must be blocked",
-      );
       assert.ok(
-        editAttempt?.reason?.includes("Critical Review Read-Only Enforcement"),
+        !mainEditAttempt?.block,
+        "Main session must NOT be read-only blocked by inCriticalReview flag",
       );
 
-      const mutatingBashAttempt = await toolCallHandler({
+      const mainBashAttempt = await toolCallHandler({
         toolName: "bash",
         input: { command: "git commit -m 'test'" },
       }, ctx);
-      assert.strictEqual(
-        mutatingBashAttempt?.block,
-        true,
-        "Mutating git command during critical review must be blocked",
+      assert.ok(
+        !mainBashAttempt?.block,
+        "Main session mutating bash must NOT be read-only blocked by inCriticalReview flag",
       );
 
-      const readAttempt = await toolCallHandler({
+      // The reviewer CHILD session IS read-only blocked by the role-based backstop,
+      // even though it shares the quest's inCriticalReview flag.
+      const reviewerChildSessionId = "reviewer_child_scenario_26";
+      const reviewerCtx = createMockContext(50000, reviewerChildSessionId);
+      // Mirror a reviewer child session that is attached to the same quest so the
+      // tool gate resolves it as a reviewer rather than an unrelated observer.
+      const reviewerChildState = getState(reviewerCtx);
+      reviewerChildState.active = s.active;
+      reviewerChildState.questId = s.questId;
+      const childReview = registerActiveReview(
+        "rev_scenario_26",
+        s.active,
+        ctx.sessionManager?.id || "session_test_26",
+        "plan_review",
+        {
+          questId: s.questId,
+          sessionId: reviewerChildSessionId,
+          reviewId: "rev_scenario_26",
+          reviewKind: "plan_review",
+          planVersion: 1,
+          saveGeneration: 0,
+          stateHash: null,
+          originalUserRequest: "stub",
+          currentUnderstanding: "stub",
+          assumptions: "",
+          plan: "stub",
+          planRevisions: "",
+          findings: "",
+          filesChanged: "",
+          relevantDiff: "",
+          testStatus: "",
+          nextAction: "",
+          createdAt: Date.now(),
+        },
+      );
+      childReview.childSessionId = reviewerChildSessionId;
+
+      const reviewerEditAttempt = await toolCallHandler({
+        toolName: "edit",
+        input: { path: "src/foo.ts" },
+      }, reviewerCtx);
+      assert.strictEqual(
+        reviewerEditAttempt?.block,
+        true,
+        "Reviewer child edit must be blocked",
+      );
+      assert.ok(
+        reviewerEditAttempt?.reason?.includes("Critical Review Read-Only Enforcement"),
+      );
+
+      const reviewerMutatingBash = await toolCallHandler({
+        toolName: "bash",
+        input: { command: "git commit -m 'test'" },
+      }, reviewerCtx);
+      assert.strictEqual(
+        reviewerMutatingBash?.block,
+        true,
+        "Reviewer child mutating git command must be blocked",
+      );
+
+      const reviewerReadAttempt = await toolCallHandler({
         toolName: "read",
         input: { path: "src/foo.ts" },
-      }, ctx);
+      }, reviewerCtx);
       assert.strictEqual(
-        readAttempt,
+        reviewerReadAttempt,
         undefined,
-        "Read tool call during critical review must be permitted",
+        "Read tool call during critical review must be permitted for the reviewer child",
       );
 
+      clearActiveReviews();
       s.inCriticalReview = false;
     },
   );

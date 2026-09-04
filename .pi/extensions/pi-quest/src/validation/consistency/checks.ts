@@ -196,15 +196,17 @@ function checkStatusAndRemaining(
       );
     }
   }
-  // test status
-  if (
-    (hasFilesModified ||
-      (options?.recentModifiedFiles &&
-        options.recentModifiedFiles.length > 0)) && !hasTestStatus
-  ) {
-    issues.push(
-      "Files were modified but Test / Build Status is empty. Test / Build Status must explicitly state whether tests have been run or are pending rerun after changes (e.g. '- Unit tests pending rerun after file edits').",
-    );
+  // test status — research-only quests must not be forced to fill Test / Build Status
+  if (!options?.isResearchOnly) {
+    if (
+      (hasFilesModified ||
+        (options?.recentModifiedFiles &&
+          options.recentModifiedFiles.length > 0)) && !hasTestStatus
+    ) {
+      issues.push(
+        "Files were modified but Test / Build Status is empty. Test / Build Status must explicitly state whether tests have been run or are pending rerun after changes (e.g. '- Unit tests pending rerun after file edits').",
+      );
+    }
   }
   // completed vs remaining
   if (hasCompleted && hasRemaining) {

@@ -1,3 +1,4 @@
+import { getActiveReviews } from "./critical_agent/tracker.ts";
 import { withContext } from "./context.ts";
 import { canImplement, getImplementationBlockReason } from "./gates.ts";
 import {
@@ -13,8 +14,9 @@ import {
   reportAgentError,
   sendInternalAgentMessage,
 } from "./messaging.ts";
-import { questPath } from "./paths.ts";
+import { fileExists, questPath } from "./paths.ts";
 import { persist } from "./persistence.ts";
+import { resolveActiveRole, resolveCallerSelf } from "./roles.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
 import {
   ExtensionAPI,
@@ -216,6 +218,67 @@ Proceed autonomously with the justified EXACT NEXT ACTION from your execution pl
   sendInternalAgentMessage(pi, steerMsg, "steer", "gate_open");
 }
 
+// Hard-block quest_mark_saved when the active quest file is not yet on disk,
+// so the agent is forced to create the file (via quest_update_state) instead of
+// the first-write failure being silently masked by a later successful save.
+async function blockQuestMarkSavedMissingFile(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  toolName: string,
+  permission: ToolPermission,
+): Promise<{ block: true; reason: string } | undefined> {
+  const qid = state.questId;
+  const p = qid ? questPath(qid) : "";
+  if (!p) return undefined;
+  if (await fileExists(p)) return undefined;
+
+  const correlationId = `marksaved_${Date.now().toString(36)}_${
+    Math.random().toString(36).slice(2, 6)
+  }`;
+  const blockMessage =
+    `[Quest Journal Gate: Blocked]
+
+Tool: ${toolName}
+Permission: ${permission}
+
+quest_mark_saved requires the active quest file to already exist on disk, but it is missing at \`${p}\`.
+
+Call quest_update_state first — it writes and formats the durable quest file — then call quest_mark_saved to mark it saved.`;
+
+  logGateTransition(
+    "GATE_BLOCKED",
+    "quest_mark_saved requires existing quest file",
+    {
+      quest: state.active || "",
+      tool: toolName,
+      permission,
+      correlationId,
+      consequence: "OPERATION_BLOCKED",
+    },
+  );
+
+  reportAgentError(
+    pi,
+    ctx,
+    `Tool '${toolName}' blocked: Quest file not on disk at \`${p}\`.`,
+    {
+      code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
+      correlationId,
+      deliverAs: "steer",
+      requiredNextAction:
+        "Call quest_update_state to create the durable quest file, then call quest_mark_saved.",
+      details: {
+        Tool: toolName,
+        Permission: permission,
+        Path: p,
+        State: "MISSING_QUEST_FILE",
+      },
+    },
+  );
+
+  return { block: true, reason: blockMessage };
+}
+
 export function installToolCallGate(pi: ExtensionAPI) {
   pi.on(
     "tool_call",
@@ -224,8 +287,18 @@ export function installToolCallGate(pi: ExtensionAPI) {
       const toolName = event?.toolName || "";
       const permission = classifyToolCall(toolName, event?.input);
 
-      // Critical review execution is strictly read-only
-      if (state.inCriticalReview) {
+      const self = resolveCallerSelf(ctx);
+      const role = resolveActiveRole(
+        state.active || state.activeDraft || "",
+        self,
+        getActiveReviews().values(),
+      );
+
+      // Critical review execution is strictly read-only for the reviewer child.
+      // The main (implementer-drafter) session is never gated here: it may draft
+      // or research freely while a background review runs. The reviewer child is
+      // primarily sandboxed by its harness tool allowlist; this is a backstop.
+      if (role.role === "reviewer") {
         if (!canToolExecuteInCriticalReview(toolName, event?.input)) {
           const correlationId = `critic_gate_${Date.now().toString(36)}_${
             Math.random().toString(36).slice(2, 6)
@@ -299,6 +372,13 @@ Allowed for critical review:
         const normTool = (toolName || "").toLowerCase().trim();
         // Allow reads, research, interaction, and quest_mark_saved (journal save marker)
         if (normTool === "quest_mark_saved") {
+          const missingBlock = await blockQuestMarkSavedMissingFile(
+            pi,
+            ctx,
+            toolName,
+            permission,
+          );
+          if (missingBlock) return missingBlock;
           return;
         }
         // Allow read/research/interaction
@@ -391,6 +471,18 @@ Required: await review verdict.`;
         permission === "read" || permission === "research" ||
         permission === "journal" || permission === "interaction"
       ) {
+        if (
+          permission === "journal" &&
+          (toolName || "").toLowerCase().trim() === "quest_mark_saved"
+        ) {
+          const missingBlock = await blockQuestMarkSavedMissingFile(
+            pi,
+            ctx,
+            toolName,
+            permission,
+          );
+          if (missingBlock) return missingBlock;
+        }
         return;
       }
 
