@@ -1059,3 +1059,137 @@ Housekeeping: mark §7 checklist items and §12 items done as implemented;
 keep the execution log of the verification run for the bundle.
 Deferred: hatch removal (revisit post-proof), bash-redirect edit
 detection, Option-B tool write-through (unneeded — promote reads file).
+
+### 12.6 Implementation notes — F2 / F3(i) / F3(ii) / F4 pass (implemented)
+
+Status: all four implemented + tested. Suite: 86 passed (379 steps) /
+0 failed (baseline was 373 steps; +6 new sub-steps: T-F2, T-F3i, T-F3i-neg,
+T-F3ii, T-F3ii-gate, T-F4). Corrections to the §12.3 specs found during
+implementation:
+
+- **F2 placement (resolves STATUS.md open question).** The §12.3 WIRING NOTE
+  ("emit immediately after the `await runCriticalReview(...)` returns") is
+  WRONG: that await resolves only when the review completes, so the steer
+  would fire post-verdict. Implemented at the launch point inside
+  `runCriticalReview` (`src/critical_agent/policy.ts`, after the
+  `PLAN_REVIEW_STARTED` log ~:841, before the background-executor IIFE
+  ~:873), where `pi` + `correlationId` + `slug` are in scope and
+  `awaitingReview` is already set. Gated on `isPlanReviewKind` and
+  `options.boundaryKey?.startsWith("draft:")`. Test T-F2 needs a ~100 ms
+  wait after registration because the `await import("../messaging.ts")`
+  inside the lock callback yields.
+- **F3(i) `pi` threading.** `handleToolResult(event, _ctx, pi?)`
+  (`src/hooks/handlers.ts:841`) gained an OPTIONAL 3rd param (backward
+  compatible — no direct test callers break); `installToolResultListener`
+  (`src/hooks/index.ts:116`) passes the closure `pi`. Detection:
+  `edit|write|user_edit|user_write`, success, `input.path|input.file`
+  endswith `future/<activeDraft>.md` → `tryLog("DRAFT_PLAN_EDITED")` (new
+  event in `logging/types.ts`) + fire-and-forget `checkAndTriggerPlanReview`.
+  Tests MUST wrap `handleToolResult` in `asyncContext.run(ctx, …)` or the
+  inner `checkAndTriggerPlanReview` cannot resolve state via
+  `getActiveContext`.
+- **F3(ii) is two layers, not one** (§12.3 only specified the tool_gating
+  intercept). `getImplementationBlockReason` returns
+  `PROVISIONAL_RESEARCH_PENDING` for ANY `s.activeDraft`, so a tool_gating-
+  only intercept never surfaces as a gate state. Implemented:
+  (a) `src/gates.ts` — new `DRAFT_REVISION_PENDING` branch INSIDE the
+  `s.activeDraft` block, BEFORE the `PROVISIONAL_RESEARCH_PENDING` return
+  (uses `DRAFT_REVIEW_REQUIRED` code, already defined/unused at
+  `constants.ts:272`); MUST be a static import
+  (`import { isDraftRevisionOutstanding } from
+  "./critical_agent/snapshot.ts"`) because `getImplementationBlockReason`
+  is sync — dynamic import is impossible there.
+  (b) `src/tool_gating.ts` — read/research intercept before the
+  unconditional allow (~:469), blocks research + non-quest-`.pi/quest/`
+  reads while `isDraftRevisionOutstanding(state)` (dynamic import fine —
+  that function is async).
+  DAG: new static edge `gates.ts → critical_agent/snapshot.ts`; acyclic —
+  `snapshot.ts` imports only markdown/constants/paths/reconstruction/state/
+  logging/types/prompt/tracker (verified import lists + full-suite
+  type-check green).
+- **T-F3ii fixtures** must include `reviewedStateVersion` (required field
+  of `CriticalReviewState`, `types.ts:446`).
+- **T-F4** uses the exported `__resetCoalesceSteerForTests()` resetter;
+  asserts first coalesce emits, second within 60 s is silent.
+
+### 12.7 Implementation notes — F7 activeGate / phase draft_revision synchronization (post-run 1788526738)
+
+Status: implemented + tested. Suite: 86 passed (380 steps) / 0 failed (+1 new sub-step: T-F7).
+Fixes identified from post-run 1788526738 diagnostics:
+
+- **Active gate & phase synchronization (`src/hooks/handlers.ts:handleTurnStart`).**
+  Previously, `activeGate` and `phase` defaulted to `"RESEARCH_PENDING"` and `"research"`
+  whenever `state.researchRequired || !state.researchComplete` was true during a draft phase.
+  When an adversarial plan review returned `UNCERTAIN` or `REVISE`, `isDraftRevisionOutstanding(state)`
+  became true, but the system prompt and turn boundary logs still reported `RESEARCH_PENDING` / `research`.
+  This contradictory hard signal led the agent to attempt `quest_update_state` (a research tool)
+  instead of directly editing `.pi/quest/future/<activeDraft>.md`.
+  `handleTurnStart` now computes `_draftRevisionPending = Boolean(state.activeDraft && isDraftRevisionOutstanding(state))`
+  and assigns `activeGate = "DRAFT_REVISION_PENDING"` and `phase = "draft_revision"`.
+- **Fresh implementation permission synchronization.**
+  `syncImplementationPermission(state, _ctx)` is now explicitly called at the start of
+  `handleTurnStart`, preventing stale `implementationAllowed: true` values from being logged
+  or observed across turn boundaries.
+- **Handler re-exports (`src/hooks/index.ts`).**
+  Exported `./handlers.ts` from `hooks/index.ts` so lifecycle handlers like `handleTurnStart`
+  are cleanly testable without private relative paths.
+- **Test T-F7 (`tests/plan_review.test.ts:2210`).**
+  Verifies that `handleTurnStart` correctly sets `activeGate = "DRAFT_REVISION_PENDING"`,
+  `phase = "draft_revision"`, and synchronizes `implementationAllowed = false` when an
+  `UNCERTAIN` plan review is outstanding for an active draft.
+
+### 12.8 Implementation notes — F8 fixes (post-run 1788530059)
+
+Status: implemented + tested. Suite: 86 passed (384 steps) / 0 failed (+4 new sub-steps: T-B1, T-B2, T-B3, T-B4).
+Fixes identified from post-run 1788530059 (session `01a06cb2-542d-76de-ae67-b9884e33c2a7`) diagnostics:
+
+- **Reviewer Turn Yield & Turn-End Steer Removal (Bug 1).**
+  - Launch steer message in `src/critical_agent/policy.ts` previously said `"finish your current tool call..."`. Because the write tool call had already finished, the agent interpreted this as an instruction to make another tool call. Updated to clearly direct: `⏹ Plan review <id> launched for '<slug>' in the background — finish your current tool call, then end your turn now with NO TOOL CALLS and await the verdict; do not start new research reads.`
+  - In Pi CLI, sending a message as `"steer"` immediately queues a new agent turn. `handleTurnEnd` (`src/hooks/handlers.ts`) and `turn_end` (`src/hooks/index.ts`) were sending a steer on *every turn end* while `awaitingReview` was active. When the agent finished a turn, pi-quest re-awakened it, causing 15 consecutive spinning turns during the 50-second background review. Removed these turn-end steer messages entirely.
+  - `handleTurnStart` (`src/hooks/handlers.ts`) now checks `_isAwaitingReview` (`state.awaitingReview` for `plan_review` and `final_acceptance`), setting `activeGate = "AWAITING_REVIEW"` and `phase = "awaiting_review"` instead of falling through to `RESEARCH_PENDING`/`research`.
+  - Test: `21. handleTurnStart sets activeGate AWAITING_REVIEW and handleTurnEnd does NOT emit steer (T-B1)`.
+
+- **`ask_user_question` Classification & Unconditional Allow (Bug 2).**
+  - `classifyToolCall` (`src/utils/tool_permissions.ts`) only checked `norm === "ask_questions"`. In this environment the tool is `ask_user_question`. It fell through to `"unknown"`, which was blocked by the `AWAITING_REVIEW` gate.
+  - Updated `classifyToolCall` to classify `ask_user_question`, `ask_questions`, `ask_question`, `ask_user`, `ask_human`, and `ask_*`/`*question*` tools as `"interaction"`.
+  - Added an unconditional allow check at the top of `installToolCallGate` (`src/tool_gating.ts`) ensuring interaction tools can never be blocked by pi-quest under any gate or state.
+  - Test: `22. classifyToolCall treats ask_user_question as interaction and gate allows it (T-B2)`.
+
+- **`quest_mark_saved` Draft Path Resolution (Bug 3).**
+  - `blockQuestMarkSavedMissingFile` (`src/tool_gating.ts`) and `verifyAndMarkSaved` (`src/persistence.ts`) hardcoded `questPath(qid)` (`.pi/quest/current/<qid>/quest.md`). During draft mode (`state.activeDraft` set), the quest file lives at `.pi/quest/future/<slug>.md`. The tool was blocked with `Quest file not on disk at .pi/quest/current/1788530059/quest.md`.
+  - Updated both functions to resolve `futureDraftPath(state.activeDraft)` when `state.activeDraft` is set, verifying and fingerprinting the draft file accurately.
+  - Test: `23. quest_mark_saved verifies future draft file when state.activeDraft is set (T-B3)`.
+
+- **Reads Unconditionally Allowed (Bug 4).**
+  - Lines 488–538 in `src/tool_gating.ts` (F3(ii) read throttle) blocked reads to any path outside `.pi/quest/` when `isDraftRevisionOutstanding` was true. The reviewer specifically asked the agent to inspect `external/bud/` to verify JSON writer vs parser primitives, and pi-quest blocked the read.
+  - Deleted lines 488–538. Reads and research operations are now unconditionally allowed across all gates and phases, respecting the invariant that reads are never blocked.
+  - Test: `24. reads to non-quest files are allowed during draft revision (T-B4)`.
+
+### 12.9 Implementation notes — F9 Reviewer Model Error Resilience & Multi-Tier Fallback (post-run 1788532278)
+
+Status: implemented + tested. Suite: 86 passed (387 steps) / 0 failed (+3 new sub-steps: 25, 26, 27).
+Fixes identified from post-run 1788532278 (session `01a06cd4-7ffe-7043-b319-2af25151e4fb`) diagnostics:
+
+- **Root Cause Discovery (Extension Provider Stripping in Child Sessions):**
+  - In run `1788530059`, Pi routed `openrouter/free` through built-in provider `openrouter` (`openrouter/openrouter/free:high`), which was available in the child session.
+  - In run `1788532278`, the user still selected `openrouter/free`, but the ambient extension `pi-free` (installed in `~/.pi/agent/settings.json`) dynamically selected `kilo` as the route (`kilo/openrouter/free:high`).
+  - Subagents created by `pi-subagents` run in isolated foreground child sessions (`host: "parent"`, `disableAmbientExtensions: true`, `noExtensions: true`), so ambient extension packages (including `pi-free` and its `kilo` provider) are intentionally stripped from the child's `ModelRuntime`.
+  - When the subagent launched with `model: "kilo/openrouter/free:high"`, the child session failed within 202ms with `Model "kilo/openrouter/free:high" not found`.
+- **Model Normalization (`normalizeReviewModel` in `src/critical_agent/pi_adapter.ts`):**
+  - Added `normalizeReviewModel(rawProvider?, rawId?)` to detect extension providers like `kilo/` and `cline/` and map them to built-in providers (`openrouter/*`).
+  - Built-in providers (`openrouter`, `openai`, `anthropic`, `google-antigravity`, `deepseek`, etc.) are preserved verbatim.
+  - `resolveDefaultReviewModel(ctx)` now normalizes model references before passing them to subagents.
+- **Multi-Tier Fallback in `PiSubagentReviewer.review()`:**
+  - Evaluates an ordered list of candidate models on failure:
+    1. Candidate 0: Initial normalized model.
+    2. Candidate 1: Normalized `openrouter/*` (if original had extension prefix).
+    3. Candidate 2: `model: undefined` (unconstrained fallback that activates `@earendil-works/pi-coding-agent`'s native `findInitialModel()` in the child session to pick any working authenticated built-in model).
+    4. Candidate 3: `process.env.PI_CRITICAL_REVIEW_MODEL_FALLBACK` (if explicitly configured).
+  - Recovers gracefully from `isModelResolutionOrProviderError` and `provider_model_timeout` errors, trying the next candidate.
+  - Emits diagnostic events: `CRITICAL_REVIEW_MODEL_FALLBACK` on fallback recovery and `CRITICAL_REVIEW_MODEL_EXHAUSTED` if all candidates fail.
+- **Defensive Prompt Building (`src/critical_agent/prompt/build.ts`):**
+  - Added defensive guards for `context.refinements`, `context.originalRequest`, and `context.planConfidence` against partial or undefined mock contexts.
+- **Tests Added (`tests/plan_review.test.ts`):**
+  - `25. normalizeReviewModel maps extension providers to built-in openrouter and preserves built-in providers`: verifies normalization of `kilo/openrouter/free` -> `openrouter/openrouter/free` while leaving built-in providers unchanged.
+  - `26. PiSubagentReviewer.review() recovers from model not found via multi-tier fallback`: verifies transparent retry and success when the first candidate model errors with `provider_model_timeout`.
+  - `27. PiSubagentReviewer.review() falls back to unconstrained host model when explicit candidate fails`: verifies `model: undefined` unconstrained fallback succeeds when explicit candidate fails.

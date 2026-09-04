@@ -297,7 +297,7 @@ export function classifySpecialGitCommand(
         t === "--get" || t === "--list" || t === "-l" || t.startsWith("--get-")
       )
       ? "read"
-      : "unknown";
+      : "implementation";
   }
   return null;
 }
@@ -319,7 +319,7 @@ export function classifyGitCommand(tokens: string[]): ToolPermission {
     return "read";
   }
 
-  return "unknown";
+  return "implementation";
 }
 
 export function classifyInterpreterCommand(
@@ -338,7 +338,7 @@ export function classifyInterpreterCommand(
   ) {
     return "implementation";
   }
-  return "unknown";
+  return "read";
 }
 
 export function classifySedPerlCommand(
@@ -355,9 +355,9 @@ export function classifySedPerlCommand(
     const hasInPlace = tokens.some((t) =>
       t === "-i" || t.startsWith("-i") || t.includes("-pi") || t.includes("-i")
     );
-    return hasInPlace ? "implementation" : "unknown";
+    return hasInPlace ? "implementation" : "read";
   }
-  return "unknown";
+  return "read";
 }
 
 export function classifyAwkCommand(
@@ -392,10 +392,10 @@ export function classifyByBinaryCategory(
   if (INTERPRETER_BINARIES.has(bin)) {
     return classifyInterpreterCommand(bin, tokens);
   }
-  if (READ_BINARIES.has(bin)) {
+  if (bin === "awk" || bin === "gawk" || bin === "mawk") {
     return classifyAwkCommand(bin, tokens);
   }
-  return "unknown";
+  return "read";
 }
 
 function classifyXargs(tokens: string[]): ToolPermission {
@@ -403,7 +403,7 @@ function classifyXargs(tokens: string[]): ToolPermission {
   if (nonFlagTokens.length > 0) {
     return classifySingleBashCommand(nonFlagTokens.join(" "));
   }
-  return "unknown";
+  return "read";
 }
 
 export function classifySingleBashCommand(cmdSegment: string): ToolPermission {
@@ -415,6 +415,24 @@ export function classifySingleBashCommand(cmdSegment: string): ToolPermission {
   }
 
   const cleaned = cleanCommandPreamble(trimmed);
+  if (!cleaned) return "read";
+
+  // Standalone shell keywords/terminators that execute no commands
+  if (/^(?:done|fi|esac|else|do|then)$/i.test(cleaned)) {
+    return "read";
+  }
+
+  // Shell loop headers: for var in ... or for ((...))
+  if (/^for\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+in\b|\(\(.*\)\))/i.test(cleaned)) {
+    return "read";
+  }
+
+  // Shell conditional/loop tests: while <test>, until <test>, if <test>
+  const testMatch = cleaned.match(/^(?:while|until|if)\s+(.+)$/i);
+  if (testMatch) {
+    return classifySingleBashCommand(testMatch[1]);
+  }
+
   const tokens = splitBashTokens(cleaned);
   if (tokens.length === 0) return "read";
 
@@ -438,18 +456,14 @@ export function classifyBashCommand(commandStr: string): ToolPermission {
   const segments = splitBashCommandChain(commandStr);
   if (segments.length === 0) return "read";
 
-  let hasUnknown = false;
   for (const segment of segments) {
     const perm = classifySingleBashCommand(segment);
     if (perm === "implementation") {
       return "implementation";
     }
-    if (perm === "unknown") {
-      hasUnknown = true;
-    }
   }
 
-  return hasUnknown ? "unknown" : "read";
+  return "read";
 }
 
 export function isCriticalReviewSubagentInvocation(input?: any): boolean {
@@ -522,7 +536,15 @@ export function classifyToolCall(
     return "journal";
   }
 
-  if (norm === "ask_questions") {
+  if (
+    norm === "ask_questions" ||
+    norm === "ask_question" ||
+    norm === "ask_user_question" ||
+    norm === "ask_user" ||
+    norm === "ask_human" ||
+    norm.startsWith("ask_") ||
+    norm.includes("question")
+  ) {
     return "interaction";
   }
 

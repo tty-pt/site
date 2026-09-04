@@ -80,6 +80,8 @@ import {
 } from "../types.ts";
 import { buildSessionAwarenessBlock, updateUIStatus } from "../ui.ts";
 import { classifyToolCall, normalizePath } from "../utils.ts";
+import { syncImplementationPermission } from "../gates.ts";
+import { isDraftRevisionOutstanding } from "../critical_agent/snapshot.ts";
 import {
   analyzeTurnToolResults,
   applyTurnEndStateTransitions,
@@ -124,8 +126,25 @@ export async function handleTurnStart(
   const intent = state.prompts && state.prompts.length > 0
     ? state.prompts[state.prompts.length - 1]
     : state.pendingRootRequest || state.active || "";
+
+  // Fix 2: Sync implementationAllowed before logging so TURN_START always reflects fresh value
+  syncImplementationPermission(state, _ctx);
+
+  // Fix 1: Check draft-revision-pending state before falling through to research gate
+  const _draftRevisionPending = !!(
+    state.activeDraft && isDraftRevisionOutstanding(state)
+  );
+  const _isAwaitingReview = Boolean(
+    state.awaitingReview &&
+      (state.awaitingReview.kind === "plan_review" ||
+        state.awaitingReview.kind === "final_acceptance"),
+  );
   const activeGate = state.reassessmentRequired
     ? "REASSESSMENT_PENDING"
+    : _isAwaitingReview
+    ? "AWAITING_REVIEW"
+    : _draftRevisionPending
+    ? "DRAFT_REVISION_PENDING"
     : state.researchRequired || !state.researchComplete
     ? "RESEARCH_PENDING"
     : state.awaitingUserConfirmation
@@ -133,6 +152,10 @@ export async function handleTurnStart(
     : "IMPLEMENTATION_ALLOWED";
   const phase = state.reassessmentRequired
     ? "reassessment"
+    : _isAwaitingReview
+    ? "awaiting_review"
+    : _draftRevisionPending
+    ? "draft_revision"
     : state.researchRequired || !state.researchComplete
     ? "research"
     : state.awaitingUserConfirmation
@@ -367,25 +390,6 @@ export async function handleTurnEnd(
   if (state.pickerCancelled) return;
 
   drainPendingResumesAndNotifications(pi, ctx);
-  // Turn-stop steer for awaitingReview (A: plan_review/final_acceptance only)
-  try {
-    const c = getActiveContext(ctx);
-    const targetSessionId = getSessionId(c);
-    const targetState = sessionStates.get(targetSessionId) ?? getState(c);
-    const aw = targetState.awaitingReview as
-      | { kind: string; reviewId: string; triggerReason?: string }
-      | null
-      | undefined;
-    if (aw && (aw.kind === "plan_review" || aw.kind === "final_acceptance")) {
-      sendInternalAgentMessage(
-        pi,
-        `⏸ Awaiting ${aw.kind}/${
-          aw.triggerReason || aw.kind
-        } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
-        "steer",
-      );
-    }
-  } catch {}
 
   if (state.compactionPending) return;
 
@@ -841,6 +845,7 @@ export async function handleTurnEnd(
 export async function handleToolResult(
   event: any,
   _ctx: ExtensionContext,
+  pi?: ExtensionAPI,
 ): Promise<void> {
   if (!state.active && !state.pendingRootQuest && !state.activeDraft) return;
   const toolName = event?.toolName || event?.name || "";
@@ -903,6 +908,29 @@ export async function handleToolResult(
     toolOutput,
     effectiveIsError,
   );
+
+  // F3(i): auto re-review on draft-file edit
+  if (
+    pi &&
+    state.activeDraft &&
+    !effectiveIsError
+  ) {
+    const normTool = (toolName || "").toLowerCase().trim();
+    if (normTool === "edit" || normTool === "write" || normTool === "user_edit" || normTool === "user_write") {
+      const toolPath = typeof toolInput?.path === "string"
+        ? toolInput.path
+        : typeof toolInput?.file === "string"
+        ? toolInput.file
+        : "";
+      if (toolPath.replace(/\\/g, "/").endsWith(`future/${state.activeDraft}.md`)) {
+        try {
+          tryLog("DRAFT_PLAN_EDITED", `draft file edited: ${toolPath}`, { quest: state.activeDraft });
+          const { checkAndTriggerPlanReview } = await import("../critical_agent/policy.ts");
+          checkAndTriggerPlanReview(pi, _ctx).catch(() => {});
+        } catch {}
+      }
+    }
+  }
 
   const activeQuest = state.active || "";
 

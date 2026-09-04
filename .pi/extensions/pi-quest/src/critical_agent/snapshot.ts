@@ -241,3 +241,23 @@ export function isReviewSnapshotCurrent(
 
   return { current: true };
 }
+
+/**
+ * F3(ii): True when a draft plan review returned REVISE/FAIL/UNCERTAIN and
+ * the draft file has NOT been edited since the snapshot was taken. Used by
+ * tool_gating to block research and non-quest reads until the agent revises
+ * the draft (which triggers F3(i) auto re-review).
+ */
+export function isDraftRevisionOutstanding(s: StoredState): boolean {
+  try {
+    if (!s.activeDraft) return false;
+    const lcr = s.lastCriticalReview;
+    if (!lcr) return false;
+    if (lcr.kind !== "plan_review") return false;
+    if (lcr.verdict !== "REVISE" && lcr.verdict !== "FAIL" && lcr.verdict !== "UNCERTAIN") return false;
+    if (!lcr.snapshot) return false;
+    if (s.awaitingReview) return false;
+    const cur = isReviewSnapshotCurrent(lcr.snapshot, s);
+    return cur.current;
+  } catch { return false; }
+}

@@ -14,7 +14,7 @@ import {
   reportAgentError,
   sendInternalAgentMessage,
 } from "./messaging.ts";
-import { fileExists, questPath } from "./paths.ts";
+import { fileExists, futureDraftPath, questPath } from "./paths.ts";
 import { persist } from "./persistence.ts";
 import { resolveActiveRole, resolveCallerSelf } from "./roles.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
@@ -227,16 +227,26 @@ async function blockQuestMarkSavedMissingFile(
   toolName: string,
   permission: ToolPermission,
 ): Promise<{ block: true; reason: string } | undefined> {
-  const qid = state.questId;
-  const p = qid ? questPath(qid) : "";
+  const isDraft = Boolean(state.activeDraft);
+  const p = isDraft
+    ? futureDraftPath(state.activeDraft!)
+    : (state.questId ? questPath(state.questId) : "");
   if (!p) return undefined;
   if (await fileExists(p)) return undefined;
 
   const correlationId = `marksaved_${Date.now().toString(36)}_${
     Math.random().toString(36).slice(2, 6)
   }`;
-  const blockMessage =
-    `[Quest Journal Gate: Blocked]
+  const blockMessage = isDraft
+    ? `[Quest Journal Gate: Blocked]
+
+Tool: ${toolName}
+Permission: ${permission}
+
+quest_mark_saved requires the active draft quest file to already exist on disk, but it is missing at \`${p}\`.
+
+Author or edit \`.pi/quest/future/${state.activeDraft}.md\` first, then call quest_mark_saved to mark it saved.`
+    : `[Quest Journal Gate: Blocked]
 
 Tool: ${toolName}
 Permission: ${permission}
@@ -249,7 +259,7 @@ Call quest_update_state first â€” it writes and formats the durable quest file â
     "GATE_BLOCKED",
     "quest_mark_saved requires existing quest file",
     {
-      quest: state.active || "",
+      quest: state.active || state.activeDraft || "",
       tool: toolName,
       permission,
       correlationId,
@@ -265,8 +275,9 @@ Call quest_update_state first â€” it writes and formats the durable quest file â
       code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
       correlationId,
       deliverAs: "steer",
-      requiredNextAction:
-        "Call quest_update_state to create the durable quest file, then call quest_mark_saved.",
+      requiredNextAction: isDraft
+        ? `Create or edit \`.pi/quest/future/${state.activeDraft}.md\`, then call quest_mark_saved.`
+        : "Call quest_update_state to create the durable quest file, then call quest_mark_saved.",
       details: {
         Tool: toolName,
         Permission: permission,
@@ -283,9 +294,22 @@ export function installToolCallGate(pi: ExtensionAPI) {
   pi.on(
     "tool_call",
     withContext(async (event: any, ctx: ExtensionContext) => {
-      if (!state.active && !state.pendingRootQuest) return;
+      if (!state.active && !state.pendingRootQuest && !state.activeDraft) return;
       const toolName = event?.toolName || "";
       const permission = classifyToolCall(toolName, event?.input);
+      const normTool = (toolName || "").toLowerCase().trim();
+
+      // Interaction tools (e.g. ask_user_question, ask_questions) must NEVER be blocked under any gate or state
+      if (
+        permission === "interaction" ||
+        normTool === "ask_user_question" ||
+        normTool === "ask_questions" ||
+        normTool === "ask_question" ||
+        normTool.startsWith("ask_") ||
+        normTool.includes("question")
+      ) {
+        return;
+      }
 
       const self = resolveCallerSelf(ctx);
       const role = resolveActiveRole(
@@ -381,10 +405,9 @@ Allowed for critical review:
           if (missingBlock) return missingBlock;
           return;
         }
-        // Allow read/research/interaction
+        // Allow read/research
         if (
-          permission === "read" || permission === "research" ||
-          permission === "interaction"
+          permission === "read" || permission === "research"
         ) {
           return;
         }
@@ -466,10 +489,30 @@ Required: await review verdict.`;
         return;
       }
 
-      // Allow all read, research, journal, and interaction operations
+      // F3(ii) draft-file edit intercept: allow write/edit on the active plan
+      // draft even when the implementation gate returns PROVISIONAL_RESEARCH_PENDING.
+      // Without this, gates.ts blocks ALL writes while activeDraft is set, which
+      // prevents the agent from authoring/revising the very plan it needs to approve.
+      if (state.activeDraft) {
+        const normTool = (toolName || "").toLowerCase().trim();
+        if (normTool === "write" || normTool === "edit" || normTool === "user_edit" || normTool === "user_write") {
+          const toolPath = typeof event?.input?.path === "string"
+            ? event.input.path
+            : typeof event?.input?.file === "string"
+            ? event.input.file
+            : "";
+          const normalizedPath = toolPath.replace(/\\/g, "/");
+          if (normalizedPath.endsWith(`future/${state.activeDraft}.md`)) {
+            return;
+          }
+        }
+      }
+
+
+      // Allow all read, research, and journal operations
       if (
         permission === "read" || permission === "research" ||
-        permission === "journal" || permission === "interaction"
+        permission === "journal"
       ) {
         if (
           permission === "journal" &&
@@ -487,7 +530,12 @@ Required: await review verdict.`;
       }
 
       if (permission === "unknown") {
-        logToolAnomaly("UNKNOWN_TOOL", `unknown tool invoked: ${toolName}`, {
+        const isBash = (toolName || "").toLowerCase().trim() === "bash" ||
+          (toolName || "").toLowerCase().trim() === "user_bash";
+        const anomalyMsg = isBash
+          ? `unclassified bash command: ${((event?.input?.command || event?.input?.cmd || "") as string).slice(0, 80)}`
+          : `unknown tool invoked: ${toolName}`;
+        logToolAnomaly("UNKNOWN_TOOL", anomalyMsg, {
           quest: state.active || "",
           tool: toolName,
           permission: "unknown",
@@ -524,10 +572,15 @@ Required: await review verdict.`;
         const errorCode = permission === "unknown"
           ? QuestErrorCode.UNKNOWN_TOOL_BLOCKED
           : (gate.code || QuestErrorCode.IMPLEMENTATION_BLOCKED);
-        const escapeHint = gate.stateName === "REASSESSMENT_PENDING" ||
+        const draftSlug = state.activeDraft;
+        const draftEscape = draftSlug
+          ? `\nDraft plan active: edit \`.pi/quest/future/${draftSlug}.md\` (the \`## Implementation Plan\` section) directly â€” \`quest_update_state\` is blocked for drafts before reviewer APPROVE.`
+          : "";
+        const escapeHint = (gate.stateName === "REASSESSMENT_PENDING" ||
             gate.stateName === "PLAN_REVIEW_PENDING" ||
-            gate.stateName === "AWAITING_REVIEW"
-          ? "\nEscapes: quest_rebut (argue with reviewer), quest_ask_human (escalate to human), quest_archive --abandon (record contradiction and archive), quest_update_state (revise plan & reassessmentConclusion)"
+            gate.stateName === "AWAITING_REVIEW" ||
+            gate.stateName === "DRAFT_REVISION_PENDING")
+          ? `\nEscapes: quest_rebut (argue with reviewer), quest_ask_human (escalate to human), quest_archive --abandon (record contradiction and archive), quest_update_state (revise plan & reassessmentConclusion)${draftEscape}`
           : permission === "unknown"
           ? "\nIf tool not found: allowed tools are quest_update_state, quest_mark_saved, quest_archive, quest_subquest, quest_rebut, quest_ask_human, read, bash, grep, etc."
           : "";

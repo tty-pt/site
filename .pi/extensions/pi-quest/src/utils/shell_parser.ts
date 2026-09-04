@@ -120,10 +120,10 @@ export function cleanCommandPreamble(cmdSegment: string): string {
   cleaned = cleaned.trim();
 
   while (
-    /^(?:sudo|time|nice|nohup|env|command|builtin|exec)\s+/.test(cleaned)
+    /^(?:sudo|time|nice|nohup|env|command|builtin|exec|do|then|elif|else)\s+/i.test(cleaned)
   ) {
     cleaned = cleaned.replace(
-      /^(?:sudo|time|nice|nohup|env|command|builtin|exec)\s+/,
+      /^(?:sudo|time|nice|nohup|env|command|builtin|exec|do|then|elif|else)\s+/i,
       "",
     ).trim();
   }

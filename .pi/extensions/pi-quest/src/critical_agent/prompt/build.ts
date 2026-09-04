@@ -141,37 +141,26 @@ You MUST explicitly distinguish:
 - Reviewer Preference (MUST NOT block a plan)
 Reviewer preference alone must never block a plan. A concrete risk to correctness or unmet requirement may block it.
 
-### 13. CRITICAL: DO NOT SPAWN MULTIPLE REVIEWERS DURING PLANNING
+### 13. REVIEWER SERIALIZATION (know your context)
 
-There must be **at most ONE active Critical Agent review per quest at any time**, especially during planning.
+You are ONE review in a single-flight pipeline. There is **at most ONE active
+Critical Review per quest at any time**, and a global cap of 1 review applies
+across all quests. This is enforced by the scheduler (\`canLaunchReview\` /
+\`registerActiveReview\`, \`GLOBAL_REVIEW_CAP\`), NOT by you. Your job is to
+evaluate — never to spawn, serialize, or "fix" the scheduler.
 
-The current implementation is wrong: every qualifying plan/state update can launch another background reviewer, and \`canLaunchReview()\` allows up to **3 concurrent reviews** when their state hashes differ. This is exactly why multiple reviewers are appearing simultaneously while the main agent is still planning.
+The plan you received is a **snapshot** captured at launch; a newer state may
+already exist. You evaluate the plan exactly as snapshotted. If a newer plan
+arrived while you ran, that does not mean you are wrong or that you must be
+re-run — the caller discards stale results and, at most, launches ONE fresh
+review for the latest state.
 
-**Fix this explicitly.**
-
-Change the review scheduler/policy so that:
-
-* A \`plan_review\` already running for the quest prevents another \`plan_review\` from starting.
-* A state/hash/version change while that reviewer is running must **not immediately launch another reviewer**.
-* Do not use differing state hashes as a reason to run parallel reviewers.
-* Do not fill a concurrency pool with reviewers for successive planning states.
-* During the planning phase, coalesce repeated review requests into **one pending/latest review request**.
-* When the current reviewer finishes, only then decide whether the latest state still requires a new review.
-* If the plan changed materially while the reviewer was running, discard/supersede the stale result and, at most, launch **one** new review for the latest state.
-* Repeated \`quest_update_state\` calls must therefore not create repeated concurrent plan reviewers.
-
-In particular, **remove the current \`maxConcurrency = 3\` behavior for reviews belonging to the same quest.** The correct invariant is:
-
-\`\`\`text
-ONE QUEST
-  └── ZERO OR ONE ACTIVE CRITICAL REVIEW
-\`\`\`
-
-Do not weaken this by saying different hashes are different boundaries. They are different snapshots, but they are still reviews of the **same quest's reasoning process** and must be serialized.
-
-Planning updates are frequent and cheap. They must not cause three expensive autonomous agents to independently research the same repository.
-
-Also make sure the existing \`inCriticalReview\` / active-review state is actually consulted by the launch path; do not leave it as an informational flag while \`canLaunchReview()\` independently permits additional reviewers.
+Serialization facts (do not contradict these):
+* A review already running for the quest prevents another from starting; repeated requests are **coalesced**, never parallelized.
+* A state/hash/version change while a reviewer runs does **not** launch a second reviewer immediately.
+* Differing state hashes are different snapshots, but all are reviews of the same quest's reasoning and are **serialized**.
+* Planning updates are frequent and cheap; coalesce repeated review requests into one pending/latest request.
+* When the current reviewer finishes, the caller alone decides whether the latest state still needs a new review.
 `
     : "";
 
@@ -188,10 +177,10 @@ MANDATORY INVARIANTS:
 ${planEvaluationGuidance}
 --- CURRENT QUEST CONTEXT ---
 ORIGINAL USER REQUEST (Primary Acceptance Criterion):
-${context.originalRequest}
+${context.originalRequest || "(none)"}
 
 REFINEMENTS / FEEDBACK:
-${context.refinements.length > 0 ? context.refinements.join("\n") : "(none)"}
+${(context.refinements?.length ?? 0) > 0 ? context.refinements.join("\n") : "(none)"}
 
 CURRENT UNDERSTANDING:
 ${context.currentUnderstanding || "(none provided)"}
@@ -203,7 +192,7 @@ CURRENT PLAN DRAFT:
 ${context.plan || "(none provided)"}
 
 PLAN CONFIDENCE:
-${context.planConfidence}
+${context.planConfidence || "medium"}
 
 IMPORTANT PLAN REVISIONS:
 ${context.planRevisions || "(none)"}

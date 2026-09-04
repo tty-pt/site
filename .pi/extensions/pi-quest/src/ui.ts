@@ -34,7 +34,7 @@ export function updateUIStatus(ctx?: ExtensionContext) {
     }
 
     const text = (state.active || state.activeDraft || state.pendingRootQuest)
-      ? formatQuestShort(state, fresh)
+      ? formatQuestShort(state, fresh, ctx)
       : undefined;
     try {
       logEvent("UI_STATUS", text || "(none)", {

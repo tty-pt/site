@@ -20,6 +20,8 @@ import plugin, {
   getQuestLogPath,
   getState,
   isActionableDraftPlan,
+  isActionablePlanContent,
+  isDraftRevisionOutstanding,
   isPlanReviewValidForState,
   isSubagentAvailable,
   isSubagentToolRegistered,
@@ -31,6 +33,14 @@ import plugin, {
   setCustomSubagentRunner,
   snapshotState,
   type StoredState,
+  __resetCoalesceSteerForTests,
+  handleToolResult,
+  handleTurnStart,
+  handleTurnEnd,
+  normalizeReviewModel,
+  resolveDefaultReviewModel,
+  isModelResolutionOrProviderError,
+  PiSubagentReviewer,
 } from "../index.ts";
 
 function createMockExtensionAPI() {
@@ -319,6 +329,57 @@ REQUIRED REVISIONS:
       assert.ok(
         prompt.includes("Do not trust the main agent's summary or claims"),
         "Must instruct untrusted inspection",
+      );
+    },
+  );
+
+  await t.step(
+    "2b. reviewer prompt §13 states the true serialization invariant, no falsehoods (T-F6)",
+    async () => {
+      const prompt = buildCriticalReviewPrompt(
+        "plan_review",
+        "stream-muxer-quest",
+        {
+          originalRequest: "Implement zero-copy audio stream muxer",
+          refinements: [],
+          currentUnderstanding: "",
+          keyAssumptions: "",
+          openQuestions: "",
+          plan: "1. Memory pool setup\n2. SRC filter\n3. Mux loop",
+          planConfidence: "high",
+          planRevisions: "Initial",
+          findings: "",
+          filesModified: "",
+          testStatus: "",
+          executionSnapshot: "",
+          exactNextAction: "",
+          remainingWork: "",
+          status: "",
+        },
+      );
+      assert.ok(
+        prompt.includes("REVIEWER SERIALIZATION"),
+        "§13 must state the serialization invariant",
+      );
+      assert.ok(
+        /at most ONE active\s+Critical Review per quest/i.test(prompt),
+        "§13 must state single-review-per-quest invariant",
+      );
+      assert.ok(
+        /global cap of 1 review/i.test(prompt),
+        "§13 must state the global cap of 1",
+      );
+      assert.ok(
+        !prompt.includes("3 concurrent"),
+        "§13 must not contain the '3 concurrent' falsehood",
+      );
+      assert.ok(
+        !prompt.includes("maxConcurrency = 3"),
+        "§13 must not contain the 'maxConcurrency = 3' falsehood",
+      );
+      assert.ok(
+        !prompt.includes("current implementation is wrong"),
+        "§13 must not claim the implementation is wrong",
       );
     },
   );
@@ -1305,6 +1366,42 @@ REQUIRED REVISIONS:
   );
 
   await t.step(
+    "11b. isActionablePlanContent recognizes scaffold header and placeholders (T-F0)",
+    async () => {
+      const scaffold = `# Draft: x\n\n## Implementation Plan\n1. Investigate via read/search the existing codebase structure\n2. Implement the feature\n3. Test the feature\n\nPlan confidence low.`;
+      const scaffoldBullets = `# Draft: x\n\n## Implementation Plan\n- goal: \n- stages: \n- findings: \n\nPlan confidence low.`;
+      const realUnderImpl = `# Draft: x\n\n## Implementation Plan\n1. Memory pool setup\n2. SRC filter with delay line\n3. Mux loop\n`;
+      const realUnderPlan = `# Draft: x\n\n## Plan\n1. Memory pool setup\n2. SRC filter with delay line\n3. Mux loop\n`;
+      const realUnderExec = `# Draft: x\n\n## Execution Plan\n1. Frame parser\n2. Flow control\n3. Backpressure\n`;
+      assert.strictEqual(
+        isActionablePlanContent(scaffold),
+        false,
+        "scaffold Implementation Plan must NOT be actionable",
+      );
+      assert.strictEqual(
+        isActionablePlanContent(scaffoldBullets),
+        false,
+        "scaffold bullet placeholders must NOT be actionable",
+      );
+      assert.strictEqual(
+        isActionablePlanContent(realUnderImpl),
+        true,
+        "substantive plan under ## Implementation Plan must be actionable",
+      );
+      assert.strictEqual(
+        isActionablePlanContent(realUnderPlan),
+        true,
+        "substantive plan under ## Plan must be actionable",
+      );
+      assert.strictEqual(
+        isActionablePlanContent(realUnderExec),
+        true,
+        "substantive plan under ## Execution Plan must be actionable",
+      );
+    },
+  );
+
+  await t.step(
     "12. promoteDraft force option bypasses review gate",
     async () => {
       const { mockPi, setAllTools } = createMockExtensionAPI();
@@ -1468,6 +1565,153 @@ REQUIRED REVISIONS:
   );
 
   await t.step(
+    "14b. REGISTERED draft review snapshot carries boundaryKey (T-F3-0)",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_14b");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-registered-key";
+      const qid = `qid_14b_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Plan\n1. Memory pool setup\n2. SRC filter\n3. Mux loop\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      const { createHash } = await import("node:crypto");
+      const expectedHash = createHash("sha256")
+        .update(content)
+        .digest("hex")
+        .slice(0, 12);
+      const expectedKey = `draft:${slug}:${expectedHash}`;
+
+      let releaseReview: (() => void) | null = null;
+      const gate = new Promise<void>((res) => {
+        releaseReview = res;
+      });
+      const approved = `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Plan Handling: addressed -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      setCustomSubagentRunner(async () => {
+        await gate;
+        return approved;
+      });
+
+      const launchPromise = asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+
+      let registered: any = null;
+      for (let i = 0; i < 50; i++) {
+        const active = getActiveReviews();
+        for (const rev of active.values()) {
+          if (rev.questSlug === slug) {
+            registered = rev;
+            break;
+          }
+        }
+        if (registered) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+
+      assert.ok(
+        registered,
+        "plan review must be registered as active while running",
+      );
+      assert.ok(
+        registered.snapshot,
+        "registered record must carry a snapshot",
+      );
+      assert.strictEqual(
+        registered.snapshot.boundaryKey,
+        expectedKey,
+        "REGISTERED (source A) snapshot must carry draft:slug:hash boundaryKey after F3-0",
+      );
+
+      releaseReview!();
+      const result = await launchPromise;
+      assert.ok(result, "review must return a result after release");
+
+      setCustomSubagentRunner(null);
+      await rm(futureDir, { recursive: true, force: true });
+      clearActiveReviews();
+    },
+  );
+
+  await t.step(
+    "14c. REVISE-draft steer directs editing the future file, not quest_update_state (T-F1)",
+    async () => {
+      const { mockPi, setAllTools, agentMessages } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_14c");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-revise-steer";
+      const qid = `qid_14c_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Plan\n1. Memory pool setup\n2. SRC filter\n3. Mux loop\n`,
+        "utf8",
+      );
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      const reviseRunner = async () =>
+        `PASS 1:\nProvisional Judgment: REVISE\nPASS 2:\n- Revised Judgment: REVISE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Plan Handling: Missing -> Status: UNSATISFIED\nVERDICT: REVISE\nSEVERITY: CRITICAL\nFINDINGS:\n- Issue: Missing stage\nREQUIRED REVISIONS:\n- Add backpressure stage`;
+      setCustomSubagentRunner(reviseRunner);
+
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "draft"),
+      );
+      setCustomSubagentRunner(null);
+      await new Promise((r) => setTimeout(r, 100));
+
+      const joined = agentMessages.map((m: any) => m.msg?.toString() || "")
+        .join("\n");
+      assert.ok(
+        joined.includes(`.pi/quest/future/${slug}.md`),
+        "REVISE-draft steer must name the future draft file",
+      );
+      assert.ok(
+        /revise\s+`?\.pi\/quest\/future\/[^`]*\.md/i.test(joined),
+        "REVISE-draft steer must direct editing the draft file",
+      );
+      assert.ok(
+        joined.includes("do NOT use `quest_update_state` for a draft plan") ||
+          joined.toLowerCase().includes("do not use `quest_update_state`"),
+        "REVISE-draft steer must warn against quest_update_state for drafts",
+      );
+      assert.ok(
+        joined.includes("re-review triggers automatically") ||
+          joined.toLowerCase().includes("triggers re-review"),
+        "REVISE-draft steer must note automatic re-review",
+      );
+
+      await rm(futureDir, { recursive: true, force: true });
+      clearActiveReviews();
+    },
+  );
+
+  await t.step(
     "15. draft update fires a fresh plan review (no coalesce deadlock)",
     async () => {
       const { mockPi, setAllTools } = createMockExtensionAPI();
@@ -1525,6 +1769,832 @@ REQUIRED REVISIONS:
       );
 
       setCustomSubagentRunner(null);
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-F2: Launch-time yield steer for draft plan_review
+  // -----------------------------------------------------------------------
+  await t.step(
+    "16. launch-time yield steer emitted for draft plan_review (T-F2)",
+    async () => {
+      const { mockPi, agentMessages, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_16");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "yield-steer-draft";
+      const qid = `qid_16_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Plan\n1. Step one\n2. Step two\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      let releaseReview: (() => void) | null = null;
+      const gate = new Promise<void>((res) => { releaseReview = res; });
+      const approved = `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      setCustomSubagentRunner(async () => {
+        await gate;
+        return approved;
+      });
+
+      agentMessages.length = 0;
+      const launchPromise = asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "yield-steer-draft"),
+      );
+
+      // Wait for review to register
+      let registered = false;
+      for (let i = 0; i < 50; i++) {
+        for (const rev of getActiveReviews().values()) {
+          if (rev.questSlug === slug) { registered = true; break; }
+        }
+        if (registered) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.ok(registered, "review must register");
+
+      // Wait for yield steer to be emitted (import inside lock yields)
+      await new Promise((r) => setTimeout(r, 100));
+
+      // The yield steer should have been emitted at launch
+      const steerTexts = agentMessages.map((m: any) => String(m.msg || ""));
+      const hasYieldSteer = steerTexts.some(
+        (t: string) => /plan review.*launched.*finish your current tool call/i.test(t),
+      );
+      assert.ok(hasYieldSteer, "launch-time yield steer must be emitted");
+
+      releaseReview!();
+      await launchPromise;
+      setCustomSubagentRunner(null);
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-F3i: Auto re-review on draft-file edit
+  // -----------------------------------------------------------------------
+  await t.step(
+    "17. draft-file edit triggers DRAFT_PLAN_EDITED and auto re-review (T-F3i)",
+    async () => {
+      const { mockPi, agentMessages, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_17");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "draft-edit-trigger";
+      const qid = `qid_17_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(draftPath, `# Draft: ${slug}\n\n## Plan\n1. Old step\n`, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      let reviewCalls = 0;
+      setCustomSubagentRunner(async () => {
+        reviewCalls++;
+        return `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      });
+
+      // Simulate a tool_result event for editing the draft file
+      agentMessages.length = 0;
+      await asyncContext.run(
+        ctx,
+        () => handleToolResult(
+          {
+            toolName: "edit",
+            input: { path: draftPath, oldString: "Old step", newString: "New step" },
+            content: "edited",
+            isError: false,
+          },
+          ctx,
+          mockPi as any,
+        ),
+      );
+
+      // Wait for async checkAndTriggerPlanReview to fire and review to start
+      for (let i = 0; i < 50; i++) {
+        if (reviewCalls >= 1) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      // The review should have been triggered
+      assert.ok(reviewCalls >= 1, "auto re-review must fire after draft edit");
+
+      setCustomSubagentRunner(null);
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  await t.step(
+    "17b. non-draft file edit does NOT trigger re-review (T-F3i negative)",
+    async () => {
+      const { mockPi, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_17b");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      s.activeDraft = "some-draft";
+      s.active = "some-quest";
+      s.questId = "qid_17b";
+
+      let reviewCalls = 0;
+      setCustomSubagentRunner(async () => { reviewCalls++; return "VERDICT: APPROVE\nSEVERITY: NONE"; });
+
+      const before = reviewCalls;
+      await asyncContext.run(
+        ctx,
+        () => handleToolResult(
+          {
+            toolName: "edit",
+            input: { path: "src/unrelated.ts", oldString: "a", newString: "b" },
+            content: "edited",
+            isError: false,
+          },
+          ctx,
+          mockPi as any,
+        ),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      assert.strictEqual(reviewCalls, before, "non-draft edit must not trigger re-review");
+
+      setCustomSubagentRunner(null);
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-F3ii: Hard throttle while REVISE outstanding
+  // -----------------------------------------------------------------------
+  await t.step(
+    "18. isDraftRevisionOutstanding returns true after REVISE + unchanged file (T-F3ii)",
+    async () => {
+      const s = getState(createMockContext(50000, "session_plan_18"));
+      const slug = "throttle-test";
+      const qid = `qid_18_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Plan\n1. Step\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+
+      const { createHash } = await import("node:crypto");
+      const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+
+      // Simulate a REVISE verdict on the draft
+      s.lastCriticalReview = {
+        id: "rev_test",
+        questId: qid,
+        kind: "plan_review",
+        reviewedStateVersion: { planVersion: 1, saveHash: null, saveCount: 0 },
+        verdict: "REVISE",
+        severity: "MAJOR",
+        findings: [],
+        requiredActions: [],
+        resolved: false,
+        timestamp: Date.now(),
+        snapshot: {
+          questId: qid,
+          sessionId: "s",
+          reviewId: "rev_test",
+          reviewKind: "plan_review",
+          planVersion: 1,
+          boundaryKey: `draft:${slug}:${hash}`,
+          saveGeneration: 0,
+          stateHash: null,
+          originalUserRequest: "test",
+          currentUnderstanding: "",
+          assumptions: "",
+          plan: "",
+          planRevisions: "",
+          findings: "",
+          filesChanged: "",
+          relevantDiff: "",
+          testStatus: "",
+          nextAction: "",
+          createdAt: Date.now(),
+        },
+      };
+      s.awaitingReview = null;
+
+      assert.ok(
+        isDraftRevisionOutstanding(s),
+        "must be outstanding when REVISE + file unchanged",
+      );
+
+      // After file edit → hash drifts → no longer outstanding
+      await writeFile(
+        `${futureDir}/${slug}.md`,
+        `# Draft: ${slug}\n\n## Plan\n1. Revised step\n`,
+        "utf8",
+      );
+      assert.ok(
+        !isDraftRevisionOutstanding(s),
+        "must NOT be outstanding after file edit (hash drift)",
+      );
+
+      // No verdict → not outstanding
+      s.lastCriticalReview = null;
+      assert.ok(
+        !isDraftRevisionOutstanding(s),
+        "must NOT be outstanding with no lastCriticalReview",
+      );
+
+      // awaitingReview set → not outstanding (review in flight)
+      s.lastCriticalReview = {
+        id: "rev_test2",
+        questId: qid,
+        kind: "plan_review",
+        reviewedStateVersion: { planVersion: 1, saveHash: null, saveCount: 0 },
+        verdict: "REVISE",
+        severity: "MAJOR",
+        findings: [],
+        requiredActions: [],
+        resolved: false,
+        timestamp: Date.now(),
+        snapshot: {
+          questId: qid, sessionId: "s", reviewId: "rev_test2",
+          reviewKind: "plan_review", planVersion: 1,
+          boundaryKey: `draft:${slug}:${hash}`, saveGeneration: 0,
+          stateHash: null, originalUserRequest: "test",
+          currentUnderstanding: "", assumptions: "", plan: "",
+          planRevisions: "", findings: "", filesChanged: "",
+          relevantDiff: "", testStatus: "", nextAction: "",
+          createdAt: Date.now(),
+        },
+      };
+      s.awaitingReview = { kind: "plan_review", reviewId: "rev_test2", since: Date.now() };
+      assert.ok(
+        !isDraftRevisionOutstanding(s),
+        "must NOT be outstanding while awaitingReview is set",
+      );
+      s.awaitingReview = null;
+
+      // APPROVE verdict → not outstanding
+      s.lastCriticalReview!.verdict = "APPROVE";
+      assert.ok(
+        !isDraftRevisionOutstanding(s),
+        "must NOT be outstanding with APPROVE verdict",
+      );
+
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  await t.step(
+    "18b. getImplementationBlockReason returns DRAFT_REVISION_PENDING when throttle active (T-F3ii)",
+    async () => {
+      const ctx = createMockContext(50000, "session_plan_18b");
+      const s = getState(ctx);
+      const slug = "gate-throttle";
+      const qid = `qid_18b_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Plan\n1. Step\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+
+      const { createHash } = await import("node:crypto");
+      const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+
+      s.lastCriticalReview = {
+        id: "rev_gate", questId: qid, kind: "plan_review",
+        reviewedStateVersion: { planVersion: 1, saveHash: null, saveCount: 0 },
+        verdict: "REVISE", severity: "MAJOR", findings: [],
+        requiredActions: [], resolved: false, timestamp: Date.now(),
+        snapshot: {
+          questId: qid, sessionId: "s", reviewId: "rev_gate",
+          reviewKind: "plan_review", planVersion: 1,
+          boundaryKey: `draft:${slug}:${hash}`, saveGeneration: 0,
+          stateHash: null, originalUserRequest: "test",
+          currentUnderstanding: "", assumptions: "", plan: "",
+          planRevisions: "", findings: "", filesChanged: "",
+          relevantDiff: "", testStatus: "", nextAction: "",
+          createdAt: Date.now(),
+        },
+      };
+      s.awaitingReview = null;
+
+      const gate = getImplementationBlockReason(s, ctx);
+      assert.strictEqual(
+        gate.stateName,
+        "DRAFT_REVISION_PENDING",
+        "gate must return DRAFT_REVISION_PENDING stateName",
+      );
+      assert.ok(gate.blocked, "gate must be blocked");
+
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-F4: Coalesce-drop steer (60 s dedup)
+  // -----------------------------------------------------------------------
+  await t.step(
+    "19. coalesce-drop steer emitted once per 60s window (T-F4)",
+    async () => {
+      const { mockPi, agentMessages, setAllTools } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_19");
+      plugin(mockPi);
+      setAllTools([{ name: "subagent", description: "Subagent runner" }]);
+
+      const s = getState(ctx);
+      const slug = "coalesce-steer";
+      const qid = `qid_19_${slug}`;
+      s.questId = qid;
+      s.activeDraft = slug;
+      s.active = "";
+      s.stack = [];
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Plan\n1. Step\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+      await mkdir(`${currentDir}/${qid}`, { recursive: true });
+      const logPath = getQuestLogPath(qid, currentDir);
+      await rm(logPath, { force: true });
+
+      __resetCoalesceSteerForTests();
+
+      let releaseReview: (() => void) | null = null;
+      const gate = new Promise<void>((res) => { releaseReview = res; });
+      const approved = `PASS 1:\nProvisional Judgment: APPROVE\nPASS 2:\n- Revised Judgment: APPROVE\nPROMPT-COMPLIANCE:\n- Requirement: plan -> Status: SATISFIED\nVERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None`;
+      setCustomSubagentRunner(async () => {
+        await gate;
+        return approved;
+      });
+
+      agentMessages.length = 0;
+      // Launch first review
+      const launchPromise1 = asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "coalesce-steer"),
+      );
+      // Wait for registration
+      for (let i = 0; i < 50; i++) {
+        let found = false;
+        for (const rev of getActiveReviews().values()) {
+          if (rev.questSlug === slug) { found = true; break; }
+        }
+        if (found) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+
+      const msgsBefore = agentMessages.length;
+      // Fire second review with SAME boundaryKey → should coalesce + emit steer
+      const launchPromise2 = asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "coalesce-steer"),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      const newMsgs = agentMessages.slice(msgsBefore);
+      const hasCoalesceSteer = newMsgs.some((m: any) =>
+        /already running.*coalesced/i.test(String(m.msg || "")),
+      );
+      assert.ok(hasCoalesceSteer, "first coalesce must emit steer");
+
+      // Third call within 60s → no second steer (dedup)
+      const msgsBefore3 = agentMessages.length;
+      await asyncContext.run(
+        ctx,
+        () => checkAndTriggerPlanReview(mockPi, ctx, "coalesce-steer"),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      const newMsgs3 = agentMessages.slice(msgsBefore3);
+      const hasSecondCoalesceSteer = newMsgs3.some((m: any) =>
+        /already running.*coalesced/i.test(String(m.msg || "")),
+      );
+      assert.ok(!hasSecondCoalesceSteer, "second coalesce within 60s must NOT emit steer (dedup)");
+
+      releaseReview!();
+      await launchPromise1;
+      await launchPromise2;
+      setCustomSubagentRunner(null);
+      __resetCoalesceSteerForTests();
+      await rm(`${currentDir}/${qid}`, { recursive: true, force: true });
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // 20. handleTurnStart emits DRAFT_REVISION_PENDING and draft_revision phase
+  // -------------------------------------------------------------------------
+  await t.step(
+    "20. handleTurnStart sets activeGate DRAFT_REVISION_PENDING and phase draft_revision when revision outstanding (T-F7)",
+    async () => {
+      const { mockPi } = createMockExtensionAPI();
+      const ctx = createMockContext(2000, "session_test_turn_start_gate");
+      const s = getState(ctx);
+
+      const slug = "draft-gate-turn-start";
+      const qid = "draft-gate-qid";
+      const futureDir = ".pi/quest/future";
+      const futurePath = `${futureDir}/${slug}.md`;
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Proposal: ${slug}\n\n## Implementation Plan\n\n- Stage 1: Initial draft\n`;
+      await writeFile(
+        futurePath,
+        content,
+        "utf8",
+      );
+
+      const { createHash } = await import("node:crypto");
+      const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+
+      s.active = slug;
+      s.activeDraft = slug;
+      s.questId = qid;
+      s.researchRequired = false;
+      s.researchComplete = true;
+
+      // Simulate an UNCERTAIN review
+      s.lastCriticalReview = {
+        kind: "plan_review",
+        verdict: "UNCERTAIN",
+        snapshot: {
+          questId: slug,
+          planVersion: 1,
+          researchComplete: true,
+          reassessmentRequired: false,
+          awaitingReview: false,
+          reviewKind: "plan_review",
+          sessionId: "session_test_turn_start_gate",
+          boundaryKey: `draft:${slug}:${hash}`,
+          sourceHash: hash,
+          draftFileHash: hash,
+        },
+      } as any;
+
+      // Ensure isDraftRevisionOutstanding returns true
+      assert.strictEqual(isDraftRevisionOutstanding(s), true);
+
+      // Run handleTurnStart and verify log / state transitions
+      await asyncContext.run(ctx, () => handleTurnStart({ turnIndex: 1 }, ctx));
+
+      // After handleTurnStart, syncImplementationPermission must have run
+      assert.strictEqual(s.implementationAllowed, false);
+
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-B1: Turn start AWAITING_REVIEW gate & turn end no-steer-loop
+  // -----------------------------------------------------------------------
+  await t.step(
+    "21. handleTurnStart sets activeGate AWAITING_REVIEW and handleTurnEnd does NOT emit steer (T-B1)",
+    async () => {
+      const { mockPi, agentMessages } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_21");
+      const s = getState(ctx);
+      const slug = "awaiting-review-turn";
+      s.active = slug;
+      s.questId = "qid_21";
+      s.awaitingReview = {
+        kind: "plan_review",
+        reviewId: "rev_21_test",
+        since: Date.now(),
+      };
+
+      await asyncContext.run(ctx, () => handleTurnStart({ turnIndex: 1 }, ctx));
+      assert.ok(
+        s._lastSemanticKey?.endsWith(":AWAITING_REVIEW"),
+        `semantic key must reflect AWAITING_REVIEW, got ${s._lastSemanticKey}`,
+      );
+      assert.ok(
+        s._lastSemanticKey?.startsWith("awaiting_review:"),
+        `semantic key must reflect awaiting_review phase, got ${s._lastSemanticKey}`,
+      );
+
+      // Verify handleTurnEnd does not emit steer messages while awaiting review
+      agentMessages.length = 0;
+      await asyncContext.run(ctx, () => handleTurnEnd(mockPi as any, ctx, { turnIndex: 1 }));
+      const hasAwaitingSteer = agentMessages.some((m: any) =>
+        String(m.msg || "").includes("verdict pending")
+      );
+      assert.strictEqual(
+        hasAwaitingSteer,
+        false,
+        "handleTurnEnd must not emit steer messages while awaiting review",
+      );
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-B2: ask_user_question classification and unconditional allow
+  // -----------------------------------------------------------------------
+  await t.step(
+    "22. classifyToolCall treats ask_user_question as interaction and gate allows it (T-B2)",
+    async () => {
+      const { mockPi, handlers } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_22");
+      plugin(mockPi);
+
+      const s = getState(ctx);
+      s.active = "interaction-test";
+      s.questId = "qid_22";
+      s.awaitingReview = {
+        kind: "plan_review",
+        reviewId: "rev_22_test",
+        since: Date.now(),
+      };
+
+      // Classification check
+      assert.strictEqual(
+        classifyToolCall("ask_user_question"),
+        "interaction",
+        "ask_user_question must be classified as interaction",
+      );
+      assert.strictEqual(
+        classifyToolCall("ask_questions"),
+        "interaction",
+        "ask_questions must be classified as interaction",
+      );
+
+      // Gate check
+      let blocked = false;
+      for (const cb of handlers["tool_call"] || []) {
+        const res = await asyncContext.run(ctx, () =>
+          cb({ toolName: "ask_user_question", input: { questions: [] } }, ctx));
+        if (res?.block) blocked = true;
+      }
+      assert.strictEqual(blocked, false, "ask_user_question must not be blocked during AWAITING_REVIEW");
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-B3: quest_mark_saved verifies draft at futureDraftPath
+  // -----------------------------------------------------------------------
+  await t.step(
+    "23. quest_mark_saved verifies future draft file when state.activeDraft is set (T-B3)",
+    async () => {
+      const { mockPi, handlers } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_23");
+      plugin(mockPi);
+
+      const s = getState(ctx);
+      const slug = "draft-mark-saved-test";
+      s.activeDraft = slug;
+      s.active = "";
+      s.questId = "1788530059"; // auto-created qid without current/ file
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const draftPath = `${futureDir}/${slug}.md`;
+      await writeFile(draftPath, `# Draft: ${slug}\n\n## Implementation Plan\n1. Step\n`, "utf8");
+
+      // Verify tool call gate does not block quest_mark_saved for the draft
+      let blocked = false;
+      for (const cb of handlers["tool_call"] || []) {
+        const res = await asyncContext.run(ctx, () =>
+          cb({ toolName: "quest_mark_saved" }, ctx));
+        if (res?.block) blocked = true;
+      }
+      assert.strictEqual(blocked, false, "quest_mark_saved must not be blocked when draft file exists on disk");
+
+      // Verify persistence.verifyAndMarkSaved saves against the draft file
+      const { verifyAndMarkSaved } = await import("../src/persistence.ts");
+      const res = await asyncContext.run(ctx, () =>
+        verifyAndMarkSaved(mockPi as any, ctx, slug));
+      assert.strictEqual(res.success, true, `save must succeed for future draft: ${res.error}`);
+      assert.ok(s.saveGeneration?.path.endsWith(`future/${slug}.md`), "saveGeneration path must be future draft");
+
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // T-B4: Reads and research are never blocked during draft revision
+  // -----------------------------------------------------------------------
+  await t.step(
+    "24. reads to non-quest files are allowed during draft revision (T-B4)",
+    async () => {
+      const { mockPi, handlers } = createMockExtensionAPI();
+      const ctx = createMockContext(50000, "session_plan_24");
+      plugin(mockPi);
+
+      const s = getState(ctx);
+      const slug = "draft-read-test";
+      s.activeDraft = slug;
+      s.active = slug;
+      s.questId = "qid_24";
+
+      const futureDir = ".pi/quest/future";
+      await mkdir(futureDir, { recursive: true });
+      const content = `# Draft: ${slug}\n\n## Implementation Plan\n1. Step\n`;
+      await writeFile(`${futureDir}/${slug}.md`, content, "utf8");
+
+      const { createHash } = await import("node:crypto");
+      const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+
+      // Simulate a REVISE verdict so isDraftRevisionOutstanding is true
+      s.lastCriticalReview = {
+        kind: "plan_review",
+        verdict: "REVISE",
+        snapshot: {
+          questId: slug,
+          planVersion: 1,
+          boundaryKey: `draft:${slug}:${hash}`,
+        },
+      } as any;
+
+      assert.strictEqual(isDraftRevisionOutstanding(s), true);
+
+      // Test reading an external file (e.g. external/bud/src/libbud.c or docs/OVERVIEW.md)
+      let blocked = false;
+      for (const cb of handlers["tool_call"] || []) {
+        const res = await asyncContext.run(ctx, () =>
+          cb({ toolName: "read", input: { path: "external/bud/src/libbud.c" } }, ctx));
+        if (res?.block) blocked = true;
+      }
+      assert.strictEqual(blocked, false, "read to external file must NOT be blocked during draft revision");
+
+      await rm(futureDir, { recursive: true, force: true });
+    },
+  );
+
+  await t.step(
+    "25. normalizeReviewModel maps extension providers to built-in openrouter and preserves built-in providers",
+    () => {
+      // kilo and cline mapping to openrouter
+      assert.strictEqual(
+        normalizeReviewModel("kilo", "openrouter/free"),
+        "openrouter/openrouter/free",
+      );
+      assert.strictEqual(
+        normalizeReviewModel("cline", "openrouter/free"),
+        "openrouter/openrouter/free",
+      );
+      assert.strictEqual(
+        normalizeReviewModel("kilo", "deepseek/deepseek-r1"),
+        "deepseek/deepseek-r1",
+      );
+
+      // Built-in providers preserved
+      assert.strictEqual(
+        normalizeReviewModel("openrouter", "openrouter/free"),
+        "openrouter/openrouter/free",
+      );
+      assert.strictEqual(
+        normalizeReviewModel("openai", "gpt-4o"),
+        "openai/gpt-4o",
+      );
+      assert.strictEqual(
+        normalizeReviewModel("anthropic", "claude-3-7-sonnet"),
+        "anthropic/claude-3-7-sonnet",
+      );
+
+      // Error classifier
+      assert.strictEqual(
+        isModelResolutionOrProviderError(
+          'Model "kilo/openrouter/free:high" not found. Use --list-models to see available models.',
+        ),
+        true,
+      );
+      assert.strictEqual(
+        isModelResolutionOrProviderError('Unknown provider "kilo"'),
+        true,
+      );
+      assert.strictEqual(
+        isModelResolutionOrProviderError("rate limit 429 exceeded"),
+        true,
+      );
+      assert.strictEqual(
+        isModelResolutionOrProviderError("mutation-capable tool was called"),
+        false,
+      );
+
+      // resolveDefaultReviewModel with ctx
+      const ctxKilo = {
+        model: { provider: "kilo", id: "openrouter/free" },
+      } as any;
+      assert.strictEqual(
+        resolveDefaultReviewModel(ctxKilo),
+        "openrouter/openrouter/free",
+      );
+
+      const ctxOpenRouter = {
+        model: { provider: "openrouter", id: "openrouter/free" },
+      } as any;
+      assert.strictEqual(
+        resolveDefaultReviewModel(ctxOpenRouter),
+        "openrouter/openrouter/free",
+      );
+    },
+  );
+
+  await t.step(
+    "26. PiSubagentReviewer.review() recovers from model not found via multi-tier fallback",
+    async () => {
+      const attemptedModels: string[] = [];
+
+      const mockRunner: any = async (_task: string, options: any) => {
+        attemptedModels.push(options?.model || "<undefined>");
+        if (options?.model === "kilo/openrouter/free") {
+          const err: any = new Error(
+            'Model "kilo/openrouter/free:high" not found. Use --list-models to see available models.',
+          );
+          err.timeoutLayer = "provider_model_timeout";
+          throw err;
+        }
+        // Fallback model succeeds
+        return {
+          text:
+            "VERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None",
+        };
+      };
+
+      const reviewer = new PiSubagentReviewer(undefined, undefined, mockRunner);
+      const res = await reviewer.review({
+        kind: "plan_review",
+        questSlug: "model-fallback-test",
+        context: {
+          originalRequest: "test request",
+          refinements: [],
+          planConfidence: "medium",
+        },
+        model: "kilo/openrouter/free",
+      } as any);
+
+      assert.strictEqual(res.verdict, "APPROVE");
+      assert.ok(
+        attemptedModels.length >= 2,
+        `expected multiple model attempts, got: ${JSON.stringify(attemptedModels)}`,
+      );
+      assert.strictEqual(attemptedModels[0], "kilo/openrouter/free");
+      assert.strictEqual(attemptedModels[1], "openrouter/openrouter/free");
+    },
+  );
+
+  await t.step(
+    "27. PiSubagentReviewer.review() falls back to unconstrained host model when explicit candidate fails",
+    async () => {
+      const attemptedModels: Array<string | undefined> = [];
+
+      const mockRunner: any = async (_task: string, options: any) => {
+        attemptedModels.push(options?.model);
+        if (options?.model) {
+          const err: any = new Error('Unknown provider "custom_prov"');
+          err.timeoutLayer = "provider_model_timeout";
+          throw err;
+        }
+        // Unconstrained fallback (model: undefined) succeeds
+        return {
+          text:
+            "VERDICT: APPROVE\nSEVERITY: NONE\nFINDINGS:\n- None\nREQUIRED REVISIONS:\n- None",
+        };
+      };
+
+      const reviewer = new PiSubagentReviewer(undefined, undefined, mockRunner);
+      const res = await reviewer.review({
+        kind: "plan_review",
+        questSlug: "unconstrained-fallback-test",
+        context: {
+          originalRequest: "test request",
+          refinements: [],
+          planConfidence: "medium",
+        },
+        model: "custom_prov/custom_model",
+      } as any);
+
+      assert.strictEqual(res.verdict, "APPROVE");
+      assert.ok(
+        attemptedModels.includes(undefined),
+        `expected attempt with model: undefined (unconstrained), got: ${JSON.stringify(attemptedModels)}`,
+      );
     },
   );
 

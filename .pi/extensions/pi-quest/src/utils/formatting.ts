@@ -3,6 +3,8 @@ import {
   DEFAULT_CEILING_TOKENS,
   MAX_QUEST_NAME_DISPLAY_LENGTH,
 } from "../constants.ts";
+import { getCompactionCeilingPct } from "../config.ts";
+import { ExtensionContext } from "../types.ts";
 
 export const displayWidth = (s: string): number => {
   let w = 0;
@@ -147,6 +149,12 @@ export function truncateToThreeWords(name: string): string {
   return words.slice(0, 3).join(sep) + "…";
 }
 
+export function formatCompactionBar(percent: number): string {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const filled = Math.round((clamped / 100) * 5);
+  return "▓".repeat(filled) + "░".repeat(5 - filled);
+}
+
 export function barIcon(state: any, fresh: boolean): string {
   if (state?.reassessmentRequired) return "↺";
   if (state?.awaitingReview) return "⏳";
@@ -156,7 +164,11 @@ export function barIcon(state: any, fresh: boolean): string {
   return "✅";
 }
 
-export function formatQuestShort(state: any, fresh: boolean): string {
+export function formatQuestShort(
+  state: any,
+  fresh: boolean,
+  ctx?: ExtensionContext,
+): string {
   const icon = barIcon(state, fresh);
   const raw = state?.active ? state.active : (state?.activeDraft || "");
   let nome: string;
@@ -170,5 +182,27 @@ export function formatQuestShort(state: any, fresh: boolean): string {
   }
   if (!nome) nome = "(none)";
   const qid = state?.questId ? ` #${state.questId}` : " #—";
-  return `${icon} ${nome}${qid}`;
+  let compaction = "";
+  if (ctx) {
+    const usage = typeof ctx.getContextUsage === "function"
+      ? ctx.getContextUsage()
+      : undefined;
+    if (
+      usage && typeof usage.percent === "number" &&
+      typeof usage.contextWindow === "number"
+    ) {
+      const ceilingPct = getCompactionCeilingPct();
+      const ceiling = Math.round(
+        (usage.contextWindow * ceilingPct) / 100,
+      );
+      const barPercent = Math.min(
+        100,
+        Math.round((usage.percent / ceilingPct) * 100),
+      );
+      const bar = formatCompactionBar(barPercent);
+      const total = formatTokens(ceiling);
+      compaction = ` │${bar} ${total}`;
+    }
+  }
+  return `${icon} ${nome}${qid}${compaction}`;
 }

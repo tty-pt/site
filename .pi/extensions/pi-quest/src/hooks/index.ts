@@ -117,7 +117,7 @@ export function installToolResultListener(pi: ExtensionAPI) {
   pi.on(
     "tool_result",
     withContext(async (event: any, ctx: ExtensionContext) => {
-      await handleToolResult(event, ctx);
+      await handleToolResult(event, ctx, pi);
     }),
   );
 }
@@ -689,18 +689,10 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     if (!slug) return false;
                     const { readFutureDraft } = await import("../paths.ts");
                     const c = await readFutureDraft(slug);
-                    const m = c.match(/##\s*Plan[\s\S]*?(?=\n##\s+|$)/i);
-                    if (!m) return false;
-                    const body = m[0].replace(/##\s*Plan[^\n]*\n/i, "").trim();
-                    if (
-                      !body ||
-                      body === "1." ||
-                      body === "-" ||
-                      body.length < 10
-                    ) {
-                      return false;
-                    }
-                    return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(body);
+                    const { isActionablePlanContent } = await import(
+                      "../critical_agent/policy.ts"
+                    );
+                    return isActionablePlanContent(c);
                   } catch {
                     return false;
                   }
@@ -730,7 +722,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                 if (!hasActionablePlanDraft && dpLen >= 1 && evidence >= 7) {
                   tryLog(
                     "PLAN_NOT_DRAFTED_YET",
-                    `plan not drafted yet — draft plan via quest_update_state {goal,plan,findings}`,
+                    `plan not drafted yet — author the plan by editing the draft file`,
                     { quest: state.activeDraft || "" },
                   );
                   try {
@@ -739,7 +731,7 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                     );
                     sendInternalAgentMessage(
                       pi,
-                      `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — draft a concise plan (goal, 2-3 stages, findings) via \`quest_update_state\` before review.`,
+                      `📝 Plan not yet drafted in \`.pi/quest/future/${state.activeDraft}.md\` — author the plan by editing that file's \`## Implementation Plan\` section directly (goal, 2–3 stages, findings). \`quest_update_state\` cannot touch a draft before reviewer APPROVE; saving a substantive plan sends it for review automatically.`,
                       "steer",
                     );
                   } catch {}
@@ -1099,23 +1091,6 @@ export function installWorkflowSystemPrompt(pi: ExtensionAPI) {
                   );
                 }
               } catch {}
-              // Re-assert steer so model stops turn
-              sendInternalAgentMessage(
-                pi,
-                `⏸ Awaiting ${aw.kind}/${
-                  aw.triggerReason || aw.kind
-                } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
-                "steer",
-              );
-            } else {
-              // Active exists, still assert turn-stop
-              sendInternalAgentMessage(
-                pi,
-                `⏸ Awaiting ${aw.kind}/${
-                  aw.triggerReason || aw.kind
-                } ${aw.reviewId} — verdict pending. No writes until verdict; reads and quest_mark_saved allowed.`,
-                "steer",
-              );
             }
           }
         } catch {}

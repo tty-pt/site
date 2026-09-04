@@ -117,7 +117,7 @@ export function recordObservedInvestigation(
       targetState.substantiveTurnsSinceCheckpoint = 0;
       tryLog(
         "RESEARCH_DRAFT_GATED",
-        `research not completed while draft active (requires reviewer APPROVE)`,
+        `research evidence recorded (${receipt.evidenceCount}); research cannot self-complete while draft '${targetState.activeDraft}' is active — author the plan in .pi/quest/future/${targetState.activeDraft}.md (\`## Implementation Plan\`); \`quest_update_state\` unlocks after reviewer APPROVE`,
         {
           quest: targetState.activeDraft || "",
           round: targetState.researchRound || 1,
@@ -171,7 +171,7 @@ export function recordObservedInvestigation(
       targetState.substantiveTurnsSinceCheckpoint = 0;
       tryLog(
         "RESEARCH_DRAFT_GATED",
-        `research not completed while draft active (requires reviewer APPROVE)`,
+        `research evidence recorded (${receipt.evidenceCount}); research cannot self-complete while draft '${targetState.activeDraft}' is active — author the plan in .pi/quest/future/${targetState.activeDraft}.md (\`## Implementation Plan\`); \`quest_update_state\` unlocks after reviewer APPROVE`,
         {
           quest: targetState.activeDraft || "",
           round: targetState.researchRound || 1,

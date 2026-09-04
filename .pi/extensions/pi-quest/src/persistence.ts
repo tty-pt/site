@@ -5,7 +5,7 @@ import { CUSTOM_TYPE, FUTURE_DIR, QUEST_CURRENT_DIR } from "./constants.ts";
 import { invalidatePreparedCompactionTransaction } from "./compaction/transaction.ts";
 import { logPersistenceTransition } from "./logging.ts";
 import { logError, reportAgentError } from "./messaging.ts";
-import { questPath, resolveQuestRecordBySlug } from "./paths.ts";
+import { futureDraftPath, questPath, resolveQuestRecordBySlug } from "./paths.ts";
 import { getState, setSessionState, snapshotState, state } from "./state.ts";
 import {
   ConsistencyAuditResult,
@@ -125,10 +125,42 @@ export async function verifyAndMarkSaved(
       consistency?: ConsistencyAuditResult;
     }
   > => {
-    const p = questPath(targetQid);
+    const isDraft = Boolean(state.activeDraft);
+    const p = isDraft
+      ? futureDraftPath(state.activeDraft!)
+      : questPath(targetQid);
     let fp = await memoFileFingerprint(p);
     if (!fp) fp = (await computeFileFingerprint(p)) as FileFingerprint | null;
     if (!fp) {
+      if (isDraft) {
+        const errMsg =
+          `Save verification failed: Draft quest file not found or unreadable at \`${p}\`. Ensure the draft file is written to disk before calling quest_mark_saved.`;
+        logPersistenceTransition("SAVE_FAILED", errMsg, {
+          quest: state.activeDraft || targetSlug || targetQid || "",
+          path: p,
+          reason: "draft_file_not_found",
+        });
+        reportAgentError(
+          pi,
+          ctx,
+          errMsg,
+          {
+            code: QuestErrorCode.SAVE_VERIFICATION_FAILURE,
+            requiredNextAction:
+              `Ensure the draft file is written to disk at \`${p}\` before calling quest_mark_saved.`,
+            details: {
+              Quest: state.activeDraft || targetSlug || targetQid || "(none)",
+              Path: p,
+            },
+          },
+        );
+        return {
+          success: false,
+          count: s.saveCount,
+          error:
+            `Draft quest file not found or unreadable at \`${p}\`. Ensure the draft file is written to disk before marking as saved.`,
+        };
+      }
       const futureDraftExists = (() => {
         try {
           const slug = targetSlug || targetQid || "";

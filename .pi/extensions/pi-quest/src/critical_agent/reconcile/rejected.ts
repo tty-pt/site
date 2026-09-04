@@ -90,17 +90,19 @@ export async function handleRejectedVerdict(
     ).join("\n")
     : "";
 
+  const draftFile =
+    `\`.pi/quest/future/${targetState.activeDraft ?? slug}.md\``;
   const errorMsg = isPlanReviewKind
     ? `[Quest Journal] ADVERSARIAL PLAN REVIEW REJECTED (VERDICT: REVISE)\n\nSeverity: ${parsedResult.severity}\n\nFindings:\n${
       findingsSummary || "(Unspecified plan finding)"
     }\n\nRequired Revisions:\n${
       actionsSummary ||
-      "Address reviewer findings, revise the execution plan, and re-submit for review."
+      "Address reviewer findings and revise the execution plan."
     }${
       complianceSummary
         ? `\n\nPrompt Compliance Check:\n${complianceSummary}`
         : ""
-    }\n\nThe plan draft is NOT approved. You must revise your execution plan to address these findings, update the quest state with your revised plan and plan revisions, and submit for re-review before implementation can proceed.`
+    }\n\nThe plan draft is NOT approved. Revise ${draftFile} directly (the \`## Implementation Plan\` section) to address these findings, then save — do NOT use \`quest_update_state\` for a draft plan before APPROVE. Saving a substantive plan triggers re-review automatically.`
     : `[Quest Journal] CRITICAL REVIEW FAILED\n\nSeverity: ${parsedResult.severity}\n\nFinding:\n${
       findingsSummary || "(Unspecified critical finding)"
     }\n\nRequired action:\n${

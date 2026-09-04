@@ -253,6 +253,28 @@ Deno.test("quest_journal_enforced_tool_permissions: default-deny enforcement of 
         "read",
       );
       assert.strictEqual(classifyBashCommand("find . >/dev/null 2>&1"), "read");
+      assert.strictEqual(
+        classifyBashCommand(
+          'cd /home/quirinpa/site && for d in mods/*/; do echo "=== $d ===" && ls -la "$d" && echo "wc:" && wc -l "$d"*.c "$d"*.h 2>/dev/null; done',
+        ),
+        "read",
+      );
+      assert.strictEqual(
+        classifyBashCommand('for f in *.c; do cat "$f"; done'),
+        "read",
+      );
+      assert.strictEqual(
+        classifyBashCommand('if [ -d mods ]; then ls mods; else pwd; fi'),
+        "read",
+      );
+      assert.strictEqual(
+        classifyBashCommand('while read line; do echo "$line"; done'),
+        "read",
+      );
+      assert.strictEqual(
+        classifyBashCommand('python3 -c "import sys; print(sys.version)"'),
+        "read",
+      );
 
       // Mutating bash commands
       assert.strictEqual(
@@ -321,6 +343,18 @@ Deno.test("quest_journal_enforced_tool_permissions: default-deny enforcement of 
       );
       assert.strictEqual(classifyBashCommand("make"), "implementation");
       assert.strictEqual(classifyBashCommand("cargo build"), "implementation");
+      assert.strictEqual(
+        classifyBashCommand('for d in mods/*/; do rm -rf "$d"; done'),
+        "implementation",
+      );
+      assert.strictEqual(
+        classifyBashCommand('for d in mods/*/; do echo "$d" > out.txt; done'),
+        "implementation",
+      );
+      assert.strictEqual(
+        classifyBashCommand('if [ -f foo ]; then rm foo; fi'),
+        "implementation",
+      );
     },
   );
 

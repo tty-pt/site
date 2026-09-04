@@ -4,6 +4,7 @@ import {
   isPlanReviewValidForState,
   isSubagentToolRegistered,
 } from "./critical_agent/index.ts";
+import { isDraftRevisionOutstanding } from "./critical_agent/snapshot.ts";
 import { questPath } from "./paths.ts";
 import { resolveCallerSelf } from "./roles.ts";
 import { getActiveContext, isRootQuest, state } from "./state.ts";
@@ -98,6 +99,20 @@ export function getImplementationBlockReason(
     };
   }
   if (s.activeDraft) {
+    // F3(ii): hard throttle while REVISE outstanding
+    try {
+      if (isDraftRevisionOutstanding(s)) {
+        return {
+          blocked: true,
+          code: QuestErrorCode.DRAFT_REVIEW_REQUIRED,
+          stateName: "DRAFT_REVISION_PENDING",
+          reason:
+            "A draft plan review returned REVISE \u2014 research and non-quest reads are blocked until you revise the plan.",
+          requiredAction:
+            `Edit \`.pi/quest/future/${s.activeDraft}.md\` (the \`## Implementation Plan\` section) to address the reviewer's findings, then save. Saving triggers re-review automatically.`,
+        };
+      }
+    } catch {}
     return {
       blocked: true,
       code: QuestErrorCode.RESEARCH_REQUIRED,

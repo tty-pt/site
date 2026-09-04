@@ -142,3 +142,43 @@ function clampRetry(n: number): number {
   if (!Number.isFinite(n)) return RETRY_MAX_TURNS_DEFAULT;
   return Math.min(50, Math.max(0, Math.floor(n)));
 }
+
+const DEFAULT_ECONOMY_CEILING_PCT = 80;
+
+export function getCompactionCeilingPct(): number {
+  const envRaw = process.env.PI_QUEST_ECONOMY_CEILING_PCT ??
+    process.env.QUEST_ECONOMY_CEILING_PCT;
+  if (envRaw !== undefined) {
+    const n = parseFloat(envRaw);
+    if (Number.isFinite(n)) return Math.min(100, Math.max(1, Math.round(n)));
+  }
+  try {
+    const j = getCachedSettingsJson(join(process.cwd(), ".pi/settings.json"));
+    if (j) {
+      const raw = j["pi-quest"]?.economyCeilingPct;
+      const n = typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+        ? parseFloat(raw)
+        : NaN;
+      if (Number.isFinite(n)) return Math.min(100, Math.max(1, Math.round(n)));
+    }
+  } catch {}
+  try {
+    const hjPath = "~/.pi/agent/settings.json".replace(
+      /^~/,
+      process.env.HOME || "",
+    );
+    const hj = getCachedSettingsJson(hjPath);
+    if (hj) {
+      const raw = hj["pi-quest"]?.economyCeilingPct;
+      const n = typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+        ? parseFloat(raw)
+        : NaN;
+      if (Number.isFinite(n)) return Math.min(100, Math.max(1, Math.round(n)));
+    }
+  } catch {}
+  return DEFAULT_ECONOMY_CEILING_PCT;
+}

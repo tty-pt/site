@@ -12,6 +12,7 @@
   },
   "pi-quest": {
     "economyCeiling": "400k",
+    "economyCeilingPct": 80,
     "warningDeltaPct": 10,
     "economyTiers": [
       { "upTo": "250k", "pct": 75 },

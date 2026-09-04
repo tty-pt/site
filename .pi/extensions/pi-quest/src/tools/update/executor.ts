@@ -629,7 +629,7 @@ export async function executeUpdateStateTool(
         reassessmentRequired: Boolean(state.reassessmentRequired),
       });
       const msg =
-        `Draft '${draftSlug}' not yet reviewer-approved — present plan via future/${draftSlug}.md and await plan_review APPROVE (boundaryKey ${boundaryKey}) before promoting. Only promotion via 'go' after APPROVE may realize the draft.`;
+        `Draft '${draftSlug}' not yet reviewer-approved — author or revise the plan by editing .pi/quest/future/${draftSlug}.md (the \`## Implementation Plan\` section) directly. \`quest_update_state\` cannot modify or realize a draft before APPROVE. Only promotion via 'go' after APPROVE realizes the draft.`;
       if (state.reassessmentRequired) {
         try {
           const { sendInternalAgentMessage } = await import(
@@ -637,7 +637,7 @@ export async function executeUpdateStateTool(
           );
           sendInternalAgentMessage(
             pi,
-            `⚠️ ${msg} — awaiting coalesced plan_review, do not retry quest_update_state.`,
+            `⚠️ ${msg} — awaiting coalesced plan_review; do not retry quest_update_state; edit the future draft file instead.`,
             "steer",
           );
         } catch {}

@@ -82,6 +82,85 @@ export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
   return "quest_journal_deadline";
 }
 
+export const BUILTIN_PROVIDERS = new Set([
+  "openrouter",
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "bedrock",
+  "ollama",
+  "groq",
+  "cerebras",
+  "together",
+  "deepseek",
+  "xai",
+  "github-copilot",
+]);
+
+/**
+ * Normalizes a provider and model ID to a canonical reference resolvable by
+ * isolated child subagent processes. In particular, extension providers registered
+ * by ambient packages like `pi-free` (e.g. `kilo`, `cline`) are not loaded in
+ * child sessions (`disableAmbientExtensions: true`), but their models point to
+ * standard providers like `openrouter`. Mapping these to the built-in provider
+ * ensures subagent launches succeed out of the box.
+ */
+export function normalizeReviewModel(
+  rawProvider?: string,
+  rawId?: string,
+): string {
+  if (!rawProvider && !rawId) return "";
+  const provider = (rawProvider || "").toLowerCase().trim();
+  const id = (rawId || "").trim();
+
+  // Handle extension-registered proxy providers from pi-free (kilo, cline, etc.)
+  if (provider === "kilo" || provider === "cline") {
+    if (id.startsWith("openrouter/")) {
+      return `openrouter/${id}`;
+    }
+    const slashIdx = id.indexOf("/");
+    if (slashIdx > 0) {
+      const subProvider = id.substring(0, slashIdx).toLowerCase();
+      if (BUILTIN_PROVIDERS.has(subProvider)) {
+        return id;
+      }
+    }
+    return `openrouter/${id}`;
+  }
+
+  // If provider is already built-in, use standard provider/id format
+  if (BUILTIN_PROVIDERS.has(provider)) {
+    return id ? `${provider}/${id}` : provider;
+  }
+
+  // If provider is unknown/ambient extension, but id starts with a known provider:
+  const slashIdx = id.indexOf("/");
+  if (slashIdx > 0) {
+    const inferred = id.substring(0, slashIdx).toLowerCase();
+    if (BUILTIN_PROVIDERS.has(inferred)) {
+      return id;
+    }
+  }
+
+  return id ? `${provider}/${id}` : provider;
+}
+
+export function isModelResolutionOrProviderError(errMessage: string): boolean {
+  const msg = (errMessage || "").toLowerCase();
+  return (
+    (msg.includes("model") &&
+      (msg.includes("not found") || msg.includes("cannot find") ||
+        msg.includes("unknown"))) ||
+    msg.includes("unknown provider") ||
+    msg.includes("provider_model_timeout") ||
+    msg.includes("rate limit") ||
+    msg.includes("429") ||
+    msg.includes("504") ||
+    msg.includes("quota")
+  );
+}
+
 export function resolveDefaultReviewModel(ctx?: ExtensionContext): string {
   if (typeof process !== "undefined" && process.env) {
     const explicitReviewModel = process.env.PI_CRITICAL_REVIEW_MODEL ||
@@ -91,7 +170,7 @@ export function resolveDefaultReviewModel(ctx?: ExtensionContext): string {
     const provider = process.env.PI_PROVIDER;
     const model = process.env.PI_MODEL;
     if (provider && model) {
-      return `${provider}/${model}`;
+      return normalizeReviewModel(provider, model);
     }
     if (model) {
       return String(model);
@@ -99,12 +178,19 @@ export function resolveDefaultReviewModel(ctx?: ExtensionContext): string {
   }
   const ctxModel = (ctx as { model?: unknown })?.model;
   if (typeof ctxModel === "string") {
+    const slashIdx = ctxModel.indexOf("/");
+    if (slashIdx > 0) {
+      return normalizeReviewModel(
+        ctxModel.substring(0, slashIdx),
+        ctxModel.substring(slashIdx + 1),
+      );
+    }
     return ctxModel;
   }
   if (ctxModel && typeof ctxModel === "object") {
     const m = ctxModel as { provider?: unknown; id?: unknown; name?: unknown };
     if (m.provider && m.id) {
-      return `${m.provider}/${m.id}`;
+      return normalizeReviewModel(String(m.provider), String(m.id));
     }
     if (m.id) return String(m.id);
     if (m.name) return String(m.name);
@@ -441,58 +527,153 @@ export class PiSubagentReviewer implements CriticalReviewer {
       }, { once: true });
     }
 
-    try {
-      rawRes = await executor(prompt, {
-        agent: "reviewer",
+    // Build ordered list of candidate models to try for review execution
+    const candidateModels: Array<{ model?: string; label: string }> = [];
+    candidateModels.push({
+      model: targetModel,
+      label: targetModel || "default",
+    });
+
+    // If targetModel starts with an extension provider prefix (e.g. kilo/ or cline/), add normalized openrouter candidate
+    if (
+      targetModel &&
+      (targetModel.startsWith("kilo/") || targetModel.startsWith("cline/"))
+    ) {
+      const rest = targetModel.replace(/^(kilo|cline)\//, "");
+      const norm = rest.startsWith("openrouter/")
+        ? `openrouter/${rest}`
+        : `openrouter/${rest}`;
+      if (
+        norm !== targetModel && !candidateModels.some((c) => c.model === norm)
+      ) {
+        candidateModels.push({ model: norm, label: norm });
+      }
+    }
+
+    // Host default / unconstrained model (model: undefined activates Pi findInitialModel in child session)
+    if (targetModel) {
+      candidateModels.push({
+        model: undefined,
+        label: "host_default_unconstrained",
+      });
+    }
+
+    // Explicit fallback env if configured
+    if (
+      typeof process !== "undefined" &&
+      process.env?.PI_CRITICAL_REVIEW_MODEL_FALLBACK
+    ) {
+      const envFallback = String(process.env.PI_CRITICAL_REVIEW_MODEL_FALLBACK);
+      if (!candidateModels.some((c) => c.model === envFallback)) {
+        candidateModels.push({ model: envFallback, label: envFallback });
+      }
+    }
+
+    const executeWithAgent = async (agent: string, modelToUse?: string) => {
+      return await executor(prompt, {
+        agent,
         isCriticalReview: true,
         reviewKind: input.kind,
         triggerReason: input.triggerReason || input.kind,
-        model: targetModel,
+        ...(modelToUse !== undefined && modelToUse !== ""
+          ? { model: modelToUse }
+          : {}),
         tools: ["read", "grep", "find", "ls"],
         async: true,
         reviewId: input.reviewId,
         timeoutMs: input.timeoutMs,
         onActivity: input.onActivity,
       });
-    } catch (err: any) {
-      const msg = String(err?.message || "");
-      const isMutationAllowlistError = msg.toLowerCase().includes("mutation-capable") ||
-        (msg.toLowerCase().includes("implementation task") && msg.toLowerCase().includes("tool allowlist"));
-      if (isMutationAllowlistError) {
-        tryLog(
-          "CRITICAL_REVIEW_FALLBACK",
-          `reviewer agent rejected as implementation task; retrying with explore`,
-          {
-            quest: input.questSlug || "",
-            reviewKind: input.kind,
-            originalAgent: "reviewer",
-            fallbackAgent: "explore",
-            reason: "mutation_allowlist_mismatch",
-          },
-          this.ctx,
-        );
+    };
+
+    let executionSuccess = false;
+    for (let i = 0; i < candidateModels.length; i++) {
+      const candidate = candidateModels[i];
+      try {
         try {
-          rawRes = await executor(prompt, {
-            agent: "explore",
-            isCriticalReview: true,
-            reviewKind: input.kind,
-            triggerReason: input.triggerReason || input.kind,
-            model: targetModel,
-            tools: ["read", "grep", "find", "ls"],
-            async: true,
-            reviewId: input.reviewId,
-            timeoutMs: input.timeoutMs,
-            onActivity: input.onActivity,
-          });
-        } catch (fallbackErr: any) {
-          const timeoutLayer = fallbackErr?.timeoutLayer ||
-            classifyTimeoutLayer(fallbackErr?.message || "");
-          fallbackErr.timeoutLayer = timeoutLayer;
-          throw fallbackErr;
+          rawRes = await executeWithAgent("reviewer", candidate.model);
+        } catch (execErr: any) {
+          const msg = String(execErr?.message || "");
+          const isMutationAllowlistError =
+            msg.toLowerCase().includes("mutation-capable") ||
+            (msg.toLowerCase().includes("implementation task") &&
+              msg.toLowerCase().includes("tool allowlist"));
+          if (isMutationAllowlistError) {
+            tryLog(
+              "CRITICAL_REVIEW_FALLBACK",
+              `reviewer agent rejected as implementation task; retrying with explore`,
+              {
+                quest: input.questSlug || "",
+                reviewKind: input.kind,
+                originalAgent: "reviewer",
+                fallbackAgent: "explore",
+                reason: "mutation_allowlist_mismatch",
+                model: candidate.label,
+              },
+              this.ctx,
+            );
+            rawRes = await executeWithAgent("explore", candidate.model);
+          } else {
+            throw execErr;
+          }
         }
-      } else {
-        const timeoutLayer = err?.timeoutLayer ||
-          classifyTimeoutLayer(err?.message || "");
+        if (i > 0) {
+          tryLog(
+            "CRITICAL_REVIEW_MODEL_FALLBACK",
+            `reviewer succeeded after model fallback from '${
+              candidateModels[0].label
+            }' to '${candidate.label}'`,
+            {
+              quest: input.questSlug || "",
+              reviewKind: input.kind,
+              fromModel: candidateModels[0].label,
+              toModel: candidate.label,
+              attempt: i + 1,
+            },
+            this.ctx,
+          );
+        }
+        executionSuccess = true;
+        break;
+      } catch (err: any) {
+        const msg = String(err?.message || "");
+        const isModelErr = isModelResolutionOrProviderError(msg) ||
+          classifyTimeoutLayer(msg) === "provider_model_timeout";
+
+        if (isModelErr && i + 1 < candidateModels.length) {
+          const nextCandidate = candidateModels[i + 1];
+          tryLog(
+            "CRITICAL_REVIEW_MODEL_FALLBACK",
+            `reviewer model '${candidate.label}' failed (${msg}); retrying with fallback '${nextCandidate.label}'`,
+            {
+              quest: input.questSlug || "",
+              reviewKind: input.kind,
+              failedModel: candidate.label,
+              fallbackModel: nextCandidate.label,
+              error: msg,
+              nextAttempt: i + 2,
+            },
+            this.ctx,
+          );
+          continue;
+        }
+
+        if (isModelErr) {
+          tryLog(
+            "CRITICAL_REVIEW_MODEL_EXHAUSTED",
+            `all reviewer model candidates exhausted after '${candidate.label}' failure (${msg})`,
+            {
+              quest: input.questSlug || "",
+              reviewKind: input.kind,
+              failedModel: candidate.label,
+              attempts: i + 1,
+              error: msg,
+            },
+            this.ctx,
+          );
+        }
+
+        const timeoutLayer = err?.timeoutLayer || classifyTimeoutLayer(msg);
         err.timeoutLayer = timeoutLayer;
         throw err;
       }

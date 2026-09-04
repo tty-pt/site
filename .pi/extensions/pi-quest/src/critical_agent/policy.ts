@@ -50,6 +50,12 @@ import {
 } from "../utils/mutex.ts";
 import { GLOBAL_REVIEW_CAP } from "../constants.ts";
 
+// F4: module-level dedup for coalesce-drop steers (60 s window per slug)
+const lastCoalesceSteerAt = new Map<string, number>();
+export function __resetCoalesceSteerForTests() {
+  lastCoalesceSteerAt.clear();
+}
+
 export { reconcileReviewResult } from "./policy/reconcile.ts";
 
 export interface CriticalReviewOptions {
@@ -118,20 +124,57 @@ export function isDraftReviewValid(targetState?: StoredState): boolean {
 }
 
 /**
+ * Single source of truth for "does this markdown contain a substantive plan?".
+ * Recognizes the scaffold header `## Implementation Plan` / `## Plan` /
+ * `## Execution Plan` (see src/markdown/template/header.ts:56), extracts the
+ * section up to the next `##` heading, strips template placeholder lines
+ * (scaffold "1. Investigate via read/search…", "plan confidence low"), and
+ * applies the body/section-list tests. F0: fixes D2 — the old regex
+ * `/##\s*Plan/i` never matched `## Implementation Plan`, so a real plan under
+ * the scaffold header never counted as actionable.
+ */
+export function isActionablePlanContent(content: string): boolean {
+  const lines = content.split("\n");
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^##\s+(?:Implementation\s+|Execution\s+)?Plan\b/i.test(lines[i])) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return false;
+  const bodyLines: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i])) break;
+    bodyLines.push(lines[i]);
+  }
+  const body = bodyLines.join("\n").trim();
+  if (!body || body === "1." || body === "-" || body.length < 10) return false;
+  if (/plan confidence low/i.test(body)) return false;
+  const nonScaffold = bodyLines
+    .map((l) => l.trim())
+    .filter(
+      (line) =>
+        !/^\d+\.\s+Investigate via read\/search/i.test(line) &&
+        !/^[-*]\s*(goal|stages?|findings?)\b:?\s*$/i.test(line),
+    )
+    .join("\n")
+    .trim();
+  if (!nonScaffold) return false;
+  return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(nonScaffold);
+}
+
+/**
  * Check whether the draft has a substantive plan section (not a template placeholder).
- * Used by auto-promote (Change B) and auto-draft review trigger (Change A).
- * Mirrors the inline `hasActionablePlanDraft` in hooks/index.ts:668-689 but
- * uses readFileSync (sync) since policy.ts already imports it.
+ * Used by auto-promote (Change B) and auto-draft review trigger (Change A) and
+ * auto-draft review trigger (hooks/index.ts). Delegates to the single source of
+ * truth `isActionablePlanContent` (F0).
  */
 export function isActionableDraftPlan(slug: string): boolean {
   try {
     const path = `${FUTURE_DIR}/${slug}.md`;
     const data = readFileSync(path, "utf8");
-    const m = data.match(/##\s*Plan[\s\S]*?(?=\n##\s+|$)/i);
-    if (!m) return false;
-    const body = m[0].replace(/##\s*Plan[^\n]*\n/i, "").trim();
-    if (!body || body === "1." || body === "-" || body.length < 10) return false;
-    return /[-*]\s+\S|^\s*\d+\.\s+\S/m.test(body);
+    return isActionablePlanContent(data);
   } catch {
     return false;
   }
@@ -301,6 +344,28 @@ export async function runCriticalReview(
         reason: "single_flight",
       },
     );
+    // F4: audible coalesce-drop steer for draft plan_review (60 s dedup)
+    if (
+      options.kind === "plan_review" &&
+      options.boundaryKey?.startsWith("draft:")
+    ) {
+      const now = Date.now();
+      const lastAt = lastCoalesceSteerAt.get(slug) || 0;
+      if (now - lastAt > 60_000) {
+        try {
+          const { sendInternalAgentMessage } = await import(
+            "../messaging.ts"
+          );
+          const runningId = findActiveReviewForQuest(slug)?.reviewId || "?";
+          sendInternalAgentMessage(
+            pi,
+            `\u23F8 Review ${runningId} already running for '${slug}' \u2014 request coalesced; end the turn and await the verdict.`,
+            "steer",
+          );
+          lastCoalesceSteerAt.set(slug, now);
+        } catch {}
+      }
+    }
     return {
       success: true,
       available: true,
@@ -685,6 +750,13 @@ export async function runCriticalReview(
               testStatus: "",
               nextAction: "",
               createdAt: Date.now(),
+              // F3-0: carry boundaryKey into the ACTIVE-registration record (source A)
+              // so it matches what createReviewSnapshot (source B) computes for
+              // plan_review. Fixes D5(a) (dead draft-staleness branch on the
+              // registered record) and D5(b) (Change-C oldHash teardown no-op).
+              ...(options.kind === "plan_review"
+                ? { boundaryKey: options.boundaryKey ?? null }
+                : {}),
             };
 
             abortController = new AbortController();
@@ -795,6 +867,22 @@ export async function runCriticalReview(
                 reviewedVersion: currentPlanVersion,
               },
             );
+            // F2: launch-time yield steer for draft plan_review
+            if (
+              isPlanReviewKind &&
+              options.boundaryKey?.startsWith("draft:")
+            ) {
+              try {
+                const { sendInternalAgentMessage } = await import(
+                  "../messaging.ts"
+                );
+                sendInternalAgentMessage(
+                  pi,
+                  `⏹ Plan review ${correlationId} launched for '${slug}' in the background — finish your current tool call, then end your turn now with NO TOOL CALLS and await the verdict; do not start new research reads.`,
+                  "steer",
+                );
+              } catch {}
+            }
           } finally {
             if (fsHeld && reviewFileLockPath) {
               try {
@@ -1023,7 +1111,7 @@ export async function checkAndTriggerPlanReview(
               result.review.requiredActions?.join("; ") ||
               result.review.findings?.map((f: any) => f.issue).join("; ") ||
               "needs revision"
-            } — update .pi/quest/future/${draftSlug}.md and re-submit for review before presenting to user.`,
+            } — edit .pi/quest/future/${draftSlug}.md (the \`## Implementation Plan\` section) and save; re-review triggers automatically. Do not use \`quest_update_state\` to modify a draft before APPROVE.`,
             "steer",
           );
         } catch {}

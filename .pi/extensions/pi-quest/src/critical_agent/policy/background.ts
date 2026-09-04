@@ -322,8 +322,9 @@ export async function executeReviewBackground(
       {
         code: QuestErrorCode.CRITICAL_REVIEW_ERROR,
         correlationId,
-        requiredNextAction:
-          "Investigate subagent execution error and retry critical review.",
+        requiredNextAction: timeoutLayer === "provider_model_timeout"
+          ? "Review model unavailable. Check PI_CRITICAL_REVIEW_MODEL or verify model credentials, then retry critical review."
+          : "Investigate subagent execution error and retry critical review.",
         details: { Quest: slug, ReviewKind: kind, TimeoutLayer: timeoutLayer },
       },
     );
