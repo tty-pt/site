@@ -1,105 +1,78 @@
-# AGENTS.md — pi-quest package guidelines
+# AGENTS.md — pi-quest v2 package guidelines
 
-`pi-quest` is the official Quest Journal & Epistemic Workflow Extension for the
-Pi Coding Agent harness.
+`pi-quest` v2 is the Quest Journal & Epistemic Workflow Extension for the
+Pi Coding Agent harness: drafting / implementing / validating modes per
+quest, enforced by gates and adversarial reviews. Product authority is
+`HIGH_LEVEL.md` (repo root); behavioral elaboration is `docs/PRODUCT_SPEC_v2.md`
+Part II; build plan is `REBUILD_PLAN.md` (repo root).
 
-## Architecture & Subsystems
+## Location & loading
 
-The package is located in `.pi/extensions/pi-quest/`:
+The package lives at `.pi/extensions/pi-quest/` and loads via pi's
+project-local auto-discovery (`*/index.ts`). No build step: pi loads the
+TypeScript directly. `/reload` picks up changes. Every pi session runs
+this extension from the skeleton onward — **every commit must leave it
+loadable-and-graceful** (resilience rule): handlers never throw on missing
+state, no imports of not-yet-existing modules.
 
-- `index.ts` — Package entry point re-exporting from `./src/index.ts`.
-- `src/` — Modular subsystems divided across 26 architectural sections:
-  1. `types.ts` — Host API types, state models, lifecycle and permission enums
-  2. `constants.ts` — Path definitions, token thresholds, aliases, prefixes
-  3. `utils.ts` — String, token arithmetic, path normalization, and hash helpers
-  4. `paths.ts` — Quest path builders, slug generators, filesystem checks
-  5. `markdown.ts` — Section/block parsers, splicers, and templates
-  6. `state.ts` — Session states, proxy handler, state reconstruction
-  7. `context.ts` — Session awareness, token calculations, git and standing
-     notes
-  8. `reconstruction.ts` — State and intent reconstruction from markdown
-     journals
-  9. `validation.ts` — Research prerequisites validation and consistency
-     auditing
-  10. `research.ts` — Reassessment triggers and research prompts
-  11. `gates.ts` — Implementation gate policies (`canImplement`, block reasons)
-  12. `messaging.ts` — Model messaging, prompt builders, save requests
-  13. `tool_gating.ts` — Tool call and bash command classifiers, permission
-      gates
-  14. `persistence.ts` — Session persistence, save verification, and mark-saved
-      logic
-  15. `compaction.ts` — Compaction pressure calculations, pre-compact
-      checkpoints, resume directives
-  16. `subquest.ts` — Sub-quest parent/child linking, completion, and child
-      returns
-  17. `lifecycle.ts` — Quest creation, activation, archival, and interactive
-      choice prompting
-  18. `classification.ts` — User message classification and confirmation
-      handling
-  19. `ui.ts` — Status bar rendering
-  20. `hooks.ts` — Pi lifecycle event listeners (`turn_end`,
-      `session_before_compact`, `session_compact`, etc.)
-  21. `tools.ts` — Tool registrations (`quest_update_state`, `quest_mark_saved`,
-      `quest_subquest`, `quest_archive`)
-  22. `commands.ts` — Slash command registrations (`/quest`, `/subquest`,
-      `/future`, `/archive`, etc.)
-  23. `index.ts` — Subsystem aggregator, export surface, and default extension
-      entry point
-- `tests/` — Test suites for all pi-quest lifecycle and gate behaviors.
+## Architecture (A1–A3, REBUILD_PLAN.md §5)
 
-## Architectural Invariants
+- **A1 — reducer.** pi events flow `hooks/tools → reduce(state, event) →
+  {state, effects[]} → interpreter`. Domain (`src/domain/`) is pure.
+- **A2 — review transport behind `ReviewRunner`.** Default impl uses the
+  `subagent` tool; abort via AbortController + cancel bridge.
+- **A3 — wordings in `src/messaging/`.** Model/user-facing text lives as
+  reviewable prose, referenced by key — never inline strings in logic.
+- **Vertical facades.** `src/index.ts` calls one installer per product
+  area (`drafting/`, `implementing/`, `validation/`, `subquests/`,
+  `absence/`, `durability/`, `surface/` — each a directory with
+  `index.ts`, imported bare). Facades are thin entry points over the
+  layers; nothing imports a facade except the main file.
+- Dependency direction: adapters → domain, never the reverse (DAG-gated;
+  `domain/` may import nothing outside itself).
 
-1. **Uniform Agent-Visible Communication**: Any extension event that changes
-   what the agent is permitted or required to do (enforcement blocks, gate
-   rejections, persistence errors, compaction/continuation directives) MUST
-   produce a model-visible message via `reportAgentError` /
-   `sendInternalAgentMessage` describing the state change, the stable
-   `QuestErrorCode`, and the required next action. UI notifications and
-   diagnostic logs are never considered sufficient model feedback.
-2. **Strict Acyclic Architecture**: Source modules in `src/` must form a strict
-   directed acyclic graph (DAG) without circular imports.
-3. **Pure-C Boundary**: No JavaScript in project application paths.
+## Readability contract (RD1–RD3)
 
-## Verification & Testing
+1. **Spec mapping is machine-checked** (`scripts/check-spec-map.ts`, run
+   with the other gates). HIGH_LEVEL `#`/`##` headers starting lowercase
+   each need ≥1 `// HIGH_LEVEL: #name` code tag; `###` item headers are
+   covered by their parent section. Permanently exempt (not behaviors):
+   `intro`, `dependencies`. Not yet wired: explicitly PENDING with the
+   owning slice — never fake tags. Every tag must name an existing
+   section.
+2. **Budgets fail the build:** file <350 LOC, function <80 LOC.
+3. **Tag format:** `// HIGH_LEVEL: #section` (why) + `// SPEC: Bx.y`
+   (exactly what), one tag per line. `src/index.ts` mirrors HIGH_LEVEL
+   section order as declarative calls; domain names come from the spec
+   glossary (`qid`, never new abbreviations).
 
-Run the complete unit test suite from the package directory or project root:
+## HIGH_LEVEL.md edit policy
+
+`HIGH_LEVEL.md` product text is frozen. Append or complete only on
+explicit user direction; never reword, "fix," or normalize existing
+lines (typos included). Structural additions (new sections) also require
+explicit direction. Keep the file git-tracked so third-party edits surface
+as reviewable diffs instead of silent changes.
+
+## Verification & testing
 
 ```bash
-deno test --allow-all .pi/extensions/pi-quest/tests/
+deno test --allow-all --sloppy-imports --node-modules-dir=none tests/
+sh scripts/check-pi-quest-dag.sh
+deno run --allow-read scripts/check-pi-quest-dag.ts
+deno run --allow-all scripts/check-complexity.ts
+deno run --allow-read scripts/check-spec-map.ts
 ```
 
-or via npm:
+or via npm (`test`, and `zip` below). Tests mirror `src/`; the bulk is
+`tests/domain/*` — pure functions, no pi mocks. Boundaries are tested
+against fakes.
 
-```bash
-npm --prefix .pi/extensions/pi-quest test
-```
-
-All 40 test suites (178 steps) must pass with zero failures.
-
-## Packaging Requirement (CRITICAL)
-
-Whenever you finish a task on `pi-quest` or test the agent, **generate the
-unified bundle ZIP archive**:
-
-```bash
-cd .pi/extensions/pi-quest && npm run zip
-```
-
-or from the repository root:
+## Packaging
 
 ```bash
 npm --prefix .pi/extensions/pi-quest run zip
 ```
 
-Running `npm run zip` creates `pi-quest-bundle.zip` at the project root
-containing:
-
-- `pi-quest/` — Current extension source tree and package
-- `diagnostic/current-run/` — Run manifest (`manifest.txt`), root quest
-  (`quest/`), sub-quests (`subquests/`), and execution log (`run.log`).
-
-The packaging command prints the exact bundle path, active Run ID, Root Quest,
-and archive SHA-256 hash (also recorded in `manifest.txt`), and the active Run
-ID is visible in the Quest Journal UI/status whenever a quest is active.
-
-Send `pi-quest-bundle.zip` for post-run evaluation or extension distribution.
+writes `pi-quest-bundle.zip` at the project root (source tree + docs;
+quest-state rendering lands with the views slice).

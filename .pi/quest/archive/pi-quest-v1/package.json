@@ -1,25 +1,27 @@
 {
   "name": "pi-quest",
-  "version": "0.1.0",
-  "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent (v2, layered rebuild)",
+  "version": "1.0.0",
+  "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent",
   "keywords": [
     "pi-package"
   ],
   "main": "index.ts",
   "type": "module",
   "scripts": {
-    "test": "deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
+    "test": "deno test --allow-all --node-modules-dir=none tests/",
     "zip": "deno run --allow-all scripts/zip_bundle.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "pi-subagents": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": { "optional": true },
     "@earendil-works/pi-agent-core": { "optional": true },
-    "@earendil-works/pi-coding-agent": { "optional": true }
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "pi-subagents": { "optional": true }
   },
   "pi": {
     "extensions": [
