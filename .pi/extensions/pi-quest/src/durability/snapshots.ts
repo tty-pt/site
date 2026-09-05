@@ -109,6 +109,18 @@ export function reconstruct(entries: readonly TranscriptEntry[]): QuestState {
   return newestSnapshot(entries) ?? IDLE_STATE;
 }
 
+export function newestSnapshotPerQid(entries: readonly TranscriptEntry[]): Map<string, QuestState> {
+  const found = new Map<string, QuestState>();
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
+    if (entry.customType !== SNAPSHOT_TYPE) continue;
+    const state = decodeSnapshot(entry.data);
+    if (state === null || state.qid === null || state.phase === "archived") continue;
+    if (!found.has(state.qid)) found.set(state.qid, state);
+  }
+  return found;
+}
+
 export function newestSnapshotFor(entries: readonly TranscriptEntry[], qid: string): QuestState | null {
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];

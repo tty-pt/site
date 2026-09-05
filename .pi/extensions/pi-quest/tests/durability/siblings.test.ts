@@ -33,13 +33,13 @@ Deno.test("sibling scan finds the newest quest snapshot", async () => {
   check(nowhere === null, "missing store returns null");
 });
 
-Deno.test("boot prefers the branch, then siblings, then cold start", async () => {
+Deno.test("boot prefers the branch, then stays idle", async () => {
   const root = fixture();
   const branchHit = encodeSnapshot(createQuest("branch work", "brn003"));
   const branch = await loadQuestState([{ customType: SNAPSHOT_TYPE, data: branchHit }], root);
   check(branch.qid === "brn003", "branch wins without touching siblings");
-  const sibling = await loadQuestState([], root);
-  check(sibling.qid === "new002", "empty branch falls back to siblings");
+  const fresh = await loadQuestState([], root);
+  check(fresh.phase === "idle" && fresh.qid === null, "empty branch never auto-adopts siblings");
   const cold = await loadQuestState([], join(root, "absent"));
   check(cold.phase === "idle" && cold.qid === null, "nothing anywhere cold-starts");
 });

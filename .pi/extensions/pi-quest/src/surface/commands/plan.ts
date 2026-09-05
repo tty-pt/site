@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #commands — /quest plan opens the floating plan viewer.
+// HIGH_LEVEL: #commands — F2 opens the floating plan viewer.
 // HIGH_LEVEL: #surface — on-demand inspection, zero inference.
 // SPEC: B1.3 (draft stays inspectable), B1.8 (amendments stay inspectable).
 import { readFile } from "node:fs/promises";

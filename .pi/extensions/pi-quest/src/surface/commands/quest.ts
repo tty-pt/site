@@ -19,16 +19,30 @@ export function summarizeActive(): string {
   return `Quest ${state.qid} — phase ${state.phase}.${review}${kids} ${state.exactNextAction}`;
 }
 
-async function adoptDraftFile(pi: Pi, ctx: PiCtx, qid: string): Promise<string> {
-  let text: string;
+export async function listDraftQids(cwd: string): Promise<string[]> {
   try {
-    text = await readFile(join(ctx.cwd, FUTURE_DIR, `${qid}.md`), "utf8");
+    const files = await readdir(join(cwd, FUTURE_DIR));
+    return files.filter((f) => f.endsWith(".md")).map((f) => f.replace(/\.md$/, ""));
   } catch {
-    return `No quest ${qid}: no snapshot and no draft file.`;
+    // Directory scan is best-effort.
+    return [];
   }
-  const objective = text.match(/^##\s+Original request\s*\n+(.+?)(?:\n##\s|\n*$)/ims)?.[1]?.trim() ||
-    text.split("\n")[0] ||
-    qid;
+}
+
+export async function readDraftObjective(cwd: string, qid: string): Promise<string | null> {
+  try {
+    const text = await readFile(join(cwd, FUTURE_DIR, `${qid}.md`), "utf8");
+    return text.match(/^##\s+Original request\s*\n+(.+?)(?:\n##\s|\n*$)/ims)?.[1]?.trim() ||
+      text.split("\n")[0] ||
+      qid;
+  } catch {
+    return null;
+  }
+}
+
+async function adoptDraftFile(pi: Pi, ctx: PiCtx, qid: string): Promise<string> {
+  const objective = await readDraftObjective(ctx.cwd, qid);
+  if (objective === null) return `No quest ${qid}: no snapshot and no draft file.`;
   replaceState(createDraft(createQuest(objective, qid), qid));
   emitNow(pi);
   return `Resumed draft ${qid}: ${summarizeActive()}`;
@@ -50,13 +64,9 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
   if (active.qid !== null && (active.name === arg || active.qid === arg)) {
     return summarizeActive();
   }
-  try {
-    const files = await readdir(join(ctx.cwd, FUTURE_DIR));
-    const match = files.find((f) => f.replace(/\.md$/, "") === arg || f === `${arg}.md`);
-    if (match) return adoptDraftFile(pi, ctx, match.replace(/\.md$/, ""));
-  } catch {
-    // Directory scan is best-effort.
-  }
+  const drafts = await listDraftQids(ctx.cwd);
+  const match = drafts.find((qid) => qid === arg);
+  if (match !== undefined) return adoptDraftFile(pi, ctx, match);
   const newest = newestSnapshot(entries);
   if (newest?.name === arg && newest.qid) {
     replaceState(newest);

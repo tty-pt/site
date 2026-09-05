@@ -51,6 +51,42 @@ async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; 
   return files.slice(0, SCAN_FILES);
 }
 
+export async function scanSiblingStates(
+  sessionsDir: string = join(homedir(), ".pi", "agent", "sessions"),
+): Promise<Map<string, QuestState>> {
+  const found = new Map<string, QuestState>();
+  let files: Array<{ path: string; mtime: number }>;
+  try {
+    files = await sessionFiles(sessionsDir);
+  } catch {
+    return found;
+  }
+  for (const file of files) {
+    let text: string;
+    try {
+      text = await readFile(file.path, "utf8");
+    } catch {
+      continue;
+    }
+    const lines = text.split("\n").filter((l) => l.trim() !== "").slice(-SCAN_TAIL_LINES);
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== "object" || parsed === null) continue;
+      const record = parsed as Record<string, unknown>;
+      if (record["customType"] !== SNAPSHOT_TYPE) continue;
+      const state = decodeSnapshot(record["data"]);
+      if (state === null || state.qid === null || state.phase === "archived") continue;
+      if (!found.has(state.qid)) found.set(state.qid, state);
+    }
+  }
+  return found;
+}
+
 export async function scanSiblingSessions(
   qid: string | null,
   sessionsDir: string = join(homedir(), ".pi", "agent", "sessions"),

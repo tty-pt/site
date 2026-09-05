@@ -13,10 +13,11 @@ import {
   type TranscriptEntry,
 } from "../hooks/events";
 import { injectQuestContext } from "./injection";
-import { scanSiblingSessions } from "./siblings";
-import { DEFAULT_CONFIG, readQuestConfig, type StatusStyle } from "../config";
-import { IDLE_STATE, type Phase, type QuestState } from "../domain/quest";
+import { refreshStatus, refreshStyle } from "./status";
+import { IDLE_STATE, type QuestState } from "../domain/quest";
 import { SNAPSHOT_TYPE, reconstruct } from "./snapshots";
+
+export { questStatus, refreshStatus } from "./status";
 
 let bootstrapped = false;
 let booting = false;
@@ -41,11 +42,11 @@ function ports(pi: Pi, ctx: PiCtx): Ports {
 
 export async function loadQuestState(
   entries: readonly TranscriptEntry[],
-  sessionsDir?: string,
+  _sessionsDir?: string,
 ): Promise<QuestState> {
-  const branch = reconstruct(entries);
-  if (branch.phase !== "idle" || branch.qid !== null) return branch;
-  return (await scanSiblingSessions(null, sessionsDir)) ?? IDLE_STATE;
+  // Fresh sessions start idle: no auto-adopt. The user starts a new quest,
+  // asks inference to recover one, or picks via /quest.
+  return reconstruct(entries);
 }
 
 async function bootFromTranscript(getEntries: () => readonly TranscriptEntry[]): Promise<void> {
@@ -63,39 +64,6 @@ async function bootFromTranscript(getEntries: () => readonly TranscriptEntry[]):
 
 function loadFromTranscript(getEntries: () => readonly TranscriptEntry[]): void {
   void bootFromTranscript(getEntries);
-}
-
-const PHASE_ICONS: Record<Phase, string> = {
-  idle: "💤",
-  provisional: "🔍",
-  drafting: "📝",
-  implementing: "🔨",
-  validating: "🧪",
-  archived: "📦",
-};
-
-export function questStatus(state: QuestState, style: StatusStyle = "icon"): string | undefined {
-  if (state.qid === null) return undefined;
-  if (style === "text") return `${state.phase} ${state.qid}`;
-  return `${PHASE_ICONS[state.phase]} ${state.qid}`;
-}
-
-let statusStyle: StatusStyle = DEFAULT_CONFIG.statusStyle;
-
-async function refreshStyle(cwd: string): Promise<void> {
-  try {
-    statusStyle = (await readQuestConfig(cwd)).statusStyle;
-  } catch {
-    // Style falls back to default; the bar stays best-effort.
-  }
-}
-
-function refreshStatus(ctx: PiCtx): void {
-  try {
-    ctx.ui.setStatus("pi-quest", questStatus(getState(), statusStyle));
-  } catch {
-    // Status bar is best-effort.
-  }
 }
 
 export function installDurability(pi: Pi): void {

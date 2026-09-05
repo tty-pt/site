@@ -10,11 +10,16 @@ export interface ShortcutReg {
   options: { description?: string; handler: (ctx: PiCtx) => Promise<void> | void };
 }
 
+export interface CommandReg {
+  name: string;
+  options: { description?: string; handler: (args: string, ctx: PiCtx) => Promise<void> | void };
+}
+
 export interface FakePi extends Pi {
   sent: SentMessage[];
   appended: Array<{ customType: string; data: unknown }>;
   tools: PiToolSpec[];
-  commands: Array<{ name: string }>;
+  commands: CommandReg[];
   shortcuts: ShortcutReg[];
   execCalls: Array<{ command: string; args: string[] }>;
   execCode: number;
@@ -26,7 +31,7 @@ export function fakePi(): FakePi {
   const sent: SentMessage[] = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const tools: PiToolSpec[] = [];
-  const commands: Array<{ name: string }> = [];
+  const commands: CommandReg[] = [];
   const shortcuts: ShortcutReg[] = [];
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const subscriptions: string[] = [];
@@ -49,8 +54,8 @@ export function fakePi(): FakePi {
     registerTool(tool: PiToolSpec): void {
       tools.push(tool);
     },
-    registerCommand(name: string): void {
-      commands.push({ name });
+    registerCommand(name: string, options: CommandReg["options"]): void {
+      commands.push({ name, options });
     },
     registerShortcut(shortcut: string, options: ShortcutReg["options"]): void {
       shortcuts.push({ shortcut, options });
