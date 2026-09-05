@@ -73,7 +73,7 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
 
 ## Commands
 
-`/quest` (resume or show), `/quests` (list), `/quest-del` (archive/kill).
+`/quest` (resume or show), `F2` (floating plan viewer), `/quests` (list), `/quest-del` (archive/kill).
 Everything else the system does by itself.
 
 ## Durability

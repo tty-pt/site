@@ -20,6 +20,30 @@ export interface PiDialogOptions {
   timeout?: number;
 }
 
+export interface PiTheme {
+  fg(color: string, text: string): string;
+}
+
+export interface PiOverlayComponent {
+  render(width: number): string[];
+  handleInput?(data: string): void;
+  handleMouse?(event: unknown): unknown;
+  dispose?(): void;
+}
+
+export type OverlayFactory<T> = (
+  tui: unknown,
+  theme: PiTheme,
+  keybindings: unknown,
+  done: (result: T) => void,
+) => PiOverlayComponent | Promise<PiOverlayComponent>;
+
+export interface OverlayShowOptions {
+  overlay?: boolean;
+  overlayOptions?: unknown;
+  onHandle?: (handle: unknown) => void;
+}
+
 export interface PiUI {
   select(title: string, options: string[], opts?: PiDialogOptions): Promise<string | undefined>;
   input(title: string, placeholder?: string, opts?: PiDialogOptions): Promise<string | undefined>;
@@ -27,6 +51,7 @@ export interface PiUI {
   notify(message: string, type?: "info" | "warning" | "error"): void;
   setStatus(key: string, text: string | undefined): void;
   setWidget(key: string, content: string[] | undefined): void;
+  custom?<T>(factory: OverlayFactory<T>, options?: OverlayShowOptions): Promise<T>;
 }
 
 export interface PiToolInfo {
@@ -141,6 +166,10 @@ export interface Pi {
   appendEntry(customType: string, data: unknown): void;
   registerTool(tool: PiToolSpec): void;
   registerCommand(name: string, options: PiCommandOptions): void;
+  registerShortcut?(shortcut: string, options: {
+    description?: string;
+    handler: (ctx: PiCtx) => Promise<void> | void;
+  }): void;
   sendMessage(
     message: { customType: string; content: unknown; display?: unknown; details?: unknown },
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },

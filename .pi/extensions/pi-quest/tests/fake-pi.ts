@@ -5,11 +5,17 @@ export interface SentMessage {
   options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" };
 }
 
+export interface ShortcutReg {
+  shortcut: string;
+  options: { description?: string; handler: (ctx: PiCtx) => Promise<void> | void };
+}
+
 export interface FakePi extends Pi {
   sent: SentMessage[];
   appended: Array<{ customType: string; data: unknown }>;
   tools: PiToolSpec[];
   commands: Array<{ name: string }>;
+  shortcuts: ShortcutReg[];
   execCalls: Array<{ command: string; args: string[] }>;
   execCode: number;
   toolNames: string[];
@@ -21,6 +27,7 @@ export function fakePi(): FakePi {
   const appended: Array<{ customType: string; data: unknown }> = [];
   const tools: PiToolSpec[] = [];
   const commands: Array<{ name: string }> = [];
+  const shortcuts: ShortcutReg[] = [];
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const subscriptions: string[] = [];
   const fake = {
@@ -28,6 +35,7 @@ export function fakePi(): FakePi {
     appended,
     tools,
     commands,
+    shortcuts,
     execCalls,
     subscriptions,
     execCode: 0,
@@ -43,6 +51,9 @@ export function fakePi(): FakePi {
     },
     registerCommand(name: string): void {
       commands.push({ name });
+    },
+    registerShortcut(shortcut: string, options: ShortcutReg["options"]): void {
+      shortcuts.push({ shortcut, options });
     },
     sendMessage(message: SentMessage["message"], options?: SentMessage["options"]): void {
       sent.push({ message, options });

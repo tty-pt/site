@@ -8,7 +8,7 @@ Deno.test("status shows one icon per phase", () => {
   const cases = [
     ["provisional", "🔍"],
     ["drafting", "📝"],
-    ["implementing", "🛠️"],
+    ["implementing", "🔨"],
     ["validating", "🧪"],
     ["archived", "📦"],
   ] as const;

@@ -130,7 +130,7 @@ export async function bootDraftReview(
   if (outcome.status === "no-runner") {
     if (!userPathSteered.has(`${qid}:${target}`)) {
       userPathSteered.add(`${qid}:${target}`);
-      sendSteer(pi, `No reviewer available. Draft plan for ${qid}:\n${sections.plan}\nReply "go" to promote to implementing, or keep revising.`);
+      sendSteer(pi, `No reviewer available for ${qid}. Plan at ${draftPath(qid)}. Reply "go" to promote to implementing, or keep revising.`);
     }
     return;
   }

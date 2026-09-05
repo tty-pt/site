@@ -2,6 +2,7 @@
 import type { Pi } from "../../hooks/events";
 import { killQuest } from "./quest-del";
 import { listQuests } from "./quests";
+import { viewActivePlan } from "./plan";
 import { resumeQuest } from "./quest";
 
 function notify(ctx: { ui: { notify: (m: string, t: "info" | "warning" | "error") => void } }, text: string): void {
@@ -37,4 +38,14 @@ export function installCommands(pi: Pi): void {
       notify(ctx, await killQuest(pi, ctx, args));
     },
   });
+  try {
+    pi.registerShortcut?.("f2", {
+      description: "Show the active quest plan in a floating viewer.",
+      handler: async (ctx) => {
+        await viewActivePlan(ctx);
+      },
+    });
+  } catch {
+    // Shortcuts are best-effort; the draft file is always there.
+  }
 }

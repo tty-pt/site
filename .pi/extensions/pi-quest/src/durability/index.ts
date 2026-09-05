@@ -69,7 +69,7 @@ const PHASE_ICONS: Record<Phase, string> = {
   idle: "💤",
   provisional: "🔍",
   drafting: "📝",
-  implementing: "🛠️",
+  implementing: "🔨",
   validating: "🧪",
   archived: "📦",
 };
