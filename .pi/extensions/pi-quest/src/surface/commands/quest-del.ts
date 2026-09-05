@@ -16,7 +16,7 @@ export async function killQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<str
   const state = getState();
   if (state.qid === null) return "No active quest to archive.";
   try {
-    const done = await archiveActiveQuest(pi, ctx, "ABANDONED", "Killed via /quest-del.");
+    const done = await archiveActiveQuest(pi, ctx, "ABANDONED", "Killed via /quest-del.", { confirmDiscard: true });
     return `Quest ${done.archivedQid} archived (abandoned, ${done.zipPath}). ${summarizeActive()}`;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

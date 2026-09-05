@@ -1,9 +1,11 @@
 import { check } from "../check.ts";
-import { mkdtempSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, mkdtempSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQuest } from "../../src/domain/quest.ts";
+import { draftPath, questDir } from "../../src/domain/paths.ts";
+import type { Qid } from "../../src/domain/qid.ts";
 import { fakePi } from "../fake-pi.ts";
 import { archiveQuestFiles, renderManifest, renderQuestView, writeViewFiles } from "../../src/views/quest-view.ts";
 
@@ -25,9 +27,34 @@ Deno.test("view files and archives land on disk", async () => {
   const { dir } = await writeViewFiles(cwd, state);
   const view = await readFile(join(dir, "quest.md"), "utf8");
   check(view.includes("abc123"), "view written");
-  const zip = await archiveQuestFiles(pi, cwd, state, "FAILED", null);
+  await mkdir(join(cwd, ".pi/quest/future"), { recursive: true });
+  await writeFile(join(cwd, draftPath("abc123" as Qid)), "draft stays until archive", "utf8");
+  const zip = await archiveQuestFiles(pi, cwd, state, "FAILED", "nope");
   check(zip.endsWith("abc123.zip"), "zip path returned");
   check(pi.execCalls.length === 1 && pi.execCalls[0].command === "zip", "zip invoked");
-  const manifestRaw = await readFile(join(dir, "manifest.json"), "utf8");
-  check(JSON.parse(manifestRaw).outcome === "FAILED", "manifest written");
+  check(!existsSync(join(cwd, questDir("abc123" as Qid))), "current dir removed after zip");
+  check(!existsSync(join(cwd, draftPath("abc123" as Qid))), "future draft removed after zip");
+});
+
+Deno.test("archived view records the outcome, not the pre-archive phase", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-views-"));
+  const pi = fakePi();
+  pi.exec = ((_command: string, _args: string[]) => {
+    return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+  }) as typeof pi.exec;
+  const state = { ...createQuest("do it", "abc123"), phase: "implementing" as const };
+  let captured = "";
+  const origExec = pi.exec.bind(pi);
+  pi.exec = (async (command: string, args: string[], options?: { cwd?: string }) => {
+    const res = await origExec(command, args, options);
+    try {
+      captured = await readFile(join(options?.cwd ?? cwd, "quest.md"), "utf8");
+    } catch {
+      captured = "";
+    }
+    return res;
+  }) as typeof pi.exec;
+  await archiveQuestFiles(pi, cwd, state, "ABANDONED", "discarded");
+  check(captured.includes("Phase: archived"), "archived phase rendered");
+  check(captured.includes("Archived: ABANDONED"), "outcome rendered");
 });

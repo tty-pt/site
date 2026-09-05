@@ -1,9 +1,9 @@
 // HIGH_LEVEL: #storage — the generated quest view and slim archives.
 // The transcript is the truth; these files are views only.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ArchivedOutcome, QuestState } from "../domain/quest";
-import { archivePath, questDir } from "../domain/paths";
+import { archivePath, draftPath, questDir } from "../domain/paths";
 import type { Qid } from "../domain/qid";
 import type { Pi } from "../hooks/events";
 
@@ -85,13 +85,16 @@ export async function archiveQuestFiles(
 ): Promise<string> {
   if (state.qid === null) throw new Error("cannot archive without a qid");
   const qid: Qid = state.qid;
-  const { dir } = await writeViewFiles(cwd, state);
-  await writeFile(join(dir, "manifest.json"), renderManifest(state, outcome, summary), "utf8");
+  const preview: QuestState = { ...state, phase: "archived", archivedOutcome: outcome, activeReview: null, exactNextAction: "" };
+  const { dir } = await writeViewFiles(cwd, preview);
+  await writeFile(join(dir, "manifest.json"), renderManifest(preview, outcome, summary), "utf8");
   const zipPath = join(cwd, archivePath(qid));
   await mkdir(join(cwd, ".pi/quest/archive"), { recursive: true });
   const res = await pi.exec("zip", ["-j", zipPath, "quest.md", "manifest.json"], { cwd: dir });
   if (res.code !== 0) {
     throw new Error(`zip failed: ${res.stderr.slice(0, 500)}`);
   }
+  await rm(dir, { recursive: true, force: true });
+  await rm(join(cwd, draftPath(qid)), { force: true });
   return zipPath;
 }

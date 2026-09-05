@@ -1,8 +1,9 @@
 import { check } from "../check.ts";
-import { mkdtempSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, mkdtempSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { questDir } from "../../src/domain/paths.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import {
   claimComplete,
@@ -154,6 +155,48 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
   check(returned.returnedToParent === "par001", "returned to parent");
   check(getState().qid === "par001", "parent restored");
   check(getState().children.length === 0, "parent had no children yet");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("archive completed without PASS guides to claimComplete", async () => {
+  replaceState({ ...promote(authored(), "review"), phase: "implementing" as const });
+  let detail = "";
+  try {
+    await archiveActiveQuest(fakePi(), fakeCtx(tmp()), "COMPLETED", "shipped");
+  } catch (err) {
+    detail = err instanceof Error ? err.message : String(err);
+  }
+  check(detail.includes("claimComplete"), "rejection names the recovery path");
+  check(getState().qid === "abc123", "quest stays active after rejection");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("archive abandoned blocks silent discard and cleans both dirs", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  replaceState({ ...promote(authored(), "review"), phase: "implementing" as const });
+  let blocked = "";
+  try {
+    await archiveActiveQuest(pi, fakeCtx(cwd), "ABANDONED", "changed mind");
+  } catch (err) {
+    blocked = err instanceof Error ? err.message : String(err);
+  }
+  check(blocked.includes("confirmDiscard"), "unconfirmed discard rejected");
+  check(getState().qid === "abc123", "quest stays active after rejection");
+  let nosummary = "";
+  try {
+    await archiveActiveQuest(pi, fakeCtx(cwd), "ABANDONED", null, { confirmDiscard: true });
+  } catch (err) {
+    nosummary = err instanceof Error ? err.message : String(err);
+  }
+  check(nosummary.includes("summary"), "discard without summary rejected");
+  await mkdir(join(cwd, ".pi/quest/future"), { recursive: true });
+  await writeFile(join(cwd, draftPath(getState().qid!)), "draft", "utf8");
+  const done = await archiveActiveQuest(pi, fakeCtx(cwd), "ABANDONED", "superseded by new direction", { confirmDiscard: true });
+  check(done.archivedQid === "abc123", "explicit discard archived");
+  check(getState().phase === "idle", "archive clears");
+  check(!existsSync(join(cwd, questDir("abc123" as Qid))), "current dir removed");
+  check(!existsSync(join(cwd, draftPath("abc123" as Qid))), "future draft removed");
   replaceState(IDLE_STATE);
 });
 

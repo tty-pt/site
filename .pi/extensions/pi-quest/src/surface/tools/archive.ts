@@ -19,20 +19,38 @@ function toOutcome(param: ArchiveOutcomeParam): ArchivedOutcome {
   return "ABANDONED";
 }
 
+export function hasValidationPass(): boolean {
+  const state = getState();
+  if (state.qid === null) return false;
+  return state.lastReview?.verdict === "PASS" &&
+    state.lastReview.target === implementationFingerprint(state);
+}
+
 export async function archiveActiveQuest(
   pi: Pi,
   ctx: PiCtx,
   outcome: ArchivedOutcome,
   summary: string | null,
+  opts?: { confirmDiscard?: boolean },
 ): Promise<{ archivedQid: string; zipPath: string; returnedToParent: string | null }> {
   const state = getState();
   if (state.qid === null) throw new Error("no active quest to archive");
   const qid = state.qid;
+  const validated = hasValidationPass();
   if (outcome === "COMPLETED") {
-    const accepted = state.lastReview?.verdict === "PASS" &&
-      state.lastReview.target === implementationFingerprint(state);
-    if (!accepted) {
-      throw new Error("COMPLETED requires a current validation PASS — run validation first, or archive as failed/abandoned");
+    if (!validated) {
+      throw new Error(
+        "COMPLETED requires a current validation PASS — run quest_update_state {claimComplete:true} to enter validating, await the validation PASS (or reply CONFIRM when no validator is available), then archive again",
+      );
+    }
+  }
+  if ((outcome === "FAILED" || outcome === "ABANDONED") && !validated) {
+    const confirmed = opts?.confirmDiscard === true;
+    const noted = typeof summary === "string" && summary.trim() !== "";
+    if (!confirmed || !noted) {
+      throw new Error(
+        `archiving as ${outcome} discards unvalidated work — pass confirmDiscard:true with a summary describing what was discarded and why, or run quest_update_state {claimComplete:true} to validate first`,
+      );
     }
   }
   cancelReview(qid);
@@ -64,12 +82,13 @@ export function archiveTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_archive",
     label: "Archive Quest",
-    description: "Finish the active quest as completed, failed, or abandoned: renders the quest view, writes the run manifest, stores a session-range reference. COMPLETED requires a current validation PASS.",
+    description: "Finish the active quest as completed, failed, or abandoned: renders the quest view, writes the run manifest, stores a session-range reference. COMPLETED requires a current validation PASS (claim via quest_update_state {claimComplete:true} first). Archiving unvalidated work as failed/abandoned requires confirmDiscard:true plus a summary.",
     parameters: {
       type: "object",
       properties: {
         outcome: { type: "string", enum: ["completed", "failed", "abandoned"] },
         summary: { type: "string", description: "Findings summary, returned to the parent for sub-quests." },
+        confirmDiscard: { type: "boolean", description: "Required when archiving unvalidated work as failed/abandoned: confirms the discard is intentional." },
       },
       required: ["outcome"],
       additionalProperties: false,
@@ -80,8 +99,9 @@ export function archiveTool(pi: Pi): PiToolSpec {
         return textResult("quest_archive needs outcome completed|failed|abandoned.", { error: "bad_outcome" });
       }
       const summary = typeof params["summary"] === "string" ? params["summary"] as string : null;
+      const confirmDiscard = params["confirmDiscard"] === true;
       try {
-        const done = await archiveActiveQuest(pi, ctx, toOutcome(outcome), summary);
+        const done = await archiveActiveQuest(pi, ctx, toOutcome(outcome), summary, { confirmDiscard });
         return textResult(
           `Quest ${done.archivedQid} archived (${outcome}, ${done.zipPath}).${done.returnedToParent ? ` Returned to parent ${done.returnedToParent}.` : ""}`,
           { archived: done.archivedQid, outcome, zip: done.zipPath },

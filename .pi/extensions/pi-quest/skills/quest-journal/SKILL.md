@@ -54,8 +54,12 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
 - `quest_subquest` — spawn a linked sub-quest for a complex sub-task. The
   parent waits; you resume on return with findings. Depth cap 3. A failed
   child never fails its parent — record, adjust, continue.
-- `quest_archive` — finish as completed (needs a current validation PASS),
-  failed, or abandoned.
+- `quest_archive` — finish as completed (needs a current validation PASS;
+  claim via `quest_update_state` with `claimComplete` first), failed, or
+  abandoned. Archiving unvalidated work as failed/abandoned requires
+  `confirmDiscard:true` plus a summary of what was discarded and why.
+  Archive zips `current/<qid>/` + `future/<qid>.md` into
+  `archive/<qid>.zip` (sole artifact) and removes both sources.
 - `quest_recover` — rebuild state from the transcript, including earlier
   sessions. Runs automatically when state is absent.
 - `quest_rebut` — answer a review with evidence; a successful rebuttal
