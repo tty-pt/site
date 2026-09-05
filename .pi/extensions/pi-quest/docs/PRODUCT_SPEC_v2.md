@@ -513,12 +513,21 @@ Authoring or revising the plan proposal is never implementation. In DRAFT
 states the draft file is the **sole** writable path: all other mutating
 tools stay blocked.
 
-Blocked = mutating tools: `edit`/`write` (and `user_` variants) to any
-other path, mutating
-`bash` (anything that is not a read-only probe; command chains split and
-each segment classified; file redirection counts as mutation),
+Blocked = write signals: `edit`/`write` (and `user_` variants) to any
+other path, `bash` carrying a write signal — file redirection to a real
+path (null-sinks like `2>/dev/null` and fd-merges like `2>&1` are not
+writes), destructive commands (`rm`/`mv`/`cp`/`mkdir`, `sed -i`,
+worktree-mutating `git`, `tee`; command chains split and `$(…)`/backtick
+bodies inspected), build/install/publish commands and raw script execution,
 `subagent` launch, background-task mutation, and direct writes to quest
 paths (blocked before execution — the agent MUST use `quest_update_state`).
+Research execution is allowed: test and typecheck runners (`deno test`,
+`npm test`, `make test`, `pytest`, `jest`, `vitest`, `cargo test`,
+`go test`, `tsc`) run as evidence gathering. The classifier probes for
+writes and prohibits on match — unknown commands default to allowed, so
+research is never blocked by an unrecognized tool; the residual risk
+(a novel file-writer with no redirect and no known name) is covered by
+setback detection, validator judgment, and path-gated edits.
 Always allowed: reads, searches, non-mutating bash, interaction tools
 (questions), and journal ops needed to resolve the block itself
 (`quest_update_state`, plus `quest_rebut`/`quest_ask_human` even inside a

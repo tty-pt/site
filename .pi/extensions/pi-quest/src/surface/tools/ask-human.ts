@@ -1,6 +1,7 @@
 // HIGH_LEVEL: #tools (main agent) — quest_ask_human.
 // Ask with a recommended default and timeout; never blocks.
-import { askWithDefault } from "../../absence/ask";
+import { askWithDefault, askingToolAvailable } from "../../absence/ask";
+import { readQuestConfig } from "../../config";
 import type { Pi, PiToolSpec } from "../../hooks/events";
 import { textResult } from "./reply";
 
@@ -29,12 +30,14 @@ export function askHumanTool(pi: Pi): PiToolSpec {
         return textResult("quest_ask_human needs a default answer.", { error: "missing_default" });
       }
       const timeoutMs = typeof params["timeoutMs"] === "number" ? params["timeoutMs"] as number : undefined;
+      const config = await readQuestConfig(ctx.cwd);
+      const askingTool = config.bindings.asking.tool;
       const result = await askWithDefault(pi, ctx, { question: question.trim(), defaultAnswer: def, timeoutMs });
       return textResult(
         result.source === "user"
           ? `Human answered: "${result.answer}"`
           : `No human answer (absence) — proceeding with default: "${result.answer}"`,
-        { answer: result.answer, source: result.source },
+        { answer: result.answer, source: result.source, askingTool, askingAvailable: askingToolAvailable(pi, askingTool) },
       );
     },
   };

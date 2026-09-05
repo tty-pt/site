@@ -1,6 +1,8 @@
 import { check } from "../check.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import {
+  acknowledgeChild,
+  addChild,
   archive,
   claimComplete,
   createDraft,
@@ -14,6 +16,7 @@ import {
   recordRefinement,
   recordReviewResult,
   resolveDialogueRound,
+  settleChild,
 } from "../../src/domain/quest.ts";
 
 const QID = "abc123";
@@ -115,6 +118,33 @@ Deno.test("quest records reviews, rebuttals, refinements, and answers", () => {
     threw = true;
   }
   check(threw, "thin rebuttal rejected");
+});
+
+Deno.test("quest acknowledges returned children explicitly", () => {
+  const linked = addChild(provisional(), {
+    qid: "kid001" as Qid,
+    brief: "slice",
+    status: "running",
+    findings: null,
+    acknowledged: false,
+  });
+  const settled = settleChild(linked, "kid001" as Qid, "returned", "done");
+  const acked = acknowledgeChild(settled, "kid001" as Qid);
+  check(acked.children[0].acknowledged, "acknowledged");
+  let threw = false;
+  try {
+    acknowledgeChild(linked, "kid001" as Qid);
+  } catch {
+    threw = true;
+  }
+  check(threw, "running child cannot be continued past");
+  threw = false;
+  try {
+    acknowledgeChild(linked, "zzz999" as Qid);
+  } catch {
+    threw = true;
+  }
+  check(threw, "unknown child rejected");
 });
 
 Deno.test("quest qid type brands strings", () => {

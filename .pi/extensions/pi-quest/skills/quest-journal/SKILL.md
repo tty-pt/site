@@ -12,9 +12,13 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
 
 ## Modes
 
-- **Drafting.** You may write exactly one file: the draft (`future/<qid>.md`).
-  Every other write is blocked with the reason and the required next action.
-  Research and read freely. Structure the draft with `## Requirements`,
+- **Drafting.** The only write path, in order: (1) `quest_update_state`
+  with findings to establish identity; (2) `quest_update_state` with
+  `draftName` — the draft is created at `.pi/quest/future/<qid>.md`;
+  (3) edit ONLY that file's `## Implementation Plan`. Every other write is
+  blocked with the reason and the required next action. Research and read
+  freely — searches, inspections, and test runs are never blocked. Structure
+  the draft with `## Requirements`,
   `## Evidence`, and `## Implementation Plan` sections. Every
   content-changing save cancels the running review and boots a fresh
   adversarial reviewer. Reviewer verdicts are PASS or FAIL with findings.
@@ -22,6 +26,8 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
   implementing automatically (recorded research + actionable plan required).
   The user may reply `go` at any moment to promote immediately; approval is
   never required. Rebut a verdict with evidence via `quest_rebut`.
+  Never author `.pi/quest/current/` — it does not exist until archive renders
+  it. `quest.md` files are generated views, never truth, never write targets.
 - **Implementing.** Unrestricted. Record setbacks with evidence as they
   happen; nothing blocks. When reality contradicts the plan, record an
   amendment with reasons via `quest_update_state` — amendments adjust the

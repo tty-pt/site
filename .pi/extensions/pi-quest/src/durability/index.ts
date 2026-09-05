@@ -13,9 +13,12 @@ import {
   type TranscriptEntry,
 } from "../hooks/events";
 import { injectQuestContext } from "./injection";
+import { scanSiblingSessions } from "./siblings";
+import { IDLE_STATE, type QuestState } from "../domain/quest";
 import { SNAPSHOT_TYPE, reconstruct } from "./snapshots";
 
 let bootstrapped = false;
+let booting = false;
 
 function ports(pi: Pi, ctx: PiCtx): Ports {
   return {
@@ -35,13 +38,30 @@ function ports(pi: Pi, ctx: PiCtx): Ports {
   };
 }
 
-function loadFromTranscript(getEntries: () => readonly TranscriptEntry[]): void {
+export async function loadQuestState(
+  entries: readonly TranscriptEntry[],
+  sessionsDir?: string,
+): Promise<QuestState> {
+  const branch = reconstruct(entries);
+  if (branch.phase !== "idle" || branch.qid !== null) return branch;
+  return (await scanSiblingSessions(null, sessionsDir)) ?? IDLE_STATE;
+}
+
+async function bootFromTranscript(getEntries: () => readonly TranscriptEntry[]): Promise<void> {
+  if (booting) return;
+  booting = true;
   try {
-    replaceState(reconstruct(getEntries()));
+    replaceState(await loadQuestState(getEntries()));
     bootstrapped = true;
   } catch {
     // Stay on current state; turn_start retries, injection stays IDLE-safe.
+  } finally {
+    booting = false;
   }
+}
+
+function loadFromTranscript(getEntries: () => readonly TranscriptEntry[]): void {
+  void bootFromTranscript(getEntries);
 }
 
 function refreshStatus(ctx: PiCtx): void {

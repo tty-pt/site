@@ -38,11 +38,12 @@ export interface GateOptions {
 }
 
 export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {}): Decision {
+  const draftFile = state.qid === null ? null : draftPath(state.qid);
   if (
-    state.qid !== null &&
+    draftFile !== null &&
     ref.toolClass === "write" &&
     ref.path !== undefined &&
-    ref.path === draftPath(state.qid)
+    (ref.path === draftFile || ref.path.endsWith(`/${draftFile}`))
   ) {
     return { allowed: true };
   }
@@ -57,18 +58,19 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return { allowed: true };
   }
   if (state.phase === "drafting") {
+    const draftName = draftFile ?? "the draft file";
     if (state.draft?.outstandingFindings === true) {
       return blocked(
         "DRAFT_REVISION_PENDING",
         "DRAFT_REVIEW_REQUIRED",
-        "Edit the draft plan to address findings; a content-changing save supersedes review and boots a fresh one.",
+        `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one.`,
       );
     }
     if (state.draft === null || !state.draft.planAuthored) {
       return blocked(
         "DRAFT_PENDING",
         "DRAFT_REVIEW_REQUIRED",
-        "Author ## Implementation Plan in the draft file.",
+        `Author ## Implementation Plan in ${draftName}.`,
       );
     }
   }
@@ -79,7 +81,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return blocked(
       "PROVISIONAL_RESEARCH_PENDING",
       "RESEARCH_REQUIRED",
-      "Investigate, establish quest identity, call quest_update_state with findings.",
+      "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — drafts live under .pi/quest/future/ and the draft file is the only writable path; never write current/, it renders at archive.",
     );
   }
   if (state.activeReview !== null) {

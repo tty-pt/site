@@ -12,6 +12,6 @@ export function installValidation(pi: Pi): void {
     void ensureValidationFlow(pi, ctx);
   });
   onUserMessage(pi, (text, ctx) => {
-    handleConfirmInput(pi, ctx, text);
+    void handleConfirmInput(pi, ctx, text);
   });
 }

@@ -66,7 +66,15 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
     humanAnswers: Array.isArray(raw["humanAnswers"]) ? (raw["humanAnswers"] as QuestState["humanAnswers"]) : [],
     setbacks: Array.isArray(raw["setbacks"]) ? (raw["setbacks"] as QuestState["setbacks"]) : [],
     amendments: Array.isArray(raw["amendments"]) ? (raw["amendments"] as QuestState["amendments"]) : [],
-    children: Array.isArray(raw["children"]) ? (raw["children"] as QuestState["children"]) : [],
+    children: Array.isArray(raw["children"])
+      ? (raw["children"] as Array<Record<string, unknown>>).map((c) => ({
+        qid: c["qid"],
+        brief: c["brief"],
+        status: c["status"],
+        findings: c["findings"] ?? null,
+        acknowledged: c["acknowledged"] ?? false,
+      })) as QuestState["children"]
+      : [],
     reviewDialogue: Array.isArray(raw["reviewDialogue"]) ? (raw["reviewDialogue"] as QuestState["reviewDialogue"]) : [],
     snapshotPending: get("snapshotPending", false),
   };

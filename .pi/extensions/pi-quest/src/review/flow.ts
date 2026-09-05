@@ -36,6 +36,7 @@ export interface FlowArgs {
   evidence: string[];
   criteria: string[];
   prompt: string;
+  runnerTool?: string;
 }
 
 export function reviewerAvailable(pi: Pi): boolean {
@@ -57,8 +58,9 @@ export function implementationFingerprint(state: QuestState): string {
 
 export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   const { pi, ctx, qid, kind, target } = args;
-  if (!isReviewerAvailable(pi)) return { status: "no-runner" };
-  const runner = createRunner({ pi, ctx, ownerRunId: qid });
+  const runnerTool = args.runnerTool ?? "subagent";
+  if (!isReviewerAvailable(pi, runnerTool)) return { status: "no-runner" };
+  const runner = createRunner({ pi, ctx, ownerRunId: qid, toolName: runnerTool });
   if (runner === null) return { status: "no-runner" };
   const controller = new AbortController();
   trackReview(qid, target, () => controller.abort());

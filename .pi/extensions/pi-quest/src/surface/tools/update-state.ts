@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import {
+  acknowledgeChild,
   claimComplete,
   createDraft,
   createQuest,
@@ -56,7 +57,7 @@ export async function applyUpdate(
     replaceState(state);
     await ensureDraftFile(ctx, qid, draftName.trim(), state.objective);
     state = getState();
-    applied.push(`draft ${draftName.trim()} created`);
+    applied.push(`draft ${draftName.trim()} created at ${draftPath(qid)} — edit ONLY this file`);
   }
   const refinement = params["refinement"];
   if (typeof refinement === "string" && refinement.trim() !== "" && state.qid) {
@@ -79,6 +80,16 @@ export async function applyUpdate(
     const text = next.trim();
     state = updateState((s) => ({ ...s, exactNextAction: text, snapshotPending: true }));
     applied.push("next action updated");
+  }
+  const continuePast = params["continuePast"];
+  if (typeof continuePast === "string" && continuePast.trim() !== "" && state.qid) {
+    try {
+      const childQid = continuePast.trim();
+      state = updateState((s) => acknowledgeChild(s, childQid as Qid));
+      applied.push(`continued past child ${childQid}`);
+    } catch (err) {
+      return { applied, error: err instanceof Error ? err.message : String(err) };
+    }
   }
   if (params["claimComplete"] === true && state.qid) {
     if (state.phase !== "implementing") {
@@ -116,6 +127,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         },
         exactNextAction: { type: "string" },
         claimComplete: { type: "boolean" },
+        continuePast: { type: "string", description: "Returned child qid to explicitly continue past." },
       },
       additionalProperties: false,
     },

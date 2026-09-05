@@ -71,6 +71,7 @@ export interface ChildLink {
   brief: string;
   status: ChildStatus;
   findings: string | null;
+  acknowledged: boolean;
 }
 
 export interface HumanAnswer {
@@ -221,6 +222,24 @@ export function archive(state: QuestState, outcome: ArchivedOutcome): QuestState
   });
 }
 
+// Promotion requires recorded research alongside the actionable plan:
+// evidence items, refinements, or setback evidence on file.
+export function researchRecorded(state: QuestState, draftEvidence: number): boolean {
+  if (draftEvidence > 0) return true;
+  if (state.refinements.length > 0) return true;
+  return state.setbacks.some((s) => s.evidence.length > 0);
+}
+
+// A child deviates from its brief when it recorded anything beyond the
+// brief itself: amendments, setbacks, refinements, or review dialogue.
+// Clean children skip the draft reviewer; the validator still judges them.
+export function childDeviated(state: QuestState): boolean {
+  return state.amendments.length > 0 ||
+    state.setbacks.length > 0 ||
+    state.refinements.length > 0 ||
+    state.reviewDialogue.length > 0;
+}
+
 // --- Review history ---
 
 export function recordReviewResult(
@@ -311,6 +330,15 @@ export function addChild(state: QuestState, link: ChildLink): QuestState {
 export function settleChild(state: QuestState, qid: Qid, status: ChildStatus, findings: string | null): QuestState {
   return markChanged(state, {
     children: state.children.map((c) => c.qid === qid ? { ...c, status, findings } : c),
+  });
+}
+
+export function acknowledgeChild(state: QuestState, qid: Qid): QuestState {
+  const link = state.children.find((c) => c.qid === qid);
+  if (!link) throw new Error(`no linked child ${qid}`);
+  if (link.status === "running") throw new Error(`child ${qid} has not returned yet`);
+  return markChanged(state, {
+    children: state.children.map((c) => c.qid === qid ? { ...c, acknowledged: true } : c),
   });
 }
 

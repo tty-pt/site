@@ -6,9 +6,9 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer } from "../app/interpreter";
-import { DEFAULT_CONFIG } from "../config";
+import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
 import type { ApprovedBy, QuestState } from "../domain/quest";
-import { noteDraftFindings, promote } from "../domain/quest";
+import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../domain/quest";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onToolResult, onUserMessage } from "../hooks/events";
@@ -89,7 +89,12 @@ function reviewMaterial(state: QuestState, sections: DraftSections): ReviewMater
 
 const userPathSteered = new Set<string>();
 
-export async function bootDraftReview(pi: Pi, ctx: PiCtx, target: string): Promise<void> {
+export async function bootDraftReview(
+  pi: Pi,
+  ctx: PiCtx,
+  target: string,
+  config: QuestConfig = DEFAULT_CONFIG,
+): Promise<void> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
@@ -107,6 +112,7 @@ export async function bootDraftReview(pi: Pi, ctx: PiCtx, target: string): Promi
     evidence: sections.evidence,
     criteria: ["plan addresses the recorded request", "research sufficient", "no reviewer-preference blocks"],
     prompt: buildReviewPrompt("draft", qid, target, material),
+    runnerTool: config.bindings.reviewRunner.tool,
   });
   if (outcome.status === "no-runner") {
     if (!userPathSteered.has(`${qid}:${target}`)) {
@@ -117,6 +123,10 @@ export async function bootDraftReview(pi: Pi, ctx: PiCtx, target: string): Promi
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
+    if (!researchRecorded(getState(), sections.evidence.length)) {
+      sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or reply "go" to proceed on your judgment.`);
+      return;
+    }
     updateState((s) => promote(s, "review"));
     emitNow(pi);
     const next = getState().exactNextAction;
@@ -141,12 +151,14 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
       snapshotPending: true,
     });
   }
-  if (!meetsReviewThresholds(sections)) return;
+  const config = await readQuestConfig(ctx.cwd);
+  if (!meetsReviewThresholds(sections, config.draftThresholds)) return;
   const target = hashContent(content);
   if (state.draft.approvedBy !== null && state.draft.contentHash === target) return;
   if (isCurrentReview(state.qid, target)) return;
+  if (state.parentQid !== null && !childDeviated(getState())) return;
   supersedeReviewThenBootFresh(state.qid, target, () => {
-    void bootDraftReview(pi, ctx, target);
+    void bootDraftReview(pi, ctx, target, config);
   });
 }
 

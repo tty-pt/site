@@ -25,7 +25,7 @@ export async function createChildQuest(
     throw new Error(`depth cap ${config.depthCap} reached — fold this work into the parent quest`);
   }
   const childQid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  updateState((s) => addChild(s, { qid: childQid, brief, status: "running", findings: null }));
+  updateState((s) => addChild(s, { qid: childQid, brief, status: "running", findings: null, acknowledged: false }));
   emitNow(pi);
   const child = { ...createQuest(goal, childQid, parent.qid), depth };
   pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));

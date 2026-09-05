@@ -57,7 +57,10 @@ Deno.test("gate blocks implementation in provisional", () => {
 Deno.test("gate blocks unauthored and revision drafts", () => {
   const pending = decide(drafting(), EDIT_OTHER);
   check(!pending.allowed && pending.code === "DRAFT_REVIEW_REQUIRED", "unauthored blocked");
-  if (!pending.allowed) check(pending.phaseName === "DRAFT_PENDING", "pending name");
+  if (!pending.allowed) {
+    check(pending.phaseName === "DRAFT_PENDING", "pending name");
+    check(reasonText(pending).includes("future/abc123.md"), "reason names the draft file");
+  }
   const s = drafting();
   const revision = { ...s, draft: { ...s.draft!, outstandingFindings: true } };
   const d = decide(revision, EDIT_OTHER);

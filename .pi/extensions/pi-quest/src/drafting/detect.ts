@@ -21,7 +21,9 @@ export async function detectSubstantiveRequest(pi: Pi, ctx: PiCtx, text: string)
   emitNow(pi);
   sendSteer(
     pi,
-    `New quest ${qid} opened as provisional: "${trimmed.slice(0, 200)}". Investigate to establish identity, then record findings via quest_update_state.`,
+    `New quest ${qid} opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
+      `(2) create the draft via quest_update_state {draftName} — it lands at .pi/quest/future/${qid}.md; ` +
+      `(3) edit ONLY that file's ## Implementation Plan. Never write .pi/quest/current/ — it renders at archive.`,
   );
   return true;
 }

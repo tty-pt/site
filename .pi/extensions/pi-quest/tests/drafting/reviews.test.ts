@@ -32,6 +32,12 @@ Deno.test("draft thresholds follow the configured counts", () => {
   check(!meetsReviewThresholds(planless), "no plan never passes");
 });
 
+Deno.test("draft thresholds accept configured counts", () => {
+  const sections = parseDraftSections("## Requirements\n- one\n\n## Implementation Plan\nplan\n");
+  check(meetsReviewThresholds(sections, { requirements: 1, evidence: 0 }), "custom counts honored");
+  check(!meetsReviewThresholds(sections, { requirements: 5, evidence: 7 }), "custom counts enforced");
+});
+
 Deno.test("go pattern matches approval and nothing else", () => {
   for (const text of ["go", "Go", "  go. ", "approve", "approved", "lgtm", "ship it!"]) {
     check(GO_PATTERN.test(text), `"${text}" is approval`);

@@ -17,7 +17,7 @@ import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { createChildQuest } from "../../src/surface/tools/subquest.ts";
-import { recoverQuest } from "../../src/surface/tools/recover.ts";
+import { recoverQuest, recoverTool } from "../../src/surface/tools/recover.ts";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../src/durability/snapshots.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 
@@ -56,13 +56,22 @@ Deno.test("update claims completion only with no running children", async () => 
   const refined = await applyUpdate(pi, ctx, { refinement: "needs retries" });
   check(getState().refinements.length === 1, "refinement recorded");
   check(refined.applied.length === 1, "applied listed");
-  replaceState({ ...promote(authored(), "review"), children: [{ qid: "kid001" as Qid, brief: "b", status: "running", findings: null }] });
+  replaceState({ ...promote(authored(), "review"), children: [{ qid: "kid001" as Qid, brief: "b", status: "running", findings: null, acknowledged: false }] });
   const blocked = await applyUpdate(pi, ctx, { claimComplete: true });
   check(blocked.error !== undefined && blocked.error.includes("kid001"), "children block claims");
   replaceState(promote(authored(), "review"));
   const claimed = await applyUpdate(pi, ctx, { claimComplete: true });
   check(getState().phase === "validating", "validating");
   check(claimed.applied.length === 1, "claim applied");
+  replaceState({
+    ...promote(authored(), "review"),
+    children: [{ qid: "kid001" as Qid, brief: "b", status: "returned", findings: "done", acknowledged: false }],
+  });
+  const continued = await applyUpdate(pi, ctx, { continuePast: "kid001" });
+  check(getState().children[0].acknowledged, "child explicitly continued past");
+  check(continued.applied.length === 1, "continue applied");
+  const unknown = await applyUpdate(pi, ctx, { continuePast: "zzz999" });
+  check(unknown.error !== undefined, "unknown child rejected");
   replaceState(IDLE_STATE);
 });
 
@@ -129,5 +138,22 @@ Deno.test("recover reads the transcript and cold-starts honestly", async () => {
   void pi;
   const cold = await recoverQuest(fakeCtx(tmp(), [{ customType: "other", data: {} }]), "zzz999");
   check(cold.qid === null, "unknown qid finds nothing");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("recover tool orients the agent", async () => {
+  replaceState(IDLE_STATE);
+  const hit = encodeSnapshot(createDraft(createQuest("found", "abc123"), "found"));
+  const out = await recoverTool(fakePi()).execute(
+    "1",
+    { qid: "abc123" },
+    undefined,
+    undefined,
+    fakeCtx(tmp(), [{ customType: SNAPSHOT_TYPE, data: hit }]),
+  );
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("drafting"), "phase oriented");
+  check(text.includes("future/abc123.md"), "draft path oriented");
+  check((out.details as { phase: string }).phase === "drafting", "phase in details");
   replaceState(IDLE_STATE);
 });

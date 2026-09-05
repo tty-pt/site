@@ -12,6 +12,7 @@ import type { Pi, PiCtx } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
+import { readQuestConfig } from "../config";
 import { hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 
@@ -44,6 +45,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (hasInFlight(qid)) return;
+  const config = await readQuestConfig(ctx.cwd);
   const plan = await approvedPlan(ctx, state);
   const evidence = [
     ...state.refinements,
@@ -58,7 +60,12 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     target,
     plan,
     evidence,
-    criteria: ["implementation matches the approved plan", "amendments stay in scope", "work is verified"],
+    criteria: [
+      "implementation matches the approved plan",
+      "each amendment appropriate and in scope against the original request",
+      "work is verified",
+    ],
+    runnerTool: config.bindings.reviewRunner.tool,
     prompt: buildReviewPrompt("validation", qid, target, {
       objective: state.pendingRootRequest ?? state.objective,
       plan,
@@ -81,14 +88,15 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   sendSteer(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
 }
 
-export function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): boolean {
+export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
   if (!CONFIRM_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return false;
   if (hasInFlight(state.qid)) return false;
   const target = implementationFingerprint(state);
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) return false;
-  if (isReviewerAvailable(pi)) return false;
+  const config = await readQuestConfig(ctx.cwd);
+  if (isReviewerAvailable(pi, config.bindings.reviewRunner.tool)) return false;
   void archiveActiveQuest(pi, ctx, "COMPLETED", "Accepted on user confirmation (no validator available).");
   return true;
 }

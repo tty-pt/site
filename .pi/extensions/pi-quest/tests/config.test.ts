@@ -1,5 +1,5 @@
 import { check } from "./check.ts";
-import { DEFAULT_CONFIG, loadConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, readQuestConfig } from "../src/config.ts";
 
 Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.askTimeoutMs === 60000, "one minute default");
@@ -21,4 +21,19 @@ Deno.test("config loads partial settings over defaults", () => {
   check(partial.bindings.reviewRunner.tool === "subagent", "bindings kept");
   const bindings = loadConfig({ bindings: { asking: { tool: "custom_ask" } } });
   check(bindings.bindings.asking.tool === "custom_ask", "binding overridden");
+});
+
+Deno.test("config reads the settings file with fallback", async () => {
+  const dir = await Deno.makeTempDir();
+  const missing = await readQuestConfig(dir);
+  check(missing.askTimeoutMs === 60000, "missing file defaults");
+  await Deno.mkdir(`${dir}/.pi`, { recursive: true });
+  await Deno.writeTextFile(
+    `${dir}/.pi/settings.json`,
+    JSON.stringify({ "pi-quest": { askTimeoutMs: 5000, bindings: { reviewRunner: { tool: "custom" } } } }),
+  );
+  const loaded = await readQuestConfig(dir);
+  check(loaded.askTimeoutMs === 5000, "file timeout honored");
+  check(loaded.bindings.reviewRunner.tool === "custom", "file binding honored");
+  check(loaded.depthCap === 3, "absent keys default");
 });

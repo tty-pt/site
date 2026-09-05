@@ -5,6 +5,7 @@ import { getState, updateState } from "../app/store";
 import { sendSteer } from "../app/interpreter";
 import { recordRefinement } from "../domain/quest";
 import { onUserMessage, type Pi } from "../hooks/events";
+import { triageInQuestRequest } from "./scope";
 import { classifyUserMessage } from "./triage";
 
 export function installSubQuests(pi: Pi): void {
@@ -14,9 +15,10 @@ export function installSubQuests(pi: Pi): void {
       if (state.qid === null || state.phase === "idle" || state.phase === "archived") return;
       const trimmed = text.trim();
       if (trimmed.startsWith("/") || trimmed.length < 20) return;
-      if (classifyUserMessage(trimmed) !== "refinement") return;
+      const triaged = triageInQuestRequest(state.qid, classifyUserMessage(trimmed));
+      if (triaged === null) return;
       updateState((s) => recordRefinement(s, trimmed));
-      sendSteer(pi, `Recorded as a refinement on quest ${state.qid}; it will feed the validator at completion.`);
+      sendSteer(pi, triaged.steer);
     } catch {
       // Passive handler: never break the agent.
     }

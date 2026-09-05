@@ -8,6 +8,7 @@ import { bootDraftReview } from "../../drafting/reviews";
 import { ensureValidationFlow } from "../../validation/flow";
 import { implementationFingerprint } from "../../review/flow";
 import { cancelReview } from "../../review/tracker";
+import { readQuestConfig } from "../../config";
 import { textResult } from "./reply";
 
 export function rebutTool(pi: Pi): PiToolSpec {
@@ -52,7 +53,7 @@ export function rebutTool(pi: Pi): PiToolSpec {
             if (stopRebuttalReview) cancelReview(stopRebuttalReview);
           };
           signal?.addEventListener("abort", onAbort, { once: true });
-          await bootDraftReview(pi, ctx, target);
+          await bootDraftReview(pi, ctx, target, await readQuestConfig(ctx.cwd));
           const after = getState();
           if (after.lastReview?.target === target) {
             updateState((s) => resolveDialogueRound(s, round, after.lastReview!.verdict));
