@@ -17,7 +17,7 @@ import { refreshStatus, refreshStyle } from "./status";
 import { IDLE_STATE, type QuestState } from "../domain/quest";
 import { SNAPSHOT_TYPE, reconstruct } from "./snapshots";
 
-export { questStatus, refreshStatus } from "./status";
+export { noteDraftUpdated, questStatus, refreshStatus, stopBlink } from "./status";
 
 let bootstrapped = false;
 let booting = false;

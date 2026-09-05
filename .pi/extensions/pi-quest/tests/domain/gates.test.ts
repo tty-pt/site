@@ -88,6 +88,17 @@ Deno.test("gate blocks writes while a review runs", () => {
   check(decide(midReview, JOURNAL).allowed, "journal ops stay usable mid-review");
 });
 
+Deno.test("gate never blocks the live asking tool, even mid-review", () => {
+  const live = ref("ask_user_question", "ask");
+  const s = drafting();
+  const authored = { ...s, draft: { ...s.draft!, planAuthored: true } };
+  const midReview = { ...authored, activeReview: { kind: "draft" as const, target: "h1" } };
+  check(decide(midReview, live).allowed, "live ask allowed mid-review");
+  check(decide(createQuest("req", QID), live).allowed, "live ask allowed in provisional");
+  check(decide(drafting(), live).allowed, "live ask allowed in drafting");
+  check(!decide(midReview, ref("ask_user_question", "other")).allowed, "misclassified ask still blocked");
+});
+
 Deno.test("gate opens implementation and blocks unknown tools while drafting", () => {
   const open: QuestState = { ...drafting(), phase: "implementing" };
   check(decide(open, EDIT_OTHER).allowed, "implementing open");

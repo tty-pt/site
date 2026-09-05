@@ -7,8 +7,9 @@ import { recordHumanAnswer } from "../domain/quest";
 import type { Pi, ToolCallEvent, ToolResultEvent } from "../hooks/events";
 import { onToolCall, onToolResult } from "../hooks/events";
 import type { QuestConfig } from "../config";
+import { ASKING_TOOL_NAMES } from "../utils/classify";
 
-const KNOWN_ASKING_TOOLS = ["ask_questions", "ask_user_question"];
+const KNOWN_ASKING_TOOLS = ASKING_TOOL_NAMES;
 const PENDING_CAP = 50;
 
 let watched: string[] = [...KNOWN_ASKING_TOOLS];

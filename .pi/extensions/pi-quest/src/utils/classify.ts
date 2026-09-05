@@ -75,9 +75,27 @@ const ALLOWED_RUNNERS = [
   "tsc",
 ];
 
+// Tools that ask the human a question. Hosts name them differently
+// (ask_questions here, ask_user_question in this environment, custom
+// bindings elsewhere); match all of them so the gate never blocks
+// asking, whatever the environment provides.
+export const ASKING_TOOL_NAMES = [
+  "ask_questions",
+  "ask_question",
+  "ask_user_question",
+  "ask_user",
+  "ask_human",
+];
+
+export function isAskingToolName(toolName: string): boolean {
+  if (ASKING_TOOL_NAMES.includes(toolName)) return true;
+  if (toolName.startsWith("ask_")) return true;
+  return toolName.includes("question");
+}
+
 export function classify(toolName: string, input: Record<string, unknown>): ToolClass {
   if (toolName.startsWith("user_")) return classify(toolName.slice("user_".length), input);
-  if (toolName === "ask_questions") return "ask";
+  if (isAskingToolName(toolName)) return "ask";
   if (toolName.startsWith("quest_")) return "journal";
   if (READ_TOOLS.has(toolName)) return "read";
   if (WRITE_TOOLS.has(toolName)) return "write";

@@ -24,7 +24,7 @@ export async function detectSubstantiveRequest(pi: Pi, ctx: PiCtx, text: string)
     pi,
     `New quest ${qid} opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
-      `(3) edit ONLY that file's ## Implementation Plan. Never write .pi/quest/current/ — it renders at archive.`,
+      `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. Never write .pi/quest/current/ — it renders at archive.`,
   );
   return true;
 }

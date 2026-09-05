@@ -1,5 +1,23 @@
 import { check } from "../check.ts";
-import { GO_PATTERN, hashContent, meetsReviewThresholds, parseDraftSections, splicePlanSection } from "../../src/drafting/reviews.ts";
+import { mkdtempSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { getState, replaceState } from "../../src/app/store.ts";
+import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import type { Qid } from "../../src/domain/qid.ts";
+import { draftPath } from "../../src/domain/paths.ts";
+import { stopBlink } from "../../src/durability/index.ts";
+import { fakeCtx, fakePi } from "../fake-pi.ts";
+import {
+  GO_PATTERN,
+  hashContent,
+  meetsReviewThresholds,
+  onTurnEndCatchAll,
+  parseDraftSections,
+  splicePlanSection,
+  watchDraftFileCatchAll,
+} from "../../src/drafting/reviews.ts";
 
 const DRAFT = `## Requirements
 - first requirement
@@ -61,4 +79,47 @@ Deno.test("plan splice replaces the section or appends it", () => {
   check(replaced.includes("## Evidence"), "later sections kept");
   const appended = splicePlanSection("## Requirements\n- one\n", "Fresh plan.");
   check(appended.includes("## Implementation Plan") && appended.includes("Fresh plan."), "section appended");
+});
+
+Deno.test("plan splice replaces a suffixed plan header instead of duplicating", () => {
+  const doc = "# T\n\n## Implementation Plan — concrete redesign\n\nOld.\n\n## Evidence\n\nE.\n";
+  const out = splicePlanSection(doc, "New plan.");
+  const headers = out.split("\n").filter((line) => /^##\s+.*implementation plan/i.test(line));
+  check(headers.length === 1, "exactly one plan section");
+  check(out.includes("New plan.") && !out.includes("Old."), "plan body replaced");
+  check(out.includes("## Evidence"), "later sections kept");
+});
+
+Deno.test("drafting installer watches turn end", () => {
+  const pi = fakePi();
+  watchDraftFileCatchAll(pi);
+  check(pi.subscriptions.includes("turn_end"), "catch-all subscribed");
+});
+
+Deno.test("turn-end catch-all absorbs the scaffold silently, then blinks on bypass edits", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-catchall-"));
+  const qid = "abc123" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "thing"));
+  const file = join(cwd, draftPath(qid));
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, "# abc123\n\nScaffold.\n", "utf8");
+  const calls: Array<string | undefined> = [];
+  const ctx = fakeCtx(cwd, [], {
+    setStatus: (_key: string, text: string | undefined) => {
+      calls.push(text);
+    },
+  });
+  const pi = fakePi();
+  try {
+    await onTurnEndCatchAll(pi, ctx);
+    check(calls.length === 0, "scaffold absorption stays silent");
+    check(getState().draft?.contentHash !== null, "baseline recorded");
+    await writeFile(file, "# abc123\n\nScaffold.\n\nBypass edit.\n", "utf8");
+    await onTurnEndCatchAll(pi, ctx);
+    check(calls.length >= 1 && calls[0] === "\x1b[97m📝 abc123 [F2]\x1b[0m", "bypass edit flashes bright");
+    check(getState().snapshotPending === true, "bypass edit marks snapshot pending");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
 });

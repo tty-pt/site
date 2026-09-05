@@ -13,6 +13,25 @@ Deno.test("classifier passes tools and folds variants", () => {
   check(classify("mystery_tool", {}) === "other", "unknown other");
 });
 
+Deno.test("classifier treats every asking-tool name as ask", () => {
+  for (
+    const name of [
+      "ask_questions",
+      "ask_question",
+      "ask_user_question",
+      "ask_user",
+      "ask_human",
+      "ask_anything",
+      "my_question_tool",
+      "user_ask_custom",
+    ]
+  ) {
+    check(classify(name, {}) === "ask", name);
+  }
+  check(classify("mystery_tool", {}) === "other", "unknown still other");
+  check(classify("quest_ask_human", {}) === "journal", "own tool stays journal");
+});
+
 Deno.test("classifier allows arbitrary research under inversion", () => {
   check(classify("bash", { command: "find mods -name '*.c' | sort | head -80" }) === "read", "find-sort pipeline");
   check(classify("bash", { command: "find . -type f 2>/dev/null | head -200" }) === "read", "stderr sink");

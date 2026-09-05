@@ -8,6 +8,7 @@ import { recordHumanAnswer } from "../domain/quest";
 import { GO_PATTERN } from "../drafting/reviews";
 import type { Pi, PiCtx } from "../hooks/events";
 import { toolNames } from "../hooks/events";
+import { ASKING_TOOL_NAMES } from "../utils/classify";
 
 export interface PendingQuestion {
   question: string;
@@ -19,7 +20,9 @@ const pendingByQid = new Map<string, PendingQuestion>();
 const LATE_WINDOW_MS = 15 * 60 * 1000;
 
 export function askingToolAvailable(pi: Pi, tool = "ask_questions"): boolean {
-  return toolNames(pi).includes(tool);
+  const names = toolNames(pi);
+  if (names.includes(tool)) return true;
+  return ASKING_TOOL_NAMES.some((known) => names.includes(known));
 }
 
 export interface AskArgs {

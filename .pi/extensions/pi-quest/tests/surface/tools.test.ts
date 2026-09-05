@@ -17,6 +17,7 @@ import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
+import { stopBlink } from "../../src/durability/index.ts";
 import { createChildQuest } from "../../src/surface/tools/subquest.ts";
 import { recoverQuest, recoverTool } from "../../src/surface/tools/recover.ts";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../src/durability/snapshots.ts";
@@ -35,6 +36,7 @@ Deno.test("update creates quests and drafts on disk", async () => {
   replaceState(IDLE_STATE);
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
+  try {
   const created = await applyUpdate(pi, ctx, { objective: "Build the thing." });
   check(created.applied.length === 1 && getState().qid !== null, "quest created");
   const qid = getState().qid!;
@@ -42,7 +44,8 @@ Deno.test("update creates quests and drafts on disk", async () => {
   check(scaffold.includes("Build the thing."), "scaffold pre-created at provisioning");
   const drafted = await applyUpdate(pi, ctx, { draftName: "thing" });
   check(getState().phase === "drafting", "drafting");
-  check(drafted.applied.length === 1, "draft applied");
+  check(drafted.applied.length === 2, "draft applied plus thin nudge");
+  check(drafted.applied.some((a) => a.includes("created thin")), "thin draft nudged");
   const file = await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
   check(file.includes("Build the thing."), "draft template carries objective");
   const empty = await applyUpdate(pi, ctx, {});
@@ -56,7 +59,10 @@ Deno.test("update creates quests and drafts on disk", async () => {
   check(onDisk.includes("Do step one, then step two."), "plan spliced into the draft file");
   const samePlan = await applyUpdate(pi, ctx, { plan: "Do step one, then step two." });
   check(samePlan.error !== undefined, "identical plan refused");
-  replaceState(IDLE_STATE);
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
 });
 
 Deno.test("update claims completion only with no running children", async () => {
@@ -120,13 +126,17 @@ Deno.test("creation pre-creates the child scaffold and never clobbers", async ()
   replaceState(IDLE_STATE);
   const cwd = tmp();
   const ctx2 = fakeCtx(cwd);
+  try {
   await applyUpdate(fakePi(), ctx2, { objective: "Keep my words." });
   const qid = getState().qid!;
   await writeFile(join(cwd, draftPath(qid)), "agent-authored plan stays", "utf8");
   await applyUpdate(fakePi(), ctx2, { draftName: "thing" });
   const kept = await readFile(join(cwd, draftPath(qid)), "utf8");
   check(kept === "agent-authored plan stays", "first draft never clobbers existing content");
-  replaceState(IDLE_STATE);
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
 });
 
 Deno.test("archive enforces PASS for completed and returns children", async () => {
@@ -228,4 +238,53 @@ Deno.test("recover tool orients the agent", async () => {
   check(text.includes("future/abc123.md"), "draft path oriented");
   check((out.details as { phase: string }).phase === "drafting", "phase in details");
   replaceState(IDLE_STATE);
+});
+
+Deno.test("draft creation carries refinements and blinks", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const calls: Array<string | undefined> = [];
+  const ctx = fakeCtx(cwd, [], {
+    setStatus: (_key: string, text: string | undefined) => {
+      calls.push(text);
+    },
+  });
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { refinement: "found a global registry" });
+    const drafted = await applyUpdate(pi, ctx, { draftName: "thing" });
+    const qid = getState().qid!;
+    const file = await readFile(join(cwd, draftPath(qid)), "utf8");
+    check(file.includes("## Findings (pre-draft investigation)"), "refinements carried into scaffold");
+    check(file.includes("- found a global registry"), "refinement text filed");
+    check(!drafted.applied.join(" ").includes("created thin"), "no thin nudge when findings exist");
+    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [F2]\x1b[0m`, "creation flashes bright");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("plan writes blink the hint", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const calls: Array<string | undefined> = [];
+  const ctx = fakeCtx(cwd, [], {
+    setStatus: (_key: string, text: string | undefined) => {
+      calls.push(text);
+    },
+  });
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const qid = getState().qid!;
+    calls.length = 0;
+    await applyUpdate(pi, ctx, { plan: "Do step one." });
+    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [F2]\x1b[0m`, "plan write flashes bright");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
 });

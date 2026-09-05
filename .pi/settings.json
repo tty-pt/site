@@ -15,7 +15,7 @@
     "depthCap": 3,
     "draftThresholds": { "requirements": 2, "evidence": 7 },
     "bindings": {
-      "asking": { "tool": "ask_questions" },
+      "asking": { "tool": "ask_user_question" },
       "reviewRunner": { "tool": "subagent" }
     }
   }

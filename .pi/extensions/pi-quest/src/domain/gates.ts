@@ -76,14 +76,14 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       return blocked(
         "DRAFT_REVISION_PENDING",
         "DRAFT_REVIEW_REQUIRED",
-        `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one.`,
+        `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {plan: ...} — it splices the Implementation Plan section and boots a fresh review.`,
       );
     }
     if (state.draft === null || !state.draft.planAuthored) {
       return blocked(
         "DRAFT_PENDING",
         "DRAFT_REVIEW_REQUIRED",
-        `Author ## Implementation Plan in ${draftName}.`,
+        `Author ## Implementation Plan in ${draftName} — pass {plan: ...} to quest_update_state to write it directly.`,
       );
     }
   }

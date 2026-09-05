@@ -11,12 +11,12 @@ import type { ApprovedBy, QuestState } from "../domain/quest";
 import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../domain/quest";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
-import { onToolResult, onUserMessage } from "../hooks/events";
+import { onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
 import { cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
+import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
-
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
 export interface DraftSections {
@@ -31,7 +31,10 @@ export function hashContent(content: string): string {
 
 export function splicePlanSection(text: string, plan: string): string {
   const lines = text.split("\n");
-  const start = lines.findIndex((line) => /^##\s+implementation plan\s*$/i.test(line));
+  const start = lines.findIndex((line) => {
+    const header = line.match(/^##\s+(.+?)\s*$/i);
+    return header !== null && header[1].toLowerCase().includes("implementation plan");
+  });
   if (start === -1) {
     const body = text.endsWith("\n") ? text : `${text}\n`;
     return `${body}\n## Implementation Plan\n\n${plan.trim()}\n`;
@@ -212,12 +215,48 @@ async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promis
     return;
   }
   if (!handleDraftEdit(expected, hashContent(content))) return;
+  noteDraftUpdated(ctx);
   void maybeBootDraftReview(pi, ctx);
 }
 
 export function watchDraftEdits(pi: Pi): void {
   onToolResult(pi, (event, eventCtx) => {
     void onWriteResult(pi, eventCtx, event);
+  });
+}
+
+// Catch-all for bypass edits (bash heredocs, sed, external tools): the gate
+// polices tool calls, not the filesystem. One hash compare per turn-end
+// while drafting; a mismatch boots a fresh review and blinks.
+export async function onTurnEndCatchAll(pi: Pi, ctx: PiCtx): Promise<void> {
+  try {
+    const state = getState();
+    if (state.phase !== "drafting" || state.qid === null || state.draft === null) return;
+    const expected = draftPath(state.qid);
+    let content: string;
+    try {
+      content = await readFile(join(ctx.cwd, expected), "utf8");
+    } catch {
+      return;
+    }
+    const hash = hashContent(content);
+    if (hash === state.draft.contentHash) return;
+    if (state.draft.contentHash === null) {
+      // Scaffold absorption: record the baseline silently; creation blinked.
+      updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash } });
+      return;
+    }
+    if (!handleDraftEdit(expected, hash)) return;
+    noteDraftUpdated(ctx);
+    void maybeBootDraftReview(pi, ctx);
+  } catch {
+    // Passive path: never break the agent.
+  }
+}
+
+export function watchDraftFileCatchAll(pi: Pi): void {
+  onTurnEnd(pi, (_event, eventCtx) => {
+    void onTurnEndCatchAll(pi, eventCtx);
   });
 }
 

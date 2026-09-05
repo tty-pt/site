@@ -4,11 +4,12 @@
 import type { Pi } from "../hooks/events";
 import { watchNewRequests } from "./detect";
 import { installDraftGate } from "./gate";
-import { watchDraftEdits, watchGoInput } from "./reviews";
+import { watchDraftEdits, watchDraftFileCatchAll, watchGoInput } from "./reviews";
 
 export function installDrafting(pi: Pi): void {
   installDraftGate(pi);
   watchNewRequests(pi);
   watchDraftEdits(pi);
+  watchDraftFileCatchAll(pi);
   watchGoInput(pi);
 }

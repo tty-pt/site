@@ -19,6 +19,7 @@ import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
 import { hashContent, maybeBootDraftReview, splicePlanSection } from "../../drafting/reviews";
+import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
@@ -71,8 +72,52 @@ async function writePlanToDraft(
     snapshotPending: true,
   });
   emitNow(pi);
+  noteDraftUpdated(ctx);
   void maybeBootDraftReview(pi, ctx);
   return next;
+}
+
+async function carryRefinementsToDraft(ctx: PiCtx, state: QuestState): Promise<QuestState> {
+  if (state.phase !== "drafting" || state.draft === null || state.qid === null) return state;
+  if (state.refinements.length === 0) return state;
+  const path = join(ctx.cwd, draftPath(state.qid));
+  const current = await readFile(path, "utf8");
+  const items = state.refinements.map((refinement) => `- ${refinement}`).join("\n");
+  const body = current.endsWith("\n") ? current : `${current}\n`;
+  const updated = `${body}\n## Findings (pre-draft investigation)\n\n${items}\n`;
+  await writeFile(path, updated, "utf8");
+  const hash = hashContent(updated);
+  return updateState((s) => s.draft === null ? s : {
+    ...s,
+    draft: { ...s.draft, contentHash: hash },
+    snapshotPending: true,
+  });
+}
+
+async function provisionDraft(
+  ctx: PiCtx,
+  state: QuestState,
+  params: Record<string, unknown>,
+  applied: string[],
+): Promise<QuestState> {
+  const draftName = params["draftName"];
+  if (typeof draftName !== "string" || draftName.trim() === "" || state.phase !== "provisional" || state.qid === null) {
+    return state;
+  }
+  const qid = state.qid;
+  const name = draftName.trim();
+  const plan = params["plan"];
+  const thin = state.refinements.length === 0 && (typeof plan !== "string" || plan.trim() === "");
+  state = createDraft(state, name);
+  replaceState(state);
+  await ensureDraftFile(ctx, qid, name, state.objective);
+  state = await carryRefinementsToDraft(ctx, getState());
+  applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
+  if (thin) {
+    applied.push("draft created thin — no findings recorded yet; file them via refinement or author the plan via {plan:}");
+  }
+  noteDraftUpdated(ctx);
+  return state;
 }
 
 export async function applyUpdate(
@@ -92,14 +137,7 @@ export async function applyUpdate(
     applied.push(`created quest ${qid}`);
   }
   const draftName = params["draftName"];
-  if (typeof draftName === "string" && draftName.trim() !== "" && state.phase === "provisional" && state.qid !== null) {
-    const qid = state.qid;
-    state = createDraft(state, draftName.trim());
-    replaceState(state);
-    await ensureDraftFile(ctx, qid, draftName.trim(), state.objective);
-    state = getState();
-    applied.push(`draft ${draftName.trim()} created at ${draftPath(qid)} — edit ONLY this file`);
-  }
+  state = await provisionDraft(ctx, state, params, applied);
   const refinement = params["refinement"];
   if (typeof refinement === "string" && refinement.trim() !== "" && state.qid) {
     state = updateState((s) => recordRefinement(s, refinement.trim()));
