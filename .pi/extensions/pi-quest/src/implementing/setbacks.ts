@@ -12,7 +12,7 @@ const INVESTIGATIVE =
 const TEST_OR_BUILD =
   /make\s+test|deno\s+test|npm\s+test|pytest|cargo\s+test|jest|vitest|make\b|npm\s+run\s+build|npm\s+build|cargo\s+build|tsc\b/i;
 const FAILURE_SIGNALS =
-  /\b(?:FAIL|FAILED|assertion failed|panic:|Segmentation fault|make:\s*\*\*\*|TypeError|SyntaxError)\b/i;
+  /\b(?:FAIL|FAILED|assertion failed|panic:|Segmentation fault|make:\s*\*\*\*|TypeError|SyntaxError)\b|[1-9]\d*\s+errors?\b|\berror:|\bError \d+/i;
 const ERROR_SIGNALS =
   /\b(?:error:|FAILED|panic:|Segmentation fault|permission denied|no such file|cannot open|failed to)\b/i;
 

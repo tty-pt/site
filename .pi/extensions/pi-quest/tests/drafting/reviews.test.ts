@@ -1,5 +1,5 @@
 import { check } from "../check.ts";
-import { GO_PATTERN, hashContent, meetsReviewThresholds, parseDraftSections } from "../../src/drafting/reviews.ts";
+import { GO_PATTERN, hashContent, meetsReviewThresholds, parseDraftSections, splicePlanSection } from "../../src/drafting/reviews.ts";
 
 const DRAFT = `## Requirements
 - first requirement
@@ -52,4 +52,13 @@ Deno.test("content hash is stable hex", () => {
   check(a === hashContent("same"), "stable");
   check(/^[0-9a-f]{64}$/.test(a), "sha256 hex");
   check(a !== hashContent("different"), "content-bound");
+});
+
+Deno.test("plan splice replaces the section or appends it", () => {
+  const doc = "## Requirements\n- one\n\n## Implementation Plan\nOld plan.\n\n## Evidence\n- e\n";
+  const replaced = splicePlanSection(doc, "New plan.");
+  check(replaced.includes("New plan.") && !replaced.includes("Old plan."), "section replaced");
+  check(replaced.includes("## Evidence"), "later sections kept");
+  const appended = splicePlanSection("## Requirements\n- one\n", "Fresh plan.");
+  check(appended.includes("## Implementation Plan") && appended.includes("Fresh plan."), "section appended");
 });

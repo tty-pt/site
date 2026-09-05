@@ -47,11 +47,24 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
   ) {
     return { allowed: true };
   }
+  if (ref.toolClass === "read" && options.isReviewerSession === true) {
+    return { allowed: true };
+  }
   if (options.isReviewerSession === true) {
     return blocked(
       "REVIEWER_READ_ONLY",
       "IMPLEMENTATION_BLOCKED",
       "Read/search only; report via verdict.",
+    );
+  }
+  if (state.activeReview !== null) {
+    if (ref.toolClass === "journal" || ref.toolClass === "ask") {
+      return { allowed: true };
+    }
+    return blocked(
+      "AWAITING_REVIEW",
+      "PLAN_REVIEW_REQUIRED",
+      "Review running — end your turn; the verdict arrives as a new turn. Draft saves still supersede.",
     );
   }
   if (ref.toolClass === "read" || ref.toolClass === "journal" || ref.toolClass === "ask") {
@@ -82,13 +95,6 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       "PROVISIONAL_RESEARCH_PENDING",
       "RESEARCH_REQUIRED",
       "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — drafts live under .pi/quest/future/ and the draft file is the only writable path; never write current/, it renders at archive.",
-    );
-  }
-  if (state.activeReview !== null) {
-    return blocked(
-      "AWAITING_REVIEW",
-      "PLAN_REVIEW_REQUIRED",
-      "No writes until verdict — except the draft file; reads allowed.",
     );
   }
   return { allowed: true };

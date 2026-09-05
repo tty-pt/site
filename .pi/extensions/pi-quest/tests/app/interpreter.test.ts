@@ -1,9 +1,10 @@
 import { check } from "../check.ts";
 import { replaceState } from "../../src/app/store.ts";
-import { interpret, type Ports } from "../../src/app/interpreter.ts";
+import { interpret, sendSteer, type Ports } from "../../src/app/interpreter.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import type { Snapshot } from "../../src/durability/snapshots.ts";
+import { fakePi } from "../fake-pi.ts";
 
 function run(effects: Parameters<typeof interpret>[0]): { saved: Snapshot[]; steered: string[]; notes: string[] } {
   const saved: Snapshot[] = [];
@@ -55,5 +56,14 @@ Deno.test("interpreter runs no ports for empty effects", () => {
   replaceState(IDLE_STATE);
   const { saved } = run([]);
   check(saved.length === 0, "inert");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("sendSteer never resumes the turn", () => {
+  const pi = fakePi();
+  sendSteer(pi, "Review running for quest abc123 — end your turn.");
+  check(pi.sent.length === 1, "one steer sent");
+  check(pi.sent[0].options?.deliverAs === "steer", "delivered as steer");
+  check(pi.sent[0].options?.triggerTurn !== true, "nothing resumes the turn");
   replaceState(IDLE_STATE);
 });

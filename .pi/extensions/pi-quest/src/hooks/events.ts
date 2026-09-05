@@ -87,6 +87,7 @@ export interface BeforeAgentStartEvent {
 export interface BlockVerdict {
   block?: boolean;
   reason?: string;
+  terminate?: boolean;
 }
 
 export interface AgentStartInjection {

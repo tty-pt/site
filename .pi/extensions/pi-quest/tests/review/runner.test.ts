@@ -36,27 +36,31 @@ Deno.test("runner availability follows the configured tool", () => {
   check(!isReviewerAvailable(none), "no bridge degrades");
 });
 
+const SUPPORTED_BRIDGE_FIELDS = new Set([
+  "requestId", "ownerRunId", "nodeId", "agent", "task", "context", "cwd",
+  "model", "thinking", "timeoutMs", "toolBudget", "skill", "artifacts", "result",
+]);
+
 Deno.test("runner resolves review text through the bridge", async () => {
   const { pi, emitted, feed } = busPi();
   const runner = createRunner({ pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" });
   check(runner !== null, "runner created");
-  const brief = { qid: "abc123" as never, kind: "draft" as const, target: "h1", evidence: [], criteria: [] };
-  const launched = runner!.launch({ brief, prompt: "review this" }, new AbortController().signal);
+  const launched = runner!.launch("review this", new AbortController().signal);
   const request = emitted.find((e) => e.event === "prompt-template:subagent:request");
   check(request !== undefined, "request emitted");
   const record = request!.data as Record<string, unknown>;
   check(record["context"] === "fresh" && record["agent"] === "reviewer", "isolated reviewer delegation");
-  feed({ requestId: record["requestId"], status: "completed", result: { kind: "text", text: "VERDICT: PASS" }, childSessionId: "child-9" });
+  const extras = Object.keys(record).filter((k) => !SUPPORTED_BRIDGE_FIELDS.has(k));
+  check(extras.length === 0, `no unsupported fields (bridge rejects them): ${extras.join(",")}`);
+  feed({ requestId: record["requestId"], status: "completed", result: { kind: "text", text: "VERDICT: PASS" } });
   const done = await launched;
   check(done.text === "VERDICT: PASS", "text resolved");
-  check(done.childSessionId === "child-9", "child session reported");
 });
 
 Deno.test("runner rejects failed delegations and honors abort", async () => {
   const first = busPi();
   const runner = createRunner({ pi: first.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" });
-  const brief = { qid: "abc123" as never, kind: "draft" as const, target: "h1", evidence: [], criteria: [] };
-  const launched = runner!.launch({ brief, prompt: "x" }, new AbortController().signal);
+  const launched = runner!.launch("x", new AbortController().signal);
   const request = first.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
   first.feed({ requestId: (request.data as Record<string, unknown>)["requestId"], status: "error", error: "boom" });
   let threw = false;
@@ -70,7 +74,7 @@ Deno.test("runner rejects failed delegations and honors abort", async () => {
   const second = busPi();
   const runner2 = createRunner({ pi: second.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" })!;
   const controller = new AbortController();
-  const pending = runner2.launch({ brief, prompt: "x" }, controller.signal);
+  const pending = runner2.launch("x", controller.signal);
   controller.abort();
   let aborted = false;
   try {

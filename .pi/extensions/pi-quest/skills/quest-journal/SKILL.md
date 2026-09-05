@@ -14,9 +14,16 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
 
 - **Drafting.** The only write path, in order: (1) `quest_update_state`
   with findings to establish identity; (2) `quest_update_state` with
-  `draftName` — the draft is created at `.pi/quest/future/<qid>.md`;
-  (3) edit ONLY that file's `## Implementation Plan`. Every other write is
-  blocked with the reason and the required next action. Research and read
+  `draftName` — the draft lives at `.pi/quest/future/<qid>.md` (its
+  scaffold is pre-created when the quest starts, so never create
+  directories yourself);
+  (3) author the plan: EITHER call the `edit` tool with the draft file path
+  (`{ "path": ".pi/quest/future/<qid>.md", "edits": [{ "oldText": "…",
+  "newText": "…" }] }`) OR pass the whole plan body as
+  `quest_update_state { "plan": "…" }` — the runtime splices it into the
+  draft's `## Implementation Plan` for you. Every other write is
+  blocked with the reason and the required next action. While a review runs,
+  end your turn: the verdict arrives as a new turn. Research and read
   freely — searches, inspections, and test runs are never blocked. Structure
   the draft with `## Requirements`,
   `## Evidence`, and `## Implementation Plan` sections. Every
@@ -56,6 +63,9 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
 - `quest_ask_human` — ask with a recommended default and timeout (one
   minute default). Never blocks: absence, cancellation, or timeout proceeds
   with the default, and a late answer still applies when it arrives.
+  Prefer it over direct `ask_*` tools whenever you want a default on
+  absence — direct asks wait indefinitely and skip timeout semantics
+  (their answers are still recorded to quest history).
 
 ## Commands
 

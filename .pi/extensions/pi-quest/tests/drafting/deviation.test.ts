@@ -38,6 +38,7 @@ Deno.test("clean children skip the draft reviewer", async () => {
   draftFile(cwd);
   replaceState(childState(false));
   await maybeBootDraftReview(fakePi(), fakeCtx(cwd));
+  await new Promise((r) => setTimeout(r, 50));
   check(!hasInFlight(QID), "no review booted for a clean child");
   replaceState(IDLE_STATE);
 });
@@ -47,6 +48,7 @@ Deno.test("deviated children take the full review loop", async () => {
   draftFile(cwd);
   replaceState(childState(true));
   await maybeBootDraftReview(fakePi(), fakeCtx(cwd));
+  await new Promise((r) => setTimeout(r, 50));
   check(hasInFlight(QID), "deviation boots a review");
   cancelReview(QID);
   replaceState(IDLE_STATE);
@@ -58,6 +60,7 @@ Deno.test("root quests always boot when thresholds pass", async () => {
   const base = createDraft(createQuest("root work", QID), "root");
   replaceState({ ...base, draft: { ...base.draft!, planAuthored: true } });
   await maybeBootDraftReview(fakePi(), fakeCtx(cwd));
+  await new Promise((r) => setTimeout(r, 50));
   check(hasInFlight(QID), "root boots regardless of deviation");
   cancelReview(QID);
   replaceState(IDLE_STATE);

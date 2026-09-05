@@ -8,6 +8,7 @@ Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.draftThresholds.evidence === 7, "7 evidence");
   check(DEFAULT_CONFIG.bindings.asking.tool === "ask_questions", "asking binding");
   check(DEFAULT_CONFIG.bindings.reviewRunner.tool === "subagent", "runner binding");
+  check(DEFAULT_CONFIG.statusStyle === "icon", "icon status default");
 });
 
 Deno.test("config loads partial settings over defaults", () => {
@@ -21,6 +22,8 @@ Deno.test("config loads partial settings over defaults", () => {
   check(partial.bindings.reviewRunner.tool === "subagent", "bindings kept");
   const bindings = loadConfig({ bindings: { asking: { tool: "custom_ask" } } });
   check(bindings.bindings.asking.tool === "custom_ask", "binding overridden");
+  check(loadConfig({ statusStyle: "text" }).statusStyle === "text", "text style honored");
+  check(loadConfig({ statusStyle: "emoji" }).statusStyle === "icon", "invalid style falls back");
 });
 
 Deno.test("config reads the settings file with fallback", async () => {

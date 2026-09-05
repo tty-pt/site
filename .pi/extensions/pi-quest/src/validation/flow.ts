@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
-import { emitNow, sendSteer } from "../app/interpreter";
+import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import type { QuestState } from "../domain/quest";
 import { demoteToImplementing } from "../domain/quest";
 import { draftPath } from "../domain/paths";
@@ -35,13 +35,19 @@ function announceOnce(pi: Pi, key: string, text: string): void {
   sendSteer(pi, text);
 }
 
+function wakeOnce(pi: Pi, key: string, text: string): void {
+  if (announced.has(key)) return;
+  announced.add(key);
+  sendWake(pi, text);
+}
+
 export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return;
   const qid = state.qid;
   const target = implementationFingerprint(state);
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) {
-    announceOnce(pi, `accepted:${qid}:${target}`, `Validation PASS recorded for ${qid} — run quest_archive to complete the quest.`);
+    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS recorded for ${qid} — run quest_archive to complete the quest.`);
     return;
   }
   if (hasInFlight(qid)) return;
@@ -56,15 +62,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     pi,
     ctx,
     qid,
-    kind: "validation",
     target,
-    plan,
-    evidence,
-    criteria: [
-      "implementation matches the approved plan",
-      "each amendment appropriate and in scope against the original request",
-      "work is verified",
-    ],
     runnerTool: config.bindings.reviewRunner.tool,
     prompt: buildReviewPrompt("validation", qid, target, {
       objective: state.pendingRootRequest ?? state.objective,
@@ -78,14 +76,18 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. The approved plan and implementation summary are above — reply CONFIRM to accept completion, or keep working.`);
     return;
   }
+  if (outcome.status === "failed") {
+    wakeOnce(pi, `failed:${qid}:${target}`, `Validation failed to run (${outcome.detail}). Claim completion again to retry, or reply CONFIRM only when no validator is available.`);
+    return;
+  }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
-    announceOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.`);
+    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.`);
     return;
   }
   updateState((s) => demoteToImplementing(s));
   emitNow(pi);
-  sendSteer(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
+  sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
 }
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {

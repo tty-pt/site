@@ -33,12 +33,15 @@ Deno.test("gate exempts the draft file in every state", () => {
 });
 
 Deno.test("gate keeps reviewers read-only", () => {
-  const d = decide({ ...drafting(), phase: "implementing" }, READ, { isReviewerSession: true });
-  check(!d.allowed && d.code === "IMPLEMENTATION_BLOCKED", "reviewer blocked");
-  if (!d.allowed) {
-    check(d.phaseName === "REVIEWER_READ_ONLY", "reviewer state name");
-    check(reasonText(d).includes("REVIEWER_READ_ONLY"), "reason carries state");
+  const state = { ...drafting(), phase: "implementing" as const };
+  check(decide(state, READ, { isReviewerSession: true }).allowed, "reviewer reads open");
+  const write = decide(state, EDIT_OTHER, { isReviewerSession: true });
+  check(!write.allowed && write.code === "IMPLEMENTATION_BLOCKED", "reviewer writes blocked");
+  if (!write.allowed) {
+    check(write.phaseName === "REVIEWER_READ_ONLY", "reviewer state name");
+    check(reasonText(write).includes("REVIEWER_READ_ONLY"), "reason carries state");
   }
+  check(!decide(state, JOURNAL, { isReviewerSession: true }).allowed, "reviewers never call quest tools");
 });
 
 Deno.test("gate always allows reads, journal ops, and questions", () => {
@@ -80,7 +83,9 @@ Deno.test("gate blocks writes while a review runs", () => {
   const midReview = { ...authored, activeReview: { kind: "draft" as const, target: "h1" } };
   const d = decide(midReview, EDIT_OTHER);
   check(!d.allowed && d.code === "PLAN_REVIEW_REQUIRED", "review blocks writes");
-  check(decide(midReview, READ).allowed, "review allows reads");
+  if (!d.allowed) check(d.action.includes("end your turn"), "reason ends the turn");
+  check(!decide(midReview, READ).allowed, "review blocks reads too — the turn ends");
+  check(decide(midReview, JOURNAL).allowed, "journal ops stay usable mid-review");
 });
 
 Deno.test("gate opens implementation and blocks unknown tools while drafting", () => {

@@ -5,7 +5,6 @@
 interface InFlight {
   target: string;
   abort: () => void;
-  childSessionId?: string;
 }
 
 const inFlight = new Map<string, InFlight>();
@@ -15,16 +14,8 @@ export function trackReview(qid: string, target: string, abort: () => void): voi
   inFlight.set(qid, { target, abort });
 }
 
-export function noteReviewerSession(qid: string, childSessionId: string): void {
-  const current = inFlight.get(qid);
-  if (current) inFlight.set(qid, { ...current, childSessionId });
-}
-
-export function isReviewerSession(sessionId: string): boolean {
-  for (const review of inFlight.values()) {
-    if (review.childSessionId === sessionId) return true;
-  }
-  return false;
+export function hasAnyInFlight(): boolean {
+  return inFlight.size > 0;
 }
 
 export function cancelReview(qid: string): void {

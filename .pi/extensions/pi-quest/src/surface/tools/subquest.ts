@@ -4,10 +4,10 @@ import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import { readQuestConfig } from "../../config";
 import { addChild, createQuest } from "../../domain/quest";
-import { nextQid } from "../../domain/qid";
+import { nextQid, type Qid } from "../../domain/qid";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../durability/snapshots";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
-import { listKnownQids } from "../../files";
+import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
 export async function createChildQuest(
@@ -16,7 +16,7 @@ export async function createChildQuest(
   goal: string,
   brief: string,
   switchNow: boolean,
-): Promise<{ childQid: string; switched: boolean }> {
+): Promise<{ childQid: Qid; switched: boolean }> {
   const parent = getState();
   if (parent.qid === null) throw new Error("no active quest to parent the sub-quest");
   const config = await readQuestConfig(ctx.cwd);
@@ -29,6 +29,7 @@ export async function createChildQuest(
   emitNow(pi);
   const child = { ...createQuest(goal, childQid, parent.qid), depth };
   pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));
+  await ensureDraftFile(ctx, childQid, childQid, goal);
   if (switchNow) {
     replaceState(child);
     sendSteer(pi, `Switched to sub-quest ${childQid}: ${goal} Parent ${parent.qid} waits and resumes on return.`);

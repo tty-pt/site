@@ -2,19 +2,13 @@
 // HIGH_LEVEL: #independent review contexts — fresh context per run, no inherited reasoning.
 // HIGH_LEVEL: #no direct mutation — the runner returns evidence, never transitions.
 import type { Pi, PiCtx } from "../hooks/events";
-import type { ReviewRequest } from "./protocol";
 
 export interface ReviewRunner {
-  launch(
-    args: { brief: ReviewRequest; prompt: string },
-    signal: AbortSignal,
-    onChild?: (childSessionId: string) => void,
-  ): Promise<LaunchResult>;
+  launch(prompt: string, signal: AbortSignal): Promise<LaunchResult>;
 }
 
 export interface LaunchResult {
   text: string;
-  childSessionId?: string;
 }
 
 const MAX_DURATION_MS = 300000;
@@ -45,16 +39,14 @@ export function createRunner(env: RunnerEnv): ReviewRunner | null {
   const toolName = env.toolName ?? "subagent";
   if (!isReviewerAvailable(env.pi, toolName)) return null;
   return {
-    launch: ({ brief, prompt }, signal, onChild) => runReview(env, brief, prompt, signal, onChild),
+    launch: (prompt, signal) => runReview(env, prompt, signal),
   };
 }
 
 function runReview(
   env: RunnerEnv,
-  brief: ReviewRequest,
   prompt: string,
   signal: AbortSignal,
-  onChild?: (childSessionId: string) => void,
 ): Promise<LaunchResult> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -65,7 +57,6 @@ function runReview(
     const nodeId = uniqueId("review");
     const startTime = Date.now();
     let lastActivityAt = startTime;
-    let childSessionId: string | undefined;
     let settled = false;
     const unsubs: Array<() => void> = [];
 
@@ -113,18 +104,8 @@ function runReview(
       fail(new Error(`review cancelled: ${String(signal.reason || "aborted")}`));
     }, { once: true });
 
-    const noteActivity = (data: unknown) => {
+    const noteActivity = () => {
       lastActivityAt = Date.now();
-      const record = data as Record<string, unknown> | null;
-      const child = record?.["childSessionId"];
-      if (typeof child === "string" && child) {
-        childSessionId = child;
-        try {
-          onChild?.(child);
-        } catch {
-          // Listener failures must not break the run.
-        }
-      }
     };
 
     const onResponse = (data: unknown) => {
@@ -149,10 +130,8 @@ function runReview(
         const fallback = record["contentText"] ?? record["text"];
         text = typeof fallback === "string" ? fallback : "";
       }
-      const child = record["childSessionId"];
-      if (typeof child === "string" && child) childSessionId = child;
       cleanup();
-      resolve({ text, childSessionId });
+      resolve({ text });
     };
 
     try {
@@ -170,9 +149,6 @@ function runReview(
         cwd: env.ctx.cwd,
         ...(env.model ? { model: env.model } : {}),
         result: { kind: "text" },
-        reviewQid: brief.qid,
-        reviewKind: brief.kind,
-        reviewTarget: brief.target,
       });
     } catch (err) {
       fail(err instanceof Error ? err : new Error(String(err)));

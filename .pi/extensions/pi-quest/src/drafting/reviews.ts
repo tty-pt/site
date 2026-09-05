@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
-import { emitNow, sendSteer } from "../app/interpreter";
+import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
 import type { ApprovedBy, QuestState } from "../domain/quest";
 import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../domain/quest";
@@ -27,6 +27,23 @@ export interface DraftSections {
 
 export function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+export function splicePlanSection(text: string, plan: string): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => /^##\s+implementation plan\s*$/i.test(line));
+  if (start === -1) {
+    const body = text.endsWith("\n") ? text : `${text}\n`;
+    return `${body}\n## Implementation Plan\n\n${plan.trim()}\n`;
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^##\s+.+?\s*$/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return [...lines.slice(0, start + 1), "", plan.trim(), "", ...lines.slice(end)].join("\n");
 }
 
 export function parseDraftSections(text: string): DraftSections {
@@ -106,12 +123,8 @@ export async function bootDraftReview(
     pi,
     ctx,
     qid,
-    kind: "draft",
     target,
-    plan: sections.plan,
-    evidence: sections.evidence,
-    criteria: ["plan addresses the recorded request", "research sufficient", "no reviewer-preference blocks"],
-    prompt: buildReviewPrompt("draft", qid, target, material),
+    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds),
     runnerTool: config.bindings.reviewRunner.tool,
   });
   if (outcome.status === "no-runner") {
@@ -119,6 +132,10 @@ export async function bootDraftReview(
       userPathSteered.add(`${qid}:${target}`);
       sendSteer(pi, `No reviewer available. Draft plan for ${qid}:\n${sections.plan}\nReply "go" to promote to implementing, or keep revising.`);
     }
+    return;
+  }
+  if (outcome.status === "failed") {
+    sendWake(pi, `Draft review failed to run (${outcome.detail}). Reply "go" to proceed on your judgment, or revise and save to retry.`);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
@@ -129,13 +146,12 @@ export async function bootDraftReview(
     }
     updateState((s) => promote(s, "review"));
     emitNow(pi);
-    const next = getState().exactNextAction;
-    sendSteer(pi, `Quest ${qid} promoted to implementing (reviewer PASS). Proceed autonomously from the draft plan. ${next}`);
+    sendWake(pi, `Quest ${qid} promoted to implementing (reviewer PASS). Proceed autonomously from the draft plan.`);
     return;
   }
   updateState((s) => noteDraftFindings(s));
   emitNow(pi);
-  sendSteer(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review. Or reply "go" to proceed on your judgment.`);
+  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review. Or reply "go" to proceed on your judgment.`);
 }
 
 export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
@@ -152,7 +168,6 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
     });
   }
   const config = await readQuestConfig(ctx.cwd);
-  if (!meetsReviewThresholds(sections, config.draftThresholds)) return;
   const target = hashContent(content);
   if (state.draft.approvedBy !== null && state.draft.contentHash === target) return;
   if (isCurrentReview(state.qid, target)) return;
@@ -168,9 +183,8 @@ export function approveDraft(pi: Pi, qid: string, by: ApprovedBy): boolean {
   cancelReview(qid);
   updateState((s) => promote(s, by));
   emitNow(pi);
-  const next = getState().exactNextAction;
   const how = by === "user" ? 'user "go"' : "reviewer PASS";
-  sendSteer(pi, `Quest ${qid} promoted to implementing (${how}). Proceed autonomously from the draft plan. ${next}`);
+  sendSteer(pi, `Quest ${qid} promoted to implementing (${how}). Proceed autonomously from the draft plan.`);
   return true;
 }
 

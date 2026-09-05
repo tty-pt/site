@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
 // The agent's write path to the quest: findings, drafts, amendments, claims.
-import { mkdir, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
@@ -14,23 +14,65 @@ import {
   unfinishedChildren,
 } from "../../domain/quest";
 import { nextQid } from "../../domain/qid";
-import { draftPath, FUTURE_DIR } from "../../domain/paths";
-import { isQid, type Qid } from "../../domain/qid";
+import { draftPath } from "../../domain/paths";
+import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
-import { renderDraftTemplate } from "../../views/draft-template";
-import { listKnownQids } from "../../files";
+import { hashContent, maybeBootDraftReview, splicePlanSection } from "../../drafting/reviews";
+import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
-async function ensureDraftFile(ctx: PiCtx, rawQid: string, name: string, objective: string): Promise<void> {
-  if (!isQid(rawQid)) throw new Error(`invalid qid: ${rawQid}`);
-  const qid: Qid = rawQid;
-  await mkdir(join(ctx.cwd, FUTURE_DIR), { recursive: true });
-  try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective), { flag: "wx" });
-  } catch (err) {
-    if ((err as { code?: string }).code !== "EEXIST") throw err;
+import type { QuestState } from "../../domain/quest";
+
+async function provisionRootQuest(ctx: PiCtx, objective: string): Promise<Qid> {
+  const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
+  replaceState(createQuest(objective, qid));
+  await ensureDraftFile(ctx, qid, qid, objective);
+  return qid;
+}
+
+async function claimForValidation(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+): Promise<QuestState> {
+  if (state.phase !== "implementing") {
+    throw new Error(`cannot claim completion from phase ${state.phase}`);
   }
+  const unfinished = unfinishedChildren(state);
+  if (unfinished.length > 0) {
+    throw new Error(`complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}`);
+  }
+  const claimed = updateState((s) => claimComplete(s));
+  emitNow(pi);
+  sendSteer(pi, `Quest ${claimed.qid} claimed complete. Validator booting against the approved plan.`);
+  void ensureValidationFlow(pi, ctx);
+  return claimed;
+}
+
+async function writePlanToDraft(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  planText: string,
+): Promise<QuestState> {
+  if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
+    throw new Error(`plan text needs an active draft (phase ${state.phase})`);
+  }
+  const path = join(ctx.cwd, draftPath(state.qid));
+  const current = await readFile(path, "utf8");
+  const updated = splicePlanSection(current, planText);
+  if (updated === current) throw new Error("plan text identical to the draft file");
+  await writeFile(path, updated, "utf8");
+  const hash = hashContent(updated);
+  const next = updateState((s) => s.draft === null ? s : {
+    ...s,
+    draft: { ...s.draft, planAuthored: true, contentHash: hash },
+    snapshotPending: true,
+  });
+  emitNow(pi);
+  void maybeBootDraftReview(pi, ctx);
+  return next;
 }
 
 export async function applyUpdate(
@@ -45,9 +87,8 @@ export async function applyUpdate(
     if (typeof objective !== "string" || objective.trim() === "") {
       return { applied, error: "no active quest; pass objective to create one" };
     }
-    const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-    state = createQuest(objective.trim(), qid);
-    replaceState(state);
+    const qid = await provisionRootQuest(ctx, objective.trim());
+    state = getState();
     applied.push(`created quest ${qid}`);
   }
   const draftName = params["draftName"];
@@ -81,6 +122,15 @@ export async function applyUpdate(
     state = updateState((s) => ({ ...s, exactNextAction: text, snapshotPending: true }));
     applied.push("next action updated");
   }
+  const plan = params["plan"];
+  if (typeof plan === "string" && plan.trim() !== "" && state.qid) {
+    try {
+      state = await writePlanToDraft(pi, ctx, state, plan.trim());
+      applied.push("plan recorded in the draft file");
+    } catch (err) {
+      return { applied, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
   const continuePast = params["continuePast"];
   if (typeof continuePast === "string" && continuePast.trim() !== "" && state.qid) {
     try {
@@ -92,18 +142,12 @@ export async function applyUpdate(
     }
   }
   if (params["claimComplete"] === true && state.qid) {
-    if (state.phase !== "implementing") {
-      return { applied, error: `cannot claim completion from phase ${state.phase}` };
+    try {
+      state = await claimForValidation(pi, ctx, state);
+      applied.push("completion claimed; validator booting");
+    } catch (err) {
+      return { applied, error: err instanceof Error ? err.message : String(err) };
     }
-    const unfinished = unfinishedChildren(state);
-    if (unfinished.length > 0) {
-      return { applied, error: `complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}` };
-    }
-    state = updateState((s) => claimComplete(s));
-    emitNow(pi);
-    applied.push("completion claimed; validator booting");
-    sendSteer(pi, `Quest ${state.qid} claimed complete. Validator booting against the approved plan.`);
-    void ensureValidationFlow(pi, ctx);
     return { applied };
   }
   if (applied.length > 0) emitNow(pi);
@@ -114,13 +158,14 @@ export function updateStateTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_update_state",
     label: "Update Quest State",
-    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, claimComplete to finish.",
+    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly, claimComplete to finish.",
     parameters: {
       type: "object",
       properties: {
         objective: { type: "string" },
         draftName: { type: "string" },
         refinement: { type: "string" },
+        plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only)." },
         amendment: {
           type: "object",
           properties: { change: { type: "string" }, reasons: { type: "string" } },

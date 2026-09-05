@@ -13,7 +13,7 @@ It's goal is to allow low-cost models to accomplish complex long-running tasks w
 # modes
 
 ## drafting
-The drafting phase is one where the main agent can only write one file, the draft file. Other than that it can research, read etc. Every time it changes the draft, an adversarial reviewer is fired up, demoting any previous and active adversarial reviewer. The reviewer will either FAIL on some grounds, or PASS the plan as-is. If it fails, it will substantiate its failure and make suggestions to the main agent to fix the plan, be it with more investigations, more proof, or whatever. If an adversarial reviewer PASSES the plan, the main agent will be promoted to the 'implementing' phase, provided its research is recorded and the plan is actionable.
+The drafting phase is one where the main agent can only write one file, the draft file. Other than that it can research, read etc. Every time it changes the draft, an adversarial reviewer is fired up, demoting any previous and active adversarial reviewer — every content-changing save boots a fresh review, with no minimum content bar. While a review runs, the main agent ends its turn: no tools run except draft saves (each one a fresh review) and quest questions; the verdict arrives as a new turn carrying the result and the next action. The reviewer will either FAIL on some grounds, or PASS the plan as-is. If it fails, it will substantiate its failure and make suggestions to the main agent to fix the plan, be it with more investigations, more proof, or whatever. If an adversarial reviewer PASSES the plan, the main agent will be promoted to the 'implementing' phase, provided its research is recorded and the plan is actionable.
 
 At any time when drafting that the user themselves say that agent can proceed to implementation, any reviewer agent currently active can be dismissed, and the main agent will be promoted to the 'implementing' phase. PASS promotes automatically; the user may also approve at any moment, which promotes immediately — approval is never required.
 
@@ -82,7 +82,7 @@ Archive (kill) the current or named quest.
 The quest-journal skill carries the workflow rules for the main agent — this document in actionable form. Reviewers do not receive it; they receive only their review brief.
 
 # configurations
-Four settings, in .pi/settings.json under "pi-quest", all optional with the stated defaults.
+Five settings, in .pi/settings.json under "pi-quest", all optional with the stated defaults.
 
 ### ask timeout
 How long quest_ask_human waits for the user: one minute by default; per question configurable to no wait, any duration, or indefinite.
@@ -91,11 +91,14 @@ How long quest_ask_human waits for the user: one minute by default; per question
 How deep sub-quests may nest: 3 by default.
 
 ### draft thresholds
-When a draft auto-reviews: 2 requirements, or 1 requirement plus 7 evidence items, with an actionable plan present.
+Review maturity bar for the draft reviewer: 2 requirements, or 1 requirement plus 7 evidence items, with an actionable plan present. Below the bar the reviewer FAILs fast, naming exactly what is missing.
 
 ### interface bindings
 Which peer tools plug into the interfaces below (defaults shown). A declared binding wins when the named tool exists; otherwise built-in defaults apply; absent entirely, the specified degradation applies.
 {"asking": {"tool": "ask_questions"}, "reviewRunner": {"tool": "subagent"}}
+
+### status style
+Status-bar format for the active quest: `icon` by default (`📝 <qid>`), or `text` (`<phase> <qid>`).
 
 # interfaces
 pi-quest talks to peer extensions through pi's tool registry and requires none of them.
@@ -145,7 +148,7 @@ findings: <findings supporting the verdict>
 
 The reviewer does not directly modify quest state.
 
-The main agent or quest runtime records the returned result in the quest history.
+The main agent or quest runtime records the returned result in the quest history. Every result is delivered to the main agent as a fresh turn carrying the verdict and the required next action, whether PASS, FAIL, or a failed review run.
 
 ## stale results
 

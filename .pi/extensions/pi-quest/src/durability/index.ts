@@ -14,7 +14,8 @@ import {
 } from "../hooks/events";
 import { injectQuestContext } from "./injection";
 import { scanSiblingSessions } from "./siblings";
-import { IDLE_STATE, type QuestState } from "../domain/quest";
+import { DEFAULT_CONFIG, readQuestConfig, type StatusStyle } from "../config";
+import { IDLE_STATE, type Phase, type QuestState } from "../domain/quest";
 import { SNAPSHOT_TYPE, reconstruct } from "./snapshots";
 
 let bootstrapped = false;
@@ -64,10 +65,34 @@ function loadFromTranscript(getEntries: () => readonly TranscriptEntry[]): void 
   void bootFromTranscript(getEntries);
 }
 
+const PHASE_ICONS: Record<Phase, string> = {
+  idle: "💤",
+  provisional: "🔍",
+  drafting: "📝",
+  implementing: "🛠️",
+  validating: "🧪",
+  archived: "📦",
+};
+
+export function questStatus(state: QuestState, style: StatusStyle = "icon"): string | undefined {
+  if (state.qid === null) return undefined;
+  if (style === "text") return `${state.phase} ${state.qid}`;
+  return `${PHASE_ICONS[state.phase]} ${state.qid}`;
+}
+
+let statusStyle: StatusStyle = DEFAULT_CONFIG.statusStyle;
+
+async function refreshStyle(cwd: string): Promise<void> {
+  try {
+    statusStyle = (await readQuestConfig(cwd)).statusStyle;
+  } catch {
+    // Style falls back to default; the bar stays best-effort.
+  }
+}
+
 function refreshStatus(ctx: PiCtx): void {
   try {
-    const state = getState();
-    ctx.ui.setStatus("pi-quest", state.qid === null ? undefined : `${state.qid} ${state.phase}`);
+    ctx.ui.setStatus("pi-quest", questStatus(getState(), statusStyle));
   } catch {
     // Status bar is best-effort.
   }
@@ -76,10 +101,12 @@ function refreshStatus(ctx: PiCtx): void {
 export function installDurability(pi: Pi): void {
   onSessionStart(pi, (_event, ctx) => {
     loadFromTranscript(() => ctx.sessionManager.getEntries());
+    void refreshStyle(ctx.cwd);
     refreshStatus(ctx);
   });
   onTurnStart(pi, (_event, ctx) => {
     if (!bootstrapped) loadFromTranscript(() => ctx.sessionManager.getEntries());
+    void refreshStyle(ctx.cwd);
   });
   onTurnEnd(pi, (_event, ctx) => {
     try {

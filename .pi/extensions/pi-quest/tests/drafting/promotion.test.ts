@@ -50,7 +50,7 @@ function busPi(): ReturnType<typeof fakePi> & { emitted: Array<{ event: string; 
   return Object.assign(pi, { emitted, feed });
 }
 
-async function runPassVerdict(evidence: boolean): Promise<{ phase: string; steered: string }> {
+async function runPassVerdict(evidence: boolean): Promise<{ phase: string; steered: string; woke: boolean }> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-promote-"));
   const target = draftFile(cwd, evidence);
   const drafting = createDraft(createQuest("work", QID), "work");
@@ -67,15 +67,17 @@ async function runPassVerdict(evidence: boolean): Promise<{ phase: string; steer
   });
   await pending;
   const steered = pi.sent.map((s) => String(s.message.content)).join("\n");
+  const woke = pi.sent.some((s) => s.options?.triggerTurn === true);
   const phase = getState().phase;
   replaceState(IDLE_STATE);
-  return { phase, steered };
+  return { phase, steered, woke };
 }
 
 Deno.test("review PASS promotes with recorded research", async () => {
   const done = await runPassVerdict(true);
   check(done.phase === "implementing", "promoted");
   check(done.steered.includes("promoted to implementing"), "promotion announced");
+  check(done.woke, "verdict wakes a new turn");
 });
 
 Deno.test("review PASS withholds promotion without recorded research", async () => {

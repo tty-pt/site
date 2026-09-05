@@ -18,6 +18,14 @@ export function sendSteer(pi: Pi, text: string): void {
   }
 }
 
+export function sendWake(pi: Pi, text: string): void {
+  try {
+    pi.sendMessage({ customType: SNAPSHOT_TYPE, content: text }, { deliverAs: "steer", triggerTurn: true });
+  } catch {
+    // Wake is best-effort; the verdict is already in history and snapshots.
+  }
+}
+
 export function emitNow(pi: Pi): void {
   try {
     interpret([{ kind: "EmitSnapshot" }], {

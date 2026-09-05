@@ -1,6 +1,6 @@
 import { check } from "../check.ts";
 import { mkdtempSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
@@ -37,6 +37,8 @@ Deno.test("update creates quests and drafts on disk", async () => {
   const created = await applyUpdate(pi, ctx, { objective: "Build the thing." });
   check(created.applied.length === 1 && getState().qid !== null, "quest created");
   const qid = getState().qid!;
+  const scaffold = await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+  check(scaffold.includes("Build the thing."), "scaffold pre-created at provisioning");
   const drafted = await applyUpdate(pi, ctx, { draftName: "thing" });
   check(getState().phase === "drafting", "drafting");
   check(drafted.applied.length === 1, "draft applied");
@@ -46,6 +48,13 @@ Deno.test("update creates quests and drafts on disk", async () => {
   check(empty.applied.length === 0 && !empty.error, "no-op update");
   const missing = await applyUpdate(pi, ctx, { amendment: { change: "x", reasons: "y" } });
   check(missing.error !== undefined, "amendment outside implementing fails honestly");
+  const planDraft = await applyUpdate(pi, ctx, { plan: "Do step one, then step two." });
+  check(getState().draft?.planAuthored === true, "plan marks authored");
+  check(planDraft.applied.some((a) => a.includes("plan recorded")), "plan applied");
+  const onDisk = await readFile(join(ctx.cwd, draftPath(getState().qid!)), "utf8");
+  check(onDisk.includes("Do step one, then step two."), "plan spliced into the draft file");
+  const samePlan = await applyUpdate(pi, ctx, { plan: "Do step one, then step two." });
+  check(samePlan.error !== undefined, "identical plan refused");
   replaceState(IDLE_STATE);
 });
 
@@ -96,6 +105,26 @@ Deno.test("subquest links children and enforces the depth cap", async () => {
   replaceState({ ...authored(), phase: "implementing" as const });
   const switched = await createChildQuest(pi, ctx, "slice two", "slice", true);
   check(switched.switched && getState().parentQid === parent.qid, "switch moves to child");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("creation pre-creates the child scaffold and never clobbers", async () => {
+  const parent = { ...authored(), phase: "implementing" as const };
+  replaceState(parent);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  const done = await createChildQuest(pi, ctx, "slice work", "slice", false);
+  const childFile = await readFile(join(ctx.cwd, draftPath(done.childQid)), "utf8");
+  check(childFile.includes("slice work"), "child scaffold pre-created");
+  replaceState(IDLE_STATE);
+  const cwd = tmp();
+  const ctx2 = fakeCtx(cwd);
+  await applyUpdate(fakePi(), ctx2, { objective: "Keep my words." });
+  const qid = getState().qid!;
+  await writeFile(join(cwd, draftPath(qid)), "agent-authored plan stays", "utf8");
+  await applyUpdate(fakePi(), ctx2, { draftName: "thing" });
+  const kept = await readFile(join(cwd, draftPath(qid)), "utf8");
+  check(kept === "agent-authored plan stays", "first draft never clobbers existing content");
   replaceState(IDLE_STATE);
 });
 

@@ -297,7 +297,7 @@ The externally visible lifecycle states are exactly:
 | `IDLE` | No active quest. The agent works unconstrained |
 | `PROVISIONAL` | A substantive prompt was detected; quest identity not yet established. Implementation blocked |
 | `DRAFT` | A future draft exists (`future/<qid>.md`) and is being authored/reviewed. Only the draft file is writable |
-| `AWAITING_REVIEW` | A `plan_review` or `final_acceptance` review is running. Draft file stays writable; all other writes blocked |
+| `AWAITING_REVIEW` | A `plan_review` or `final_acceptance` review is running. The main agent ends its turn: blocked calls carry a terminate hint; draft saves and journal ops stay usable; the verdict wakes a new turn |
 | `IMPLEMENTATION_ALLOWED` | Gates open; the agent works autonomously from the Exact Next Action |
 | (terminal) | `COMPLETED` / `FAILED` / `ABANDONED` — quest archived, see B1.5 |
 
@@ -335,12 +335,18 @@ fragments review unnecessarily — so the bias is to keep.
 ### B1.3 Draft → active (B2: user "go" override kept)
 
 1. The agent authors the plan by editing the draft file's
-   `## Implementation Plan` section. Reviews follow the supersede rule:
+   `## Implementation Plan` section — directly with the `edit` tool, or by
+   passing the plan body as `quest_update_state { plan }`, which the runtime
+   splices into the draft file. Reviews follow the supersede rule:
    every **content-changing** save cancels any in-flight review for the
-   draft and boots a fresh one, so a verdict can never land on stale
-   content. Saves that change nothing boot nothing: reviews dedup on the
-   draft content hash, already-approved content is not re-reviewed, and
-   with no reviewer registered the flow falls back to user approval only.
+   draft and boots a fresh one, with no minimum content bar, so a verdict
+   can never land on stale content. Saves that change nothing boot nothing:
+   reviews dedup on the draft content hash, already-approved content is not
+   re-reviewed, and with no reviewer registered the flow falls back to user
+   approval only. While a review runs, the main agent ends its turn
+   (blocked calls carry a terminate hint); every verdict — PASS, FAIL, or a
+   failed run — is delivered as a fresh turn carrying the result and the
+   next action.
 2. A `FAIL` verdict returns the quest to draft revision with the
    findings; the agent revises the draft and saves, which supersedes and
    re-reviews. Nothing else unblocks drafting.
@@ -491,7 +497,7 @@ mid-implementation), and user confirmation (no such gate exists, B2/B7):
 | 4 | Active draft, plan not yet authored | `DRAFT_PENDING` | `DRAFT_REVIEW_REQUIRED` | Author `## Implementation Plan` in the draft file |
 | 5 | No active quest | `IDLE` | — (not blocked) | — |
 | 6 | Pending sub-quest continuation inconsistent with active state | `PENDING_RESUME_INCONSISTENT` | `PENDING_RESUME_INCONSISTENT` | Reconcile parent/child hierarchy first |
-| 7 | `plan_review`/`final_acceptance` running | `AWAITING_REVIEW` | `PLAN_REVIEW_REQUIRED` | No writes until verdict — except the draft file (exemption below); reads allowed |
+| 7 | `plan_review`/`final_acceptance` running | `AWAITING_REVIEW` | `PLAN_REVIEW_REQUIRED` | End the turn — the verdict arrives as a new turn; draft saves still supersede, journal ops stay usable |
 | 8 | Otherwise | `IMPLEMENTATION_ALLOWED` | — (not blocked) | Work autonomously from Exact Next Action |
 
 **V2-DELTA rows removed:** `RESUME_STATE_INCONSISTENT`,

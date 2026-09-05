@@ -6,16 +6,16 @@
 // HIGH_LEVEL: #no direct mutation — the flow records evidence, transitions stay in domain.
 import { createHash } from "node:crypto";
 import { updateState } from "../app/store";
+import { sendSteer } from "../app/interpreter";
 import type { Pi, PiCtx } from "../hooks/events";
 import type { Qid } from "../domain/qid";
-import type { QuestState, ReviewKind } from "../domain/quest";
+import type { QuestState } from "../domain/quest";
 import { recordReviewResult } from "../domain/quest";
 import { createRunner, isReviewerAvailable } from "./runner";
 import { parseReviewText, type ParsedReview } from "./verdicts";
 import {
   cancelReview,
   isCurrentReview,
-  noteReviewerSession,
   settleReview,
   trackReview,
 } from "./tracker";
@@ -30,17 +30,29 @@ export interface FlowArgs {
   pi: Pi;
   ctx: PiCtx;
   qid: Qid;
-  kind: ReviewKind;
   target: string;
-  plan?: string;
-  evidence: string[];
-  criteria: string[];
   prompt: string;
   runnerTool?: string;
 }
 
 export function reviewerAvailable(pi: Pi): boolean {
   return isReviewerAvailable(pi);
+}
+
+// One short notice per review target: the main agent must end its turn and
+// wait — the verdict (which resumes work) arrives separately as a new turn.
+// Never resumed from here: this path uses sendSteer, never sendWake.
+const noticedReviews = new Set<string>();
+
+export function reviewRunningNotice(qid: string): string {
+  return `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`;
+}
+
+export function shouldNoticeReview(qid: string, target: string): boolean {
+  const key = `${qid}:${target}`;
+  if (noticedReviews.has(key)) return false;
+  noticedReviews.add(key);
+  return true;
 }
 
 export function implementationFingerprint(state: QuestState): string {
@@ -57,29 +69,16 @@ export function implementationFingerprint(state: QuestState): string {
 }
 
 export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
-  const { pi, ctx, qid, kind, target } = args;
+  const { pi, ctx, qid, target } = args;
   const runnerTool = args.runnerTool ?? "subagent";
   if (!isReviewerAvailable(pi, runnerTool)) return { status: "no-runner" };
   const runner = createRunner({ pi, ctx, ownerRunId: qid, toolName: runnerTool });
   if (runner === null) return { status: "no-runner" };
   const controller = new AbortController();
   trackReview(qid, target, () => controller.abort());
+  if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));
   try {
-    const launched = await runner.launch(
-      {
-        brief: {
-          qid,
-          kind,
-          target,
-          plan: args.plan,
-          evidence: args.evidence,
-          criteria: args.criteria,
-        },
-        prompt: args.prompt,
-      },
-      controller.signal,
-      (child) => noteReviewerSession(qid, child),
-    );
+    const launched = await runner.launch(args.prompt, controller.signal);
     const review = parseReviewText(launched.text);
     updateState((s) => recordReviewResult(s, review.verdict, target, review.findings));
     return { status: "verdict", review, settled: settleReview(qid, target) };

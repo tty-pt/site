@@ -4,6 +4,7 @@
 // HIGH_LEVEL: #independent review contexts — fresh context, no inherited reasoning.
 import type { Qid } from "../domain/qid";
 import type { ReviewKind } from "../domain/quest";
+import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 
 export interface ReviewMaterial {
   objective: string;
@@ -57,7 +58,7 @@ ${evidence}
 ${rebuttal}--- END MATERIAL ---`;
 }
 
-function draftGuidance(): string {
+function draftGuidance(maturity: DraftThresholds): string {
   return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
 You review the PLAN, not implementation. Compare the draft plan against the exact recorded request:
 1. Whether the plan addresses the objective; 2. Whether requirements were omitted;
@@ -66,6 +67,7 @@ You review the PLAN, not implementation. Compare the draft plan against the exac
 7. Whether complexity is unnecessary; 8. Whether an alternative was dismissed without evidence;
 9. Whether it commits prematurely; 10. Whether it contradicts itself;
 11. Whether it credibly satisfies the request.
+MATURITY BAR: a reviewable draft has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an actionable plan. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
 }
 
@@ -79,11 +81,17 @@ You review the IMPLEMENTATION against the approved plan plus recorded amendments
 Reviewer preference NEVER blocks; only unmet requirements or out-of-scope drift do.`;
 }
 
-export function buildReviewPrompt(kind: ReviewKind, qid: Qid, target: string, material: ReviewMaterial): string {
+export function buildReviewPrompt(
+  kind: ReviewKind,
+  qid: Qid,
+  target: string,
+  material: ReviewMaterial,
+  maturity: DraftThresholds = DEFAULT_CONFIG.draftThresholds,
+): string {
   const header = kind === "draft"
     ? `ADVERSARIAL DRAFT REVIEW: ${qid} (target revision ${target})`
     : `VALIDATION REVIEW: ${qid} (target implementation snapshot ${target})`;
-  const guidance = kind === "draft" ? draftGuidance() : validationGuidance();
+  const guidance = kind === "draft" ? draftGuidance(maturity) : validationGuidance();
   const impl = material.implementationSummary
     ? `\nIMPLEMENTATION SUMMARY UNDER REVIEW:\n${material.implementationSummary}\n`
     : "";

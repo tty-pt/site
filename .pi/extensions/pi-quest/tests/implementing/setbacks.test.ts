@@ -30,6 +30,13 @@ Deno.test("setbacks ignore investigative noise", () => {
   check(real !== null, "real cat error recorded");
 });
 
+Deno.test("setbacks catch build error counts", () => {
+  const make = detectSetback(bash("make -j4", "4 errors generated.\nmake: Error 1", false));
+  check(make !== null && make.reason.includes("Test/build"), "error counts recorded");
+  const clean = detectSetback(bash("make -j4", "0 errors, build clean", false));
+  check(clean === null, "zero errors ignored");
+});
+
 Deno.test("setbacks catch failed file writes and ignore the rest", () => {
   const write: ToolResultEvent = {
     type: "tool_result",

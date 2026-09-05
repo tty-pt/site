@@ -11,25 +11,12 @@
     "keepRecentTokens": 20000
   },
   "pi-quest": {
-    "economyCeiling": "400k",
-    "economyCeilingPct": 80,
-    "warningDeltaPct": 10,
-    "economyTiers": [
-      { "upTo": "250k", "pct": 75 },
-      { "upTo": "500k", "pct": 60 },
-      { "upTo": "1M", "pct": 40 }
-    ],
-    "subquestCompactTokens": "60k",
-    "semanticSummary": { "enabled": true },
-    "thoughtLogging": { "enabled": true },
-    "reviewLock": { "staleMs": 30000 },
-    "aqm": { "subquestDuringDrafting": { "enabled": false } },
-    "checkpointIntervalTurns": 6,
-    "directionReviewCooldownMs": 45000,
-    "substantiveTurnsPerDirectionReview": 5,
-    "retry": {
-      "maxTurns": 5,
-      "deliverAs": "nextTurn"
+    "askTimeoutMs": 60000,
+    "depthCap": 3,
+    "draftThresholds": { "requirements": 2, "evidence": 7 },
+    "bindings": {
+      "asking": { "tool": "ask_questions" },
+      "reviewRunner": { "tool": "subagent" }
     }
   }
 }

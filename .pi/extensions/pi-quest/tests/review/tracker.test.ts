@@ -1,10 +1,9 @@
 import { check } from "../check.ts";
 import {
   cancelReview,
+  hasAnyInFlight,
   hasInFlight,
   isCurrentReview,
-  isReviewerSession,
-  noteReviewerSession,
   settleReview,
   supersedeReviewThenBootFresh,
   trackReview,
@@ -44,12 +43,12 @@ Deno.test("tracker cancel is safe on unknown qids and throwing aborts", () => {
   check(!isCurrentReview("qid-3", "rev-a"), "entry gone despite abort error");
 });
 
-Deno.test("tracker knows in-flight reviews and reviewer sessions", () => {
+Deno.test("tracker knows in-flight reviews", () => {
+  check(!hasAnyInFlight(), "idle at start");
   trackReview("qid-4", "rev-a", () => {});
   check(hasInFlight("qid-4"), "in flight");
-  check(!isReviewerSession("child-1"), "unknown session not a reviewer");
-  noteReviewerSession("qid-4", "child-1");
-  check(isReviewerSession("child-1"), "recorded child session matches");
+  check(hasAnyInFlight(), "any in flight");
   cancelReview("qid-4");
   check(!hasInFlight("qid-4"), "settled on cancel");
+  check(!hasAnyInFlight(), "idle again");
 });
