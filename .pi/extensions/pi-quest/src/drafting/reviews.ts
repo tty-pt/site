@@ -11,12 +11,13 @@ import type { ApprovedBy, QuestState } from "../domain/quest";
 import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../domain/quest";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
-import { onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
+import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
 import { cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
+import { diffPlans } from "./plan-diff";
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
 export interface DraftSections {
@@ -68,7 +69,7 @@ export function parseDraftSections(text: string): DraftSections {
       planLines.push(line);
       continue;
     }
-    const bullet = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+    const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
     if (bullet && (section === "requirements" || section === "evidence")) {
       if (section === "requirements") requirements.push(bullet[1]);
       else evidence.push(bullet[1]);
@@ -96,15 +97,30 @@ async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | nu
   }
 }
 
-function reviewMaterial(state: QuestState, sections: DraftSections): ReviewMaterial {
+// Exported for tests: the re-review brief must diff against the previously
+// reviewed plan, never against the plan being sent.
+export function reviewMaterial(state: QuestState, sections: DraftSections): ReviewMaterial {
   const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
-  return {
+  const base: ReviewMaterial = {
     objective: state.pendingRootRequest ?? state.objective,
     plan: sections.plan,
     evidence: sections.evidence,
     amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
     rebuttal: openRebuttal?.implementerRebuttal,
   };
+  const last = state.lastReview;
+  const previous = state.draft?.lastReviewedPlan;
+  if (last === null || previous === undefined || previous === null) return base;
+  // Prior verdict always travels: an evidence-only revision answers the last
+  // findings even when the plan itself is unchanged (then diffPlans is null).
+  const continued: ReviewMaterial = {
+    ...base,
+    previousVerdict: last.verdict,
+    previousFindings: last.findings,
+  };
+  const planDiff = diffPlans(previous, sections.plan);
+  if (planDiff === null) return continued;
+  return { ...continued, planDiff };
 }
 
 const userPathSteered = new Set<string>();
@@ -121,7 +137,10 @@ export async function bootDraftReview(
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
   const sections = parseDraftSections(content);
+  // Material first: it diffs against the previously reviewed plan, so the
+  // base below must still hold the old text at this point.
   const material = reviewMaterial(getState(), sections);
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: sections.plan } });
   const outcome = await runIsolatedReview({
     pi,
     ctx,
@@ -149,7 +168,8 @@ export async function bootDraftReview(
     }
     updateState((s) => promote(s, "review"));
     emitNow(pi);
-    sendWake(pi, `Quest ${qid} promoted to implementing (reviewer PASS). Proceed autonomously from the draft plan.`);
+    const advisories = outcome.review.advisories.trim();
+    sendWake(pi, `Quest ${qid} promoted to implementing (reviewer PASS). Proceed autonomously from the draft plan.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;
   }
   updateState((s) => noteDraftFindings(s));
@@ -178,6 +198,20 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   supersedeReviewThenBootFresh(state.qid, target, () => {
     void bootDraftReview(pi, ctx, target, config);
   });
+}
+
+// Resumed on session start: a drafting quest whose current disk content was
+// never reviewed boots a fresh review, so a quit mid-review loses nothing.
+// Recorded verdicts (PASS or FAIL) are left alone; planless drafts have
+// nothing to review yet. Delegates to the single save-path boot below.
+export async function ensureDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
+  const state = getState();
+  if (state.phase !== "drafting" || state.qid === null || state.draft === null) return;
+  const content = await readDraftFile(ctx, state);
+  if (content === null) return;
+  if (parseDraftSections(content).plan.length === 0) return;
+  if (state.lastReview?.target === hashContent(content)) return;
+  await maybeBootDraftReview(pi, ctx);
 }
 
 export function approveDraft(pi: Pi, qid: string, by: ApprovedBy): boolean {
@@ -257,6 +291,12 @@ export async function onTurnEndCatchAll(pi: Pi, ctx: PiCtx): Promise<void> {
 export function watchDraftFileCatchAll(pi: Pi): void {
   onTurnEnd(pi, (_event, eventCtx) => {
     void onTurnEndCatchAll(pi, eventCtx);
+  });
+}
+
+export function watchResume(pi: Pi): void {
+  onSessionStart(pi, (_event, eventCtx) => {
+    void ensureDraftReview(pi, eventCtx);
   });
 }
 

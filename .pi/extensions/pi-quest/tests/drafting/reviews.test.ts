@@ -3,8 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { getState, replaceState } from "../../src/app/store.ts";
-import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { getState, replaceState, updateState } from "../../src/app/store.ts";
+import { createDraft, createQuest, IDLE_STATE, recordReviewResult } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import { stopBlink } from "../../src/durability/index.ts";
@@ -15,6 +15,7 @@ import {
   meetsReviewThresholds,
   onTurnEndCatchAll,
   parseDraftSections,
+  reviewMaterial,
   splicePlanSection,
   watchDraftFileCatchAll,
 } from "../../src/drafting/reviews.ts";
@@ -90,8 +91,82 @@ Deno.test("plan splice replaces a suffixed plan header instead of duplicating", 
   check(out.includes("## Evidence"), "later sections kept");
 });
 
-Deno.test("drafting installer watches turn end", () => {
-  const pi = fakePi();
+function staleBaseState(qid: Qid, basePlan: string): void {
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  updateState((s) => recordReviewResult(s, "FAIL", "old-target", "thin plan"));
+  updateState((s) =>
+    s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: basePlan } }
+  );
+}
+
+Deno.test("re-review material diffs against the stale base, not the plan being sent", () => {
+  const qid = "mat001" as Qid;
+  try {
+    staleBaseState(qid, "step one\nstep two");
+    const sections = parseDraftSections(
+      "## Requirements\n- one\n- two\n\n## Implementation Plan\nstep one\nstep three\n",
+    );
+    const material = reviewMaterial(getState(), sections);
+    check(material.planDiff !== undefined, "diff present");
+    check(
+      (material.planDiff ?? "").includes("- step two") &&
+        (material.planDiff ?? "").includes("+ step three"),
+      "diff spans old and new plan",
+    );
+    check(material.previousVerdict === "FAIL", "prior verdict travels");
+    check(material.previousFindings === "thin plan", "prior findings travel");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("evidence-only revisions keep the prior verdict without a diff", () => {
+  const qid = "mat002" as Qid;
+  try {
+    staleBaseState(qid, "step one");
+    const sections = parseDraftSections("## Requirements\n- one\n\n## Implementation Plan\nstep one\n");
+    const material = reviewMaterial(getState(), sections);
+    check(material.planDiff === undefined, "identical plan has no diff");
+    check(material.previousVerdict === "FAIL", "prior verdict still travels");
+    check(material.previousFindings === "thin plan", "prior findings still travel");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("first reviews carry no continuity fields", () => {
+  const qid = "mat003" as Qid;
+  try {
+    replaceState(createDraft(createQuest("req", qid), "mat"));
+    const sections = parseDraftSections("## Requirements\n- one\n\n## Implementation Plan\nstep one\n");
+    const material = reviewMaterial(getState(), sections);
+    check(material.planDiff === undefined, "no diff on first review");
+    check(material.previousVerdict === undefined, "no prior verdict on first review");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("draft sections accept numbered and plus bullets", () => {
+  const sections = parseDraftSections(
+    "## Requirements\n1. first thing\n2) second thing\n\n## Evidence\n+ saw it in the code\n1. measured it\n\n## Implementation Plan\nplan\n",
+  );
+  check(sections.requirements.length === 2, "numbered requirements parse");
+  check(sections.requirements[0] === "first thing", "dot number stripped");
+  check(sections.requirements[1] === "second thing", "paren number stripped");
+  check(sections.evidence.length === 2, "plus and numbered evidence parse");
+  check(meetsReviewThresholds(sections, { requirements: 5, evidence: 2 }), "parsed evidence counts toward the bar");
+});
+
+Deno.test("the 1x38Fd evidence shape survives to the brief", () => {
+  const sections = parseDraftSections(
+    "## Requirements\n- one\n- two\n\n## Evidence (7 file-backed items)\n1. `a.c:1` — first\n2. `b.c:2` — second\n\n## Implementation Plan\nplan\n",
+  );
+  check(sections.evidence.length === 2, "numbered items under a suffixed header parse");
+  check(sections.evidence[0].includes("a.c:1"), "file:line citation kept");
+});
+
+Deno.test("drafting installer watches turn end", () => {  const pi = fakePi();
   watchDraftFileCatchAll(pi);
   check(pi.subscriptions.includes("turn_end"), "catch-all subscribed");
 });

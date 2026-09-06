@@ -65,6 +65,20 @@ Deno.test("update creates quests and drafts on disk", async () => {
   }
 });
 
+Deno.test("plan writes after promotion redirect to amendment", async () => {
+  replaceState(promote(authored(), "review"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const refused = await applyUpdate(pi, ctx, { plan: "Do more things." });
+    check(refused.error !== undefined, "plan refused outside drafting");
+    check((refused.error ?? "").includes("amendment"), "refusal names the amendment channel");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
 Deno.test("update claims completion only with no running children", async () => {
   replaceState(promote(authored(), "review"));
   const pi = fakePi();

@@ -22,6 +22,7 @@ import {
   normalizeKey,
   type KeyMatcher,
 } from "../../src/views/plan-keys.ts";
+import { wrapLine, wrapMarkdown } from "../../src/views/plan-wrap.ts";
 
 const measure: RowMeasure = {
   visibleWidth: (text: string) => Array.from(text.replace(/\x1b\[[0-9;]*m/g, "")).length,
@@ -226,13 +227,16 @@ Deno.test("chooseViewer falls back without a kit", () => {
   check(closed, "fallback still closes");
 });
 
-Deno.test("chooseViewer hands the draft to SelectList unmodified", () => {
+Deno.test("chooseViewer wraps long draft lines before SelectList", () => {
   const { kit, lists } = stubKit();
-  const view = chooseViewer(kit, "Quest x — plan", "## Plan\n\nDo it.", theme, () => {});
+  const long = "## Plan\n\n" + "word ".repeat(40).trim();
+  const view = chooseViewer(kit, "Quest x — plan", long, theme, () => {});
   check(lists.length === 1, "one list built");
   const out = view.render(60).join("\n");
   check(out.includes("Quest x"), "title shown");
-  check(out.includes("## Plan") && out.includes("Do it."), "list rows pass through byte-identical");
+  check(out.includes("## Plan"), "header kept");
+  const joined = out.split("\n").map((l) => l.replace(/^\s*│/, "").replace(/│$/, "")).join(" ");
+  check(joined.length > long.length, "wrapped content preserved, not clipped");
 });
 
 Deno.test("vanilla keys reach the list, q closes past it", () => {
@@ -357,4 +361,50 @@ Deno.test("other keys never close and never throw", () => {
   }
   check(!closed.value, "still open");
   check(view.render(10).length > 0, "narrow render works");
+});
+
+Deno.test("wrapLine wraps long lines and keeps every word", () => {
+  const long = Array.from({ length: 20 }, (_, i) => `word${i}`).join(" ");
+  const rows = wrapLine(long, 20);
+  check(rows.length > 1, "split into multiple rows");
+  check(rows.join(" ").replace(/  +/g, " ").trim() === long, "no words dropped");
+  check(rows.every((r) => r.length <= 20), "every row fits");
+});
+
+Deno.test("wrapLine breaks over-wide tokens at the cell boundary", () => {
+  const rows = wrapLine("x".repeat(50), 10);
+  check(rows.length === 5, "token broken into exact rows");
+  check(rows.every((r) => r.length <= 10), "no row overflows");
+});
+
+Deno.test("wrapLine is ANSI- and wide-char-aware", () => {
+  const ansi = `\x1b[33m${"a".repeat(30)}\x1b[0m`;
+  const styled = wrapLine(ansi, 10);
+  check(styled.length === 3, "styled line wraps");
+  check(styled.every((r) => !/^\x1b\[[0-9;]*$/.test(r)), "no dangling escape prefix");
+  const cjk = "日本語".repeat(20);
+  const cjkRows = wrapLine(cjk, 8);
+  check(cjkRows.length > 1, "wide chars wrap");
+  check(cjkRows.every((r) => Array.from(r).length * 2 <= 8 + 4), "each row bounded to ~2 cells/char");
+});
+
+Deno.test("wrapMarkdown preserves blank lines and indents continuations", () => {
+  const rows = wrapMarkdown("## Plan\n\n- " + "item ".repeat(10).trim() + "\n", 12);
+  check(rows[0] === "## Plan", "first line kept");
+  check(rows[1] === " ", "blank line preserved");
+  check(rows[2].startsWith("- "), "list marker kept");
+  check(rows[3]?.startsWith("  "), "continuation indented");
+});
+
+Deno.test("fallback overlay wraps long lines into visible rows", () => {
+  const long = Array.from({ length: 60 }, (_, i) => `w${String(i).padStart(2, "0")}`).join(" ");
+  const { view } = component(["short", long, "tail"]);
+  const top = view.render(40).join("\n");
+  check(top.includes("short") && top.includes("w00"), "top rows shown");
+  check(!top.includes("tail"), "tail below the fold at top");
+  check(top.includes("w59") === false, "long line tail not yet visible");
+  for (let i = 0; i < 30; i++) view.handleInput("j");
+  const bottom = view.render(40).join("\n");
+  check(bottom.includes("tail"), "tail reachable after scrolling");
+  check(!bottom.includes("w00"), "wrapped first chunk scrolled away");
 });

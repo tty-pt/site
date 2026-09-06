@@ -3,7 +3,7 @@
 // HIGH_LEVEL: #review independence — no inherited context, no prior conclusions.
 // HIGH_LEVEL: #independent review contexts — fresh context, no inherited reasoning.
 import type { Qid } from "../domain/qid";
-import type { ReviewKind } from "../domain/quest";
+import type { ReviewKind, ReviewVerdict } from "../domain/quest";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 
 export interface ReviewMaterial {
@@ -13,6 +13,9 @@ export interface ReviewMaterial {
   amendments: string[];
   rebuttal?: string;
   implementationSummary?: string;
+  planDiff?: string;
+  previousVerdict?: ReviewVerdict;
+  previousFindings?: string;
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
@@ -30,6 +33,14 @@ const OUTPUT_FORMAT = `OUTPUT FORMAT — your response MUST end with exactly thi
 VERDICT: PASS | FAIL
 SEVERITY: NONE | MINOR | MAJOR | CRITICAL
 
+On PASS, approval is unconditional — do NOT write a REQUIRED REVISIONS section:
+SUPPORTING FINDINGS:
+- Finding: <why the material passes, with concrete evidence>
+
+ADVISORIES (optional, non-blocking observations only):
+- <observation the implementer may consider; never a condition of approval>
+
+On FAIL:
 FINDINGS:
 - Issue: <concrete issue or omission>
   Evidence: <concrete evidence from repository, plan, or logs>
@@ -38,10 +49,20 @@ REQUIRED REVISIONS:
 - <concrete change or targeted investigation required>`;
 
 function contextBlock(material: ReviewMaterial): string {
-  const evidence = material.evidence.length > 0 ? material.evidence.join("\n") : "(none)";
-  const amendments = material.amendments.length > 0 ? material.amendments.join("\n") : "(none)";
+  const evidence = material.evidence.length > 0
+    ? material.evidence.join("\n")
+    : "(no evidence items recorded in the draft file)";
+  const amendments = material.amendments.length > 0
+    ? material.amendments.join("\n")
+    : "(no amendments recorded)";
   const rebuttal = material.rebuttal
     ? `\n--- IMPLEMENTER REBUTTAL ---\n${material.rebuttal}\n`
+    : "";
+  const diff = material.planDiff
+    ? `\nCHANGES SINCE LAST REVIEW:\n${material.planDiff}\n`
+    : "";
+  const prior = material.previousVerdict
+    ? `\nPRIOR VERDICT: ${material.previousVerdict}\nPRIOR FINDINGS:\n${material.previousFindings ?? "(none)"}\nRe-verify prior findings yourself against the full material above; a prior FAIL presumes nothing about this revision.\n`
     : "";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
@@ -49,13 +70,13 @@ ${material.objective || "(none)"}
 
 APPROVED PLAN:
 ${material.plan || "(none)"}
-
+${diff}
 RECORDED AMENDMENTS:
 ${amendments}
 
 EVIDENCE:
 ${evidence}
-${rebuttal}--- END MATERIAL ---`;
+${rebuttal}${prior}--- END MATERIAL ---`;
 }
 
 function draftGuidance(maturity: DraftThresholds): string {

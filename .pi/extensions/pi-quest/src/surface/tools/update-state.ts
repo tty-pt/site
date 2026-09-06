@@ -58,7 +58,7 @@ async function writePlanToDraft(
   planText: string,
 ): Promise<QuestState> {
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
-    throw new Error(`plan text needs an active draft (phase ${state.phase})`);
+    throw new Error(`plan text needs an active draft (phase ${state.phase}); the plan is drafting-only — record post-approval deviations via amendment or refinement`);
   }
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");

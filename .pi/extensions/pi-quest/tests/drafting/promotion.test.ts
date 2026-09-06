@@ -86,3 +86,32 @@ Deno.test("review PASS withholds promotion without recorded research", async () 
   check(done.steered.includes("needs recorded research"), "withhold explains");
   check(done.steered.includes('"go"'), "go escape offered");
 });
+
+Deno.test("review PASS attaches advisories to the promotion wake", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-promote-"));
+  const target = draftFile(cwd, true);
+  const drafting = createDraft(createQuest("work", QID), "work");
+  replaceState({ ...drafting, draft: { ...drafting.draft!, planAuthored: true } });
+  const pi = busPi();
+  const pending = bootDraftReview(pi, fakeCtx(cwd), target, DEFAULT_CONFIG);
+  try {
+    await new Promise((r) => setTimeout(r, 50));
+    const request = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
+    check(request !== undefined, "review launched");
+    pi.feed({
+      requestId: (request!.data as Record<string, unknown>)["requestId"],
+      status: "completed",
+      result: {
+        kind: "text",
+        text: "VERDICT: PASS\nSEVERITY: NONE\nSUPPORTING FINDINGS:\n- Issue: solid\n  Evidence: checked\n\nADVISORIES:\n- confirm the choice\n",
+      },
+    });
+    await pending;
+    const steered = pi.sent.map((s) => String(s.message.content)).join("\n");
+    check(getState().phase === "implementing", "still promotes");
+    check(steered.includes("promoted to implementing"), "promotion announced");
+    check(steered.includes("confirm the choice"), "advisory attached, not filed as findings");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});

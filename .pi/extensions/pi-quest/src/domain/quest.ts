@@ -35,6 +35,8 @@ export interface DraftInfo {
   approvedBy: ApprovedBy | null;
   outstandingFindings: boolean;
   contentHash: string | null;
+  // HIGH_LEVEL: #review request — re-review briefs diff against the last reviewed plan.
+  lastReviewedPlan?: string | null;
 }
 
 export interface LastReview {

@@ -27,8 +27,7 @@ REQUIRED REVISIONS:
 - add tests
 `;
 
-Deno.test("verdicts parse PASS and FAIL with findings", () => {
-  const pass = parseReviewText(PASS_TEXT);
+Deno.test("verdicts parse PASS and FAIL with findings", () => {  const pass = parseReviewText(PASS_TEXT);
   check(pass.verdict === "PASS", "pass");
   check(pass.severity === "NONE", "severity kept");
   const fail = parseReviewText(FAIL_TEXT);
@@ -36,6 +35,36 @@ Deno.test("verdicts parse PASS and FAIL with findings", () => {
   check(fail.severity === "MAJOR", "major kept");
   check(fail.findings.includes("plan skips auth"), "first finding kept");
   check(fail.findings.includes("add tests"), "revisions kept");
+});
+
+const ADVISORY_PASS_TEXT = `Reviewed independently.
+
+VERDICT: PASS
+SEVERITY: NONE
+
+SUPPORTING FINDINGS:
+- Issue: plan is evidence-rich
+  Evidence: file:line citations throughout
+
+ADVISORIES:
+- confirm the Phase D choice before implementing
+- run boundary scripts after Phase A
+`;
+
+Deno.test("PASS advisories parse apart from findings", () => {
+  const pass = parseReviewText(ADVISORY_PASS_TEXT);
+  check(pass.verdict === "PASS", "pass");
+  check(pass.findings.includes("evidence-rich"), "support kept in findings");
+  check(!pass.findings.includes("Phase D"), "homework kept out of findings");
+  check(pass.advisories.includes("Phase D"), "first advisory kept");
+  check(pass.advisories.includes("boundary scripts"), "second advisory kept");
+});
+
+Deno.test("old-style PASS with revisions still parses", () => {
+  const legacy = parseReviewText(`${PASS_TEXT}\nREQUIRED REVISIONS:\n- confirm this\n`);
+  check(legacy.verdict === "PASS", "pass");
+  check(legacy.findings.includes("confirm this"), "legacy revisions retained");
+  check(legacy.advisories === "", "no advisories section, empty field");
 });
 
 Deno.test("verdicts normalize legacy words and fail closed on garbage", () => {

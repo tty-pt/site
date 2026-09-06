@@ -6,6 +6,7 @@ export interface ParsedReview {
   verdict: ReviewVerdict;
   findings: string;
   severity: string;
+  advisories: string;
 }
 
 const MAX_FINDINGS_CHARS = 4000;
@@ -17,17 +18,17 @@ function normalize(raw: string): ReviewVerdict | null {
   return null;
 }
 
-function collectBullets(lines: string[]): string {
+function collectSection(lines: string[], headers: RegExp): string {
   const items: string[] = [];
   let inSection = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (/^(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS)\s*:/i.test(trimmed)) {
-      inSection = true;
+    if (/^(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|ADVISORIES|SUPPORTING FINDINGS)\s*:/i.test(trimmed)) {
+      inSection = headers.test(trimmed);
       continue;
     }
     if (/^[A-Z][A-Z /-]*\s*:/.test(trimmed) && !trimmed.startsWith("-") && !trimmed.startsWith("*")) {
-      if (!/^(FINDINGS|REQUIRED)/i.test(trimmed)) inSection = false;
+      inSection = false;
       continue;
     }
     if (!inSection) continue;
@@ -43,6 +44,7 @@ export function parseReviewText(text: string): ParsedReview {
       verdict: "FAIL",
       severity: "MAJOR",
       findings: "Reviewer returned no output (treated as FAIL; rebut with evidence or approve manually).",
+      advisories: "",
     };
   }
   const lines = text.split(/\r?\n/);
@@ -67,14 +69,17 @@ export function parseReviewText(text: string): ParsedReview {
       verdict: "FAIL",
       severity: "MAJOR",
       findings: "Reviewer returned no parseable VERDICT line (treated as FAIL; rebut with evidence or approve manually).",
+      advisories: "",
     };
   }
   if (verdict === "FAIL" && severity === "NONE") severity = "MAJOR";
   if (verdict === "PASS" && severity !== "NONE" && severity !== "MINOR") severity = "NONE";
-  const findings = collectBullets(lines);
+  const findings = collectSection(lines, /^(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|SUPPORTING FINDINGS)/i);
+  const advisories = collectSection(lines, /^ADVISORIES/i);
   return {
     verdict,
     severity,
     findings: findings || (verdict === "PASS" ? "No blocking findings." : "Reviewer gave no itemized findings."),
+    advisories,
   };
 }

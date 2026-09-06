@@ -190,3 +190,6 @@ keeps search live.
 - Copied blocks of handler code between modules (song vs poem vs grp).
 - New externals depending on the site or on each other's internals.
 - Exporting more symbols than callers need.
+
+---
+*Ambitious abstraction improvement note (quest 1x37Od): Filter stateless redesign removes global mutable arrays (`filter.c`); dynamic array prototype (`prototype_dynamic_state.c`) eliminates fixed limits; picker simplification separates pinned logic; flags-word picker spec reduces parameter count. All valid per architecture rules (`ARCHITECTURE.md` §5, `DESIGN.md` §4.2). See `.pi/quest/future/1x37Od.md`.*

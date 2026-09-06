@@ -6,11 +6,13 @@
 // Selection Dialog): the viewer body is vanilla SelectList, which owns
 // navigation, windowing, and its scroll indicator. This module only maps
 // draft lines to items, draws title/hint chrome, and falls back to a plain
-// box when pi-tui is absent. Every emitted row is normalized to exactly the
-// frame width (padded when short, ANSI-aware truncated when long), so no
-// row can overflow or underflow the frame whatever produced it.
+// box when pi-tui is absent. Long draft lines are word-wrapped to visual
+// rows before either renderer sees them (SelectList truncates by design),
+// so nothing is silently clipped; every emitted row is then padded to
+// exactly the frame width so no row can overflow.
 import type { PiOverlayComponent, PiTheme } from "../hooks/events";
 import { classifyKey, normalizeKey } from "./plan-keys";
+import { wrapLine, wrapMarkdown } from "./plan-wrap";
 
 const MIN_WIDTH = 20;
 const MAX_WIDTH = 80;
@@ -52,6 +54,10 @@ const VANILLA_SPECIFIER = "@earendil-works/pi-tui";
 
 export class PlanOverlayComponent implements PiOverlayComponent {
   private offset = 0;
+  // Pre-wrapped once so scrolling and rendering share one width-stable row
+  // model (the overlay is opened at a fixed width). Narrower renders pad or
+  // truncate each pre-wrapped row via fitRow.
+  private readonly rows: string[];
 
   constructor(
     private readonly title: string,
@@ -59,7 +65,9 @@ export class PlanOverlayComponent implements PiOverlayComponent {
     private readonly theme: PiTheme,
     private readonly onClose: () => void,
     private readonly height = 16,
-  ) {}
+  ) {
+    this.rows = this.wrapAll();
+  }
 
   handleInput(data: string): void {
     switch (classifyKey(data, null)) {
@@ -98,10 +106,10 @@ export class PlanOverlayComponent implements PiOverlayComponent {
   render(width: number): string[] {
     const box = Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH);
     const { inner, border, row } = frame(this.theme, box);
-    const slice = this.lines.slice(this.offset, this.offset + this.height);
-    const first = this.lines.length === 0 ? 0 : this.offset + 1;
+    const slice = this.rows.slice(this.offset, this.offset + this.height);
+    const first = this.rows.length === 0 ? 0 : this.offset + 1;
     const last = this.offset + slice.length;
-    const foot = `${first}-${last}/${this.lines.length} · ${HINT}`;
+    const foot = `${first}-${last}/${this.rows.length} · ${HINT}`;
     return [
       border("╭", "─", "╮"),
       row(fitRow(` ${this.title}`, inner)),
@@ -113,8 +121,25 @@ export class PlanOverlayComponent implements PiOverlayComponent {
     ];
   }
 
+  // Canonical wrap width: the overlay's max box (80) leaves an inner of 78,
+  // and each row carries a leading space, so content fits in 77 cells.
+  private wrapAll(): string[] {
+    const width = MAX_WIDTH - 3;
+    const rows: string[] = [];
+    for (const line of this.lines) {
+      if (line.trim() === "") {
+        rows.push(" ");
+        continue;
+      }
+      const wrapped = wrapLine(line, width);
+      rows.push(wrapped[0] ?? " ");
+      for (const cont of wrapped.slice(1)) rows.push("  " + cont);
+    }
+    return rows;
+  }
+
   private maxOffset(): number {
-    return Math.max(0, this.lines.length - this.height);
+    return Math.max(0, this.rows.length - this.height);
   }
 }
 
@@ -203,7 +228,9 @@ export function chooseViewer(
   onClose: () => void,
 ): PiOverlayComponent {
   if (kit === null) return new PlanOverlayComponent(title, markdown.split("\n"), theme, onClose);
-  const items = toSelectItems(markdown);
+  // SelectList adds `  ` + `→ `/`  ` prefixes (inner−4 cells of label space),
+  // so wide-wrap draft lines at the canonical max instead of letting them clip.
+  const items = toSelectItems(wrapMarkdown(markdown, MAX_WIDTH - 6).join("\n"));
   const list = new kit.SelectList(items, LIST_VISIBLE, buildSelectListTheme(theme));
   list.onSelect = () => {};
   list.onCancel = () => onClose();
@@ -236,8 +263,7 @@ export function chooseViewer(
   };
   return {
     render: (width: number) => {
-      const box = Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH);
-      const { inner, border, row } = frame(theme, box);
+      const { inner, border, row } = frame(theme, Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH));
       return [
         border("╭", "─", "╮"),
         row(fitRow(` ${title}`, inner, kit)),

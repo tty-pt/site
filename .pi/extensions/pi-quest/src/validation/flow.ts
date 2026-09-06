@@ -82,7 +82,8 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
-    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.`);
+    const advisories = outcome.review.advisories.trim();
+    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;
   }
   updateState((s) => demoteToImplementing(s));
