@@ -1,10 +1,12 @@
 // HIGH_LEVEL: #drafting — one writable file, all else blocked.
+// HIGH_LEVEL: #plan revision — implementation waits while a revision review runs.
 // SPEC: B2 (gate table), B2.1 (exemption, agent-visible blocks, INTERNAL_ERROR).
 import type { Pi, PiCtx, ToolCallEvent } from "../hooks/events";
 import { getState } from "../app/store";
 import { classify } from "../utils/classify";
 import { decide, reasonText } from "../domain/gates";
-import { hasAnyInFlight } from "../review/tracker";
+import { hasAnyInFlight, hasInFlight } from "../review/tracker";
+import { draftPath } from "../domain/paths";
 
 function pathOf(input: Record<string, unknown>): string | undefined {
   const path = input["path"];
@@ -19,9 +21,30 @@ function reviewerCaller(ctx: PiCtx): boolean {
   return typeof child === "string" && child.length > 0 && hasAnyInFlight();
 }
 
+// While a plan-revision review runs, implementing tightens like drafting:
+// the agent ends its turn and waits for the verdict instead of building
+// against an un-approved plan. Draft saves still supersede; journal and
+// questions stay usable. Block-only — reads and verdicts fall through.
+function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: string; terminate?: true } | undefined {
+  const state = getState();
+  if (state.phase !== "implementing" || state.qid === null || !hasInFlight(state.qid)) return undefined;
+  const toolClass = classify(event.toolName, event.input);
+  if (toolClass === "journal" || toolClass === "ask") return undefined;
+  const file = draftPath(state.qid);
+  const path = pathOf(event.input);
+  if (toolClass === "write" && path !== undefined && (path === file || path.endsWith(`/${file}`))) return undefined;
+  return {
+    block: true,
+    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. Draft saves still supersede.",
+    terminate: true,
+  };
+}
+
 export function installDraftGate(pi: Pi): void {
   pi.on("tool_call", (event: ToolCallEvent, ctx: PiCtx) => {
     try {
+      const held = holdForRevisionReview(event);
+      if (held !== undefined) return held;
       const decision = decide(getState(), {
         toolName: event.toolName,
         toolClass: classify(event.toolName, event.input),

@@ -1,24 +1,26 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
+// HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision.
 // The agent's write path to the quest: findings, drafts, amendments, claims.
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import {
-  acknowledgeChild,
   claimComplete,
   createDraft,
   createQuest,
   recordAmendment,
   recordRefinement,
-  unfinishedChildren,
 } from "../../domain/quest";
+import { recordPlanRevision } from "../../domain/plan-revision";
+import { acknowledgeChild, unfinishedChildren } from "../../domain/children";
+import { bootPlanRevisionReview } from "../../implementing/plan-revision";
 import { nextQid } from "../../domain/qid";
 import { draftPath } from "../../domain/paths";
 import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
-import { hashContent, maybeBootDraftReview, splicePlanSection } from "../../drafting/reviews";
+import { hashContent, maybeBootDraftReview, parseDraftSections, splicePlanSection } from "../../drafting/reviews";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
@@ -77,6 +79,41 @@ async function writePlanToDraft(
   return next;
 }
 
+// Mid-implementation plan revision: the objective is immutable here — a new
+// goal is a scope change and belongs in a new quest. The revision stages new
+// content and boots a re-review; the approved binding moves only on PASS.
+async function writePlanRevision(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  planText: string,
+  note: string,
+  objective: unknown,
+): Promise<QuestState> {
+  if (state.phase !== "implementing" || state.draft === null || state.qid === null) {
+    throw new Error(`plan revision needs an implementing quest (phase ${state.phase})`);
+  }
+  if (typeof objective === "string" && objective.trim() !== "") {
+    const current = state.pendingRootRequest ?? state.objective;
+    if (objective.trim() !== current) {
+      throw new Error("plan revision keeps the quest objective — a new goal is a scope change, start a new quest");
+    }
+  }
+  const path = join(ctx.cwd, draftPath(state.qid));
+  const current = await readFile(path, "utf8");
+  const previousPlan = parseDraftSections(current).plan;
+  const updated = splicePlanSection(current, planText);
+  if (updated === current) throw new Error("plan revision identical to the draft file");
+  await writeFile(path, updated, "utf8");
+  const hash = hashContent(updated);
+  const previousHash = state.draft.contentHash;
+  const next = updateState((s) => recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan));
+  emitNow(pi);
+  noteDraftUpdated(ctx);
+  void bootPlanRevisionReview(pi, ctx, hash);
+  return next;
+}
+
 async function carryRefinementsToDraft(ctx: PiCtx, state: QuestState): Promise<QuestState> {
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) return state;
   if (state.refinements.length === 0) return state;
@@ -118,6 +155,25 @@ async function provisionDraft(
   }
   noteDraftUpdated(ctx);
   return state;
+}
+
+async function applyPlanRevisionParam(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  params: Record<string, unknown>,
+  applied: string[],
+): Promise<{ state: QuestState; error?: string }> {
+  const revision = params["planRevision"];
+  if (typeof revision !== "string" || revision.trim() === "" || !state.qid) return { state };
+  try {
+    const note = params["note"];
+    const next = await writePlanRevision(pi, ctx, state, revision.trim(), typeof note === "string" ? note.trim() : "", params["objective"]);
+    applied.push("plan revision staged in the draft file; re-review booted");
+    return { state: next };
+  } catch (err) {
+    return { state, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function applyUpdate(
@@ -169,6 +225,9 @@ export async function applyUpdate(
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }
   }
+  const revised = await applyPlanRevisionParam(pi, ctx, state, params, applied);
+  if (revised.error !== undefined) return { applied, error: revised.error };
+  state = revised.state;
   const continuePast = params["continuePast"];
   if (typeof continuePast === "string" && continuePast.trim() !== "" && state.qid) {
     try {
@@ -196,7 +255,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_update_state",
     label: "Update Quest State",
-    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly, claimComplete to finish.",
+    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), claimComplete to finish.",
     parameters: {
       type: "object",
       properties: {
@@ -204,6 +263,8 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         draftName: { type: "string" },
         refinement: { type: "string" },
         plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only)." },
+        planRevision: { type: "string", description: "Revised Implementation Plan body, staged from implementing (boots a re-review; objective unchanged)." },
+        note: { type: "string", description: "Why the plan revision was needed; kept in the append-only history." },
         amendment: {
           type: "object",
           properties: { change: { type: "string" }, reasons: { type: "string" } },

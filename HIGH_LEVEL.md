@@ -23,6 +23,9 @@ During implementation, no action is restricted to the agent. Setbacks (test fail
 ## validation
 In this phase, a reviewer/validator agent will be fired up to check if the implementation really does comply to the plan, and whether the decisions the main agent took along the way were appropriate. If it does, the quest will be complete and archived (a slim archive: quest view, session reference, manifest). If it does not, then it must demote the main agent back to the 'implementing' phase with its findings.
 
+## plan revision
+During implementation, the implementer or the user may revise the approved plan when reality contradicts it: the revision replaces the plan's remaining steps without rewriting its history — prior plan texts are kept as an append-only record. The objective never changes in a revision; a change of scope is a new quest. Every revision boots an independent re-review of the full revised plan against the previous plan's diff and prior verdict; while that review runs, implementation work waits. A PASS adopts the revision and re-binds validation to the new plan; a FAIL restores the previous plan and the implementer revises again or records an amendment.
+
 # working together
 
 ## sub-quests

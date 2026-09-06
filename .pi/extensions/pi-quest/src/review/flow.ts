@@ -64,6 +64,9 @@ export function implementationFingerprint(state: QuestState): string {
     setbacks: state.setbacks,
     children: state.children.map((c) => `${c.qid}:${c.status}`),
     exactNextAction: state.exactNextAction,
+    // HIGH_LEVEL: #plan revision — a staged or adopted revision must stale any prior PASS.
+    approvedPlanHash: state.draft?.approvedPlanHash ?? null,
+    draftHash: state.draft?.contentHash ?? null,
   };
   return createHash("sha256").update(JSON.stringify(stable), "utf8").digest("hex");
 }

@@ -16,6 +16,8 @@ export interface ReviewMaterial {
   planDiff?: string;
   previousVerdict?: ReviewVerdict;
   previousFindings?: string;
+  // HIGH_LEVEL: #plan revision — re-review briefs name the revision context.
+  revisionNote?: string;
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
@@ -64,6 +66,9 @@ function contextBlock(material: ReviewMaterial): string {
   const prior = material.previousVerdict
     ? `\nPRIOR VERDICT: ${material.previousVerdict}\nPRIOR FINDINGS:\n${material.previousFindings ?? "(none)"}\nRe-verify prior findings yourself against the full material above; a prior FAIL presumes nothing about this revision.\n`
     : "";
+  const revision = material.revisionNote
+    ? `\nPLAN REVISION UNDER REVIEW:\n${material.revisionNote}\nThe objective above is unchanged — a revision that introduces a new goal or acceptance criterion is out of scope and must FAIL.\n`
+    : "";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
@@ -71,7 +76,7 @@ ${material.objective || "(none)"}
 APPROVED PLAN:
 ${material.plan || "(none)"}
 ${diff}
-RECORDED AMENDMENTS:
+${revision}RECORDED AMENDMENTS:
 ${amendments}
 
 EVIDENCE:

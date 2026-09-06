@@ -3,6 +3,9 @@ import type { Qid } from "../../src/domain/qid.ts";
 import {
   acknowledgeChild,
   addChild,
+  settleChild,
+} from "../../src/domain/children.ts";
+import {
   archive,
   claimComplete,
   createDraft,
@@ -16,7 +19,6 @@ import {
   recordRefinement,
   recordReviewResult,
   resolveDialogueRound,
-  settleChild,
 } from "../../src/domain/quest.ts";
 
 const QID = "abc123";

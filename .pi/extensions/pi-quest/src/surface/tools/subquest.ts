@@ -3,7 +3,8 @@
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import { readQuestConfig } from "../../config";
-import { addChild, createQuest } from "../../domain/quest";
+import { createQuest } from "../../domain/quest";
+import { addChild } from "../../domain/children";
 import { nextQid, type Qid } from "../../domain/qid";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../durability/snapshots";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";

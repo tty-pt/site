@@ -37,6 +37,17 @@ export interface DraftInfo {
   contentHash: string | null;
   // HIGH_LEVEL: #review request — re-review briefs diff against the last reviewed plan.
   lastReviewedPlan?: string | null;
+  // HIGH_LEVEL: #plan revision — the plan the implementer is bound to; re-binds validation.
+  approvedPlanHash: string | null;
+  // HIGH_LEVEL: #plan revision — append-only record of superseded plan texts.
+  planRevisions: PlanRevision[];
+}
+
+export interface PlanRevision {
+  hash: string | null;
+  at: number;
+  note: string;
+  plan: string;
 }
 
 export interface LastReview {
@@ -140,7 +151,8 @@ function requirePhase(state: QuestState, ...allowed: Phase[]): void {
 
 // Every transition marks the state snapshot-pending: the code form of
 // #durability ("stamped on every change"). The emitter clears the flag.
-function markChanged(state: QuestState, patch: Partial<QuestState>): QuestState {
+// Exported for the domain slices (children, plan revisions) sharing this file's shape.
+export function markChanged(state: QuestState, patch: Partial<QuestState>): QuestState {
   return { ...state, ...patch, snapshotPending: true };
 }
 
@@ -170,6 +182,8 @@ export function createDraft(state: QuestState, draftName: string): QuestState {
       approvedBy: null,
       outstandingFindings: false,
       contentHash: null,
+      approvedPlanHash: null,
+      planRevisions: [],
     },
     exactNextAction: `Author ## Implementation Plan in the draft file for '${draftName}'.`,
   });
@@ -182,7 +196,7 @@ export function promote(state: QuestState, approvedBy: ApprovedBy): QuestState {
   }
   return markChanged(state, {
     phase: "implementing",
-    draft: { ...state.draft, approvedBy, outstandingFindings: false },
+    draft: { ...state.draft, approvedBy, outstandingFindings: false, approvedPlanHash: state.draft.contentHash },
     activeReview: null,
     exactNextAction: "Proceed autonomously from the draft plan.",
   });
@@ -322,28 +336,5 @@ export function recordHumanAnswer(
   });
 }
 
-// --- Sub-quest links ---
+// --- Sub-quest links live in ./children.ts (complexity budget) ---
 
-export function addChild(state: QuestState, link: ChildLink): QuestState {
-  if (state.children.some((c) => c.qid === link.qid)) throw new Error(`child ${link.qid} already linked`);
-  return markChanged(state, { children: [...state.children, link] });
-}
-
-export function settleChild(state: QuestState, qid: Qid, status: ChildStatus, findings: string | null): QuestState {
-  return markChanged(state, {
-    children: state.children.map((c) => c.qid === qid ? { ...c, status, findings } : c),
-  });
-}
-
-export function acknowledgeChild(state: QuestState, qid: Qid): QuestState {
-  const link = state.children.find((c) => c.qid === qid);
-  if (!link) throw new Error(`no linked child ${qid}`);
-  if (link.status === "running") throw new Error(`child ${qid} has not returned yet`);
-  return markChanged(state, {
-    children: state.children.map((c) => c.qid === qid ? { ...c, acknowledged: true } : c),
-  });
-}
-
-export function unfinishedChildren(state: QuestState): ChildLink[] {
-  return state.children.filter((c) => c.status === "running");
-}
