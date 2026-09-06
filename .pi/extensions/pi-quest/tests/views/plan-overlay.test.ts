@@ -9,6 +9,7 @@ import {
   LIST_VISIBLE,
   loadVanilla,
   openPlanViewer,
+  OVERLAY_FRAME,
   PlanOverlayComponent,
   toSelectItems,
   type RowMeasure,
@@ -239,6 +240,47 @@ Deno.test("chooseViewer wraps long draft lines before SelectList", () => {
   check(joined.length > long.length, "wrapped content preserved, not clipped");
 });
 
+Deno.test("chooseViewer threads a custom visible row budget", () => {
+  let recorded = 0;
+  let jumped = -1;
+  const items = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
+  const kit: ViewerKit = {
+    visibleWidth: (text: string) => measure.visibleWidth(text),
+    truncateToWidth: (text: string, width: number) => measure.truncateToWidth(text, width),
+    SelectList: function (
+      this: unknown,
+      _got: SelectItem[],
+      maxVisible: number,
+      _theme: SelectListTheme,
+    ) {
+      recorded = maxVisible;
+      const list: SelectableList = {
+        render: () => [],
+        handleInput: () => {},
+        getSelectedItem: () => ({ value: "0", label: "x" }),
+        setSelectedIndex: (i: number) => {
+          jumped = i;
+        },
+      };
+      return list;
+    } as unknown as ViewerKit["SelectList"],
+  };
+  const view = chooseViewer(kit, "t", items, theme, () => {}, { visible: 18 });
+  check(recorded === 18, "viewport follows the requested budget");
+  view.handleInput?.(" ");
+  check(jumped === 18, "space pages by the budget, not the fixed constant");
+  view.handleInput?.("\x1b[5~");
+  check(jumped === 0, "page up returns to the start");
+});
+
+Deno.test("fallback viewer fits inside the same row budget", () => {
+  const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+  const view = chooseViewer(null, "t", lines, theme, () => {}, { visible: 18 });
+  const rows = view.render(60);
+  check(rows.length <= 18 + OVERLAY_FRAME, "frame never exceeds body + chrome");
+  check(rows[0].includes("╭") && rows[rows.length - 1].includes("╰"), "both borders intact");
+});
+
 Deno.test("vanilla keys reach the list, q closes past it", () => {
   const { view, closed, received } = openStubbed("a\nb");
   view.handleInput?.("\x1b[A");
@@ -397,14 +439,14 @@ Deno.test("wrapMarkdown preserves blank lines and indents continuations", () => 
 });
 
 Deno.test("fallback overlay wraps long lines into visible rows", () => {
-  const long = Array.from({ length: 60 }, (_, i) => `w${String(i).padStart(2, "0")}`).join(" ");
+  const long = Array.from({ length: 500 }, (_, i) => `w${String(i).padStart(3, "0")}`).join(" ");
   const { view } = component(["short", long, "tail"]);
   const top = view.render(40).join("\n");
-  check(top.includes("short") && top.includes("w00"), "top rows shown");
+  check(top.includes("short") && top.includes("w000"), "top rows shown");
   check(!top.includes("tail"), "tail below the fold at top");
-  check(top.includes("w59") === false, "long line tail not yet visible");
-  for (let i = 0; i < 30; i++) view.handleInput("j");
+  check(top.includes("w499") === false, "long line tail not yet visible");
+  for (let i = 0; i < 500; i++) view.handleInput("j");
   const bottom = view.render(40).join("\n");
   check(bottom.includes("tail"), "tail reachable after scrolling");
-  check(!bottom.includes("w00"), "wrapped first chunk scrolled away");
+  check(!bottom.includes("w000"), "wrapped first chunk scrolled away");
 });

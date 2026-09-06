@@ -19,6 +19,7 @@ import { draftPath } from "../../src/domain/paths.ts";
 import type { QuestState } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
+import { formatRevisionHistory } from "../../src/validation/flow.ts";
 import { buildReviewPrompt } from "../../src/review/prompts.ts";
 import { installDraftGate } from "../../src/drafting/gate.ts";
 import { cancelReview, trackReview } from "../../src/review/tracker.ts";
@@ -113,6 +114,22 @@ Deno.test("legacy snapshots without revision fields still work", () => {
   const staged = recordPlanRevision(legacy, "hash-v1", "hash-v2", "fix", "old plan");
   check(staged.draft?.planRevisions.length === 1, "history starts from empty");
   check((staged.draft?.approvedPlanHash ?? null) === null, "missing binding reads as null");
+});
+
+Deno.test("revision history formats notes with truncated prior text", () => {
+  check(formatRevisionHistory(implementing()).length === 0, "unrevised quest has no history");
+  const staged = recordPlanRevision(implementing(), "hash-v1", "hash-v2", "step 3 was wrong", "old plan", 1720000000000);
+  const lines = formatRevisionHistory(staged);
+  check(lines.length === 1, "one line per revision");
+  check(lines[0].includes("step 3 was wrong"), "note kept");
+  check(lines[0].includes("hash-v1"), "superseded hash kept");
+  check(lines[0].includes("old plan"), "prior text kept");
+  const long = recordPlanRevision(implementing(), "h1", "h2", "fix", "x".repeat(2000));
+  const capped = formatRevisionHistory(long);
+  check(capped[0].length < 900, "prior text truncated");
+  check(capped[0].includes("(truncated)"), "truncation marked");
+  const legacy = { ...implementing(), draft: { ...implementing().draft!, planRevisions: undefined } } as unknown as QuestState;
+  check(formatRevisionHistory(legacy).length === 0, "legacy drafts format as empty");
 });
 
 Deno.test("revision note renders in the re-review brief", () => {

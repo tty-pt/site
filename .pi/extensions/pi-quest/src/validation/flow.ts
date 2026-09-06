@@ -29,6 +29,22 @@ async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
 
 const announced = new Set<string>();
 
+// HIGH_LEVEL: #plan revision — the validator judges every plan move, so the
+// brief carries the append-only revision record: note, superseded hash, and
+// prior text truncated to a bounded window with the cut marked.
+const REVISION_PLAN_CHARS = 500;
+
+export function formatRevisionHistory(state: QuestState): string[] {
+  return (state.draft?.planRevisions ?? []).map((r) => {
+    const hash = r.hash === null || r.hash === "" ? "initial plan" : `superseded ${r.hash.slice(0, 12)}`;
+    const when = new Date(r.at).toISOString().slice(0, 10);
+    const prior = r.plan.length > REVISION_PLAN_CHARS
+      ? `${r.plan.slice(0, REVISION_PLAN_CHARS)}… (truncated)`
+      : r.plan;
+    return `- ${r.note} (${hash}, ${when}): ${prior}`;
+  });
+}
+
 function announceOnce(pi: Pi, key: string, text: string): void {
   if (announced.has(key)) return;
   announced.add(key);
@@ -69,6 +85,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
       plan,
       evidence,
       amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
+      planRevisionHistory: formatRevisionHistory(state),
       implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
     }),
   });

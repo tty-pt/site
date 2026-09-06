@@ -26,6 +26,8 @@ In this phase, a reviewer/validator agent will be fired up to check if the imple
 ## plan revision
 During implementation, the implementer or the user may revise the approved plan when reality contradicts it: the revision replaces the plan's remaining steps without rewriting its history — prior plan texts are kept as an append-only record. The objective never changes in a revision; a change of scope is a new quest. Every revision boots an independent re-review of the full revised plan against the previous plan's diff and prior verdict; while that review runs, implementation work waits. A PASS adopts the revision and re-binds validation to the new plan; a FAIL restores the previous plan and the implementer revises again or records an amendment.
 
+Validation judges the plan moves alongside the implementation: the validator receives the revision history and must FAIL a revision that weakened the acceptance bar to fit what was built, while a revision that corrected an impossibility without changing the objective is legitimate. If no sub-agent is available, the user adopts the staged revision by replying "approve"; agents cannot self-approve while the revision review is in flight.
+
 # working together
 
 ## sub-quests
@@ -101,7 +103,7 @@ Which peer tools plug into the interfaces below (defaults shown). A declared bin
 {"asking": {"tool": "ask_questions"}, "reviewRunner": {"tool": "subagent"}}
 
 ### status style
-Status-bar format for the active quest: `icon` by default (`📝 <qid>`), or `text` (`<phase> <qid>`).
+Status-bar format for the active quest: `icon` by default (`📝 <qid>`), or `text` (`<phase> <qid>`). The bar renders dim with an `[F2]` hint and flashes bright for a few seconds after a content-changing draft save; `F2` opens the active quest's plan in a floating viewer (view-only, best-effort — the draft file remains the source).
 
 # interfaces
 pi-quest talks to peer extensions through pi's tool registry and requires none of them.
@@ -152,6 +154,8 @@ findings: <findings supporting the verdict>
 The reviewer does not directly modify quest state.
 
 The main agent or quest runtime records the returned result in the quest history. Every result is delivered to the main agent as a fresh turn carrying the verdict and the required next action, whether PASS, FAIL, or a failed review run.
+
+A `PASS` may additionally carry non-blocking advisories for the main agent to consider; they never block promotion.
 
 ## stale results
 
@@ -244,6 +248,8 @@ Quest creation does not require explicit user confirmation.
 When a quest is already active, a new user request does not automatically create a second active quest. It is interpreted in the context of the active quest unless the quest system determines that the request constitutes a separate quest according to its scope rules.
 
 Only one quest may be active at a time.
+
+Boot is idle: on a fresh session a quest's state is re-read from the transcript but not adopted automatically — the session starts with no active quest. `/quest` resumes: one candidate is adopted directly, several are presented for selection (or listed when there is no UI), and none leaves the session idle.
 
 # independent review contexts
 

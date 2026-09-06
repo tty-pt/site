@@ -18,6 +18,8 @@ export interface ReviewMaterial {
   previousFindings?: string;
   // HIGH_LEVEL: #plan revision — re-review briefs name the revision context.
   revisionNote?: string;
+  // HIGH_LEVEL: #plan revision — validators see the plan's revision history.
+  planRevisionHistory?: string[];
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
@@ -69,6 +71,9 @@ function contextBlock(material: ReviewMaterial): string {
   const revision = material.revisionNote
     ? `\nPLAN REVISION UNDER REVIEW:\n${material.revisionNote}\nThe objective above is unchanged — a revision that introduces a new goal or acceptance criterion is out of scope and must FAIL.\n`
     : "";
+  const history = (material.planRevisionHistory ?? []).length > 0
+    ? `\nPLAN REVISION HISTORY (the approved plan moved during implementation):\n${(material.planRevisionHistory ?? []).join("\n")}\n`
+    : "";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
@@ -78,7 +83,7 @@ ${material.plan || "(none)"}
 ${diff}
 ${revision}RECORDED AMENDMENTS:
 ${amendments}
-
+${history}
 EVIDENCE:
 ${evidence}
 ${rebuttal}${prior}--- END MATERIAL ---`;
@@ -104,6 +109,7 @@ You review the IMPLEMENTATION against the approved plan plus recorded amendments
 2. Amendments stay in scope and carry reasons; scope change is a failure;
 3. Decisions along the way were appropriate and evidenced;
 4. The work is verified (tests, builds, or stated verification).
+When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
 Reviewer preference NEVER blocks; only unmet requirements or out-of-scope drift do.`;
 }
 

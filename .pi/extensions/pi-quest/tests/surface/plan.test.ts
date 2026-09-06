@@ -6,7 +6,7 @@ import { getState, replaceState } from "../../src/app/store.ts";
 import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { draftPath } from "../../src/domain/paths.ts";
-import type { OverlayFactory, PiCtx, PiOverlayComponent, PiTheme } from "../../src/hooks/events.ts";
+import type { OverlayFactory, OverlayShowOptions, PiCtx, PiOverlayComponent, PiTheme } from "../../src/hooks/events.ts";
 import { installCommands } from "../../src/surface/commands/index.ts";
 import { viewActivePlan } from "../../src/surface/commands/plan.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
@@ -20,6 +20,26 @@ function draftingCwd(): string {
   writeFileSync(join(cwd, draftPath(QID)), DRAFT);
   replaceState(createDraft(createQuest("work", QID), "work"));
   return cwd;
+}
+
+function withTerminalSize(rows: number, cols: number, run: () => Promise<void>): Promise<void> {
+  const stdout = process.stdout as unknown as { rows?: number; columns?: number };
+  const prevRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  const prevCols = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+  Object.defineProperties(process.stdout, {
+    rows: { value: rows, configurable: true },
+    columns: { value: cols, configurable: true },
+  });
+  return (async () => {
+    try {
+      await run();
+    } finally {
+      if (prevRows) Object.defineProperty(process.stdout, "rows", prevRows);
+      else delete stdout.rows;
+      if (prevCols) Object.defineProperty(process.stdout, "columns", prevCols);
+      else delete stdout.columns;
+    }
+  })();
 }
 
 Deno.test("plan viewer reports when no quest is active", async () => {
@@ -50,19 +70,33 @@ Deno.test("non-tui viewers fall back to a capped toast", async () => {
   replaceState(IDLE_STATE);
 });
 
-Deno.test("tui viewers open the overlay with the plan lines", async () => {
+Deno.test("tui viewers open a full-size, top-anchored overlay", async () => {
   const cwd = draftingCwd();
-  let captured: { factory: OverlayFactory<void>; overlay: boolean } | null = null;
-  const ctx: PiCtx = fakeCtx(cwd, [], {
-    notify: () => {},
-    custom: <T>(factory: OverlayFactory<T>, options?: { overlay?: boolean }): Promise<T> => {
-      captured = { factory: factory as OverlayFactory<void>, overlay: options?.overlay === true };
-      return Promise.resolve(undefined as unknown as T);
-    },
+  let captured: { factory: OverlayFactory<void>; overlay: boolean; overlayOptions: unknown } | null = null;
+  await withTerminalSize(40, 200, async () => {
+    const ctx: PiCtx = fakeCtx(cwd, [], {
+      notify: () => {},
+      custom: <T>(factory: OverlayFactory<T>, options?: OverlayShowOptions): Promise<T> => {
+        captured = {
+          factory: factory as OverlayFactory<void>,
+          overlay: options?.overlay === true,
+          overlayOptions: options?.overlayOptions,
+        };
+        return Promise.resolve(undefined as unknown as T);
+      },
+    });
+    await viewActivePlan({ ...ctx, mode: "tui" });
   });
-  await viewActivePlan({ ...ctx, mode: "tui" });
   check(captured !== null, "overlay opened");
-  check((captured as unknown as { overlay: boolean }).overlay, "floating overlay requested");
+  const capturedView = captured as unknown as {
+    overlay: boolean;
+    overlayOptions: { width: number; maxHeight: number; anchor: string; offsetX: number; offsetY: number };
+  };
+  check(capturedView.overlay, "floating overlay requested");
+  check(capturedView.overlayOptions.width === 200 - 2, "full-screen box minus its two border cells");
+  check(capturedView.overlayOptions.maxHeight === 40 - 2, "full-screen height minus two rows");
+  check(capturedView.overlayOptions.anchor === "top-left", "pinned to the top edge so height changes never move it");
+  check(capturedView.overlayOptions.offsetX === 1 && capturedView.overlayOptions.offsetY === 1, "one-cell margin on top and left");
   const theme: PiTheme = { fg: (_c: string, s: string) => s };
   let closed = false;
   const produced: PiOverlayComponent | Promise<PiOverlayComponent> = (captured as unknown as {
@@ -76,6 +110,24 @@ Deno.test("tui viewers open the overlay with the plan lines", async () => {
   check(out.includes("## Implementation Plan"), "full draft markdown, not just the section");
   view.handleInput?.("\x1b");
   check(closed, "escape closes");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("plan floater never tops out below its own chrome floor", async () => {
+  const cwd = draftingCwd();
+  let overlayOptions: { width?: number; maxHeight?: number; anchor?: string } | undefined;
+  const ctx: PiCtx = fakeCtx(cwd, [], {
+    notify: () => {},
+    custom: <T>(_factory: OverlayFactory<T>, options?: OverlayShowOptions): Promise<T> => {
+      overlayOptions = options?.overlayOptions as { width?: number; maxHeight?: number; anchor?: string };
+      return Promise.resolve(undefined as unknown as T);
+    },
+  });
+  await withTerminalSize(6, 30, async () => {
+    await viewActivePlan({ ...ctx, mode: "tui" });
+  });
+  check(overlayOptions?.maxHeight === 8, "maxHeight stays above the 7-row chrome frame");
+  check(overlayOptions?.anchor === "top-left", "anchored to the top edge");
   replaceState(IDLE_STATE);
 });
 

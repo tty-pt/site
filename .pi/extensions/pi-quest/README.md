@@ -10,6 +10,18 @@ Gives your Pi coding agent a work ethic for long, complex tasks: it researches b
 
 Big tasks split into sub-quests, each with the same three phases.
 
+Plans can change mid-way. If reality contradicts the plan itself, the agent revises the plan instead of abandoning the quest: every revision is re-reviewed, earlier plans are kept, a rejected revision snaps back to the last good plan — and validation judges the plan moves too, so the bar can't be quietly lowered to fit what was built.
+
+## While you work
+
+- Press `F2` any time to peek at the active quest's plan.
+- The status bar always shows the active quest (dim; it flashes bright right after a draft change).
+- A fresh session starts idle: nothing takes over until you describe a request or `/quest` resumes a known quest. With several known quests, `/quest` lets you pick one.
+
+## The agent's tools
+
+Six quest tools the main agent uses on your behalf: `quest_update_state` (record findings, plans, amendments — the write path), `quest_subquest` (spawn a sub-quest), `quest_archive` (finish as complete, failed, or abandoned), `quest_recover` (rebuild state from the transcript), `quest_rebut` (challenge a review with evidence), `quest_ask_human` (ask you with a recommended default and a one-minute timeout; never blocks).
+
 ## Requirements
 
 - Pi coding agent (the extension loads itself; `/reload` picks up changes).
@@ -21,11 +33,11 @@ Big tasks split into sub-quests, each with the same three phases.
 - `/quests` — list all quests with their states.
 - `/quest-del` — archive (stop) the current or named quest.
 
-Everything else happens by itself. Settings (all optional) live in `.pi/settings.json` under `"pi-quest"`: ask timeout, sub-quest depth cap, draft-review thresholds, interface bindings.
+Everything else happens by itself. Settings (all optional) live in `.pi/settings.json` under `"pi-quest"`: ask timeout, sub-quest depth cap, draft-review thresholds, interface bindings, status-bar style.
 
 ## Status & docs
 
-Status: skeleton — loads clean, no quest behavior yet. Slices land per `REBUILD_PLAN.md` (repo root).
+Implemented and tested today: the full drafting → implementing → validation lifecycle with adversarial review, plan revision with re-review, sub-quests, idle boot with `/quest` picking, the `F2` plan viewer, and durability across compactions and restarts (218 tests pass; the distributable bundle is `pi-quest-bundle.zip` at the project root).
 
 - Product (normative): `HIGH_LEVEL.md` (repo root)
 - Behavior: `docs/PRODUCT_SPEC_v2.md` Part II

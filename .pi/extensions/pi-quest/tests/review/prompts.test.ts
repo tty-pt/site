@@ -109,6 +109,33 @@ Deno.test("output format splits PASS support from FAIL revisions", () => {
   check(validation.includes("REQUIRED REVISIONS"), "validation shares the FAIL branch");
 });
 
+Deno.test("validation brief carries the plan revision history", () => {
+  const withHistory = buildReviewPrompt("validation", QID, "s1", {
+    objective: "ship it",
+    plan: "new plan",
+    evidence: [],
+    amendments: [],
+    planRevisionHistory: ["- step 3 was wrong (superseded abc12345, 2026-09-06): old plan"],
+  });
+  check(withHistory.includes("PLAN REVISION HISTORY"), "history section present");
+  check(withHistory.includes("step 3 was wrong"), "revision note present");
+  check(withHistory.includes("weakens the acceptance bar"), "bar-weakening rule present");
+  const clean = buildReviewPrompt("validation", QID, "s1", {
+    objective: "ship it",
+    plan: "did things",
+    evidence: [],
+    amendments: [],
+  });
+  check(!clean.includes("PLAN REVISION HISTORY"), "unrevised quest has no history section");
+  const draft = buildReviewPrompt("draft", QID, "h1", {
+    objective: "ship it",
+    plan: "do things",
+    evidence: [],
+    amendments: [],
+  });
+  check(!draft.includes("weakens the acceptance bar"), "draft guidance has no validator rule");
+});
+
 Deno.test("implementation fingerprint is stable and content-bound", () => {
   const a = createQuest("same", "abc123");
   const b = createQuest("same", "abc123");

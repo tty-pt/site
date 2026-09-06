@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { getState } from "../../app/store";
 import { draftPath } from "../../domain/paths";
 import type { PiCtx } from "../../hooks/events";
-import { openPlanViewer } from "../../views/plan-overlay";
+import { openPlanViewer, OVERLAY_FRAME } from "../../views/plan-overlay";
 
 const TOAST_BODY_MAX = 800;
 
@@ -40,9 +40,22 @@ export async function viewActivePlan(ctx: PiCtx): Promise<void> {
     return;
   }
   try {
+    const cols = process.stdout.columns ?? 120;
+    const rows = process.stdout.rows ?? 40;
+    // Full-size box (cols − 2 × rows − 2, even offsets), nudged one cell
+    // inside both axes so a 1-cell margin frames it on all sides. The list
+    // body is budgeted so the worst-case frame (body + OVERLAY_FRAME chrome)
+    // lands exactly at maxHeight: pi only trims an overlay above that bound,
+    // so the bottom border can never be amputated.
+    const width = cols - 2;
+    const rowBudget = Math.max(OVERLAY_FRAME + 1, rows - 2);
+    const visible = Math.max(1, rowBudget - OVERLAY_FRAME);
     await ctx.ui.custom<void>(async (_tui, theme, _kb, done) => {
-      return openPlanViewer(title, content, theme, () => done());
-    }, { overlay: true, overlayOptions: { width: 80, maxHeight: "80%" } });
+      return openPlanViewer(title, content, theme, () => done(), { visible, width });
+    }, {
+      overlay: true,
+      overlayOptions: { width, maxHeight: rowBudget, anchor: "top-left", offsetX: 1, offsetY: 1 },
+    });
   } catch {
     // The viewer is best-effort; the draft file remains the source.
   }

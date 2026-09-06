@@ -14,9 +14,13 @@ import type { PiOverlayComponent, PiTheme } from "../hooks/events";
 import { classifyKey, normalizeKey } from "./plan-keys";
 import { wrapLine, wrapMarkdown } from "./plan-wrap";
 
-const MIN_WIDTH = 20;
-const MAX_WIDTH = 80;
-export const LIST_VISIBLE = 14;
+export const LIST_VISIBLE = 24;
+// Worst-case chrome rows around the list body (top border, title,
+// separator, scroll indicator, separator, hint, bottom border). pi trims
+// an overlay the moment `overlayLines.length > maxHeight`, so callers
+// budget the body as (target height − OVERLAY_FRAME) and pass that same
+// target as maxHeight: the frame can then never exceed it.
+export const OVERLAY_FRAME = 7;
 
 // One shared key legend, used verbatim by both viewers. Deliberately
 // minimal: vim bindings (jk, ^U/^D, g/G), Space, and q keep working but are
@@ -64,7 +68,8 @@ export class PlanOverlayComponent implements PiOverlayComponent {
     private readonly lines: string[],
     private readonly theme: PiTheme,
     private readonly onClose: () => void,
-    private readonly height = 16,
+    private readonly height = 28,
+    private readonly width = 80,
   ) {
     this.rows = this.wrapAll();
   }
@@ -104,7 +109,7 @@ export class PlanOverlayComponent implements PiOverlayComponent {
   }
 
   render(width: number): string[] {
-    const box = Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH);
+    const box = width;
     const { inner, border, row } = frame(this.theme, box);
     const slice = this.rows.slice(this.offset, this.offset + this.height);
     const first = this.rows.length === 0 ? 0 : this.offset + 1;
@@ -121,10 +126,10 @@ export class PlanOverlayComponent implements PiOverlayComponent {
     ];
   }
 
-  // Canonical wrap width: the overlay's max box (80) leaves an inner of 78,
-  // and each row carries a leading space, so content fits in 77 cells.
+  // Wrap at the box requested at open time: the inner (box − 2) holds rows
+  // that carry a leading space, so content fits in box − 3 cells exactly.
   private wrapAll(): string[] {
-    const width = MAX_WIDTH - 3;
+    const width = this.width - 3;
     const rows: string[] = [];
     for (const line of this.lines) {
       if (line.trim() === "") {
@@ -182,7 +187,7 @@ function frame(theme: PiTheme, box: number): {
   border(l: string, fill: string, r: string): string;
   row(text: string): string;
 } {
-  const inner = box - 2;
+  const inner = Math.max(0, box - 2);
   return {
     inner,
     border: (l, fill, r) => theme.fg("border", l + fill.repeat(inner) + r),
@@ -226,18 +231,62 @@ export function chooseViewer(
   markdown: string,
   theme: PiTheme,
   onClose: () => void,
+  opts?: { visible?: number; width?: number },
 ): PiOverlayComponent {
-  if (kit === null) return new PlanOverlayComponent(title, markdown.split("\n"), theme, onClose);
+  const visible = opts?.visible ?? LIST_VISIBLE;
+  if (kit === null) {
+    return new PlanOverlayComponent(
+      title,
+      markdown.split("\n"),
+      theme,
+      onClose,
+      opts ? Math.max(1, visible) : undefined,
+      opts?.width,
+    );
+  }
+  const span = opts?.width ?? 80;
   // SelectList adds `  ` + `→ `/`  ` prefixes (inner−4 cells of label space),
-  // so wide-wrap draft lines at the canonical max instead of letting them clip.
-  const items = toSelectItems(wrapMarkdown(markdown, MAX_WIDTH - 6).join("\n"));
-  const list = new kit.SelectList(items, LIST_VISIBLE, buildSelectListTheme(theme));
+  // so wide-wrap draft lines at the opening box instead of letting them clip.
+  const items = toSelectItems(wrapMarkdown(markdown, span - 6).join("\n"));
+  const list = new kit.SelectList(items, visible, buildSelectListTheme(theme));
   list.onSelect = () => {};
   list.onCancel = () => onClose();
+  return {
+    render: (width: number) => overlayFrame(title, list, theme, kit, width),
+    handleInput: viewerKeys(list, items, visible, onClose),
+    handleMouse: (event: unknown) => dispatchMouse(list, event),
+  };
+}
+
+function overlayFrame(
+  title: string,
+  list: SelectableList,
+  theme: PiTheme,
+  kit: ViewerKit,
+  width: number,
+): string[] {
+  const { inner, border, row } = frame(theme, width);
+  return [
+    border("╭", "─", "╮"),
+    row(fitRow(` ${title}`, inner, kit)),
+    border("├", "─", "┤"),
+    ...list.render(inner).map((line) => row(fitRow(line, inner, kit))),
+    border("├", "─", "┤"),
+    row(fitRow(` ${HINT} `, inner, kit)),
+    border("╰", "─", "╯"),
+  ];
+}
+
+function viewerKeys(
+  list: SelectableList,
+  items: SelectItem[],
+  visible: number,
+  onClose: () => void,
+): (data: string) => void {
   // SelectList.handleInput only knows up/down/confirm/cancel (pi-tui
   // registers pageUp/pageDown bindings but never checks them), so paging
   // and home/end go through the public index API instead of key synthesis.
-  const half = Math.max(1, Math.floor(LIST_VISIBLE / 2));
+  const half = Math.max(1, Math.floor(visible / 2));
   const jump = (target: number): void => {
     try {
       list.setSelectedIndex?.(Math.max(0, Math.min(items.length - 1, target)));
@@ -261,43 +310,30 @@ export function chooseViewer(
       // The viewer is best-effort; the draft file remains the source.
     }
   };
-  return {
-    render: (width: number) => {
-      const { inner, border, row } = frame(theme, Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH));
-      return [
-        border("╭", "─", "╮"),
-        row(fitRow(` ${title}`, inner, kit)),
-        border("├", "─", "┤"),
-        ...list.render(inner).map((line) => row(fitRow(line, inner, kit))),
-        border("├", "─", "┤"),
-        row(fitRow(` ${HINT} `, inner, kit)),
-        border("╰", "─", "╯"),
-      ];
-    },
-    handleInput: (data: string) => {
-      const token = normalizeKey(data);
-      if (token === "q" || token === "Q") {
-        onClose();
-        return;
-      }
-      if (token === "j") return forward("\x1b[B");
-      if (token === "k") return forward("\x1b[A");
-      if (token === "pageDown" || token === " ") return jump(current() + LIST_VISIBLE);
-      if (token === "pageUp") return jump(current() - LIST_VISIBLE);
-      if (token === "ctrlU") return jump(current() - half);
-      if (token === "ctrlD") return jump(current() + half);
-      if (token === "home" || token === "g") return jump(0);
-      if (token === "end" || token === "G") return jump(items.length - 1);
-      forward(data);
-    },
-    handleMouse: (event: unknown) => {
-      try {
-        return list.handleMouse?.(event as never) as unknown;
-      } catch {
-        return undefined;
-      }
-    },
+  return (data: string) => {
+    const token = normalizeKey(data);
+    if (token === "q" || token === "Q") {
+      onClose();
+      return;
+    }
+    if (token === "j") return forward("\x1b[B");
+    if (token === "k") return forward("\x1b[A");
+    if (token === "pageDown" || token === " ") return jump(current() + visible);
+    if (token === "pageUp") return jump(current() - visible);
+    if (token === "ctrlU") return jump(current() - half);
+    if (token === "ctrlD") return jump(current() + half);
+    if (token === "home" || token === "g") return jump(0);
+    if (token === "end" || token === "G") return jump(items.length - 1);
+    forward(data);
   };
+}
+
+function dispatchMouse(list: SelectableList, event: unknown): unknown {
+  try {
+    return list.handleMouse?.(event as never) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function openPlanViewer(
@@ -305,6 +341,7 @@ export async function openPlanViewer(
   markdown: string,
   theme: PiTheme,
   onClose: () => void,
+  opts?: { visible?: number; width?: number },
 ): Promise<PiOverlayComponent> {
-  return chooseViewer(await loadVanilla(), title, markdown, theme, onClose);
+  return chooseViewer(await loadVanilla(), title, markdown, theme, onClose, opts);
 }
