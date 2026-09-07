@@ -22,7 +22,9 @@
 # Exceptions for htdocs
 !/htdocs/bud-client.js
 !/htdocs/bud-hydrate.js
+!/htdocs/bud-fragments.js
 !/htdocs/styles.css
+!/htdocs/hyle.css
 /external/*/bin
 /external/*/lib
 tests/unit/mpfd_contract_test
