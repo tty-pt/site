@@ -21,7 +21,7 @@ At any time when drafting that the user themselves say that agent can proceed to
 During implementation, no action is restricted to the agent. Setbacks (test failures, contradictions, new requirements) are recorded with their evidence and the agent carries on; nothing blocks. When it learns something that refines or contradicts the approved plan, it records the change with its reasons without rewriting the original plan. Amendments adjust the plan toward reality as new facts emerge; they never change the quest's scope — a change of scope is a new quest. Once it claims that implementation is complete, it will be promoted to the validation phase.
 
 ## validation
-In this phase, a reviewer/validator agent will be fired up to check if the implementation really does comply to the plan, and whether the decisions the main agent took along the way were appropriate. If it does, the quest will be complete and archived (a slim archive: quest view, session reference, manifest). If it does not, then it must demote the main agent back to the 'implementing' phase with its findings.
+In this phase, a reviewer/validator agent will be fired up to check if the implementation really does comply to the plan, and whether the decisions the main agent took along the way were appropriate. If it does, the quest will be complete and archived (a slim archive: quest view, session reference, manifest). A validation PASS concludes and archives the quest automatically, unless `autoArchive` is disabled — then the agent archives manually. If it does not, then it must demote the main agent back to the 'implementing' phase with its findings. When no validator is available, the agent never archives on its own judgment: unfinished work sends it back to implementing to continue, and finished work waits for the user, whose own CONFIRM reply accepts completion. The agent can never archive a quest as abandoned.
 
 ## plan revision
 During implementation, the implementer or the user may revise the approved plan when reality contradicts it: the revision replaces the plan's remaining steps without rewriting its history — prior plan texts are kept as an append-only record. The objective never changes in a revision; a change of scope is a new quest. Every revision boots an independent re-review of the full revised plan against the previous plan's diff and prior verdict; while that review runs, implementation work waits. A PASS adopts the revision and re-binds validation to the new plan; a FAIL restores the previous plan and the implementer revises again or records an amendment.
@@ -57,7 +57,7 @@ Record findings, plans, amendments, and state. The agent's write path to the que
 Spawn a linked sub-quest for a complex sub-task.
 
 ### quest_archive
-Finish a quest as complete, failed, or abandoned.
+Finish a quest as complete or failed. Abandoning a quest is user-only via /quest-del — the agent can never archive as abandoned.
 
 ### quest_recover
 Rebuild quest state from the transcript, including earlier sessions. Runs automatically when state is absent; callable directly.
@@ -87,7 +87,7 @@ Archive (kill) the current or named quest.
 The quest-journal skill carries the workflow rules for the main agent — this document in actionable form. Reviewers do not receive it; they receive only their review brief.
 
 # configurations
-Five settings, in .pi/settings.json under "pi-quest", all optional with the stated defaults.
+Six settings, in .pi/settings.json under "pi-quest", all optional with the stated defaults.
 
 ### ask timeout
 How long quest_ask_human waits for the user: one minute by default; per question configurable to no wait, any duration, or indefinite.
@@ -104,6 +104,9 @@ Which peer tools plug into the interfaces below (defaults shown). A declared bin
 
 ### status style
 Status-bar format for the active quest: `icon` by default (`📝 <qid>`), or `text` (`<phase> <qid>`). The bar renders dim with an `[F2]` hint and flashes bright for a few seconds after a content-changing draft save; `F2` opens the active quest's plan in a floating viewer (view-only, best-effort — the draft file remains the source).
+
+### auto archive
+Whether a validation PASS concludes and archives the quest automatically: on by default. When off, the agent archives manually via quest_archive after the PASS.
 
 # interfaces
 pi-quest talks to peer extensions through pi's tool registry and requires none of them.

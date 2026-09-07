@@ -12,12 +12,11 @@ import { cancelReview } from "../../review/tracker";
 import { archiveQuestFiles } from "../../views/quest-view";
 import { textResult } from "./reply";
 
-export type ArchiveOutcomeParam = "completed" | "failed" | "abandoned";
+export type ArchiveOutcomeParam = "completed" | "failed";
 
 function toOutcome(param: ArchiveOutcomeParam): ArchivedOutcome {
   if (param === "completed") return "COMPLETED";
-  if (param === "failed") return "FAILED";
-  return "ABANDONED";
+  return "FAILED";
 }
 
 export function hasValidationPass(): boolean {
@@ -45,7 +44,18 @@ export async function archiveActiveQuest(
       );
     }
   }
-  if ((outcome === "FAILED" || outcome === "ABANDONED") && !validated) {
+  if (outcome === "FAILED") {
+    const target = implementationFingerprint(state);
+    const review = state.lastReview;
+    if (review === null || review.target !== target || review.verdict !== "FAIL") {
+      throw new Error(
+        "FAILED needs a validation FAIL on the current work — keep implementing (continueWork:true returns from validating), claim completion to validate, or hold for the user to reply CONFIRM when no validator is available",
+      );
+    }
+  }
+  // ABANDONED stays user-only: the quest_archive tool no longer offers it.
+  // /quest-del is the single path here, passing confirmDiscard explicitly.
+  if (outcome === "ABANDONED" && !validated) {
     const confirmed = opts?.confirmDiscard === true;
     const noted = typeof summary === "string" && summary.trim() !== "";
     if (!confirmed || !noted) {
@@ -83,26 +93,24 @@ export function archiveTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_archive",
     label: "Archive Quest",
-    description: "Finish the active quest as completed, failed, or abandoned: renders the quest view, writes the run manifest, stores a session-range reference. COMPLETED requires a current validation PASS (claim via quest_update_state {claimComplete:true} first). Archiving unvalidated work as failed/abandoned requires confirmDiscard:true plus a summary.",
+    description: "Finish the active quest as completed or failed: renders the quest view, writes the run manifest, stores a session-range reference. COMPLETED requires a current validation PASS (claim via quest_update_state {claimComplete:true} first; usually automatic on validation PASS). FAILED requires a validation FAIL on the current work. Abandoning a quest is user-only via /quest-del.",
     parameters: {
       type: "object",
       properties: {
-        outcome: { type: "string", enum: ["completed", "failed", "abandoned"] },
+        outcome: { type: "string", enum: ["completed", "failed"] },
         summary: { type: "string", description: "Findings summary, returned to the parent for sub-quests." },
-        confirmDiscard: { type: "boolean", description: "Required when archiving unvalidated work as failed/abandoned: confirms the discard is intentional." },
       },
       required: ["outcome"],
       additionalProperties: false,
     },
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const outcome = params["outcome"];
-      if (outcome !== "completed" && outcome !== "failed" && outcome !== "abandoned") {
-        return textResult("quest_archive needs outcome completed|failed|abandoned.", { error: "bad_outcome" });
+      if (outcome !== "completed" && outcome !== "failed") {
+        return textResult("quest_archive needs outcome completed|failed.", { error: "bad_outcome" });
       }
       const summary = typeof params["summary"] === "string" ? params["summary"] as string : null;
-      const confirmDiscard = params["confirmDiscard"] === true;
       try {
-        const done = await archiveActiveQuest(pi, ctx, toOutcome(outcome), summary, { confirmDiscard });
+        const done = await archiveActiveQuest(pi, ctx, toOutcome(outcome), summary);
         return textResult(
           `Quest ${done.archivedQid} archived (${outcome}, ${done.zipPath}).${done.returnedToParent ? ` Returned to parent ${done.returnedToParent}.` : ""}`,
           { archived: done.archivedQid, outcome, zip: done.zipPath },

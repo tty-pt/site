@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #configurations — five settings under "pi-quest", all optional.
+// HIGH_LEVEL: #configurations — six settings under "pi-quest", all optional.
 // HIGH_LEVEL: #interfaces — bindings select the peer tools; built-ins apply otherwise.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ export interface QuestConfig {
   draftThresholds: DraftThresholds;
   bindings: InterfaceBindings;
   statusStyle: StatusStyle;
+  autoArchive: boolean;
 }
 
 export const DEFAULT_CONFIG: QuestConfig = {
@@ -28,6 +29,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   draftThresholds: { requirements: 2, evidence: 7 },
   bindings: { asking: { tool: "ask_questions" }, reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
+  autoArchive: true,
 };
 
 export function loadConfig(raw: unknown): QuestConfig {
@@ -36,12 +38,14 @@ export function loadConfig(raw: unknown): QuestConfig {
   const timeout = record["askTimeoutMs"];
   const depth = record["depthCap"];
   const style = record["statusStyle"];
+  const autoArchive = record["autoArchive"];
   const thresholds = record["draftThresholds"] as Record<string, unknown> | undefined;
   const bindings = record["bindings"] as Record<string, unknown> | undefined;
   return {
     askTimeoutMs: typeof timeout === "number" ? timeout : DEFAULT_CONFIG.askTimeoutMs,
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
+    autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
     draftThresholds: {
       requirements: typeof thresholds?.["requirements"] === "number"
         ? thresholds["requirements"] as number

@@ -9,6 +9,7 @@ import {
   claimComplete,
   createDraft,
   createQuest,
+  demoteToImplementing,
   recordAmendment,
   recordRefinement,
 } from "../../domain/quest";
@@ -176,6 +177,23 @@ async function applyPlanRevisionParam(
   }
 }
 
+// A validating quest with no validator to answer it goes back to work
+// instead of stalling: the agent keeps implementing and claims again.
+function applyContinueWorkParam(
+  state: QuestState,
+  params: Record<string, unknown>,
+  applied: string[],
+): { state: QuestState; error?: string } {
+  if (params["continueWork"] !== true || !state.qid) return { state };
+  try {
+    const next = updateState((s) => demoteToImplementing(s));
+    applied.push("returned to implementing to continue the work");
+    return { state: next };
+  } catch (err) {
+    return { state, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function applyUpdate(
   pi: Pi,
   ctx: PiCtx,
@@ -238,6 +256,9 @@ export async function applyUpdate(
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }
   }
+  const continued = applyContinueWorkParam(state, params, applied);
+  if (continued.error !== undefined) return { applied, error: continued.error };
+  state = continued.state;
   if (params["claimComplete"] === true && state.qid) {
     try {
       state = await claimForValidation(pi, ctx, state);
@@ -255,7 +276,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_update_state",
     label: "Update Quest State",
-    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), claimComplete to finish.",
+    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), claimComplete to finish, continueWork to return a validating quest to implementing.",
     parameters: {
       type: "object",
       properties: {
@@ -271,6 +292,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         },
         exactNextAction: { type: "string" },
         claimComplete: { type: "boolean" },
+        continueWork: { type: "boolean", description: "Return a validating quest to implementing to continue the work." },
         continuePast: { type: "string", description: "Returned child qid to explicitly continue past." },
       },
       additionalProperties: false,

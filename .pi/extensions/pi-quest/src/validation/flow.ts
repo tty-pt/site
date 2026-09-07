@@ -6,12 +6,13 @@ import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import type { QuestState } from "../domain/quest";
-import { demoteToImplementing } from "../domain/quest";
+import { demoteToImplementing, recordReviewResult } from "../domain/quest";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
+import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig } from "../config";
 import { hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
@@ -57,6 +58,41 @@ function wakeOnce(pi: Pi, key: string, text: string): void {
   sendWake(pi, text);
 }
 
+// A PASS verdict concludes the quest: the archive summary carries the
+// verdict's counts and advisories so nothing the validator said is lost
+// when nobody archives manually.
+const CONCLUSION_ADVISORY_CHARS = 300;
+
+export function buildConclusionSummary(state: QuestState, target: string, review: ParsedReview): string {
+  const advisories = review.advisories.trim();
+  const noted = advisories === ""
+    ? "(no advisories)"
+    : advisories.length > CONCLUSION_ADVISORY_CHARS
+    ? `${advisories.slice(0, CONCLUSION_ADVISORY_CHARS)}… (truncated)`
+    : advisories;
+  return `Validation PASS (${target.slice(0, 12)}). ${state.amendments.length} amendment(s), ${state.setbacks.length} setback(s). Advisories: ${noted}`;
+}
+
+export async function concludeValidationPass(
+  pi: Pi,
+  ctx: PiCtx,
+  qid: string,
+  target: string,
+  review: ParsedReview,
+  autoArchive: boolean,
+): Promise<{ archived: boolean; zipPath: string | null }> {
+  if (!autoArchive) return { archived: false, zipPath: null };
+  // The manual path re-checks currency at archive time; conclude must too:
+  // work that moved after the verdict needs a fresh validation, not an archive.
+  if (implementationFingerprint(getState()) !== target) {
+    sendSteer(pi, `Quest ${qid} changed during validation — conclusion skipped; a fresh validation will boot against the current work.`);
+    return { archived: false, zipPath: null };
+  }
+  const done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
+  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).`);
+  return { archived: true, zipPath: done.zipPath };
+}
+
 export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return;
@@ -90,17 +126,20 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     }),
   });
   if (outcome.status === "no-runner") {
-    announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. The approved plan and implementation summary are above — reply CONFIRM to accept completion, or keep working.`);
+    announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. Only the user can accept completion by replying CONFIRM — your own CONFIRM text does nothing. Otherwise keep working (continueWork:true returns to implementing).`);
     return;
   }
   if (outcome.status === "failed") {
-    wakeOnce(pi, `failed:${qid}:${target}`, `Validation failed to run (${outcome.detail}). Claim completion again to retry, or reply CONFIRM only when no validator is available.`);
+    wakeOnce(pi, `failed:${qid}:${target}`, `Validation failed to run (${outcome.detail}). Claim completion again to retry, keep working (continueWork:true), or hold for the user to reply CONFIRM.`);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
-    const advisories = outcome.review.advisories.trim();
-    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
+    const concluded = await concludeValidationPass(pi, ctx, qid, target, outcome.review, config.autoArchive);
+    if (!concluded.archived) {
+      const advisories = outcome.review.advisories.trim();
+      wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
+    }
     return;
   }
   updateState((s) => demoteToImplementing(s));
@@ -117,6 +156,10 @@ export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) return false;
   const config = await readQuestConfig(ctx.cwd);
   if (isReviewerAvailable(pi, config.bindings.reviewRunner.tool)) return false;
-  void archiveActiveQuest(pi, ctx, "COMPLETED", "Accepted on user confirmation (no validator available).");
+  // User acceptance stands in for the missing validator verdict: record it
+  // as the current PASS so the COMPLETED archive gate sees honest state.
+  updateState((s) => recordReviewResult(s, "PASS", target, "Accepted on user confirmation (no validator available)."));
+  emitNow(pi);
+  await archiveActiveQuest(pi, ctx, "COMPLETED", "Accepted on user confirmation (no validator available).");
   return true;
 }
