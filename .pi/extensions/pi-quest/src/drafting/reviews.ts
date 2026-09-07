@@ -152,7 +152,10 @@ export async function bootDraftReview(
   if (outcome.status === "no-runner") {
     if (!userPathSteered.has(`${qid}:${target}`)) {
       userPathSteered.add(`${qid}:${target}`);
-      sendSteer(pi, `No reviewer available for ${qid}. Plan at ${draftPath(qid)}. Reply "go" to promote to implementing, or keep revising.`);
+      // No reviewer subagent exists: only a live human "go" (real input) may
+      // promote. A quest_ask_human default is absence, not approval — it must
+      // never be treated as promotion authority.
+      sendSteer(pi, `No reviewer available for ${qid}. Plan at ${draftPath(qid)}. Only a live user reply "go" promotes; a quest_ask_human default does not count. Keep revising to stay in drafting.`);
     }
     return;
   }
@@ -226,6 +229,9 @@ export function approveDraft(pi: Pi, qid: string, by: ApprovedBy): boolean {
 }
 
 export function handleGoInput(pi: Pi, text: string): boolean {
+  // "go" here is a LIVE user input event (wired in watchGoInput via
+  // onUserMessage). It is never served from a tool result — a quest_ask_human
+  // default is absence, not approval, and so can never promote a draft.
   if (!GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;

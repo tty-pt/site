@@ -66,7 +66,11 @@ run_slugify()
 {
 	for loc in C C.UTF-8 ""; do
 		run_locale "$loc" "$BIN_ASAN"
-		run_locale "$loc" valgrind $VG_OPTS "$BIN_VG"
+		if command -v valgrind >/dev/null 2>&1; then
+			run_locale "$loc" valgrind $VG_OPTS "$BIN_VG"
+		else
+			echo "SKIP     slugify_test valgrind (valgrind not installed)"
+		fi
 	done
 }
 

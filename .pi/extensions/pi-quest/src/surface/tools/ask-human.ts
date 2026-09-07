@@ -37,7 +37,13 @@ export function askHumanTool(pi: Pi): PiToolSpec {
         result.source === "user"
           ? `Human answered: "${result.answer}"`
           : `No human answer (absence) — proceeding with default: "${result.answer}"`,
-        { answer: result.answer, source: result.source, askingTool, askingAvailable: askingToolAvailable(pi, askingTool) },
+        {
+          answer: result.answer,
+          source: result.source,
+          askingTool,
+          askingAvailable: askingToolAvailable(pi, askingTool),
+          uiPresent: ctx.hasUI,
+        },
       );
     },
   };

@@ -48,6 +48,11 @@ export async function askWithDefault(pi: Pi, ctx: PiCtx, args: AskArgs): Promise
   };
   if (!ctx.hasUI || timeoutMs === 0) {
     pendingByQid.set(qid, { question: args.question, at: Date.now(), resolve: null });
+    if (ctx.hasUI) {
+      sendSteer(pi, `Question not shown (zero wait): defaulting to "${args.defaultAnswer}". No human checkpoint occurred.`);
+    } else {
+      sendSteer(pi, `No interactive UI present — this question was not shown to a human. Answering with default "${args.defaultAnswer}". A quest_ask_human default is not live human approval.`);
+    }
     return finish(args.defaultAnswer, "default", false);
   }
   const answer = await new Promise<string | null>((resolve) => {

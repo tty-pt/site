@@ -24,7 +24,7 @@ export async function detectSubstantiveRequest(pi: Pi, ctx: PiCtx, text: string)
     pi,
     `New quest ${qid} opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
-      `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. The same future/<qid>.md stays the quest document through implementing and validating — mark completion with a ## Status section (Phase: validating, Complete: true), or quest_update_state {claimComplete: true} writes it for you.`,
+      `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}.`,
   );
   return true;
 }

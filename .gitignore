@@ -39,3 +39,4 @@ tests/unit/mpfd_contract_test
 /debug
 *.zip
 /compile_commands.json
+.worktrees

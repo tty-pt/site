@@ -21,6 +21,16 @@ Deno.test("ask defaults immediately without UI", async () => {
   replaceState(IDLE_STATE);
 });
 
+Deno.test("ask without UI surfaces a steer that no human saw it", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  await askWithDefault(pi, fakeCtx(tmp()), { question: "Which color?", defaultAnswer: "blue" });
+  const steers = pi.sent.map((s) => String(s.message.content).toLowerCase());
+  check(steers.some((s) => s.includes("not shown to a human")), "steers that no human checkpoint occurred");
+  check(steers.some((s) => s.includes("default")), "steers the applied default");
+  replaceState(IDLE_STATE);
+});
+
 Deno.test("ask takes the user's answer when given", async () => {
   replaceState(createQuest("work", "abc123"));
   const pi = fakePi();

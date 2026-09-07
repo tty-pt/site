@@ -18,8 +18,10 @@
 #include "../source/source.h"
 
 #define ITEM_IMPL
+#define AUTH_OUTCOME_IMPL
 #include "auth.h"
 #undef ITEM_IMPL
+#undef AUTH_OUTCOME_IMPL
 
 #include "../common/common.h"
 #include "dict.h"
@@ -666,8 +668,8 @@ static void auth_send_html(
 /* SSR outcome hooks                                                    */
 /* ------------------------------------------------------------------ */
 
-int on_auth_login_error(
-        int fd, int status, const char *msg, const char *redirect)
+XY_IMPL(int, on_auth_login_error,
+	int, fd, int, status, const char *, msg, const char *, redirect)
 {
 	char accept[256] = { 0 };
 	axil_header_get(fd, "Accept", accept, sizeof(accept));

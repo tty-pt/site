@@ -25,6 +25,21 @@ Deno.test("quest_ask_human reports the live asking tool as available", async () 
   check(details["askingTool"] === "ask_user_question", "binding reported");
   check(details["askingAvailable"] === true, "live tool available");
   check(details["answer"] === "green" && details["source"] === "user", "answer details");
+  check(details["uiPresent"] === true, "ui presence reported true with a UI");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("quest_ask_human reports absence and no UI when headless", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const cwd = await settingsCwd({});
+  const pi = fakePi();
+  const ctx = fakeCtx(cwd);
+  const result = await askHumanTool(pi).execute("t3", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
+  const details = result.details as Record<string, unknown>;
+  check(details["source"] === "default", "no UI defaults");
+  check(details["uiPresent"] === false, "ui presence reported false without a UI");
+  const text = result.content.map((c) => c.text ?? "").join("\n");
+  check(text.includes("absence"), "absence surfaced in text");
   replaceState(IDLE_STATE);
 });
 

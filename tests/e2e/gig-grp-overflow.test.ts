@@ -65,7 +65,7 @@ Deno.test("gig: grp field >= 128 bytes does not crash the server", async () => {
         Cookie: ch,
         "Content-Type": "multipart/form-data; boundary=----boundary",
       },
-      body,
+      body: new Blob([body as BlobPart]),
       redirect: "manual",
     });
     await resp.body?.cancel();

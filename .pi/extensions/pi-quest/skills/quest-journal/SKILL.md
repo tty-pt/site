@@ -41,9 +41,11 @@ quest id (`future/<qid>.md`); there are no slugs.
   plan, never the scope (scope change = new quest). Work from the quest's
   Exact Next Action. User refinements are recorded and feed the validator.
   When done, claim completion via `quest_update_state` with `claimComplete`
-  (which writes the quest doc's `## Status` section), or mark it directly by
-  editing the doc: `## Status` with `- Phase: validating` and `- Complete:
-  true`. Either way the save boots the validator immediately.
+  — an unverified claim that boots the validator immediately. The quest doc
+  is locked to direct edits during implementing; all plan changes go through
+  `planRevision` (peer-reviewed) and completion through `claimComplete`. The
+  doc's `## Status` section tracks the phase but never marks completion as
+  true on your say-so.
 - **Validation.** A validator checks the implementation against the approved
   plan plus amendments. PASS: run `quest_archive` to finish (agent quest doc
   + rendered view + manifest). FAIL: findings return you to implementing and

@@ -1,4 +1,6 @@
 // HIGH_LEVEL: #drafting — one writable file, all else blocked.
+// HIGH_LEVEL: #implementing — the quest doc is locked to direct edits; plan
+// moves go through peer-reviewed planRevision, completion through claimComplete.
 // HIGH_LEVEL: #tools (other agents) — reviewer sessions stay read-only.
 // SPEC: B2 (truth table, first match wins), B2.1 (exemption first, block-message invariant).
 import type { QuestState } from "./quest";
@@ -39,12 +41,13 @@ export interface GateOptions {
 
 export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {}): Decision {
   const draftFile = state.qid === null ? null : draftPath(state.qid);
-  if (
-    draftFile !== null &&
+  const isDraftFile = draftFile !== null &&
     ref.toolClass === "write" &&
     ref.path !== undefined &&
-    (ref.path === draftFile || ref.path.endsWith(`/${draftFile}`))
-  ) {
+    (ref.path === draftFile || ref.path.endsWith(`/${draftFile}`));
+  // The drafting exemption keeps its historic precedence: it beats even the
+  // reviewer row. The lock below only narrows implementing/validating.
+  if (isDraftFile && state.phase !== "implementing" && state.phase !== "validating") {
     return { allowed: true };
   }
   if (ref.toolClass === "read" && options.isReviewerSession === true) {
@@ -57,6 +60,13 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       "Read/search only; report via verdict.",
     );
   }
+  if (isDraftFile) {
+    return blocked(
+      "QUEST_DOC_LOCKED",
+      "IMPLEMENTATION_BLOCKED",
+      "Quest doc is locked during implementation. Use quest_update_state {planRevision: ...} to revise the plan (peer-reviewed), or {claimComplete: true} to claim completion.",
+    );
+  }
   if (state.activeReview !== null) {
     if (ref.toolClass === "journal" || ref.toolClass === "ask") {
       return { allowed: true };
@@ -64,7 +74,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return blocked(
       "AWAITING_REVIEW",
       "PLAN_REVIEW_REQUIRED",
-      "Review running — end your turn; the verdict arrives as a new turn. Draft saves still supersede.",
+      "Review running — end your turn; the verdict arrives as a new turn.",
     );
   }
   if (ref.toolClass === "read" || ref.toolClass === "journal" || ref.toolClass === "ask") {
@@ -94,7 +104,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return blocked(
       "PROVISIONAL_RESEARCH_PENDING",
       "RESEARCH_REQUIRED",
-      "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — the quest document lives at .pi/quest/future/<qid>.md and stays the only writable path through implementing and validating; it renders at archive.",
+      "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — the quest document lives at .pi/quest/future/<qid>.md; during drafting it is the only writable file, and during implementing and validating it is locked to direct edits.",
     );
   }
   return { allowed: true };

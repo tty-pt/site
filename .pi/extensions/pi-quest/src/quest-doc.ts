@@ -1,5 +1,6 @@
-// HIGH_LEVEL: #validation — the quest doc's ## Status section is the in-file
-// completion signal; implementing update-state and demotes keep it honest.
+// HIGH_LEVEL: #validation — the quest doc's ## Status section tracks the
+// phase; claim and demote paths keep it honest. The validator boots from
+// the claim tool call, never from the file.
 // Shared file I/O for the quest document (domain namespaces the pure string
 // parsing); best-effort by design — a failed status write never breaks the
 // agent or blocks a transition already taken in state.

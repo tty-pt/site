@@ -53,7 +53,9 @@ async function claimForValidation(
     throw new Error(`complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}`);
   }
   const claimed = updateState((s) => claimComplete(s));
-  await setDocStatus(ctx, qid, "validating", true);
+  // The claim is unverified until the validator passes: the doc tracks the
+  // phase but never marks completion as true on the agent's say-so.
+  await setDocStatus(ctx, qid, "validating", false);
   emitNow(pi);
   sendSteer(pi, `Quest ${claimed.qid} claimed complete. Validator booting against the approved plan.`);
   void ensureValidationFlow(pi, ctx);
@@ -185,7 +187,7 @@ async function applyPlanRevisionParam(
 
 // A validating quest with no validator to answer it goes back to work
 // instead of stalling: the agent keeps implementing and claims again. The
-// in-file ## Status marker is reset so a fresh claim re-arms the trigger.
+// in-file ## Status marker is reset so the doc stays honest about the phase.
 async function applyContinueWorkParam(
   pi: Pi,
   ctx: PiCtx,

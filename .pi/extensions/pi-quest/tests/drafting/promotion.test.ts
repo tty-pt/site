@@ -8,7 +8,7 @@ import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts"
 import type { Qid } from "../../src/domain/qid.ts";
 import { draftPath } from "../../src/domain/paths";
 import { bootDraftReview, hashContent } from "../../src/drafting/reviews.ts";
-import { fakeCtx, fakePi } from "../fake-pi.ts";
+import { barePi, fakeCtx, fakePi } from "../fake-pi.ts";
 
 const QID = "abc123" as Qid;
 
@@ -114,4 +114,19 @@ Deno.test("review PASS attaches advisories to the promotion wake", async () => {
   } finally {
     replaceState(IDLE_STATE);
   }
+});
+
+Deno.test("no reviewer keeps drafting and steers only a live user 'go'", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-promote-"));
+  const target = draftFile(cwd, true);
+  const drafting = createDraft(createQuest("work", QID), "work");
+  replaceState({ ...drafting, draft: { ...drafting.draft!, planAuthored: true } });
+  const pi = barePi(); // no reviewer transport at all => no-runner
+  await bootDraftReview(pi, fakeCtx(cwd), target, DEFAULT_CONFIG);
+  const steered = pi.sent.map((s) => String(s.message.content)).join("\n");
+  check(getState().phase === "drafting", "stays drafting with no reviewer");
+  check(steered.includes("No reviewer available"), "no-runner notice sent");
+  check(steered.includes("live user"), "asks for a live user go");
+  check(steered.includes("default does not count"), "excludes ask-tool defaults");
+  replaceState(IDLE_STATE);
 });

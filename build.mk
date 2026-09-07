@@ -15,7 +15,7 @@ TARGET ?= ${TARGET-WASM_ONLY-${WASM_ONLY}}
 SRC ?= $(SRC_AUTO)
 MAKEFILE_DEPS = Makefile $(REPO_ROOT)/build.mk
 
-CC ?= clang
+CC = clang
 
 SANITIZE ?= 0
 CFLAGS-SANITIZE-1 = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer

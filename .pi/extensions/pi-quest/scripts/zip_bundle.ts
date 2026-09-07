@@ -17,13 +17,31 @@ const INPUTS = [
   "skills",
 ];
 
-const cmd = new Deno.Command("zip", {
-  args: ["-r", "-q", OUT, ...INPUTS],
-  cwd: PKG,
-  stdout: "piped",
-  stderr: "piped",
-});
-const { code, stderr } = await cmd.output();
+let code = 1;
+let stderr = new Uint8Array();
+
+try {
+  const cmd = new Deno.Command("zip", {
+    args: ["-r", "-q", OUT, ...INPUTS],
+    cwd: PKG,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const res = await cmd.output();
+  code = res.code;
+  stderr = res.stderr;
+} catch {
+  // Fallback to python3 -m zipfile if zip executable is not available
+  const pyCmd = new Deno.Command("python3", {
+    args: ["-m", "zipfile", "-c", OUT, ...INPUTS],
+    cwd: PKG,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const res = await pyCmd.output();
+  code = res.code;
+  stderr = res.stderr;
+}
 if (code !== 0) {
   const err = new TextDecoder().decode(stderr).trim();
   console.error(`bundle zip packaging failed: ${err || `exit ${code}`}`);

@@ -6,7 +6,6 @@ import { getState } from "../app/store";
 import { classify } from "../utils/classify";
 import { decide, reasonText } from "../domain/gates";
 import { hasAnyInFlight, hasInFlight } from "../review/tracker";
-import { draftPath } from "../domain/paths";
 
 function pathOf(input: Record<string, unknown>): string | undefined {
   const path = input["path"];
@@ -23,19 +22,17 @@ function reviewerCaller(ctx: PiCtx): boolean {
 
 // While a plan-revision review runs, implementing tightens like drafting:
 // the agent ends its turn and waits for the verdict instead of building
-// against an un-approved plan. Draft saves still supersede; journal and
-// questions stay usable. Block-only — reads and verdicts fall through.
+// against an un-approved plan. The quest doc is locked to direct edits, so
+// revisions go through quest_update_state; journal and questions stay
+// usable. Block-only — reads and verdicts fall through.
 function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: string; terminate?: true } | undefined {
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || !hasInFlight(state.qid)) return undefined;
   const toolClass = classify(event.toolName, event.input);
   if (toolClass === "journal" || toolClass === "ask") return undefined;
-  const file = draftPath(state.qid);
-  const path = pathOf(event.input);
-  if (toolClass === "write" && path !== undefined && (path === file || path.endsWith(`/${file}`))) return undefined;
   return {
     block: true,
-    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. Draft saves still supersede.",
+    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn.",
     terminate: true,
   };
 }

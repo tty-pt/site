@@ -1,5 +1,6 @@
-// HIGH_LEVEL: #validation — the quest doc's ## Status section is the in-file
-// completion signal; implementing updates it, the touch trigger reads it.
+// HIGH_LEVEL: #validation — the quest doc's ## Status section tracks the
+// phase but never marks completion on the agent's say-so; the runtime keeps
+// it honest on claims and demotes.
 // Pure string helpers over the quest document; file I/O lives in the
 // adapters (quest-doc.ts at src root), never here.
 

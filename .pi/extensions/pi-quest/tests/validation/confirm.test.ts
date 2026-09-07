@@ -17,7 +17,7 @@ import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { handleConfirmInput } from "../../src/validation/flow.ts";
-import { fakeCtx, fakePi } from "../fake-pi.ts";
+import { fakeCtx, fakePi, barePi } from "../fake-pi.ts";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-confirm-"));
@@ -52,7 +52,7 @@ async function withDraftFile(cwd: string): Promise<void> {
 
 Deno.test("user CONFIRM archives COMPLETED when no validator is available", async () => {
   const cwd = tmp();
-  const pi = fakePi(); // no tools registered: reviewer unavailable
+  const pi = barePi(); // no reviewer transport: reviewer unavailable
   replaceState(validatingWithStalePlanPass());
   await withDraftFile(cwd);
   const accepted = await handleConfirmInput(pi, fakeCtx(cwd), "CONFIRM");

@@ -71,9 +71,13 @@ run()
 	ASAN_OPTIONS=symbolize=0 "$B_SLUG" >/dev/null 2>&1
 	report "slugify_test ASAN" $? clean
 
-	echo "== slugify_test (valgrind) =="
-	valgrind $VG_OPTS "$B_SLUG" >/dev/null 2>&1
-	report "slugify_test valgrind" $? clean
+	if command -v valgrind >/dev/null 2>&1; then
+		echo "== slugify_test (valgrind) =="
+		valgrind $VG_OPTS "$B_SLUG" >/dev/null 2>&1
+		report "slugify_test valgrind" $? clean
+	else
+		echo "SKIP     slugify_test valgrind (valgrind not installed)"
+	fi
 
 	echo "== caller_contract_test (ASAN) =="
 	for s in 1 2 3; do

@@ -97,3 +97,11 @@ export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Parti
     },
   };
 }
+
+// A Pi with neither a reviewer tool nor an event bridge: the structural "no
+// reviewer at all" case that must fall back to a live human.
+export function barePi(): FakePi {
+  const pi = fakePi();
+  (pi as { events: unknown }).events = undefined;
+  return pi;
+}

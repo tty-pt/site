@@ -23,13 +23,30 @@ function drafting() {
   return createDraft(createQuest("req", QID), "thing");
 }
 
-Deno.test("gate exempts the draft file in every state", () => {
+Deno.test("gate exempts the draft file only during drafting", () => {
   const draftWrite = ref("edit", "write", draftPath(QID));
   const revision = { ...drafting(), draft: { ...drafting().draft!, outstandingFindings: true } };
-  check(decide(revision, draftWrite).allowed, "exempt under revision");
+  check(decide(revision, draftWrite).allowed, "exempt under revision in drafting");
   const midReview = { ...drafting(), activeReview: { kind: "draft" as const, target: "h1" } };
-  check(decide(midReview, draftWrite).allowed, "exempt mid-review");
-  check(decide(midReview, draftWrite, { isReviewerSession: true }).allowed, "exemption beats reviewer row");
+  check(decide(midReview, draftWrite).allowed, "exempt mid-review in drafting");
+  check(decide(midReview, draftWrite, { isReviewerSession: true }).allowed, "exemption beats reviewer row in drafting");
+  const implementing = { ...drafting(), phase: "implementing" as const };
+  const blockedImpl = decide(implementing, draftWrite);
+  check(!blockedImpl.allowed && blockedImpl.code === "IMPLEMENTATION_BLOCKED", "quest doc locked during implementing");
+  const validating = { ...drafting(), phase: "validating" as const };
+  const blockedVal = decide(validating, draftWrite);
+  check(!blockedVal.allowed && blockedVal.code === "IMPLEMENTATION_BLOCKED", "quest doc locked during validating");
+});
+
+Deno.test("QUEST_DOC_LOCKED names planRevision and claimComplete", () => {
+  const implementing = { ...drafting(), phase: "implementing" as const };
+  const d = decide(implementing, ref("edit", "write", draftPath(QID)));
+  check(!d.allowed, "blocked");
+  if (!d.allowed) {
+    check(d.phaseName === "QUEST_DOC_LOCKED", "locked state name");
+    check(d.action.includes("planRevision"), "action mentions planRevision");
+    check(d.action.includes("claimComplete"), "action mentions claimComplete");
+  }
 });
 
 Deno.test("gate keeps reviewers read-only", () => {

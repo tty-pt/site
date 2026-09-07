@@ -174,7 +174,9 @@ Deno.test("gate tightens while a plan-revision review runs", () => {
     const journal = { type: "tool_call", toolCallId: "3", toolName: "quest_update_state", input: {} } as ToolCallEvent;
     check(handler(journal, ctx) === undefined, "journal ops stay usable");
     const draftWrite = { type: "tool_call", toolCallId: "4", toolName: "edit", input: { path: draftPath(QID) } } as ToolCallEvent;
-    check(handler(draftWrite, ctx) === undefined, "draft saves still supersede");
+    const held = handler(draftWrite, ctx);
+    check(held?.block === true, "quest-doc edits blocked mid-revision-review — revisions go through quest_update_state");
+    check(String(held?.reason).includes("PLAN_REVISION_REVIEW"), "hold names the revision review");
   } finally {
     cancelReview(QID);
     replaceState(IDLE_STATE);

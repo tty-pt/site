@@ -128,6 +128,30 @@ else
   check_fail "Boundary or purity checks failed (run 'make boundary-check' for details)"
 fi
 
+# 8. Deploy assets (gitignored, required for version.gen.h / common.so)
+echo -e "\n${BOLD}8. Deploy Assets (htdocs)${RESET}"
+DEPLOY_ASSETS=("hyle.css" "hyle-fragments.js" "styles.css" "bud-client.js" "bud-hydrate.js")
+ASSETS_OK=1
+for a in "${DEPLOY_ASSETS[@]}"; do
+  if [ ! -f "htdocs/$a" ]; then
+    ASSETS_OK=0
+    check_fail "htdocs/$a is missing (gitignored; removed by 'git clean')"
+  fi
+done
+if [ -f "htdocs/hyle.css" ] && [ ! -f "external/hyle/crates/hyle/assets/hyle.css" ]; then
+  check_warn "hyle crate CSS source missing — cannot verify htdocs/hyle.css sync"
+fi
+if [ -f "htdocs/hyle.css" ] && [ -f "external/hyle/crates/hyle/assets/hyle.css" ]; then
+  if diff -q htdocs/hyle.css external/hyle/crates/hyle/assets/hyle.css >/dev/null 2>&1; then
+    check_pass "htdocs/hyle.css matches the hyle crate source"
+  else
+    check_warn "htdocs/hyle.css is out of sync with the hyle crate (run 'make assets-sync')"
+  fi
+fi
+if [ "$ASSETS_OK" -eq 1 ]; then
+  check_pass "All hashed deploy assets present in htdocs/"
+fi
+
 echo -e "\n${BOLD}=== Doctor Summary: ${ERRORS} errors, ${WARNINGS} warnings ===${RESET}"
 if [ $ERRORS -eq 0 ]; then
   echo -e "${GREEN}Project is in healthy working condition!${RESET}\n"
