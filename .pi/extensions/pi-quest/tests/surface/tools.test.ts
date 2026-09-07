@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { questDir } from "../../src/domain/paths.ts";
+import { stageDir } from "../../src/domain/paths.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import {
   claimComplete,
@@ -219,7 +219,7 @@ Deno.test("archive abandoned blocks silent discard and cleans both dirs", async 
   const done = await archiveActiveQuest(pi, fakeCtx(cwd), "ABANDONED", "superseded by new direction", { confirmDiscard: true });
   check(done.archivedQid === "abc123", "explicit discard archived");
   check(getState().phase === "idle", "archive clears");
-  check(!existsSync(join(cwd, questDir("abc123" as Qid))), "current dir removed");
+  check(!existsSync(join(cwd, stageDir("abc123" as Qid))), "staging dir removed");
   check(!existsSync(join(cwd, draftPath("abc123" as Qid))), "future draft removed");
   replaceState(IDLE_STATE);
 });

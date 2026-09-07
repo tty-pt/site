@@ -94,7 +94,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return blocked(
       "PROVISIONAL_RESEARCH_PENDING",
       "RESEARCH_REQUIRED",
-      "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — drafts live under .pi/quest/future/ and the draft file is the only writable path; never write current/, it renders at archive.",
+      "Investigate, establish quest identity, call quest_update_state with findings. Then create the draft with quest_update_state {draftName} — the quest document lives at .pi/quest/future/<qid>.md and stays the only writable path through implementing and validating; it renders at archive.",
     );
   }
   return { allowed: true };

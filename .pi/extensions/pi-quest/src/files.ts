@@ -3,7 +3,7 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx } from "./hooks/events";
-import { CURRENT_DIR, draftPath, FUTURE_DIR } from "./domain/paths";
+import { draftPath, FUTURE_DIR } from "./domain/paths";
 import { isQid, type Qid } from "./domain/qid";
 import { renderDraftTemplate } from "./views/draft-template";
 
@@ -17,10 +17,11 @@ export async function listKnownQids(cwd: string): Promise<string[]> {
   } catch {
     // Missing workspace is fine — no known ids.
   }
+  // Archived quests keep their id reserved so a past id is never reused.
   try {
-    const currents = await readdir(join(cwd, CURRENT_DIR), { withFileTypes: true });
-    for (const entry of currents) {
-      if (entry.isDirectory()) qids.add(entry.name);
+    const archives = await readdir(join(cwd, ".pi", "quest", "archive"));
+    for (const f of archives) {
+      if (f.endsWith(".zip")) qids.add(f.slice(0, -4));
     }
   } catch {
     // Missing workspace is fine — no known ids.

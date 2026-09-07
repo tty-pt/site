@@ -14,8 +14,9 @@ import type { Pi, PiCtx } from "../hooks/events";
 import { onSessionStart, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview, shouldNoticeReview } from "../review/flow";
-import { hasInFlight, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
+import { cancelReview, hasInFlight, isCurrentReview } from "../review/tracker";
 import { hashContent, parseDraftSections, reviewMaterial, splicePlanSection } from "../drafting/reviews";
+import { diffPlans } from "../drafting/plan-diff";
 import { noteDraftUpdated } from "../durability/status";
 
 export const APPROVE_PATTERN = /^\s*approve(?:\s+revision)?\s*[.!]*\s*$/i;
@@ -110,21 +111,34 @@ export async function maybeBootPlanRevisionReview(pi: Pi, ctx: PiCtx, note: stri
   const sections = parseDraftSections(content);
   if (sections.plan.length === 0) return "idle";
   const hash = hashContent(content);
-  if (hash === state.draft.contentHash) return "in-sync";
-  if (isCurrentReview(state.qid, hash)) return "in-flight";
-  if (hash === state.draft.approvedPlanHash) {
-    updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash } });
+  // Plan drift, not raw hash: the quest doc also carries ## Status and notes,
+  // so a status-only edit must not masquerade as a plan revision. The baseline
+  // is the last reviewed (or last revised) plan text; without one the first
+  // touch just records the baseline.
+  const baseline = state.draft.lastReviewedPlan
+    ?? [...(state.draft.planRevisions ?? [])].reverse().find((r) => r.plan !== "")?.plan
+    ?? "";
+  const planChanged = baseline !== "" && diffPlans(baseline, sections.plan, 1e6) !== null;
+  if (!planChanged) {
+    if (state.draft.contentHash !== hash) {
+      updateState((s) =>
+        s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true }
+      );
+    }
     return "in-sync";
   }
+  if (isCurrentReview(state.qid, hash)) return "in-flight";
   const qid = state.qid;
   const previousHash = state.draft.contentHash;
-  const previousPlan = state.draft.lastReviewedPlan ?? "";
-  updateState((s) => recordPlanRevision(s, previousHash, hash, note, previousPlan));
+  updateState((s) => recordPlanRevision(s, previousHash, hash, note, baseline));
   noteDraftUpdated(ctx);
   const config = await readQuestConfig(ctx.cwd);
-  supersedeReviewThenBootFresh(qid, hash, () => {
-    void bootPlanRevisionReview(pi, ctx, hash, config);
-  });
+  // Boot the reviewer for the new target — cancelling any in-flight review
+  // first. The tracker must NOT be pre-seeded (as supersedeReviewThenBootFresh
+  // does): bootPlanRevisionReview treats an in-flight current target as a
+  // duplicate and the boot would be a no-op.
+  if (hasInFlight(qid)) cancelReview(qid);
+  void bootPlanRevisionReview(pi, ctx, hash, config);
   return "booted";
 }
 

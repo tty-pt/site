@@ -16,6 +16,7 @@ import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig } from "../config";
 import { hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
+import { setDocStatus } from "../quest-doc";
 
 export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
@@ -56,6 +57,12 @@ function wakeOnce(pi: Pi, key: string, text: string): void {
   if (announced.has(key)) return;
   announced.add(key);
   sendWake(pi, text);
+}
+
+// HIGH_LEVEL: #independent review contexts — fresh-session announcements, so
+// a stale "no validator" notice can never suppress a retry's messaging.
+export function resetAnnouncements(): void {
+  announced.clear();
 }
 
 // A PASS verdict concludes the quest: the archive summary carries the
@@ -143,6 +150,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   updateState((s) => demoteToImplementing(s));
+  await setDocStatus(ctx, qid, "implementing", false);
   emitNow(pi);
   sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
 }

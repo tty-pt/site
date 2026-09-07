@@ -144,9 +144,9 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 Under `.pi/quest/` in the project:
 
 ```
-future/<qid>.md     the draft — the only file drafting may write, and the workout space for plans
-current/<qid>/      generated, read-only view of a live quest (never write here)
-archive/<qid>.zip   slim archive of each finished quest (view + session reference + manifest)
+future/<qid>.md     the quest document — one file for the whole life (draft plan, then the editable plan+## Status doc through implementing and validating)
+.staging/<qid>/     ephemeral archive staging, removed after zipping (never surfaced, never read back)
+archive/<qid>.zip   slim archive of each finished quest (agent doc + rendered view + manifest)
 ```
 
 Every quest — draft or active — is identified by a short alphanumeric quest id

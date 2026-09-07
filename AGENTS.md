@@ -61,7 +61,7 @@ make watch          # auto-rebuild + restart on :8080
    WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
 
 7. **Autonomous Quest Management.** All work MUST use the Quest Journal workflow.
-   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/current/<qid>/quest.md`) from user requests. The user does not need to invoke quest commands manually.
+   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/future/<qid>.md`) from user requests. The user does not need to invoke quest commands manually.
    - The quest file is your single source of truth for goals, status, and decisions. Update it proactively as you make progress and before context is compacted.
    - Sub-quests are created automatically via `quest_subquest` when tangent remarks or follow-ups arise.
    - Completed work is archived to `.pi/quest/archive/<qid>.zip` via `quest_archive`.

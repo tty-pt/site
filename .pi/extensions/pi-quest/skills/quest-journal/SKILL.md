@@ -8,7 +8,7 @@ description: "Quest Journal v2: drafting / implementing / validating modes per q
 You work inside quests. One quest is active at a time. Quest state lives in
 the session transcript as `quest_journal` snapshots; `quest.md` files are
 generated read-only views, never truth. Every quest has a short alphanumeric
-quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
+quest id (`future/<qid>.md`); there are no slugs.
 
 ## Modes
 
@@ -33,17 +33,21 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
   implementing automatically (recorded research + actionable plan required).
   The user may reply `go` at any moment to promote immediately; approval is
   never required. Rebut a verdict with evidence via `quest_rebut`.
-  Never author `.pi/quest/current/` — it does not exist until archive renders
-  it. `quest.md` files are generated views, never truth, never write targets.
+  `future/<qid>.md` stays the one quest document through implementing and
+  validating; it is removed only when the quest archives.
 - **Implementing.** Unrestricted. Record setbacks with evidence as they
   happen; nothing blocks. When reality contradicts the plan, record an
   amendment with reasons via `quest_update_state` — amendments adjust the
   plan, never the scope (scope change = new quest). Work from the quest's
   Exact Next Action. User refinements are recorded and feed the validator.
-  When done, claim completion via `quest_update_state` with `claimComplete`.
+  When done, claim completion via `quest_update_state` with `claimComplete`
+  (which writes the quest doc's `## Status` section), or mark it directly by
+  editing the doc: `## Status` with `- Phase: validating` and `- Complete:
+  true`. Either way the save boots the validator immediately.
 - **Validation.** A validator checks the implementation against the approved
-  plan plus amendments. PASS: run `quest_archive` to finish (quest view +
-  session reference + manifest). FAIL: findings return you to implementing.
+  plan plus amendments. PASS: run `quest_archive` to finish (agent quest doc
+  + rendered view + manifest). FAIL: findings return you to implementing and
+  the doc's `## Status` is reset, so a fresh claim re-arms the trigger.
   Archived is final — follow-ups are new quests citing the old id.
 
 ## Tools
@@ -58,8 +62,8 @@ quest id (`future/<qid>.md`, `current/<qid>/`); there are no slugs.
   claim via `quest_update_state` with `claimComplete` first), failed, or
   abandoned. Archiving unvalidated work as failed/abandoned requires
   `confirmDiscard:true` plus a summary of what was discarded and why.
-  Archive zips `current/<qid>/` + `future/<qid>.md` into
-  `archive/<qid>.zip` (sole artifact) and removes both sources.
+  Archive zips the quest doc `future/<qid>.md` plus the rendered view and
+  manifest into `archive/<qid>.zip` (sole artifact) and removes both sources.
 - `quest_recover` — rebuild state from the transcript, including earlier
   sessions. Runs automatically when state is absent.
 - `quest_rebut` — answer a review with evidence; a successful rebuttal

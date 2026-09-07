@@ -225,8 +225,9 @@ at risk while the storage layer is replaced.
   Hand-edits to `quest.md` must not be read back as truth; R3 contract:
   the file header states it is generated output. Without this, user edits
   reintroduce the drift pi-quest was built to stop.
-- **The transcript is the source of truth.** `.pi/quest/current/**/quest.md`
-  is a render, not a second database.
+- **The transcript is the source of truth.** `future/<qid>.md` is the quest
+  document (editable plan + `## Status`); the archive's `rendered-view.md`
+  is a render. Never a second database.
 
 ---
 
@@ -282,11 +283,11 @@ assigned once at detection. The id is the base62 encoding (`0-9A-Za-z`,
 big-endian, fixed minimum width) of unix epoch seconds at creation (~6
 characters today), bumped monotonically on same-second or directory
 collision, so ids are short, filesystem-safe, and roughly time-ordered.
-The id names all paths (`future/<qid>.md`, `current/<qid>/`,
-`archive/<qid>.zip`) and tags all snapshots. There are no slugs: no
-slug generation, no slug matching, no slug-correction. Human-readable
-names live in the quest's `name` field for display and name matching
-only, never in paths.
+The id names all paths (`future/<qid>.md`, `archive/<qid>.zip`, the
+  ephemeral `.pi/quest/.staging/<qid>/`) and tags all snapshots. There are
+  no slugs: no slug generation, no slug matching, no slug-correction.
+  Human-readable names live in the quest's `name` field for display and
+  name matching only, never in paths.
 
 ### B1.1 States
 

@@ -22,6 +22,7 @@ import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
 import { hashContent, maybeBootDraftReview, parseDraftSections, splicePlanSection } from "../../drafting/reviews";
+import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
@@ -43,15 +44,20 @@ async function claimForValidation(
   if (state.phase !== "implementing") {
     throw new Error(`cannot claim completion from phase ${state.phase}`);
   }
+  const qid = state.qid;
+  if (qid === null) {
+    throw new Error("cannot claim completion without an active quest");
+  }
   const unfinished = unfinishedChildren(state);
   if (unfinished.length > 0) {
     throw new Error(`complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}`);
   }
   const claimed = updateState((s) => claimComplete(s));
+  await setDocStatus(ctx, qid, "validating", true);
   emitNow(pi);
   sendSteer(pi, `Quest ${claimed.qid} claimed complete. Validator booting against the approved plan.`);
   void ensureValidationFlow(pi, ctx);
-  return claimed;
+  return getState();
 }
 
 async function writePlanToDraft(
@@ -178,15 +184,20 @@ async function applyPlanRevisionParam(
 }
 
 // A validating quest with no validator to answer it goes back to work
-// instead of stalling: the agent keeps implementing and claims again.
-function applyContinueWorkParam(
+// instead of stalling: the agent keeps implementing and claims again. The
+// in-file ## Status marker is reset so a fresh claim re-arms the trigger.
+async function applyContinueWorkParam(
+  pi: Pi,
+  ctx: PiCtx,
   state: QuestState,
   params: Record<string, unknown>,
   applied: string[],
-): { state: QuestState; error?: string } {
+): Promise<{ state: QuestState; error?: string }> {
   if (params["continueWork"] !== true || !state.qid) return { state };
   try {
+    const qid = state.qid;
     const next = updateState((s) => demoteToImplementing(s));
+    await setDocStatus(ctx, qid, "implementing", false);
     applied.push("returned to implementing to continue the work");
     return { state: next };
   } catch (err) {
@@ -256,7 +267,7 @@ export async function applyUpdate(
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }
   }
-  const continued = applyContinueWorkParam(state, params, applied);
+  const continued = await applyContinueWorkParam(pi, ctx, state, params, applied);
   if (continued.error !== undefined) return { applied, error: continued.error };
   state = continued.state;
   if (params["claimComplete"] === true && state.qid) {

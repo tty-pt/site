@@ -8,11 +8,13 @@ import { recordAdvisoryNote } from "../domain/quest";
 import { onToolResult, type Pi } from "../hooks/events";
 import { detectSetback } from "./setbacks";
 import { watchApproveInput, watchPlanRevisionCatchAll, watchPlanRevisionResume } from "./plan-revision";
+import { watchImplementingDocBoot } from "./quest-touch";
 
 export function installImplementing(pi: Pi): void {
   watchApproveInput(pi);
   watchPlanRevisionCatchAll(pi);
   watchPlanRevisionResume(pi);
+  watchImplementingDocBoot(pi);
   onToolResult(pi, (event) => {
     try {
       if (getState().phase !== "implementing") return;

@@ -58,7 +58,7 @@ Deno.test("classifier prohibits write signals", () => {
   check(classify("bash", { command: "rm -rf dist" }) === "mutating-bash", "rm");
   check(classify("bash", { command: "sudo rm -rf /tmp/x" }) === "mutating-bash", "sudo rm");
   check(classify("bash", { command: "FOO=1 mv a b" }) === "mutating-bash", "env-prefixed mv");
-  check(classify("bash", { command: "mkdir -p .pi/quest/current/x" }) === "mutating-bash", "mkdir");
+  check(classify("bash", { command: "mkdir -p .pi/quest/.staging/x" }) === "mutating-bash", "mkdir");
   check(classify("bash", { command: "sed -i s/a/b/ file" }) === "mutating-bash", "sed in place");
   check(classify("bash", { command: "git commit -m x" }) === "mutating-bash", "commit");
   check(classify("bash", { command: "git checkout -- file" }) === "mutating-bash", "checkout");

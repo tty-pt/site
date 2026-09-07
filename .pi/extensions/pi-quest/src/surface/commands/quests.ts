@@ -2,7 +2,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { getState } from "../../app/store";
-import { ARCHIVE_DIR, CURRENT_DIR, FUTURE_DIR } from "../../domain/paths";
+import { ARCHIVE_DIR, FUTURE_DIR } from "../../domain/paths";
 import { decodeSnapshot } from "../../durability/snapshots";
 import type { PiCtx } from "../../hooks/events";
 import type { QuestState } from "../../domain/quest";
@@ -31,17 +31,13 @@ export async function questRows(ctx: PiCtx): Promise<string[]> {
     }
   }
   const futures = await listDir(ctx.cwd, FUTURE_DIR, ".md");
-  const currents = await listDir(ctx.cwd, CURRENT_DIR, "");
   const archives = await listDir(ctx.cwd, ARCHIVE_DIR, ".zip");
   const mark = (qid: string) => active.qid === qid ? "  ◀ active" : "";
   for (const state of branch) {
     if (state.qid) rows.push(`  ${state.qid} — ${state.phase}${mark(state.qid)}`);
   }
   for (const qid of futures) {
-    if (!seen.has(qid)) rows.push(`  ${qid} — drafting (draft file)${mark(qid)}`);
-  }
-  for (const qid of currents) {
-    if (!seen.has(qid)) rows.push(`  ${qid} — current/${mark(qid)}`);
+    if (!seen.has(qid)) rows.push(`  ${qid} — ${active.qid === qid ? (active.phase === "implementing" || active.phase === "validating" ? active.phase : "drafting") : "drafting"}${mark(qid)}`);
   }
   for (const qid of archives) {
     rows.push(`  ${qid} — archived`);

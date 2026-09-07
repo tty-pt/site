@@ -55,6 +55,12 @@ export function shouldNoticeReview(qid: string, target: string): boolean {
   return true;
 }
 
+// HIGH_LEVEL: #independent review contexts — stale session bookkeeping must
+// not suppress a notice at the start of a fresh session.
+export function resetNoticedReviews(): void {
+  noticedReviews.clear();
+}
+
 export function implementationFingerprint(state: QuestState): string {
   const stable = {
     qid: state.qid,
