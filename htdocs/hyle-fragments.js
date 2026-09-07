@@ -64,6 +64,37 @@
 		var tpl = document.createElement('template');
 		tpl.innerHTML = html.trim();
 		var next = tpl.content.firstElementChild;
+		if (!next) return null;
+
+		var oldSearch = (name === 'panel') ? searchOf(slot) : null;
+		var newSearch = (name === 'panel') ? searchOf(next) : null;
+
+		if (oldSearch && newSearch) {
+			newSearch.remove();
+			var newAdd = next.querySelector('.hyle-picker-add');
+			if (newAdd) newAdd.remove();
+			var oldAdd = slot.querySelector('.hyle-picker-add');
+			if (oldAdd) oldAdd.remove();
+
+			while (oldSearch.previousSibling)
+				slot.removeChild(oldSearch.previousSibling);
+			while (oldSearch.nextSibling)
+				slot.removeChild(oldSearch.nextSibling);
+			while (next.firstChild)
+				slot.appendChild(next.firstChild);
+			for (var i = slot.attributes.length - 1; i >= 0; i--) {
+				var oldAttr = slot.attributes[i].name;
+				if (!next.hasAttribute(oldAttr))
+					slot.removeAttribute(oldAttr);
+			}
+			for (var j = 0; j < next.attributes.length; j++) {
+				var newAttr = next.attributes[j];
+				slot.setAttribute(newAttr.name, newAttr.value);
+			}
+			updateAddButton(root, oldSearch.value);
+			return slot;
+		}
+
 		slot.parentNode.replaceChild(next, slot);
 		return next;
 	}
@@ -74,7 +105,8 @@
 
 	function resetFetch(root, page) {
 		var st = state(root);
-		var q = searchOf(root).value;
+		var searchEl = searchOf(root);
+		var q = searchEl ? searchEl.value : '';
 		var url = sub(root.getAttribute('data-hyle-frag-url'),
 			q, page, checkedSlugs(root));
 		var seq = ++st.seq;
@@ -95,7 +127,7 @@
 				st.eof = false;
 				reobserve(root);
 				var box = searchOf(root);
-				if (hadFocus && box) {
+				if (hadFocus && box && document.activeElement !== box) {
 					box.focus();
 					var end = box.value.length;
 					try {
@@ -103,6 +135,11 @@
 							caret <= end ? caret : end,
 							caret <= end ? caret : end);
 					} catch (e) { /* not focusable */ }
+				}
+				if (box && box.value !== q && !st.timer) {
+					st.timer = setTimeout(function () {
+						resetFetch(root, 0);
+					}, DEBOUNCE_MS);
 				}
 			})
 			.catch(function () {})

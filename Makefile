@@ -5,13 +5,32 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
+all: assets-sync stoma-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
 
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
+
+# Sync gitignored htdocs deploy assets. hyle.css is copied from the hyle
+# crate (canonical source, per docs/STYLING.md); the remaining hashed assets
+# are checked for presence so `make` fails clearly instead of aborting
+# silently on a missing prerequisite of mods/common/ux/version.gen.h.
+DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js
+assets-sync:
+	@cp external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css
+	@missing=""; \
+	for a in $(DEPLOY_ASSETS); do \
+		if [ ! -f "htdocs/$$a" ]; then missing="$$missing htdocs/$$a"; fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "ERROR: missing deploy assets:$$missing" >&2; \
+		echo "These are gitignored and removed by 'git clean'. Restore them:" >&2; \
+		echo "  htdocs/hyle.css  <- cp external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css" >&2; \
+		echo "  others          <- restore from the hyle submodule or a sibling worktree, or rebuild." >&2; \
+		exit 1; \
+	fi
 
 stoma-lib:
 	$(MAKE) -C external/stoma
@@ -244,4 +263,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

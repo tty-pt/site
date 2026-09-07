@@ -49,7 +49,7 @@ check "/" "<!DOCTYPE html>" "root DOCTYPE"
 check "/poem" "<title>[^<]*[Pp]oem|href=\"/poem" "poem page"
 check "/song" "<title>[^<]*[Ss]ong|href=\"/song" "song page"
 check "/gig" "<title>[^<]*[Ss]ongbook|href=\"/gig" "gig page"
-check "/grp" "<title>[^<]*[Cc]hoir|href=\"/grp" "grp page"
+check "/grp" "<title>[^<]*([Cc]hoir|[Gg]roup)|href=\"/grp" "grp page"
 check "/auth/login" "name=\"username\"|<form[^>]*action=\"/auth/login\"" "login form"
 check "/auth/register" "name=\"email\"|<form[^>]*action=\"/auth/register\"" "register form"
 
