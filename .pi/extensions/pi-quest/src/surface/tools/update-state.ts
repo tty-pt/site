@@ -1,6 +1,5 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
-// HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision.
-// The agent's write path to the quest: findings, drafts, amendments, claims.
+// HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision. The agent's write path: findings, drafts, amendments, claims.
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
@@ -12,6 +11,7 @@ import {
   demoteToImplementing,
   recordAmendment,
   recordRefinement,
+  type QuestState,
 } from "../../domain/quest";
 import { recordPlanRevision } from "../../domain/plan-revision";
 import { acknowledgeChild, unfinishedChildren } from "../../domain/children";
@@ -28,8 +28,7 @@ import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 import { checkPlanCitations } from "./claims";
-
-import type { QuestState } from "../../domain/quest";
+import { checkPlanParam, profileForSavedDoc } from "./draft-profile";
 
 async function provisionRootQuest(ctx: PiCtx, objective: string): Promise<Qid> {
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
@@ -164,10 +163,33 @@ async function provisionDraft(
   state = await carryRefinementsToDraft(ctx, getState());
   applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
   if (thin) {
-    applied.push("draft created thin — no findings recorded yet; file them via refinement or author the plan via {plan:}");
+    applied.push("draft created thin — no findings recorded yet; file them via refinement or author the plan via {plan:}. A draft becomes reviewable at the maturity bar: 2 requirements, or 1 requirement + 7 evidence, with an actionable plan. Use {checkPlan: \"<plan body>\"} to preview the profile without booting a review.");
   }
   noteDraftUpdated(ctx);
   return state;
+}
+
+async function applyPlanParam(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  params: Record<string, unknown>,
+  applied: string[],
+): Promise<{ state: QuestState; error?: string }> {
+  const plan = params["plan"];
+  const planQid = state.qid;
+  if (typeof plan !== "string" || plan.trim() === "" || planQid === null) return { state };
+  try {
+    const next = await writePlanToDraft(pi, ctx, state, plan.trim());
+    applied.push("plan recorded in the draft file");
+    const claims = await checkPlanCitations(ctx, plan.trim());
+    if (claims !== "") applied.push(claims);
+    const docAfter = await readFile(join(ctx.cwd, draftPath(planQid)), "utf8");
+    applied.push(await profileForSavedDoc(ctx, docAfter));
+    return { state: next };
+  } catch (err) {
+    return { state, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 async function applyPlanRevisionParam(
@@ -191,9 +213,7 @@ async function applyPlanRevisionParam(
   }
 }
 
-// A validating quest with no validator to answer it goes back to work
-// instead of stalling: the agent keeps implementing and claims again. The
-// in-file ## Status marker is reset so the doc stays honest about the phase.
+// A validating quest with no validator goes back to work instead of stalling; the in-file ## Status marker resets to stay honest.
 async function applyContinueWorkParam(
   pi: Pi,
   ctx: PiCtx,
@@ -220,6 +240,9 @@ export async function applyUpdate(
 ): Promise<{ applied: string[]; error?: string }> {
   const applied: string[] = [];
   let state = getState();
+  // checkPlan: pure read-only probe (see draft-profile.ts) — before any create path so it never side-creates.
+  const check = await checkPlanParam(ctx, params);
+  if (check.applied.length > 0 || check.error !== undefined) return { applied: check.applied, error: check.error };
   if (state.qid === null) {
     const objective = params["objective"];
     if (typeof objective !== "string" || objective.trim() === "") {
@@ -253,17 +276,9 @@ export async function applyUpdate(
     state = updateState((s) => ({ ...s, exactNextAction: text, snapshotPending: true }));
     applied.push("next action updated");
   }
-  const plan = params["plan"];
-  if (typeof plan === "string" && plan.trim() !== "" && state.qid) {
-    try {
-      state = await writePlanToDraft(pi, ctx, state, plan.trim());
-      applied.push("plan recorded in the draft file");
-      const claims = await checkPlanCitations(ctx, plan.trim());
-      if (claims !== "") applied.push(claims);
-    } catch (err) {
-      return { applied, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
+  const planParam = await applyPlanParam(pi, ctx, state, params, applied);
+  if (planParam.error !== undefined) return { applied, error: planParam.error };
+  state = planParam.state;
   const revised = await applyPlanRevisionParam(pi, ctx, state, params, applied);
   if (revised.error !== undefined) return { applied, error: revised.error };
   state = revised.state;
@@ -297,7 +312,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_update_state",
     label: "Update Quest State",
-    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), claimComplete to finish, continueWork to return a validating quest to implementing.",
+    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), checkPlan to preview the maturity profile of a would-be plan WITHOUT writing or booting a review (drafting only), claimComplete to finish, continueWork to return a validating quest to implementing.",
     parameters: {
       type: "object",
       properties: {
@@ -305,6 +320,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         draftName: { type: "string" },
         refinement: { type: "string" },
         plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only)." },
+        checkPlan: { type: "string", description: "Preview the draft profile (requirements/evidence counts, maturity-bar verdict, citation resolution) for a would-be plan body — read-only, no save, no review boot (drafting only)." },
         planRevision: { type: "string", description: "Revised Implementation Plan body, staged from implementing (boots a re-review; objective unchanged)." },
         note: { type: "string", description: "Why the plan revision was needed; kept in the append-only history." },
         amendment: {

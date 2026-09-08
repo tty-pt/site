@@ -35,6 +35,34 @@ quest id (`future/<qid>.md`); there are no slugs.
   never required. Rebut a verdict with evidence via `quest_rebut`.
   `future/<qid>.md` stays the one quest document through implementing and
   validating; it is removed only when the quest archives.
+- **Drafting to pass review in one pass.** Every save boots a fresh
+  adversarial reviewer, so build up to the maturity bar before you save.
+  The reviewer checks your *plan* against the recorded request along these
+  dimensions: does it address the objective; are requirements omitted; did
+  it substitute a different problem; is research sufficient; are assumptions
+  verified; does the work sequence fit; is complexity unnecessary; was an
+  alternative dismissed without evidence; does it commit prematurely; does it
+  contradict itself; does it credibly satisfy the request. Draft so the
+  answers are visibly yes:
+  - Write requirements as numbered, objective-stated bullets. A draft clears
+    the review threshold at **2 requirements**, or **1 requirement + 7
+    evidence items**, with an actionable plan — below that, the reviewer
+    fails fast.
+  - Distinguish a **user requirement** (blocks), a **technical constraint**
+    (binds your approach), and a **reviewer preference** (never blocks).
+    Each requirement needs evidence or a verification step; research you
+    file via `refinement` lands as `## Findings (pre-draft investigation)`
+    and counts as evidence.
+  - Cite code-generation claims as `file:line` so the save-time claims check
+    stays silent; the reviewer spot-checks named lines rather than
+    re-auditing the tree.
+  - **Preview before you pay:** call `quest_update_state` with
+    `{ "checkPlan": "<plan body>" }` to read the deterministic draft profile
+    (counts, maturity-bar verdict, citation resolution) without writing or
+    booting a review. Iterate on the profile until it reads `maturity bar:
+    met`, then save once.
+  - Revise from the verbatim FAIL text the wake carries; a FAIL marks
+    findings outstanding until your next save supersedes them.
 - **Implementing.** Unrestricted. Record setbacks with evidence as they
   happen; nothing blocks. When reality contradicts the plan, record an
   amendment with reasons via `quest_update_state` — amendments adjust the

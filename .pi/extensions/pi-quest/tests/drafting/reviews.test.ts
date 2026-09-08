@@ -422,6 +422,86 @@ Deno.test("a FAIL verdict wake carries the verbatim review text and marks findin
   }
 });
 
+async function belowBarSetup(qid: Qid): Promise<{ cwd: string; file: string; doc: string; target: string }> {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-barbelow-"));
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  const file = join(cwd, draftPath(qid));
+  await mkdir(dirname(file), { recursive: true });
+  // Above 1 requirement + 1 evidence + a plan, but below the default bar
+  // (2 requirements, or 1 requirement + 7 evidence).
+  const doc = "## Requirements\n- one\n\n## Evidence\n- found\n\n## Implementation Plan\n\n### Goal\nDo the work.\n";
+  await writeFile(file, doc, "utf8");
+  const target = hashContent(doc);
+  updateState((s) => s.draft === null ? s : {
+    ...s,
+    draft: { ...s.draft, planAuthored: true, contentHash: target },
+  });
+  return { cwd, file, doc, target };
+}
+
+Deno.test("a below-bar draft boots a bounded fast-fail review brief", async () => {
+  const d = await belowBarSetup("barf01" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    const task = String(requests(bus.emitted)[0]["task"] ?? "");
+    check(task.includes("FAST-FAIL"), "below-bar brief enters fast-fail mode");
+    check(task.toLowerCase().includes("maturity bar"), "bar named in the brief");
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: {
+        kind: "text",
+        text: "VERDICT: FAIL\nSEVERITY: MINOR\nFINDINGS:\n- Issue: below the maturity bar\n  Evidence: thin draft\n\nREQUIRED REVISIONS:\n- add requirements and evidence",
+      },
+    });
+    await booted;
+    const sentWakes = wakes(bus.pi);
+    check(sentWakes.length === 1, "FAIL wakes once");
+    const text = String(sentWakes[0].content);
+    check(text.includes("draft profile"), "FAIL wake carries the draft profile");
+    check(text.includes("NOT met"), "wake names the bar gap");
+  } finally {
+    clearDraftReviewRetry("barf01" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("an above-bar draft boots the unbounded review brief", async () => {
+  const d = await draftFailureSetup("barup1" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    const task = String(requests(bus.emitted)[0]["task"] ?? "");
+    check(!task.includes("FAST-FAIL"), "above-bar brief stays a full adversarial audit");
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "error",
+      error: "boom",
+    });
+    await booted;
+  } finally {
+    setReviewRetryDispatcher((_delay, _fn) => {});
+    clearDraftReviewRetry("barup1" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("pre-draft findings travel as evidence into the review material", () => {
+  replaceState(createDraft(createQuest("req", "mat005" as Qid), "mat"));
+  try {
+    const sections = parseDraftSections(
+      "## Requirements\n- one\n\n## Findings (pre-draft investigation)\n- registry found\n\n## Implementation Plan\nplan\n",
+    );
+    const material = reviewMaterial(getState(), sections);
+    check(material.evidence.includes("registry found"), "findings carry into the review brief");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
 Deno.test("a superseding save cancels the pending retry", async () => {
   const d = await draftFailureSetup("ret004" as Qid);
   const bus = retryBus();

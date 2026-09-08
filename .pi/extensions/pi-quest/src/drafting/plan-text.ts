@@ -50,6 +50,9 @@ export function parseDraftSections(text: string): DraftSections {
       if (name.includes("requirement")) section = "requirements";
       else if (name.includes("evidence")) section = "evidence";
       else if (name.includes("implementation plan")) section = "plan";
+      // Pre-draft investigation recorded via recordRefinement is research:
+      // its bullets fold into the evidence list so it counts toward the bar.
+      else if (name.includes("findings") && name.includes("pre-draft")) section = "evidence";
       else section = null;
       continue;
     }
@@ -74,6 +77,41 @@ export function meetsReviewThresholds(
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   return counts && sections.plan.length > 0;
+}
+
+// The deterministic draft profile the agent sees before and at every save:
+// counts, the maturity-bar verdict, and what is missing to clear it. It is the
+// agent's free look at what the reviewer will check, without a review boot.
+export function draftProfileText(
+  sections: DraftSections,
+  thresholds: DraftThresholds,
+  citationSummary = "",
+): string {
+  const req = sections.requirements.length;
+  const ev = sections.evidence.length;
+  const planPresent = sections.plan.trim().length > 0;
+  const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
+  const meets = counts && planPresent;
+  const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an actionable plan)`;
+  const lines = [
+    `draft profile: requirements ${req}, evidence ${ev}, plan ${planPresent ? "present" : "missing"}`,
+  ];
+  if (meets) {
+    lines.push(`reviewability: maturity bar: met${gapLeg}`);
+  } else {
+    const gaps: string[] = [];
+    if (!planPresent) gaps.push("author the ## Implementation Plan section");
+    if (req < thresholds.requirements && ev < thresholds.evidence) {
+      gaps.push(`add ${thresholds.requirements - req} more requirements, or ${thresholds.evidence - ev} more evidence items with at least 1 requirement`);
+    } else if (req < thresholds.requirements) {
+      gaps.push(`add ${thresholds.requirements - req} more requirements`);
+    } else if (ev < thresholds.evidence) {
+      gaps.push(`add ${thresholds.evidence - ev} more evidence items`);
+    }
+    lines.push(`reviewability: maturity bar NOT met${gapLeg}; missing: ${gaps.join("; ") || "none"}`);
+  }
+  if (citationSummary !== "") lines.push(citationSummary);
+  return lines.join("\n");
 }
 
 // --- Claim citations --------------------------------------------------------

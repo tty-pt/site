@@ -18,7 +18,9 @@ import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
 import {
   bumpReviewCount,
+  draftProfileText,
   hashContent,
+  meetsReviewThresholds,
   parseDraftSections,
   reviewMaterial,
 } from "./plan-text";
@@ -105,13 +107,14 @@ export async function bootDraftReview(
   // Material first: it diffs against the previously reviewed plan, so the
   // base below must still hold the old text at this point.
   const material = reviewMaterial(getState(), sections);
+  const belowBar = !meetsReviewThresholds(sections, config.draftThresholds);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: sections.plan } });
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
-    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds),
+    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds, belowBar),
     runnerTool: config.bindings.reviewRunner.tool,
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
@@ -150,7 +153,10 @@ export async function bootDraftReview(
   const reviewExcerpt = verbatim === ""
     ? ""
     : `\n\nReview text (verbatim, budget-bounded):\n${verbatim}`;
-  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review.${reviewExcerpt}`);
+  const profile = belowBar
+    ? `\n\nDraft profile:\n${draftProfileText(sections, config.draftThresholds)}`
+    : "";
+  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
 }
 
 // A failed run's retry: rewrite the quest doc with the incremented review

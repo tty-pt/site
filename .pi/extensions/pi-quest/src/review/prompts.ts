@@ -123,12 +123,16 @@ When a revision history is present, judge every plan move: a revision that corre
 Reviewer preference NEVER blocks; only unmet requirements or out-of-scope drift do.`;
 }
 
+const FAST_FAIL = (maturity: DraftThresholds): string =>
+  `FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR (needs ${maturity.requirements} requirements, or 1 requirement + ${maturity.evidence} evidence items, with an actionable plan). Report exactly what structure is missing for the bar plus any requirement omissions from the request, then FAIL. Do NOT audit the plan in depth — the draft must be built up to the bar first.`;
+
 export function buildReviewPrompt(
   kind: ReviewKind,
   qid: Qid,
   target: string,
   material: ReviewMaterial,
   maturity: DraftThresholds = DEFAULT_CONFIG.draftThresholds,
+  belowBar = false,
 ): string {
   const header = kind === "draft"
     ? `ADVERSARIAL DRAFT REVIEW: ${qid} (target revision ${target})`
@@ -137,6 +141,7 @@ export function buildReviewPrompt(
   const impl = material.implementationSummary
     ? `\nIMPLEMENTATION SUMMARY UNDER REVIEW:\n${material.implementationSummary}\n`
     : "";
+  const fastFail = belowBar ? `\n${FAST_FAIL(maturity)}\n` : "";
   return `# ${header}
 
 You are an independent reviewer. You run in a fresh context: evaluate only the material below, never continue anyone's reasoning.
@@ -145,5 +150,5 @@ ${guidance}
 ${contextBlock(material)}
 ${impl}
 ${SELF_ATTACK}
-${OUTPUT_FORMAT}`;
+${fastFail}${OUTPUT_FORMAT}`;
 }

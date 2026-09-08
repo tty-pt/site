@@ -324,3 +324,86 @@ Deno.test("plan saves warn on citations that do not resolve on disk", async () =
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("checkPlan returns a draft profile without writing or booting a review", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const qid = getState().qid!;
+    const beforeHash = getState().draft?.contentHash ?? null;
+    const snapsBefore = pi.appended.filter((e) => e.customType === SNAPSHOT_TYPE).length;
+    const probe = await applyUpdate(pi, ctx, { checkPlan: "Do step one via song.c:12." });
+    check(probe.applied.some((a) => a.includes("draft profile")), "profile reported");
+    check(probe.applied.some((a) => a.includes("requirements 0")), "partial draft reported honestly");
+    check((getState().draft?.contentHash ?? null) === beforeHash, "check does not rewrite the draft");
+    check(getState().draft?.planAuthored === false, "check does not mark the plan authored");
+    check(pi.appended.filter((e) => e.customType === SNAPSHOT_TYPE).length === snapsBefore, "no snapshot emitted for a pure check");
+    check(getState().phase === "drafting", "no phase change");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("checkPlan resolves the would-be plan against the draft on disk", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const qid = getState().qid!;
+    const file = join(cwd, draftPath(qid));
+    await writeFile(
+      file,
+      "## Requirements\n- one\n- two\n\n## Evidence\n- measurement\n\n## Implementation Plan\nrough\n",
+      "utf8",
+    );
+    const probe = await applyUpdate(pi, ctx, { checkPlan: "Rewrite the walker." });
+    check(probe.applied.some((a) => a.includes("requirements 2")), "on-disk requirements counted");
+    check(probe.applied.some((a) => a.includes("evidence 1")), "on-disk evidence counted");
+    check(probe.applied.some((a) => a.includes("maturity bar: met")), "reviewable verdict for a real draft");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("checkPlan refuses without a draft and never creates a quest", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const idle = await applyUpdate(pi, ctx, { checkPlan: "anything" });
+    check(idle.error !== undefined && idle.error.includes("draft"), "idle check refuses with guidance");
+    check(getState().qid === null, "no quest created by a pure check");
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    const provisional = await applyUpdate(pi, ctx, { checkPlan: "anything" });
+    check(provisional.error !== undefined && provisional.error.includes("draft"), "provisional check refuses");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("plan saves report the draft profile alongside the citation check", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const saved = await applyUpdate(pi, ctx, { plan: "Step one: thin gig.c:5." });
+    check(saved.applied.some((a) => a.includes("draft profile")), "profile on plan save");
+    check(saved.applied.some((a) => a.includes("maturity bar")), "bar verdict on plan save");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
