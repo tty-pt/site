@@ -72,6 +72,68 @@ OUT=$($MM vec cos --file "$F" --key v1 --key v1)
 [ "$OUT" = "1.000000" ] || fail "cos self expected 1.0, got $OUT"
 pass "vectors + cosine"
 
+# ---- semantic scan (offline primitives: --vec and --like) ------------
+$MM vec put --file "$F" --key "mirror@2025-05" --text "1 0 0" || fail "vec mirror@2025-05"
+$MM vec put --file "$F" --key "mirror@2025-06" --text "0 1 0" || fail "vec mirror@2025-06"
+$MM vec put --file "$F" --key "mirror@2025-05-14T1705" --text "0.9 0.1 0" || fail "vec L1"
+
+OUT=$($MM scan --file "$F" --vec "0 1 0.1")
+N=$(printf '%s' "$OUT" | grep -c '^mirror') || true
+[ "$N" = "3" ] || fail "semantic --vec expected 3, got $N"
+case "$OUT" in
+	mirror@2025-06*) : ;;
+	*) fail "semantic --vec: top cosine first" ;;
+esac
+echo "$OUT" | grep -q 'mirror@2025-06	2	2025-06' || fail "semantic split field lost"
+pass "semantic --vec"
+
+OUT=$($MM scan --file "$F" --like "mirror@2025-06")
+case "$OUT" in
+	mirror@2025-06*) : ;;
+	*) fail "semantic --like: self first" ;;
+esac
+pass "semantic --like"
+
+OUT=$($MM scan --file "$F" --vec "0 0 1")
+case "$OUT" in
+	"") fail "semantic: orthogonal entries should still return at min_sim 0" ;;
+	*) : ;;
+esac
+OUT=$($MM scan --file "$F" --vec "0 0 1" --min-sim 0.5)
+[ -z "$OUT" ] || fail "semantic --min-sim 0.5 should drop orthogonal, got: $OUT"
+pass "semantic --min-sim"
+
+OUT=$($MM scan --file "$F" --vec "1 0 0" --max 1)
+N=$(printf '%s' "$OUT" | grep -c '^mirror') || true
+[ "$N" = "1" ] || fail "semantic --max 1 expected 1, got $N"
+pass "semantic --max"
+
+# ---- --embed via a stub curl over a fake provider --------------------
+STUB="$TMP/stubbin"
+mkdir -p "$STUB"
+cat > "$STUB/curl" <<'EOF'
+#!/bin/sh
+printf '%s' '{"data":[{"embedding":[1.0,0.0,0.0]}]}'
+EOF
+chmod +x "$STUB/curl"
+
+$MM scan --file "$F" --embed "anything" >/dev/null 2>&1 && fail "embed without provider should fail"
+OUT=$(MM_EMBED_URL="http://fake" MM_EMBED_KEY="k" PATH="$STUB:$PATH" \
+	$MM scan --file "$F" --embed "text to embed" 2>&1)
+case "$OUT" in
+	mirror@2025-05*) : ;;
+	*) fail "semantic --embed (stub) should rank mirror@2025-05 first, got: $OUT" ;;
+esac
+pass "semantic --embed (stub curl)"
+
+OUT=$(MM_EMBED_URL="http://fake" MM_EMBED_KEY="k" PATH="$STUB:$PATH" \
+	$MM store --file "$F" --level 2 --topic embed --ts 2025-07 \
+	--text "embedded gist" --embed 2>&1) || fail "store --embed (stub)"
+[ -z "$OUT" ] || fail "store --embed unexpected output: $OUT"
+OUT=$($MM vec get --file "$F" --key "embed@2025-07")
+[ "$OUT" = "1.000000 0.000000 0.000000" ] || fail "store --embed vector, got: $OUT"
+pass "store --embed (stub curl)"
+
 $MM forget --file "$F" --key "mirror@2025-05" || fail "forget"
 OUT=$($MM scan --file "$F" --topic mirror --level 2)
 N=$(printf '%s' "$OUT" | grep -c '^mirror@') || true

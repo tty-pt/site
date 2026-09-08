@@ -2,7 +2,8 @@
 // HIGH_LEVEL: #implementing — the quest doc is locked to direct edits; plan
 // moves go through peer-reviewed planRevision, completion through claimComplete.
 // HIGH_LEVEL: #tools (other agents) — reviewer sessions stay read-only.
-// SPEC: B2 (truth table, first match wins), B2.1 (exemption first, block-message invariant).
+// SPEC: B2 (truth table, first match wins), B2.1 (write-signal blocks only,
+// unknown tools default to allowed; exemption first; block-message invariant).
 import type { QuestState } from "./quest";
 import { draftPath } from "./paths";
 
@@ -14,6 +15,14 @@ export type ToolClass =
   | "journal"
   | "ask"
   | "other";
+
+// B2.1: phases block write signals — direct edits, mutating bash, and
+// subagent launch. Every other class (reads, journal, questions, and unknown
+// tools like vcc_recall) defaults to allowed, so research is never blocked
+// by an unrecognized tool.
+function isWriteSignal(toolClass: ToolClass): boolean {
+  return toolClass === "write" || toolClass === "mutating-bash" || toolClass === "launch";
+}
 
 export interface ToolRef {
   toolName: string;
@@ -111,7 +120,10 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       "Review running — end your turn; the verdict arrives as a new turn.",
     );
   }
-  if (ref.toolClass === "read" || ref.toolClass === "journal" || ref.toolClass === "ask") {
+  // B2.1: only write signals are phase-gated. Reads, journal ops, questions,
+  // and unknown-class tools (vcc_recall, …) pass — no read whitelist to
+  // maintain, and an unrecognized tool never blocks research.
+  if (!isWriteSignal(ref.toolClass)) {
     return { allowed: true };
   }
   if (state.phase === "drafting") {

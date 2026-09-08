@@ -441,6 +441,32 @@ static int mm_cmp_desc(const void *a, const void *b)
 mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
                   const char *textq, int level, size_t max, size_t *n)
 {
+	return mm_semantic_scan(mm, topic, prefix, textq, level, max,
+	                        NULL, 0, 0.0, n);
+}
+
+typedef struct {
+	char key[MM_KEY_LEN];
+	double score;
+} scored_t;
+
+static int scored_cmp(const void *a, const void *b)
+{
+	const scored_t *sa = (const scored_t *)a;
+	const scored_t *sb = (const scored_t *)b;
+	if (sb->score > sa->score)
+		return 1;
+	if (sb->score < sa->score)
+		return -1;
+	/* ties: newest key first, same as plain mm_scan */
+	return strcmp(sb->key, sa->key);
+}
+
+mm_hit_t *mm_semantic_scan(mm_t *mm, const char *topic, const char *prefix,
+                           const char *textq, int level, size_t max,
+                           const float *q, size_t qdim, double min_sim,
+                           size_t *n)
+{
 	strs_t cand;
 	uint32_t cur = 0;
 	const void *k;
@@ -448,6 +474,8 @@ mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
 	size_t i;
 	size_t many = 0;
 	mm_hit_t *hits = NULL;
+	scored_t *sc = NULL;
+	float *qb = NULL;
 
 	if (n)
 		*n = 0;
@@ -501,13 +529,14 @@ mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
 		qmap_fin(cur);
 	}
 
-	/* filter: full-text hits + level */
+	/* filter: full-text hits + level (free the strdup'd keys we drop) */
 	for (i = 0; i < cand.n; i++) {
 		const char *key = cand.buf[i];
-		if (textq && textq[0] && !strs_has(&fkeys, key))
+		if ((textq && textq[0] && !strs_has(&fkeys, key)) ||
+		    (level >= 0 && mm_key_level(key) != level)) {
+			free(cand.buf[i]);
 			cand.buf[i] = NULL;
-		else if (level >= 0 && mm_key_level(key) != level)
-			cand.buf[i] = NULL;
+		}
 	}
 	/* compact candidates (NULL holes) */
 	{
@@ -522,6 +551,53 @@ mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
 			}
 		}
 		cand.n = w;
+	}
+
+	if (q && qdim > 0) {
+		/* semantic: score every candidate against the query vector */
+		size_t nsc = 0;
+		qb = malloc(qdim * sizeof(float));
+		if (!qb || cand.n == 0)
+			goto done;
+		sc = calloc(cand.n, sizeof(*sc));
+		if (!sc)
+			goto done;
+		for (i = 0; i < cand.n; i++) {
+			const char *key = cand.buf[i];
+			double score;
+			if (mm_vec_dim(mm, key) != qdim) /* no vector, or dim mismatch */
+				continue;
+			mm_vec_get(mm, key, qb, qdim);
+			score = (double)mm_cosine(q, qb, qdim);
+			if (score < min_sim)
+				continue;
+			strncpy(sc[nsc].key, key, sizeof(sc[nsc].key) - 1);
+			sc[nsc].score = score;
+			nsc++;
+		}
+		qsort(sc, nsc, sizeof(*sc), scored_cmp);
+
+		many = nsc;
+		if (max > 0 && many > max)
+			many = max;
+		if (many == 0)
+			goto done;
+		hits = calloc(many, sizeof(mm_hit_t));
+		if (!hits)
+			goto done;
+		for (i = 0; i < many; i++) {
+			const char *key = sc[i].key;
+			const mm_entry_t *row = qmap_get(mm->entry_hd, key);
+			if (!row)
+				continue;
+			strncpy(hits[i].key, key, sizeof(hits[i].key) - 1);
+			strncpy(hits[i].ts, row->ts, sizeof(hits[i].ts) - 1);
+			strncpy(hits[i].tags, row->tags, sizeof(hits[i].tags) - 1);
+			hits[i].level = row->level;
+			hits[i].score = sc[i].score;
+			hits[i].text = strdup(row->text);
+		}
+		goto done;
 	}
 
 	qsort(cand.buf, cand.n, sizeof(char *), mm_cmp_desc);
@@ -551,6 +627,8 @@ mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
 done:
 	strs_free(&cand);
 	strs_free(&fkeys);
+	free(sc);
+	free(qb);
 	if (n)
 		*n = many;
 	return hits;

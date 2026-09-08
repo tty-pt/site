@@ -350,6 +350,110 @@ static void test_vectors(void)
 	mm_close(mm);
 }
 
+static void test_semantic(void)
+{
+	printf("test_semantic\n");
+	char err[256];
+	mm_t *mm = t_open(err, sizeof(err));
+	mm_hit_t *hits;
+	int n;
+	int i;
+	float x[3] = { 1.0f, 0.0f, 0.0f };
+	float y[3] = { 0.0f, 1.0f, 0.0f };
+	float xy[3] = { 0.9f, 0.1f, 0.0f };
+	float u2[2] = { 1.0f, 0.0f };
+
+	if (!mm)
+		return;
+	seed(mm);
+
+	/* vectors on three mirror entries */
+	CHECK(mm_vec_put(mm, "mirror@2025-05", x, 3) == 0, "vec May");
+	CHECK(mm_vec_put(mm, "mirror@2025-06", y, 3) == 0, "vec June");
+	CHECK(mm_vec_put(mm, "mirror@2025-05-14T1705", xy, 3) == 0, "vec L1");
+	/* an entry with a DIFFERENT dimension: must be skipped, not compared */
+	CHECK(mm_vec_put(mm, "mirror@2025-05-14T1707", u2, 2) == 0, "vec other dim");
+	/* song + L0 raw have no vectors at all: must be skipped */
+
+	hits = NULL;
+	n = (int)(size_t)0;
+	{
+		size_t nn;
+		hits = mm_semantic_scan(mm, NULL, NULL, NULL, -1, 0, x, 3, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 3, "semantic: only vector-bearing 3-dim entries");
+	for (i = 0; i < n; i++) {
+		if (strcmp(hits[i].key, "mirror@2025-05-14T1707") == 0)
+			CHECK(0, "semantic: dim-mismatch entry excluded");
+		if (strcmp(hits[i].key, "song@2025-05") == 0)
+			CHECK(0, "semantic: vector-less entry excluded");
+	}
+	CHECK(strcmp(hits[0].key, "mirror@2025-05") == 0,
+	      "semantic: highest cosine first");
+	CHECK(hits[0].score > 0.9999, "semantic: self cosine ~ 1");
+	CHECK(strcmp(hits[1].key, "mirror@2025-05-14T1705") == 0,
+	      "semantic: 0.9-x cosine second");
+	CHECK(hits[1].score > 0.99 && hits[1].score < 1.0,
+	      "semantic: cosine ~0.994");
+	/* hits[2] is the orthogonal y -> cosine 0, last. */
+	CHECK(hits[2].score < 0.0001, "semantic: orthogonal cosine ~ 0");
+	mm_hits_free(hits, (size_t)n);
+
+	/* --like equivalent: query with the stored xy vector */
+	{
+		size_t nn;
+		hits = mm_semantic_scan(mm, NULL, NULL, NULL, -1, 0, xy, 3, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(strcmp(hits[0].key, "mirror@2025-05-14T1705") == 0,
+	      "semantic: query xy ranks L1 first");
+	mm_hits_free(hits, (size_t)n);
+
+	/* min_sim filters */
+	{
+		size_t nn;
+		hits = mm_semantic_scan(mm, NULL, NULL, NULL, -1, 0, x, 3, 0.5, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 2, "semantic: min_sim 0.5 keeps 2 entries");
+	mm_hits_free(hits, (size_t)n);
+
+	/* max cap */
+	{
+		size_t nn;
+		hits = mm_semantic_scan(mm, NULL, NULL, NULL, -1, 1, x, 3, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 1, "semantic: max cap");
+	CHECK(strcmp(hits[0].key, "mirror@2025-05") == 0,
+	      "semantic: max keeps top cosine");
+	mm_hits_free(hits, (size_t)n);
+
+	/* routing still composes (topic mirror, level 2) */
+	{
+		size_t nn;
+		hits = mm_semantic_scan(mm, "mirror", NULL, NULL, 2, 0, x, 3, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 2, "semantic: topic+level routing under vector query");
+	CHECK(strcmp(hits[0].key, "mirror@2025-05") == 0,
+	      "semantic: routing keeps ranking");
+	mm_hits_free(hits, (size_t)n);
+
+	/* no query vector -> plain mm_scan (wrapper) unaffected */
+	{
+		size_t nn;
+		hits = mm_scan(mm, "mirror", NULL, NULL, 2, 0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 2, "plain scan still works after semantic additions");
+	CHECK(hits[0].score == 0.0, "plain scan has no score");
+	mm_hits_free(hits, (size_t)n);
+
+	mm_close(mm);
+}
+
 int main(void)
 {
 	char tmpl[] = "/tmp/mm_test_XXXXXX";
@@ -372,6 +476,7 @@ int main(void)
 	test_persistence();
 	test_reset();
 	test_vectors();
+	test_semantic();
 
 	if (fails == 0)
 		printf("\nALL MM TESTS PASSED (%d checks)\n", checks);

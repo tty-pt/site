@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define VEC_MAX 512
 
 static const char *default_path(void)
 {
@@ -15,6 +19,181 @@ static const char *default_path(void)
 	return buf;
 }
 
+/* Parse "d0 d1 ..." into out; *n = count. Returns 0 on success. */
+static int parse_vec(const char *s, float *out, size_t max, size_t *n)
+{
+	size_t cnt = 0;
+	*n = 0;
+	while (*s && cnt < max) {
+		char *end;
+		out[cnt++] = strtof(s, &end);
+		if (end == s)
+			break;
+		s = end;
+		while (*s == ' ')
+			s++;
+	}
+	*n = cnt;
+	return cnt == 0 ? -1 : 0;
+}
+
+/* Extract the first JSON array of floats ("[0.1, 0.2, ...]") from `json`.
+ * Returns the count, or -1 if none found. */
+static int extract_floats(const char *json, float *out, size_t max)
+{
+	const char *p = json;
+	while (*p) {
+		const char *open, *q;
+		size_t cnt = 0;
+		open = strchr(p, '[');
+		if (!open)
+			break;
+		q = open + 1;
+		while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')
+			q++;
+		while (cnt < max) {
+			char *end;
+			out[cnt] = strtof(q, &end);
+			if (end == q)
+				break;
+			cnt++;
+			q = end;
+			while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r' ||
+			       *q == ',')
+				q++;
+			if (*q == ']')
+				return (int)cnt;
+		}
+		p = open + 1;
+	}
+	return -1;
+}
+
+/* JSON-escape text into buf (under bufsz, little end-of-string slack). */
+static size_t json_escape(const char *text, char *buf, size_t bufsz)
+{
+	size_t w = 0;
+	while (*text && w + 8 < bufsz) {
+		unsigned char c = (unsigned char)*text;
+		if (c == '"' || c == '\\') {
+			buf[w++] = '\\';
+			buf[w++] = (char)c;
+		} else if (c == '\n') {
+			buf[w++] = '\\';
+			buf[w++] = 'n';
+		} else if (c < 0x20) {
+			buf[w++] = ' ';
+		} else {
+			buf[w++] = (char)c;
+		}
+		text++;
+	}
+	buf[w] = '\0';
+	return w;
+}
+
+/* Build the curl argv array for one embeddings POST. */
+static void build_curl(char **pp, const char *url, const char *auth,
+                       const char *body)
+{
+	*pp++ = "curl";
+	*pp++ = "-sS";
+	*pp++ = "-X";
+	*pp++ = "POST";
+	*pp++ = "-H";
+	*pp++ = "Content-Type: application/json";
+	if (auth && auth[0]) {
+		*pp++ = "-H";
+		*pp++ = (char *)auth;
+	}
+	*pp++ = "-d";
+	*pp++ = (char *)body;
+	*pp++ = (char *)url;
+	*pp = NULL;
+}
+
+/* Query the embeddings provider (config-only, via system curl).
+ * POSTs {"input":"<text>","model":N} to $MM_EMBED_URL with
+ * Authorization: Bearer $MM_EMBED_KEY. Returns 0 and fills out and n on
+ * success; on failure writes a message into err. */
+static int embed(const char *text, float *out, size_t max, size_t *n,
+                 char *err, size_t errsz)
+{
+	const char *url = getenv("MM_EMBED_URL");
+	const char *key = getenv("MM_EMBED_KEY");
+	const char *model = getenv("MM_EMBED_MODEL");
+	char body[8192];
+	char auth[1600];
+	char resp[65536];
+	const char *argv[16];
+	int pfd[2];
+	pid_t pid;
+	ssize_t got;
+	size_t total = 0;
+	int status;
+	int cnt;
+	char esc[8192];
+
+	if (!url || !url[0]) {
+		snprintf(err, errsz,
+		         "mm: no embeddings provider configured (set MM_EMBED_URL; "
+		         "or pass --vec / --like to search with a stored vector)");
+		return -1;
+	}
+	json_escape(text, esc, sizeof(esc));
+	if (model && model[0])
+		snprintf(body, sizeof(body),
+		         "{\"input\":\"%s\",\"model\":\"%s\"}", esc, model);
+	else
+		snprintf(body, sizeof(body), "{\"input\":\"%s\"}", esc);
+	snprintf(auth, sizeof(auth), "Authorization: Bearer %s", key ? key : "");
+	build_curl((char **)argv, url, auth, body);
+
+	if (pipe(pfd) < 0) {
+		snprintf(err, errsz, "mm: pipe failed");
+		return -1;
+	}
+	pid = fork();
+	if (pid < 0) {
+		snprintf(err, errsz, "mm: fork failed");
+		close(pfd[0]);
+		close(pfd[1]);
+		return -1;
+	}
+	if (pid == 0) {
+		dup2(pfd[1], STDOUT_FILENO);
+		close(pfd[0]);
+		close(pfd[1]);
+		execvp("curl", (char *const *)argv);
+		_exit(127);
+	}
+	close(pfd[1]);
+	while (total + 1 < sizeof(resp)) {
+		got = read(pfd[0], resp + total, sizeof(resp) - total - 1);
+		if (got <= 0)
+			break;
+		total += (size_t)got;
+	}
+	close(pfd[0]);
+	resp[total] = '\0';
+	waitpid(pid, &status, 0);
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+		cnt = extract_floats(resp, out, max);
+		if (cnt > 0) {
+			*n = (size_t)cnt;
+			return 0;
+		}
+		snprintf(err, errsz, "mm: no embedding in provider response: %s",
+		         resp);
+		return -1;
+	}
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 127)
+		snprintf(err, errsz, "mm: curl not found (set MM_EMBED_URL and install curl)");
+	else
+		snprintf(err, errsz, "mm: embeddings request failed: %s", resp);
+	return -1;
+}
+
 static void usage(const char *prog)
 {
 	fprintf(stderr,
@@ -22,15 +201,21 @@ static void usage(const char *prog)
 	        "\n"
 	        "Usage:\n"
 	        "  %s store --file PATH --level N --topic T --ts TS\n"
-	        "        [--tags T] --text '...'\n"
+	        "        [--tags T] --text '...' [--embed]\n"
 	        "      Store an entry. level 0=raw, 1=condensed, 2=summary.\n"
 	        "      L2 ts is YYYY-MM; L1/L0 ts is an ISO timestamp.\n"
-	        "      L0 has no topic.\n"
+	        "      L0 has no topic. --embed (optional) stores an embedding\n"
+	        "      for the new entry via $MM_EMBED_URL (requires curl).\n"
 	        "  %s scan [--file PATH] [--level N] [--topic T] [--prefix P]\n"
 	        "        [--q 'tokens' | --q '\"phrase\"'] [--max M]\n"
-	        "      Recall entries, newest first. N=-1 = any level.\n"
-	        "      Topic routes to 'T@...' keys; prefix zooms to an exact\n"
-	        "      key prefix; --q applies full-text search (stoma).\n"
+	        "        [--vec 'v1 ...' | --like K | --embed 'text']\n"
+	        "        [--min-sim F]\n"
+	        "      Recall entries. Without a vector flag: newest first.\n"
+	        "      With --vec/--like/--embed: cosine top-k by similarity\n"
+	        "      (entries without a stored vector, or with a different\n"
+	        "      dimension, are excluded). --vec takes the query vector as\n"
+	        "      space-separated floats (dimension = count); --min-sim sets\n"
+	        "      a threshold on the score column.\n"
 	        "  %s get --file PATH --key K            print one entry\n"
 	        "  %s forget --file PATH --key K         delete one entry\n"
 	        "  %s reset --file PATH                  delete everything\n"
@@ -38,7 +223,13 @@ static void usage(const char *prog)
 	        "  %s vec get --file PATH --key K                 print vector\n"
 	        "  %s vec cos --file PATH --key A --key B          cosine similarity\n"
 	        "\n"
-	        "  Default file: $HOME/.mm/memory.qmap\n",
+	        "  Default file: $HOME/.mm/memory.qmap\n"
+	        "\n"
+	        "  Embeddings: optional, never required.  Configure via:\n"
+	        "    MM_EMBED_URL   — OpenAI-compatible /v1/embeddings endpoint\n"
+	        "    MM_EMBED_KEY   — API key (optional)\n"
+	        "    MM_EMBED_MODEL — model name (optional, omit for provider default)\n"
+	        "  Without a config, --vec and --like still work fully offline.\n",
 	        prog, prog, prog, prog, prog, prog, prog, prog);
 }
 
@@ -65,6 +256,7 @@ static int cmd_store(int argc, char **argv)
 	mm_t *mm;
 	char err[256];
 	int i;
+	int do_embed = 0;
 
 	for (i = 2; i < argc; i++) {
 		const char *v;
@@ -80,6 +272,8 @@ static int cmd_store(int argc, char **argv)
 			text = v;
 		else if (opti(argc, argv, &i, "--level", &v))
 			e.level = (uint32_t)strtoul(v, NULL, 10);
+		else if (strcmp(argv[i], "--embed") == 0)
+			do_embed = 1;
 		else {
 			fprintf(stderr, "mm: unknown store option: %s\n", argv[i]);
 			return 2;
@@ -106,6 +300,20 @@ static int cmd_store(int argc, char **argv)
 		mm_close(mm);
 		return 1;
 	}
+	if (do_embed) {
+		float ev[VEC_MAX];
+		size_t edim = 0;
+		char key[MM_KEY_LEN];
+		if (embed(e.text, ev, VEC_MAX, &edim, err, sizeof(err)) < 0) {
+			fprintf(stderr, "%s\n", err);
+			mm_close(mm);
+			return 1;
+		}
+		if (mm_key_make(&e, key, sizeof(key)) == 0) {
+			if (mm_vec_put(mm, key, ev, edim) < 0)
+				fprintf(stderr, "mm: vec_put after store failed\n");
+		}
+	}
 	mm_close(mm);
 	return 0;
 }
@@ -113,29 +321,42 @@ static int cmd_store(int argc, char **argv)
 static int cmd_scan(int argc, char **argv)
 {
 	const char *path = NULL, *topic = "", *prefix = "", *textq = NULL;
+	const char *vec_str = NULL, *like_key = NULL, *embed_text = NULL;
 	long level = -1, max = 0;
+	double min_sim = 0.0;
+	float q[VEC_MAX];
+	size_t qdim = 0;
+	int semantic = 0;
 	mm_t *mm;
 	char err[256];
 	mm_hit_t *hits;
 	size_t n, i;
-	int c;
 
-	for (c = 2; c < argc; c++) {
+	for (i = 2; i < (size_t)argc; i++) {
 		const char *v;
-		if (opti(argc, argv, &c, "--file", &v))
+		if (opti(argc, argv, (int *)&i, "--file", &v))
 			path = v;
-		else if (opti(argc, argv, &c, "--topic", &v))
+		else if (opti(argc, argv, (int *)&i, "--topic", &v))
 			topic = v;
-		else if (opti(argc, argv, &c, "--prefix", &v))
+		else if (opti(argc, argv, (int *)&i, "--prefix", &v))
 			prefix = v;
-		else if (opti(argc, argv, &c, "--q", &v))
+		else if (opti(argc, argv, (int *)&i, "--q", &v))
 			textq = v;
-		else if (opti(argc, argv, &c, "--level", &v))
+		else if (opti(argc, argv, (int *)&i, "--level", &v))
 			level = strtol(v, NULL, 10);
-		else if (opti(argc, argv, &c, "--max", &v))
+		else if (opti(argc, argv, (int *)&i, "--max", &v))
 			max = strtol(v, NULL, 10);
+		else if (opti(argc, argv, (int *)&i, "--vec", &v))
+			vec_str = v;
+		else if (opti(argc, argv, (int *)&i, "--like", &v))
+			like_key = v;
+		else if (opti(argc, argv, (int *)&i, "--embed", &v))
+			embed_text = v;
+		else if (opti(argc, argv, (int *)&i, "--min-sim", &v))
+			min_sim = strtod(v, NULL);
 		else {
-			fprintf(stderr, "mm: unknown scan option: %s\n", argv[c]);
+			fprintf(stderr, "mm: unknown scan option: %s\n",
+			        argv[(int)i]);
 			return 2;
 		}
 	}
@@ -146,15 +367,48 @@ static int cmd_scan(int argc, char **argv)
 		fprintf(stderr, "%s\n", err);
 		return 1;
 	}
-	hits = mm_scan(mm, topic[0] ? topic : NULL, prefix[0] ? prefix : NULL,
-	               textq, (int)level, (size_t)max, &n);
+	if (vec_str) {
+		if (parse_vec(vec_str, q, VEC_MAX, &qdim) < 0 || qdim == 0) {
+			fprintf(stderr, "mm: --vec expects d space-separated floats\n");
+			mm_close(mm);
+			return 2;
+		}
+		semantic = 1;
+	} else if (like_key) {
+		qdim = mm_vec_get(mm, like_key, q, VEC_MAX);
+		if (qdim == 0) {
+			fprintf(stderr,
+			        "mm: no stored vector for --like key '%s'\n",
+			        like_key);
+			mm_close(mm);
+			return 1;
+		}
+		semantic = 1;
+	} else if (embed_text) {
+		if (embed(embed_text, q, VEC_MAX, &qdim, err, sizeof(err)) < 0) {
+			fprintf(stderr, "%s\n", err);
+			mm_close(mm);
+			return 1;
+		}
+		semantic = 1;
+	}
+
+	hits = mm_semantic_scan(mm,
+	                        topic[0] ? topic : NULL,
+	                        prefix[0] ? prefix : NULL,
+	                        textq, (int)level, (size_t)max,
+	                        semantic ? q : NULL, semantic ? qdim : 0,
+	                        min_sim, &n);
 	if (!hits) {
 		mm_close(mm);
 		return 0;
 	}
 	for (i = 0; i < n; i++) {
-		printf("%s\t%u\t%s\t%s\n", hits[i].key, hits[i].level,
+		printf("%s\t%u\t%s\t%s", hits[i].key, hits[i].level,
 		       hits[i].ts, hits[i].topic);
+		if (semantic)
+			printf("\t%.4f", (double)hits[i].score);
+		printf("\n");
 		if (hits[i].text && hits[i].text[0])
 			printf("%s\n", hits[i].text);
 		printf("\n");

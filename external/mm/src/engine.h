@@ -26,6 +26,7 @@ typedef struct {
 	char topic[MM_TOPIC_LEN];
 	char tags[MM_TAGS_LEN];
 	uint32_t level;
+	double score; /* cosine similarity when a semantic query was used */
 	char *text; /* malloc'd; free with mm_hits_free */
 } mm_hit_t;
 
@@ -57,6 +58,18 @@ int mm_keyify(const char *in, char *out, size_t outsz);
  * *n = count. Free with mm_hits_free. */
 mm_hit_t *mm_scan(mm_t *mm, const char *topic, const char *prefix,
                   const char *textq, int level, size_t max, size_t *n);
+
+/* Semantic scan. Same routing arguments as mm_scan, plus a query vector:
+ *   q/qdim -> cosine top-k over stored entry vectors; entries without a
+ *             stored vector, or whose dimension != qdim, are skipped.
+ *   min_sim-> only entries with score >= min_sim survive.
+ * Hits are sorted by score descending (ties = newest key first) with the
+ * score recorded in hit.score. Pass q == NULL / qdim == 0 to fall back to
+ * plain mm_scan behavior (newest-first, no score). */
+mm_hit_t *mm_semantic_scan(mm_t *mm, const char *topic, const char *prefix,
+                           const char *textq, int level, size_t max,
+                           const float *q, size_t qdim, double min_sim,
+                           size_t *n);
 void mm_hits_free(mm_hit_t *hits, size_t n);
 
 /* Optional semantic layer: dimension-tagged vectors (float per record).

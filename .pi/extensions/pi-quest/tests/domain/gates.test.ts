@@ -131,16 +131,21 @@ Deno.test("gate never blocks the live asking tool, even mid-review", () => {
   check(!decide(midReview, ref("ask_user_question", "other")).allowed, "misclassified ask still blocked");
 });
 
-Deno.test("gate opens implementation and blocks unknown tools while drafting", () => {
+Deno.test("gate opens implementation and allows unknown tools while drafting", () => {
   const open: QuestState = { ...drafting(), phase: "implementing" };
   check(decide(open, EDIT_OTHER).allowed, "implementing open");
   check(decide(open, LAUNCH).allowed, "implementing launch open");
-  const d = decide(drafting(), OTHER);
-  check(!d.allowed, "unknown tool blocked while drafting");
-  if (!d.allowed) {
-    const text = reasonText(d);
-    check(text.includes(d.code) && text.includes(d.action), "reason carries code and action");
-  }
+  check(decide(drafting(), OTHER).allowed, "unknown non-mutating tool not blocked while drafting");
+});
+
+Deno.test("gate lets read-only runtime tools like vcc_recall through every phase", () => {
+  const recall = ref("vcc_recall", "other");
+  check(decide(createQuest("req", QID), recall).allowed, "vcc_recall allowed in provisional");
+  check(decide(drafting(), recall).allowed, "vcc_recall allowed in drafting");
+  const implementing = { ...drafting(), phase: "implementing" as const };
+  check(decide(implementing, recall).allowed, "vcc_recall allowed in implementing");
+  const validating = { ...drafting(), phase: "validating" as const };
+  check(decide(validating, recall).allowed, "vcc_recall allowed in validating");
 });
 
 Deno.test("gate locks every non-draft write while drafting, authored plan or not", () => {
