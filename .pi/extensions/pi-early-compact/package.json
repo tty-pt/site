@@ -1,0 +1,29 @@
+{
+  "name": "pi-early-compact",
+  "version": "0.1.0",
+  "description": "Standalone Pi extension: deterministic, configurable early compaction (adaptive window tiers, percentage/token thresholds, warning margin). Composable with pi-vcc but never dependent on it.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "compaction"
+  ],
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "test": "deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
+    "check": "deno check --sloppy-imports --node-modules-dir=none src/index.ts tests/*.ts && deno run --allow-all --sloppy-imports --node-modules-dir=none scripts/check-complexity.ts",
+    "zip": "deno run --allow-all scripts/zip_bundle.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true }
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  }
+}

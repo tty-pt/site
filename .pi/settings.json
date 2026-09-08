@@ -18,5 +18,11 @@
       "asking": { "tool": "ask_user_question" },
       "reviewRunner": { "tool": "subagent" }
     }
+  },
+  "pi-early-compact": {
+    "tiers": [
+      { "upTo": 200000, "pct": 80 },
+      { "upTo": 1000000, "pct": 50 }
+    ]
   }
 }

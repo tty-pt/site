@@ -179,7 +179,32 @@ keeps search live.
 - [ ] New write path? Through `source_update_item`/`source_delete_item` only.
 - [ ] `make lint`, `make format`, module `test.sh`, `make unit-tests`.
 
-## 8. Anti-patterns
+## 8. Consumer-side complexity guardrails
+
+These rules prevent regressions where consumers reimplement mechanics that belong
+inside an abstraction.
+
+1. **One-line intent, not multi-step mechanism.** If a caller must assemble
+   locale, ownership, prefs, picker state, JSON serialization, and page
+   metadata before invoking a renderer, the abstraction is wrong. Move the
+   boilerplate into a shared builder; the caller should pass intent parameters
+   (module, id, username, optional overrides), not internal data handles.
+2. **Use the shared responder helpers.** When a module needs to render a page
+   with state JSON, use `site_ui_respond_with_state` or an equivalent shared
+   helper. Do not hand-roll `<script type="application/json" id="bud-state">`
+   tags in consumers.
+3. **Return raw data from helpers; let the caller choose presentation.** A
+   helper that builds JSON state should return a JSON string, not a pre-wrapped
+   HTML script tag. The responder helper adds the wrapper consistently.
+4. **One fill call for list state.** List consumers should call `list_fill_state`
+   (or a future `list_state_fill`) and receive a fully populated `list_state_t`.
+   They should not parse query strings, whitelist/blacklist parameters, resolve
+   schema columns, or sanitize `per_page` themselves.
+5. **Watch for duplicated ordered-source or format-resolution helpers.** If two
+   modules need the same song-row loader, format-name resolver, or repertoire
+   collector, extract it to a shared owner before the second copy appears.
+
+## 9. Anti-patterns
 
 - 30-line preambles in handlers that should be a
   `with_module_item_access` call.
@@ -190,6 +215,9 @@ keeps search live.
 - Copied blocks of handler code between modules (song vs poem vs grp).
 - New externals depending on the site or on each other's internals.
 - Exporting more symbols than callers need.
+- Hand-rolling state-script HTML in consumers instead of using shared responders.
+- Reimplementing query-string parsing, schema column collection, or ref
+  resolution in list consumers instead of `list_fill_state`.
 
 ---
 *Ambitious abstraction improvement note (quest 1x37Od): Filter stateless redesign removes global mutable arrays (`filter.c`); dynamic array prototype (`prototype_dynamic_state.c`) eliminates fixed limits; picker simplification separates pinned logic; flags-word picker spec reduces parameter count. All valid per architecture rules (`ARCHITECTURE.md` §5, `DESIGN.md` §4.2). See `.pi/quest/future/1x37Od.md`.*
