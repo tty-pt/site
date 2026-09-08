@@ -886,6 +886,21 @@ bud_node *bud_text(const char *text)
 	return node;
 }
 
+bud_node *bud_textf(const char *fmt, ...)
+{
+	char tmp[4096];
+	va_list ap;
+
+	if (!fmt) {
+		return bud_text("");
+	}
+	va_start(ap, fmt);
+	vsnprintf(tmp, sizeof(tmp), fmt, ap);
+	va_end(ap);
+
+	return bud_text(tmp);
+}
+
 bud_node *bud_raw(const char *html)
 {
 	bud_node *node;
@@ -1590,6 +1605,21 @@ int bud_set_attr(bud_node *node, const char *name, const char *value)
 	return 0;
 }
 
+int bud_set_attr_fmt(bud_node *node, const char *name, const char *fmt, ...)
+{
+	char buf[512];
+	va_list ap;
+
+	if (!fmt) {
+		return bud_set_attr(node, name, "");
+	}
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+
+	return bud_set_attr(node, name, buf);
+}
+
 bud_arg bud_attr_fmt(const char *name, const char *fmt, ...)
 {
 	char tmp[512];
@@ -2005,6 +2035,11 @@ const bud_node *bud_node_child(const bud_node *node, size_t index)
 	}
 
 	return NULL;
+}
+
+bud_node *bud_node_parent(const bud_node *node)
+{
+	return node ? node->parent : NULL;
 }
 
 static const bud_attr *bud_attr_at(const bud_node *node, size_t index)
@@ -2526,126 +2561,6 @@ int bud_vdom_diff(
 	return bud_vdom_diff_node(old_root, new_root, emit, user);
 }
 
-static const char *bud_kind_name(bud_node_kind kind)
-{
-	switch (kind) {
-	case BUD_NODE_FRAGMENT:
-		return "fragment";
-	case BUD_NODE_ELEMENT:
-		return "element";
-	case BUD_NODE_TEXT:
-		return "text";
-	case BUD_NODE_RAW_HTML:
-		return "raw";
-	default:
-		return "unknown";
-	}
-}
-
-static int bud_render_walk_ops_node(
-        const bud_node *node, bud_emit_fn emit, void *user, size_t depth)
-{
-	const bud_attr *attr;
-	const bud_listener *listener;
-	const bud_node *child;
-	char depth_buf[32];
-	char id_buf[32];
-	char bubbles_buf[8];
-	int len;
-
-	if (!node) {
-		return 0;
-	}
-
-	len = snprintf(depth_buf, sizeof(depth_buf), "%zu", depth);
-	if (len < 0) {
-		return -1;
-	}
-	len = snprintf(id_buf, sizeof(id_buf), "%u", node->id);
-	if (len < 0) {
-		return -1;
-	}
-
-	if (emit(user, "walk-enter", depth_buf, bud_kind_name(node->kind),
-	         id_buf) != 0)
-	{
-		return -1;
-	}
-
-	switch (node->kind) {
-	case BUD_NODE_FRAGMENT:
-		for (child = node->first_child; child;
-		     child = child->next_sibling)
-		{
-			if (bud_render_walk_ops_node(
-			            child, emit, user, depth + 1) != 0)
-			{
-				return -1;
-			}
-		}
-		break;
-	case BUD_NODE_ELEMENT:
-		for (attr = node->attrs; attr; attr = attr->next) {
-			if (emit(user, "walk-attr", id_buf, attr->name,
-			         attr->value) != 0)
-			{
-				return -1;
-			}
-		}
-		for (listener = node->listeners; listener;
-		     listener = listener->next)
-		{
-			snprintf(
-			        bubbles_buf, sizeof(bubbles_buf), "%d",
-			        listener->bubbles ? 1 : 0);
-			if (emit(user, "walk-listener", id_buf, listener->event,
-			         bubbles_buf) != 0)
-			{
-				return -1;
-			}
-		}
-		for (child = node->first_child; child;
-		     child = child->next_sibling)
-		{
-			if (bud_render_walk_ops_node(
-			            child, emit, user, depth + 1) != 0)
-			{
-				return -1;
-			}
-		}
-		break;
-	case BUD_NODE_TEXT:
-		if (emit(user, "walk-text", id_buf, depth_buf, node->text) != 0)
-		{
-			return -1;
-		}
-		break;
-	case BUD_NODE_RAW_HTML:
-		if (emit(user, "walk-raw", id_buf, depth_buf, node->text) != 0)
-		{
-			return -1;
-		}
-		break;
-	default:
-		return -1;
-	}
-
-	return emit(user, "walk-leave", depth_buf, bud_kind_name(node->kind),
-	            id_buf) != 0
-	               ? -1
-	               : 0;
-}
-
-int bud_render_walk_ops(const bud_node *root, bud_emit_fn emit, void *user)
-{
-	if (!emit) {
-		return -1;
-	}
-
-	bud_prepare_render((bud_node *)root);
-	return bud_render_walk_ops_node(root, emit, user, 0);
-}
-
 int bud_hydrate(const bud_node *root, bud_hydrate_lookup_fn lookup, void *user)
 {
 	if (!lookup) {
@@ -2654,74 +2569,6 @@ int bud_hydrate(const bud_node *root, bud_hydrate_lookup_fn lookup, void *user)
 
 	bud_prepare_render((bud_node *)root);
 	return bud_hydrate_node(root, lookup, user);
-}
-
-static int
-bud_walk_node(const bud_node *node, const bud_walk_ops *ops, size_t depth)
-{
-	const bud_attr *attr;
-	const bud_listener *listener;
-	const bud_node *child;
-	size_t index;
-
-	if (!node) {
-		return 0;
-	}
-
-	if (ops->enter_node) {
-		if (ops->enter_node(ops->user, node, depth) != 0) {
-			return -1;
-		}
-	}
-
-	index = 0;
-	for (attr = node->attrs; attr; attr = attr->next) {
-		if (ops->attr) {
-			if (ops->attr(
-			            ops->user, node, depth, index, attr->name,
-			            attr->value) != 0)
-			{
-				return -1;
-			}
-		}
-		index++;
-	}
-
-	index = 0;
-	for (listener = node->listeners; listener; listener = listener->next) {
-		if (ops->listener) {
-			if (ops->listener(
-			            ops->user, node, depth, index,
-			            listener->event, listener->bubbles) != 0)
-			{
-				return -1;
-			}
-		}
-		index++;
-	}
-
-	for (child = node->first_child; child; child = child->next_sibling) {
-		if (bud_walk_node(child, ops, depth + 1) != 0) {
-			return -1;
-		}
-	}
-
-	if (ops->leave_node) {
-		if (ops->leave_node(ops->user, node, depth) != 0) {
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-int bud_walk(const bud_node *root, const bud_walk_ops *ops)
-{
-	if (!ops) {
-		return -1;
-	}
-
-	return bud_walk_node(root, ops, 0);
 }
 
 bud_runtime *bud_runtime_new(bud_node *root)

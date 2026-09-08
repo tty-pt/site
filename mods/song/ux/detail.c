@@ -21,7 +21,6 @@ static int on_zoom_change(bud_event *event)
 {
 	const char *value = (const char *)event->user;
 	int z;
-	char zv[16];
 
 	if (!value)
 		return 0;
@@ -34,8 +33,7 @@ static int on_zoom_change(bud_event *event)
 	app_state.zoom = z;
 	ui_apply_zoom(g_main, NULL, z);
 
-	snprintf(zv, sizeof(zv), "%d", z);
-	bud_set_attr(event->target, "value", zv);
+	bud_set_attr_fmt(event->target, "value", "%d", z);
 
 	return bud_api_action_handler(event);
 }
@@ -73,8 +71,10 @@ static bud_node *render_key_options(void)
 		const char *name = key_name(
 		        i, app_state.original_key, app_state.use_latin);
 		bud_append(
-		        opts, bud_tpl("<option value='%d' %b>%s</option>", i,
-		                      (i == cur_t) ? "selected" : NULL, name));
+		        opts,
+		        lx_n("option", lx_attr("value", "%d", i),
+		             (i == cur_t) ? lx_attr("selected", "") : lx_none(),
+		             lx_textf("%s", name)));
 	}
 	return opts;
 }

@@ -85,6 +85,19 @@ bud_arg bud_attr_fmt(const char *name, const char *fmt, ...);
 	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
 	                (bud_arg[]){ __VA_ARGS__ }) })
 
+#define lx_n(tag, ...)                                                         \
+	bud_el_impl((tag),                                                     \
+	            sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),      \
+	            (bud_arg[]){ __VA_ARGS__ })
+
+#define lx_frag_n(...)                                                         \
+	bud_frag_impl(sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),    \
+	              (bud_arg[]){ __VA_ARGS__ })
+
+#define lx_textf(fmt, ...)                                                     \
+	((bud_arg){ .type = BUD_ARG_NODE,                                      \
+	            .data.node = bud_textf((fmt), ##__VA_ARGS__) })
+
 /* ── BUD_DEBUG: source location tracking ── */
 /* When BUD_DEBUG is defined, lx_el/lx_text/lx_frag capture __FILE__/__LINE__
  * and stamp it on the created node.  lx_raw() is also provided as a
@@ -119,6 +132,31 @@ static inline bud_arg _bud_src_node(bud_node *node, const char *file, int line)
 	                sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg),  \
 	                (bud_arg[]){ __VA_ARGS__ }),                           \
 	        __FILE__, __LINE__)
+
+static inline bud_node *_bud_src_node_ptr(bud_node *node, const char *file, int line)
+{
+	bud_node_set_src(node, file, line);
+	return node;
+}
+
+#undef lx_n
+#define lx_n(tag, ...)                                                         \
+	_bud_src_node_ptr(                                                     \
+	        bud_el_impl((tag),                                             \
+	                    sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg), \
+	                    (bud_arg[]){ __VA_ARGS__ }),                       \
+	        __FILE__, __LINE__)
+
+#undef lx_frag_n
+#define lx_frag_n(...)                                                         \
+	_bud_src_node_ptr(                                                     \
+	        bud_frag_impl(sizeof((bud_arg[]){ __VA_ARGS__ }) / sizeof(bud_arg), \
+	                      (bud_arg[]){ __VA_ARGS__ }),                     \
+	        __FILE__, __LINE__)
+
+#undef lx_textf
+#define lx_textf(fmt, ...)                                                     \
+	_bud_src_node(bud_textf((fmt), ##__VA_ARGS__), __FILE__, __LINE__)
 
 /* lx_raw wraps bud_raw with source tracking (use as a child arg to lx_el) */
 #define lx_raw(html) _bud_src_node(bud_raw(html), __FILE__, __LINE__)

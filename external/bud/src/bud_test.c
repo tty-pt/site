@@ -18,11 +18,6 @@ typedef struct hydrate_expect {
 	const char *text;
 } hydrate_expect;
 
-typedef struct walk_ops {
-	char buffer[2048];
-	size_t len;
-} walk_ops;
-
 typedef struct lifecycle_log {
 	char buffer[512];
 	size_t len;
@@ -91,112 +86,6 @@ static int hydrate_lookup(
 	}
 
 	return -1;
-}
-
-static const char *walk_kind_name(bud_node_kind kind)
-{
-	switch (kind) {
-	case BUD_NODE_FRAGMENT:
-		return "fragment";
-	case BUD_NODE_ELEMENT:
-		return "element";
-	case BUD_NODE_TEXT:
-		return "text";
-	default:
-		return "unknown";
-	}
-}
-
-static int walk_push(walk_ops *ops, const char *fmt, ...)
-{
-	va_list ap;
-	int wrote;
-
-	if (ops->len >= sizeof(ops->buffer)) {
-		return -1;
-	}
-
-	va_start(ap, fmt);
-	wrote = vsnprintf(
-	        ops->buffer + ops->len, sizeof(ops->buffer) - ops->len, fmt,
-	        ap);
-	va_end(ap);
-	if (wrote < 0) {
-		return -1;
-	}
-	if ((size_t)wrote >= sizeof(ops->buffer) - ops->len) {
-		return -1;
-	}
-
-	ops->len += (size_t)wrote;
-	return 0;
-}
-
-static int walk_enter(void *user, const bud_node *node, size_t depth)
-{
-	walk_ops *ops;
-	const char *label;
-	bud_node_kind kind;
-
-	ops = (walk_ops *)user;
-	kind = bud_node_kind_of(node);
-	label = NULL;
-	if (kind == BUD_NODE_TEXT) {
-		label = bud_node_text(node);
-	} else {
-		label = bud_node_tag(node);
-	}
-	if (!label) {
-		label = "";
-	}
-
-	return walk_push(
-	        ops, "enter:%zu:%s:%s\n", depth, walk_kind_name(kind), label);
-}
-
-static int walk_attr(
-        void *user, const bud_node *node, size_t depth, size_t index,
-        const char *name, const char *value)
-{
-	(void)node;
-	return walk_push(
-	        (walk_ops *)user, "attr:%zu:%zu:%s=%s\n", depth, index, name,
-	        value);
-}
-
-static int walk_listener(
-        void *user, const bud_node *node, size_t depth, size_t index,
-        const char *event, int bubbles)
-{
-	walk_ops *ops;
-
-	(void)node;
-	ops = (walk_ops *)user;
-	return walk_push(
-	        ops, "listener:%zu:%zu:%s:%d\n", depth, index, event,
-	        bubbles ? 1 : 0);
-}
-
-static int walk_leave(void *user, const bud_node *node, size_t depth)
-{
-	walk_ops *ops;
-	bud_node_kind kind;
-	const char *label;
-
-	ops = (walk_ops *)user;
-	kind = bud_node_kind_of(node);
-	label = NULL;
-	if (kind == BUD_NODE_TEXT) {
-		label = bud_node_text(node);
-	} else {
-		label = bud_node_tag(node);
-	}
-	if (!label) {
-		label = "";
-	}
-
-	return walk_push(
-	        ops, "leave:%zu:%s:%s\n", depth, walk_kind_name(kind), label);
 }
 
 static int lifecycle_push(lifecycle_log *log, const char *fmt, ...)
@@ -302,6 +191,42 @@ static int test_jsx(void)
 	}
 	bud_free_string(html);
 	bud_free(tree.data.node);
+	return rc;
+}
+
+static int test_jsx_ergonomics(void)
+{
+	bud_node *tree = lx_n("main", lx_attr("data-role", "app"),
+	                      lx_el("h1", lx_textf("%s %d", "Item", 42)),
+	                      lx_el("button", lx_text("Click me")),
+	                      lx_textf("Count: %d", 100));
+	char *html = bud_render_html(tree);
+	int rc = 0;
+	if (!html ||
+	    !strstr(html, "<main data-role=\"app\"><h1>Item 42</h1><button>Click "
+	                  "me</button>Count: 100</main>"))
+	{
+		fprintf(stderr, "JSX ergonomics test failed: %s\n", html ? html : "NULL");
+		rc = 1;
+	}
+	bud_free_string(html);
+
+	const bud_node *h1_node = bud_node_child(tree, 0);
+	if (!h1_node || bud_node_parent(h1_node) != tree) {
+		fprintf(stderr, "bud_node_parent test failed\n");
+		rc = 1;
+	}
+
+	bud_node *frag = lx_frag_n(lx_el("span", lx_text("A")), lx_el("span", lx_text("B")));
+	char *frag_html = bud_render_html(frag);
+	if (!frag_html || strcmp(frag_html, "<span>A</span><span>B</span>") != 0) {
+		fprintf(stderr, "lx_frag_n test failed: %s\n", frag_html ? frag_html : "NULL");
+		rc = 1;
+	}
+	bud_free_string(frag_html);
+	bud_free(frag);
+
+	bud_free(tree);
 	return rc;
 }
 
@@ -617,6 +542,8 @@ int main(void)
 
 	if (test_jsx() != 0)
 		return 1;
+	if (test_jsx_ergonomics() != 0)
+		return 1;
 	if (test_bool_attr() != 0)
 		return 1;
 	if (test_raw_html() != 0)
@@ -639,9 +566,7 @@ int main(void)
 	char *html;
 	char *hydrated_html;
 	test_ops ops;
-	test_ops walk_stream;
 	test_ops patch_stream;
-	walk_ops walk;
 	lifecycle_log lifecycle;
 	hydrate_expect expect[] = { { 0, "fragment", NULL, NULL },
 		                    { 1, "element", "main", NULL },
@@ -665,9 +590,7 @@ int main(void)
 	hydrated_html = NULL;
 
 	memset(&ops, 0, sizeof(ops));
-	memset(&walk_stream, 0, sizeof(walk_stream));
 	memset(&patch_stream, 0, sizeof(patch_stream));
-	memset(&walk, 0, sizeof(walk));
 	memset(&lifecycle, 0, sizeof(lifecycle));
 
 	root = bud_fragment();
@@ -852,76 +775,6 @@ int main(void)
 	        check(bud_node_listener_bubbles(button, 2) == 0,
 	              "listener bubbles 2");
 	if (rc != 0) {
-		goto cleanup;
-	}
-
-	{
-		bud_walk_ops visitor;
-
-		visitor.enter_node = walk_enter;
-		visitor.attr = walk_attr;
-		visitor.listener = walk_listener;
-		visitor.leave_node = walk_leave;
-		visitor.user = &walk;
-		rc = bud_walk(root, &visitor);
-	}
-	if (rc != 0) {
-		fprintf(stderr, "bud test failed: walk\n");
-		goto cleanup;
-	}
-	rc =
-	        check(strstr(walk.buffer, "enter:0:fragment:") != NULL,
-	              "walk enter fragment");
-	if (rc != 0) {
-		fprintf(stderr, "walk: %s\n", walk.buffer);
-		goto cleanup;
-	}
-	rc =
-	        check(strstr(walk.buffer, "attr:1:0:data-role=app") != NULL,
-	              "walk attr");
-	if (rc != 0) {
-		fprintf(stderr, "walk: %s\n", walk.buffer);
-		goto cleanup;
-	}
-	rc =
-	        check(strstr(walk.buffer, "listener:2:0:click:1") != NULL,
-	              "walk listener");
-	if (rc != 0) {
-		fprintf(stderr, "walk: %s\n", walk.buffer);
-		goto cleanup;
-	}
-	rc =
-	        check(strstr(walk.buffer, "leave:0:fragment:") != NULL,
-	              "walk leave fragment");
-	if (rc != 0) {
-		fprintf(stderr, "walk: %s\n", walk.buffer);
-		goto cleanup;
-	}
-
-	rc = bud_render_walk_ops(root, test_emit, &walk_stream);
-	if (rc != 0) {
-		fprintf(stderr, "bud test failed: render walk ops\n");
-		goto cleanup;
-	}
-	rc = check(
-	        strstr(walk_stream.buffer, "walk-enter:0:fragment:0") != NULL,
-	        "walk stream enter fragment");
-	if (rc != 0) {
-		fprintf(stderr, "walk stream: %s\n", walk_stream.buffer);
-		goto cleanup;
-	}
-	rc = check(
-	        strstr(walk_stream.buffer, "walk-listener:4:click:1") != NULL,
-	        "walk stream listener");
-	if (rc != 0) {
-		fprintf(stderr, "walk stream: %s\n", walk_stream.buffer);
-		goto cleanup;
-	}
-	rc = check(
-	        strstr(walk_stream.buffer, "walk-text:5:3:Click me") != NULL,
-	        "walk stream text");
-	if (rc != 0) {
-		fprintf(stderr, "walk stream: %s\n", walk_stream.buffer);
 		goto cleanup;
 	}
 

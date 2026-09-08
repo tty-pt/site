@@ -10,8 +10,6 @@ It provides:
 - a tree model for fragments, elements, and text nodes
 - attribute storage and child linking
 - child/attr/listener accessors for host-side hydration
-- a structured tree walk API for host-side inspection without HTML parsing
-- a walk op stream for browser/WASM bridges
 - HTML SSR serialization (`bud_render_html`)
 - hydrated HTML markers for DOM reattachment (`bud_render_hydrated_html`)
 - a hydration callback stream with stable node IDs

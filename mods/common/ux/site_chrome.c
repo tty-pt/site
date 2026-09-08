@@ -14,11 +14,6 @@
 #define NAV_SCROLL_HIDE_AT 48
 #define NAV_SCROLL_DELTA 4
 
-static bud_node *site_chrome_nav_bar;
-static int site_chrome_scroll_y;
-static int site_chrome_scroll_ready;
-static int site_chrome_hidden;
-
 static void site_chrome_parent_path(const char *path, char *buf, size_t len)
 {
 	const char *slash;
@@ -49,40 +44,75 @@ static void site_chrome_parent_path(const char *path, char *buf, size_t len)
 	buf[n] = '\0';
 }
 
-static void site_chrome_set_hidden(int hidden)
+static bud_node *site_chrome_get_nav_bar(bud_node *target)
 {
-	const char *classes;
+	bud_node *curr = target;
+	while (curr) {
+		if (bud_get_attr(curr, "data-site-chrome"))
+			return curr;
+		curr = bud_node_parent(curr);
+	}
+	return NULL;
+}
 
-	if (!site_chrome_nav_bar || site_chrome_hidden == hidden)
+static void site_chrome_set_hidden(bud_node *nav_bar, int hidden)
+{
+	const char *hidden_str;
+	const char *classes;
+	int cur_hidden;
+
+	if (!nav_bar)
 		return;
-	site_chrome_hidden = hidden;
+	hidden_str = bud_get_attr(nav_bar, "data-chrome-hidden");
+	cur_hidden = (hidden_str && hidden_str[0] == '1');
+	if (cur_hidden == hidden)
+		return;
+	bud_set_attr(nav_bar, "data-chrome-hidden", hidden ? "1" : "0");
 	classes = hidden ? "nav-bar nav-bar-hidden" : "nav-bar";
-	bud_set_attr(site_chrome_nav_bar, "class", classes);
-	bud_patch_attr(site_chrome_nav_bar, "class", classes);
+	bud_set_attr(nav_bar, "class", classes);
+	bud_patch_attr(nav_bar, "class", classes);
 }
 
 static int site_chrome_on_scroll(bud_event *event)
 {
+	bud_node *nav_bar;
 	const char *value;
+	const char *ready_str;
+	const char *prev_y_str;
 	int y;
+	int prev_y;
 	int delta;
 
-	value = event ? (const char *)event->user : NULL;
-	if (!value || !site_chrome_nav_bar)
+	if (!event)
 		return 0;
+	nav_bar = site_chrome_get_nav_bar(event->target);
+	if (!nav_bar)
+		return 0;
+
+	value = (const char *)event->user;
+	if (!value)
+		return 0;
+
 	y = atoi(value);
-	if (!site_chrome_scroll_ready) {
-		site_chrome_scroll_y = y;
-		site_chrome_scroll_ready = 1;
+	ready_str = bud_get_attr(nav_bar, "data-chrome-scroll-ready");
+	if (!ready_str || ready_str[0] != '1') {
+		bud_set_attr_fmt(nav_bar, "data-chrome-scroll-y", "%d", y);
+		bud_set_attr(nav_bar, "data-chrome-scroll-ready", "1");
 		return 0;
 	}
-	delta = y - site_chrome_scroll_y;
+
+	prev_y_str = bud_get_attr(nav_bar, "data-chrome-scroll-y");
+	prev_y = prev_y_str ? atoi(prev_y_str) : 0;
+	delta = y - prev_y;
+
 	if (y < NAV_SCROLL_TOP || delta < -NAV_SCROLL_DELTA)
-		site_chrome_set_hidden(0);
+		site_chrome_set_hidden(nav_bar, 0);
 	else if (y > NAV_SCROLL_HIDE_AT && delta > NAV_SCROLL_DELTA)
-		site_chrome_set_hidden(1);
+		site_chrome_set_hidden(nav_bar, 1);
+
 	if (delta > NAV_SCROLL_DELTA || delta < -NAV_SCROLL_DELTA)
-		site_chrome_scroll_y = y;
+		bud_set_attr_fmt(nav_bar, "data-chrome-scroll-y", "%d", y);
+
 	return 0;
 }
 
@@ -122,10 +152,6 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	                "</header>",
 	                "scroll@window", site_chrome_on_scroll, back,
 	                state ? state->title : "", menu_label, icon);
-	site_chrome_nav_bar = bar;
-	site_chrome_scroll_y = 0;
-	site_chrome_scroll_ready = 0;
-	site_chrome_hidden = 0;
 
 	return bud_tpl(
 	        "<div id='chrome-root'>"

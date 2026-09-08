@@ -51,25 +51,6 @@ typedef int (*bud_event_handler_fn)(bud_event *event);
 typedef void (*bud_lifecycle_fn)(
         void *user, bud_runtime *runtime, const bud_node *node);
 
-typedef int (*bud_walk_enter_fn)(
-        void *user, const bud_node *node, size_t depth);
-typedef int (*bud_walk_attr_fn)(
-        void *user, const bud_node *node, size_t depth, size_t index,
-        const char *name, const char *value);
-typedef int (*bud_walk_listener_fn)(
-        void *user, const bud_node *node, size_t depth, size_t index,
-        const char *event, int bubbles);
-typedef int (*bud_walk_leave_fn)(
-        void *user, const bud_node *node, size_t depth);
-
-typedef struct bud_walk_ops {
-	bud_walk_enter_fn enter_node;
-	bud_walk_attr_fn attr;
-	bud_walk_listener_fn listener;
-	bud_walk_leave_fn leave_node;
-	void *user;
-} bud_walk_ops;
-
 typedef bud_node *(*bud_component_fn)(void *ctx, const void *props);
 
 typedef struct bud_component {
@@ -80,6 +61,7 @@ typedef struct bud_component {
 bud_node *bud_fragment(void);
 bud_node *bud_element(const char *tag);
 bud_node *bud_text(const char *text);
+bud_node *bud_textf(const char *fmt, ...);
 bud_node *bud_raw(const char *html);
 bud_node *bud_tpl(const char *fmt, ...);
 bud_node *bud_vtpl(const char *fmt, va_list ap);
@@ -88,6 +70,7 @@ bud_node *
 bud_component_render(const bud_component *component, const void *props);
 
 int bud_set_attr(bud_node *node, const char *name, const char *value);
+int bud_set_attr_fmt(bud_node *node, const char *name, const char *fmt, ...);
 int bud_set_bool_attr(bud_node *node, const char *name);
 const char *bud_get_attr(const bud_node *node, const char *name);
 int bud_add_class(bud_node *node, const char *cls);
@@ -112,6 +95,7 @@ const char *bud_node_text(const bud_node *node);
 unsigned int bud_node_id(const bud_node *node);
 size_t bud_node_child_count(const bud_node *node);
 const bud_node *bud_node_child(const bud_node *node, size_t index);
+bud_node *bud_node_parent(const bud_node *node);
 size_t bud_node_attr_count(const bud_node *node);
 const char *bud_node_attr_name(const bud_node *node, size_t index);
 const char *bud_node_attr_value(const bud_node *node, size_t index);
@@ -128,9 +112,7 @@ int bud_render_patch_ops(const bud_node *root, bud_emit_fn emit, void *user);
 int bud_vdom_diff(
         bud_node *old_root, bud_node *new_root, bud_emit_fn emit, void *user);
 void bud_app_set_state(void);
-int bud_render_walk_ops(const bud_node *root, bud_emit_fn emit, void *user);
 int bud_hydrate(const bud_node *root, bud_hydrate_lookup_fn lookup, void *user);
-int bud_walk(const bud_node *root, const bud_walk_ops *ops);
 
 bud_runtime *bud_runtime_new(bud_node *root);
 void bud_runtime_free(bud_runtime *runtime);

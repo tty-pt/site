@@ -657,7 +657,6 @@ class BudHostBase {
 
 	replay(ops) {
 		const stack = [];
-		const walkStack = [];
 		let current = null;
 
 		for (const rawOp of ops) {
@@ -725,56 +724,6 @@ class BudHostBase {
 			case 'element-close':
 				stack.pop();
 				current = stack[stack.length - 1] || null;
-				break;
-			case 'walk-enter': {
-				const id = parseIntOrNull(op.c);
-				if (id === null) {
-					throw new Error('bud: missing walk node id');
-				}
-				if (!this.getNode(id)) {
-					throw new Error('bud: missing walk node');
-				}
-				walkStack.push(id);
-				break;
-			}
-			case 'walk-attr': {
-				const node = this.getNode(parseIntOrNull(op.a));
-				if (node && node.nodeType === Node.ELEMENT_NODE && node.getAttribute(op.b) !== op.c) {
-					node.setAttribute(op.b, op.c);
-				}
-				break;
-			}
-			case 'walk-listener': {
-				const id = parseIntOrNull(op.a);
-				const node = this.getNode(id);
-				if (!node) {
-					throw new Error('bud: missing walk listener node');
-				}
-				const bubbles = op.c === '1';
-				const spec = parseListenerToken(op.b);
-				const handler = this.resolveListener({
-					id,
-					event: spec.event,
-					rawEvent: spec.rawEvent,
-					target: spec.target,
-					bubbles,
-					node,
-					root: this.root
-				});
-				if (typeof handler === 'function') {
-					this.bind(id, op.b, handler, bubbles);
-				}
-				break;
-			}
-			case 'walk-text': {
-				const node = this.getNode(parseIntOrNull(op.a));
-				if (node && node.nodeType === Node.TEXT_NODE && node.textContent !== op.c) {
-					node.textContent = op.c;
-				}
-				break;
-			}
-			case 'walk-leave':
-				walkStack.pop();
 				break;
 			default:
 				break;
@@ -1498,10 +1447,6 @@ function readWasmCString(memory, ptr) {
 
 export function hydrateBud(root, ops, listenerResolver = null) {
 	return new BudHydrator(root, listenerResolver).replay(ops);
-}
-
-export function hydrateBudFromWalk(root, walkOps, listenerResolver = null) {
-	return hydrateBud(root, walkOps, listenerResolver);
 }
 
 export function applyBudPatch(root, patchOps, listenerResolver = null) {
