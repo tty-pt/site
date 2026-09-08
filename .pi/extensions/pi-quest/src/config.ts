@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #configurations — six settings under "pi-quest", all optional.
+// HIGH_LEVEL: #configurations — settings under "pi-quest", all optional.
 // HIGH_LEVEL: #interfaces — bindings select the peer tools; built-ins apply otherwise.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,6 +21,8 @@ export interface QuestConfig {
   bindings: InterfaceBindings;
   statusStyle: StatusStyle;
   autoArchive: boolean;
+  reviewInactivityMs: number;
+  reviewMaxDurationMs: number;
 }
 
 export const DEFAULT_CONFIG: QuestConfig = {
@@ -30,6 +32,8 @@ export const DEFAULT_CONFIG: QuestConfig = {
   bindings: { asking: { tool: "ask_questions" }, reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
+  reviewInactivityMs: 300000,
+  reviewMaxDurationMs: 1500000,
 };
 
 export function loadConfig(raw: unknown): QuestConfig {
@@ -39,6 +43,8 @@ export function loadConfig(raw: unknown): QuestConfig {
   const depth = record["depthCap"];
   const style = record["statusStyle"];
   const autoArchive = record["autoArchive"];
+  const reviewInactivity = record["reviewInactivityMs"];
+  const reviewMaxDuration = record["reviewMaxDurationMs"];
   const thresholds = record["draftThresholds"] as Record<string, unknown> | undefined;
   const bindings = record["bindings"] as Record<string, unknown> | undefined;
   return {
@@ -54,19 +60,25 @@ export function loadConfig(raw: unknown): QuestConfig {
         ? thresholds["evidence"] as number
         : DEFAULT_CONFIG.draftThresholds.evidence,
     },
-    bindings: {
-      asking: {
-        tool: typeof (bindings?.["asking"] as Record<string, unknown> | undefined)?.["tool"] === "string"
-          ? (bindings?.["asking"] as Record<string, unknown>)["tool"] as string
-          : DEFAULT_CONFIG.bindings.asking.tool,
+bindings: {
+        asking: {
+          tool: typeof (bindings?.["asking"] as Record<string, unknown> | undefined)?.["tool"] === "string"
+            ? (bindings?.["asking"] as Record<string, unknown>)["tool"] as string
+            : DEFAULT_CONFIG.bindings.asking.tool,
+        },
+        reviewRunner: {
+          tool:
+            typeof (bindings?.["reviewRunner"] as Record<string, unknown> | undefined)?.["tool"] === "string"
+              ? (bindings?.["reviewRunner"] as Record<string, unknown>)["tool"] as string
+              : DEFAULT_CONFIG.bindings.reviewRunner.tool,
+        },
       },
-      reviewRunner: {
-        tool:
-          typeof (bindings?.["reviewRunner"] as Record<string, unknown> | undefined)?.["tool"] === "string"
-            ? (bindings?.["reviewRunner"] as Record<string, unknown>)["tool"] as string
-            : DEFAULT_CONFIG.bindings.reviewRunner.tool,
-      },
-    },
+    reviewInactivityMs: typeof reviewInactivity === "number"
+      ? reviewInactivity
+      : DEFAULT_CONFIG.reviewInactivityMs,
+    reviewMaxDurationMs: typeof reviewMaxDuration === "number"
+      ? reviewMaxDuration
+      : DEFAULT_CONFIG.reviewMaxDurationMs,
   };
 }
 

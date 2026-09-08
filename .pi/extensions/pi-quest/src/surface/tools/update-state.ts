@@ -15,17 +15,19 @@ import {
 } from "../../domain/quest";
 import { recordPlanRevision } from "../../domain/plan-revision";
 import { acknowledgeChild, unfinishedChildren } from "../../domain/children";
-import { bootPlanRevisionReview } from "../../implementing/plan-revision";
+import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { nextQid } from "../../domain/qid";
 import { draftPath } from "../../domain/paths";
 import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
-import { hashContent, maybeBootDraftReview, parseDraftSections, splicePlanSection } from "../../drafting/reviews";
+import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
+import { hashContent, parseDraftSections, seedReviewCount, splicePlanSection } from "../../drafting/plan-text";
 import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
+import { checkPlanCitations } from "./claims";
 
 import type { QuestState } from "../../domain/quest";
 
@@ -73,7 +75,7 @@ async function writePlanToDraft(
   }
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
-  const updated = splicePlanSection(current, planText);
+  const updated = splicePlanSection(current, seedReviewCount(planText));
   if (updated === current) throw new Error("plan text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
@@ -84,6 +86,7 @@ async function writePlanToDraft(
   });
   emitNow(pi);
   noteDraftUpdated(ctx);
+  clearDraftReviewRetry(state.qid);
   void maybeBootDraftReview(pi, ctx);
   return next;
 }
@@ -111,7 +114,7 @@ async function writePlanRevision(
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
   const previousPlan = parseDraftSections(current).plan;
-  const updated = splicePlanSection(current, planText);
+  const updated = splicePlanSection(current, seedReviewCount(planText));
   if (updated === current) throw new Error("plan revision identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
@@ -119,6 +122,7 @@ async function writePlanRevision(
   const next = updateState((s) => recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan));
   emitNow(pi);
   noteDraftUpdated(ctx);
+  clearPlanRevisionRetries(state.qid);
   void bootPlanRevisionReview(pi, ctx, hash);
   return next;
 }
@@ -179,6 +183,8 @@ async function applyPlanRevisionParam(
     const note = params["note"];
     const next = await writePlanRevision(pi, ctx, state, revision.trim(), typeof note === "string" ? note.trim() : "", params["objective"]);
     applied.push("plan revision staged in the draft file; re-review booted");
+    const claims = await checkPlanCitations(ctx, revision.trim());
+    if (claims !== "") applied.push(claims);
     return { state: next };
   } catch (err) {
     return { state, error: err instanceof Error ? err.message : String(err) };
@@ -252,6 +258,8 @@ export async function applyUpdate(
     try {
       state = await writePlanToDraft(pi, ctx, state, plan.trim());
       applied.push("plan recorded in the draft file");
+      const claims = await checkPlanCitations(ctx, plan.trim());
+      if (claims !== "") applied.push(claims);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }

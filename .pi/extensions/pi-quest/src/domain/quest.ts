@@ -54,6 +54,9 @@ export interface LastReview {
   verdict: ReviewVerdict;
   target: string;
   findings: string;
+  // Verbatim reviewer text (truncated). The gate echoes it so a FAIL's
+  // concrete details always reach the implementer — never a blind rewrite.
+  reviewText?: string;
 }
 
 export interface DialogueRound {
@@ -263,9 +266,13 @@ export function recordReviewResult(
   verdict: ReviewVerdict,
   target: string,
   findings: string,
+  reviewText?: string,
 ): QuestState {
+  const lastReview: LastReview = reviewText === undefined || reviewText === ""
+    ? { verdict, target, findings }
+    : { verdict, target, findings, reviewText };
   return markChanged(state, {
-    lastReview: { verdict, target, findings },
+    lastReview,
     exactNextAction: verdict === "PASS"
       ? state.exactNextAction
       : "Address the review findings, then continue.",

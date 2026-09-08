@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync stoma-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
+all: assets-sync stoma-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mm mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -62,6 +62,9 @@ axil-hyle: axil-lib hyle-source hyle-bud axil-auth-lib
 qmap-lib:
 	$(MAKE) -C external/libqmap
 
+mm:
+	$(MAKE) -C external/mm
+
 xylem-lib:
 	$(MAKE) -C external/libxylem
 
@@ -111,6 +114,7 @@ standalone-unit-tests:
 	@sh tests/unit/run-viewer-prefs.sh
 	@sh tests/unit/run-slugify.sh
 	@sh tests/unit/run-i18n.sh
+	@$(MAKE) -C external/mm test
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -178,6 +182,7 @@ lint:
 clean:
 	$(MAKE) -C external/bud clean
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
+	$(MAKE) -C external/mm clean
 
 distclean:
 	$(MAKE) -C external/bud distclean
@@ -263,4 +268,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib axil-lib qmap-lib xylem-lib mm boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

@@ -1,6 +1,6 @@
 import { check } from "../check.ts";
 import { mkdtempSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
@@ -23,10 +23,21 @@ import { formatRevisionHistory } from "../../src/validation/flow.ts";
 import { buildReviewPrompt } from "../../src/review/prompts.ts";
 import { installDraftGate } from "../../src/drafting/gate.ts";
 import { cancelReview, trackReview } from "../../src/review/tracker.ts";
+import { hashContent } from "../../src/drafting/plan-text.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
+import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { stopBlink } from "../../src/durability/index.ts";
 import type { Pi, ToolCallEvent } from "../../src/hooks/events.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
+import type { FakePi, SentMessage } from "../fake-pi.ts";
+import {
+  MAX_REVISION_RETRIES,
+  REVISION_RETRY_BASE_MS,
+  bootPlanRevisionReview,
+  clearPlanRevisionRetries,
+  planRevisionRetryCount,
+  setRevisionRetryDispatcher,
+} from "../../src/implementing/plan-revision.ts";
 
 const QID = "abc123" as Qid;
 
@@ -234,6 +245,142 @@ Deno.test("planRevision refuses outside implementing and guards scope", async ()
     check(plan.error !== undefined && plan.error.includes("amendment"), "plain plan still drafting-only");
   } finally {
     stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+interface RevisionRetryRecord {
+  delay: number;
+  fire: () => void;
+}
+
+interface RevisionBus {
+  pi: FakePi;
+  emitted: Array<{ event: string; data: unknown }>;
+  feed: (data: unknown) => void;
+  schedules: RevisionRetryRecord[];
+}
+
+function revisionBus(): RevisionBus {
+  const pi = fakePi();
+  pi.toolNames = ["subagent"];
+  const emitted: Array<{ event: string; data: unknown }> = [];
+  const handlers = new Map<string, Array<(data: unknown) => void>>();
+  (pi as { events: unknown }).events = {
+    on: (event: string, handler: (data: unknown) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => {};
+    },
+    emit: (event: string, data: unknown) => {
+      emitted.push({ event, data });
+    },
+  };
+  const feed = (data: unknown) => {
+    for (const handler of handlers.get("prompt-template:subagent:response") ?? []) handler(data);
+  };
+  return { pi, emitted, feed, schedules: [] };
+}
+
+function revisionRequests(emitted: Array<{ event: string; data: unknown }>): Array<Record<string, unknown>> {
+  return emitted
+    .filter((e) => e.event === "prompt-template:subagent:request")
+    .map((e) => e.data as Record<string, unknown>);
+}
+
+async function waitForRevisionRequests(
+  emitted: Array<{ event: string; data: unknown }>,
+  count: number,
+): Promise<void> {
+  for (let i = 0; i < 200 && revisionRequests(emitted).length < count; i += 1) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  check(revisionRequests(emitted).length >= count, `expected ${count} review attempts`);
+}
+
+function revisionWakes(pi: FakePi): Array<SentMessage["message"]> {
+  return pi.sent.filter((m) => m.options?.triggerTurn === true).map((m) => m.message);
+}
+
+async function revisionFailureSetup(): Promise<{ cwd: string; target: string; content: string; qid: Qid }> {
+  const cwd = tmp();
+  const qid = QID;
+  replaceState(implementing());
+  const content = "# t\n\n## Implementation Plan\n\nnew plan\n";
+  await mkdir(join(cwd, ".pi/quest/future"), { recursive: true });
+  await writeFile(join(cwd, draftPath(qid)), content, "utf8");
+  const target = hashContent(content);
+  return { cwd, target, content, qid };
+}
+
+Deno.test("a failed plan-revision review retries the same target and adopts on PASS", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  const prior = setRevisionRetryDispatcher((delay, fire) => {
+    bus.schedules.push({ delay, fire });
+  });
+  try {
+    const booted = bootPlanRevisionReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRevisionRequests(bus.emitted, 1);
+    bus.feed({ requestId: revisionRequests(bus.emitted)[0]["requestId"], status: "error", error: "boom" });
+    await booted;
+    check(bus.schedules.length === 1, "first retry scheduled");
+    check(bus.schedules[0].delay === REVISION_RETRY_BASE_MS, "base backoff");
+    check(planRevisionRetryCount(d.qid) === 1, "revision retry count recorded");
+    check(revisionWakes(bus.pi).length === 0, "no wake while retrying");
+    const onDisk = await readFile(join(d.cwd, draftPath(d.qid)), "utf8");
+    check(onDisk === d.content, "staged plan untouched at scheduling time");
+    await bus.schedules[0].fire();
+    await waitForRevisionRequests(bus.emitted, 2);
+    bus.feed({
+      requestId: revisionRequests(bus.emitted)[1]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE" },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    check(getState().draft?.approvedPlanHash === d.target, "revision adopted on retried PASS");
+    check(getState().phase === "implementing", "stays implementing");
+    check(planRevisionRetryCount(d.qid) === 0, "counter cleared on verdict");
+  } finally {
+    setRevisionRetryDispatcher(prior);
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("plan-revision retries cap out and wake without self-approval", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  const prior = setRevisionRetryDispatcher((delay, fire) => {
+    bus.schedules.push({ delay, fire });
+  });
+  try {
+    const booted = bootPlanRevisionReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRevisionRequests(bus.emitted, 1);
+    bus.feed({ requestId: revisionRequests(bus.emitted)[0]["requestId"], status: "error", error: "boom" });
+    await booted;
+    for (let step = 1; step <= MAX_REVISION_RETRIES; step += 1) {
+      check(bus.schedules.length === step, `retry ${step} scheduled`);
+      await bus.schedules[step - 1].fire();
+      await waitForRevisionRequests(bus.emitted, step + 1);
+      bus.feed({ requestId: revisionRequests(bus.emitted)[step]["requestId"], status: "error", error: "boom" });
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    check(bus.schedules.length === MAX_REVISION_RETRIES, "no retry past the cap");
+    const sentWakes = revisionWakes(bus.pi);
+    check(sentWakes.length === 1, "woken exactly once, at the cap");
+    const text = String(sentWakes[0].content);
+    check(text.includes(`failed ${MAX_REVISION_RETRIES} times`), "cap named");
+    check(!text.includes("proceed on your judgment"), "no self-judgment escape");
+    check(planRevisionRetryCount(d.qid) === 0, "counter reset at cap");
+    const onDisk = await readFile(join(d.cwd, draftPath(d.qid)), "utf8");
+    check(onDisk === d.content, "previous plan still stands after the cap");
+  } finally {
+    setRevisionRetryDispatcher(prior);
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
     replaceState(IDLE_STATE);
   }
 });

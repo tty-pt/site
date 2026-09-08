@@ -302,3 +302,25 @@ Deno.test("plan writes blink the hint", async () => {
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("plan saves warn on citations that do not resolve on disk", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await applyUpdate(pi, ctx, { objective: "Thin the code." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const missing = await applyUpdate(pi, ctx, { plan: "Walk the tree via song.c:12 and gig.c:40." });
+    check(missing.applied.some((a) => a.includes("claims check")), "claims check reported");
+    check(missing.applied.some((a) => a.includes("song.c:12 not found")), "missing file named");
+    const dir = join(cwd, "mods/common/ux");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "site_page.c"), Array(30).fill("/* x */").join("\n"), "utf8");
+    const resolved = await applyUpdate(pi, ctx, { plan: "Use the canonical responder mods/common/ux/site_page.c:20." });
+    check(resolved.applied.some((a) => a.includes("claims check: 1 citations resolve")), "resolving citation counted as ok");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});

@@ -7,9 +7,14 @@ export interface ParsedReview {
   findings: string;
   severity: string;
   advisories: string;
+  // The reviewer's verbatim text (truncated) — travels to the implementer so
+  // a rich FAIL never degrades to a blind rewrite. Budget-bounded, never zero
+  // for a completed run: the verdict lines alone survive any truncation.
+  text: string;
 }
 
 const MAX_FINDINGS_CHARS = 4000;
+const MAX_REVIEW_TEXT_CHARS = 8000;
 
 function normalize(raw: string): ReviewVerdict | null {
   const upper = raw.toUpperCase().trim();
@@ -23,7 +28,9 @@ function collectSection(lines: string[], headers: RegExp): string {
   let inSection = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (/^(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|ADVISORIES|SUPPORTING FINDINGS)\s*:/i.test(trimmed)) {
+    // Headers arrive in free prose too: "## Required revisions", "### Findings",
+    // "FINDINGS:" — match any casing and any heading nesting, colon optional.
+    if (/^#*\s*(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|ADVISORIES|SUPPORTING FINDINGS)\b\s*:?/i.test(trimmed)) {
       inSection = headers.test(trimmed);
       continue;
     }
@@ -38,6 +45,12 @@ function collectSection(lines: string[], headers: RegExp): string {
   return items.join("; ").slice(0, MAX_FINDINGS_CHARS);
 }
 
+function clipped(text: string): string {
+  const t = text.trim();
+  if (t.length <= MAX_REVIEW_TEXT_CHARS) return t;
+  return `${t.slice(0, MAX_REVIEW_TEXT_CHARS)}\n… (truncated)`;
+}
+
 export function parseReviewText(text: string): ParsedReview {
   if (typeof text !== "string" || text.trim() === "") {
     return {
@@ -45,6 +58,7 @@ export function parseReviewText(text: string): ParsedReview {
       severity: "MAJOR",
       findings: "Reviewer returned no output (treated as FAIL; rebut with evidence or approve manually).",
       advisories: "",
+      text: "",
     };
   }
   const lines = text.split(/\r?\n/);
@@ -70,16 +84,18 @@ export function parseReviewText(text: string): ParsedReview {
       severity: "MAJOR",
       findings: "Reviewer returned no parseable VERDICT line (treated as FAIL; rebut with evidence or approve manually).",
       advisories: "",
+      text: clipped(text),
     };
   }
   if (verdict === "FAIL" && severity === "NONE") severity = "MAJOR";
   if (verdict === "PASS" && severity !== "NONE" && severity !== "MINOR") severity = "NONE";
-  const findings = collectSection(lines, /^(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|SUPPORTING FINDINGS)/i);
-  const advisories = collectSection(lines, /^ADVISORIES/i);
+  const findings = collectSection(lines, /^#*\s*(FINDINGS|REQUIRED REVISIONS|REQUIRED ACTIONS|SUPPORTING FINDINGS)\b\s*:?/i);
+  const advisories = collectSection(lines, /^#*\s*ADVISORIES\b\s*:?/i);
   return {
     verdict,
     severity,
     findings: findings || (verdict === "PASS" ? "No blocking findings." : "Reviewer gave no itemized findings."),
     advisories,
+    text: clipped(text),
   };
 }

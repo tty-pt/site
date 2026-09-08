@@ -11,8 +11,11 @@ export interface LaunchResult {
   text: string;
 }
 
-const MAX_DURATION_MS = 300000;
-const INACTIVITY_LIMIT_MS = 60000;
+// Reviewers run deep: a thorough run measured over 10 minutes, so the
+// inactivity window is a real liveness check (5 min without any update),
+// not a 60-second bot-sitter that kills a live, thinking reviewer mid-work.
+const MAX_DURATION_MS = 1500000;
+const INACTIVITY_LIMIT_MS = 300000;
 
 function uniqueId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -34,6 +37,8 @@ export interface RunnerEnv {
   model?: string;
   thinking?: string;
   toolName?: string;
+  maxDurationMs?: number;
+  inactivityLimitMs?: number;
 }
 
 export function createRunner(env: RunnerEnv): ReviewRunner | null {
@@ -49,6 +54,8 @@ function runReview(
   prompt: string,
   signal: AbortSignal,
 ): Promise<LaunchResult> {
+  const maxDurationMs = env.maxDurationMs ?? MAX_DURATION_MS;
+  const inactivityLimitMs = env.inactivityLimitMs ?? INACTIVITY_LIMIT_MS;
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error(`review cancelled: ${String(signal.reason || "aborted")}`));
@@ -82,11 +89,11 @@ function runReview(
 
     const maxTimer = setTimeout(() => {
       fail(new Error("Subagent execution timed out (quest_journal_deadline: max_duration)"));
-    }, MAX_DURATION_MS);
+    }, maxDurationMs);
 
     const inactivityInterval = setInterval(() => {
       const now = Date.now();
-      if (now - lastActivityAt > INACTIVITY_LIMIT_MS && now - startTime > INACTIVITY_LIMIT_MS) {
+      if (now - lastActivityAt > inactivityLimitMs && now - startTime > inactivityLimitMs) {
         fail(new Error("Subagent execution timed out (quest_journal_deadline: inactivity)"));
       }
     }, 15000);

@@ -39,6 +39,40 @@ export interface GateOptions {
   isReviewerSession?: boolean;
 }
 
+function draftDecision(state: QuestState, draftName: string): Decision {
+  if (state.draft?.outstandingFindings === true) {
+    const findings = state.lastReview?.findings?.trim() ?? "";
+    const findingsText = findings === ""
+      ? ""
+      : ` Findings from the last review: ${findings.length > 1200 ? `${findings.slice(0, 1200)}…` : findings}`;
+    return blocked(
+      "DRAFT_REVISION_PENDING",
+      "DRAFT_REVIEW_REQUIRED",
+      `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {plan: ...} — it splices the Implementation Plan section and boots a fresh review.${findingsText}`,
+    );
+  }
+  if (state.draft === null || !state.draft.planAuthored) {
+    return blocked(
+      "DRAFT_PENDING",
+      "DRAFT_REVIEW_REQUIRED",
+      `Author ## Implementation Plan in ${draftName} — pass {plan: ...} to quest_update_state to write it directly.`,
+    );
+  }
+  return blocked(
+    "DRAFT_LOCKED",
+    "DRAFT_REVIEW_REQUIRED",
+    `Only the quest document (${draftName}) is writable while drafting. Author the plan and save to boot the review; promotion to implementing unlocks the worktree. A completed review — or a live user "go" — is the only path out of drafting.`,
+  );
+}
+
+function validatingDecision(): Decision {
+  return blocked(
+    "VALIDATION_LOCKED",
+    "VALIDATION_REQUIRED",
+    "Validating is write-free: address the validation verdict via quest_update_state {planRevision: ...}, or pass {continueWork: true} to resume implementing.",
+  );
+}
+
 export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {}): Decision {
   const draftFile = state.qid === null ? null : draftPath(state.qid);
   const isDraftFile = draftFile !== null &&
@@ -81,21 +115,10 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return { allowed: true };
   }
   if (state.phase === "drafting") {
-    const draftName = draftFile ?? "the draft file";
-    if (state.draft?.outstandingFindings === true) {
-      return blocked(
-        "DRAFT_REVISION_PENDING",
-        "DRAFT_REVIEW_REQUIRED",
-        `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {plan: ...} — it splices the Implementation Plan section and boots a fresh review.`,
-      );
-    }
-    if (state.draft === null || !state.draft.planAuthored) {
-      return blocked(
-        "DRAFT_PENDING",
-        "DRAFT_REVIEW_REQUIRED",
-        `Author ## Implementation Plan in ${draftName} — pass {plan: ...} to quest_update_state to write it directly.`,
-      );
-    }
+    return draftDecision(state, draftFile ?? "the draft file");
+  }
+  if (state.phase === "validating") {
+    return validatingDecision();
   }
   if (state.phase === "idle" || state.phase === "archived") {
     return { allowed: true };

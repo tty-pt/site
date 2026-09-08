@@ -41,6 +41,8 @@ export interface FlowArgs {
   runnerTool?: string;
   model?: string;
   thinking?: string;
+  maxDurationMs?: number;
+  inactivityLimitMs?: number;
 }
 
 export function reviewerAvailable(pi: Pi): boolean {
@@ -110,12 +112,14 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       toolName: runnerTool,
       ...(candidate.model ? { model: candidate.model } : {}),
       ...(thinking ? { thinking } : {}),
+      ...(args.maxDurationMs !== undefined ? { maxDurationMs: args.maxDurationMs } : {}),
+      ...(args.inactivityLimitMs !== undefined ? { inactivityLimitMs: args.inactivityLimitMs } : {}),
     });
     if (runner === null) return { status: "no-runner" };
     try {
       const launched = await runner.launch(args.prompt, controller.signal);
       const review = parseReviewText(launched.text);
-      updateState((s) => recordReviewResult(s, review.verdict, target, review.findings));
+      updateState((s) => recordReviewResult(s, review.verdict, target, review.findings, review.text));
       return { status: "verdict", review, settled: settleReview(qid, target) };
     } catch (err) {
       if (controller.signal.aborted) return { status: "aborted" };

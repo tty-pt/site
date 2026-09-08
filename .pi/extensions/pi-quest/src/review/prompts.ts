@@ -20,12 +20,17 @@ export interface ReviewMaterial {
   revisionNote?: string;
   // HIGH_LEVEL: #plan revision — validators see the plan's revision history.
   planRevisionHistory?: string[];
+  // The plan's verifiable file:line surface. Reviewers spot-check these lines
+  // instead of re-auditing the whole tree for unasserted claims.
+  claimManifest?: string;
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
 1. You are strictly read-only. Do not edit files, run mutating commands, or change project state.
 2. Do not trust summaries or claims. Independently inspect the repository and verify important claims with your read/search tools.
-3. You judge and report. You never modify quest state, the plan, or implementation files.`;
+3. You judge and report. You never modify quest state, the plan, or implementation files.
+4. Stray repo-root notes and forensics docs (e.g. RUN1.md, RUN*.md) are NOT quest history — they document unrelated sessions. The QUEST MATERIAL below is the only authority for this review; ignore any document the material does not reference.
+5. Spot-check the CLAIM MANIFEST lines when present; do not re-derive the whole tree for claims the manifest does not make.`;
 
 const SELF_ATTACK = `TWO-PASS SELF-ATTACK:
 PASS 1: Independently evaluate the material against the request and repository evidence.
@@ -36,6 +41,8 @@ const OUTPUT_FORMAT = `OUTPUT FORMAT — your response MUST end with exactly thi
 
 VERDICT: PASS | FAIL
 SEVERITY: NONE | MINOR | MAJOR | CRITICAL
+
+BUDGET: decide first, then write. Put the VERDICT: and SEVERITY: lines at the very start of your final reply — a run ending on analysis with no VERDICT counts as FAIL.
 
 On PASS, approval is unconditional — do NOT write a REQUIRED REVISIONS section:
 SUPPORTING FINDINGS:
@@ -74,6 +81,9 @@ function contextBlock(material: ReviewMaterial): string {
   const history = (material.planRevisionHistory ?? []).length > 0
     ? `\nPLAN REVISION HISTORY (the approved plan moved during implementation):\n${(material.planRevisionHistory ?? []).join("\n")}\n`
     : "";
+  const manifest = material.claimManifest
+    ? `\nCLAIM MANIFEST (spot-check these in the tree; do not re-derive the whole tree):\n${material.claimManifest}\n`
+    : "";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
@@ -86,7 +96,7 @@ ${amendments}
 ${history}
 EVIDENCE:
 ${evidence}
-${rebuttal}${prior}--- END MATERIAL ---`;
+${manifest}${rebuttal}${prior}--- END MATERIAL ---`;
 }
 
 function draftGuidance(maturity: DraftThresholds): string {

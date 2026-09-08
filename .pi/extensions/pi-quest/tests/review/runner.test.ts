@@ -145,3 +145,23 @@ Deno.test("runner rejection carries the bridge error text", async () => {
   }
   check(message.includes("not found"), "bridge error text preserved for classification");
 });
+
+Deno.test("runner enforces the configured max duration, not the inactivity window", async () => {
+  const { pi } = busPi();
+  const runner = createRunner({
+    pi,
+    ctx: fakeCtx("/tmp"),
+    ownerRunId: "abc123",
+    maxDurationMs: 60,
+    inactivityLimitMs: 5000,
+  });
+  const launched = runner!.launch("x", new AbortController().signal);
+  let message = "";
+  try {
+    await launched;
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  check(message.includes("quest_journal_deadline"), "deadline enforced");
+  check(!message.includes("inactivity"), "max duration fired, not the wider inactivity window");
+});

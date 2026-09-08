@@ -1,8 +1,7 @@
 // HIGH_LEVEL: #drafting — every content-changing save boots a fresh review.
 // HIGH_LEVEL: #modes — PASS auto-promotes, FAIL returns findings, user "go" promotes.
 // SPEC: B1.3 (supersede, thresholds, approval), B2 (go-override).
-import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
@@ -12,80 +11,46 @@ import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
-import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
+import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
 import { cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
-import { diffPlans } from "./plan-diff";
+import {
+  bumpReviewCount,
+  hashContent,
+  parseDraftSections,
+  reviewMaterial,
+} from "./plan-text";
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
-export interface DraftSections {
-  requirements: string[];
-  evidence: string[];
-  plan: string;
+export const MAX_REVIEW_RETRIES = 3;
+export const REVIEW_RETRY_BASE_MS = 4000;
+
+// HIGH_LEVEL: #drafting — retries are capped and back off; the agent is only
+// woken at the cap. The only paths out of drafting stay a verdict or a real
+// live-user "go" — never the agent's own judgment.
+const retryAttempts = new Map<string, number>();
+
+export function draftReviewRetryCount(qid: string): number {
+  return retryAttempts.get(qid) ?? 0;
 }
 
-export function hashContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
+export function clearDraftReviewRetry(qid: string): void {
+  retryAttempts.delete(qid);
 }
 
-export function splicePlanSection(text: string, plan: string): string {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => {
-    const header = line.match(/^##\s+(.+?)\s*$/i);
-    return header !== null && header[1].toLowerCase().includes("implementation plan");
-  });
-  if (start === -1) {
-    const body = text.endsWith("\n") ? text : `${text}\n`;
-    return `${body}\n## Implementation Plan\n\n${plan.trim()}\n`;
-  }
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s+.+?\s*$/.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  return [...lines.slice(0, start + 1), "", plan.trim(), "", ...lines.slice(end)].join("\n");
-}
+type RetryDispatcher = (delayMs: number, fn: () => void) => void;
+let dispatchRetry: RetryDispatcher = (delayMs, fn) => {
+  setTimeout(fn, delayMs);
+};
 
-export function parseDraftSections(text: string): DraftSections {
-  const requirements: string[] = [];
-  const evidence: string[] = [];
-  const planLines: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | null = null;
-  for (const line of text.split(/\r?\n/)) {
-    const header = line.match(/^##\s+(.+?)\s*$/);
-    if (header) {
-      const name = header[1].toLowerCase();
-      if (name.includes("requirement")) section = "requirements";
-      else if (name.includes("evidence")) section = "evidence";
-      else if (name.includes("implementation plan")) section = "plan";
-      else section = null;
-      continue;
-    }
-    if (section === "plan") {
-      planLines.push(line);
-      continue;
-    }
-    const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
-    if (bullet && (section === "requirements" || section === "evidence")) {
-      if (section === "requirements") requirements.push(bullet[1]);
-      else evidence.push(bullet[1]);
-    }
-  }
-  return { requirements, evidence, plan: planLines.join("\n").trim() };
-}
-
-export function meetsReviewThresholds(
-  sections: DraftSections,
-  thresholds = DEFAULT_CONFIG.draftThresholds,
-): boolean {
-  const req = sections.requirements.length;
-  const ev = sections.evidence.length;
-  const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  return counts && sections.plan.length > 0;
+// Test seam: swap the real timer for a recorder to assert retry scheduling
+// deterministically without leaking pending timers.
+export function setReviewRetryDispatcher(next: RetryDispatcher): RetryDispatcher {
+  const previous = dispatchRetry;
+  dispatchRetry = next;
+  return previous;
 }
 
 async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | null> {
@@ -97,33 +62,33 @@ async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | nu
   }
 }
 
-// Exported for tests: the re-review brief must diff against the previously
-// reviewed plan, never against the plan being sent.
-export function reviewMaterial(state: QuestState, sections: DraftSections): ReviewMaterial {
-  const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
-  const base: ReviewMaterial = {
-    objective: state.pendingRootRequest ?? state.objective,
-    plan: sections.plan,
-    evidence: sections.evidence,
-    amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
-    rebuttal: openRebuttal?.implementerRebuttal,
-  };
-  const last = state.lastReview;
-  const previous = state.draft?.lastReviewedPlan;
-  if (last === null || previous === undefined || previous === null) return base;
-  // Prior verdict always travels: an evidence-only revision answers the last
-  // findings even when the plan itself is unchanged (then diffPlans is null).
-  const continued: ReviewMaterial = {
-    ...base,
-    previousVerdict: last.verdict,
-    previousFindings: last.findings,
-  };
-  const planDiff = diffPlans(previous, sections.plan);
-  if (planDiff === null) return continued;
-  return { ...continued, planDiff };
-}
-
 const userPathSteered = new Set<string>();
+
+// A launch that never ran a reviewer schedules a marker-bump retry with
+// backoff, capped; the agent is only woken at the cap. The only ways out of
+// drafting stay a completed review or a live user "go".
+function noteReviewLaunchFailed(
+  pi: Pi,
+  ctx: PiCtx,
+  config: QuestConfig,
+  qid: string,
+  target: string,
+  detail: string,
+): void {
+  const attempts = retryAttempts.get(qid) ?? 0;
+  if (attempts < MAX_REVIEW_RETRIES) {
+    const attempt = attempts + 1;
+    retryAttempts.set(qid, attempt);
+    const delay = REVIEW_RETRY_BASE_MS * 2 ** (attempt - 1);
+    dispatchRetry(delay, () => {
+      void bumpReviewCountAndReboot(pi, ctx, config, attempt, target);
+    });
+    return;
+  }
+  retryAttempts.delete(qid);
+  userPathSteered.add(`${qid}:${target}`);
+  sendWake(pi, `Draft review failed ${MAX_REVIEW_RETRIES} times (last error: ${detail}). Revise the plan and save to boot a fresh review — promotion requires a reviewer PASS or a live user "go" reply.`);
+}
 
 export async function bootDraftReview(
   pi: Pi,
@@ -148,6 +113,8 @@ export async function bootDraftReview(
     target,
     prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds),
     runnerTool: config.bindings.reviewRunner.tool,
+    maxDurationMs: config.reviewMaxDurationMs,
+    inactivityLimitMs: config.reviewInactivityMs,
   });
   if (outcome.status === "no-runner") {
     if (!userPathSteered.has(`${qid}:${target}`)) {
@@ -160,13 +127,14 @@ export async function bootDraftReview(
     return;
   }
   if (outcome.status === "failed") {
-    sendWake(pi, `Draft review failed to run (${outcome.detail}). Reply "go" to proceed on your judgment, or revise and save to retry.`);
+    noteReviewLaunchFailed(pi, ctx, config, qid, target, outcome.detail);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
+    clearDraftReviewRetry(qid);
     if (!researchRecorded(getState(), sections.evidence.length)) {
-      sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or reply "go" to proceed on your judgment.`);
+      sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or a live user may reply "go".`);
       return;
     }
     updateState((s) => promote(s, "review"));
@@ -176,8 +144,59 @@ export async function bootDraftReview(
     return;
   }
   updateState((s) => noteDraftFindings(s));
+  clearDraftReviewRetry(qid);
   emitNow(pi);
-  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review. Or reply "go" to proceed on your judgment.`);
+  const verbatim = outcome.review.text.trim();
+  const reviewExcerpt = verbatim === ""
+    ? ""
+    : `\n\nReview text (verbatim, budget-bounded):\n${verbatim}`;
+  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review.${reviewExcerpt}`);
+}
+
+// A failed run's retry: rewrite the quest doc with the incremented review
+// count, then boot the fresh review through the standard pipeline. Only
+// fires while the file still holds the failed target — a superseding agent
+// save cancels it (that save boots its own review) instead of clobbering.
+export async function bumpReviewCountAndReboot(
+  pi: Pi,
+  ctx: PiCtx,
+  config: QuestConfig,
+  attempt: number,
+  retryTarget: string,
+): Promise<void> {
+  const state = getState();
+  if (state.phase !== "drafting" || state.qid === null) return;
+  const qid = state.qid;
+  if (retryAttempts.get(qid) !== attempt) return;
+  const file = join(ctx.cwd, draftPath(qid));
+  let content: string;
+  try {
+    content = await readFile(file, "utf8");
+  } catch {
+    return;
+  }
+  if (hashContent(content) !== retryTarget) {
+    clearDraftReviewRetry(qid);
+    return;
+  }
+  const bumped = bumpReviewCount(content, attempt);
+  if (bumped === content) return;
+  try {
+    await writeFile(file, bumped, "utf8");
+  } catch {
+    return;
+  }
+  const hash = hashContent(bumped);
+  updateState((s) => s.draft === null ? s : {
+    ...s,
+    draft: { ...s.draft, contentHash: hash },
+    snapshotPending: true,
+  });
+  noteDraftUpdated(ctx);
+  if (isCurrentReview(qid, hash)) return;
+  supersedeReviewThenBootFresh(qid, hash, () => {
+    void bootDraftReview(pi, ctx, hash, config);
+  });
 }
 
 export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
@@ -221,6 +240,7 @@ export function approveDraft(pi: Pi, qid: string, by: ApprovedBy): boolean {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return false;
   cancelReview(qid);
+  clearDraftReviewRetry(qid);
   updateState((s) => promote(s, by));
   emitNow(pi);
   const how = by === "user" ? 'user "go"' : "reviewer PASS";

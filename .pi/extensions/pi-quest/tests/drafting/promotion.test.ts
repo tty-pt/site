@@ -7,7 +7,8 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { draftPath } from "../../src/domain/paths";
-import { bootDraftReview, hashContent } from "../../src/drafting/reviews.ts";
+import { bootDraftReview } from "../../src/drafting/reviews.ts";
+import { hashContent } from "../../src/drafting/plan-text.ts";
 import { barePi, fakeCtx, fakePi } from "../fake-pi.ts";
 
 const QID = "abc123" as Qid;

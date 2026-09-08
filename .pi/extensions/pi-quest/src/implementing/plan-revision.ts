@@ -15,11 +15,37 @@ import { onSessionStart, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview, shouldNoticeReview } from "../review/flow";
 import { cancelReview, hasInFlight, isCurrentReview } from "../review/tracker";
-import { hashContent, parseDraftSections, reviewMaterial, splicePlanSection } from "../drafting/reviews";
+import { hashContent, parseDraftSections, reviewMaterial, splicePlanSection } from "../drafting/plan-text";
 import { diffPlans } from "../drafting/plan-diff";
 import { noteDraftUpdated } from "../durability/status";
 
 export const APPROVE_PATTERN = /^\s*approve(?:\s+revision)?\s*[.!]*\s*$/i;
+
+// A failed plan-revision review re-boots the SAME staged target (no marker
+// bump — the revision already has a strict diff baseline and binding), capped
+// and back-offed; the agent is woken only at the cap. The previous plan stays
+// binding throughout: adoption needs a reviewer PASS or a live-user APPROVE.
+export const MAX_REVISION_RETRIES = 3;
+export const REVISION_RETRY_BASE_MS = 4000;
+
+const revisionRetries = new Map<string, number>();
+let dispatchRevisionRetry: (delayMs: number, fn: () => void) => void = (delayMs, fn) => {
+  setTimeout(fn, delayMs);
+};
+
+export function planRevisionRetryCount(qid: string): number {
+  return revisionRetries.get(qid) ?? 0;
+}
+
+export function clearPlanRevisionRetries(qid: string): void {
+  revisionRetries.delete(qid);
+}
+
+export function setRevisionRetryDispatcher(next: (delayMs: number, fn: () => void) => void): (delayMs: number, fn: () => void) => void {
+  const previous = dispatchRevisionRetry;
+  dispatchRevisionRetry = next;
+  return previous;
+}
 
 const REVISION_NOTE = "Mid-implementation plan revision: the remaining steps changed after reality contradicted the approved plan.";
 
@@ -57,6 +83,8 @@ export async function bootPlanRevisionReview(
     target,
     prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds),
     runnerTool: config.bindings.reviewRunner.tool,
+    maxDurationMs: config.reviewMaxDurationMs,
+    inactivityLimitMs: config.reviewInactivityMs,
   });
   if (outcome.status === "no-runner") {
     if (shouldNoticeReview(qid, target)) {
@@ -65,20 +93,56 @@ export async function bootPlanRevisionReview(
     return;
   }
   if (outcome.status === "failed") {
-    sendWake(pi, `Plan-revision review failed to run (${outcome.detail}). The previous plan still stands; revise again to retry.`);
+    const attempts = revisionRetries.get(qid) ?? 0;
+    if (attempts < MAX_REVISION_RETRIES) {
+      const attempt = attempts + 1;
+      revisionRetries.set(qid, attempt);
+      const delay = REVISION_RETRY_BASE_MS * 2 ** (attempt - 1);
+      dispatchRevisionRetry(delay, () => {
+        void retryPlanRevisionReview(pi, ctx, target, config, attempt);
+      });
+      return;
+    }
+    revisionRetries.delete(qid);
+    sendWake(pi, `Plan-revision review failed ${MAX_REVISION_RETRIES} times (last error: ${outcome.detail}). The previous plan still stands; revise again via planRevision to retry, or reply APPROVE to adopt on a live user's judgment.`);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
+    clearPlanRevisionRetries(qid);
     updateState((s) => approvePlanRevision(s, target, sections.plan));
     emitNow(pi);
     const advisories = outcome.review.advisories.trim();
     sendWake(pi, `Plan revision adopted for ${qid} (reviewer PASS). Proceed against the revised plan; validation re-binds to it.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;
   }
+  clearPlanRevisionRetries(qid);
   await restoreApprovedPlan(pi, ctx);
   emitNow(pi);
   sendWake(pi, `Plan revision FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} The previous plan is restored. Revise again via planRevision, or record an amendment.`);
+}
+
+// A failed plan-revision review's retry: re-launch the same staged target
+// with backoff. Skips once the staged content moved on (a superseding
+// save/adopt/restore) so the stale target label never re-reviews new content.
+async function retryPlanRevisionReview(
+  pi: Pi,
+  ctx: PiCtx,
+  target: string,
+  config: QuestConfig,
+  attempt: number,
+): Promise<void> {
+  const state = getState();
+  if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
+  if (revisionRetries.get(state.qid) !== attempt) return;
+  if (isCurrentReview(state.qid, target)) return;
+  const content = await readPlanFile(ctx, state);
+  if (content === null) return;
+  if (hashContent(content) !== target) {
+    clearPlanRevisionRetries(state.qid);
+    return;
+  }
+  void bootPlanRevisionReview(pi, ctx, target, config);
 }
 
 // FAIL restores the last approved plan text over the rejected revision and
@@ -154,6 +218,7 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (content === null) return false;
   const sections = parseDraftSections(content);
   if (sections.plan.length === 0) return false;
+  clearPlanRevisionRetries(state.qid);
   updateState((s) => approvePlanRevision(s, s.draft?.contentHash ?? "", sections.plan));
   emitNow(pi);
   sendSteer(pi, `Plan revision adopted for ${state.qid} on user approval. Proceed against the revised plan; validation re-binds to it.`);

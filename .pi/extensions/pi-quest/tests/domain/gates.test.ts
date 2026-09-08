@@ -88,6 +88,21 @@ Deno.test("gate blocks unauthored and revision drafts", () => {
   if (!d.allowed) check(d.phaseName === "DRAFT_REVISION_PENDING", "revision name");
 });
 
+Deno.test("revision gate echoes the last review findings instead of a bare pointer", () => {
+  const s = drafting();
+  const revision = {
+    ...s,
+    draft: { ...s.draft!, outstandingFindings: true },
+    lastReview: { verdict: "FAIL" as const, target: "h1", findings: "double-free in the responder; line cites off at gig.c:751" },
+  };
+  const d = decide(revision, EDIT_OTHER);
+  check(!d.allowed, "revision blocked");
+  if (!d.allowed) {
+    check(reasonText(d).includes("double-free"), "findings reach the blocked write");
+    check(reasonText(d).includes("gig.c:751"), "detail reaches the blocked write");
+  }
+});
+
 Deno.test("gate leaves idle and archived open", () => {
   check(decide(IDLE_STATE, EDIT_OTHER).allowed, "idle open");
   check(decide(IDLE_STATE, LAUNCH).allowed, "idle launch open");
@@ -126,4 +141,34 @@ Deno.test("gate opens implementation and blocks unknown tools while drafting", (
     const text = reasonText(d);
     check(text.includes(d.code) && text.includes(d.action), "reason carries code and action");
   }
+});
+
+Deno.test("gate locks every non-draft write while drafting, authored plan or not", () => {
+  const s = drafting();
+  const authored = { ...s, draft: { ...s.draft!, planAuthored: true } };
+  const d = decide(authored, EDIT_OTHER);
+  check(!d.allowed && d.code === "DRAFT_REVIEW_REQUIRED", "authored plan still locks other files");
+  if (!d.allowed) {
+    check(d.phaseName === "DRAFT_LOCKED", "draft-locked state name");
+    check(d.action.includes(draftPath(QID)), "reason names the quest doc as the only writable file");
+  }
+  check(!decide(authored, LAUNCH).allowed, "launch blocked while drafting");
+  const midReview = { ...authored, activeReview: { kind: "draft" as const, target: "h1" } };
+  const held = decide(midReview, EDIT_OTHER);
+  check(!held.allowed && held.code === "PLAN_REVIEW_REQUIRED", "active-review row still outranks the phase lock");
+  check(decide(authored, READ).allowed, "reads remain open");
+  check(decide(authored, JOURNAL).allowed, "journal stays open");
+  check(decide(authored, ASK).allowed, "questions stay open");
+});
+
+Deno.test("gate locks writes while validating", () => {
+  const validating = { ...drafting(), phase: "validating" as const };
+  const d = decide(validating, EDIT_OTHER);
+  check(!d.allowed && d.code === "VALIDATION_REQUIRED", "validating write blocked");
+  if (!d.allowed) {
+    check(d.phaseName === "VALIDATION_LOCKED", "validation-locked state name");
+    check(d.action.includes("continueWork"), "action points out the exit");
+  }
+  check(decide(validating, READ).allowed, "validating reads open");
+  check(decide(validating, JOURNAL).allowed, "journal stays open");
 });

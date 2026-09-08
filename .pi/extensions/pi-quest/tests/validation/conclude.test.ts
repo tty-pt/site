@@ -33,7 +33,7 @@ function validating() {
 }
 
 function passReview(advisories: string): ParsedReview {
-  return { verdict: "PASS", findings: "meets the plan", severity: "NONE", advisories };
+  return { verdict: "PASS", findings: "meets the plan", severity: "NONE", advisories, text: "" };
 }
 
 async function withDraftFile(cwd: string): Promise<void> {

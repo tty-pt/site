@@ -7,7 +7,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { updateState } from "./app/store";
-import { hashContent } from "./drafting/reviews";
+import { hashContent } from "./drafting/plan-text";
 import { draftPath } from "./domain/paths";
 import { upsertDocStatus } from "./domain/quest-doc";
 import type { Qid } from "./domain/qid";

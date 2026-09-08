@@ -9,6 +9,8 @@ Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.bindings.asking.tool === "ask_questions", "asking binding");
   check(DEFAULT_CONFIG.bindings.reviewRunner.tool === "subagent", "runner binding");
   check(DEFAULT_CONFIG.statusStyle === "icon", "icon status default");
+  check(DEFAULT_CONFIG.reviewInactivityMs === 300000, "5 minute inactivity default");
+  check(DEFAULT_CONFIG.reviewMaxDurationMs === 1500000, "25 minute max-duration default");
 });
 
 Deno.test("config loads partial settings over defaults", () => {
@@ -24,6 +26,10 @@ Deno.test("config loads partial settings over defaults", () => {
   check(bindings.bindings.asking.tool === "custom_ask", "binding overridden");
   check(loadConfig({ statusStyle: "text" }).statusStyle === "text", "text style honored");
   check(loadConfig({ statusStyle: "emoji" }).statusStyle === "icon", "invalid style falls back");
+  const knobs = loadConfig({ reviewInactivityMs: 5000, reviewMaxDurationMs: 90000 });
+  check(knobs.reviewInactivityMs === 5000, "inactivity knob honored");
+  check(knobs.reviewMaxDurationMs === 90000, "max-duration knob honored");
+  check(loadConfig({ reviewInactivityMs: "nope" }).reviewInactivityMs === 300000, "invalid inactivity defaults");
 });
 
 Deno.test("config reads the settings file with fallback", async () => {

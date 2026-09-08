@@ -138,6 +138,29 @@ Deno.test("thinking reaches the delegation only when resolved", async () => {
   check(outcome.status === "verdict", "thinking verdict recorded");
 });
 
+Deno.test("the reviewer's verbatim text is recorded with the verdict", async () => {
+  clearReviewEnv();
+  resetNoticedReviews();
+  const qid = "fb0007" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  const { pi, emitted, feed } = flowBus();
+  const pending = runIsolatedReview({
+    pi,
+    ctx: fakeCtx("/tmp"),
+    qid,
+    target: "t7",
+    prompt: "review this",
+  });
+  await waitForRequests(emitted, 1);
+  const raw = "VERDICT: FAIL\nSEVERITY: MAJOR\nFINDINGS:\n- Issue: double-free\n  Evidence: respond_html frees page\n\nREQUIRED REVISIONS:\n- remove the trailing free";
+  feed({ requestId: requests(emitted)[0]["requestId"], status: "completed", result: { kind: "text", text: raw } });
+  const outcome = await pending;
+  check(outcome.status === "verdict", "verdict outcome");
+  check(outcome.status === "verdict" && outcome.review.text.includes("double-free"), "outcome carries the raw text");
+  check(getState().lastReview?.findings.includes("double-free") === true, "findings recorded");
+  check(getState().lastReview?.reviewText?.includes("REQUIRED REVISIONS") === true, "review text recorded in state");
+});
+
 Deno.test("exhausted candidates report failure", async () => {
   clearReviewEnv();
   resetNoticedReviews();
