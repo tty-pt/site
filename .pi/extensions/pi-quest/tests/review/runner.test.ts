@@ -90,3 +90,58 @@ Deno.test("runner refuses without a registered tool", () => {
   const pi = fakePi();
   check(createRunner({ pi, ctx: fakeCtx("/tmp"), ownerRunId: "x" }) === null, "null without tool");
 });
+
+Deno.test("runner sends the configured model and omits it otherwise", async () => {
+  const first = busPi();
+  const runner = createRunner({ pi: first.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123", model: "requesty/openai/o3-mini:high" });
+  const launched = runner!.launch("x", new AbortController().signal);
+  const request = first.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  check((request.data as Record<string, unknown>)["model"] === "requesty/openai/o3-mini:high", "explicit model sent");
+  first.feed({ requestId: (request.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
+  await launched;
+
+  const second = busPi();
+  const runner2 = createRunner({ pi: second.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" })!;
+  const pending = runner2.launch("x", new AbortController().signal);
+  const bare = second.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  check(!("model" in (bare.data as Record<string, unknown>)), "inherit omits model");
+  second.feed({ requestId: (bare.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
+  await pending;
+});
+
+Deno.test("runner sends thinking only when configured", async () => {
+  const first = busPi();
+  const runner = createRunner({ pi: first.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123", thinking: "off" });
+  const launched = runner!.launch("x", new AbortController().signal);
+  const request = first.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  check((request.data as Record<string, unknown>)["thinking"] === "off", "explicit thinking sent");
+  first.feed({ requestId: (request.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
+  await launched;
+
+  const second = busPi();
+  const runner2 = createRunner({ pi: second.pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" })!;
+  const pending = runner2.launch("x", new AbortController().signal);
+  const bare = second.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  check(!("thinking" in (bare.data as Record<string, unknown>)), "inherit omits thinking");
+  second.feed({ requestId: (bare.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
+  await pending;
+});
+
+Deno.test("runner rejection carries the bridge error text", async () => {
+  const { pi, emitted, feed } = busPi();
+  const runner = createRunner({ pi, ctx: fakeCtx("/tmp"), ownerRunId: "abc123" })!;
+  const launched = runner.launch("x", new AbortController().signal);
+  const request = emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  feed({
+    requestId: (request.data as Record<string, unknown>)["requestId"],
+    status: "error",
+    error: 'Model "antigravity/gemini-3.8-flash:high" not found. Use --list-models to see available models.',
+  });
+  let message = "";
+  try {
+    await launched;
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  check(message.includes("not found"), "bridge error text preserved for classification");
+});

@@ -32,6 +32,7 @@ export interface RunnerEnv {
   ctx: PiCtx;
   ownerRunId: string;
   model?: string;
+  thinking?: string;
   toolName?: string;
 }
 
@@ -113,7 +114,13 @@ function runReview(
       if (!record || record["requestId"] !== requestId || settled) return;
       const status = record["status"] as string | undefined;
       if (status && status !== "completed") {
-        fail(new Error(`Subagent delegation failed (${status})`));
+        // Preserve the bridge error text: the flow classifies launch failures
+        // (e.g. unresolvable reviewer models) for candidate fallback.
+        const bridgeError = record["error"];
+        const detail = typeof bridgeError === "string" && bridgeError.length > 0
+          ? `: ${bridgeError}`
+          : "";
+        fail(new Error(`Subagent delegation failed (${status})${detail}`));
         return;
       }
       const result = record["result"] as Record<string, unknown> | undefined;
@@ -148,6 +155,9 @@ function runReview(
         context: "fresh",
         cwd: env.ctx.cwd,
         ...(env.model ? { model: env.model } : {}),
+        // Omitted by default (inherit): the extension never fabricates a
+        // thinking level the child registry may not carry.
+        ...(env.thinking ? { thinking: env.thinking } : {}),
         result: { kind: "text" },
       });
     } catch (err) {

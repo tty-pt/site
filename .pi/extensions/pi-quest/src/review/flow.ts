@@ -12,6 +12,12 @@ import type { Qid } from "../domain/qid";
 import type { QuestState } from "../domain/quest";
 import { recordReviewResult } from "../domain/quest";
 import { createRunner, isReviewerAvailable } from "./runner";
+import {
+  isModelResolutionOrProviderError,
+  resolveDefaultReviewModel,
+  resolveReviewThinking,
+  reviewModelCandidates,
+} from "./model";
 import { parseReviewText, type ParsedReview } from "./verdicts";
 import {
   cancelReview,
@@ -33,6 +39,8 @@ export interface FlowArgs {
   target: string;
   prompt: string;
   runnerTool?: string;
+  model?: string;
+  thinking?: string;
 }
 
 export function reviewerAvailable(pi: Pi): boolean {
@@ -81,19 +89,44 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   const { pi, ctx, qid, target } = args;
   const runnerTool = args.runnerTool ?? "subagent";
   if (!isReviewerAvailable(pi, runnerTool)) return { status: "no-runner" };
-  const runner = createRunner({ pi, ctx, ownerRunId: qid, toolName: runnerTool });
-  if (runner === null) return { status: "no-runner" };
+  // Ordered candidates: the resolved target first (it may carry a thinking
+  // suffix the child registry never registered), then the suffix-stripped
+  // variant, then the operator fallback. Neither model nor thinking is sent
+  // unless resolved — omission means inherit.
+  const targetModel = args.model ?? resolveDefaultReviewModel(ctx);
+  const thinking = args.thinking ?? resolveReviewThinking();
+  const candidates = reviewModelCandidates(targetModel);
   const controller = new AbortController();
   trackReview(qid, target, () => controller.abort());
   if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));
-  try {
-    const launched = await runner.launch(args.prompt, controller.signal);
-    const review = parseReviewText(launched.text);
-    updateState((s) => recordReviewResult(s, review.verdict, target, review.findings));
-    return { status: "verdict", review, settled: settleReview(qid, target) };
-  } catch (err) {
-    if (controller.signal.aborted) return { status: "aborted" };
-    if (isCurrentReview(qid, target)) cancelReview(qid);
-    return { status: "failed", detail: err instanceof Error ? err.message : String(err) };
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    // A superseding boot owns the quest now; stop instead of launching stale.
+    if (i > 0 && !isCurrentReview(qid, target)) return { status: "aborted" };
+    const runner = createRunner({
+      pi,
+      ctx,
+      ownerRunId: qid,
+      toolName: runnerTool,
+      ...(candidate.model ? { model: candidate.model } : {}),
+      ...(thinking ? { thinking } : {}),
+    });
+    if (runner === null) return { status: "no-runner" };
+    try {
+      const launched = await runner.launch(args.prompt, controller.signal);
+      const review = parseReviewText(launched.text);
+      updateState((s) => recordReviewResult(s, review.verdict, target, review.findings));
+      return { status: "verdict", review, settled: settleReview(qid, target) };
+    } catch (err) {
+      if (controller.signal.aborted) return { status: "aborted" };
+      const detail = err instanceof Error ? err.message : String(err);
+      const retryable = isModelResolutionOrProviderError(detail) && i + 1 < candidates.length;
+      if (!retryable) {
+        if (isCurrentReview(qid, target)) cancelReview(qid);
+        return { status: "failed", detail };
+      }
+    }
   }
+  if (isCurrentReview(qid, target)) cancelReview(qid);
+  return { status: "failed", detail: "all reviewer model candidates exhausted" };
 }
