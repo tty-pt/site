@@ -34,7 +34,7 @@ On `input` (agent idle), the extension projects `current usage + new prompt`
 against the resolved threshold. At or above it, `ctx.compact()` runs once before
 the prompt is sent. Soft errors ("Nothing to compact" / "Already compacted") let
 the prompt through; hard errors fail closed. `turn_end` shows a colored dot
-(red = compacting, yellow = approaching, dim = healthy).
+(green = healthy, yellow = approaching, red = compacting).
 
 ### Mid-run compaction (during agent turns)
 

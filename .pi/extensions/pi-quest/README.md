@@ -53,8 +53,9 @@ to fit what was built.
 - **Asks that never block** — when the agent needs a human decision it records
   a recommended default, waits a minute, and proceeds on absence. A late
   answer still applies whenever it arrives.
-- **Full-screen plan viewer** — `F2` floats the active quest's plan; the status
+- **Full-screen plan viewer** — `Ctrl+P` floats the active quest's plan; the status
   bar shows the current phase and qid at all times.
+- **External editor** — `Ctrl+Shift+P` opens the plan in your configured editor (falls back to `$EDITOR`).
 - **Idle boot** — a fresh session starts idle. Nothing takes over until you
   describe a request (which opens a quest) or run `/quest`. With several known
   quests, `/quest` lets you pick one.
@@ -83,7 +84,8 @@ Keyboard — the agent's own shortcuts:
 
 | Key | Effect |
 |-----|--------|
-| `F2` | Open the active quest's plan in a floating, near-fullscreen viewer |
+| `Ctrl+P` | Open the active quest's plan in a floating, near-fullscreen viewer |
+| `Ctrl+Shift+P` | Open the active quest's plan in the external editor (`planEditor` or `$EDITOR`) |
 
 ### The plan viewer
 

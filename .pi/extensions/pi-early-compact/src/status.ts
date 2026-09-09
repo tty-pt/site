@@ -4,7 +4,7 @@ import {
   resolveWarningThreshold,
 } from "./policy.ts";
 import { loadConfig, readSettingsHints, type EarlyCompactConfig } from "./config.ts";
-import type { UltraCtx, UltraPi } from "./trigger.ts";
+import { themeColor, type UltraCtx, type UltraPi } from "./trigger.ts";
 
 const STATUS_KEY = "pi-early-compact";
 
@@ -31,18 +31,18 @@ export function installStatusFooter(pi: UltraPi, loadConfigFile?: () => EarlyCom
     );
     const report = buildPressure(usage, resolved.threshold, warningThreshold);
 
-    const kind =
-      report.pressure === "critical" ? "error" : report.pressure === "warning" ? "warning" : "info";
-    setStatus(ctx, BALL, kind);
+    const color =
+      report.pressure === "critical" ? "error" : report.pressure === "warning" ? "warning" : "success";
+    setStatus(ctx, BALL, color);
   });
 }
 
-function setStatus(ctx: UltraCtx, text: string | undefined, kind?: "info" | "warning" | "error"): void {
+function setStatus(ctx: UltraCtx, text: string | undefined, color?: string): void {
   if (!ctx.hasUI || !ctx.ui?.setStatus) return;
   try {
     ctx.ui.setStatus(
       STATUS_KEY,
-      text === undefined ? undefined : ctx.ui.theme?.fg ? ctx.ui.theme.fg(kind ?? "info", text) : text,
+      text === undefined ? undefined : color ? themeColor(ctx, color, text) : text,
     );
   } catch {
     // Best-effort: a stale ctx never breaks the turn.

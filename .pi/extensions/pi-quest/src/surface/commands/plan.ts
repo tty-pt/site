@@ -1,11 +1,12 @@
-// HIGH_LEVEL: #commands — F2 opens the floating plan viewer.
+// HIGH_LEVEL: #commands — Ctrl+P opens the floating plan viewer, Ctrl+Shift+P opens the editor.
 // HIGH_LEVEL: #surface — on-demand inspection, zero inference.
 // SPEC: B1.3 (draft stays inspectable), B1.8 (amendments stay inspectable).
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState } from "../../app/store";
 import { draftPath } from "../../domain/paths";
-import type { PiCtx } from "../../hooks/events";
+import type { Pi, PiCtx } from "../../hooks/events";
+import { readQuestConfig } from "../../config";
 import { openPlanViewer, OVERLAY_FRAME } from "../../views/plan-overlay";
 
 const TOAST_BODY_MAX = 800;
@@ -58,5 +59,28 @@ export async function viewActivePlan(ctx: PiCtx): Promise<void> {
     });
   } catch {
     // The viewer is best-effort; the draft file remains the source.
+  }
+}
+
+export async function editActivePlan(pi: Pi, ctx: PiCtx): Promise<void> {
+  const state = getState();
+  if (state.qid === null) {
+    notify(ctx, "No active quest.");
+    return;
+  }
+  const qid = state.qid;
+  const file = draftPath(qid);
+  const fullPath = join(ctx.cwd, file);
+  try {
+    await readFile(fullPath, "utf8");
+  } catch {
+    notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
+    return;
+  }
+  const config = await readQuestConfig(ctx.cwd);
+  const editor = config.planEditor ?? process.env.EDITOR ?? "vi";
+  const res = await pi.exec(editor, [fullPath], { cwd: ctx.cwd });
+  if (res.code !== 0) {
+    notify(ctx, `Editor exited with code ${res.code}.`);
   }
 }

@@ -23,6 +23,7 @@ export interface QuestConfig {
   autoArchive: boolean;
   reviewInactivityMs: number;
   reviewMaxDurationMs: number;
+  planEditor: string | null;
 }
 
 export const DEFAULT_CONFIG: QuestConfig = {
@@ -34,6 +35,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   autoArchive: true,
   reviewInactivityMs: 300000,
   reviewMaxDurationMs: 1500000,
+  planEditor: null,
 };
 
 export function loadConfig(raw: unknown): QuestConfig {
@@ -60,25 +62,26 @@ export function loadConfig(raw: unknown): QuestConfig {
         ? thresholds["evidence"] as number
         : DEFAULT_CONFIG.draftThresholds.evidence,
     },
-bindings: {
-        asking: {
-          tool: typeof (bindings?.["asking"] as Record<string, unknown> | undefined)?.["tool"] === "string"
-            ? (bindings?.["asking"] as Record<string, unknown>)["tool"] as string
-            : DEFAULT_CONFIG.bindings.asking.tool,
-        },
-        reviewRunner: {
-          tool:
-            typeof (bindings?.["reviewRunner"] as Record<string, unknown> | undefined)?.["tool"] === "string"
-              ? (bindings?.["reviewRunner"] as Record<string, unknown>)["tool"] as string
-              : DEFAULT_CONFIG.bindings.reviewRunner.tool,
-        },
+    bindings: {
+      asking: {
+        tool: typeof (bindings?.["asking"] as Record<string, unknown> | undefined)?.["tool"] === "string"
+          ? (bindings?.["asking"] as Record<string, unknown>)["tool"] as string
+          : DEFAULT_CONFIG.bindings.asking.tool,
       },
+      reviewRunner: {
+        tool:
+          typeof (bindings?.["reviewRunner"] as Record<string, unknown> | undefined)?.["tool"] === "string"
+            ? (bindings?.["reviewRunner"] as Record<string, unknown>)["tool"] as string
+            : DEFAULT_CONFIG.bindings.reviewRunner.tool,
+      },
+    },
     reviewInactivityMs: typeof reviewInactivity === "number"
       ? reviewInactivity
       : DEFAULT_CONFIG.reviewInactivityMs,
     reviewMaxDurationMs: typeof reviewMaxDuration === "number"
       ? reviewMaxDuration
       : DEFAULT_CONFIG.reviewMaxDurationMs,
+    planEditor: typeof record["planEditor"] === "string" ? record["planEditor"] : DEFAULT_CONFIG.planEditor,
   };
 }
 

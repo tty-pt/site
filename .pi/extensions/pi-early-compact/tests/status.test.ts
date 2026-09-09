@@ -42,13 +42,24 @@ Deno.test("status footer differentiates warning vs critical by color", () => {
   check(c.startsWith("error>>"), "critical colored red");
 });
 
-Deno.test("status footer shows dim ball when usage low", () => {
+Deno.test("status footer shows green ball when usage low", () => {
   const pi = install(makeConfig({ thresholdPct: 50 }));
   const ctx = makeCtx({ tokens: 10_000, contextWindow: 200_000 });
   ctx.ui.theme.fg = (color: string, text: string) => `${color}>>${text}`;
   pi.emit("turn_end", {}, ctx);
   const last = ctx.statusCalls[ctx.statusCalls.length - 1];
-  check(last.text!.startsWith("info>>●"), `dim ball, got ${last.text}`);
+  check(last.text!.startsWith("success>>●"), `green ball, got ${last.text}`);
+});
+
+Deno.test("status footer keeps the ball when the theme throws on an unknown color", () => {
+  const pi = install(makeConfig({ thresholdPct: 50 }));
+  const ctx = makeCtx({ tokens: 10_000, contextWindow: 200_000 });
+  ctx.ui.theme.fg = () => {
+    throw new Error("Unknown theme color");
+  };
+  pi.emit("turn_end", {}, ctx);
+  const last = ctx.statusCalls[ctx.statusCalls.length - 1];
+  check(last.text === "●", "ball still rendered even when fg throws");
 });
 
 Deno.test("status footer clears when disabled", () => {

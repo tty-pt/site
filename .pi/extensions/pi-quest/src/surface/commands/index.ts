@@ -2,7 +2,7 @@
 import type { Pi } from "../../hooks/events";
 import { killQuest } from "./quest-del";
 import { listQuests } from "./quests";
-import { viewActivePlan } from "./plan";
+import { viewActivePlan, editActivePlan } from "./plan";
 import { pickQuest } from "./pick";
 import { resumeQuest } from "./quest";
 import { refreshStatus } from "../../durability/status";
@@ -46,10 +46,16 @@ export function installCommands(pi: Pi): void {
     },
   });
   try {
-    pi.registerShortcut?.("f2", {
+    pi.registerShortcut?.("ctrl+p", {
       description: "Show the active quest plan in a floating viewer.",
       handler: async (ctx) => {
         await viewActivePlan(ctx);
+      },
+    });
+    pi.registerShortcut?.("ctrl+shift+p", {
+      description: "Open the active quest plan in an external editor.",
+      handler: async (ctx) => {
+        await editActivePlan(pi, ctx);
       },
     });
   } catch {

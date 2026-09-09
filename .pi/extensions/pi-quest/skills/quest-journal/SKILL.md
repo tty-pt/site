@@ -107,7 +107,7 @@ quest id (`future/<qid>.md`); there are no slugs.
 
 ## Commands
 
-`/quest` (resume by qid/name, show the active quest, or pick from current quests when idle — fresh sessions start with no active quest), `F2` (floating plan viewer), `/quests` (list), `/quest-del` (archive/kill).
+`/quest` (resume by qid/name, show the active quest, or pick from current quests when idle — fresh sessions start with no active quest), `Ctrl+P` (floating plan viewer), `Ctrl+Shift+P` (edit plan in external editor), `/quests` (list), `/quest-del` (archive/kill).
 Everything else the system does by itself.
 
 ## Durability

@@ -21,7 +21,7 @@ export interface UltraCtx {
   ui?: {
     notify?(message: string, type?: "info" | "warning" | "error"): void;
     setStatus?(key: string, text: string | undefined): void;
-    theme?: { fg?(color: "info" | "warning" | "error", text: string): string };
+    theme?: { fg?(color: string, text: string): string };
   };
 }
 
@@ -229,12 +229,25 @@ function compactAndWait(
   });
 }
 
+// Color text through the host theme, degrading to plain text when the theme
+// lacks the color (a throw from fg must never drop the indicator or break
+// the turn). Theme color sets vary; "info" is commonly missing.
+export function themeColor(ctx: UltraCtx, color: string, text: string): string {
+  const fg = ctx.ui?.theme?.fg;
+  if (!fg) return text;
+  try {
+    return fg(color, text);
+  } catch {
+    return text;
+  }
+}
+
 export function setStatusSafe(ctx: UltraCtx, text: string | undefined, kind: "info" | "warning" | "error" = "info"): void {
   if (!ctx.hasUI || !ctx.ui?.setStatus) return;
   try {
     ctx.ui.setStatus(
       "pi-early-compact",
-      text === undefined ? undefined : kind === "info" || !ctx.ui.theme?.fg ? text : ctx.ui.theme.fg(kind, text),
+      text === undefined ? undefined : kind === "info" ? text : themeColor(ctx, kind, text),
     );
   } catch {
     // A stale ctx never breaks the prompt flow.

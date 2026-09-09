@@ -131,13 +131,13 @@ Deno.test("plan floater never tops out below its own chrome floor", async () => 
   replaceState(IDLE_STATE);
 });
 
-Deno.test("f2 shortcut opens the plan viewer", async () => {
+Deno.test("ctrl+p shortcut opens the plan viewer", async () => {
   const cwd = draftingCwd();
   const pi = fakePi();
   installCommands(pi);
-  const entry = pi.shortcuts.find((s) => s.shortcut === "f2");
-  check(entry !== undefined, "f2 registered");
-  if (entry === undefined) throw new Error("f2 shortcut missing");
+  const entry = pi.shortcuts.find((s) => s.shortcut === "ctrl+p");
+  check(entry !== undefined, "ctrl+p registered");
+  if (entry === undefined) throw new Error("ctrl+p shortcut missing");
   let opened = false;
   const ctx: PiCtx = fakeCtx(cwd, [], {
     notify: () => {},
