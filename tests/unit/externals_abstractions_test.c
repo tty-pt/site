@@ -185,9 +185,9 @@ int main(void)
 		}
 	}
 
-	/* 5. Axil param and param_int */
+	/* 5. Axil param, req_param, and boolean extraction */
 	{
-		axil_query_parse("item_id=abc456&count=42&zero=0&neg=-5");
+		axil_query_parse("item_id=abc456&count=42&zero=0&neg=-5&active=1&disabled=false&on_flag=on&off_flag=off");
 		char val[64] = { 0 };
 		int rc = axil_param(-1, "item_id", val, sizeof(val));
 		CHECK("axil_param fetches parsed query param",
@@ -204,15 +204,36 @@ int main(void)
 
 		int def = axil_param_int(-1, "nonexistent", 999);
 		CHECK("axil_param_int returns default for nonexistent key", def == 999);
+
+		/* Boolean flags */
+		CHECK("axil_param_bool parses '1'", axil_param_bool(-1, "active", 0) == 1);
+		CHECK("axil_param_bool parses 'false'", axil_param_bool(-1, "disabled", 1) == 0);
+		CHECK("axil_param_bool parses 'on'", axil_param_bool(-1, "on_flag", 0) == 1);
+		CHECK("axil_param_bool parses 'off'", axil_param_bool(-1, "off_flag", 1) == 0);
+		CHECK("axil_param_bool default fallback", axil_param_bool(-1, "missing", 1) == 1);
+
+		/* Auto-parsing body via axil_req_param */
+		char body_buf[64] = { 0 };
+		const char *post_body = "body_field=hello_world&body_num=123&body_flag=true";
+		int rcb = axil_req_param(-1, post_body, "body_field", body_buf, sizeof(body_buf));
+		CHECK("axil_req_param auto-parses body", rcb > 0 && strcmp(body_buf, "hello_world") == 0);
+		CHECK("axil_req_param_int parses from body", axil_req_param_int(-1, post_body, "body_num", 0) == 123);
+		CHECK("axil_req_param_bool parses from body", axil_req_param_bool(-1, post_body, "body_flag", 0) == 1);
 	}
 
-	/* 6. Axil respond_json */
+	/* 6. Axil response shortcuts */
 	{
 		int rc200 = axil_respond_json(-1, 200, "{\"status\":\"ok\"}");
 		CHECK("axil_respond_json 200 returns 0", rc200 == 0);
 
 		int rc404 = axil_respond_json(-1, 404, "{\"error\":\"not found\"}");
 		CHECK("axil_respond_json 404 returns 1", rc404 == 1);
+
+		int rcnoc = axil_respond_no_content(-1);
+		CHECK("axil_respond_no_content returns 0", rcnoc == 0);
+
+		int rcjok = axil_respond_json_ok(-1);
+		CHECK("axil_respond_json_ok returns 0", rcjok == 0);
 	}
 
 	/* 7. Libhyle-source ordered partition operations */
@@ -259,6 +280,25 @@ int main(void)
 		CHECK("hyle_source_ordered_get_field updated transpose is '5'",
 		      tr0 && strcmp(tr0, "5") == 0);
 
+		/* Find and replace */
+		int f_idx = hyle_source_ordered_find("test.ord", "p1", "title", "Track 2");
+		CHECK("hyle_source_ordered_find finds 'Track 2' at index 1", f_idx == 1);
+		int f_none = hyle_source_ordered_find("test.ord", "p1", "title", "No Such Track");
+		CHECK("hyle_source_ordered_find returns -1 for missing", f_none == -1);
+
+		const char *rep_n[] = { "title", "transpose", "format" };
+		const char *rep_v[] = { "Track 2 Replaced", "3", "lyrics" };
+		int rc_rep = hyle_source_ordered_replace_row("test.ord", "p1", 1, rep_n, rep_v, 3);
+		CHECK("hyle_source_ordered_replace_row returns 0", rc_rep == 0);
+		const char *rep_t = hyle_source_ordered_get_field("test.ord", "p1", 1, "title");
+		CHECK("hyle_source_ordered_get_field row 1 is replaced",
+		      rep_t && strcmp(rep_t, "Track 2 Replaced") == 0);
+
+		/* Restore row 1 title for subsequent checks */
+		const char *n2_rst[] = { "title", "transpose", "format" };
+		const char *v2_rst[] = { "Track 2", "2", "tabs" };
+		hyle_source_ordered_replace_row("test.ord", "p1", 1, n2_rst, v2_rst, 3);
+
 		struct fe_test_ctx fe_ctx = { 0 };
 		int fe_tot = hyle_source_ordered_for_each(
 		        "test.ord", "p1", test_ordered_each_cb, &fe_ctx);
@@ -278,6 +318,11 @@ int main(void)
 		        "test.ord", "p1", 0, "title");
 		CHECK("hyle_source_ordered_get_field row 0 after remove is 'Track 2'",
 		      rem_t0 && strcmp(rem_t0, "Track 2") == 0);
+
+		/* Test remove matching */
+		int rc_rem_m = hyle_source_ordered_remove_matching("test.ord", "p1", "title", "Track 2");
+		CHECK("hyle_source_ordered_remove_matching returns 0", rc_rem_m == 0);
+		CHECK("count after remove_matching is 0", hyle_source_ordered_count("test.ord", "p1") == 0);
 	}
 
 	/* 8. Libhyle-source referencing / relation querying */
@@ -327,6 +372,51 @@ int main(void)
 		      r_ctx.count > 0 && strcmp(r_ctx.ids[0], "c1") == 0);
 		CHECK("hyle_source_for_each_referencing item 1 is c2",
 		      r_ctx.count > 1 && strcmp(r_ctx.ids[1], "c2") == 0);
+
+		/* Direct field get/set tests */
+		const char *b_orig = hyle_source_get_field("test.band", "b1", "name");
+		CHECK("hyle_source_get_field reads 'The Beatles'",
+		      b_orig && strcmp(b_orig, "The Beatles") == 0);
+
+		int rc_bf = hyle_source_set_field(0, "test.band", "b1", "name", "The Wings");
+		CHECK("hyle_source_set_field returns 0", rc_bf == 0);
+		const char *b_mod = hyle_source_get_field("test.band", "b1", "name");
+		CHECK("hyle_source_get_field reads updated 'The Wings'",
+		      b_mod && strcmp(b_mod, "The Wings") == 0);
+
+		/* Test int getters/setters */
+		hyle_source_set_field_int(0, "test.band", "b1", "name", 4);
+		int n_mem = hyle_source_get_field_int("test.band", "b1", "name", 0);
+		CHECK("hyle_source_get_field_int reads 4", n_mem == 4);
+		int n_def = hyle_source_get_field_int("test.band", "b1", "missing_field", 99);
+		CHECK("hyle_source_get_field_int default fallback", n_def == 99);
+	}
+
+	/* 9. Test hyle_bud_form with FIELD_FILE renders textarea */
+	{
+		typedef struct {
+			char id[64];
+			char title[64];
+		} test_poem_meta_t;
+
+		static const hyle_schema_desc_t poem_schema[] = {
+			FIELD_TEXT(id, test_poem_meta_t),
+			FIELD_TEXT(title, test_poem_meta_t, .required = 1, .min_length = 1, .in_meta = 1),
+			FIELD_FILE(body_content, "pt_PT.html"),
+			FIELD_END
+		};
+
+		test_poem_meta_t meta = { .id = "poem1", .title = "Ode to Spring" };
+		bud_node *form = hyle_bud_form(
+		        poem_schema, &meta, "/poem/poem1/edit", "/poem/poem1",
+		        "Save", "csrf_test_tok", NULL, "Poem Content Line 1\nLine 2");
+		CHECK("hyle_bud_form with FIELD_FILE produces node", form != NULL);
+		char *html = bud_render_html(form);
+		CHECK("form html is non-NULL", html != NULL);
+		CHECK("form html contains input title", strstr(html, "name=\"title\"") != NULL);
+		CHECK("form html contains textarea body_content", strstr(html, "textarea name=\"body_content\"") != NULL);
+		CHECK("form html contains vstr value", strstr(html, "Poem Content Line 1") != NULL);
+		bud_free_string(html);
 	}
 
 	printf("\nTotal failures: %d\n", failures);

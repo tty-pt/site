@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 
 #include <ttypt/axil.h>
+#include <ttypt/axil-hyle.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/xy.h>
 #include <ttypt/qmap.h>
@@ -310,109 +311,10 @@ static int grp_song_index(const char *grp_id, const char *song_id)
 	return -1;
 }
 
-static int
-handle_grp_song_add_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+static int grp_on_song_change(const axil_hyle_partition_change_ctx_t *c)
 {
-	(void)user;
-	(void)body;
-	char s_id[128] = { 0 };
-	int s_len = axil_param(fd, "song_id", s_id, sizeof(s_id) - 1);
-	if (s_len <= 0)
-		return bad_request(fd, "Missing song_id");
-	datalist_extract_id(s_id, s_id, sizeof(s_id));
-
-	char fmt[64] = "any";
-	char tr[16] = "0";
-	axil_param(fd, "format", fmt, sizeof(fmt) - 1);
-	axil_param(fd, "transpose", tr, sizeof(tr) - 1);
-	if (!fmt[0])
-		snprintf(fmt, sizeof(fmt), "any");
-	if (!tr[0])
-		snprintf(tr, sizeof(tr), "0");
-	/* Manual adds are pinned: they survive rep_rebuild. */
-	const char *names[] = { "song", "transpose", "format", "pinned" };
-	const char *vals[] = { s_id, tr, fmt, "1" };
-	source_ordered_append_and_save("grp.songs", ctx->id, names, vals, 4);
-
-	return redirect_to_item(fd, "grp", ctx->id);
-}
-
-static int handle_grp_song_add(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "grp",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_CSRF_QUERY, NULL,
-	        NULL, handle_grp_song_add_auth, NULL);
-}
-
-static int
-handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)user;
-	(void)body;
-	char k_s[32] = { 0 };
-	axil_param(fd, "key", k_s, sizeof(k_s) - 1);
-
-	int idx = grp_song_index(ctx->id, ctx->sub_id);
-	if (idx >= 0) {
-		const char *key =
-		        source_ordered_key_at("grp.songs", ctx->id, idx);
-		/* Setting a key pins the entry: the preferred key is a
-		 * group setting that rep_rebuild preserves. */
-		const char *names[] = { "transpose", "pinned" };
-		const char *vals[] = { k_s, "1" };
-		source_put_row("grp.songs", key, names, vals, 2);
-		source_ordered_save("grp.songs", ctx->id);
-	} else {
-		/* Song was derived, not yet in grp.songs: pin it with the
-		 * chosen key */
-		char fmt[64] = "any";
-		rep_row_t rows[REP_MAX_SONGS];
-		int n_rows = rep_collect_merged(ctx->id, rows, REP_MAX_SONGS);
-		for (int i = 0; i < n_rows; i++) {
-			if (strcmp(rows[i].song, ctx->sub_id) == 0) {
-				snprintf(
-				        fmt, sizeof(fmt), "%s", rows[i].format);
-				break;
-			}
-		}
-		const char *names[] = { "song", "transpose", "format",
-			                "pinned" };
-		const char *vals[] = { ctx->sub_id, k_s, fmt, "1" };
-		source_ordered_append_and_save("grp.songs", ctx->id, names, vals, 4);
-	}
-
-	return redirect_to_item(fd, "grp", ctx->id);
-}
-
-static int handle_grp_song_key(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "grp",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SUB_ID |
-	                ICTX_CSRF_QUERY,
-	        NULL, NULL, handle_grp_song_key_auth, NULL);
-}
-
-static int
-handle_grp_song_del_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)user;
-
-	int idx = grp_song_index(ctx->id, ctx->sub_id);
-	if (idx >= 0)
-		source_ordered_remove_and_save("grp.songs", ctx->id, idx);
-
-	return redirect_to_item(fd, "grp", ctx->id);
-}
-
-static int handle_grp_song_delete(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "grp",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP | ICTX_SUB_ID |
-	                ICTX_CSRF_QUERY,
-	        NULL, NULL, handle_grp_song_del_auth, NULL);
+	rep_rebuild(c->parent_id);
+	return 0;
 }
 
 static int
@@ -587,16 +489,6 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
 	(void)user_data;
-	detail_state_t state;
-	detail_state_build_spec_t spec = {
-	        .module = "grp",
-	        .id = ctx->id,
-	        .username = ctx->username,
-	        .item_path = ctx->item_path,
-	        .fd = fd,
-	        .flags = DETAIL_BUILD_OWNERSHIP | DETAIL_BUILD_CSRF,
-	        .wasm_module = "grp"};
-	detail_state_build(&state, &spec, NULL, NULL);
 
 	unsigned cf_hd = source_get_fields_hd("grp.items");
 	if (!cf_hd)
@@ -614,13 +506,16 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	 * drift from deleted gigs or missed runtime hooks. */
 	rep_rebuild(ctx->id);
 
-	snprintf(state.title, sizeof(state.title), "group: %s", title);
+	int is_owner = (ctx->username && ctx->username[0])
+	                       ? item_owner_check(ctx->item_path, ctx->username)
+	                       : 0;
+	const char *csrf_token = csrf_setup(fd);
 
 	bud_node *body_frag = grp_detail_build_body(
-	        fd, ctx, cf_hd, title, owner_buf, state.is_owner,
-	        state.csrf_token);
+	        fd, ctx, cf_hd, title, owner_buf, is_owner,
+	        csrf_token);
 
-	return detail_respond_item_detail(fd, &state, ctx, "grp", body_frag);
+	return site_ui_respond_item_detail(fd, ctx, "grp", title, body_frag);
 }
 
 static int handle_grp_member_action_authorized(
@@ -631,10 +526,9 @@ static int handle_grp_member_action_authorized(
 	char member[64] = { 0 };
 	char back[512] = { 0 };
 
-	axil_query_parse(body);
-	axil_param(fd, "action", action, sizeof(action));
-	axil_param(fd, "member", member, sizeof(member));
-	axil_param(fd, "back", back, sizeof(back));
+	axil_req_param(fd, body, "action", action, sizeof(action));
+	axil_req_param(fd, body, "member", member, sizeof(member));
+	axil_req_param(fd, body, "back", back, sizeof(back));
 
 	if (!member[0])
 		return respond_error(fd, 400, "Missing member username");
@@ -698,15 +592,28 @@ void xy_install(void)
 	}
 	axil_register_handler(
 	        "GET:/grp/:id/song/:song_id", handle_grp_song_view);
-	axil_register_handler("POST:/api/grp/:id/songs", handle_grp_song_add);
 	axil_register_handler("POST:/api/grp/:id/members", handle_grp_members);
-	axil_register_handler(
-	        "POST:/api/grp/:id/song/:song_id/key", handle_grp_song_key);
-	axil_register_handler(
-	        "DELETE:/api/grp/:id/song/:song_id", handle_grp_song_delete);
-	axil_register_handler(
-	        "POST:/api/grp/:id/song/:song_id/remove",
-	        handle_grp_song_delete);
+
+	static const axil_hyle_param_alias_t grp_song_aliases[] = {
+		{ "transpose", { "key", "t", NULL } },
+		{ "format",    { "fmt", NULL } },
+		{ NULL }
+	};
+
+	axil_hyle_partition_routes_spec_t song_part_routes = {
+		.module = "grp",
+		.child_resource = "song",
+		.children_resource = "songs",
+		.partition_source = "grp.songs",
+		.primary_field = "song",
+		.pin_field = "pinned",
+		.positional = 0,
+		.update_action = "key",
+		.redirect_pattern = "/%s/%s",
+		.aliases = grp_song_aliases,
+		.on_change = (axil_hyle_partition_change_fn)grp_on_song_change,
+	};
+	axil_hyle_register_partition_routes(&song_part_routes);
 
 	source_setup(
 	        "grp.items", NULL, sizeof(grp_cache_t), "var/grp", grp_fields,

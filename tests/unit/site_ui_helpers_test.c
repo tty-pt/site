@@ -69,18 +69,18 @@ int main(void)
 		      state.title[0] == '\0');
 	}
 
-	/* 4. wasm_picker_init with NULL json does not crash */
+	/* 4. site_ui_picker_state_from_json with NULL json does not crash */
 	{
 		site_ui_picker_buffer_t buf;
 		pick_view_t pv;
 		memset(&buf, 0, sizeof(buf));
 		memset(&pv, 0, sizeof(pv));
-		wasm_picker_init(NULL, 0, "song", "song.items", NULL, 0, &buf, &pv);
-		CHECK("wasm_picker_init NULL json does not crash",
+		site_ui_picker_state_from_json(NULL, 0, "song", "song.items", 0, NULL, 0, &buf, &pv);
+		CHECK("site_ui_picker_state_from_json NULL json does not crash",
 		      pv.entries[0].npage == 0);
 	}
 
-	/* 5. wasm_picker_init with valid JSON populates picker buffer and view */
+	/* 5. site_ui_picker_state_from_json with valid JSON populates picker buffer and view */
 	{
 		site_ui_picker_buffer_t buf;
 		pick_view_t pv;
@@ -92,27 +92,27 @@ int main(void)
 		        "\"pick_sel\":[],"
 		        "\"pick_per_page\":10,"
 		        "\"pick_total\":2}";
-		wasm_picker_init(
-		        json, strlen(json), "song", "song.items",
+		site_ui_picker_state_from_json(
+		        json, strlen(json), "song", "song.items", 0,
 		        "search", 1, &buf, &pv);
-		CHECK("wasm_picker_init sets entry key",
+		CHECK("site_ui_picker_state_from_json sets entry key",
 		      strcmp(pv.entries[0].key, "song") == 0);
-		CHECK("wasm_picker_init sets entry target",
+		CHECK("site_ui_picker_state_from_json sets entry target",
 		      strcmp(pv.entries[0].target, "song.items") == 0);
-		CHECK("wasm_picker_init populates 2 page options",
+		CHECK("site_ui_picker_state_from_json populates 2 page options",
 		      pv.entries[0].npage == 2);
-		CHECK("wasm_picker_init opt 0 id is correct",
+		CHECK("site_ui_picker_state_from_json opt 0 id is correct",
 		      pv.entries[0].page_opts[0].id != NULL &&
 		      strcmp(pv.entries[0].page_opts[0].id, "s1") == 0);
-		CHECK("wasm_picker_init opt 0 label is correct",
+		CHECK("site_ui_picker_state_from_json opt 0 label is correct",
 		      pv.entries[0].page_opts[0].label != NULL &&
 		      strcmp(pv.entries[0].page_opts[0].label, "Song One") == 0);
-		CHECK("wasm_picker_init opt 1 id is correct",
+		CHECK("site_ui_picker_state_from_json opt 1 id is correct",
 		      pv.entries[0].page_opts[1].id != NULL &&
 		      strcmp(pv.entries[0].page_opts[1].id, "s2") == 0);
-		CHECK("wasm_picker_init per_page set to 10",
+		CHECK("site_ui_picker_state_from_json per_page set to 10",
 		      pv.entries[0].per_page == 10);
-		CHECK("wasm_picker_init total set to 2",
+		CHECK("site_ui_picker_state_from_json total set to 2",
 		      pv.entries[0].total == 2);
 	}
 

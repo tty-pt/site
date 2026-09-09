@@ -100,43 +100,37 @@ XY_IMPL(int, song_parse_viewer_prefs,
 			out->show_media = 1;
 	}
 
-	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	if (qs[0]) {
-		char copy[1024];
-		snprintf(copy, sizeof(copy), "%s", qs);
-		axil_query_parse(copy);
-		char buf[32];
-		if (axil_param(fd, "t", buf, sizeof(buf)) > 0)
-			out->transpose = axil_param_int(fd, "t", 0);
-		if (axil_param_int(fd, "b", 0) != 0)
-			out->flags |= TRANSP_BEMOL;
-		if (axil_param_int(fd, "l", 0) != 0)
-			out->flags |= TRANSP_LATIN;
-		if (axil_param_int(fd, "h", 0) != 0)
-			out->flags |= TRANSP_HTML;
-		if (axil_param_int(fd, "m", 0) != 0)
-			out->show_media = 1;
+	char buf[32];
+	if (axil_param(fd, "t", buf, sizeof(buf)) > 0)
+		out->transpose = axil_param_int(fd, "t", 0);
+	if (axil_param_bool(fd, "b", 0))
+		out->flags |= TRANSP_BEMOL;
+	if (axil_param_bool(fd, "l", 0))
+		out->flags |= TRANSP_LATIN;
+	if (axil_param_bool(fd, "h", 0))
+		out->flags |= TRANSP_HTML;
+	if (axil_param_bool(fd, "m", 0))
+		out->show_media = 1;
 
-		char zb[16] = { 0 };
-		if (axil_param(fd, "z", zb, sizeof(zb)) > 0) {
-			int zv = axil_param_int(fd, "z", VIEWER_ZOOM_DEFAULT);
-			if (zv < VIEWER_ZOOM_MIN)
-				zv = VIEWER_ZOOM_MIN;
-			if (zv > VIEWER_ZOOM_MAX)
-				zv = VIEWER_ZOOM_MAX;
-			out->zoom = zv;
-			if (username && username[0])
-				song_set_viewer_zoom(username, zv);
-		}
+	char zb[16] = { 0 };
+	if (axil_param(fd, "z", zb, sizeof(zb)) > 0) {
+		int zv = axil_param_int(fd, "z", VIEWER_ZOOM_DEFAULT);
+		if (zv < VIEWER_ZOOM_MIN)
+			zv = VIEWER_ZOOM_MIN;
+		if (zv > VIEWER_ZOOM_MAX)
+			zv = VIEWER_ZOOM_MAX;
+		out->zoom = zv;
+		if (username && username[0])
+			song_set_viewer_zoom(username, zv);
+	}
 
-		if (username && username[0]) {
-			char pv[2];
-			pv[0] = (out->flags & TRANSP_LATIN) ? '1' : '0';
-			pv[1] = '\0';
-			user_pref_write(username, "chords-latin", pv);
-			pv[0] = out->show_media ? '1' : '0';
-			user_pref_write(username, "chords-media", pv);
-		}
+	if (username && username[0]) {
+		char pv[2];
+		pv[0] = (out->flags & TRANSP_LATIN) ? '1' : '0';
+		pv[1] = '\0';
+		user_pref_write(username, "chords-latin", pv);
+		pv[0] = out->show_media ? '1' : '0';
+		user_pref_write(username, "chords-media", pv);
 	}
 	return 0;
 }
@@ -144,32 +138,22 @@ XY_IMPL(int, song_parse_viewer_prefs,
 static int api_song_viewer_prefs_handler(int fd, char *body)
 {
 	const char *u = get_request_user(fd);
-	if (!u || !u[0]) {
-		axil_respond(fd, 204, "");
-		return 0;
-	}
-	char method[16] = { 0 };
-	axil_env_get(fd, method, sizeof(method), "REQUEST_METHOD");
-	if (strcmp(method, "GET") == 0) {
-		char qs[1024] = { 0 };
-		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-		axil_query_parse(qs);
-	} else {
-		axil_query_parse(body);
-	}
+	if (!u || !u[0])
+		return axil_respond_no_content(fd);
+
 	char b[16];
-	if (axil_param(fd, "v", b, sizeof(b)) >= 0)
-		song_set_viewer_zoom(u, axil_param_int(fd, "v", 100));
-	if (axil_param(fd, "b", b, sizeof(b)) >= 0)
+	if (axil_req_param(fd, body, "v", b, sizeof(b)) >= 0)
+		song_set_viewer_zoom(u, axil_req_param_int(fd, body, "v", 100));
+	if (axil_req_param(fd, body, "b", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-bemol", b);
-	if (axil_param(fd, "l", b, sizeof(b)) >= 0)
+	if (axil_req_param(fd, body, "l", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-latin", b);
-	if (axil_param(fd, "m", b, sizeof(b)) >= 0)
+	if (axil_req_param(fd, body, "m", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-media", b);
-	if (axil_param(fd, "z", b, sizeof(b)) >= 0)
-		song_set_viewer_zoom(u, axil_param_int(fd, "z", 100));
-	axil_respond(fd, 204, "");
-	return 0;
+	if (axil_req_param(fd, body, "z", b, sizeof(b)) >= 0)
+		song_set_viewer_zoom(u, axil_req_param_int(fd, body, "z", 100));
+
+	return axil_respond_no_content(fd);
 }
 
 /* ── State specs (computed once at init) ─────────────────────── */

@@ -38,6 +38,8 @@ typedef struct {
 	unsigned flags;                      /* SOURCE_FLAG_* */
 	const source_list_view_t *list_view; /* optional list view columns & search presentation */
 	standard_item_handlers_t handlers;   /* custom handler overrides (NULL = generic default) */
+	const char *media_exts;              /* allowlisted media file extensions, e.g. "jpeg,jpg,png" */
+	const char *body_file;               /* allowlisted public body file, e.g. "pt_PT.html" */
 } index_module_def_t;
 
 typedef void (*index_cleanup_fn)(const char *id);

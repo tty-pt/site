@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <sys/stat.h>
 
 #include "../auth/auth.h"
 #include "../common/common.h"
@@ -646,6 +647,73 @@ XY_IMPL(size_t, source_for_each_referencing,
 {
 	return hyle_source_for_each_referencing(
 	        source_dataset, ref_field, target_id, (hyle_source_ref_cb_t)cb, user);
+}
+
+XY_IMPL(int, source_ordered_find,
+	const char *, source_id,
+	const char *, partition_val,
+	const char *, field,
+	const char *, val)
+{
+	return hyle_source_ordered_find(source_id, partition_val, field, val);
+}
+
+XY_IMPL(int, source_ordered_remove_matching,
+	const char *, source_id,
+	const char *, partition_val,
+	const char *, field,
+	const char *, val)
+{
+	return hyle_source_ordered_remove_matching(source_id, partition_val, field, val);
+}
+
+XY_IMPL(int, source_ordered_replace_row,
+	const char *, source_id,
+	const char *, partition_val,
+	int, index,
+	const char **, names,
+	const char **, vals,
+	size_t, count)
+{
+	return hyle_source_ordered_replace_row(
+	        source_id, partition_val, index, names, vals, count);
+}
+
+XY_IMPL(const char *, source_get_field,
+	const char *, dataset_id,
+	const char *, item_id,
+	const char *, field)
+{
+	return hyle_source_get_field(dataset_id, item_id, field);
+}
+
+XY_IMPL(int, source_set_field,
+	int, fd,
+	const char *, dataset_id,
+	const char *, item_id,
+	const char *, field,
+	const char *, value)
+{
+	return hyle_source_set_field(fd, dataset_id, item_id, field, value);
+}
+
+XY_IMPL(int, source_get_field_int,
+	const char *, dataset_id,
+	const char *, item_id,
+	const char *, field,
+	int, def_val)
+{
+	return hyle_source_get_field_int(dataset_id, item_id, field, def_val);
+}
+
+XY_IMPL(int, source_set_field_int,
+	int, fd,
+	const char *, dataset_id,
+	const char *, item_id,
+	const char *, field,
+	int, val)
+{
+	return hyle_source_set_field_int(fd, dataset_id, item_id, field, val);
 }
 
 XY_IMPL(int, source_register_derive,

@@ -288,13 +288,6 @@ XY_DECL(int, detail_respond_page,
 	int, fd,
 	const detail_state_t *, state,
 	bud_node *, layout);
-
-XY_DECL(int, detail_respond_item_detail,
-	int, fd,
-	const detail_state_t *, state,
-	const item_ctx_t *, ctx,
-	const char *, module,
-	bud_node *, body);
 #endif
 
 #endif /* COMMON_H */

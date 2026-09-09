@@ -66,41 +66,6 @@ static int poem_detail_handler(int fd, char *body)
 	        fd, body, "poem", 0, NULL, NULL, poem_detail_auth, NULL);
 }
 
-/* GET /poem/:id/pt_PT.html — allowlisted body file, public read.
- * Only this basename is ever served; owner/meta stay unreachable. */
-static int
-poem_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
-{
-	(void)body;
-	(void)user_data;
-	return respond_item_file(fd, ctx->item_path, "pt_PT.html", "html");
-}
-
-static int poem_body_handler(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "poem", 0, NULL, NULL, poem_body_auth, NULL);
-}
-
-/* GET /poem/:id/:file — allowlisted image assets, public read.
- * The stem must be a safe id and the extension one of .jpeg/.jpg/.png;
- * anything else (including pt_PT.html, which has its own route) is 404. */
-static int
-poem_media_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
-{
-	(void)body;
-	(void)user_data;
-	char file[256] = { 0 };
-	axil_env_get(fd, file, sizeof(file), "PATTERN_PARAM_FILE");
-	return respond_item_file(fd, ctx->item_path, file, "jpeg,jpg,png");
-}
-
-static int poem_media_handler(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "poem", 0, NULL, NULL, poem_media_auth, NULL);
-}
-
 void xy_install(void)
 {
 	xy_load("./mods/index/index");
@@ -116,8 +81,7 @@ void xy_install(void)
 	        .items_path = "var/poem",
 	        .list_view = &poem_list_view,
 	        .handlers = { .detail = poem_detail_handler },
+	        .body_file = "pt_PT.html",
+	        .media_exts = "jpeg,jpg,png",
 	});
-
-	axil_register_handler("GET:/poem/:id/pt_PT.html", poem_body_handler);
-	axil_register_handler("GET:/poem/:id/:file", poem_media_handler);
 }

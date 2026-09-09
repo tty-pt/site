@@ -118,12 +118,6 @@ bud_node *site_ui_form_from_desc(
         const hyle_schema_desc_t *desc, const void *struct_ptr,
         const char *csrf_token, const pick_view_t *pv, const char *vstr_val);
 
-/* ── Action / Standalone Picker Component ───────────── */
-typedef hyle_bud_action_picker_spec_t site_ui_action_picker_spec_t;
-
-bud_node *site_ui_action_picker(
-        const site_ui_action_picker_spec_t *spec, const pick_view_t *pv);
-
 /* ── Generic Row / Cell Picker Primitives ─────────────────── */
 bud_node *site_ui_cell_picker(
         const char *target, const char *key, int row_idx, const char *cur_id,
@@ -194,9 +188,5 @@ int site_ui_respond_with_state(
 
 /* ── WASM detail init helpers ───────────────────────────────────── */
 void wasm_state_init(const char *json, int len, const bud_field_desc_t *fields, void *state);
-void wasm_picker_init(
-        const char *json, size_t jlen, const char *key, const char *target,
-        const char *q, int page, site_ui_picker_buffer_t *buf,
-        pick_view_t *pv_out);
 
 #endif

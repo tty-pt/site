@@ -17,6 +17,8 @@ is_server_up() {
   curl -s --max-time 1 "http://localhost:${PORT}/" >/dev/null 2>&1
 }
 
+export AUTH_SKIP_CONFIRM=1
+
 # If server is already running, just run the command directly
 if is_server_up; then
   "$@"

@@ -43,6 +43,7 @@ XY_DECL(int, item_owner_record, const char *, item_path, const char *, username)
 XY_DECL(int, item_owner_check, const char *, item_path, const char *, username);
 XY_DECL(const char *, resolve_doc_root, int, fd, char *, buf, size_t, len);
 XY_DECL(int, source_after_update, int, fd, const char *, dataset_id, const char *, id, unsigned, data_handle);
+XY_DECL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_sz);
 
 /* ── HTTP Response Helpers ───────────────────────────────────────── */
 
@@ -1671,4 +1672,528 @@ void axil_hyle_install_routes(void)
 	        source_delete_ordered_handler);
 	axil_register_handler(
 	        "GET:/pick/:id/options", pick_options_handler);
+}
+
+/* ── Partition Sub-Resource Route Dispatch ───────────────────────── */
+
+struct axil_hyle_partition_closure {
+	axil_hyle_partition_routes_spec_t spec;
+	char action[32];
+	char primary_field_buf[64];
+	char child_res_buf[64];
+	char children_res_buf[64];
+	char update_act_buf[64];
+};
+
+static struct axil_hyle_partition_closure g_axil_hyle_closures[32];
+static size_t g_n_axil_hyle_closures = 0;
+
+static void datalist_extract_id(const char *src, char *out, size_t out_sz)
+{
+	if (!src || !out || out_sz == 0)
+		return;
+	const char *dash = strstr(src, " - ");
+	if (dash) {
+		size_t len = (size_t)(dash - src);
+		if (len >= out_sz)
+			len = out_sz - 1;
+		memcpy(out, src, len);
+		out[len] = '\0';
+	} else {
+		strncpy(out, src, out_sz - 1);
+		out[out_sz - 1] = '\0';
+	}
+}
+
+static int partition_get_param(int fd, const char *body, const char *name, char *buf, size_t sz)
+{
+	if (!name || !buf || sz == 0)
+		return -1;
+	buf[0] = '\0';
+	axil_req_param(fd, body, name, buf, sz);
+	if (!buf[0]) {
+		mpfd_get(name, buf, sz);
+	}
+	return buf[0] ? (int)strlen(buf) : -1;
+}
+
+static void get_field_val(
+	int fd, const char *body, const char *fname,
+	const axil_hyle_param_alias_t *aliases,
+	char *buf, size_t sz)
+{
+	buf[0] = '\0';
+	partition_get_param(fd, body, fname, buf, sz);
+	if (buf[0])
+		return;
+
+	/* Check standard {fname}_id convention (e.g. song -> song_id) */
+	char alt[128];
+	snprintf(alt, sizeof(alt), "%s_id", fname);
+	partition_get_param(fd, body, alt, buf, sz);
+	if (buf[0])
+		return;
+
+	/* Check explicit caller alias table */
+	if (aliases) {
+		for (const axil_hyle_param_alias_t *a = aliases; a->field; a++) {
+			if (strcmp(a->field, fname) == 0) {
+				for (int i = 0; i < 4 && a->aliases[i]; i++) {
+					partition_get_param(fd, body, a->aliases[i], buf, sz);
+					if (buf[0])
+						return;
+				}
+				break;
+			}
+		}
+	}
+}
+
+static int verify_partition_access(
+	int fd, const axil_hyle_partition_routes_spec_t *spec,
+	const char *parent_id, const char *username)
+{
+	if (spec->check_access) {
+		return spec->check_access(
+		        fd, spec->module, parent_id, username, spec->user_data);
+	}
+	if (!check_partition_owner(fd, spec->partition_source, parent_id, username))
+		return 0;
+	const hyle_source_def_t *def = hyle_source_find(spec->partition_source);
+	if (def && source_access_allowed(def, fd, username) !=
+	            HYLE_SOURCE_ACCESS_RESULT_ALLOW)
+		return 0;
+	return 1;
+}
+
+static int partition_respond_success(
+	int fd, const char *body,
+	const axil_hyle_partition_routes_spec_t *spec,
+	const char *parent_id, int row_idx)
+{
+	char accept[256] = { 0 };
+	axil_header_get(fd, "Accept", accept, sizeof(accept));
+	if (strstr(accept, "application/json")) {
+		char resp[128];
+		snprintf(resp, sizeof(resp), "{\"ok\":true,\"index\":%d}", row_idx);
+		return respond_json(fd, 200, resp);
+	}
+
+	char back_href[512] = { 0 };
+	partition_get_param(fd, body, "back", back_href, sizeof(back_href));
+	if (back_href[0])
+		return axil_redirect(fd, back_href);
+
+	if (spec->redirect_pattern) {
+		char redir[256];
+		const char *first_s = strstr(spec->redirect_pattern, "%s");
+		const char *second_s = first_s ? strstr(first_s + 2, "%s") : NULL;
+		if (second_s) {
+			snprintf(
+			        redir, sizeof(redir), spec->redirect_pattern,
+			        spec->module, parent_id);
+		} else if (first_s) {
+			snprintf(
+			        redir, sizeof(redir), spec->redirect_pattern,
+			        parent_id);
+		} else {
+			snprintf(redir, sizeof(redir), "%s", spec->redirect_pattern);
+		}
+		return axil_redirect(fd, redir);
+	}
+
+	char resp[128];
+	snprintf(resp, sizeof(resp), "{\"ok\":true,\"index\":%d}", row_idx);
+	return respond_json(fd, 200, resp);
+}
+
+int axil_hyle_partition_execute(
+	int fd, char *body,
+	const char *action,
+	const axil_hyle_partition_routes_spec_t *spec,
+	const char *parent_id)
+{
+	if (!spec || !spec->partition_source || !parent_id || !parent_id[0])
+		return bad_request(fd, "Missing partition parameters");
+
+	const char *username = get_request_user(fd);
+	if (!username || !username[0])
+		return respond_json_error(fd, 401, "Unauthorized");
+
+	if (!verify_partition_access(fd, spec, parent_id, username))
+		return respond_json_error(fd, 403, "Forbidden");
+
+	char method[16] = { 0 };
+	axil_env_get(fd, method, sizeof(method), "REQUEST_METHOD");
+
+	char csrf[64] = { 0 };
+	partition_get_param(fd, body, "csrf_token", csrf, sizeof(csrf));
+	if (strcmp(method, "DELETE") != 0 || csrf[0]) {
+		if (csrf_validate(fd, csrf) != 0)
+			return respond_json_error(fd, 403, "Forbidden");
+	}
+
+	size_t n_fields = hyle_source_get_field_count(spec->partition_source);
+	if (n_fields == 0)
+		return respond_json_error(fd, 404, "Dataset not found");
+
+	const char *primary_field = spec->primary_field ? spec->primary_field : "item";
+	char primary_param[128];
+	snprintf(primary_param, sizeof(primary_param), "%s_id", primary_field);
+
+	char child_id[128] = { 0 };
+	int row_idx = -1;
+
+	if (strcmp(action, "add") == 0) {
+		partition_get_param(fd, body, primary_param, child_id, sizeof(child_id));
+		if (!child_id[0])
+			partition_get_param(fd, body, primary_field, child_id, sizeof(child_id));
+		if (!child_id[0])
+			return bad_request(fd, "Missing child id");
+
+		datalist_extract_id(child_id, child_id, sizeof(child_id));
+
+		const char *names[64];
+		const char *vals[64];
+		char val_bufs[64][256];
+		size_t count = 0;
+
+		for (size_t i = 0; i < n_fields && count < 64; i++) {
+			const char *fname = hyle_source_get_field_name(spec->partition_source, i);
+			if (!fname || hyle_source_get_field_type(spec->partition_source, i) == HYLE_FIELD_INVERSE)
+				continue;
+			names[count] = fname;
+			if (strcmp(fname, primary_field) == 0) {
+				vals[count] = child_id;
+			} else if (spec->pin_field && strcmp(fname, spec->pin_field) == 0) {
+				vals[count] = "1";
+			} else {
+				val_bufs[count][0] = '\0';
+				get_field_val(fd, body, fname, spec->aliases, val_bufs[count], sizeof(val_bufs[count]));
+				if (!val_bufs[count][0]) {
+					hyle_field_type_t ft = hyle_source_get_field_type(spec->partition_source, i);
+					if (ft == HYLE_FIELD_INT || ft == HYLE_FIELD_BOOL)
+						strcpy(val_bufs[count], "0");
+					else
+						strcpy(val_bufs[count], "any");
+				}
+				vals[count] = val_bufs[count];
+			}
+			count++;
+		}
+
+		hyle_source_ordered_append_and_save(spec->partition_source, parent_id, names, vals, count);
+		row_idx = hyle_source_ordered_count(spec->partition_source, parent_id) - 1;
+	} else if (strcmp(action, "remove") == 0) {
+		if (spec->positional) {
+			char n_str[32] = { 0 };
+			axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
+			if (!n_str[0])
+				partition_get_param(fd, body, "n", n_str, sizeof(n_str));
+			row_idx = n_str[0] ? atoi(n_str) : -1;
+		} else {
+			char target_child[128] = { 0 };
+			char param_env[64];
+			const char *cr = spec->child_resource ? spec->child_resource : primary_field;
+			snprintf(param_env, sizeof(param_env), "PATTERN_PARAM_%s_ID", cr);
+			for (char *p = param_env; *p; p++) {
+				if (*p >= 'a' && *p <= 'z')
+					*p = (char)(*p - 32);
+			}
+			axil_env_get(fd, target_child, sizeof(target_child), param_env);
+			if (!target_child[0])
+				axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_CHILD_ID");
+			if (!target_child[0])
+				axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_SONG_ID");
+			if (!target_child[0])
+				axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_KEY");
+			if (!target_child[0])
+				partition_get_param(fd, body, primary_param, target_child, sizeof(target_child));
+			if (!target_child[0])
+				partition_get_param(fd, body, primary_field, target_child, sizeof(target_child));
+
+			if (target_child[0]) {
+				row_idx = hyle_source_ordered_find(spec->partition_source, parent_id, primary_field, target_child);
+				snprintf(child_id, sizeof(child_id), "%s", target_child);
+			}
+		}
+
+		if (row_idx >= 0) {
+			if (!child_id[0]) {
+				const char *kid = hyle_source_ordered_get_field(spec->partition_source, parent_id, row_idx, primary_field);
+				if (kid)
+					snprintf(child_id, sizeof(child_id), "%s", kid);
+			}
+			hyle_source_ordered_remove_and_save(spec->partition_source, parent_id, row_idx);
+		}
+	} else if (strcmp(action, "replace") == 0) {
+		char n_str[32] = { 0 };
+		axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
+		if (!n_str[0])
+			partition_get_param(fd, body, "n", n_str, sizeof(n_str));
+		row_idx = n_str[0] ? atoi(n_str) : -1;
+		if (row_idx < 0)
+			return bad_request(fd, "Missing row index n");
+
+		char new_child_id[128] = { 0 };
+		partition_get_param(fd, body, primary_param, new_child_id, sizeof(new_child_id));
+		if (!new_child_id[0])
+			partition_get_param(fd, body, primary_field, new_child_id, sizeof(new_child_id));
+		if (new_child_id[0]) {
+			datalist_extract_id(new_child_id, new_child_id, sizeof(new_child_id));
+			hyle_source_ordered_set_field(spec->partition_source, parent_id, row_idx, primary_field, new_child_id);
+			snprintf(child_id, sizeof(child_id), "%s", new_child_id);
+		}
+
+		for (size_t i = 0; i < n_fields; i++) {
+			const char *fname = hyle_source_get_field_name(spec->partition_source, i);
+			if (!fname || strcmp(fname, primary_field) == 0)
+				continue;
+			char fval[256] = { 0 };
+			get_field_val(fd, body, fname, spec->aliases, fval, sizeof(fval));
+			if (fval[0])
+				hyle_source_ordered_set_field(spec->partition_source, parent_id, row_idx, fname, fval);
+		}
+		hyle_source_ordered_save(spec->partition_source, parent_id);
+	} else if (strcmp(action, "update") == 0 || strcmp(action, "key") == 0) {
+		char target_child[128] = { 0 };
+		char param_env[64];
+		const char *cr = spec->child_resource ? spec->child_resource : primary_field;
+		snprintf(param_env, sizeof(param_env), "PATTERN_PARAM_%s_ID", cr);
+		for (char *p = param_env; *p; p++) {
+			if (*p >= 'a' && *p <= 'z')
+				*p = (char)(*p - 32);
+		}
+		axil_env_get(fd, target_child, sizeof(target_child), param_env);
+		if (!target_child[0])
+			axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_CHILD_ID");
+		if (!target_child[0])
+			axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_SONG_ID");
+		if (!target_child[0])
+			axil_env_get(fd, target_child, sizeof(target_child), "PATTERN_PARAM_KEY");
+
+		if (target_child[0]) {
+			snprintf(child_id, sizeof(child_id), "%s", target_child);
+			row_idx = hyle_source_ordered_find(spec->partition_source, parent_id, primary_field, target_child);
+		}
+
+		if (row_idx >= 0) {
+			for (size_t i = 0; i < n_fields; i++) {
+				const char *fname = hyle_source_get_field_name(spec->partition_source, i);
+				if (!fname || strcmp(fname, primary_field) == 0)
+					continue;
+				if (spec->pin_field && strcmp(fname, spec->pin_field) == 0) {
+					hyle_source_ordered_set_field(spec->partition_source, parent_id, row_idx, fname, "1");
+					continue;
+				}
+				char fval[256] = { 0 };
+				get_field_val(fd, body, fname, spec->aliases, fval, sizeof(fval));
+				if (fval[0])
+					hyle_source_ordered_set_field(spec->partition_source, parent_id, row_idx, fname, fval);
+			}
+			hyle_source_ordered_save(spec->partition_source, parent_id);
+		} else if (spec->pin_field && target_child[0]) {
+			const char *names[64];
+			const char *vals[64];
+			char val_bufs[64][256];
+			size_t count = 0;
+
+			for (size_t i = 0; i < n_fields && count < 64; i++) {
+				const char *fname = hyle_source_get_field_name(spec->partition_source, i);
+				if (!fname) continue;
+				names[count] = fname;
+				if (strcmp(fname, primary_field) == 0) {
+					vals[count] = target_child;
+				} else if (strcmp(fname, spec->pin_field) == 0) {
+					vals[count] = "1";
+				} else {
+					val_bufs[count][0] = '\0';
+					get_field_val(fd, body, fname, spec->aliases, val_bufs[count], sizeof(val_bufs[count]));
+					if (!val_bufs[count][0]) {
+						hyle_field_type_t ft = hyle_source_get_field_type(spec->partition_source, i);
+						if (ft == HYLE_FIELD_INT || ft == HYLE_FIELD_BOOL)
+							strcpy(val_bufs[count], "0");
+						else
+							strcpy(val_bufs[count], "any");
+					}
+					vals[count] = val_bufs[count];
+				}
+				count++;
+			}
+			hyle_source_ordered_append_and_save(spec->partition_source, parent_id, names, vals, count);
+			row_idx = hyle_source_ordered_count(spec->partition_source, parent_id) - 1;
+		}
+	}
+
+	if (spec->on_change) {
+		axil_hyle_partition_change_ctx_t ch_ctx = {
+			.action = action,
+			.module = spec->module,
+			.parent_id = parent_id,
+			.partition_id = spec->partition_source,
+			.row_index = row_idx,
+			.item_key = child_id[0] ? child_id : "",
+			.fd = fd,
+			.user_data = spec->user_data,
+		};
+		spec->on_change(&ch_ctx);
+	}
+
+	return partition_respond_success(fd, body, spec, parent_id, row_idx);
+}
+
+static struct axil_hyle_partition_closure *find_partition_closure(int fd, const char *action)
+{
+	char uri[512] = { 0 };
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+
+	for (size_t i = 0; i < g_n_axil_hyle_closures; i++) {
+		struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[i];
+		if (strcmp(c->action, action) != 0)
+			continue;
+		char mod_prefix[128];
+		snprintf(mod_prefix, sizeof(mod_prefix), "/%s/", c->spec.module);
+		char api_mod_prefix[128];
+		snprintf(api_mod_prefix, sizeof(api_mod_prefix), "/api/%s/", c->spec.module);
+		if (strstr(uri, mod_prefix) || strstr(uri, api_mod_prefix)) {
+			char ch_needle[128], chs_needle[128];
+			snprintf(ch_needle, sizeof(ch_needle), "/%s/", c->spec.child_resource);
+			snprintf(chs_needle, sizeof(chs_needle), "/%s", c->spec.children_resource);
+			if (strstr(uri, ch_needle) || strstr(uri, chs_needle))
+				return c;
+		}
+	}
+	return NULL;
+}
+
+static int partition_action_dispatch(int fd, char *body, const char *action)
+{
+	struct axil_hyle_partition_closure *c = find_partition_closure(fd, action);
+	if (!c)
+		return not_found(fd, "Handler not found");
+
+	const axil_hyle_partition_routes_spec_t *spec = &c->spec;
+
+	char parent_id[128] = { 0 };
+	axil_env_get(fd, parent_id, sizeof(parent_id), "PATTERN_PARAM_ID");
+	if (!parent_id[0]) {
+		char uri[512] = { 0 };
+		axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+		const char *p = uri;
+		if (strncmp(p, "/api/", 5) == 0)
+			p += 5;
+		else if (*p == '/')
+			p++;
+		const char *slash = strchr(p, '/');
+		if (slash) {
+			p = slash + 1;
+			const char *slash2 = strchr(p, '/');
+			size_t id_len = slash2 ? (size_t)(slash2 - p) : strlen(p);
+			if (id_len < sizeof(parent_id)) {
+				memcpy(parent_id, p, id_len);
+				parent_id[id_len] = '\0';
+			}
+		}
+	}
+
+	return axil_hyle_partition_execute(fd, body, action, spec, parent_id);
+}
+
+static int partition_add_handler(int fd, char *body)
+{
+	return partition_action_dispatch(fd, body, "add");
+}
+
+static int partition_remove_handler(int fd, char *body)
+{
+	return partition_action_dispatch(fd, body, "remove");
+}
+
+static int partition_replace_handler(int fd, char *body)
+{
+	return partition_action_dispatch(fd, body, "replace");
+}
+
+static int partition_update_handler(int fd, char *body)
+{
+	return partition_action_dispatch(fd, body, "update");
+}
+
+int axil_hyle_register_partition_routes(const axil_hyle_partition_routes_spec_t *spec)
+{
+	if (!spec || !spec->module || !spec->partition_source)
+		return -1;
+
+	const char *primary = spec->primary_field ? spec->primary_field
+	                                         : (spec->child_resource ? spec->child_resource : "item");
+	const char *child = spec->child_resource ? spec->child_resource : primary;
+	char default_children[64];
+	snprintf(default_children, sizeof(default_children), "%ss", child);
+	const char *children = spec->children_resource ? spec->children_resource : default_children;
+	const char *update_act = spec->update_action ? spec->update_action : "key";
+
+	/* 1. Add route: POST /api/:module/:id/:children */
+	if (g_n_axil_hyle_closures < 32) {
+		struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[g_n_axil_hyle_closures++];
+		c->spec = *spec;
+		snprintf(c->primary_field_buf, sizeof(c->primary_field_buf), "%s", primary);
+		snprintf(c->child_res_buf, sizeof(c->child_res_buf), "%s", child);
+		snprintf(c->children_res_buf, sizeof(c->children_res_buf), "%s", children);
+		snprintf(c->update_act_buf, sizeof(c->update_act_buf), "%s", update_act);
+		c->spec.primary_field = c->primary_field_buf;
+		c->spec.child_resource = c->child_res_buf;
+		c->spec.children_resource = c->children_res_buf;
+		c->spec.update_action = c->update_act_buf;
+		snprintf(c->action, sizeof(c->action), "add");
+
+		char buf[256];
+		snprintf(buf, sizeof(buf), "POST:/api/%s/:id/%s", spec->module, children);
+		axil_register_handler(buf, partition_add_handler);
+	}
+
+	if (spec->positional) {
+		/* 2. Remove by index: POST /api/:module/:id/:child/:n/remove */
+		if (g_n_axil_hyle_closures < 32) {
+			struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[g_n_axil_hyle_closures++];
+			*c = g_axil_hyle_closures[g_n_axil_hyle_closures - 2];
+			snprintf(c->action, sizeof(c->action), "remove");
+			char buf[256];
+			snprintf(buf, sizeof(buf), "POST:/api/%s/:id/%s/:n/remove", spec->module, child);
+			axil_register_handler(buf, partition_remove_handler);
+		}
+
+		/* 3. Replace by index: POST /api/:module/:id/:child/:n/replace */
+		if (g_n_axil_hyle_closures < 32) {
+			struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[g_n_axil_hyle_closures++];
+			*c = g_axil_hyle_closures[g_n_axil_hyle_closures - 2];
+			snprintf(c->action, sizeof(c->action), "replace");
+			char buf[256];
+			snprintf(buf, sizeof(buf), "POST:/api/%s/:id/%s/:n/replace", spec->module, child);
+			axil_register_handler(buf, partition_replace_handler);
+		}
+	} else {
+		/* 4. Remove by id: POST & DELETE /api/:module/:id/:child/:{child}_id/remove */
+		if (g_n_axil_hyle_closures < 32) {
+			struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[g_n_axil_hyle_closures++];
+			*c = g_axil_hyle_closures[g_n_axil_hyle_closures - 2];
+			snprintf(c->action, sizeof(c->action), "remove");
+			char buf[256];
+			snprintf(buf, sizeof(buf), "POST:/api/%s/:id/%s/:%s_id/remove", spec->module, child, child);
+			axil_register_handler(buf, partition_remove_handler);
+			snprintf(buf, sizeof(buf), "DELETE:/api/%s/:id/%s/:%s_id", spec->module, child, child);
+			axil_register_handler(buf, partition_remove_handler);
+		}
+
+		/* 5. Update by id: POST /api/:module/:id/:child/:{child}_id/:update_action */
+		if (g_n_axil_hyle_closures < 32) {
+			struct axil_hyle_partition_closure *c = &g_axil_hyle_closures[g_n_axil_hyle_closures++];
+			*c = g_axil_hyle_closures[g_n_axil_hyle_closures - 2];
+			snprintf(c->action, sizeof(c->action), "update");
+			char buf[256];
+			snprintf(buf, sizeof(buf), "POST:/api/%s/:id/%s/:%s_id/%s", spec->module, child, child, update_act);
+			axil_register_handler(buf, partition_update_handler);
+		}
+	}
+
+	return 0;
 }

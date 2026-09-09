@@ -425,39 +425,3 @@ XY_IMPL(int, detail_respond_page,
 	        state->wasm_module ? state->wasm_module : state->module,
 	        layout);
 }
-
-XY_IMPL(int, detail_respond_item_detail,
-	int, fd,
-	const detail_state_t *, state,
-	const item_ctx_t *, ctx,
-	const char *, module,
-	bud_node *, body)
-{
-	char path[256];
-	char page_title[512];
-	bud_node *layout;
-
-	if (!state || !ctx || !module || !body)
-		return respond_error(fd, 500, "Internal Server Error");
-
-	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
-	if (state->title[0])
-		snprintf(
-		        page_title, sizeof(page_title), "%s: %s", module,
-		        state->title);
-	else
-		snprintf(
-		        page_title, sizeof(page_title), "%s: %s", module,
-		        ctx->id);
-
-	layout = site_ui_layout(
-	        page_title, path, site_ui_module_icon(module),
-	        state->username[0] ? state->username : ctx->username,
-	        site_ui_item_menu(module, ctx->id, state->is_owner), body);
-
-	return site_ui_respond_with_state(
-	        fd, page_title, path, site_ui_module_icon(module),
-	        state->username[0] ? state->username : ctx->username,
-	        state->state_json,
-	        state->wasm_module ? state->wasm_module : module, layout);
-}

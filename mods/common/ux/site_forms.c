@@ -95,14 +95,6 @@ bud_node *site_ui_form_from_desc(
 	        pv, vstr_val);
 }
 
-/* ── Action / Standalone Picker Component ────────────────────────── */
-
-bud_node *site_ui_action_picker(
-        const site_ui_action_picker_spec_t *spec, const pick_view_t *pv)
-{
-	return hyle_bud_action_picker(spec, pv);
-}
-
 /* ── String-First Action & Replace Picker Components ─────────────── */
 
 static void derive_target_key_label(
@@ -146,7 +138,7 @@ bud_node *site_ui_picker(
 
 	derive_target_key_label(target, key, sizeof(key), label, sizeof(label));
 
-	site_ui_action_picker_spec_t spec = {
+	hyle_bud_action_picker_spec_t spec = {
 		.key = key,
 		.label = label,
 		.target = target,
@@ -158,7 +150,7 @@ bud_node *site_ui_picker(
 		.hint = "Click an item to select it.",
 		.auto_submit = auto_submit,
 	};
-	return site_ui_action_picker(&spec, pv);
+	return hyle_bud_action_picker(&spec, pv);
 }
 
 bud_node *site_ui_row_replace_picker(
@@ -191,7 +183,7 @@ bud_node *site_ui_row_replace_picker(
 	        (cur_title && cur_title[0]) ? cur_title
 	                                    : (cur_id ? cur_id : ""));
 
-	site_ui_action_picker_spec_t spec = {
+	hyle_bud_action_picker_spec_t spec = {
 		.key = key,
 		.label = label,
 		.target = target,
@@ -211,7 +203,7 @@ bud_node *site_ui_row_replace_picker(
 		.extra_post_inputs = extra,
 	};
 
-	return site_ui_action_picker(&spec, pv);
+	return hyle_bud_action_picker(&spec, pv);
 }
 
 /* ── Reusable Action Form & Item Row Primitives ──────────────────── */

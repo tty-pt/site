@@ -149,9 +149,9 @@ test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test
 
 test-e2e: test-data-dirs
 	@if [ -n "$(FILE)" ]; then \
-		./scripts/run-with-server.sh deno test --allow-all "tests/e2e/$(FILE)"; \
+		AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all "tests/e2e/$(FILE)"; \
 	else \
-		./scripts/run-with-server.sh deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/; \
+		AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} ./scripts/run-with-server.sh deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/; \
 	fi
 
 e2e-tests: test-data-dirs

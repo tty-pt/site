@@ -122,12 +122,12 @@ void wasm_init(const char *json, int len)
 	        json, jlen, "songs", g_sb_songs, sizeof(sb_song_row_data_t),
 	        &sb_app_state.n_songs, MAX_SB_SONGS, sb_song_row_fields);
 
-	wasm_picker_init(
-	        json, jlen, "song_id", "song.items", sb_app_state.pick_q,
+	site_ui_picker_state_from_json(
+	        json, jlen, "song_id", "song.items", 0, sb_app_state.pick_q,
 	        sb_app_state.pick_page, &g_sb_pick_buf, &g_sb_pick_state);
 
-	wasm_picker_init(
-	        json, jlen, "format", "song.types", sb_app_state.pick_fmt_q,
+	site_ui_picker_state_from_json(
+	        json, jlen, "format", "song.types", 0, sb_app_state.pick_fmt_q,
 	        sb_app_state.pick_fmt_page, &g_sb_fmt_pick_buf,
 	        &g_sb_fmt_pick_state);
 }
@@ -353,7 +353,7 @@ static bud_node *sb_render_song_picker(const pick_view_t *pv)
 	pref_vals[3] = sb_app_state.show_media;
 	pref_vals[4] = sb_app_state.zoom;
 
-	site_ui_action_picker_spec_t spec = {
+	hyle_bud_action_picker_spec_t spec = {
 		.key = "song_id",
 		.label = "Song:",
 		.target = "song.items",
@@ -369,7 +369,7 @@ static bud_node *sb_render_song_picker(const pick_view_t *pv)
 		.n_prefs = 5,
 	};
 
-	return site_ui_action_picker(&spec, pv);
+	return hyle_bud_action_picker(&spec, pv);
 }
 
 /* ── Per-row song picker with default value ─────────── */
@@ -395,7 +395,7 @@ static bud_node *sb_render_song_title_picker(
 	bud_node *extra = bud_fragment();
 	bud_append(extra, bud_hidden_input_int("n", row_idx));
 
-	site_ui_action_picker_spec_t spec = {
+	hyle_bud_action_picker_spec_t spec = {
 		.key = "song_id",
 		.label = "song",
 		.target = "song.items",
@@ -414,7 +414,7 @@ static bud_node *sb_render_song_title_picker(
 		.extra_post_inputs = extra,
 	};
 
-	return site_ui_action_picker(&spec, is_active ? pv : NULL);
+	return hyle_bud_action_picker(&spec, is_active ? pv : NULL);
 }
 
 static bud_node *sb_render_format_picker(
@@ -441,7 +441,7 @@ static bud_node *sb_render_format_picker(
 		bud_append(extra, bud_hidden_input("song_id", s->song_id));
 	}
 
-	site_ui_action_picker_spec_t spec = {
+	hyle_bud_action_picker_spec_t spec = {
 		.key = "format",
 		.label = "format",
 		.target = "song.types",
@@ -460,7 +460,7 @@ static bud_node *sb_render_format_picker(
 		.extra_post_inputs = extra,
 	};
 
-	bud_node *p = site_ui_action_picker(&spec, is_active ? pv : NULL);
+	bud_node *p = hyle_bud_action_picker(&spec, is_active ? pv : NULL);
 	if (p)
 		bud_add_class(p, "gig-format-picker-wrap text-xs");
 	return p;

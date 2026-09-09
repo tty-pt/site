@@ -745,6 +745,61 @@ XY_IMPL(int, check_item_access,
 	return 0;
 }
 
+struct index_asset_closure {
+	char module[64];
+	char filename[64];
+	char exts[64];
+};
+
+static struct index_asset_closure g_asset_closures[16];
+static size_t g_n_asset_closures = 0;
+
+static int index_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	const struct index_asset_closure *c = (const struct index_asset_closure *)user;
+	return respond_item_file(fd, ctx->item_path, c->filename, c->exts);
+}
+
+static int index_body_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	struct index_asset_closure *match = NULL;
+	for (size_t i = 0; i < g_n_asset_closures; i++) {
+		if (strcmp(g_asset_closures[i].module, module) == 0 && g_asset_closures[i].filename[0]) {
+			match = &g_asset_closures[i];
+			break;
+		}
+	}
+	if (!match)
+		return not_found(fd, "Asset not found");
+	return with_module_item_access(fd, body, module, 0, NULL, NULL, index_body_auth, match);
+}
+
+static int index_media_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	const struct index_asset_closure *c = (const struct index_asset_closure *)user;
+	char file[256] = { 0 };
+	axil_env_get(fd, file, sizeof(file), "PATTERN_PARAM_FILE");
+	return respond_item_file(fd, ctx->item_path, file, c->exts);
+}
+
+static int index_media_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	struct index_asset_closure *match = NULL;
+	for (size_t i = 0; i < g_n_asset_closures; i++) {
+		if (strcmp(g_asset_closures[i].module, module) == 0 && !g_asset_closures[i].filename[0]) {
+			match = &g_asset_closures[i];
+			break;
+		}
+	}
+	if (!match)
+		return not_found(fd, "Media not found");
+	return with_module_item_access(fd, body, module, 0, NULL, NULL, index_media_auth, match);
+}
+
 XY_IMPL(uint32_t, index_module_init, const index_module_def_t *, def)
 {
 	if (!def || !def->name)
@@ -763,6 +818,27 @@ XY_IMPL(uint32_t, index_module_init, const index_module_def_t *, def)
 	        NULL, NULL, NULL, NULL, NULL, NULL);
 
 	register_standard_item_handlers(def->name, &def->handlers);
+
+	if (def->body_file && def->body_file[0] && g_n_asset_closures < 16) {
+		struct index_asset_closure *c = &g_asset_closures[g_n_asset_closures++];
+		snprintf(c->module, sizeof(c->module), "%s", def->name);
+		snprintf(c->filename, sizeof(c->filename), "%s", def->body_file);
+		const char *dot = strrchr(def->body_file, '.');
+		snprintf(c->exts, sizeof(c->exts), "%s", dot ? dot + 1 : "html");
+		char route[256];
+		snprintf(route, sizeof(route), "GET:/%s/:id/%s", def->name, def->body_file);
+		axil_register_handler(route, index_body_handler);
+	}
+
+	if (def->media_exts && def->media_exts[0] && g_n_asset_closures < 16) {
+		struct index_asset_closure *c = &g_asset_closures[g_n_asset_closures++];
+		snprintf(c->module, sizeof(c->module), "%s", def->name);
+		c->filename[0] = '\0';
+		snprintf(c->exts, sizeof(c->exts), "%s", def->media_exts);
+		char route[256];
+		snprintf(route, sizeof(route), "GET:/%s/:id/:file", def->name);
+		axil_register_handler(route, index_media_handler);
+	}
 
 	return rid;
 }
