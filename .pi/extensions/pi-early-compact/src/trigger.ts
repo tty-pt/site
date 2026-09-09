@@ -14,6 +14,7 @@ export interface UltraCtx {
   signal?: AbortSignal; // present only while an agent run is active
   getContextUsage?(): ContextUsage | undefined;
   compact?(opts: {
+    customInstructions?: string;
     onComplete?: () => void;
     onError?: (error: Error) => void;
   }): void;
@@ -67,7 +68,40 @@ export interface UltraSendMessageOptions {
   triggerTurn?: boolean;
 }
 
+// Marker Pi's compactor hook uses to opt a compaction into pi-vcc's
+// deterministic (zero-LLM) compactor even when overrideDefaultCompaction is
+// false. Value mirrors pi-vcc's own PI_VCC_COMPACT_INSTRUCTION; kept local so
+// pi-early-compact stays standalone and never imports pi-vcc.
+export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
+
 const SOFT_COMPACT_ERRORS = ["Nothing to compact", "Already compacted"];
+
+// Resume-safe compaction outcomes. These never trim context, so the running task
+// can safely resume on the (unchanged) context instead of hard-pausing:
+// - pi-vcc opted out / cancelled (nothing trimmed)
+// - the built-in LLM summarizer failed to produce a complete summary (e.g. it hit
+//   its output token cap) — pi-core only writes a compaction entry for a COMPLETED
+//   summary, so on an incomplete one nothing is committed and the branch is intact.
+const RESUME_SAFE_ERRORS = [
+  "Compaction cancelled",
+  "Nothing to compact",
+  "Already compacted",
+  "pi-vcc",
+  "token cap",
+  "summary is incomplete",
+  "Summarization aborted",
+];
+
+export function isSoftCompactionError(error: Error): boolean {
+  return SOFT_COMPACT_ERRORS.some((message) => error.message.includes(message));
+}
+
+// A compaction that came back without committing a trimmed context: a pi-vcc opt
+// out / cancellation, or a failed (incomplete) summarization where nothing was
+// written. In every case the run can safely continue or be automatically resumed.
+export function isResumeSafeError(error: Error): boolean {
+  return RESUME_SAFE_ERRORS.some((message) => error.message.includes(message));
+}
 
 export interface TriggerDeps {
   pi: UltraPi;
@@ -176,6 +210,7 @@ function compactAndWait(
     }
     try {
       compact({
+        customInstructions: PI_VCC_COMPACT_INSTRUCTION,
         onComplete: () => {
           try {
             if (gen === currentGen()) setStatusSafe(ctx, undefined);
@@ -192,10 +227,6 @@ function compactAndWait(
       resolve(error instanceof Error ? error : new Error(String(error)));
     }
   });
-}
-
-export function isSoftCompactionError(error: Error): boolean {
-  return SOFT_COMPACT_ERRORS.some((message) => error.message.includes(message));
 }
 
 export function setStatusSafe(ctx: UltraCtx, text: string | undefined, kind: "info" | "warning" | "error" = "info"): void {

@@ -61,6 +61,7 @@ export function makeCtx(opts: FakeCtxOpts = {}): UltraCtx & {
   notifyCalls: Array<{ msg: string; type?: string }>;
   statusCalls: Array<{ key: string; text: string | undefined }>;
   compactCalls: number;
+  compactInstructions: Array<string | undefined>;
   usage: ContextUsage;
   signal: AbortSignal | undefined;
   pendingCompact: { onComplete?: () => void; onError?: (e: Error) => void } | undefined;
@@ -78,6 +79,7 @@ export function makeCtx(opts: FakeCtxOpts = {}): UltraCtx & {
     notifyCalls,
     statusCalls,
     compactCalls: 0,
+    compactInstructions: [] as Array<string | undefined>,
     usage,
     signal: "signal" in opts ? opts.signal : new AbortController().signal,
     pendingCompact: undefined as { onComplete?: () => void; onError?: (e: Error) => void } | undefined,
@@ -96,8 +98,9 @@ export function makeCtx(opts: FakeCtxOpts = {}): UltraCtx & {
     },
     compact: opts.compact === false
       ? undefined
-      : (cd: { onComplete?: () => void; onError?: (e: Error) => void }) => {
+      : (cd: { customInstructions?: string; onComplete?: () => void; onError?: (e: Error) => void }) => {
           fake.compactCalls++;
+          fake.compactInstructions.push(cd.customInstructions);
           if (opts.pending) {
             fake.pendingCompact = cd;
             return;
@@ -116,6 +119,7 @@ export function makeCtx(opts: FakeCtxOpts = {}): UltraCtx & {
     notifyCalls: Array<{ msg: string; type?: string }>;
     statusCalls: Array<{ key: string; text: string | undefined }>;
     compactCalls: number;
+    compactInstructions: Array<string | undefined>;
     usage: ContextUsage;
     signal: AbortSignal | undefined;
     pendingCompact: { onComplete?: () => void; onError?: (e: Error) => void } | undefined;

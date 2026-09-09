@@ -1,8 +1,9 @@
 import { resolveThreshold, resolveWarningThreshold } from "./policy.ts";
 import { loadConfig, readSettingsHints, type EarlyCompactConfig } from "./config.ts";
 import {
-  isSoftCompactionError,
+  isResumeSafeError,
   notifySafe,
+  PI_VCC_COMPACT_INSTRUCTION,
   setStatusSafe,
   type TriggerDeps,
   type UltraCtx,
@@ -75,7 +76,7 @@ export function installMidRunGuard(deps: TriggerDeps): void {
     }
     void inFlight.then((error) => {
       if (gen !== sessionGeneration) return;
-      if (error && !isSoftCompactionError(error)) {
+      if (error && !isResumeSafeError(error)) {
         notifySafe(ctx, `Early compact failed mid-run: ${error.message}. Run paused at the turn boundary — resubmit when ready.`, "error");
       }
     });
@@ -109,6 +110,7 @@ function runCompaction(
     }
     try {
       compact({
+        customInstructions: PI_VCC_COMPACT_INSTRUCTION,
         onComplete: () => {
           try {
             if (gen === currentGen()) setStatusSafe(ctx, undefined);
@@ -119,8 +121,13 @@ function runCompaction(
           resolve(null);
         },
         onError: (error) => {
-          const soft = isSoftCompactionError(error);
-          if (soft) queueResume(pi, cfg, gen, currentGen);
+          // Resume-safe errors never cut context: a pi-vcc opt out / cancellation,
+          // or an incomplete LLM summary (pi-core only writes a compaction entry
+          // for a COMPLETED summary, so an incomplete one leaves the branch intact).
+          // In all these cases the abort already happened, so auto-resume the task
+          // on the unchanged context. Only genuinely-unknown hard errors stay
+          // paused for the user to resubmit.
+          if (isResumeSafeError(error)) queueResume(pi, cfg, gen, currentGen);
           resolve(error);
         },
       });

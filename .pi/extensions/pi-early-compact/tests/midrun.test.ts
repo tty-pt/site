@@ -1,5 +1,6 @@
 import { check, makeCtx, makeFakePi, makeConfig, settle } from "./fakes.ts";
 import { installMidRunGuard } from "../src/midrun.ts";
+import { PI_VCC_COMPACT_INSTRUCTION } from "../src/trigger.ts";
 import type { EarlyCompactConfig } from "../src/config.ts";
 
 function installWith(config: EarlyCompactConfig) {
@@ -21,6 +22,7 @@ Deno.test("midrun compacts once on crossing and queues a continuation", async ()
   const ctx = makeCtx({ tokens: OVER, contextWindow: WINDOW });
   await pi.emit("context", contextEvent(), ctx);
   check(ctx.compactCalls === 1, `compact once, got ${ctx.compactCalls}`);
+  check(ctx.compactInstructions[0] === PI_VCC_COMPACT_INSTRUCTION, "compaction routed to pi-vcc via customInstructions");
   check(pi.sentMessages.length === 1, "continuation queued");
   const sent = pi.sentMessages[0];
   check(sent.message.customType === "pi-early-compact", "customType set");
@@ -137,6 +139,51 @@ Deno.test("midrun pauses on hard errors without continuation", async () => {
   check(ctx.compactCalls === 1, "compact attempted");
   check(pi.sentMessages.length === 0, "hard error -> no continuation");
   check(ctx.notifyCalls.some((n) => n.msg.includes("failed mid-run")), "failure notified");
+});
+
+Deno.test("midrun routes through pi-vcc and treats its cancellation as soft (resumes, no failure notify)", async () => {
+  const pi = installWith(makeConfig());
+  const ctx = makeCtx({
+    tokens: OVER,
+    contextWindow: WINDOW,
+    onCompactError: () => new Error("Compaction cancelled"),
+  });
+  await pi.emit("context", contextEvent(), ctx);
+  await settle();
+  check(ctx.compactCalls === 1, "compact attempted");
+  check(ctx.compactInstructions[0] === PI_VCC_COMPACT_INSTRUCTION, "routed to pi-vcc");
+  check(pi.sentMessages.length === 1, "pi-vcc cancellation resumes the run");
+  check(!ctx.notifyCalls.some((n) => n.msg.includes("failed mid-run")), "no failure notify for cancellation");
+});
+
+Deno.test("midrun auto-resumes on an incomplete summarization (token cap) instead of pausing", async () => {
+  const pi = installWith(makeConfig());
+  const ctx = makeCtx({
+    tokens: OVER,
+    contextWindow: WINDOW,
+    onCompactError: () =>
+      new Error("Compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete"),
+  });
+  await pi.emit("context", contextEvent(), ctx);
+  await settle();
+  check(ctx.compactCalls === 1, "compact attempted");
+  check(ctx.compactInstructions[0] === PI_VCC_COMPACT_INSTRUCTION, "routed to pi-vcc (inert when absent)");
+  check(pi.sentMessages.length === 1, "incomplete-summary failure auto-resumes the run");
+  check(!ctx.notifyCalls.some((n) => n.msg.includes("failed mid-run")), "no failure notify for incomplete summary");
+});
+
+Deno.test("midrun auto-resumes on a summarization-aborted failure", async () => {
+  const pi = installWith(makeConfig());
+  const ctx = makeCtx({
+    tokens: OVER,
+    contextWindow: WINDOW,
+    onCompactError: () => new Error("Summarization aborted"),
+  });
+  await pi.emit("context", contextEvent(), ctx);
+  await settle();
+  check(ctx.compactCalls === 1, "compact attempted");
+  check(pi.sentMessages.length === 1, "summarization abort auto-resumes the run");
+  check(!ctx.notifyCalls.some((n) => n.msg.includes("failed mid-run")), "no failure notify for summarization abort");
 });
 
 Deno.test("session generation guards stale continuation", async () => {
