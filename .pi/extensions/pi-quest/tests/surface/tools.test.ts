@@ -22,6 +22,7 @@ import { createChildQuest } from "../../src/surface/tools/subquest.ts";
 import { recoverQuest, recoverTool } from "../../src/surface/tools/recover.ts";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../src/durability/snapshots.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
+import { askHumanTool } from "../../src/surface/tools/ask-human.ts";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-tools-"));
@@ -406,4 +407,117 @@ Deno.test("plan saves report the draft profile alongside the citation check", as
     stopBlink();
     replaceState(IDLE_STATE);
   }
+});
+
+Deno.test("askHumanTool round-trip with UI shows prompt and returns answer", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp(), [], { input: async () => "green" });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("Human answered"), "user answer reported");
+  check(text.includes("green"), "answer in text");
+  check((out.details as { answer: string; source: string }).answer === "green", "answer in details");
+  check((out.details as { answer: string; source: string }).source === "user", "source is user");
+  check(getState().humanAnswers.length === 1, "answer recorded");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("askHumanTool round-trip without UI defaults and notifies", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("No human answer"), "default reported");
+  check(text.includes("blue"), "default in text");
+  check((out.details as { answer: string; source: string }).source === "default", "source is default");
+  check(ctx.notifications.calls.length >= 1, "notification sent");
+  check(ctx.notifications.calls[0].message.includes("no UI"), "no-UI notification");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("askHumanTool delegates to native tool when available", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  pi.toolNames = ["ask_questions"];
+  pi.executeToolHandler = async (name, _params, _signal) => {
+    if (name === "ask_questions") {
+      return { content: [{ type: "text", text: "green" }] };
+    }
+    return { content: [{ type: "text", text: "unknown" }] };
+  };
+  const ctx = fakeCtx(tmp());
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("Human answered"), "native answer reported");
+  check(text.includes("green"), "answer from native tool");
+  check((out.details as { answer: string; source: string }).answer === "green", "answer in details");
+  check((out.details as { source: string }).source === "user", "source is user");
+  check(pi.executeToolCalls.length === 1, "native tool called");
+  check(pi.executeToolCalls[0].name === "ask_questions", "correct tool name");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("askHumanTool falls back to ctx.ui.input when executeTool missing", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  pi.toolNames = ["ask_questions"];
+  delete (pi as { executeTool?: typeof pi.executeTool }).executeTool;
+  const ctx = fakeCtx(tmp(), [], { input: async () => "red" });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("Human answered"), "fallback answer reported");
+  check(text.includes("red"), "answer from ui.input");
+  check(pi.executeToolCalls.length === 0, "native tool not called");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("askHumanTool falls back when configured tool not registered", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  pi.toolNames = ["other_tool"];
+  const ctx = fakeCtx(tmp(), [], { input: async () => "red" });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("Human answered"), "fallback answer reported");
+  check(text.includes("red"), "answer from ui.input");
+  check(pi.executeToolCalls.length === 0, "native tool not called");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("askHumanTool aborts native tool on timeout", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  pi.toolNames = ["ask_questions"];
+  let abortCalled = false;
+  pi.executeToolHandler = async (name, _params, signal) => {
+    if (name === "ask_questions" && signal) {
+      await new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(undefined));
+        setTimeout(() => resolve(undefined), 10000);
+      });
+      if (signal.aborted) abortCalled = true;
+      throw new Error("aborted");
+    }
+    return { content: [{ type: "text", text: "unknown" }] };
+  };
+  const ctx = fakeCtx(tmp());
+  const tool = askHumanTool(pi);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue", timeoutMs: 50 }, undefined, undefined, ctx);
+  const text = String(out.content[0].text ?? "");
+  check(text.includes("No human answer"), "timeout default reported");
+  check(text.includes("blue"), "default in text");
+  check((out.details as { source: string }).source === "default", "source is default");
+  check(abortCalled, "abort signal fired");
+  check(ctx.notifications.calls.some((n) => n.message.includes("timed out")), "timeout notification sent");
+  replaceState(IDLE_STATE);
 });

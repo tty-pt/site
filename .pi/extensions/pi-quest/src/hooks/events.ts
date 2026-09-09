@@ -175,6 +175,13 @@ export interface Pi {
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
   ): void;
   getAllTools(): PiToolInfo[];
+  executeTool?(
+    name: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+    ctx?: PiCtx,
+  ): Promise<AgentToolResult>;
   exec(command: string, args: string[], options?: { cwd?: string }): Promise<PiExecResult>;
   events: PiEventBus;
 }

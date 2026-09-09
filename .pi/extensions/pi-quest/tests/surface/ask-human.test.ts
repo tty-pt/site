@@ -16,16 +16,19 @@ Deno.test("quest_ask_human reports the live asking tool as available", async () 
   const cwd = await settingsCwd({ bindings: { asking: { tool: "ask_user_question" } } });
   const pi = fakePi();
   pi.toolNames = ["ask_user_question"];
-  const ctx = fakeCtx(cwd, [], { input: async () => "green" });
-  const withUI = { ...ctx, hasUI: true };
-  const result = await askHumanTool(pi).execute("t1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
+  pi.executeToolHandler = async (name, _params, _signal) => {
+    if (name === "ask_user_question") return { content: [{ type: "text", text: "green" }] };
+    return { content: [{ type: "text", text: "unknown" }] };
+  };
+  const ctx = fakeCtx(cwd);
+  const result = await askHumanTool(pi).execute("t1", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
   const text = result.content.map((c) => c.text ?? "").join("\n");
   check(text.includes('Human answered: "green"'), "user answer reported");
   const details = result.details as Record<string, unknown>;
   check(details["askingTool"] === "ask_user_question", "binding reported");
   check(details["askingAvailable"] === true, "live tool available");
   check(details["answer"] === "green" && details["source"] === "user", "answer details");
-  check(details["uiPresent"] === true, "ui presence reported true with a UI");
+  check(details["uiPresent"] === false, "ui presence reported false without a UI");
   replaceState(IDLE_STATE);
 });
 
@@ -45,21 +48,26 @@ Deno.test("quest_ask_human reports absence and no UI when headless", async () =>
 
 Deno.test("quest_ask_human honors the settings timeout without an explicit one", async () => {
   replaceState(createQuest("work", "abc123"));
-  const cwd = await settingsCwd({ askTimeoutMs: 40, bindings: { asking: { tool: "ask_user_question" } } });
+  const cwd = await settingsCwd({ askTimeoutMs: 50, bindings: { asking: { tool: "ask_user_question" } } });
   const pi = fakePi();
   pi.toolNames = ["ask_user_question"];
-  let captured = -1;
-  const ctx = fakeCtx(cwd, [], {
-    input: (_title, _placeholder, opts) => {
-      captured = opts?.timeout ?? -1;
-      return new Promise<never>(() => {});
-    },
-  });
-  const withUI = { ...ctx, hasUI: true };
-  const result = await askHumanTool(pi).execute("t2", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
+  let abortCalled = false;
+  pi.executeToolHandler = async (name, _params, signal) => {
+    if (name === "ask_user_question" && signal) {
+      await new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(undefined));
+        setTimeout(() => resolve(undefined), 10000);
+      });
+      if (signal.aborted) abortCalled = true;
+      throw new Error("aborted");
+    }
+    return { content: [{ type: "text", text: "unknown" }] };
+  };
+  const ctx = fakeCtx(cwd);
+  const result = await askHumanTool(pi).execute("t2", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
   const text = result.content.map((c) => c.text ?? "").join("\n");
   check(text.includes('proceeding with default: "blue"'), "settings timeout lapses to default");
-  check(captured === 40, "settings timeout forwarded");
+  check(abortCalled, "abort signal fired");
   check(getState().humanAnswers.length === 1, "default recorded");
   replaceState(IDLE_STATE);
 });

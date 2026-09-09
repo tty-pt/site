@@ -151,3 +151,41 @@ Deno.test("late answers apply as refinements with guards", async () => {
   check(!noteLateAnswer(pi, "x".repeat(600)), "essays ignored");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("ask notifies user when no UI", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  await askWithDefault(pi, ctx, { question: "Which color?", defaultAnswer: "blue" });
+  check(ctx.notifications.calls.length === 1, "one notify call");
+  check(ctx.notifications.calls[0].type === "warning", "warning type");
+  check(ctx.notifications.calls[0].message.includes("no UI"), "no-UI message");
+  check(ctx.notifications.calls[0].message.includes("Which color?"), "question text in notify");
+  check(ctx.notifications.calls[0].message.includes("blue"), "default in notify");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("ask notifies user on zero timeout", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp(), [], { input: async () => "green" });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
+  await askWithDefault(pi, withUI, { question: "Q?", defaultAnswer: "blue", timeoutMs: 0 });
+  check(withUI.notifications.calls.length === 1, "one notify call");
+  check(withUI.notifications.calls[0].type === "warning", "warning type");
+  check(withUI.notifications.calls[0].message.includes("zero wait"), "zero-wait message");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("ask notifies user on timeout fire", async () => {
+  replaceState(createQuest("work", "abc123"));
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp(), [], { input: () => new Promise<never>(() => {}) });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
+  await askWithDefault(pi, withUI, { question: "Which style?", defaultAnswer: "minimal", timeoutMs: 20 });
+  check(withUI.notifications.calls.length === 1, "one notify call");
+  check(withUI.notifications.calls[0].type === "warning", "warning type");
+  check(withUI.notifications.calls[0].message.includes("timed out"), "timeout message");
+  check(withUI.notifications.calls[0].message.includes("minimal"), "default in notify");
+  replaceState(IDLE_STATE);
+});

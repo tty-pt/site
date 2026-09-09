@@ -1,4 +1,4 @@
-import type { Pi, PiCtx, PiToolSpec, TranscriptEntry } from "../src/hooks/events.ts";
+import type { Pi, PiCtx, PiToolSpec, TranscriptEntry, AgentToolResult } from "../src/hooks/events.ts";
 
 export interface SentMessage {
   message: { customType: string; content: unknown };
@@ -25,6 +25,8 @@ export interface FakePi extends Pi {
   execCode: number;
   toolNames: string[];
   subscriptions: string[];
+  executeToolCalls: Array<{ name: string; params: Record<string, unknown>; signal?: AbortSignal }>;
+  executeToolHandler: ((name: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<AgentToolResult>) | null;
 }
 
 export function fakePi(): FakePi {
@@ -45,6 +47,8 @@ export function fakePi(): FakePi {
     subscriptions,
     execCode: 0,
     toolNames: [] as string[],
+    executeToolCalls: [] as Array<{ name: string; params: Record<string, unknown>; signal?: AbortSignal }>,
+    executeToolHandler: null as ((name: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<AgentToolResult>) | null,
     on(event: string): void {
       subscriptions.push(event);
     },
@@ -70,6 +74,13 @@ export function fakePi(): FakePi {
       execCalls.push({ command, args });
       return Promise.resolve({ stdout: "", stderr: "", code: (fake as FakePi).execCode });
     },
+    executeTool(name: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
+      (fake as FakePi).executeToolCalls.push({ name, params, signal });
+      if ((fake as FakePi).executeToolHandler) {
+        return (fake as FakePi).executeToolHandler!(name, params, signal);
+      }
+      return Promise.resolve({ content: [{ type: "text", text: "mock answer" }] });
+    },
     events: {
       on(): () => void {
         return () => {};
@@ -80,17 +91,23 @@ export function fakePi(): FakePi {
   return fake as unknown as FakePi;
 }
 
-export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Partial<PiCtx["ui"]>): PiCtx {
+export interface FakeNotifications {
+  calls: Array<{ message: string; type?: string }>;
+}
+
+export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Partial<PiCtx["ui"]>): PiCtx & { notifications: FakeNotifications } {
+  const notifications: FakeNotifications = { calls: [] };
   return {
     cwd,
     hasUI: false,
     mode: "test",
+    notifications,
     sessionManager: { getEntries: () => entries },
     ui: {
       select: async () => undefined,
       input: async () => undefined,
       confirm: async () => false,
-      notify: () => {},
+      notify: (message: string, type?: string) => { notifications.calls.push({ message, type }); },
       setStatus: () => {},
       setWidget: () => {},
       ...ui,
