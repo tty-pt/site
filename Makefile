@@ -109,6 +109,8 @@ standalone-unit-tests:
 	@sh tests/unit/run-axil-auth-groups.sh
 	@sh tests/unit/run-auth-group-permissions.sh
 	@sh tests/unit/run-site-media.sh
+	@sh tests/unit/run-site-ui-helpers.sh
+	@sh tests/unit/run-index-helpers.sh
 	@sh tests/unit/run-ordered-sync.sh
 	@sh tests/unit/run-source-dataset-options.sh
 	@sh tests/unit/run-viewer-prefs.sh

@@ -162,6 +162,154 @@ XY_IMPL(int, index_add_item,
 	return 0;
 }
 
+#ifndef __wasm__
+XY_IMPL(int, list_respond_page,
+	int, fd,
+	list_state_t *, state,
+	const char *, module,
+	const char *, username)
+{
+	bud_node *layout;
+	char *json = NULL;
+	int rc = -1;
+
+	if (!state || !module) {
+		if (fd >= 0)
+			respond_error(fd, 500, "Internal Server Error");
+		return -1;
+	}
+
+	size_t json_budget =
+		        8192 +
+		        (size_t)state->nids * (size_t)(state->ncols * 512 + 128) +
+		        (size_t)state->nopts * 256;
+	json = malloc(json_budget);
+	if (!json)
+		goto render;
+
+	if (list_state_to_json(state, json, json_budget) != 0)
+		goto render;
+
+render:
+	layout = list_render(state);
+	if (!layout) {
+		axil_respond(fd, 500, "Internal Server Error");
+		goto cleanup;
+	}
+
+	char title[128];
+	snprintf(title, sizeof(title), "%ss", state->display_name);
+	if (title[0] >= 'a')
+		title[0] -= 32;
+
+	char path[256];
+	snprintf(path, sizeof(path), "/%s/", module);
+
+	rc = site_ui_respond_with_state(
+		        fd, ui_t(title), path, site_ui_module_icon(module),
+		        username, json, "list", layout);
+
+cleanup:
+	free(json);
+	list_fill_free(state);
+	return rc;
+}
+
+XY_IMPL(int, detail_respond_item_detail,
+	int, fd,
+	const detail_state_t *, state,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	bud_node *, body)
+{
+	char path[256];
+	char page_title[512];
+	bud_node *layout;
+
+	if (!state || !ctx || !module || !body)
+		return respond_error(fd, 500, "Internal Server Error");
+
+	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
+	if (state->title[0])
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        state->title);
+	else
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        ctx->id);
+
+	layout = site_ui_layout(
+	        page_title, path, site_ui_module_icon(module),
+	        state->username[0] ? state->username : ctx->username,
+	        site_ui_item_menu(module, ctx->id, state->is_owner), body);
+
+	return site_ui_respond_with_state(
+	        fd, page_title, path, site_ui_module_icon(module),
+	        state->username[0] ? state->username : ctx->username,
+	        state->state_json,
+	        state->wasm_module ? state->wasm_module : module, layout);
+}
+
+XY_IMPL(int, detail_state_build,
+	detail_state_t *, state,
+	const detail_state_build_spec_t *, spec,
+	const char *, title,
+	const char *, path)
+{
+	if (!state || !spec)
+		return -1;
+
+	memset(state, 0, sizeof(*state));
+	snprintf(state->module, sizeof(state->module), "%s", spec->module ? spec->module : "");
+	snprintf(state->id, sizeof(state->id), "%s", spec->id ? spec->id : "");
+	snprintf(
+	        state->username, sizeof(state->username), "%s",
+	        spec->username ? spec->username : "");
+	snprintf(state->path, sizeof(state->path), "%s", path ? path : "");
+	snprintf(state->title, sizeof(state->title), "%s", title ? title : "");
+
+	if (spec->flags & DETAIL_BUILD_LOCALE) {
+		const char *lang = i18n_resolve_locale(spec->fd);
+		site_ui_set_locale(lang);
+		snprintf(state->lang, sizeof(state->lang), "%s", lang);
+	}
+
+	if (spec->flags & DETAIL_BUILD_OWNERSHIP && spec->item_path) {
+		state->is_owner = (spec->username && spec->username[0])
+		               ? item_owner_check(spec->item_path, spec->username)
+		               : 0;
+	}
+
+	if (spec->flags & DETAIL_BUILD_CSRF)
+		state->csrf_token = csrf_setup(spec->fd);
+
+	state->wasm_module = spec->wasm_module;
+	return 0;
+}
+
+XY_IMPL(int, detail_respond_page,
+	int, fd,
+	const detail_state_t *, state,
+	bud_node *, layout)
+{
+	if (!state || !layout) {
+		if (fd >= 0)
+			respond_error(fd, 500, "Internal Server Error");
+		return -1;
+	}
+
+	return site_ui_respond_with_state(
+	        fd, state->title, state->path,
+	        site_ui_module_icon(state->module),
+	        state->username[0] ? state->username : NULL,
+	        state->state_json,
+	        state->wasm_module ? state->wasm_module : state->module,
+	        layout);
+}
+#endif
+
+
 static int idx_render_list_bud(
         int fd, const char *module, const char *query_str, const char *username)
 {
@@ -191,47 +339,7 @@ static int idx_render_list_bud(
 	list_fill_state(&state, dataset_id, query_str, 1);
 
 	/* One render path: serialize state -> JSON, render, respond. */
-	{
-		size_t json_budget =
-		        8192 +
-		        (size_t)state.nids * (size_t)(state.ncols * 512 + 128) +
-		        (size_t)state.nopts * 256;
-		char *json = malloc(json_budget);
-
-		if (json) {
-			if (list_state_to_json(&state, json, json_budget) == 0)
-			{
-				size_t head_len = strlen(json) + 128;
-				extra_head = malloc(head_len);
-				if (extra_head)
-					snprintf(
-					        extra_head, head_len,
-					        "<script "
-					        "type=\"application/json\" "
-					        "id=\"bud-state\">%s</script>",
-					        json);
-			}
-			free(json);
-		}
-	}
-
-	layout = list_render(&state);
-	rc = 0;
-	if (layout) {
-		snprintf(title, sizeof(title), "%ss", state.display_name);
-		if (title[0] >= 'a')
-			title[0] -= 32;
-		snprintf(path, sizeof(path), "/%s/", module);
-		respond_html(
-		        fd, site_ui_page(
-		                    ui_t(title), path, site_ui_module_icon(module),
-		                    username, extra_head, "list", layout));
-	} else {
-		axil_respond(fd, 500, "Internal Server Error");
-		rc = -1;
-	}
-	free(extra_head);
-	list_fill_free(&state);
+	rc = list_respond_page(fd, &state, module, username);
 	return rc;
 }
 

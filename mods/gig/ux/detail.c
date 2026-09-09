@@ -111,11 +111,8 @@ void wasm_init(const char *json, int len)
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
-
-	bud_state_apply_len(&sb_app_state, gig_app_fields, json, jlen);
-
+	wasm_state_init(json, len, gig_app_fields, &sb_app_state);
 	site_ui_set_locale(sb_app_state.lang);
-	hyle_bud_set_translator(ui_t);
 
 	if (sb_app_state.zoom < VIEWER_ZOOM_MIN ||
 	    sb_app_state.zoom > VIEWER_ZOOM_MAX)
@@ -125,12 +122,12 @@ void wasm_init(const char *json, int len)
 	        json, jlen, "songs", g_sb_songs, sizeof(sb_song_row_data_t),
 	        &sb_app_state.n_songs, MAX_SB_SONGS, sb_song_row_fields);
 
-	site_ui_picker_state_from_json(
-	        json, jlen, "song_id", "song.items", 0, sb_app_state.pick_q,
+	wasm_picker_init(
+	        json, jlen, "song_id", "song.items", sb_app_state.pick_q,
 	        sb_app_state.pick_page, &g_sb_pick_buf, &g_sb_pick_state);
 
-	site_ui_picker_state_from_json(
-	        json, jlen, "format", "song.types", 0, sb_app_state.pick_fmt_q,
+	wasm_picker_init(
+	        json, jlen, "format", "song.types", sb_app_state.pick_fmt_q,
 	        sb_app_state.pick_fmt_page, &g_sb_fmt_pick_buf,
 	        &g_sb_fmt_pick_state);
 }

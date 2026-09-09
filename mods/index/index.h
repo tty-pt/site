@@ -102,5 +102,60 @@ XY_DECL(int, list_fill_free, list_state_t *, state);
 XY_DECL(uint32_t, index_module_init, const index_module_def_t *, def);
 #endif /* INDEX_IMPL */
 
-#endif
+/* Shared detail page state */
+typedef struct {
+	char module[64];
+	char id[64];
+	char username[64];
+	char path[256];
+	char title[256];
+	char lang[32];
+	int is_owner;
+	const char *csrf_token;
+	const char *wasm_module;
+	char *state_json;
+} detail_state_t;
+
+typedef struct {
+	const char *module;
+	const char *id;
+	const char *username;
+	const char *item_path;
+	int fd;
+	unsigned flags;
+	const char *wasm_module;
+} detail_state_build_spec_t;
+
+#define DETAIL_BUILD_OWNERSHIP 1
+#define DETAIL_BUILD_CSRF      2
+#define DETAIL_BUILD_LOCALE    4
+
+#ifndef INDEX_IMPL
+XY_DECL(int, detail_state_build,
+	detail_state_t *, state,
+	const detail_state_build_spec_t *, spec,
+	const char *, title,
+	const char *, path);
+
+XY_DECL(int, detail_respond_page,
+	int, fd,
+	const detail_state_t *, state,
+	bud_node *, layout);
+
+XY_DECL(int, detail_respond_item_detail,
+	int, fd,
+	const detail_state_t *, state,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	bud_node *, body);
+
+XY_DECL(int, list_respond_page,
+	int, fd,
+	list_state_t *, state,
+	const char *, module,
+	const char *, username);
+#endif /* INDEX_IMPL */
+
+#endif /* INDEX_MOD_H */
+
 

@@ -245,8 +245,6 @@ int site_ui_respond_with_state(
 	else
 		axil_respond(fd, 500, "Internal Server Error");
 	free(head);
-	/* respond_html takes ownership of page via axil_respond copy; free */
-	free(page);
 	return rc;
 }
 

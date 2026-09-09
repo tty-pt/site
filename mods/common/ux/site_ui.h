@@ -221,4 +221,11 @@ int site_ui_respond_with_state(
         const char *user, const char *state_json, const char *module,
         bud_node *body);
 
+/* ── WASM detail init helpers ───────────────────────────────────── */
+void wasm_state_init(const char *json, int len, const bud_field_desc_t *fields, void *state);
+void wasm_picker_init(
+        const char *json, size_t jlen, const char *key, const char *target,
+        const char *q, int page, site_ui_picker_buffer_t *buf,
+        pick_view_t *pv_out);
+
 #endif

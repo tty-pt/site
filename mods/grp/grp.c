@@ -562,49 +562,14 @@ static void ch_load_repertoire(
 
 /* ── HTTP handlers ──────────────────────────────────────── */
 
-/* ── Detail handler ──────────────────────────────────────── */
-
-static int
-grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
+static bud_node *grp_detail_build_body(
+        int fd, const item_ctx_t *ctx, unsigned cf_hd, const char *title,
+        const char *owner, int is_owner, const char *csrf_token)
 {
-	(void)body;
-	(void)user_data;
-	unsigned cf_hd, sf_hd;
-	const char *title, *owner;
-	char owner_buf[64] = { 0 };
-	char page_title[256];
-	char path[256];
-	bud_node *layout;
-	int is_owner = 0;
-	const char *csrf_token = csrf_setup(fd);
-
-	cf_hd = source_get_fields_hd("grp.items");
-	if (!cf_hd)
-		return server_error(fd, "No fields_hd");
-
-	title = qmap_get_field_str(cf_hd, ctx->id, "title");
-	if (!title)
-		return respond_error(fd, 404, "Group not found");
-
-	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
-	owner = owner_buf;
-	is_owner = item_owner_check(ctx->item_path, ctx->username);
-
-	/* Self-heal: recompute the repertoire from the gigs before
-	 * rendering. A no-op when in sync (compare-before-write); heals
-	 * drift from deleted gigs or missed runtime hooks. */
-	rep_rebuild(ctx->id);
-
-	snprintf(page_title, sizeof(page_title), "group: %s", title);
-
-	/* ── Build body content ────────────────────────────── */
-
 	bud_node *body_frag = bud_fragment();
-	{
-		bud_node *header = ch_render_detail_header(title, owner);
-		if (header)
-			bud_append(body_frag, header);
-	}
+	bud_node *header = ch_render_detail_header(title, owner);
+	if (header)
+		bud_append(body_frag, header);
 
 	ch_sb_entry_t gigs[CH_MAX_GIGS];
 	int n_gigs;
@@ -616,13 +581,11 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		source_def_t *sb_def = source_find("gig.items");
 		if (sb_def && sb_def->fields_hd) {
 			ch_load_gigs(sb_def, grp_pos, gigs, &n_gigs);
-			bud_append(
-			        body_frag,
-			        ch_render_gigs_section(gigs, n_gigs));
+			bud_append(body_frag, ch_render_gigs_section(gigs, n_gigs));
 		}
 	}
 
-	sf_hd = source_get_fields_hd("song.items");
+	unsigned sf_hd = source_get_fields_hd("song.items");
 	if (sf_hd) {
 		ch_load_repertoire(ctx->id, sf_hd, repertoire, &n_repertoire);
 		bud_append(
@@ -631,20 +594,15 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		                           csrf_token));
 	}
 
-	{
-		char members_buf[1024] = { 0 };
-		auth_group_get_members(
-		        ctx->id, members_buf, sizeof(members_buf));
-		bud_append(
-		        body_frag,
-		        ch_render_members_section(
-		                ctx->id, members_buf, is_owner, owner,
-		                csrf_token));
-	}
+	char members_buf[1024] = { 0 };
+	auth_group_get_members(ctx->id, members_buf, sizeof(members_buf));
+	bud_append(
+	        body_frag, ch_render_members_section(
+	                           ctx->id, members_buf, is_owner, owner,
+	                           csrf_token));
 
 	if (is_owner) {
 		char qs[1024] = { 0 };
-
 		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 		memset(&g_ch_pick_state, 0, sizeof(g_ch_pick_state));
 		snprintf(
@@ -655,15 +613,51 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		        sizeof(g_ch_pick_state.username), "%s",
 		        ctx->username ? ctx->username : "");
 		list_fill_state(&g_ch_pick_state, "song.items", qs, 0);
-
-		bud_append(
-		        body_frag,
-		        ch_render_add_song_section(ctx->id, csrf_token));
+		bud_append(body_frag, ch_render_add_song_section(ctx->id, csrf_token));
 	}
 
-	/* ── Assemble page ──────────────────────────────────── */
+	return body_frag;
+}
 
-	return site_ui_respond_item_detail(fd, ctx, "grp", title, body_frag);
+static int
+grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
+{
+	(void)body;
+	(void)user_data;
+	detail_state_t state;
+	detail_state_build_spec_t spec = {
+	        .module = "grp",
+	        .id = ctx->id,
+	        .username = ctx->username,
+	        .item_path = ctx->item_path,
+	        .fd = fd,
+	        .flags = DETAIL_BUILD_OWNERSHIP | DETAIL_BUILD_CSRF,
+	        .wasm_module = "grp"};
+	detail_state_build(&state, &spec, NULL, NULL);
+
+	unsigned cf_hd = source_get_fields_hd("grp.items");
+	if (!cf_hd)
+		return server_error(fd, "No fields_hd");
+
+	const char *title = qmap_get_field_str(cf_hd, ctx->id, "title");
+	if (!title)
+		return respond_error(fd, 404, "Group not found");
+
+	char owner_buf[64] = { 0 };
+	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
+
+	/* Self-heal: recompute the repertoire from the gigs before
+	 * rendering. A no-op when in sync (compare-before-write); heals
+	 * drift from deleted gigs or missed runtime hooks. */
+	rep_rebuild(ctx->id);
+
+	snprintf(state.title, sizeof(state.title), "group: %s", title);
+
+	bud_node *body_frag = grp_detail_build_body(
+	        fd, ctx, cf_hd, title, owner_buf, state.is_owner,
+	        state.csrf_token);
+
+	return detail_respond_item_detail(fd, &state, ctx, "grp", body_frag);
 }
 
 static int handle_grp_member_action_authorized(

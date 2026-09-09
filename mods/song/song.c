@@ -347,51 +347,23 @@ XY_IMPL(int, source_after_update,
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
 
-static int
-song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
+static void song_detail_populate_app_state(
+        const item_ctx_t *ctx, const song_viewer_prefs_t *prefs,
+        const char *title, const char *trans, int k, int is_owner,
+        const char *lang)
 {
-	(void)body;
-	(void)user_data;
-
-	int is_owner = item_owner_check(ctx->item_path, ctx->username);
-
-	song_viewer_prefs_t prefs;
-	char *trans = NULL;
-	int k = 0;
-	json_object *jo = NULL;
-	song_parse_viewer_prefs(fd, ctx->username, &prefs);
-
-	song_transpose_root(
-	        g_doc_root, ctx->id, prefs.transpose, prefs.flags, &trans, &k);
-
-	source_build_state_json("song.items", ctx->id, song_state_specs, &jo);
-	if (!jo)
-		return respond_error(fd, 404, "Song not found");
-
-	const char *title = NULL;
-	json_object *jval;
-	if (json_object_object_get_ex(jo, "title", &jval))
-		title = json_object_get_string(jval);
-	if (!title || !title[0]) {
-		json_object_put(jo);
-		return respond_error(fd, 404, "Song not found");
-	}
-
-	const char *lang = i18n_resolve_locale(fd);
-	site_ui_set_locale(lang);
-
 	memset(&app_state, 0, sizeof(app_state));
 	snprintf(app_state.cache.id, sizeof(app_state.cache.id), "%s", ctx->id);
 	snprintf(
 	        app_state.cache.title, sizeof(app_state.cache.title), "%s",
 	        title);
 	snprintf(app_state.lang, sizeof(app_state.lang), "%s", lang);
-	app_state.transpose = prefs.transpose;
-	app_state.use_latin = (prefs.flags & TRANSP_LATIN) != 0;
-	app_state.show_media = prefs.show_media;
+	app_state.transpose = prefs->transpose;
+	app_state.use_latin = (prefs->flags & TRANSP_LATIN) != 0;
+	app_state.show_media = prefs->show_media;
 	app_state.original_key = k;
 	app_state.is_owner = is_owner;
-	app_state.zoom = prefs.zoom;
+	app_state.zoom = prefs->zoom;
 	snprintf(
 	        app_state.chord_html, sizeof(app_state.chord_html), "%s",
 	        trans ? trans : "");
@@ -404,34 +376,66 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 		        "/api/song/prefs");
 	}
 	snprintf(app_state.path, sizeof(app_state.path), "/song/%s", ctx->id);
+}
+
+static int
+song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
+{
+	(void)body;
+	(void)user_data;
+
+	detail_state_t state;
+	detail_state_build_spec_t spec = {
+	        .module = "song",
+	        .id = ctx->id,
+	        .username = ctx->username,
+	        .item_path = ctx->item_path,
+	        .fd = fd,
+	        .flags = DETAIL_BUILD_OWNERSHIP | DETAIL_BUILD_LOCALE | DETAIL_BUILD_CSRF,
+	        .wasm_module = "song_detail"};
+	detail_state_build(&state, &spec, NULL, NULL);
+
+	song_viewer_prefs_t prefs;
+	char *trans = NULL;
+	int k = 0;
+	json_object *jo = NULL, *jval = NULL;
+	song_parse_viewer_prefs(fd, ctx->username, &prefs);
+	song_transpose_root(
+	        g_doc_root, ctx->id, prefs.transpose, prefs.flags, &trans, &k);
+
+	source_build_state_json("song.items", ctx->id, song_state_specs, &jo);
+	if (!jo)
+		return respond_error(fd, 404, "Song not found");
+
+	const char *title = json_object_object_get_ex(jo, "title", &jval)
+	                          ? json_object_get_string(jval)
+	                          : NULL;
+	if (!title || !title[0]) {
+		json_object_put(jo);
+		return respond_error(fd, 404, "Song not found");
+	}
+
+	snprintf(state.title, sizeof(state.title), "%s", title);
+	snprintf(state.path, sizeof(state.path), "/song/%s", ctx->id);
+	song_detail_populate_app_state(
+	        ctx, &prefs, title, trans, k, state.is_owner, state.lang);
 
 	hyle_bud_state_overlay_from_desc(
 	        jo, &app_state, song_app_fields, BUD_OVERLAY_INT,
 	        BUD_OVERLAY_STR);
-
 	hyle_bud_state_apply(
 	        &app_state.cache, song_fields, json_object_to_json_string(jo));
 	bud_state_apply(
 	        &app_state, song_app_fields, json_object_to_json_string(jo));
 
 	bud_node *layout = bud_app_render();
-	{
-		char state_buf[16384];
-		snprintf(
-		        state_buf, sizeof(state_buf),
-		        "<script type=\"application/json\" "
-		        "id=\"bud-state\">%s</script>",
-		        json_object_to_json_string(jo));
-		json_object_put(jo);
-
-		free(trans);
-		return site_ui_respond_page(
-		        fd, app_state.cache.title, app_state.path,
-		        site_ui_module_icon("song"), app_state.page_user,
-		        state_buf, "song_detail", layout);
-	}
+	state.state_json = strdup(json_object_to_json_string(jo));
+	free(trans);
+	int rc = detail_respond_page(fd, &state, layout);
+	free(state.state_json);
+	json_object_put(jo);
+	return rc;
 }
-
 static int song_detail_handler(int fd, char *body)
 {
 	return with_module_item_access(

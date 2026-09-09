@@ -55,10 +55,9 @@ void wasm_fetch_callback(int request_id, const char *data, int data_len)
 void wasm_init(const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
+	wasm_state_init(json, len, song_app_fields, &app_state);
 	hyle_bud_state_apply_len(&app_state.cache, song_fields, json, jlen);
-	bud_state_apply_len(&app_state, song_app_fields, json, jlen);
 	site_ui_set_locale(app_state.lang);
-	hyle_bud_set_translator(ui_t);
 }
 
 /* ── Page builder helpers ──────────────────────────── */

@@ -637,23 +637,15 @@ static char *sb_emit_state_json(void)
 	}
 	mlen = strlen(json_str);
 
-	req = snprintf(
-	        NULL, 0,
-	        "<script type=\"application/json\" "
-	        "id=\"bud-state\">%s</script>",
-	        json_str);
-	{
-		char *sj = malloc(req + 1);
-		if (sj)
-			snprintf(
-			        sj, req + 1,
-			        "<script type=\"application/json\" "
-			        "id=\"bud-state\">%s</script>",
-			        json_str);
-		free(merged);
+	json_str = json_object_to_json_string_ext(j_root, 0);
+	if (!json_str) {
 		json_object_put(j_root);
-		return sj;
+		return NULL;
 	}
+	char *sj = strdup(json_str);
+	free(merged);
+	json_object_put(j_root);
+	return sj;
 }
 
 /* GET /api/gig/:id/transpose - Return transposed chord HTML for
@@ -903,120 +895,66 @@ int sb_load_format_options(char (*buf)[128], const char **opts, int max)
 /* ── HTTP handlers ──────────────────────────────────────── */
 
 /* ── Detail handler ──────────────────────────────────────── */
-
-static int
-gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+static void sb_load_detail_songs(const char *id, unsigned song_hd, int flags)
 {
-	(void)body;
-	(void)user;
-	unsigned sb_hd, song_hd;
-	const char *title, *owner;
-	char owner_buf[64] = { 0 };
-	char fkey[512];
-	int is_owner = 0;
-	char *grp_id = NULL;
-	song_viewer_prefs_t prefs;
-	char page_title[256];
-	bud_node *layout;
-	const char *csrf_token;
-
-	sb_hd = source_get_fields_hd("gig.items");
-	if (!sb_hd)
-		return server_error(fd, "No fields_hd");
-
-	title = qmap_get_field_str(sb_hd, ctx->id, "title");
-	if (!title)
-		return respond_error(fd, 404, "Gig not found");
-
-	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
-	owner = owner_buf;
-	is_owner = item_owner_check(ctx->item_path, ctx->username);
-
-	/* Parse query prefs + zoom */
-	song_parse_viewer_prefs(fd, ctx->username, &prefs);
-
-	/* Resolve grp ID from gig reference field */
-	{
-		snprintf(fkey, sizeof(fkey), "%s:grp", ctx->id);
-		const char *grp_id_str = qmap_get(sb_hd, fkey);
-		if (grp_id_str && grp_id_str[0])
-			grp_id = strdup(grp_id_str);
-	}
-
-	snprintf(page_title, sizeof(page_title), "gig: %s", title);
-
-	/* Open data handles we need throughout */
-	song_hd = source_get_fields_hd("song.items");
-	if (!song_hd)
-		return respond_error(fd, 500, "Failed to open data handles");
-
-	csrf_token = csrf_setup(fd);
-
-	/* Load songs via ordered source first so song count is known */
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 	sb_app_state.active_row_pick = -1;
+	struct detail_song_ctx {
+		unsigned song_hd;
+		int f;
+	} detail_ctx = { song_hd, flags };
+	sb_for_each_song(id, detail_song_cb, &detail_ctx);
+}
+
+static void sb_collect_detail_pickers(int fd, int is_owner)
+{
+	if (!is_owner)
+		return;
+	char qs[2048] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	hyle_bud_picker_view_collect_schema(
+	        qs, sb_pick_song_schema, NULL, &g_sb_pick_state,
+	        &sb_app_state.active_row_pick);
+	hyle_bud_picker_view_collect_schema(
+	        qs, sb_pick_fmt_schema, NULL, &g_sb_fmt_pick_state,
+	        &sb_app_state.active_fmt_pick);
+	if (sb_app_state.active_row_pick < 0 &&
+	    sb_app_state.active_fmt_pick < 0)
 	{
-		struct detail_song_ctx {
-			unsigned song_hd;
-			int f;
-		} detail_ctx = { song_hd, prefs.flags };
-		sb_for_each_song(ctx->id, detail_song_cb, &detail_ctx);
-	}
-
-	/* Auto-collect scoped picker if active (?replace=N or
-	 * pick_q_song_id__N), otherwise collect options for the top Add Song
-	 * picker. */
-	if (is_owner) {
-		char qs[2048] = { 0 };
-		if (fd > 0)
-			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-
-		hyle_bud_picker_view_collect_schema(
-		        qs, sb_pick_song_schema, NULL, &g_sb_pick_state,
-		        &sb_app_state.active_row_pick);
-		hyle_bud_picker_view_collect_schema(
-		        qs, sb_pick_fmt_schema, NULL, &g_sb_fmt_pick_state,
-		        &sb_app_state.active_fmt_pick);
-		/* For No-JS top add picker when search query is present
-		 * (pick_q_song_id=), ensure top picker is populated */
-		if (sb_app_state.active_row_pick < 0 &&
-		    sb_app_state.active_fmt_pick < 0)
+		if (strstr(qs, "pick_q_song_id=") ||
+		    strstr(qs, "pick_page_song_id="))
 		{
-			if (strstr(qs, "pick_q_song_id=") ||
-			    strstr(qs, "pick_page_song_id="))
-			{
-				hyle_bud_picker_view_collect_schema(
-				        qs, sb_pick_song_schema, NULL,
-				        &g_sb_pick_state, NULL);
-			}
+			hyle_bud_picker_view_collect_schema(
+			        qs, sb_pick_song_schema, NULL,
+			        &g_sb_pick_state, NULL);
 		}
 	}
+}
 
-	const char *lang = i18n_resolve_locale(fd);
-	site_ui_set_locale(lang);
-
-	/* ── Populate sb_app_state with page data ────────────────── */
-	sb_app_state.zoom = prefs.zoom;
-	sb_app_state.latin = (prefs.flags & TRANSP_LATIN) ? 1 : 0;
-	sb_app_state.show_media = prefs.show_media;
-	sb_app_state.t_pref = prefs.transpose;
-	sb_app_state.bemol = (prefs.flags & TRANSP_BEMOL) ? 1 : 0;
-	sb_app_state.is_owner = is_owner;
+static void sb_populate_detail_state(
+        const item_ctx_t *ctx, const detail_state_t *state,
+        const song_viewer_prefs_t *prefs, const char *owner,
+        const char *grp_id)
+{
+	sb_app_state.zoom = prefs->zoom;
+	sb_app_state.latin = (prefs->flags & TRANSP_LATIN) ? 1 : 0;
+	sb_app_state.show_media = prefs->show_media;
+	sb_app_state.t_pref = prefs->transpose;
+	sb_app_state.bemol = (prefs->flags & TRANSP_BEMOL) ? 1 : 0;
+	sb_app_state.is_owner = state->is_owner;
 
 	snprintf(sb_app_state.sb_id, sizeof(sb_app_state.sb_id), "%s", ctx->id);
-	snprintf(sb_app_state.lang, sizeof(sb_app_state.lang), "%s", lang);
-	snprintf(
-	        sb_app_state.path, sizeof(sb_app_state.path), "/gig/%s",
-	        ctx->id);
-	snprintf(
-	        sb_app_state.title, sizeof(sb_app_state.title), "%s",
-	        page_title);
+	snprintf(sb_app_state.lang, sizeof(sb_app_state.lang), "%s", state->lang);
+	snprintf(sb_app_state.path, sizeof(sb_app_state.path), "/gig/%s", ctx->id);
+	snprintf(sb_app_state.title, sizeof(sb_app_state.title), "%s", state->title);
 	snprintf(
 	        sb_app_state.user, sizeof(sb_app_state.user), "%s",
 	        ctx->username ? ctx->username : "");
 	snprintf(
 	        sb_app_state.csrf_token, sizeof(sb_app_state.csrf_token), "%s",
-	        csrf_token);
+	        state->csrf_token ? state->csrf_token : "");
 	snprintf(
 	        sb_app_state.grp_id, sizeof(sb_app_state.grp_id), "%s",
 	        grp_id ? grp_id : "");
@@ -1024,8 +962,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	snprintf(
 	        sb_app_state.pick_q, sizeof(sb_app_state.pick_q), "%s",
-	        g_sb_pick_state.entries[0].q ? g_sb_pick_state.entries[0].q
-	                                     : "");
+	        g_sb_pick_state.entries[0].q ? g_sb_pick_state.entries[0].q : "");
 	sb_app_state.pick_page = g_sb_pick_state.entries[0].page;
 
 	snprintf(
@@ -1034,30 +971,73 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                ? g_sb_fmt_pick_state.entries[0].q
 	                : "");
 	sb_app_state.pick_fmt_page = g_sb_fmt_pick_state.entries[0].page;
+}
 
-	/* ── Build page through isomorphic entry point ────────────── */
-	layout = bud_app_render();
-
-	/* ── JSON state blob for WASM init (inside <script> tag) ──── */
-	{
-		char *state_json = sb_emit_state_json();
-		site_ui_respond_page(
-		        fd, page_title, sb_app_state.path,
-		        site_ui_module_icon("gig"), sb_app_state.user,
-		        state_json, "gig_detail", layout);
-		free(state_json);
-	}
-
-	/* Free allocated chord data after render */
+static void sb_free_detail_songs(void)
+{
 	for (int i = 0; i < sb_app_state.n_songs; i++) {
 		free(g_sb_songs[i].chord_html);
 		g_sb_songs[i].chord_html = NULL;
 	}
-	free(grp_id);
-
-	return 0;
 }
 
+static int
+gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	(void)user;
+	detail_state_t state;
+	detail_state_build_spec_t spec = {
+	        .module = "gig",
+	        .id = ctx->id,
+	        .username = ctx->username,
+	        .item_path = ctx->item_path,
+	        .fd = fd,
+	        .flags = DETAIL_BUILD_OWNERSHIP | DETAIL_BUILD_CSRF | DETAIL_BUILD_LOCALE,
+	        .wasm_module = "gig_detail"};
+	detail_state_build(&state, &spec, NULL, NULL);
+
+	unsigned sb_hd = source_get_fields_hd("gig.items");
+	if (!sb_hd)
+		return server_error(fd, "No fields_hd");
+
+	const char *title = qmap_get_field_str(sb_hd, ctx->id, "title");
+	if (!title)
+		return respond_error(fd, 404, "Gig not found");
+
+	char owner_buf[64] = { 0 };
+	item_owner_read(ctx->item_path, owner_buf, sizeof(owner_buf));
+
+	song_viewer_prefs_t prefs;
+	song_parse_viewer_prefs(fd, ctx->username, &prefs);
+
+	char fkey[512];
+	snprintf(fkey, sizeof(fkey), "%s:grp", ctx->id);
+	const char *grp_id_str = qmap_get(sb_hd, fkey);
+	char *grp_id = (grp_id_str && grp_id_str[0]) ? strdup(grp_id_str) : NULL;
+
+	snprintf(state.title, sizeof(state.title), "gig: %s", title);
+	snprintf(state.path, sizeof(state.path), "/gig/%s", ctx->id);
+
+	unsigned song_hd = source_get_fields_hd("song.items");
+	if (!song_hd) {
+		free(grp_id);
+		return respond_error(fd, 500, "Failed to open data handles");
+	}
+
+	sb_load_detail_songs(ctx->id, song_hd, prefs.flags);
+	sb_collect_detail_pickers(fd, state.is_owner);
+	sb_populate_detail_state(ctx, &state, &prefs, owner_buf, grp_id);
+
+	bud_node *layout = bud_app_render();
+	state.state_json = sb_emit_state_json();
+	detail_respond_page(fd, &state, layout);
+	free(state.state_json);
+
+	sb_free_detail_songs();
+	free(grp_id);
+	return 0;
+}
 static int gig_detail_handler(int fd, char *body)
 {
 	return with_module_item_access(
