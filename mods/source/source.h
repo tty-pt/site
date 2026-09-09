@@ -83,6 +83,11 @@ typedef struct {
 	void *persist_user;
 } source_ordered_def_t;
 
+typedef void (*source_ordered_each_fn)(
+    int index, const char *key, unsigned fields_hd, void *user);
+
+typedef void (*source_ref_cb_t)(const char *source_id, void *user);
+
 #ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
     int, fd,
@@ -284,6 +289,51 @@ XY_DECL(int, source_put_row,
     const char **, names,
     const char **, values,
     size_t, count);
+
+XY_DECL(const char *, source_ordered_get_field,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index,
+    const char *, field);
+
+XY_DECL(int, source_ordered_set_field,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index,
+    const char *, field,
+    const char *, value);
+
+XY_DECL(int, source_ordered_remove_and_save,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index);
+
+XY_DECL(int, source_ordered_append_and_save,
+    const char *, source_id,
+    const char *, partition_val,
+    const char **, names,
+    const char **, vals,
+    size_t, count);
+
+XY_DECL(int, source_ordered_for_each,
+    const char *, source_id,
+    const char *, partition_val,
+    source_ordered_each_fn, fn,
+    void *, user);
+
+XY_DECL(size_t, source_find_referencing,
+    const char *, source_dataset,
+    const char *, ref_field,
+    const char *, target_id,
+    const char **, ids_out,
+    size_t, max);
+
+XY_DECL(size_t, source_for_each_referencing,
+    const char *, source_dataset,
+    const char *, ref_field,
+    const char *, target_id,
+    source_ref_cb_t, cb,
+    void *, user);
 
 XY_DECL(int, source_register_derive,
     const char *, derive_key,

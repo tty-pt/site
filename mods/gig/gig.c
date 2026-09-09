@@ -84,21 +84,28 @@ typedef void (*sb_song_cb)(
         const char *key, const char *song_id, int transpose, const char *format,
         void *user);
 
+struct sb_each_wrapper {
+	sb_song_cb cb;
+	void *user;
+};
+
+static void sb_for_each_song_row_cb(
+        int idx, const char *key, unsigned fhd, void *user)
+{
+	(void)idx;
+	struct sb_each_wrapper *w = user;
+	const char *sid = qmap_field_get(fhd, key, "song");
+	if (!sid)
+		return;
+	const char *ts = qmap_field_get(fhd, key, "transpose");
+	const char *fm = qmap_field_get(fhd, key, "format");
+	w->cb(key, sid, ts ? atoi(ts) : 0, fm ? fm : "any", w->user);
+}
+
 static void sb_for_each_song(const char *sb_id, sb_song_cb cb, void *user)
 {
-	int total = source_ordered_count("gig.songs", sb_id);
-	unsigned fhd = source_get_fields_hd("gig.songs");
-	for (int i = 0; i < total; i++) {
-		const char *key = source_ordered_key_at("gig.songs", sb_id, i);
-		if (!key)
-			continue;
-		const char *sid = qmap_field_get(fhd, key, "song");
-		if (!sid)
-			continue;
-		const char *ts = qmap_field_get(fhd, key, "transpose");
-		const char *fm = qmap_field_get(fhd, key, "format");
-		cb(key, sid, ts ? atoi(ts) : 0, fm ? fm : "any", user);
-	}
+	struct sb_each_wrapper w = { cb, user };
+	source_ordered_for_each("gig.songs", sb_id, sb_for_each_song_row_cb, &w);
 }
 
 static void gig_meta_read(const char *item_path, gig_cache_t *meta)
@@ -182,28 +189,24 @@ static int handle_sb_transpose_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
-	char n_str[16] = { 0 };
+	(void)body;
 	char t_str[16] = { 0 };
-	int idx;
-	const char *key;
-	const char *names[1];
-	const char *vals[1];
-
-	mpfd_get("n", n_str, sizeof(n_str));
-	mpfd_get("t", t_str, sizeof(t_str));
-	if (!n_str[0])
-		return bad_request(fd, "Missing n");
-	idx = atoi(n_str);
-
-	key = source_ordered_key_at("gig.songs", ctx->id, idx);
-	if (!key)
-		return respond_error(fd, 404, "Song not found in gig");
 	char location[256];
+	int idx = axil_param_int(fd, "n", -1);
+	if (idx < 0) {
+		char n_str[16] = { 0 };
+		mpfd_get("n", n_str, sizeof(n_str));
+		if (n_str[0])
+			idx = atoi(n_str);
+	}
+	if (idx < 0)
+		return bad_request(fd, "Missing n");
 
-	names[0] = "transpose";
-	vals[0] = t_str;
-	source_put_row("gig.songs", key, names, vals, 1);
-	source_ordered_save("gig.songs", ctx->id);
+	if (axil_param(fd, "t", t_str, sizeof(t_str)) <= 0)
+		mpfd_get("t", t_str, sizeof(t_str));
+
+	if (source_ordered_set_field("gig.songs", ctx->id, idx, "transpose", t_str) != 0)
+		return respond_error(fd, 404, "Song not found in gig");
 
 	gig_sync_repertoire(ctx->id);
 
@@ -216,26 +219,20 @@ static int handle_sb_randomize_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
-	char n_str[16] = { 0 };
-	int idx;
-	const char *key;
-	unsigned fhd;
-	const char *fmt_val;
-	const char *s_names[3];
-	const char *s_vals[3];
-	char new_song_id[128] = { 0 };
+	(void)body;
 	char location[256];
-
-	mpfd_get("n", n_str, sizeof(n_str));
-	if (!n_str[0])
+	char new_song_id[128] = { 0 };
+	int idx = axil_param_int(fd, "n", -1);
+	if (idx < 0) {
+		char n_str[16] = { 0 };
+		mpfd_get("n", n_str, sizeof(n_str));
+		if (n_str[0])
+			idx = atoi(n_str);
+	}
+	if (idx < 0)
 		return bad_request(fd, "Missing n");
-	idx = atoi(n_str);
 
-	key = source_ordered_key_at("gig.songs", ctx->id, idx);
-	if (!key)
-		return respond_error(fd, 404, "Song not found in gig");
-	fhd = source_get_fields_hd("gig.songs");
-	fmt_val = qmap_field_get(fhd, key, "format");
+	const char *fmt_val = source_ordered_get_field("gig.songs", ctx->id, idx, "format");
 	if (!fmt_val || !fmt_val[0])
 		fmt_val = "any";
 
@@ -243,13 +240,11 @@ static int handle_sb_randomize_authorized(
 	            ctx->id, fmt_val, new_song_id, sizeof(new_song_id)) != 0)
 		return respond_error(fd, 404, "No songs found for format");
 
-	/* Replace song_id in-place */
-	s_names[0] = "song";
-	s_vals[0] = new_song_id;
-	s_names[1] = "transpose";
-	s_vals[1] = "0";
-	s_names[2] = "format";
-	s_vals[2] = fmt_val;
+	const char *s_names[3] = { "song", "transpose", "format" };
+	const char *s_vals[3] = { new_song_id, "0", fmt_val };
+	const char *key = source_ordered_key_at("gig.songs", ctx->id, idx);
+	if (!key)
+		return respond_error(fd, 404, "Song not found in gig");
 	source_put_row("gig.songs", key, s_names, s_vals, 3);
 	source_ordered_save("gig.songs", ctx->id);
 
@@ -285,28 +280,30 @@ static int handle_sb_song_add_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
+	(void)body;
 	char s_id[128] = { 0 };
 	char fmt_val[64] = "any";
 	char back[256] = { 0 };
 
-	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0)
+	if (axil_param(fd, "song_id", s_id, sizeof(s_id) - 1) <= 0)
 		return bad_request(fd, "Missing song_id");
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 
 	resolve_song_id(s_id, sizeof(s_id));
 
-	axil_query_param("format", fmt_val, sizeof(fmt_val) - 1);
+	axil_param(fd, "format", fmt_val, sizeof(fmt_val) - 1);
 	if (!fmt_val[0])
 		snprintf(fmt_val, sizeof(fmt_val), "any");
 
-	sb_append_song("gig.songs", ctx->id, s_id, "0", fmt_val);
-	source_ordered_save("gig.songs", ctx->id);
+	const char *names[3] = { "song", "transpose", "format" };
+	const char *vals[3] = { s_id, "0", fmt_val };
+	source_ordered_append_and_save("gig.songs", ctx->id, names, vals, 3);
 
 	gig_sync_repertoire(ctx->id);
 
 	/* Picker may ask to come back to the page it was opened from
 	 * (e.g. the edit page); validate prefix to avoid open redirects. */
-	axil_query_param("back", back, sizeof(back) - 1);
+	axil_param(fd, "back", back, sizeof(back) - 1);
 	if (back[0] && strncmp(back, "/gig/", 5) == 0)
 		return axil_redirect(fd, back);
 
@@ -318,19 +315,13 @@ static int handle_sb_song_remove_authorized(
         int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
-	char n_str[16] = { 0 };
-	int idx;
-
-	/* Prefer an explicit query param; fall back to the :n path
-	 * parameter matched by the route (PATTERN_PARAM_N env). */
-	if (axil_query_param("n", n_str, sizeof(n_str) - 1) <= 0)
-		axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
-	if (!n_str[0])
+	(void)body;
+	int idx = axil_param_int(fd, "n", -1);
+	if (idx < 0)
 		return bad_request(fd, "Missing n");
-	idx = atoi(n_str);
 
-	source_ordered_remove_at("gig.songs", ctx->id, idx);
-	source_ordered_save("gig.songs", ctx->id);
+	if (source_ordered_remove_and_save("gig.songs", ctx->id, idx) != 0)
+		return respond_error(fd, 404, "Song not found in gig");
 
 	gig_sync_repertoire(ctx->id);
 
@@ -345,30 +336,22 @@ static int handle_sb_song_replace_authorized(
 {
 	(void)user;
 	(void)body;
-	char n_str[16] = { 0 };
 	char s_id[128] = { 0 };
 	char back[256] = { 0 };
-	int idx;
 	const char *key;
 	const char *names[3];
 	const char *vals[3];
 
-	if (axil_query_param("n", n_str, sizeof(n_str) - 1) <= 0)
-		axil_env_get(fd, n_str, sizeof(n_str), "PATTERN_PARAM_N");
-	if (!n_str[0])
+	int idx = axil_param_int(fd, "n", -1);
+	if (idx < 0)
 		return bad_request(fd, "Missing n");
-	idx = atoi(n_str);
 
 	key = source_ordered_key_at("gig.songs", ctx->id, idx);
 	if (!key)
 		return respond_error(fd, 404, "Song not found in gig");
 
-	if (axil_query_param("song_id", s_id, sizeof(s_id) - 1) <= 0 ||
-	    !s_id[0])
-	{
-		/* If song_id is not provided, keep current song_id */
-		unsigned cur_fhd = source_get_fields_hd("gig.songs");
-		const char *cur_s = qmap_field_get(cur_fhd, key, "song");
+	if (axil_param(fd, "song_id", s_id, sizeof(s_id) - 1) <= 0 || !s_id[0]) {
+		const char *cur_s = source_ordered_get_field("gig.songs", ctx->id, idx, "song");
 		if (cur_s)
 			snprintf(s_id, sizeof(s_id), "%s", cur_s);
 	}
@@ -377,30 +360,20 @@ static int handle_sb_song_replace_authorized(
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 	resolve_song_id(s_id, sizeof(s_id));
 
-	/* Preserve the replaced row's key/format unless the request
-	 * carries explicit new values (kept for API compatibility). */
-	unsigned fhd = source_get_fields_hd("gig.songs");
-	const char *cur_t = qmap_field_get(fhd, key, "transpose");
-	const char *cur_f = qmap_field_get(fhd, key, "format");
-	char key_val[16] = { 0 };
-	char fmt_val[64] = { 0 };
+	const char *cur_t = source_ordered_get_field("gig.songs", ctx->id, idx, "transpose");
+	const char *cur_f = source_ordered_get_field("gig.songs", ctx->id, idx, "format");
 
-	axil_query_param("transpose", key_val, sizeof(key_val) - 1);
-	if (!key_val[0] && cur_t)
-		snprintf(key_val, sizeof(key_val), "%s", cur_t);
-
-	axil_query_param("format", fmt_val, sizeof(fmt_val) - 1);
-	if (!fmt_val[0] && cur_f)
-		snprintf(fmt_val, sizeof(fmt_val), "%s", cur_f);
-	if (!fmt_val[0])
-		snprintf(fmt_val, sizeof(fmt_val), "any");
+	char req_t[16] = { 0 };
+	char req_f[64] = { 0 };
+	axil_param(fd, "transpose", req_t, sizeof(req_t));
+	axil_param(fd, "format", req_f, sizeof(req_f));
 
 	names[0] = "song";
 	vals[0] = s_id;
 	names[1] = "transpose";
-	vals[1] = key_val[0] ? key_val : "0";
+	vals[1] = req_t[0] ? req_t : (cur_t ? cur_t : "0");
 	names[2] = "format";
-	vals[2] = fmt_val;
+	vals[2] = req_f[0] ? req_f : (cur_f ? cur_f : "any");
 	source_put_row("gig.songs", key, names, vals, 3);
 	source_ordered_save("gig.songs", ctx->id);
 
@@ -419,14 +392,14 @@ static int handle_sb_song_replace_authorized(
 		int dk = 0;
 		int flags = TRANSP_HTML;
 		char l_str[4] = { 0 }, b_str[4] = { 0 };
-		if (axil_query_param("l", l_str, sizeof(l_str)) >= 0 &&
+		if (axil_param(fd, "l", l_str, sizeof(l_str)) >= 0 &&
 		    l_str[0] == '1')
 			flags |= TRANSP_LATIN;
-		if (axil_query_param("b", b_str, sizeof(b_str)) >= 0 &&
+		if (axil_param(fd, "b", b_str, sizeof(b_str)) >= 0 &&
 		    b_str[0] == '1')
 			flags |= TRANSP_BEMOL;
 
-		int tr = key_val[0] ? atoi(key_val) : 0;
+		int tr = req_t[0] ? atoi(req_t) : (cur_t ? atoi(cur_t) : 0);
 		unsigned song_hd = source_get_fields_hd("song.items");
 		if (song_hd) {
 			const char *st =
@@ -490,15 +463,12 @@ static int handle_sb_song_replace_authorized(
 
 		const char *json_str = json_object_to_json_string(j_resp);
 		free(ch);
-		axil_header_set(fd, "Content-Type", "application/json");
-		axil_respond(fd, 200, json_str);
+		axil_respond_json(fd, 200, json_str);
 		json_object_put(j_resp);
 		return 1;
 	}
 
-	/* Picker may ask to come back to the page it was opened from
-	 * (e.g. the edit page); validate prefix to avoid open redirects. */
-	axil_query_param("back", back, sizeof(back) - 1);
+	axil_param(fd, "back", back, sizeof(back) - 1);
 	if (back[0] && strncmp(back, "/gig/", 5) == 0)
 		return axil_redirect(fd, back);
 
@@ -732,8 +702,7 @@ static int api_sb_transpose_get(int fd, char *body)
 
 	const char *json_str = json_object_to_json_string(j_resp);
 	free(chord_html);
-	axil_header_set(fd, "Content-Type", "application/json");
-	axil_respond(fd, 200, json_str);
+	axil_respond_json(fd, 200, json_str);
 	json_object_put(j_resp);
 	return 1;
 }

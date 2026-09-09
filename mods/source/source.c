@@ -575,6 +575,79 @@ XY_IMPL(int, source_put_row,
 	return hyle_source_put(source_id, row_id, names, values, count);
 }
 
+XY_IMPL(const char *, source_ordered_get_field,
+	const char *, source_id,
+	const char *, partition_val,
+	int, index,
+	const char *, field)
+{
+	return hyle_source_ordered_get_field(
+	        source_id, partition_val, index, field);
+}
+
+XY_IMPL(int, source_ordered_set_field,
+	const char *, source_id,
+	const char *, partition_val,
+	int, index,
+	const char *, field,
+	const char *, value)
+{
+	return hyle_source_ordered_set_field(
+	        source_id, partition_val, index, field, value);
+}
+
+XY_IMPL(int, source_ordered_remove_and_save,
+	const char *, source_id,
+	const char *, partition_val,
+	int, index)
+{
+	return hyle_source_ordered_remove_and_save(
+	        source_id, partition_val, index);
+}
+
+XY_IMPL(int, source_ordered_append_and_save,
+	const char *, source_id,
+	const char *, partition_val,
+	const char **, names,
+	const char **, vals,
+	size_t, count)
+{
+	return hyle_source_ordered_append_and_save(
+	        source_id, partition_val, names, vals, count);
+}
+
+XY_IMPL(int, source_ordered_for_each,
+	const char *, source_id,
+	const char *, partition_val,
+	source_ordered_each_fn, fn,
+	void *, user)
+{
+	return hyle_source_ordered_for_each(
+	        source_id, partition_val, (hyle_source_ordered_each_fn)fn, user);
+}
+
+XY_IMPL(size_t, source_find_referencing,
+	const char *, source_dataset,
+	const char *, ref_field,
+	const char *, target_id,
+	const char **, ids_out,
+	size_t, max)
+{
+	return hyle_source_find_referencing(
+	        source_dataset, ref_field, target_id, ids_out, max);
+}
+
+XY_IMPL(size_t, source_for_each_referencing,
+	const char *, source_dataset,
+	const char *, ref_field,
+	const char *, target_id,
+	source_ref_cb_t, cb,
+	void *, user)
+{
+	return hyle_source_for_each_referencing(
+	        source_dataset, ref_field, target_id, (hyle_source_ref_cb_t)cb, user);
+}
+
 XY_IMPL(int, source_register_derive,
 	const char *, derive_key,
 	source_derive_fn_t, fn,

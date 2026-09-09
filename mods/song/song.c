@@ -102,39 +102,24 @@ XY_IMPL(int, song_parse_viewer_prefs,
 
 	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 	if (qs[0]) {
-		int t = 0, pf = 0, sm = 0;
 		char copy[1024];
 		snprintf(copy, sizeof(copy), "%s", qs);
 		axil_query_parse(copy);
 		char buf[32];
-		if (axil_query_param("t", buf, sizeof(buf)) > 0)
-			t = atoi(buf);
-		if (axil_query_param("b", buf, sizeof(buf)) >= 0 &&
-		    atoi(buf) != 0)
-			pf |= TRANSP_BEMOL;
-		if (axil_query_param("l", buf, sizeof(buf)) >= 0 &&
-		    atoi(buf) != 0)
-			pf |= TRANSP_LATIN;
-		if (axil_query_param("h", buf, sizeof(buf)) >= 0 &&
-		    atoi(buf) != 0)
-			pf |= TRANSP_HTML;
-		if (axil_query_param("m", buf, sizeof(buf)) >= 0 &&
-		    atoi(buf) != 0)
-			sm = 1;
-
-		out->transpose = t;
-		if (pf & TRANSP_BEMOL)
+		if (axil_param(fd, "t", buf, sizeof(buf)) > 0)
+			out->transpose = axil_param_int(fd, "t", 0);
+		if (axil_param_int(fd, "b", 0) != 0)
 			out->flags |= TRANSP_BEMOL;
-		if (pf & TRANSP_LATIN)
+		if (axil_param_int(fd, "l", 0) != 0)
 			out->flags |= TRANSP_LATIN;
-		if (pf & TRANSP_HTML)
+		if (axil_param_int(fd, "h", 0) != 0)
 			out->flags |= TRANSP_HTML;
-		if (sm)
+		if (axil_param_int(fd, "m", 0) != 0)
 			out->show_media = 1;
 
 		char zb[16] = { 0 };
-		if (axil_query_param("z", zb, sizeof(zb)) > 0) {
-			int zv = atoi(zb);
+		if (axil_param(fd, "z", zb, sizeof(zb)) > 0) {
+			int zv = axil_param_int(fd, "z", VIEWER_ZOOM_DEFAULT);
 			if (zv < VIEWER_ZOOM_MIN)
 				zv = VIEWER_ZOOM_MIN;
 			if (zv > VIEWER_ZOOM_MAX)
@@ -173,16 +158,16 @@ static int api_song_viewer_prefs_handler(int fd, char *body)
 		axil_query_parse(body);
 	}
 	char b[16];
-	if (axil_query_param("v", b, sizeof(b)) >= 0)
-		song_set_viewer_zoom(u, atoi(b));
-	if (axil_query_param("b", b, sizeof(b)) >= 0)
+	if (axil_param(fd, "v", b, sizeof(b)) >= 0)
+		song_set_viewer_zoom(u, axil_param_int(fd, "v", 100));
+	if (axil_param(fd, "b", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-bemol", b);
-	if (axil_query_param("l", b, sizeof(b)) >= 0)
+	if (axil_param(fd, "l", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-latin", b);
-	if (axil_query_param("m", b, sizeof(b)) >= 0)
+	if (axil_param(fd, "m", b, sizeof(b)) >= 0)
 		user_pref_write(u, "chords-media", b);
-	if (axil_query_param("z", b, sizeof(b)) >= 0)
-		song_set_viewer_zoom(u, atoi(b));
+	if (axil_param(fd, "z", b, sizeof(b)) >= 0)
+		song_set_viewer_zoom(u, axil_param_int(fd, "z", 100));
 	axil_respond(fd, 204, "");
 	return 0;
 }

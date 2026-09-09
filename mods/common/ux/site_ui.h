@@ -119,36 +119,7 @@ bud_node *site_ui_form_from_desc(
         const char *csrf_token, const pick_view_t *pv, const char *vstr_val);
 
 /* ── Action / Standalone Picker Component ───────────── */
-typedef struct {
-	const char *key;        /* field name, e.g. "song_id" */
-	const char *label;      /* field label, e.g. "Song:" */
-	const char *target;     /* target dataset, e.g. "song.items" */
-	const char *default_id; /* optional pre-selected default value ID */
-	const char
-	        *default_label;  /* optional pre-selected default value label */
-	const char *get_action;  /* action URL for sibling GET form */
-	const char *post_action; /* action URL for POST form */
-	const char *form_id;     /* POST form ID, default "pick-post" */
-	const char *csrf_token;  /* CSRF token for POST form */
-	const char *submit_label; /* submit button text, default "Add" */
-	const char *hint;         /* optional hint text above picker */
-	const char *cancel_href;  /* optional cancel link href */
-	const char *cancel_label; /* optional cancel link label */
-	const char *header_text;  /* optional header text above picker */
-	const char *scope; /* scope suffix, e.g. "0" for pick_q_<key>__0 */
-	int auto_submit; /* 1 = auto-submit on radio change when scripts active
-	                  */
-	int allow_add;   /* 1 = enable inline creation, 0 = selection only */
-	const char *search_param; /* custom search input name; NULL defaults to
-	                             "pick_q_<key>" */
-	const char *page_param;   /* custom page input name; NULL defaults to
-	                             "pick_page_<key>" */
-	const char **pref_names;  /* optional extra GET input names */
-	const int *pref_vals;     /* optional extra GET input integer values */
-	int n_prefs;              /* number of pref entries */
-	bud_node *extra_post_inputs; /* optional extra hidden inputs for POST
-	                                form */
-} site_ui_action_picker_spec_t;
+typedef hyle_bud_action_picker_spec_t site_ui_action_picker_spec_t;
 
 bud_node *site_ui_action_picker(
         const site_ui_action_picker_spec_t *spec, const pick_view_t *pv);

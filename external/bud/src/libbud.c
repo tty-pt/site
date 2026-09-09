@@ -901,6 +901,53 @@ bud_node *bud_textf(const char *fmt, ...)
 	return bud_text(tmp);
 }
 
+bud_node *bud_hidden_input(const char *name, const char *value)
+{
+	bud_node *input = bud_element("input");
+	if (!input)
+		return NULL;
+	bud_set_attr(input, "type", "hidden");
+	if (name)
+		bud_set_attr(input, "name", name);
+	if (value)
+		bud_set_attr(input, "value", value);
+	return input;
+}
+
+bud_node *bud_hidden_input_int(const char *name, int value)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%d", value);
+	return bud_hidden_input(name, buf);
+}
+
+bud_node *bud_submit_btn(const char *label, const char *class_name)
+{
+	bud_node *btn = bud_element("button");
+	if (!btn)
+		return NULL;
+	bud_set_attr(btn, "type", "submit");
+	if (class_name && class_name[0])
+		bud_set_attr(btn, "class", class_name);
+	if (label && label[0])
+		bud_append(btn, bud_text(label));
+	return btn;
+}
+
+bud_node *bud_link(const char *href, const char *text, const char *class_name)
+{
+	bud_node *a = bud_element("a");
+	if (!a)
+		return NULL;
+	if (href)
+		bud_set_attr(a, "href", href);
+	if (class_name && class_name[0])
+		bud_set_attr(a, "class", class_name);
+	if (text && text[0])
+		bud_append(a, bud_text(text));
+	return a;
+}
+
 bud_node *bud_raw(const char *html)
 {
 	bud_node *node;
@@ -3550,7 +3597,7 @@ void bud_state_apply_stride_len(
 		return;
 	if (field_stride < sizeof(bud_field_desc_t))
 		field_stride = sizeof(bud_field_desc_t);
-	if (len == 0)
+	if ((ssize_t)len <= 0)
 		len = strlen(json);
 	if (len == 0)
 		return;
@@ -3693,7 +3740,7 @@ void bud_state_apply_array_stride_len(
 		return;
 	if (schema_stride < sizeof(bud_field_desc_t))
 		schema_stride = sizeof(bud_field_desc_t);
-	if (len == 0)
+	if ((ssize_t)len <= 0)
 		len = strlen(json);
 	ctx.array_out = (char *)array_out;
 	ctx.elem_size = elem_size;

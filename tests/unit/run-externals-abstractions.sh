@@ -4,7 +4,7 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
-bin=$tmpdir/index_helpers_test
+bin=$tmpdir/externals_abstractions_test
 
 ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/hyle/include" \
@@ -16,11 +16,10 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libqmap/include" \
 	-I"$repo/external/libxylem/include" \
 	-I"$repo/mods/common" \
+	-I"$repo/mods/source" \
 	-I"$repo" \
 	-o "$bin" \
-	"$repo/tests/unit/index_helpers_test.c" \
-	-L"$repo/mods/index" -Wl,-rpath,"$repo/mods/index" -l:index.so \
-	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
+	"$repo/tests/unit/externals_abstractions_test.c" \
 	-L"$repo/external/hyle/c/libhyle-bud/lib" -lhyle-bud \
 	-L"$repo/external/hyle/c/libhyle-source/lib" -lhyle-source \
 	-L"$repo/external/hyle/lib" -lhyle \

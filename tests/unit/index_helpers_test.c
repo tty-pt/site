@@ -7,15 +7,17 @@
 #include <hyle/schema.h>
 #include <hyle/picker.h>
 #include <hyle-bud/hyle-bud.h>
+#include <ttypt/xy.h>
+#include "mods/common/common.h"
 #define INDEX_IMPL
 #include "mods/index/index.h"
+
+void _xy_init(void *ptr, const char *fname, uint64_t region_id);
 
 /* Forward declare functions under test from mods/index/index.so */
 int list_fill_state(list_state_t *state, const char *dataset_id, const char *raw_qs, int allow_fields);
 int list_fill_free(list_state_t *state);
 int list_respond_page(int fd, list_state_t *state, const char *module, const char *username);
-int detail_state_build(detail_state_t *state, const detail_state_build_spec_t *spec, const char *title, const char *path);
-int detail_respond_page(int fd, const detail_state_t *state, bud_node *layout);
 
 #define CHECK(label, condition)                                                \
 	do {                                                                   \
@@ -32,6 +34,11 @@ static int failures = 0;
 int main(void)
 {
 	printf("=== Testing index and list/detail shared helpers ===\n");
+
+	xy_init();
+	_xy_init(&xy, "main", 0);
+	xy_load("./mods/common/common");
+	xy_load("./mods/index/index");
 
 	/* 1. detail_state_build: basic fields assignment */
 	{

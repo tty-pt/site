@@ -9,6 +9,7 @@ bin=$tmpdir/site_media_test
 ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/bud/include" \
 	-I"$repo/external/hyle/include" \
+	-I"$repo/external/hyle/c/libhyle-bud/include" \
 	-I"$repo/mods/common" \
 	-I"$repo/mods/common/ux" \
 	-o "$bin" \

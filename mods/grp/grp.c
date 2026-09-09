@@ -342,16 +342,17 @@ static int
 handle_grp_song_add_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
+	(void)body;
 	char s_id[128] = { 0 };
-	int s_len = axil_query_param("song_id", s_id, sizeof(s_id) - 1);
+	int s_len = axil_param(fd, "song_id", s_id, sizeof(s_id) - 1);
 	if (s_len <= 0)
 		return bad_request(fd, "Missing song_id");
 	datalist_extract_id(s_id, s_id, sizeof(s_id));
 
 	char fmt[64] = "any";
 	char tr[16] = "0";
-	axil_query_param("format", fmt, sizeof(fmt) - 1);
-	axil_query_param("transpose", tr, sizeof(tr) - 1);
+	axil_param(fd, "format", fmt, sizeof(fmt) - 1);
+	axil_param(fd, "transpose", tr, sizeof(tr) - 1);
 	if (!fmt[0])
 		snprintf(fmt, sizeof(fmt), "any");
 	if (!tr[0])
@@ -359,8 +360,7 @@ handle_grp_song_add_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	/* Manual adds are pinned: they survive rep_rebuild. */
 	const char *names[] = { "song", "transpose", "format", "pinned" };
 	const char *vals[] = { s_id, tr, fmt, "1" };
-	source_ordered_append("grp.songs", ctx->id, names, vals, 4);
-	source_ordered_save("grp.songs", ctx->id);
+	source_ordered_append_and_save("grp.songs", ctx->id, names, vals, 4);
 
 	return redirect_to_item(fd, "grp", ctx->id);
 }
@@ -377,8 +377,9 @@ static int
 handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
 	(void)user;
+	(void)body;
 	char k_s[32] = { 0 };
-	axil_query_param("key", k_s, sizeof(k_s) - 1);
+	axil_param(fd, "key", k_s, sizeof(k_s) - 1);
 
 	int idx = grp_song_index(ctx->id, ctx->sub_id);
 	if (idx >= 0) {
@@ -406,8 +407,7 @@ handle_grp_song_key_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		const char *names[] = { "song", "transpose", "format",
 			                "pinned" };
 		const char *vals[] = { ctx->sub_id, k_s, fmt, "1" };
-		source_ordered_append("grp.songs", ctx->id, names, vals, 4);
-		source_ordered_save("grp.songs", ctx->id);
+		source_ordered_append_and_save("grp.songs", ctx->id, names, vals, 4);
 	}
 
 	return redirect_to_item(fd, "grp", ctx->id);
@@ -428,10 +428,8 @@ handle_grp_song_del_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	(void)user;
 
 	int idx = grp_song_index(ctx->id, ctx->sub_id);
-	if (idx >= 0) {
-		source_ordered_remove_at("grp.songs", ctx->id, idx);
-		source_ordered_save("grp.songs", ctx->id);
-	}
+	if (idx >= 0)
+		source_ordered_remove_and_save("grp.songs", ctx->id, idx);
 
 	return redirect_to_item(fd, "grp", ctx->id);
 }
@@ -479,24 +477,20 @@ static int handle_grp_song_view(int fd, char *body)
 #include "ux/all.c"
 
 static void ch_load_gigs(
-        source_def_t *sb_def, uint32_t grp_pos, ch_sb_entry_t *gigs,
+        const char *grp_id, unsigned sb_fields_hd, ch_sb_entry_t *gigs,
         int *n_gigs)
 {
 	*n_gigs = 0;
-	uint32_t inv_buf[256];
-	size_t n =
-	        qmap_inv_get(sb_def->fields_hd, "grp", grp_pos, inv_buf, 256);
+	const char *gig_ids[CH_MAX_GIGS];
+	size_t n = source_find_referencing(
+	        "gig.items", "grp", grp_id, gig_ids, CH_MAX_GIGS);
 	for (size_t i = 0; i < n && *n_gigs < CH_MAX_GIGS; i++) {
-		const char *sb_id = qmap_get_key(sb_def->fields_hd, inv_buf[i]);
-		if (!sb_id)
-			continue;
 		const char *t =
-		        qmap_get_field_str(sb_def->fields_hd, sb_id, "title");
-		if (!t)
-			t = sb_id;
+		        sb_fields_hd ? qmap_get_field_str(sb_fields_hd, gig_ids[i], "title")
+		                     : NULL;
 		ch_sb_entry_t *e = &gigs[(*n_gigs)++];
-		snprintf(e->title, sizeof(e->title), "%s", t);
-		snprintf(e->href, sizeof(e->href), "/gig/%s", sb_id);
+		snprintf(e->title, sizeof(e->title), "%s", t ? t : gig_ids[i]);
+		snprintf(e->href, sizeof(e->href), "/gig/%s", gig_ids[i]);
 	}
 }
 
@@ -576,13 +570,10 @@ static bud_node *grp_detail_build_body(
 	ch_rep_entry_t repertoire[CH_MAX_REP_SONGS];
 	int n_repertoire;
 
-	uint32_t grp_pos = qmap_pos(cf_hd, ctx->id);
-	if (grp_pos != QM_MISS) {
-		source_def_t *sb_def = source_find("gig.items");
-		if (sb_def && sb_def->fields_hd) {
-			ch_load_gigs(sb_def, grp_pos, gigs, &n_gigs);
-			bud_append(body_frag, ch_render_gigs_section(gigs, n_gigs));
-		}
+	unsigned sb_hd = source_get_fields_hd("gig.items");
+	ch_load_gigs(ctx->id, sb_hd, gigs, &n_gigs);
+	if (n_gigs > 0) {
+		bud_append(body_frag, ch_render_gigs_section(gigs, n_gigs));
 	}
 
 	unsigned sf_hd = source_get_fields_hd("song.items");
@@ -669,9 +660,9 @@ static int handle_grp_member_action_authorized(
 	char back[512] = { 0 };
 
 	axil_query_parse(body);
-	axil_query_param("action", action, sizeof(action));
-	axil_query_param("member", member, sizeof(member));
-	axil_query_param("back", back, sizeof(back));
+	axil_param(fd, "action", action, sizeof(action));
+	axil_param(fd, "member", member, sizeof(member));
+	axil_param(fd, "back", back, sizeof(back));
 
 	if (!member[0])
 		return respond_error(fd, 400, "Missing member username");

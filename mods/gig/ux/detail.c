@@ -393,9 +393,7 @@ static bud_node *sb_render_song_title_picker(
 	snprintf(form_id, sizeof(form_id), "sb-pick-post-%d", row_idx);
 
 	bud_node *extra = bud_fragment();
-	bud_append(
-	        extra, lx_n("input", lx_attr("type", "hidden"),
-	                    lx_attr("name", "n"), lx_attr("value", n_str)));
+	bud_append(extra, bud_hidden_input_int("n", row_idx));
 
 	site_ui_action_picker_spec_t spec = {
 		.key = "song_id",
@@ -438,14 +436,9 @@ static bud_node *sb_render_format_picker(
 	snprintf(form_id, sizeof(form_id), "sb-fmt-pick-post-%d", row_idx);
 
 	bud_node *extra = bud_fragment();
-	bud_append(
-	        extra, lx_n("input", lx_attr("type", "hidden"),
-	                    lx_attr("name", "n"), lx_attr("value", n_str)));
+	bud_append(extra, bud_hidden_input_int("n", row_idx));
 	if (s->song_id[0]) {
-		bud_append(
-		        extra, lx_n("input", lx_attr("type", "hidden"),
-		                    lx_attr("name", "song_id"),
-		                    lx_attr("value", s->song_id)));
+		bud_append(extra, bud_hidden_input("song_id", s->song_id));
 	}
 
 	site_ui_action_picker_spec_t spec = {
