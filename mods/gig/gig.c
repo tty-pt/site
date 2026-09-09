@@ -625,10 +625,9 @@ static int api_sb_transpose_get(int fd, char *body)
 	(void)body;
 	char id[128] = { 0 };
 	char qs[1024] = { 0 };
-	char n_str[16] = { 0 }, t_str[16] = { 0 };
 	int flags = TRANSP_HTML;
-	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
-	if (!id[0])
+
+	if (axil_param(fd, "id", id, sizeof(id)) <= 0)
 		return bad_request(fd, "Missing ID");
 
 	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
@@ -636,55 +635,35 @@ static int api_sb_transpose_get(int fd, char *body)
 		return bad_request(fd, "Missing query string");
 
 	axil_query_parse(qs);
-	axil_query_param("n", n_str, sizeof(n_str) - 1);
-	axil_query_param("t", t_str, sizeof(t_str) - 1);
-	{
-		char b[4] = { 0 };
-		if (axil_query_param("b", b, sizeof(b)) >= 0 && b[0] == '1')
-			flags |= TRANSP_BEMOL;
-	}
-	{
-		char l[4] = { 0 };
-		if (axil_query_param("l", l, sizeof(l)) >= 0 && l[0] == '1')
-			flags |= TRANSP_LATIN;
-	}
-	(void)axil_query_param(
-	        "m", (char[4]){ 0 }, 4); /* consumed for consistency */
 
-	if (!n_str[0])
+	int idx = axil_param_int(fd, "n", -1);
+	if (idx < 0)
 		return bad_request(fd, "Missing n");
 
-	int idx = atoi(n_str);
-	int transpose = t_str[0] ? atoi(t_str) : 0;
-	char found_song[256] = { 0 };
+	if (axil_param_int(fd, "b", 0) == 1)
+		flags |= TRANSP_BEMOL;
+	if (axil_param_int(fd, "l", 0) == 1)
+		flags |= TRANSP_LATIN;
 
-	/* Read song_id and transpose from ordered source */
-	{
-		const char *key;
-		unsigned fhd;
-		const char *sid, *db_tr;
+	char t_str[16] = { 0 };
+	axil_param(fd, "t", t_str, sizeof(t_str));
 
-		key = source_ordered_key_at("gig.songs", id, idx);
-		if (!key)
-			return respond_error(fd, 404, "Song not found");
-		fhd = source_get_fields_hd("gig.songs");
-		sid = qmap_field_get(fhd, key, "song");
-		if (!sid)
-			return respond_error(fd, 404, "Song not found");
-		snprintf(found_song, sizeof(found_song), "%s", sid);
-
-		db_tr = qmap_field_get(fhd, key, "transpose");
-		if (!t_str[0])
-			transpose = db_tr ? atoi(db_tr) : 0;
-	}
-
-	if (!found_song[0])
+	const char *sid = source_ordered_get_field("gig.songs", id, idx, "song");
+	if (!sid)
 		return respond_error(fd, 404, "Song not found");
+
+	int transpose = t_str[0] ? atoi(t_str) : 0;
+	if (!t_str[0]) {
+		const char *db_tr =
+		        source_ordered_get_field("gig.songs", id, idx, "transpose");
+		if (db_tr)
+			transpose = atoi(db_tr);
+	}
 
 	char *chord_html = NULL;
 	int detected_key = 0;
 	song_transpose_root(
-	        g_doc_root, found_song, transpose, flags, &chord_html,
+	        g_doc_root, sid, transpose, flags, &chord_html,
 	        &detected_key);
 
 	const char *tgt_key = target_key_name(

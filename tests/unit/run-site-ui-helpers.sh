@@ -19,7 +19,9 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
 	-L"$repo/external/hyle/c/libhyle-bud/lib" -lhyle-bud \
 	-L"$repo/external/bud/lib" -lbud \
+	-L"$repo/external/libxylem/lib" -lxylem \
 	-Wl,-rpath,"$repo/external/hyle/c/libhyle-bud/lib" \
-	-Wl,-rpath,"$repo/external/bud/lib"
+	-Wl,-rpath,"$repo/external/bud/lib" \
+	-Wl,-rpath,"$repo/external/libxylem/lib"
 
 "$bin"

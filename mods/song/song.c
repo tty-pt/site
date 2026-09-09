@@ -328,7 +328,7 @@ XY_IMPL(int, source_after_update,
 }
 
 #include "ux/detail.c"
-#include "ux/form.c"
+
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
 
@@ -428,74 +428,6 @@ static int song_detail_handler(int fd, char *body)
 	        NULL);
 }
 
-static int song_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-	song_cache_t meta;
-
-	song_meta_read(ctx->item_path, &meta);
-	source_resolve_meta_display(
-	        "song.items", ctx->id, song_fields, SONG_FIELD_COUNT, &meta);
-
-	char data_path[PATH_MAX];
-	item_child_path(
-	        ctx->item_path, "data.txt", data_path, sizeof(data_path));
-	char *data_val = slurp_file(data_path);
-
-	const char *csrf_token = csrf_setup(fd);
-
-	{
-		pick_view_t pv;
-		char qs[4096] = { 0 };
-		if (fd > 0)
-			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-
-		hyle_bud_picker_view_collect_schema(
-		        qs, song_fields, &meta, &pv, NULL);
-
-		bud_node *form = song_form_content(
-		        1, ctx->id, &meta, data_val, csrf_token, &pv);
-		free(data_val);
-
-		return site_ui_respond_edit_page(
-		        fd, ctx->username, "song", site_ui_module_icon("song"),
-		        meta.title, ctx->id, form);
-	}
-}
-
-static int song_edit_get_handler(int fd, char *body)
-{
-	return with_module_item_access(
-	        fd, body, "song", ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        "Song not found", NULL, song_edit_auth, NULL);
-}
-
-static int song_add_get_handler(int fd, char *body)
-{
-	(void)body;
-	const char *user = require_user(fd);
-	if (!user)
-		return 1;
-
-	const char *csrf_token = csrf_setup(fd);
-
-	{
-		pick_view_t pv;
-		char qs[4096] = { 0 };
-		if (fd > 0)
-			axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-
-		hyle_bud_picker_view_collect_schema(
-		        qs, song_fields, NULL, &pv, NULL);
-
-		bud_node *form =
-		        song_form_content(0, NULL, NULL, NULL, csrf_token, &pv);
-		return site_ui_respond_add_page(
-		        fd, user, "song", site_ui_module_icon("song"), form);
-	}
-}
-
 void xy_install(void)
 {
 	char dr[256] = { 0 };
@@ -537,8 +469,6 @@ void xy_install(void)
 
 	standard_item_handlers_t handlers = {
 		.detail = song_detail_handler,
-		.add_get = song_add_get_handler,
-		.edit_get = song_edit_get_handler,
 	};
 	register_standard_item_handlers("song", &handlers);
 	axil_register_handler(

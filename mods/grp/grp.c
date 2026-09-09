@@ -76,111 +76,87 @@ static int rep_row_find(rep_row_t *rows, int n_rows, const char *song_id)
 	return -1;
 }
 
+struct rep_pinned_ctx {
+	rep_row_t *rows;
+	int *n_rows;
+	int max_rows;
+};
+
+static void rep_pinned_cb(int idx, const char *key, unsigned fhd, void *user)
+{
+	(void)idx;
+	struct rep_pinned_ctx *c = user;
+	if (*c->n_rows >= c->max_rows)
+		return;
+	const char *sid = qmap_field_get(fhd, key, "song");
+	if (!sid)
+		return;
+	const char *pv = qmap_field_get(fhd, key, "pinned");
+	if (pv && atoi(pv) == 0)
+		return;
+	if (rep_row_find(c->rows, *c->n_rows, sid) >= 0)
+		return;
+
+	rep_row_t *r = &c->rows[(*c->n_rows)++];
+	memset(r, 0, sizeof(*r));
+	snprintf(r->song, sizeof(r->song), "%s", sid);
+	const char *ts = qmap_field_get(fhd, key, "transpose");
+	r->transpose = ts ? atoi(ts) : 0;
+	const char *fm = qmap_field_get(fhd, key, "format");
+	snprintf(r->format, sizeof(r->format), "%s", fm && fm[0] ? fm : "any");
+	r->pinned = 1;
+}
+
+struct rep_tally_ctx {
+	rep_tally_t *tally;
+	int *n_tally;
+};
+
+static void rep_tally_song_cb(
+        int idx, const char *key, unsigned fhd, void *user)
+{
+	(void)idx;
+	struct rep_tally_ctx *c = user;
+	const char *sid = qmap_field_get(fhd, key, "song");
+	if (!sid)
+		return;
+
+	int ti = rep_tally_find(c->tally, *c->n_tally, sid);
+	if (ti < 0) {
+		if (*c->n_tally >= REP_MAX_SONGS)
+			return;
+		ti = (*c->n_tally)++;
+		rep_tally_t *t = &c->tally[ti];
+		memset(t, 0, sizeof(*t));
+		snprintf(t->song, sizeof(t->song), "%s", sid);
+		const char *fm = qmap_field_get(fhd, key, "format");
+		snprintf(t->format, sizeof(t->format), "%s", fm && fm[0] ? fm : "any");
+	}
+	rep_tally_t *t = &c->tally[ti];
+	const char *ts = qmap_field_get(fhd, key, "transpose");
+	rep_tally_bump(t, ts ? atoi(ts) : 0);
+}
+
 static int rep_collect_merged(const char *grp_id, rep_row_t *rows, int max_rows)
 {
-	source_def_t *sb_def;
-	unsigned rfhd, gfhd;
 	rep_tally_t tally[REP_MAX_SONGS];
 	int n_tally = 0, n_rows = 0;
-	uint32_t inv_buf[REP_MAX_GIGS];
-	size_t n_inv;
-	uint32_t grp_pos;
 
 	if (!grp_id || !grp_id[0] || !rows || max_rows <= 0)
 		return 0;
 
 	/* Pinned pass: collect pinned rows first from grp.songs partition */
-	rfhd = source_get_fields_hd("grp.songs");
-	if (rfhd) {
-		int total = source_ordered_count("grp.songs", grp_id);
-		for (int i = 0; i < total && n_rows < max_rows; i++) {
-			const char *k =
-			        source_ordered_key_at("grp.songs", grp_id, i);
-			const char *sid, *ts, *fm, *pv;
-			rep_row_t *r;
-
-			if (!k)
-				continue;
-			sid = qmap_field_get(rfhd, k, "song");
-			if (!sid)
-				continue;
-			pv = qmap_field_get(rfhd, k, "pinned");
-			if (pv && atoi(pv) == 0)
-				continue; /* only pinned rows */
-
-			if (rep_row_find(rows, n_rows, sid) >= 0)
-				continue;
-
-			r = &rows[n_rows++];
-			memset(r, 0, sizeof(*r));
-			snprintf(r->song, sizeof(r->song), "%s", sid);
-			ts = qmap_field_get(rfhd, k, "transpose");
-			r->transpose = ts ? atoi(ts) : 0;
-			fm = qmap_field_get(rfhd, k, "format");
-			snprintf(
-			        r->format, sizeof(r->format), "%s",
-			        fm && fm[0] ? fm : "any");
-			r->pinned = 1;
-		}
-	}
+	struct rep_pinned_ctx pinned_ctx = { rows, &n_rows, max_rows };
+	source_ordered_for_each("grp.songs", grp_id, rep_pinned_cb, &pinned_ctx);
 
 	/* Tally pass: across gigs, tally transposes per song */
-	sb_def = source_find("gig.items");
-	gfhd = source_get_fields_hd("gig.songs");
-	if (sb_def && sb_def->fields_hd && gfhd) {
-		grp_pos = qmap_pos(source_get_fields_hd("grp.items"), grp_id);
-		if (grp_pos != QM_MISS) {
-			n_inv = qmap_inv_get(
-			        sb_def->fields_hd, "grp", grp_pos, inv_buf,
-			        REP_MAX_GIGS);
-			for (size_t gi = 0; gi < n_inv; gi++) {
-				const char *sb_id = qmap_get_key(
-				        sb_def->fields_hd, inv_buf[gi]);
-				int total;
-
-				if (!sb_id)
-					continue;
-				total = source_ordered_count(
-				        "gig.songs", sb_id);
-				for (int i = 0; i < total; i++) {
-					const char *k = source_ordered_key_at(
-					        "gig.songs", sb_id, i);
-					const char *sid, *ts, *fm;
-					rep_tally_t *t;
-					int ti;
-
-					if (!k)
-						continue;
-					sid = qmap_field_get(gfhd, k, "song");
-					if (!sid)
-						continue;
-					ti = rep_tally_find(
-					        tally, n_tally, sid);
-					if (ti < 0) {
-						if (n_tally >= REP_MAX_SONGS)
-							break;
-						ti = n_tally++;
-						t = &tally[ti];
-						memset(t, 0, sizeof(*t));
-						snprintf(
-						        t->song,
-						        sizeof(t->song), "%s",
-						        sid);
-						fm = qmap_field_get(
-						        gfhd, k, "format");
-						snprintf(
-						        t->format,
-						        sizeof(t->format), "%s",
-						        fm && fm[0] ? fm
-						                    : "any");
-					}
-					t = &tally[ti];
-					ts = qmap_field_get(
-					        gfhd, k, "transpose");
-					rep_tally_bump(t, ts ? atoi(ts) : 0);
-				}
-			}
-		}
+	const char *gig_ids[REP_MAX_GIGS];
+	size_t n_gigs = source_find_referencing(
+	        "gig.items", "grp", grp_id, gig_ids, REP_MAX_GIGS);
+	struct rep_tally_ctx tally_ctx = { tally, &n_tally };
+	for (size_t gi = 0; gi < n_gigs; gi++) {
+		source_ordered_for_each(
+		        "gig.songs", gig_ids[gi], rep_tally_song_cb, &tally_ctx);
 	}
 
 	/* Append derived rows in tally order (first-seen), resolving majority
@@ -235,48 +211,44 @@ XY_IMPL(int, rep_for_each_merged,
 	return 0;
 }
 
+struct rep_snapshot_ctx {
+	rep_row_t *cur;
+	int *n_cur;
+};
+
+static void rep_snapshot_cb(
+        int idx, const char *key, unsigned fhd, void *user)
+{
+	(void)idx;
+	struct rep_snapshot_ctx *c = user;
+	if (*c->n_cur >= REP_MAX_SONGS)
+		return;
+	const char *sid = qmap_field_get(fhd, key, "song");
+	if (!sid)
+		return;
+	rep_row_t *r = &c->cur[(*c->n_cur)++];
+	memset(r, 0, sizeof(*r));
+	snprintf(r->song, sizeof(r->song), "%s", sid);
+	const char *ts = qmap_field_get(fhd, key, "transpose");
+	r->transpose = ts ? atoi(ts) : 0;
+	const char *fm = qmap_field_get(fhd, key, "format");
+	snprintf(r->format, sizeof(r->format), "%s", fm && fm[0] ? fm : "any");
+	const char *pv = qmap_field_get(fhd, key, "pinned");
+	r->pinned = pv ? atoi(pv) : 0;
+}
+
 XY_IMPL(int, rep_rebuild, const char *, grp_id)
 {
-	unsigned rfhd;
 	rep_row_t cur[REP_MAX_SONGS], want[REP_MAX_SONGS];
 	int n_cur = 0, n_want = 0;
 	int changed;
 
 	if (!grp_id || !grp_id[0])
 		return -1;
-	rfhd = source_get_fields_hd("grp.songs");
-	if (!rfhd)
-		return -1;
 
 	/* Current partition snapshot: read what's currently in grp.songs */
-	{
-		int total = source_ordered_count("grp.songs", grp_id);
-		for (int i = 0; i < total; i++) {
-			const char *k =
-			        source_ordered_key_at("grp.songs", grp_id, i);
-			const char *sid, *ts, *fm, *pv;
-			rep_row_t *r;
-
-			if (!k)
-				continue;
-			sid = qmap_field_get(rfhd, k, "song");
-			if (!sid)
-				continue;
-			if (n_cur >= REP_MAX_SONGS)
-				return -1;
-			r = &cur[n_cur++];
-			memset(r, 0, sizeof(*r));
-			snprintf(r->song, sizeof(r->song), "%s", sid);
-			ts = qmap_field_get(rfhd, k, "transpose");
-			r->transpose = ts ? atoi(ts) : 0;
-			fm = qmap_field_get(rfhd, k, "format");
-			snprintf(
-			        r->format, sizeof(r->format), "%s",
-			        fm && fm[0] ? fm : "any");
-			pv = qmap_field_get(rfhd, k, "pinned");
-			r->pinned = pv ? atoi(pv) : 0;
-		}
-	}
+	struct rep_snapshot_ctx snap_ctx = { cur, &n_cur };
+	source_ordered_for_each("grp.songs", grp_id, rep_snapshot_cb, &snap_ctx);
 
 	/* Desired list: ONLY pinned rows (pinned=1) hit the disk partition */
 	for (int i = 0; i < n_cur; i++) {

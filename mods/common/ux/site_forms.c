@@ -43,13 +43,13 @@ bud_node *site_ui_delete_confirm(
 	        "  <p>%s <strong>%s</strong>?</p>"
 	        "  <form method='POST' action='%s' "
 	        "enctype='multipart/form-data'>"
-	        "    <input type='hidden' name='csrf_token' value='%s'/>"
+	        "    %node"
 	        "    %node"
 	        "  </form>"
 	        "</div>",
 	        prompt,
 	        (title && title[0]) ? title : (id ? id : ""), action_path,
-	        csrf_token ? csrf_token : "",
+	        csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL,
 	        site_ui_form_actions(cancel_path, "Delete", NULL));
 }
 
@@ -68,7 +68,7 @@ bud_node *site_ui_add_form(
 	        "%node"
 	        "<form action='%s' method='POST' enctype='multipart/form-data' "
 	        "class='flex flex-col gap-4'>"
-	        "  <input type='hidden' name='csrf_token' value='%s'/>"
+	        "  %node"
 	        "  <label>%s"
 	        "    <input name='title'/>"
 	        "  </label>"
@@ -77,7 +77,8 @@ bud_node *site_ui_add_form(
 	        (has_error && error_msg)
 	                ? bud_tpl("<p class='text-error'>%s</p>", error_msg)
 	                : NULL,
-	        action, csrf_token ? csrf_token : "",
+	        action,
+	        csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL,
 	        title_lbl,
 	        site_ui_form_actions(cancel_href, "Add", NULL));
 }
@@ -219,25 +220,22 @@ bud_node *site_ui_action_form(
         const char *action, const char *csrf_token, const char *method,
         bud_node *inputs, const char *btn_label, const char *btn_class)
 {
-	bud_node *form = bud_tpl(
-	        "<form action='%s' method='%s' class='flex gap-1 items-center'>"
-	        "  %node"
-	        "  %node"
-	        "  %node"
-	        "</form>",
-	        action ? action : "", (method && method[0]) ? method : "POST",
-	        csrf_token ? bud_tpl("<input type='hidden' name='csrf_token' "
-	                             "value='%s'/>",
-	                             csrf_token)
-	                   : NULL,
-	        inputs,
-	        (btn_label && btn_label[0])
-	                ? bud_tpl("<button type='submit' "
-	                          "class='%s'>%s</button>",
-	                          btn_class ? btn_class
-	                                    : "btn text-xs py-1 px-2",
-	                          btn_label)
-	                : NULL);
+	bud_node *form = bud_element("form");
+	if (!form)
+		return NULL;
+	bud_set_attr(form, "action", action ? action : "");
+	bud_set_attr(form, "method", (method && method[0]) ? method : "POST");
+	bud_set_attr(form, "class", "flex gap-1 items-center");
+	if (csrf_token)
+		bud_append(form, bud_hidden_input("csrf_token", csrf_token));
+	if (inputs)
+		bud_append(form, inputs);
+	if (btn_label && btn_label[0])
+		bud_append(
+		        form,
+		        bud_submit_btn(
+		                btn_label,
+		                btn_class ? btn_class : "btn text-xs py-1 px-2"));
 	return form;
 }
 
