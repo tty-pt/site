@@ -7,8 +7,7 @@ bud_node *list_render(const list_state_t *state)
 
 	if (!state)
 		return NULL;
-	inner = state->nids == 0 ? idx_list_empty_layout(state)
-	                         : idx_list_layout(state);
+	inner = idx_list_layout(state);
 	if (!inner)
 		return NULL;
 	return bud_tpl("<div id='bud-root'>%node</div>", inner);

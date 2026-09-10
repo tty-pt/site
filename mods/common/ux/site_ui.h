@@ -86,6 +86,7 @@ typedef hyle_bud_picker_entry_t pick_entry_t;
 typedef hyle_bud_picker_view_t pick_view_t;
 
 /* ── Zoom helpers ─────────────────────────────────── */
+void site_ui_zoom_style(int zoom, char *buf, size_t len);
 void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom);
 int ui_on_zoom_change(
         bud_event *event, int *zoom_out, bud_node *main_node,

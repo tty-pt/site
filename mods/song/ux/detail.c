@@ -9,6 +9,7 @@
 
 #include <transp/music.h>
 #include <transp/spelling.h>
+#include "../../common/ux/site_music.h"
 
 #include "../../common/ux/site_ui.c"
 
@@ -64,18 +65,9 @@ void wasm_init(const char *json, int len)
 
 static bud_node *render_key_options(void)
 {
-	bud_node *opts = bud_fragment();
-	int cur_t = ((app_state.transpose % 12) + 12) % 12;
-	for (int i = 0; i < 12; i++) {
-		const char *name = key_name(
-		        i, app_state.original_key, app_state.use_latin);
-		bud_append(
-		        opts,
-		        lx_n("option", lx_attr("value", "%d", i),
-		             (i == cur_t) ? lx_attr("selected", "") : lx_none(),
-		             lx_textf("%s", name)));
-	}
-	return opts;
+	return site_ui_render_key_options(
+	        app_state.transpose, app_state.original_key,
+	        app_state.use_latin);
 }
 
 static bud_node *render_transpose_form(bud_node *key_options)
@@ -116,9 +108,7 @@ static bud_node *render_transpose_form(bud_node *key_options)
 static bud_node *render_chord_viewer(void)
 {
 	char zoom_style[64];
-	snprintf(
-	        zoom_style, sizeof(zoom_style),
-	        "width:100%%;max-width:100%%;--chord-zoom:%d", app_state.zoom);
+	site_ui_zoom_style(app_state.zoom, zoom_style, sizeof(zoom_style));
 
 	bud_node *media_slot = site_ui_render_media_slot(
 	        app_state.cache.yt, app_state.cache.audio, app_state.cache.pdf);

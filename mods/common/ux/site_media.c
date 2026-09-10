@@ -11,12 +11,17 @@
 #include "bud/bud_app.h"
 #include "bud/bud_jsx.h"
 
+void site_ui_zoom_style(int zoom, char *buf, size_t len)
+{
+	snprintf(
+	        buf, len,
+	        "width:100%%;max-width:100%%;--chord-zoom:%d", zoom);
+}
+
 void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom)
 {
 	char style[64], zoom_str[16], zoom_pct[16];
-	snprintf(
-	        style, sizeof(style),
-	        "width:100%%;max-width:100%%;--chord-zoom:%d", zoom);
+	site_ui_zoom_style(zoom, style, sizeof(style));
 	snprintf(zoom_str, sizeof(zoom_str), "%d", zoom);
 	snprintf(zoom_pct, sizeof(zoom_pct), "%d%%", zoom);
 	bud_patch_attr(main_node, "style", style);

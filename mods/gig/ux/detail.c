@@ -11,6 +11,7 @@
 
 #include <transp/music.h>
 #include <transp/transp_flags.h>
+#include "../../common/ux/site_music.h"
 
 #include "../../common/ux/site_ui.c"
 #include "../../common/state_macros.h"
@@ -275,10 +276,7 @@ bud_node *bud_app_render(void)
 	char zoom_style[64];
 
 	snprintf(zoom_str, sizeof(zoom_str), "%d", sb_app_state.zoom);
-	snprintf(
-	        zoom_style, sizeof(zoom_style),
-	        "width:100%%;max-width:100%%;--chord-zoom:%d",
-	        sb_app_state.zoom);
+	site_ui_zoom_style(sb_app_state.zoom, zoom_style, sizeof(zoom_style));
 
 	/* Option checkboxes + zoom slider inside a form */
 	bud_node *opts = bud_tpl(
@@ -471,17 +469,7 @@ static bud_node *sb_render_format_picker(
 static bud_node *sb_render_key_options(int t, int orig_key, int flags)
 {
 	int latin = (flags & TRANSP_LATIN) ? 1 : 0;
-	bud_node *key_opts = bud_fragment();
-	int cur_t = ((t % 12) + 12) % 12;
-	for (int i = 0; i < 12; i++) {
-		bud_node *o =
-		        bud_tpl("<option value='%d' %b>%s</option>", i,
-		                i == cur_t ? "selected" : NULL,
-		                key_name(i, orig_key, latin));
-		if (o)
-			bud_append(key_opts, o);
-	}
-	return key_opts;
+	return site_ui_render_key_options(t, orig_key, latin);
 }
 
 static bud_node *sb_render_song_row(

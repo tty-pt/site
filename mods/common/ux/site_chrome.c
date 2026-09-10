@@ -8,41 +8,12 @@
 #include "bud/bud_app.h"
 #include "bud/bud_jsx.h"
 #include "site_chrome.h"
+#include "site_paths.c"
 #include "../../i18n/i18n_dict.h"
 
 #define NAV_SCROLL_TOP 24
 #define NAV_SCROLL_HIDE_AT 48
 #define NAV_SCROLL_DELTA 4
-
-static void site_chrome_parent_path(const char *path, char *buf, size_t len)
-{
-	const char *slash;
-	const char *p;
-	size_t n;
-
-	if (!path || !buf || len == 0)
-		return;
-	slash = strrchr(path, '/');
-	if (!slash || slash == path) {
-		snprintf(buf, len, "/");
-		return;
-	}
-	if (*(slash + 1) == '\0') {
-		p = slash - 1;
-		while (p > path && *p != '/')
-			p--;
-		if (*p != '/') {
-			snprintf(buf, len, "/");
-			return;
-		}
-		slash = p;
-	}
-	n = (size_t)(slash - path) + 1;
-	if (n >= len)
-		n = len - 1;
-	memcpy(buf, path, n);
-	buf[n] = '\0';
-}
 
 static bud_node *site_chrome_get_nav_bar(bud_node *target)
 {
@@ -128,7 +99,7 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	icon = state && state->icon[0] ? state->icon : "🏠";
 	up[0] = '\0';
 	if (path[0] && strcmp(path, "/") != 0)
-		site_chrome_parent_path(path, up, sizeof(up));
+		parent_path(path, up, sizeof(up));
 	if (up[0]) {
 		const char *back_label = i18n_t(state ? state->lang : NULL, "Back");
 		back = bud_tpl(

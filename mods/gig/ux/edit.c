@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include <transp/music.h>
+#include "../../common/ux/site_music.h"
 #include "../../common/ux/site_ui.c"
 #include "../../index/ux/list.c"
 
@@ -20,15 +21,7 @@ typedef struct {
 
 static bud_node *render_key_options(int cur_key, int orig_key)
 {
-	bud_node *opts = bud_fragment();
-	int norm_key = ((cur_key % 12) + 12) % 12;
-	for (int si = 0; si < 12; si++) {
-		bud_append(
-		        opts, bud_tpl("<option value='%d' %b>%s</option>", si,
-		                      si == norm_key ? "selected" : NULL,
-		                      key_name(si, orig_key, 0)));
-	}
-	return opts;
+	return site_ui_render_key_options(cur_key, orig_key, 0);
 }
 
 static bud_node *render_song_row(

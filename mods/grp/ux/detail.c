@@ -107,26 +107,9 @@ static bud_node *ch_render_repertoire_empty(void)
 
 static bud_node *ch_render_key_selector(int orig_key, int transpose)
 {
-	static const char *CH_KEYS[] = { "C",  "C#", "D",  "D#", "E",  "F",
-		                         "F#", "G",  "G#", "A",  "A#", "B" };
-	bud_node *sel =
-	        bud_tpl("<select name='key' class='text-xs p-1'></select>");
-	for (int k = 0; k < 12; k++) {
-		int semitones = ((k - orig_key) % 12 + 12) % 12;
-		char label[32];
-		if (semitones == 0)
-			snprintf(
-			        label, sizeof(label), "%s (Original)",
-			        CH_KEYS[k]);
-		else
-			snprintf(label, sizeof(label), "%s", CH_KEYS[k]);
-		bud_append(
-		        sel,
-		        bud_tpl("<option value='%d' %b>%s</option>", semitones,
-		                (semitones == transpose) ? "selected" : NULL,
-		                label));
-	}
-	return sel;
+	return bud_tpl(
+	        "<select name='key' class='text-xs p-1'>%node</select>",
+	        site_ui_render_key_options(transpose, orig_key, 0));
 }
 
 static bud_node *ch_render_song_row(

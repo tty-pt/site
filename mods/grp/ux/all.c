@@ -13,5 +13,6 @@
 #include "../../index/ux/list.c"
 
 #include <transp/music.h>
+#include "../../common/ux/site_music.h"
 
 #include "detail.c"
