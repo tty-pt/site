@@ -36,6 +36,37 @@ uint32_t stoma_query_phrase(stoma_db_t *db, const char *field, const char *query
                             uint32_t out_hd, int *handled);
 ```
 
+## Recall-kernel form
+
+stoma is the lexical axis of the recall kernel (`rec.h` in libqmap; spec in
+libqmap's `docs/RECALL-KERNEL.md`). Implemented adapter following the
+contract (one filler, streams matches, seals, plain `int` return, additive):
+
+```c
+/* Exact lexical set: refs are the caller's decimal row ids. phrase=0 behaves
+   as stoma_query, phrase=1 as stoma_query_phrase. Fills `out` additively and
+   seals it; -1 on NULL args or a non-decimal row id encountered in the walk
+   (the consumer must index by its own decimal rec_ref_t). Zero-token/empty
+   queries yield a sealed empty set (mirrors the handled=0 no-op). */
+int rec_axis_fill_tokens(stoma_db_t *db, const char *field,
+                         const char *query, int phrase, rec_set_t *out);
+
+/* FTS score ranker for the kernel loop: score = matched / token_count of the
+   folded field text of decimal(ref). Shorter docs rank higher on ties.
+   Proposed consumer plan (mm R4): tokens(db, t) ∩ geo(b) ∩ time(r) →
+   soonest+FTS → top-k. */
+struct stoma_rank_ctx {
+	stoma_db_t *db;
+	const char *field;
+	size_t matched; /* matched query tokens (= query tokens for an AND-set) */
+};
+int stoma_rank(struct stoma_rank_ctx *ctx, rec_ref_t ref, float *score);
+```
+
+`stoma_query`/`stoma_query_phrase` remain the raw entry points for
+non-numeric row ids (hyle uses them today as a prefilter, no scoring); the
+adapter is optional and additive.
+
 ## Dependencies
 
 - `external/libqmap` — Hash map storage

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <ttypt/rec.h>
 
 /*
  * stoma — qmap-backed full-text index.
@@ -65,6 +66,36 @@ uint32_t stoma_query(stoma_db_t *db,
 uint32_t stoma_query_phrase(stoma_db_t *db,
 	const char *field, const char *query,
 	uint32_t out_hd, int *handled);
+
+/*
+ * Recall-kernel lexical filler (adapter contract, see rec.h): the exact set
+ * of refs whose row_id matches `query` in `field`. The consumer must index
+ * by its own decimal rec_ref_t (stoma_index(db, field, "42", value)) — the
+ * filler pushes the parsed ids and stoma_rank reverses the mapping.
+ * Semantics are identical to stoma_query (phrase=0) / stoma_query_phrase
+ * (phrase=1). Refs are appended to `out` (additive) and the set is sealed
+ * (0 = ok). -1 on NULL args or when a matched row_id is not strictly decimal
+ * (fill aborts; raw entry points still serve non-numeric stores). Zero-token
+ * or empty queries yield a sealed empty set (mirrors the handled=0 no-op).
+ */
+int rec_axis_fill_tokens(stoma_db_t *db,
+	const char *field, const char *query,
+	int phrase, rec_set_t *out);
+
+/*
+ * FTS score function for the recall-kernel rank loop: score = ctx->matched /
+ * token_count of the folded field text of decimal(ref) (shorter docs rank
+ * higher on ties). Caller must have indexed by its decimal ref. -1 on NULL
+ * args, an unknown (field, row), or a zero-token document (the rank loop
+ * skips the ref). The score may exceed 1.0 when matched > doc tokens.
+ * Compatible with rec_score_fn via a caller adapter.
+ */
+struct stoma_rank_ctx {
+	stoma_db_t *db;
+	const char *field;
+	size_t matched; /* matched query tokens (= query tokens for an AND-set) */
+};
+int stoma_rank(struct stoma_rank_ctx *ctx, rec_ref_t ref, float *score);
 
 /*
  * Iterates non-whitespace word tokens in `text` and invokes cb(token, len, user).

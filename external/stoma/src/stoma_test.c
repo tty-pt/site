@@ -3,10 +3,12 @@
 #include <stdlib.h>
 #include <locale.h>
 #include <ttypt/qmap.h>
+#include <ttypt/rec.h>
 #include "stoma/stoma.h"
 
 static int failures = 0;
 static int total = 0;
+static stoma_db_t *rdb;
 
 #define CHECK(cond, name)                                                      \
 	do {                                                                   \
@@ -20,6 +22,109 @@ static int total = 0;
 static int hd_has(unsigned hd, const char *row)
 {
 	return qmap_get(hd, row) != NULL;
+}
+
+/* ---- recall-kernel helpers (groups 30-35) ---- */
+
+static int rec_has(const rec_set_t *fs, rec_ref_t r)
+{
+	const rec_ref_t *s = rec_set_at(fs);
+	size_t n = rec_set_count(fs);
+	size_t lo = 0, hi = n, mid;
+
+	while (lo < hi) {
+		mid = lo + (hi - lo) / 2;
+		if (s[mid] < r)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo < n && s[lo] == r;
+}
+
+static int rec_sorted_unique(const rec_set_t *fs)
+{
+	const rec_ref_t *s = rec_set_at(fs);
+	size_t n = rec_set_count(fs);
+	size_t i;
+
+	for (i = 1; i < n; i++)
+		if (s[i] <= s[i - 1])
+			return 0;
+	return 1;
+}
+
+static int qmap_equals_set(unsigned hd, const rec_set_t *fs)
+{
+	uint32_t cur = qmap_iter(hd, NULL, 0);
+	const void *k;
+	const void *v;
+	size_t qn = 0;
+	int ok = 1;
+
+	while (ok && qmap_next(&k, &v, cur)) {
+		const char *key = (const char *)k;
+		char *end;
+		unsigned long long rv;
+
+		if (key[0] < '0' || key[0] > '9') {
+			ok = 0;
+			break;
+		}
+		rv = strtoull(key, &end, 10);
+		ok = end && *end == '\0' && rec_has(fs, (rec_ref_t)rv);
+		if (ok)
+			qn++;
+	}
+	qmap_fin(cur);
+	return ok && qn == rec_set_count(fs);
+}
+
+static rec_set_t *fill_once(stoma_db_t *db, const char *field,
+                            const char *query, int phrase)
+{
+	rec_set_t *fs = rec_set_new();
+
+	if (!fs)
+		return NULL;
+	if (rec_axis_fill_tokens(db, field, query, phrase, fs) != 0) {
+		rec_set_free(fs);
+		return NULL;
+	}
+	return fs;
+}
+
+static int float_close(float a, float b)
+{
+	float d = a - b;
+
+	return d < 0 ? -d < 1e-6f : d < 1e-6f;
+}
+
+static void check_row_fill(unsigned out, const char *query, int hexp,
+                           const rec_ref_t *exp, size_t nex)
+{
+	int handled = 0;
+	uint32_t n;
+	rec_set_t *fs;
+	char name[128];
+
+	qmap_drop(out);
+	n = stoma_query(rdb, "title", query, out, &handled);
+	fs = fill_once(rdb, "title", query, 0);
+	snprintf(name, sizeof(name), "fill==query '%s'", query);
+	CHECK(fs && handled == hexp && n == nex && rec_set_count(fs) == nex &&
+	              qmap_equals_set(out, fs) &&
+	              rec_sorted_unique(fs),
+	      name);
+	if (fs) {
+		const rec_ref_t *s = rec_set_at(fs);
+		size_t i;
+
+		for (i = 0; i < nex; i++)
+			CHECK(s[i] == exp[i], "fill member order");
+		rec_set_free(fs);
+	}
 }
 
 int main(void)
@@ -377,6 +482,302 @@ int main(void)
 	n = stoma_query_phrase(db, "title", "nowhere at all", out, &handled);
 	CHECK(handled == 1 && n == 0, "phrase no match -> 0");
 	qmap_drop(out);
+
+	/* 30-35. recall-kernel adapter (rec_axis_fill_tokens / stoma_rank) on a
+	 * dedicated decimal-id db so the raw r1-r29 universe is untouched. */
+	rdb = stoma_open(0);
+	if (rdb) {
+		/* 30. fill-phrase=0 == stoma_query on decimal ids 10-17 */
+		stoma_index(rdb, "title", "10", "Starlight of the night");
+		stoma_index(rdb, "title", "11", "Station one");
+		stoma_index(rdb, "title", "12", "st");
+		stoma_index(rdb, "title", "13", "A Dark Night");
+		stoma_index(rdb, "title", "14", "Black Star");
+		stoma_index(rdb, "title", "15", "1984");
+		stoma_index(rdb, "title", "16", "Pão de Açúcar");
+		stoma_index(rdb, "title", "17", "Estrela negra");
+		{
+			static const rec_ref_t e10[] = { 10, 13 };
+			static const rec_ref_t e11[] = { 10, 11, 12, 14 };
+			static const rec_ref_t e14[] = { 14 };
+			static const rec_ref_t e15[] = { 15 };
+			static const rec_ref_t e16[] = { 16 };
+			static const rec_ref_t e17[] = { 17 };
+			/* zero-token/empty queries: handled==0 */
+			check_row_fill(out, "night", 1, e10, 2);
+			check_row_fill(out, "st", 1, e11, 4);
+			check_row_fill(out, "black star", 1, e14, 1);
+			check_row_fill(out, "star black", 1, e14, 1);
+			check_row_fill(out, "1984", 1, e15, 1);
+			check_row_fill(out, "19", 1, e15, 1);
+			check_row_fill(out, "pão", 1, e16, 1);
+			check_row_fill(out, "pao", 1, NULL, 0);
+			check_row_fill(out, "estrela", 1, e17, 1);
+			check_row_fill(out, "nowhere", 1, NULL, 0);
+			check_row_fill(out, "---", 0, NULL, 0);
+			check_row_fill(out, "", 0, NULL, 0);
+		}
+
+		/* 31. add ids 18-23; fill-phrase=1 == stoma_query_phrase, and
+		 * fill-phrase=0 == stoma_query */
+		stoma_index(rdb, "title", "18", "Blue Dawn");
+		stoma_index(rdb, "title", "19", "Blue summer of the dawn");
+		stoma_index(rdb, "title", "20", "Atenção Coração");
+		stoma_index(rdb, "title", "21", "blackstar manor");
+		stoma_index(rdb, "title", "22", "la la la");
+		stoma_index(rdb, "title", "23", "");
+		{
+			static const rec_ref_t e18[] = { 18 };
+			static const rec_ref_t e1819[] = { 18, 19 };
+			static const rec_ref_t e19[] = { 19 };
+			static const rec_ref_t e20[] = { 20 };
+			static const rec_ref_t e21[] = { 21 };
+			static const rec_ref_t e22[] = { 22 };
+			static const struct {
+				const char *q;
+				const rec_ref_t *e0;
+				size_t n0;
+				const rec_ref_t *e1;
+				size_t n1;
+			} rows[] = {
+				{ "blue dawn", e1819, 2, e18, 1 },
+				{ "blue summer", e19, 1, e19, 1 },
+				{ "dawn blue", e1819, 2, NULL, 0 },
+				{ "black manor", e21, 1, e21, 1 },
+				{ "star manor", NULL, 0, NULL, 0 },
+				{ "atenção coração", e20, 1, e20, 1 },
+				{ "coracao atencao", NULL, 0, NULL, 0 },
+				{ "blue", e1819, 2, e1819, 2 },
+				{ "la", e22, 1, e22, 1 },
+				{ "la la", e22, 1, e22, 1 },
+				{ "dawn", e1819, 2, e1819, 2 },
+			};
+			size_t i;
+			int p;
+
+			for (i = 0; i < sizeof(rows) / sizeof(rows[0]); i++)
+				for (p = 0; p < 2; p++) {
+					int handled = 0;
+					uint32_t nn;
+					rec_set_t *fs;
+					char name[128];
+					const rec_ref_t *e =
+					        p ? rows[i].e1 : rows[i].e0;
+					size_t ne = p ? rows[i].n1
+					              : rows[i].n0;
+
+					qmap_drop(out);
+					if (p)
+						nn = stoma_query_phrase(
+						        rdb, "title", rows[i].q,
+						        out, &handled);
+					else
+						nn = stoma_query(
+						        rdb, "title", rows[i].q,
+						        out, &handled);
+					fs = fill_once(rdb, "title", rows[i].q,
+					               p);
+					snprintf(name, sizeof(name),
+					         "fill==query_phrase=%d '%s'", p,
+					         rows[i].q);
+					CHECK(fs && handled == 1 && nn == ne &&
+					              rec_set_count(fs) == ne &&
+					              qmap_equals_set(out, fs) &&
+					              rec_sorted_unique(fs),
+					      name);
+					if (fs) {
+						const rec_ref_t *sb =
+						        rec_set_at(fs);
+						size_t j;
+
+						for (j = 0; j < ne; j++)
+							CHECK(sb[j] == e[j],
+							      "fill member order");
+						rec_set_free(fs);
+					}
+				}
+		}
+
+		/* 32. seal + additivity */
+		{
+			rec_set_t *fs = fill_once(rdb, "title", "night", 0);
+
+			CHECK(fs && rec_set_count(fs) == 2 && rec_has(fs, 10) &&
+			              rec_has(fs, 13) && rec_sorted_unique(fs),
+			      "fill night count+seal");
+			CHECK(fs && rec_axis_fill_tokens(rdb, "title", "estrela", 0,
+			                                 fs) == 0 &&
+			              rec_set_count(fs) == 3 && rec_has(fs, 17) &&
+			              rec_sorted_unique(fs),
+			      "fill additive union");
+			CHECK(fs && rec_axis_fill_tokens(rdb, "title", "night", 0,
+			                                 fs) == 0 &&
+			              rec_set_count(fs) == 3,
+			      "fill reseal dedup stable");
+			rec_set_push(fs, 999);
+			CHECK(fs && rec_axis_fill_tokens(rdb, "title", "night", 0,
+			                                 fs) == 0 &&
+			              rec_set_count(fs) == 4 && rec_has(fs, 999) &&
+			              rec_sorted_unique(fs),
+			      "fill keeps pre-existing refs");
+			rec_set_free(fs);
+			fs = fill_once(rdb, "title", "black star", 0);
+			CHECK(fs && rec_set_count(fs) == 1 && rec_has(fs, 14),
+			      "fill multi-token dedup");
+			rec_set_free(fs);
+		}
+
+		/* 33. arg validation + non-decimal store */
+		{
+			rec_set_t *fs = rec_set_new();
+			float sc;
+			struct stoma_rank_ctx c0;
+
+			CHECK(rec_axis_fill_tokens(NULL, "title", "x", 0, fs) ==
+			              -1,
+			      "fill null db");
+			CHECK(rec_axis_fill_tokens(rdb, NULL, "x", 0, fs) == -1,
+			      "fill null field");
+			CHECK(rec_axis_fill_tokens(rdb, "title", NULL, 0, fs) ==
+			              -1,
+			      "fill null query");
+			CHECK(rec_axis_fill_tokens(rdb, "title", "x", 0, NULL) ==
+			              -1,
+			      "fill null out");
+			rec_set_free(fs);
+			c0.db = NULL;
+			c0.field = NULL;
+			c0.matched = 0;
+			CHECK(stoma_rank(NULL, 1, &sc) == -1, "rank null ctx");
+			CHECK(stoma_rank(&c0, 1, &sc) == -1, "rank null db");
+			c0.db = rdb;
+			CHECK(stoma_rank(&c0, 1, &sc) == -1, "rank null field");
+			c0.field = "title";
+			CHECK(stoma_rank(&c0, 1, NULL) == -1, "rank null score");
+		}
+		{
+			stoma_db_t *xdb = stoma_open(0);
+			rec_set_t *fs;
+
+			stoma_index(xdb, "title", "r7", "alpha beta");
+			stoma_index(xdb, "title", "12x", "alpha beta");
+			fs = fill_once(xdb, "title", "alpha", 0);
+			CHECK(fs == NULL, "fill rejects non-decimal row id");
+			if (fs)
+				rec_set_free(fs);
+			stoma_close(xdb);
+		}
+
+		/* 34. stoma_rank numbers */
+		{
+			struct stoma_rank_ctx ctx = { rdb, "title", 1 };
+			float sc;
+
+			CHECK(stoma_rank(&ctx, 10, &sc) == 0 &&
+			              float_close(sc, 0.25f),
+			      "rank 10 1/4");
+			CHECK(stoma_rank(&ctx, 13, &sc) == 0 &&
+			              float_close(sc, 1.0f / 3.0f),
+			      "rank 13 1/3");
+			CHECK(stoma_rank(&ctx, 15, &sc) == 0 &&
+			              float_close(sc, 1.0f),
+			      "rank 15 1/1");
+			CHECK(stoma_rank(&ctx, 17, &sc) == 0 &&
+			              float_close(sc, 0.5f),
+			      "rank 17 1/2");
+			{
+				struct stoma_rank_ctx ctx2 = { rdb, "title", 2 };
+
+				CHECK(stoma_rank(&ctx2, 15, &sc) == 0 &&
+				              float_close(sc, 2.0f),
+				      "rank matched override >1");
+			}
+			CHECK(stoma_rank(&ctx, 999, &sc) == -1,
+			      "rank missing doc");
+			{
+				struct stoma_rank_ctx ctxb = { rdb, "bogus", 1 };
+
+				CHECK(stoma_rank(&ctxb, 10, &sc) == -1,
+				      "rank missing field");
+			}
+			CHECK(stoma_rank(&ctx, 23, &sc) == -1,
+			      "rank zero-token doc");
+			CHECK(stoma_rank(&ctx, 10, &sc) == 0 &&
+			              float_close(sc, 0.25f),
+			      "rank round-trip stable");
+		}
+
+		/* 35. kernel integration (rec_set join + rec_rank loop) */
+		{
+			rec_set_t *A = fill_once(rdb, "title", "night", 0);
+			rec_set_t *B = rec_set_new();
+			rec_set_t *I = rec_set_new();
+			rec_set_t *D = rec_set_new();
+			rec_set_t *U = rec_set_new();
+			rec_ref_t refs[2];
+			float scores[2];
+			size_t nr;
+			size_t i;
+
+			rec_set_push(B, 9);
+			rec_set_push(B, 10);
+			rec_set_push(B, 13);
+			rec_set_push(B, 14);
+			rec_set_seal(B);
+			CHECK(rec_set_intersect(I, A, B) == 0 &&
+			              rec_set_count(I) == 2 && rec_has(I, 10) &&
+			              rec_has(I, 13),
+			      "kernel intersect");
+			CHECK(rec_set_subtract(D, B, A) == 0 &&
+			              rec_set_count(D) == 2 && rec_has(D, 9) &&
+			              rec_has(D, 14),
+			      "kernel subtract");
+			CHECK(rec_set_union(U, B, A) == 0 &&
+			              rec_set_count(U) == 4 && rec_has(U, 9) &&
+			              rec_has(U, 10) && rec_has(U, 13) &&
+			              rec_has(U, 14),
+			      "kernel union");
+			{
+				rec_rank_t *rk = rec_rank_new(2, 0.0f);
+				struct stoma_rank_ctx ctx = { rdb, "title", 1 };
+				float sc;
+
+				for (i = 0; i < rec_set_count(A); i++)
+					if (stoma_rank(&ctx, rec_set_at(A)[i],
+					               &sc) == 0)
+						rec_rank_push(rk, rec_set_at(A)[i],
+						              sc);
+				nr = rec_rank_sorted(rk, refs, scores);
+				CHECK(nr == 2 && refs[0] == 13 && refs[1] == 10 &&
+				              float_close(scores[0],
+				                          1.0f / 3.0f) &&
+				              float_close(scores[1], 0.25f),
+				      "kernel rank loop best-first");
+				rec_rank_free(rk);
+			}
+			{
+				rec_rank_t *rk = rec_rank_new(1, 0.31f);
+				struct stoma_rank_ctx ctx = { rdb, "title", 1 };
+				float sc;
+
+				for (i = 0; i < rec_set_count(A); i++)
+					if (stoma_rank(&ctx, rec_set_at(A)[i],
+					               &sc) == 0)
+						rec_rank_push(rk, rec_set_at(A)[i],
+						              sc);
+				nr = rec_rank_sorted(rk, refs, scores);
+				CHECK(nr == 1 && refs[0] == 13,
+				      "kernel min_score filters");
+				rec_rank_free(rk);
+			}
+			rec_set_free(A);
+			rec_set_free(B);
+			rec_set_free(I);
+			rec_set_free(D);
+			rec_set_free(U);
+		}
+		stoma_close(rdb);
+	}
 
 	stoma_close(db);
 	qmap_close(out);

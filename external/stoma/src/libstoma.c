@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 #include <ttypt/qmap.h>
 #include "stoma/stoma.h"
 
@@ -208,8 +209,40 @@ static int doc_matches_phrase(const dctoks_t *d, const collect_ctx_t *q)
 	return 0;
 }
 
+/* ---- recall-kernel adapter ---- */
+
+typedef struct {
+	unsigned hd;    /* raw-path output handle            */
+	rec_set_t *set; /* kernel candidate set              */
+	int err;        /* strict decimal-parse failure flag */
+} stoma_dest_t;
+
+static void stoma_dest_emit(stoma_dest_t *d, const char *row_id)
+{
+	if (d->hd) {
+		qmap_put(d->hd, row_id, "");
+		return;
+	}
+	if (d->set) {
+		char *end;
+		unsigned long long v;
+
+		errno = 0;
+		if (row_id[0] < '0' || row_id[0] > '9') {
+			d->err = 1;
+			return;
+		}
+		v = strtoull(row_id, &end, 10);
+		if (!end || *end != '\0' || errno == ERANGE) {
+			d->err = 1;
+			return;
+		}
+		rec_set_push(d->set, (rec_ref_t)v);
+	}
+}
+
 static uint32_t stoma_query_any(
-        stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
+        stoma_db_t *db, const char *field, const char *query, stoma_dest_t *out,
         int *handled, int phrase)
 {
 	collect_ctx_t toks;
@@ -222,7 +255,9 @@ static uint32_t stoma_query_any(
 
 	if (handled)
 		*handled = 0;
-	if (!db || !field || !query || !out_hd)
+	if (!db || !field || !query || !out)
+		return 0;
+	if (!out->hd && !out->set)
 		return 0;
 	/* The fold never grows its output, so strlen+1 always fits. */
 	qlen = strlen(query);
@@ -329,7 +364,7 @@ static uint32_t stoma_query_any(
 				free(d.ent);
 			}
 			if (keep) {
-				qmap_put(out_hd, rid, "");
+				stoma_dest_emit(out, rid);
 				matches++;
 			}
 		}
@@ -346,12 +381,71 @@ uint32_t stoma_query(
         stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
         int *handled)
 {
-	return stoma_query_any(db, field, query, out_hd, handled, 0);
+	stoma_dest_t d = { out_hd, NULL, 0 };
+
+	return stoma_query_any(db, field, query, &d, handled, 0);
 }
 
 uint32_t stoma_query_phrase(
         stoma_db_t *db, const char *field, const char *query, uint32_t out_hd,
         int *handled)
 {
-	return stoma_query_any(db, field, query, out_hd, handled, 1);
+	stoma_dest_t d = { out_hd, NULL, 0 };
+
+	return stoma_query_any(db, field, query, &d, handled, 1);
+}
+
+/* ---- recall-kernel fill + rank ---- */
+
+int rec_axis_fill_tokens(stoma_db_t *db, const char *field, const char *query,
+                         int phrase, rec_set_t *out)
+{
+	stoma_dest_t d;
+
+	if (!db || !field || !query || !out)
+		return -1;
+	d.hd = 0;
+	d.set = out;
+	d.err = 0;
+	stoma_query_any(db, field, query, &d, NULL, phrase ? 1 : 0);
+	if (d.err)
+		return -1;
+	rec_set_seal(out);
+	return 0;
+}
+
+int stoma_rank(struct stoma_rank_ctx *ctx, rec_ref_t ref, float *score)
+{
+	char rid[24];
+	size_t fld;
+	size_t rlen;
+	char *dkey;
+	const char *dtext;
+	dctoks_t d;
+
+	if (!ctx || !ctx->db || !ctx->field || !score)
+		return -1;
+	snprintf(rid, sizeof(rid), "%llu", (unsigned long long)ref);
+	fld = strlen(ctx->field);
+	rlen = strlen(rid);
+	dkey = malloc(fld + 1 + rlen + 1);
+	if (!dkey)
+		return -1;
+	memcpy(dkey, ctx->field, fld);
+	dkey[fld] = '\t';
+	memcpy(dkey + fld + 1, rid, rlen);
+	dkey[fld + 1 + rlen] = '\0';
+	dtext = (const char *)qmap_get(ctx->db->doc_hd, dkey);
+	free(dkey);
+	if (!dtext)
+		return -1;
+	memset(&d, 0, sizeof(d));
+	stoma_tokenize(dtext, collect_doc_token, &d);
+	if (d.n == 0) {
+		free(d.ent);
+		return -1;
+	}
+	*score = (float)ctx->matched / (float)d.n;
+	free(d.ent);
+	return 0;
 }

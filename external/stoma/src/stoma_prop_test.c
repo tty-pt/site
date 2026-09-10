@@ -12,6 +12,7 @@
 #include <string.h>
 #include <locale.h>
 #include <ttypt/qmap.h>
+#include <ttypt/rec.h>
 #include "stoma/stoma.h"
 
 #define MAX_ROWS 300
@@ -255,6 +256,107 @@ static int ref_phrase_matches(int row, int fi, const toks_t *qt)
 	return 0;
 }
 
+/* Differential check of rec_axis_fill_tokens against the independent
+ * reference (match_fn) plus set invariants and the exact rank formula for
+ * single-token queries. Returns the failure count for this query. */
+static int check_fill(unsigned long seed, int q, const char *query, int fi,
+                      const toks_t *qt, int phrase,
+                      int (*match_fn)(int, int, const toks_t *))
+{
+	rec_set_t *fs = rec_set_new();
+	const rec_ref_t *s;
+	size_t cnt;
+	int rc;
+	int bad = 0;
+	int r;
+	int exp_total = 0;
+
+	rc = rec_axis_fill_tokens(db, field_names[fi], query, phrase, fs);
+	cnt = rec_set_count(fs);
+	s = rec_set_at(fs);
+	if (rc != 0) {
+		printf("seed %lu q%d: fill rc=%d query='%s'\n", seed, q, rc,
+		       query);
+		bad = 1;
+		goto out;
+	}
+	if (qt->n == 0 && cnt != 0) {
+		printf("seed %lu q%d: fill zero-token mismatch (cnt=%zu) "
+		       "query='%s'\n",
+		       seed, q, cnt, query);
+		bad = 1;
+		goto out;
+	}
+	for (r = 0; r < MAX_ROWS; r++)
+		if (match_fn(r, fi, qt)) {
+			size_t lo = 0, hi = cnt, mid;
+
+			exp_total++;
+			while (lo < hi) {
+				mid = lo + (hi - lo) / 2;
+				if (s[mid] < (rec_ref_t)r)
+					lo = mid + 1;
+				else
+					hi = mid;
+			}
+			if (lo >= cnt || s[lo] != (rec_ref_t)r) {
+				printf("seed %lu q%d: fill missing ref %d "
+				       "field '%s' query='%s'\n",
+				       seed, q, r, field_names[fi], query);
+				bad++;
+			}
+		}
+	if ((size_t)exp_total != cnt) {
+		printf("seed %lu q%d: fill count mismatch (fill=%zu "
+		       "ref=%d)\n",
+		       seed, q, cnt, exp_total);
+		bad++;
+	}
+	for (r = 1; r < (int)cnt; r++)
+		if (s[r] <= s[r - 1]) {
+			printf("seed %lu q%d: fill set not sorted/unique\n",
+			       seed, q);
+			bad++;
+			break;
+		}
+	/* exact score spot-check: single query token => matched = 1; skip
+	 * cap-edge docs (>= MAX_VT tokens) and zero-token docs (rank -1). */
+	if (qt->n == 1)
+		for (r = 0; r < MAX_ROWS; r++)
+			if (match_fn(r, fi, qt) && row_toks[r][fi].n > 0 &&
+			    row_toks[r][fi].n < MAX_VT) {
+				struct stoma_rank_ctx c = { db,
+				                              field_names[fi],
+				                              1 };
+				float score;
+				float e;
+				float err;
+
+				if (stoma_rank(&c, (rec_ref_t)r, &score) != 0 ||
+				    score <= 0.0f) {
+					printf("seed %lu q%d: rank fail row "
+					       "%d\n",
+					       seed, q, r);
+					bad++;
+					continue;
+				}
+				e = 1.0f / (float)row_toks[r][fi].n;
+				err = score - e;
+				if (err < 0.0f)
+					err = -err;
+				if (err > 1e-6f) {
+					printf("seed %lu q%d: rank score row "
+					       "%d score=%g exp=%g\n",
+					       seed, q, r, (double)score,
+					       (double)e);
+					bad++;
+				}
+			}
+out:
+	rec_set_free(fs);
+	return bad;
+}
+
 static int run_seed(unsigned long seed)
 {
 	int failures = 0;
@@ -278,7 +380,7 @@ static int run_seed(unsigned long seed)
 				        &row_toks[r][f]);
 				if (!row_has[r][f])
 					continue;
-				snprintf(rid, sizeof(rid), "r%d", r);
+				snprintf(rid, sizeof(rid), "%d", r);
 				if (stoma_index(
 				            db, field_names[f], rid, value) !=
 				    0)
@@ -316,7 +418,7 @@ static int run_seed(unsigned long seed)
 			int exp = handled && ref_matches(r, fi, &qt);
 			int got;
 
-			snprintf(rid, sizeof(rid), "r%d", r);
+			snprintf(rid, sizeof(rid), "%d", r);
 			got = qmap_get(out_hd, rid) != NULL;
 			exp_total += exp;
 			if (got != exp) {
@@ -336,6 +438,8 @@ static int run_seed(unsigned long seed)
 			failures++;
 		}
 		qmap_close(out_hd);
+		failures += check_fill(
+		        seed, q, query, fi, &qt, 0, ref_matches);
 
 		/* phrase variant: the same query through stoma_query_phrase,
 		 * compared against the contiguous-subsequence reference. */
@@ -363,7 +467,7 @@ static int run_seed(unsigned long seed)
 				           ref_phrase_matches(r2, fi, &qt);
 				int got2;
 
-				snprintf(rid2, sizeof(rid2), "r%d", r2);
+				snprintf(rid2, sizeof(rid2), "%d", r2);
 				got2 = qmap_get(out_hd2, rid2) != NULL;
 				exp_total2 += exp2;
 				if (got2 != exp2) {
@@ -387,6 +491,8 @@ static int run_seed(unsigned long seed)
 				failures++;
 			}
 			qmap_close(out_hd2);
+			failures += check_fill(seed, q, query, fi, &qt, 1,
+			                      ref_phrase_matches);
 		}
 	}
 
