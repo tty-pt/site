@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
-import { askingToolAvailable, askWithDefault, noteLateAnswer, pendingQuestion } from "../../src/absence/ask.ts";
+import { askWithDefault, noteLateAnswer, pendingQuestion } from "../../src/absence/ask.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 
@@ -49,18 +49,6 @@ Deno.test("ask times out to the default", async () => {
   const result = await askWithDefault(pi, withUI, { question: "Which color?", defaultAnswer: "blue", timeoutMs: 20 });
   check(result.answer === "blue" && result.source === "default", "timeout defaults");
   replaceState(IDLE_STATE);
-});
-
-Deno.test("asking availability probes every known tool name", () => {
-  const pi = fakePi();
-  check(!askingToolAvailable(pi), "none registered");
-  check(!askingToolAvailable(pi, "ask_questions"), "default binding misses");
-  pi.toolNames = ["ask_user_question"];
-  check(askingToolAvailable(pi), "live name found");
-  check(askingToolAvailable(pi, "ask_questions"), "default binding resolves to live name");
-  pi.toolNames = ["custom_ask"];
-  check(!askingToolAvailable(pi), "unrelated tool ignored");
-  check(askingToolAvailable(pi, "custom_ask"), "explicit binding honored");
 });
 
 Deno.test("ask with zero timeout never prompts", async () => {

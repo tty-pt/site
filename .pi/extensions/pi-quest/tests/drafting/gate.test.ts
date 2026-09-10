@@ -50,3 +50,21 @@ Deno.test("gate leaves ordinary blocks unterminated", () => {
   check(blocked?.terminate !== true, "no turn-end without a review");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("gate leaves native ask tools alone while a quest is active", () => {
+  const { handler } = captureGate();
+  replaceState(createDraft(createQuest("work", "abc123"), "work"));
+  const probe = { type: "tool_call", toolCallId: "2", toolName: "ask_questions", input: { questions: [] } } as ToolCallEvent;
+  const blocked = handler()(probe, fakeCtx("/tmp"));
+  check(blocked === undefined, "native ask not blocked; none are assumed installed");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("gate leaves quest_ask_human alone", () => {
+  const { handler } = captureGate();
+  replaceState(createDraft(createQuest("work", "abc123"), "work"));
+  const probe = { type: "tool_call", toolCallId: "3", toolName: "quest_ask_human", input: { question: "hi", default: "yes" } } as ToolCallEvent;
+  const blocked = handler()(probe, fakeCtx("/tmp"));
+  check(blocked === undefined, "quest_ask_human not blocked");
+  replaceState(IDLE_STATE);
+});

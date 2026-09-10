@@ -1,5 +1,5 @@
 // HIGH_LEVEL: #configurations — settings under "pi-quest", all optional.
-// HIGH_LEVEL: #interfaces — bindings select the peer tools; built-ins apply otherwise.
+// HIGH_LEVEL: #interfaces — the review binding names the peer runner; built-ins apply otherwise.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 export interface DraftThresholds {
@@ -8,7 +8,6 @@ export interface DraftThresholds {
 }
 
 export interface InterfaceBindings {
-  asking: { tool: string };
   reviewRunner: { tool: string };
 }
 
@@ -30,7 +29,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   askTimeoutMs: 60000,
   depthCap: 3,
   draftThresholds: { requirements: 2, evidence: 7 },
-  bindings: { asking: { tool: "ask_questions" }, reviewRunner: { tool: "subagent" } },
+  bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
   reviewInactivityMs: 300000,
@@ -63,11 +62,6 @@ export function loadConfig(raw: unknown): QuestConfig {
         : DEFAULT_CONFIG.draftThresholds.evidence,
     },
     bindings: {
-      asking: {
-        tool: typeof (bindings?.["asking"] as Record<string, unknown> | undefined)?.["tool"] === "string"
-          ? (bindings?.["asking"] as Record<string, unknown>)["tool"] as string
-          : DEFAULT_CONFIG.bindings.asking.tool,
-      },
       reviewRunner: {
         tool:
           typeof (bindings?.["reviewRunner"] as Record<string, unknown> | undefined)?.["tool"] === "string"

@@ -6,18 +6,13 @@ import { getState, updateState } from "../app/store";
 import { recordHumanAnswer } from "../domain/quest";
 import type { Pi, ToolCallEvent, ToolResultEvent } from "../hooks/events";
 import { onToolCall, onToolResult } from "../hooks/events";
-import type { QuestConfig } from "../config";
 import { ASKING_TOOL_NAMES } from "../utils/classify";
 
 const KNOWN_ASKING_TOOLS = ASKING_TOOL_NAMES;
 const PENDING_CAP = 50;
 
-let watched: string[] = [...KNOWN_ASKING_TOOLS];
+const watched: string[] = [...KNOWN_ASKING_TOOLS];
 const pending = new Map<string, string>();
-
-export function refreshAskingTools(config: QuestConfig): void {
-  watched = [...new Set([config.bindings.asking.tool, ...KNOWN_ASKING_TOOLS])];
-}
 
 function isAskingTool(toolName: string): boolean {
   return watched.includes(toolName);

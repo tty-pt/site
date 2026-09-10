@@ -29,7 +29,7 @@ Deno.test("status text mode puts the phase where the icon goes", () => {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const DIM_FRAME = "📝 abc123 [Ctrl+P]";
+const DIM_FRAME = "📝 abc123 [^Q]";
 const dimFrame = `\x1b[2m${DIM_FRAME}\x1b[0m`;
 const brightFrame = `\x1b[97m${DIM_FRAME}\x1b[0m`;
 
@@ -43,7 +43,7 @@ Deno.test("steady status renders dim with a permanent hint", () => {
   });
   try {
     refreshStatus(ctx);
-    check(calls.length === 1 && calls[0] === dimFrame, "dim frame with permanent [Ctrl+P]");
+    check(calls.length === 1 && calls[0] === dimFrame, "dim frame with permanent [^Q]");
     check(!/[\x00-\x08\x0b\x0c\x0e-\x1a]/.test(calls[0] ?? ""), "escapes only, no raw control bytes");
   } finally {
     replaceState(IDLE_STATE);
@@ -72,7 +72,7 @@ Deno.test("draft update flashes bright then relaxes to dim", async () => {
     check(calls.length >= 3, "blink toggles at least once mid-window");
     check(calls.some((text) => text === dimFrame), "dim frame returns mid-window");
     check(calls[calls.length - 1] === dimFrame, "relaxes back to the dim token");
-    check(calls.every((text) => (text ?? "").includes("[Ctrl+P]")), "hint never disappears");
+    check(calls.every((text) => (text ?? "").includes("[^Q]")), "hint never disappears");
   } finally {
     replaceState(IDLE_STATE);
   }

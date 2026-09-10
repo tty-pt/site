@@ -75,6 +75,8 @@ similarity with **no provider and no network**:
 Entries without a stored vector, or with a different dimension than the query,
 are skipped. Results include a trailing `\tscore` column and sort by score
 descending. `--min-sim F` drops scores below a threshold; `--max` still caps.
+Vectors hold up to **`MM_VEC_MAX` (2048) dimensions**; over-cap input is an
+error, never a silent truncation.
 
 Semantic search is a **routing aid, never the sole index** — time, topic, and
 full-text always work, exactly the `MM.md` §2.2 degradation rule.

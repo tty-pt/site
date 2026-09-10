@@ -38,7 +38,7 @@ export function refreshStatus(ctx: PiCtx): void {
   }
 }
 
-const PLAN_HINT = "[Ctrl+P]";
+const PLAN_HINT = "[^Q]";
 const BLINK_INTERVAL_MS = 500;
 const BLINK_WINDOW_MS = 6000;
 

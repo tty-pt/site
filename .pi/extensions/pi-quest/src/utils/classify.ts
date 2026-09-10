@@ -76,9 +76,10 @@ const ALLOWED_RUNNERS = [
 ];
 
 // Tools that ask the human a question. Hosts name them differently
-// (ask_questions here, ask_user_question in this environment, custom
-// bindings elsewhere); match all of them so the gate never blocks
-// asking, whatever the environment provides.
+// (ask_questions, ask_user_question, custom bindings elsewhere); match all
+// of them so questions classify as ask: readable during reviews, never
+// write-gated. The wrapper remains the quest path; direct asks are the
+// agent's own choice and their answers still feed quest history.
 export const ASKING_TOOL_NAMES = [
   "ask_questions",
   "ask_question",

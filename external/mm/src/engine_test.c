@@ -350,6 +350,110 @@ static void test_vectors(void)
 	mm_close(mm);
 }
 
+static void test_big_vectors(void)
+{
+	printf("test_big_vectors\n");
+	char err[256];
+	mm_t *mm = t_open(err, sizeof(err));
+	const size_t D = 896;
+	const size_t D_OTHER = 768;
+	float *a, *b, *q, *out, *other, *huge;
+	mm_hit_t *hits;
+	size_t i, nn;
+	int n;
+
+	if (!mm)
+		return;
+
+	a = malloc(D * sizeof(float));
+	b = malloc(D * sizeof(float));
+	q = malloc(D * sizeof(float));
+	out = malloc(D * sizeof(float));
+	other = malloc(D_OTHER * sizeof(float));
+	huge = malloc((MM_VEC_MAX + 1) * sizeof(float));
+	if (!a || !b || !q || !out || !other || !huge) {
+		CHECK(0, "big_vectors: allocation");
+		free(a); free(b); free(q); free(out); free(other); free(huge);
+		mm_close(mm);
+		return;
+	}
+	/* a = one-hot at 0; b = one-hot at 1 (orthogonal to a); q = a. */
+	for (i = 0; i < D; i++) {
+		a[i] = (i == 0) ? 1.0f : 0.0f;
+		b[i] = (i == 1) ? 1.0f : 0.0f;
+		q[i] = a[i];
+	}
+	for (i = 0; i < D_OTHER; i++)
+		other[i] = 0.5f;
+	for (i = 0; i <= MM_VEC_MAX; i++)
+		huge[i] = 1.0f;
+
+	/* pure cosine on 896 dims */
+	CHECK(mm_cosine(a, a, D) > 0.9999f, "896-dim self cosine ~ 1");
+	CHECK(mm_cosine(a, b, D) < 0.0001f, "896-dim orthogonal cosine ~ 0");
+
+	/* over-cap put is rejected cleanly, never truncated */
+	CHECK(mm_vec_put(mm, "huge@9999-99", huge, MM_VEC_MAX + 1) == -1,
+	      "MM_VEC_MAX+1 put rejected");
+
+	/* three L2 "big" entries: 896, 896(orth), 768 (dim mismatch) */
+	{
+		mm_entry_t e = { 0 };
+		e.level = 2;
+		strcpy(e.topic, "big");
+		strcpy(e.ts, "2025-05");
+		strcpy(e.text, "big a");
+		CHECK(mm_store(mm, &e, NULL, 0) == 0, "store big 05");
+		CHECK(mm_vec_put(mm, "big@2025-05", a, D) == 0, "vec 896 a");
+		strcpy(e.ts, "2025-06");
+		strcpy(e.text, "big b");
+		CHECK(mm_store(mm, &e, NULL, 0) == 0, "store big 06");
+		CHECK(mm_vec_put(mm, "big@2025-06", b, D) == 0, "vec 896 b");
+		strcpy(e.ts, "2025-07");
+		strcpy(e.text, "big other");
+		CHECK(mm_store(mm, &e, NULL, 0) == 0, "store big 07");
+		CHECK(mm_vec_put(mm, "big@2025-07", other, D_OTHER) == 0,
+		      "vec 768 (mismatch)");
+	}
+
+	/* dim round-trip */
+	CHECK(mm_vec_dim(mm, "big@2025-05") == D, "896-dim round-trip");
+	n = (int)mm_vec_get(mm, "big@2025-05", out, D);
+	CHECK(n == 896, "896-dim vec get count");
+	CHECK(out[0] == 1.0f, "896-dim first value");
+	CHECK(out[D - 1] == 0.0f, "896-dim last value");
+
+	/* over-max get reports a mismatch, not a truncation */
+	n = (int)mm_vec_get(mm, "big@2025-05", out, 512);
+	CHECK(n == 0, "vec get with max < dim returns 0 (mismatch)");
+
+	/* semantic scan: only the two 896-dim entries rank; 768 skipped */
+	{
+		hits = mm_semantic_scan(mm, NULL, NULL, NULL, -1, 0, q, D, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 2, "semantic: only 896-dim entries rank");
+	CHECK(strcmp(hits[0].key, "big@2025-05") == 0,
+	      "semantic: highest 896 cosine first");
+	CHECK(hits[0].score > 0.9999, "semantic: 896 self cosine ~ 1");
+	CHECK(hits[1].score < 0.0001, "semantic: orthogonal 896 cosine ~ 0");
+	for (i = 0; i < (size_t)n; i++)
+		CHECK(strcmp(hits[i].key, "big@2025-07") != 0,
+		      "semantic: 768-dim entry skipped");
+	mm_hits_free(hits, nn);
+
+	/* topic/level routing still composes under big-dim semantic query */
+	{
+		hits = mm_semantic_scan(mm, "big", NULL, NULL, 2, 0, q, D, 0.0, &nn);
+		n = (int)nn;
+	}
+	CHECK(n == 2, "semantic: topic+level routing under 896-dim query");
+	mm_hits_free(hits, nn);
+
+	free(a); free(b); free(q); free(out); free(other); free(huge);
+	mm_close(mm);
+}
+
 static void test_semantic(void)
 {
 	printf("test_semantic\n");
@@ -476,6 +580,7 @@ int main(void)
 	test_persistence();
 	test_reset();
 	test_vectors();
+	test_big_vectors();
 	test_semantic();
 
 	if (fails == 0)

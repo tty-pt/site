@@ -44,6 +44,8 @@ export interface OverlayShowOptions {
   onHandle?: (handle: unknown) => void;
 }
 
+export type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
+
 export interface PiUI {
   select(title: string, options: string[], opts?: PiDialogOptions): Promise<string | undefined>;
   input(title: string, placeholder?: string, opts?: PiDialogOptions): Promise<string | undefined>;
@@ -52,6 +54,7 @@ export interface PiUI {
   setStatus(key: string, text: string | undefined): void;
   setWidget(key: string, content: string[] | undefined): void;
   custom?<T>(factory: OverlayFactory<T>, options?: OverlayShowOptions): Promise<T>;
+  onTerminalInput?(handler: TerminalInputHandler): () => void;
 }
 
 export interface PiToolInfo {
@@ -175,13 +178,6 @@ export interface Pi {
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
   ): void;
   getAllTools(): PiToolInfo[];
-  executeTool?(
-    name: string,
-    params: Record<string, unknown>,
-    signal?: AbortSignal,
-    onUpdate?: unknown,
-    ctx?: PiCtx,
-  ): Promise<AgentToolResult>;
   exec(command: string, args: string[], options?: { cwd?: string }): Promise<PiExecResult>;
   events: PiEventBus;
 }

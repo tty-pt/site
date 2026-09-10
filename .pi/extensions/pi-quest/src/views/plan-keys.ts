@@ -41,6 +41,7 @@ export function normalizeKey(data: string): string | null {
   if (data === "\r" || data === "\n") return "return";
   if (data === "\x15") return "ctrlU";
   if (data === "\x04") return "ctrlD";
+  if (data === "\x11") return "ctrlQ";
   if (Array.from(data).length === 1) return data;
   if (data.includes("\x1b[200~")) return null;
   if (data.includes(":3u")) return null;
@@ -58,6 +59,7 @@ export function normalizeKey(data: string): string | null {
     if ((modifier & CTRL_MOD) !== 0) {
       if (codepoint === 85 || codepoint === 117) return "ctrlU";
       if (codepoint === 68 || codepoint === 100) return "ctrlD";
+      if (codepoint === 81 || codepoint === 113) return "ctrlQ";
       return null;
     }
     if (codepoint === 13) return "return";

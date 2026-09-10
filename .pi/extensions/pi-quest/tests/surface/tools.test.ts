@@ -274,7 +274,7 @@ Deno.test("draft creation carries refinements and blinks", async () => {
     check(file.includes("## Findings (pre-draft investigation)"), "refinements carried into scaffold");
     check(file.includes("- found a global registry"), "refinement text filed");
     check(!drafted.applied.join(" ").includes("created thin"), "no thin nudge when findings exist");
-    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [Ctrl+P]\x1b[0m`, "creation flashes bright");
+    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [^Q]\x1b[0m`, "creation flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -297,7 +297,7 @@ Deno.test("plan writes blink the hint", async () => {
     const qid = getState().qid!;
     calls.length = 0;
     await applyUpdate(pi, ctx, { plan: "Do step one." });
-    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [Ctrl+P]\x1b[0m`, "plan write flashes bright");
+    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [^Q]\x1b[0m`, "plan write flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -440,84 +440,34 @@ Deno.test("askHumanTool round-trip without UI defaults and notifies", async () =
   replaceState(IDLE_STATE);
 });
 
-Deno.test("askHumanTool delegates to native tool when available", async () => {
+Deno.test("askHumanTool asks via the input provider", async () => {
   replaceState(createQuest("work", "abc123"));
   const pi = fakePi();
-  pi.toolNames = ["ask_questions"];
-  pi.executeToolHandler = async (name, _params, _signal) => {
-    if (name === "ask_questions") {
-      return { content: [{ type: "text", text: "green" }] };
-    }
-    return { content: [{ type: "text", text: "unknown" }] };
-  };
-  const ctx = fakeCtx(tmp());
+  const ctx = fakeCtx(tmp(), [], { input: async () => "green" });
+  const withUI: typeof ctx = { ...ctx, hasUI: true };
   const tool = askHumanTool(pi);
-  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, ctx);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
   const text = String(out.content[0].text ?? "");
-  check(text.includes("Human answered"), "native answer reported");
-  check(text.includes("green"), "answer from native tool");
+  check(text.includes("Human answered"), "provider answer reported");
+  check(text.includes("green"), "answer from input provider");
   check((out.details as { answer: string; source: string }).answer === "green", "answer in details");
   check((out.details as { source: string }).source === "user", "source is user");
-  check(pi.executeToolCalls.length === 1, "native tool called");
-  check(pi.executeToolCalls[0].name === "ask_questions", "correct tool name");
+  check((out.details as { provider: string }).provider === "input", "provider in details");
   replaceState(IDLE_STATE);
 });
 
-Deno.test("askHumanTool falls back to ctx.ui.input when executeTool missing", async () => {
+Deno.test("askHumanTool times out to the default via the input provider", async () => {
   replaceState(createQuest("work", "abc123"));
   const pi = fakePi();
-  pi.toolNames = ["ask_questions"];
-  delete (pi as { executeTool?: typeof pi.executeTool }).executeTool;
-  const ctx = fakeCtx(tmp(), [], { input: async () => "red" });
+  const ctx = fakeCtx(tmp(), [], { input: () => new Promise<never>(() => {}) });
   const withUI: typeof ctx = { ...ctx, hasUI: true };
   const tool = askHumanTool(pi);
-  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
-  const text = String(out.content[0].text ?? "");
-  check(text.includes("Human answered"), "fallback answer reported");
-  check(text.includes("red"), "answer from ui.input");
-  check(pi.executeToolCalls.length === 0, "native tool not called");
-  replaceState(IDLE_STATE);
-});
-
-Deno.test("askHumanTool falls back when configured tool not registered", async () => {
-  replaceState(createQuest("work", "abc123"));
-  const pi = fakePi();
-  pi.toolNames = ["other_tool"];
-  const ctx = fakeCtx(tmp(), [], { input: async () => "red" });
-  const withUI: typeof ctx = { ...ctx, hasUI: true };
-  const tool = askHumanTool(pi);
-  const out = await tool.execute("1", { question: "Which color?", default: "blue" }, undefined, undefined, withUI);
-  const text = String(out.content[0].text ?? "");
-  check(text.includes("Human answered"), "fallback answer reported");
-  check(text.includes("red"), "answer from ui.input");
-  check(pi.executeToolCalls.length === 0, "native tool not called");
-  replaceState(IDLE_STATE);
-});
-
-Deno.test("askHumanTool aborts native tool on timeout", async () => {
-  replaceState(createQuest("work", "abc123"));
-  const pi = fakePi();
-  pi.toolNames = ["ask_questions"];
-  let abortCalled = false;
-  pi.executeToolHandler = async (name, _params, signal) => {
-    if (name === "ask_questions" && signal) {
-      await new Promise((resolve) => {
-        signal.addEventListener("abort", () => resolve(undefined));
-        setTimeout(() => resolve(undefined), 10000);
-      });
-      if (signal.aborted) abortCalled = true;
-      throw new Error("aborted");
-    }
-    return { content: [{ type: "text", text: "unknown" }] };
-  };
-  const ctx = fakeCtx(tmp());
-  const tool = askHumanTool(pi);
-  const out = await tool.execute("1", { question: "Which color?", default: "blue", timeoutMs: 50 }, undefined, undefined, ctx);
+  const out = await tool.execute("1", { question: "Which color?", default: "blue", timeoutMs: 50 }, undefined, undefined, withUI);
   const text = String(out.content[0].text ?? "");
   check(text.includes("No human answer"), "timeout default reported");
   check(text.includes("blue"), "default in text");
   check((out.details as { source: string }).source === "default", "source is default");
-  check(abortCalled, "abort signal fired");
+  check((out.details as { provider: string }).provider === "input", "provider in details");
   check(ctx.notifications.calls.some((n) => n.message.includes("timed out")), "timeout notification sent");
   replaceState(IDLE_STATE);
 });

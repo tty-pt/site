@@ -116,9 +116,12 @@ Deno.test("normalizeKey speaks legacy ANSI, Kitty CSI-u, and printables", () => 
   check(normalizeKey("\x1b[999u") === null, "unknown codepoints ignored");
   check(normalizeKey("\x15") === "ctrlU", "raw ctrl+U");
   check(normalizeKey("\x04") === "ctrlD", "raw ctrl+D");
+  check(normalizeKey("\x11") === "ctrlQ", "raw ctrl+Q");
   check(normalizeKey("\x1b[85;5u") === "ctrlU", "kitty ctrl+U");
   check(normalizeKey("\x1b[100;5u") === "ctrlD", "kitty ctrl+d");
   check(normalizeKey("\x1b[68;5u") === "ctrlD", "kitty ctrl+D");
+  check(normalizeKey("\x1b[113;5u") === "ctrlQ", "kitty ctrl+q");
+  check(normalizeKey("\x1b[81;5u") === "ctrlQ", "kitty ctrl+Q");
   check(normalizeKey("\x1b[106u") === "j", "unmodified letters unaffected");
 });
 

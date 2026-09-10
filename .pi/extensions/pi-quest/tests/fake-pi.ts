@@ -1,4 +1,4 @@
-import type { Pi, PiCtx, PiToolSpec, TranscriptEntry, AgentToolResult } from "../src/hooks/events.ts";
+import type { Pi, PiCtx, PiToolSpec, TranscriptEntry } from "../src/hooks/events.ts";
 
 export interface SentMessage {
   message: { customType: string; content: unknown };
@@ -25,8 +25,7 @@ export interface FakePi extends Pi {
   execCode: number;
   toolNames: string[];
   subscriptions: string[];
-  executeToolCalls: Array<{ name: string; params: Record<string, unknown>; signal?: AbortSignal }>;
-  executeToolHandler: ((name: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<AgentToolResult>) | null;
+  eventHandlers: Record<string, Array<(event: unknown, ctx: PiCtx) => unknown>>;
 }
 
 export function fakePi(): FakePi {
@@ -37,6 +36,7 @@ export function fakePi(): FakePi {
   const shortcuts: ShortcutReg[] = [];
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const subscriptions: string[] = [];
+  const eventHandlers: Record<string, Array<(event: unknown, ctx: PiCtx) => unknown>> = {};
   const fake = {
     sent,
     appended,
@@ -45,12 +45,13 @@ export function fakePi(): FakePi {
     shortcuts,
     execCalls,
     subscriptions,
+    eventHandlers,
     execCode: 0,
     toolNames: [] as string[],
-    executeToolCalls: [] as Array<{ name: string; params: Record<string, unknown>; signal?: AbortSignal }>,
-    executeToolHandler: null as ((name: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<AgentToolResult>) | null,
-    on(event: string): void {
+    on(event: string, handler: (event: unknown, ctx: PiCtx) => unknown): void {
       subscriptions.push(event);
+      if (!eventHandlers[event]) eventHandlers[event] = [];
+      eventHandlers[event].push(handler);
     },
     appendEntry(customType: string, data: unknown): void {
       appended.push({ customType, data });
@@ -74,13 +75,6 @@ export function fakePi(): FakePi {
       execCalls.push({ command, args });
       return Promise.resolve({ stdout: "", stderr: "", code: (fake as FakePi).execCode });
     },
-    executeTool(name: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
-      (fake as FakePi).executeToolCalls.push({ name, params, signal });
-      if ((fake as FakePi).executeToolHandler) {
-        return (fake as FakePi).executeToolHandler!(name, params, signal);
-      }
-      return Promise.resolve({ content: [{ type: "text", text: "mock answer" }] });
-    },
     events: {
       on(): () => void {
         return () => {};
@@ -95,8 +89,11 @@ export interface FakeNotifications {
   calls: Array<{ message: string; type?: string }>;
 }
 
-export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Partial<PiCtx["ui"]>): PiCtx & { notifications: FakeNotifications } {
+export type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
+
+export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Partial<PiCtx["ui"]>): PiCtx & { notifications: FakeNotifications; inputHandlers: TerminalInputHandler[] } {
   const notifications: FakeNotifications = { calls: [] };
+  const inputHandlers: TerminalInputHandler[] = [];
   return {
     cwd,
     hasUI: false,
@@ -110,8 +107,10 @@ export function fakeCtx(cwd: string, entries: TranscriptEntry[] = [], ui?: Parti
       notify: (message: string, type?: string) => { notifications.calls.push({ message, type }); },
       setStatus: () => {},
       setWidget: () => {},
+      onTerminalInput: (handler: TerminalInputHandler) => { inputHandlers.push(handler); return () => {}; },
       ...ui,
     },
+    inputHandlers,
   };
 }
 

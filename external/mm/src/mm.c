@@ -6,8 +6,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define VEC_MAX 512
-
 static const char *default_path(void)
 {
 	const char *home = getenv("HOME");
@@ -19,7 +17,9 @@ static const char *default_path(void)
 	return buf;
 }
 
-/* Parse "d0 d1 ..." into out; *n = count. Returns 0 on success. */
+/* Parse "d0 d1 ..." into out; *n = count. Returns 0 on success, -1 when the
+ * input has no floats or exceeds max (over-cap is an error, never a silent
+ * truncation). */
 static int parse_vec(const char *s, float *out, size_t max, size_t *n)
 {
 	size_t cnt = 0;
@@ -34,7 +34,15 @@ static int parse_vec(const char *s, float *out, size_t max, size_t *n)
 			s++;
 	}
 	*n = cnt;
-	return cnt == 0 ? -1 : 0;
+	if (cnt == 0)
+		return -1;
+	if (cnt == max && *s) {
+		char *end;
+		(void)strtof(s, &end);
+		if (end != s)
+			return -1; /* more floats than max */
+	}
+	return 0;
 }
 
 /* Extract the first JSON array of floats ("[0.1, 0.2, ...]") from `json`.
@@ -301,10 +309,10 @@ static int cmd_store(int argc, char **argv)
 		return 1;
 	}
 	if (do_embed) {
-		float ev[VEC_MAX];
+		float ev[MM_VEC_MAX];
 		size_t edim = 0;
 		char key[MM_KEY_LEN];
-		if (embed(e.text, ev, VEC_MAX, &edim, err, sizeof(err)) < 0) {
+		if (embed(e.text, ev, MM_VEC_MAX, &edim, err, sizeof(err)) < 0) {
 			fprintf(stderr, "%s\n", err);
 			mm_close(mm);
 			return 1;
@@ -324,7 +332,7 @@ static int cmd_scan(int argc, char **argv)
 	const char *vec_str = NULL, *like_key = NULL, *embed_text = NULL;
 	long level = -1, max = 0;
 	double min_sim = 0.0;
-	float q[VEC_MAX];
+	float q[MM_VEC_MAX];
 	size_t qdim = 0;
 	int semantic = 0;
 	mm_t *mm;
@@ -368,14 +376,15 @@ static int cmd_scan(int argc, char **argv)
 		return 1;
 	}
 	if (vec_str) {
-		if (parse_vec(vec_str, q, VEC_MAX, &qdim) < 0 || qdim == 0) {
-			fprintf(stderr, "mm: --vec expects d space-separated floats\n");
+		if (parse_vec(vec_str, q, MM_VEC_MAX, &qdim) < 0 || qdim == 0) {
+			fprintf(stderr, "mm: --vec expects %d space-separated floats\n",
+			        MM_VEC_MAX);
 			mm_close(mm);
 			return 2;
 		}
 		semantic = 1;
 	} else if (like_key) {
-		qdim = mm_vec_get(mm, like_key, q, VEC_MAX);
+		qdim = mm_vec_get(mm, like_key, q, MM_VEC_MAX);
 		if (qdim == 0) {
 			fprintf(stderr,
 			        "mm: no stored vector for --like key '%s'\n",
@@ -385,7 +394,7 @@ static int cmd_scan(int argc, char **argv)
 		}
 		semantic = 1;
 	} else if (embed_text) {
-		if (embed(embed_text, q, VEC_MAX, &qdim, err, sizeof(err)) < 0) {
+		if (embed(embed_text, q, MM_VEC_MAX, &qdim, err, sizeof(err)) < 0) {
 			fprintf(stderr, "%s\n", err);
 			mm_close(mm);
 			return 1;
@@ -560,47 +569,46 @@ static int cmd_vec(int argc, char **argv)
 		return 1;
 	}
 	if (strcmp(sub, "put") == 0) {
-		float vals[512];
+		float vals[MM_VEC_MAX];
 		size_t n = 0;
-		const char *p = text;
 		if (!key || !text) {
 			fprintf(stderr, "mm: vec put requires --key and --text\n");
 			mm_close(mm);
 			return 2;
 		}
-		while (*p && n < 512) {
-			char *end;
-			vals[n++] = strtof(p, &end);
-			while (*end == ' ')
-				end++;
-			p = end;
+		if (parse_vec(text, vals, MM_VEC_MAX, &n) < 0) {
+			fprintf(stderr,
+			        "mm: vec put --text expects %d floats (over-cap is an error)\n",
+			        MM_VEC_MAX);
+			mm_close(mm);
+			return 2;
 		}
 		if (mm_vec_put(mm, key, vals, n) < 0) {
 			mm_close(mm);
 			return 1;
 		}
 	} else if (strcmp(sub, "get") == 0) {
-		float vals[512];
+		float vals[MM_VEC_MAX];
 		size_t n, j;
 		if (!key) {
 			fprintf(stderr, "mm: vec get requires --key\n");
 			mm_close(mm);
 			return 2;
 		}
-		n = mm_vec_get(mm, key, vals, 512);
+		n = mm_vec_get(mm, key, vals, MM_VEC_MAX);
 		for (j = 0; j < n; j++)
 			printf("%s%f", j ? " " : "", (double)vals[j]);
 		printf("\n");
 	} else if (strcmp(sub, "cos") == 0) {
-		float a[512], b[512];
+		float a[MM_VEC_MAX], b[MM_VEC_MAX];
 		size_t na, nb;
 		if (!key || !key2) {
 			fprintf(stderr, "mm: vec cos requires two --key\n");
 			mm_close(mm);
 			return 2;
 		}
-		na = mm_vec_get(mm, key, a, 512);
-		nb = mm_vec_get(mm, key2, b, 512);
+		na = mm_vec_get(mm, key, a, MM_VEC_MAX);
+		nb = mm_vec_get(mm, key2, b, MM_VEC_MAX);
 		if (na != nb || na == 0) {
 			fprintf(stderr, "mm: vectors differ or missing (%zu vs %zu)\n",
 			        na, nb);

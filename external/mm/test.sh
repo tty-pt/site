@@ -134,6 +134,62 @@ OUT=$($MM vec get --file "$F" --key "embed@2025-07")
 [ "$OUT" = "1.000000 0.000000 0.000000" ] || fail "store --embed vector, got: $OUT"
 pass "store --embed (stub curl)"
 
+# ---- Phase 1: 896-dim vectors (VEC_MAX 512 -> 2048) ------------------
+V896=$(awk 'BEGIN{for(i=0;i<896;i++){ if(i) printf " "; printf "1" } }')
+$MM store --file "$F" --level 2 --topic big --ts 2025-08 \
+	--text "big eight nine six" || fail "store big 896"
+$MM vec put --file "$F" --key "big@2025-08" --text "$V896" || fail "vec put 896"
+N=$($MM vec get --file "$F" --key "big@2025-08")
+C=$(printf '%s' "$N" | tr ' ' '\n' | grep -c .) || true
+[ "$C" = "896" ] || fail "896-dim vec put/get round-trip depth, got $C"
+pass "896-dim vec put/get round-trip"
+
+V2049=$(awk 'BEGIN{for(i=0;i<2049;i++){ if(i) printf " "; printf "1" } }')
+if $MM vec put --file "$F" --key "huge@x" --text "$V2049" >/dev/null 2>&1; then
+	fail "over-cap 2049-dim vec put should error"
+fi
+if $MM scan --file "$F" --vec "$V2049" >/dev/null 2>&1; then
+	fail "over-cap 2049-dim --vec should error"
+fi
+pass "over-cap 2049-dim rejected (put + --vec)"
+
+D896=$(awk 'BEGIN{for(i=0;i<896;i++){ if(i) printf ","; printf "0.001" } }')
+D2049=$(awk 'BEGIN{for(i=0;i<2049;i++){ if(i) printf ","; printf "0.001" } }')
+mkdir -p "$STUB/896" "$STUB/over"
+cat > "$STUB/896/curl" <<EOF
+#!/bin/sh
+printf '%s' '{"data":[{"embedding":[$D896]}]}'
+EOF
+chmod +x "$STUB/896/curl"
+cat > "$STUB/over/curl" <<EOF
+#!/bin/sh
+printf '%s' '{"data":[{"embedding":[$D2049]}]}'
+EOF
+chmod +x "$STUB/over/curl"
+
+OUT=$(MM_EMBED_URL="http://fake" PATH="$STUB/896:$PATH" \
+	$MM scan --file "$F" --embed "896 query" 2>&1)
+case "$OUT" in
+	big@2025-08*) : ;;
+	*) fail "896 --embed should rank big@2025-08 (only 896-dim entry), got: $OUT" ;;
+esac
+pass "896-dim --embed semantic scan (stub curl)"
+
+OUT=$(MM_EMBED_URL="http://fake" PATH="$STUB/896:$PATH" \
+	$MM store --file "$F" --level 2 --topic big --ts 2025-09 \
+	--text "big embed 896" --embed 2>&1) || fail "store --embed 896 (stub)"
+[ -z "$OUT" ] || fail "store --embed 896 unexpected output: $OUT"
+OUT=$($MM vec get --file "$F" --key "big@2025-09")
+C=$(printf '%s' "$OUT" | tr ' ' '\n' | grep -c .) || true
+[ "$C" = "896" ] || fail "store --embed 896 vector depth, got $C"
+pass "896-dim store --embed (stub curl)"
+
+if MM_EMBED_URL="http://fake" PATH="$STUB/over:$PATH" \
+	$MM scan --file "$F" --embed "over" >/dev/null 2>&1; then
+	fail "over-cap 2049-dim embed response should error"
+fi
+pass "over-cap 2049-dim embed response rejected"
+
 $MM forget --file "$F" --key "mirror@2025-05" || fail "forget"
 OUT=$($MM scan --file "$F" --topic mirror --level 2)
 N=$(printf '%s' "$OUT" | grep -c '^mirror@') || true

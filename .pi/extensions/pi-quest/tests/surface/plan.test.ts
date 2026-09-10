@@ -131,22 +131,35 @@ Deno.test("plan floater never tops out below its own chrome floor", async () => 
   replaceState(IDLE_STATE);
 });
 
-Deno.test("ctrl+p shortcut opens the plan viewer", async () => {
+Deno.test("ctrl+q via onTerminalInput opens the plan viewer", async () => {
   const cwd = draftingCwd();
-  const pi = fakePi();
-  installCommands(pi);
-  const entry = pi.shortcuts.find((s) => s.shortcut === "ctrl+p");
-  check(entry !== undefined, "ctrl+p registered");
-  if (entry === undefined) throw new Error("ctrl+p shortcut missing");
   let opened = false;
-  const ctx: PiCtx = fakeCtx(cwd, [], {
+  const ctx = fakeCtx(cwd, [], {
     notify: () => {},
     custom: <T>(): Promise<T> => {
       opened = true;
       return Promise.resolve(undefined as unknown as T);
     },
   });
-  await entry.options.handler({ ...ctx, mode: "tui" });
-  check(opened, "shortcut opens the viewer");
+  ctx.mode = "tui";
+  const { default: install } = await import("../../src/index.ts");
+  const pi = fakePi();
+  install(pi);
+  // Fire the session_start handler to register onTerminalInput.
+  const handlers = pi.eventHandlers["session_start"] ?? [];
+  check(handlers.length >= 1, "session_start handler registered");
+  for (const h of handlers) h({ type: "session_start", reason: "test" }, ctx);
+  // The onTerminalInput handler should now be registered.
+  check(ctx.inputHandlers.length >= 1, "onTerminalInput registered");
+  const handler = ctx.inputHandlers[ctx.inputHandlers.length - 1];
+  const result = handler("\x11"); // raw ctrl+Q
+  check(result?.consume === true, "ctrl+Q consumed");
+  await new Promise((r) => setTimeout(r, 50)); // let async viewActivePlan settle (file I/O)
+  check(opened, "viewer opened on ctrl+Q");
+  // Non-ctrl+Q passes through.
+  opened = false;
+  const pass = handler("j");
+  check(pass === undefined, "other keys pass through");
+  check(!opened, "viewer not opened for other keys");
   replaceState(IDLE_STATE);
 });

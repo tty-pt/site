@@ -649,13 +649,13 @@ void mm_hits_free(mm_hit_t *hits, size_t n)
 int mm_vec_put(mm_t *mm, const char *key, const float *v, size_t n)
 {
 	size_t i;
-	char buf[8192];
+	char buf[66000];
 	size_t off = 0;
 	size_t need;
 	if (!mm || !v)
 		return -1;
 	need = 20 + n * 24;
-	if (need > sizeof(buf) || n > 512) {
+	if (need > sizeof(buf) || n > MM_VEC_MAX) {
 		fprintf(stderr, "mm: vector too large (%zu dims)\n", n);
 		return -1;
 	}
@@ -691,7 +691,7 @@ size_t mm_vec_get(mm_t *mm, const char *key, float *out, size_t max)
 		return 0;
 	dim = (size_t)strtoul(s, NULL, 10);
 	if (dim > max)
-		dim = max;
+		return 0; /* caller max too small: mismatch, never truncate */
 	p = s;
 	while (*p && *p != ' ')
 		p++;

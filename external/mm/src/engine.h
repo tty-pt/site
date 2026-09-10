@@ -9,6 +9,7 @@
 #define MM_TAGS_LEN  128
 #define MM_TEXT_LEN  8192
 #define MM_KEY_LEN   128
+#define MM_VEC_MAX   2048 /* max embedding dimensions (over-cap is an error) */
 
 typedef struct mm_engine mm_t;
 

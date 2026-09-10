@@ -45,20 +45,4 @@ export function installCommands(pi: Pi): void {
       notify(ctx, out);
     },
   });
-  try {
-    pi.registerShortcut?.("ctrl+p", {
-      description: "Show the active quest plan in a floating viewer.",
-      handler: async (ctx) => {
-        await viewActivePlan(ctx);
-      },
-    });
-    pi.registerShortcut?.("ctrl+shift+p", {
-      description: "Open the active quest plan in an external editor.",
-      handler: async (ctx) => {
-        await editActivePlan(pi, ctx);
-      },
-    });
-  } catch {
-    // Shortcuts are best-effort; the draft file is always there.
-  }
 }

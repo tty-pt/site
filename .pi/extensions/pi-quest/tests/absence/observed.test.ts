@@ -1,7 +1,6 @@
 import { check } from "../check.ts";
 import { replaceState } from "../../src/app/store.ts";
-import { installObservedQuestions, refreshAskingTools } from "../../src/absence/observed.ts";
-import { DEFAULT_CONFIG } from "../../src/config.ts";
+import { installObservedQuestions } from "../../src/absence/observed.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import type { Pi, ToolCallEvent, ToolResultEvent } from "../../src/hooks/events.ts";
 import { getState } from "../../src/app/store.ts";
@@ -46,7 +45,6 @@ function result(toolName: string, toolCallId: string, input: Record<string, unkn
 
 Deno.test("observed direct asks land in history", () => {
   replaceState(createQuest("work", "abc123"));
-  refreshAskingTools(DEFAULT_CONFIG);
   const { captured } = wire();
   captured.calls[0](call("ask_user_question", "c1", {
     questions: [{ header: "Phase D", question: "Pick the fix:", options: [] }],
@@ -64,7 +62,6 @@ Deno.test("observed direct asks land in history", () => {
 
 Deno.test("observed asks handle the flat shape and cancellations", () => {
   replaceState(createQuest("work", "abc123"));
-  refreshAskingTools(DEFAULT_CONFIG);
   const { captured } = wire();
   captured.calls[0](call("ask_questions", "c2", { question: "Proceed?" }));
   captured.results[0](result("ask_questions", "c2", {}, "user said yes"));
@@ -75,16 +72,5 @@ Deno.test("observed asks handle the flat shape and cancellations", () => {
   captured.calls[0](call("bash", "c4", { command: "ls" }));
   captured.results[0](result("bash", "c4", {}, "files"));
   check(getState().humanAnswers.length === 1, "other tools ignored");
-  replaceState(IDLE_STATE);
-});
-
-Deno.test("observed asks honor the configured binding", () => {
-  replaceState(createQuest("work", "abc123"));
-  refreshAskingTools({ ...DEFAULT_CONFIG, bindings: { asking: { tool: "custom_ask" }, reviewRunner: { tool: "subagent" } } });
-  const { captured } = wire();
-  captured.calls[0](call("custom_ask", "c5", { question: "Custom?" }));
-  captured.results[0](result("custom_ask", "c5", {}, "custom yes"));
-  check(getState().humanAnswers.length === 1, "configured tool observed");
-  refreshAskingTools(DEFAULT_CONFIG);
   replaceState(IDLE_STATE);
 });

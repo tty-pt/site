@@ -99,15 +99,15 @@ quest id (`future/<qid>.md`); there are no slugs.
 - `quest_rebut` — answer a review with evidence; a successful rebuttal
   reopens the question.
 - `quest_ask_human` — ask with a recommended default and timeout (one
-  minute default). Never blocks: absence, cancellation, or timeout proceeds
-  with the default, and a late answer still applies when it arrives.
-  Prefer it over direct `ask_*` tools whenever you want a default on
-  absence — direct asks wait indefinitely and skip timeout semantics
-  (their answers are still recorded to quest history).
+  minute default). It dispatches through question providers — tools with a
+  working invocation protocol first, the built-in input prompt as the
+  guaranteed fallback. Never blocks: absence, cancellation, or timeout
+  proceeds with the default, and a late answer still applies when it
+  arrives.
 
 ## Commands
 
-`/quest` (resume by qid/name, show the active quest, or pick from current quests when idle — fresh sessions start with no active quest), `Ctrl+P` (floating plan viewer), `Ctrl+Shift+P` (edit plan in external editor), `/quests` (list), `/quest-del` (archive/kill).
+`/quest` (resume by qid/name, show the active quest, or pick from current quests when idle — fresh sessions start with no active quest), `[^Q]` (floating plan viewer), `/quests` (list), `/quest-del` (archive/kill).
 Everything else the system does by itself.
 
 ## Durability

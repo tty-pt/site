@@ -6,7 +6,6 @@ Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.depthCap === 3, "depth cap 3");
   check(DEFAULT_CONFIG.draftThresholds.requirements === 2, "2 requirements");
   check(DEFAULT_CONFIG.draftThresholds.evidence === 7, "7 evidence");
-  check(DEFAULT_CONFIG.bindings.asking.tool === "ask_questions", "asking binding");
   check(DEFAULT_CONFIG.bindings.reviewRunner.tool === "subagent", "runner binding");
   check(DEFAULT_CONFIG.statusStyle === "icon", "icon status default");
   check(DEFAULT_CONFIG.reviewInactivityMs === 300000, "5 minute inactivity default");
@@ -22,8 +21,6 @@ Deno.test("config loads partial settings over defaults", () => {
   check(partial.draftThresholds.requirements === 1, "threshold overridden");
   check(partial.draftThresholds.evidence === 7, "sibling threshold kept");
   check(partial.bindings.reviewRunner.tool === "subagent", "bindings kept");
-  const bindings = loadConfig({ bindings: { asking: { tool: "custom_ask" } } });
-  check(bindings.bindings.asking.tool === "custom_ask", "binding overridden");
   check(loadConfig({ statusStyle: "text" }).statusStyle === "text", "text style honored");
   check(loadConfig({ statusStyle: "emoji" }).statusStyle === "icon", "invalid style falls back");
   const knobs = loadConfig({ reviewInactivityMs: 5000, reviewMaxDurationMs: 90000 });
