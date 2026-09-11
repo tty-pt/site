@@ -10,6 +10,13 @@ optional config-gated `--embed` via curl.
 
 ## Invariants (do not "fix" these)
 
+- **Multi-axis composition is `rec_query`'s job, not mm's.** mm maps its scan
+  flags (`--when`, `--where`, `--q`, `--level`, `--topic`, `--vec`/`--like`)
+  onto `rec_query_t` and calls `rec_query_run`. Do **not** hand-roll join
+  loops (intersect/subtract/union) or a min-sim+qsort rank loop in mm's
+  engine; register a fill/rank axis through libqmap's `rec_axis` registry
+  instead (see `external/libqmap/docs/RECALL-KERNEL.md` "Query engine &
+  plugin registry"). The offline paths must still work with no plugin loaded.
 - **Keys never contain `:`.** libqmap record maps treat any `:` in a key as a
   `struct:field` composite lookup. All keys are `mm_keyify`'d (colons
   stripped); the stored `ts` field keeps the real ISO string. `mm_get`/

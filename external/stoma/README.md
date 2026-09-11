@@ -53,8 +53,8 @@ int rec_axis_fill_tokens(stoma_db_t *db, const char *field,
 
 /* FTS score ranker for the kernel loop: score = matched / token_count of the
    folded field text of decimal(ref). Shorter docs rank higher on ties.
-   Proposed consumer plan (mm R4): tokens(db, t) ∩ geo(b) ∩ time(r) →
-   soonest+FTS → top-k. */
+   Proposed consumer plan (rec_query R4): tokens(db, t) ∩ geo(b) ∩ time(r) →
+   soonest+FTS → top-k, composed via `rec_query_run` (PLAN-REC-QUERY §2). */
 struct stoma_rank_ctx {
 	stoma_db_t *db;
 	const char *field;

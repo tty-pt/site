@@ -63,6 +63,15 @@ Full-text semantics match site search: tokens are **prefix-AND**; a quoted
 value (`--q '"phrase"'`) requires a **contiguous phrase**; matching is
 accent-sensitive (`pão` ≠ `pao`).
 
+Multi-axis composition is delegated to the `rec_query` engine in libqmap
+(`rec_axis_register` + `rec_query_run`, per-axis AND/OR/NOT joins; see
+`external/libqmap/docs/RECALL-KERNEL.md` and the plan at
+`.opencode/plans/PLAN-REC-QUERY.md`). mm maps its scan flags onto
+`rec_query_t` — `--when` → the time axis, `--where` → the space axis,
+`--q` → the stoma (text) axis, `--vec`/`--like` → the libsepal (meaning)
+axis. The engine is a consumer-side convenience; mm's offline paths work
+with no provider and no plugin loaded.
+
 ### Optional semantic recall (offline primitives)
 
 Vectors can be attached to entries (`mm vec put`) and scanned by cosine
@@ -195,6 +204,12 @@ The vector companion file is always `PATH + ".vec"`.
                                  +----------------+  the memory store    |
 ```
 
+Multi-axis scan composition runs through **`rec_query`** in libqmap
+(`rec_query_run` with AND/OR/NOT joins over dlopen'able axis plugins:
+time / space / text / meaning). mm maps its scan flags onto `rec_query_t`;
+its hand-rolled join/min-sim rank loop is retired. See
+`external/libqmap/docs/RECALL-KERNEL.md` "Query engine & plugin registry".
+
 ## Package structure
 
 ```
@@ -221,8 +236,11 @@ end-to-end with zero real network.
 ## What this project is — and isn't
 
 - **Is:** the local memory engine for Memory Mipmaps — deterministic, offline,
-  provider-free, sub-1000-lines, testable.
-- **Is not:** an embedding provider, a neural model, a chat daemon, or a
-  replacement for quest journals. It does not link, curl, or otherwise depend
-  on the `~/llm` repo. The `pi-mem` extension (`~/llm/MM.md`, Phase 2–4) wires
-  these tools into the agent with gist-first recall rules.
+  provider-free, sub-1000-lines, testable. The **store** (store/get/forget)
+  and the map of CLI flags onto `rec_query` composition.
+- **Is not:** an embedding provider, a neural model, a chat daemon, a
+  replacement for quest journals, or the multi-axis search compiler — that
+  last job belongs to the `rec_query` engine in libqmap (axis registry +
+  join semantics + plugin loading). mm **does not** link, curl, or otherwise
+  depend on the `~/llm` repo. The `pi-mem` extension (`~/llm/MM.md`,
+  Phase 2–4) wires these tools into the agent with gist-first recall rules.
