@@ -1,6 +1,6 @@
 REPO_ROOT := $(abspath ../..)
 QMAP_DIR  := $(REPO_ROOT)/external/libqmap
-STOMA_DIR := $(REPO_ROOT)/external/stoma
+STOMA_DIR := $(REPO_ROOT)/external/libstoma
 
 CC       ?= clang
 CFLAGS   = -std=c11 -g -O0 -Wall -Wextra -Wpedantic -D_POSIX_C_SOURCE=200809L

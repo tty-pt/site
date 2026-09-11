@@ -1,5 +1,5 @@
 BUD_DIR = $(REPO_ROOT)/external/bud
-STOMA_DIR = $(REPO_ROOT)/external/stoma
+STOMA_DIR = $(REPO_ROOT)/external/libstoma
 HYLE_DIR = $(REPO_ROOT)/external/hyle
 EXTRA_CFLAGS += -I../../external/bud/include -I$(HYLE_DIR)/c/libhyle-bud/include -I$(STOMA_DIR)/include
 EXTRA_LDLIBS += -L$(BUD_DIR)/lib -lbud -Wl,-rpath,$(BUD_DIR)/lib

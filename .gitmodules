@@ -19,3 +19,6 @@
 [submodule "external/libqsys"]
 	path = external/libqsys
 	url = git@github.com:tty-pt/libqsys.git
+[submodule "external/libstoma"]
+	path = external/libstoma
+	url = git@github.com:tty-pt/libstoma.git

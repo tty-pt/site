@@ -33,7 +33,7 @@ assets-sync:
 	fi
 
 stoma-lib:
-	$(MAKE) -C external/stoma
+	$(MAKE) -C external/libstoma
 
 hyle-lib:
 	$(MAKE) -C external/hyle
@@ -242,7 +242,7 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-qmap)
 hyle-tests:
-	RUSTFLAGS="-l qmap -l stoma -L $$(pwd)/external/libqmap/lib -L $$(pwd)/external/stoma/lib" cargo test --workspace \
+	RUSTFLAGS="-l qmap -l stoma -L $$(pwd)/external/libqmap/lib -L $$(pwd)/external/libstoma/lib" cargo test --workspace \
 		--manifest-path external/hyle/Cargo.toml 2>&1
 
 debug-clean:

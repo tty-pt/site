@@ -13,7 +13,7 @@ clang -Wall -Wextra \
       -I"$ROOT/external/hyle/include" \
       -I"$ROOT/external/hyle/c/libhyle-source/include" \
       -I"$ROOT/external/hyle/c/libhyle-bud/include" \
-      -I"$ROOT/external/stoma/include" \
+      -I"$ROOT/external/libstoma/include" \
       -I"$ROOT/mods" \
       -L"$ROOT/external/axil-auth/lib" \
       -Wl,-rpath,"$ROOT/external/axil-auth/lib" \
@@ -31,8 +31,8 @@ clang -Wall -Wextra \
       -Wl,-rpath,"$ROOT/external/hyle/c/libhyle-source/lib" \
       -L"$ROOT/external/hyle/c/libhyle-bud/lib" \
       -Wl,-rpath,"$ROOT/external/hyle/c/libhyle-bud/lib" \
-      -L"$ROOT/external/stoma/lib" \
-      -Wl,-rpath,"$ROOT/external/stoma/lib" \
+      -L"$ROOT/external/libstoma/lib" \
+      -Wl,-rpath,"$ROOT/external/libstoma/lib" \
       -laxil-auth -laxil -lqmap -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -lstoma -ljson-c -lqsys \
       "$ROOT/tests/unit/auth_group_permissions_test.c" \
       -o "$ROOT/build/test/auth_group_permissions_test"

@@ -17,7 +17,7 @@ COMMON_INCLUDES=(
   "-I${REPO_ROOT}/external/hyle/c/libhyle-source/include"
   "-I${REPO_ROOT}/external/hyle/c/libhyle-bud/include"
   "-I${REPO_ROOT}/external/libtransp/include"
-  "-I${REPO_ROOT}/external/stoma/include"
+  "-I${REPO_ROOT}/external/libstoma/include"
   "-I${REPO_ROOT}/mods/common"
   "-I${REPO_ROOT}/mods/index"
   "-I${REPO_ROOT}/mods/song"
