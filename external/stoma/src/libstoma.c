@@ -449,3 +449,116 @@ int stoma_rank(struct stoma_rank_ctx *ctx, rec_ref_t ref, float *score)
 	free(d.ent);
 	return 0;
 }
+
+/* ---- rec_query axis registration (stoma) ---- */
+
+struct rec_stoma_params {
+	const char *field;
+	const char *query;
+	int         phrase;
+	size_t      matched; /* rank param: matched query tokens */
+};
+
+static int stoma_axis_fill(void *ctx, void *params, rec_set_t *out)
+{
+	stoma_db_t *db = ctx;
+	const struct rec_stoma_params *p = params;
+
+	if (!p)
+		return -1;
+	return rec_axis_fill_tokens(db, p->field, p->query, p->phrase, out);
+}
+
+static int stoma_axis_rank(void *ctx, void *params, rec_ref_t ref, float *score)
+{
+	const struct rec_stoma_params *p = params;
+	struct stoma_rank_ctx sc;
+
+	if (!p)
+		return -1;
+	sc.db = ctx;
+	sc.field = p->field;
+	sc.matched = p->matched;
+	return stoma_rank(&sc, ref, score);
+}
+
+/*
+ * Decode "field=body query='hello world' phrase=1 matched=2" into a
+ * heap-owned rec_stoma_params (freed never — one-shot CLI process lifetime,
+ * matches the other axis decode fns). query/field default to "", phrase/
+ * matched default to 0. Single-quoted values may contain spaces.
+ */
+static void *stoma_axis_decode(const char *s)
+{
+	struct rec_stoma_params *p;
+	char *buf, *cur;
+
+	if (!s)
+		return NULL;
+	p = calloc(1, sizeof(*p));
+	buf = malloc(strlen(s) + 1);
+	if (!p || !buf) {
+		free(p);
+		free(buf);
+		return NULL;
+	}
+	strcpy(buf, s);
+	p->field = "";
+	p->query = "";
+	p->phrase = 0;
+	p->matched = 0;
+	cur = buf;
+	while (*cur) {
+		char *key, *val;
+		size_t vlen;
+
+		while (*cur == ' ')
+			cur++;
+		if (!*cur)
+			break;
+		key = cur;
+		while (*cur && *cur != '=' && *cur != ' ')
+			cur++;
+		if (*cur != '=') {
+			if (*cur)
+				cur++;
+			continue;
+		}
+		*cur++ = '\0';
+		if (*cur == '\'') {
+			cur++;
+			val = cur;
+			while (*cur && *cur != '\'')
+				cur++;
+			vlen = (size_t)(cur - val);
+			if (*cur == '\'')
+				*cur++ = '\0';
+		} else {
+			val = cur;
+			while (*cur && *cur != ' ')
+				cur++;
+			vlen = (size_t)(cur - val);
+			if (*cur)
+				*cur++ = '\0';
+		}
+		(void)vlen;
+		if (!strcmp(key, "field"))
+			p->field = val;
+		else if (!strcmp(key, "query"))
+			p->query = val;
+		else if (!strcmp(key, "phrase"))
+			p->phrase = atoi(val);
+		else if (!strcmp(key, "matched"))
+			p->matched = (size_t)atol(val);
+	}
+	return p;
+}
+
+__attribute__((constructor)) static void stoma_rec_axis_init(void)
+{
+	static const rec_axis_t stoma_axis = {
+		"stoma", stoma_axis_fill, stoma_axis_rank, NULL, stoma_axis_decode
+	};
+
+	rec_axis_register(&stoma_axis);
+}

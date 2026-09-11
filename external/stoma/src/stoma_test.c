@@ -776,6 +776,113 @@ int main(void)
 			rec_set_free(D);
 			rec_set_free(U);
 		}
+
+		/* 36. rec_query "stoma" axis registration: registered fill/rank
+		 * dispatch through the axis table must equal the direct
+		 * rec_axis_fill_tokens / stoma_rank calls. */
+		{
+			int slot = -1;
+			int i;
+			const rec_axis_t *axis;
+
+			for (i = 0; i < rec_axis_count(); i++) {
+				axis = rec_axis_get(i);
+				if (axis && !strcmp(axis->name, "stoma")) {
+					slot = i;
+					break;
+				}
+			}
+			CHECK(slot >= 0, "stoma axis registered");
+			axis = slot >= 0 ? rec_axis_get(slot) : NULL;
+			CHECK(axis && axis->fill && axis->rank && axis->decode,
+			      "stoma axis has fill+rank+decode");
+			CHECK(axis && axis->ctx == NULL,
+			      "stoma axis ctx NULL before set_ctx");
+			CHECK(slot < 0 || rec_axis_set_ctx(slot, rdb) == 0,
+			      "stoma axis set_ctx ok");
+			axis = slot >= 0 ? rec_axis_get(slot) : NULL;
+			CHECK(axis && axis->ctx == rdb,
+			      "stoma axis ctx == rdb after set_ctx");
+
+			if (axis) {
+				void *p = rec_axis_decode(
+				        slot, "field=title query=night phrase=0");
+				rec_set_t *direct = fill_once(rdb, "title",
+				                              "night", 0);
+				rec_set_t *via = rec_set_new();
+
+				CHECK(p != NULL, "decode basic params");
+				CHECK(via && p &&
+				              axis->fill(axis->ctx, p, via) ==
+				                      0,
+				      "registered fill via axis table ok");
+				CHECK(direct && via &&
+				              rec_set_count(direct) ==
+				                      rec_set_count(via) &&
+				              (rec_set_count(direct) == 0 ||
+				               !memcmp(rec_set_at(direct),
+				                       rec_set_at(via),
+				                       rec_set_count(direct) *
+				                               sizeof(rec_ref_t))),
+				      "registered fill == direct rec_axis_fill_tokens");
+				if (direct)
+					rec_set_free(direct);
+				if (via)
+					rec_set_free(via);
+			}
+
+			if (axis) {
+				/* phrase + quoted multi-word query */
+				void *pp = rec_axis_decode(
+				        slot,
+				        "field=title query='black star' phrase=1");
+				rec_set_t *direct = fill_once(rdb, "title",
+				                              "black star", 1);
+				rec_set_t *via = rec_set_new();
+
+				CHECK(pp != NULL, "decode quoted phrase params");
+				CHECK(via && pp &&
+				              axis->fill(axis->ctx, pp, via) ==
+				                      0,
+				      "registered fill (phrase) ok");
+				CHECK(direct && via &&
+				              rec_set_count(direct) ==
+				                      rec_set_count(via) &&
+				              (rec_set_count(direct) == 0 ||
+				               !memcmp(rec_set_at(direct),
+				                       rec_set_at(via),
+				                       rec_set_count(direct) *
+				                               sizeof(rec_ref_t))),
+				      "registered fill == direct (phrase, quoted query)");
+				if (direct)
+					rec_set_free(direct);
+				if (via)
+					rec_set_free(via);
+			}
+
+			if (axis) {
+				/* rank: matched=1, ref 13 ("A Dark Night") */
+				void *rp = rec_axis_decode(
+				        slot, "field=title matched=1");
+				struct stoma_rank_ctx dctx = { rdb, "title", 1 };
+				float direct_sc = 0.0f, via_sc = 0.0f;
+				int drc, vrc;
+
+				CHECK(rp != NULL, "decode rank params");
+				drc = stoma_rank(&dctx, 13, &direct_sc);
+				vrc = rp ? axis->rank(axis->ctx, rp, 13,
+				                      &via_sc)
+				         : -1;
+				CHECK(drc == 0 && vrc == 0 &&
+				              float_close(direct_sc, via_sc),
+				      "registered rank == direct stoma_rank");
+			}
+
+			CHECK(rec_axis_decode(slot, "") != NULL,
+			      "decode empty string still allocates defaults");
+			CHECK(rec_axis_decode(-1, "field=x") == NULL,
+			      "decode invalid slot -> NULL");
+		}
 		stoma_close(rdb);
 	}
 
