@@ -22,3 +22,12 @@
 [submodule "external/libstoma"]
 	path = external/libstoma
 	url = git@github.com:tty-pt/libstoma.git
+[submodule "external/libgeo"]
+	path = external/libislet
+	url = git@github.com:tty-pt/libgeo.git
+[submodule "external/libjoint"]
+	path = external/libjoint
+	url = git@github.com:tty-pt/libit.git
+[submodule "external/libsepal"]
+	path = external/libsepal
+	url = git@github.com:tty-pt/libsepal.git
