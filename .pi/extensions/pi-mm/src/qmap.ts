@@ -3,7 +3,6 @@ import { levelWindow } from "./window.ts";
 import type { MmConfig } from "./config.ts";
 
 export const FILESPEC = "mem.db@joint,stoma:a:s";
-export const SEPAL_M = 10;
 export const SEPAL_MIN_SIM = 0.2;
 export const SEPAL_VEC_MAX = 2048;
 
@@ -132,7 +131,7 @@ export function scanExpr(topic: string, level: number, now: Date, until?: string
 }
 
 export function sepalLeafForText(topic: string): string {
-  return `sepal="query='${topic}' m=${SEPAL_M} min_sim=${SEPAL_MIN_SIM}"`;
+  return `sepal="query='${topic}' min_sim=${SEPAL_MIN_SIM}"`;
 }
 
 export interface ResultLine {

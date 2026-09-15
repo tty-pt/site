@@ -208,7 +208,7 @@ Deno.test("memory_scan: embed=true with sepal configured → query= text leaf, n
   const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() })));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes(`sepal="query='beacon' m=10 min_sim=0.2"`), `sepal query= text leaf; got ${args}`);
+  check(args.includes(`sepal="query='beacon' min_sim=0.2"`), `sepal query= text leaf; got ${args}`);
   check(!args.includes("file="), `no tempfile bridge; got ${args}`);
   check(runner.invocations[0].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[0].args[4]}`);
   check(runner.invocations[0].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");

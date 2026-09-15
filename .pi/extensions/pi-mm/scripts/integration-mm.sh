@@ -121,7 +121,7 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
     # query= text leaf, conjoined with stoma exactly as memory_scan emits it
     mock_embed_once
     if out=$(QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
-        "$QMAP" -X "(stoma=\"field=text query=beacon matched=1\" AND sepal=\"query='embedded lighthouse beacon' m=10 min_sim=0.4\")" -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
+        "$QMAP" -X "(stoma=\"field=text query=beacon matched=1\" AND sepal=\"query='embedded lighthouse beacon' min_sim=0.4\")" -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
       wait "$SRV_PID" 2>/dev/null || true
       echo "$out" | grep -q "^4 " && ok "embed store + query= text leaf finds ref 4" || failmsg "query= must find ref 4" "$out"
     else

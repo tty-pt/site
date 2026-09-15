@@ -92,7 +92,7 @@ Deno.test("filespecFor uses absolute path to avoid ./ alias clobber", () => {
 
 Deno.test("scanExpr: sepal leaf ANDed into any window shape", () => {
   const leaf = sepalLeafForText("harbor lights");
-  check(leaf === `sepal="query='harbor lights' m=10 min_sim=0.2"`, "sepalLeafForText exact");
+  check(leaf === `sepal="query='harbor lights' min_sim=0.2"`, "sepalLeafForText exact");
   check(
     scanExpr("beacon", 0, date("2026-09-15"), undefined, leaf) ===
       `(stoma="field=text query=beacon matched=1" AND ${leaf})`,
