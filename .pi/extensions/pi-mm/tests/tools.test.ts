@@ -1,5 +1,5 @@
 import { makeStoreTool, makeScanTool, makeThinkTool, makeForgetTool, makeResetTool, type ToolEnv } from "../src/tools/index.ts";
-import type { ExecFn, QmapRunner } from "../src/qmap.ts";
+import type { QmapRunner } from "../src/qmap.ts";
 import { give } from "../src/tools/index.ts";
 import { fakeRunner, runTool, okResult } from "./fake-qmap.ts";
 import { DEFAULT_CONFIG, type MmConfig } from "../src/config.ts";
@@ -16,12 +16,11 @@ function now(): Date {
   return new Date("2026-09-15T10:00:00");
 }
 
-function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}, exec?: ExecFn): ToolEnv {
+function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}): ToolEnv {
   return {
     cwd: CWD,
     runner,
     nowProvider: now,
-    exec: exec ?? ((_c, _a, _o) => Promise.resolve({ stdout: "", stderr: "", code: 0 })),
     cfg: { ...DEFAULT_CONFIG, qmapBin: "/usr/bin/qmap", ...cfg },
   };
 }
@@ -204,26 +203,18 @@ Deno.test("degradation: nonzero exec exit still returns a non-error result with 
   check((res.content[0].text ?? "").includes("joint missing"), "stderr surfaced");
 });
 
-Deno.test("memory_scan: embed=true with sepal configured → sepal leaf in expr, vec file passed, cleaned after", async () => {
-  const calls: Array<{ command: string; args: string[] }> = [];
-  const exec: ExecFn = (command, args) => {
-    calls.push({ command, args });
-    return Promise.resolve({ stdout: JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), stderr: "", code: 0 });
-  };
+Deno.test("memory_scan: embed=true with sepal configured → query= text leaf, no curl, no temp files", async () => {
   const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
-  const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() }, exec)));
+  const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() })));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
-  check(calls.length === 1 && calls[0].command === "curl", "curl invoked once");
-  check(calls[0].args[3] === "http://localhost:4242/v1/embeddings", "embed url passed to curl");
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes(`qdim=3`), `sepal leaf qdim present; got ${args}`);
-  check(args.includes(`m=10`) && args.includes("min_sim=0.2"), "sepal leaf knobs");
+  check(args.includes(`sepal="query='beacon' m=10 min_sim=0.2"`), `sepal query= text leaf; got ${args}`);
+  check(!args.includes("file="), `no tempfile bridge; got ${args}`);
   check(runner.invocations[0].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[0].args[4]}`);
   check(runner.invocations[0].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");
-  const vecFile = /file=([^\s"]+)/.exec(args)?.[1];
-  check(typeof vecFile === "string", "vec file in expr");
-  const d = res.details as { records: unknown[] };
+  const d = res.details as { records: unknown[]; embed?: string };
   check(d.records.length === 1, "records returned");
+  check(d.embed === undefined, "no embed diagnostic on the text-leaf path");
 });
 
 Deno.test("memory_scan: embed=true but sepal unconfigured → soft fallback diagnostic", async () => {
@@ -235,17 +226,6 @@ Deno.test("memory_scan: embed=true but sepal unconfigured → soft fallback diag
   check(runner.invocations[0].args[4] === FS, `plain filespec on fallback; got ${runner.invocations[0].args[4]}`);
   const d = res.details as { embed: string };
   check(d.embed === "unconfigured", "diagnostic embed=unconfigured");
-});
-
-Deno.test("memory_scan: embed=true but embed helper returns null → soft fallback no-vector", async () => {
-  const exec: ExecFn = () => Promise.resolve({ stdout: "", stderr: "boom", code: 7 });
-  const runner = fakeRunner([okResult("1 0.125000 payload\n")]);
-  const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() }, exec)));
-  const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
-  const args = runner.invocations[0].args.join(" ");
-  check(!args.includes("sepal="), `no sepal leaf on no-vector; got ${args}`);
-  const d = res.details as { embed: string };
-  check(d.embed === "no-vector", "diagnostic embed=no-vector");
 });
 
 Deno.test("memory_store/memory_think/memory_forget/memory_reset: sepal-aware filespec + embed env when configured", async () => {

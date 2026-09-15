@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
@@ -30,6 +31,12 @@ export function makeStoreTool(envSource: EnvSource): PiToolSpec {
         const cwd = memDir(env);
         const runner = env.runner;
         if (env.cfg.qmapBin === "") return { content: [{ type: "text", text: `mm unavailable: qmap binary not found (configured: empty; in-site probe failed under ${cwd})` }], details: { error: "no-qmap" } };
+
+        try {
+          await mkdir(cwd, { recursive: true });
+        } catch {
+          // Best-effort directory creation
+        }
 
         const embed = sepalConfigured(env.cfg);
         const fspec = filespecFor(cwd, embed);

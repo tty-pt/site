@@ -55,23 +55,19 @@ qmap -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma,sepal:a:s"
 
 ## 4. Query with embeddings
 
-Sepal ranks from a pre-computed binary float vector at query time —
+Sepal embeds the query text server-side at query time — one leaf:
 
 ```sh
-# 1. embed the search text (external; sepal does not embed at query time)
-curl -sS -X POST localhost:4242/v1/embeddings \
-  -d '{"input":"beacon","model":"nomic-embed-text"}' \
-  | jq -r '.data[0].embedding[]' > /tmp/q.txt
-python3 -c 'import struct,sys; d=[float(line) for line in open("/tmp/q.txt")]; sys.stdout.buffer.write(struct.pack("<%df"%len(d), *d))' > /tmp/q.bin
-
-# 2. scan
-qmap -X '(joint="a=0 b=2026-10-01" AND sepal="file=/tmp/q.bin qdim=768 m=10 min_sim=0.3")' \
+qmap -X "(stoma=\"field=text query=beacon matched=1\" AND sepal=\"query='harbor lights' m=10 min_sim=0.2\")" \
   -g . "mem.db@joint,stoma,sepal:a:s" -t 10
 ```
 
-The Phase 5 `memory_scan embed=true` mode automates steps 1–2 (embeds the
-topic, writes the temp vector, merges the `sepal=` leaf).
-Track: `mm-plan/5-EMBED-PLAN.md`.
+The Phase 6 `memory_scan embed=true` mode emits exactly this leaf (no
+client curl, no temp vector). The Phase 5 `file=` form
+(`sepal="file=/tmp/q.bin qdim=768 …"`, LE-float32 vector file) still
+works for pre-computed vectors.
+Track: `mm-plan/6-QUERY-TEXT-PLAN.md` (Phase 5 record stays in
+`mm-plan/5-EMBED-PLAN.md`).
 
 ## Notes
 
@@ -81,3 +77,6 @@ Track: `mm-plan/5-EMBED-PLAN.md`.
   phase-2 qmap surface + pi-mm tools replace it; do not rely on `mm --embed`.
 - Sepal stores only the vector, not the text; a sepal-only scan returns
   refs, not payloads — join with `stoma=` for text, or `memory_think`.
+- Each `*.db` owns its axis stores (`<primary>-<axis>`, e.g.
+  `mem.db-joint`, `mem.db-sepal` beside `mem.db`); a directory may host
+  many databases without cross-talk. Track: `mm-plan/7-AXIS-NAMESPACE-PLAN.md`.

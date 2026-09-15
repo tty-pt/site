@@ -7,12 +7,6 @@ export const SEPAL_M = 10;
 export const SEPAL_MIN_SIM = 0.2;
 export const SEPAL_VEC_MAX = 2048;
 
-export type ExecFn = (
-  command: string,
-  args: string[],
-  options?: { cwd?: string; env?: Record<string, string> },
-) => Promise<PiExecResult>;
-
 export function filespecFor(memDir: string, embed?: boolean): string {
   return `${memDir}/mem.db@joint,stoma${embed ? ",sepal" : ""}:a:s`;
 }
@@ -137,8 +131,8 @@ export function scanExpr(topic: string, level: number, now: Date, until?: string
   return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
 }
 
-export function sepalLeafFor(vecFile: string, qdim: number): string {
-  return `sepal="file=${vecFile} qdim=${qdim} m=${SEPAL_M} min_sim=${SEPAL_MIN_SIM}"`;
+export function sepalLeafForText(topic: string): string {
+  return `sepal="query='${topic}' m=${SEPAL_M} min_sim=${SEPAL_MIN_SIM}"`;
 }
 
 export interface ResultLine {

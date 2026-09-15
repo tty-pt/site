@@ -34,7 +34,7 @@ Optional `.pi/settings.json` under `"pi-mm"`:
 
 Precedence: settings → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` `qmap` → in-site fallback. Defaults: `memDir=.pi/mm`, `scanLimit=10`. Unit tests stub qmap and never shell out; real-qmap coverage is `scripts/integration-mm.sh`.
 
-Optional embeddings: `QMAP_SEPAL_EMBED_URL` + `QMAP_SEPAL_EMBED_MODEL` (optional `QMAP_SEPAL_EMBED_KEY`, or `embedUrl`/`embedModel`/`embedKey` under `"pi-mm"`). When set, tools use `mem.db@joint,stoma,sepal:a:s` and `memory_scan(embed=true)` adds semantic ranking. Sepal stores vectors only (no text); degradation is soft (`details.embed` = `unconfigured`/`no-vector`). Operator guide: repo-root `RUNNING.md`.
+Optional embeddings: `QMAP_SEPAL_EMBED_URL` + `QMAP_SEPAL_EMBED_MODEL` (optional `QMAP_SEPAL_EMBED_KEY`, or `embedUrl`/`embedModel`/`embedKey` under `"pi-mm"`). When set, tools use `mem.db@joint,stoma,sepal:a:s` and `memory_scan(embed=true)` adds semantic ranking via a `sepal="query='…'"` text leaf that libsepal embeds server-side (no client curl, no temp files). Sepal stores vectors only (no text); unconfigured degrades soft (`details.embed` = `unconfigured`), while a configured-but-unreachable endpoint fails the query loud (exit 1). Operator guide: repo-root `RUNNING.md`.
 
 ## Development
 
@@ -50,4 +50,4 @@ Budgets: file <350 LOC, function <80 LOC. Every commit must leave the extension 
 
 ## Layout
 
-`src/config.ts` (defaults + resolution), `src/window.ts` (level→joint window, always bounded per F2), `src/resolve.ts` (bare-ref parse + sentinel skip + nextRef), `src/qmap.ts` (QmapRunner + invocation builders pinned to §8), `src/embed.ts` (query-time embed via curl → LE float32 temp vector + cleanup), `src/tools/*` (store/scan/think/forget/reset), `skills/pi-mm/SKILL.md`, `scripts/{zip_bundle,check-complexity,integration-mm}.`.
+`src/config.ts` (defaults + resolution), `src/window.ts` (level→joint window, always bounded per F2), `src/resolve.ts` (bare-ref parse + sentinel skip + nextRef), `src/qmap.ts` (QmapRunner + invocation builders pinned to §8, incl. the `sepalLeafForText` query leaf), `src/tools/*` (store/scan/think/forget/reset), `skills/pi-mm/SKILL.md`, `scripts/{zip_bundle,check-complexity,integration-mm}.`.

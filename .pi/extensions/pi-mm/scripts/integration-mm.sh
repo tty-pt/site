@@ -85,17 +85,15 @@ left=$(qmap_cwd -g . "$FILESPEC" 2>/dev/null | grep -E '^[0-9]+$' | wc -l | tr -
 for ref in $(qmap_cwd -g . "$FILESPEC" 2>/dev/null | grep -E '^[0-9]+$' || true); do qmap_cwd -d "$ref" "$FILESPEC" >/dev/null || true; done
 
 # ── embed smoke (requires python3 + libsepal) ── store on a ,sepal roster
-# via a one-shot local HTTP mock (OpenAI JSON), then query with a vector.
+# via a one-shot local HTTP mock (OpenAI JSON). Phase 6: the query uses the
+# `query=` text leaf (libsepal embeds server-side — a second HTTP call, so
+# the one-shot mock restarts); `file=` stays for the dissimilar-vector gate.
 SEPAL_LIB="$ROOT/external/libsepal/lib"
 if command -v python3 >/dev/null 2>&1 && [ -f "$SEPAL_LIB/libsepal.so" ]; then
   EMBED_FILE="$mem/mem-embed.db@joint,stoma,sepal:a:s"
   EMBED_AXES="$JOINT_LIB:$STOMA_LIB:$SEPAL_LIB"
-  # query vectors as exact float32 LE (sh printf \xHH is not portable; python3 is gated anyway)
-  python3 -c 'import struct; open("'"$td"'/vec.bin","wb").write(struct.pack("<3f", 0.1, 0.2, 0.3))'
-  python3 -c 'import struct; open("'"$td"'/vec0.bin","wb").write(struct.pack("<3f", 1.0, 0.0, 0.0))'
-  [ "$(wc -c < "$td/vec.bin")" = "12" ] || failmsg "vec.bin must be 12 bytes" "$(wc -c < "$td/vec.bin")"
-  [ "$(wc -c < "$td/vec0.bin")" = "12" ] || failmsg "vec0.bin must be 12 bytes" "$(wc -c < "$td/vec0.bin")"
-  python3 -c '
+  mock_embed_once() {
+    python3 -c '
 import http.server, json
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
@@ -110,13 +108,26 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
 ' &
-  SRV_PID=$!
-  sleep 0.3
+    SRV_PID=$!
+    sleep 0.3
+  }
+  # query vectors as exact float32 LE (sh printf \xHH is not portable; python3 is gated anyway)
+  python3 -c 'import struct; open("'"$td"'/vec0.bin","wb").write(struct.pack("<3f", 1.0, 0.0, 0.0))'
+  [ "$(wc -c < "$td/vec0.bin")" = "12" ] || failmsg "vec0.bin must be 12 bytes" "$(wc -c < "$td/vec0.bin")"
+  mock_embed_once
   if QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
       "$QMAP" -p 4:"2026-09-16:embedded lighthouse beacon" "$EMBED_FILE" >/dev/null 2>"$td/embed.err"; then
     wait "$SRV_PID" 2>/dev/null || true
-    out=$(QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X "sepal=\"file=$td/vec.bin qdim=3 m=10 min_sim=0.4\"" -g . "$EMBED_FILE" -t 10 2>/dev/null)
-    echo "$out" | grep -q "^4 " && ok "embed store + sepal query finds ref 4" || failmsg "sepal must find ref 4" "$out"
+    # query= text leaf, conjoined with stoma exactly as memory_scan emits it
+    mock_embed_once
+    if out=$(QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
+        "$QMAP" -X "(stoma=\"field=text query=beacon matched=1\" AND sepal=\"query='embedded lighthouse beacon' m=10 min_sim=0.4\")" -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
+      wait "$SRV_PID" 2>/dev/null || true
+      echo "$out" | grep -q "^4 " && ok "embed store + query= text leaf finds ref 4" || failmsg "query= must find ref 4" "$out"
+    else
+      wait "$SRV_PID" 2>/dev/null || true
+      failmsg "query= text leaf failed (exit nonzero)" "$(cat "$td/query.err")"
+    fi
     out0=$(QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X "sepal=\"file=$td/vec0.bin qdim=3 m=10 min_sim=0.4\"" -g . "$EMBED_FILE" -t 10 2>/dev/null)
     echo "$out0" | grep -q "^4 " && failmsg "dissimilar vector must not match ref 4" "$out0" || ok "sepal similarity gate"
   else
@@ -126,5 +137,22 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
 else
   echo "skip - embed smoke (python3 or libsepal missing)"
 fi
+
+# ── per-primary axis isolation (7-AXIS-NAMESPACE-PLAN.md Phase D): two DBs
+# in one directory each own their axis stores; stoma rebuilds bind exactly
+# the queried primary (never a sibling roster) ──
+DBA="$mem/a.db@joint,stoma:a:s"
+DBB="$mem/b.db@joint,stoma:a:s"
+qmap_cwd -p 1:"2026-09-14:I was with my grandfather under the cherry tree" "$DBA" >/dev/null
+qmap_cwd -p 1:"2026-09-14:A boat ride with a panda can be deep" "$DBB" >/dev/null
+[ -f "$mem/a.db-joint" ] && [ -f "$mem/b.db-joint" ] \
+  && ok "two DBs own distinct axis stores" \
+  || failmsg "two DBs must own distinct axis stores" "$(ls "$mem" | tr '\n' ' ')"
+out=$(qmap_cwd -X 'stoma="field=text query=grandfather matched=1"' -g . "$DBA" -t 10 2>/dev/null || true)
+echo "$out" | grep -q "^1 " || failmsg "own-DB recall finds grandfather" "$out"
+out2=$(qmap_cwd -X 'stoma="field=text query=grandfather matched=1"' -g . "$DBB" -t 10 2>/dev/null || true)
+echo "$out2" | grep -q "^1 " && failmsg "sibling DB must not leak grandfather" "$out2" || ok "two-DB stoma isolation (no leak)"
+out3=$(qmap_cwd -X 'stoma="field=text query=panda matched=1"' -g . "$DBB" -t 10 2>/dev/null || true)
+echo "$out3" | grep -q "^1 " || failmsg "own-DB recall finds panda" "$out3"
 
 [ $fail -eq 0 ] && echo "integration-mm: all green" || { echo "integration-mm: $fail failure(s)" >&2; exit 1; }

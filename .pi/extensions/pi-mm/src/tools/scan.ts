@@ -1,8 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
-import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, sepalLeafFor, embedEnv } from "../qmap";
-import { embedQuery, cleanupEmbed } from "../embed";
+import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, sepalLeafForText, embedEnv } from "../qmap";
 
 function defaultLevel(l: unknown): number {
   if (typeof l === "number" && l >= 0 && l <= 2) return l;
@@ -26,14 +25,13 @@ export function makeScanTool(envSource: EnvSource): PiToolSpec {
         topic: { type: "string", description: "Search topic (accent-sensitive, passed verbatim to the text index)." },
         level: { type: ["number", "string"], description: "Time resolution: 0 = all-time, 1 = today, 2 = this month. Default 0." },
         until: { type: "string", description: "ISO date (YYYY-MM-DD) upper bound. Caps the time window: level 0 searches all-time up to this date; level 1/2 caps the window end. Default: now." },
-        embed: { type: "boolean", description: "Embed the topic and add semantic (sepal) ranking when QMAP_SEPAL_EMBED_URL + QMAP_SEPAL_EMBED_MODEL are configured. Unconfigured or embed failure degrades to the plain text scan." },
+        embed: { type: "boolean", description: "Add semantic (sepal) ranking: libsepal embeds the topic server-side when QMAP_SEPAL_EMBED_URL + QMAP_SEPAL_EMBED_MODEL are configured. Unconfigured degrades to the plain text scan; a configured-but-unreachable endpoint fails the query loud (exit 1)." },
         limit: { type: "number", description: "Maximum records returned. Default 10." },
       },
       required: ["topic"],
       additionalProperties: false,
     },
     execute: async (_id, params, _signal, _onUpdate, ctx) => {
-      let vecFile: string | undefined;
       try {
         const env = await envSource(ctx as PiCtx);
         const topic = typeof params["topic"] === "string" ? params["topic"].trim() : "";
@@ -47,17 +45,10 @@ export function makeScanTool(envSource: EnvSource): PiToolSpec {
         const wantEmbed = params["embed"] === true;
         const embedReady = wantEmbed && sepalConfigured(env.cfg);
         const details: Record<string, unknown> = {};
-        let sepalLeaf: string | undefined;
+        // libsepal embeds the topic server-side at query time (Phase 6
+        // `query=` leaf): no curl, no temp vector — just a text leaf.
+        const sepalLeaf = embedReady ? sepalLeafForText(topic) : undefined;
         if (wantEmbed && !embedReady) details["embed"] = "unconfigured";
-        if (embedReady && env.cfg.embedUrl && env.cfg.embedModel) {
-          const embedded = await embedQuery(env.cfg.embedUrl, env.cfg.embedModel, topic, env.exec);
-          if (embedded) {
-            vecFile = embedded.vecFile;
-            sepalLeaf = sepalLeafFor(embedded.vecFile, embedded.qdim);
-          } else {
-            details["embed"] = "no-vector";
-          }
-        }
         const axes = axisPath(env);
         const cwd = memDir(env);
         const now = env.nowProvider();
@@ -71,8 +62,6 @@ export function makeScanTool(envSource: EnvSource): PiToolSpec {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text", text: `mm unavailable: ${msg}` }], details: { error: msg, records: [] } };
-      } finally {
-        if (vecFile) await cleanupEmbed([vecFile]);
       }
     },
   };

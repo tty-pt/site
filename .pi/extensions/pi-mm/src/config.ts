@@ -86,7 +86,24 @@ export function resolveQmapBin(
 
 export function resolveAxisPath(cfg: MmConfig, cwd: string): string {
   if (cfg.axisLibs !== null) return cfg.axisLibs;
-  return join(cwd, "external", "libjoint", "lib") + ":" + join(cwd, "external", "libstoma", "lib");
+  const joint = join(cwd, "external", "libjoint", "lib");
+  const stoma = join(cwd, "external", "libstoma", "lib");
+  const base = `${joint}:${stoma}`;
+  if (sepalConfigured(cfg)) {
+    return `${base}:${join(cwd, "external", "libsepal", "lib")}`;
+  }
+  return base;
+}
+
+export function runtimeEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  if (typeof process !== "undefined" && process?.env) {
+    Object.assign(env, process.env);
+  }
+  if (typeof Deno !== "undefined" && Deno?.env) {
+    Object.assign(env, Deno.env.toObject());
+  }
+  return env;
 }
 
 export async function readMmConfig(cwd: string, env: Record<string, string | undefined> = {}): Promise<MmConfig> {
@@ -100,5 +117,5 @@ export async function readMmConfig(cwd: string, env: Record<string, string | und
   } catch {
     raw = undefined;
   }
-  return applyEnv(loadConfig(raw), { ...Deno.env.toObject(), ...env });
+  return applyEnv(loadConfig(raw), { ...runtimeEnv(), ...env });
 }

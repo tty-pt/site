@@ -7,7 +7,7 @@ import {
   buildGetInvocation,
   buildForgetInvocation,
   scanExpr,
-  sepalLeafFor,
+  sepalLeafForText,
   embedEnv,
   parseResultLines,
   payloadDate,
@@ -91,8 +91,8 @@ Deno.test("filespecFor uses absolute path to avoid ./ alias clobber", () => {
 });
 
 Deno.test("scanExpr: sepal leaf ANDed into any window shape", () => {
-  const leaf = sepalLeafFor("/tmp/v.bin", 768);
-  check(leaf === 'sepal="file=/tmp/v.bin qdim=768 m=10 min_sim=0.2"', "sepalLeafFor exact");
+  const leaf = sepalLeafForText("harbor lights");
+  check(leaf === `sepal="query='harbor lights' m=10 min_sim=0.2"`, "sepalLeafForText exact");
   check(
     scanExpr("beacon", 0, date("2026-09-15"), undefined, leaf) ===
       `(stoma="field=text query=beacon matched=1" AND ${leaf})`,

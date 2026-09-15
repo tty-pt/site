@@ -1,7 +1,10 @@
+import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { Pi, PiCtx, PiToolSpec } from "../hooks/events";
 import type { MmConfig } from "../config";
-import { readMmConfig, resolveAxisPath, sepalConfigured } from "../config";
-import type { ExecFn, QmapRunner } from "../qmap";
+import { readMmConfig, resolveAxisPath, resolveQmapBin, runtimeEnv, sepalConfigured } from "../config";
+import type { QmapRunner } from "../qmap";
 import { ShellQmapRunner } from "../qmap";
 import { makeStoreTool } from "./store";
 import { makeScanTool } from "./scan";
@@ -16,7 +19,6 @@ export interface ToolEnv {
   cwd: string;
   cfg: MmConfig;
   runner: QmapRunner;
-  exec: ExecFn;
   nowProvider: () => Date;
 }
 
@@ -26,14 +28,24 @@ export function give(env: ToolEnv): EnvSource {
   return () => Promise.resolve(env);
 }
 
-export async function readToolEnv(cwd: string, runner: QmapRunner, exec: ExecFn): Promise<ToolEnv> {
+export async function readToolEnv(cwd: string, runner: QmapRunner): Promise<ToolEnv> {
   const cfg = await readMmConfig(cwd);
-  return { cwd, cfg, runner, exec, nowProvider: () => new Date() };
+  if (cfg.qmapBin === "") {
+    const env = runtimeEnv();
+    const pathDirs = (env["PATH"] ?? "").split(":");
+    cfg.qmapBin = resolveQmapBin(cfg, cwd, pathDirs, existsSync).path;
+  }
+  try {
+    await mkdir(join(cwd, cfg.memDir), { recursive: true });
+  } catch {
+    // Best-effort directory creation
+  }
+  return { cwd, cfg, runner, nowProvider: () => new Date() };
 }
 
 export function defaultEnvSource(pi: Pi): EnvSource {
   const runner = new ShellQmapRunner((command, args, options) => pi.exec(command, args, options));
-  return (ctx) => readToolEnv(ctx.cwd, runner, (command, args, options) => pi.exec(command, args, options));
+  return (ctx) => readToolEnv(ctx.cwd, runner);
 }
 
 export function axisPath(env: ToolEnv): string {

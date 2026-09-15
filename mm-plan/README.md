@@ -11,7 +11,7 @@
 > explicit decision 2026-09-13); **commit only when explicitly asked**;
 > `make` + full suites green as a gate.
 
-Version: v23 (2026-09-16) — phase 1 DONE (all five repos, fixture
+Version: v26 (2026-09-16) — phase 1 DONE (all five repos, fixture
 16/16, site `make` + `make test` green). Phase 2 stores **the whole
 `-p` string as one un-split value** (see §10, §11). Phase 2 re-scoped
 around four principles (detail `PHASE-2-CLI.md` header)**: axes decide
@@ -30,6 +30,10 @@ checklist all green; `deno test` 48/48, integration all green). **Phase 4 —
 `--until` validity window DONE 2026-09-15** (`4-UNTIL-IMPLEMENTATION.md`).
 **Phase 5 — real embeddings DONE 2026-09-16** (`src/embed.ts` +
 `memory_scan embed=true`; `5-EMBED-PLAN.md`, operator guide `RUNNING.md`).
+**Phase 6 — sepal query-time `query=` leaf DONE 2026-09-16**
+(libsepal `1ade85a` embeds the string server-side at decode; pi-mm
+`src/embed.ts` deleted, `memory_scan embed=true` emits a text leaf;
+`6-QUERY-TEXT-PLAN.md`).
 §10 catalogs every
 operation kind the four axes answer, store/unstore/get included
 (source-verified; each repo's own README carries its matching catalog).
@@ -50,6 +54,8 @@ implemented).
 | 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | ✅ DONE 2026-09-15 — `.pi/extensions/pi-mm/` scaffold (mirrors `pi-quest`); `deno test` 48/48 + integration all green; §13 checklist all green |
 | 5 | Validity window in the extension | `memory_scan` `until` upper-bound via joint through the phase-2 surface | ✅ **DONE 2026-09-15** — `memory_scan` gains `until` (ISO date YYYY-MM-DD) capping the time window upper bound: level 0 → `joint="a=0 b=until" AND stoma`; level 1/2 caps `b` at the earlier of `until` and the level's natural end. Unit tests 54/54 + integration green; root `make` W06 PASS. Detail: `4-UNTIL-IMPLEMENTATION.md` |
 | 6 | Real embeddings | sepal axis in the pi-mm filespec when `QMAP_SEPAL_EMBED_*` configured; `memory_scan embed=true` embeds the topic via axil-qllm (`/v1/embeddings`) and merges a `sepal="file=… qdim=…"` leaf | ✅ **DONE 2026-09-16** — `src/embed.ts` (`embedQuery` curl→LE float32 temp vector, `cleanupEmbed` best-effort) + `scanExpr(…, sepalLeaf?)` + `sepalLeafFor`/`embedEnv`/`sepalConfigured` + sepal-aware filespec in all five tools (`embed=true` modal on scan with soft `unconfigured`/`no-vector` fallback; sepal never enters the roster unconfigured since its EINVAL rejects the whole `-p`). Unit tests 68/68 + lint + complexity ok; integration green incl. the gated embed smoke (python3 one-shot mock: store embeds → sepal query finds ref; dissimilar vector gated out). Detail: `5-EMBED-PLAN.md` |
+| 7 | Sepal query-time `query=` leaf | `sepal="query='…'"` embeds the string server-side in libsepal decode (stoma quote parity), `query=` name per user choice; pi-mm drops the curl→tempfile bridge and just emits a text leaf | ✅ **DONE 2026-09-16** — Phase A: `sepal_axis_decode` + `query` key (single-quote-aware, wins over `file=`, NULL when unconfigured/fetch fails) + header docs + `tests/unit/test_axis_decode_query.c` (56 assertions: verbatim text, unquoted token, precedence, empty/unconfigured NULL, end-to-end fill+rank); libsepal `make test` exit 0, clean rebuild zero warnings, exported symbols unchanged, commit `1ade85a`. Phase B: submodule bump + `src/embed.ts`/`tests/embed.test.ts` deleted + `sepalLeafForText` + `ToolEnv.exec` dropped + scan emits the text leaf (unconfigured → soft `unconfigured`; unreachable endpoint → loud exit 1); `deno test` 61/61 + lint + complexity ok; integration green incl. the `query=` text-leaf smoke (one-shot mock restarted per embed call) with the `file=` dissimilar gate kept. Detail: `6-QUERY-TEXT-PLAN.md` |
+| 8 | Per-primary axis-store isolation | Two DBs in one directory corrupted each other (stoma rebuilt from the first `*.roster` in readdir order → silent 0 docs; `joint.db`/`sepal.db` shared per dir → ref collisions). Fix: `qmap_axes_spec` → `<dir>/<basename>-<axis>` (`garden.db` → `garden.db-joint` …), libqmap publishes verbatim `QMAP_AXIS_PRIMARY`, stoma rebuilds from that primary (+ loud multi-roster guard when the env is absent) | ✅ **DONE 2026-09-16** — Phase A (libqmap): spec naming + env + `test-roster.sh` §7 fix + §8 two-DB isolation check + `test-cli.sh`/`test-fanout.sh`/`real_seed.c` per-primary rework; clean rebuild zero warnings, `make test` exit 0. Phase B (libstoma): env-preferred rebuild + B-2 guard + `src/stoma_axis_rebuild_test.c` (15 assertions, stderr-captured) wired into `make test`; all suites green. Phase C: joint/sepal/islet verbatim-passthrough verified, suites green, no code change. Phase D: site `make` W06 PASS; pi-mm `deno test` 61/61 + lint + complexity + `integration-mm.sh` all green incl. the new two-DB-in-one-dir smoke; `RUNNING.md` + SKILL.md storage notes. Detail: `7-AXIS-NAMESPACE-PLAN.md` |
 
 ---
 
@@ -100,6 +106,10 @@ DONE 2026-09-16** — sepal axis in the filespec when
 `QMAP_SEPAL_EMBED_*` configured + `memory_scan embed=true` via
 `src/embed.ts`; unit tests 68/68 + integration green incl. the gated
 embed smoke; detail: `5-EMBED-PLAN.md`; operator guide `RUNNING.md`.
+**Next: none planned** — Phase 6 (sepal query-time `query=` leaf) is DONE
+2026-09-16 (plan `6-QUERY-TEXT-PLAN.md`; libsepal commit `1ade85a`).
+**Phase 7 (per-primary axis-store isolation) DONE 2026-09-16**
+(plan `7-AXIS-NAMESPACE-PLAN.md`).
 
 ---
 
@@ -430,6 +440,24 @@ changes essentially **zero functional lines**. What remains per repo:
    incl. the gated embed smoke (python3 one-shot mock store → sepal query
    finds the ref; dissimilar vector gated out). Live-qllm manual gate stays
    in `RUNNING.md`. Plan: `5-EMBED-PLAN.md`.
+7. **Phase 6 — sepal query-time `query=` leaf.** **DONE 2026-09-16** —
+   `sepal="query='…'"` embeds the string server-side in libsepal decode
+   (stoma quote parity, `query=` name per user choice); pi-mm drops the
+   curl→tempfile bridge (`src/embed.ts` deleted) and just emits a text
+   leaf. Two repos: Phase A (libsepal C + tests, commit `1ade85a`) then
+   Phase B (submodule bump + pi-mm simplification). Gate: libsepal
+   `make test` exit 0 + clean rebuild zero warnings + symbols unchanged;
+   pi-mm `deno test` 61/61 + lint + complexity + `integration-mm.sh`
+   green. Plan: `6-QUERY-TEXT-PLAN.md`.
+8. **Phase 7 — per-primary axis-store isolation.** **DONE 2026-09-16** —
+   axis stores are `<dir>/<basename>-<axis>` (e.g. `garden.db-joint`),
+   stoma rebuilds bind the `QMAP_AXIS_PRIMARY` the CLI opened (+ loud
+   multi-roster guard without the env); a directory may host many
+   databases. Four repos: Phase A (libqmap spec+env+tests) → Phase B
+   (libstoma rebuild+guard+tests) → Phase C (joint/sepal/islet verify,
+   no change) → Phase D (site + pi-mm + docs). Gate: every repo's
+   `make test` green, site `make` W06 PASS, pi-mm gates + new two-DB
+   integration smoke green. Plan: `7-AXIS-NAMESPACE-PLAN.md`.
 
 ---
 
@@ -547,8 +575,10 @@ valid — missing typed export ⇒ text-only axis. See `PHASE-2-CLI.md` D12 /
 
 **Derived vs persisted:** `rec_axis_open(spec)` decides — the roster (`@joint`)
 names the *logical* axis only. A derived axis rebuilds from the primary at
-each open (like `stoma`); a persisted one uses the alongside file (`<dir>/
-<name>.db`). Freedom per deployment, not hard-wired per axis.
+each open (like `stoma`, bound via `QMAP_AXIS_PRIMARY` when the CLI opened
+it); a persisted one uses the alongside file (`<dir>/<primary>-<name>`,
+e.g. `garden.db-joint`). Freedom per deployment, not hard-wired per axis.
+(Phase 7, `7-AXIS-NAMESPACE-PLAN.md`.)
 
 Each repo's own README carries its matching per-repo catalog.
 
