@@ -2,7 +2,7 @@
 
 Memory Mipmaps for the Pi coding agent: persistent, hierarchical, low-cost recall across compaction and sessions without holding raw transcripts in context and without requiring a model, a daemon, or a network connection.
 
-`pi-mm` wraps the phase-2 `qmap` CLI composition surface (`external/libqmap` with `libjoint` + `libstoma`) into five agent tools. Storage is local: `.pi/mm/mem.db` (`QM_AINDEX:string`, ref = `uint32_t`) plus axis stores `joint.db`, `stoma.db`, and the roster sidecar `<primary>.roster`. The surface is byte-identical to `mm-plan/CLI-SURFACE-EXAMPLES.md` §8; the only new boundary is the Pi tool layer.
+`pi-mm` wraps the phase-2 `qmap` CLI composition surface (`external/libqmap` with `libjoint` + `libstoma`, plus `libsepal` when embeddings are configured) into five agent tools. Storage is local: `.pi/mm/mem.db` (`QM_AINDEX:string`, ref = `uint32_t`) plus axis stores `joint.db`, `stoma.db` (and `sepal.db`), and the roster sidecar `<primary>.roster`. The surface is byte-identical to `mm-plan/CLI-SURFACE-EXAMPLES.md` §8; the only new boundary is the Pi tool layer.
 
 ## How memory works
 
@@ -13,7 +13,7 @@ Every memory is one line `<DATE>:<TEXT>` (e.g. `2026-09-15:Beacon Harbor lights`
 | Tool | Params | Effect |
 |------|--------|--------|
 | `memory_store` | `text` (required), `timestamp` | Stores `<DATE>:<TEXT>` under a new ref. |
-| `memory_scan` | `topic`, `level` (0 all-time/1 today/2 this month), `limit` | Searches topic at a time window (joint is bounded, pure text at level 0). |
+| `memory_scan` | `topic`, `level` (0 all-time/1 today/2 this month), `until`, `embed`, `limit` | Searches topic at a time window (joint is bounded, pure text at level 0). `embed=true` adds semantic (sepal) ranking when configured. |
 | `memory_think` | `key` (ref or topic), `extract` (`date`/`text`/`whole`) | Recalls a payload (splits an ISO timestamp before the delimiter `:`). |
 | `memory_forget` | `key` | Deletes on primary + every roster axis (idempotent). |
 | `memory_reset` | — | Forgets every ref (enumerate bare + `grep -E '^[0-9]+$'` form). |
@@ -34,6 +34,8 @@ Optional `.pi/settings.json` under `"pi-mm"`:
 
 Precedence: settings → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` `qmap` → in-site fallback. Defaults: `memDir=.pi/mm`, `scanLimit=10`. Unit tests stub qmap and never shell out; real-qmap coverage is `scripts/integration-mm.sh`.
 
+Optional embeddings: `QMAP_SEPAL_EMBED_URL` + `QMAP_SEPAL_EMBED_MODEL` (optional `QMAP_SEPAL_EMBED_KEY`, or `embedUrl`/`embedModel`/`embedKey` under `"pi-mm"`). When set, tools use `mem.db@joint,stoma,sepal:a:s` and `memory_scan(embed=true)` adds semantic ranking. Sepal stores vectors only (no text); degradation is soft (`details.embed` = `unconfigured`/`no-vector`). Operator guide: repo-root `RUNNING.md`.
+
 ## Development
 
 ```bash
@@ -48,4 +50,4 @@ Budgets: file <350 LOC, function <80 LOC. Every commit must leave the extension 
 
 ## Layout
 
-`src/config.ts` (defaults + resolution), `src/window.ts` (level→joint window, always bounded per F2), `src/resolve.ts` (bare-ref parse + sentinel skip + nextRef), `src/qmap.ts` (QmapRunner + invocation builders pinned to §8), `src/tools/*` (store/scan/think/forget/reset), `skills/pi-mm/SKILL.md`, `scripts/{zip_bundle,check-complexity,integration-mm}.`.
+`src/config.ts` (defaults + resolution), `src/window.ts` (level→joint window, always bounded per F2), `src/resolve.ts` (bare-ref parse + sentinel skip + nextRef), `src/qmap.ts` (QmapRunner + invocation builders pinned to §8), `src/embed.ts` (query-time embed via curl → LE float32 temp vector + cleanup), `src/tools/*` (store/scan/think/forget/reset), `skills/pi-mm/SKILL.md`, `scripts/{zip_bundle,check-complexity,integration-mm}.`.

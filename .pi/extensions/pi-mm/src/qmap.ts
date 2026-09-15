@@ -1,10 +1,30 @@
 import type { PiExecResult } from "./hooks/events.ts";
 import { levelWindow } from "./window.ts";
+import type { MmConfig } from "./config.ts";
 
 export const FILESPEC = "mem.db@joint,stoma:a:s";
+export const SEPAL_M = 10;
+export const SEPAL_MIN_SIM = 0.2;
+export const SEPAL_VEC_MAX = 2048;
 
-export function filespecFor(memDir: string): string {
-  return `${memDir}/mem.db@joint,stoma:a:s`;
+export type ExecFn = (
+  command: string,
+  args: string[],
+  options?: { cwd?: string; env?: Record<string, string> },
+) => Promise<PiExecResult>;
+
+export function filespecFor(memDir: string, embed?: boolean): string {
+  return `${memDir}/mem.db@joint,stoma${embed ? ",sepal" : ""}:a:s`;
+}
+
+export function embedEnv(cfg: MmConfig): Record<string, string> {
+  if (typeof cfg.embedUrl !== "string" || typeof cfg.embedModel !== "string") return {};
+  const env: Record<string, string> = {
+    QMAP_SEPAL_EMBED_URL: cfg.embedUrl,
+    QMAP_SEPAL_EMBED_MODEL: cfg.embedModel,
+  };
+  if (typeof cfg.embedKey === "string" && cfg.embedKey.trim() !== "") env["QMAP_SEPAL_EMBED_KEY"] = cfg.embedKey;
+  return env;
 }
 
 export interface Invocation {
@@ -32,8 +52,8 @@ export class ShellQmapRunner implements QmapRunner {
   }
 }
 
-function base(bin: string, axisLibPath: string, memDir: string): Invocation {
-  return { command: bin, args: [], env: { QMAP_AXIS_PATH: axisLibPath }, cwd: memDir };
+function base(bin: string, axisLibPath: string, memDir: string, extraEnv?: Record<string, string>): Invocation {
+  return { command: bin, args: [], env: { QMAP_AXIS_PATH: axisLibPath, ...extraEnv }, cwd: memDir };
 }
 
 export function buildStoreInvocation(
@@ -43,8 +63,9 @@ export function buildStoreInvocation(
   payload: string,
   axisLibPath: string,
   memDir: string,
+  extraEnv?: Record<string, string>,
 ): Invocation {
-  const inv = base(bin, axisLibPath, memDir);
+  const inv = base(bin, axisLibPath, memDir, extraEnv);
   inv.args = ["-p", `${ref}:${payload}`, filespec];
   return inv;
 }
@@ -56,14 +77,21 @@ export function buildScanInvocation(
   limit: number,
   axisLibPath: string,
   memDir: string,
+  extraEnv?: Record<string, string>,
 ): Invocation {
-  const inv = base(bin, axisLibPath, memDir);
+  const inv = base(bin, axisLibPath, memDir, extraEnv);
   inv.args = ["-X", expr, "-g", ".", filespec, "-t", String(limit)];
   return inv;
 }
 
-export function buildListInvocation(bin: string, filespec: string, axisLibPath: string, memDir: string): Invocation {
-  const inv = base(bin, axisLibPath, memDir);
+export function buildListInvocation(
+  bin: string,
+  filespec: string,
+  axisLibPath: string,
+  memDir: string,
+  extraEnv?: Record<string, string>,
+): Invocation {
+  const inv = base(bin, axisLibPath, memDir, extraEnv);
   inv.args = ["-g", ".", filespec];
   return inv;
 }
@@ -74,8 +102,9 @@ export function buildGetInvocation(
   ref: number,
   axisLibPath: string,
   memDir: string,
+  extraEnv?: Record<string, string>,
 ): Invocation {
-  const inv = base(bin, axisLibPath, memDir);
+  const inv = base(bin, axisLibPath, memDir, extraEnv);
   inv.args = ["-r", "-g", String(ref), filespec];
   return inv;
 }
@@ -86,17 +115,30 @@ export function buildForgetInvocation(
   ref: number,
   axisLibPath: string,
   memDir: string,
+  extraEnv?: Record<string, string>,
 ): Invocation {
-  const inv = base(bin, axisLibPath, memDir);
+  const inv = base(bin, axisLibPath, memDir, extraEnv);
   inv.args = ["-d", String(ref), filespec];
   return inv;
 }
 
-export function scanExpr(topic: string, level: number, now: Date): string {
+export function scanExpr(topic: string, level: number, now: Date, until?: string, sepalLeaf?: string): string {
   const stoma = `stoma="field=text query=${topic} matched=1"`;
+  const parts: string[] = [];
   const window = levelWindow(level, now);
-  if (window === null) return stoma;
-  return `(joint="a=${window.a} b=${window.b}" AND ${stoma})`;
+  if (window === null) {
+    if (until) parts.push(`joint="a=0 b=${until}"`);
+  } else {
+    const b = until && until < window.b ? until : window.b;
+    parts.push(`joint="a=${window.a} b=${b}"`);
+  }
+  parts.push(stoma);
+  if (sepalLeaf) parts.push(sepalLeaf);
+  return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
+}
+
+export function sepalLeafFor(vecFile: string, qdim: number): string {
+  return `sepal="file=${vecFile} qdim=${qdim} m=${SEPAL_M} min_sim=${SEPAL_MIN_SIM}"`;
 }
 
 export interface ResultLine {

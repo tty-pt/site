@@ -1,4 +1,4 @@
-import { readMmConfig, loadConfig, applyEnv, resolveQmapBin, resolveAxisPath, DEFAULT_CONFIG } from "../src/config.ts";
+import { readMmConfig, loadConfig, applyEnv, resolveQmapBin, resolveAxisPath, sepalConfigured, DEFAULT_CONFIG } from "../src/config.ts";
 import { join } from "node:path";
 
 function check(cond: boolean, msg: string): void {
@@ -41,6 +41,34 @@ Deno.test("applyEnv: fills only when settings unset; respects settings otherwise
   const bare = applyEnv(DEFAULT_CONFIG, { QMAP_BIN: "/env/qmap", QMAP_AXIS_PATH: "/env:/axes" });
   check(bare.qmapBin === "/env/qmap", "env QMAP_BIN fills unset qmapBin");
   check(bare.axisLibs === "/env:/axes", "env QMAP_AXIS_PATH fills unset axisLibs");
+});
+
+Deno.test("applyEnv: sepal embed env vars fill unset fields; settings win", () => {
+  const envRec = {
+    QMAP_SEPAL_EMBED_URL: "http://h:4242/v1/embeddings",
+    QMAP_SEPAL_EMBED_MODEL: "nomic-embed-text",
+    QMAP_SEPAL_EMBED_KEY: "secret",
+  };
+  const filled = applyEnv(DEFAULT_CONFIG, envRec);
+  check(filled.embedUrl === "http://h:4242/v1/embeddings", "env fills url");
+  check(filled.embedModel === "nomic-embed-text", "env fills model");
+  check(filled.embedKey === "secret", "env fills key");
+
+  const fromSettings = loadConfig({ embedUrl: "http://s:1/v1/embeddings", embedModel: "sm" });
+  const merged = applyEnv(fromSettings, envRec);
+  check(merged.embedUrl === "http://s:1/v1/embeddings", "settings url wins");
+  check(merged.embedModel === "sm", "settings model wins");
+  check(merged.embedKey === "secret", "key still from env (settings unset)");
+});
+
+Deno.test("sepalConfigured: true only when url+model both set", () => {
+  check(sepalConfigured(DEFAULT_CONFIG) === false, "defaults false");
+  check(sepalConfigured(applyEnv(DEFAULT_CONFIG, { QMAP_SEPAL_EMBED_URL: "http://h" })) === false, "url only false");
+  check(sepalConfigured(applyEnv(DEFAULT_CONFIG, { QMAP_SEPAL_EMBED_MODEL: "m" })) === false, "model only false");
+  check(
+    sepalConfigured(applyEnv(DEFAULT_CONFIG, { QMAP_SEPAL_EMBED_URL: "http://h", QMAP_SEPAL_EMBED_MODEL: "m" })) === true,
+    "pair true",
+  );
 });
 
 Deno.test("resolveQmapBin: precedence settings → env → PATH → in-site → none", () => {

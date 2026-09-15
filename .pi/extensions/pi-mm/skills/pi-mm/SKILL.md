@@ -5,7 +5,7 @@ description: "Memory Mipmaps (pi-mm): persistent hierarchical recall over local 
 
 # pi-mm — Memory Mipmaps
 
-Persistent, hierarchical, low-cost recall over local `qmap` files. No model, no daemon, no network. Memory lives in `.pi/mm/mem.db` (primary `QM_AINDEX:string` + roster `joint,stoma`).
+Persistent, hierarchical, low-cost recall over local `qmap` files. No model, no daemon, no network. Memory lives in `.pi/mm/mem.db` (primary `QM_AINDEX:string` + roster `joint,stoma`; + `sepal` when embeddings are configured).
 
 ## Boundary rule (with pi-quest)
 
@@ -26,7 +26,7 @@ Store is level-agnostic: every entry is `<DATE>:<TEXT>` (joint leading-date + st
 ## Tools
 
 - `memory_store(text, timestamp?)` — stores `<DATE>:<TEXT>` under an auto-picked numeric ref (`max+1` over bare `qmap -g .`). `timestamp` defaults to now (`YYYY-MM-DD`). Returns `{ref, key:"@DATE"}`.
-- `memory_scan(topic, level?=0, limit?=10)` — searches by topic at a time window. Level 0 is pure text; 1/2 add a bounded `joint="a=… b=…"` (required by F2). Returns `{records:[{ref, score?, record}]}`.
+- `memory_scan(topic, level?=0, limit?=10, until?=undefined, embed?=false)` — searches by topic at a time window. Level 0 is pure text; 1/2 add a bounded `joint="a=… b=…"` (required by F2). `until` (ISO date YYYY-MM-DD) caps the time window upper bound: level 0 searches all-time up to `until`; level 1/2 caps the window end at `until`. `embed=true` embeds the topic via the configured embedding server and adds semantic (sepal) ranking — requires `QMAP_SEPAL_EMBED_URL` + `QMAP_SEPAL_EMBED_MODEL`; unconfigured or embed failure degrades to the plain text scan (`details.embed` says `unconfigured`/`no-vector`). Returns `{records:[{ref, score?, record}]}`.
 - `memory_think(key, extract?="whole")` — recalls the payload for a numeric ref or a topic resolved by a top-1 scan. `extract` is `date|text|whole` (splits the ISO timestamp before the delimiter `:`). Returns `{ref, date?, text?, payload?}`.
 - `memory_forget(key)` — deletes a memory by numeric ref or topic on the primary and every roster axis (idempotent, roster-backed). Returns `{ref, removed}`.
 - `memory_reset()` — enumerates bare refs (`qmap -g .`) and forgets each (skips the `-1` sentinel). Returns `{refsForgotten}`. Idempotent; re-running is a no-op.
@@ -43,6 +43,18 @@ Optional `.pi/settings.json` under `"pi-mm"`:
 
 Resolution: `settings.json` → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` `qmap` → in-site `external/libqmap/bin/qmap`. Unit tests stub qmap and never shell out.
 
+## Embeddings
+
+Optional: point sepal at a local embedding server (axil-qllm's OpenAI-compatible `/v1/embeddings`; operator guide: repo-root `RUNNING.md`):
+
+```sh
+export QMAP_SEPAL_EMBED_URL=http://localhost:4242/v1/embeddings
+export QMAP_SEPAL_EMBED_MODEL=nomic-embed-text
+# optional: export QMAP_SEPAL_EMBED_KEY=…
+```
+
+(or add `embedUrl`/`embedModel`/`embedKey` under `"pi-mm"` in settings.json). When configured, the tools switch the filespec to `mem.db@joint,stoma,sepal:a:s`: `memory_store` persists an embedding of the whole `<DATE>:<TEXT>` payload (sepal stores the vector, not the text — join with joint/stoma for payloads), and `memory_scan(…, embed=true)` embeds the topic and ranks semantically. Text recall never needs the server; the semantic dimension is strictly additive.
+
 ## Degradation
 
 - Empty `text`/`topic`/`key`, no matches, or a failed `qmap` invocation → a `mm:*` message with `details.error`, never a thrown error.
@@ -53,6 +65,7 @@ Resolution: `settings.json` → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` `qmap
 ```
 memory_store("Beacon Harbor lights", "2026-09-15")
 memory_scan("beacon", 1)
+memory_scan(topic="harbor lights", embed=true)   # semantic (needs embed config)
 memory_think("2", "text")
 memory_forget("beacon")
 memory_reset()

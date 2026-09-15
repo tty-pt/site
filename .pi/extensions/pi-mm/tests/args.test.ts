@@ -7,9 +7,12 @@ import {
   buildGetInvocation,
   buildForgetInvocation,
   scanExpr,
+  sepalLeafFor,
+  embedEnv,
   parseResultLines,
   payloadDate,
 } from "../src/qmap.ts";
+import type { MmConfig } from "../src/config.ts";
 
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -56,6 +59,22 @@ Deno.test("scanExpr: accent-sensitive text passes through verbatim (no translite
   check(scanExpr("Pão", 0, date("2026-09-15")) === "stoma=\"field=text query=Pão matched=1\"", "Pão verbatim");
 });
 
+Deno.test("scanExpr: level 0 with --until creates epoch-to-until window", () => {
+  check(scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20") === "(joint=\"a=0 b=2026-09-20\" AND stoma=\"field=text query=beacon matched=1\")", "level-0 + until");
+});
+
+Deno.test("scanExpr: level 1 with --until caps b at until", () => {
+  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-09-15") === "(joint=\"a=2026-09-15 b=2026-09-15\" AND stoma=\"field=text query=beacon matched=1\")", "level-1 + until same day");
+});
+
+Deno.test("scanExpr: level 1 with --until past tomorrow uses tomorrow", () => {
+  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-10-01") === "(joint=\"a=2026-09-15 b=2026-09-16\" AND stoma=\"field=text query=beacon matched=1\")", "level-1 + until beyond window");
+});
+
+Deno.test("scanExpr: level 2 with --until caps at until", () => {
+  check(scanExpr("beacon", 2, date("2026-09-15"), "2026-09-20") === "(joint=\"a=2026-09-01 b=2026-09-20\" AND stoma=\"field=text query=beacon matched=1\")", "level-2 + until within month");
+});
+
 Deno.test("forget / list / get invocations byte-identical to §8", () => {
   const forget = buildForgetInvocation(BIN, FILESPEC, 1, AXES, MEM);
   check(forget.args.join(" ") === `-d 1 ${FILESPEC}`, "forget");
@@ -67,6 +86,39 @@ Deno.test("forget / list / get invocations byte-identical to §8", () => {
 
 Deno.test("filespecFor uses absolute path to avoid ./ alias clobber", () => {
   check(filespecFor(MEM) === `${MEM}/mem.db@joint,stoma:a:s`, "absolute filespec");
+  check(filespecFor(MEM, true) === `${MEM}/mem.db@joint,stoma,sepal:a:s`, "sepal filespec");
+  check(filespecFor(MEM, false) === `${MEM}/mem.db@joint,stoma:a:s`, "embed=false unchanged");
+});
+
+Deno.test("scanExpr: sepal leaf ANDed into any window shape", () => {
+  const leaf = sepalLeafFor("/tmp/v.bin", 768);
+  check(leaf === 'sepal="file=/tmp/v.bin qdim=768 m=10 min_sim=0.2"', "sepalLeafFor exact");
+  check(
+    scanExpr("beacon", 0, date("2026-09-15"), undefined, leaf) ===
+      `(stoma="field=text query=beacon matched=1" AND ${leaf})`,
+    "level-0 + sepal",
+  );
+  check(
+    scanExpr("beacon", 1, date("2026-09-15"), undefined, leaf) ===
+      `(joint="a=2026-09-15 b=2026-09-16" AND stoma="field=text query=beacon matched=1" AND ${leaf})`,
+    "level-1 + sepal",
+  );
+  check(
+    scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20", leaf) ===
+      `(joint="a=0 b=2026-09-20" AND stoma="field=text query=beacon matched=1" AND ${leaf})`,
+    "level-0 + until + sepal",
+  );
+});
+
+Deno.test("embedEnv: configured pair produces env vars; unconfigured or partial → empty", () => {
+  const full = { embedUrl: "http://h:4242/v1/embeddings", embedModel: "m", embedKey: "k" } as MmConfig;
+  const env = embedEnv(full);
+  check(env["QMAP_SEPAL_EMBED_URL"] === "http://h:4242/v1/embeddings", "url var");
+  check(env["QMAP_SEPAL_EMBED_MODEL"] === "m", "model var");
+  check(env["QMAP_SEPAL_EMBED_KEY"] === "k", "key var");
+  check(embedEnv({} as MmConfig).QMAP_SEPAL_EMBED_URL === undefined, "empty cfg → no url");
+  check(embedEnv({ embedUrl: "http://h" } as MmConfig).QMAP_SEPAL_EMBED_MODEL === undefined, "url-only → no model");
+  check(embedEnv({ embedModel: "m" } as MmConfig).QMAP_SEPAL_EMBED_URL === undefined, "model-only → no url");
 });
 
 Deno.test("invocations carry QMAP_AXIS_PATH env and memDir cwd", () => {

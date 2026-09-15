@@ -1,5 +1,5 @@
 import { makeStoreTool, makeScanTool, makeThinkTool, makeForgetTool, makeResetTool, type ToolEnv } from "../src/tools/index.ts";
-import type { QmapRunner } from "../src/qmap.ts";
+import type { ExecFn, QmapRunner } from "../src/qmap.ts";
 import { give } from "../src/tools/index.ts";
 import { fakeRunner, runTool, okResult } from "./fake-qmap.ts";
 import { DEFAULT_CONFIG, type MmConfig } from "../src/config.ts";
@@ -10,13 +10,24 @@ function check(cond: boolean, msg: string): void {
 
 const CWD = "/repo";
 const FS = `${CWD}/.pi/mm/mem.db@joint,stoma:a:s`;
+const FS_SEPAL = `${CWD}/.pi/mm/mem.db@joint,stoma,sepal:a:s`;
 
 function now(): Date {
   return new Date("2026-09-15T10:00:00");
 }
 
-function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}): ToolEnv {
-  return { cwd: CWD, runner, nowProvider: now, cfg: { ...DEFAULT_CONFIG, qmapBin: "/usr/bin/qmap", ...cfg } };
+function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}, exec?: ExecFn): ToolEnv {
+  return {
+    cwd: CWD,
+    runner,
+    nowProvider: now,
+    exec: exec ?? ((_c, _a, _o) => Promise.resolve({ stdout: "", stderr: "", code: 0 })),
+    cfg: { ...DEFAULT_CONFIG, qmapBin: "/usr/bin/qmap", ...cfg },
+  };
+}
+
+function embedEnvCfg(): Partial<MmConfig> {
+  return { embedUrl: "http://localhost:4242/v1/embeddings", embedModel: "nomic-embed-text" };
 }
 
 const ctx = { cwd: CWD };
@@ -80,6 +91,22 @@ Deno.test("memory_scan: zero matches → empty non-error", async () => {
   const details = res.details as { records: unknown[] };
   check(details.records.length === 0, "no match is not an error");
   check(runner.invocations.length === 1, "scan still ran");
+});
+
+Deno.test("memory_scan: level 0 with --until → epoch-to-until window", async () => {
+  const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
+  const tool = makeScanTool(give(env(runner)));
+  await runTool(tool, { topic: "beacon", until: "2026-09-16" }, ctx);
+  const args = runner.invocations[0].args.join(" ");
+  check(args.includes('joint="a=0 b=2026-09-16"'), `epoch-to-until window; got ${args}`);
+});
+
+Deno.test("memory_scan: level 1 with --until caps b at until", async () => {
+  const runner = fakeRunner([okResult("3 0.125000 2026-09-15:anything\n")]);
+  const tool = makeScanTool(give(env(runner)));
+  await runTool(tool, { topic: "beacon", level: 1, until: "2026-09-15" }, ctx);
+  const args = runner.invocations[0].args.join(" ");
+  check(args.includes('joint="a=2026-09-15 b=2026-09-15"'), `capped at until; got ${args}`);
 });
 
 Deno.test("memory_think: numeric key gets raw payload; extract splits date/text", async () => {
@@ -175,4 +202,69 @@ Deno.test("degradation: nonzero exec exit still returns a non-error result with 
   const tool = makeScanTool(give(env(runner)));
   const res = await runTool(tool, { topic: "x" }, ctx);
   check((res.content[0].text ?? "").includes("joint missing"), "stderr surfaced");
+});
+
+Deno.test("memory_scan: embed=true with sepal configured → sepal leaf in expr, vec file passed, cleaned after", async () => {
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const exec: ExecFn = (command, args) => {
+    calls.push({ command, args });
+    return Promise.resolve({ stdout: JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), stderr: "", code: 0 });
+  };
+  const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
+  const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() }, exec)));
+  const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
+  check(calls.length === 1 && calls[0].command === "curl", "curl invoked once");
+  check(calls[0].args[3] === "http://localhost:4242/v1/embeddings", "embed url passed to curl");
+  const args = runner.invocations[0].args.join(" ");
+  check(args.includes(`qdim=3`), `sepal leaf qdim present; got ${args}`);
+  check(args.includes(`m=10`) && args.includes("min_sim=0.2"), "sepal leaf knobs");
+  check(runner.invocations[0].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[0].args[4]}`);
+  check(runner.invocations[0].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");
+  const vecFile = /file=([^\s"]+)/.exec(args)?.[1];
+  check(typeof vecFile === "string", "vec file in expr");
+  const d = res.details as { records: unknown[] };
+  check(d.records.length === 1, "records returned");
+});
+
+Deno.test("memory_scan: embed=true but sepal unconfigured → soft fallback diagnostic", async () => {
+  const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
+  const tool = makeScanTool(give(env(runner)));
+  const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
+  const args = runner.invocations[0].args.join(" ");
+  check(!args.includes("sepal="), `no sepal leaf on fallback; got ${args}`);
+  check(runner.invocations[0].args[4] === FS, `plain filespec on fallback; got ${runner.invocations[0].args[4]}`);
+  const d = res.details as { embed: string };
+  check(d.embed === "unconfigured", "diagnostic embed=unconfigured");
+});
+
+Deno.test("memory_scan: embed=true but embed helper returns null → soft fallback no-vector", async () => {
+  const exec: ExecFn = () => Promise.resolve({ stdout: "", stderr: "boom", code: 7 });
+  const runner = fakeRunner([okResult("1 0.125000 payload\n")]);
+  const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() }, exec)));
+  const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
+  const args = runner.invocations[0].args.join(" ");
+  check(!args.includes("sepal="), `no sepal leaf on no-vector; got ${args}`);
+  const d = res.details as { embed: string };
+  check(d.embed === "no-vector", "diagnostic embed=no-vector");
+});
+
+Deno.test("memory_store/memory_think/memory_forget/memory_reset: sepal-aware filespec + embed env when configured", async () => {
+  const runner = fakeRunner([okResult(""), okResult("ok\n")]);
+  const res = await runTool(makeStoreTool(give(env(runner, { ...embedEnvCfg() }))), { text: "memo" }, ctx);
+  check(runner.invocations[0].args[2] === FS_SEPAL, "store list sepal filespec");
+  check(runner.invocations[1].args[2] === FS_SEPAL, "store write sepal filespec");
+  check(runner.invocations[1].env["QMAP_SEPAL_EMBED_MODEL"] === "nomic-embed-text", "store embed env");
+  check((res.details as { ref: number }).ref === 1, "store ok");
+
+  const runner2 = fakeRunner([okResult("2026-09-14T20:00:00:Beacon Harbor lights\n")]);
+  await runTool(makeThinkTool(give(env(runner2, { ...embedEnvCfg() }))), { key: "5" }, ctx);
+  check(runner2.invocations[0].args[3] === FS_SEPAL, "think sepal filespec");
+
+  const runner3 = fakeRunner([okResult("")]);
+  await runTool(makeForgetTool(give(env(runner3, { ...embedEnvCfg() }))), { key: "5" }, ctx);
+  check(runner3.invocations[0].args[2] === FS_SEPAL, "forget sepal filespec");
+
+  const runner4 = fakeRunner([okResult(""), okResult("")]);
+  await runTool(makeResetTool(give(env(runner4, { ...embedEnvCfg() }))), {}, ctx);
+  check(runner4.invocations[0].args[2] === FS_SEPAL, "reset list sepal filespec");
 });

@@ -11,7 +11,7 @@
 > explicit decision 2026-09-13); **commit only when explicitly asked**;
 > `make` + full suites green as a gate.
 
-Version: v20 (2026-09-15) — phase 1 DONE (all five repos, fixture
+Version: v23 (2026-09-16) — phase 1 DONE (all five repos, fixture
 16/16, site `make` + `make test` green). Phase 2 stores **the whole
 `-p` string as one un-split value** (see §10, §11). Phase 2 re-scoped
 around four principles (detail `PHASE-2-CLI.md` header)**: axes decide
@@ -24,9 +24,12 @@ additive). **2A — per-axis store/unstore/readback** (DONE, §11) and
 **2B — general qmap CLI composition** (DONE 2026-09-15, §12; the
 `-Q` mode folded into a composed `-g`, the `@` filespec roster declares the
 load set once at creation; 2B-0..2B-6 all landed; §12 checklist all green).
-**Phase 3 — `pi-mm` extension scaffold IN PROGRESS** (tools
+**Phase 3 — `pi-mm` extension scaffold DONE 2026-09-15** (tools
 `memory_scan/think/store/forget/reset` wrapping the phase-2 surface, §13
-checklist).
+checklist all green; `deno test` 48/48, integration all green). **Phase 4 —
+`--until` validity window DONE 2026-09-15** (`4-UNTIL-IMPLEMENTATION.md`).
+**Phase 5 — real embeddings DONE 2026-09-16** (`src/embed.ts` +
+`memory_scan embed=true`; `5-EMBED-PLAN.md`, operator guide `RUNNING.md`).
 §10 catalogs every
 operation kind the four axes answer, store/unstore/get included
 (source-verified; each repo's own README carries its matching catalog).
@@ -44,8 +47,9 @@ implemented).
 | 1 | Ref-type law: `rec_ref_t = uint32_t` (qmap ref, not an axis's internal key) | ✅ **DONE 2026-09-13** — all five repos retyped + installed + verified; fixture 16/16; site `make` + `make test` green. Detail: `PHASE-1-RETYPE.md` | ✅ DONE — gate (§6 item 1) green |
 | 2 | 2A — per-axis store/unstore/readback | Conventional `rec_axis_store(ctx, spec, ref, value)` / `rec_axis_unstore(ctx, ref)` / `rec_axis_readback(ctx, ref, blob_out, n_out)` exports per axis (`readback`, not `get` — `rec_axis_get(int)` is the landed registry lookup; U2 settled 2026-09-14): the CLI passes the **whole** `-p` string as `(ref, value)` — never split — and each axis parses it entirely in its own grammar (joint leading-date, sepal floats-or-configured-embed, stoma memory-only text, islet point lists); unstore walks the axis's existing inverse — only libislet adds new stored state (`rev`, ref→cells); uniform idempotent contract + surface rules; missing symbols ⇒ read-only axis; no kernel/libqmap change. Detail: `PHASE-2-CLI.md` 2A; contract: `RECALL-KERNEL.md` | ✅ **DONE 2026-09-14** — mock proof-of-contract (`rec_axis_store_test`, libqmap `make test` green) + libsepal adapters with real lazy-curl embedder (`test_axis_store` 70 assertions green, valgrind clean) + libstoma `stoma_unindex`/`_ref` + `text`-field adapters (`stoma_test` 227/227, `stoma_axis_store_test` 34/34, 5 symbols) + libjoint `joint_erase` + ordered-grammar adapters (`joint_axis_store_test` 116/116, 4 symbols) + libislet `rev` + `islet_del_value_N` + point-list adapters (`test_axis_store` 15 tests/193 assertions, 9 symbols) + **2A-5 cross-process round-trips** (sepal `sepal_search` + isolation, islet `.ridx` rehydration + `fill_bbox_2`, joint `joint_iter` + file-backed `id` backfill — each via self-exec harness `seed/verify1/unstore/verify2`; stoma corpus `{(1,"Beacon Harbor lights"),(2,"Beacon AND Pão"),(3,"alpha omega")}` store→beacon 2→unstore 1→harbor miss→rebuild minus dropped 3 → beacon {1,2}+harbor {1} again, omega gone, parity 43/43) + **2A-6 close-out** (`make` W06 PASS, all suites green, `nm -D` spot-checks, no installs). Next: 2B |
 | 3 | 2B — general qmap CLI composition | The `-Q` mode folds into a composed `-g` (same trigger shape as the `-q` chain vs classic `-g`); axis plugins auto-discovered by name; `@` filespec roster declares the load set once at creation (persisted in a <primary>.roster sidecar, fan-out for `-p`/`-d`); string-unified writes over the phase-2A store surface; mm dialect as invocations of this same surface — **not mm-only**, must also compose e.g. islet-with-others. Detail: `PHASE-2-CLI.md` (2B) | ✅ **DONE 2026-09-15** — 2B-0 + 2B-1 (by-name discovery/load + `@roster` sidecar + `--list-axes`, `test-roster.sh` green 2026-09-14); decided options (D1-D10 + D11-D13); **D10 = the `-X EXPR` set-expression query** (`CLI-SURFACE-EXAMPLES.md`); 2B-3 (fold, `test-cli.sh` 25/25, `2B-3-IMPLEMENTATION.md`); 2B-2 (real-file gate, `test-real.sh` green, `CLI-SURFACE-EXAMPLES.md` §6); 2B-4 (write fan-out + forget, `test-fanout.sh` green, `2B-4-IMPLEMENTATION.md`); 2B-5 (mm dialect, `test-mm.sh` green, F4 `qmap_open` aliasing, `2B-5-IMPLEMENTATION.md`); **2B-6 (rank convention D2 — first rank-capable axis in query order wins, `--score` deferred — pinned in `test-cli.sh`/`test-real.sh`; `-X` grammar verified against the built parser). Phase 2B closed — next: phase 3 (`pi-mm`)** |
-| 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | 🟡 IN PROGRESS 2026-09-15 — `.pi/extensions/pi-mm/` scaffold (mirrors `pi-quest`); §13 checklist |
-| 5 | Time/space in the extension | `memory_store --until/--near` via joint/islet through the phase-2 surface | 🔴 NOT STARTED |
+| 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | ✅ DONE 2026-09-15 — `.pi/extensions/pi-mm/` scaffold (mirrors `pi-quest`); `deno test` 48/48 + integration all green; §13 checklist all green |
+| 5 | Validity window in the extension | `memory_scan` `until` upper-bound via joint through the phase-2 surface | ✅ **DONE 2026-09-15** — `memory_scan` gains `until` (ISO date YYYY-MM-DD) capping the time window upper bound: level 0 → `joint="a=0 b=until" AND stoma`; level 1/2 caps `b` at the earlier of `until` and the level's natural end. Unit tests 54/54 + integration green; root `make` W06 PASS. Detail: `4-UNTIL-IMPLEMENTATION.md` |
+| 6 | Real embeddings | sepal axis in the pi-mm filespec when `QMAP_SEPAL_EMBED_*` configured; `memory_scan embed=true` embeds the topic via axil-qllm (`/v1/embeddings`) and merges a `sepal="file=… qdim=…"` leaf | ✅ **DONE 2026-09-16** — `src/embed.ts` (`embedQuery` curl→LE float32 temp vector, `cleanupEmbed` best-effort) + `scanExpr(…, sepalLeaf?)` + `sepalLeafFor`/`embedEnv`/`sepalConfigured` + sepal-aware filespec in all five tools (`embed=true` modal on scan with soft `unconfigured`/`no-vector` fallback; sepal never enters the roster unconfigured since its EINVAL rejects the whole `-p`). Unit tests 68/68 + lint + complexity ok; integration green incl. the gated embed smoke (python3 one-shot mock: store embeds → sepal query finds ref; dissimilar vector gated out). Detail: `5-EMBED-PLAN.md` |
 
 ---
 
@@ -83,11 +87,19 @@ seeds/forgets); detail: `2B-5-IMPLEMENTATION.md`. **2B-6 DONE 2026-09-15**
 — rank convention landed (D2: first rank-capable axis in query order
 wins; `--score` deferred) + `-X` grammar verified against the built
 parser (chained-`EXCEPT` + two-rank pins in `test-cli.sh`/`test-real.sh`);
-detail: `2B-6-IMPLEMENTATION.md`. **Phase 2B closed 2026-09-15.** **Now
-phase 3 (`pi-mm`):** the `.pi/extensions/pi-mm/` scaffold — 5 tools
-(`memory_scan/think/store/forget/reset`) + skill + config wrapping the
-proven phase-2 surface (§8 recipes), mirroring `pi-quest`; §13 checklist.
-TDD per increment, commit only when asked.
+detail: `2B-6-IMPLEMENTATION.md`. **Phase 2B closed 2026-09-15.**
+**Phase 3 (`pi-mm`) DONE 2026-09-15:** the `.pi/extensions/pi-mm/`
+scaffold — 5 tools (`memory_scan/think/store/forget/reset`) + skill +
+config wrapping the proven phase-2 surface (§8 recipes), mirroring
+`pi-quest`; §13 checklist all green (`deno test` 48/48, integration all
+green). TDD per increment, commit only when asked. **Phase 4 (`--until`)
+DONE 2026-09-15** — `memory_scan` gains `until` (ISO date YYYY-MM-DD)
+capping the time window upper bound; unit tests 54/54 + integration
+green; detail: `4-UNTIL-IMPLEMENTATION.md`. **Phase 5 (real embeddings)
+DONE 2026-09-16** — sepal axis in the filespec when
+`QMAP_SEPAL_EMBED_*` configured + `memory_scan embed=true` via
+`src/embed.ts`; unit tests 68/68 + integration green incl. the gated
+embed smoke; detail: `5-EMBED-PLAN.md`; operator guide `RUNNING.md`.
 
 ---
 
@@ -397,16 +409,27 @@ changes essentially **zero functional lines**. What remains per repo:
    `@` roster + fan-out, slices 2B-0..2B-6 landed, decided options
    D1-D13 in `PHASE-2-CLI.md`; §12 is the checklist. Gate: `make test`
    all 6 scripts green, root `make` W06 PASS.
-4. **Phase 3 — `pi-mm` scaffold.** **IN PROGRESS 2026-09-15** — the
+4. **Phase 3 — `pi-mm` scaffold.** **DONE 2026-09-15** — the
    `.pi/extensions/pi-mm/` extension (tools `memory_scan/think/store/
    forget/reset` + skill + config wrapping the phase-2 surface). Tools
    stub qmap in unit tests (never shell out in `deno test`; real qmap
    covered by `scripts/integration-mm.sh`). Gate: a
    Pi session recalls prior gist from disk with no provider; `deno test`
-   green.
-5. **Phase 4 — time/space in the extension.** `memory_store --until` /
-   `--near` tool surface over joint/islet through the phase-2 surface. Gate:
-   validity-window + geotag round-trips through the extension tools.
+   green — **both green**.
+5. **Phase 4 — validity window in the extension.** **DONE 2026-09-15** —
+   `memory_scan` gains `until` (ISO date YYYY-MM-DD) capping the time
+   window upper bound via joint. Gate: validity-window round-trip through
+   the extension tools — **green**. Detail: `4-UNTIL-IMPLEMENTATION.md`.
+6. **Phase 5 — real embeddings.** **DONE 2026-09-16** — sepal axis in the
+   filespec when `QMAP_SEPAL_EMBED_*` configured + `memory_scan
+   embed=true` (embed the topic via axil-qllm `/v1/embeddings` through
+   `src/embed.ts`, write a temp LE float32 vector, merge
+   `sepal="file=… qdim=… m=10 min_sim=0.2"`). No C changes (store-time
+   embedding already works). Gates: `deno test` 68/68 green, `deno lint`
+   clean, `check-complexity.ts` ok, `scripts/integration-mm.sh` all green
+   incl. the gated embed smoke (python3 one-shot mock store → sepal query
+   finds the ref; dissimilar vector gated out). Live-qllm manual gate stays
+   in `RUNNING.md`. Plan: `5-EMBED-PLAN.md`.
 
 ---
 
@@ -861,7 +884,7 @@ hazard on tests (clean-rebuild first, as always).
 
 ---
 
-## 13. Phase 3 — `pi-mm` extension scaffold (IN PROGRESS 2026-09-15)
+## 13. Phase 3 — `pi-mm` extension scaffold (DONE 2026-09-15)
 
 Working copy: `.pi/extensions/pi-mm/` under `site` (the plan repo's tree).
 Structure mirrors `pi-quest` (package.json + `index.ts` + `src/` + `tests/`

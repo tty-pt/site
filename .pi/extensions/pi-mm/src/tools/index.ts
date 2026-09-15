@@ -1,7 +1,7 @@
 import type { Pi, PiCtx, PiToolSpec } from "../hooks/events";
 import type { MmConfig } from "../config";
-import { readMmConfig, resolveAxisPath } from "../config";
-import type { QmapRunner } from "../qmap";
+import { readMmConfig, resolveAxisPath, sepalConfigured } from "../config";
+import type { ExecFn, QmapRunner } from "../qmap";
 import { ShellQmapRunner } from "../qmap";
 import { makeStoreTool } from "./store";
 import { makeScanTool } from "./scan";
@@ -10,11 +10,13 @@ import { makeForgetTool } from "./forget";
 import { makeResetTool } from "./reset";
 
 export { makeStoreTool, makeScanTool, makeThinkTool, makeForgetTool, makeResetTool };
+export { sepalConfigured };
 
 export interface ToolEnv {
   cwd: string;
   cfg: MmConfig;
   runner: QmapRunner;
+  exec: ExecFn;
   nowProvider: () => Date;
 }
 
@@ -24,14 +26,14 @@ export function give(env: ToolEnv): EnvSource {
   return () => Promise.resolve(env);
 }
 
-export async function readToolEnv(cwd: string, runner: QmapRunner): Promise<ToolEnv> {
+export async function readToolEnv(cwd: string, runner: QmapRunner, exec: ExecFn): Promise<ToolEnv> {
   const cfg = await readMmConfig(cwd);
-  return { cwd, cfg, runner, nowProvider: () => new Date() };
+  return { cwd, cfg, runner, exec, nowProvider: () => new Date() };
 }
 
 export function defaultEnvSource(pi: Pi): EnvSource {
   const runner = new ShellQmapRunner((command, args, options) => pi.exec(command, args, options));
-  return (ctx) => readToolEnv(ctx.cwd, runner);
+  return (ctx) => readToolEnv(ctx.cwd, runner, (command, args, options) => pi.exec(command, args, options));
 }
 
 export function axisPath(env: ToolEnv): string {

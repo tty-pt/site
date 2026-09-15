@@ -9,9 +9,10 @@ The package lives at `.pi/extensions/pi-mm/` and loads via pi's project-local au
 ## Architecture
 
 - **Shallow shell over qmap.** `src/qmap.ts` owns invocation building (byte-pinned to §8) and the `QmapRunner` boundary (`ShellQmapRunner` over `pi.exec` with `QMAP_AXIS_PATH` + `cwd=memDir`). Tools import builders + the window/resolve helpers; nothing imports `qmap` internals from the kernel.
-- **Config via `src/config.ts`.** `DEFAULT_CONFIG` + `loadConfig(raw)` + `applyEnv(env)` + `resolveQmapBin(cwd, pathDirs, probe)` + `resolveAxisPath(cwd)` + `readMmConfig(cwd, env)` mirror `pi-quest/src/config.ts` shape; tested first, implemented first. Precedence: `settings.json "pi-mm"` → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` → in-site `external/libqmap/bin/qmap`.
-- **Pure helpers.** `src/window.ts` (level→`{a,b}|null`, always bounded per F2 — no bare `a` leaf), `src/resolve.ts` (bare-ref parse + `-1` sentinel skip + `nextRef=max+1`), `src/qmap.ts` (`scanExpr`, `parseResultLines`, `payloadDate`). All pure functions, testable without fakes.
-- **Tools.** `src/tools/` — one file per tool + `index.ts` (`ToolEnv`, `give`, `defaultEnvSource`, `installTools`). Each factory is `(EnvSource) => PiToolSpec`; tests inject a fake `ToolEnv` via `give`, real installs use `defaultEnvSource(pi)` (reads config, builds `ShellQmapRunner`). Tools stub `qmap` in unit tests by contract (never shell out in `deno test`); real-qmap coverage is `scripts/integration-mm.sh` + the manual Pi-recall gate.
+- **Config via `src/config.ts`.** `DEFAULT_CONFIG` + `loadConfig(raw)` + `applyEnv(env)` + `resolveQmapBin(cwd, pathDirs, probe)` + `resolveAxisPath(cwd)` + `sepalConfigured(cfg)` + `readMmConfig(cwd, env)` mirror `pi-quest/src/config.ts` shape; tested first, implemented first. Precedence: `settings.json "pi-mm"` → `QMAP_BIN`/`QMAP_AXIS_PATH`/`QMAP_SEPAL_EMBED_*` env → `PATH` → in-site `external/libqmap/bin/qmap`. When sepal is configured the tools use the `mem.db@joint,stoma,sepal:a:s` filespec (sepal must never enter the roster unconfigured — its EINVAL rejects the whole `-p`).
+- **Pure helpers.** `src/window.ts` (level→`{a,b}|null`, always bounded per F2 — no bare `a` leaf), `src/resolve.ts` (bare-ref parse + `-1` sentinel skip + `nextRef=max+1`), `src/qmap.ts` (`scanExpr`, `sepalLeafFor`, `embedEnv`, `parseResultLines`, `payloadDate`). All pure functions, testable without fakes.
+- **Query-time embed via `src/embed.ts`.** `embedQuery(url, model, text, exec)` shells out to curl (OpenAI-compatible `/v1/embeddings`), extracts the `embedding` array, writes a LE float32 temp vector (`os.tmpdir()`), returns `{vecFile, qdim}` or `null` (empty text, curl failure, no array, dim > 2048 — never throws); `cleanupEmbed` is best-effort unlink. `scan` merges a `sepal="file=… qdim=… m=10 min_sim=0.2"` AND-leaf when `embed=true` and configured, else soft fallback.
+- **Tools.** `src/tools/` — one file per tool + `index.ts` (`ToolEnv`, `give`, `defaultEnvSource`, `installTools`). Each factory is `(EnvSource) => PiToolSpec`; tests inject a fake `ToolEnv` via `give`, real installs use `defaultEnvSource(pi)` (reads config, builds `ShellQmapRunner`; `ToolEnv.exec` carries the raw `pi.exec` for curl). Tools stub `qmap` in unit tests by contract (never shell out in `deno test`); real-qmap coverage is `scripts/integration-mm.sh` (incl. the gated embed smoke: python3 one-shot mock + `struct.pack` LE float32 vectors — note POSIX sh `printf` has no portable `\xHH`) + the manual Pi-recall gate.
 - **Degradation never error.** Empty inputs, no matches, missing binary, or nonzero exits yield `{content:[text], details:{error,…}}` — never a throw.
 
 ## Layout
@@ -20,9 +21,9 @@ The package lives at `.pi/extensions/pi-mm/` and loads via pi's project-local au
 src/
   hooks/events.ts   minimal Pi types (command+args+{cwd,env} exec)
   config.ts
-  window.ts  resolve.ts  qmap.ts
+  window.ts  resolve.ts  qmap.ts  embed.ts
   tools/{index,store,scan,think,forget,reset}.ts
-tests/              fake-qmap + config/window/resolve/args/tools + smoke
+tests/              fake-qmap + config/window/resolve/args/embed/tools + smoke
 skills/pi-mm/SKILL.md
 scripts/zip_bundle.ts  check-complexity.ts  integration-mm.sh
 ```
@@ -39,4 +40,4 @@ npm --prefix .pi/extensions/pi-mm run zip
 sh scripts/integration-mm.sh
 ```
 
-File <350 LOC, function <80 LOC. Tests mirror `src/`; bulk is pure. No `/usr` installs; real-qmap coverage uses fresh in-site `external/libqmap/bin/qmap` + sibling `libjoint`/`libstoma`.
+File <350 LOC, function <80 LOC. Tests mirror `src/`; bulk is pure. No `/usr` installs; real-qmap coverage uses fresh in-site `external/libqmap/bin/qmap` + sibling `libjoint`/`libstoma` (+ `libsepal` in the gated embed smoke).

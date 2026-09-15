@@ -1,7 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
-import { axisPath, memDir, exportDetail } from "./index";
-import { filespecFor, buildStoreInvocation, buildListInvocation } from "../qmap";
+import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
+import { filespecFor, buildStoreInvocation, buildListInvocation, embedEnv } from "../qmap";
 import { parseBareRefs, nextRef } from "../resolve";
 import { payloadDate } from "../qmap";
 
@@ -31,12 +31,13 @@ export function makeStoreTool(envSource: EnvSource): PiToolSpec {
         const runner = env.runner;
         if (env.cfg.qmapBin === "") return { content: [{ type: "text", text: `mm unavailable: qmap binary not found (configured: empty; in-site probe failed under ${cwd})` }], details: { error: "no-qmap" } };
 
-        const fspec = filespecFor(cwd);
-        const list = await runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd));
+        const embed = sepalConfigured(env.cfg);
+        const fspec = filespecFor(cwd, embed);
+        const list = await runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, embedEnv(env.cfg)));
         const refs = parseBareRefs(list.stdout);
         const ref = nextRef(refs);
         const payload = `${date}:${text}`;
-        const result = await runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd));
+        const result = await runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd, embedEnv(env.cfg)));
         if (result.code !== 0) {
           return { content: [{ type: "text", text: `mm store failed (exit ${result.code}): ${result.stderr || result.stdout}` }], details: { ref, key: `@${date}`, error: result.stderr || result.stdout } };
         }

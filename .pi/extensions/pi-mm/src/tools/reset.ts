@@ -1,7 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
-import { axisPath, memDir, exportDetail } from "./index";
-import { filespecFor, buildListInvocation, buildForgetInvocation } from "../qmap";
+import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
+import { filespecFor, buildListInvocation, buildForgetInvocation, embedEnv } from "../qmap";
 import { parseBareRefs } from "../resolve";
 
 export function makeResetTool(envSource: EnvSource): PiToolSpec {
@@ -21,12 +21,13 @@ export function makeResetTool(envSource: EnvSource): PiToolSpec {
 
         const axes = axisPath(env);
         const cwd = memDir(env);
-        const fspec = filespecFor(cwd);
-        const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd));
+        const embed = sepalConfigured(env.cfg);
+        const fspec = filespecFor(cwd, embed);
+        const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, embedEnv(env.cfg)));
         const refs = parseBareRefs(list.stdout);
         let forgotten = 0;
         for (const ref of refs) {
-          const result = await env.runner.run(buildForgetInvocation(env.cfg.qmapBin, fspec, ref, axes, cwd));
+          const result = await env.runner.run(buildForgetInvocation(env.cfg.qmapBin, fspec, ref, axes, cwd, embedEnv(env.cfg)));
           if (result.code === 0) forgotten += 1;
         }
         return exportDetail({ refsForgotten: forgotten });

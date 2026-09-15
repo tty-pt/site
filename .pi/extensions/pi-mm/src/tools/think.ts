@@ -1,7 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
-import { axisPath, memDir, exportDetail } from "./index";
-import { filespecFor, buildGetInvocation } from "../qmap";
+import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
+import { filespecFor, buildGetInvocation, embedEnv } from "../qmap";
 import { isNumericRef } from "../resolve";
 import { scanTopRef } from "./scan";
 
@@ -39,7 +39,8 @@ export function makeThinkTool(envSource: EnvSource): PiToolSpec {
           : await scanTopRef(envSource, ctx as PiCtx, key);
         if (ref === null) return { content: [{ type: "text", text: `mm think: no memory matches ${key}` }], details: { error: "no-match" } };
 
-        const result = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, filespecFor(memDir(env)), ref, axisPath(env), memDir(env)));
+        const embed = sepalConfigured(env.cfg);
+        const result = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, filespecFor(memDir(env), embed), ref, axisPath(env), memDir(env), embedEnv(env.cfg)));
         const payload = result.code === 0 ? result.stdout.trim() : "";
         if (payload === "") {
           return { content: [{ type: "text", text: `mm think: ref ${ref} returned nothing` }], details: { ref, error: "empty-get" } };
