@@ -11,7 +11,7 @@
 > explicit decision 2026-09-13); **commit only when explicitly asked**;
 > `make` + full suites green as a gate.
 
-Version: v19 (2026-09-15) — phase 1 DONE (all five repos, fixture
+Version: v20 (2026-09-15) — phase 1 DONE (all five repos, fixture
 16/16, site `make` + `make test` green). Phase 2 stores **the whole
 `-p` string as one un-split value** (see §10, §11). Phase 2 re-scoped
 around four principles (detail `PHASE-2-CLI.md` header)**: axes decide
@@ -24,6 +24,9 @@ additive). **2A — per-axis store/unstore/readback** (DONE, §11) and
 **2B — general qmap CLI composition** (DONE 2026-09-15, §12; the
 `-Q` mode folded into a composed `-g`, the `@` filespec roster declares the
 load set once at creation; 2B-0..2B-6 all landed; §12 checklist all green).
+**Phase 3 — `pi-mm` extension scaffold IN PROGRESS** (tools
+`memory_scan/think/store/forget/reset` wrapping the phase-2 surface, §13
+checklist).
 §10 catalogs every
 operation kind the four axes answer, store/unstore/get included
 (source-verified; each repo's own README carries its matching catalog).
@@ -41,7 +44,7 @@ implemented).
 | 1 | Ref-type law: `rec_ref_t = uint32_t` (qmap ref, not an axis's internal key) | ✅ **DONE 2026-09-13** — all five repos retyped + installed + verified; fixture 16/16; site `make` + `make test` green. Detail: `PHASE-1-RETYPE.md` | ✅ DONE — gate (§6 item 1) green |
 | 2 | 2A — per-axis store/unstore/readback | Conventional `rec_axis_store(ctx, spec, ref, value)` / `rec_axis_unstore(ctx, ref)` / `rec_axis_readback(ctx, ref, blob_out, n_out)` exports per axis (`readback`, not `get` — `rec_axis_get(int)` is the landed registry lookup; U2 settled 2026-09-14): the CLI passes the **whole** `-p` string as `(ref, value)` — never split — and each axis parses it entirely in its own grammar (joint leading-date, sepal floats-or-configured-embed, stoma memory-only text, islet point lists); unstore walks the axis's existing inverse — only libislet adds new stored state (`rev`, ref→cells); uniform idempotent contract + surface rules; missing symbols ⇒ read-only axis; no kernel/libqmap change. Detail: `PHASE-2-CLI.md` 2A; contract: `RECALL-KERNEL.md` | ✅ **DONE 2026-09-14** — mock proof-of-contract (`rec_axis_store_test`, libqmap `make test` green) + libsepal adapters with real lazy-curl embedder (`test_axis_store` 70 assertions green, valgrind clean) + libstoma `stoma_unindex`/`_ref` + `text`-field adapters (`stoma_test` 227/227, `stoma_axis_store_test` 34/34, 5 symbols) + libjoint `joint_erase` + ordered-grammar adapters (`joint_axis_store_test` 116/116, 4 symbols) + libislet `rev` + `islet_del_value_N` + point-list adapters (`test_axis_store` 15 tests/193 assertions, 9 symbols) + **2A-5 cross-process round-trips** (sepal `sepal_search` + isolation, islet `.ridx` rehydration + `fill_bbox_2`, joint `joint_iter` + file-backed `id` backfill — each via self-exec harness `seed/verify1/unstore/verify2`; stoma corpus `{(1,"Beacon Harbor lights"),(2,"Beacon AND Pão"),(3,"alpha omega")}` store→beacon 2→unstore 1→harbor miss→rebuild minus dropped 3 → beacon {1,2}+harbor {1} again, omega gone, parity 43/43) + **2A-6 close-out** (`make` W06 PASS, all suites green, `nm -D` spot-checks, no installs). Next: 2B |
 | 3 | 2B — general qmap CLI composition | The `-Q` mode folds into a composed `-g` (same trigger shape as the `-q` chain vs classic `-g`); axis plugins auto-discovered by name; `@` filespec roster declares the load set once at creation (persisted in a <primary>.roster sidecar, fan-out for `-p`/`-d`); string-unified writes over the phase-2A store surface; mm dialect as invocations of this same surface — **not mm-only**, must also compose e.g. islet-with-others. Detail: `PHASE-2-CLI.md` (2B) | ✅ **DONE 2026-09-15** — 2B-0 + 2B-1 (by-name discovery/load + `@roster` sidecar + `--list-axes`, `test-roster.sh` green 2026-09-14); decided options (D1-D10 + D11-D13); **D10 = the `-X EXPR` set-expression query** (`CLI-SURFACE-EXAMPLES.md`); 2B-3 (fold, `test-cli.sh` 25/25, `2B-3-IMPLEMENTATION.md`); 2B-2 (real-file gate, `test-real.sh` green, `CLI-SURFACE-EXAMPLES.md` §6); 2B-4 (write fan-out + forget, `test-fanout.sh` green, `2B-4-IMPLEMENTATION.md`); 2B-5 (mm dialect, `test-mm.sh` green, F4 `qmap_open` aliasing, `2B-5-IMPLEMENTATION.md`); **2B-6 (rank convention D2 — first rank-capable axis in query order wins, `--score` deferred — pinned in `test-cli.sh`/`test-real.sh`; `-X` grammar verified against the built parser). Phase 2B closed — next: phase 3 (`pi-mm`)** |
-| 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | 🔴 NOT STARTED |
+| 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | 🟡 IN PROGRESS 2026-09-15 — `.pi/extensions/pi-mm/` scaffold (mirrors `pi-quest`); §13 checklist |
 | 5 | Time/space in the extension | `memory_store --until/--near` via joint/islet through the phase-2 surface | 🔴 NOT STARTED |
 
 ---
@@ -80,8 +83,11 @@ seeds/forgets); detail: `2B-5-IMPLEMENTATION.md`. **2B-6 DONE 2026-09-15**
 — rank convention landed (D2: first rank-capable axis in query order
 wins; `--score` deferred) + `-X` grammar verified against the built
 parser (chained-`EXCEPT` + two-rank pins in `test-cli.sh`/`test-real.sh`);
-detail: `2B-6-IMPLEMENTATION.md`. **Phase 2B closed — next: phase 3
-(`pi-mm`).** TDD per slice, commit only when asked.
+detail: `2B-6-IMPLEMENTATION.md`. **Phase 2B closed 2026-09-15.** **Now
+phase 3 (`pi-mm`):** the `.pi/extensions/pi-mm/` scaffold — 5 tools
+(`memory_scan/think/store/forget/reset`) + skill + config wrapping the
+proven phase-2 surface (§8 recipes), mirroring `pi-quest`; §13 checklist.
+TDD per increment, commit only when asked.
 
 ---
 
@@ -385,12 +391,17 @@ changes essentially **zero functional lines**. What remains per repo:
     idempotent `unstore`, `readback`), uniform surface
     rules, persistence classes, slices 2A-mock..2A-6 in `PHASE-2-CLI.md` (2A);
     §11 is the checklist.
-3. **Phase 2B — general qmap CLI composition.** **IN PROGRESS 2026-09-14** —
-    2B-0 + 2B-1 landed (docs + `@roster` sidecar + by-name discovery/load,
-    `test-roster.sh` green). Composed `-g` (fold of `-Q`),
-    `@` roster + fan-out, reserialized slices 2B-0..2B-6, decided options
-    D1-D10 in `PHASE-2-CLI.md`; §12 is the checklist.
-4. **Phase 3 — `pi-mm` scaffold.** Tools stub qmap in unit tests. Gate: a
+3. **Phase 2B — general qmap CLI composition.** **DONE 2026-09-15 (v19)** —
+   2B-0 + 2B-1 landed (docs + `@roster` sidecar + by-name discovery/load,
+   `test-roster.sh` green). Composed `-g` (fold of `-Q`),
+   `@` roster + fan-out, slices 2B-0..2B-6 landed, decided options
+   D1-D13 in `PHASE-2-CLI.md`; §12 is the checklist. Gate: `make test`
+   all 6 scripts green, root `make` W06 PASS.
+4. **Phase 3 — `pi-mm` scaffold.** **IN PROGRESS 2026-09-15** — the
+   `.pi/extensions/pi-mm/` extension (tools `memory_scan/think/store/
+   forget/reset` + skill + config wrapping the phase-2 surface). Tools
+   stub qmap in unit tests (never shell out in `deno test`; real qmap
+   covered by `scripts/integration-mm.sh`). Gate: a
    Pi session recalls prior gist from disk with no provider; `deno test`
    green.
 5. **Phase 4 — time/space in the extension.** `memory_store --until` /
@@ -847,3 +858,81 @@ green; `./test.sh && ./test-cli.sh` green; sibling suites green; site
 clobber by old-binary bare opens — recoverable (re-specify `@`), axis
 data never at risk, alongside-heuristic notes it. (3) sibling stale-binary
 hazard on tests (clean-rebuild first, as always).
+
+---
+
+## 13. Phase 3 — `pi-mm` extension scaffold (IN PROGRESS 2026-09-15)
+
+Working copy: `.pi/extensions/pi-mm/` under `site` (the plan repo's tree).
+Structure mirrors `pi-quest` (package.json + `index.ts` + `src/` + `tests/`
++ `skills/` + `scripts/`). Tools shell out to the built `qmap` binary
+**exactly per** `CLI-SURFACE-EXAMPLES.md` §8 recipes (U3); unit tests never
+shell out — an injectable `QmapRunner` stub pins the exact `command + args`
+bytes, and real-qmap coverage lives in `scripts/integration-mm.sh` + the
+manual Pi recall gate. TDD every increment; status lives here, no
+`.pi/quest/` usage; commit only when explicitly asked.
+
+Decisions (locked with the user 2026-09-15):
+- **Level = time-window granularity, now-anchored** — scan computes a
+  bounded joint window from the current clock: level 0 = all-time (omit the
+  joint leaf; pure stoma text), level 1 = since start of today, level 2 =
+  since start of this month. Store is level-agnostic (always
+  `<DATE>:<TEXT>`); F2 keeps every joint leaf bounded (`a`+`b`).
+- **Store layout** — one primary `mem.db` + `joint.db`/`stoma.db` +
+  `<primary>.roster` under `ctx.cwd/.pi/mm/`. `nextRef =
+  max(bare refs from 'qmap -g .') + 1` per store (reuses the reset listing
+  path; no counter state).
+- **Degradation, never error** — missing `qmap` binary / nonzero exit /
+  zero matches → informative non-error tool results; accent-sensitive text
+  passed through verbatim.
+- **Slice scope** — the 5 tools + config + adapter + skill + tests only;
+  `turn_end` auto-capture (open capture-heuristic, §7) deferred.
+
+Execution checklist:
+
+- [x] **3-1** Doc fold-in — DONE 2026-09-15: §6 item 3 flipped to DONE,
+  v20 header, §3 row 4 IN PROGRESS, §6 item 4 annotated, this §13 added,
+  resume paragraph → phase 3.
+- [x] **3-2** Skeleton + smoke — DONE 2026-09-15: `package.json`
+  (`pi.extensions` + `pi.skills`, `test`/`zip` scripts), `index.ts`,
+  `src/index.ts` installer (loadable-graceful: never throws on missing
+  state), `tests/smoke.test.ts` green (4 tests).
+- [x] **3-3** `src/config.ts` (+ tests) — DONE 2026-09-15: `qmapBin`/
+  `axisLibs`/`memDir`/`scanLimit`; resolution precedence settings.json
+  `"pi-mm"` → env `QMAP_BIN`/`QMAP_AXIS_PATH` → `PATH` → in-site
+  `external/libqmap/bin/qmap` + `external/lib{joint,stoma}/lib`; defaults.
+  `config.test.ts` 6 tests green.
+- [x] **3-4** Pure helpers (+ tests) — DONE 2026-09-15: `window.ts`
+  (level→a/b, now-anchored, always bounded), `resolve.ts` (bare-ref parse,
+  sentinel skip, `nextRef=max+1`), `qmap.ts` helpers (`scanExpr`,
+  `parseResultLines`, `payloadDate`, `filespecFor` absolute). `window.test`
+  7 + `resolve.test` 5 green.
+- [x] **3-5** `src/qmap.ts` + arg byte-pinning (`tests/args.test.ts`) —
+  DONE 2026-09-15: `QmapRunner` + `ShellQmapRunner` (builds command/args/env
+  per §8, runs via `pi.exec` with `QMAP_AXIS_PATH`); each tool's `args`
+  asserted byte-identical to the documented recipes (store
+  `-p REF:"DATE:TEXT"` + absolute `@joint,stoma:a:s`; scan `-X '(...)'`
+  + `-g .` + `-t N`; forget `-d REF`; `filespecFor` absolute avoids the
+  `./` vs `mem.db` alias clobber in `libqmap`/`libstoma`; think's `-g`
+  fixed to `-r -g` for AINDEX). `args.test` 9 green.
+- [x] **3-6** Tools (+ tests via fake runner) — DONE 2026-09-15:
+  `memory_store` (nextRef `{ref, key:"@DATE"}`), `memory_scan` (level
+  window, parsed records), `memory_think` (`extract` ∈ date|text|whole,
+  ISO-aware split), `memory_forget` (resolve + idempotent `-d`),
+  `memory_reset` (enumerate + forget, `-1` skipped, idempotent);
+  degradation paths non-error, accent-sensitive passthrough. `tools.test`
+  14 green.
+- [x] **3-7** Skill + packaging — DONE 2026-09-15: `skills/pi-mm/SKILL.md`
+  (the 5 tools + quest-vs-MM boundary), `scripts/zip_bundle.ts`
+  (`pi-mm-bundle.zip`), `scripts/check-complexity.ts` (LOC budgets),
+  `AGENTS.md`/`README.md`. Skill mirrors `pi-quest` shape.
+- [x] **3-8** Gates — DONE 2026-09-15: `deno test` 48 passed 0 failed;
+  `deno lint` clean; complexity ok (19 files, all <350 LOC, fns <80);
+  zip builds (`pi-mm-bundle.zip` 30K); `scripts/integration-mm.sh` all
+  green (real joint+stoma, absolute filespec, separate puts, accent Pão,
+  forget+reset idempotent); root `make` unaffected (extension is TS);
+  no `.pi/quest/` writes; commit only when asked.
+
+**Gate:** a Pi session recalls a prior gist from disk with no provider
+(proven by `integration-mm.sh` separate-store→scan→think recall) and
+`deno test` green — **both green 2026-09-15**.
