@@ -68,7 +68,7 @@ Deno.test("memory_scan: level 0 → pure stoma expr, parsed records", async () =
   const tool = makeScanTool(give(env(runner)));
   const res = await runTool(tool, { topic: "beacon", level: 0 }, ctx);
   check(runner.invocations[0].args.join(" ") ===
-    `-X stoma="field=text query=beacon matched=1" -g . ${FS} -t 10`, "level-0 expr + default limit");
+    `-X stoma="field=text matched=1" -g . ${FS} -t 10 --query=beacon`, "level-0 expr + default limit + query flag");
   const details = res.details as { records: Array<{ ref: number; score: string; record: string }> };
   check(details.records.length === 2, "two records");
   check(details.records[0].ref === 1 && details.records[0].score === "0.125000", "first record");
@@ -134,7 +134,7 @@ Deno.test("memory_think: text key resolves via scan top-1, then gets", async () 
   const res = await runTool(tool, { key: "beacon" }, ctx);
   check(runner.invocations.length === 2, "scan then get");
   check(runner.invocations[0].args.includes("-X"), "resolution scan");
-  check(runner.invocations[0].args.join(" ").endsWith(`-g . ${FS} -t 1`), "limit 1 scan");
+  check(runner.invocations[0].args.join(" ").endsWith(`-g . ${FS} -t 1 --query=beacon`), "limit 1 scan + query flag");
   check(runner.invocations[1].args.join(" ") === `-r -g 2 ${FS}`, "get resolved ref");
   check((res.details as { ref: number }).ref === 2, "ref 2 resolved");
 });
@@ -203,18 +203,21 @@ Deno.test("degradation: nonzero exec exit still returns a non-error result with 
   check((res.content[0].text ?? "").includes("joint missing"), "stderr surfaced");
 });
 
-Deno.test("memory_scan: embed=true with sepal configured → query= text leaf, no curl, no temp files", async () => {
+Deno.test("memory_scan: embed=true with sepal configured → bare sepal + --query/--min-sim flags, no curl, no temp files", async () => {
   const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
   const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() })));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes(`sepal="query='beacon' min_sim=0.2"`), `sepal query= text leaf; got ${args}`);
+  check(args.includes(`(stoma="field=text matched=1" AND sepal)`), `bare sepal AND-leaf; got ${args}`);
+  check(args.includes("--query=beacon"), `--query flag carries the text; got ${args}`);
+  check(args.includes("--min-sim=0.2"), `--min-sim flag carries the floor; got ${args}`);
+  check(!runner.invocations[0].args[1].includes("query="), `no query= inside the -X expr; got ${args}`);
   check(!args.includes("file="), `no tempfile bridge; got ${args}`);
   check(runner.invocations[0].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[0].args[4]}`);
   check(runner.invocations[0].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");
   const d = res.details as { records: unknown[]; embed?: string };
   check(d.records.length === 1, "records returned");
-  check(d.embed === undefined, "no embed diagnostic on the text-leaf path");
+  check(d.embed === undefined, "no embed diagnostic on the flags path");
 });
 
 Deno.test("memory_scan: embed=true but sepal unconfigured → soft fallback diagnostic", async () => {
@@ -222,7 +225,8 @@ Deno.test("memory_scan: embed=true but sepal unconfigured → soft fallback diag
   const tool = makeScanTool(give(env(runner)));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(!args.includes("sepal="), `no sepal leaf on fallback; got ${args}`);
+  check(!args.includes("sepal"), `no sepal leaf on fallback; got ${args}`);
+  check(args.includes("--query=beacon"), `text still rides --query on fallback; got ${args}`);
   check(runner.invocations[0].args[4] === FS, `plain filespec on fallback; got ${runner.invocations[0].args[4]}`);
   const d = res.details as { embed: string };
   check(d.embed === "unconfigured", "diagnostic embed=unconfigured");

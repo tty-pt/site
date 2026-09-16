@@ -1,7 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events";
 import type { EnvSource } from "./index";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
-import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, sepalLeafForText, embedEnv } from "../qmap";
+import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM } from "../qmap";
 
 function defaultLevel(l: unknown): number {
   if (typeof l === "number" && l >= 0 && l <= 2) return l;
@@ -45,15 +45,14 @@ export function makeScanTool(envSource: EnvSource): PiToolSpec {
         const wantEmbed = params["embed"] === true;
         const embedReady = wantEmbed && sepalConfigured(env.cfg);
         const details: Record<string, unknown> = {};
-        // libsepal embeds the topic server-side at query time (Phase 6
-        // `query=` leaf): no curl, no temp vector — just a text leaf.
-        const sepalLeaf = embedReady ? sepalLeafForText(topic) : undefined;
         if (wantEmbed && !embedReady) details["embed"] = "unconfigured";
         const axes = axisPath(env);
         const cwd = memDir(env);
         const now = env.nowProvider();
-        const expr = scanExpr(topic, level, now, until, sepalLeaf);
-        const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg)));
+        const extraArgs: string[] = ["--query=" + topic];
+        if (embedReady) extraArgs.push("--min-sim=" + String(SEPAL_MIN_SIM));
+        const expr = scanExpr(topic, level, now, until, embedReady);
+        const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg), extraArgs));
         if (result.code !== 0) {
           return { content: [{ type: "text", text: `mm scan failed (exit ${result.code}): ${result.stderr || result.stdout}` }], details: { records: [], error: result.stderr || result.stdout, ...details } };
         }
@@ -73,7 +72,7 @@ export async function scanTopRef(envSource: EnvSource, ctx: PiCtx, topic: string
   const axes = axisPath(env);
   const cwd = memDir(env);
   const expr = scanExpr(topic, 0, env.nowProvider());
-  const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, sepalConfigured(env.cfg)), expr, 1, axes, cwd, embedEnv(env.cfg)));
+  const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, sepalConfigured(env.cfg)), expr, 1, axes, cwd, embedEnv(env.cfg), ["--query=" + topic]));
   if (result.code !== 0) return null;
   const lines = parseResultLines(result.stdout);
   return lines.length > 0 ? lines[0].ref : null;

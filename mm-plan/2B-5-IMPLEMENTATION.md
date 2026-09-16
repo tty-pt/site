@@ -8,6 +8,14 @@
 > (current shape, incl. `gen_put`/`gen_del`/`gen_del_all`,
 > `qmap_fanout_store`/`qmap_fanout_unstore`, `qmap_write_ref`).
 >
+> **D14 update (2026-09-16):** historical record of the mm dialect as
+> built. The `stoma="… query=…"` leaf grammar here is still valid qmap
+> syntax, but pi-mm now emits the D14 flags form — `-X '(joint=… AND
+> stoma="field=text matched=1" AND sepal)' --query=… [--min-sim=…]` —
+> structure in `-X`, runtime values on CLI flags (precedence leaf spec >
+> CLI > env). See `mm-plan/PHASE-2-CLI.md` D14 carve-out and
+> `mm-plan/CLI-SURFACE-EXAMPLES.md` §8/§11.
+>
 > This file is the lossless record: §1 = the built surface as found
 > 2026-09-15, §2 = rehearsal evidence, §3 = findings F1–F6, §4 = the
 > normative pi-mm recipes (settle U3), §5 = `test-mm.sh` design, §6 = the

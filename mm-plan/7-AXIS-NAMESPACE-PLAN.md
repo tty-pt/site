@@ -4,6 +4,13 @@ Status: **DONE 2026-09-16** — all four phases landed, every gate green
 (commit only when asked; site tree left uncommitted). Status lives in
 `README.md` §0 row 8 (v26).
 
+> **D14 update (2026-09-16):** historical record of the per-primary store
+> naming as built. Unrelated to D14, but note pi-mm's query surface has
+> since moved to the flags form — `-X '(stoma="field=text matched=1" AND
+> sepal)' --query=… [--min-sim=…]` — structure in `-X`, runtime values on
+> CLI flags (leaf spec > CLI > env). See `mm-plan/PHASE-2-CLI.md` D14
+> carve-out and `mm-plan/CLI-SURFACE-EXAMPLES.md` §11.
+
 ## The current issue
 
 Axis stores are **directory-scoped**, while the primary DB, its roster

@@ -9,6 +9,14 @@
 > `qmap_expr_*` recursive descent) and `external/libqmap/src/rec_axis.c`
 > (lines 199–211, the kernel rank fallback).
 >
+> **D14 update (2026-09-16):** historical record of the rank-convention /
+> `-X` grammar as built. The leaf grammars verified here are still valid
+> qmap syntax, but pi-mm now emits the D14 flags form — `-X '… AND
+> stoma="field=text matched=1" AND sepal)' --query=… [--min-sim=…]` —
+> structure in `-X`, runtime values on CLI flags (precedence leaf spec >
+> CLI > env). See `mm-plan/PHASE-2-CLI.md` D14 carve-out and
+> `mm-plan/CLI-SURFACE-EXAMPLES.md` §11.
+>
 > This file is the lossless record: §1 = rank convention as built,
 > §2 = grammar verification (doc ↔ prototype), §3 = new gate rows,
 > §4 = doc updates, §5 = gates, §6 = execution log.

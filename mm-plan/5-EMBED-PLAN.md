@@ -5,6 +5,14 @@ status lives in `README.md` §0 row 6. Followed the Phase-3/4 TDD pattern:
 unit tests stub qmap + curl (never shell out in `deno test`), real-qmap
 coverage in `scripts/integration-mm.sh` (+ `RUNNING.md` manual gate).
 
+> **D14 update (2026-09-16):** historical record of the `sepal="file=…"` /
+> curl-bridge surface as built. The `file=` leaf grammar here is still
+> valid qmap syntax, but pi-mm now emits the D14 flags form — `-X
+> '(stoma="field=text matched=1" AND sepal)' --query=… [--min-sim=…]` —
+> structure in `-X`, runtime values on CLI flags (precedence leaf spec >
+> CLI > env). See `mm-plan/PHASE-2-CLI.md` D14 carve-out and
+> `mm-plan/CLI-SURFACE-EXAMPLES.md` §11.
+
 ## Goal
 
 Give the pi-mm extension a **semantic** recall dimension on top of the

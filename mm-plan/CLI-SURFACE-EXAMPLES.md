@@ -2,11 +2,14 @@
 
 > Normative usage examples for the qmap CLI after the **phase-2B fold (2B-3)**:
 > the composed `-g .` query replaces the retired `-Q` mode, and the set-expression
-> flag **`-X EXPR`** is the **only** query mechanism — no `--axis`, no `--params`,
+> flag **`-X EXPR`** is the **only query verb** — no `--axis`, no `--params`,
 > no `--dl`, no `--open`, no numeric slots, no sticky join words, no `--combine`.
-> `[slice]` tags say which 2B slice lands each capability; untagged examples are
-> already true against today's binary. This file doubles as the slice-by-slice
-> acceptance checklist.
+> Plugin-contributed `--<name>=VALUE` configuration flags are permitted (D14 —
+> additive per-axis defaults, forwarded to every bound axis that declares them;
+> precedence leaf spec > CLI arg > env; inline form only; credentials stay
+> env-only). `[slice]` tags say which 2B slice lands each capability; untagged
+> examples are already true against today's binary. This file doubles as the
+> slice-by-slice acceptance checklist.
 
 Legend: `[2B-3]` the fold (`-X` + `-t`/`-b`, old surface deleted) ·
 `[2B-2]` real-file gate · `[2B-4]` write fan-out · `[2B-5]` mm dialect (exact
@@ -257,12 +260,16 @@ file-backed, `joint`/`islet` either (D13).
 > primary (by design, D13), so forget deletes primary *and* axes in one
 > op. Reset has no single flag — it is the enumerate+forget loop below
 > (the `-1` empty sentinel is skipped; re-running is a no-op).
+>
+> **D14 amendment (2026-09-16):** the search recipe below now uses the
+> flags form — `-X` carries structure, `--query`/`--min-sim` carry runtime
+> values; store/forget/reset unchanged.
 
 ```sh
 # store
 qmap -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma:a:s"
 # search
-qmap -X '(joint="a=2026-09-14 b=2026-09-16" AND stoma="field=text query=beacon matched=1")' -g . mem.db -t 10
+qmap -X '(joint="a=2026-09-14 b=2026-09-16" AND stoma="field=text matched=1" AND sepal)' --query=beacon --min-sim=0.2 -g . mem.db -t 10
 # forget
 qmap -d 1 "mem.db@joint,stoma:a:s"
 # reset
@@ -315,6 +322,7 @@ missing typed export ⇒ text-only axis, missing both ⇒ read-only.
 | `-X EXPR` | set-expression query (arms `-g .`) `[2B-3]` |
 | `-t N` / `--top N` | cap result count (default 0 = all) `[2B-3]` |
 | `-b F` / `--bottom F` | score floor (drop below F) `[2B-3]` |
+| `--NAME=VALUE` | plugin-contributed per-axis config flag (D14): inline form only; accepted by getopt via the dynamic table, forwarded after bind to every bound axis whose `rec_axis_cli_options()` declares NAME; unknown/rejected/misformed → usage + exit 1; bare `--NAME` requires `--NAME=VALUE`; `query`/`min-sim` declared by sepal, `query` by stoma; e.g. `-X '(stoma="field=text matched=1" AND sepal)' --query='the old lighthouse beacon' --min-sim=0.2` |
 | `--list-axes` | long-only: registered-axis table, standalone |
 
 Reserved expression words: `AND OR EXCEPT NOT ( )`. Keywords are uppercase-only;

@@ -5,6 +5,13 @@ site Phase B landed). Tracked here; status lives in `README.md` §0 row 7.
 Leaf name settled by user choice: **`query=`**
 (parallels stoma's `query=` key).
 
+> **D14 update (2026-09-16):** historical record of the leaf surface as
+> built. The `query=` leaf grammar here is still valid qmap syntax, but
+> pi-mm now emits the D14 flags form — `-X '(stoma="field=text matched=1"
+> AND sepal)' --query=… [--min-sim=…]` — structure in `-X`, runtime
+> values on CLI flags (precedence leaf spec > CLI > env). See
+> `mm-plan/PHASE-2-CLI.md` D14 carve-out and `mm-plan/CLI-SURFACE-EXAMPLES.md` §11.
+
 ## Goal
 
 Let the caller pass a plain string — `sepal="query='harbor lights' m=10

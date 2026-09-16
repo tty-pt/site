@@ -586,7 +586,11 @@ new symbols exported; round-trips green; site `make` green as insurance
   (`<primary-dir>/<name>.db`, or the axis's own memory/empty-field
   defaults); sepal embed config is env-only (D8). `-Q`, `--dl`, `--open`,
   `--axis` (any form), `--params`, and the `rq_*` helpers are retired and
-  removed with the `-g` fold (2B-3).
+  removed with the `-g` fold (2B-3). **Plugin-contributed `--<name>=VALUE`
+  configuration flags are permitted** (D14): additive per-axis config
+  defaults forwarded by qmap to every bound axis that declares them, via the
+  optional `rec_axis_cli_options()` / `rec_axis_config_arg()` convention —
+  `-X` remains the only query *verb* (see the D14 carve-out below).
 - **D10 — the query is ONE set-expression flag (locked 2026-09-14):**
   `-X EXPR` is the only query mechanism. `EXPR` is a set algebra over axis
   leaves — `( ) AND OR EXCEPT NOT`, `NAME` / `NAME=VALUE` (whole-string
@@ -601,10 +605,18 @@ new symbols exported; round-trips green; site `make` green as insurance
   floor). Armed iff `-X` present and nonempty; unarmed = classic `-g`.
   Retired with the fold: sticky `--and/--or/--not`, `--combine`, per-axis
   `--params`. `AND/OR/EXCEPT/NOT/( )` are reserved (uppercase-only; axis
-   names are lowercase slugs, so shadowing is effectively unreachable —
-   `-X except` referencing an axis literally named `except` stays legal).
-   This is the surface `mm-plan/CLI-SURFACE-EXAMPLES.md` documents;
-   grammar/`-X` details live there and win.
+  names are lowercase slugs, so shadowing is effectively unreachable —
+  `-X except` referencing an axis literally named `except` stays legal).
+  This is the surface `mm-plan/CLI-SURFACE-EXAMPLES.md` documents;
+  grammar/`-X` details live there and win.
+
+> **D14 carve-out — `-X` remains the only query verb.** `--axis`/`--params`/
+> sticky joins stay retired. **Plugin-contributed `--<name>=VALUE`
+> configuration flags** are now permitted: additive per-axis config defaults
+> forwarded by qmap (`-g .` armed) to every bound axis that declares them,
+> via the optional `rec_axis_cli_options()` / `rec_axis_config_arg()`
+> convention. Precedence: leaf spec > CLI arg > env. Inline `--name=value`
+> only; bare `--name` is an error; credentials stay env-only.
 
 > **Verified against the built 2B-3 parser (2026-09-15, 2B-6):** the
 > grammar above is exactly what `external/libqmap/src/qmap.c` (lexer +

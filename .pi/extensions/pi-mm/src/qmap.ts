@@ -71,9 +71,10 @@ export function buildScanInvocation(
   axisLibPath: string,
   memDir: string,
   extraEnv?: Record<string, string>,
+  extraArgs?: string[],
 ): Invocation {
   const inv = base(bin, axisLibPath, memDir, extraEnv);
-  inv.args = ["-X", expr, "-g", ".", filespec, "-t", String(limit)];
+  inv.args = ["-X", expr, "-g", ".", filespec, "-t", String(limit), ...(extraArgs ?? [])];
   return inv;
 }
 
@@ -115,8 +116,8 @@ export function buildForgetInvocation(
   return inv;
 }
 
-export function scanExpr(topic: string, level: number, now: Date, until?: string, sepalLeaf?: string): string {
-  const stoma = `stoma="field=text query=${topic} matched=1"`;
+export function scanExpr(_topic: string, level: number, now: Date, until?: string, withEmbed?: boolean): string {
+  const stoma = `stoma="field=text matched=1"`;
   const parts: string[] = [];
   const window = levelWindow(level, now);
   if (window === null) {
@@ -126,12 +127,8 @@ export function scanExpr(topic: string, level: number, now: Date, until?: string
     parts.push(`joint="a=${window.a} b=${b}"`);
   }
   parts.push(stoma);
-  if (sepalLeaf) parts.push(sepalLeaf);
+  if (withEmbed) parts.push("sepal");
   return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
-}
-
-export function sepalLeafForText(topic: string): string {
-  return `sepal="query='${topic}' min_sim=${SEPAL_MIN_SIM}"`;
 }
 
 export interface ResultLine {
