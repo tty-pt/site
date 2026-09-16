@@ -39,28 +39,28 @@ qmap_cwd -p 2:"2026-09-14:Beacon AND Pão" "$FILESPEC" >/dev/null
 qmap_cwd -p 3:"2026-09-15:Beacon Harbor lights again" "$FILESPEC" >/dev/null
 
 # scan level 0 (pure text): beacon should return 3 (+/- ordering by score/ties asc ref)
-out=$(qmap_cwd -X 'stoma="field=text query=beacon matched=1"' -g . "$FILESPEC" -t 10)
+out=$(qmap_cwd -X 'stoma' --field=text --query=beacon --matched=1 -g . "$FILESPEC" -t 10)
 echo "$out" | grep -q "^1 " || failmsg "scan level-0 has ref 1" "$out"
 echo "$out" | grep -q "^2 " || failmsg "scan level-0 has ref 2" "$out"
 echo "$out" | grep -q "^3 " || failmsg "scan level-0 has ref 3" "$out"
 [ $fail -eq 0 ] && ok "scan level-0 pure text"
 
 # scan level 0 with --until (all-time up to date): epoch-to-until window
-out=$(qmap_cwd -X '(joint="a=0 b=2026-09-15" AND stoma="field=text query=beacon matched=1")' -g . "$FILESPEC" -t 10)
+out=$(qmap_cwd -X '(joint AND stoma)' --field=text --query=beacon --matched=1 --since=0 --until=2026-09-15 -g . "$FILESPEC" -t 10)
 echo "$out" | grep -q "^1 " || failmsg "scan level-0 until=2026-09-15 has ref 1" "$out"
 echo "$out" | grep -q "^2 " || failmsg "scan level-0 until=2026-09-15 has ref 2" "$out"
 echo "$out" | grep -q "^3 " && failmsg "scan level-0 until=2026-09-15 must NOT have ref 3" "$out" || ok "scan level-0 + until caps at ref 3"
 
 # scan level 1 (today window = 2026-09-15) — need a date that matches 3 only.
 # Use a=2026-09-15 b=2026-09-16 and text beacon → should return 3.
-out=$(qmap_cwd -X '(joint="a=2026-09-15 b=2026-09-16" AND stoma="field=text query=beacon matched=1")' -g . "$FILESPEC" -t 10)
+out=$(qmap_cwd -X '(joint AND stoma)' --field=text --query=beacon --matched=1 --since=2026-09-15 --until=2026-09-16 -g . "$FILESPEC" -t 10)
 echo "$out" | grep -q "^3 " || failmsg "scan level-1 today window has ref 3" "$out"
 [ $fail -eq 0 ] && ok "scan level-1 today window"
 
 # accent-sensitive: Pão ≠ pao
-out_accent=$(qmap_cwd -X 'stoma="field=text query=Pão matched=1"' -g . "$FILESPEC" -t 10)
+out_accent=$(qmap_cwd -X 'stoma' --field=text --query=Pão --matched=1 -g . "$FILESPEC" -t 10)
 echo "$out_accent" | grep -q "^2 " || failmsg "accent Pão finds ref 2" "$out_accent"
-out_pao=$(qmap_cwd -X 'stoma="field=text query=pao matched=1"' -g . "$FILESPEC" -t 10 2>/dev/null || true)
+out_pao=$(qmap_cwd -X 'stoma' --field=text --query=pao --matched=1 -g . "$FILESPEC" -t 10 2>/dev/null || true)
 echo "$out_pao" | grep -q "^2 " && failmsg "accent: pao must not find Pão" "$out_pao" || ok "accent-sensitive Pão≠pao"
 
 # think: get ref 2 raw payload (AINDEX needs -r)
@@ -71,7 +71,7 @@ echo "$payload" | grep -q "Pão" || failmsg "get ref 2 has Pão" "$payload"
 # forget ref 2 (roster-backed, idempotent)
 qmap_cwd -d 2 "$FILESPEC" >/dev/null
 qmap_cwd -d 2 "$FILESPEC" >/dev/null || true
-out=$(qmap_cwd -X 'stoma="field=text query=Pão matched=1"' -g . "$FILESPEC" -t 10 2>/dev/null || true)
+out=$(qmap_cwd -X 'stoma' --field=text --query=Pão --matched=1 -g . "$FILESPEC" -t 10 2>/dev/null || true)
 echo "$out" | grep -q "^2 " && failmsg "forget 2 removed" "$out" || ok "forget idempotent"
 
 # reset: enumerate bare + forget each (§8)
@@ -85,10 +85,11 @@ left=$(qmap_cwd -g . "$FILESPEC" 2>/dev/null | grep -E '^[0-9]+$' | wc -l | tr -
 for ref in $(qmap_cwd -g . "$FILESPEC" 2>/dev/null | grep -E '^[0-9]+$' || true); do qmap_cwd -d "$ref" "$FILESPEC" >/dev/null || true; done
 
 # ── embed smoke (requires python3 + libsepal) ── store on a ,sepal roster
-# via a one-shot local HTTP mock (OpenAI JSON). D14: the query is a bare
-# `sepal` leaf + `stoma="field=text matched=1"`; the text + floor ride
-# `--query`/`--min-sim` flags (a second HTTP call, so the one-shot mock
-# restarts); `file=` stays for the dissimilar-vector gate.
+# via a one-shot local HTTP mock (OpenAI JSON). D14: bare names in `-X`
+# (`stoma AND sepal`); the field/text/floor/window ride
+# `--field=text --query/--min-sim` + `--since/--until` flags (a second HTTP
+# call, so the one-shot mock restarts); `file=` stays for the dissimilar-
+# vector gate.
 SEPAL_LIB="$ROOT/external/libsepal/lib"
 if command -v python3 >/dev/null 2>&1 && [ -f "$SEPAL_LIB/libsepal.so" ]; then
   EMBED_FILE="$mem/mem-embed.db@joint,stoma,sepal:a:s"
@@ -119,10 +120,10 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
   if QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
       "$QMAP" -p 4:"2026-09-16:embedded lighthouse beacon" "$EMBED_FILE" >/dev/null 2>"$td/embed.err"; then
     wait "$SRV_PID" 2>/dev/null || true
-    # bare sepal + flags, exactly as memory_scan emits it
+    # bare names + flags, exactly as memory_scan emits it
     mock_embed_once
     if out=$(QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
-        "$QMAP" -X '(stoma="field=text matched=1" AND sepal)' --query='embedded lighthouse beacon' --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
+        "$QMAP" -X '(stoma AND sepal)' --field=text --matched=1 --query='embedded lighthouse beacon' --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
       wait "$SRV_PID" 2>/dev/null || true
       echo "$out" | grep -q "^4 " && ok "embed store + bare sepal + flags finds ref 4" || failmsg "--query/--min-sim must find ref 4" "$out"
     else
@@ -149,11 +150,11 @@ qmap_cwd -p 1:"2026-09-14:A boat ride with a panda can be deep" "$DBB" >/dev/nul
 [ -f "$mem/a.db-joint" ] && [ -f "$mem/b.db-joint" ] \
   && ok "two DBs own distinct axis stores" \
   || failmsg "two DBs must own distinct axis stores" "$(ls "$mem" | tr '\n' ' ')"
-out=$(qmap_cwd -X 'stoma="field=text query=grandfather matched=1"' -g . "$DBA" -t 10 2>/dev/null || true)
+out=$(qmap_cwd -X 'stoma' --field=text --query=grandfather --matched=1 -g . "$DBA" -t 10 2>/dev/null || true)
 echo "$out" | grep -q "^1 " || failmsg "own-DB recall finds grandfather" "$out"
-out2=$(qmap_cwd -X 'stoma="field=text query=grandfather matched=1"' -g . "$DBB" -t 10 2>/dev/null || true)
+out2=$(qmap_cwd -X 'stoma' --field=text --query=grandfather --matched=1 -g . "$DBB" -t 10 2>/dev/null || true)
 echo "$out2" | grep -q "^1 " && failmsg "sibling DB must not leak grandfather" "$out2" || ok "two-DB stoma isolation (no leak)"
-out3=$(qmap_cwd -X 'stoma="field=text query=panda matched=1"' -g . "$DBB" -t 10 2>/dev/null || true)
+out3=$(qmap_cwd -X 'stoma' --field=text --query=panda --matched=1 -g . "$DBB" -t 10 2>/dev/null || true)
 echo "$out3" | grep -q "^1 " || failmsg "own-DB recall finds panda" "$out3"
 
 [ $fail -eq 0 ] && echo "integration-mm: all green" || { echo "integration-mm: $fail failure(s)" >&2; exit 1; }

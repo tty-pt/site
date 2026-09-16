@@ -68,7 +68,7 @@ Deno.test("memory_scan: level 0 → pure stoma expr, parsed records", async () =
   const tool = makeScanTool(give(env(runner)));
   const res = await runTool(tool, { topic: "beacon", level: 0 }, ctx);
   check(runner.invocations[0].args.join(" ") ===
-    `-X stoma="field=text matched=1" -g . ${FS} -t 10 --query=beacon`, "level-0 expr + default limit + query flag");
+    `-X stoma -g . ${FS} -t 10 --field=text --matched=1 --query=beacon`, "level-0 expr + default limit + query flag");
   const details = res.details as { records: Array<{ ref: number; score: string; record: string }> };
   check(details.records.length === 2, "two records");
   check(details.records[0].ref === 1 && details.records[0].score === "0.125000", "first record");
@@ -79,7 +79,8 @@ Deno.test("memory_scan: level 1 bounds the joint window from the injected clock"
   const tool = makeScanTool(give(env(runner)));
   await runTool(tool, { topic: "beacon", level: 1 }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes('joint="a=2026-09-15 b=2026-09-16"'), `day window; got ${args}`);
+  check(args.includes("(joint AND stoma)"), `day window expr; got ${args}`);
+  check(args.includes("--since=2026-09-15 --until=2026-09-16"), `window flags; got ${args}`);
   check(args.includes("-t 10"), "limit passes through");
 });
 
@@ -97,7 +98,8 @@ Deno.test("memory_scan: level 0 with --until → epoch-to-until window", async (
   const tool = makeScanTool(give(env(runner)));
   await runTool(tool, { topic: "beacon", until: "2026-09-16" }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes('joint="a=0 b=2026-09-16"'), `epoch-to-until window; got ${args}`);
+  check(args.includes("(joint AND stoma)"), `epoch-to-until expr; got ${args}`);
+  check(args.includes("--since=0 --until=2026-09-16"), `epoch-to-until window flags; got ${args}`);
 });
 
 Deno.test("memory_scan: level 1 with --until caps b at until", async () => {
@@ -105,7 +107,8 @@ Deno.test("memory_scan: level 1 with --until caps b at until", async () => {
   const tool = makeScanTool(give(env(runner)));
   await runTool(tool, { topic: "beacon", level: 1, until: "2026-09-15" }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes('joint="a=2026-09-15 b=2026-09-15"'), `capped at until; got ${args}`);
+  check(args.includes("(joint AND stoma)"), `capped expr; got ${args}`);
+  check(args.includes("--since=2026-09-15 --until=2026-09-15"), `capped at until; got ${args}`);
 });
 
 Deno.test("memory_think: numeric key gets raw payload; extract splits date/text", async () => {
@@ -134,7 +137,7 @@ Deno.test("memory_think: text key resolves via scan top-1, then gets", async () 
   const res = await runTool(tool, { key: "beacon" }, ctx);
   check(runner.invocations.length === 2, "scan then get");
   check(runner.invocations[0].args.includes("-X"), "resolution scan");
-  check(runner.invocations[0].args.join(" ").endsWith(`-g . ${FS} -t 1 --query=beacon`), "limit 1 scan + query flag");
+  check(runner.invocations[0].args.join(" ").endsWith(`-g . ${FS} -t 1 --field=text --matched=1 --query=beacon`), "limit 1 scan + query flag");
   check(runner.invocations[1].args.join(" ") === `-r -g 2 ${FS}`, "get resolved ref");
   check((res.details as { ref: number }).ref === 2, "ref 2 resolved");
 });
@@ -208,7 +211,9 @@ Deno.test("memory_scan: embed=true with sepal configured → bare sepal + --quer
   const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() })));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
   const args = runner.invocations[0].args.join(" ");
-  check(args.includes(`(stoma="field=text matched=1" AND sepal)`), `bare sepal AND-leaf; got ${args}`);
+  check(args.includes("(stoma AND sepal)"), `bare sepal AND-leaf; got ${args}`);
+  check(args.includes("--field=text"), `--field flag carries the field; got ${args}`);
+  check(args.includes("--matched=1"), `--matched flag carries the flag; got ${args}`);
   check(args.includes("--query=beacon"), `--query flag carries the text; got ${args}`);
   check(args.includes("--min-sim=0.2"), `--min-sim flag carries the floor; got ${args}`);
   check(!runner.invocations[0].args[1].includes("query="), `no query= inside the -X expr; got ${args}`);

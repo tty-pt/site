@@ -55,21 +55,24 @@ qmap -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma,sepal:a:s"
 
 ## 4. Query with embeddings
 
-Structure lives in `-X`; the runtime query text and score floor ride D14
-plugin flags (`--query`/`--min-sim`), broadcast to every bound axis that
-declares them (sepal embeds the text server-side, stoma full-text tokenizes):
+Structure lives in `-X` (bare axis names + AND/OR/EXCEPT/NOT); ALL runtime
+values ride D14 plugin flags, broadcast to every bound axis that declares
+them (joint window `--since/--until`; stoma `--field=text --matched=1`;
+`--query` → sepal embeds the text server-side + stoma full-text tokenizes;
+`--min-sim` score floor):
 
 ```sh
-qmap -X '(stoma="field=text matched=1" AND sepal)' -g . \
+qmap -X '(joint AND stoma AND sepal)' -g . \
+  --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 \
   --query='harbor lights' --min-sim=0.2 "mem.db@joint,stoma,sepal:a:s" -t 10
 ```
 
-The Phase 6/7 `memory_scan embed=true` mode emits exactly this shape — bare
-`sepal` leaf + static `stoma="field=text matched=1"`, with the flags
-appended (no client curl, no temp vector). Precedence is leaf spec > CLI
-flag > env, so a leaf `query=`/`min_sim=` still wins when present (backward
-compatible). The Phase 5 `file=` form (`sepal="file=/tmp/q.bin qdim=768 …"`,
-LE-float32 vector file) still works for pre-computed vectors.
+The Phase 6/7 `memory_scan embed=true` mode emits exactly this shape (bare
+names only; the plugin flags appended). Precedence is leaf spec > CLI
+flag > env, so the old leaf grammar (`stoma="field=text query='…' matched=1"`
+/ `joint="a=… b=…"`) still parses and wins per field (backward compatible).
+The Phase 5 `file=` form (`sepal="file=/tmp/q.bin qdim=768 …"`, LE-float32
+vector file) still works for pre-computed vectors.
 Track: `mm-plan/6-QUERY-TEXT-PLAN.md` (Phase 5 record stays in
 `mm-plan/5-EMBED-PLAN.md`).
 

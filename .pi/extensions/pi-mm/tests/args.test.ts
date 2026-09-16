@@ -7,6 +7,8 @@ import {
   buildGetInvocation,
   buildForgetInvocation,
   scanExpr,
+  scanWindow,
+  scanWindowArgs,
   embedEnv,
   parseResultLines,
   payloadDate,
@@ -40,38 +42,38 @@ Deno.test("store invocation is byte-identical to §8", () => {
 
 Deno.test("scan invocation is byte-identical to §8 (level-1 bounded window)", () => {
   const expr = scanExpr("beacon", 1, date("2026-09-15"));
-  check(expr === "(joint=\"a=2026-09-15 b=2026-09-16\" AND stoma=\"field=text matched=1\")", "expr exact");
+  check(expr === "(joint AND stoma)", "expr exact");
   const inv = buildScanInvocation(BIN, FILESPEC, expr, 10, AXES, MEM);
   check(inv.args.join(" ") === `-X ${expr} -g . ${FILESPEC} -t 10`, "arg order byte-identical to §8");
 });
 
 Deno.test("scanExpr: level 0 omits the joint leaf (pure text)", () => {
-  check(scanExpr("beacon", 0, date("2026-09-15")) === "stoma=\"field=text matched=1\"", "pure stoma");
+  check(scanExpr("beacon", 0, date("2026-09-15")) === "stoma", "pure stoma");
 });
 
 Deno.test("scanExpr: level 2 bounds to the month window", () => {
   const expr = scanExpr("beacon", 2, date("2026-09-15"));
-  check(expr === "(joint=\"a=2026-09-01 b=2026-10-01\" AND stoma=\"field=text matched=1\")", "month window");
+  check(expr === "(joint AND stoma)", "month window");
 });
 
 Deno.test("scanExpr: accent-sensitive text passes through verbatim (no transliteration)", () => {
-  check(scanExpr("Pão", 0, date("2026-09-15")) === "stoma=\"field=text matched=1\"", "Pão verbatim");
+  check(scanExpr("Pão", 0, date("2026-09-15")) === "stoma", "Pão verbatim");
 });
 
 Deno.test("scanExpr: level 0 with --until creates epoch-to-until window", () => {
-  check(scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20") === "(joint=\"a=0 b=2026-09-20\" AND stoma=\"field=text matched=1\")", "level-0 + until");
+  check(scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20") === "(joint AND stoma)", "level-0 + until");
 });
 
 Deno.test("scanExpr: level 1 with --until caps b at until", () => {
-  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-09-15") === "(joint=\"a=2026-09-15 b=2026-09-15\" AND stoma=\"field=text matched=1\")", "level-1 + until same day");
+  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-09-15") === "(joint AND stoma)", "level-1 + until same day");
 });
 
 Deno.test("scanExpr: level 1 with --until past tomorrow uses tomorrow", () => {
-  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-10-01") === "(joint=\"a=2026-09-15 b=2026-09-16\" AND stoma=\"field=text matched=1\")", "level-1 + until beyond window");
+  check(scanExpr("beacon", 1, date("2026-09-15"), "2026-10-01") === "(joint AND stoma)", "level-1 + until beyond window");
 });
 
 Deno.test("scanExpr: level 2 with --until caps at until", () => {
-  check(scanExpr("beacon", 2, date("2026-09-15"), "2026-09-20") === "(joint=\"a=2026-09-01 b=2026-09-20\" AND stoma=\"field=text matched=1\")", "level-2 + until within month");
+  check(scanExpr("beacon", 2, date("2026-09-15"), "2026-09-20") === "(joint AND stoma)", "level-2 + until within month");
 });
 
 Deno.test("forget / list / get invocations byte-identical to §8", () => {
@@ -91,25 +93,34 @@ Deno.test("filespecFor uses absolute path to avoid ./ alias clobber", () => {
 
 Deno.test("scanExpr: bare sepal ANDed into any window shape when embed ready", () => {
   check(
-    scanExpr("beacon", 0, date("2026-09-15"), undefined, true) ===
-      "(stoma=\"field=text matched=1\" AND sepal)",
+    scanExpr("beacon", 0, date("2026-09-15"), undefined, true) === "(stoma AND sepal)",
     "level-0 + bare sepal",
   );
   check(
-    scanExpr("beacon", 1, date("2026-09-15"), undefined, true) ===
-      `(joint="a=2026-09-15 b=2026-09-16" AND stoma="field=text matched=1" AND sepal)`,
+    scanExpr("beacon", 1, date("2026-09-15"), undefined, true) === "(joint AND stoma AND sepal)",
     "level-1 + bare sepal",
   );
   check(
-    scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20", true) ===
-      `(joint="a=0 b=2026-09-20" AND stoma="field=text matched=1" AND sepal)`,
+    scanExpr("beacon", 0, date("2026-09-15"), "2026-09-20", true) === "(joint AND stoma AND sepal)",
     "level-0 + until + bare sepal",
   );
   check(
-    scanExpr("beacon", 0, date("2026-09-15"), undefined, false) ===
-      "stoma=\"field=text matched=1\"",
+    scanExpr("beacon", 0, date("2026-09-15"), undefined, false) === "stoma",
     "withEmbed=false → no sepal",
   );
+});
+
+Deno.test("scanWindowArgs: time-window flags mirror the scanExpr window", () => {
+  check(scanWindowArgs(1, date("2026-09-15")).join(" ") === "--since=2026-09-15 --until=2026-09-16", "level-1 bounded today");
+  check(scanWindowArgs(0, date("2026-09-15"), "2026-09-20").join(" ") === "--since=0 --until=2026-09-20", "level-0 + until epoch window");
+  check(scanWindowArgs(0, date("2026-09-15")).length === 0, "level-0 no until → no window flags");
+  check(scanWindowArgs(2, date("2026-09-15")).join(" ") === "--since=2026-09-01 --until=2026-10-01", "level-2 month window");
+});
+
+Deno.test("scanWindow: cap b at until when inside the window; else keep window", () => {
+  check(scanWindow(1, date("2026-09-15"), "2026-09-15")!.b === "2026-09-15", "until inside day caps b");
+  check(scanWindow(1, date("2026-09-15"), "2026-10-01")!.b === "2026-09-16", "until beyond window keeps b");
+  check(scanWindow(0, date("2026-09-15")) === null, "level-0 no until → null");
 });
 
 Deno.test("buildScanInvocation: extraArgs appended after -t limit", () => {

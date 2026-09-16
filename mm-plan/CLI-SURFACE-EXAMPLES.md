@@ -261,15 +261,17 @@ file-backed, `joint`/`islet` either (D13).
 > op. Reset has no single flag — it is the enumerate+forget loop below
 > (the `-1` empty sentinel is skipped; re-running is a no-op).
 >
-> **D14 amendment (2026-09-16):** the search recipe below now uses the
-> flags form — `-X` carries structure, `--query`/`--min-sim` carry runtime
-> values; store/forget/reset unchanged.
+> **D14 amendment (round 2, 2026-09-16):** `-X` is now PURE structure — bare
+> axis names only. ALL params ride plugin-declared flags
+> (`--since/--until/--field/--matched/--query/--min-sim`); pi-mm emits exactly
+> the shape below; store/forget/reset unchanged. Leaf params (old grammar)
+> still parse and win over CLI per field.
 
 ```sh
 # store
 qmap -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma:a:s"
-# search
-qmap -X '(joint="a=2026-09-14 b=2026-09-16" AND stoma="field=text matched=1" AND sepal)' --query=beacon --min-sim=0.2 -g . mem.db -t 10
+# search (bare names + flags; joint window optional per level/until)
+qmap -X '(joint AND stoma AND sepal)' --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 --query=beacon --min-sim=0.2 -g . mem.db -t 10
 # forget
 qmap -d 1 "mem.db@joint,stoma:a:s"
 # reset
@@ -322,7 +324,7 @@ missing typed export ⇒ text-only axis, missing both ⇒ read-only.
 | `-X EXPR` | set-expression query (arms `-g .`) `[2B-3]` |
 | `-t N` / `--top N` | cap result count (default 0 = all) `[2B-3]` |
 | `-b F` / `--bottom F` | score floor (drop below F) `[2B-3]` |
-| `--NAME=VALUE` | plugin-contributed per-axis config flag (D14): inline form only; accepted by getopt via the dynamic table, forwarded after bind to every bound axis whose `rec_axis_cli_options()` declares NAME; unknown/rejected/misformed → usage + exit 1; bare `--NAME` requires `--NAME=VALUE`; `query`/`min-sim` declared by sepal, `query` by stoma; e.g. `-X '(stoma="field=text matched=1" AND sepal)' --query='the old lighthouse beacon' --min-sim=0.2` |
+| `--NAME=VALUE` | plugin-contributed per-axis config flag (D14): inline form only; accepted by getopt via the dynamic table, forwarded after bind to every bound axis whose `rec_axis_cli_options()` declares NAME; unknown/rejected/misformed → usage + exit 1; bare `--NAME` requires `--NAME=VALUE`; declared names: joint `since`/`until` (time_t window), stoma `field`/`phrase`/`matched`/`query` (field default `text`), sepal `query`/`min-sim`/`m` (pool size, 0=default); `-X` is PURE structure (bare names + AND/OR/EXCEPT/NOT); e.g. `-X '(joint AND stoma AND sepal)' --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 --query='the old lighthouse beacon' --min-sim=0.2` |
 | `--list-axes` | long-only: registered-axis table, standalone |
 
 Reserved expression words: `AND OR EXCEPT NOT ( )`. Keywords are uppercase-only;

@@ -1,5 +1,5 @@
 import type { PiExecResult } from "./hooks/events.ts";
-import { levelWindow } from "./window.ts";
+import { levelWindow, type JointWindow } from "./window.ts";
 import type { MmConfig } from "./config.ts";
 
 export const FILESPEC = "mem.db@joint,stoma:a:s";
@@ -116,17 +116,25 @@ export function buildForgetInvocation(
   return inv;
 }
 
-export function scanExpr(_topic: string, level: number, now: Date, until?: string, withEmbed?: boolean): string {
-  const stoma = `stoma="field=text matched=1"`;
-  const parts: string[] = [];
-  const window = levelWindow(level, now);
-  if (window === null) {
-    if (until) parts.push(`joint="a=0 b=${until}"`);
-  } else {
-    const b = until && until < window.b ? until : window.b;
-    parts.push(`joint="a=${window.a} b=${b}"`);
+export function scanWindow(level: number, now: Date, until?: string): JointWindow | null {
+  const w = levelWindow(level, now);
+  if (w === null) {
+    if (until) return { a: "0", b: until };
+    return null;
   }
-  parts.push(stoma);
+  return { a: w.a, b: until && until < w.b ? until : w.b };
+}
+
+export function scanWindowArgs(level: number, now: Date, until?: string): string[] {
+  const w = scanWindow(level, now, until);
+  return w ? ["--since=" + w.a, "--until=" + w.b] : [];
+}
+
+export function scanExpr(_topic: string, level: number, now: Date, until?: string, withEmbed?: boolean): string {
+  const parts: string[] = [];
+  const window = scanWindow(level, now, until);
+  if (window) parts.push("joint");
+  parts.push("stoma");
   if (withEmbed) parts.push("sepal");
   return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
 }
