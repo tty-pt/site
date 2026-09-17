@@ -106,30 +106,38 @@ label   := [_A-Za-z][_A-Za-z0-9]*   # ≤31 chars; not AND/OR/EXCEPT/NOT
   names are lowercase slugs, so shadowing is effectively unreachable. Labels
   are additionally reserved from the keyword set and must not collide with a
   bound axis name (both are parse-time errors).
-- Query is **armed** iff `-X` is present with a nonempty `EXPR`; then `-g .` runs
-  the effective query at its argv position. No `-X` (or `-X "  "`) ⇒ `-g .` is
-  classic all-records. `[2B-2]`
+- Query is **armed** iff `-X` is present with a nonempty `EXPR`. An armed
+  query runs when it meets a `-g .` (at that arg's argv position —
+  write-then-query interleavings work), or **once after all ops when no
+  `-g .` appears at all** (`-g .` is no longer required). It runs alongside
+  any other classic ops in the same invocation (e.g. `-g KEY` answers
+  first, then the query). No `-X` (or `-X "  "`) ⇒ `-g .` is classic
+  all-records. `[2B-2]`
 - `-t N` / `--top N` cap the result count (default `-t 0` = all); `-b F` /
   `--bottom F` is the score floor (drop results below F); both apply to the
-  whole expression's result.
+  whole expression's result — in the explicit and the implicit run alike.
 - Scoped flag values are transported internally as `key='value'` decode specs
   synthesized into the target leaf — **internal transport**, not user grammar
   (`--NAME@LABEL` is the user-facing surface for per-instance parameters).
 
 ```sh
 # simplest
-qmap -X stoma --query=beacon -g . demo.db          # one axis
-qmap -X stoma -g . demo.db                         # bare name: join, no params
+qmap -X stoma --query=beacon demo.db              # one axis, no -g . needed
+qmap -X stoma -g . demo.db                        # bare name: join, no params
+                                                  # (-g . still works as before)
 
 # D15 labeled instances: the SAME axis fills twice with different params
 # (stoma rebuilt twice; per-instance params via scoped flags)
-qmap -X 'A:stoma OR B:stoma' -g . --query@A=beacon --query@B=alpha demo.db
+qmap -X 'A:stoma OR B:stoma' --query@A=beacon --query@B=alpha demo.db
 
 # E_REF backward reference (guarded by NOT/EXCEPT, duplicate axes collapsed)
 qmap -X '(A:stoma EXCEPT A)' -g . demo.db      # empty: A \ A
 
 # with -g . in between ops (write-then-query in one invocation)
 qmap -X joint --query=2026-09-14 -g . demo.db -p 9:lunch demo.db:a:s
+
+# without -g . : writes first, then the implicit query sees them
+qmap -X joint --query=2026-09-14 demo.db -p 9:lunch demo.db:a:s
 ```
 
 ## 5. Set algebra — grouping, precedence, NOT/EXCEPT `[2B-3]`
@@ -365,7 +373,7 @@ missing typed export ⇒ text-only axis, missing both ⇒ read-only.
 | Flag | Meaning |
 |---|---|
 | `-r` `-l` `-L` `-R` `-p` `-d` `-D` `-g` `-m` `-c` `-x` `-k` `-q` `-a` | classic (unchanged, see §1/§9) |
-| `-X EXPR` | set-expression query (arms `-g .`) `[2B-3]`; leaves `label:axis`, backward-only bare `label` refs (D15) — **structure only**: `NAME=VALUE` inside `-X` is a parse error; params ride flags (`--NAME=VALUE` / `--NAME@LABEL` / `--NAME@AXIS`) |
+| `-X EXPR` | set-expression query (no `-g .` needed — runs at `-g .` when present, else once after all ops) `[2B-3]`; leaves `label:axis`, backward-only bare `label` refs (D15) — **structure only**: `NAME=VALUE` inside `-X` is a parse error; params ride flags (`--NAME=VALUE` / `--NAME@LABEL` / `--NAME@AXIS`) |
 | `-t N` / `--top N` | cap result count (default 0 = all) `[2B-3]` |
 | `-b F` / `--bottom F` | score floor (drop below F) `[2B-3]` |
 | `--rank[=LABEL]` | core rank override: `--rank=A` ranks exactly the labeled instance A; `--rank@A` is the scoped form; without it, same-axis rank-capable instances aggregate as the per-ref MAX score (order-independent; distinct axes keep D2 first-rankable-in-preorder) `[D15]` |

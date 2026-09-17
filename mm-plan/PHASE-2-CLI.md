@@ -613,8 +613,8 @@ new symbols exported; round-trips green; site `make` green as insurance
 > **D14 carve-out — `-X` remains the only query verb.** `--axis`/`--params`/
 > sticky joins stay retired. **Plugin-contributed `--<name>=VALUE`
 > configuration flags** are now permitted: additive per-axis config defaults
-> forwarded by qmap (`-g .` armed) to every bound axis that declares them,
-> via the optional `rec_axis_cli_options()` / `rec_axis_config_arg()`
+> forwarded by qmap (an armed `-X` present) to every bound axis that declares
+> them, via the optional `rec_axis_cli_options()` / `rec_axis_config_arg()`
 > convention. Precedence: leaf spec > CLI arg > env. Inline `--name=value`
 > only; bare `--name` is an error; credentials stay env-only.
 
@@ -635,11 +635,12 @@ new symbols exported; round-trips green; site `make` green as insurance
 `-Q` is a get — get-against-a-composed-predicate — so it folds into the
 get the CLI already had, sharing subroutines (`gen_lookup` ref resolution,
 `qmape_print` rendering, `assoc` tail, the two-pass loop, exit codes), with
-the trigger spelled `-g .` when a query is armed. The classic `-g` keeps
-its exact meaning everywhere else. Structural parallel (already the CLI's
-own pattern): `-X EXPR : composed -g` :: `-q/-a chain : classic -g` —
-predicate-building in pass 1, trigger in pass 2. The full surface is
-documented in `mm-plan/CLI-SURFACE-EXAMPLES.md` (normative; D10).
+an armed `-X` itself running the query (explicit `-g .` at its argv
+position when present; once after all ops when absent). The classic `-g`
+keeps its exact meaning everywhere else. Structural parallel (already the
+CLI's own pattern): `-X EXPR : composed -g` :: `-q/-a chain : classic -g` —
+predicate-building in pass 1, evaluation in pass 2 + end of main. The full
+surface is documented in `mm-plan/CLI-SURFACE-EXAMPLES.md` (normative; D10).
 
 - *Pass 1 (setup):* axis plugin loads/discovery (`QMAP_AXIS_PATH`,
   by-name dlopen of `lib<name>.so`, name→slot resolution among loaded
@@ -650,7 +651,9 @@ documented in `mm-plan/CLI-SURFACE-EXAMPLES.md` (normative; D10).
   bulk-reindex. Opens must happen before pass 2 because pass 2 may not open.
 - *Pass 2 (ops):* `-g .` with a nonempty effective query runs the composed
   query at its argv position, interleavable with `-p`/`-d`/`-g KEY`
-  (write-then-query in one invocation — correct by 2A per-op durability).
+  (write-then-query in one invocation — correct by 2A per-op durability);
+  with no `-g .` present, an armed `-X` runs once after all ops (so `-g .`
+  is no longer required — it now only pins the query's position).
   `-g KEY` is always the classic keyed get; the predicate never touches it.
   `-g .` with no `-X` (or an empty `-X`) is classic all-records (so
   write-only invocations can never surprise).
@@ -835,8 +838,9 @@ Slices (TDD; gate per slice = its own suite + `./test.sh &&
 - **2B-3** The `-g` fold + the `-X` surface: one `getopt_long` loop over
   the extended optstr; `-X EXPR` parsed as a set algebra (D10 — leaves
   `NAME`/`NAME=VALUE`, `( ) AND OR EXCEPT NOT`, precedence; the CLI parses set
-  structure only, leaf grammars stay opaque); `-g .` armed runs the
-  effective query (D6) and renders ref-led lines; result knobs `-t N`/
+  structure only, leaf grammars stay opaque); an armed `-X` runs the
+  effective query — at an explicit `-g .`'s argv position, else once after
+  all ops (D6) — and renders ref-led lines; result knobs `-t N`/
   `--top N` (default 0 = all) + `-b F`/`--bottom F`; load set extends to
   names in `EXPR` (D9); `-Q`, its guard, `--dl`, `--open`, `--axis`,
   `--params`, sticky joins, `--combine`, and the `rq_*` helpers deleted;
