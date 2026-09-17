@@ -84,57 +84,92 @@ expr    := or
 or      := and (OR and)*
 and     := not (AND not)*
 not     := NOT not | primary
-primary := '(' expr ')' | axis
-axis    := NAME (= VALUE)?        # bare NAME ⇒ params "" (D6 opt-in)
+primary := '(' expr ')' | term
+term    := instance | reference
+instance:= label ':' axis           # labeled instance (D15)
+reference:= label                   # reuses an earlier instance's set
+axis    := NAME                     # bare NAME ⇒ params from flags only
+label   := [_A-Za-z][_A-Za-z0-9]*   # ≤31 chars; not AND/OR/EXCEPT/NOT
 ```
 
 - The CLI parses **only the set structure** — never an axis's grammar. Each
-  leaf's `=VALUE` is passed whole-string to its axis (D5, principle 1).
+  leaf's parameters ride plugin-declared flags (`--NAME=VALUE`,
+  `--NAME@LABEL=VALUE` / `--NAME@AXIS=VALUE`); a hand-written `NAME=VALUE`
+  inside `-X` is now a **hard parse error** pointing at flags (removal
+  hint: `qmap: -X: '…=VALUE' no longer allowed in -X; pass values via
+  --flags (e.g. --query=… / --query@A=…)`). A `label:axis` leaf gives that
+  instance an address; a bare `label` (already defined earlier in the
+  expression) reuses its set (**backward references only** — `A AND
+  A:stoma` is an error, `A:stoma AND A` is not).
 - `AND` / `OR` / `EXCEPT` / `NOT` and `(` `)` are reserved words; `NAME` is a
   registered axis name (case-sensitive). Keywords are uppercase-only and axis
-  names are lowercase slugs, so shadowing is effectively unreachable.
-- `VALUE` extends to the matching quote if it opens with one, else to the next
-  unquoted `and|or|except|not|(|)` token. The value IS whatever precedes an
-  operator — quote it to include operator words. Keywords must be
-  whitespace-separated.
+  names are lowercase slugs, so shadowing is effectively unreachable. Labels
+  are additionally reserved from the keyword set and must not collide with a
+  bound axis name (both are parse-time errors).
 - Query is **armed** iff `-X` is present with a nonempty `EXPR`; then `-g .` runs
   the effective query at its argv position. No `-X` (or `-X "  "`) ⇒ `-g .` is
   classic all-records. `[2B-2]`
 - `-t N` / `--top N` cap the result count (default `-t 0` = all); `-b F` /
   `--bottom F` is the score floor (drop results below F); both apply to the
   whole expression's result.
+- Scoped flag values are transported internally as `key='value'` decode specs
+  synthesized into the target leaf — **internal transport**, not user grammar
+  (`--NAME@LABEL` is the user-facing surface for per-instance parameters).
 
 ```sh
 # simplest
-qmap -X stoma=beacon -g . demo.db              # one axis
-qmap -X stoma -g . demo.db                     # bare name: join, empty params
+qmap -X stoma --query=beacon -g . demo.db          # one axis
+qmap -X stoma -g . demo.db                         # bare name: join, no params
+
+# D15 labeled instances: the SAME axis fills twice with different params
+# (stoma rebuilt twice; per-instance params via scoped flags)
+qmap -X 'A:stoma OR B:stoma' -g . --query@A=beacon --query@B=alpha demo.db
+
+# E_REF backward reference (guarded by NOT/EXCEPT, duplicate axes collapsed)
+qmap -X '(A:stoma EXCEPT A)' -g . demo.db      # empty: A \ A
 
 # with -g . in between ops (write-then-query in one invocation)
-qmap -X "joint=2026-09-14 00:00..T23:59:59" -g . demo.db -p 9:lunch demo.db:a:s
+qmap -X joint --query=2026-09-14 -g . demo.db -p 9:lunch demo.db:a:s
 ```
 
 ## 5. Set algebra — grouping, precedence, NOT/EXCEPT `[2B-3]`
 
 ```sh
 # (A OR B) AND C  — any precedence, no reordering tricks
-qmap -X "(stoma=beacon OR joint=2026-09-14) AND islet=3,3" -g . demo.db -t 10
+qmap -X '(stoma OR joint) AND islet' -g . \
+     --query=beacon --since=2026-09-14 --until=2026-09-15 \
+     --dim=2 --s=9,1 --l=1,1 demo.db -t 10
 
 # A OR (B AND C) — parens override left-to-right
-qmap -X "stoma=beacon OR (joint=2026-09-14 AND islet=3,3)" -g . demo.db
+qmap -X 'stoma OR (joint AND islet)' -g . \
+     --query=beacon --since=2026-09-14 --until=2026-09-15 \
+     --dim=2 --s=9,1 --l=1,1 demo.db
 
 # EXCEPT = relative setminus: first set minus the second (NOT is unary-only)
-qmap -X "stoma=beacon EXCEPT joint=2026-09-14" -g . demo.db -t 5
+qmap -X 'stoma EXCEPT joint' -g . --query=beacon --since=2026-09-14 demo.db -t 5
 
 # leading NOT at root = complement against the primary ref universe
-qmap -X "NOT stoma=beacon" -g . demo.db            # every ref not matching "beacon"
+qmap -X 'NOT stoma' -g . --query=beacon demo.db     # every ref not matching "beacon"
 
 # NOT composes with EXCEPT: (complement A) − B
-qmap -X "NOT a=1 EXCEPT b=2" -g . demo.db
+qmap -X 'NOT A:stoma EXCEPT B:stoma' -g . --query@A=alpha --query@B=beta demo.db
 
 # 3+ groups, mixed, score floor
-qmap -X "((a=1 OR b=2) AND c=3) EXCEPT (d=4 OR e=5)" -g . demo.db -b 0.5
+qmap -X '((A:stoma OR B:stoma) AND C:joint) EXCEPT (D:stoma OR E:islet)' -g . \
+     --query@A=alpha --query@B=beta \
+     --since@C=2026-09-14 --until@C=2026-09-15 \
+     --query@D=gamma --dim@E=2 --s@E=0,0 --l@E=1,1 demo.db -b 0.5
 
 # `A NOT B` is a parse error (hint: use EXCEPT)
+
+# D15: labeled instances are first-class in the algebra — the same axis can
+# appear twice, referenced by label after its definition
+qmap -X '(A:stoma AND NOT (B:stoma EXCEPT A))' -g . --query@A=beacon --query@B=alpha demo.db
+
+# scoped flags reach individual instances (leaf spec > @label > @axis >
+# unscoped broadcast > env); they synthesize into the leaf's decode spec
+qmap -X '(A:stoma OR B:stoma)' -g . --query@A=beacon --query@B=alpha demo.db
+qmap -X '(A:joint AND B:joint)' -g . --since@A=2026-09-14 --until@A=2026-09-15 --since@B=2026-09-13 --until@B=2026-09-16 demo.db
 ```
 
 The retired pieces and why they're gone: `--and/--or/--not` sticky words,
@@ -152,23 +187,27 @@ columns: floats-direct (the offline default) or embedded strings when
 `QMAP_SEPAL_EMBED_URL`+`MODEL` are both set (D8, `rec_axis_env_config` — skipped
 unless the vars are set).
 
-Exact grammars (axis-decode, case-sensitive keys; whole-VALUE quoting):
+Internal per-leaf decode keys (case-sensitive; **not** user grammar — every
+key has a flag alias, and flags are the only way to reach a leaf post-flip):
 
-- joint: `a=<date>[ b=<date>]`  (interval on the open axis; half-open `[a,b)`,
-  defaults `b=0` meaning open-ended; `sscantime` accepts `YYYY-MM-DD` and
-  `YYYY-MM-DDTHH:MM:SS`). The fixture's joint query is
-  `joint="a=2026-09-14 b=2026-09-15"` — refs 1 before and 2 after that day are
-  excluded, ref 3 inside (rank-less, pure filter).
-- islet: `dim=N s=x,y[,z,…] l=dx,dy[,…]`  (`s` minimum corner, `l` span
-  per-lane; fixture query: `islet="dim=2 s=9,1 l=1,1"` — tight box on (9,1)).
-- stoma: `field=<field> query=<text> [phrase=0|1] [matched=N]`  (`field`
-  defaults to `""` → `"text"`; `matched` default 0, the first-rank effect in
-  the gate: `stoma="field=text query=beacon matched=1"` on a 3-token doc →
-  `1/3 = 0.125`).
+- joint: leaf keys `a=<date>[ b=<date>]`  (interval on the open axis; half-open
+  `[a,b)`, defaults `b=0` meaning open-ended; `sscantime` accepts `YYYY-MM-DD`
+  and `YYYY-MM-DDTHH:MM:SS`). Flag form: `--since=<date> --until=<date>`,
+  plus `--query=<point-timestamp|A..B>` (point → containing calendar day;
+  `A..B` space-free; non-parseable → ignored). Fixture:
+  `--since=2026-09-14 --until=2026-09-15` — refs 1 before and 2 after that day
+  are excluded, ref 3 inside (rank-less, pure filter).
+- islet: leaf keys `dim=N s=x,y[,z,…] l=dx,dy[,…]`  (`s` minimum corner, `l`
+  span per-lane). Flag form mirrors keys 1:1 (`--dim/--s/--l`); fixture:
+  `--dim=2 --s=9,1 --l=1,1` — tight box on (9,1).
+- stoma: leaf keys `field=<field> query=<text> [phrase=0|1] [matched=N]`
+  (`field` defaults to `""` → `"text"`; `matched` default 0, the first-rank
+  effect in the gate: `--field=text --query=beacon --matched=1` on a 3-token
+  doc → `1/3 = 0.125`).
 - sepal: offline floats are comma-floats `f1,f2,…` written directly; the
-  query leaf reads a binary-floats qvec file — `sepal="file=<q.vec>
-  qdim=N m=M min_sim=F"` (fixture: floats `0.9,0.1,0.8` written as the
-  query vector, `qdim=3`). First-rank is stoma (the **first rank-capable
+  query reads a binary-floats qvec file. Flags: `--file=<q.vec> --qdim=N
+  --m=M --min-sim=F` (fixture: floats `0.9,0.1,0.8` written as the query
+  vector, `--qdim=3`). First-rank is stoma (the **first rank-capable
   leaf in preorder wins** — the standing rank convention D2,
   `RECALL-KERNEL.md`; pinned by a two-rankable row in `test-real.sh`
   `[2B-6]`); sepal's rank (cosine) ranks its own single-axis query. The embed column stores strings (e.g. `"beacon beacon harbor
@@ -186,15 +225,19 @@ qmap --list-axes "greps.db@joint,islet,sepal,stoma:a:s"
 # (first-ever @ is LOUD: alongside-heuristic + stoma's "no primary found"
 # notes, never silently empty; later opens emit "rebuilt N docs in X ms")
 
-# space ∩ time ∩ text — the conjunctive winner (full ref score record):
-qmap -X '(joint="a=2026-09-14 b=2026-09-15" AND islet="dim=2 s=9,1 l=1,1") AND stoma="field=text query=beacon matched=1"' \
+# space ∩ time ∩ text — the conjunctive winner (full ref score record);
+# scoped flags pin each instance's params (joint+islet+stoma all declare
+# distinct names except --query, so the stoma query is scoped to be safe):
+qmap -X '(A:joint AND B:islet) AND C:stoma' \
+     --since@A=2026-09-14 --until@A=2026-09-15 \
+     --dim@B=2 --s@B=9,1 --l@B=1,1 --query@C=beacon --field@C=text --matched@C=1 \
      -g . "greps.db@joint,islet,sepal,stoma:a:s" -t 100
 # → 3 0.125000 2026-09-14T12:00:00:Beacon Harbor lights
 # (3 docs corpus in the gate: ~0.02–0.03 ms rebuild; budget recorded, U4)
 
 # sepal column (offline floats-direct default):
 #   q.vec = binary floats of ref 3's vector; q.dim = 3 written by the seeder
-qmap -X "sepal=\"file=$qvec qdim=3 m=2 min_sim=0.5\"" -g . \
+qmap -X 'sepal' --file=$qvec --qdim=3 --m=2 --min-sim=0.5 -g . \
      "greps.db@joint,islet,sepal,stoma:a:s" -t 100
 # → 3 1.000000 2026-09-14T12:00:00:Beacon Harbor lights
 #   1 0.906867 2026-09-13T20:00:00:Beacon Harbor lights
@@ -264,8 +307,9 @@ file-backed, `joint`/`islet` either (D13).
 > **D14 amendment (round 2, 2026-09-16):** `-X` is now PURE structure — bare
 > axis names only. ALL params ride plugin-declared flags
 > (`--since/--until/--field/--matched/--query/--min-sim`); pi-mm emits exactly
-> the shape below; store/forget/reset unchanged. Leaf params (old grammar)
-> still parse and win over CLI per field.
+> the shape below; store/forget/reset unchanged. Hand-written `NAME=VALUE`
+> inside `-X` is a **hard parse error** (removal hint in the message) — leaf
+> params can no longer be authored in the grammar.
 
 ```sh
 # store
@@ -321,14 +365,20 @@ missing typed export ⇒ text-only axis, missing both ⇒ read-only.
 | Flag | Meaning |
 |---|---|
 | `-r` `-l` `-L` `-R` `-p` `-d` `-D` `-g` `-m` `-c` `-x` `-k` `-q` `-a` | classic (unchanged, see §1/§9) |
-| `-X EXPR` | set-expression query (arms `-g .`) `[2B-3]` |
+| `-X EXPR` | set-expression query (arms `-g .`) `[2B-3]`; leaves `label:axis`, backward-only bare `label` refs (D15) — **structure only**: `NAME=VALUE` inside `-X` is a parse error; params ride flags (`--NAME=VALUE` / `--NAME@LABEL` / `--NAME@AXIS`) |
 | `-t N` / `--top N` | cap result count (default 0 = all) `[2B-3]` |
 | `-b F` / `--bottom F` | score floor (drop below F) `[2B-3]` |
-| `--NAME=VALUE` | plugin-contributed per-axis config flag (D14): inline form only; accepted by getopt via the dynamic table, forwarded after bind to every bound axis whose `rec_axis_cli_options()` declares NAME; unknown/rejected/misformed → usage + exit 1; bare `--NAME` requires `--NAME=VALUE`; declared names: joint `since`/`until` (time_t window), stoma `field`/`phrase`/`matched`/`query` (field default `text`), sepal `query`/`min-sim`/`m` (pool size, 0=default); `-X` is PURE structure (bare names + AND/OR/EXCEPT/NOT); e.g. `-X '(joint AND stoma AND sepal)' --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 --query='the old lighthouse beacon' --min-sim=0.2` |
+| `--rank[=LABEL]` | core rank override: `--rank=A` ranks exactly the labeled instance A; `--rank@A` is the scoped form; without it, same-axis rank-capable instances aggregate as the per-ref MAX score (order-independent; distinct axes keep D2 first-rankable-in-preorder) `[D15]` |
+| `--NAME=VALUE` | plugin-contributed per-axis config flag (D14): inline form only; accepted by getopt via the dynamic table, forwarded after bind to every bound axis whose `rec_axis_cli_options()` declares NAME; unknown/rejected/misformed → usage + exit 1; bare `--NAME` requires `--NAME=VALUE`; declared names: joint `since`/`until` (time_t window) + `query` (point timestamp → containing day, or space-free `A..B`; non-parseable → ignored), stoma `field`/`phrase`/`matched`/`query` (field default `text`), sepal `file`/`qdim`/`query`/`min-sim`/`m` (pool size, 0=default), islet `dim`/`s`/`l`; `-X` is PURE structure (bare names + AND/OR/EXCEPT/NOT); **unscoped `--NAME` broadcasts to every bound axis declaring NAME** — for one axis use `@label`/`@axis` (joint's `--query` ignore-non-parseable exists so a shared broadcast `--query` never aborts a mixed run); e.g. `-X '(joint AND stoma AND sepal)' --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 --query='the old lighthouse beacon' --min-sim=0.2` |
+| `--NAME@LABEL=VALUE` / `--NAME@AXIS=VALUE` | scoped config (D15): applied to the labeled instance, or to every bare instance of AXIS, instead of the unscoped broadcast. Precedence: leaf spec > `@label` > `@axis` > unscoped > env. The `@`-token never reaches a plugin's broadcast `cfg()`; it is synthesized into the target leaf's decode spec (`<base>=<value>`, single-quoted with `\` escapes when the value contains space/tab/quote/paren). Unknown scope → `unknown label or axis 'N'`, exit 1 |
 | `--list-axes` | long-only: registered-axis table, standalone |
 
 Reserved expression words: `AND OR EXCEPT NOT ( )`. Keywords are uppercase-only;
 axis names are lowercase slugs, so an axis named `except` stays reachable.
+Labels (D15): `[_A-Za-z][_A-Za-z0-9]*`, ≤31 chars, must not be a keyword and
+must not collide with a bound axis name; duplicate labels are a parse error;
+references are backward-only (a bare name is a label only once defined, else
+an axis name).
 Env: `QMAP_AXIS_LIBS` (colon paths, dlopen'd first), `QMAP_AXIS_PATH`
 (dir list for `lib<name>.so`, default `/usr/lib`), `QMAP_MASK` (D11, per-store
 initial mask override, default `4095` `2^12-1` — auto-grow, `qmap.h:204`),

@@ -130,7 +130,7 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
       wait "$SRV_PID" 2>/dev/null || true
       failmsg "bare sepal + flags failed (exit nonzero)" "$(cat "$td/query.err")"
     fi
-    out0=$(QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X "sepal=\"file=$td/vec0.bin qdim=3 m=10 min_sim=0.4\"" -g . "$EMBED_FILE" -t 10 2>/dev/null)
+    out0=$(QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X 'sepal' --file="$td/vec0.bin" --qdim=3 --m=10 --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>/dev/null)
     echo "$out0" | grep -q "^4 " && failmsg "dissimilar vector must not match ref 4" "$out0" || ok "sepal similarity gate"
   else
     wait "$SRV_PID" 2>/dev/null || true
