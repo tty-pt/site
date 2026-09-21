@@ -1,6 +1,10 @@
 {
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "deno.ns"]
+  },
   "imports": {
-    "npm:playwright": "npm:playwright"
+    "npm:playwright": "npm:playwright",
+    "playwright": "npm:playwright"
   },
   "tasks": {
     "e2e": "deno test --allow-all tests/e2e/"

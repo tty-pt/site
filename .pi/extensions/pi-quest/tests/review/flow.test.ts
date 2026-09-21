@@ -1,6 +1,7 @@
 import { check } from "../check.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
-import { createDraft, createQuest } from "../../src/domain/quest.ts";
+import { createQuest } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import type { Pi } from "../../src/hooks/events.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";

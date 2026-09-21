@@ -16,6 +16,10 @@ export type Phase =
 
 export type ArchivedOutcome = "COMPLETED" | "FAILED" | "ABANDONED";
 
+// HIGH_LEVEL: #modes — kind is immutable per quest; "analysis" swaps the
+// deliverable (## Analysis) for the implementation plan in the same flow.
+export type QuestKind = "standard" | "analysis";
+
 export type ReviewKind = "draft" | "validation";
 
 export type ApprovedBy = "review" | "user";
@@ -100,6 +104,7 @@ export interface HumanAnswer {
 
 export interface QuestState {
   phase: Phase;
+  kind: QuestKind;
   qid: Qid | null;
   parentQid: Qid | null;
   depth: number;
@@ -122,6 +127,7 @@ export interface QuestState {
 
 export const IDLE_STATE: QuestState = {
   phase: "idle",
+  kind: "standard",
   qid: null,
   parentQid: null,
   depth: 0,
@@ -144,7 +150,7 @@ export const IDLE_STATE: QuestState = {
 
 // --- Guards ---
 
-function requirePhase(state: QuestState, ...allowed: Phase[]): void {
+export function requirePhase(state: QuestState, ...allowed: Phase[]): void {
   if (!allowed.includes(state.phase)) {
     throw new Error(
       `invalid transition from phase ${state.phase} (allowed: ${allowed.join(", ")})`,
@@ -160,6 +166,11 @@ export function markChanged(state: QuestState, patch: Partial<QuestState>): Ques
 }
 
 // --- Transitions: creation → draft → implement → validate → archive ---
+//
+// The modal lifecycle transitions (createDraft, promote, promoteToValidation,
+// claimComplete, demoteToImplementing, demoteToDrafting, noteDraftFindings,
+// archive) live in ./transitions.ts so this file stays under the complexity
+// budget; they are re-exported by importers from that module.
 
 export function createQuest(request: string, qid: string, parentQid: Qid | null = null): QuestState {
   if (!isQid(qid)) throw new Error(`invalid qid: ${qid}`);
@@ -170,74 +181,6 @@ export function createQuest(request: string, qid: string, parentQid: Qid | null 
     objective: request,
     pendingRootRequest: request,
     exactNextAction: "Establish quest identity: investigate, then record findings.",
-  });
-}
-
-export function createDraft(state: QuestState, draftName: string): QuestState {
-  requirePhase(state, "provisional");
-  if (state.qid === null) throw new Error("cannot draft without a qid");
-  return markChanged(state, {
-    phase: "drafting",
-    name: draftName,
-    draft: {
-      name: draftName,
-      planAuthored: false,
-      approvedBy: null,
-      outstandingFindings: false,
-      contentHash: null,
-      approvedPlanHash: null,
-      planRevisions: [],
-    },
-    exactNextAction: `Author ## Implementation Plan in the draft file for '${draftName}'.`,
-  });
-}
-
-export function promote(state: QuestState, approvedBy: ApprovedBy): QuestState {
-  requirePhase(state, "drafting");
-  if (state.draft === null || !state.draft.planAuthored) {
-    throw new Error("cannot promote a draft with no authored plan");
-  }
-  return markChanged(state, {
-    phase: "implementing",
-    draft: { ...state.draft, approvedBy, outstandingFindings: false, approvedPlanHash: state.draft.contentHash },
-    activeReview: null,
-    exactNextAction: "Proceed autonomously from the draft plan.",
-  });
-}
-
-export function claimComplete(state: QuestState): QuestState {
-  requirePhase(state, "implementing");
-  return markChanged(state, {
-    phase: "validating",
-    exactNextAction: "Await validation verdict against the approved plan.",
-  });
-}
-
-export function demoteToImplementing(state: QuestState): QuestState {
-  requirePhase(state, "validating");
-  return markChanged(state, {
-    phase: "implementing",
-    activeReview: null,
-    exactNextAction: "Address validation findings, then claim completion again.",
-  });
-}
-
-export function noteDraftFindings(state: QuestState): QuestState {
-  requirePhase(state, "drafting");
-  if (state.draft === null) throw new Error("no draft to revise");
-  return markChanged(state, {
-    draft: { ...state.draft, outstandingFindings: true, approvedBy: null },
-    exactNextAction: "Revise the draft plan to address the findings, then save.",
-  });
-}
-
-export function archive(state: QuestState, outcome: ArchivedOutcome): QuestState {
-  requirePhase(state, "implementing", "validating");
-  return markChanged(state, {
-    phase: "archived",
-    archivedOutcome: outcome,
-    activeReview: null,
-    exactNextAction: "",
   });
 }
 

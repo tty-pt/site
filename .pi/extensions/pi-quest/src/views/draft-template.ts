@@ -16,6 +16,10 @@ ${objective}
 
 <!-- Record file-backed proof per requirement (file:line citations or measured verification). -->
 
+## Analysis
+
+<!-- Purely analytical quests (quest_update_state {kind: "analysis"}) deliver the written analysis here; it is their whole deliverable. Standard quests may leave this section empty or delete it. -->
+
 ## Implementation Plan
 `;
 }

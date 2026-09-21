@@ -70,3 +70,32 @@ Deno.test("archived view records the outcome, not the pre-archive phase", async 
   check(captured.includes("Phase: archived"), "archived phase rendered");
   check(captured.includes("Archived: ABANDONED"), "outcome rendered");
 });
+
+Deno.test("archive retains the delivered analysis in the quest doc", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-views-"));
+  const pi = fakePi();
+  const state = { ...createQuest("decide", "abc123"), phase: "validating" as const };
+  await mkdir(join(cwd, ".pi/quest/future"), { recursive: true });
+  await writeFile(join(cwd, draftPath("abc123" as Qid)), [
+    "## Requirements",
+    "- requirement",
+    "",
+    "## Analysis",
+    "Root cause sits in alloc.c:77.",
+    "",
+  ].join("\n"), "utf8");
+  let captured = "";
+  const origExec = pi.exec.bind(pi);
+  pi.exec = (async (command: string, args: string[], options?: { cwd?: string }) => {
+    const res = await origExec(command, args, options);
+    try {
+      captured = await readFile(join(options?.cwd ?? cwd, "quest.md"), "utf8");
+    } catch {
+      captured = "";
+    }
+    return res;
+  }) as typeof pi.exec;
+  await archiveQuestFiles(pi, cwd, state, "COMPLETED", "analysis grounded");
+  check(captured.includes("## Analysis"), "analysis section archived with the quest doc");
+  check(captured.includes("alloc.c:77"), "analysis body preserved");
+});

@@ -6,12 +6,15 @@ import { join } from "node:path";
 import { stageDir } from "../../src/domain/paths.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import {
-  claimComplete,
-  createDraft,
   createQuest,
   IDLE_STATE,
-  promote,
 } from "../../src/domain/quest.ts";
+import {
+  claimComplete,
+  createDraft,
+  promote,
+  promoteToValidation,
+} from "../../src/domain/transitions.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
@@ -470,4 +473,86 @@ Deno.test("askHumanTool times out to the default via the input provider", async 
   check((out.details as { provider: string }).provider === "input", "provider in details");
   check(ctx.notifications.calls.some((n) => n.message.includes("timed out")), "timeout notification sent");
   replaceState(IDLE_STATE);
+});
+
+Deno.test("analysis quests author the ## Analysis deliverable and refuse plans", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    await applyUpdate(pi, ctx, { objective: "Decide the refactor." });
+    const created = await applyUpdate(pi, ctx, { kind: "analysis", draftName: "decide" });
+    check(getState().kind === "analysis", "analysis kind stamped");
+    check(getState().phase === "drafting", "draft created");
+    check(created.applied.some((a) => a.includes("analysis quest")), "nudged to author the deliverable");
+    const qid = getState().qid!;
+    const written = await applyUpdate(pi, ctx, { analysis: "Root cause sits in alloc.c:77; bound the buffer." });
+    check(written.error === undefined, "analysis accepted");
+    check(getState().draft?.planAuthored === true, "deliverable marks authored");
+    const file = await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+    check(file.includes("## Analysis"), "analysis section spliced in");
+    check(file.includes("alloc.c:77"), "analysis body on disk");
+    check(file.includes("review-count"), "review marker seeded in the analysis body");
+    const refused = await applyUpdate(pi, ctx, { plan: "Do the work." });
+    check(refused.error !== undefined && refused.error.includes("standard quests"), "plan refused on analysis kind");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("an invalid kind and a standard-quest analysis are refused", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const bogus = await applyUpdate(pi, ctx, { objective: "x", kind: "tactical" });
+    check(bogus.error !== undefined && bogus.error.includes("unknown quest kind"), "bogus kind rejected before creation");
+    check(getState().qid === null, "nothing created on bogus kind");
+    await applyUpdate(pi, ctx, { objective: "Build the thing." });
+    await applyUpdate(pi, ctx, { draftName: "thing" });
+    const refused = await applyUpdate(pi, ctx, { analysis: "some analysis body" });
+    check(refused.error !== undefined && refused.error.includes("analysis text is for analysis quests"), "analysis refused on standard kind");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("checkAnalysis previews the profile without writing or booting", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const idle = await applyUpdate(pi, ctx, { checkAnalysis: "anything" });
+    check(idle.error !== undefined && idle.error.includes("needs a draft"), "probe without a draft errors, never creates");
+    await applyUpdate(pi, ctx, { objective: "Decide the refactor." });
+    await applyUpdate(pi, ctx, { kind: "analysis", draftName: "decide" });
+    const probe = await applyUpdate(pi, ctx, { checkAnalysis: "Root cause sites alloc.c:77." });
+    check(probe.error === undefined && probe.applied.length === 1, "probe answers read-only");
+    check(probe.applied[0].includes("analysis"), "profile names the analysis deliverable");
+    const file = await readFile(join(ctx.cwd, draftPath(getState().qid!)), "utf8");
+    check(!file.includes("alloc.c:77"), "probe never wrote the body");
+    check(getState().draft?.planAuthored === false, "probe never marked authored");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("analysis continueWork returns a validating analysis quest to drafting", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const drafted = createDraft(createQuest("Decide the refactor.", "abc123"), "decide", "analysis");
+    replaceState(promoteToValidation({ ...drafted, draft: { ...drafted.draft!, planAuthored: true } }, "review"));
+    check(getState().phase === "validating", "precondition: validating");
+    const continued = await applyUpdate(pi, ctx, { continueWork: true });
+    check(continued.error === undefined, "continue accepted");
+    check(getState().phase === "drafting", "returned to drafting, not implementing");
+    check(getState().draft?.outstandingFindings === true, "findings flagged for revision");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
 });

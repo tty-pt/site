@@ -1,7 +1,8 @@
 import { check } from "../check.ts";
 import { replaceState } from "../../src/app/store.ts";
 import { installDraftGate } from "../../src/drafting/gate.ts";
-import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import type { Pi, ToolCallEvent } from "../../src/hooks/events.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 

@@ -79,6 +79,25 @@ quest id (`future/<qid>.md`); there are no slugs.
   + rendered view + manifest). FAIL: findings return you to implementing and
   the doc's `## Status` is reset, so a fresh claim re-arms the trigger.
   Archived is final — follow-ups are new quests citing the old id.
+- **Analysis quests.** Some requests ask for a verdict or decision rather
+  than a change — `quest_update_state { "kind": "analysis" }` opens that
+  mode at draft provisioning (explicit only; any other value errors, and
+  `standard` is unchanged). The deliverable is the `## Analysis` section of
+  the same `future/<qid>.md` document: author it via the `edit` tool or pass
+  the whole body as `quest_update_state { "analysis": "…" }`; the runtime
+  splices it in. Plan writes are refused on analysis quests and analysis
+  writes on standard ones, each naming the correct section. Save-time
+  review, thresholds, `checkAnalysis` probe, claim manifest, and the review
+  counts all key off the analysis body.
+  A review PASS auto-claims the quest straight to **validating** — there is
+  no implementing phase — and boots the validator immediately (while
+  sub-quests run, the analysis stays provisional and the quest stays in a
+  work phase until children finish). The validator judges the analysis
+  against the request plus a bounded transcript extract (~8k chars of the
+  user/assistant thread, truncation-marked), never your full session.
+  Validation PASS archives as usual; FAIL returns the quest to **drafting**
+  (not implementing) with findings and resets the doc's `## Status`. The
+  conclusion wake reproduces the delivered analysis when it matters most.
 
 ## Tools
 

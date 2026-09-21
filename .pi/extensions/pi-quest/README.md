@@ -29,6 +29,12 @@ One quest is active at a time. Every quest runs through three modes:
    its amendments. A PASS archives the quest (a slim `archive/<qid>.zip`);
    a FAIL sends it back to implementing with findings.
 
+Some quests ask for a **verdict, not a change**: open them with
+`quest_update_state { "kind": "analysis" }` and the deliverable is the quest's
+own `## Analysis` section. A draft review PASS auto-claims straight to
+validation, the validator judges the analysis against a bounded extract of the
+research, and a FAIL returns the analysis to drafting for revision.
+
 Large tasks split into **sub-quests**, each running the same three modes under
 its own quest id (nested up to the depth cap). Plans can be **revised** mid-way
 when reality contradicts them: each revision is re-reviewed, prior plans are
@@ -44,6 +50,10 @@ to fit what was built.
 - **Adversarial review** — every draft save boots an independent reviewer that
   returns PASS or FAIL with findings. A rebuttal with evidence reopens a
   question rather than arguing in circles.
+- **Analysis quests** — `{ "kind": "analysis" }` turns the quest into a
+  research deliverable: a draft PASS skips implementation and goes straight to
+  validation, the validator checks the analysis against the research
+  transcript, and a FAIL returns it to drafting.
 - **Sub-quests** — complex sub-tasks become full-lifecycle quests up to the
   depth cap. A failed child never fails its parent: the parent records,
   adjusts, and continues.

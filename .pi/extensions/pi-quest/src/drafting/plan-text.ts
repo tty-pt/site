@@ -4,7 +4,7 @@
 // re-review by slightly altering the plan.
 import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
-import type { QuestState } from "../domain/quest";
+import type { QuestKind, QuestState } from "../domain/quest";
 import type { ReviewMaterial } from "../review/prompts";
 import { diffPlans } from "./plan-diff";
 
@@ -12,21 +12,26 @@ export interface DraftSections {
   requirements: string[];
   evidence: string[];
   plan: string;
+  // Analysis quests deliver the quest doc's ## Analysis body here (D1).
+  analysis: string;
 }
 
 export function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-export function splicePlanSection(text: string, plan: string): string {
+// Generic ##-section splices: replace the named section's body, or append a
+// fresh section when absent. Both the plan and the analysis deliverable reuse
+// it so their splice semantics stay byte-identical.
+function spliceSection(text: string, match: string, label: string, body: string): string {
   const lines = text.split("\n");
   const start = lines.findIndex((line) => {
     const header = line.match(/^##\s+(.+?)\s*$/i);
-    return header !== null && header[1].toLowerCase().includes("implementation plan");
+    return header !== null && header[1].toLowerCase().includes(match);
   });
   if (start === -1) {
-    const body = text.endsWith("\n") ? text : `${text}\n`;
-    return `${body}\n## Implementation Plan\n\n${plan.trim()}\n`;
+    const base = text.endsWith("\n") ? text : `${text}\n`;
+    return `${base}\n## ${label}\n\n${body.trim()}\n`;
   }
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
@@ -35,20 +40,30 @@ export function splicePlanSection(text: string, plan: string): string {
       break;
     }
   }
-  return [...lines.slice(0, start + 1), "", plan.trim(), "", ...lines.slice(end)].join("\n");
+  return [...lines.slice(0, start + 1), "", body.trim(), "", ...lines.slice(end)].join("\n");
+}
+
+export function splicePlanSection(text: string, plan: string): string {
+  return spliceSection(text, "implementation plan", "Implementation Plan", plan);
+}
+
+export function spliceAnalysisSection(text: string, analysis: string): string {
+  return spliceSection(text, "analysis", "Analysis", analysis);
 }
 
 export function parseDraftSections(text: string): DraftSections {
   const requirements: string[] = [];
   const evidence: string[] = [];
   const planLines: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | null = null;
+  const analysisLines: string[] = [];
+  let section: "requirements" | "evidence" | "plan" | "analysis" | null = null;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
       const name = header[1].toLowerCase();
       if (name.includes("requirement")) section = "requirements";
       else if (name.includes("evidence")) section = "evidence";
+      else if (name.includes("analysis")) section = "analysis";
       else if (name.includes("implementation plan")) section = "plan";
       // Pre-draft investigation recorded via recordRefinement is research:
       // its bullets fold into the evidence list so it counts toward the bar.
@@ -60,23 +75,34 @@ export function parseDraftSections(text: string): DraftSections {
       planLines.push(line);
       continue;
     }
+    if (section === "analysis") {
+      analysisLines.push(line);
+      continue;
+    }
     const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
     if (bullet && (section === "requirements" || section === "evidence")) {
       if (section === "requirements") requirements.push(bullet[1]);
       else evidence.push(bullet[1]);
     }
   }
-  return { requirements, evidence, plan: planLines.join("\n").trim() };
+  return {
+    requirements,
+    evidence,
+    plan: planLines.join("\n").trim(),
+    analysis: analysisLines.join("\n").trim(),
+  };
 }
 
 export function meetsReviewThresholds(
   sections: DraftSections,
   thresholds = DEFAULT_CONFIG.draftThresholds,
+  kind: QuestKind = "standard",
 ): boolean {
   const req = sections.requirements.length;
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  return counts && sections.plan.length > 0;
+  const authored = kind === "analysis" ? sections.analysis !== "" : sections.plan.length > 0;
+  return counts && authored;
 }
 
 // The deterministic draft profile the agent sees before and at every save:
@@ -86,21 +112,25 @@ export function draftProfileText(
   sections: DraftSections,
   thresholds: DraftThresholds,
   citationSummary = "",
+  kind: QuestKind = "standard",
 ): string {
+  const analysis = kind === "analysis";
   const req = sections.requirements.length;
   const ev = sections.evidence.length;
-  const planPresent = sections.plan.trim().length > 0;
+  const noun = analysis ? "analysis" : "plan";
+  const deliverable = analysis ? sections.analysis : sections.plan;
+  const planPresent = deliverable.trim().length > 0;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   const meets = counts && planPresent;
-  const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an actionable plan)`;
+  const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an ${analysis ? "authored analysis" : "actionable plan"})`;
   const lines = [
-    `draft profile: requirements ${req}, evidence ${ev}, plan ${planPresent ? "present" : "missing"}`,
+    `draft profile: requirements ${req}, evidence ${ev}, ${noun} ${planPresent ? "present" : "missing"}`,
   ];
   if (meets) {
     lines.push(`reviewability: maturity bar: met${gapLeg}`);
   } else {
     const gaps: string[] = [];
-    if (!planPresent) gaps.push("author the ## Implementation Plan section");
+    if (!planPresent) gaps.push(`author the ## ${analysis ? "Analysis" : "Implementation Plan"} section`);
     if (req < thresholds.requirements && ev < thresholds.evidence) {
       gaps.push(`add ${thresholds.requirements - req} more requirements, or ${thresholds.evidence - ev} more evidence items with at least 1 requirement`);
     } else if (req < thresholds.requirements) {
@@ -139,13 +169,15 @@ export function citeLocations(text: string): PlanCitation[] {
   return out;
 }
 
-// The reviewer spot-checks these instead of re-deriving the whole tree.
-export function buildClaimManifest(sections: DraftSections): string {
+// The reviewer spot-checks these instead of re-deriving the whole tree. For
+// analysis quests, the claim surface is the ## Analysis body, not the plan.
+export function buildClaimManifest(sections: DraftSections, kind: QuestKind = "standard"): string {
   const lines: string[] = [];
   for (const item of sections.evidence) {
     lines.push(`- Evidence claim (verify in repo): ${item}`);
   }
-  for (const cite of citeLocations(sections.plan)) {
+  const deliverable = deliverableBody(sections, kind);
+  for (const cite of citeLocations(deliverable)) {
     lines.push(`- Cited location: ${cite.file}:${cite.lineStart}${cite.lineEnd !== undefined ? `-${cite.lineEnd}` : ""}`);
   }
   return lines.join("\n");
@@ -165,41 +197,57 @@ export function seedReviewCount(plan: string): string {
   return [REVIEW_COUNT_LINE(0), ...lines].join("\n");
 }
 
-// Retry bumps rewrite the quest doc with the incremented count. No plan body
-// means no bootable review: the text is returned untouched.
-export function bumpReviewCount(text: string, count: number): string {
+// Retry bumps rewrite the quest doc with the incremented count. No deliverable
+// body means no bootable review: the text is returned untouched. For analysis
+// quests the marker lands inside the ## Analysis body (D1).
+export function bumpReviewCount(text: string, count: number, kind: QuestKind = "standard"): string {
   const sections = parseDraftSections(text);
-  const planLines = sections.plan
+  const deliverable = deliverableBody(sections, kind);
+  const deliverableLines = deliverable
     .split("\n")
     .filter((line) => line.trim() !== "" && !REVIEW_COUNT_MARKER.test(line.trim()));
-  if (planLines.length === 0) return text;
-  const bumpedPlan = [REVIEW_COUNT_LINE(count), ...planLines].join("\n");
-  return splicePlanSection(text, bumpedPlan);
+  if (deliverableLines.length === 0) return text;
+  const bumped = [REVIEW_COUNT_LINE(count), ...deliverableLines].join("\n");
+  return kind === "analysis" ? spliceAnalysisSection(text, bumped) : splicePlanSection(text, bumped);
 }
 
-// The re-review brief must diff against the previously reviewed plan, never
-// against the plan being sent.
+// The deliverable a quest commits: standard quests an Implementation Plan,
+// analysis quests the Analysis itself (D1). Every section-target site keys on
+// this single selector.
+export function deliverableBody(sections: DraftSections, kind: QuestKind): string {
+  return kind === "analysis" ? sections.analysis : sections.plan;
+}
+
+export function deliverableWord(kind: QuestKind): string {
+  return kind === "analysis" ? "Analysis" : "Plan";
+}
+
+// The re-review brief must diff against the previously reviewed deliverable,
+// never against the one being sent. Analysis quests target the analysis body.
 export function reviewMaterial(state: QuestState, sections: DraftSections): ReviewMaterial {
+  const analysis = state.kind === "analysis";
+  const deliverable = deliverableBody(sections, state.kind);
   const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
   const base: ReviewMaterial = {
     objective: state.pendingRootRequest ?? state.objective,
-    plan: sections.plan,
+    plan: deliverable,
+    kind: state.kind,
     evidence: sections.evidence,
     amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
     rebuttal: openRebuttal?.implementerRebuttal,
-    claimManifest: buildClaimManifest(sections),
+    claimManifest: buildClaimManifest(sections, state.kind),
   };
   const last = state.lastReview;
   const previous = state.draft?.lastReviewedPlan;
   if (last === null || previous === undefined || previous === null) return base;
   // Prior verdict always travels: an evidence-only revision answers the last
-  // findings even when the plan itself is unchanged (then diffPlans is null).
+  // findings even when the deliverable itself is unchanged (then diffPlans is null).
   const continued: ReviewMaterial = {
     ...base,
     previousVerdict: last.verdict,
     previousFindings: last.findings,
   };
-  const planDiff = diffPlans(previous, sections.plan);
+  const planDiff = diffPlans(previous, deliverable);
   if (planDiff === null) return continued;
   return { ...continued, planDiff };
 }

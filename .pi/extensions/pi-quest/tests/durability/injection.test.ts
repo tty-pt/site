@@ -1,7 +1,8 @@
 import { check } from "../check.ts";
 import { replaceState } from "../../src/app/store.ts";
 import { injectQuestContext } from "../../src/durability/injection.ts";
-import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import type { Pi } from "../../src/hooks/events.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 

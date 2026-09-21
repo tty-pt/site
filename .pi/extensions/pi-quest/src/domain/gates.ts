@@ -57,28 +57,36 @@ function draftDecision(state: QuestState, draftName: string): Decision {
     return blocked(
       "DRAFT_REVISION_PENDING",
       "DRAFT_REVIEW_REQUIRED",
-      `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {plan: ...} — it splices the Implementation Plan section and boots a fresh review.${findingsText}`,
+      state.kind === "analysis"
+        ? `Edit the ## Analysis section in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {analysis: ...} — it splices the Analysis section and boots a fresh review.${findingsText}`
+        : `Edit the draft plan in ${draftName} to address findings; a content-changing save supersedes review and boots a fresh one. Prefer quest_update_state {plan: ...} — it splices the Implementation Plan section and boots a fresh review.${findingsText}`,
     );
   }
   if (state.draft === null || !state.draft.planAuthored) {
     return blocked(
       "DRAFT_PENDING",
       "DRAFT_REVIEW_REQUIRED",
-      `Author ## Implementation Plan in ${draftName} — pass {plan: ...} to quest_update_state to write it directly.`,
+      state.kind === "analysis"
+        ? `Author ## Analysis in ${draftName} — pass {analysis: ...} to quest_update_state to write it directly.`
+        : `Author ## Implementation Plan in ${draftName} — pass {plan: ...} to quest_update_state to write it directly.`,
     );
   }
   return blocked(
     "DRAFT_LOCKED",
     "DRAFT_REVIEW_REQUIRED",
-    `Only the quest document (${draftName}) is writable while drafting. Author the plan and save to boot the review; promotion to implementing unlocks the worktree. A completed review — or a live user "go" — is the only path out of drafting.`,
+    state.kind === "analysis"
+      ? `Only the quest document (${draftName}) is writable while drafting. Author the analysis and save to boot the review; promotion to validation unlocks the worktree. A completed review — or a live user "go" — is the only path out of drafting.`
+      : `Only the quest document (${draftName}) is writable while drafting. Author the plan and save to boot the review; promotion to implementing unlocks the worktree. A completed review — or a live user "go" — is the only path out of drafting.`,
   );
 }
 
-function validatingDecision(): Decision {
+function validatingDecision(state: QuestState): Decision {
   return blocked(
     "VALIDATION_LOCKED",
     "VALIDATION_REQUIRED",
-    "Validating is write-free: address the validation verdict via quest_update_state {planRevision: ...}, or pass {continueWork: true} to resume implementing.",
+    state.kind === "analysis"
+      ? "Validating is write-free: address the validation verdict via quest_update_state {analysis: ...} to revise the ## Analysis, or pass {continueWork: true} to resume drafting."
+      : "Validating is write-free: address the validation verdict via quest_update_state {planRevision: ...}, or pass {continueWork: true} to resume implementing.",
   );
 }
 
@@ -130,7 +138,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return draftDecision(state, draftFile ?? "the draft file");
   }
   if (state.phase === "validating") {
-    return validatingDecision();
+    return validatingDecision(state);
   }
   if (state.phase === "idle" || state.phase === "archived") {
     return { allowed: true };

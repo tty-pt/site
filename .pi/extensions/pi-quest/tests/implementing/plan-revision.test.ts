@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
 import {
-  createDraft,
   createQuest,
   IDLE_STATE,
-  promote,
 } from "../../src/domain/quest.ts";
+import {
+  createDraft,
+  promote,
+} from "../../src/domain/transitions.ts";
 import {
   approvePlanRevision,
   recordPlanRevision,

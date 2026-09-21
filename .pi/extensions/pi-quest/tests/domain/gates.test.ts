@@ -1,7 +1,8 @@
 import { check } from "../check.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import type { QuestState } from "../../src/domain/quest.ts";
-import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import type { ToolRef } from "../../src/domain/gates.ts";
 import { decide, reasonText } from "../../src/domain/gates.ts";
@@ -21,6 +22,10 @@ const LAUNCH = ref("subagent", "launch");
 
 function drafting() {
   return createDraft(createQuest("req", QID), "thing");
+}
+
+function analyzing() {
+  return createDraft(createQuest("req", QID), "thing", "analysis");
 }
 
 Deno.test("gate exempts the draft file only during drafting", () => {
@@ -176,4 +181,26 @@ Deno.test("gate locks writes while validating", () => {
   }
   check(decide(validating, READ).allowed, "validating reads open");
   check(decide(validating, JOURNAL).allowed, "journal stays open");
+});
+
+Deno.test("gate wording names the Analysis deliverable for analysis quests", () => {
+  const pending = decide(analyzing(), EDIT_OTHER);
+  check(!pending.allowed && pending.code === "DRAFT_REVIEW_REQUIRED", "analysis draft blocked");
+  if (!pending.allowed) {
+    check(pending.phaseName === "DRAFT_PENDING", "pending name");
+    check(decide(analyzing(), EDIT_OTHER).allowed === false, "wording check keeps blocking");
+    check(reasonText(pending).includes("## Analysis"), "names the analysis section");
+    check(reasonText(pending).includes("{analysis: ...}"), "names the analysis param");
+  }
+  const authored = { ...analyzing(), draft: { ...analyzing().draft!, planAuthored: true } };
+  const locked = decide(authored, EDIT_OTHER);
+  if (!locked.allowed) {
+    check(locked.phaseName === "DRAFT_LOCKED", "locked name");
+    check(reasonText(locked).includes("promotion to validation"), "analysis promotion target");
+  }
+  const validating = { ...authored, phase: "validating" as const };
+  const val = decide(validating, EDIT_OTHER);
+  if (!val.allowed) {
+    check(reasonText(val).includes("resume drafting"), "analysis validation exit wording");
+  }
 });

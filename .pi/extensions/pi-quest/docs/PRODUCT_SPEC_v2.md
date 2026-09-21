@@ -483,6 +483,48 @@ subprocesses are called reviewers, never children.
 9. **Tree recovery.** `quest_recover` restores the whole tree by following
    parent/child qid links across snapshots, not just the single quest.
 
+### B1.11 Analysis quests (kind: "analysis")
+
+Some requests ask for a verdict or decision, not a code change — the
+deliverable is the quest's own **`## Analysis`** section, and the rest of the
+ladder adapts without inventing an implementation ceremony.
+
+1. **Explicit kind only.** `quest_update_state { kind: "analysis" }` opens an
+   analysis quest at `provisionDraft`; any other value errors ("explicit
+   only"). There is no auto-detection, so analysis behavior can never sneak
+   in by wording. Omission or `"standard"` keeps the standard ladder
+   byte-for-byte unchanged.
+2. **Deliverable.** The analysis is authored in the `## Analysis` section of
+   the same `future/<qid>.md` document, splices like the plan, and owns the
+   kind-aware review surface: thresholds, profile, claim manifest, review
+   counts, and the maturity bar key off the analysis body instead of the
+   plan. Standard plan writes are refused on analysis quests (and vice
+   versa), naming the correct section.
+3. **Draft review.** The reviewer judges the `## Analysis` for completeness,
+   grounding in repository evidence, and scope against the original request
+   (labeled `APPROVED ANALYSIS:`).
+4. **Auto-claim.** A draft review PASS on an analysis quest promotes straight
+   to `validating` — there is no implementing phase — and boots the validator
+   immediately. While sub-quests are still running the analysis stays
+   provisional and the quest falls back to a work phase until the children
+   complete.
+5. **Validator material.** The validation brief carries the analysis body
+   plus a **bounded transcript extract** (`transcriptExtract`): the tail of
+   the user/assistant thread from the current and child-research sessions
+   (~8k chars, truncation-marked, tool/system spam stripped) so the
+   validator can judge adequacy. The extract is secondary to the material and
+   repository evidence, never the verdict's single source.
+6. **FAIL repairs to drafting.** A validation FAIL demotes an analysis quest
+   to `drafting` (the analysis is a draft-like artifact; `implementing`,
+   where the quest doc is locked, is the wrong repair state) and resets the
+   doc's `## Status`. A PASS archives as usual; the conclusion wake carries a
+   `DELIVERED ANALYSIS:` excerpt captured from the analysis before archival
+   removes the live draft.
+7. **Kind is immutable and snapshot-safe.** `kind` is fixed at detection,
+   survives every phase, is sanitized explicitly when snapshots normalize
+   (bogus kinds drop to `standard`), and never feeds the implementation
+   fingerprint — existing PASS records do not re-validate spuriously.
+
 ## B2. Implementation gates (truth table)
 
 Gate evaluation order is normative — first match wins. Anything not in

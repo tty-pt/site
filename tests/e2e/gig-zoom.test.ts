@@ -122,7 +122,7 @@ Deno.test({
     // ── 4. Change zoom via slider event ───────────────────────────────────
     // Set the slider value and dispatch change event for WASM handler
     await slider.evaluate((el) => {
-      el.value = "150";
+      (el as HTMLInputElement).value = "150";
       el.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
@@ -163,7 +163,7 @@ Deno.test({
     await Promise.all([
       page.waitForResponse((res) => res.url().includes("/api/song/prefs") && res.status() < 400, { timeout: 10000 }).catch(() => null),
       page.locator('input[type="checkbox"][name="l"]').evaluate((el) => {
-        (el as unknown as { checked: boolean }).checked = true;
+        (el as HTMLInputElement).checked = true;
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }),
     ]);
@@ -225,7 +225,7 @@ Deno.test({
     );
     await page.locator('input[type="range"][data-detail-viewer-zoom]')
       .evaluate((el) => {
-        el.value = "100";
+        (el as HTMLInputElement).value = "100";
         el.dispatchEvent(new Event("change", { bubbles: true }));
       });
 

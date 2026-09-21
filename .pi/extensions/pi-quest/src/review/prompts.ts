@@ -3,12 +3,13 @@
 // HIGH_LEVEL: #review independence — no inherited context, no prior conclusions.
 // HIGH_LEVEL: #independent review contexts — fresh context, no inherited reasoning.
 import type { Qid } from "../domain/qid";
-import type { ReviewKind, ReviewVerdict } from "../domain/quest";
+import type { QuestKind, ReviewKind, ReviewVerdict } from "../domain/quest";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 
 export interface ReviewMaterial {
   objective: string;
   plan: string;
+  kind?: QuestKind;
   evidence: string[];
   amendments: string[];
   rebuttal?: string;
@@ -20,6 +21,10 @@ export interface ReviewMaterial {
   revisionNote?: string;
   // HIGH_LEVEL: #plan revision — validators see the plan's revision history.
   planRevisionHistory?: string[];
+  // HIGH_LEVEL: #validation — analysis-quest validators judge the analysis
+  // against the bounded research transcript; the extract is truncated, so the
+  // validator sees the substance, never the full session.
+  transcriptExtract?: string;
   // The plan's verifiable file:line surface. Reviewers spot-check these lines
   // instead of re-auditing the whole tree for unasserted claims.
   claimManifest?: string;
@@ -84,11 +89,15 @@ function contextBlock(material: ReviewMaterial): string {
   const manifest = material.claimManifest
     ? `\nCLAIM MANIFEST (spot-check these in the tree; do not re-derive the whole tree):\n${material.claimManifest}\n`
     : "";
+  const transcript = material.transcriptExtract
+    ? `\nRESEARCH TRANSCRIPT (bounded extract, most recent first):\n${material.transcriptExtract}\n`
+    : "";
+  const deliverableLabel = material.kind === "analysis" ? "APPROVED ANALYSIS" : "APPROVED PLAN";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
 
-APPROVED PLAN:
+${deliverableLabel}:
 ${material.plan || "(none)"}
 ${diff}
 ${revision}RECORDED AMENDMENTS:
@@ -96,10 +105,24 @@ ${amendments}
 ${history}
 EVIDENCE:
 ${evidence}
-${manifest}${rebuttal}${prior}--- END MATERIAL ---`;
+${manifest}${transcript}${rebuttal}${prior}--- END MATERIAL ---`;
 }
 
-function draftGuidance(maturity: DraftThresholds): string {
+function draftGuidance(maturity: DraftThresholds, kind: QuestKind | undefined): string {
+  if (kind === "analysis") {
+    return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
+You review the ANALYSIS deliverable, not implementation. Compare it against the exact recorded request:
+1. Whether the analysis addresses every requirement in the objective;
+2. Whether important requirements were omitted;
+3. Whether conclusions are grounded in repository evidence;
+4. Whether research is sufficient to support the claims;
+5. Whether assumptions remain unverified;
+6. Whether it stays in scope or substitutes a different problem;
+7. Whether it contradicts itself;
+8. Whether it credibly satisfies the request.
+MATURITY BAR: a reviewable analysis has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an authored ## Analysis section. Below the bar, FAIL fast naming exactly what is missing.
+Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
+  }
   return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
 You review the PLAN, not implementation. Compare the draft plan against the exact recorded request:
 1. Whether the plan addresses the objective; 2. Whether requirements were omitted;
@@ -112,7 +135,16 @@ MATURITY BAR: a reviewable draft has ${maturity.requirements} requirements, or 1
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
 }
 
-function validationGuidance(): string {
+function validationGuidance(kind: QuestKind | undefined): string {
+  if (kind === "analysis") {
+    return `WHAT YOU MUST EVALUATE (VALIDATION):
+You review the ANALYSIS deliverable against the original request: is it complete, grounded, and on scope?
+1. Every requirement in the request is addressed by the analysis;
+2. Conclusions are grounded — spot-check claims against the repository and the RESEARCH TRANSCRIPT extract;
+3. The analysis stays in scope; covering a different problem is a failure;
+4. The research backing is adequate for the claim made.
+Reviewer preference NEVER blocks; only unmet requirements, ungrounded claims, or out-of-scope drift do.`;
+  }
   return `WHAT YOU MUST EVALUATE (VALIDATION):
 You review the IMPLEMENTATION against the approved plan plus recorded amendments:
 1. Every plan step implemented or explicitly superseded by an amendment;
@@ -137,7 +169,7 @@ export function buildReviewPrompt(
   const header = kind === "draft"
     ? `ADVERSARIAL DRAFT REVIEW: ${qid} (target revision ${target})`
     : `VALIDATION REVIEW: ${qid} (target implementation snapshot ${target})`;
-  const guidance = kind === "draft" ? draftGuidance(maturity) : validationGuidance();
+  const guidance = kind === "draft" ? draftGuidance(maturity, material.kind) : validationGuidance(material.kind);
   const impl = material.implementationSummary
     ? `\nIMPLEMENTATION SUMMARY UNDER REVIEW:\n${material.implementationSummary}\n`
     : "";

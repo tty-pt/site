@@ -1,7 +1,8 @@
 import { check } from "../check.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import { handleDraftEdit } from "../../src/drafting/edits.ts";
-import { createDraft, createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 

@@ -1,7 +1,8 @@
 import { check } from "../check.ts";
 import { fakeCtx } from "../fake-pi.ts";
 import { replaceState } from "../../src/app/store.ts";
-import { IDLE_STATE, createDraft, createQuest } from "../../src/domain/quest.ts";
+import { IDLE_STATE, createQuest } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { noteDraftUpdated, questStatus, refreshStatus } from "../../src/durability/index.ts";
 

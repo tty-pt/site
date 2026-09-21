@@ -3,7 +3,7 @@
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import type { ArchivedOutcome } from "../../domain/quest";
-import { archive } from "../../domain/quest";
+import { archive } from "../../domain/transitions";
 import { settleChild } from "../../domain/children";
 import { newestSnapshotFor } from "../../durability/snapshots";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";

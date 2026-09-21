@@ -6,10 +6,12 @@ import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import type { QuestState } from "../domain/quest";
-import { demoteToImplementing, recordReviewResult } from "../domain/quest";
+import { recordReviewResult } from "../domain/quest";
+import { demoteToDrafting, demoteToImplementing } from "../domain/transitions";
+import type { Qid } from "../domain/qid";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx } from "../hooks/events";
-import { buildReviewPrompt } from "../review/prompts";
+import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
@@ -17,6 +19,8 @@ import { readQuestConfig } from "../config";
 import { hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
+import { parseDraftSections } from "../drafting/plan-text";
+import { extractQuestTranscript } from "../durability/transcript";
 
 export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
@@ -80,6 +84,66 @@ export function buildConclusionSummary(state: QuestState, target: string, review
   return `Validation PASS (${target.slice(0, 12)}). ${state.amendments.length} amendment(s), ${state.setbacks.length} setback(s). Advisories: ${noted}`;
 }
 
+// The validator's brief differs by kind: standard quests validate against the
+// full approved doc; analysis quests validate the ## Analysis deliverable
+// against the bounded research transcript (D4).
+const DELIVERED_ANALYSIS_CHARS = 900;
+
+export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<ReviewMaterial> {
+  const plan = await approvedPlan(ctx, state);
+  if (state.kind === "analysis" && state.qid !== null) {
+    return {
+      objective: state.pendingRootRequest ?? state.objective,
+      plan: parseDraftSections(plan).analysis,
+      kind: "analysis",
+      evidence: [
+        ...state.refinements,
+        ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
+        ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
+      ],
+      amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
+      planRevisionHistory: formatRevisionHistory(state),
+      implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
+      transcriptExtract: await extractQuestTranscript(ctx, state.qid),
+    };
+  }
+  return {
+    objective: state.pendingRootRequest ?? state.objective,
+    plan,
+    kind: state.kind,
+    evidence: [
+      ...state.refinements,
+      ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
+      ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
+    ],
+    amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
+    planRevisionHistory: formatRevisionHistory(state),
+    implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
+  };
+}
+
+// The conclusion wake for an analysis quest carries the delivered analysis so
+// the moment is reviewable after archival removed the live draft. Computed
+// against the pre-archive doc at the last possible moment.
+export async function deliveredAnalysisExcerpt(ctx: PiCtx, state: QuestState): Promise<string> {
+  if (state.kind !== "analysis" || state.qid === null) return "";
+  const body = parseDraftSections(await approvedPlan(ctx, state)).analysis.trim();
+  if (body === "") return "";
+  return body.length > DELIVERED_ANALYSIS_CHARS ? `${body.slice(0, DELIVERED_ANALYSIS_CHARS)}… (truncated)` : body;
+}
+
+// A validating FAIL returns analysis quests to drafting (the analysis is a
+// draft-like artifact; implementing, where the quest doc is locked, is the
+// wrong repair state) and standard quests to implementing.
+export function repairAfterFail(state: QuestState): QuestState {
+  return state.kind === "analysis" ? demoteToDrafting(state) : demoteToImplementing(state);
+}
+
+export async function launchValidation(pi: Pi, ctx: PiCtx, qid: Qid): Promise<void> {
+  await setDocStatus(ctx, qid, "validating", false);
+  await ensureValidationFlow(pi, ctx);
+}
+
 export async function concludeValidationPass(
   pi: Pi,
   ctx: PiCtx,
@@ -95,8 +159,12 @@ export async function concludeValidationPass(
     sendSteer(pi, `Quest ${qid} changed during validation — conclusion skipped; a fresh validation will boot against the current work.`);
     return { archived: false, zipPath: null };
   }
+  // The excerpt must be captured before archive: archiveActiveQuest removes the
+  // live draft that carries the delivered analysis.
+  const excerpt = await deliveredAnalysisExcerpt(ctx, getState());
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
-  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).`);
+  const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
+  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}`);
   return { archived: true, zipPath: done.zipPath };
 }
 
@@ -111,29 +179,20 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   }
   if (hasInFlight(qid)) return;
   const config = await readQuestConfig(ctx.cwd);
-  const plan = await approvedPlan(ctx, state);
-  const evidence = [
-    ...state.refinements,
-    ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
-    ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
-  ];
+  const brief = await validationBrief(ctx, state);
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
     runnerTool: config.bindings.reviewRunner.tool,
-    prompt: buildReviewPrompt("validation", qid, target, {
-      objective: state.pendingRootRequest ?? state.objective,
-      plan,
-      evidence,
-      amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
-      planRevisionHistory: formatRevisionHistory(state),
-      implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
-    }),
+    prompt: buildReviewPrompt("validation", qid, target, brief),
   });
   if (outcome.status === "no-runner") {
-    announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. Only the user can accept completion by replying CONFIRM — your own CONFIRM text does nothing. Otherwise keep working (continueWork:true returns to implementing).`);
+    // continueWork returns analysis quests to drafting, implementation quests to
+    // implementing — name the right phase so the guidance stays accurate.
+    const workPhase = state.kind === "analysis" ? "drafting" : "implementing";
+    announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. Only the user can accept completion by replying CONFIRM — your own CONFIRM text does nothing. Otherwise keep working (continueWork:true returns to ${workPhase}).`);
     return;
   }
   if (outcome.status === "failed") {
@@ -149,7 +208,14 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     }
     return;
   }
-  updateState((s) => demoteToImplementing(s));
+  if (state.kind === "analysis") {
+    updateState((s) => repairAfterFail(s));
+    await setDocStatus(ctx, qid, "drafting", false);
+    emitNow(pi);
+    sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings in the analysis, then submit the revised analysis for review again.`);
+    return;
+  }
+  updateState((s) => repairAfterFail(s));
   await setDocStatus(ctx, qid, "implementing", false);
   emitNow(pi);
   sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);

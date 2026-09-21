@@ -1,34 +1,29 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
 // HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision. The agent's write path: findings, drafts, amendments, claims.
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import {
-  claimComplete,
-  createDraft,
   createQuest,
-  demoteToImplementing,
   recordAmendment,
   recordRefinement,
   type QuestState,
 } from "../../domain/quest";
-import { recordPlanRevision } from "../../domain/plan-revision";
+import { claimComplete, createDraft, demoteToDrafting, demoteToImplementing } from "../../domain/transitions";
 import { acknowledgeChild, unfinishedChildren } from "../../domain/children";
-import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { nextQid } from "../../domain/qid";
 import { draftPath } from "../../domain/paths";
 import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
-import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
-import { hashContent, parseDraftSections, seedReviewCount, splicePlanSection } from "../../drafting/plan-text";
+import { checkAnalysisParam, checkPlanParam, profileForSavedDoc } from "./draft-profile";
+import { checkPlanCitations } from "./claims";
+import { carryRefinementsToDraft, writeAnalysisToDraft, writePlanRevision, writePlanToDraft } from "./draft-writer";
 import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
-import { checkPlanCitations } from "./claims";
-import { checkPlanParam, profileForSavedDoc } from "./draft-profile";
 
 async function provisionRootQuest(ctx: PiCtx, objective: string): Promise<Qid> {
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
@@ -63,86 +58,6 @@ async function claimForValidation(
   return getState();
 }
 
-async function writePlanToDraft(
-  pi: Pi,
-  ctx: PiCtx,
-  state: QuestState,
-  planText: string,
-): Promise<QuestState> {
-  if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
-    throw new Error(`plan text needs an active draft (phase ${state.phase}); the plan is drafting-only — record post-approval deviations via amendment or refinement`);
-  }
-  const path = join(ctx.cwd, draftPath(state.qid));
-  const current = await readFile(path, "utf8");
-  const updated = splicePlanSection(current, seedReviewCount(planText));
-  if (updated === current) throw new Error("plan text identical to the draft file");
-  await writeFile(path, updated, "utf8");
-  const hash = hashContent(updated);
-  const next = updateState((s) => s.draft === null ? s : {
-    ...s,
-    draft: { ...s.draft, planAuthored: true, contentHash: hash },
-    snapshotPending: true,
-  });
-  emitNow(pi);
-  noteDraftUpdated(ctx);
-  clearDraftReviewRetry(state.qid);
-  void maybeBootDraftReview(pi, ctx);
-  return next;
-}
-
-// Mid-implementation plan revision: the objective is immutable here — a new
-// goal is a scope change and belongs in a new quest. The revision stages new
-// content and boots a re-review; the approved binding moves only on PASS.
-async function writePlanRevision(
-  pi: Pi,
-  ctx: PiCtx,
-  state: QuestState,
-  planText: string,
-  note: string,
-  objective: unknown,
-): Promise<QuestState> {
-  if (state.phase !== "implementing" || state.draft === null || state.qid === null) {
-    throw new Error(`plan revision needs an implementing quest (phase ${state.phase})`);
-  }
-  if (typeof objective === "string" && objective.trim() !== "") {
-    const current = state.pendingRootRequest ?? state.objective;
-    if (objective.trim() !== current) {
-      throw new Error("plan revision keeps the quest objective — a new goal is a scope change, start a new quest");
-    }
-  }
-  const path = join(ctx.cwd, draftPath(state.qid));
-  const current = await readFile(path, "utf8");
-  const previousPlan = parseDraftSections(current).plan;
-  const updated = splicePlanSection(current, seedReviewCount(planText));
-  if (updated === current) throw new Error("plan revision identical to the draft file");
-  await writeFile(path, updated, "utf8");
-  const hash = hashContent(updated);
-  const previousHash = state.draft.contentHash;
-  const next = updateState((s) => recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan));
-  emitNow(pi);
-  noteDraftUpdated(ctx);
-  clearPlanRevisionRetries(state.qid);
-  void bootPlanRevisionReview(pi, ctx, hash);
-  return next;
-}
-
-async function carryRefinementsToDraft(ctx: PiCtx, state: QuestState): Promise<QuestState> {
-  if (state.phase !== "drafting" || state.draft === null || state.qid === null) return state;
-  if (state.refinements.length === 0) return state;
-  const path = join(ctx.cwd, draftPath(state.qid));
-  const current = await readFile(path, "utf8");
-  const items = state.refinements.map((refinement) => `- ${refinement}`).join("\n");
-  const body = current.endsWith("\n") ? current : `${current}\n`;
-  const updated = `${body}\n## Findings (pre-draft investigation)\n\n${items}\n`;
-  await writeFile(path, updated, "utf8");
-  const hash = hashContent(updated);
-  return updateState((s) => s.draft === null ? s : {
-    ...s,
-    draft: { ...s.draft, contentHash: hash },
-    snapshotPending: true,
-  });
-}
-
 async function provisionDraft(
   ctx: PiCtx,
   state: QuestState,
@@ -156,14 +71,20 @@ async function provisionDraft(
   const qid = state.qid;
   const name = draftName.trim();
   const plan = params["plan"];
-  const thin = state.refinements.length === 0 && (typeof plan !== "string" || plan.trim() === "");
-  state = createDraft(state, name);
+  const kind = params["kind"] === "analysis" ? "analysis" : "standard";
+  const analysis = kind === "analysis";
+  const thin = state.refinements.length === 0 &&
+    ((typeof plan !== "string" || plan.trim() === "") && !analysis);
+  state = createDraft(state, name, kind);
   replaceState(state);
   await ensureDraftFile(ctx, qid, name, state.objective);
   state = await carryRefinementsToDraft(ctx, getState());
   applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
   if (thin) {
     applied.push("draft created thin — no findings recorded yet; file them via refinement or author the plan via {plan:}. A draft becomes reviewable at the maturity bar: 2 requirements, or 1 requirement + 7 evidence, with an actionable plan. Use {checkPlan: \"<plan body>\"} to preview the profile without booting a review.");
+  }
+  if (analysis) {
+    applied.push("analysis quest — author the deliverable via {analysis: \"<body>\"} or by editing the ## Analysis section, and use {checkAnalysis: \"<body>\"} to preview the profile without booting a review.");
   }
   noteDraftUpdated(ctx);
   return state;
@@ -185,7 +106,30 @@ async function applyPlanParam(
     const claims = await checkPlanCitations(ctx, plan.trim());
     if (claims !== "") applied.push(claims);
     const docAfter = await readFile(join(ctx.cwd, draftPath(planQid)), "utf8");
-    applied.push(await profileForSavedDoc(ctx, docAfter));
+    applied.push(await profileForSavedDoc(ctx, docAfter, state.kind));
+    return { state: next };
+  } catch (err) {
+    return { state, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function applyAnalysisParam(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  params: Record<string, unknown>,
+  applied: string[],
+): Promise<{ state: QuestState; error?: string }> {
+  const analysis = params["analysis"];
+  const qid = state.qid;
+  if (typeof analysis !== "string" || analysis.trim() === "" || qid === null) return { state };
+  try {
+    const next = await writeAnalysisToDraft(pi, ctx, state, analysis.trim());
+    applied.push("analysis recorded in the draft file");
+    const claims = await checkPlanCitations(ctx, analysis.trim());
+    if (claims !== "") applied.push(claims);
+    const docAfter = await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+    applied.push(await profileForSavedDoc(ctx, docAfter, state.kind));
     return { state: next };
   } catch (err) {
     return { state, error: err instanceof Error ? err.message : String(err) };
@@ -224,6 +168,14 @@ async function applyContinueWorkParam(
   if (params["continueWork"] !== true || !state.qid) return { state };
   try {
     const qid = state.qid;
+    if (state.kind === "analysis") {
+      // An analysis quest cannot implement: it has no implementation plan, so
+      // returning to work means revising the analysis deliverable (D1/D3).
+      const next = updateState((s) => demoteToDrafting(s));
+      await setDocStatus(ctx, qid, "drafting", false);
+      applied.push("returned to drafting to revise the delivered analysis");
+      return { state: next };
+    }
     const next = updateState((s) => demoteToImplementing(s));
     await setDocStatus(ctx, qid, "implementing", false);
     applied.push("returned to implementing to continue the work");
@@ -240,9 +192,14 @@ export async function applyUpdate(
 ): Promise<{ applied: string[]; error?: string }> {
   const applied: string[] = [];
   let state = getState();
-  // checkPlan: pure read-only probe (see draft-profile.ts) — before any create path so it never side-creates.
-  const check = await checkPlanParam(ctx, params);
-  if (check.applied.length > 0 || check.error !== undefined) return { applied: check.applied, error: check.error };
+  const kind = params["kind"];
+  if (kind !== undefined && kind !== "standard" && kind !== "analysis") {
+    return { applied, error: `unknown quest kind ${JSON.stringify(kind)} — expected "standard" or "analysis"` };
+  }
+  // checkPlan/checkAnalysis: pure read-only probes (see draft-profile.ts) —
+  // before any create path so they never side-create.
+  const probe = (await Promise.all([checkPlanParam(ctx, params), checkAnalysisParam(ctx, params)])).find((p) => p.applied.length > 0 || p.error !== undefined);
+  if (probe !== undefined) return { applied: probe.applied, error: probe.error };
   if (state.qid === null) {
     const objective = params["objective"];
     if (typeof objective !== "string" || objective.trim() === "") {
@@ -252,7 +209,6 @@ export async function applyUpdate(
     state = getState();
     applied.push(`created quest ${qid}`);
   }
-  const draftName = params["draftName"];
   state = await provisionDraft(ctx, state, params, applied);
   const refinement = params["refinement"];
   if (typeof refinement === "string" && refinement.trim() !== "" && state.qid) {
@@ -272,22 +228,23 @@ export async function applyUpdate(
   }
   const next = params["exactNextAction"];
   if (typeof next === "string" && next.trim() !== "" && state.qid) {
-    const text = next.trim();
-    state = updateState((s) => ({ ...s, exactNextAction: text, snapshotPending: true }));
+    state = updateState((s) => ({ ...s, exactNextAction: (next as string).trim(), snapshotPending: true }));
     applied.push("next action updated");
   }
   const planParam = await applyPlanParam(pi, ctx, state, params, applied);
   if (planParam.error !== undefined) return { applied, error: planParam.error };
   state = planParam.state;
+  const analysisParam = await applyAnalysisParam(pi, ctx, state, params, applied);
+  if (analysisParam.error !== undefined) return { applied, error: analysisParam.error };
+  state = analysisParam.state;
   const revised = await applyPlanRevisionParam(pi, ctx, state, params, applied);
   if (revised.error !== undefined) return { applied, error: revised.error };
   state = revised.state;
   const continuePast = params["continuePast"];
   if (typeof continuePast === "string" && continuePast.trim() !== "" && state.qid) {
     try {
-      const childQid = continuePast.trim();
-      state = updateState((s) => acknowledgeChild(s, childQid as Qid));
-      applied.push(`continued past child ${childQid}`);
+      state = updateState((s) => acknowledgeChild(s, continuePast.trim() as Qid));
+      applied.push(`continued past child ${continuePast.trim()}`);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }
@@ -312,15 +269,18 @@ export function updateStateTool(pi: Pi): PiToolSpec {
   return {
     name: "quest_update_state",
     label: "Update Quest State",
-    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), checkPlan to preview the maturity profile of a would-be plan WITHOUT writing or booting a review (drafting only), claimComplete to finish, continueWork to return a validating quest to implementing.",
+    description: "Record findings, drafts, amendments, and state. The agent's write path to the quest: pass objective to create, kind with \"analysis\" to mark a purely-analytical quest (deliverable is the ## Analysis; no implementation phase), draftName to draft, refinement/amendment/exactNextAction to record, plan to author the draft Implementation Plan section directly (drafting only, standard quests), analysis to author the draft Analysis section directly (drafting only, analysis quests), planRevision with an optional note to revise the approved plan mid-implementation (boots a re-review), checkPlan to preview the maturity profile of a would-be plan WITHOUT writing or booting a review (drafting only), checkAnalysis likewise for a would-be analysis, claimComplete to finish, continueWork to return a validating quest to a work phase.",
     parameters: {
       type: "object",
       properties: {
         objective: { type: "string" },
+        kind: { type: "string", description: "Quest kind on creation: \"standard\" (default) or \"analysis\"." },
         draftName: { type: "string" },
         refinement: { type: "string" },
-        plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only)." },
+        plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only, standard quests)." },
+        analysis: { type: "string", description: "Analysis body, spliced into the draft file (drafting only, analysis quests)." },
         checkPlan: { type: "string", description: "Preview the draft profile (requirements/evidence counts, maturity-bar verdict, citation resolution) for a would-be plan body — read-only, no save, no review boot (drafting only)." },
+        checkAnalysis: { type: "string", description: "Preview the draft profile for a would-be analysis body — read-only, no save, no review boot (drafting only, analysis quests)." },
         planRevision: { type: "string", description: "Revised Implementation Plan body, staged from implementing (boots a re-review; objective unchanged)." },
         note: { type: "string", description: "Why the plan revision was needed; kept in the append-only history." },
         amendment: {

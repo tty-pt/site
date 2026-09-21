@@ -5,12 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
 import {
-  claimComplete,
-  createDraft,
   createQuest,
   IDLE_STATE,
-  promote,
 } from "../../src/domain/quest.ts";
+import {
+  claimComplete,
+  createDraft,
+  promote,
+} from "../../src/domain/transitions.ts";
 import { draftPath, stageDir } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";

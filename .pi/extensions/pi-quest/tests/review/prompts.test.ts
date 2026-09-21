@@ -136,6 +136,35 @@ Deno.test("validation brief carries the plan revision history", () => {
   check(!draft.includes("weakens the acceptance bar"), "draft guidance has no validator rule");
 });
 
+Deno.test("analysis briefs label the deliverable and render the transcript block", () => {
+  const brief = {
+    objective: "ship it",
+    plan: "the allocator is the bottleneck",
+    kind: "analysis" as const,
+    evidence: ["traced alloc.c:77"],
+    amendments: [],
+    transcriptExtract: "[user] profile it\n[assistant] traced alloc",
+  };
+  const validation = buildReviewPrompt("validation", QID, "s1", brief);
+  check(validation.includes("APPROVED ANALYSIS:"), "analysis label used");
+  check(!validation.includes("APPROVED PLAN"), "no plan label for analysis");
+  check(validation.includes("RESEARCH TRANSCRIPT"), "transcript block present");
+  check(validation.includes("[assistant] traced alloc"), "extract content present");
+  check(validation.includes("You review the ANALYSIS deliverable"), "analysis validation guidance");
+  const draft = buildReviewPrompt("draft", QID, "h1", { ...brief, plan: "the allocator is the bottleneck" });
+  check(draft.includes("You review the ANALYSIS deliverable"), "analysis draft guidance");
+  check(draft.includes("APPROVED ANALYSIS:"), "draft label matches");
+  const standard = buildReviewPrompt("validation", QID, "s1", {
+    objective: "ship it",
+    plan: "did things",
+    evidence: [],
+    amendments: [],
+  });
+  check(standard.includes("APPROVED PLAN:"), "standard label unchanged");
+  check(standard.includes("You review the IMPLEMENTATION"), "standard guidance unchanged");
+  check(!standard.includes("RESEARCH TRANSCRIPT"), "no extract block without an extract");
+});
+
 Deno.test("implementation fingerprint is stable and content-bound", () => {
   const a = createQuest("same", "abc123");
   const b = createQuest("same", "abc123");

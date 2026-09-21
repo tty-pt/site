@@ -44,6 +44,62 @@ async function extractStateJson(
 }
 
 /**
+ * Pick an option in a hyle picker on the add/edit page.
+ *
+ * Ticks the exact-slug row when present; otherwise searches for the label
+ * and ticks the exact-slug row in the results (safe now that
+ * hyle-fragments.js reconciles the submit payload with the persistent
+ * selection set). Fails fast with a dataset-repair hint instead of silently
+ * creating junk entities — never uses the inline "Add" button for fixtures.
+ */
+async function pickRow(
+  page: import("npm:playwright").Page,
+  key: string,
+  slug: string,
+  label: string,
+): Promise<void> {
+  const picker = page.locator(`.hyle-picker[data-hyle-picker-key="${key}"]`);
+  if (await picker.count() === 0) {
+    throw new Error(`No hyle picker with key "${key}" on the page`);
+  }
+  const details = picker.locator("details.hyle-picker-details");
+  if (await details.count() > 0) {
+    const open = await details.first().getAttribute("open");
+    if (open === null) {
+      await details.first().locator("summary").first().click();
+    }
+  }
+  let cb = picker.locator(`input[name="${key}"][value="${slug}"]`);
+  if (await cb.count() === 0) {
+    const search = picker.locator("input.hyle-picker-search");
+    if (await search.count() > 0) {
+      await search.fill(label);
+      const rows = picker.locator(".hyle-picker-rows").first();
+      await rows.waitFor({ state: "visible" });
+      for (let i = 0; i < 30; i++) {
+        if (await picker.locator(`input[name="${key}"][value="${slug}"]`).count() > 0) break;
+        await page.waitForTimeout(100);
+      }
+    }
+    cb = picker.locator(`input[name="${key}"][value="${slug}"]`);
+  }
+  assert(
+    await cb.count() > 0,
+    `Picker option "${slug}" (label "${label}") not found on any page. ` +
+      `Plan B: stop axil, run scripts/gc-picker-junk.sh, then restart axil.`,
+  );
+  await cb.first().evaluate((el) => {
+    (el as any).checked = true;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const valSpan = picker.locator(".hyle-picker-values");
+  for (let i = 0; i < 20; i++) {
+    if ((await valSpan.innerText().catch(() => "")).includes(label)) break;
+    await page.waitForTimeout(100);
+  }
+}
+
+/**
  * Create a song via the browser form and return its ID.
  */
 async function createSongViaForm(
@@ -65,58 +121,9 @@ async function createSongViaForm(
       const open = await details.first().getAttribute('open');
       if (open === null) await details.locator('summary').first().click();
     }
-    // also handle inline checkbox grid fallback (no details)
     for (const v of vals) {
       const slug = v.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-      let cb = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${slug}"]`);
-      if (await cb.count() === 0) cb = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${v}"]`);
-      if (await cb.count() > 0) {
-        await cb.first().evaluate((el) => {
-          (el as any).checked = true;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        });
-        const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
-        for (let i = 0; i < 20; i++) {
-          if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
-          await page.waitForTimeout(100);
-        }
-      } else {
-        const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
-        if (await search.count() > 0) {
-          await search.fill("");
-          await search.fill(v);
-          const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
-          await rows.waitFor({ state: "visible" });
-          let text = await rows.innerText();
-          for (let i = 0; i < 20 && !text.includes(v); i++) {
-            await page.waitForTimeout(100);
-            text = await rows.innerText();
-          }
-          let cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${slug}"]`);
-          if (await cb2.count() === 0) cb2 = page.locator(`.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="${v}"]`);
-          if (await cb2.count() > 0) {
-            await cb2.first().evaluate((el) => {
-              (el as any).checked = true;
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-            });
-            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
-            for (let i = 0; i < 20; i++) {
-              if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
-              await page.waitForTimeout(100);
-            }
-          } else {
-            const addBtn = page.locator('.hyle-picker[data-hyle-picker-key="type"] button[data-hyle-picker-add]');
-            if (await addBtn.count() > 0) {
-              await addBtn.click();
-              const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
-              for (let i = 0; i < 20; i++) {
-                if ((await valSpan.innerText().catch(() => "")).includes(v)) break;
-                await page.waitForTimeout(100);
-              }
-            }
-          }
-        }
-      }
+      await pickRow(page, "type", slug, v);
     }
     if (await details.count() > 0 && (await details.first().getAttribute('open')) !== null) {
       await details.locator('summary').first().click();
@@ -853,29 +860,7 @@ Deno.test({
           }
           const cCom = page.locator('input[name="type"][value="communion"]');
           if (await cCom.count() > 0 && await cCom.isChecked()) await cCom.uncheck();
-          let cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
-          if (await cEntry.count() === 0) {
-            const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
-            if (await search.count() > 0) {
-              await search.fill("Entry");
-              const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
-              await rows.waitFor({ state: "visible" });
-              let text = await rows.innerText();
-              for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
-                await page.waitForTimeout(100);
-                text = await rows.innerText();
-              }
-            }
-            cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
-          }
-          if (await cEntry.count() > 0) {
-            await cEntry.first().check();
-            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
-            for (let i = 0; i < 20; i++) {
-              if ((await valSpan.innerText()).includes("Entry")) break;
-              await page.waitForTimeout(100);
-            }
-          }
+          await pickRow(page, "type", "entry", "Entry");
         }
       }
       await Promise.all([
@@ -995,32 +980,7 @@ Deno.test({
             const open = await details.first().getAttribute('open');
             if (open === null) await details.locator('summary').first().click();
           }
-          let cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
-          if (await cEntry.count() === 0) {
-            const search = page.locator('.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search');
-            if (await search.count() > 0) {
-              await search.fill("Entry");
-              const rows = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows').first();
-              await rows.waitFor({ state: "visible" });
-              let text = await rows.innerText();
-              for (let i = 0; i < 20 && !text.includes("Entry"); i++) {
-                await page.waitForTimeout(100);
-                text = await rows.innerText();
-              }
-            }
-            cEntry = page.locator('.hyle-picker[data-hyle-picker-key="type"] input[name="type"][value="entry"]');
-          }
-          if (await cEntry.count() > 0) {
-            await cEntry.first().evaluate((el) => {
-              (el as any).checked = true;
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-            });
-            const valSpan = page.locator('.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-values');
-            for (let i = 0; i < 20; i++) {
-              if ((await valSpan.innerText().catch(() => "")).includes("Entry")) break;
-              await page.waitForTimeout(100);
-            }
-          }
+          await pickRow(page, "type", "entry", "Entry");
         }
       }
       await Promise.all([
@@ -1074,6 +1034,106 @@ Deno.test({
         assert(
           found,
           "Filter type=entry should find song after adding second type",
+        );
+      }
+    } finally {
+      await browser.close();
+      if (songId) {
+        try {
+          await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, {
+            recursive: true,
+          });
+        } catch { /* ignore */ }
+      }
+    }
+  },
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Test 10: WipeBuster — search-driven refetch must not drop earlier picks
+// ──────────────────────────────────────────────────────────────────────────────
+
+Deno.test({
+  name: "song type: selecting via search keeps earlier pick (no payload wipe)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    let songId: string | null = null;
+
+    try {
+      page.setDefaultNavigationTimeout(10000);
+      page.setDefaultTimeout(10000);
+
+      await createAndLoginUser(page, BASE);
+
+      const ts = Date.now();
+      await page.goto(`${BASE}/song/add`);
+      await page.waitForSelector('input[name="title"]', { timeout: 5000 });
+      await page.fill('input[name="title"]', `Type WipeBuster Test ${ts}`);
+
+      const ta = page.locator('textarea[name="type"]');
+      if (await ta.count() > 0) {
+        await page.fill('textarea[name="type"]', "Communion\nEntry");
+      } else {
+        await pickRow(page, "type", "communion", "Communion");
+
+        // Force the panel swap that wipes Communion's row off the DOM.
+        const search = page.locator(
+          '.hyle-picker[data-hyle-picker-key="type"] input.hyle-picker-search',
+        );
+        assert(
+          await search.count() > 0,
+          "WipeBuster needs the picker search box for key=type",
+        );
+        await search.fill("Entry");
+        const rows = page.locator(
+          '.hyle-picker[data-hyle-picker-key="type"] .hyle-picker-rows',
+        ).first();
+        await rows.waitFor({ state: "visible" });
+        let text = "";
+        for (let i = 0; i < 20; i++) {
+          text = await rows.innerText().catch(() => "");
+          if (text.includes("Entry")) break;
+          await page.waitForTimeout(100);
+        }
+        assert(
+          text.includes("Entry"),
+          `Picker search should surface "Entry", got: "${text.slice(0, 120)}"`,
+        );
+
+        // Communion's row is gone from the DOM now; the submit payload must
+        // still carry both values. Tick Entry, then submit.
+        await pickRow(page, "type", "entry", "Entry");
+      }
+
+      const submit = page.locator('form[method="POST"] button[type="submit"]');
+      const [response] = await Promise.all([
+        page.waitForURL(/\/song\/[^/]+$/, { timeout: 10000 }),
+        submit.click(),
+      ]);
+      songId = extractSongId(page.url());
+
+      // Detail state must include both values.
+      {
+        const state = await extractStateJson(page);
+        const typeStr = Array.isArray(state.type)
+          ? (state.type as string[]).join(", ")
+          : String(state.type);
+        assert(
+          typeStr.includes("Communion") && typeStr.includes("Entry"),
+          `After search-driven select, detail must include both "Communion" and "Entry", got: ${JSON.stringify(state.type)}`,
+        );
+      }
+
+      // On-disk type file must contain both values (no duplicates).
+      {
+        const typeFile = `${REPO_ROOT}/var/song/${songId}/type`;
+        const content = await Deno.readTextFile(typeFile);
+        assert(
+          content.includes("Communion") && content.includes("Entry"),
+          `On-disk type file should contain both after search-driven select, got: "${content.trim()}"`,
         );
       }
     } finally {

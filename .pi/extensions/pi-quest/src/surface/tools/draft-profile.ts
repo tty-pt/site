@@ -1,23 +1,26 @@
-// HIGH_LEVEL: #tools (main agent) — checkPlan reports the deterministic draft
-// profile without writing or booting a review, so the agent builds up to the
-// maturity bar before paying for a reviewer run.
+// HIGH_LEVEL: #tools (main agent) — checkPlan/checkAnalysis report the
+// deterministic draft profile without writing or booting a review, so the
+// agent builds up to the maturity bar before paying for a reviewer run.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx } from "../../hooks/events";
-import type { QuestState } from "../../domain/quest";
+import type { QuestKind, QuestState } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
 import { getState } from "../../app/store";
 import { readQuestConfig } from "../../config";
-import { draftProfileText, parseDraftSections, splicePlanSection } from "../../drafting/plan-text";
+import { draftProfileText, parseDraftSections, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { checkPlanCitations } from "./claims";
 
-export async function applyPlanCheck(
+async function deliverableProfile(
   ctx: PiCtx,
   state: QuestState,
-  planBody: string,
+  splice: (text: string, body: string) => string,
+  body: string,
+  kind: QuestKind,
+  param: string,
 ): Promise<{ text?: string; error?: string }> {
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
-    return { error: `checkPlan needs a draft in drafting (phase ${state.phase}); author one via draftName first` };
+    return { error: `${param} needs a draft in drafting (phase ${state.phase}); author one via draftName first` };
   }
   const path = join(ctx.cwd, draftPath(state.qid));
   let current: string;
@@ -26,18 +29,34 @@ export async function applyPlanCheck(
   } catch {
     return { error: `draft file missing at ${draftPath(state.qid)}` };
   }
-  // Splice the would-be plan onto the current draft so the profile reflects
+  // Splice the would-be body onto the current draft so the profile reflects
   // exactly what a save would review.
-  const updated = splicePlanSection(current, planBody);
+  const updated = splice(current, body);
   const sections = parseDraftSections(updated);
   const config = await readQuestConfig(ctx.cwd);
-  const claims = await checkPlanCitations(ctx, planBody);
-  return { text: draftProfileText(sections, config.draftThresholds, claims) };
+  const claims = await checkPlanCitations(ctx, body);
+  return { text: draftProfileText(sections, config.draftThresholds, claims, kind) };
 }
 
-export async function profileForSavedDoc(ctx: PiCtx, docText: string): Promise<string> {
+export async function applyPlanCheck(
+  ctx: PiCtx,
+  state: QuestState,
+  planBody: string,
+): Promise<{ text?: string; error?: string }> {
+  return deliverableProfile(ctx, state, splicePlanSection, planBody, "standard", "checkPlan");
+}
+
+export async function applyAnalysisCheck(
+  ctx: PiCtx,
+  state: QuestState,
+  analysisBody: string,
+): Promise<{ text?: string; error?: string }> {
+  return deliverableProfile(ctx, state, spliceAnalysisSection, analysisBody, "analysis", "checkAnalysis");
+}
+
+export async function profileForSavedDoc(ctx: PiCtx, docText: string, kind: QuestKind = "standard"): Promise<string> {
   const config = await readQuestConfig(ctx.cwd);
-  return draftProfileText(parseDraftSections(docText), config.draftThresholds);
+  return draftProfileText(parseDraftSections(docText), config.draftThresholds, "", kind);
 }
 
 // The quest_update_state { checkPlan } parameter: a pure read-only probe that
@@ -49,6 +68,17 @@ export async function checkPlanParam(
   const body = params["checkPlan"];
   if (typeof body !== "string" || body.trim() === "") return { applied: [] };
   const check = await applyPlanCheck(ctx, getState(), body.trim());
+  if (check.error !== undefined) return { applied: [], error: check.error };
+  return { applied: [check.text ?? ""] };
+}
+
+export async function checkAnalysisParam(
+  ctx: PiCtx,
+  params: Record<string, unknown>,
+): Promise<{ applied: string[]; error?: string }> {
+  const body = params["checkAnalysis"];
+  if (typeof body !== "string" || body.trim() === "") return { applied: [] };
+  const check = await applyAnalysisCheck(ctx, getState(), body.trim());
   if (check.error !== undefined) return { applied: [], error: check.error };
   return { applied: [check.text ?? ""] };
 }

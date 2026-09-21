@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
-import type { ApprovedBy, QuestState } from "../domain/quest";
-import { childDeviated, noteDraftFindings, promote, researchRecorded } from "../domain/quest";
+import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
+import { noteDraftFindings } from "../domain/transitions";
+import { promoteAfterPass } from "./promote";
 import { draftPath } from "../domain/paths";
+import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
@@ -18,6 +20,8 @@ import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
 import {
   bumpReviewCount,
+  deliverableBody,
+  deliverableWord,
   draftProfileText,
   hashContent,
   meetsReviewThresholds,
@@ -101,14 +105,13 @@ export async function bootDraftReview(
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
+  const kind = state.kind;
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
   const sections = parseDraftSections(content);
-  // Material first: it diffs against the previously reviewed plan, so the
-  // base below must still hold the old text at this point.
   const material = reviewMaterial(getState(), sections);
-  const belowBar = !meetsReviewThresholds(sections, config.draftThresholds);
-  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: sections.plan } });
+  const belowBar = !meetsReviewThresholds(sections, config.draftThresholds, kind);
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
   const outcome = await runIsolatedReview({
     pi,
     ctx,
@@ -125,7 +128,7 @@ export async function bootDraftReview(
       // No reviewer subagent exists: only a live human "go" (real input) may
       // promote. A quest_ask_human default is absence, not approval — it must
       // never be treated as promotion authority.
-      sendSteer(pi, `No reviewer available for ${qid}. Plan at ${draftPath(qid)}. Only a live user reply "go" promotes; a quest_ask_human default does not count. Keep revising to stay in drafting.`);
+      sendSteer(pi, `No reviewer available for ${qid}. ${deliverableWord(kind)} at ${draftPath(qid)}. Only a live user reply "go" promotes; a quest_ask_human default does not count. Keep revising to stay in drafting.`);
     }
     return;
   }
@@ -140,10 +143,12 @@ export async function bootDraftReview(
       sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or a live user may reply "go".`);
       return;
     }
-    updateState((s) => promote(s, "review"));
-    emitNow(pi);
+    // Route by kind: standard quests promote to implementing; analysis quests
+    // auto-claim straight to validating (D3) unless sub-quests still run.
+    const message = promoteAfterPass(pi, ctx, qid, "review");
+    if (message === null) return;
     const advisories = outcome.review.advisories.trim();
-    sendWake(pi, `Quest ${qid} promoted to implementing (reviewer PASS). Proceed autonomously from the draft plan.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
+    sendWake(pi, `${message}${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;
   }
   updateState((s) => noteDraftFindings(s));
@@ -154,9 +159,9 @@ export async function bootDraftReview(
     ? ""
     : `\n\nReview text (verbatim, budget-bounded):\n${verbatim}`;
   const profile = belowBar
-    ? `\n\nDraft profile:\n${draftProfileText(sections, config.draftThresholds)}`
+    ? `\n\nDraft profile:\n${draftProfileText(sections, config.draftThresholds, "", kind)}`
     : "";
-  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the plan and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
+  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
 }
 
 // A failed run's retry: rewrite the quest doc with the incremented review
@@ -185,7 +190,7 @@ export async function bumpReviewCountAndReboot(
     clearDraftReviewRetry(qid);
     return;
   }
-  const bumped = bumpReviewCount(content, attempt);
+  const bumped = bumpReviewCount(content, attempt, getState().kind);
   if (bumped === content) return;
   try {
     await writeFile(file, bumped, "utf8");
@@ -211,7 +216,7 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
   const sections = parseDraftSections(content);
-  if (sections.plan.length > 0 && !state.draft.planAuthored) {
+  if (deliverableBody(sections, state.kind).length > 0 && !state.draft.planAuthored) {
     updateState((s) => s.draft === null ? s : {
       ...s,
       draft: { ...s.draft, planAuthored: true },
@@ -237,31 +242,32 @@ export async function ensureDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   if (state.phase !== "drafting" || state.qid === null || state.draft === null) return;
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
-  if (parseDraftSections(content).plan.length === 0) return;
+  if (deliverableBody(parseDraftSections(content), state.kind) === "") return;
   if (state.lastReview?.target === hashContent(content)) return;
   await maybeBootDraftReview(pi, ctx);
 }
 
-export function approveDraft(pi: Pi, qid: string, by: ApprovedBy): boolean {
+export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): boolean {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return false;
   cancelReview(qid);
   clearDraftReviewRetry(qid);
-  updateState((s) => promote(s, by));
-  emitNow(pi);
-  const how = by === "user" ? 'user "go"' : "reviewer PASS";
-  sendSteer(pi, `Quest ${qid} promoted to implementing (${how}). Proceed autonomously from the draft plan.`);
+  // Kind-aware routing in promoteAfterPass: standard → implementing, analysis
+  // → full-on validating once its children are done (D3).
+  const message = promoteAfterPass(pi, ctx, qid, by);
+  if (message === null) return false;
+  sendSteer(pi, message);
   return true;
 }
 
-export function handleGoInput(pi: Pi, text: string): boolean {
+export function handleGoInput(pi: Pi, ctx: PiCtx, text: string): boolean {
   // "go" here is a LIVE user input event (wired in watchGoInput via
   // onUserMessage). It is never served from a tool result — a quest_ask_human
   // default is absence, not approval, and so can never promote a draft.
   if (!GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
-  return approveDraft(pi, state.qid, "user");
+  return approveDraft(pi, ctx, state.qid, "user");
 }
 
 async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promise<void> {
@@ -333,7 +339,7 @@ export function watchResume(pi: Pi): void {
 }
 
 export function watchGoInput(pi: Pi): void {
-  onUserMessage(pi, (text) => {
-    handleGoInput(pi, text);
+  onUserMessage(pi, (text, eventCtx) => {
+    handleGoInput(pi, eventCtx, text);
   });
 }

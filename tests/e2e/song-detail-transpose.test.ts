@@ -33,7 +33,7 @@ Deno.test("song detail: login → view song → toggle Latin notation → verify
 
     // Open the sidebar menu to access transpose controls
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -85,7 +85,7 @@ Deno.test("song detail: login → view song → transpose via JS → verify disp
 
     // Open the sidebar menu to access transpose controls
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });

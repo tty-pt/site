@@ -29,7 +29,8 @@
 	function state(root) {
 		if (!root.__frag)
 			root.__frag = { seq: 0, busy: false, eof: false,
-				cursor: 0, appends: 0, io: null, timer: null };
+				cursor: 0, appends: 0, io: null, timer: null,
+				sel: {} };
 		return root.__frag;
 	}
 
@@ -40,6 +41,47 @@
 		for (i = 0; i < inputs.length; i++)
 			out.push(inputs[i].value);
 		return out.join(',');
+	}
+
+	function selectedSlugs(root) {
+		var sel = state(root).sel;
+		if (sel && Object.keys(sel).length > 0)
+			return Object.keys(sel).join(',');
+		return checkedSlugs(root);
+	}
+
+	/* Persistent selection set per root. A slug is kept while any row
+	 * that carries it is absent from the DOM (panel swap/paging wiped it)
+	 * or checked. It is dropped only when a row for it exists AND is
+	 * unchecked (the user explicitly un-selected it). Single-select
+	 * pickers track only the single active selection. */
+	function updateSel(root) {
+		var st = state(root);
+		if (!st.sel) st.sel = {};
+		var multi = root.getAttribute('data-hyle-picker-multi') === '1';
+		var inputs = root.querySelectorAll('.hyle-picker-rows input');
+		var i, v;
+		if (!multi) {
+			for (i = 0; i < inputs.length; i++) {
+				if (inputs[i].checked) {
+					st.sel = {};
+					st.sel[inputs[i].value] = true;
+					return;
+				}
+			}
+			return;
+		}
+		var present = {}, checked = {};
+		for (i = 0; i < inputs.length; i++) {
+			v = inputs[i].value;
+			present[v] = true;
+			if (inputs[i].checked) checked[v] = true;
+		}
+		for (v in checked) st.sel[v] = true;
+		for (v in st.sel) {
+			if (present[v] && !checked[v])
+				delete st.sel[v];
+		}
 	}
 
 	function labelOf(input) {
@@ -57,6 +99,19 @@
 		slot.textContent = labels.join('; ');
 	}
 
+	function applyPinned(root, slugs) {
+		var set = {}, i, input;
+		for (i = 0; i < slugs.length; i++) set[slugs[i]] = true;
+		var rows = root.querySelectorAll(
+			'.hyle-picker-rows input');
+		for (i = 0; i < rows.length; i++) {
+			input = rows[i];
+			if (set[input.value] && !input.checked)
+				input.checked = true;
+		}
+		syncSummary(root);
+	}
+
 	function swapSlot(root, name, html) {
 		var slot = root.querySelector(
 			'[data-hyle-slot="' + name + '"]');
@@ -65,6 +120,8 @@
 		tpl.innerHTML = html.trim();
 		var next = tpl.content.firstElementChild;
 		if (!next) return null;
+
+		var pre = Object.keys(state(root).sel || {});
 
 		var oldSearch = (name === 'panel') ? searchOf(slot) : null;
 		var newSearch = (name === 'panel') ? searchOf(next) : null;
@@ -92,6 +149,7 @@
 				slot.setAttribute(newAttr.name, newAttr.value);
 			}
 			updateAddButton(root, oldSearch.value);
+			applyPinned(root, pre);
 			return slot;
 		}
 
@@ -108,7 +166,7 @@
 		var searchEl = searchOf(root);
 		var q = searchEl ? searchEl.value : '';
 		var url = sub(root.getAttribute('data-hyle-frag-url'),
-			q, page, checkedSlugs(root));
+			q, page, selectedSlugs(root));
 		var seq = ++st.seq;
 
 		st.busy = true;
@@ -203,6 +261,7 @@
 	function adopt(root) {
 		if (root.__frag) return;
 		state(root);
+		updateSel(root);
 		root.classList.add('hyle-frag-active');
 
 		/* Start the cursor one past whatever page SSR rendered
@@ -345,18 +404,19 @@
 						prevRadios[i].checked = false;
 				}
 
-				var existing = rows.querySelector('input[value="' + newId + '"]');
-				if (existing) {
-					existing.checked = true;
-				} else {
-					var newOption = document.createElement('label');
-					newOption.className = 'hyle-picker-option';
-					newOption.innerHTML = '<input type="' + (multi ? 'checkbox' : 'radio') + '" name="' + escapeAttr(key) + '" value="' + escapeAttr(newId) + '" checked/> ' + escapeHtml(newName);
-					rows.insertBefore(newOption, rows.firstChild);
-				}
+var existing = rows.querySelector('input[value="' + newId + '"]');
+			if (existing) {
+				existing.checked = true;
+			} else {
+				var newOption = document.createElement('label');
+				newOption.className = 'hyle-picker-option';
+				newOption.innerHTML = '<input type="' + (multi ? 'checkbox' : 'radio') + '" name="' + escapeAttr(key) + '" value="' + escapeAttr(newId) + '" checked/> ' + escapeHtml(newName);
+				rows.insertBefore(newOption, rows.firstChild);
 			}
+		}
 
-			syncSummary(root);
+		updateSel(root);
+		syncSummary(root);
 
 			var search = searchOf(root);
 			if (search) search.value = '';
@@ -396,6 +456,7 @@
 		 * instead of submitting the surrounding form. */
 		e.preventDefault();
 		e.target.checked = true;
+		updateSel(root);
 		syncSummary(root);
 		var details = root.querySelector('details');
 		if (details) details.removeAttribute('open');
@@ -491,6 +552,7 @@
 				if (radio) {
 					radio.checked = true;
 					adopt(optRoot);
+					updateSel(optRoot);
 					syncSummary(optRoot);
 					var d = optRoot.querySelector('details');
 					if (d) d.removeAttribute('open');
@@ -518,6 +580,7 @@
 				e.target.tagName !== 'INPUT')
 			return;
 		adopt(root);
+		updateSel(root);
 		syncSummary(root);
 		if (e.target.type === 'radio') {
 			var details = root.querySelector('details');
@@ -527,6 +590,48 @@
 			}
 		}
 	});
+
+	/* Reconcile form payload with the persistent selection set before
+	 * submit: any selected slug that no longer has a checked row in the
+	 * form (its panel row was swapped out by search/paging) is re-added
+	 * as a hidden input. No-op for rows already submitted by a checked
+	 * element, so values are never duplicated. */
+	document.addEventListener('submit', function (e) {
+		var form = e.target;
+		if (!form || form.tagName !== 'FORM') return;
+		var roots = form.querySelectorAll('[data-hyle-frag-url]');
+		var i, j, root, key, slugs, v, multi;
+		for (i = 0; i < roots.length; i++) {
+			root = roots[i];
+			key = root.getAttribute('data-hyle-picker-key');
+			if (!key) continue;
+			multi = root.getAttribute('data-hyle-picker-multi') === '1';
+			if (!multi) {
+				if (form.querySelector('input[name="' + key + '"]:checked'))
+					continue;
+				slugs = Object.keys(state(root).sel || {});
+				if (slugs.length > 0) {
+					var hid = document.createElement('input');
+					hid.type = 'hidden';
+					hid.name = key;
+					hid.value = slugs[0];
+					form.appendChild(hid);
+				}
+				continue;
+			}
+			slugs = Object.keys(state(root).sel || {});
+			for (j = 0; j < slugs.length; j++) {
+				v = slugs[j];
+				if (form.querySelector('input[name="' + key + '"][value="' + v + '"]:checked'))
+					continue;
+				var hid = document.createElement('input');
+				hid.type = 'hidden';
+				hid.name = key;
+				hid.value = v;
+				form.appendChild(hid);
+			}
+		}
+	}, true);
 
 	var nodes = document.querySelectorAll('[data-hyle-frag-url]');
 	for (var i = 0; i < nodes.length; i++)
