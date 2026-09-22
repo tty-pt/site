@@ -40,10 +40,10 @@ make watch          # auto-rebuild + restart on :8080
    `gig→index+mpfd+song+source+grp`; `core` loads only `common+source`).
    See `ARCHITECTURE §5`, `CONVENTIONS`.
 
-4. **hyle stays neutral; SSR is the contract.** `external/hyle` owns
+4. **hyle stays neutral; SSR is the contract.** `external/libhyle` owns
    canonical data schemas (`hyle_schema_desc_t`) without any DOM concepts;
-   `external/bud` is a pure 5-field UI binder (`bud_field_desc_t`) without
-   any database/storage concepts. `external/hyle/c/libhyle-source` owns
+   `external/libbud` is a pure 5-field UI binder (`bud_field_desc_t`) without
+   any database/storage concepts. `external/libhyle-source` owns
    persistence and storage drivers (`hyle_source_store_ops_t`). `libhyle-bud`
    is the ONLY bud-dependent bridge and **is** used in UX for filters/tables
    (`index`/`gig`/`grp`). SSR emits plain HTML + `data-*` hooks;

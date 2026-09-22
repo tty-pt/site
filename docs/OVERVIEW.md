@@ -19,10 +19,11 @@ to wasm32-wasi for browser-side polish.
 | `external/libxylem` | XY cross-.so dispatch (`dlopen` before chroot) |
 | `external/libqmap` | opaque data store (never free values) |
 | `external/stoma` | tokenization / search fold (accent-sensitive) |
-| `external/hyle` | data layer: canonical schema (`hyle_schema_desc_t`), records, query, filtering, FTS |
-| `external/hyle/c/libhyle-source` | standalone persistence engine: dataset metadata, DSV, JSON state overlays, pluggable drivers (`hyle_source_store_ops_t`) |
-| `external/hyle/c/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp`) |
-| `external/bud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
+| `external/libhyle` | data/query kernel: canonical schema (`hyle_schema_desc_t`), query, filtering, FTS, generic registry/ordered/derive machinery, FFI row API, `hyle_qs_param` |
+| `external/libhyle-source` | standalone persistence engine: dataset metadata, DSV, JSON state overlays, pluggable drivers (`hyle_source_store_ops_t`), plus the picker DTOs (`hyle-source/picker.h`) |
+| `external/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp` and the `/pick/:id/options` fragment route hosted by `mods/source`) |
+| `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
+| `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
 | `mods/*` | site modules — thin composition layers wiring the libraries together (reusable; declare deps via `xy_load()` in `xy_install()`, see `ARCHITECTURE.md:§3`) |
 
 ## Framework-pair model (the governing design rule)
@@ -48,7 +49,7 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 ## The unbreakable rules
 
 - **No-JS must always work.** Client enhancement is optional and additive.
-- **hyle stays neutral.** `external/hyle` has 0 DOM symbols; `external/bud` has 0 database/storage symbols. Only `external/hyle/c/libhyle-bud` and `mods/common` may bridge the two.
+- **hyle stays neutral.** `external/libhyle` has 0 DOM symbols; `external/libbud` has 0 database/storage symbols. Only `external/libhyle-bud` and `mods/common` may bridge the two.
 - **All row writes go through hyle `put`/`del`** (`source_update_item` /
   `source_delete_item`) — writing qmaps directly freezes the FTS index. Storage drivers (`store_fs`, `store_mem`) handle file and field persistence automatically.
 - **Search is accent-sensitive by design** (`pão` ≠ `pao`); no iconv

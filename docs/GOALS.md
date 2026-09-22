@@ -89,29 +89,29 @@ axil           → xylem+qmap+qsys+ssl
 site mods      → assemble axil+XY+hyle(+libhyle-source+libhyle-bud)+bud
 ```
 
-Verify with `grep -r bud external/hyle/src include/hyle` must be `0`
-before every commit (`ARCHITECTURE.md:§2`). `external/bud/include` and `external/bud/src`
+Verify with `grep -r bud external/libhyle/src include/hyle` must be `0`
+before every commit (`ARCHITECTURE.md:§2`). `external/libbud/include` and `external/libbud/src`
 must contain `0` database/storage includes.
 
 ### 2.2 Rules
 
-- `external/hyle/src` + `include/hyle` contain **no** `bud`/`lx_`/`bud_`
-  symbols. `external/hyle/include/hyle/schema.h` defines canonical data schemas
+- `external/libhyle/src` + `include/hyle` contain **no** `bud`/`lx_`/`bud_`
+  symbols. `external/libhyle/include/hyle/schema.h` defines canonical data schemas
   (`hyle_schema_desc_t`) independently of any UI renderer.
-- `external/bud` contains **no** `qmap_`/`hyle`/`xy_`/`stoma`/`axil`
-  includes (`external/bud/src/libbud.c` only `bud.h`/`bud_app.h`). `bud_field_desc_t`
+- `external/libbud` contains **no** `qmap_`/`hyle`/`xy_`/`stoma`/`axil`
+  includes (`external/libbud/src/libbud.c` only `bud.h`/`bud_app.h`). `bud_field_desc_t`
   is a pure 5-field UI state binder (`key`, `offset`, `size`, `is_int`, `kind`).
-- Only `external/hyle/c/libhyle-bud` may include `bud/bud.h`
-  (`external/hyle/c/libhyle-bud/include/hyle-bud/hyle-bud.h`). It links
+- Only `external/libhyle-bud` may include `bud/bud.h`
+  (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`). It links
   `LDLIBS = -lhyle -lbud -lqmap` and nothing else.
-- `external/hyle/c/libhyle-source` is the standalone persistence engine, linking
+- `external/libhyle-source` is the standalone persistence engine, linking
   `-lhyle -lqmap -lstoma -ljson-c`.
 - `stoma` exposes `stoma_fold` as pure `string.h`/`ctype.h`
   (`external/stoma/src/token.c:11`); its `libstoma` TU may use `qmap`
   but `token.c` does not.
 - Site modules that need `hyle-bud` rendering (`gig`, `grp`, `index`)
   declare it explicitly:
-  `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include`
+  `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/libhyle-bud/include`
   and `EXTRA_LDLIBS += -lhyle-bud`.
   `hyle-bud` is pure `bud` + C (`filter.c`, `table.c` via `hyle-bud-wasm.mk`);
   its use in `mods/*/ux` for filters/tables **is** the sanctioned UX
@@ -181,8 +181,8 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 
 ## 5. Guardrails (check before commit — must be 0 / pass)
 
-1. `grep -rn bud external/hyle/src include/hyle` must be empty
-    (`ARCHITECTURE.md:§2`). Only `external/hyle/c/libhyle-bud` may
+1. `grep -rn bud external/libhyle/src include/hyle` must be empty
+    (`ARCHITECTURE.md:§2`). Only `external/libhyle-bud` may
     mention `bud`.
 2. New `WASM` TU: `grep -E 'qmap_|source_|axil_|hyle_source|XY_' ux/<your>.c` must be
     empty; `hyle_bud_*` is the only allowed `hyle_*` in UX. Any hit will be
@@ -194,7 +194,7 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 5. No `"var/` literal outside `common_storage.c` / `source_store_fs.c` + `source_setup` registration; use `with_module_item_access` / `item_path_build_root`.
 6. New write path: through `source_update_item`/`source_delete_item` → `hyle put/del` only (`ARCHITECTURE.md:§6`). Direct `fopen("var/...")` freezes FTS.
 7. New field: one row in `fields.h`; no `switch(module)` in `index` — declare `source_list_view_t` beside field table.
-8. `hyle-bud` is per-module: `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/hyle/c/libhyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` in `mods/index,gig,grp/Makefile` only; `hyle-bud-wasm.mk` is single `HYLE_BUD_WASM_SRC` declaration. No global `-I` in `build.mk`.
+8. `hyle-bud` is per-module: `EXTRA_CFLAGS += -I$(REPO_ROOT)/external/libhyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` in `mods/index,gig,grp/Makefile` only; `hyle-bud-wasm.mk` is single `HYLE_BUD_WASM_SRC` declaration. No global `-I` in `build.mk`.
 9. `sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh` must pass (blocking `make all:boundary-check`). `wasm-allowed-imports.lst` allowlists `env.bud_host_*` only.
 10. Site-specific surface minimal (blocking): `grep -E '"(poem|song|gig|grp)"' mods/common mods/index --include="*.h" --include="*.c"` must be 0 outside `source_list_view_t` registration — per-module registration keeps `common/index` reusable.
 11. Feature placement — consider owning http server: choose owner `HTTP→axil`, `dataset/query/FTS→source→hyle`, `collection/list→index+hyle-bud`, `chrome/forms→common/ux`, `domain→song/gig/grp`. If 2+ callers need it, invent in the library; if handler >30 lines, extend abstraction.

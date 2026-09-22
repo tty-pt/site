@@ -5,12 +5,12 @@ state: ready
 severity: medium
 requires: []
 validates: "walk-* dead code removed; g_ms/g_ss replaced with per-widget lookup; site_ui_textarea_value dedup deleted; form.c domain-leak skip-list removed; site_chrome.c statics moved off global"
-area: "htdocs/bud-hydrate.js:729-778,1503, external/bud/src/libbud.c:2545-2647, mods/common/ux/site_forms.c:85-128, external/hyle/c/libhyle-bud/src/filter.c:128-149, external/hyle/c/libhyle-bud/src/form.c:108-115, mods/common/ux/site_chrome.c:17-20"
+area: "htdocs/bud-hydrate.js:729-778,1503, external/libbud/src/libbud.c:2545-2647, mods/common/ux/site_forms.c:85-128, external/libhyle-bud/src/filter.c:128-149, external/libhyle-bud/src/form.c:108-115, mods/common/ux/site_chrome.c:17-20"
 parent: []
 ---
 # Issue: Consumer-side complexity — 6 items from quest #1788359911
 
-- **Area:** Consumer code across `htdocs/`, `external/bud/`, `external/hyle/c/libhyle-bud/`, `mods/common/ux/`
+- **Area:** Consumer code across `htdocs/`, `external/libbud/`, `external/libhyle-bud/`, `mods/common/ux/`
 - **Runs observed:** `1788359911` (`ANALYSIS.md:1`, plan v4 high confidence)
 - **Severity:** Medium — reduces cognitive complexity without file-splitting; items 1+4 pure deletion (lowest risk), items 2+5+6 need design
 
@@ -36,7 +36,7 @@ TWO distinct dead APIs (verified 2026-09-02 build-mode):
 | `bud_walk_node` (static) | `libbud.c:2659-2716` | DEAD prod |
 | `bud_walk` (public) | `libbud.c:2718-2725` | DEAD prod |
 | Declarations | `bud.h:131,133`, `bud_walk_ops` `bud.h:54-71` | DEAD prod |
-| Docs | `external/bud/README.md` (tree-walk + walk-op lines) | remove |
+| Docs | `external/libbud/README.md` (tree-walk + walk-op lines) | remove |
 | Test `bud_walk` block | `bud_test.c:858-899` | test only — remove |
 | Test `walk-stream` block | `bud_test.c:901-926` | test only — remove |
 
@@ -106,13 +106,13 @@ Generic `writable` + `kind>=3||kind==5` already cover most. Only `id` is truly n
 ## Constraints
 
 - `AGENTS.md:1` — UX pure & isomorphic, forbidden `XY_/xy_/qmap_/source_/axil_`
-- `AGENTS.md:4` — hyle neutral; `external/hyle` no DOM, `external/bud` no storage
+- `AGENTS.md:4` — hyle neutral; `external/libhyle` no DOM, `external/libbud` no storage
 - `AGENTS.md:5` — data invariants; all writes via `source_update_item`
 - `docs/SSR-CONTRACT.md` — plain HTML + `data-*` hooks
 - `docs/C-ISOMORPHIC-BUD.md` — one `bud_app_render(state)`
 
 ## Files examined
 
-`htdocs/bud-hydrate.js`, `htdocs/bud-client.js`, `external/bud/src/libbud.c`, `external/bud/src/bud_test.c`, `external/bud/src/bud_wasm_app.c`, `external/hyle/c/libhyle-bud/src/filter.c`, `external/hyle/c/libhyle-bud/src/form.c`, `external/hyle/c/libhyle-bud/src/picker.c`, `external/hyle/c/libhyle-bud/src/table.c`, `mods/common/ux/site_ui.c`, `mods/common/ux/site_chrome.c`, `mods/common/ux/site_forms.c`, `mods/site_chrome/ux/chrome.c`, `mods/index/ux/list*.c`, `docs/OVERVIEW.md`
+`htdocs/bud-hydrate.js`, `htdocs/bud-client.js`, `external/libbud/src/libbud.c`, `external/libbud/src/bud_test.c`, `external/libbud/src/bud_wasm_app.c`, `external/libhyle-bud/src/filter.c`, `external/libhyle-bud/src/form.c`, `external/libhyle-bud/src/picker.c`, `external/libhyle-bud/src/table.c`, `mods/common/ux/site_ui.c`, `mods/common/ux/site_chrome.c`, `mods/common/ux/site_forms.c`, `mods/site_chrome/ux/chrome.c`, `mods/index/ux/list*.c`, `docs/OVERVIEW.md`
 
 Related: Quest #1788359911 (`consumer-complexity-analysis`), plan v4.

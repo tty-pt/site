@@ -1161,7 +1161,7 @@ Fixes identified from post-run 1788530059 (session `01a06cb2-542d-76de-ae67-b988
   - Test: `23. quest_mark_saved verifies future draft file when state.activeDraft is set (T-B3)`.
 
 - **Reads Unconditionally Allowed (Bug 4).**
-  - Lines 488–538 in `src/tool_gating.ts` (F3(ii) read throttle) blocked reads to any path outside `.pi/quest/` when `isDraftRevisionOutstanding` was true. The reviewer specifically asked the agent to inspect `external/bud/` to verify JSON writer vs parser primitives, and pi-quest blocked the read.
+  - Lines 488–538 in `src/tool_gating.ts` (F3(ii) read throttle) blocked reads to any path outside `.pi/quest/` when `isDraftRevisionOutstanding` was true. The reviewer specifically asked the agent to inspect `external/libbud/` to verify JSON writer vs parser primitives, and pi-quest blocked the read.
   - Deleted lines 488–538. Reads and research operations are now unconditionally allowed across all gates and phases, respecting the invariant that reads are never blocked.
   - Test: `24. reads to non-quest files are allowed during draft revision (T-B4)`.
 

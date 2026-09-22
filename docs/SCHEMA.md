@@ -8,12 +8,12 @@ through the data layer.
 Three separate concepts, don't conflate them:
 
 1. **Canonical data schema (`hyle_schema_desc_t`)** — defined in
-   `external/hyle/include/hyle/schema.h`. Pure C descriptor specifying data types
+   `external/libhyle/include/hyle/schema.h`. Pure C descriptor specifying data types
    (`qm_type`, `source_type`), struct offsets/sizes, validation rules (`required`,
    `min_length`), persistence targets (`in_meta`, `file`), and foreign keys
    (`ref_source`, `ref_inverse`). Used by `libhyle-source`, `hyle`, and
    declarative form builders.
-2. **UI state binder (`bud_field_desc_t`)** — defined in `external/bud/include/bud/bud.h`.
+2. **UI state binder (`bud_field_desc_t`)** — defined in `external/libbud/include/bud/bud.h`.
    Contains **only 5 UI layout fields** (`key`, `offset`, `size`, `is_int`, `kind`).
    Purely used by `libbud` / WASM hydration (`bud_state_apply_stride_len`) with
    zero database or storage concepts.
@@ -24,6 +24,14 @@ Three separate concepts, don't conflate them:
 4. **List-view registration** — a framework-neutral `source_list_view_t`
    borrowed by an item source. It declares ordered columns and user-facing
    labels without changing hyle's registry schema.
+5. **Picker DTOs** — the widget/presentation types (`hyle_option_t`,
+   `hyle_picker_desc_t`, `_entry_t`, `_view_t`, `_buffer_t`, `HYLE_PICKER_*`
+   limits) are declared in `external/libhyle-source/include/hyle-source/picker.h`
+   (authored by the library that produces option rows). They moved out of libhyle
+   (`hyle/picker.h` no longer exists); `hyle-bud.h` includes the new header. Hint
+   policy is unchanged: `filter_style` / `filter_mode` / `allow_add` remain opaque
+   metadata strings on `hyle_schema_desc_t`, and libhyle still has zero bud
+   symbols.
 
 This split is what lets UI hints ride along without touching the data layer.
 
@@ -94,10 +102,10 @@ Plumbing (all shipped):
    absent (grid). Initialize `cols[n].filter[0]='\0'` up front (sscanf won't
    touch it on mismatch).
 4. `idx_filter_bar` passes it to `hyle_bud_filter_field` (the trailing
-   `filter_style` param); `external/hyle/c/libhyle-bud/src/filter.c` renders
+   `filter_style` param); `external/libhyle-bud/src/filter.c` renders
    `hyle_bud_multiselect_field` when the hint is `"dropdown"`.
 
-Guard: no `bud`/component symbols may appear in `external/hyle/src` or
+Guard: no `bud`/component symbols may appear in `external/libhyle/src` or
 `include/hyle` — the hint is an opaque string there.
 
 ## 6. Reference display

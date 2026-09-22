@@ -38,9 +38,10 @@ mkdir -p "$VAR_DIR"
 
 # 1. Makefile
 cat <<EOF > "$MOD_DIR/Makefile"
-HYLE_DIR = \$(REPO_ROOT)/external/hyle
-EXTRA_CFLAGS += -I../common -I\$(HYLE_DIR)/c/libhyle-bud/include
-EXTRA_LDLIBS += -lbud -laxil-auth -L\$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,\$(HYLE_DIR)/c/libhyle-bud/lib
+HYLE_DIR = \$(REPO_ROOT)/external/libhyle
+HYLE_BUD_DIR = \$(REPO_ROOT)/external/libhyle-bud
+EXTRA_CFLAGS += -I../common -I\$(HYLE_BUD_DIR)/include
+EXTRA_LDLIBS += -lbud -laxil-auth -L\$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,\$(HYLE_BUD_DIR)/lib
 MOD_NAME = ${MOD_NAME}
 DIRS = var/${MOD_NAME}
 REPO_ROOT != cd ../.. && pwd

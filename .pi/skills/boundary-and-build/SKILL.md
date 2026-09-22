@@ -23,8 +23,8 @@ sh scripts/check-module-boundaries.sh   # exits 1 on violation — covers:
 # delegates to check-wasm-imports.sh W06
 
 sh scripts/check-no-site-specific-js.sh # htdocs/*.js must not contain gig|song|poem|grp|repertoire|transpose|sb-|chord
-grep -rn 'bud' external/hyle/src/include/hyle  # must be 0
-grep -rn 'qmap' external/bud/src               # must be 0
+grep -rn 'bud' external/libhyle/src/include/hyle  # must be 0
+grep -rn 'qmap' external/libbud/src               # must be 0
 ```
 
 `check-ux-purity.sh` is warn-only (`exit 0` always) — run separately via `pure-c-isomorphic` skill for `mods/*/ux/*.c`.

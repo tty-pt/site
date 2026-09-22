@@ -71,8 +71,8 @@ song/form 2, poem/form 2, grp/add 2, grp/edit 2, index/list_render 1).
 
 ### 1.2 Changes
 
-All in `external/bud/include/bud/bud_jsx.h` (+ one function in
-`external/bud/src/libbud.c`). Existing macros keep their exact behavior;
+All in `external/libbud/include/bud/bud_jsx.h` (+ one function in
+`external/libbud/src/libbud.c`). Existing macros keep their exact behavior;
 these are additive.
 
 ```c
@@ -106,7 +106,7 @@ lx_text(zv)
 
 ### 1.3 Tests & demo
 
-- Extend `external/bud/src/bud_test.c`: `bud_textf` ownership/formatting,
+- Extend `external/libbud/src/bud_test.c`: `bud_textf` ownership/formatting,
   `lx_n`/`lx_frag_n` equivalence with `lx_el(...)...data.node`.
 - Rewrite `mods/song/ux/detail.c` renderers onto the new names as the demo.
 
@@ -250,8 +250,8 @@ byte-diff gates.
 ### 2.4 Support additions to bud
 
 Same as Stage 1's `bud_textf`/`lx_textf`, plus `CX_CHILD` above. All
-in-repo (`external/bud` is not a submodule). Tested in
-`external/bud/src/bud_test.c`.
+in-repo (`external/libbud` is not a submodule). Tested in
+`external/libbud/src/bud_test.c`.
 
 ### 2.5 Build integration — POSIX suffix rules, both makes
 

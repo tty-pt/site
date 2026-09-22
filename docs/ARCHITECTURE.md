@@ -55,24 +55,33 @@ axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
 qmap ── the data store (qmap_put copies key and value; caller frees originals)
 stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
-hyle  ── pure data/schema/query layer, canonical hyle_schema_desc_t, NO component symbols
-        deps: stoma, qmap
-libhyle-source (external/hyle/c/libhyle-source) ── standalone persistence engine:
-        dataset registration, CRUD, DSV, JSON state overlays, pluggable drivers
-        (hyle_source_store_ops_t: store_fs, store_mem, custom stores).
+hyle  ── pure data/query kernel: canonical hyle_schema_desc_t, query/filter/FTS,
+        generic registry/ordered/derive machinery, FFI row API, qs helpers
+        (hyle_qs_param in hyle/url.h). NO component symbols. deps: stoma, qmap
+libhyle-source (external/libhyle-source) ── standalone persistence engine:
+        registry access + CRUD, ordered/derive wrappers, option resolution,
+        DSV, JSON state overlays, pluggable drivers
+        (hyle_source_store_ops_t: store_fs, store_mem, custom stores), and the
+        picker DTOs (`hyle-source/picker.h` — `hyle/picker.h` no longer exists).
         deps: hyle, qmap, stoma, json-c
-hyle-bud (external/hyle/c/libhyle-bud) ── the bud binding; ONLY place that
+hyle-bud (external/libhyle-bud) ── the bud binding; ONLY place that
         may depend on bud. Bridges Hyle schemas to Bud UI components.
         deps: hyle, bud, qmap. Used in UX for filters/tables (`index`/`gig`/`grp`
-        link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`)
+        link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`) and by
+        `mods/source` for the picker fragment route (`/pick/:id/options`).
 bud   ── pure C DOM scaffold, 5-field UI state binder (bud_field_desc_t),
         and WASM bridge. deps: none of the above
+axil-hyle (external/axil-hyle) ── framework-neutral Axil↔Hyle REST connector:
+        `GET|POST|PUT|DELETE /api/dataset/...` (JSON CRUD) + partition
+        sub-resource routes. deps: axil, axil-auth, qmap, hyle, libhyle-source,
+        json-c. No bud/hyle-bud symbols — the bud-rendered `/pick/:id/options`
+        fragment endpoint is mounted by `mods/source` instead.
 site mods ── assemble axil + XY + hyle(+libhyle-source+libhyle-bud) + bud
 ```
 
-Verify the boundary with a grep before committing: `external/hyle/src` and
-`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols. `external/bud/include`
-and `external/bud/src` must contain no database/storage symbols.
+Verify the boundary with a grep before committing: `external/libhyle/src` and
+`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols. `external/libbud/include`
+and `external/libbud/src` must contain no database/storage symbols.
 
 ## 3. Module load order
 

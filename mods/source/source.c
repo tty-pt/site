@@ -12,14 +12,17 @@
 #include <ttypt/qmap.h>
 #include <ttypt/axil-hyle.h>
 #include <hyle/hyle.h>
-#include <hyle/source.h>
+#include <hyle/registry.h>
 
 #define SOURCE_IMPL
 #include "source.h"
 
+void source_install_pick_routes(void);
+
 void source_install_routes(void)
 {
 	axil_hyle_install_routes();
+	source_install_pick_routes();
 }
 
 XY_DECL(int, source_after_update,
@@ -497,7 +500,7 @@ XY_IMPL(unsigned, source_register_ordered,
 {
 	if (!def)
 		return 0;
-	return hyle_source_register_ordered(
+	return hyle_ordered_register(
 	        def->source_id, def->fields, def->field_count,
 	        def->partition_field, def->record_id, def->flags, def->load_fn,
 	        def->save_fn, def->persist_user);
@@ -507,7 +510,7 @@ XY_IMPL(int, source_ordered_count,
 	const char *, source_id,
 	const char *, partition_val)
 {
-	return hyle_source_ordered_count(source_id, partition_val);
+	return hyle_ordered_count(source_id, partition_val);
 }
 
 XY_IMPL(const char *, source_ordered_key_at,
@@ -515,7 +518,7 @@ XY_IMPL(const char *, source_ordered_key_at,
 	const char *, partition_val,
 	int, pos)
 {
-	return hyle_source_ordered_key_at(source_id, partition_val, pos);
+	return hyle_ordered_key_at(source_id, partition_val, pos);
 }
 
 XY_IMPL(int, source_ordered_append,
@@ -525,7 +528,7 @@ XY_IMPL(int, source_ordered_append,
 	const char **, values,
 	size_t, count)
 {
-	return hyle_source_ordered_append(
+	return hyle_ordered_append(
 	        source_id, partition_val, names, values, count);
 }
 
@@ -537,7 +540,7 @@ XY_IMPL(int, source_ordered_insert_at,
 	const char **, values,
 	size_t, count)
 {
-	return hyle_source_ordered_insert_at(
+	return hyle_ordered_insert_at(
 	        source_id, partition_val, pos, names, values, count);
 }
 
@@ -546,7 +549,7 @@ XY_IMPL(int, source_ordered_remove_at,
 	const char *, partition_val,
 	int, pos)
 {
-	hyle_source_ordered_remove_at(source_id, partition_val, pos);
+	hyle_ordered_remove_at(source_id, partition_val, pos);
 	return 0;
 }
 
@@ -554,7 +557,7 @@ XY_IMPL(int, source_ordered_clear,
 	const char *, source_id,
 	const char *, partition_val)
 {
-	hyle_source_ordered_clear(source_id, partition_val);
+	hyle_ordered_clear(source_id, partition_val);
 	return 0;
 }
 
@@ -562,7 +565,7 @@ XY_IMPL(int, source_ordered_save,
 	const char *, source_id,
 	const char *, partition_val)
 {
-	hyle_source_ordered_save(source_id, partition_val);
+	hyle_ordered_save(source_id, partition_val);
 	return 0;
 }
 
@@ -573,7 +576,7 @@ XY_IMPL(int, source_put_row,
 	const char **, values,
 	size_t, count)
 {
-	return hyle_source_put(source_id, row_id, names, values, count);
+	return hyle_registry_put(source_id, row_id, names, values, count);
 }
 
 XY_IMPL(const char *, source_ordered_get_field,
@@ -721,5 +724,5 @@ XY_IMPL(int, source_register_derive,
 	source_derive_fn_t, fn,
 	void *, user)
 {
-	return hyle_register_derive(derive_key, fn, user);
+	return hyle_derive_register(derive_key, fn, user);
 }

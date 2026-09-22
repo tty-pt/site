@@ -16,9 +16,9 @@ description: "Hyle data engine, query, FTS, and source writes. Use when touching
 
 | Store | Path | Engine |
 |---|---|---|
-| `store_fs` | `external/hyle/c/libhyle-source/src/store_fs.c` | filesystem DSV |
+| `store_fs` | `external/libhyle-source/src/store_fs.c` | filesystem DSV |
 | `store_mem` | `src/store_mem.c` | memory (tests) |
-| `hyle` core | `external/hyle/src/{libhyle.c,field.c,query.c,source.c,ctx.c,view.c}` `include/hyle/*.h` | `hyle_schema_desc_t`, `hyle_query_t`, FTS |
+| `hyle` core | `external/libhyle/src/{libhyle.c,field.c,query.c,source.c,ctx.c,view.c}` `include/hyle/*.h` | `hyle_schema_desc_t`, `hyle_query_t`, FTS |
 
 ## Checks
 
@@ -27,9 +27,9 @@ grep -rn 'source_update_item\|source_delete_item' mods/ --include="*.c" --includ
 grep -rn 'hyle_put\|hyle_del\|hyle_source_put' mods/ --include="*.c" | grep -v mods/source  # must be 0
 grep -rn 'var/' mods/ --include="*.c" --include="*.h" | grep -v 'common_storage.c\|source.c\|source_setup'
 grep -rn 'stoma_fold\|axil_slugify' mods/ --include="*.c"
-grep -rn 'TRANSLIT' mods/ external/hyle/  # must be 0
+grep -rn 'TRANSLIT' mods/ external/libhyle/  # must be 0
 ```
 
 Thin modules `~150 lines` (`poem.c` exemplar) — flags/structs/hooks `register_standard_item_handlers`, `with_module_item_access(ICTX_*)`, `index_module_init`, `source_setup`.
 
-See `docs/ARCHITECTURE.md` §6-7, `docs/SCHEMA.md`, `docs/DESIGN.md` §4.7, `external/hyle` `external/hyle/c/libhyle-source` `external/stoma`.
+See `docs/ARCHITECTURE.md` §6-7, `docs/SCHEMA.md`, `docs/DESIGN.md` §4.7, `external/libhyle` `external/libhyle-source` `external/stoma`.

@@ -1,9 +1,9 @@
-HYLE_DIR = $(REPO_ROOT)/external/hyle
-EXTRA_CFLAGS += -I../common -I$(HYLE_DIR)/c/libhyle-bud/include
+HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
+EXTRA_CFLAGS += -I../common -I$(HYLE_BUD_DIR)/include
 EXTRA_LDLIBS += -lbud
 EXTRA_LDLIBS-OpenBSD += -liconv
 EXTRA_LDLIBS += -laxil-auth
-EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
+EXTRA_LDLIBS += -L$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,$(HYLE_BUD_DIR)/lib
 
 include ../../build.mk
 

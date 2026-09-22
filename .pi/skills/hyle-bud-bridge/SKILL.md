@@ -5,11 +5,11 @@ description: "Bridge Hyle schema to Bud binder for filters/tables/pickers. Use w
 
 # Hyle-Bud Bridge — Filter/Table/Picker
 
-`libhyle-bud` is the **ONLY** bud-dependent bridge (`external/hyle/c/libhyle-bud`), compiling via `hyle-bud-wasm.mk`:
+`libhyle-bud` is the **ONLY** bud-dependent bridge (`external/libhyle-bud`), compiling via `hyle-bud-wasm.mk`:
 
 ```make
-include external/hyle/c/libhyle-bud/hyle-bud-wasm.mk  # defines HYLE_BUD_WASM_SRC / CFLAGS
-EXTRA_CFLAGS += -I external/hyle/c/libhyle-bud/include
+include external/libhyle-bud/hyle-bud-wasm.mk  # defines HYLE_BUD_WASM_SRC / CFLAGS
+EXTRA_CFLAGS += -I external/libhyle-bud/include
 EXTRA_LDLIBS += -lhyle-bud -lhyle -lbud -lqmap
 ```
 
@@ -17,8 +17,8 @@ Used only by `mods/index/Makefile`, `mods/gig/Makefile`, `mods/grp/Makefile`.
 
 ## Bridge
 
-- **Hyle** owns canonical `hyle_schema_desc_t` (no DOM) per `external/hyle`.
-- **Bud** is pure 5-field binder `bud_field_desc_t` (`external/bud` 5 fields) no DB.
+- **Hyle** owns canonical `hyle_schema_desc_t` (no DOM) per `external/libhyle`.
+- **Bud** is pure 5-field binder `bud_field_desc_t` (`external/libbud` 5 fields) no DB.
 - **libhyle-bud** `src/{filter.c,table.c,picker.c,form.c,libhyle-bud.c}` maps `hyle_schema_desc_t → bud_field_desc_t` + `hyle_bud_state_apply_stride_len` + `hyle_bud_filter_*`/`hyle_bud_table_*` helpers. SSR emits plain HTML + `data-*` hooks; `data-bud-*`/patch ops are additive (`SSR-CONTRACT`).
 
 ## Wiring per module
@@ -42,4 +42,4 @@ grep -rn 'bud_field_desc_t' mods/ --include="*.c"
 
 Do not add `bud` logic to `hyle` nor `hyle` query to `bud` — only via bridge.
 
-See `docs/C-ISOMORPHIC-BUD.md` §3-5, `docs/WASM-BRIDGE.md`, `external/hyle/c/libhyle-bud/hyle-bud-wasm.mk`.
+See `docs/C-ISOMORPHIC-BUD.md` §3-5, `docs/WASM-BRIDGE.md`, `external/libhyle-bud/hyle-bud-wasm.mk`.

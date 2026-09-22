@@ -23,7 +23,7 @@ abstraction is wrong. Push the boilerplate into the helper, not the caller.
 
 - **Thin feature modules:** `poem/song/gig/grp` target ≈150 lines, `xy_install` ≈15 lines (`poem.c` exemplar). If handler needs 30-line boilerplate, extend the abstraction — do not copy into the module.
 - **Evoke, don’t branch:** one row in `fields.h` → `hyle_source_register_def` + `hyle_bud_state_apply` (`§4.4`); `index_module_init` + `register_standard_item_handlers("song",&h)` + `ICTX_*` (`§4.2`); `source_list_view_t` (`source.h:50`) consumed by `list_fill_state` — never `switch(module)` in `common/index` (`CONVENTIONS`).
-- **We own the http server — invent well:** prefer extending `axil` / `hyle` / `bud` over shimming in `common`. Libraries must stay site-agnostic (`grep -rn bud external/hyle/src` must be 0).
+- **We own the http server — invent well:** prefer extending `axil` / `hyle` / `bud` over shimming in `common`. Libraries must stay site-agnostic (`grep -rn bud external/libhyle/src` must be 0).
 - **Site-specific surface minimal (blocking):** `common` is reusable *within this site*, not a per-feature dumping ground. Adding a new module must not edit `common` — use per-module registration (`source_list_view_t`). Enforced by `scripts/check-module-boundaries.sh`.
 
 Grandfathered surface (`site_paths.c:68` icon table, etc.) is allowlisted in `scripts/check-module-boundaries.sh`; do not add more.
@@ -35,8 +35,8 @@ external libraries (neutral, self-contained)
    axil   HTTP primitives            libxylem  XY dispatch (dlopen hidden)
    qmap   opaque data store          stoma     tokenization/search
    hyle   pure data layer (canonical hyle_schema_desc_t, NO component symbols)
-   libhyle-source  dataset persistence, DSV, JSON overlays, pluggable drivers
-   hyle-bud  the ONLY bud-dependent bridge (external/hyle/c/libhyle-bud)
+   libhyle-source  dataset persistence, DSV, JSON overlays, pluggable drivers, picker DTOs
+   hyle-bud  the ONLY bud-dependent bridge (external/libhyle-bud)
    bud    pure C DOM scaffold, 5-field UI binder, WASM bridge (depends on nothing above)
 site modules (thin composition)
    core → common → source → index → song/poem/gig/grp (+ auth, mpfd)
@@ -45,7 +45,7 @@ site modules (thin composition)
 Rules:
 - Externals never know about the site or each other (except documented deps:
   `hyle → stoma → qmap`; `hyle-bud → hyle + bud + qmap`).
-- `external/hyle/src` + `include/hyle` must stay free of bud/component symbols.
+- `external/libhyle/src` + `include/hyle` must stay free of bud/component symbols.
   Only `libhyle-bud` may depend on bud.
 - Site modules are the composition layer: they wire libraries together, keep
   their own code thin (`poem.c` ≈ 130 lines; song's `xy_install` ≈ 40 lines).
@@ -99,7 +99,7 @@ pattern: a small flags word, not a dozen bool params.
   `NULL` on "nothing here" and callers check it.
 
 ### 4.4 Data-driven tables: one source of truth
-`fields.h` (`hyle_schema_desc_t[]` per module, defined in `external/hyle/include/hyle/schema.h`) drives everything:
+`fields.h` (`hyle_schema_desc_t[]` per module, defined in `external/libhyle/include/hyle/schema.h`) drives everything:
 - server field generators (`hyle_source_register_def`),
 - persistence file/meta attributes (`in_meta`, `file`),
 - validation (`required`, `min_length`),

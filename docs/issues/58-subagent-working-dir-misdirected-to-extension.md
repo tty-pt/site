@@ -29,7 +29,7 @@ parent: 44
 
 ## Current behavior
 
-- When a stray `QUEST_REUSED` session mounts (see #56), it receives the same initial prompt ("Look at the consumer side code…") but resolves research paths against a wrong base (likely the extension directory or an unqualified relative search path). `canLaunchReview` / `launch_guard.ts` / `tracker.ts` etc. are extension internals, not site code — the site's consumer side is `mods/*/ux`, `mods/common/ux`, `external/hyle/c/libhyle-bud`, `external/bud`, etc. (as the main session `01a061e9-…` correctly read 28 site files).
+- When a stray `QUEST_REUSED` session mounts (see #56), it receives the same initial prompt ("Look at the consumer side code…") but resolves research paths against a wrong base (likely the extension directory or an unqualified relative search path). `canLaunchReview` / `launch_guard.ts` / `tracker.ts` etc. are extension internals, not site code — the site's consumer side is `mods/*/ux`, `mods/common/ux`, `external/libhyle-bud`, `external/libbud`, etc. (as the main session `01a061e9-…` correctly read 28 site files).
 - The failing reads still count as tool activity but produce no `RESEARCH_EVIDENCE` with a valid site target, so `NO_PROGRESS` fires (`turns without state checkpoint`) and the direction-review dedup path is entered with `not_registered`.
 
 ## Desired behavior

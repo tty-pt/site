@@ -55,7 +55,7 @@ guarantees the native tree and the WASM tree are structurally identical — see
 ## 2. The state table (fields.h pattern)
 
 `mods/song/fields.h`, `mods/gig/fields.h`, `mods/grp/fields.h`, and `mods/poem/fields.h`
-define module schemas using canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`):
+define module schemas using canonical `hyle_schema_desc_t` (from `external/libhyle/include/hyle/schema.h`):
 
 - server: the table feeds `source_setup` / `index_module_init` (storage, validation, persistence),
 - WASM: `hyle_bud_state_apply_len(&app_state, fields, json, len)` fills the struct from the
@@ -219,7 +219,7 @@ $(WASM_PATH)/%.wasm:            # WASM_PATH = $(REPO_ROOT)/htdocs
 
 - `WASI_CC` default `clang`, `--target=wasm32-wasi -mexec-model=reactor
   -Wl,--export-all -Wl,--allow-undefined`.
-- `WASM_COMMON_SRC = external/bud/src/libbud.c external/bud/src/bud_wasm_app.c`.
+- `WASM_COMMON_SRC = external/libbud/src/libbud.c external/libbud/src/bud_wasm_app.c`.
 - The rule self-probes (`echo 'int main(void){}' | $(WASI_CC) … -c -`) and skips
   with "Skipping WASM build of $@" when no WASI clang is available.
 

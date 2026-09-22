@@ -95,8 +95,8 @@ Removing all `data-bud-*` from the HTML must leave a fully functional widget.
 
 ## 5. Guardrails (enforced in code review)
 
-1. No `bud` symbols/types in `external/hyle/src` or `include/hyle`; only
-   `external/hyle/c/libhyle-bud` may depend on bud.
+1. No `bud` symbols/types in `external/libhyle/src` or `include/hyle`; only
+   `external/libhyle-bud` may depend on bud.
 2. The widget's client behavior must never REQUIRE `bud-client.js`, the WASM
    bridge, or the patch stream.
 3. All interactivity must have a no-JS path; all input must use native controls

@@ -364,7 +364,7 @@ changes essentially **zero functional lines**. What remains per repo:
 - **Fixture** (`external/libqmap/tests/fixture_id_join.c`): no source
   change (casts at `:110`/`:154` are no-ops). Rebuild + rerun
   `make clean all test` → 16/16 once the installed stack matches.
-- **Site gate:** `rec_*` appears nowhere in `external/hyle`,
+- **Site gate:** `rec_*` appears nowhere in `external/libhyle`,
   `external/axil`, `external/libxylem`, or the libqmap rust bindings — the
   site build is source-invisible to the retype. Gate stays "site `make`"
   (+ full `make test` as cheap insurance).

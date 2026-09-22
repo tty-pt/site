@@ -12,10 +12,10 @@ COMMON_INCLUDES=(
   "-I${REPO_ROOT}/external/axil-hyle/include"
   "-I${REPO_ROOT}/external/libqmap/include"
   "-I${REPO_ROOT}/external/libxylem/include"
-  "-I${REPO_ROOT}/external/bud/include"
-  "-I${REPO_ROOT}/external/hyle/include"
-  "-I${REPO_ROOT}/external/hyle/c/libhyle-source/include"
-  "-I${REPO_ROOT}/external/hyle/c/libhyle-bud/include"
+  "-I${REPO_ROOT}/external/libbud/include"
+  "-I${REPO_ROOT}/external/libhyle/include"
+  "-I${REPO_ROOT}/external/libhyle-source/include"
+  "-I${REPO_ROOT}/external/libhyle-bud/include"
   "-I${REPO_ROOT}/external/libtransp/include"
   "-I${REPO_ROOT}/external/libstoma/include"
   "-I${REPO_ROOT}/mods/common"
@@ -75,12 +75,14 @@ for d in axil axil-auth axil-hyle bud libqmap libtransp libxylem stoma; do
   fi
 done
 
-if [ -d "${REPO_ROOT}/external/hyle/c" ]; then
-  for f in $(find "${REPO_ROOT}/external/hyle/c" -name "*.c" | sort); do
-    rel_file="${f#"${REPO_ROOT}/"}"
-    add_entry "$rel_file" "${INCLUDE_STR}"
-  done
-fi
+for ext_lib in hyle-source hyle-bud; do
+  if [ -d "${REPO_ROOT}/external/${ext_lib}" ]; then
+    for f in $(find "${REPO_ROOT}/external/${ext_lib}/src" -name "*.c" | sort); do
+      rel_file="${f#"${REPO_ROOT}/"}"
+      add_entry "$rel_file" "${INCLUDE_STR}"
+    done
+  fi
+done
 
 # 4. Unit and Matrix test harnesses
 if [ -d "${REPO_ROOT}/tests/unit" ]; then

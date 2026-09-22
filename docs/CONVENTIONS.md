@@ -76,7 +76,7 @@ replaces, it does not append.
 
 ## Field Schemas (`<hyle/schema.h>`)
 
-Module schemas use canonical `hyle_schema_desc_t` (from `external/hyle/include/hyle/schema.h`):
+Module schemas use canonical `hyle_schema_desc_t` (from `external/libhyle/include/hyle/schema.h`):
 - `FIELD_TEXT(name, struct_t, member, ...)` — string record field with automatic `sizeof`/`offsetof`, optional designated initializers (`.required=1`, `.min_length=1`, `.in_meta=1`). If `member` is omitted, it defaults to `name`.
 - `FIELD_INT(name, struct_t, member, ...)` — integer record field with automatic `sizeof`/`offsetof`.
 - `FIELD_BOOL(name, struct_t, member, ...)` — boolean record field.

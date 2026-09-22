@@ -38,7 +38,7 @@ bud-specific; the framework-neutral contract is `docs/SSR-CONTRACT.md`.
 - `mount()` only calls the optional export `bud_app_mount`. **The bridge does
   not re-render the DOM on mount** — hydration attaches to the SSR'd DOM.
 
-## 3. Wasm side: `external/bud/src/bud_wasm_app.c`
+## 3. Wasm side: `external/libbud/src/bud_wasm_app.c`
 
 Imports (from `env`):
 
@@ -97,7 +97,7 @@ These cost real debugging time — read before emitting patches from wasm code:
   `strlen(op_name)`, never `sizeof`. `sizeof("patch-text")` is 11 (the NUL is
   counted) and the JS `switch (op.op)` sees `"patch-text\0"`, which matches
   nothing → **the patch is silently dropped**. This was a real shipped bug
-  (`external/bud/src/bud_wasm_app.c`); the JS side cannot detect it.
+  (`external/libbud/src/bud_wasm_app.c`); the JS side cannot detect it.
 - **`patch-text` updates a node in place ONLY when the id is a TEXT_NODE.**
   `getNode(id)` for an element id falls back to `createWrappedText(id, text,
   parent)` with a stale `_currentParent` (last `patch-close` of the mount

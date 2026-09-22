@@ -25,7 +25,7 @@ Related: #10, #11.
 - `:495` (turn 25): `… Files Modified is empty or placeholder, but substantive changes to [list_state.h, list_fill.c, list_json.c, site_ui.h, site_forms.c] were recorded in Latest Reassessment / Completed / tool history`
 - `:525` (turn 26): omits `[list_state.h, list_fill.c, list_json.c, site_ui.h, site_forms.c]`
 - `:570` (turn 29): omits `[list_state.h, list_fill.c, site_ui.h, site_forms.c, hyle-bud/hyle-bud.h, list_json.c, index.c, design.md, architecture.md]`
-- `:634` (turn 34): omits `[external/hyle/include/hyle/schema.h, hyle-bud.h, picker.c, list_json.c]`; `Completed section is empty`
+- `:634` (turn 34): omits `[external/libhyle/include/hyle/schema.h, hyle-bud.h, picker.c, list_json.c]`; `Completed section is empty`
 - `:672` (turn 37): omits `[bud/libbud.c, state_macros.h, libbud.c, picker.c, list_json.c]`
 
 Each failure rejected a `quest_update_state` write and contributed to the 19-turn deadlock in `REASSESSMENT_PENDING` (see `FRICTION_REPORT.md` §3.3). Desired fix remains: only require `Files Modified` for files the tool-history confirms were actually edited (via `edit`/`bash` with a write), not files mentioned in prose. Research-only quests with `Files Modified: -` must not error.

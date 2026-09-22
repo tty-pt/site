@@ -12,9 +12,9 @@ the libxylem XY module system, the hyle data engine, and the bud HTML builder.
   the libxylem XY module system (`RTLD_LOCAL` — cross-module calls go through
   XY dispatch only).
 - `hyle` provides the pure schema, query, and full-text search (FTS) engine.
-- `libhyle-source` (`external/hyle/c/libhyle-source`) provides dataset persistence,
+- `libhyle-source` (`external/libhyle-source`) provides dataset persistence,
   metadata I/O, and pluggable storage drivers (`store_fs`, `store_mem`, custom stores).
-- `libhyle-bud` (`external/hyle/c/libhyle-bud`) bridges Hyle data components to Bud DOM rendering.
+- `libhyle-bud` (`external/libhyle-bud`) bridges Hyle data components to Bud DOM rendering.
 - HTML is built server-side with **bud** (a C DOM/SSR scaffold). There is no
   Rust SSR / Dioxus / Fresh / Deno proxy in the request path.
 - The only WASM is C compiled to `wasm32-wasi` from the same sources as the

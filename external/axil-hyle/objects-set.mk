@@ -1,1 +1,0 @@
-CFLAGS-libaxil-hyle-o := -fPIC -I/home/quirinpa/site/external/axil/include -I/home/quirinpa/site/external/libqmap/include -I/home/quirinpa/site/external/hyle/include -I/home/quirinpa/site/external/hyle/c/libhyle-source/include -I/home/quirinpa/site/external/hyle/c/libhyle-bud/include -I/home/quirinpa/site/external/bud/include -I/home/quirinpa/site/external/axil-auth/include

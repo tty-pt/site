@@ -21,11 +21,11 @@ make format               # clang-format on all .c/.h
 make clean / make distclean
 ```
 
-- `make lint`/`make format` cover `mods` + `external/bud` only. Keep
-  `external/hyle` + `external/hyle/c/libhyle-bud` code tidy manually (tabs,
+- `make lint`/`make format` cover `mods` + `external/libbud` only. Keep
+  `external/libhyle` + `external/libhyle-bud` code tidy manually (tabs,
   ≤4 nest) — the site Makefile does not tidy them.
 - Site `make` is GNU make; `build.mk:22` adds
-  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
+  `-I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/libbud/include -I$(REPO_ROOT)/external/libhyle/include -I$(REPO_ROOT)/external/libhyle-source/include` (+ per-module `EXTRA_CFLAGS` for `hyle-bud` in `mods/index`, `mods/gig`, `mods/grp`).
 
 ## CRITICAL: stale system headers shadow the repo for native builds
 

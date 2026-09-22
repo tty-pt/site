@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle qmap-lib xylem-lib mods clients boundary-check
+all: assets-sync qsys-lib qmap-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -13,13 +13,16 @@ mods:
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
 
-# Sync gitignored htdocs deploy assets. hyle.css is copied from the hyle
-# crate (canonical source, per docs/STYLING.md); the remaining hashed assets
-# are checked for presence so `make` fails clearly instead of aborting
-# silently on a missing prerequisite of mods/common/ux/version.gen.h.
+# Sync gitignored htdocs deploy assets. hyle.css is copied from external/libhyle/assets/hyle.css;
+# the remaining hashed assets are checked for presence so `make` fails clearly instead of
+# aborting silently on a missing prerequisite of mods/common/ux/version.gen.h.
 DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js
 assets-sync:
-	@cp external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css
+	@if [ -f external/libhyle/assets/hyle.css ]; then \
+		cp external/libhyle/assets/hyle.css htdocs/hyle.css; \
+	else \
+		cp external/libhyle/crates/hyle/assets/hyle.css htdocs/hyle.css; \
+	fi
 	@missing=""; \
 	for a in $(DEPLOY_ASSETS); do \
 		if [ ! -f "htdocs/$$a" ]; then missing="$$missing htdocs/$$a"; fi; \
@@ -27,7 +30,7 @@ assets-sync:
 	if [ -n "$$missing" ]; then \
 		echo "ERROR: missing deploy assets:$$missing" >&2; \
 		echo "These are gitignored and removed by 'git clean'. Restore them:" >&2; \
-		echo "  htdocs/hyle.css  <- cp external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css" >&2; \
+		echo "  htdocs/hyle.css  <- cp external/libhyle/assets/hyle.css htdocs/hyle.css" >&2; \
 		echo "  others          <- restore from the hyle submodule or a sibling worktree, or rebuild." >&2; \
 		exit 1; \
 	fi
@@ -45,27 +48,30 @@ sepal-lib:
 	$(MAKE) -C external/libsepal
 
 hyle-lib:
-	$(MAKE) -C external/hyle
+	$(MAKE) -C external/libhyle
 
 transp-lib:
 	$(MAKE) -C external/libtransp
 
 bud-lib:
-	$(MAKE) -C external/bud
+	$(MAKE) -C external/libbud
 
-hyle-bud: hyle-lib bud-lib
-	$(MAKE) -C external/hyle/c/libhyle-bud
+hyle-bud: hyle-lib bud-lib hyle-source
+	$(MAKE) -C external/libhyle-bud EXTRA_CFLAGS="-I$$(pwd)/external/libhyle/include -I$$(pwd)/external/libhyle-source/include"
 
 hyle-source: hyle-lib qmap-lib stoma-lib
-	$(MAKE) -C external/hyle/c/libhyle-source
+	$(MAKE) -C external/libhyle-source
 
-axil-lib:
-	$(MAKE) -C external/axil
+qsys-lib:
+	$(MAKE) -C external/libqsys
+
+axil-lib: qsys-lib qmap-lib xylem-lib
+	$(MAKE) -C external/axil CFLAGS="-g -I$$(pwd)/external/libqsys/include -I$$(pwd)/external/libqmap/include -I$$(pwd)/external/libxylem/include" LDFLAGS="-L$$(pwd)/external/libqsys/lib -L$$(pwd)/external/libqmap/lib -L$$(pwd)/external/libxylem/lib -Wl,-rpath,$$(pwd)/external/libqsys/lib -Wl,-rpath,$$(pwd)/external/libqmap/lib -Wl,-rpath,$$(pwd)/external/libxylem/lib"
 
 axil-auth-lib: axil-lib qmap-lib xylem-lib
 	$(MAKE) -C external/axil-auth
 
-axil-hyle: axil-lib hyle-source hyle-bud axil-auth-lib
+axil-hyle: axil-lib hyle-source axil-auth-lib
 	$(MAKE) -C external/axil-hyle
 
 qmap-lib:
@@ -181,20 +187,20 @@ watch:
 	./scripts/watch.sh
 
 format:
-	find mods external/bud \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
+	find mods external/libbud \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
 
 lint:
-	find mods external/bud -name "*.c" -exec clang-tidy {} -- \
+	find mods external/libbud -name "*.c" -exec clang-tidy {} -- \
 		-Iexternal/axil/include -Iexternal/libqmap/include \
-		-Iexternal/libxylem/include -Iexternal/bud/include \
-		-Iexternal/hyle/include \;
+		-Iexternal/libxylem/include -Iexternal/libbud/include \
+		-Iexternal/libhyle/include \;
 
 clean:
-	$(MAKE) -C external/bud clean
+	$(MAKE) -C external/libbud clean
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
 
 distclean:
-	$(MAKE) -C external/bud distclean
+	$(MAKE) -C external/libbud distclean
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
 
 # Debug/compilation capture targets
@@ -249,7 +255,7 @@ debug-logs:
 # Run hyle workspace crate tests (core, axil, source-qmap)
 hyle-tests:
 	RUSTFLAGS="-l qmap -l stoma -L $$(pwd)/external/libqmap/lib -L $$(pwd)/external/libstoma/lib" cargo test --workspace \
-		--manifest-path external/hyle/Cargo.toml 2>&1
+		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
 	rm -rf $(DEBUG_DIR)/*

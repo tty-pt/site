@@ -10,15 +10,15 @@ char *source_util_slurp_file(const char *path);
 #define source_dsv_load hyle_source_dsv_load
 #define source_dsv_save hyle_source_dsv_save
 
-size_t hyle_source_get_field_count(const char *source_id);
-const char *hyle_source_get_field_name(const char *source_id, size_t idx);
-hyle_field_type_t hyle_source_get_field_type(const char *source_id, size_t idx);
-int hyle_source_put(
+size_t hyle_registry_get_field_count(const char *source_id);
+const char *hyle_registry_get_field_name(const char *source_id, size_t idx);
+hyle_field_type_t hyle_registry_get_field_type(const char *source_id, size_t idx);
+int hyle_registry_put(
         const char *source_id, const char *row_id, const char **names,
         const char **values, size_t count);
-int hyle_source_ordered_count(const char *source_id, const char *pval);
+int hyle_ordered_count(const char *source_id, const char *pval);
 const char *
-hyle_source_ordered_key_at(const char *source_id, const char *pval, int pos);
+hyle_ordered_key_at(const char *source_id, const char *pval, int pos);
 const char *
 qmap_field_get(unsigned hd, const char *item_id, const char *field_name);
 
@@ -27,7 +27,7 @@ qmap_field_get(unsigned hd, const char *item_id, const char *field_name);
 #define HYLE_SOURCE_H
 #define SOURCE_H
 
-#include "../../external/hyle/c/libhyle-source/src/dsv.c"
+#include "../../external/libhyle-source/src/dsv.c"
 
 #define TEST_SOURCE "grp.songs"
 #define TEST_PARTITION "legacy-grp"
@@ -115,26 +115,26 @@ char *slurp_file(const char *path)
 	return buf;
 }
 
-size_t hyle_source_get_field_count(const char *source_id)
+size_t hyle_registry_get_field_count(const char *source_id)
 {
 	CHECK("DSV asks for the registered source",
 	      strcmp(source_id, TEST_SOURCE) == 0);
 	return FIELD_COUNT;
 }
 
-const char *hyle_source_get_field_name(const char *source_id, size_t idx)
+const char *hyle_registry_get_field_name(const char *source_id, size_t idx)
 {
 	(void)source_id;
 	return idx < FIELD_COUNT ? field_names[idx] : NULL;
 }
 
-hyle_field_type_t hyle_source_get_field_type(const char *source_id, size_t idx)
+hyle_field_type_t hyle_registry_get_field_type(const char *source_id, size_t idx)
 {
 	(void)source_id;
 	return idx < FIELD_COUNT ? field_types[idx] : HYLE_FIELD_INVERSE;
 }
 
-int hyle_source_put(
+int hyle_registry_put(
         const char *source_id, const char *row_id, const char **names,
         const char **values, size_t count)
 {
@@ -162,7 +162,7 @@ int hyle_source_put(
 	return 0;
 }
 
-int hyle_source_ordered_count(const char *source_id, const char *pval)
+int hyle_ordered_count(const char *source_id, const char *pval)
 {
 	(void)source_id;
 	(void)pval;
@@ -170,7 +170,7 @@ int hyle_source_ordered_count(const char *source_id, const char *pval)
 }
 
 const char *
-hyle_source_ordered_key_at(const char *source_id, const char *pval, int pos)
+hyle_ordered_key_at(const char *source_id, const char *pval, int pos)
 {
 	(void)source_id;
 	(void)pval;
@@ -267,7 +267,7 @@ int main(void)
 	      !pinned || atoi(pinned) == 0);
 
 	CHECK("mutation succeeds",
-	      hyle_source_put(
+	      hyle_registry_put(
 	              TEST_SOURCE, row->key, mutation_names, mutation_values,
 	              1) == 0);
 	CHECK("save after mutation succeeds",

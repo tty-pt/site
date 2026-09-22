@@ -5,8 +5,8 @@
 
 #include <ttypt/qmap.h>
 #include <hyle/schema.h>
-#include <hyle/picker.h>
-#include <hyle/source.h>
+#include <hyle-source/picker.h>
+#include <hyle/registry.h>
 #include <hyle-source/hyle_source.h>
 #include <hyle-bud/hyle-bud.h>
 
@@ -67,15 +67,15 @@ static void setup_test_data(void)
 
 	const char *names1[] = { "title" };
 	const char *vals1[] = { "Rock & Roll" };
-	hyle_source_put("test.cats", "rock", names1, vals1, 1);
+	hyle_registry_put("test.cats", "rock", names1, vals1, 1);
 
 	const char *names2[] = { "title" };
 	const char *vals2[] = { "Jazz Classics" };
-	hyle_source_put("test.cats", "jazz", names2, vals2, 1);
+	hyle_registry_put("test.cats", "jazz", names2, vals2, 1);
 
 	const char *names3[] = { "title" };
 	const char *vals3[] = { "Pop Hits" };
-	hyle_source_put("test.cats", "pop", names3, vals3, 1);
+	hyle_registry_put("test.cats", "pop", names3, vals3, 1);
 }
 
 int main(void)

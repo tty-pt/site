@@ -138,14 +138,18 @@ for a in "${DEPLOY_ASSETS[@]}"; do
     check_fail "htdocs/$a is missing (gitignored; removed by 'git clean')"
   fi
 done
-if [ -f "htdocs/hyle.css" ] && [ ! -f "external/hyle/crates/hyle/assets/hyle.css" ]; then
-  check_warn "hyle crate CSS source missing — cannot verify htdocs/hyle.css sync"
+HYLE_CSS_SRC="external/libhyle/assets/hyle.css"
+if [ ! -f "$HYLE_CSS_SRC" ]; then
+  HYLE_CSS_SRC="external/libhyle/crates/hyle/assets/hyle.css"
 fi
-if [ -f "htdocs/hyle.css" ] && [ -f "external/hyle/crates/hyle/assets/hyle.css" ]; then
-  if diff -q htdocs/hyle.css external/hyle/crates/hyle/assets/hyle.css >/dev/null 2>&1; then
-    check_pass "htdocs/hyle.css matches the hyle crate source"
+if [ -f "htdocs/hyle.css" ] && [ ! -f "$HYLE_CSS_SRC" ]; then
+  check_warn "hyle CSS source missing — cannot verify htdocs/hyle.css sync"
+fi
+if [ -f "htdocs/hyle.css" ] && [ -f "$HYLE_CSS_SRC" ]; then
+  if diff -q htdocs/hyle.css "$HYLE_CSS_SRC" >/dev/null 2>&1; then
+    check_pass "htdocs/hyle.css matches the hyle CSS source"
   else
-    check_warn "htdocs/hyle.css is out of sync with the hyle crate (run 'make assets-sync')"
+    check_warn "htdocs/hyle.css is out of sync with hyle CSS source (run 'make assets-sync')"
   fi
 fi
 if [ "$ASSETS_OK" -eq 1 ]; then

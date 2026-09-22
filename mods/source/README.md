@@ -46,6 +46,6 @@ Under the hood, `mods/source` uses `libhyle-source` with the filesystem storage 
 
 ## Related Docs
 
-- `external/hyle/c/libhyle-source/README.md` — `libhyle-source` library architecture.
+- `external/libhyle-source/README.md` — `libhyle-source` library architecture.
 - `docs/FILTERS.md` — Query filtering and multi-reference semantics.
 - `docs/GOALS.md` — Data-layer invariants.

@@ -11,7 +11,7 @@ parent: 43
 # Issue: `researchComplete` never flips despite 10 evidences — `NO_PROGRESS` flood without checkpoint
 
 - **Area:** `pi-quest` research lifecycle — `research.ts recordObservedInvestigation`, `validation.ts researchRequired`, `hooks/handlers.ts applyTurnEndStateTransitions/analyzeTurnToolResults`, `state.ts researchRound/researchComplete/reassessmentRequired`, `compaction.ts requestPeriodicCheckpoint`
-- **Runs observed:** `1788299416` 21:50 `01a05ef3` — `RESEARCH_EVIDENCE` 10× `read future/...md` `bash ls mods/ external/bud/hyle` `cat mods/index/ux/all.c` across `TURN_START 0-6`, yet `TURN_END` `activeGate=RESEARCH_PENDING` persists, `STEP_SUMMARY research planVersion1 gate=RESEARCH_PENDING tools=1 reads=0/1 writes=0 failures=0` 21×, `NO_PROGRESS turns 5→15` `turn5 correlationId=turn_5_mtj7b67v` `turn6 6` `turn11 12` `turn17 13` `turn20 15`, `substantiveTurnsSinceCheckpoint` never reset because `didUpdateQuestThisTurn` never true.
+- **Runs observed:** `1788299416` 21:50 `01a05ef3` — `RESEARCH_EVIDENCE` 10× `read future/...md` `bash ls mods/ external/libbud/hyle` `cat mods/index/ux/all.c` across `TURN_START 0-6`, yet `TURN_END` `activeGate=RESEARCH_PENDING` persists, `STEP_SUMMARY research planVersion1 gate=RESEARCH_PENDING tools=1 reads=0/1 writes=0 failures=0` 21×, `NO_PROGRESS turns 5→15` `turn5 correlationId=turn_5_mtj7b67v` `turn6 6` `turn11 12` `turn17 13` `turn20 15`, `substantiveTurnsSinceCheckpoint` never reset because `didUpdateQuestThisTurn` never true.
 - **Severity:** Medium — agent loops evidence without durable `quest_update_state`, `periodic_checkpoint` steer spams but `researchComplete` stays false, `PROVISIONAL_RESEARCH_PENDING` never clears.
 
 ## Current behavior

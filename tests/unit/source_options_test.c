@@ -5,8 +5,8 @@
 
 #include <ttypt/qmap.h>
 #include <hyle/schema.h>
-#include <hyle/picker.h>
-#include <hyle/source.h>
+#include <hyle-source/picker.h>
+#include <hyle/registry.h>
 #include <hyle-source/hyle_source.h>
 
 #define CHECK(label, condition)                                                \
@@ -53,15 +53,15 @@ static void setup_test_data(void)
 	/* Populate some records */
 	const char *names1[] = { "title", "color" };
 	const char *vals1[] = { "Rock & Roll", "red" };
-	hyle_source_put("test.tags", "rock", names1, vals1, 2);
+	hyle_registry_put("test.tags", "rock", names1, vals1, 2);
 
 	const char *names2[] = { "title", "color" };
 	const char *vals2[] = { "Jazz Classics", "blue" };
-	hyle_source_put("test.tags", "jazz", names2, vals2, 2);
+	hyle_registry_put("test.tags", "jazz", names2, vals2, 2);
 
 	const char *names3[] = { "title", "color" };
 	const char *vals3[] = { "Pop Hits", "yellow" };
-	hyle_source_put("test.tags", "pop", names3, vals3, 2);
+	hyle_registry_put("test.tags", "pop", names3, vals3, 2);
 }
 
 int main(void)

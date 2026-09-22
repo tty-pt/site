@@ -17,7 +17,7 @@ and the widget wire format.
 
 ## 2. Query string → filters (C parser)
 
-`hyle_parse_query` (`external/hyle/src/query.c`):
+`hyle_parse_query` (`external/libhyle/src/query.c`):
 
 - Splits on `&`/`=`, url-decodes.
 - Special keys: `sort`, `page`, `per_page`, `q`, `include`.
@@ -30,7 +30,7 @@ So `?type=comunhao&type=natal` produces two filters, both on field `type`.
 
 ## 3. The pre-filter pipeline (`hyle_source_query`)
 
-Order matters (`external/hyle/src/source.c`):
+Order matters (`external/libhyle/src/source.c`):
 
 1. `prefilter_fts` (source.c:579) — for searchable fields, resolves each filter
    against the stoma index, **intersects** the matching row sets. Rebuilds the
@@ -87,8 +87,8 @@ single-value unchanged, accent-sensitivity preserved.
   (`mods/index/index.c:48`): builds `hyle_bud_option_t {id,label}[]` — id =
   row_id (slug), label = the target source's first non-`id` display field value
   (via `"<row>:<display_field>"` lookup). Native-only (qmap).
-- Universal component: `hyle_bud_filter` / `hyle_bud_filter_group` (`external/hyle/c/libhyle-bud/include/hyle-bud/hyle-bud.h`) is the single schema-driven dispatcher for all filters, dropdowns, and reference selectors across SSR and WASM.
-- Renderers live in `external/hyle/c/libhyle-bud/src/filter.c`:
+- Universal component: `hyle_bud_filter` / `hyle_bud_filter_group` (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`) is the single schema-driven dispatcher for all filters, dropdowns, and reference selectors across SSR and WASM.
+- Renderers live in `external/libhyle-bud/src/filter.c`:
   - `hyle_bud_filter` — universal schema field dispatcher.
   - `hyle_bud_filter_scoped` — scoped/indexed row dispatcher.
   - `hyle_bud_checkbox_fieldset` — the full-width multi-ref grid;
@@ -119,14 +119,14 @@ is generic (hint absent = grid).
 - The widget's field wrapper `.hyle-ms-field` mirrors `.hyle-filter-bar
   label` sizing so the trigger matches sibling inputs; its styles must
   out-specify the bar's generic `label`/`input` rules (see `docs/STYLING.md`).
-- Widget implementation (`external/hyle/c/libhyle-bud/src/filter.c`): the
+- Widget implementation (`external/libhyle-bud/src/filter.c`): the
   `hyle_bud_ms_t` registry **owns copies** of the options (never borrow the
   caller's stack `opts[]` — the widget outlives `bud_app_render` on wasm) and
   is reset via `hyle_bud_ms_reset()` from `idx_filter_bar`.
 
 ## 9. Tests
 
-- hyle unit (`external/hyle/src/hyle_test.c`): same-field OR, cross-field AND,
+- hyle unit (`external/libhyle/src/hyle_test.c`): same-field OR, cross-field AND,
   single-value unchanged, accent-sensitivity preserved.
 - pages-test: repeated-key filtering (`/song/?type=comunhao&type=natal`);
   SSR HTML contains visible checkboxes.

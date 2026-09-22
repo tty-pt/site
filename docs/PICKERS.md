@@ -25,6 +25,11 @@ At its core, a picker consists of two synchronized components on any given page:
 
 All reference selection, omni-dropdowns, facets, and filter controls across the entire platform **MUST** use the universal **`hyle_bud_filter`** or **`hyle_bud_filter_scoped`** component (`<hyle-bud/hyle-bud.h>`).
 
+The picker presentation DTOs (`hyle_option_t`, `hyle_picker_desc_t`, …) are
+declared in `<hyle-source/picker.h>` (libhyle-source); `hyle-bud.h` includes it.
+Schema hint members (`filter_style`/`filter_mode`/`allow_add`) stay as opaque
+members of `hyle_schema_desc_t` in libhyle.
+
 There are no separate ad-hoc picker widgets. `hyle_bud_filter` inspects the schema field descriptor (`hyle_schema_desc_t`) and renders the exact control needed:
 - Single-reference dropdown / omnisearch picker (e.g. `grp`, `song`, `format`)
 - Multi-reference facet / multiselect (e.g. `type`)
@@ -99,4 +104,6 @@ Multiple pickers collected within the same HTTP request automatically receive is
 - Sibling forms take the ID `pickq-<first_ref_key>` (e.g. `id="pickq-type"`).
 - Sibling form inputs take the names `pick_q_<key>` and `pick_page_<key>`.
 - Scoped row pickers take names `pick_q_<key>__<scope>` and `pick_page_<key>__<scope>`.
-- The picker fragment endpoint routes to `/pick/<dataset>/options`.
+- The picker fragment endpoint routes to `/pick/<dataset>/options`. It is mounted
+  by `mods/source/pick.c` (`source_install_pick_routes`), not by `axil-hyle`,
+  which stays framework-neutral (`docs/ARCHITECTURE.md` §2).

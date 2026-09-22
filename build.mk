@@ -29,13 +29,13 @@ CFLAGS-PROFILE-dev = -g -O0 $(PICFLAGS)
 CFLAGS-PROFILE- = -g -O0 $(PICFLAGS)
 CFLAGS += ${CFLAGS-PROFILE-${PROFILE}}
 
-CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/bud/include -I$(REPO_ROOT)/external/hyle/include -I$(REPO_ROOT)/external/hyle/c/libhyle-source/include
+CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/libqmap/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/libbud/include -I$(REPO_ROOT)/external/libhyle/include -I$(REPO_ROOT)/external/libhyle-source/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
 LDFLAGS += -L$(REPO_ROOT)/external/axil/lib -L$(REPO_ROOT)/external/libqmap/lib
 LDFLAGS += -L$(REPO_ROOT)/external/axil-auth/lib -Wl,-rpath,$(REPO_ROOT)/external/axil-auth/lib
-LDFLAGS += -L$(REPO_ROOT)/external/bud/lib -Wl,-rpath,$(REPO_ROOT)/external/bud/lib
+LDFLAGS += -L$(REPO_ROOT)/external/libbud/lib -Wl,-rpath,$(REPO_ROOT)/external/libbud/lib
 
 LDLIBS += -laxil -lqmap
 LDLIBS += $(EXTRA_LDLIBS)
@@ -49,8 +49,8 @@ WASM_CFLAGS-PROFILE-dev = -g -O0 -D__wasm__ --target=wasm32-wasi
 WASM_CFLAGS-PROFILE- = -g -O0 -D__wasm__ --target=wasm32-wasi
 WASM_CFLAGS  ?= ${WASM_CFLAGS-PROFILE-${PROFILE}}
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--export=malloc -Wl,--export=free -Wl,--allow-undefined -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
-WASM_COMMON_SRC   = $(REPO_ROOT)/external/bud/src/libbud.c $(REPO_ROOT)/external/bud/src/bud_wasm_app.c
-WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/bud/include
+WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libbud/src/bud_wasm_app.c
+WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/libbud/include
 
 # BSD/GNU portable: keep `all` as first target
 all: dirs $(TARGET) $(WASM_TARGETS)

@@ -90,12 +90,12 @@ EOF
 while IFS=: read -r file line text; do
 	[ -z "$file" ] && continue
 	case "$file" in
-		mods/source/*|external/hyle/*) continue ;;
+		mods/source/*|external/libhyle/*) continue ;;
 	esac
-	printf '%s:%s: prohibited direct hyle_source_put/del outside source (use source ops): %s\n' "$file" "$line" "$text" >&2
+	printf '%s:%s: prohibited direct hyle_registry_put/del outside source (use source ops): %s\n' "$file" "$line" "$text" >&2
 	failed=1
 done <<EOF
-$(CDPATH= cd -- "$root" && rg -n 'hyle_source_(put|del|register)' mods --glob '*.c' --glob '*.h' 2>/dev/null | grep -v 'mods/source/source\.c:.*hyle_source_register' || true)
+$(CDPATH= cd -- "$root" && rg -n 'hyle_registry_(put|del|register)' mods --glob '*.c' --glob '*.h' 2>/dev/null | grep -v 'mods/source/source\.c:.*hyle_registry_register' || true)
 EOF
 
 # -- site-specific surface minimal (blocking): no hardcoded module names in common/index outside registration -----

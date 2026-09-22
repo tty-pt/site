@@ -6,8 +6,8 @@
 #include <bud/bud.h>
 #include <bud/bud_jsx.h>
 #include <hyle/schema.h>
-#include <hyle/picker.h>
-#include <hyle/source.h>
+#include <hyle-source/picker.h>
+#include <hyle/registry.h>
 #include <hyle-bud/hyle-bud.h>
 #include <hyle-source/hyle_source.h>
 #include <ttypt/axil.h>
@@ -243,7 +243,7 @@ int main(void)
 			{ .name = "transpose", .type = HYLE_FIELD_INT, .writable = 1 },
 			{ .name = "format", .type = HYLE_FIELD_STRING, .writable = 1 }
 		};
-		hyle_source_register_ordered(
+		hyle_ordered_register(
 		        "test.ord", ord_fields, 3, "part", 0, 0, NULL, NULL, NULL);
 
 		const char *n1[] = { "title", "transpose", "format" };
@@ -258,8 +258,8 @@ int main(void)
 		        "test.ord", "p1", n2, v2, 3);
 		CHECK("hyle_source_ordered_append_and_save row 1 returns 0", rc2 == 0);
 
-		int count = hyle_source_ordered_count("test.ord", "p1");
-		CHECK("hyle_source_ordered_count returns 2", count == 2);
+		int count = hyle_ordered_count("test.ord", "p1");
+		CHECK("hyle_ordered_count returns 2", count == 2);
 
 		const char *t0 = hyle_source_ordered_get_field(
 		        "test.ord", "p1", 0, "title");
@@ -312,8 +312,8 @@ int main(void)
 		int rc_rem = hyle_source_ordered_remove_and_save(
 		        "test.ord", "p1", 0);
 		CHECK("hyle_source_ordered_remove_and_save returns 0", rc_rem == 0);
-		CHECK("hyle_source_ordered_count after remove is 1",
-		      hyle_source_ordered_count("test.ord", "p1") == 1);
+		CHECK("hyle_ordered_count after remove is 1",
+		      hyle_ordered_count("test.ord", "p1") == 1);
 		const char *rem_t0 = hyle_source_ordered_get_field(
 		        "test.ord", "p1", 0, "title");
 		CHECK("hyle_source_ordered_get_field row 0 after remove is 'Track 2'",
@@ -322,7 +322,7 @@ int main(void)
 		/* Test remove matching */
 		int rc_rem_m = hyle_source_ordered_remove_matching("test.ord", "p1", "title", "Track 2");
 		CHECK("hyle_source_ordered_remove_matching returns 0", rc_rem_m == 0);
-		CHECK("count after remove_matching is 0", hyle_source_ordered_count("test.ord", "p1") == 0);
+		CHECK("count after remove_matching is 0", hyle_ordered_count("test.ord", "p1") == 0);
 	}
 
 	/* 8. Libhyle-source referencing / relation querying */

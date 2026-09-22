@@ -7,14 +7,14 @@ trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
 bin=$tmpdir/site_media_test
 
 ${CC:-clang} -Wall -Wextra -Werror \
-	-I"$repo/external/bud/include" \
-	-I"$repo/external/hyle/include" \
-	-I"$repo/external/hyle/c/libhyle-bud/include" \
+	-I"$repo/external/libbud/include" \
+	-I"$repo/external/libhyle/include" \
+	-I"$repo/external/libhyle-bud/include" \
 	-I"$repo/mods/common" \
 	-I"$repo/mods/common/ux" \
 	-o "$bin" \
 	"$repo/tests/unit/site_media_test.c" \
-	-L"$repo/external/bud/lib" -lbud \
-	-Wl,-rpath,"$repo/external/bud/lib"
+	-L"$repo/external/libbud/lib" -lbud \
+	-Wl,-rpath,"$repo/external/libbud/lib"
 
 "$bin"

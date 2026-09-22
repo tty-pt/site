@@ -1,5 +1,5 @@
-[submodule "external/hyle"]
-	path = external/hyle
+[submodule "external/libhyle"]
+	path = external/libhyle
 	url = git@github.com:tty-pt/hyle.git
 [submodule "external/libqmap"]
 	path = external/libqmap
@@ -31,3 +31,15 @@
 [submodule "external/libsepal"]
 	path = external/libsepal
 	url = git@github.com:tty-pt/libsepal.git
+[submodule "external/libbud"]
+	path = external/libbud
+	url = git@github.com:tty-pt/libbud.git
+[submodule "external/libhyle-source"]
+	path = external/libhyle-source
+	url = git@github.com:tty-pt/libhyle-source.git
+[submodule "external/libhyle-bud"]
+	path = external/libhyle-bud
+	url = git@github.com:tty-pt/libhyle-bud.git
+[submodule "external/axil-hyle"]
+	path = external/axil-hyle
+	url = git@github.com:tty-pt/axil-hyle.git

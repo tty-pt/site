@@ -5,7 +5,7 @@
 
 #include <bud/bud.h>
 #include <hyle/schema.h>
-#include <hyle/picker.h>
+#include <hyle-source/picker.h>
 #include <hyle-bud/hyle-bud.h>
 #include <ttypt/xy.h>
 #include "mods/common/common.h"

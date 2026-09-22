@@ -30,8 +30,8 @@ task complete.
 | `make e2e-tests` | Playwright via Deno. Needs server + `AUTH_SKIP_CONFIRM=1`. |
 | `AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file execution. |
 | `DEBUG=1 AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file with WASM/DOM lookahead and browser console diagnostics. |
-| `make hyle-tests` | cargo test on the `external/hyle` Rust workspace. |
-| `make -C external/hyle test` | hyle C unit suite (incl. zig-test step — see below). |
+| `make hyle-tests` | cargo test on the `external/libhyle` Rust workspace. |
+| `make -C external/libhyle test` | hyle C unit suite (incl. zig-test step — see below). |
 
 ## Server prerequisites
 
@@ -43,7 +43,7 @@ task complete.
 
 - `start.sh` and `scripts/watch.sh` enable `AUTH_SKIP_CONFIRM=1` in dev
   mode. This is a development convenience, not production behavior.
-- `make -C external/hyle test` `zig-test` step fails when `zig` is not
+- `make -C external/libhyle test` `zig-test` step fails when `zig` is not
   installed (unrelated to the C suite).
 - `tests/pages/20-song-search.sh` expects the "No items" empty state: a
   valid-but-zero FTS result renders `<p class="text-muted">No items</p>` (the

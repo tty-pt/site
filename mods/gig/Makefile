@@ -1,9 +1,10 @@
-HYLE_DIR = $(REPO_ROOT)/external/hyle
+HYLE_DIR = $(REPO_ROOT)/external/libhyle
+HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
 TRANSP_DIR = $(REPO_ROOT)/external/libtransp
-EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_DIR)/c/libhyle-bud/include -I$(REPO_ROOT)/external/axil-hyle/include
+EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_BUD_DIR)/include -I$(REPO_ROOT)/external/axil-hyle/include
 EXTRA_LDLIBS += -lbud -laxil-auth -ljson-c -L$(TRANSP_DIR)/lib -ltransp -Wl,-rpath,$(TRANSP_DIR)/lib
 EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
-EXTRA_LDLIBS += -L$(HYLE_DIR)/c/libhyle-bud/lib -lhyle-bud -Wl,-rpath,$(HYLE_DIR)/c/libhyle-bud/lib
+EXTRA_LDLIBS += -L$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,$(HYLE_BUD_DIR)/lib
 EXTRA_LDLIBS += -L$(REPO_ROOT)/external/axil-hyle/lib -laxil-hyle -Wl,-rpath,$(REPO_ROOT)/external/axil-hyle/lib
 
 # WASM targets must be defined before including build.mk so the shared
@@ -11,7 +12,7 @@ EXTRA_LDLIBS += -L$(REPO_ROOT)/external/axil-hyle/lib -laxil-hyle -Wl,-rpath,$(R
 WASM_TARGETS = $(WASM_PATH)/gig_detail.wasm
 gig_detail-src = ux/detail.c $(REPO_ROOT)/external/libtransp/src/music.c
 
-include ../../external/hyle/c/libhyle-bud/hyle-bud-wasm.mk
+include ../../external/libhyle-bud/hyle-bud-wasm.mk
 gig_detail-src += $(HYLE_BUD_WASM_SRC)
 LIST_UX_DEPS = ../index/ux/list.c ../index/ux/list_state.h \
 	../index/ux/list_query.c ../index/ux/list_filters.c \

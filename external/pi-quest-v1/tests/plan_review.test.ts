@@ -2438,11 +2438,11 @@ REQUIRED REVISIONS:
 
       assert.strictEqual(isDraftRevisionOutstanding(s), true);
 
-      // Test reading an external file (e.g. external/bud/src/libbud.c or docs/OVERVIEW.md)
+      // Test reading an external file (e.g. external/libbud/src/libbud.c or docs/OVERVIEW.md)
       let blocked = false;
       for (const cb of handlers["tool_call"] || []) {
         const res = await asyncContext.run(ctx, () =>
-          cb({ toolName: "read", input: { path: "external/bud/src/libbud.c" } }, ctx));
+          cb({ toolName: "read", input: { path: "external/libbud/src/libbud.c" } }, ctx));
         if (res?.block) blocked = true;
       }
       assert.strictEqual(blocked, false, "read to external file must NOT be blocked during draft revision");

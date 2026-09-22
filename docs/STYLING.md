@@ -3,23 +3,21 @@
 Where the CSS actually lives, how to ship a change, and the specificity traps
 that make widget styles silently not apply.
 
-## Source of truth — edit the hyle crate, not htdocs
+## Source of truth — edit the hyle asset, not htdocs
 
 `htdocs/hyle.css` is a **gitignored deployed copy**. The committed source of
-truth lives in the **hyle submodule**:
+truth lives in the **hyle repository**:
 
 ```
-external/hyle/crates/hyle/assets/hyle.css           ← canonical
-external/hyle/crates/hyle-dioxus/assets/hyle.css    ← identical twin
+external/libhyle/assets/hyle.css                       ← canonical
 htdocs/hyle.css                                     ← synced, gitignored
 ```
 
-After editing the crate asset, sync the twin and the deployed copy and verify:
+After editing the asset, sync the deployed copy and verify:
 
 ```bash
-cp external/hyle/crates/hyle/assets/hyle.css external/hyle/crates/hyle-dioxus/assets/hyle.css
-cp external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css
-diff external/hyle/crates/hyle/assets/hyle.css htdocs/hyle.css   # must be empty
+cp external/libhyle/assets/hyle.css htdocs/hyle.css
+diff external/libhyle/assets/hyle.css htdocs/hyle.css   # must be empty
 ```
 
 (`site_ui_page` links `/hyle.css` and `/styles.css`; `styles.css` is the
