@@ -105,7 +105,7 @@ Generic `writable` + `kind>=3||kind==5` already cover most. Only `id` is truly n
 
 ## Constraints
 
-- `AGENTS.md:1` — UX pure & isomorphic, forbidden `XY_/xy_/qmap_/source_/axil_`
+- `AGENTS.md:1` — UX pure & isomorphic, forbidden `XY_/xy_/corm_/source_/axil_`
 - `AGENTS.md:4` — hyle neutral; `external/libhyle` no DOM, `external/libbud` no storage
 - `AGENTS.md:5` — data invariants; all writes via `source_update_item`
 - `docs/SSR-CONTRACT.md` — plain HTML + `data-*` hooks

@@ -1,17 +1,17 @@
 # 2B-6 — Implementation detail (rank convention + `-X` grammar verification)
 
-> Final slice of phase 2B (`external/libqmap`). Read these first, in order:
+> Final slice of phase 2B (`external/libcorm`). Read these first, in order:
 > `mm-plan/PHASE-2-CLI.md` (2B, decisions D2 + D10, the 2B-6 slice row),
 > `mm-plan/CLI-SURFACE-EXAMPLES.md` (§4–§6 grammar + rank note),
-> `external/libqmap/docs/RECALL-KERNEL.md` (Rank convention),
+> `external/libcorm/docs/RECALL-KERNEL.md` (Rank convention),
 > `mm-plan/2B-3-IMPLEMENTATION.md` (§1–§2 the built parser this slice
-> verifies), then `external/libqmap/src/qmap.c` (lexer `lx_next` + the
-> `qmap_expr_*` recursive descent) and `external/libqmap/src/rec_axis.c`
+> verifies), then `external/libcorm/src/corm.c` (lexer `lx_next` + the
+> `corm_expr_*` recursive descent) and `external/libcorm/src/rec_axis.c`
 > (lines 199–211, the kernel rank fallback).
 >
 > **D14 update (2026-09-16):** historical record of the rank-convention /
 > `-X` grammar as built. The leaf grammars verified here are still valid
-> qmap syntax, but pi-mm now emits the D14 flags form — `-X '… AND
+> corm syntax, but pi-mm now emits the D14 flags form — `-X '… AND
 > stoma="field=text matched=1" AND sepal)' --query=… [--min-sim=…]` —
 > structure in `-X`, runtime values on CLI flags (precedence leaf spec >
 > CLI > env). See `mm-plan/PHASE-2-CLI.md` D14 carve-out and
@@ -29,7 +29,7 @@ axis in query order** — the first axis that has a `rank` fn + `ctx`
 supplies *the* score for every surviving ref; the other axes contribute
 membership only. Both rankings paths implement exactly this:
 
-- **CLI** (`src/qmap.c`, comment at line 273, eval at 1646-1648): the
+- **CLI** (`src/corm.c`, comment at line 273, eval at 1646-1648): the
   first `E_LEAF` with `axis->rank` seen in **preorder** records
   `ranker_axis`/`ranker_params`; every leaf filter-only ⇒
   `ranker_axis == NULL` ⇒ pure-filter render (no scores, asc ref).
@@ -43,18 +43,18 @@ membership only. Both rankings paths implement exactly this:
 ## 2. Grammar verification (doc ↔ prototype)
 
 D10 (`PHASE-2-CLI.md`, as documented in `CLI-SURFACE-EXAMPLES.md` §4)
-checked line-by-line against `src/qmap.c`:
+checked line-by-line against `src/corm.c`:
 
-- Productions (`qmap_expr_setexpr/orexpr/andexpr/notexpr/primary/leaf`,
-  `qmap.c:1499-1584`) match the doc grammar exactly, incl. EXCEPT only
+- Productions (`corm_expr_setexpr/orexpr/andexpr/notexpr/primary/leaf`,
+  `corm.c:1499-1584`) match the doc grammar exactly, incl. EXCEPT only
   at the `setexpr` level, `or`/`and` folds, unary-chained `NOT`.
-- Tokenizer (`lx_next`, `qmap.c:1360-1479`): word runs, uppercase-only
+- Tokenizer (`lx_next`, `corm.c:1360-1479`): word runs, uppercase-only
   keyword match (`lx_is_keyword`), `(`, `)` single-char tokens, optional
   `NAME=VALUE`; quoted VALUE verbatim to close quote (`unterminated
   quote` error); unquoted VALUE consumed to an unquoted `(`/`)` or a
   whitespace-delimited keyword — matches the doc rules incl. silent-
   truncation precedence (`quote values containing operator words`).
-- `A NOT B` ⇒ the `use EXCEPT` hint (`qmap.c:1710-1713`); empty parens ⇒
+- `A NOT B` ⇒ the `use EXCEPT` hint (`corm.c:1710-1713`); empty parens ⇒
   `expected expression`; trailing garbage ⇒ `unexpected token`. Empty/
   whitespace-only `-X` ⇒ unarmed (`expr_root == NULL`).
 
@@ -96,10 +96,10 @@ sibling lib changed; no new flags; classic path untouched.
 
 ## 5. Gates
 
-- `make -C external/libqmap test` (env unset): all 6 scripts green
+- `make -C external/libcorm test` (env unset): all 6 scripts green
   (`test-cli.sh` now 27 rows, `test-real.sh` incl. `stoma-over-sepal`).
 - `make` (site root): W06 PASS.
-- Stale-path grep over `mm-plan/` + `external/libqmap/`: only the
+- Stale-path grep over `mm-plan/` + `external/libcorm/`: only the
   intentional migration notes.
 - D4: no `/usr` installs; write gates on fresh in-site builds.
 

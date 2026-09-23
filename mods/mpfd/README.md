@@ -122,10 +122,10 @@ These can be changed via `mpfd_set_limits()` before parsing.
 
 ### Architecture
 
-The module uses qmap for storing parsed field data:
+The module uses corm for storing parsed field data:
 
-1. **Custom Type Registration:** Uses `qmap_mreg()` to register a variable-size type for `mpfd_val` structures
-2. **Memory Management:** qmap owns all value memory - never manually `free()` retrieved values
+1. **Custom Type Registration:** Uses `corm_mreg()` to register a variable-size type for `mpfd_val` structures
+2. **Memory Management:** corm owns all value memory - never manually `free()` retrieved values
 3. **Boundary Parsing:** Extracts boundary from Content-Type header and parses parts
 4. **Quote Handling:** Properly handles quoted filenames with bounded search
 
@@ -145,36 +145,36 @@ The `data[]` field contains:
 
 ### Memory Management (Critical)
 
-⚠️ **Important:** qmap manages all value memory internally.
+⚠️ **Important:** corm manages all value memory internally.
 
 **Correct usage:**
 ```c
-const char *value = qmap_get(mpfd_db, "fieldname");
+const char *value = corm_get(mpfd_db, "fieldname");
 // Use value, but DON'T free it
 ```
 
 **Incorrect usage (causes crashes):**
 ```c
-const char *value = qmap_get(mpfd_db, "fieldname");
-free(value);  // ❌ WRONG - qmap owns this memory
+const char *value = corm_get(mpfd_db, "fieldname");
+free(value);  // ❌ WRONG - corm owns this memory
 ```
 
-When calling `qmap_put()`:
+When calling `corm_put()`:
 ```c
 struct mpfd_val *val = malloc(sizeof(*val) + data_len);
 // ... populate val ...
-qmap_put(mpfd_db, key, val);
-free(val);  // ✅ Correct - qmap made a copy
+corm_put(mpfd_db, key, val);
+free(val);  // ✅ Correct - corm made a copy
 ```
 
 ### Recent Bug Fix (March 2026)
 
 Fixed critical use-after-free bug:
-- **Problem:** Code called `free()` on qmap-managed values before `qmap_put()`
+- **Problem:** Code called `free()` on corm-managed values before `corm_put()`
 - **Solution:** 
-  - Registered custom variable-size type via `qmap_mreg()`
+  - Registered custom variable-size type via `corm_mreg()`
   - Removed all manual `free()` calls on retrieved values
-  - qmap now properly manages all memory for field data
+  - corm now properly manages all memory for field data
 
 See `mpfd.c:315-316` for type registration.
 

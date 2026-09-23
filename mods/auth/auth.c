@@ -1,6 +1,6 @@
 #include <ttypt/xy-mod.h>
 #include <ttypt/xy.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #include <stddef.h>
 #include <string.h>

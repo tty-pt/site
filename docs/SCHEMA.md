@@ -75,7 +75,7 @@ registration lifetime. It contains:
 
 `list_fill_state` gets it through `source_get_list_view`, combines it with the
 field type/reference/filter schema strings, and serializes resolved values into
-`list_state_t`. The WASM renderer has no source, qmap, or XY dependency. If a
+`list_state_t`. The WASM renderer has no source, corm, or XY dependency. If a
 source has no view descriptor, list filling safely prefers `title`, then falls
 back to generic non-ID schema fields.
 
@@ -112,7 +112,7 @@ Guard: no `bud`/component symbols may appear in `external/libhyle/src` or
 
 - `idx_resolve_refs` (index.c:227) resolves stored positions → labels for table
   cells: split stored value on `\n`, treat numeric tokens as positions into the
-  target fields registry (`qmap_get_key`), look up `"<slug>:<display_field>"`
+  target fields registry (`corm_get_key`), look up `"<slug>:<display_field>"`
   for the label. Falls back to the raw slug. The display field is the target
   source's first non-`id` schema key.
 - `idx_resolve_filter_options` (list.c:118) uses the same display-field logic

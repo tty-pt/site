@@ -6,7 +6,7 @@ Leaf name settled by user choice: **`query=`**
 (parallels stoma's `query=` key).
 
 > **D14 update (2026-09-16):** historical record of the leaf surface as
-> built. The `query=` leaf grammar here is still valid qmap syntax, but
+> built. The `query=` leaf grammar here is still valid corm syntax, but
 > pi-mm now emits the D14 flags form — `-X '(stoma="field=text matched=1"
 > AND sepal)' --query=… [--min-sim=…]` — structure in `-X`, runtime
 > values on CLI flags (precedence leaf spec > CLI > env). See
@@ -29,11 +29,11 @@ its already-configured embedder. This deletes the entire pi-mm curl→tempfile�
 - **Quoting**: stoma's established convention is single-quoted values with
   spaces (`query='black star'`, `libstoma.c:681-744`, lenient on
   unterminated quote). The `-X` lexer passes double-quoted whole values
-  through with inner single quotes literal (`qmap.c:1433-1445`), so
+  through with inner single quotes literal (`corm.c:1433-1445`), so
   `sepal="query='harbor lights' m=10"` arrives at decode intact. Mirror
   stoma's tokenizer verbatim.
-- **Failure contract**: decode NULL → fill −1 → `qmap_expr_error` →
-  `exit(EXIT_FAILURE)` (`qmap.c:1643-1644, :1350-1359`). Same as unreadable
+- **Failure contract**: decode NULL → fill −1 → `corm_expr_error` →
+  `exit(EXIT_FAILURE)` (`corm.c:1643-1644, :1350-1359`). Same as unreadable
   `file=` today: loud query error, never silent-empty. pi-mm's client-side
   `sepalConfigured` gate + soft fallback stays as-is.
 - **Test seam**: `sepal_embed_fetch` is `__attribute__((weak))`;
@@ -79,7 +79,7 @@ its already-configured embedder. This deletes the entire pi-mm curl→tempfile�
 - End-to-end: `sepal_put` direct floats → decode `query=…` → registered-axis
   fill+rank → ref found with expected cosine.
 - Gates: `make test` green, `make valgrind` clean for the new binary, zero
-  warnings. (TESTING.md: build site `external/libqmap` kernel first.)
+  warnings. (TESTING.md: build site `external/libcorm` kernel first.)
 
 ## Phase B — site + pi-mm simplification
 
@@ -91,7 +91,7 @@ site `make` green.
 ### B-2 pi-mm (net deletion)
 
 - Delete `src/embed.ts` + `tests/embed.test.ts`.
-- `qmap.ts`: `sepalLeafFor(vecFile,qdim)` → `sepalLeafForText(topic)`
+- `corm.ts`: `sepalLeafFor(vecFile,qdim)` → `sepalLeafForText(topic)`
   emitting ``sepal="query='<topic>' m=10 min_sim=0.2"``. Keep
   `SEPAL_M/MIN_SIM`, `embedEnv`, `filespecFor(_,embed)`, `sepalConfigured`
   (store still embeds; env passthrough still required).

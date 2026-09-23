@@ -9,7 +9,7 @@
 #include <ttypt/axil-hyle.h>
 #include <ttypt/xy.h>
 #include <ttypt/xy-mod.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #include "../common/common.h"
 #include "../source/source.h"
@@ -63,7 +63,7 @@ static void gig_sync_repertoire(const char *sb_id)
 	if (!sb_id || !sb_id[0])
 		return;
 	fhd = source_get_fields_hd("gig.items");
-	grp = fhd ? qmap_get_field_str(fhd, sb_id, "grp") : NULL;
+	grp = fhd ? corm_get_field_str(fhd, sb_id, "grp") : NULL;
 	if (grp && grp[0])
 		rep_rebuild(grp);
 }
@@ -86,11 +86,11 @@ static void sb_for_each_song_row_cb(
 {
 	(void)idx;
 	struct sb_each_wrapper *w = user;
-	const char *sid = qmap_field_get(fhd, key, "song");
+	const char *sid = corm_field_get(fhd, key, "song");
 	if (!sid)
 		return;
-	const char *ts = qmap_field_get(fhd, key, "transpose");
-	const char *fm = qmap_field_get(fhd, key, "format");
+	const char *ts = corm_field_get(fhd, key, "transpose");
+	const char *fm = corm_field_get(fhd, key, "format");
 	w->cb(key, sid, ts ? atoi(ts) : 0, fm ? fm : "any", w->user);
 }
 
@@ -149,7 +149,7 @@ static int get_random_repertoire_by_type(
 	int pick;
 
 	gig_fhd = source_get_fields_hd("gig.items");
-	grp = gig_fhd ? qmap_get_field_str(gig_fhd, sb_id, "grp") : NULL;
+	grp = gig_fhd ? corm_get_field_str(gig_fhd, sb_id, "grp") : NULL;
 	if (!grp || !grp[0])
 		return -1;
 
@@ -322,7 +322,7 @@ static int handle_sb_add(int fd, char *body)
 		{
 			unsigned grp_fhd = source_get_fields_hd("grp.items");
 			const char *formats =
-			        grp_fhd ? qmap_get_field_str(
+			        grp_fhd ? corm_get_field_str(
 			                          grp_fhd, grp, "format")
 			                : NULL;
 			struct seed_song_ctx seed_ctx = { id };
@@ -347,7 +347,7 @@ static int handle_sb_add(int fd, char *body)
 
 static const hyle_schema_desc_t sb_pick_song_schema[] = {
 	{ .key = "song_id",
-	  .qm_type = BUD_QM_STR,
+	  .qm_type = BUD_CM_STR,
 	  .type = HYLE_FIELD_REFERENCE,
 	  .ref_source = "song.items",
 	  .writable = 1 },
@@ -356,7 +356,7 @@ static const hyle_schema_desc_t sb_pick_song_schema[] = {
 
 static const hyle_schema_desc_t sb_pick_fmt_schema[] = {
 	{ .key = "format",
-	  .qm_type = BUD_QM_STR,
+	  .qm_type = BUD_CM_STR,
 	  .type = HYLE_FIELD_REFERENCE,
 	  .ref_source = "song.types",
 	  .writable = 1 },
@@ -382,7 +382,7 @@ static void sb_load_edit_song_picks(int fd, pick_view_t *pv_out)
 {
 	static const hyle_schema_desc_t edit_song_schema[] = {
 		{ .key = "song",
-		  .qm_type = BUD_QM_STR,
+		  .qm_type = BUD_CM_STR,
 		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.items",
 		  .writable = 1 },
@@ -515,10 +515,10 @@ static int sb_load_song_row(
 	char *ch;
 	int dk;
 
-	if (qmap_pos(song_hd, song_id) == QM_MISS)
+	if (corm_pos(song_hd, song_id) == CM_MISS)
 		return -1;
 
-	st = qmap_get_field_str(song_hd, song_id, "title");
+	st = corm_get_field_str(song_hd, song_id, "title");
 	if (!st)
 		st = song_id;
 
@@ -534,10 +534,10 @@ static int sb_load_song_row(
 	sd->flags = flags;
 
 	{
-		const char *_yt = qmap_get_field_str(song_hd, song_id, "yt");
+		const char *_yt = corm_get_field_str(song_hd, song_id, "yt");
 		const char *_audio =
-		        qmap_get_field_str(song_hd, song_id, "audio");
-		const char *_pdf = qmap_get_field_str(song_hd, song_id, "pdf");
+		        corm_get_field_str(song_hd, song_id, "audio");
+		const char *_pdf = corm_get_field_str(song_hd, song_id, "pdf");
 		if (_yt)
 			snprintf(sd->yt, sizeof(sd->yt), "%s", _yt);
 		if (_audio)
@@ -578,7 +578,7 @@ static void detail_song_cb(
 	if (sb_load_song_row(song_id, transpose, c->song_hd, c->f, sd) == 0) {
 		if (format && format[0] && strcmp(format, "any") != 0) {
 			unsigned thd = source_get_fields_hd("song.types");
-			const char *name = thd ? qmap_get_field_str(thd, format, "name") : NULL;
+			const char *name = thd ? corm_get_field_str(thd, format, "name") : NULL;
 			if (name && name[0])
 				snprintf(
 				        sd->type, sizeof(sd->type), "%s",
@@ -609,7 +609,7 @@ static void edit_song_cb(
 	if (*c->n_songs >= 256)
 		return;
 	sb_edit_row_t *row = &c->songs[*c->n_songs];
-	const char *s_title = qmap_get_field_str(c->song_hd, song_id, "title");
+	const char *s_title = corm_get_field_str(c->song_hd, song_id, "title");
 	if (!s_title)
 		s_title = song_id;
 	snprintf(row->repo_id, sizeof(row->repo_id), "%s", song_id);
@@ -643,7 +643,7 @@ static void sb_resolve_edit_format_names(sb_edit_row_t *songs, int n_songs)
 		if (fmt[0] && strcmp(fmt, "any") != 0) {
 			char nk[320];
 			snprintf(nk, sizeof(nk), "%s:name", fmt);
-			const char *name = qmap_get(type_fhd, nk);
+			const char *name = corm_get(type_fhd, nk);
 			if (name && name[0])
 				snprintf(
 				        songs[si].format,
@@ -821,11 +821,11 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	if (!fields_hd)
 		return server_error(fd, "No fields_hd");
 
-	title = qmap_get_field_str(fields_hd, ctx->id, "title");
+	title = corm_get_field_str(fields_hd, ctx->id, "title");
 	if (!title)
 		title = "";
 
-	grp_id = qmap_get_field_str(fields_hd, ctx->id, "grp");
+	grp_id = corm_get_field_str(fields_hd, ctx->id, "grp");
 	song_hd = source_get_fields_hd("song.items");
 
 	/* Read song_source from meta; default to repertoire when a grp
@@ -862,7 +862,7 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	static const hyle_schema_desc_t grp_field_schema[] = {
 		{ .key = "grp",
-		  .qm_type = BUD_QM_STR,
+		  .qm_type = BUD_CM_STR,
 		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "grp.items",
 		  .offset = offsetof(gig_cache_t, grp),
@@ -881,12 +881,12 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	 * unified multi-field auto-collector */
 	static const hyle_schema_desc_t row_candidate_schema[] = {
 		{ .key = "song",
-		  .qm_type = BUD_QM_STR,
+		  .qm_type = BUD_CM_STR,
 		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.items",
 		  .writable = 1 },
 		{ .key = "fmt",
-		  .qm_type = BUD_QM_STR,
+		  .qm_type = BUD_CM_STR,
 		  .type = HYLE_FIELD_REFERENCE,
 		  .ref_source = "song.types",
 		  .writable = 1 },
@@ -1001,7 +1001,7 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	{
 		unsigned ohd = source_get_fields_hd("gig.items");
 		const char *og =
-		        ohd ? qmap_get_field_str(ohd, ctx->id, "grp") : NULL;
+		        ohd ? corm_get_field_str(ohd, ctx->id, "grp") : NULL;
 		if (og && og[0])
 			snprintf(old_grp, sizeof(old_grp), "%s", og);
 	}
@@ -1010,13 +1010,13 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	{
 		unsigned dh = source_parse_form("gig.items");
 		if (dh) {
-			const char *new_grp = qmap_get(dh, "grp");
+			const char *new_grp = corm_get(dh, "grp");
 			if (new_grp && new_grp[0]) {
 				if (!source_item_exists("grp.items", new_grp) ||
 				    !module_item_owner_check(
 				            fd, "grp", new_grp, ctx->username))
 				{
-					qmap_close(dh);
+					corm_close(dh);
 					return respond_error(
 					        fd, 403,
 					        "You don't own this group");
@@ -1025,7 +1025,7 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 			}
 
 			source_update_item(fd, "gig.items", ctx->id, dh);
-			qmap_close(dh);
+			corm_close(dh);
 		}
 	}
 
@@ -1038,7 +1038,7 @@ gig_edit_post_authorized(int fd, char *body, const item_ctx_t *ctx, void *user)
 	if (old_grp[0]) {
 		unsigned nhd = source_get_fields_hd("gig.items");
 		const char *ng =
-		        nhd ? qmap_get_field_str(nhd, ctx->id, "grp") : NULL;
+		        nhd ? corm_get_field_str(nhd, ctx->id, "grp") : NULL;
 		if (!ng || !ng[0] || strcmp(ng, old_grp) != 0)
 			rep_rebuild(old_grp);
 	}
@@ -1137,12 +1137,12 @@ void xy_install(void)
 		unsigned gh = source_get_fields_hd("gig.items");
 		unsigned dh = source_get_data_hd("gig.items");
 		if (gh && dh) {
-			uint32_t cur = qmap_iter(dh, NULL, 0);
+			uint32_t cur = corm_iter(dh, NULL, 0);
 			const void *k, *v;
-			while (qmap_next(&k, &v, cur)) {
+			while (corm_next(&k, &v, cur)) {
 				const char *gig_id = (const char *)k;
 				const char *grp_in_mem =
-				        qmap_get_field_str(gh, gig_id, "grp");
+				        corm_get_field_str(gh, gig_id, "grp");
 				char item_path[512];
 				if (item_path_build(
 				            0, "gig", gig_id, item_path,
@@ -1160,7 +1160,7 @@ void xy_install(void)
 					}
 				}
 			}
-			qmap_fin(cur);
+			corm_fin(cur);
 		}
 	}
 
@@ -1170,11 +1170,11 @@ void xy_install(void)
 		unsigned gh = source_get_fields_hd("grp.items");
 		unsigned dh = source_get_data_hd("grp.items");
 		if (gh && dh) {
-			uint32_t cur = qmap_iter(dh, NULL, 0);
+			uint32_t cur = corm_iter(dh, NULL, 0);
 			const void *k, *v;
-			while (qmap_next(&k, &v, cur))
+			while (corm_next(&k, &v, cur))
 				rep_rebuild((const char *)k);
-			qmap_fin(cur);
+			corm_fin(cur);
 		}
 	}
 }

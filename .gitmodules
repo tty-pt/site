@@ -1,8 +1,8 @@
 [submodule "external/libhyle"]
 	path = external/libhyle
 	url = git@github.com:tty-pt/hyle.git
-[submodule "external/libqmap"]
-	path = external/libqmap
+[submodule "external/libcorm"]
+	path = external/libcorm
 	url = git@github.com:tty-pt/libqmap.git
 [submodule "external/libxylem"]
 	path = external/libxylem

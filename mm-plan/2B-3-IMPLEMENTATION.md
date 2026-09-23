@@ -1,24 +1,24 @@
 # 2B-3 — Implementation detail (the `-g` fold + the `-X` surface)
 
-> Precise, normative spec for slice 2B-3 of `external/libqmap`. Read these
+> Precise, normative spec for slice 2B-3 of `external/libcorm`. Read these
 > first, in order: `mm-plan/CLI-SURFACE-EXAMPLES.md` (§3/§4/§5/§11 normative
 > surface), `mm-plan/PHASE-2-CLI.md` (§2B "the `-g` fold", decisions D1-D10,
-> the 2B-3 slice), `external/libqmap/docs/RECALL-KERNEL.md` (`rec.h` APIs),
-> then `external/libqmap/src/qmap.c` (current shape). References to
+> the 2B-3 slice), `external/libcorm/docs/RECALL-KERNEL.md` (`rec.h` APIs),
+> then `external/libcorm/src/corm.c` (current shape). References to
 > `CLI-SURFACE-EXAMPLES.md` below are "examples".
 
 ## 0. Scope & file deltas
 
 | File | Action |
 |---|---|
-| `src/qmap.c` | delete `-Q` mode; add `-X`/`-t`/`-b`; extend load set (D9); composed `-g .`; exit codes; `--list-axes` standalone |
+| `src/corm.c` | delete `-Q` mode; add `-X`/`-t`/`-b`; extend load set (D9); composed `-g .`; exit codes; `--list-axes` standalone |
 | `src/librec_axis_fold.c` | **new** test plugin (3 axes: alpha/beta/pure) |
 | `Makefile` | `LDLIBS-librec_axis_fold`, standalone rule, `all:` addition |
 | `test-cli.sh` | full rewrite (acceptance spec in §7) |
 | `test-roster.sh` | untouched, must stay green |
 | docs (this pass) | `<mm-plan/CLI-SURFACE-EXAMPLES.md>` §4/§5/§11 + `<mm-plan/PHASE-2-CLI.md>` D10/§2B + `<mm-plan/README.md>` 2B-3 row → EXCEPT sync — **already applied**; §8 drift fixes **already applied** |
 
-Ground rules: work only in `external/libqmap`; kernel (`rec.h`/`rec.c`,
+Ground rules: work only in `external/libcorm`; kernel (`rec.h`/`rec.c`,
 `idm.c`) untouched; no `/usr` installs (D4); TDD red → green; commit only
 when asked.
 
@@ -74,13 +74,13 @@ every §5 shape parse unambiguously:
 **Named parse errors** (each `fprintf` + `exit(EXIT_FAILURE)` from pass 1):
 
 ```
-qmap: -X: unexpected token '<tok>'
-qmap: -X: unexpected token 'NOT' (use EXCEPT for set difference)
-qmap: -X: expected ')'                  # unbalanced parens
-qmap: -X: expected expression           # empty parens "()"
-qmap: -X: unterminated quote
-qmap: -X: too many expression nodes      # arena cap (512)
-qmap: -X: too many distinct axes (max 8)
+corm: -X: unexpected token '<tok>'
+corm: -X: unexpected token 'NOT' (use EXCEPT for set difference)
+corm: -X: expected ')'                  # unbalanced parens
+corm: -X: expected expression           # empty parens "()"
+corm: -X: unterminated quote
+corm: -X: too many expression nodes      # arena cap (512)
+corm: -X: too many distinct axes (max 8)
 ```
 
 Empty expression / whitespace-only `-X` → **unarmed** (parse succeeds,
@@ -109,7 +109,7 @@ struct expr_node {
   bump-allocated by the parser (never freed individually; process lifetime).
   Overflow → parse error `too many expression nodes` (512 covers 8 axes × 64
   uses each).
-- `expr_names[REC_QUERY_MAX_AXES][QMAP_AXIS_ROSTER_MAX]` + `expr_n`: distinct
+- `expr_names[REC_QUERY_MAX_AXES][CORM_AXIS_ROSTER_MAX]` + `expr_n`: distinct
   axis names seen by the parser, deduped in order — this drives the D9
   load-set extension (see §4). Cap `REC_QUERY_MAX_AXES` → parse error
   `too many distinct axes (max 8)`.
@@ -117,7 +117,7 @@ struct expr_node {
 ### 2b. Lexer
 
 Single cursor `static const char *lx;` walking `expr_str`. One lookahead at a
-time; `qmap_expr_peek_tok()` materializes `qmap_cur_tok` (a static
+time; `corm_expr_peek_tok()` materializes `corm_cur_tok` (a static
 `{ enum tok t; const char *word; size_t len; }`). Tokens:
 
 ```
@@ -136,16 +136,16 @@ enum tok { T_EOF, T_LP, T_RP, T_KW, T_NAME };
   space).
 
 ### 2c. Parser (recursive descent; all fns return `struct expr_node *` or
-NULL; on failure they fill `static char qmap_expr_err[128]` and pass-1 prints
-`qmap: -X: %s` then exits 1)
+NULL; on failure they fill `static char corm_expr_err[128]` and pass-1 prints
+`corm: -X: %s` then exits 1)
 
 ```c
-static struct expr_node *qmap_expr_setexpr(void);  /* orexpr (EXCEPT orexpr)* → SUB */
-static struct expr_node *qmap_expr_orexpr(void);   /* andexpr (OR andexpr)*   → OR  */
-static struct expr_node *qmap_expr_andexpr(void);  /* notexpr (AND notexpr)*  → AND */
-static struct expr_node *qmap_expr_notexpr(void);  /* NOT notexpr | primary   → NOTP */
-static struct expr_node *qmap_expr_primary(void);  /* '(' setexpr ')' | axis  → LEAF */
-static struct expr_node *qmap_expr_leaf(void);     /* NAME ('=' VALUE)? + expr_names add */
+static struct expr_node *corm_expr_setexpr(void);  /* orexpr (EXCEPT orexpr)* → SUB */
+static struct expr_node *corm_expr_orexpr(void);   /* andexpr (OR andexpr)*   → OR  */
+static struct expr_node *corm_expr_andexpr(void);  /* notexpr (AND notexpr)*  → AND */
+static struct expr_node *corm_expr_notexpr(void);  /* NOT notexpr | primary   → NOTP */
+static struct expr_node *corm_expr_primary(void);  /* '(' setexpr ')' | axis  → LEAF */
+static struct expr_node *corm_expr_leaf(void);     /* NAME ('=' VALUE)? + expr_names add */
 ```
 
 - `setexpr`: `n = orexpr()`; while next is `T_KW EXCEPT`: consume, parse
@@ -156,8 +156,8 @@ static struct expr_node *qmap_expr_leaf(void);     /* NAME ('=' VALUE)? + expr_n
   (NOT is unary; it may chain: `NOT NOT alpha`). Else `primary()`.
 - `primary`: if `T_LP` → consume, parse `setexpr()`; require `T_RP` else
   `expected ')'`. If the paren is immediately empty (`T_RP` right after
-  `T_LP`) → `expected expression`. Else `qmap_expr_leaf()`.
-- `qmap_expr_leaf`: `T_NAME` required (else `unexpected token '<tok>'`,
+  `T_LP`) → `expected expression`. Else `corm_expr_leaf()`.
+- `corm_expr_leaf`: `T_NAME` required (else `unexpected token '<tok>'`,
   tok text trimmed to 32 chars); collect into `expr_names` (dedup, cap);
   optional `=VALUE`; arena node.
 - **`A NOT B` legality guard:** after any of `orexpr`/`andexpr`/`notexpr`
@@ -168,19 +168,19 @@ static struct expr_node *qmap_expr_leaf(void);     /* NAME ('=' VALUE)? + expr_n
   completed operand) is a parse error → `unexpected token 'NOT' (use EXCEPT
   for set difference)`. This is naturally produced by the grammar (no
   separate state machine) — verify with test rows 19b.
-- Entry: `int qmap_expr_parse(const char *expr)` — resets arena + cursor;
+- Entry: `int corm_expr_parse(const char *expr)` — resets arena + cursor;
   whitespace-only/empty ⇒ success with `expr_root = NULL` (unarmed);
-  otherwise `expr_root = qmap_expr_setexpr()`; a trailing garbage token ⇒
+  otherwise `expr_root = corm_expr_setexpr()`; a trailing garbage token ⇒
   `unexpected token '<tok>'`.
 
 ### 2d. Eval
 
-`static rec_set_t *qmap_expr_eval(struct expr_node *n)` — memoizes into
+`static rec_set_t *corm_expr_eval(struct expr_node *n)` — memoizes into
 `n->set` (each node evaluated exactly once per run, no shared sub-trees).
 On any failure it records a named error and returns NULL (caller frees
 everything it owns and exits 1).
 
-- **E_LEAF**: `slot = qmap_axes_find_slot(n->name)` (pre-validated already,
+- **E_LEAF**: `slot = corm_axes_find_slot(n->name)` (pre-validated already,
   §3); `params = axis->decode ? axis->decode(n->value) :
   (void *)(n->value ? n->value : "")`; `s = rec_set_new(); axis->fill(ctx,
   params, s); rec_set_seal(s);` `fill < 0` → named error. First leaf with
@@ -188,7 +188,7 @@ everything it owns and exits 1).
   ranker_params = params` — used by the rank pass; when every leaf is
   filter-only, `ranker_axis == NULL` ⇒ pure-filter render.
 - **E_NOTP(c)**: `d = rec_set_new(); rec_set_subtract(d, UNIVERSE,
-  eval(c));` (UNIVERSE = `rec_set_new(); rec_set_fill_qmap_iter(U,
+  eval(c));` (UNIVERSE = `rec_set_new(); rec_set_fill_corm_iter(U,
   prim_hd); rec_set_seal(U);` built once per composed run).
 - **E_AND / E_OR / E_SUB**: fold — `acc = eval(kids[0])`; for i>0:
   `t = eval(kids[i]); d = rec_set_new();` then
@@ -196,13 +196,13 @@ everything it owns and exits 1).
   rec_set_free(acc); acc = d;`.
 - Every intermediate `d` is new; operands freed after each join; exactness /
   approx propagation inherited from the kernel joins (documented in rec.h).
-- Freeing: `qmap_expr_free_tree()` walks the arena, `rec_set_free`ing every
+- Freeing: `corm_expr_free_tree()` walks the arena, `rec_set_free`ing every
   `n->set`; called at the end of each composed get so a second armed `-g .`
   in the same invocation (after interleaved `-p` writes) evaluates fresh.
 
 ---
 
-## 3. The composed get — `qmap_composed_get(void)`
+## 3. The composed get — `corm_composed_get(void)`
 
 Called from pass-2 `case 'g':` iff `optarg == "." && expr_root`; else
 `gen_get(optarg)` (byte-for-byte classic). `expr_root` non-NULL only when
@@ -210,13 +210,13 @@ armed (`-X` present and nonempty).
 
 Order of operations:
 
-1. **Primary ref-law check:** `qmap_get_ktype(prim_hd) != QM_HNDL` →
-   `qmap: composed -g . needs an :a:-type primary`, exit 1.
+1. **Primary ref-law check:** `corm_get_ktype(prim_hd) != CM_HNDL` →
+   `corm: composed -g . needs an :a:-type primary`, exit 1.
 2. **Pre-validation (named errors, exit 1)** for every heap node in the
    tree (`kind == E_LEAF`):
-   - `qmap_axes_find_slot(name) < 0` → `qmap: axis '%s': slot not found`
-   - `!axis || !axis->fill` → `qmap: axis '%s': no fill function`
-   - `!axis->ctx` → `qmap: axis '%s': no ctx (not bound)`
+   - `corm_axes_find_slot(name) < 0` → `corm: axis '%s': slot not found`
+   - `!axis || !axis->fill` → `corm: axis '%s': no fill function`
+   - `!axis->ctx` → `corm: axis '%s': no ctx (not bound)`
 3. **Eval** (re-seed `ranker_axis = NULL`; reset all memo `set` fields) the
    tree → final sealed `rec_set_t *R` (`rec_set_count(R)` refs).
 4. **Rank or pure-filter:**
@@ -233,25 +233,25 @@ Order of operations:
    - else pure-filter: `R` is already sealed (asc-ref); walk
      `rec_set_at(R)` directly, no scores, no board.
 5. **Render** (locked format): per result `ref`:
-   `rec = qmap_get(prim_hd, &ref)`:
+   `rec = corm_get(prim_hd, &ref)`:
    - missing → `dangling++`, skip (stderr count + exit 0, never a render
      line);
    - ranked: `printf("%u %f ", ref, score)`; pure: `printf("%u ", ref)`;
-     then `qmape_print(prim_hd, VALUE, rec); putchar('\n')` (`qmape_print`
+     then `corme_print(prim_hd, VALUE, rec); putchar('\n')` (`corme_print`
      keeps the type tables honest for `s`/`u` value types).
 6. **Dangling epilogue:** `if (dangling) fprintf(stderr,
-   "qmap: %d refs skipped: no primary record\n", dangling);` → exit 0.
+   "corm: %d refs skipped: no primary record\n", dangling);` → exit 0.
 7. `-k` / `-r` / `-x` are ignored under an armed `-g .` (composed path never
    consults `print_keys` / `reverse` / `bail`).
 8. **Free**: `rec_set_free(R)` (intermediates were freed in the fold),
-   `rec_set_free(UNIVERSE)`, `qmap_expr_free_tree()`, `free(refs)`,
+   `rec_set_free(UNIVERSE)`, `corm_expr_free_tree()`, `free(refs)`,
    `free(scores)`. Return `EXIT_SUCCESS` → `main` stores it in `rc` (see the
    `main()` wiring in §4: plain `int rc` in `main`, assigned by the
    `case 'g':` branch).
 
 **Exit codes:** `main` gains `int rc = EXIT_SUCCESS;` set by the composed
 path; all named errors above `exit(EXIT_FAILURE)` (matches the CLI's
-existing style — `_qmape_type`, `gen_open`). Final `return rc;` replaces
+existing style — `_corme_type`, `gen_open`). Final `return rc;` replaces
 today's implicit fall-off.
 
 **Edge: `rec_set_count(R) == 0`** → nothing to rank/render and no boards
@@ -261,13 +261,13 @@ floor `-b` only bites ranked mode (pure-filter has no scores to floor).
 
 ---
 
-## 4. `src/qmap.c` concrete edits
+## 4. `src/corm.c` concrete edits
 
-**Delete:** the `-Q` guard in `main` (`argv[1]=="-Q"`), `qmap_recall_query`,
-`rq_long_opts`, the `RQ_OPT_*` enum, `QMAP_RQ_DEFAULT_TOP` /
-`QMAP_RQ_ALL_TOP`, `qmap_rq_usage`, `qmap_rq_parse_join`,
-`qmap_rq_dlopen_env_one`. Outcome: `grep -E '\-Q|--dl|--open|--axis|
---params|--combine|qmap_rq|RQ_OPT' src/` returns 0.
+**Delete:** the `-Q` guard in `main` (`argv[1]=="-Q"`), `corm_recall_query`,
+`rq_long_opts`, the `RQ_OPT_*` enum, `CORM_RQ_DEFAULT_TOP` /
+`CORM_RQ_ALL_TOP`, `corm_rq_usage`, `corm_rq_parse_join`,
+`corm_rq_dlopen_env_one`. Outcome: `grep -E '\-Q|--dl|--open|--axis|
+--params|--combine|corm_rq|RQ_OPT' src/` returns 0.
 
 **`optstr`:** `"kxla:q:p:d:D:g:m:c:rR:L:X:t:b:?"`
 
@@ -278,7 +278,7 @@ floor `-b` only bites ranked mode (pure-filter has no scores to floor).
 
 **New globals:** `static const char *expr_str;`
 `static struct expr_node *expr_root;`
-`static char expr_names[REC_QUERY_MAX_AXES][QMAP_AXIS_ROSTER_MAX];`
+`static char expr_names[REC_QUERY_MAX_AXES][CORM_AXIS_ROSTER_MAX];`
 `static int expr_n;` `static size_t top_k;` `static float min_score;`
 
 **Pass-1 switch additions:**
@@ -286,8 +286,8 @@ floor `-b` only bites ranked mode (pure-filter has no scores to floor).
 ```c
 case 'X':
 	expr_str = optarg;
-	if (qmap_expr_parse(optarg) != 0) {    /* sets expr_root + expr_names */
-		fprintf(stderr, "qmap: -X: %s\n", qmap_expr_err);
+	if (corm_expr_parse(optarg) != 0) {    /* sets expr_root + expr_names */
+		fprintf(stderr, "corm: -X: %s\n", corm_expr_err);
 		return EXIT_FAILURE;
 	}
 	break;
@@ -295,7 +295,7 @@ case 't':
 case CLIP_OPT_TOP: {
 		char *end; long t = strtol(optarg, &end, 10);
 		if (*end != '\0' || t < 0) {
-			fprintf(stderr, "qmap: invalid --top value '%s'\n", optarg);
+			fprintf(stderr, "corm: invalid --top value '%s'\n", optarg);
 			return EXIT_FAILURE;
 		}
 		top_k = (size_t) t;
@@ -305,7 +305,7 @@ case 'b':
 case CLIP_OPT_BOTTOM: {
 		char *end; float b = strtof(optarg, &end);
 		if (end == optarg) {
-			fprintf(stderr, "qmap: invalid --bottom value '%s'\n", optarg);
+			fprintf(stderr, "corm: invalid --bottom value '%s'\n", optarg);
 			return EXIT_FAILURE;
 		}
 		min_score = b;
@@ -313,8 +313,8 @@ case CLIP_OPT_BOTTOM: {
 	}
 ```
 
-**`qmap_axes_setup`:** extract the env-libs dlopen loop into
-`static void qmap_axes_dlopen_env(int quiet)`; in setup, after roster
+**`corm_axes_setup`:** extract the env-libs dlopen loop into
+`static void corm_axes_dlopen_env(int quiet)`; in setup, after roster
 handling, extend the load loop over `roster_names` **then** `expr_names`
 (both deduped by `strcmp`, combined cap `REC_QUERY_MAX_AXES` names) so an
 `-X`-only invocation loads + binds its axes without `@` (D9). The sidecar
@@ -325,8 +325,8 @@ persist into the roster.
 
 ```c
 if (list_axes && optind >= argc) {   /* right after pass-1 loop, before the argc check */
-	qmap_axes_dlopen_env(1);
-	qmap_axes_list();
+	corm_axes_dlopen_env(1);
+	corm_axes_list();
 	return EXIT_SUCCESS;
 }
 ```
@@ -345,7 +345,7 @@ and change `case 'g':` to:
 ```c
 case 'g':
 	if (!strcmp(optarg, ".") && expr_root)
-		rc = qmap_composed_get();
+		rc = corm_composed_get();
 	else
 		gen_get(optarg);
 	break;
@@ -376,8 +376,8 @@ main(int argc, char *argv[])
 	...
 	while (pass-1 loop) { ... }     /* parses -X/-t/-b + long opts */
 	if (list_axes && optind >= argc) {
-		qmap_axes_dlopen_env(1);
-		qmap_axes_list();
+		corm_axes_dlopen_env(1);
+		corm_axes_list();
 		return EXIT_SUCCESS;
 	}
 	if (optind >= argc) { usage(*argv); return EXIT_FAILURE; }
@@ -385,13 +385,13 @@ main(int argc, char *argv[])
 	optind = 1;
 	prim_hd = gen_open(fname, flags);
 	srand(time(NULL));
-	qmap_axes_setup();              /* load set = @ ∪ roster ∪ expr_names */
-	if (list_axes) { qmap_axes_list(); return EXIT_SUCCESS; }
+	corm_axes_setup();              /* load set = @ ∪ roster ∪ expr_names */
+	if (list_axes) { corm_axes_list(); return EXIT_SUCCESS; }
 	while (pass-2 loop) {
 		...
 		case 'g':
 			if (!strcmp(optarg, ".") && expr_root)
-				rc = qmap_composed_get();
+				rc = corm_composed_get();
 			else
 				gen_get(optarg);
 			break;
@@ -401,7 +401,7 @@ main(int argc, char *argv[])
 ```
 
 - `rc` is thread-local-ish file scope is unnecessary; a plain `int rc`
-  shadowed nowhere, defaulting `EXIT_SUCCESS`; `qmap_composed_get` also
+  shadowed nowhere, defaulting `EXIT_SUCCESS`; `corm_composed_get` also
   returns `EXIT_SUCCESS`/`EXIT_FAILURE` (failure via its own `exit(1)` on
   named errors, per the CLI's existing style).
 - Pass-2 `case 'p'/'d'/'D'` still clears `QH_RDONLY` before `gen_open` for
@@ -411,8 +411,8 @@ main(int argc, char *argv[])
   read-write when a write op exists (the `p/d/D` flags logic runs during
   pass-1's option scan).
 
-**`qmap_expr_parse` failure path (pass 1):** errors carry a message in
-`qmap_expr_err` and pass-1 emits `qmap: -X: <msg>`, returns
+**`corm_expr_parse` failure path (pass 1):** errors carry a message in
+`corm_expr_err` and pass-1 emits `corm: -X: <msg>`, returns
 `EXIT_FAILURE` — before any primary is opened, so parse errors cost
 nothing.
 
@@ -421,7 +421,7 @@ nothing.
 ## 5. `src/librec_axis_fold.c` (new)
 
 Three by-name axes in one `.so`, loaded in tests via
-`QMAP_AXIS_LIBS=$PWD/lib/librec_axis_fold.so` (the exact multi-axis-in-one-`
+`CORM_AXIS_LIBS=$PWD/lib/librec_axis_fold.so` (the exact multi-axis-in-one-`
 .so` pattern the mock + roster §5 already establish — this works around the
 shared mk `LIB`-obj aggregation bug; see the comment in `librec_axis_mock.c`).
 `rec_axis_open(spec)` opens the alongside-default `<dir>/<name>.db` as a
@@ -430,7 +430,7 @@ value; `decode` NULL (raw VALUE forwarded whole-string):
 
 ```c
 #include <ttypt/rec.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -439,7 +439,7 @@ fold_fill(void *ctx, void *params, rec_set_t *out)
 {
 	(void) params;
 	if (!ctx) return -1;
-	int rc = rec_set_fill_qmap_iter(out, (uint32_t)(uintptr_t) ctx);
+	int rc = rec_set_fill_corm_iter(out, (uint32_t)(uintptr_t) ctx);
 	rec_set_seal(out);
 	return rc;
 }
@@ -464,15 +464,15 @@ static void fold_init(void)
 }
 
 /* Alongside-default spec: <primary-dir>/<name>.db — open as an a:u store.
- * Database name MUST be "hd" with the CLI mask: qmap files namespace
+ * Database name MUST be "hd" with the CLI mask: corm files namespace
  * records by dbid = XXH32(database) and the CLI seeds via gen_open(...,
  * "hd", ...); any other name loads nothing (and exit-save would truncate). */
 void *
 rec_axis_open(const char *spec)
 {
 	if (!spec) return NULL;
-	uint32_t hd = qmap_open(spec, "hd", QM_HNDL, QM_U32,
-			(32768 - 1), QM_AINDEX);
+	uint32_t hd = corm_open(spec, "hd", CM_HNDL, CM_U32,
+			(32768 - 1), CM_AINDEX);
 	return (void *)(uintptr_t) hd;
 }
 ```
@@ -482,9 +482,9 @@ rec_axis_open(const char *spec)
 ## 6. `Makefile`
 
 ```make
-LDLIBS-librec_axis_fold := -lqmap
+LDLIBS-librec_axis_fold := -lcorm
 
-lib/librec_axis_fold.${SO}: src/librec_axis_fold.c lib/libqmap.${SO} lib
+lib/librec_axis_fold.${SO}: src/librec_axis_fold.c lib/libcorm.${SO} lib
 	${cc} ${CFLAGS} ${CFLAGS-LIB} -shared -o $@ src/librec_axis_fold.c ${LDFLAGS} ${LDLIBS-librec_axis_fold}
 
 all: lib/librec_axis_mock.${SO} lib/libstub.${SO} lib/libzed.${SO} lib/librec_axis_fold.${SO}
@@ -496,8 +496,8 @@ all: lib/librec_axis_mock.${SO} lib/libstub.${SO} lib/libzed.${SO} lib/librec_ax
 
 Seeding (envs clean): four refs in `demo.db:a:s` (values `one..four`), and
 `alpha.db` = refs 1,2,3 / `beta.db` = 2,3,4 / `pure.db` = 1,2 as `:a:u`.
-Then set `QMAP_AXIS_LIBS=$PWD/lib/librec_axis_fold.so`,
-`QMAP_AXIS_PATH=./lib`, `LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH`.
+Then set `CORM_AXIS_LIBS=$PWD/lib/librec_axis_fold.so`,
+`CORM_AXIS_PATH=./lib`, `LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH`.
 
 Rank scores = ref value; `%f` renders 6 decimals. Expected outputs:
 
@@ -563,14 +563,14 @@ The EXCEPT decision (user, 2026-09-14) is also already reflected in
 > - Stale-term grep over `src/` + `include/` = **0** (mock-plugin comments
 >   reworded to drop retired `-Q`/`--dl` references).
 > - Classic flat CLI byte-identical vs the pre-fold binary (verified by
->   building pristine `qmap.c` from git and diffing behavior).
+>   building pristine `corm.c` from git and diffing behavior).
 > - Not committed (per instruction).
 >
 > Bring-up fixes (deviations from the first RED cut, now reflected in the
 > code and in §5/§7 above):
 >
 > 1. **Fold-plugin dbid.** `rec_axis_open` opened axis stores with database
->    `"fold"` + mask `0xFF` → `qmap_load_file` (dbid-filtered) loaded
+>    `"fold"` + mask `0xFF` → `corm_load_file` (dbid-filtered) loaded
 >    nothing, and exit-save truncated the file. Fixed to database `"hd"`
 >    + CLI mask `(32768 - 1)`, matching `gen_open` — the first file-backed
 >    test axis, so this constraint is now documented in §5.
@@ -580,18 +580,18 @@ The EXCEPT decision (user, 2026-09-14) is also already reflected in
 >    guessed value-printing, but verified pristine behavior is ref-led
 >    (`-g .` → `1..4`, `-g 1` → `-1`); rows now pin that, and row 23
 >    includes the interleaved ref 9.
-> 4. **Parser hardening**: `qmap_expr_eval` return type `rec_set_t *`;
->    axis-name length cap (`QMAP_AXIS_ROSTER_MAX`); `qmap_expr_free_tree`
+> 4. **Parser hardening**: `corm_expr_eval` return type `rec_set_t *`;
+>    axis-name length cap (`CORM_AXIS_ROSTER_MAX`); `corm_expr_free_tree`
 >    clears memo sets only (never resets the arena, so a second interleaved
 >    `-g .` still pre-validates).
 >
 > Original plan (kept for the record): `src/librec_axis_fold.c` + Makefile
 > rule were written first; `test-cli.sh` rewritten to §7 and red (old
-> `bin/qmap` had no `-X`/standalone `--list-axes`); then the fold in
-> `src/qmap.c` (§3 + §4) until green:
+> `bin/corm` had no `-X`/standalone `--list-axes`); then the fold in
+> `src/corm.c` (§3 + §4) until green:
 >
-> 1. ~~Implement the fold in `src/qmap.c`~~ DONE — parser (§2b/§2c), eval
->    (§2d), `qmap_composed_get` (§3), `-Q` + `rq_*` deletion,
+> 1. ~~Implement the fold in `src/corm.c`~~ DONE — parser (§2b/§2c), eval
+>    (§2d), `corm_composed_get` (§3), `-Q` + `rq_*` deletion,
 >    `optstr`/long-opts/`-X`/`-t`/`-b`, load-set extension (D9), standalone
 >    `--list-axes`, `main` `rc`; stale-term grep = 0.
 > 2. ~~`make test` green~~ DONE — `test.sh` + `test-cli.sh` + `test-roster.sh`

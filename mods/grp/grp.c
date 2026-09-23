@@ -9,7 +9,7 @@
 #include <ttypt/axil-hyle.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/xy.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #include "../index/index.h"
 #include "../common/common.h"
@@ -89,10 +89,10 @@ static void rep_pinned_cb(int idx, const char *key, unsigned fhd, void *user)
 	struct rep_pinned_ctx *c = user;
 	if (*c->n_rows >= c->max_rows)
 		return;
-	const char *sid = qmap_field_get(fhd, key, "song");
+	const char *sid = corm_field_get(fhd, key, "song");
 	if (!sid)
 		return;
-	const char *pv = qmap_field_get(fhd, key, "pinned");
+	const char *pv = corm_field_get(fhd, key, "pinned");
 	if (pv && atoi(pv) == 0)
 		return;
 	if (rep_row_find(c->rows, *c->n_rows, sid) >= 0)
@@ -101,9 +101,9 @@ static void rep_pinned_cb(int idx, const char *key, unsigned fhd, void *user)
 	rep_row_t *r = &c->rows[(*c->n_rows)++];
 	memset(r, 0, sizeof(*r));
 	snprintf(r->song, sizeof(r->song), "%s", sid);
-	const char *ts = qmap_field_get(fhd, key, "transpose");
+	const char *ts = corm_field_get(fhd, key, "transpose");
 	r->transpose = ts ? atoi(ts) : 0;
-	const char *fm = qmap_field_get(fhd, key, "format");
+	const char *fm = corm_field_get(fhd, key, "format");
 	snprintf(r->format, sizeof(r->format), "%s", fm && fm[0] ? fm : "any");
 	r->pinned = 1;
 }
@@ -118,7 +118,7 @@ static void rep_tally_song_cb(
 {
 	(void)idx;
 	struct rep_tally_ctx *c = user;
-	const char *sid = qmap_field_get(fhd, key, "song");
+	const char *sid = corm_field_get(fhd, key, "song");
 	if (!sid)
 		return;
 
@@ -130,11 +130,11 @@ static void rep_tally_song_cb(
 		rep_tally_t *t = &c->tally[ti];
 		memset(t, 0, sizeof(*t));
 		snprintf(t->song, sizeof(t->song), "%s", sid);
-		const char *fm = qmap_field_get(fhd, key, "format");
+		const char *fm = corm_field_get(fhd, key, "format");
 		snprintf(t->format, sizeof(t->format), "%s", fm && fm[0] ? fm : "any");
 	}
 	rep_tally_t *t = &c->tally[ti];
-	const char *ts = qmap_field_get(fhd, key, "transpose");
+	const char *ts = corm_field_get(fhd, key, "transpose");
 	rep_tally_bump(t, ts ? atoi(ts) : 0);
 }
 
@@ -224,17 +224,17 @@ static void rep_snapshot_cb(
 	struct rep_snapshot_ctx *c = user;
 	if (*c->n_cur >= REP_MAX_SONGS)
 		return;
-	const char *sid = qmap_field_get(fhd, key, "song");
+	const char *sid = corm_field_get(fhd, key, "song");
 	if (!sid)
 		return;
 	rep_row_t *r = &c->cur[(*c->n_cur)++];
 	memset(r, 0, sizeof(*r));
 	snprintf(r->song, sizeof(r->song), "%s", sid);
-	const char *ts = qmap_field_get(fhd, key, "transpose");
+	const char *ts = corm_field_get(fhd, key, "transpose");
 	r->transpose = ts ? atoi(ts) : 0;
-	const char *fm = qmap_field_get(fhd, key, "format");
+	const char *fm = corm_field_get(fhd, key, "format");
 	snprintf(r->format, sizeof(r->format), "%s", fm && fm[0] ? fm : "any");
-	const char *pv = qmap_field_get(fhd, key, "pinned");
+	const char *pv = corm_field_get(fhd, key, "pinned");
 	r->pinned = pv ? atoi(pv) : 0;
 }
 
@@ -304,7 +304,7 @@ static int grp_song_index(const char *grp_id, const char *song_id)
 		const char *key = source_ordered_key_at("grp.songs", grp_id, i);
 		if (!key)
 			continue;
-		const char *sid = qmap_field_get(fhd, key, "song");
+		const char *sid = corm_field_get(fhd, key, "song");
 		if (sid && strcmp(sid, song_id) == 0)
 			return i;
 	}
@@ -360,7 +360,7 @@ static void ch_load_gigs(
 	        "gig.items", "grp", grp_id, gig_ids, CH_MAX_GIGS);
 	for (size_t i = 0; i < n && *n_gigs < CH_MAX_GIGS; i++) {
 		const char *t =
-		        sb_fields_hd ? qmap_get_field_str(sb_fields_hd, gig_ids[i], "title")
+		        sb_fields_hd ? corm_get_field_str(sb_fields_hd, gig_ids[i], "title")
 		                     : NULL;
 		ch_sb_entry_t *e = &gigs[(*n_gigs)++];
 		snprintf(e->title, sizeof(e->title), "%s", t ? t : gig_ids[i]);
@@ -386,7 +386,7 @@ static void ch_load_rep_cb(
 	const char *st = song_id;
 	if (ctx->sf_hd) {
 		const char *s =
-		        qmap_get_field_str(ctx->sf_hd, song_id, "title");
+		        corm_get_field_str(ctx->sf_hd, song_id, "title");
 		if (s)
 			st = s;
 	}
@@ -494,7 +494,7 @@ grp_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	if (!cf_hd)
 		return server_error(fd, "No fields_hd");
 
-	const char *title = qmap_get_field_str(cf_hd, ctx->id, "title");
+	const char *title = corm_get_field_str(cf_hd, ctx->id, "title");
 	if (!title)
 		return respond_error(fd, 404, "Group not found");
 

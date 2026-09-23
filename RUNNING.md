@@ -37,12 +37,12 @@ curl -sS -X POST localhost:4242/v1/embeddings \
 setenv-style, per shell (also valid in `start.sh` before the site server):
 
 ```sh
-export QMAP_SEPAL_EMBED_URL=http://localhost:4242/v1/embeddings
-export QMAP_SEPAL_EMBED_MODEL=nomic-embed-text
-export QMAP_AXIS_PATH=external/libsepal/lib:external/libjoint/lib:external/libstoma/lib
+export CORM_SEPAL_EMBED_URL=http://localhost:4242/v1/embeddings
+export CORM_SEPAL_EMBED_MODEL=nomic-embed-text
+export CORM_AXIS_PATH=external/libsepal/lib:external/libjoint/lib:external/libstoma/lib
 ```
 
-`QMAP_SEPAL_EMBED_KEY` is optional (Bearer token; none for the local qllm).
+`CORM_SEPAL_EMBED_KEY` is optional (Bearer token; none for the local qllm).
 
 ## 3. Store with embeddings
 
@@ -50,7 +50,7 @@ With sepal in the roster, `memory_store` auto-embeds the text via the
 qllm server (stores the VEC1 blob; the raw text is only in stoma):
 
 ```sh
-qmap -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma,sepal:a:s"
+corm -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma,sepal:a:s"
 ```
 
 ## 4. Query with embeddings
@@ -62,7 +62,7 @@ them (joint window `--since/--until`; stoma `--field=text --matched=1`;
 `--min-sim` score floor):
 
 ```sh
-qmap -X '(joint AND stoma AND sepal)' -g . \
+corm -X '(joint AND stoma AND sepal)' -g . \
   --field=text --matched=1 --since=2026-09-14 --until=2026-09-16 \
   --query='harbor lights' --min-sim=0.2 "mem.db@joint,stoma,sepal:a:s" -t 10
 ```
@@ -81,7 +81,7 @@ Track: `mm-plan/6-QUERY-TEXT-PLAN.md` (Phase 5 record stays in
 - pi-mm's text recall (stoma FTS) needs **no** qllm — this only adds the
   semantic (sepal) dimension to `memory_scan`.
 - The standalone `mm` binary (`external/mm/bin/mm`) is **legacy** — the
-  phase-2 qmap surface + pi-mm tools replace it; do not rely on `mm --embed`.
+  phase-2 corm surface + pi-mm tools replace it; do not rely on `mm --embed`.
 - Sepal stores only the vector, not the text; a sepal-only scan returns
   refs, not payloads — join with `stoma=` for text, or `memory_think`.
 - Each `*.db` owns its axis stores (`<primary>-<axis>`, e.g.

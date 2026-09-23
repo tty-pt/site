@@ -10,7 +10,7 @@ detection rework.
 empty lines, typed tokens), transposes chord roots, and renders plain text or
 HTML while preserving the original spacing. Chord detection is a single-pass
 **grammar** (`token.c`): a token is a chord iff it parses entirely as `root` +
-suffix atoms. No character whitelists, no chord database, no qmap.
+suffix atoms. No character whitelists, no chord database, no corm.
 
 ## API
 
@@ -123,7 +123,7 @@ is clean under ASan/UBSan. The transp tests are wired into the root build via
 | `Makefile` | `libtransp.a` build |
 
 History: the original was a `wchar_t` `transp.c` from tty.pt, then a UTF-8
-rewrite with ad-hoc per-character whitelists (the `libqmap` `chord_db`
+rewrite with ad-hoc per-character whitelists (the `libcorm` `chord_db`
 approach). The 2026-08-16 rework replaced the whitelists with the grammar-based
 classifier and parse → render pipeline, added the model fields, and fixed
 robustness bugs (a stack overflow in mod rendering and a queue double-free on

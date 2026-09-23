@@ -2,7 +2,7 @@
  * collection, filter-option resolution, query whitelisting and the
  * source_query fill for any list-grade surface (index lists, grp/gig
  * song pickers). Compiled once into index and exposed through XY.
- * NEVER include from a WASM TU (axil/qmap/source calls). */
+ * NEVER include from a WASM TU (axil/corm/source calls). */
 
 #ifndef __wasm__
 
@@ -35,8 +35,8 @@ static int idx_resolve_filter_options(
 	hyle_source_get_display_field(
 	        target_source, display_field, sizeof(display_field));
 
-	cur = qmap_iter(row_hd, NULL, 0);
-	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {
+	cur = corm_iter(row_hd, NULL, 0);
+	while (corm_next(&key, &val, cur) && nopts < pool_avail) {
 		const char *row_id = (const char *)key;
 		strncpy(pool[nopts].id, row_id, sizeof(pool[nopts].id) - 1);
 		pool[nopts].id[sizeof(pool[nopts].id) - 1] = '\0';
@@ -45,7 +45,7 @@ static int idx_resolve_filter_options(
 		        sizeof(pool[nopts].label));
 		nopts++;
 	}
-	qmap_fin(cur);
+	corm_fin(cur);
 
 	return nopts;
 }
@@ -98,7 +98,7 @@ static int idx_schema_collect(
 
 	if (view && view->fields && view->field_count > 0) {
 		for (i = 0; i < view->field_count && n < max_cols; i++) {
-			val = qmap_get(schema_hd, view->fields[i].name);
+			val = corm_get(schema_hd, view->fields[i].name);
 			if (!val)
 				continue;
 			idx_schema_col_set(
@@ -107,14 +107,14 @@ static int idx_schema_collect(
 			n++;
 		}
 	} else {
-		val = qmap_get(schema_hd, "title");
+		val = corm_get(schema_hd, "title");
 		if (val) {
 			idx_schema_col_set(
 			        &cols[0], "title", "Title", (const char *)val);
 			return 1;
 		}
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (n < max_cols && qmap_next(&key, &val, cur)) {
+		cur = corm_iter(schema_hd, NULL, 0);
+		while (n < max_cols && corm_next(&key, &val, cur)) {
 			if (strcmp((const char *)key, "id") == 0)
 				continue;
 			idx_schema_col_set(
@@ -122,7 +122,7 @@ static int idx_schema_collect(
 			        (const char *)val);
 			n++;
 		}
-		qmap_fin(cur);
+		corm_fin(cur);
 	}
 	return n;
 }
@@ -167,7 +167,7 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 				/* Try position lookup first */
 				if (num[0] >= '0' && num[0] <= '9') {
 					uint32_t pos = (uint32_t)atoi(num);
-					slug = qmap_get_key(
+					slug = corm_get_key(
 					        col->target_hd, pos);
 				}
 				/* If not a position or not found, treat as
@@ -179,7 +179,7 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
 					snprintf(
 					        name_key, sizeof(name_key),
 					        "%s:%s", slug, df);
-					name = (const char *)qmap_get(
+					name = (const char *)corm_get(
 					        col->target_hd, name_key);
 					if (buf[0])
 						strncat(buf, ", ",
@@ -489,16 +489,16 @@ XY_IMPL(int, list_fill_state,
 		return -1;
 	}
 
-	total_str = (const char *)qmap_get(result_hd, "__total__");
+	total_str = (const char *)corm_get(result_hd, "__total__");
 	state->total = total_str ? atoi(total_str) : 0;
 
-	cur = qmap_iter(result_hd, NULL, 0);
-	while (nid_all < 1024 && qmap_next(&key, &val, cur)) {
+	cur = corm_iter(result_hd, NULL, 0);
+	while (nid_all < 1024 && corm_next(&key, &val, cur)) {
 		if (strcmp((const char *)key, "__total__") == 0)
 			continue;
 		all_ids[nid_all++] = (const char *)key;
 	}
-	qmap_fin(cur);
+	corm_fin(cur);
 
 	/* Local slicing. When the request carries an explicit ?page=, the
 	 * source engine already applied the page/per_page window to the
@@ -542,7 +542,7 @@ XY_IMPL(int, list_fill_state,
 			snprintf(
 			        fkey, sizeof(fkey), "%s:%s", state->ids[i],
 			        cols[j].key);
-			fval = (const char *)qmap_get(fields_hd, fkey);
+			fval = (const char *)corm_get(fields_hd, fkey);
 			if (!fval || !fval[0]) {
 				if (j == 0 && state->ids[i])
 					fval = state->ids[i];
@@ -558,7 +558,7 @@ XY_IMPL(int, list_fill_state,
 		}
 	}
 
-	qmap_close(result_hd);
+	corm_close(result_hd);
 	return 0;
 }
 

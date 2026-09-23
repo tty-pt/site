@@ -96,7 +96,7 @@ XY_DECL(int, source_clear_inverse_refs,
     int, fd,
     const char *, dataset_id,
     const char *, item_id);
-XY_DECL(int, source_def_to_qmap,
+XY_DECL(int, source_def_to_corm,
     const source_desc_t *, defs, int, count, void *, out);
 XY_DECL(int, source_def_to_source_fields,
     const source_desc_t *, defs, int, count, void *, out);
@@ -205,7 +205,7 @@ XY_DECL(const char *, source_inv_key_at,
     uint32_t, target_pos,
     size_t, index);
 
-XY_DECL(const char *, qmap_get_field_str,
+XY_DECL(const char *, corm_get_field_str,
     unsigned, hd,
     const char *, id,
     const char *, field);

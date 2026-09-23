@@ -43,7 +43,7 @@ ISO date (YYYY-MM-DD). Parsed in scan.ts with the same regex guard as
 
 | File | Change |
 |------|--------|
-| `src/qmap.ts` | `scanExpr` gains optional `until` param; caps `b` at the earlier of `until` and `window.b`; level 0 + until creates `a=0 b=until` |
+| `src/corm.ts` | `scanExpr` gains optional `until` param; caps `b` at the earlier of `until` and `window.b`; level 0 + until creates `a=0 b=until` |
 | `src/tools/scan.ts` | `until` parameter in tool schema + parsed before `scanExpr` call |
 | `tests/args.test.ts` | 4 new tests: level 0 + until, level 1 + until same day, level 1 + until beyond window, level 2 + until |
 | `tests/tools.test.ts` | 2 new tests: scan level 0 + until epoch-to-until, scan level 1 + until caps b |

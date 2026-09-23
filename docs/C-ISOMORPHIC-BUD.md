@@ -29,7 +29,7 @@ It **must NOT** reference:
 
 - `axil` (HTTP/env/respond),
 - `source` / `source_*` (mods/source XY calls),
-- `qmap` (`qmap_*`),
+- `corm` (`corm_*`),
 - `stoma`,
 - any `XY_DECL`/`XY_IMPL` cross-.so function,
 - the site's native data registries.
@@ -44,7 +44,7 @@ or garbage, only when the browser runs it. `make` will not catch it.
 Everything the renderer needs to draw must arrive as **data**, not via native
 lookups:
 
-- Native SSR: build the data from the qmap/source registries (server-side only),
+- Native SSR: build the data from the corm/source registries (server-side only),
   serialize it to a `bud-state` JSON, embed it in the page.
 - WASM: `wasm_init(json, len)` parses that same JSON into the same state struct.
 
@@ -237,7 +237,7 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
   `#include "../../common/ux/site_ui.c"`. `site_ui.c`
   and `mods/index/ux/list.c` are written to be WASM-compilable — keep them that
   way.
-- Native-only helpers (qmap/source/axil) must live in a DIFFERENT file (e.g.
+- Native-only helpers (corm/source/axil) must live in a DIFFERENT file (e.g.
   `mods/index/index.c`, `mods/source/source.c`) so they never end up in the
   wasm translation unit.
 - **WASM deps are now tracked via `build.mk:57` `.d` + `LIST_UX_DEPS`** — editing `filter.c`/`site_ui.c` rebuilds dependent WASMs automatically (see `docs/BUILD.md` §WASM rebuilds). Historical trap: the rule once had NO prerequisites and `rm -f htdocs/<target>.wasm && make` was required; plain `make` then silently shipped stale WASM. If `WASI_CC` probe fails (`Skipping WASM build`), the `.wasm` is *absent not stale* — SSR still works. Verify with `make -n`.

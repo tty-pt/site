@@ -6,13 +6,13 @@ and the widget wire format.
 
 ## 1. Storage of field values
 
-- Scalar fields: `"<row_id>:<field>"` key in the fields registry qmap.
+- Scalar fields: `"<row_id>:<field>"` key in the fields registry corm.
 - **Multi-ref fields** (`HYLE_FIELD_MULTI_REFERENCE` /
   `SOURCE_FIELD_MULTI_REFERENCE`, type 5): the value is **newline-separated**
   position indices (typed-record sources) or slugs. Example:
   `"12\n34\n"` — positions into the target source's row map.
-- Position ↔ slug: `qmap_pos(target->fields_hd, slug)` resolves a slug to its
-  position; `qmap_get_key(target->fields_hd, pos)` resolves the reverse. When
+- Position ↔ slug: `corm_pos(target->fields_hd, slug)` resolves a slug to its
+  position; `corm_get_key(target->fields_hd, pos)` resolves the reverse. When
   slug→pos fails, the raw slug is used as the token.
 
 ## 2. Query string → filters (C parser)
@@ -86,7 +86,7 @@ single-value unchanged, accent-sensitivity preserved.
 - `idx_resolve_filter_options(target_source, target_hd, opts, max)`
   (`mods/index/index.c:48`): builds `hyle_bud_option_t {id,label}[]` — id =
   row_id (slug), label = the target source's first non-`id` display field value
-  (via `"<row>:<display_field>"` lookup). Native-only (qmap).
+  (via `"<row>:<display_field>"` lookup). Native-only (corm).
 - Universal component: `hyle_bud_filter` / `hyle_bud_filter_group` (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`) is the single schema-driven dispatcher for all filters, dropdowns, and reference selectors across SSR and WASM.
 - Renderers live in `external/libhyle-bud/src/filter.c`:
   - `hyle_bud_filter` — universal schema field dispatcher.

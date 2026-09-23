@@ -3,7 +3,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <hyle/schema.h>
 #include <hyle-source/picker.h>
 #include <hyle/registry.h>
@@ -30,9 +30,9 @@ static const hyle_source_field_t tag_fields[] = {
 };
 
 static const hyle_source_desc_t tag_desc[] = {
-	{ .key = "id", .qm_type = BUD_QM_STR, .writable = 0 },
-	{ .key = "title", .qm_type = BUD_QM_STR, .writable = 1 },
-	{ .key = "color", .qm_type = BUD_QM_STR, .writable = 1 },
+	{ .key = "id", .qm_type = BUD_CM_STR, .writable = 0 },
+	{ .key = "title", .qm_type = BUD_CM_STR, .writable = 1 },
+	{ .key = "color", .qm_type = BUD_CM_STR, .writable = 1 },
 	{ 0 }
 };
 

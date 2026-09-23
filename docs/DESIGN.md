@@ -33,7 +33,7 @@ Grandfathered surface (`site_paths.c:68` icon table, etc.) is allowlisted in `sc
 ```
 external libraries (neutral, self-contained)
    axil   HTTP primitives            libxylem  XY dispatch (dlopen hidden)
-   qmap   opaque data store          stoma     tokenization/search
+   corm   opaque data store          stoma     tokenization/search
    hyle   pure data layer (canonical hyle_schema_desc_t, NO component symbols)
    libhyle-source  dataset persistence, DSV, JSON overlays, pluggable drivers, picker DTOs
    hyle-bud  the ONLY bud-dependent bridge (external/libhyle-bud)
@@ -44,7 +44,7 @@ site modules (thin composition)
 
 Rules:
 - Externals never know about the site or each other (except documented deps:
-  `hyle → stoma → qmap`; `hyle-bud → hyle + bud + qmap`).
+  `hyle → stoma → corm`; `hyle-bud → hyle + bud + corm`).
 - `external/libhyle/src` + `include/hyle` must stay free of bud/component symbols.
   Only `libhyle-bud` may depend on bud.
 - Site modules are the composition layer: they wire libraries together, keep
@@ -90,7 +90,7 @@ fully-populated `item_ctx_t`. `TPARAM_*`, `SOURCE_FLAG_*` follow the same
 pattern: a small flags word, not a dozen bool params.
 
 ### 4.3 Opaque handles + documented ownership
-- `qmap` handles are `unsigned`; **never `free()` a qmap value**; `qmap_put`
+- `corm` handles are `unsigned`; **never `free()` a corm value**; `corm_put`
   copies key and value; caller retains ownership.
 - `hyle_query_t` documents its lifetime in the header comment (caller keeps
   `query_str` alive; must call `hyle_query_clear`). Ownership rules live in the
@@ -111,7 +111,7 @@ Adding a field = adding a row to the table. No per-field boilerplate anywhere.
 ### 4.5 Shared render functions over state structs (C-isomorphic)
 One renderer + one state struct, used by both native SSR and the WASM bundle
 (`list_render(list_state_t*)`, `bud_app_render()`/`app_state_t`). The data path
-differs (qmap vs JSON); the render code does not. See
+differs (corm vs JSON); the render code does not. See
 `docs/C-ISOMORPHIC-BUD.md` — and note the id-alignment trap this pattern exists
 to satisfy.
 
@@ -145,7 +145,7 @@ keeps search live.
 1. **`static` by default.** Non-static symbols are either `XY_IMPL`'d API or
    deliberately documented exceptions.
 2. **Owned vs borrowed is explicit** in headers; when in doubt, state it.
-3. **Split native-only from WASM-safe units.** Native data collection (qmap/
+3. **Split native-only from WASM-safe units.** Native data collection (corm/
    source/axil) lives in files the wasm never compiles; pure render helpers live
    in WASM-safe files (`mods/index/ux/list.c`, `common/ux/site_ui.c`).
 4. **Composition over copy.** Repeated logic in 2+ modules belongs in
@@ -208,7 +208,7 @@ inside an abstraction.
 
 - 30-line preambles in handlers that should be a
   `with_module_item_access` call.
-- Writing qmap rows directly (FTS freezes).
+- Writing corm rows directly (FTS freezes).
 - Native-only symbols leaking into wasm units (`--allow-undefined` hides it
   until the browser crashes).
 - Growing params instead of a flags word or a small struct.

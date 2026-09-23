@@ -2,12 +2,12 @@
 
 Status: **DONE 2026-09-16** — all slices landed (5-1..5-7). Tracked here;
 status lives in `README.md` §0 row 6. Followed the Phase-3/4 TDD pattern:
-unit tests stub qmap + curl (never shell out in `deno test`), real-qmap
+unit tests stub corm + curl (never shell out in `deno test`), real-corm
 coverage in `scripts/integration-mm.sh` (+ `RUNNING.md` manual gate).
 
 > **D14 update (2026-09-16):** historical record of the `sepal="file=…"` /
 > curl-bridge surface as built. The `file=` leaf grammar here is still
-> valid qmap syntax, but pi-mm now emits the D14 flags form — `-X
+> valid corm syntax, but pi-mm now emits the D14 flags form — `-X
 > '(stoma="field=text matched=1" AND sepal)' --query=… [--min-sim=…]` —
 > structure in `-X`, runtime values on CLI flags (precedence leaf spec >
 > CLI > env). See `mm-plan/PHASE-2-CLI.md` D14 carve-out and
@@ -24,9 +24,9 @@ path of the site.
 ## Non-goals / decisions
 
 - **Legacy `mm` binary is dead** — do not touch `external/mm`; nobody calls
-  `mm --embed` anymore. The phase-2 qmap surface carries it.
+  `mm --embed` anymore. The phase-2 corm surface carries it.
 - **No C changes.** Store-time embedding already works (sepal embeds via
-  curl when `QMAP_SEPAL_EMBED_URL`+`MODEL` are set, stores VEC1 blob). The
+  curl when `CORM_SEPAL_EMBED_URL`+`MODEL` are set, stores VEC1 blob). The
   only new work is: (a) conditionally add `sepal` to the filespec,
   (b) a query-time embedding helper in TS, (c) `embed=true` on scan.
 - **Query-time embedding lives in the extension, not sepal.** Sepal's decode
@@ -43,22 +43,22 @@ path of the site.
   `sepal_embed_fetch(value)` → curl POST
   `{"model":…,"input":…}` → parse first `"embedding"` array →
   `sepal_put` → VEC1 blob (magic VEC1, sketch, norm, 256-dim prefix) in the
-  same qmap file. Raw text is **not** stored on sepal.
+  same corm file. Raw text is **not** stored on sepal.
   (`external/libsepal/src/libsepal.c:1561-1596`, `451-510`)
 - Query: `sepal_axis_decode("file=… qdim=… m=… min_sim=…")` reads LE
   float32s; `sepal_search` = Hamming prefilter (m candidates) + cosine
   rerank on dim prefix. (`libsepal.c:1043-1119`, `879-944`)
-- Env config: `QMAP_SEPAL_EMBED_URL`+`MODEL` required together, `KEY`
+- Env config: `CORM_SEPAL_EMBED_URL`+`MODEL` required together, `KEY`
   optional; read in `rec_axis_env_config()` (`libsepal.c:1153-1165`).
 
 ## Extension slices
 
 ### 5-1 Filespec gains sepal when configured
 
-- `src/config.ts`: read `QMAP_SEPAL_EMBED_URL` (+`MODEL`) via `applyEnv`;
+- `src/config.ts`: read `CORM_SEPAL_EMBED_URL` (+`MODEL`) via `applyEnv`;
   add `embedUrl?: string`, `embedModel?: string` to `MmConfig`; a
   `sepalConfigured(env)` helper = both set.
-- `src/qmap.ts`: `filespecFor(memDir, embed?: boolean)` appends `,sepal`
+- `src/corm.ts`: `filespecFor(memDir, embed?: boolean)` appends `,sepal`
   when embed is on. **Keep the plain `mem.db@joint,stoma:a:s` default** so
   no-qllm runs are byte-identical (back-compat with §8 recipes).
 - Wiring: tools pass `env.cfg.embedUrl ? "sepal" : undefined`.
@@ -82,12 +82,12 @@ path of the site.
 - `src/tools/scan.ts`: new boolean `embed` param.
   - when `embed=true` and sepal configured → embed, build
     `sepal="file=$vecFile qdim=$N m=10 min_sim=0.2"` (D-constants in
-    `qmap.ts`), merge with existing joint/stoma expr:
+    `corm.ts`), merge with existing joint/stoma expr:
     `(joint=… AND stoma=… AND sepal=…)`.
   - when `embed=true` but sepal NOT configured → soft diagnostic
     (`details: {embed: "unconfigured"}`), fall back to the plain text scan.
   - embed helper returns null → same soft fallback, `details:{embed:"no-vector"}`.
-- `src/qmap.ts`: `scanExpr(topic, level, now, until?, sepalLeaf?)`
+- `src/corm.ts`: `scanExpr(topic, level, now, until?, sepalLeaf?)`
   appends/ANDs the opt-in sepal leaf. Exports the consts `SEPAL_M=10`,
   `SEPAL_MIN_SIM=0.2`.
 
@@ -109,7 +109,7 @@ path of the site.
   fallback on null vector.
 - `tests/args.test.ts`: `filespecFor(…, embed)` → `,sepal`; default still
   `joint,stoma`; scan arg order byte-identical with/without sepal leaf.
-- `tests/config.test.ts`: `applyEnv` picks `QMAP_SEPAL_EMBED_*`.
+- `tests/config.test.ts`: `applyEnv` picks `CORM_SEPAL_EMBED_*`.
 
 ### 5-6 Integration (`scripts/integration-mm.sh`)
 
@@ -165,5 +165,5 @@ path of the site.
   two `-p` calls) — not needed today.
 - **Store-side hard failure rule confirmed**: sepal in the roster +
   unconfigured embed URL ⇒ EINVAL ⇒ `-p` returns `EXIT_FAILURE`
-  (`qmap.c` fan-out). Hence `filespecFor(_, embed)` adds `,sepal` only
+  (`corm.c` fan-out). Hence `filespecFor(_, embed)` adds `,sepal` only
   when `sepalConfigured(cfg)` — never otherwise. Same for `-d` paths.

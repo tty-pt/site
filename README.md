@@ -96,7 +96,7 @@ make debug-clean     # Clear debug logs
 ## Requirements
 
 - C compiler (`clang` for WASM builds)
-- `axil`, `libxylem`, `libqmap`, `stoma`, `hyle`, `bud` (submodules under `external/`)
+- `axil`, `libxylem`, `libcorm`, `stoma`, `hyle`, `bud` (submodules under `external/`)
 - Deno, only for the Playwright e2e test runner
 
 ## Modules

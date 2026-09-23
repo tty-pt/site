@@ -1,6 +1,6 @@
-/* mpfd_get_all: repeated multipart parts accumulate (QM_SORTED |
- * QM_MULTIVALUE) and join '\n'-separated; single-part readers are
- * unaffected (qmap_get keeps returning the first match). */
+/* mpfd_get_all: repeated multipart parts accumulate (CM_SORTED |
+ * CM_MULTIVALUE) and join '\n'-separated; single-part readers are
+ * unaffected (corm_get keeps returning the first match). */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

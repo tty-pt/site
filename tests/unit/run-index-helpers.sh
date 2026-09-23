@@ -14,7 +14,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/axil/include" \
 	-I"$repo/external/axil-auth/include" \
 	-I"$repo/external/libqsys/include" \
-	-I"$repo/external/libqmap/include" \
+	-I"$repo/external/libcorm/include" \
 	-I"$repo/external/libxylem/include" \
 	-I"$repo/mods/common" \
 	-I"$repo" \
@@ -27,7 +27,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-L"$repo/external/libhyle/lib" -lhyle \
 	-L"$repo/external/libbud/lib" -lbud \
 	-L"$repo/external/libqsys/lib" -lqsys \
-	-L"$repo/external/libqmap/lib" -lqmap \
+	-L"$repo/external/libcorm/lib" -lcorm \
 	-L"$repo/external/axil/lib" -laxil \
 	-L"$repo/external/axil-auth/lib" -laxil-auth \
 	-L"$repo/external/libxylem/lib" -lxylem \
@@ -36,7 +36,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-Wl,-rpath,"$repo/external/libhyle/lib" \
 	-Wl,-rpath,"$repo/external/libbud/lib" \
 	-Wl,-rpath,"$repo/external/libqsys/lib" \
-	-Wl,-rpath,"$repo/external/libqmap/lib" \
+	-Wl,-rpath,"$repo/external/libcorm/lib" \
 	-Wl,-rpath,"$repo/external/axil/lib" \
 	-Wl,-rpath,"$repo/external/axil-auth/lib" \
 	-Wl,-rpath,"$repo/external/libxylem/lib"

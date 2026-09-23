@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib qmap-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle mods clients boundary-check
+all: assets-sync qsys-lib corm-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -59,23 +59,23 @@ bud-lib:
 hyle-bud: hyle-lib bud-lib hyle-source
 	$(MAKE) -C external/libhyle-bud EXTRA_CFLAGS="-I$$(pwd)/external/libhyle/include -I$$(pwd)/external/libhyle-source/include"
 
-hyle-source: hyle-lib qmap-lib stoma-lib
+hyle-source: hyle-lib corm-lib stoma-lib
 	$(MAKE) -C external/libhyle-source
 
 qsys-lib:
 	$(MAKE) -C external/libqsys
 
-axil-lib: qsys-lib qmap-lib xylem-lib
+axil-lib: qsys-lib corm-lib xylem-lib
 	$(MAKE) -C external/axil
 
-axil-auth-lib: axil-lib qmap-lib xylem-lib
+axil-auth-lib: axil-lib corm-lib xylem-lib
 	$(MAKE) -C external/axil-auth
 
 axil-hyle: axil-lib hyle-source axil-auth-lib
 	$(MAKE) -C external/axil-hyle
 
-qmap-lib:
-	$(MAKE) -C external/libqmap
+corm-lib:
+	$(MAKE) -C external/libcorm
 
 mm: ;
 
@@ -191,7 +191,7 @@ format:
 
 lint:
 	find mods external/libbud -name "*.c" -exec clang-tidy {} -- \
-		-Iexternal/axil/include -Iexternal/libqmap/include \
+		-Iexternal/axil/include -Iexternal/libcorm/include \
 		-Iexternal/libxylem/include -Iexternal/libbud/include \
 		-Iexternal/libhyle/include \;
 
@@ -252,9 +252,9 @@ debug-logs:
 	tail -20 $(RUNTIME_LOG_DIR)/axil.log 2>/dev/null || echo "No runtime log found"
 
 # Clean debug logs
-# Run hyle workspace crate tests (core, axil, source-qmap)
+# Run hyle workspace crate tests (core, axil, source-corm)
 hyle-tests:
-	RUSTFLAGS="-l qmap -l stoma -L $$(pwd)/external/libqmap/lib -L $$(pwd)/external/libstoma/lib" cargo test --workspace \
+	RUSTFLAGS="-l corm -l stoma -L $$(pwd)/external/libcorm/lib -L $$(pwd)/external/libstoma/lib" cargo test --workspace \
 		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
@@ -283,4 +283,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib qmap-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib corm-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

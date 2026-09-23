@@ -89,7 +89,7 @@ char *transp_shift_table(transp_ctx_t *ctx, int latin);
 /*
  * Clean up resources
  *
- * Frees all memory associated with context including qmap databases
+ * Frees all memory associated with context including corm databases
  * and spacing queue.
  *
  * Params:

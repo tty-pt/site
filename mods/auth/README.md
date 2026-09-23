@@ -87,7 +87,7 @@ The module provides server-side rendered pages:
 
 ## Storage
 
-Uses `auth.qmap` with two qmap tables:
+Uses `auth.corm` with two corm tables:
 
 ### users table
 
@@ -278,18 +278,18 @@ curl -b "QSESSION=<token>" http://localhost:8080/api/session
 tail -100 debug/runtime/axil.log | grep "axil-auth: confirm"
 ```
 
-### auth.qmap permission errors
+### auth.corm permission errors
 
 **Cause:** File permissions or ownership issues.
 
 **Solution:**
 ```sh
 # Check permissions
-ls -l auth.qmap
+ls -l auth.corm
 
 # If needed, fix ownership
-chown $USER:$USER auth.qmap
-chmod 644 auth.qmap
+chown $USER:$USER auth.corm
+chmod 644 auth.corm
 ```
 
 ## See Also

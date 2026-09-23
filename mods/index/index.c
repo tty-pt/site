@@ -5,7 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
 
@@ -275,7 +275,7 @@ static int index_list_handler(int fd, char *body)
 
 	(void)body;
 	module = index_name(fd);
-	hd = *(unsigned *)qmap_get(module_hd, module);
+	hd = *(unsigned *)corm_get(module_hd, module);
 	return index_render_list(fd, hd, NULL);
 }
 
@@ -328,11 +328,11 @@ static int index_generic_add_handler(int fd, char *body)
 	}
 
 	if (source_update_item(fd, dataset_id, id, data_handle) != 0) {
-		qmap_close(data_handle);
+		corm_close(data_handle);
 		item_remove_path_recursive(items_path);
 		return server_error(fd, "Failed to save item data");
 	}
-	qmap_close(data_handle);
+	corm_close(data_handle);
 
 	return redirect_to_item(fd, module, id);
 }
@@ -358,7 +358,7 @@ static int index_generic_edit_authorized(
 		return server_error(fd, "OOM");
 
 	int rc = source_update_item(fd, dataset_id, ctx->id, data_handle);
-	qmap_close(data_handle);
+	corm_close(data_handle);
 	if (rc != 0) {
 		return server_error(fd, "Failed to update item data");
 	}
@@ -395,7 +395,7 @@ XY_IMPL(unsigned, index_open,
 
 	unsigned hd = source_get_data_hd(dataset_name);
 	if (!hd)
-		return QM_MISS;
+		return CM_MISS;
 
 	if (url_slug && url_slug[0])
 		snprintf(id, sizeof(id), "%s", url_slug);
@@ -403,16 +403,16 @@ XY_IMPL(unsigned, index_open,
 		axil_slugify(name, strlen(name), id, sizeof(id));
 	index_update_json(id, name);
 	if (module_path_build(doc_root, id, buf, sizeof(buf)) != 0)
-		return QM_MISS;
+		return CM_MISS;
 	mkdir(buf, 0755);
 	if (module_items_path_build(doc_root, id, buf, sizeof(buf)) != 0)
-		return QM_MISS;
+		return CM_MISS;
 	mkdir(buf, 0755);
 
 	dir = opendir(buf);
 	if (!dir) {
 		perror("opendir");
-		return QM_MISS;
+		return CM_MISS;
 	}
 	closedir(dir);
 
@@ -458,7 +458,7 @@ XY_IMPL(unsigned, index_open,
 		module_cleanups[slot] = cleanup;
 	}
 
-	qmap_put(module_hd, id, &hd);
+	corm_put(module_hd, id, &hd);
 	return hd;
 }
 
@@ -558,7 +558,7 @@ index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 
 	char *vstr_val = NULL;
 	for (int i = 0; i < count; i++) {
-		if (defs[i].qm_type == BUD_QM_VSTR && defs[i].file) {
+		if (defs[i].qm_type == BUD_CM_VSTR && defs[i].file) {
 			char vstr_path[PATH_MAX];
 			item_child_path(
 			        ctx->item_path, defs[i].file, vstr_path,
@@ -670,7 +670,7 @@ static int index_delete_handler(int fd, char *body)
 	            "Forbidden"))
 		return 1;
 
-	/* Clear inverse references in other datasets before purging qmap */
+	/* Clear inverse references in other datasets before purging corm */
 	{
 		char dset[256];
 		snprintf(dset, sizeof(dset), "%s.items", module);
@@ -698,7 +698,7 @@ static int index_delete_handler(int fd, char *body)
 		}
 	}
 
-	/* Delete through hyle (removes dir + qmaps + marks stoma_dirty) */
+	/* Delete through hyle (removes dir + corms + marks stoma_dirty) */
 	{
 		char dset[256];
 		source_def_t *def;
@@ -849,7 +849,7 @@ void xy_install(void)
 	xy_load("./mods/auth/auth");
 	xy_load("./mods/mpfd/mpfd");
 
-	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
+	module_hd = corm_open(NULL, NULL, CM_STR, CM_U32, 0x1FF, 0);
 
 	axil_register_handler("GET:/", core_get);
 	axil_config.default_handler = core_get;

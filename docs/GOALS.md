@@ -78,14 +78,14 @@ Libraries are independent, small-surface, and do not know about the
 site or each other except documented deps.
 
 ```
-qmap                    bottom leaf
-stoma          → qmap   fold only
-hyle           → stoma+qmap (canonical schema, query, FTS)
-libhyle-source → hyle+qmap+stoma+json-c (persistence, store drivers, DSV, JSON)
-hyle-bud       → hyle+bud+qmap   ONLY bridge that may depend on bud
+corm                    bottom leaf
+stoma          → corm   fold only
+hyle           → stoma+corm (canonical schema, query, FTS)
+libhyle-source → hyle+corm+stoma+json-c (persistence, store drivers, DSV, JSON)
+hyle-bud       → hyle+bud+corm   ONLY bridge that may depend on bud
 bud                     pure DOM/JSX/WASM, 5-field UI binder, depends on nothing
-libxylem       → qmap+qsys
-axil           → xylem+qmap+qsys+ssl
+libxylem       → corm+qsys
+axil           → xylem+corm+qsys+ssl
 site mods      → assemble axil+XY+hyle(+libhyle-source+libhyle-bud)+bud
 ```
 
@@ -98,16 +98,16 @@ must contain `0` database/storage includes.
 - `external/libhyle/src` + `include/hyle` contain **no** `bud`/`lx_`/`bud_`
   symbols. `external/libhyle/include/hyle/schema.h` defines canonical data schemas
   (`hyle_schema_desc_t`) independently of any UI renderer.
-- `external/libbud` contains **no** `qmap_`/`hyle`/`xy_`/`stoma`/`axil`
+- `external/libbud` contains **no** `corm_`/`hyle`/`xy_`/`stoma`/`axil`
   includes (`external/libbud/src/libbud.c` only `bud.h`/`bud_app.h`). `bud_field_desc_t`
   is a pure 5-field UI state binder (`key`, `offset`, `size`, `is_int`, `kind`).
 - Only `external/libhyle-bud` may include `bud/bud.h`
   (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`). It links
-  `LDLIBS = -lhyle -lbud -lqmap` and nothing else.
+  `LDLIBS = -lhyle -lbud -lcorm` and nothing else.
 - `external/libhyle-source` is the standalone persistence engine, linking
-  `-lhyle -lqmap -lstoma -ljson-c`.
+  `-lhyle -lcorm -lstoma -ljson-c`.
 - `stoma` exposes `stoma_fold` as pure `string.h`/`ctype.h`
-  (`external/stoma/src/token.c:11`); its `libstoma` TU may use `qmap`
+  (`external/stoma/src/token.c:11`); its `libstoma` TU may use `corm`
   but `token.c` does not.
 - Site modules that need `hyle-bud` rendering (`gig`, `grp`, `index`)
   declare it explicitly:
@@ -128,11 +128,11 @@ Same pattern as `C-ISOMORPHIC-BUD.md:§1` and `mods/song/ux/detail.c`
 `htdocs/list.wasm`: `fields.h` defines `app_state_t` + `bud_field_desc_t[]`;
 one pure renderer `bud_app_render()` over that state wrapped in `#bud-root`
 (`#chrome-root` for global); `wasm_init` fills state via `bud_state_apply`;
-native handler builds same state from `source`/`qmap` and responds via
+native handler builds same state from `source`/`corm` and responds via
 `site_ui_respond_page`. See `C-ISOMORPHIC-BUD.md` for hard constraints.
 
 Hard constraint: a dual-compiled TU must **not** reference `axil`,
-`source`, `qmap`, `stoma`, or any `XY_DECL`. `hyle-bud` (`hyle_bud_*`) **is**
+`source`, `corm`, `stoma`, or any `XY_DECL`. `hyle-bud` (`hyle_bud_*`) **is**
 allowed — it is the filter/table primitive compiled via `HYLE_BUD_WASM_SRC`.
 `--allow-undefined` in `build.mk` hides violations as `0x0` at runtime. Keep
 native-only data collection in a separate file (`mods/index/index.c`
@@ -168,7 +168,7 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 ## 4. Dev ergonomics — custom SSR + WASM without too much trouble
 
 - **Adding a field:** one row in `fields.h` (`bud_field_desc_t` drives
-  `source_def_to_qmap`, meta I/O, and `bud_state_apply`).
+  `source_def_to_corm`, meta I/O, and `bud_state_apply`).
 - **Adding a page WASM:** one `ux/*.c` that includes only WASM-safe
   headers, defines `wasm_init` + `bud_app_render`, plus 3 lines in the
   module `Makefile` (`WASM_TARGETS`, `<name>-src`, `<name>-cflags`).
@@ -184,7 +184,7 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
 1. `grep -rn bud external/libhyle/src include/hyle` must be empty
     (`ARCHITECTURE.md:§2`). Only `external/libhyle-bud` may
     mention `bud`.
-2. New `WASM` TU: `grep -E 'qmap_|source_|axil_|hyle_source|XY_' ux/<your>.c` must be
+2. New `WASM` TU: `grep -E 'corm_|source_|axil_|hyle_source|XY_' ux/<your>.c` must be
     empty; `hyle_bud_*` is the only allowed `hyle_*` in UX. Any hit will be
     `--allow-undefined` and crash in the browser only. WASM-safe files are
     `site_ui.c`/`list.c` (+ `hyle-bud` `filter.c`/`table.c`); `list_fill.c`/`source.c` are native-only.

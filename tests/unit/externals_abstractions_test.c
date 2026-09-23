@@ -11,7 +11,7 @@
 #include <hyle-bud/hyle-bud.h>
 #include <hyle-source/hyle_source.h>
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/xy.h>
 #include "mods/common/common.h"
 #include "mods/source/source.h"
@@ -49,7 +49,7 @@ static void test_ordered_each_cb(
 {
 	(void)idx;
 	struct fe_test_ctx *c = user;
-	const char *t = hyle_qmap_get_field_str(fhd, key, "title");
+	const char *t = hyle_corm_get_field_str(fhd, key, "title");
 	if (t && c->count < 4)
 		snprintf(c->titles[c->count++], 32, "%s", t);
 }
@@ -328,7 +328,7 @@ int main(void)
 	/* 8. Libhyle-source referencing / relation querying */
 	{
 		static const hyle_source_desc_t band_schema[] = {
-			{ .key = "name", .offset = offsetof(test_band_rec_t, name), .size = 64, .qm_type = HYLE_QM_STR, .type = HYLE_FIELD_STRING, .writable = 1 },
+			{ .key = "name", .offset = offsetof(test_band_rec_t, name), .size = 64, .qm_type = HYLE_CM_STR, .type = HYLE_FIELD_STRING, .writable = 1 },
 			{ 0 }
 		};
 		hyle_source_setup(
@@ -336,8 +336,8 @@ int main(void)
 		        band_schema, 1, HYLE_SOURCE_FLAG_VOLATILE, NULL);
 
 		static const hyle_source_desc_t concert_schema[] = {
-			{ .key = "title", .offset = offsetof(test_concert_rec_t, title), .size = 64, .qm_type = HYLE_QM_STR, .type = HYLE_FIELD_STRING, .writable = 1 },
-			{ .key = "band", .offset = offsetof(test_concert_rec_t, band), .size = 64, .qm_type = HYLE_QM_REFERENCE, .type = HYLE_FIELD_REFERENCE, .ref_source = "test.band", .writable = 1 },
+			{ .key = "title", .offset = offsetof(test_concert_rec_t, title), .size = 64, .qm_type = HYLE_CM_STR, .type = HYLE_FIELD_STRING, .writable = 1 },
+			{ .key = "band", .offset = offsetof(test_concert_rec_t, band), .size = 64, .qm_type = HYLE_CM_REFERENCE, .type = HYLE_FIELD_REFERENCE, .ref_source = "test.band", .writable = 1 },
 			{ 0 }
 		};
 		hyle_source_setup(
@@ -346,15 +346,15 @@ int main(void)
 		        NULL);
 
 		unsigned b_hd = hyle_source_get_fields_hd("test.band");
-		qmap_field_put(b_hd, "b1", "name", "The Beatles");
+		corm_field_put(b_hd, "b1", "name", "The Beatles");
 
 		unsigned c_hd = hyle_source_get_fields_hd("test.concert");
-		qmap_field_put(c_hd, "c1", "title", "Concert 1");
-		qmap_field_put(c_hd, "c1", "band", "b1");
-		qmap_field_put(c_hd, "c2", "title", "Concert 2");
-		qmap_field_put(c_hd, "c2", "band", "b1");
-		qmap_field_put(c_hd, "c3", "title", "Concert 3");
-		qmap_field_put(c_hd, "c3", "band", "b2");
+		corm_field_put(c_hd, "c1", "title", "Concert 1");
+		corm_field_put(c_hd, "c1", "band", "b1");
+		corm_field_put(c_hd, "c2", "title", "Concert 2");
+		corm_field_put(c_hd, "c2", "band", "b1");
+		corm_field_put(c_hd, "c3", "title", "Concert 3");
+		corm_field_put(c_hd, "c3", "band", "b2");
 
 		const char *matched[8] = { 0 };
 		size_t n_matched = hyle_source_find_referencing(

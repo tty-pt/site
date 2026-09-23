@@ -1,10 +1,10 @@
-# MM Plan — Memory Mipmaps + general qmap composition
+# MM Plan — Memory Mipmaps + general corm composition
 
 > Single home for this plan. Whole plan lives in this one doc; phase detail
 > docs (only where a phase genuinely needs one) live beside it in this same
 > directory. Nowhere else — not `.pi/quest/`, not scattered root markdowns.
 > Canonical kernel API reference (library-owned, unchanged in location):
-> `external/libqmap/docs/RECALL-KERNEL.md`.
+> `external/libcorm/docs/RECALL-KERNEL.md`.
 >
 > Working rules: TDD every increment; execution tracking lives in this
 > plan itself (per-phase status + checklists — no `.pi/quest/` usage, by
@@ -18,10 +18,10 @@ around four principles (detail `PHASE-2-CLI.md` header)**: axes decide
 put/delete/get** (CLI passes `(ref, value)` blindly — one opaque string,
 never split; each axis parses the whole string in its own grammar);
 **axes own their query language**;
-**the CLI conjunctions axis results** (AND/OR/NOT over ref sets); **qmap
+**the CLI conjunctions axis results** (AND/OR/NOT over ref sets); **corm
 stays legacy-close** (zero-axis invocations byte-identical, all new surface
 additive). **2A — per-axis store/unstore/readback** (DONE, §11) and
-**2B — general qmap CLI composition** (DONE 2026-09-15, §12; the
+**2B — general corm CLI composition** (DONE 2026-09-15, §12; the
 `-Q` mode folded into a composed `-g`, the `@` filespec roster declares the
 load set once at creation; 2B-0..2B-6 all landed; §12 checklist all green).
 **Phase 3 — `pi-mm` extension scaffold DONE 2026-09-15** (tools
@@ -38,7 +38,7 @@ checklist all green; `deno test` 48/48, integration all green). **Phase 4 —
 operation kind the four axes answer, store/unstore/get included
 (source-verified; each repo's own README carries its matching catalog).
 Supersedes v17/v16/v15/v14; still supersedes `MM-PI-MM.md` (deleted) and
-`external/libqmap/docs/QMAP-AXIS-CLI.md` (deleted, was superseded/never
+`external/libcorm/docs/CORM-AXIS-CLI.md` (deleted, was superseded/never
 implemented).
 
 ---
@@ -47,16 +47,16 @@ implemented).
 
 | # | Phase | What it is | Status |
 |---|---|---|---|
-| 0 | Recall kernel substrate | `rec.h`/`rec.c` in libqmap; a working `qmap -Q` scored-query mode (dlopen'd axis plugins, boolean AND/OR/NOT combine, top-k/min-score ranking) — tested, green; 4 axis libs registered via `rec_axis_register` + `rec_axis_open(spec)` | ✅ DONE — `-Q` retired in 2B (replaced by the by-name composed `-g`) |
-| 1 | Ref-type law: `rec_ref_t = uint32_t` (qmap ref, not an axis's internal key) | ✅ **DONE 2026-09-13** — all five repos retyped + installed + verified; fixture 16/16; site `make` + `make test` green. Detail: `PHASE-1-RETYPE.md` | ✅ DONE — gate (§6 item 1) green |
-| 2 | 2A — per-axis store/unstore/readback | Conventional `rec_axis_store(ctx, spec, ref, value)` / `rec_axis_unstore(ctx, ref)` / `rec_axis_readback(ctx, ref, blob_out, n_out)` exports per axis (`readback`, not `get` — `rec_axis_get(int)` is the landed registry lookup; U2 settled 2026-09-14): the CLI passes the **whole** `-p` string as `(ref, value)` — never split — and each axis parses it entirely in its own grammar (joint leading-date, sepal floats-or-configured-embed, stoma memory-only text, islet point lists); unstore walks the axis's existing inverse — only libislet adds new stored state (`rev`, ref→cells); uniform idempotent contract + surface rules; missing symbols ⇒ read-only axis; no kernel/libqmap change. Detail: `PHASE-2-CLI.md` 2A; contract: `RECALL-KERNEL.md` | ✅ **DONE 2026-09-14** — mock proof-of-contract (`rec_axis_store_test`, libqmap `make test` green) + libsepal adapters with real lazy-curl embedder (`test_axis_store` 70 assertions green, valgrind clean) + libstoma `stoma_unindex`/`_ref` + `text`-field adapters (`stoma_test` 227/227, `stoma_axis_store_test` 34/34, 5 symbols) + libjoint `joint_erase` + ordered-grammar adapters (`joint_axis_store_test` 116/116, 4 symbols) + libislet `rev` + `islet_del_value_N` + point-list adapters (`test_axis_store` 15 tests/193 assertions, 9 symbols) + **2A-5 cross-process round-trips** (sepal `sepal_search` + isolation, islet `.ridx` rehydration + `fill_bbox_2`, joint `joint_iter` + file-backed `id` backfill — each via self-exec harness `seed/verify1/unstore/verify2`; stoma corpus `{(1,"Beacon Harbor lights"),(2,"Beacon AND Pão"),(3,"alpha omega")}` store→beacon 2→unstore 1→harbor miss→rebuild minus dropped 3 → beacon {1,2}+harbor {1} again, omega gone, parity 43/43) + **2A-6 close-out** (`make` W06 PASS, all suites green, `nm -D` spot-checks, no installs). Next: 2B |
-| 3 | 2B — general qmap CLI composition | The `-Q` mode folds into a composed `-g` (same trigger shape as the `-q` chain vs classic `-g`); axis plugins auto-discovered by name; `@` filespec roster declares the load set once at creation (persisted in a <primary>.roster sidecar, fan-out for `-p`/`-d`); string-unified writes over the phase-2A store surface; mm dialect as invocations of this same surface — **not mm-only**, must also compose e.g. islet-with-others. Detail: `PHASE-2-CLI.md` (2B) | ✅ **DONE 2026-09-15** — 2B-0 + 2B-1 (by-name discovery/load + `@roster` sidecar + `--list-axes`, `test-roster.sh` green 2026-09-14); decided options (D1-D10 + D11-D13); **D10 = the `-X EXPR` set-expression query** (`CLI-SURFACE-EXAMPLES.md`); 2B-3 (fold, `test-cli.sh` 25/25, `2B-3-IMPLEMENTATION.md`); 2B-2 (real-file gate, `test-real.sh` green, `CLI-SURFACE-EXAMPLES.md` §6); 2B-4 (write fan-out + forget, `test-fanout.sh` green, `2B-4-IMPLEMENTATION.md`); 2B-5 (mm dialect, `test-mm.sh` green, F4 `qmap_open` aliasing, `2B-5-IMPLEMENTATION.md`); **2B-6 (rank convention D2 — first rank-capable axis in query order wins, `--score` deferred — pinned in `test-cli.sh`/`test-real.sh`; `-X` grammar verified against the built parser). Phase 2B closed — next: phase 3 (`pi-mm`)** |
+| 0 | Recall kernel substrate | `rec.h`/`rec.c` in libcorm; a working `corm -Q` scored-query mode (dlopen'd axis plugins, boolean AND/OR/NOT combine, top-k/min-score ranking) — tested, green; 4 axis libs registered via `rec_axis_register` + `rec_axis_open(spec)` | ✅ DONE — `-Q` retired in 2B (replaced by the by-name composed `-g`) |
+| 1 | Ref-type law: `rec_ref_t = uint32_t` (corm ref, not an axis's internal key) | ✅ **DONE 2026-09-13** — all five repos retyped + installed + verified; fixture 16/16; site `make` + `make test` green. Detail: `PHASE-1-RETYPE.md` | ✅ DONE — gate (§6 item 1) green |
+| 2 | 2A — per-axis store/unstore/readback | Conventional `rec_axis_store(ctx, spec, ref, value)` / `rec_axis_unstore(ctx, ref)` / `rec_axis_readback(ctx, ref, blob_out, n_out)` exports per axis (`readback`, not `get` — `rec_axis_get(int)` is the landed registry lookup; U2 settled 2026-09-14): the CLI passes the **whole** `-p` string as `(ref, value)` — never split — and each axis parses it entirely in its own grammar (joint leading-date, sepal floats-or-configured-embed, stoma memory-only text, islet point lists); unstore walks the axis's existing inverse — only libislet adds new stored state (`rev`, ref→cells); uniform idempotent contract + surface rules; missing symbols ⇒ read-only axis; no kernel/libcorm change. Detail: `PHASE-2-CLI.md` 2A; contract: `RECALL-KERNEL.md` | ✅ **DONE 2026-09-14** — mock proof-of-contract (`rec_axis_store_test`, libcorm `make test` green) + libsepal adapters with real lazy-curl embedder (`test_axis_store` 70 assertions green, valgrind clean) + libstoma `stoma_unindex`/`_ref` + `text`-field adapters (`stoma_test` 227/227, `stoma_axis_store_test` 34/34, 5 symbols) + libjoint `joint_erase` + ordered-grammar adapters (`joint_axis_store_test` 116/116, 4 symbols) + libislet `rev` + `islet_del_value_N` + point-list adapters (`test_axis_store` 15 tests/193 assertions, 9 symbols) + **2A-5 cross-process round-trips** (sepal `sepal_search` + isolation, islet `.ridx` rehydration + `fill_bbox_2`, joint `joint_iter` + file-backed `id` backfill — each via self-exec harness `seed/verify1/unstore/verify2`; stoma corpus `{(1,"Beacon Harbor lights"),(2,"Beacon AND Pão"),(3,"alpha omega")}` store→beacon 2→unstore 1→harbor miss→rebuild minus dropped 3 → beacon {1,2}+harbor {1} again, omega gone, parity 43/43) + **2A-6 close-out** (`make` W06 PASS, all suites green, `nm -D` spot-checks, no installs). Next: 2B |
+| 3 | 2B — general corm CLI composition | The `-Q` mode folds into a composed `-g` (same trigger shape as the `-q` chain vs classic `-g`); axis plugins auto-discovered by name; `@` filespec roster declares the load set once at creation (persisted in a <primary>.roster sidecar, fan-out for `-p`/`-d`); string-unified writes over the phase-2A store surface; mm dialect as invocations of this same surface — **not mm-only**, must also compose e.g. islet-with-others. Detail: `PHASE-2-CLI.md` (2B) | ✅ **DONE 2026-09-15** — 2B-0 + 2B-1 (by-name discovery/load + `@roster` sidecar + `--list-axes`, `test-roster.sh` green 2026-09-14); decided options (D1-D10 + D11-D13); **D10 = the `-X EXPR` set-expression query** (`CLI-SURFACE-EXAMPLES.md`); 2B-3 (fold, `test-cli.sh` 25/25, `2B-3-IMPLEMENTATION.md`); 2B-2 (real-file gate, `test-real.sh` green, `CLI-SURFACE-EXAMPLES.md` §6); 2B-4 (write fan-out + forget, `test-fanout.sh` green, `2B-4-IMPLEMENTATION.md`); 2B-5 (mm dialect, `test-mm.sh` green, F4 `corm_open` aliasing, `2B-5-IMPLEMENTATION.md`); **2B-6 (rank convention D2 — first rank-capable axis in query order wins, `--score` deferred — pinned in `test-cli.sh`/`test-real.sh`; `-X` grammar verified against the built parser). Phase 2B closed — next: phase 3 (`pi-mm`)** |
 | 4 | `pi-mm` extension | Tools/hooks/skill/config wrapping phase 2 (`memory_scan/think/store/forget/reset`) | ✅ DONE 2026-09-15 — `.pi/extensions/pi-mm/` scaffold (mirrors `pi-quest`); `deno test` 48/48 + integration all green; §13 checklist all green |
 | 5 | Validity window in the extension | `memory_scan` `until` upper-bound via joint through the phase-2 surface | ✅ **DONE 2026-09-15** — `memory_scan` gains `until` (ISO date YYYY-MM-DD) capping the time window upper bound: level 0 → `joint="a=0 b=until" AND stoma`; level 1/2 caps `b` at the earlier of `until` and the level's natural end. Unit tests 54/54 + integration green; root `make` W06 PASS. Detail: `4-UNTIL-IMPLEMENTATION.md` |
-| 6 | Real embeddings | sepal axis in the pi-mm filespec when `QMAP_SEPAL_EMBED_*` configured; `memory_scan embed=true` embeds the topic via axil-qllm (`/v1/embeddings`) and merges a `sepal="file=… qdim=…"` leaf | ✅ **DONE 2026-09-16** — `src/embed.ts` (`embedQuery` curl→LE float32 temp vector, `cleanupEmbed` best-effort) + `scanExpr(…, sepalLeaf?)` + `sepalLeafFor`/`embedEnv`/`sepalConfigured` + sepal-aware filespec in all five tools (`embed=true` modal on scan with soft `unconfigured`/`no-vector` fallback; sepal never enters the roster unconfigured since its EINVAL rejects the whole `-p`). Unit tests 68/68 + lint + complexity ok; integration green incl. the gated embed smoke (python3 one-shot mock: store embeds → sepal query finds ref; dissimilar vector gated out). Detail: `5-EMBED-PLAN.md` |
+| 6 | Real embeddings | sepal axis in the pi-mm filespec when `CORM_SEPAL_EMBED_*` configured; `memory_scan embed=true` embeds the topic via axil-qllm (`/v1/embeddings`) and merges a `sepal="file=… qdim=…"` leaf | ✅ **DONE 2026-09-16** — `src/embed.ts` (`embedQuery` curl→LE float32 temp vector, `cleanupEmbed` best-effort) + `scanExpr(…, sepalLeaf?)` + `sepalLeafFor`/`embedEnv`/`sepalConfigured` + sepal-aware filespec in all five tools (`embed=true` modal on scan with soft `unconfigured`/`no-vector` fallback; sepal never enters the roster unconfigured since its EINVAL rejects the whole `-p`). Unit tests 68/68 + lint + complexity ok; integration green incl. the gated embed smoke (python3 one-shot mock: store embeds → sepal query finds ref; dissimilar vector gated out). Detail: `5-EMBED-PLAN.md` |
 | 7 | Sepal query-time `query=` leaf | `sepal="query='…'"` embeds the string server-side in libsepal decode (stoma quote parity), `query=` name per user choice; pi-mm drops the curl→tempfile bridge and just emits a text leaf | ✅ **DONE 2026-09-16** — Phase A: `sepal_axis_decode` + `query` key (single-quote-aware, wins over `file=`, NULL when unconfigured/fetch fails) + header docs + `tests/unit/test_axis_decode_query.c` (56 assertions: verbatim text, unquoted token, precedence, empty/unconfigured NULL, end-to-end fill+rank); libsepal `make test` exit 0, clean rebuild zero warnings, exported symbols unchanged, commit `1ade85a`. Phase B: submodule bump + `src/embed.ts`/`tests/embed.test.ts` deleted + `sepalLeafForText` + `ToolEnv.exec` dropped + scan emits the text leaf (unconfigured → soft `unconfigured`; unreachable endpoint → loud exit 1); `deno test` 61/61 + lint + complexity ok; integration green incl. the `query=` text-leaf smoke (one-shot mock restarted per embed call) with the `file=` dissimilar gate kept. Detail: `6-QUERY-TEXT-PLAN.md` |
-| 8 | Per-primary axis-store isolation | Two DBs in one directory corrupted each other (stoma rebuilt from the first `*.roster` in readdir order → silent 0 docs; `joint.db`/`sepal.db` shared per dir → ref collisions). Fix: `qmap_axes_spec` → `<dir>/<basename>-<axis>` (`garden.db` → `garden.db-joint` …), libqmap publishes verbatim `QMAP_AXIS_PRIMARY`, stoma rebuilds from that primary (+ loud multi-roster guard when the env is absent) | ✅ **DONE 2026-09-16** — Phase A (libqmap): spec naming + env + `test-roster.sh` §7 fix + §8 two-DB isolation check + `test-cli.sh`/`test-fanout.sh`/`real_seed.c` per-primary rework; clean rebuild zero warnings, `make test` exit 0. Phase B (libstoma): env-preferred rebuild + B-2 guard + `src/stoma_axis_rebuild_test.c` (15 assertions, stderr-captured) wired into `make test`; all suites green. Phase C: joint/sepal/islet verbatim-passthrough verified, suites green, no code change. Phase D: site `make` W06 PASS; pi-mm `deno test` 61/61 + lint + complexity + `integration-mm.sh` all green incl. the new two-DB-in-one-dir smoke; `RUNNING.md` + SKILL.md storage notes. Detail: `7-AXIS-NAMESPACE-PLAN.md` |
-| 9 | Axis-contributed CLI flags (D14) | `--query`/`--min-sim` plugin flags broadcast to every bound axis that declares them via `rec_axis_cli_options`/`rec_axis_config_arg` (D14 — collector mirror-scan + dynamic getopt table + post-bind flush in libqmap; inline `--name=value` only; credentials env-only); **round 2: `-X` is pure structure (bare names only) — ALL params ride flags: joint `--since`/`--until`, stoma `--field` (default `text`)/`--phrase`/`--matched`/`--query`, sepal `--query`/`--min-sim`/`--m`**; `decode` merges CLI into leaf params (leaf spec > CLI > env); pi-mm emits bare `joint AND stoma AND sepal` and appends `--field=text --matched=1 --since/--until --query=… [--min-sim=…]` as extra args. Detail: `RECALL-KERNEL.md` §3 convention, `CLI-SURFACE-EXAMPLES.md` §11 | ✅ **DONE 2026-09-16 (round 2)** — round 1: libqmap collector + dynamic table + flush + 11 new test-cli rows (all green); libsepal `rec_axis_cli_options`/`rec_axis_config_arg` + decode merge + bare-leaf fallback (all green, 87465+ asserts); libstoma `stoma_cli_query` + decode merge (0 warnings, 242/242 + stress + property + rebuild tests green); pi-mm `scanExpr` drop `sepalLeafForText`, `buildScanInvocation` gains `extraArgs` (deno 62/62 + lint + complexity + integration all green); 5-lib gates green, site `make` W06 PASS. Round 2: joint `--since/--until` + safe `joint_parse_time`; stoma bare+`--query` searchable + field default `text` (+`--field/--phrase/--matched`); sepal `--m`; pi-mm bare `-X` + all flags (deno 64/64 + lint + complexity + integration incl. embed smoke green); 3-lib gates green, site `make` W06 PASS, bundles regenerated. No commits. |
+| 8 | Per-primary axis-store isolation | Two DBs in one directory corrupted each other (stoma rebuilt from the first `*.roster` in readdir order → silent 0 docs; `joint.db`/`sepal.db` shared per dir → ref collisions). Fix: `corm_axes_spec` → `<dir>/<basename>-<axis>` (`garden.db` → `garden.db-joint` …), libcorm publishes verbatim `CORM_AXIS_PRIMARY`, stoma rebuilds from that primary (+ loud multi-roster guard when the env is absent) | ✅ **DONE 2026-09-16** — Phase A (libcorm): spec naming + env + `test-roster.sh` §7 fix + §8 two-DB isolation check + `test-cli.sh`/`test-fanout.sh`/`real_seed.c` per-primary rework; clean rebuild zero warnings, `make test` exit 0. Phase B (libstoma): env-preferred rebuild + B-2 guard + `src/stoma_axis_rebuild_test.c` (15 assertions, stderr-captured) wired into `make test`; all suites green. Phase C: joint/sepal/islet verbatim-passthrough verified, suites green, no code change. Phase D: site `make` W06 PASS; pi-mm `deno test` 61/61 + lint + complexity + `integration-mm.sh` all green incl. the new two-DB-in-one-dir smoke; `RUNNING.md` + SKILL.md storage notes. Detail: `7-AXIS-NAMESPACE-PLAN.md` |
+| 9 | Axis-contributed CLI flags (D14) | `--query`/`--min-sim` plugin flags broadcast to every bound axis that declares them via `rec_axis_cli_options`/`rec_axis_config_arg` (D14 — collector mirror-scan + dynamic getopt table + post-bind flush in libcorm; inline `--name=value` only; credentials env-only); **round 2: `-X` is pure structure (bare names only) — ALL params ride flags: joint `--since`/`--until`, stoma `--field` (default `text`)/`--phrase`/`--matched`/`--query`, sepal `--query`/`--min-sim`/`--m`**; `decode` merges CLI into leaf params (leaf spec > CLI > env); pi-mm emits bare `joint AND stoma AND sepal` and appends `--field=text --matched=1 --since/--until --query=… [--min-sim=…]` as extra args. Detail: `RECALL-KERNEL.md` §3 convention, `CLI-SURFACE-EXAMPLES.md` §11 | ✅ **DONE 2026-09-16 (round 2)** — round 1: libcorm collector + dynamic table + flush + 11 new test-cli rows (all green); libsepal `rec_axis_cli_options`/`rec_axis_config_arg` + decode merge + bare-leaf fallback (all green, 87465+ asserts); libstoma `stoma_cli_query` + decode merge (0 warnings, 242/242 + stress + property + rebuild tests green); pi-mm `scanExpr` drop `sepalLeafForText`, `buildScanInvocation` gains `extraArgs` (deno 62/62 + lint + complexity + integration all green); 5-lib gates green, site `make` W06 PASS. Round 2: joint `--since/--until` + safe `joint_parse_time`; stoma bare+`--query` searchable + field default `text` (+`--field/--phrase/--matched`); sepal `--m`; pi-mm bare `-X` + all flags (deno 64/64 + lint + complexity + integration incl. embed smoke green); 3-lib gates green, site `make` W06 PASS, bundles regenerated. No commits. |
 
 ---
 
@@ -69,7 +69,7 @@ joint + 2A-4 islet + 2A-5 cross-process round-trips + 2A-6 close-out —
 per-repo suites green, `nm -D` spot-checks, no installs). **2B started:
 2B-0 (CLI-surface docs corrected) + 2B-1 (roster + discovery + load)
 DONE 2026-09-14** — `@roster` sidecar `<primary>.roster`, by-name dlopen
-(`lib<name>.so` from `$QMAP_AXIS_PATH`), alongside-default bind, flat
+(`lib<name>.so` from `$CORM_AXIS_PATH`), alongside-default bind, flat
 `--list-axes`; `test-roster.sh` green. **2B-3 DONE 2026-09-14** — the `-g`
 fold + the `-X` set-expression surface landed first (EXCEPT-setminus,
 unary-only NOT; `-t`/`-b` knobs; `-Q`/`rq_*` deleted; `test-cli.sh`
@@ -82,13 +82,13 @@ measured; §12 checklist; bring-ups: joint jd-0 burn + §6 grammar).
 **2B-4 DONE 2026-09-15** — write fan-out + forget landed (union
 `-p`/`-d`/`-D` over `{primary} ∪ {@} ∪ {target}`; string/typed dispatch
 D12 with binary+text-only loud-skip; loud partials + idempotent forget;
-`QDBE_MASK` 4095 + `QMAP_MASK` D11; readback has no CLI surface —
+`QDBE_MASK` 4095 + `CORM_MASK` D11; readback has no CLI surface —
 deferred; `test-fanout.sh` 40/40 green; detail:
 `2B-4-IMPLEMENTATION.md`).
 **2B-5 DONE 2026-09-15** — mm dialect landed: pi-mm recipes
 (store explicit-ref, bounded-window joint ∧ stoma search, idempotent
 forget, enumerate+forget reset loop) proven over real joint+stoma files
-by `test-mm.sh` green; **F4 fix**: `qmap_open` aliases the live handle on
+by `test-mm.sh` green; **F4 fix**: `corm_open` aliases the live handle on
 identical (file, map) re-opens (stoma sidecar mirror no longer clobbers
 seeds/forgets); detail: `2B-5-IMPLEMENTATION.md`. **2B-6 DONE 2026-09-15**
 — rank convention landed (D2: first rank-capable axis in query order
@@ -104,7 +104,7 @@ DONE 2026-09-15** — `memory_scan` gains `until` (ISO date YYYY-MM-DD)
 capping the time window upper bound; unit tests 54/54 + integration
 green; detail: `4-UNTIL-IMPLEMENTATION.md`. **Phase 5 (real embeddings)
 DONE 2026-09-16** — sepal axis in the filespec when
-`QMAP_SEPAL_EMBED_*` configured + `memory_scan embed=true` via
+`CORM_SEPAL_EMBED_*` configured + `memory_scan embed=true` via
 `src/embed.ts`; unit tests 68/68 + integration green incl. the gated
 embed smoke; detail: `5-EMBED-PLAN.md`; operator guide `RUNNING.md`.
 **Next: none planned** — D14 axis-contributed CLI flags round DONE
@@ -146,9 +146,9 @@ lives in memory. Don't duplicate.
 
 **Non-goals:** no `~/llm` dependency (not `llmd`, not llama.cpp, no
 local-embedding requirement); no remote memory storage (memory is local
-data — a `qmap` file, never leaves the machine).
+data — a `corm` file, never leaves the machine).
 
-**A second, equally important goal:** the qmap CLI composition surface
+**A second, equally important goal:** the corm CLI composition surface
 built for phase 2 is **general-purpose**, not an mm-only mechanism. It must
 let any registered axis libraries compose with each other — e.g. libislet
 (space) in conjunction with libjoint (time) and libstoma (text), with no mm
@@ -159,8 +159,8 @@ concepts involved — with mm as one documented consumer on top.
 ## 2. The data model & the ref-type law (locked)
 
 A memory (or any record) is a **value V** (a string, a vector, whatever)
-referenced by an **id** that lives in a **primary qmap map** (its own file,
-`QM_AINDEX`-opened — the id authority). Each id is looked up in key-lookup
+referenced by an **id** that lives in a **primary corm map** (its own file,
+`CM_AINDEX`-opened — the id authority). Each id is looked up in key-lookup
 sets built by axis libraries:
 
 - **Set I** — interval membership (time): libjoint inserts times.
@@ -172,8 +172,8 @@ sets built by axis libraries:
 **The law, stated precisely (this is what "axis id-uniformity" actually
 means — get this right and everything else follows):**
 
-1. **A qmap ref is `uint32_t`.** It is whatever `qmap_put()` under
-   `QM_AINDEX` handed back for the primary record. This is the one
+1. **A corm ref is `uint32_t`.** It is whatever `corm_put()` under
+   `CM_AINDEX` handed back for the primary record. This is the one
    reference type that crosses every boundary: axis fill functions, `rec_set_t`,
    `rec_rank_t`, `rec_query_run`'s output arrays.
 2. **An axis's own internal keys are a completely different thing and are
@@ -181,16 +181,16 @@ means — get this right and everything else follows):**
    fine, that's islet's own spatial index, entirely internal. libjoint's
    internal secondary index, libstoma's inverted index, libsepal's sketch
    table — all internal, all axis-owned, any width they like.
-3. **An axis search returns qmap refs** (`uint32_t`), stamped alongside
+3. **An axis search returns corm refs** (`uint32_t`), stamped alongside
    whatever internal key got it there. Never the internal key itself.
-4. **Set operations (AND/OR/NOT) run over qmap refs.** This is the kernel's
+4. **Set operations (AND/OR/NOT) run over corm refs.** This is the kernel's
    entire job (`rec_set_t`, `rec.h`) — sorted merge-join, no hashing, no
    axis-specific knowledge.
 5. **The real record is fetched last**, by ref, from the primary map (or
    whichever map owns that content) — never before the composition is done.
 
 Consequence for `rec_ref_t` (the kernel's carrier type): it is `uint32_t`,
-matching qmap's own native id width, not the wider width that would be
+matching corm's own native id width, not the wider width that would be
 needed to embed axis-internal keys (those never leave their axis). Phase 1
 is the work of making every axis speak this at its fill/rank boundary,
 independent of what it stores internally.
@@ -199,26 +199,26 @@ independent of what it stores internally.
 
 ## 3. Architecture (what phase 2 builds on)
 
-- **One primary map** (its own qmap file, auto-indexed) is the id authority
+- **One primary map** (its own corm file, auto-indexed) is the id authority
   and (for mm specifically) the only place content lives. Writes are
   explicit multi-call sequences: put primary → same ref into each axis
   store.
-- **Each axis keeps its own qmap-backed store** (own file — "their own
-  qmaps if need be"). No shared physical file is required — only the ref
+- **Each axis keeps its own corm-backed store** (own file — "their own
+  corms if need be"). No shared physical file is required — only the ref
   value is shared.
 - **Types are the language:** typed-file slots accept registered type
   names (a time store, an embedding store, ...) exactly like today's
-  built-in type shorthand (`u`/`s`/`a`, see `external/libqmap/README.md`).
+  built-in type shorthand (`u`/`s`/`a`, see `external/libcorm/README.md`).
   Representative types live in core (`name`/`parse`/`print` + optional
   **query-time-only** `fill`/`rank` on the type vtable); capabilities live
-  outside core. **No put/del hooks, no per-map engine state in libqmap** —
+  outside core. **No put/del hooks, no per-map engine state in libcorm** —
   derived indexes rebuild on query, plugin-side. The live data plane is
   untouched.
 - **Composition, both mechanisms kept:** the existing exact relational
   chain, extended to the same typed addressing; and the scored/ranked
   set-composition mode (`rec_query_run`). Neither replaces the other.
   `rec.h`/kernel unchanged in shape (only the ref width changes).
-- **No bespoke binary:** the mm dialect is documented qmap invocations
+- **No bespoke binary:** the mm dialect is documented corm invocations
   issued from `pi-mm`'s `mm/client.ts`, not a separate engine. Old
   `external/mm` stays deleted once phase 2/3 land.
 
@@ -226,15 +226,15 @@ independent of what it stores internally.
 
 ## 4. Preserved contracts (do not re-litigate)
 
-- **Mipmap keys never contain `:`** — libqmap record maps treat any `:` in
+- **Mipmap keys never contain `:`** — libcorm record maps treat any `:` in
   a key as a `struct:field` composite lookup. All keys are `mm_keyify`'d
   (colons stripped); the stored `ts` field keeps the real ISO string.
-- **One qmap map per file.** libqmap saves/loads multiple maps sharing one
+- **One corm map per file.** libcorm saves/loads multiple maps sharing one
   file *positionally* — across processes (or a different open order) that
   silently skips blocks. Every store this plan touches (entries, ids,
   vectors) gets its **own file**.
-- **Never `qmap_close` the long-lived handles.** libqmap's
-  `__attribute__((destructor))` runs `qmap_save()` after `main`; closing a
+- **Never `corm_close` the long-lived handles.** libcorm's
+  `__attribute__((destructor))` runs `corm_save()` after `main`; closing a
   map first removes it from `file->ids`, so the destructor sees an empty
   file and truncates it to 0 bytes. Single-writer, no locking; forget
   deletes everywhere it was written.
@@ -263,21 +263,21 @@ Started 2026-09-13, closed same day. All five repos retyped +
 installed + verified; fixture 16/16; site `make` + `make test` green.
 Research pass 2026-09-13 source-read all four axis libs and the
 build/install wiring; the remaining scope is smaller and more mechanical
-than first assumed — but nothing downstream of libqmap can be *verified*
+than first assumed — but nothing downstream of libcorm can be *verified*
 until the new headers and binaries are propagated, not just edited.
 Status, evidence, execution checklist, and decision log:
 `PHASE-1-RETYPE.md`.
 
-Done so far (`external/libqmap` working tree only, uncommitted):
+Done so far (`external/libcorm` working tree only, uncommitted):
 - `rec.h`: `rec_ref_t` retyped `uint64_t` → `uint32_t`; doc comments
-  updated (refs are qmap refs, not axis-internal keys;
-  `rec_set_fill_qmap_iter` now accepts keys ≤ 4 bytes, was ≤ 8).
+  updated (refs are corm refs, not axis-internal keys;
+  `rec_set_fill_corm_iter` now accepts keys ≤ 4 bytes, was ≤ 8).
 - `rec.c`: no changes needed — fully generic over `rec_ref_t`.
-- `src/rec_test.c`: one test (`fill_qmap_iter duplicates`) was registering
-  8-byte qmap keys — fixed to 4 bytes (now matches the ref width it feeds).
-- `src/bench_rec.c`: was registering an 8-byte qmap key type while reading
+- `src/rec_test.c`: one test (`fill_corm_iter duplicates`) was registering
+  8-byte corm keys — fixed to 4 bytes (now matches the ref width it feeds).
+- `src/bench_rec.c`: was registering an 8-byte corm key type while reading
   4-byte `rec_ref_t` array elements by pointer — a real buffer over-read
-  bug this retype exposed. Fixed to `qmap_reg(sizeof(rec_ref_t))`.
+  bug this retype exposed. Fixed to `corm_reg(sizeof(rec_ref_t))`.
 - Verified: `test.sh` and `test-cli.sh` green after both fixes.
 
 ### 5.1 The propagation gap (the actual blocker)
@@ -286,19 +286,19 @@ The retype exists only in the submodule working tree. The live system the
 axis libs build and link against is still u64:
 
 - `/usr/include/ttypt/rec.h` still reads
-  `typedef uint64_t rec_ref_t;` (installed Sep 11); `/usr/lib/libqmap.so`
+  `typedef uint64_t rec_ref_t;` (installed Sep 11); `/usr/lib/libcorm.so`
   and `/usr/lib/lib{joint,sepal,stoma,islet}.so` were all built against it.
-- The id-join fixture (`external/libqmap/tests/Makefile`) links the
-  *system-installed* `libqmap.so` + joint/sepal `.so`s and asserts
+- The id-join fixture (`external/libcorm/tests/Makefile`) links the
+  *system-installed* `libcorm.so` + joint/sepal `.so`s and asserts
   header≡installed-copy byte-identity — it cannot pass until the new stack
   is installed, whatever the sources say. Rebuilding an axis lib now would
-  link a u64-ABI `libqmap.so` under u32 headers (real breakage in
+  link a u64-ABI `libcorm.so` under u32 headers (real breakage in
   `rec_set_push`/`rec_rank_push`/`rec_query_run`, not cosmetic).
-- Rebuild order is forced: **install libqmap first.** `libsepal` resolves
-  `rec.h` from `external/libqmap/include` (explicit `-I` ahead of
+- Rebuild order is forced: **install libcorm first.** `libsepal` resolves
+  `rec.h` from `external/libcorm/include` (explicit `-I` ahead of
   `-I/usr/include` in its Makefile); `libjoint`/`libstoma`/`libislet` have
   no explicit `-I` and resolve `<ttypt/rec.h>` from `/usr/include`. Only
-  after libqmap's install do the axis repos see u32 `rec.h`.
+  after libcorm's install do the axis repos see u32 `rec.h`.
 - Installs land in root-owned `/usr` (same as the Sep 11 installs): exact
   `sudo make install` commands are handed to the user to run; the
   assistant does everything else. (Decided 2026-09-13.)
@@ -310,7 +310,7 @@ changes essentially **zero functional lines**. What remains per repo:
 
 - **libsepal** (`external/libsepal`): `sepal_hit_t.ref`,
   `sepal_put/del/get/dim/full_dim/rank`, `idx_ref[]`, and
-   `sepal_kt = qmap_reg(sizeof(rec_ref_t))` (now 4 bytes, was 8) all
+   `sepal_kt = corm_reg(sizeof(rec_ref_t))` (now 4 bytes, was 8) all
    self-adapt; the u64 slot map (`ref_hash`, `hkey`) stays correct for
    zero-extended u32 refs. Changes: (a) header wording
    `sepal.h:10` "`caller-opaque rec_ref_t (u64)`" → u32; (b) **rewrite
@@ -346,7 +346,7 @@ changes essentially **zero functional lines**. What remains per repo:
   `stoma_prop_test` seeds 1/42/1337 green, zero warnings); installed,
   verified (header identical, `.so` byte-identical).
 - **libjoint** (`external/libjoint`): internally `unsigned` ids,
-  `qm_id = qmap_reg(sizeof(uint32_t))` already 4-byte
+  `qm_id = corm_reg(sizeof(uint32_t))` already 4-byte
   (`src/libjoint.c`); `rec_axis_fill_interval`'s widen is now an identity
   cast. **No code change.** Doc-only: the ID-uniformity note in `joint.h`
   (~lines 19–28) still says `rec_ref_t (uint64_t…)` → u32.
@@ -361,17 +361,17 @@ changes essentially **zero functional lines**. What remains per repo:
   (`external/lib{joint,islet,sepal,stoma}`). The historical note below
   about the site's `external/libstoma` copy is superseded: there is one
   copy now, the submodule.
-- **Fixture** (`external/libqmap/tests/fixture_id_join.c`): no source
+- **Fixture** (`external/libcorm/tests/fixture_id_join.c`): no source
   change (casts at `:110`/`:154` are no-ops). Rebuild + rerun
   `make clean all test` → 16/16 once the installed stack matches.
 - **Site gate:** `rec_*` appears nowhere in `external/libhyle`,
-  `external/axil`, `external/libxylem`, or the libqmap rust bindings — the
+  `external/axil`, `external/libxylem`, or the libcorm rust bindings — the
   site build is source-invisible to the retype. Gate stays "site `make`"
   (+ full `make test` as cheap insurance).
 
 ### 5.3 Execution checklist (in order)
 
-1. ✅ DONE — `external/libqmap`: re-ran `./test.sh && ./test-cli.sh`;
+1. ✅ DONE — `external/libcorm`: re-ran `./test.sh && ./test-cli.sh`;
    user ran `sudo make install`; verified `/usr/include/ttypt/rec.h`
    reads u32.
 2. ✅ DONE — `external/libsepal`: header wording + `test_opaque_refs` rewrite +
@@ -390,7 +390,7 @@ changes essentially **zero functional lines**. What remains per repo:
    sentence fix → `make -C tests clean && make test` green 2026-09-13
    (exit 0, 27 suites; first run red was the stale-binary hazard) →
    installed; header≡tree + `.so` byte-identity verified.
-6. ✅ DONE — Fixture: `make -C external/libqmap/tests clean all test`
+6. ✅ DONE — Fixture: `make -C external/libcorm/tests clean all test`
    → 16/16, 2026-09-13.
 7. ✅ DONE — Site: `make` green 2026-09-13 (incl. `W06 check PASS: no
    native imports in WASM`) + `make test` green (manual run by the user,
@@ -417,7 +417,7 @@ changes essentially **zero functional lines**. What remains per repo:
     idempotent `unstore`, `readback`), uniform surface
     rules, persistence classes, slices 2A-mock..2A-6 in `PHASE-2-CLI.md` (2A);
     §11 is the checklist.
-3. **Phase 2B — general qmap CLI composition.** **DONE 2026-09-15 (v19)** —
+3. **Phase 2B — general corm CLI composition.** **DONE 2026-09-15 (v19)** —
    2B-0 + 2B-1 landed (docs + `@roster` sidecar + by-name discovery/load,
    `test-roster.sh` green). Composed `-g` (fold of `-Q`),
    `@` roster + fan-out, slices 2B-0..2B-6 landed, decided options
@@ -426,7 +426,7 @@ changes essentially **zero functional lines**. What remains per repo:
 4. **Phase 3 — `pi-mm` scaffold.** **DONE 2026-09-15** — the
    `.pi/extensions/pi-mm/` extension (tools `memory_scan/think/store/
    forget/reset` + skill + config wrapping the phase-2 surface). Tools
-   stub qmap in unit tests (never shell out in `deno test`; real qmap
+   stub corm in unit tests (never shell out in `deno test`; real corm
    covered by `scripts/integration-mm.sh`). Gate: a
    Pi session recalls prior gist from disk with no provider; `deno test`
    green — **both green**.
@@ -435,7 +435,7 @@ changes essentially **zero functional lines**. What remains per repo:
    window upper bound via joint. Gate: validity-window round-trip through
    the extension tools — **green**. Detail: `4-UNTIL-IMPLEMENTATION.md`.
 6. **Phase 5 — real embeddings.** **DONE 2026-09-16** — sepal axis in the
-   filespec when `QMAP_SEPAL_EMBED_*` configured + `memory_scan
+   filespec when `CORM_SEPAL_EMBED_*` configured + `memory_scan
    embed=true` (embed the topic via axil-qllm `/v1/embeddings` through
    `src/embed.ts`, write a temp LE float32 vector, merge
    `sepal="file=… qdim=… m=10 min_sim=0.2"`). No C changes (store-time
@@ -455,9 +455,9 @@ changes essentially **zero functional lines**. What remains per repo:
    green. Plan: `6-QUERY-TEXT-PLAN.md`.
 8. **Phase 7 — per-primary axis-store isolation.** **DONE 2026-09-16** —
    axis stores are `<dir>/<basename>-<axis>` (e.g. `garden.db-joint`),
-   stoma rebuilds bind the `QMAP_AXIS_PRIMARY` the CLI opened (+ loud
+   stoma rebuilds bind the `CORM_AXIS_PRIMARY` the CLI opened (+ loud
    multi-roster guard without the env); a directory may host many
-   databases. Four repos: Phase A (libqmap spec+env+tests) → Phase B
+   databases. Four repos: Phase A (libcorm spec+env+tests) → Phase B
    (libstoma rebuild+guard+tests) → Phase C (joint/sepal/islet verify,
    no change) → Phase D (site + pi-mm + docs). Gate: every repo's
    `make test` green, site `make` W06 PASS, pi-mm gates + new two-DB
@@ -495,15 +495,15 @@ changes essentially **zero functional lines**. What remains per repo:
   over budget would add a proposal, not silently change the design).
 - **U6** `QDBE_MASK` sizing → **decided 2026-09-14 pre-2B-4**: default CLI mask
   shrinks `32767 → 4095` (4k buckets, `2^12-1`; was 32k, `2^15-1` —
-  `external/libqmap/src/qmap.c:163` + `libstoma` sidecar-scan). Over-large
-  by ~8× for small corpora (mmap bloat) — `qmap_open(...,mask,flags)`
-  auto-grows (`external/libqmap/include/ttypt/qmap.h:172`) so the mask is
-  only a hint, not a cap; per-store env `QMAP_MASK` overrides for benches.
+  `external/libcorm/src/corm.c:163` + `libstoma` sidecar-scan). Over-large
+  by ~8× for small corpora (mmap bloat) — `corm_open(...,mask,flags)`
+  auto-grows (`external/libcorm/include/ttypt/corm.h:172`) so the mask is
+  only a hint, not a cap; per-store env `CORM_MASK` overrides for benches.
 - **U7** Binary primary + typed fanout → **decided 2026-09-14 pre-2B-4**:
-  libqmap is already typed (`qmap_reg`); the axis store boundary gains
+  libcorm is already typed (`corm_reg`); the axis store boundary gains
   additive `rec_axis_store_typed(ctx,spec,ref, blob,len,qtype)` alongside
   the string `rec_axis_store` (keeps shipped `*.so`s valid); CLI prefers
-  the typed symbol when `vtype != QM_STR`, else the string one.
+  the typed symbol when `vtype != CM_STR`, else the string one.
 - **U8** Derived (rebuild) vs persisted axis → **decided 2026-09-14 pre-2B-4**:
   freedom per deployment, not per-axis hard-wired. `rec_axis_open(spec)`
   decides persistence (file vs memory/rebuild) — the roster names the
@@ -531,19 +531,19 @@ changes essentially **zero functional lines**. What remains per repo:
 |---|---|
 | Ref-type retype left half-done breaks a downstream consumer silently | gate every phase-1 step on that repo's own suite; don't call phase 1 done until all 5 repos + the fixture are green |
 | Vectors regress to meaningless (wrong model/pooling change again) | keep the water/fire ordering as a standing fixture/test |
-| `qmap_close` truncation bug reintroduced | keep the no-close invariant explicit; test file integrity after every mutating op |
+| `corm_close` truncation bug reintroduced | keep the no-close invariant explicit; test file integrity after every mutating op |
 | Single-writer invariant violated across the primary + axis stores | document single-writer; round-trip test (`put` → `get` → `del` everywhere it was written) in phase 2 |
 
 ---
 
 ## 9. References
 
-- Kernel API (canonical, unchanged location): `external/libqmap/docs/RECALL-KERNEL.md`
-- Kernel header: `external/libqmap/include/ttypt/rec.h`
-- qmap public API: `external/libqmap/include/ttypt/qmap.h`
+- Kernel API (canonical, unchanged location): `external/libcorm/docs/RECALL-KERNEL.md`
+- Kernel header: `external/libcorm/include/ttypt/rec.h`
+- corm public API: `external/libcorm/include/ttypt/corm.h`
 - Axis libs: `external/libjoint`, `external/libislet`, `external/libsepal`, `external/libstoma` (in-site
   submodules since 2026-09-15; formerly `~/lib*` sibling checkouts, now removed)
-- id-join proof fixture: `external/libqmap/tests/fixture_id_join.c`
+- id-join proof fixture: `external/libcorm/tests/fixture_id_join.c`
 
 ---
 
@@ -564,22 +564,22 @@ to understand an unexpected format (it alone rejects).
 Only the fill/rank adapters and the ref crossing them follow the ref boundary
 (§2); internal keys never leave the axis.
 **Mask:** default hash mask `4095` (`2^12-1`, 4k buckets; was `32767`) —
-`qmap_open(...,mask,flags)` auto-grows on overflow (`qmap.h:172`), so the
-mask is only an initial hint. Override per-store via env `QMAP_MASK` for
+`corm_open(...,mask,flags)` auto-grows on overflow (`corm.h:172`), so the
+mask is only an initial hint. Override per-store via env `CORM_MASK` for
 benches.
 
 **Typed store:** alongside `rec_axis_store(ctx,spec,ref, const char *value)`
 (string whole-value) there is additive
 `rec_axis_store_typed(ctx,spec,ref, const void *blob,size_t len,uint32_t qtype)`
-for binary primaries (any `qmap_reg` type); the CLI forwards `(ptr,len,qtype)`
-from `qmap_get`+`qmap_type_len(qtype)` and prefers the typed symbol when
-`vtype != QM_STR`. `readback` already returns `blob/n`. Shipped `*.so`s stay
+for binary primaries (any `corm_reg` type); the CLI forwards `(ptr,len,qtype)`
+from `corm_get`+`corm_type_len(qtype)` and prefers the typed symbol when
+`vtype != CM_STR`. `readback` already returns `blob/n`. Shipped `*.so`s stay
 valid — missing typed export ⇒ text-only axis. See `PHASE-2-CLI.md` D12 /
 `RECALL-KERNEL.md` convention.
 
 **Derived vs persisted:** `rec_axis_open(spec)` decides — the roster (`@joint`)
 names the *logical* axis only. A derived axis rebuilds from the primary at
-each open (like `stoma`, bound via `QMAP_AXIS_PRIMARY` when the CLI opened
+each open (like `stoma`, bound via `CORM_AXIS_PRIMARY` when the CLI opened
 it); a persisted one uses the alongside file (`<dir>/<primary>-<name>`,
 e.g. `garden.db-joint`). Freedom per deployment, not hard-wired per axis.
 (Phase 7, `7-AXIS-NAMESPACE-PLAN.md`.)
@@ -609,7 +609,7 @@ index `(field, token) → row_id` (decimal strings) + folded doc text per
 
 **sepal — meaning** (`external/libsepal`, `include/ttypt/sepal.h`). Store:
 dim-tagged vectors per ref (matryoshka prefix `min(full_dim, 256)` +
-sign-bit sketch over the full dim), qmap-persisted blobs (VEC1).
+sign-bit sketch over the full dim), corm-persisted blobs (VEC1).
 - Writes/reads: `sepal_open/close`, `sepal_put/del`,
   `sepal_get` (never truncates; 0 = missing or undersized buffer),
   `sepal_dim/full_dim/n`, `sepal_index_validate`. Phase-2A store/unstore/get:
@@ -669,7 +669,7 @@ and `id` secondary indexes.
   are no-ops via an `id`-index guard. Delete via new
   `joint_erase(jd, id)` over the existing `id` secondary index; read-back
   is one `start,end` per interval. **No new stored state** (the `id`
-  index, kept by `qmap_assoc` and backfilled from the file-backed `ti`
+  index, kept by `corm_assoc` and backfilled from the file-backed `ti`
   map on open, is the inverse).
   Utils: `sscantime` / `printtime` (ISO-8601 ↔ `time_t`).
 - Native query: `joint_iter(jd, a, b)` + `joint_next` — decomposes the
@@ -703,8 +703,8 @@ remove it idempotently, and read its entries back — with axis-decided
 grammars, no per-axis glue.
 Detail (inverse principle, uniform contract + surface rules, per-axis
 roles, persistence classes, slices): `PHASE-2-CLI.md` 2A; contract kernel:
-`external/libqmap/docs/RECALL-KERNEL.md` (store/unstore/readback conventional
-exports). No libqmap/kernel change, no site change, no `/usr` installs
+`external/libcorm/docs/RECALL-KERNEL.md` (store/unstore/readback conventional
+exports). No libcorm/kernel change, no site change, no `/usr` installs
 (D4 — write gates run on fresh in-site `external/lib*` builds). TDD every slice;
 per-repo gate = that repo's suite + `nm -D` shows the new symbols;
 clean-rebuild rule. Commit only when asked.
@@ -726,7 +726,7 @@ ref isn't discoverable backwards) adds the canonical `rev` manifest
   Plan v18. Content-only.
 - [x] **2A-mock** Proof-of-contract slice (DONE 2026-09-14): mock plugin
   `src/librec_axis_mock.c` + `src/rec_axis_store_test.c` dlsym round-trip
-  suite; `Makefile` + `test.sh` wiring; libqmap `make test` green.
+  suite; `Makefile` + `test.sh` wiring; libcorm `make test` green.
 - [x] **2A-1** libsepal adapters (DONE 2026-09-14): store = floats direct /
   curl-embed iff configured / else `EINVAL`; `unstore` = `sepal_del`
   absent → 0; `readback` = stored vector as `%.9g` comma-floats.
@@ -749,8 +749,8 @@ ref isn't discoverable backwards) adds the canonical `rev` manifest
   exit 0 (227/227 + prop seeds + 34/34), new test valgrind-clean, `nm -D`
   shows all five symbols, zero warnings. Memory-only confirmed.
 - [x] **2A-3** libjoint (DONE 2026-09-14): native `joint_erase(jd,
-  id)` (id-index `qmap_get_multi` → collect → del each ti key; `qmap_assoc`
-  cleans `max`/`id`; `qmap_del_all(id)` mops replace-path residual dups —
+  id)` (id-index `corm_get_multi` → collect → del each ti key; `corm_assoc`
+  cleans `max`/`id`; `corm_del_all(id)` mops replace-path residual dups —
   empirically verified; absent → 0; `UINT32_MAX` → `EINVAL`; zero new
   state) + adapters (ordered-attempt whole-string grammar: open / `,B`
   close-or-backfill / `A,B` atomic with `B>A` pre-checked; native `1`s
@@ -782,8 +782,8 @@ ref isn't discoverable backwards) adds the canonical `rev` manifest
   only — this slice crossed real process boundaries. File-backed
   (sepal/islet/joint): self-exec'ing harness per repo
   (`seed`/`verify1`/`unstore`/`verify2` modes + no-arg orchestrator that
-  fork+exec's itself per phase; explicit `qmap_save()` + exit destructor;
-  never `qmap_close`; self-unlinking `/tmp/test_*` files): store → reopen
+  fork+exec's itself per phase; explicit `corm_save()` + exit destructor;
+  never `corm_close`; self-unlinking `/tmp/test_*` files): store → reopen
   → query finds ref (`sepal_search` with ref-1 vector score ≥ 0.99;
   islet `readback` = `1,2␀4,5` + `fill_bbox_2` full={11,12} tight={11} —
   proved `.ridx` rehydration; joint `joint_iter` at 2026-02-01 has 13 not
@@ -810,7 +810,7 @@ ref isn't discoverable backwards) adds the canonical `rev` manifest
 
 ---
 
-## 12. Phase 2B — general qmap CLI composition (PLANNED, after 2A)
+## 12. Phase 2B — general corm CLI composition (PLANNED, after 2A)
 
 Execution checklist (detail: `PHASE-2-CLI.md` — principles, D1-D10, `-g`
 fold, `@` roster, reserialized slices). Built on the phase-2A adapters.
@@ -818,11 +818,11 @@ TDD every slice; each slice ends green on its own gate + `./test.sh &&
 ./test-cli.sh` + the sibling suites it touches (standing clean-rebuild
 rule). No `/usr` installs (D4): read gates run on the phase-1 `/usr`
 stack, write gates on fresh in-site `external/lib*` builds via
-`QMAP_AXIS_PATH`/`LD_LIBRARY_PATH`. Commit only when explicitly asked.
+`CORM_AXIS_PATH`/`LD_LIBRARY_PATH`. Commit only when explicitly asked.
 Legacy-close throughout: zero-axis invocations byte-identical.
 
 - [x] **2B-0** CLI-surface doc correction (DONE 2026-09-14): README
-  width-lie fix — `external/libqmap/README.md:125-126,138-139`
+  width-lie fix — `external/libcorm/README.md:125-126,138-139`
   (previously "uniform 64-bit refs", `libit`/`libgeo`) → u32 + the four
   real axis names; plus `docs/RECALL-KERNEL.md` `rec_axis_open`/Status
   rewritten to the by-name surface (`-Q`/`--dl`/`--open` retired) and
@@ -831,13 +831,13 @@ Legacy-close throughout: zero-axis invocations byte-identical.
 - [x] **2B-1** Discovery + roster + load (CLI-only, kernel untouched):
   `@roster` parse/persist/load (write-if-absent; override-once;
   alongside-heuristic note); by-name inter-pass load+bind (name→slot,
-  lazy dlopen of `lib<name>.so` from `$QMAP_AXIS_PATH`, ctx via
+  lazy dlopen of `lib<name>.so` from `$CORM_AXIS_PATH`, ctx via
   `rec_axis_open` on alongside-defaults — no `--dl`/`--open`, D9;
   stoma memory-open + reindex + sepal env config D8 deferred to
   real-lib wiring in 2B-2 — the CLI plugs each axis through the same
   by-name load/bind surface);
   numeric `--axis SLOT` kept only as `-Q`-legacy until its deletion (2B-3);
-  `QMAP_AXIS_LIBS` stays. Single-axis stub plugins `libstub.so`/`libzed.so`
+  `CORM_AXIS_LIBS` stays. Single-axis stub plugins `libstub.so`/`libzed.so`
   built via the standalone-rule pattern (avoids the multi-LIB Makefile
   aggregation bug). `test-roster.sh` TDD (DONE 2026-09-14).
 - [x] **2B-2** Non-mm space∩time∩text gate over real files (DONE 2026-09-14):
@@ -845,7 +845,7 @@ Legacy-close throughout: zero-axis invocations byte-identical.
   primary (`:a:s`) + joint/islet/sepal stores (islet `q.vec`/`q.dim` side
   files); stoma rebuilt from the primary at each open via the sidecar-scan
   (`rec_axis_open` scans `<dir>/*.roster`, opens `"<dir>/<base>"` as
-  `qmap_open(…,"hd",QM_HNDL,QM_STR,32767,QM_AINDEX|QM_MIRROR)` and
+  `corm_open(…,"hd",CM_HNDL,CM_STR,32767,CM_AINDEX|CM_MIRROR)` and
   re-indexes; budget note `rebuilt N docs in X ms` on stderr — 3 docs
   ~0.02–0.03 ms in the gate, U4: well under budget, no persist-postings
   proposal needed at this scale, deferred and never silently absorbed);
@@ -857,7 +857,7 @@ Legacy-close throughout: zero-axis invocations byte-identical.
   lights` (stoma first rank, `1/8` tokens) + sepal
   `sepal="file=q.vec qdim=3 m=2 min_sim=0.5"` → `3 1.0 …` / `1 0.906…` +
   classic zero-plugin regression on a fresh no-roster primary + offline
-  floats-direct + env-gated `QMAP_SEPAL_EMBED_*` ANN column
+  floats-direct + env-gated `CORM_SEPAL_EMBED_*` ANN column
   (`rec_axis_env_config` hook, `sepal_embed_fetch` for qvec+strings, skipped
   unless both vars set). Bring-ups: libjoint burns handle 0 once per
   process in `rec_axis_open` (jd-0↔NULL) + `CLI-SURFACE-EXAMPLES.md` §6
@@ -881,11 +881,11 @@ Legacy-close throughout: zero-axis invocations byte-identical.
   union write-sets for `-p`/`-d` (`{primary} ∪ {@} ∪ {target}`, each store
   once; whole `-p` *payload* fans out as `(ref, blob,len,qtype)` to every
   target — string `rec_axis_store` for `:a:s` primaries, additive
-  `rec_axis_store_typed` when `vtype != QM_STR` (D12) else a loud
+  `rec_axis_store_typed` when `vtype != CM_STR` (D12) else a loud
   text-only skip); dlsym store(_typed)/unstore/readback (missing store ⇒
   read-only); loud partials (attempt all, report all, nonzero) with
   idempotent forget as compensation; `-d`/`-D` collapse on axes;
-  `QDBE_MASK` `4095` + `QMAP_MASK` env (D11); readback has **no** CLI
+  `QDBE_MASK` `4095` + `CORM_MASK` env (D11); readback has **no** CLI
   surface (deferred 2026-09-15 — query + write cover the flow; `-g`/`-m`/
   `-c` stay byte-identical). ✅ **DONE 2026-09-15** — `test-fanout.sh`
   green (verbatim store, typed dispatch, text-only skip, named/numeric
@@ -896,12 +896,12 @@ Legacy-close throughout: zero-axis invocations byte-identical.
   **DONE 2026-09-15** (store → composed search → forget → reset: the exact
   recipes pi-mm issues in phase 3; U3 settled — `CLI-SURFACE-EXAMPLES.md`
   §8 rewritten to the proven spellings; `test-mm.sh` green over real
-  joint+stoma files; F4 double-open clobber fixed in `qmap_open`).
+  joint+stoma files; F4 double-open clobber fixed in `corm_open`).
   Detail: `2B-5-IMPLEMENTATION.md`.
 - [x] **2B-6** Rank convention documented (D2; `--score` deferred),
   `-X` grammar verified against the built prototype, plan bumped to v19.
   **DONE 2026-09-15** — standing rule = **first rank-capable axis in query
-  order wins** (CLI preorder leaf selection in `qmap.c`, kernel fallback
+  order wins** (CLI preorder leaf selection in `corm.c`, kernel fallback
   `rec_axis.c:199-211`); `except-chain` row in `test-cli.sh`,
   `stoma-over-sepal` row in `test-real.sh`; no lib/kernel changes. Detail:
   `2B-6-IMPLEMENTATION.md`. **Phase 2B closed — next: phase 3 (`pi-mm`).**
@@ -922,10 +922,10 @@ hazard on tests (clean-rebuild first, as always).
 
 Working copy: `.pi/extensions/pi-mm/` under `site` (the plan repo's tree).
 Structure mirrors `pi-quest` (package.json + `index.ts` + `src/` + `tests/`
-+ `skills/` + `scripts/`). Tools shell out to the built `qmap` binary
++ `skills/` + `scripts/`). Tools shell out to the built `corm` binary
 **exactly per** `CLI-SURFACE-EXAMPLES.md` §8 recipes (U3); unit tests never
-shell out — an injectable `QmapRunner` stub pins the exact `command + args`
-bytes, and real-qmap coverage lives in `scripts/integration-mm.sh` + the
+shell out — an injectable `CormRunner` stub pins the exact `command + args`
+bytes, and real-corm coverage lives in `scripts/integration-mm.sh` + the
 manual Pi recall gate. TDD every increment; status lives here, no
 `.pi/quest/` usage; commit only when explicitly asked.
 
@@ -937,9 +937,9 @@ Decisions (locked with the user 2026-09-15):
   `<DATE>:<TEXT>`); F2 keeps every joint leaf bounded (`a`+`b`).
 - **Store layout** — one primary `mem.db` + `joint.db`/`stoma.db` +
   `<primary>.roster` under `ctx.cwd/.pi/mm/`. `nextRef =
-  max(bare refs from 'qmap -g .') + 1` per store (reuses the reset listing
+  max(bare refs from 'corm -g .') + 1` per store (reuses the reset listing
   path; no counter state).
-- **Degradation, never error** — missing `qmap` binary / nonzero exit /
+- **Degradation, never error** — missing `corm` binary / nonzero exit /
   zero matches → informative non-error tool results; accent-sensitive text
   passed through verbatim.
 - **Slice scope** — the 5 tools + config + adapter + skill + tests only;
@@ -954,23 +954,23 @@ Execution checklist:
   (`pi.extensions` + `pi.skills`, `test`/`zip` scripts), `index.ts`,
   `src/index.ts` installer (loadable-graceful: never throws on missing
   state), `tests/smoke.test.ts` green (4 tests).
-- [x] **3-3** `src/config.ts` (+ tests) — DONE 2026-09-15: `qmapBin`/
+- [x] **3-3** `src/config.ts` (+ tests) — DONE 2026-09-15: `cormBin`/
   `axisLibs`/`memDir`/`scanLimit`; resolution precedence settings.json
-  `"pi-mm"` → env `QMAP_BIN`/`QMAP_AXIS_PATH` → `PATH` → in-site
-  `external/libqmap/bin/qmap` + `external/lib{joint,stoma}/lib`; defaults.
+  `"pi-mm"` → env `CORM_BIN`/`CORM_AXIS_PATH` → `PATH` → in-site
+  `external/libcorm/bin/corm` + `external/lib{joint,stoma}/lib`; defaults.
   `config.test.ts` 6 tests green.
 - [x] **3-4** Pure helpers (+ tests) — DONE 2026-09-15: `window.ts`
   (level→a/b, now-anchored, always bounded), `resolve.ts` (bare-ref parse,
-  sentinel skip, `nextRef=max+1`), `qmap.ts` helpers (`scanExpr`,
+  sentinel skip, `nextRef=max+1`), `corm.ts` helpers (`scanExpr`,
   `parseResultLines`, `payloadDate`, `filespecFor` absolute). `window.test`
   7 + `resolve.test` 5 green.
-- [x] **3-5** `src/qmap.ts` + arg byte-pinning (`tests/args.test.ts`) —
-  DONE 2026-09-15: `QmapRunner` + `ShellQmapRunner` (builds command/args/env
-  per §8, runs via `pi.exec` with `QMAP_AXIS_PATH`); each tool's `args`
+- [x] **3-5** `src/corm.ts` + arg byte-pinning (`tests/args.test.ts`) —
+  DONE 2026-09-15: `CormRunner` + `ShellCormRunner` (builds command/args/env
+  per §8, runs via `pi.exec` with `CORM_AXIS_PATH`); each tool's `args`
   asserted byte-identical to the documented recipes (store
   `-p REF:"DATE:TEXT"` + absolute `@joint,stoma:a:s`; scan `-X '(...)'`
   + `-g .` + `-t N`; forget `-d REF`; `filespecFor` absolute avoids the
-  `./` vs `mem.db` alias clobber in `libqmap`/`libstoma`; think's `-g`
+  `./` vs `mem.db` alias clobber in `libcorm`/`libstoma`; think's `-g`
   fixed to `-r -g` for AINDEX). `args.test` 9 green.
 - [x] **3-6** Tools (+ tests via fake runner) — DONE 2026-09-15:
   `memory_store` (nextRef `{ref, key:"@DATE"}`), `memory_scan` (level

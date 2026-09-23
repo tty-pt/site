@@ -97,9 +97,9 @@ WASM and state serialization use `BUD_STATE_FIELDS` (from `mods/common/state_mac
 
 ## Memory
 
-- Never `free()` qmap-managed values.
-- `qmap_put(map, key, ptr)` copies key and value; caller retains ownership.
-- `QM_REFERENCE` field values are string IDs (slugs), not positions.
+- Never `free()` corm-managed values.
+- `corm_put(map, key, ptr)` copies key and value; caller retains ownership.
+- `CM_REFERENCE` field values are string IDs (slugs), not positions.
 
 ## XY cross-.so convention
 
@@ -173,13 +173,13 @@ Grandfathered `site_paths.c:68` icon table is the only allowed enumeration.
 A dual-compiled UX TU (`mods/*/ux/*.c` + `mods/common/ux/*`) may only include
 `bud.h`/`bud_jsx.h`/`bud_app.h` + `hyle-bud/hyle-bud.h` (for filters/tables in
 `index`/`gig`/`grp`) + pure C (`string.h`, etc.). It must **not**
-reference `qmap_`, `source_`, `axil_`, `stoma_`, `hyle_source_`, `XY_`/`xy_`,
+reference `corm_`, `source_`, `axil_`, `stoma_`, `hyle_source_`, `XY_`/`xy_`,
 or `var/` literals. Per-module WASM that needs `hyle-bud` declares
 `EXTRA_CFLAGS += -I…/hyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` and
 `HYLE_BUD_WASM_SRC` (`hyle-bud-wasm.mk`). Every other module must fail to
 `#include <hyle-bud/hyle-bud.h>` — that failure is the guard.
 
-- Check: `grep -E 'qmap_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must be
+- Check: `grep -E 'corm_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must be
   empty (native-only `site_page.c` behind `site_ui.c:#ifndef __wasm__` is not a
   WASM TU and is excluded); `sh scripts/check-wasm-imports.sh` must pass
   (`wasm-allowed-imports.lst` allowlists only `env.bud_host_*`).
@@ -197,7 +197,7 @@ file outside `ux/` (`GOALS.md:§3`). Allowed only: `#ifndef *_C` include guards,
 
 - Route ALL site row writes through hyle `put`/`del`
   (`mods/source` `source_update_item`/`source_delete_item`). Writing rows
-  directly into the shared qmaps bypasses `stoma_dirty` and freezes the FTS
+  directly into the shared corms bypasses `stoma_dirty` and freezes the FTS
   index. Filter/search semantics in `docs/FILTERS.md`.
 - Ordered `gig.songs`/`grp.songs` via `hyle_source_ordered_*` are sanctioned
   until DSV migration; item sources must use `source`.

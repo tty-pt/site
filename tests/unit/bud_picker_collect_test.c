@@ -3,7 +3,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <hyle/schema.h>
 #include <hyle-source/picker.h>
 #include <hyle/registry.h>
@@ -30,8 +30,8 @@ static const hyle_source_field_t cat_fields[] = {
 };
 
 static const hyle_source_desc_t cat_desc[] = {
-	{ .key = "id", .qm_type = BUD_QM_STR, .writable = 0 },
-	{ .key = "title", .qm_type = BUD_QM_STR, .writable = 1 },
+	{ .key = "id", .qm_type = BUD_CM_STR, .writable = 0 },
+	{ .key = "title", .qm_type = BUD_CM_STR, .writable = 1 },
 	{ 0 }
 };
 
@@ -44,10 +44,10 @@ typedef struct {
 } item_record_t;
 
 static const hyle_source_desc_t item_desc[] = {
-	{ .key = "id", .offset = offsetof(item_record_t, id), .size = sizeof(((item_record_t *)0)->id), .qm_type = BUD_QM_STR, .writable = 0 },
-	{ .key = "title", .offset = offsetof(item_record_t, title), .size = sizeof(((item_record_t *)0)->title), .qm_type = BUD_QM_STR, .writable = 1 },
-	{ .key = "category", .offset = offsetof(item_record_t, category), .size = sizeof(((item_record_t *)0)->category), .qm_type = BUD_QM_STR, .type = HYLE_FIELD_REFERENCE, .ref_source = "test.cats", .writable = 1 },
-	{ .key = "tags", .offset = offsetof(item_record_t, tags), .size = sizeof(((item_record_t *)0)->tags), .qm_type = BUD_QM_STR, .type = HYLE_FIELD_MULTI_REFERENCE, .ref_source = "test.cats", .writable = 1 },
+	{ .key = "id", .offset = offsetof(item_record_t, id), .size = sizeof(((item_record_t *)0)->id), .qm_type = BUD_CM_STR, .writable = 0 },
+	{ .key = "title", .offset = offsetof(item_record_t, title), .size = sizeof(((item_record_t *)0)->title), .qm_type = BUD_CM_STR, .writable = 1 },
+	{ .key = "category", .offset = offsetof(item_record_t, category), .size = sizeof(((item_record_t *)0)->category), .qm_type = BUD_CM_STR, .type = HYLE_FIELD_REFERENCE, .ref_source = "test.cats", .writable = 1 },
+	{ .key = "tags", .offset = offsetof(item_record_t, tags), .size = sizeof(((item_record_t *)0)->tags), .qm_type = BUD_CM_STR, .type = HYLE_FIELD_MULTI_REFERENCE, .ref_source = "test.cats", .writable = 1 },
 	{ 0 }
 };
 

@@ -11,7 +11,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libhyle-source/include" \
 	-I"$repo/external/libhyle-bud/include" \
 	-I"$repo/external/libbud/include" \
-	-I"$repo/external/libqmap/include" \
+	-I"$repo/external/libcorm/include" \
 	-I"$repo/external/libstoma/include" \
 	-o "$bin" \
 	"$repo/tests/unit/bud_form_test.c" \
@@ -19,14 +19,14 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-L"$repo/external/libhyle-source/lib" -lhyle-source \
 	-L"$repo/external/libhyle/lib" -lhyle \
 	-L"$repo/external/libbud/lib" -lbud \
-	-L"$repo/external/libqmap/lib" -lqmap \
+	-L"$repo/external/libcorm/lib" -lcorm \
 	-L"$repo/external/libstoma/lib" -lstoma \
 	-ljson-c \
 	-Wl,-rpath,"$repo/external/libhyle-bud/lib" \
 	-Wl,-rpath,"$repo/external/libhyle-source/lib" \
 	-Wl,-rpath,"$repo/external/libhyle/lib" \
 	-Wl,-rpath,"$repo/external/libbud/lib" \
-	-Wl,-rpath,"$repo/external/libqmap/lib" \
+	-Wl,-rpath,"$repo/external/libcorm/lib" \
 	-Wl,-rpath,"$repo/external/libstoma/lib"
 
 "$bin"

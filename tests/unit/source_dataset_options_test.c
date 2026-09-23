@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #define CHECK(label, condition)                                                \
 	do {                                                                   \
@@ -34,15 +34,15 @@ int mock_collect_options(
 	if (!data_hd)
 		return n;
 
-	uint32_t cur = qmap_iter(data_hd, NULL, 0);
+	uint32_t cur = corm_iter(data_hd, NULL, 0);
 	const void *tk, *tv;
-	while (qmap_next(&tk, &tv, cur) && n < max) {
+	while (corm_next(&tk, &tv, cur) && n < max) {
 		const char *id = (const char *)tk;
 		const char *name = NULL;
 		if (fhd && label_field) {
 			char nk[320];
 			snprintf(nk, sizeof(nk), "%s:%s", id, label_field);
-			name = qmap_get(fhd, nk);
+			name = corm_get(fhd, nk);
 		}
 		const char *label = name ? name : id;
 		int dup = 0;
@@ -58,22 +58,22 @@ int mock_collect_options(
 			n++;
 		}
 	}
-	qmap_fin(cur);
+	corm_fin(cur);
 	return n;
 }
 
 int main(void)
 {
-	unsigned data_hd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
-	unsigned fhd = qmap_open(NULL, NULL, QM_STR, QM_STR, 0xFF, 0);
+	unsigned data_hd = corm_open(NULL, NULL, CM_STR, CM_STR, 0xFF, 0);
+	unsigned fhd = corm_open(NULL, NULL, CM_STR, CM_STR, 0xFF, 0);
 
-	qmap_put(data_hd, "chords", "1");
-	qmap_put(data_hd, "tab", "1");
-	qmap_put(data_hd, "lyrics", "1");
+	corm_put(data_hd, "chords", "1");
+	corm_put(data_hd, "tab", "1");
+	corm_put(data_hd, "lyrics", "1");
 
-	qmap_put(fhd, "chords:name", "Chords & Lyrics");
-	qmap_put(fhd, "tab:name", "Tablature");
-	qmap_put(fhd, "lyrics:name", "Lyrics Only");
+	corm_put(fhd, "chords:name", "Chords & Lyrics");
+	corm_put(fhd, "tab:name", "Tablature");
+	corm_put(fhd, "lyrics:name", "Lyrics Only");
 
 	char buf[8][128];
 	const char *opts[8];
@@ -85,8 +85,8 @@ int main(void)
 	                                strcmp(opts[2], "Chords & Lyrics") == 0 ||
 	                                strcmp(opts[3], "Chords & Lyrics") == 0);
 
-	qmap_close(data_hd);
-	qmap_close(fhd);
+	corm_close(data_hd);
+	corm_close(fhd);
 
 	if (failures == 0)
 		printf("\nsource_dataset_collect_options_test: ALL PASS\n");

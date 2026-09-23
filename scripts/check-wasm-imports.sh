@@ -9,20 +9,20 @@ for wasm in htdocs/*.wasm; do
 	echo "checking $wasm"
 	if command -v wasm-objdump >/dev/null 2>&1; then
 		out="$(wasm-objdump -x "$wasm" 2>/dev/null || wasm-objdump -j Import -x "$wasm" 2>/dev/null || true)"
-		if echo "$out" | grep -Eq 'qmap_|source_|axil_|xy_|hyle_source|XY_'; then
+		if echo "$out" | grep -Eq 'corm_|source_|axil_|xy_|hyle_source|XY_'; then
 			echo "FAIL: $wasm imports native symbol:"
-			echo "$out" | grep -E 'qmap_|source_|axil_|xy_|hyle_source|XY_' || true
+			echo "$out" | grep -E 'corm_|source_|axil_|xy_|hyle_source|XY_' || true
 			FAIL=1
 		fi
 	elif command -v llvm-objdump >/dev/null 2>&1; then
 		out="$(llvm-objdump --syms "$wasm" 2>/dev/null || true)"
-		if echo "$out" | grep -Eq 'qmap_|source_|axil_|xy_'; then
+		if echo "$out" | grep -Eq 'corm_|source_|axil_|xy_'; then
 			echo "FAIL: $wasm imports native symbol (llvm fallback)"
 			FAIL=1
 		fi
 	else
 		# strings fallback — less precise; do not fail, just warn (install wabt for precise W06)
-		if strings "$wasm" 2>/dev/null | grep -qE 'qmap_|source_item|axil_|xy_call'; then
+		if strings "$wasm" 2>/dev/null | grep -qE 'corm_|source_item|axil_|xy_call'; then
 			echo "WARN: $wasm contains native-like strings (no wasm-objdump) — manual check needed"
 		fi
 	fi

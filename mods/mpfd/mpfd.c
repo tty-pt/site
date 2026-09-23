@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/qsys.h>
 
 #define CD "Content-Disposition: form-data; name=\""
@@ -275,8 +275,8 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		if (data_len)
 			memcpy(val->data + fname_len, data_start, data_len);
 
-		/* qmap copies custom values using mpfd_val_measure(). */
-		qmap_put(mpfd_db, key, val);
+		/* corm copies custom values using mpfd_val_measure(). */
+		corm_put(mpfd_db, key, val);
 		free(val);
 		field_count++;
 
@@ -297,7 +297,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 
 static void mpfd_clear(void)
 {
-	qmap_drop(mpfd_db);
+	corm_drop(mpfd_db);
 	clear_error();
 }
 
@@ -331,25 +331,25 @@ XY_IMPL(int, mpfd_parse, socket_t, fd, char *, body)
 	 * in-window. */
 	int result = parse_multipart(body, content_type, body_len);
 	if (result != 0)
-		qmap_drop(mpfd_db);
+		corm_drop(mpfd_db);
 	return result;
 }
 
 /* Field Inspection - All O(1) */
 static int mpfd_exists(const char *name)
 {
-	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
+	return corm_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
 XY_IMPL(int, mpfd_len, const char *, name)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	return val ? (int)val->len : -1;
 }
 
 static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
 		return -1;
 	size_t to_copy = val->filename_len < buf_len
@@ -364,7 +364,7 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 /* Data Retrieval */
 XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val)
 		return -1;
 	size_t to_copy =
@@ -385,25 +385,25 @@ XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 XY_IMPL(int, mpfd_get_all, const char *, name, char *, buf, size_t,
         buf_len)
 {
-	uint32_t cur = qmap_get_multi(mpfd_db, name);
+	uint32_t cur = corm_get_multi(mpfd_db, name);
 	const void *k;
 	const void *v;
 	size_t total = 0;
 	size_t pos = 0;
 
-	if (cur == QM_MISS)
+	if (cur == CM_MISS)
 		return -1;
 
 	if (!buf || buf_len == 0) {
-		while (qmap_next(&k, &v, cur)) {
+		while (corm_next(&k, &v, cur)) {
 			const struct mpfd_val *val = v;
 			total += val->len + 1; /* part + '\n' */
 		}
-		qmap_fin(cur);
+		corm_fin(cur);
 		return total ? (int)(total - 1) : 0;
 	}
 
-	while (qmap_next(&k, &v, cur)) {
+	while (corm_next(&k, &v, cur)) {
 		const struct mpfd_val *val = v;
 		size_t len = val->len;
 
@@ -416,14 +416,14 @@ XY_IMPL(int, mpfd_get_all, const char *, name, char *, buf, size_t,
 		memcpy(buf + pos, val->data + val->filename_len, len);
 		pos += len;
 	}
-	qmap_fin(cur);
+	corm_fin(cur);
 	buf[pos] = '\0';
 	return (int)pos;
 }
 
 static int mpfd_save(const char *name, const char *path)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val)
 		return -1;
 	FILE *fp = fopen(path, "wb");
@@ -444,13 +444,13 @@ static int mpfd_set_limits(size_t max_field_size, size_t max_total_size)
 
 XY_MODULE_API void xy_install(void)
 {
-	mpfd_val_type = qmap_mreg(mpfd_val_measure);
-	/* QM_SORTED | QM_MULTIVALUE: browsers submit N checked boxes as
+	mpfd_val_type = corm_mreg(mpfd_val_measure);
+	/* CM_SORTED | CM_MULTIVALUE: browsers submit N checked boxes as
 	 * N repeated parts named {key}; without MULTIVALUE each put
 	 * REPLACES and the last part silently wins. With it, parts
-	 * accumulate while qmap_get keeps returning the first match, so
+	 * accumulate while corm_get keeps returning the first match, so
 	 * every single-part reader behaves exactly as before. */
-	mpfd_db = qmap_open(
-	        NULL, NULL, QM_STR, mpfd_val_type, 0xFF,
-	        QM_SORTED | QM_MULTIVALUE);
+	mpfd_db = corm_open(
+	        NULL, NULL, CM_STR, mpfd_val_type, 0xFF,
+	        CM_SORTED | CM_MULTIVALUE);
 }

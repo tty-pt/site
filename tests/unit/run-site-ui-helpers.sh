@@ -12,7 +12,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libhyle-bud/include" \
 	-I"$repo/external/libbud/include" \
 	-I"$repo/external/axil/include" \
-	-I"$repo/external/libqmap/include" \
+	-I"$repo/external/libcorm/include" \
 	-I"$repo" \
 	-o "$bin" \
 	"$repo/tests/unit/site_ui_helpers_test.c" \

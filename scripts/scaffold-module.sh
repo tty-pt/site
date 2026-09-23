@@ -99,7 +99,7 @@ cat <<EOF > "$MOD_DIR/${MOD_NAME}.c"
 
 #include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #include "../index/index.h"
 #include "../common/common.h"

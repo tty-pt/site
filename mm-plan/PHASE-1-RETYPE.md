@@ -14,7 +14,7 @@
 
 ## Status
 
-✅ **DONE 2026-09-13.** libqmap core retyped, green,
+✅ **DONE 2026-09-13.** libcorm core retyped, green,
 installed. **sepal done** (installed, verified). **stoma done**
 (group-38 rewrite + `stoma_dest_emit` guard + header docs; `make test`
 exit 0 — `stoma_test` 198/198, `stoma_prop_test` 3 seeds green;
@@ -27,34 +27,34 @@ item 1) green — phase 2 unblocked.
 ## Requirements
 
 - Every `rec_ref_t` crossing an axis fill/rank boundary is a `uint32_t`
-  qmap ref; no axis-internal key ever leaves its axis (§2 of README, the
+  corm ref; no axis-internal key ever leaves its axis (§2 of README, the
   ref-type law — locked, not re-litigated here).
 - The two u64-era tests that encode the old width are rewritten for the
   u32 world (sepal `test_opaque_refs`, stoma group 38).
 - The new headers + binaries are *propagated* to the live `/usr` stack in
-  dependency order (libqmap first), not just edited in working trees —
+  dependency order (libcorm first), not just edited in working trees —
   otherwise nothing downstream verifies (ABI mismatch, §5.1 of README).
 - Gate (§6 item 1): every touched repo's suite green + `fixture_id_join`
   16/16 + site `make`.
 
 ## Evidence (research pass 2026-09-13, all read from source)
 
-- `external/libqmap/include/ttypt/rec.h:41` — `typedef uint32_t rec_ref_t;`
+- `external/libcorm/include/ttypt/rec.h:41` — `typedef uint32_t rec_ref_t;`
   (retyped, working tree, uncommitted); `rec.c` fully generic, no change.
-- `external/libqmap/src/rec_test.c` — duplicate-key test fixed to 4-byte
+- `external/libcorm/src/rec_test.c` — duplicate-key test fixed to 4-byte
   keys; `src/bench_rec.c` — real 8-byte-read/4-byte-write buffer
-  over-read fixed to `qmap_reg(sizeof(rec_ref_t))`; `test.sh` +
-  `test-cli.sh` green; `lib/libqmap.so` rebuilt.
+  over-read fixed to `corm_reg(sizeof(rec_ref_t))`; `test.sh` +
+  `test-cli.sh` green; `lib/libcorm.so` rebuilt.
 - `/usr/include/ttypt/rec.h:37` — still `typedef uint64_t rec_ref_t;`
-  (installed Sep 11, stale); `/usr/lib/lib{joint,sepal,stoma,islet,qmap}.so`
+  (installed Sep 11, stale); `/usr/lib/lib{joint,sepal,stoma,islet,corm}.so`
   all built Sep 11 against the u64 header (stale ABI).
-- `external/libqmap/tests/Makefile` — fixture links the system-installed
-  `libqmap.so`/joint/sepal `.so`s and asserts header≡installed-copy
+- `external/libcorm/tests/Makefile` — fixture links the system-installed
+  `libcorm.so`/joint/sepal `.so`s and asserts header≡installed-copy
   byte-identity; it cannot pass until the new stack is installed.
-- `~/libsepal/Makefile:8` pins `-I…/external/libqmap/include` ahead of
+- `~/libsepal/Makefile:8` pins `-I…/external/libcorm/include` ahead of
   `-I/usr/include`; `~/lib{joint,stoma,islet}/Makefile` carry no explicit
   `-I` and resolve `<ttypt/rec.h>` from `/usr/include` — hence the
-  libqmap-first install order.
+  libcorm-first install order.
 - `~/libsepal/tests/unit/test_vecstore.c:76,82` — `1ULL << 63` narrows to
   `0u` under u32, duplicating ref 0 (`sepal_n` becomes 4, not 5): broken,
   must be rewritten with u32-world refs.
@@ -70,11 +70,11 @@ item 1) green — phase 2 unblocked.
   `~/libislet/include/ttypt/islet.h:89-99` — stale "u64" `rec_ref_t`
   wording in the ID-uniformity notes.
 - `~/libjoint/src/libjoint.c:380-382` — `qm_id` already
-  `qmap_reg(sizeof(uint32_t))`; `:896-906` widen is identity: no code
+  `corm_reg(sizeof(uint32_t))`; `:896-906` widen is identity: no code
   change. `~/libislet` — `uint32_t` cell values, u64 morton keys internal,
   fill widen is identity: no code change.
 - Site impact: `rg rec_ref_t` over `external/{hyle,axil,libxylem}` and
-  `external/libqmap/rust-bindings` returns zero hits — the site build is
+  `external/libcorm/rust-bindings` returns zero hits — the site build is
   source-invisible to the retype.
 - `external/libstoma/src/stoma_test.c` has no group-38/big-ref content —
   the site submodule needs no edits (scope stays `~/lib*`).
@@ -91,12 +91,12 @@ item 1) green — phase 2 unblocked.
   only the header doc's stale `%llu` quote was de-littered. Build wiring
   confirmed: mk emits `-I…/libstoma/include` ahead of `-I/usr/include`,
   `-L…/libstoma/lib -L/usr/lib`, tests run with `LD_LIBRARY_PATH=lib`
-  (local fresh `libstoma.so` + installed u32 `libqmap.so` — consistent).
+  (local fresh `libstoma.so` + installed u32 `libcorm.so` — consistent).
   `/usr/include/stoma/stoma.h` is one feature behind the working tree
   (lacks `stoma_index_ref`, installed Sep 11) — the pending
   `sudo make install` fixes that too; verify header≡working-tree and
   `.so` byte-identity after.
-- **Stale-binary ABI hazard (hit 2026-09-13, sepal):** after the libqmap
+- **Stale-binary ABI hazard (hit 2026-09-13, sepal):** after the libcorm
   install, sepal's `test_search`/`test_axis` failed with pointer-valued
   refs and denormal scores — looked like a real width bug, but the test
   binaries were dated Sep 11 (built against u64 headers) while
@@ -113,7 +113,7 @@ item 1) green — phase 2 unblocked.
 - **Same hazard, second and third sightings (2026-09-13, joint + islet,
   during the docs pass):** joint `./test.sh` failed 3 Category-9 checks
   (`rec_ref_present` in fill/decode/open tests) — `bin/test` dated Sep 11
-  running against the Sep-13 u32 `/usr/lib/libqmap.so`; `make clean && make
+  running against the Sep-13 u32 `/usr/lib/libcorm.so`; `make clean && make
   all && ./test.sh` → all green (core expects-diff + extended). Islet
   `make test` failed 2 fill checks (`fill_mv_cell`: expected 11, got
   94489280523 = `0x16_0000000B`, high-bits leakage — the classic width
@@ -129,7 +129,7 @@ item 1) green — phase 2 unblocked.
 
 - [x] Research all four axis libs + build/install wiring (read-only).
 - [x] Record findings + refined checklist in the plan (README §5, this file).
-- [x] `external/libqmap`: re-ran `./test.sh && ./test-cli.sh`; user ran
+- [x] `external/libcorm`: re-ran `./test.sh && ./test-cli.sh`; user ran
   `sudo make install`; verified `/usr/include/ttypt/rec.h` reads u32.
 - [x] `~/libsepal`: header wording + `test_opaque_refs` rewrite +
   `Makefile` clean-recursion fix → `make test` green (exit 0, 13 suites,
@@ -152,7 +152,7 @@ item 1) green — phase 2 unblocked.
   first run red was the stale-binary hazard, see above) → installed;
   verified `/usr/include/ttypt/islet.h` identical to working tree and
   `/usr/lib/libislet.so` byte-identical to the fresh build.
-- [x] Fixture: `make -C external/libqmap/tests clean all test` → 16/16
+- [x] Fixture: `make -C external/libcorm/tests clean all test` → 16/16
   (2026-09-13).
 - [x] Site: `make` green 2026-09-13 (incl. `W06 check PASS: no native
   imports in WASM`) + `make test` green (manual run by the user,

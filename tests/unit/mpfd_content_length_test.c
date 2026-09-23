@@ -10,7 +10,7 @@ static const char *test_content_length;
 
 static char *stored_key;
 static void *stored_value;
-static qmap_measure_t *stored_measure;
+static corm_measure_t *stored_measure;
 
 static void discard_log(int type, const char *fmt, ...)
 {
@@ -47,13 +47,13 @@ unsigned xy_areg(char *name, xy_adapter_t *adapter)
 	return 0;
 }
 
-uint32_t qmap_mreg(qmap_measure_t *measure)
+uint32_t corm_mreg(corm_measure_t *measure)
 {
 	stored_measure = measure;
 	return 10;
 }
 
-uint32_t qmap_open(
+uint32_t corm_open(
         const char *filename, const char *database, uint32_t ktype,
         uint32_t vtype, uint32_t mask, uint32_t flags)
 {
@@ -66,7 +66,7 @@ uint32_t qmap_open(
 	return 1;
 }
 
-void qmap_drop(uint32_t hd)
+void corm_drop(uint32_t hd)
 {
 	(void)hd;
 	free(stored_key);
@@ -75,10 +75,10 @@ void qmap_drop(uint32_t hd)
 	stored_value = NULL;
 }
 
-uint32_t qmap_put(uint32_t hd, const void *const key, const void *const value)
+uint32_t corm_put(uint32_t hd, const void *const key, const void *const value)
 {
 	(void)hd;
-	qmap_drop(hd);
+	corm_drop(hd);
 	stored_key = strdup(key);
 	stored_value = malloc(stored_measure(value));
 	if (!stored_key || !stored_value)
@@ -87,20 +87,20 @@ uint32_t qmap_put(uint32_t hd, const void *const key, const void *const value)
 	return 1;
 }
 
-const void *qmap_get(uint32_t hd, const void *const key)
+const void *corm_get(uint32_t hd, const void *const key)
 {
 	(void)hd;
 	return stored_key && strcmp(stored_key, key) == 0 ? stored_value : NULL;
 }
 
-uint32_t qmap_get_multi(uint32_t hd, const void *key)
+uint32_t corm_get_multi(uint32_t hd, const void *key)
 {
 	(void)hd;
 	(void)key;
-	return QM_MISS;
+	return CM_MISS;
 }
 
-int qmap_next(const void **key, const void **value, uint32_t cur_id)
+int corm_next(const void **key, const void **value, uint32_t cur_id)
 {
 	(void)key;
 	(void)value;
@@ -108,7 +108,7 @@ int qmap_next(const void **key, const void **value, uint32_t cur_id)
 	return 0;
 }
 
-void qmap_fin(uint32_t cur_id)
+void corm_fin(uint32_t cur_id)
 {
 	(void)cur_id;
 }
@@ -188,7 +188,7 @@ int main(void)
 	      parse_with_length(body, length) < 0);
 	CHECK("failed parse clears fields", mpfd_len("file") == -1);
 
-	qmap_drop(mpfd_db);
+	corm_drop(mpfd_db);
 	if (failures)
 		printf("mpfd_content_length_test: %d failures\n", failures);
 	else

@@ -9,7 +9,7 @@
 #include "../mpfd/mpfd.h"
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/axil-hyle.h>
 #include <hyle/hyle.h>
 #include <hyle/registry.h>
@@ -205,10 +205,10 @@ XY_IMPL(const source_list_view_t *, source_get_list_view,
 	return hyle_source_get_list_view(dataset_id);
 }
 
-XY_IMPL(int, source_def_to_qmap,
+XY_IMPL(int, source_def_to_corm,
     const source_desc_t *, defs, int, count, void *, out)
 {
-	return hyle_source_def_to_qmap(defs, count, out);
+	return hyle_source_def_to_corm(defs, count, out);
 }
 
 XY_IMPL(int, source_def_to_source_fields,
@@ -270,12 +270,12 @@ XY_IMPL(const char *, source_inv_key_at,
 	return hyle_source_inv_key_at(dataset_id, field, target_pos, index);
 }
 
-XY_IMPL(const char *, qmap_get_field_str,
+XY_IMPL(const char *, corm_get_field_str,
 	unsigned, hd,
 	const char *, id,
 	const char *, field)
 {
-	return hyle_qmap_get_field_str(hd, id, field);
+	return hyle_corm_get_field_str(hd, id, field);
 }
 
 XY_IMPL(uint32_t, source_setup,
@@ -420,15 +420,15 @@ XY_IMPL(int, source_dataset_collect_options,
 		return n;
 
 	unsigned fhd = source_get_fields_hd(dataset_id);
-	uint32_t cur = qmap_iter(data_hd, NULL, 0);
+	uint32_t cur = corm_iter(data_hd, NULL, 0);
 	const void *tk, *tv;
-	while (qmap_next(&tk, &tv, cur) && n < max) {
+	while (corm_next(&tk, &tv, cur) && n < max) {
 		const char *id = (const char *)tk;
 		const char *name = NULL;
 		if (fhd && label_field) {
 			char nk[320];
 			snprintf(nk, sizeof(nk), "%s:%s", id, label_field);
-			name = qmap_get(fhd, nk);
+			name = corm_get(fhd, nk);
 		}
 		const char *label = name ? name : id;
 		int dup = 0;
@@ -444,7 +444,7 @@ XY_IMPL(int, source_dataset_collect_options,
 			n++;
 		}
 	}
-	qmap_fin(cur);
+	corm_fin(cur);
 	return n;
 }
 
@@ -460,11 +460,11 @@ XY_IMPL(int, source_resolve_partition_key,
 	source_def_t *prim_def = source_find(primary_dataset);
 	source_def_t *part_def = source_find(partition_dataset);
 	if (prim_def && part_def &&
-	    qmap_pos(prim_def->fields_hd, id_inout) == QM_MISS)
+	    corm_pos(prim_def->fields_hd, id_inout) == CM_MISS)
 	{
-		uint32_t rp = qmap_pos(part_def->fields_hd, id_inout);
-		if (rp != QM_MISS) {
-			const char *rs = qmap_field_get(
+		uint32_t rp = corm_pos(part_def->fields_hd, id_inout);
+		if (rp != CM_MISS) {
+			const char *rs = corm_field_get(
 			        part_def->fields_hd, id_inout, target_field);
 			if (rs && rs[0]) {
 				snprintf(id_inout, id_sz, "%s", rs);

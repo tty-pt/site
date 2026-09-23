@@ -3,7 +3,7 @@
  *
  * Thin wrapper over the parse → render pipeline (token.c / parse.c / render.c).
  * The context holds only the detected key and the active i18n table; there is
- * no qmap. See CHORDS.md §8.5.
+ * no corm. See CHORDS.md §8.5.
  */
 
 #include "transp.h"

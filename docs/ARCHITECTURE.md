@@ -53,27 +53,27 @@ Rules derived from the model:
 ```
 axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
-qmap ── the data store (qmap_put copies key and value; caller frees originals)
+corm ── the data store (corm_put copies key and value; caller frees originals)
 stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
 hyle  ── pure data/query kernel: canonical hyle_schema_desc_t, query/filter/FTS,
         generic registry/ordered/derive machinery, FFI row API, qs helpers
-        (hyle_qs_param in hyle/url.h). NO component symbols. deps: stoma, qmap
+        (hyle_qs_param in hyle/url.h). NO component symbols. deps: stoma, corm
 libhyle-source (external/libhyle-source) ── standalone persistence engine:
         registry access + CRUD, ordered/derive wrappers, option resolution,
         DSV, JSON state overlays, pluggable drivers
         (hyle_source_store_ops_t: store_fs, store_mem, custom stores), and the
         picker DTOs (`hyle-source/picker.h` — `hyle/picker.h` no longer exists).
-        deps: hyle, qmap, stoma, json-c
+        deps: hyle, corm, stoma, json-c
 hyle-bud (external/libhyle-bud) ── the bud binding; ONLY place that
         may depend on bud. Bridges Hyle schemas to Bud UI components.
-        deps: hyle, bud, qmap. Used in UX for filters/tables (`index`/`gig`/`grp`
+        deps: hyle, bud, corm. Used in UX for filters/tables (`index`/`gig`/`grp`
         link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`) and by
         `mods/source` for the picker fragment route (`/pick/:id/options`).
 bud   ── pure C DOM scaffold, 5-field UI state binder (bud_field_desc_t),
         and WASM bridge. deps: none of the above
 axil-hyle (external/axil-hyle) ── framework-neutral Axil↔Hyle REST connector:
         `GET|POST|PUT|DELETE /api/dataset/...` (JSON CRUD) + partition
-        sub-resource routes. deps: axil, axil-auth, qmap, hyle, libhyle-source,
+        sub-resource routes. deps: axil, axil-auth, corm, hyle, libhyle-source,
         json-c. No bud/hyle-bud symbols — the bud-rendered `/pick/:id/options`
         fragment endpoint is mounted by `mods/source` instead.
 site mods ── assemble axil + XY + hyle(+libhyle-source+libhyle-bud) + bud
@@ -173,7 +173,7 @@ restarting the server.
 - Route ALL row writes through hyle `put`/`del` (`mods/source`
   `source_update_item`/`source_delete_item` $\rightarrow$ `libhyle-source`
   `hyle_source_put`/`hyle_source_del`). Writing rows directly into shared
-  qmaps bypasses `stoma_dirty` and freezes the FTS index.
+  corms bypasses `stoma_dirty` and freezes the FTS index.
 - Pluggable storage drivers: `libhyle-source` operates through `hyle_source_store_ops_t`
   (`scan`, `load`, `put`, `put_field`, `del`), allowing filesystem persistence (`store_fs`),
   memory persistence (`store_mem`), or custom database engines.

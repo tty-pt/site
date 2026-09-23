@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include "../index/index.h"
 
 #include "../common/common.h"
@@ -301,7 +301,7 @@ XY_IMPL(int, source_after_update,
 	    0)
 		return 0;
 
-	const char *data = (const char *)qmap_get(data_handle, "data");
+	const char *data = (const char *)corm_get(data_handle, "data");
 	if (data) {
 		char data_path[PATH_MAX];
 		item_child_path(path, "data.txt", data_path, sizeof(data_path));

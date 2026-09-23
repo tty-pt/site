@@ -20,10 +20,10 @@ int hyle_ordered_count(const char *source_id, const char *pval);
 const char *
 hyle_ordered_key_at(const char *source_id, const char *pval, int pos);
 const char *
-qmap_field_get(unsigned hd, const char *item_id, const char *field_name);
+corm_field_get(unsigned hd, const char *item_id, const char *field_name);
 
 #define COMMON_H
-#define QMAP_H
+#define CORM_H
 #define HYLE_SOURCE_H
 #define SOURCE_H
 
@@ -178,7 +178,7 @@ hyle_ordered_key_at(const char *source_id, const char *pval, int pos)
 }
 
 const char *
-qmap_field_get(unsigned hd, const char *item_id, const char *field_name)
+corm_field_get(unsigned hd, const char *item_id, const char *field_name)
 {
 	mock_row_t *row;
 	int fi;
@@ -261,7 +261,7 @@ int main(void)
 	CHECK("format survives legacy load",
 	      row && strcmp(row->values[2], "communion") == 0);
 	pinned =
-	        row ? qmap_field_get(TEST_FIELDS_HD, row->key, "pinned") : NULL;
+	        row ? corm_field_get(TEST_FIELDS_HD, row->key, "pinned") : NULL;
 	CHECK("missing pinned field stays absent", pinned == NULL);
 	CHECK("missing pinned field reads as zero",
 	      !pinned || atoi(pinned) == 0);

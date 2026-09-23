@@ -8,7 +8,7 @@ clang -Wall -Wextra \
       -I"$ROOT/external/axil-auth/include" \
       -I"$ROOT/external/axil/include" \
       -I"$ROOT/external/libqsys/include" \
-      -I"$ROOT/external/libqmap/include" \
+      -I"$ROOT/external/libcorm/include" \
       -I"$ROOT/external/libxylem/include" \
       -I"$ROOT/external/libbud/include" \
       -I"$ROOT/external/libhyle/include" \
@@ -22,8 +22,8 @@ clang -Wall -Wextra \
       -Wl,-rpath,"$ROOT/external/axil/lib" \
       -L"$ROOT/external/libqsys/lib" \
       -Wl,-rpath,"$ROOT/external/libqsys/lib" \
-      -L"$ROOT/external/libqmap/lib" \
-      -Wl,-rpath,"$ROOT/external/libqmap/lib" \
+      -L"$ROOT/external/libcorm/lib" \
+      -Wl,-rpath,"$ROOT/external/libcorm/lib" \
       -L"$ROOT/external/libxylem/lib" \
       -Wl,-rpath,"$ROOT/external/libxylem/lib" \
       -L"$ROOT/external/libbud/lib" \
@@ -36,7 +36,7 @@ clang -Wall -Wextra \
       -Wl,-rpath,"$ROOT/external/libhyle-bud/lib" \
       -L"$ROOT/external/libstoma/lib" \
       -Wl,-rpath,"$ROOT/external/libstoma/lib" \
-      -laxil-auth -laxil -lqmap -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -lstoma -ljson-c -lqsys \
+      -laxil-auth -laxil -lcorm -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -lstoma -ljson-c -lqsys \
       "$ROOT/tests/unit/auth_group_permissions_test.c" \
       -o "$ROOT/build/test/auth_group_permissions_test"
 

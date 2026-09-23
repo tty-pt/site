@@ -9,7 +9,7 @@ Thin XY module wrapper exposing `libhyle-source` functionality to the rest of th
 ## Core Invariant
 
 > **All row writes MUST go through `source_update_item` or `source_delete_item`.**
-> Directly writing files or mutating qmaps bypasses index invalidation and freezes search.
+> Directly writing files or mutating corms bypasses index invalidation and freezes search.
 
 ## Key APIs (via `source.h`)
 
