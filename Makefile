@@ -66,7 +66,7 @@ qsys-lib:
 	$(MAKE) -C external/libqsys
 
 axil-lib: qsys-lib qmap-lib xylem-lib
-	$(MAKE) -C external/axil CFLAGS="-g -I$$(pwd)/external/libqsys/include -I$$(pwd)/external/libqmap/include -I$$(pwd)/external/libxylem/include" LDFLAGS="-L$$(pwd)/external/libqsys/lib -L$$(pwd)/external/libqmap/lib -L$$(pwd)/external/libxylem/lib -Wl,-rpath,$$(pwd)/external/libqsys/lib -Wl,-rpath,$$(pwd)/external/libqmap/lib -Wl,-rpath,$$(pwd)/external/libxylem/lib"
+	$(MAKE) -C external/axil
 
 axil-auth-lib: axil-lib qmap-lib xylem-lib
 	$(MAKE) -C external/axil-auth
