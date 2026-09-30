@@ -43,3 +43,9 @@
 [submodule "external/axil-hyle"]
 	path = external/axil-hyle
 	url = git@github.com:tty-pt/axil-hyle.git
+[submodule "external/axil-tty"]
+	path = external/axil-tty
+	url = git@github.com:tty-pt/axil-tty.git
+[submodule "external/axil-nd"]
+	path = external/axil-nd
+	url = git@github.com:tty-pt/axil-nd.git

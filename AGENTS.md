@@ -80,6 +80,44 @@ make watch          # auto-rebuild + restart on :8080
    - **Iterative Loop**: Feature implementation $\rightarrow$ `make` $\rightarrow$ run/verify $\rightarrow$ test.
    - **Final Quality Gates**: Build completes with zero errors, code contains zero debug artifacts (no temp logs or leftover debug code), and the full test suite (`make test`) passes with zero failures.
 
+## axil-nd (sibling module port) — build, run & test
+
+Sibling repo **`~/axil-nd`**: NeverDark MUCK engine as a generic axil module
+(`libaxil-nd.so`), port status + remaining work in `~/nd/ND_PORT.md` (what is
+missing to complete the port; the old full-plan file was removed). Builds
+against the **system-installed**
+axil/corm/xylem (`/usr/bin/axil`, headers `/usr/include/ttypt`, libs
+`/lib`+`/usr/lib`).
+
+```sh
+make                  # builds lib/libaxil-nd.so (+ lib/axil-nd.so SONAME link)
+./test                # RUN the suite (test.sh). NOTE: `make test` only bakes
+                      #   test.sh into a `test` artifact (mk recipe) — it does
+                      #   NOT run it. Use ./test or ./test.sh.
+```
+
+Run manually (module loader appends `.so`, so pass the SONAME path):
+
+```sh
+( LD_LIBRARY_PATH=$PWD/lib axil -d -A -p 28000 -m /home/quirinpa/axil-nd/lib/axil-nd & )
+```
+
+Known issues:
+- `test.sh` flakes ~1 in 4 (`FAIL: no 101 in response` — real connection gets
+  `HTTP/1.1 200 OK`+COOP instead of 101). Recorded in `~/nd/ND_PORT.md`
+  (Known quirks);
+  first check: does `~/axil-tty/test.sh` (identical structure) flake too?
+- `make` prints `find: './htdocs': No such file or directory` — harmless
+  (htdocs/ is gitignored/absent, same as axil-tty).
+- After debug sessions run `pgrep -x axil` to catch stray axil daemons left
+  on fixed ports.
+
+Key axil wiring (verified from axil source): `on_axil_connect` fires ONLY on
+WS upgrade; raw TCP accepts use the weak `axil_accept` hook; returning <0
+from `on_axil_parse` skips `cmd_parse` (which routes HTTP methods, so it must
+pass through for HTTP/WS-upgrade requests). See `~/nd/ND_PORT.md` (Library
+usage findings + Locked decisions).
+
 ## Topic index
 
 | Topic | Read |
