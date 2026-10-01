@@ -49,3 +49,60 @@
 [submodule "external/axil-nd"]
 	path = external/axil-nd
 	url = git@github.com:tty-pt/axil-nd.git
+[submodule "external/nd-attr"]
+	path = external/nd-attr
+	url = git@github.com:tty-pt/nd-attr
+[submodule "external/nd-biome"]
+	path = external/nd-biome
+	url = git@github.com:tty-pt/nd-biome
+[submodule "external/nd-class"]
+	path = external/nd-class
+	url = git@github.com:tty-pt/nd-class
+[submodule "external/nd-core"]
+	path = external/nd-core
+	url = git@github.com:tty-pt/nd-core
+[submodule "external/nd-drink"]
+	path = external/nd-drink
+	url = git@github.com:tty-pt/nd-drink
+[submodule "external/nd-equip"]
+	path = external/nd-equip
+	url = git@github.com:tty-pt/nd-equip
+[submodule "external/nd-fight"]
+	path = external/nd-fight
+	url = git@github.com:tty-pt/nd-fight
+[submodule "external/nd-level"]
+	path = external/nd-level
+	url = git@github.com:tty-pt/nd-level
+[submodule "external/nd-mob"]
+	path = external/nd-mob
+	url = git@github.com:tty-pt/nd-mob
+[submodule "external/nd-mortal"]
+	path = external/nd-mortal
+	url = git@github.com:tty-pt/nd-mortal
+[submodule "external/nd-other"]
+	path = external/nd-other
+	url = git@github.com:tty-pt/nd-other
+[submodule "external/nd-plant"]
+	path = external/nd-plant
+	url = git@github.com:tty-pt/nd-plant
+[submodule "external/nd-race"]
+	path = external/nd-race
+	url = git@github.com:tty-pt/nd-race
+[submodule "external/nd-seat"]
+	path = external/nd-seat
+	url = git@github.com:tty-pt/nd-seat
+[submodule "external/nd-shop"]
+	path = external/nd-shop
+	url = git@github.com:tty-pt/nd-shop
+[submodule "external/nd-spell"]
+	path = external/nd-spell
+	url = git@github.com:tty-pt/nd-spell
+[submodule "external/nd-stone"]
+	path = external/nd-stone
+	url = git@github.com:tty-pt/nd-stone
+[submodule "external/nd-vanilla"]
+	path = external/nd-vanilla
+	url = git@github.com:tty-pt/nd-vanilla
+[submodule "external/nd-wts"]
+	path = external/nd-wts
+	url = git@github.com:tty-pt/nd-wts
