@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib corm-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle mods clients boundary-check
+all: assets-sync qsys-lib corm-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -73,6 +73,12 @@ axil-auth-lib: axil-lib corm-lib xylem-lib
 
 axil-hyle: axil-lib hyle-source axil-auth-lib
 	$(MAKE) -C external/axil-hyle
+
+axil-tty-lib: axil-lib corm-lib xylem-lib
+	$(MAKE) -C external/axil-tty
+
+axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib qsys-lib
+	$(MAKE) -C external/axil-nd
 
 corm-lib:
 	$(MAKE) -C external/libcorm
@@ -283,4 +289,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib corm-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
