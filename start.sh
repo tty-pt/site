@@ -3,7 +3,14 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
-export LD_LIBRARY_PATH="$HOME/libqllm/lib:$SCRIPT_DIR/external/libqsys/lib:$SCRIPT_DIR/external/libxylem/lib:$SCRIPT_DIR/external/axil/lib:$SCRIPT_DIR/external/axil-auth/lib:$SCRIPT_DIR/external/axil-hyle/lib:$SCRIPT_DIR/external/libhyle/lib:$SCRIPT_DIR/external/libtransp/lib:$SCRIPT_DIR/external/libhyle-bud/lib:$SCRIPT_DIR/external/libhyle-source/lib:$SCRIPT_DIR/external/libbud/lib:$SCRIPT_DIR/external/libcorm/lib:$SCRIPT_DIR/external/libstoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$HOME/libqllm/lib:$SCRIPT_DIR/external/libqsys/lib:$SCRIPT_DIR/external/libxylem/lib:$SCRIPT_DIR/external/axil/lib:$SCRIPT_DIR/external/axil-auth/lib:$SCRIPT_DIR/external/axil-hyle/lib:$SCRIPT_DIR/external/libhyle/lib:$SCRIPT_DIR/external/libtransp/lib:$SCRIPT_DIR/external/libhyle-bud/lib:$SCRIPT_DIR/external/libhyle-source/lib:$SCRIPT_DIR/external/libbud/lib:$SCRIPT_DIR/external/libcorm/lib:$SCRIPT_DIR/external/libstoma/lib:$SCRIPT_DIR/external/libislet/lib:$SCRIPT_DIR/external/axil-tty/lib:$SCRIPT_DIR/external/axil-nd/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+mkdir -p "$SCRIPT_DIR/var/nd"
+export AXIL_ND_DB="$SCRIPT_DIR/var/nd/std.db"
+# The engine's own global module tier, kept apart from the site's mods.load
+# (mods/core/core.c reads that one) -- see nd_xy.c:nd_mods_load().
+export AXIL_ND_GLOBAL_MODS="$SCRIPT_DIR/external/axil-nd/mods.load"
+export AXIL_ND_HTDOCS="$SCRIPT_DIR/external/axil-nd/htdocs"
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"

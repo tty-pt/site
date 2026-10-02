@@ -1,3 +1,5 @@
 htdocs /*.css
 htdocs /*.js
 htdocs /*.wasm
+external/axil-nd/htdocs /nd/*
+external/axil-nd/art /nd/art/*

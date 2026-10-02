@@ -26,10 +26,15 @@ if is_server_up; then
 fi
 
 # Ensure data directories exist
-mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors"
+mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
 
 export AUTH_SKIP_CONFIRM=1
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/libqsys/lib:${REPO_ROOT}/external/libxylem/lib:${REPO_ROOT}/external/axil/lib:${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/axil-hyle/lib:${REPO_ROOT}/external/libhyle/lib:${REPO_ROOT}/external/libtransp/lib:${REPO_ROOT}/external/libhyle-bud/lib:${REPO_ROOT}/external/libhyle-source/lib:${REPO_ROOT}/external/libbud/lib:${REPO_ROOT}/external/libcorm/lib:${REPO_ROOT}/external/libstoma/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${REPO_ROOT}/external/libqsys/lib:${REPO_ROOT}/external/libxylem/lib:${REPO_ROOT}/external/axil/lib:${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/axil-hyle/lib:${REPO_ROOT}/external/libhyle/lib:${REPO_ROOT}/external/libtransp/lib:${REPO_ROOT}/external/libhyle-bud/lib:${REPO_ROOT}/external/libhyle-source/lib:${REPO_ROOT}/external/libbud/lib:${REPO_ROOT}/external/libcorm/lib:${REPO_ROOT}/external/libstoma/lib:${REPO_ROOT}/external/libislet/lib:${REPO_ROOT}/external/axil-tty/lib:${REPO_ROOT}/external/axil-nd/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export AXIL_ND_DB="${REPO_ROOT}/var/nd/std.db"
+# The engine's own global module tier, kept apart from the site's mods.load
+# (mods/core/core.c reads that one) -- see nd_xy.c:nd_mods_load().
+export AXIL_ND_GLOBAL_MODS="${REPO_ROOT}/external/axil-nd/mods.load"
+export AXIL_ND_HTDOCS="${REPO_ROOT}/external/axil-nd/htdocs"
 
 AXIL_BIN="${REPO_ROOT}/external/axil/bin/axil"
 if [ ! -x "$AXIL_BIN" ]; then

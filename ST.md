@@ -411,17 +411,40 @@ Four, all additive:
      qualifies.
    - If a region with exactly this `id` and `plen` already exists: succeed
      idempotently, make it current, return it.
-   - Reject `plen > 64`, `(id & mask(plen)) != id` (misaligned), and
-     `id == A->id` (no new bits).
+   - Reject `plen > 64`, `(id & high-bit-mask(plen)) != id` (misaligned), and
+     `plen <= plen_A` (not strictly wider than the nearest ancestor).
+     ~~and `id == A->id` (no new bits)~~ — **wrong as originally written, see
+     the deviation record.** The rejection is about *width*, never about the id
+     equalling the ancestor's: a same-id child *widens* the region and is legal,
+     and rejecting it would reject `(0,16)` under `(0,0)`, which is CP-3's
+     flagship identity rather than an error.
+   - Note `mask` throughout this section is the **high**-bit mask: `(a, plen_a)`
+     covers `(id, plen)` when `plen_a <= plen` and
+     `(id & high-bit-mask(plen_a)) == a`. The low-bit reading is what makes
+     planets siblings of each other rather than of the root.
    - Otherwise allocate the entry (`depth = A->depth + 1`, `owner_path = NULL`),
      wire it into `A->children_head`, `corm_put(region_hd, …)`,
      `region_mark_subtree_dirty(A)`, `region_dispatch_gen_bump(A)`, optionally
      install `fn`/`ud` as the child's claim handler, and make it current.
    - Does **not** create intermediate ancestors: §4.3(1) makes a multi-bit jump
      legal, so the region is created directly under `A`.
-2. **`xy_region_plen(uint64_t id)`** → `uint8_t` (or `XY_ERR_*`). Needed because
-   `xy_region_each` hands out ids with no widths, and the engine must be able to
-   re-derive a region key.
+2. ~~**`xy_region_plen(uint64_t id)`** → `uint8_t` (or `XY_ERR_*`).~~ **Dropped
+   in CP-3 — do not implement or call this.** Needed because `xy_region_each`
+   hands out ids with no widths, and the engine must be able to re-derive a
+   region key. That job is now done honestly by two functions instead, because a
+   lookup by id alone is a *query*, not a lookup — the root `(0,0)` and its
+   leftmost 16-bit child `(0,16)` share `id == 0` — and a `uint8_t` return
+   cannot distinguish the root's real width of `0` from "not found":
+   - **`uint8_t xy_current_region_plen(void)`** — the caller's current region's
+     width, read from the thread-local entry. No hash lookup, no ambiguity. This
+     is the re-derive-a-key primitive §4.5(2) actually wanted.
+   - **`int xy_region_exists(uint64_t id, uint8_t plen)`** — `XY_OK` /
+     `XY_ERR_NOTFOUND`. The honest existence-and-addressability predicate for a
+     specific pair.
+
+   `xy_region_each` now yields `(child_id, plen)` per child, so the widths are
+   available without a lookup at all. Rationale and the full deviation record:
+   `CP3.md` §2 B.
 3. **`xy_region_at(uint64_t prefix_id, uint8_t plen)`** → id of the **deepest**
    existing region whose prefix covers `(prefix_id, plen)`, else
    `XY_REGION_INVALID`. This is the engine's "which region is this point in?"
@@ -764,6 +787,54 @@ Two consequences to state plainly:
   positionless event has no scoped answer and must either be scoped by its
   payload's location or be declared global.
 
+#### 7.4.1 The per-event anchor table (2026-10-03, §27.1)
+
+"There is an anchor" is **not** a property of the event's shape but of which of
+its arguments names a room, so the rule is a table, not a heuristic. Two
+resolutions, and the second is the interesting one:
+
+- **`ND_ANCHOR_ROOM(arg)`** — that argument *is* a room ref. Use it directly.
+- **`ND_ANCHOR_OBJECT(arg)`** — that argument is an object; take its
+  `location`, then that room's `pos_t`. Use it when the event's subject is the
+  thing in the world (it was added, moved, updated, deleted).
+- **`ND_ANCHOR_NONE`** — no argument names anything spatial. Declared global.
+
+`ND_ANCHOR_PLAYER` is deliberately *absent* as a separate kind: a player is an
+object whose `location` is its room, so `ND_ANCHOR_OBJECT` on a player ref
+already resolves it, and one fewer kind is one fewer thing to get wrong. The
+distinction that does matter is **which** argument: for `on_icon` it is the
+*viewer* (`player_ref`), not the object being drawn, because a viewer only ever
+sees their own room; for `on_enter`/`on_leave` it is the room argument, not the
+mover, because those two fire on either side of a move and the mover's
+`location` is, at that instant, the wrong room for one of them.
+
+| event | anchor | why |
+|---|---|---|
+| `on_status`, `on_auth`, `on_after_enter`, `on_before_leave`, `on_vim`, `on_get`, `on_examine` | object(`player_ref`) | the actor's room |
+| `on_icon` | object(`player_ref`) | the viewer's room, not the drawn object's |
+| `on_view_flags`, `on_update`, `on_del`, `on_clone` | object(`ref`) | the subject's room |
+| `on_move` | object(`ref`) | fires *before* the move, so this is the room being left |
+| `on_add` | object(`ref`) | `nu->location`, so an object added into a room scopes to that room |
+| `on_enter` | **room(`loc_ref`)** | the arriving room, which `location` no longer says |
+| `on_leave` | **room(`loc_ref`)** | the room being left; `location` is already the new one |
+| `on_spawn` | **room(`loc_ref`)** | the room just created for the chunk |
+| `on_new_player` | none | the player has no room yet (`where=NOTHING`, `world.c:908`) |
+| `on_noise`, `on_empty_tile` | none | no position in the signature at all |
+
+Two rows deserve their reasoning written down, because both are the kind of thing
+that gets "simplified" later into a leak:
+
+- **`on_move` anchors before the move.** `e_move` fires `on_move` at
+  `spacetime.c:553` *before* it computes the destination. Anchoring on the
+  mover therefore scopes the veto to the room the player is standing in, which is
+  what a movement veto means. Anchoring on the destination would let a planet
+  forbid a player from leaving it — the opposite of what a veto is for.
+- **`on_add` is scoped, not global.** §7.4 named `on_add` as the anchorless
+  case, and it is the one that most needed resolving: the object exists, it just
+  has no *player* ref. Its `location` is the room it was added into, so the
+  event scopes there. The genuinely global residue is `on_new_player`, where
+  there is no room because there is nothing yet.
+
 ### 7.5 In-game commands
 
 Registered like the rest (`axil_register`, `src/world.c:626-711`). Proposed set,
@@ -807,16 +878,18 @@ never come from `mods.load`.
 
 ### Phase 0 — libxylem: region-at-prefix (dependency change)
 
-`xy_claim_at`, `xy_region_plen`, `xy_region_at`, exact-region dispatch
-(`xy_call_self` or a scope parameter). Surface in `xy.h`, `xy_t`, `xy-mod.h`;
+`xy_claim_at`, ~~`xy_region_plen`~~ (superseded in CP-3 — §4.5(2) as amended;
+use `xy_current_region_plen` + `xy_region_exists`), `xy_region_at`, exact-region
+dispatch (`xy_call_self` or a scope parameter). Surface in `xy.h`, `xy_t`, `xy-mod.h`;
 document in `docs/api.md` + README. Tests (`external/libxylem/tests/`):
 
 - `test_claim_at.c` — nested prefixes at 0/16/32/48/64; a jump that skips levels;
   idempotent re-claim; misaligned id rejected; `plen > 64` rejected;
   `id == nearest ancestor` rejected.
 - **non-canonical id** — planet `N = 2` is id `2<<48`, whose lowest set bit
-  implies a different width. Assert it is found, nested into, and that
-  `xy_region_plen` reports 16 (§4.3(2)).
+  implies a different width. Assert it is found, nested into, and that its width
+  is 16 — via `xy_region_exists(id, 16)` and/or the `plen` that
+  `xy_region_each` now yields. (`xy_region_plen` is gone; §4.5(2) as amended.)
 - dispatch scope — `xy_call` from a planet reaches the planet and its children
   but **not** the root and **not** a sibling planet; `xy_call_self` reaches only
   the region's own modules; a coarse-to-fine walk visits each ancestor once.
@@ -908,8 +981,14 @@ SONAME stem (the loader appends `.so`).
    module-side. Five module sites affected.
 9. **Region destruction** (§4.6) — inert entries left behind on release. Fine at
    this scale; would need a `xy_region_free` if planets churn.
-10. **Anchorless events** — what a positionless event does under a scoped walk
-    (§7.4) is undecided: fall back to the global tier, or refuse.
+10. **Anchorless events** — **ANSWERED 2026-10-03, §27.1.** A positionless
+    event is *declared global*: it dispatches from the root region, reaching
+    every module in every planet, exactly as before Phase 3. Refusing was the
+    other candidate and is wrong — `on_noise` and `on_empty_tile` have no
+    position in their signatures at all, so refusing would delete noise
+    generation and empty-tile naming planet-wide. §7.4's per-event anchor table
+    is the rest of the answer: an event is scoped iff one of its own arguments
+    names a room, directly or by way of an object's `location`.
 
 ---
 
@@ -918,21 +997,42 @@ SONAME stem (the loader appends `.so`).
 - [x] design captured here (single doc)
 - [x] decisions locked
 - [x] `external/axil-tty` builds against the site's externals
-- [ ] `external/axil-nd` builds against the site's externals
-- [ ] Phase 0 libxylem: `xy_claim_at` + `xy_region_plen` + `xy_region_at` +
-  exact-region dispatch
+- [x] `external/axil-nd` builds against the site's externals
+- [x] Phase 0 libxylem: `xy_claim_at` + `xy_region_at` +
+  exact-region dispatch — **code complete and gated**; `tests/test_claim_at.c`
+  green from clean, suite 17/17, and the ABI-3 rebuild paid tree-wide with the
+  site + `axil-nd` gates green (see "CP-4 status" below). The
+  `xy_region_plen` half was superseded early by `xy_current_region_plen` +
+  `xy_region_exists`, shipped in CP-3; §4.5(2)
 - [ ] Phase 1 wired + verified
-- [ ] Phase 2 persistence + runtime load/unload
+- [x] Phase 2 persistence + runtime load/unload — **done, 2026-10-03, gated
+  green.** `struct st_rec` record table (string key, §22.1), `xy_claim_at`
+  region creation, boot restore sorted by `plen` (§7.6/§22.2), seven commands
+  (`planet`/`planets`/`here`/`loadmod`/`unloadmod`/`modlist`/`release`).
+  `external/axil-nd/test.sh` green 2× consecutively (incl. the §22.6 gate:
+  two planets, different sets, reboot restore, unload-shrink, failed-load
+  keeps row, release); site `make`, `make unit-tests`, G6 checks green.
+  Committed in-submodule as `external/axil-nd@87678eb` ("live nd"); site
+  gitlink bumped. Design §22 (incl. §22.9 contract). Two traps found en
+  route, both recorded: every `do_*` reply must `eng_nd_flush` (§5.3, incl.
+  fall-through exits); planet boots die by SIGTERM, not SEGV (§22.6
+  shutdown note).
 - [ ] Phase 3 region tree + delegation
 - [ ] Phase 4 gates
 - [ ] archived + `npm --prefix .pi/extensions/pi-quest run zip`
+
+> 2026-10-03 note: §26's "Nothing has been committed" is stale — both
+> submodules have since been committed and the site gitlinks bumped
+> (`axil-nd@bbe9002 "live nd"`, `libxylem@e769840 "live nd"`, site `947b20e`).
+> The CP-4 deviation review (§1768 "need review") is still outstanding.
 
 ---
 
 ## 12. Superseded
 
-The separate quest file `.pi/quest/future/AXILND-ST-WORLDS.md` is folded into this
-document and should be deleted; its content is §0, §1, §7 and §8 here.
+The separate quest file `.pi/quest/future/AXILND-ST-WORLDS.md` was folded into
+this document and is deleted (2026-10-03); its content is §0, §1, §7, §8, §11
+and §22 here.
 
 ---
 
@@ -1128,8 +1228,12 @@ each pinned to one reading. Each bullet names the sections it amends.
   (`src/papi.h:52-53`) but is not exposed. §4.1 already notes the missing `plen`
   getter; the sharpened form is that after the §15.1 change a bare id is ambiguous,
   so `xy_region_each` must yield `(id, plen)` or become unusable for persistence.
-  *Resolution:* `xy_region_plen` (§4.5 #2) is a *prerequisite* of iterating the
-  tree, not a convenience. Amends §4.1, §4.5.
+  *Resolution:* a width getter (§4.5 #2) is a *prerequisite* of iterating the
+  tree, not a convenience. Amends §4.1, §4.5. **(CP-3 note:** this shipped as
+  `xy_current_region_plen()` + `xy_region_exists()` rather than the id-only
+  `xy_region_plen(id)` originally sketched here — an id-only lookup cannot
+  disambiguate the four regions that share `id == 0`. The requirement stands; the
+  signature did not.)
 
 - **The root tier is cosmos-wide by construction.** §6.1 keeps six entries
   (`demo`, `nd-core`, `other`, `level`, `vanilla`, `shop`) loading into the root
@@ -1213,12 +1317,17 @@ Cross-cutting detail behind §15. Each item is a constraint, not a decision.
   a collision. Left alone it will keep rejecting the leftmost half of every
   region, which is the case §15.1 is about.
 - **`xy_claim_at` rejection rules, restated for `(id, plen)`.** Reject `plen > 64`;
-  reject `(id & mask(plen)) != id` as misaligned; reject `plen == plen_A` with
-  `id == A->id` as "no new bits". Accept an exact `(id, plen)` match
-  idempotently and make it current. Do **not** create intermediate ancestors —
-  §4.3(1)'s multi-bit jump stays legal. Create under the nearest existing
-  ancestor `A` = largest `plen_A < plen` with `(id & mask(plen_A)) == A->id`, which
-  is the codebase's first mask-based containment (§15).
+  reject `(id & high-bit-mask(plen)) != id` as misaligned; reject `plen <= plen_A`
+  (not strictly wider than the nearest covering ancestor). **Do not reject on
+  `id == A->id`** — the original phrasing here read "reject `plen == plen_A` with
+  `id == A->id`", which conflates two different things and would forbid `(0,16)`
+  under `(0,0)`. Width is the axis; the id is only half a key and repeats by
+  design. Accept an exact `(id, plen)` match idempotently, make it current, and
+  install a non-NULL `fn` so a later claim reconfigures rather than silently drops
+  the handler. Do **not** create intermediate ancestors — §4.3(1)'s multi-bit jump
+  stays legal. Create under the nearest existing ancestor `A` = largest
+  `plen_A < plen` with `(id & high-bit-mask(plen_a)) == A->id`, which is the
+  codebase's first mask-based containment (§15).
 - **Deny invariants, as testable statements.** A module's own region is never
   blocked by its own deny (`xy.h:371-374`); a deny applies to descendants; a
   dispatch is refused with `XY_ERR_EPERM` if **any** ancestor in the call chain
@@ -1286,16 +1395,15 @@ question. Numbering is retained as a tombstone so §19.3's cross-references from
 
 - **One canonical libxylem checkout.** See §15's thirteenth bullet.
 - **libcorm path split is a gate.** See §15's fourteenth bullet and §9.
-- **`external/libcorm` is uninitialized.** `git submodule status` reports
-  `-78bb2554…` while `external/libcorm/` has content and
-  `external/libcorm/lib/libcorm.so` exists. A fresh `git submodule update --init`
-  may therefore change which corm the site links. Worth settling before any
-  persistence gate is believed.
-- **The folded quest file still exists.** §12 says
-  `.pi/quest/future/AXILND-ST-WORLDS.md` should be deleted; it is present, and its
-  status block (lines 57-59) contradicts §11 — it lists `axil-tty` and `axil-nd`
-  as unbuilt and Phase 1 as unwired, where §11 marks `axil-tty` done. Delete it,
-  or reconcile it, so §11 is not left with a live dissenting copy.
+- **`external/libcorm` is initialised (2026-10-03).** `git submodule status`
+  now reports it checked out at `78bb2554` with content and a built
+  `lib/libcorm.so` present — the `-` prefix §19.3 worried about is gone, so a
+  fresh `update --init` no longer threatens to swap which corm the site links.
+  The "both corm paths" gate (§22.6) is still one path in practice (the engine
+  suite exercises `/lib/libcorm.so`); the site path proof is outstanding.
+- **The folded quest file is deleted (2026-10-03).** §12 claimed
+  `.pi/quest/future/AXILND-ST-WORLDS.md` "should be deleted" while it was
+  present and dissenting; it is now gone, so §11 stands uncontradicted.
 - **Status delta for §11.** Two items are not in §11's list and should be, per
   §15.5 and §15.2: the `xy.last()` fix, and the promotion of region
   identity from `id` to `(id, plen)` — the latter changes what Phase 0 has to
@@ -1352,9 +1460,9 @@ first, with each checkpoint independently demonstrable and leaving the tree gree
 | CP | Content | Gate |
 |---|---|---|
 | **CP-0** | `external/axil-nd` (`6f1edb7`) builds against the site's externals | clean build; site `all:` gains `axil-tty-lib` / `axil-nd-lib` targets; nothing else changed |
-| **CP-1** ✅ | close out `v1.4.2`: mid-dispatch `xy.last` test + CHANGELOG entry | **done** — new test asserts each later module sees its predecessor's return and a nested dispatch does not leak; verified red against `4372b3b`, green against `3a2d32e`. Pre-existing, unrelated libxylem suite failures found — see §24, not a CP-1 blocker |
-| **CP-2** | Phase 1 wiring (§6.5) | **`/nd` client + WS `connect`/`say` round-trip on the site port**; site `make test` plus `check-module-boundaries.sh` and `check-wasm-imports.sh` green |
-| **CP-3** | region identity → `(id, plen)`; `xy_region_plen`; `xy_region_each` yields plen (§15.1, §16) | `test_region_identity.c`: cosmos `(0,0)` → `(0,16)` → `(0,17)` → `(0,64)` coexist and are individually addressable; existing suite green |
+| **CP-1** ✅ | close out `v1.4.2`: mid-dispatch `xy.last` test + CHANGELOG entry | **done** — already merged upstream in `external/libxylem` (`40130b47`); verified green by direct build+run in this environment. See §25 (supersedes §24's now-stale `~/libxylem` reference) |
+| **CP-2** ✅ | Phase 1 wiring (§6.5) | **done** — `/nd` WS `say` round-trip verified (`say pong` → `You say: pong .`); found+fixed a real crash bug in `on_axil_connect` along the way (incomplete `NOTHING`-sentinel check, not site wiring). See §26 |
+| **CP-3** ✅ | region identity → `(id, plen)`; ~~`xy_region_plen`~~ superseded by `xy_current_region_plen` + `xy_region_exists`; `xy_region_each` yields plen (§15.1, §16) | **done** — `test_region_identity`: cosmos `(0,0)` → `(0,16)` → `(0,17)` → `(0,64)` all coexist with `id == 0`, are individually addressable, and are distinct dispatch contexts; proven red against the pre-change allocator (first child landed at `1<<62`, not `0`). 14/14 libxylem tests, site `make`, `make unit-tests` and all four G6 checks green; `axil-tty`/`axil-nd` rebuilt with **no** source change. Full record, incl. the one open item and the `xy_ctx` ABI-split incident: `CP3.md` |
 | **CP-4** | `xy_claim_at` + `xy_region_at` + exact-region dispatch (§4.5) | §8's Phase 0 test list, including the non-canonical-id and deny cases |
 
 Ordering notes:
@@ -1472,3 +1580,601 @@ explicitly requested to be committed.
 > Also removed 11 stray root-level `bin-test_*` files (dated Sep 30, not from
 > this session): byte-identical copies of `tests/test_*` binaries, referenced
 > by nothing. Added `/bin-test_*` to `.gitignore` so they don't recur.
+>
+> **Superseded by §25**: `~/libxylem` (the sibling clone this section describes)
+> no longer exists in this environment. The same content is confirmed live at
+> `~/site/external/libxylem`, in scope, already merged upstream.
+
+---
+
+## 25. CP-1 reconfirmed in-scope (2026-10-02, `~/site/external/libxylem`) — PASS
+
+All work happens inside `~/site` from now on. The fix, test, and CHANGELOG
+entry described in §24 are not a pending port — they are **already merged
+upstream** and present at `~/site/external/libxylem`, which is in scope:
+submodule HEAD `40130b47` ("just some gitignore updates and new tests", on top
+of `3a2d32e` "xy.last fix"); the gitlink in `~/site`'s index matches exactly;
+working tree was clean before the one edit below.
+
+Verified directly in this environment: `make tests/test_xy_last_dispatch`
+builds clean; running it (`LD_LIBRARY_PATH=./lib ./tests/test_xy_last_dispatch`)
+exits 0, confirming both the mid-dispatch-read fix and the nested-dispatch-leak
+fix.
+
+Closed the one real gap: the test binary and its 4 fixture `.so`s were
+buildable by name but absent from `TEST_BINS`/`TEST_MODS`. Added them
+(`Makefile`, local-only diff against the submodule's locked upstream commit —
+intentionally left uncommitted, per "commit only when asked"). This does not
+make the submodule's own `make test` pass — that aggregate still fails on the
+~19 pre-existing missing source files from §24, unrelated to CP-1.
+
+**CP-1 is closed.** Next: CP-2.
+
+---
+
+## 26. CP-2 — Phase 1 wiring (2026-10-02) — PASS
+
+All eight items from §6.5's "Phase 1 work from this state" list are implemented and the full site `make` (including `check-module-boundaries.sh` and `check-wasm-imports.sh`) is green:
+
+- **3-form module loader** (`mods/core/core.c:load_modules_from_file`) ported from `external/axil-nd/src/nd_xy.c:nd_mods_load()`'s reference implementation: bare name + in-tree `.c` present → `mods/<n>/<n>`; bare name without → installed soname (dlopen search path); anything with `/` → verbatim.
+- **`external/axil-nd/src/nd_xy.c`**: `nd_mods_load()` now reads `AXIL_ND_GLOBAL_MODS` (falls back to the standalone-compatible `"mods.load"`), and resolves the in-tree form against `dirname()` of that path rather than cwd — needed so the engine's own `mods/demo/demo` entry still resolves when the site's axil process has `chdir()`'d to the site root, not this tree. A missing list now fails loudly (`fprintf` + return) instead of silently substituting the demo module.
+- **`external/axil-nd/src/libaxil-nd.c`**: `handle_nd()`'s hardcoded `axil_sendfile(fd, "htdocs/index.html")` replaced with `nd_serve_htdocs()`, copying axil-tty's `serve_htdocs()` pattern (compiled-in `AXIL_HTDOCS` default + process-env override) — under a **distinct** env var (`AXIL_ND_HTDOCS`, not axil-tty's `AXIL_HTDOCS`), since both modules load into the same process and serve different asset trees.
+- **`mods.load`** (site): added `axil-nd` (bare name, installed-soname form — proven below).
+- **`serve.allow`** (site): added `external/axil-nd/htdocs /nd/*` and `external/axil-nd/art /nd/art/*`, same order as the engine's own file (general-then-specific, relying on `static_mapping_resolve`'s stat-based fallthrough, not pattern specificity).
+- **`start.sh` / `scripts/run-with-server.sh`**: `LD_LIBRARY_PATH` += `libislet`, `axil-tty`, `axil-nd`; `AXIL_ND_DB`, `AXIL_ND_GLOBAL_MODS`, `AXIL_ND_HTDOCS` exported; `var/nd` created.
+- **`Makefile`**: `unit-tests`'s `MODS` loop now skips any entry without a `mods/<d>` directory (logs why) instead of hard-failing `cd` — required the moment `mods.load` carries a non-directory (installed-soname or path) entry, which `axil-nd` now is. Verified: `make unit-tests` runs i18n/poem/song/grp/gig normally, logs `=== SKIPPING axil-nd (no mods/axil-nd dir ...) ===`, zero failures.
+
+**A real crash bug was found and fixed** in `external/axil-nd/src/libaxil-nd.c:on_axil_connect()` (not site wiring, but blocked wiring verification — fixed with sign-off). Root-caused via core dump + `gdb bt full`, then confirmed with targeted `stderr` tracing (same-stream, to rule out an stdio-buffering red herring that briefly looked like a second, unrelated cause):
+
+> `nd_connect()` → `auth()` → `nd_player_login()` (`world.c`) returns **two distinct failure sentinels**: plain `0` when there's no `REMOTE_USER` at all, and `NOTHING` (`(unsigned) -1`) when `nd_player_login`'s own `if (axil_auth(fd, user)) return NOTHING;` fires. `on_axil_connect`'s guard was `if (!player_ref) return 0;` — which only catches `0`. `NOTHING` is nonzero, so it fell through to `nd_io_attach(fd, player_ref=NOTHING)`, **clobbering** the valid attach `nd_player_login`'s own NEW-PLAYER branch had already made moments earlier (its `nd_io_attach` runs *before* the `axil_auth` check, not after). Any later command on that fd — `do_say` and siblings read `eng_fd_player(fd)` unconditionally — then aborted in `corm_get_copy` on the bogus key:
+> ```
+> #5 corm_get_copy (hd=70, ...) at src/libcorm.c:1686        <- aborts: no record
+> #6 do_say (fd=5, ...) at src/speech.c:35
+>         player_ref = 4294967295                              <- NOTHING, clobbered
+> ```
+> The raw-telnet counterpart (`world.c:do_connect`) already checks both sentinels (`if (player_ref && player_ref != NOTHING)`); the WS path just didn't. **Fix**: `on_axil_connect`'s guard is now `if (!player_ref || player_ref == NOTHING) return 0;`, matching `do_connect`'s convention.
+>
+> **First-pass root cause was wrong and corrected**: this was initially suspected to be specific to `/tty` connections reaching `DF_AUTHENTICATED` without a game login (`nd_tty_owned()` gates axil-nd's own hooks away from `/tty` on purpose). That is a *real, independent* trigger for this same crash (confirmed: an external process in this sandbox — not started by this session, reconnects to `/tty` within ~100ms of every `axil` restart, origin never identified — hits it reliably). But a second, broader trigger was found by instrumentation: `getpwnam()` genuinely fails for every `axil-auth`-registered site account (verified directly: `python3 -c "import pwd; pwd.getpwnam('x')"` → `KeyError` for a freshly registered name), so `axil_auth()` returns `1` and `nd_player_login` returns `NOTHING` for **every** site-registered `/nd` login, not just the `/tty` edge case. The crash was therefore reachable from the site's own intended `/nd` path too, with no `/tty` involved — the fix is necessary for *any* site-registered account, not only to suppress sandbox noise.
+> **Residual, deliberately unaddressed nuance**: because `nd_player_login`'s own `nd_io_attach` (new-player branch) happens *before* its `axil_auth` rejection, the fix's effect is that a rejected (unknown-OS-user) login still ends up with a working fd→player mapping — i.e. axil_auth()'s rejection is not actually enforced end-to-end for a brand-new player on this path. Whether axil-nd should walk that back further (actually disconnect on an unknown-OS name) is a separate policy question, out of scope here; this fix's scope was the crash only.
+
+**Verified working end-to-end** (manual boot + raw-socket probes, repeated across multiple clean server restarts, not yet captured as an automated test):
+
+- `nd_world_init: Done.`; `demo`, `nd-core`, `nd-other`, `nd-level`, `nd-vanilla`, `nd-shop` all load.
+- `GET /nd` → WS upgrade → `101 Switching Protocols` with correct `Sec-WebSocket-Accept`.
+- Registering through the site's own `/auth/register` (`AUTH_SKIP_CONFIRM=1`) sets a `QSESSION` cookie; carrying it on the `/nd` WS upgrade resolves through `axil_auth_check` → `REMOTE_USER` → `nd_xy.c:auth()` → `nd_player_login()`: a new player object is created, teleported, `demo`'s hooks fire and resolve the player's handle correctly.
+- **`say pong` → `You say: pong .`** — the full round trip, confirmed PASS repeatedly.
+- The server survives the sandbox's unrelated `/tty` auto-connector without crashing (previously fatal).
+- `external/axil-nd/./test.sh` still fails at the same pre-existing, unrelated point (`GET /nd/app.css not 200 OK` — gitignored `htdocs/`, a separate npm/Tailwind build step, §23); no regression anywhere else in it.
+- Full site `make`, `make unit-tests`, `check-module-boundaries.sh`, `check-wasm-imports.sh` all green.
+
+**CP-2 and CP-3 are closed.** Nothing has been committed in `~/site` or any
+submodule — everything remains in the working tree, per the standing
+no-commit rule. `CP3.md` is the live CP-3 record (design deviations, the
+`packed` regression, the gate, and §4's append-only gate log).
+
+Two things CP-3 changed that later phases must respect:
+
+- **A region is `(id, plen)`, never `id` alone** — four regions share `id == 0`.
+  Anything that keys, caches, or names a region by id alone is wrong; see the
+  amended §4.5(2).
+- **`sizeof(struct xy_ctx)` grew 144 → 160 bytes, and that is a binary-ABI break
+  for every module.** Adding fields to `xy_ctx` is safe at the source level and
+  catastrophic at the binary level: a module built against the old header gets the
+  extra slots written past the end of its context and into adjacent BSS, which
+  presents as corruption in an unrelated library (it surfaced in `libaxil-tty` as
+  a garbage corm handle and a SIGSEGV on the first HTTP request). Every
+  `external/axil-*` consumer builds against the *system-installed* `/usr/include/ttypt`,
+  so a site `make` does **not** refresh them — they must be rebuilt and reinstalled
+  explicitly after any `xy_ctx` change. **This is now enforced, not just
+  documented — see the follow-up below.**
+
+### Follow-up, done: the `xy_ctx` ABI gate
+
+The hazard above was a *note*, and notes do not fail builds. It is now a gate,
+because the cost of getting it wrong is silent corruption of unrelated libraries.
+
+**Compile time** — `XY_CTX_ABI_VER` (2) and `XY_CTX_SIZE` (160) in `xy.h`, with
+`_Static_assert(sizeof(struct xy_ctx) == XY_CTX_SIZE)`. Adding a field without
+bumping the constant breaks the build of *everything* including this header, host
+and module alike. Verified firing in both directions: a field added without a
+bump, and a bump without a field. `src/papi.h` additionally pins the host mirror
+to the module struct (`sizeof(xy_t) == sizeof(struct xy_ctx)`, plus two
+`offsetof` checks), which is the drift §2 A wanted and never actually enforced.
+Rust mirrors it with `const _: () = assert!(size_of::<XyCtx>() == XY_CTX_SIZE)`.
+
+**Load time** — a module exports `xy_ctx_abi()` returning `XY_CTX_ABI_DESC`
+(`xy-mod.h` emits it, `xy_module!()` emits it for Rust). The host compares it in
+`mod_load_bind_xy()` *before* `_xy_init()` writes anything, and refuses a
+mismatch — or a missing symbol — with the new `XY_ERR_ABI`. The compile-time
+assert alone cannot cover this, because a module compiled earlier is still on
+disk with nothing to rebuild it.
+
+**The gate has a real cost, and it has now been paid.** A module that predates
+the symbol is refused even when it would work fine, so **every existing module
+binary must be rebuilt once** when this lands. This is not hypothetical: it is
+what `external/axil-nd`'s own suite failure turned out to be (§ below).
+
+**Contextless modules are exempt**, and this distinction matters. A module that
+exports neither `get_xy_ptr` nor a `xy_self_init_ctx` call has nothing for the
+host to write into, so there is nothing to overrun and nothing to declare. The
+site's `mods/core` is exactly this — it exports `xy_install` and no `get_xy_ptr`
+— and loads unchanged.
+
+**Verified.** 15/15 libxylem tests (14 + the new `test_ctx_abi`), library clean
+with zero warnings, site `make`, `make unit-tests`, all four G6 checks, and
+`axil`/`axil-auth`/`axil-tty`/`axil-nd` clean-built and installed with
+`sizeof(struct xy_ctx) == 160` confirmed in every `.so`.
+
+Two implementation notes worth keeping, both found the hard way:
+`module_lookup_symbol_fn()` returns the symbol's **address**, so the descriptor
+must be produced by calling through it; and a `_Static_assert` fixture must
+prove it is looking at the memory under test. The first version of
+`tests/mods/mod_stale_ctx.c` put its canaries in an initialised global while the
+zeroed context sat in `.bss` — different sections, never adjacent — so the
+"memory intact" assertion passed **vacuously**. The canaries now live inside the
+same object as the context and the test asserts `canary == ctx + 144` and that a
+160-byte write reaches them. A standalone reproducer confirms the write does
+clobber them; that is what makes the passing result mean something.
+
+### Closed: the `libnd-*` rebuild, and what the suite's baseline really is
+
+`external/axil-nd`'s `bash test.sh` fails with `FAIL: on_demo frame missing`, and
+it is **now attributed**. It is not CP-3 and not ND_PORT's documented flake: it is
+the new ABI gate refusing the `libnd-*` module family, which was built against the
+old header and exported no handshake. `demo` therefore never loaded, so its
+`[demo] player ` announce never fired. `/tmp/axil_test.log` shows 18 consecutive
+`xy_load: refusing libnd-X: it does not export xy_ctx_abi()` lines.
+
+18 of the 19 installed `libnd-*.so` have been rebuilt. **`libnd-core.so` was the last
+holdout. It exports `get_xy_ptr`, so unlike `mods/core` it *is* subject to the
+gate, and `test.sh` asserts on its behaviour (`nd-core: on_icon ...`,
+`nd-core: core_icon_decorate #1`), so the suite could not pass without it.
+
+**All three module families have now been rebuilt and the gate is fully paid.**
+19/19 installed `libnd-*.so` carry the handshake, plus the in-tree modules — one
+of which, `mods/demo/demo.so`, was a stale build predating the header change and
+was the sole remaining refusal. `axil_test.log` now shows **0 refusals and 0
+module load failures**, and `test.sh` runs past every ABI, WS, BCP, icon and
+`on_demo` assertion it previously died on.
+
+`test.sh` still exits non-zero, but at `GET /nd/app.css not 200 OK` — which is
+**the same pre-existing failure §26 recorded for CP-2**: `htdocs/` is gitignored
+and absent, and the stylesheet needs a separate npm/Tailwind build step (§23).
+It is an asset problem, not a code one. **So the suite is back at its documented
+baseline**, and the ABI gate has cost exactly one round of module rebuilds and
+nothing else.
+
+### CP-4 status: gated green, and the gate found a real deny bug
+
+**Shipped and gated** (uncommitted, 18 files in `external/libxylem`):
+`xy_claim_at()`, `xy_region_at()`, `xy_call_self()`, surfaced in `xy.h`, `xy_t`,
+`xy-mod.h`, `_xy_init` and the runtime context, plus `tests/test_claim_at.c`
+with four fixtures (`mod_ca_{root,p1,p1child,p2}`). `make test` is clean with
+zero warnings and runs **17/17 from `make clean`** — every §8 Phase 0 case is
+asserted.
+
+### The downstream half is now paid too — and better than the recorded baseline
+
+CP-4 is closed on the whole tree, not just in libxylem. Verified 2026-10-03:
+
+| gate | result |
+|---|---|
+| libxylem `make clean && make test` | **17/17**, rc=0, zero warnings |
+| site `make` | rc=0 |
+| site `make unit-tests` | rc=0 |
+| four G6 checks | 4/4 rc=0 |
+| `bash external/axil-nd/test.sh` | **rc=0, `axil-nd ok`** — three consecutive greens |
+| Rust fixtures + `cargo build` | clean; all three cdylibs report ABI 3/184 |
+| ABI audit | 38/40 in-tree `.so` + 19/19 installed `libnd-*.so` = **0 stale** |
+
+Two things here are worth recording because they contradict what §26 had
+established, in our favour and against us respectively.
+
+**`test.sh` no longer stops at the `app.css` baseline.** §26 recorded it as
+permanently stuck at `GET /nd/app.css not 200 OK` because `htdocs/` is gitignored
+and absent. It is a *build* step, not an unfixable state: `npm install
+--ignore-scripts` (plain `npm install` dies in the published
+`@tty-pt/axil-tty` dep's `postinstall: make`, which has no default target) then
+`npx tailwindcss -i src/app.css -o htdocs/app.css --minify` produces it. That
+unblocked the **275 lines of assertions behind it** — assets, 404s, directory
+traversal, the say/pong round-trip — none of which had ever run at this ABI. So
+the gate is not "back at baseline"; it is genuinely green for the first time.
+
+**`nm -D --defined-only <so> | grep xy_ctx_abi` cannot verify an ABI.** That
+command, recorded in the handoff as the audit method, prints the symbol's
+*address* — `xy_ctx_abi` is a **function** that returns the descriptor
+`(ver << 32) | size`, so the check passes for a stale module exactly as
+happily as for a fresh one. It would have reported "fine" for the two binaries
+that were in fact still on generation 2. A real audit dlopens the module and
+calls it. Doing that is what surfaced `mods/demo/demo.so` and
+`axil-nd-testprobe/testprobe.so` still at 2/160.
+
+**Both of those were invisible to `make` for the same reason**, and it is worth
+naming as a general trap: neither rule listed the installed xylem headers as
+prerequisites.
+
+```
+mods/demo/demo.so: mods/demo/demo.c include/nd/xy.h
+```
+
+A `XY_CTX_ABI_VER` bump changes nothing under `include/nd/`, so `make` compared
+two *older* files against the `.so`, printed "Nothing to be done for 'demo'", and
+left a generation-2 binary in place — 30 minutes stale, with a green build
+saying so. Fixed in both `external/axil-nd/Makefile` (the explicit rule **and**
+the `mods/%.so` pattern rule) and `external/axil-nd-testprobe/Makefile` by
+listing `$(XY_HDRS)`. **A header-only ABI bump does not rebuild anything unless
+each module's Makefile rule names the header.** That is a live hazard for the
+next bump, not a one-off.
+
+### The gate found a real, pre-existing bug: deny was inverted
+
+Writing the deny assertions exposed that `xy_dispatch()` gated its ancestor
+deny walk on **the caller's own** `subtree_flags`, then walked the **ancestor**
+chain looking for denies. Those are opposite ends of the chain, and
+`region_propagate_deny()` maintains the bit *upward* — so `root->subtree_flags`
+is the one entry summarising "some region in this tree denies something".
+
+Consequence: for any caller that was not the root, the bit was clear, so the
+**entire deny block was skipped** and an ancestor's deny was silently inert.
+For the root the bit happened to be set, so its own deny fired. Both documented
+behaviours were wrong *simultaneously and in opposite directions*:
+
+| case | before | spec (`xy.h`, §16) | after |
+|---|---|---|---|
+| root denies hook, dispatch from a planet | ran anyway, `XY_OK` | `XY_ERR_EPERM` | `XY_ERR_EPERM` |
+| root denies hook, dispatch from root | `XY_ERR_EPERM` | `XY_OK` (own deny is children-only) | `XY_OK` |
+
+Nothing caught this before because **no test exercised `xy_deny()` at all** —
+`grep -rn xy_deny tests/*.c` was empty. The fix in
+`src/libxylem-dispatch.c` reads the flag from `anc_chain[0]` and bounds the hook
+walk to `i < anc_n - 1`, excluding the caller's own region. Cost: the chain is
+now walked whenever there is a caller region rather than only when the caller's
+own subtree was dirty; it is a bounded pointer chase (depth <= 65) and both
+CP-4 scopes need it anyway. `test_deny_semantics` is what pins it shut.
+
+**Still outstanding** (unchanged from before, none of it libxylem work):
+the ABI-3 downstream rebuild below, the Rust mirror, and the API docs.
+
+### Four decisions in that code that deviate from §4.5 and need review
+
+1. **`region_mask()` masks the HIGH `plen` bits, not the low ones.** This is the
+   load-bearing one. §4.5(1) writes the ancestor test as
+   `(id & mask(plen_A)) == A->id` without saying which bits `mask` keeps. The
+   shipped `region_alloc_slot()` builds a child as
+   `parent->id | (s << (64 - cplen))` — prefix in the **high** bits, low `plen`
+   bits zero — so a low-bit mask agrees for the root (whose mask is 0) and then
+   silently diverges: it reports `region_alloc_slot`'s own siblings as nested,
+   i.e. `(1<<48,16)` "inside" `(0,16)`. Two siblings must never be parent and
+   child. High-bit masking is the only reading consistent with the allocator,
+   and it also makes planet 2 (`2<<48` at plen 16) canonical and aligned, which
+   is what §8's non-canonical-id case asks for. **Do not "fix" this to a
+   low-bit mask.**
+2. **`xy_region_at()` takes a `uint8_t *region_plen` out-param**; §4.5(3) has it
+   return only the id. Returning only the id reproduces exactly the ambiguity
+   CP-3 existed to remove — the covering region can sit at a width the caller
+   did not pass, and (0,0)/(0,16) share an id — so the caller could not
+   `xy_with_region()` to what it found. §4.5(3) predates that lesson.
+3. **`xy_claim_at()` returns `int`,** not the region. §4.5(1) says "return it",
+   but the id is already an argument, so returning it is redundant *and* would
+   collapse misaligned / `plen > 64` / no-new-bits into one failure. It also
+   installs `fn`/`ud` on the idempotent path, which §4.5(1) lists only under
+   creation — otherwise a re-claim silently discards the handler.
+4. **§4.5(1)'s "reject `id == A->id` (no new bits)" is wrong as written** and
+   was not implemented. It would reject `(0,16)` under `(0,0)` — CP-3's flagship
+   same-id child. **Both restatements of the rule were wrong, in different
+   ways, and both are now corrected** (§4.5(1) and §16 above):
+   - §4.5(1) rejected on *id equality*, which forbids a legal widening.
+   - §16 rejected on "`plen == plen_A` **with** `id == A->id`" — still an
+     id-equality test, just gated on equal widths, so it would have accepted
+     `(x, 8)` under an ancestor `(x, 16)`.
+
+   The rule that is actually implemented, and the only one that is right, is
+   about **width alone**: `plen > plen_A`, where `A` is the nearest existing
+   ancestor. It mentions no id. As a guard in the code it is `plen <=
+   parent->plen`, which is **unreachable** while the ancestor search considers
+   only `plen_A < plen` — it exists so that relaxing that search later fails
+   loudly instead of silently creating a duplicate identity for `corm_put` to
+   resolve arbitrarily. `tests/test_claim_at.c`'s
+   `test_same_id_child_accepted` pins the intended behaviour from the public
+   side, and `xy.h`/`xy-mod.h`/`docs/api.md` now state it in width terms so the
+   next reader is not misled by the id reading.
+
+Also chosen: the dispatch macro is `XY_CALL_SELF`, mirroring the existing
+`XY_CALL`, rather than a scope parameter threaded through `xy_with_region`.
+
+### The ABI bump: paid, and it cost two Makefile rules
+
+Adding three pointers to `xy_ctx` grew it **160 → 184**, so `XY_CTX_ABI_VER` is
+now **3** and `XY_CTX_SIZE` **184**. The tripwire did its job on the way: both
+the `xy.h` size assert and the `papi.h` host/module mirror assert failed before
+the bump, naming the missing fields.
+
+The bump is now **paid across the whole tree**: 19/19 installed `libnd-*.so`,
+38/38 in-tree module `.so`, and all three Rust cdylibs report generation 3, with
+0 refusals in `axil_test.log`. The cost was two module Makefile rules that could
+not see the header change — see "the downstream half is now paid too" above for
+why `make` reported the stale binaries as up to date, and why the `nm -D` audit
+recorded in the handoff could not have caught them.
+
+The 6 in-tree `.so` with no `xy_ctx_abi` symbol are correct and should stay that
+way: `libxylem.so`, `libcorm.so`, `libbud.so`, `axil-hyle.so` (host TUs — the
+host provides the hooks, it does not consume a context), and `mods/core/core.so`
+(the bootstrap loader, which includes no `xy-mod.h` at all). Only modules that
+*consume* an injected context export the handshake.
+
+### Housekeeping: `make test` is runnable again
+
+`make test` could not complete, because `TEST_MODS`/`TEST_BINS` listed 15
+targets whose sources do not exist (`mod_game_*`, `mod_claim_god`,
+`mod_region_worker`, `test_region`, `test_fn_hook`, `test_game`, `test_rust`).
+Make **aborts** at the first missing prerequisite, so this silently skipped
+every fixture after `mod_region_worker` — and the inherited "15/15" was measured
+against stale `.so` artifacts that `make clean` then deleted. All 15 dead rules
+and list entries are gone; the Rust fixtures moved to `RUST_FIXTURES` with
+`make rust-fixtures` / `make rust-test` so the C gate never needs a Rust
+toolchain. `make test-build` now emits 33 fixtures and `make test` runs 17
+binaries end-to-end (16 inherited + CP-4's `test_claim_at`).
+
+`mod_stale_ctx.c` and `test_ctx_abi.c` were also made generation-agnostic: the
+stale fixture now pins itself to *one generation behind* and derives its canary
+count from the real size delta, so the ABI gate keeps testing the right overrun
+across future bumps instead of degrading into a comparison of two stale literals.
+
+### Three places the gate's own first draft was wrong, and the lesson
+
+Worth recording because each was a case of asserting the *obvious* answer
+instead of the *correct* one:
+
+1. **Tree built piecemeal.** `test_jump_skips_levels` asserted "root has 5
+   children" while planets 1 and 2 had not been created yet — it saw 2. Fixed
+   with one `build_tree()` up front, which also means every per-test
+   `xy_claim_at()` left over is now an idempotent re-claim, so idempotency is
+   exercised incidentally throughout.
+2. **Cover arithmetic, twice.** Querying `0xDEADBEEF` at width 64 was expected
+   to land on `(0,48)` because the value "looks small". It does not: `0xDEADBEEF`
+   has bits 16..31 set, and the cover test masks the **high** plen bits, so the
+   answer is `(0,32)`. The library was right both times; the hand-computed
+   expectations were not. Only a printed probe settled it.
+3. **`xy_errno()` read too late.** Asserting `xy_errno() == XY_ERR_NOTFOUND`
+   after `dispatch_in()` returned read `0`, because `snapshot()` calls
+   `dlopen`/`dlsym` immediately after the dispatch and those reset the
+   thread-local error. The status must be captured *inside* the trampoline
+   (`last_dispatch_errno`), which is the same trap as "a zero return does not
+   prove a listener ran", one level up.
+
+### What the gate discriminates
+
+Three assertions fail against a build that gets the idea wrong rather than
+merely returning an error, which is the only kind worth having:
+
+- **Sibling-ness (high-bit mask).** All planets are direct children of the root.
+  A low-bit containment mask nests them under `(0,16)` instead, so the root ends
+  up with 2 children, not 5.
+- **The jump.** `(3<<48,16) -> (3<<48,64)` attaches straight under the plen-16
+  parent and `(3<<48,32)` / `(3<<48,48)` do not exist.
+- **3 vs 7.** The coarse-to-fine walk runs 3 listeners; the same path in subtree
+  scope runs 7 (`root +1, p1 +2, p1child +3, p2 +1`) — planet 2 is dragged in by
+  the root's subtree and the inner two are re-run at every level. That gap is
+  the entire reason `xy_call_self()` exists, and it is now measured rather than
+  asserted in prose.
+
+Next: rebuild the downstream modules for ABI 3, re-run the site and `axil-nd`
+gates, then the Rust mirror and the API docs.
+
+---
+
+## 22. Phase 2 record (2026-10-03) — persistence shape, corrected against corm
+
+§§1–21 stand as written. This section records what Phase 2 actually had to
+build, measured against `external/libcorm@78bb2554`, `external/libxylem@e769840`
+and `external/axil-nd@bbe9002`. Where it disagrees with an earlier section it
+names the section it amends.
+
+### 22.1 `CM_RECORD` cannot have a binary key — §7.2's shape is amended
+
+§7.2 keeps "the existing `struct st_key`" as the row key and §17 picks the
+record-aware map (`corm_record_register` + `CM_RECORD`) partly *because*
+`corm_get(hd, "key:owner")` reads one field. Those two are incompatible, and the
+incompatibility is a hard `CM_MISS`, not a style question:
+
+- `corm_open` refuses a record map whose `ktype` is not `CM_STR`
+  (`external/libcorm/src/libcorm.c:832-835`, `record maps require ktype=CM_STR`).
+- Even if it did not, the composite-key path scans with `strchr(k, ':')`
+  (`libcorm.c:1627`) — a NUL-terminated scan. `struct st_key` is `packed`
+  `{uint64_t key; unsigned shift;}`, so its first byte is a NUL for every
+  id < 2^56: `st_key{0x0001000000000000, 48}`, planet 1, is 18 bytes of key of
+  which `strchr` sees **zero**.
+
+Verified with a standalone probe against the submodule's own corm, not inferred:
+a binary-key `CM_RECORD` open returns `CM_MISS`; the same record opened with
+`CM_STR` keys puts, reads one field, iterates and `corm_del`s correctly.
+
+**Resolution.** The `st` table becomes record-aware with a **string** key, and
+the key itself carries `(id, plen)` in fixed width so the engine can re-derive
+them without an extra field (a `CM_U32` field is four bytes, so a `uint64_t`
+id does not fit the field API at all):
+
+```
+key    = "<16 hex id><2 hex plen>", fixed 18 chars (ST_ROW_KEY_LEN)
+fields = owner (CM_U32), plen (CM_U32), nmods (CM_U32), flags (CM_U32),
+         mods (CM_STR, max_size = sizeof(mods))
+```
+
+Re-derivation is a hand-rolled parser (`st_row_key_parse` in `include/st.h`),
+not `sscanf("%16llx%2x")`: the width caps make that form silently accept a
+short key with a stale high word. The `plen` field is the cross-check against
+the key's suffix (§22.2), now a comparison of two genuinely different sources
+rather than a field with itself.
+
+`plen` is widened from `uint8_t` to `uint32_t` because a `CM_U32` field
+`memcpy`s four bytes (`libcorm.c:1517-1518`); a `uint8_t` field would be read
+past its own storage. `owner` stays a true one-field read — `st_high_shift`
+does up to 65 of them per call and must not copy 776 bytes each time.
+
+Amends §7.2 ("Key is the existing `struct st_key`"), §7.2's *why one row* list
+(intact — this is still one row), §17's first bullet.
+
+### 22.2 The rest of §7.2 survives unchanged
+
+- **`nmods` is authoritative** — `corm_get(hd, "key:mods")` hands back a raw
+  `char *` into the map's payload with no per-element NUL guarantee, so every
+  read of the list is bounded by `nmods` and a short entry is individually
+  NUL-terminated on write.
+- **`st_key.shift` is authoritative for the width, `st_rec.plen` is validated
+  against it and a disagreement is refused and logged** (§15's eleventh bullet).
+  With §22.1's shape the two now come from *different* places — the shift from
+  the key's suffix, the plen from the field — so the cross-check is real rather
+  than a comparison of a field with itself.
+- **Stems only; `loadmod` rejects any name containing `/`** (§15's twelfth).
+- **Snapshot, sort by `plen` ascending, then claim and load** (§7.2, §17).
+  With `(id, plen)` identity this is load-bearing, not tidy: `corm_iter` order
+  is unspecified, and `xy_claim_at` attaches to the *nearest existing ancestor*
+  (`libxylem.c:1749`, `region_find_ancestor_rec`), so an out-of-order child row
+  would otherwise be created under a region its parent's own row did not choose.
+
+### 22.3 The region API as shipped differs from §4.5's sketches
+
+Recorded because §4.5 and §21/CP-4 were written before the code landed:
+
+| §4.5 | shipped |
+|---|---|
+| `xy_with_region(id, fn, ud)` | `xy_with_region(id, plen, fn, ud)` — **takes the width too**, which is the direct consequence of §15.1 |
+| `xy_region_at(id, plen)` → id | `xy_region_at(prefix_id, plen, uint8_t *region_plen)` → id (deviation 2, §1782) |
+| `xy_claim_at` "return it" | returns `int` (deviation 3, §1787) |
+| `xy_call_self()` | `xy_call_self(retp, adapter, args)` + an `XY_CALL_SELF` macro |
+
+`xy_claim_at` calls `xy_runtime_ensure()` first (`libxylem.c:1727`), so it is
+safe to call from inside `xy_install` — which is where `st_init` runs, since
+`nd_world_init` is called from axil-nd's `xy_install`. No ordering hazard.
+
+§15's sixth bullet is therefore resolved by a trampoline, as §16 requires:
+
+```c
+static int nd_st_load_cb(void *ud) { xy_load((char *)ud); return XY_OK; }
+```
+
+### 22.4 `eng_map_mwhere` cannot be the region anchor — §7.3 amended
+
+§3.3 flagged that `map_mwhere` returns "raw `pos_t` bytes" and warned that a
+region lookup must call `pos_morton(pos)` instead. That is an understatement of
+the problem, and worth stating exactly:
+
+- `w_hd` is opened with `pos_type = corm_reg(sizeof(pos_t))` (`map.c:29`),
+  so a row is an 8-byte `int16_t[4]`.
+- `eng_map_mwhere` returns `*(const morton_t *)v` (`map.c:174`) — it
+  **reinterprets those 8 bytes as a `uint64_t`**.
+
+So it is not a Morton code and not a position: it is the little-endian byte
+soup of `{pos[0], pos[1], pos[2], pos[3]}` read as one word. Feeding it to
+`xy_region_at` would put players in regions chosen by endianness.
+
+**Resolution:** §7.3's anchor is `eng_map_where(pos, player.location)` followed
+by `pos_morton(pos)`. `eng_map_mwhere` is left alone — it is a module-facing
+API (`nd/xy.h`'s `map_mwhere`, `nd_api.c:179`) and changing its meaning is out
+of scope — but **no region code calls it**. Amends §7.3, sharpens §3.3.
+
+### 22.5 `loadmod`'s gate is ownership, not the allow-list — §7.5 amended
+
+§7.5 has `loadmod` "refuse if not on the region's moderator allow-list", and
+§1.1 calls the row's module list the allow-list. As written those two deadlock:
+a new planet's list is empty, so the only way to populate it is the command the
+list refuses.
+
+**Resolution:** the row's `mods[]` is the **enabled set**, and `loadmod` is the
+ruler's act of adding to it — so `loadmod` is gated on *ownership of the
+region*, not on membership of the list. The two real code gates are both still
+there and neither is mine:
+
+- `xy_deny(name, XY_DENY_MODULE)` refuses the load inside libxylem
+  (`xy.h`, checked before `xy_install`), so an outer ruler's limit holds.
+- ownership bounds the caller, inherited from `st_high_shift` (§7.5's own note).
+
+`modlist` reports the set, `unloadmod` removes from it and persists. Amends
+§7.5's `loadmod` row.
+
+### 22.6 Phase 2 gate, as run
+
+**Log stream, load-bearing.** The gate greps the restore lines
+(`st_restore: region …`, `st_restore: loaded …`) out of the axil process's
+**stderr** capture (`test.sh`'s `$lb`/`$lc`), the same stream `WARN()` writes
+to — the stream `wait_up` already greps for `Done.`. The engine must therefore
+emit them with `WARN()`/`fprintf(stderr)`, **not** with `syslog()`: syslog
+goes to `/dev/log`, which the suite never sees, so a syslog'd restore would
+look exactly like a missing restore. Same rule as the pre-existing persistence
+assertions (`nd_player_login:`, `eng_object_add`), which are all `WARN()` for
+this reason.
+
+Two boots minimum, and per §15's fourteenth bullet on **both** corm paths — the
+site's `external/libcorm/lib` and the system `/lib/libcorm.so` that
+`~/axil-nd` links against. The engine suite covers the system path (it runs
+`axil -m ./lib/axil-nd` with `LD_LIBRARY_PATH=./lib`, and `./lib` holds no
+corm), so the site path needs its own proof; see §22.7.
+
+**Shutdown method, load-bearing (2026-10-03).** The gate kills planet boots
+with SIGTERM after an explicit `save`, never SIGSEGV, and the distinction is
+the difference between a deterministic gate and a flaky one:
+
+- Explicit `save` is always complete (measured 6209–8331 bytes every run, all
+  rows present, `do_save` reporting the full counts).
+- `kill -SEGV` runs `close_all`'s handler save, which intermittently truncates
+  the store to ~1.5–2KB (a few tables, everything else lost; boot B then sees
+  a fresh DB and re-seeds). Measured ~1-in-3 with planet rows present — the
+  same rate as §9's pre-existing flake, which is the same path. The in-memory
+  table populations are identical at both saves (`obj`/`player`/`st` counts
+  match, cursors free), so the truncation is in the handler-context save
+  itself racing the world tick, not in the data. Bisected to prove the
+  explicit save innocent: with the handler save skipped, truncation persists
+  (it moves to the exit-destructor save after the closes).
+- SIGTERM performs no save of its own — verified: no `close_all` line in the
+  log — so the file keeps exactly what the explicit save wrote. 3/3 green,
+  all rows restored, vs ~1/3 red with SEGV.
+
+The planet gate therefore tests **reboot** persistence (fresh process reads the
+file), which is what §8 demands ("reboot, assert the set is restored").
+Crash persistence (SEGV mid-tick) stays the pre-existing section's job, flake
+and all — deliberately not re-proven here.
+
+1. establish planet 1 and planet 2 with **different** module sets;
+2. `modlist` in each shows its own set, and neither shows the other's;
+3. reboot — both sets restored, and a planet-only module fires only for its
+   own planet;
+4. `unloadmod` in planet 1, reboot — planet 1's set shrinks, planet 2's is
+   untouched;
+5. `loadmod` of a name with no binary behind it fails loudly **and leaves the
+   row intact** (a missing `.so` is not a reason to forget the intent, §7.6).
+
+### 22.7 Open, carried forward
+
+- **§19.3 is unresolved and now load-bearing.** `external/libcorm` is still
+  uninitialised in `git submodule status`, so "both corm paths" (§22.6) is
+  currently one path until someone settles it.
+- The system `/lib/libcorm.so` still may predate the shutdown-zeroing fixes
+  (§6.2). `external/axil-nd`'s suite links it. Step 5 above is the cheapest
+  probe: a row that vanishes across the reboot is that defect, not this code.
+- §10 Q10 (anchorless events) still blocks Phase 3, not Phase 2 — nothing in
+  Phase 2 dispatches an event.
+
+### 22.9 Test contract — exact strings the gate greps
+
+`external/axil-nd/test.sh`, planet section. Client-visible replies go over the
+socket (raw telnet in the suite); restore lines go to axil stderr via `WARN()`
+(§22.6). If an implementation changes a string, the test changes with it —
+these are the handshake, not decoration.
+
+| producer | string (fixed substring) |
+|---|---|
+| `do_planet` | `planet 1 established` (full: `planet <N> established: region id=0x… plen=16 world=<N> owner=<name> mods=<n>`) |
+| `do_loadmod` | `<stem> loaded into` (full: `<stem> loaded into region id=0x… plen=<p>`) |
+| `do_loadmod` failure | `<stem> failed to load (<xy_strerror>)` |
+| `do_unloadmod` | `<stem> unloaded from` (full: `… region id=0x… plen=<p>`) |
+| `do_modlist` / `do_planets` header | `[id=0x… plen=16 world=<N> owner=<name> mods=<n>]`, one per row; cosmos row has no `world=` |
+| `do_modlist` body | `  <stem>` per module, row order |
+| `do_release` | `planet <N> released` |
+| `st_init`, per row | `st_restore: region id=0x%016llx plen=%u` |
+| `st_init`, per module | `st_restore: loaded <stem>` |
+| `st_init`, per failure | `st_restore: module <stem> failed to load, keeping row` |
+
+The suite uses three planet-external modules precisely because they are
+commented out of `mods.load` and therefore absent from the root tier
+(`libnd-wts`, `libnd-stone` → planet 1; `libnd-biome` → planet 2). A root-tier
+module would make the cross-planet leak assertions pass vacuously (§15 ¶9).

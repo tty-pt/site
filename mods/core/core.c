@@ -3,10 +3,18 @@
 #include <string.h>
 #include <stdio.h>
 #include <dlfcn.h>
+#include <unistd.h>
 
 static int load_modules_from_file(const char *path)
 {
+	/* A line is one of three things: a bare module name WITH a module in
+	 * this tree -- loaded as `mods/<n>/<n>`, the in-tree layout -- a bare
+	 * name WITHOUT one, which names an INSTALLED library by soname, or a
+	 * path (anything containing `/`), taken verbatim. Same resolution
+	 * `external/axil-nd/src/nd_xy.c:nd_mods_load()` uses, so a module
+	 * can be named the same way regardless of which engine loads it. */
 	char mod_line[1030];
+	char in_line[sizeof(mod_line) + 8];
 	char line[512];
 	FILE *fp = fopen(path, "r");
 
@@ -23,7 +31,15 @@ static int load_modules_from_file(const char *path)
 		}
 		if (len == 0 || line[0] == '#')
 			continue;
-		snprintf(mod_line, sizeof(mod_line), "mods/%s/%s", line, line);
+		if (strchr(line, '/'))
+			snprintf(mod_line, sizeof(mod_line), "%s", line);
+		else {
+			snprintf(in_line, sizeof(in_line), "mods/%s/%s.c",
+			         line, line);
+			snprintf(mod_line, sizeof(mod_line),
+			         access(in_line, R_OK) == 0 ? "mods/%s/%s" : "%s",
+			         line, line);
+		}
 		if (xy_load(mod_line) != XY_OK)
 			fprintf(stderr, "warning: module %s failed to load\n",
 			        mod_line);

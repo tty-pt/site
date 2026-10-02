@@ -98,11 +98,15 @@ run:
 MODS != cat mods.load
 
 test-data-dirs:
-	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors
+	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors var/nd
 
 unit-tests: all test-data-dirs
 	@./scripts/run-with-server.sh sh -c '\
 		for d in $(MODS); do \
+			if [ ! -d mods/$$d ]; then \
+				echo "=== SKIPPING $$d (no mods/$$d dir -- installed-soname or path-form entry) ==="; \
+				continue; \
+			fi; \
 			echo "=== TESTING $$d ==="; \
 			(cd mods/$$d && ./test.sh) || exit 1; \
 		done'
