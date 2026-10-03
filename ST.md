@@ -997,14 +997,18 @@ SONAME stem (the loader appends `.so`).
 - [x] design captured here (single doc)
 - [x] decisions locked
 - [x] `external/axil-tty` builds against the site's externals
-- [x] `external/axil-nd` builds against the site's externals
+- [x]   `external/axil-nd` builds against the site's externals
 - [x] Phase 0 libxylem: `xy_claim_at` + `xy_region_at` +
   exact-region dispatch — **code complete and gated**; `tests/test_claim_at.c`
   green from clean, suite 17/17, and the ABI-3 rebuild paid tree-wide with the
   site + `axil-nd` gates green (see "CP-4 status" below). The
   `xy_region_plen` half was superseded early by `xy_current_region_plen` +
   `xy_region_exists`, shipped in CP-3; §4.5(2)
-- [ ] Phase 1 wired + verified
+- [x] Phase 1 wired + verified — **box corrected 2026-10-03 (§28.4 called it
+  stale; §30 closes the gap).** The wiring was §26; "verified" is now
+  automated: `tests/e2e/nd-ws-roundtrip.test.ts` drives the §26 round trip
+  (site register → QSESSION → `/nd` WS upgrade → `say pong` →
+  `You say: pong`) against the site process with axil-nd loaded.
 - [x] Phase 2 persistence + runtime load/unload — **done, 2026-10-03, gated
   green.** `struct st_rec` record table (string key, §22.1), `xy_claim_at`
   region creation, boot restore sorted by `plen` (§7.6/§22.2), seven commands
@@ -2592,3 +2596,65 @@ open work. Incidental: `axil-tty` now builds against in-tree axil headers
 the in-tree build — both suites previously tested stale `/usr` copies without
 saying so. Deliberately left open: axil never `waitpid()`s PTY children
 (zombie-only leak; regression test counts live children).
+
+## 30. G4 — §26's `/nd` WS round-trip, automated (2026-10-03) — PASS
+
+G4 is what made §11's "Phase 1 verified" mean automated rather than manual
+(§28.4). The test is `tests/e2e/nd-ws-roundtrip.test.ts`, pure Deno (no
+Chromium): register through the site's own `/auth/register` (login fallback
+when the fixed user exists), carry `QSESSION` on a hand-rolled `/nd`
+upgrade — Deno's WebSocket takes no headers — send a masked `say pong` frame,
+assert `You say: pong`. Masks use the zero key, the same shape
+`external/axil-nd/test.sh` sends; axil's WS parser fails unmasked client
+frames outright (`src/ws.c`). A second case pins the refusal path: an
+upgrade with no session must get `BCP.AUTH_FAILURE` in the protocol stream
+and then a closed socket, not a silent lingering connection.
+
+**The test uses a fixed identity (`e2e_nd_ws`) on purpose**: a unique-per-run
+user would create one new persisted nd player per run in `var/nd/std.db` —
+the same pollution class that made `var/song.types` break the *next* run's
+picker tests (§29). A returning player is reused by name, so repeat runs are
+idempotent.
+
+**What writing it down caught.** Three things, two of them mine, all
+corrected before this section was written:
+
+1. A loop bug in the test's own first draft: it sliced the response head off
+   at the blank line and then waited for `"\r\n\r\n"` inside what remained —
+   which can never arrive. Masked as a server hang for two runs (g4c/g4d);
+   the fixed error message now reports the bytes actually received.
+2. A blocking-read bug in the second draft: `conn.read()` with no deadline
+   meant a silent server hung the suite instead of failing it. Every wait in
+   the file now has a named deadline; the finally-block's `conn.close()`
+   releases the pending read.
+3. A real fail-silent decline in axil-nd (`src/libaxil-nd.c:on_axil_connect`):
+   with no `REMOTE_USER`, `auth()` sent `mcp_auth_fail` and the hook returned
+   0 — and axil's upgrade path takes no teardown action on a decline, so the
+   descriptor and its TCP socket stayed open indefinitely (`ws_init` in the
+   log, then silence, no disconnect ever). The decline path now sends the
+   close frame (`axil_ws_close`, which is also what flushes the queued 101)
+   and tears the descriptor down (`axil_close`; the post-hook flag write
+   lands on a zeroed slot that `descr_new()` memsets on reuse).
+
+Adjacent fix in the same pass (`src/world.c:nd_player_login`): the
+`axil_auth()` return was read as an auth rejection, so every site login
+bailed before `mcp_auth_success`/`mcp_actions`/`do_view` — a site user got a
+working connection but never received `AUTH_SUCCESS`, their room view, or
+their action table. Per `axil.h` that return is ADVISORY ("the connection is
+still marked authenticated"); REMOTE_USER's presence is what established the
+identity, and the no-passwd-entry fallback runs as the server's own identity,
+never uid 0. Kept visible as a WARN.
+
+**RED/GREEN.** With the fixes stashed (HEAD build): 1 passed / 1 failed —
+the authenticated round trip passes (say/pong was never broken; only the
+login-time frames were missing), and the unauthenticated case fails in 5s
+with "still open 5s after AUTH_FAILURE". With the fixes: 2/2 green in
+<1s both via direct `deno test` and via `make test-e2e FILE=`. axil-nd's own
+`test.sh` stays green (`axil-nd ok`), incl. S5.4/S5.5 and the `/tty` shell
+tests, and the site auth smoke subset (`auth-register`, `auth-logout`,
+`login-ret`, `song-add`) is green.
+
+**Not claimed.** The §29 full-e2e greens predate these axil-nd changes, so
+Phase 4's site gate wants one final full `make test` before its box is
+ticked — left unchecked deliberately. Suite hermeticity (`var/nd` growth,
+the picker-junk class) is still open; this test is idempotent, not isolated.
