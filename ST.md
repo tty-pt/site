@@ -1017,7 +1017,21 @@ SONAME stem (the loader appends `.so`).
   route, both recorded: every `do_*` reply must `eng_nd_flush` (§5.3, incl.
   fall-through exits); planet boots die by SIGTERM, not SEGV (§22.6
   shutdown note).
-- [ ] Phase 3 region tree + delegation
+- [x] Phase 3 region tree + delegation — **done, 2026-10-03, gated green.**
+  Anchored coarse-to-fine dispatch (`nd_scope_dispatch`: root `xy_call_self`
+  then descend the covering child, one shared scratch, §27), per-event anchors
+  (§7.4.1), `room` (create-or-find-and-enter, §27.3) + `deny` (dispatch-time,
+  subtree-scoped, §27.5) gated on `st_can_region`, legacy `eng_st_run`/`sl_hd`
+  dlopen path retired (§27.8), `xy_require_claim` deliberately unset (§27.7).
+  `external/axil-nd/test.sh` green 2× consecutively on the retired tree
+  (plus one hit of the known pre-existing persist-section
+  "boot B re-created the player" SIGSEGV flake, proven at HEAD with Phase 3
+  stashed); site `make`, `make test-fast`, G6 boundary/wasm/JS checks green.
+  Committed in-submodule as `external/axil-nd@3c00f3a` ("retire legacy
+  st_run/sl dlopen path", on top of `e7cb82a` "live nd" with the Phase 3
+  implementation + gate); site gitlink bumped. Design §27 (incl. §27.4
+  contract, §27.6 port bugs: dead `EF_WIZARD` gates, `on_del` post-delete
+  guard).
 - [ ] Phase 4 gates
 - [ ] archived + `npm --prefix .pi/extensions/pi-quest run zip`
 
@@ -2085,8 +2099,11 @@ ruler's act of adding to it — so `loadmod` is gated on *ownership of the
 region*, not on membership of the list. The two real code gates are both still
 there and neither is mine:
 
-- `xy_deny(name, XY_DENY_MODULE)` refuses the load inside libxylem
-  (`xy.h`, checked before `xy_install`), so an outer ruler's limit holds.
+- `xy_deny(name, XY_DENY_MODULE)` is consulted by the DISPATCH walker
+  (`module_is_denied()` is reached only from `libxylem-dispatch.c`), so a
+  denied module still loads and is still recorded -- it just never RUNS in
+  that subtree. An outer ruler's limit therefore holds at the point that
+  matters (execution), not at the point §7.5 imagined (loading).
 - ownership bounds the caller, inherited from `st_high_shift` (§7.5's own note).
 
 `modlist` reports the set, `unloadmod` removes from it and persists. Amends
@@ -2178,3 +2195,222 @@ The suite uses three planet-external modules precisely because they are
 commented out of `mods.load` and therefore absent from the root tier
 (`libnd-wts`, `libnd-stone` → planet 1; `libnd-biome` → planet 2). A root-tier
 module would make the cross-planet leak assertions pass vacuously (§15 ¶9).
+
+---
+
+## 27. Phase 3 record (2026-10-03) — region tree, delegation, anchored dispatch
+
+Phase 2 gave a planet a region and a persisted module set. Nothing yet *ran*
+per planet: `nd_events.c` still dispatched every event with a bare `xy_call`
+from the root, which reaches the whole tree (§4.4), so a planet's module fired
+for events anchored on the other side of the world. Phase 3 is the walk.
+
+### 27.1 Q10 answered, and the anchor table
+
+§10 Q10 is closed by §7.4.1: an event is scoped **iff** one of its own
+arguments names a room, directly (`ND_ANCHOR_ROOM`) or through an object's
+`location` (`ND_ANCHOR_OBJECT`); otherwise it is *declared global* and
+dispatches from the root, reaching every region exactly as before. Refusing was
+the other candidate and is wrong — `on_noise` and `on_empty_tile` carry no
+position in their signatures at all, so refusing would delete noise generation
+and empty-tile naming everywhere.
+
+Two resolutions deserve to be false at least once, because both look like
+"simplifications":
+
+- **An unmapped or absent room is not world 0.** `eng_map_where` *memsets* the
+  `pos_t` for a room it does not know, which would silently anchor a
+  positionless object in world 0's planet — a leak wearing the costume of a
+  success. The resolver therefore asks `eng_map_has()` first and reports "no
+  anchor" when the answer is no, which falls through to global.
+- **`on_enter`/`on_leave`/`on_spawn` anchor on the room argument, not the
+  object.** `object.c:339-340` fires leave-then-enter around a move, so by then
+  the mover's `location` is the *new* room: anchoring on it would make the
+  leave event fire in the room being entered into.
+
+### 27.2 The walk
+
+```
+nd_scope_dispatch(code, have_code, retp, adapter, args):
+    if !have_code:  return xy_call(retp, adapter, args)      /* global, root */
+
+    sc = { adapter, args, retp, code }
+    memset(retp, 0, adapter->ret_size)                        /* "nothing ran" */
+    return xy_with_region(XY_REGION_ROOT, 0, nd_scope_step, &sc)
+
+nd_scope_step(sc):                       /* current region = one chain member */
+    rc = xy_call_self(sc->scratch, sc->adapter, sc->args)     /* OWN modules */
+    if rc == XY_OK: memcpy(sc->ret, sc->scratch, ret_size); sc->ran = 1
+    child = narrowest child of the current region covering sc->code
+    if child: xy_with_region(child->id, child->plen, nd_scope_step, sc)
+```
+
+Coarse→finest falls out of the recursion rather than being sorted for: the root
+step runs first and each step descends afterwards. `xy_region_each` is the only
+public way to see children, and it enumerates *immediate* children with their
+`plen`, which is what makes the descent possible without an ancestor-chain API.
+The scratch buffer is one VLA of `adapter->ret_size` for the whole walk, not one
+per level: `xy_dispatch` zeroes `retp` when nothing ran, so a coarser region's
+value would be destroyed by a finer region that has no listener. Copying out
+only on `XY_OK` is what makes "last region that actually ran" the winner.
+
+Deny needs no work here and that is the point: `xy_dispatch` evaluates denies
+over the *ancestor chain* of the region it dispatches in (§4.4), so a
+cosmos-level `xy_deny` refuses planet-wide implementations without the walk
+knowing anything about it.
+
+### 27.3 What Phase 3 found missing before it could be tested
+
+Two gaps, both of which the gate hit before any assertion could be written:
+
+1. **A world was unreachable.** Every room inherits `pos[3]` from the room it was
+   carved from (`st_pos` → `pos_move`), and the fresh world's rooms all sit at
+   `pos[3] == 0`, so no in-game action reaches a non-zero world — §22.5 already
+   noted this when it gave the planet commands an explicit world argument. A
+   gate asserting "a module in planet A never fires for an event anchored in
+   planet B" needs an anchor *in* planet B, so the enabling primitive is
+   **`room <x> <y> <z> <w>`**: create-or-find the room at an explicit 4D
+   position, report its ref, AND enter it. The entering half is not optional:
+   `do_teleport` cannot make this move for a non-wizard (its `eng_controls`
+   path requires control of the caller's current location, and nothing in the
+   port ever grants `EF_WIZARD`), while `room` is already authorized for the
+   target region -- the same create-or-find-then-enter shape `eng_st_teleport`
+   already had. `planet 0` is legal and is the leftmost 16-bit child `(0, 16)` of
+   the root — CP-3's flagship identity — so world 0 is not a special case.
+2. **No non-root-tier module implements a hook.** §22.9's three planet modules
+   are `libnd-wts` and `libnd-biome` (no hooks at all — they are table-registration
+   modules by design, MODS.md §7) and `libnd-stone` (`on_add` + `on_spawn`).
+   Every module that implements `on_status`/`on_examine`/`on_icon` is in
+   `mods.load`, i.e. root-tier, and §15's ninth bullet is exactly the trap: a
+   root module fires for every planet by construction, so the negative assertion
+   would pass vacuously. The suite therefore builds a **probe module** per
+   planet, from one source, tagged by `-D` and reachable by bare soname on
+   `LD_LIBRARY_PATH` — `loadmod` rejects any name containing `/`, so the §0.4
+   by-path fixture shape cannot be used for a planet.
+
+### 27.4 Test contract — exact strings the Phase 3 gate greps
+
+Same discipline as §22.9: these are the handshake, and the test changes with the
+string if the string must change.
+
+| producer | string (fixed substring) |
+|---|---|
+| `do_room` | `room <ref> at <x> <y> <z> <w>` (created) / `room <ref> at <x> <y> <z> <w> (existing)` — and the caller is standing in it afterwards (`eng_enter`, same as `eng_st_teleport`) |
+| `do_room` refusal | `Usage: room <x> <y> <z> <w>` |
+| `do_room`/`do_deny` auth | `st_can_region`: owner of the target region, or the cosmos ruler (`cosmos.owner = 1`, the seeded first player). NOT wizard-only: nothing in the port ever sets `EF_WIZARD`, so every `st_is_wiz()` gate is currently dead code — a port bug (§27.6), not a design choice |
+| `do_deny` | `denied: <hook\|module> <what> in region id=0x%016llx plen=%u` |
+| probe, `xy_install` | `nd-scope-<tag>: installed plen=<n>` |
+| probe, each fired hook | `nd-scope-<tag>: on_status region plen=<n>` — one line per dispatch, on axil stderr |
+| `nd_scope_dispatch`, per region | `nd_scope: <hook> region id=0x%016llx plen=%u ran=%u` (WARN, debug) |
+
+The probe's line carries `xy_current_region_plen()` so the *region that ran it*
+is in the assertion, not merely the module's name: that is what distinguishes
+"planet A's module fired for planet A" from "planet A's module fired, from the
+cosmos, for planet B". `plen=0` is the root and `plen=16` a planet, so the
+number alone separates the two, and the gate asserts the number rather than a
+region id it would then have to keep in step with the id allocation.
+
+The probe reads the injected context as **`xy`**, not `xy_ctx`:
+`<ttypt/xy-mod.h>` declares `static struct xy_ctx xy;` and the host fills it in
+via `get_xy_ptr()` (`nd/xy.h` says as much in the `nd_last` note). A first
+out-of-tree probe compiled against the two-run failure
+`'xy_ctx' undeclared`, which is worth recording because the header's own
+warning — "`xy` is undeclared at the use site" if `xy-mod.h` is included second
+— makes the wrong name look like a *missing include* rather than a wrong
+identifier, and the fix would then have been to reorder includes for no reason.
+
+### 27.5 What the gate actually asserts
+
+Four assertions, and the shape of the negative one matters more than the
+positive one:
+
+1. **Positive, own planet.** A probe loaded into planet 1 fires for `status`
+   while standing in world 1, and reports `plen=16`.
+2. **Negative, both directions, as a delta.** With a probe in each planet,
+   standing in world 2 fires B and not A; after the reboot, standing in world 1
+   fires A and not B. Counting the marker as a **delta around one command**
+   (`nmarked` before, `ndsettle`, `nmarked` after) rather than a whole-file
+   `grep -c` is what makes absence provable: a file-wide count would be
+   satisfied by an earlier firing and would assert nothing about *this* event.
+3. **Reboot.** Both sets are restored by `st_init`, and the isolation still
+   holds from the restored sets rather than from ones the boot loaded by hand.
+4. **Delegation, scoped, dispatch-time.** `deny module libnd-scope-a 1`
+    answers `denied: module libnd-scope-a in region id=0x0001000000000000
+    plen=16`. The load still SUCCEEDS and the module is still recorded --
+    `module_is_denied()` is reached only from the dispatch walker, so there
+    is no load-time refusal to assert. What the gate asserts instead is
+    silence: a `status` in world 1 fires nothing from A, while the same `.so`
+    loaded into planet 2 still fires there. A deny that leaked would silence
+    planet 2 as well and fail the second half. The delegation block runs
+    AFTER the reboot assertions on purpose: a deny lives in region entries,
+    which are rebuilt from the st rows on every boot, so it does not survive
+    a reboot -- setting one first would break step 3 for the wrong reason.
+
+Two fixture details that were not obvious. The probes go in
+`$tmpdb/probe`, prepended to `LD_LIBRARY_PATH`, **not** in the engine's `lib/`
+as §27.3 first said: `dlopen` is what resolves a bare soname, and a
+`$tmpdb` subdirectory is self-cleaning via the existing trap while writing into
+`lib/` would leave untracked `.so`s behind. And each `status` truncates the
+transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
+`"%s (%u) type %u owner %u flags %u at %u\n"`) would otherwise match a line
+   left by an earlier command in the cumulative file — a false pass, not a false
+   fail, which is the worse direction for a gate.
+
+### 27.6 Two port bugs the gate tripped over
+
+1. **`EF_WIZARD` is never set.** No code path in the port grants it, so every
+   `st_is_wiz()` gate -- `do_room`/`do_deny` as first written, plus the
+   pre-existing `eng_controls` wizard clause, `do_clone`, `do_say`-style speech
+   gates -- is dead code: the commands exist but no player can ever reach them.
+   `room`/`deny` are therefore gated on `st_can_region` (target-region owner or
+   cosmos ruler) instead. Granting wizard status to anyone (first player?
+   cosmos ruler?) is a real design decision with squatting implications and is
+   left open -- but until it is made, "wizard-only" in this tree means
+   "unreachable".
+2. **`on_del` re-reads a deleted row.** `eng_object_move(ref, NOTHING)` calls
+   `nd_evt_del` AFTER `corm_del(obj_hd, ref)`, and the anchored wrapper's
+   `nd_anchor_object` did an unconditional `corm_get_copy` -- which aborts on
+   a miss. The pre-Phase-3 generated inline never read the object, so only the
+   anchored wrapper can hit this. Fixed with a `corm_get() == NULL` guard that
+   falls back to global dispatch: a deleted object has no location, but its
+   delete must still reach every region's `on_del`. Any future wrapper that
+   reads an object row needs the same guard if its firing site can run
+   post-delete.
+
+### 27.7 `xy_require_claim`: deliberately not set (decision, no code)
+
+§4.2's rule stands and Phase 3 adds no claim handler anywhere: a planet region
+must NOT set `require_claim`, because its content modules (probes, nd-shop,
+nd-stone) sit directly IN the planet region via the persisted set and
+`st_region_load`. Setting the gate would divert every such load into claim
+negotiation -- `_xy_claim_for_load` would allocate a child region per module
+and re-key it there -- which is the semantics for sub-rulers claiming land,
+not for a planet's own code. No command currently creates sub-rulers, so there
+is nothing to approve footprints for; if one ever does, THAT command sets the
+   handler, not the planet. The legacy `eng_st_run`/`sl_hd` dlopen table, which
+   was the only other loader, is retired in this same phase (§27.8).
+
+### 27.8 Legacy loader retired: `eng_st_run` / `sl_hd` / `stchown` / `streload`
+
+The old `(key, shift)` spacetime path is deleted, not deprecated:
+`st_open` (dlopen of `st/<shift>/<key>/libnd.so`), `st_put`, `st_dlclose`,
+`_st_run`/`eng_st_run` (dlsym-by-symbol across the `sl_hd` handle table),
+`st_get`/`_st_can`/`st_high_shift`, the `st_key`/`st_key_new`/`sthd_get`/
+`sthd_put` helpers, the `sl` corm table open/close, the `st_run` PAPI slot and
+`XY_DECL`/`XY_IMPL`, and the `stchown`/`streload` commands. What each piece
+was replaced by, so nobody re-adds one half of it:
+
+- symbol dispatch (`eng_st_run`) superseded by hook dispatch (`nd_scope_dispatch`
+  walk for events; `xy_load` + `xy_install` for loading);
+- per-shift ownership (`stchown`) superseded by per-region ownership
+  (`st_can` on `(id, plen)` rows, `planet` to claim);
+- per-shift reload (`streload`) superseded by `loadmod`/`unloadmod` on the
+  persisted set.
+
+The fresh-boot `eng_st_run(-1, "mod_init")` it removed was a no-op: `sl_hd` is
+empty on a fresh DB, and real module installation has always come from
+`nd_mods_load()` (mods.load) on every boot plus `mod_load_all()` (persisted
+sets) on restores. `struct nd` itself stays -- the rest of the vtable
+(`st_teleport`, map/object providers) is live -- and `eng_st_teleport`
+(create-or-find-then-enter) stays as the precedent `do_room`'s entering half
+follows.
