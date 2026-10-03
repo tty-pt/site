@@ -1026,12 +1026,15 @@ SONAME stem (the loader appends `.so`).
   `external/axil-nd/test.sh` green 2× consecutively on the retired tree
   (plus one hit of the known pre-existing persist-section
   "boot B re-created the player" SIGSEGV flake, proven at HEAD with Phase 3
-  stashed); site `make`, `make test-fast`, G6 boundary/wasm/JS checks green.
-  Committed in-submodule as `external/axil-nd@3c00f3a` ("retire legacy
-  st_run/sl dlopen path", on top of `e7cb82a` "live nd" with the Phase 3
-  implementation + gate); site gitlink bumped. Design §27 (incl. §27.4
+  stashed), then green 3× more after the room-cleanup guard in §27.6(3)
+  (plus one more hit of the same pre-existing flake); site `make`,
+  `make test-fast`, G6 boundary/wasm/JS checks green.
+  Committed in-submodule as `external/axil-nd@85af699` ("guard room-cleanup
+  deletion against stale contents pairs", on top of `3c00f3a` retiring the
+  legacy loader and `e7cb82a` "live nd" with the Phase 3 implementation +
+  gate); site gitlink bumped. Design §27 (incl. §27.4
   contract, §27.6 port bugs: dead `EF_WIZARD` gates, `on_del` post-delete
-  guard).
+  guard, stale-contents guard).
 - [ ] Phase 4 gates
 - [ ] archived + `npm --prefix .pi/extensions/pi-quest run zip`
 
@@ -2376,6 +2379,20 @@ transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
    delete must still reach every region's `on_del`. Any future wrapper that
    reads an object row needs the same guard if its firing site can run
    post-delete.
+3. **Room cleanup trusted a stale contents pair and deleted the player.**
+   `room`'s entering half abandons the boot start-room (RF_TEMP), so
+   `eng_room_clean` actually runs in the gate for the first time -- the old
+   flow never left the start room because `teleport` always refused. The old
+   room's `contents_hd` still listed the player (standing in the new room),
+   and `eng_object_move(old, NOTHING)` deleted every listed row without
+   checking: boot B aborted on `corm_get_copy: no record` right after
+   `eng_object_move 1 quirinpa -> 4294967295`. Fixed by collect-then-delete in
+   passes, verifying each candidate's `.location` against the dying room and
+   dropping (not deleting) gone rows, rows filed elsewhere, and self-pairs;
+   every pass removes at least one pair, so it terminates. The stale-pair
+   factory itself (a contents put without a matching drop somewhere in
+   login/restore/move) is pre-existing and unaudited -- same family as the
+   `obs_hd` repair note in `eng_object_move` -- and stays Phase 4 territory.
 
 ### 27.7 `xy_require_claim`: deliberately not set (decision, no code)
 
