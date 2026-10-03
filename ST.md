@@ -2546,3 +2546,49 @@ Still open from §27 and unchanged by this pass: the CP-4 deviation review, the
 wizard-grant decision, the stale-contents factory audit, and the pre-existing
 persist-section flake. G4 (automating §26's `/nd` WS round-trip) is untouched
 and is the natural next slice once G3 is unblocked.
+
+## 29. Phase 4 — G3 corruption root-caused and fixed (2026-10-03) — PASS
+
+The full record (evidence, dead ends, exact commands) is `FIX.md`; the
+vulnerability write-ups are `external/axil/SECURITY.md` (S5.4, S5.5). This
+section is the summary for the status trail.
+
+**Root cause (S5.4).** axil-tty keeps each PTY and its spawned `sh` in a
+`mux_state` keyed by raw fd number, but `on_axil_disconnect` was gated twice —
+`DF_CONNECTED` in `axil_close()`, `DF_AUTHENTICATED` in `axil_disconnect()` —
+against its own header contract ("fires whenever a descriptor is torn down").
+A PTY-bearing connection that never authenticated (raw telnet, non-upgraded
+`/tty`) was never cleaned up; the kernel recycled its fd to a site HTTP
+request, and `axil_tty_input()` fed that request to the leaked shell and
+suppressed dispatch. Wire proof: own-request echo, `\r\n`→`\r\n\r\n`
+(ICRNL+ONLCR), `\x1b[?2004l`, shell prompt, `command not found`. The site runs
+axil without `-A`, so WS `/tty` upgrades were unauthenticated — which is why
+the bug reproduced there and not in `axil-nd/test.sh` (which uses `-A`).
+
+**Fix.** Layer 1: both gates removed. Layer 2: per-accept `descr.generation` +
+`axil_generation()`, validated in `mux_get()`/`mux_wsz_get()` so a stale entry
+is inert on a recycled fd. Layer 3: `AXIL_TTY_TRACE` fail-loud. Regression
+test boots its own no-`-A` server, spawns a shell over WS `/tty`, closes it,
+and requires zero live children plus 20 clean recycled-fd responses —
+shown red (1 surviving child) on the vulnerable build, green on the fixed one.
+
+**Second finding (S5.5).** `axil_tty_input()` scanned whole head+body chunks
+for `0xFF`; a body byte read as IAC made nd slide the request head off and
+answer the POST with the telnet banner ("invalid HTTP version parsed",
+deterministic 6/6). Fix: chunks opening with an HTTP request line bypass
+telnet/RAW processing (nd; same gate for non-WS in axil-tty, since shell bytes
+ride WS frames). Regression-tested in `axil-nd/test.sh`; site
+`song-add-invalid-utf8` e2e now passes.
+
+**Verification.** `external/axil/test.sh` green, `external/axil-nd/test.sh`
+green (incl. S5.4/S5.5), site `make` + all four G6 scripts green, full e2e
+green twice with a clean byte-tap (`118 passed | 0 failed`, 0 GARBAGE both
+runs; pre-fix baseline was 84 GARBAGE). Two intermediate runs failed six
+song-type/picker tests on `var/song.types` pollution from the previous run —
+`scripts/gc-picker-junk.sh` before each green run; the wire was clean in all
+post-fix runs. Suite hermeticity (per-run store or post-run cleanup) remains
+open work. Incidental: `axil-tty` now builds against in-tree axil headers
+(`-I../axil/include`), and `axil-nd/test.sh` binds `PATH`/`LD_LIBRARY_PATH` to
+the in-tree build — both suites previously tested stale `/usr` copies without
+saying so. Deliberately left open: axil never `waitpid()`s PTY children
+(zombie-only leak; regression test counts live children).

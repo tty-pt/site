@@ -178,7 +178,7 @@ test-e2e: test-data-dirs
 	fi
 
 e2e-tests: test-data-dirs
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
+	AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
 
 restart:
 	@pkill -f 'axil -C .* mods/core/core' || true
@@ -235,7 +235,7 @@ test-capture: test-data-dirs
 	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
 	touch $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests started at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log; \
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all --parallel tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} deno test --allow-all --parallel tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests completed at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log
 	@echo "Test log saved to $(TEST_LOG_DIR)/test_$$timestamp.log"
 
