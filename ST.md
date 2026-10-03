@@ -1042,6 +1042,22 @@ SONAME stem (the loader appends `.so`).
 > submodules have since been committed and the site gitlinks bumped
 > (`axil-nd@bbe9002 "live nd"`, `libxylem@e769840 "live nd"`, site `947b20e`).
 > The CP-4 deviation review (§1768 "need review") is still outstanding.
+>
+> 2026-10-03 remaining-work note (Phase 3 done, site `01bd9ad`,
+> `axil-nd@85af699`): what is left, in dependency order —
+> 1. Phase 1 wired + verified (§11 unchecked);
+> 2. CP-4 deviation review — four libxylem decisions deviating from §4.5
+>    (§1855+, "still outstanding");
+> 3. wizard-grant decision (§27.6(1)) — until made, "wizard-only" means
+>    unreachable, and `st_can_region` carries all authorization;
+> 4. stale-contents factory audit (§27.6(3)) — the deletion guard treats the
+>    crash, but a contents put without a matching drop still exists somewhere
+>    in login/restore/move;
+> 5. pre-existing persist-section flake ("boot B re-created the player",
+>    proven at HEAD with Phase 3 stashed — SIGSEGV crash-persistence race);
+> 6. Phase 4 gates, then the archive step (quest zip tooling is broken here:
+>    `.pi/extensions/pi-quest` absent, `pi-quest` script packages the wrong
+>    tree — the Phase 3 bundle was assembled by hand).
 
 ---
 
