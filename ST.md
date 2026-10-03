@@ -2447,3 +2447,102 @@ sets) on restores. `struct nd` itself stays -- the rest of the vtable
 (`st_teleport`, map/object providers) is live -- and `eng_st_teleport`
 (create-or-find-then-enter) stays as the precedent `do_room`'s entering half
 follows.
+
+---
+
+## 28. Phase 4 attempt (2026-10-03) — G1/G2 GREEN, G3 BLOCKED by a real bug
+
+Phase 4 (§8) was started as its own quest. It did not finish: the site gate
+found a genuine defect. State at the stop point: `external/libxylem` and
+`external/axil-nd` are both green, the site `make` (including all four
+G6 scripts) is green, and `make test` is **red in e2e** — 48 passed / 70 failed
+under `--parallel`, 24 / 94 run serially.
+
+### 28.1 Green
+
+- **libxylem** — `make test`: every validation target passes, ending
+  `All validation targets passed!`. That covers `test_claim_at`,
+  `test_region_state` (coarse-to-fine walk measured at 3 vs 7 listeners,
+  `test_deny_semantics: PASS (EPERM below, OK at the denier)`),
+  `test_region_identity`, `test_ptr_args`, `test_xy_last_dispatch`,
+  `bench_dispatch`.
+- **axil-nd** — `make clean && make` links with 33 warnings, **all
+  pre-existing** (no new ones versus §27). `./test.sh` prints `axil-nd ok`;
+  since every assertion in that script is `exit 1`-on-fail, that is a full pass,
+  including the pre-existing testprobe `Error 2` line that is not a failure.
+- **axil-nd restart round-trip** — §8's "live claim/load/unload round-trip
+  that persists across restart" is **already automated**, so nothing new was
+  written for it: `test.sh:989` (reboot restores both sets), `:1042` (unload
+  one, reboot: planet 1 shrinks, planet 2 untouched), and §27's reboot
+  isolation and reboot-deny steps at `:1282+`.
+
+### 28.2 The blocker: site e2e breaks whenever axil-nd is loaded
+
+`make test`'s e2e stage fails, always with the same client-side signature, on
+`registerUser` (`tests/e2e/helpers/auth.ts:29`):
+
+```
+error: TypeError: fetch failed
+Caused by: Error: error sending request from 127.0.0.1:40024 for
+  http://localhost:8080/auth/register: client error (SendRequest):
+  invalid HTTP version parsed
+```
+
+**axil-nd's presence in the site process is necessary and sufficient for the
+failure.** Deleting the single `axil-nd` line from `mods.load` and re-running
+the same 12-file subset that scored 17 passed / 7 failed gives **24 passed / 0
+failed**; restoring the line brings the failures back. (`mods.load` is restored
+at HEAD; this is a diagnosis, not a proposed fix.)
+
+What it is **not**, each measured rather than assumed:
+- not the `--parallel` flag — it fails serially too (24/94);
+- not register volume — 25 sequential `POST /auth/register` in one Deno
+  process against the nd-loaded server is 25 ok / 0 bad;
+- not one bad endpoint — 6 sequential `GET /` are all 200, and
+  bud-hydration + content-security + csrf-stability alone pass 12/12 with nd
+  loaded. Failures need a long enough run, so this is cumulative/stateful.
+
+### 28.3 What is known about the mechanism, and what is not
+
+Established:
+- axil emits **no `Content-Length` and no `Connection` header** and closes the
+  socket after each response, so keep-alive is not in play. A raw socket probe
+  gets a clean 200 on request 1 and `BrokenPipeError` on request 2. This looks
+  like ordinary axil behaviour that Deno absorbs when nd is absent — most likely
+  the *precondition* the bug needs, not the bug itself.
+- axil-nd's hooks observe **all** site traffic: every site HTTP request appears
+  in the server log between `request_handle:` and `nd_disconnect:` lines, with
+  the raw `fd` churning 6/7/8 within a single page load.
+- `nd_disconnect` (`src/world.c:975`) runs its **full body for ordinary site
+  HTTP connections**: its only gate is `DF_AUTHENTICATED`, which axil-auth sets
+  on any logged-in site session. It then `corm_get`s a non-nd ref
+  (`eng_fd_player(fd)` → 0) and calls `nd_io_detach(fd)`. `nd_io_detach`
+  (`src/io.c:75`) no-ops when the fd has no entry, so the `WARN` spam is
+  probably harmless — but this is the first thing to re-examine and it is
+  **not** proven innocent.
+
+Not established: the actual corrupting write. Ordered leads:
+1. everything else `DF_AUTHENTICATED` site fds reach in nd's hooks —
+   `on_axil_parse` and `on_axil_update` touch shared state;
+2. nd's per-fd corm tables (`dplayer_hd`/`fds_hd`) are keyed by the raw `fd`,
+   and fds are **recycled** across connections in the site process;
+3. `on_axil_update` → `nd_update` ticks the nd world inside the site process on
+   every axil update.
+
+### 28.4 Two bookkeeping corrections this pass produced
+
+- **§11's `Phase 1 wired + verified` box is stale.** §26 (CP-2) is a PASS with
+  all eight §6.5 items implemented. §26 verified the full site **`make`** —
+  which includes all four G6 scripts — but *not* `make test`; the `/nd`
+  round-trip there was manual. That is how a red e2e suite survived Phases 1–3:
+  §11's Phase 2 and Phase 3 records both cite `make test-fast` /
+  `make unit-tests`, never `make test`.
+- Consequence for dating the bug: the G3 blocker may predate Phase 3 entirely.
+  The cheap way to date it is to bisect `axil-nd` (`6f1edb7` → `e7cb82a` →
+  `3c00f3a` → `85af699`) against the 12-file subset. Do **not** close G3 by
+  dropping `axil-nd` from `mods.load`: that deletes the feature Phase 1 wired.
+
+Still open from §27 and unchanged by this pass: the CP-4 deviation review, the
+wizard-grant decision, the stale-contents factory audit, and the pre-existing
+persist-section flake. G4 (automating §26's `/nd` WS round-trip) is untouched
+and is the natural next slice once G3 is unblocked.
