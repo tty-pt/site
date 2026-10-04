@@ -89,6 +89,8 @@ Deno.test({
     const page = await context.newPage();
     let grpTypeRaw = "";
     let gigTypeRaw = "";
+    let grpSongId: string | null = null;
+    let gigSongId: string | null = null;
 
     try {
       page.setDefaultNavigationTimeout(15000);
@@ -101,8 +103,8 @@ Deno.test({
       // Use unique type slugs to avoid collision with leftover songs from previous runs (per_page=10 pagination would hide the unique song among many "communion" rows)
       grpTypeRaw = `communion${unique}`;
       gigTypeRaw = `entry${unique}`;
-      const grpSongId = await createSong(page, grpSongTitle, grpTypeRaw);
-      const gigSongId = await createSong(page, gigSongTitle, gigTypeRaw);
+      grpSongId = await createSong(page, grpSongTitle, grpTypeRaw);
+      gigSongId = await createSong(page, gigSongTitle, gigTypeRaw);
 
       await page.goto(`${BASE}/grp/add`, GOTO);
       await page.locator('form[method="POST"] input[name="title"]').fill(`NoJS Grp ${unique}`);
@@ -177,6 +179,17 @@ Deno.test({
       );
     } finally {
       await browser.close();
+      // Delete the songs FIRST, then their unique types. Order matters:
+      // the server materializes type rows referenced by live songs, so
+      // removing only the type dirs resurrects them on the next read
+      // (the nojs_communion_<hex> immortals). With the songs gone the
+      // types stay dead. Same fs-remove precedent as zz-probe-POST.
+      for (const songId of [grpSongId, gigSongId]) {
+        if (!songId) continue;
+        try {
+          await Deno.remove(`var/song/${songId}`, { recursive: true });
+        } catch {}
+      }
       try {
         await Deno.remove(`var/song.types/${grpTypeRaw}`, { recursive: true });
       } catch {}

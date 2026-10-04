@@ -51,6 +51,13 @@ async function extractStateJson(
  * hyle-fragments.js reconciles the submit payload with the persistent
  * selection set). Fails fast with a dataset-repair hint instead of silently
  * creating junk entities — never uses the inline "Add" button for fixtures.
+ *
+ * The search is paged (15/page with sentinel infinite scroll), and earlier
+ * suite runs leave junk rows (e.g. communion<hex> from inline-add probes)
+ * that can push a canonical row off page 0. So after searching, this pages
+ * through the results (scrolling the rows panel to trip the sentinel)
+ * instead of assuming page 0 — the suite stays green regardless of how
+ * much junk other tests left behind.
  */
 async function pickRow(
   page: import("npm:playwright").Page,
@@ -69,20 +76,32 @@ async function pickRow(
       await details.first().locator("summary").first().click();
     }
   }
-  let cb = picker.locator(`input[name="${key}"][value="${slug}"]`);
-  if (await cb.count() === 0) {
+  const rowSelector = `input[name="${key}"][value="${slug}"]`;
+  const found = () => picker.locator(rowSelector).count().then((n) => n > 0);
+  if (!(await found())) {
     const search = picker.locator("input.hyle-picker-search");
     if (await search.count() > 0) {
       await search.fill(label);
       const rows = picker.locator(".hyle-picker-rows").first();
       await rows.waitFor({ state: "visible" });
-      for (let i = 0; i < 30; i++) {
-        if (await picker.locator(`input[name="${key}"][value="${slug}"]`).count() > 0) break;
-        await page.waitForTimeout(100);
+      // Page through the search results: the wanted row may sit past
+      // junk rows on later pages. Scrolling the panel (the scroll
+      // container -- .hyle-picker-rows itself does not scroll) trips the
+      // sentinel, which appends the next page (up to MAX_APPENDS=10
+      // client-side, ~165 rows — far past any junk volume seen).
+      for (let p = 0; p < 12 && !(await found()); p++) {
+        await picker.locator(".hyle-picker-panel").first().evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+        }).catch(() => {});
+        await picker.locator("[data-hyle-frag-sentinel]").first()
+          .evaluate((el) => el.scrollIntoView()).catch(() => {});
+        for (let i = 0; i < 5 && !(await found()); i++) {
+          await page.waitForTimeout(150);
+        }
       }
     }
-    cb = picker.locator(`input[name="${key}"][value="${slug}"]`);
   }
+  const cb = picker.locator(rowSelector);
   assert(
     await cb.count() > 0,
     `Picker option "${slug}" (label "${label}") not found on any page. ` +

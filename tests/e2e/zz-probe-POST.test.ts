@@ -51,13 +51,21 @@ Deno.test({
           el.dispatchEvent(new Event("change", { bubbles: true }));
         });
 
-      // 1. tick Communion from the rows (or search if on later page)
+      // 1. tick Communion from the rows (or search if on later page).
+      // Search results are paged and earlier runs leave junk rows that
+      // can push the canonical row off page 0, so scroll the rows panel
+      // to trip the sentinel and load further pages while waiting.
+      const rows0 = picker.locator(".hyle-picker-rows").first();
+      const panel0 = picker.locator(".hyle-picker-panel").first();
       if (await picker.locator('input[name="type"][value="communion"]').count() === 0) {
         const searchInit = picker.locator('input.hyle-picker-search');
         await searchInit.fill("Communion");
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 40; i++) {
           if (await picker.locator('input[name="type"][value="communion"]').count() > 0) break;
-          await page.waitForTimeout(100);
+          await panel0.evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+          }).catch(() => {});
+          await page.waitForTimeout(150);
         }
       }
       assert(
@@ -72,12 +80,16 @@ Deno.test({
       const search = picker.locator('input.hyle-picker-search');
       await search.fill("Entry");
       const rows = picker.locator('.hyle-picker-rows').first();
+      const panel = picker.locator('.hyle-picker-panel').first();
       await rows.waitFor({ state: "visible" });
       let text = "";
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 30; i++) {
         text = await rows.innerText().catch(() => "");
         if (text.includes("Entry")) break;
-        await page.waitForTimeout(100);
+        await panel.evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+        }).catch(() => {});
+        await page.waitForTimeout(150);
       }
       assert(text.includes("Entry"), `search should surface Entry, got: "${text.slice(0, 120)}"`);
       await tick("entry");
