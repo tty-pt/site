@@ -1078,8 +1078,9 @@ SONAME stem (the loader appends `.so`).
 > 1. Phase 1 wired + verified (§11 unchecked);
 > 2. CP-4 deviation review — **accepted 2026-10-04** (four libxylem decisions,
 >    §4.5 amended to match);
-> 3. wizard-grant decision (§27.6(1)) — until made, "wizard-only" means
->    unreachable, and `st_can_region` carries all authorization;
+> 3. wizard-grant decision (§27.6(1)) — **decided 2026-10-04: drop
+>    `EF_WIZARD`, gate on region ownership** (scope recorded at §27.6(1));
+>    until implemented, "wizard-only" still means unreachable;
 > 4. stale-contents factory audit (§27.6(3)) — the deletion guard treats the
 >    crash, but a contents put without a matching drop still exists somewhere
 >    in login/restore/move;
@@ -2414,8 +2415,32 @@ transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
    `room`/`deny` are therefore gated on `st_can_region` (target-region owner or
    cosmos ruler) instead. Granting wizard status to anyone (first player?
    cosmos ruler?) is a real design decision with squatting implications and is
-   left open -- but until it is made, "wizard-only" in this tree means
+   left open — but until it is made, "wizard-only" in this tree means
    "unreachable".
+   **DECIDED 2026-10-04: drop `EF_WIZARD`, gate on region ownership.**
+   The decision is not who to grant it to but to remove the concept: each
+   wizard check becomes a region-ownership check (the region's ruler, or a
+   ruler above it — `st_can_region` semantics), and `st_is_wiz` goes away.
+   The squatting question dissolves with it: no global privilege remains
+   to squat; authority is always scoped to a region someone rules.
+   Implementation scope (all in `external/axil-nd`): delete the
+   `EF_WIZARD` enumerators (`include/uapi/object.h:40`,
+   `include/nd/xy-types.h:104`), delete `st_is_wiz`
+   (`src/spacetime.c:1487`) and its override at the five
+   `st_can(...) && !st_is_wiz(...)` sites (`spacetime.c:1510,1620,1631,
+   1929,1985,2059`, incl. `st_can_region` itself), and re-gate the nine
+   command-level sites onto ownership: `do_wall` (`speech.c:62`),
+   `do_owned` (`look.c:91`), `do_clone` (`object.c:396`), `do_create`
+   (`object.c:472`), `do_chown` (`object.c:515`), `eng_payfor`
+   (`entity.c:70`), `eng_controls` (`entity.c:96`), `eng_look_at`
+   (`entity.c:163`), `do_ban` (`wiz.c:75`). Open sub-question for
+   implementation: the *scope* of global acts — `wall` broadcasts
+   world-wide and `ban` excludes from somewhere, so "the region" needs an
+   answer per command (own region? cosmos for world-wide? target's region
+   for ban?). `room`/`deny` already gate on `st_can_region` and are the
+   template. Gate with `test.sh`: each re-gated command needs RED
+   (non-owner refused) + GREEN (owner acts), since every one of these
+   paths is untested dead code today.
 2. **`on_del` re-reads a deleted row.** `eng_object_move(ref, NOTHING)` calls
    `nd_evt_del` AFTER `corm_del(obj_hd, ref)`, and the anchored wrapper's
    `nd_anchor_object` did an unconditional `corm_get_copy` -- which aborts on
