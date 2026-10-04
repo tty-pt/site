@@ -2441,6 +2441,20 @@ transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
    template. Gate with `test.sh`: each re-gated command needs RED
    (non-owner refused) + GREEN (owner acts), since every one of these
    paths is untested dead code today.
+   Scoping rule for the global acts, decided 2026-10-04: `wall` broadcasts
+   to a region *and all its subregions*, and `ban` excludes from a region
+   *and all its subregions* the same way. The region is selectable
+   (`wall <region> <msg>`, `ban <player> <region>` — selector syntax is
+   implementation detail; planet/world number or coordinates, matching how
+   `room`/`planet` already name regions); by default both act on *all of
+   the actor's own regions* (every region they rule, each with its whole
+   subtree). So a planet ruler walls/bans planet-wide out of the box, the
+   cosmos ruler world-wide, and nobody broadcasts anywhere they rule
+   nothing. Implementation notes: "all my regions" needs a tree walk
+   (`xy_region_each`, filter by `st_can`) since ownership is per-region;
+   ban's enforcement points (movement/teleport/look — where an excluded
+   player is actually stopped) are still open, and `deny` (module-level,
+   dispatch-time) is the neighboring mechanism, not the same one.
 2. **`on_del` re-reads a deleted row.** `eng_object_move(ref, NOTHING)` calls
    `nd_evt_del` AFTER `corm_del(obj_hd, ref)`, and the anchored wrapper's
    `nd_anchor_object` did an unconditional `corm_get_copy` -- which aborts on
