@@ -1039,7 +1039,16 @@ SONAME stem (the loader appends `.so`).
   gate); site gitlink bumped. Design §27 (incl. §27.4
   contract, §27.6 port bugs: dead `EF_WIZARD` gates, `on_del` post-delete
   guard, stale-contents guard).
-- [ ] Phase 4 gates
+- [x] Phase 4 gates — **done, 2026-10-04.** Full `make test` green,
+  `120 passed | 0 failed`, rc=0 (boundary + unit-c + unit + pages +
+  integration + e2e in one invocation, `DENO_JOBS=4`, `gc-picker-junk.sh`
+  first: 92→41 rows). Closes the "Not claimed" caveat in §30: the gate now
+  postdates the G4 axil-nd changes. Two flakes found and fixed en route —
+  both recorded in §31, both with RED→GREEN evidence, neither in product
+  code. Post-gate store: 47 rows, zero `nojs_*` songs, one resurrected
+  `entry<hex>` row kept alive by pre-existing `draft_preserve`/`omni_js`/
+  `framework` songs (§31) — harmless at that volume, next in line for the
+  hermeticity follow-up.
 - [ ] archived + `npm --prefix .pi/extensions/pi-quest run zip`
 
 > 2026-10-03 note: §26's "Nothing has been committed" is stale — both
@@ -2658,3 +2667,67 @@ tests, and the site auth smoke subset (`auth-register`, `auth-logout`,
 Phase 4's site gate wants one final full `make test` before its box is
 ticked — left unchecked deliberately. Suite hermeticity (`var/nd` growth,
 the picker-junk class) is still open; this test is idempotent, not isolated.
+
+## 31. Phase 4 gate run (2026-10-04) — GREEN, and the two flakes it took down
+
+The gate (§8: site `make test`) went red twice on the way to green, each
+red a real find, each fixed with its own RED→GREEN. Neither fix touches
+product code — both are in the tests — and both misdiagnoses are recorded
+because the pattern (confident server-side theory, refuted by bytes) has
+now hit three times in this tree.
+
+**Flake 1: the G4 test's own framing bug.** The unauthenticated case failed
+intermittently (2/2 full-suite runs, then ~1-in-4 in isolation): fast EOF,
+"no AUTH_FAILURE", server logs identical between green and red
+(`fbcp_auth_failure ... ret=9` both ways — temporary WARNs, since
+reverted; axil-nd is byte-identical to `0555d14` again). The wire truth,
+from a hex dump of the client's own leftover buffer: 32 bytes —
+three telnet-negotiation frames from `axil_tty_attach` (`ff fc 01 /
+ff fc 03 / ff fd 1f`, WS-framed), the AUTH_FAILURE frame
+(`82 07 23 62 05 ...`, present and correct), and the close frame twice
+(`axil_ws_close` plus `axil_close`'s own). The server sent everything.
+The client only parsed `buf` *after* a fresh socket read: when all bytes
+arrived with the handshake head in one segment, the first read was
+already EOF and the 32-byte leftover sat unexamined. Case 1 never hit it
+(it writes first, forcing a later read that parses everything). Fix
+(`37e37a4`): check the upgrade leftover for the refusal before reading.
+15/15 green in isolation afterwards, then green in-suite. Lesson kept:
+the EAGAIN-queue-drop theory (axil_close frees `d->remaining`
+unflushed) was plausible, load-correlated, and wrong — the bytes were
+never queued. A flush-then-close primitive for declines stays a
+suspected-but-unproven hardening, not a fix.
+
+**Flake 2: immortal picker junk (ordering-dependent).** `song-type` (7) +
+`zz-probe-POST` (1) failed whenever junk-producers ran first under
+`--parallel`: 20+ `communion<hex>` rows crowd the canonical `communion`
+off picker search page 0, and the tests only ever looked at page 0.
+Root cause, in two layers: (a) the producer is `picker-nojs.test.ts`,
+which mints one `communion<hex>`/`entry<hex>` pair per run and deleted
+only the type dirs in `finally` — but the server materializes type rows
+referenced by live songs, so the undeleted `nojs_*` songs resurrected
+them on the next read; 25 pairs accumulated that `gc-picker-junk.sh`
+could never kill (it only sweeps `song.types`, never the referencing
+songs). One-time cleanup: the 50 `nojs_(communion|entry)_*` song dirs,
+then gc (143→41). (b) the consumer assumed page 0. Fixes (`e42547e`):
+`picker-nojs` deletes its two songs *before* their types (songs-first
+order is load-bearing; fs-remove follows the `zz-probe-POST`
+precedent); `song-type:pickRow` and the probe's waits page through
+results by scrolling `.hyle-picker-panel` — the scroll container;
+`.hyle-picker-rows` does not scroll, which is why the first attempt
+moved nothing — tripping the sentinel (proven: `pick_page_type=1`
+fetches in the log). Verified against 20 faithful empty-label junk
+rows: 10/10 green with page-1 fetches. The suite's
+`--parallel` schedule no longer matters for these tests.
+
+**Deliberately not done here.** The sentinel is a zero-height empty div
+with no CSS sizing (`picker.c:229`, no `hyle-picker-more` rule) — the
+infinite scroll it anchors likely under-fires in production too; fixing
+that is a product change with blast radius on every picker-counting
+test, so it stays open. Same for `picker-create-records`' songs (they
+reference the `genrejazz`/`keyenter` families — the next resurrection
+time bomb, different search terms), the old `draft_preserve`/`omni_js`/
+`framework` songs referencing one dead `entry<hex>` slug, the
+`xy_last`/region-destruction items, and the `/usr` install (no
+passwordless sudo here; gates pin `LD_LIBRARY_PATH` in-tree, so they
+are unaffected — but anything running the installed copies tests the
+older build).
