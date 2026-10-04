@@ -1063,6 +1063,22 @@ SONAME stem (the loader appends `.so`).
   `entry<hex>` row kept alive by pre-existing `draft_preserve`/`omni_js`/
   `framework` songs (§31) — harmless at that volume, next in line for the
   hermeticity follow-up.
+- [x] `EF_WIZARD` removed, region ownership replaces it — **done, 2026-10-04.**
+  The four decisions the wizard question left open are settled at §27.6(1)
+  (`eng_payfor` clause deleted; `eng_controls` four cases with ownership first
+  and the one player-in-region exception; `eng_look_at` open to a region's
+  ruler; bans in a separate `region_ban` table enforced entry-only at
+  `eng_enter`, login allowed, `EF_BAN` retired with a one-time migration).
+  `external/axil-nd/test.sh` green 2× consecutively with the new S6/S7/S8
+  gates (region primitives, the seven re-gated commands owner-yes/guest-no,
+  and the full ban lifecycle including reboot persistence).
+  **The pre-existing persist-section flake is closed, and it was never a
+  flake**: `close_all()` closed every corm map before the process exited, and
+  libcorm's exit-time save rewrites the store at whatever size is left in its
+  file cache — down to the bare 16-byte header. Symptom
+  "boot B re-created the player" / "boot C lost planet 1's surviving module",
+  §22.6's "planet boots die by SIGTERM" note, and the S8 reboot gate were all
+  this one bug; §27.6(1) records the mechanism and the fix.
 - [ ] archived + `npm --prefix .pi/extensions/pi-quest run zip`
 
 > 2026-10-03 note: §26's "Nothing has been committed" is stale — both
@@ -1080,12 +1096,16 @@ SONAME stem (the loader appends `.so`).
 >    §4.5 amended to match);
 > 3. wizard-grant decision (§27.6(1)) — **decided 2026-10-04: drop
 >    `EF_WIZARD`, gate on region ownership** (scope recorded at §27.6(1));
->    until implemented, "wizard-only" still means unreachable;
+>    **implemented and gated 2026-10-04** — the four remaining sub-decisions
+>    are settled in §27.6(1) and `EF_WIZARD` no longer exists;
 > 4. stale-contents factory audit (§27.6(3)) — the deletion guard treats the
 >    crash, but a contents put without a matching drop still exists somewhere
 >    in login/restore/move;
 > 5. pre-existing persist-section flake ("boot B re-created the player",
 >    proven at HEAD with Phase 3 stashed — SIGSEGV crash-persistence race);
+>    **resolved 2026-10-04: not a SIGSEGV race at all** — it was `close_all()`
+>    closing the maps before libcorm's exit-time save rewrote the store at
+>    the reduced size; see §27.6(1);
 > 6. Phase 4 gates, then the archive step (quest zip tooling is broken here:
 >    `.pi/extensions/pi-quest` absent, `pi-quest` script packages the wrong
 >    tree — the Phase 3 bundle was assembled by hand).
@@ -2452,9 +2472,61 @@ transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
    cosmos ruler world-wide, and nobody broadcasts anywhere they rule
    nothing. Implementation notes: "all my regions" needs a tree walk
    (`xy_region_each`, filter by `st_can`) since ownership is per-region;
-   ban's enforcement points (movement/teleport/look — where an excluded
-   player is actually stopped) are still open, and `deny` (module-level,
-   dispatch-time) is the neighboring mechanism, not the same one.
+   `deny` (module-level, dispatch-time) is the neighboring mechanism, not
+   the same one.
+
+   **The four remaining decisions, settled 2026-10-04** (implementation and
+   gates in `external/axil-nd`; full evidence in `NO_WIZ.md` §5-§7, §13-§14):
+
+   a. **`eng_payfor`: the wizard clause is deleted outright.** Everyone pays
+      from their own `value`; there is no region-scoped equivalent, because
+      payment is about the payer's purse, not about territory. No
+      `st_can_region` check is added here.
+
+   b. **`eng_controls`: four cases, ownership first.** A player's property is
+      never overridden by rulership -- possession stays authoritative -- with
+      exactly one exception: a region ruler may move a *player* standing
+      inside their region. Rulership is instead the authority over things
+      nobody owns (ROOT-owned rooms, unclaimed items), which is what keeps
+      `teleport` usable at all. A ruler still cannot move a player's
+      *inventory*: `eng_controls` gates the actor, and the things it carries
+      are the actor's.
+
+   c. **`eng_look_at`: a ruler may inspect entities in their region** (and its
+      subtree, per the scoping rule above). This is what makes the map usable
+      for a planet ruler without granting a global `look` everywhere.
+
+   d. **Ban storage and enforcement: a separate `region_ban` corm table keyed
+      `(player, region id, plen)`, enforced at `eng_enter` only, login
+      allowed.** Not a widened `struct st_rec`: the ban set has its own
+      cardinality and its own lifetime (it outlives the region row it names,
+      and a region can be recreated), and keeping it out of `st_rec` means
+      `st_restore` does not have to decide what an un-restorable ban means.
+      Enforcement is entry-only, at the single chokepoint every arrival
+      already passes through, so it cannot be routed around: the refused
+      mover stays put and is told which region refused them, and the ban does
+      not leak sideways into regions the mover may still enter. **Login is
+      NOT refused** -- a banned player still connects, still exists, and is
+      stopped on arrival; that keeps "banned" a statement about place rather
+      than about existence, and it keeps the exclusion auditable (`status` in
+      the region they *are* in). `EF_BAN` is removed from both headers; a
+      one-time `st_ban_migrate()` re-keys any pre-existing root-wide row
+      through the retired bit, read as an `EF_BAN_LEGACY` literal.
+
+   **Store persistence for the ban table is a libcorm constraint, not an
+   engine choice.** libcorm saves every file-backed map from a destructor at
+   process exit (`corm.h:181`), and a save over *closed* maps recomputes the
+   store size from what is left in corm's file cache and rewrites the file at
+   that size -- with everything closed, that is the bare 16-byte header. So
+   `close_all()` saves once and closes nothing (`src/world.c`): every path
+   into it exits anyway, and closing maps only guaranteed the destructor's
+   save would truncate the store. This was measured as a 6347 -> 16 byte
+   planet db across a plain SIGTERM, and as "player, region and ban all gone"
+   in a hand run where a correct 8461-byte image became 3200 bytes of seeds.
+   The symptom is invisible while a file's maps are all closed (the file
+   leaves corm's cache and the save finds nothing to write) and destructive
+   the moment one map is deliberately left open -- which is exactly why it
+   looked like a ban-table bug.
 2. **`on_del` re-reads a deleted row.** `eng_object_move(ref, NOTHING)` calls
    `nd_evt_del` AFTER `corm_del(obj_hd, ref)`, and the anchored wrapper's
    `nd_anchor_object` did an unconditional `corm_get_copy` -- which aborts on
