@@ -405,12 +405,18 @@ for that chaining to become observable, because each region gets its own dispatc
 Four, all additive:
 
 1. **`xy_claim_at(uint64_t id, uint8_t plen, xy_claim_handler_fn_t *fn, void *ud)`**
+   → `int` status, **not** the region (CP-4 review 2026-10-04: accepted).
    Create the region `(id, plen)`.
    - Find the nearest existing ancestor `A` = the region with the largest
      `plen_A < plen` such that `(id & mask(plen_A)) == A->id`. The root always
      qualifies.
    - If a region with exactly this `id` and `plen` already exists: succeed
-     idempotently, make it current, return it.
+     idempotently, install `fn`/`ud` even on this path (a re-claim must not
+     silently discard the handler), make it current, and return status.
+     The id is already an argument so returning it would be redundant —
+     and one code could not distinguish misaligned / `plen > 64` /
+     no-new-bits. (CP-4 review 2026-10-04: accepted; §4.5(1)'s "return it"
+     predates that lesson.)
    - Reject `plen > 64`, `(id & high-bit-mask(plen)) != id` (misaligned), and
      `plen <= plen_A` (not strictly wider than the nearest ancestor).
      ~~and `id == A->id` (no new bits)~~ — **wrong as originally written, see
@@ -424,8 +430,8 @@ Four, all additive:
      planets siblings of each other rather than of the root.
    - Otherwise allocate the entry (`depth = A->depth + 1`, `owner_path = NULL`),
      wire it into `A->children_head`, `corm_put(region_hd, …)`,
-     `region_mark_subtree_dirty(A)`, `region_dispatch_gen_bump(A)`, optionally
-     install `fn`/`ud` as the child's claim handler, and make it current.
+     `region_mark_subtree_dirty(A)`, `region_dispatch_gen_bump(A)`, install
+     `fn`/`ud` as the child's claim handler, and make it current.
    - Does **not** create intermediate ancestors: §4.3(1) makes a multi-bit jump
      legal, so the region is created directly under `A`.
 2. ~~**`xy_region_plen(uint64_t id)`** → `uint8_t` (or `XY_ERR_*`).~~ **Dropped
@@ -445,15 +451,23 @@ Four, all additive:
    `xy_region_each` now yields `(child_id, plen)` per child, so the widths are
    available without a lookup at all. Rationale and the full deviation record:
    `CP3.md` §2 B.
-3. **`xy_region_at(uint64_t prefix_id, uint8_t plen)`** → id of the **deepest**
-   existing region whose prefix covers `(prefix_id, plen)`, else
-   `XY_REGION_INVALID`. This is the engine's "which region is this point in?"
-   primitive.
-4. **A self-scope dispatch.** Smallest form: `xy_call_self()` alongside
-   `xy_call()`, backed by a dispatch rebuild that uses the region's *own* modules
-   only. Alternative form: an `xy_scope_t` parameter threaded through
-   `xy_with_region`. Either lets §8.4 walk the ancestor chain coarse-to-fine and
-   land one turn in each region instead of re-dispatching the whole subtree.
+3. **`xy_region_at(uint64_t prefix_id, uint8_t plen, uint8_t *region_plen)`**
+   → id of the **deepest** existing region whose prefix covers
+   `(prefix_id, plen)` (else `XY_REGION_INVALID`), with the covering
+   region's width returned through `region_plen` (CP-4 review 2026-10-04:
+   accepted). Returning only the id reproduces exactly the ambiguity CP-3
+   existed to remove — the covering region can sit at a width the caller
+   did not pass, and `(0,0)`/`(0,16)` share an id — so without the
+   out-param the caller could not `xy_with_region()` to what it found.
+   This is the engine's "which region is this point in?" primitive.
+4. **A self-scope dispatch, as `XY_CALL_SELF`.** (CP-4 review 2026-10-04:
+   the macro form chosen, mirroring the existing `XY_CALL`, over a scope
+   parameter threaded through `xy_with_region`.) Smallest form:
+   `xy_call_self()` alongside `xy_call()`, backed by a dispatch rebuild
+   that uses the region's *own* modules only. ~~Alternative form: an
+   `xy_scope_t` parameter threaded through `xy_with_region`.~~ Either lets
+   §8.4 walk the ancestor chain coarse-to-fine and land one turn in each
+   region instead of re-dispatching the whole subtree.
 
 Surface all four in `xy.h`, `xy_t`, `xy-mod.h`; document in `docs/api.md`.
 
@@ -1054,13 +1068,16 @@ SONAME stem (the loader appends `.so`).
 > 2026-10-03 note: §26's "Nothing has been committed" is stale — both
 > submodules have since been committed and the site gitlinks bumped
 > (`axil-nd@bbe9002 "live nd"`, `libxylem@e769840 "live nd"`, site `947b20e`).
-> The CP-4 deviation review (§1768 "need review") is still outstanding.
+> The CP-4 deviation review (§1768 "need review") is accepted 2026-10-04:
+> all four deviations stand, and §4.5(1)/(3)/(4) now state the shipped
+> behavior (int status + handler install on the idempotent path, plen
+> out-param, `XY_CALL_SELF`).
 >
 > 2026-10-03 remaining-work note (Phase 3 done, site `01bd9ad`,
 > `axil-nd@85af699`): what is left, in dependency order —
 > 1. Phase 1 wired + verified (§11 unchecked);
-> 2. CP-4 deviation review — four libxylem decisions deviating from §4.5
->    (§1855+, "still outstanding");
+> 2. CP-4 deviation review — **accepted 2026-10-04** (four libxylem decisions,
+>    §4.5 amended to match);
 > 3. wizard-grant decision (§27.6(1)) — until made, "wizard-only" means
 >    unreachable, and `st_can_region` carries all authorization;
 > 4. stale-contents factory audit (§27.6(3)) — the deletion guard treats the
@@ -1881,7 +1898,7 @@ CP-4 scopes need it anyway. `test_deny_semantics` is what pins it shut.
 **Still outstanding** (unchanged from before, none of it libxylem work):
 the ABI-3 downstream rebuild below, the Rust mirror, and the API docs.
 
-### Four decisions in that code that deviate from §4.5 and need review
+### Four decisions in that code that deviated from §4.5 — reviewed and accepted (2026-10-04)
 
 1. **`region_mask()` masks the HIGH `plen` bits, not the low ones.** This is the
    load-bearing one. §4.5(1) writes the ancestor test as
