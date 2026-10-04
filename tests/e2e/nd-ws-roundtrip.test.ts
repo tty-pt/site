@@ -305,25 +305,40 @@ Deno.test({
       let buf = await upgrade(conn);
       const scratch = new Uint8Array(16384);
 
-      // 1. the refusal frame
+      // 1. the refusal frame. It may already have arrived with the
+      // handshake head in a single segment (the server writes 101,
+      // negotiation, refusal and close back to back on an idle
+      // loopback), so the leftover is parsed BEFORE the first read:
+      // parsing only after a fresh read misses a refusal that arrived
+      // with the head, and the next read is already EOF.
+      const isRefusal = (f: Frame): boolean => {
+        if (f.opcode !== 0x1 && f.opcode !== 0x2) return false;
+        const iden = bcpIden(decoder.decode(f.payload));
+        return iden === BCP.AUTH_FAILURE || iden === BCP.AUTH_SUCCESS;
+      };
       let refused = false;
+      let eofBeforeRefusal = false;
       const until = Date.now() + 10000;
-      while (Date.now() < until && !refused) {
-        const remain = until - Date.now();
-        const chunk = await readSomeDeadline(conn, scratch, remain, "AUTH_FAILURE frame");
-        if (chunk === null) break;
-        buf = concat(buf, chunk);
-        const { frames, rest } = takeFrames(buf);
-        buf = rest;
-        for (const f of frames) {
-          if (f.opcode !== 0x1 && f.opcode !== 0x2) continue;
-          const iden = bcpIden(decoder.decode(f.payload));
-          if (iden === BCP.AUTH_FAILURE || iden === BCP.AUTH_SUCCESS) refused = true;
+      for (;;) {
+        const parsed = takeFrames(buf);
+        buf = parsed.rest;
+        if (parsed.frames.some(isRefusal)) {
+          refused = true;
+          break;
         }
+        if (Date.now() >= until) break;
+        const chunk = await readSomeDeadline(conn, scratch, until - Date.now(), "AUTH_FAILURE frame");
+        if (chunk === null) {
+          eofBeforeRefusal = true;
+          break;
+        }
+        buf = concat(buf, chunk);
       }
       if (!refused) {
         throw new Error(
-          "nd-ws: unauthenticated /nd upgrade got no AUTH_FAILURE frame within 10s",
+          eofBeforeRefusal
+            ? "nd-ws: server closed the unauthenticated /nd upgrade before any AUTH_FAILURE frame (EOF with no refusal)"
+            : "nd-ws: unauthenticated /nd upgrade got no AUTH_FAILURE frame within 10s (socket stayed open and silent)",
         );
       }
 
