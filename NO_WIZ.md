@@ -175,7 +175,7 @@ every path.
 
 | # | Site | Gate |
 |---|---|---|
-| 1 | `do_wall` `speech.c:54` | selector: `wall world <n> <msg>` / `wall all <msg>` (reuse `st_cmd_region`, `spacetime.c:1577`). Deliver **only** to `TYPE_ENTITY` recipients whose region the selection covers; dedup by first-hit so a player matching two of my regions gets one copy. `argscat` swallows `argv[1..]`, which is why the selector needs an explicit keyword — `wall hello 3` must be one message, not world 3 |
+| 1 | `do_wall` `speech.c:54` | selector: `wall world <n> <msg>` / `wall all <msg>` (reuse `st_cmd_region`, `spacetime.c:1577`). Deliver **only** to `TYPE_ENTITY` recipients whose region the selection covers; dedup by first-hit so a player matching two of my regions gets one copy. `argscat` swallows `argv[1..]`, which is why the selector needs an explicit keyword — `wall hello 3` must be one message, not world 3. **SUPERSEDED by CMD_REGION.md §5.4 (implemented 2026-10-05):** the `all`/`world <n>` keywords are gone, replaced by one bare-world-number-or-`cosmos` dialect shared with the other six commands. `wall` parses its own leading token (`argc`-testing was tried and reverted — axil inflates `argc`, so the "something follows" test is on the argv *string*), and a bare `wall` resolves through the shared `st_target_or_position()`. This row is the record as executed at the time; do not rewrite it. |
 | 2 | `do_owned` `look.c:85` | no-arg form unchanged (self). `<name>` requires `st_can_region(me, region_of(victim))` **and** printed rows filtered to in-scope objects — otherwise a ruler enumerates world-wide ownership |
 | 3 | `do_clone` `object.c:391` | region of the *cloned object* in scope, plus the existing `eng_controls` on the source |
 | 4 | `do_create` `object.c:453` | creator's own region. It calls `eng_object_add(..., where_ref = player_ref, ...)`, so the object lands in their inventory — the scope is already honest, no placement question |
@@ -421,10 +421,10 @@ a follow-up.
 |---|---|---|
 | Unchecked `argv` indexing | `look.c:88`, `object.c:394`, `object.c:514-516`, `wiz.c:73` | bare `owned`/`clone`/`chown`/`ban` are NULL-deref crashes. Unreachable until the gates open. **`do_teleport` DONE (`70fc37c`)** — and it was not merely a latent crash, see §14.5 |
 | No `eng_nd_flush` on any path | all six commands | convention per `do_room`/`do_planet` (§5.3). `axil_flush` runs after every command (`libaxil.c:1136`), so for a *reachable* command this is **convention, not a hang fix** — do not claim otherwise in the commit. **`do_teleport` DONE (`70fc37c`), and there it was neither convention nor cosmetic**: it had no flush at all, and that is the entire reason the command looked mute (§14.5.3) |
-| `do_ban` sets the flag on the **banmer** | `wiz.c:95-96` | `eng_ent_set(player_ref, &evictim)` |
-| `do_owned` silent fall-through | `look.c:88-94` | a non-ruler passing a name gets *their own* list plus "N objects found" — misleading, not a refusal |
-| `do_wall` writes to rooms and items | `speech.c:71-76` | harmless today (`eng_nd_write` drops `fd < 0`) but semantically wrong |
-| `eng_ent_get` returns uninitialized `ENT` | `entity.c:25-31` | UB in the authorization path (§2) |
+| `do_ban` sets the flag on the **banmer** | `wiz.c:95-96` | `eng_ent_set(player_ref, &evictim)`. **DONE (`dd96947`)** — the ban model (§7) replaced the flag with a region-keyed row, so there is no flag to mis-set |
+| `do_owned` silent fall-through | `look.c:88-94` | a non-ruler passing a name gets *their own* list plus "N objects found" — misleading, not a refusal. **DONE (`dd96947`)** — S7 leg 6 pins the named refusal |
+| `do_wall` writes to rooms and items | `speech.c:71-76` | harmless today (`eng_nd_write` drops `fd < 0`) but semantically wrong. **DONE (`dd96947`)** — the delivery loop filters `TYPE_ENTITY` only |
+| `eng_ent_get` returns uninitialized `ENT` | `entity.c:25-31` | UB in the authorization path (§2). **DONE (`dd96947`)** — the callee zeroes the struct on a miss |
 
 **Deliberately out of scope:** the three `fprintf(stderr, ...)` debug artifacts in
 the object path — `st_room_at` (`spacetime.c:503`), `eng_object_add`
@@ -472,14 +472,20 @@ survived.
 3. **The matcher blockers (§14)** — had to come before the gates, because §6.1's
    grant is observable *only* through `teleport`. **DONE** — `70fc37c`, S6.
 4. ~~`st.h` primitives (§4).~~ **DONE** — `7d30179`.
-5. **The seven command gates (§5)** + their named-ruler refusals. **NEXT.**
+5. **The seven command gates (§5)** + their named-ruler refusals. **DONE** —
+   `dd96947`, S7.
 6. **The two grants (§6)** — `eng_controls` four cases, `eng_look_at`. Note
    §14.3: `eng_look_at` must be reached with `look #<ref>`, not a name.
+   **DONE** — `dd96947`, S7.
 7. **Ban table + `eng_enter` guard + `unban` + boot migration (§7).**
-8. Full `test.sh`, then site `make test`.
+   **DONE** — `dd96947`, S8.
+8. Full `test.sh`, then site `make test`. **DONE** — `./test.sh` green 3x,
+   site `DENO_JOBS=4 make test` green (`120 passed | 0 failed`).
 9. ST.md: append the four decisions taken in review (§11) to §27.6(1) — they
    are **not recorded yet**; only the storage choice is settled. Update the §11
    open-work note. Commit the **submodule first**, then the superproject.
+   **DONE** — ST.md §27.6(1) carries the review decisions; committed as
+   `external/axil-nd@dd96947` + site `a3c3a52`.
 
 **Commits so far, all with `./test.sh` green:** `bea2721` (drop `EF_WIZARD`),
 `7d30179` (region primitives), `70fc37c` (matcher + `do_teleport`, S6).

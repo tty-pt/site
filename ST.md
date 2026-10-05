@@ -2475,6 +2475,28 @@ transcript first, because `ndwait`'s marker (`) type `, from `do_status`'s
    `deny` (module-level, dispatch-time) is the neighboring mechanism, not
    the same one.
 
+   **RETRACTED 2026-10-05 (CMD_REGION.md, implemented in `external/axil-nd`).**
+   The "all of the actor's own regions" default was never implemented — what
+   shipped is a single position-derived region — and it is replaced, not built:
+   the default target is ONE region the player chose (stored in `ENT` as
+   `(target_id, target_plen)`, set by the new `target` command), and `target
+   none` restores the position-derived behaviour. A default the player sets
+   explicitly is a better answer than recomputing a union per command.
+   Consequences, all decided with the retraction:
+   the `xy_region_each` ownership walk is **not needed** (recorded as such);
+   the selector dialect is one bare-world-number-or-`cosmos` token shared by all
+   seven region commands (`wall`, `ban`, `unban`, `loadmod`, `unloadmod`,
+   `modlist`, `deny`); `wall` loses its private `all`/`world <n>` keywords; and
+   every one of the seven resolves an absent selector through the single
+   `st_target_or_position()` (explicit argument → default target → position).
+   `ST_SEL_UNSET` keeps the "every region I rule" meaning it already carries,
+   but only at the three *filter* sites (`st_in_scope` callers) where that union
+   is genuinely the right semantic — the default must never reach those, or a
+   preference would silently widen into authority. Zero behaviour change for any
+   player who never runs `target`. Gate: new S9 section in `test.sh`, written
+   RED-first (legs 1, 6, 7 failed on the pre-change build), green with the
+   change; full suite green 3x consecutively; site suite `120|0`.
+
    **The four remaining decisions, settled 2026-10-04** (implementation and
    gates in `external/axil-nd`; full evidence in `NO_WIZ.md` §5-§7, §13-§14):
 
