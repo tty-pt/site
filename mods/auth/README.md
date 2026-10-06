@@ -24,7 +24,9 @@ Authenticate a user with username and password.
 **Responses:**
 - `303 See Other` - Success, redirects to `ret` parameter or `/`
 - `400 Bad Request` - Missing credentials or invalid username/password
-- `401 Unauthorized` - Account not activated (email not confirmed)
+- `401 Unauthorized` - Invalid credentials (unknown user, wrong password, or
+  account not confirmed — deliberately one message so the form is not an
+  account oracle)
 
 **Sets cookie:** `QSESSION=<token>` on success
 
@@ -256,11 +258,14 @@ if (username) {
 
 ## Troubleshooting
 
-### Login fails with 401 "Account not activated"
+### Login fails with 401 "Invalid credentials"
 
-**Cause:** Email not confirmed after registration.
+**Cause:** Unknown user, wrong password, or email not confirmed after
+registration. All three report the same message on purpose, so a login form
+cannot be used to enumerate accounts.
 
-**Solution:** Visit the confirmation URL logged during registration, or check the confirmation code in logs.
+**Solution:** If the account is new, visit the confirmation URL logged during
+registration, or check the confirmation code in logs.
 
 ### Sessions don't persist
 

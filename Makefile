@@ -131,6 +131,8 @@ standalone-unit-tests:
 	@sh tests/unit/run-source-utils.sh
 	@sh tests/unit/run-auth-disk-permissions.sh
 	@sh tests/unit/run-axil-auth-groups.sh
+	@sh tests/unit/run-axil-auth-account.sh
+	@sh tests/unit/run-xy-hook-default.sh
 	@sh tests/unit/run-auth-group-permissions.sh
 	@sh tests/unit/run-site-media.sh
 	@sh tests/unit/run-site-ui-helpers.sh
