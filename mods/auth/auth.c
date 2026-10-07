@@ -788,7 +788,10 @@ void xy_install(void)
 	/* removed xy_load("./mods/index/index") to break auth↔index cycle; auth
 	 * is independent but depends on common */
 	xy_load("./mods/common/common");
-	xy_load("libaxil-auth"); /* external — not in ./mods */
+	if (xy_load("libaxil-auth") < 0) { /* external — not in ./mods */
+		fprintf(stderr, "auth: xy_load(\"libaxil-auth\") failed\n");
+		abort();
+	}
 	i18n_register_dict(auth_dict, AUTH_DICT_COUNT);
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
