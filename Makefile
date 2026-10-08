@@ -83,6 +83,36 @@ axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib qsys-lib
 corm-lib:
 	$(MAKE) -C external/libcorm
 
+# The external packages own their install: mk/include.mk's `install` target
+# copies ${LIB} (plus the bare-soname alias xy_load() addresses), headers and
+# the binary into ${DESTDIR}${PREFIX}/lib + bin, with PREFIX taken from
+# mk/portable.mk's table. There is no -L into the tree at link time either
+# (build.mk), so ${PREFIX}/lib is the one place a library exists: the file the
+# link inspects is the file the loader maps and xy_load() fetches. Run this
+# with sudo/doas after any library rebuild, then restart axil.
+# Keep the table in sync with external/mk/portable.mk:16-29.
+UNAME_S := $(shell uname -s)
+ARCH_M := $(shell uname -m)
+PREFIX ?= $(if $(filter Linux,$(UNAME_S)),/usr, \
+	$(if $(filter NetBSD,$(UNAME_S)),/usr/pkg, \
+	$(if $(and $(filter Darwin,$(UNAME_S)),$(filter arm64,$(ARCH_M))),/opt/homebrew, \
+	/usr/local)))
+SUDO ?=
+
+INSTALL_PKGS = libqsys libcorm libxylem libstoma libjoint libislet libsepal \
+	libhyle libtransp libbud libhyle-bud libhyle-source \
+	axil axil-auth axil-hyle axil-tty axil-nd \
+	$(patsubst external/%,%,$(wildcard external/nd-*))
+
+install-libs:
+	@for p in $(INSTALL_PKGS); do \
+		$(SUDO) $(MAKE) -C external/$$p PREFIX="$(PREFIX)" install || exit 1; \
+	done
+	@echo "runtime libraries + axil installed under $(PREFIX)"
+
+print-prefix:
+	@echo $(PREFIX)
+
 mm: ;
 
 xylem-lib:
@@ -192,8 +222,10 @@ restart:
 
 test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e2e
 
-boundary-check:
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh
+# depends on mods: check-no-tree-rpath inspects built artifacts, which must not
+# be mid-relink when the check runs under -j
+boundary-check: mods
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh scripts/check-no-tree-rpath.sh
 
 watch:
 	./scripts/watch.sh
@@ -266,7 +298,7 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-corm)
 hyle-tests:
-	RUSTFLAGS="-l corm -l stoma -L $$(pwd)/external/libcorm/lib -L $$(pwd)/external/libstoma/lib" cargo test --workspace \
+	RUSTFLAGS="-l corm -l stoma" cargo test --workspace \
 		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
@@ -295,4 +327,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

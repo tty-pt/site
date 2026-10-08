@@ -33,9 +33,14 @@ CFLAGS += -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
-LDFLAGS += -L$(REPO_ROOT)/external/axil/lib -L$(REPO_ROOT)/external/libcorm/lib
-LDFLAGS += -L$(REPO_ROOT)/external/axil-auth/lib -Wl,-rpath,$(REPO_ROOT)/external/axil-auth/lib
-LDFLAGS += -L$(REPO_ROOT)/external/libbud/lib -Wl,-rpath,$(REPO_ROOT)/external/libbud/lib
+# No -L into the tree: link and run both resolve from the system search path
+# (portable.mk's ${prefix}/lib -- /usr/lib on Linux, /usr/local/lib on OpenBSD),
+# exactly like external/* already link each other. The in-tree copies are build
+# outputs for `make install-libs`, never a link or load source. A tree path at
+# link time plus the same soname resolved from the system means two distinct
+# files for one soname, only one of which gets the xy context bound into it --
+# calls through the other dispatch on a zero context and fault, which is how a
+# successful login took the daemon down.
 
 LDLIBS += -laxil -lcorm
 LDLIBS += $(EXTRA_LDLIBS)

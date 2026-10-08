@@ -3,10 +3,9 @@ HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
 HYLE_SOURCE_DIR = $(REPO_ROOT)/external/libhyle-source
 EXTRA_CFLAGS += -I../common -I$(HYLE_BUD_DIR)/include -I$(HYLE_SOURCE_DIR)/include
 EXTRA_LDLIBS += -lbud
-EXTRA_LDLIBS += -L$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,$(HYLE_BUD_DIR)/lib
-EXTRA_LDLIBS += -Wl,--no-as-needed -L$(HYLE_SOURCE_DIR)/lib -lhyle-source -Wl,--as-needed -Wl,-rpath,$(HYLE_SOURCE_DIR)/lib
+EXTRA_LDLIBS += -lhyle-bud
+EXTRA_LDLIBS += -Wl,--no-as-needed -lhyle-source -Wl,--as-needed
 EXTRA_LDLIBS-OpenBSD += -liconv
-EXTRA_LDLIBS += -laxil-auth
 
 # WASM targets must be defined before including build.mk so the shared
 # all:/wasm: rules can see them during parse time.

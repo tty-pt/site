@@ -14,7 +14,6 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/mods/common/ux" \
 	-o "$bin" \
 	"$repo/tests/unit/site_media_test.c" \
-	-L"$repo/external/libbud/lib" -lbud \
-	-Wl,-rpath,"$repo/external/libbud/lib"
+	-lbud \
 
 "$bin"

@@ -15,18 +15,12 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libstoma/include" \
 	-o "$bin" \
 	"$repo/tests/unit/bud_form_test.c" \
-	-L"$repo/external/libhyle-bud/lib" -lhyle-bud \
-	-L"$repo/external/libhyle-source/lib" -lhyle-source \
-	-L"$repo/external/libhyle/lib" -lhyle \
-	-L"$repo/external/libbud/lib" -lbud \
-	-L"$repo/external/libcorm/lib" -lcorm \
-	-L"$repo/external/libstoma/lib" -lstoma \
+	-lhyle-bud \
+	-lhyle-source \
+	-lhyle \
+	-lbud \
+	-lcorm \
+	-lstoma \
 	-ljson-c \
-	-Wl,-rpath,"$repo/external/libhyle-bud/lib" \
-	-Wl,-rpath,"$repo/external/libhyle-source/lib" \
-	-Wl,-rpath,"$repo/external/libhyle/lib" \
-	-Wl,-rpath,"$repo/external/libbud/lib" \
-	-Wl,-rpath,"$repo/external/libcorm/lib" \
-	-Wl,-rpath,"$repo/external/libstoma/lib"
 
 "$bin"

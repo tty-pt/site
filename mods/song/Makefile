@@ -2,10 +2,10 @@ HYLE_DIR = $(REPO_ROOT)/external/libhyle
 HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
 TRANSP_DIR = $(REPO_ROOT)/external/libtransp
 EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_BUD_DIR)/include
-EXTRA_LDLIBS += -lbud -laxil-auth
-EXTRA_LDLIBS += -L$(TRANSP_DIR)/lib -ltransp -Wl,-rpath,$(TRANSP_DIR)/lib -ljson-c
-EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
-EXTRA_LDLIBS += -L$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,$(HYLE_BUD_DIR)/lib
+EXTRA_LDLIBS += -lbud
+EXTRA_LDLIBS += -ltransp -ljson-c
+EXTRA_LDLIBS += -lhyle
+EXTRA_LDLIBS += -lhyle-bud
 
 # WASM targets must be defined before including build.mk so the shared
 # all:/wasm: rules can see them during parse time.

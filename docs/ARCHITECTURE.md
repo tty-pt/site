@@ -122,7 +122,9 @@ the process chroots**; `xy_reload()` `external/libxylem/src/libxylem.c:804,828` 
 - Cross-.so calls MUST use the XY dispatch mechanism (`XY_DECL`/`XY_IMPL`),
   never plain `extern` (`RTLD_LOCAL` in `libxylem.c:813` means `bud_adapter` etc. must be via `XY` in `common.so`).
 - Native deps (e.g. GNU libiconv for `axil_slugify`) resolve from the **host**
-  root, not the chroot; `LD_LIBRARY_PATH` must put `site/external/libxylem/lib` first (`start.sh:6`) so tmp-dlopened modules resolve site `libxylem` not `/lib/libxylem.so`.
+  root, not the chroot; there is no `LD_LIBRARY_PATH`, so a tmp-dlopened module
+  resolves the *installed* `libxylem` from the system search path — the same
+  copy everything linked against (`docs/BUILD.md`, one-authority rule).
 
 ## 4. Runtime & request path
 

@@ -2,10 +2,10 @@ HYLE_DIR = $(REPO_ROOT)/external/libhyle
 HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
 TRANSP_DIR = $(REPO_ROOT)/external/libtransp
 EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_BUD_DIR)/include -I$(REPO_ROOT)/external/axil-hyle/include
-EXTRA_LDLIBS += -lbud -laxil-auth -L$(TRANSP_DIR)/lib -ltransp -Wl,-rpath,$(TRANSP_DIR)/lib
-EXTRA_LDLIBS += -L$(HYLE_DIR)/lib -lhyle -Wl,-rpath,$(HYLE_DIR)/lib
-EXTRA_LDLIBS += -L$(HYLE_BUD_DIR)/lib -lhyle-bud -Wl,-rpath,$(HYLE_BUD_DIR)/lib
-EXTRA_LDLIBS += -L$(REPO_ROOT)/external/axil-hyle/lib -laxil-hyle -Wl,-rpath,$(REPO_ROOT)/external/axil-hyle/lib
+EXTRA_LDLIBS += -lbud -laxil-auth -ltransp
+EXTRA_LDLIBS += -lhyle
+EXTRA_LDLIBS += -lhyle-bud
+EXTRA_LDLIBS += -laxil-hyle
 LIST_UX_DEPS = ../index/ux/list.c ../index/ux/list_state.h \
 	../index/ux/list_query.c ../index/ux/list_filters.c \
 	../index/ux/list_layout.c ../index/ux/list_json.c \

@@ -13,14 +13,10 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libstoma/include" \
 	-o "$bin" \
 	"$repo/tests/unit/source_options_test.c" \
-	-L"$repo/external/libhyle-source/lib" -lhyle-source \
-	-L"$repo/external/libhyle/lib" -lhyle \
-	-L"$repo/external/libcorm/lib" -lcorm \
-	-L"$repo/external/libstoma/lib" -lstoma \
+	-lhyle-source \
+	-lhyle \
+	-lcorm \
+	-lstoma \
 	-ljson-c \
-	-Wl,-rpath,"$repo/external/libhyle-source/lib" \
-	-Wl,-rpath,"$repo/external/libhyle/lib" \
-	-Wl,-rpath,"$repo/external/libcorm/lib" \
-	-Wl,-rpath,"$repo/external/libstoma/lib"
 
 "$bin"

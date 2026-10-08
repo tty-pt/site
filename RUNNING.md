@@ -6,7 +6,8 @@ pi-mm extension for real semantic search over `memory_scan`.
 ## Prerequisites
 
 - `~/libqllm` source checkout — the axil module `libaxil-qllm.so` and the
-  `axil` binary (already in `LD_LIBRARY_PATH` in `start.sh`).
+  `axil` binary; publish them from that checkout (`make install-libs`-style
+  `install`) — nothing loads through `LD_LIBRARY_PATH` any more.
 - An embeddings-capable GGUF model on disk. Instruct models (e.g.
   `qwen2.5-*instruct`) do not produce useful embeddings — use a dedicated
   embeddings model (`nomic-embed-text-v1.5.Q5_K_M.gguf` recommended,

@@ -16,6 +16,7 @@ make new-mod NAME=xyz DISPLAY="Xyz" # scaffold complete CRUD module in 1 second
 make test-mod MOD=song    # run targeted test suite for a specific module
 make test-fast            # run standalone unit + matrix + pages smoke tests
 make test-e2e FILE=...    # run targeted e2e test with auto-server
+make install-libs         # install libs + axil into $PREFIX (SUDO=doas/sudo)
 make lint                 # clang-tidy (max 4 indent levels enforced)
 make format               # clang-format on all .c/.h
 make clean / make distclean
@@ -101,11 +102,40 @@ cp /bin/sh ./bin/sh
 # ldd /bin/sh → copy the libs it needs, typically libnss_files.so.2
 ```
 
+## One authority: $PREFIX/lib — link, load, dev, prod
+
+There is **no `-L` into the tree** (`build.mk`, module `Makefile`s — `sh
+scripts/check-no-tree-rpath.sh`, wired into `boundary-check`, fails the build
+if one appears or if a shipped `.so` records a tree `DT_RUNPATH`), and **no
+`LD_LIBRARY_PATH`** in `start.sh` or `scripts/run-with-server.sh`. Modules link
+plain `-lhyle-bud -ltransp …` against the default system search path;
+`external/mk/portable.mk:16-29` picks that directory (`/usr` on Linux,
+`/usr/local` on OpenBSD), and `make install-libs` asks each package's own
+`install` target (from `external/mk/include.mk`) to publish there — libs, the
+bare-soname aliases `xy_load()` addresses, headers and the `axil` binary.
+
+So the file the link inspects, the file the loader maps, the file
+`xy_load("libaxil-auth")` fetches, and the file dev and prod run are one and
+the same file.
+
+Why the rule exists: a tree copy reachable at link or load time plus the same
+soname fetched from the system maps two distinct files as two objects, only one
+of which gets the xy context bound into it — callers linked to the other
+dispatch through a zero context, which took the daemon down on a *successful*
+login while wrong-password 401s and every page still looked healthy.
+
+Consequence: after rebuilding any runtime library, `SUDO=doas make install-libs`
+before restarting axil. A link failure with undefined symbols means the
+installed copy is older than the tree — install it, don't add paths back.
+`scripts/rebuild-install.sh` does a clean rebuild + install in one pass and
+delegates its install to the same target.
+
 ## Rebuild checklist after a code change
 
 1. `make` (recompiles affected `.so`; WASM `.d` deps from `build.mk:57` rebuild WASMs automatically when `filter.c`/`site_ui.c` changes; CSS/JS hash auto-regens `mods/common/ux/version.gen.h` via `scripts/gen-asset-version.sh`).
-2. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
-3. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh` (wired into `make all` and `make test`).
+2. If any `external/*/lib` library changed: `SUDO=doas make install-libs`.
+3. Restart `axil` (see above; add `AUTH_SKIP_CONFIRM=1` if e2e will run).
+4. Verify: `sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-wasm-imports.sh && sh scripts/check-no-tree-rpath.sh` (wired into `make all` and `make test`).
 
 ## Related docs
 

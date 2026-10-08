@@ -17,11 +17,8 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-o "$bin" \
 	"$repo/tests/unit/site_ui_helpers_test.c" \
 	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
-	-L"$repo/external/libhyle-bud/lib" -lhyle-bud \
-	-L"$repo/external/libbud/lib" -lbud \
-	-L"$repo/external/libxylem/lib" -lxylem \
-	-Wl,-rpath,"$repo/external/libhyle-bud/lib" \
-	-Wl,-rpath,"$repo/external/libbud/lib" \
-	-Wl,-rpath,"$repo/external/libxylem/lib"
+	-lhyle-bud \
+	-lbud \
+	-lxylem \
 
 "$bin"

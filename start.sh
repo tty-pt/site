@@ -3,7 +3,9 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PORT=${PORT:-8080}
-export LD_LIBRARY_PATH="$HOME/libqllm/lib:$SCRIPT_DIR/external/libqsys/lib:$SCRIPT_DIR/external/libxylem/lib:$SCRIPT_DIR/external/axil/lib:$SCRIPT_DIR/external/axil-auth/lib:$SCRIPT_DIR/external/axil-hyle/lib:$SCRIPT_DIR/external/libhyle/lib:$SCRIPT_DIR/external/libtransp/lib:$SCRIPT_DIR/external/libhyle-bud/lib:$SCRIPT_DIR/external/libhyle-source/lib:$SCRIPT_DIR/external/libbud/lib:$SCRIPT_DIR/external/libcorm/lib:$SCRIPT_DIR/external/libstoma/lib:$SCRIPT_DIR/external/libislet/lib:$SCRIPT_DIR/external/axil-tty/lib:$SCRIPT_DIR/external/axil-nd/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# No LD_LIBRARY_PATH: every library resolves from the system path ($PREFIX/lib,
+# mk/portable.mk) -- the same authority the link uses, so dev runs what prod
+# runs. `make install-libs` publishes a rebuilt library there.
 
 mkdir -p "$SCRIPT_DIR/var/nd"
 export AXIL_ND_DB="$SCRIPT_DIR/var/nd/std.db"
