@@ -886,6 +886,15 @@ The engine's own `mods.load` is *not* consulted. That is what makes planets
 survive a reboot without a hand-maintained file, and it is why §1.12 says modules
 never come from `mods.load`.
 
+The restore above (and the flat list, which `nd_mods_load()` installs next)
+does not run at module load: both are file loaders, so they run from the
+`on_axil_post_chroot()` hook — after `-C`'s chroot, before the first bind —
+and every name they `xy_load()` resolves inside the jail. The jail therefore
+has to contain every module the tree can build (`sh scripts/seed-jail.sh`),
+and `sh scripts/check-jail.sh` gates the restart on it. See
+`scripts/jail-manifest.sh` for the manifest and `docs/BUILD.md` for the
+ladder.
+
 ---
 
 ## 8. Implementation plan

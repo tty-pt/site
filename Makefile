@@ -110,6 +110,19 @@ install-libs:
 	done
 	@echo "runtime libraries + axil installed under $(PREFIX)"
 
+# The `axil -C` chroot jail: seed what the engine resolves AFTER the chroot
+# (it fires on_axil_post_chroot between init_pre_bind() and the first bind),
+# then gate the restart on the result. JAIL is normally the site root itself
+# -- on prod /var/www both holds the checkout and is the chroot, which is what
+# keeps var/ and htdocs/ the same files before and after. The manifest and the
+# reason for every entry: scripts/jail-manifest.sh. Run after `make` +
+# `make install-libs`; check-jail.sh alone is the pre-restart gate.
+JAIL ?= /var/www
+
+install-jail:
+	@sh scripts/seed-jail.sh $(JAIL)
+	@sh scripts/check-jail.sh $(JAIL)
+
 print-prefix:
 	@echo $(PREFIX)
 
@@ -327,4 +340,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

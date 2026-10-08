@@ -88,8 +88,17 @@ Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/c
 
 ## Running the server
 
-- Modules are dlopen'd **before** the chroot; DT_NEEDED deps resolve from the
-  host root — do not chase missing libs inside the chroot.
+- Modules are dlopen'd on **both sides** of the chroot, split by the
+  `on_axil_post_chroot()` hook (`external/axil/src/libaxil.c`, fired between
+  `init_pre_bind()` and the first bind): the `-m` chain, engine deps,
+  handlers and the DB open resolve from the **host** root pre-chroot; the
+  engine's two file loaders — `st_init()` (persisted planet modules) and
+  `nd_mods_load()` (the flat `external/axil-nd/mods.load` list) — resolve
+  **inside the jail** post-chroot. DT_NEEDED of the post-chroot modules either
+  reuses the already-mapped copy (libc, libxylem) or must live in a glibc
+  default dir inside the jail (`usr/lib/libm.so.6` today) — do not chase them
+  in `/etc/ld.so.cache` (a jail has none) or `/usr/local/lib` (not a loader
+  default).
 - Start: `axil -C /home/quirinpa/site -p 8080 -d -m mods/core/core` or `AUTH_SKIP_CONFIRM=1 make watch`. The
   `-m mods/core/core` flag is **required** — without it no handlers register.
 - C frontend and module changes need module rebuild **+ server restart** to take effect. If `axil` is already running when `.so` files are recompiled, kill the existing process (`ps aux | grep axil`, `kill -9 <pid>`) so `dlopen` loads the new binary objects.
@@ -101,6 +110,39 @@ mkdir -p ./bin ./lib ./lib/x86_64-linux-gnu
 cp /bin/sh ./bin/sh
 # ldd /bin/sh → copy the libs it needs, typically libnss_files.so.2
 ```
+
+## The `axil -C` chroot jail — seed it, then gate the restart on it
+
+The split above means the jail must contain every module `st_init()` and
+`nd_mods_load()` can name, at the paths `module_load_path()` walks inside the
+jail (`/lib`, `/usr/lib`, `/usr/local/lib`). `scripts/jail-manifest.sh` is the
+single source of truth (the manifest, and why); `sh scripts/seed-jail.sh
+[JAIL]` copies it in; `sh scripts/check-jail.sh [JAIL]` verifies it, and is
+the **hard pre-restart gate** — it also fails on a module shadowed by an
+earlier search dir, on an unreachable post-chroot `DT_NEEDED`, and on a jail
+that is not the site root.
+
+Ladder (`make` builds the tree `.so` files; `install-libs` is what builds and
+publishes the `nd-*` modules):
+
+```bash
+make
+SUDO=doas make install-libs
+make install-jail          # JAIL defaults to /var/www; seeds + checks
+```
+
+Invariants (enforced by `check-jail.sh`):
+
+- **The jail IS the site root.** Every post-chroot path is site-root-relative,
+  so `var/` and `htdocs/` are the same files before and after. A jail anywhere
+  else boots an *empty* world silently (corm opens `var/nd/std.db` with
+  `O_RDONLY` and simply finds nothing) and would save the world back into
+  itself.
+- **`AXIL_*` env under `-C` (root) must be site-root-relative**
+  (`external/axil-nd/mods.load`, `var/nd/std.db`, `external/axil-nd/htdocs`,
+  `external/axil-tty/htdocs`); an absolute path resolves to `$JAIL/<abs>` after
+  the chroot and misses. Dev (`start.sh`, `run-with-server.sh`) uses absolute
+  paths, which is fine because dev never runs as root.
 
 ## One authority: $PREFIX/lib — link, load, dev, prod
 
