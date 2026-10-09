@@ -129,11 +129,8 @@ done <<EOF
 $(jail_manifest_bare_names)
 EOF
 
-# ---- 4. every DT_NEEDED is reachable after the chroot --------------------
-# Collected first: the loop runs in a pipeline, hence in a subshell, so its
-# verdict has to come back as data rather than as shell state.
 startup=$(jail_startup_libs "$JAIL_AXIL_BIN" | tr '\n' ' ')
-need_fails=$(
+need_fails() {
 	jail_manifest_sos | while IFS= read -r so; do
 		[ -f "$so" ] || continue
 		for need in $(jail_needed "$so"); do
@@ -150,7 +147,12 @@ need_fails=$(
 			[ -n "$have" ] || printf '%s needs %s\n' "${so##*/}" "$need"
 		done
 	done
-)
+}
+
+# ---- 4. every DT_NEEDED is reachable after the chroot --------------------
+# Collected first: the loop runs in a pipeline, hence in a subshell, so its
+# verdict has to come back as data rather than as shell state.
+need_fails=$(need_fails)
 if [ -n "$need_fails" ]; then
 	while IFS= read -r line; do
 		[ -n "$line" ] || continue
