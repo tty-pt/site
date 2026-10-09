@@ -9,9 +9,6 @@ PORT=${PORT:-8080}
 
 mkdir -p "$SCRIPT_DIR/var/nd"
 export AXIL_ND_DB="$SCRIPT_DIR/var/nd/std.db"
-# The engine's own global module tier, kept apart from the site's mods.load
-# (mods/core/core.c reads that one) -- see nd_xy.c:nd_mods_load().
-export AXIL_ND_GLOBAL_MODS="$SCRIPT_DIR/external/axil-nd/mods.load"
 export AXIL_ND_HTDOCS="$SCRIPT_DIR/external/axil-nd/htdocs"
 
 if [ -n "$DEBUG" ]; then

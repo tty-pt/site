@@ -102,11 +102,8 @@ EOF
 
 # ---- 3. bare sonames resolve inside the jail -----------------------------
 while IFS= read -r name; do
-	# The in-tree form is addressed by path, not by soname; rule 1 already
-	# checked that path inside the jail.
-	[ -f "external/axil-nd/mods/$name/$name.c" ] && continue
 	src=$(jail_soname_src "$name") || {
-		fail "mods.load names $name, which is neither built nor installed"
+		fail "$name is seeded but neither built nor installed"
 		continue
 	}
 	resolved=

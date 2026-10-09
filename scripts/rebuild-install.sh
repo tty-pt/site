@@ -45,8 +45,9 @@ log() { printf '=== %s ===\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 # Modules whose lib/ outputs `make all` (transitively) regenerates, plus the
-# nd-* engine modules dlopened at boot via AXIL_ND_GLOBAL_MODS. Anything not
-# listed here is never deleted and never installed by this script.
+# nd-* engine modules, which region rows name by soname and st_init() dlopens
+# at boot from inside the jail. Anything not listed here is never deleted and
+# never installed by this script.
 CHAIN_LIBS="libqsys libcorm libxylem libstoma libjoint libislet libsepal \
 	libhyle libtransp libbud libhyle-bud libhyle-source \
 	axil axil-auth axil-hyle axil-tty axil-nd"

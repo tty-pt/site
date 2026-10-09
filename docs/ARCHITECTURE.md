@@ -119,14 +119,15 @@ Site modules declare their own immediate **true** `xy_load` deps (not centrally 
 
 Modules are `xy_load()` → `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` on
 **both sides of the process chroot**: the `-m` chain, engine deps, handlers
-and the DB open resolve from the host root, while the engine's two file
-loaders — `st_init()` (persisted planet modules) and `nd_mods_load()` (the
-flat `external/axil-nd/mods.load` list) — run from the `on_axil_post_chroot()`
-hook (`external/axil/src/libaxil.c`, between `init_pre_bind()`'s
-chroot/chdir and the first bind) and resolve inside the jail. The jail is
-seeded and gated by `scripts/seed-jail.sh` / `scripts/check-jail.sh` (see
-`docs/BUILD.md`); the manifest lives in `scripts/jail-manifest.sh`.
-`xy_reload()` `external/libxylem/src/libxylem.c:804,828` copies rebuilt `.so` to a unique inode via `mkstemps` (`dir/.xylem-XXXXXX.so` → `/tmp/...`) then `dlopen(tmp)` only when `xy_reloading==1` (`libxylem-module.c:226` `papi.h:145` `tmp_load_path` + `fchmod`/`fsync`), initial loads stay direct — `RTLD_NODELETE` kept for `sica_hd` adapter stability but reload no longer reuses old `link_map`. Consequences:
+and the DB open resolve from the host root, while the engine's persisted
+region restore — `st_init()` (one `xy_load()` per `st` row) — runs from the
+`on_axil_post_chroot()` hook (`external/axil/src/libaxil.c`, between
+`init_pre_bind()`'s chroot/chdir and the first bind) and resolves inside the
+jail. There is no boot-time module list: game modules load only via region
+modding. The jail is seeded and gated by `scripts/seed-jail.sh` /
+`scripts/check-jail.sh` (see `docs/BUILD.md`); the manifest lives in
+`scripts/jail-manifest.sh`.
+`xy_reload()` `external/libxylem/src/libxylem.c:804,828` copies rebuilt `.so` to a unique inode via `mkstemps` (`dir/.xylem-XXXXXX.so` → `/tmp/...`) then `dlopen(tmp)` only when `xy_reloading==1` (`libxylem-module.c:226` `papi.h:145` `tmp_load_path` + `fchmod`/`fsync`), initial loads stay direct — `RTLD_NODELETE` kept but reload no longer reuses old `link_map`. Consequences:
 - Cross-.so calls MUST use the XY dispatch mechanism (`XY_DECL`/`XY_IMPL`),
   never plain `extern` (`RTLD_LOCAL` in `libxylem.c:813` means `bud_adapter` etc. must be via `XY` in `common.so`).
 - Native deps (e.g. GNU libiconv for `axil_slugify`) resolve from the **host**

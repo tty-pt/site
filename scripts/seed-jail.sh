@@ -5,12 +5,12 @@
 #
 #   sh scripts/seed-jail.sh [JAIL]     # JAIL defaults to $JAIL or /var/www
 #
-# The jail is normally the site root itself, so the tree files (mods.load, the
-# in-tree modules, both htdocs trees) are already in place there and are
-# skipped; what this script adds is the installed game libraries under
-# usr/local/lib and the runtime libraries under usr/lib. Never run it at a
-# jail other than the site root -- check-jail.sh refuses one, because corm
-# would load an empty world from it and save the world back to it.
+# The jail is normally the site root itself, so the htdocs trees are already
+# in place there and are skipped; what this script adds is the installed game
+# libraries under usr/local/lib and the runtime libraries under usr/lib.
+# Never run it at a jail other than the site root -- check-jail.sh refuses
+# one, because corm would load an empty world from it and save the world
+# back to it.
 #
 # Run it after `make` (and `make install-libs`, which is what builds the
 # nd-* modules) and before the server restarts: sh scripts/check-jail.sh.

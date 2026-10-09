@@ -10,16 +10,16 @@
 # open, before the first bind. Everything loaded before that point resolves on
 # the host; everything resolved after it resolves inside $JAIL. The split
 # point is the on_axil_post_chroot() hook (external/axil/src/libaxil.c,
-# called between init_pre_bind() and axil_bind()), and the only things that
-# run there are the engine's two file loaders:
+# called between init_pre_bind() and axil_bind()), and the only thing that
+# runs there is the engine's persisted-region restore:
 #
-#     st_init()       -- persisted planet modules, one xy_load() per DB row
-#     nd_mods_load()  -- the flat external/axil-nd/mods.load list
+#     st_init()       -- persisted region modules, one xy_load() per DB row
 #
-# so the jail needs exactly what those two, plus request-time static serving,
-# resolve. Nothing else: no headers, no archives, no site or axil libraries
+# so the jail needs exactly what that, plus request-time static serving,
+# resolves. Nothing else: no headers, no archives, no site or axil libraries
 # (all loaded pre-chroot), no DB (corm holds the open fd across the chroot),
-# no pkg-config.
+# no pkg-config. There is no module list: region rows are the source of
+# truth, and every module the tree can build is seeded (rule 1).
 #
 # The topology that makes this work: **the jail IS the site root** (on prod,
 # /var/www both holds the checkout and is the chroot). Every path the site and
@@ -32,15 +32,18 @@
 #
 # The manifest:
 #
-#   usr/local/lib/<libnd-*.so>   every module the tree can build. Seeded from
-#                                the tree, not from mods.load, because the
-#                                persisted regions reload from DB rows, not
-#                                from the list -- a module the list dropped
-#                                still has to exist for st_init(). Found by
-#                                module_load_path() at its third system dir
-#                                (cwd is "/", LD_LIBRARY_PATH is unset by the
+#   usr/local/lib/<libnd-*.so>   every module the tree can build
+#                                (external/nd-*/lib/*.so). Seeded from the
+#                                tree, because the persisted regions reload
+#                                from DB rows, not from a list -- a module a
+#                                region names still has to exist for
+#                                st_init(). Found by module_load_path() at
+#                                its third system dir (cwd is "/",
+#                                LD_LIBRARY_PATH is unset by the
 #                                one-authority rule, /lib and /usr/lib hold
 #                                nothing): external/libxylem/src/libxylem.c.
+#                                A region module built outside this tree is
+#                                the operator's to seed by hand.
 #
 #   usr/lib/<NEEDED>             the one class of file the process has NOT
 #                                already mapped: the module set's DT_NEEDED
@@ -59,10 +62,6 @@
 #                                caught without editing this file;
 #                                check-jail.sh re-derives it.
 #
-#   external/axil-nd/mods.load   AXIL_ND_GLOBAL_MODS (rc.d sets it relative)
-#   external/axil-nd/mods/<n>/**  the in-tree branch of nd_mods_load(): it
-#                                probes <list dir>/mods/<n>/<n>.c, then loads
-#                                <list dir>/mods/<n>/<n>.so
 #   external/axil-nd/htdocs/**    AXIL_ND_HTDOCS -- serves GET /nd
 #   external/axil-tty/htdocs/**   AXIL_HTDOCS -- serves GET /tty (axil-tty's
 #                                compiled default is $(PREFIX)/share/axil/
@@ -120,8 +119,8 @@ jail_host_lib() {
 
 # Resolve a bare soname to its source: the tree first (that is the authority
 # check-jail.sh compares the jail against), then the host's own search order
-# for a module built outside the tree. Neither -> failure: an unbuildable
-# mods.load entry must stop the seed rather than be skipped silently.
+# for a module built outside the tree. Neither -> failure: an unresolvable
+# stem must stop the seed rather than be skipped silently.
 jail_soname_src() {
 	_js_stem=$1
 	if _js_src=$(jail_tree_lib "$_js_stem"); then
@@ -156,42 +155,25 @@ jail_startup_libs() {
 		sort -u
 }
 
-# The module sources of rules 1+2 (see jail_manifest): every .so the manifest
+# The module sources of rule 1 (see jail_manifest): every .so the manifest
 # installs under usr/local/lib, from the tree side.
 jail_manifest_sos() {
 	for _jf in external/nd-*/lib/*.so; do
 		[ -f "$_jf" ] || continue
 		printf '%s\n' "$_jf"
 	done
-	_jf_list=${JAIL_MANIFEST_LIST:-external/axil-nd/mods.load}
-	[ -f "$_jf_list" ] || return 0
-	while IFS= read -r _jf_entry || [ -n "$_jf_entry" ]; do
-		case $_jf_entry in '' | '#'*) continue ;; esac
-		case $_jf_entry in */*) continue ;; esac
-		if [ -f "external/axil-nd/mods/$_jf_entry/$_jf_entry.c" ]; then
-			printf '%s\n' "external/axil-nd/mods/$_jf_entry/$_jf_entry.so"
-			continue
-		fi
-		_jf_src=$(jail_soname_src "$_jf_entry") || continue
-		case $_jf_src in
-		external/nd-*/lib/*) continue ;; # rule 1 above already emitted it
-		esac
-		printf '%s\n' "$_jf_src"
-	done < "$_jf_list"
-	unset _jf_list _jf_entry _jf_src _jf
+	unset _jf
 }
 
-# Every bare soname mods.load names, in list order (used by check-jail.sh to
-# re-run module_load_path()'s search inside the jail).
+# Every module stem the manifest seeds, in rule-1 order (used by
+# check-jail.sh to re-run module_load_path()'s search inside the jail).
 jail_manifest_bare_names() {
-	_jf_list=${JAIL_MANIFEST_LIST:-external/axil-nd/mods.load}
-	[ -f "$_jf_list" ] || return 0
-	while IFS= read -r _jf_entry || [ -n "$_jf_entry" ]; do
-		case $_jf_entry in '' | '#'*) continue ;; esac
-		case $_jf_entry in */*) continue ;; esac
-		printf '%s\n' "$_jf_entry"
-	done < "$_jf_list"
-	unset _jf_list _jf_entry
+	for _jf in external/nd-*/lib/*.so; do
+		[ -f "$_jf" ] || continue
+		_jf_stem=${_jf##*/}
+		printf '%s\n' "${_jf_stem%.so}"
+	done
+	unset _jf _jf_stem
 }
 
 jail_manifest() {
@@ -201,54 +183,11 @@ jail_manifest() {
 		printf '%s usr/local/lib/%s\n' "$_jf" "${_jf##*/}"
 	done
 
-	# ---- 2. every bare soname mods.load names ---------------------------
-	# Path forms (anything with a /) name a sibling checkout and never live
-	# in the jail; in-tree forms are covered by rule 3, which copies the
-	# whole mods/<n>/ directory the way nd_mods_load() addresses it.
-	_jf_list=${JAIL_MANIFEST_LIST:-external/axil-nd/mods.load}
-	if [ ! -f "$_jf_list" ]; then
-		printf 'jail-manifest: no module list at %s\n' "$_jf_list" >&2
-		return 1
-	fi
-	while IFS= read -r _jf_entry || [ -n "$_jf_entry" ]; do
-		case $_jf_entry in '' | '#'*) continue ;; esac
-		case $_jf_entry in */*) continue ;; esac
-		if [ -f "external/axil-nd/mods/$_jf_entry/$_jf_entry.c" ]; then
-			continue
-		fi
-		if _jf_src=$(jail_soname_src "$_jf_entry"); then
-			# Rule 1 already emitted every external/nd-*/lib/*.so; the list
-			# names those same files by soname, so emitting them again would
-			# make the seed copy each module twice.
-			case $_jf_src in
-			external/nd-*/lib/*) continue ;;
-			esac
-			printf '%s usr/local/lib/%s.so\n' "$_jf_src" "$_jf_entry"
-		else
-			printf 'jail-manifest: mods.load names %s, which is neither built in the tree (external/*/lib/%s.so) nor installed on the host\n' \
-				"$_jf_entry" "$_jf_entry" >&2
-			unset _jf_list _jf_entry _jf_src _jf _jf_dir _jf_needed _jf_mapped
-			return 1
-		fi
-	done < "$_jf_list"
-
-	# ---- 3. the list file and the in-tree modules it names --------------
-	printf '%s %s\n' "$_jf_list" "$_jf_list"
-	while IFS= read -r _jf_entry || [ -n "$_jf_entry" ]; do
-		case $_jf_entry in '' | '#'*) continue ;; esac
-		case $_jf_entry in */*) continue ;; esac
-		[ -d "external/axil-nd/mods/$_jf_entry" ] || continue
-		for _jf in external/axil-nd/mods/$_jf_entry/*; do
-			[ -f "$_jf" ] || continue
-			printf '%s %s\n' "$_jf" "$_jf"
-		done
-	done < "$_jf_list"
-
-	# ---- 4. the two static trees the relative AXIL_* envs point at -------
+	# ---- 2. the two static trees the relative AXIL_* envs point at -------
 	for _jf_dir in external/axil-nd/htdocs external/axil-tty/htdocs; do
 		if [ ! -d "$_jf_dir" ]; then
 			printf 'jail-manifest: missing %s\n' "$_jf_dir" >&2
-			unset _jf_list _jf_entry _jf_src _jf _jf_dir _jf_needed _jf_mapped
+			unset _jf_src _jf _jf_dir _jf_needed _jf_mapped
 			return 1
 		fi
 		for _jf in "$_jf_dir"/*; do
@@ -257,7 +196,7 @@ jail_manifest() {
 		done
 	done
 
-	# ---- 5. DT_NEEDED the process will not already hold ------------------
+	# ---- 3. DT_NEEDED the process will not already hold ------------------
 	# Everything else in the module graph resolves by reuse; this is the
 	# remainder, placed where glibc's own default search will find it.
 	_jf_needed=$(jail_manifest_sos | while IFS= read -r _jf; do
@@ -272,12 +211,12 @@ jail_manifest() {
 			if ! _jf_src=$(jail_host_lib "$_jf_need"); then
 				printf 'jail-manifest: %s is needed after the chroot but is in neither the axil startup closure nor the host libraries\n' \
 					"$_jf_need" >&2
-				unset _jf_list _jf_entry _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
+				unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
 				return 1
 			fi
 			printf '%s usr/lib/%s\n' "$_jf_src" "$_jf_need"
 		done
 	fi
-	unset _jf_list _jf_entry _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
+	unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
 	return 0
 }

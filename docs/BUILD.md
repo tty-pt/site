@@ -92,13 +92,13 @@ Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/c
   `on_axil_post_chroot()` hook (`external/axil/src/libaxil.c`, fired between
   `init_pre_bind()` and the first bind): the `-m` chain, engine deps,
   handlers and the DB open resolve from the **host** root pre-chroot; the
-  engine's two file loaders — `st_init()` (persisted planet modules) and
-  `nd_mods_load()` (the flat `external/axil-nd/mods.load` list) — resolve
-  **inside the jail** post-chroot. DT_NEEDED of the post-chroot modules either
-  reuses the already-mapped copy (libc, libxylem) or must live in a glibc
-  default dir inside the jail (`usr/lib/libm.so.6` today) — do not chase them
-  in `/etc/ld.so.cache` (a jail has none) or `/usr/local/lib` (not a loader
-  default).
+  engine's persisted region restore — `st_init()` (one `xy_load()` per `st`
+  row) — resolves **inside the jail** post-chroot. There is no boot-time
+  module list; game modules load only via region modding. DT_NEEDED of the
+  post-chroot modules either reuses the already-mapped copy (libc, libxylem)
+  or must live in a glibc default dir inside the jail (`usr/lib/libm.so.6`
+  today) — do not chase them in `/etc/ld.so.cache` (a jail has none) or
+  `/usr/local/lib` (not a loader default).
 - Start: `axil -C /home/quirinpa/site -p 8080 -d -m mods/core/core` or `AUTH_SKIP_CONFIRM=1 make watch`. The
   `-m mods/core/core` flag is **required** — without it no handlers register.
 - C frontend and module changes need module rebuild **+ server restart** to take effect. If `axil` is already running when `.so` files are recompiled, kill the existing process (`ps aux | grep axil`, `kill -9 <pid>`) so `dlopen` loads the new binary objects.
@@ -113,9 +113,9 @@ cp /bin/sh ./bin/sh
 
 ## The `axil -C` chroot jail — seed it, then gate the restart on it
 
-The split above means the jail must contain every module `st_init()` and
-`nd_mods_load()` can name, at the paths `module_load_path()` walks inside the
-jail (`/lib`, `/usr/lib`, `/usr/local/lib`). `scripts/jail-manifest.sh` is the
+The split above means the jail must contain every module `st_init()` can
+name (the persisted region rows), at the paths `module_load_path()` walks
+inside the jail (`/lib`, `/usr/lib`, `/usr/local/lib`). `scripts/jail-manifest.sh` is the
 single source of truth (the manifest, and why); `sh scripts/seed-jail.sh
 [JAIL]` copies it in; `sh scripts/check-jail.sh [JAIL]` verifies it, and is
 the **hard pre-restart gate** — it also fails on a module shadowed by an
@@ -139,10 +139,12 @@ Invariants (enforced by `check-jail.sh`):
   `O_RDONLY` and simply finds nothing) and would save the world back into
   itself.
 - **`AXIL_*` env under `-C` (root) must be site-root-relative**
-  (`external/axil-nd/mods.load`, `var/nd/std.db`, `external/axil-nd/htdocs`,
+  (`var/nd/std.db`, `external/axil-nd/htdocs`,
   `external/axil-tty/htdocs`); an absolute path resolves to `$JAIL/<abs>` after
   the chroot and misses. Dev (`start.sh`, `run-with-server.sh`) uses absolute
-  paths, which is fine because dev never runs as root.
+  paths, which is fine because dev never runs as root. (And on OpenBSD the
+  rc.d `su -l` launch discards daemon environment entirely — only compiled
+  defaults plus cwd apply there.)
 
 ## One authority: $PREFIX/lib — link, load, dev, prod
 
