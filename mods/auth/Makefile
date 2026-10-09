@@ -1,5 +1,4 @@
-EXTRA_CFLAGS += -I../common -I$(REPO_ROOT)/external/libhyle-bud/include
-EXTRA_LDLIBS = -laxil-auth -lbud
+EXTRA_LDLIBS = -lbud
 EXTRA_LDLIBS += -lhyle-bud
 
 include ../../build.mk
