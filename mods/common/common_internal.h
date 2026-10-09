@@ -2,10 +2,9 @@
 #define COMMON_INTERNAL_H
 
 #include <stddef.h>
+#include "../i18n/i18n.h"
 
-#define COMMON_IMPL
-#include "common.h"
-#undef COMMON_IMPL
+#include "common-types.h"
 
 int respond_error(int fd, int status, const char *msg);
 int bad_request(int fd, const char *msg);

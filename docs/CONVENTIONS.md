@@ -108,13 +108,15 @@ go through the XY dispatch mechanism, never plain `extern` (a default-visibility
 symbol exported by `XY_IMPL` is still not callable by name from another .so).
 Full contract in `docs/ARCHITECTURE.md` §5.
 
-- Shared header declares behind `#ifndef MODULE_IMPL`: `XY_DECL(int, my_func,
-  const char *, arg);` → static inline wrapper.
-- Owning `.c` (after `#define MODULE_IMPL`): `XY_IMPL(...)` then the
-  definition.
-- Constants BOTH sides need (e.g. `TPARAM_*`, `ICTX_*`, `SOURCE_FLAG_*`) go
-  **outside** the `#ifndef MODULE_IMPL` guard — inside it, callers would never
-  see them.
+- Shared types live in `M-types.h`: structs, typedefs, enums, constants (`TPARAM_*`,
+  `ICTX_*`, `SOURCE_FLAG_*`), and callback types. Zero `XY_DECL`s.
+- Public caller header `M.h`: includes `M-types.h` and lists unconditional `XY_DECL(...)`
+  hooks. Zero `#ifndef M_IMPL` guards.
+- Owning `.c`: includes `M-types.h` (never `M.h`), defines hooks with `XY_IMPL(...)`.
+  No `#define M_IMPL`.
+- Dual-role co-implementors (implementing some hooks of module X while calling others):
+  include `X-types.h` (never `X.h`), declare called hooks via local `XY_DECL`s, and
+  implement owned hooks via `XY_IMPL`.
 - Keep the exported set minimal: `static` by default.
 - Do not `#include "*.c"` across modules except the sanctioned pure
   C-isomorphic files `mods/common/ux/site_ui.c|mods/index/ux/list.c`

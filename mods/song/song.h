@@ -1,16 +1,14 @@
 #ifndef SONG_MOD_H
 #define SONG_MOD_H
 
+/*
+ * mods/song — Caller-facing XY hook declarations.
+ * Types live in song-types.h.
+ * Implementers must include song-types.h, not this header.
+ */
+
 #include <ttypt/xy-mod.h>
-
-typedef struct {
-	int transpose;
-	int flags;
-	int show_media;
-	int zoom;
-} song_viewer_prefs_t;
-
-#ifndef SONG_IMPL
+#include "song-types.h"
 
 /* Read and transpose a song's data.txt from the given doc root.
  * If output is non-NULL, receives an allocated result the caller must free.
@@ -52,7 +50,5 @@ XY_DECL(int, song_parse_viewer_prefs,
 	int, fd,
 	const char *, username,
 	song_viewer_prefs_t *, out);
-
-#endif /* SONG_IMPL */
 
 #endif /* SONG_MOD_H */

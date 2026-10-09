@@ -29,6 +29,7 @@ fi
 mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
 
 export AUTH_SKIP_CONFIRM=1
+export LD_LIBRARY_PATH="${REPO_ROOT}/external/axil-auth/lib:${LD_LIBRARY_PATH:-/usr/lib}"
 export AXIL_ND_DB="${REPO_ROOT}/var/nd/std.db"
 # The engine's own global module tier, kept apart from the site's mods.load
 # (mods/core/core.c reads that one) -- see nd_xy.c:nd_mods_load().

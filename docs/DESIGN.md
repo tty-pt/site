@@ -56,20 +56,21 @@ Rules:
 `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` is an **implementation detail**
 hidden by libxylem. A module exposes capability by:
 
-1. **Shared header** declaring it behind `#ifndef MODULE_IMPL`:
-   `XY_DECL(int, my_func, const char *, arg);` — expands to a static inline
-   wrapper that dispatches through `xy_call`. **Callers just call the function.**
-2. **Implementer** (`#define MODULE_IMPL`, then `XY_IMPL(...)` + definition).
+1. **Shared types header** (`M-types.h`): types, structs, constants.
+2. **Caller header** (`M.h`): includes `M-types.h` and declares hooks via
+   unconditional `XY_DECL(int, my_func, const char *, arg);` — expands to a
+   static inline wrapper that dispatches through `xy_call`. **Callers just call the function.**
+3. **Implementer** (`M.c`): includes `M-types.h` (never `M.h`), defines hooks via
+   `XY_IMPL(...)` + definition. No `MODULE_IMPL` guard macro.
 
 Consequences:
-- **The header IS the API.** The implementation file is irrelevant to callers.
-- Constants both sides need (e.g. `TPARAM_*`, `ICTX_*`, `SOURCE_FLAG_*`) live
-  **outside** the `#ifndef` guard, so callers AND implementer see them.
+- **The public header IS the caller API.** Implementers never include it.
+- Shared types, structs, and constants (`TPARAM_*`, `ICTX_*`, `SOURCE_FLAG_*`)
+  live in `M-types.h`, so callers AND implementers see them without header collisions.
 - Dependencies are declared by `xy_load()` in `xy_install()` — the graph is
   explicit and load-order is enforced by `mods/core/core.c`.
-- Never `extern` a cross-.so function directly; never add a new module header
-  without the guard. Keep the exported set minimal: `static` by default,
-  export only what others genuinely need.
+- Never `extern` a cross-.so function directly; never use `_IMPL` guard macros.
+  Keep the exported set minimal: `static` by default, export only what others genuinely need.
 
 ## 4. Evoking complex features (the patterns that make it one-line)
 
@@ -171,8 +172,8 @@ keeps search live.
 - [ ] Reuse: `index_open` + `register_standard_item_handlers` +
       `with_module_item_access` + `source_setup`/`source_query` cover 90% of it?
 - [ ] If you wrote the same 10 lines twice, extract a helper instead.
-- [ ] New cross-module function? Header with `#ifndef MODULE_IMPL` guard,
-      `XY_DECL`/`XY_IMPL`, shared constants outside the guard.
+- [ ] New cross-module function? Two headers: `M-types.h` (types) and `M.h`
+      (unconditional `XY_DECL`s); `XY_IMPL` in implementer; no `MODULE_IMPL` guards.
 - [ ] New field? One row in the fields table; nothing else.
 - [ ] New renderer? Pure bud over a state struct, dual-compiled; native data
       collection stays in a native-only file.

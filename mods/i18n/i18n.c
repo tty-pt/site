@@ -1,5 +1,4 @@
-#define I18N_IMPL
-#include "i18n.h"
+#include "i18n_dict.h"
 
 #include <stdio.h>
 #include <stdlib.h>

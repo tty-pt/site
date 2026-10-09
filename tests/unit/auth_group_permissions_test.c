@@ -62,16 +62,16 @@ int main(void)
 		fclose(pf);
 	}
 
+	/* Configure auth subsystem via environment for xy_install */
+	setenv("AXIL_AUTH_ETC", test_dir, 1);
+	setenv("AXIL_AUTH_USERS", test_dir, 1);
+	setenv("AXIL_AUTH_HOME", test_dir, 1);
+
 	/* Initialize XY bus and load modules */
 	xy_init();
 	_xy_init(&xy, "main", 0);
 	xy_load("./mods/common/common");
 	xy_load("./mods/auth/auth");
-
-	auth_config.etc_dir = test_dir;
-	auth_config.users_dir = test_dir;
-	auth_config.home_dir = test_dir;
-	auth_init();
 
 	/* Setup group and membership */
 	auth_create_group("choir_band");

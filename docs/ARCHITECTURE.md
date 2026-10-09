@@ -154,14 +154,13 @@ seeded and gated by `scripts/seed-jail.sh` / `scripts/check-jail.sh` (see
 
 See `CONVENTIONS` for the normative recipe. Summary:
 
-1. Shared header declares it behind `#ifndef MODULE_IMPL`: `XY_DECL(int,
-   my_func, const char *, arg);` → static inline wrapper dispatching through
-   `xy_call`.
-2. Owning `.c` (after `#define MODULE_IMPL`): `XY_IMPL(int, my_func, const
-   char *, arg);` then the definition. `XY_IMPL` produces the public function +
-   a default-visibility auto-registered adapter.
-3. Shared constants needed by callers AND impl go outside the `#ifndef
-   MODULE_IMPL` guard.
+1. Shared types, structs, constants, and enums live in `M-types.h` with zero
+   `XY_DECL`s.
+2. Public caller header `M.h` includes `M-types.h` and declares hooks via
+   unconditional `XY_DECL(...)` (no `#ifndef MODULE_IMPL` guards).
+3. Owning `.c` includes `M-types.h` (never `M.h`) and defines hooks via
+   `XY_IMPL(...)`. Dual-role co-implementors include `M-types.h` and declare
+   called hooks with local `XY_DECL`s.
 
 Handler registration helper: `register_standard_item_handlers()` in common;
 `with_module_item_access(fd, body, module, flags, notfound, forbidden, cb,

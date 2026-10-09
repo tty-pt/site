@@ -14,8 +14,7 @@
 #include <hyle/hyle.h>
 #include <hyle/registry.h>
 
-#define SOURCE_IMPL
-#include "source.h"
+#include "source-types.h"
 
 void source_install_pick_routes(void);
 

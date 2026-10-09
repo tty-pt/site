@@ -5,7 +5,15 @@
 #include <sys/stat.h>
 #include <limits.h>
 
-#include <ttypt/auth.h>
+#include <ttypt/auth-config.h>
+
+int auth_create_group(const char *grp_name);
+int auth_get_gid(const char *grp_name);
+int auth_get_grpname(int gid, char *out, size_t len);
+int auth_user_in_group(const char *username, const char *grp_name);
+int auth_group_add_member(const char *grp_name, const char *username);
+int auth_group_del_member(const char *grp_name, const char *username);
+int auth_group_get_members(const char *grp_name, char *out, size_t len);
 
 #define CHECK(label, condition)                                                \
 	do {                                                                   \

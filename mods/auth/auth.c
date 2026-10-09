@@ -14,16 +14,10 @@
 #include <ttypt/axil-xy.h>
 
 #include "../common/common.h"
+#include "../i18n/i18n.h"
 #include "../mpfd/mpfd.h"
 #include "../source/source.h"
-
-#define ITEM_IMPL
-#define AUTH_OUTCOME_IMPL
-#include "auth.h"
-#undef ITEM_IMPL
-#undef AUTH_OUTCOME_IMPL
-
-#include "../common/common.h"
+#include "auth-types.h"
 #include "dict.h"
 #include "ux/all.c"
 
@@ -190,7 +184,7 @@ XY_IMPL(int, item_owner_record,
 	if (is_disk_permission_mode()) {
 		if (geteuid() == 0) {
 			if (chown(item_path, (uid_t)uid,
-			          (gid_t)auth_config.www_gid) != 0 &&
+			          (gid_t)auth_www_gid()) != 0 &&
 			    chown(item_path, (uid_t)uid, (gid_t)-1) != 0)
 				return -1;
 		}
@@ -796,5 +790,4 @@ void xy_install(void)
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);
-	auth_init();
 }

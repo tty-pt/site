@@ -13,6 +13,7 @@
 
 #include "../index/index.h"
 #include "../common/common.h"
+#include "../i18n/i18n.h"
 #include "../source/source.h"
 
 #include "../auth/auth.h"

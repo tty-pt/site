@@ -31,8 +31,9 @@ make watch          # auto-rebuild + restart on :8080
    `site_ui.c:#ifndef __wasm__` aggregator,
    `site_page.c:#if __has_include` fallback (`C-ISOMORPHIC-BUD §3`).
 
-3. **XY is the only cross-.so boundary.** `XY_DECL` in header behind
-   `#ifndef MODULE_IMPL`, `XY_IMPL` in owner, constants outside guard,
+3. **XY is the only cross-.so boundary.** Unconditional `XY_DECL` in caller header,
+   `XY_IMPL` in owner, no X_IMPL guards — two-header rule (`M-types.h` for shared types,
+   `M.h` for caller `XY_DECL`s; implementer includes `M-types.h` and never `M.h`),
    `static` by default, never `extern` or cross-module `#include "*.c"`.
    Declare deps via `xy_load()` in `xy_install()` — modules are reusable;
    maximally independent = explicit DAG, not zero edges

@@ -1,53 +1,15 @@
 #ifndef MOD_AUTH_H
 #define MOD_AUTH_H
 
-#include <stddef.h>
-#include <ttypt/xy.h>
-
-#ifndef PATH_MAX
-#include <limits.h>
-#endif
-
-/* ---------------------------------------------------------------------------
- * Item handler context.
+/*
+ * mods/auth — Site-level authorization, ownership, item access, and CSRF.
  *
- * Standard preamble for handlers operating on a module item. Populated by
- * module_item_ctx_load(), which resolves the storage path and also enforces
- * login/ownership and writes error responses on failure.
- * ------------------------------------------------------------------------- */
+ * Caller-facing XY hook declarations.
+ * Types and context definitions live in auth-types.h.
+ * Implementers must include auth-types.h, not this header.
+ */
 
-typedef struct item_ctx_s {
-	int fd;
-	const char *username;
-	char doc_root[256];
-	char id[128];
-	char sub_id[128];
-	char item_path[PATH_MAX - 512];
-} item_ctx_t;
-
-typedef enum {
-	ITEM_ACCESS_OK = 0,
-	ITEM_ACCESS_UNAUTHENTICATED,
-	ITEM_ACCESS_MISSING,
-	ITEM_ACCESS_FORBIDDEN,
-} item_access_t;
-
-typedef int (*item_handler_cb)(
-        int fd, char *body, const item_ctx_t *ctx, void *user);
-
-#define ICTX_NEED_LOGIN 0x1     /* require logged-in user; else 401 */
-#define ICTX_NEED_OWNERSHIP 0x2 /* require item ownership; else 403/404 */
-#define ICTX_SUB_ID                                                            \
-	0x4                /* also read secondary pattern param                \
-	                      (PATTERN_PARAM_SUB_ID/CHILD_ID/SONG_ID) */
-#define ICTX_CSRF_MPFD 0x8 /* validate CSRF token from multipart form data */
-#define ICTX_CSRF_QUERY                                                        \
-	0x10 /* validate CSRF token from query string / url-encoded body */
-#define ICTX_NEED_READ_ACCESS 0x20 /* explicitly require read access (owner or group member if private) */
-
-#include <ttypt/auth.h>
-
-#ifndef ITEM_IMPL
+#include "auth-types.h"
 
 /* Canonical ownership operations. In production (chrooted / root /
  * AUTH_ENV=prod), ownership is determined strictly by POSIX disk permissions
@@ -155,6 +117,4 @@ XY_DECL(int, csrf_generate_token, char *, out, size_t, len);
 XY_DECL(int, csrf_set_cookie, int, fd, char *, out, size_t, len);
 XY_DECL(int, csrf_validate, int, fd, const char *, submitted);
 
-#endif /* ITEM_IMPL */
-
-#endif
+#endif /* MOD_AUTH_H */

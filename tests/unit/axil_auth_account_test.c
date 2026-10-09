@@ -18,9 +18,7 @@
  * calls the exported symbol directly, the way libaxil-auth.c does.
  */
 
-#define AUTH_IMPL
-#include <ttypt/auth.h>
-#undef AUTH_IMPL
+#include <ttypt/auth-config.h>
 
 int auth_password_matches(const char *username, const char *password);
 

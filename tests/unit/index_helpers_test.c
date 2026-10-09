@@ -9,8 +9,7 @@
 #include <hyle-bud/hyle-bud.h>
 #include <ttypt/xy.h>
 #include "mods/common/common.h"
-#define INDEX_IMPL
-#include "mods/index/index.h"
+#include "mods/index/index-types.h"
 
 void _xy_init(void *ptr, const char *fname, uint64_t region_id);
 

@@ -1,54 +1,16 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <ttypt/xy.h>
-#include <ttypt/axil.h>
-#include <json-c/json.h>
-#include "bud/bud.h"
-#include <hyle/schema.h>
-#include "hyle-bud/hyle-bud.h"
-#include "../i18n/i18n.h"
-
-struct item_ctx_s;
-typedef struct item_ctx_s item_ctx_t;
-
-typedef struct bud_node bud_node;
-
-typedef struct {
-	axil_handler_t *detail;
-	axil_handler_t *add_get;
-	axil_handler_t *add_post;
-	axil_handler_t *edit_get;
-	axil_handler_t *edit_post;
-} standard_item_handlers_t;
-
-typedef struct {
-	const char *name;
-	char *buf;
-	size_t sz;
-} meta_field_t;
-
-/* Convenience macros: declare a local `fields` array then call these. */
-#define META_READ(item_path, fields)                                           \
-	meta_fields_read(                                                      \
-	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
-#define META_WRITE(item_path, fields)                                          \
-	meta_fields_write(                                                     \
-	        (item_path), (fields), sizeof(fields) / sizeof(fields[0]))
-
-typedef int (*str_list_cb)(const char *token, void *user);
-
-/* ---------------------------------------------------------------------------
- * XY declarations.
+/*
+ * mods/common — Core shared site utilities, HTML/JSON responses,
+ * and entity registration.
  *
- * common.c (the implementer) must NOT include this header, since XY_DEF +
- * XY_DECL on the same symbol clash. Other modules include this freely.
- * ------------------------------------------------------------------------- */
-#ifndef COMMON_IMPL
+ * Caller-facing XY declarations.
+ * Types and definitions live in common-types.h.
+ * Implementers must include common-types.h (or common_internal.h), not this header.
+ */
+
+#include "common-types.h"
 
 XY_DECL(int, str_trim, char *, s);
 XY_DECL(int, register_standard_item_handlers,
@@ -62,12 +24,9 @@ XY_DECL(int, respond_html, int, fd, const char *, html);
 XY_DECL(const char *, require_user, int, fd);
 XY_DECL(int, respond_json, int, fd, int, status, const char *, msg);
 XY_DECL(int, respond_error, int, fd, int, status, const char *, msg);
-XY_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad
-request" */
-XY_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal
-server error" */
-XY_DECL(int, not_found, int, fd, const char *, msg);    /* 404; NULL -> "Not found"
-                                                  */
+XY_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad request" */
+XY_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal server error" */
+XY_DECL(int, not_found, int, fd, const char *, msg);    /* 404; NULL -> "Not found" */
 XY_DECL(int, redirect_to_item,
 	int, fd,
 	const char *, module,
@@ -222,62 +181,8 @@ XY_DECL(int, site_ui_respond_isomorphic,
 	const char *, wasm_module,
 	bud_node *, body);
 
-struct site_entity_def_s;
-typedef struct site_entity_def_s site_entity_def_t;
-
 XY_DECL(int, site_entity_register, const site_entity_def_t *, def);
 
-#endif /* COMMON_IMPL — end of XY_DECL section */
-
-#include "viewer_zoom.h"
-
-typedef hyle_bud_picker_view_t pick_view_t;
-
-typedef struct site_entity_def_s {
-	const char *name;
-	const char *display_name;
-	const hyle_schema_desc_t *schema;
-	size_t field_count;
-	size_t record_size;
-	const char *items_path;
-	const char *file_attachment;
-	int (*detail_auth)(
-	        int fd, char *body, const item_ctx_t *ctx, void *user);
-	bud_node *(*form_render)(
-	        int is_edit, const char *id, const void *meta,
-	        const char *file_val, const char *csrf_token,
-	        const pick_view_t *pv);
-} site_entity_def_t;
-
-/* Shared detail page state */
-typedef struct {
-	char module[64];
-	char id[64];
-	char username[64];
-	char path[256];
-	char title[256];
-	char lang[32];
-	int is_owner;
-	const char *csrf_token;
-	const char *wasm_module;
-	char *state_json;
-} detail_state_t;
-
-typedef struct {
-	const char *module;
-	const char *id;
-	const char *username;
-	const char *item_path;
-	int fd;
-	unsigned flags;
-	const char *wasm_module;
-} detail_state_build_spec_t;
-
-#define DETAIL_BUILD_OWNERSHIP 1
-#define DETAIL_BUILD_CSRF      2
-#define DETAIL_BUILD_LOCALE    4
-
-#ifndef COMMON_IMPL
 XY_DECL(int, detail_state_build,
 	detail_state_t *, state,
 	const detail_state_build_spec_t *, spec,
@@ -288,6 +193,5 @@ XY_DECL(int, detail_respond_page,
 	int, fd,
 	const detail_state_t *, state,
 	bud_node *, layout);
-#endif
 
 #endif /* COMMON_H */

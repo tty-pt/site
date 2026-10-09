@@ -27,8 +27,9 @@ zero edges.
 ### 1.2 Rules
 
 1. **XY is the only cross-`.so` interface.** A module exposes
-   capability via `XY_DECL`/`XY_IMPL` in a shared header behind
-   `#ifndef MODULE_IMPL` (`ARCHITECTURE.md:§5`). Callers just
+   capability via two headers (`M-types.h` for shared types, `M.h` for
+   unconditional `XY_DECL`s without guard macros; `XY_IMPL` in owner, which
+   never includes `M.h`; `ARCHITECTURE.md:§5`). Callers just
    call the function. Never `extern` a cross-`.so` symbol, never
    `#include "*.c"` from another module except the sanctioned
    C-isomorphic case (`CONVENTIONS` / `C-ISOMORPHIC-BUD.md:§6`
@@ -188,8 +189,8 @@ page-local     list.wasm etc.    ↔  #bud-root    + #bud-state      (route opts
     empty; `hyle_bud_*` is the only allowed `hyle_*` in UX. Any hit will be
     `--allow-undefined` and crash in the browser only. WASM-safe files are
     `site_ui.c`/`list.c` (+ `hyle-bud` `filter.c`/`table.c`); `list_fill.c`/`source.c` are native-only.
-3. New cross-module symbol: `XY_DECL` in header, `XY_IMPL` in owner,
-    shared constants outside `#ifndef MODULE_IMPL` (`CONVENTIONS:§XY`, `ARCHITECTURE.md:§5`). Never plain `extern`.
+3. New cross-module symbol: `XY_DECL` in `M.h`, `XY_IMPL` in owner,
+    shared types in `M-types.h`, no `MODULE_IMPL` guards (`CONVENTIONS:§XY`, `ARCHITECTURE.md:§5`). Never plain `extern`.
 4. No `#include "*.c"` across modules except sanctioned pure C-isomorphic `mods/common/ux/site_ui.c|mods/index/ux/list.c` (`scripts/check-module-boundaries.sh:26`). Keep `static` by default.
 5. No `"var/` literal outside `common_storage.c` / `source_store_fs.c` + `source_setup` registration; use `with_module_item_access` / `item_path_build_root`.
 6. New write path: through `source_update_item`/`source_delete_item` → `hyle put/del` only (`ARCHITECTURE.md:§6`). Direct `fopen("var/...")` freezes FTS.

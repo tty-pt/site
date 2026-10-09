@@ -2,7 +2,6 @@
 #define SITE_PAGE_C
 
 #include "site_ui.h"
-#include "../common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
