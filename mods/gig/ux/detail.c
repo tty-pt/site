@@ -693,8 +693,8 @@ static bud_node *sb_build_body_content(void)
 			        sb_app_state.sb_id, i);
 			snprintf(
 			        tpose_action, sizeof(tpose_action),
-			        "/api/gig/%s/song/%d/transpose",
-			        sb_app_state.sb_id, i);
+			        "/gig/%s/transpose",
+			        sb_app_state.sb_id);
 			snprintf(
 			        rand_action, sizeof(rand_action),
 			        "/gig/%s/randomize", sb_app_state.sb_id);
