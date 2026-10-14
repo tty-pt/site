@@ -8,7 +8,7 @@ function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
 }
 
-const CWD = "/repo";
+const CWD = await Deno.makeTempDir({ prefix: "mm-tools-cwd-" });
 const FS = `${CWD}/.pi/mm/mem.db@joint,stoma:a:s`;
 const FS_SEPAL = `${CWD}/.pi/mm/mem.db@joint,stoma,sepal:a:s`;
 

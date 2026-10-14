@@ -4,7 +4,7 @@ import { axisPath, memDir, sepalConfigured } from "./index.ts";
 import { filespecFor, buildGetInvocation, buildListInvocation, embedEnv } from "../qmap.ts";
 import { decodePayload } from "../payload.ts";
 import { parseBareRefs } from "../resolve.ts";
-import type { MemoryEnvelope, MipmapLevel, LifecycleState } from "../types.ts";
+import type { MemoryEnvelope, MipmapLevel, LifecycleState, EpisodeRecord } from "../types.ts";
 
 export interface TraversalNode {
   ref: number;
@@ -16,6 +16,7 @@ export interface TraversalNode {
   missingEvidence?: number[];
   children?: TraversalNode[];
   parents?: TraversalNode[];
+  episode?: EpisodeRecord;
 }
 
 async function fetchEnvelope(
@@ -55,6 +56,7 @@ async function traverseDown(
     summary: item.envelope.summary,
     type: item.envelope.type,
     evidence: item.envelope.evidence,
+    episode: item.envelope.episode,
     children: [],
   };
 
@@ -98,6 +100,7 @@ async function traverseUp(
     summary: item.envelope.summary,
     type: item.envelope.type,
     evidence: item.envelope.evidence,
+    episode: item.envelope.episode,
     parents: [],
   };
 

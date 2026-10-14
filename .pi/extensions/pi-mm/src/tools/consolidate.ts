@@ -106,12 +106,17 @@ async function autoL0ToL1(
   const uncited = items.filter((i) => i.envelope.level === "L0" && !cited.has(i.ref));
   const created: number[] = [];
   for (const l0 of uncited) {
-    // Reject obsolete or contradicted source memories
     if (l0.envelope.lifecycle === "superseded" || l0.envelope.lifecycle === "contradicted") continue;
-    const isSuccess = l0.envelope.episode?.outcome === "success" || (l0.envelope.episode?.approaches?.some((a) => a.outcome === "worked") ?? false);
+    const worked = l0.envelope.episode?.approaches?.find((a) => a.outcome === "worked");
+    const hasFindings = (l0.envelope.episode?.findings?.length ?? 0) > 0;
+    const isSuccess = l0.envelope.episode?.outcome === "success" || Boolean(worked) || hasFindings;
     const lifecycle: LifecycleState = isSuccess ? "supported" : "observed";
 
-    const summary = `Investigation: ${l0.envelope.episode?.problem || l0.envelope.summary}`;
+    const problem = l0.envelope.episode?.problem || l0.envelope.summary;
+    const summary = worked?.approach
+      ? `Investigation: ${problem} — verified: ${worked.approach}`
+      : `Investigation: ${problem}`;
+
     if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", [l0.ref], summary) !== null) continue;
     const envl: MemoryEnvelope = { level: "L1", type: "investigation", lifecycle, summary, context: l0.envelope.context, evidence: [l0.ref] };
     const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
@@ -124,6 +129,37 @@ async function autoL0ToL1(
   return created;
 }
 
+const STOP_WORDS = new Set([
+  "investigation", "observed", "episode", "verified", "issue", "problem", "error", "session", "test", "fix",
+]);
+
+function hasConflictingFindings(investigations: StoredItem[]): boolean {
+  let hasAlways = false;
+  let hasNever = false;
+  for (const inv of investigations) {
+    const text = `${inv.envelope.summary} ${inv.envelope.episode?.problem || ""}`.toLowerCase();
+    if (text.includes("never") || text.includes("avoid") || text.includes("refute") || text.includes("prohibit")) hasNever = true;
+    if (text.includes("always") || text.includes("require") || text.includes("must") || text.includes("enforce")) hasAlways = true;
+  }
+  return hasAlways && hasNever;
+}
+
+function findSharedInvariantRule(investigations: StoredItem[]): string | null {
+  if (investigations.length < 2) return null;
+  if (hasConflictingFindings(investigations)) return null; // Conflicting conclusions cannot form an invariant!
+  const tokenSets = investigations.map((inv) => {
+    const text = `${inv.envelope.summary} ${inv.envelope.episode?.problem || ""}`.toLowerCase();
+    const words = text
+      .split(/\s+/)
+      .map((w) => w.replace(/[^\w]/g, ""))
+      .filter((w) => w.length >= 4 && !STOP_WORDS.has(w));
+    return new Set(words);
+  });
+  const common = [...tokenSets[0]].filter((token) => tokenSets.every((ts) => ts.has(token)));
+  if (common.length === 0) return null;
+  return `Hypothesized rule for ${common.join(" ")}`;
+}
+
 async function autoL1ToL2(
   env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
   items: StoredItem[], refs: number[], cited: Set<number>, date: string,
@@ -131,7 +167,6 @@ async function autoL1ToL2(
   const uncited = items.filter((i) => i.envelope.level === "L1" && !cited.has(i.ref));
   const byScope = new Map<string, StoredItem[]>();
   for (const l1 of uncited) {
-    // Never promote contradicted or superseded investigations into supported project knowledge
     if (l1.envelope.lifecycle === "contradicted" || l1.envelope.lifecycle === "superseded") continue;
     const scope = l1.envelope.context?.project || l1.envelope.context?.subsystem || l1.envelope.context?.module;
     if (!scope) continue;
@@ -141,13 +176,25 @@ async function autoL1ToL2(
   }
   const created: number[] = [];
   for (const [scope, group] of byScope.entries()) {
-    const sRefs = group.map((g) => g.ref);
-    const allSupported = group.every((g) => g.envelope.lifecycle === "supported");
-    const lifecycle: LifecycleState = allSupported ? "supported" : "observed";
+    const supported = group.filter((g) => g.envelope.lifecycle === "supported");
+    if (supported.length < 2) continue; // Single investigation or unverified items do not form an invariant rule
 
-    const summary = `Project Invariant [${scope}]: ${group.map((g) => g.envelope.summary.replace(/^Investigation:\s*/, "")).join("; ")}`;
+    const sharedRule = findSharedInvariantRule(supported);
+    if (!sharedRule) continue; // Unrelated investigations in the same scope are NOT conjoined!
+
+    const sRefs = supported.map((g) => g.ref);
+    const summary = `Project Invariant [${scope}]: ${sharedRule}`;
+
     if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L2", sRefs, summary) !== null) continue;
-    const envl: MemoryEnvelope = { level: "L2", type: "invariant", lifecycle, summary, context: { project: scope }, evidence: sRefs };
+    // Without an active semantic synthesis model, automated abstractions are recorded as hypotheses
+    const envl: MemoryEnvelope = {
+      level: "L2",
+      type: "invariant",
+      lifecycle: "hypothesized",
+      summary,
+      context: { project: scope },
+      evidence: sRefs,
+    };
     const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
     if (ref !== null) {
       created.push(ref);
@@ -174,18 +221,43 @@ async function runAutoConsolidation(env: ToolEnv, _ctx: PiCtx): Promise<{ conten
 
     const createdL1 = await autoL0ToL1(env, fspec, axes, cwd, eEnv, items, refs, cited, date);
     const createdL2 = await autoL1ToL2(env, fspec, axes, cwd, eEnv, items, refs, cited, date);
-    // When semantic synthesis models are unconfigured, do not fabricate generic L3 lessons
-    const createdL3: number[] = [];
 
     return exportDetail({
       mode: "auto",
       createdL1,
       createdL2,
-      createdL3,
-      totalCreated: createdL1.length + createdL2.length + createdL3.length,
-      note: "L3 synthesis requires explicit model synthesis; unpromoted when offline",
+      createdL3: [],
+      totalCreated: createdL1.length + createdL2.length,
+      l3Status: "unavailable (synthesis model not configured)",
     });
   });
+}
+
+async function validateL3Generalization(
+  env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
+  sourceRefs: number[],
+): Promise<{ valid: boolean; error?: string }> {
+  if (sourceRefs.length === 0) {
+    return { valid: false, error: "L3 general lesson requires at least 1 validated project knowledge source" };
+  }
+  const sourceEnvelopes: MemoryEnvelope[] = [];
+  for (const r of sourceRefs) {
+    const item = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, r, axes, cwd, eEnv));
+    if (item.code === 0 && item.stdout.trim()) {
+      const { envelope } = decodePayload(item.stdout.trim());
+      if (envelope.level !== "L2" || envelope.lifecycle !== "supported") {
+        return { valid: false, error: `source ref ${r} is not a supported L2 project invariant` };
+      }
+      sourceEnvelopes.push(envelope);
+    }
+  }
+  if (sourceRefs.length >= 2) {
+    const distinctScopes = new Set(sourceEnvelopes.map((e) => e.context?.project || e.context?.subsystem).filter(Boolean));
+    if (distinctScopes.size < 2) {
+      return { valid: false, error: "cannot generalize L3 across a single project scope" };
+    }
+  }
+  return { valid: true };
 }
 
 async function executeConsolidate(
@@ -219,6 +291,13 @@ async function executeConsolidate(
         const errType = error?.includes("cannot use") ? "invalid-level-transition" : "invalid-source";
         if (error) return { content: [{ type: "text", text: `mm consolidate: ${error}` }], details: { error: errType } };
         return { content: [{ type: "text", text: `mm consolidate: supporting evidence refs missing: ${missing.join(", ")}` }], details: { error: "missing-sources", missing } };
+      }
+
+      if (targetLevel === "L3") {
+        const l3Val = await validateL3Generalization(env, fspec, axes, cwd, eEnv, sourceRefs);
+        if (!l3Val.valid) {
+          return { content: [{ type: "text", text: `mm consolidate: ${l3Val.error}` }], details: { error: "unsupported-generalization" } };
+        }
       }
 
       const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));

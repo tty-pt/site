@@ -224,6 +224,7 @@ function walkProvenanceChain(ref: number, corpus: BenchmarkCorpusItem[], visited
 interface SyntheticMetrics {
   name: string;
   precisionAt1: number;
+  targetRecall: number;
   obsoleteExcluded: number;
   evidenceTraceable: number;
 }
@@ -239,10 +240,16 @@ function evaluateSynthetic(
     metric.precisionAt1++;
   }
 
-  // Obsolete exclusion: does the top-3 returned candidate set contain any obsolete candidates?
+  // Target recall: is the expected reference anywhere in the returned candidates?
+  const hasTarget = ranked.slice(0, 5).some((r) => r.ref === task.expectedRef);
+  if (hasTarget) {
+    metric.targetRecall++;
+  }
+
+  // Obsolete exclusion: awarded ONLY when expected target is recalled AND obsolete candidates are excluded
   const topCandidates = ranked.slice(0, 3).map((r) => r.ref);
   const hasObsoleteInResults = task.obsoleteCandidateRefs.some((obsRef) => topCandidates.includes(obsRef));
-  if (!hasObsoleteInResults) {
+  if (hasTarget && !hasObsoleteInResults) {
     metric.obsoleteExcluded++;
   }
 
@@ -259,10 +266,10 @@ function runSyntheticBenchmark(): SyntheticMetrics[] {
   console.log(`Corpus items: ${CORPUS.length} | Test queries: ${TASKS.length}\n`);
 
   const results: SyntheticMetrics[] = [
-    { name: "1. Raw Episode Search (stoma alone)", precisionAt1: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "2. Flat Episode Summaries", precisionAt1: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "3. Summaries + Semantic Approx (offline)", precisionAt1: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "4. Multidimensional Memory Mipmaps", precisionAt1: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "1. Raw Episode Search (stoma alone)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "2. Flat Episode Summaries", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "3. Summaries + Semantic Approx (offline)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "4. Multidimensional Memory Mipmaps", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
   ];
 
   for (const task of TASKS) {
@@ -302,15 +309,35 @@ function runSyntheticBenchmark(): SyntheticMetrics[] {
     evaluateSynthetic(task, ranked4, results[3], true);
   }
 
-  console.log("Configuration                            | P@1    | Obsolete Excl | Evidence Trace");
-  console.log("-----------------------------------------+--------+---------------+---------------");
+  console.log("Configuration                            | P@1    | Recall | Obsolete Excl | Evidence Trace");
+  console.log("-----------------------------------------+--------+--------+---------------+---------------");
   for (const r of results) {
     const p1 = `${((r.precisionAt1 / TASKS.length) * 100).toFixed(0)}%`.padEnd(6);
+    const rec = `${((r.targetRecall / TASKS.length) * 100).toFixed(0)}%`.padEnd(6);
     const obs = `${((r.obsoleteExcluded / TASKS.length) * 100).toFixed(0)}%`.padEnd(13);
     const ev = `${((r.evidenceTraceable / TASKS.length) * 100).toFixed(0)}%`.padEnd(13);
-    console.log(`${r.name.padEnd(40)} | ${p1} | ${obs} | ${ev}`);
+    console.log(`${r.name.padEnd(40)} | ${p1} | ${rec} | ${obs} | ${ev}`);
   }
   return results;
+}
+
+interface LeafVerificationNode {
+  level: string;
+  summary?: string;
+  episode?: { diffs?: string[]; approaches?: Array<{ approach: string; outcome: string }> };
+  children?: LeafVerificationNode[];
+}
+
+function verifyL0EvidenceLeaf(node?: LeafVerificationNode): boolean {
+  if (!node) return false;
+  if (node.level === "L0") {
+    const hasDiffs = (node.episode?.diffs?.length ?? 0) > 0;
+    const hasWorked = Boolean(node.episode?.approaches?.some((a) => a.outcome === "worked"));
+    return hasDiffs || hasWorked;
+  }
+  const children = node.children || [];
+  if (children.length === 0) return false;
+  return children.some(verifyL0EvidenceLeaf);
 }
 
 async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
@@ -388,8 +415,12 @@ async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
 
   // Execute scan queries through real backend
   let realHits = 0;
+  let realRecall = 0;
   let realObsoleteExcluded = 0;
-  let realTraceable = 0;
+  let targetTraceable = 0;
+  let topCandidateTraceable = 0;
+  let realEmptyResults = 0;
+  let realTargetFailures = 0;
 
   for (const task of TASKS) {
     const scanRes = await scanTool.execute(
@@ -402,46 +433,75 @@ async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
     const details = scanRes.details as { records: Array<{ ref: number; envelope?: MemoryEnvelope }> };
     const records = details.records || [];
 
+    if (records.length === 0) {
+      realEmptyResults++;
+    }
+
     if (records.length > 0 && records[0].ref === task.expectedRef) {
       realHits++;
     }
 
-    // Require target record recall AND obsolete exclusion; empty queries do NOT count
     const hasTarget = records.some((r) => r.ref === task.expectedRef);
+    if (hasTarget) {
+      realRecall++;
+    } else {
+      realTargetFailures++;
+    }
+
     const hasObsolete = records.some((r) => task.obsoleteCandidateRefs.includes(r.ref));
-    if (records.length > 0 && hasTarget && !hasObsolete) {
+    // Obsolete exclusion is credited ONLY when target is recalled AND obsolete candidates are excluded
+    if (hasTarget && !hasObsolete) {
       realObsoleteExcluded++;
     }
 
+    // 1. Evidence traversal of top-ranked candidate
     if (records.length > 0) {
       const topRef = records[0].ref;
-      const travRes = await traverseTool.execute(
-        "trav_bench",
+      const topTravRes = await traverseTool.execute(
+        "trav_top",
         { ref: topRef, direction: "down", depth: 3 },
         undefined,
         undefined,
         ctx,
       );
-      const travDetails = travRes.details as {
+      const topTravDetails = topTravRes.details as {
         root: number;
         visitedCount: number;
-        tree?: { level: string; envelope?: MemoryEnvelope; children?: Array<{ level: string; envelope?: MemoryEnvelope }> };
+        tree?: LeafVerificationNode;
       };
-      // Validate complete multi-hop traversal down to valid L0 leaf
-      const reachedL0 = Boolean(
-        travDetails?.visitedCount >= 2 &&
-        travDetails.tree?.children?.some((c) => c.level === "L0" || c.envelope?.level === "L0")
+      if (topTravDetails?.visitedCount >= 2 && verifyL0EvidenceLeaf(topTravDetails.tree)) {
+        topCandidateTraceable++;
+      }
+    }
+
+    // 2. Evidence traversal specifically of the expected target memory
+    if (hasTarget) {
+      const targetTravRes = await traverseTool.execute(
+        "trav_target",
+        { ref: task.expectedRef, direction: "down", depth: 3 },
+        undefined,
+        undefined,
+        ctx,
       );
-      if (reachedL0) {
-        realTraceable++;
+      const targetTravDetails = targetTravRes.details as {
+        root: number;
+        visitedCount: number;
+        tree?: LeafVerificationNode;
+      };
+      if (targetTravDetails?.visitedCount >= 2 && verifyL0EvidenceLeaf(targetTravDetails.tree)) {
+        targetTraceable++;
       }
     }
   }
 
   console.log("Real C Engine Results (libcorm + libstoma + libjoint):");
   console.log(`- Precision@1: ${((realHits / TASKS.length) * 100).toFixed(0)}% (${realHits}/${TASKS.length})`);
-  console.log(`- Valid Target Recall & Obsolete Exclusion: ${((realObsoleteExcluded / TASKS.length) * 100).toFixed(0)}% (${realObsoleteExcluded}/${TASKS.length})`);
-  console.log(`- Provenance Traversal to L0 Leaf: ${((realTraceable / TASKS.length) * 100).toFixed(0)}% (${realTraceable}/${TASKS.length})`);
+  console.log(`- Target Recall: ${((realRecall / TASKS.length) * 100).toFixed(0)}% (${realRecall}/${TASKS.length})`);
+  console.log(`- Obsolete Candidate Exclusion (with Target): ${((realObsoleteExcluded / TASKS.length) * 100).toFixed(0)}% (${realObsoleteExcluded}/${TASKS.length})`);
+  console.log(`- Target Evidence Traceability: ${((targetTraceable / TASKS.length) * 100).toFixed(0)}% (${targetTraceable}/${TASKS.length})`);
+  console.log(`- Top Candidate Evidence Traceability: ${((topCandidateTraceable / TASKS.length) * 100).toFixed(0)}% (${topCandidateTraceable}/${TASKS.length})`);
+  console.log(`- Empty Results: ${realEmptyResults}/${TASKS.length}`);
+  console.log(`- Target Recall Failures: ${realTargetFailures}/${TASKS.length}`);
   console.log(`- Backend Workspace: ${tmpDir}`);
 }
 
@@ -453,5 +513,56 @@ const siteRoot = (() => {
   return cwd;
 })();
 
+function runRegressionFixtures(): void {
+  console.log("\n=== Part C: Benchmark Regression Fixture Validations ===");
+  const summaryOnlyLeaf: LeafVerificationNode = {
+    level: "L0",
+    summary: "Very detailed and long summary describing a fix in the parser without diffs",
+  };
+  if (verifyL0EvidenceLeaf(summaryOnlyLeaf) !== false) {
+    throw new Error("FAIL: summaryOnlyLeaf must not pass evidence check");
+  }
+  console.log("ok - summary-only L0 record rejected as evidence");
+
+  const diffLeaf: LeafVerificationNode = {
+    level: "L0",
+    summary: "Episode with verified diff",
+    episode: { diffs: ["+ if (bounds) return 0;"] },
+  };
+  if (!verifyL0EvidenceLeaf(diffLeaf)) {
+    throw new Error("FAIL: diffLeaf must pass evidence check");
+  }
+  console.log("ok - diff-bearing L0 leaf verified");
+
+  const workedApproachLeaf: LeafVerificationNode = {
+    level: "L0",
+    summary: "Episode with worked approach",
+    episode: { approaches: [{ approach: "bounds check", outcome: "worked" }] },
+  };
+  if (!verifyL0EvidenceLeaf(workedApproachLeaf)) {
+    throw new Error("FAIL: workedApproachLeaf must pass evidence check");
+  }
+  console.log("ok - worked-approach L0 leaf verified");
+
+  const taskWithoutTarget: BenchmarkTask = {
+    query: "test query",
+    expectedRef: 10,
+    obsoleteCandidateRefs: [20],
+  };
+  const metrics: SyntheticMetrics = {
+    name: "test",
+    precisionAt1: 0,
+    targetRecall: 0,
+    obsoleteExcluded: 0,
+    evidenceTraceable: 0,
+  };
+  evaluateSynthetic(taskWithoutTarget, [{ ref: 99, item: CORPUS[0] }], metrics, false);
+  if (metrics.obsoleteExcluded !== 0) {
+    throw new Error("FAIL: obsolete exclusion must not be credited when target is missing");
+  }
+  console.log("ok - missing target recall does not award obsolete exclusion credit");
+}
+
 runSyntheticBenchmark();
 await runRealBackendBenchmark(siteRoot);
+runRegressionFixtures();

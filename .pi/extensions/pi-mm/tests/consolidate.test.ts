@@ -6,8 +6,8 @@ import { encodePayload, decodePayload } from "../src/payload.ts";
 import { give, type ToolEnv } from "../src/tools/index.ts";
 import type { QmapRunner } from "../src/qmap.ts";
 
-const CWD = "/repo";
-const ctx = { cwd: CWD };
+const CWD = await Deno.makeTempDir({ prefix: "mm-consolidate-cwd-" });
+const ctx = { cwd: CWD, hasUI: false, mode: "agent" };
 
 function now(): Date {
   return new Date("2026-10-14T12:00:00Z");
@@ -337,29 +337,33 @@ Deno.test("consolidate: end-to-end automatic L0->L1->L2->L3 hierarchy with scope
   const consolidateTool = makeConsolidateTool(give(env(memoryRunner)));
   const traverseTool = makeTraverseTool(give(env(memoryRunner)));
 
-  // Seed two episodes in project A, two in project B
+  // Seed two verified episodes in project A, two in project B
   await runTool(storeTool, {
     level: "L0",
     type: "episode",
     summary: "A1: buffer overflow in parser",
+    episode: { problem: "parser buffer overflow", approaches: [{ approach: "bounds check", outcome: "worked" }], outcome: "success" },
     context: { project: "project-a" },
   }, ctx); // ref 1
   await runTool(storeTool, {
     level: "L0",
     type: "episode",
-    summary: "A2: off-by-one in lexer",
+    summary: "A2: off-by-one in parser lexer",
+    episode: { problem: "parser off-by-one lexer", approaches: [{ approach: "zero-index check", outcome: "worked" }], outcome: "success" },
     context: { project: "project-a" },
   }, ctx); // ref 2
   await runTool(storeTool, {
     level: "L0",
     type: "episode",
     summary: "B1: socket timeout on connect",
+    episode: { problem: "socket timeout connect", approaches: [{ approach: "keepalive flag", outcome: "worked" }], outcome: "success" },
     context: { project: "project-b" },
   }, ctx); // ref 3
   await runTool(storeTool, {
     level: "L0",
     type: "episode",
-    summary: "B2: connection reset on close",
+    summary: "B2: socket connection reset on close",
+    episode: { problem: "socket connection reset", approaches: [{ approach: "graceful shutdown", outcome: "worked" }], outcome: "success" },
     context: { project: "project-b" },
   }, ctx); // ref 4
 
@@ -477,4 +481,174 @@ Deno.test("consolidate: auto mode skips contradicted and superseded memories", a
   const createdL1Raw = store.get(4)!;
   const { envelope } = decodePayload(createdL1Raw);
   assert.deepStrictEqual(envelope.evidence, [1]);
+});
+
+Deno.test("consolidate: unrelated investigations in the same scope are NOT conjoined into invariants", async () => {
+  const store = new Map<number, string>();
+  const memoryRunner: QmapRunner = {
+    run(inv: import("../src/qmap.ts").Invocation) {
+      if (inv.args[0] === "-p") {
+        const firstColon = inv.args[1].indexOf(":");
+        const ref = Number(inv.args[1].slice(0, firstColon));
+        const payload = inv.args[1].slice(firstColon + 1);
+        store.set(ref, payload);
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-g" && inv.args[1] === ".") {
+        const refs = [...store.keys()].join("\n");
+        return Promise.resolve({ stdout: refs ? refs + "\n" : "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-r" && inv.args[1] === "-g") {
+        const ref = Number(inv.args[2]);
+        const val = store.get(ref);
+        return Promise.resolve({ stdout: val ?? "", stderr: "", code: val ? 0 : 1 });
+      }
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+    },
+  };
+
+  const { makeStoreTool } = await import("../src/tools/store.ts");
+  const storeTool = makeStoreTool(give(env(memoryRunner)));
+  const consolidateTool = makeConsolidateTool(give(env(memoryRunner)));
+
+  // Two completely unrelated episodes in the same project
+  await runTool(storeTool, {
+    level: "L0",
+    type: "episode",
+    summary: "Investigation: binary parser segmentation fault",
+    episode: { problem: "binary parser segmentation fault", approaches: [{ approach: "null check", outcome: "worked" }], outcome: "success" },
+    context: { project: "project-a" },
+  }, ctx); // ref 1
+
+  await runTool(storeTool, {
+    level: "L0",
+    type: "episode",
+    summary: "Investigation: css header styling margin alignment",
+    episode: { problem: "css header styling margin alignment", approaches: [{ approach: "flexbox adjust", outcome: "worked" }], outcome: "success" },
+    context: { project: "project-a" },
+  }, ctx); // ref 2
+
+  const autoRes = await runTool(consolidateTool, { mode: "auto" }, ctx);
+  const details = autoRes.details as { createdL1: number[]; createdL2: number[]; totalCreated: number };
+
+  // Two L1 investigations were created
+  assert.strictEqual(details.createdL1.length, 2);
+  // BUT ZERO L2 invariants were created because the investigations are unrelated!
+  assert.strictEqual(details.createdL2.length, 0);
+  assert.strictEqual(details.totalCreated, 2);
+});
+
+Deno.test("consolidate: rejects unsupported L3 generalizations (single source or single scope)", async () => {
+  const store = new Map<number, string>();
+  // L2 in project-a
+  store.set(1, `2026-10-15:{"level":"L2","type":"invariant","summary":"Invariant A1","lifecycle":"supported","context":{"project":"project-a"},"evidence":[10]}`);
+  store.set(2, `2026-10-15:{"level":"L2","type":"invariant","summary":"Invariant A2","lifecycle":"supported","context":{"project":"project-a"},"evidence":[11]}`);
+  // L2 in project-b
+  store.set(3, `2026-10-15:{"level":"L2","type":"invariant","summary":"Invariant B1","lifecycle":"supported","context":{"project":"project-b"},"evidence":[12]}`);
+  // Unverified L2 in project-c
+  store.set(4, `2026-10-15:{"level":"L2","type":"invariant","summary":"Unverified C1","lifecycle":"observed","context":{"project":"project-c"},"evidence":[13]}`);
+
+  const memoryRunner: QmapRunner = {
+    run(inv: import("../src/qmap.ts").Invocation) {
+      if (inv.args[0] === "-p") {
+        const firstColon = inv.args[1].indexOf(":");
+        const ref = Number(inv.args[1].slice(0, firstColon));
+        const payload = inv.args[1].slice(firstColon + 1);
+        store.set(ref, payload);
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-g" && inv.args[1] === ".") {
+        const refs = [...store.keys()].join("\n");
+        return Promise.resolve({ stdout: refs ? refs + "\n" : "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-r" && inv.args[1] === "-g") {
+        const ref = Number(inv.args[2]);
+        const val = store.get(ref);
+        return Promise.resolve({ stdout: val ?? "", stderr: "", code: val ? 0 : 1 });
+      }
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+    },
+  };
+
+  const consolidateTool = makeConsolidateTool(give(env(memoryRunner)));
+
+  // 1. Attempt L3 from an unverified (observed) L2 source -> rejected
+  const resUnverified = await runTool(consolidateTool, {
+    targetLevel: "L3",
+    sourceRefs: [4],
+    summary: "General Lesson from unverified source",
+  }, ctx);
+  assert.strictEqual((resUnverified.details as { error: string }).error, "unsupported-generalization");
+  assert.strictEqual(resUnverified.content[0].text?.includes("is not a supported L2 project invariant"), true);
+
+  // 2. Attempt L3 from multiple refs in the same single project scope -> rejected
+  const resSameScope = await runTool(consolidateTool, {
+    targetLevel: "L3",
+    sourceRefs: [1, 2],
+    summary: "General Lesson from single project",
+  }, ctx);
+  assert.strictEqual((resSameScope.details as { error: string }).error, "unsupported-generalization");
+  assert.strictEqual(resSameScope.content[0].text?.includes("cannot generalize L3 across a single project scope"), true);
+
+  // 3. Attempt L3 from multiple refs across distinct project scopes (project-a and project-b) -> SUCCEEDS
+  const resMultiScope = await runTool(consolidateTool, {
+    targetLevel: "L3",
+    sourceRefs: [1, 3],
+    summary: "Genuine General Lesson across project-a and project-b",
+  }, ctx);
+  assert.strictEqual((resMultiScope.details as { level: string }).level, "L3");
+});
+
+Deno.test("consolidate: investigations sharing vocabulary but expressing contradictory conclusions are NOT merged", async () => {
+  const store = new Map<number, string>();
+  const memoryRunner: QmapRunner = {
+    run(inv: import("../src/qmap.ts").Invocation) {
+      if (inv.args[0] === "-p") {
+        const firstColon = inv.args[1].indexOf(":");
+        const ref = Number(inv.args[1].slice(0, firstColon));
+        const payload = inv.args[1].slice(firstColon + 1);
+        store.set(ref, payload);
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-g" && inv.args[1] === ".") {
+        const refs = [...store.keys()].join("\n");
+        return Promise.resolve({ stdout: refs ? refs + "\n" : "", stderr: "", code: 0 });
+      }
+      if (inv.args[0] === "-r" && inv.args[1] === "-g") {
+        const ref = Number(inv.args[2]);
+        const val = store.get(ref);
+        return Promise.resolve({ stdout: val ?? "", stderr: "", code: val ? 0 : 1 });
+      }
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+    },
+  };
+
+  const { makeStoreTool } = await import("../src/tools/store.ts");
+  const storeTool = makeStoreTool(give(env(memoryRunner)));
+  const consolidateTool = makeConsolidateTool(give(env(memoryRunner)));
+
+  // Two episodes in the same project and topic, but with contradictory conclusions
+  await runTool(storeTool, {
+    level: "L0",
+    type: "episode",
+    summary: "Investigation: parser must always require strict buffer bounds",
+    episode: { problem: "parser bounds check", approaches: [{ approach: "always check bounds", outcome: "worked" }], outcome: "success" },
+    context: { project: "project-a" },
+  }, ctx); // ref 1
+
+  await runTool(storeTool, {
+    level: "L0",
+    type: "episode",
+    summary: "Investigation: parser should never enforce buffer bounds on raw streams",
+    episode: { problem: "parser bounds check", approaches: [{ approach: "never enforce bounds", outcome: "worked" }], outcome: "success" },
+    context: { project: "project-a" },
+  }, ctx); // ref 2
+
+  const autoRes = await runTool(consolidateTool, { mode: "auto" }, ctx);
+  const details = autoRes.details as { createdL1: number[]; createdL2: number[]; totalCreated: number };
+
+  // 2 L1 investigations created
+  assert.strictEqual(details.createdL1.length, 2);
+  // BUT 0 L2 invariants created because the findings contradict each other!
+  assert.strictEqual(details.createdL2.length, 0);
 });

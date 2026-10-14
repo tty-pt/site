@@ -25,6 +25,7 @@ export interface EpisodeRecord {
   diffs?: string[];
   outcome?: "success" | "failure" | "aborted" | string;
   environment?: Record<string, string>;
+  eventIds?: string[];
 }
 
 export interface SpatialGrid {

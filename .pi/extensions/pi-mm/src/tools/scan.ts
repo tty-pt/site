@@ -1,7 +1,7 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events.ts";
-import type { EnvSource } from "./index.ts";
+import type { EnvSource, ToolEnv } from "./index.ts";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
-import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM, scanWindowArgs } from "../qmap.ts";
+import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM, scanWindowArgs, type ResultLine } from "../qmap.ts";
 import { decodePayload } from "../payload.ts";
 import type { MipmapLevel, LifecycleState, MemoryEnvelope } from "../types.ts";
 
@@ -130,6 +130,40 @@ function filterAndEnrich(rawLines: ReturnType<typeof parseResultLines>, crit: Fi
   return candidates.slice(0, crit.limit);
 }
 
+async function querySpatialFilter(
+  env: ToolEnv, cwd: string, axes: string, limit: number, bbox: { dim?: number; s: string; l: string },
+): Promise<Set<number>> {
+  const isletFspec = `${cwd}/mem-islet.db@islet:a:s`;
+  const res = await env.runner.run(buildScanInvocation(
+    env.cfg.qmapBin, isletFspec, "islet", limit * 2, axes, cwd, undefined,
+    [`--dim=${bbox.dim ?? 2}`, `--s=${bbox.s}`, `--l=${bbox.l}`],
+  ));
+  return res.code === 0 ? new Set(parseResultLines(res.stdout).map((l) => l.ref)) : new Set();
+}
+
+async function scanTokenFallback(
+  env: ToolEnv, cwd: string, expr: string, limit: number, axes: string,
+  embedReady: boolean, timeLevel: number, now: Date, until: string | undefined, topic: string,
+): Promise<ResultLine[]> {
+  const words = topic.split(/\s+/).map((w) => w.replace(/[^\w-]/g, "")).filter((w) => w.length >= 3);
+  const seen = new Set<number>();
+  const lines: ResultLine[] = [];
+  for (const w of words.slice(0, 6)) {
+    const subArgs = [
+      ...scanWindowArgs(timeLevel, now, until),
+      "--field=text", "--matched=1", "--query=" + w,
+      ...(embedReady ? ["--min-sim=" + String(SEPAL_MIN_SIM)] : []),
+    ];
+    const subRes = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg), subArgs));
+    if (subRes.code === 0) {
+      for (const line of parseResultLines(subRes.stdout)) {
+        if (!seen.has(line.ref)) { seen.add(line.ref); lines.push(line); }
+      }
+    }
+  }
+  return lines;
+}
+
 async function executeScan(envSource: EnvSource, params: Record<string, unknown>, ctx: PiCtx) {
   try {
     const env = await envSource(ctx);
@@ -153,32 +187,11 @@ async function executeScan(envSource: EnvSource, params: Record<string, unknown>
 
     const extraArgs: string[] = [
       ...scanWindowArgs(timeLevel, now, until),
-      "--field=text",
-      "--matched=1",
-      "--query=" + topic,
+      "--field=text", "--matched=1", "--query=" + topic,
       ...(embedReady ? ["--min-sim=" + String(SEPAL_MIN_SIM)] : []),
     ];
 
-    let isletRefs: Set<number> | null = null;
-    if (bbox) {
-      const isletFspec = `${cwd}/mem-islet.db@islet:a:s`;
-      const isletRes = await env.runner.run(buildScanInvocation(
-        env.cfg.qmapBin,
-        isletFspec,
-        "islet",
-        limit * 2,
-        axes,
-        cwd,
-        undefined,
-        [`--dim=${bbox.dim ?? 2}`, `--s=${bbox.s}`, `--l=${bbox.l}`],
-      ));
-      if (isletRes.code === 0) {
-        isletRefs = new Set(parseResultLines(isletRes.stdout).map((l) => l.ref));
-      } else {
-        isletRefs = new Set();
-      }
-    }
-
+    const isletRefs = bbox ? await querySpatialFilter(env, cwd, axes, limit, bbox) : null;
     const expr = scanExpr(topic, timeLevel, now, until, embedReady);
     const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg), extraArgs));
     if (result.code !== 0) {
@@ -186,8 +199,11 @@ async function executeScan(envSource: EnvSource, params: Record<string, unknown>
     }
 
     let rawLines = parseResultLines(result.stdout);
+    if (rawLines.length === 0 && topic.includes(" ")) {
+      rawLines = await scanTokenFallback(env, cwd, expr, limit, axes, embedReady, timeLevel, now, until, topic);
+    }
     if (isletRefs !== null) {
-      rawLines = rawLines.filter((l) => isletRefs!.has(l.ref));
+      rawLines = rawLines.filter((l) => isletRefs.has(l.ref));
     }
     details["records"] = filterAndEnrich(rawLines, {
       mipmap: resolveMipmapFilter(params["level"]),

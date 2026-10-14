@@ -6,8 +6,8 @@ import { encodePayload } from "../src/payload.ts";
 import { give, type ToolEnv } from "../src/tools/index.ts";
 import type { QmapRunner } from "../src/qmap.ts";
 
-const CWD = "/repo";
-const ctx = { cwd: CWD };
+const CWD = await Deno.makeTempDir({ prefix: "mm-ranking-cwd-" });
+const ctx = { cwd: CWD, hasUI: false, mode: "agent" };
 
 function now(): Date {
   return new Date("2026-10-14T12:00:00Z");

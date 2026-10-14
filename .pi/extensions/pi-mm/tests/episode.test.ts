@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { join } from "node:path";
 import { makeStoreTool } from "../src/tools/store.ts";
 import { SessionEventBuffer } from "../src/hooks/events.ts";
 import { fakeRunner, runTool, okResult } from "./fake-qmap.ts";
@@ -7,8 +8,8 @@ import { decodePayload } from "../src/payload.ts";
 import { give, type ToolEnv } from "../src/tools/index.ts";
 import type { QmapRunner } from "../src/qmap.ts";
 
-const CWD = "/repo";
-const ctx = { cwd: CWD };
+const CWD = await Deno.makeTempDir({ prefix: "mm-episode-cwd-" });
+const ctx = { cwd: CWD, hasUI: false, mode: "agent" };
 
 function now(): Date {
   return new Date("2026-10-14T12:00:00Z");
@@ -451,4 +452,387 @@ Deno.test("episode: disk journal persists pending events across process restart 
   const proc3Buffer = new SessionEventBuffer();
   const recoveredAfterFlush = await proc3Buffer.restoreJournal(tmpDir);
   assert.strictEqual(recoveredAfterFlush, 0);
+});
+
+Deno.test("episode: automatic journaling on normal Pi tool_result hook without manual saveJournal", async () => {
+  const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-auto-journal-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  activeSessionBuffer.clear();
+  activeSessionBuffer.setJournalDir(tmpDir);
+
+  const mockPi = {
+    handlers: new Map<string, Array<(...args: unknown[]) => unknown>>(),
+    on(event: string, handler: (...args: unknown[]) => unknown): void {
+      if (!this.handlers.has(event)) this.handlers.set(event, []);
+      this.handlers.get(event)!.push(handler);
+    },
+    emit(event: string, data: unknown): void {
+      for (const h of this.handlers.get(event) || []) h(data);
+    },
+  };
+
+  installSessionHooks(mockPi as unknown as import("../src/hooks/events.ts").Pi);
+
+  // Normal tool_result hook execution
+  mockPi.emit("tool_result", {
+    toolCallId: "call_hook_auto_journal",
+    toolName: "bash",
+    isError: true,
+    content: [{ type: "text", text: "FAIL: panic in buffer allocator" }],
+  });
+
+  // Small delay to allow async journal file write
+  await new Promise((r) => setTimeout(r, 25));
+
+  // Verify journal file was automatically written to disk!
+  const journalExists = await (async () => {
+    try {
+      const s = await Deno.stat(journalFile);
+      return s.isFile;
+    } catch {
+      return false;
+    }
+  })();
+  assert.strictEqual(journalExists, true);
+
+  const content = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(content.length, 1);
+  assert.strictEqual(content[0].id, "call_hook_auto_journal");
+});
+
+Deno.test("episode: post-crash idempotency prunes already-committed event IDs", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-idempotency-" });
+
+  const buf1 = new SessionEventBuffer();
+  buf1.setJournalDir(tmpDir);
+  buf1.record({
+    id: "evt_committed_1",
+    timestamp: "2026-10-15T15:00:00Z",
+    toolName: "bash",
+    summary: "build passed",
+    isError: false,
+    approach: "cargo build",
+    outcome: "worked",
+  });
+  buf1.record({
+    id: "evt_uncommitted_2",
+    timestamp: "2026-10-15T15:01:00Z",
+    toolName: "bash",
+    summary: "test failed",
+    isError: true,
+    approach: "cargo test",
+    outcome: "failed",
+  });
+  await buf1.saveJournal(tmpDir);
+
+  // Process restarts. "evt_committed_1" is found in mem.db
+  const existingCommitted = new Set<string>(["evt_committed_1"]);
+
+  const buf2 = new SessionEventBuffer();
+  const restored = await buf2.restoreJournal(tmpDir, existingCommitted);
+
+  // Only the uncommitted event should be restored
+  assert.strictEqual(restored, 1);
+  const unflushed = buf2.getUnflushed();
+  assert.strictEqual(unflushed.length, 1);
+  assert.strictEqual(unflushed[0].id, "evt_uncommitted_2");
+});
+
+Deno.test("episode: crash recovery across fresh spawned OS process", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-os-proc-recovery-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  // Write a pending event journal from a crashed process
+  const pendingEvents = [{
+    id: "evt_from_crashed_proc",
+    timestamp: "2026-10-15T16:00:00Z",
+    toolName: "bash",
+    summary: "make: *** [test] Error 2",
+    isError: true,
+    approach: "make test",
+    outcome: "failed",
+  }];
+  await Deno.writeTextFile(journalFile, JSON.stringify(pendingEvents));
+
+  const cwd = Deno.cwd();
+  const eventsModule = cwd.includes(".pi/extensions/pi-mm")
+    ? `${cwd}/src/hooks/events.ts`
+    : `${cwd}/.pi/extensions/pi-mm/src/hooks/events.ts`;
+
+  const workerScript = `
+    import { SessionEventBuffer } from "${eventsModule}";
+
+    const dir = Deno.args[0];
+    const buf = new SessionEventBuffer();
+    const restored = await buf.restoreJournal(dir);
+    if (restored !== 1) {
+      console.error("Expected 1 restored event, got " + restored);
+      Deno.exit(1);
+    }
+    const unflushed = buf.getUnflushed();
+    if (unflushed[0].id !== "evt_from_crashed_proc") {
+      console.error("Unexpected id " + unflushed[0].id);
+      Deno.exit(2);
+    }
+    buf.markFlushed("recovered_fp", ["evt_from_crashed_proc"]);
+    await buf.saveJournal(dir);
+    Deno.exit(0);
+  `;
+
+  const scriptPath = join(tmpDir, "recover_worker.ts");
+  await Deno.writeTextFile(scriptPath, workerScript);
+
+  const cmd = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", "--sloppy-imports", scriptPath, tmpDir],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await cmd.output();
+  assert.strictEqual(output.code, 0, new TextDecoder().decode(output.stderr));
+
+  // Verify journal was cleared by the recovered process
+  const journalRemaining = await (async () => {
+    try {
+      const s = await Deno.stat(journalFile);
+      return s.isFile;
+    } catch {
+      return false;
+    }
+  })();
+  assert.strictEqual(journalRemaining, false);
+});
+
+Deno.test("episode: mid-flush event arrival is isolated and not marked as flushed", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const buf = new SessionEventBuffer();
+
+  buf.record({
+    id: "evt_batch_1",
+    timestamp: "2026-10-15T10:00:00Z",
+    toolName: "bash",
+    summary: "initial test",
+    isError: false,
+  });
+
+  // Begin flush: batch 1 is in-flight
+  const batch = buf.beginFlush()!;
+  assert.strictEqual(batch.length, 1);
+  assert.strictEqual(batch[0].id, "evt_batch_1");
+
+  // An event arrives while the write is in flight
+  buf.record({
+    id: "evt_mid_flight_2",
+    timestamp: "2026-10-15T10:00:01Z",
+    toolName: "edit",
+    summary: "file modified mid-flight",
+    isError: false,
+  });
+
+  // Complete batch 1 flush
+  buf.commitFlush(batch.map((e) => e.id));
+
+  // The event that arrived mid-flight MUST NOT be marked flushed!
+  assert.strictEqual(buf.hasUnflushed(), true);
+  const remaining = buf.getUnflushed();
+  assert.strictEqual(remaining.length, 1);
+  assert.strictEqual(remaining[0].id, "evt_mid_flight_2");
+});
+
+Deno.test("episode: simultaneous flush calls are protected against duplicate commits", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const buf = new SessionEventBuffer();
+
+  buf.record({
+    id: "evt_concurrent_1",
+    timestamp: "2026-10-15T11:00:00Z",
+    toolName: "bash",
+    summary: "concurrent test",
+    isError: false,
+  });
+
+  const firstBatch = buf.beginFlush();
+  assert.notStrictEqual(firstBatch, null);
+
+  // A concurrent flush call occurs before firstBatch finishes
+  const secondBatch = buf.beginFlush();
+  // Second flush MUST be rejected while first is in-flight
+  assert.strictEqual(secondBatch, null);
+
+  buf.commitFlush(firstBatch!.map((e) => e.id));
+  assert.strictEqual(buf.hasUnflushed(), false);
+});
+
+Deno.test("episode: execution outcome distinguishes ordinary tool returns from verified test success", async () => {
+  const { summarizeToolEvent } = await import("../src/hooks/events.ts");
+
+  // 1. Ordinary read/bash tool invocation that completed without error
+  const ordinaryEvent = summarizeToolEvent({
+    toolName: "bash",
+    content: [{ type: "text", text: "total 12\n-rw-r--r-- 1 user user 1024 Oct 15 server.c" }],
+    isError: false,
+  });
+  assert.notStrictEqual(ordinaryEvent, null);
+  // Outcome MUST be undefined (executed/observed), NOT verified "worked"!
+  assert.strictEqual(ordinaryEvent!.outcome, undefined);
+
+  // 2. Test execution that explicitly passed
+  const testPassEvent = summarizeToolEvent({
+    toolName: "bash",
+    content: [{ type: "text", text: "ok 1 - all green 0 failed (12ms)" }],
+    isError: false,
+  });
+  assert.notStrictEqual(testPassEvent, null);
+  // Outcome MUST be verified "worked"
+  assert.strictEqual(testPassEvent!.outcome, "worked");
+
+  // 3. Test execution that failed
+  const testFailEvent = summarizeToolEvent({
+    toolName: "bash",
+    content: [{ type: "text", text: "FAIL: 1 failed in suite" }],
+    isError: true,
+  });
+  assert.notStrictEqual(testFailEvent, null);
+  assert.strictEqual(testFailEvent!.outcome, "failed");
+});
+
+Deno.test("episode: journal write queue recovers after failed write and exposes lastError", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const buf = new SessionEventBuffer();
+
+  // Create an invalid path that cannot be written to
+  const tmpFile = await Deno.makeTempFile({ prefix: "mm-journal-bad-" });
+  const badDir = join(tmpFile, "cannot_create_dir");
+
+  buf.record({
+    id: "evt_fail_journal",
+    timestamp: "2026-10-15T12:00:00Z",
+    toolName: "bash",
+    summary: "fail test",
+    isError: false,
+  });
+
+  // Attempt save to bad directory: must fail safely and populate lastError
+  await buf.saveJournal(badDir);
+  assert.notStrictEqual(buf.lastError, null);
+  assert.strictEqual(buf.lastError!.includes("journal-error:"), true);
+
+  // Now save to a valid directory: queue MUST recover and succeed
+  const goodDir = await Deno.makeTempDir({ prefix: "mm-journal-good-" });
+  await buf.saveJournal(goodDir);
+  assert.strictEqual(buf.lastError, null);
+
+  const savedContent = JSON.parse(await Deno.readTextFile(join(goodDir, ".pending_events.json")));
+  assert.strictEqual(savedContent.length, 1);
+  assert.strictEqual(savedContent[0].id, "evt_fail_journal");
+});
+
+Deno.test("episode: concurrent journal updates result in latest unflushed event state", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-concurrent-journal-" });
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  // Issue 5 rapid updates concurrently
+  for (let i = 1; i <= 5; i++) {
+    buf.record({
+      id: `evt_rapid_${i}`,
+      timestamp: `2026-10-15T12:0${i}:00Z`,
+      toolName: "edit",
+      summary: `edit step ${i}`,
+      isError: false,
+    });
+  }
+
+  // Await the journal queue to settle
+  await buf.saveJournal(tmpDir);
+
+  const saved = JSON.parse(await Deno.readTextFile(join(tmpDir, ".pending_events.json")));
+  assert.strictEqual(saved.length, 5);
+  assert.strictEqual(saved[4].id, "evt_rapid_5");
+});
+
+Deno.test("episode: session_start during in-flight flush preserves flush guard and avoids duplicate commit", async () => {
+  const { flushSessionBuffer } = await import("../src/hooks/events.ts");
+
+  const committedBatches: string[][] = [];
+  const fakeStore = new Map<number, string>();
+  let nextId = 1;
+
+  let releaseStoreDelay: () => void = () => {};
+  const storeDelayPromise = new Promise<void>((resolve) => {
+    releaseStoreDelay = resolve;
+  });
+
+  const slowRunner: import("../src/qmap.ts").QmapRunner = {
+    async run(inv: import("../src/qmap.ts").Invocation) {
+      if (inv.args[0] === "-g" && inv.args[1] === ".") {
+        const refs = [...fakeStore.keys()].join("\n");
+        return { stdout: refs ? refs + "\n" : "", stderr: "", code: 0 };
+      }
+      if (inv.args[0] === "-p") {
+        // Pause inside store operation
+        await storeDelayPromise;
+        const ref = nextId++;
+        const payload = inv.args[1];
+        fakeStore.set(ref, payload);
+        const { decodePayload } = await import("../src/payload.ts");
+        const { envelope } = decodePayload(payload.slice(payload.indexOf(":") + 1));
+        if (envelope.episode?.eventIds) {
+          committedBatches.push(envelope.episode.eventIds);
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  };
+
+  const { DEFAULT_CONFIG } = await import("../src/config.ts");
+  const envSource = () => Promise.resolve({
+    cfg: { ...DEFAULT_CONFIG, qmapBin: "/fake/qmap" },
+    runner: slowRunner,
+    nowProvider: () => new Date("2026-10-15T12:00:00Z"),
+    cwd: "/tmp",
+  });
+
+  const { activeSessionBuffer } = await import("../src/hooks/events.ts");
+  activeSessionBuffer.clear();
+
+  // 1. Record event 1
+  activeSessionBuffer.record({
+    id: "evt_in_flight_1",
+    timestamp: "2026-10-15T12:00:00Z",
+    toolName: "bash",
+    summary: "first step",
+    isError: false,
+  });
+
+  // 2. Start flush (now paused inside slowRunner)
+  const flushPromise = flushSessionBuffer(envSource, { cwd: "/tmp", hasUI: false, mode: "test" });
+
+  // 3. session_start fires while store is still in flight!
+  activeSessionBuffer.onSessionStart();
+
+  // 4. A new event arrives
+  activeSessionBuffer.record({
+    id: "evt_new_step_2",
+    timestamp: "2026-10-15T12:00:01Z",
+    toolName: "edit",
+    summary: "second step",
+    isError: false,
+  });
+
+  // 5. Release slow store operation
+  releaseStoreDelay();
+  await flushPromise;
+
+  // 6. Another settle flush fires
+  await flushSessionBuffer(envSource, { cwd: "/tmp", hasUI: false, mode: "test" });
+
+  // Each event batch was persisted separately, exactly once!
+  assert.strictEqual(committedBatches.length, 2);
+  assert.deepStrictEqual(committedBatches[0], ["evt_in_flight_1"]);
+  assert.deepStrictEqual(committedBatches[1], ["evt_new_step_2"]);
 });

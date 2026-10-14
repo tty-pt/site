@@ -1,11 +1,11 @@
 import type { EnvSource } from "../tools/index.ts";
 import { axisPath, memDir, sepalConfigured } from "../tools/index.ts";
-import { filespecFor, buildStoreInvocation, buildListInvocation, embedEnv } from "../qmap.ts";
+import { filespecFor, buildStoreInvocation, buildListInvocation, buildGetInvocation, embedEnv } from "../qmap.ts";
 import { parseBareRefs, nextRef } from "../resolve.ts";
-import { encodePayload } from "../payload.ts";
+import { encodePayload, decodePayload } from "../payload.ts";
 import { withLock } from "../lock.ts";
 import type { MemoryEnvelope, EpisodeRecord } from "../types.ts";
-import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface PiToolSpec {
@@ -13,32 +13,12 @@ export interface PiToolSpec {
   label: string;
   description: string;
   parameters: unknown;
-  execute: (
-    toolCallId: string,
-    params: Record<string, unknown>,
-    signal: AbortSignal | undefined,
-    onUpdate: unknown,
-    ctx: PiCtx,
-  ) => Promise<PiAgentToolResult>;
+  execute: (toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: PiCtx) => Promise<PiAgentToolResult>;
 }
 
-export interface PiAgentToolResult {
-  content: Array<{ type: string; text?: string }>;
-  details?: unknown;
-}
-
-export interface PiExecResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
-
-export interface PiCtx {
-  cwd: string;
-  hasUI: boolean;
-  mode: string;
-  ui?: unknown;
-}
+export interface PiAgentToolResult { content: Array<{ type: string; text?: string }>; details?: unknown; }
+export interface PiExecResult { stdout: string; stderr: string; code: number; }
+export interface PiCtx { cwd: string; hasUI: boolean; mode: string; ui?: unknown; }
 
 export interface ToolResultEvent {
   toolCallId?: string;
@@ -66,103 +46,127 @@ export interface SignificantEvent {
 export interface Pi {
   on(event: string, handler: (...args: unknown[]) => unknown): void;
   registerTool(tool: PiToolSpec): void;
-  exec(
-    command: string,
-    args: string[],
-    options?: { cwd?: string; env?: Record<string, string> },
-  ): Promise<PiExecResult>;
+  exec(command: string, args: string[], options?: { cwd?: string; env?: Record<string, string> }): Promise<PiExecResult>;
 }
 
 export class SessionEventBuffer {
   private events: SignificantEvent[] = [];
+  private inFlightBatch: SignificantEvent[] | null = null;
   private maxEvents = 50;
-  private lastFlushedCount = 0;
-  private lastFlushedFingerprint = "";
   private flushedEventIds = new Set<string>();
+  private journalDir: string | null = null;
+  private journalQueue: Promise<void> = Promise.resolve();
+  private isFlushing = false;
   public lastError: string | null = null;
 
+  public setJournalDir(dir: string): void { this.journalDir = dir; }
   public clear(): void {
-    this.events = [];
-    this.lastFlushedCount = 0;
-    this.lastFlushedFingerprint = "";
-    this.flushedEventIds.clear();
-    this.lastError = null;
+    this.events = []; this.inFlightBatch = null; this.flushedEventIds.clear(); this.lastError = null; this.isFlushing = false;
   }
-
   public onSessionStart(): void {
-    if (this.lastFlushedCount > 0) {
-      this.events = this.events.slice(this.lastFlushedCount);
-      this.lastFlushedCount = 0;
-    }
+    this.events = this.events.filter((e) => !this.flushedEventIds.has(e.id));
+    if (!this.isFlushing) this.inFlightBatch = null;
   }
-
   public record(event: SignificantEvent): void {
     if (this.flushedEventIds.has(event.id) || this.events.some((e) => e.id === event.id)) return;
-    if (this.events.length >= this.maxEvents) {
-      this.events.shift();
-      if (this.lastFlushedCount > 0) this.lastFlushedCount--;
-    }
+    if (this.events.length >= this.maxEvents) this.events.shift();
     this.events.push(event);
+    if (this.journalDir) void this.saveJournal(this.journalDir);
   }
-
   public getEvents(): readonly SignificantEvent[] { return this.events; }
-  public hasUnflushed(): boolean { return this.events.length > this.lastFlushedCount; }
-  public getUnflushed(): SignificantEvent[] { return this.events.slice(this.lastFlushedCount); }
-
-  public markFlushed(fingerprint: string, ids: string[]): void {
-    this.lastFlushedCount = this.events.length;
-    this.lastFlushedFingerprint = fingerprint;
+  public hasUnflushed(): boolean { return this.events.some((e) => !this.flushedEventIds.has(e.id)); }
+  public getUnflushed(): SignificantEvent[] { return this.events.filter((e) => !this.flushedEventIds.has(e.id)); }
+  public beginFlush(): SignificantEvent[] | null {
+    if (this.isFlushing) return null;
+    const unflushed = this.getUnflushed();
+    if (unflushed.length === 0) return null;
+    this.isFlushing = true;
+    this.inFlightBatch = [...unflushed];
+    return this.inFlightBatch;
+  }
+  public commitFlush(ids: string[]): void {
     for (const id of ids) this.flushedEventIds.add(id);
+    this.inFlightBatch = null;
+    this.isFlushing = false;
     this.lastError = null;
+    this.events = this.events.filter((e) => !this.flushedEventIds.has(e.id));
   }
-
-  public getLastFingerprint(): string { return this.lastFlushedFingerprint; }
-
+  public markFlushed(_fingerprint: string, ids: string[]): void { this.commitFlush(ids); }
   public getApproaches(): Array<{ approach: string; outcome: "worked" | "failed" | "abandoned"; reason?: string }> {
-    return this.events.filter((e) => e.approach && e.outcome).map((e) => ({
-      approach: e.approach!,
-      outcome: e.outcome!,
-      reason: e.summary,
-    }));
+    return extractBatchApproaches(this.getUnflushed());
   }
+  public getDiffs(): string[] { return extractBatchDiffs(this.getUnflushed()); }
 
-  public getDiffs(): string[] {
-    const diffs: string[] = [];
-    for (const e of this.events) if (e.diffs) diffs.push(...e.diffs);
-    return diffs;
+  public rollbackFlush(err?: string): void {
+    this.inFlightBatch = null;
+    this.isFlushing = false;
+    if (err) this.lastError = err;
   }
 
   public async saveJournal(dir: string): Promise<void> {
     const unflushed = this.getUnflushed();
     const journalFile = join(dir, ".pending_events.json");
-    try {
-      await mkdir(dir, { recursive: true });
-      if (unflushed.length === 0) {
-        await unlink(journalFile).catch(() => {});
-      } else {
-        await writeFile(journalFile, JSON.stringify(unflushed));
+    const tmpJournal = `${journalFile}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 6)}`;
+
+    this.journalQueue = this.journalQueue.catch(() => {}).then(async () => {
+      try {
+        await mkdir(dir, { recursive: true });
+        if (unflushed.length === 0) {
+          await unlink(journalFile).catch(() => {});
+        } else {
+          await writeFile(tmpJournal, JSON.stringify(unflushed));
+          await rename(tmpJournal, journalFile);
+        }
+        if (this.lastError?.startsWith("journal-error:")) {
+          this.lastError = null;
+        }
+      } catch (err: unknown) {
+        await unlink(tmpJournal).catch(() => {});
+        const msg = err instanceof Error ? err.message : String(err);
+        this.lastError = `journal-error: ${msg}`;
+        throw err;
       }
-    } catch { /* best-effort journal */ }
+    });
+    try { await this.journalQueue; } catch { /* recorded in this.lastError */ }
   }
 
-  public async restoreJournal(dir: string): Promise<number> {
+  public async restoreJournal(dir: string, existingEventIds?: Set<string>): Promise<number> {
     const journalFile = join(dir, ".pending_events.json");
     try {
       const data = await readFile(journalFile, "utf-8");
       const loaded: SignificantEvent[] = JSON.parse(data);
       let count = 0;
       for (const ev of loaded) {
+        if (existingEventIds?.has(ev.id)) {
+          this.flushedEventIds.add(ev.id);
+          continue;
+        }
         if (!this.flushedEventIds.has(ev.id) && !this.events.some((e) => e.id === ev.id)) {
           this.events.push(ev);
           count++;
         }
       }
+      await this.saveJournal(dir);
       return count;
     } catch { return 0; }
   }
 }
 
 export const activeSessionBuffer = new SessionEventBuffer();
+
+export function extractBatchApproaches(batch: SignificantEvent[]): Array<{ approach: string; outcome: "worked" | "failed" | "abandoned"; reason?: string }> {
+  return batch.filter((e) => e.approach && e.outcome).map((e) => ({
+    approach: e.approach!,
+    outcome: e.outcome!,
+    reason: e.summary,
+  }));
+}
+
+export function extractBatchDiffs(batch: SignificantEvent[]): string[] {
+  const diffs: string[] = [];
+  for (const e of batch) if (e.diffs) diffs.push(...e.diffs);
+  return diffs;
+}
 
 function extractDiffs(text: string): string[] {
   if (!text.includes("@@ -") && !text.includes("--- a/") && !text.includes("diff --git")) {
@@ -181,10 +185,15 @@ export function summarizeToolEvent(event: ToolResultEvent): SignificantEvent | n
   const isCodeMod = /edit|write|patch/i.test(event.toolName);
   if (!isTest && !isErr && !isCodeMod) return null;
 
-  const failed = isErr || /FAIL|failed|error|fatal|panic/i.test(text);
-  const passed = !failed && (/PASS|passed|ok|succeeded/i.test(text) || !isErr);
+  const cmd = String(event.input?.["command"] || event.args?.["command"] || "");
+  const hasErrorWord = /\b(?:FAIL|failed|error|fatal|panic)\b/i.test(text.replace(/0\s+failed/gi, ""));
+  const failed = isErr || hasErrorWord;
+  const isVerification = /test|check|verify|smoke/i.test(event.toolName) ||
+                         /test|check|make|deno|cargo|npm/i.test(cmd) ||
+                         /test|PASS|check-complexity|integration|ok\s+\d+|all green/i.test(text);
+  const verifiedWorked = !failed && isVerification && (/PASS|passed|all green|ok\s+-|0 failed/i.test(text));
 
-  const outcome: "worked" | "failed" = passed ? "worked" : "failed";
+  const outcome: "worked" | "failed" | undefined = failed ? "failed" : verifiedWorked ? "worked" : undefined;
   const firstLine = text.split("\n")[0]?.slice(0, 160) || `Executed ${event.toolName}`;
 
   const id = event.toolCallId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -200,7 +209,7 @@ export function summarizeToolEvent(event: ToolResultEvent): SignificantEvent | n
     toolName: event.toolName,
     summary: firstLine,
     isError: failed,
-    approach: `Executed ${event.toolName}: ${firstLine.slice(0, 80)}`,
+    approach: outcome ? `Executed ${event.toolName}: ${firstLine.slice(0, 80)}` : undefined,
     outcome,
     diffs,
     environment: envInfo,
@@ -208,42 +217,42 @@ export function summarizeToolEvent(event: ToolResultEvent): SignificantEvent | n
   };
 }
 
-export async function flushSessionBuffer(envSource: EnvSource, ctx: PiCtx): Promise<number | null> {
-  if (!activeSessionBuffer.hasUnflushed()) return null;
-  const unflushed = activeSessionBuffer.getUnflushed();
-  if (unflushed.length === 0) return null;
+let activeFlushPromise: Promise<number | null> | null = null;
 
-  const ids = unflushed.map((e) => e.id);
-  const fingerprint = unflushed.map((e) => `${e.id}:${e.outcome}`).join(";");
-  if (fingerprint === activeSessionBuffer.getLastFingerprint()) return null;
+async function executeBatchFlush(
+  batch: SignificantEvent[],
+  envSource: EnvSource,
+  ctx: PiCtx,
+): Promise<number | null> {
+  const ids = batch.map((e) => e.id);
+  const firstEvent = batch[0];
+  const approaches = extractBatchApproaches(batch);
+  const observations = batch.map((e) => e.summary);
+  const diffs = extractBatchDiffs(batch);
+  const hasFail = batch.some((e) => e.isError);
 
   try {
     const env = await envSource(ctx);
     if (!env.cfg.qmapBin) {
-      activeSessionBuffer.lastError = "qmap-not-found";
+      activeSessionBuffer.rollbackFlush("qmap-not-found");
       return null;
     }
-
-    const firstEvent = unflushed[0];
-    const approaches = activeSessionBuffer.getApproaches();
-    const observations = unflushed.map((e) => e.summary);
-    const diffs = activeSessionBuffer.getDiffs();
-    const hasFail = unflushed.some((e) => e.isError);
 
     const episode: EpisodeRecord = {
       problem: firstEvent.summary,
       request: `Session event: ${firstEvent.summary}`,
-      approaches,
+      approaches: approaches.length > 0 ? approaches : undefined,
       observations,
       diffs: diffs.length > 0 ? diffs : undefined,
       environment: firstEvent.environment,
-      outcome: hasFail ? "failure" : "success",
+      outcome: hasFail ? "failure" : approaches.some((a) => a.outcome === "worked") ? "success" : "observed",
+      eventIds: ids,
     };
 
     const envelope: MemoryEnvelope = {
       level: "L0",
       type: "episode",
-      lifecycle: "observed",
+      lifecycle: episode.outcome === "success" ? "supported" : "observed",
       summary: `Automated Episode: ${firstEvent.summary}`,
       episode,
     };
@@ -263,17 +272,34 @@ export async function flushSessionBuffer(envSource: EnvSource, ctx: PiCtx): Prom
 
       const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd, eEnv));
       if (res.code === 0) {
-        activeSessionBuffer.markFlushed(fingerprint, ids);
+        activeSessionBuffer.commitFlush(ids);
         await activeSessionBuffer.saveJournal(cwd);
         return ref;
       }
-      activeSessionBuffer.lastError = `store-failed-code-${res.code}: ${res.stderr}`;
+      activeSessionBuffer.rollbackFlush(`store-failed-code-${res.code}: ${res.stderr}`);
       await activeSessionBuffer.saveJournal(cwd);
       return null;
     });
   } catch (err) {
-    activeSessionBuffer.lastError = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    activeSessionBuffer.rollbackFlush(msg);
     return null;
+  }
+}
+
+export async function flushSessionBuffer(envSource: EnvSource, ctx: PiCtx): Promise<number | null> {
+  while (activeFlushPromise) {
+    await activeFlushPromise;
+  }
+
+  const batch = activeSessionBuffer.beginFlush();
+  if (!batch || batch.length === 0) return null;
+
+  activeFlushPromise = executeBatchFlush(batch, envSource, ctx);
+  try {
+    return await activeFlushPromise;
+  } finally {
+    activeFlushPromise = null;
   }
 }
 
@@ -283,7 +309,22 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     if (envSource && ctxUnknown) {
       try {
         const env = await envSource(ctxUnknown as PiCtx);
-        await activeSessionBuffer.restoreJournal(memDir(env));
+        const cwd = memDir(env);
+        activeSessionBuffer.setJournalDir(cwd);
+
+        const committedIds = new Set<string>();
+        const embed = sepalConfigured(env.cfg);
+        const fspec = filespecFor(cwd, embed);
+        const axes = axisPath(env);
+        const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd));
+        for (const r of parseBareRefs(list.stdout)) {
+          const res = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, r, axes, cwd));
+          if (res.code === 0 && res.stdout.trim()) {
+            const { envelope } = decodePayload(res.stdout.trim());
+            for (const id of envelope.episode?.eventIds || []) committedIds.add(id);
+          }
+        }
+        await activeSessionBuffer.restoreJournal(cwd, committedIds);
       } catch { /* best-effort */ }
     }
   });

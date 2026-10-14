@@ -1,4 +1,4 @@
-import { open, unlink, stat, readFile, mkdir } from "node:fs/promises";
+import { open, unlink, stat, readFile, rename, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const inProcessLocks = new Map<string, Promise<void>>();
@@ -20,38 +20,52 @@ export function isPidAlive(pid: number): boolean {
     return true;
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code;
-    return code === "EPERM"; // EPERM means process exists (alive)
+    if (code === "ESRCH") {
+      return false; // Confirmed: process does not exist
+    }
+    // Fail closed: EPERM or any ambiguous system error treats process as alive
+    return true;
   }
 }
 
 async function tryRecoverStaleLock(lockFile: string, staleThresholdMs: number): Promise<void> {
   try {
-    const content = await readFile(lockFile, "utf-8");
     const st = await stat(lockFile);
-    if (!content.trim()) {
-      // Empty lock file: wait if recent to avoid pruning mid-write
-      if (Date.now() - st.mtimeMs > 1000) {
-        await unlink(lockFile).catch(() => {});
-      }
+    if (Date.now() - st.mtimeMs < staleThresholdMs) {
       return;
     }
-    const info: LockInfo = JSON.parse(content);
-    // If the process that created the lock is genuinely dead, safely prune it
-    if (info.pid > 0 && !isPidAlive(info.pid)) {
-      await unlink(lockFile).catch(() => {});
-    } else if (Date.now() - st.mtimeMs > staleThresholdMs * 10 && !isPidAlive(info.pid)) {
-      await unlink(lockFile).catch(() => {});
+
+    const content = await readFile(lockFile, "utf-8");
+    let info: LockInfo | null = null;
+    try {
+      info = JSON.parse(content);
+    } catch {
+      // Treat malformed lock ownership as unknown, not dead. Fail closed!
+      return;
+    }
+
+    if (!info || typeof info.pid !== "number" || info.pid <= 0 || isPidAlive(info.pid)) {
+      return;
+    }
+
+    // Process is confirmed dead (ESRCH).
+    // Atomically isolate this candidate lock to eliminate TOCTOU replacement races.
+    const myPid = typeof process !== "undefined" ? process.pid : 0;
+    const recoveryPath = `${lockFile}.recovery.${myPid}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      await rename(lockFile, recoveryPath);
+    } catch {
+      return; // Competing process already won recovery or lock was unlinked
+    }
+
+    // Safely remove the isolated recovery file without ever overwriting another process's lock
+    try {
+      await unlink(recoveryPath);
+    } catch {
+      // Best-effort cleanup
     }
   } catch {
-    // If unparseable and older than threshold, prune corrupt lock file
-    try {
-      const st = await stat(lockFile);
-      if (Date.now() - st.mtimeMs > 2000) {
-        await unlink(lockFile).catch(() => {});
-      }
-    } catch {
-      // Stat failed: file was already removed
-    }
+    // Stat failed or file absent
   }
 }
 
@@ -73,9 +87,6 @@ async function acquireFileLock(
       return true;
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
-      if (code === "ENOENT" || code === "ENOTDIR" || code === "EACCES" || code === "EPERM") {
-        return false; // Mock/virtual directories without disk access
-      }
       if (code === "EEXIST") {
         await tryRecoverStaleLock(lockFile, staleThresholdMs);
       }
@@ -96,7 +107,7 @@ export async function withLock<T>(
   const timeoutMs = opts.timeoutMs ?? 3000;
   const staleThresholdMs = opts.staleThresholdMs ?? 5000;
 
-  // 1. In-process queue
+  // 1. In-process queue: ensures serialized execution within the same process
   let releaseInProcess: () => void = () => {};
   const currentLock = inProcessLocks.get(dir) ?? Promise.resolve();
   const lockAcquiredPromise = new Promise<void>((resolve) => {
@@ -105,20 +116,14 @@ export async function withLock<T>(
   inProcessLocks.set(dir, currentLock.then(() => lockAcquiredPromise, () => lockAcquiredPromise));
   await currentLock;
 
-  // 2. Cross-process filesystem lock
+  // 2. Cross-process filesystem lock: unconditionally enforced inside try/finally
   const lockFile = join(dir, ".mm.lock");
   let fileLockAcquired = false;
-  let dirOnDisk = false;
-  try {
-    await mkdir(dir, { recursive: true });
-    dirOnDisk = true;
-  } catch {
-    // Mock directory
-  }
 
   try {
+    await mkdir(dir, { recursive: true });
     fileLockAcquired = await acquireFileLock(lockFile, Date.now(), timeoutMs, staleThresholdMs);
-    if (!fileLockAcquired && dirOnDisk) {
+    if (!fileLockAcquired) {
       throw new Error(`Failed to acquire memory lock on ${dir}: filesystem locking required`);
     }
     return await fn();

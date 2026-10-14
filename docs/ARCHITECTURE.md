@@ -50,6 +50,38 @@ Rules derived from the model:
 
 ## 2. Libraries and dependency direction
 
+```text
+               axil (HTTP/WS Daemon & Host)
+                 │  ▲
+                 ▼  │ (via libxylem hooks)
+             libxylem (Dynamic Module Extensibility)
+                 │
+                 ▼
+  Browser WASM <─── libbud ───> Native SSR (Isomorphic DOM)
+                      ▲
+                      │ (via libhyle-bud bridge)
+                   libhyle (Data & Schema Kernel)
+                      │
+                      ▼
+                   libcorm (Core In-Memory Map Store & Recall Engine)
+                      │
+     ┌────────────────┼────────────────┬────────────────┐
+     ▼                ▼                ▼                ▼
+  libjoint         libislet         libstoma         libsepal
+ (Time Axis)      (Space Axis)     (Text Axis)     (Meaning Axis)
+```
+
+Core repositories:
+- [axil](https://github.com/tty-pt/axil) — HTTP(S), WebSocket, and network daemon library
+- [libxylem](https://github.com/tty-pt/libxylem) — Dynamic module loader and hook isolation
+- [libbud](https://github.com/tty-pt/libbud) — Isomorphic C DOM scaffold for SSR + WASM
+- [libhyle](https://github.com/tty-pt/hyle) — Data schema and query kernel
+- [libcorm](https://github.com/tty-pt/libcorm) — In-memory map store and recall kernel
+- [libjoint](https://github.com/tty-pt/libit) — Temporal presence interval tree (Time axis)
+- [libislet](https://github.com/tty-pt/libgeo) — Multi-dimensional Morton code spatial index (Space axis)
+- [libstoma](https://github.com/tty-pt/libstoma) — Accent-preserving lexical tokenizer (Text axis)
+- [libsepal](https://github.com/tty-pt/libsepal) — Semantic vector store & 2-stage ANN (Meaning axis)
+
 ```
 axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)

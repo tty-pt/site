@@ -8,7 +8,7 @@ import { give } from "../src/tools/index.ts";
 import type { QmapRunner } from "../src/qmap.ts";
 import type { PiExecResult } from "../src/hooks/events.ts";
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
 
 class ThreadSafeFakeStore {
   public records = new Map<number, string>();
@@ -305,4 +305,185 @@ Deno.test("concurrency: active process lock is not pruned even if staleThreshold
   assert.strictEqual(executed, false);
   assert.notStrictEqual(caughtError, null);
   assert.strictEqual(caughtError!.message.includes("lock contention"), true);
+});
+
+Deno.test("concurrency: withLock is strictly fail-closed on filesystem setup error", async () => {
+  // A path under a regular file cannot have subdirectories created
+  const tmpFile = await Deno.makeTempFile({ prefix: "mm-fail-closed-" });
+  const badDir = join(tmpFile, "invalid_subdir");
+
+  let executed = false;
+  let caughtError: Error | null = null;
+  try {
+    await withLock(badDir, () => {
+      executed = true;
+      return Promise.resolve();
+    });
+  } catch (err) {
+    caughtError = err as Error;
+  }
+
+  // MUST throw filesystem error and MUST NEVER execute fn()
+  assert.strictEqual(executed, false);
+  assert.notStrictEqual(caughtError, null);
+});
+
+Deno.test("concurrency: isPidAlive fails closed on ambiguous error (only ESRCH is dead)", async () => {
+  const { isPidAlive } = await import("../src/lock.ts");
+
+  // Current process is alive
+  assert.strictEqual(isPidAlive(Deno.pid), true);
+
+  // An impossible PID is dead (ESRCH)
+  assert.strictEqual(isPidAlive(99999999), false);
+
+  // Negative or zero PID is dead
+  assert.strictEqual(isPidAlive(0), false);
+  assert.strictEqual(isPidAlive(-1), false);
+});
+
+Deno.test("concurrency: replacement lock created during recovery is preserved and never clobbered", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-replacement-lock-" });
+  const lockFile = join(tmpDir, ".mm.lock");
+
+  // A live replacement lock exists
+  const livePayload = { pid: Deno.pid, createdAt: Date.now() };
+  await writeFile(lockFile, JSON.stringify(livePayload));
+
+  // Running withLock from another call must NOT remove or overwrite this lock
+  let executed = false;
+  try {
+    await withLock(tmpDir, () => {
+      executed = true;
+      return Promise.resolve();
+    }, { timeoutMs: 80, staleThresholdMs: 30 });
+  } catch {
+    // Expected timeout contention
+  }
+
+  assert.strictEqual(executed, false);
+  // Verify the lock file still exists and still belongs to the live PID!
+  const remainingContent = JSON.parse(await readFile(lockFile, "utf-8"));
+  assert.strictEqual(remainingContent.pid, Deno.pid);
+});
+
+Deno.test("concurrency: malformed lock file is treated as unknown ownership and never pruned", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-malformed-lock-" });
+  const lockFile = join(tmpDir, ".mm.lock");
+
+  // Write corrupt/malformed content and backdate mtime
+  await writeFile(lockFile, "MALFORMED_NON_JSON_DATA{{{");
+  const oldTime = new Date(Date.now() - 20000);
+  await Deno.utime(lockFile, oldTime, oldTime);
+
+  let executed = false;
+  try {
+    await withLock(tmpDir, () => {
+      executed = true;
+      return Promise.resolve();
+    }, { timeoutMs: 80, staleThresholdMs: 30 });
+  } catch {
+    // Expected timeout
+  }
+
+  assert.strictEqual(executed, false);
+  // Malformed lock MUST NOT be pruned!
+  const remaining = await readFile(lockFile, "utf-8");
+  assert.strictEqual(remaining, "MALFORMED_NON_JSON_DATA{{{");
+});
+
+Deno.test("concurrency: in-process queue releases mutex on filesystem setup failure", async () => {
+  const tmpFile = await Deno.makeTempFile({ prefix: "mm-mutex-release-" });
+  const badDir = join(tmpFile, "invalid_subdir");
+
+  // First call fails at mkdir
+  let firstFailed = false;
+  try {
+    await withLock(badDir, () => Promise.resolve());
+  } catch {
+    firstFailed = true;
+  }
+  assert.strictEqual(firstFailed, true);
+
+  // Subsequent call on a valid directory MUST NOT hang or deadlock!
+  const goodDir = await Deno.makeTempDir({ prefix: "mm-mutex-recovered-" });
+  let secondSucceeded = false;
+  await withLock(goodDir, () => {
+    secondSucceeded = true;
+    return Promise.resolve();
+  });
+  assert.strictEqual(secondSucceeded, true);
+});
+
+Deno.test("concurrency: two OS contenders racing over a stale lock never overlap critical sections", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-stale-race-" });
+  const lockFile = join(tmpDir, ".mm.lock");
+  const logFile = join(tmpDir, "contender_timeline.log");
+
+  // Create an initial stale lock owned by an impossible dead PID
+  await writeFile(lockFile, JSON.stringify({ pid: 99999999, createdAt: Date.now() - 10000 }));
+  const oldTime = new Date(Date.now() - 10000);
+  await Deno.utime(lockFile, oldTime, oldTime);
+
+  const cwd = Deno.cwd();
+  const lockModule = cwd.includes(".pi/extensions/pi-mm")
+    ? `${cwd}/src/lock.ts`
+    : `${cwd}/.pi/extensions/pi-mm/src/lock.ts`;
+
+  const contenderScript = `
+    import { withLock } from "${lockModule}";
+    import { appendFile } from "node:fs/promises";
+
+    const [dir, logPath, id] = Deno.args;
+    await withLock(dir, async () => {
+      const start = Date.now();
+      await appendFile(logPath, \`\${id}:ENTER:\${start}\\n\`);
+      // Hold critical section
+      await new Promise((r) => setTimeout(r, 60));
+      const end = Date.now();
+      await appendFile(logPath, \`\${id}:EXIT:\${end}\\n\`);
+    }, { timeoutMs: 3000, staleThresholdMs: 50 });
+  `;
+
+  const scriptPath = join(tmpDir, "contender.ts");
+  await writeFile(scriptPath, contenderScript);
+
+  // Launch two child OS processes simultaneously to race over the stale lock
+  const p1 = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", "--sloppy-imports", scriptPath, tmpDir, logFile, "P1"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
+  const p2 = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", "--sloppy-imports", scriptPath, tmpDir, logFile, "P2"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
+  const [res1, res2] = await Promise.all([p1, p2]);
+  assert.strictEqual(res1.code, 0, new TextDecoder().decode(res1.stderr));
+  assert.strictEqual(res2.code, 0, new TextDecoder().decode(res2.stderr));
+
+  // Parse timeline
+  const timeline = (await readFile(logFile, "utf-8")).trim().split("\n");
+  assert.strictEqual(timeline.length, 4);
+
+  const events = timeline.map((line) => {
+    const [proc, type, time] = line.split(":");
+    return { proc, type, time: Number(time) };
+  });
+
+  // Verify that ENTER of the second contender happened at or after EXIT of the first
+  const firstEnter = events[0];
+  const firstExit = events[1];
+  const secondEnter = events[2];
+  const secondExit = events[3];
+
+  assert.strictEqual(firstEnter.proc, firstExit.proc);
+  assert.strictEqual(firstExit.type, "EXIT");
+  assert.strictEqual(secondEnter.proc, secondExit.proc);
+  assert.strictEqual(secondEnter.type, "ENTER");
+  assert.notStrictEqual(firstEnter.proc, secondEnter.proc);
+  assert.strictEqual(secondEnter.time >= firstExit.time, true);
 });
