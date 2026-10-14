@@ -47,11 +47,11 @@ export function loadConfig(raw: unknown): MmConfig {
 }
 
 export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>): MmConfig {
-  const envBin = env["QMAP_BIN"];
-  const envLibs = env["QMAP_AXIS_PATH"];
-  const envUrl = env["QMAP_SEPAL_EMBED_URL"];
-  const envModel = env["QMAP_SEPAL_EMBED_MODEL"];
-  const envKey = env["QMAP_SEPAL_EMBED_KEY"];
+  const envBin = env["CORM_BIN"] ?? env["QMAP_BIN"];
+  const envLibs = env["CORM_AXIS_PATH"] ?? env["QMAP_AXIS_PATH"];
+  const envUrl = env["CORM_SEPAL_EMBED_URL"] ?? env["QMAP_SEPAL_EMBED_URL"];
+  const envModel = env["CORM_SEPAL_EMBED_MODEL"] ?? env["QMAP_SEPAL_EMBED_MODEL"];
+  const envKey = env["CORM_SEPAL_EMBED_KEY"] ?? env["QMAP_SEPAL_EMBED_KEY"];
   return {
     qmapBin: cfg.qmapBin === "" && typeof envBin === "string" && envBin.trim() !== "" ? envBin.trim() : cfg.qmapBin,
     axisLibs: cfg.axisLibs === null && typeof envLibs === "string" && envLibs.trim() !== "" ? envLibs.trim() : cfg.axisLibs,
@@ -76,11 +76,15 @@ export function resolveQmapBin(
 ): QmapResolution {
   if (cfg.qmapBin !== "") return { source: "settings", path: cfg.qmapBin };
   for (const dir of pathDirs) {
-    const candidate = join(dir, "qmap");
-    if (probe(candidate)) return { source: "path", path: candidate };
+    const candidateCorm = join(dir, "corm");
+    if (probe(candidateCorm)) return { source: "path", path: candidateCorm };
+    const candidateQmap = join(dir, "qmap");
+    if (probe(candidateQmap)) return { source: "path", path: candidateQmap };
   }
-  const inSite = join(cwd, "external", "libqmap", "bin", "qmap");
-  if (probe(inSite)) return { source: "insite", path: inSite };
+  const inSiteCorm = join(cwd, "external", "libcorm", "bin", "corm");
+  if (probe(inSiteCorm)) return { source: "insite", path: inSiteCorm };
+  const inSiteQmap = join(cwd, "external", "libqmap", "bin", "qmap");
+  if (probe(inSiteQmap)) return { source: "insite", path: inSiteQmap };
   return { source: "none", path: "" };
 }
 
@@ -88,7 +92,8 @@ export function resolveAxisPath(cfg: MmConfig, cwd: string): string {
   if (cfg.axisLibs !== null) return cfg.axisLibs;
   const joint = join(cwd, "external", "libjoint", "lib");
   const stoma = join(cwd, "external", "libstoma", "lib");
-  const base = `${joint}:${stoma}`;
+  const islet = join(cwd, "external", "libislet", "lib");
+  const base = `${joint}:${stoma}:${islet}`;
   if (sepalConfigured(cfg)) {
     return `${base}:${join(cwd, "external", "libsepal", "lib")}`;
   }

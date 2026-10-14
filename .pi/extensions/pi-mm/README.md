@@ -6,15 +6,19 @@ Memory Mipmaps for the Pi coding agent: persistent, hierarchical, low-cost recal
 
 ## How memory works
 
-Every memory is one line `<DATE>:<TEXT>` (e.g. `2026-09-15:Beacon Harbor lights`). Joint indexes the leading date; stoma indexes the text. The agent picks the ref as `max(bare refs from qmap -g .)+1` per store. No single-flag reset exists — reset is the enumerate+forget loop (skips the `-1` sentinel; idempotent). See `mm-plan/README.md` §1 and `PHASE-2-CLI.md` + `CLI-SURFACE-EXAMPLES.md` §8 for the full dialect and conventions (U3 settled, F1–F6, D13, rank D2).
+Every memory is one line `<DATE>:<TEXT>` (or `<DATE>:<JSON>` for structured mipmap envelopes). Joint indexes the leading date; stoma indexes the text; islet indexes spatial coordinates in auxiliary `mem-islet.db`. Significant session events (test passes, failures, build errors) are automatically captured via Pi hooks and persisted into L0 episodes on session boundaries without requiring manual tool calls. The agent picks the ref as `max(bare refs from qmap -g .)+1` per store with atomic filesystem locking. No single-flag reset exists — reset is the enumerate+forget loop (skips the `-1` sentinel; idempotent). See `mm-plan/README.md` §1 and `PHASE-2-CLI.md` + `CLI-SURFACE-EXAMPLES.md` §8 for the full dialect and conventions (U3 settled, F1–F6, D13, rank D2).
 
 ## Tools
 
 | Tool | Params | Effect |
 |------|--------|--------|
-| `memory_store` | `text` (required), `timestamp` | Stores `<DATE>:<TEXT>` under a new ref. |
-| `memory_scan` | `topic`, `level` (0 all-time/1 today/2 this month), `until`, `embed`, `limit` | Searches topic at a time window (joint is bounded, pure text at level 0). `embed=true` adds semantic (sepal) ranking when configured. |
-| `memory_think` | `key` (ref or topic), `extract` (`date`/`text`/`whole`) | Recalls a payload (splits an ISO timestamp before the delimiter `:`). |
+| `memory_store` | `text`/`summary`, `level`, `type`, `lifecycle`, `episode`, `context`, `evidence`, `supersedes` | Stores raw text or structured mipmap L0-L3 envelope at a generated ref. |
+| `memory_scan` | `topic`, `level` (L0-L3 or 0-2), `lifecycle`, `project`, `subsystem`, `bbox`, `until`, `embed`, `limit` | Multidimensional search across time (`joint`), text (`stoma`), semantics (`sepal`), and space (`islet`). |
+| `memory_traverse` | `ref`, `direction` (`down` \| `up`), `depth` | Walks evidence tree downward to supporting episodes/diffs or upward to derived abstractions. |
+| `memory_consolidate` | `mode` (`manual` \| `auto`), `targetLevel`, `sourceRefs`, `summary`, `problem`, `context`, `tags` | Consolidates memories into higher-level abstractions (L1/L2/L3). Auto mode discovers unconsolidated episodes automatically. |
+| `memory_lifecycle` | `ref`, `lifecycle`, `reason`, `evidenceRef` | Transitions lifecycle state (`observed` -> `hypothesized` -> `tested` -> `supported` -> `contradicted` -> `superseded`). |
+| `memory_feedback` | `ref`, `utility` (`useful` \| `irrelevant` \| `obsolete`), `note` | Records retrieval usefulness to inform recall relevance. |
+| `memory_think` | `key` (ref or topic), `extract` (`date`/`text`/`whole`/`episode`/`evidence`/`context`/`lifecycle`) | Recalls payload or parsed fields. |
 | `memory_forget` | `key` | Deletes on primary + every roster axis (idempotent). |
 | `memory_reset` | — | Forgets every ref (enumerate bare + `grep -E '^[0-9]+$'` form). |
 

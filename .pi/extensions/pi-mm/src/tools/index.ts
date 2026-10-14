@@ -6,13 +6,27 @@ import type { MmConfig } from "../config";
 import { readMmConfig, resolveAxisPath, resolveQmapBin, runtimeEnv, sepalConfigured } from "../config";
 import type { QmapRunner } from "../qmap";
 import { ShellQmapRunner } from "../qmap";
-import { makeStoreTool } from "./store";
-import { makeScanTool } from "./scan";
-import { makeThinkTool } from "./think";
-import { makeForgetTool } from "./forget";
-import { makeResetTool } from "./reset";
+import { makeStoreTool } from "./store.ts";
+import { makeScanTool } from "./scan.ts";
+import { makeThinkTool } from "./think.ts";
+import { makeForgetTool } from "./forget.ts";
+import { makeResetTool } from "./reset.ts";
+import { makeTraverseTool } from "./traverse.ts";
+import { makeLifecycleTool } from "./lifecycle.ts";
+import { makeFeedbackTool } from "./feedback.ts";
+import { makeConsolidateTool } from "./consolidate.ts";
 
-export { makeStoreTool, makeScanTool, makeThinkTool, makeForgetTool, makeResetTool };
+export {
+  makeStoreTool,
+  makeScanTool,
+  makeThinkTool,
+  makeForgetTool,
+  makeResetTool,
+  makeTraverseTool,
+  makeLifecycleTool,
+  makeFeedbackTool,
+  makeConsolidateTool,
+};
 export { sepalConfigured };
 
 export interface ToolEnv {
@@ -67,6 +81,10 @@ export function installTools(pi: Pi, env: EnvSource = defaultEnvSource(pi)): voi
     makeThinkTool(env),
     makeForgetTool(env),
     makeResetTool(env),
+    makeTraverseTool(env),
+    makeLifecycleTool(env),
+    makeFeedbackTool(env),
+    makeConsolidateTool(env),
   ];
   for (const tool of tools) pi.registerTool(tool);
 }

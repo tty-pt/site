@@ -13,10 +13,15 @@ export function filespecFor(memDir: string, embed?: boolean): string {
 export function embedEnv(cfg: MmConfig): Record<string, string> {
   if (typeof cfg.embedUrl !== "string" || typeof cfg.embedModel !== "string") return {};
   const env: Record<string, string> = {
+    CORM_SEPAL_EMBED_URL: cfg.embedUrl,
+    CORM_SEPAL_EMBED_MODEL: cfg.embedModel,
     QMAP_SEPAL_EMBED_URL: cfg.embedUrl,
     QMAP_SEPAL_EMBED_MODEL: cfg.embedModel,
   };
-  if (typeof cfg.embedKey === "string" && cfg.embedKey.trim() !== "") env["QMAP_SEPAL_EMBED_KEY"] = cfg.embedKey;
+  if (typeof cfg.embedKey === "string" && cfg.embedKey.trim() !== "") {
+    env["CORM_SEPAL_EMBED_KEY"] = cfg.embedKey;
+    env["QMAP_SEPAL_EMBED_KEY"] = cfg.embedKey;
+  }
   return env;
 }
 
@@ -46,7 +51,16 @@ export class ShellQmapRunner implements QmapRunner {
 }
 
 function base(bin: string, axisLibPath: string, memDir: string, extraEnv?: Record<string, string>): Invocation {
-  return { command: bin, args: [], env: { QMAP_AXIS_PATH: axisLibPath, ...extraEnv }, cwd: memDir };
+  return {
+    command: bin,
+    args: [],
+    env: {
+      CORM_AXIS_PATH: axisLibPath,
+      QMAP_AXIS_PATH: axisLibPath,
+      ...extraEnv,
+    },
+    cwd: memDir,
+  };
 }
 
 export function buildStoreInvocation(

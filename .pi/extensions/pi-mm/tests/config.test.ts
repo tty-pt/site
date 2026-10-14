@@ -90,12 +90,12 @@ Deno.test("resolveQmapBin: precedence settings → env → PATH → in-site → 
   check(none.source === "none" && none.path === "", "none when nothing resolves");
 });
 
-Deno.test("resolveAxisPath: explicit list used; null → in-site joint:stoma under cwd", () => {
+Deno.test("resolveAxisPath: explicit list used; null → in-site joint:stoma:islet under cwd", () => {
   check(resolveAxisPath(loadConfig({ axisLibs: "/x:/y" }), "/repo") === "/x:/y", "explicit axisLibs");
   check(
     resolveAxisPath(DEFAULT_CONFIG, "/repo") ===
-      join("/repo", "external", "libjoint", "lib") + ":" + join("/repo", "external", "libstoma", "lib"),
-    "in-site joint:stoma default",
+      join("/repo", "external", "libjoint", "lib") + ":" + join("/repo", "external", "libstoma", "lib") + ":" + join("/repo", "external", "libislet", "lib"),
+    "in-site joint:stoma:islet default",
   );
 });
 

@@ -4,14 +4,18 @@
 # Mirrors test-mm.sh structure; exit nonzero on any mismatch.
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../../../.." && pwd)
-QMAP="$ROOT/external/libqmap/bin/qmap"
+QMAP="$ROOT/external/libcorm/bin/corm"
+if [ ! -x "$QMAP" ]; then QMAP="$ROOT/external/libqmap/bin/qmap"; fi
+if [ ! -x "$QMAP" ]; then QMAP="/usr/bin/corm"; fi
+if [ ! -x "$QMAP" ]; then QMAP="/usr/bin/qmap"; fi
 JOINT_LIB="$ROOT/external/libjoint/lib"
 STOMA_LIB="$ROOT/external/libstoma/lib"
 AXIS_PATH="$JOINT_LIB:$STOMA_LIB"
+export CORM_AXIS_PATH="$AXIS_PATH"
 export QMAP_AXIS_PATH="$AXIS_PATH"
-export LD_LIBRARY_PATH="$ROOT/external/libqmap/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$ROOT/external/libcorm/lib:$ROOT/external/libqmap/lib:$LD_LIBRARY_PATH"
 
-if [ ! -x "$QMAP" ]; then echo "integration: missing qmap at $QMAP (run make -C external/libqmap)" >&2; exit 1; fi
+if [ ! -x "$QMAP" ]; then echo "integration: missing corm/qmap at $QMAP (run make -C external/libcorm)" >&2; exit 1; fi
 for a in joint stoma; do
   if [ ! -f "$JOINT_LIB/lib$a.so" ] && [ ! -f "$STOMA_LIB/lib$a.so" ]; then :; fi
 done
@@ -117,12 +121,16 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
   python3 -c 'import struct; open("'"$td"'/vec0.bin","wb").write(struct.pack("<3f", 1.0, 0.0, 0.0))'
   [ "$(wc -c < "$td/vec0.bin")" = "12" ] || failmsg "vec0.bin must be 12 bytes" "$(wc -c < "$td/vec0.bin")"
   mock_embed_once
-  if QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
+  if CORM_AXIS_PATH="$EMBED_AXES" QMAP_AXIS_PATH="$EMBED_AXES" \
+     CORM_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings \
+     CORM_SEPAL_EMBED_MODEL=test QMAP_SEPAL_EMBED_MODEL=test \
       "$QMAP" -p 4:"2026-09-16:embedded lighthouse beacon" "$EMBED_FILE" >/dev/null 2>"$td/embed.err"; then
     wait "$SRV_PID" 2>/dev/null || true
     # bare names + flags, exactly as memory_scan emits it
     mock_embed_once
-    if out=$(QMAP_AXIS_PATH="$EMBED_AXES" QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_MODEL=test \
+    if out=$(CORM_AXIS_PATH="$EMBED_AXES" QMAP_AXIS_PATH="$EMBED_AXES" \
+        CORM_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings QMAP_SEPAL_EMBED_URL=http://127.0.0.1:8081/v1/embeddings \
+        CORM_SEPAL_EMBED_MODEL=test QMAP_SEPAL_EMBED_MODEL=test \
         "$QMAP" -X '(stoma AND sepal)' --field=text --matched=1 --query='embedded lighthouse beacon' --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>"$td/query.err"); then
       wait "$SRV_PID" 2>/dev/null || true
       echo "$out" | grep -q "^4 " && ok "embed store + bare sepal + flags finds ref 4" || failmsg "--query/--min-sim must find ref 4" "$out"
@@ -130,7 +138,7 @@ http.server.HTTPServer(("127.0.0.1", 8081), H).handle_request()
       wait "$SRV_PID" 2>/dev/null || true
       failmsg "bare sepal + flags failed (exit nonzero)" "$(cat "$td/query.err")"
     fi
-    out0=$(QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X 'sepal' --file="$td/vec0.bin" --qdim=3 --m=10 --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>/dev/null)
+    out0=$(CORM_AXIS_PATH="$EMBED_AXES" QMAP_AXIS_PATH="$EMBED_AXES" "$QMAP" -X 'sepal' --file="$td/vec0.bin" --qdim=3 --m=10 --min-sim=0.4 -g . "$EMBED_FILE" -t 10 2>/dev/null)
     echo "$out0" | grep -q "^4 " && failmsg "dissimilar vector must not match ref 4" "$out0" || ok "sepal similarity gate"
   else
     wait "$SRV_PID" 2>/dev/null || true

@@ -1,28 +1,23 @@
-import type { PiCtx, PiToolSpec } from "../hooks/events";
-import type { EnvSource } from "./index";
-import { axisPath, memDir, exportDetail, sepalConfigured } from "./index";
-import { filespecFor, buildGetInvocation, embedEnv } from "../qmap";
-import { isNumericRef } from "../resolve";
-import { scanTopRef } from "./scan";
+import type { PiCtx, PiToolSpec } from "../hooks/events.ts";
+import type { EnvSource } from "./index.ts";
+import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
+import { filespecFor, buildGetInvocation, embedEnv } from "../qmap.ts";
+import { isNumericRef } from "../resolve.ts";
+import { scanTopRef } from "./scan.ts";
+import { decodePayload, splitRawPayload } from "../payload.ts";
 
-export function splitPayload(payload: string): { date: string; text: string } {
-  const m = /^(\d{4}-\d{2}-\d{2}(?:T[0-9:.]+)?):([\s\S]*)$/.exec(payload);
-  if (m) return { date: m[1], text: m[2].trimStart() };
-  const idx = payload.indexOf(":");
-  if (idx < 0) return { date: "", text: payload };
-  return { date: payload.slice(0, idx), text: payload.slice(idx + 1) };
-}
+export { splitRawPayload as splitPayload };
 
 export function makeThinkTool(envSource: EnvSource): PiToolSpec {
   return {
     name: "memory_think",
     label: "Think Memory",
-    description: "Recall the stored payload for a key (numeric ref or topic resolved by a top-1 scan). extract ∈ date|text|whole (default whole).",
+    description: "Recall the stored payload for a key (numeric ref or topic resolved by a top-1 scan). extract ∈ date|text|whole|episode|evidence|context|lifecycle (default whole).",
     parameters: {
       type: "object",
       properties: {
         key: { type: "string", description: "Numeric ref or a topic to resolve." },
-        extract: { type: "string", description: "date | text | whole (default whole)." },
+        extract: { type: "string", description: "date | text | whole | episode | evidence | context | lifecycle (default whole)." },
       },
       required: ["key"],
       additionalProperties: false,
@@ -45,16 +40,34 @@ export function makeThinkTool(envSource: EnvSource): PiToolSpec {
         if (payload === "") {
           return { content: [{ type: "text", text: `mm think: ref ${ref} returned nothing` }], details: { ref, error: "empty-get" } };
         }
-        const { date, text } = splitPayload(payload);
+
+        const { date, envelope } = decodePayload(payload);
         const extract = typeof params["extract"] === "string" ? params["extract"] : "whole";
-        const detail: Record<string, string | number> = { ref };
-        if (extract === "date") detail["date"] = date;
-        else if (extract === "text") detail["text"] = text;
-        else {
+        const detail: Record<string, unknown> = { ref, date };
+
+        if (extract === "date") {
           detail["date"] = date;
-          detail["text"] = text;
+        } else if (extract === "text" || extract === "summary") {
+          detail["text"] = envelope.summary;
+          detail["summary"] = envelope.summary;
+        } else if (extract === "episode") {
+          detail["episode"] = envelope.episode;
+        } else if (extract === "evidence") {
+          detail["evidence"] = envelope.evidence ?? [];
+        } else if (extract === "context") {
+          detail["context"] = envelope.context;
+        } else if (extract === "lifecycle") {
+          detail["lifecycle"] = envelope.lifecycle;
+        } else {
+          detail["date"] = date;
+          detail["text"] = envelope.summary;
           detail["payload"] = payload;
+          detail["level"] = envelope.level;
+          detail["lifecycle"] = envelope.lifecycle;
+          detail["summary"] = envelope.summary;
+          detail["envelope"] = envelope;
         }
+
         return exportDetail(detail);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

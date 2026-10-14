@@ -1,72 +1,105 @@
 ---
 name: pi-mm
-description: "Memory Mipmaps (pi-mm): persistent hierarchical recall over local qmap files. Agent tools memory_scan/think/store/forget/reset."
+description: "Memory Mipmaps (pi-mm): persistent multi-resolution memory space over local libcorm recall kernel and axes. Tools: memory_scan/think/store/traverse/lifecycle/feedback/consolidate/forget/reset."
 ---
 
 # pi-mm — Memory Mipmaps
 
-Persistent, hierarchical, low-cost recall over local `qmap` files. No model, no daemon, no network. Memory lives in `.pi/mm/mem.db` (primary `QM_AINDEX:string` + roster `joint,stoma`; + `sepal` when embeddings are configured).
+Persistent, evidence-preserving, multi-resolution memory space over local `libcorm` recall kernel and axes (`joint` time, `stoma` lexical FTS, `sepal` semantic ANN, `islet` spatial context). No daemon, zero network required. Memory lives in `.pi/mm/mem.db` (primary `CM_AINDEX:string` + roster `joint,stoma`; + `sepal` when embeddings are configured; + `islet` for spatial coordinates).
 
 ## Boundary rule (with pi-quest)
 
-- **Quest** = current work state (findings, decisions, plan).
-- **MM** = episodic history (what happened when and why).
-- Never duplicate the same fact in both.
+- **Quest** = current active task state (goals, findings, decisions, plan).
+- **MM** = persistent cross-session episodic history & multiresolution memory space (what happened, failed vs successful attempts, and why).
+- Never duplicate the same ephemeral fact in both.
 
-## Levels
+## Mipmap Hierarchy (IDEA.md §2)
 
-| Level | Resolution | Key form | Window in `memory_scan` |
-|-------|------------|----------|-------------------------|
-| 2 | summary | `topic@month` | since start of this month |
-| 1 | condensed | `topic@timestamp` | since start of today |
-| 0 | raw | `@timestamp` | all-time (no time filter) |
+| Level | Name | Description | Key Contents |
+|-------|------|-------------|--------------|
+| **L3** | General Knowledge | Cross-project recurring lessons and patterns | Generalized architectural heuristics |
+| **L2** | Project Understanding | Architectural decisions, invariants, conventions | Invariants, conventions, rules |
+| **L1** | Investigations | Hypotheses, attempted fixes, causal explanations | Tested theories, root causes |
+| **L0** | Experience | Original observations, tool results, diffs, tests | Raw episodes, commands, diffs |
 
-Store is level-agnostic: every entry is `<DATE>:<TEXT>` (joint leading-date + stoma text). Scan's `level` shapes the joint window. Degradation never errors; missing `qmap` binary, empty matches, or nonzero exits return a diagnostic detail — not a thrown error. Text is accent-sensitive (`Pão≠pao`, no transliteration).
+Every higher-level abstraction remains connected to its underlying evidence via `evidence: number[]` refs. Never replace source evidence with a summary.
 
-## Tools
+## Memory Lifecycle (IDEA.md §3)
 
-- `memory_store(text, timestamp?)` — stores `<DATE>:<TEXT>` under an auto-picked numeric ref (`max+1` over bare `qmap -g .`). `timestamp` defaults to now (`YYYY-MM-DD`). Returns `{ref, key:"@DATE"}`.
-- `memory_scan(topic, level?=0, limit?=10, until?=undefined, embed?=false)` — searches by topic at a time window. Level 0 is pure text; 1/2 add a bounded `joint="a=… b=…"` (required by F2). `until` (ISO date YYYY-MM-DD) caps the time window upper bound: level 0 searches all-time up to `until`; level 1/2 caps the window end at `until`. `embed=true` adds semantic (sepal) ranking — requires `QMAP_SEPAL_EMBED_URL` + `QMAP_SEPAL_EMBED_MODEL`; the scan emits a bare `sepal` leaf plus `--query=<topic> --min-sim=0.2` flags that libsepal merges server-side at decode time, so there is no client-side curl or temp vector. Unconfigured degrades to the plain text scan (`details.embed` says `unconfigured`); a configured-but-unreachable endpoint fails the query loud (`mm scan failed (exit 1)`), never silent-empty. A literal `'` in the topic is passed verbatim in the flag value (no leaf-quote truncation). Returns `{records:[{ref, score?, record}]}`.
-- `memory_think(key, extract?="whole")` — recalls the payload for a numeric ref or a topic resolved by a top-1 scan. `extract` is `date|text|whole` (splits the ISO timestamp before the delimiter `:`). Returns `{ref, date?, text?, payload?}`.
-- `memory_forget(key)` — deletes a memory by numeric ref or topic on the primary and every roster axis (idempotent, roster-backed). Returns `{ref, removed}`.
-- `memory_reset()` — enumerates bare refs (`qmap -g .`) and forgets each (skips the `-1` sentinel). Returns `{refsForgotten}`. Idempotent; re-running is a no-op.
+Memories progress through explicit lifecycle states:
+- `observed` — noted in a tool result, command output, or conversation.
+- `hypothesized` — proposed explanation or candidate theory.
+- `tested` — verified or tested in an experiment.
+- `supported` — active truth currently favored by evidence.
+- `contradicted` — evidence conflicts with this claim (requires `reason` or `evidenceRef`).
+- `superseded` — replaced by a newer conclusion; terminal state preserving historical auditable records.
 
-All tools shell out to the built `qmap` binary exactly per `mm-plan/CLI-SURFACE-EXAMPLES.md` §8; invocations carry `QMAP_AXIS_PATH` and run with `cwd` = the memory dir.
+## Tools Reference
 
-## Configuration
+- `memory_store(options)` — stores a raw text memory or structured mipmap envelope (`level`, `summary`, `episode`, `context`, `evidence`, `supersedes`, `lifecycle`, `tags`). When `supersedes` is set, marks the prior ref as `superseded` and records `supersededBy`. Returns `{ref, key, level, lifecycle, summary}`.
+- `memory_scan(topic, options?)` — multidimensional search across time (`joint`), text (`stoma`), semantics (`sepal`), and space (`islet`). Options: `level` (`L0`..`L3` or legacy 0..2), `lifecycle` (`supported`, `all`, etc.), `project`, `subsystem`, `bbox`, `until`, `embed`, `limit`. Returns ranked `{records: [{ref, score?, level, lifecycle, summary, record, envelope}]}`.
+- `memory_traverse(ref, direction?="down", depth?=2)` — walks the memory hierarchy bidirectionally with cycle detection:
+  - `down` — drills down from invariants/investigations into supporting L0 episodes and diffs (flags `missingEvidence` if broken).
+  - `up` — discovers higher-level abstractions citing this memory as evidence.
+- `memory_consolidate(options)` — consolidates lower-level memories into higher-level abstractions (L1 Investigation, L2 Project Knowledge, L3 General Lesson). Enforces explicit scope on L2 and is strictly idempotent (zero duplicate records).
+- `memory_lifecycle(ref, lifecycle, reason?, evidenceRef?)` — transitions a memory's state, recording the transition rationale and history.
+- `memory_feedback(ref, utility, note?)` — records retrieval utility (`useful`, `irrelevant`, `obsolete`) to calibrate recall usefulness.
+- `memory_think(key, extract?="whole")` — recalls the payload for a numeric ref or top-1 topic. `extract` ∈ `date|text|whole|episode|evidence|context|lifecycle`.
+- `memory_forget(key)` — deletes a memory across primary and all roster axes (idempotent).
+- `memory_reset()` — enumerates and deletes all memories.
 
-Optional `.pi/settings.json` under `"pi-mm"`:
+## Operational Guidelines for Agents
 
-```json
-{ "pi-mm": { "qmapBin": "/usr/bin/qmap", "axisLibs": "/a:/b", "memDir": ".pi/mm", "scanLimit": 10 } }
-```
-
-Resolution: `settings.json` → `QMAP_BIN`/`QMAP_AXIS_PATH` env → `PATH` `qmap` → in-site `external/libqmap/bin/qmap`. Unit tests stub qmap and never shell out. Each `*.db` owns its axis stores (`<primary>-<axis>`, e.g. `mem.db-joint` beside `mem.db`); a directory may host many databases without cross-talk.
-
-## Embeddings
-
-Optional: point sepal at a local embedding server (axil-qllm's OpenAI-compatible `/v1/embeddings`; operator guide: repo-root `RUNNING.md`):
-
-```sh
-export QMAP_SEPAL_EMBED_URL=http://localhost:4242/v1/embeddings
-export QMAP_SEPAL_EMBED_MODEL=nomic-embed-text
-# optional: export QMAP_SEPAL_EMBED_KEY=…
-```
-
-(or add `embedUrl`/`embedModel`/`embedKey` under `"pi-mm"` in settings.json). When configured, the tools switch the filespec to `mem.db@joint,stoma,sepal:a:s`: `memory_store` persists an embedding of the whole `<DATE>:<TEXT>` payload (sepal stores the vector, not the text — join with joint/stoma for payloads), and `memory_scan(…, embed=true)` appends a bare `sepal` leaf plus `--query=<topic> --min-sim=0.2` flags that libsepal embeds server-side and ranks semantically. Text recall never needs the server; the semantic dimension is strictly additive.
-
-## Degradation
-
-- Empty `text`/`topic`/`key`, no matches, or a failed `qmap` invocation → a `mm:*` message with `details.error`, never a thrown error.
-- Store/forget/reset are idempotent; re-running does no harm.
+1. **Recall before repeating investigations:**
+   When encountering a failure, test error, or complex architecture question, call `memory_scan` with the exact error string or symbol. If a past episode attempted fixes, check what failed and what worked to avoid repeating mistakes.
+2. **Inspect evidence behind conclusions:**
+   When recalling an invariant or rule, use `memory_traverse(ref, "down")` to examine the original diffs and test results before trusting an abstraction.
+3. **Record failed and successful approaches:**
+   When storing an episode (`level: "L0"`), populate `approaches` with items marked `"failed"` or `"worked"` and specific reasons.
+4. **Distinguish hypotheses from findings:**
+   Do not store unverified theories as `supported`. Start candidate explanations as `hypothesized`, test them, and only mark `supported` once verified with evidence.
+5. **Consolidate incrementally:**
+   Use `memory_consolidate` after completing an investigation to derive an L1 investigation or L2 invariant linked to the episode refs.
+6. **Contradict or supersede without erasing history:**
+   When new evidence disproves an old conclusion, use `memory_store` with `supersedes: oldRef` or `memory_lifecycle` with `lifecycle: "contradicted"`. Never delete historical records that other conclusions depend on.
 
 ## Examples
 
-```
-memory_store("Beacon Harbor lights", "2026-09-15")
-memory_scan("beacon", 1)
-memory_scan(topic="harbor lights", embed=true)   # semantic (needs embed config)
-memory_think("2", "text")
-memory_forget("beacon")
-memory_reset()
+```ts
+// 1. Capture an L0 episode with failed vs worked approaches
+memory_store({
+  level: "L0",
+  type: "episode",
+  summary: "Fixed corm_open handle aliasing bug",
+  episode: {
+    problem: "Investigate fd leak on duplicate corm_open",
+    approaches: [
+      { approach: "Increase file descriptor limit", outcome: "failed", reason: "Masked the leak rather than fixing root cause" },
+      { approach: "Add live handle table alias check", outcome: "worked", reason: "Reuses existing handle on identical (file, map)" }
+    ],
+    observations: ["duplicate corm_open was allocating fresh fd"],
+    diffs: ["--- a/libcorm.c\n+++ b/libcorm.c\n+ alias check"],
+    outcome: "success",
+  },
+  context: { project: "site", subsystem: "libcorm", module: "corm" }
+}); // -> ref 1
+
+// 2. Consolidate into an L2 project invariant backed by evidence
+memory_consolidate({
+  targetLevel: "L2",
+  sourceRefs: [1],
+  summary: "Invariant: corm_open must alias live handles on identical (file, map)",
+  context: { project: "site", subsystem: "libcorm" }
+}); // -> ref 2
+
+// 3. Inspect why the invariant exists (downward traversal)
+memory_traverse(2, "down");
+// -> [L2] Ref 2: Invariant: corm_open must alias live handles (supported)
+//      └─ [L0] Ref 1: Fixed corm_open handle aliasing bug (supported)
+
+// 4. Multidimensional scan with ranking and lifecycle filtering
+memory_scan("corm_open", { level: "L2", lifecycle: "supported" });
+
+// 5. Record retrieval utility
+memory_feedback(2, "useful", "Prevented file descriptor duplication");
 ```

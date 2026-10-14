@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "test": "deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
+    "benchmark": "deno run --allow-all scripts/benchmark-mm.ts",
     "zip": "deno run --allow-all scripts/zip_bundle.ts"
   },
   "peerDependencies": {

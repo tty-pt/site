@@ -37,12 +37,23 @@ Deno.test("entry default-exports an installer function", () => {
   check(typeof install === "function", "default export must be a function");
 });
 
-Deno.test("installer registers the five memory tools", () => {
+Deno.test("installer registers all memory mipmap tools", () => {
   const api = fakePi();
   install(api);
   const names = api.tools.map((t) => t.name);
-  for (const expected of ["memory_store", "memory_scan", "memory_think", "memory_forget", "memory_reset"]) {
+  const expectedTools = [
+    "memory_store",
+    "memory_scan",
+    "memory_think",
+    "memory_forget",
+    "memory_reset",
+    "memory_traverse",
+    "memory_consolidate",
+    "memory_lifecycle",
+    "memory_feedback",
+  ];
+  for (const expected of expectedTools) {
     check(names.includes(expected), `expected tool ${expected}; got ${names.join(", ")}`);
   }
-  check(names.length >= 5, "at least the five memory tools registered");
+  check(names.length === expectedTools.length, `expected exactly ${expectedTools.length} tools registered, got ${names.length}`);
 });
