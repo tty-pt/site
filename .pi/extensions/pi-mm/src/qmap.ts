@@ -153,6 +153,22 @@ export function scanExpr(_topic: string, level: number, now: Date, until?: strin
   return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
 }
 
+export function scanLexicalExpr(level: number, now: Date, until?: string): string {
+  const parts: string[] = [];
+  const window = scanWindow(level, now, until);
+  if (window) parts.push("joint");
+  parts.push("stoma");
+  return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
+}
+
+export function scanSemanticExpr(level: number, now: Date, until?: string): string {
+  const parts: string[] = [];
+  const window = scanWindow(level, now, until);
+  if (window) parts.push("joint");
+  parts.push("sepal");
+  return parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`;
+}
+
 export interface ResultLine {
   ref: number;
   score?: string;

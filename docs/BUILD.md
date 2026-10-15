@@ -103,12 +103,15 @@ Source of truth for the hash: run `sh scripts/gen-asset-version.sh && cat mods/c
   `-m mods/core/core` flag is **required** — without it no handlers register.
 - C frontend and module changes need module rebuild **+ server restart** to take effect. If `axil` is already running when `.so` files are recompiled, kill the existing process (`ps aux | grep axil`, `kill -9 <pid>`) so `dlopen` loads the new binary objects.
 - When adding shared component libraries (like `libhyle-bud.so`), ensure native dependencies (e.g. `-ljson-c`) are listed in `LDLIBS` in `Makefile` so dynamic linking resolves all symbols cleanly upon startup (`ldd libhyle-bud.so`).
-- Chroot prerequisites (`sh` + libs):
+- Chroot prerequisites (`sh` + man toolchain + libs):
 
 ```bash
 mkdir -p ./bin ./lib ./lib/x86_64-linux-gnu
 cp /bin/sh ./bin/sh
 # ldd /bin/sh → copy the libs it needs, typically libnss_files.so.2
+# In-game manual help rendering closure (see scripts/seed-jail.sh --with-man):
+# /usr/bin/man, /usr/bin/groff, /usr/bin/troff, /usr/bin/grotty, /usr/bin/tbl, /usr/bin/col,
+# /usr/bin/nroff, /usr/bin/cat, /lib64/ld-linux-x86-64.so.2, /usr/share/groff/**, /etc/manpath.config
 ```
 
 ## The `axil -C` chroot jail — seed it, then gate the restart on it

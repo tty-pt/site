@@ -266,36 +266,36 @@ function runSyntheticBenchmark(): SyntheticMetrics[] {
   console.log(`Corpus items: ${CORPUS.length} | Test queries: ${TASKS.length}\n`);
 
   const results: SyntheticMetrics[] = [
-    { name: "1. Raw Episode Search (stoma alone)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "2. Flat Episode Summaries", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "3. Summaries + Semantic Approx (offline)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
-    { name: "4. Multidimensional Memory Mipmaps", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "1. Lexical-Only Search (stoma alone)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "2. Semantic-Only Search (dense approx)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "3. Hybrid RRF Search (lexical + semantic)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
+    { name: "4. Multidimensional Memory Mipmaps (RRF+prov)", precisionAt1: 0, targetRecall: 0, obsoleteExcluded: 0, evidenceTraceable: 0 },
   ];
 
   for (const task of TASKS) {
-    // Mode 1: Raw Episode Search
+    // Mode 1: Lexical-Only Search
     const ranked1 = [...CORPUS]
       .map((item) => ({ ref: item.ref, score: scoreLexical(item.rawText, task.query), item }))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score || a.ref - b.ref);
     evaluateSynthetic(task, ranked1, results[0], false);
 
-    // Mode 2: Flat Summaries
+    // Mode 2: Semantic-Only Search
     const ranked2 = [...CORPUS]
-      .map((item) => ({ ref: item.ref, score: scoreLexical(item.envelope.summary, task.query), item }))
-      .sort((a, b) => b.score - a.score);
+      .map((item) => ({ ref: item.ref, score: scoreSemantic(item.semanticTokens, task.query), item }))
+      .sort((a, b) => b.score - a.score || a.ref - b.ref);
     evaluateSynthetic(task, ranked2, results[1], false);
 
-    // Mode 3: Summaries + Semantic Approximation
+    // Mode 3: Hybrid Search (lexical + semantic dense fusion)
     const ranked3 = [...CORPUS]
       .map((item) => {
         const lex = scoreLexical(item.envelope.summary, task.query);
         const sem = scoreSemantic(item.semanticTokens, task.query);
         return { ref: item.ref, score: lex * 0.4 + sem * 0.6, item };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score || a.ref - b.ref);
     evaluateSynthetic(task, ranked3, results[2], false);
 
-    // Mode 4: Multidimensional Memory Mipmaps (lifecycle active filter + provenance traversal)
+    // Mode 4: Multidimensional Memory Mipmaps (Hybrid + active lifecycle filter + provenance bonus)
     const ranked4 = [...CORPUS]
       .filter((item) => item.envelope.lifecycle !== "superseded" && item.envelope.lifecycle !== "contradicted")
       .map((item) => {
@@ -305,7 +305,7 @@ function runSyntheticBenchmark(): SyntheticMetrics[] {
         const provBonus = item.envelope.evidence?.length ? 0.15 : 0.0;
         return { ref: item.ref, score: lex * 0.45 + sem * 0.4 + provBonus, item };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score || a.ref - b.ref);
     evaluateSynthetic(task, ranked4, results[3], true);
   }
 
@@ -421,6 +421,7 @@ async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
   let topCandidateTraceable = 0;
   let realEmptyResults = 0;
   let realTargetFailures = 0;
+  const startBenchmarkTime = performance.now();
 
   for (const task of TASKS) {
     const scanRes = await scanTool.execute(
@@ -494,6 +495,9 @@ async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
     }
   }
 
+  const totalQueryTimeMs = performance.now() - startBenchmarkTime;
+  const avgLatencyMs = totalQueryTimeMs / TASKS.length;
+
   console.log("Real C Engine Results (libcorm + libstoma + libjoint):");
   console.log(`- Precision@1: ${((realHits / TASKS.length) * 100).toFixed(0)}% (${realHits}/${TASKS.length})`);
   console.log(`- Target Recall: ${((realRecall / TASKS.length) * 100).toFixed(0)}% (${realRecall}/${TASKS.length})`);
@@ -502,6 +506,7 @@ async function runRealBackendBenchmark(siteRoot: string): Promise<void> {
   console.log(`- Top Candidate Evidence Traceability: ${((topCandidateTraceable / TASKS.length) * 100).toFixed(0)}% (${topCandidateTraceable}/${TASKS.length})`);
   console.log(`- Empty Results: ${realEmptyResults}/${TASKS.length}`);
   console.log(`- Target Recall Failures: ${realTargetFailures}/${TASKS.length}`);
+  console.log(`- Average Retrieval Latency: ${avgLatencyMs.toFixed(2)} ms/query (Total: ${totalQueryTimeMs.toFixed(1)} ms)`);
   console.log(`- Backend Workspace: ${tmpDir}`);
 }
 

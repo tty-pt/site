@@ -21,7 +21,7 @@ zip:
 	rm -f $(BUNDLE)
 	rm -rf .stage
 	mkdir -p .stage
-	cp -r index.ts package.json Makefile README.md AGENTS.md IMPLEMENTATION_STATUS.md IDEA.md src skills tests scripts patches .stage/
+	cp -r index.ts package.json Makefile README.md AGENTS.md IMPLEMENTATION_STATUS.md SYNTHESIS_REPORT.md IDEA.md src skills tests scripts patches .stage/
 	cd .stage && zip -r -q $(BUNDLE) .
 	rm -rf .stage
 	@echo "Generated $(BUNDLE)"

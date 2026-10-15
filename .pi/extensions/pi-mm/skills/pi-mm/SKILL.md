@@ -1,6 +1,6 @@
 ---
 name: pi-mm
-description: "Memory Mipmaps (pi-mm): persistent multi-resolution memory space over local libcorm recall kernel and axes. Tools: memory_scan/think/store/traverse/lifecycle/feedback/consolidate/forget/reset."
+description: "Memory Mipmaps (pi-mm): persistent multi-resolution memory space. Primary tools: memory_recall, memory_record, memory_review (plus automatic before_agent_start context injection). Low-level administrative tools enabled via advancedTools setting."
 ---
 
 # pi-mm — Memory Mipmaps
@@ -26,80 +26,88 @@ Every higher-level abstraction remains connected to its underlying evidence via 
 
 ## Memory Lifecycle (IDEA.md §3)
 
-Memories progress through explicit lifecycle states:
-- `observed` — noted in a tool result, command output, or conversation.
-- `hypothesized` — proposed explanation or candidate theory.
-- `tested` — verified or tested in an experiment.
-- `supported` — active truth currently favored by evidence.
-- `contradicted` — evidence conflicts with this claim (requires `reason` or `evidenceRef`).
-- `superseded` — replaced by a newer conclusion; terminal state preserving historical auditable records.
+Memories progress through explicit, epistemically grounded lifecycle states:
+- `observed` — raw observation from a tool result, error, or unverified legacy note.
+- `hypothesized` — proposed explanation, candidate theory, or speculative heuristic.
+- `tested` — approach attempted in an experiment, worked in execution, or reported by a model without independent evidence validation.
+- `supported` — verified conclusion backed by confirmed, active evidence references (`evidence: number[]`) pointing to non-contradicted stored records.
+- `contradicted` — refuted claim with explicit justification or counter-evidence.
+- `superseded` — replaced by a newer verified conclusion; terminal historical record.
 
-## Tools Reference
+## Primary Model-Facing Workflow
 
-- `memory_store(options)` — stores a raw text memory or structured mipmap envelope (`level`, `summary`, `episode`, `context`, `evidence`, `supersedes`, `lifecycle`, `tags`). When `supersedes` is set, marks the prior ref as `superseded` and records `supersededBy`. Returns `{ref, key, level, lifecycle, summary}`.
-- `memory_scan(topic, options?)` — multidimensional search across time (`joint`), text (`stoma`), semantics (`sepal`), and space (`islet`). Options: `level` (`L0`..`L3` or legacy 0..2), `lifecycle` (`supported`, `all`, etc.), `project`, `subsystem`, `bbox`, `until`, `embed`, `limit`. Returns ranked `{records: [{ref, score?, level, lifecycle, summary, record, envelope}]}`.
-- `memory_traverse(ref, direction?="down", depth?=2)` — walks the memory hierarchy bidirectionally with cycle detection:
-  - `down` — drills down from invariants/investigations into supporting L0 episodes and diffs (flags `missingEvidence` if broken).
-  - `up` — discovers higher-level abstractions citing this memory as evidence.
-- `memory_consolidate(options)` — consolidates lower-level memories into higher-level abstractions (L1 Investigation, L2 Project Knowledge, L3 General Lesson). Enforces explicit scope on L2 and is strictly idempotent (zero duplicate records).
-- `memory_lifecycle(ref, lifecycle, reason?, evidenceRef?)` — transitions a memory's state, recording the transition rationale and history.
-- `memory_feedback(ref, utility, note?)` — records retrieval utility (`useful`, `irrelevant`, `obsolete`) to calibrate recall usefulness.
-- `memory_think(key, extract?="whole")` — recalls the payload for a numeric ref or top-1 topic. `extract` ∈ `date|text|whole|episode|evidence|context|lifecycle`.
-- `memory_forget(key)` — deletes a memory across primary and all roster axes (idempotent).
-- `memory_reset()` — enumerates and deletes all memories.
+For routine coding tasks, agents use the 3 streamlined tools:
+
+1. **Automatic Context Recall**:
+   Pi automatically injects compact, relevant memory context before your turn starts via the `before_agent_start` hook. You do not need to call a memory tool just to check if prior experience exists.
+
+2. **`memory_recall(query, options?)`**:
+   One-stop hybrid search across lexical (`stoma`) and semantic (`sepal`) axes fused deterministically with Reciprocal Rank Fusion ($k=60$).
+   - `query`: natural language problem, error text, or symbol.
+   - `project`: optional project filter/boost (e.g. `site`).
+   - `includeEvidence: true`: automatically fetches and attaches supporting evidence trees.
+
+3. **`memory_record(problem, approaches, ...)`**:
+   Record task resolution and learnings without low-level JSON envelope wrangling:
+   - `problem`: description of the task or bug.
+   - `approaches`: array of `{ approach, outcome: "worked" | "failed" | "abandoned", reason }`.
+   - `evidence`: optional array of active memory refs (`evidence: number[]`) required to attain `supported` status (dangling or contradicted refs are rejected).
+   - `verification`: optional model-reported verification (`testsPassed?: string[]`, `verifiedDiff?: boolean`) recorded under `tested`.
+   - `diffs`: code or command changes.
+   - `outcome`: `"success"` or `"failure"`.
+
+4. **`memory_review(ref, action, ...)`**:
+   Inspect or update memory states:
+   - `action: "inspect"`: views complete details, approaches, diffs, and evidence tree.
+   - `action: "update_lifecycle"`: safely transitions state (e.g. `tested`, `supported`, `contradicted`, `superseded`) with required justification.
+
+## Advanced Maintenance Tools (Optional)
+
+By default, only the 3 primary tools above are registered for clean model focus. Low-level maintenance tools (`memory_store`, `memory_scan`, `memory_traverse`, `memory_consolidate`, `memory_lifecycle`, `memory_feedback`, `memory_think`, `memory_forget`, `memory_reset`) can be exposed by setting `"advancedTools": true` in `.pi/settings.json` under `pi-mm` or setting the environment variable `PI_MM_ADVANCED_TOOLS=true`.
 
 ## Operational Guidelines for Agents
 
-1. **Recall before repeating investigations:**
-   When encountering a failure, test error, or complex architecture question, call `memory_scan` with the exact error string or symbol. If a past episode attempted fixes, check what failed and what worked to avoid repeating mistakes.
-2. **Inspect evidence behind conclusions:**
-   When recalling an invariant or rule, use `memory_traverse(ref, "down")` to examine the original diffs and test results before trusting an abstraction.
-3. **Record failed and successful approaches:**
-   When storing an episode (`level: "L0"`), populate `approaches` with items marked `"failed"` or `"worked"` and specific reasons.
-4. **Distinguish hypotheses from findings:**
-   Do not store unverified theories as `supported`. Start candidate explanations as `hypothesized`, test them, and only mark `supported` once verified with evidence.
-5. **Consolidate incrementally:**
-   Use `memory_consolidate` after completing an investigation to derive an L1 investigation or L2 invariant linked to the episode refs.
+1. **Rely on automatic context first:**
+   Prior experience is already injected at the start of your turn. Review the `[Persistent Memory Context]` block before writing code.
+2. **Recall for deeper searches:**
+   When encountering a specific compiler error or unfamiliar symbol, run `memory_recall(query, { includeEvidence: true })`.
+3. **Inspect evidence behind conclusions:**
+   When verifying an invariant or rule, use `memory_review(ref, "inspect")` to examine underlying diffs and test results.
+4. **Record failed and successful approaches:**
+   When finishing a task, record what worked and what failed via `memory_record`. Include specific reasons.
+5. **Truthful verification:**
+   Do not claim verification without tests or verified diffs. Unverified fixes will be marked `tested`, while verified fixes will be marked `supported`.
 6. **Contradict or supersede without erasing history:**
-   When new evidence disproves an old conclusion, use `memory_store` with `supersedes: oldRef` or `memory_lifecycle` with `lifecycle: "contradicted"`. Never delete historical records that other conclusions depend on.
+   When new evidence disproves an old conclusion, use `memory_review(oldRef, "update_lifecycle", { lifecycle: "superseded", reason, evidenceRef: newRef })`.
 
 ## Examples
 
 ```ts
-// 1. Capture an L0 episode with failed vs worked approaches
-memory_store({
-  level: "L0",
-  type: "episode",
-  summary: "Fixed corm_open handle aliasing bug",
-  episode: {
-    problem: "Investigate fd leak on duplicate corm_open",
-    approaches: [
-      { approach: "Increase file descriptor limit", outcome: "failed", reason: "Masked the leak rather than fixing root cause" },
-      { approach: "Add live handle table alias check", outcome: "worked", reason: "Reuses existing handle on identical (file, map)" }
-    ],
-    observations: ["duplicate corm_open was allocating fresh fd"],
-    diffs: ["--- a/libcorm.c\n+++ b/libcorm.c\n+ alias check"],
-    outcome: "success",
-  },
-  context: { project: "site", subsystem: "libcorm", module: "corm" }
-}); // -> ref 1
+// 1. Recall prior experience with supporting evidence
+memory_recall("corm_open handle aliasing leak", { includeEvidence: true, project: "site" });
 
-// 2. Consolidate into an L2 project invariant backed by evidence
-memory_consolidate({
-  targetLevel: "L2",
-  sourceRefs: [1],
-  summary: "Invariant: corm_open must alias live handles on identical (file, map)",
-  context: { project: "site", subsystem: "libcorm" }
-}); // -> ref 2
+// 2. Record a structured task resolution with verified fix
+memory_record({
+  problem: "Investigate fd leak on duplicate corm_open",
+  approaches: [
+    { approach: "Increase file descriptor limit", outcome: "failed", reason: "Masked the leak rather than fixing root cause" },
+    { approach: "Add live handle table alias check", outcome: "worked", reason: "Reuses existing handle on identical (file, map)" }
+  ],
+  findings: ["corm_open duplicate open was allocating fresh fd"],
+  diffs: ["--- a/libcorm.c\n+++ b/libcorm.c\n+ alias check"],
+  verification: { testsPassed: ["test_corm_alias_roundtrip"], verifiedDiff: true },
+  outcome: "success",
+  project: "site",
+  subsystem: "libcorm",
+});
 
-// 3. Inspect why the invariant exists (downward traversal)
-memory_traverse(2, "down");
-// -> [L2] Ref 2: Invariant: corm_open must alias live handles (supported)
-//      └─ [L0] Ref 1: Fixed corm_open handle aliasing bug (supported)
+// 3. Inspect evidence tree behind a rule
+memory_review(2, "inspect");
 
-// 4. Multidimensional scan with ranking and lifecycle filtering
-memory_scan("corm_open", { level: "L2", lifecycle: "supported" });
-
-// 5. Record retrieval utility
-memory_feedback(2, "useful", "Prevented file descriptor duplication");
+// 4. Update lifecycle when an old theory is superseded
+memory_review(1, "update_lifecycle", {
+  lifecycle: "superseded",
+  reason: "Superseded by verified handle aliasing implementation in Ref 2",
+  evidenceRef: 2,
+});
 ```

@@ -1,7 +1,7 @@
 {
   "name": "pi-mm",
   "version": "0.1.0",
-  "description": "Memory Mipmaps extension for Pi Coding Agent — persistent, hierarchical, low-cost recall over local qmap files (memory_scan/think/store/forget/reset). Phase 3 of mm-plan.",
+  "description": "Memory Mipmaps extension for Pi Coding Agent — persistent, hierarchical recall with automatic bounded context injection and streamlined memory_recall, memory_record, memory_review tools.",
   "keywords": [
     "pi-package"
   ],

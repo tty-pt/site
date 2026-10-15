@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -6,6 +7,7 @@ export interface MmConfig {
   axisLibs: string | null;
   memDir: string;
   scanLimit: number;
+  advancedTools?: boolean;
   embedUrl?: string;
   embedModel?: string;
   embedKey?: string;
@@ -16,6 +18,7 @@ export const DEFAULT_CONFIG: MmConfig = {
   axisLibs: null,
   memDir: ".pi/mm",
   scanLimit: 10,
+  advancedTools: false,
 };
 
 export type QmapSource = "settings" | "env" | "path" | "insite" | "none";
@@ -35,11 +38,13 @@ export function loadConfig(raw: unknown): MmConfig {
   const url = record["embedUrl"];
   const model = record["embedModel"];
   const key = record["embedKey"];
+  const adv = record["advancedTools"];
   return {
     qmapBin: typeof bin === "string" && bin.trim() !== "" ? bin.trim() : DEFAULT_CONFIG.qmapBin,
     axisLibs: typeof libs === "string" && libs.trim() !== "" ? libs.trim() : DEFAULT_CONFIG.axisLibs,
     memDir: typeof dir === "string" && dir.trim() !== "" ? dir.trim() : DEFAULT_CONFIG.memDir,
     scanLimit: typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_CONFIG.scanLimit,
+    advancedTools: typeof adv === "boolean" ? adv : DEFAULT_CONFIG.advancedTools,
     embedUrl: typeof url === "string" && url.trim() !== "" ? url.trim() : undefined,
     embedModel: typeof model === "string" && model.trim() !== "" ? model.trim() : undefined,
     embedKey: typeof key === "string" && key.trim() !== "" ? key.trim() : undefined,
@@ -52,11 +57,13 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
   const envUrl = env["CORM_SEPAL_EMBED_URL"] ?? env["QMAP_SEPAL_EMBED_URL"];
   const envModel = env["CORM_SEPAL_EMBED_MODEL"] ?? env["QMAP_SEPAL_EMBED_MODEL"];
   const envKey = env["CORM_SEPAL_EMBED_KEY"] ?? env["QMAP_SEPAL_EMBED_KEY"];
+  const envAdv = env["PI_MM_ADVANCED_TOOLS"];
   return {
     qmapBin: cfg.qmapBin === "" && typeof envBin === "string" && envBin.trim() !== "" ? envBin.trim() : cfg.qmapBin,
     axisLibs: cfg.axisLibs === null && typeof envLibs === "string" && envLibs.trim() !== "" ? envLibs.trim() : cfg.axisLibs,
     memDir: cfg.memDir,
     scanLimit: cfg.scanLimit,
+    advancedTools: typeof envAdv === "string" ? (envAdv === "1" || envAdv === "true") : cfg.advancedTools,
     embedUrl: cfg.embedUrl ?? (typeof envUrl === "string" && envUrl.trim() !== "" ? envUrl.trim() : undefined),
     embedModel: cfg.embedModel ?? (typeof envModel === "string" && envModel.trim() !== "" ? envModel.trim() : undefined),
     embedKey: cfg.embedKey ?? (typeof envKey === "string" && envKey.trim() !== "" ? envKey.trim() : undefined),
@@ -123,4 +130,21 @@ export async function readMmConfig(cwd: string, env: Record<string, string | und
     raw = undefined;
   }
   return applyEnv(loadConfig(raw), { ...runtimeEnv(), ...env });
+}
+
+export function resolveAdvancedTools(cwd = "."): boolean {
+  const env = runtimeEnv();
+  const envAdv = env["PI_MM_ADVANCED_TOOLS"];
+  if (typeof envAdv === "string") {
+    return envAdv === "1" || envAdv === "true";
+  }
+  try {
+    const text = readFileSync(join(cwd, ".pi", "settings.json"), "utf8");
+    const parsed = JSON.parse(text);
+    const mm = parsed?.["pi-mm"] ?? parsed?.["mm"];
+    if (typeof mm?.advancedTools === "boolean") return mm.advancedTools;
+  } catch {
+    // Non-blocking fallback
+  }
+  return false;
 }

@@ -30,7 +30,13 @@ const LIFECYCLE_PARAMS = {
   additionalProperties: false,
 };
 
-function validateTransition(from: LifecycleState, to: LifecycleState, reason?: string, evRef?: number): string | null {
+function validateTransition(
+  from: LifecycleState,
+  to: LifecycleState,
+  reason?: string,
+  evRef?: number,
+  existingEvidence?: number[],
+): string | null {
   if (from === to) return null;
   const allowed = PERMITTED_TRANSITIONS[from] || [];
   if (!allowed.includes(to)) {
@@ -39,10 +45,57 @@ function validateTransition(from: LifecycleState, to: LifecycleState, reason?: s
   if ((to === "contradicted" || to === "superseded") && !reason && evRef === undefined) {
     return `transition to ${to} requires a reason or evidenceRef`;
   }
+  if (to === "supported" && evRef === undefined && (!existingEvidence || existingEvidence.length === 0)) {
+    return `transition to supported requires supporting evidenceRef or existing evidence`;
+  }
   return null;
 }
 
-async function executeLifecycle(
+export async function validateEvidenceRef(
+  env: import("./index.ts").ToolEnv,
+  ref: number,
+): Promise<{ valid: boolean; reason?: string }> {
+  if (!Number.isInteger(ref) || ref <= 0) {
+    return { valid: false, reason: `invalid evidence reference ${ref}` };
+  }
+  if (env.cfg.qmapBin === "") {
+    return { valid: false, reason: "qmap binary unavailable" };
+  }
+  const embed = sepalConfigured(env.cfg);
+  const cwd = memDir(env);
+  const fspec = filespecFor(cwd, embed);
+  const axes = axisPath(env);
+  const eEnv = embedEnv(env.cfg);
+
+  const res = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, ref, axes, cwd, eEnv));
+  if (res.code !== 0 || !res.stdout.trim()) {
+    return { valid: false, reason: `evidence reference ${ref} not found in database` };
+  }
+  const { envelope } = decodePayload(res.stdout.trim());
+  if (envelope.lifecycle === "contradicted" || envelope.lifecycle === "superseded") {
+    return { valid: false, reason: `evidence reference ${ref} is ${envelope.lifecycle} and cannot support new conclusions` };
+  }
+  return { valid: true };
+}
+
+async function validateEvidenceTargets(
+  env: import("./index.ts").ToolEnv,
+  evidenceRef?: number,
+  existingEvidence?: number[],
+): Promise<string | null> {
+  if (evidenceRef !== undefined) {
+    const evCheck = await validateEvidenceRef(env, evidenceRef);
+    if (!evCheck.valid) return evCheck.reason ?? "invalid evidence";
+  } else if (Array.isArray(existingEvidence) && existingEvidence.length > 0) {
+    for (const ev of existingEvidence) {
+      const evCheck = await validateEvidenceRef(env, ev);
+      if (!evCheck.valid) return evCheck.reason ?? "invalid evidence";
+    }
+  }
+  return null;
+}
+
+export async function executeLifecycle(
   envSource: EnvSource,
   params: Record<string, unknown>,
   ctx: PiCtx,
@@ -74,9 +127,21 @@ async function executeLifecycle(
 
     const { date, envelope } = decodePayload(getRes.stdout.trim());
     const fromState = envelope.lifecycle;
-    const err = validateTransition(fromState, nextState, reason, evidenceRef);
+    const err = validateTransition(fromState, nextState, reason, evidenceRef, envelope.evidence);
     if (err) {
       return { content: [{ type: "text", text: `mm lifecycle error: ${err}` }], details: { error: err, ref } };
+    }
+
+    if (nextState === "supported") {
+      const targetErr = await validateEvidenceTargets(env, evidenceRef, envelope.evidence);
+      if (targetErr) {
+        return { content: [{ type: "text", text: `mm lifecycle error: ${targetErr}` }], details: { error: targetErr, ref } };
+      }
+    }
+
+    if (evidenceRef !== undefined) {
+      envelope.evidence = envelope.evidence ?? [];
+      if (!envelope.evidence.includes(evidenceRef)) envelope.evidence.push(evidenceRef);
     }
 
     const transition: LifecycleTransition = {

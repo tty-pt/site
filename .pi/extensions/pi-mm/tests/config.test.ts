@@ -1,4 +1,5 @@
-import { readMmConfig, loadConfig, applyEnv, resolveQmapBin, resolveAxisPath, sepalConfigured, DEFAULT_CONFIG } from "../src/config.ts";
+import { readMmConfig, loadConfig, applyEnv, resolveQmapBin, resolveAxisPath, resolveAdvancedTools, sepalConfigured, DEFAULT_CONFIG } from "../src/config.ts";
+import { resolveMemDir } from "../src/tools/index.ts";
 import { join } from "node:path";
 
 function check(cond: boolean, msg: string): void {
@@ -102,4 +103,64 @@ Deno.test("resolveAxisPath: explicit list used; null → in-site joint:stoma:isl
 Deno.test("readMmConfig: no settings file → defaults", async () => {
   const cfg = await readMmConfig("/definitely/not/a/real/pi/config/dir");
   check(cfg.memDir === ".pi/mm", "defaults on missing settings");
+});
+
+Deno.test("resolveMemDir: handles both absolute and relative directories without double-rooting", () => {
+  const rel = resolveMemDir("/home/user/project", ".pi/mm");
+  check(rel === "/home/user/project/.pi/mm", "relative resolves under cwd");
+
+  const abs = resolveMemDir("/home/user/project", "/tmp/isolated-mem-dir");
+  check(abs === "/tmp/isolated-mem-dir", "absolute path preserves exact root without concatenation");
+});
+
+Deno.test("resolveAdvancedTools: defaults to false when unconfigured", () => {
+  const dir = Deno.makeTempDirSync({ prefix: "mm-adv-default-" });
+  try {
+    check(resolveAdvancedTools(dir) === false, "defaults to false");
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("resolveAdvancedTools: reads advancedTools from .pi/settings.json via readFileSync", () => {
+  const dir = Deno.makeTempDirSync({ prefix: "mm-adv-settings-" });
+  try {
+    Deno.mkdirSync(join(dir, ".pi"), { recursive: true });
+    Deno.writeTextFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ "pi-mm": { advancedTools: true } }),
+    );
+    check(resolveAdvancedTools(dir) === true, "reads true from settings");
+
+    Deno.writeTextFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ "pi-mm": { advancedTools: false } }),
+    );
+    check(resolveAdvancedTools(dir) === false, "reads false from settings");
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("resolveAdvancedTools: PI_MM_ADVANCED_TOOLS env var takes precedence", () => {
+  const dir = Deno.makeTempDirSync({ prefix: "mm-adv-env-" });
+  try {
+    Deno.mkdirSync(join(dir, ".pi"), { recursive: true });
+    Deno.writeTextFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ "pi-mm": { advancedTools: false } }),
+    );
+    Deno.env.set("PI_MM_ADVANCED_TOOLS", "true");
+    check(resolveAdvancedTools(dir) === true, "env true overrides settings false");
+
+    Deno.env.set("PI_MM_ADVANCED_TOOLS", "false");
+    Deno.writeTextFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ "pi-mm": { advancedTools: true } }),
+    );
+    check(resolveAdvancedTools(dir) === false, "env false overrides settings true");
+  } finally {
+    Deno.env.delete("PI_MM_ADVANCED_TOOLS");
+    Deno.removeSync(dir, { recursive: true });
+  }
 });

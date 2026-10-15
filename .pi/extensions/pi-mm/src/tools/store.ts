@@ -137,7 +137,7 @@ function buildEnvelope(params: Record<string, unknown>, summary: string, ep?: Ep
   return { envelope, isStructured };
 }
 
-async function executeStore(envSource: EnvSource, params: Record<string, unknown>, ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details?: unknown }> {
+export async function executeStore(envSource: EnvSource, params: Record<string, unknown>, ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details?: unknown }> {
   try {
     const env = await envSource(ctx);
     const textParam = typeof params["text"] === "string" ? params["text"].trim() : "";

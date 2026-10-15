@@ -208,15 +208,48 @@ jail_manifest() {
 			case " $_jf_mapped " in
 			*" $_jf_need "*) continue ;;
 			esac
-			if ! _jf_src=$(jail_host_lib "$_jf_need"); then
+			if _jf_src=$(jail_soname_src "${_jf_need%.so}" 2>/dev/null); then
+				:
+			elif ! _jf_src=$(jail_host_lib "$_jf_need"); then
 				printf 'jail-manifest: %s is needed after the chroot but is in neither the axil startup closure nor the host libraries\n' \
 					"$_jf_need" >&2
-				unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
+				unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_mods _jf_need
 				return 1
 			fi
 			printf '%s usr/lib/%s\n' "$_jf_src" "$_jf_need"
 		done
 	fi
-	unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_need
+	unset _jf_src _jf _jf_dir _jf_needed _jf_mapped _jf_mods _jf_need
 	return 0
+}
+
+# The man-db / groff toolchain execve closure: binaries, loader, config,
+# groff data, and DT_NEEDED libraries needed for in-jail manual rendering.
+jail_manifest_man_toolchain() {
+	_bins="/usr/bin/man /usr/bin/groff /usr/bin/troff /usr/bin/grotty /usr/bin/tbl /usr/bin/col /usr/bin/nroff /usr/bin/cat /bin/sh"
+	for _b in $_bins; do
+		[ -x "$_b" ] && printf '%s %s\n' "$_b" "${_b#/}"
+	done
+	for _b in /usr/libexec/man-db/*; do
+		[ -f "$_b" ] && printf '%s %s\n' "$_b" "${_b#/}"
+	done
+	if [ -f /lib64/ld-linux-x86-64.so.2 ]; then
+		printf '/lib64/ld-linux-x86-64.so.2 lib64/ld-linux-x86-64.so.2\n'
+	fi
+	if [ -f /etc/manpath.config ]; then
+		printf '/etc/manpath.config etc/manpath.config\n'
+	fi
+	if [ -d /usr/share/groff ]; then
+		find /usr/share/groff -type f | while IFS= read -r _gf; do
+			printf '%s %s\n' "$_gf" "${_gf#/}"
+		done
+	fi
+	_all_targets="$_bins"
+	[ -d /usr/libexec/man-db ] && _all_targets="$_all_targets /usr/libexec/man-db/*"
+	[ -d /usr/lib/man-db ] && _all_targets="$_all_targets /usr/lib/man-db/*.so"
+	ldd $_all_targets 2>/dev/null |
+		awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\// && $i !~ /:$/) print $i }' |
+		sort -u | while IFS= read -r _lib; do
+			[ -f "$_lib" ] && printf '%s %s\n' "$_lib" "${_lib#/}"
+		done
 }

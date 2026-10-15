@@ -63,7 +63,7 @@ export function decodePayload(raw: string): { date: string; envelope: MemoryEnve
     envelope: {
       level: "L2",
       type: "note",
-      lifecycle: "supported",
+      lifecycle: "observed",
       summary: text,
     },
   };

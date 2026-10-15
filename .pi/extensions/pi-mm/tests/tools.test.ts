@@ -206,22 +206,28 @@ Deno.test("degradation: nonzero exec exit still returns a non-error result with 
   check((res.content[0].text ?? "").includes("joint missing"), "stderr surfaced");
 });
 
-Deno.test("memory_scan: embed=true with sepal configured → bare sepal + --query/--min-sim flags, no curl, no temp files", async () => {
-  const runner = fakeRunner([okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n")]);
+Deno.test("memory_scan: embed=true with sepal configured → independent lexical and semantic paths with flags", async () => {
+  const runner = fakeRunner([
+    okResult("1 0.125000 2026-09-14:Beacon Harbor lights\n"),
+    okResult("1 0.850000 2026-09-14:Beacon Harbor lights\n"),
+  ]);
   const tool = makeScanTool(give(env(runner, { ...embedEnvCfg() })));
   const res = await runTool(tool, { topic: "beacon", embed: true }, ctx);
-  const args = runner.invocations[0].args.join(" ");
-  check(args.includes("(stoma AND sepal)"), `bare sepal AND-leaf; got ${args}`);
-  check(args.includes("--field=text"), `--field flag carries the field; got ${args}`);
-  check(args.includes("--matched=1"), `--matched flag carries the flag; got ${args}`);
-  check(args.includes("--query=beacon"), `--query flag carries the text; got ${args}`);
-  check(args.includes("--min-sim=0.2"), `--min-sim flag carries the floor; got ${args}`);
-  check(!runner.invocations[0].args[1].includes("query="), `no query= inside the -X expr; got ${args}`);
-  check(!args.includes("file="), `no tempfile bridge; got ${args}`);
-  check(runner.invocations[0].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[0].args[4]}`);
-  check(runner.invocations[0].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");
-  const d = res.details as { records: unknown[]; embed?: string };
+  check(runner.invocations.length === 2, `two independent invocations; got ${runner.invocations.length}`);
+  const lexArgs = runner.invocations[0].args.join(" ");
+  const semArgs = runner.invocations[1].args.join(" ");
+  check(lexArgs.includes("-X stoma"), `lexical path uses stoma; got ${lexArgs}`);
+  check(lexArgs.includes("--field=text"), `--field flag carries the field; got ${lexArgs}`);
+  check(lexArgs.includes("--matched=1"), `--matched flag carries the flag; got ${lexArgs}`);
+  check(lexArgs.includes("--query=beacon"), `--query flag carries the text; got ${lexArgs}`);
+  check(semArgs.includes("-X sepal"), `semantic path uses sepal; got ${semArgs}`);
+  check(semArgs.includes("--query=beacon"), `semantic query carries text; got ${semArgs}`);
+  check(semArgs.includes("--min-sim=0.2"), `--min-sim flag carries the floor; got ${semArgs}`);
+  check(runner.invocations[1].args[4] === FS_SEPAL, `sepal aware filespec; got ${runner.invocations[1].args[4]}`);
+  check(runner.invocations[1].env["QMAP_SEPAL_EMBED_URL"] === "http://localhost:4242/v1/embeddings", "embed url env var");
+  const d = res.details as { records: Array<{ ref: number; origin?: string }>; embed?: string };
   check(d.records.length === 1, "records returned");
+  check(d.records[0].origin === "both", "fused origin is both");
   check(d.embed === undefined, "no embed diagnostic on the flags path");
 });
 

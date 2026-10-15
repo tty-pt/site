@@ -168,6 +168,25 @@ for dir in var htdocs; do
 		fail "$dir/ is in the site tree but not in the jail: the jail must be the site root itself (a separate jail loads an empty world and saves back into it)"
 	fi
 done
+
+# Art and man presence assertions for axil-nd
+if [ -d "$root/external/axil-nd/art" ]; then
+	if [ ! -d "$JAIL/external/axil-nd/art" ]; then
+		fail "external/axil-nd/art/ is in the site tree but not in the jail"
+	elif [ -z "$(ls -A "$JAIL/external/axil-nd/art" 2>/dev/null)" ]; then
+		fail "external/axil-nd/art/ in the jail is empty"
+	fi
+fi
+if [ -d "$root/external/axil-nd/man" ]; then
+	if [ ! -d "$JAIL/external/axil-nd/man" ]; then
+		fail "external/axil-nd/man/ is in the site tree but not in the jail"
+	else
+		man_count=$(find "$JAIL/external/axil-nd/man" -maxdepth 1 -name '*.10' 2>/dev/null | wc -l)
+		if [ "$man_count" -eq 0 ]; then
+			fail "external/axil-nd/man/ in the jail has no .10 manual pages"
+		fi
+	fi
+fi
 if [ -f "$root/var/nd/std.db" ]; then
 	if [ ! -f "$JAIL/var/nd/std.db" ]; then
 		fail "var/nd/std.db is in the tree but not in the jail"
@@ -203,6 +222,16 @@ if [ -x "$root/bin/sh" ] && [ ! -x "$JAIL/bin/sh" ]; then
 	warn "bin/sh is in the tree but not in the jail (axil-tty's shell exec will fail; see docs/BUILD.md chroot prerequisites)"
 elif [ ! -e "$JAIL/bin/sh" ]; then
 	warn "no bin/sh in the jail (axil-tty's shell exec will fail; see docs/BUILD.md chroot prerequisites)"
+fi
+
+# Man toolchain closure observations (non-fatal; see docs/BUILD.md)
+for tool in lib64/ld-linux-x86-64.so.2 usr/bin/man usr/bin/groff usr/bin/troff usr/bin/grotty usr/bin/tbl usr/bin/col usr/bin/nroff usr/bin/cat etc/manpath.config; do
+	if [ ! -e "$JAIL/$tool" ]; then
+		warn "$tool is missing from the jail (in-game help manual rendering will fail; see docs/BUILD.md)"
+	fi
+done
+if [ ! -d "$JAIL/usr/share/groff" ]; then
+	warn "usr/share/groff is missing from the jail (groff tmac/font definitions; in-game help will fail)"
 fi
 
 if [ "$failed" -ne 0 ]; then

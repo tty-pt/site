@@ -20,7 +20,15 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
 . scripts/jail-manifest.sh
 
-JAIL=${1:-${JAIL:-/var/www}}
+with_man=0
+jail_arg=
+for arg in "$@"; do
+	case "$arg" in
+	--with-man) with_man=1 ;;
+	*) jail_arg="$arg" ;;
+	esac
+done
+JAIL=${jail_arg:-${JAIL:-/var/www}}
 
 if ! command -v readelf >/dev/null 2>&1; then
 	printf 'seed-jail: readelf not found, cannot derive DT_NEEDED\n' >&2
@@ -46,6 +54,14 @@ manifest=$(jail_manifest) || {
 	printf 'seed-jail: manifest failed, nothing copied\n' >&2
 	exit 1
 }
+
+if [ "$with_man" = "1" ] || [ "${SEED_MAN_TOOLCHAIN:-0}" = "1" ]; then
+	man_manifest=$(jail_manifest_man_toolchain) || {
+		printf 'seed-jail: man toolchain manifest failed\n' >&2
+		exit 1
+	}
+	manifest=$(printf '%s\n%s' "$manifest" "$man_manifest")
+fi
 
 # Byte-identical counts as already in place: re-copying a correct jail on
 # every run would churn mtimes for no reason. On the supported topology

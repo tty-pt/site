@@ -491,10 +491,16 @@ help_topic_cmp(const void *a, const void *b)
 static void
 nd_help_index(unsigned player_ref)
 {
-	DIR *dir = opendir("man");
+	char man_dir[BUFSIZ];
+	DIR *dir = NULL;
 	struct dirent *de;
 	char **topics = NULL;
 	size_t n = 0, cap = 0;
+
+	if (nd_asset_dir(ND_ASSET_MAN, man_dir, sizeof(man_dir)))
+		dir = opendir(man_dir);
+	if (!dir)
+		dir = opendir("man");
 
 	if (dir) {
 		while ((de = readdir(dir)) != NULL) {
@@ -559,7 +565,11 @@ do_man(int fd, int argc, char *argv[])
 		return;
 	}
 
-	snprintf(path, sizeof(path), "man/%s.10", topic);
+	char man_dir[BUFSIZ];
+	if (nd_asset_dir(ND_ASSET_MAN, man_dir, sizeof(man_dir)))
+		snprintf(path, sizeof(path), "%s/%s.10", man_dir, topic);
+	else
+		snprintf(path, sizeof(path), "man/%s.10", topic);
 
 	if (access(path, R_OK) == 0) {
 		char *rargv[] = { "/usr/bin/man", "-P", "cat", "-l", path, NULL };
@@ -711,9 +721,16 @@ static const char nd_motd_default[] =
 static void
 nd_motd_show(unsigned player_ref)
 {
-	char buf[BUFSIZ];
-	FILE *f = fopen("motd", "r");
+	char dir[BUFSIZ], path[BUFSIZ], buf[BUFSIZ];
+	FILE *f = NULL;
 	const char *text = nd_motd_default;
+
+	if (nd_asset_dir(ND_ASSET_MOTD, dir, sizeof(dir))) {
+		snprintf(path, sizeof(path), "%s/motd", dir);
+		f = fopen(path, "r");
+	}
+	if (!f)
+		f = fopen("motd", "r");
 
 	if (f) {
 		size_t len = fread(buf, 1, sizeof(buf) - 2, f);

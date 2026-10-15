@@ -19,7 +19,7 @@ export interface TraversalNode {
   episode?: EpisodeRecord;
 }
 
-async function fetchEnvelope(
+export async function fetchEnvelope(
   env: ToolEnv,
   fspec: string,
   axes: string,
@@ -32,7 +32,7 @@ async function fetchEnvelope(
   return decodePayload(res.stdout.trim());
 }
 
-async function traverseDown(
+export async function traverseDown(
   env: ToolEnv,
   fspec: string,
   axes: string,
@@ -118,7 +118,7 @@ async function traverseUp(
   return node;
 }
 
-function renderTree(node: TraversalNode, prefix = "", isLast = true, isRoot = true): string {
+export function renderTree(node: TraversalNode, prefix = "", isLast = true, isRoot = true): string {
   const branch = isRoot ? "" : isLast ? "└─ " : "├─ ";
   const line = `${prefix}${branch}[${node.level}] Ref ${node.ref}: ${node.summary} (${node.lifecycle})\n`;
   const nextPrefix = isRoot ? "" : prefix + (isLast ? "   " : "│  ");

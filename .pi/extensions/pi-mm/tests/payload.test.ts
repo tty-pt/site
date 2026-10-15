@@ -57,7 +57,7 @@ Deno.test("decodePayload gracefully falls back for legacy plain text", () => {
   assert.strictEqual(decoded.date, "2026-09-14");
   assert.strictEqual(decoded.envelope.level, "L2");
   assert.strictEqual(decoded.envelope.type, "note");
-  assert.strictEqual(decoded.envelope.lifecycle, "supported");
+  assert.strictEqual(decoded.envelope.lifecycle, "observed");
   assert.strictEqual(decoded.envelope.summary, "Beacon Harbor lights");
 });
 

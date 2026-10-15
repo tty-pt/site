@@ -120,14 +120,16 @@ Deno.test("episode: end-to-end capture hook -> persistence -> fresh session reco
 
   // Step 1: Simulate Pi tool hook firing with test failure
   activeSessionBuffer.clear();
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-e2e-hook-" });
+  activeSessionBuffer.setJournalDir(tmpDir);
   const mockPi = {
     handlers: new Map<string, Array<(...args: unknown[]) => unknown>>(),
     on(event: string, handler: (...args: unknown[]) => unknown): void {
       if (!this.handlers.has(event)) this.handlers.set(event, []);
       this.handlers.get(event)!.push(handler);
     },
-    emit(event: string, data: unknown): void {
-      for (const h of this.handlers.get(event) || []) h(data);
+    async emit(event: string, data: unknown): Promise<void> {
+      for (const h of this.handlers.get(event) || []) await h(data);
     },
   };
 
@@ -184,6 +186,8 @@ Deno.test("episode: automatic persistence on agent_settled without manual store 
   const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
 
   activeSessionBuffer.clear();
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-auto-settle-" });
+  activeSessionBuffer.setJournalDir(tmpDir);
   const runner = fakeRunner([
     okResult(""), // list all refs
     okResult(""), // store invocation
@@ -231,6 +235,8 @@ Deno.test("episode: failed write followed by retry preserves unpersisted events 
   const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
 
   activeSessionBuffer.clear();
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-retry-store-" });
+  activeSessionBuffer.setJournalDir(tmpDir);
 
   let shouldFail = true;
   const runner: QmapRunner = {
@@ -284,6 +290,8 @@ Deno.test("episode: session_start preserves unpersisted events but drops flushed
   const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
 
   activeSessionBuffer.clear();
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-session-start-" });
+  activeSessionBuffer.setJournalDir(tmpDir);
 
   let allowStore = true;
   const runner: QmapRunner = {
@@ -352,6 +360,8 @@ Deno.test("episode: captures diffs and runtime environment from tool modificatio
   const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
 
   activeSessionBuffer.clear();
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-diffs-" });
+  activeSessionBuffer.setJournalDir(tmpDir);
   let storedPayload = "";
   const runner: QmapRunner = {
     run(inv: import("../src/qmap.ts").Invocation) {
@@ -468,8 +478,8 @@ Deno.test("episode: automatic journaling on normal Pi tool_result hook without m
       if (!this.handlers.has(event)) this.handlers.set(event, []);
       this.handlers.get(event)!.push(handler);
     },
-    emit(event: string, data: unknown): void {
-      for (const h of this.handlers.get(event) || []) h(data);
+    async emit(event: string, data: unknown): Promise<void> {
+      for (const h of this.handlers.get(event) || []) await h(data);
     },
   };
 
@@ -714,8 +724,10 @@ Deno.test("episode: journal write queue recovers after failed write and exposes 
     isError: false,
   });
 
-  // Attempt save to bad directory: must fail safely and populate lastError
-  await buf.saveJournal(badDir);
+  // Attempt save to bad directory: must reject and populate lastError
+  await assert.rejects(async () => {
+    await buf.saveJournal(badDir);
+  });
   assert.notStrictEqual(buf.lastError, null);
   assert.strictEqual(buf.lastError!.includes("journal-error:"), true);
 
@@ -836,3 +848,687 @@ Deno.test("episode: session_start during in-flight flush preserves flush guard a
   assert.deepStrictEqual(committedBatches[0], ["evt_in_flight_1"]);
   assert.deepStrictEqual(committedBatches[1], ["evt_new_step_2"]);
 });
+
+Deno.test("episode: process termination immediately after tool-result capture leaves durable disk journal", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-proc-term-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  const cwd = Deno.cwd();
+  const eventsModule = cwd.includes(".pi/extensions/pi-mm")
+    ? `${cwd}/src/hooks/events.ts`
+    : `${cwd}/.pi/extensions/pi-mm/src/hooks/events.ts`;
+
+  const workerScript = `
+    import { activeSessionBuffer, installSessionHooks } from "${eventsModule}";
+
+    const dir = Deno.args[0];
+    activeSessionBuffer.setJournalDir(dir);
+
+    // Mock Pi harness with event listener registry
+    const handlers = new Map();
+    const fakePi = {
+      on(ev, fn) { handlers.set(ev, fn); },
+      registerTool() {},
+      exec() { return Promise.resolve({ stdout: "", stderr: "", code: 0 }); }
+    };
+
+    installSessionHooks(fakePi);
+
+    // Emit tool_result and await handler completion per Pi ExtensionRunner contract
+    const toolResultFn = handlers.get("tool_result");
+    await toolResultFn({
+      toolCallId: "call_term_immediate_123",
+      toolName: "bash",
+      args: { command: "deno test" },
+      content: [{ type: "text", text: "ok 1 - test passed" }],
+      isError: false,
+    });
+
+    // Immediate exit without manual flush or graceful shutdown
+    Deno.exit(0);
+  `;
+
+  const scriptPath = join(tmpDir, "worker.ts");
+  await Deno.writeTextFile(scriptPath, workerScript);
+
+  const res = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", "--sloppy-imports", scriptPath, tmpDir],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
+  assert.strictEqual(res.code, 0, new TextDecoder().decode(res.stderr));
+
+  // Verify journal was persisted to disk before process exit
+  const journalContent = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(journalContent.length, 1);
+  assert.strictEqual(journalContent[0].id, "call_term_immediate_123");
+  assert.strictEqual(journalContent[0].outcome, "worked");
+});
+
+Deno.test("episode: failed journaling followed by retry cleans up and succeeds", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-journal-retry-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  buf.record({
+    id: "evt_retry_1",
+    timestamp: "2026-10-15T13:00:00Z",
+    toolName: "bash",
+    summary: "first task",
+    isError: false,
+  });
+
+  // Inject a failure by making a directory where the journal file would be
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  // Attempt save to the blocked path: should reject and set lastError
+  await assert.rejects(async () => {
+    await buf.saveJournal(tmpDir);
+  });
+  assert.strictEqual(buf.lastError !== null, true);
+  assert.strictEqual(buf.lastError?.startsWith("journal-error:"), true);
+
+  // Remove the blocking directory
+  await Deno.remove(journalFile, { recursive: true });
+
+  // Add another event and retry save
+  buf.record({
+    id: "evt_retry_2",
+    timestamp: "2026-10-15T13:01:00Z",
+    toolName: "bash",
+    summary: "second task",
+    isError: false,
+  });
+  await buf.saveJournal(tmpDir);
+
+  // Assert successful recovery: lastError cleared and file saved
+  assert.strictEqual(buf.lastError, null);
+  const data = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(data.length, 2);
+  assert.strictEqual(data[0].id, "evt_retry_1");
+  assert.strictEqual(data[1].id, "evt_retry_2");
+
+  // Verify no orphaned .tmp files left in dir
+  for await (const entry of Deno.readDir(tmpDir)) {
+    assert.strictEqual(entry.name.includes(".tmp."), false);
+  }
+});
+
+Deno.test("episode: invalid journal content surfaces error in lastError", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-corrupt-journal-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  // Write corrupt non-JSON content
+  await Deno.writeTextFile(journalFile, "MALFORMED_NON_JSON_CORRUPTION<<<>>>");
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  const restored = await buf.restoreJournal(tmpDir);
+  assert.strictEqual(restored, 0);
+
+  // Error MUST be surfaced in lastError, not silently swallowed
+  assert.strictEqual(buf.lastError !== null, true);
+  assert.strictEqual(buf.lastError?.startsWith("journal-restore-error:"), true);
+  assert.strictEqual(buf.lastError?.includes("invalid json"), true);
+
+  // In contrast, a genuinely missing journal file (ENOENT) is benign clean start and sets no error
+  const cleanDir = await Deno.makeTempDir({ prefix: "mm-clean-journal-" });
+  const cleanBuf = new SessionEventBuffer();
+  cleanBuf.setJournalDir(cleanDir);
+  const cleanRestored = await cleanBuf.restoreJournal(cleanDir);
+  assert.strictEqual(cleanRestored, 0);
+  assert.strictEqual(cleanBuf.lastError, null);
+});
+
+Deno.test("episode: more than 50 pending events triggers observable overflow condition", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-overflow-" });
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  // Record 55 distinct events
+  for (let i = 1; i <= 55; i++) {
+    buf.record({
+      id: `evt_overflow_${i}`,
+      timestamp: `2026-10-15T14:${String(i).padStart(2, "0")}:00Z`,
+      toolName: "bash",
+      summary: `overflow task ${i}`,
+      isError: false,
+    });
+  }
+
+  // Observable overflow state must be set
+  assert.strictEqual(buf.hasOverflow, true);
+  assert.strictEqual(buf.overflowCount, 5);
+  assert.strictEqual(buf.lastError !== null, true);
+  assert.strictEqual(buf.lastError?.startsWith("buffer-overflow: capacity exceeded (50 events)"), true);
+
+  const status = buf.getOverflowStatus();
+  assert.strictEqual(status.hasOverflow, true);
+  assert.strictEqual(status.overflowCount, 5);
+
+  // Events are preserved rather than silently vanished
+  assert.strictEqual(buf.getEvents().length, 55);
+
+  // Once committed/cleared, overflow status resets
+  buf.commitFlush(buf.getEvents().map((e) => e.id));
+  assert.strictEqual(buf.hasOverflow, false);
+  assert.strictEqual(buf.overflowCount, 0);
+});
+
+Deno.test("episode: recordAsync explicitly rejects on failed journal write and retains pending events", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-rec-async-fail-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  // Block journal creation by putting a directory at the target filename
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  const event: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_rec_fail_1",
+    timestamp: "2026-10-15T10:00:00Z",
+    toolName: "bash",
+    summary: "should fail journal write",
+    isError: false,
+  };
+
+  // Must reject rather than silently succeeding
+  await assert.rejects(async () => {
+    await buf.recordAsync(event);
+  });
+
+  // Verify failure is visible in lastError
+  assert.strictEqual(buf.lastError !== null, true);
+  assert.strictEqual(buf.lastError?.startsWith("journal-error:"), true);
+
+  // The event must be preserved in memory for later retry!
+  assert.strictEqual(buf.getEvents().length, 1);
+  assert.strictEqual(buf.getUnflushed().length, 1);
+  assert.strictEqual(buf.getUnflushed()[0].id, "evt_rec_fail_1");
+
+  await Deno.remove(journalFile, { recursive: true });
+});
+
+Deno.test("episode: real event-handler path exposes persistence failure to Pi runner", async () => {
+  const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-pi-error-expose-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  // Block the journal path
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  activeSessionBuffer.clear();
+  activeSessionBuffer.setJournalDir(tmpDir);
+
+  let capturedError: { event: string; error: string } | null = null;
+  const fakePi = {
+    handlers: new Map<string, Array<(...args: unknown[]) => unknown>>(),
+    on(event: string, handler: (...args: unknown[]) => unknown): void {
+      if (!this.handlers.has(event)) this.handlers.set(event, []);
+      this.handlers.get(event)!.push(handler);
+    },
+    // Simulates ExtensionRunner.emitToolResult which catches handler errors and calls emitError
+    async emitToolResult(data: unknown): Promise<void> {
+      for (const h of this.handlers.get("tool_result") || []) {
+        try {
+          await h(data);
+        } catch (err: unknown) {
+          capturedError = {
+            event: "tool_result",
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+    },
+  };
+
+  installSessionHooks(fakePi as unknown as import("../src/hooks/events.ts").Pi);
+
+  await fakePi.emitToolResult({
+    toolCallId: "call_expose_err",
+    toolName: "bash",
+    isError: true,
+    content: [{ type: "text", text: "FAIL: memory leak in corm buffer" }],
+  });
+
+  // Pi extension runner must have received the emitted error diagnostic
+  assert.notStrictEqual(capturedError, null);
+  assert.strictEqual(capturedError!.event, "tool_result");
+  assert.strictEqual(capturedError!.error.startsWith("journal-error:"), true);
+
+  // Buffer still has the event pending
+  assert.strictEqual(activeSessionBuffer.getUnflushed().length, 1);
+
+  await Deno.remove(journalFile, { recursive: true });
+});
+
+Deno.test("episode: pending events survive write failure and are durably persisted on later retry", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-survive-retry-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  // First event fails
+  await assert.rejects(async () => {
+    await buf.recordAsync({
+      id: "evt_survive_1",
+      timestamp: "2026-10-15T11:00:00Z",
+      toolName: "bash",
+      summary: "task 1",
+      isError: false,
+    });
+  });
+
+  assert.strictEqual(buf.getUnflushed().length, 1);
+  assert.strictEqual(buf.lastError?.startsWith("journal-error:"), true);
+
+  // Unblock path
+  await Deno.remove(journalFile, { recursive: true });
+
+  // Second event succeeds
+  await buf.recordAsync({
+    id: "evt_survive_2",
+    timestamp: "2026-10-15T11:01:00Z",
+    toolName: "bash",
+    summary: "task 2",
+    isError: false,
+  });
+
+  // Both events must now be durably persisted on disk!
+  assert.strictEqual(buf.lastError, null);
+  const data = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(data.length, 2);
+  assert.strictEqual(data[0].id, "evt_survive_1");
+  assert.strictEqual(data[1].id, "evt_survive_2");
+});
+
+Deno.test("episode: missing journalDir configuration explicitly rejects and preserves buffered events", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const buf = new SessionEventBuffer();
+  // journalDir is null / uninitialized
+
+  const event: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_unconfigured_1",
+    timestamp: "2026-10-15T12:00:00Z",
+    toolName: "bash",
+    summary: "unconfigured task",
+    isError: false,
+  };
+
+  await assert.rejects(
+    async () => {
+      await buf.recordAsync(event);
+    },
+    /journalDir has not been initialized/,
+  );
+
+  // Error is surfaced in lastError
+  assert.strictEqual(buf.lastError, "journal-error: journalDir has not been initialized");
+
+  // Event was buffered in memory and NOT lost!
+  assert.strictEqual(buf.getEvents().length, 1);
+  assert.strictEqual(buf.getEvents()[0].id, "evt_unconfigured_1");
+
+  // When journalDir is later configured, a save persists it
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-later-configured-" });
+  buf.setJournalDir(tmpDir);
+  await buf.saveJournal(tmpDir);
+
+  const data = JSON.parse(await Deno.readTextFile(join(tmpDir, ".pending_events.json")));
+  assert.strictEqual(data.length, 1);
+  assert.strictEqual(data[0].id, "evt_unconfigured_1");
+});
+
+Deno.test("episode: journal write queue recovers after failure without poisoning subsequent operations", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-no-poison-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  // Write 1 fails
+  await assert.rejects(async () => {
+    await buf.recordAsync({
+      id: "evt_q_1",
+      timestamp: "2026-10-15T13:00:00Z",
+      toolName: "bash",
+      summary: "queue item 1",
+      isError: false,
+    });
+  });
+
+  // Unblock path
+  await Deno.remove(journalFile, { recursive: true });
+
+  // Rapid sequential writes: neither should fail or be poisoned by write 1
+  const p1 = buf.recordAsync({
+    id: "evt_q_2",
+    timestamp: "2026-10-15T13:00:01Z",
+    toolName: "bash",
+    summary: "queue item 2",
+    isError: false,
+  });
+
+  const p2 = buf.recordAsync({
+    id: "evt_q_3",
+    timestamp: "2026-10-15T13:00:02Z",
+    toolName: "bash",
+    summary: "queue item 3",
+    isError: false,
+  });
+
+  await Promise.all([p1, p2]);
+
+  assert.strictEqual(buf.lastError, null);
+  const data = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(data.length, 3);
+  assert.strictEqual(data[0].id, "evt_q_1");
+  assert.strictEqual(data[1].id, "evt_q_2");
+  assert.strictEqual(data[2].id, "evt_q_3");
+});
+
+Deno.test("episode: duplicate-event retries after journal failure enforce durability with deduplication", async () => {
+  const { SessionEventBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-dup-retry-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  // Block the journal path
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  const event: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_dup_retry_1",
+    timestamp: "2026-10-15T15:00:00Z",
+    toolName: "bash",
+    summary: "duplicate test task",
+    isError: false,
+  };
+
+  // 1. First journal write fails explicitly
+  await assert.rejects(async () => {
+    await buf.recordAsync(event);
+  });
+  assert.strictEqual(buf.getEvents().length, 1);
+  assert.strictEqual(buf.isJournaled("evt_dup_retry_1"), false);
+  assert.strictEqual(buf.lastError?.startsWith("journal-error:"), true);
+
+  // 2. The same event ID is delivered again while persistence is still unavailable
+  // Must NOT succeed early, must NOT create duplicate copy, and must fail explicitly
+  await assert.rejects(async () => {
+    await buf.recordAsync(event);
+  });
+  assert.strictEqual(buf.getEvents().length, 1); // Deduplicated!
+  assert.strictEqual(buf.isJournaled("evt_dup_retry_1"), false);
+
+  // 3. Persistence recovers: unblock the journal path
+  await Deno.remove(journalFile, { recursive: true });
+
+  // 4. Repeated event ID is delivered: successfully writes pending event exactly once
+  await buf.recordAsync(event);
+  assert.strictEqual(buf.lastError, null);
+  assert.strictEqual(buf.isJournaled("evt_dup_retry_1"), true);
+  assert.strictEqual(buf.getEvents().length, 1);
+
+  const diskData = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskData.length, 1);
+  assert.strictEqual(diskData[0].id, "evt_dup_retry_1");
+
+  // Subsequent duplicate of already-journaled event returns early without re-writing
+  await buf.recordAsync(event);
+  assert.strictEqual(buf.getEvents().length, 1);
+});
+
+Deno.test("episode: duplicate-event failures expose diagnostic through Pi runner on each failed attempt", async () => {
+  const { installSessionHooks, activeSessionBuffer } = await import("../src/hooks/events.ts");
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-dup-pi-diag-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  await Deno.mkdir(journalFile, { recursive: true });
+
+  activeSessionBuffer.clear();
+  activeSessionBuffer.setJournalDir(tmpDir);
+
+  const errors: Array<{ event: string; error: string }> = [];
+  const fakePi = {
+    handlers: new Map<string, Array<(...args: unknown[]) => unknown>>(),
+    on(event: string, handler: (...args: unknown[]) => unknown): void {
+      if (!this.handlers.has(event)) this.handlers.set(event, []);
+      this.handlers.get(event)!.push(handler);
+    },
+    async emitToolResult(data: unknown): Promise<void> {
+      for (const h of this.handlers.get("tool_result") || []) {
+        try {
+          await h(data);
+        } catch (err: unknown) {
+          errors.push({
+            event: "tool_result",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    },
+  };
+
+  installSessionHooks(fakePi as unknown as import("../src/hooks/events.ts").Pi);
+
+  const toolPayload = {
+    toolCallId: "call_dup_err_1",
+    toolName: "bash",
+    isError: true,
+    content: [{ type: "text", text: "FAIL: buffer overflow in parser" }],
+  };
+
+  // Attempt 1: fails and exposes error
+  await fakePi.emitToolResult(toolPayload);
+  assert.strictEqual(errors.length, 1);
+  assert.strictEqual(errors[0].error.startsWith("journal-error:"), true);
+
+  // Attempt 2 with duplicate event: must ALSO fail explicitly and expose error to Pi
+  await fakePi.emitToolResult(toolPayload);
+  assert.strictEqual(errors.length, 2);
+  assert.strictEqual(errors[1].error.startsWith("journal-error:"), true);
+
+  // Buffer still has the event pending exactly once
+  assert.strictEqual(activeSessionBuffer.getUnflushed().length, 1);
+
+  // Recover persistence
+  await Deno.remove(journalFile, { recursive: true });
+
+  // Attempt 3 with duplicate event: succeeds and clears error
+  await fakePi.emitToolResult(toolPayload);
+  assert.strictEqual(errors.length, 2); // No new error
+  assert.strictEqual(activeSessionBuffer.isJournaled("call_dup_err_1"), true);
+
+  const diskData = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskData.length, 1);
+  assert.strictEqual(diskData[0].id, "call_dup_err_1");
+});
+
+Deno.test("episode: snapshot interleaving marks only successfully persisted event IDs in recordAsync", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-interleaving-async-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  const eventA: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_interleave_A",
+    timestamp: "2026-10-15T15:00:00Z",
+    toolName: "bash",
+    summary: "task A",
+    isError: false,
+  };
+
+  const eventB: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_interleave_B",
+    timestamp: "2026-10-15T15:00:01Z",
+    toolName: "bash",
+    summary: "task B",
+    isError: false,
+  };
+
+  let pauseA = true;
+  let aInFlightResolve: () => void = () => {};
+  const aInFlightPromise = new Promise<void>((r) => { aInFlightResolve = r; });
+  let aReleaseResolve: () => void = () => {};
+  const aReleasePromise = new Promise<void>((r) => { aReleaseResolve = r; });
+  let failB = true;
+
+  buf._testHooks = {
+    onBeforeRename: async (snapshot) => {
+      if (snapshot.some((e) => e.id === "evt_interleave_A") && !snapshot.some((e) => e.id === "evt_interleave_B") && pauseA) {
+        pauseA = false;
+        aInFlightResolve();
+        await aReleasePromise;
+      } else if (snapshot.some((e) => e.id === "evt_interleave_B") && failB) {
+        throw new Error("simulated failure during B write");
+      }
+    },
+  };
+
+  // 1. Start write for event A
+  const aPromise = buf.recordAsync(eventA);
+
+  // Wait until A is in flight and paused before completion
+  await aInFlightPromise;
+
+  // 2. Add event B while A's write is in flight
+  const bPromise = buf.recordAsync(eventB);
+
+  // 3. Allow A's write to succeed
+  aReleaseResolve();
+  await aPromise;
+
+  // 4. Force B's queued write to fail
+  await assert.rejects(async () => {
+    await bPromise;
+  });
+
+  // 5. Assert A is journaled and B is NOT journaled
+  assert.strictEqual(buf.isJournaled("evt_interleave_A"), true);
+  assert.strictEqual(buf.isJournaled("evt_interleave_B"), false);
+
+  // Disk currently contains only A
+  const diskDataA = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskDataA.length, 1);
+  assert.strictEqual(diskDataA[0].id, "evt_interleave_A");
+
+  // Deduplication check: in-memory events contains each event once
+  assert.strictEqual(buf.getEvents().length, 2);
+
+  // 6. Deliver B again and verify persistence is retried, journal contains both events exactly once
+  failB = false;
+  await buf.recordAsync(eventB);
+
+  assert.strictEqual(buf.isJournaled("evt_interleave_A"), true);
+  assert.strictEqual(buf.isJournaled("evt_interleave_B"), true);
+  assert.strictEqual(buf.getEvents().length, 2);
+
+  const diskDataBoth = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskDataBoth.length, 2);
+  assert.strictEqual(diskDataBoth[0].id, "evt_interleave_A");
+  assert.strictEqual(diskDataBoth[1].id, "evt_interleave_B");
+});
+
+Deno.test("episode: snapshot interleaving marks only successfully persisted event IDs in legacy record path", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "mm-interleaving-record-" });
+  const journalFile = join(tmpDir, ".pending_events.json");
+
+  const buf = new SessionEventBuffer();
+  buf.setJournalDir(tmpDir);
+
+  const eventA: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_rec_A",
+    timestamp: "2026-10-15T15:00:00Z",
+    toolName: "bash",
+    summary: "task A",
+    isError: false,
+  };
+
+  const eventB: import("../src/hooks/events.ts").SignificantEvent = {
+    id: "evt_rec_B",
+    timestamp: "2026-10-15T15:00:01Z",
+    toolName: "bash",
+    summary: "task B",
+    isError: false,
+  };
+
+  let pauseA = true;
+  let aInFlightResolve: () => void = () => {};
+  const aInFlightPromise = new Promise<void>((r) => { aInFlightResolve = r; });
+  let aReleaseResolve: () => void = () => {};
+  const aReleasePromise = new Promise<void>((r) => { aReleaseResolve = r; });
+  let failB = true;
+
+  buf._testHooks = {
+    onBeforeRename: async (snapshot) => {
+      if (snapshot.some((e) => e.id === "evt_rec_A") && !snapshot.some((e) => e.id === "evt_rec_B") && pauseA) {
+        pauseA = false;
+        aInFlightResolve();
+        await aReleasePromise;
+      } else if (snapshot.some((e) => e.id === "evt_rec_B") && failB) {
+        throw new Error("simulated failure during B record write");
+      }
+    },
+  };
+
+  // 1. Deliver A via record()
+  buf.record(eventA);
+  await aInFlightPromise;
+
+  // 2. Deliver B via record() while A is in flight
+  buf.record(eventB);
+
+  // 3. Allow A to succeed and B to fail
+  aReleaseResolve();
+
+  // Wait for queue to settle
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  // 4. Assert A is journaled and B is NOT journaled
+  assert.strictEqual(buf.isJournaled("evt_rec_A"), true);
+  assert.strictEqual(buf.isJournaled("evt_rec_B"), false);
+  assert.strictEqual(buf.lastError?.startsWith("journal-error:"), true);
+
+  const diskDataA = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskDataA.length, 1);
+  assert.strictEqual(diskDataA[0].id, "evt_rec_A");
+
+  // 5. Deliver B again via record() after failure
+  failB = false;
+  buf.record(eventB);
+
+  // Await settlement by waiting for saveJournal
+  await buf.saveJournal(tmpDir);
+
+  assert.strictEqual(buf.isJournaled("evt_rec_A"), true);
+  assert.strictEqual(buf.isJournaled("evt_rec_B"), true);
+  assert.strictEqual(buf.getEvents().length, 2);
+
+  const diskDataBoth = JSON.parse(await Deno.readTextFile(journalFile));
+  assert.strictEqual(diskDataBoth.length, 2);
+  assert.strictEqual(diskDataBoth[0].id, "evt_rec_A");
+  assert.strictEqual(diskDataBoth[1].id, "evt_rec_B");
+});
+
+
+

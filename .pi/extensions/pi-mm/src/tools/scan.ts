@@ -1,9 +1,11 @@
 import type { PiCtx, PiToolSpec } from "../hooks/events.ts";
 import type { EnvSource, ToolEnv } from "./index.ts";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
-import { filespecFor, buildScanInvocation, scanExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM, scanWindowArgs, type ResultLine } from "../qmap.ts";
-import { decodePayload } from "../payload.ts";
-import type { MipmapLevel, LifecycleState, MemoryEnvelope } from "../types.ts";
+import { filespecFor, buildScanInvocation, scanLexicalExpr, scanSemanticExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM, scanWindowArgs, type ResultLine } from "../qmap.ts";
+import type { MipmapLevel } from "../types.ts";
+import { fuseRankingsRRF, filterAndEnrich, type FusedCandidate, type FilterCriteria } from "./ranking.ts";
+
+export type EnrichedRecord = FusedCandidate;
 
 const SCAN_PARAMS = {
   type: "object",
@@ -52,84 +54,6 @@ function defaultLimit(n: unknown): number {
   return 10;
 }
 
-export interface EnrichedRecord {
-  ref: number;
-  score?: string;
-  record: string;
-  envelope?: MemoryEnvelope;
-  level?: MipmapLevel;
-  lifecycle?: LifecycleState;
-  summary?: string;
-}
-
-interface FilterCriteria {
-  mipmap?: MipmapLevel;
-  lifecycle?: string;
-  project?: string;
-  subsystem?: string;
-  limit: number;
-}
-
-function computeRankingScore(rec: EnrichedRecord, crit: FilterCriteria): number {
-  let score = rec.score ? parseFloat(rec.score) : 1.0;
-  if (isNaN(score)) score = 1.0;
-
-  const env = rec.envelope;
-  if (!env) return score;
-
-  // Lifecycle state factor
-  const lifecycleWeights: Record<LifecycleState, number> = {
-    supported: 1.0,
-    tested: 0.95,
-    observed: 0.9,
-    hypothesized: 0.7,
-    contradicted: 0.1,
-    superseded: 0.05,
-  };
-  score *= (lifecycleWeights[env.lifecycle] ?? 0.8);
-
-  // Provenance bonus
-  if (env.evidence && env.evidence.length > 0) {
-    score += 0.1;
-  }
-
-  // Utility feedback factor
-  if (env.utility) {
-    const net = (env.utility.usedCount || 0) - (env.utility.irrelevantCount || 0) - (env.utility.obsoleteCount || 0) * 2;
-    score += Math.max(-0.3, Math.min(0.3, net * 0.05));
-  }
-
-  // Scope compatibility bonus
-  if (crit.project && env.context?.project === crit.project) score += 0.15;
-  if (crit.subsystem && env.context?.subsystem === crit.subsystem) score += 0.15;
-
-  return score;
-}
-
-function filterAndEnrich(rawLines: ReturnType<typeof parseResultLines>, crit: FilterCriteria): EnrichedRecord[] {
-  const candidates: EnrichedRecord[] = [];
-  for (const line of rawLines) {
-    const { envelope } = decodePayload(line.record);
-    if (crit.mipmap && envelope.level !== crit.mipmap) continue;
-    if (crit.lifecycle && crit.lifecycle !== "all" && envelope.lifecycle !== crit.lifecycle) continue;
-    if (crit.project && envelope.context?.project !== crit.project) continue;
-    if (crit.subsystem && envelope.context?.subsystem !== crit.subsystem) continue;
-
-    candidates.push({
-      ...line,
-      envelope,
-      level: envelope.level,
-      lifecycle: envelope.lifecycle,
-      summary: envelope.summary,
-    });
-  }
-
-  // Multi-factor ranking
-  candidates.sort((a, b) => computeRankingScore(b, crit) - computeRankingScore(a, crit));
-
-  return candidates.slice(0, crit.limit);
-}
-
 async function querySpatialFilter(
   env: ToolEnv, cwd: string, axes: string, limit: number, bbox: { dim?: number; s: string; l: string },
 ): Promise<Set<number>> {
@@ -141,20 +65,34 @@ async function querySpatialFilter(
   return res.code === 0 ? new Set(parseResultLines(res.stdout).map((l) => l.ref)) : new Set();
 }
 
+const STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "with",
+  "by", "from", "of", "about", "into", "through", "after", "before", "is",
+  "are", "was", "were", "be", "been", "being", "have", "has", "had", "do",
+  "does", "did", "can", "could", "will", "would", "shall", "should", "what",
+  "which", "who", "whom", "this", "that", "these", "those", "my", "your",
+  "our", "their", "its", "there", "here", "when", "where", "why", "how",
+]);
+
 async function scanTokenFallback(
   env: ToolEnv, cwd: string, expr: string, limit: number, axes: string,
-  embedReady: boolean, timeLevel: number, now: Date, until: string | undefined, topic: string,
+  timeLevel: number, now: Date, until: string | undefined, topic: string,
 ): Promise<ResultLine[]> {
-  const words = topic.split(/\s+/).map((w) => w.replace(/[^\w-]/g, "")).filter((w) => w.length >= 3);
+  const allTokens = topic.split(/\s+/)
+    .map((w) => w.replace(/[^\w-]/g, ""))
+    .filter((w) => w.length >= 2);
+
+  const filtered = allTokens.filter((w) => !STOP_WORDS.has(w.toLowerCase()));
+  const words = filtered.length > 0 ? filtered : allTokens;
+
   const seen = new Set<number>();
   const lines: ResultLine[] = [];
   for (const w of words.slice(0, 6)) {
     const subArgs = [
       ...scanWindowArgs(timeLevel, now, until),
       "--field=text", "--matched=1", "--query=" + w,
-      ...(embedReady ? ["--min-sim=" + String(SEPAL_MIN_SIM)] : []),
     ];
-    const subRes = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg), subArgs));
+    const subRes = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, false), expr, limit, axes, cwd, undefined, subArgs));
     if (subRes.code === 0) {
       for (const line of parseResultLines(subRes.stdout)) {
         if (!seen.has(line.ref)) { seen.add(line.ref); lines.push(line); }
@@ -164,6 +102,110 @@ async function scanTokenFallback(
   return lines;
 }
 
+async function queryLexicalPath(
+  env: ToolEnv, cwd: string, axes: string, timeLevel: number, now: Date,
+  until: string | undefined, topic: string, limit: number,
+): Promise<{ lines: ResultLine[]; error?: string }> {
+  const lexExpr = scanLexicalExpr(timeLevel, now, until);
+  const lexArgs = [
+    ...scanWindowArgs(timeLevel, now, until),
+    "--field=text", "--matched=1", "--query=" + topic,
+  ];
+  const res = await env.runner.run(buildScanInvocation(
+    env.cfg.qmapBin, filespecFor(cwd, false), lexExpr, limit, axes, cwd, undefined, lexArgs,
+  ));
+  if (res.code === 0) {
+    let lines = parseResultLines(res.stdout);
+    if (lines.length === 0 && topic.includes(" ")) {
+      lines = await scanTokenFallback(env, cwd, lexExpr, limit, axes, timeLevel, now, until, topic);
+    }
+    return { lines };
+  }
+  return { lines: [], error: res.stderr || res.stdout };
+}
+
+async function querySemanticPath(
+  env: ToolEnv, cwd: string, axes: string, timeLevel: number, now: Date,
+  until: string | undefined, topic: string, limit: number,
+): Promise<{ lines: ResultLine[]; error?: string }> {
+  const semExpr = scanSemanticExpr(timeLevel, now, until);
+  const semArgs = [
+    ...scanWindowArgs(timeLevel, now, until),
+    "--query=" + topic,
+    "--min-sim=" + String(SEPAL_MIN_SIM),
+  ];
+  const res = await env.runner.run(buildScanInvocation(
+    env.cfg.qmapBin, filespecFor(cwd, true), semExpr, limit, axes, cwd, embedEnv(env.cfg), semArgs,
+  ));
+  if (res.code === 0) {
+    return { lines: parseResultLines(res.stdout) };
+  }
+  return { lines: [], error: res.stderr || res.stdout };
+}
+
+export interface HybridScanOptions {
+  topic: string;
+  level?: unknown;
+  timeWindow?: unknown;
+  lifecycle?: string;
+  project?: string;
+  subsystem?: string;
+  bbox?: { dim?: number; s: string; l: string };
+  until?: string;
+  embed?: boolean;
+  limit?: number;
+}
+
+export async function executeHybridScan(
+  env: ToolEnv,
+  opts: HybridScanOptions,
+): Promise<{ records: FusedCandidate[]; details: Record<string, unknown> }> {
+  const topic = opts.topic.trim();
+  const details: Record<string, unknown> = {};
+  if (topic === "") return { records: [], details: { records: [] } };
+  if (env.cfg.qmapBin === "") return { records: [], details: { error: "no-qmap", records: [] } };
+
+  const timeLevel = resolveTimeLevel(opts.level, opts.timeWindow);
+  const limit = defaultLimit(opts.limit) || env.cfg.scanLimit;
+  const untilRaw = opts.until;
+  const until = typeof untilRaw === "string" && /^\d{4}-\d{2}-\d{2}/.test(untilRaw) ? untilRaw.slice(0, 10) : undefined;
+  const wantEmbed = opts.embed === true;
+  const embedReady = wantEmbed && sepalConfigured(env.cfg);
+  if (wantEmbed && !embedReady) details["embed"] = "unconfigured";
+
+  const axes = axisPath(env);
+  const cwd = memDir(env);
+  const now = env.nowProvider();
+
+  const lexResult = await queryLexicalPath(env, cwd, axes, timeLevel, now, until, topic, limit);
+  if (lexResult.error) details["lexicalError"] = lexResult.error;
+
+  let semLines: ResultLine[] = [];
+  if (embedReady) {
+    const semResult = await querySemanticPath(env, cwd, axes, timeLevel, now, until, topic, limit);
+    if (semResult.error) details["embedError"] = semResult.error;
+    semLines = semResult.lines;
+  }
+
+  let fused = fuseRankingsRRF(lexResult.lines, semLines, 60);
+
+  if (opts.bbox) {
+    const isletRefs = await querySpatialFilter(env, cwd, axes, limit, opts.bbox);
+    fused = fused.filter((c) => isletRefs.has(c.ref));
+  }
+
+  const filterCrit: FilterCriteria = {
+    mipmap: resolveMipmapFilter(opts.level),
+    lifecycle: typeof opts.lifecycle === "string" ? opts.lifecycle : undefined,
+    project: typeof opts.project === "string" ? opts.project.trim() : undefined,
+    subsystem: typeof opts.subsystem === "string" ? opts.subsystem.trim() : undefined,
+    limit,
+  };
+  const records = filterAndEnrich(fused, filterCrit);
+  details["records"] = records;
+  return { records, details };
+}
+
 async function executeScan(envSource: EnvSource, params: Record<string, unknown>, ctx: PiCtx) {
   try {
     const env = await envSource(ctx);
@@ -171,47 +213,10 @@ async function executeScan(envSource: EnvSource, params: Record<string, unknown>
     if (topic === "") return { content: [{ type: "text", text: "mm scan: empty topic (degradation: soft)" }], details: { records: [] } };
     if (env.cfg.qmapBin === "") return { content: [{ type: "text", text: "mm unavailable: qmap binary not found" }], details: { error: "no-qmap", records: [] } };
 
-    const timeLevel = resolveTimeLevel(params["level"], params["timeWindow"]);
-    const limit = defaultLimit(params["limit"]) || env.cfg.scanLimit;
-    const untilRaw = params["until"];
-    const until = typeof untilRaw === "string" && /^\d{4}-\d{2}-\d{2}/.test(untilRaw) ? untilRaw.slice(0, 10) : undefined;
-    const wantEmbed = params["embed"] === true;
-    const embedReady = wantEmbed && sepalConfigured(env.cfg);
-    const details: Record<string, unknown> = {};
-    if (wantEmbed && !embedReady) details["embed"] = "unconfigured";
-
-    const axes = axisPath(env);
-    const cwd = memDir(env);
-    const now = env.nowProvider();
-    const bbox = params["bbox"] as { dim?: number; s: string; l: string } | undefined;
-
-    const extraArgs: string[] = [
-      ...scanWindowArgs(timeLevel, now, until),
-      "--field=text", "--matched=1", "--query=" + topic,
-      ...(embedReady ? ["--min-sim=" + String(SEPAL_MIN_SIM)] : []),
-    ];
-
-    const isletRefs = bbox ? await querySpatialFilter(env, cwd, axes, limit, bbox) : null;
-    const expr = scanExpr(topic, timeLevel, now, until, embedReady);
-    const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, embedReady), expr, limit, axes, cwd, embedEnv(env.cfg), extraArgs));
-    if (result.code !== 0) {
-      return { content: [{ type: "text", text: `mm scan failed (exit ${result.code}): ${result.stderr || result.stdout}` }], details: { records: [], error: result.stderr || result.stdout, ...details } };
+    const { details } = await executeHybridScan(env, params as unknown as HybridScanOptions);
+    if (details["lexicalError"] && (!details["records"] || (details["records"] as unknown[]).length === 0)) {
+      return { content: [{ type: "text", text: `mm scan failed: ${details["lexicalError"]}` }], details };
     }
-
-    let rawLines = parseResultLines(result.stdout);
-    if (rawLines.length === 0 && topic.includes(" ")) {
-      rawLines = await scanTokenFallback(env, cwd, expr, limit, axes, embedReady, timeLevel, now, until, topic);
-    }
-    if (isletRefs !== null) {
-      rawLines = rawLines.filter((l) => isletRefs.has(l.ref));
-    }
-    details["records"] = filterAndEnrich(rawLines, {
-      mipmap: resolveMipmapFilter(params["level"]),
-      lifecycle: typeof params["lifecycle"] === "string" ? params["lifecycle"] : undefined,
-      project: typeof params["project"] === "string" ? params["project"].trim() : undefined,
-      subsystem: typeof params["subsystem"] === "string" ? params["subsystem"].trim() : undefined,
-      limit,
-    });
     return exportDetail(details);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -232,11 +237,6 @@ export function makeScanTool(envSource: EnvSource): PiToolSpec {
 export async function scanTopRef(envSource: EnvSource, ctx: PiCtx, topic: string): Promise<number | null> {
   const env = await envSource(ctx as PiCtx);
   if (env.cfg.qmapBin === "") return null;
-  const axes = axisPath(env);
-  const cwd = memDir(env);
-  const expr = scanExpr(topic, 0, env.nowProvider());
-  const result = await env.runner.run(buildScanInvocation(env.cfg.qmapBin, filespecFor(cwd, sepalConfigured(env.cfg)), expr, 1, axes, cwd, embedEnv(env.cfg), ["--field=text", "--matched=1", "--query=" + topic]));
-  if (result.code !== 0) return null;
-  const lines = parseResultLines(result.stdout);
-  return lines.length > 0 ? lines[0].ref : null;
+  const { records } = await executeHybridScan(env, { topic, limit: 1 });
+  return records.length > 0 ? records[0].ref : null;
 }
