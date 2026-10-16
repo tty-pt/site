@@ -4,6 +4,7 @@ import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
 import { filespecFor, buildScanInvocation, scanLexicalExpr, scanSemanticExpr, parseResultLines, embedEnv, SEPAL_MIN_SIM, scanWindowArgs, type ResultLine } from "../qmap.ts";
 import type { MipmapLevel } from "../types.ts";
 import { fuseRankingsRRF, filterAndEnrich, type FusedCandidate, type FilterCriteria } from "./ranking.ts";
+import { debugLog } from "../debug.ts";
 
 export type EnrichedRecord = FusedCandidate;
 
@@ -102,7 +103,7 @@ async function scanTokenFallback(
   return lines;
 }
 
-async function queryLexicalPath(
+export async function queryLexicalPath(
   env: ToolEnv, cwd: string, axes: string, timeLevel: number, now: Date,
   until: string | undefined, topic: string, limit: number,
 ): Promise<{ lines: ResultLine[]; error?: string }> {
@@ -124,7 +125,7 @@ async function queryLexicalPath(
   return { lines: [], error: res.stderr || res.stdout };
 }
 
-async function querySemanticPath(
+export async function querySemanticPath(
   env: ToolEnv, cwd: string, axes: string, timeLevel: number, now: Date,
   until: string | undefined, topic: string, limit: number,
 ): Promise<{ lines: ResultLine[]; error?: string }> {
@@ -179,12 +180,29 @@ export async function executeHybridScan(
 
   const lexResult = await queryLexicalPath(env, cwd, axes, timeLevel, now, until, topic, limit);
   if (lexResult.error) details["lexicalError"] = lexResult.error;
+  debugLog("recall", "Lexical query path evaluated", {
+    topic: topic.slice(0, 80),
+    hitCount: lexResult.lines.length,
+    refs: lexResult.lines.map((l) => l.ref),
+    error: lexResult.error,
+  });
 
   let semLines: ResultLine[] = [];
   if (embedReady) {
     const semResult = await querySemanticPath(env, cwd, axes, timeLevel, now, until, topic, limit);
     if (semResult.error) details["embedError"] = semResult.error;
     semLines = semResult.lines;
+    debugLog("recall", "Semantic query path evaluated", {
+      topic: topic.slice(0, 80),
+      hitCount: semLines.length,
+      refs: semLines.map((l) => l.ref),
+      error: semResult.error,
+    });
+  } else {
+    debugLog("recall", "Semantic query path skipped", {
+      wantEmbed,
+      embedReady,
+    });
   }
 
   let fused = fuseRankingsRRF(lexResult.lines, semLines, 60);
@@ -200,9 +218,16 @@ export async function executeHybridScan(
     project: typeof opts.project === "string" ? opts.project.trim() : undefined,
     subsystem: typeof opts.subsystem === "string" ? opts.subsystem.trim() : undefined,
     limit,
+    query: topic,
   };
   const records = filterAndEnrich(fused, filterCrit);
   details["records"] = records;
+  debugLog("recall", "Hybrid scan fused and filtered records", {
+    topic: topic.slice(0, 80),
+    fusedCount: fused.length,
+    returnedCount: records.length,
+    refs: records.map((r) => r.ref),
+  });
   return { records, details };
 }
 

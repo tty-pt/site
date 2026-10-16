@@ -1,6 +1,9 @@
 import type { PiExecResult } from "./hooks/events.ts";
 import { levelWindow, type JointWindow } from "./window.ts";
 import type { MmConfig } from "./config.ts";
+import { isDaemonLockHeld, resolveLockPath } from "./daemon.ts";
+
+export { DaemonQmapRunner, isDaemonLockHeld, resolveLockPath } from "./daemon.ts";
 
 export const FILESPEC = "mem.db@joint,stoma:a:s";
 export const SEPAL_MIN_SIM = 0.2;
@@ -45,7 +48,18 @@ export class ShellQmapRunner implements QmapRunner {
     ) => Promise<PiExecResult>,
   ) {}
 
-  run(invocation: Invocation): Promise<PiExecResult> {
+  async run(invocation: Invocation): Promise<PiExecResult> {
+    const isMutation = invocation.args.includes("-p") || invocation.args.includes("-d") || invocation.args.includes("-D");
+    if (isMutation) {
+      const lockPath = resolveLockPath(invocation);
+      if (await isDaemonLockHeld(lockPath)) {
+        return {
+          stdout: "",
+          stderr: "corm: database is leased by resident cormd; direct mutation forbidden",
+          code: 1,
+        };
+      }
+    }
     return this.exec(invocation.command, invocation.args, { cwd: invocation.cwd, env: invocation.env });
   }
 }

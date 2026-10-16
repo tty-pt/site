@@ -103,7 +103,14 @@ async function autoL0ToL1(
   env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
   items: StoredItem[], refs: number[], cited: Set<number>, date: string,
 ): Promise<number[]> {
-  const uncited = items.filter((i) => i.envelope.level === "L0" && !cited.has(i.ref));
+  // Only technical investigation episodes (type === "episode" or with tool approaches)
+  // are auto-promoted into "Investigation: ...".
+  // Uncited conversational L0 turns (type === "note") explicitly skipped by judge must NOT be promoted!
+  const uncited = items.filter((i) =>
+    i.envelope.level === "L0" &&
+    !cited.has(i.ref) &&
+    (i.envelope.type === "episode" || (i.envelope.episode?.approaches && i.envelope.episode.approaches.length > 0))
+  );
   const created: number[] = [];
   for (const l0 of uncited) {
     if (l0.envelope.lifecycle === "superseded" || l0.envelope.lifecycle === "contradicted") continue;
@@ -160,39 +167,75 @@ function findSharedInvariantRule(investigations: StoredItem[]): string | null {
   return `Hypothesized rule for ${common.join(" ")}`;
 }
 
+function extractMemoryScope(l1: StoredItem): { scope: string; isConversational: boolean } | null {
+  const ctx = l1.envelope.context;
+  if (ctx?.project || ctx?.subsystem || ctx?.module) {
+    return { scope: (ctx.project || ctx.subsystem || ctx.module)!, isConversational: false };
+  }
+  if (ctx?.subject) {
+    return { scope: ctx.subject, isConversational: true };
+  }
+  if (l1.envelope.tags && l1.envelope.tags.length > 0) {
+    return { scope: l1.envelope.tags[0], isConversational: true };
+  }
+  // Conversational domain heuristics for non-technical memories
+  const text = `${l1.envelope.summary} ${l1.envelope.episode?.findings?.join(" ") ?? ""}`.toLowerCase();
+  if (/(?:grandpa|grandfather|grandma|grandmother|dad|mom|father|mother|family|parent|brother|sister|son|daughter)/i.test(text)) {
+    return { scope: "family", isConversational: true };
+  }
+  if (/(?:airplane|airplanes|boeing|flight|flew|pilot|aviation|aircraft)/i.test(text)) {
+    return { scope: "aviation", isConversational: true };
+  }
+  if (/(?:dog|cat|pet|puppy|kitten|adopted)/i.test(text)) {
+    return { scope: "pets", isConversational: true };
+  }
+  return null;
+}
+
 async function autoL1ToL2(
   env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
   items: StoredItem[], refs: number[], cited: Set<number>, date: string,
 ): Promise<number[]> {
   const uncited = items.filter((i) => i.envelope.level === "L1" && !cited.has(i.ref));
-  const byScope = new Map<string, StoredItem[]>();
+  const byScope = new Map<string, { items: StoredItem[]; isConversational: boolean }>();
   for (const l1 of uncited) {
     if (l1.envelope.lifecycle === "contradicted" || l1.envelope.lifecycle === "superseded") continue;
-    const scope = l1.envelope.context?.project || l1.envelope.context?.subsystem || l1.envelope.context?.module;
-    if (!scope) continue;
-    const g = byScope.get(scope) ?? [];
-    g.push(l1);
-    byScope.set(scope, g);
+    const scopeInfo = extractMemoryScope(l1);
+    if (!scopeInfo) continue;
+    const g = byScope.get(scopeInfo.scope) ?? { items: [], isConversational: scopeInfo.isConversational };
+    g.items.push(l1);
+    byScope.set(scopeInfo.scope, g);
   }
   const created: number[] = [];
   for (const [scope, group] of byScope.entries()) {
-    const supported = group.filter((g) => g.envelope.lifecycle === "supported");
-    if (supported.length < 2) continue; // Single investigation or unverified items do not form an invariant rule
+    const activeItems = group.items.filter((g) => g.envelope.lifecycle === "supported" || g.envelope.lifecycle === "observed");
+    if (activeItems.length < 2) continue; // Single investigation or unverified items do not form an invariant rule
 
-    const sharedRule = findSharedInvariantRule(supported);
-    if (!sharedRule) continue; // Unrelated investigations in the same scope are NOT conjoined!
+    const sRefs = activeItems.map((g) => g.ref);
+    let summary: string;
+    let type: MemoryEnvelope["type"] = "concept";
+    const lifecycle: LifecycleState = activeItems.some((g) => g.envelope.lifecycle === "supported") ? "supported" : "observed";
 
-    const sRefs = supported.map((g) => g.ref);
-    const summary = `Project Invariant [${scope}]: ${sharedRule}`;
+    if (group.isConversational) {
+      const summaries = activeItems.map((g) => g.envelope.summary).join("; ");
+      summary = `Knowledge [${scope}]: ${summaries}`;
+      if (summary.length > 250) summary = summary.slice(0, 247) + "...";
+    } else {
+      const supportedOnly = activeItems.filter((g) => g.envelope.lifecycle === "supported");
+      if (supportedOnly.length < 2) continue;
+      const sharedRule = findSharedInvariantRule(supportedOnly);
+      if (!sharedRule) continue; // Unrelated investigations in the same scope are NOT conjoined!
+      summary = `Project Invariant [${scope}]: ${sharedRule}`;
+      type = "invariant";
+    }
 
     if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L2", sRefs, summary) !== null) continue;
-    // Without an active semantic synthesis model, automated abstractions are recorded as hypotheses
     const envl: MemoryEnvelope = {
       level: "L2",
-      type: "invariant",
-      lifecycle: "hypothesized",
+      type,
+      lifecycle,
       summary,
-      context: { project: scope },
+      context: group.isConversational ? { subject: scope } : { project: scope },
       evidence: sRefs,
     };
     const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
@@ -205,7 +248,7 @@ async function autoL1ToL2(
   return created;
 }
 
-async function runAutoConsolidation(env: ToolEnv, _ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
+export async function runAutoConsolidation(env: ToolEnv, _ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
   const embed = sepalConfigured(env.cfg);
   const cwd = memDir(env);
   const fspec = filespecFor(cwd, embed);
@@ -276,8 +319,8 @@ async function executeConsolidate(
     const tags = params["tags"] as string[] | undefined;
 
     if (!summary || sourceRefs.length === 0) return { content: [{ type: "text", text: "mm consolidate: summary and non-empty sourceRefs required" }], details: { error: "invalid-params" } };
-    if (targetLevel === "L2" && (!context || (!context.project && !context.module && !context.subsystem))) {
-      return { content: [{ type: "text", text: "mm consolidate: L2 project knowledge requires explicit scope (context.project/subsystem/module)" }], details: { error: "scope-required" } };
+    if (targetLevel === "L2" && (!context || (!context.project && !context.module && !context.subsystem && !context.subject))) {
+      return { content: [{ type: "text", text: "mm consolidate: L2 knowledge requires explicit scope (context.project/subsystem/module/subject)" }], details: { error: "scope-required" } };
     }
 
     const cwd = memDir(env);

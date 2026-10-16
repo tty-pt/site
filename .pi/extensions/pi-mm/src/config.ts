@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+export type JudgeMode = "auto" | "heuristic" | "off";
+export type JudgeFallback = "heuristic" | "skip";
+
 export interface MmConfig {
   qmapBin: string;
+  cormdBin?: string;
   axisLibs: string | null;
   memDir: string;
   scanLimit: number;
@@ -11,14 +15,25 @@ export interface MmConfig {
   embedUrl?: string;
   embedModel?: string;
   embedKey?: string;
+  semanticSearch?: boolean;
+  judgeMode?: JudgeMode;
+  judgeUrl?: string;
+  judgeModel?: string;
+  judgeKey?: string;
+  judgeTimeoutMs?: number;
+  judgeFallback?: JudgeFallback;
 }
 
 export const DEFAULT_CONFIG: MmConfig = {
   qmapBin: "",
+  cormdBin: undefined,
   axisLibs: null,
   memDir: ".pi/mm",
   scanLimit: 10,
   advancedTools: false,
+  judgeMode: "auto",
+  judgeTimeoutMs: 5000,
+  judgeFallback: "heuristic",
 };
 
 export type QmapSource = "settings" | "env" | "path" | "insite" | "none";
@@ -32,6 +47,7 @@ export function loadConfig(raw: unknown): MmConfig {
   if (typeof raw !== "object" || raw === null) return DEFAULT_CONFIG;
   const record = raw as Record<string, unknown>;
   const bin = record["qmapBin"];
+  const cormd = record["cormdBin"];
   const libs = record["axisLibs"];
   const dir = record["memDir"];
   const limit = record["scanLimit"];
@@ -39,8 +55,17 @@ export function loadConfig(raw: unknown): MmConfig {
   const model = record["embedModel"];
   const key = record["embedKey"];
   const adv = record["advancedTools"];
+  const semSearch = record["semanticSearch"];
+  const jMode = record["judgeMode"];
+  const jUrl = record["judgeUrl"];
+  const jModel = record["judgeModel"];
+  const jKey = record["judgeKey"];
+  const jTimeout = record["judgeTimeoutMs"];
+  const jFallback = record["judgeFallback"];
+
   return {
     qmapBin: typeof bin === "string" && bin.trim() !== "" ? bin.trim() : DEFAULT_CONFIG.qmapBin,
+    cormdBin: typeof cormd === "string" && cormd.trim() !== "" ? cormd.trim() : undefined,
     axisLibs: typeof libs === "string" && libs.trim() !== "" ? libs.trim() : DEFAULT_CONFIG.axisLibs,
     memDir: typeof dir === "string" && dir.trim() !== "" ? dir.trim() : DEFAULT_CONFIG.memDir,
     scanLimit: typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_CONFIG.scanLimit,
@@ -48,18 +73,80 @@ export function loadConfig(raw: unknown): MmConfig {
     embedUrl: typeof url === "string" && url.trim() !== "" ? url.trim() : undefined,
     embedModel: typeof model === "string" && model.trim() !== "" ? model.trim() : undefined,
     embedKey: typeof key === "string" && key.trim() !== "" ? key.trim() : undefined,
+    semanticSearch: typeof semSearch === "boolean" ? semSearch : undefined,
+    judgeMode: jMode === "auto" || jMode === "heuristic" || jMode === "off" ? jMode : DEFAULT_CONFIG.judgeMode,
+    judgeUrl: typeof jUrl === "string" && jUrl.trim() !== "" ? jUrl.trim() : undefined,
+    judgeModel: typeof jModel === "string" && jModel.trim() !== "" ? jModel.trim() : undefined,
+    judgeKey: typeof jKey === "string" && jKey.trim() !== "" ? jKey.trim() : undefined,
+    judgeTimeoutMs: typeof jTimeout === "number" && jTimeout > 0 ? jTimeout : DEFAULT_CONFIG.judgeTimeoutMs,
+    judgeFallback: jFallback === "skip" ? "skip" : DEFAULT_CONFIG.judgeFallback,
   };
 }
 
 export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>): MmConfig {
   const envBin = env["CORM_BIN"] ?? env["QMAP_BIN"];
+  const envCormd = env["CORMD_BIN"];
   const envLibs = env["CORM_AXIS_PATH"] ?? env["QMAP_AXIS_PATH"];
-  const envUrl = env["CORM_SEPAL_EMBED_URL"] ?? env["QMAP_SEPAL_EMBED_URL"];
-  const envModel = env["CORM_SEPAL_EMBED_MODEL"] ?? env["QMAP_SEPAL_EMBED_MODEL"];
-  const envKey = env["CORM_SEPAL_EMBED_KEY"] ?? env["QMAP_SEPAL_EMBED_KEY"];
+
+  // Independent embedding settings
+  let defaultEmbedUrl = env["CORM_SEPAL_EMBED_URL"] ?? env["QMAP_SEPAL_EMBED_URL"];
+  let defaultEmbedModel = env["CORM_SEPAL_EMBED_MODEL"] ?? env["QMAP_SEPAL_EMBED_MODEL"];
+  let defaultEmbedKey = env["CORM_SEPAL_EMBED_KEY"] ?? env["QMAP_SEPAL_EMBED_KEY"];
+
+  // Independent judge settings
+  const envJMode = env["PI_MM_JUDGE_MODE"] ?? env["MM_JUDGE_MODE"];
+  let defaultJudgeUrl = env["PI_MM_JUDGE_URL"] ?? env["MM_JUDGE_URL"] ?? env["JEV_URL"];
+  let defaultJudgeModel = env["PI_MM_JUDGE_MODEL"] ?? env["MM_JUDGE_MODEL"] ?? env["JEV_MODEL"];
+  let defaultJudgeKey = env["PI_MM_JUDGE_KEY"] ?? env["MM_JUDGE_KEY"] ?? env["JEV_KEY"];
+  const envJTimeout = env["PI_MM_JUDGE_TIMEOUT_MS"] ?? env["MM_JUDGE_TIMEOUT_MS"];
+  const envJFallback = env["PI_MM_JUDGE_FALLBACK"] ?? env["MM_JUDGE_FALLBACK"];
+
+  // Legacy fallback if QLLM_URL is set
+  const qllmBase = env["QLLM_URL"];
+  if (qllmBase && qllmBase.trim() !== "") {
+    const trimmedBase = qllmBase.trim().replace(/\/+$/, "");
+    if (!defaultJudgeUrl) {
+      defaultJudgeUrl = trimmedBase.endsWith("/api/v1/systemone/") ? trimmedBase :
+                       (trimmedBase.endsWith("/api/v1/systemone") ? `${trimmedBase}/` : `${trimmedBase}/api/v1/systemone/`);
+    }
+    if (!defaultEmbedUrl) {
+      defaultEmbedUrl = trimmedBase.endsWith("/v1/embeddings") ? trimmedBase : `${trimmedBase}/v1/embeddings`;
+    }
+    if (!defaultJudgeModel && env["QLLM_MODEL"]) defaultJudgeModel = env["QLLM_MODEL"];
+    if (!defaultEmbedModel && env["QLLM_MODEL"]) defaultEmbedModel = env["QLLM_MODEL"];
+    if (!defaultJudgeKey && env["QLLM_KEY"]) defaultJudgeKey = env["QLLM_KEY"];
+    if (!defaultEmbedKey && env["QLLM_KEY"]) defaultEmbedKey = env["QLLM_KEY"];
+  }
+
+  const envUrl = defaultEmbedUrl;
+  const envModel = defaultEmbedModel;
+  const envKey = defaultEmbedKey;
   const envAdv = env["PI_MM_ADVANCED_TOOLS"];
+  const envSemSearch = env["PI_MM_SEMANTIC_SEARCH"] ?? env["MM_SEMANTIC_SEARCH"];
+  const envJUrl = defaultJudgeUrl;
+  const envJModel = defaultJudgeModel;
+  const envJKey = defaultJudgeKey;
+
+  let semSearch = cfg.semanticSearch;
+  if (typeof envSemSearch === "string") {
+    semSearch = envSemSearch === "1" || envSemSearch.toLowerCase() === "true";
+  }
+
+  let jMode = cfg.judgeMode;
+  if (envJMode === "auto" || envJMode === "heuristic" || envJMode === "off") {
+    jMode = envJMode;
+  }
+
+  let jFallback = cfg.judgeFallback;
+  if (envJFallback === "heuristic" || envJFallback === "skip") {
+    jFallback = envJFallback;
+  }
+
+  const timeoutNum = envJTimeout ? parseInt(envJTimeout, 10) : undefined;
+
   return {
     qmapBin: cfg.qmapBin === "" && typeof envBin === "string" && envBin.trim() !== "" ? envBin.trim() : cfg.qmapBin,
+    cormdBin: cfg.cormdBin ?? (typeof envCormd === "string" && envCormd.trim() !== "" ? envCormd.trim() : undefined),
     axisLibs: cfg.axisLibs === null && typeof envLibs === "string" && envLibs.trim() !== "" ? envLibs.trim() : cfg.axisLibs,
     memDir: cfg.memDir,
     scanLimit: cfg.scanLimit,
@@ -67,12 +154,45 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
     embedUrl: cfg.embedUrl ?? (typeof envUrl === "string" && envUrl.trim() !== "" ? envUrl.trim() : undefined),
     embedModel: cfg.embedModel ?? (typeof envModel === "string" && envModel.trim() !== "" ? envModel.trim() : undefined),
     embedKey: cfg.embedKey ?? (typeof envKey === "string" && envKey.trim() !== "" ? envKey.trim() : undefined),
+    semanticSearch: semSearch,
+    judgeMode: jMode,
+    judgeUrl: cfg.judgeUrl ?? (typeof envJUrl === "string" && envJUrl.trim() !== "" ? envJUrl.trim() : undefined),
+    judgeModel: cfg.judgeModel ?? (typeof envJModel === "string" && envJModel.trim() !== "" ? envJModel.trim() : undefined),
+    judgeKey: cfg.judgeKey ?? (typeof envJKey === "string" && envJKey.trim() !== "" ? envJKey.trim() : undefined),
+    judgeTimeoutMs: timeoutNum && !isNaN(timeoutNum) && timeoutNum > 0 ? timeoutNum : cfg.judgeTimeoutMs,
+    judgeFallback: jFallback,
   };
 }
 
 export function sepalConfigured(cfg: MmConfig): boolean {
+  if (cfg.semanticSearch === false) return false;
   return typeof cfg.embedUrl === "string" && cfg.embedUrl.trim() !== "" &&
     typeof cfg.embedModel === "string" && cfg.embedModel.trim() !== "";
+}
+
+export function judgeConfigured(cfg: MmConfig): boolean {
+  if (cfg.judgeMode === "off" || cfg.judgeMode === "heuristic") return false;
+  return typeof cfg.judgeUrl === "string" && cfg.judgeUrl.trim() !== "";
+}
+
+export function describeCapabilities(cfg: MmConfig): string {
+  const parts: string[] = [];
+  if (cfg.judgeMode === "off") {
+    parts.push("judge=off");
+  } else if (cfg.judgeMode === "heuristic" || !judgeConfigured(cfg)) {
+    parts.push(`judge=heuristic (${cfg.judgeMode === "auto" ? "fallback: no endpoint" : "explicit"})`);
+  } else {
+    parts.push(`judge=auto (systemone @ ${cfg.judgeUrl})`);
+  }
+
+  if (!sepalConfigured(cfg)) {
+    parts.push(`semantic=disabled (${cfg.semanticSearch === false ? "explicitly disabled" : "unconfigured"})`);
+  } else {
+    parts.push(`semantic=enabled (${cfg.embedModel ?? "model"} @ ${cfg.embedUrl})`);
+  }
+
+  parts.push("stoma=active (FTS)");
+  return `pi-mm: ${parts.join(", ")}`;
 }
 
 export function resolveQmapBin(
@@ -92,6 +212,27 @@ export function resolveQmapBin(
   if (probe(inSiteCorm)) return { source: "insite", path: inSiteCorm };
   const inSiteQmap = join(cwd, "external", "libqmap", "bin", "qmap");
   if (probe(inSiteQmap)) return { source: "insite", path: inSiteQmap };
+  return { source: "none", path: "" };
+}
+
+export function resolveCormdBin(
+  cfg: MmConfig,
+  cwd: string,
+  pathDirs: string[],
+  probe: (p: string) => boolean,
+): QmapResolution {
+  if (cfg.cormdBin && cfg.cormdBin !== "") return { source: "settings", path: cfg.cormdBin };
+  if (cfg.qmapBin !== "") {
+    const qdir = join(cfg.qmapBin, "..");
+    const alongside = join(qdir, "cormd");
+    if (probe(alongside)) return { source: "insite", path: alongside };
+  }
+  for (const dir of pathDirs) {
+    const candidateCormd = join(dir, "cormd");
+    if (probe(candidateCormd)) return { source: "path", path: candidateCormd };
+  }
+  const inSiteCormd = join(cwd, "external", "libcorm", "bin", "cormd");
+  if (probe(inSiteCormd)) return { source: "insite", path: inSiteCormd };
   return { source: "none", path: "" };
 }
 
