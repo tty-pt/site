@@ -1,4 +1,4 @@
-import type { PiCtx, PiToolSpec } from "../hooks/events.ts";
+import { activeConversationTurn, type PiCtx, type PiToolSpec } from "../hooks/events.ts";
 import type { EnvSource, ToolEnv } from "./index.ts";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
 import { filespecFor, buildGetInvocation, buildStoreInvocation, buildListInvocation, embedEnv } from "../qmap.ts";
@@ -99,36 +99,6 @@ async function storeAbs(
   return res.code === 0 ? ref : null;
 }
 
-async function autoL0ToL1(
-  env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
-  items: StoredItem[], refs: number[], cited: Set<number>, date: string,
-): Promise<number[]> {
-  const uncited = items.filter((i) => i.envelope.level === "L0" && !cited.has(i.ref));
-  const created: number[] = [];
-  for (const l0 of uncited) {
-    if (l0.envelope.lifecycle === "superseded" || l0.envelope.lifecycle === "contradicted") continue;
-    const worked = l0.envelope.episode?.approaches?.find((a) => a.outcome === "worked");
-    const hasFindings = (l0.envelope.episode?.findings?.length ?? 0) > 0;
-    const isSuccess = l0.envelope.episode?.outcome === "success" || Boolean(worked) || hasFindings;
-    const lifecycle: LifecycleState = isSuccess ? "supported" : "observed";
-
-    const problem = l0.envelope.episode?.problem || l0.envelope.summary;
-    const summary = worked?.approach
-      ? `Investigation: ${problem} — verified: ${worked.approach}`
-      : `Investigation: ${problem}`;
-
-    if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", [l0.ref], summary) !== null) continue;
-    const envl: MemoryEnvelope = { level: "L1", type: "investigation", lifecycle, summary, context: l0.envelope.context, evidence: [l0.ref] };
-    const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
-    if (ref !== null) {
-      created.push(ref);
-      cited.add(l0.ref);
-      items.push({ ref, date, envelope: envl });
-    }
-  }
-  return created;
-}
-
 const STOP_WORDS = new Set([
   "investigation", "observed", "episode", "verified", "issue", "problem", "error", "session", "test", "fix",
 ]);
@@ -160,39 +130,256 @@ function findSharedInvariantRule(investigations: StoredItem[]): string | null {
   return `Hypothesized rule for ${common.join(" ")}`;
 }
 
+async function autoL0ToL1(
+  env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
+  items: StoredItem[], refs: number[], cited: Set<number>, date: string,
+): Promise<number[]> {
+  const uncited = items.filter((i) => i.envelope.level === "L0" && !cited.has(i.ref));
+  const created: number[] = [];
+
+  // Separate technical episodes and session-grouped conversational turns
+  const technicalL0: StoredItem[] = [];
+  const bySession = new Map<string, StoredItem[]>();
+  const unassigned: StoredItem[] = [];
+
+  for (const l0 of uncited) {
+    if (l0.envelope.lifecycle === "superseded" || l0.envelope.lifecycle === "contradicted") continue;
+    const isToolEpisode = l0.envelope.type === "episode" || (l0.envelope.episode?.approaches && l0.envelope.episode.approaches.length > 0);
+    if (isToolEpisode) {
+      technicalL0.push(l0);
+      continue;
+    }
+    const sessId = l0.envelope.episode?.sessionId;
+    if (sessId) {
+      const g = bySession.get(sessId) ?? [];
+      g.push(l0);
+      bySession.set(sessId, g);
+    } else {
+      unassigned.push(l0);
+    }
+  }
+
+  // 1. Process technical investigation episodes
+  for (const l0 of technicalL0) {
+    const worked = l0.envelope.episode?.approaches?.find((a) => a.outcome === "worked");
+    const hasFindings = (l0.envelope.episode?.findings?.length ?? 0) > 0;
+    const isSuccess = l0.envelope.episode?.outcome === "success" || Boolean(worked) || hasFindings;
+    const lifecycle: LifecycleState = isSuccess ? "supported" : "observed";
+
+    const problem = l0.envelope.episode?.problem || l0.envelope.summary;
+    const summary = worked?.approach
+      ? `Investigation: ${problem} — verified: ${worked.approach}`
+      : `Investigation: ${problem}`;
+
+    if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", [l0.ref], summary) !== null) {
+      cited.add(l0.ref);
+      continue;
+    }
+    const envl: MemoryEnvelope = { level: "L1", type: "investigation", lifecycle, summary, context: l0.envelope.context, evidence: [l0.ref] };
+    const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
+    if (ref !== null) {
+      created.push(ref);
+      cited.add(l0.ref);
+      items.push({ ref, date, envelope: envl });
+    }
+  }
+
+  // 2. Process session-grouped L0 conversational turns
+  for (const [sessId, group] of bySession.entries()) {
+    const existingL1 = items.find((i) =>
+      i.envelope.level === "L1" &&
+      i.envelope.episode?.sessionId === sessId &&
+      i.envelope.lifecycle !== "superseded" &&
+      i.envelope.lifecycle !== "contradicted"
+    );
+
+    const groupFacts = group.map((g) => g.envelope.summary).filter((s): s is string => Boolean(s && s.trim()));
+    const groupEvidence = group.map((g) => g.ref);
+
+    if (existingL1) {
+      // Create successor L1 memory incorporating new L0 facts
+      const priorFindings = existingL1.envelope.episode?.findings ?? [existingL1.envelope.summary];
+      const mergedFindings = Array.from(new Set([...priorFindings, ...groupFacts]));
+      const priorEvidence = existingL1.envelope.evidence ?? [];
+      const mergedEvidence = Array.from(new Set([...priorEvidence, ...groupEvidence]));
+
+      let updatedSummary = existingL1.envelope.summary;
+      for (const newFact of groupFacts) {
+        if (!updatedSummary.toLowerCase().includes(newFact.toLowerCase())) {
+          updatedSummary = `${updatedSummary} — ${newFact}`;
+        }
+      }
+      if (updatedSummary.length > 250) {
+        updatedSummary = updatedSummary.slice(0, 247) + "...";
+      }
+
+      if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", mergedEvidence, updatedSummary) !== null) {
+        for (const r of groupEvidence) cited.add(r);
+        continue;
+      }
+
+      const successorRef = nextRef(refs);
+      refs.push(successorRef);
+
+      const successorEnvelope: MemoryEnvelope = {
+        level: "L1",
+        type: existingL1.envelope.type ?? "note",
+        lifecycle: "observed",
+        summary: updatedSummary,
+        supersedes: existingL1.ref,
+        evidence: mergedEvidence,
+        context: existingL1.envelope.context,
+        episode: {
+          problem: existingL1.envelope.episode?.problem || group[0].envelope.episode?.problem || updatedSummary,
+          findings: mergedFindings,
+          outcome: "success",
+          sessionId: sessId,
+          sessionFile: existingL1.envelope.episode?.sessionFile || group[0].envelope.episode?.sessionFile,
+          leafId: group[group.length - 1].envelope.episode?.leafId || existingL1.envelope.episode?.leafId,
+        },
+      };
+
+      const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, successorRef, encodePayload(date, successorEnvelope), axes, cwd, eEnv));
+      if (res.code === 0) {
+        // Mark predecessor superseded
+        existingL1.envelope.lifecycle = "superseded";
+        existingL1.envelope.supersededBy = successorRef;
+        await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, existingL1.ref, encodePayload(existingL1.date, existingL1.envelope), axes, cwd, eEnv));
+
+        // Update active in-memory session reference
+        activeConversationTurn.activeMemoryRef = successorRef;
+        activeConversationTurn.activeSessionId = sessId;
+
+        created.push(successorRef);
+        for (const r of groupEvidence) cited.add(r);
+        items.push({ ref: successorRef, date, envelope: successorEnvelope });
+      }
+    } else {
+      // Create new L1 episodic memory for this session
+      const summary = groupFacts.length === 1 ? groupFacts[0] : groupFacts.join(" — ").slice(0, 250);
+
+      if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", groupEvidence, summary) !== null) {
+        for (const r of groupEvidence) cited.add(r);
+        continue;
+      }
+
+      const l1Ref = nextRef(refs);
+      refs.push(l1Ref);
+
+      const l1Envelope: MemoryEnvelope = {
+        level: "L1",
+        type: "note",
+        lifecycle: "observed",
+        summary,
+        evidence: groupEvidence,
+        context: group[0].envelope.context,
+        episode: {
+          problem: group[0].envelope.episode?.problem || summary,
+          findings: groupFacts,
+          outcome: "success",
+          sessionId: sessId,
+          sessionFile: group[0].envelope.episode?.sessionFile,
+          leafId: group[group.length - 1].envelope.episode?.leafId,
+        },
+      };
+
+      const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, l1Ref, encodePayload(date, l1Envelope), axes, cwd, eEnv));
+      if (res.code === 0) {
+        activeConversationTurn.activeMemoryRef = l1Ref;
+        activeConversationTurn.activeSessionId = sessId;
+
+        created.push(l1Ref);
+        for (const r of groupEvidence) cited.add(r);
+        items.push({ ref: l1Ref, date, envelope: l1Envelope });
+      }
+    }
+  }
+
+  // 3. Process standalone L0 turns (no sessionId)
+  for (const l0 of unassigned) {
+    if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L1", [l0.ref], l0.envelope.summary) !== null) {
+      cited.add(l0.ref);
+      continue;
+    }
+    const l1Ref = nextRef(refs);
+    refs.push(l1Ref);
+    const l1Envelope: MemoryEnvelope = {
+      level: "L1",
+      type: l0.envelope.type ?? "note",
+      lifecycle: l0.envelope.lifecycle,
+      summary: l0.envelope.summary,
+      evidence: [l0.ref],
+      context: l0.envelope.context,
+      episode: l0.envelope.episode,
+    };
+    const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, l1Ref, encodePayload(date, l1Envelope), axes, cwd, eEnv));
+    if (res.code === 0) {
+      created.push(l1Ref);
+      cited.add(l0.ref);
+      items.push({ ref: l1Ref, date, envelope: l1Envelope });
+    }
+  }
+
+  return created;
+}
+
+function extractMemoryScope(l1: StoredItem): { scope: string; isConversational: boolean } | null {
+  const ctx = l1.envelope.context;
+  if (ctx?.project || ctx?.subsystem || ctx?.module) {
+    return { scope: (ctx.project || ctx.subsystem || ctx.module)!, isConversational: false };
+  }
+  if (ctx?.subject) {
+    return { scope: ctx.subject, isConversational: true };
+  }
+  if (l1.envelope.tags && l1.envelope.tags.length > 0) {
+    return { scope: l1.envelope.tags[0], isConversational: true };
+  }
+  return null;
+}
+
 async function autoL1ToL2(
   env: ToolEnv, fspec: string, axes: string, cwd: string, eEnv: Record<string, string>,
   items: StoredItem[], refs: number[], cited: Set<number>, date: string,
 ): Promise<number[]> {
   const uncited = items.filter((i) => i.envelope.level === "L1" && !cited.has(i.ref));
-  const byScope = new Map<string, StoredItem[]>();
+  const byScope = new Map<string, { items: StoredItem[]; isConversational: boolean }>();
   for (const l1 of uncited) {
     if (l1.envelope.lifecycle === "contradicted" || l1.envelope.lifecycle === "superseded") continue;
-    const scope = l1.envelope.context?.project || l1.envelope.context?.subsystem || l1.envelope.context?.module;
-    if (!scope) continue;
-    const g = byScope.get(scope) ?? [];
-    g.push(l1);
-    byScope.set(scope, g);
+    const scopeInfo = extractMemoryScope(l1);
+    if (!scopeInfo) continue;
+    const g = byScope.get(scopeInfo.scope) ?? { items: [], isConversational: scopeInfo.isConversational };
+    g.items.push(l1);
+    byScope.set(scopeInfo.scope, g);
   }
   const created: number[] = [];
   for (const [scope, group] of byScope.entries()) {
-    const supported = group.filter((g) => g.envelope.lifecycle === "supported");
-    if (supported.length < 2) continue; // Single investigation or unverified items do not form an invariant rule
+    const activeItems = group.items.filter((g) => g.envelope.lifecycle === "supported" || g.envelope.lifecycle === "observed");
+    if (activeItems.length < 2) continue;
 
-    const sharedRule = findSharedInvariantRule(supported);
-    if (!sharedRule) continue; // Unrelated investigations in the same scope are NOT conjoined!
+    const sRefs = activeItems.map((g) => g.ref);
+    let summary: string;
+    let type: MemoryEnvelope["type"] = "concept";
+    const lifecycle: LifecycleState = activeItems.some((g) => g.envelope.lifecycle === "supported") ? "supported" : "observed";
 
-    const sRefs = supported.map((g) => g.ref);
-    const summary = `Project Invariant [${scope}]: ${sharedRule}`;
+    if (group.isConversational) {
+      const summaries = activeItems.map((g) => g.envelope.summary).join("; ");
+      summary = `Scoped Knowledge [${scope}]: ${summaries.slice(0, 240)}`;
+    } else {
+      const supportedOnly = activeItems.filter((g) => g.envelope.lifecycle === "supported");
+      if (supportedOnly.length < 2) continue;
+      const sharedRule = findSharedInvariantRule(supportedOnly);
+      if (!sharedRule) continue; // Unrelated investigations in the same scope are NOT conjoined!
+      summary = `Project Invariant [${scope}]: ${sharedRule}`;
+      type = "invariant";
+    }
 
     if (await checkIdempotency(env, fspec, axes, cwd, eEnv, refs, "L2", sRefs, summary) !== null) continue;
-    // Without an active semantic synthesis model, automated abstractions are recorded as hypotheses
     const envl: MemoryEnvelope = {
       level: "L2",
-      type: "invariant",
-      lifecycle: "hypothesized",
+      type,
+      lifecycle,
       summary,
-      context: { project: scope },
+      context: group.isConversational ? { subject: scope } : { project: scope },
       evidence: sRefs,
     };
     const ref = await storeAbs(env, fspec, axes, cwd, eEnv, refs, envl, date);
@@ -205,7 +392,7 @@ async function autoL1ToL2(
   return created;
 }
 
-async function runAutoConsolidation(env: ToolEnv, _ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
+export async function runAutoConsolidation(env: ToolEnv, _ctx: PiCtx): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
   const embed = sepalConfigured(env.cfg);
   const cwd = memDir(env);
   const fspec = filespecFor(cwd, embed);
@@ -276,8 +463,8 @@ async function executeConsolidate(
     const tags = params["tags"] as string[] | undefined;
 
     if (!summary || sourceRefs.length === 0) return { content: [{ type: "text", text: "mm consolidate: summary and non-empty sourceRefs required" }], details: { error: "invalid-params" } };
-    if (targetLevel === "L2" && (!context || (!context.project && !context.module && !context.subsystem))) {
-      return { content: [{ type: "text", text: "mm consolidate: L2 project knowledge requires explicit scope (context.project/subsystem/module)" }], details: { error: "scope-required" } };
+    if (targetLevel === "L2" && (!context || (!context.project && !context.module && !context.subsystem && !context.subject))) {
+      return { content: [{ type: "text", text: "mm consolidate: L2 knowledge requires explicit scope (context.project/subsystem/module/subject)" }], details: { error: "scope-required" } };
     }
 
     const cwd = memDir(env);

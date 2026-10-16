@@ -27,6 +27,38 @@ export interface FilterCriteria {
   project?: string;
   subsystem?: string;
   limit: number;
+  query?: string;
+  dedupe?: boolean;
+}
+
+export function isCodeOrDocArtifact(cand: FusedCandidate, envelope: MemoryEnvelope): boolean {
+  if (envelope.level === "L0") return true;
+  const s = envelope.summary || cand.record || "";
+  if (s.startsWith("# ") || s.startsWith("## ")) return true;
+  if (/^(?:import\s+|export\s+|const\s+|function\s+|class\s+|var\s+|let\s+)/.test(s)) return true;
+  if (/:\d+:\s*(?:const|let|var|function|import|export|#include)/.test(s)) return true;
+  if (s.includes("isletFspec") || s.includes("mem-islet.db")) return true;
+  return false;
+}
+
+export function isQuestionMemory(_cand: FusedCandidate, envelope: MemoryEnvelope): boolean {
+  const s = (envelope.summary || "").trim();
+  if (s.endsWith("?")) return true;
+  if (/^(?:remember\s+anything|anything\s+about|do\s+you\s+remember|can\s+you\s+remember|what\s+did\s+i\s+say|did\s+i\s+mention)\b/i.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+export function isAssistantEcho(_cand: FusedCandidate, envelope: MemoryEnvelope): boolean {
+  const s = (envelope.summary || "").trim();
+  if (/^(?:you\s+mentioned|you\s+said|i\s+remember\s+that\s+you|as\s+you\s+said)\s*[:\-—]/i.test(s)) {
+    return true;
+  }
+  if (s.startsWith("> *\"") || s.startsWith("> \"")) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -127,15 +159,37 @@ export function filterAndEnrich(
   for (const cand of candidates) {
     const { envelope } = decodePayload(cand.record);
     if (crit.mipmap && envelope.level !== crit.mipmap) continue;
-    if (crit.lifecycle && crit.lifecycle !== "all" && envelope.lifecycle !== crit.lifecycle) continue;
+
+    // Lifecycle filtering:
+    // Exclude superseded records from normal search by default.
+    const effectiveLifecycle = envelope.lifecycle ?? "supported";
+    if (crit.lifecycle && crit.lifecycle !== "all") {
+      if (effectiveLifecycle !== crit.lifecycle) continue;
+    } else {
+      if (effectiveLifecycle === "superseded") {
+        continue;
+      }
+    }
+
     if (crit.project && envelope.context?.project !== crit.project) continue;
     if (crit.subsystem && envelope.context?.subsystem !== crit.subsystem) continue;
+
+    // Normal recall prefers useful higher-level memories (L1+) over raw L0 turns,
+    // unless L0 was explicitly requested.
+    if (crit.mipmap === undefined && envelope.level === "L0") {
+      continue;
+    }
+
+    // Exclude question-shaped memories
+    if (isQuestionMemory(cand, envelope)) continue;
+    // Exclude assistant echoes
+    if (isAssistantEcho(cand, envelope)) continue;
 
     const enriched: FusedCandidate = {
       ...cand,
       envelope,
       level: envelope.level,
-      lifecycle: envelope.lifecycle,
+      lifecycle: effectiveLifecycle,
       summary: envelope.summary,
       score: cand.score ?? cand.lexicalScore ?? cand.semanticScore ?? cand.rrfScore.toFixed(6),
     };
@@ -144,5 +198,19 @@ export function filterAndEnrich(
   }
 
   filtered.sort((a, b) => (b.rankingScore ?? 0) - (a.rankingScore ?? 0) || a.ref - b.ref);
+
+  // Deduplicate candidates with identical normalized summaries only when requested (e.g. auto-recall)
+  if (crit.dedupe) {
+    const deduped: FusedCandidate[] = [];
+    const seenSummaries = new Set<string>();
+    for (const cand of filtered) {
+      const norm = (cand.summary || "").toLowerCase().replace(/[^\w\s]/g, "").trim();
+      if (seenSummaries.has(norm)) continue;
+      seenSummaries.add(norm);
+      deduped.push(cand);
+    }
+    return deduped.slice(0, crit.limit);
+  }
+
   return filtered.slice(0, crit.limit);
 }

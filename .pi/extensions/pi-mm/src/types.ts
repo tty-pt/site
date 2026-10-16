@@ -26,6 +26,10 @@ export interface EpisodeRecord {
   outcome?: "success" | "failure" | "aborted" | string;
   environment?: Record<string, string>;
   eventIds?: string[];
+  sessionId?: string;
+  sessionFile?: string;
+  leafId?: string;
+  toolCallId?: string;
 }
 
 export interface SpatialGrid {
@@ -39,6 +43,7 @@ export interface MemoryContext {
   subsystem?: string;
   module?: string;
   path?: string;
+  subject?: string;
   grid?: SpatialGrid;
 }
 
@@ -60,7 +65,7 @@ export interface LifecycleTransition {
 
 export interface MemoryEnvelope {
   level: MipmapLevel;
-  type?: "episode" | "investigation" | "decision" | "invariant" | "pattern" | "note";
+  type?: "episode" | "investigation" | "decision" | "invariant" | "pattern" | "note" | "concept";
   lifecycle: LifecycleState;
   summary: string;
   context?: MemoryContext;

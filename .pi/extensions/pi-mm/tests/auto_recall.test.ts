@@ -179,9 +179,59 @@ Deno.test("auto_recall: handleBeforeAgentStart injects context for relevant user
 
   assert.ok(res);
   assert.ok(res.message);
+  assert.strictEqual(res.message.role, "custom");
   assert.strictEqual(res.message.customType, "memory_context");
   assert.strictEqual(res.message.display, true);
+  assert.ok(typeof res.message.timestamp === "number");
   assert.ok(res.message.content.includes("Always check corm_open handles"));
+});
+
+Deno.test("auto_recall: handleBeforeAgentStart populates systemPromptOptions.sections and ensures role: custom for LLM conversion", async () => {
+  const fakeStdout = "1 0.5 2026-03-30:" + JSON.stringify({
+    level: "L1",
+    type: "note",
+    lifecycle: "observed",
+    summary: "I spoke to my grandfather under the cherry tree",
+  }) + "\n";
+
+  const runner = fakeRunner([{ stdout: fakeStdout, stderr: "", code: 0 }]);
+  const env: ToolEnv = {
+    cwd: "/tmp/fake-cwd",
+    runner,
+    nowProvider: () => new Date("2026-03-30"),
+    cfg: {
+      ...DEFAULT_CONFIG,
+      memDir: ".pi/mm",
+      qmapBin: "/usr/bin/qmap",
+      scanLimit: 5,
+    },
+  };
+  const envSource = () => Promise.resolve(env);
+
+  const event: import("../src/hooks/auto_recall.ts").BeforeAgentStartEvent = {
+    messageType: "user",
+    prompt: "Do you remember me speaking about my grandfather?",
+    systemPromptOptions: {
+      sections: {},
+    },
+  };
+
+  const res = await handleBeforeAgentStart(
+    event,
+    { cwd: "/tmp/fake-cwd", hasUI: false, mode: "headless" },
+    envSource,
+  );
+
+  assert.ok(res);
+  assert.ok(res.message);
+  assert.strictEqual(res.message.role, "custom");
+  assert.strictEqual(res.message.customType, "memory_context");
+  assert.ok(res.message.content.includes("I spoke to my grandfather under the cherry tree"));
+
+  // Verify systemPromptOptions was augmented
+  assert.ok(event.systemPromptOptions?.sections);
+  assert.ok(event.systemPromptOptions.sections["memory_context"]);
+  assert.ok(event.systemPromptOptions.sections["memory_context"]?.includes("I spoke to my grandfather under the cherry tree"));
 });
 
 Deno.test("auto_recall: handleBeforeAgentStart returns null for greeting or custom messages", async () => {

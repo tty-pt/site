@@ -5,6 +5,8 @@ import { filespecFor, embedEnv } from "../qmap.ts";
 import { executeHybridScan } from "./scan.ts";
 import { traverseDown, renderTree } from "./traverse.ts";
 import type { FusedCandidate } from "./ranking.ts";
+import { enrichCandidatesWithSessionHistory } from "../hooks/auto_recall.ts";
+import type { SessionExcerpt } from "../session_history.ts";
 
 const RECALL_PARAMS = {
   type: "object",
@@ -20,7 +22,7 @@ const RECALL_PARAMS = {
   additionalProperties: false,
 };
 
-function formatResult(cand: FusedCandidate, evidenceText?: string): string {
+function formatResult(cand: FusedCandidate, evidenceText?: string, excerpts?: SessionExcerpt[]): string {
   const ref = cand.ref;
   const env = cand.envelope;
   const level = env?.level ?? cand.level ?? "L2";
@@ -40,6 +42,11 @@ function formatResult(cand: FusedCandidate, evidenceText?: string): string {
   } else if (env?.evidence && env.evidence.length > 0) {
     text += `\n  Cites evidence refs: [${env.evidence.join(", ")}]`;
   }
+
+  if (excerpts && excerpts.length > 0) {
+    text += `\n  Source Session Excerpts:\n` + excerpts.map((e) => `    ${e.role === "user" ? "User" : "Assistant"}: "${e.text}"`).join("\n");
+  }
+
   return text;
 }
 
@@ -104,9 +111,11 @@ async function executeRecall(
       evidenceMap = await attachEvidence(env, records);
     }
 
+    const excerptsMap = await enrichCandidatesWithSessionHistory(records, query, ctx.cwd);
+
     const lines = [`Found ${records.length} relevant memory record(s) for "${query}":\n`];
     for (const rec of records) {
-      lines.push(formatResult(rec, evidenceMap?.get(rec.ref)));
+      lines.push(formatResult(rec, evidenceMap?.get(rec.ref), excerptsMap.get(rec.ref)));
     }
 
     return {

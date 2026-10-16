@@ -1,11 +1,19 @@
 import type { EnvSource } from "../tools/index.ts";
 import { axisPath, memDir, sepalConfigured } from "../tools/index.ts";
+import { describeCapabilities } from "../config.ts";
+import { evaluateTurnWithJudge } from "../judge/adapter.ts";
+import type { JudgeDecision } from "../judge/types.ts";
 import { filespecFor, buildStoreInvocation, buildListInvocation, buildGetInvocation, embedEnv } from "../qmap.ts";
 import { parseBareRefs, nextRef } from "../resolve.ts";
 import { encodePayload, decodePayload } from "../payload.ts";
 import { withLock } from "../lock.ts";
-import type { MemoryEnvelope, EpisodeRecord } from "../types.ts";
+import type { MemoryEnvelope, EpisodeRecord, MemoryContext } from "../types.ts";
 import { handleBeforeAgentStart, type BeforeAgentStartEvent } from "./auto_recall.ts";
+import { validateEvidenceRef } from "../tools/lifecycle.ts";
+import { executeHybridScan } from "../tools/scan.ts";
+import { runAutoConsolidation } from "../tools/consolidate.ts";
+import { debugLog, traceEvent } from "../debug.ts";
+import { isDaemonLockHeld } from "../daemon.ts";
 import { readFile, writeFile, unlink, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -15,7 +23,20 @@ export interface PiToolSpec {
 }
 export interface PiAgentToolResult { content: Array<{ type: string; text?: string }>; details?: unknown; }
 export interface PiExecResult { stdout: string; stderr: string; code: number; }
-export interface PiCtx { cwd: string; hasUI: boolean; mode: string; ui?: unknown; }
+export interface PiCtx {
+  cwd: string;
+  hasUI: boolean;
+  mode: string;
+  ui?: unknown;
+  sessionId?: string;
+  sessionManager?: {
+    getSessionId?: () => string;
+    getSessionFile?: () => string;
+    getLeafId?: () => string;
+    id?: string;
+    sessionId?: string;
+  };
+}
 
 export interface ToolResultEvent {
   toolCallId?: string; toolName: string; input?: Record<string, unknown>; args?: Record<string, unknown>;
@@ -26,6 +47,25 @@ export interface SignificantEvent {
   id: string; timestamp: string; toolName: string; summary: string; isError: boolean;
   approach?: string; outcome?: "worked" | "failed" | "abandoned"; diffs?: string[];
   environment?: Record<string, string>; toolArgs?: Record<string, unknown>;
+  evidence?: number[];
+}
+
+export function extractSessionId(ctx?: PiCtx): string {
+  if (!ctx) return "unknown-session";
+  const sm = ctx.sessionManager ||
+    ((ctx as unknown as Record<string, unknown>)?.sessionManager as
+      | { getSessionId?: () => string; id?: string; sessionId?: string }
+      | undefined);
+  return (
+    sm?.getSessionId?.() ||
+    sm?.id ||
+    sm?.sessionId ||
+    ctx.sessionId ||
+    ((ctx as unknown as Record<string, unknown>)?.sessionId as string) ||
+    (typeof process !== "undefined" ? process.env?.["PI_SESSION_ID"] : undefined) ||
+    (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_ID") : undefined) ||
+    "unknown-session"
+  );
 }
 
 export interface Pi {
@@ -198,39 +238,36 @@ export function extractBatchDiffs(batch: SignificantEvent[]): string[] {
   return diffs;
 }
 
-function extractDiffs(text: string): string[] {
-  if (!text.includes("@@ -") && !text.includes("--- a/") && !text.includes("diff --git")) return [];
-  const lines = text.split("\n");
-  const diffLines = lines.filter((l) => /^[+-][^+-]/.test(l) || /^@@\s+-\d+/.test(l)).slice(0, 40);
-  return diffLines.length > 0 ? [diffLines.join("\n")] : [];
-}
-
 export function summarizeToolEvent(event: ToolResultEvent): SignificantEvent | null {
   const isErr = Boolean(event.isError);
   const text = event.content?.map((c) => c.text || "").join(" ").trim() || "";
-  const isTest = /test|make|deno|cargo|npm/i.test(text) || event.toolName === "bash";
-  const isCodeMod = /edit|write|patch/i.test(event.toolName);
-  if (!isTest && !isErr && !isCodeMod) return null;
-
   const cmd = String(event.input?.["command"] || event.args?.["command"] || "");
   const hasErrorWord = /\b(?:FAIL|failed|error|fatal|panic)\b/i.test(text.replace(/0\s+failed/gi, ""));
   const failed = isErr || hasErrorWord;
+
   const isVerification = /test|check|verify|smoke/i.test(event.toolName) ||
                          /test|check|make|deno|cargo|npm/i.test(cmd) ||
                          /test|PASS|check-complexity|integration|ok\s+\d+|all green/i.test(text);
   const verifiedWorked = !failed && isVerification && (/PASS|passed|all green|ok\s+-|0 failed/i.test(text));
 
+  // Filter out routine, non-error bash invocations and low-value tool calls without verification signals
+  if (event.toolName === "bash" && !failed && !verifiedWorked) {
+    return null;
+  }
+
+  const isTest = isVerification;
+  const isCodeMod = /edit|write|patch/i.test(event.toolName);
+  if (!isTest && !failed && !isCodeMod) return null;
+
   const outcome: "worked" | "failed" | undefined = failed ? "failed" : verifiedWorked ? "worked" : undefined;
   const firstLine = text.split("\n")[0]?.slice(0, 160) || `Executed ${event.toolName}`;
   const id = event.toolCallId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const extracted = isCodeMod ? extractDiffs(text) : [];
-  const diffs = extracted.length > 0 ? extracted : undefined;
   const toolArgs = event.input ? { ...event.input } : event.args ? { ...event.args } : undefined;
 
   return {
     id, timestamp: new Date().toISOString(), toolName: event.toolName, summary: firstLine,
     isError: failed, approach: outcome ? `Executed ${event.toolName}: ${firstLine.slice(0, 80)}` : undefined,
-    outcome, diffs, environment: { runtime: typeof Deno !== "undefined" ? "deno" : "node" }, toolArgs,
+    outcome, environment: { runtime: typeof Deno !== "undefined" ? "deno" : "node" }, toolArgs,
   };
 }
 
@@ -242,24 +279,86 @@ async function executeBatchFlush(
   const ids = batch.map((e) => e.id);
   const firstEvent = batch[0];
   const approaches = extractBatchApproaches(batch);
-  const observations = batch.map((e) => e.summary);
-  const diffs = extractBatchDiffs(batch);
   const hasFail = batch.some((e) => e.isError);
 
   try {
     const env = await envSource(ctx);
     if (!env.cfg.qmapBin) { activeSessionBuffer.rollbackFlush("qmap-not-found"); return null; }
 
+    const sessionManager = ctx.sessionManager ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionManager as
+        | { getSessionId?: () => string; getSessionFile?: () => string; getLeafId?: () => string; id?: string; sessionId?: string }
+        | undefined);
+    const sessionId = sessionManager?.getSessionId?.() ||
+      sessionManager?.id ||
+      sessionManager?.sessionId ||
+      ctx.sessionId ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionId as string) ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_ID"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_ID") : undefined);
+    const sessionFile = sessionManager?.getSessionFile?.() ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_FILE"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_FILE") : undefined);
+    const leafId = sessionManager?.getLeafId?.();
+
     const episode: EpisodeRecord = {
-      problem: firstEvent.summary, request: `Session event: ${firstEvent.summary}`,
-      approaches: approaches.length > 0 ? approaches : undefined, observations,
-      diffs: diffs.length > 0 ? diffs : undefined, environment: firstEvent.environment,
+      problem: firstEvent.summary,
+      approaches: approaches.length > 0 ? approaches : undefined,
+      environment: firstEvent.environment,
       outcome: hasFail ? "failure" : approaches.some((a) => a.outcome === "worked") ? "success" : "observed",
       eventIds: ids,
+      sessionId: sessionId ?? undefined,
+      sessionFile: sessionFile ?? undefined,
+      leafId: leafId ?? undefined,
+      toolCallId: firstEvent.id,
     };
+
+    // Collect any explicit evidence references from events in the batch
+    const candidateEvidence: number[] = [];
+    for (const e of batch) {
+      if (Array.isArray(e.evidence)) {
+        for (const ev of e.evidence) {
+          if (Number.isInteger(ev) && ev > 0 && !candidateEvidence.includes(ev)) {
+            candidateEvidence.push(ev);
+          }
+        }
+      }
+    }
+
+    let lifecycle: import("../types.ts").LifecycleState = "observed";
+    let validatedEvidence: number[] | undefined;
+
+    if (episode.outcome === "success") {
+      if (candidateEvidence.length > 0) {
+        let allValid = true;
+        for (const evRef of candidateEvidence) {
+          const evCheck = await validateEvidenceRef(env, evRef);
+          if (!evCheck.valid) {
+            allValid = false;
+            break;
+          }
+        }
+        if (allValid) {
+          lifecycle = "supported";
+          validatedEvidence = candidateEvidence;
+        } else {
+          lifecycle = "tested";
+        }
+      } else {
+        // Without validated supporting evidence, successful outcomes remain at "tested"
+        lifecycle = "tested";
+      }
+    } else {
+      lifecycle = "observed";
+    }
+
     const envelope: MemoryEnvelope = {
-      level: "L0", type: "episode", lifecycle: episode.outcome === "success" ? "supported" : "observed",
-      summary: `Automated Episode: ${firstEvent.summary}`, episode,
+      level: "L0",
+      type: "episode",
+      lifecycle,
+      summary: firstEvent.summary,
+      evidence: validatedEvidence,
+      episode,
     };
     const date = env.nowProvider().toISOString().slice(0, 10);
     const payload = encodePayload(date, envelope);
@@ -297,18 +396,423 @@ export async function flushSessionBuffer(envSource: EnvSource, ctx: PiCtx): Prom
   try { return await activeFlushPromise; } finally { activeFlushPromise = null; }
 }
 
+export interface ActiveConversationTurn {
+  prompt?: string;
+  response?: string;
+  responses?: string[];
+  timestamp?: string;
+  activeMemoryRef?: number;
+  activeSessionId?: string;
+  previousUserPrompt?: string;
+  previousAssistantResponse?: string;
+  topicSubject?: string;
+}
+
+export const activeConversationTurn: ActiveConversationTurn = {};
+
+export interface ConversationalClassification {
+  meaningful: boolean;
+  type?: "note" | "decision" | "episode";
+  level?: "L0" | "L1" | "L2";
+  summary?: string;
+  problem?: string;
+  findings?: string[];
+  evidence?: number[];
+  context?: MemoryContext;
+}
+
+export async function persistConversationalMemory(
+  classification: ConversationalClassification,
+  envSource: EnvSource,
+  ctx: PiCtx,
+): Promise<number | null> {
+  try {
+    const env = await envSource(ctx);
+    if (!env.cfg.qmapBin || !classification.meaningful || !classification.summary) return null;
+
+    const sessionManager = ctx.sessionManager ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionManager as
+        | { getSessionId?: () => string; getSessionFile?: () => string; getLeafId?: () => string; id?: string; sessionId?: string }
+        | undefined);
+    const sessionId = sessionManager?.getSessionId?.() ||
+      sessionManager?.id ||
+      sessionManager?.sessionId ||
+      ctx.sessionId ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionId as string) ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_ID"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_ID") : undefined);
+    const sessionFile = sessionManager?.getSessionFile?.() ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_FILE"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_FILE") : undefined);
+    const leafId = sessionManager?.getLeafId?.();
+
+    const episode: EpisodeRecord = {
+      problem: classification.problem,
+      findings: classification.findings,
+      outcome: "success",
+      sessionId: sessionId ?? undefined,
+      sessionFile: sessionFile ?? undefined,
+      leafId: leafId ?? undefined,
+    };
+
+    const context = classification.context ??
+      (activeConversationTurn.topicSubject ? { subject: activeConversationTurn.topicSubject } : undefined) ??
+      ((ctx as unknown as Record<string, unknown>).context as MemoryContext | undefined);
+
+    const envelope: MemoryEnvelope = {
+      level: classification.level ?? "L1",
+      type: classification.type ?? "note",
+      lifecycle: "observed",
+      summary: classification.summary,
+      evidence: classification.evidence,
+      context,
+      episode,
+    };
+
+    const date = env.nowProvider().toISOString().slice(0, 10);
+    const payload = encodePayload(date, envelope);
+    const cwd = memDir(env);
+    const axes = axisPath(env);
+    const embed = sepalConfigured(env.cfg);
+    const fspec = filespecFor(cwd, embed);
+    const eEnv = embedEnv(env.cfg);
+
+    debugLog("persistence", "Attempting conversational memory store", {
+      fact: classification.summary,
+      level: classification.level ?? "L1",
+      type: classification.type ?? "note",
+      memDir: cwd,
+      filespec: fspec,
+      semanticSearch: embed,
+    });
+
+    return await withLock(cwd, async () => {
+      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
+      const ref = nextRef(parseBareRefs(list.stdout));
+      const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd, eEnv));
+      debugLog("persistence", "Executed corm store", {
+        ref,
+        exitCode: res.code,
+        stdout: res.stdout,
+        stderr: res.stderr,
+      });
+
+      traceEvent("memory_write", res.code === 0 ? "ok" : "error", {
+        targetFilespec: fspec,
+        proposedSummary: classification.summary,
+        exitStatus: res.code,
+        assignedRef: res.code === 0 ? ref : null,
+        stderr: res.stderr || null,
+        persisted: res.code === 0,
+      }, { sessionId });
+
+      if (res.code === 0) {
+        debugLog("persistence", "Successfully allocated memory reference", { ref });
+        return ref;
+      }
+      debugLog("persistence", "CORM store mutation returned non-zero code", {
+        code: res.code,
+        stderr: res.stderr,
+      });
+      return null;
+    });
+  } catch (err) {
+    debugLog("persistence", "Conversational memory persistence failed with exception", {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    return null;
+  }
+}
+
+export async function enrichActiveMemory(
+  activeRef: number,
+  newFact: string,
+  envSource: EnvSource,
+  ctx: PiCtx,
+): Promise<boolean> {
+  try {
+    const env = await envSource(ctx);
+    const cwd = memDir(env);
+    const axes = axisPath(env);
+    const embed = sepalConfigured(env.cfg);
+    const fspec = filespecFor(cwd, embed);
+    const eEnv = embedEnv(env.cfg);
+
+    return await withLock(cwd, async () => {
+      const getRes = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, activeRef, axes, cwd, eEnv));
+      if (getRes.code !== 0 || !getRes.stdout.trim()) return false;
+
+      const decoded = decodePayload(getRes.stdout.trim());
+      if (!decoded.envelope.episode) {
+        decoded.envelope.episode = {
+          problem: decoded.envelope.summary,
+          findings: [decoded.envelope.summary],
+          outcome: "success",
+        };
+      }
+      const findings = decoded.envelope.episode.findings ?? [decoded.envelope.summary];
+      if (!findings.includes(newFact)) {
+        findings.push(newFact);
+      }
+      decoded.envelope.episode.findings = findings;
+
+      const payload = encodePayload(decoded.date, decoded.envelope);
+      const storeRes = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, activeRef, payload, axes, cwd, eEnv));
+      debugLog("persistence", "Enriched existing active memory with follow-up", {
+        ref: activeRef,
+        newFact,
+        totalFindings: findings.length,
+        exitCode: storeRes.code,
+      });
+      return storeRes.code === 0;
+    });
+  } catch (err) {
+    debugLog("persistence", "Failed to enrich active memory", {
+      ref: activeRef,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+export async function handleMemoryUpdate(
+  decision: JudgeDecision,
+  prompt: string,
+  envSource: EnvSource,
+  ctx: PiCtx,
+  supportingEvidenceRef?: number,
+): Promise<string | null> {
+  if (!decision.summary) return null;
+  try {
+    const env = await envSource(ctx);
+    const cwd = memDir(env);
+    const axes = axisPath(env);
+    const embed = sepalConfigured(env.cfg);
+    const fspec = filespecFor(cwd, embed);
+    const eEnv = embedEnv(env.cfg);
+
+    const sessionManager = ctx.sessionManager ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionManager as
+        | { getSessionId?: () => string; getSessionFile?: () => string; getLeafId?: () => string; id?: string; sessionId?: string }
+        | undefined);
+    const sessionId = sessionManager?.getSessionId?.() ||
+      sessionManager?.id ||
+      sessionManager?.sessionId ||
+      ctx.sessionId ||
+      ((ctx as unknown as Record<string, unknown>)?.sessionId as string) ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_ID"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_ID") : undefined);
+    const sessionFile = sessionManager?.getSessionFile?.() ||
+      (typeof process !== "undefined" ? process.env?.["PI_SESSION_FILE"] : undefined) ||
+      (typeof Deno !== "undefined" ? Deno.env.get("PI_SESSION_FILE") : undefined);
+    const leafId = sessionManager?.getLeafId?.();
+
+    let targetRefNum: number | undefined = undefined;
+    if (decision.targetRef !== undefined) {
+      const parsed = typeof decision.targetRef === "number"
+        ? decision.targetRef
+        : parseInt(String(decision.targetRef).replace(/\D/g, ""), 10);
+      if (!isNaN(parsed) && parsed > 0) targetRefNum = parsed;
+    }
+
+    // 2. Same-session active memory preference
+    if (
+      targetRefNum === undefined &&
+      activeConversationTurn.activeMemoryRef !== undefined &&
+      activeConversationTurn.activeSessionId === sessionId
+    ) {
+      targetRefNum = activeConversationTurn.activeMemoryRef;
+    }
+
+    // 3. Search for genuinely related active candidate if targetRef is still unset
+    if (targetRefNum === undefined) {
+      try {
+        const scanRes = await executeHybridScan(env, { topic: prompt, limit: 3, embed });
+        const activeCandidates = scanRes.records.filter((r) => {
+          const lc = r.envelope?.lifecycle ?? r.lifecycle;
+          const lvl = r.envelope?.level ?? r.level;
+          return lvl === "L1" && lc !== "superseded" && lc !== "contradicted";
+        });
+        if (activeCandidates.length > 0) {
+          targetRefNum = activeCandidates[0].ref;
+        }
+      } catch {
+        // scan fallback
+      }
+    }
+
+    return await withLock(cwd, async () => {
+      let priorFindings: string[] = [];
+      let priorEvidence: number[] = [];
+      let priorSummary = "";
+      let validTarget = false;
+      let targetPayloadToUpdate: { date: string; envelope: MemoryEnvelope } | null = null;
+
+      if (targetRefNum !== undefined) {
+        const getRes = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, targetRefNum, axes, cwd, eEnv));
+        if (getRes.code === 0 && getRes.stdout.trim()) {
+          try {
+            const oldDecoded = decodePayload(getRes.stdout.trim());
+            // Reject missing, contradicted or superseded targets
+            if (oldDecoded.envelope.lifecycle !== "superseded" && oldDecoded.envelope.lifecycle !== "contradicted") {
+              validTarget = true;
+              targetPayloadToUpdate = oldDecoded;
+              priorSummary = oldDecoded.envelope.summary;
+              if (oldDecoded.envelope.episode?.findings) {
+                priorFindings = oldDecoded.envelope.episode.findings;
+              } else if (oldDecoded.envelope.summary) {
+                priorFindings = [oldDecoded.envelope.summary];
+              }
+              if (oldDecoded.envelope.evidence) {
+                priorEvidence = oldDecoded.envelope.evidence;
+              }
+            }
+          } catch {
+            validTarget = false;
+          }
+        }
+      }
+
+      const rawFindings = [...priorFindings, ...(decision.findings ?? (decision.summary ? [decision.summary] : []))];
+      const mergedFindings: string[] = Array.from(new Set(rawFindings.filter((f): f is string => typeof f === "string" && f.length > 0)));
+
+      const rawEvidence = [...priorEvidence, ...(supportingEvidenceRef !== undefined ? [supportingEvidenceRef] : [])];
+      const mergedEvidence: number[] = Array.from(new Set(rawEvidence));
+
+      const decisionSummary = decision.summary ?? "Conversational update";
+      let updatedSummary = decisionSummary;
+      if (validTarget && priorSummary) {
+        const pLower = priorSummary.toLowerCase();
+        const dLower = decisionSummary.toLowerCase();
+        if (pLower.includes(dLower)) {
+          updatedSummary = priorSummary;
+        } else if (dLower.includes(pLower)) {
+          updatedSummary = decisionSummary;
+        } else {
+          updatedSummary = `${priorSummary} — ${decisionSummary}`;
+          if (updatedSummary.length > 250) {
+            updatedSummary = updatedSummary.slice(0, 247) + "...";
+          }
+        }
+      }
+
+      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
+      const allRefs = parseBareRefs(list.stdout);
+      const newRef = nextRef(allRefs);
+
+      const episode: EpisodeRecord = {
+        problem: prompt,
+        findings: mergedFindings,
+        outcome: "success",
+        sessionId: sessionId ?? targetPayloadToUpdate?.envelope.episode?.sessionId,
+        sessionFile: sessionFile ?? targetPayloadToUpdate?.envelope.episode?.sessionFile,
+        leafId: leafId ?? targetPayloadToUpdate?.envelope.episode?.leafId,
+      };
+
+      const newEnvelope: MemoryEnvelope = {
+        level: "L1",
+        type: decision.type ?? targetPayloadToUpdate?.envelope.type ?? "note",
+        lifecycle: "observed",
+        summary: updatedSummary,
+        supersedes: validTarget && targetRefNum !== undefined ? targetRefNum : undefined,
+        evidence: mergedEvidence.length > 0 ? mergedEvidence : undefined,
+        episode,
+      };
+
+      const date = env.nowProvider().toISOString().slice(0, 10);
+      const newPayload = encodePayload(date, newEnvelope);
+
+      // Store the new successor record
+      const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, newRef, newPayload, axes, cwd, eEnv));
+      if (res.code !== 0) return null;
+
+      // If valid target was superseded, update predecessor with bidirectional supersededBy link
+      if (validTarget && targetRefNum !== undefined && targetPayloadToUpdate) {
+        targetPayloadToUpdate.envelope.lifecycle = "superseded";
+        targetPayloadToUpdate.envelope.supersededBy = newRef;
+        const oldUpdatedPayload = encodePayload(targetPayloadToUpdate.date, targetPayloadToUpdate.envelope);
+        await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, targetRefNum, oldUpdatedPayload, axes, cwd, eEnv));
+      }
+
+      // Update active turn tracking to the new active ref
+      activeConversationTurn.activeMemoryRef = newRef;
+      activeConversationTurn.activeSessionId = sessionId;
+
+      debugLog("persistence", "Executed memory update with successor management", {
+        newRef,
+        supersedes: validTarget ? targetRefNum : null,
+        evidence: mergedEvidence,
+        exitCode: res.code,
+      });
+
+      traceEvent("memory_write", "ok", {
+        targetFilespec: fspec,
+        proposedSummary: updatedSummary,
+        exitStatus: 0,
+        assignedRef: newRef,
+        persisted: true,
+        supersedes: validTarget ? targetRefNum : null,
+      }, { sessionId });
+
+      return String(newRef);
+    });
+  } catch (err) {
+    debugLog("persistence", "Memory update persistence failed with exception", {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    return null;
+  }
+}
+
 export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
   pi.on("session_start", async (_event: unknown, ctxUnknown?: unknown) => {
     activeSessionBuffer.onSessionStart();
+    activeConversationTurn.activeMemoryRef = undefined;
+    activeConversationTurn.activeSessionId = undefined;
     if (envSource && ctxUnknown) {
       try {
-        const env = await envSource(ctxUnknown as PiCtx);
+        const ctx = ctxUnknown as PiCtx;
+        const sessionId = extractSessionId(ctx);
+        const env = await envSource(ctx);
+        console.log(`[pi-mm] ${describeCapabilities(env.cfg)}`);
         const cwd = memDir(env);
         activeSessionBuffer.setJournalDir(cwd);
         const committedIds = new Set<string>();
         const embed = sepalConfigured(env.cfg);
         const fspec = filespecFor(cwd, embed);
         const axes = axisPath(env);
+
+        debugLog("startup", "Session started", {
+          memDir: cwd,
+          filespec: fspec,
+          axes: axes.split(":"),
+          semanticSearch: embed,
+          judgeMode: env.cfg.judgeMode,
+          judgeUrl: env.cfg.judgeUrl,
+          judgeModel: env.cfg.judgeModel,
+          judgeFallback: env.cfg.judgeFallback,
+        });
+
+        traceEvent("extension_loaded", "ok", {
+          extension: "pi-mm",
+          version: "0.1.0",
+          cwd: ctx.cwd,
+          memDir: cwd,
+          filespec: fspec,
+          axisRoster: axes.split(":"),
+          cormdRunning: isDaemonLockHeld(cwd),
+          cormdSocket: `${cwd}/cormd.sock`,
+          judgeMode: env.cfg.judgeMode,
+          judgeUrl: env.cfg.judgeUrl,
+          judgeModel: env.cfg.judgeModel,
+          judgeFallback: env.cfg.judgeFallback,
+          semanticSearch: embed,
+          embedUrl: env.cfg.embedUrl,
+          embedModel: env.cfg.embedModel,
+        }, { sessionId });
+
         const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd));
         for (const r of parseBareRefs(list.stdout)) {
           const res = await env.runner.run(buildGetInvocation(env.cfg.qmapBin, fspec, r, axes, cwd));
@@ -318,7 +822,11 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
           }
         }
         await activeSessionBuffer.restoreJournal(cwd, committedIds);
-      } catch { /* best-effort */ }
+      } catch (err) {
+        debugLog("startup", "session_start failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   });
 
@@ -329,18 +837,208 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     if (sig) await activeSessionBuffer.recordAsync(sig);
   });
 
-  const onSettle = async (_event: unknown, ctxUnknown?: unknown) => {
+  pi.on("message_end", (eventUnknown: unknown) => {
+    if (typeof eventUnknown !== "object" || eventUnknown === null) return;
+    const event = eventUnknown as { message?: { role?: string; content?: unknown } };
+    if (event.message?.role === "assistant") {
+      const content = event.message.content;
+      let text = "";
+      if (typeof content === "string") {
+        text = content.trim();
+      } else if (Array.isArray(content)) {
+        text = content
+          .filter((p: unknown) => typeof p === "object" && p !== null && (p as { type?: string }).type === "text")
+          .map((p: unknown) => (p as { text?: string }).text ?? "")
+          .join("\n")
+          .trim();
+      }
+      if (text) {
+        activeConversationTurn.response = text;
+        if (!activeConversationTurn.responses) activeConversationTurn.responses = [];
+        activeConversationTurn.responses.push(text);
+        debugLog("capture", "Assistant response collected", {
+          responseLength: text.length,
+          responsePreview: text.slice(0, 100),
+          turnResponsesCount: activeConversationTurn.responses.length,
+        });
+        traceEvent("conversation_captured", "ok", {
+          lifecycle: "message_end",
+          assistantResponse: text,
+        });
+      }
+    }
+  });
+
+  const onTurnEnd = async (_event: unknown, ctxUnknown?: unknown) => {
     if (!envSource || !ctxUnknown) return;
-    await flushSessionBuffer(envSource, ctxUnknown as PiCtx);
+    const ctx = ctxUnknown as PiCtx;
+
+    // Per-turn boundary: flush tool events as required, but do not clear
+    // prompt or response across intermediate turns of an agent run.
+    await flushSessionBuffer(envSource, ctx);
+  };
+
+  const onRunSettled = async (eventUnknown: unknown, ctxUnknown?: unknown) => {
+    if (!envSource || !ctxUnknown) return;
+    const ctx = ctxUnknown as PiCtx;
+    const sessionId = extractSessionId(ctx);
+    const isAborted = Boolean((eventUnknown as { aborted?: boolean })?.aborted);
+
+    debugLog("capture", "agent_settled triggered", {
+      hasPrompt: Boolean(activeConversationTurn.prompt),
+      promptPreview: activeConversationTurn.prompt ? activeConversationTurn.prompt.slice(0, 100) : undefined,
+      hasResponse: Boolean(activeConversationTurn.response || activeConversationTurn.responses?.length),
+      aborted: isAborted,
+    });
+
+    traceEvent("conversation_captured", isAborted ? "error" : "ok", {
+      lifecycle: "agent_settled",
+      settled: true,
+      aborted: isAborted,
+      prompt: activeConversationTurn.prompt,
+      response: activeConversationTurn.response ?? activeConversationTurn.responses?.join("\n"),
+    }, { sessionId });
+
+    // 1. Flush any remaining tool-call events
+    await flushSessionBuffer(envSource, ctx);
+
+    // 2. Finalize and persist conversational memory strictly after the full agent run settles
+    if (activeConversationTurn.prompt && !isAborted) {
+      const prompt = activeConversationTurn.prompt.trim();
+      const response = activeConversationTurn.response ??
+        (activeConversationTurn.responses ? activeConversationTurn.responses.join("\n") : "");
+
+      // Thread context for judge
+      const threadContext = (activeConversationTurn.previousUserPrompt && activeConversationTurn.activeSessionId === sessionId)
+        ? `Topic: ${activeConversationTurn.previousUserPrompt}\nPreceding Assistant Question: ${(activeConversationTurn.previousAssistantResponse || "").slice(0, 150)}`
+        : undefined;
+
+      activeConversationTurn.previousUserPrompt = prompt;
+      activeConversationTurn.previousAssistantResponse = response;
+      activeConversationTurn.prompt = undefined;
+      activeConversationTurn.response = undefined;
+      activeConversationTurn.responses = undefined;
+
+      if (!prompt) return;
+
+      const env = await envSource(ctx);
+      const mode = env.cfg.captureMode ?? (env.cfg.judgeMode === "off" ? "off" : (env.cfg.judgeUrl ? "judge" : "all"));
+
+      // Mode D: off
+      if (mode === "off") {
+        debugLog("capture", "Capture mode is off; skipping automatic capture");
+        return;
+      }
+
+      let contentToStore = prompt;
+
+      // Mode B: keyword
+      if (mode === "keyword") {
+        const keyword = env.cfg.captureKeyword?.trim();
+        if (!keyword) {
+          console.error("[pi-mm] Configuration error: captureMode='keyword' but captureKeyword is not configured");
+          debugLog("capture", "Keyword mode without configured keyword; aborting capture");
+          return;
+        }
+        if (!prompt.startsWith(keyword)) {
+          debugLog("capture", "Prompt does not start with literal keyword; skipping", { keyword, promptPreview: prompt.slice(0, 40) });
+          return;
+        }
+        // Remove keyword prefix literally and exactly
+        contentToStore = prompt.slice(keyword.length).trim();
+        if (!contentToStore) {
+          debugLog("capture", "Prompt empty after stripping keyword; skipping");
+          return;
+        }
+      }
+
+      // Mode C: judge
+      if (mode === "judge") {
+        const judgeStart = Date.now();
+        debugLog("judgement", "Evaluating turn with binary Jev judge", {
+          promptPreview: prompt.slice(0, 100),
+          judgeUrl: env.cfg.judgeUrl,
+          judgeModel: env.cfg.judgeModel,
+        });
+
+        const judgeRes = await evaluateTurnWithJudge(prompt, response, env.cfg, globalThis.fetch, threadContext);
+        const judgeDurationMs = Date.now() - judgeStart;
+
+        debugLog("judgement", "Binary judge evaluated turn", {
+          action: judgeRes.decision.action,
+          source: judgeRes.source,
+          durationMs: judgeDurationMs,
+          degraded: Boolean(judgeRes.degraded),
+          reason: judgeRes.decision.reason,
+        });
+
+        traceEvent("judge_request", judgeRes.decision.action === "skip" ? "skip" : "ok", {
+          endpoint: env.cfg.judgeUrl || "unconfigured",
+          model: env.cfg.judgeModel || "none",
+          status: judgeRes.degraded ? "degraded" : (judgeRes.source === "llm" ? "http-200" : "fallback"),
+          elapsedMs: judgeDurationMs,
+          action: judgeRes.decision.action,
+          failureReason: judgeRes.decision.reason || null,
+        }, { sessionId });
+
+        if (judgeRes.decision.action === "skip") {
+          debugLog("capture", "Judge decided skip; turn not persisted to L0");
+          return;
+        }
+      }
+
+      // Mode A: all (or accepted from Mode B / Mode C)
+      // Persist as compact attributable L0 experience record
+      const l0Classification: ConversationalClassification = {
+        meaningful: true,
+        type: "note",
+        level: "L0",
+        summary: contentToStore.slice(0, 250),
+        problem: contentToStore,
+        findings: [contentToStore],
+        context: activeConversationTurn.topicSubject ? { subject: activeConversationTurn.topicSubject } : undefined,
+      };
+      const l0Ref = await persistConversationalMemory(l0Classification, envSource, ctx);
+      debugLog("capture", "Captured L0 experience record", { l0Ref, summary: l0Classification.summary });
+
+      // Run incremental auto-consolidation (which handles L0 -> L1, thread updates, and successors)
+      try {
+        await runAutoConsolidation(env, ctx);
+      } catch (err) {
+        debugLog("consolidation", "Incremental consolidation error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   };
 
   pi.on("before_agent_start", async (eventUnknown: unknown, ctxUnknown?: unknown) => {
+    const ctx = ctxUnknown as PiCtx | undefined;
+    const sessionId = extractSessionId(ctx);
+    if (typeof eventUnknown === "object" && eventUnknown !== null) {
+      const event = eventUnknown as BeforeAgentStartEvent;
+      if (event.messageType === "user" && typeof event.prompt === "string") {
+        activeConversationTurn.prompt = event.prompt;
+        activeConversationTurn.response = undefined;
+        activeConversationTurn.responses = undefined;
+        activeConversationTurn.timestamp = new Date().toISOString();
+        debugLog("capture", "before_agent_start user prompt captured", {
+          promptPreview: event.prompt.slice(0, 100),
+          length: event.prompt.length,
+        });
+        traceEvent("conversation_captured", "ok", {
+          lifecycle: "before_agent_start",
+          messageType: event.messageType,
+          userPrompt: event.prompt,
+        }, { sessionId });
+      }
+    }
     if (!envSource || !ctxUnknown) return;
     const event = eventUnknown as BeforeAgentStartEvent;
     return await handleBeforeAgentStart(event, ctxUnknown as PiCtx, envSource);
   });
 
-  pi.on("agent_settled", onSettle);
-  pi.on("turn_end", onSettle);
-  pi.on("session_before_compact", onSettle);
+  pi.on("turn_end", onTurnEnd);
+  pi.on("agent_settled", onRunSettled);
+  pi.on("session_before_compact", onRunSettled);
 }

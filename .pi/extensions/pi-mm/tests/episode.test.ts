@@ -404,7 +404,9 @@ Deno.test("episode: captures diffs and runtime environment from tool modificatio
   assert.notStrictEqual(storedPayload, "");
   const { envelope } = decodePayload(storedPayload.slice(storedPayload.indexOf(":") + 1));
   assert.strictEqual(envelope.level, "L0");
-  assert.strictEqual(envelope.episode?.diffs?.[0]?.includes("new_function_call"), true);
+  // Conforms to deduplicated session referencing contract: raw diff excerpts omitted
+  assert.strictEqual(envelope.episode?.diffs, undefined);
+  assert.strictEqual(envelope.episode?.toolCallId, "call_edit_1");
   assert.strictEqual(envelope.episode?.environment?.runtime, "deno");
 });
 
@@ -684,9 +686,8 @@ Deno.test("episode: execution outcome distinguishes ordinary tool returns from v
     content: [{ type: "text", text: "total 12\n-rw-r--r-- 1 user user 1024 Oct 15 server.c" }],
     isError: false,
   });
-  assert.notStrictEqual(ordinaryEvent, null);
-  // Outcome MUST be undefined (executed/observed), NOT verified "worked"!
-  assert.strictEqual(ordinaryEvent!.outcome, undefined);
+  // Conforms to deduplicated session referencing contract: routine bash is filtered out!
+  assert.strictEqual(ordinaryEvent, null);
 
   // 2. Test execution that explicitly passed
   const testPassEvent = summarizeToolEvent({
