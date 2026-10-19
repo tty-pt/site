@@ -8,13 +8,15 @@
 
 #include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 
 #include "../index/index.h"
 #include "../common/common.h"
+#include "../i18n/i18n.h"
 #include "../source/source.h"
 #include "../auth/auth.h"
 #include "fields.h"
+#include "dict.h"
 
 #include "ux/all.c"
 
@@ -27,50 +29,12 @@ static void poem_meta_read(const char *path, poem_cache_t *m)
 
 /* ── HTTP handlers ────────────────────────────────────────────── */
 
-static int poem_add_get_handler(int fd, char *body)
-{
-	(void)body;
-	const char *user = require_user(fd);
-	if (!user)
-		return 1;
-
-	const char *csrf_token = csrf_setup(fd);
-
-	bud_node *form = poem_form_content(0, NULL, NULL, csrf_token);
-	return site_ui_respond_add_page(
-	        fd, user, "poem", "\xf0\x9f\x93\x9d", form);
-}
-
-static int poem_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
-{
-	(void)body;
-	(void)user;
-	poem_cache_t meta;
-	poem_meta_read(ctx->item_path, &meta);
-
-	const char *csrf_token = csrf_setup(fd);
-
-	bud_node *form = poem_form_content(1, ctx->id, &meta, csrf_token);
-	return site_ui_respond_edit_page(
-	        fd, ctx->username, "poem", "\xf0\x9f\x93\x9d", meta.title,
-	        ctx->id, form);
-}
-
-static int poem_edit_get_handler(int fd, char *body)
-{
-	return with_item_access(
-	        fd, body, "items/poem/items",
-	        ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL, NULL,
-	        poem_edit_auth, NULL);
-}
-
 static int
 poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 {
 	(void)body;
 	(void)user_data;
-	char path[256];
-	char page_title[512];
+	char owner[64] = { 0 };
 
 	poem_cache_t meta;
 	poem_meta_read(ctx->item_path, &meta);
@@ -86,45 +50,39 @@ poem_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	if (!body_content)
 		body_content = strdup("");
 
-	int is_owner =
-	        (ctx->username && ctx->username[0] &&
-	         strcmp(ctx->username, meta.owner) == 0);
-	snprintf(path, sizeof(path), "/poem/%s", ctx->id);
-	snprintf(page_title, sizeof(page_title), "poem: %s", meta.title);
+	item_owner_read(ctx->item_path, owner, sizeof(owner));
 
-	bud_node *frag = poem_render_detail_body(body_content, meta.owner);
+	bud_node *frag = poem_render_detail_body(body_content, owner, ctx->id);
 	free(body_content);
 
 	if (!frag)
 		return server_error(fd, "OOM");
 
-	bud_node *layout = site_ui_layout(
-	        page_title, path, "\xf0\x9f\x93\x9d", ctx->username,
-	        site_ui_item_menu("poem", ctx->id, is_owner), frag);
-
-	return site_ui_respond_page(fd, page_title, NULL, "poem", layout);
+	return site_ui_respond_item_detail(fd, ctx, "poem", meta.title, frag);
 }
 
 static int poem_detail_handler(int fd, char *body)
 {
-	return with_item_access(
-	        fd, body, "items/poem/items", 0, NULL, NULL, poem_detail_auth,
-	        NULL);
+	return with_module_item_access(
+	        fd, body, "poem", 0, NULL, NULL, poem_detail_auth, NULL);
 }
 
 void xy_install(void)
 {
 	xy_load("./mods/index/index");
 
-	source_setup(
-	        "poem.items", NULL, sizeof(poem_cache_t), "items/poem/items",
-	        poem_fields, POEM_FIELD_COUNT, 0);
+	i18n_register_dict(poem_dict, POEM_DICT_COUNT);
 
-	index_open("Poem", "poem.items", NULL, NULL, NULL, NULL, NULL);
-	standard_item_handlers_t handlers = {
-		.detail = poem_detail_handler,
-		.add_get = poem_add_get_handler,
-		.edit_get = poem_edit_get_handler,
-	};
-	register_standard_item_handlers("poem", &handlers);
+	index_module_init(&(index_module_def_t){
+	        .name = "poem",
+	        .display_name = "Poem",
+	        .schema = poem_fields,
+	        .field_count = POEM_FIELD_COUNT,
+	        .record_size = sizeof(poem_cache_t),
+	        .items_path = "var/poem",
+	        .list_view = &poem_list_view,
+	        .handlers = { .detail = poem_detail_handler },
+	        .body_file = "pt_PT.html",
+	        .media_exts = "jpeg,jpg,png",
+	});
 }

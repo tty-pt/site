@@ -1,0 +1,5 @@
+wasi-libc
+lld-21
+libxxhash-dev
+libcrypt-dev
+libclang-rt-21-dev-wasm32

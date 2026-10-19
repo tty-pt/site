@@ -1,0 +1,901 @@
+/* ── Tokens ── */
+
+:root {
+  /* Base — 5 raw colors, everything else derives from these */
+  --hyle-color-primary: var(--color-primary, var(--color-blue-500, #3b82f6));
+  --hyle-color-danger:  var(--color-danger,  var(--color-red-600,  #dc2626));
+  --hyle-color-text:    var(--color-text,    var(--color-gray-900, #111827));
+  --hyle-color-surface: var(--color-surface, var(--color-white,    #ffffff));
+  --hyle-color-border:  var(--color-border,  var(--color-gray-200, #e5e7eb));
+
+  /* Derived */
+  --hyle-text-muted:      color-mix(in srgb, var(--hyle-color-text) 60%, var(--hyle-color-surface));
+  --hyle-text-subtle:     color-mix(in srgb, var(--hyle-color-text) 35%, var(--hyle-color-surface));
+
+  --hyle-surface-raised:  color-mix(in srgb, var(--hyle-color-text)  5%, var(--hyle-color-surface));
+  --hyle-surface-hover:   color-mix(in srgb, var(--hyle-color-text) 10%, var(--hyle-color-surface));
+  --hyle-surface-primary: color-mix(in srgb, var(--hyle-color-primary) 8%, var(--hyle-color-surface));
+
+  --hyle-border-subtle:   var(--hyle-color-border);
+  --hyle-border-hover:    color-mix(in srgb, var(--hyle-color-border), var(--hyle-color-text) 20%);
+
+  --hyle-primary-hover:   color-mix(in srgb, var(--hyle-color-primary) 85%, black);
+  --hyle-primary-ring:    color-mix(in srgb, var(--hyle-color-primary) 12%, transparent);
+
+  --hyle-danger-hover:    color-mix(in srgb, var(--hyle-color-danger) 85%, black);
+
+  /* Code block — intentionally fixed dark terminal palette */
+  --hyle-code-bg:         #101828;
+  --hyle-code-text:       #e4e7ec;
+
+  /* Shadow */
+  --hyle-shadow-sm:       0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Dark mode — only structural neutrals flip; primary/danger are consumer's responsibility */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hyle-color-text:    var(--color-text,    var(--color-gray-100, #f3f4f6));
+    --hyle-color-surface: var(--color-surface, var(--color-gray-900, #111827));
+    --hyle-color-border:  var(--color-border,  var(--color-gray-700, #374151));
+  }
+}
+
+.dark {
+  --hyle-color-text:    var(--color-text,    var(--color-gray-100, #f3f4f6));
+  --hyle-color-surface: var(--color-surface, var(--color-gray-900, #111827));
+  --hyle-color-border:  var(--color-border,  var(--color-gray-700, #374151));
+}
+
+/* ── Table ── */
+
+.hyle-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.hyle-sort-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: center;
+}
+
+.hyle-sort-button:hover {
+  color: var(--hyle-color-text);
+}
+
+.hyle-empty-state {
+  text-align: center;
+  color: var(--hyle-text-subtle);
+  padding: 48px 18px;
+  font-size: 14px;
+}
+
+.hyle-row-clickable {
+  cursor: pointer;
+}
+
+.hyle-row-clickable:hover td {
+  background: var(--hyle-surface-hover);
+}
+
+.hyle-row-selected td {
+  background: var(--hyle-surface-primary);
+}
+
+.hyle-error {
+  color: var(--hyle-color-danger);
+}
+
+/* ── Filter bar ── */
+
+.hyle-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hyle-border-subtle);
+  background: var(--hyle-surface-raised);
+}
+
+.hyle-filter-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 120px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hyle-filter-bar fieldset {
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: 0;
+  flex: 1 1 100px;
+  background: var(--hyle-color-surface);
+  max-height: 70px;
+  overflow-y: auto;
+}
+
+.hyle-filter-bar fieldset legend {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 2px;
+}
+
+.hyle-filter-bar fieldset label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar fieldset.hyle-checkbox-filter {
+  flex: 0 0 100%;
+  order: -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 4px 10px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.hyle-filter-bar .hyle-checkbox-filter legend {
+  grid-column: 1 / -1;
+}
+
+.hyle-filter-bar .hyle-checkbox-filter label {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: normal;
+}
+
+.hyle-filter-bar input,
+.hyle-filter-bar select {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--hyle-color-surface);
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar input[type="checkbox"] {
+  height: auto;
+  width: auto;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hyle-filter-bar input:focus,
+.hyle-filter-bar select:focus {
+  outline: none;
+  border-color: var(--hyle-color-primary);
+  box-shadow: 0 0 0 2px var(--hyle-primary-ring);
+}
+
+/* ── Multiselect dropdown filter (SSR `<details>` + checkbox panel) ── */
+
+.hyle-filter-bar .hyle-ms-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 120px;
+  min-width: 120px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hyle-multiselect {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.hyle-ms-trigger {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 0.6em;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  background: var(--hyle-color-surface);
+  font-size: 12px;
+  height: 30px;
+  box-sizing: border-box;
+}
+
+.hyle-ms-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.hyle-ms-values {
+  pointer-events: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hyle-ms-caret {
+  flex: none;
+  opacity: 0.7;
+}
+
+details.hyle-multiselect[open] .hyle-ms-caret {
+  transform: rotate(180deg);
+}
+
+.hyle-ms-panel {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 2px;
+  background: var(--hyle-color-surface);
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  box-shadow: var(--hyle-shadow-sm);
+}
+
+.hyle-filter-bar .hyle-ms-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid var(--hyle-color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar .hyle-ms-search:focus {
+  outline: none;
+  border-bottom-color: var(--hyle-color-primary);
+  box-shadow: none;
+}
+
+.hyle-ms-options {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.hyle-ms-option {
+  text-align: left;
+}
+
+.hyle-filter-bar .hyle-ms-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar .hyle-ms-option:hover {
+  background: var(--hyle-surface-hover);
+}
+
+.hyle-filter-bar .hyle-ms-option.hyle-ms-hidden {
+  display: none;
+}
+
+/* ── Singleselect dropdown filter (SSR `<details>` + radio panel) ── */
+
+.hyle-filter-bar .hyle-ss-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 120px;
+  min-width: 120px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hyle-filter-bar .hyle-singleselect {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.hyle-ss-trigger {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 0.6em;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  background: var(--hyle-color-surface);
+  font-size: 12px;
+  height: 30px;
+  box-sizing: border-box;
+}
+
+.hyle-ss-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.hyle-ss-values {
+  pointer-events: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hyle-ss-caret {
+  flex: none;
+  opacity: 0.7;
+}
+
+details.hyle-singleselect[open] .hyle-ss-caret {
+  transform: rotate(180deg);
+}
+
+.hyle-ss-panel {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 2px;
+  background: var(--hyle-color-surface);
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  box-shadow: var(--hyle-shadow-sm);
+}
+
+.hyle-filter-bar .hyle-ss-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid var(--hyle-color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar .hyle-ss-search:focus {
+  outline: none;
+  border-bottom-color: var(--hyle-color-primary);
+  box-shadow: none;
+}
+
+.hyle-ss-options {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.hyle-filter-bar .hyle-ss-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar .hyle-ss-option:hover {
+  background: var(--hyle-surface-hover);
+}
+
+.hyle-filter-bar .hyle-ss-option.hyle-ss-hidden {
+  display: none;
+}
+
+/* ── Filter actions ── */
+
+.hyle-filter-actions {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.hyle-filter-actions button[type="submit"] {
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--hyle-color-primary);
+  color: var(--hyle-color-surface);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.hyle-filter-actions button[type="submit"]:hover {
+  background: var(--hyle-primary-hover);
+}
+
+.hyle-filter-actions button[type="reset"] {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  background: var(--hyle-color-surface);
+  color: var(--hyle-text-subtle);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.hyle-filter-actions button[type="reset"]:hover {
+  background: var(--hyle-surface-hover);
+  color: var(--hyle-color-text);
+}
+
+.hyle-filter-bar .hyle-omnisearch {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.hyle-mode-toggle {
+  align-self: center;
+  color: var(--hyle-text-muted);
+  text-decoration: none;
+  padding: 0;
+  line-height: 1;
+}
+
+.hyle-mode-toggle:hover {
+  color: var(--hyle-color-primary);
+}
+
+/* ── Table footer / pagination ── */
+
+.hyle-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  border-top: 1px solid var(--hyle-border-subtle);
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--hyle-surface-raised);
+  border-radius: 0 0 8px 8px;
+}
+
+.hyle-pagination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.hyle-pagination button {
+  height: 32px;
+  min-width: 76px;
+  padding: 0 12px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  background: var(--hyle-color-surface);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--hyle-color-text);
+}
+
+.hyle-pagination button:hover:not(:disabled) {
+  background: var(--hyle-surface-hover);
+  border-color: var(--hyle-border-hover);
+}
+
+.hyle-pagination button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.hyle-pagination select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  background: var(--hyle-color-surface);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--hyle-color-text);
+}
+
+.hyle-pagination span {
+  color: var(--hyle-text-subtle);
+  padding: 0 4px;
+}
+
+.hyle-row-count {
+  color: var(--hyle-text-subtle);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ── Form fields ── */
+
+.hyle-edit-fields {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hyle-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hyle-field-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hyle-field-row fieldset {
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.hyle-field-row fieldset legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hyle-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 4px;
+}
+
+.hyle-field-row fieldset label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--hyle-color-text);
+}
+
+.hyle-field-row input,
+.hyle-field-row select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--hyle-color-surface);
+  color: var(--hyle-color-text);
+}
+
+.hyle-field-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+/* Whole-row actions: stretched overlay element inside the first cell. */
+.hyle-table-wrap tbody tr { position: relative; }
+.hyle-row-action {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.hyle-row-action:focus-visible {
+  outline: 2px solid var(--hyle-color-primary, currentColor);
+  outline-offset: -2px;
+  z-index: 2;
+}
+.hyle-table-wrap td > a:not(.hyle-row-action),
+.hyle-table-wrap td > button:not(.hyle-row-action),
+.hyle-table-wrap td > select:not(.hyle-row-action),
+.hyle-table-wrap td > input:not(.hyle-row-action) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Paginated omnisearch picker (form REFERENCE/MULTI_REFERENCE) ──
+ * Sizing mirrors .hyle-ms-* so triggers align with sibling inputs.
+ * The panel itself is the scroll container so the infinite-scroll
+ * sentinel intersects within it. */
+
+.hyle-picker {
+  position: relative;
+  display: block;
+  font-size: 14px;
+  width: 100%;
+  flex: 1 1 0%;
+  min-width: 0;
+  text-align: left;
+}
+
+.hyle-picker-details {
+  display: block;
+  width: 100%;
+}
+
+.hyle-picker-submit {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hyle-frag-active [data-hyle-auto-submit] ~ .hyle-picker-submit,
+.hyle-frag-active [data-hyle-auto-submit] .hyle-picker-submit,
+.hyle-frag-active form:has([data-hyle-auto-submit]) .hyle-picker-submit {
+  display: none;
+}
+
+.hyle-picker-trigger {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 0.75em;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 4px;
+  background: var(--hyle-color-surface);
+  min-height: 36px;
+  height: 36px;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+  text-align: left;
+}
+
+.hyle-picker-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.hyle-picker-values {
+  pointer-events: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.hyle-picker-values:empty::before {
+  content: "None";
+  opacity: 0.55;
+}
+
+.hyle-picker-caret {
+  flex: none;
+  opacity: 0.7;
+}
+
+details.hyle-picker-details[open] .hyle-picker-caret {
+  transform: rotate(180deg);
+}
+
+.hyle-picker-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 4px;
+  border: 1px solid var(--hyle-color-border);
+  border-radius: 6px;
+  background: var(--hyle-color-surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  text-align: left;
+}
+
+.hyle-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--hyle-color-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hyle-color-text);
+  font-size: 14px;
+  text-align: left;
+}
+
+.hyle-picker-search:focus {
+  outline: none;
+  border-bottom-color: var(--hyle-color-primary);
+  box-shadow: none;
+}
+
+.hyle-picker-rows {
+  padding: 4px 0;
+}
+
+.hyle-picker-option {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--hyle-color-text);
+  font-size: 14px;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.hyle-picker-option input[type='checkbox'],
+.hyle-picker-option input[type='radio'],
+.hyle-ms-option input[type='checkbox'],
+.hyle-ms-option input[type='radio'] {
+  width: auto;
+  flex: none;
+  flex-shrink: 0;
+  flex-grow: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Single-select pickers: visually hide the native radio but keep it
+   focusable so Tab/arrow keys reach it natively; the checked state is
+   shown by highlighting the option row instead. Multi-select checkboxes
+   stay visible so users can see multi-selection state. */
+.hyle-picker[data-hyle-picker-multi='0'] .hyle-picker-option input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.hyle-picker-option:has(input:checked) {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--hyle-color-primary, #2563eb);
+  font-weight: 600;
+}
+
+.hyle-picker-option:hover,
+.hyle-picker-option:has(input:focus) {
+  background: var(--hyle-surface-hover, #f3f4f6);
+  outline: none;
+}
+
+.hyle-picker-empty {
+  padding: 8px 10px;
+  color: var(--hyle-text-muted, #888);
+  font-style: italic;
+}
+
+.hyle-picker-add {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hyle-color-border, #e5e7eb);
+}
+
+.hyle-picker-add-btn {
+  background: transparent;
+  border: 1px dashed var(--hyle-color-primary, #3b82f6);
+  border-radius: 4px;
+  color: var(--hyle-color-primary, #3b82f6);
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: block;
+}
+
+.hyle-picker-add-btn:hover {
+  background: var(--hyle-surface-hover, #f3f4f6);
+}
+
+.hyle-picker-add-btn:focus,
+.hyle-picker-add-btn:focus-visible {
+  background: var(--hyle-surface-hover, #f3f4f6);
+  outline: 2px solid var(--hyle-color-primary, #3b82f6);
+  outline-offset: 1px;
+}
+
+/* Native Prev/Next are the no-JS engine; enhanced containers hide them. */
+.hyle-picker-paging {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--hyle-color-border);
+}
+
+.hyle-picker-page-btn {
+  min-width: 2em;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.hyle-frag-active .hyle-picker-paging {
+  display: none;
+}

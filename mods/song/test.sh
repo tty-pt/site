@@ -2,11 +2,11 @@
 set -e
 
 # Run transp unit tests first
-make -C lib/transp test
+make -C ../../external/libtransp test
 
 BASE="http://localhost:8080"
 REPO_ROOT="$(cd ../.. && pwd)"
-SONG_DIR="$REPO_ROOT/items/song/items"
+SONG_DIR="$REPO_ROOT/var/song"
 COOKIE="/tmp/song_test_cookie_$$"
 USER="songtest$$"
 

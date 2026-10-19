@@ -6,18 +6,18 @@ and the widget wire format.
 
 ## 1. Storage of field values
 
-- Scalar fields: `"<row_id>:<field>"` key in the fields registry qmap.
+- Scalar fields: `"<row_id>:<field>"` key in the fields registry corm.
 - **Multi-ref fields** (`HYLE_FIELD_MULTI_REFERENCE` /
   `SOURCE_FIELD_MULTI_REFERENCE`, type 5): the value is **newline-separated**
   position indices (typed-record sources) or slugs. Example:
   `"12\n34\n"` — positions into the target source's row map.
-- Position ↔ slug: `qmap_pos(target->fields_hd, slug)` resolves a slug to its
-  position; `qmap_get_key(target->fields_hd, pos)` resolves the reverse. When
+- Position ↔ slug: `corm_pos(target->fields_hd, slug)` resolves a slug to its
+  position; `corm_get_key(target->fields_hd, pos)` resolves the reverse. When
   slug→pos fails, the raw slug is used as the token.
 
 ## 2. Query string → filters (C parser)
 
-`hyle_parse_query` (`external/hyle/src/query.c`):
+`hyle_parse_query` (`external/libhyle/src/query.c`):
 
 - Splits on `&`/`=`, url-decodes.
 - Special keys: `sort`, `page`, `per_page`, `q`, `include`.
@@ -30,36 +30,34 @@ So `?type=comunhao&type=natal` produces two filters, both on field `type`.
 
 ## 3. The pre-filter pipeline (`hyle_source_query`)
 
-Order matters (`external/hyle/src/source.c`):
+Order matters (`external/libhyle/src/source.c`):
 
-1. `prefilter_fts` (source.c:315) — for searchable fields, resolves each filter
-   against the stoma index, **intersects** the matching row sets. Rebuilds the
+1. `prefilter_fts` (source.c:579) — for searchable fields, resolves each filter
+   against the lemma index, **intersects** the matching row sets. Rebuilds the
    index lazily after mutations.
-2. `prefilter_multi_ref` (source.c:217) — for multi-ref fields, resolves
+2. `prefilter_multi_ref` (source.c:331) — for multi-ref fields, resolves
    slug→position and pre-filters rows. Runs with
    `base_hd = fts_hd ? fts_hd : e->row_hd` (i.e. FTS narrowing is preserved).
 3. `hyle_apply_view` — the residual filter/sort on the pre-filtered row set.
    Handled filters have their `value` set to NULL so apply_view doesn't
    double-filter.
 
-## 4. The multi-ref bug and the required semantics (IMPORTANT)
+## 4. Multi-ref union/intersect semantics
 
-`prefilter_multi_ref` currently iterates filters and for EACH one REPLACES the
-running pre-filtered set with the new single-value set (`if (pre_hd)
-qmap_close(pre_hd); pre_hd = new_hd;`). With repeated keys only the **last**
-value wins — multi-select is broken.
-
-Required semantics (framework-neutral, hyle core):
+`prefilter_multi_ref` (`source.c:331`) implements the following:
 
 - **Union within a field**: rows matching ANY of the selected values for the
   same field.
 - **Intersect across fields**: rows matching field A AND field B.
-- Single-value behavior must remain byte-identical to today.
+- Single-value behavior is byte-identical to the simple case.
 
-Algorithm sketch: group filters by field name; for each distinct field build a
+Algorithm: group filters by field name; for each distinct field build a
 union map over `base_hd`; then fold the per-field union maps together by
-intersection. Remember to `qmap_close` intermediate maps and to NULL the filter
-values that were handled.
+intersection. Intermediate maps are closed and handled filter values are
+set to NULL so `hyle_apply_view` doesn't double-filter.
+
+Tested in `hyle_test.c:1615-1782`: same-field OR, cross-field AND,
+single-value unchanged, accent-sensitivity preserved.
 
 ## 5. Server-side handling of filter values
 
@@ -74,7 +72,7 @@ values that were handled.
 
 ## 6. SSR checked-state round-trip
 
-- `idx_query_param(qs, name, buf, len)` (`mods/index/ux/list.c:38`) returns only
+- `idx_query_param(qs, name, buf, len)` (`mods/index/ux/list.c:39`) returns only
   the FIRST occurrence of a repeated key — fine for `sort`/`page`/`per_page`,
   wrong for multi-ref selections.
 - Add/use `idx_query_params_join`: collect ALL occurrences of `name`, url-decode
@@ -83,22 +81,21 @@ values that were handled.
   `hyle_bud_checkbox_fieldset`).
 - Keep `idx_query_param` for single-value params.
 
-## 7. Filter UI options
+## 7. Filter UI options & `hyle_bud_filter`
 
 - `idx_resolve_filter_options(target_source, target_hd, opts, max)`
-  (`mods/index/ux/list.c:118`): builds `hyle_bud_option_t {id,label}[]` — id =
+  (`mods/index/index.c:48`): builds `hyle_bud_option_t {id,label}[]` — id =
   row_id (slug), label = the target source's first non-`id` display field value
-  (via `"<row>:<display_field>"` lookup). Native-only (qmap).
-- `idx_filter_bar` (list.c:191) reads `cur`, resolves options for
-  REFERENCE/MULTI_REFERENCE columns, calls `hyle_bud_filter_field(key, label,
-  type, cur, opts, nopts)`.
-- Renderers live in `external/hyle/c/libhyle-bud/src/filter.c`:
-  - `hyle_bud_checkbox_fieldset` — the current full-width multi-ref grid;
+  (via `"<row>:<display_field>"` lookup). Native-only (corm).
+- Universal component: `hyle_bud_filter` / `hyle_bud_filter_group` (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`) is the single schema-driven dispatcher for all filters, dropdowns, and reference selectors across SSR and WASM.
+- Renderers live in `external/libhyle-bud/src/filter.c`:
+  - `hyle_bud_filter` — universal schema field dispatcher.
+  - `hyle_bud_filter_scoped` — scoped/indexed row dispatcher.
+  - `hyle_bud_checkbox_fieldset` — the full-width multi-ref grid;
     comma-splits `current_value` for checked state.
-  - `hyle_bud_reference_select` — single-value `<select>`.
+  - `hyle_bud_reference_select` — single-value `<select>` or dropdown.
   - `hyle_bud_text_input` — text field.
-  - `hyle_bud_filter_field` — dispatch switch; MULTI_REFERENCE → grid (text
-    input fallback when no options).
+  - `hyle_bud_filter_field` — low-level type switch.
 
 ## 8. The multi-ref dropdown widget (shipped)
 
@@ -122,14 +119,14 @@ is generic (hint absent = grid).
 - The widget's field wrapper `.hyle-ms-field` mirrors `.hyle-filter-bar
   label` sizing so the trigger matches sibling inputs; its styles must
   out-specify the bar's generic `label`/`input` rules (see `docs/STYLING.md`).
-- Widget implementation (`external/hyle/c/libhyle-bud/src/filter.c`): the
+- Widget implementation (`external/libhyle-bud/src/filter.c`): the
   `hyle_bud_ms_t` registry **owns copies** of the options (never borrow the
   caller's stack `opts[]` — the widget outlives `bud_app_render` on wasm) and
   is reset via `hyle_bud_ms_reset()` from `idx_filter_bar`.
 
 ## 9. Tests
 
-- hyle unit (`external/hyle/src/hyle_test.c`): same-field OR, cross-field AND,
+- hyle unit (`external/libhyle/src/hyle_test.c`): same-field OR, cross-field AND,
   single-value unchanged, accent-sensitivity preserved.
 - pages-test: repeated-key filtering (`/song/?type=comunhao&type=natal`);
   SSR HTML contains visible checkboxes.
@@ -139,4 +136,5 @@ is generic (hint absent = grid).
 
 - `docs/SCHEMA.md` — the `"f"` hint and schema metadata.
 - `docs/SSR-CONTRACT.md` — the widget DOM contract.
+- `docs/PICKERS.md` — guidelines on the omnisearch picker component.
 - `docs/C-ISOMORPHIC-BUD.md` — how the enhancement ships as a wasm bundle.

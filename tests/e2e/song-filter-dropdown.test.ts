@@ -50,7 +50,7 @@ Deno.test({
       page.setDefaultNavigationTimeout(10000);
       page.setDefaultTimeout(10000);
 
-      await page.goto(`${BASE}/song/`, { waitUntil: "load" });
+      await page.goto(`${BASE}/song/?custom=1`, { waitUntil: "load" });
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
 
       // ---- 1. SSR contract (works with no JS at all) ----
@@ -107,7 +107,6 @@ Deno.test({
 
       // ---- 2. WASM hydration ----
       await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
-      console.log("WASM bundle mounted");
 
       // ---- 3. Live option search ----
       await details.locator("summary").click();
@@ -133,7 +132,6 @@ Deno.test({
         5000,
         "live search should leave only Comunhão visible",
       );
-      console.log("Live search filtered options to Comunhão");
 
       // ---- 4. Summary label sync (WASM patch) ----
       await searchInput.fill("");
@@ -154,7 +152,6 @@ Deno.test({
         "summary should sync to both selections",
       );
       const summaryText = (await summary.textContent())?.trim() ?? "";
-      console.log(`Summary after selecting: "${summaryText}"`);
 
       // ---- 5. Apply -> AND filter URL (type default = AND) ----
       await page.locator('.hyle-filter-actions button[type="submit"]').click();
@@ -208,7 +205,6 @@ Deno.test({
         reloadSummary.includes("Natal") && reloadSummary.includes("Saída"),
         `reload summary should list both selections, got: "${reloadSummary}"`,
       );
-      console.log(`Reload summary: "${reloadSummary}"`);
     } finally {
       await browser.close();
     }
@@ -227,7 +223,7 @@ Deno.test({
     try {
       // AND default: natal+saida → only dual-typed songs
       await page.goto(
-        `${BASE}/song/?type=natal&type=saida`,
+        `${BASE}/song/?custom=1&type=natal&type=saida`,
         { waitUntil: "load" },
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
@@ -255,11 +251,10 @@ Deno.test({
         ).isChecked(),
         "JS-disabled: saida checkbox should render checked from SSR",
       );
-      console.log("JS-disabled AND filter verified (SSR only)");
 
       // OR override: natal+comunhao with type_op=or → union
       await page.goto(
-        `${BASE}/song/?type=natal&type=comunhao&type_op=or`,
+        `${BASE}/song/?custom=1&type=natal&type=comunhao&type_op=or`,
         { waitUntil: "load" },
       );
       await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
@@ -274,7 +269,6 @@ Deno.test({
           `JS-disabled OR-filtered row should be Natal or Comunhão, got: "${t}"`,
         );
       }
-      console.log("JS-disabled OR override verified (SSR only)");
     } finally {
       await browser.close();
     }

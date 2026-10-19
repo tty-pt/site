@@ -29,10 +29,10 @@ Deno.test("poem: login → add poem → verify detail page", async () => {
 
     // ── 2. Fill title and submit ──────────────────────────────────────────────
     await page.fill('input[name="title"]', poemTitle);
-    await page.click('button[type="submit"]');
-
-    // Should redirect to /poem/<id> after creation
-    await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/poem\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
 
     // ── 3. Verify detail page loads ───────────────────────────────────────────
     await page.waitForSelector("body", { timeout: 5000 });
@@ -48,7 +48,7 @@ Deno.test("poem: login → add poem → verify detail page", async () => {
     // Cleanup: remove created poem directory
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone or never created — ignore
       }

@@ -2,10 +2,9 @@
 #define COMMON_INTERNAL_H
 
 #include <stddef.h>
+#include "../i18n/i18n.h"
 
-#define COMMON_IMPL
-#include "common.h"
-#undef COMMON_IMPL
+#include "common-types.h"
 
 int respond_error(int fd, int status, const char *msg);
 int bad_request(int fd, const char *msg);
@@ -24,6 +23,14 @@ int server_error(int fd, const char *msg);
 int respond_json(int fd, int status, const char *msg);
 int get_doc_root(int fd, char *buf, size_t len);
 int item_remove_path_recursive(const char *item_path);
+int user_pref_read(
+        const char *username, const char *name, char *out, size_t out_sz);
+int user_pref_write(const char *username, const char *name, const char *val);
 int build_owner_path(const char *ip, char *out, size_t len);
+int is_safe_id(const char *id);
+int site_ui_respond_page(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *extra_head, const char *module,
+        bud_node *body);
 
 #endif

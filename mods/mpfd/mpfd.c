@@ -4,11 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
 #include <ttypt/axil.h>
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/qsys.h>
 
 #define CD "Content-Disposition: form-data; name=\""
@@ -47,6 +48,28 @@ static void set_error(const char *fmt, ...)
 static void clear_error(void)
 {
 	mpfd_error_buf[0] = '\0';
+}
+
+static int parse_content_length(const char *value, size_t *length)
+{
+	size_t result = 0;
+
+	if (!value || !*value)
+		return -1;
+
+	for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+		if (*p < '0' || *p > '9')
+			return -1;
+		size_t digit = (size_t)(*p - '0');
+		if (result > (SIZE_MAX - digit) / 10)
+			return -1;
+		result = result * 10 + digit;
+	}
+
+	if (result == 0)
+		return -1;
+	*length = result;
+	return 0;
 }
 
 /* Safe substring search that works even with binary data (embedded '\0') */
@@ -94,6 +117,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 
 	size_t total_size = 0;
 	size_t field_count = 0;
+	int found_closing_boundary = 0;
 
 	char *pos = body;
 	while (1) {
@@ -105,8 +129,19 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		pos = bpos + blen;
 
 		/* End of multipart? */
-		if (body_len - (pos - body) >= 2 && strncmp(pos, "--", 2) == 0)
+		size_t remaining = body_len - (size_t)(pos - body);
+		if (remaining >= 2 && memcmp(pos, "--", 2) == 0) {
+			remaining -= 2;
+			if (remaining != 0 &&
+			    (remaining != 2 || memcmp(pos + 2, "\r\n", 2) != 0))
+			{
+				set_error("Data follows closing multipart "
+				          "boundary");
+				return -1;
+			}
+			found_closing_boundary = 1;
 			break;
+		}
 
 		/* Expect \r\n after boundary */
 		if (body_len - (pos - body) < 2 || strncmp(pos, "\r\n", 2) != 0)
@@ -195,12 +230,11 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		char *next_sep = find_substr(
 		        data_start, data_remaining, boundary_crlf,
 		        strlen(boundary_crlf));
-		size_t data_len;
-		if (next_sep) {
-			data_len = next_sep - data_start;
-		} else {
-			data_len = data_remaining; /* last part */
+		if (!next_sep) {
+			set_error("Missing closing multipart boundary");
+			return -1;
 		}
+		size_t data_len = next_sep - data_start;
 
 		/* Enforce limits */
 		if (field_count >= mpfd_max_field_count) {
@@ -241,12 +275,18 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 		if (data_len)
 			memcpy(val->data + fname_len, data_start, data_len);
 
-		/* Store value in qmap - qmap takes ownership of the pointer */
-		qmap_put(mpfd_db, key, val);
+		/* corm copies custom values using mpfd_val_measure(). */
+		corm_put(mpfd_db, key, val);
+		free(val);
 		field_count++;
 
 	next_part:
 		pos = next_sep ? next_sep : (body + body_len);
+	}
+
+	if (!found_closing_boundary) {
+		set_error("Missing closing multipart boundary");
+		return -1;
 	}
 
 	clear_error();
@@ -257,7 +297,7 @@ parse_multipart(char *body, const char *content_type, size_t body_len)
 
 static void mpfd_clear(void)
 {
-	qmap_drop(mpfd_db);
+	corm_drop(mpfd_db);
 	clear_error();
 }
 
@@ -265,44 +305,56 @@ static void mpfd_clear(void)
 XY_IMPL(int, mpfd_parse, socket_t, fd, char *, body)
 {
 	char content_type[512] = { 0 };
-	char clen_str[32] = { 0 };
+	char clen_str[BUFSIZ] = { 0 };
+	size_t body_len;
 
-	axil_env_get(fd, content_type, "HTTP_CONTENT_TYPE");
-	axil_env_get(fd, clen_str, "HTTP_CONTENT_LENGTH");
+	axil_header_get(fd, "Content-Type", content_type, sizeof(content_type));
 
 	/* Not multipart - not an error, just skip */
 	if (!strstr(content_type, "multipart/form-data")) {
 		return -1;
 	}
 
-	size_t body_len = clen_str[0] ? strtoul(clen_str, NULL, 10) : 0;
-
 	/* Clear previous data */
 	mpfd_clear();
 
-	/* Parse and return result */
-	return parse_multipart(body, content_type, body_len);
+	if (axil_header_get(fd, "Content-Length", clen_str, sizeof(clen_str)) !=
+	            0 ||
+	    parse_content_length(clen_str, &body_len) != 0 || !body)
+	{
+		set_error("Invalid Content-Length");
+		return -1;
+	}
+
+	/* Axil buffers this many bytes before dispatch but exposes no body
+	 * length. Keep binary data intact and validate the terminal boundary
+	 * in-window. */
+	int result = parse_multipart(body, content_type, body_len);
+	if (result != 0)
+		corm_drop(mpfd_db);
+	return result;
 }
 
 /* Field Inspection - All O(1) */
 static int mpfd_exists(const char *name)
 {
-	return qmap_get(mpfd_db, name) != NULL ? 1 : 0;
+	return corm_get(mpfd_db, name) != NULL ? 1 : 0;
 }
 
 XY_IMPL(int, mpfd_len, const char *, name)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	return val ? (int)val->len : -1;
 }
 
 static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val || val->filename_len == 0)
 		return -1;
-	size_t to_copy =
-	        val->filename_len < buf_len ? val->filename_len : buf_len;
+	size_t to_copy = val->filename_len < buf_len
+	                         ? val->filename_len
+	                         : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';
@@ -312,19 +364,66 @@ static int mpfd_filename(const char *name, char *buf, size_t buf_len)
 /* Data Retrieval */
 XY_IMPL(int, mpfd_get, const char *, name, char *, buf, size_t, buf_len)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val)
 		return -1;
-	size_t to_copy = val->len < buf_len ? val->len : buf_len;
+	size_t to_copy =
+	        val->len < buf_len ? val->len : (buf_len > 0 ? buf_len - 1 : 0);
 	memcpy(buf, val->data + val->filename_len, to_copy);
 	if (to_copy > 0)
 		buf[to_copy] = '\0';
 	return (int)to_copy;
 }
 
+/* All parts for `name` joined '\n'-separated. Repeated parts arrive
+ * when a form posts N checked boxes sharing one name; ref_normalize()
+ * downstream splits on newlines, slugifies and dedups. Returns -1 when
+ * the name is absent. With buf == NULL / buf_len == 0 returns the
+ * untruncated joined length. Duplicates iterate in sorted order, not
+ * document order — harmless: multi-ref storage is order-insensitive.
+ */
+XY_IMPL(int, mpfd_get_all, const char *, name, char *, buf, size_t,
+        buf_len)
+{
+	uint32_t cur = corm_get_multi(mpfd_db, name);
+	const void *k;
+	const void *v;
+	size_t total = 0;
+	size_t pos = 0;
+
+	if (cur == CM_MISS)
+		return -1;
+
+	if (!buf || buf_len == 0) {
+		while (corm_next(&k, &v, cur)) {
+			const struct mpfd_val *val = v;
+			total += val->len + 1; /* part + '\n' */
+		}
+		corm_fin(cur);
+		return total ? (int)(total - 1) : 0;
+	}
+
+	while (corm_next(&k, &v, cur)) {
+		const struct mpfd_val *val = v;
+		size_t len = val->len;
+
+		if (pos && pos < buf_len - 1)
+			buf[pos++] = '\n';
+		if (pos >= buf_len - 1)
+			break;
+		if (len > buf_len - 1 - pos)
+			len = buf_len - 1 - pos;
+		memcpy(buf + pos, val->data + val->filename_len, len);
+		pos += len;
+	}
+	corm_fin(cur);
+	buf[pos] = '\0';
+	return (int)pos;
+}
+
 static int mpfd_save(const char *name, const char *path)
 {
-	struct mpfd_val *val = (struct mpfd_val *)qmap_get(mpfd_db, name);
+	struct mpfd_val *val = (struct mpfd_val *)corm_get(mpfd_db, name);
 	if (!val)
 		return -1;
 	FILE *fp = fopen(path, "wb");
@@ -345,6 +444,13 @@ static int mpfd_set_limits(size_t max_field_size, size_t max_total_size)
 
 XY_MODULE_API void xy_install(void)
 {
-	mpfd_val_type = qmap_mreg(mpfd_val_measure);
-	mpfd_db = qmap_open(NULL, NULL, QM_STR, mpfd_val_type, 0xFF, 0);
+	mpfd_val_type = corm_mreg(mpfd_val_measure);
+	/* CM_SORTED | CM_MULTIVALUE: browsers submit N checked boxes as
+	 * N repeated parts named {key}; without MULTIVALUE each put
+	 * REPLACES and the last part silently wins. With it, parts
+	 * accumulate while corm_get keeps returning the first match, so
+	 * every single-part reader behaves exactly as before. */
+	mpfd_db = corm_open(
+	        NULL, NULL, CM_STR, mpfd_val_type, 0xFF,
+	        CM_SORTED | CM_MULTIVALUE);
 }

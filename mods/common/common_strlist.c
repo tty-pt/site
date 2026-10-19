@@ -1,8 +1,26 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ttypt/lemma.h>
 
 #include "common_internal.h"
+
+static void strlist_trim(char *s)
+{
+	if (!s || !s[0])
+		return;
+	char *p = s;
+	while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+		p++;
+	if (p > s)
+		memmove(s, p, strlen(p) + 1);
+	size_t len = strlen(s);
+	while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' ||
+	                   s[len - 1] == '\r' || s[len - 1] == '\n'))
+	{
+		s[--len] = '\0';
+	}
+}
 
 XY_IMPL(int, str_list_contains, const char *, list, const char *, token)
 {
@@ -16,6 +34,7 @@ XY_IMPL(int, str_list_contains, const char *, list, const char *, token)
 	snprintf(copy, sizeof(copy), "%s", list);
 	tok = strtok_r(copy, "\n", &saveptr);
 	while (tok) {
+		strlist_trim(tok);
 		if (strcmp(tok, token) == 0)
 			return 1;
 		tok = strtok_r(NULL, "\n", &saveptr);
@@ -26,53 +45,44 @@ XY_IMPL(int, str_list_contains, const char *, list, const char *, token)
 XY_IMPL(int, str_list_append, char *, out, size_t, out_sz,
         const char *, token)
 {
-	size_t used;
-	size_t len;
+	if (!out || out_sz == 0 || !token || !token[0])
+		return -1;
 
-	if (!out || !token || !token[0])
-		return 0;
 	if (str_list_contains(out, token))
 		return 0;
 
-	used = strlen(out);
-	len = strlen(token);
-	if (used && used + 1 >= out_sz)
-		return -1;
-	if (used)
-		out[used++] = '\n';
-	if (used + len >= out_sz)
-		return -1;
-	memcpy(out + used, token, len);
-	used += len;
-	out[used] = '\0';
+	size_t cur_len = strlen(out);
+	if (cur_len == 0) {
+		snprintf(out, out_sz, "%s", token);
+	} else {
+		if (cur_len + 1 + strlen(token) >= out_sz)
+			return -1;
+		snprintf(out + cur_len, out_sz - cur_len, "\n%s", token);
+	}
 	return 0;
 }
 
 XY_IMPL(int, str_list_normalize, const char *, input, char *, out,
         size_t, out_sz)
 {
+	if (!out || out_sz == 0)
+		return -1;
+
+	out[0] = '\0';
+	if (!input || !input[0])
+		return 0;
+
 	char copy[8192];
 	char *tok;
 	char *saveptr;
 
-	if (!out || out_sz == 0)
-		return 0;
-
-	copy[0] = '\0';
-	if (input && input[0])
-		snprintf(copy, sizeof(copy), "%s", input);
-	out[0] = '\0';
-	if (!copy[0])
-		return 0;
-
-	tok = strtok_r(copy, "\r\n", &saveptr);
+	snprintf(copy, sizeof(copy), "%s", input);
+	tok = strtok_r(copy, "\n", &saveptr);
 	while (tok) {
-		char t[256];
-		snprintf(t, sizeof(t), "%s", tok);
-		str_trim(t);
-		if (t[0])
-			str_list_append(out, out_sz, t);
-		tok = strtok_r(NULL, "\r\n", &saveptr);
+		strlist_trim(tok);
+		if (tok[0])
+			str_list_append(out, out_sz, tok);
+		tok = strtok_r(NULL, "\n", &saveptr);
 	}
 	return 0;
 }

@@ -64,7 +64,7 @@ Deno.test("song: invalid UTF-8 title does not crash the server", async () => {
         Cookie: ch,
         "Content-Type": "multipart/form-data; boundary=----boundary",
       },
-      body,
+      body: new Blob([body as BlobPart]),
       redirect: "manual",
     });
     await resp.body?.cancel();

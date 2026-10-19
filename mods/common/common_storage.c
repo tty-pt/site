@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,10 +10,14 @@
 
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
+#include <hyle-source/hyle_source.h>
 
 #include "common_internal.h"
 
-static int remove_path_recursive(const char *path);
+XY_IMPL(int, is_safe_id, const char *, id)
+{
+	return hyle_source_is_safe_id(id);
+}
 
 XY_IMPL(int, read_meta_file,
 	const char *, item_path,
@@ -92,16 +97,7 @@ XY_IMPL(int, write_file_path,
 	const char *, buf,
 	size_t, sz)
 {
-	FILE *fp = fopen(path, "w");
-
-	if (!fp)
-		return -1;
-	if (sz > 0 && fwrite(buf, 1, sz, fp) != sz) {
-		fclose(fp);
-		return -1;
-	}
-	fclose(fp);
-	return 0;
+	return hyle_source_write_file(path, buf, sz);
 }
 
 XY_IMPL(int, ensure_dir_path, const char *, path)
@@ -120,8 +116,57 @@ XY_IMPL(int, user_path_build,
 	if (!username || !username[0] || !suffix || !suffix[0] || !out ||
 	    outlen == 0)
 		return -1;
+	if (username[0] == '/' || username[0] == '\\' || username[0] == '.')
+		return -1;
+	if (strcmp(username, ".") == 0 || strcmp(username, "..") == 0)
+		return -1;
 	snprintf(out, outlen, "./home/%s/%s", username, suffix);
 	return 0;
+}
+
+XY_IMPL(int, user_pref_read,
+	const char *, username,
+	const char *, name,
+	char *, out,
+	size_t, out_sz)
+{
+	char s[PATH_MAX], p[PATH_MAX];
+	char *c;
+
+	if (!username || !username[0] || !name || !name[0] || !out ||
+	    out_sz == 0)
+		return -1;
+
+	snprintf(s, sizeof(s), ".tty/%s", name);
+	if (user_path_build(username, s, p, sizeof(p)) != 0)
+		return -1;
+
+	c = slurp_file(p);
+	if (!c) {
+		out[0] = '\0';
+		return -1;
+	}
+	snprintf(out, out_sz, "%s", c);
+	free(c);
+	return 0;
+}
+
+XY_IMPL(int, user_pref_write,
+	const char *, username,
+	const char *, name,
+	const char *, val)
+{
+	char d[PATH_MAX], s[PATH_MAX], p[PATH_MAX];
+
+	if (!username || !username[0] || !name || !name[0])
+		return -1;
+
+	user_path_build(username, ".tty", d, sizeof(d));
+	ensure_dir_path(d);
+
+	snprintf(s, sizeof(s), ".tty/%s", name);
+	user_path_build(username, s, p, sizeof(p));
+	return write_file_path(p, val, val ? strlen(val) : 0);
 }
 
 XY_IMPL(int, write_item_child_file,
@@ -139,34 +184,13 @@ XY_IMPL(int, write_item_child_file,
 
 XY_IMPL(char *, slurp_file, const char *, path)
 {
-	FILE *fp = fopen(path, "r");
-	long fsize;
-	char *buf;
-	size_t got;
-
-	if (!fp)
-		return NULL;
-	fseek(fp, 0, SEEK_END);
-	fsize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	if (fsize <= 0) {
-		fclose(fp);
-		return strdup("");
-	}
-	buf = malloc((size_t)fsize + 1);
-	if (!buf) {
-		fclose(fp);
-		return NULL;
-	}
-	got = fread(buf, 1, (size_t)fsize, fp);
-	fclose(fp);
-	buf[got] = '\0';
-	return buf;
+	return hyle_source_slurp_file(path);
 }
 
 XY_IMPL(int, get_doc_root, int, fd, char *, buf, size_t, len)
 {
-	if (fd > 0 && axil_env_get(fd, buf, "DOCUMENT_ROOT") > 0 && buf[0])
+	if (fd > 0 && axil_env_get(fd, buf, len, "DOCUMENT_ROOT") == 0 &&
+	    buf[0])
 		return 0;
 
 	snprintf(buf, len, ".");
@@ -194,55 +218,38 @@ XY_IMPL(int, item_child_path,
 	return 0;
 }
 
-static int remove_path_recursive(const char *path)
+static int is_safe_var_subpath(const char *path)
 {
-	struct stat st;
-	DIR *dir;
-	struct dirent *entry;
-	int rc = 0;
+	char resolved[PATH_MAX];
+	char var_root[PATH_MAX];
 
-	if (lstat(path, &st) != 0) {
-		return -1;
-	}
-	if (!S_ISDIR(st.st_mode)) {
-		return unlink(path);
-	}
+	if (!path || !path[0])
+		return 0;
 
-	dir = opendir(path);
-	if (!dir) {
-		return -1;
+	if (!realpath(path, resolved))
+		return 0;
+
+	if (!realpath("var", var_root) && !realpath("./var", var_root)) {
+		return (strstr(resolved, "/var/") != NULL);
 	}
 
-	while ((entry = readdir(dir)) != NULL) {
-		char child[PATH_MAX];
+	size_t vlen = strlen(var_root);
+	if (strncmp(resolved, var_root, vlen) != 0)
+		return 0;
 
-		if (strcmp(entry->d_name, ".") == 0 ||
-		    strcmp(entry->d_name, "..") == 0)
-			continue;
-		if (snprintf(
-		            child, sizeof(child), "%s/%s", path,
-		            entry->d_name) >= (int)sizeof(child))
-		{
-			rc = -1;
-			break;
-		}
-		if (remove_path_recursive(child) != 0) {
-			rc = -1;
-			break;
-		}
-	}
-	closedir(dir);
+	if (resolved[vlen] != '/' && resolved[vlen] != '\0')
+		return 0;
 
-	if (rc != 0)
-		return -1;
-	return rmdir(path);
+	return 1;
 }
 
 XY_IMPL(int, item_remove_path_recursive, const char *, item_path)
 {
 	if (!item_path || !item_path[0])
 		return -1;
-	return remove_path_recursive(item_path);
+	if (!is_safe_var_subpath(item_path))
+		return -1;
+	return hyle_source_remove_path_recursive(item_path);
 }
 
 XY_IMPL(int, module_path_build,
@@ -252,7 +259,11 @@ XY_IMPL(int, module_path_build,
 	size_t, outlen)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s", root, module);
+	int n;
+
+	if (!out || outlen == 0 || !is_safe_id(module))
+		return -1;
+	n = snprintf(out, outlen, "%s/var/%s", root, module);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
@@ -266,7 +277,11 @@ XY_IMPL(int, module_items_path_build,
 	size_t, outlen)
 {
 	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s/items", root, module);
+	int n;
+
+	if (!out || outlen == 0 || !is_safe_id(module))
+		return -1;
+	n = snprintf(out, outlen, "%s/var/%s", root, module);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
@@ -280,8 +295,13 @@ XY_IMPL(int, item_path_build_root,
 	char *, out,
 	size_t, outlen)
 {
-	const char *root = (doc_root && doc_root[0]) ? doc_root : ".";
-	int n = snprintf(out, outlen, "%s/items/%s/items/%s", root, module, id);
+	const char *root;
+	int n;
+
+	if (!out || outlen == 0 || !is_safe_id(module) || !is_safe_id(id))
+		return -1;
+	root = (doc_root && doc_root[0]) ? doc_root : ".";
+	n = snprintf(out, outlen, "%s/var/%s/%s", root, module, id);
 
 	if (n < 0 || (size_t)n >= outlen)
 		return -1;
@@ -334,6 +354,14 @@ XY_IMPL(int, build_owner_path,
 	char *, out,
 	size_t, len)
 {
-	snprintf(out, len, "%s/owner", ip);
+	int n;
+
+	if (!ip || !ip[0] || !out || len == 0)
+		return -1;
+	n = snprintf(out, len, "%s/owner", ip);
+	if (n < 0 || (size_t)n >= len) {
+		out[0] = '\0';
+		return -1;
+	}
 	return 0;
 }

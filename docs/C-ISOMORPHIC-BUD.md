@@ -10,9 +10,9 @@ A **C-isomorphic** renderer is a single C function tree that is compiled twice:
 
 The same source must therefore satisfy **both** environments. This doc is the
 rulebook. Reference implementations: `mods/song/ux/detail.c` →
-`htdocs/song_detail.wasm` (also `mods/songbook/ux/detail.c`, `mods/bud_demo`),
+`htdocs/song_detail.wasm` (also `mods/gig/ux/detail.c`),
 and the **list page** `mods/index/ux/list.c` → `htdocs/list.wasm` (served on
-all four list pages via `data-modules="list"`; poem/choir load it too and the
+all four list pages via `data-modules="list"`; poem/grp load it too and the
 enhancement no-ops).
 
 ---
@@ -29,8 +29,8 @@ It **must NOT** reference:
 
 - `axil` (HTTP/env/respond),
 - `source` / `source_*` (mods/source XY calls),
-- `qmap` (`qmap_*`),
-- `stoma`,
+- `corm` (`corm_*`),
+- `lemma`,
 - any `XY_DECL`/`XY_IMPL` cross-.so function,
 - the site's native data registries.
 
@@ -44,7 +44,7 @@ or garbage, only when the browser runs it. `make` will not catch it.
 Everything the renderer needs to draw must arrive as **data**, not via native
 lookups:
 
-- Native SSR: build the data from the qmap/source registries (server-side only),
+- Native SSR: build the data from the corm/source registries (server-side only),
   serialize it to a `bud-state` JSON, embed it in the page.
 - WASM: `wasm_init(json, len)` parses that same JSON into the same state struct.
 
@@ -54,22 +54,54 @@ guarantees the native tree and the WASM tree are structurally identical — see
 
 ## 2. The state table (fields.h pattern)
 
-`mods/song/fields.h` and `mods/songbook/fields.h` define an `app_state_t` plus a
-`bud_field_desc_t` table (in bud.h) that drives BOTH environments:
+`mods/song/fields.h`, `mods/gig/fields.h`, `mods/grp/fields.h`, and `mods/poem/fields.h`
+define module schemas using canonical `hyle_schema_desc_t` (from `external/libhyle/include/hyle/schema.h`):
 
-- server: the table feeds the `source_def_to_qmap` generators (mods/source),
-- WASM: `bud_state_apply(&app_state, fields, json)` fills the struct from the
-  `bud-state` JSON by key.
+- server: the table feeds `source_setup` / `index_module_init` (storage, validation, persistence),
+- WASM: `hyle_bud_state_apply_len(&app_state, fields, json, len)` fills the struct from the
+  `bud-state` JSON by key using stride-aware unpackers (`bud_state_apply_stride_len`).
 
 Pattern:
 
 ```c
-typedef struct { char title[256]; int transpose; /* … */ } app_state_t;
-#define OVERLAY_STR(field, type, dest, size) \
-	{ #field, offsetof(type, field), size, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0, NULL }
-#define OVERLAY_INT(field, type, dest) \
-	{ #field, offsetof(type, field), sizeof(int), 1, 0, 0, 0, 0, 0, 0, NULL, NULL, 0, NULL }
-static const bud_field_desc_t song_fields[] = { … };
+#include <hyle/schema.h>
+#include "../common/state_macros.h"
+
+typedef struct {
+    char id[128];
+    char title[256];
+    char type[2048];
+    char author[256];
+    char owner[32];
+} song_cache_t;
+
+typedef struct {
+    song_cache_t cache;
+    int transpose;
+    int use_latin;
+    char chord_html[65536];
+} app_state_t;
+
+static const hyle_schema_desc_t song_fields[] = {
+    FIELD_TEXT(id, song_cache_t),
+    FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+    FIELD_ARRAY(FIELD_REF, type, song_cache_t, "song.types",
+                .ref_inverse = "songs", .filter_style = "dropdown",
+                .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+    FIELD_REF(author, song_cache_t, "song.authors",
+              .ref_inverse = "songs", .filter_style = "dropdown",
+              .allow_add = 1, .in_meta = 1),
+    FIELD_FILE(data, "data.txt"),
+    FIELD_EXCL(owner, song_cache_t),
+    FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
+    FIELD_END
+};
+
+#define SONG_APP_SCHEMA(F_STR, F_INT, st) \
+    F_INT(st, transpose) \
+    F_INT(st, use_latin)
+
+BUD_STATE_FIELDS(app_state_t, song_app_fields, SONG_APP_SCHEMA)
 ```
 
 Use `bud_json_str` / `bud_json_int` / `bud_json_data` /
@@ -187,7 +219,7 @@ $(WASM_PATH)/%.wasm:            # WASM_PATH = $(REPO_ROOT)/htdocs
 
 - `WASI_CC` default `clang`, `--target=wasm32-wasi -mexec-model=reactor
   -Wl,--export-all -Wl,--allow-undefined`.
-- `WASM_COMMON_SRC = external/bud/src/libbud.c external/bud/src/bud_wasm_app.c`.
+- `WASM_COMMON_SRC = external/libbud/src/libbud.c external/libbud/src/bud_wasm_app.c`.
 - The rule self-probes (`echo 'int main(void){}' | $(WASI_CC) … -c -`) and skips
   with "Skipping WASM build of $@" when no WASI clang is available.
 
@@ -202,16 +234,13 @@ song_detail-cflags  = -I$(REPO_ROOT)/mods/common
 - `X-src` may list multiple files; relative paths are relative to the module
   dir. `X-cflags` receives include paths for anything the unit pulls in.
 - Include-source composition is the established pattern: `detail.c` does
-  `#include "music.c"` and `#include "../../common/ux/site_ui.c"`. `site_ui.c`
+  `#include "../../common/ux/site_ui.c"`. `site_ui.c`
   and `mods/index/ux/list.c` are written to be WASM-compilable — keep them that
   way.
-- Native-only helpers (qmap/source/axil) must live in a DIFFERENT file (e.g.
+- Native-only helpers (corm/source/axil) must live in a DIFFERENT file (e.g.
   `mods/index/index.c`, `mods/source/source.c`) so they never end up in the
   wasm translation unit.
-- **The wasm rule has NO prerequisites** — a `.wasm` only rebuilds when the
-  target file is missing. After any change to a wasm-compiled source, force it:
-  `rm -f htdocs/<target>.wasm && make`. Plain `make` silently ships the stale
-  wasm (see `docs/BUILD.md`).
+- **WASM deps are now tracked via `build.mk:57` `.d` + `LIST_UX_DEPS`** — editing `filter.c`/`site_ui.c` rebuilds dependent WASMs automatically (see `docs/BUILD.md` §WASM rebuilds). Historical trap: the rule once had NO prerequisites and `rm -f htdocs/<target>.wasm && make` was required; plain `make` then silently shipped stale WASM. If `WASI_CC` probe fails (`Skipping WASM build`), the `.wasm` is *absent not stale* — SSR still works. Verify with `make -n`.
 
 ## 7. Checklist: add a new dual-compiled page
 

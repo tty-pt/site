@@ -15,7 +15,7 @@
 #   slugify_test        PASS everywhere (correct-usage semantics)
 #   caller_contract 1   ASAN trip (iconv over-read), valgrind over-read
 #   caller_contract 2   ASAN trip (strlen over-read) when title[255]!=0
-#   caller_contract 3A  ASAN trip (choir[128] redzone write)
+#   caller_contract 3A  ASAN trip (grp[128] redzone write)
 #   caller_contract 3B  silent by design (write lands in addressable
 #                       neighbor stack — matches live-box behaviour)
 #   slug_fuzz mode 0    PASS (robustness)
@@ -38,8 +38,7 @@ BIN_CALLER="$OUT/caller_contract_test"
 BIN_FUZZ="$OUT/slug_fuzz"
 VG_OPTS="--error-exitcode=42 --quiet"
 
-step=$1
-[ -z "$step" ] && step=all
+step=${1:-all}
 
 build()
 {
@@ -67,7 +66,11 @@ run_slugify()
 {
 	for loc in C C.UTF-8 ""; do
 		run_locale "$loc" "$BIN_ASAN"
-		run_locale "$loc" valgrind $VG_OPTS "$BIN_VG"
+		if command -v valgrind >/dev/null 2>&1; then
+			run_locale "$loc" valgrind $VG_OPTS "$BIN_VG"
+		else
+			echo "SKIP     slugify_test valgrind (valgrind not installed)"
+		fi
 	done
 }
 

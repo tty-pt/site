@@ -7,5 +7,4 @@
 #include "../../common/ux/site_ui.c"
 #include "../fields.h"
 
-#include "form.c"
 #include "detail.c"

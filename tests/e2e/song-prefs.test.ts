@@ -17,7 +17,7 @@ Deno.test("song preferences: login → set Latin notation → reload → verify 
 
     // Open the menu
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -32,7 +32,7 @@ Deno.test("song preferences: login → set Latin notation → reload → verify 
     // 2. Reload page WITHOUT query params
     await page.goto(`${BASE}/song/${SONG_ID}`);
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });

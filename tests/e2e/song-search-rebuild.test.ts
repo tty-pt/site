@@ -1,7 +1,7 @@
 /**
  * E2E test: lazy full-text index rebuild on song edit
  *
- * Verifies the stoma index is rebuilt after a mutation through the live stack:
+ * Verifies the lemma index is rebuilt after a mutation through the live stack:
  * 1. add a song with a distinctive title -> searching it returns it
  * 2. edit the title to something else
  * 3. searching the OLD title returns 0 rows (stale token gone)
@@ -31,7 +31,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
   }
 
   async function searchTitle(title: string): Promise<string> {
-    await page.goto(`${BASE}/song/?title=${encodeURIComponent(title)}`, {
+    await page.goto(`${BASE}/song/?custom=1&title=${encodeURIComponent(title)}`, {
       waitUntil: "load",
     });
     await page.waitForSelector("div.hyle-table-wrap, p.text-muted", { timeout: 10000 });
@@ -45,7 +45,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', oldTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/song/${songId}`, { timeout: 5000 });
 
     // ---- 2. Search for the new song -> found ----
@@ -62,7 +62,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
     await page.fill('input[name="title"]', newTitle);
     await Promise.all([
       page.waitForURL(`${BASE}/song/${songId}`, { timeout: 10000 }),
-      page.click('button[type="submit"]'),
+      page.click('form[method="POST"] button[type="submit"]'),
     ]);
 
     // ---- 4. Old title no longer matches (stale token gone) ----
@@ -85,7 +85,7 @@ Deno.test("song list: FTS index rebuilds after edit", async () => {
 
     // ---- Cleanup: remove created song directory ----
     try {
-      await Deno.remove(`items/song/items/${songId}`, { recursive: true });
+      await Deno.remove(`var/song/${songId}`, { recursive: true });
     } catch {
       // Already gone or never created — ignore
     }

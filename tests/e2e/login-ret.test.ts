@@ -51,7 +51,7 @@ Deno.test({
     // ── 2. Submit login and verify redirect target is /song/ ─────────────────
     await page.fill('input[name="username"]', user.username);
     await page.fill('input[name="password"]', user.password);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/song\/?$/, { timeout: 8000 });
   } finally {

@@ -1,9 +1,10 @@
 /node_modules/
 /.deno/
-/items
+/var
 /htdocs/*
 *.so
 *.o
+*.d
 *.swp
 /deno.lock
 /.cache
@@ -21,6 +22,22 @@
 # Exceptions for htdocs
 !/htdocs/bud-client.js
 !/htdocs/bud-hydrate.js
+!/htdocs/bud-fragments.js
 !/htdocs/styles.css
+!/htdocs/hyle.css
 /external/*/bin
 /external/*/lib
+tests/unit/mpfd_contract_test
+.opencode
+/.pi/*
+!/.pi/extensions
+!/.pi/prompts
+!/.pi/settings.json
+!/.pi/lsp.json
+!/.pi/skills
+/build
+/debug
+*.zip
+/compile_commands.json
+.worktrees
+/tmp

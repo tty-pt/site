@@ -1,44 +1,36 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 #include <ttypt/axil.h>
 #include <ttypt/xy-mod.h>
 
 #include "common_internal.h"
+#include <hyle/schema.h>
+#include "hyle-bud/hyle-bud.h"
 #include "ux/site_ui.h"
 #include "bud/bud_jsx.h"
 #include "../mpfd/mpfd.h"
 #include "../auth/auth.h"
 
-XY_IMPL(int, parse_transpose_qs,
-	const char *, qs,
-	int *, transpose,
-	int *, flags,
-	int *, show_media);
-
-int parse_transpose_qs(
-        const char *qs, int *transpose, int *flags, int *show_media)
+static void set_html_security_headers(int fd)
 {
-	*transpose = 0;
-	*flags = 0;
-	*show_media = 0;
-	if (!qs || !*qs)
-		return 0;
-	char copy[1024];
-	snprintf(copy, sizeof(copy), "%s", qs);
-	axil_query_parse(copy);
-	char buf[32];
-	if (axil_query_param("t", buf, sizeof(buf)) > 0)
-		*transpose = atoi(buf);
-	if (axil_query_param("b", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_BEMOL;
-	if (axil_query_param("l", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_LATIN;
-	if (axil_query_param("h", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*flags |= TPARAM_HTML;
-	if (axil_query_param("m", buf, sizeof(buf)) >= 0 && atoi(buf) != 0)
-		*show_media = 1;
-	return 0;
+	axil_header_set(fd, "X-Content-Type-Options", "nosniff");
+	axil_header_set(fd, "X-Frame-Options", "DENY");
+	axil_header_set(
+	        fd, "Referrer-Policy", "strict-origin-when-cross-origin");
+	axil_header_set(
+	        fd, "Content-Security-Policy",
+	        "default-src 'self'; "
+	        "script-src 'self' 'wasm-unsafe-eval'; "
+	        "style-src 'self' 'unsafe-inline'; "
+	        "img-src 'self' data:; "
+	        "media-src 'self'; "
+	        "frame-src 'self' https://www.youtube.com; "
+	        "frame-ancestors 'none'");
 }
 
 XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
@@ -46,24 +38,33 @@ XY_IMPL(int, respond_error, int, fd, int, status, const char *, msg)
 	char accept[256] = { 0 };
 
 	axil_header_get(fd, "Accept", accept, sizeof(accept));
-	if (strstr(accept, "text/html")) {
+	if (strstr(accept, "text/html") || strstr(accept, "*/*") || accept[0] == '\0') {
 		char status_str[16];
+		char msg_with_space[256];
 		char uri[512] = { 0 };
 		char *html;
 		bud_node *body;
 
 		snprintf(status_str, sizeof(status_str), "%d", status);
-		axil_env_get(fd, uri, "DOCUMENT_URI");
+		const char *lang = i18n_resolve_locale(fd);
+		site_ui_set_locale(lang);
+		const char *trans_msg = msg ? ui_t(msg) : ui_t("Error");
+		snprintf(
+		        msg_with_space, sizeof(msg_with_space), " %s",
+		        trans_msg);
+		axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 
 		body = site_ui_layout(
-		        msg ? msg : status_str, uri, "!", get_request_user(fd),
+		        trans_msg, uri, "!", get_request_user(fd),
 		        NULL,
-		        lx_el("p", lx_el("strong", lx_text(status_str)),
-		              lx_text(" "), lx_text(msg ? msg : "Error"))
-		                .data.node);
+		        bud_tpl("<p><strong>%s</strong>%s</p>", status_str,
+		                msg_with_space));
 
-		html = site_ui_page(msg ? msg : status_str, NULL, NULL, body);
+		html = site_ui_page_lang(
+		        trans_msg, uri, "!", get_request_user(fd),
+		        NULL, NULL, body, lang);
 		if (html) {
+			set_html_security_headers(fd);
 			axil_header_set(
 			        fd, "Content-Type", "text/html; charset=utf-8");
 			axil_respond(fd, status, html);
@@ -94,7 +95,7 @@ XY_IMPL(const char *, require_user, int, fd)
 {
 	const char *user = get_request_user(fd);
 	if (!user || !user[0]) {
-		respond_error(fd, 401, "Unauthorized");
+		require_login(fd, user);
 		return NULL;
 	}
 	return user;
@@ -103,6 +104,7 @@ XY_IMPL(const char *, require_user, int, fd)
 XY_IMPL(int, respond_html, int, fd, const char *, html)
 {
 	if (html) {
+		set_html_security_headers(fd);
 		axil_header_set(fd, "Content-Type", "text/html; charset=utf-8");
 		axil_respond(fd, 200, html);
 		bud_free_string((char *)html);
@@ -128,14 +130,91 @@ XY_IMPL(int, redirect_to_item,
 	return axil_redirect(fd, loc);
 }
 
+XY_IMPL(int, respond_item_file,
+	int, fd,
+	const char *, item_path,
+	const char *, filename,
+	const char *, allowed_exts)
+{
+	char full_path[PATH_MAX];
+	char stem[256];
+	size_t flen, slen = 0;
+	const char *dot;
+
+	if (!item_path || !filename || !filename[0])
+		return respond_error(fd, 404, "Not found");
+
+	dot = strrchr(filename, '.');
+	flen = strlen(filename);
+	slen = dot ? (size_t)(dot - filename) : flen;
+	if (slen >= sizeof(stem))
+		return respond_error(fd, 404, "Not found");
+	memcpy(stem, filename, slen);
+	stem[slen] = '\0';
+	if (!is_safe_id(stem))
+		return respond_error(fd, 404, "Not found");
+
+	item_child_path(item_path, filename, full_path, sizeof(full_path));
+	return axil_respond_file(fd, full_path, allowed_exts);
+}
+
+XY_IMPL(int, site_ui_respond_item_detail,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	bud_node *, body)
+{
+	char path[256];
+	char page_title[512];
+	int is_owner;
+	bud_node *layout;
+	const char *lang;
+
+	if (!ctx || !module || !body)
+		return server_error(fd, "Invalid detail context");
+
+	lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+
+	is_owner = (ctx->username && ctx->username[0])
+	                   ? item_owner_check(ctx->item_path, ctx->username)
+	                   : 0;
+
+	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
+	if (title && title[0])
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        title);
+	else
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        ctx->id);
+
+	layout = site_ui_layout(
+	        page_title, path, site_ui_module_icon(module), ctx->username,
+	        site_ui_item_menu(module, ctx->id, is_owner), body);
+
+	return site_ui_respond_page(
+	        fd, page_title, path, site_ui_module_icon(module),
+	        ctx->username, NULL, module, layout);
+}
+
 XY_IMPL(int, site_ui_respond_page,
 	int, fd,
 	const char *, title,
+	const char *, path,
+	const char *, icon,
+	const char *, user,
 	const char *, extra_head,
 	const char *, module,
 	bud_node *, body)
 {
-	return respond_html(fd, site_ui_page(title, extra_head, module, body));
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+	return respond_html(
+	        fd, site_ui_page_lang(
+	                    title, path, icon, user, extra_head, module, body, lang));
 }
 
 XY_IMPL(int, site_ui_respond_form_page,
@@ -147,15 +226,18 @@ XY_IMPL(int, site_ui_respond_form_page,
 	const char *, module,
 	bud_node *, form)
 {
-	bud_node *page =
-	        site_ui_form_page(user, title, action, icon, NULL, form);
-	return site_ui_respond_page(fd, title, NULL, module, page);
+	bud_node *page = site_ui_form_page(
+	        user, title, action, icon, NULL, SITE_UI_FRAGMENTS_SCRIPT,
+	        form);
+	return site_ui_respond_page(
+	        fd, title, action, icon, user, SITE_UI_FRAGMENTS_SCRIPT, module,
+	        page);
 }
 
 XY_IMPL(int, csrf_check_mpfd, int, fd)
 {
 	char csrf_submitted[33] = { 0 };
-	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted) - 1);
+	mpfd_get("csrf_token", csrf_submitted, sizeof(csrf_submitted));
 	if (csrf_validate(fd, csrf_submitted))
 		return respond_error(fd, 403, "Forbidden");
 	return 0;
@@ -186,10 +268,60 @@ XY_IMPL(int, site_ui_respond_add_page,
 	bud_node *, form)
 {
 	char title[64], action[256];
-	snprintf(title, sizeof(title), "Add %s", module);
+	snprintf(
+	        title, sizeof(title), "Add %s", site_ui_module_display(module));
 	snprintf(action, sizeof(action), "/%s/add", module);
 	return site_ui_respond_form_page(
 	        fd, user, title, action, icon, module, form);
+}
+
+XY_IMPL(int, site_ui_respond_isomorphic,
+	int, fd,
+	const item_ctx_t *, ctx,
+	const char *, module,
+	const char *, title,
+	const char *, state_json,
+	const char *, wasm_module,
+	bud_node *, body)
+{
+	char path[256];
+	char page_title[512];
+	char state_script[16384];
+
+	if (!ctx || !module || !body)
+		return server_error(fd, "Invalid isomorphic context");
+
+	snprintf(path, sizeof(path), "/%s/%s", module, ctx->id);
+	if (title && title[0])
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        title);
+	else
+		snprintf(
+		        page_title, sizeof(page_title), "%s: %s", module,
+		        ctx->id);
+
+	if (state_json && state_json[0])
+		snprintf(
+		        state_script, sizeof(state_script),
+		        "<script type=\"application/json\" "
+		        "id=\"bud-state\">%s</script>",
+		        state_json);
+	else
+		state_script[0] = '\0';
+
+	return site_ui_respond_page(
+	        fd, page_title, path, site_ui_module_icon(module),
+	        ctx->username ? ctx->username : "",
+	        state_script[0] ? state_script : NULL,
+	        wasm_module ? wasm_module : module, body);
+}
+
+XY_IMPL(int, site_entity_register, const site_entity_def_t *, def)
+{
+	if (!def || !def->name)
+		return -1;
+	return 0;
 }
 
 XY_IMPL(int, site_ui_respond_edit_page,
@@ -235,4 +367,61 @@ XY_IMPL(int, register_standard_item_handlers,
 		axil_register_handler(buf, handlers->edit_post);
 	}
 	return 0;
+}
+
+XY_IMPL(int, detail_state_build,
+	detail_state_t *, state,
+	const detail_state_build_spec_t *, spec,
+	const char *, title,
+	const char *, path)
+{
+	if (!state || !spec)
+		return -1;
+
+	memset(state, 0, sizeof(*state));
+	snprintf(state->module, sizeof(state->module), "%s", spec->module ? spec->module : "");
+	snprintf(state->id, sizeof(state->id), "%s", spec->id ? spec->id : "");
+	snprintf(
+	        state->username, sizeof(state->username), "%s",
+	        spec->username ? spec->username : "");
+	snprintf(state->path, sizeof(state->path), "%s", path ? path : "");
+	snprintf(state->title, sizeof(state->title), "%s", title ? title : "");
+
+	if (spec->flags & DETAIL_BUILD_LOCALE) {
+		const char *lang = i18n_resolve_locale(spec->fd);
+		site_ui_set_locale(lang);
+		snprintf(state->lang, sizeof(state->lang), "%s", lang);
+	}
+
+	if (spec->flags & DETAIL_BUILD_OWNERSHIP && spec->item_path) {
+		state->is_owner = (spec->username && spec->username[0])
+		               ? item_owner_check(spec->item_path, spec->username)
+		               : 0;
+	}
+
+	if (spec->flags & DETAIL_BUILD_CSRF)
+		state->csrf_token = csrf_setup(spec->fd);
+
+	state->wasm_module = spec->wasm_module;
+	return 0;
+}
+
+XY_IMPL(int, detail_respond_page,
+	int, fd,
+	const detail_state_t *, state,
+	bud_node *, layout)
+{
+	if (!state || !layout) {
+		if (fd >= 0)
+			respond_error(fd, 500, "Internal Server Error");
+		return -1;
+	}
+
+	return site_ui_respond_with_state(
+	        fd, state->title, state->path,
+	        site_ui_module_icon(state->module),
+	        state->username[0] ? state->username : NULL,
+	        state->state_json,
+	        state->wasm_module ? state->wasm_module : state->module,
+	        layout);
 }

@@ -1,8 +1,8 @@
-[submodule "external/hyle"]
-	path = external/hyle
+[submodule "external/libhyle"]
+	path = external/libhyle
 	url = git@github.com:tty-pt/hyle.git
-[submodule "external/libqmap"]
-	path = external/libqmap
+[submodule "external/libcorm"]
+	path = external/libcorm
 	url = git@github.com:tty-pt/libqmap.git
 [submodule "external/libxylem"]
 	path = external/libxylem
@@ -16,3 +16,99 @@
 [submodule "external/axil-auth"]
 	path = external/axil-auth
 	url = git@github.com:tty-pt/axil-auth.git
+[submodule "external/libqsys"]
+	path = external/libqsys
+	url = git@github.com:tty-pt/libqsys.git
+[submodule "external/liblemma"]
+	path = external/liblemma
+	url = git@github.com:tty-pt/libstoma.git
+[submodule "external/libgeo"]
+	path = external/libislet
+	url = git@github.com:tty-pt/libgeo.git
+[submodule "external/libjoint"]
+	path = external/libjoint
+	url = git@github.com:tty-pt/libit.git
+[submodule "external/libsepal"]
+	path = external/libsepal
+	url = git@github.com:tty-pt/libsepal.git
+[submodule "external/libbud"]
+	path = external/libbud
+	url = git@github.com:tty-pt/libbud.git
+[submodule "external/libhyle-source"]
+	path = external/libhyle-source
+	url = git@github.com:tty-pt/libhyle-source.git
+[submodule "external/libhyle-bud"]
+	path = external/libhyle-bud
+	url = git@github.com:tty-pt/libhyle-bud.git
+[submodule "external/axil-hyle"]
+	path = external/axil-hyle
+	url = git@github.com:tty-pt/axil-hyle.git
+[submodule "external/axil-tty"]
+	path = external/axil-tty
+	url = git@github.com:tty-pt/axil-tty.git
+[submodule "external/axil-nd"]
+	path = external/axil-nd
+	url = git@github.com:tty-pt/axil-nd.git
+[submodule "external/nd-attr"]
+	path = external/nd-attr
+	url = git@github.com:tty-pt/nd-attr
+[submodule "external/nd-biome"]
+	path = external/nd-biome
+	url = git@github.com:tty-pt/nd-biome
+[submodule "external/nd-class"]
+	path = external/nd-class
+	url = git@github.com:tty-pt/nd-class
+[submodule "external/nd-core"]
+	path = external/nd-core
+	url = git@github.com:tty-pt/nd-core
+[submodule "external/nd-drink"]
+	path = external/nd-drink
+	url = git@github.com:tty-pt/nd-drink
+[submodule "external/nd-equip"]
+	path = external/nd-equip
+	url = git@github.com:tty-pt/nd-equip
+[submodule "external/nd-fight"]
+	path = external/nd-fight
+	url = git@github.com:tty-pt/nd-fight
+[submodule "external/nd-level"]
+	path = external/nd-level
+	url = git@github.com:tty-pt/nd-level
+[submodule "external/nd-mob"]
+	path = external/nd-mob
+	url = git@github.com:tty-pt/nd-mob
+[submodule "external/nd-mortal"]
+	path = external/nd-mortal
+	url = git@github.com:tty-pt/nd-mortal
+[submodule "external/nd-other"]
+	path = external/nd-other
+	url = git@github.com:tty-pt/nd-other
+[submodule "external/nd-plant"]
+	path = external/nd-plant
+	url = git@github.com:tty-pt/nd-plant
+[submodule "external/nd-race"]
+	path = external/nd-race
+	url = git@github.com:tty-pt/nd-race
+[submodule "external/nd-seat"]
+	path = external/nd-seat
+	url = git@github.com:tty-pt/nd-seat
+[submodule "external/nd-shop"]
+	path = external/nd-shop
+	url = git@github.com:tty-pt/nd-shop
+[submodule "external/nd-spell"]
+	path = external/nd-spell
+	url = git@github.com:tty-pt/nd-spell
+[submodule "external/nd-stone"]
+	path = external/nd-stone
+	url = git@github.com:tty-pt/nd-stone
+[submodule "external/nd-vanilla"]
+	path = external/nd-vanilla
+	url = git@github.com:tty-pt/nd-vanilla
+[submodule "external/nd-wts"]
+	path = external/nd-wts
+	url = git@github.com:tty-pt/nd-wts
+[submodule ".pi/extensions/pi-quest"]
+	path = .pi/extensions/pi-quest
+	url = git@github.com:tty-pt/pi-quest.git
+[submodule ".pi/extensions/pi-mm"]
+	path = .pi/extensions/pi-mm
+	url = git@github.com:tty-pt/pi-mm.git

@@ -10,9 +10,12 @@ data layer depends on a component framework, and no component framework is the
 "platform's" client runtime.
 
 ```
-        hyle ── data layer (schema, records, query, filtering, FTS)
+        hyle ── data layer (canonical schema hyle_schema_desc_t, query, filtering, FTS)
            │         framework-neutral. No bud/React/dioxus symbols.
            │         Server contract: query API + schema metadata strings.
+           ▼
+ libhyle-source ── dataset persistence, DSV, JSON state, pluggable store drivers
+           │
            ▼
    SSR contract ── plain HTML + native form controls + data-* hooks.
            │         The ONLY cross-framework interface.
@@ -47,51 +50,122 @@ Rules derived from the model:
 
 ## 2. Libraries and dependency direction
 
+```text
+               axil (HTTP/WS Daemon & Host)
+                 │  ▲
+                 ▼  │ (via libxylem hooks)
+             libxylem (Dynamic Module Extensibility)
+                 │
+                 ▼
+  Browser WASM <─── libbud ───> Native SSR (Isomorphic DOM)
+                      ▲
+                      │ (via libhyle-bud bridge)
+                   libhyle (Data & Schema Kernel)
+                      │
+                      ▼
+                   libcorm (Core In-Memory Map Store & Recall Engine)
+                      │
+     ┌────────────────┼────────────────┬────────────────┐
+     ▼                ▼                ▼                ▼
+  libjoint         libislet         liblemma         libsepal
+ (Time Axis)      (Space Axis)     (Text Axis)     (Meaning Axis)
+```
+
+Core repositories:
+- [axil](https://github.com/tty-pt/axil) — HTTP(S), WebSocket, and network daemon library
+- [libxylem](https://github.com/tty-pt/libxylem) — Dynamic module loader and hook isolation
+- [libbud](https://github.com/tty-pt/libbud) — Isomorphic C DOM scaffold for SSR + WASM
+- [libhyle](https://github.com/tty-pt/hyle) — Data schema and query kernel
+- [libcorm](https://github.com/tty-pt/libcorm) — In-memory map store and recall kernel
+- [libjoint](https://github.com/tty-pt/libit) — Temporal presence interval tree (Time axis)
+- [libislet](https://github.com/tty-pt/libgeo) — Multi-dimensional Morton code spatial index (Space axis)
+- [liblemma](https://github.com/tty-pt/liblemma) — Accent-preserving lexical tokenizer (Text axis)
+- [libsepal](https://github.com/tty-pt/libsepal) — Semantic vector store & 2-stage ANN (Meaning axis)
+
 ```
 axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
-qmap ── the data store (never free() qmap values; qmap_put takes ownership)
-stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
-hyle  ── data/schema/query layer, NO component symbols
-        deps: stoma, qmap
-hyle-bud (external/hyle/c/libhyle-bud) ── the bud binding; ONLY place that
-        may depend on bud. deps: hyle, bud, qmap
-bud   ── C DOM scaffold + WASM bridge. deps: none of the above
-site mods ── assemble axil + XY + hyle(+hyle-bud) + bud
+corm ── the data store (corm_put copies key and value; caller frees originals)
+lemma ── tokenization/search fold (accent-sensitive by design; no iconv)
+hyle  ── pure data/query kernel: canonical hyle_schema_desc_t, query/filter/FTS,
+        generic registry/ordered/derive machinery, FFI row API, qs helpers
+        (hyle_qs_param in hyle/url.h). NO component symbols. deps: lemma, corm
+libhyle-source (external/libhyle-source) ── standalone persistence engine:
+        registry access + CRUD, ordered/derive wrappers, option resolution,
+        DSV, JSON state overlays, pluggable drivers
+        (hyle_source_store_ops_t: store_fs, store_mem, custom stores), and the
+        picker DTOs (`hyle-source/picker.h` — `hyle/picker.h` no longer exists).
+        deps: hyle, corm, lemma, json-c
+hyle-bud (external/libhyle-bud) ── the bud binding; ONLY place that
+        may depend on bud. Bridges Hyle schemas to Bud UI components.
+        deps: hyle, bud, corm. Used in UX for filters/tables (`index`/`gig`/`grp`
+        link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`) and by
+        `mods/source` for the picker fragment route (`/pick/:id/options`).
+bud   ── pure C DOM scaffold, 5-field UI state binder (bud_field_desc_t),
+        and WASM bridge. deps: none of the above
+axil-hyle (external/axil-hyle) ── framework-neutral Axil↔Hyle REST connector:
+        `GET|POST|PUT|DELETE /api/dataset/...` (JSON CRUD) + partition
+        sub-resource routes. deps: axil, axil-auth, corm, hyle, libhyle-source,
+        json-c. No bud/hyle-bud symbols — the bud-rendered `/pick/:id/options`
+        fragment endpoint is mounted by `mods/source` instead.
+site mods ── assemble axil + XY + hyle(+libhyle-source+libhyle-bud) + bud
 ```
 
-Verify the boundary with a grep before committing: `external/hyle/src` and
-`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols.
+Verify the boundary with a grep before committing: `external/libhyle/src` and
+`include/hyle` must contain no `bud`/`lx_`/`bud_` symbols. `external/libbud/include`
+and `external/libbud/src` must contain no database/storage symbols.
 
 ## 3. Module load order
 
-Enforced by `mods/core/core.c` `xy_install`:
+Independent modules that explicitly declare immediate dependencies via `xy_load` in `xy_install`. `mods/core/core.c` loads only host foundations (`common` + `source`; `common` itself `xy_load`s `mpfd`) then `mods.load`:
 
 ```
 core.so
- ├── common.so   response/page/CSRF/storage helpers (XY_DECL in common.h)
- │   └── mpfd.so multipart/form-data parser
- ├── source.so   dataset CRUD + /api/dataset/*
- └── mods.load → poem, songbook, bud_demo, song, choir
-      ├── poem → index → auth, common, mpfd
-      ├── songbook → index, mpfd, song, source, choir
-      ├── bud_demo (registers GET:/bud-demo)
+ ├── common.so   response/page/CSRF/storage helpers, declarative forms (XY_DECL in common.h)
+ │    └── mpfd.so     multipart/form-data parser (xy_load in common)
+ ├── source.so   thin XY/HTTP transport wrapper over libhyle-source
+ └── mods.load → poem, song, grp, gig           (order respects DAG)
+      ├── poem → index
       ├── song → index, mpfd
-      └── choir → index, mpfd, song
+      ├── grp  → index, mpfd, song
+      ├── gig  → index, mpfd, song, source, grp
+
+ plus:
+  index → common, auth, mpfd, source
+  auth  → common, libaxil-auth (external, not ./mods/*)
 ```
 
-- `index` registers `GET:/` and the default handler; `index_open()` adds the
-  generic `/module/*` CRUD routes. `auth` registers `/api/csrf`,
+Site modules declare their own immediate **true** `xy_load` deps (not centrally owned by `core` — maximally independent does not mean zero deps). `mods.load` order `poem→song→grp→gig` respects `song→grp→gig`; `libxylem` deduplicates repeated loads. External deps like `libaxil-auth` are marked external.
+
+- `index` registers `GET:/` and default handlers; `index_open()` or `index_module_init()`
+  adds the generic `/module/*` CRUD routes (add GET/POST, edit GET/POST, detail, list)
+  automatically from schema descriptors. `auth` registers `/api/csrf`,
   `/auth/login`, `/auth/register` and dlopens `libaxil-auth.so`.
 - `mods/redir/` exists but is never loaded; its `/sb` and `/chords` redirects
   were duplicated into `core.c`.
 
-Modules are `xy_load()` → `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` **before
-the process chroots**. Consequences:
+- `mods/site_chrome/` is **WASM-only** (`WASM_ONLY=1` in its Makefile) — it
+  produces `htdocs/site_chrome.wasm` for global chrome enhancement but has no
+  native `.so` and is not in `mods.load`. It is not part of the native module
+  load order.
+
+Modules are `xy_load()` → `dlopen(RTLD_NOW|RTLD_LOCAL|RTLD_NODELETE)` on
+**both sides of the process chroot**: the `-m` chain, engine deps, handlers
+and the DB open resolve from the host root, while the engine's persisted
+region restore — `st_init()` (one `xy_load()` per `st` row) — runs from the
+`on_axil_post_chroot()` hook (`external/axil/src/libaxil.c`, between
+`init_pre_bind()`'s chroot/chdir and the first bind) and resolves inside the
+jail. There is no boot-time module list: game modules load only via region
+modding. The jail is seeded and gated by `scripts/seed-jail.sh` /
+`scripts/check-jail.sh` (see `docs/BUILD.md`); the manifest lives in
+`scripts/jail-manifest.sh`.
+`xy_reload()` `external/libxylem/src/libxylem.c:804,828` copies rebuilt `.so` to a unique inode via `mkstemps` (`dir/.xylem-XXXXXX.so` → `/tmp/...`) then `dlopen(tmp)` only when `xy_reloading==1` (`libxylem-module.c:226` `papi.h:145` `tmp_load_path` + `fchmod`/`fsync`), initial loads stay direct — `RTLD_NODELETE` kept but reload no longer reuses old `link_map`. Consequences:
 - Cross-.so calls MUST use the XY dispatch mechanism (`XY_DECL`/`XY_IMPL`),
-  never plain `extern`.
+  never plain `extern` (`RTLD_LOCAL` in `libxylem.c:813` means `bud_adapter` etc. must be via `XY` in `common.so`).
 - Native deps (e.g. GNU libiconv for `axil_slugify`) resolve from the **host**
-  root, not the chroot.
+  root, not the chroot; there is no `LD_LIBRARY_PATH`, so a tmp-dlopened module
+  resolves the *installed* `libxylem` from the system search path — the same
+  copy everything linked against (`docs/BUILD.md`, one-authority rule).
 
 ## 4. Runtime & request path
 
@@ -102,8 +176,8 @@ the process chroots**. Consequences:
   (`bud-client.js` loads `/{module}.wasm` per `body[data-modules]`). Ignore any
   stale doc claiming a Rust SSR path (`mods/ssr`, `ssr.so`, wasm-bindgen).
 - The site self-serves from the repo root as a chroot; required data dirs:
-  `items/poem/items`, `items/song/items`, `items/songbook/items`,
-  `items/choir/items`.
+  `var/poem`, `var/song`, `var/gig`,
+  `var/grp`.
 - `htdocs/` is the static web root (`styles.css`, `hyle.css`, `*.wasm`,
   `bud-client.js`). `site_ui_page()` only emits `bud-client.js` +
   `data-modules` when given a non-empty module name — plain list pages stay
@@ -111,40 +185,61 @@ the process chroots**. Consequences:
 
 ## 5. XY cross-.so convention (short form)
 
-1. Shared header declares it behind `#ifndef MODULE_IMPL`: `XY_DECL(int,
-   my_func, const char *, arg);` → static inline wrapper dispatching through
-   `xy_call`.
-2. Owning `.c` (after `#define MODULE_IMPL`): `XY_IMPL(int, my_func, const
-   char *, arg);` then the definition. `XY_IMPL` produces the public function +
-   a default-visibility auto-registered adapter.
-3. Shared constants needed by callers AND impl go outside the `#ifndef
-   MODULE_IMPL` guard.
+See `CONVENTIONS` for the normative recipe. Summary:
+
+1. Shared types, structs, constants, and enums live in `M-types.h` with zero
+   `XY_DECL`s.
+2. Public caller header `M.h` includes `M-types.h` and declares hooks via
+   unconditional `XY_DECL(...)` (no `#ifndef MODULE_IMPL` guards).
+3. Owning `.c` includes `M-types.h` (never `M.h`) and defines hooks via
+   `XY_IMPL(...)`. Dual-role co-implementors include `M-types.h` and declare
+   called hooks with local `XY_DECL`s.
 
 Handler registration helper: `register_standard_item_handlers()` in common;
-`with_item_access(fd, body, path, flags, notfound, forbidden, cb, user)` in
-auth.h handles login/ownership/CSRF.
+`with_module_item_access(fd, body, module, flags, notfound, forbidden, cb,
+user)` in auth.h resolves the validated item path and handles
+login/ownership/CSRF.
+
+Auth is the single ownership authority. In production (`geteuid() == 0` /
+chrooted / `AUTH_ENV=prod`), ownership follows POSIX filesystem disk permissions
+(`stat` `st_uid` and `chown`) strictly without creating or checking owner
+files. `item_owner_read` resolves the username from the directory's UID via
+`auth_get_username_by_uid`, and `item_owner_check` validates against the user's
+registered UID. In dev mode (unprivileged non-root), owner files are used as a
+local multi-user simulation fallback. Legacy root-created items are migrated
+offline with `scripts/migrate-owner-files.sh --apply`, then refreshed by
+restarting the server.
 
 ## 6. Data-layer invariants
 
 - Route ALL row writes through hyle `put`/`del` (`mods/source`
-  `source_update_item`/`source_delete_item`). Writing rows directly into shared
-  qmaps bypasses `stoma_dirty` and freezes the FTS index.
-- Search is **accent-sensitive** by design: `stoma_fold` lowercases ASCII and
+  `source_update_item`/`source_delete_item` $\rightarrow$ `libhyle-source`
+  `hyle_source_put`/`hyle_source_del`). Writing rows directly into shared
+  corms bypasses `lemma_dirty` and freezes the FTS index.
+- Pluggable storage drivers: `libhyle-source` operates through `hyle_source_store_ops_t`
+  (`scan`, `load`, `put`, `put_field`, `del`), allowing filesystem persistence (`store_fs`),
+  memory persistence (`store_mem`), or custom database engines.
+- Search is **accent-sensitive** by design: `lemma_fold` lowercases ASCII and
   Latin-1 uppercase, preserving accents; `pão` ≠ `pao`. No iconv TRANSLIT in the
   search fold; don't make it accent-insensitive. (TRANSLIT survives ONLY in
   `axil_slugify`, which must keep producing ASCII slugs.)
 - Multi-ref field values are stored **newline-separated**; the C
   `hyle_parse_query` creates one filter per repeated `key=val` param (the Rust
   crate instead joins with commas — keep the discrepancy in mind).
+- Item sources may carry a borrowed, static `source_list_view_t`. Feature
+  modules own its ordered fields, labels, display name, default sort, and
+  optional content-search presentation. Native `list_fill_state` resolves the
+  descriptor and serializes only resolved strings into the SSR/WASM state;
+  index does not switch on feature module names.
 - Searchable/FTS pre-filtering and multi-ref pre-filtering happen in
   `hyle_source_query` before `hyle_apply_view`. See `docs/FILTERS.md`.
 
 ## 7. Client-side reality
 
 - `body[data-modules]` names a module; `/{module}.wasm` is fetched (a 404 is
-  caught silently — poem/choir intentionally have none).
+  caught silently — poem/grp intentionally have none).
 - **The list pages now ship `data-modules="list"`** → `htdocs/list.wasm`
-  (from `mods/index/ux/list.c`); poem/choir load it too and the enhancement
+  (from `mods/index/ux/list.c`); poem/grp load it too and the enhancement
   no-ops (no widget nodes). See `docs/C-ISOMORPHIC-BUD.md`.
 - `.wasm` assets are dual-compiled from the same sources as the `.so` (see
   `docs/C-ISOMORPHIC-BUD.md`); `make` probes for a WASI clang and skips if
@@ -155,22 +250,11 @@ auth.h handles login/ownership/CSRF.
 
 ## 8. Build / test / debug quick reference
 
-| Command | What |
-|---------|------|
-| `make` | build everything |
-| `AUTH_SKIP_CONFIRM=1 make watch` | auto-rebuild + restart on :8080 |
-| `make unit-tests` | per-module test.sh (needs axil on :8080) |
-| `make pages-test` | page-render smoke tests (curl DOCTYPE) |
-| `make e2e-tests` | Playwright via Deno (needs server, `AUTH_SKIP_CONFIRM=1`) |
-| `make hyle-tests` | cargo test on external/hyle |
-| `make lint` / `make format` | clang-tidy (max 4 indent levels) / clang-format |
-| `make -C external/hyle` | hyle C tests |
-| `make wasm-debug` | rebuild wasm with `-DBUD_DEBUG` |
-
+See `docs/BUILD.md` and `docs/TESTING.md` for commands.
 Logs: `debug/builds/`, `debug/runtime/axil.log`, `debug/tests/`.
 
-Known pre-existing failure: `songbook` unit-test step 6 (`data.txt empty`)
-fails on clean main — unrelated to any change.
+Gig unit-test step 6 (`data.txt` seeding) passes after the 2026-08-21 source
+data migration (`AUDIT` E9).
 
 ## 9. Related docs
 

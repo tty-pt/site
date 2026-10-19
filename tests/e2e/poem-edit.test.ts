@@ -36,9 +36,10 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
     await page.goto(`${BASE}/poem/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', originalTitle);
-    await page.click('button[type="submit"]');
-
-    await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/poem\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const url = page.url();
     poemId = url.replace(`${BASE}/poem/`, "").replace(/\/$/, "");
 
@@ -65,11 +66,10 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
       );
     }
 
-    // ── 3. Edit title and upload file ─────────────────────────────────────────
+    // ── 3. Edit title and fill content ─────────────────────────────────────────
     await page.fill('input[name="title"]', editedTitle);
-    const fileInput = page.locator('input[type="file"][name="body_content"]');
-    await fileInput.setInputFiles(tmpFile);
-    await page.click('button[type="submit"]');
+    await page.fill('textarea[name="body_content"]', poemContent);
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to /poem/<id> after save
     await page.waitForURL(`${BASE}/poem/${poemId}`, { timeout: 8000 });
@@ -89,7 +89,7 @@ Deno.test("poem edit: login → add poem → edit title+file → verify detail p
     // Cleanup: remove created poem directory
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone or never created — ignore
       }

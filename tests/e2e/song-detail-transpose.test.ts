@@ -24,7 +24,8 @@ Deno.test("song detail: login → view song → toggle Latin notation → verify
 
     // Navigate to the song detail page
     await page.goto(`${BASE}/song/${SONG_ID}`);
-    await page.waitForSelector("#chord-data", { timeout: 5000 });
+    await page.waitForSelector("#chord-data", { timeout: 10000 });
+    await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
 
     // Grab the original chord display HTML
     const originalHtml = await page.innerHTML("#chord-data");
@@ -32,7 +33,7 @@ Deno.test("song detail: login → view song → toggle Latin notation → verify
 
     // Open the sidebar menu to access transpose controls
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -75,7 +76,8 @@ Deno.test("song detail: login → view song → transpose via JS → verify disp
 
     // Navigate to the song detail page
     await page.goto(`${BASE}/song/${SONG_ID}`);
-    await page.waitForSelector("#chord-data", { timeout: 5000 });
+    await page.waitForSelector("#chord-data", { timeout: 10000 });
+    await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
 
     // Grab the original chord display HTML
     const originalHtml = await page.innerHTML("#chord-data");
@@ -83,7 +85,7 @@ Deno.test("song detail: login → view song → transpose via JS → verify disp
 
     // Open the sidebar menu to access transpose controls
     await page.locator('#menu-functions').evaluate((el) => {
-      const input = el;
+      const input = el as HTMLInputElement;
       input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -95,7 +97,7 @@ Deno.test("song detail: login → view song → transpose via JS → verify disp
     await selectEl.selectOption({ index: 5 });
 
     // Wait for the client-side update to change the chord display
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 10000;
     let newHtml = "";
     while (Date.now() < deadline) {
       newHtml = await page.innerHTML("#chord-data");

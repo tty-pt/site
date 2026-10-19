@@ -32,7 +32,10 @@ Consequences:
    the form ignores.
 3. **Form submission works with zero JS.** The widget must sit in a real
    `<form>`; native controls submit the exact values the server understands
-   (see `docs/FILTERS.md` for the multi-ref repeated-keys wire format).
+   (see `docs/FILTERS.md` for the multi-ref repeated-keys wire format). Note:
+   When complex pickers require pagination/search, they utilize a sibling GET
+   form. Navigating via this sibling GET form without JS intentionally discards
+   unsaved drafts in the main POST form (acceptable progressive enhancement degradation).
 4. **`data-*` hooks** for everything the client needs to find/enhance:
    `data-hyle-ms`-style namespace attributes. They identify the widget, its
    parts, and its current state in a framework-agnostic way.
@@ -92,8 +95,8 @@ Removing all `data-bud-*` from the HTML must leave a fully functional widget.
 
 ## 5. Guardrails (enforced in code review)
 
-1. No `bud` symbols/types in `external/hyle/src` or `include/hyle`; only
-   `external/hyle/c/libhyle-bud` may depend on bud.
+1. No `bud` symbols/types in `external/libhyle/src` or `include/hyle`; only
+   `external/libhyle-bud` may depend on bud.
 2. The widget's client behavior must never REQUIRE `bud-client.js`, the WASM
    bridge, or the patch stream.
 3. All interactivity must have a no-JS path; all input must use native controls
@@ -102,7 +105,11 @@ Removing all `data-bud-*` from the HTML must leave a fully functional widget.
    `data-bud-*` as free to change.
 5. hyle may become WASM-only later — SSR output must stay plain HTML with no
    hidden runtime dependency.
-6. Server writes still route through hyle `put`/`del` (`source_update_item` /
+6. Zero site-specific JavaScript: `htdocs/*.js` (`hyle-fragments.js`,
+   `bud-client.js`, `bud-hydrate.js`) must remain 100% generic transports
+   driven only by neutral `data-*` hooks. Never put domain selectors, classes,
+   or logic into JS.
+7. Server writes still route through hyle `put`/`del` (`source_update_item` /
    `source_delete_item`) so the FTS index stays live.
 
 ## 6. Related docs

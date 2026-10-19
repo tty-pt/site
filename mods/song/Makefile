@@ -1,17 +1,24 @@
-EXTRA_CFLAGS += -I../common
-EXTRA_LDLIBS += -lbud -laxil-auth
-EXTRA_CFLAGS += -I./lib/transp
-EXTRA_LDLIBS += ./lib/transp/libtransp.a -ljson-c
+HYLE_DIR = $(REPO_ROOT)/external/libhyle
+HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
+TRANSP_DIR = $(REPO_ROOT)/external/libtransp
+EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_BUD_DIR)/include
+EXTRA_LDLIBS += -lbud
+EXTRA_LDLIBS += -ltransp -ljson-c
+EXTRA_LDLIBS += -lhyle
+EXTRA_LDLIBS += -lhyle-bud
 
 # WASM targets must be defined before including build.mk so the shared
 # all:/wasm: rules can see them during parse time.
 WASM_TARGETS = $(WASM_PATH)/song_detail.wasm
-song_detail-src = ux/detail.c
-song_detail-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/song/lib/transp
+song_detail-src = ux/detail.c $(REPO_ROOT)/external/libtransp/src/music.c
+song_detail-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/external/libtransp/include
+
+include ../../external/libhyle-bud/hyle-bud-wasm.mk
+song_detail-src += $(HYLE_BUD_WASM_SRC)
+song_detail-cflags += $(HYLE_BUD_WASM_CFLAGS)
 
 include ../../build.mk
 
-all: transp.so
+$(TARGET): ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/ux/site_page.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h ../common/viewer_zoom.h
 
-transp.so:
-	${MAKE} -C lib/transp
+$(WASM_PATH)/song_detail.wasm: ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/ux/site_chrome.h ../common/viewer_zoom.h

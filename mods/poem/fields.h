@@ -12,9 +12,8 @@
 #ifndef POEM_FIELDS_H
 #define POEM_FIELDS_H
 
-#include "bud/bud.h"
+#include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
 
 typedef struct {
 	char id[128];
@@ -24,13 +23,31 @@ typedef struct {
 
 /* ── Poem record fields ──────────────────────────────────────── */
 
-static const bud_field_desc_t poem_fields[] = {
-	REC_FIELD(id, poem_cache_t, id, 128, 1, 0, 0, 0),
-	REC_FIELD(title, poem_cache_t, title, 256, 1, 1, 1, 1),
-	EXCL_FIELD(owner, poem_cache_t, owner, 32, BUD_QM_STR, 1),
-	EXCL_FIELD_VF(body_content, BUD_QM_VSTR, 1, 0, "pt_PT.html"), FIELD_END
+static const hyle_schema_desc_t poem_fields[] = {
+	FIELD_TEXT(id, poem_cache_t),
+	FIELD_TEXT(title, poem_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+	FIELD_EXCL(owner, poem_cache_t, .in_meta = 1),
+	FIELD_FILE(body_content, "pt_PT.html"),
+	FIELD_END
 };
 
 #define POEM_FIELD_COUNT (sizeof(poem_fields) / sizeof(poem_fields[0]) - 1)
+
+#ifndef __wasm__
+static const source_list_field_t poem_list_fields[] = {
+	{ "title", "Title" },
+	{ "owner", "Owner" },
+};
+
+static const source_list_view_t poem_list_view = {
+	"poem",
+	poem_list_fields,
+	sizeof(poem_list_fields) / sizeof(poem_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+#endif
 
 #endif

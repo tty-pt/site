@@ -12,9 +12,9 @@
 #ifndef SONG_FIELDS_H
 #define SONG_FIELDS_H
 
-#include "bud/bud.h"
+#include <hyle/schema.h>
 #include <stddef.h>
-#include "../common/field_macros.h"
+#include "../common/state_macros.h"
 
 typedef struct {
 	char id[128];
@@ -39,6 +39,7 @@ typedef struct {
 	char page_user[64];
 	char path[256];
 	int zoom;
+	char lang[32];
 } app_state_t;
 
 /* ── Song type entity ────────────────────────────────────────── */
@@ -48,41 +49,87 @@ typedef struct {
 	char name[256];
 } song_type_cache_t;
 
-static const bud_field_desc_t song_type_fields[] = {
-	REC_FIELD(id, song_type_cache_t, id, 64, 1, 0, 0, 0),
-	REC_FIELD(name, song_type_cache_t, name, 256, 1, 0, 0, 1),
-	INVERSE_FIELD(songs, "song.items", "type"), FIELD_END
+static const hyle_schema_desc_t song_type_fields[] = {
+	FIELD_TEXT(id, song_type_cache_t),
+	FIELD_TEXT(name, song_type_cache_t, .in_meta = 1),
+	FIELD_INVERSE(songs, "song.items", "type"),
+	FIELD_END
 };
 
 #define SONG_TYPE_FIELD_COUNT                                                  \
 	(sizeof(song_type_fields) / sizeof(song_type_fields[0]) - 1)
 
+/* ── Song author entity ──────────────────────────────────────── */
+
+typedef struct {
+	char id[64];
+	char name[256];
+} song_author_cache_t;
+
+static const hyle_schema_desc_t song_author_fields[] = {
+	FIELD_TEXT(id, song_author_cache_t),
+	FIELD_TEXT(name, song_author_cache_t, .in_meta = 1),
+	FIELD_INVERSE(songs, "song.items", "author"),
+	FIELD_END
+};
+
+#define SONG_AUTHOR_FIELD_COUNT                                                \
+	(sizeof(song_author_fields) / sizeof(song_author_fields[0]) - 1)
+
 /* ── Song record fields ──────────────────────────────────────── */
 
-static const bud_field_desc_t song_fields[] = {
-	REC_FIELD(id, song_cache_t, id, 128, 1, 0, 0, 0),
-	REC_FIELD(title, song_cache_t, title, 256, 1, 1, 1, 1),
-	MULTI_REF_FIELD_SM(
-	        type, song_cache_t, type, 2048, "song.types", "songs", 1,
-	        "dropdown", "and"),
-	REC_FIELD(author, song_cache_t, author, 256, 1, 0, 0, 1),
-	REC_FIELD(yt, song_cache_t, yt, 512, 1, 0, 0, 1),
-	REC_FIELD(audio, song_cache_t, audio, 512, 1, 0, 0, 1),
-	REC_FIELD(pdf, song_cache_t, pdf, 512, 1, 0, 0, 1),
-	EXCL_FIELD_VF(data, BUD_QM_VSTR, 1, 0, "data.txt"),
-	EXCL_FIELD(owner, song_cache_t, owner, 32, BUD_QM_STR, 0),
-	OVERLAY_INT(transpose, app_state_t, transpose),
-	OVERLAY_INT(use_latin, app_state_t, use_latin),
-	OVERLAY_INT(show_media, app_state_t, show_media),
-	OVERLAY_INT(zoom, app_state_t, zoom),
-	OVERLAY_INT(original_key, app_state_t, original_key),
-	OVERLAY_INT(is_owner, app_state_t, is_owner),
-	OVERLAY_STR(page_user, app_state_t, page_user, 64),
-	OVERLAY_STR(path, app_state_t, path, 256),
-	OVERLAY_STR(save_url, app_state_t, save_url, 512),
+static const hyle_schema_desc_t song_fields[] = {
+	FIELD_TEXT(id, song_cache_t),
+	FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+	FIELD_ARRAY(
+	        FIELD_REF, type, song_cache_t, "song.types",
+	        .ref_inverse = "songs", .filter_style = "dropdown",
+	        .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+	FIELD_REF(
+	        author, song_cache_t, "song.authors",
+	        .ref_inverse = "songs", .filter_style = "dropdown",
+	        .allow_add = 1, .in_meta = 1),
+	FIELD_TEXT(yt, song_cache_t, .in_meta = 1),
+	FIELD_TEXT(audio, song_cache_t, .in_meta = 1),
+	FIELD_TEXT(pdf, song_cache_t, .in_meta = 1),
+	FIELD_FILE(data, "data.txt"),
+	FIELD_EXCL(owner, song_cache_t),
+	FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
 	FIELD_END
 };
 
 #define SONG_FIELD_COUNT (sizeof(song_fields) / sizeof(song_fields[0]) - 1)
+
+#define SONG_APP_SCHEMA(F_STR, F_INT, st)                                      \
+	F_STR(st, save_url, 512)                                               \
+	F_STR(st, page_user, 64)                                               \
+	F_STR(st, path, 256)                                                   \
+	F_STR(st, lang, 32)                                                    \
+	F_INT(st, transpose)                                                   \
+	F_INT(st, use_latin)                                                   \
+	F_INT(st, show_media)                                                  \
+	F_INT(st, zoom)                                                        \
+	F_INT(st, original_key)                                                \
+	F_INT(st, is_owner)
+
+BUD_STATE_FIELDS(app_state_t, song_app_fields, SONG_APP_SCHEMA)
+
+#ifndef __wasm__
+static const source_list_field_t song_list_fields[] = {
+	{ "title", "Title" },
+	{ "type", "Type" },
+	{ "author", "Author" },
+};
+
+static const source_list_view_t song_list_view = {
+	"song",
+	song_list_fields,
+	sizeof(song_list_fields) / sizeof(song_list_fields[0]),
+	NULL,
+	"lyrics",
+	"Lyrics",
+	"e.g. \"a quiet place\"",
+};
+#endif
 
 #endif

@@ -1,0 +1,6 @@
+env.bud_host_log
+env.bud_host_mark_dirty
+env.bud_host_flush
+env.bud_host_fetch
+env.bud_host_set_location
+env.bud_host_emit_patch

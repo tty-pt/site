@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Full-text (stoma) search semantics on the song listing.
+# Full-text (lemma) search semantics on the song listing.
 # Pins the token-prefix behavior that replaced ci_substr substring matching:
 #  - "star" is NOT a token prefix of "estar"/"Starlight" -> 0 rows (old code matched)
 #  - "cor" IS a token prefix ("Coração", "Corações") -> rows
@@ -61,23 +61,25 @@ expect_zero "/song/?title=star" "mid-word 'star' must NOT match 'estar' (prefix 
 expect_rows "/song/?title=cor" "token prefix 'cor' matches"
 expect_zero "/song/?title=coracao" "accent-sensitive: 'coracao' must NOT match 'Coração'"
 expect_zero "/song/?title=zzzzzz" "non-matching value -> 0 rows"
+expect_rows "/song/?title=" "empty title param -> all songs (not filtered)"
+expect_rows "/song/?title=&author=" "all empty params -> all songs"
 expect_rows "/song/?title=cor&author=joaquim" "multi-field AND (title+author)"
 expect_zero "/song/?title=cor&author=zzzz" "multi-field AND with bad author -> 0 rows"
 
-# Content lookup (`data=` lyric/chord field) — corpus files: items/song/items/*/data.txt
-expect_rows "/song/?data=amazing" "content lookup: 'amazing' matches lyrics"
-expect_rows "/song/?data=sweet" "content lookup: 'sweet' matches lyrics"
-expect_rows "/song/?data=amazing+sound" "content lookup: multi-token AND ('amazing sound')"
-expect_zero "/song/?data=amazing+zzz" "content lookup: AND with bad token -> 0 rows"
-expect_zero "/song/?data=zzzzzz" "content lookup: non-matching value -> 0 rows"
-expect_rows "/song/?title=grace&data=sweet" "content lookup ANDs with metadata filters"
+# Lyrics lookup (`lyrics=` derived lyric field) — corpus files: var/song/*/data.txt
+expect_rows "/song/?lyrics=amazing" "lyrics lookup: 'amazing' matches lyrics"
+expect_rows "/song/?lyrics=sweet" "lyrics lookup: 'sweet' matches lyrics"
+expect_rows "/song/?lyrics=amazing+sound" "lyrics lookup: multi-token AND ('amazing sound')"
+expect_zero "/song/?lyrics=amazing+zzz" "lyrics lookup: AND with bad token -> 0 rows"
+expect_zero "/song/?lyrics=zzzzzz" "lyrics lookup: non-matching value -> 0 rows"
+expect_rows "/song/?title=grace&lyrics=sweet" "lyrics lookup ANDs with metadata filters"
 
 # Quoted phrase: contiguous tokens in order (sopra_em_nos, pra_te_adorar)
-expect_rows "/song/?data=%22minha+alma+tem+sede%22" \
+expect_rows "/song/?lyrics=%22minha+alma+tem+sede%22" \
   "quoted phrase 'minha alma tem sede' matches contiguous tokens"
-expect_zero "/song/?data=%22sede+minha+alma%22" \
+expect_zero "/song/?lyrics=%22sede+minha+alma%22" \
   "quoted phrase: reversed order -> 0 rows"
-expect_zero "/song/?data=%22sede+minha%22" \
+expect_zero "/song/?lyrics=%22sede+minha%22" \
   "quoted phrase: spread tokens -> 0 rows"
 
 pass "FTS song-search smoke tests all OK"

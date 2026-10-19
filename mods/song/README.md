@@ -13,11 +13,11 @@ The song module provides functionality for:
 ## Architecture
 
 - **Backend:** `song.c` - C module with axil HTTP handlers
-- **SSR:** Server-side HTML built with bud (via `mods/index` + common layout)
-- **Dataset:** Uses the common dataset system for loading song data
-- **Storage:** Filesystem + qmap index database
+- **SSR & Forms:** Server-side HTML built with bud and `site_ui_form_from_desc` (via `mods/index` + common layout)
+- **Dataset & Storage:** `libhyle-source` filesystem driver (`store_fs`) storing `var/song/{id}/`
+- **Schema:** Defined in `fields.h` using canonical `<hyle/schema.h>` descriptors (`hyle_schema_desc_t`)
 - **Transposition:** C library (`lib/transp/`) for chord transposition
-- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`)
+- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
 
 ### SSR Route Pattern
 
@@ -109,10 +109,10 @@ curl "http://localhost:8080/api/song/transpose?id=amazing_grace&t=1&l=1"
 
 ### Directory Structure
 
-Songs are stored in `items/song/items/{id}/`:
+Songs are stored in `var/song/{id}/`:
 
 ```
-items/song/items/
+var/song/
 └── amazing_grace/
     ├── data.txt    # Song with chords and lyrics (required)
     ├── title       # Display title (optional)
@@ -125,8 +125,8 @@ items/song/items/
 ```
 
 **Required Directory:**
-- `items/song/items/` must exist before uploads will work
-- Created automatically by `make test-data-dirs` or manually: `mkdir -p items/song/items`
+- `var/song/` must exist before uploads will work
+- Created automatically by `make test-data-dirs` or manually: `mkdir -p var/song`
 
 ### File Formats
 
@@ -160,46 +160,45 @@ Song types are categories used for organizing songs and filtering. Default types
 - saida (Closing)
 - any (General use)
 
-## Dataset System
+## Schema and Dataset Architecture
 
-The song module uses the common dataset system for loading song data across the application.
-
-### Data Flow
-
-```
-index_hd (qmap) ← populated at startup by index_open
-       ↓
-dataset_def.source_hd = index_hd
-       ↓
-dataset_rows_json_build iterates over source_hd
-       ↓
-For each ID, looks up JSON from source_hd
-       ↓
-If JSON empty, calls dataset_scan_item to read from disk
-```
-
-### Dataset Definition (song.c)
+The song module defines its schema in `fields.h` using canonical `<hyle/schema.h>` macros:
 
 ```c
-static const dataset_field_t fields[] = {
-    { "id", NULL, DATASET_FIELD_STRING, 0 },
-    { "title", "title", DATASET_FIELD_STRING, 1 },
-    { "type", "type", DATASET_FIELD_STRING, 1 },
-    { "author", "author", DATASET_FIELD_STRING, 1 },
-    { "yt", "yt", DATASET_FIELD_STRING, 1 },
-    { "audio", "audio", DATASET_FIELD_STRING, 1 },
-    { "pdf", "pdf", DATASET_FIELD_STRING, 1 },
-    { "data", "data.txt", DATASET_FIELD_STRING, 1 },
-    { "owner", "owner", DATASET_FIELD_STRING, 0 },
+static const hyle_schema_desc_t song_fields[] = {
+    FIELD_TEXT(id, song_cache_t),
+    FIELD_TEXT(title, song_cache_t, .required = 1, .min_length = 1, .in_meta = 1),
+    FIELD_ARRAY(FIELD_REF, type, song_cache_t, "song.types",
+                .ref_inverse = "songs", .filter_style = "dropdown",
+                .filter_mode = "and", .allow_add = 1, .in_meta = 1),
+    FIELD_REF(author, song_cache_t, "song.authors",
+              .ref_inverse = "songs", .filter_style = "dropdown",
+              .allow_add = 1, .in_meta = 1),
+    FIELD_TEXT(yt, song_cache_t, .in_meta = 1),
+    FIELD_TEXT(audio, song_cache_t, .in_meta = 1),
+    FIELD_TEXT(pdf, song_cache_t, .in_meta = 1),
+    FIELD_FILE(data, "data.txt"),
+    FIELD_EXCL(owner, song_cache_t),
+    FIELD_DERIVED(lyrics, "song.lyrics_from_data"),
+    FIELD_END
 };
+```
 
-dataset_def_t def = {
-    .id = "song.items",
-    .items_path = "items/song/items",
-    .source_hd = index_hd,
-    // ...
-};
-dataset_register(&def);
+In `song.c` `xy_install()`, the module registers datasets and standard handlers:
+
+```c
+source_setup("song.types", "name", sizeof(song_type_cache_t),
+             "var/song.types", song_type_fields, SONG_TYPE_FIELD_COUNT, 0, NULL);
+ref_field_register("song.items", "type");
+
+source_setup("song.authors", "name", sizeof(song_author_cache_t),
+             "var/song.authors", song_author_fields, SONG_AUTHOR_FIELD_COUNT, 0, NULL);
+ref_field_register("song.items", "author");
+
+source_setup("song.items", NULL, sizeof(song_cache_t),
+             "var/song", song_fields, SONG_FIELD_COUNT, 0, &song_list_view);
+
+index_open("Song", "song.items", NULL, NULL, NULL, NULL, NULL, NULL);
 ```
 
 ## Testing
@@ -235,11 +234,11 @@ For debugging test failures, see [debug/README.md](../../debug/README.md).
 
 ### Upload fails with HTTP 500
 
-**Cause:** Directory `items/song/items/` doesn't exist.
+**Cause:** Directory `var/song/` doesn't exist.
 
 **Fix:**
 ```bash
-mkdir -p items/song/items
+mkdir -p var/song
 ```
 
 ### Songs don't appear in listing
@@ -252,7 +251,7 @@ mkdir -p items/song/items
 **Debug:**
 ```bash
 # Check if directory exists
-ls -la items/song/items/
+ls -la var/song/
 
 # Check if axil is running
 pgrep -a axildc
@@ -268,10 +267,10 @@ tail -100 debug/runtime/axil.log
 **Debug:**
 ```bash
 # Check song exists
-ls -la items/song/items/{song_id}/
+ls -la var/song/{song_id}/
 
 # Check data.txt has content
-cat items/song/items/{song_id}/data.txt
+cat var/song/{song_id}/data.txt
 ```
 
 ## See Also

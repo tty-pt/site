@@ -1,130 +1,33 @@
 #ifndef SOURCE_H
 #define SOURCE_H
 
-#include <stddef.h>
-#include <stdint.h>
-#include <json-c/json.h>
-#include <ttypt/xy.h>
+/*
+ * mods/source — Caller-facing XY hook declarations over libhyle-source.
+ * Types and structs live in source-types.h.
+ * Implementers must include source-types.h, not this header.
+ */
 
-typedef enum {
-	SOURCE_ACCESS_PUBLIC = 0,
-	DATASET_ACCESS_LOGIN,
-} source_access_policy_t;
+#include "source-types.h"
 
-typedef enum {
-	DATASET_ACCESS_RESULT_ALLOW = 0,
-	DATASET_ACCESS_RESULT_UNAUTHORIZED,
-	DATASET_ACCESS_RESULT_FORBIDDEN,
-} source_access_result_t;
-
-#define SOURCE_FIELD_KIND_INVERSE 5
-
-typedef enum {
-	SOURCE_FIELD_STRING = 0,
-	DATASET_FIELD_INT,
-	DATASET_FIELD_BOOL,
-	DATASET_FIELD_NULLABLE_STRING,
-	SOURCE_FIELD_REFERENCE,
-	SOURCE_FIELD_MULTI_REFERENCE,
-	SOURCE_FIELD_INVERSE,
-} source_field_type_t;
-
-typedef struct {
-	const char *name;
-	const char *file;
-	source_field_type_t type;
-	int writable;
-	const char *target_source;
-	const char *inverse_name;
-	int required;
-	int64_t min;
-	int64_t max;
-	size_t min_length;
-	size_t max_length;
-	const char *pattern;
-	const char *filter_style;
-	const char *filter_mode;
-} source_field_t;
-
-typedef struct {
-	const char *id;
-	const char *key_field;
-	const char *items_path;
-	source_access_policy_t access_policy;
-	const source_field_t *fields;
-	size_t field_count;
-	unsigned source_hd;
-	unsigned fields_hd;
-	uint32_t record_id;
-	unsigned flags;
-	void *user;
-} source_def_t;
-
-typedef int (*source_each_cb_t)(const source_def_t *, void *);
-
-#define SOURCE_FLAG_VOLATILE 64u
-#define SOURCE_ERR_VALIDATION -2
-
-/* ── State JSON builder ─────────────────────────────────────────── */
-
-typedef enum {
-	SF_RECORD,
-	SF_EXCLUDE,
-	SF_REF_DISPLAY,
-} source_state_kind_t;
-
-typedef struct {
-	const char *name;
-	source_state_kind_t kind;
-} source_state_field_t;
-
-typedef struct {
-	const char *key;
-	int is_int;
-	int int_val;
-	const char *str_val;
-} source_state_kv_t;
-
-typedef struct {
-	const char *key;
-	char *dest;
-	size_t dest_size;
-} json_str_map_t;
-
-static inline void
-json_extract_strings(json_object *jo, const json_str_map_t *map)
-{
-	if (!jo || !map)
-		return;
-	json_object *jval;
-	for (const json_str_map_t *m = map; m->key; m++) {
-		if (json_object_object_get_ex(jo, m->key, &jval))
-			snprintf(
-			        m->dest, m->dest_size, "%s",
-			        json_object_get_string(jval));
-	}
-}
-
-/* ── Unified field schema generators ───────────────────────────── */
-
-struct bud_field_desc;
-
-#ifndef SOURCE_IMPL
 XY_DECL(int, source_clear_inverse_refs,
+    int, fd,
     const char *, dataset_id,
     const char *, item_id);
-XY_DECL(int, source_def_to_qmap,
-    const struct bud_field_desc *, defs, int, count, void *, out);
+XY_DECL(int, source_def_to_corm,
+    const source_desc_t *, defs, int, count, void *, out);
 XY_DECL(int, source_def_to_source_fields,
-    const struct bud_field_desc *, defs, int, count, void *, out);
+    const source_desc_t *, defs, int, count, void *, out);
 XY_DECL(int, source_def_to_meta_fields,
-    const struct bud_field_desc *, defs, int, count,
+    const source_desc_t *, defs, int, count,
     const void *, record, void *, out);
 XY_DECL(int, source_build_state_specs,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     source_state_field_t *, specs,
     int, max_specs);
 XY_DECL(source_def_t *, source_find, const char *, dataset_id);
+XY_DECL(int, source_item_exists,
+    const char *, dataset_id,
+    const char *, item_id);
 XY_DECL(int, source_register, const source_def_t *, def);
 XY_DECL(int, source_refresh_row,
     int, fd, const char *, dataset_id, const char *, id);
@@ -145,6 +48,8 @@ XY_DECL(unsigned, source_query,
 XY_DECL(unsigned, source_get_data_hd, const char *, dataset_id);
 XY_DECL(unsigned, source_get_fields_hd, const char *, dataset_id);
 XY_DECL(unsigned, source_get_schema_hd, const char *, dataset_id);
+XY_DECL(const source_list_view_t *, source_get_list_view,
+	const char *, dataset_id);
 XY_DECL(int, source_build_state_json,
     const char *, dataset_id,
     const char *, item_id,
@@ -156,7 +61,7 @@ XY_DECL(int, source_state_overlay,
 XY_DECL(int, source_overlay_from_desc,
     json_object *, jo,
     const void *, state,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, int_kind,
     int, str_kind);
 XY_DECL(int, source_respond_page_state,
@@ -165,12 +70,12 @@ XY_DECL(int, source_respond_page_state,
     const char *, item_id,
     const source_state_field_t *, specs,
     const void *, state_struct,
-    const struct bud_field_desc *, overlay_fields,
+    const source_desc_t *, overlay_fields,
     void *, custom_overlay_fn,
     void *, user_data);
 XY_DECL(json_object *, source_overlay_array,
     const void *, items, int, count, size_t, elem_size,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, int_kind, int, str_kind);
 XY_DECL(int, source_resolve_ref_display_str,
     const char *, dataset_id,
@@ -180,18 +85,18 @@ XY_DECL(int, source_resolve_ref_display_str,
 XY_DECL(int, source_resolve_meta_display,
     const char *, dataset_id,
     const char *, item_id,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     void *, state);
 XY_DECL(int, source_meta_read,
     const char *, path,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     void *, record,
     size_t, record_size);
 XY_DECL(int, source_meta_write,
     const char *, path,
-    const struct bud_field_desc *, fields,
+    const source_desc_t *, fields,
     int, count,
     const void *, record);
 XY_DECL(uint32_t, source_setup,
@@ -199,9 +104,10 @@ XY_DECL(uint32_t, source_setup,
     const char *, key_field,
     size_t, record_size,
     const char *, items_path,
-    const struct bud_field_desc *, defs,
+    const source_desc_t *, defs,
     int, field_count,
-    unsigned, flags);
+    unsigned, flags,
+    const source_list_view_t *, list_view);
 
 XY_DECL(size_t, source_inv_keys,
     const char *, dataset_id,
@@ -216,7 +122,7 @@ XY_DECL(const char *, source_inv_key_at,
     uint32_t, target_pos,
     size_t, index);
 
-XY_DECL(const char *, qmap_get_field_str,
+XY_DECL(const char *, corm_get_field_str,
     unsigned, hd,
     const char *, id,
     const char *, field);
@@ -231,5 +137,172 @@ XY_DECL(int, source_dsv_save,
     const char *, pval,
     unsigned, fhd,
     void *, user);
-#endif /* SOURCE_IMPL */
-#endif
+XY_DECL(const source_desc_t *, source_get_desc,
+    const char *, dataset_id,
+    int *, count_out);
+XY_DECL(size_t, source_get_record_size,
+    const char *, dataset_id);
+XY_DECL(int, source_dataset_collect_options,
+    const char *, dataset_id,
+    const char *, label_field,
+    const char *, default_opt,
+    source_opt_buf_t *, buf,
+    const char **, opts,
+    int, max);
+XY_DECL(int, source_resolve_partition_key,
+    const char *, primary_dataset,
+    const char *, partition_dataset,
+    const char *, target_field,
+    char *, id_inout,
+    size_t, id_sz);
+XY_DECL(int, source_ordered_sync_form,
+    const char *, source_id,
+    const char *, partition_id,
+    const char *, amount_param,
+    const char *, remove_param_prefix,
+    const source_ordered_field_sync_t *, fields,
+    size_t, n_fields);
+
+XY_DECL(unsigned, source_register_ordered,
+    const source_ordered_def_t *, def);
+
+XY_DECL(int, source_ordered_count,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(const char *, source_ordered_key_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos);
+
+XY_DECL(int, source_ordered_append,
+    const char *, source_id,
+    const char *, partition_val,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(int, source_ordered_insert_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(int, source_ordered_remove_at,
+    const char *, source_id,
+    const char *, partition_val,
+    int, pos);
+
+XY_DECL(int, source_ordered_clear,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(int, source_ordered_save,
+    const char *, source_id,
+    const char *, partition_val);
+
+XY_DECL(int, source_put_row,
+    const char *, source_id,
+    const char *, row_id,
+    const char **, names,
+    const char **, values,
+    size_t, count);
+
+XY_DECL(const char *, source_ordered_get_field,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index,
+    const char *, field);
+
+XY_DECL(int, source_ordered_set_field,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index,
+    const char *, field,
+    const char *, value);
+
+XY_DECL(int, source_ordered_remove_and_save,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index);
+
+XY_DECL(int, source_ordered_append_and_save,
+    const char *, source_id,
+    const char *, partition_val,
+    const char **, names,
+    const char **, vals,
+    size_t, count);
+
+XY_DECL(int, source_ordered_for_each,
+    const char *, source_id,
+    const char *, partition_val,
+    source_ordered_each_fn, fn,
+    void *, user);
+
+XY_DECL(size_t, source_find_referencing,
+    const char *, source_dataset,
+    const char *, ref_field,
+    const char *, target_id,
+    const char **, ids_out,
+    size_t, max);
+
+XY_DECL(size_t, source_for_each_referencing,
+    const char *, source_dataset,
+    const char *, ref_field,
+    const char *, target_id,
+    source_ref_cb_t, cb,
+    void *, user);
+
+XY_DECL(int, source_ordered_find,
+    const char *, source_id,
+    const char *, partition_val,
+    const char *, field,
+    const char *, val);
+
+XY_DECL(int, source_ordered_remove_matching,
+    const char *, source_id,
+    const char *, partition_val,
+    const char *, field,
+    const char *, val);
+
+XY_DECL(int, source_ordered_replace_row,
+    const char *, source_id,
+    const char *, partition_val,
+    int, index,
+    const char **, names,
+    const char **, vals,
+    size_t, count);
+
+XY_DECL(const char *, source_get_field,
+    const char *, dataset_id,
+    const char *, item_id,
+    const char *, field);
+
+XY_DECL(int, source_set_field,
+    int, fd,
+    const char *, dataset_id,
+    const char *, item_id,
+    const char *, field,
+    const char *, value);
+
+XY_DECL(int, source_get_field_int,
+    const char *, dataset_id,
+    const char *, item_id,
+    const char *, field,
+    int, def_val);
+
+XY_DECL(int, source_set_field_int,
+    int, fd,
+    const char *, dataset_id,
+    const char *, item_id,
+    const char *, field,
+    int, val);
+
+XY_DECL(int, source_register_derive,
+    const char *, derive_key,
+    source_derive_fn_t, fn,
+    void *, user);
+
+#endif /* SOURCE_H */

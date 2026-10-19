@@ -33,9 +33,10 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
     await pageA.goto(`${BASE}/poem/add`);
     await pageA.waitForSelector('input[name="title"]', { timeout: 5000 });
     await pageA.fill('input[name="title"]', title);
-    await pageA.click('button[type="submit"]');
-
-    await pageA.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
+    await Promise.all([
+      pageA.waitForURL(/\/poem\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      pageA.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const url = pageA.url();
     poemId = url.replace(`${BASE}/poem/`, "").replace(/\/$/, "");
 
@@ -118,7 +119,7 @@ Deno.test("poem ownership: user B cannot edit or delete user A's poem", async ()
 
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone — ignore
       }

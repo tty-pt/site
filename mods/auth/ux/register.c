@@ -1,28 +1,30 @@
 bud_node *auth_render_register(const char *user)
 {
+	const char *user_lbl = ui_t("Username:");
+	const char *pass_lbl = ui_t("Password:");
+	const char *confirm_lbl = ui_t("Confirm password:");
+	const char *submit_lbl = ui_t("Register");
+	const char *reg_title = ui_t("Register");
+
 	bud_node *frag =
-	        lx_frag(lx_el("form", lx_attr("action", "/auth/register"),
-	                      lx_attr("method", "POST"),
-	                      lx_attr("class", "flex flex-col gap-4"),
-	                      lx_el("label", lx_text("Username:"),
-	                            lx_el("input", lx_attr("required", ""),
-	                                  lx_attr("name", "username"))),
-	                      lx_el("label", lx_text("Password:"),
-	                            lx_el("input", lx_attr("required", ""),
-	                                  lx_attr("name", "password"),
-	                                  lx_attr("type", "password"))),
-	                      lx_el("label", lx_text("Confirm:"),
-	                            lx_el("input", lx_attr("required", ""),
-	                                  lx_attr("name", "password2"),
-	                                  lx_attr("type", "password"))),
-	                      lx_el("label", lx_text("Email:"),
-	                            lx_el("input", lx_attr("required", ""),
-	                                  lx_attr("name", "email"),
-	                                  lx_attr("type", "email"))),
-	                      lx_el("button", lx_attr("type", "submit"),
-	                            lx_text("Register"))))
-	                .data.node;
+	        bud_tpl("<form action='/auth/register' method='POST' "
+	                "class='flex flex-col gap-4'>"
+	                "  <label>%s"
+	                "    <input required name='username'/>"
+	                "  </label>"
+	                "  <label>%s"
+	                "    <input required name='password' type='password'/>"
+	                "  </label>"
+	                "  <label>%s"
+	                "    <input required name='password2' type='password'/>"
+	                "  </label>"
+	                "  <label>Email:"
+	                "    <input required name='email' type='email'/>"
+	                "  </label>"
+	                "  <button type='submit'>%s</button>"
+	                "</form>",
+	                user_lbl, pass_lbl, confirm_lbl, submit_lbl);
 
 	return site_ui_form_page(
-	        user, "Register", "/auth/register", "📝", NULL, frag);
+	        user, reg_title, "/auth/register", "\xf0\x9f\x93\x9d", NULL, NULL, frag);
 }

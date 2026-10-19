@@ -35,7 +35,7 @@ Deno.test({
     await page.goto(`${BASE}/song/add`);
     await page.waitForSelector('input[name="title"]');
     await page.fill('input[name="title"]', songTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     await page.waitForURL(/\/song\/[^/]+$/);
     songId = page.url().split("/song/")[1].replace(/\/$/, "");
@@ -46,7 +46,7 @@ Deno.test({
     await waitForText(page, "body", songTitle);
 
     // 3. Perform deletion
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to song list
     await page.waitForURL(`${BASE}/song`);
@@ -58,7 +58,7 @@ Deno.test({
     }
 
     // 5. Verify files are removed from disk
-    const itemPath = `${REPO_ROOT}/items/song/items/${songId}`;
+    const itemPath = `${REPO_ROOT}/var/song/${songId}`;
     try {
       await Deno.stat(itemPath);
       throw new Error(`Item directory ${itemPath} still exists after deletion`);
@@ -72,7 +72,7 @@ Deno.test({
     await browser.close();
     if (songId) {
       try {
-        await Deno.remove(`${REPO_ROOT}/items/song/items/${songId}`, { recursive: true });
+        await Deno.remove(`${REPO_ROOT}/var/song/${songId}`, { recursive: true });
       } catch { /* ignore */ }
     }
   }

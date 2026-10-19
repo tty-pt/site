@@ -32,7 +32,7 @@ Deno.test("song: login → add song → verify detail page", async () => {
 
     // ── 2. Fill title and submit ────────────────────────────────────────────
     await page.fill('input[name="title"]', songTitle);
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
 
     // Should redirect to /song/<id> after creation
     await page.waitForURL(`${BASE}/song/${expectedId}`, { timeout: 5000 });
@@ -50,7 +50,7 @@ Deno.test("song: login → add song → verify detail page", async () => {
 
     // ── Cleanup: remove created song directory ─────────────────────────────
     try {
-      await Deno.remove(`items/song/items/${expectedId}`, { recursive: true });
+      await Deno.remove(`var/song/${expectedId}`, { recursive: true });
     } catch {
       // Already gone or never created — ignore
     }

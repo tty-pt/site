@@ -2,32 +2,28 @@
 #include <limits.h>
 #include <dirent.h>
 #include <errno.h>
-#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <ttypt/qmap.h>
+#include <ttypt/corm.h>
 #include <ttypt/xy-mod.h>
 #include <ttypt/axil.h>
 
 #include "./../common/common.h"
+#include "./../i18n/i18n.h"
 #include "./../source/source.h"
 #include "./../mpfd/mpfd.h"
 #include "./../auth/auth.h"
 
-typedef void (*index_cleanup_fn)(const char *id);
-typedef size_t (*index_format_fn)(
-        const char *id, const char *val, char *out, size_t out_sz);
-typedef int (*index_detail_handler_fn)(int fd, char *body);
-typedef int (*index_handler_fn)(int fd, char *body);
+#include "index-types.h"
 
 #define MAX_MODULES 64
 
 static int index_add_get_handler(int fd, char *body);
+static int index_generic_edit_get_handler(int fd, char *body);
 static int index_delete_get_handler(int fd, char *body);
 static int index_delete_handler(int fd, char *body);
 int index_add_item(int fd, char *body, char *id_out, size_t id_len);
-int item_record_ownership(const char *item_path, const char *username);
 
 static char modules_json[256 * MAX_MODULES], *modules_json_end = modules_json;
 
@@ -42,63 +38,7 @@ static void (*module_cleanups[MAX_MODULES])(const char *id);
 static size_t module_slot_count = 0;
 
 #include "ux/all.c"
-
-/* Resolve filter options for a ref column into the state option pool.
- * Native-only (source/qmap) — the WASM unit must never see this. */
-static int idx_resolve_filter_options(
-        const char *target_source, unsigned target_hd, list_opt_t *pool,
-        int pool_avail)
-{
-	unsigned row_hd;
-	unsigned schema_hd;
-	char display_field[64] = "";
-	int nopts = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
-
-	if (!target_source || !target_source[0] || !target_hd)
-		return 0;
-
-	row_hd = source_get_data_hd(target_source);
-	if (!row_hd)
-		return 0;
-
-	schema_hd = source_get_schema_hd(target_source);
-	if (schema_hd) {
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (qmap_next(&key, &val, cur)) {
-			const char *fn = (const char *)key;
-			if (strcmp(fn, "id") == 0)
-				continue;
-			strncpy(display_field, fn, sizeof(display_field) - 1);
-			break;
-		}
-		qmap_fin(cur);
-	}
-
-	cur = qmap_iter(row_hd, NULL, 0);
-	while (qmap_next(&key, &val, cur) && nopts < pool_avail) {
-		const char *row_id = (const char *)key;
-		const char *name = NULL;
-		if (display_field[0]) {
-			char name_key[320];
-			snprintf(
-			        name_key, sizeof(name_key), "%s:%s", row_id,
-			        display_field);
-			name = (const char *)qmap_get(target_hd, name_key);
-		}
-		strncpy(pool[nopts].id, row_id, sizeof(pool[nopts].id) - 1);
-		pool[nopts].id[sizeof(pool[nopts].id) - 1] = '\0';
-		strncpy(pool[nopts].label, name ? name : row_id,
-		        sizeof(pool[nopts].label) - 1);
-		pool[nopts].label[sizeof(pool[nopts].label) - 1] = '\0';
-		nopts++;
-	}
-	qmap_fin(cur);
-
-	return nopts;
-}
+#include "list_fill.c"
 
 int index_update_json(const char *id, const char *title)
 {
@@ -142,7 +82,7 @@ static const char *index_name(int fd)
 	static __thread char uri[256];
 	char *module;
 
-	axil_env_get(fd, uri, "DOCUMENT_URI");
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
 	module = strchr(uri + 1, '/');
 	if (module)
 		*module = '\0';
@@ -180,7 +120,7 @@ XY_IMPL(int, index_add_item,
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	title_len = mpfd_get("title", title, sizeof(title) - 1);
+	title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
@@ -191,223 +131,105 @@ XY_IMPL(int, index_add_item,
 		return server_error(fd, "Failed to resolve item path");
 
 	int r = mkdir(path, 0755);
-	if (r == -1 && errno != EEXIST)
+	if (r == -1 && errno == EEXIST)
+		return respond_error(
+		        fd, 409, "An item with that title already exists");
+	if (r == -1)
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
 
-	item_record_ownership(path, username);
+	if (module_item_owner_record(fd, module, id, username) != 0) {
+		item_remove_path_recursive(path);
+		return server_error(fd, "Failed to record ownership");
+	}
 
-	if (write_meta_file(path, "title", title, (size_t)title_len) != 0)
+	if (write_meta_file(path, "title", title, (size_t)title_len) != 0) {
+		item_remove_path_recursive(path);
 		return respond_error(
 		        fd, 403, "You don't have permissions for that");
+	}
 
 	{
 		char dataset_id[512];
 		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		source_refresh_row(fd, dataset_id, id);
+		if (source_refresh_row(fd, dataset_id, id) != 0) {
+			item_remove_path_recursive(path);
+			return server_error(fd, "Failed to refresh item");
+		}
 	}
 
 	snprintf(id_out, id_len, "%s", id);
 	return 0;
 }
 
-/* ── Schema & data querying (native-only: axil, source, qmap) ── */
-
-static int idx_schema_collect(
-        const char *dataset_id, const char *select_csv, col_t *cols,
-        int max_cols)
+#ifndef __wasm__
+XY_IMPL(int, list_respond_page,
+	int, fd,
+	list_state_t *, state,
+	const char *, module,
+	const char *, username)
 {
-	unsigned schema_hd;
-	int n = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
+	bud_node *layout;
+	char *json = NULL;
+	int rc = -1;
 
-	schema_hd = source_get_schema_hd(dataset_id);
-	if (!schema_hd)
-		return 0;
-
-	if (select_csv && select_csv[0]) {
-		char copy[256];
-		char *tok;
-		char *rest;
-
-		strncpy(copy, select_csv, sizeof(copy) - 1);
-		copy[sizeof(copy) - 1] = '\0';
-		rest = copy;
-		while ((tok = strtok_r(rest, ",", &rest)) && n < max_cols) {
-			strncpy(cols[n].key, tok, sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label), tok);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			val = qmap_get(schema_hd, tok);
-			cols[n].type = 0;
-			cols[n].target_source[0] = '\0';
-			cols[n].target_hd = 0;
-			cols[n].filter[0] = '\0';
-			if (val && ((const char *)val)[0] == '{') {
-				int t;
-				char ts[64] = "";
-				char fs[16] = "";
-				int m =
-				        sscanf((const char *)val,
-				               "{\"t\":%d,\"s\":\"%63[^\"]\","
-				               "\"f\":\"%15[^\"]\"",
-				               &t, ts, fs);
-				if (m >= 1)
-					cols[n].type = t;
-				if (m >= 2 && ts[0]) {
-					strncpy(cols[n].target_source, ts,
-					        sizeof(cols[n].target_source) -
-					                1);
-				}
-				if (m >= 3 && fs[0]) {
-					strncpy(cols[n].filter, fs,
-					        sizeof(cols[n].filter) - 1);
-				}
-			}
-			n++;
-		}
-	} else {
-		cur = qmap_iter(schema_hd, NULL, 0);
-		while (n < max_cols && qmap_next(&key, &val, cur)) {
-			strncpy(cols[n].key, (const char *)key,
-			        sizeof(cols[n].key) - 1);
-			cols[n].key[sizeof(cols[n].key) - 1] = '\0';
-			col_tok_label(
-			        cols[n].label, sizeof(cols[n].label),
-			        (const char *)key);
-			if (cols[n].label[0] >= 'a')
-				cols[n].label[0] -= 32;
-			cols[n].type = 0;
-			n++;
-		}
-		qmap_fin(cur);
+	if (!state || !module) {
+		if (fd >= 0)
+			respond_error(fd, 500, "Internal Server Error");
+		return -1;
 	}
-	return n;
+
+	size_t json_budget =
+		        8192 +
+		        (size_t)state->nids * (size_t)(state->ncols * 512 + 128) +
+		        (size_t)state->nopts * 256;
+	json = malloc(json_budget);
+	if (!json)
+		goto render;
+
+	if (list_state_to_json(state, json, json_budget) != 0)
+		goto render;
+
+render:
+	layout = list_render(state);
+	if (!layout) {
+		axil_respond(fd, 500, "Internal Server Error");
+		goto cleanup;
+	}
+
+	char title[128];
+	snprintf(title, sizeof(title), "%ss", state->display_name);
+	if (title[0] >= 'a')
+		title[0] -= 32;
+
+	char path[256];
+	snprintf(path, sizeof(path), "/%s/", module);
+
+	rc = site_ui_respond_with_state(
+		        fd, ui_t(title), path, site_ui_module_icon(module),
+		        username, json, "list", layout);
+
+cleanup:
+	free(json);
+	list_fill_free(state);
+	return rc;
 }
+#endif
 
-static const char *idx_resolve_refs(const col_t *col, const char *raw)
-{
-	static char buf[4096];
-	static char last_target[64] = "";
-	static char display_field[64] = "";
-	const char *df;
-
-	if (!raw || !raw[0] || !col->target_hd)
-		return raw;
-
-	if (strcmp(last_target, col->target_source) != 0) {
-		unsigned shd = source_get_schema_hd(col->target_source);
-		display_field[0] = '\0';
-		if (shd) {
-			uint32_t ccur;
-			const void *ckey;
-			const void *cval;
-			ccur = qmap_iter(shd, NULL, 0);
-			while (qmap_next(&ckey, &cval, ccur)) {
-				const char *fn = (const char *)ckey;
-				if (strcmp(fn, "id") == 0)
-					continue;
-				strncpy(display_field, fn,
-				        sizeof(display_field) - 1);
-				break;
-			}
-			qmap_fin(ccur);
-		}
-		strncpy(last_target, col->target_source,
-		        sizeof(last_target) - 1);
-	}
-
-	df = display_field[0] ? display_field : NULL;
-	if (!df)
-		return raw;
-
-	buf[0] = '\0';
-	{
-		const char *p = raw;
-		while (*p) {
-			const char *nl = strchr(p, '\n');
-			size_t llen = nl ? (size_t)(nl - p) : strlen(p);
-			if (llen > 0) {
-				char num[32];
-				size_t cplen = llen < sizeof(num) - 1
-				                       ? llen
-				                       : sizeof(num) - 1;
-				memcpy(num, p, cplen);
-				num[cplen] = '\0';
-				const char *slug = NULL;
-				const char *name = NULL;
-				/* Try position lookup first */
-				if (num[0] >= '0' && num[0] <= '9') {
-					uint32_t pos = (uint32_t)atoi(num);
-					slug = qmap_get_key(
-					        col->target_hd, pos);
-				}
-				/* If not a position or not found, treat as raw
-				 * slug */
-				if (!slug)
-					slug = num;
-				if (slug) {
-					char name_key[320];
-					snprintf(
-					        name_key, sizeof(name_key),
-					        "%s:%s", slug, df);
-					name = (const char *)qmap_get(
-					        col->target_hd, name_key);
-					if (buf[0])
-						strncat(buf, ", ",
-						        sizeof(buf) -
-						                strlen(buf) -
-						                1);
-					strncat(buf, name ? name : slug,
-					        sizeof(buf) - strlen(buf) - 1);
-				}
-			}
-			if (!nl)
-				break;
-			p = nl + 1;
-		}
-	}
-
-	if (!buf[0])
-		return raw;
-
-	return buf;
-}
 
 static int idx_render_list_bud(
         int fd, const char *module, const char *query_str, const char *username)
 {
 	char dataset_id[256];
-	const char *select_csv;
-	col_t cols[32];
-	int ncols;
-	unsigned result_hd;
-	unsigned fields_hd;
-	const char *total_str;
-	uint32_t total = 0;
-	uint32_t page = 1;
-	uint32_t per_page = 10;
-	char page_buf[64] = { 0 };
-	char per_page_buf[64] = { 0 };
-	char sort_field[64];
-	int sort_asc;
-	const char *ids[1024];
-	int nids = 0;
-	const char **values = NULL;
-	int disp_nids = 0;
-	uint32_t cur;
-	const void *key;
-	const void *val;
-	uint32_t offset;
-	uint32_t disp_count;
-	int i, j, rc;
 	list_state_t state;
 	bud_node *layout;
 	char title[128];
+	char path[256];
+	char *extra_head = NULL;
+	int rc;
+
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
 
 	memset(&state, 0, sizeof(state));
 	snprintf(
@@ -415,233 +237,17 @@ static int idx_render_list_bud(
 	snprintf(
 	        state.username, sizeof(state.username), "%s",
 	        username ? username : "");
-	snprintf(
-	        state.query, sizeof(state.query), "%s",
-	        query_str ? query_str : "");
-
+	snprintf(state.lang, sizeof(state.lang), "%s", lang);
 	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-	select_csv = idx_select_fields_for(module);
 
-	idx_query_param(query_str, "page", page_buf, sizeof(page_buf));
-	if (page_buf[0]) {
-		page = (uint32_t)atoi(page_buf);
-		state.has_page = 1;
-	}
-	idx_query_param(
-	        query_str, "per_page", per_page_buf, sizeof(per_page_buf));
-	if (per_page_buf[0])
-		per_page = (uint32_t)atoi(per_page_buf);
-	idx_parse_sort(query_str, sort_field, sizeof(sort_field), &sort_asc);
-	snprintf(state.sort_field, sizeof(state.sort_field), "%s", sort_field);
-	state.sort_asc = sort_asc;
-	state.page = (int)page;
-	state.per_page = (int)per_page;
-
-	ncols = idx_schema_collect(dataset_id, select_csv, cols, 32);
-	state.ncols = ncols;
-
-	/* Columns: copy into state, resolve ref targets, fill options pool. */
-	state.nopts = 0;
-	for (i = 0; i < ncols; i++) {
-		char cur_buf[512] = "";
-
-		snprintf(
-		        state.cols[i].key, sizeof(state.cols[i].key), "%s",
-		        cols[i].key);
-		snprintf(
-		        state.cols[i].label, sizeof(state.cols[i].label), "%s",
-		        cols[i].label);
-		state.cols[i].type = cols[i].type;
-		snprintf(
-		        state.cols[i].target_source,
-		        sizeof(state.cols[i].target_source), "%s",
-		        cols[i].target_source);
-		snprintf(
-		        state.cols[i].filter, sizeof(state.cols[i].filter),
-		        "%s", cols[i].filter);
-
-		if (cols[i].target_source[0] && !cols[i].target_hd)
-			cols[i].target_hd =
-			        source_get_fields_hd(cols[i].target_source);
-
-		{
-			int is_multi =
-			        cols[i].type == SOURCE_FIELD_MULTI_REFERENCE;
-
-			if (!is_multi &&
-			    cols[i].type == SOURCE_FIELD_REFERENCE &&
-			    (strcmp(cols[i].filter, "multiselect") == 0 ||
-			     strcmp(cols[i].filter, "grid") == 0))
-				is_multi = 1;
-			if (is_multi && cols[i].target_hd) {
-				idx_query_params_join(
-				        query_str, cols[i].key,
-				        state.cols[i].current,
-				        sizeof(state.cols[i].current));
-			} else {
-				idx_query_param(
-				        query_str, cols[i].key, cur_buf,
-				        sizeof(cur_buf));
-				snprintf(
-				        state.cols[i].current,
-				        sizeof(state.cols[i].current), "%s",
-				        cur_buf);
-			}
-		}
-
-		if (cols[i].target_hd &&
-		    (cols[i].type == SOURCE_FIELD_REFERENCE ||
-		     cols[i].type == SOURCE_FIELD_MULTI_REFERENCE))
-		{
-			int n = idx_resolve_filter_options(
-			        cols[i].target_source, cols[i].target_hd,
-			        state.opts + state.nopts,
-			        LIST_MAX_OPTS - state.nopts);
-			state.cols[i].opt_start = state.nopts;
-			state.cols[i].opt_count = n;
-			state.nopts += n;
-		}
-	}
-
-	result_hd = source_query(dataset_id, query_str);
-	if (!result_hd)
-		goto empty_page;
-
-	total_str = (const char *)qmap_get(result_hd, "__total__");
-	if (total_str)
-		total = (uint32_t)atoi(total_str);
-	state.total = (int)total;
-
-	cur = qmap_iter(result_hd, NULL, 0);
-	while (nids < 1024 && qmap_next(&key, &val, cur)) {
-		const char *ks = (const char *)key;
-		if (strcmp(ks, "__total__") == 0)
-			continue;
-		ids[nids] = strdup(ks);
-		if (!ids[nids])
-			break;
-		nids++;
-	}
-	qmap_fin(cur);
-
-	offset = 0;
-	disp_count = (uint32_t)nids;
-	if (!state.has_page) {
-		offset = (page - 1) * per_page;
-		if (offset > (uint32_t)nids)
-			offset = 0;
-		disp_count = per_page;
-		if (offset + disp_count > (uint32_t)nids)
-			disp_count = (uint32_t)nids - offset;
-	}
-
-	{
-		const char **disp_ids = ids + offset;
-
-		disp_nids = (int)disp_count;
-		fields_hd = source_get_fields_hd(dataset_id);
-
-		values = malloc((size_t)disp_nids * ncols * sizeof(char *));
-		if (!values) {
-			for (i = 0; i < nids; i++)
-				free((void *)ids[i]);
-			return respond_error(fd, 500, "OOM");
-		}
-
-		for (i = 0; i < disp_nids; i++) {
-			for (j = 0; j < ncols; j++) {
-				char fkey[256];
-				const char *fval;
-				snprintf(
-				        fkey, sizeof(fkey), "%s:%s",
-				        disp_ids[i], cols[j].key);
-				fval = (const char *)qmap_get(fields_hd, fkey);
-				if (!fval)
-					fval = "";
-				if (j > 0 &&
-				    cols[j].type ==
-				            SOURCE_FIELD_MULTI_REFERENCE &&
-				    cols[j].target_hd)
-				{
-					fval = idx_resolve_refs(&cols[j], fval);
-				}
-				values[i * ncols + j] = strdup(fval);
-			}
-		}
-
-		state.nids = disp_nids;
-		for (i = 0; i < disp_nids; i++)
-			state.ids[i] = disp_ids[i];
-		for (i = 0; i < disp_nids; i++)
-			for (j = 0; j < ncols; j++)
-				state.values[i * ncols + j] =
-				        values[i * ncols + j];
-	}
+	/* Filler parses params, whitelists the qs into state.query, queries
+	 * and slices. On query failure it leaves nids/total at 0 with the
+	 * column metadata intact so the chrome still renders (empty page). */
+	list_fill_state(&state, dataset_id, query_str, 1);
 
 	/* One render path: serialize state -> JSON, render, respond. */
-	{
-		size_t json_budget =
-		        8192 +
-		        (size_t)state.nids * (size_t)(state.ncols * 512 + 128) +
-		        (size_t)state.nopts * 256;
-		char *json = malloc(json_budget);
-		char *extra_head = NULL;
-		int json_rc = -1;
-
-		if (json) {
-			json_rc = list_state_to_json(&state, json, json_budget);
-			if (json_rc == 0) {
-				size_t head_len = strlen(json) + 128;
-				extra_head = malloc(head_len);
-				if (extra_head) {
-					snprintf(
-					        extra_head, head_len,
-					        "<script "
-					        "type=\"application/json\" "
-					        "id=\"bud-state\">%s</script>",
-					        json);
-				}
-			}
-			free(json);
-		}
-
-		layout = list_render(&state);
-		rc = 0;
-		if (layout) {
-			snprintf(title, sizeof(title), "%ss", module);
-			if (title[0] >= 'a')
-				title[0] -= 32;
-			respond_html(
-			        fd, site_ui_page(
-			                    title, extra_head, "list", layout));
-		} else {
-			axil_respond(fd, 500, "Internal Server Error");
-		}
-		free(extra_head);
-	}
-
-	for (i = 0; i < disp_nids; i++)
-		for (j = 0; j < ncols; j++)
-			free((void *)values[i * ncols + j]);
-	free(values);
-	for (i = 0; i < nids; i++)
-		free((void *)ids[i]);
+	rc = list_respond_page(fd, &state, module, username);
 	return rc;
-
-empty_page:
-	/* Zero-row result set — still through list_render (id alignment). */
-	state.nids = 0;
-	state.total = 0;
-	layout = list_render(&state);
-	if (layout) {
-		snprintf(title, sizeof(title), "%ss", module);
-		if (title[0] >= 'a')
-			title[0] -= 32;
-		respond_html(fd, site_ui_page(title, NULL, "list", layout));
-	} else {
-		axil_respond(fd, 500, "Internal Server Error");
-	}
-	return 0;
 }
 
 XY_IMPL(int, index_render_list,
@@ -654,7 +260,9 @@ XY_IMPL(int, index_render_list,
 
 	(void)hd;
 	(void)fmt;
-	axil_env_get(fd, query, "QUERY_STRING");
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+	axil_env_get(fd, query, sizeof(query), "QUERY_STRING");
 	username = get_request_user(fd);
 	return idx_render_list_bud(
 	        fd, index_name(fd), query, username ? username : "");
@@ -667,7 +275,7 @@ static int index_list_handler(int fd, char *body)
 
 	(void)body;
 	module = index_name(fd);
-	hd = *(unsigned *)qmap_get(module_hd, module);
+	hd = *(unsigned *)corm_get(module_hd, module);
 	return index_render_list(fd, hd, NULL);
 }
 
@@ -680,15 +288,15 @@ static int index_generic_add_handler(int fd, char *body)
 	char dataset_id[512];
 
 	const char *username = get_request_user(fd);
-	if (!username || !username[0])
-		return respond_error(fd, 401, "Unauthorized");
+	if (require_login(fd, username))
+		return 1;
 
 	if (mpfd_parse(fd, body) == -1)
 		return respond_error(fd, 415, "Expected multipart/form-data");
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	int title_len = mpfd_get("title", title, sizeof(title) - 1);
+	int title_len = mpfd_get("title", title, sizeof(title));
 	if (title_len <= 0)
 		return bad_request(fd, "Missing title");
 
@@ -699,22 +307,32 @@ static int index_generic_add_handler(int fd, char *body)
 	    0)
 		return server_error(fd, "Failed to resolve item path");
 
-	if (mkdir(items_path, 0755) == -1 && errno != EEXIST)
+	if (mkdir(items_path, 0755) == -1) {
+		if (errno == EEXIST)
+			return respond_error(
+			        fd, 409,
+			        "An item with that title already exists");
 		return respond_error(
 		        fd, 403, "Failed to create item directory");
+	}
 
-	item_record_ownership(items_path, username);
-	write_meta_file(items_path, "title", title, (size_t)title_len);
+	if (module_item_owner_record(fd, module, id, username) != 0) {
+		item_remove_path_recursive(items_path);
+		return server_error(fd, "Failed to record ownership");
+	}
 
 	unsigned data_handle = source_parse_form(dataset_id);
-	if (!data_handle)
+	if (!data_handle) {
+		item_remove_path_recursive(items_path);
 		return server_error(fd, "OOM");
+	}
 
 	if (source_update_item(fd, dataset_id, id, data_handle) != 0) {
-		qmap_close(data_handle);
+		corm_close(data_handle);
+		item_remove_path_recursive(items_path);
 		return server_error(fd, "Failed to save item data");
 	}
-	qmap_close(data_handle);
+	corm_close(data_handle);
 
 	return redirect_to_item(fd, module, id);
 }
@@ -740,24 +358,9 @@ static int index_generic_edit_authorized(
 		return server_error(fd, "OOM");
 
 	int rc = source_update_item(fd, dataset_id, ctx->id, data_handle);
+	corm_close(data_handle);
 	if (rc != 0) {
-		qmap_close(data_handle);
 		return server_error(fd, "Failed to update item data");
-	}
-
-	qmap_close(data_handle);
-
-	/* Update title in meta file if provided */
-	char title[256];
-	int title_len = mpfd_get("title", title, sizeof(title) - 1);
-	if (title_len > 0) {
-		if (item_path_build(
-		            fd, module, ctx->id, items_path,
-		            sizeof(items_path)) == 0)
-		{
-			write_meta_file(
-			        items_path, "title", title, (size_t)title_len);
-		}
 	}
 
 	return redirect_to_item(fd, module, ctx->id);
@@ -766,12 +369,10 @@ static int index_generic_edit_authorized(
 static int index_generic_edit_handler(int fd, char *body)
 {
 	const char *module = index_name(fd);
-	char items_path[512];
-	snprintf(items_path, sizeof(items_path), "items/%s/items", module);
 
-	return with_item_access(
-	        fd, body, items_path, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
-	        NULL, NULL, index_generic_edit_authorized, NULL);
+	return with_module_item_access(
+	        fd, body, module, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP, NULL,
+	        NULL, index_generic_edit_authorized, NULL);
 }
 
 XY_IMPL(unsigned, index_open,
@@ -781,7 +382,8 @@ XY_IMPL(unsigned, index_open,
 	index_detail_handler_fn, detail_handler,
 	index_handler_fn, add_handler,
 	index_handler_fn, edit_get_handler,
-	index_handler_fn, edit_post_handler)
+	index_handler_fn, edit_post_handler,
+	const char *, url_slug)
 {
 	struct dirent *entry;
 	char buf[PATH_MAX / 2];
@@ -793,21 +395,24 @@ XY_IMPL(unsigned, index_open,
 
 	unsigned hd = source_get_data_hd(dataset_name);
 	if (!hd)
-		return QM_MISS;
+		return CM_MISS;
 
+	if (url_slug && url_slug[0])
+		snprintf(id, sizeof(id), "%s", url_slug);
+	else
+		axil_slugify(name, strlen(name), id, sizeof(id));
 	index_update_json(id, name);
-	axil_slugify(name, strlen(name), id, sizeof(id));
 	if (module_path_build(doc_root, id, buf, sizeof(buf)) != 0)
-		return QM_MISS;
+		return CM_MISS;
 	mkdir(buf, 0755);
 	if (module_items_path_build(doc_root, id, buf, sizeof(buf)) != 0)
-		return QM_MISS;
+		return CM_MISS;
 	mkdir(buf, 0755);
 
 	dir = opendir(buf);
 	if (!dir) {
 		perror("opendir");
-		return QM_MISS;
+		return CM_MISS;
 	}
 	closedir(dir);
 
@@ -835,10 +440,10 @@ XY_IMPL(unsigned, index_open,
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/delete", id);
 	axil_register_handler(buf, index_delete_handler);
 
-	if (edit_get_handler) {
-		snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
-		axil_register_handler(buf, edit_get_handler);
-	}
+	snprintf(buf, sizeof(buf), "GET:/%s/:id/edit", id);
+	axil_register_handler(
+	        buf, edit_get_handler ? edit_get_handler
+	                              : index_generic_edit_get_handler);
 	snprintf(buf, sizeof(buf), "POST:/%s/:id/edit", id);
 	axil_register_handler(
 	        buf, edit_post_handler ? edit_post_handler
@@ -853,13 +458,20 @@ XY_IMPL(unsigned, index_open,
 		module_cleanups[slot] = cleanup;
 	}
 
-	qmap_put(module_hd, id, &hd);
+	corm_put(module_hd, id, &hd);
 	return hd;
 }
 
 XY_IMPL(int, core_get, int, fd, char *, body)
 {
 	(void)body;
+	const char *lang = i18n_resolve_locale(fd);
+	site_ui_set_locale(lang);
+	char uri[1024] = { 0 };
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+	if (uri[0] && strcmp(uri, "/") != 0)
+		return not_found(fd, "Not found");
+
 	const char *username = get_request_user(fd);
 	const char *mod_names[MAX_MODULES];
 	const char *mod_titles_p[MAX_MODULES];
@@ -873,7 +485,9 @@ XY_IMPL(int, core_get, int, fd, char *, body)
 
 	if (layout) {
 		return respond_html(
-		        fd, site_ui_page("tty.pt", NULL, NULL, layout));
+		        fd, site_ui_page(
+		                    "tty.pt", "/", site_ui_module_icon(NULL),
+		                    username, NULL, NULL, layout));
 	}
 	axil_respond(fd, 500, "Internal Server Error");
 	return 0;
@@ -881,7 +495,111 @@ XY_IMPL(int, core_get, int, fd, char *, body)
 
 static int index_add_get_handler(int fd, char *body)
 {
-	return core_get(fd, body);
+	(void)body;
+	const char *user = require_user(fd);
+	if (!user)
+		return 1;
+
+	const char *module = index_name(fd);
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+
+	int count = 0;
+	const source_desc_t *defs = source_get_desc(dataset_id, &count);
+	if (!defs)
+		return core_get(fd, body);
+
+	const char *csrf_token = csrf_setup(fd);
+	char action[128], cancel_href[128];
+	snprintf(action, sizeof(action), "/%s/add", module);
+	snprintf(cancel_href, sizeof(cancel_href), "/%s/", module);
+
+	pick_view_t pv;
+	int active_scope = -1;
+	char qs[4096] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	hyle_bud_picker_view_collect_schema(qs, defs, NULL, &pv, &active_scope);
+
+	bud_node *form = site_ui_form_from_desc(
+	        action, cancel_href, "Add", defs, NULL, csrf_token, &pv, NULL);
+
+	return site_ui_respond_add_page(
+	        fd, user, module, site_ui_module_icon(module), form);
+}
+
+static int
+index_generic_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	(void)user;
+	const char *module = index_name(fd);
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
+
+	int count = 0;
+	const source_desc_t *defs = source_get_desc(dataset_id, &count);
+	if (!defs)
+		return respond_error(fd, 404, "Module schema not found");
+
+	size_t rec_sz = source_get_record_size(dataset_id);
+	if (rec_sz == 0 || rec_sz > 65536)
+		rec_sz = 4096;
+
+	char *record = calloc(1, rec_sz);
+	if (!record)
+		return server_error(fd, "OOM");
+
+	source_meta_read(ctx->item_path, defs, count, record, rec_sz);
+	source_resolve_meta_display(dataset_id, ctx->id, defs, count, record);
+
+	char title[256] = { 0 };
+	read_meta_file(ctx->item_path, "title", title, sizeof(title));
+
+	char *vstr_val = NULL;
+	for (int i = 0; i < count; i++) {
+		if (defs[i].qm_type == BUD_CM_VSTR && defs[i].file) {
+			char vstr_path[PATH_MAX];
+			item_child_path(
+			        ctx->item_path, defs[i].file, vstr_path,
+			        sizeof(vstr_path));
+			vstr_val = slurp_file(vstr_path);
+			break;
+		}
+	}
+
+	const char *csrf_token = csrf_setup(fd);
+	char action[256], cancel_href[256];
+	snprintf(action, sizeof(action), "/%s/%s/edit", module, ctx->id);
+	snprintf(cancel_href, sizeof(cancel_href), "/%s/%s", module, ctx->id);
+
+	pick_view_t pv;
+	int active_scope = -1;
+	char qs[4096] = { 0 };
+	if (fd > 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	hyle_bud_picker_view_collect_schema(
+	        qs, defs, record, &pv, &active_scope);
+
+	bud_node *form = site_ui_form_from_desc(
+	        action, cancel_href, "Save Changes", defs, record, csrf_token,
+	        &pv, vstr_val);
+
+	if (vstr_val)
+		free(vstr_val);
+	free(record);
+
+	return site_ui_respond_edit_page(
+	        fd, ctx->username, module, site_ui_module_icon(module),
+	        title[0] ? title : ctx->id, ctx->id, form);
+}
+
+static int index_generic_edit_get_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	return with_module_item_access(
+	        fd, body, module, ICTX_NEED_LOGIN | ICTX_NEED_OWNERSHIP,
+	        "Not found", NULL, index_generic_edit_auth, NULL);
 }
 
 /* GET /<module>/:id/delete — confirmation page */
@@ -890,7 +608,7 @@ static int index_delete_get_handler(int fd, char *body)
 	(void)body;
 
 	char id[128] = { 0 };
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");
 
@@ -935,7 +653,7 @@ static int index_delete_handler(int fd, char *body)
 	if (csrf_check_mpfd(fd))
 		return 1;
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, sizeof(id), "PATTERN_PARAM_ID");
 	if (!id[0])
 		return bad_request(fd, "Missing ID");
 
@@ -952,95 +670,49 @@ static int index_delete_handler(int fd, char *body)
 	            "Forbidden"))
 		return 1;
 
-	/* Remove item directory */
-	int remove_rc = item_remove_path_recursive(item_path);
-	if (remove_rc != 0) {
-		fprintf(stderr,
-		        "ERROR delete: item_remove_path_recursive failed for "
-		        "%s\n",
-		        item_path);
-	}
-
-	/* Find module slot and call cleanup + index_del */
-	unsigned hd = 0;
-	pid_t pid = getpid();
-	for (size_t i = 0; i < module_slot_count; i++) {
-		char simple_name[257];
-		snprintf(
-		        simple_name, sizeof(simple_name), "%s",
-		        module_names[i]);
-		char *dot = strchr(simple_name, '.');
-		if (dot)
-			*dot = '\0';
-
-		if (strcmp(module_names[i], module) == 0 ||
-		    strcmp(simple_name, module) == 0)
-		{
-			hd = module_hds[i];
-			if (module_cleanups[i]) {
-				module_cleanups[i](id);
-			}
-			break;
-		}
-	}
-
-	/* Clear inverse references in other datasets before purging qmap */
+	/* Clear inverse references in other datasets before purging corm */
 	{
 		char dset[256];
 		snprintf(dset, sizeof(dset), "%s.items", module);
-		source_clear_inverse_refs(dset, id);
+		source_clear_inverse_refs(fd, dset, id);
 	}
 
-	if (hd) {
-		qmap_del_all(hd, id);
-	}
-
-	/* Also clean up fields handle so detail handlers return 404 */
+	/* Find module slot and call module-specific cleanup */
 	{
-		char dataset_id[256];
-		snprintf(dataset_id, sizeof(dataset_id), "%s.items", module);
-		unsigned fhd = source_get_fields_hd(dataset_id);
-		if (fhd)
-			qmap_del_all(fhd, id);
+		size_t i;
+		for (i = 0; i < module_slot_count; i++) {
+			char simple_name[257];
+			snprintf(
+			        simple_name, sizeof(simple_name), "%s",
+			        module_names[i]);
+			char *dot = strchr(simple_name, '.');
+			if (dot)
+				*dot = '\0';
+			if (strcmp(module_names[i], module) == 0 ||
+			    strcmp(simple_name, module) == 0)
+			{
+				if (module_cleanups[i])
+					module_cleanups[i](id);
+				break;
+			}
+		}
+	}
+
+	/* Delete through hyle (removes dir + corms + marks lemma_dirty) */
+	{
+		char dset[256];
+		source_def_t *def;
+		snprintf(dset, sizeof(dset), "%s.items", module);
+		def = source_find(dset);
+		if (def)
+			source_delete_item(fd, def, id);
+		else
+			item_remove_path_recursive(item_path);
 	}
 
 	char location[256];
 	snprintf(location, sizeof(location), "/%s", module);
 	return axil_redirect(fd, location);
-}
-
-/* ------------------------------------------------------------------ */
-/* Ownership helpers — item metadata management                        */
-/* ------------------------------------------------------------------ */
-
-XY_IMPL(int, item_record_ownership,
-	const char *, item_path,
-	const char *, username)
-{
-	if (geteuid() == 0) {
-		int uid = auth_get_uid(username);
-		if (uid >= 0)
-			chown(item_path, (uid_t)uid, (gid_t)-1);
-	} else {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		FILE *fp = fopen(owner_path, "w");
-		if (fp) {
-			fwrite(username, 1, strlen(username), fp);
-			fclose(fp);
-		}
-	}
-	return 0;
-}
-
-static int item_unlink_owner(const char *item_path)
-{
-	if (geteuid() != 0) {
-		char owner_path[1024];
-		build_owner_path(item_path, owner_path, sizeof(owner_path));
-		unlink(owner_path);
-	}
-	return 0;
 }
 
 XY_IMPL(int, check_item_access,
@@ -1054,7 +726,7 @@ XY_IMPL(int, check_item_access,
 	if (!*user)
 		return -1;
 
-	axil_env_get(fd, id, "PATTERN_PARAM_ID");
+	axil_env_get(fd, id, id_sz, "PATTERN_PARAM_ID");
 	if (!id[0]) {
 		bad_request(fd, "Missing ID");
 		return -1;
@@ -1073,13 +745,111 @@ XY_IMPL(int, check_item_access,
 	return 0;
 }
 
+struct index_asset_closure {
+	char module[64];
+	char filename[64];
+	char exts[64];
+};
+
+static struct index_asset_closure g_asset_closures[16];
+static size_t g_n_asset_closures = 0;
+
+static int index_body_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	const struct index_asset_closure *c = (const struct index_asset_closure *)user;
+	return respond_item_file(fd, ctx->item_path, c->filename, c->exts);
+}
+
+static int index_body_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	struct index_asset_closure *match = NULL;
+	for (size_t i = 0; i < g_n_asset_closures; i++) {
+		if (strcmp(g_asset_closures[i].module, module) == 0 && g_asset_closures[i].filename[0]) {
+			match = &g_asset_closures[i];
+			break;
+		}
+	}
+	if (!match)
+		return not_found(fd, "Asset not found");
+	return with_module_item_access(fd, body, module, 0, NULL, NULL, index_body_auth, match);
+}
+
+static int index_media_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
+{
+	(void)body;
+	const struct index_asset_closure *c = (const struct index_asset_closure *)user;
+	char file[256] = { 0 };
+	axil_env_get(fd, file, sizeof(file), "PATTERN_PARAM_FILE");
+	return respond_item_file(fd, ctx->item_path, file, c->exts);
+}
+
+static int index_media_handler(int fd, char *body)
+{
+	const char *module = index_name(fd);
+	struct index_asset_closure *match = NULL;
+	for (size_t i = 0; i < g_n_asset_closures; i++) {
+		if (strcmp(g_asset_closures[i].module, module) == 0 && !g_asset_closures[i].filename[0]) {
+			match = &g_asset_closures[i];
+			break;
+		}
+	}
+	if (!match)
+		return not_found(fd, "Media not found");
+	return with_module_item_access(fd, body, module, 0, NULL, NULL, index_media_auth, match);
+}
+
+XY_IMPL(uint32_t, index_module_init, const index_module_def_t *, def)
+{
+	if (!def || !def->name)
+		return 0;
+
+	char dataset_id[128];
+	snprintf(dataset_id, sizeof(dataset_id), "%s.items", def->name);
+
+	uint32_t rid = source_setup(
+	        dataset_id, def->key_field, def->record_size,
+	        def->items_path ? def->items_path : "", def->schema,
+	        def->field_count, def->flags, def->list_view);
+
+	index_open(
+	        def->display_name ? def->display_name : def->name, dataset_id,
+	        NULL, NULL, NULL, NULL, NULL, NULL);
+
+	register_standard_item_handlers(def->name, &def->handlers);
+
+	if (def->body_file && def->body_file[0] && g_n_asset_closures < 16) {
+		struct index_asset_closure *c = &g_asset_closures[g_n_asset_closures++];
+		snprintf(c->module, sizeof(c->module), "%s", def->name);
+		snprintf(c->filename, sizeof(c->filename), "%s", def->body_file);
+		const char *dot = strrchr(def->body_file, '.');
+		snprintf(c->exts, sizeof(c->exts), "%s", dot ? dot + 1 : "html");
+		char route[256];
+		snprintf(route, sizeof(route), "GET:/%s/:id/%s", def->name, def->body_file);
+		axil_register_handler(route, index_body_handler);
+	}
+
+	if (def->media_exts && def->media_exts[0] && g_n_asset_closures < 16) {
+		struct index_asset_closure *c = &g_asset_closures[g_n_asset_closures++];
+		snprintf(c->module, sizeof(c->module), "%s", def->name);
+		c->filename[0] = '\0';
+		snprintf(c->exts, sizeof(c->exts), "%s", def->media_exts);
+		char route[256];
+		snprintf(route, sizeof(route), "GET:/%s/:id/:file", def->name);
+		axil_register_handler(route, index_media_handler);
+	}
+
+	return rid;
+}
+
 void xy_install(void)
 {
 	xy_load("./mods/common/common");
 	xy_load("./mods/auth/auth");
 	xy_load("./mods/mpfd/mpfd");
 
-	module_hd = qmap_open(NULL, NULL, QM_STR, QM_U32, 0x1FF, 0);
+	module_hd = corm_open(NULL, NULL, CM_STR, CM_U32, 0x1FF, 0);
 
 	axil_register_handler("GET:/", core_get);
 	axil_config.default_handler = core_get;

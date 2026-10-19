@@ -1,32 +1,141 @@
 CC  ?= clang
 DEV ?= 0
+PROFILE ?= dev
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
-MODULE_DIRS != for f in modules/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stoma-lib hyle-lib bud-lib hyle-bud mods modules clients
+all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
 
-modules:
-	@for d in $(MODULE_DIRS); do $(MAKE) -C $$d; done
-
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
 
-stoma-lib:
-	$(MAKE) -C external/stoma
+# Sync gitignored htdocs deploy assets. hyle.css is copied from external/libhyle/assets/hyle.css;
+# the remaining hashed assets are checked for presence so `make` fails clearly instead of
+# aborting silently on a missing prerequisite of mods/common/ux/version.gen.h.
+DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js
+assets-sync:
+	@if [ -f external/libhyle/assets/hyle.css ]; then \
+		cp external/libhyle/assets/hyle.css htdocs/hyle.css; \
+	else \
+		cp external/libhyle/crates/hyle/assets/hyle.css htdocs/hyle.css; \
+	fi
+	@missing=""; \
+	for a in $(DEPLOY_ASSETS); do \
+		if [ ! -f "htdocs/$$a" ]; then missing="$$missing htdocs/$$a"; fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "ERROR: missing deploy assets:$$missing" >&2; \
+		echo "These are gitignored and removed by 'git clean'. Restore them:" >&2; \
+		echo "  htdocs/hyle.css  <- cp external/libhyle/assets/hyle.css htdocs/hyle.css" >&2; \
+		echo "  others          <- restore from the hyle submodule or a sibling worktree, or rebuild." >&2; \
+		exit 1; \
+	fi
 
-hyle-lib:
-	$(MAKE) -C external/hyle
+lemma-lib:
+	$(MAKE) -C external/liblemma
+
+joint-lib:
+	$(MAKE) -C external/libjoint
+
+islet-lib:
+	$(MAKE) -C external/libislet
+
+sepal-lib:
+	$(MAKE) -C external/libsepal
+
+pi-mm-zip:
+	$(MAKE) -C .pi/extensions/pi-mm zip
+
+hyle-lib: lemma-lib corm-lib
+	$(MAKE) -C external/libhyle
+
+transp-lib:
+	$(MAKE) -C external/libtransp
 
 bud-lib:
-	$(MAKE) -C external/bud
+	$(MAKE) -C external/libbud
 
-hyle-bud: hyle-lib bud-lib
-	$(MAKE) -C external/hyle/c/libhyle-bud
+hyle-bud: hyle-lib bud-lib hyle-source
+	$(MAKE) -C external/libhyle-bud EXTRA_CFLAGS="-I$$(pwd)/external/libhyle/include -I$$(pwd)/external/libhyle-source/include"
+
+hyle-source: hyle-lib corm-lib lemma-lib
+	$(MAKE) -C external/libhyle-source
+
+qsys-lib:
+	$(MAKE) -C external/libqsys
+
+axil-lib: qsys-lib corm-lib xylem-lib
+	$(MAKE) -C external/axil
+
+axil-auth-lib: axil-lib corm-lib xylem-lib
+	$(MAKE) -C external/axil-auth
+
+axil-hyle: axil-lib hyle-source axil-auth-lib
+	$(MAKE) -C external/axil-hyle
+
+axil-tty-lib: axil-lib corm-lib xylem-lib
+	$(MAKE) -C external/axil-tty
+
+axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib qsys-lib
+	$(MAKE) -C external/axil-nd
+
+corm-lib:
+	$(MAKE) -C external/libcorm
+
+# The external packages own their install: mk/include.mk's `install` target
+# copies ${LIB} (plus the bare-soname alias xy_load() addresses), headers and
+# the binary into ${DESTDIR}${PREFIX}/lib + bin, with PREFIX taken from
+# mk/portable.mk's table. There is no -L into the tree at link time either
+# (build.mk), so ${PREFIX}/lib is the one place a library exists: the file the
+# link inspects is the file the loader maps and xy_load() fetches. Run this
+# with sudo/doas after any library rebuild, then restart axil.
+# Keep the table in sync with external/mk/portable.mk:16-29.
+UNAME_S := $(shell uname -s)
+ARCH_M := $(shell uname -m)
+PREFIX ?= $(if $(filter Linux,$(UNAME_S)),/usr, \
+	$(if $(filter NetBSD,$(UNAME_S)),/usr/pkg, \
+	$(if $(and $(filter Darwin,$(UNAME_S)),$(filter arm64,$(ARCH_M))),/opt/homebrew, \
+	/usr/local)))
+SUDO ?=
+
+INSTALL_PKGS = libqsys libcorm libxylem liblemma libjoint libislet libsepal \
+	libhyle libtransp libbud libhyle-bud libhyle-source \
+	axil axil-auth axil-hyle axil-tty axil-nd \
+	$(patsubst external/%,%,$(wildcard external/nd-*))
+
+install-libs:
+	@for p in $(INSTALL_PKGS); do \
+		$(SUDO) $(MAKE) -C external/$$p PREFIX="$(PREFIX)" install || exit 1; \
+	done
+	@echo "runtime libraries + axil installed under $(PREFIX)"
+
+# The `axil -C` chroot jail: seed what the engine resolves AFTER the chroot
+# (it fires on_axil_post_chroot between init_pre_bind() and the first bind),
+# then gate the restart on the result. JAIL is normally the site root itself
+# -- on prod /var/www both holds the checkout and is the chroot, which is what
+# keeps var/ and htdocs/ the same files before and after. The manifest and the
+# reason for every entry: scripts/jail-manifest.sh. Run after `make` +
+# `make install-libs`; check-jail.sh alone is the pre-restart gate.
+JAIL ?= /var/www
+
+install-jail:
+	@sh scripts/seed-jail.sh $(JAIL)
+	@sh scripts/check-jail.sh $(JAIL)
+
+print-prefix:
+	@echo $(PREFIX)
+
+mm: ;
+
+xylem-lib:
+	$(MAKE) -C external/libxylem
+
+dev:
+	@./scripts/dev.sh
 
 run:
 	$(MAKE) DEV=1 all
@@ -35,51 +144,124 @@ run:
 MODS != cat mods.load
 
 test-data-dirs:
-	mkdir -p items/poem/items items/song/items items/songbook/items items/choir/items
+	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors var/nd
 
 unit-tests: all test-data-dirs
-	@curl -s --max-time 2 http://localhost:8080/ > /dev/null 2>&1 || \
-		{ echo "ERROR: axil not running on :8080 — start the server before running unit-tests"; exit 1; }
-	@for d in $(MODS); do \
-		echo "=== TESTING $$d ==="; \
-		(cd mods/$$d && ./test.sh) || exit 1; \
+	@./scripts/run-with-server.sh sh -c '\
+		for d in $(MODS); do \
+			if [ ! -d mods/$$d ]; then \
+				echo "=== SKIPPING $$d (no mods/$$d dir -- installed-soname or path-form entry) ==="; \
+				continue; \
+			fi; \
+			echo "=== TESTING $$d ==="; \
+			(cd mods/$$d && ./test.sh) || exit 1; \
+		done'
+	@$(MAKE) standalone-unit-tests
+
+standalone-unit-tests:
+	@tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT HUP INT TERM; \
+	for test in mpfd_contract_test caller_contract_test; do \
+		echo "=== TESTING $$test ==="; \
+		$(CC) -Wall -Wextra -Werror -o "$$tmpdir/$$test" \
+			"tests/unit/$$test.c" || exit 1; \
+		"$$tmpdir/$$test" || exit 1; \
 	done
+	@sh tests/unit/run-mpfd-content-length.sh
+	@sh tests/unit/run-mpfd-multivalue.sh
+	@sh tests/unit/run-dsv-legacy.sh
+	@sh tests/unit/run-source-options.sh
+	@sh tests/unit/run-bud-picker-collect.sh
+	@sh tests/unit/run-bud-form.sh
+	@sh tests/unit/run-bud-table.sh
+	@sh tests/unit/run-source-utils.sh
+	@sh tests/unit/run-auth-disk-permissions.sh
+	@sh tests/unit/run-axil-auth-groups.sh
+	@sh tests/unit/run-axil-auth-account.sh
+	@sh tests/unit/run-xy-hook-default.sh
+	@sh tests/unit/run-auth-group-permissions.sh
+	@sh tests/unit/run-site-media.sh
+	@sh tests/unit/run-site-ui-helpers.sh
+	@sh tests/unit/run-index-helpers.sh
+	@sh tests/unit/run-externals-abstractions.sh
+	@sh tests/unit/run-ordered-sync.sh
+	@sh tests/unit/run-source-dataset-options.sh
+	@sh tests/unit/run-viewer-prefs.sh
+	@sh tests/unit/run-slugify.sh
+	@sh tests/unit/run-i18n.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
-	sh tests/pages/10-pages-render.sh
-	sh tests/pages/20-song-search.sh
-	sh tests/pages/30-song-multiselect.sh
+	@./scripts/run-with-server.sh sh -c '\
+		sh tests/pages/10-pages-render.sh && \
+		sh tests/pages/20-song-search.sh && \
+		sh tests/pages/25-list-metadata.sh && \
+		sh tests/pages/30-song-multiselect.sh && \
+		sh tests/pages/40-traversal.sh && \
+		sh tests/pages/50-pickers.sh'
 
 unit-c-tests:
 	@sh tests/scripts/repro-matrix.sh --build
 
 integration-tests: all
-	@sh tests/integration/run_all.sh
+	@./scripts/run-with-server.sh sh tests/integration/run_all.sh
+
+test-mod: all test-data-dirs
+	@if [ -z "$(MOD)" ]; then \
+		echo "Error: MOD is required. Example: make test-mod MOD=song"; \
+		exit 1; \
+	fi
+	@echo "=== Running targeted tests for module: $(MOD) ==="
+	@./scripts/run-with-server.sh sh -c '\
+		if [ -f "mods/$(MOD)/test.sh" ]; then (cd mods/$(MOD) && ./test.sh); fi'
+
+test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test
+	@echo "Fast test suite passed!"
+
+test-e2e: test-data-dirs
+	@if [ -n "$(FILE)" ]; then \
+		AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all "tests/e2e/$(FILE)"; \
+	else \
+		AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} ./scripts/run-with-server.sh deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/; \
+	fi
 
 e2e-tests: test-data-dirs
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/
+	AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
 
-test: unit-c-tests unit-tests pages-test e2e-tests
+restart:
+	@pkill -f 'axil -C .* mods/core/core' || true
+	@sleep 0.5
+	@./start.sh &
+	@sleep 1
+	@curl -s --max-time 3 http://localhost:8080/ > /dev/null 2>&1 || { echo "Failed to start server"; exit 1; }
+	@echo "Server restarted on :8080"
+
+test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e2e
+
+# depends on mods: check-no-tree-rpath inspects built artifacts, which must not
+# be mid-relink when the check runs under -j
+boundary-check: mods
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh
+
 watch:
 	./scripts/watch.sh
 
 format:
-	find mods external/bud \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
+	find mods external/libbud \( -name "*.c" -o -name "*.h" \) | xargs clang-format -i
 
 lint:
-	find mods external/bud -name "*.c" -exec clang-tidy {} -- \
-		-Iexternal/axil/include -Iexternal/qmap/include \
-		-Iexternal/libxylem/include -Iexternal/bud/include \
-		-Iexternal/hyle/include -Iexternal/hyle/c/libhyle-bud/include \;
+	find mods external/libbud -name "*.c" -exec clang-tidy {} -- \
+		-Iexternal/axil/include -Iexternal/libcorm/include \
+		-Iexternal/libxylem/include -Iexternal/libbud/include \
+		-Iexternal/libhyle/include \;
 
 clean:
-	$(MAKE) -C external/bud clean
-	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
+	$(MAKE) -C external/libbud clean
+	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
 
 distclean:
-	$(MAKE) -C external/bud distclean
-	@for d in $(MOD_DIRS) $(MODULE_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
+	$(MAKE) -C external/libbud distclean
+	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d distclean; done
 
 # Debug/compilation capture targets
 DEBUG_DIR := debug
@@ -103,7 +285,7 @@ test-capture: test-data-dirs
 	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
 	touch $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests started at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log; \
-	AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
+	AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} deno test --allow-all --parallel tests/e2e/ 2>&1 | tee -a $(TEST_LOG_DIR)/test_$$timestamp.log; \
 	echo "=== Tests completed at $$(date) ===" >> $(TEST_LOG_DIR)/test_$$timestamp.log
 	@echo "Test log saved to $(TEST_LOG_DIR)/test_$$timestamp.log"
 
@@ -130,21 +312,35 @@ debug-logs:
 	tail -20 $(RUNTIME_LOG_DIR)/axil.log 2>/dev/null || echo "No runtime log found"
 
 # Clean debug logs
-# Run hyle workspace crate tests (core, axil, source-qmap)
+# Run hyle workspace crate tests (core, axil, source-corm)
 hyle-tests:
-	RUSTFLAGS="-l qmap" cargo test --workspace \
-		--manifest-path external/hyle/Cargo.toml 2>&1
+	LIBRARY_PATH="$(CURDIR)/external/liblemma/lib:$${LIBRARY_PATH:-}" RUSTFLAGS="-l corm -l lemma" cargo test --workspace \
+		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
 	rm -rf $(DEBUG_DIR)/*
 
+doctor:
+	@./scripts/doctor.sh
+
+compile_commands.json:
+	@./scripts/gen-compile-commands.sh
+
+new-mod:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME is required. Example: make new-mod NAME=artist DISPLAY=Artist"; \
+		exit 1; \
+	fi
+	@./scripts/scaffold-module.sh "$(NAME)" "$(DISPLAY)"
+
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
+PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
 
 deploy-wasm: clients
-	scp htdocs/*.js htdocs/*.wasm htdocs/*.css \
+	scp $(PROD_ASSETS:%=htdocs/%) \
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods modules clients run clean distclean format lint test unit-c-tests unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib stoma-lib
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

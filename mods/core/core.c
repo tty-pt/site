@@ -3,15 +3,23 @@
 #include <string.h>
 #include <stdio.h>
 #include <dlfcn.h>
+#include <unistd.h>
 
 static int load_modules_from_file(const char *path)
 {
+	/* A line is one of three things: a bare module name WITH a module in
+	 * this tree -- loaded as `mods/<n>/<n>`, the in-tree layout -- a bare
+	 * name WITHOUT one, which names an INSTALLED library by soname, or a
+	 * path (anything containing `/`), taken verbatim. The site's own
+	 * single module tier; the embedded game engine loads its modules only
+	 * from persisted region rows (region modding), never from a list. */
 	char mod_line[1030];
+	char in_line[sizeof(mod_line) + 8];
 	char line[512];
 	FILE *fp = fopen(path, "r");
 
 	if (!fp)
-		return 0;
+		return -1;
 
 	while (fgets(line, sizeof(line), fp)) {
 		size_t len = strlen(line);
@@ -23,8 +31,18 @@ static int load_modules_from_file(const char *path)
 		}
 		if (len == 0 || line[0] == '#')
 			continue;
-		snprintf(mod_line, sizeof(mod_line), "mods/%s/%s", line, line);
-		xy_load(mod_line);
+		if (strchr(line, '/'))
+			snprintf(mod_line, sizeof(mod_line), "%s", line);
+		else {
+			snprintf(in_line, sizeof(in_line), "mods/%s/%s.c",
+			         line, line);
+			snprintf(mod_line, sizeof(mod_line),
+			         access(in_line, R_OK) == 0 ? "mods/%s/%s" : "%s",
+			         line, line);
+		}
+		if (xy_load(mod_line) != XY_OK)
+			fprintf(stderr, "warning: module %s failed to load\n",
+			        mod_line);
 	}
 
 	fclose(fp);
@@ -39,12 +57,17 @@ static int alias_redirect(
 	char location[1600];
 	int written;
 
-	axil_env_get(fd, uri, "DOCUMENT_URI");
-	axil_env_get(fd, query, "QUERY_STRING");
+	axil_env_get(fd, uri, sizeof(uri), "DOCUMENT_URI");
+	axil_env_get(fd, query, sizeof(query), "QUERY_STRING");
 
-	if (strncmp(uri, from_prefix, strlen(from_prefix)) != 0) {
-		axil_respond(fd, 404, "Not found");
-		return 1;
+	{
+		size_t flen = strlen(from_prefix);
+		if (strncmp(uri, from_prefix, flen) != 0 ||
+		    (uri[flen] != '\0' && uri[flen] != '/'))
+		{
+			axil_respond(fd, 404, "Not found");
+			return 1;
+		}
 	}
 
 	written = snprintf(
@@ -70,10 +93,10 @@ static int alias_redirect(
 	return 0;
 }
 
-static int songbook_redirect_handler(int fd, char *body)
+static int gig_redirect_handler(int fd, char *body)
 {
 	(void)body;
-	return alias_redirect(fd, "/sb", "/songbook", 303);
+	return alias_redirect(fd, "/sb", "/gig", 303);
 }
 
 static int song_redirect_handler(int fd, char *body)
@@ -82,15 +105,53 @@ static int song_redirect_handler(int fd, char *body)
 	return alias_redirect(fd, "/chords", "/song", 301);
 }
 
+/* Pre-rename URL shims (301 permanent). */
+static int old_gig_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/songbook", "/gig", 301);
+}
+
+static int old_grp_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/choir", "/grp", 301);
+}
+
+static int grp_url_redirect_handler(int fd, char *body)
+{
+	(void)body;
+	return alias_redirect(fd, "/group", "/grp", 301);
+}
+
 void xy_install(void)
 {
-	xy_load("./mods/common/common");
-	xy_load("./mods/source/source");
-	load_modules_from_file("./mods.load");
+	int i18n_ok = (xy_load("./mods/i18n/i18n") == XY_OK);
+	int common_ok = (xy_load("./mods/common/common") == XY_OK);
+	int source_ok = (xy_load("./mods/source/source") == XY_OK);
 
-	axil_register_handler("GET:/sb", songbook_redirect_handler);
-	axil_register_handler("GET:/sb/*", songbook_redirect_handler);
+	if (!i18n_ok)
+		fprintf(stderr, "warning: i18n module failed to load\n");
+	if (!common_ok)
+		fprintf(stderr, "warning: common module failed to load\n");
+	if (!source_ok)
+		fprintf(stderr, "warning: source module failed to load\n");
+
+	if (common_ok && source_ok)
+		load_modules_from_file("./mods.load");
+
+	axil_register_handler("GET:/sb", gig_redirect_handler);
+	axil_register_handler("GET:/sb/*", gig_redirect_handler);
 
 	axil_register_handler("GET:/chords", song_redirect_handler);
 	axil_register_handler("GET:/chords/*", song_redirect_handler);
+
+	axil_register_handler("GET:/songbook", old_gig_redirect_handler);
+	axil_register_handler("GET:/songbook/*", old_gig_redirect_handler);
+
+	axil_register_handler("GET:/choir", old_grp_redirect_handler);
+	axil_register_handler("GET:/choir/*", old_grp_redirect_handler);
+
+	axil_register_handler("GET:/group", grp_url_redirect_handler);
+	axil_register_handler("GET:/group/*", grp_url_redirect_handler);
 }

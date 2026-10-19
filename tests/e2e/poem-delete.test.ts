@@ -30,9 +30,10 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     await page.goto(`${BASE}/poem/add`);
     await page.waitForSelector('input[name="title"]', { timeout: 5000 });
     await page.fill('input[name="title"]', title);
-    await page.click('button[type="submit"]');
-
-    await page.waitForURL(`${BASE}/poem/**`, { timeout: 5000 });
+    await Promise.all([
+      page.waitForURL(/\/poem\/(?!add$)[^\/]+$/, { timeout: 10000 }),
+      page.click('form[method="POST"] button[type="submit"]'),
+    ]);
     const url = page.url();
     poemId = url.replace(`${BASE}/poem/`, "").replace(/\/$/, "");
 
@@ -52,7 +53,7 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     }
 
     // ── 3. Confirm deletion ───────────────────────────────────────────────────
-    await page.click('button[type="submit"]');
+    await page.click('form[method="POST"] button[type="submit"]');
     await page.waitForURL(`${BASE}/poem`, { timeout: 5000 });
 
     // ── 4. Verify poem is gone ────────────────────────────────────────────────
@@ -69,7 +70,7 @@ Deno.test("poem delete: login → add poem → delete → verify gone", async ()
     // Cleanup in case deletion failed
     if (poemId) {
       try {
-        await Deno.remove(`items/poem/items/${poemId}`, { recursive: true });
+        await Deno.remove(`var/poem/${poemId}`, { recursive: true });
       } catch {
         // Already gone — ignore
       }

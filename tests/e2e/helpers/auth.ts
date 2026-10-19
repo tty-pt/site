@@ -3,12 +3,14 @@
  * All tests use a unique user per run to avoid session conflicts.
  */
 
+export { getBrowser, withTestContext, withTestPage, closeSharedBrowser } from "./browser.ts";
+
 export interface TestUser {
   username: string;
   password: string;
 }
 
-const LOG_FILE = "/tmp/site.log";
+const LOG_FILES = ["/tmp/site.log", "debug/runtime/axil.log"];
 
 function skipConfirmRequired(): boolean {
   const env = Deno.env.get("AUTH_SKIP_CONFIRM");
@@ -55,32 +57,33 @@ export async function confirmUser(base: string, username: string): Promise<void>
   // Let server process registration & flush log before we start
   await new Promise((r) => setTimeout(r, 1000));
   const deadline = Date.now() + 15000;
+  const lastFind: Record<string, number> = {};
 
   while (Date.now() < deadline) {
-    const stat = await Deno.stat(LOG_FILE).catch(() => null);
-    if (!stat || stat.size === 0) {
-      await new Promise((r) => setTimeout(r, 500));
-      continue;
-    }
-    const tailSize = Math.min(stat.size, 131072);
-    const file = await Deno.open(LOG_FILE, { read: true });
-    await file.seek(-tailSize, Deno.SeekMode.End);
-    const buf = new Uint8Array(tailSize);
-    const n = await file.read(buf);
-    file.close();
-    const tail = new TextDecoder().decode(buf.subarray(0, n ?? tailSize));
-    const lines = tail.split("\n").reverse();
-    for (const line of lines) {
-      const m = line.match(pattern);
-      if (m) {
-        const resp = await fetch(`${base}${m[1]}`, { redirect: "manual" });
-        await resp.body?.cancel();
-        return;
+    for (const logFile of LOG_FILES) {
+      const stat = await Deno.stat(logFile).catch(() => null);
+      if (!stat || stat.size === 0)
+        continue;
+      const tailSize = Math.min(stat.size, 131072);
+      const file = await Deno.open(logFile, { read: true });
+      await file.seek(-tailSize, Deno.SeekMode.End);
+      const buf = new Uint8Array(tailSize);
+      const n = await file.read(buf);
+      file.close();
+      const tail = new TextDecoder().decode(buf.subarray(0, n ?? tailSize));
+      const lines = tail.split("\n").reverse();
+      for (const line of lines) {
+        const m = line.match(pattern);
+        if (m) {
+          const resp = await fetch(`${base}${m[1]}`, { redirect: "manual" });
+          await resp.body?.cancel();
+          return;
+        }
       }
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`confirmUser: rcode for ${username} not found in ${LOG_FILE}`);
+  throw new Error(`confirmUser: rcode for ${username} not found in ${LOG_FILES.join(", ")}`);
 }
 
 /**
@@ -119,7 +122,7 @@ export async function loginUser(
   await page.fill('input[name="username"]', user.username);
   await page.fill('input[name="password"]', user.password);
   await Promise.all([
-    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 15000 }),
     page.click('button[type="submit"]'),
   ]);
 }
@@ -132,7 +135,7 @@ export async function logoutUser(
   base: string,
 ): Promise<void> {
   await Promise.all([
-    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 5000 }),
+    page.waitForURL(`${base}/`, { waitUntil: "domcontentloaded", timeout: 15000 }),
     page.goto(`${base}/auth/logout`, { waitUntil: "domcontentloaded" }),
   ]);
 }

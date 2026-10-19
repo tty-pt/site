@@ -6,7 +6,7 @@ in a `docs/` file linked below. The golden rule for every other doc:
 
 ## The site
 
-A pure-C music site for poems, songs, songbooks, and choirs. Server-rendered
+A pure-C music site for poems, songs, gigs, and grps. Server-rendered
 HTML (SSR-first) with progressive, optional WASM enhancement in the browser.
 **No Rust, Dioxus, or Deno in the request path** — the only WASM is C compiled
 to wasm32-wasi for browser-side polish.
@@ -17,12 +17,14 @@ to wasm32-wasi for browser-side polish.
 |-------|--------------|
 | `external/axil` | HTTP, sessions, auth, uploads, chroot |
 | `external/libxylem` | XY cross-.so dispatch (`dlopen` before chroot) |
-| `external/libqmap` | opaque data store (never free values) |
-| `external/stoma` | tokenization / search fold (accent-sensitive) |
-| `external/hyle` | data layer: schema, records, query, filtering, FTS (submodule) |
-| `external/hyle/c/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud |
-| `external/bud` | C DOM scaffold (SSR) + WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
-| `mods/*` | site modules — thin composition layers wiring the libraries together |
+| `external/libcorm` | opaque data store (never free values) |
+| `external/liblemma` | tokenization / search fold (accent-sensitive) |
+| `external/libhyle` | data/query kernel: canonical schema (`hyle_schema_desc_t`), query, filtering, FTS, generic registry/ordered/derive machinery, FFI row API, `hyle_qs_param` |
+| `external/libhyle-source` | standalone persistence engine: dataset metadata, DSV, JSON state overlays, pluggable drivers (`hyle_source_store_ops_t`), plus the picker DTOs (`hyle-source/picker.h`) |
+| `external/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp` and the `/pick/:id/options` fragment route hosted by `mods/source`) |
+| `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
+| `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
+| `mods/*` | site modules — thin composition layers wiring the libraries together (reusable; declare deps via `xy_load()` in `xy_install()`, see `ARCHITECTURE.md:§3`) |
 
 ## Framework-pair model (the governing design rule)
 
@@ -47,10 +49,9 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 ## The unbreakable rules
 
 - **No-JS must always work.** Client enhancement is optional and additive.
-- **hyle stays neutral.** No bud/component symbols in `external/hyle/src` or
-  `include/hyle`; only `external/hyle/c/libhyle-bud` may depend on bud.
+- **hyle stays neutral.** `external/libhyle` has 0 DOM symbols; `external/libbud` has 0 database/storage symbols. Only `external/libhyle-bud` and `mods/common` may bridge the two.
 - **All row writes go through hyle `put`/`del`** (`source_update_item` /
-  `source_delete_item`) — writing qmaps directly freezes the FTS index.
+  `source_delete_item`) — writing corms directly freezes the FTS index. Storage drivers (`store_fs`, `store_mem`) handle file and field persistence automatically.
 - **Search is accent-sensitive by design** (`pão` ≠ `pao`); no iconv
   TRANSLIT in the search fold. TRANSLIT survives only in `axil_slugify`.
 - **SSR markup is the contract.** `data-bud-*`/patch ops are bud-stack-internal
@@ -60,14 +61,15 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 
 ```
 AGENTS.md          doc index — route from here (read this first)
-docs/              the docs (OVERVIEW, ARCHITECTURE, DESIGN, BUILD, TESTING,
-                   CONVENTIONS, STYLING, SSR-CONTRACT, C-ISOMORPHIC-BUD,
-                   WASM-BRIDGE, FILTERS, SCHEMA)
-external/          axil, libxylem, libqmap, stoma, hyle (submodule), bud
+ docs/              the docs (OVERVIEW, GOALS, VIOLATIONS, ARCHITECTURE,
+                    DESIGN, BUILD, TESTING, CONVENTIONS, STYLING,
+                    SSR-CONTRACT, C-ISOMORPHIC-BUD, WASM-BRIDGE, FILTERS,
+                    SCHEMA, AUDIT)
+external/          axil, libxylem, libcorm, lemma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
-                   songbook, choir, bud_demo, redir (never loaded)
+                   gig, grp
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
-items/<mod>/items  data directories (server chroots at the repo root)
+var/<source>       data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)
 debug/             captured build/runtime/test logs (gitignored)
 ```
@@ -86,6 +88,7 @@ the repo root (prereqs in `docs/BUILD.md`).
 
 | You want to… | Read |
 |--------------|------|
+| Understand what the architecture wants to be | `docs/GOALS.md` |
 | Understand the architecture / load order / XY contract | `docs/ARCHITECTURE.md` |
 | Understand the design philosophy before designing anything | `docs/DESIGN.md` |
 | Build, rebuild, or hit a build gotcha | `docs/BUILD.md` |

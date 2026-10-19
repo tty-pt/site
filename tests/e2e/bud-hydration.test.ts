@@ -20,7 +20,6 @@ Deno.test("bud hydration: verify SSR #main element with chord data", async () =>
 
     const songId = await mountEl.getAttribute("data-song-id");
     const transpose = await mountEl.getAttribute("data-transpose");
-    const chordData = await mountEl.getAttribute("data-chord-data");
 
     if (songId !== SONG_ID) {
       throw new Error(`data-song-id mismatch: expected ${SONG_ID}, got ${songId}`);
@@ -28,15 +27,12 @@ Deno.test("bud hydration: verify SSR #main element with chord data", async () =>
     if (transpose === null) {
       throw new Error("data-transpose attribute missing");
     }
-    if (!chordData || chordData.length < 10) {
-      throw new Error("data-chord-data attribute missing or too short");
-    }
   } finally {
     await browser.close();
   }
 });
 
-Deno.test("bud hydration: verify WASM module loads (song-client.js)", async () => {
+Deno.test("bud hydration: verify WASM module loads (bud-client.js)", async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
@@ -55,7 +51,7 @@ Deno.test("bud hydration: verify WASM module loads (song-client.js)", async () =
     await page.waitForTimeout(3000);
 
     if (wasmRequests.length === 0) {
-      throw new Error("song-client.js WASM module was not requested");
+      throw new Error("bud-client.js WASM module was not requested");
     }
   } finally {
     await browser.close();

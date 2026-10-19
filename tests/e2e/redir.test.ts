@@ -2,8 +2,8 @@
  * E2E test: legacy shorthand redirects
  *
  * Tests:
- *   1. /sb redirects to /songbook (303)
- *   2. /sb/:id redirects to /songbook/:id (303)
+ *   1. /sb redirects to /gig (303)
+ *   2. /sb/:id redirects to /gig/:id (303)
  *   3. /chords redirects to /song (301)
  *   4. /chords/:id redirects to /song/:id (301)
  *   5. Query strings are preserved during redirect
@@ -20,17 +20,17 @@ Deno.test("redirects: shorthand paths redirect correctly with query preservation
   const page = await browser.newPage();
 
   try {
-    // 1. /sb → /songbook
+    // 1. /sb → /gig
     const sbResp = await page.goto(`${BASE}/sb`, { waitUntil: "domcontentloaded" });
     if (!sbResp) throw new Error("No response from /sb");
-    if (page.url() !== `${BASE}/songbook`) {
-       throw new Error(`Expected redirect to /songbook, got ${page.url()}`);
+    if (page.url() !== `${BASE}/gig`) {
+       throw new Error(`Expected redirect to /gig, got ${page.url()}`);
     }
 
-    // 2. /sb/:id → /songbook/:id
+    // 2. /sb/:id → /gig/:id
     await page.goto(`${BASE}/sb/some-id`, { waitUntil: "domcontentloaded" });
-    if (page.url() !== `${BASE}/songbook/some-id`) {
-       throw new Error(`Expected redirect to /songbook/some-id, got ${page.url()}`);
+    if (page.url() !== `${BASE}/gig/some-id`) {
+       throw new Error(`Expected redirect to /gig/some-id, got ${page.url()}`);
     }
 
     // 3. /chords → /song
