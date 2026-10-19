@@ -28,6 +28,10 @@ class InMemoryBackend {
     const id = explicitRef ?? this.nextId++;
     this.items.set(id, payload);
     if (id >= this.nextId) this.nextId = id + 1;
+    try {
+      Deno.mkdirSync("/tmp/mm-e2e/.pi/mm", { recursive: true });
+      Deno.writeTextFileSync("/tmp/mm-e2e/.pi/mm/.ref_seq", `${this.nextId}\n`);
+    } catch { /* ignore */ }
     return id;
   }
 
@@ -59,6 +63,9 @@ class InMemoryBackend {
 }
 
 function createSimulator(): { env: ToolEnv; backend: InMemoryBackend } {
+  try { Deno.removeSync("/tmp/mm-e2e", { recursive: true }); } catch { /* ignore */ }
+  try { Deno.mkdirSync("/tmp/mm-e2e", { recursive: true }); } catch { /* ignore */ }
+
   const backend = new InMemoryBackend();
 
   const runner: QmapRunner = {

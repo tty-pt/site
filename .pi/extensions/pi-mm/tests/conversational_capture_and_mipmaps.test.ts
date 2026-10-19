@@ -8,7 +8,7 @@ import { parseBareRefs } from "../src/resolve.ts";
 import { decodePayload } from "../src/payload.ts";
 import { installSessionHooks, activeConversationTurn, type PiCtx } from "../src/hooks/events.ts";
 import { handleBeforeAgentStart } from "../src/hooks/auto_recall.ts";
-import { runAutoConsolidation } from "../src/tools/consolidate.ts";
+import { runAutoConsolidation, runDeferredConsolidation } from "../src/tools/consolidate.ts";
 import { traverseDown } from "../src/tools/traverse.ts";
 
 const axisPath = "/home/quirinpa/site/external/libjoint/lib:/home/quirinpa/site/external/libstoma/lib:/home/quirinpa/site/external/libsepal/lib";
@@ -351,12 +351,31 @@ Deno.test("conversational_capture_and_mipmaps: Scenario C - Conversational L1->L
 
     const daemonRunner = new DaemonQmapRunner(sockPath, { run: (inv) => shellExec(inv.command, inv.args, inv) });
 
+    const synthServer = Deno.serve({ port: 0 }, async (req) => {
+      const body = await req.json();
+      const userPrompt = body.messages[1].content as string;
+      const matches = [...userPrompt.matchAll(/\[Ref (\d+)\]/g)].map((m) => Number(m[1]));
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              summary: "Family knowledge: grandparents research history and memories",
+              explanation: "Synthesized from family memories",
+              citedRefs: matches,
+            }),
+          },
+        }],
+      }), { headers: { "Content-Type": "application/json" } });
+    });
+
     const cfg = {
       ...DEFAULT_CONFIG,
       qmapBin: cormBin,
       cormdBin,
       axisLibs: axisPath,
       memDir: tmpDir,
+      synthUrl: `http://127.0.0.1:${synthServer.addr.port}`,
+      synthModel: "mock-synthesis-model",
     };
 
     const ctx: PiCtx = {
@@ -431,7 +450,7 @@ Deno.test("conversational_capture_and_mipmaps: Scenario C - Conversational L1->L
 
     // If not already created on incremental settlement, run consolidation explicitly
     if (l2Ref === undefined) {
-      const autoRes = await runAutoConsolidation(toolEnv, ctx);
+      const autoRes = await runDeferredConsolidation(toolEnv, ctx, { force: true });
       const autoDetails = autoRes.details as { createdL2: number[]; l3Status: string };
       if (autoDetails.createdL2.length > 0) {
         l2Ref = autoDetails.createdL2[0];
@@ -469,6 +488,7 @@ Deno.test("conversational_capture_and_mipmaps: Scenario C - Conversational L1->L
     assert.strictEqual(countAfter, countBefore, "Total records must not change on repeated run");
 
     // Clean up daemon
+    await synthServer.shutdown();
     const lockData = JSON.parse(await Deno.readTextFile(join(tmpDir, ".cormd.lock")));
     process.kill(lockData.pid, "SIGTERM");
   } finally {

@@ -29,7 +29,10 @@ export interface EpisodeRecord {
   sessionId?: string;
   sessionFile?: string;
   leafId?: string;
+  runId?: string;
   toolCallId?: string;
+  principle?: string;
+  applicability?: string;
 }
 
 export interface SpatialGrid {

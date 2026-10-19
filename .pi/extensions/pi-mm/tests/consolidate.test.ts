@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { join } from "node:path";
 import { makeConsolidateTool } from "../src/tools/consolidate.ts";
 import { fakeRunner, runTool, okResult } from "./fake-qmap.ts";
 import { DEFAULT_CONFIG, type MmConfig } from "../src/config.ts";
@@ -13,12 +14,17 @@ function now(): Date {
   return new Date("2026-10-14T12:00:00Z");
 }
 
-function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}): ToolEnv {
+function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}, fetchFn?: typeof fetch): ToolEnv {
+  try { Deno.removeSync(join(CWD, ".ref_seq")); } catch { /* ignore */ }
+  try { Deno.removeSync(join(CWD, ".pi", "mm", ".ref_seq")); } catch { /* ignore */ }
+  try { Deno.removeSync(join(CWD, ".consolidation.json")); } catch { /* ignore */ }
+  try { Deno.removeSync(join(CWD, ".pi", "mm", ".consolidation.json")); } catch { /* ignore */ }
   return {
     cwd: CWD,
     runner,
     nowProvider: now,
     cfg: { ...DEFAULT_CONFIG, qmapBin: "/usr/bin/qmap", ...cfg },
+    fetchFn,
   };
 }
 
@@ -331,11 +337,35 @@ Deno.test("consolidate: end-to-end automatic L0->L1->L2->L3 hierarchy with scope
     },
   };
 
+  const mockSynthFetch = (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(init?.body as string);
+    const userPrompt = body.messages[1].content as string;
+    const isL3 = body.messages[0].content.includes("generalization engine");
+    if (isL3) {
+      return Promise.resolve(new Response(JSON.stringify({ error: "L3 disabled in mock" }), { status: 500 }));
+    }
+    const matches = [...userPrompt.matchAll(/\[Ref (\d+)\]/g)].map((m) => Number(m[1]));
+    const scopeMatch = userPrompt.match(/Scope: ([^\n\s]+)/);
+    const scope = scopeMatch ? scopeMatch[1] : "scope";
+    return Promise.resolve(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            summary: `Synthesized knowledge for ${scope}`,
+            explanation: "Derived from valid evidence",
+            citedRefs: matches,
+          }),
+        },
+      }],
+    })));
+  };
+
   const { makeStoreTool } = await import("../src/tools/store.ts");
   const { makeTraverseTool } = await import("../src/tools/traverse.ts");
-  const storeTool = makeStoreTool(give(env(memoryRunner)));
-  const consolidateTool = makeConsolidateTool(give(env(memoryRunner)));
-  const traverseTool = makeTraverseTool(give(env(memoryRunner)));
+  const toolEnv = env(memoryRunner, { synthUrl: "http://mock-synth", synthModel: "mock-model" }, mockSynthFetch);
+  const storeTool = makeStoreTool(give(toolEnv));
+  const consolidateTool = makeConsolidateTool(give(toolEnv));
+  const traverseTool = makeTraverseTool(give(toolEnv));
 
   // Seed two verified episodes in project A, two in project B
   await runTool(storeTool, {

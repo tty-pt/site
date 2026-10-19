@@ -2,8 +2,8 @@ import { mkdir } from "node:fs/promises";
 import type { PiCtx, PiToolSpec } from "../hooks/events.ts";
 import type { EnvSource, ToolEnv } from "./index.ts";
 import { axisPath, memDir, exportDetail, sepalConfigured } from "./index.ts";
-import { filespecFor, buildStoreInvocation, buildListInvocation, buildGetInvocation, embedEnv } from "../qmap.ts";
-import { parseBareRefs, nextRef } from "../resolve.ts";
+import { filespecFor, buildStoreInvocation, buildGetInvocation, embedEnv } from "../qmap.ts";
+import { allocateNextRef } from "./ref_allocator.ts";
 import { payloadDate } from "../qmap.ts";
 import { encodePayload, decodePayload } from "../payload.ts";
 import { withLock } from "../lock.ts";
@@ -157,8 +157,7 @@ export async function executeStore(envSource: EnvSource, params: Record<string, 
     const fspec = filespecFor(cwd, embed);
     const eEnv = embedEnv(env.cfg);
     return await withLock(cwd, async () => {
-      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
-      const ref = nextRef(parseBareRefs(list.stdout));
+      const ref = await allocateNextRef(cwd, env.runner, env.cfg.qmapBin, fspec, axes, eEnv);
       const { envelope, isStructured } = buildEnvelope(params, summary, ep);
       const payload = isStructured ? encodePayload(date, envelope) : `${date}:${summary}`;
 

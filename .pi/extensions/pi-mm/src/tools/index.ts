@@ -41,6 +41,7 @@ export interface ToolEnv {
   cfg: MmConfig;
   runner: QmapRunner;
   nowProvider: () => Date;
+  fetchFn?: typeof fetch;
 }
 
 export type EnvSource = (ctx: PiCtx) => Promise<ToolEnv>;

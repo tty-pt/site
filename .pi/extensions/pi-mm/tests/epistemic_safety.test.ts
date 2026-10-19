@@ -23,6 +23,8 @@ function fakeRunner(results: PiExecResult[]): { runner: QmapRunner; invocations:
 }
 
 function makeEnv(runner: QmapRunner): ToolEnv {
+  try { Deno.removeSync("/tmp/fake-mm/.pi/mm/.ref_seq"); } catch { /* ignore */ }
+  try { Deno.removeSync("/tmp/fake-mm/.ref_seq"); } catch { /* ignore */ }
   return {
     cwd: "/tmp/fake-mm",
     runner,

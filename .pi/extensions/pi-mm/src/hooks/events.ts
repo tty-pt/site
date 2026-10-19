@@ -3,15 +3,17 @@ import { axisPath, memDir, sepalConfigured } from "../tools/index.ts";
 import { describeCapabilities } from "../config.ts";
 import { evaluateTurnWithJudge } from "../judge/adapter.ts";
 import type { JudgeDecision } from "../judge/types.ts";
-import { filespecFor, buildStoreInvocation, buildListInvocation, buildGetInvocation, embedEnv } from "../qmap.ts";
-import { parseBareRefs, nextRef } from "../resolve.ts";
+import { filespecFor, buildStoreInvocation, buildGetInvocation, buildListInvocation, embedEnv } from "../qmap.ts";
+import { allocateNextRef } from "../tools/ref_allocator.ts";
+import { parseBareRefs } from "../resolve.ts";
 import { encodePayload, decodePayload } from "../payload.ts";
 import { withLock } from "../lock.ts";
 import type { MemoryEnvelope, EpisodeRecord, MemoryContext } from "../types.ts";
 import { handleBeforeAgentStart, type BeforeAgentStartEvent } from "./auto_recall.ts";
 import { validateEvidenceRef } from "../tools/lifecycle.ts";
 import { executeHybridScan } from "../tools/scan.ts";
-import { runAutoConsolidation } from "../tools/consolidate.ts";
+import { runAutoConsolidation, runDeferredConsolidation } from "../tools/consolidate.ts";
+import { recordNewL0InJournal } from "../tools/consolidation_journal.ts";
 import { debugLog, traceEvent } from "../debug.ts";
 import { isDaemonLockHeld } from "../daemon.ts";
 import { readFile, writeFile, unlink, mkdir, rename } from "node:fs/promises";
@@ -271,6 +273,66 @@ export function summarizeToolEvent(event: ToolResultEvent): SignificantEvent | n
   };
 }
 
+export function extractReliableProjectContext(
+  ctx: PiCtx,
+  batch?: SignificantEvent[],
+): MemoryContext | undefined {
+  const explicitCtx = ((ctx as unknown as Record<string, unknown>).context as MemoryContext | undefined);
+  let project = explicitCtx?.project;
+  let subsystem = explicitCtx?.subsystem;
+  let moduleName = explicitCtx?.module;
+
+  if (!project && ctx.cwd) {
+    const norm = ctx.cwd.replace(/\/+$/, "");
+    const isTmp = norm.startsWith("/tmp") || norm.startsWith("/var/tmp") || norm.includes("/tmp/") || norm.includes("/var/tmp/");
+    if (!isTmp) {
+      const base = norm.split("/").filter(Boolean).pop();
+      if (base && !base.startsWith("mm-")) {
+        project = base;
+      }
+    }
+  }
+
+  if (batch && batch.length > 0) {
+    const touchedPaths: string[] = [];
+    for (const e of batch) {
+      if (typeof e.toolArgs?.path === "string") touchedPaths.push(e.toolArgs.path);
+      if (typeof e.toolArgs?.file === "string") touchedPaths.push(e.toolArgs.file);
+      if (Array.isArray(e.diffs)) {
+        for (const d of e.diffs) {
+          if (typeof d === "string") touchedPaths.push(d);
+        }
+      }
+    }
+    if (touchedPaths.length > 0) {
+      for (const p of touchedPaths) {
+        const cleanP = p.replace(/^\.\//, "");
+        const parts = cleanP.split("/").filter(Boolean);
+        if (parts.length >= 2) {
+          if (parts[0] === "mods" || parts[0] === "external" || parts[0] === "packages") {
+            if (!subsystem) subsystem = parts[0];
+            if (!moduleName) moduleName = parts[1];
+            if (!project && parts[0] === "packages") project = parts[1];
+            break;
+          } else if (parts[0] === "src") {
+            if (!moduleName) moduleName = parts[1] || parts[0];
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (project || subsystem || moduleName) {
+    return {
+      project,
+      subsystem,
+      module: moduleName,
+    };
+  }
+  return undefined;
+}
+
 let activeFlushPromise: Promise<number | null> | null = null;
 
 async function executeBatchFlush(
@@ -302,6 +364,7 @@ async function executeBatchFlush(
     const leafId = sessionManager?.getLeafId?.();
 
     const episode: EpisodeRecord = {
+      request: activeConversationTurn.prompt || undefined,
       problem: firstEvent.summary,
       approaches: approaches.length > 0 ? approaches : undefined,
       environment: firstEvent.environment,
@@ -310,6 +373,7 @@ async function executeBatchFlush(
       sessionId: sessionId ?? undefined,
       sessionFile: sessionFile ?? undefined,
       leafId: leafId ?? undefined,
+      runId: activeConversationTurn.activeRunId,
       toolCallId: firstEvent.id,
     };
 
@@ -352,12 +416,15 @@ async function executeBatchFlush(
       lifecycle = "observed";
     }
 
+    const context = extractReliableProjectContext(ctx, batch);
+
     const envelope: MemoryEnvelope = {
       level: "L0",
       type: "episode",
       lifecycle,
       summary: firstEvent.summary,
       evidence: validatedEvidence,
+      context,
       episode,
     };
     const date = env.nowProvider().toISOString().slice(0, 10);
@@ -369,12 +436,12 @@ async function executeBatchFlush(
     const eEnv = embedEnv(env.cfg);
 
     return await withLock(cwd, async () => {
-      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
-      const ref = nextRef(parseBareRefs(list.stdout));
+      const ref = await allocateNextRef(cwd, env.runner, env.cfg.qmapBin, fspec, axes, eEnv);
       const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd, eEnv));
       if (res.code === 0) {
         activeSessionBuffer.commitFlush(ids);
         await activeSessionBuffer.saveJournal(cwd).catch(() => {});
+        await recordNewL0InJournal(cwd, [ref]).catch(() => {});
         return ref;
       }
       activeSessionBuffer.rollbackFlush(`store-failed-code-${res.code}: ${res.stderr}`);
@@ -406,6 +473,7 @@ export interface ActiveConversationTurn {
   previousUserPrompt?: string;
   previousAssistantResponse?: string;
   topicSubject?: string;
+  activeRunId?: string;
 }
 
 export const activeConversationTurn: ActiveConversationTurn = {};
@@ -487,8 +555,7 @@ export async function persistConversationalMemory(
     });
 
     return await withLock(cwd, async () => {
-      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
-      const ref = nextRef(parseBareRefs(list.stdout));
+      const ref = await allocateNextRef(cwd, env.runner, env.cfg.qmapBin, fspec, axes, eEnv);
       const res = await env.runner.run(buildStoreInvocation(env.cfg.qmapBin, fspec, ref, payload, axes, cwd, eEnv));
       debugLog("persistence", "Executed corm store", {
         ref,
@@ -508,6 +575,9 @@ export async function persistConversationalMemory(
 
       if (res.code === 0) {
         debugLog("persistence", "Successfully allocated memory reference", { ref });
+        if (classification.level === "L0") {
+          await recordNewL0InJournal(cwd, [ref]).catch(() => {});
+        }
         return ref;
       }
       debugLog("persistence", "CORM store mutation returned non-zero code", {
@@ -697,9 +767,7 @@ export async function handleMemoryUpdate(
         }
       }
 
-      const list = await env.runner.run(buildListInvocation(env.cfg.qmapBin, fspec, axes, cwd, eEnv));
-      const allRefs = parseBareRefs(list.stdout);
-      const newRef = nextRef(allRefs);
+      const newRef = await allocateNextRef(cwd, env.runner, env.cfg.qmapBin, fspec, axes, eEnv);
 
       const episode: EpisodeRecord = {
         problem: prompt,
@@ -873,9 +941,18 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     if (!envSource || !ctxUnknown) return;
     const ctx = ctxUnknown as PiCtx;
 
-    // Per-turn boundary: flush tool events as required, but do not clear
-    // prompt or response across intermediate turns of an agent run.
-    await flushSessionBuffer(envSource, ctx);
+    // Per-turn boundary: flush tool events as required, and record returned
+    // technical L0 reference into the persistent consolidation journal.
+    const flushedRef = await flushSessionBuffer(envSource, ctx);
+    if (flushedRef !== null && flushedRef !== undefined) {
+      try {
+        const env = await envSource(ctx);
+        const cwd = memDir(env);
+        await withLock(cwd, async () => {
+          await recordNewL0InJournal(cwd, [flushedRef]);
+        });
+      } catch { /* best effort */ }
+    }
   };
 
   const onRunSettled = async (eventUnknown: unknown, ctxUnknown?: unknown) => {
@@ -883,6 +960,12 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     const ctx = ctxUnknown as PiCtx;
     const sessionId = extractSessionId(ctx);
     const isAborted = Boolean((eventUnknown as { aborted?: boolean })?.aborted);
+
+    const hasActiveRun = Boolean(
+      activeConversationTurn.activeRunId ||
+      activeConversationTurn.timestamp ||
+      activeConversationTurn.prompt !== undefined,
+    );
 
     debugLog("capture", "agent_settled triggered", {
       hasPrompt: Boolean(activeConversationTurn.prompt),
@@ -900,7 +983,18 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     }, { sessionId });
 
     // 1. Flush any remaining tool-call events
-    await flushSessionBuffer(envSource, ctx);
+    const flushedRef = await flushSessionBuffer(envSource, ctx);
+    const capturedL0Refs: number[] = [];
+    if (flushedRef !== null && flushedRef !== undefined) {
+      capturedL0Refs.push(flushedRef);
+      try {
+        const env = await envSource(ctx);
+        const cwd = memDir(env);
+        await withLock(cwd, async () => {
+          await recordNewL0InJournal(cwd, [flushedRef]);
+        });
+      } catch { /* best effort */ }
+    }
 
     // 2. Finalize and persist conversational memory strictly after the full agent run settles
     if (activeConversationTurn.prompt && !isAborted) {
@@ -915,95 +1009,79 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
 
       activeConversationTurn.previousUserPrompt = prompt;
       activeConversationTurn.previousAssistantResponse = response;
-      activeConversationTurn.prompt = undefined;
-      activeConversationTurn.response = undefined;
-      activeConversationTurn.responses = undefined;
 
-      if (!prompt) return;
+      if (prompt) {
+        try {
+          const env = await envSource(ctx);
+          const mode = env.cfg.captureMode ?? (env.cfg.judgeMode === "off" ? "off" : (env.cfg.judgeUrl ? "judge" : "all"));
 
-      const env = await envSource(ctx);
-      const mode = env.cfg.captureMode ?? (env.cfg.judgeMode === "off" ? "off" : (env.cfg.judgeUrl ? "judge" : "all"));
+          let shouldStoreConversational = false;
+          let contentToStore = prompt;
 
-      // Mode D: off
-      if (mode === "off") {
-        debugLog("capture", "Capture mode is off; skipping automatic capture");
-        return;
-      }
+          if (mode === "off") {
+            debugLog("capture", "Capture mode is off; skipping automatic capture");
+          } else if (mode === "keyword") {
+            const keyword = env.cfg.captureKeyword?.trim();
+            if (keyword && prompt.startsWith(keyword)) {
+              contentToStore = prompt.slice(keyword.length).trim();
+              if (contentToStore) shouldStoreConversational = true;
+            }
+          } else if (mode === "judge") {
+            const judgeStart = Date.now();
+            const judgeRes = await evaluateTurnWithJudge(prompt, response, env.cfg, globalThis.fetch, threadContext);
+            const judgeDurationMs = Date.now() - judgeStart;
 
-      let contentToStore = prompt;
+            traceEvent("judge_request", judgeRes.decision.action === "skip" ? "skip" : "ok", {
+              endpoint: env.cfg.judgeUrl || "unconfigured",
+              model: env.cfg.judgeModel || "none",
+              status: judgeRes.degraded ? "degraded" : (judgeRes.source === "llm" ? "http-200" : "fallback"),
+              elapsedMs: judgeDurationMs,
+              action: judgeRes.decision.action,
+              failureReason: judgeRes.decision.reason || null,
+            }, { sessionId });
 
-      // Mode B: keyword
-      if (mode === "keyword") {
-        const keyword = env.cfg.captureKeyword?.trim();
-        if (!keyword) {
-          console.error("[pi-mm] Configuration error: captureMode='keyword' but captureKeyword is not configured");
-          debugLog("capture", "Keyword mode without configured keyword; aborting capture");
-          return;
-        }
-        if (!prompt.startsWith(keyword)) {
-          debugLog("capture", "Prompt does not start with literal keyword; skipping", { keyword, promptPreview: prompt.slice(0, 40) });
-          return;
-        }
-        // Remove keyword prefix literally and exactly
-        contentToStore = prompt.slice(keyword.length).trim();
-        if (!contentToStore) {
-          debugLog("capture", "Prompt empty after stripping keyword; skipping");
-          return;
-        }
-      }
+            if (judgeRes.decision.action !== "skip") {
+              shouldStoreConversational = true;
+            }
+          } else {
+            // mode === "all"
+            shouldStoreConversational = true;
+          }
 
-      // Mode C: judge
-      if (mode === "judge") {
-        const judgeStart = Date.now();
-        debugLog("judgement", "Evaluating turn with binary Jev judge", {
-          promptPreview: prompt.slice(0, 100),
-          judgeUrl: env.cfg.judgeUrl,
-          judgeModel: env.cfg.judgeModel,
-        });
-
-        const judgeRes = await evaluateTurnWithJudge(prompt, response, env.cfg, globalThis.fetch, threadContext);
-        const judgeDurationMs = Date.now() - judgeStart;
-
-        debugLog("judgement", "Binary judge evaluated turn", {
-          action: judgeRes.decision.action,
-          source: judgeRes.source,
-          durationMs: judgeDurationMs,
-          degraded: Boolean(judgeRes.degraded),
-          reason: judgeRes.decision.reason,
-        });
-
-        traceEvent("judge_request", judgeRes.decision.action === "skip" ? "skip" : "ok", {
-          endpoint: env.cfg.judgeUrl || "unconfigured",
-          model: env.cfg.judgeModel || "none",
-          status: judgeRes.degraded ? "degraded" : (judgeRes.source === "llm" ? "http-200" : "fallback"),
-          elapsedMs: judgeDurationMs,
-          action: judgeRes.decision.action,
-          failureReason: judgeRes.decision.reason || null,
-        }, { sessionId });
-
-        if (judgeRes.decision.action === "skip") {
-          debugLog("capture", "Judge decided skip; turn not persisted to L0");
-          return;
+          if (shouldStoreConversational) {
+            const l0Classification: ConversationalClassification = {
+              meaningful: true,
+              type: "note",
+              level: "L0",
+              summary: contentToStore.slice(0, 250),
+              problem: contentToStore,
+              findings: [contentToStore],
+              context: activeConversationTurn.topicSubject ? { subject: activeConversationTurn.topicSubject } : undefined,
+            };
+            const l0Ref = await persistConversationalMemory(l0Classification, envSource, ctx);
+            debugLog("capture", "Captured L0 experience record", { l0Ref, summary: l0Classification.summary });
+            if (l0Ref !== null && l0Ref !== undefined) {
+              const numRef = typeof l0Ref === "number" ? l0Ref : parseInt(String(l0Ref), 10);
+              if (!isNaN(numRef)) capturedL0Refs.push(numRef);
+            }
+          }
+        } catch (err) {
+          debugLog("capture", "Conversational capture error", { error: err instanceof Error ? err.message : String(err) });
         }
       }
+    }
 
-      // Mode A: all (or accepted from Mode B / Mode C)
-      // Persist as compact attributable L0 experience record
-      const l0Classification: ConversationalClassification = {
-        meaningful: true,
-        type: "note",
-        level: "L0",
-        summary: contentToStore.slice(0, 250),
-        problem: contentToStore,
-        findings: [contentToStore],
-        context: activeConversationTurn.topicSubject ? { subject: activeConversationTurn.topicSubject } : undefined,
-      };
-      const l0Ref = await persistConversationalMemory(l0Classification, envSource, ctx);
-      debugLog("capture", "Captured L0 experience record", { l0Ref, summary: l0Classification.summary });
+    activeConversationTurn.prompt = undefined;
+    activeConversationTurn.response = undefined;
+    activeConversationTurn.responses = undefined;
+    activeConversationTurn.timestamp = undefined;
+    activeConversationTurn.activeRunId = undefined;
 
-      // Run incremental auto-consolidation (which handles L0 -> L1, thread updates, and successors)
+    // 3. UNCONDITIONALLY run incremental auto-consolidation for settled agent runs
+    if (hasActiveRun) {
       try {
-        await runAutoConsolidation(env, ctx);
+        const env = await envSource(ctx);
+        await runAutoConsolidation(env, ctx, { newL0Refs: capturedL0Refs, incrementalOnly: true });
       } catch (err) {
         debugLog("consolidation", "Incremental consolidation error", {
           error: err instanceof Error ? err.message : String(err),
@@ -1017,11 +1095,12 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     const sessionId = extractSessionId(ctx);
     if (typeof eventUnknown === "object" && eventUnknown !== null) {
       const event = eventUnknown as BeforeAgentStartEvent;
+      activeConversationTurn.timestamp = new Date().toISOString();
+      activeConversationTurn.activeRunId = (event as { runId?: string }).runId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       if (event.messageType === "user" && typeof event.prompt === "string") {
         activeConversationTurn.prompt = event.prompt;
         activeConversationTurn.response = undefined;
         activeConversationTurn.responses = undefined;
-        activeConversationTurn.timestamp = new Date().toISOString();
         debugLog("capture", "before_agent_start user prompt captured", {
           promptPreview: event.prompt.slice(0, 100),
           length: event.prompt.length,
@@ -1038,7 +1117,32 @@ export function installSessionHooks(pi: Pi, envSource?: EnvSource): void {
     return await handleBeforeAgentStart(event, ctxUnknown as PiCtx, envSource);
   });
 
+  const onBeforeCompact = async (eventUnknown: unknown, ctxUnknown?: unknown) => {
+    // 1. Ensure any in-flight turn is captured and settled into L0/L1
+    await onRunSettled(eventUnknown, ctxUnknown);
+
+    // 2. Execute deferred consolidation so pending L2/L3 abstractions are committed
+    // to CORM before compaction summarization reads existing abstractions.
+    if (!envSource || !ctxUnknown) return;
+    const ctx = ctxUnknown as PiCtx;
+    try {
+      const env = await envSource(ctx);
+      await runDeferredConsolidation(env, ctx);
+    } catch (err) {
+      debugLog("consolidation", "Deferred consolidation failed during before_compact", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   pi.on("turn_end", onTurnEnd);
   pi.on("agent_settled", onRunSettled);
-  pi.on("session_before_compact", onRunSettled);
+  pi.on("session_before_compact", onBeforeCompact);
+  pi.on("session_shutdown", async (_ev: unknown, ctxUnknown?: unknown) => {
+    if (!envSource || !ctxUnknown) return;
+    try {
+      const env = await envSource(ctxUnknown as PiCtx);
+      await runDeferredConsolidation(env, ctxUnknown as PiCtx);
+    } catch { /* ignore shutdown errors */ }
+  });
 }

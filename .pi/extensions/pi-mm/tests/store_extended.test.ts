@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { join } from "node:path";
 import { makeStoreTool } from "../src/tools/store.ts";
 import { makeLifecycleTool } from "../src/tools/lifecycle.ts";
 import { makeFeedbackTool } from "../src/tools/feedback.ts";
@@ -16,6 +17,8 @@ function now(): Date {
 }
 
 function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}): ToolEnv {
+  try { Deno.removeSync(join(CWD, ".ref_seq")); } catch { /* ignore */ }
+  try { Deno.removeSync(join(CWD, ".pi", "mm", ".ref_seq")); } catch { /* ignore */ }
   return {
     cwd: CWD,
     runner,

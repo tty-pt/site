@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { makeStoreTool, makeScanTool, makeThinkTool, makeForgetTool, makeResetTool, type ToolEnv } from "../src/tools/index.ts";
 import type { QmapRunner } from "../src/qmap.ts";
 import { give } from "../src/tools/index.ts";
@@ -17,6 +18,8 @@ function now(): Date {
 }
 
 function env(runner: QmapRunner, cfg: Partial<MmConfig> = {}): ToolEnv {
+  try { Deno.removeSync(join(CWD, ".ref_seq")); } catch { /* ignore */ }
+  try { Deno.removeSync(join(CWD, ".pi", "mm", ".ref_seq")); } catch { /* ignore */ }
   return {
     cwd: CWD,
     runner,

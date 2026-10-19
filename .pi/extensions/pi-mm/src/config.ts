@@ -25,6 +25,14 @@ export interface MmConfig {
   judgeKey?: string;
   judgeTimeoutMs?: number;
   judgeFallback?: JudgeFallback;
+  consolidateL2Threshold?: number;
+  consolidateL3Threshold?: number;
+  consolidateMaxAgeHours?: number;
+  consolidateBatchLimit?: number;
+  synthUrl?: string;
+  synthModel?: string;
+  synthKey?: string;
+  synthTimeoutMs?: number;
 }
 
 export const DEFAULT_CONFIG: MmConfig = {
@@ -39,6 +47,14 @@ export const DEFAULT_CONFIG: MmConfig = {
   judgeMode: "auto",
   judgeTimeoutMs: 5000,
   judgeFallback: "skip",
+  consolidateL2Threshold: 3,
+  consolidateL3Threshold: 2,
+  consolidateMaxAgeHours: undefined,
+  consolidateBatchLimit: 20,
+  synthUrl: undefined,
+  synthModel: undefined,
+  synthKey: undefined,
+  synthTimeoutMs: 15000,
 };
 
 export type QmapSource = "settings" | "env" | "path" | "insite" | "none";
@@ -69,6 +85,14 @@ export function loadConfig(raw: unknown): MmConfig {
   const jKey = record["judgeKey"];
   const jTimeout = record["judgeTimeoutMs"];
   const jFallback = record["judgeFallback"];
+  const l2Thresh = record["consolidateL2Threshold"];
+  const l3Thresh = record["consolidateL3Threshold"];
+  const maxAge = record["consolidateMaxAgeHours"];
+  const batchLim = record["consolidateBatchLimit"];
+  const sUrl = record["synthUrl"];
+  const sModel = record["synthModel"];
+  const sKey = record["synthKey"];
+  const sTimeout = record["synthTimeoutMs"];
 
   // Migrate legacy judgeMode if captureMode is not explicitly set
   let effectiveCaptureMode: CaptureMode = "all";
@@ -108,6 +132,14 @@ export function loadConfig(raw: unknown): MmConfig {
     judgeKey: typeof jKey === "string" && jKey.trim() !== "" ? jKey.trim() : undefined,
     judgeTimeoutMs: typeof jTimeout === "number" && jTimeout > 0 ? jTimeout : DEFAULT_CONFIG.judgeTimeoutMs,
     judgeFallback: effectiveFallback,
+    consolidateL2Threshold: typeof l2Thresh === "number" && l2Thresh > 0 ? l2Thresh : DEFAULT_CONFIG.consolidateL2Threshold,
+    consolidateL3Threshold: typeof l3Thresh === "number" && l3Thresh > 0 ? l3Thresh : DEFAULT_CONFIG.consolidateL3Threshold,
+    consolidateMaxAgeHours: typeof maxAge === "number" && maxAge > 0 ? maxAge : undefined,
+    consolidateBatchLimit: typeof batchLim === "number" && batchLim > 0 ? batchLim : DEFAULT_CONFIG.consolidateBatchLimit,
+    synthUrl: typeof sUrl === "string" && sUrl.trim() !== "" ? sUrl.trim() : undefined,
+    synthModel: typeof sModel === "string" && sModel.trim() !== "" ? sModel.trim() : undefined,
+    synthKey: typeof sKey === "string" && sKey.trim() !== "" ? sKey.trim() : undefined,
+    synthTimeoutMs: typeof sTimeout === "number" && sTimeout > 0 ? sTimeout : DEFAULT_CONFIG.synthTimeoutMs,
   };
 }
 
@@ -132,6 +164,20 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
   let defaultJudgeKey = env["PI_MM_JUDGE_KEY"] ?? env["MM_JUDGE_KEY"] ?? env["JEV_KEY"];
   const envJTimeout = env["PI_MM_JUDGE_TIMEOUT_MS"] ?? env["MM_JUDGE_TIMEOUT_MS"];
   const envJFallback = env["PI_MM_JUDGE_FALLBACK"] ?? env["MM_JUDGE_FALLBACK"];
+  const envL2Thresh = env["PI_MM_CONSOLIDATE_L2_THRESHOLD"] ?? env["MM_CONSOLIDATE_L2_THRESHOLD"];
+  const envL3Thresh = env["PI_MM_CONSOLIDATE_L3_THRESHOLD"] ?? env["MM_CONSOLIDATE_L3_THRESHOLD"];
+  const envMaxAge = env["PI_MM_CONSOLIDATE_MAX_AGE_HOURS"] ?? env["MM_CONSOLIDATE_MAX_AGE_HOURS"];
+  const envBatchLim = env["PI_MM_CONSOLIDATE_BATCH_LIMIT"] ?? env["MM_CONSOLIDATE_BATCH_LIMIT"];
+
+  // Independent synthesis settings
+  const envSynthUrl = env["PI_MM_SYNTH_URL"] ?? env["MM_SYNTH_URL"];
+  const envSynthModel = env["PI_MM_SYNTH_MODEL"] ?? env["MM_SYNTH_MODEL"];
+  const envSynthKey = env["PI_MM_SYNTH_KEY"] ?? env["MM_SYNTH_KEY"];
+  const envSynthTimeout = env["PI_MM_SYNTH_TIMEOUT_MS"] ?? env["MM_SYNTH_TIMEOUT_MS"];
+
+  let defaultSynthUrl = envSynthUrl;
+  let defaultSynthModel = envSynthModel;
+  let defaultSynthKey = envSynthKey;
 
   // Legacy fallback if QLLM_URL is set
   const qllmBase = env["QLLM_URL"];
@@ -144,10 +190,16 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
     if (!defaultEmbedUrl) {
       defaultEmbedUrl = trimmedBase.endsWith("/v1/embeddings") ? trimmedBase : `${trimmedBase}/v1/embeddings`;
     }
+    if (!defaultSynthUrl) {
+      defaultSynthUrl = trimmedBase.endsWith("/v1/chat/completions") ? trimmedBase :
+                       (trimmedBase.endsWith("/chat/completions") ? trimmedBase : `${trimmedBase}/v1/chat/completions`);
+    }
     if (!defaultJudgeModel && env["QLLM_MODEL"]) defaultJudgeModel = env["QLLM_MODEL"];
     if (!defaultEmbedModel && env["QLLM_MODEL"]) defaultEmbedModel = env["QLLM_MODEL"];
+    if (!defaultSynthModel && env["QLLM_MODEL"]) defaultSynthModel = env["QLLM_MODEL"];
     if (!defaultJudgeKey && env["QLLM_KEY"]) defaultJudgeKey = env["QLLM_KEY"];
     if (!defaultEmbedKey && env["QLLM_KEY"]) defaultEmbedKey = env["QLLM_KEY"];
+    if (!defaultSynthKey && env["QLLM_KEY"]) defaultSynthKey = env["QLLM_KEY"];
   }
 
   const envUrl = defaultEmbedUrl;
@@ -191,6 +243,11 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
   }
 
   const timeoutNum = envJTimeout ? parseInt(envJTimeout, 10) : undefined;
+  const l2ThreshNum = envL2Thresh ? parseInt(envL2Thresh, 10) : undefined;
+  const l3ThreshNum = envL3Thresh ? parseInt(envL3Thresh, 10) : undefined;
+  const maxAgeNum = envMaxAge ? parseFloat(envMaxAge) : undefined;
+  const batchLimNum = envBatchLim ? parseInt(envBatchLim, 10) : undefined;
+  const synthTimeoutNum = envSynthTimeout ? parseInt(envSynthTimeout, 10) : undefined;
 
   return {
     qmapBin: cfg.qmapBin === "" && typeof envBin === "string" && envBin.trim() !== "" ? envBin.trim() : cfg.qmapBin,
@@ -211,6 +268,14 @@ export function applyEnv(cfg: MmConfig, env: Record<string, string | undefined>)
     judgeKey: cfg.judgeKey ?? (typeof envJKey === "string" && envJKey.trim() !== "" ? envJKey.trim() : undefined),
     judgeTimeoutMs: timeoutNum && !isNaN(timeoutNum) && timeoutNum > 0 ? timeoutNum : cfg.judgeTimeoutMs,
     judgeFallback: jFallback,
+    consolidateL2Threshold: l2ThreshNum && !isNaN(l2ThreshNum) && l2ThreshNum > 0 ? l2ThreshNum : cfg.consolidateL2Threshold,
+    consolidateL3Threshold: l3ThreshNum && !isNaN(l3ThreshNum) && l3ThreshNum > 0 ? l3ThreshNum : cfg.consolidateL3Threshold,
+    consolidateMaxAgeHours: maxAgeNum && !isNaN(maxAgeNum) && maxAgeNum > 0 ? maxAgeNum : cfg.consolidateMaxAgeHours,
+    consolidateBatchLimit: batchLimNum && !isNaN(batchLimNum) && batchLimNum > 0 ? batchLimNum : cfg.consolidateBatchLimit,
+    synthUrl: cfg.synthUrl ?? (typeof defaultSynthUrl === "string" && defaultSynthUrl.trim() !== "" ? defaultSynthUrl.trim() : undefined),
+    synthModel: cfg.synthModel ?? (typeof defaultSynthModel === "string" && defaultSynthModel.trim() !== "" ? defaultSynthModel.trim() : undefined),
+    synthKey: cfg.synthKey ?? (typeof defaultSynthKey === "string" && defaultSynthKey.trim() !== "" ? defaultSynthKey.trim() : undefined),
+    synthTimeoutMs: synthTimeoutNum && !isNaN(synthTimeoutNum) && synthTimeoutNum > 0 ? synthTimeoutNum : cfg.synthTimeoutMs,
   };
 }
 
@@ -223,6 +288,11 @@ export function sepalConfigured(cfg: MmConfig): boolean {
 export function judgeConfigured(cfg: MmConfig): boolean {
   if (cfg.captureMode === "off") return false;
   return typeof cfg.judgeUrl === "string" && cfg.judgeUrl.trim() !== "";
+}
+
+export function synthConfigured(cfg: MmConfig): boolean {
+  return typeof cfg.synthUrl === "string" && cfg.synthUrl.trim() !== "" &&
+         typeof cfg.synthModel === "string" && cfg.synthModel.trim() !== "";
 }
 
 export function describeCapabilities(cfg: MmConfig): string {
