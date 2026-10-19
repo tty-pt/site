@@ -8,4 +8,6 @@ LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -Wl
 FOLDER := nd
 
 LDFLAGS-libnd-obj-Darwin += -undefined dynamic_lookup
+add-prefix-glob := ../nd-* ../axil-nd
+
 -include ./../mk/include.mk

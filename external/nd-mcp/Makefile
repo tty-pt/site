@@ -8,4 +8,6 @@ LDLIBS-libnd-mcp := -lxylem -lcorm -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as
 FOLDER := nd
 
 LDFLAGS-libnd-mcp-Darwin += -undefined dynamic_lookup
+add-prefix-glob := ../nd-* ../axil-nd
+
 -include ./../mk/include.mk

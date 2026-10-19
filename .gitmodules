@@ -106,3 +106,9 @@
 [submodule "external/nd-wts"]
 	path = external/nd-wts
 	url = git@github.com:tty-pt/nd-wts
+[submodule ".pi/extensions/pi-quest"]
+	path = .pi/extensions/pi-quest
+	url = git@github.com:tty-pt/pi-quest.git
+[submodule ".pi/extensions/pi-mm"]
+	path = .pi/extensions/pi-mm
+	url = git@github.com:tty-pt/pi-mm.git

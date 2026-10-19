@@ -1,11 +1,11 @@
-# RUNNING — qllm embeddings with pi-mm (real embeddings)
+# RUNNING — auren embeddings with pi-mm (real embeddings)
 
-How to run a local embedding server (axil-qllm) and use it with the
+How to run a local embedding server (axil-auren) and use it with the
 pi-mm extension for real semantic search over `memory_scan`.
 
 ## Prerequisites
 
-- `~/libqllm` source checkout — the axil module `libaxil-qllm.so` and the
+- `~/auren` source checkout — the axil module `libaxil-auren.so` and the
   `axil` binary; publish them from that checkout (`make install-libs`-style
   `install`) — nothing loads through `LD_LIBRARY_PATH` any more.
 - An embeddings-capable GGUF model on disk. Instruct models (e.g.
@@ -13,16 +13,16 @@ pi-mm extension for real semantic search over `memory_scan`.
   embeddings model (`nomic-embed-text-v1.5.Q5_K_M.gguf` recommended,
   768-dim, fits the `SEPAL_VEC_MAX` 2048 cap). ~250 MB.
 
-## 1. Start the qllm server
+## 1. Start the auren server
 
 ```sh
-cd ~/libqllm
-QLLM_MODEL_PATH=/path/to/nomic-embed-text-v1.5.Q5_K_M.gguf \
-  axil -A -d -p 4242 -m libaxil-qllm
+cd ~/auren
+AUREN_MODEL_PATH=/path/to/nomic-embed-text-v1.5.Q5_K_M.gguf \
+  axil -A -d -p 4242 -m libaxil-auren
 ```
 
-`-m libaxil-qllm` resolves from `~/libqllm/lib` (or pass an absolute
-path without `.so`, e.g. `-m /home/you/libqllm/lib/libaxil-qllm`).
+`-m libaxil-auren` resolves from `~/auren/lib` (or pass an absolute
+path without `.so`, e.g. `-m /home/you/auren/lib/libaxil-auren`).
 `-A` auto-authenticates (needed for clean session handling).
 
 Verify it is up:
@@ -43,12 +43,12 @@ export CORM_SEPAL_EMBED_MODEL=nomic-embed-text
 export CORM_AXIS_PATH=external/libsepal/lib:external/libjoint/lib:external/libstoma/lib
 ```
 
-`CORM_SEPAL_EMBED_KEY` is optional (Bearer token; none for the local qllm).
+`CORM_SEPAL_EMBED_KEY` is optional (Bearer token; none for the local auren server).
 
 ## 3. Store with embeddings
 
 With sepal in the roster, `memory_store` auto-embeds the text via the
-qllm server (stores the VEC1 blob; the raw text is only in stoma):
+auren server (stores the VEC1 blob; the raw text is only in stoma):
 
 ```sh
 corm -p 1:"2026-09-14:Beacon Harbor lights" "mem.db@joint,stoma,sepal:a:s"
@@ -79,7 +79,7 @@ Track: `mm-plan/6-QUERY-TEXT-PLAN.md` (Phase 5 record stays in
 
 ## Notes
 
-- pi-mm's text recall (stoma FTS) needs **no** qllm — this only adds the
+- pi-mm's text recall (stoma FTS) needs **no** auren server — this only adds the
   semantic (sepal) dimension to `memory_scan`.
 - The standalone `mm` binary (`external/mm/bin/mm`) is **legacy** — the
   phase-2 corm surface + pi-mm tools replace it; do not rely on `mm --embed`.

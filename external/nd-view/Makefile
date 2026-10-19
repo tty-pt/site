@@ -7,4 +7,6 @@ LDLIBS-libnd-view := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -W
 FOLDER := nd
 
 LDFLAGS-libnd-view-Darwin += -undefined dynamic_lookup
+add-prefix-glob := ../nd-* ../axil-nd
+
 -include ./../mk/include.mk

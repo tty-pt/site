@@ -7,4 +7,6 @@ LDLIBS-libnd-speech := -lxylem -lcorm -lqsys -L../axil-nd/lib -laxil-nd
 FOLDER := nd
 
 LDFLAGS-libnd-speech-Darwin += -undefined dynamic_lookup
+add-prefix-glob := ../nd-* ../axil-nd
+
 -include ./../mk/include.mk

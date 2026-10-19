@@ -83,19 +83,19 @@ def get_logo_id(x, y, alpha):
     if alpha <= 5:
         return None
     # Col 0:
-    if 50 <= x <= 540:
-        if y <= 370: return 'libcorm'
-        elif y <= 695: return 'libislet'
+    if 50 <= x <= 510:
+        if y <= 340: return 'libcorm'
+        elif y <= 655: return 'libislet'
         else: return 'liblemma'
     # Col 1:
-    elif 550 <= x <= 980:
-        if y <= 370: return 'axil'
-        elif y <= 690 or (y <= 706 and x < 760): return 'libjoint'
+    elif 560 <= x <= 980:
+        if y <= 342: return 'axil'
+        elif y <= 657: return 'libjoint'
         else: return 'bud'
     # Col 2:
-    elif 1000 <= x <= 1450:
-        if y <= 370 or (y <= 380 and x < 1215): return 'libxylem'
-        elif y <= 703: return 'libsepal'
+    elif 1040 <= x <= 1500:
+        if y <= 350: return 'libxylem'
+        elif y <= 665: return 'libsepal'
         else: return 'hyle'
     return None
 

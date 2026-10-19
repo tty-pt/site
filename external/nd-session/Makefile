@@ -8,4 +8,6 @@ LDLIBS-libnd-session := -lxylem -lcorm -lqsys -laxil-tty -L../axil-nd/lib -laxil
 FOLDER := nd
 
 LDFLAGS-libnd-session-Darwin += -undefined dynamic_lookup
+add-prefix-glob := ../nd-* ../axil-nd
+
 -include ./../mk/include.mk
