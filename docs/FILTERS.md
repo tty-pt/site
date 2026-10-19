@@ -33,7 +33,7 @@ So `?type=comunhao&type=natal` produces two filters, both on field `type`.
 Order matters (`external/libhyle/src/source.c`):
 
 1. `prefilter_fts` (source.c:579) — for searchable fields, resolves each filter
-   against the stoma index, **intersects** the matching row sets. Rebuilds the
+   against the lemma index, **intersects** the matching row sets. Rebuilds the
    index lazily after mutations.
 2. `prefilter_multi_ref` (source.c:331) — for multi-ref fields, resolves
    slug→position and pre-filters rows. Runs with

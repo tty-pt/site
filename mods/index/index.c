@@ -698,7 +698,7 @@ static int index_delete_handler(int fd, char *body)
 		}
 	}
 
-	/* Delete through hyle (removes dir + corms + marks stoma_dirty) */
+	/* Delete through hyle (removes dir + corms + marks lemma_dirty) */
 	{
 		char dset[256];
 		source_def_t *def;

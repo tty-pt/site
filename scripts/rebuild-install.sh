@@ -48,7 +48,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # nd-* engine modules, which region rows name by soname and st_init() dlopens
 # at boot from inside the jail. Anything not listed here is never deleted and
 # never installed by this script.
-CHAIN_LIBS="libqsys libcorm libxylem libstoma libjoint libislet libsepal \
+CHAIN_LIBS="libqsys libcorm libxylem liblemma libjoint libislet libsepal \
 	libhyle libtransp libbud libhyle-bud libhyle-source \
 	axil axil-auth axil-hyle axil-tty axil-nd"
 ENGINE_MODS=""

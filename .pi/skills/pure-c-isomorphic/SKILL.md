@@ -10,7 +10,7 @@ UX `mods/*/ux/*.c` compiles twice: native `.so` for SSR and `htdocs/*.wasm` for 
 ## Allowed vs forbidden in `mods/*/ux/*.c`
 
 - **Allowed:** `bud.h / bud_jsx.h / bud_app.h` + `hyle-bud/hyle-bud.h` + pure C. One `bud_app_render(state)` + `bud-state` JSON + `#bud-root` / `#chrome-root` wrapper.
-- **Forbidden:** `XY_`/`xy_`/`qmap_`/`source_`/`axil_`/`stoma_`/`hyle_source_`/`var/` literals — must stay in `mods/*/index.c` or `mods/source` or `mods/common/common_storage.c`. Exception: `hyle_bud_*` is sanctioned.
+- **Forbidden:** `XY_`/`xy_`/`qmap_`/`source_`/`axil_`/`lemma_`/`hyle_source_`/`var/` literals — must stay in `mods/*/index.c` or `mods/source` or `mods/common/common_storage.c`. Exception: `hyle_bud_*` is sanctioned.
 - **Include allowlist:** Only `mods/common/ux/site_ui.c` and `mods/index/ux/list.c` may `#include "*.c"` (`scripts/check-module-boundaries.sh`). Others must `XY_DECL` boundary.
 - **Preprocessor:** No `#if`/`#ifdef` for nodes — branch on runtime `state`. Allowed only: `#ifndef *_C` guards, `__attribute__((import_module("env")…))`, `site_ui.c:#ifndef __wasm__` aggregator, `site_page.c:#if __has_include` fallback (`C-ISOMORPHIC-BUD §3`).
 

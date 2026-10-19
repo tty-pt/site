@@ -30,7 +30,7 @@ It **must NOT** reference:
 - `axil` (HTTP/env/respond),
 - `source` / `source_*` (mods/source XY calls),
 - `corm` (`corm_*`),
-- `stoma`,
+- `lemma`,
 - any `XY_DECL`/`XY_IMPL` cross-.so function,
 - the site's native data registries.
 

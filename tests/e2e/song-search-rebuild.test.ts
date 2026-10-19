@@ -1,7 +1,7 @@
 /**
  * E2E test: lazy full-text index rebuild on song edit
  *
- * Verifies the stoma index is rebuilt after a mutation through the live stack:
+ * Verifies the lemma index is rebuilt after a mutation through the live stack:
  * 1. add a song with a distinctive title -> searching it returns it
  * 2. edit the title to something else
  * 3. searching the OLD title returns 0 rows (stale token gone)

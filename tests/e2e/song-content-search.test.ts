@@ -2,7 +2,7 @@
  * E2E test: song lyrics lookup (`lyrics` field derived from data.txt)
  *
  * Pins the "Lyrics" lookup box on /song that submits `?lyrics=<text>` against
- * the stoma full-text index of each song's in-memory derived lyrics:
+ * the lemma full-text index of each song's in-memory derived lyrics:
  * 1. seeding a song with chord lines and lyric lines
  * 2. searching a unique lyric token narrows the list to that song
  * 3. searching a unique chord token (e.g. "Cmaj7chordtest") returns 0 rows,

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Full-text (stoma) search semantics on the song listing.
+# Full-text (lemma) search semantics on the song listing.
 # Pins the token-prefix behavior that replaced ci_substr substring matching:
 #  - "star" is NOT a token prefix of "estar"/"Starlight" -> 0 rows (old code matched)
 #  - "cor" IS a token prefix ("Coração", "Corações") -> rows

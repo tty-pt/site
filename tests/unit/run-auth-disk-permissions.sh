@@ -14,9 +14,11 @@ clang -Wall -Wextra \
       -I"$ROOT/external/libhyle/include" \
       -I"$ROOT/external/libhyle-source/include" \
       -I"$ROOT/external/libhyle-bud/include" \
-      -I"$ROOT/external/libstoma/include" \
+      -I"$ROOT/external/liblemma/include" \
+      -L"$ROOT/external/liblemma/lib" \
+      -Wl,-rpath,"$ROOT/external/liblemma/lib" \
       -I"$ROOT/mods" \
-      -laxil -lcorm -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -lstoma -ljson-c -lqsys \
+      -laxil -lcorm -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -llemma -ljson-c -lqsys \
       "$ROOT/tests/unit/auth_disk_permissions_test.c" \
       -o "$ROOT/build/test/auth_disk_permissions_test"
 

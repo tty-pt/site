@@ -86,7 +86,7 @@ def get_logo_id(x, y, alpha):
     if 50 <= x <= 540:
         if y <= 370: return 'libcorm'
         elif y <= 695: return 'libislet'
-        else: return 'libstoma'
+        else: return 'liblemma'
     # Col 1:
     elif 550 <= x <= 980:
         if y <= 370: return 'axil'
@@ -106,7 +106,7 @@ TARGET_MAP = {
     'libislet': 'external/libislet/assets/logo.png',
     'libjoint': 'external/libjoint/assets/logo.png',
     'libsepal': 'external/libsepal/assets/logo.png',
-    'libstoma': 'external/libstoma/assets/logo.png',
+    'liblemma': 'external/liblemma/assets/logo.png',
     'bud': 'external/libbud/assets/logo.png',
     'hyle': 'external/libhyle/assets/logo.png',
 }

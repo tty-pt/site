@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib corm-lib xylem-lib stoma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib mods clients boundary-check
+all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -35,8 +35,8 @@ assets-sync:
 		exit 1; \
 	fi
 
-stoma-lib:
-	$(MAKE) -C external/libstoma
+lemma-lib:
+	$(MAKE) -C external/liblemma
 
 joint-lib:
 	$(MAKE) -C external/libjoint
@@ -50,7 +50,7 @@ sepal-lib:
 pi-mm-zip:
 	$(MAKE) -C .pi/extensions/pi-mm zip
 
-hyle-lib:
+hyle-lib: lemma-lib corm-lib
 	$(MAKE) -C external/libhyle
 
 transp-lib:
@@ -62,7 +62,7 @@ bud-lib:
 hyle-bud: hyle-lib bud-lib hyle-source
 	$(MAKE) -C external/libhyle-bud EXTRA_CFLAGS="-I$$(pwd)/external/libhyle/include -I$$(pwd)/external/libhyle-source/include"
 
-hyle-source: hyle-lib corm-lib stoma-lib
+hyle-source: hyle-lib corm-lib lemma-lib
 	$(MAKE) -C external/libhyle-source
 
 qsys-lib:
@@ -102,7 +102,7 @@ PREFIX ?= $(if $(filter Linux,$(UNAME_S)),/usr, \
 	/usr/local)))
 SUDO ?=
 
-INSTALL_PKGS = libqsys libcorm libxylem libstoma libjoint libislet libsepal \
+INSTALL_PKGS = libqsys libcorm libxylem liblemma libjoint libislet libsepal \
 	libhyle libtransp libbud libhyle-bud libhyle-source \
 	axil axil-auth axil-hyle axil-tty axil-nd \
 	$(patsubst external/%,%,$(wildcard external/nd-*))
@@ -314,7 +314,7 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-corm)
 hyle-tests:
-	RUSTFLAGS="-l corm -l stoma" cargo test --workspace \
+	LIBRARY_PATH="$(CURDIR)/external/liblemma/lib:$${LIBRARY_PATH:-}" RUSTFLAGS="-l corm -l lemma" cargo test --workspace \
 		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
@@ -343,4 +343,4 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib stoma-lib joint-lib islet-lib sepal-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync

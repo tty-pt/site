@@ -1,7 +1,7 @@
 /**
  * E2E test: quoted-phrase search on the song Lyrics box
  *
- * Wrapping the `lyrics=` value in double quotes switches stoma from token-AND to
+ * Wrapping the `lyrics=` value in double quotes switches lemma from token-AND to
  * a positional phrase match: the query tokens must appear as a contiguous,
  * in-order subsequence of the document's token stream. Per-token prefix still
  * applies, and every indexed token counts. Chord lines are stripped from the

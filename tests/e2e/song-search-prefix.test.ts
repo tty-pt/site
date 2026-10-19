@@ -1,7 +1,7 @@
 /**
  * E2E test: FTS token-prefix semantics + multi-field AND on song listing
  *
- * Pins the behavior of the stoma full-text search that replaced the old
+ * Pins the behavior of the lemma full-text search that replaced the old
  * ci_substr substring scan:
  * 1. searching "star" returns 0 rows (mid-word "estar" is NOT a token prefix;
  *    the old substring path would have matched)

@@ -12,7 +12,9 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libhyle-bud/include" \
 	-I"$repo/external/libbud/include" \
 	-I"$repo/external/libcorm/include" \
-	-I"$repo/external/libstoma/include" \
+	-I"$repo/external/liblemma/include" \
+	-L"$repo/external/liblemma/lib" \
+	-Wl,-rpath,"$repo/external/liblemma/lib" \
 	-o "$bin" \
 	"$repo/tests/unit/bud_picker_collect_test.c" \
 	-lhyle-bud \
@@ -20,7 +22,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-lhyle \
 	-lbud \
 	-lcorm \
-	-lstoma \
+	-llemma \
 	-ljson-c \
 
 "$bin"

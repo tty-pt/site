@@ -1,6 +1,6 @@
 ---
 name: externals-map
-description: "Map external libraries hyle, bud, libhyle-bud, libhyle-source, axil, libxylem, libqmap, stoma. Use when touching external/libhyle, external/libbud, or cross-harness boundaries. Triggers on: external/libhyle, external/libbud, libhyle-bud, libhyle-source, axil, libxylem, qmap, stoma"
+description: "Map external libraries hyle, bud, libhyle-bud, libhyle-source, axil, libxylem, libcorm, lemma. Use when touching external/libhyle, external/libbud, or cross-harness boundaries. Triggers on: external/libhyle, external/libbud, libhyle-bud, libhyle-source, axil, libxylem, corm, lemma"
 ---
 
 # Externals Map — hyle / bud / axil / libxylem
@@ -12,7 +12,7 @@ description: "Map external libraries hyle, bud, libhyle-bud, libhyle-source, axi
 | **axil** | `external/axil` | HTTP/sessions/auth/chroot `:8080` | Owns HTTP, never in WASM TU |
 | **libxylem (XY)** | `external/libxylem` | `dlopen(RTLD_LOCAL\|NODELETE)` before chroot | **Only** cross-`.so` mechanism; `XY_DECL` behind `#ifndef MODULE_IMPL`, `XY_IMPL` in owner, `static` default |
 | **qmap** | `external/libqmap` | opaque store `unsigned` handle | Never free values |
-| **stoma** | `external/stoma` | `stoma_fold` accent-sensitive `pão≠pao` no TRANSLIT | No `iconv` in search fold |
+| **lemma** | `external/liblemma` | `lemma_fold` accent-sensitive `pão≠pao` no TRANSLIT | No `iconv` in search fold |
 | **hyle** | `external/libhyle/include/hyle/{hyle.h,schema.h,field.h,query.h,source.h}` `src/{libhyle.c,field.c,query.c}` | canonical `hyle_schema_desc_t`, query/FTS | **Zero `bud` symbols** `grep -rn bud external/libhyle/src` must be `0` |
 | **libhyle-source** | `external/libhyle-source/include/hyle-source/{hyle_source.h,store.h}` `src/{engine.c,store_fs.c,store_mem.c,dsv.c}` | `hyle_source_store_ops_t` `store_fs`/`store_mem` | All writes via `source_update_item/del` → `hyle put/del` |
 | **libhyle-bud** | `external/libhyle-bud/include/hyle-bud/hyle-bud.h` `src/{filter.c,table.c,picker.c,libhyle-bud.c}` `hyle-bud-wasm.mk` | **ONLY** bud-dependent bridge | Bridges Hyle→Bud filters/tables; deps `-lhyle -lbud -lqmap` |

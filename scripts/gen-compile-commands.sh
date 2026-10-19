@@ -17,7 +17,7 @@ COMMON_INCLUDES=(
   "-I${REPO_ROOT}/external/libhyle-source/include"
   "-I${REPO_ROOT}/external/libhyle-bud/include"
   "-I${REPO_ROOT}/external/libtransp/include"
-  "-I${REPO_ROOT}/external/libstoma/include"
+  "-I${REPO_ROOT}/external/liblemma/include"
   "-I${REPO_ROOT}/mods/common"
   "-I${REPO_ROOT}/mods/index"
   "-I${REPO_ROOT}/mods/song"
@@ -66,7 +66,7 @@ for f in $(find "${REPO_ROOT}/mods" -path "*/ux/*.c" | sort); do
 done
 
 # 3. External C libraries
-for d in axil axil-auth axil-hyle bud libcorm libtransp libxylem stoma; do
+for d in axil axil-auth axil-hyle bud libcorm libtransp libxylem lemma; do
   if [ -d "${REPO_ROOT}/external/${d}" ]; then
     for f in $(find "${REPO_ROOT}/external/${d}" -name "*.c" -not -path "*/target/*" -not -path "*/.*" | sort); do
       rel_file="${f#"${REPO_ROOT}/"}"

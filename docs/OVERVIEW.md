@@ -18,7 +18,7 @@ to wasm32-wasi for browser-side polish.
 | `external/axil` | HTTP, sessions, auth, uploads, chroot |
 | `external/libxylem` | XY cross-.so dispatch (`dlopen` before chroot) |
 | `external/libcorm` | opaque data store (never free values) |
-| `external/stoma` | tokenization / search fold (accent-sensitive) |
+| `external/liblemma` | tokenization / search fold (accent-sensitive) |
 | `external/libhyle` | data/query kernel: canonical schema (`hyle_schema_desc_t`), query, filtering, FTS, generic registry/ordered/derive machinery, FFI row API, `hyle_qs_param` |
 | `external/libhyle-source` | standalone persistence engine: dataset metadata, DSV, JSON state overlays, pluggable drivers (`hyle_source_store_ops_t`), plus the picker DTOs (`hyle-source/picker.h`) |
 | `external/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp` and the `/pick/:id/options` fragment route hosted by `mods/source`) |
@@ -65,7 +65,7 @@ AGENTS.md          doc index — route from here (read this first)
                     DESIGN, BUILD, TESTING, CONVENTIONS, STYLING,
                     SSR-CONTRACT, C-ISOMORPHIC-BUD, WASM-BRIDGE, FILTERS,
                     SCHEMA, AUDIT)
-external/          axil, libxylem, libcorm, stoma, hyle (submodule), bud
+external/          axil, libxylem, libcorm, lemma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
                    gig, grp
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js

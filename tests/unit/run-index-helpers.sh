@@ -22,6 +22,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	"$repo/tests/unit/index_helpers_test.c" \
 	-L"$repo/mods/index" -Wl,-rpath,"$repo/mods/index" -l:index.so \
 	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
+	-L"$repo/external/liblemma/lib" -Wl,-rpath,"$repo/external/liblemma/lib" \
 	-lhyle-bud \
 	-lhyle-source \
 	-lhyle \
@@ -32,4 +33,4 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-laxil-auth \
 	-lxylem \
 
-"$bin"
+LD_LIBRARY_PATH="$repo/external/liblemma/lib:${LD_LIBRARY_PATH:-}" "$bin"

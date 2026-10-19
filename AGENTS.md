@@ -18,7 +18,7 @@ make watch          # auto-rebuild + restart on :8080
    for SSR and `htdocs/*.wasm` for the browser. One `bud_app_render(state)`
    + `bud-state` JSON + `#bud-root` / `#chrome-root` wrapper. Allowed:
    `bud.h` / `bud_jsx.h` / `bud_app.h` + `hyle-bud/hyle-bud.h` + pure C.
-   Forbidden in UX: `XY_`/`xy_`/`corm_`/`source_`/`axil_`/`stoma_`/
+   Forbidden in UX: `XY_`/`xy_`/`corm_`/`source_`/`axil_`/`lemma_`/
    `hyle_source_`/`var/` literals. Sanctioned `#include "*.c"` only
    `site_ui.c|list.c` (`scripts/check-module-boundaries.sh`).
    Check `grep -E 'corm_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must

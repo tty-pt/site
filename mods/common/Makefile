@@ -1,10 +1,10 @@
 BUD_DIR = $(REPO_ROOT)/external/libbud
-STOMA_DIR = $(REPO_ROOT)/external/libstoma
+LEMMA_DIR = $(REPO_ROOT)/external/liblemma
 HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
 HYLE_SOURCE_DIR = $(REPO_ROOT)/external/libhyle-source
-EXTRA_CFLAGS += -I../../external/libbud/include -I$(HYLE_BUD_DIR)/include -I$(STOMA_DIR)/include
+EXTRA_CFLAGS += -I../../external/libbud/include -I$(HYLE_BUD_DIR)/include -I$(LEMMA_DIR)/include
 EXTRA_LDLIBS += -lbud
-EXTRA_LDLIBS += -lstoma
+EXTRA_LDLIBS += -llemma
 EXTRA_LDLIBS += -lhyle-bud
 EXTRA_LDLIBS += -lhyle-source
 

@@ -67,7 +67,7 @@ Rules derived from the model:
                       │
      ┌────────────────┼────────────────┬────────────────┐
      ▼                ▼                ▼                ▼
-  libjoint         libislet         libstoma         libsepal
+  libjoint         libislet         liblemma         libsepal
  (Time Axis)      (Space Axis)     (Text Axis)     (Meaning Axis)
 ```
 
@@ -79,23 +79,23 @@ Core repositories:
 - [libcorm](https://github.com/tty-pt/libcorm) — In-memory map store and recall kernel
 - [libjoint](https://github.com/tty-pt/libit) — Temporal presence interval tree (Time axis)
 - [libislet](https://github.com/tty-pt/libgeo) — Multi-dimensional Morton code spatial index (Space axis)
-- [libstoma](https://github.com/tty-pt/libstoma) — Accent-preserving lexical tokenizer (Text axis)
+- [liblemma](https://github.com/tty-pt/liblemma) — Accent-preserving lexical tokenizer (Text axis)
 - [libsepal](https://github.com/tty-pt/libsepal) — Semantic vector store & 2-stage ANN (Meaning axis)
 
 ```
 axil ── HTTP, sessions, auth, chroot, uploads
 libxylem (XY) ── cross-.so call dispatch (RTLD_LOCAL dlopen before chroot)
 corm ── the data store (corm_put copies key and value; caller frees originals)
-stoma ── tokenization/search fold (accent-sensitive by design; no iconv)
+lemma ── tokenization/search fold (accent-sensitive by design; no iconv)
 hyle  ── pure data/query kernel: canonical hyle_schema_desc_t, query/filter/FTS,
         generic registry/ordered/derive machinery, FFI row API, qs helpers
-        (hyle_qs_param in hyle/url.h). NO component symbols. deps: stoma, corm
+        (hyle_qs_param in hyle/url.h). NO component symbols. deps: lemma, corm
 libhyle-source (external/libhyle-source) ── standalone persistence engine:
         registry access + CRUD, ordered/derive wrappers, option resolution,
         DSV, JSON state overlays, pluggable drivers
         (hyle_source_store_ops_t: store_fs, store_mem, custom stores), and the
         picker DTOs (`hyle-source/picker.h` — `hyle/picker.h` no longer exists).
-        deps: hyle, corm, stoma, json-c
+        deps: hyle, corm, lemma, json-c
 hyle-bud (external/libhyle-bud) ── the bud binding; ONLY place that
         may depend on bud. Bridges Hyle schemas to Bud UI components.
         deps: hyle, bud, corm. Used in UX for filters/tables (`index`/`gig`/`grp`
@@ -215,11 +215,11 @@ restarting the server.
 - Route ALL row writes through hyle `put`/`del` (`mods/source`
   `source_update_item`/`source_delete_item` $\rightarrow$ `libhyle-source`
   `hyle_source_put`/`hyle_source_del`). Writing rows directly into shared
-  corms bypasses `stoma_dirty` and freezes the FTS index.
+  corms bypasses `lemma_dirty` and freezes the FTS index.
 - Pluggable storage drivers: `libhyle-source` operates through `hyle_source_store_ops_t`
   (`scan`, `load`, `put`, `put_field`, `del`), allowing filesystem persistence (`store_fs`),
   memory persistence (`store_mem`), or custom database engines.
-- Search is **accent-sensitive** by design: `stoma_fold` lowercases ASCII and
+- Search is **accent-sensitive** by design: `lemma_fold` lowercases ASCII and
   Latin-1 uppercase, preserving accents; `pão` ≠ `pao`. No iconv TRANSLIT in the
   search fold; don't make it accent-insensitive. (TRANSLIT survives ONLY in
   `axil_slugify`, which must keep producing ASCII slugs.)

@@ -29,7 +29,7 @@ fi
 mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
 
 export AUTH_SKIP_CONFIRM=1
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/axil-auth/lib:${LD_LIBRARY_PATH:-/usr/lib}"
+export LD_LIBRARY_PATH="${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/liblemma/lib:${LD_LIBRARY_PATH:-/usr/lib}"
 export AXIL_ND_DB="${REPO_ROOT}/var/nd/std.db"
 export AXIL_ND_HTDOCS="${REPO_ROOT}/external/axil-nd/htdocs"
 

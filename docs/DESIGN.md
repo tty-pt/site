@@ -33,7 +33,7 @@ Grandfathered surface (`site_paths.c:68` icon table, etc.) is allowlisted in `sc
 ```
 external libraries (neutral, self-contained)
    axil   HTTP primitives            libxylem  XY dispatch (dlopen hidden)
-   corm   opaque data store          stoma     tokenization/search
+   corm   opaque data store          lemma     tokenization/search
    hyle   pure data layer (canonical hyle_schema_desc_t, NO component symbols)
    libhyle-source  dataset persistence, DSV, JSON overlays, pluggable drivers, picker DTOs
    hyle-bud  the ONLY bud-dependent bridge (external/libhyle-bud)
@@ -44,7 +44,7 @@ site modules (thin composition)
 
 Rules:
 - Externals never know about the site or each other (except documented deps:
-  `hyle → stoma → corm`; `hyle-bud → hyle + bud + corm`).
+  `hyle → lemma → corm`; `hyle-bud → hyle + bud + corm`).
 - `external/libhyle/src` + `include/hyle` must stay free of bud/component symbols.
   Only `libhyle-bud` may depend on bud.
 - Site modules are the composition layer: they wire libraries together, keep

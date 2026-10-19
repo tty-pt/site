@@ -44,7 +44,7 @@ zero edges.
    sibling dataset's directory. `source` owns scanning and persistence layout;
    others call it.
 4. **All row writes through hyle.** `source_update_item` /
-   `source_delete_item` → `hyle_source_put`/`del` so `stoma_dirty`
+   `source_delete_item` → `hyle_source_put`/`del` so `lemma_dirty`
    stays live. Direct `write_meta_file` /
    `fopen("var/.../owner")` without the hyle path freezes FTS.
 5. **Single ownership for cross-cutting concerns.** `auth` owns
@@ -80,9 +80,9 @@ site or each other except documented deps.
 
 ```
 corm                    bottom leaf
-stoma          → corm   fold only
-hyle           → stoma+corm (canonical schema, query, FTS)
-libhyle-source → hyle+corm+stoma+json-c (persistence, store drivers, DSV, JSON)
+lemma          → corm   fold only
+hyle           → lemma+corm (canonical schema, query, FTS)
+libhyle-source → hyle+corm+lemma+json-c (persistence, store drivers, DSV, JSON)
 hyle-bud       → hyle+bud+corm   ONLY bridge that may depend on bud
 bud                     pure DOM/JSX/WASM, 5-field UI binder, depends on nothing
 libxylem       → corm+qsys
@@ -99,16 +99,16 @@ must contain `0` database/storage includes.
 - `external/libhyle/src` + `include/hyle` contain **no** `bud`/`lx_`/`bud_`
   symbols. `external/libhyle/include/hyle/schema.h` defines canonical data schemas
   (`hyle_schema_desc_t`) independently of any UI renderer.
-- `external/libbud` contains **no** `corm_`/`hyle`/`xy_`/`stoma`/`axil`
+- `external/libbud` contains **no** `corm_`/`hyle`/`xy_`/`lemma`/`axil`
   includes (`external/libbud/src/libbud.c` only `bud.h`/`bud_app.h`). `bud_field_desc_t`
   is a pure 5-field UI state binder (`key`, `offset`, `size`, `is_int`, `kind`).
 - Only `external/libhyle-bud` may include `bud/bud.h`
   (`external/libhyle-bud/include/hyle-bud/hyle-bud.h`). It links
   `LDLIBS = -lhyle -lbud -lcorm` and nothing else.
 - `external/libhyle-source` is the standalone persistence engine, linking
-  `-lhyle -lcorm -lstoma -ljson-c`.
-- `stoma` exposes `stoma_fold` as pure `string.h`/`ctype.h`
-  (`external/stoma/src/token.c:11`); its `libstoma` TU may use `corm`
+  `-lhyle -lcorm -llemma -ljson-c`.
+- `lemma` exposes `lemma_fold` as pure `string.h`/`ctype.h`
+  (`external/liblemma/src/token.c:11`); its `liblemma` TU may use `corm`
   but `token.c` does not.
 - Site modules that need `hyle-bud` rendering (`gig`, `grp`, `index`)
   declare it explicitly:
@@ -133,7 +133,7 @@ native handler builds same state from `source`/`corm` and responds via
 `site_ui_respond_page`. See `C-ISOMORPHIC-BUD.md` for hard constraints.
 
 Hard constraint: a dual-compiled TU must **not** reference `axil`,
-`source`, `corm`, `stoma`, or any `XY_DECL`. `hyle-bud` (`hyle_bud_*`) **is**
+`source`, `corm`, `lemma`, or any `XY_DECL`. `hyle-bud` (`hyle_bud_*`) **is**
 allowed — it is the filter/table primitive compiled via `HYLE_BUD_WASM_SRC`.
 `--allow-undefined` in `build.mk` hides violations as `0x0` at runtime. Keep
 native-only data collection in a separate file (`mods/index/index.c`

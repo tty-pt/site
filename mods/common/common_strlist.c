@@ -1,7 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stoma/stoma.h>
+#include <ttypt/lemma.h>
 
 #include "common_internal.h"
 

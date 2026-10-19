@@ -175,7 +175,7 @@ Grandfathered `site_paths.c:68` icon table is the only allowed enumeration.
 A dual-compiled UX TU (`mods/*/ux/*.c` + `mods/common/ux/*`) may only include
 `bud.h`/`bud_jsx.h`/`bud_app.h` + `hyle-bud/hyle-bud.h` (for filters/tables in
 `index`/`gig`/`grp`) + pure C (`string.h`, etc.). It must **not**
-reference `corm_`, `source_`, `axil_`, `stoma_`, `hyle_source_`, `XY_`/`xy_`,
+reference `corm_`, `source_`, `axil_`, `lemma_`, `hyle_source_`, `XY_`/`xy_`,
 or `var/` literals. Per-module WASM that needs `hyle-bud` declares
 `EXTRA_CFLAGS += -I…/hyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` and
 `HYLE_BUD_WASM_SRC` (`hyle-bud-wasm.mk`). Every other module must fail to
@@ -199,7 +199,7 @@ file outside `ux/` (`GOALS.md:§3`). Allowed only: `#ifndef *_C` include guards,
 
 - Route ALL site row writes through hyle `put`/`del`
   (`mods/source` `source_update_item`/`source_delete_item`). Writing rows
-  directly into the shared corms bypasses `stoma_dirty` and freezes the FTS
+  directly into the shared corms bypasses `lemma_dirty` and freezes the FTS
   index. Filter/search semantics in `docs/FILTERS.md`.
 - Ordered `gig.songs`/`grp.songs` via `hyle_source_ordered_*` are sanctioned
   until DSV migration; item sources must use `source`.
