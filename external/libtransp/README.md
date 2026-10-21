@@ -25,6 +25,9 @@ internals, and the detection rework.
 
 ## Features
 
+- **Site Integration**: Powers live chord chart parsing and real-time key
+  transposition in `mods/song/` and `mods/gig/`, enabling both SSR and browser
+  WASM to shift keys instantly without server round-trips.
 - **Grammar-based detection**: a token is a chord iff a single left-to-right
   scan consumes it entirely as `root` + suffix atoms — no character
   whitelists, no chord database, no corm.

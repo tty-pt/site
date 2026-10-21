@@ -8,6 +8,8 @@ the libxylem XY module system, the hyle data engine, and the bud HTML builder.
 ## Architecture
 
 - `axil` handles HTTP, auth, sessions, file uploads, and business logic.
+- Modular ecosystem plugins loaded via `axil -m` / `mods.load` (`axil-auth`,
+  `axil-hyle`, `axil-tty`, `axil-nd`, `libaxil-auren`).
 - All request handlers are C functions compiled into `mods/*/*.so`, loaded via
   the libxylem XY module system (`RTLD_LOCAL` — cross-module calls go through
   XY dispatch only).
@@ -96,7 +98,7 @@ make debug-clean     # Clear debug logs
 ## Requirements
 
 - C compiler (`clang` for WASM builds)
-- `axil`, `libxylem`, `libcorm`, `stoma`, `hyle`, `bud` (submodules under `external/`)
+- `axil`, `libxylem`, `libcorm`, `liblemma`, `hyle`, `bud` (submodules under `external/`)
 - Deno, only for the Playwright e2e test runner
 
 ## Modules
