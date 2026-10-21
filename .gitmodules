@@ -112,3 +112,6 @@
 [submodule ".pi/extensions/pi-mm"]
 	path = .pi/extensions/pi-mm
 	url = git@github.com:tty-pt/pi-mm.git
+[submodule "external/pi-instruct"]
+	path = external/pi-instruct
+	url = https://github.com/tty-pt/pi-instruct.git
