@@ -29,17 +29,17 @@
 #include <ttypt/corm.h>
 #include <ttypt/qsys.h>
 
-#include "config.h"
-#include "mcp.h"
-#include "player.h"
-#include "st.h"
-#include "uapi/entity.h"
-#include "uapi/map.h"
-#include "uapi/match.h"
-#include "uapi/object.h"
-#include "uapi/skel.h"
-#include "uapi/type.h"
-#include "view.h"
+#include <nd/config.h>
+#include <nd/mcp.h>
+#include <nd/player.h>
+#include <nd/st.h>
+#include <nd/entity.h>
+#include <nd/map.h>
+#include <nd/match.h>
+#include <nd/object.h>
+#include <nd/skel.h>
+#include <nd/type.h>
+#include <nd/view.h>
 
 ROO room_zero_room = {
 	.flags = RF_HAVEN,
@@ -92,7 +92,6 @@ void do_save(int fd, int argc, char *argv[]);
 void do_deny(int fd, int argc, char *argv[]);
 void do_grant(int fd, int argc, char *argv[]);
 void do_toad(int fd, int argc, char *argv[]);
-void do_view(int fd, int argc, char *argv[]);
 void do_wall(int fd, int argc, char *argv[]);
 void do_target(int fd, int argc, char *argv[]);
 
@@ -107,14 +106,6 @@ int map_sync(void);
  * chroot-relative (-C /var/nd -> /var/nd/std.db; plain dev host -> ./std.db,
  * writable). AXIL_ND_DB still overrides. Non-static: map.c + spacetime.c +
  * the nd_open XY provider share this path. */
-const char *
-world_db(void)
-{
-	const char *db = getenv("AXIL_ND_DB");
-
-	return db && *db ? db : "std.db";
-}
-
 void
 close_all(int i)
 {
@@ -124,31 +115,6 @@ close_all(int i)
 	sync();
 	if (i)
 		exit(i);
-}
-
-/* legacy cursor-API adapters over corm for libnd.a compat (struct nd). */
-static unsigned
-shared_iter(unsigned hd, void *key)
-{
-	return corm_iter(hd, key, 0);
-}
-
-static int
-shared_next(void *key, void *val, unsigned cur)
-{
-	/* Same zero-byte fix as nd_next: corm_next_copy sizes via corm_len(),
-	 * NULL dests skipped, shared_hd stash deleted below. */
-	if (!corm_next_copy(key, val, cur)) {
-		corm_fin(cur);
-		return 0;
-	}
-	return 1;
-}
-
-static void
-shared_fin(unsigned cur)
-{
-	corm_fin(cur);
 }
 
 /* Module value-type registry. nd_len_reg("equipper", 40) registers that the
@@ -167,8 +133,7 @@ static unsigned mod_type_tid[MOD_TYPE_MAX];
 static unsigned mod_type_n;
 
 /* Register a module value type by name. Called by the nd_len_reg XY hook
- * (nd_api.c) -- NOT by shared_len_reg below, which is the legacy struct-nd
- * path that modules no longer use. */
+ * (nd_api.c). */
 void
 mod_type_register(char *name, unsigned tid)
 {
@@ -177,13 +142,6 @@ mod_type_register(char *name, unsigned tid)
 	mod_type_name[mod_type_n] = name;
 	mod_type_tid[mod_type_n] = tid;
 	mod_type_n++;
-}
-
-static void
-shared_len_reg(char *iden, size_t len)
-{
-	unsigned tid = corm_reg(len);
-	mod_type_register(iden, tid);
 }
 
 /* Look up a registered value-type ID by name. Returns 0 if not found, in
@@ -205,14 +163,6 @@ shared_kind(char *t)
 	if (!strcmp(t, "p"))
 		return CM_PTR;
 	return CM_U32;
-}
-
-static int
-shared_open(char *name, char *kt, char *vt, unsigned flags)
-{
-	(void) flags;
-	corm_open(world_db(), name, shared_kind(kt), shared_kind(vt), 0xFF, 0);
-	return 0;
 }
 
 /* The engine's `enum hd` -> corm table map (MODS.md §0.2). Defined here
@@ -262,9 +212,9 @@ hd_mod_open(char *type, char *iden, char *anon, unsigned flags)
 void
 shared_init(void)
 {
-	nd_hds[HD_FD] = hd_resolve(HD_FD);
-	nd_hds[HD_RTYPE] = type_hd + 2;
-	nd_hds[HD_RWTS] = wts_hd + 2;
+	nd_table_handle_set(HD_FD, hd_resolve(HD_FD));
+	nd_table_handle_set(HD_RTYPE, type_hd + 2);
+	nd_table_handle_set(HD_RWTS, wts_hd + 2);
 }
 
 int
@@ -300,9 +250,9 @@ nd_world_init(int argc __attribute__((unused)), char **argv __attribute__((unuse
 	 * open refuses with CM_MISS and every region call below degrades to a
 	 * miss instead of indexing corm_heads[CM_MISS]. */
 	/* Phase 2: st table initialization moved to external/nd-region */
-	vtf_hd = corm_open(NULL, "vtf", CM_U32, vtf_type, 0xFF, CM_AINDEX);
-	bcp_hd = corm_open(NULL, "bcp", CM_U32, CM_STR, 0xFF, CM_AINDEX);
-	hd_hd = corm_open(NULL, NULL, CM_STR, CM_U32, 0xFF, 0);
+	nd_table_handle_set(HD_VTF, corm_open(NULL, "vtf", CM_U32, vtf_type, 0xFF, CM_AINDEX));
+	nd_table_handle_set(HD_BCP, corm_open(NULL, "bcp", CM_U32, CM_STR, 0xFF, CM_AINDEX));
+	nd_table_handle_set(HD_HD, corm_open(NULL, NULL, CM_STR, CM_U32, 0xFF, 0));
 
 	/* action_hd/type_hd are boot-registration maps, not state: every
 	 * consumer either iterates the whole map (mcp_actions) or is handed
@@ -310,11 +260,11 @@ nd_world_init(int argc __attribute__((unused)), char **argv __attribute__((unuse
 	 * per-boot re-registration append duplicates. Same family as
 	 * vtf_hd/bcp_hd just above: transient, and repopulated
 	 * unconditionally below. */
-	action_hd = corm_open(NULL, "action", CM_U32, ai_type, 0xFFFF, CM_AINDEX);
-	type_hd = corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX);
-	ent_hd = corm_open(db, "entity", CM_U32, ent_type, 0xFFFF, 0);
-	player_hd = corm_open(db, "player", CM_STR, CM_U32, 0xFF, 0);
-	obj_hd = corm_open(db, "obj", CM_U32, obj_type, 0xFFFF, CM_AINDEX);
+	nd_table_handle_set(HD_ACTION, corm_open(NULL, "action", CM_U32, ai_type, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_TYPE, corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_ENTITY, corm_open(db, "entity", CM_U32, ent_type, 0xFFFF, 0));
+	nd_table_handle_set(HD_PLAYER, corm_open(db, "player", CM_STR, CM_U32, 0xFF, 0));
+	nd_table_handle_set(HD_OBJ, corm_open(db, "obj", CM_U32, obj_type, 0xFFFF, CM_AINDEX));
 	/* contents/obs are DERIVED indices over persisted sources, not state
 	 * in their own right, so they stay transient: contents is a pure
 	 * function of obj_hd (one pair per object with location != NOTHING),
@@ -323,22 +273,22 @@ nd_world_init(int argc __attribute__((unused)), char **argv __attribute__((unuse
 	 * before any read, so persisting them could only duplicate pairs and
 	 * strand dead-session observers. The persisted state is obj_hd plus
 	 * ent_hd.last_observed, which is what survives a reboot. */
-	contents_hd = corm_open(NULL, "contents", CM_U32, CM_U32, 0xFFFF,
-				CM_SORTED | CM_MULTIVALUE);
-	obs_hd = corm_open(NULL, "obs", CM_U32, CM_U32, 0xFFFF,
-			   CM_SORTED | CM_MULTIVALUE);
+	nd_table_handle_set(HD_CONTENTS, corm_open(NULL, "contents", CM_U32, CM_U32, 0xFFFF,
+				CM_SORTED | CM_MULTIVALUE));
+	nd_table_handle_set(HD_OBS, corm_open(NULL, "obs", CM_U32, CM_U32, 0xFFFF,
+			   CM_SORTED | CM_MULTIVALUE));
 	/* Phase 3: map_init moved to external/nd-world */
 
-	skel_hd = corm_open(db, "skel", CM_U32, skel_type, 0xFFFF, CM_AINDEX);
-	drop_hd = corm_open(db, "drop", CM_U32, drop_type, 0xFFFF, CM_AINDEX);
-	adrop_hd = corm_open(db, "adrop", CM_U32, CM_U32, 0xFFFF,
-			     CM_SORTED | CM_MULTIVALUE);
-	element_hd = corm_open(db, "element", CM_U32, element_type, 0xFFFF,
-			       CM_AINDEX);
-	wts_hd = corm_open(db, "wts", CM_U32, CM_STR, 0xFFFF, CM_AINDEX);
-	awts_hd = corm_open(db, "awts", CM_U32, CM_U32, 0xFFFF,
-			    CM_SORTED | CM_MULTIVALUE);
-	biome_hd = corm_open(db, "biome", CM_U32, biome_type, 0xFFFF, 0);
+	nd_table_handle_set(HD_SKEL, corm_open(db, "skel", CM_U32, skel_type, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_DROP, corm_open(db, "drop", CM_U32, drop_type, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_ADROP, corm_open(db, "adrop", CM_U32, CM_U32, 0xFFFF,
+			     CM_SORTED | CM_MULTIVALUE));
+	nd_table_handle_set(HD_ELEMENT, corm_open(db, "element", CM_U32, element_type, 0xFFFF,
+			       CM_AINDEX));
+	nd_table_handle_set(HD_WTS, corm_open(db, "wts", CM_U32, CM_STR, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_RWTS, corm_open(db, "awts", CM_U32, CM_U32, 0xFFFF,
+			    CM_SORTED | CM_MULTIVALUE));
+	nd_table_handle_set(HD_BIOME, corm_open(db, "biome", CM_U32, biome_type, 0xFFFF, 0));
 
 	shared_init();
 	objects_init(0);
@@ -565,7 +515,7 @@ do_man(int fd, int argc, char *argv[])
 		return;
 	}
 
-	char man_dir[BUFSIZ];
+	char man_dir[BUFSIZ / 2];
 	if (nd_asset_dir(ND_ASSET_MAN, man_dir, sizeof(man_dir)))
 		snprintf(path, sizeof(path), "%s/%s.10", man_dir, topic);
 	else
@@ -721,7 +671,7 @@ static const char nd_motd_default[] =
 static void
 nd_motd_show(unsigned player_ref)
 {
-	char dir[BUFSIZ], path[BUFSIZ], buf[BUFSIZ];
+	char dir[BUFSIZ - 32], path[BUFSIZ], buf[BUFSIZ];
 	FILE *f = NULL;
 	const char *text = nd_motd_default;
 
@@ -814,7 +764,7 @@ nd_player_login(int fd, char *user)
 	mcp_actions(player_ref);
 	eng_look_at(player_ref, NOTHING);
 	presence_refresh(player_ref);
-	do_view(fd, 0, NULL);
+	nd_view(player_ref ? player_ref : fd_player(fd));
 	if (day_n)
 		mcp_tod(player_ref, 1);
 	else

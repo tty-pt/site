@@ -8,6 +8,16 @@
 #include <string.h>
 
 #include "bud/bud_app.h"
+#include "bud/bud_slot.h"
+
+#ifndef __wasm__
+#include <ttypt/axil.h>
+#ifdef COMMON_INTERNAL_H
+int respond_html(int fd, const char *html);
+#else
+#include "../common.h"
+#endif
+#endif
 
 static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
 {
@@ -127,7 +137,9 @@ char *site_ui_page_lang(
 	snprintf(state.icon, sizeof(state.icon), "%s", icon ? icon : "");
 	snprintf(state.user, sizeof(state.user), "%s", user ? user : "");
 	snprintf(state.lang, sizeof(state.lang), "%s", locale);
-	chrome = site_ui_chrome(&state);
+	chrome = bud_slot_render(BUD_SLOT_SHELL_NAV, &state);
+	if (!chrome)
+		chrome = site_ui_chrome(&state);
 	chrome_html = chrome ? bud_render_hydrated_html(chrome) : NULL;
 	if (!chrome_html) {
 		bud_free_string(body_html);

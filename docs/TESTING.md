@@ -24,11 +24,14 @@ task complete.
 
 | Command | What |
 |---------|------|
+| `make test` | Full test quality gate: boundaries, unit tests, pages smoke, integration, and all E2E suites. |
+| `make test-fast` | Fast matrix, slugify, i18n, BCP, and pages smoke tests. |
+| `make test-e2e` | Runs all 121 Playwright browser E2E test suites with auto-managed server. |
 | `make unit-tests` | Runs `test.sh` in each module directory + standalone C unit tests (`run-dsv-legacy.sh`). Needs axil on :8080. |
 | `make matrix-tests` | Runs C cross-library memory/matrix tests under ASAN. |
 | `make pages-test` | Page-render HTTP smoke test (curls :8080 for DOCTYPE/markup). |
-| `make e2e-tests` | Playwright via Deno. Needs server + `AUTH_SKIP_CONFIRM=1`. |
-| `AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file execution. |
+| `./scripts/run-with-server.sh deno test --allow-all tests/e2e/<file>.test.ts` | Run specific E2E test against an auto-spawned transient axil instance. |
+| `AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file execution against already-running server. |
 | `DEBUG=1 AUTH_SKIP_CONFIRM=1 deno test --allow-all tests/e2e/<file>.test.ts` | Single e2e file with WASM/DOM lookahead and browser console diagnostics. |
 | `make hyle-tests` | cargo test on the `external/libhyle` Rust workspace. |
 | `make -C external/libhyle test` | hyle C unit suite (incl. zig-test step — see below). |

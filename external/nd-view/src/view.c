@@ -1,19 +1,19 @@
-#include "view.h"
+#include <nd/view.h>
 
 #include <stdio.h>
 #include <string.h>
 
-#include "mcp.h"
-#include "noise.h"
-#include "params.h"
-#include "uapi/entity.h"
+#include <nd/mcp.h>
+#include <nd/noise.h>
+#include <nd/params.h>
+#include <nd/entity.h>
 #include <nd/law.h>
 #include <nd/view-types.h>
-#include "uapi/map.h"
+#include <nd/map.h>
 #include <nd/world-types.h>
 unsigned nd_get(unsigned hd, void *value, void *key);
 ENT ent_get(unsigned ref);
-#include "uapi/type.h"
+#include <nd/type.h>
 
 static unsigned *biome_map;
 unsigned short day_n = 0;
@@ -59,6 +59,7 @@ static const char *h_open	= "   ";
 static const char *h_closed	= "---";
 
 void base_vtf_init(void) {
+	if (!vtf_hd) return;
 	vtf_shop = eng_vtf_register('$', GREEN, BOLD);
 	vtf_entity = eng_vtf_register('!', YELLOW, BOLD);
 }
@@ -76,6 +77,7 @@ dr_room(char *buf, view_tile_t *t, const char *bg)
 {
 	register char *b = buf;
 	vtf_t vtf;
+	memset(&vtf, 0, sizeof(vtf));
 	unsigned i;
 
 	if (t->exits & E_DOWN)
@@ -92,7 +94,8 @@ dr_room(char *buf, view_tile_t *t, const char *bg)
 			continue;
 
 		const void *__v = corm_get(vtf_hd, &i);
-		if (!__v) {
+		if (__v) {
+			memcpy(&vtf, __v, sizeof(vtf));
 			got = 1;
 			break;
 		}
@@ -321,7 +324,7 @@ static inline void
 view_build_exit_s(view_tile_t *t, pos_t p, enum exit e) {
 	pos_t pa;
 	pos_move(pa, p, e);
-	unsigned tmp_ref = eng_map_get(pa);
+	unsigned tmp_ref = map_get(pa);
 
 	if (tmp_ref == NOTHING) {
 		t->exits |= e;
@@ -341,7 +344,7 @@ view_build_exit_s(view_tile_t *t, pos_t p, enum exit e) {
 
 static inline ucoord_t
 view_build_flags(unsigned loc_ref) {
-	unsigned c = corm_iter(hd_resolve(HD_CONTENTS), &loc_ref, CM_RANGE);
+	unsigned c = corm_iter(nd_table_handle(HD_CONTENTS), &loc_ref, CM_RANGE);
 	unsigned tmp_ref;
 	ucoord_t flags = 0;
 	const void *kp, *vp;
@@ -410,9 +413,6 @@ _view_build(struct bio *n, unsigned *g, view_tile_t *b, pos_t p)
         return b;
 }
 
-void map_search(unsigned *mat, pos_t pos, unsigned radius);
-void noise_view(struct bio to[VIEW_M], pos_t pos);
-
 void
 eng_view(unsigned player_ref)
 {
@@ -421,15 +421,15 @@ eng_view(unsigned player_ref)
 	pos_t pos, opos;
 	OBJ player;
 	nd_get(HD_OBJ, &(player), &player_ref);
-	eng_map_where(opos, player.location);
+	map_where(opos, player.location);
 	view_t view;
         view_tile_t *p = view;
 	unsigned o[VIEW_M], *o_p = o;
-	uint64_t position = eng_map_mwhere(player.location);
+	uint64_t position = map_mwhere(player.location);
 	biome_map = biome_map_get(position);
 
 	memcpy(pos, opos, sizeof(pos));
-	noise_view(bd, pos);
+	nd_noise_view(bd, pos);
 	map_search(o, pos, VIEW_AROUND);
 	memset(view, 0, sizeof(view));
 

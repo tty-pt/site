@@ -7,6 +7,7 @@
 
 #include "bud/bud_app.h"
 #include "bud/bud_jsx.h"
+#include "bud/bud_slot.h"
 #include "site_chrome.h"
 #include "site_paths.c"
 #include "../../i18n/i18n_dict.h"
@@ -135,5 +136,14 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	        menu_label, close_menu_label,
 	        bar);
 }
+
+static bud_node *site_chrome_slot_render(int slot_id, const void *state)
+{
+	if (slot_id == BUD_SLOT_SHELL_NAV)
+		return site_ui_chrome((const site_ui_chrome_state *)state);
+	return NULL;
+}
+
+BUD_SLOT_CONTRIBUTE(site_chrome_nav, .slot_id = BUD_SLOT_SHELL_NAV, .name = "site_chrome_nav", .render = site_chrome_slot_render);
 
 #endif

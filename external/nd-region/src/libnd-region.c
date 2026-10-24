@@ -699,18 +699,6 @@ st_target_or_position(unsigned player_ref, uint64_t *id, uint8_t *plen)
 }
 
 static int
-st_cmd_region(unsigned player_ref, int argc, char *argv[], int world_arg,
-	uint64_t *id, uint8_t *plen)
-{
-	if (argc > world_arg && argv[world_arg] && *argv[world_arg]) {
-		if (st_cmd_world(argv[world_arg], id, plen) == XY_OK)
-			return XY_OK;
-		return XY_ERR_INVALID;
-	}
-	return st_target_or_position(player_ref, id, plen);
-}
-
-static int
 st_here_cell(unsigned player_ref, uint64_t *cell)
 {
 	OBJ player;
@@ -799,6 +787,35 @@ st_finest_owned_plen(unsigned ref, uint64_t cell, uint8_t *plen)
 	if (plen)
 		*plen = hit;
 	return 1;
+}
+
+static int
+st_cmd_region(unsigned player_ref, int argc, char *argv[], int region_arg,
+	uint64_t *id, uint8_t *plen)
+{
+	if (argc > region_arg && argv[region_arg] && *argv[region_arg]) {
+		char *end = NULL;
+		unsigned long w = strtoul(argv[region_arg], &end, 10);
+
+		/* Check for "<width> <point>" syntax */
+		if (end && !*end && w <= ST_PLEN_CELL && argc > region_arg + 1) {
+			uint64_t cell;
+			int consumed = 0;
+			if (st_cmd_point(player_ref, argc, argv, region_arg + 1, &cell, &consumed) == XY_OK &&
+			    consumed > 0 && region_arg + 1 + consumed == argc) {
+				*plen = (uint8_t)w;
+				uint64_t mask = *plen ? (~0ULL << (64 - *plen)) : 0ULL;
+				*id = cell & mask;
+				return XY_OK;
+			}
+		}
+
+		/* Check for single world/cosmos argument (backward-compatible) */
+		if (st_cmd_world(argv[region_arg], id, plen) == XY_OK)
+			return XY_OK;
+		return XY_ERR_INVALID;
+	}
+	return st_target_or_position(player_ref, id, plen);
 }
 
 /* --- Governance Commands ------------------------------------------------- */
@@ -1031,6 +1048,91 @@ do_here(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((un
 		rec.plen = plen;
 	}
 	st_row_header(player_ref, id, plen, &rec);
+	nd_flush(player_ref);
+}
+
+static void
+do_regions(int fd, int argc, char *argv[])
+{
+	do_planets(fd, argc, argv);
+}
+
+static void
+do_region(int fd, int argc, char *argv[])
+{
+	unsigned player_ref = fd_player(fd);
+	char *wstr = (argc > 1 && argv[1]) ? argv[1] : "";
+	uint64_t cell, id, mask;
+	uint8_t plen;
+	int consumed = 0;
+	struct st_rec rec;
+	int have;
+	char *end = NULL;
+	unsigned long w;
+	char oname[64];
+
+	argc = st_argc_trim(argc, argv);
+	if (!*wstr) {
+		do_here(fd, argc, argv);
+		return;
+	}
+
+	w = strtoul(wstr, &end, 10);
+	if (!end || end == wstr || *end || w > ST_PLEN_CELL) {
+		nd_printf(player_ref, "Usage: region [<width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
+		nd_flush(player_ref);
+		return;
+	}
+	plen = (uint8_t)w;
+
+	if (argc > 2) {
+		if (st_cmd_point(player_ref, argc, argv, 2, &cell, &consumed) != XY_OK ||
+		    consumed <= 0 || 2 + consumed != argc) {
+			nd_printf(player_ref, "Usage: region [<width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
+			nd_flush(player_ref);
+			return;
+		}
+	} else if (st_here_cell(player_ref, &cell) != XY_OK) {
+		nd_printf(player_ref, "You are nowhere.\n");
+		nd_flush(player_ref);
+		return;
+	}
+
+	mask = plen ? (~0ULL << (64 - plen)) : 0ULL;
+	id = cell & mask;
+
+	have = st_row_get(id, plen, &rec);
+	if (have && rec.owner != player_ref && rec.owner != NOTHING) {
+		st_owner_name(rec.owner, oname, sizeof(oname));
+		nd_printf(player_ref, "Region is already claimed by %s\n", oname);
+		nd_flush(player_ref);
+		return;
+	}
+	if (!st_can_region(player_ref, id, plen)) {
+		st_refuse_region(player_ref, id, plen);
+		return;
+	}
+
+	int claim_rc = xy_claim_at(id, plen, NULL, NULL);
+	xy_claim_at(0, 0, NULL, NULL);
+	if (claim_rc != XY_OK) {
+		nd_printf(player_ref, "Region could not be claimed (%s)\n",
+			xy_strerror(xy_errno()));
+		nd_flush(player_ref);
+		return;
+	}
+
+	if (!have) {
+		memset(&rec, 0, sizeof(rec));
+		rec.plen = plen;
+	}
+	rec.owner = player_ref;
+	st_row_put(id, plen, &rec);
+
+	st_owner_name(player_ref, oname, sizeof(oname));
+	nd_printf(player_ref,
+		"region established: id=0x%016llx plen=%u owner=%s mods=%u\n",
+		(unsigned long long)id, plen, oname, rec.nmods);
 	nd_flush(player_ref);
 }
 
@@ -1574,6 +1676,8 @@ xy_install(void)
 
 	nd_register("grant", do_grant, 0);
 	nd_register("release", do_release, 0);
+	nd_register("region", do_region, 0);
+	nd_register("regions", do_regions, 0);
 	nd_register("planet", do_planet, 0);
 	nd_register("planets", do_planets, 0);
 	nd_register("here", do_here, 0);

@@ -6,13 +6,14 @@
  */
 
 #include <nd/world-types.h>
+#include <nd/law.h>
 
-#define obj_hd nd_hds[HD_OBJ]
-#define skel_hd nd_hds[HD_SKEL]
-#define contents_hd nd_hds[HD_CONTENTS]
-#define obs_hd nd_hds[HD_OBS]
-#define ent_hd nd_hds[HD_ENTITY]
-#define drop_hd nd_hds[HD_DROP]
-#define adrop_hd nd_hds[HD_ADROP]
+#define obj_hd nd_table_handle(HD_OBJ)
+#define skel_hd nd_table_handle(HD_SKEL)
+#define contents_hd nd_table_handle(HD_CONTENTS)
+#define obs_hd nd_table_handle(HD_OBS)
+#define ent_hd nd_table_handle(HD_ENTITY)
+#define drop_hd nd_table_handle(HD_DROP)
+#define adrop_hd nd_table_handle(HD_ADROP)
 
 #endif /* ND_OBJ_TYPES_H */

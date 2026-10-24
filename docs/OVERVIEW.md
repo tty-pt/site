@@ -24,7 +24,9 @@ to wasm32-wasi for browser-side polish.
 | `external/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp` and the `/pick/:id/options` fragment route hosted by `mods/source`) |
 | `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
 | `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
-| `mods/*` | site modules — thin composition layers wiring the libraries together (reusable; declare deps via `xy_load()` in `xy_install()`, see `ARCHITECTURE.md:§3`) |
+| `external/axil-tty` | WebSocket-to-PTY terminal streaming bridge |
+| `external/axil-nd` | modular NeverDark MUCK engine running in-process behind Axil |
+| `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `source`, `index`, `auth`, `mpfd`, `song`, `poem`, `gig`, `grp`, `nd`) |
 
 ## Framework-pair model (the governing design rule)
 
@@ -67,7 +69,7 @@ AGENTS.md          doc index — route from here (read this first)
                     SCHEMA, AUDIT)
 external/          axil, libxylem, libcorm, lemma, hyle (submodule), bud
 mods/              core, common, source, index, auth, mpfd, song, poem,
-                   gig, grp
+                   gig, grp, nd (pure-C isomorphic Bud UI)
 htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
 var/<source>       data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)
@@ -95,8 +97,7 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Run or write tests | `docs/TESTING.md` |
 | Write idiomatic C / handlers / follow conventions | `docs/CONVENTIONS.md` |
 | Change styling or CSS assets | `docs/STYLING.md` |
-| Write SSR markup for a widget | `docs/SSR-CONTRACT.md` |
-| Write a dual-compiled SSR+wasm renderer | `docs/C-ISOMORPHIC-BUD.md` |
-| Touch the WASM bridge / patch ops | `docs/WASM-BRIDGE.md` |
+| Understand the Web HAL C/WASM systems architecture | `docs/WEB_HAL_SPECIFICATION.md` |
+| Follow the Web HAL implementation roadmap | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |

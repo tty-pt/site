@@ -7,6 +7,7 @@ Read before touching any build files (`Makefile`, `build.mk`, module
 ## Commands
 
 ```bash
+./start.sh                # singular turnkey runner (auto-seeds universe.db, sets paths, runs on :8080)
 make                      # build everything (native .so + wasm assets)
 make dev                  # one-command dev server (auto-cleans stale axil, builds, starts)
 make watch                # auto-rebuild + restart on :8080 with entr

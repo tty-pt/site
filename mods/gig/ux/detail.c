@@ -107,7 +107,7 @@ BUD_STATE_FIELDS(sb_song_row_data_t, sb_song_row_fields, SB_SONG_ROW_SCHEMA)
 
 /* ── WASM state init (called by JS bridge before bud_app_mount) ── */
 
-void wasm_init(const char *json, int len)
+ISO_EXPORT(void, wasm_init, const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 
@@ -151,7 +151,7 @@ static void fetch_sb_transpose(int song_index, int semitones)
 extern void wasm_mark_dirty(void);
 extern void wasm_flush(void);
 
-void wasm_fetch_callback(int request_id, const char *data, int data_len)
+ISO_EXPORT(void, wasm_fetch_callback, int request_id, const char *data, int data_len)
 {
 	(void)request_id;
 	char chord_html[65536];
@@ -265,7 +265,7 @@ static bud_node *sb_build_body_content(void);
 
 /* ── WASM app entry point (isomorphic: server .so + WASM .wasm) ── */
 
-bud_node *bud_app_render(void)
+ISO_EXPORT(bud_node *, bud_app_render, void)
 {
 	g_sb_root = NULL;
 	g_sb_main = NULL;

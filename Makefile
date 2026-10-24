@@ -5,7 +5,7 @@ PROFILE ?= dev
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib mods clients boundary-check
+all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -22,6 +22,31 @@ assets-sync:
 		cp external/libhyle/assets/hyle.css htdocs/hyle.css; \
 	else \
 		cp external/libhyle/crates/hyle/assets/hyle.css htdocs/hyle.css; \
+	fi
+	@if [ -f external/axil-tty/htdocs/axil-tty-bridge.js ]; then \
+		cp external/axil-tty/htdocs/axil-tty-bridge.js htdocs/axil-tty-bridge.js; \
+	fi
+	@if [ -f external/axil-tty/node_modules/@xterm/xterm/lib/xterm.js ]; then \
+		mkdir -p htdocs/vendor && cp external/axil-tty/node_modules/@xterm/xterm/lib/xterm.js htdocs/vendor/xterm.js; \
+	fi
+	@if [ -f external/axil-tty/node_modules/@xterm/xterm/css/xterm.css ]; then \
+		mkdir -p htdocs/vendor && cp external/axil-tty/node_modules/@xterm/xterm/css/xterm.css htdocs/vendor/xterm.css; \
+	fi
+	@if [ -f external/liblamina/htdocs/lamina-bridge.js ]; then \
+		cp external/liblamina/htdocs/lamina-bridge.js htdocs/lamina-bridge.js; \
+	fi
+	@if [ -f external/liblamina/htdocs/webgl-bridge.js ]; then \
+		cp external/liblamina/htdocs/webgl-bridge.js htdocs/webgl-bridge.js; \
+	fi
+	@if [ -f external/libxylem/htdocs/xylem-bridge.js ]; then \
+		cp external/libxylem/htdocs/xylem-bridge.js htdocs/xylem-bridge.js; \
+	fi
+	@if [ -f external/axil-nd/htdocs/app.css ]; then \
+		cp external/axil-nd/htdocs/app.css htdocs/nd.css; \
+	fi
+	@mkdir -p htdocs/nd
+	@if [ -d external/axil-nd/art ]; then \
+		rm -rf htdocs/nd/art && mkdir -p htdocs/nd/art && cp -RL external/axil-nd/art/. htdocs/nd/art/; \
 	fi
 	@missing=""; \
 	for a in $(DEPLOY_ASSETS); do \
@@ -82,6 +107,11 @@ axil-tty-lib: axil-lib corm-lib xylem-lib
 
 axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib qsys-lib
 	$(MAKE) -C external/axil-nd
+
+nd-libs: axil-nd-lib
+	@for d in external/nd-*; do \
+		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" || exit 1; fi; \
+	done
 
 corm-lib:
 	$(MAKE) -C external/libcorm
@@ -189,6 +219,15 @@ standalone-unit-tests:
 	@sh tests/unit/run-viewer-prefs.sh
 	@sh tests/unit/run-slugify.sh
 	@sh tests/unit/run-i18n.sh
+	@sh tests/unit/run-nd-bcp.sh
+	@sh tests/unit/run-nd-table.sh
+	@sh tests/unit/run-nd-ext-state.sh
+	@sh tests/unit/run-test-bcp-meta.sh
+	@sh tests/unit/run-test-scene-sync.sh
+	@sh tests/unit/run-test-ssr-hydration.sh
+	@sh tests/unit/run-test-axil-ws-multiplex.sh
+	@sh tests/unit/run-xylem-wasm.sh
+	@sh tests/unit/run-nd-ui-slot.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -241,7 +280,7 @@ test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e
 # depends on mods: check-no-tree-rpath inspects built artifacts, which must not
 # be mid-relink when the check runs under -j
 boundary-check: mods
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh
 
 watch:
 	./scripts/watch.sh
@@ -343,4 +382,29 @@ deploy-wasm: clients
 	    $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	scp -r htdocs/snippets/ $(DEPLOY_HOST):$(DEPLOY_PATH)/
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync
+# NeverDark Full Universe Orchestration
+ND_PORT ?= 8080
+ND_PLANETS ?= 1
+ND_DB ?= var/nd/universe.db
+
+seed-universe:
+	@bash scripts/seed-nd-universe.sh "$(ND_DB)" $(ND_PLANETS)
+
+test-universe:
+	@bash tests/e2e/test_full_universe.sh
+
+run-universe:
+	@if [ ! -f "$(ND_DB)" ] || [ "$${RESEED:-0}" = "1" ]; then \
+		echo "Seeding NeverDark universe into $(ND_DB) ($(ND_PLANETS) planets)..."; \
+		bash scripts/seed-nd-universe.sh "$(ND_DB)" $(ND_PLANETS); \
+	fi
+	@echo "Starting NeverDark universe on single port http://localhost:$(ND_PORT)/nd (Press Ctrl+C to stop) ..."
+	@export PATH="$$PWD/external/axil/bin:$$PATH"; \
+	export AXIL_ND_DB="$$PWD/$(ND_DB)"; \
+	export AXIL_ND_HTDOCS="$$PWD/htdocs"; \
+	cd external/axil-nd && axil -d -A -p $(ND_PORT) -m "./lib/axil-nd"
+
+run-sector32:
+	@$(MAKE) run-universe ND_PLANETS=32 ND_DB=var/nd/sector32.db
+
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e assets-sync seed-universe test-universe run-universe run-sector32

@@ -79,7 +79,7 @@ function findTextNode(startComment) {
 	return node && node.nodeType === Node.TEXT_NODE ? node : null;
 }
 
-function buildHydrationMap(root) {
+function buildHydrationMap(root, keys = null) {
 	const nodes = new Map();
 
 	walkNodes(root, (node) => {
@@ -91,6 +91,10 @@ function buildHydrationMap(root) {
 			const id = parseNodeId(node.getAttribute('data-bud-id'));
 			if (id !== null) {
 				nodes.set(id, node);
+			}
+			const key = node.getAttribute('data-bud-key');
+			if (key && keys) {
+				keys.set(key, node);
 			}
 			return;
 		}
@@ -231,7 +235,8 @@ class BudHostBase {
 		this.rootListeners = new Map();
 		this.boundHandlers = new Map();
 		this.physicalListeners = [];
-		this.nodes = buildHydrationMap(root);
+		this.keys = new Map();
+		this.nodes = buildHydrationMap(root, this.keys);
 		this._parentStack = [];
 		this._currentParent = root;
 		this.autoBindListeners();
@@ -264,25 +269,45 @@ class BudHostBase {
 		}
 	}
 
-	getNode(id) {
-		return this.nodes.get(id) || null;
+	getNode(id, key = null) {
+		if (id !== null && id !== undefined && this.nodes.has(id)) {
+			return this.nodes.get(id);
+		}
+		if (key && this.keys.has(key)) {
+			return this.keys.get(key);
+		}
+		if (key && this.root) {
+			const el = this.root.querySelector(`[data-bud-key="${key}"]`);
+			if (el) {
+				this.keys.set(key, el);
+				return el;
+			}
+		}
+		return null;
 	}
 
-	setNode(id, node) {
+	setNode(id, node, key = null) {
 		if (id === null || id === undefined || !node) {
 			return;
 		}
 
 		this.nodes.set(id, node);
+		if (key) {
+			this.keys.set(key, node);
+		} else if (node.nodeType === Node.ELEMENT_NODE) {
+			const k = node.getAttribute('data-bud-key');
+			if (k) this.keys.set(k, node);
+		}
 	}
 
 	clearTrackedNodes() {
 		this.clearListeners();
 		this.nodes.clear();
+		this.keys.clear();
 	}
 
 	refreshTrackedSubtree(root) {
-		for (const [id, node] of buildHydrationMap(root).entries()) {
+		for (const [id, node] of buildHydrationMap(root, this.keys).entries()) {
 			this.nodes.set(id, node);
 		}
 		this.autoBindListeners();
@@ -628,7 +653,25 @@ class BudHostBase {
 		case 'patch-replace':
 			id = parseIntOrNull(op.a);
 			if (id !== null) {
-				this.removeNode(id);
+				node = this.getNode(id);
+				if (node && node.parentNode) {
+					const tpl = document.createElement('template');
+					tpl.innerHTML = op.b || '';
+					const newEl = tpl.content.firstElementChild || tpl.content.firstChild;
+					if (newEl) {
+						this.unbindNode(id);
+						if (newEl.nodeType === Node.ELEMENT_NODE && !newEl.hasAttribute('data-bud-id')) {
+							newEl.setAttribute('data-bud-id', String(id));
+						}
+						node.parentNode.replaceChild(newEl, node);
+						this.setNode(id, newEl);
+						this.refreshTrackedSubtree(newEl);
+					} else {
+						this.removeNode(id);
+					}
+				} else {
+					this.removeNode(id);
+				}
 			}
 			return true;
 		case 'patch-close':
@@ -730,6 +773,12 @@ class BudHostBase {
 			}
 		}
 
+		if (typeof window !== 'undefined' && window.__active_bridges) {
+			for (const b of window.__active_bridges) {
+				if (typeof b.mount === 'function') b.mount();
+			}
+		}
+
 		return this;
 	}
 }
@@ -777,6 +826,8 @@ export class BudWasmBridge {
 		this.listenerResolver = listenerResolver;
 		this.host = new BudPatchApplier(root, (info) => this.resolveListener(info));
 		this._debugged = false;
+		this._ws = null;
+		this._term = null;
 	}
 
 	setWasm(wasm) {
@@ -805,12 +856,52 @@ export class BudWasmBridge {
 		if (fn) {
 			fn();
 		}
+		if (typeof document !== 'undefined') {
+			if (this._docClickListener) {
+				document.removeEventListener('click', this._docClickListener);
+			}
+			this._docClickListener = (evt) => {
+				const path = typeof evt.composedPath === 'function' ? evt.composedPath() : [evt.target];
+				for (const candidate of path) {
+					if (!candidate || candidate.nodeType !== Node.ELEMENT_NODE) continue;
+					const action = candidate.getAttribute('data-bud-action') || (candidate.hasAttribute('data-cmd') ? 'cmd' : null);
+					if (action) {
+						const value = candidate.getAttribute('data-bud-value') || candidate.getAttribute('data-cmd') || '';
+						const wasm = this.wasm;
+						if (wasm && typeof wasm.bud_app_dispatch === 'function') {
+							const malloc = getWasmExport(wasm, ['malloc']);
+							const free = getWasmExport(wasm, ['free']);
+							let valPtr = 0;
+							if (malloc && value) {
+								const bytes = new TextEncoder().encode(value + '\0');
+								valPtr = malloc(bytes.length);
+								if (valPtr) new Uint8Array(this.memory.buffer, valPtr, bytes.length).set(bytes);
+							}
+							const nameBytes = new TextEncoder().encode(action + '\0');
+							const namePtr = malloc ? malloc(nameBytes.length) : 0;
+							if (namePtr) new Uint8Array(this.memory.buffer, namePtr, nameBytes.length).set(nameBytes);
+							wasm.bud_app_dispatch(0, namePtr, 1, valPtr);
+							if (free) {
+								if (valPtr) free(valPtr);
+								if (namePtr) free(namePtr);
+							}
+						}
+						evt.stopPropagation();
+						return;
+					}
+				}
+			};
+			document.addEventListener('click', this._docClickListener);
+		}
 		return this;
 	}
 
 	resolveListener(info) {
 		if (this.wasm && typeof this.wasm.bud_app_dispatch === 'function') {
 			return (evt) => {
+				if (!info.bubbles && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
+					return;
+				}
 				const malloc = getWasmExport(this.wasm, ['malloc']);
 				const free = getWasmExport(this.wasm, ['free']);
 				const value = buildEventPayload(info, evt);
@@ -841,6 +932,9 @@ export class BudWasmBridge {
 		}
 
 		return (evt) => {
+			if (!info.bubbles && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
+				return;
+			}
 			const value = buildEventPayload(info, evt);
 			let eventData = null;
 			if (value) {
@@ -938,6 +1032,10 @@ export class BudWasmBridge {
 		const fn = getWasmExport(this.wasm, ['bud_app_unmount']);
 		if (fn) {
 			fn();
+		}
+		if (typeof document !== 'undefined' && this._docClickListener) {
+			document.removeEventListener('click', this._docClickListener);
+			this._docClickListener = null;
 		}
 		if (this.host) this.host.destroy();
 		return this;

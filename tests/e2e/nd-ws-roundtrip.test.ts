@@ -69,7 +69,7 @@ async function readSomeDeadline(
   ms: number,
   phase: string,
 ): Promise<Uint8Array<ArrayBuffer> | null> {
-  let timer: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       readSome(conn, scratch),
@@ -180,7 +180,7 @@ async function sessionCookie(): Promise<string> {
   await resp.body?.cancel();
 
   const cookies = resp.headers.getSetCookie();
-  const session = cookies.map((c) => c.match(/^\s*QSESSION=([^;]*)/)?.[1]).find((v) => v);
+  const session = cookies.map((c) => c.match(/^\s*QSESSION(?:_\d+)?=([^;]*)/)?.[1]).find((v) => v);
   if (!session) {
     throw new Error(`nd-ws: no QSESSION cookie in ${JSON.stringify(cookies)}`);
   }
@@ -199,7 +199,7 @@ async function upgrade(conn: Deno.Conn, cookie?: string): Promise<Uint8Array<Arr
     `GET /nd HTTP/1.1\r\nHost: ${HOST}:${PORT}\r\nUpgrade: websocket\r\n` +
     `Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n` +
     `Sec-WebSocket-Key: ${key}\r\n` +
-    (cookie ? `Cookie: QSESSION=${cookie}\r\n` : "") +
+    (cookie ? `Cookie: QSESSION=${cookie}; QSESSION_${PORT}=${cookie}\r\n` : "") +
     `\r\n`;
   await conn.write(new TextEncoder().encode(req));
 

@@ -38,14 +38,25 @@ LDLIBS += -laxil -lcorm
 LDLIBS += $(EXTRA_LDLIBS)
 LDLIBS += $(EXTRA_LDLIBS-$(uname))
 
+.DEFAULT_GOAL := all
+
+-include $(REPO_ROOT)/external/mk/iso.mk
+
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= clang
 WASI_SYSROOT ?=
-WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi
-WASM_CFLAGS-PROFILE-dev = -g -O0 -D__wasm__ --target=wasm32-wasi
-WASM_CFLAGS-PROFILE- = -g -O0 -D__wasm__ --target=wasm32-wasi
+WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE-dev = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE- = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS  ?= ${WASM_CFLAGS-PROFILE-${PROFILE}}
-WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--export-all -Wl,--export=malloc -Wl,--export=free -Wl,--allow-undefined -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
+WASM_LDFLAGS := -mexec-model=reactor \
+                -Wl,--gc-sections \
+                -Wl,--no-entry \
+                -Wl,--export=malloc \
+                -Wl,--export=free \
+                -Wl,--export=_initialize \
+                -Wl,--allow-undefined \
+                -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libbud/src/bud_wasm_app.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/libbud/include
 
@@ -60,11 +71,27 @@ $(VERSION_GEN): $(REPO_ROOT)/htdocs/styles.css $(REPO_ROOT)/htdocs/hyle.css $(RE
 
 $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
+		for src in $($*-src); do \
+			case "$$src" in *libxylem-wasm.c|*hyle-bud*|*bud_wasm_app.c) continue ;; esac; \
+			if [ -f "$$src" ]; then \
+				bad=$$(sed -e 's,//.*,,g' -e 's,/\*.*\*/,,g' "$$src" | grep -En '\b(corm_|source_|axil_|hyle_source|XY_DECL|XY_IMPL)\b' || true); \
+				if [ -n "$$bad" ]; then \
+					echo "ERROR: Pre-link boundary violation in $$src:" >&2; \
+					echo "$$bad" >&2; \
+					exit 1; \
+				fi; \
+			fi; \
+		done; \
 		rm -f $@.d; \
 		for src in $($*-src) $(WASM_COMMON_SRC); do \
 			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
 		done; \
-		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
+		extra_allowed=""; \
+		for f in $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
+			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
+		done; \
+		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $$extra_allowed -o $@ $($*-src) $(WASM_COMMON_SRC) || exit 1; \
+		sh $(REPO_ROOT)/external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }; \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
 	fi

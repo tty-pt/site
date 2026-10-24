@@ -3,11 +3,11 @@ all := libnd-session
 
 libnd-session-obj-y := src/session.o
 
-LDLIBS-libnd-session := -lxylem -lcorm -lqsys -laxil-tty -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -L../nd-view/lib -lnd-view -Wl,--as-needed
+LDLIBS-libnd-session := -lxylem -lcorm -lqsys -laxil-tty -laxil-nd -lnd-bus
 
 FOLDER := nd
 
 LDFLAGS-libnd-session-Darwin += -undefined dynamic_lookup
-add-prefix-glob := ../nd-* ../axil-nd
+add-prefix := ../axil-nd ../nd-region ../nd-session ../nd-world ../nd-view ../nd-obj ../nd-speech ../nd-mcp
 
 -include ./../mk/include.mk

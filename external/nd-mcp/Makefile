@@ -3,11 +3,11 @@ all := libnd-mcp
 
 libnd-mcp-obj-y := src/mcp.o
 
-LDLIBS-libnd-mcp := -lxylem -lcorm -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-obj/lib -lnd-obj -Wl,--as-needed
+LDLIBS-libnd-mcp := -lxylem -lcorm -lqsys
 
 FOLDER := nd
 
 LDFLAGS-libnd-mcp-Darwin += -undefined dynamic_lookup
-add-prefix-glob := ../nd-* ../axil-nd
+add-prefix := ../axil-nd ../nd-region ../nd-session ../nd-world ../nd-view ../nd-obj ../nd-speech ../nd-mcp
 
 -include ./../mk/include.mk

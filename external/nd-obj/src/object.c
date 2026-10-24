@@ -18,12 +18,12 @@
 char std_db[BUFSIZ];
 char std_db_ok[BUFSIZ];
 
-#define obj_hd hd_resolve(HD_OBJ)
-#define skel_hd hd_resolve(HD_SKEL)
-#define contents_hd hd_resolve(HD_CONTENTS)
-#define obs_hd hd_resolve(HD_OBS)
-#define ent_hd hd_resolve(HD_ENTITY)
-#define player_hd hd_resolve(HD_PLAYER)
+#define obj_hd nd_table_handle(HD_OBJ)
+#define skel_hd nd_table_handle(HD_SKEL)
+#define contents_hd nd_table_handle(HD_CONTENTS)
+#define obs_hd nd_table_handle(HD_OBS)
+#define ent_hd nd_table_handle(HD_ENTITY)
+#define player_hd nd_table_handle(HD_PLAYER)
 
 void
 eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len)
@@ -246,7 +246,7 @@ eng_object_art(unsigned thing_ref)
 	default:
 		 /* "room" is id 1 in the transient type_hd — the host seeds it
 		  * first, before any module loads. See world.c. */
-		 const void *__v2 = corm_get(hd_resolve(HD_RTYPE), &thing.type);
+		 const void *__v2 = corm_get(nd_table_handle(HD_RTYPE), &thing.type);
 		 if (__v2)
 			 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
 		 type = typestr; break;

@@ -23,10 +23,12 @@
 #define BUD_GEN_FIELD_STR(st, name, sz) OVERLAY_STR(name, st, name, sz),
 #define BUD_GEN_FIELD_INT(st, name) OVERLAY_INT(name, st, name),
 
+#ifndef BUD_STATE_STRUCT
 #define BUD_STATE_STRUCT(struct_name, SCHEMA)                                  \
 	typedef struct {                                                       \
 		SCHEMA(BUD_GEN_STRUCT_STR, BUD_GEN_STRUCT_INT, struct_name)    \
 	} struct_name;
+#endif
 
 #define BUD_STATE_STRUCT_EXT(struct_name, SCHEMA, EXT)                         \
 	typedef struct {                                                       \

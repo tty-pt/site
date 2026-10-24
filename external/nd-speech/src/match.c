@@ -1,4 +1,4 @@
-#include "uapi/match.h"
+#include <nd/match.h>
 #include <nd/law.h>
 #include <nd/world-types.h>
 #include <nd/obj-types.h>
@@ -6,9 +6,9 @@
 #include <ctype.h>
 #include <stdlib.h>
 
-#include "params.h"
-#include "uapi/entity.h"
-#include "player.h"
+#include <nd/params.h>
+#include <nd/entity.h>
+#include <nd/player.h>
 
 ENT ent_get(unsigned ref);
 int ent_set(unsigned ref, ENT *tmp);
