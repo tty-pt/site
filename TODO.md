@@ -73,3 +73,4 @@ Status of the boundary and decoupling work across NeverDark. Rule being enforced
 
 - Formula and balance scaling parameters (`nd-level` XP curves, `nd-fight` combat factors, `nd-mortal` hunger/thirst thresholds).
 - Noise octaves and cosmological parameters in `nd-world`.
+
