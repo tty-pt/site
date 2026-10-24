@@ -64,7 +64,11 @@ $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 		for src in $($*-src) $(WASM_COMMON_SRC); do \
 			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
 		done; \
-		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $($*-src) $(WASM_COMMON_SRC); \
+		extra_allowed=""; \
+		for f in $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
+			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
+		done; \
+		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $$extra_allowed -o $@ $($*-src) $(WASM_COMMON_SRC); \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
 	fi

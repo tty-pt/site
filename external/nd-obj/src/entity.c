@@ -1,4 +1,4 @@
-#include "uapi/entity.h"
+#include <nd/entity.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -6,20 +6,19 @@
 #include <string.h>
 #include <ttypt/corm.h>
 
-#include "config.h"
-#include "mcp.h"
-#include "params.h"
-#include "st.h"
+#include <nd/config.h>
+#include <nd/mcp.h>
+#include <nd/params.h>
+#include <nd/st.h>
 #include <nd/law.h>
 #include <nd/obj-types.h>
-#include "uapi/map.h"
-#include "uapi/match.h"
-#include "uapi/type.h"
-#include "view.h"
+#include <nd/map.h>
+#include <nd/match.h>
+#include <nd/type.h>
+#include <nd/view.h>
 
 unsigned fd_player(unsigned fd);
 unsigned room_clean(unsigned loc_ref);
-unsigned hd_resolve(unsigned hd);
 
 unsigned me = -1;
 

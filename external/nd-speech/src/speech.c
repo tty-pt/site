@@ -6,11 +6,11 @@
 #include <string.h>
 #include <ttypt/xy.h>
 
-#include "config.h"
-#include "player.h"
-#include "st.h"
-#include "uapi/entity.h"
-#include "uapi/match.h"
+#include <nd/config.h>
+#include <nd/player.h>
+#include <nd/st.h>
+#include <nd/entity.h>
+#include <nd/match.h>
 
 unsigned fd_player(unsigned fd);
 

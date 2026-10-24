@@ -8,11 +8,11 @@
 #include <sys/resource.h>
 #include <ttypt/xy.h>
 
-#include "config.h"
-#include "st.h"
-#include "uapi/entity.h"
-#include "uapi/match.h"
-#include "player.h"
+#include <nd/config.h>
+#include <nd/st.h>
+#include <nd/entity.h>
+#include <nd/match.h>
+#include <nd/player.h>
 
 unsigned fd_player(unsigned fd);
 

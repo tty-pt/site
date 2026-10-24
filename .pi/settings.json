@@ -22,9 +22,11 @@
     "judgeMode": "auto",
     "judgeUrl": "http://127.0.0.1:4242",
     "judgeModel": "qwen",
+    "judgeTimeoutMs": 15000,
     "embedUrl": "http://127.0.0.1:4242/v1/embeddings",
     "embedModel": "bge-small",
-    "semanticSearch": true
+    "semanticSearch": true,
+    "ephemeralSepal": true
   },
   "pi-early-compact": {
     "tiers": [

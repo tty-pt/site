@@ -297,6 +297,54 @@ To execute these releases smoothly, follow this operational checklist:
    - Execute Wave 4 (`libhyle`, `axil`), tag, and test.
    - Execute Wave 5 (`libhyle-source`, `libhyle-bud`), tag, and test.
    - Execute Wave 6 (`axil-auth`, `axil-tty`, `axil-hyle`, `axil-nd`, `libauren`), tag, and test.
+
+---
+
+## 6. Release Wave 2026.11: The Full-Universe Isomorphic Runtime, Linker Purity & Binary Tokenization
+
+Building upon Wave 2026.10, this release establishes the complete pure-C isomorphic NeverDark runtime, full 32-planet universe deployment, DT_RUNPATH/RPATH elimination, in-WASM Xylem hook dispatching, and HTOK v3 binary tokenization.
+
+### Full Ecosystem SemVer & Release Matrix (39 Targets)
+
+| Target / Submodule | Prior Version | Next Release | SemVer Type | Scope & Key Additions |
+| :--- | :--- | :--- | :--- | :--- |
+| **`site` (host platform)** | `none` | **`v1.0.0`** | Major / Debut | Turnkey full-universe deployment (`./start.sh`), pure-C isomorphic Bud UI for NeverDark (`htdocs/nd.wasm`), multi-viewport support (WebGL 3D, Lamina 2D, TTY, Bud DOM), zero site-specific JS. |
+| **`libcorm`** | `v2.0.0` | **`v2.0.1`** | Patch | WASM linear memory arena shims (`src/corm_compat.h:63`), resident daemon `cormd` multi-instance resilience, DT_RUNPATH elimination. |
+| **`liblemma`** | `v1.0.0` | **`v1.1.0`** | Minor | Lossless subword tokenizer (`src/tok.c`, `lemma_tok_encode/decode/stream`), static BPE vocabulary (`vocab.txt`), 3-gram index, `doc_hd` elimination. |
+| **`libjoint`** | `v1.4.0` | **`v1.5.0`** | Minor | Exported `rec_axis_store_typed` for HTOK ISO date ingestion, clean system library linkage. |
+| **`libsepal`** | `v1.1.0` | **`v1.2.0`** | Minor | In-memory vector store rebuilding, `rec_axis_store_typed` embedding ingestion, cache synchronization. |
+| **`libislet`** | `v1.2.0` | **`v1.2.1`** | Patch | Portable build flags, purge of hardcoded `/home/` paths, portable add-prefix. |
+| **`libxylem`** | `v1.5.0` | **`v1.6.0`** | Minor | In-WASM hook registry and dispatcher (`src/libxylem-wasm.c`), `XY_LISTENER_TAG`, browser hook chaining without `dlopen`. |
+| **`axil`** | `v1.5.0` | **`v1.6.0`** | Minor | Canonical browser WebSocket bus (`htdocs/axil-bridge.js`), channel multiplexing (Stream 0 text, Stream 1 BCP, Stream 2 RPC), WASM capability allowlist. |
+| **`axil-auth`** | `v1.2.0` | **`v1.2.1`** | Patch | Port-qualified session cookies (`QSESSION_<port>`), two-header separation. |
+| **`axil-tty`** | `v1.4.0` | **`v1.4.1`** | Patch | Pure TTY capability bridge consuming `axil-bridge.js`, local xterm.js vendoring, decoupled terminal resize. |
+| **`axil-nd`** | `v1.2.0` | **`v1.3.0`** | Minor | Declarative BCP protocol (`<nd/bcp.h>`), multi-viewport system (`<nd/viewport.h>`), extensible UI slots (`nd_client_ext`), generic table loader (`nd_table_load`), XY bus table handle encapsulation (`nd_table_handle`). |
+| **`libbud`** | `v1.0.1` | **`v1.0.2`** | Patch | Namespaced `bud.*` WASM host imports, hardened capability allowlist (`wasm-allowed-imports.lst`). |
+| **`libhyle`** | `v1.4.0` | **`v1.5.0`** | Minor | Binary token array storage, rotating ring buffer for lazy SSR decoding and high-throughput zero-copy field parsing. |
+| **`libhyle-bud`** | `v1.0.1` | **`v1.0.2`** | Patch | Ecosystem synchronization with Hyle 1.5 token storage and Bud 1.0.2 host imports. |
+| **`libhyle-source`** | `v1.1.0` | **`v1.2.0`** | Minor | Binary token store driver (`store_tok`), companion `data.tok`, `hyle-tok` inspection CLI tool. |
+| **`nd-attr`** | `v1.0.1` | **`v1.1.0`** | Minor | Interactive 2-column character sheet (`ux/attr_ui.c`, `<nd/attr-ui.h>`), HP/MP vitality gauges (`<nd/attr-bcp.h>`), `stats` command. |
+| **`nd-biome`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/biomes.dsv` table (20 biomes) loaded dynamically via `nd_table_load()`. |
+| **`nd-class`** | `v1.0.2` | **`v1.0.3`** | Patch | Declarative `data/classes.dsv` table (4 classes) loaded dynamically via `nd_table_load()`. |
+| **`nd-core`** | `v1.0.2` | **`v1.0.3`** | Patch | Two-header separation (`<nd/core-types.h>`), removed `CORE_IMPL` guards, standardized README. |
+| **`nd-drink`** | `v1.0.7` | **`v1.0.8`** | Patch | Two-header separation (`<nd/drink-types.h>`), removed `DRINK_IMPL` guards, standardized README. |
+| **`nd-equip`** | `v1.0.2` | **`v1.1.0`** | Minor | 4x5 paper doll modal overlay (`ux/equip_ui.c`, `<nd/equip-ui.h>`), BCP unpacker (`<nd/equip-bcp.h>`), 9-slot descriptor table. |
+| **`nd-fight`** | `v1.0.2` | **`v1.1.0`** | Minor | Combat target HUD overlay (`ux/fight_ui.c`, `<nd/fight-ui.h>`) driven by live target vitality gauge. |
+| **`nd-level`** | `v1.0.1` | **`v1.1.0`** | Minor | Two-header separation (`<nd/level-types.h>` defining `nd_level_t` and `ND_LEVEL_DEFAULT`), public caller `<nd/level.h>`. |
+| **`nd-mob`** | `v1.0.2` | **`v1.0.3`** | Patch | Declarative `data/mobs.dsv` table (14 mob templates) loaded dynamically via `nd_table_load()`. |
+| **`nd-mortal`** | `v1.0.2` | **`v1.1.0`** | Minor | Two-header separation (`<nd/mortal-types.h>`), target vitality BCP channel (`<nd/mortal-bcp.h>`), and `ux/mortal_ui.c`. |
+| **`nd-other`** | `v1.0.1` | **`v1.0.2`** | Patch | Standardized README with man-src and modder guide. |
+| **`nd-plant`** | `v1.0.2` | **`v1.1.0`** | Minor | Two-header separation (`<nd/plant-types.h>` defining `plant_tile_t`), declarative `data/plants.dsv` (10 plant species). |
+| **`nd-race`** | `v1.0.1` | **`v1.1.0`** | Minor | Two-header separation (`<nd/race-types.h>` defining `race_t`), declarative `data/races.dsv` (5 playable races). |
+| **`nd-seat`** | `v1.0.2` | **`v1.0.3`** | Patch | Two-header separation (`<nd/seat-types.h>`), removed `SEAT_IMPL` guards, standardized README. |
+| **`nd-shop`** | `v1.0.1` | **`v1.0.2`** | Patch | Header import cleanup, standardized README with man-src and modder guide. |
+| **`nd-spell`** | `v1.0.7` | **`v1.1.0`** | Minor | Two-header separation (`<nd/spell-types.h>`), declarative `data/spells.dsv` (11 spells), BCP unpackers (`<nd/spell-bcp.h>`), grimoire modal UI (`ux/spell_ui.c`, `<nd/spell-ui.h>`). |
+| **`nd-stone`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/stones.dsv` table loaded dynamically via `nd_table_load()`. |
+| **`nd-vanilla`** | `v1.0.1` | **`v1.0.2`** | Patch | Standardized README with man-src, art, and modder guide. |
+| **`nd-wts`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/wts.dsv` table (12 weapon types) loaded dynamically via `nd_table_load()`. |
+| **`.pi/extensions/pi-mm`** | `v0.1.0` | **`v0.2.0`** | Minor | HTOK v3 binary tokenization format, associative memory co-occurrence graph (`src/associative.ts`), cognitive priming, flashbulb anchors. |
+| **Engine Subsystems (8 in-tree)** | `none` | `in-tree` | Internal | Unversioned host subsystems (`nd-bus`, `nd-mcp`, `nd-obj`, `nd-region`, `nd-session`, `nd-speech`, `nd-view`, `nd-world`) providing core spacetime coordinates, object skeletons, and session queues. |
+
 3. **Step 3: Root Site & Submodule Pointer Updates**
    - Update git submodules in `site` to the newly tagged release commits.
    - Run root site verification (`make clean && make && make test`).

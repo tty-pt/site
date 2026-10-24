@@ -1,12 +1,14 @@
-#include "mcp.h"
+#include <nd/mcp.h>
 
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <ttypt/axil.h>
+#include <ttypt/corm.h>
+#include <nd/view-types.h>
 
-#include "uapi/entity.h"
-#include "uapi/type.h"
+#include <nd/entity.h>
+#include <nd/type.h>
 #include <ttypt/xy.h>
 
 #define SUPERBIGSIZ 80000 * 8192
@@ -25,10 +27,7 @@ enum bcp_type {
 };
 
 XY_DECL(struct icon, object_icon, unsigned, player_ref, unsigned, thing_ref);
-char *object_art(unsigned thing_ref);
-char *unparse(unsigned loc_ref);
 void eng_nd_wwrite(unsigned player_ref, void *msg, size_t len);
-ENT ent_get(unsigned ref);
 
 int
 strcmp_nocase(const char *s1, const char *s2)
@@ -102,7 +101,7 @@ typedef int _fbcp_item_t(char *, unsigned, unsigned, unsigned char);
 int
 _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 {
-	int aux, aux1, exists;
+	int aux, aux1;
 	OBJ obj = {
 		.location = -1,
 		.name = "**NOTHING!**",

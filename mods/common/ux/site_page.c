@@ -9,6 +9,15 @@
 
 #include "bud/bud_app.h"
 
+#ifndef __wasm__
+#include <ttypt/axil.h>
+#ifdef COMMON_INTERNAL_H
+int respond_html(int fd, const char *html);
+#else
+#include "../common.h"
+#endif
+#endif
+
 static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
 {
 	size_t w = 0;

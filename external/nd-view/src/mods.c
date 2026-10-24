@@ -18,7 +18,7 @@
 
 #include <nd/law.h>
 #include <nd/view-types.h>
-#include "uapi/type.h"
+#include <nd/type.h>
 
 
 unsigned shared_put(unsigned hd, void *key, void *data) {

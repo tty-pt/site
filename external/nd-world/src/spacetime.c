@@ -1,4 +1,4 @@
-#include "st.h"
+#include <nd/st.h>
 
 #include <ctype.h>
 #include <dlfcn.h>
@@ -21,17 +21,17 @@
 #include <ttypt/xy.h>
 #include <xxhash.h>
 
-#include "config.h"
-#include "noise.h"
-#include "params.h"
-#include "player.h"
-#include "view.h"
-#include "mcp.h"
+#include <nd/config.h>
+#include <nd/noise.h>
+#include <nd/params.h>
+#include <nd/player.h>
+#include <nd/view.h>
+#include <nd/mcp.h>
 #include <nd/obj-types.h>
-#include "uapi/map.h"
-#include "uapi/type.h"
-#include "uapi/entity.h"
-#include "uapi/match.h"
+#include <nd/map.h>
+#include <nd/type.h>
+#include <nd/entity.h>
+#include <nd/match.h>
 
 unsigned fd_player(unsigned fd);
 
@@ -196,7 +196,7 @@ eng_object_drop(unsigned where_ref, unsigned skel_id)
 	unsigned drop_id;
 	OBJ where;
 	const void *__v, *kp, *vp;
-	unsigned c = corm_iter(hd_resolve(HD_ADROP), &skel_id, CM_RANGE);
+	unsigned c = corm_iter(nd_table_handle(HD_ADROP), &skel_id, CM_RANGE);
 
 	nd_get(HD_OBJ, &(where), &where_ref);
 	eng_map_where(pos, where.location);
@@ -544,7 +544,7 @@ eng_room_clean(unsigned here_ref)
 	if (!(((ROO *) here.data)->flags & RF_TEMP))
 		return here_ref;
 
-	unsigned c = corm_iter(hd_resolve(HD_CONTENTS), &here_ref, CM_RANGE);
+	unsigned c = corm_iter(nd_table_handle(HD_CONTENTS), &here_ref, CM_RANGE);
 	const void *kp, *vp;
 	while (corm_next(&kp, &vp, c)) {
 		OBJ tmp;
@@ -1046,18 +1046,24 @@ eng_st_v(unsigned player_ref, char const *opcs)
 
 void
 echo(char *fmt, ...) {
+	char buf[1024];
 	va_list va;
 	va_start(va, fmt);
-	nd_dwritef(g_player_ref, fmt, va);
+	int n = vsnprintf(buf, sizeof(buf), fmt, va);
 	va_end(va);
+	if (n > 0)
+		nd_write(g_player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
 void
 oecho(char *format, ...) {
+	char buf[1024];
 	va_list args;
 	va_start(args, format);
-	nd_owritef(g_player_ref, format, args);
+	int n = vsnprintf(buf, sizeof(buf), format, args);
 	va_end(args);
+	if (n > 0)
+		nd_write(g_player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
 /* ---------------------------------------------------------------------------

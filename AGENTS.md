@@ -9,6 +9,7 @@ progressive WASM enhancement; no Rust/Dioxus/Deno in the request path.
 
 ```bash
 make
+./start.sh          # singular turnkey runner: auto-seeds universe.db, sets paths, runs on :8080
 make watch          # auto-rebuild + restart on :8080
 ```
 
