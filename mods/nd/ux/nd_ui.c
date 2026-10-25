@@ -188,6 +188,51 @@ static const nd_viewport_driver_t g_driver_lamina = {
 	.destroy = NULL
 };
 
+/* Bud DOM Viewport Driver (nd-driver-bud) */
+static bud_node *mount_bud(void)
+{
+	bud_node *panel = bud_element("div");
+	bud_set_attr(panel, "id", "bud-viewport");
+	bud_set_attr(panel, "data-bud-viewport", "bud");
+	bud_set_attr(panel, "class", "flex-1 h-full min-h-[400px] bg-neutral-900 border border-emerald-800 rounded p-4 font-mono text-neutral-200 overflow-y-auto relative flex flex-col gap-3");
+
+	bud_node *hdr = bud_element("div");
+	bud_set_attr(hdr, "class", "text-xl font-bold text-emerald-400 border-b border-emerald-900/50 pb-2");
+	bud_append(hdr, bud_text(client_state.room.name[0] ? client_state.room.name : "NeverDark World"));
+	bud_append(panel, hdr);
+
+	bud_node *desc = bud_element("p");
+	bud_set_attr(desc, "class", "text-sm text-neutral-300 leading-relaxed");
+	bud_append(desc, bud_text(client_state.room.desc[0] ? client_state.room.desc : "Exploring spacetime coordinates..."));
+	bud_append(panel, desc);
+
+	if (client_state.entity_count > 0) {
+		bud_node *ents = bud_element("div");
+		bud_set_attr(ents, "class", "flex flex-wrap gap-2 mt-2");
+		for (size_t i = 0; i < client_state.entity_count; i++) {
+			const nd_entity_desc_t *e = &client_state.entities[i];
+			bud_node *ebadge = bud_element("span");
+			bud_set_attr(ebadge, "class", "px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200");
+			bud_append(ebadge, bud_text(e->name[0] ? e->name : "entity"));
+			bud_append(ents, ebadge);
+		}
+		bud_append(panel, ents);
+	}
+
+	return panel;
+}
+
+static const nd_viewport_driver_t g_driver_bud = {
+	.id = "bud",
+	.label = "🌿 Bud (DOM)",
+	.required_capability = "bud",
+	.mount = mount_bud,
+	.init = NULL,
+	.on_frame = NULL,
+	.on_resize = NULL,
+	.destroy = NULL
+};
+
 void nd_ui_init_defaults(void)
 {
 	if (g_ui_initialized)
@@ -198,6 +243,7 @@ void nd_ui_init_defaults(void)
 
 	nd_register_viewport_driver(&g_driver_tty);
 	nd_register_viewport_driver(&g_driver_lamina);
+	nd_register_viewport_driver(&g_driver_bud);
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -281,6 +327,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		"{\"me\":%u,\"auth_failed\":%d,\"user\":\"%s\",\"map_buf\":\"%s\","
 		"\"active_modal\":\"%s\","
 		"\"selected_item_ref\":%u,"
+		"\"preferred_driver\":\"%s\","
 		"\"active_viewport\":%d,\"tod\":%u,"
 		"\"room\":{\"ref\":%u,\"name\":\"%s\",\"desc\":\"%s\",\"exits\":%u},"
 		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,"
@@ -288,6 +335,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		st->me, st->auth_failed, st->user, esc_map,
 		st->active_modal,
 		st->selected_item_ref,
+		st->preferred_driver,
 		g_active_driver_idx, st->tod,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits);
@@ -1046,6 +1094,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		client_state.selected_item_ref = (uint32_t)bud_json_int(json, "selected_item_ref", 0);
 		bud_json_str(json, "active_modal", client_state.active_modal, sizeof(client_state.active_modal));
 		nd_ui_set_active_modal(client_state.active_modal);
+		bud_json_str(json, "preferred_driver", client_state.preferred_driver, sizeof(client_state.preferred_driver));
 
 		int v_idx = (int)bud_json_int(json, "active_viewport", 0);
 		if (v_idx >= 0 && (size_t)v_idx < g_driver_count) {
@@ -1073,6 +1122,19 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 	ws_connect("/nd", 3);
 }
 
+/*
+ * Negotiate active viewport driver based on genuine regional driver metadata
+ * delivered via BCP (opcode ND_BCP_REGION) from nd-region persistence.
+ */
+static void nd_negotiate_regional_driver(const nd_client_state_t *st)
+{
+	if (!st) return;
+
+	if (st->preferred_driver[0]) {
+		nd_set_active_viewport_driver(st->preferred_driver);
+	}
+}
+
 ISO_EXPORT(void, wasm_term_on_input, const char *buf, size_t len)
 {
 	if (buf && len > 0)
@@ -1097,6 +1159,7 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
 		int ret = nd_bcp_decode(buf, len, &client_state);
 		if (ret > 0) {
+			nd_negotiate_regional_driver(&client_state);
 			nd_scene_sync(&g_scene, &client_state);
 			bud_app_set_state();
 			const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();

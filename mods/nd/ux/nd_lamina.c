@@ -88,13 +88,41 @@ void nd_lamina_render_scene(uint32_t *fb, uint32_t w, uint32_t h, const nd_scene
 			draw_ring(fb, w, h, ex + 8, ey + 8, 14, 0xFFFFCC00);
 		}
 
-		/* Avatar glyph box */
-		fill_rect(fb, w, h, ex, ey, 16, 16, ent_col);
+		/* Base avatar body box */
+		fill_rect(fb, w, h, ex + 2, ey + 2, 12, 12, ent_col);
 
-		/* Attached items: one pip per socket, colour derived from the item ref */
+		/* 2D Equipment Layering: layer gear sprites/plates onto the avatar */
 		for (size_t a = 0; a < se->attach_count; a++) {
-			uint32_t pc = 0xFF000000u | ((se->attach[a].ref * 2654435761u) & 0x00FFFFFFu) | 0x00404040u;
-			fill_rect(fb, w, h, ex + 18, ey + (uint32_t)a * 4, 3, 3, pc);
+			const char *sock = se->attach[a].socket;
+			uint32_t ref = se->attach[a].ref;
+			if (!ref)
+				continue;
+
+			if (!strcmp(sock, "head")) {
+				/* 2D Helm / Visor crest */
+				fill_rect(fb, w, h, ex + 1, ey, 14, 3, 0xFFCCCCCC);
+				fill_rect(fb, w, h, ex + 5, ey - 2, 6, 2, 0xFF888888);
+			} else if (!strcmp(sock, "chest") || !strcmp(sock, "body")) {
+				/* 2D Armor chestplate */
+				fill_rect(fb, w, h, ex + 4, ey + 5, 8, 7, 0xFFAAAAAA);
+				fill_rect(fb, w, h, ex + 6, ey + 7, 4, 3, 0xFF666666);
+			} else if (!strcmp(sock, "main_hand") || !strcmp(sock, "weapon")) {
+				/* 2D Weapon blade and hilt */
+				fill_rect(fb, w, h, ex + 13, ey + 6, 2, 4, 0xFF553311);
+				fill_rect(fb, w, h, ex + 15, ey + 3, 2, 9, 0xFFEEEEEE);
+			} else if (!strcmp(sock, "off_hand") || !strcmp(sock, "shield")) {
+				/* 2D Shield */
+				fill_rect(fb, w, h, ex - 2, ey + 5, 4, 8, 0xFF3B5998);
+				fill_rect(fb, w, h, ex - 1, ey + 7, 2, 4, 0xFFDDAA33);
+			} else if (!strcmp(sock, "legs") || !strcmp(sock, "feet")) {
+				/* 2D Greaves / Boots */
+				fill_rect(fb, w, h, ex + 3, ey + 13, 4, 3, 0xFF554433);
+				fill_rect(fb, w, h, ex + 9, ey + 13, 4, 3, 0xFF554433);
+			} else {
+				/* Generic equipment socket pip */
+				uint32_t pc = 0xFF000000u | ((ref * 2654435761u) & 0x00FFFFFFu) | 0x00404040u;
+				fill_rect(fb, w, h, ex + 18, ey + (uint32_t)a * 4, 3, 3, pc);
+			}
 		}
 
 		/* Health bar */

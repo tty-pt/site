@@ -22,6 +22,7 @@ struct st_rec {
 	uint32_t plen;
 	uint32_t nmods;
 	uint32_t flags;
+	char     driver[16];
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

@@ -239,6 +239,7 @@ cmd "drop Iron Helm"
 # If 2 or more planets, establish Planet 2 as the Lamina Graphical Showcase Area
 if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "region 16 world 2"
+	cmd "driver lamina-2d 16 world 2"
 
 	# Room 1: The High Crystal Sanctum at (0, 0, 0, 2)
 	cmd "room 0 0 0 2"

@@ -4,11 +4,11 @@ WASM_PATH ?= $(REPO_ROOT)/htdocs
 TARGET = nd.so
 
 ND_UX_MODULES = \
-	$(REPO_ROOT)/external/nd-attr/ux/attr_ui.c \
-	$(REPO_ROOT)/external/nd-equip/ux/equip_ui.c \
-	$(REPO_ROOT)/external/nd-spell/ux/spell_ui.c \
-	$(REPO_ROOT)/external/nd-fight/ux/fight_ui.c \
-	$(REPO_ROOT)/external/nd-mortal/ux/mortal_ui.c
+	ux/glue/attr_ui.c \
+	ux/glue/equip_ui.c \
+	ux/glue/spell_ui.c \
+	ux/glue/fight_ui.c \
+	ux/glue/mortal_ui.c
 
 SRC = nd.c ux/nd_ui.c ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES)
 EXTRA_CFLAGS += -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux

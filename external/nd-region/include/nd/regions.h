@@ -91,4 +91,10 @@ XY_DECL(int, st_refuse_region, unsigned, player_ref, uint64_t, id, uint8_t, plen
 XY_DECL(int, presence_refresh, unsigned, ref);
 XY_DECL(int, presence_forget, unsigned, ref);
 
+/* ---------------------------------------------------------------- driver */
+
+XY_DECL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen);
+XY_DECL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, driver);
+XY_DECL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, size_t, maxlen);
+
 #endif /* ND_REGIONS_H */

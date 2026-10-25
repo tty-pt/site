@@ -21,11 +21,11 @@ gcc -g -O0 \
 	mods/nd/ux/nd_ui.c \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
-	external/nd-equip/ux/equip_ui.c \
-	external/nd-attr/ux/attr_ui.c \
-	external/nd-spell/ux/spell_ui.c \
-	external/nd-fight/ux/fight_ui.c \
-	external/nd-mortal/ux/mortal_ui.c \
+	mods/nd/ux/glue/equip_ui.c \
+	mods/nd/ux/glue/attr_ui.c \
+	mods/nd/ux/glue/spell_ui.c \
+	mods/nd/ux/glue/fight_ui.c \
+	mods/nd/ux/glue/mortal_ui.c \
 	-lbud -laxil -lxylem -lhyle-bud -lm
 
 ./tests/unit/test_ssr_hydration

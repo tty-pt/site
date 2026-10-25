@@ -192,7 +192,8 @@ struct st_rec {
 	uint32_t owner;   /* OBJ ref of the ruler; NOTHING = unclaimed */
 	uint32_t plen;    /* cross-check against the key's plen suffix (§22.2) */
 	uint32_t nmods;   /* authoritative for iteration */
-	uint32_t flags;   /* reserved */
+	uint32_t flags;   /* driver preference or flags */
+	char     driver[16]; /* preferred viewport driver ("lamina-2d", "tty", "bud") */
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

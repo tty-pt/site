@@ -63,10 +63,13 @@ st_rec_init(void)
 			{ .name = "flags", .type = CM_U32,
 			  .offset = offsetof(struct st_rec, flags),
 			  .max_size = sizeof(uint32_t) },
+			{ .name = "driver", .type = CM_STR,
+			  .offset = offsetof(struct st_rec, driver),
+			  .max_size = sizeof(((struct st_rec *)0)->driver) },
 			{ .name = "mods", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, mods),
 			  .max_size = sizeof(((struct st_rec *)0)->mods) },
-		}, 5);
+		}, 6);
 	if (rec == CM_MISS)
 		WARN("st_rec_register: corm_record_register failed\n");
 	return rec;
@@ -567,6 +570,46 @@ XY_IMPL(int, st_refuse_region, unsigned, player_ref, uint64_t, id, uint8_t, plen
 	}
 	nd_flush(player_ref);
 	return 0;
+}
+
+XY_IMPL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen)
+{
+	struct st_rec rec;
+	if (!out_driver || maxlen == 0)
+		return XY_ERR_INVALID;
+	out_driver[0] = '\0';
+	if (!st_row_get(id, plen, &rec))
+		return XY_ERR_NOTFOUND;
+	if (rec.driver[0]) {
+		snprintf(out_driver, maxlen, "%s", rec.driver);
+		return XY_OK;
+	}
+	return XY_ERR_NOTFOUND;
+}
+
+XY_IMPL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, driver)
+{
+	struct st_rec rec;
+	if (!st_row_get(id, plen, &rec)) {
+		memset(&rec, 0, sizeof(rec));
+		rec.owner = 1;
+		rec.plen = plen;
+	}
+	snprintf(rec.driver, sizeof(rec.driver), "%s", driver ? driver : "");
+	st_row_put(id, plen, &rec);
+	return XY_OK;
+}
+
+XY_IMPL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, size_t, maxlen)
+{
+	uint64_t id;
+	uint8_t plen;
+	if (!out_driver || maxlen == 0)
+		return XY_ERR_INVALID;
+	out_driver[0] = '\0';
+	if (st_region_of_player(player_ref, &id, &plen) != XY_OK)
+		return XY_ERR_NOTFOUND;
+	return st_region_get_driver(id, plen, out_driver, maxlen);
 }
 
 /* --- Bans ---------------------------------------------------------------- */
@@ -1537,6 +1580,44 @@ do_ban(int fd, int argc, char *argv[])
 }
 
 static void
+do_driver(int fd, int argc, char *argv[])
+{
+	unsigned player_ref = fd_player(fd);
+	if (argc < 2 || !argv[1] || !*argv[1]) {
+		char cur[16] = {0};
+		if (st_player_get_driver(player_ref, cur, sizeof(cur)) == XY_OK && cur[0]) {
+			nd_printf(player_ref, "Active regional driver: %s\n", cur);
+		} else {
+			nd_printf(player_ref, "No regional driver set (default tty).\n");
+		}
+		nd_flush(player_ref);
+		return;
+	}
+
+	const char *drv = argv[1];
+	uint64_t id = 0;
+	uint8_t plen = ST_PLEN_ROOT;
+
+	if (argc > 2) {
+		if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
+			nd_printf(player_ref, "Invalid region\n");
+			nd_flush(player_ref);
+			return;
+		}
+	} else {
+		if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
+			nd_printf(player_ref, "You are nowhere.\n");
+			nd_flush(player_ref);
+			return;
+		}
+	}
+
+	st_region_set_driver(id, plen, drv);
+	nd_printf(player_ref, "Set region driver to %s\n", drv);
+	nd_flush(player_ref);
+}
+
+static void
 do_unban(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd), victim_ref, banner = NOTHING;
@@ -1688,4 +1769,5 @@ xy_install(void)
 	nd_register("modlist", do_modlist, 0);
 	nd_register("ban", do_ban, 0);
 	nd_register("unban", do_unban, 0);
+	nd_register("driver", do_driver, 0);
 }

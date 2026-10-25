@@ -24,6 +24,7 @@ enum bcp_type {
 	BCP_OUT,
 	BCP_TOD,
 	BCP_ACTION,
+	BCP_REGION,
 };
 
 XY_DECL(struct icon, object_icon, unsigned, player_ref, unsigned, thing_ref);
@@ -267,8 +268,18 @@ eng_mcp_content_out(unsigned loc_ref, unsigned thing_ref) {
 }
 
 void
+eng_mcp_send_region_driver(unsigned player_ref)
+{
+	char drv[16] = {0};
+	if (st_player_get_driver(player_ref, drv, sizeof(drv)) == 0 && drv[0]) {
+		eng_fbcp(player_ref, strlen(drv) + 1, BCP_REGION, drv);
+	}
+}
+
+void
 eng_mcp_content_in(unsigned loc_ref, unsigned thing_ref) {
 	fbcp_observers(loc_ref, thing_ref, 2);
+	eng_mcp_send_region_driver(thing_ref);
 }
 
 void
@@ -279,6 +290,7 @@ eng_mcp_auth_fail(int descr, int reason) {
 void
 eng_mcp_auth_success(unsigned player_ref) {
 	fbcp_auth_success(player_ref);
+	eng_mcp_send_region_driver(player_ref);
 }
 
 void
