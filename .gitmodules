@@ -1,9 +1,9 @@
 [submodule "external/libhyle"]
 	path = external/libhyle
-	url = git@github.com:tty-pt/hyle.git
+	url = git@github.com:tty-pt/libhyle.git
 [submodule "external/libcorm"]
 	path = external/libcorm
-	url = git@github.com:tty-pt/libqmap.git
+	url = git@github.com:tty-pt/libcorm.git
 [submodule "external/libxylem"]
 	path = external/libxylem
 	url = git@github.com:tty-pt/libxylem.git
@@ -21,13 +21,13 @@
 	url = git@github.com:tty-pt/libqsys.git
 [submodule "external/liblemma"]
 	path = external/liblemma
-	url = git@github.com:tty-pt/libstoma.git
-[submodule "external/libgeo"]
+	url = git@github.com:tty-pt/liblemma.git
+[submodule "external/libislet"]
 	path = external/libislet
-	url = git@github.com:tty-pt/libgeo.git
+	url = git@github.com:tty-pt/libislet.git
 [submodule "external/libjoint"]
 	path = external/libjoint
-	url = git@github.com:tty-pt/libit.git
+	url = git@github.com:tty-pt/libjoint.git
 [submodule "external/libsepal"]
 	path = external/libsepal
 	url = git@github.com:tty-pt/libsepal.git
@@ -51,61 +51,61 @@
 	url = git@github.com:tty-pt/axil-nd.git
 [submodule "external/nd-attr"]
 	path = external/nd-attr
-	url = git@github.com:tty-pt/nd-attr
+	url = git@github.com:tty-pt/nd-attr.git
 [submodule "external/nd-biome"]
 	path = external/nd-biome
-	url = git@github.com:tty-pt/nd-biome
+	url = git@github.com:tty-pt/nd-biome.git
 [submodule "external/nd-class"]
 	path = external/nd-class
-	url = git@github.com:tty-pt/nd-class
+	url = git@github.com:tty-pt/nd-class.git
 [submodule "external/nd-core"]
 	path = external/nd-core
-	url = git@github.com:tty-pt/nd-core
+	url = git@github.com:tty-pt/nd-core.git
 [submodule "external/nd-drink"]
 	path = external/nd-drink
-	url = git@github.com:tty-pt/nd-drink
+	url = git@github.com:tty-pt/nd-drink.git
 [submodule "external/nd-equip"]
 	path = external/nd-equip
-	url = git@github.com:tty-pt/nd-equip
+	url = git@github.com:tty-pt/nd-equip.git
 [submodule "external/nd-fight"]
 	path = external/nd-fight
-	url = git@github.com:tty-pt/nd-fight
+	url = git@github.com:tty-pt/nd-fight.git
 [submodule "external/nd-level"]
 	path = external/nd-level
-	url = git@github.com:tty-pt/nd-level
+	url = git@github.com:tty-pt/nd-level.git
 [submodule "external/nd-mob"]
 	path = external/nd-mob
-	url = git@github.com:tty-pt/nd-mob
+	url = git@github.com:tty-pt/nd-mob.git
 [submodule "external/nd-mortal"]
 	path = external/nd-mortal
-	url = git@github.com:tty-pt/nd-mortal
+	url = git@github.com:tty-pt/nd-mortal.git
 [submodule "external/nd-other"]
 	path = external/nd-other
-	url = git@github.com:tty-pt/nd-other
+	url = git@github.com:tty-pt/nd-other.git
 [submodule "external/nd-plant"]
 	path = external/nd-plant
-	url = git@github.com:tty-pt/nd-plant
+	url = git@github.com:tty-pt/nd-plant.git
 [submodule "external/nd-race"]
 	path = external/nd-race
-	url = git@github.com:tty-pt/nd-race
+	url = git@github.com:tty-pt/nd-race.git
 [submodule "external/nd-seat"]
 	path = external/nd-seat
-	url = git@github.com:tty-pt/nd-seat
+	url = git@github.com:tty-pt/nd-seat.git
 [submodule "external/nd-shop"]
 	path = external/nd-shop
-	url = git@github.com:tty-pt/nd-shop
+	url = git@github.com:tty-pt/nd-shop.git
 [submodule "external/nd-spell"]
 	path = external/nd-spell
-	url = git@github.com:tty-pt/nd-spell
+	url = git@github.com:tty-pt/nd-spell.git
 [submodule "external/nd-stone"]
 	path = external/nd-stone
-	url = git@github.com:tty-pt/nd-stone
+	url = git@github.com:tty-pt/nd-stone.git
 [submodule "external/nd-vanilla"]
 	path = external/nd-vanilla
-	url = git@github.com:tty-pt/nd-vanilla
+	url = git@github.com:tty-pt/nd-vanilla.git
 [submodule "external/nd-wts"]
 	path = external/nd-wts
-	url = git@github.com:tty-pt/nd-wts
+	url = git@github.com:tty-pt/nd-wts.git
 [submodule ".pi/extensions/pi-quest"]
 	path = .pi/extensions/pi-quest
 	url = git@github.com:tty-pt/pi-quest.git
