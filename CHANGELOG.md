@@ -5,6 +5,21 @@ All notable changes to the site and NeverDark platform will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-25
+
+- **Ecosystem Wide Synchronized Release Wave 2026.11**:
+  - Published and verified 18 interconnected libraries and platform services across 10 native packaging matrices (Debian/Ubuntu, Alpine, Rocky Linux, Arch Linux, MSYS2/MinGW, macOS Intel, macOS Apple Silicon, Windows Winget, and OpenBSD):
+    * **System & Foundations**: `libqsys` (v1.3.1), `libcorm` (v2.0.1), `libbud` (v1.0.2), `libxylem` (v1.6.0).
+    * **Corm Recall Axes**: `libjoint` (v1.5.0, time), `libislet` (v1.2.1, space), `libsepal` (v1.2.0, semantics), `liblemma` (v1.1.0, lexics).
+    * **Servers & Data Kernel**: `axil` (v1.6.0), `libhyle` (v1.5.0), `libhyle-source` (v1.2.0), `libhyle-bud` (v1.0.2).
+    * **Harness Bridges & LLM Server**: `axil-auth` (v1.2.1), `axil-tty` (v1.4.1), `axil-hyle` (v1.0.2), `axil-auren` (v1.2.0).
+    * **Developer Tools & Journaling Extensions**: `pi-quest` (v1.2.0), `pi-mm` (v0.3.1).
+- **Submodule URL Normalization & Repository Canonicalization (`.gitmodules`)**:
+  - Replaced legacy redirected URLs (`libqmap.git` → `libcorm.git`, `libstoma.git` → `liblemma.git`, `libgeo.git` → `libislet.git`, `libit.git` → `libjoint.git`, `hyle.git` → `libhyle.git`).
+  - Standardized `.git` URI naming across all 16 NeverDark tenant module submodules.
+- **Ecosystem Release Execution Strategy (`docs/RELEASE_EXECUTION_STRATEGY.md`)**:
+  - Documented strict topological DAG layers, bounded concurrency batching rules (3–4 at a time), pre-flight quality gates, Windows/MinGW header hygiene, and CI remote lock troubleshooting.
+
 ## [1.0.0] - 2026-10-24
 
 - **Turnkey Full-Universe Deployment (`./start.sh`, `scripts/seed-nd-universe.sh`, `tests/e2e/test_full_universe.sh`)**:
