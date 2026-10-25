@@ -236,10 +236,18 @@ cmd "drop Leather Tunic"
 cmd "create Iron Helm"
 cmd "drop Iron Helm"
 
-# If 2 or more planets, establish Planet 2 as the Lamina Graphical Showcase Area
+# Planet 1: Composable Viewport Governance with Choice Allowed
+cmd "region 16 world 1"
+cmd "driver stage choice 16 world 1"
+cmd "driver map ascii 16 world 1"
+cmd "driver layout hybrid 16 world 1"
+
+# If 2 or more planets, establish Planet 2 as the Locked Lamina Graphical Showcase Area
 if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "region 16 world 2"
-	cmd "driver lamina-2d 16 world 2"
+	cmd "driver stage lamina-2d locked 16 world 2"
+	cmd "driver map canvas 16 world 2"
+	cmd "driver layout hybrid 16 world 2"
 
 	# Room 1: The High Crystal Sanctum at (0, 0, 0, 2)
 	cmd "room 0 0 0 2"

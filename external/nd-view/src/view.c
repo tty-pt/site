@@ -443,9 +443,58 @@ eng_view(unsigned player_ref)
 	}
 
 	char *view_buf = view_draw(view);
-        /* if (mcp_view(eplayer, &view)) */
-        /* if (fbcp_view(eplayer, &view)) */
-        fbcp_view_buf(player_ref, view_buf);
+
+	nd_map_data_t map_data;
+	memset(&map_data, 0, sizeof(map_data));
+	map_data.width = VIEW_SIZE;
+	map_data.height = VIEW_SIZE;
+	map_data.player_x = VIEW_AROUND;
+	map_data.player_y = VIEW_AROUND;
+	map_data.room_ref = player.location;
+
+	for (int i = 0; i < VIEW_M; i++) {
+		const view_tile_t *vt = &view[i];
+		nd_map_tile_t *mt = &map_data.tiles[i];
+
+		mt->bio_idx = (uint8_t)(vt->bio_idx & 0xFF);
+		mt->exits = (uint8_t)(vt->exits & 0xFF);
+		mt->doors = (uint8_t)(vt->doors & 0xFF);
+
+		uint8_t flags = 0;
+		if (vt->room != NOTHING && vt->room != 0)
+			flags |= ND_MAP_FLAG_ROOM;
+		if (i == (VIEW_AROUND * VIEW_SIZE + VIEW_AROUND))
+			flags |= ND_MAP_FLAG_PLAYER;
+		if (vt->flags & vtf_entity)
+			flags |= ND_MAP_FLAG_ENTITY;
+
+		mt->flags = flags;
+
+		if (flags & ND_MAP_FLAG_PLAYER) {
+			mt->symbol = '@';
+			mt->fg = 15;
+		} else if (flags & ND_MAP_FLAG_ENTITY) {
+			mt->symbol = '!';
+			mt->fg = 14;
+		} else if (vt->exits & E_UP) {
+			mt->symbol = '>';
+			mt->fg = 15;
+		} else if (vt->exits & E_DOWN) {
+			mt->symbol = '<';
+			mt->fg = 15;
+		} else if (flags & ND_MAP_FLAG_ROOM) {
+			mt->symbol = '.';
+			mt->fg = 7;
+		} else {
+			mt->symbol = ' ';
+			mt->fg = 0;
+		}
+
+		mt->bg = (uint8_t)(vt->bio_idx & 0x0F);
+	}
+
+	fbcp_view(player_ref, &map_data);
+	fbcp_view_buf(player_ref, view_buf);
 }
 
 void

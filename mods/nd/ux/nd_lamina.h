@@ -24,6 +24,11 @@ void nd_lamina_render_scene(uint32_t *fb, uint32_t w, uint32_t h, const nd_scene
  */
 void nd_lamina_render_room(uint32_t *fb, uint32_t w, uint32_t h, const nd_client_state_t *st);
 
+/*
+ * Render a mini-map from binary map data into an RGBA pixel buffer (e.g. 160x160).
+ */
+void nd_lamina_render_map(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map);
+
 #ifdef __cplusplus
 }
 #endif

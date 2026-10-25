@@ -9,6 +9,7 @@
 
 #include <nd/entity.h>
 #include <nd/type.h>
+#include <nd/regions.h>
 #include <ttypt/xy.h>
 
 #define SUPERBIGSIZ 80000 * 8192
@@ -218,9 +219,9 @@ eng_mcp_bar(unsigned char iden, unsigned player_ref, unsigned short val, unsigne
 }
 
 void
-fbcp_view(unsigned player_ref, view_t *view)
+eng_fbcp_view(unsigned player_ref, const nd_map_data_t *map)
 {
-	eng_fbcp(player_ref, sizeof(view_t), BCP_VIEW, view);
+	eng_fbcp(player_ref, sizeof(nd_map_data_t), BCP_VIEW, (void *)map);
 }
 
 void
@@ -270,9 +271,25 @@ eng_mcp_content_out(unsigned loc_ref, unsigned thing_ref) {
 void
 eng_mcp_send_region_driver(unsigned player_ref)
 {
-	char drv[16] = {0};
-	if (st_player_get_driver(player_ref, drv, sizeof(drv)) == 0 && drv[0]) {
-		eng_fbcp(player_ref, strlen(drv) + 1, BCP_REGION, drv);
+	char stage[16] = {0};
+	char map[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map, sizeof(map), &layout, &flags) == 0) {
+		uint8_t buf[64];
+		size_t pos = 0;
+		size_t slen = strlen(stage) + 1;
+		size_t mlen = strlen(map) + 1;
+
+		memcpy(buf + pos, stage, slen);
+		pos += slen;
+		memcpy(buf + pos, map, mlen);
+		pos += mlen;
+		buf[pos++] = layout;
+		buf[pos++] = flags;
+
+		eng_fbcp(player_ref, pos, BCP_REGION, buf);
 	}
 }
 

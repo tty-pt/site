@@ -97,4 +97,16 @@ XY_DECL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driv
 XY_DECL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, driver);
 XY_DECL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, size_t, maxlen);
 
+XY_DECL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags);
+
+XY_DECL(int, st_player_resolve_presentation, unsigned, player_ref,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags);
+
 #endif /* ND_REGIONS_H */

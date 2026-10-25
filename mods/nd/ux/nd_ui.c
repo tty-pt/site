@@ -323,19 +323,39 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		}
 	}
 
+	char map_hex[802];
+	map_hex[0] = '\0';
+	static const char hex_chars[] = "0123456789abcdef";
+	if (st->map_data.width > 0) {
+		const uint8_t *raw = (const uint8_t *)&st->map_data;
+		for (size_t i = 0; i < sizeof(nd_map_data_t); i++) {
+			map_hex[i * 2]     = hex_chars[(raw[i] >> 4) & 0x0F];
+			map_hex[i * 2 + 1] = hex_chars[raw[i] & 0x0F];
+		}
+		map_hex[sizeof(nd_map_data_t) * 2] = '\0';
+	}
+
 	int offset = snprintf(buf, cap,
 		"{\"me\":%u,\"auth_failed\":%d,\"user\":\"%s\",\"map_buf\":\"%s\","
+		"\"map_hex\":\"%s\","
 		"\"active_modal\":\"%s\","
 		"\"selected_item_ref\":%u,"
 		"\"preferred_driver\":\"%s\","
+		"\"preferred_map_driver\":\"%s\","
+		"\"layout_mode\":%u,"
+		"\"pres_flags\":%u,"
 		"\"active_viewport\":%d,\"tod\":%u,"
 		"\"room\":{\"ref\":%u,\"name\":\"%s\",\"desc\":\"%s\",\"exits\":%u},"
 		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,"
 		"\"gauges\":[",
 		st->me, st->auth_failed, st->user, esc_map,
+		map_hex,
 		st->active_modal,
 		st->selected_item_ref,
 		st->preferred_driver,
+		st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud",
+		(unsigned)st->layout_mode,
+		(unsigned)st->pres_flags,
 		g_active_driver_idx, st->tod,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits);
@@ -580,8 +600,9 @@ static bud_node *render_action_bar(const nd_client_state_t *st)
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁", "Look", on_action_look));
 
-	/* Dynamic viewport cycle button if multiple drivers registered */
-	if (g_driver_count > 1) {
+	/* Dynamic viewport cycle button ONLY if allowed by region policy */
+	int allow_choice = (st && (st->pres_flags & ND_REGION_ALLOW_CHOICE) && !(st->pres_flags & ND_REGION_LOCKED));
+	if (g_driver_count > 1 && allow_choice) {
 		int next_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
 		bud_node *vbtn = make_btn(g_viewport_drivers[next_idx].label, "Switch Viewport", on_cycle_viewport);
 		bud_set_attr(vbtn, "data-bud-action", "cycle-viewport");
@@ -838,11 +859,83 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 	dst[w < cap ? w : cap - 1] = '\0';
 }
 
-static bud_node *render_room_map(const nd_client_state_t *st)
+static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 {
 	bud_node *map = bud_element("nd-map");
 	bud_set_attr(map, "id", "room-map");
 	bud_set_attr(map, "class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner");
+
+	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
+		char out[2048];
+		size_t pos = 0;
+		uint8_t w = st->map_data.width;
+		uint8_t h = st->map_data.height;
+		if (w > 7) w = 7;
+		if (h > 7) h = 7;
+
+		for (uint8_t y = 0; y < h; y++) {
+			/* Top boundary of row y */
+			for (uint8_t x = 0; x < w; x++) {
+				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
+				int n_open = (t->exits & 2); /* E_NORTH */
+				int n_door = (t->doors & 2);
+				if (x == 0) out[pos++] = '+';
+				if (n_door) {
+					out[pos++] = '#'; out[pos++] = '#'; out[pos++] = '#';
+				} else if (n_open) {
+					out[pos++] = ' '; out[pos++] = ' '; out[pos++] = ' ';
+				} else {
+					out[pos++] = '-'; out[pos++] = '-'; out[pos++] = '-';
+				}
+				out[pos++] = '+';
+			}
+			out[pos++] = '\n';
+
+			/* Room interior of row y */
+			for (uint8_t x = 0; x < w; x++) {
+				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
+				int w_open = (t->exits & 1); /* E_WEST */
+				int w_door = (t->doors & 1);
+				if (w_door) out[pos++] = '#';
+				else if (w_open) out[pos++] = ' ';
+				else out[pos++] = '|';
+
+				out[pos++] = ' ';
+				out[pos++] = t->symbol ? t->symbol : '.';
+				out[pos++] = ' ';
+
+				if (x == w - 1) {
+					int e_open = (t->exits & 8); /* E_EAST */
+					int e_door = (t->doors & 8);
+					if (e_door) out[pos++] = '#';
+					else if (e_open) out[pos++] = ' ';
+					else out[pos++] = '|';
+				}
+			}
+			out[pos++] = '\n';
+		}
+
+		/* Bottom boundary of last row */
+		for (uint8_t x = 0; x < w; x++) {
+			const nd_map_tile_t *t = &st->map_data.tiles[(h - 1) * w + x];
+			int s_open = (t->exits & 16); /* E_SOUTH */
+			int s_door = (t->doors & 16);
+			if (x == 0) out[pos++] = '+';
+			if (s_door) {
+				out[pos++] = '#'; out[pos++] = '#'; out[pos++] = '#';
+			} else if (s_open) {
+				out[pos++] = ' '; out[pos++] = ' '; out[pos++] = ' ';
+			} else {
+				out[pos++] = '-'; out[pos++] = '-'; out[pos++] = '-';
+			}
+			out[pos++] = '+';
+		}
+		out[pos] = '\0';
+
+		bud_append(map, bud_text(out));
+		return map;
+	}
+
 	if (st && st->map_buf[0]) {
 		char html[8192];
 		nd_ansi_to_html(st->map_buf, html, sizeof(html));
@@ -853,6 +946,31 @@ static bud_node *render_room_map(const nd_client_state_t *st)
 		bud_append(map, bud_text("+---+---+---+\n|   |   |   |\n+---#   #---+\n|   # @ #   |\n+---#   #---+\n|   |   |   |\n+---+---+---+"));
 	}
 	return map;
+}
+
+static bud_node *render_room_map_canvas(const nd_client_state_t *st)
+{
+	(void)st;
+	bud_node *cmap = bud_element("canvas");
+	bud_set_attr(cmap, "id", "room-map-canvas");
+	bud_set_attr(cmap, "data-bud-canvas", "1");
+	bud_set_attr(cmap, "width", "160");
+	bud_set_attr(cmap, "height", "160");
+	bud_set_attr(cmap, "class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto");
+	return cmap;
+}
+
+static bud_node *render_room_map(const nd_client_state_t *st)
+{
+	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
+
+	if (strcmp(map_drv, "none") == 0)
+		return NULL;
+
+	if (strcmp(map_drv, "canvas-lamina") == 0 || strcmp(map_drv, "canvas") == 0)
+		return render_room_map_canvas(st);
+
+	return render_room_map_ascii(st);
 }
 
 bud_node *nd_ui_render(const nd_client_state_t *st)
@@ -885,7 +1003,8 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_set_attr(cb, "id", "cb");
 	bud_set_attr(cb, "class", "flex flex-col gap-2 items-center w-full flex-1 min-h-0 overflow-y-auto");
 	bud_append(cb, target_card);
-	bud_append(cb, map);
+	if (map)
+		bud_append(cb, map);
 	bud_append(cb, keypad);
 	bud_append(cb, contents);
 
@@ -896,18 +1015,25 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *rp = bud_element("div");
 	bud_set_attr(rp, "id", "right-panel");
-	bud_set_attr(rp, "class", "flex flex-col gap-2 w-80 max-w-[340px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden");
+	const char *rp_class = "flex flex-col gap-2 w-80 max-w-[340px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden";
+	if (st && st->layout_mode == ND_LAYOUT_STAGE_EXPANDED) {
+		rp_class = "flex flex-col gap-2 w-52 max-w-[220px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden text-xs";
+	}
+	bud_set_attr(rp, "class", rp_class);
 	bud_append(rp, cb);
 	bud_append(rp, rp_bottom);
 
 	bud_node *holder = bud_element("div");
 	bud_set_attr(holder, "id", "holder");
-	char hcls[128];
-	snprintf(hcls, sizeof(hcls), "nd terminal-mode flex flex-1 gap-2 p-2 min-h-0 h-full overflow-hidden %s",
-		(st && st->target_ref) ? "targetting" : "");
+	char hcls[160];
+	snprintf(hcls, sizeof(hcls), "nd terminal-mode flex flex-1 gap-2 p-2 min-h-0 h-full overflow-hidden %s %s",
+		(st && st->target_ref) ? "targetting" : "",
+		(st && st->layout_mode == ND_LAYOUT_STAGE_FULLSCREEN) ? "fullscreen-layout" : "");
 	bud_set_attr(holder, "class", hcls);
 	bud_append(holder, vport);
-	bud_append(holder, rp);
+	if (!st || st->layout_mode != ND_LAYOUT_STAGE_FULLSCREEN) {
+		bud_append(holder, rp);
+	}
 
 	bud_node *main_box = bud_element("div");
 	bud_set_attr(main_box, "id", "main");
@@ -1083,6 +1209,8 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 {
 	nd_ui_init_defaults();
 	memset(&client_state, 0, sizeof(client_state));
+	client_state.pres_flags = ND_REGION_ALLOW_CHOICE;
+	snprintf(client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver), "ascii-bud");
 	nd_ui_glue_state_default(&client_state);
 
 	if (json && len > 0) {
@@ -1090,11 +1218,31 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		client_state.auth_failed = (int)bud_json_int(json, "auth_failed", 0);
 		bud_json_str(json, "user", client_state.user, sizeof(client_state.user));
 		bud_json_str(json, "map_buf", client_state.map_buf, sizeof(client_state.map_buf));
+
+		char map_hex[802] = {0};
+		bud_json_str(json, "map_hex", map_hex, sizeof(map_hex));
+		if (map_hex[0]) {
+			uint8_t *raw = (uint8_t *)&client_state.map_data;
+			size_t hex_len = strlen(map_hex);
+			if (hex_len == sizeof(nd_map_data_t) * 2) {
+				for (size_t i = 0; i < sizeof(nd_map_data_t); i++) {
+					char h1 = map_hex[i * 2];
+					char h2 = map_hex[i * 2 + 1];
+					uint8_t b1 = (h1 >= 'a') ? (h1 - 'a' + 10) : (h1 >= 'A') ? (h1 - 'A' + 10) : (h1 - '0');
+					uint8_t b2 = (h2 >= 'a') ? (h2 - 'a' + 10) : (h2 >= 'A') ? (h2 - 'A' + 10) : (h2 - '0');
+					raw[i] = (uint8_t)((b1 << 4) | b2);
+				}
+			}
+		}
+
 		client_state.tod = (uint32_t)bud_json_int(json, "tod", 0);
 		client_state.selected_item_ref = (uint32_t)bud_json_int(json, "selected_item_ref", 0);
 		bud_json_str(json, "active_modal", client_state.active_modal, sizeof(client_state.active_modal));
 		nd_ui_set_active_modal(client_state.active_modal);
 		bud_json_str(json, "preferred_driver", client_state.preferred_driver, sizeof(client_state.preferred_driver));
+		bud_json_str(json, "preferred_map_driver", client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver));
+		client_state.layout_mode = (uint8_t)bud_json_int(json, "layout_mode", 0);
+		client_state.pres_flags = (uint8_t)bud_json_int(json, "pres_flags", ND_REGION_ALLOW_CHOICE);
 
 		int v_idx = (int)bud_json_int(json, "active_viewport", 0);
 		if (v_idx >= 0 && (size_t)v_idx < g_driver_count) {
@@ -1131,7 +1279,11 @@ static void nd_negotiate_regional_driver(const nd_client_state_t *st)
 	if (!st) return;
 
 	if (st->preferred_driver[0]) {
-		nd_set_active_viewport_driver(st->preferred_driver);
+		if (st->pres_flags & ND_REGION_LOCKED) {
+			nd_set_active_viewport_driver(st->preferred_driver);
+		} else if (g_active_driver_idx < 0) {
+			nd_set_active_viewport_driver(st->preferred_driver);
+		}
 	}
 }
 

@@ -123,6 +123,21 @@ nd_seed_state_from_data(nd_client_state_t *st)
 			"+---+---+---+",
 			sizeof(st->map_buf) - 1);
 	}
+	if (st->map_data.width == 0) {
+		st->map_data.width = 7;
+		st->map_data.height = 7;
+		st->map_data.player_x = 3;
+		st->map_data.player_y = 3;
+		st->map_data.room_ref = st->room.ref;
+		for (int i = 0; i < 49; i++) {
+			st->map_data.tiles[i].symbol = '.';
+			st->map_data.tiles[i].flags = ND_MAP_FLAG_ROOM;
+			st->map_data.tiles[i].fg = 7;
+		}
+		st->map_data.tiles[24].symbol = '@';
+		st->map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
+		st->map_data.tiles[24].fg = 15;
+	}
 	if (st->action_count == 0) {
 		st->action_count = 3;
 		st->actions[0].id = 0;
@@ -151,10 +166,10 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	}
 	nd_seed_state_from_data(&st);
 
-	char state_json[4096];
+	char state_json[8192];
 	nd_state_serialize(&st, state_json, sizeof(state_json));
 
-	char extra_head[5120];
+	char extra_head[9216];
 	snprintf(
 		extra_head, sizeof(extra_head),
 		"<link rel=\"stylesheet\" href=\"/nd.css\">\n"

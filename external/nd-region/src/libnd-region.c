@@ -63,13 +63,22 @@ st_rec_init(void)
 			{ .name = "flags", .type = CM_U32,
 			  .offset = offsetof(struct st_rec, flags),
 			  .max_size = sizeof(uint32_t) },
+			{ .name = "layout_mode", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, layout_mode),
+			  .max_size = sizeof(uint32_t) },
+			{ .name = "pres_flags", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, pres_flags),
+			  .max_size = sizeof(uint32_t) },
 			{ .name = "driver", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, driver),
 			  .max_size = sizeof(((struct st_rec *)0)->driver) },
+			{ .name = "map_driver", .type = CM_STR,
+			  .offset = offsetof(struct st_rec, map_driver),
+			  .max_size = sizeof(((struct st_rec *)0)->map_driver) },
 			{ .name = "mods", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, mods),
 			  .max_size = sizeof(((struct st_rec *)0)->mods) },
-		}, 6);
+		}, 9);
 	if (rec == CM_MISS)
 		WARN("st_rec_register: corm_record_register failed\n");
 	return rec;
@@ -572,19 +581,112 @@ XY_IMPL(int, st_refuse_region, unsigned, player_ref, uint64_t, id, uint8_t, plen
 	return 0;
 }
 
-XY_IMPL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen)
+XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags)
 {
-	struct st_rec rec;
-	if (!out_driver || maxlen == 0)
-		return XY_ERR_INVALID;
-	out_driver[0] = '\0';
-	if (!st_row_get(id, plen, &rec))
-		return XY_ERR_NOTFOUND;
-	if (rec.driver[0]) {
-		snprintf(out_driver, maxlen, "%s", rec.driver);
+	uint64_t mask;
+	unsigned w;
+	char res_stage[16] = "";
+	char res_map[16] = "ascii-bud";
+	uint8_t res_layout = ND_LAYOUT_STANDARD_HYBRID;
+	uint8_t res_flags = ND_REGION_ALLOW_CHOICE;
+	int stage_locked = 0;
+	int map_locked = 0;
+	int layout_locked = 0;
+
+	if (plen > ST_PLEN_CELL)
+		plen = ST_PLEN_CELL;
+
+	/* Walk prefix lengths from cosmos (0) down to cell (plen).
+	 * If a higher authority locks an attribute (ND_REGION_LOCKED),
+	 * lower levels cannot override it.
+	 * If not locked, subordinate regions can refine or override. */
+	for (w = 0; w <= plen; w++) {
+		struct st_rec rec;
+		mask = w ? (~0ULL << (64 - w)) : 0ULL;
+		if (!st_row_get(id & mask, (uint8_t)w, &rec))
+			continue;
+
+		uint32_t eff_flags = rec.pres_flags | rec.flags;
+
+		/* Stage driver resolution */
+		if (!stage_locked) {
+			if (rec.driver[0]) {
+				snprintf(res_stage, sizeof(res_stage), "%s", rec.driver);
+				if (eff_flags & ND_REGION_LOCKED) {
+					stage_locked = 1;
+					res_flags |= ND_REGION_LOCKED;
+					res_flags &= ~ND_REGION_ALLOW_CHOICE;
+				} else if (eff_flags & ND_REGION_ALLOW_CHOICE) {
+					res_flags |= ND_REGION_ALLOW_CHOICE;
+				}
+			} else if (eff_flags & ND_REGION_ALLOW_CHOICE) {
+				res_flags |= ND_REGION_ALLOW_CHOICE;
+			}
+		}
+
+		/* Map driver resolution */
+		if (!map_locked) {
+			if (rec.map_driver[0]) {
+				snprintf(res_map, sizeof(res_map), "%s", rec.map_driver);
+				if (eff_flags & ND_REGION_LOCKED)
+					map_locked = 1;
+			}
+		}
+
+		/* Layout mode resolution */
+		if (!layout_locked) {
+			if (rec.layout_mode != 0) {
+				res_layout = (uint8_t)rec.layout_mode;
+				if (eff_flags & ND_REGION_LOCKED)
+					layout_locked = 1;
+			}
+		}
+	}
+
+	if (out_stage && stage_len > 0)
+		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
+	if (out_map && map_len > 0)
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
+	if (out_layout)
+		*out_layout = res_layout;
+	if (out_flags)
+		*out_flags = res_flags;
+
+	return XY_OK;
+}
+
+XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags)
+{
+	uint64_t id;
+	uint8_t plen;
+	if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
+		if (out_stage && stage_len > 0)
+			snprintf(out_stage, stage_len, "tty");
+		if (out_map && map_len > 0)
+			snprintf(out_map, map_len, "ascii-bud");
+		if (out_layout)
+			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
+		if (out_flags)
+			*out_flags = ND_REGION_ALLOW_CHOICE;
 		return XY_OK;
 	}
-	return XY_ERR_NOTFOUND;
+	return st_resolve_presentation_policy(id, plen, out_stage, stage_len,
+		out_map, map_len, out_layout, out_flags);
+}
+
+XY_IMPL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen)
+{
+	if (!out_driver || maxlen == 0)
+		return XY_ERR_INVALID;
+	return st_resolve_presentation_policy(id, plen, out_driver, maxlen, NULL, 0, NULL, NULL);
 }
 
 XY_IMPL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, driver)
@@ -595,21 +697,22 @@ XY_IMPL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, dr
 		rec.owner = 1;
 		rec.plen = plen;
 	}
-	snprintf(rec.driver, sizeof(rec.driver), "%s", driver ? driver : "");
+	if (!driver || !*driver || strcmp(driver, "choice") == 0) {
+		rec.driver[0] = '\0';
+		rec.pres_flags |= ND_REGION_ALLOW_CHOICE;
+		rec.pres_flags &= ~ND_REGION_LOCKED;
+	} else {
+		snprintf(rec.driver, sizeof(rec.driver), "%s", driver);
+	}
 	st_row_put(id, plen, &rec);
 	return XY_OK;
 }
 
 XY_IMPL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, size_t, maxlen)
 {
-	uint64_t id;
-	uint8_t plen;
 	if (!out_driver || maxlen == 0)
 		return XY_ERR_INVALID;
-	out_driver[0] = '\0';
-	if (st_region_of_player(player_ref, &id, &plen) != XY_OK)
-		return XY_ERR_NOTFOUND;
-	return st_region_get_driver(id, plen, out_driver, maxlen);
+	return st_player_resolve_presentation(player_ref, out_driver, maxlen, NULL, 0, NULL, NULL);
 }
 
 /* --- Bans ---------------------------------------------------------------- */
@@ -1584,35 +1687,210 @@ do_driver(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
 	if (argc < 2 || !argv[1] || !*argv[1]) {
-		char cur[16] = {0};
-		if (st_player_get_driver(player_ref, cur, sizeof(cur)) == XY_OK && cur[0]) {
-			nd_printf(player_ref, "Active regional driver: %s\n", cur);
-		} else {
-			nd_printf(player_ref, "No regional driver set (default tty).\n");
-		}
+		char stage[16] = {0};
+		char map[16] = {0};
+		uint8_t layout = 0;
+		uint8_t flags = 0;
+		st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+			map, sizeof(map), &layout, &flags);
+		const char *lstr = (layout == ND_LAYOUT_STAGE_FULLSCREEN) ? "fullscreen" :
+		                   (layout == ND_LAYOUT_STAGE_EXPANDED) ? "expanded" : "hybrid";
+		const char *fstr = (flags & ND_REGION_LOCKED) ? "locked" : "choice allowed";
+		nd_printf(player_ref, "Active presentation policy:\n"
+		                      "  Stage driver: %s (%s)\n"
+		                      "  Map driver:   %s\n"
+		                      "  Layout mode:  %s\n",
+		          stage[0] ? stage : "tty", fstr,
+		          map[0] ? map : "ascii-bud", lstr);
 		nd_flush(player_ref);
 		return;
 	}
 
-	const char *drv = argv[1];
 	uint64_t id = 0;
 	uint8_t plen = ST_PLEN_ROOT;
+	struct st_rec rec;
 
-	if (argc > 2) {
+	if (strcmp(argv[1], "clear") == 0) {
 		if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
 			nd_printf(player_ref, "Invalid region\n");
 			nd_flush(player_ref);
 			return;
 		}
-	} else {
-		if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
-			nd_printf(player_ref, "You are nowhere.\n");
+		if (!st_can_region(player_ref, id, plen)) {
+			st_refuse_region(player_ref, id, plen);
+			return;
+		}
+		if (st_row_get(id, plen, &rec)) {
+			rec.driver[0] = '\0';
+			rec.map_driver[0] = '\0';
+			rec.layout_mode = 0;
+			rec.pres_flags = 0;
+			rec.flags = 0;
+			st_row_put(id, plen, &rec);
+		}
+		nd_printf(player_ref, "Cleared presentation policy for region.\n");
+		nd_flush(player_ref);
+		return;
+	}
+
+	if (strcmp(argv[1], "stage") == 0) {
+		if (argc < 3 || !argv[2] || !*argv[2]) {
+			nd_printf(player_ref, "Usage: driver stage <name|choice> [locked|choice] [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
+		const char *sname = argv[2];
+		int reg_arg = 3;
+		uint32_t pflags = ND_REGION_ALLOW_CHOICE;
+
+		if (strcmp(sname, "choice") == 0) {
+			sname = "";
+			pflags = ND_REGION_ALLOW_CHOICE;
+		} else if (argc > 3 && argv[3]) {
+			if (strcmp(argv[3], "locked") == 0) {
+				pflags = ND_REGION_LOCKED;
+				reg_arg = 4;
+			} else if (strcmp(argv[3], "choice") == 0) {
+				pflags = ND_REGION_ALLOW_CHOICE;
+				reg_arg = 4;
+			}
+		}
+
+		if (st_cmd_region(player_ref, argc, argv, reg_arg, &id, &plen) != XY_OK) {
+			nd_printf(player_ref, "Invalid region\n");
+			nd_flush(player_ref);
+			return;
+		}
+		if (!st_can_region(player_ref, id, plen)) {
+			st_refuse_region(player_ref, id, plen);
+			return;
+		}
+		if (!st_row_get(id, plen, &rec)) {
+			memset(&rec, 0, sizeof(rec));
+			rec.owner = player_ref;
+			rec.plen = plen;
+		}
+		snprintf(rec.driver, sizeof(rec.driver), "%s", sname);
+		rec.pres_flags = pflags;
+		rec.flags = pflags;
+		st_row_put(id, plen, &rec);
+		nd_printf(player_ref, "Set region stage driver to %s (%s)\n",
+			rec.driver[0] ? rec.driver : "unconstrained",
+			(pflags & ND_REGION_LOCKED) ? "locked" : "choice allowed");
+		nd_flush(player_ref);
+		return;
 	}
 
-	st_region_set_driver(id, plen, drv);
+	if (strcmp(argv[1], "map") == 0) {
+		if (argc < 3 || !argv[2] || !*argv[2]) {
+			nd_printf(player_ref, "Usage: driver map <ascii|canvas|none> [region]\n");
+			nd_flush(player_ref);
+			return;
+		}
+		const char *mname = argv[2];
+		char map_drv[16] = "ascii-bud";
+		if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina"))
+			snprintf(map_drv, sizeof(map_drv), "canvas-lamina");
+		else if (!strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud"))
+			snprintf(map_drv, sizeof(map_drv), "ascii-bud");
+		else if (!strcmp(mname, "none"))
+			snprintf(map_drv, sizeof(map_drv), "none");
+		else {
+			nd_printf(player_ref, "Unknown map driver (use ascii, canvas, or none)\n");
+			nd_flush(player_ref);
+			return;
+		}
+
+		if (st_cmd_region(player_ref, argc, argv, 3, &id, &plen) != XY_OK) {
+			nd_printf(player_ref, "Invalid region\n");
+			nd_flush(player_ref);
+			return;
+		}
+		if (!st_can_region(player_ref, id, plen)) {
+			st_refuse_region(player_ref, id, plen);
+			return;
+		}
+		if (!st_row_get(id, plen, &rec)) {
+			memset(&rec, 0, sizeof(rec));
+			rec.owner = player_ref;
+			rec.plen = plen;
+		}
+		snprintf(rec.map_driver, sizeof(rec.map_driver), "%s", map_drv);
+		st_row_put(id, plen, &rec);
+		nd_printf(player_ref, "Set region map driver to %s\n", map_drv);
+		nd_flush(player_ref);
+		return;
+	}
+
+	if (strcmp(argv[1], "layout") == 0) {
+		if (argc < 3 || !argv[2] || !*argv[2]) {
+			nd_printf(player_ref, "Usage: driver layout <hybrid|expanded|fullscreen> [region]\n");
+			nd_flush(player_ref);
+			return;
+		}
+		const char *lmode = argv[2];
+		uint32_t mode = ND_LAYOUT_STANDARD_HYBRID;
+		if (!strcmp(lmode, "fullscreen"))
+			mode = ND_LAYOUT_STAGE_FULLSCREEN;
+		else if (!strcmp(lmode, "expanded"))
+			mode = ND_LAYOUT_STAGE_EXPANDED;
+		else if (!strcmp(lmode, "hybrid"))
+			mode = ND_LAYOUT_STANDARD_HYBRID;
+		else {
+			nd_printf(player_ref, "Unknown layout mode (use hybrid, expanded, or fullscreen)\n");
+			nd_flush(player_ref);
+			return;
+		}
+
+		if (st_cmd_region(player_ref, argc, argv, 3, &id, &plen) != XY_OK) {
+			nd_printf(player_ref, "Invalid region\n");
+			nd_flush(player_ref);
+			return;
+		}
+		if (!st_can_region(player_ref, id, plen)) {
+			st_refuse_region(player_ref, id, plen);
+			return;
+		}
+		if (!st_row_get(id, plen, &rec)) {
+			memset(&rec, 0, sizeof(rec));
+			rec.owner = player_ref;
+			rec.plen = plen;
+		}
+		rec.layout_mode = mode;
+		st_row_put(id, plen, &rec);
+		nd_printf(player_ref, "Set region layout mode to %s\n", lmode);
+		nd_flush(player_ref);
+		return;
+	}
+
+	/* Backward compatibility: driver <name> [region] */
+	const char *drv = argv[1];
+	int is_choice = (strcmp(drv, "choice") == 0);
+
+	if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
+		nd_printf(player_ref, "Invalid region\n");
+		nd_flush(player_ref);
+		return;
+	}
+	if (!st_can_region(player_ref, id, plen)) {
+		st_refuse_region(player_ref, id, plen);
+		return;
+	}
+	if (!st_row_get(id, plen, &rec)) {
+		memset(&rec, 0, sizeof(rec));
+		rec.owner = player_ref;
+		rec.plen = plen;
+	}
+	if (is_choice) {
+		rec.driver[0] = '\0';
+		rec.pres_flags = ND_REGION_ALLOW_CHOICE;
+		rec.flags = ND_REGION_ALLOW_CHOICE;
+	} else {
+		snprintf(rec.driver, sizeof(rec.driver), "%s", drv);
+		rec.pres_flags = ND_REGION_ALLOW_CHOICE;
+		rec.flags = ND_REGION_ALLOW_CHOICE;
+	}
+	st_row_put(id, plen, &rec);
 	nd_printf(player_ref, "Set region driver to %s\n", drv);
 	nd_flush(player_ref);
 }

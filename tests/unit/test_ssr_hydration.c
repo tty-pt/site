@@ -51,12 +51,29 @@ int main(void)
 	ssr_st.entities[1].location = 1234;
 	ssr_st.entity_count = 2;
 
+	ssr_st.map_data.width = 7;
+	ssr_st.map_data.height = 7;
+	ssr_st.map_data.player_x = 3;
+	ssr_st.map_data.player_y = 3;
+	ssr_st.map_data.room_ref = 1234;
+	for (int i = 0; i < 49; i++) {
+		ssr_st.map_data.tiles[i].bio_idx = 1;
+		ssr_st.map_data.tiles[i].symbol = '.';
+		ssr_st.map_data.tiles[i].flags = ND_MAP_FLAG_ROOM;
+		ssr_st.map_data.tiles[i].exits = 0x0F; /* N, S, E, W */
+		ssr_st.map_data.tiles[i].fg = 7;
+	}
+	ssr_st.map_data.tiles[24].symbol = '@';
+	ssr_st.map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
+	ssr_st.map_data.tiles[24].fg = 15;
+
 	/* 1. Execute true production nd_state_serialize() */
-	char json_buf[4096] = {0};
+	char json_buf[8192] = {0};
 	nd_state_serialize(&ssr_st, json_buf, sizeof(json_buf));
 
 	assert(json_buf[0] == '{');
 	assert(strstr(json_buf, "\"me\":999") != NULL);
+	assert(strstr(json_buf, "\"map_hex\":\"") != NULL);
 	assert(strstr(json_buf, "\"Grand Cathedral\"") != NULL);
 	assert(strstr(json_buf, "\"Cathedral Abbot\"") != NULL);
 	assert(strstr(json_buf, "\"active_modal\":\"spell\"") != NULL);
@@ -69,6 +86,13 @@ int main(void)
 	const nd_client_state_t *rehydrated = nd_ui_get_client_state();
 	assert(rehydrated != NULL);
 	assert(rehydrated->me == 999);
+	assert(rehydrated->map_data.width == 7);
+	assert(rehydrated->map_data.height == 7);
+	assert(rehydrated->map_data.room_ref == 1234);
+	assert(rehydrated->map_data.tiles[24].symbol == '@');
+	assert(rehydrated->map_data.tiles[24].flags & ND_MAP_FLAG_PLAYER);
+	assert(memcmp(&ssr_st.map_data, &rehydrated->map_data, sizeof(nd_map_data_t)) == 0);
+	printf("PASS: binary nd_map_data_t rehydrated byte-for-byte with zero loss\n");
 	assert(nd_client_gauge_get(rehydrated, "hp") && nd_client_gauge_get(rehydrated, "hp")->val == 88);
 	assert(nd_client_gauge_get(rehydrated, "hp")->max == 110);
 	assert(nd_client_gauge_get(rehydrated, "mp") && nd_client_gauge_get(rehydrated, "mp")->val == 42);
@@ -177,6 +201,79 @@ int main(void)
 	assert(me && me->attach_count == 2);
 	assert(scene2.fx_count == 1 && !strcmp(scene2.fx[0].kind, "fire") && scene2.fx[0].target_ref == 2002);
 	printf("PASS: scene graph carries equipment sockets and spell fx from module glue\n");
+
+	/* 6. Viewport Governance & Composable Layout Tests */
+	nd_client_state_t gov;
+	memset(&gov, 0, sizeof(gov));
+	gov.me = 1;
+	gov.pres_flags = ND_REGION_ALLOW_CHOICE;
+	strncpy(gov.preferred_driver, "tty", sizeof(gov.preferred_driver) - 1);
+	strncpy(gov.preferred_map_driver, "ascii-bud", sizeof(gov.preferred_map_driver) - 1);
+	gov.layout_mode = ND_LAYOUT_STANDARD_HYBRID;
+
+	char gov_json[8192] = {0};
+	nd_state_serialize(&gov, gov_json, sizeof(gov_json));
+	assert(strstr(gov_json, "\"preferred_driver\":\"tty\"") != NULL);
+	assert(strstr(gov_json, "\"preferred_map_driver\":\"ascii-bud\"") != NULL);
+	assert(strstr(gov_json, "\"pres_flags\":1") != NULL);
+	printf("PASS: presentation governance metadata serialized to JSON\n");
+
+	/* Rehydrate governance state */
+	wasm_init(gov_json, (int)strlen(gov_json));
+	const nd_client_state_t *gov_rehydrated = nd_ui_get_client_state();
+	assert(gov_rehydrated != NULL);
+	assert(gov_rehydrated->pres_flags & ND_REGION_ALLOW_CHOICE);
+	assert(strcmp(gov_rehydrated->preferred_map_driver, "ascii-bud") == 0);
+	assert(gov_rehydrated->layout_mode == ND_LAYOUT_STANDARD_HYBRID);
+	printf("PASS: presentation governance state rehydrated from JSON\n");
+
+	/* In an ALLOW_CHOICE region, Switch Viewport button must be rendered */
+	html = bud_render_html(nd_ui_render(gov_rehydrated));
+	assert(html && strstr(html, "data-bud-action=\"cycle-viewport\""));
+	assert(strstr(html, "Switch Viewport"));
+	assert(strstr(html, "<nd-map id=\"room-map\""));
+	assert(strstr(html, "id=\"right-panel\""));
+	bud_free_string(html);
+	printf("PASS: ALLOW_CHOICE region renders Switch Viewport button and ascii map\n");
+
+	/* In a LOCKED region, Switch Viewport button MUST NOT be rendered */
+	gov.pres_flags = ND_REGION_LOCKED;
+	strncpy(gov.preferred_driver, "lamina-2d", sizeof(gov.preferred_driver) - 1);
+	strncpy(gov.preferred_map_driver, "canvas-lamina", sizeof(gov.preferred_map_driver) - 1);
+	html = bud_render_html(nd_ui_render(&gov));
+	assert(html && !strstr(html, "Switch Viewport"));
+	assert(!strstr(html, "data-bud-action=\"cycle-viewport\""));
+	assert(strstr(html, "<canvas id=\"room-map-canvas\""));
+	bud_free_string(html);
+	printf("PASS: LOCKED region strictly omits Switch Viewport button and renders canvas-lamina map\n");
+
+	/* Test map driver 'none' */
+	strncpy(gov.preferred_map_driver, "none", sizeof(gov.preferred_map_driver) - 1);
+	html = bud_render_html(nd_ui_render(&gov));
+	assert(html && !strstr(html, "id=\"room-map\""));
+	assert(!strstr(html, "id=\"room-map-canvas\""));
+	bud_free_string(html);
+	printf("PASS: Map driver 'none' completely omits map container\n");
+
+	/* Test FULLSCREEN layout mode */
+	gov.layout_mode = ND_LAYOUT_STAGE_FULLSCREEN;
+	html = bud_render_html(nd_ui_render(&gov));
+	assert(html && strstr(html, "fullscreen-layout"));
+	assert(!strstr(html, "id=\"right-panel\""));
+	bud_free_string(html);
+	printf("PASS: FULLSCREEN layout mode occupies full canvas and omits right panel\n");
+
+	/* 7. Test Pure-C Binary Map Rendering */
+	html = bud_render_html(nd_ui_render(rehydrated));
+	assert(html && strstr(html, "<nd-map id=\"room-map\""));
+	assert(strstr(html, "@"));
+	bud_free_string(html);
+	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph\n");
+
+	uint32_t map_fb[160 * 160] = {0};
+	nd_lamina_render_map(map_fb, 160, 160, &rehydrated->map_data);
+	assert(map_fb[0] != 0);
+	printf("PASS: nd_lamina_render_map renders 2D mini-map pixels\n");
 
 	printf("ALL SSR HYDRATION TESTS PASSED\n");
 	return 0;

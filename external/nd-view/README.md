@@ -6,7 +6,7 @@ Provides visual room perception, ANSI view buffer assembly, and entity looking m
 
 ## Role & Subsystem
 
-`nd-view` aggregates room title, atmospheric descriptions, exits, present entities, dropped items, and terrain features into a cohesive visual representation. It transmits both ANSI strings (`BCP_VIEW_BUFFER`) and structured data (`BCP_VIEW`) to connected clients.
+`nd-view` aggregates room title, atmospheric descriptions, exits, present entities, dropped items, and terrain features into a cohesive visual representation. It transmits packed pure-C binary map grid structs (`nd_map_data_t`, opcode 1 `BCP_VIEW`) for client-side rendering (Bud ASCII or Lamina 2D Canvas) as well as fallback ANSI strings (`BCP_VIEW_BUFFER`, opcode 2).
 
 ## In-Game Commands (`man-src/`)
 

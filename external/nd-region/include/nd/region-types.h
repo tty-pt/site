@@ -17,12 +17,26 @@
 #define ST_PLEN_CELL  64
 #define ST_SEL_UNSET  255
 
+#define ND_REGION_DRIVER_INHERIT    0x00
+#define ND_REGION_ALLOW_CHOICE      0x01
+#define ND_REGION_LOCKED            0x02
+
+#define ND_LAYOUT_STANDARD_HYBRID   0
+#define ND_LAYOUT_STAGE_EXPANDED    1
+#define ND_LAYOUT_STAGE_FULLSCREEN  2
+
 struct st_rec {
 	uint32_t owner;
 	uint32_t plen;
 	uint32_t nmods;
 	uint32_t flags;
-	char     driver[16];
+	uint32_t layout_mode;
+	uint32_t pres_flags;
+	union {
+		char driver[16];
+		char stage_driver[16];
+	};
+	char     map_driver[16];
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

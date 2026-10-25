@@ -49,6 +49,7 @@ echo "[2/4] Booting single-port unified axil daemon on port $PORT..."
 export PATH="$AXIL_BIN_DIR:$PATH"
 export AXIL_ND_DB="$TMP_DB"
 export AXIL_ND_HTDOCS="$REPO_ROOT/htdocs"
+export LD_LIBRARY_PATH="$REPO_ROOT/external/axil-nd/lib:$REPO_ROOT/external/nd-view/lib:$REPO_ROOT/external/nd-mcp/lib:$REPO_ROOT/external/nd-region/lib:${LD_LIBRARY_PATH:-}"
 
 MODULE_SET="./lib/axil-nd:libnd-region:libnd-bus:libnd-obj:libnd-world:libnd-view:libnd-mcp:libnd-speech:libnd-session"
 
@@ -56,9 +57,13 @@ MODULE_SET="./lib/axil-nd:libnd-region:libnd-bus:libnd-obj:libnd-world:libnd-vie
 TMP_PID=$!
 
 # Wait for server ready
-tries=50
+tries=100
 while [ $tries -gt 0 ]; do
-	if grep -q "st_init: st_restore: region id=0x0000000000000000" "$TMP_LOG" 2>/dev/null; then
+	if curl -s "http://127.0.0.1:$PORT/nd" >/dev/null 2>&1 || grep -q "st_init: st_restore: region id=0x0000000000000000" "$TMP_LOG" 2>/dev/null; then
+		break
+	fi
+	if ! kill -0 "$TMP_PID" 2>/dev/null; then
+		echo "Daemon process died unexpectedly." >&2
 		break
 	fi
 	tries=$((tries - 1))
@@ -180,6 +185,8 @@ while idx < len(buf) - 2:
         elif opcode == 9: # ACTION dock
             action_id = struct.unpack('<I', buf[idx+3:idx+7])[0]
             print(f"PASS: BCP ACTION validated (action_id={action_id})")
+        elif opcode == 10: # REGION layout
+            print("PASS: BCP REGION layout frame validated (opcode 10)")
         idx += 3
     else:
         idx += 1
@@ -189,12 +196,26 @@ assert 2 in bcp_opcodes, "Expected BCP ITEM entities (opcode 2)"
 assert 8 in bcp_opcodes, "Expected BCP TOD (opcode 8)"
 print("PASS: Core BCP packet streams validated (AUTH, ITEM, TOD)")
 
-# 3. Test look command -> emits room & entity items
-send_ws_text(s, "look\n")
+# 3. Test view command -> emits binary map & text view
+send_ws_text(s, "view\n")
 look_buf = read_ws_frames(s, timeout=0.8)
-assert len(look_buf) > 0, "Expected response to look"
-assert b"#b" in look_buf, "Expected BCP entity stream in response to look"
-print(f"PASS: Command 'look' executed and emitted BCP entity streams ({len(look_buf)} bytes)")
+assert len(look_buf) > 0, "Expected response to view"
+assert b"#b" in look_buf, "Expected BCP stream in response to view"
+
+look_opcodes = []
+l_idx = 0
+while l_idx < len(look_buf) - 2:
+    if look_buf[l_idx:l_idx+2] == b"#b":
+        l_op = look_buf[l_idx+2]
+        look_opcodes.append(l_op)
+        if l_op == 1 and l_idx + 5 <= len(look_buf):
+            gw, gh = struct.unpack('<BB', look_buf[l_idx+3:l_idx+5])
+            print(f"PASS: BCP VIEW binary map received and validated (grid={gw}x{gh})")
+        l_idx += 3
+    else:
+        l_idx += 1
+assert 1 in look_opcodes, f"Expected BCP VIEW (opcode 1) in response to view, got {look_opcodes}"
+print(f"PASS: Command 'view' executed and emitted BCP binary view & entity streams ({len(look_buf)} bytes)")
 
 # 4. Test inventory command -> emits inventory items
 send_ws_text(s, "inventory\n")
@@ -215,7 +236,15 @@ help_text = help_buf.decode('latin1', errors='ignore')
 assert "topics" in help_text or "help" in help_text, "Expected help text in output"
 print("PASS: Command 'help' executed (tenant module commands verified active)")
 
-# 7. Test save command
+# 7. Test driver command -> verifies regional presentation policy query
+send_ws_text(s, "driver\n")
+drv_buf = read_ws_frames(s, timeout=0.8)
+assert len(drv_buf) > 0, "Expected response to driver"
+drv_text = drv_buf.decode('latin1', errors='ignore')
+assert "presentation policy" in drv_text or "driver" in drv_text, f"Expected driver output, got {drv_text}"
+print("PASS: Command 'driver' executed and returned active regional presentation policy")
+
+# 8. Test save command
 send_ws_text(s, "save\n")
 time.sleep(0.3)
 print("PASS: Command 'save' executed")

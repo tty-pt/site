@@ -163,3 +163,70 @@ WebAssembly.instantiate(wasmBytes, imports);
 ```
 
 Third-party modders can register custom runtime capabilities without modifying core files by serving an ES module that calls `window.registerWasmCapability(namespace, factory)`.
+
+---
+
+## 7. Hierarchical Regional Viewport Governance & Layout Composition
+
+NeverDark presentation policy is not hardcoded in site or client harness code; it is governed by the Spacetime Region Hierarchy in Corm DB (`nd-region`):
+
+### 7.1 Inheritance & Delegation Model
+Rulers at higher prefix lengths establish baseline presentation policies; subordinate rulers refine or specialize them:
+- **Root / Emperor (`plen 0`)**: Universe baseline defaults (default stage: `tty`, default map: `ascii-bud`, layout: `hybrid`).
+- **King / Planet Governor (`plen 16`)**: Can leave drivers unconstrained (`driver stage choice`), delegating choices to counts, or mandate a planetary aesthetic.
+- **Count / Province Magistrate (`plen 32`)**: Can lock an entire province to 2D graphics (`driver stage lamina-2d locked`) or ANSI text (`driver stage tty locked`).
+- **Baron / Room Architect (`plen 64`)**: If not overridden by an ancestor's lock, can configure local presentation or grant travelers the freedom to toggle viewports (`driver stage choice`).
+
+### 7.2 Independent Slot Composition
+Regions govern independent presentation slots rather than a single monolithic toggle:
+- **Stage Slot**: `tty` (terminal stream), `lamina-2d` (2D immediate-mode canvas), `bud` (HTML DOM).
+- **Map Slot**: `ascii-bud` (pure-C ASCII grid in DOM), `canvas-lamina` (embedded 2D mini-tilemap canvas), `none` (hidden).
+- **Layout Mode**: `hybrid` (standard 2-column with sidebar), `expanded` (widened viewport, condensed sidebar), `fullscreen` (stage occupies full viewport).
+
+### 7.3 BCP Wire Frame (`ND_BCP_REGION` = 10)
+Presentation policies resolve into compact binary packets transmitted when players enter a region:
+```c
+typedef struct {
+    char    stage_driver[16];
+    char    map_driver[16];
+    uint8_t layout_mode;
+    uint8_t pres_flags;
+} nd_bcp_region_layout_t;
+```
+
+---
+
+## 8. Pure-C Binary Map Pipeline (`nd_map_data_t`)
+
+To eliminate string formatting overhead, ANSI escape parser fragility, and JSON string escaping risks, NeverDark transmits map data as raw binary structures.
+
+### 8.1 Wire Structures
+Defined in `<nd/bcp-types.h>` with cross-architecture static assertions:
+```c
+typedef struct {
+    uint8_t bio_idx;   /* Biome enum (0..255) */
+    uint8_t exits;     /* Bitmask of exits: W(1), N(2), U(4), E(8), S(16), D(32) */
+    uint8_t doors;     /* Bitmask of doors / obstacles */
+    uint8_t flags;     /* Tile flags (ND_MAP_FLAG_*) */
+    uint8_t symbol;    /* ASCII character representation ('.', '#', '@', '+') */
+    uint8_t fg;        /* Foreground color (0..15 or ANSI index) */
+    uint8_t bg;        /* Background color (0..15 or ANSI index) */
+    uint8_t reserved;  /* Future attributes / alignment pad */
+} nd_map_tile_t;       /* Exactly 8 bytes */
+
+typedef struct {
+    uint8_t width;                       /* Grid width (7) */
+    uint8_t height;                      /* Grid height (7) */
+    uint8_t player_x;                    /* Player position x (3) */
+    uint8_t player_y;                    /* Player position y (3) */
+    uint32_t room_ref;                   /* Current room reference */
+    nd_map_tile_t tiles[ND_MAP_TILES_COUNT]; /* 49 tiles * 8B = 392 bytes */
+} nd_map_data_t;       /* Exactly 400 bytes */
+```
+
+### 8.2 Symmetrical Rendering
+- **Bud ASCII DOM (`render_room_map_ascii`)**: Constructs formatted ASCII room boxes with walls, exits, and glyphs directly from `st->map_data.tiles` without ANSI escape string dependencies.
+- **Lamina 2D Canvas (`render_room_map_canvas` & `nd_lamina_render_map`)**: Blits tile backgrounds, stone floors, 1px wall outlines, player cyan rings, and entity gold squares directly into the 160x160 RGBA canvas framebuffer.
+
+### 8.3 Zero-Loss SSR State Hydration
+In `nd_state_serialize()`, `st->map_data` (400 bytes) is serialized as an 800-character hex string (`map_hex`) embedded in the SSR `<script id="bud-state">` JSON. `wasm_init()` unhexes the payload directly into `client_state.map_data` byte-for-byte, eliminating all string escaping and character encoding corruption.

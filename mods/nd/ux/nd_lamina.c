@@ -172,3 +172,65 @@ void nd_lamina_render_room(uint32_t *fb, uint32_t w, uint32_t h, const nd_client
 	}
 	nd_lamina_render_scene(fb, w, h, &scene);
 }
+
+void nd_lamina_render_map(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map)
+{
+	if (!fb || w == 0 || h == 0)
+		return;
+
+	fill_rect(fb, w, h, 0, 0, w, h, 0xFF0A0A0F);
+
+	if (!map || map->width == 0 || map->height == 0)
+		return;
+
+	uint32_t cols = map->width;
+	uint32_t rows = map->height;
+	uint32_t pad = 4;
+	uint32_t avail_w = (w > pad * 2) ? (w - pad * 2) : w;
+	uint32_t avail_h = (h > pad * 2) ? (h - pad * 2) : h;
+	uint32_t tile_w = avail_w / cols;
+	uint32_t tile_h = avail_h / rows;
+	uint32_t tile_sz = (tile_w < tile_h) ? tile_w : tile_h;
+	if (tile_sz < 4) tile_sz = 4;
+
+	uint32_t start_x = (w - (cols * tile_sz)) / 2;
+	uint32_t start_y = (h - (rows * tile_sz)) / 2;
+
+	for (uint32_t y = 0; y < rows; y++) {
+		for (uint32_t x = 0; x < cols; x++) {
+			const nd_map_tile_t *tile = &map->tiles[y * cols + x];
+			uint32_t tx = start_x + x * tile_sz;
+			uint32_t ty = start_y + y * tile_sz;
+
+			uint32_t t_col = 0xFF14141E;
+			if (tile->flags & ND_MAP_FLAG_ROOM)
+				t_col = 0xFF2A2824;
+			else if (tile->symbol == '.')
+				t_col = 0xFF1E2028;
+
+			fill_rect(fb, w, h, tx, ty, tile_sz, tile_sz, t_col);
+
+			/* Walls: draw 1px outline if exits are closed */
+			uint32_t wall_col = 0xFF4A4438;
+			if (!(tile->exits & 2)) /* North wall */
+				fill_rect(fb, w, h, tx, ty, tile_sz, 1, wall_col);
+			if (!(tile->exits & 16)) /* South wall */
+				fill_rect(fb, w, h, tx, ty + tile_sz - 1, tile_sz, 1, wall_col);
+			if (!(tile->exits & 1)) /* West wall */
+				fill_rect(fb, w, h, tx, ty, 1, tile_sz, wall_col);
+			if (!(tile->exits & 8)) /* East wall */
+				fill_rect(fb, w, h, tx + tile_sz - 1, ty, 1, tile_sz, wall_col);
+
+			/* Entities / Player */
+			if (tile->flags & ND_MAP_FLAG_PLAYER) {
+				draw_ring(fb, w, h, tx + tile_sz / 2, ty + tile_sz / 2, tile_sz / 3, 0xFF00E5FF);
+			} else if (tile->flags & ND_MAP_FLAG_ENTITY) {
+				fill_rect(fb, w, h, tx + tile_sz / 3, ty + tile_sz / 3, tile_sz / 3, tile_sz / 3, 0xFF00D7FF);
+			} else if (tile->exits & 4) { /* Up */
+				fill_rect(fb, w, h, tx + tile_sz / 3, ty + tile_sz / 3, tile_sz / 3, tile_sz / 3, 0xFFFFFFFF);
+			} else if (tile->exits & 32) { /* Down */
+				fill_rect(fb, w, h, tx + tile_sz / 3, ty + tile_sz / 3, tile_sz / 3, tile_sz / 3, 0xFFAAAAAA);
+			}
+		}
+	}
+}

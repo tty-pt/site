@@ -181,6 +181,14 @@ XY_DECL(int, st_v, unsigned, player_ref, const char *, dir);
 #define ND_ST_MAX_MODS 32
 #define ND_ST_MOD_NAME 24
 
+#define ND_REGION_DRIVER_INHERIT    0x00
+#define ND_REGION_ALLOW_CHOICE      0x01
+#define ND_REGION_LOCKED            0x02
+
+#define ND_LAYOUT_STANDARD_HYBRID   0
+#define ND_LAYOUT_STAGE_EXPANDED    1
+#define ND_LAYOUT_STAGE_FULLSCREEN  2
+
 /* One corm row per region: owner, width, and the moderator's module set.
  *
  * owner/plen/nmods/flags are uint32_t rather than the uint8_t §7.2 sketched
@@ -192,8 +200,14 @@ struct st_rec {
 	uint32_t owner;   /* OBJ ref of the ruler; NOTHING = unclaimed */
 	uint32_t plen;    /* cross-check against the key's plen suffix (§22.2) */
 	uint32_t nmods;   /* authoritative for iteration */
-	uint32_t flags;   /* driver preference or flags */
-	char     driver[16]; /* preferred viewport driver ("lamina-2d", "tty", "bud") */
+	uint32_t flags;   /* legacy driver preference or flags */
+	uint32_t layout_mode; /* ND_LAYOUT_STANDARD_HYBRID / EXPANDED / FULLSCREEN */
+	uint32_t pres_flags;  /* ND_REGION_ALLOW_CHOICE / LOCKED */
+	union {
+		char driver[16]; /* preferred stage driver ("lamina-2d", "tty", "bud") */
+		char stage_driver[16];
+	};
+	char     map_driver[16]; /* preferred map driver ("ascii-bud", "canvas-lamina", "none") */
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

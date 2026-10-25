@@ -2,6 +2,7 @@
 #include <nd/law.h>
 #include <nd/world-types.h>
 #include <nd/regions.h>
+#include <nd/bcp-types.h>
 
 void eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags);
 void eng_fbcp(unsigned player_ref, size_t len, unsigned char iden, void *data);
@@ -11,6 +12,7 @@ void eng_mcp_bar(unsigned char iden, unsigned player_ref, unsigned short val, un
 void eng_mcp_auth_fail(int descr, int reason);
 void eng_mcp_auth_success(unsigned player_ref);
 void eng_mcp_tod(unsigned player_ref, unsigned tod);
+void eng_fbcp_view(unsigned player_ref, const nd_map_data_t *map);
 void eng_fbcp_view_buf(unsigned player_ref, char *view);
 void eng_mcp_action(unsigned player_ref, unsigned id, char *label, char *icon);
 
@@ -59,6 +61,12 @@ XY_IMPL(int, mcp_auth_success, unsigned, player_ref)
 XY_IMPL(int, mcp_tod, unsigned, player_ref, unsigned, tod)
 {
 	eng_mcp_tod(player_ref, tod);
+	return 0;
+}
+
+XY_IMPL(int, fbcp_view, unsigned, player_ref, const nd_map_data_t *, map)
+{
+	eng_fbcp_view(player_ref, map);
 	return 0;
 }
 

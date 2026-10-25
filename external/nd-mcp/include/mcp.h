@@ -4,6 +4,7 @@
 #include "uapi/object.h"
 #include "uapi/mcp.h"
 #include "view.h"
+#include <nd/bcp-types.h>
 #include <ttypt/xy.h>
 
 XY_DECL(int, mcp_auth_fail, int, descr, int, reason);
@@ -18,7 +19,7 @@ void mcp_dialog_start(OBJ *player, OBJ *npc, const char *dialog);
 void mcp_dialog_stop(OBJ *player);
 */
 void mcp_equipment(unsigned player_ref);
-void fbcp_view(unsigned player_ref, view_t *view);
+XY_DECL(int, fbcp_view, unsigned, player_ref, const nd_map_data_t *, map);
 XY_DECL(int, fbcp_view_buf, unsigned, player_ref, char *, view);
 
 void eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags);
