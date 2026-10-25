@@ -38,8 +38,7 @@ eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len)
 		if (tmp_ref == exception_ref)
 			continue;
 
-		if (corm_get(obj_hd, &tmp_ref)) {
-			corm_get_copy(obj_hd, &tmp_ref, &tmp);
+		if (corm_read(obj_hd, &tmp_ref, &tmp, sizeof(tmp)) == 0) {
 			if (tmp.type == TYPE_ENTITY)
 				nd_write(tmp_ref, str, len);
 		}

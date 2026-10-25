@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <bud/bud.h>
+#include <bud/bud_jsx.h>
 #include <bud/bud_app.h>
 
 #include <nd/bcp.h>
@@ -137,13 +138,12 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 /* TTY Viewport Driver */
 static bud_node *mount_tty(void)
 {
-	bud_node *term = bud_element("div");
-	bud_set_attr(term, "id", "term");
-	bud_set_attr(term, "data-bud-terminal", "1");
-	bud_set_attr(term, "data-line-mode", "true");
-	bud_set_attr(term, "style", "border: thin solid #9589c5 !important;");
-	bud_set_attr(term, "class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative");
-	return term;
+	return lx_n("div",
+		lx_attr("id", "term"),
+		lx_attr("data-bud-terminal", "1"),
+		lx_attr("data-line-mode", "true"),
+		lx_attr("style", "border: thin solid #9589c5 !important;"),
+		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
 }
 
 static const nd_viewport_driver_t g_driver_tty = {
@@ -160,13 +160,12 @@ static const nd_viewport_driver_t g_driver_tty = {
 /* Lamina 2D Canvas Driver */
 static bud_node *mount_lamina(void)
 {
-	bud_node *canvas = bud_element("canvas");
-	bud_set_attr(canvas, "id", "viewport");
-	bud_set_attr(canvas, "data-bud-canvas", "1");
-	bud_set_attr(canvas, "width", "640");
-	bud_set_attr(canvas, "height", "480");
-	bud_set_attr(canvas, "class", "flex-1 min-h-[400px] bg-black rounded border border-neutral-800 shadow-inner");
-	return canvas;
+	return lx_n("canvas",
+		lx_attr("id", "viewport"),
+		lx_attr("data-bud-canvas", "1"),
+		lx_attr("width", "640"),
+		lx_attr("height", "480"),
+		lx_attr("class", "flex-1 min-h-[400px] bg-black rounded border border-neutral-800 shadow-inner"));
 }
 
 static void on_frame_lamina(const uint8_t *buf, size_t len)
@@ -191,34 +190,27 @@ static const nd_viewport_driver_t g_driver_lamina = {
 /* Bud DOM Viewport Driver (nd-driver-bud) */
 static bud_node *mount_bud(void)
 {
-	bud_node *panel = bud_element("div");
-	bud_set_attr(panel, "id", "bud-viewport");
-	bud_set_attr(panel, "data-bud-viewport", "bud");
-	bud_set_attr(panel, "class", "flex-1 h-full min-h-[400px] bg-neutral-900 border border-emerald-800 rounded p-4 font-mono text-neutral-200 overflow-y-auto relative flex flex-col gap-3");
-
-	bud_node *hdr = bud_element("div");
-	bud_set_attr(hdr, "class", "text-xl font-bold text-emerald-400 border-b border-emerald-900/50 pb-2");
-	bud_append(hdr, bud_text(client_state.room.name[0] ? client_state.room.name : "NeverDark World"));
-	bud_append(panel, hdr);
-
-	bud_node *desc = bud_element("p");
-	bud_set_attr(desc, "class", "text-sm text-neutral-300 leading-relaxed");
-	bud_append(desc, bud_text(client_state.room.desc[0] ? client_state.room.desc : "Exploring spacetime coordinates..."));
-	bud_append(panel, desc);
+	bud_node *panel = lx_n("div",
+		lx_attr("id", "bud-viewport"),
+		lx_attr("data-bud-viewport", "bud"),
+		lx_attr("class", "flex-1 h-full min-h-[400px] bg-neutral-900 border border-emerald-800 rounded p-4 font-mono text-neutral-200 overflow-y-auto relative flex flex-col gap-3"),
+		lx_node(lx_n("div",
+			lx_attr("class", "text-xl font-bold text-emerald-400 border-b border-emerald-900/50 pb-2"),
+			lx_text(client_state.room.name[0] ? client_state.room.name : "NeverDark World"))),
+		lx_node(lx_n("p",
+			lx_attr("class", "text-sm text-neutral-300 leading-relaxed"),
+			lx_text(client_state.room.desc[0] ? client_state.room.desc : "Exploring spacetime coordinates..."))));
 
 	if (client_state.entity_count > 0) {
-		bud_node *ents = bud_element("div");
-		bud_set_attr(ents, "class", "flex flex-wrap gap-2 mt-2");
+		bud_node *ents = lx_n("div", lx_attr("class", "flex flex-wrap gap-2 mt-2"));
 		for (size_t i = 0; i < client_state.entity_count; i++) {
 			const nd_entity_desc_t *e = &client_state.entities[i];
-			bud_node *ebadge = bud_element("span");
-			bud_set_attr(ebadge, "class", "px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200");
-			bud_append(ebadge, bud_text(e->name[0] ? e->name : "entity"));
-			bud_append(ents, ebadge);
+			bud_append(ents, lx_n("span",
+				lx_attr("class", "px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200"),
+				lx_text(e->name[0] ? e->name : "entity")));
 		}
 		bud_append(panel, ents);
 	}
-
 	return panel;
 }
 
@@ -537,15 +529,12 @@ static int on_cycle_viewport(bud_event *ev)
 
 static bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler)
 {
-	bud_node *btn = bud_element("button");
-	bud_set_attr(btn, "type", "button");
-	bud_set_attr(btn, "class", "nd-pad btn round border border-neutral-700 hover:bg-neutral-800 text-neutral-200 shadow-md text-base select-none");
-	if (title && title[0])
-		bud_set_attr(btn, "title", title);
-	bud_append(btn, bud_text(label));
-	if (handler)
-		bud_bind(btn, "click", 1, handler);
-	return btn;
+	return lx_n("button",
+		lx_attr("type", "button"),
+		lx_attr("class", "nd-pad btn round border border-neutral-700 hover:bg-neutral-800 text-neutral-200 shadow-md text-base select-none"),
+		(title && title[0]) ? lx_attr("title", title) : lx_none(),
+		handler ? lx_bind("click", 1, handler) : lx_none(),
+		lx_text(label ? label : ""));
 }
 
 bud_node *nd_ui_dock_button(const char *icon, const char *title, const char *action_id)
@@ -558,23 +547,18 @@ bud_node *nd_ui_dock_button(const char *icon, const char *title, const char *act
 
 static bud_node *render_direction_keypad(void)
 {
-	bud_node *grid = bud_element("div");
-	bud_set_attr(grid, "id", "directions");
-	bud_set_attr(grid, "class", "nd-keypad text-center select-none");
-
-	bud_append(grid, bud_element("div"));
-	bud_append(grid, make_btn("↑", "North (k)", on_move_k));
-	bud_append(grid, make_btn("↗", "Northeast (K)", on_move_K));
-
-	bud_append(grid, make_btn("←", "West (h)", on_move_h));
-	bud_append(grid, bud_element("div"));
-	bud_append(grid, make_btn("→", "East (l)", on_move_l));
-
-	bud_append(grid, bud_element("div"));
-	bud_append(grid, make_btn("↓", "South (j)", on_move_j));
-	bud_append(grid, make_btn("↘", "Southeast (J)", on_move_J));
-
-	return grid;
+	return lx_n("div",
+		lx_attr("id", "directions"),
+		lx_attr("class", "nd-keypad text-center select-none"),
+		lx_node(bud_element("div")),
+		lx_node(make_btn("↑", "North (k)", on_move_k)),
+		lx_node(make_btn("↗", "Northeast (K)", on_move_K)),
+		lx_node(make_btn("←", "West (h)", on_move_h)),
+		lx_node(bud_element("div")),
+		lx_node(make_btn("→", "East (l)", on_move_l)),
+		lx_node(bud_element("div")),
+		lx_node(make_btn("↓", "South (j)", on_move_j)),
+		lx_node(make_btn("↘", "Southeast (J)", on_move_J)));
 }
 
 static bud_node *render_gauges_slot(const nd_client_state_t *st)
@@ -861,9 +845,9 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 
 static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 {
-	bud_node *map = bud_element("nd-map");
-	bud_set_attr(map, "id", "room-map");
-	bud_set_attr(map, "class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner");
+	bud_node *map = lx_n("nd-map",
+		lx_attr("id", "room-map"),
+		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
 
 	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
 		char out[2048];
@@ -951,13 +935,12 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 static bud_node *render_room_map_canvas(const nd_client_state_t *st)
 {
 	(void)st;
-	bud_node *cmap = bud_element("canvas");
-	bud_set_attr(cmap, "id", "room-map-canvas");
-	bud_set_attr(cmap, "data-bud-canvas", "1");
-	bud_set_attr(cmap, "width", "160");
-	bud_set_attr(cmap, "height", "160");
-	bud_set_attr(cmap, "class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto");
-	return cmap;
+	return lx_n("canvas",
+		lx_attr("id", "room-map-canvas"),
+		lx_attr("data-bud-canvas", "1"),
+		lx_attr("width", "160"),
+		lx_attr("height", "160"),
+		lx_attr("class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto"));
 }
 
 static bud_node *render_room_map(const nd_client_state_t *st)

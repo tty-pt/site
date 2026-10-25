@@ -166,19 +166,28 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	}
 	nd_seed_state_from_data(&st);
 
-	char state_json[8192];
-	nd_state_serialize(&st, state_json, sizeof(state_json));
+	size_t json_cap = 16384;
+	char *state_json = malloc(json_cap);
+	if (!state_json)
+		return -1;
+	nd_state_serialize(&st, state_json, json_cap);
 
-	char extra_head[9216];
-	snprintf(
-		extra_head, sizeof(extra_head),
+	char *extra_head = NULL;
+	if (asprintf(&extra_head,
 		"<link rel=\"stylesheet\" href=\"/nd.css\">\n"
 		"<script type=\"application/json\" id=\"bud-state\">%s</script>\n",
-		state_json);
+		state_json) < 0 || !extra_head)
+	{
+		free(state_json);
+		return -1;
+	}
+	free(state_json);
 
 	bud_node *body = nd_ui_render(&st);
-	return site_ui_respond_page(
+	int rc = site_ui_respond_page(
 		fd, "NeverDark", "/nd", "🕹️", user, extra_head, "nd", body);
+	free(extra_head);
+	return rc;
 }
 
 XY_MODULE_API void

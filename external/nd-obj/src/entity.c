@@ -155,11 +155,9 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 	/* An owner that is a different player keeps authority over possessions.
 	 * Another player may be inspected in-region, but their inventory may
 	 * not be taken through region authority. */
-	if (corm_get(obj_hd, &what.owner)) {
-		OBJ owner;
-
-		memset(&owner, 0, sizeof(owner));
-		corm_get_copy(obj_hd, &what.owner, &(owner));
+	OBJ owner;
+	memset(&owner, 0, sizeof(owner));
+	if (corm_read(obj_hd, &what.owner, &owner, sizeof(owner)) == 0) {
 		if (owner.type == TYPE_ENTITY) {
 			if (what.type != TYPE_ENTITY)
 				return 0;

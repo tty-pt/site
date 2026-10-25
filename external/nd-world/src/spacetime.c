@@ -1137,10 +1137,9 @@ static inline void
 st_owner_name(unsigned owner_ref, char *buf, size_t len)
 {
 	OBJ o;
+	memset(&o, 0, sizeof(o));
 
-	if (corm_get(obj_hd, &owner_ref)) {
-		memset(&o, 0, sizeof(o));
-		corm_get_copy(obj_hd, &owner_ref, &o);
+	if (corm_read(obj_hd, &owner_ref, &o, sizeof(o)) == 0) {
 		snprintf(buf, len, "%s", o.name);
 	} else {
 		snprintf(buf, len, "%u", owner_ref);
