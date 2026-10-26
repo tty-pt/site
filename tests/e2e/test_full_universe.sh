@@ -51,9 +51,9 @@ export AXIL_ND_DB="$TMP_DB"
 export AXIL_ND_HTDOCS="$REPO_ROOT/htdocs"
 export LD_LIBRARY_PATH="$REPO_ROOT/external/axil-tty/lib:$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/axil-nd/lib:$REPO_ROOT/external/nd-view/lib:$REPO_ROOT/external/nd-mcp/lib:$REPO_ROOT/external/nd-region/lib:${LD_LIBRARY_PATH:-}"
 
-MODULE_SET="./lib/axil-nd:libnd-region:libnd-bus:libnd-obj:libnd-world:libnd-view:libnd-mcp:libnd-speech:libnd-session"
+. "$REPO_ROOT/scripts/nd-kernel-mods.sh"
 
-(cd "$REPO_ROOT" && exec "$AXIL_BIN" -C "$REPO_ROOT" -p "$PORT" -d -A -m mods/core/core > "$TMP_LOG" 2>&1) &
+(cd "$REPO_ROOT" && exec "$AXIL_BIN" -C "$REPO_ROOT" -p "$PORT" -d -A -m "mods/core/core:$ND_KERNEL_MODS" > "$TMP_LOG" 2>&1) &
 TMP_PID=$!
 
 # Wait for server ready

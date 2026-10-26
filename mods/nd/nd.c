@@ -112,32 +112,10 @@ nd_seed_state_from_data(nd_client_state_t *st)
 		strncpy(st->room.name, "The Citadel Common Hall", sizeof(st->room.name) - 1);
 		strncpy(st->room.desc, "A grand hall with towering stone arches and banners.", sizeof(st->room.desc) - 1);
 	}
-	if (!st->map_buf[0]) {
-		strncpy(st->map_buf,
-			"+---+---+---+\n"
-			"|   |   |   |\n"
-			"+---#   #---+\n"
-			"|   # @ #   |\n"
-			"+---#   #---+\n"
-			"|   |   |   |\n"
-			"+---+---+---+",
-			sizeof(st->map_buf) - 1);
-	}
-	if (st->map_data.width == 0) {
-		st->map_data.width = 7;
-		st->map_data.height = 7;
-		st->map_data.player_x = 3;
-		st->map_data.player_y = 3;
-		st->map_data.room_ref = st->room.ref;
-		for (int i = 0; i < 49; i++) {
-			st->map_data.tiles[i].symbol = '.';
-			st->map_data.tiles[i].flags = ND_MAP_FLAG_ROOM;
-			st->map_data.tiles[i].fg = 7;
-		}
-		st->map_data.tiles[24].symbol = '@';
-		st->map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
-		st->map_data.tiles[24].fg = 15;
-	}
+	/* No placeholder map: map_buf and map_data stay empty until the first BCP
+	 * VIEW_BUFFER / VIEW frame arrives, so first paint never shows a fake grid
+	 * as if it were the real world. render_room_map_ascii falls back to the
+	 * room description meanwhile. */
 	if (st->action_count == 0) {
 		st->action_count = 3;
 		st->actions[0].id = 0;

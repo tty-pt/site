@@ -4,42 +4,61 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 {
 	if (!src || !dst || cap == 0) return;
 	size_t r = 0, w = 0;
+	int fg = 7, bg = 0, bold = 0;
+	int cur_fg = 7, cur_bg = 0;
 	int span_open = 0;
 
 	while (src[r] && w + 64 < cap) {
 		if (src[r] == '\033' && src[r + 1] == '[') {
 			r += 2;
-			int code = 0;
-			while (src[r] >= '0' && src[r] <= '9') {
-				code = code * 10 + (src[r] - '0');
-				r++;
+			while (src[r] && src[r] != 'm') {
+				int code = 0;
+				while (src[r] >= '0' && src[r] <= '9') {
+					code = code * 10 + (src[r] - '0');
+					r++;
+				}
+				if (code == 0) {
+					fg = 7;
+					bg = 0;
+					bold = 0;
+				} else if (code == 1) {
+					bold = 1;
+				} else if (code == 2 || code == 22) {
+					bold = 0;
+				} else if (code >= 30 && code <= 37) {
+					fg = code - 30;
+				} else if (code == 39) {
+					fg = 7;
+				} else if (code >= 40 && code <= 47) {
+					bg = code - 40;
+				} else if (code == 49) {
+					bg = 0;
+				}
+				if (src[r] == ';') r++;
 			}
 			if (src[r] == 'm') r++;
 
-			if (span_open) {
+			int eff_fg = (bold && fg < 8) ? (fg + 8) : fg;
+			if (span_open && (eff_fg != cur_fg || bg != cur_bg)) {
 				memcpy(dst + w, "</span>", 7);
 				w += 7;
 				span_open = 0;
 			}
 
-			const char *cls = NULL;
-			switch (code) {
-			case 0: cls = NULL; break;
-			case 31: cls = "text-red-500"; break;
-			case 32: cls = "text-green-500"; break;
-			case 33: cls = "text-yellow-500"; break;
-			case 34: cls = "text-blue-500"; break;
-			case 35: cls = "text-magenta-500"; break;
-			case 36: cls = "text-cyan-500"; break;
-			case 37: cls = "text-neutral-200"; break;
-			default: break;
-			}
+			if (!span_open && (eff_fg != 7 || bg != 0)) {
+				char cls[64] = {0};
+				size_t clen = 0;
+				if (eff_fg != 7)
+					clen += snprintf(cls + clen, sizeof(cls) - clen, "cf%d", eff_fg);
+				if (bg != 0)
+					clen += snprintf(cls + clen, sizeof(cls) - clen, "%sc%d", clen ? " " : "", bg);
 
-			if (cls) {
 				int n = snprintf(dst + w, cap - w, "<span class=\"%s\">", cls);
 				if (n > 0) {
 					w += (size_t)n;
 					span_open = 1;
+					cur_fg = eff_fg;
+					cur_bg = bg;
 				}
 			}
 		} else if (src[r] == '<') {
@@ -63,11 +82,50 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 	dst[w < cap ? w : cap - 1] = '\0';
 }
 
+/* #room-map always holds exactly one RAW_HTML child. A TEXT child that later
+ * becomes RAW_HTML (first BCP view frame) is not a clean DOM patch: the
+ * hydrator reported a SSR/WASM mismatch and left one stray coloured cell.
+ * RAW -> RAW is a single patch-innerhtml on the element. */
+static bud_node *raw_escaped(const char *text)
+{
+	size_t n = text ? strlen(text) : 0;
+	char *esc = malloc(n * 5 + 1);
+	size_t w = 0;
+	bud_node *node;
+
+	if (!esc)
+		return bud_raw("");
+	for (size_t i = 0; i < n; i++) {
+		switch (text[i]) {
+		case '<': memcpy(esc + w, "&lt;", 4); w += 4; break;
+		case '>': memcpy(esc + w, "&gt;", 4); w += 4; break;
+		case '&': memcpy(esc + w, "&amp;", 5); w += 5; break;
+		default: esc[w++] = text[i]; break;
+		}
+	}
+	esc[w] = '\0';
+	node = bud_raw(esc);
+	free(esc);
+	return node;
+}
+
 static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 {
 	bud_node *map = lx_n("nd-map",
 		lx_attr("id", "room-map"),
-		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
+		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
+
+	if (st && st->map_buf[0]) {
+		/* Each ANSI escape (>= 3 bytes) can open a ~30 byte <span>. */
+		size_t cap = strlen(st->map_buf) * 12 + 256;
+		char *html = malloc(cap);
+		if (html) {
+			nd_ansi_to_html(st->map_buf, html, cap);
+			bud_append(map, bud_raw(html));
+			free(html);
+		}
+		return map;
+	}
 
 	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
 		char out[2048];
@@ -136,19 +194,11 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 		}
 		out[pos] = '\0';
 
-		bud_append(map, bud_text(out));
+		bud_append(map, raw_escaped(out));
 		return map;
 	}
 
-	if (st && st->map_buf[0]) {
-		char html[8192];
-		nd_ansi_to_html(st->map_buf, html, sizeof(html));
-		bud_append(map, bud_raw(html));
-	} else if (st && st->room.desc[0]) {
-		bud_append(map, bud_text(st->room.desc));
-	} else {
-		bud_append(map, bud_text("+---+---+---+\n|   |   |   |\n+---#   #---+\n|   # @ #   |\n+---#   #---+\n|   |   |   |\n+---+---+---+"));
-	}
+	bud_append(map, raw_escaped(st ? st->room.desc : ""));
 	return map;
 }
 

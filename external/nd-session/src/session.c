@@ -761,6 +761,19 @@ nd_player_login(int fd, char *user)
 	if (axil_auth(fd, user))
 		WARN("'%s': no passwd entry; authenticated by session only\n", user);
 
+	OBJ pobj;
+	if (nd_get(HD_OBJ, &pobj, &player_ref) == 0 && (pobj.location == 0 || pobj.location == NOTHING)) {
+		coord_t p_spawn1[4] = { 0, 0, 0, 1 };
+		unsigned spawn_ref = map_get(p_spawn1);
+		if (spawn_ref == NOTHING) {
+			coord_t p_spawn0[4] = { 0, 0, 0, 0 };
+			spawn_ref = map_get(p_spawn0);
+		}
+		if (spawn_ref != NOTHING) {
+			enter(player_ref, spawn_ref, E_NULL);
+		}
+	}
+
 	mcp_auth_success(player_ref);
 	mcp_actions(player_ref);
 	eng_look_at(player_ref, NOTHING);

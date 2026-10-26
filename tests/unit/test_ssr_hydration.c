@@ -264,14 +264,57 @@ int main(void)
 	printf("PASS: FULLSCREEN layout mode occupies full canvas and omits right panel\n");
 
 	/* 7. Test Pure-C Binary Map Rendering */
-	html = bud_render_html(nd_ui_render(rehydrated));
+	/* Render the state that actually carries the binary grid. The shared
+	 * client state was replaced by the governance renders above, and an empty
+	 * state used to pass this check only because it drew a fake "+---#" box
+	 * containing an '@'. */
+	html = bud_render_html(nd_ui_render(&ssr_st));
 	assert(html && strstr(html, "<nd-map id=\"room-map\""));
 	assert(strstr(html, "@"));
 	bud_free_string(html);
 	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph\n");
 
+	/* A state with no map yet must not show a fabricated one. */
+	nd_client_state_t blank;
+	memset(&blank, 0, sizeof(blank));
+	html = bud_render_html(nd_ui_render(&blank));
+	assert(html && strstr(html, "<nd-map id=\"room-map\""));
+	assert(!strstr(html, "+---#"));
+	bud_free_string(html);
+	printf("PASS: empty map state renders no placeholder grid\n");
+
+	/* A real 7x7 view buffer is ~2.2 KB of ANSI. map_buf used to be 1 KB, which
+	 * cut it to its first tile row: the browser drew a single coloured cell. */
+	{
+		static uint8_t frame[3 + 4096];
+		static nd_client_state_t big;
+		size_t n = 0;
+		const char *tile = "\033[42m \033[0m\033[43m  \033[0m";
+		frame[n++] = ND_BCP_MAGIC_0;
+		frame[n++] = ND_BCP_MAGIC_1;
+		frame[n++] = ND_BCP_VIEW_BUFFER;
+		for (int row = 0; row < 13; row++) {
+			for (int col = 0; col < 7; col++) {
+				size_t l = strlen(tile);
+				memcpy(frame + n, tile, l);
+				n += l;
+			}
+			frame[n++] = '\n';
+		}
+		memcpy(frame + n, "\033[42mLASTROW\033[0m", 17);
+		n += 17;
+		assert(n - 3 > 1023);
+		memset(&big, 0, sizeof(big));
+		assert(nd_bcp_decode(frame, n, &big) == 1);
+		assert(strstr(big.map_buf, "LASTROW") != NULL);
+		html = bud_render_html(nd_ui_render(&big));
+		assert(html && strstr(html, "LASTROW"));
+		bud_free_string(html);
+		printf("PASS: >1 KB view buffer survives BCP decode and renders to its last row\n");
+	}
+
 	uint32_t map_fb[160 * 160] = {0};
-	nd_lamina_render_map(map_fb, 160, 160, &rehydrated->map_data);
+	nd_lamina_render_map(map_fb, 160, 160, &ssr_st.map_data);
 	assert(map_fb[0] != 0);
 	printf("PASS: nd_lamina_render_map renders 2D mini-map pixels\n");
 

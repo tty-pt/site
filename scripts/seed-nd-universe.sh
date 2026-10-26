@@ -82,6 +82,7 @@ cleanup() {
 		wait "$SEED_PID" 2>/dev/null || true
 	fi
 	if [ -n "${SEED_KEEP_LOG:-}" ] && [ -f "$SEED_LOG" ]; then cp "$SEED_LOG" "$SEED_KEEP_LOG"; fi
+	if [ -n "${SEED_KEEP_TXT:-}" ] && [ -f "$SEED_TXT" ]; then cp "$SEED_TXT" "$SEED_KEEP_TXT"; fi
 	rm -rf "$SEED_TMP"
 }
 trap cleanup EXIT INT TERM
@@ -91,7 +92,9 @@ export PATH="$AXIL_BIN_DIR:$PATH"
 export AXIL_AUTH_ETC="$AUTH_DIR/etc"
 export AXIL_ND_DB="$TARGET_DB"
 
-MODULE_SET="./lib/axil-nd"
+. "$REPO_ROOT/scripts/nd-kernel-mods.sh"
+export LD_LIBRARY_PATH="$(nd_local_ld_path "$REPO_ROOT")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+MODULE_SET="./lib/axil-nd:$ND_KERNEL_MODS"
 
 echo "Booting temporary NeverDark seeder on port $SEED_PORT..."
 cd "$AXIL_ND_DIR"
@@ -151,8 +154,16 @@ while [ $tries -gt 0 ]; do
 	sleep 0.05
 done
 
-# Warm up root region: load core modules into root and enter room 0 0 0 0
-for mod in libnd-core libnd-vanilla libnd-other libnd-level libnd-shop; do
+# Warm up root region: load every module into the ROOT region and enter room 0 0 0 0.
+# XY dispatch from a module reaches only its own region's subtree, never an
+# ancestor: a content module loaded into a child region (e.g. plen=11) cannot
+# call the kernel's nd_put/nd_get (served from root), so its xy_install silently
+# fails -- nd-biome then leaves HD_BIOME on the all-void default and the map has
+# no biome colours and no plants. Root-loaded modules still apply to every
+# nested planet. Order matters: biome before plant, attr/equip before fight.
+for mod in libnd-core libnd-vanilla libnd-other libnd-level libnd-shop \
+	libnd-attr libnd-equip libnd-fight libnd-spell libnd-race libnd-class \
+	libnd-mob libnd-biome libnd-plant libnd-drink libnd-seat libnd-stone libnd-wts; do
 	cmd "loadmod $mod"
 done
 cmd "room 0 0 0 0"
@@ -163,17 +174,10 @@ echo "Establishing universe sector with $NUM_PLANETS planet(s)..."
 # Claim the 32-planet super-region (plen=11 covers worlds 0..31 in 4D Morton keyspace)
 cmd "region 11 world 0"
 
-# Load the complete tenant content module suite into the 32-planet sector region ONCE.
-# Through hierarchical XY dispatch, all 32 nested planets automatically inherit these modules.
-for mod in libnd-attr libnd-equip libnd-fight libnd-spell libnd-race libnd-class libnd-mob libnd-biome libnd-plant libnd-drink libnd-seat libnd-stone libnd-wts; do
-	cmd "loadmod $mod 11 world 0"
-done
-
 # Establish central planet 1 region under the 32-planet sector
 cmd "region 16 world 1"
 
 cmd "room 0 0 0 1"
-cmd "teleport 0 0 0 1"
 cmd "name The Citadel Common Hall"
 cmd "biome urban_stone"
 cmd "create Steel Broadsword"
@@ -185,7 +189,6 @@ cmd "drop Iron Helm"
 
 # 2. Room at (1, 0, 0, 1): "The Merchant Bazaar" (East exit)
 cmd "room 1 0 0 1"
-cmd "teleport 1 0 0 1"
 cmd "name The Merchant Bazaar"
 cmd "create Shopkeeper Vaelin"
 cmd "drop Shopkeeper Vaelin"
@@ -196,21 +199,18 @@ cmd "drop Mana Potion"
 
 # 3. Room at (0, 1, 0, 1): "The Arcane Sanctum" (North exit)
 cmd "room 0 1 0 1"
-cmd "teleport 0 1 0 1"
 cmd "name The Arcane Sanctum"
 cmd "create Spell Altar"
 cmd "drop Spell Altar"
 
 # 4. Room at (0, -1, 0, 1): "The Training Grounds" (South exit)
 cmd "room 0 -1 0 1"
-cmd "teleport 0 -1 0 1"
 cmd "name The Training Grounds"
 cmd "create Training Golem"
 cmd "drop Training Golem"
 
 # 5. Room at (-1, 0, 0, 1): "The Whispering Woods" (West exit)
 cmd "room -1 0 0 1"
-cmd "teleport -1 0 0 1"
 cmd "name The Whispering Woods"
 cmd "create Ancient Pine"
 cmd "drop Ancient Pine"
@@ -219,16 +219,15 @@ cmd "drop Wild Mushrooms"
 
 # 6. Room at (0, 2, 0, 1): "The Boreal Canopy" (North of Arcane Sanctum)
 cmd "room 0 2 0 1"
-cmd "teleport 0 2 0 1"
 cmd "name The Boreal Canopy"
 cmd "create Tall Fir"
 cmd "drop Tall Fir"
 
 # Return player to Central Spawn Hall
-cmd "teleport 0 0 0 1"
+cmd "room 0 0 0 1"
 
 # Seed spawn room at (0, 0, 0, 0) with initial ground item fixtures
-cmd "teleport 0 0 0 0"
+cmd "room 0 0 0 0"
 cmd "create Steel Broadsword"
 cmd "drop Steel Broadsword"
 cmd "create Leather Tunic"
@@ -251,7 +250,6 @@ if [ "$NUM_PLANETS" -ge 2 ]; then
 
 	# Room 1: The High Crystal Sanctum at (0, 0, 0, 2)
 	cmd "room 0 0 0 2"
-	cmd "teleport 0 0 0 2"
 	cmd "name The High Crystal Sanctum"
 	cmd "biome crystal"
 	cmd "create Crystal Core"
@@ -261,28 +259,34 @@ if [ "$NUM_PLANETS" -ge 2 ]; then
 
 	# Room 2: The Observatory Terrace at (1, 0, 0, 2) (East exit)
 	cmd "room 1 0 0 2"
-	cmd "teleport 1 0 0 2"
 	cmd "name The Observatory Terrace"
 	cmd "create Star Tracker"
 	cmd "drop Star Tracker"
 
 	# Room 3: The Luminescent Spire at (0, 1, 0, 2) (North exit)
 	cmd "room 0 1 0 2"
-	cmd "teleport 0 1 0 2"
 	cmd "name The Luminescent Spire"
 	cmd "create Sun Prism"
 	cmd "drop Sun Prism"
 
 	# Room 4: The Shadow Vault at (0, -1, 0, 2) (South exit)
 	cmd "room 0 -1 0 2"
-	cmd "teleport 0 -1 0 2"
 	cmd "name The Shadow Vault"
 	cmd "create Obsidian Sentinel"
 	cmd "drop Obsidian Sentinel"
-
-	# Return to Planet 1 spawn
-	cmd "teleport 0 0 0 1"
 fi
+
+# Finish at the ROOT SPAWN (0,0,0,0) whatever the planet count: it is where the
+# admin and any new player first looks, and the one place with plants. Planet 1's
+# origin (the Citadel) is ocean by the world generator, so ending there parks the
+# admin in water. Look once so the capture holds the final map.
+cmd "room 0 0 0 0"
+cmd "look"
+sleep 0.5
+
+echo "Verifying the seeded spawn renders biome colours and plants..."
+python3 "$REPO_ROOT/scripts/check-nd-seed-view.py" "$SEED_TXT" "$REPO_ROOT/external/nd-plant/data/plants.dsv" \
+	|| { echo "Error: seeded universe failed the spawn view check (see above)." >&2; exit 1; }
 
 echo "Flushing seeded universe database..."
 cmd "save"
@@ -299,5 +303,10 @@ echo "Stopping seeder daemon..."
 kill -TERM "$SEED_PID" 2>/dev/null || true
 wait "$SEED_PID" 2>/dev/null || true
 SEED_PID=""
+
+# Marker start.sh reads: this DB holds content modules in the ROOT region (v2).
+# A DB seeded earlier loaded them into plen=11, where they cannot reach the
+# kernel, and renders a black mapless world.
+date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET_DB.seed-v2"
 
 echo "Successfully seeded $NUM_PLANETS planet(s) in $TARGET_DB."

@@ -176,6 +176,7 @@ static int
 st_cmd_region(unsigned player_ref, int argc, char *argv[], int region_arg,
 	uint64_t *id, uint8_t *plen)
 {
+	argc = st_argc_trim(argc, argv);
 	if (argc > region_arg && argv[region_arg] && *argv[region_arg]) {
 		char *end = NULL;
 		unsigned long w = strtoul(argv[region_arg], &end, 10);
@@ -675,11 +676,14 @@ static void
 do_loadmod(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
+	char *name;
 	uint64_t id = 0;
 	uint8_t plen = ST_PLEN_ROOT;
 	char namebuf[ND_ST_MOD_NAME + 1];
 	int rc;
+
+	argc = st_argc_trim(argc, argv);
+	name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (!*name || strchr(name, '/')) {
 		nd_printf(player_ref, "Usage: loadmod <module> [world]\n");
@@ -724,11 +728,14 @@ static void
 do_unloadmod(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
+	char *name;
 	uint64_t id = 0;
 	uint8_t plen = ST_PLEN_ROOT;
 	char namebuf[ND_ST_MOD_NAME + 1];
 	int rc;
+
+	argc = st_argc_trim(argc, argv);
+	name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (!*name || strchr(name, '/')) {
 		nd_printf(player_ref, "Usage: unloadmod <module> [world]\n");
@@ -773,6 +780,7 @@ do_modlist(int fd, int argc, char *argv[])
 	struct st_rec rec;
 	uint32_t i;
 
+	argc = st_argc_trim(argc, argv);
 	if (st_cmd_region(player_ref, argc, argv, 1, &id, &plen) != XY_OK) {
 		nd_printf(player_ref, "Invalid world\n");
 		nd_flush(player_ref);

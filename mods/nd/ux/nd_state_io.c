@@ -6,9 +6,13 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 	if (!st || !buf || cap == 0)
 		return;
 
-	char esc_map[1200] = {0};
+	/* Worst case every byte of map_buf is escaped to two. */
+	const size_t esc_cap = sizeof(st->map_buf) * 2 + 4;
+	char *esc_map = calloc(1, esc_cap);
+	if (!esc_map)
+		return;
 	size_t em = 0;
-	for (size_t i = 0; st->map_buf[i] && em + 4 < sizeof(esc_map); i++) {
+	for (size_t i = 0; st->map_buf[i] && em + 4 < esc_cap; i++) {
 		if (st->map_buf[i] == '\n') {
 			esc_map[em++] = '\\';
 			esc_map[em++] = 'n';
@@ -56,6 +60,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		g_active_driver_idx, st->tod,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits);
+	free(esc_map);
 
 	if (offset > 0 && (size_t)offset < cap) {
 		size_t gcur = (size_t)offset;

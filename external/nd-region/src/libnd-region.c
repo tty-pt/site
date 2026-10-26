@@ -274,18 +274,10 @@ XY_IMPL(int, st_region_of_player, unsigned, player_ref, uint64_t *, id,
 
 XY_IMPL(unsigned, st_owner, uint64_t, id, uint8_t, plen)
 {
-	char key[ST_ROW_KEY_LEN + 1];
-	char q[ST_ROW_KEY_LEN + 1 + sizeof(":owner")];
-	const uint32_t *o;
-
-	if (!st_have_hd())
+	struct st_rec rec;
+	if (!st_row_get(id, plen, &rec))
 		return NOTHING;
-	st_row_key(key, sizeof(key), id, plen);
-	snprintf(q, sizeof(q), "%s:owner", key);
-	o = corm_get(owner_hd, q);
-	if (!o)
-		return NOTHING;
-	return *o;
+	return rec.owner;
 }
 
 int
