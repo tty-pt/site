@@ -28,6 +28,11 @@ This document formalizes the reproducible, battle-tested release methodology use
 3. **Zero Tolerance for Unchecked Releases**:
    Every release must be verified to have completed all packaging and publishing steps before releasing its direct dependents.
 
+4. **Semantic Versioning & Bumping Rule**:
+   **Bump minor only if public API changes. Otherwise bump patch.**
+   - Minor increments are strictly required when public headers (`include/ttypt/*.h`), ABI structures, exported symbol tables, or public CLI options are added or modified.
+   - Patch increments are reserved for internal refactorings, performance optimizations, bug fixes, documentation updates, and implementation improvements that leave public API signatures and header contracts unchanged.
+
 ---
 
 ## 2. Topological Dependency Layers

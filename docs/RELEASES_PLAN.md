@@ -4,6 +4,14 @@
 
 ---
 
+## Release Versioning Standards
+
+- **Bump minor only if public API changes. Otherwise bump patch.**
+  * Minor version bumps (`x.Y.0`) are reserved exclusively for modifications that alter public C headers (`include/ttypt/*.h`), ABI structures, public function signatures, or CLI flags.
+  * Patch version bumps (`x.y.Z`) must be used for bug fixes, performance improvements, documentation updates, and internal refactorings that maintain full backwards and binary API compatibility.
+
+---
+
 ## 1. Executive Summary & Unified Changelog Item
 
 Below is the **single unified changelog entry** synthesizing the cross-cutting architectural breakthroughs, breaking changes, renames, and newly introduced capabilities across all 18 repositories since the last release wave.
