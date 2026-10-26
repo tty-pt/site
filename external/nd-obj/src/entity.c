@@ -1,6 +1,7 @@
 #include <nd/entity.h>
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@
 #include <nd/view.h>
 
 unsigned fd_player(unsigned fd);
+void eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len);
 unsigned room_clean(unsigned loc_ref);
 
 unsigned me = -1;
@@ -56,6 +58,24 @@ void eng_ent_del(unsigned ref) {
 	corm_del(ent_hd, &ref);
 }
 
+/* Tell everyone in a room EXCEPT the actor. nd_owritef (law.h) writes to the
+ * actor itself, so it cannot be used to announce a move: the mover would be
+ * told "<me> goes north." about their own step. */
+static void
+room_tellf(unsigned room_ref, unsigned except_ref, const char *fmt, ...)
+{
+	char buf[1024];
+	va_list va;
+	int n;
+
+	va_start(va, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, va);
+	va_end(va);
+	if (n > 0)
+		eng_nd_rwrite(room_ref, except_ref, buf,
+		    (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
+}
+
 void
 eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 {
@@ -86,18 +106,18 @@ eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 	nd_evt_before_leave(player_ref);
 
 	if (e == E_NULL)
-		nd_owritef(player_ref, "%s teleports out.\n", player.name);
+		room_tellf(old_loc_ref, player_ref, "%s teleports out.\n", player.name);
 	else {
 		nd_writef(player_ref, "You go %s%s%s.\n", ANSI_FG_BLUE ANSI_BOLD, e_name(e), ANSI_RESET);
-		nd_owritef(player_ref, "%s goes %s.\n", player.name, e_name(e));
+		room_tellf(old_loc_ref, player_ref, "%s goes %s.\n", player.name, e_name(e));
 	}
 	eng_object_move(player_ref, loc_ref);
 	room_clean(old_loc_ref);
 	if (e == E_NULL) {
 		nd_writef(player_ref, "Teleported\n");
-		nd_owritef(player_ref, "%s teleports in.\n", player.name);
+		room_tellf(loc_ref, player_ref, "%s teleports in.\n", player.name);
 	} else
-		nd_owritef(player_ref, "%s comes in from the %s.\n", player.name, e_name(e_simm(e)));
+		room_tellf(loc_ref, player_ref, "%s comes in from the %s.\n", player.name, e_name(e_simm(e)));
 
 	nd_evt_after_enter(player_ref);
 }

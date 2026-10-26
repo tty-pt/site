@@ -1,4 +1,4 @@
-import { createBudWasmBridge } from './bud-hydrate.js?v=1';
+import { createBudWasmBridge } from './bud-hydrate.js?v=2';
 
 window.bud_data = {};
 window.hydrate_queue = [];

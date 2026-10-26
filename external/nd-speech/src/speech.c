@@ -72,7 +72,10 @@ do_say(int fd, int argc, char *argv[])
 
 	nd_writef(player_ref, "You say:%s.\n", message);
 	nd_get(HD_OBJ, &(player), &player_ref);
-	nd_owritef(player_ref, "%s says:%s\n", player.name, message);
+	char out[1024];
+	int n = snprintf(out, sizeof(out), "%s says:%s\n", player.name, message);
+	if (n > 0)
+		nd_rwrite(player.location, player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
 	eng_nd_flush(player_ref);
 }
 
@@ -85,7 +88,10 @@ do_pose(int fd, int argc, char *argv[])
 
 	nd_writef(player_ref, "You %s\n", message);
 	nd_get(HD_OBJ, &(player), &player_ref);
-	nd_owritef(player_ref, "%s%s\n", player.name, message);
+	char out[1024];
+	int n = snprintf(out, sizeof(out), "%s%s\n", player.name, message);
+	if (n > 0)
+		nd_rwrite(player.location, player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
 	eng_nd_flush(player_ref);
 }
 
