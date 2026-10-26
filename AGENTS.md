@@ -120,11 +120,26 @@ from `on_axil_parse` skips `cmd_parse` (which routes HTTP methods, so it must
 pass through for HTTP/WS-upgrade requests). See `~/nd/ND_PORT.md` (Library
 usage findings + Locked decisions).
 
+## axil-auren (local LLM inference engine) — build, run & test
+
+Local LLM inference, OpenAI-compatible streaming chat, and dense vector embeddings engine
+running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `docs/LOCAL_LLM.md`.
+
+```sh
+# Turnkey server launcher:
+/home/quirinpa/axil-auren/scripts/auren-server
+
+# Run standalone engine unit suite:
+LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
+/home/quirinpa/axil-auren/bin/engine-test ~/.models/qwen2.5-0.5b-instruct.gguf
+```
+
 ## Topic index
 
 | Topic | Read |
 |-------|------|
 | 5-min orientation: stack, framework-pair model, request path, unbreakable rules | `docs/OVERVIEW.md` |
+| Local LLM inference, session continuity & Pi agent integration | `docs/LOCAL_LLM.md` |
 | Invariants & checklists | `docs/GOALS.md` |
 | Encapsulation & abstractions — read before adding a feature | `docs/DESIGN.md` |
 | Module graph, load order, XY contract, data invariants | `docs/ARCHITECTURE.md` |
