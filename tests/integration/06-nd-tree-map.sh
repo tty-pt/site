@@ -126,11 +126,27 @@ if not re.search(rb"\x1b\[4[1-7]m", login):
 pat = rb"\x1b\[3[0-7]m[" + re.escape("".join(sorted(glyphs)).encode()) + rb"]"
 if not re.search(pat, login):
     fails.append("login view buffer has no plant glyph")
+if not re.search(rb"\x1b\[1m\x1b\[37m@\x1b\[22m", login) and b"@" not in login:
+    fails.append("login view buffer has no '@' player marker")
+
+if label == "real" and not fails:
+    send("x\n")
+    rx = drain(0.5)
+    if b"0x0" not in rx:
+        fails.append("tell position 'x' replied %r, want 0x0" % rx)
+    send("k\n")
+    rk = drain(0.8)
+    if b"north" not in rk:
+        fails.append("vim move north 'k' failed: %r" % rk)
+    send("j\n")
+    rj = drain(0.8)
+    if b"south" not in rj:
+        fails.append("vim move south 'j' failed: %r" % rj)
 
 if fails:
     print("[%s] FAIL: %s" % (label, "; ".join(fails)))
     sys.exit(1)
-print("[%s] ok: room `%s`(#%s) at 0 0 0 0, backgrounds + plant glyphs present" % (label, name, ref))
+print("[%s] ok: room `%s`(#%s) at 0 0 0 0, backgrounds + plant glyphs + player '@' present, vim moves verified" % (label, name, ref))
 PY
 	local rc=$?
 	kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; PID=""

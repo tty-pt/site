@@ -14,6 +14,7 @@ int nd_world_init(int argc, char **argv);
 void nd_set_auth_ready(int ready);
 unsigned nd_connect(int fd);
 void nd_disconnect(int fd);
+void nd_vim(int fd, int argc, char *argv[]);
 void nd_update(double dt);
 void nd_password_line(int fd, const char *name, const char *password);
 void nd_io_attach(unsigned fd, unsigned player_ref);
@@ -191,6 +192,14 @@ XY_IMPL(int, on_axil_disconnect, socket_t, fd)
   if (nd_tty_owned(fd))
     return 0;
   nd_disconnect(fd);
+  return 0;
+}
+
+XY_IMPL(int, on_axil_vim, socket_t, fd, int, argc, char **, argv)
+{
+  if (nd_tty_owned(fd))
+    return 0;
+  nd_vim((int)fd, argc, argv);
   return 0;
 }
 

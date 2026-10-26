@@ -481,11 +481,70 @@ static bud_node *render_modals_slot(const nd_client_state_t *st)
 	return slot;
 }
 
+static int on_key_down(bud_event *e)
+{
+	const char *key = (const char *)e->user;
+	if (!key || !*key)
+		return 0;
+
+	if (strcmp(key, "k") == 0 || strcmp(key, "ArrowUp") == 0) {
+		ws_send("k\n", 2);
+		return 1;
+	} else if (strcmp(key, "K") == 0) {
+		ws_send("K\n", 2);
+		return 1;
+	} else if (strcmp(key, "j") == 0 || strcmp(key, "ArrowDown") == 0) {
+		ws_send("j\n", 2);
+		return 1;
+	} else if (strcmp(key, "J") == 0) {
+		ws_send("J\n", 2);
+		return 1;
+	} else if (strcmp(key, "h") == 0 || strcmp(key, "ArrowLeft") == 0) {
+		ws_send("h\n", 2);
+		return 1;
+	} else if (strcmp(key, "l") == 0 || strcmp(key, "ArrowRight") == 0) {
+		ws_send("l\n", 2);
+		return 1;
+	} else if (strcmp(key, "x") == 0) {
+		ws_send("x\n", 2);
+		return 1;
+	} else if (strcmp(key, "X") == 0) {
+		ws_send("X0\n", 3);
+		return 1;
+	} else if (strcmp(key, "o") == 0) {
+		ws_send("look\n", 5);
+		return 1;
+	} else if (strcmp(key, "i") == 0) {
+		ws_send("inventory\n", 10);
+		return 1;
+	}
+	return 0;
+}
+
+static bud_node *render_room_header(const nd_client_state_t *st)
+{
+	if (!st || (!st->room.name[0] && !st->room.ref))
+		return bud_element("div");
+
+	char text[128];
+	if (st->room.name[0]) {
+		snprintf(text, sizeof(text), "📍 %s (#%u)", st->room.name, st->room.ref);
+	} else {
+		snprintf(text, sizeof(text), "📍 Room #%u", st->room.ref);
+	}
+
+	return lx_n("div",
+		lx_attr("id", "room-header"),
+		lx_attr("class", "text-center font-mono text-xs text-neutral-300 font-bold px-2 py-0.5 bg-neutral-900/60 rounded border border-neutral-800/60 truncate max-w-full"),
+		lx_text(text));
+}
+
 bud_node *nd_ui_render(const nd_client_state_t *st)
 {
 	nd_ui_init_defaults();
 
 	bud_node *vport = render_viewport_slot(st);
+	bud_node *room_hdr = render_room_header(st);
 	bud_node *keypad = render_direction_keypad();
 	bud_node *map = render_room_map(st);
 	bud_node *contents = render_room_contents(st);
@@ -498,6 +557,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_set_attr(cb, "id", "cb");
 	bud_set_attr(cb, "class", "flex flex-col gap-2 items-center w-full flex-1 min-h-0 overflow-y-auto");
 	bud_append(cb, target_card);
+	bud_append(cb, room_hdr);
 	if (map)
 		bud_append(cb, map);
 	bud_append(cb, keypad);
@@ -549,6 +609,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
 	bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
+	bud_bind(root, "keydown@window", 0, on_key_down);
 	return root;
 }
 

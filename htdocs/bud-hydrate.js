@@ -164,6 +164,14 @@ function buildEventPayload(info, event) {
 		const view = doc && doc.defaultView;
 		return String(view ? view.scrollY || view.pageYOffset || 0 : 0);
 	}
+	if (event && (info.event === 'keydown' || info.event === 'keyup')) {
+		const t = event.target;
+		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable ||
+		    (typeof t.closest === 'function' && t.closest('[data-bud-terminal]')))) {
+			return '';
+		}
+		return event.key || '';
+	}
 	return buildControlValue(event && event.target);
 }
 

@@ -73,7 +73,7 @@ empty_tile(char *b, view_tile_t *t, unsigned side) {
 }
 
 static inline char *
-dr_room(char *buf, view_tile_t *t, const char *bg)
+dr_room(char *buf, view_tile_t *t, const char *bg, int is_player)
 {
 	register char *b = buf;
 	vtf_t vtf;
@@ -104,7 +104,12 @@ dr_room(char *buf, view_tile_t *t, const char *bg)
 	b = stpcpy(b, ANSI_RESET);
 	b = stpcpy(b, bg);
 
-	if (got) {
+	if (is_player) {
+		b = stpcpy(b, ANSI_BOLD);
+		b = stpcpy(b, ANSI_FG_WHITE);
+		*b++ = '@';
+		b = stpcpy(b, ANSI_RESET_BOLD);
+	} else if (got) {
 		if (vtf.pi.flags & BOLD)
 			b = stpcpy(b, ANSI_BOLD);
 		b = stpcpy(b, ansi_fg[vtf.pi.fg]);
@@ -165,7 +170,7 @@ dr_v(char *b, view_tile_t *t, enum exit exit,
 }
 
 static char *
-dr_vs(char *b, view_tile_t *t)
+dr_vs(char *b, view_tile_t *t, const view_tile_t *player_tile)
 {
 	view_tile_t * const t_max = &t[VIEW_SIZE];
 	const char *bg, *wp;
@@ -185,7 +190,7 @@ dr_vs(char *b, view_tile_t *t)
 	b = stpcpy(b, " ");
 	for (;;) {
 		b = stpcpy(b, bg);
-		b = dr_room(b, t, bg);
+		b = dr_room(b, t, bg, t == player_tile);
 
 		tp = t;
 		t++;
@@ -291,16 +296,17 @@ static char *
 view_draw(view_t view) {
 	static char view_buf[8 * BUFSIZ];
 	view_tile_t * const t_max = &view[VIEW_BDI];
+	view_tile_t * const player_tile = &view[VIEW_AROUND * VIEW_SIZE + VIEW_AROUND];
 	view_tile_t *t = view;
 	char *p = view_buf;
         memset(view_buf, 0, sizeof(view_buf));
 
-	p = dr_vs(p, t);
+	p = dr_vs(p, t, player_tile);
 
 	for (; t < t_max;) {
 		p = dr_hs_n(p, t);
 		t += VIEW_SIZE;
-		p = dr_vs(p, t);
+		p = dr_vs(p, t, player_tile);
 	}
 
 	return view_buf;

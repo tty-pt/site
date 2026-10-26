@@ -271,8 +271,11 @@ int main(void)
 	html = bud_render_html(nd_ui_render(&ssr_st));
 	assert(html && strstr(html, "<nd-map id=\"room-map\""));
 	assert(strstr(html, "@"));
+	assert(strstr(html, "id=\"room-header\""));
+	assert(strstr(html, "Grand Cathedral"));
+	assert(strstr(html, "#1234"));
 	bud_free_string(html);
-	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph\n");
+	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph and room header\n");
 
 	/* A state with no map yet must not show a fabricated one. */
 	nd_client_state_t blank;
