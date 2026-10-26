@@ -79,7 +79,9 @@ eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 		return;
 	}
 
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	memset(&player, 0, sizeof(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned old_loc_ref = player.location;
 
 	nd_evt_before_leave(player_ref);
@@ -133,11 +135,15 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 
 	/* Zombies and puppets use the permissions of their owner */
 	OBJ who, what;
-	corm_get_copy(obj_hd, &who_ref, &(who));
+	memset(&who, 0, sizeof(who));
+	if (corm_read(obj_hd, &who_ref, &(who), sizeof(who)) != 0)
+		return 0;
 	if (who.type != TYPE_ENTITY)
 		who_ref = who.owner;
 
-	corm_get_copy(obj_hd, &what_ref, &(what));
+	memset(&what, 0, sizeof(what));
+	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0)
+		return 0;
 
 	/* Ownership of any kind still applies, including puppet ownership. ROOT
 	 * and NOTHING are deliberately not ownership here: ref 1 is both ROOT
@@ -181,7 +187,9 @@ eng_unparse(unsigned loc_ref)
 		return "*NOTHING*";
 
 	OBJ loc;
-	corm_get_copy(obj_hd, &loc_ref, &(loc));
+	memset(&loc, 0, sizeof(loc));
+	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
+		return "*NOTHING*";
 
 	BUFF("%s(#%u)", loc.name, loc_ref);
 
@@ -197,8 +205,9 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	OBJ loc;
 
 	if (loc_ref == NOTHING) {
-		corm_get_copy(obj_hd, &player_ref, &(player));
-		loc_ref = player.location;
+		memset(&player, 0, sizeof(player));
+		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) == 0)
+			loc_ref = player.location;
 		if (loc_ref == NOTHING) {
 			eng_fbcp_item(player_ref, loc_ref, 1);
 			nd_writef(player_ref, "You see both nothing and everything...\n");
@@ -217,7 +226,9 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	eplayer.last_observed = loc_ref;
 	eng_ent_set(player_ref, &eplayer);
 
-	corm_get_copy(obj_hd, &loc_ref, &(loc));
+	memset(&loc, 0, sizeof(loc));
+	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
+		return;
 	unsigned thing_ref;
 
 	eng_fbcp_item(player_ref, loc_ref, 1);
@@ -283,7 +294,9 @@ do_look_at(int fd, int argc, char *argv[])
 	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (*name == '\0') {
-		corm_get_copy(obj_hd, &player_ref, &(player));
+		memset(&player, 0, sizeof(player));
+		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+			return;
 		thing_ref = player.location;
 	} else if (
 			(thing_ref = ematch_absolute(name)) == NOTHING
@@ -298,7 +311,12 @@ do_look_at(int fd, int argc, char *argv[])
 		return;
 	}
 
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	memset(&thing, 0, sizeof(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
+		nd_writef(player_ref, NOMATCH_MESSAGE);
+		eng_nd_flush(player_ref);
+		return;
+	}
 	switch (thing.type) {
 	case TYPE_ROOM:
 		view(player_ref);
@@ -314,7 +332,9 @@ do_status(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((
 {
 	OBJ obj;
 	unsigned player_ref = fd_player(fd);
-	corm_get_copy(obj_hd, &player_ref, &(obj));
+	memset(&obj, 0, sizeof(obj));
+	if (corm_read(obj_hd, &player_ref, &(obj), sizeof(obj)) != 0)
+		return 0;
 	nd_writef(player_ref, "%s (%u) type %u owner %u flags %u at %u\n", obj.name, player_ref, obj.type, obj.owner, obj.flags, obj.location);
 	nd_evt_status(player_ref);
 	/* Same reason do_connect flushes after nd_event_announce() (world.c:865):

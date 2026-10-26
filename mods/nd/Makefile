@@ -10,12 +10,17 @@ ND_UX_MODULES = \
 	ux/glue/fight_ui.c \
 	ux/glue/mortal_ui.c
 
-SRC = nd.c ux/nd_ui.c ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES)
+ND_UX_PARTS = \
+	ux/nd_map_ui.c \
+	ux/nd_dock_ui.c \
+	ux/nd_state_io.c
+
+SRC = nd.c ux/nd_ui.c $(ND_UX_PARTS) ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES)
 EXTRA_CFLAGS += -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux
 EXTRA_LDLIBS += -lbud -laxil -lxylem -lhyle-bud -lm
 
 WASM_TARGETS = $(WASM_PATH)/nd.wasm
-nd-src = ux/nd_ui.c ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES) $(REPO_ROOT)/external/libxylem/src/libxylem-wasm.c
+nd-src = ux/nd_ui.c $(ND_UX_PARTS) ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES) $(REPO_ROOT)/external/libxylem/src/libxylem-wasm.c
 nd-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux
 nd-wasm-allowed = $(REPO_ROOT)/external/axil/wasm-allowed-imports.lst $(REPO_ROOT)/external/axil-tty/wasm-allowed-imports.lst $(REPO_ROOT)/external/liblamina/wasm-allowed-imports.lst
 

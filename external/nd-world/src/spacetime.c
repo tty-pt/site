@@ -1002,9 +1002,9 @@ int
 eng_st_v(unsigned player_ref, char const *opcs)
 {
 	OBJ player;
-	if (!player_ref || !corm_get(obj_hd, &player_ref))
+	memset(&player, 0, sizeof(player));
+	if (!player_ref || corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 		return 0;
-	corm_get_copy(obj_hd, &player_ref, &(player));
 	morton_t old_loc = eng_map_mwhere(player.location);
 	biome_map = biome_map_get(old_loc);
 	if (!biome_map)

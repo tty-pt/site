@@ -19,6 +19,9 @@ gcc -g -O0 \
 	-o tests/unit/test_ssr_hydration \
 	tests/unit/test_ssr_hydration.c \
 	mods/nd/ux/nd_ui.c \
+	mods/nd/ux/nd_map_ui.c \
+	mods/nd/ux/nd_dock_ui.c \
+	mods/nd/ux/nd_state_io.c \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
 	mods/nd/ux/glue/equip_ui.c \

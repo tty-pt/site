@@ -1,29 +1,14 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-
-#include <bud/bud.h>
-#include <bud/bud_jsx.h>
-#include <bud/bud_app.h>
-
-#include <nd/bcp.h>
-#include <nd/ui-slot.h>
-#include "nd_viewport.h"
-
+#include "nd_ui_internal.h"
 #include <ttypt/axil-ws.h>
 #include <ttypt/lam.h>
-#include "nd_scene.h"
-#include "nd_lamina.h"
-#include "nd_ui.h"
 #include "../../common/ux/site_ui.c"
 
-static nd_client_state_t client_state;
-static nd_scene_t g_scene;
-static uint32_t g_lamina_fb[ND_CANVAS_W * ND_CANVAS_H];
-static int g_ui_initialized = 0;
+nd_client_state_t client_state;
+nd_scene_t g_scene;
+uint32_t g_lamina_fb[ND_CANVAS_W * ND_CANVAS_H];
+int g_ui_initialized = 0;
 
-static char g_active_modal[32] = {0};
+char g_active_modal[32] = {0};
 
 void nd_ui_set_active_modal(const char *modal_id)
 {
@@ -63,9 +48,9 @@ const nd_client_state_t *nd_ui_get_client_state(void)
 
 /* --- Pluggable Viewport Registry & Drivers --- */
 
-static nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS];
-static size_t g_driver_count = 0;
-static int g_active_driver_idx = 0;
+nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS];
+size_t g_driver_count = 0;
+int g_active_driver_idx = 0;
 
 int nd_register_viewport_driver(const nd_viewport_driver_t *drv)
 {
@@ -87,53 +72,26 @@ const nd_viewport_driver_t *nd_get_active_viewport_driver(void)
 {
 	if (g_driver_count == 0) return NULL;
 	if (g_active_driver_idx < 0 || (size_t)g_active_driver_idx >= g_driver_count)
-		g_active_driver_idx = 0;
+		return &g_viewport_drivers[0];
 	return &g_viewport_drivers[g_active_driver_idx];
 }
 
-int nd_set_active_viewport_driver(const char *id)
+int nd_set_active_viewport_driver(const char *driver_id)
 {
-	if (!id) return -1;
+	if (!driver_id) return -1;
 	for (size_t i = 0; i < g_driver_count; i++) {
-		if (strcmp(g_viewport_drivers[i].id, id) == 0) {
-			g_active_driver_idx = (int)i;
+		if (strcmp(g_viewport_drivers[i].id, driver_id) == 0) {
+			if (g_active_driver_idx != (int)i) {
+				g_active_driver_idx = (int)i;
+#ifdef __wasm__
+				bud_app_set_state();
+#endif
+			}
 			return 0;
 		}
 	}
 	return -1;
 }
-
-int nd_viewport_driver_count(void)
-{
-	return (int)g_driver_count;
-}
-
-const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
-{
-	if (idx < 0 || (size_t)idx >= g_driver_count) return NULL;
-	return &g_viewport_drivers[idx];
-}
-
-/* --------------------------------------------------------------------------
- * NeverDark UI Decoupling & Viewport Architecture
- *
- * NeverDark strictly partitions responsibilities between backend simulation
- * and client presentation:
- *
- * 1. Backend Simulation & Game Logic (axil-nd, nd-* modules):
- *    - Simulates spatial movement, combat, vitals, inventory, and biomes.
- *    - Emits declarative Binary Client Protocol (#b) streams and ANSI text.
- *    - Contains ZERO UI or DOM rendering code.
- *
- * 2. Client Presentation & Viewports:
- *    - Bud UI Shell (mods/nd/ux/nd_ui.c): Pure-C isomorphic HTML DOM HUD
- *      (character vitals, paper doll equipment modal, grimoire, chat/command).
- *    - liblamina Viewports: Standalone 2D immediate-mode graphics surface
- *      (tilemaps, sprites, bitmap fonts, immediate-mode canvas via lam_canvas_flush).
- *      On native systems, liblamina renders via OpenGL/GLFW or Linux /dev/fb0.
- *    - Custom Native Clients: Modders can code custom client surfaces for
- *      their area of space without touching game logic or backend modules.
- * -------------------------------------------------------------------------- */
 
 /* TTY Viewport Driver */
 static bud_node *mount_tty(void)
@@ -227,15 +185,14 @@ static const nd_viewport_driver_t g_driver_bud = {
 
 void nd_ui_init_defaults(void)
 {
-	if (g_ui_initialized)
-		return;
+	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
-
 	nd_scene_init(&g_scene);
 
 	nd_register_viewport_driver(&g_driver_tty);
 	nd_register_viewport_driver(&g_driver_lamina);
 	nd_register_viewport_driver(&g_driver_bud);
+	g_active_driver_idx = 0;
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -294,136 +251,13 @@ void nd_ui_glue_scene_sync(void *scene, const void *state)
 			g_glue[i]->scene_sync(scene, state);
 }
 
-/* --- Serialization --- */
-
-void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
-{
-	if (!st || !buf || cap == 0)
-		return;
-
-	char esc_map[1200] = {0};
-	size_t em = 0;
-	for (size_t i = 0; st->map_buf[i] && em + 4 < sizeof(esc_map); i++) {
-		if (st->map_buf[i] == '\n') {
-			esc_map[em++] = '\\';
-			esc_map[em++] = 'n';
-		} else if (st->map_buf[i] == '"' || st->map_buf[i] == '\\') {
-			esc_map[em++] = '\\';
-			esc_map[em++] = st->map_buf[i];
-		} else {
-			esc_map[em++] = st->map_buf[i];
-		}
-	}
-
-	char map_hex[802];
-	map_hex[0] = '\0';
-	static const char hex_chars[] = "0123456789abcdef";
-	if (st->map_data.width > 0) {
-		const uint8_t *raw = (const uint8_t *)&st->map_data;
-		for (size_t i = 0; i < sizeof(nd_map_data_t); i++) {
-			map_hex[i * 2]     = hex_chars[(raw[i] >> 4) & 0x0F];
-			map_hex[i * 2 + 1] = hex_chars[raw[i] & 0x0F];
-		}
-		map_hex[sizeof(nd_map_data_t) * 2] = '\0';
-	}
-
-	int offset = snprintf(buf, cap,
-		"{\"me\":%u,\"auth_failed\":%d,\"user\":\"%s\",\"map_buf\":\"%s\","
-		"\"map_hex\":\"%s\","
-		"\"active_modal\":\"%s\","
-		"\"selected_item_ref\":%u,"
-		"\"preferred_driver\":\"%s\","
-		"\"preferred_map_driver\":\"%s\","
-		"\"layout_mode\":%u,"
-		"\"pres_flags\":%u,"
-		"\"active_viewport\":%d,\"tod\":%u,"
-		"\"room\":{\"ref\":%u,\"name\":\"%s\",\"desc\":\"%s\",\"exits\":%u},"
-		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,"
-		"\"gauges\":[",
-		st->me, st->auth_failed, st->user, esc_map,
-		map_hex,
-		st->active_modal,
-		st->selected_item_ref,
-		st->preferred_driver,
-		st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud",
-		(unsigned)st->layout_mode,
-		(unsigned)st->pres_flags,
-		g_active_driver_idx, st->tod,
-		st->room.ref, st->room.name, st->room.desc, st->room.exits,
-		st->room.ref, st->room.name, st->room.desc, st->room.exits);
-
-	if (offset > 0 && (size_t)offset < cap) {
-		size_t gcur = (size_t)offset;
-		int first = 1;
-		for (size_t i = 0; i < ND_MAX_GAUGES && gcur + 96 < cap; i++) {
-			if (!st->gauges[i].name[0])
-				continue;
-			int gn = snprintf(buf + gcur, cap - gcur,
-				"%s{\"n\":\"%s\",\"val\":%u,\"max\":%u}",
-				first ? "" : ",", st->gauges[i].name,
-				st->gauges[i].bar.val, st->gauges[i].bar.max);
-			if (gn > 0) gcur += (size_t)gn;
-			first = 0;
-		}
-		int en = snprintf(buf + gcur, cap - gcur, "],\"entities\":[");
-		if (en > 0) offset = (int)(gcur + (size_t)en);
-	}
-
-	if (offset < 0 || (size_t)offset >= cap)
-		return;
-
-	size_t cur = (size_t)offset;
-	for (size_t i = 0; i < st->entity_count && cur + 128 < cap; i++) {
-		const nd_entity_desc_t *e = &st->entities[i];
-		int n = snprintf(buf + cur, cap - cur,
-			"%s{\"ref\":%u,\"name\":\"%s\",\"ch\":\"%c\",\"fg\":%u,\"loc\":%u}",
-			(i > 0) ? "," : "",
-			e->ref, e->name, e->ch ? e->ch : '?', e->fg, e->location);
-		if (n > 0) cur += (size_t)n;
-	}
-
-	if (cur + 3 < cap) {
-		buf[cur++] = ']';
-
-		/* Actions array */
-		if (cur + 16 < cap) {
-			int an = snprintf(buf + cur, cap - cur, ",\"actions\":[");
-			if (an > 0) cur += (size_t)an;
-			for (size_t i = 0; i < st->action_count && cur + 128 < cap; i++) {
-				const nd_action_desc_t *a = &st->actions[i];
-				int n = snprintf(buf + cur, cap - cur,
-					"%s{\"id\":%u,\"label\":\"%s\",\"icon\":\"%s\"}",
-					(i > 0) ? "," : "",
-					a->id, a->label, a->icon);
-				if (n > 0) cur += (size_t)n;
-			}
-			if (cur + 1 < cap) {
-				buf[cur++] = ']';
-			}
-		}
-
-		/* Allow tenant modules to contribute state slices */
-		char slice_buf[1024] = {0};
-		nd_ui_glue_state_serialize(st, slice_buf, sizeof(slice_buf));
-		size_t slen = strlen(slice_buf);
-		if (slen > 0 && cur + slen + 16 < cap) {
-			int n = snprintf(buf + cur, cap - cur, ",\"slices\":{%s}", slice_buf);
-			if (n > 0) cur += (size_t)n;
-		}
-
-		buf[cur++] = '}';
-		buf[cur] = '\0';
-	}
-}
-
+/* Command sending helpers */
 static int send_cmd(const char *cmd)
 {
-	if (!cmd)
-		return 0;
+	if (!cmd) return 0;
 	size_t len = strlen(cmd);
 	char buf[128];
-	if (len + 2 > sizeof(buf))
-		return 0;
+	if (len + 2 > sizeof(buf)) return 0;
 	memcpy(buf, cmd, len);
 	buf[len] = '\n';
 	ws_send(buf, len + 1);
@@ -437,41 +271,16 @@ int nd_ui_send_cmd(const char *cmd)
 
 static int on_data_cmd(bud_event *ev)
 {
-	if (ev)
-		bud_event_stop_propagation(ev);
+	if (ev) bud_event_stop_propagation(ev);
 	const char *cmd = bud_get_attr(ev->target, "data-cmd");
-	if (!cmd || !cmd[0])
-		return 0;
+	if (!cmd || !cmd[0]) return 0;
 	return send_cmd(cmd);
-}
-
-static int on_cycle_viewport(bud_event *ev);
-
-static int on_action_dispatch(bud_event *ev)
-{
-	const char *action = ev ? ev->type : NULL;
-	const char *val = ev ? (const char *)ev->user : NULL;
-	if (!action)
-		return 0;
-	if (strcmp(action, "item-select") == 0 && val && val[0]) {
-		uint32_t ref = (uint32_t)strtoul(val, NULL, 10);
-		client_state.selected_item_ref = (client_state.selected_item_ref == ref) ? 0 : ref;
-#ifdef __wasm__
-		bud_app_set_state();
-#endif
-		return 0;
-	}
-	if (strcmp(action, "cycle-viewport") == 0) {
-		return on_cycle_viewport(ev);
-	}
-	return 0;
 }
 
 static int on_cmd_action(bud_event *ev)
 {
 	const char *cmd = ev ? (const char *)ev->user : NULL;
-	if (!cmd || !cmd[0])
-		return 0;
+	if (!cmd || !cmd[0]) return 0;
 	return send_cmd(cmd);
 }
 
@@ -479,8 +288,7 @@ static int on_item_select(bud_event *ev)
 {
 	bud_node *node = ev ? (ev->current_target ? ev->current_target : ev->target) : NULL;
 	const char *ref_str = node ? bud_get_attr(node, "data-item-ref") : NULL;
-	if (!ref_str || !ref_str[0])
-		return 0;
+	if (!ref_str || !ref_str[0]) return 0;
 
 	uint32_t ref = (uint32_t)strtoul(ref_str, NULL, 10);
 	client_state.selected_item_ref = (client_state.selected_item_ref == ref) ? 0 : ref;
@@ -490,121 +298,32 @@ static int on_item_select(bud_event *ev)
 	return 0;
 }
 
-static int on_move_k(bud_event *ev) { (void)ev; send_cmd("k"); return 0; }
-static int on_move_K(bud_event *ev) { (void)ev; send_cmd("K"); return 0; }
-static int on_move_h(bud_event *ev) { (void)ev; send_cmd("h"); return 0; }
-static int on_move_l(bud_event *ev) { (void)ev; send_cmd("l"); return 0; }
-static int on_move_j(bud_event *ev) { (void)ev; send_cmd("j"); return 0; }
-static int on_move_J(bud_event *ev) { (void)ev; send_cmd("J"); return 0; }
-
-/* Generic dock-button click: dispatch the action id carried by the button to
- * whichever module registered for it. The shell never names the modules. */
-static int on_dock_action(bud_event *ev)
+static int on_item_click(bud_event *ev)
 {
-	if (ev)
-		bud_event_stop_propagation(ev);
-	const char *id = (ev && ev->target) ? bud_get_attr(ev->target, "data-nd-action") : NULL;
-	if (id && id[0])
-		on_nd_ui_action(id);
-	return 0;
-}
+	bud_node *node = ev ? (ev->current_target ? ev->current_target : ev->target) : NULL;
+	const char *ref_str = node ? bud_get_attr(node, "data-ref") : NULL;
+	if (!ref_str || !ref_str[0]) return 0;
 
-static int on_action_look(bud_event *ev) { (void)ev; send_cmd("look"); return 0; }
-static int on_action_inv(bud_event *ev) { (void)ev; send_cmd("inventory"); return 0; }
-
-static int on_cycle_viewport(bud_event *ev)
-{
-	(void)ev;
-	if (g_driver_count > 1) {
-		g_active_driver_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
-		const nd_viewport_driver_t *cur = nd_get_active_viewport_driver();
-		if (cur && cur->init)
-			cur->init();
+	uint32_t ref = (uint32_t)strtoul(ref_str, NULL, 10);
+	client_state.target_ref = (client_state.target_ref == ref) ? 0 : ref;
 #ifdef __wasm__
-		bud_app_set_state();
+	bud_app_set_state();
 #endif
-	}
 	return 0;
 }
 
-static bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler)
+static int on_btn_action(bud_event *ev)
 {
-	return lx_n("button",
-		lx_attr("type", "button"),
-		lx_attr("class", "nd-pad btn round border border-neutral-700 hover:bg-neutral-800 text-neutral-200 shadow-md text-base select-none"),
-		(title && title[0]) ? lx_attr("title", title) : lx_none(),
-		handler ? lx_bind("click", 1, handler) : lx_none(),
-		lx_text(label ? label : ""));
-}
+	if (!ev || !ev->target) return 0;
+	bud_event_stop_propagation(ev);
+	const char *action = bud_get_attr(ev->target, "data-action");
+	const char *ref_str = bud_get_attr(ev->target, "data-ref");
+	if (!action || !ref_str) return 0;
 
-bud_node *nd_ui_dock_button(const char *icon, const char *title, const char *action_id)
-{
-	bud_node *btn = make_btn(icon ? icon : "", title, on_dock_action);
-	if (action_id && action_id[0])
-		bud_set_attr(btn, "data-nd-action", action_id);
-	return btn;
-}
-
-static bud_node *render_direction_keypad(void)
-{
-	return lx_n("div",
-		lx_attr("id", "directions"),
-		lx_attr("class", "nd-keypad text-center select-none"),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("↑", "North (k)", on_move_k)),
-		lx_node(make_btn("↗", "Northeast (K)", on_move_K)),
-		lx_node(make_btn("←", "West (h)", on_move_h)),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("→", "East (l)", on_move_l)),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("↓", "South (j)", on_move_j)),
-		lx_node(make_btn("↘", "Southeast (J)", on_move_J)));
-}
-
-static bud_node *render_gauges_slot(const nd_client_state_t *st)
-{
-	bud_node *node = nd_ui_glue_render_slot(ND_UI_SLOT_GAUGES, st);
-	if (node)
-		return node;
-
-	/* No module claimed the gauges slot: render nothing. */
-	return bud_element("div");
-}
-
-static bud_node *render_action_bar(const nd_client_state_t *st)
-{
-	bud_node *dock = bud_element("div");
-	bud_set_attr(dock, "id", "g-actions");
-	bud_set_attr(dock, "class", "flex flex-wrap gap-1 items-center justify-center");
-
-	/* Tenant modules contribute their own dock buttons */
-	nd_ui_glue_contribute(ND_UI_SLOT_ACTIONS, dock, st);
-
-	/* Shell-level commands */
-	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
-	bud_append(dock, make_btn("👁", "Look", on_action_look));
-
-	/* Dynamic viewport cycle button ONLY if allowed by region policy */
-	int allow_choice = (st && (st->pres_flags & ND_REGION_ALLOW_CHOICE) && !(st->pres_flags & ND_REGION_LOCKED));
-	if (g_driver_count > 1 && allow_choice) {
-		int next_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
-		bud_node *vbtn = make_btn(g_viewport_drivers[next_idx].label, "Switch Viewport", on_cycle_viewport);
-		bud_set_attr(vbtn, "data-bud-action", "cycle-viewport");
-		bud_append(dock, vbtn);
-	}
-
-	return dock;
-}
-
-static bud_node *render_modals_slot(const nd_client_state_t *st)
-{
-	bud_node *slot = bud_element("div");
-	bud_set_attr(slot, "id", "modals-slot");
-
-	/* Tenant modules contribute their own modals */
-	nd_ui_glue_contribute(ND_UI_SLOT_MODALS, slot, st);
-
-	return slot;
+	char cmd[64];
+	snprintf(cmd, sizeof(cmd), "%s #%s\n", action, ref_str);
+	ws_send(cmd, strlen(cmd));
+	return 0;
 }
 
 static bud_node *render_viewport_slot(const nd_client_state_t *st)
@@ -659,50 +378,50 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			snprintf(glyph, sizeof(glyph), "%c", e->ch ? e->ch : '?');
 			bud_node *g = bud_element("span");
 			char gclass[64];
-			snprintf(gclass, sizeof(gclass), "cf%u font-bold pointer-events-none", e->fg & 0xF);
+			snprintf(gclass, sizeof(gclass), "font-mono font-bold w-4 text-center select-none text-[%u]", e->fg);
 			bud_set_attr(g, "class", gclass);
 			bud_append(g, bud_text(glyph));
 			bud_append(row, g);
 
-			/* Entity Name */
+			/* Name */
 			bud_node *name_span = bud_element("span");
 			bud_set_attr(name_span, "class", "grow truncate pointer-events-none");
 			bud_append(name_span, bud_text(e->name));
 			bud_append(row, name_span);
 
-			/* Dynamic Contextual Action Bar */
+			/* Action Dock */
 			bud_node *act_dock = bud_element("div");
 			bud_set_attr(act_dock, "class", is_selected ? "flex items-center gap-1 flex-shrink-0" : "hidden");
 
-			/* 👁 Look Action (universal) */
 			bud_node *look = bud_element("button");
 			bud_set_attr(look, "type", "button");
-			snprintf(ref_buf, sizeof(ref_buf), "look #%u", e->ref);
+			bud_set_attr(look, "data-action", "look");
 			bud_set_attr(look, "data-cmd", ref_buf);
 			bud_set_attr(look, "class", "nd-pad btn round text-xs");
+			bud_set_attr(look, "title", "Look");
 			bud_append(look, bud_text("👁"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
 
-			/* 🖐️ Get Action (ACT_GET = 4, only if in room / not in player inventory) */
-			if (e->location != st->me && (e->actions & 4)) {
+			if (e->type != 1 && !(e->flags & 0x01)) {
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
-				snprintf(ref_buf, sizeof(ref_buf), "get #%u", e->ref);
+				bud_set_attr(get, "data-action", "get");
 				bud_set_attr(get, "data-cmd", ref_buf);
 				bud_set_attr(get, "class", "nd-pad btn round text-xs");
-				bud_append(get, bud_text("🖐️"));
+				bud_set_attr(get, "title", "Get");
+				bud_append(get, bud_text("🖐"));
 				bud_bind(get, "click", 1, on_data_cmd);
 				bud_append(act_dock, get);
 			}
 
-			/* 🪣 Drop Action (ACT_DROP = 8, only if in player inventory) */
-			if (e->location == st->me && (e->actions & 8)) {
+			if (e->location == st->me) {
 				bud_node *drop = bud_element("button");
 				bud_set_attr(drop, "type", "button");
-				snprintf(ref_buf, sizeof(ref_buf), "drop #%u", e->ref);
+				bud_set_attr(drop, "data-action", "drop");
 				bud_set_attr(drop, "data-cmd", ref_buf);
 				bud_set_attr(drop, "class", "nd-pad btn round text-xs");
+				bud_set_attr(drop, "title", "Drop");
 				bud_append(drop, bud_text("🪣"));
 				bud_bind(drop, "click", 1, on_data_cmd);
 				bud_append(act_dock, drop);
@@ -716,244 +435,45 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 	if (!any) {
 		bud_node *empty = bud_element("div");
 		bud_set_attr(empty, "class", "text-neutral-500 text-xs px-2 py-1 italic select-none");
-		bud_append(empty, bud_text("nothing here"));
+		bud_append(empty, bud_text("Nothing here."));
 		bud_append(wrap, empty);
 	}
 
 	return wrap;
 }
 
-static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
+static bud_node *render_target_card(const nd_client_state_t *st)
 {
-	if (!dst || cap == 0)
-		return;
-	dst[0] = '\0';
-	if (!src || !src[0])
-		return;
+	uint32_t t_ref = st ? st->target_ref : 0;
+	if (!t_ref) return bud_element("div");
 
-	size_t w = 0;
-	int state = 0; /* 0: normal, 1: esc, 2: csi */
-	int fg = 7;
-	int bg = 0;
-	int bold = 0;
-	int span_open = 0;
-	int params[16] = {0};
-	int nparams = 0;
-	int cur_val = 0;
-	int has_val = 0;
-
-	for (size_t i = 0; src[i] && w + 40 < cap; i++) {
-		unsigned char c = (unsigned char)src[i];
-		if (state == 0) {
-			if (c == '\x1b') {
-				state = 1;
-				continue;
-			}
-			if (c == '<') {
-				if (w + 4 < cap) { memcpy(dst + w, "&lt;", 4); w += 4; }
-			} else if (c == '>') {
-				if (w + 4 < cap) { memcpy(dst + w, "&gt;", 4); w += 4; }
-			} else if (c == '&') {
-				if (w + 5 < cap) { memcpy(dst + w, "&amp;", 5); w += 5; }
-			} else if (c == '\r' || c == '\0' || c == '\x7f' || c == '\v' || c == '\f') {
-				continue;
-			} else {
-				if (!span_open && (fg != 7 || bg != 0 || bold)) {
-					int sn = snprintf(dst + w, cap - w, "<span class=\"cf%d c%d\">", fg, bg);
-					if (sn > 0) { w += (size_t)sn; span_open = 1; }
-				}
-				dst[w++] = c;
-			}
-		} else if (state == 1) {
-			if (c == '[') {
-				state = 2;
-				nparams = 0;
-				cur_val = 0;
-				has_val = 0;
-			} else {
-				state = 0;
-			}
-		} else if (state == 2) {
-			if (c >= '0' && c <= '9') {
-				cur_val = cur_val * 10 + (c - '0');
-				has_val = 1;
-			} else if (c == ';') {
-				if (nparams < 16) {
-					params[nparams++] = has_val ? cur_val : 0;
-				}
-				cur_val = 0;
-				has_val = 0;
-			} else if (c == 'm') {
-				if (has_val || nparams > 0) {
-					if (nparams < 16)
-						params[nparams++] = cur_val;
-				} else {
-					if (nparams < 16)
-						params[nparams++] = 0;
-				}
-
-				for (int p = 0; p < nparams; p++) {
-					int val = params[p];
-					if (val == 0) {
-						fg = 7;
-						bg = 0;
-						bold = 0;
-					} else if (val == 1) {
-						bold = 1;
-						if (fg < 8) fg += 8;
-					} else if (val == 22) {
-						bold = 0;
-						if (fg >= 8) fg -= 8;
-					} else if (val >= 30 && val <= 37) {
-						fg = (bold ? 8 : 0) + (val - 30);
-					} else if (val == 39) {
-						fg = bold ? 15 : 7;
-					} else if (val >= 40 && val <= 47) {
-						bg = val - 40;
-					} else if (val == 49) {
-						bg = 0;
-					}
-				}
-
-				if (span_open) {
-					if (w + 7 < cap) {
-						memcpy(dst + w, "</span>", 7);
-						w += 7;
-						span_open = 0;
-					}
-				}
-				if (fg != 7 || bg != 0 || bold) {
-					int sn = snprintf(dst + w, cap - w, "<span class=\"cf%d c%d\">", fg, bg);
-					if (sn > 0) {
-						w += (size_t)sn;
-						span_open = 1;
-					}
-				}
-				state = 0;
-			} else {
-				state = 0;
+	const nd_entity_desc_t *target = NULL;
+	if (st) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].ref == t_ref) {
+				target = &st->entities[i];
+				break;
 			}
 		}
 	}
+	if (!target) return bud_element("div");
 
-	if (span_open && w + 7 < cap) {
-		memcpy(dst + w, "</span>", 7);
-		w += 7;
-	}
-	dst[w < cap ? w : cap - 1] = '\0';
+	char tcls[128];
+	snprintf(tcls, sizeof(tcls), "target-card p-2 rounded border border-red-500/40 bg-neutral-900/80 mb-2 flex items-center justify-between text-xs w-full");
+	bud_node *card = lx_n("div",
+		lx_attr("id", "target-card"),
+		lx_attr("class", tcls),
+		lx_node(lx_n("span", lx_attr("class", "font-bold text-red-400 truncate"), lx_text(target->name))),
+		lx_node(lx_n("span", lx_attr("class", "text-neutral-500 font-mono text-[10px]"), lx_textf("#%u", target->ref))));
+	return card;
 }
 
-static bud_node *render_room_map_ascii(const nd_client_state_t *st)
+static bud_node *render_modals_slot(const nd_client_state_t *st)
 {
-	bud_node *map = lx_n("nd-map",
-		lx_attr("id", "room-map"),
-		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
-
-	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
-		char out[2048];
-		size_t pos = 0;
-		uint8_t w = st->map_data.width;
-		uint8_t h = st->map_data.height;
-		if (w > 7) w = 7;
-		if (h > 7) h = 7;
-
-		for (uint8_t y = 0; y < h; y++) {
-			/* Top boundary of row y */
-			for (uint8_t x = 0; x < w; x++) {
-				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int n_open = (t->exits & 2); /* E_NORTH */
-				int n_door = (t->doors & 2);
-				if (x == 0) out[pos++] = '+';
-				if (n_door) {
-					out[pos++] = '#'; out[pos++] = '#'; out[pos++] = '#';
-				} else if (n_open) {
-					out[pos++] = ' '; out[pos++] = ' '; out[pos++] = ' ';
-				} else {
-					out[pos++] = '-'; out[pos++] = '-'; out[pos++] = '-';
-				}
-				out[pos++] = '+';
-			}
-			out[pos++] = '\n';
-
-			/* Room interior of row y */
-			for (uint8_t x = 0; x < w; x++) {
-				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int w_open = (t->exits & 1); /* E_WEST */
-				int w_door = (t->doors & 1);
-				if (w_door) out[pos++] = '#';
-				else if (w_open) out[pos++] = ' ';
-				else out[pos++] = '|';
-
-				out[pos++] = ' ';
-				out[pos++] = t->symbol ? t->symbol : '.';
-				out[pos++] = ' ';
-
-				if (x == w - 1) {
-					int e_open = (t->exits & 8); /* E_EAST */
-					int e_door = (t->doors & 8);
-					if (e_door) out[pos++] = '#';
-					else if (e_open) out[pos++] = ' ';
-					else out[pos++] = '|';
-				}
-			}
-			out[pos++] = '\n';
-		}
-
-		/* Bottom boundary of last row */
-		for (uint8_t x = 0; x < w; x++) {
-			const nd_map_tile_t *t = &st->map_data.tiles[(h - 1) * w + x];
-			int s_open = (t->exits & 16); /* E_SOUTH */
-			int s_door = (t->doors & 16);
-			if (x == 0) out[pos++] = '+';
-			if (s_door) {
-				out[pos++] = '#'; out[pos++] = '#'; out[pos++] = '#';
-			} else if (s_open) {
-				out[pos++] = ' '; out[pos++] = ' '; out[pos++] = ' ';
-			} else {
-				out[pos++] = '-'; out[pos++] = '-'; out[pos++] = '-';
-			}
-			out[pos++] = '+';
-		}
-		out[pos] = '\0';
-
-		bud_append(map, bud_text(out));
-		return map;
-	}
-
-	if (st && st->map_buf[0]) {
-		char html[8192];
-		nd_ansi_to_html(st->map_buf, html, sizeof(html));
-		bud_append(map, bud_raw(html));
-	} else if (st && st->room.desc[0]) {
-		bud_append(map, bud_text(st->room.desc));
-	} else {
-		bud_append(map, bud_text("+---+---+---+\n|   |   |   |\n+---#   #---+\n|   # @ #   |\n+---#   #---+\n|   |   |   |\n+---+---+---+"));
-	}
-	return map;
-}
-
-static bud_node *render_room_map_canvas(const nd_client_state_t *st)
-{
-	(void)st;
-	return lx_n("canvas",
-		lx_attr("id", "room-map-canvas"),
-		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "160"),
-		lx_attr("height", "160"),
-		lx_attr("class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto"));
-}
-
-static bud_node *render_room_map(const nd_client_state_t *st)
-{
-	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
-
-	if (strcmp(map_drv, "none") == 0)
-		return NULL;
-
-	if (strcmp(map_drv, "canvas-lamina") == 0 || strcmp(map_drv, "canvas") == 0)
-		return render_room_map_canvas(st);
-
-	return render_room_map_ascii(st);
+	bud_node *slot = bud_element("div");
+	bud_set_attr(slot, "id", "modals-slot");
+	nd_ui_glue_contribute(ND_UI_SLOT_MODALS, slot, st);
+	return slot;
 }
 
 bud_node *nd_ui_render(const nd_client_state_t *st)
@@ -967,20 +487,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_node *gauges = render_gauges_slot(st);
 	bud_node *actions = render_action_bar(st);
 	bud_node *modals = render_modals_slot(st);
-
-	/* Target card if entity targeted */
-	int has_target = (st && st->target_ref);
-	bud_node *target_card = bud_element("nd-look-at");
-	bud_set_attr(target_card, "id", "target-card");
-	char tcls[160];
-	snprintf(tcls, sizeof(tcls), "%sw-full p-2 bg-neutral-800/80 rounded border border-[#9589c5] text-xs font-bold text-neutral-100 flex items-center gap-2",
-		has_target ? "" : "hidden ");
-	bud_set_attr(target_card, "class", tcls);
-	bud_append(target_card, bud_text("🎯 Target #"));
-	char tref[16] = "0";
-	if (has_target)
-		snprintf(tref, sizeof(tref), "%u", st->target_ref);
-	bud_append(target_card, bud_text(tref));
+	bud_node *target_card = render_target_card(st);
 
 	bud_node *cb = bud_element("div");
 	bud_set_attr(cb, "id", "cb");
@@ -1020,9 +527,9 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *main_box = bud_element("div");
 	bud_set_attr(main_box, "id", "main");
-	char mcls[160];
-	snprintf(mcls, sizeof(mcls), "w-full h-full flex flex-col box-border %s",
-		(st && st->tod == 1) ? "night" : "day");
+	char mcls[128];
+	snprintf(mcls, sizeof(mcls), "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 %s",
+		(st && st->target_ref) ? "targetting" : "");
 	bud_set_attr(main_box, "class", mcls);
 	bud_append(main_box, holder);
 	bud_append(main_box, modals);
@@ -1034,8 +541,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
 		"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 		layout);
-	bud_bind(root, "cycle-viewport", 1, on_action_dispatch);
-	bud_bind(root, "item-select", 1, on_action_dispatch);
+
 	bud_bind(root, "cmd", 1, on_cmd_action);
 	return root;
 }
@@ -1062,263 +568,4 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 ISO_EXPORT(bud_node *, bud_app_render, void)
 {
 	return nd_ui_render(&client_state);
-}
-
-/* Compact JSON sequential scanner for entities array */
-static void parse_json_entities(const char *json, nd_client_state_t *st)
-{
-	if (!json || !st)
-		return;
-	const char *arr = strstr(json, "\"entities\":");
-	if (!arr)
-		return;
-	arr = strchr(arr, '[');
-	if (!arr)
-		return;
-	arr++;
-
-	size_t count = 0;
-	while (*arr && *arr != ']' && count < ND_MAX_ENTITIES) {
-		const char *obj = strchr(arr, '{');
-		if (!obj)
-			break;
-		const char *obj_end = strchr(obj, '}');
-		if (!obj_end)
-			break;
-
-		/* Extract ref */
-		const char *p = strstr(obj, "\"ref\":");
-		if (p && p < obj_end) {
-			st->entities[count].ref = (uint32_t)strtoul(p + 6, NULL, 10);
-		}
-		/* Extract name */
-		p = strstr(obj, "\"name\":\"");
-		if (p && p < obj_end) {
-			p += 8;
-			size_t nlen = 0;
-			while (p + nlen < obj_end && p[nlen] != '"' && nlen < sizeof(st->entities[count].name) - 1) {
-				st->entities[count].name[nlen] = p[nlen];
-				nlen++;
-			}
-			st->entities[count].name[nlen] = '\0';
-		}
-		/* Extract ch */
-		p = strstr(obj, "\"ch\":\"");
-		if (p && p < obj_end) {
-			st->entities[count].ch = p[6];
-		}
-		/* Extract fg */
-		p = strstr(obj, "\"fg\":");
-		if (p && p < obj_end) {
-			st->entities[count].fg = (uint16_t)strtoul(p + 5, NULL, 10);
-		}
-		/* Extract loc */
-		p = strstr(obj, "\"loc\":");
-		if (p && p < obj_end) {
-			st->entities[count].location = (uint32_t)strtoul(p + 6, NULL, 10);
-		}
-
-		count++;
-		arr = obj_end + 1;
-	}
-	st->entity_count = count;
-}
-
-static void parse_json_actions(const char *json, nd_client_state_t *st)
-{
-	if (!json || !st)
-		return;
-	const char *arr = strstr(json, "\"actions\":");
-	if (!arr)
-		return;
-	arr = strchr(arr, '[');
-	if (!arr)
-		return;
-	arr++;
-
-	size_t count = 0;
-	while (*arr && *arr != ']' && count < ND_MAX_ACTIONS) {
-		const char *obj = strchr(arr, '{');
-		if (!obj)
-			break;
-		const char *obj_end = strchr(obj, '}');
-		if (!obj_end)
-			break;
-
-		const char *p = strstr(obj, "\"id\":");
-		if (p && p < obj_end) {
-			st->actions[count].id = (uint32_t)strtoul(p + 5, NULL, 10);
-		}
-		p = strstr(obj, "\"label\":\"");
-		if (p && p < obj_end) {
-			p += 9;
-			size_t nlen = 0;
-			while (p + nlen < obj_end && p[nlen] != '"' && nlen < sizeof(st->actions[count].label) - 1) {
-				st->actions[count].label[nlen] = p[nlen];
-				nlen++;
-			}
-			st->actions[count].label[nlen] = '\0';
-		}
-		p = strstr(obj, "\"icon\":\"");
-		if (p && p < obj_end) {
-			p += 8;
-			size_t nlen = 0;
-			while (p + nlen < obj_end && p[nlen] != '"' && nlen < sizeof(st->actions[count].icon) - 1) {
-				st->actions[count].icon[nlen] = p[nlen];
-				nlen++;
-			}
-			st->actions[count].icon[nlen] = '\0';
-		}
-
-		count++;
-		arr = obj_end + 1;
-	}
-	st->action_count = count;
-}
-
-static void parse_gauge_elem(const char *elem, size_t elen, void *user)
-{
-	nd_client_state_t *st = (nd_client_state_t *)user;
-	char name[ND_GAUGE_NAME_MAX] = {0};
-	bud_json_str_len(elem, elen, "n", name, sizeof(name));
-	if (!name[0])
-		return;
-	nd_client_gauge_set(st, name,
-		(uint16_t)bud_json_int_len(elem, elen, "val", 0),
-		(uint16_t)bud_json_int_len(elem, elen, "max", 0));
-}
-
-ISO_EXPORT(void, wasm_init, const char *json, int len)
-{
-	nd_ui_init_defaults();
-	memset(&client_state, 0, sizeof(client_state));
-	client_state.pres_flags = ND_REGION_ALLOW_CHOICE;
-	snprintf(client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver), "ascii-bud");
-	nd_ui_glue_state_default(&client_state);
-
-	if (json && len > 0) {
-		client_state.me = (uint32_t)bud_json_int(json, "me", 0);
-		client_state.auth_failed = (int)bud_json_int(json, "auth_failed", 0);
-		bud_json_str(json, "user", client_state.user, sizeof(client_state.user));
-		bud_json_str(json, "map_buf", client_state.map_buf, sizeof(client_state.map_buf));
-
-		char map_hex[802] = {0};
-		bud_json_str(json, "map_hex", map_hex, sizeof(map_hex));
-		if (map_hex[0]) {
-			uint8_t *raw = (uint8_t *)&client_state.map_data;
-			size_t hex_len = strlen(map_hex);
-			if (hex_len == sizeof(nd_map_data_t) * 2) {
-				for (size_t i = 0; i < sizeof(nd_map_data_t); i++) {
-					char h1 = map_hex[i * 2];
-					char h2 = map_hex[i * 2 + 1];
-					uint8_t b1 = (h1 >= 'a') ? (h1 - 'a' + 10) : (h1 >= 'A') ? (h1 - 'A' + 10) : (h1 - '0');
-					uint8_t b2 = (h2 >= 'a') ? (h2 - 'a' + 10) : (h2 >= 'A') ? (h2 - 'A' + 10) : (h2 - '0');
-					raw[i] = (uint8_t)((b1 << 4) | b2);
-				}
-			}
-		}
-
-		client_state.tod = (uint32_t)bud_json_int(json, "tod", 0);
-		client_state.selected_item_ref = (uint32_t)bud_json_int(json, "selected_item_ref", 0);
-		bud_json_str(json, "active_modal", client_state.active_modal, sizeof(client_state.active_modal));
-		nd_ui_set_active_modal(client_state.active_modal);
-		bud_json_str(json, "preferred_driver", client_state.preferred_driver, sizeof(client_state.preferred_driver));
-		bud_json_str(json, "preferred_map_driver", client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver));
-		client_state.layout_mode = (uint8_t)bud_json_int(json, "layout_mode", 0);
-		client_state.pres_flags = (uint8_t)bud_json_int(json, "pres_flags", ND_REGION_ALLOW_CHOICE);
-
-		int v_idx = (int)bud_json_int(json, "active_viewport", 0);
-		if (v_idx >= 0 && (size_t)v_idx < g_driver_count) {
-			g_active_driver_idx = v_idx;
-		}
-
-		/* Rehydrate room info */
-		client_state.room.ref = (uint32_t)bud_json_int(json, "room_ref", 0);
-		client_state.room.exits = (uint32_t)bud_json_int(json, "room_exits", 0);
-		bud_json_str(json, "room_name", client_state.room.name, sizeof(client_state.room.name));
-		bud_json_str(json, "room_desc", client_state.room.desc, sizeof(client_state.room.desc));
-
-		/* Rehydrate generic gauges, then let each module restore its own state */
-		bud_json_array_for_each_key_len(json, (size_t)len, "gauges", parse_gauge_elem, &client_state);
-		on_nd_state_deserialize(json, &client_state);
-
-		/* Rehydrate entities and actions lists */
-		parse_json_entities(json, &client_state);
-		parse_json_actions(json, &client_state);
-	}
-
-	/* Immediately synchronize scene graph before initial render frame */
-	nd_scene_sync(&g_scene, &client_state);
-
-	ws_connect("/nd", 3);
-}
-
-/*
- * Negotiate active viewport driver based on genuine regional driver metadata
- * delivered via BCP (opcode ND_BCP_REGION) from nd-region persistence.
- */
-static void nd_negotiate_regional_driver(const nd_client_state_t *st)
-{
-	if (!st) return;
-
-	if (st->preferred_driver[0]) {
-		if (st->pres_flags & ND_REGION_LOCKED) {
-			nd_set_active_viewport_driver(st->preferred_driver);
-		} else if (g_active_driver_idx < 0) {
-			nd_set_active_viewport_driver(st->preferred_driver);
-		}
-	}
-}
-
-ISO_EXPORT(void, wasm_term_on_input, const char *buf, size_t len)
-{
-	if (buf && len > 0)
-		ws_send(buf, len);
-}
-
-ISO_EXPORT(void, wasm_ws_on_open, void)
-{
-	/* WebSocket connected */
-}
-
-ISO_EXPORT(void, wasm_ws_on_close, int code)
-{
-	(void)code;
-}
-
-ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t len)
-{
-	if (!buf || len == 0)
-		return;
-
-	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
-		int ret = nd_bcp_decode(buf, len, &client_state);
-		if (ret > 0) {
-			nd_negotiate_regional_driver(&client_state);
-			nd_scene_sync(&g_scene, &client_state);
-			bud_app_set_state();
-			const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-			if (drv && drv->on_frame) {
-				drv->on_frame(NULL, 0);
-			}
-		}
-		return;
-	}
-
-	if (channel == 0) {
-		/* Raw text channel is handled directly by axil-tty-bridge */
-		return;
-	}
-}
-
-ISO_EXPORT(void, wasm_ws_on_message, const uint8_t *buf, size_t len)
-{
-	if (!buf || len == 0)
-		return;
-
-	if (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1) {
-		wasm_ws_on_channel(1, buf, len);
-	} else {
-		wasm_ws_on_channel(0, buf, len);
-	}
 }

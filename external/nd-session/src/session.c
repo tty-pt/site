@@ -616,7 +616,9 @@ do_avatar(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((
 {
 	unsigned player_ref = fd_player(fd);
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &player);
+	memset(&player, 0, sizeof(player));
+	if (corm_read(obj_hd, &player_ref, &player, sizeof(player)) != 0)
+		return;
 	avatar(&player);
 	corm_put(obj_hd, &player_ref, &player);
 	mcp_content_out(player.location, player_ref);

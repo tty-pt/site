@@ -1,6 +1,6 @@
 all := libnd-region
 
-libnd-region-obj-y :=
+libnd-region-obj-y := src/region_cmd.o
 
 LDLIBS-libnd-region := -lxylem -lcorm
 

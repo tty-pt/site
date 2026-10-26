@@ -151,9 +151,32 @@ _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char d
 void
 eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 {
-	static char bcp_buf[SUPERBIGSIZ];
-	int ret = _fbcp_item(bcp_buf, player_ref, obj_ref, dynflags);
-	eng_nd_wwrite(player_ref, bcp_buf, ret);
+	OBJ obj = {
+		.location = -1,
+		.name = "**NOTHING!**",
+	};
+	nd_get(HD_OBJ, &obj, &obj_ref);
+	struct icon ico = object_icon(player_ref, obj_ref);
+
+	nd_entity_packet_t pkt;
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.ref = obj_ref;
+	pkt.location = obj.location;
+	pkt.type = obj.type;
+	pkt.actions = ico.actions;
+	pkt.fg = (uint16_t)ico.pi.fg;
+	pkt.flags = (uint16_t)ico.pi.flags;
+	pkt.dynflags = dynflags;
+	pkt.ch = ico.ch;
+	snprintf(pkt.name, sizeof(pkt.name), "%s", obj.name);
+	char *u = (char *)unparse(obj_ref);
+	if (u)
+		snprintf(pkt.unparse, sizeof(pkt.unparse), "%s", u);
+	char *a = object_art(obj_ref);
+	if (a)
+		snprintf(pkt.art, sizeof(pkt.art), "%s", a);
+
+	eng_fbcp(player_ref, sizeof(pkt), BCP_ITEM, &pkt);
 }
 
 static int // 2 + sizeof(iden) + sizeof(int) * 2
