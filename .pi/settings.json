@@ -18,6 +18,7 @@
       "reviewRunner": { "tool": "subagent" }
     },
     "reviewPolicy": "strict",
+    "judgeFallback": "heuristic",
     "roles": {
       "reviewer": "antigravity/gemini-3.8-flash",
       "validator": "antigravity/gemini-3.8-flash"
