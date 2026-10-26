@@ -22,7 +22,8 @@
     "reviewPolicy": "balanced",
     "judgeFallback": "heuristic",
     "roles": {
-      "reviewer": "antigravity/gemini-3.8-flash",
+      "reviewer": "anthropic/claude-sonnet-4-5",
+      "reviewerFallback": ["antigravity/gemini-3.8-flash"],
       "validator": "antigravity/gemini-3.8-flash"
     },
     "router": {
@@ -35,7 +36,7 @@
       "matrix": {
         "drafting": {
           "complex": [
-            "anthropic/claude-sonnet-4-5:high",
+            "anthropic/claude-sonnet-5-5:high",
             "antigravity/gemini-3.8-flash"
           ],
           "*": "antigravity/gemini-3.8-flash"
