@@ -54,7 +54,6 @@ nd_dowritef(unsigned player_ref, const char *fmt, va_list args)
 	if (n <= 0)
 		return;
 	OBJ player;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &player, sizeof(player)) != 0)
 		return;
 	eng_nd_rwrite(player.location, player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
@@ -151,7 +150,6 @@ biome_art_idx(struct bio *bio) {
 static inline unsigned
 art_idx(OBJ *obj) {
 	SKEL skel;
-	memset(&skel, 0, sizeof(skel));
 	if (corm_read(skel_hd, &obj->skid, &(skel), sizeof(skel)) != 0)
 		return 1;
 	return 1 + (random() % (skel.max_art ? skel.max_art : 1));
@@ -161,7 +159,6 @@ unsigned
 eng_object_add(OBJ *nu, unsigned skel_id, unsigned where_ref, uint64_t v, unsigned flags)
 {
 	SKEL skel;
-	memset(&skel, 0, sizeof(skel));
 	if (corm_read(skel_hd, &skel_id, &(skel), sizeof(skel)) != 0)
 		return NOTHING;
 	unsigned nu_ref = eng_object_new(nu);
@@ -236,7 +233,6 @@ eng_object_art(unsigned thing_ref)
 	if (thing_ref == NOTHING)
 		return void_art;
 
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 		return void_art;
 	switch (thing.type) {
@@ -297,7 +293,6 @@ unsigned
 eng_object_copy(OBJ *nu, unsigned old_ref)
 {
 	OBJ old;
-	memset(&old, 0, sizeof(old));
 	if (corm_read(obj_hd, &old_ref, &(old), sizeof(old)) != 0)
 		return NOTHING;
 	unsigned ref = eng_object_new(nu);
@@ -327,7 +322,6 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 {
 	unsigned last_loc;
 	OBJ what;
-	memset(&what, 0, sizeof(what));
 	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0)
 		return;
 
@@ -441,7 +435,6 @@ struct icon
 eng_object_icon(unsigned player_ref, unsigned what_ref)
 {
 	OBJ what;
-	memset(&what, 0, sizeof(what));
 	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0) {
 		struct icon empty = {0};
 		return empty;
@@ -494,7 +487,6 @@ do_clone(int fd, int argc, char *argv[])
 	}
 
 	OBJ thing;
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		nd_flush(player_ref);
@@ -508,7 +500,6 @@ do_clone(int fd, int argc, char *argv[])
 	}
 
 	OBJ player;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
 		nd_printf(player_ref, CANTDO_MESSAGE);
 		nd_flush(player_ref);
@@ -636,7 +627,6 @@ do_create(int fd, int argc, char *argv[])
 		nd_flush(player_ref);
 		return;
 	}
-	memset(&skel, 0, sizeof(skel));
 	corm_read(skel_hd, &skid_ref, &skel, sizeof(skel));
 	if (skel.type == TYPE_ROOM) {
 		nd_printf(player_ref, "Rooms are made with `room`, not `create`.\n");
@@ -645,7 +635,6 @@ do_create(int fd, int argc, char *argv[])
 	}
 
 	OBJ player;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
 		nd_printf(player_ref, CANTDO_MESSAGE);
 		nd_flush(player_ref);
@@ -679,7 +668,6 @@ do_name(int fd, int argc __attribute__((unused)), char *argv[])
 	}
 
 	OBJ thing;
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		return;
@@ -718,7 +706,6 @@ do_chown(int fd, int argc, char *argv[])
 	}
 
 	OBJ player, thing;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 		goto error;
 
@@ -726,7 +713,6 @@ do_chown(int fd, int argc, char *argv[])
 	if (owner_ref == NOTHING)
 		goto error;
 
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 		goto error;
 
@@ -752,7 +738,6 @@ do_recycle(int fd, int argc __attribute__((unused)), char *argv[])
 	char *name = argv[1];
 	unsigned thing_ref;
 	OBJ thing;
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		return;
@@ -784,8 +769,6 @@ do_get(int fd, int argc __attribute__((unused)), char *argv[])
 
 	cont_ref = thing_ref;
 	OBJ player, thing, cont;
-	memset(&player, 0, sizeof(player));
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0 ||
 	    corm_read(obj_hd, &cont_ref, &(thing), sizeof(thing)) != 0)
 	{
@@ -799,7 +782,6 @@ do_get(int fd, int argc __attribute__((unused)), char *argv[])
 			nd_printf(player_ref, NOMATCH_MESSAGE);
 			return;
 		}
-		memset(&thing, 0, sizeof(thing));
 		if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 			goto error;
 		if (cont.type == TYPE_ENTITY)
@@ -832,7 +814,6 @@ do_drop(int fd, int argc __attribute__((unused)), char *argv[])
 {
 	unsigned player_ref = fd_player(fd), thing_ref, cont_ref;
 	OBJ player, cont, thing;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
 		nd_printf(player_ref, CANTDO_MESSAGE);
 		return;
@@ -859,12 +840,10 @@ do_drop(int fd, int argc __attribute__((unused)), char *argv[])
 	if (thing_ref == cont_ref)
 		goto error;
 
-	memset(&cont, 0, sizeof(cont));
 	if (corm_read(obj_hd, &cont_ref, &(cont), sizeof(cont)) != 0)
 		goto error;
 
 	eng_object_move(thing_ref, cont_ref);
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 		goto error;
 

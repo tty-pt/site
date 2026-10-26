@@ -79,7 +79,6 @@ eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 		return;
 	}
 
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 		return;
 	unsigned old_loc_ref = player.location;
@@ -135,13 +134,11 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 
 	/* Zombies and puppets use the permissions of their owner */
 	OBJ who, what;
-	memset(&who, 0, sizeof(who));
 	if (corm_read(obj_hd, &who_ref, &(who), sizeof(who)) != 0)
 		return 0;
 	if (who.type != TYPE_ENTITY)
 		who_ref = who.owner;
 
-	memset(&what, 0, sizeof(what));
 	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0)
 		return 0;
 
@@ -162,7 +159,6 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 	 * Another player may be inspected in-region, but their inventory may
 	 * not be taken through region authority. */
 	OBJ owner;
-	memset(&owner, 0, sizeof(owner));
 	if (corm_read(obj_hd, &what.owner, &owner, sizeof(owner)) == 0) {
 		if (owner.type == TYPE_ENTITY) {
 			if (what.type != TYPE_ENTITY)
@@ -187,7 +183,6 @@ eng_unparse(unsigned loc_ref)
 		return "*NOTHING*";
 
 	OBJ loc;
-	memset(&loc, 0, sizeof(loc));
 	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
 		return "*NOTHING*";
 
@@ -205,7 +200,6 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	OBJ loc;
 
 	if (loc_ref == NOTHING) {
-		memset(&player, 0, sizeof(player));
 		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) == 0)
 			loc_ref = player.location;
 		if (loc_ref == NOTHING) {
@@ -226,7 +220,6 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	eplayer.last_observed = loc_ref;
 	eng_ent_set(player_ref, &eplayer);
 
-	memset(&loc, 0, sizeof(loc));
 	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
 		return;
 	unsigned thing_ref;
@@ -294,7 +287,6 @@ do_look_at(int fd, int argc, char *argv[])
 	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (*name == '\0') {
-		memset(&player, 0, sizeof(player));
 		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 			return;
 		thing_ref = player.location;
@@ -311,7 +303,6 @@ do_look_at(int fd, int argc, char *argv[])
 		return;
 	}
 
-	memset(&thing, 0, sizeof(thing));
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_writef(player_ref, NOMATCH_MESSAGE);
 		eng_nd_flush(player_ref);
@@ -332,7 +323,6 @@ do_status(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((
 {
 	OBJ obj;
 	unsigned player_ref = fd_player(fd);
-	memset(&obj, 0, sizeof(obj));
 	if (corm_read(obj_hd, &player_ref, &(obj), sizeof(obj)) != 0)
 		return 0;
 	nd_writef(player_ref, "%s (%u) type %u owner %u flags %u at %u\n", obj.name, player_ref, obj.type, obj.owner, obj.flags, obj.location);

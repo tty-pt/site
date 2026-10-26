@@ -616,7 +616,6 @@ do_avatar(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((
 {
 	unsigned player_ref = fd_player(fd);
 	OBJ player;
-	memset(&player, 0, sizeof(player));
 	if (corm_read(obj_hd, &player_ref, &player, sizeof(player)) != 0)
 		return;
 	avatar(&player);
