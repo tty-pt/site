@@ -16,6 +16,11 @@
     "draftThresholds": { "requirements": 2, "evidence": 7 },
     "bindings": {
       "reviewRunner": { "tool": "subagent" }
+    },
+    "reviewPolicy": "strict",
+    "roles": {
+      "reviewer": "antigravity/gemini-3.8-flash",
+      "validator": "antigravity/gemini-3.8-flash"
     }
   },
   "pi-mm": {
