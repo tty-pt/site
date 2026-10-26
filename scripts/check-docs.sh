@@ -22,7 +22,7 @@ if grep -rn "See docs" docs/ | grep -v "docs/ADVANCED_GIT_RECOVERY\|docs/FILTERS
   : # ok
 fi
 # Stale-string check: C-ISOMORPHIC trap vs BUILD auto-rebuild
-if grep -q "NO prerequisites" docs/C-ISOMORPHIC-BUD.md && grep -q "auto.*rebuild" docs/BUILD.md; then
+if [ -f docs/C-ISOMORPHIC-BUD.md ] && grep -q "NO prerequisites" docs/C-ISOMORPHIC-BUD.md && grep -q "auto.*rebuild" docs/BUILD.md; then
   if ! grep -q "Historical trap" docs/C-ISOMORPHIC-BUD.md; then
     echo "WARN: C-ISOMORPHIC-BUD stale trap note not reconciled with BUILD auto-rebuild" >&2
   fi

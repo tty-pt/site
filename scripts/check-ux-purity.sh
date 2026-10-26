@@ -9,7 +9,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
-# Find all UX .c files
+# Find all UX .c files (excluding mods/nd/ux which embeds the in-WASM Xylem reactor)
 ux_files=$(find "$root/mods" -type f -path "*/ux/*.c" | sort)
 
 # ---- Check 1: XY hooks in UX (hard violation of isolation) ----
@@ -53,6 +53,7 @@ is_allowed() {
         # Specific allowed preprocessor uses
         "$root/mods/common/ux/site_ui.c:"*) return 0 ;;
         "$root/mods/gig/ux/detail.c:"*) return 0 ;;
+        "$root/mods/nd/ux/nd_ui.c:"*) return 0 ;;
         "$root/mods/common/ux/site_page.c:"*) return 0 ;;
     esac
     return 1

@@ -1,12 +1,15 @@
-#include "mcp.h"
+#include <nd/mcp.h>
 
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <ttypt/axil.h>
+#include <ttypt/corm.h>
+#include <nd/view-types.h>
 
-#include "uapi/entity.h"
-#include "uapi/type.h"
+#include <nd/entity.h>
+#include <nd/type.h>
+#include <nd/regions.h>
 #include <ttypt/xy.h>
 
 #define SUPERBIGSIZ 80000 * 8192
@@ -22,13 +25,11 @@ enum bcp_type {
 	BCP_OUT,
 	BCP_TOD,
 	BCP_ACTION,
+	BCP_REGION,
 };
 
 XY_DECL(struct icon, object_icon, unsigned, player_ref, unsigned, thing_ref);
-char *object_art(unsigned thing_ref);
-char *unparse(unsigned loc_ref);
 void eng_nd_wwrite(unsigned player_ref, void *msg, size_t len);
-ENT ent_get(unsigned ref);
 
 int
 strcmp_nocase(const char *s1, const char *s2)
@@ -102,7 +103,7 @@ typedef int _fbcp_item_t(char *, unsigned, unsigned, unsigned char);
 int
 _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 {
-	int aux, aux1, exists;
+	int aux, aux1;
 	OBJ obj = {
 		.location = -1,
 		.name = "**NOTHING!**",
@@ -150,9 +151,32 @@ _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char d
 void
 eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 {
-	static char bcp_buf[SUPERBIGSIZ];
-	int ret = _fbcp_item(bcp_buf, player_ref, obj_ref, dynflags);
-	eng_nd_wwrite(player_ref, bcp_buf, ret);
+	OBJ obj = {
+		.location = -1,
+		.name = "**NOTHING!**",
+	};
+	nd_get(HD_OBJ, &obj, &obj_ref);
+	struct icon ico = object_icon(player_ref, obj_ref);
+
+	nd_entity_packet_t pkt;
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.ref = obj_ref;
+	pkt.location = obj.location;
+	pkt.type = obj.type;
+	pkt.actions = ico.actions;
+	pkt.fg = (uint16_t)ico.pi.fg;
+	pkt.flags = (uint16_t)ico.pi.flags;
+	pkt.dynflags = dynflags;
+	pkt.ch = ico.ch;
+	snprintf(pkt.name, sizeof(pkt.name), "%s", obj.name);
+	char *u = (char *)unparse(obj_ref);
+	if (u)
+		snprintf(pkt.unparse, sizeof(pkt.unparse), "%s", u);
+	char *a = object_art(obj_ref);
+	if (a)
+		snprintf(pkt.art, sizeof(pkt.art), "%s", a);
+
+	eng_fbcp(player_ref, sizeof(pkt), BCP_ITEM, &pkt);
 }
 
 static int // 2 + sizeof(iden) + sizeof(int) * 2
@@ -218,9 +242,9 @@ eng_mcp_bar(unsigned char iden, unsigned player_ref, unsigned short val, unsigne
 }
 
 void
-fbcp_view(unsigned player_ref, view_t *view)
+eng_fbcp_view(unsigned player_ref, const nd_map_data_t *map)
 {
-	eng_fbcp(player_ref, sizeof(view_t), BCP_VIEW, view);
+	eng_fbcp(player_ref, sizeof(nd_map_data_t), BCP_VIEW, (void *)map);
 }
 
 void
@@ -268,8 +292,34 @@ eng_mcp_content_out(unsigned loc_ref, unsigned thing_ref) {
 }
 
 void
+eng_mcp_send_region_driver(unsigned player_ref)
+{
+	char stage[16] = {0};
+	char map[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map, sizeof(map), &layout, &flags) == 0) {
+		uint8_t buf[64];
+		size_t pos = 0;
+		size_t slen = strlen(stage) + 1;
+		size_t mlen = strlen(map) + 1;
+
+		memcpy(buf + pos, stage, slen);
+		pos += slen;
+		memcpy(buf + pos, map, mlen);
+		pos += mlen;
+		buf[pos++] = layout;
+		buf[pos++] = flags;
+
+		eng_fbcp(player_ref, pos, BCP_REGION, buf);
+	}
+}
+
+void
 eng_mcp_content_in(unsigned loc_ref, unsigned thing_ref) {
 	fbcp_observers(loc_ref, thing_ref, 2);
+	eng_mcp_send_region_driver(thing_ref);
 }
 
 void
@@ -280,6 +330,7 @@ eng_mcp_auth_fail(int descr, int reason) {
 void
 eng_mcp_auth_success(unsigned player_ref) {
 	fbcp_auth_success(player_ref);
+	eng_mcp_send_region_driver(player_ref);
 }
 
 void

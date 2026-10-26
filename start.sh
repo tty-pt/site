@@ -8,8 +8,13 @@ PORT=${PORT:-8080}
 # runs. `make install-libs` publishes a rebuilt library there.
 
 mkdir -p "$SCRIPT_DIR/var/nd"
-export AXIL_ND_DB="$SCRIPT_DIR/var/nd/std.db"
-export AXIL_ND_HTDOCS="$SCRIPT_DIR/external/axil-nd/htdocs"
+export AXIL_ND_DB="${AXIL_ND_DB:-$SCRIPT_DIR/var/nd/universe.db}"
+export AXIL_ND_HTDOCS="${AXIL_ND_HTDOCS:-$SCRIPT_DIR/htdocs}"
+
+if [ ! -f "$AXIL_ND_DB" ]; then
+    echo "NeverDark universe database not found at $AXIL_ND_DB. Auto-seeding default star sector..."
+    bash "$SCRIPT_DIR/scripts/seed-nd-universe.sh" "$AXIL_ND_DB" 1
+fi
 
 if [ -n "$DEBUG" ]; then
     LOG_OUT="/dev/stdout"
@@ -40,5 +45,5 @@ fi
 if test ! -z "$GDB"; then
   gdb --args "$AXIL_BIN" -C "$SCRIPT_DIR" -p 8080 -d -m mods/core/core
 else
-  "$AXIL_BIN" -C "$SCRIPT_DIR" -p "$PORT" -d -m mods/core/core 2>&1 | tee "$LOG_OUT"
+  "$AXIL_BIN" -A -C "$SCRIPT_DIR" -p "$PORT" -d -m mods/core/core 2>&1 | tee "$LOG_OUT"
 fi

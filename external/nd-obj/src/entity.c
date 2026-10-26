@@ -1,4 +1,4 @@
-#include "uapi/entity.h"
+#include <nd/entity.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -6,20 +6,19 @@
 #include <string.h>
 #include <ttypt/corm.h>
 
-#include "config.h"
-#include "mcp.h"
-#include "params.h"
-#include "st.h"
+#include <nd/config.h>
+#include <nd/mcp.h>
+#include <nd/params.h>
+#include <nd/st.h>
 #include <nd/law.h>
 #include <nd/obj-types.h>
-#include "uapi/map.h"
-#include "uapi/match.h"
-#include "uapi/type.h"
-#include "view.h"
+#include <nd/map.h>
+#include <nd/match.h>
+#include <nd/type.h>
+#include <nd/view.h>
 
 unsigned fd_player(unsigned fd);
 unsigned room_clean(unsigned loc_ref);
-unsigned hd_resolve(unsigned hd);
 
 unsigned me = -1;
 
@@ -80,7 +79,8 @@ eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 		return;
 	}
 
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned old_loc_ref = player.location;
 
 	nd_evt_before_leave(player_ref);
@@ -134,11 +134,13 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 
 	/* Zombies and puppets use the permissions of their owner */
 	OBJ who, what;
-	corm_get_copy(obj_hd, &who_ref, &(who));
+	if (corm_read(obj_hd, &who_ref, &(who), sizeof(who)) != 0)
+		return 0;
 	if (who.type != TYPE_ENTITY)
 		who_ref = who.owner;
 
-	corm_get_copy(obj_hd, &what_ref, &(what));
+	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0)
+		return 0;
 
 	/* Ownership of any kind still applies, including puppet ownership. ROOT
 	 * and NOTHING are deliberately not ownership here: ref 1 is both ROOT
@@ -156,11 +158,8 @@ eng_controls(unsigned who_ref, unsigned what_ref)
 	/* An owner that is a different player keeps authority over possessions.
 	 * Another player may be inspected in-region, but their inventory may
 	 * not be taken through region authority. */
-	if (corm_get(obj_hd, &what.owner)) {
-		OBJ owner;
-
-		memset(&owner, 0, sizeof(owner));
-		corm_get_copy(obj_hd, &what.owner, &(owner));
+	OBJ owner;
+	if (corm_read(obj_hd, &what.owner, &owner, sizeof(owner)) == 0) {
 		if (owner.type == TYPE_ENTITY) {
 			if (what.type != TYPE_ENTITY)
 				return 0;
@@ -184,7 +183,8 @@ eng_unparse(unsigned loc_ref)
 		return "*NOTHING*";
 
 	OBJ loc;
-	corm_get_copy(obj_hd, &loc_ref, &(loc));
+	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
+		return "*NOTHING*";
 
 	BUFF("%s(#%u)", loc.name, loc_ref);
 
@@ -200,8 +200,8 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	OBJ loc;
 
 	if (loc_ref == NOTHING) {
-		corm_get_copy(obj_hd, &player_ref, &(player));
-		loc_ref = player.location;
+		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) == 0)
+			loc_ref = player.location;
 		if (loc_ref == NOTHING) {
 			eng_fbcp_item(player_ref, loc_ref, 1);
 			nd_writef(player_ref, "You see both nothing and everything...\n");
@@ -220,7 +220,8 @@ eng_look_at(unsigned player_ref, unsigned loc_ref)
 	eplayer.last_observed = loc_ref;
 	eng_ent_set(player_ref, &eplayer);
 
-	corm_get_copy(obj_hd, &loc_ref, &(loc));
+	if (corm_read(obj_hd, &loc_ref, &(loc), sizeof(loc)) != 0)
+		return;
 	unsigned thing_ref;
 
 	eng_fbcp_item(player_ref, loc_ref, 1);
@@ -286,7 +287,8 @@ do_look_at(int fd, int argc, char *argv[])
 	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (*name == '\0') {
-		corm_get_copy(obj_hd, &player_ref, &(player));
+		if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+			return;
 		thing_ref = player.location;
 	} else if (
 			(thing_ref = ematch_absolute(name)) == NOTHING
@@ -301,7 +303,11 @@ do_look_at(int fd, int argc, char *argv[])
 		return;
 	}
 
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
+		nd_writef(player_ref, NOMATCH_MESSAGE);
+		eng_nd_flush(player_ref);
+		return;
+	}
 	switch (thing.type) {
 	case TYPE_ROOM:
 		view(player_ref);
@@ -317,7 +323,8 @@ do_status(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((
 {
 	OBJ obj;
 	unsigned player_ref = fd_player(fd);
-	corm_get_copy(obj_hd, &player_ref, &(obj));
+	if (corm_read(obj_hd, &player_ref, &(obj), sizeof(obj)) != 0)
+		return 0;
 	nd_writef(player_ref, "%s (%u) type %u owner %u flags %u at %u\n", obj.name, player_ref, obj.type, obj.owner, obj.flags, obj.location);
 	nd_evt_status(player_ref);
 	/* Same reason do_connect flushes after nd_event_announce() (world.c:865):

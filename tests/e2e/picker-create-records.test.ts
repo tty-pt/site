@@ -242,10 +242,10 @@ Deno.test({
       await typeSearch.press("Enter");
 
       // Verify type summary contains the newly created type
-      let typeSummary = await typePicker.locator('.hyle-picker-values').innerText();
-      while (!typeSummary.includes(enterTypeName)) {
+      for (let retries = 0; retries < 50; retries++) {
+        const typeSummary = await typePicker.locator('.hyle-picker-values').innerText();
+        if (typeSummary.includes(enterTypeName)) break;
         await page.waitForTimeout(100);
-        typeSummary = await typePicker.locator('.hyle-picker-values').innerText();
       }
 
       // Close type picker
@@ -269,10 +269,10 @@ Deno.test({
       await page.keyboard.press("Space");
 
       // Verify author summary contains the newly created author
-      let authorSummary = await authorPicker.locator('.hyle-picker-values').innerText();
-      while (!authorSummary.includes(tabAuthorName)) {
+      for (let retries = 0; retries < 50; retries++) {
+        const authorSummary = await authorPicker.locator('.hyle-picker-values').innerText();
+        if (authorSummary.includes(tabAuthorName)) break;
         await page.waitForTimeout(100);
-        authorSummary = await authorPicker.locator('.hyle-picker-values').innerText();
       }
 
       // ── 3. Fill title and save song ──

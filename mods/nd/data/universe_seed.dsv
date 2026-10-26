@@ -1,0 +1,9 @@
+# universe_seed.dsv — Default NeverDark universe starting space and actions
+# room|ref|exits|name|desc
+room|1001|15|The Citadel Common Hall|A grand hall with towering stone arches and banners.
+# map|escaped_ascii_grid
+map|+---+---+---+\n|   |   |   |\n+---#   #---+\n|   # @ #   |\n+---#   #---+\n|   |   |   |\n+---+---+---+
+# action|id|label|icon
+action|0|look|🔍
+action|1|get|🖐️
+action|2|drop|🪣

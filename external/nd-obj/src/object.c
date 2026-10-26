@@ -18,12 +18,12 @@
 char std_db[BUFSIZ];
 char std_db_ok[BUFSIZ];
 
-#define obj_hd hd_resolve(HD_OBJ)
-#define skel_hd hd_resolve(HD_SKEL)
-#define contents_hd hd_resolve(HD_CONTENTS)
-#define obs_hd hd_resolve(HD_OBS)
-#define ent_hd hd_resolve(HD_ENTITY)
-#define player_hd hd_resolve(HD_PLAYER)
+#define obj_hd nd_table_handle(HD_OBJ)
+#define skel_hd nd_table_handle(HD_SKEL)
+#define contents_hd nd_table_handle(HD_CONTENTS)
+#define obs_hd nd_table_handle(HD_OBS)
+#define ent_hd nd_table_handle(HD_ENTITY)
+#define player_hd nd_table_handle(HD_PLAYER)
 
 void
 eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len)
@@ -38,8 +38,7 @@ eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len)
 		if (tmp_ref == exception_ref)
 			continue;
 
-		if (corm_get(obj_hd, &tmp_ref)) {
-			corm_get_copy(obj_hd, &tmp_ref, &tmp);
+		if (corm_read(obj_hd, &tmp_ref, &tmp, sizeof(tmp)) == 0) {
 			if (tmp.type == TYPE_ENTITY)
 				nd_write(tmp_ref, str, len);
 		}
@@ -55,7 +54,8 @@ nd_dowritef(unsigned player_ref, const char *fmt, va_list args)
 	if (n <= 0)
 		return;
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &player);
+	if (corm_read(obj_hd, &player_ref, &player, sizeof(player)) != 0)
+		return;
 	eng_nd_rwrite(player.location, player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
@@ -150,7 +150,8 @@ biome_art_idx(struct bio *bio) {
 static inline unsigned
 art_idx(OBJ *obj) {
 	SKEL skel;
-	corm_get_copy(skel_hd, &obj->skid, &(skel));
+	if (corm_read(skel_hd, &obj->skid, &(skel), sizeof(skel)) != 0)
+		return 1;
 	return 1 + (random() % (skel.max_art ? skel.max_art : 1));
 }
 
@@ -158,7 +159,8 @@ unsigned
 eng_object_add(OBJ *nu, unsigned skel_id, unsigned where_ref, uint64_t v, unsigned flags)
 {
 	SKEL skel;
-	corm_get_copy(skel_hd, &skel_id, &(skel));
+	if (corm_read(skel_hd, &skel_id, &(skel), sizeof(skel)) != 0)
+		return NOTHING;
 	unsigned nu_ref = eng_object_new(nu);
 	memset(nu, 0, sizeof(OBJ));
 	strlcpy(nu->name, skel.name, sizeof(nu->name));
@@ -215,7 +217,7 @@ eng_object_add(OBJ *nu, unsigned skel_id, unsigned where_ref, uint64_t v, unsign
 		mcp_content_in(where_ref, nu_ref);
 
 	// needed for retrieval (FIXME)
-	corm_get_copy(obj_hd, &nu_ref, nu);
+	corm_read(obj_hd, &nu_ref, nu, sizeof(OBJ));
 	return nu_ref;
 }
 
@@ -231,7 +233,8 @@ eng_object_art(unsigned thing_ref)
 	if (thing_ref == NOTHING)
 		return void_art;
 
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
+		return void_art;
 	switch (thing.type) {
 	case TYPE_ENTITY:
 		type = "entity";
@@ -246,7 +249,7 @@ eng_object_art(unsigned thing_ref)
 	default:
 		 /* "room" is id 1 in the transient type_hd — the host seeds it
 		  * first, before any module loads. See world.c. */
-		 const void *__v2 = corm_get(hd_resolve(HD_RTYPE), &thing.type);
+		 const void *__v2 = corm_get(nd_table_handle(HD_RTYPE), &thing.type);
 		 if (__v2)
 			 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
 		 type = typestr; break;
@@ -290,7 +293,8 @@ unsigned
 eng_object_copy(OBJ *nu, unsigned old_ref)
 {
 	OBJ old;
-	corm_get_copy(obj_hd, &old_ref, &(old));
+	if (corm_read(obj_hd, &old_ref, &(old), sizeof(old)) != 0)
+		return NOTHING;
 	unsigned ref = eng_object_new(nu);
 	strlcpy(nu->name, old.name, sizeof(nu->name));
 	nu->location = NOTHING;
@@ -318,7 +322,8 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 {
 	unsigned last_loc;
 	OBJ what;
-	corm_get_copy(obj_hd, &what_ref, &(what));
+	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0)
+		return;
 
 	last_loc = what.location;
 	/* if (last_loc == where_ref) */
@@ -430,7 +435,10 @@ struct icon
 eng_object_icon(unsigned player_ref, unsigned what_ref)
 {
 	OBJ what;
-	corm_get_copy(obj_hd, &what_ref, &(what));
+	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0) {
+		struct icon empty = {0};
+		return empty;
+	}
 	return on_icon(what_ref, what.type, player_ref);
 }
 
@@ -479,7 +487,11 @@ do_clone(int fd, int argc, char *argv[])
 	}
 
 	OBJ thing;
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
+		nd_printf(player_ref, NOMATCH_MESSAGE);
+		nd_flush(player_ref);
+		return;
+	}
 
 	if(!controls(player_ref, thing_ref)) {
 		nd_printf(player_ref, CANTDO_MESSAGE);
@@ -488,7 +500,11 @@ do_clone(int fd, int argc, char *argv[])
 	}
 
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
+		nd_printf(player_ref, CANTDO_MESSAGE);
+		nd_flush(player_ref);
+		return;
+	}
 	OBJ clone;
 	unsigned clone_ref = eng_object_new(&clone);
 
@@ -611,8 +627,7 @@ do_create(int fd, int argc, char *argv[])
 		nd_flush(player_ref);
 		return;
 	}
-	memset(&skel, 0, sizeof(skel));
-	corm_get_copy(skel_hd, &skid_ref, &skel);
+	corm_read(skel_hd, &skid_ref, &skel, sizeof(skel));
 	if (skel.type == TYPE_ROOM) {
 		nd_printf(player_ref, "Rooms are made with `room`, not `create`.\n");
 		nd_flush(player_ref);
@@ -620,7 +635,11 @@ do_create(int fd, int argc, char *argv[])
 	}
 
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
+		nd_printf(player_ref, CANTDO_MESSAGE);
+		nd_flush(player_ref);
+		return;
+	}
 
 	ref = eng_object_add(&obj, (unsigned)skid, player_ref, v, 0);
 	obj.owner = player.owner;
@@ -649,7 +668,10 @@ do_name(int fd, int argc __attribute__((unused)), char *argv[])
 	}
 
 	OBJ thing;
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
+		nd_printf(player_ref, NOMATCH_MESSAGE);
+		return;
+	}
 	strlcpy(thing.name, newname, sizeof(thing.name));
 	corm_put(obj_hd, &thing_ref, &thing);
 }
@@ -684,13 +706,15 @@ do_chown(int fd, int argc, char *argv[])
 	}
 
 	OBJ player, thing;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		goto error;
 
 	owner_ref = *newowner && strcmp(newowner, "me") ? (*(const unsigned *)corm_get(player_hd, newowner)) : player.owner;
 	if (owner_ref == NOTHING)
 		goto error;
 
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
+		goto error;
 
 	if (thing.type == TYPE_ENTITY ||
 			((thing.type == TYPE_ROOM && player.location != thing_ref)
@@ -714,18 +738,10 @@ do_recycle(int fd, int argc __attribute__((unused)), char *argv[])
 	char *name = argv[1];
 	unsigned thing_ref;
 	OBJ thing;
-
-	if (
-			(thing_ref = ematch_absolute(name)) == NOTHING
-			&& (thing_ref = ematch_near(player_ref, name)) == NOTHING
-			&& (thing_ref = ematch_mine(player_ref, name)) == NOTHING
-	   )
-	{
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		return;
 	}
-
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
 
 	if (!controls(player_ref, thing_ref) || thing.owner != player_ref) {
 		nd_printf(player_ref, CANTDO_MESSAGE);
@@ -753,8 +769,11 @@ do_get(int fd, int argc __attribute__((unused)), char *argv[])
 
 	cont_ref = thing_ref;
 	OBJ player, thing, cont;
-	corm_get_copy(obj_hd, &player_ref, &(player));
-	corm_get_copy(obj_hd, &cont_ref, &(thing));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0 ||
+	    corm_read(obj_hd, &cont_ref, &(thing), sizeof(thing)) != 0)
+	{
+		goto error;
+	}
 	cont = thing;
 
 	if (obj && *obj) {
@@ -763,7 +782,8 @@ do_get(int fd, int argc __attribute__((unused)), char *argv[])
 			nd_printf(player_ref, NOMATCH_MESSAGE);
 			return;
 		}
-		corm_get_copy(obj_hd, &thing_ref, &(thing));
+		if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
+			goto error;
 		if (cont.type == TYPE_ENTITY)
 			goto error;
 	}
@@ -794,7 +814,10 @@ do_drop(int fd, int argc __attribute__((unused)), char *argv[])
 {
 	unsigned player_ref = fd_player(fd), thing_ref, cont_ref;
 	OBJ player, cont, thing;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0) {
+		nd_printf(player_ref, CANTDO_MESSAGE);
+		return;
+	}
 	char *name = argv[1];
 	char *obj = argv[2];
 
@@ -817,10 +840,12 @@ do_drop(int fd, int argc __attribute__((unused)), char *argv[])
 	if (thing_ref == cont_ref)
 		goto error;
 
-	corm_get_copy(obj_hd, &cont_ref, &(cont));
+	if (corm_read(obj_hd, &cont_ref, &(cont), sizeof(cont)) != 0)
+		goto error;
 
 	eng_object_move(thing_ref, cont_ref);
-	corm_get_copy(obj_hd, &thing_ref, &(thing));
+	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
+		goto error;
 
 	if (cont.type == TYPE_ENTITY) {
 		nd_printf(cont_ref, "%s hands you %s.\n", player.name, thing.name);

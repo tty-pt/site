@@ -1,4 +1,4 @@
-#include "st.h"
+#include <nd/st.h>
 
 #include <ctype.h>
 #include <dlfcn.h>
@@ -21,17 +21,17 @@
 #include <ttypt/xy.h>
 #include <xxhash.h>
 
-#include "config.h"
-#include "noise.h"
-#include "params.h"
-#include "player.h"
-#include "view.h"
-#include "mcp.h"
+#include <nd/config.h>
+#include <nd/noise.h>
+#include <nd/params.h>
+#include <nd/player.h>
+#include <nd/view.h>
+#include <nd/mcp.h>
 #include <nd/obj-types.h>
-#include "uapi/map.h"
-#include "uapi/type.h"
-#include "uapi/entity.h"
-#include "uapi/match.h"
+#include <nd/map.h>
+#include <nd/type.h>
+#include <nd/entity.h>
+#include <nd/match.h>
 
 unsigned fd_player(unsigned fd);
 
@@ -196,7 +196,7 @@ eng_object_drop(unsigned where_ref, unsigned skel_id)
 	unsigned drop_id;
 	OBJ where;
 	const void *__v, *kp, *vp;
-	unsigned c = corm_iter(hd_resolve(HD_ADROP), &skel_id, CM_RANGE);
+	unsigned c = corm_iter(nd_table_handle(HD_ADROP), &skel_id, CM_RANGE);
 
 	nd_get(HD_OBJ, &(where), &where_ref);
 	eng_map_where(pos, where.location);
@@ -357,7 +357,8 @@ st_claim(unsigned player_ref, OBJ *room) {
 	}
 
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return 1;
 	if (fee_fail(player_ref, &player, "claim a room", "", ROOM_COST))
 		return 1;
 
@@ -372,7 +373,8 @@ static inline void
 exits_fix(unsigned there_ref, enum exit e)
 {
 	OBJ there;
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+		return;
 	ROO *rthere = (ROO *) &there.data;
 	const char *s;
 
@@ -384,7 +386,8 @@ exits_fix(unsigned there_ref, enum exit e)
 			continue;
 
 		OBJ othere;
-		corm_get_copy(obj_hd, &othere_ref, &(othere));
+		if (corm_read(obj_hd, &othere_ref, &(othere), sizeof(othere)) != 0)
+			continue;
 		ROO *rothere = (ROO *) &othere.data;
 
 		if (rothere->flags & RF_TEMP) {
@@ -422,7 +425,8 @@ exits_infer(unsigned here_ref, ROO *rhere)
 		}
 
 		OBJ there;
-		corm_get_copy(obj_hd, &there_ref, &(there));
+		if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+			continue;
 		ROO *rthere = (ROO *) &there.data;
 
 		if (rthere->exits & e_simm(e)) {
@@ -494,9 +498,11 @@ st_room(unsigned player_ref, unsigned location, enum exit e)
 static unsigned
 e_move(unsigned player_ref, enum exit e) {
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return NOTHING;
 	OBJ loc;
-	corm_get_copy(obj_hd, &player.location, &(loc));
+	if (corm_read(obj_hd, &player.location, &(loc), sizeof(loc)) != 0)
+		return NOTHING;
 	unsigned dest_ref;
 	ROO *rloc = (ROO *) &loc.data;
 	char const *dwts = "door";
@@ -539,18 +545,20 @@ eng_room_clean(unsigned here_ref)
 	unsigned tmp_ref;
 	OBJ here;
 
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return here_ref;
 
 	if (!(((ROO *) here.data)->flags & RF_TEMP))
 		return here_ref;
 
-	unsigned c = corm_iter(hd_resolve(HD_CONTENTS), &here_ref, CM_RANGE);
+	unsigned c = corm_iter(nd_table_handle(HD_CONTENTS), &here_ref, CM_RANGE);
 	const void *kp, *vp;
 	while (corm_next(&kp, &vp, c)) {
 		OBJ tmp;
 		here_ref = *(const unsigned *)kp;
 		tmp_ref = *(const unsigned *)vp;
-		corm_get_copy(obj_hd, &tmp_ref, &(tmp));
+		if (corm_read(obj_hd, &tmp_ref, &(tmp), sizeof(tmp)) != 0)
+			continue;
 
 		if (tmp.type != TYPE_ENTITY)
 			continue;
@@ -574,10 +582,12 @@ static void
 carve(unsigned player_ref, enum exit e)
 {
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned here_ref = player.location, there_ref = here_ref;
 	OBJ here;
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return;
 	ROO *rhere = (ROO *) &here.data;
 	int wall = 0;
 
@@ -599,7 +609,8 @@ carve(unsigned player_ref, enum exit e)
 		return;
 
 	OBJ there;
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+		return;
 	st_claim(player_ref, &there); // FIXME check success in advance
 
 	if (wall) {
@@ -622,11 +633,13 @@ static void
 uncarve(unsigned player_ref, enum exit e)
 {
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	const char *s0 = "is";
 	unsigned here_ref = player.location, there_ref;
 	OBJ here;
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return;
 	ROO *rhere = (ROO *) &here.data;
 	int ht, cd = e_ground(here_ref, e);
 
@@ -651,7 +664,8 @@ uncarve(unsigned player_ref, enum exit e)
 	}
 
 	OBJ there;
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+		return;
 	ROO *rthere = (ROO *) &there.data;
 
 	if ((rthere->flags & RF_TEMP) || there.owner != player_ref) {
@@ -668,10 +682,11 @@ uncarve(unsigned player_ref, enum exit e)
 	} else
 		eng_room_clean(there_ref);
 
-	corm_get_copy(obj_hd, &player_ref, &(player));
-	player.value += ROOM_COST;
-	nd_writef(player_ref, "You collect your materials. (+%dp)\n", ROOM_COST);
-	corm_put(obj_hd, &player_ref, &player);
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) == 0) {
+		player.value += ROOM_COST;
+		nd_writef(player_ref, "You collect your materials. (+%dp)\n", ROOM_COST);
+		corm_put(obj_hd, &player_ref, &player);
+	}
 }
 
 static void
@@ -679,10 +694,12 @@ unwall(unsigned player_ref, enum exit e)
 {
 	int a, b, c, d;
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned there_ref, here_ref = player.location;
 	OBJ here;
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return;
 	ROO *rhere = (ROO *) &here.data;
 
 	a = here.owner == player_ref;
@@ -690,7 +707,7 @@ unwall(unsigned player_ref, enum exit e)
 	there_ref = st_there(here_ref, e);
 
 	OBJ there;
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	corm_read(obj_hd, &there_ref, &(there), sizeof(there));
 	ROO *rthere = (ROO *) &there.data;
 
 	if (there_ref != NOTHING) {
@@ -717,7 +734,8 @@ unwall(unsigned player_ref, enum exit e)
 	if (there_ref == NOTHING)
 		return;
 
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+		return;
 	rthere = (ROO *) &there.data;
 	rthere->exits |= e_simm(e);
 	corm_put(obj_hd, &there_ref, &there);
@@ -729,11 +747,15 @@ gexit_claim(unsigned player_ref, enum exit e)
 {
 	int a, b, c, d;
 	OBJ player, here, there;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return 1;
 	unsigned here_ref = player.location,
 	      there_ref = st_there(player.location, e);
-	corm_get_copy(obj_hd, &here_ref, &(here));
-	corm_get_copy(obj_hd, &there_ref, &(there));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0 ||
+	    corm_read(obj_hd, &there_ref, &(there), sizeof(there)) != 0)
+	{
+		return 1;
+	}
 	ROO *rthere = (ROO *) &there.data;
 
 	a = here_ref != NOTHING && here.owner == player_ref;
@@ -759,9 +781,11 @@ static inline int
 gexit_claim_walk(unsigned player_ref, enum exit e)
 {
 	OBJ player, here;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return 1;
 	unsigned here_ref = player.location;
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return 1;
 	ROO *rhere = (ROO *) &here.data;
 
 	if (!(rhere->exits & e)) {
@@ -786,9 +810,11 @@ e_wall(unsigned player_ref, enum exit e)
 		return;
 
 	OBJ player, here;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned here_ref = player.location;
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+		return;
 	ROO *rhere = (ROO *) &here.data;
 
 	rhere->exits &= ~e_simm(e);
@@ -798,10 +824,11 @@ e_wall(unsigned player_ref, enum exit e)
 
 	if (there_ref != NOTHING) {
 		OBJ there;
-		corm_get_copy(obj_hd, &there_ref, &(there));
-		ROO *rthere = (ROO *) &there.data;
-		rthere->exits &= ~e;
-		corm_put(obj_hd, &there_ref, &there);
+		if (corm_read(obj_hd, &there_ref, &(there), sizeof(there)) == 0) {
+			ROO *rthere = (ROO *) &there.data;
+			rthere->exits &= ~e;
+			corm_put(obj_hd, &there_ref, &there);
+		}
 	}
 
 	nd_writef(player_ref, "You build a wall.\n");
@@ -814,9 +841,11 @@ door(unsigned player_ref, enum exit e)
 		return;
 
 	OBJ player, where;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned where_ref = player.location;
-	corm_get_copy(obj_hd, &where_ref, &(where));
+	if (corm_read(obj_hd, &where_ref, &(where), sizeof(where)) != 0)
+		return;
 	ROO *rwhere = (ROO *) &where.data;
 	rwhere->doors |= e_simm(e);
 	corm_put(obj_hd, &where_ref, &where);
@@ -824,7 +853,7 @@ door(unsigned player_ref, enum exit e)
 	where_ref = st_there(where_ref, e_simm(e));
 
 	if (where_ref == NOTHING) {
-		corm_get_copy(obj_hd, &where_ref, &(where));
+		corm_read(obj_hd, &where_ref, &(where), sizeof(where));
 		rwhere = (ROO *) &where.data;
 		rwhere->doors |= e;
 		corm_put(obj_hd, &where_ref, &where);
@@ -840,9 +869,11 @@ undoor(unsigned player_ref, enum exit e)
 		return;
 
 	OBJ player, where;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	unsigned where_ref = player.location;
-	corm_get_copy(obj_hd, &where_ref, &(where));
+	if (corm_read(obj_hd, &where_ref, &(where), sizeof(where)) != 0)
+		return;
 	ROO *rwhere = (ROO *) &where.data;
 	rwhere->doors &= ~e_simm(e);
 	corm_put(obj_hd, &where_ref, &where);
@@ -850,7 +881,7 @@ undoor(unsigned player_ref, enum exit e)
 	where_ref = st_there(where_ref, e_simm(e));
 
 	if (where_ref != NOTHING) {
-		corm_get_copy(obj_hd, &where_ref, &(where));
+		corm_read(obj_hd, &where_ref, &(where), sizeof(where));
 		rwhere = (ROO *) &where.data;
 		rwhere->doors &= ~e;
 		corm_put(obj_hd, &where_ref, &where);
@@ -864,7 +895,8 @@ tell_pos(unsigned player_ref, struct cmd_dir cd) {
 	pos_t pos;
 	unsigned target_ref = cd.rep == 1 ? player_ref : cd.rep;
 	OBJ target;
-	corm_get_copy(obj_hd, &target_ref, &(target));
+	if (corm_read(obj_hd, &target_ref, &(target), sizeof(target)) != 0)
+		return 0;
 	int ret = 1;
 
 	if (target.type != TYPE_ENTITY) {
@@ -899,8 +931,7 @@ vim_teleport(unsigned player_ref, struct cmd_dir cd)
 		// X6? teleport to chivas
 		unsigned target_ref = cd.rep;
 		OBJ target;
-		corm_get_copy(obj_hd, &target_ref, &(target));
-		if (target.type == TYPE_ENTITY) {
+		if (corm_read(obj_hd, &target_ref, &(target), sizeof(target)) == 0 && target.type == TYPE_ENTITY) {
 			eng_map_where(pos, target.location);
 			ret = 1;
 		}
@@ -917,7 +948,8 @@ pull(unsigned player_ref, struct cmd_dir cd)
 	pos_t pos;
 	enum exit e = cd.e;
 	OBJ player;
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return 0;
 	unsigned here_ref = player.location, there_ref;
 
 	if (e == E_NULL)
@@ -931,8 +963,12 @@ pull(unsigned player_ref, struct cmd_dir cd)
 	}
 
 	OBJ what, here;
-	corm_get_copy(obj_hd, &what_ref, &(what));
-	corm_get_copy(obj_hd, &here_ref, &(here));
+	if (corm_read(obj_hd, &what_ref, &(what), sizeof(what)) != 0 ||
+	    corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
+	{
+		nd_writef(player_ref, "You cannot do that.\n");
+		return 1;
+	}
 	ROO *rhere = (ROO *) &here.data;
 
 	if (!(rhere->exits & e)
@@ -987,7 +1023,8 @@ static void may_look(unsigned player_ref, morton_t old_loc) {
 	OBJ player;
 	morton_t new_loc;
 
-	corm_get_copy(obj_hd, &player_ref, &(player));
+	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
+		return;
 	new_loc = eng_map_mwhere(player.location);
 
 	if (old_loc == new_loc)
@@ -1002,9 +1039,8 @@ int
 eng_st_v(unsigned player_ref, char const *opcs)
 {
 	OBJ player;
-	if (!player_ref || !corm_get(obj_hd, &player_ref))
+	if (!player_ref || corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 		return 0;
-	corm_get_copy(obj_hd, &player_ref, &(player));
 	morton_t old_loc = eng_map_mwhere(player.location);
 	biome_map = biome_map_get(old_loc);
 	if (!biome_map)
@@ -1046,18 +1082,24 @@ eng_st_v(unsigned player_ref, char const *opcs)
 
 void
 echo(char *fmt, ...) {
+	char buf[1024];
 	va_list va;
 	va_start(va, fmt);
-	nd_dwritef(g_player_ref, fmt, va);
+	int n = vsnprintf(buf, sizeof(buf), fmt, va);
 	va_end(va);
+	if (n > 0)
+		nd_write(g_player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
 void
 oecho(char *format, ...) {
+	char buf[1024];
 	va_list args;
 	va_start(args, format);
-	nd_owritef(g_player_ref, format, args);
+	int n = vsnprintf(buf, sizeof(buf), format, args);
 	va_end(args);
+	if (n > 0)
+		nd_write(g_player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1131,10 +1173,9 @@ static inline void
 st_owner_name(unsigned owner_ref, char *buf, size_t len)
 {
 	OBJ o;
+	memset(&o, 0, sizeof(o));
 
-	if (corm_get(obj_hd, &owner_ref)) {
-		memset(&o, 0, sizeof(o));
-		corm_get_copy(obj_hd, &owner_ref, &o);
+	if (corm_read(obj_hd, &owner_ref, &o, sizeof(o)) == 0) {
 		snprintf(buf, len, "%s", o.name);
 	} else {
 		snprintf(buf, len, "%u", owner_ref);

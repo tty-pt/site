@@ -2,12 +2,12 @@
 #include <nd/world-types.h>
 #include <nd/obj-types.h>
 
-#include "mcp.h"
-#include "player.h"
-#include "st.h"
-#include "uapi/entity.h"
-#include "uapi/match.h"
-#include "uapi/type.h"
+#include <nd/mcp.h>
+#include <nd/player.h>
+#include <nd/st.h>
+#include <nd/entity.h>
+#include <nd/match.h>
+#include <nd/type.h>
 #include <ttypt/xy.h>
 
 XY_DECL(int, on_examine, unsigned, player_ref, unsigned, ref, unsigned, type);

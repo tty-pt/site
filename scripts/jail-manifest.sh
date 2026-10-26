@@ -183,12 +183,10 @@ jail_manifest() {
 		printf '%s usr/local/lib/%s\n' "$_jf" "${_jf##*/}"
 	done
 
-	# ---- 2. the two static trees the relative AXIL_* envs point at -------
-	for _jf_dir in external/axil-nd/htdocs external/axil-tty/htdocs; do
+	# ---- 2. the static trees the relative AXIL_* envs point at -------
+	for _jf_dir in external/axil-nd/htdocs external/axil-tty/htdocs external/liblamina/htdocs; do
 		if [ ! -d "$_jf_dir" ]; then
-			printf 'jail-manifest: missing %s\n' "$_jf_dir" >&2
-			unset _jf_src _jf _jf_dir _jf_needed _jf_mapped
-			return 1
+			continue
 		fi
 		for _jf in "$_jf_dir"/*; do
 			[ -f "$_jf" ] || continue

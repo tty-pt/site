@@ -9,6 +9,7 @@ progressive WASM enhancement; no Rust/Dioxus/Deno in the request path.
 
 ```bash
 make
+./start.sh          # singular turnkey runner: auto-seeds universe.db, sets paths, runs on :8080
 make watch          # auto-rebuild + restart on :8080
 ```
 
@@ -29,7 +30,7 @@ make watch          # auto-rebuild + restart on :8080
    Branch on runtime `state`. Allowed only: `#ifndef *_C` guards,
    `__attribute__((import_module("env")…))` host imports,
    `site_ui.c:#ifndef __wasm__` aggregator,
-   `site_page.c:#if __has_include` fallback (`C-ISOMORPHIC-BUD §3`).
+   `site_page.c:#if __has_include` fallback (id-drift prevention).
 
 3. **XY is the only cross-.so boundary.** Unconditional `XY_DECL` in caller header,
    `XY_IMPL` in owner, no X_IMPL guards — two-header rule (`M-types.h` for shared types,
@@ -48,12 +49,12 @@ make watch          # auto-rebuild + restart on :8080
    persistence and storage drivers (`hyle_source_store_ops_t`). `libhyle-bud`
    is the ONLY bud-dependent bridge and **is** used in UX for filters/tables
    (`index`/`gig`/`grp`). SSR emits plain HTML + `data-*` hooks;
-   `data-bud-*`/patch ops are additive. See `SSR-CONTRACT`.
+   `data-bud-*`/patch ops are additive.
 
 5. **Data invariants.** All row writes via `source_update_item` /
    `source_delete_item` → `hyle put/del` (FTS), never direct `var/`;
    search accent-sensitive `pão≠pao` (no TRANSLIT, only `axil_slugify`);
-   No-JS must always work (`SSR-CONTRACT`).
+   No-JS must always work.
 
 6. **No Site-Specific JavaScript.** JavaScript (`htdocs/*.js`) must remain
    strictly generic library infrastructure (`hyle` slot transport, `bud` hydration).
@@ -119,11 +120,26 @@ from `on_axil_parse` skips `cmd_parse` (which routes HTTP methods, so it must
 pass through for HTTP/WS-upgrade requests). See `~/nd/ND_PORT.md` (Library
 usage findings + Locked decisions).
 
+## axil-auren (local LLM inference engine) — build, run & test
+
+Local LLM inference, OpenAI-compatible streaming chat, and dense vector embeddings engine
+running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `docs/LOCAL_LLM.md`.
+
+```sh
+# Turnkey server launcher:
+/home/quirinpa/axil-auren/scripts/auren-server
+
+# Run standalone engine unit suite:
+LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
+/home/quirinpa/axil-auren/bin/engine-test ~/.models/qwen2.5-0.5b-instruct.gguf
+```
+
 ## Topic index
 
 | Topic | Read |
 |-------|------|
 | 5-min orientation: stack, framework-pair model, request path, unbreakable rules | `docs/OVERVIEW.md` |
+| Local LLM inference, session continuity & Pi agent integration | `docs/LOCAL_LLM.md` |
 | Invariants & checklists | `docs/GOALS.md` |
 | Encapsulation & abstractions — read before adding a feature | `docs/DESIGN.md` |
 | Module graph, load order, XY contract, data invariants | `docs/ARCHITECTURE.md` |
@@ -131,10 +147,9 @@ usage findings + Locked decisions).
 | Build, WASM rebuild, stale headers, chroot | `docs/BUILD.md` |
 | Tests & e2e prereqs | `docs/TESTING.md` |
 | Styling & CSS cache bust | `docs/STYLING.md` |
-| SSR contract (plain HTML + `data-*` hooks) | `docs/SSR-CONTRACT.md` |
-| Isomorphic BUD (one renderer for SSR+WASM) | `docs/C-ISOMORPHIC-BUD.md` |
-| WASM bridge | `docs/WASM-BRIDGE.md` |
 | Filters & schema hints | `docs/FILTERS.md` / `docs/SCHEMA.md` |
 | Pickers & Omni-Dropdowns | `docs/PICKERS.md` |
 | Extension guide & custom Pi workflows | `docs/EXTENSIONS.md` |
 | Advanced Git Recovery | `docs/ADVANCED_GIT_RECOVERY.md` |
+| Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
+| Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |

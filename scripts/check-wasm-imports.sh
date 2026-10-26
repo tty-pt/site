@@ -4,14 +4,15 @@ set -eu
 # Uses wasm-objdump if available, else strings fallback.
 
 FAIL=0
-for wasm in htdocs/*.wasm; do
+targets="${*:-htdocs/*.wasm}"
+for wasm in $targets; do
 	[ -f "$wasm" ] || continue
 	echo "checking $wasm"
 	if command -v wasm-objdump >/dev/null 2>&1; then
-		out="$(wasm-objdump -x "$wasm" 2>/dev/null || wasm-objdump -j Import -x "$wasm" 2>/dev/null || true)"
-		if echo "$out" | grep -Eq 'corm_|source_|axil_|xy_|hyle_source|XY_'; then
+		out="$(wasm-objdump -j Import -x "$wasm" 2>/dev/null || wasm-objdump -x "$wasm" 2>/dev/null || true)"
+		if echo "$out" | grep -Eq '<(corm_|source_|axil_|xy_|hyle_source|XY_)|<- env\.(corm_|source_|axil_|xy_|hyle_source|XY_)'; then
 			echo "FAIL: $wasm imports native symbol:"
-			echo "$out" | grep -E 'corm_|source_|axil_|xy_|hyle_source|XY_' || true
+			echo "$out" | grep -E '<(corm_|source_|axil_|xy_|hyle_source|XY_)|<- env\.(corm_|source_|axil_|xy_|hyle_source|XY_)' || true
 			FAIL=1
 		fi
 	elif command -v llvm-objdump >/dev/null 2>&1; then

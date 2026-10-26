@@ -229,6 +229,12 @@ The site is pure C with progressive WASM enhancement. **No site-specific JavaScr
   `docs/C-ISOMORPHIC-BUD.md`): only `site_ui.c|list.c`.
 - `bud_patch_text` must target a TEXT node, not an element (`WASM-BRIDGE.md:§6`).
 
+## Database Retrieval Patterns (`libcorm`)
+
+- **Always use `corm_read()`**: `int corm_read(uint32_t hd, const void *key, void *dst, size_t max_sz)` is the canonical safe record retrieval function. It returns `0` on success and `-1` on a miss.
+- **Never use `corm_get_copy()` in simulation or handlers**: `corm_get_copy()` executes `CBUG(!v)` which causes a fatal process abort (`SIGABRT`) on missing or deleted keys.
+- **No Pre-`memset` Required**: `corm_read` guarantees complete zero-filling of `dst` up to `max_sz` on failure or error, and zero-fills any trailing bytes (`max_sz > len`) on success. Callers do NOT need to call `memset(&dst, 0, sizeof(dst))` before calling `corm_read()`.
+
 ## Related docs
 
 - `docs/ARCHITECTURE.md` — module graph, load order, XY contract.

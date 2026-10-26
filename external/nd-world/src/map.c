@@ -1,12 +1,12 @@
-#include "uapi/map.h"
+#include <nd/map.h>
 
 #include <string.h>
 
 #include <ttypt/corm.h>
 #include <ttypt/islet.h>
 
-#include "config.h"
-#include "st.h"
+#include <nd/config.h>
+#include <nd/st.h>
 
 typedef struct {
 	unsigned what;
@@ -140,7 +140,7 @@ map_range_safe(map_range_t *res,
 }
 
 void
-map_search(unsigned *mat, pos_t pos, unsigned radius)
+eng_map_search(unsigned *mat, pos_t pos, unsigned radius)
 {
 	const unsigned side = 2 * radius + 1;
 	const unsigned m = side * side;

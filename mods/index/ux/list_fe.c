@@ -17,14 +17,14 @@
 
 static list_state_t g_state = { 0 };
 
-void wasm_init(const char *json, int len)
+ISO_EXPORT(void, wasm_init, const char *json, int len)
 {
 	list_state_from_json_len(&g_state, json, len >= 0 ? (size_t)len : 0);
 	site_ui_set_locale(g_state.lang);
 	hyle_bud_set_translator(ui_t);
 }
 
-bud_node *bud_app_render(void)
+ISO_EXPORT(bud_node *, bud_app_render, void)
 {
 	return list_render(&g_state);
 }

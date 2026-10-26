@@ -17,6 +17,7 @@
 #include <ttypt/xy.h>
 
 #include <nd/law-types.h>
+#include <nd/law.h>
 
 /* --- game universe table indices ------------------------------------------ */
 
@@ -45,12 +46,12 @@ enum hd {
 	HD_MAX,
 };
 
-#define biome_hd nd_hds[HD_BIOME]
-#define map_w_hd nd_hds[HD_MAP_W]
-#define element_hd nd_hds[HD_ELEMENT]
-#define wts_hd nd_hds[HD_WTS]
-#define awts_hd nd_hds[HD_RWTS]
-#define hd_hd nd_hds[HD_HD]
+#define biome_hd nd_table_handle(HD_BIOME)
+#define map_w_hd nd_table_handle(HD_MAP_W)
+#define element_hd nd_table_handle(HD_ELEMENT)
+#define wts_hd nd_table_handle(HD_WTS)
+#define awts_hd nd_table_handle(HD_RWTS)
+#define hd_hd nd_table_handle(HD_HD)
 
 /* --- azoth.h ------------------------------------------------------------- */
 

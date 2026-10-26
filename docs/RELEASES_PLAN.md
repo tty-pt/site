@@ -63,24 +63,25 @@ stabilizing our isomorphic C-WASM web runtime, and introducing modular interacti
 
 | Repository | Baseline Tag | Proposed Version | SemVer Justification | Key Deltas & Breaking Changes |
 | :--- | :--- | :--- | :--- | :--- |
-| **`libqsys`** | `v1.2.1` | **`v1.2.2`** | Patch | Documentation consistency across all symbols in `ttypt/qsys.h`, Doxygen formatting, Windows/Unix split documented per symbol. Zero ABI changes. |
-| **`libcorm`** | `v1.4.0` | **`v2.0.0`** *(or `v1.5.0`)* | Major (or Minor) | **Breaking**: deleted `rec.h`; unified under `corm.h` and `cormr.h`. Added `cormd` resident daemon. New copy primitives (`corm_get_copy`, `corm_next_copy`), record registration helpers (`corm_rec_reg`, `corm_field_target`, `corm_rec_type`), multi-axis query engine (`cormr_query_run`), spec scan helpers. |
-| **`libxylem`** | `v1.4.0` | **`v1.5.0`** | Minor | Soname loads resolve against `LD_LIBRARY_PATH` before storing identity (`module_load_path`). Multi-root `claim_at` and namespace isolation. Two-header rule enforcement (removed `PTR_ARGS_IMPL` guards). BSD/macOS fixes. |
-| **`libjoint`** | `v1.3.0` | **`v1.4.0`** | Minor | Adopted modern `cormr.h` / `corm.h` API. Updated references from `libstoma` to `liblemma`. Memory tuning: scaled down initial allocation footprint. |
-| **`libislet`** | `v1.1.0` | **`v1.2.0`** | Minor | Adopted modern `cormr.h` / `corm.h` API. Updated references from `libstoma` to `liblemma`. 4D Morton encoding property tests and multi-value cell enhancements. |
-| **`libsepal`** | `v1.0.0` | **`v1.1.0`** | Minor | Added `CORM_SEPAL_EMBED_CACHE` file-backed vector embedding cache. Adopted modern `cormr.h` / `corm.h`. Updated `libstoma` → `liblemma`. |
-| **`liblemma`** *(was `libstoma`)* | `v1.0.0` *(stoma)* | **`v1.0.0`** *(or `v2.0.0`)* | Major / Rebrand | Complete rename from `libstoma` to `liblemma`. Header `<ttypt/lemma.h>`, library `lib/liblemma.so`, prefix `lemma_*`. Accent-preserving UTF-8 folding (`lemma_fold`), inverted index FTS. Adopted `corm.h`. |
-| **`libbud`** | `v1.0.0` | **`v1.0.1`** | Patch | Asset and documentation refresh. Pure-C isomorphic DOM scaffold and HTML renderer remain stable. |
-| **`libhyle`** | `v1.3.0` | **`v1.4.0`** | Minor | Updated registry and view query engines to consume `liblemma` instead of `libstoma`. Rebuilt and verified with Corm 2.0. |
-| **`libhyle-source`** | `v1.0.0` | **`v1.1.0`** | Minor | Updated storage persistence drivers to link and consume `liblemma` instead of `libstoma`. |
-| **`libhyle-bud`** | `v1.0.0` | **`v1.0.1`** | Patch | Ecosystem synchronization and verification with updated Hyle and Bud. |
-| **`axil`** | `v1.4.0` | **`v1.5.0`** | Minor | Framed HTTP responses (`Content-Length` + `Connection: close`). Security hardening (S5.4): teardown unauthenticated connections and gate terminal spawning. Per-connection generation tracking. Fixed 303 redirect connection teardown. Post-chroot module loading. |
-| **`axil-auth`** | `v1.1.0` | **`v1.2.0`** | Minor | Enforce `/bin/false` as default shell in `passwd` rows for terminal access gating. Header split: `ttypt/auth-config.h` and `ttypt/auth-outcome.h`. Exported `auth_password_matches()`. |
-| **`axil-hyle`** | `v1.0.0` | **`v1.0.1`** | Patch | Build flag cleanups, synchronized with `libhyle` and `libhyle-source`. |
-| **`axil-tty`** | *(New release / v1.3.2)* | **`v1.4.0`** | Minor | Debut synchronized release. WebSocket-to-PTY terminal streaming bridge, Telnet NAWS negotiation, browser terminal frontend (`axil-tty.js`, `axil-tty.css`), fail-closed authenticated identity checks. |
-| **`axil-nd`** | *(New release / v1.1.0)* | **`v1.2.0`** | Minor / Debut | Debut public release of NeverDark MUCK as a modular Axil plugin (`libaxil-nd.so`). Decoupled from legacy standalone architecture. Clean `law_*` command/data/storage pipeline, in-process Corm database storage, browser xterm client, telnet protocol support. |
-| **`libauren`** *(was `libqllm`)* | *(New release / v1.1.0)* | **`v1.0.0`** *(or `v1.2.0`)* | Major / Rebrand | Rebranding from `libqllm` to `libauren`. Header `<ttypt/auren.h>`, library `lib/libauren.so`, module `libaxil-auren.so`, CLI `auren-chat`, pkg-config `auren.pc`. Multi-model registry (up to 16 models), SystemOne, sliding-window KV cache, ggml/Vulkan/Metal backends. |
-| **`libqgl`** | *(New release / v1.1.0)* | **`v1.1.0`** | Minor / Debut | Debut public release of 2D graphics layer across OpenGL/GLFW and Linux framebuffer. Immediate-mode rendering, textures, bitmap fonts, tilemaps, layout engine, explicit `qgl_init()` lifecycle. |
+| **`libqsys`** | `v1.2.1` | **`v1.3.1`** | Minor | Added universal isomorphic C export contract `<ttypt/iso.h>` (`ISO_EXPORT`, `ISO_EXPORT_AS`, `ISO_IMPORT`), packaging in `/usr/include/ttypt/iso.h`. Updated `qsys.pc` to 1.3.1. |
+| **`libcorm`** | `v1.4.0` | **`v2.0.1`** | Major | **Breaking**: deleted `rec.h`; unified under `corm.h` and `cormr.h`. Added `cormd` resident daemon, linear memory arena shims for WASM, and multi-axis query engine (`cormr_query_run`). Updated `corm.pc` to 2.0.1. |
+| **`libxylem`** | `v1.4.0` | **`v1.6.0`** | Minor | In-WASM Xylem core dispatcher (`libxylem-wasm.c`), `XY_LISTENER_TAG`, dynamic loader bridge, and `LD_LIBRARY_PATH` soname resolution. Updated `xylem.pc` to 1.6.0. |
+| **`libjoint`** | `v1.3.0` | **`v1.5.0`** | Minor | Exported `rec_axis_store_typed` for HTOK binary date ingestion. Adopted modern `cormr.h` / `corm.h`. Updated `joint.pc` to 1.5.0. |
+| **`libislet`** | `v1.1.0` | **`v1.2.1`** | Patch | Purged hardcoded `/home` paths, enhanced build portability with `add-prefix`. Updated `islet.pc` to 1.2.1. |
+| **`libsepal`** | `v1.0.0` | **`v1.2.0`** | Minor | Exported `rec_axis_store_typed` for HTOK binary vector embedding ingestion. Updated `sepal.pc` to 1.2.0. |
+| **`liblemma`** *(was `libstoma`)* | `v1.0.0` | **`v1.1.0`** | Minor | Lossless tokenizer, 3-gram index, and elimination of `doc_hd`. Rebranded from `libstoma` (`<ttypt/lemma.h>`, `lib/liblemma.so`). Updated `lemma.pc` to 1.1.0. |
+| **`libbud`** | `v1.0.0` | **`v1.0.2`** | Patch | Namespaced host imports (`ISO_IMPORT`), universal `bud_slot` engine, keyed hydration, and 60fps `wasm_tick` frame loop. Updated `bud.pc` to 1.0.2. |
+| **`libhyle`** | `v1.3.0` | **`v1.5.0`** | Minor | Added binary token array storage and rotating ring buffer for lazy SSR decoding. Updated `hyle.pc` to 1.5.0. |
+| **`libhyle-source`** | `v1.0.0` | **`v1.2.0`** | Minor | Added `store_tok`, companion `data.tok`, `record.tok` container writing, and `hyle-tok` tool. Updated `hyle-source.pc` to 1.2.0. |
+| **`libhyle-bud`** | `v1.0.0` | **`v1.0.2`** | Patch | Ecosystem synchronization and verification with updated Hyle 1.5.0 and Bud 1.0.2. Updated `hyle-bud.pc` to 1.0.2. |
+| **`axil`** | `v1.4.0` | **`v1.6.0`** | Minor | Provided canonical browser `axil-bridge.js`, single-socket WebSocket multiplexing, and wasm allowed imports. Updated `axil.pc` to 1.6.0. |
+| **`axil-auth`** | `v1.1.0` | **`v1.2.1`** | Patch | Added support for port-qualified and configured cookie names. Updated `axil-auth.pc` to 1.2.1. |
+| **`axil-hyle`** | `v1.0.0` | **`v1.0.1`** | Patch | Ecosystem synchronization with Hyle 1.5.0 and Corm 2.0.1. Updated `axil-hyle.pc` to 1.0.1. |
+| **`axil-tty`** | `v1.4.0` | **`v1.4.1`** | Patch | Pure tty terminal capability bridge consuming axil transport. Updated `axil-tty.pc` to 1.4.1. |
+| **`libauren`** *(was `libqllm`)* | `v1.1.0` | **`v1.0.0`** | Major / Rebrand | Rebranding from `libqllm` to `libauren` (`<ttypt/auren.h>`, `lib/libauren.so`, `libaxil-auren.so`, CLI `auren-chat`). Multi-model registry (16 models), SystemOne, sliding-window KV cache. |
+| **`external/mk`** | `v0.1.18` | **`v0.2.0`** | Minor | Reusable isomorphic C engine (`iso.mk`), WASM ABI auditor (`wasm-audit.sh`), and purged `portable.mk`. |
+| **`pi-quest`** | `v1.1.0` | **`v1.2.0`** | Minor | Full quest journal engine: evidence gate, subquest foreman, Jev System One intent judge, TUI plan viewer, and zip bundle packaging. |
+| **`pi-mm`** | `v0.1.0` | **`v0.3.1`** | Minor | Cormd-first memory daemon, HTOK v4 cognitive triads, associative graph, epistemic safety states, and reciprocal rank fusion. |
 
 ---
 
@@ -90,69 +91,79 @@ To prevent broken downstream builds, releases must be executed in strict topolog
 
 ```
 [Wave 1: Foundations]
-   libqsys (1.2.2) ──┬────────────────────────────────────────────────────────┐
-   libbud  (1.0.1) ──┼───────────────────────────────────────┐                │
+   libqsys (1.3.1) ──┬────────────────────────────────────────────────────────┐
+   libbud  (1.0.2) ──┼───────────────────────────────────────┐                │
+   mk      (0.2.0)   │                                       │                │
    libtransp (sync)  │                                       │                │
                      ▼                                       │                │
 [Wave 2: Storage]    │                                       │                │
-   libcorm (2.0.0) ──┼──────────┬──────────┬──────────┐      │                │
+   libcorm (2.0.1) ──┼──────────┬──────────┬──────────┐      │                │
                      │          │          │          │      │                │
 [Wave 3: Modules & Axes]        │          │          │      │                │
-   libxylem (1.5.0) ─┼───┐      │          │          │      │                │
-   libjoint (1.4.0)  │   │      │          │          │      │                │
-   libislet (1.2.0)  │   │      │          │          │      │                │
-   libsepal (1.1.0)  │   │      │          │          │      │                │
-   liblemma (1.0.0) ─┼───┼──────┼───┐      │          │      │                │
+   libxylem (1.6.0) ─┼───┐      │          │          │      │                │
+   libjoint (1.5.0)  │   │      │          │          │      │                │
+   libislet (1.2.1)  │   │      │          │          │      │                │
+   libsepal (1.2.0)  │   │      │          │          │      │                │
+   liblemma (1.1.0) ─┼───┼──────┼───┐      │          │      │                │
    libqgl   (1.1.0)  │   │      │   │      │          │      │                │
                      ▼   │      │   ▼      │          │      │                │
 [Wave 4: Schema & Web]   │      │   │      │          │      │                │
-   libhyle  (1.4.0) ─────┼──────┼───┼──────┼──┐       │      │                │
-   axil     (1.5.0) ─────┼───┐  │   │      │  │       │      │                │
+   libhyle  (1.5.0) ─────┼──────┼───┼──────┼──┐       │      │                │
+   axil     (1.6.0) ─────┼───┐  │   │      │  │       │      │                │
                          │   │  │   │      │  │       │      │                │
 [Wave 5: Persistence & UI]   │  │   │      │  │       │      │                │
-   libhyle-source (1.1.0)────┼──┼───┼──────┼──┼───┐   │      │                │
-   libhyle-bud    (1.0.1) ◄──┘  │   │      │  │   └───┼──────┘                │
+   libhyle-source (1.2.0)────┼──┼───┼──────┼──┼───┐   │      │                │
+   libhyle-bud    (1.0.2) ◄──┘  │   │      │  │   └───┼──────┘                │
                                 │   │      │  │       │                       │
 [Wave 6: Services & Apps]       │   │      │  │       │                       │
-   axil-auth (1.2.0) ◄──────────┘   │      │  │       │                       │
-   axil-tty  (1.4.0) ◄──────────────┘      │  │       │                       │
+   axil-auth (1.2.1) ◄──────────┘   │      │  │       │                       │
+   axil-tty  (1.4.1) ◄──────────────┘      │  │       │                       │
    axil-hyle (1.0.1) ◄─────────────────────┘──┘       │                       │
    axil-nd   (1.2.0) ◄────────────────────────────────┘                       │
    libauren  (1.0.0) ◄────────────────────────────────────────────────────────┘
+
+[Tooling Extensions]
+   pi-quest  (1.2.0)
+   pi-mm     (0.3.1)
 ```
 
 ### Detailed Wave Sequence
 
 1. **Wave 1: Foundational Zero-Dependency Libraries**
-   - Step 1: `libqsys` (`v1.2.2`)
-   - Step 2: `libbud` (`v1.0.1`)
-   - Step 3: `libtransp`
+   - Step 1: `libqsys` (`v1.3.1`)
+   - Step 2: `libbud` (`v1.0.2`)
+   - Step 3: `mk` (`v0.2.0`)
+   - Step 4: `libtransp`
 
 2. **Wave 2: Core Storage Engine**
-   - Step 4: `libcorm` (`v2.0.0`)
+   - Step 5: `libcorm` (`v2.0.1`)
 
 3. **Wave 3: Dynamic Runtime, Domain Axes, and Graphics**
-   - Step 5: `libxylem` (`v1.5.0`)
-   - Step 6: `libjoint` (`v1.4.0`)
-   - Step 7: `libislet` (`v1.2.0`)
-   - Step 8: `libsepal` (`v1.1.0`)
-   - Step 9: `liblemma` (`v1.0.0`)
-   - Step 10: `libqgl` (`v1.1.0`)
+   - Step 6: `libxylem` (`v1.6.0`)
+   - Step 7: `libjoint` (`v1.5.0`)
+   - Step 8: `libislet` (`v1.2.1`)
+   - Step 9: `libsepal` (`v1.2.0`)
+   - Step 10: `liblemma` (`v1.1.0`)
+   - Step 11: `libqgl` (`v1.1.0`)
 
 4. **Wave 4: Canonical Schemas & HTTP Server Engine**
-   - Step 11: `libhyle` (`v1.4.0`)
-   - Step 12: `axil` (`v1.5.0`)
+   - Step 12: `libhyle` (`v1.5.0`)
+   - Step 13: `axil` (`v1.6.0`)
 
 5. **Wave 5: Persistence & UI Bridge Libraries**
-   - Step 13: `libhyle-source` (`v1.1.0`)
-   - Step 14: `libhyle-bud` (`v1.0.1`)
+   - Step 14: `libhyle-source` (`v1.2.0`)
+   - Step 15: `libhyle-bud` (`v1.0.2`)
 
 6. **Wave 6: Axil Dynamic Modules, Interactive Engines & Services**
-   - Step 15: `axil-auth` (`v1.2.0`)
-   - Step 16: `axil-tty` (`v1.4.0`)
-   - Step 17: `axil-hyle` (`v1.0.1`)
-   - Step 18: `axil-nd` (`v1.2.0`)
+   - Step 16: `axil-auth` (`v1.2.1`)
+   - Step 17: `axil-tty` (`v1.4.1`)
+   - Step 18: `axil-hyle` (`v1.0.1`)
    - Step 19: `libauren` (`v1.0.0`)
+   - Step 20: `axil-nd` (`v1.2.0` - tenant ongoing)
+
+7. **Wave 7: Agent Harness Tooling Extensions**
+   - Step 21: `pi-quest` (`v1.2.0`)
+   - Step 22: `pi-mm` (`v0.3.1`)
 
 ---
 
@@ -297,6 +308,54 @@ To execute these releases smoothly, follow this operational checklist:
    - Execute Wave 4 (`libhyle`, `axil`), tag, and test.
    - Execute Wave 5 (`libhyle-source`, `libhyle-bud`), tag, and test.
    - Execute Wave 6 (`axil-auth`, `axil-tty`, `axil-hyle`, `axil-nd`, `libauren`), tag, and test.
+
+---
+
+## 6. Release Wave 2026.11: The Full-Universe Isomorphic Runtime, Linker Purity & Binary Tokenization
+
+Building upon Wave 2026.10, this release establishes the complete pure-C isomorphic NeverDark runtime, full 32-planet universe deployment, DT_RUNPATH/RPATH elimination, in-WASM Xylem hook dispatching, and HTOK v3 binary tokenization.
+
+### Full Ecosystem SemVer & Release Matrix (39 Targets)
+
+| Target / Submodule | Prior Version | Next Release | SemVer Type | Scope & Key Additions |
+| :--- | :--- | :--- | :--- | :--- |
+| **`site` (host platform)** | `none` | **`v1.0.0`** | Major / Debut | Turnkey full-universe deployment (`./start.sh`), pure-C isomorphic Bud UI for NeverDark (`htdocs/nd.wasm`), multi-viewport support (WebGL 3D, Lamina 2D, TTY, Bud DOM), zero site-specific JS. |
+| **`libcorm`** | `v2.0.0` | **`v2.0.1`** | Patch | WASM linear memory arena shims (`src/corm_compat.h:63`), resident daemon `cormd` multi-instance resilience, DT_RUNPATH elimination. |
+| **`liblemma`** | `v1.0.0` | **`v1.1.0`** | Minor | Lossless subword tokenizer (`src/tok.c`, `lemma_tok_encode/decode/stream`), static BPE vocabulary (`vocab.txt`), 3-gram index, `doc_hd` elimination. |
+| **`libjoint`** | `v1.4.0` | **`v1.5.0`** | Minor | Exported `rec_axis_store_typed` for HTOK ISO date ingestion, clean system library linkage. |
+| **`libsepal`** | `v1.1.0` | **`v1.2.0`** | Minor | In-memory vector store rebuilding, `rec_axis_store_typed` embedding ingestion, cache synchronization. |
+| **`libislet`** | `v1.2.0` | **`v1.2.1`** | Patch | Portable build flags, purge of hardcoded `/home/` paths, portable add-prefix. |
+| **`libxylem`** | `v1.5.0` | **`v1.6.0`** | Minor | In-WASM hook registry and dispatcher (`src/libxylem-wasm.c`), `XY_LISTENER_TAG`, browser hook chaining without `dlopen`. |
+| **`axil`** | `v1.5.0` | **`v1.6.0`** | Minor | Canonical browser WebSocket bus (`htdocs/axil-bridge.js`), channel multiplexing (Stream 0 text, Stream 1 BCP, Stream 2 RPC), WASM capability allowlist. |
+| **`axil-auth`** | `v1.2.0` | **`v1.2.1`** | Patch | Port-qualified session cookies (`QSESSION_<port>`), two-header separation. |
+| **`axil-tty`** | `v1.4.0` | **`v1.4.1`** | Patch | Pure TTY capability bridge consuming `axil-bridge.js`, local xterm.js vendoring, decoupled terminal resize. |
+| **`axil-nd`** | `v1.2.0` | **`v1.3.0`** | Minor | Declarative BCP protocol (`<nd/bcp.h>`), multi-viewport system (`<nd/viewport.h>`), extensible UI slots (`nd_client_ext`), generic table loader (`nd_table_load`), XY bus table handle encapsulation (`nd_table_handle`). |
+| **`libbud`** | `v1.0.1` | **`v1.0.2`** | Patch | Namespaced `bud.*` WASM host imports, hardened capability allowlist (`wasm-allowed-imports.lst`). |
+| **`libhyle`** | `v1.4.0` | **`v1.5.0`** | Minor | Binary token array storage, rotating ring buffer for lazy SSR decoding and high-throughput zero-copy field parsing. |
+| **`libhyle-bud`** | `v1.0.1` | **`v1.0.2`** | Patch | Ecosystem synchronization with Hyle 1.5 token storage and Bud 1.0.2 host imports. |
+| **`libhyle-source`** | `v1.1.0` | **`v1.2.0`** | Minor | Binary token store driver (`store_tok`), companion `data.tok`, `hyle-tok` inspection CLI tool. |
+| **`nd-attr`** | `v1.0.1` | **`v1.1.0`** | Minor | Interactive 2-column character sheet (`ux/attr_ui.c`, `<nd/attr-ui.h>`), HP/MP vitality gauges (`<nd/attr-bcp.h>`), `stats` command. |
+| **`nd-biome`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/biomes.dsv` table (20 biomes) loaded dynamically via `nd_table_load()`. |
+| **`nd-class`** | `v1.0.2` | **`v1.0.3`** | Patch | Declarative `data/classes.dsv` table (4 classes) loaded dynamically via `nd_table_load()`. |
+| **`nd-core`** | `v1.0.2` | **`v1.0.3`** | Patch | Two-header separation (`<nd/core-types.h>`), removed `CORE_IMPL` guards, standardized README. |
+| **`nd-drink`** | `v1.0.7` | **`v1.0.8`** | Patch | Two-header separation (`<nd/drink-types.h>`), removed `DRINK_IMPL` guards, standardized README. |
+| **`nd-equip`** | `v1.0.2` | **`v1.1.0`** | Minor | 4x5 paper doll modal overlay (`ux/equip_ui.c`, `<nd/equip-ui.h>`), BCP unpacker (`<nd/equip-bcp.h>`), 9-slot descriptor table. |
+| **`nd-fight`** | `v1.0.2` | **`v1.1.0`** | Minor | Combat target HUD overlay (`ux/fight_ui.c`, `<nd/fight-ui.h>`) driven by live target vitality gauge. |
+| **`nd-level`** | `v1.0.1` | **`v1.1.0`** | Minor | Two-header separation (`<nd/level-types.h>` defining `nd_level_t` and `ND_LEVEL_DEFAULT`), public caller `<nd/level.h>`. |
+| **`nd-mob`** | `v1.0.2` | **`v1.0.3`** | Patch | Declarative `data/mobs.dsv` table (14 mob templates) loaded dynamically via `nd_table_load()`. |
+| **`nd-mortal`** | `v1.0.2` | **`v1.1.0`** | Minor | Two-header separation (`<nd/mortal-types.h>`), target vitality BCP channel (`<nd/mortal-bcp.h>`), and `ux/mortal_ui.c`. |
+| **`nd-other`** | `v1.0.1` | **`v1.0.2`** | Patch | Standardized README with man-src and modder guide. |
+| **`nd-plant`** | `v1.0.2` | **`v1.1.0`** | Minor | Two-header separation (`<nd/plant-types.h>` defining `plant_tile_t`), declarative `data/plants.dsv` (10 plant species). |
+| **`nd-race`** | `v1.0.1` | **`v1.1.0`** | Minor | Two-header separation (`<nd/race-types.h>` defining `race_t`), declarative `data/races.dsv` (5 playable races). |
+| **`nd-seat`** | `v1.0.2` | **`v1.0.3`** | Patch | Two-header separation (`<nd/seat-types.h>`), removed `SEAT_IMPL` guards, standardized README. |
+| **`nd-shop`** | `v1.0.1` | **`v1.0.2`** | Patch | Header import cleanup, standardized README with man-src and modder guide. |
+| **`nd-spell`** | `v1.0.7` | **`v1.1.0`** | Minor | Two-header separation (`<nd/spell-types.h>`), declarative `data/spells.dsv` (11 spells), BCP unpackers (`<nd/spell-bcp.h>`), grimoire modal UI (`ux/spell_ui.c`, `<nd/spell-ui.h>`). |
+| **`nd-stone`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/stones.dsv` table loaded dynamically via `nd_table_load()`. |
+| **`nd-vanilla`** | `v1.0.1` | **`v1.0.2`** | Patch | Standardized README with man-src, art, and modder guide. |
+| **`nd-wts`** | `v1.0.1` | **`v1.0.2`** | Patch | Declarative `data/wts.dsv` table (12 weapon types) loaded dynamically via `nd_table_load()`. |
+| **`.pi/extensions/pi-mm`** | `v0.1.0` | **`v0.2.0`** | Minor | HTOK v3 binary tokenization format, associative memory co-occurrence graph (`src/associative.ts`), cognitive priming, flashbulb anchors. |
+| **Engine Subsystems (8 in-tree)** | `none` | `in-tree` | Internal | Unversioned host subsystems (`nd-bus`, `nd-mcp`, `nd-obj`, `nd-region`, `nd-session`, `nd-speech`, `nd-view`, `nd-world`) providing core spacetime coordinates, object skeletons, and session queues. |
+
 3. **Step 3: Root Site & Submodule Pointer Updates**
    - Update git submodules in `site` to the newly tagged release commits.
    - Run root site verification (`make clean && make && make test`).

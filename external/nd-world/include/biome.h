@@ -13,7 +13,7 @@ biome_map_get(uint64_t position)
 	static unsigned biome_map[BIOME_MAX];
 	const void *v;
 	unsigned ref;
-	unsigned hd = hd_resolve(HD_BIOME);
+	unsigned hd = biome_hd;
 
 	for (int i = 0; i < 16; i++) {
 		ref = ((position >> (48 + i)) << 4) | i;

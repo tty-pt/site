@@ -13,6 +13,7 @@
 #include <nd/law.h>
 #include <nd/world-types.h>
 #include <nd/region-types.h>
+#include "region_cmd.h"
 
 /* World convention hooks called by governance */
 XY_DECL(int, map_where, coord_t *, p, unsigned, thing);
@@ -23,14 +24,14 @@ XY_DECL(int, ent_set, unsigned, ref, ENT *, tmp);
 #define NOMATCH_MESSAGE "I don't know what you mean.\n"
 #define CANTDO_MESSAGE "You can't do that.\n"
 
-static unsigned owner_hd = CM_MISS;
-static unsigned ban_hd = CM_MISS;
-static unsigned player_hd = CM_MISS;
-static unsigned presence_hd = (unsigned)-1;
+unsigned owner_hd = CM_MISS;
+unsigned ban_hd = CM_MISS;
+unsigned player_hd = CM_MISS;
+unsigned presence_hd = (unsigned)-1;
 static unsigned presence_type = (unsigned)-1;
 
-static int st_row_get(uint64_t id, uint8_t plen, struct st_rec *out);
-static void st_row_put(uint64_t id, uint8_t plen, const struct st_rec *rec);
+int st_row_get(uint64_t id, uint8_t plen, struct st_rec *out);
+void st_row_put(uint64_t id, uint8_t plen, const struct st_rec *rec);
 
 static const char *
 region_db_path(void)
@@ -63,10 +64,22 @@ st_rec_init(void)
 			{ .name = "flags", .type = CM_U32,
 			  .offset = offsetof(struct st_rec, flags),
 			  .max_size = sizeof(uint32_t) },
+			{ .name = "layout_mode", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, layout_mode),
+			  .max_size = sizeof(uint32_t) },
+			{ .name = "pres_flags", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, pres_flags),
+			  .max_size = sizeof(uint32_t) },
+			{ .name = "driver", .type = CM_STR,
+			  .offset = offsetof(struct st_rec, driver),
+			  .max_size = sizeof(((struct st_rec *)0)->driver) },
+			{ .name = "map_driver", .type = CM_STR,
+			  .offset = offsetof(struct st_rec, map_driver),
+			  .max_size = sizeof(((struct st_rec *)0)->map_driver) },
 			{ .name = "mods", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, mods),
 			  .max_size = sizeof(((struct st_rec *)0)->mods) },
-		}, 5);
+		}, 9);
 	if (rec == CM_MISS)
 		WARN("st_rec_register: corm_record_register failed\n");
 	return rec;
@@ -97,14 +110,14 @@ region_tables_init(void)
 	}
 }
 
-static int
+int
 st_have_hd(void)
 {
 	region_tables_init();
 	return owner_hd != CM_MISS;
 }
 
-static unsigned
+unsigned
 player_lookup(const char *name)
 {
 	region_tables_init();
@@ -275,13 +288,13 @@ XY_IMPL(unsigned, st_owner, uint64_t, id, uint8_t, plen)
 	return *o;
 }
 
-static int
+int
 st_can(unsigned ref, uint64_t id, uint8_t plen)
 {
 	return st_owner(id, plen) == ref;
 }
 
-static int
+int
 st_row_get(uint64_t id, uint8_t plen, struct st_rec *out)
 {
 	char key[ST_ROW_KEY_LEN + 1];
@@ -298,7 +311,7 @@ st_row_get(uint64_t id, uint8_t plen, struct st_rec *out)
 	return 1;
 }
 
-static void
+void
 st_row_put(uint64_t id, uint8_t plen, const struct st_rec *rec)
 {
 	char key[ST_ROW_KEY_LEN + 1];
@@ -309,7 +322,7 @@ st_row_put(uint64_t id, uint8_t plen, const struct st_rec *rec)
 	corm_put(owner_hd, key, rec);
 }
 
-static void
+void
 st_row_del(uint64_t id, uint8_t plen)
 {
 	char key[ST_ROW_KEY_LEN + 1];
@@ -334,7 +347,7 @@ st_unload_tramp(void *ud)
 	return xy_unload((char *)ud);
 }
 
-static int
+int
 st_region_load(uint64_t id, uint8_t plen, char *name)
 {
 	int rc;
@@ -349,7 +362,7 @@ st_region_load(uint64_t id, uint8_t plen, char *name)
 	return rc;
 }
 
-static int
+int
 st_region_unload(uint64_t id, uint8_t plen, char *name)
 {
 	int rc;
@@ -361,7 +374,7 @@ st_region_unload(uint64_t id, uint8_t plen, char *name)
 	return rc;
 }
 
-static int
+int
 st_mod_loaded(uint64_t id, uint8_t plen, const char *name)
 {
 	struct st_rec rec;
@@ -376,7 +389,7 @@ st_mod_loaded(uint64_t id, uint8_t plen, const char *name)
 	return 0;
 }
 
-static int
+int
 st_mod_add(uint64_t id, uint8_t plen, const char *name)
 {
 	struct st_rec rec;
@@ -397,7 +410,7 @@ st_mod_add(uint64_t id, uint8_t plen, const char *name)
 	return XY_OK;
 }
 
-static int
+int
 st_mod_del(uint64_t id, uint8_t plen, const char *name)
 {
 	struct st_rec rec;
@@ -542,7 +555,7 @@ XY_IMPL(int, st_region_of_obj, unsigned, ref, uint64_t *, id, uint8_t *, plen)
 
 /* --- Ruler Name & Refusal ------------------------------------------------ */
 
-static void
+void
 st_owner_name(unsigned owner_ref, char *buf, size_t len)
 {
 	OBJ o;
@@ -569,6 +582,140 @@ XY_IMPL(int, st_refuse_region, unsigned, player_ref, uint64_t, id, uint8_t, plen
 	return 0;
 }
 
+XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags)
+{
+	uint64_t mask;
+	unsigned w;
+	char res_stage[16] = "";
+	char res_map[16] = "ascii-bud";
+	uint8_t res_layout = ND_LAYOUT_STANDARD_HYBRID;
+	uint8_t res_flags = ND_REGION_ALLOW_CHOICE;
+	int stage_locked = 0;
+	int map_locked = 0;
+	int layout_locked = 0;
+
+	if (plen > ST_PLEN_CELL)
+		plen = ST_PLEN_CELL;
+
+	/* Walk prefix lengths from cosmos (0) down to cell (plen).
+	 * If a higher authority locks an attribute (ND_REGION_LOCKED),
+	 * lower levels cannot override it.
+	 * If not locked, subordinate regions can refine or override. */
+	for (w = 0; w <= plen; w++) {
+		struct st_rec rec;
+		mask = w ? (~0ULL << (64 - w)) : 0ULL;
+		if (!st_row_get(id & mask, (uint8_t)w, &rec))
+			continue;
+
+		uint32_t eff_flags = rec.pres_flags | rec.flags;
+
+		/* Stage driver resolution */
+		if (!stage_locked) {
+			if (rec.driver[0]) {
+				snprintf(res_stage, sizeof(res_stage), "%s", rec.driver);
+				if (eff_flags & ND_REGION_LOCKED) {
+					stage_locked = 1;
+					res_flags |= ND_REGION_LOCKED;
+					res_flags &= ~ND_REGION_ALLOW_CHOICE;
+				} else if (eff_flags & ND_REGION_ALLOW_CHOICE) {
+					res_flags |= ND_REGION_ALLOW_CHOICE;
+				}
+			} else if (eff_flags & ND_REGION_ALLOW_CHOICE) {
+				res_flags |= ND_REGION_ALLOW_CHOICE;
+			}
+		}
+
+		/* Map driver resolution */
+		if (!map_locked) {
+			if (rec.map_driver[0]) {
+				snprintf(res_map, sizeof(res_map), "%s", rec.map_driver);
+				if (eff_flags & ND_REGION_LOCKED)
+					map_locked = 1;
+			}
+		}
+
+		/* Layout mode resolution */
+		if (!layout_locked) {
+			if (rec.layout_mode != 0) {
+				res_layout = (uint8_t)rec.layout_mode;
+				if (eff_flags & ND_REGION_LOCKED)
+					layout_locked = 1;
+			}
+		}
+	}
+
+	if (out_stage && stage_len > 0)
+		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
+	if (out_map && map_len > 0)
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
+	if (out_layout)
+		*out_layout = res_layout;
+	if (out_flags)
+		*out_flags = res_flags;
+
+	return XY_OK;
+}
+
+XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
+	char *, out_stage, size_t, stage_len,
+	char *, out_map, size_t, map_len,
+	uint8_t *, out_layout,
+	uint8_t *, out_flags)
+{
+	uint64_t id;
+	uint8_t plen;
+	if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
+		if (out_stage && stage_len > 0)
+			snprintf(out_stage, stage_len, "tty");
+		if (out_map && map_len > 0)
+			snprintf(out_map, map_len, "ascii-bud");
+		if (out_layout)
+			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
+		if (out_flags)
+			*out_flags = ND_REGION_ALLOW_CHOICE;
+		return XY_OK;
+	}
+	return st_resolve_presentation_policy(id, plen, out_stage, stage_len,
+		out_map, map_len, out_layout, out_flags);
+}
+
+XY_IMPL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen)
+{
+	if (!out_driver || maxlen == 0)
+		return XY_ERR_INVALID;
+	return st_resolve_presentation_policy(id, plen, out_driver, maxlen, NULL, 0, NULL, NULL);
+}
+
+XY_IMPL(int, st_region_set_driver, uint64_t, id, uint8_t, plen, const char *, driver)
+{
+	struct st_rec rec;
+	if (!st_row_get(id, plen, &rec)) {
+		memset(&rec, 0, sizeof(rec));
+		rec.owner = 1;
+		rec.plen = plen;
+	}
+	if (!driver || !*driver || strcmp(driver, "choice") == 0) {
+		rec.driver[0] = '\0';
+		rec.pres_flags |= ND_REGION_ALLOW_CHOICE;
+		rec.pres_flags &= ~ND_REGION_LOCKED;
+	} else {
+		snprintf(rec.driver, sizeof(rec.driver), "%s", driver);
+	}
+	st_row_put(id, plen, &rec);
+	return XY_OK;
+}
+
+XY_IMPL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, size_t, maxlen)
+{
+	if (!out_driver || maxlen == 0)
+		return XY_ERR_INVALID;
+	return st_player_resolve_presentation(player_ref, out_driver, maxlen, NULL, 0, NULL, NULL);
+}
+
 /* --- Bans ---------------------------------------------------------------- */
 
 #define BAN_KEY_LEN 32
@@ -587,7 +734,7 @@ st_ban_have(void)
 	return ban_hd != CM_MISS;
 }
 
-static void
+void
 st_ban_put(unsigned player_ref, uint64_t id, uint8_t plen, unsigned banner)
 {
 	char key[64];
@@ -598,7 +745,7 @@ st_ban_put(unsigned player_ref, uint64_t id, uint8_t plen, unsigned banner)
 	corm_put(ban_hd, key, &banner);
 }
 
-static int
+int
 st_ban_lookup(unsigned player_ref, uint64_t id, uint8_t plen, unsigned *banner)
 {
 	char key[64];
@@ -615,7 +762,7 @@ st_ban_lookup(unsigned player_ref, uint64_t id, uint8_t plen, unsigned *banner)
 	return 1;
 }
 
-static void
+void
 st_ban_del(unsigned player_ref, uint64_t id, uint8_t plen)
 {
 	char key[64];
@@ -626,7 +773,7 @@ st_ban_del(unsigned player_ref, uint64_t id, uint8_t plen)
 	corm_del(ban_hd, key);
 }
 
-static void
+void
 st_ban_place(uint64_t id, uint8_t plen, char *buf, size_t len)
 {
 	if (plen == ST_PLEN_ROOT)
@@ -639,7 +786,7 @@ st_ban_place(uint64_t id, uint8_t plen, char *buf, size_t len)
 
 /* --- Target Selection Helpers -------------------------------------------- */
 
-static int
+int
 st_cmd_world(const char *tok, uint64_t *id, uint8_t *plen)
 {
 	char *end = NULL;
@@ -659,830 +806,6 @@ st_cmd_world(const char *tok, uint64_t *id, uint8_t *plen)
 	*plen = ST_PLEN_WORLD;
 	return XY_OK;
 }
-
-static int
-st_target_get(unsigned player_ref, uint64_t *id, uint8_t *plen)
-{
-	ENT e = ent_get(player_ref);
-
-	if (e.target_plen == ST_SEL_UNSET)
-		return 0;
-	if (id)
-		*id = e.target_id;
-	if (plen)
-		*plen = e.target_plen;
-	return 1;
-}
-
-static void
-st_target_set(unsigned player_ref, uint64_t id, uint8_t plen)
-{
-	ENT e = ent_get(player_ref);
-
-	e.target_id = id;
-	e.target_plen = plen;
-	ent_set(player_ref, &e);
-}
-
-static void
-st_target_clear(unsigned player_ref)
-{
-	st_target_set(player_ref, 0, ST_SEL_UNSET);
-}
-
-static int
-st_target_or_position(unsigned player_ref, uint64_t *id, uint8_t *plen)
-{
-	if (st_target_get(player_ref, id, plen))
-		return XY_OK;
-	return st_region_of_player(player_ref, id, plen);
-}
-
-static int
-st_cmd_region(unsigned player_ref, int argc, char *argv[], int world_arg,
-	uint64_t *id, uint8_t *plen)
-{
-	if (argc > world_arg && argv[world_arg] && *argv[world_arg]) {
-		if (st_cmd_world(argv[world_arg], id, plen) == XY_OK)
-			return XY_OK;
-		return XY_ERR_INVALID;
-	}
-	return st_target_or_position(player_ref, id, plen);
-}
-
-static int
-st_here_cell(unsigned player_ref, uint64_t *cell)
-{
-	OBJ player;
-	coord_t pos[4];
-
-	if (!cell || player_ref == NOTHING || player_ref == (unsigned)-1)
-		return XY_ERR_INVALID;
-	if (nd_get(HD_OBJ, &player, &player_ref) != 0)
-		return XY_ERR_NOTFOUND;
-	map_where(pos, player.location);
-	*cell = pos_morton_encode(pos);
-	return XY_OK;
-}
-
-static int
-st_argc_trim(int argc, char *argv[])
-{
-	while (argc > 1 && (!argv[argc - 1] || !*argv[argc - 1]))
-		argc--;
-	return argc;
-}
-
-static int
-st_cmd_point(unsigned player_ref, int argc, char *argv[], int arg,
-	uint64_t *cell, int *consumed)
-{
-	coord_t pos[4];
-	char *end;
-	long v;
-	int i;
-	unsigned long w;
-
-	if (!cell || !consumed || arg >= argc || !argv[arg] || !*argv[arg])
-		return XY_ERR_INVALID;
-	*consumed = 0;
-	if (strcmp(argv[arg], "here") == 0) {
-		if (st_here_cell(player_ref, cell) != XY_OK)
-			return XY_ERR_NOTFOUND;
-		*consumed = 1;
-		return XY_OK;
-	}
-	if (strcmp(argv[arg], "cosmos") == 0) {
-		*cell = 0;
-		*consumed = 1;
-		return XY_OK;
-	}
-	if (strcmp(argv[arg], "world") == 0) {
-		if (arg + 1 >= argc || !argv[arg + 1] || !*argv[arg + 1])
-			return XY_ERR_INVALID;
-		w = strtoul(argv[arg + 1], &end, 10);
-		if (!end || end == argv[arg + 1] || *end || w > 65535)
-			return XY_ERR_INVALID;
-		*cell = st_planet_id((unsigned)w);
-		*consumed = 2;
-		return XY_OK;
-	}
-	if (arg + 3 >= argc)
-		return XY_ERR_INVALID;
-	for (i = 0; i < 4; i++) {
-		if (!argv[arg + i] || !*argv[arg + i])
-			return XY_ERR_INVALID;
-		v = strtol(argv[arg + i], &end, 10);
-		if (end == argv[arg + i] || *end || v < SHRT_MIN || v > SHRT_MAX)
-			return XY_ERR_INVALID;
-		pos[i] = (coord_t)v;
-	}
-	*cell = pos_morton_encode(pos);
-	*consumed = 4;
-	return XY_OK;
-}
-
-static int
-st_finest_owned_plen(unsigned ref, uint64_t cell, uint8_t *plen)
-{
-	unsigned w;
-	uint64_t mask;
-	uint8_t hit = ST_SEL_UNSET;
-
-	for (w = 0; w <= ST_PLEN_CELL; w++) {
-		mask = w ? (~0ULL << (64 - w)) : 0ULL;
-		if (st_can(ref, cell & mask, (uint8_t)w))
-			hit = (uint8_t)w;
-	}
-	if (hit == ST_SEL_UNSET)
-		return 0;
-	if (plen)
-		*plen = hit;
-	return 1;
-}
-
-/* --- Governance Commands ------------------------------------------------- */
-
-static void st_row_header(unsigned player_ref, uint64_t id, uint8_t plen,
-	const struct st_rec *rec);
-
-static void
-do_grant(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
-	char *wstr = (argc > 2 && argv[2]) ? argv[2] : "";
-	unsigned target_ref;
-	uint64_t cell, id, mask;
-	uint8_t plen;
-	int consumed = 0;
-	struct st_rec rec;
-	int have;
-	char *end = NULL;
-	unsigned long w;
-	OBJ target;
-
-	argc = st_argc_trim(argc, argv);
-	if (!*name) {
-		nd_printf(player_ref, "Usage: grant <player> [<width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (strcmp(name, "me") == 0)
-		target_ref = player_ref;
-	else {
-		target_ref = player_lookup(name);
-		if (target_ref == NOTHING) {
-			nd_printf(player_ref, NOMATCH_MESSAGE);
-			nd_flush(player_ref);
-			return;
-		}
-	}
-	if (nd_get(HD_OBJ, &target, &target_ref) != 0 || target.type != TYPE_ENTITY) {
-		nd_printf(player_ref, CANTDO_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (argc > 3) {
-		if (st_cmd_point(player_ref, argc, argv, 3, &cell, &consumed) != XY_OK ||
-		    consumed <= 0 || 3 + consumed != argc) {
-			nd_printf(player_ref, "Usage: grant <player> [<width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-			nd_flush(player_ref);
-			return;
-		}
-	} else if (st_here_cell(player_ref, &cell) != XY_OK) {
-		nd_printf(player_ref, "You are nowhere.\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (argc > 2 && *wstr) {
-		w = strtoul(wstr, &end, 10);
-		if (!end || end == wstr || *end || w > ST_PLEN_CELL) {
-			nd_printf(player_ref, "Usage: grant <player> [<width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-			nd_flush(player_ref);
-			return;
-		}
-		plen = (uint8_t)w;
-	} else {
-		if (st_finest_owned_plen(player_ref, cell, &plen)) {
-			if (plen < ST_PLEN_WORLD)
-				plen = ST_PLEN_WORLD;
-		} else
-			plen = ST_PLEN_WORLD;
-	}
-	mask = plen ? (~0ULL << (64 - plen)) : 0ULL;
-	id = cell & mask;
-
-	if (!st_can_region(player_ref, id, plen)) {
-		st_refuse_region(player_ref, id, plen);
-		return;
-	}
-
-	have = st_row_get(id, plen, &rec);
-	if (!have) {
-		memset(&rec, 0, sizeof(rec));
-		rec.plen = plen;
-	}
-	rec.owner = target_ref;
-	st_row_put(id, plen, &rec);
-
-	xy_claim_at(id, plen, NULL, NULL);
-	xy_claim_at(0, 0, NULL, NULL);
-
-	st_row_header(player_ref, id, plen, &rec);
-	if (target_ref != player_ref) {
-		OBJ granter;
-		memset(&granter, 0, sizeof(granter));
-		nd_get(HD_OBJ, &granter, &player_ref);
-		nd_printf(target_ref, "%s granted you a region:\n", granter.name);
-		st_row_header(target_ref, id, plen, &rec);
-		nd_flush(target_ref);
-	}
-	nd_flush(player_ref);
-}
-
-static void
-do_planet(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	char *tok = (argc > 1 && argv[1]) ? argv[1] : "";
-	uint64_t id;
-	uint8_t plen;
-	char *end = NULL;
-	unsigned long w;
-	struct st_rec rec;
-
-	WARN("do_planet entered: player_ref=%u argc=%d tok='%s'\n", player_ref, argc, tok);
-
-	if (!*tok) {
-		nd_printf(player_ref, "Usage: planet <world>\n");
-		nd_flush(player_ref);
-		return;
-	}
-	w = strtoul(tok, &end, 10);
-	if (!end || end == tok || *end || w > 65535) {
-		nd_printf(player_ref, "Usage: planet <world>\n");
-		nd_flush(player_ref);
-		return;
-	}
-	id = st_planet_id((unsigned)w);
-	plen = ST_PLEN_WORLD;
-
-	int have = st_row_get(id, plen, &rec);
-	char oname[64];
-	if (have && rec.owner != player_ref && rec.owner != NOTHING) {
-		st_owner_name(rec.owner, oname, sizeof(oname));
-		nd_printf(player_ref, "Planet %lu is already claimed by %s\n", w, oname);
-		nd_flush(player_ref);
-		return;
-	}
-	if (!have && !st_can(player_ref, 0, ST_PLEN_ROOT)) {
-		WARN("do_planet: permission denied branch taken!\n");
-		nd_printf(player_ref, "Permission denied\n");
-		nd_flush(player_ref);
-		return;
-	}
-	int claim_rc = xy_claim_at(id, plen, NULL, NULL);
-	xy_claim_at(0, 0, NULL, NULL);
-	if (claim_rc != XY_OK) {
-		WARN("do_planet: xy_claim_at failed rc=%d\n", claim_rc);
-		nd_printf(player_ref, "Planet %lu could not be claimed (%s)\n",
-			w, xy_strerror(xy_errno()));
-		nd_flush(player_ref);
-		return;
-	}
-	if (!have) {
-		memset(&rec, 0, sizeof(rec));
-		rec.plen = plen;
-	}
-	rec.owner = player_ref;
-	st_row_put(id, plen, &rec);
-
-	st_owner_name(player_ref, oname, sizeof(oname));
-	nd_printf(player_ref,
-		"planet %lu established: region id=0x%016llx plen=%u world=%lu owner=%s mods=%u\n",
-		w, (unsigned long long)id, plen, w, oname, rec.nmods);
-	nd_flush(player_ref);
-}
-
-static void
-st_row_header(unsigned player_ref, uint64_t id, uint8_t plen,
-	const struct st_rec *rec)
-{
-	char oname[64];
-
-	st_owner_name(rec->owner, oname, sizeof(oname));
-	if (plen == ST_PLEN_WORLD) {
-		nd_printf(player_ref, "[id=0x%016llx plen=%u world=%u owner=%s mods=%u]\n",
-			(unsigned long long)id, plen, st_world_of(id),
-			oname, rec->nmods);
-	} else {
-		nd_printf(player_ref, "[id=0x%016llx plen=%u owner=%s mods=%u]\n",
-			(unsigned long long)id, plen, oname, rec->nmods);
-	}
-}
-
-static void
-do_planets(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
-{
-	unsigned player_ref = fd_player(fd);
-	unsigned c;
-	const void *kp, *vp;
-	int n = 0;
-
-	if (!st_have_hd())
-		return;
-	c = corm_iter(owner_hd, NULL, 0);
-	while (corm_next(&kp, &vp, c)) {
-		const char *key = kp;
-		const struct st_rec *rec = vp;
-		uint64_t id;
-		uint8_t plen;
-
-		if (st_row_key_parse(key, &id, &plen) != 0)
-			continue;
-		if (rec->plen != plen)
-			continue;
-		st_row_header(player_ref, id, plen, rec);
-		n++;
-	}
-	corm_fin(c);
-	if (!n)
-		nd_printf(player_ref, "No regions claimed.\n");
-	nd_flush(player_ref);
-}
-
-static void
-do_here(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
-{
-	unsigned player_ref = fd_player(fd);
-	uint64_t id;
-	uint8_t plen;
-	struct st_rec rec;
-
-	if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "You are nowhere.\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_row_get(id, plen, &rec)) {
-		memset(&rec, 0, sizeof(rec));
-		rec.owner = NOTHING;
-		rec.plen = plen;
-	}
-	st_row_header(player_ref, id, plen, &rec);
-	nd_flush(player_ref);
-}
-
-static void
-do_target(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	uint64_t id;
-	uint8_t plen;
-	char place[64];
-	const char *arg;
-
-	argc = st_argc_trim(argc, argv);
-	arg = (argc > 1 && argv[1]) ? argv[1] : "";
-
-	if (!*arg) {
-		if (st_target_get(player_ref, &id, &plen)) {
-			st_ban_place(id, plen, place, sizeof(place));
-			nd_printf(player_ref,
-				"Default target region: %s.\n", place);
-			nd_printf(player_ref,
-				"Commands without a region act there: wall, ban, "
-				"unban, loadmod, unloadmod, modlist, deny.\n");
-		} else {
-			nd_printf(player_ref,
-				"No default target region set (commands act on "
-				"your current region).\n");
-			nd_printf(player_ref,
-				"Set one with `target <region>', `target here', "
-				"or clear it with `target none'.\n");
-		}
-		nd_flush(player_ref);
-		return;
-	}
-
-	if (strcmp(arg, "none") == 0) {
-		st_target_clear(player_ref);
-		nd_printf(player_ref, "Default target region cleared.\n");
-		nd_flush(player_ref);
-		return;
-	}
-
-	if (strcmp(arg, "here") == 0) {
-		if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
-			nd_printf(player_ref, "You are nowhere.\n");
-			nd_flush(player_ref);
-			return;
-		}
-	} else if (argc > 2 && *arg) {
-		char *end = NULL;
-		unsigned long wp = strtoul(arg, &end, 10);
-		uint64_t cell;
-		uint64_t mask;
-		int consumed = 0;
-
-		if (!end || *end || wp > ST_PLEN_CELL ||
-		    st_cmd_point(player_ref, argc, argv, 2, &cell, &consumed) != XY_OK ||
-		    consumed <= 0 || 2 + consumed != argc) {
-			nd_printf(player_ref,
-				"Usage: target [<world> | cosmos | here | none | <width> <point>]\n");
-			nd_flush(player_ref);
-			return;
-		}
-		plen = (uint8_t)wp;
-		mask = plen ? (~0ULL << (64 - plen)) : 0ULL;
-		id = cell & mask;
-	} else if (st_cmd_world(arg, &id, &plen) != XY_OK) {
-		nd_printf(player_ref,
-			"Usage: target [<world> | cosmos | here | none | <width> <point>]\n");
-		nd_flush(player_ref);
-		return;
-	}
-
-	if (!st_can_region(player_ref, id, plen)) {
-		st_refuse_region(player_ref, id, plen);
-		return;
-	}
-	st_target_set(player_ref, id, plen);
-	st_ban_place(id, plen, place, sizeof(place));
-	nd_printf(player_ref, "Default target region set to %s.\n", place);
-	nd_flush(player_ref);
-}
-
-struct st_deny_arg {
-	char what[ND_ST_MOD_NAME + 32];
-	xy_deny_type_t type;
-	int rc;
-};
-
-static int
-st_deny_tramp(void *ud)
-{
-	struct st_deny_arg *a = ud;
-	a->rc = xy_deny(a->what, a->type);
-	return a->rc;
-}
-
-static void
-do_deny(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	struct st_deny_arg a;
-	uint64_t id;
-	uint8_t plen;
-	xy_deny_type_t type;
-	int rc;
-
-	if (argc < 3 || !argv[1] || !*argv[1] || !argv[2] || !*argv[2]) {
-		nd_printf(player_ref, "Usage: deny <hook|module> <name> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!strcmp(argv[1], "hook"))
-		type = XY_DENY_HOOK;
-	else if (!strcmp(argv[1], "module"))
-		type = XY_DENY_MODULE;
-	else {
-		nd_printf(player_ref, "Usage: deny <hook|module> <name> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_cmd_region(player_ref, argc, argv, 3, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Invalid world\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_can_region(player_ref, id, plen)) {
-		st_refuse_region(player_ref, id, plen);
-		return;
-	}
-	if (!st_row_get(id, plen, NULL)) {
-		nd_printf(player_ref, "No such region\n");
-		nd_flush(player_ref);
-		return;
-	}
-
-	snprintf(a.what, sizeof(a.what), "%s", argv[2]);
-	a.type = type;
-	a.rc = XY_ERR_INVALID;
-
-	rc = xy_claim_at(id, plen, NULL, NULL);
-	if (rc == XY_OK)
-		rc = xy_with_region(id, plen, st_deny_tramp, &a);
-	xy_claim_at(0, 0, NULL, NULL);
-	if (rc != XY_OK || a.rc != XY_OK) {
-		nd_printf(player_ref, "deny failed (%s)\n", xy_strerror(rc != XY_OK ? rc : a.rc));
-		nd_flush(player_ref);
-		return;
-	}
-	nd_printf(player_ref, "denied: %s %s in region id=0x%016llx plen=%u\n",
-		type == XY_DENY_HOOK ? "hook" : "module", argv[2],
-		(unsigned long long)id, plen);
-	nd_flush(player_ref);
-}
-
-static void
-do_loadmod(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
-	uint64_t id = 0;
-	uint8_t plen = ST_PLEN_ROOT;
-	char namebuf[ND_ST_MOD_NAME + 1];
-	int rc;
-
-	if (!*name || strchr(name, '/')) {
-		nd_printf(player_ref, "Usage: loadmod <module> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Invalid world\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_can(player_ref, id, plen)) {
-		nd_printf(player_ref, "Permission denied\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_row_get(id, plen, NULL)) {
-		nd_printf(player_ref, "No such region\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_mod_loaded(id, plen, name)) {
-		nd_printf(player_ref, "%s is already loaded\n", name);
-		nd_flush(player_ref);
-		return;
-	}
-
-	snprintf(namebuf, sizeof(namebuf), "%s", name);
-	rc = st_region_load(id, plen, namebuf);
-	if (rc != XY_OK) {
-		nd_printf(player_ref, "%s failed to load (%s)\n", name, xy_strerror(xy_errno()));
-		nd_flush(player_ref);
-		return;
-	}
-	st_mod_add(id, plen, name);
-	nd_printf(player_ref, "%s loaded into region id=0x%016llx plen=%u\n",
-		namebuf, (unsigned long long)id, plen);
-	nd_flush(player_ref);
-}
-
-static void
-do_unloadmod(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
-	uint64_t id = 0;
-	uint8_t plen = ST_PLEN_ROOT;
-	char namebuf[ND_ST_MOD_NAME + 1];
-	int rc;
-
-	if (!*name || strchr(name, '/')) {
-		nd_printf(player_ref, "Usage: unloadmod <module> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Invalid world\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_can(player_ref, id, plen)) {
-		nd_printf(player_ref, "Permission denied\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_mod_loaded(id, plen, name)) {
-		nd_printf(player_ref, "%s is not loaded\n", name);
-		nd_flush(player_ref);
-		return;
-	}
-
-	snprintf(namebuf, sizeof(namebuf), "%s", name);
-	rc = st_region_unload(id, plen, namebuf);
-	if (rc != XY_OK && rc != XY_ERR_NOTFOUND) {
-		nd_printf(player_ref, "%s failed to unload (%s)\n", name, xy_strerror(xy_errno()));
-		nd_flush(player_ref);
-		return;
-	}
-	st_mod_del(id, plen, name);
-	nd_printf(player_ref, "%s unloaded from region id=0x%016llx plen=%u\n",
-		namebuf, (unsigned long long)id, plen);
-	nd_flush(player_ref);
-}
-
-static void
-do_modlist(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	uint64_t id = 0;
-	uint8_t plen = ST_PLEN_ROOT;
-	struct st_rec rec;
-	uint32_t i;
-
-	if (st_cmd_region(player_ref, argc, argv, 1, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Invalid world\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_row_get(id, plen, &rec)) {
-		nd_printf(player_ref, "No such region\n");
-		nd_flush(player_ref);
-		return;
-	}
-	st_row_header(player_ref, id, plen, &rec);
-	for (i = 0; i < rec.nmods && i < ND_ST_MAX_MODS; i++)
-		nd_printf(player_ref, "  %s\n", rec.mods[i]);
-	nd_flush(player_ref);
-}
-
-static void
-do_release(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd);
-	char *tok = (argc > 1 && argv[1]) ? argv[1] : "";
-	char *end = NULL;
-	unsigned long w = 0;
-	uint64_t id = 0, cell, mask;
-	uint8_t plen = ST_PLEN_ROOT;
-	struct st_rec rec;
-	int is_world = 0;
-	int consumed = 0;
-	uint32_t i;
-	char namebuf[ND_ST_MOD_NAME + 1];
-
-	argc = st_argc_trim(argc, argv);
-	if (argc <= 1 || !*tok) {
-		nd_printf(player_ref, "Usage: release [<world> | <width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (argc == 2) {
-		w = strtoul(tok, &end, 10);
-		if (!end || end == tok || *end || w > 65535) {
-			nd_printf(player_ref, "Usage: release [<world> | <width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-			nd_flush(player_ref);
-			return;
-		}
-		id = st_planet_id((unsigned)w);
-		plen = ST_PLEN_WORLD;
-		is_world = 1;
-	} else {
-		w = strtoul(tok, &end, 10);
-		if (!end || end == tok || *end || w > ST_PLEN_CELL) {
-			nd_printf(player_ref, "Usage: release [<world> | <width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-			nd_flush(player_ref);
-			return;
-		}
-		if (st_cmd_point(player_ref, argc, argv, 2, &cell, &consumed) != XY_OK ||
-		    consumed <= 0 || 2 + consumed != argc) {
-			nd_printf(player_ref, "Usage: release [<world> | <width> [here | world <N> | cosmos | <x> <y> <z> <w>]]\n");
-			nd_flush(player_ref);
-			return;
-		}
-		plen = (uint8_t)w;
-		mask = plen ? (~0ULL << (64 - plen)) : 0ULL;
-		id = cell & mask;
-		w = 0;
-	}
-
-	if (plen == ST_PLEN_ROOT) {
-		nd_printf(player_ref, "The cosmos cannot be released (grant it instead).\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_can(player_ref, id, plen)) {
-		nd_printf(player_ref, "Permission denied\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_row_get(id, plen, &rec)) {
-		nd_printf(player_ref, "No such region\n");
-		nd_flush(player_ref);
-		return;
-	}
-	for (i = 0; i < rec.nmods && i < ND_ST_MAX_MODS; i++) {
-		memcpy(namebuf, rec.mods[i], ND_ST_MOD_NAME);
-		namebuf[ND_ST_MOD_NAME] = '\0';
-		if (!namebuf[0])
-			continue;
-		st_region_unload(id, plen, namebuf);
-	}
-	st_row_del(id, plen);
-	if (is_world)
-		nd_printf(player_ref, "planet %lu released\n", w);
-	else
-		nd_printf(player_ref, "released: region id=0x%016llx plen=%u\n",
-			(unsigned long long)id, plen);
-	nd_flush(player_ref);
-}
-
-static void
-do_ban(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd), victim_ref;
-	uint64_t id = 0;
-	uint8_t plen = ST_PLEN_ROOT;
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
-	char place[64];
-	OBJ victim;
-
-	if (!*name) {
-		nd_printf(player_ref, "Usage: ban <player> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	victim_ref = player_lookup(name);
-	if (victim_ref == NOTHING) {
-		nd_printf(player_ref, NOMATCH_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (victim_ref == ROOT) {
-		nd_printf(player_ref, CANTDO_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (nd_get(HD_OBJ, &victim, &victim_ref) != 0 || victim.type != TYPE_ENTITY) {
-		nd_printf(player_ref, CANTDO_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Usage: ban <player> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	if (!st_can_region(player_ref, id, plen)) {
-		st_refuse_region(player_ref, id, plen);
-		return;
-	}
-
-	st_ban_put(victim_ref, id, plen, player_ref);
-	st_ban_place(id, plen, place, sizeof(place));
-	nd_printf(player_ref, "Banned %s from %s.\n", victim.name, place);
-	nd_printf(victim_ref, "You have been banned from %s.\n", place);
-	nd_flush(player_ref);
-	nd_flush(victim_ref);
-}
-
-static void
-do_unban(int fd, int argc, char *argv[])
-{
-	unsigned player_ref = fd_player(fd), victim_ref, banner = NOTHING;
-	uint64_t id = 0;
-	uint8_t plen = ST_PLEN_ROOT;
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
-	char place[64];
-	OBJ victim;
-
-	if (!*name) {
-		nd_printf(player_ref, "Usage: unban <player> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	victim_ref = player_lookup(name);
-	if (victim_ref == NOTHING) {
-		nd_printf(player_ref, NOMATCH_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (nd_get(HD_OBJ, &victim, &victim_ref) != 0) {
-		nd_printf(player_ref, NOMATCH_MESSAGE);
-		nd_flush(player_ref);
-		return;
-	}
-	if (st_cmd_region(player_ref, argc, argv, 2, &id, &plen) != XY_OK) {
-		nd_printf(player_ref, "Usage: unban <player> [world]\n");
-		nd_flush(player_ref);
-		return;
-	}
-	st_ban_place(id, plen, place, sizeof(place));
-	if (!st_ban_lookup(victim_ref, id, plen, &banner)) {
-		nd_printf(player_ref, "%s is not banned from %s.\n", victim.name, place);
-		nd_flush(player_ref);
-		return;
-	}
-	if (banner != player_ref && !st_can_region(player_ref, id, plen)) {
-		st_refuse_region(player_ref, id, plen);
-		return;
-	}
-	st_ban_del(victim_ref, id, plen);
-	nd_printf(player_ref, "Unbanned %s from %s.\n", victim.name, place);
-	nd_printf(victim_ref, "You have been unbanned from %s.\n", place);
-	nd_flush(player_ref);
-	nd_flush(victim_ref);
-}
-
-/* --- Boot restore (st_init) ---------------------------------------------- */
 
 struct st_restore_row {
 	uint64_t id;
@@ -1558,6 +881,12 @@ st_init(void)
 	xy_claim_at(0, 0, NULL, NULL);
 }
 
+int
+st_xy_claim_at(uint64_t id, uint8_t plen)
+{
+	return xy_claim_at(id, plen, NULL, NULL);
+}
+
 XY_IMPL(int, on_axil_post_chroot, void)
 {
 	st_init();
@@ -1571,17 +900,6 @@ xy_install(void)
 {
 	WARN("nd-region: governance module installed from '%s'\n", xy.module_path);
 	region_tables_init();
-
-	nd_register("grant", do_grant, 0);
-	nd_register("release", do_release, 0);
-	nd_register("planet", do_planet, 0);
-	nd_register("planets", do_planets, 0);
-	nd_register("here", do_here, 0);
-	nd_register("target", do_target, 0);
-	nd_register("deny", do_deny, 0);
-	nd_register("loadmod", do_loadmod, 0);
-	nd_register("unloadmod", do_unloadmod, 0);
-	nd_register("modlist", do_modlist, 0);
-	nd_register("ban", do_ban, 0);
-	nd_register("unban", do_unban, 0);
+	st_cmd_init_xy(&xy);
+	st_register_commands();
 }

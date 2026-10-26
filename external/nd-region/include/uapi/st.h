@@ -8,6 +8,7 @@
 #define NOISE_MAX ((uint32_t) -1)
 #define DAYTICK_Y	10
 
+#ifndef ND_WORLD_TYPES_H
 typedef int16_t coord_t;
 typedef uint16_t ucoord_t;
 
@@ -39,6 +40,7 @@ typedef struct view_tile {
 	ucoord_t flags, exits, doors;
 	unsigned raw[16];
 } view_tile_t;
+#endif
 
 typedef void st_teleport_t(unsigned player_ref, uint64_t pos);
 st_teleport_t eng_st_teleport;
@@ -46,11 +48,13 @@ st_teleport_t eng_st_teleport;
 typedef struct bio noise_point_t(pos_t p);
 noise_point_t eng_noise_point;
 
+#ifndef ND_WORLD_TYPES_H
 struct spawn_arg {
 	unsigned where_ref;
 	void *arg;
 	coord_t *pos;
 };
+#endif
 
 typedef unsigned room_clean_t(unsigned loc_ref);
 room_clean_t eng_room_clean;

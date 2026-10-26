@@ -21,11 +21,30 @@ const char *
 hyle_ordered_key_at(const char *source_id, const char *pval, int pos);
 const char *
 corm_field_get(unsigned hd, const char *item_id, const char *field_name);
+int lemma_tok_decode(void *vocab, const uint16_t *tokens, size_t n_tokens,
+                     char *out, size_t outsz, size_t *n_written);
+int lemma_tok_encode(void *vocab, const char *text, size_t len,
+                     uint16_t *tokens, size_t cap, size_t *n_tokens);
 
 #define COMMON_H
 #define CORM_H
 #define HYLE_SOURCE_H
 #define SOURCE_H
+#define LEMMA_H
+
+int lemma_tok_decode(void *vocab, const uint16_t *tokens, size_t n_tokens,
+                     char *out, size_t outsz, size_t *n_written)
+{
+	(void)vocab; (void)tokens; (void)n_tokens; (void)out; (void)outsz; (void)n_written;
+	return -1;
+}
+
+int lemma_tok_encode(void *vocab, const char *text, size_t len,
+                     uint16_t *tokens, size_t cap, size_t *n_tokens)
+{
+	(void)vocab; (void)text; (void)len; (void)tokens; (void)cap; (void)n_tokens;
+	return -1;
+}
 
 #include "../../external/libhyle-source/src/dsv.c"
 

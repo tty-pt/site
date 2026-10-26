@@ -34,6 +34,8 @@ XY_DECL(morton_t, map_mwhere, unsigned, thing);
 XY_DECL(int, map_where, coord_t *, p, unsigned, thing);
 XY_DECL(int, map_delete, unsigned, what);
 XY_DECL(unsigned, map_get, coord_t *, p);
+XY_DECL(int, map_search, unsigned *, mat, coord_t *, pos, unsigned, radius);
+XY_DECL(int, nd_noise_view, struct bio *, to, coord_t *, pos);
 
 /* ------------------------------------------------------------------- st */
 

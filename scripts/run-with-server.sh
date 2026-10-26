@@ -10,6 +10,7 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  pkill -f "axil.*-p ${PORT}" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -19,19 +20,20 @@ is_server_up() {
 
 export AUTH_SKIP_CONFIRM=1
 
-# If server is already running, just run the command directly
-if is_server_up; then
-  "$@"
-  exit $?
-fi
+# Clean up any stale process holding port to ensure fresh test runs
+pkill -f "axil.*-p ${PORT}" 2>/dev/null || true
+sleep 0.5
 
 # Ensure data directories exist
 mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
 
 export AUTH_SKIP_CONFIRM=1
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/axil-auth/lib:${REPO_ROOT}/external/liblemma/lib:${LD_LIBRARY_PATH:-/usr/lib}"
-export AXIL_ND_DB="${REPO_ROOT}/var/nd/std.db"
-export AXIL_ND_HTDOCS="${REPO_ROOT}/external/axil-nd/htdocs"
+export AXIL_ND_DB="${REPO_ROOT}/var/nd/universe.db"
+export AXIL_ND_HTDOCS="${REPO_ROOT}/htdocs"
+
+if [ ! -f "$AXIL_ND_DB" ]; then
+  bash "${REPO_ROOT}/scripts/seed-nd-universe.sh" "$AXIL_ND_DB" 1
+fi
 
 AXIL_BIN="${REPO_ROOT}/external/axil/bin/axil"
 if [ ! -x "$AXIL_BIN" ]; then

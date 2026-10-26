@@ -70,6 +70,23 @@ scoping, independence and persistence are all actually observable.
 | 13 | Are a planet's modules scoped to it? | **Yes, fully** — the planet, plus any region deliberately nested inside it. |
 | 14 | How does a planet get its region id | Deterministic: `id = st_key.key << st_key.shift`. Idempotent across reboots; nothing to reconcile. |
 
+### 1.0.1 Morton Key Prefix & Bitmask Arithmetic Table
+
+Regions in Xylem and NeverDark are pure bit-prefixes of the 64-bit Morton spacetime keyspace `(id, plen)`. Each bit represents a recursive spatial subdivision:
+
+| Prefix Width (`plen`) | High-Bit Mask | Spatial Scale / Scope | Hierarchy & Modder Governance |
+|---|---|---|---|
+| `plen = 0` | `0x0000000000000000` | Cosmos (Universe) | Root tier. Server administrator / engine core. Global laws & baseline modules. |
+| `plen = 11` | `0xFFE0000000000000` | 32-Planet Super-Sector | Sovereign sector governor ($2^5 = 32$ worlds, covering worlds 0..31). Loads baseline gameplay suite once. |
+| `plen = 16` | `0xFFFF000000000000` | Single Planet / World | Planetary ruler ($2^{16} = 65,536$ worlds total). Local planetary laws, biomes, and rules. |
+| `plen = 24` | `0xFFFFFF0000000000` | Hemisphere / Continent | Continental governor. Regional mechanics, sub-factions. |
+| `plen = 32` | `0xFFFFFFFF00000000` | District / Zone / Area | District magistrate / modder. Area-specific custom graphics (e.g. `liblamina` viewport). |
+| `plen = 48` | `0xFFFFFFFFFFFF0000` | City / Settlement | Town mayor / settlement builder. Local vendors, town laws. |
+| `plen = 64` | `0xFFFFFFFFFFFFFFFF` | Single Room / Cell | Room architect / individual player room. Custom room scripts and fixtures. |
+
+**Hierarchical Modder Attribution Rule**:
+The most powerful modder governs the coarsest prefix (fewer bits = larger spatial domain). Each additional bit refines the area. When events occur at coordinate `code`, XY hierarchical dispatch (`nd_scope_dispatch`) begins at root (`(0, 0)`) and descends down the prefix tree to the leaf. Ancestor modules execute for all descendants automatically, and ancestor `deny` rules strictly bound child regions.
+
 ### 1.1 Delegation
 
 A ruler may govern a large region, split it, and impose limits on the code its

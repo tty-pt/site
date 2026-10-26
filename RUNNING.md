@@ -77,6 +77,12 @@ vector file) still works for pre-computed vectors.
 Track: `mm-plan/6-QUERY-TEXT-PLAN.md` (Phase 5 record stays in
 `mm-plan/5-EMBED-PLAN.md`).
 
+## Multi-Instance Isolation (Auren on :4242 vs Site on :8080)
+
+Running auren on `:4242` concurrently with the site server on `:8080` (via `./start.sh`) works without session or WebSocket collisions:
+- **Port-Scoped Cookies**: `libaxil-auth` automatically computes session cookies scoped by TCP port: `QSESSION_4242` for auren vs `QSESSION` (or `QSESSION_8080`) for the site server, with automatic backward-compatible fallback to `QSESSION`. An explicitly set `AXIL_COOKIE_NAME` overrides this.
+- **Client-Side WebSocket Bus**: Browser-side WebSockets (`window.__axil_ws_instances`) are namespaced by origin host and port, preventing open browser tabs on `:4242` and `:8080` from cross-talking or dropping connections.
+
 ## Notes
 
 - pi-mm's text recall (stoma FTS) needs **no** auren server — this only adds the

@@ -2,8 +2,8 @@
 #include "noise_impl.h"
 #include <string.h>
 #include "xxhash.h"
-#include "st.h"
-#include "uapi/type.h"
+#include <nd/st.h>
+#include <nd/type.h>
 
 #define HASH XXH32
 
