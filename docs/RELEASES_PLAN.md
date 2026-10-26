@@ -86,7 +86,7 @@ stabilizing our isomorphic C-WASM web runtime, and introducing modular interacti
 | **`axil-auth`** | `v1.1.0` | **`v1.2.1`** | Patch | Added support for port-qualified and configured cookie names. Updated `axil-auth.pc` to 1.2.1. |
 | **`axil-hyle`** | `v1.0.0` | **`v1.0.1`** | Patch | Ecosystem synchronization with Hyle 1.5.0 and Corm 2.0.1. Updated `axil-hyle.pc` to 1.0.1. |
 | **`axil-tty`** | `v1.4.0` | **`v1.4.1`** | Patch | Pure tty terminal capability bridge consuming axil transport. Updated `axil-tty.pc` to 1.4.1. |
-| **`libauren`** *(was `libqllm`)* | `v1.1.0` | **`v1.0.0`** | Major / Rebrand | Rebranding from `libqllm` to `libauren` (`<ttypt/auren.h>`, `lib/libauren.so`, `libaxil-auren.so`, CLI `auren-chat`). Multi-model registry (16 models), SystemOne, sliding-window KV cache. |
+| **`libauren`** *(was `libqllm`)* | `v1.1.0` | **`v1.3.0`** | Major / Rebrand | **PUBLISHED** — Rebranding from `libqllm` to `libauren` (`<ttypt/auren.h>`, `lib/libauren.so`, `libaxil-auren.so`, CLI `auren-chat`). Multi-model registry, SystemOne calibrated decision judge with choice criteria prompt injection and CPU thread clamping, token-level prefix KV reuse, and session continuity. |
 | **`external/mk`** | `v0.1.18` | **`v0.2.0`** | Minor | Reusable isomorphic C engine (`iso.mk`), WASM ABI auditor (`wasm-audit.sh`), and purged `portable.mk`. |
 | **`pi-quest`** | `v1.1.0` | **`v1.2.0`** | Minor | Full quest journal engine: evidence gate, subquest foreman, Jev System One intent judge, TUI plan viewer, and zip bundle packaging. |
 | **`pi-mm`** | `v0.1.0` | **`v0.3.1`** | Minor | Cormd-first memory daemon, HTOK v4 cognitive triads, associative graph, epistemic safety states, and reciprocal rank fusion. |
@@ -287,17 +287,17 @@ For each repository, the following checklist must be satisfied before creating g
 - [ ] Rebuild and run test suite: `make clean && make && ./test.sh`.
 - [ ] Tag: `git tag -s v1.2.0 -m "Release v1.2.0: Debut Modular NeverDark MUCK Engine for Axil"`.
 
-### 18. `libauren` (formerly `libqllm`, Target: `v1.0.0`)
-- [ ] Execute rename migration:
+### 18. `libauren` (formerly `libqllm`, Target: `v1.3.0` — **PUBLISHED**)
+- [x] Execute rename migration:
   * Rename header `include/ttypt/qllm.h` → `include/ttypt/auren.h` (with backward-compatibility aliases).
   * Rename source files / module `libaxil-qllm.c` → `libaxil-auren.c`, `libqllm.c` → `libauren.c`.
-  * Rename pkg-config `axil-qllm.pc` → `auren.pc` / `axil-auren.pc` with `Version: 1.0.0`.
+  * Rename pkg-config `axil-qllm.pc` → `auren.pc` / `axil-auren.pc` with `Version: 1.3.0`.
   * Rename CLI tools `qllm-chat` → `auren-chat`, `qllm-list` → `auren-list`.
   * Update config discovery: check `auren.json` then fallback to `qllm.json`.
-- [ ] Update `CHANGELOG.md` with debut `## 1.0.0` release under `libauren`, documenting 16-model registry, SystemOne, sliding-window KV cache, and Vulkan/Metal acceleration.
-- [ ] Update `README.md` with new branding and CLI usage examples.
-- [ ] Rebuild and run unit tests: `make clean && make && make -C tests test`.
-- [ ] Tag: `git tag -s v1.0.0 -m "Release v1.0.0: Rebranded libauren Inference Engine"`.
+- [x] Update `CHANGELOG.md` with `## 1.3.0` release: session continuity, prefix KV reuse, System One choice criteria prompt injection, CPU batch thread clamping to 4 cores, and memory verb fallback decoupling.
+- [x] Update `README.md` and `docs/USAGE.md` with new capabilities and benchmarks.
+- [x] Rebuild and run unit tests: `make clean && make && bin/engine-test`.
+- [x] Tag and push: `git tag -a v1.3.0 -m "Release v1.3.0"` and published across all 10 matrix package managers.
 
 ---
 
