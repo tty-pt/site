@@ -124,6 +124,7 @@ usage findings + Locked decisions).
 
 Local LLM inference, OpenAI-compatible streaming chat, and dense vector embeddings engine
 running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `docs/LOCAL_LLM.md`.
+To build custom semantic and hybrid search engines with `axil-auren`, `libsepal`, and `liblemma`, see `docs/SEMANTIC_SEARCH.md`.
 
 ```sh
 # Turnkey server launcher:
@@ -153,3 +154,4 @@ LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 | Advanced Git Recovery | `docs/ADVANCED_GIT_RECOVERY.md` |
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
+| Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |

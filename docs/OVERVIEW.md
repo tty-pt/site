@@ -101,3 +101,4 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Follow the Web HAL implementation roadmap | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |
+| Build custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
