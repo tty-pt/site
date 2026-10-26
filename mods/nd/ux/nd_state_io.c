@@ -41,6 +41,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		"\"map_hex\":\"%s\","
 		"\"active_modal\":\"%s\","
 		"\"selected_item_ref\":%u,"
+		"\"target_ref\":%u,"
 		"\"preferred_driver\":\"%s\","
 		"\"preferred_map_driver\":\"%s\","
 		"\"layout_mode\":%u,"
@@ -53,6 +54,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		map_hex,
 		st->active_modal,
 		st->selected_item_ref,
+		st->target_ref,
 		st->preferred_driver,
 		st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud",
 		(unsigned)st->layout_mode,
@@ -83,12 +85,12 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		return;
 
 	size_t cur = (size_t)offset;
-	for (size_t i = 0; i < st->entity_count && cur + 128 < cap; i++) {
+	for (size_t i = 0; i < st->entity_count && cur + 160 < cap; i++) {
 		const nd_entity_desc_t *e = &st->entities[i];
 		int n = snprintf(buf + cur, cap - cur,
-			"%s{\"ref\":%u,\"name\":\"%s\",\"ch\":\"%c\",\"fg\":%u,\"loc\":%u}",
+			"%s{\"ref\":%u,\"name\":\"%s\",\"ch\":\"%c\",\"fg\":%u,\"loc\":%u,\"art\":\"%s\"}",
 			(i > 0) ? "," : "",
-			e->ref, e->name, e->ch ? e->ch : '?', e->fg, e->location);
+			e->ref, e->name, e->ch ? e->ch : '?', e->fg, e->location, e->art);
 		if (n > 0) cur += (size_t)n;
 	}
 
@@ -178,6 +180,17 @@ void parse_json_entities(const char *json, nd_client_state_t *st)
 		p = strstr(obj, "\"loc\":");
 		if (p && p < obj_end) {
 			st->entities[count].location = (uint32_t)strtoul(p + 6, NULL, 10);
+		}
+		/* Extract art */
+		p = strstr(obj, "\"art\":\"");
+		if (p && p < obj_end) {
+			p += 7;
+			size_t alen = 0;
+			while (p + alen < obj_end && p[alen] != '"' && alen < sizeof(st->entities[count].art) - 1) {
+				st->entities[count].art[alen] = p[alen];
+				alen++;
+			}
+			st->entities[count].art[alen] = '\0';
 		}
 
 		count++;
@@ -294,6 +307,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 
 		client_state.tod = (uint32_t)bud_json_int(json, "tod", 0);
 		client_state.selected_item_ref = (uint32_t)bud_json_int(json, "selected_item_ref", 0);
+		client_state.target_ref = (uint32_t)bud_json_int(json, "target_ref", 0);
 		bud_json_str(json, "active_modal", client_state.active_modal, sizeof(client_state.active_modal));
 		nd_ui_set_active_modal(client_state.active_modal);
 		bud_json_str(json, "preferred_driver", client_state.preferred_driver, sizeof(client_state.preferred_driver));

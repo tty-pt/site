@@ -105,6 +105,10 @@ def send(text):
     s.sendall(bytes([0x81, 0x80 | len(b)]) + m + bytes(c ^ m[i % 4] for i, c in enumerate(b)))
 
 login = drain(1.5)
+if label == "real":
+    has_plant_login = any(p in login for p in [b"plant/", b"pinus", b"pseudotsuga", b"betula", b"linum", b"abies", b"acacia"])
+    if not has_plant_login:
+        fails.append("login stream did not contain plant/tree objects for spawn room")
 send("room 0 0 0 0\n")
 reply = drain(1.0)
 fails = []
@@ -134,10 +138,18 @@ if label == "real" and not fails:
     rx = drain(0.5)
     if b"0x0" not in rx:
         fails.append("tell position 'x' replied %r, want 0x0" % rx)
+    send("inventory\n")
+    rinv = drain(0.8)
+    if b"entity/avatar" not in rinv:
+        fails.append("inventory did not emit avatar BCP_ITEM frame: %r" % rinv)
     send("k\n")
     rk = drain(0.8)
     if b"north" not in rk:
         fails.append("vim move north 'k' failed: %r" % rk)
+    # Check for room and tree BCP item frames
+    has_plant = any(p in rk for p in [b"plant/", b"pinus", b"pseudotsuga", b"betula", b"linum", b"abies", b"acacia", b"woodland"])
+    if not has_plant:
+        fails.append("move north did not receive woodland or plant BCP frames in rk: %r" % rk[:200])
     send("j\n")
     rj = drain(0.8)
     if b"south" not in rj:

@@ -169,19 +169,27 @@ eng_object_add(OBJ *nu, unsigned skel_id, unsigned where_ref, uint64_t v, unsign
 		where_ref = nu_ref;
 	nu->location = where_ref;
 	nu->owner = ROOT;
-	nu->type = skel.type;
+	nu->type = (flags & OF_PLAYER) ? TYPE_ENTITY : skel.type;
+	if (flags & OF_PLAYER)
+		nu->flags |= OF_PLAYER;
 	if (where_ref != NOTHING)
 		corm_put(contents_hd, &nu->location, &nu_ref);
 	fprintf(stderr, "eng_object_add %u -> %u\n", nu_ref, where_ref);
 
-	switch (skel.type) {
+	if (flags & OF_PLAYER) {
+		ENT ent;
+		memset(&ent, 0, sizeof(ent));
+		ent.select = 0;
+		ent.target_plen = ST_SEL_UNSET;
+		ent.home = 1;
+		ent_set(nu_ref, &ent);
+		nu->art_id = art_idx(nu);
+	} else switch (skel.type) {
 	case TYPE_ENTITY:
 		{
 			ENT ent;
 			memset(&ent, 0, sizeof(ent));
 			ent.flags = ((SENT *) &skel.data)->flags;
-			if (flags & OF_PLAYER)
-				nu->flags |= OF_PLAYER;
 			ent.select = 0;
 			/* No default target region: (0,0) names the cosmos, a
 			 * real region, so a zeroed row would hand every new
@@ -238,7 +246,7 @@ eng_object_art(unsigned thing_ref)
 	switch (thing.type) {
 	case TYPE_ENTITY:
 		type = "entity";
-		snprintf(art, sizeof(art), "%s/%s/%u.jpeg", type, thing.art_id && thing.flags & OF_PLAYER ? "avatar" : thing.name, thing.art_id);
+		snprintf(art, sizeof(art), "%s/%s/%u.jpeg", type, (thing.art_id && (thing.flags & OF_PLAYER)) ? "avatar" : thing.name, thing.art_id);
 		return art;
 	case TYPE_ROOM:
 			if (!map_has(thing_ref))

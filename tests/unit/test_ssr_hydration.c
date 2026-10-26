@@ -321,6 +321,82 @@ int main(void)
 	assert(map_fb[0] != 0);
 	printf("PASS: nd_lamina_render_map renders 2D mini-map pixels\n");
 
+	/* Test: Target card with avatar image and inventory contents rendering */
+	{
+		nd_client_state_t inv_st;
+		memset(&inv_st, 0, sizeof(inv_st));
+		inv_st.me = 100;
+		inv_st.target_ref = 100;
+		inv_st.room.ref = 2;
+		snprintf(inv_st.room.name, sizeof(inv_st.room.name), "woodland");
+		inv_st.entity_count = 3;
+
+		/* Entity 0: Player with avatar art */
+		inv_st.entities[0].ref = 100;
+		inv_st.entities[0].location = 2;
+		inv_st.entities[0].type = 3; /* TYPE_ENTITY */
+		snprintf(inv_st.entities[0].name, sizeof(inv_st.entities[0].name), "quirinpa");
+		snprintf(inv_st.entities[0].art, sizeof(inv_st.entities[0].art), "entity/avatar/42.jpeg");
+
+		/* Entity 1: Tree in room */
+		inv_st.entities[1].ref = 101;
+		inv_st.entities[1].location = 2;
+		inv_st.entities[1].type = 5;
+		inv_st.entities[1].ch = 'T';
+		inv_st.entities[1].fg = 2; /* GREEN */
+		snprintf(inv_st.entities[1].name, sizeof(inv_st.entities[1].name), "pinus sylvestris");
+
+		/* Entity 2: Stick in player inventory */
+		inv_st.entities[2].ref = 102;
+		inv_st.entities[2].location = 100; /* carried by player */
+		inv_st.entities[2].type = 4;
+		inv_st.entities[2].ch = '/';
+		snprintf(inv_st.entities[2].name, sizeof(inv_st.entities[2].name), "stick");
+
+		/* When target is me (inventory): target card shows avatar and contents shows stick */
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "id=\"target-card\""));
+		assert(strstr(html, "/nd/art/entity/avatar/42.jpeg"));
+		assert(strstr(html, "quirinpa"));
+		assert(strstr(html, "(You - Inventory)"));
+		assert(strstr(html, "stick"));
+		bud_free_string(html);
+
+		/* When target is 0 (room): target card is empty, contents shows tree in room */
+		inv_st.target_ref = 0;
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "pinus sylvestris"));
+		assert(strstr(html, "Room Contents"));
+		bud_free_string(html);
+
+		/* Test BCP item decoding: room item (dynflags=1, type=0) clears target and sets room */
+		uint8_t room_frame[131];
+		memset(room_frame, 0, sizeof(room_frame));
+		room_frame[0] = ND_BCP_MAGIC_0;
+		room_frame[1] = ND_BCP_MAGIC_1;
+		room_frame[2] = ND_BCP_ITEM;
+		nd_entity_packet_t *rpkt = (nd_entity_packet_t *)(room_frame + 3);
+		rpkt->ref = 55;
+		rpkt->type = 0; /* TYPE_ROOM */
+		rpkt->dynflags = 1;
+		snprintf(rpkt->name, sizeof(rpkt->name), "The Whispering Woods");
+		inv_st.target_ref = 100;
+		assert(nd_bcp_decode(room_frame, sizeof(room_frame), &inv_st) == 1);
+		assert(inv_st.target_ref == 0);
+		assert(inv_st.room.ref == 55);
+		assert(strcmp(inv_st.room.name, "The Whispering Woods") == 0);
+
+		/* Test BCP item decoding: player entity (dynflags=1, type=3) sets target */
+		rpkt->ref = 100;
+		rpkt->type = 3; /* TYPE_ENTITY */
+		rpkt->dynflags = 1;
+		snprintf(rpkt->name, sizeof(rpkt->name), "quirinpa");
+		assert(nd_bcp_decode(room_frame, sizeof(room_frame), &inv_st) == 1);
+		assert(inv_st.target_ref == 100);
+
+		printf("PASS: target card renders avatar, room contents renders trees and inventory, BCP item updates target and room\n");
+	}
+
 	printf("ALL SSR HYDRATION TESTS PASSED\n");
 	return 0;
 }

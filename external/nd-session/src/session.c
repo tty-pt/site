@@ -606,9 +606,7 @@ do_save(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((un
 static inline void
 avatar(OBJ *player)
 {
-	const SKEL *skel = corm_get(skel_hd, &player->skid);
-
-	player->art_id = 1 + (random() % (skel && skel->max_art ? skel->max_art : 1));
+	player->art_id = 1 + (random() % 300);
 }
 
 void
@@ -720,6 +718,8 @@ nd_player_login(int fd, char *user)
 
 	if (player_ref == NOTHING) {
 		player_ref = eng_object_add(&player, 0, NOTHING, 0, OF_PLAYER);
+		player.type = TYPE_ENTITY;
+		player.flags |= OF_PLAYER;
 		strlcpy(player.name, user, sizeof(player.name));
 		player.value = 150;
 		player_put(user, player_ref);
@@ -736,6 +736,16 @@ nd_player_login(int fd, char *user)
 		 * void, and a login refusal would turn a cosmos-wide ban into a
 		 * permanent lockout. */
 		nd_io_attach(fd, player_ref);
+		OBJ pl;
+		if (corm_read(obj_hd, &player_ref, &pl, sizeof(pl)) == 0) {
+			if (!(pl.flags & OF_PLAYER) || pl.type != TYPE_ENTITY || pl.art_id == 0) {
+				pl.flags |= OF_PLAYER;
+				pl.type = TYPE_ENTITY;
+				if (pl.art_id == 0)
+					avatar(&pl);
+				corm_put(obj_hd, &player_ref, &pl);
+			}
+		}
 	}
 
 	/* axil_auth() is called for what it DOES, not for what it returns: it

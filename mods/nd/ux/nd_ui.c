@@ -342,19 +342,43 @@ static bud_node *render_viewport_slot(const nd_client_state_t *st)
 	return vport;
 }
 
+static int on_dismiss_target(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	client_state.target_ref = 0;
+#ifdef __wasm__
+	bud_app_set_state();
+#endif
+	return 0;
+}
+
 static bud_node *render_room_contents(const nd_client_state_t *st)
 {
 	bud_node *wrap = bud_element("nd-contents");
 	bud_set_attr(wrap, "id", "contents");
 	bud_set_attr(wrap, "class", "nd-contents w-full min-h-0 overflow-y-auto max-h-36");
 
+	uint32_t active_loc = (st && st->target_ref) ? st->target_ref : (st ? st->room.ref : 0);
+	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
+
+	bud_node *sec_hdr = bud_element("div");
+	bud_set_attr(sec_hdr, "class", "text-[10px] font-mono text-neutral-400 uppercase tracking-wider px-1 py-0.5 border-b border-neutral-800 select-none flex items-center justify-between");
+	if (is_inventory) {
+		bud_append(sec_hdr, bud_text("📦 Inventory"));
+	} else if (st && st->target_ref) {
+		bud_append(sec_hdr, bud_text("Items"));
+	} else {
+		bud_append(sec_hdr, bud_text("Room Contents"));
+	}
+	bud_append(wrap, sec_hdr);
+
 	int any = 0;
 	if (st) {
 		for (size_t i = 0; i < st->entity_count; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
-			if (st->me && e->ref == st->me)
+			if (!is_inventory && st->me && e->ref == st->me)
 				continue;
-			if (st->room.ref && e->location != st->room.ref)
+			if (active_loc && e->location != active_loc)
 				continue;
 			any = 1;
 
@@ -440,7 +464,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 	if (!any) {
 		bud_node *empty = bud_element("div");
 		bud_set_attr(empty, "class", "text-neutral-500 text-xs px-2 py-1 italic select-none");
-		bud_append(empty, bud_text("Nothing here."));
+		bud_append(empty, bud_text(is_inventory ? "Inventory is empty." : "Nothing here."));
 		bud_append(wrap, empty);
 	}
 
@@ -463,13 +487,57 @@ static bud_node *render_target_card(const nd_client_state_t *st)
 	}
 	if (!target) return bud_element("div");
 
-	char tcls[128];
-	snprintf(tcls, sizeof(tcls), "target-card p-2 rounded border border-red-500/40 bg-neutral-900/80 mb-2 flex items-center justify-between text-xs w-full");
-	bud_node *card = lx_n("div",
-		lx_attr("id", "target-card"),
-		lx_attr("class", tcls),
-		lx_node(lx_n("span", lx_attr("class", "font-bold text-red-400 truncate"), lx_text(target->name))),
-		lx_node(lx_n("span", lx_attr("class", "text-neutral-500 font-mono text-[10px]"), lx_textf("#%u", target->ref))));
+	bud_node *card = bud_element("div");
+	bud_set_attr(card, "id", "target-card");
+	bud_set_attr(card, "class", "target-card p-2 rounded border border-neutral-700 bg-neutral-900/90 mb-2 flex items-center gap-2 text-xs w-full shadow-lg");
+
+	/* Avatar image or glyph */
+	if (target->art[0]) {
+		char art_url[128];
+		snprintf(art_url, sizeof(art_url), "/nd/art/%s", target->art);
+		bud_node *img = bud_element("img");
+		bud_set_attr(img, "src", art_url);
+		bud_set_attr(img, "alt", target->name);
+		bud_set_attr(img, "class", "w-12 h-12 rounded object-cover border border-neutral-700/80 flex-shrink-0");
+		bud_append(card, img);
+	} else {
+		bud_node *badge = bud_element("div");
+		char gclass[192];
+		snprintf(gclass, sizeof(gclass), "w-12 h-12 rounded bg-neutral-800/80 border border-neutral-700/80 flex items-center justify-center font-mono font-bold text-lg text-[%u] flex-shrink-0", target->fg);
+		bud_set_attr(badge, "class", gclass);
+		char ch_str[2] = { target->ch ? target->ch : '?', '\0' };
+		bud_append(badge, bud_text(ch_str));
+		bud_append(card, badge);
+	}
+
+	/* Target Details */
+	bud_node *info = bud_element("div");
+	bud_set_attr(info, "class", "flex flex-col flex-1 min-w-0");
+	bud_node *name_row = bud_element("div");
+	bud_set_attr(name_row, "class", "font-bold text-neutral-100 truncate");
+	bud_append(name_row, bud_text(target->name));
+	bud_append(info, name_row);
+
+	bud_node *ref_row = bud_element("div");
+	bud_set_attr(ref_row, "class", "text-neutral-500 font-mono text-[10px]");
+	char ref_text[48];
+	if (st && st->me && target->ref == st->me)
+		snprintf(ref_text, sizeof(ref_text), "#%u (You - Inventory)", target->ref);
+	else
+		snprintf(ref_text, sizeof(ref_text), "#%u", target->ref);
+	bud_append(ref_row, bud_text(ref_text));
+	bud_append(info, ref_row);
+	bud_append(card, info);
+
+	/* Dismiss Button */
+	bud_node *close_btn = bud_element("button");
+	bud_set_attr(close_btn, "type", "button");
+	bud_set_attr(close_btn, "class", "text-neutral-400 hover:text-neutral-200 text-sm px-1.5 py-0.5 rounded hover:bg-neutral-800/80 select-none flex-shrink-0");
+	bud_set_attr(close_btn, "title", "Clear Target");
+	bud_append(close_btn, bud_text("✕"));
+	bud_bind(close_btn, "click", 1, on_dismiss_target);
+	bud_append(card, close_btn);
+
 	return card;
 }
 
