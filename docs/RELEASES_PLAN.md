@@ -128,7 +128,7 @@ To prevent broken downstream builds, releases must be executed in strict topolog
    axil-tty  (1.4.1) ◄──────────────┘      │  │       │                       │
    axil-hyle (1.0.1) ◄─────────────────────┘──┘       │                       │
    axil-nd   (1.2.0) ◄────────────────────────────────┘                       │
-   libauren  (1.0.0) ◄────────────────────────────────────────────────────────┘
+   libauren  (1.3.0) ◄────────────────────────────────────────────────────────┘
 
 [Tooling Extensions]
    pi-quest  (1.2.0)
@@ -166,7 +166,7 @@ To prevent broken downstream builds, releases must be executed in strict topolog
    - Step 16: `axil-auth` (`v1.2.1`)
    - Step 17: `axil-tty` (`v1.4.1`)
    - Step 18: `axil-hyle` (`v1.0.1`)
-   - Step 19: `libauren` (`v1.0.0`)
+   - Step 19: `libauren` (`v1.3.0`)
    - Step 20: `axil-nd` (`v1.2.0` - tenant ongoing)
 
 7. **Wave 7: Agent Harness Tooling Extensions**

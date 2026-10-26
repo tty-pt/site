@@ -184,7 +184,7 @@ Every release job runs through:
 | **5** | `axil-auth` | `v1.2.1` | **PUBLISHED** | Port-qualified cookie auth |
 | **5** | `axil-tty` | `v1.4.1` | **PUBLISHED** | Pure TTY capability bridge |
 | **6** | `axil-hyle` | `v1.0.2` | **PUBLISHED** | Dynamic REST/FTS dataset HTTP handler |
-| **6** | `axil-auren` | `v1.2.0` | **PUBLISHED** | Model registry, SystemOne classifier, block KV reuse |
+| **6** | `axil-auren` | `v1.3.0` | **PUBLISHED** | Session continuity, prefix KV reuse, System One CPU thread clamping |
 | **6** | `axil-nd` | `v1.3.0` | Pending ND update | Decoupled UI presentation, MUCK core |
 | **7** | `pi-quest` | `v1.2.0` | **PUBLISHED** | Autonomous quest journal & evidence gate |
 | **7** | `pi-mm` | `v0.3.1` | **PUBLISHED** | Latent mipmap recall & cormd daemon |
