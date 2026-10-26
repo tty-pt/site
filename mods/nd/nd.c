@@ -157,12 +157,22 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	char user[ENV_VALUE_LEN] = {0};
 	axil_env_get(fd, user, sizeof(user), "REMOTE_USER");
 
+	/* Under -A (AXIL_AUTOAUTH) or DF_AUTH_AUTO, enable turnkey terminal and game access without prior login */
+	if (!user[0] && ((axil_config.flags & AXIL_AUTOAUTH) || (axil_flags(fd) & DF_AUTH_AUTO))) {
+		const char *auto_user = getenv("USER");
+		if (!auto_user || !*auto_user)
+			auto_user = "guest";
+		strncpy(user, auto_user, sizeof(user) - 1);
+	}
+
 	nd_client_state_t st;
 	memset(&st, 0, sizeof(st));
 	/* Modules seed their own defaults (vitals, attributes, ...). */
 	nd_ui_glue_state_default(&st);
 	if (user[0]) {
 		strncpy(st.user, user, sizeof(st.user) - 1);
+		if (!st.me)
+			st.me = 1;
 	}
 	nd_seed_state_from_data(&st);
 

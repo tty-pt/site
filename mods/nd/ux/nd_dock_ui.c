@@ -7,11 +7,11 @@ int on_dock_action(bud_event *ev)
 	const char *action = bud_get_attr(ev->target, "data-nd-action");
 	if (!action) return 0;
 
-	if (!strcmp(action, "stats")) {
-		nd_ui_toggle_modal("attr");
-	} else if (!strcmp(action, "equipment")) {
+	if (!strcmp(action, "stats") || !strcmp(action, "attr")) {
+		nd_ui_toggle_modal("stats");
+	} else if (!strcmp(action, "equipment") || !strcmp(action, "equip")) {
 		nd_ui_toggle_modal("equip");
-	} else if (!strcmp(action, "spells")) {
+	} else if (!strcmp(action, "spells") || !strcmp(action, "spell")) {
 		nd_ui_toggle_modal("spell");
 	} else {
 		char cmd[64];
@@ -28,13 +28,13 @@ static int on_move_l(bud_event *e) { (void)e; ws_send("l\n", 2); return 0; }
 static int on_move_K(bud_event *e) { (void)e; ws_send("K\n", 2); return 0; }
 static int on_move_J(bud_event *e) { (void)e; ws_send("J\n", 2); return 0; }
 
-static int on_action_stats(bud_event *e) { (void)e; nd_ui_toggle_modal("attr"); return 0; }
+static int on_action_stats(bud_event *e) { (void)e; nd_ui_toggle_modal("stats"); return 0; }
 static int on_action_equip(bud_event *e) { (void)e; nd_ui_toggle_modal("equip"); return 0; }
 static int on_action_spells(bud_event *e) { (void)e; nd_ui_toggle_modal("spell"); return 0; }
 static int on_action_inv(bud_event *e) { (void)e; ws_send("inventory\n", 10); return 0; }
 static int on_action_look(bud_event *e) { (void)e; ws_send("look\n", 5); return 0; }
 
-static int on_cycle_viewport(bud_event *e)
+int on_cycle_viewport(bud_event *e)
 {
 	(void)e;
 	if (g_driver_count > 1) {
@@ -90,10 +90,17 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁", "Look", on_action_look));
 
-	int allow_choice = (st && (st->pres_flags & ND_REGION_ALLOW_CHOICE) && !(st->pres_flags & ND_REGION_LOCKED));
+	int allow_choice = !st || !(st->pres_flags & ND_REGION_LOCKED);
 	if (g_driver_count > 1 && allow_choice) {
 		int next_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
-		bud_node *vbtn = make_btn(g_viewport_drivers[next_idx].label, "Switch Viewport", on_cycle_viewport);
+		const char *icon = "📺";
+		if (g_viewport_drivers[next_idx].id) {
+			if (strstr(g_viewport_drivers[next_idx].id, "lamina"))
+				icon = "🎮";
+			else if (strstr(g_viewport_drivers[next_idx].id, "webgl") || strstr(g_viewport_drivers[next_idx].id, "3d"))
+				icon = "🧊";
+		}
+		bud_node *vbtn = make_btn(icon, "Switch Viewport", on_cycle_viewport);
 		bud_set_attr(vbtn, "data-bud-action", "cycle-viewport");
 		bud_append(dock, vbtn);
 	}

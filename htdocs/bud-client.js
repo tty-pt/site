@@ -93,6 +93,34 @@ async function loadModule(spec) {
 			}
 		}
 
+		const origEmitPatch = budImports.bud_host_emit_patch;
+		if (typeof origEmitPatch === 'function') {
+			const hookedEmitPatch = function(...args) {
+				const res = origEmitPatch.apply(this, args);
+				for (const cap of activeBridges) {
+					if (typeof cap.mount === 'function') cap.mount();
+				}
+				return res;
+			};
+			budImports.bud_host_emit_patch = hookedEmitPatch;
+			if (imports.env) imports.env.bud_host_emit_patch = hookedEmitPatch;
+			if (imports.bud) imports.bud.bud_host_emit_patch = hookedEmitPatch;
+		}
+
+		const origFlush = budImports.bud_host_flush;
+		if (typeof origFlush === 'function') {
+			const hookedFlush = function(...args) {
+				const res = origFlush.apply(this, args);
+				for (const cap of activeBridges) {
+					if (typeof cap.mount === 'function') cap.mount();
+				}
+				return res;
+			};
+			budImports.bud_host_flush = hookedFlush;
+			if (imports.env) imports.env.bud_host_flush = hookedFlush;
+			if (imports.bud) imports.bud.bud_host_flush = hookedFlush;
+		}
+
 		for (const imp of declaredImports) {
 			if (!imports[imp.module]) {
 				imports[imp.module] = {};

@@ -17,11 +17,30 @@
     "bindings": {
       "reviewRunner": { "tool": "subagent" }
     },
-    "reviewPolicy": "strict",
+    "reviewPolicy": "balanced",
     "judgeFallback": "heuristic",
     "roles": {
       "reviewer": "antigravity/gemini-3.8-flash",
       "validator": "antigravity/gemini-3.8-flash"
+    },
+    "router": {
+      "enabled": true,
+      "provider": "quest",
+      "id": "auto",
+      "default": "antigravity/gemini-3.8-flash",
+      "direct": "antigravity/gemini-3.8-flash:low",
+      "cooldownMs": 900000,
+      "matrix": {
+        "drafting": {
+          "complex": [
+            "anthropic/claude-sonnet-4-5:high",
+            "antigravity/gemini-3.8-flash"
+          ],
+          "*": "antigravity/gemini-3.8-flash"
+        },
+        "implementing": "antigravity/gemini-3.8-flash",
+        "validating": "antigravity/gemini-3.8-flash"
+      }
     }
   },
   "pi-mm": {

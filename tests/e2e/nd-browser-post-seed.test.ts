@@ -389,7 +389,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     }
 
     // Dismiss via backdrop click
-    await page.locator("#spell-modal").click({ position: { x: 5, y: 5 } });
+    await page.locator("#spell-modal").click({ position: { x: 50, y: 150 } });
     await page.waitForSelector("#spell-modal", { state: "hidden", timeout: 3000 });
 
     // 5d. Equipment Modal (👕)
@@ -413,7 +413,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     await page.waitForTimeout(300);
 
     // Dismiss via backdrop click
-    await page.locator("#equipment-modal").click({ position: { x: 5, y: 5 } });
+    await page.locator("#equipment-modal").click({ position: { x: 50, y: 150 } });
     await page.waitForSelector("#equipment-modal", { state: "hidden", timeout: 3000 });
 
     // 5e. Character Sheet Modal (📋)
@@ -432,7 +432,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     }
 
     // Dismiss via backdrop click
-    await page.locator("#stats-modal").click({ position: { x: 5, y: 5 } });
+    await page.locator("#stats-modal").click({ position: { x: 50, y: 150 } });
     await page.waitForSelector("#stats-modal", { state: "hidden", timeout: 3000 });
 
     // 5f. Dynamic server action buttons hygiene
@@ -595,7 +595,13 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     });
     if (!hasPixels) throw new Error("Lamina 2D canvas is blank; room geometry not rendered");
 
-    // Cycle 2: 2D Lamina -> back to TTY
+    // Cycle 2: 2D Lamina -> Bud DOM
+    await cycleBtn.click();
+    await page.waitForTimeout(500);
+    const budViewport = await page.waitForSelector("#bud-viewport", { timeout: 5000 });
+    if (!budViewport) throw new Error("#bud-viewport not mounted after switching to bud");
+
+    // Cycle 3: Bud DOM -> back to TTY
     await cycleBtn.click();
     await page.waitForSelector("#term", { timeout: 5000 });
     if ((await hpText()) !== hpTty) throw new Error("HP gauge diverged after returning to TTY");

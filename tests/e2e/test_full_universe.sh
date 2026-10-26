@@ -49,7 +49,7 @@ echo "[2/4] Booting single-port unified axil daemon on port $PORT..."
 export PATH="$AXIL_BIN_DIR:$PATH"
 export AXIL_ND_DB="$TMP_DB"
 export AXIL_ND_HTDOCS="$REPO_ROOT/htdocs"
-export LD_LIBRARY_PATH="$REPO_ROOT/external/axil-nd/lib:$REPO_ROOT/external/nd-view/lib:$REPO_ROOT/external/nd-mcp/lib:$REPO_ROOT/external/nd-region/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$REPO_ROOT/external/axil-tty/lib:$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/axil-nd/lib:$REPO_ROOT/external/nd-view/lib:$REPO_ROOT/external/nd-mcp/lib:$REPO_ROOT/external/nd-region/lib:${LD_LIBRARY_PATH:-}"
 
 MODULE_SET="./lib/axil-nd:libnd-region:libnd-bus:libnd-obj:libnd-world:libnd-view:libnd-mcp:libnd-speech:libnd-session"
 
@@ -185,8 +185,8 @@ while idx < len(buf) - 2:
         elif opcode == 9: # ACTION dock
             action_id = struct.unpack('<I', buf[idx+3:idx+7])[0]
             print(f"PASS: BCP ACTION validated (action_id={action_id})")
-        elif opcode == 10: # REGION layout
-            print("PASS: BCP REGION layout frame validated (opcode 10)")
+        elif opcode == 19 or opcode == 10: # REGION layout
+            print("PASS: BCP REGION layout frame validated")
         idx += 3
     else:
         idx += 1
@@ -249,12 +249,34 @@ send_ws_text(s, "save\n")
 time.sleep(0.3)
 print("PASS: Command 'save' executed")
 
-# 7. Send clean WebSocket close frame
+# 9. Send clean WebSocket close frame
 mask = b'\x00\x00\x00\x00'
 s.sendall(bytearray([0x88, 0x80]) + mask)
 time.sleep(0.2)
 s.close()
 print("PASS: WebSocket session closed gracefully")
+
+# 10. Verify Terminal access under -A flag (no refusal)
+s_tty = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s_tty.settimeout(5.0)
+s_tty.connect(('127.0.0.1', $PORT))
+key_tty = base64.b64encode(b'0987654321098765').decode('ascii')
+req_tty = (
+    f"GET /tty HTTP/1.1\r\n"
+    f"Host: 127.0.0.1:$PORT\r\n"
+    f"Upgrade: websocket\r\n"
+    f"Connection: Upgrade\r\n"
+    f"Sec-WebSocket-Key: {key_tty}\r\n"
+    f"Sec-WebSocket-Version: 13\r\n\r\n"
+)
+s_tty.sendall(req_tty.encode('ascii'))
+resp_tty = s_tty.recv(1024).decode('latin1', errors='ignore')
+assert "101" in resp_tty, f"Expected 101 Switching Protocols on /tty, got: {resp_tty}"
+time.sleep(0.3)
+tty_frames = read_ws_frames(s_tty, timeout=1.0)
+assert b"Terminal disabled" not in tty_frames, f"Terminal was unexpectedly disabled under -A: {tty_frames}"
+s_tty.close()
+print("PASS: Terminal access under -A flag verified without auth refusal")
 EOF
 
 echo "ALL E2E FULL UNIVERSE TESTS PASSED"

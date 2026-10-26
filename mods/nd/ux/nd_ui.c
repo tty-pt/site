@@ -393,10 +393,15 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_node *act_dock = bud_element("div");
 			bud_set_attr(act_dock, "class", is_selected ? "flex items-center gap-1 flex-shrink-0" : "hidden");
 
+			char look_cmd[48], get_cmd[48], drop_cmd[48];
+			snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
+			snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
+			snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
+
 			bud_node *look = bud_element("button");
 			bud_set_attr(look, "type", "button");
 			bud_set_attr(look, "data-action", "look");
-			bud_set_attr(look, "data-cmd", ref_buf);
+			bud_set_attr(look, "data-cmd", look_cmd);
 			bud_set_attr(look, "class", "nd-pad btn round text-xs");
 			bud_set_attr(look, "title", "Look");
 			bud_append(look, bud_text("👁"));
@@ -407,7 +412,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
-				bud_set_attr(get, "data-cmd", ref_buf);
+				bud_set_attr(get, "data-cmd", get_cmd);
 				bud_set_attr(get, "class", "nd-pad btn round text-xs");
 				bud_set_attr(get, "title", "Get");
 				bud_append(get, bud_text("🖐"));
@@ -419,7 +424,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 				bud_node *drop = bud_element("button");
 				bud_set_attr(drop, "type", "button");
 				bud_set_attr(drop, "data-action", "drop");
-				bud_set_attr(drop, "data-cmd", ref_buf);
+				bud_set_attr(drop, "data-cmd", drop_cmd);
 				bud_set_attr(drop, "class", "nd-pad btn round text-xs");
 				bud_set_attr(drop, "title", "Drop");
 				bud_append(drop, bud_text("🪣"));
@@ -543,6 +548,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		layout);
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
+	bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
 	return root;
 }
 

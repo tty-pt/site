@@ -35,6 +35,7 @@ bud_node *render_direction_keypad(void);
 bud_node *render_action_bar(const nd_client_state_t *st);
 bud_node *render_gauges_slot(const nd_client_state_t *st);
 int on_dock_action(bud_event *ev);
+int on_cycle_viewport(bud_event *e);
 
 /* State I/O */
 void parse_json_entities(const char *json, nd_client_state_t *st);

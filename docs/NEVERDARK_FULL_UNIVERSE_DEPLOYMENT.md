@@ -18,6 +18,25 @@ The exact same port `:8080` handles:
 3. **In-Place WebSocket Upgrade (`Upgrade: websocket` at `/nd`)**: Upgrades the HTTP socket in-place to full-duplex Binary Client Protocol (`#b`) and ANSI text streaming.
 4. **Telnet / Raw CLI**: Plain TCP telnet clients connect and authenticate on the same port.
 
+### How to Test the Turn-Key Universe with `-A`
+
+To test the turn-key NeverDark universe directly with operator/anonymous access:
+1. **Turnkey Server Launch**:
+   ```bash
+   ./start.sh
+   # or manually with -A:
+   axil -d -A -p 8080 -m mods/core/core
+   ```
+2. **Run Headless E2E Integration Suite**:
+   ```bash
+   bash tests/e2e/test_full_universe.sh
+   ```
+3. **Run Playwright Browser Suite**:
+   ```bash
+   make test-e2e FILE=nd-browser-post-seed.test.ts
+   ```
+Under the `-A` flag, `axil` auto-authenticates incoming connections as the operator (`pw->pw_name`), enabling immediate full-fidelity terminal and game interactions without manual login.
+
 ---
 
 ## 2. Spacetime Region & Morton Hierarchy Architecture
