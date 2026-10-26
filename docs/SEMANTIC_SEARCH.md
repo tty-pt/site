@@ -16,6 +16,7 @@ This document explains how to set up and run semantic and hybrid search using `a
    - [Download Embedding Model](#download-embedding-model)
    - [Install Packages](#install-packages)
    - [Build from Source](#build-from-source)
+6. [HTTP Service: axil-embed-search Module](#6-http-service-axil-embed-search-module)
 
 ---
 
@@ -221,3 +222,25 @@ git clone https://github.com/tty-pt/liblemma.git && cd liblemma && make && sudo 
 git clone https://github.com/tty-pt/libsepal.git && cd libsepal && make && sudo make install && cd ..
 git clone https://github.com/tty-pt/axil-auren.git && cd axil-auren && make && sudo make install && cd ..
 ```
+
+---
+
+## 6. HTTP Service: axil-embed-search Module
+
+For an out-of-the-box REST API and browser UI that coordinates embeddings with `axil-auren` and searches `libsepal` / `liblemma`, use the pure-C `axil-embed-search` module located at `external/axil-embed-search`.
+
+### Build & Run
+```bash
+./external/axil-embed-search/run.sh
+```
+Or with a custom port:
+```bash
+PORT=8090 ./external/axil-embed-search/run.sh
+```
+
+### Endpoints
+- **`GET /` or `GET /embed-search`**: Interactive web UI form for ingesting prompts and querying results in the browser.
+- **`POST /embeddings` (and `/api/embeddings`)**: Ingest prompt/text document, call `axil-auren`, and persist dense vector into `libsepal` and inverted tokens into `liblemma`.
+- **`GET /search` (and `/api/search`)**: Query stored documents with semantic similarity (`mode=sepal`), lexical prefix matching (`mode=lemma`), or hybrid ranking (`mode=hybrid`).
+
+For complete documentation, curl cheat sheets, and JSON schemas, see [`external/axil-embed-search/README.md`](../external/axil-embed-search/README.md).

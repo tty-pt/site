@@ -1,4 +1,6 @@
 {
+  "defaultProvider": "quest",
+  "defaultModel": "auto",
   "retry": {
     "enabled": true,
     "maxRetries": 5,

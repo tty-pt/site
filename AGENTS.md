@@ -135,6 +135,20 @@ LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 /home/quirinpa/axil-auren/bin/engine-test ~/.models/qwen2.5-0.5b-instruct.gguf
 ```
 
+## axil-embed-search (embeddings & hybrid search HTTP service) — build, run & test
+
+Pure-C Axil service module providing `POST /embeddings` (vector generation via `axil-auren` on port 4242, persistent storage in `libsepal` and `liblemma`), `GET /search` (semantic, lexical, hybrid), and an interactive browser UI form at `GET /`.
+
+```sh
+# Turnkey launcher (runs on :8090 by default):
+./external/axil-embed-search/run.sh
+
+# Run end-to-end integration test suite:
+make -C external/axil-embed-search test
+```
+
+Full documentation and curl examples in `external/axil-embed-search/README.md`.
+
 ## Topic index
 
 | Topic | Read |
@@ -155,3 +169,4 @@ LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Axil embedding & hybrid search HTTP service (`axil-embed-search`) | `external/axil-embed-search/README.md` |
