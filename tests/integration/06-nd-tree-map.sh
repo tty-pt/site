@@ -130,8 +130,8 @@ if not re.search(rb"\x1b\[4[1-7]m", login):
 pat = rb"\x1b\[3[0-7]m[" + re.escape("".join(sorted(glyphs)).encode()) + rb"]"
 if not re.search(pat, login):
     fails.append("login view buffer has no plant glyph")
-if not re.search(rb"\x1b\[1m\x1b\[37m@\x1b\[22m", login) and b"@" not in login:
-    fails.append("login view buffer has no '@' player marker")
+if not re.search(rb"\x1b\[1m\x1b\[33m!\x1b\[2\d?m", login):
+    fails.append("login view buffer has no yellow bold '!' entity marker at the player tile")
 
 if label == "real" and not fails:
     send("x\n")
@@ -158,7 +158,7 @@ if label == "real" and not fails:
 if fails:
     print("[%s] FAIL: %s" % (label, "; ".join(fails)))
     sys.exit(1)
-print("[%s] ok: room `%s`(#%s) at 0 0 0 0, backgrounds + plant glyphs + player '@' present, vim moves verified" % (label, name, ref))
+print("[%s] ok: room `%s`(#%s) at 0 0 0 0, backgrounds + plant glyphs + player yellow '!' present, vim moves verified" % (label, name, ref))
 PY
 	local rc=$?
 	kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; PID=""

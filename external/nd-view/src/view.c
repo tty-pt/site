@@ -105,9 +105,11 @@ dr_room(char *buf, view_tile_t *t, const char *bg, int is_player)
 	b = stpcpy(b, bg);
 
 	if (is_player) {
+		/* The player is an entity like any other: the original game
+		 * drew its tile as the yellow bold entity glyph '!'. */
 		b = stpcpy(b, ANSI_BOLD);
-		b = stpcpy(b, ANSI_FG_WHITE);
-		*b++ = '@';
+		b = stpcpy(b, ansi_fg[YELLOW]);
+		*b++ = '!';
 		b = stpcpy(b, ANSI_RESET_BOLD);
 	} else if (got) {
 		if (vtf.pi.flags & BOLD)
@@ -477,8 +479,8 @@ eng_view(unsigned player_ref)
 		mt->flags = flags;
 
 		if (flags & ND_MAP_FLAG_PLAYER) {
-			mt->symbol = '@';
-			mt->fg = 15;
+			mt->symbol = '!';
+			mt->fg = 14;
 		} else if (flags & ND_MAP_FLAG_ENTITY) {
 			mt->symbol = '!';
 			mt->fg = 14;
