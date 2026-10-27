@@ -28,6 +28,7 @@ extern int g_active_driver_idx;
 
 /* Map UI */
 bud_node *render_room_map(const nd_client_state_t *st);
+void nd_map_canvas_redraw(const nd_client_state_t *st);
 
 /* Dock & Keypad UI */
 bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler);
@@ -35,11 +36,9 @@ bud_node *render_direction_keypad(void);
 bud_node *render_action_bar(const nd_client_state_t *st);
 bud_node *render_gauges_slot(const nd_client_state_t *st);
 int on_dock_action(bud_event *ev);
-int on_cycle_viewport(bud_event *e);
 
 /* State I/O */
 void parse_json_entities(const char *json, nd_client_state_t *st);
 void parse_json_actions(const char *json, nd_client_state_t *st);
-void nd_negotiate_regional_driver(const nd_client_state_t *st);
 
 #endif /* ND_UI_INTERNAL_H */

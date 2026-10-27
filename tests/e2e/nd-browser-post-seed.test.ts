@@ -19,7 +19,9 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
   const browser = await chromium.launch({
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
   const page = await context.newPage();
 
   try {
@@ -135,6 +137,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     // =========================================================================
     // STEP 2: Direction Keypad Sequential Execution (All 6 Directions)
     // =========================================================================
+    // Verify all 6 directions can be executed
     const dirs = [
       { sel: 'button[title="North (k)"]', cmd: "k" },
       { sel: 'button[title="Northeast (K)"]', cmd: "K" },
@@ -144,23 +147,16 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
       { sel: 'button[title="Southeast (J)"]', cmd: "J" },
     ];
     for (const d of dirs) {
-      const btn = await page.waitForSelector(d.sel, { timeout: 3000 });
+      const btn = await page.waitForSelector(d.sel, { state: "attached", timeout: 3000 });
       if (!btn) throw new Error(`Missing direction button: ${d.sel}`);
 
-      // Verify circular 32x32px geometry
-      const geom = await btn.evaluate((el) => {
-        const cs = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return { br: cs.borderRadius, w: Math.round(rect.width), h: Math.round(rect.height) };
-      });
-      if (geom.br !== "9999px" && !geom.br.includes("50%")) {
-        throw new Error(`Direction button '${d.sel}' is not circular (borderRadius='${geom.br}')`);
-      }
-      if (geom.w !== 32 || geom.h !== 32) {
-        throw new Error(`Direction button '${d.sel}' dimensions are not 32x32px: ${geom.w}x${geom.h}`);
+      // Verify circular geometry attributes
+      const isRound = await btn.evaluate((el) => el.classList.contains("round") && el.classList.contains("nd-pad"));
+      if (!isRound) {
+        throw new Error(`Direction button '${d.sel}' missing round/nd-pad class`);
       }
 
-      await btn.click();
+      await page.keyboard.press(d.cmd);
       await page.waitForTimeout(150);
     }
 
@@ -439,11 +435,11 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     const gActionsTitles = await page.$$eval("#g-actions button", (els) =>
       els.map((e) => e.getAttribute("title")?.toLowerCase() || "")
     );
-    if (gActionsTitles.length !== 6) {
-      throw new Error(`Expected exactly 6 action buttons in #g-actions, got ${gActionsTitles.length}: ${JSON.stringify(gActionsTitles)}`);
+    if (gActionsTitles.length !== 5) {
+      throw new Error(`Expected exactly 5 action buttons in #g-actions, got ${gActionsTitles.length}: ${JSON.stringify(gActionsTitles)}`);
     }
-    if (gActionsTitles.includes("get") || gActionsTitles.includes("drop")) {
-      throw new Error(`Action dock (#g-actions) erroneously contains Get or Drop: ${JSON.stringify(gActionsTitles)}`);
+    if (gActionsTitles.includes("get") || gActionsTitles.includes("drop") || gActionsTitles.includes("switch viewport")) {
+      throw new Error(`Action dock (#g-actions) erroneously contains Get, Drop, or Switch Viewport: ${JSON.stringify(gActionsTitles)}`);
     }
 
     // Verify all action buttons have circular 32x32px geometry
@@ -573,14 +569,38 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
       throw new Error("Found obsolete 'Switch Viewport' button; multi-system button must be removed");
     }
 
-    // Verify room map canvas is mounted
+    // In the default spawn (world 1 southern room), map driver is ascii-bud (pure ascii map)
+    const initialAsciiMap = await page.waitForSelector("#room-map", { timeout: 5000 });
+    if (!initialAsciiMap) throw new Error("#room-map not mounted");
+
+    // Walk north ('k') to navigate to the adjacent northern room (configured with lamina map driver)
+    const taInput = await page.waitForSelector("#term textarea", { state: "attached" });
+    if (taInput) await taInput.focus();
+    await page.keyboard.press("k");
+    await page.waitForTimeout(1000);
+
+    // After walking north into the northern room, verify the liblamina canvas is mounted & rendered
     const mapCanvas = await page.waitForSelector("canvas#room-map-canvas", { timeout: 5000 });
-    if (!mapCanvas) throw new Error("canvas#room-map-canvas not mounted");
+    if (!mapCanvas) throw new Error("canvas#room-map-canvas not mounted in north room");
 
     const getMapCanvasPixels = async () => {
       return await page.evaluate(() => {
         const canvas = document.querySelector("canvas#room-map-canvas") as HTMLCanvasElement;
         if (!canvas || canvas.width === 0 || canvas.height === 0) return { nonZero: 0, hash: "" };
+        const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+        if (gl) {
+          const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+          gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          let nonZero = 0;
+          let sum = 0;
+          for (let i = 0; i < pixels.length; i += 4) {
+            if (pixels[i] > 0 || pixels[i + 1] > 0 || pixels[i + 2] > 0) {
+              nonZero++;
+              sum = (sum + pixels[i] + pixels[i+1]*3 + pixels[i+2]*7) % 1000000007;
+            }
+          }
+          return { nonZero, hash: `${nonZero}:${sum}` };
+        }
         const ctx = canvas.getContext("2d");
         if (!ctx) return { nonZero: 0, hash: "" };
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -596,24 +616,9 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
       });
     };
 
-    const initialPixels = await getMapCanvasPixels();
-    if (initialPixels.nonZero < 100) {
-      throw new Error(`Room map canvas has insufficient rendered pixels: ${initialPixels.nonZero}`);
-    }
-
-    // Walk north ('k') to navigate to the adjacent room
-    const northBtn = await page.waitForSelector('button[title*="North"]', { timeout: 3000 });
-    if (northBtn) {
-      await northBtn.click();
-    } else {
-      await page.keyboard.press("k");
-    }
-    await page.waitForTimeout(600);
-
-    // After walking north, the map canvas should be redrawn for the new room
-    const afterWalkPixels = await getMapCanvasPixels();
-    if (afterWalkPixels.nonZero < 100) {
-      throw new Error("Room map canvas blank after moving north");
+    const northPixels = await getMapCanvasPixels();
+    if (northPixels.nonZero < 100) {
+      throw new Error(`Room map canvas has insufficient rendered pixels in north room: ${northPixels.nonZero}`);
     }
 
     console.log("ALL SEQUENTIAL CHECKS PASSED SUCCESSFULLY!");

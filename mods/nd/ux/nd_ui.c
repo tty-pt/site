@@ -46,54 +46,8 @@ const nd_client_state_t *nd_ui_get_client_state(void)
 	return &client_state;
 }
 
-/* --- Pluggable Viewport Registry & Drivers --- */
+/* --- Unified Viewport & Terminal Stage --- */
 
-nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS];
-size_t g_driver_count = 0;
-int g_active_driver_idx = 0;
-
-int nd_register_viewport_driver(const nd_viewport_driver_t *drv)
-{
-	if (!drv || g_driver_count >= ND_VIEWPORT_MAX_DRIVERS)
-		return -1;
-
-	for (size_t i = 0; i < g_driver_count; i++) {
-		if (strcmp(g_viewport_drivers[i].id, drv->id) == 0) {
-			g_viewport_drivers[i] = *drv;
-			return 0;
-		}
-	}
-
-	g_viewport_drivers[g_driver_count++] = *drv;
-	return 0;
-}
-
-const nd_viewport_driver_t *nd_get_active_viewport_driver(void)
-{
-	if (g_driver_count == 0) return NULL;
-	if (g_active_driver_idx < 0 || (size_t)g_active_driver_idx >= g_driver_count)
-		return &g_viewport_drivers[0];
-	return &g_viewport_drivers[g_active_driver_idx];
-}
-
-int nd_set_active_viewport_driver(const char *driver_id)
-{
-	if (!driver_id) return -1;
-	for (size_t i = 0; i < g_driver_count; i++) {
-		if (strcmp(g_viewport_drivers[i].id, driver_id) == 0) {
-			if (g_active_driver_idx != (int)i) {
-				g_active_driver_idx = (int)i;
-#ifdef __wasm__
-				bud_app_set_state();
-#endif
-			}
-			return 0;
-		}
-	}
-	return -1;
-}
-
-/* TTY Viewport Driver */
 static bud_node *mount_tty(void)
 {
 	return lx_n("div",
@@ -104,95 +58,11 @@ static bud_node *mount_tty(void)
 		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
 }
 
-static const nd_viewport_driver_t g_driver_tty = {
-	.id = "tty",
-	.label = "📺 TTY",
-	.required_capability = "axil-tty",
-	.mount = mount_tty,
-	.init = NULL,
-	.on_frame = NULL,
-	.on_resize = NULL,
-	.destroy = NULL
-};
-
-/* Lamina 2D Canvas Driver */
-static bud_node *mount_lamina(void)
-{
-	return lx_n("canvas",
-		lx_attr("id", "viewport"),
-		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "640"),
-		lx_attr("height", "480"),
-		lx_attr("class", "flex-1 min-h-[400px] bg-black rounded border border-neutral-800 shadow-inner"));
-}
-
-static void on_frame_lamina(const uint8_t *buf, size_t len)
-{
-	(void)buf; (void)len;
-	nd_scene_sync(&g_scene, &client_state);
-	nd_lamina_render_scene(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H, &g_scene);
-	lam_canvas_flush(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H);
-}
-
-static const nd_viewport_driver_t g_driver_lamina = {
-	.id = "lamina-2d",
-	.label = "🎮 Lamina (2D)",
-	.required_capability = "lamina",
-	.mount = mount_lamina,
-	.init = NULL,
-	.on_frame = on_frame_lamina,
-	.on_resize = NULL,
-	.destroy = NULL
-};
-
-/* Bud DOM Viewport Driver (nd-driver-bud) */
-static bud_node *mount_bud(void)
-{
-	bud_node *panel = lx_n("div",
-		lx_attr("id", "bud-viewport"),
-		lx_attr("data-bud-viewport", "bud"),
-		lx_attr("class", "flex-1 h-full min-h-[400px] bg-neutral-900 border border-emerald-800 rounded p-4 font-mono text-neutral-200 overflow-y-auto relative flex flex-col gap-3"),
-		lx_node(lx_n("div",
-			lx_attr("class", "text-xl font-bold text-emerald-400 border-b border-emerald-900/50 pb-2"),
-			lx_text(client_state.room.name[0] ? client_state.room.name : "NeverDark World"))),
-		lx_node(lx_n("p",
-			lx_attr("class", "text-sm text-neutral-300 leading-relaxed"),
-			lx_text(client_state.room.desc[0] ? client_state.room.desc : "Exploring spacetime coordinates..."))));
-
-	if (client_state.entity_count > 0) {
-		bud_node *ents = lx_n("div", lx_attr("class", "flex flex-wrap gap-2 mt-2"));
-		for (size_t i = 0; i < client_state.entity_count; i++) {
-			const nd_entity_desc_t *e = &client_state.entities[i];
-			bud_append(ents, lx_n("span",
-				lx_attr("class", "px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200"),
-				lx_text(e->name[0] ? e->name : "entity")));
-		}
-		bud_append(panel, ents);
-	}
-	return panel;
-}
-
-static const nd_viewport_driver_t g_driver_bud = {
-	.id = "bud",
-	.label = "🌿 Bud (DOM)",
-	.required_capability = "bud",
-	.mount = mount_bud,
-	.init = NULL,
-	.on_frame = NULL,
-	.on_resize = NULL,
-	.destroy = NULL
-};
-
 void nd_ui_init_defaults(void)
 {
 	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
 	nd_scene_init(&g_scene);
-
-	nd_register_viewport_driver(&g_driver_tty);
-	nd_register_viewport_driver(&g_driver_lamina);
-	nd_register_viewport_driver(&g_driver_bud);
-	g_active_driver_idx = 0;
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -328,8 +198,7 @@ static int on_btn_action(bud_event *ev)
 
 static bud_node *render_viewport_slot(const nd_client_state_t *st)
 {
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	bud_node *vport = (drv && drv->mount) ? drv->mount() : mount_tty();
+	bud_node *vport = mount_tty();
 
 	bud_node *overlay = nd_ui_glue_render_slot(ND_UI_SLOT_HUD_OVERLAYS, st);
 	if (overlay) {
@@ -671,17 +540,13 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		layout);
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
-	bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
 	bud_bind(root, "keydown@window", 0, on_key_down);
 	return root;
 }
 
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	if (drv && drv->on_frame) {
-		drv->on_frame(NULL, 0);
-	}
+	nd_map_canvas_redraw(&client_state);
 }
 
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
@@ -689,9 +554,10 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	(void)dt;
 	(void)width;
 	(void)height;
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	if (drv && drv->on_frame) {
-		drv->on_frame(NULL, 0);
+	static uint32_t s_tick_counter = 0;
+	s_tick_counter++;
+	if ((s_tick_counter % 3) == 0) {
+		nd_map_canvas_redraw(&client_state);
 	}
 }
 

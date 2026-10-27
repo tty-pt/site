@@ -134,7 +134,14 @@ static const uint16_t g_font_3x5[] = {
 	['#'] = 0x5757, /* grid hatch */
 	['+'] = 0x2720, /* cross */
 	['@'] = 0x7572, /* player glyph */
-	['?'] = 0x7120  /* question */
+	['?'] = 0x7120, /* question */
+	['t'] = 0x2722, /* small tree: trunk + branch */
+	['T'] = 0x7222, /* big tree: canopy bar + trunk */
+	['x'] = 0x5250, /* small shrub / plant */
+	['X'] = 0x5750, /* big dense bush / foliage */
+	['a'] = 0x2575, /* small pine */
+	['i'] = 0x2022, /* small cactus */
+	['I'] = 0x5722  /* saguaro cactus */
 };
 
 static void draw_glyph_3x5(uint32_t *fb, uint32_t w, uint32_t h,
@@ -376,6 +383,40 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
 			if (is_entity && !is_player) {
 				uint32_t ec = theme->entity_color;
 				fill_rounded_rect(fb, w, h, (int)(tx + tile_sz / 2 - 2), (int)(ty + tile_sz / 2 - 2), 5, 5, 2, ec);
+			}
+
+			/* Tree / Plant nature rendering matching ASCII map information */
+			if (is_room && !is_player && !is_entity && tile->symbol) {
+				char s = (char)tile->symbol;
+				if (s == 't' || s == 'T' || s == 'x' || s == 'X' || s == 'a' || s == 'A' || s == 'i' || s == 'I') {
+					int cx = (int)(tx + tile_sz / 2);
+					int cy = (int)(ty + tile_sz / 2);
+
+					if (s == 't' || s == 'T') {
+						/* Tree: lush green canopy circle + trunk */
+						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy + 1), 2, 4, 0xFF4A3525); /* Bark */
+						fill_rounded_rect(fb, w, h, cx - 4, cy - 5, 8, 7, 3, (s == 'T') ? 0xFF2D8A3E : 0xFF3DA652); /* Canopy */
+						fill_rounded_rect(fb, w, h, cx - 2, cy - 4, 4, 3, 1, 0xFF54C46B); /* Highlight */
+					} else if (s == 'a' || s == 'A') {
+						/* Pine / Fir: conical tiered pine */
+						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy + 2), 2, 3, 0xFF3A2818);
+						fill_rounded_rect(fb, w, h, cx - 2, cy - 4, 4, 3, 1, 0xFF1D6632);
+						fill_rounded_rect(fb, w, h, cx - 4, cy - 1, 8, 4, 2, 0xFF287A40);
+					} else if (s == 'i' || s == 'I') {
+						/* Cactus: desert saguaro arms */
+						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy - 4), 2, 9, 0xFF2E854B);
+						fill_rect_blend(fb, w, h, (uint32_t)(cx - 4), (uint32_t)(cy - 2), 2, 4, 0xFF2E854B);
+						fill_rect_blend(fb, w, h, (uint32_t)(cx + 2), (uint32_t)(cy - 1), 2, 4, 0xFF2E854B);
+						fill_rect_blend(fb, w, h, (uint32_t)(cx - 3), (uint32_t)(cy + 1), 6, 2, 0xFF2E854B);
+					} else {
+						/* Shrub / crop / bush */
+						fill_rounded_rect(fb, w, h, cx - 3, cy - 3, 6, 5, 2, 0xFF4E9E3B);
+						fill_rounded_rect(fb, w, h, cx - 1, cy - 2, 3, 2, 1, 0xFF72C758);
+					}
+				} else if (s != '.' && s != ' ') {
+					/* Other feature glyph (e.g. shrine, altar) */
+					draw_glyph_3x5(fb, w, h, (int)(tx + tile_sz / 2 - 1), (int)(ty + tile_sz / 2 - 2), s, 0xFFE0E0E0);
+				}
 			}
 
 			/* Player avatar with breathing radial glow */

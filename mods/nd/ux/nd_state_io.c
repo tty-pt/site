@@ -46,7 +46,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		"\"preferred_map_driver\":\"%s\","
 		"\"layout_mode\":%u,"
 		"\"pres_flags\":%u,"
-		"\"active_viewport\":%d,\"tod\":%u,"
+		"\"tod\":%u,"
 		"\"room\":{\"ref\":%u,\"name\":\"%s\",\"desc\":\"%s\",\"exits\":%u},"
 		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,"
 		"\"gauges\":[",
@@ -56,10 +56,10 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		st->selected_item_ref,
 		st->target_ref,
 		st->preferred_driver,
-		st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud",
+		st->preferred_map_driver[0] ? st->preferred_map_driver : "lamina",
 		(unsigned)st->layout_mode,
 		(unsigned)st->pres_flags,
-		g_active_driver_idx, st->tod,
+		st->tod,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits);
 	free(esc_map);
@@ -265,14 +265,7 @@ static void parse_gauge_elem(const char *elem, size_t elen, void *user)
 
 void nd_negotiate_regional_driver(const nd_client_state_t *st)
 {
-	if (!st) return;
-	if (st->preferred_driver[0]) {
-		if (st->pres_flags & ND_REGION_LOCKED) {
-			nd_set_active_viewport_driver(st->preferred_driver);
-		} else if (g_active_driver_idx < 0) {
-			nd_set_active_viewport_driver(st->preferred_driver);
-		}
-	}
+	(void)st;
 }
 
 ISO_EXPORT(void, wasm_init, const char *json, int len)
@@ -314,11 +307,6 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		bud_json_str(json, "preferred_map_driver", client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver));
 		client_state.layout_mode = (uint8_t)bud_json_int(json, "layout_mode", 0);
 		client_state.pres_flags = (uint8_t)bud_json_int(json, "pres_flags", ND_REGION_ALLOW_CHOICE);
-
-		int v_idx = (int)bud_json_int(json, "active_viewport", 0);
-		if (v_idx >= 0 && (size_t)v_idx < g_driver_count) {
-			g_active_driver_idx = v_idx;
-		}
 
 		/* Rehydrate room info */
 		client_state.room.ref = (uint32_t)bud_json_int(json, "room_ref", 0);
@@ -364,13 +352,9 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
 		int ret = nd_bcp_decode(buf, len, &client_state);
 		if (ret > 0) {
-			nd_negotiate_regional_driver(&client_state);
 			nd_scene_sync(&g_scene, &client_state);
 			bud_app_set_state();
-			const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-			if (drv && drv->on_frame) {
-				drv->on_frame(NULL, 0);
-			}
+			nd_map_canvas_redraw(&client_state);
 		}
 		return;
 	}

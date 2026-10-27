@@ -235,17 +235,28 @@ cmd "drop Leather Tunic"
 cmd "create Iron Helm"
 cmd "drop Iron Helm"
 
-# Planet 1: Composable Viewport Governance with Choice Allowed
+# Planet 1 (world 1):
+# Base planet policy: southern half / default renders with ascii
 cmd "region 16 world 1"
 cmd "driver stage choice 16 world 1"
 cmd "driver map ascii 16 world 1"
 cmd "driver layout hybrid 16 world 1"
 
+# Specific rooms / northern half: Room (0, 1, 0, 1) and (0, 2, 0, 1)
+# When the player is in or walks north into these rooms, map renders with lamina!
+cmd "room 0 1 0 1"
+cmd "driver map lamina 64 here"
+cmd "room 0 2 0 1"
+cmd "driver map lamina 64 here"
+
+# Return player to Central Spawn Hall
+cmd "room 0 0 0 1"
+
 # If 2 or more planets, establish Planet 2 as the Locked Lamina Graphical Showcase Area
 if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "region 16 world 2"
-	cmd "driver stage lamina-2d locked 16 world 2"
-	cmd "driver map canvas 16 world 2"
+	cmd "driver stage choice 16 world 2"
+	cmd "driver map cyber 16 world 2"
 	cmd "driver layout hybrid 16 world 2"
 
 	# Room 1: The High Crystal Sanctum at (0, 0, 0, 2)

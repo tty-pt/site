@@ -1,4 +1,6 @@
 #include "nd_ui_internal.h"
+#include "nd_lamina.h"
+#include <ttypt/lam.h>
 
 static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 {
@@ -82,10 +84,6 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 	dst[w < cap ? w : cap - 1] = '\0';
 }
 
-/* #room-map always holds exactly one RAW_HTML child. A TEXT child that later
- * becomes RAW_HTML (first BCP view frame) is not a clean DOM patch: the
- * hydrator reported a SSR/WASM mismatch and left one stray coloured cell.
- * RAW -> RAW is a single patch-innerhtml on the element. */
 static bud_node *raw_escaped(const char *text)
 {
 	size_t n = text ? strlen(text) : 0;
@@ -109,22 +107,19 @@ static bud_node *raw_escaped(const char *text)
 	return node;
 }
 
-static bud_node *render_room_map_ascii(const nd_client_state_t *st)
+static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st)
 {
-	bud_node *map = lx_n("nd-map",
-		lx_attr("id", "room-map"),
-		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
-
 	if (st && st->map_buf[0]) {
-		/* Each ANSI escape (>= 3 bytes) can open a ~30 byte <span>. */
 		size_t cap = strlen(st->map_buf) * 12 + 256;
 		char *html = malloc(cap);
 		if (html) {
 			nd_ansi_to_html(st->map_buf, html, cap);
-			bud_append(map, bud_raw(html));
+			bud_append(parent, lx_n("div",
+				lx_attr("class", "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight"),
+				lx_node(bud_raw(html))));
 			free(html);
 		}
-		return map;
+		return;
 	}
 
 	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
@@ -136,10 +131,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 		if (h > 7) h = 7;
 
 		for (uint8_t y = 0; y < h; y++) {
-			/* Top boundary of row y */
 			for (uint8_t x = 0; x < w; x++) {
 				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int n_open = (t->exits & 2); /* E_NORTH */
+				int n_open = (t->exits & 2);
 				int n_door = (t->doors & 2);
 				if (x == 0) out[pos++] = '+';
 				if (n_door) {
@@ -153,10 +147,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 			}
 			out[pos++] = '\n';
 
-			/* Room interior of row y */
 			for (uint8_t x = 0; x < w; x++) {
 				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int w_open = (t->exits & 1); /* E_WEST */
+				int w_open = (t->exits & 1);
 				int w_door = (t->doors & 1);
 				if (w_door) out[pos++] = '#';
 				else if (w_open) out[pos++] = ' ';
@@ -167,7 +160,7 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 				out[pos++] = ' ';
 
 				if (x == w - 1) {
-					int e_open = (t->exits & 8); /* E_EAST */
+					int e_open = (t->exits & 8);
 					int e_door = (t->doors & 8);
 					if (e_door) out[pos++] = '#';
 					else if (e_open) out[pos++] = ' ';
@@ -177,10 +170,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 			out[pos++] = '\n';
 		}
 
-		/* Bottom boundary of last row */
 		for (uint8_t x = 0; x < w; x++) {
 			const nd_map_tile_t *t = &st->map_data.tiles[(h - 1) * w + x];
-			int s_open = (t->exits & 16); /* E_SOUTH */
+			int s_open = (t->exits & 16);
 			int s_door = (t->doors & 16);
 			if (x == 0) out[pos++] = '+';
 			if (s_door) {
@@ -194,34 +186,70 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 		}
 		out[pos] = '\0';
 
-		bud_append(map, raw_escaped(out));
-		return map;
+		bud_append(parent, lx_n("div",
+			lx_attr("class", "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight"),
+			lx_node(raw_escaped(out))));
+		return;
 	}
 
-	bud_append(map, raw_escaped(st ? st->room.desc : ""));
-	return map;
-}
-
-static bud_node *render_room_map_canvas(const nd_client_state_t *st)
-{
-	(void)st;
-	return lx_n("canvas",
-		lx_attr("id", "room-map-canvas"),
-		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "160"),
-		lx_attr("height", "160"),
-		lx_attr("class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto"));
+	if (st && st->room.desc[0]) {
+		bud_append(parent, lx_n("div",
+			lx_attr("class", "nd-map-fallback font-mono text-xs text-neutral-400 p-1"),
+			lx_node(raw_escaped(st->room.desc))));
+	}
 }
 
 bud_node *render_room_map(const nd_client_state_t *st)
 {
-	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
+	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "lamina";
 
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
 
-	if (strcmp(map_drv, "canvas-lamina") == 0 || strcmp(map_drv, "canvas") == 0)
-		return render_room_map_canvas(st);
+	/* If explicitly configured as ascii-bud / ascii, render the pure ASCII map */
+	if (strcmp(map_drv, "ascii-bud") == 0 || strcmp(map_drv, "ascii") == 0) {
+		bud_node *ascii_map = lx_n("nd-map",
+			lx_attr("id", "room-map"),
+			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
+		append_fallback_ascii(ascii_map, st);
+		return ascii_map;
+	}
 
-	return render_room_map_ascii(st);
+	/* Container wrapping canvas and progressive SSR/No-JS fallback */
+	bud_node *map = lx_n("nd-map",
+		lx_attr("id", "room-map"),
+		lx_attr("class", "relative w-[160px] h-[160px] bg-black/90 p-0 rounded border border-neutral-700/60 overflow-hidden select-none block mx-auto shadow-inner"));
+
+	/* The canvas rendered by liblamina */
+	bud_node *cv = lx_n("canvas",
+		lx_attr("id", "room-map-canvas"),
+		lx_attr("data-bud-canvas", "1"),
+		lx_attr("width", "160"),
+		lx_attr("height", "160"),
+		lx_attr("class", "w-[160px] h-[160px] block"));
+	bud_append(map, cv);
+
+	/* Progressive fallback map text for SSR / No-JS */
+	append_fallback_ascii(map, st);
+
+	return map;
+}
+
+static uint32_t s_map_fb[ND_MAP_CANVAS_W * ND_MAP_CANVAS_H];
+static uint32_t s_map_frame = 0;
+
+void nd_map_canvas_redraw(const nd_client_state_t *st)
+{
+	if (!st) return;
+	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "lamina";
+	if (strcmp(theme, "none") == 0) return;
+
+	/* If legacy name "canvas" or "canvas-lamina" is passed, use default lamina theme */
+	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0 || strcmp(theme, "ascii-bud") == 0) {
+		theme = "lamina";
+	}
+
+	nd_lamina_render_map_themed(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
+	                            &st->map_data, theme, st->tod, s_map_frame++);
+	lam_canvas_flush(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H);
 }

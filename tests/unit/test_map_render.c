@@ -97,13 +97,24 @@ int main(void)
 	assert(lum_unexp < lum_exp);
 	printf("PASS: unexplored tile area is darker than explored tile area (lum %u < %u)\n", lum_unexp, lum_exp);
 
-	/* 7. Player pulsing: different frame values modulate player marker/glow */
+	/* 7. Tree and Plant nature rendering: tiles with tree symbols render distinct canopy/trunk pixels */
+	nd_map_data_t map_trees;
+	init_sample_map(&map_trees);
+	map_trees.tiles[1 * 7 + 1].symbol = 'T'; /* Big tree */
+	map_trees.tiles[1 * 7 + 2].symbol = 't'; /* Small tree */
+	map_trees.tiles[1 * 7 + 3].symbol = 'a'; /* Fir/Pine */
+	uint32_t fb_trees[160 * 160] = {0};
+	nd_lamina_render_map_themed(fb_trees, 160, 160, &map_trees, "lamina", 43200, 0);
+	assert(memcmp(fb1, fb_trees, sizeof(fb1)) != 0);
+	printf("PASS: tree and plant symbols produce distinct nature pixels\n");
+
+	/* 8. Player pulsing: different frame values modulate player marker/glow */
 	uint32_t fb_pulse[160 * 160] = {0};
 	nd_lamina_render_map_themed(fb_pulse, 160, 160, &map, "lamina", 43200, 30);
 	assert(memcmp(fb1, fb_pulse, sizeof(fb1)) != 0);
 	printf("PASS: animation frame modulates player marker pulse\n");
 
-	/* 8. Backward compatibility wrapper nd_lamina_render_map still works */
+	/* 9. Backward compatibility wrapper nd_lamina_render_map still works */
 	uint32_t fb_compat[160 * 160] = {0};
 	nd_lamina_render_map(fb_compat, 160, 160, &map);
 	assert(memcmp(fb1, fb_compat, sizeof(fb1)) == 0);
