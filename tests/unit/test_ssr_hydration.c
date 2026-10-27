@@ -373,6 +373,14 @@ int main(void)
 		assert(strstr(html, "<nd-avatar"));       /* rows carry an avatar thumbnail */
 		bud_free_string(html);
 
+		/* When an item is selected: renders floating action popup with look button */
+		inv_st.selected_item_ref = 101; /* tree */
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "nd-item-popup"));
+		assert(strstr(html, "data-action=\"look\""));
+		bud_free_string(html);
+		inv_st.selected_item_ref = 0;
+
 		/* Test BCP item decoding: room item (dynflags=1, type=0) clears target and sets room */
 		uint8_t room_frame[131];
 		memset(room_frame, 0, sizeof(room_frame));

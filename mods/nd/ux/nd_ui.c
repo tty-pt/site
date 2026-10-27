@@ -412,9 +412,9 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_append(name_span, bud_text(e->name));
 			bud_append(row, name_span);
 
-			/* Action Dock */
+			/* Action Dock: floating popup capsule when selected */
 			bud_node *act_dock = bud_element("div");
-			bud_set_attr(act_dock, "class", is_selected ? "flex items-center gap-1 flex-shrink-0" : "hidden");
+			bud_set_attr(act_dock, "class", is_selected ? "nd-item-popup flex items-center gap-1" : "hidden");
 
 			char look_cmd[48], get_cmd[48], drop_cmd[48];
 			snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);

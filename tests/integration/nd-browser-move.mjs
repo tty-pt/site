@@ -52,6 +52,7 @@ try {
   console.log("south :", JSON.stringify(back.head), "map", back.map.length);
   if (back.head !== before.head) fails.push("room header did not return after moving south");
   if (back.map === north.map) fails.push("map did not change after moving back south");
+  if (back.map !== before.map) fails.push("map after moving back south differs from initial login map");
   if (/\x1b|\[4\dm/.test(back.map)) fails.push("raw ANSI leaked into the map");
   // The vim keys also work with focus outside the terminal (window keydown).
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -60,6 +61,9 @@ try {
   const key = await snap();
   console.log("key k :", JSON.stringify(key.head), "map", key.map.length);
   if (key.head === back.head) fails.push("pressing k outside the terminal did not move the map");
+  // Return to spawn room #2 for fixture tests
+  await page.keyboard.press("j");
+  await page.waitForTimeout(2500);
   // Layout: the map and the looked-at object's image are never shown together,
   // and the direction pad is for small/touch screens only.
   const vis = (sel) => page.evaluate((q) => {
@@ -110,6 +114,27 @@ try {
   if (lay.radius < 6) fails.push("contents rows are not rounded");
   if (lay.cbottom > lay.abottom) fails.push("contents list overlaps the action bar");
   if (art.art && Math.abs(art.art.w - lay.mapW) > lay.mapW * 0.35) fails.push(`target art ${art.art.w} vs map ${lay.mapW} differ too much`);
+
+  // Item selection: clicking an item reveals a floating action popup capsule (position: absolute)
+  await page.click("#contents nd-item");
+  await page.waitForTimeout(300);
+  const popup = await page.evaluate(() => {
+    const p = document.querySelector("#contents nd-item .nd-item-popup");
+    if (!p) return null;
+    const cs = getComputedStyle(p);
+    return {
+      pos: cs.position,
+      vis: cs.display !== "none" && p.getClientRects().length > 0,
+      look: !!p.querySelector("[data-action='look']"),
+      get: !!p.querySelector("[data-action='get']"),
+    };
+  });
+  if (!popup || !popup.vis) fails.push("item action popup did not appear on item click");
+  else {
+    if (popup.pos !== "absolute") fails.push("item action popup is not position: absolute: " + popup.pos);
+    if (!popup.look) fails.push("item action popup missing look button");
+  }
+
   const small = await browser.newPage({ viewport: { width: 390, height: 800 } });
   await small.goto(url, { waitUntil: "domcontentloaded" });
   await small.waitForSelector("#directions", { state: "attached", timeout: 8000 });

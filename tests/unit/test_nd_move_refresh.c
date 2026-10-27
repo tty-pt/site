@@ -104,7 +104,22 @@ int main(void)
 	assert(st.room.ref == room0);
 	assert(strcmp(st.room.name, name0) == 0);
 	assert(strcmp(view1, view2) != 0);
-	printf("PASS: moving back south restores the original room and refreshes the map\n");
+	assert(strcmp(view2, view0) == 0);
+	printf("PASS: moving back south restores the original room and refreshes the map (100%% identical to login map)\n");
+
+	/* Test item selection popup in contents */
+	for (size_t i = 0; i < st.entity_count; i++) {
+		if (st.entities[i].ref != st.me && st.entities[i].location == st.room.ref) {
+			st.selected_item_ref = st.entities[i].ref;
+			break;
+		}
+	}
+	assert(st.selected_item_ref != 0);
+	char *html_sel = bud_render_html(nd_ui_render(&st));
+	assert(html_sel && strstr(html_sel, "nd-item-popup"));
+	assert(strstr(html_sel, "data-action=\"look\""));
+	bud_free_string(html_sel);
+	printf("PASS: selected item renders floating action popup\n");
 
 	free(view0);
 	free(view1);

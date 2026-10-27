@@ -446,9 +446,6 @@ st_room_at(unsigned player_ref, pos_t pos)
 	biome_map = biome_map_get(* (uint64_t *) pos);
 	unsigned there_ref = eng_object_add(&there, biome_map[bio.bio_idx], 0, (uint64_t) &bio, 0);
 	ROO *rthere = (ROO *) &there.data;
-	/* Carved rooms are permanent; clear RF_TEMP so eng_room_clean
-	 * does not collect the room when empty (§27.3). */
-	rthere->flags &= ~RF_TEMP;
 	map_put(pos, there_ref, 1);
 	exits_infer(there_ref, rthere);
 
@@ -1263,6 +1260,13 @@ do_room(int fd, int argc, char *argv[])
 		nd_writef(player_ref, "Couldn't make a room there.\n");
 		nd_flush(player_ref);
 		return;
+	}
+	/* Explicitly created rooms (admin `room x y z w`) are permanent (§27.3). */
+	OBJ r_obj;
+	if (corm_read(obj_hd, &there_ref, &r_obj, sizeof(r_obj)) == 0) {
+		ROO *r = (ROO *)&r_obj.data;
+		r->flags &= ~RF_TEMP;
+		corm_put(obj_hd, &there_ref, &r_obj);
 	}
 	eng_enter(player_ref, there_ref, E_NULL);
 	nd_writef(player_ref, "room %u at %d %d %d %d\n",
