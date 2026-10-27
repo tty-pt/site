@@ -149,8 +149,6 @@ int nd_seven_key(const char *key, int down)
 		return 0;
 	if (down) {
 		s_held |= bit;
-		s_dir = bit == HELD_U ? DIR_UP : bit == HELD_D ? DIR_DOWN :
-		        bit == HELD_L ? DIR_LEFT : DIR_RIGHT;
 	} else {
 		s_held &= ~bit;
 	}
@@ -195,8 +193,25 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 	s_acc -= (float)steps;
 	while (steps-- > 0 && !key) {
 		int ox = s_fx, oy = s_fy;
-		if (dx) key = move_axis(dx, 0);
-		if (dy && !key) key = move_axis(0, dy);
+		if (dx) {
+			int k = move_axis(dx, 0);
+			if (k) key = k;
+		}
+		if (dy) {
+			int k = move_axis(0, dy);
+			if (k) key = k;
+		}
+		/* Detect actual movement by position change */
+		int moved_dx = (ox != s_fx) && (dx != 0);
+		int moved_dy = (oy != s_fy) && (dy != 0);
+		
+		/* Update direction based on actual movement this frame */
+		if (moved_dx || moved_dy) {
+			if (moved_dy)
+				s_dir = (dy > 0) ? DIR_DOWN : DIR_UP;      /* Y-axis priority */
+			else if (moved_dx)
+				s_dir = (dx > 0) ? DIR_RIGHT : DIR_LEFT;    /* X-axis fallback */
+		}
 		if (ox != s_fx || oy != s_fy)
 			s_walking = 1;
 	}

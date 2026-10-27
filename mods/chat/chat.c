@@ -519,7 +519,7 @@ static void *ws_worker_thread(void *arg)
 	}
 
 	struct timeval tv;
-	tv.tv_sec = 60;
+	tv.tv_sec = 5;  /* Reduced from 60s to 5s for better responsiveness when auren unavailable */
 	tv.tv_usec = 0;
 	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));

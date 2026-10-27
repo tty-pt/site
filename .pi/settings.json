@@ -15,11 +15,12 @@
   "pi-quest": {
     "askTimeoutMs": 60000,
     "depthCap": 3,
+    "strictMode": true,
     "draftThresholds": { "requirements": 2, "evidence": 7 },
     "bindings": {
       "reviewRunner": { "tool": "subagent" }
     },
-    "reviewPolicy": "balanced",
+    "reviewPolicy": "strict",
     "judgeFallback": "heuristic",
     "roles": {
       "reviewer": "anthropic/claude-sonnet-4-5",
