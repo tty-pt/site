@@ -23,19 +23,33 @@ This document explains how to set up and run semantic and hybrid search using `a
 ## 1. Quick Start
 
 ### 1. Start the Embedding Daemon
-Run `axil-auren` on port `4242`:
+Run `axil-auren` on port `4242` with your preferred embedding model:
+- **`bge-small`**: Fast & ultra-lightweight (384-dimensional, 37 MB)
+- **`bge-base`**: Higher retrieval accuracy (768-dimensional, 118 MB)
 
 ```bash
+# Option A: Fast & lightweight (bge-small, default)
 AUREN_EMBED_MODEL="bge-small" \
 AUREN_EMBED_PATH=~/.models/bge-small-en-v1.5.gguf \
 axil -A -d -p 4242 -m libaxil-auren
+
+# Option B: High accuracy (bge-base)
+# AUREN_EMBED_MODEL="bge-base" \
+# AUREN_EMBED_PATH=~/.models/bge-base-en-v1.5.gguf \
+# axil -A -d -p 4242 -m libaxil-auren
 ```
 
 Verify that the daemon answers:
 ```bash
+# Query bge-small (384 dims):
 curl -s http://127.0.0.1:4242/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model":"bge-small","input":"test string"}'
+
+# Or query bge-base (768 dims):
+curl -s http://127.0.0.1:4242/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model":"bge-base","input":"test string"}'
 ```
 
 ### 2. Configure Client Environment
@@ -43,7 +57,8 @@ Point `corm` / `libsepal` to the embedding endpoint:
 
 ```bash
 export CORM_SEPAL_EMBED_URL="http://127.0.0.1:4242/v1/embeddings"
-export CORM_SEPAL_EMBED_MODEL="bge-small"
+# Choose "bge-small" (384-d, fastest) or "bge-base" (768-d, higher accuracy):
+export CORM_SEPAL_EMBED_MODEL="bge-base"
 ```
 
 ### 3. Ingest Documents
@@ -175,14 +190,23 @@ export SEPAL_EXACT_DIM=128
 
 ## 5. Installation & Model Setup
 
-### Download Embedding Model
-Create `~/.models/` and download `bge-small-en-v1.5` in GGUF format (133 MB):
+### Download Embedding Models
+Create `~/.models/` and download your chosen model in GGUF format:
 
 ```bash
 mkdir -p ~/.models
+
+# Option A: Fast & ultra-lightweight (bge-small-en-v1.5, 384 dims, 37 MB)
 curl -L -o ~/.models/bge-small-en-v1.5.gguf \
   https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf
+
+# Option B: Higher accuracy (bge-base-en-v1.5, 768 dims, 118 MB)
+curl -L -o ~/.models/bge-base-en-v1.5.gguf \
+  https://huggingface.co/CompendiumLabs/bge-base-en-v1.5-gguf/resolve/main/bge-base-en-v1.5-q8_0.gguf
 ```
+
+> **Note on Dimensionality & libsepal**:
+> `libsepal` natively handles both 384-dimensional (`bge-small`) and 768-dimensional (`bge-base`) embeddings (up to `SEPAL_VEC_MAX = 2048`). Stage 1 performs sign-bit sketch prefiltering over the full dimension (384 or 768 bits), and Stage 2 performs exact AVX2 cosine reranking over `min(dim, SEPAL_EXACT_DIM)` (default 256 dimensions), giving optimal retrieval accuracy with low CPU and memory footprint.
 
 ### Install Packages
 

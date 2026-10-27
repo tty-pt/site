@@ -115,7 +115,7 @@ try {
   if (lay.cbottom > lay.abottom) fails.push("contents list overlaps the action bar");
   if (art.art && Math.abs(art.art.w - lay.mapW) > lay.mapW * 0.35) fails.push(`target art ${art.art.w} vs map ${lay.mapW} differ too much`);
 
-  // Item selection: clicking an item reveals a floating action popup to the LEFT with square buttons
+  // Item selection: clicking an item reveals action buttons with original square styling
   await page.click("#contents nd-item");
   await page.waitForTimeout(300);
   const popup = await page.evaluate(() => {
@@ -131,17 +131,17 @@ try {
     return {
       pos: cs.position,
       vis: cs.display !== "none" && pb.width > 0,
-      leftSide: pb.left < ib.left + 50,
+      visibleInRow: pb.right <= ib.right + 2 && pb.left >= ib.left,
       look: !!p.querySelector("[data-action='look']"),
       get: !!p.querySelector("[data-action='get']"),
-      btnSquare: bb ? Math.abs(bb.width - bb.height) <= 6 : false,
+      btnSquare: bb ? Math.abs(bb.width - bb.height) <= 4 : false,
       btnRadius: bcs ? parseFloat(bcs.borderRadius) : 999,
     };
   });
   if (!popup || !popup.vis) fails.push("item action popup did not appear on item click");
   else {
     if (popup.pos !== "absolute") fails.push("item action popup is not position: absolute: " + popup.pos);
-    if (!popup.leftSide) fails.push("item action popup is not positioned to the left");
+    if (!popup.visibleInRow) fails.push("item action popup is clipped or outside the item row");
     if (!popup.btnSquare) fails.push("item action buttons are not square");
     if (popup.btnRadius > 6) fails.push("item action buttons are pill-shaped instead of square (radius > 6): " + popup.btnRadius);
     if (!popup.look) fails.push("item action popup missing look button");

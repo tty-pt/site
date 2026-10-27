@@ -421,6 +421,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
 			snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
 
+			/* Look button */
 			bud_node *look = bud_element("button");
 			bud_set_attr(look, "type", "button");
 			bud_set_attr(look, "data-action", "look");
@@ -431,7 +432,8 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
 
-			if (e->type != 1 && !(e->flags & 0x01)) {
+			/* Get button: shown if ACT_GET (4) is set or item is gettable */
+			if ((e->actions & 4) || (e->location != st->me && e->type != 1 && e->actions == 0)) {
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
@@ -443,7 +445,8 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 				bud_append(act_dock, get);
 			}
 
-			if (e->location == st->me) {
+			/* Drop button: shown if ACT_DROP (8) is set or item is in inventory */
+			if ((e->actions & 8) || (e->location == st->me)) {
 				bud_node *drop = bud_element("button");
 				bud_set_attr(drop, "type", "button");
 				bud_set_attr(drop, "data-action", "drop");

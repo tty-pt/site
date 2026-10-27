@@ -7,7 +7,7 @@ A high-performance pure-C [Axil](https://github.com/tty-pt/axil) module providin
 ## Architecture
 
 - **HTTP Engine**: Pure-C Axil daemon request dispatch via `axil_register_handler`.
-- **Embeddings Backend**: Interoperates with `axil-auren` (`http://127.0.0.1:4242/v1/embeddings`) using OpenAI-compatible JSON payloads (`bge-small` 384-dimensional dense vectors).
+- **Embeddings Backend**: Interoperates with `axil-auren` (`http://127.0.0.1:4242/v1/embeddings`) using OpenAI-compatible JSON payloads (`bge-small` 384-dimensional or `bge-base` 768-dimensional dense vectors).
 - **Vector Search Engine**: [libsepal](https://github.com/tty-pt/libsepal) two-stage ANN pipeline (Hamming sketch prefilter + exact cosine rerank).
 - **Lexical Search Engine**: [liblemma](https://github.com/tty-pt/liblemma) inverted index with accent-preserving token folding (`pão ≠ pao`).
 - **Prompt Storage**: [libcorm](https://github.com/tty-pt/libcorm) persistent string map linking document IDs (`ref`) to raw prompt text.
@@ -18,9 +18,15 @@ A high-performance pure-C [Axil](https://github.com/tty-pt/axil) module providin
 
 1. Ensure the `axil-auren` embedding daemon is running on port `4242`:
    ```bash
+   # Verify default or bge-small:
    curl -s http://127.0.0.1:4242/v1/embeddings \
      -H "Content-Type: application/json" \
      -d '{"model":"bge-small","input":"ping"}'
+
+   # Or verify bge-base (768 dimensions):
+   curl -s http://127.0.0.1:4242/v1/embeddings \
+     -H "Content-Type: application/json" \
+     -d '{"model":"bge-base","input":"ping"}'
    ```
    *(Expected response: `{"data":[{"object":"embedding","embedding":[...]}]}`)*
 
@@ -77,6 +83,7 @@ curl -s -X POST http://127.0.0.1:8090/embeddings \
   "prompt": "High-performance vector similarity search in pure C"
 }
 ```
+*(Note: `dim` will be `384` when using `bge-small` or `768` when using `bge-base`).*
 
 #### Ingest with Custom ID / Ref:
 ```bash

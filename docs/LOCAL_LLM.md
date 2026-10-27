@@ -25,7 +25,8 @@ axil -A -d -p 4242 -m /home/quirinpa/axil-auren/lib/libaxil-auren
 ### Models & Sizing
 Models are stored in `~/.models/`:
 - **Generative Chat & System One**: `~/.models/qwen2.5-0.5b-instruct.gguf` (398 MB, Q4_K_M)
-- **Dense Vector Embeddings**: `~/.models/bge-small-en-v1.5.gguf` (133 MB, Q8_0)
+- **Dense Vector Embeddings (Fast & Lightweight)**: `~/.models/bge-small-en-v1.5.gguf` (37 MB, Q8_0, 384-dimensional)
+- **Dense Vector Embeddings (More Accurate)**: `~/.models/bge-base-en-v1.5.gguf` (118 MB, Q8_0, 768-dimensional)
 
 ---
 
@@ -49,6 +50,13 @@ The active multi-model configuration lives in `/home/quirinpa/auren.json` (and `
       "capabilities": ["embed"],
       "n_ctx": 512,
       "n_gpu_layers": 0
+    },
+    {
+      "id": "bge-base",
+      "path": "~/.models/bge-base-en-v1.5.gguf",
+      "capabilities": ["embed"],
+      "n_ctx": 512,
+      "n_gpu_layers": 0
     }
   ],
   "defaults": {
@@ -56,7 +64,7 @@ The active multi-model configuration lives in `/home/quirinpa/auren.json` (and `
     "judge": "qwen",
     "embed": "bge-small"
   },
-  "max_resident": 2
+  "max_resident": 3
 }
 ```
 
