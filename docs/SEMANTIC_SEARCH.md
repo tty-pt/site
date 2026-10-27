@@ -1,290 +1,317 @@
-# Semantic & Hybrid Search
+# Semantic & Hybrid Search: Complete Guide
 
-This document explains how to set up and run semantic and hybrid search using `axil-auren`, `libsepal`, and `liblemma`.
+This guide explains how semantic and hybrid search work in this pure-C stack, and how to use them either via **base command-line tools** (`corm`, `libsepal`, `liblemma`, `axil-auren`) or via **turnkey HTTP services** (`axil-embed-search` for text prompts, and `axil-resume-search` for PDF documents).
 
 ---
 
 ## Table of Contents
-1. [Quick Start](#1-quick-start)
-2. [Search Modes](#2-search-modes)
-   - [Semantic Search](#semantic-search)
-   - [Hybrid Search (Keyword + Vector)](#hybrid-search-keyword--vector)
+1. [Conceptual Mental Model](#1-conceptual-mental-model)
+2. [Architecture & Components](#2-architecture--components)
+3. [Choosing the Right Approach](#3-choosing-the-right-approach)
+4. [Prerequisite: The Embedding Daemon (`axil-auren`)](#4-prerequisite-the-embedding-daemon-axil-auren)
+5. [Approach A: Base CLI Tools (`corm` + `sepal` + `lemma`)](#5-approach-a-base-cli-tools-corm--sepal--lemma)
    - [Database Syntax](#database-syntax)
-3. [C API Example](#3-c-api-example)
-4. [Caching & Performance Tuning](#4-caching--performance-tuning)
-5. [Installation & Model Setup](#5-installation--model-setup)
-   - [Download Embedding Model](#download-embedding-model)
-   - [Install Packages](#install-packages)
-   - [Build from Source](#build-from-source)
-6. [HTTP Service: axil-embed-search Module](#6-http-service-axil-embed-search-module)
+   - [Ingesting Text Documents](#ingesting-text-documents)
+   - [Pure Semantic Search](#pure-semantic-search)
+   - [Hybrid Search (Keywords + Semantic)](#hybrid-search-keywords--semantic)
+6. [Approach B: HTTP Service Modules](#6-approach-b-http-service-modules)
+   - [1. `axil-embed-search` (Text Prompts & Knowledge Base)](#1-axil-embed-search-text-prompts--knowledge-base)
+   - [2. `axil-resume-search` (PDF Resumes & Job Matching)](#2-axil-resume-search-pdf-resumes--job-matching)
+7. [C API Integration](#7-c-api-integration)
+8. [Troubleshooting & FAQ](#8-troubleshooting--faq)
 
 ---
 
-## 1. Quick Start
+## 1. Conceptual Mental Model
 
-### 1. Start the Embedding Daemon
-Run `axil-auren` on port `4242` with your preferred embedding model:
-- **`bge-small`**: Fast & ultra-lightweight (384-dimensional, 37 MB)
-- **`bge-base`**: Higher retrieval accuracy (768-dimensional, 118 MB)
+### Why Semantic Search?
+Traditional databases use **lexical search** (exact keyword matching). If you search for *"socket network programming"*, a document containing *"Linux TCP/IP daemon developer"* will NOT match unless both share the exact same words.
 
+**Semantic search** converts sentences into mathematical vectors (lists of floating-point numbers called **embeddings**) that capture the *meaning* of the text. Sentences with similar concepts end up close together in vector space.
+
+| Search Type | Engine | How It Works | Example |
+|---|---|---|---|
+| **Lexical** | `liblemma` | Exact tokens, accent-sensitive (`pão ≠ pao`), prefix matching | Searching `"C99"` matches `"C99"`. |
+| **Semantic** | `libsepal` | Vector cosine similarity via neural embedding models | Searching *"baking fresh bread in Portugal"* matches *"Traditional bakery making pão de queijo"*. |
+| **Hybrid** | `lemma + sepal` | Lexical candidate filtering / keyword boost + semantic vector ranking | Requires mandatory keywords (e.g. `"WASM"`) while ranking candidates by similarity to a job description. |
+
+---
+
+## 2. Architecture & Components
+
+The search pipeline consists of four pure-C layers:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  Client Layer: CLI (`corm`) OR Web UI / REST (`axil`)       │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            ▼                                     ▼
+ ┌───────────────────────┐             ┌─────────────────────┐
+ │  Lexical Indexing     │             │  Vector Indexing    │
+ │  `liblemma`           │             │  `libsepal`         │
+ │  (accent-preserving   │             │  (Hamming sketch +  │
+ │   inverted tokens)    │             │   cosine rerank)    │
+ └──────────┬────────────┘             └──────────┬──────────┘
+            │                                     │
+            │                          ┌──────────┴──────────┐
+            │                          ▼                     ▼
+            │               ┌────────────────────┐ ┌─────────────────┐
+            │               │  `libcorm` Storage │ │  `axil-auren`   │
+            │               │  (Key-Value Maps   │ │  Port 4242      │
+            │               │   & Document Text) │ │  (Local Neural  │
+            │               └────────────────────┘ │   Embeddings)   │
+            │                                      └─────────────────┘
+            ▼
+ ┌───────────────────────────────────────────────────────────┐
+ │ Persistent Storage (Disk / RAM)                           │
+ └───────────────────────────────────────────────────────────┘
+```
+
+- **`axil-auren` (Port 4242)**: Local inference engine running dense embedding models (`bge-small` 384 dimensions, `bge-base` 768 dimensions).
+- **`libsepal`**: High-performance pure-C vector similarity store. Uses two-stage ANN (Hamming sketch filter + exact cosine similarity).
+- **`liblemma`**: High-performance pure-C inverted token index with accent-preserving normalization.
+- **`libcorm`**: Pure-C storage engine supporting key-value and column-oriented tables.
+
+---
+
+## 3. Choosing the Right Approach
+
+| Need | Recommended Tool | Interface |
+|---|---|---|
+| Shell scripts, batch pipelines, direct file indexing | **Base CLI Tools (`corm`)** | Command-line (`corm -p`, `corm -X`) |
+| Web API or browser UI for text queries, prompts, FAQs | **`axil-embed-search`** | REST (`POST /embeddings`, `GET /search`) + UI on `:8090` |
+| PDF document intake, resume parsing, job candidate matching | **`axil-resume-search`** | REST (`POST /resume`, `GET /candidates`) + UI on `:8092` |
+| Custom daemon or embedded application in C | **C API (`sepal.h`, `lemma.h`, `corm.h`)** | Pure C library functions |
+
+---
+
+## 4. Prerequisite: The Embedding Daemon (`axil-auren`)
+
+Both the CLI tools and the HTTP modules require the `axil-auren` embedding daemon running on port `4242`.
+
+### Start the Daemon
 ```bash
-# Option A: Fast & lightweight (bge-small, default)
 AUREN_EMBED_MODEL="bge-small" \
 AUREN_EMBED_PATH=~/.models/bge-small-en-v1.5.gguf \
 axil -A -d -p 4242 -m libaxil-auren
-
-# Option B: High accuracy (bge-base)
-# AUREN_EMBED_MODEL="bge-base" \
-# AUREN_EMBED_PATH=~/.models/bge-base-en-v1.5.gguf \
-# axil -A -d -p 4242 -m libaxil-auren
 ```
 
-Verify that the daemon answers:
+### Verify Daemon Health
 ```bash
-# Query bge-small (384 dims):
 curl -s http://127.0.0.1:4242/v1/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"model":"bge-small","input":"test string"}'
-
-# Or query bge-base (768 dims):
-curl -s http://127.0.0.1:4242/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{"model":"bge-base","input":"test string"}'
+  -d '{"model":"bge-small","input":"ping"}'
 ```
+*(Expected output contains: `"embedding": [...]`)*
 
-### 2. Configure Client Environment
-Point `corm` / `libsepal` to the embedding endpoint:
+---
 
+## 5. Approach A: Base CLI Tools (`corm` + `sepal` + `lemma`)
+
+Use the `corm` CLI when you want to create and query local database files directly from the terminal or shell scripts.
+
+### 1. Configure the Environment
+Tell `corm` where to find the embedding service:
 ```bash
 export CORM_SEPAL_EMBED_URL="http://127.0.0.1:4242/v1/embeddings"
-# Choose "bge-small" (384-d, fastest) or "bge-base" (768-d, higher accuracy):
-export CORM_SEPAL_EMBED_MODEL="bge-base"
+export CORM_SEPAL_EMBED_MODEL="bge-small"
 ```
 
-### 3. Ingest Documents
-Insert documents using `corm -p`. The `@lemma,sepal` suffix indexes each row with both lexical tokens (`liblemma`) and semantic vectors (`libsepal`):
+### 2. Database Syntax
+Target databases are specified as `filename.db@plugins:key_type:val_type`:
+- `docs.db`: File on disk.
+- `@lemma,sepal`: Attaches both the lexical (`lemma`) and vector (`sepal`) indexers.
+- `:a:s`: Auto-incrementing integer key (`a`), string value (`s`).
 
+### 3. Ingesting Text Documents (`corm -p`)
+Insert records using `corm -p`:
 ```bash
 corm -p "Zero-copy in-memory caching and RAM table indexing" docs.db@lemma,sepal:a:s
 corm -p "Traditional Portuguese bakery baking warm pão de queijo" docs.db@lemma,sepal:a:s
 corm -p "High-performance vector similarity search in pure C" docs.db@lemma,sepal:a:s
+corm -p "Autonomous robotics navigation using lidar telemetry" docs.db@lemma,sepal:a:s
 ```
+*Each insert automatically updates the `corm` table, generates an embedding via `axil-auren`, and indexes words in `liblemma`.*
 
-### 4. Run a Query
-Query the vector index with `-X 'sepal'`:
-
-```bash
-corm -X 'sepal' --query="fast memory storage techniques" docs.db@lemma,sepal:a:s
-```
-
-Output:
-```text
-1 0.814200 1:Zero-copy in-memory caching and RAM table indexing
-3 0.692100 3:High-performance vector similarity search in pure C
-```
-
----
-
-## 2. Search Modes
-
-### Semantic Search
-Searches by vector similarity. Matches documents with similar meaning even if words differ:
-
+### 4. Pure Semantic Search (`-X 'sepal'`)
+Search by meaning. Notice words do not need to match:
 ```bash
 corm -X 'sepal' --query="baking fresh bread in Portugal" docs.db@lemma,sepal:a:s
 ```
-
 Output:
 ```text
 2 0.785400 2:Traditional Portuguese bakery baking warm pão de queijo
 ```
 
-### Hybrid Search (Keyword + Vector)
-Combines strict lexical filtering with vector ranking. This example requires the word `"pão"` (preserving accents) while ranking matches by similarity to `"breakfast pastry"`:
+Querying for robotics:
+```bash
+corm -X 'sepal' --query="self-driving robot sensor maps" docs.db@lemma,sepal:a:s
+```
+Output:
+```text
+4 0.762100 4:Autonomous robotics navigation using lidar telemetry
+```
 
+### 5. Hybrid Search (`-X 'lemma AND sepal'`)
+Enforce a mandatory keyword via `lemma` while ranking results by semantic similarity via `sepal`:
 ```bash
 corm -X 'lemma AND sepal' \
   --query@lemma="pão" \
   --query@sepal="breakfast pastry" \
   docs.db@lemma,sepal:a:s
 ```
-
 Output:
 ```text
 2 0.785400 2:Traditional Portuguese bakery baking warm pão de queijo
 ```
 
-### Database Syntax
-The string `docs.db@lemma,sepal:a:s` defines the target:
-- `docs.db`: database file name on disk.
-- `@lemma,sepal`: active index plugins (`lemma` for lexical search, `sepal` for vector search).
-- `:a`: primary key mode (`a` = auto-incrementing integer ID).
-- `:s`: value schema (`s` = UTF-8 string).
-
 ---
 
-## 3. C API Example
+## 6. Approach B: HTTP Service Modules
 
-To use `libsepal` directly from C code:
+For web applications, browser dashboards, or microservices, use the pre-built Axil modules.
 
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <ttypt/sepal.h>
+### 1. `axil-embed-search` (Text Prompts & Knowledge Base)
 
-int main(void) {
-    int err = 0;
+Located in `external/axil-embed-search/`. Ideal for raw text, documentation search, and chat prompt retrieval.
 
-    // 1. Open persistent vector store
-    sepal_vecstore_t *vs = sepal_open("store.db", &err);
-    if (!vs) return 1;
-
-    // 2. Set embedding daemon URL
-    sepal_configure_embeddings("http://127.0.0.1:4242/v1/embeddings", "bge-small", NULL);
-
-    // 3. Store text items (auto-embedded via the daemon)
-    rec_axis_store(vs, NULL, 1, "Zero-copy in-memory caching and RAM table indexing");
-    rec_axis_store(vs, NULL, 2, "Traditional Portuguese bakery baking warm pão de queijo");
-    rec_axis_store(vs, NULL, 3, "High-performance vector similarity search in pure C");
-
-    // 4. Search using a query vector (384 dimensions for bge-small)
-    // Here we pass a sample query vector:
-    float query_vec[4] = {0.85f, 0.15f, 0.0f, 0.0f};
-    sepal_hit_t hits[3];
-    size_t count = sepal_search(vs, query_vec, 4, 3, 0.0f, 0, hits);
-
-    for (size_t i = 0; i < count; i++) {
-        printf("Hit %zu: doc_id=%u score=%.4f\n", i + 1, hits[i].ref, hits[i].score);
-    }
-
-    sepal_close(vs);
-    return 0;
-}
-```
-
-Compile and run:
-```bash
-cc search.c $(pkg-config --cflags --libs sepal) -o search
-./search
-```
-
----
-
-## 4. Caching & Performance Tuning
-
-### Embedding Cache
-Set `CORM_SEPAL_EMBED_CACHE` to avoid re-embedding repeated text across runs:
-
-```bash
-export CORM_SEPAL_EMBED_CACHE="$HOME/.cache/sepal-embed.db"
-```
-
-### Exact Dimension Truncation
-`SEPAL_EXACT_DIM` controls how many dimensions are evaluated during the exact cosine rerank stage (default `256`). Lower values speed up search at a minor accuracy trade-off:
-
-```bash
-export SEPAL_EXACT_DIM=128
-```
-
----
-
-## 5. Installation & Model Setup
-
-### Download Embedding Models
-Create `~/.models/` and download your chosen model in GGUF format:
-
-```bash
-mkdir -p ~/.models
-
-# Option A: Fast & ultra-lightweight (bge-small-en-v1.5, 384 dims, 37 MB)
-curl -L -o ~/.models/bge-small-en-v1.5.gguf \
-  https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf
-
-# Option B: Higher accuracy (bge-base-en-v1.5, 768 dims, 118 MB)
-curl -L -o ~/.models/bge-base-en-v1.5.gguf \
-  https://huggingface.co/CompendiumLabs/bge-base-en-v1.5-gguf/resolve/main/bge-base-en-v1.5-q8_0.gguf
-```
-
-> **Note on Dimensionality & libsepal**:
-> `libsepal` natively handles both 384-dimensional (`bge-small`) and 768-dimensional (`bge-base`) embeddings (up to `SEPAL_VEC_MAX = 2048`). Stage 1 performs sign-bit sketch prefiltering over the full dimension (384 or 768 bits), and Stage 2 performs exact AVX2 cosine reranking over `min(dim, SEPAL_EXACT_DIM)` (default 256 dimensions), giving optimal retrieval accuracy with low CPU and memory footprint.
-
-### Install Packages
-
-#### Debian / Ubuntu / WSL2 (APT)
-```bash
-sudo mkdir -p /etc/apt/keyrings
-wget -qO- https://tty.pt/apt/keyrings/archive-key.gpg | sudo tee /etc/apt/keyrings/ttypt.asc > /dev/null
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ttypt.asc] https://tty.pt/deb stable main" | sudo tee /etc/apt/sources.list.d/ttypt.list
-sudo apt update && sudo apt install -y axil axil-auren libsepal liblemma libcorm
-```
-
-#### macOS (Homebrew)
-```bash
-brew tap tty-pt/tap https://github.com/tty-pt/tap.git
-brew install axil axil-auren libsepal liblemma libcorm
-```
-
-#### Arch Linux (pacman)
-```bash
-sudo pacman-key --add <(wget -qO- https://tty.pt/pacman/key-ttypt.pub)
-echo -e "\n[ttypt]\nSigLevel = Required DatabaseOptional\nServer = https://tty.pt/pacman/\$arch" | sudo tee -a /etc/pacman.conf
-sudo pacman -Sy ttypt/axil ttypt/axil-auren ttypt/libsepal ttypt/liblemma ttypt/libcorm
-```
-
-#### Fedora / RHEL (dnf)
-```bash
-curl -O https://tty.pt/rpm/ttypt.repo && sudo mv ttypt.repo /etc/yum.repos.d/
-sudo rpm --import https://tty.pt/rpm/RPM-GPG-KEY-ttypt
-sudo dnf install -y axil axil-auren libsepal liblemma libcorm
-```
-
-### Build from Source
-```bash
-git clone https://github.com/tty-pt/axil.git && cd axil && make && sudo make install && cd ..
-git clone https://github.com/tty-pt/libcorm.git && cd libcorm && make && sudo make install && cd ..
-git clone https://github.com/tty-pt/liblemma.git && cd liblemma && make && sudo make install && cd ..
-git clone https://github.com/tty-pt/libsepal.git && cd libsepal && make && sudo make install && cd ..
-git clone https://github.com/tty-pt/axil-auren.git && cd axil-auren && make && sudo make install && cd ..
-```
-
----
-
-## 6. HTTP Service: axil-embed-search Module
-
-For an out-of-the-box REST API and browser UI that coordinates embeddings with `axil-auren` and searches `libsepal` / `liblemma`, use the pure-C `axil-embed-search` module located at `external/axil-embed-search`.
-
-### Build & Run
+#### Run the Service
 ```bash
 ./external/axil-embed-search/run.sh
 ```
-Or with a custom port:
+*Starts on `http://localhost:8090` (custom port via `PORT=8099`).*
+
+#### Ingest a Text Document
 ```bash
-PORT=8090 ./external/axil-embed-search/run.sh
+curl -s -X POST http://localhost:8090/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "High-throughput asynchronous I/O using Linux io_uring"}'
 ```
 
-### Endpoints
-- **`GET /` or `GET /embed-search`**: Interactive web UI form for ingesting prompts and querying results in the browser.
-- **`POST /embeddings` (and `/api/embeddings`)**: Ingest prompt/text document, call `axil-auren`, and persist dense vector into `libsepal` and inverted tokens into `liblemma`.
-- **`GET /search` (and `/api/search`)**: Query stored documents with semantic similarity (`mode=sepal`), lexical prefix matching (`mode=lemma`), or hybrid ranking (`mode=hybrid`).
+#### Query Documents
+```bash
+curl -s "http://localhost:8090/search?q=fast+disk+storage+techniques&mode=hybrid" | jq
+```
 
-For complete documentation, curl cheat sheets, and JSON schemas, see [`external/axil-embed-search/README.md`](../external/axil-embed-search/README.md).
+#### Interactive Browser UI
+Open **`http://localhost:8090/`** in your browser for the search dashboard.
 
 ---
 
-## 7. PDF Resume Ingestion & Job Opportunity Search: axil-resume-search Module
+### 2. `axil-resume-search` (PDF Resumes & Job Matching)
 
-For PDF document ingestion and job candidate semantic matching, use the `axil-resume-search` module located at `external/axil-resume-search`.
+Located in `external/axil-resume-search/`. Specifically designed for PDF file ingestion, automatic text extraction under the hood, and matching candidates to natural-language job opportunity descriptions.
 
-### Build & Run
+#### How It Works:
+1. **Uploads**: Accepts PDF files via `multipart/form-data` (browser file input), raw binary `application/pdf`, or base64 JSON.
+2. **Text Extraction**: Runs `pdftotext -layout <file> -` under the hood via `popen()`, extracting the complete document text into memory.
+3. **Physical Storage**: Writes the uploaded PDF to disk (`uploads/resume_<ref>_<filename>.pdf`).
+4. **Vector Embedding**: Computes dense embeddings with `axil-auren` on port 4242 and stores vectors in `libsepal`.
+5. **Job Matching**: Users pass natural language job opportunity descriptions (`GET /candidates?job=...`). The system ranks candidates by match score and provides PDF download links.
+
+#### Run the Service
 ```bash
 ./external/axil-resume-search/run.sh
 ```
+*Starts on `http://localhost:8092` (custom port via `PORT=8095`).*
 
-### Endpoints
-- **`GET /` or `GET /ui`**: Interactive web UI for uploading resumes, entering job opportunities, and viewing ranked candidate matches with PDF download links.
-- **`POST /resume` (and `/api/resume`)**: Upload a PDF resume (`multipart/form-data`, raw binary, or base64 JSON). The module saves the PDF to disk (`uploads/`), invokes `pdftotext` under the hood to extract text, generates embeddings via `axil-auren`, and stores vectors in `libsepal` and metadata in `libcorm`.
-- **`GET /candidates` (and `/search`)**: Search and rank candidates by passing a job opportunity description query (`job="Senior C developer..."`). Supports semantic (`mode=sepal`), lexical (`mode=lemma`), and hybrid ranking (`mode=hybrid`).
-- **`GET /resume/file?ref=<id>`**: Stream and download the stored PDF resume with `Content-Type: application/pdf`.
-- **`GET /candidates/list`**: List all currently ingested candidate records.
+#### Upload a PDF Resume
+```bash
+curl -s -X POST http://localhost:8092/resume \
+  -F "file=@external/axil-resume-search/test_resumes/paulo_lead_frontend_systems_architect.pdf;type=application/pdf" | jq
+```
+Response:
+```json
+{
+  "ok": true,
+  "ref": 1,
+  "candidate": "Paulo Quirino",
+  "file_name": "paulo_lead_frontend_systems_architect.pdf",
+  "file_path": "uploads/resume_1_paulo_lead_frontend_systems_architect.pdf",
+  "file_size": 9746,
+  "text_len": 4120,
+  "snippet": "Paulo Quirino - Lead Frontend Engineer & Systems Architect...",
+  "file_url": "/resume/file?ref=1"
+}
+```
 
-For complete documentation and curl examples, see [`external/axil-resume-search/README.md`](../external/axil-resume-search/README.md).
+#### Search Candidates by Job Opportunity
+```bash
+curl -s "http://localhost:8092/candidates?job=Lead+Frontend+Engineer+with+React+and+WASM+systems+experience&mode=hybrid" | jq
+```
+
+#### Download / View Original Stored PDF
+```bash
+curl -O -J "http://localhost:8092/resume/file?ref=1"
+```
+
+#### Interactive Browser UI
+Open **`http://localhost:8092/`** in your browser for the full interactive matching dashboard.
+
+---
+
+## 7. C API Integration
+
+To embed semantic search into your own C module, link `-laxil -lxylem -lcorm -lsepal -llemma`:
+
+```c
+#include <ttypt/sepal.h>
+#include <ttypt/lemma.h>
+#include <ttypt/corm.h>
+
+/* 1. Initialize engines */
+sepal_configure_embeddings("http://127.0.0.1:4242/v1/embeddings", "bge-small", NULL);
+int err = 0;
+sepal_vecstore_t *vs = sepal_open(NULL, &err); /* NULL = in-memory */
+lemma_db_t *ldb = lemma_open(0);
+uint32_t text_map = corm_open(NULL, NULL, CM_STR, CM_STR, 1023, 0);
+
+/* 2. Ingest document */
+uint32_t doc_id = 1;
+const char *text = "Low-latency Linux networking daemon in pure C99";
+float *vec = NULL;
+size_t dim = 0;
+if (sepal_embed_fetch(text, &vec, &dim) == 0) {
+    sepal_put(vs, doc_id, vec, dim);
+    free(vec);
+}
+lemma_index_ref(ldb, "text", doc_id, text);
+corm_put(text_map, "1", text);
+
+/* 3. Query with natural language */
+float *qvec = NULL;
+size_t qdim = 0;
+if (sepal_embed_fetch("socket server programmer", &qvec, &qdim) == 0) {
+    sepal_hit_t hits[10];
+    size_t count = sepal_search(vs, qvec, qdim, 10, 0.0f, 0, hits);
+    for (size_t i = 0; i < count; i++) {
+        printf("Hit Ref: %u, Similarity Score: %.4f\n", hits[i].ref, hits[i].score);
+    }
+    free(qvec);
+}
+
+/* 4. Cleanup */
+sepal_close(vs);
+lemma_close(ldb);
+corm_close(text_map);
+```
+
+---
+
+## 8. Troubleshooting & FAQ
+
+### 1. `axil-auren: connection refused` on port 4242
+- **Cause**: The embedding daemon is not running.
+- **Fix**: Launch `axil-auren` using the command in [Section 4](#4-prerequisite-the-embedding-daemon-axil-auren).
+
+### 2. Can I use external embedding APIs (e.g. OpenAI)?
+- Yes. `libsepal` and `axil-auren` implement the standard OpenAI `/v1/embeddings` endpoint format (`{"model": "...", "input": "..."}`). Point `CORM_SEPAL_EMBED_URL` to any OpenAI-compatible provider.
+
+### 3. How are accents handled?
+- `liblemma` preserves diacritics strictly: `pão ≠ pao`.
+- `libsepal` converts text into semantic vector embeddings, capturing language meaning regardless of spelling variations.
+
+### 4. Where are uploaded PDFs stored?
+- In `axil-resume-search`, uploaded files are stored physically under `uploads/` (`uploads/resume_<id>_<filename>.pdf`). Stored PDFs can be directly downloaded or viewed via `GET /resume/file?ref=<id>`.
