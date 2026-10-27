@@ -13,6 +13,7 @@ void do_clone(int fd, int argc, char *argv[]);
 void do_chown(int fd, int argc, char *argv[]);
 void do_status(int fd, int argc, char *argv[]);
 void do_look_at(int fd, int argc, char *argv[]);
+void do_get(int fd, int argc, char *argv[]);
 
 int eng_obj_exists(unsigned ref);
 unsigned eng_object_new(OBJ *obj);
@@ -165,4 +166,5 @@ xy_install(void)
 	nd_register("chown", do_chown, 0);
 	nd_register("status", do_status, 0);
 	nd_register("look", do_look_at, 0);
+	nd_register("get", do_get, 0);
 }

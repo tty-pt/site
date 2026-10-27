@@ -115,23 +115,35 @@ try {
   if (lay.cbottom > lay.abottom) fails.push("contents list overlaps the action bar");
   if (art.art && Math.abs(art.art.w - lay.mapW) > lay.mapW * 0.35) fails.push(`target art ${art.art.w} vs map ${lay.mapW} differ too much`);
 
-  // Item selection: clicking an item reveals a floating action popup capsule (position: absolute)
+  // Item selection: clicking an item reveals a floating action popup to the LEFT with square buttons
   await page.click("#contents nd-item");
   await page.waitForTimeout(300);
   const popup = await page.evaluate(() => {
     const p = document.querySelector("#contents nd-item .nd-item-popup");
-    if (!p) return null;
+    const item = document.querySelector("#contents nd-item");
+    if (!p || !item) return null;
     const cs = getComputedStyle(p);
+    const pb = p.getBoundingClientRect();
+    const ib = item.getBoundingClientRect();
+    const btn = p.querySelector("button");
+    const bb = btn ? btn.getBoundingClientRect() : null;
+    const bcs = btn ? getComputedStyle(btn) : null;
     return {
       pos: cs.position,
-      vis: cs.display !== "none" && p.getClientRects().length > 0,
+      vis: cs.display !== "none" && pb.width > 0,
+      leftSide: pb.left < ib.left + 50,
       look: !!p.querySelector("[data-action='look']"),
       get: !!p.querySelector("[data-action='get']"),
+      btnSquare: bb ? Math.abs(bb.width - bb.height) <= 6 : false,
+      btnRadius: bcs ? parseFloat(bcs.borderRadius) : 999,
     };
   });
   if (!popup || !popup.vis) fails.push("item action popup did not appear on item click");
   else {
     if (popup.pos !== "absolute") fails.push("item action popup is not position: absolute: " + popup.pos);
+    if (!popup.leftSide) fails.push("item action popup is not positioned to the left");
+    if (!popup.btnSquare) fails.push("item action buttons are not square");
+    if (popup.btnRadius > 6) fails.push("item action buttons are pill-shaped instead of square (radius > 6): " + popup.btnRadius);
     if (!popup.look) fails.push("item action popup missing look button");
   }
 

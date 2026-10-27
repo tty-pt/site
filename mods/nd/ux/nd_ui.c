@@ -425,7 +425,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_set_attr(look, "type", "button");
 			bud_set_attr(look, "data-action", "look");
 			bud_set_attr(look, "data-cmd", look_cmd);
-			bud_set_attr(look, "class", "nd-pad btn round text-xs");
+			bud_set_attr(look, "class", "nd-pad btn text-xs");
 			bud_set_attr(look, "title", "Look");
 			bud_append(look, bud_text("👁"));
 			bud_bind(look, "click", 1, on_data_cmd);
@@ -436,7 +436,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
 				bud_set_attr(get, "data-cmd", get_cmd);
-				bud_set_attr(get, "class", "nd-pad btn round text-xs");
+				bud_set_attr(get, "class", "nd-pad btn text-xs");
 				bud_set_attr(get, "title", "Get");
 				bud_append(get, bud_text("🖐"));
 				bud_bind(get, "click", 1, on_data_cmd);
@@ -448,7 +448,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 				bud_set_attr(drop, "type", "button");
 				bud_set_attr(drop, "data-action", "drop");
 				bud_set_attr(drop, "data-cmd", drop_cmd);
-				bud_set_attr(drop, "class", "nd-pad btn round text-xs");
+				bud_set_attr(drop, "class", "nd-pad btn text-xs");
 				bud_set_attr(drop, "title", "Drop");
 				bud_append(drop, bud_text("🪣"));
 				bud_bind(drop, "click", 1, on_data_cmd);

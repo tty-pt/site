@@ -860,7 +860,10 @@ body[data-wasm-loaded] [data-wasm-hide] { display: none; }
 #right-panel #cb {
   flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible !important;
+}
+#right-panel {
+  overflow: visible !important;
 }
 
 /* Look-at: a map-sized square, art covering it, name overlaid (original
@@ -920,7 +923,8 @@ body[data-wasm-loaded] [data-wasm-hide] { display: none; }
   min-height: 0 !important;
   max-height: none !important;
   gap: 0 !important;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: visible;
   align-self: stretch;
   width: 100%;
 }
@@ -938,29 +942,46 @@ body[data-wasm-loaded] [data-wasm-hide] { display: none; }
 }
 #contents .nd-item-popup {
   position: absolute;
-  right: 8px;
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 4px;
   background: rgba(26, 26, 26, 0.95);
   border: 1px solid rgba(149, 137, 197, 0.6);
-  border-radius: 9999px;
+  border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
-  z-index: 10;
+  z-index: 50;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
 #contents .nd-item-popup button {
-  padding: 4px 8px;
-  font-size: 14px;
-  border-radius: 9999px;
-  background: rgba(45, 45, 45, 0.9);
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  font-size: 16px !important;
+  border-radius: 4px !important;
+  background: rgba(45, 45, 45, 0.95);
+  border: 1px solid rgba(149, 137, 197, 0.4);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
   transition: background 0.15s, transform 0.1s;
 }
 #contents .nd-item-popup button:hover {
   background: rgba(70, 70, 70, 0.95);
-  transform: scale(1.08);
+  transform: scale(1.06);
+}
+@media (max-width: 700px), (orientation: portrait) {
+  #contents .nd-item-popup {
+    right: 8px;
+    left: auto;
+  }
 }
 #contents nd-avatar {
   display: inline-flex;

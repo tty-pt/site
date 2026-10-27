@@ -213,7 +213,7 @@ void
 shared_init(void)
 {
 	nd_table_handle_set(HD_FD, hd_resolve(HD_FD));
-	nd_table_handle_set(HD_RTYPE, type_hd + 2);
+	nd_table_handle_set(HD_RTYPE, type_hd + 1);
 	nd_table_handle_set(HD_RWTS, wts_hd + 2);
 }
 
@@ -261,7 +261,7 @@ nd_world_init(int argc __attribute__((unused)), char **argv __attribute__((unuse
 	 * vtf_hd/bcp_hd just above: transient, and repopulated
 	 * unconditionally below. */
 	nd_table_handle_set(HD_ACTION, corm_open(NULL, "action", CM_U32, ai_type, 0xFFFF, CM_AINDEX));
-	nd_table_handle_set(HD_TYPE, corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_TYPE, corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX | CM_MIRROR));
 	nd_table_handle_set(HD_ENTITY, corm_open(db, "entity", CM_U32, ent_type, 0xFFFF, 0));
 	nd_table_handle_set(HD_PLAYER, corm_open(db, "player", CM_STR, CM_U32, 0xFF, 0));
 	nd_table_handle_set(HD_OBJ, corm_open(db, "obj", CM_U32, obj_type, 0xFFFF, CM_AINDEX));
