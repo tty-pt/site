@@ -63,6 +63,8 @@ int main(void)
 		ssr_st.map_data.tiles[i].exits = 0x0F; /* N, S, E, W */
 		ssr_st.map_data.tiles[i].fg = 7;
 	}
+	ssr_st.map_data.pos[0] = -7; ssr_st.map_data.pos[1] = 12;
+	ssr_st.map_data.pos[2] = 0;  ssr_st.map_data.pos[3] = 3;
 	ssr_st.map_data.tiles[24].symbol = '!';
 	ssr_st.map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
 	ssr_st.map_data.tiles[24].fg = 15;
@@ -89,6 +91,8 @@ int main(void)
 	assert(rehydrated->map_data.width == 7);
 	assert(rehydrated->map_data.height == 7);
 	assert(rehydrated->map_data.room_ref == 1234);
+	assert(rehydrated->map_data.pos[0] == -7 && rehydrated->map_data.pos[1] == 12);
+	assert(rehydrated->map_data.pos[2] == 0 && rehydrated->map_data.pos[3] == 3);
 	assert(rehydrated->map_data.tiles[24].symbol == '!');
 	assert(rehydrated->map_data.tiles[24].flags & ND_MAP_FLAG_PLAYER);
 	assert(memcmp(&ssr_st.map_data, &rehydrated->map_data, sizeof(nd_map_data_t)) == 0);

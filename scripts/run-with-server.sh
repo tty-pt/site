@@ -25,7 +25,7 @@ pkill -f "axil.*-p ${PORT}" 2>/dev/null || true
 sleep 0.5
 
 # Ensure data directories exist
-mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
+mkdir -p "${REPO_ROOT}/var/poem" "${REPO_ROOT}/var/song" "${REPO_ROOT}/var/gig" "${REPO_ROOT}/var/grp" "${REPO_ROOT}/var/software" "${REPO_ROOT}/var/song.types" "${REPO_ROOT}/var/song.authors" "${REPO_ROOT}/var/nd"
 
 export AUTH_SKIP_CONFIRM=1
 export AXIL_ND_DB="${REPO_ROOT}/var/nd/universe.db"

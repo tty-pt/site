@@ -501,6 +501,8 @@ eng_view(unsigned player_ref)
 	map_data.player_x = VIEW_AROUND;
 	map_data.player_y = VIEW_AROUND;
 	map_data.room_ref = player.location;
+	for (int i = 0; i < 4; i++)
+		map_data.pos[i] = (int16_t)opos[i];
 
 	/* Fill each tile with what dr_room()/dr_vs() paint for it, so the graphical
 	 * map shows the same information as the ASCII one: three cells (left,

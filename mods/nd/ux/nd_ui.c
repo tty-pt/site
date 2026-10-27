@@ -108,6 +108,30 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 	return &g_viewport_drivers[idx];
 }
 
+static bud_node *mount_seven_stage(void)
+{
+	/* A different tag than the terminal's <div>: swapping stages must replace
+	 * the element (patch-replace). Patching the terminal's div in place would
+	 * keep its data-bud-terminal attribute, and with it the live xterm, which
+	 * then swallows every key press. */
+	return lx_n("nd-stage",
+		lx_attr("id", "game-stage"),
+		lx_attr("class", "relative flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden"),
+		lx_node(lx_n("canvas",
+			lx_attr("id", "seven-stage-canvas"),
+			lx_attr("data-bud-canvas", "1"),
+			lx_attr("width", "640"),
+			lx_attr("height", "480"),
+			lx_attr("class", "w-[640px] h-[480px] rounded-lg border-2 border-amber-900/60 shadow-2xl block select-none bg-neutral-950"))));
+}
+
+static const nd_viewport_driver_t s_seven_driver = {
+	.id = "lamina-seven",
+	.label = "🐑 Seven Ways",
+	.required_capability = "lamina",
+	.mount = mount_seven_stage,
+};
+
 static const nd_viewport_driver_t s_tty_driver = {
 	.id = "tty",
 	.label = "📺 Terminal",
@@ -121,6 +145,7 @@ void nd_ui_init_defaults(void)
 	g_ui_initialized = 1;
 	nd_scene_init(&g_scene);
 	nd_register_viewport_driver(&s_tty_driver);
+	nd_register_viewport_driver(&s_seven_driver);
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -482,12 +507,27 @@ static bud_node *render_modals_slot(const nd_client_state_t *st)
 	return slot;
 }
 
+static int nd_ui_seven_active(const nd_client_state_t *st)
+{
+	return st && strcmp(st->preferred_driver, "lamina-seven") == 0;
+}
+
+static int on_key_up(bud_event *e)
+{
+	const char *key = (const char *)e->user;
+	if (!key || !*key || !nd_ui_seven_active(&client_state))
+		return 0;
+	return nd_seven_key(key, 0);
+}
+
 static int on_key_down(bud_event *e)
 {
 	const char *key = (const char *)e->user;
 	if (!key || !*key)
 		return 0;
 
+	if (nd_ui_seven_active(&client_state) && nd_seven_key(key, 1))
+		return 1;
 	if (strcmp(key, "k") == 0 || strcmp(key, "ArrowUp") == 0) {
 		ws_send("k\n", 2);
 		return 1;
@@ -639,24 +679,40 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
 	bud_bind(root, "keydown@window", 0, on_key_down);
+	bud_bind(root, "keyup@window", 0, on_key_up);
 	return root;
+}
+
+static void seven_stage_redraw(void)
+{
+	nd_seven_render(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H, &client_state);
+	lam_canvas_flush(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H);
 }
 
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
+	if (nd_ui_seven_active(&client_state))
+		seven_stage_redraw();
 	nd_map_canvas_redraw(&client_state);
 }
 
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 {
-	(void)dt;
 	(void)width;
 	(void)height;
 	static uint32_t s_tick_counter = 0;
 	s_tick_counter++;
-	if ((s_tick_counter % 3) == 0) {
-		nd_map_canvas_redraw(&client_state);
+	if (nd_ui_seven_active(&client_state)) {
+		int mv = nd_seven_tick(&client_state, dt);
+		if (mv) {
+			char m[2] = { (char)mv, '\n' };
+			ws_send(m, 2);
+		}
+		if ((s_tick_counter % 2) == 0)
+			seven_stage_redraw();
 	}
+	if ((s_tick_counter % 3) == 0)
+		nd_map_canvas_redraw(&client_state);
 }
 
 ISO_EXPORT(bud_node *, bud_app_render, void)

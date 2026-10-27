@@ -87,60 +87,86 @@ function initGlPipeline(gl) {
 }
 
 export function createLaminaBridge(root, getWasm) {
-	let canvasEl = null;
-	let gl = null;
-	let glPipe = null;
-	let canvas2d = null;
-	let boundCanvas = null;
+	// One rendering target per <canvas data-bud-canvas>. A page may carry
+	// several (e.g. a game stage and a mini-map); each lam_canvas_flush(buf, w,
+	// h) is routed to the canvas whose intrinsic size is exactly w x h, falling
+	// back to the first one, so independent frame producers never overwrite
+	// each other's canvas.
+	const targets = new WeakMap();
+	const kicked = new WeakSet();
 
-	function findAndBindCanvas() {
-		const target = (root && root.querySelector('[data-bud-canvas]')) || document.querySelector('[data-bud-canvas]');
-		if (target === boundCanvas && (gl || canvas2d)) {
-			return;
+	function allCanvases() {
+		const scope = root && root.querySelectorAll ? root : document;
+		let list = scope.querySelectorAll('[data-bud-canvas]');
+		if (!list.length && scope !== document) list = document.querySelectorAll('[data-bud-canvas]');
+		return list;
+	}
+
+	function pickCanvas(width, height) {
+		const list = allCanvases();
+		let first = null;
+		for (const c of list) {
+			if (!first) first = c;
+			if (c.width === width && c.height === height) return c;
 		}
-		boundCanvas = target;
-		canvasEl = target;
-		gl = null;
-		glPipe = null;
-		canvas2d = null;
+		return first;
+	}
 
-		if (!canvasEl) return;
-
+	function targetFor(el) {
+		let t = targets.get(el);
+		if (t) return t;
+		t = { gl: null, glPipe: null, canvas2d: null };
 		// Try WebGL / WebGL2 context first with preserveDrawingBuffer enabled
 		try {
 			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: true };
-			gl = canvasEl.getContext('webgl2', glOpts) || canvasEl.getContext('webgl', glOpts);
-			if (gl) {
-				glPipe = initGlPipeline(gl);
-			}
+			t.gl = el.getContext('webgl2', glOpts) || el.getContext('webgl', glOpts);
+			if (t.gl) t.glPipe = initGlPipeline(t.gl);
 		} catch (e) {
-			gl = null;
-			glPipe = null;
+			t.gl = null;
+			t.glPipe = null;
 		}
-
-		if (!gl || !glPipe) {
+		if (!t.gl || !t.glPipe) {
+			t.gl = null;
+			t.glPipe = null;
 			try {
-				canvas2d = canvasEl.getContext('2d');
+				t.canvas2d = el.getContext('2d');
 			} catch (e) {
-				canvas2d = null;
+				t.canvas2d = null;
 			}
 		}
+		targets.set(el, t);
+		return t;
+	}
 
+	function kickRender() {
 		const fn = getExport(getWasm(), ['wasm_canvas_render']);
-		if (fn) {
-			requestAnimationFrame(() => fn());
+		if (fn) requestAnimationFrame(() => fn());
+	}
+
+	function bindAll() {
+		for (const c of allCanvases()) {
+			targetFor(c);
+			if (!kicked.has(c)) {
+				kicked.add(c);
+				kickRender();
+			}
 		}
 	}
 
 	return {
 		mount() {
-			findAndBindCanvas();
+			bindAll();
 		},
 		makeLaminaImports() {
 			return {
 				lam_canvas_flush(buf_ptr, width, height) {
-					findAndBindCanvas();
+					const canvasEl = pickCanvas(width, height);
 					if (!canvasEl) return;
+					const t = targetFor(canvasEl);
+					if (!kicked.has(canvasEl)) {
+						kicked.add(canvasEl);
+						kickRender();
+					}
 					const exports = getWasm();
 					if (!exports || !exports.memory) return;
 					const uptr = buf_ptr >>> 0;
@@ -149,19 +175,20 @@ export function createLaminaBridge(root, getWasm) {
 
 					const bytes = new Uint8Array(exports.memory.buffer, uptr, byteLen);
 
-					if (gl && glPipe) {
+					if (t.gl && t.glPipe) {
+						const gl = t.gl;
 						gl.viewport(0, 0, canvasEl.width || width, canvasEl.height || height);
-						gl.useProgram(glPipe.prog);
-						gl.bindTexture(gl.TEXTURE_2D, glPipe.tex);
+						gl.useProgram(t.glPipe.prog);
+						gl.bindTexture(gl.TEXTURE_2D, t.glPipe.tex);
 						gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
 						gl.drawArrays(gl.TRIANGLES, 0, 6);
 						return;
 					}
 
-					if (canvas2d) {
+					if (t.canvas2d) {
 						const clamped = new Uint8ClampedArray(exports.memory.buffer, uptr, byteLen);
 						const imgData = new ImageData(clamped, width, height);
-						canvas2d.putImageData(imgData, 0, 0);
+						t.canvas2d.putImageData(imgData, 0, 0);
 					}
 				},
 				lam_fill() {},
@@ -170,11 +197,7 @@ export function createLaminaBridge(root, getWasm) {
 			};
 		},
 		destroy() {
-			canvasEl = null;
-			boundCanvas = null;
-			gl = null;
-			glPipe = null;
-			canvas2d = null;
+			// Targets are keyed weakly by element; nothing to release.
 		}
 	};
 }

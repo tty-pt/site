@@ -204,7 +204,25 @@ export function createAxilBridge(root, getWasm) {
 					const exports = getWasm();
 					if (!exports || !exports.memory || !buf_ptr || buf_len <= 0) return;
 					const bytes = new Uint8Array(exports.memory.buffer, buf_ptr, buf_len);
-					bus.send(bytes);
+					// Detect if this is text (for movement commands, look, etc.) by checking
+					// if it's printable ASCII + newline. Commands like "k\n", "j\n", "look\n" are text.
+					let isText = true;
+					for (let i = 0; i < bytes.length; i++) {
+						const b = bytes[i];
+						// Allow ASCII 32-126 (printable), plus \t (9), \n (10), \r (13)
+						if ((b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126) {
+							isText = false;
+							break;
+						}
+					}
+					if (isText) {
+						// Send as text frame for MUCK command parsing
+						const text = new TextDecoder().decode(bytes);
+						bus.send(text);
+					} else {
+						// Send as binary frame for protocol data
+						bus.send(bytes);
+					}
 				},
 				ws_send_channel(channel, buf_ptr, buf_len) {
 					const exports = getWasm();

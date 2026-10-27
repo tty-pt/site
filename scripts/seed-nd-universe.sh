@@ -237,13 +237,30 @@ cmd "drop Iron Helm"
 
 # Map presentation is chosen by LOCATION using regional programming.
 # World 0 holds the root spawn (woodland, (0,0,0,0)): its baseline (region 16)
-# is the ASCII map, and the entire northern half (region 18 0 1 0 0, all cells
-# with y >= 1 from the starting position upwards) renders with the Lamina canvas map.
+# is the ASCII map with the classic terminal stage.
+#
+# Region keys are Morton prefixes of (world, z, y, x) with each coordinate
+# stored as n+32767, so the top bit of x is 0 for every x <= 0 and 1 for x >= 1
+# (x=0 and x=-1 differ only in the LOWEST bit and can never be split by a
+# prefix). Hence:
+#   region 18 0 1 0 0   = every cell with y >= 1 (north half): Lamina map.
+#   region 19 -1 1 0 0  = y >= 1 AND x <= 0 (north-west quadrant, which
+#                         includes the x=0 column due north of the start).
+#                         This is the deterministic Zelda-like 2D game stage.
+#   x >= 1, y >= 1      = north-east quadrant: Lamina map, classic terminal.
 cmd "region 16 world 0"
+cmd "driver stage tty 16 world 0"
 cmd "driver map ascii-bud 16 world 0"
+cmd "driver layout hybrid 16 world 0"
 
 cmd "region 18 0 1 0 0"
 cmd "driver map lamina 18 0 1 0 0"
+
+cmd "region 19 -1 1 0 0"
+cmd "loadmod libnd-seven 19 -1 1 0 0"
+cmd "driver stage lamina-seven 19 -1 1 0 0"
+cmd "driver map lamina 19 -1 1 0 0"
+cmd "driver layout game-2d 19 -1 1 0 0"
 
 # Seed spawn room at (0, 0, 0, 0) with initial ground item fixtures
 cmd "room 0 0 0 0"
@@ -303,22 +320,27 @@ if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "drop Obsidian Sentinel"
 fi
 
-# Ask the server which map driver each place resolves to: the room north of the
-# spawn must be Lamina; the spawn and the room south of it must be the ASCII map.
-# (`driver` with no argument prints the policy for the admin's current location.)
-cmd "room 0 1 0 0"
-cmd "driver"
-cmd "room 0 -1 0 0"
-cmd "driver"
-cmd "room 0 0 0 0"
-cmd "driver"
+# Ask the server which presentation (stage, map, layout) each place resolves
+# to. `driver` with no argument prints the policy for the admin's location.
+# Probe order (see PROBES): x<=0,y>=1 is the 2D Zelda-like stage; x>=1,y>=1 is
+# the Lamina map under the classic terminal; everything else is ASCII + tty.
+PROBES="0,1 -1,1 -5,3 1,1 4,2 0,0 0,-1 -2,-1"
+for p in $PROBES; do
+	cmd "room ${p%,*} ${p#*,} 0 0"
+	cmd "driver"
+done
 sleep 1.5
-GOT_DRIVERS="$(grep -a 'Map driver:' "$SEED_TXT" | sed 's/.*Map driver: *//; s/[^a-z-].*//' | tr '\n' ' ')"
-if [ "$GOT_DRIVERS" != "lamina ascii-bud ascii-bud " ]; then
-	echo "Error: map driver by location is wrong. Wanted 'lamina ascii-bud ascii-bud' (north, south, spawn), got '$GOT_DRIVERS'" >&2
+GOT_POLICY="$(grep -a -E 'Stage driver:|Map driver:|Layout mode:' "$SEED_TXT" | tail -n 24 \
+	| sed -E 's/\x1b\[[0-9;]*m//g; s/.*(Stage driver|Map driver|Layout mode): *//; s/[^a-z0-9-].*//' | paste -sd' ' -)"
+WANT_POLICY="lamina-seven lamina game-2d lamina-seven lamina game-2d lamina-seven lamina game-2d tty lamina hybrid tty lamina hybrid tty ascii-bud hybrid tty ascii-bud hybrid tty ascii-bud hybrid"
+if [ "$GOT_POLICY" != "$WANT_POLICY" ]; then
+	echo "Error: presentation policy by location is wrong." >&2
+	echo "  probes: $PROBES" >&2
+	echo "  wanted: $WANT_POLICY" >&2
+	echo "  got:    $GOT_POLICY" >&2
 	exit 1
 fi
-echo "Map driver by location OK: north=lamina south=ascii-bud spawn=ascii-bud"
+echo "Presentation by location OK: NW(x<=0,y>=1)=lamina-seven/game-2d NE=lamina/tty spawn,south=ascii-bud/tty"
 
 # Finish at the ROOT SPAWN (0,0,0,0) whatever the planet count: it is where the
 # admin and any new player first looks, and the one place with plants. Planet 1's
@@ -351,6 +373,6 @@ SEED_PID=""
 # Marker start.sh reads: this DB holds content modules in the ROOT region (v2).
 # A DB seeded earlier loaded them into plen=11, where they cannot reach the
 # kernel, and renders a black mapless world.
-date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET_DB.seed-v3"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET_DB.seed-v5"
 
 echo "Successfully seeded $NUM_PLANETS planet(s) in $TARGET_DB."

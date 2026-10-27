@@ -684,9 +684,10 @@ static int render_chat_page(int fd, const chat_session_t *s, const char *err)
 
 	bud_node *chat_view = chat_ui_render_view(s, summaries, summary_count, user, err);
 
-	char extra_head[512];
+	char extra_head[1024];
 	snprintf(extra_head, sizeof(extra_head),
-	         "<link rel=\"stylesheet\" href=\"/chat.css\">\n");
+	         "<link rel=\"stylesheet\" href=\"/chat.css\">\n"
+	         "<script src=\"/chat.js\" defer></script>\n");
 
 	return site_ui_respond_page(
 	        fd, "Chat", "/chat", "💬", user, extra_head, "chat", chat_view);

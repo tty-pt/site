@@ -15,6 +15,7 @@
 #include "nd_viewport.h"
 #include "nd_scene.h"
 #include "nd_lamina.h"
+#include "nd_seven.h"
 #include "nd_ui.h"
 
 extern nd_client_state_t client_state;
