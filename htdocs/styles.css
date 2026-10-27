@@ -833,3 +833,20 @@ body[data-wasm-loaded] [data-wasm-hide] { display: none; }
     transition: none;
   }
 }
+
+/* /nd: the direction pad is for touch/small screens only (large screens use
+   the keyboard), and the room panel shows either the looked-at object's
+   target card or the map, never both. Selectors are id-qualified so they win
+   over the generic nd.css rules regardless of load order. */
+#directions.nd-keypad {
+  display: none !important;
+}
+@media (pointer: coarse), (max-width: 700px), (orientation: portrait) {
+  #directions.nd-keypad {
+    display: grid !important;
+  }
+}
+#holder.targetting #room-map,
+#holder.targetting #room-map-canvas {
+  display: none !important;
+}

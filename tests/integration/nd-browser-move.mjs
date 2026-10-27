@@ -60,6 +60,24 @@ try {
   const key = await snap();
   console.log("key k :", JSON.stringify(key.head), "map", key.map.length);
   if (key.head === back.head) fails.push("pressing k outside the terminal did not move the map");
+  // Layout: the map and the looked-at object's image are never shown together,
+  // and the direction pad is for small/touch screens only.
+  const vis = (sel) => page.evaluate((q) => {
+    const el = document.querySelector(q);
+    return !!el && getComputedStyle(el).display !== "none" && el.getClientRects().length > 0;
+  }, sel);
+  if (await vis("#directions")) fails.push("direction pad visible on a large screen");
+  if (!(await vis("nd-map#room-map"))) fails.push("map hidden although nothing is targeted");
+  await sendLine("inventory");
+  await page.waitForSelector("#target-card", { state: "attached", timeout: 8000 })
+    .catch(() => fails.push("target card did not appear after inventory"));
+  if (!(await vis("#target-card"))) fails.push("target card not visible when targeting");
+  if (await vis("nd-map#room-map")) fails.push("map still visible together with the target card");
+  const small = await browser.newPage({ viewport: { width: 390, height: 800 } });
+  await small.goto(url, { waitUntil: "domcontentloaded" });
+  await small.waitForSelector("#directions", { state: "attached", timeout: 8000 });
+  const smallVis = await small.evaluate(() => getComputedStyle(document.querySelector("#directions")).display);
+  if (smallVis === "none") fails.push("direction pad hidden on a small screen");
 } catch (e) {
   fails.push("exception: " + e.message);
 } finally {
