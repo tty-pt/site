@@ -25,7 +25,7 @@ enum bcp_type {
 	BCP_OUT,
 	BCP_TOD,
 	BCP_ACTION,
-	BCP_REGION,
+	BCP_REGION = ND_BCP_REGION,
 };
 
 XY_DECL(struct icon, object_icon, unsigned, player_ref, unsigned, thing_ref);
@@ -292,6 +292,29 @@ eng_mcp_content_out(unsigned loc_ref, unsigned thing_ref) {
 }
 
 void
+eng_fbcp_region(unsigned player_ref, const char *stage, const char *map, uint8_t layout, uint8_t flags)
+{
+	const char *s = (stage && *stage) ? stage : "tty";
+	const char *m = (map && *map) ? map : "ascii-bud";
+	uint8_t buf[64];
+	size_t pos = 0;
+	size_t slen = strlen(s) + 1;
+	size_t mlen = strlen(m) + 1;
+
+	if (pos + slen + mlen + 2 > sizeof(buf))
+		return;
+
+	memcpy(buf + pos, s, slen);
+	pos += slen;
+	memcpy(buf + pos, m, mlen);
+	pos += mlen;
+	buf[pos++] = layout;
+	buf[pos++] = flags;
+
+	eng_fbcp(player_ref, pos, ND_BCP_REGION, buf);
+}
+
+void
 eng_mcp_send_region_driver(unsigned player_ref)
 {
 	char stage[16] = {0};
@@ -300,19 +323,7 @@ eng_mcp_send_region_driver(unsigned player_ref)
 	uint8_t flags = 0;
 	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
 	                                   map, sizeof(map), &layout, &flags) == 0) {
-		uint8_t buf[64];
-		size_t pos = 0;
-		size_t slen = strlen(stage) + 1;
-		size_t mlen = strlen(map) + 1;
-
-		memcpy(buf + pos, stage, slen);
-		pos += slen;
-		memcpy(buf + pos, map, mlen);
-		pos += mlen;
-		buf[pos++] = layout;
-		buf[pos++] = flags;
-
-		eng_fbcp(player_ref, pos, BCP_REGION, buf);
+		eng_fbcp_region(player_ref, stage, map, layout, flags);
 	}
 }
 

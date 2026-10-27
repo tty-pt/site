@@ -24,7 +24,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		}
 	}
 
-	char map_hex[802];
+	char map_hex[ND_MAP_HEX_CAP];
 	map_hex[0] = '\0';
 	static const char hex_chars[] = "0123456789abcdef";
 	if (st->map_data.width > 0) {
@@ -56,7 +56,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		st->selected_item_ref,
 		st->target_ref,
 		st->preferred_driver,
-		st->preferred_map_driver[0] ? st->preferred_map_driver : "lamina",
+		st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud",
 		(unsigned)st->layout_mode,
 		(unsigned)st->pres_flags,
 		st->tod,
@@ -282,7 +282,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		bud_json_str(json, "user", client_state.user, sizeof(client_state.user));
 		bud_json_str(json, "map_buf", client_state.map_buf, sizeof(client_state.map_buf));
 
-		char map_hex[802] = {0};
+		char map_hex[ND_MAP_HEX_CAP] = {0};
 		bud_json_str(json, "map_hex", map_hex, sizeof(map_hex));
 		if (map_hex[0]) {
 			uint8_t *raw = (uint8_t *)&client_state.map_data;

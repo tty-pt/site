@@ -9,6 +9,7 @@
 
 #include <nd/config.h>
 #include <nd/mcp.h>
+#include <nd/regions.h>
 #include <nd/params.h>
 #include <nd/st.h>
 #include <nd/law.h>
@@ -112,6 +113,15 @@ eng_enter(unsigned player_ref, unsigned loc_ref, enum exit e)
 		room_tellf(old_loc_ref, player_ref, "%s goes %s.\n", player.name, e_name(e));
 	}
 	eng_object_move(player_ref, loc_ref);
+	presence_refresh(player_ref);
+	char stage[16] = {0};
+	char map_drv[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map_drv, sizeof(map_drv), &layout, &flags) == 0) {
+		fbcp_region(player_ref, stage, map_drv, layout, flags);
+	}
 	room_clean(old_loc_ref);
 	if (e == E_NULL) {
 		nd_writef(player_ref, "Teleported\n");

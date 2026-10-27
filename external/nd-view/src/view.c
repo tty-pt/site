@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include <nd/mcp.h>
+#include <nd/regions.h>
+#include <nd/map-cell.h>
 #include <nd/noise.h>
 #include <nd/params.h>
 #include <nd/entity.h>
@@ -20,32 +22,37 @@ unsigned short day_n = 0;
 
 unsigned vtf_entity, vtf_shop, vtf_max;
 
-static inline char * biome_bg(unsigned i) {
-	static char ret[16];
-	if (NIGHT_IS)
-		return ANSI_RESET;
-
+/* The biome's background colour as an enum, independent of time of day. */
+static enum color
+biome_bg_color(unsigned i)
+{
 	if (i >= BIOME_MAX) /* unmapped/limbo tiles: render void, never OOB */
 		i = 0;
 
-	/* Both halves of this read the row rather than trusting it: a biome with
-	 * no skel row leaves skel zeroed by the copy's miss, and a row from an
-	 * older build can carry a colour outside the eight ansi_bg[] slots. The
-	 * copy is bounded by the source string, not by sizeof(ret): ansi_bg
-	 * entries are 6-byte literals like "\033[40m" and memcpy-ing 16 bytes out
-	 * of one read 10 bytes past the literal (ASan, src/view.c:29). */
+	/* Read the row rather than trusting it: a biome with no skel row leaves
+	 * skel zeroed by the copy's miss, and a row from an older build can carry
+	 * a colour outside the eight ansi_bg[] slots. */
 	SKEL skel = { 0 };
 	biome_skel_t *biome_skel = (biome_skel_t *) skel.data;
 	enum color bg = BLACK;
-	const char *src;
-	size_t n;
 
 	if (nd_get(HD_SKEL, &(skel), &biome_map[i]) == 0 &&
 	    biome_skel->bg <= WHITE)
 		bg = biome_skel->bg;
 
-	src = ansi_bg[bg];
-	n = strlen(src);
+	return bg;
+}
+
+static inline char * biome_bg(unsigned i) {
+	static char ret[16];
+	if (NIGHT_IS)
+		return ANSI_RESET;
+
+	/* The copy is bounded by the source string, not by sizeof(ret): ansi_bg
+	 * entries are 6-byte literals like "\033[40m" and memcpy-ing 16 bytes out
+	 * of one read 10 bytes past the literal (ASan, src/view.c:29). */
+	const char *src = ansi_bg[biome_bg_color(i)];
+	size_t n = strlen(src);
 	if (n >= sizeof(ret))
 		n = sizeof(ret) - 1;
 	memcpy(ret, src, n);
@@ -72,21 +79,14 @@ empty_tile(char *b, view_tile_t *t, unsigned side) {
 	return b;
 }
 
-static inline char *
-dr_room(char *buf, view_tile_t *t, const char *bg, int is_player)
+/* The first registered view-tile flag set on `t`, if any: what the centre of a
+ * room tile shows ('!' entity, '$' shop, '~' pond, ...). */
+static int
+vtf_find(const view_tile_t *t, vtf_t *vtf)
 {
-	register char *b = buf;
-	vtf_t vtf;
-	memset(&vtf, 0, sizeof(vtf));
 	unsigned i;
 
-	if (t->exits & E_DOWN)
-		b = stpcpy(b, ANSI_FG_WHITE "<");
-	else
-		b = empty_tile(b, t, 0);
-
-
-	int got = 0;
+	memset(vtf, 0, sizeof(*vtf));
 	for (i = 0; i < vtf_max; i++) {
 		unsigned ref = (1 << i);
 
@@ -95,11 +95,25 @@ dr_room(char *buf, view_tile_t *t, const char *bg, int is_player)
 
 		const void *__v = corm_get(vtf_hd, &i);
 		if (__v) {
-			memcpy(&vtf, __v, sizeof(vtf));
-			got = 1;
-			break;
+			memcpy(vtf, __v, sizeof(*vtf));
+			return 1;
 		}
 	}
+	return 0;
+}
+
+static inline char *
+dr_room(char *buf, view_tile_t *t, const char *bg, int is_player)
+{
+	register char *b = buf;
+	vtf_t vtf;
+
+	if (t->exits & E_DOWN)
+		b = stpcpy(b, ANSI_FG_WHITE "<");
+	else
+		b = empty_tile(b, t, 0);
+
+	int got = vtf_find(t, &vtf);
 
 	b = stpcpy(b, ANSI_RESET);
 	b = stpcpy(b, bg);
@@ -156,6 +170,30 @@ wall_paint(int floor)
 	default:
 		return ANSI_FG_YELLOW;
 	}
+}
+
+/* wall_paint() as an ANSI colour index, for the graphical map. */
+static inline uint8_t
+wall_paint_ansi(int floor)
+{
+	switch (floor) {
+	case 11: /* desert */
+	case -8:
+		return 1; /* red */
+	default:
+		return 3; /* yellow */
+	}
+}
+
+/* One cell (side 0 left, 1 centre, 2 right) of a tile's on_empty_tile output
+ * (plants), as glyph + ANSI colour; blank cells give glyph 0. */
+static void
+view_empty_cell(const view_tile_t *t, unsigned side, uint8_t *glyph, uint8_t *fg)
+{
+	sic_str_t ss = { .str = "" };
+
+	ss = nd_evt_empty_tile(*t, side, ss);
+	nd_map_cell_parse(ss.str, glyph, fg);
 }
 
 static inline char *
@@ -460,53 +498,66 @@ eng_view(unsigned player_ref)
 	map_data.player_y = VIEW_AROUND;
 	map_data.room_ref = player.location;
 
+	/* Fill each tile with what dr_room()/dr_vs() paint for it, so the graphical
+	 * map shows the same information as the ASCII one: three cells (left,
+	 * centre, right), the biome background, and the wall paint colour. */
 	for (int i = 0; i < VIEW_M; i++) {
 		const view_tile_t *vt = &view[i];
 		nd_map_tile_t *mt = &map_data.tiles[i];
+		int is_player = (i == (VIEW_AROUND * VIEW_SIZE + VIEW_AROUND));
 
 		mt->bio_idx = (uint8_t)(vt->bio_idx & 0xFF);
 		mt->exits = (uint8_t)(vt->exits & 0xFF);
 		mt->doors = (uint8_t)(vt->doors & 0xFF);
+		mt->bg = nd_color_to_ansi(biome_bg_color(vt->bio_idx));
+		mt->wall_fg = wall_paint_ansi(vt->bio_idx);
 
 		uint8_t flags = 0;
 		if (vt->room != NOTHING && vt->room != 0)
 			flags |= ND_MAP_FLAG_ROOM;
-		if (i == (VIEW_AROUND * VIEW_SIZE + VIEW_AROUND))
+		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;
 		if (vt->flags & vtf_entity)
 			flags |= ND_MAP_FLAG_ENTITY;
-
 		mt->flags = flags;
 
-		if (flags & ND_MAP_FLAG_PLAYER) {
-			mt->symbol = '!';
-			mt->fg = 14;
-		} else if (flags & ND_MAP_FLAG_ENTITY) {
-			mt->symbol = '!';
-			mt->fg = 14;
-		} else if (vt->exits & E_UP) {
-			mt->symbol = '>';
-			mt->fg = 15;
-		} else if (vt->exits & E_DOWN) {
-			mt->symbol = '<';
-			mt->fg = 15;
-		} else if (flags & ND_MAP_FLAG_ROOM) {
-			/* Check if empty tile callback produces plant/tree symbols */
-			sic_str_t ss = { .str = {0} };
-			ss = nd_evt_empty_tile(*vt, 1, ss);
-			if (ss.str[0] && ss.str[0] != ' ') {
-				mt->symbol = ss.str[0];
-				mt->fg = 10; /* Green tree / plant */
-			} else {
-				mt->symbol = '.';
-				mt->fg = 7;
-			}
+		/* left cell: stairs down, else plants */
+		if (vt->exits & E_DOWN) {
+			mt->side_l = '<';
+			mt->fg_l = 7;
 		} else {
-			mt->symbol = ' ';
-			mt->fg = 0;
+			view_empty_cell(vt, 0, &mt->side_l, &mt->fg_l);
 		}
 
-		mt->bg = (uint8_t)(vt->bio_idx & 0x0F);
+		/* centre cell: the player, then a registered flag glyph, else plants */
+		vtf_t vtf;
+		if (is_player) {
+			mt->symbol = '!';
+			mt->fg = 11; /* bold yellow */
+		} else if (vtf_find(vt, &vtf)) {
+			mt->symbol = (uint8_t)vtf.emp;
+			mt->fg = (uint8_t)(nd_color_to_ansi(vtf.pi.fg) +
+				((vtf.pi.flags & BOLD) ? 8 : 0));
+		} else {
+			view_empty_cell(vt, 1, &mt->symbol, &mt->fg);
+		}
+
+		/* right cell: stairs up, else plants */
+		if (vt->exits & E_UP) {
+			mt->side_r = '>';
+			mt->fg_r = 7;
+		} else {
+			view_empty_cell(vt, 2, &mt->side_r, &mt->fg_r);
+		}
+	}
+
+	char stage[16] = {0};
+	char map_drv[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map_drv, sizeof(map_drv), &layout, &flags) == 0) {
+		fbcp_region(player_ref, stage, map_drv, layout, flags);
 	}
 
 	fbcp_view(player_ref, &map_data);

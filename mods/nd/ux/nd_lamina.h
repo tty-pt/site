@@ -14,8 +14,8 @@ extern "C" {
 #define ND_CANVAS_W 640
 #define ND_CANVAS_H 480
 
-#define ND_MAP_CANVAS_W 160
-#define ND_MAP_CANVAS_H 160
+#define ND_MAP_CANVAS_W 224
+#define ND_MAP_CANVAS_H 224
 
 /*
  * Theme descriptor for liblamina room map rendering.

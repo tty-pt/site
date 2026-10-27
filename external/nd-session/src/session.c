@@ -31,6 +31,7 @@
 
 #include <nd/config.h>
 #include <nd/mcp.h>
+#include <nd/regions.h>
 #include <nd/player.h>
 #include <nd/st.h>
 #include <nd/entity.h>
@@ -71,9 +72,6 @@ int euid = 0;
 double tick = 0;
 unsigned short day_n = 0;
 unsigned me = 1;
-
-int presence_refresh(unsigned ref);
-int presence_forget(unsigned ref);
 
 void do_avatar(int fd, int argc, char *argv[]);
 /* do_ban, do_unban moved to external/nd-region */
@@ -788,6 +786,14 @@ nd_player_login(int fd, char *user)
 	mcp_actions(player_ref);
 	eng_look_at(player_ref, NOTHING);
 	presence_refresh(player_ref);
+	char stage[16] = {0};
+	char map_drv[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map_drv, sizeof(map_drv), &layout, &flags) == 0) {
+		fbcp_region(player_ref, stage, map_drv, layout, flags);
+	}
 	nd_view(player_ref ? player_ref : fd_player(fd));
 	if (day_n)
 		mcp_tod(player_ref, 1);

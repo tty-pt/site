@@ -99,6 +99,14 @@ st_here_cell(unsigned player_ref, uint64_t *cell)
 static int
 st_argc_trim(int argc, char *argv[])
 {
+	for (int i = 0; i < argc; i++) {
+		if (argv[i]) {
+			size_t l = strlen(argv[i]);
+			while (l > 0 && ((unsigned char)argv[i][l - 1] <= 32)) {
+				argv[i][--l] = '\0';
+			}
+		}
+	}
 	while (argc > 1 && (!argv[argc - 1] || !*argv[argc - 1]))
 		argc--;
 	return argc;
@@ -1028,13 +1036,15 @@ do_driver(int fd, int argc, char *argv[])
 
 	if (strcmp(argv[1], "map") == 0) {
 		if (argc < 3 || !argv[2] || !*argv[2]) {
-			nd_printf(player_ref, "Usage: driver map <lamina|classic|cyber|dungeon|none> [region]\n");
+			nd_printf(player_ref, "Usage: driver map <ascii-bud|lamina|classic|cyber|dungeon|none> [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
 		const char *mname = argv[2];
 		char map_drv[16] = "lamina";
-		if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina") || !strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud") || !strcmp(mname, "lamina"))
+		if (!strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud"))
+			snprintf(map_drv, sizeof(map_drv), "ascii-bud");
+		else if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina") || !strcmp(mname, "lamina"))
 			snprintf(map_drv, sizeof(map_drv), "lamina");
 		else if (!strcmp(mname, "classic"))
 			snprintf(map_drv, sizeof(map_drv), "classic");

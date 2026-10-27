@@ -124,62 +124,169 @@ static void draw_radial_glow(uint32_t *fb, uint32_t w, uint32_t h,
 	}
 }
 
-/* 3x5 compact bitmap font for map tile glyphs ('!', 'A', '>', '<', '.', '#', '+') */
-static const uint16_t g_font_3x5[] = {
-	['!'] = 0x5040, /* 101, 000, 100 -> binary packed */
-	['A'] = 0x7577, /* 111, 101, 111, 101, 101 */
-	['>'] = 0x4212, /* > arrow */
-	['<'] = 0x1242, /* < arrow */
-	['.'] = 0x0002, /* dot at bottom center */
-	['#'] = 0x5757, /* grid hatch */
-	['+'] = 0x2720, /* cross */
-	['@'] = 0x7572, /* player glyph */
-	['?'] = 0x7120, /* question */
-	['t'] = 0x2722, /* small tree: trunk + branch */
-	['T'] = 0x7222, /* big tree: canopy bar + trunk */
-	['x'] = 0x5250, /* small shrub / plant */
-	['X'] = 0x5750, /* big dense bush / foliage */
-	['a'] = 0x2575, /* small pine */
-	['i'] = 0x2022, /* small cactus */
-	['I'] = 0x5722  /* saguaro cactus */
+/* The ASCII map's colours. nd.css colours the ASCII map's spans with
+ * cfN / cN classes keyed by ANSI colour index (0..15, bold folded into 8..15);
+ * this is that same palette (--c0..--c15) so a tile reads the same colour here
+ * as it does there. 0xAABBGGRR. */
+static const uint32_t g_ansi_rgb[16] = {
+	0xFF2C2C2C, 0xFF6A4ABD, 0xFF465E3A, 0xFF5A97A3,
+	0xFFBD8973, 0xFFAC778A, 0xFF5F5C41, 0xFFA5858B,
+	0xFFC1AAB4, 0xFF874ABD, 0xFF8AD353, 0xFF2ECDB8,
+	0xFFBD9C73, 0xFFC58995, 0xFFBAD016, 0xFFF5F5F5
 };
 
-static void draw_glyph_3x5(uint32_t *fb, uint32_t w, uint32_t h,
-                           int x, int y, char ch, uint32_t color)
+static inline uint32_t ansi_rgb(uint8_t idx)
 {
-	if (ch < 0 || (size_t)ch >= sizeof(g_font_3x5) / sizeof(g_font_3x5[0])) return;
-	uint16_t pattern = g_font_3x5[(int)ch];
-	if (!pattern) return;
+	return g_ansi_rgb[idx & 15];
+}
+
+/* Scale an opaque colour's brightness by num/den. */
+static inline uint32_t shade(uint32_t c, uint32_t num, uint32_t den)
+{
+	uint32_t r = ((c & 0xFF) * num) / den;
+	uint32_t g = (((c >> 8) & 0xFF) * num) / den;
+	uint32_t b = (((c >> 16) & 0xFF) * num) / den;
+	if (r > 255) r = 255;
+	if (g > 255) g = 255;
+	if (b > 255) b = 255;
+	return 0xFF000000 | (b << 16) | (g << 8) | r;
+}
+
+/* 3x5 bitmap font for the non-plant cell glyphs the ASCII map uses:
+ * '!' entity/player, '$' shop, '~' pond, '<' '>' stairs, plus a few more. */
+static const uint16_t g_font_3x5[128] = {
+	['!'] = 0x2482, /* 010 010 010 000 010 */
+	['$'] = 0x3C9E, /* 011 110 010 011 110 */
+	['~'] = 0x0780, /* 000 011 110 000 000 */
+	['*'] = 0x55D5, /* 101 010 111 010 101 */
+	['>'] = 0x4212, /* arrow right */
+	['<'] = 0x1242, /* arrow left */
+	['.'] = 0x0002, /* dot */
+	['#'] = 0x5757, /* hatch */
+	['+'] = 0x2720, /* cross */
+	['@'] = 0x7572, /* at */
+	['?'] = 0x7120  /* question */
+};
+
+static void draw_glyph_scaled(uint32_t *fb, uint32_t w, uint32_t h,
+                              int x, int y, int ch, uint32_t color, int scale)
+{
+	if (ch <= 0 || ch >= 128) return;
+	uint16_t pattern = g_font_3x5[ch];
+	if (!pattern) {
+		/* A glyph we have no bitmap for still has to show up: a solid pip. */
+		fill_rounded_rect(fb, w, h, x, y + scale, 3 * scale, 3 * scale, scale, color);
+		return;
+	}
 
 	for (int row = 0; row < 5; row++) {
 		for (int col = 0; col < 3; col++) {
 			int bit = 14 - (row * 3 + col);
-			if (bit >= 0 && (pattern & (1 << bit))) {
-				blend_pixel_at(fb, w, h, (uint32_t)(x + col), (uint32_t)(y + row), color);
-			}
+			if (pattern & (1 << bit))
+				fill_rect_blend(fb, w, h, (uint32_t)(x + col * scale),
+				                (uint32_t)(y + row * scale), (uint32_t)scale,
+				                (uint32_t)scale, color);
 		}
 	}
 }
 
-/* Biome palette table (0..15) */
-static const uint32_t g_biome_palette[16] = {
-	[0]  = 0xFF14181E, /* 0: Void / Limbo / Space (deep cosmic obsidian) */
-	[1]  = 0xFF243B28, /* 1: Verdant Meadow / Forest (rich moss green) */
-	[2]  = 0xFF1E3836, /* 2: Swamp / Wetlands (deep murky teal) */
-	[3]  = 0xFF3D3222, /* 3: Plains / Steppe (dry golden umber) */
-	[4]  = 0xFF2A2A38, /* 4: Mountain / Stone (cool granite) */
-	[5]  = 0xFF18304C, /* 5: Ocean / Lake (midnight azure) */
-	[6]  = 0xFF422818, /* 6: Volcanic / Badlands (smoldering rust) */
-	[7]  = 0xFF4A4A58, /* 7: Snow / Tundra (permafrost slate) */
-	[8]  = 0xFF1E1E28, /* 8: Subterranean / Deep Cavern (shadow basalt) */
-	[9]  = 0xFF443820, /* 9: Desert / Dunes (warm sandstone) */
-	[10] = 0xFF341C34, /* 10: Arcane Sanctum (mystic violet) */
-	[11] = 0xFF202830, /* 11: Urban / Town Settlement (cobblestone) */
-	[12] = 0xFF383824, /* 12: Farmland / Orchard (olive grove) */
-	[13] = 0xFF2C241E, /* 13: Ruins / Wastes (ancient debris) */
-	[14] = 0xFF1C2C28, /* 14: Jungle / Canopy (dense pine) */
-	[15] = 0xFF2A2434  /* 15: Celestial / Citadel (aetherium) */
-};
+/* Plants. The ASCII map shows one letter per plant cell: the letter family says
+ * what it is (x/X deciduous or crop, t/T tall tree, a/A fir, i/I cactus), the
+ * case says how grown it is (lower small, upper big), and the colour is the
+ * species' own. Draw a sprite per family, in that colour, in a cell box
+ * (cx,cy,cw,ch). */
+static int is_plant_glyph(int g)
+{
+	return g == 'x' || g == 'X' || g == 't' || g == 'T' ||
+	       g == 'a' || g == 'A' || g == 'i' || g == 'I';
+}
+
+static void draw_crown(uint32_t *fb, uint32_t w, uint32_t h, int mx, int top,
+                       int cw_, int ch_, uint32_t col)
+{
+	if (cw_ < 2) cw_ = 2;
+	if (ch_ < 2) ch_ = 2;
+	fill_rounded_rect(fb, w, h, mx - cw_ / 2, top, cw_, ch_, cw_ / 2, shade(col, 70, 100));
+	fill_rounded_rect(fb, w, h, mx - cw_ / 2, top, cw_ - 1, ch_ - 1, (cw_ - 1) / 2, col);
+	if (cw_ >= 6)
+		fill_rounded_rect(fb, w, h, mx - cw_ / 4 - 1, top + 1, cw_ / 2, ch_ / 3, 1,
+		                  shade(col, 130, 100));
+}
+
+static void draw_plant(uint32_t *fb, uint32_t w, uint32_t h,
+                       int cx, int cy, int cw, int ch, int glyph, uint32_t col)
+{
+	const uint32_t bark = 0xFF2A4A6B;
+	int big = (glyph >= 'A' && glyph <= 'Z');
+	int mx = cx + cw / 2;
+	int my = cy + ch / 2;
+	int fam = glyph | 0x20; /* lower-case */
+
+	if (fam == 'x') {
+		/* Deciduous tree / crop: round crown on a short trunk. */
+		int crown_w = big ? cw - 1 : (cw * 6) / 10;
+		int crown_h = (crown_w * 9) / 10 + 1;
+		int trunk_h = big ? 5 : 3;
+		int total = crown_h + trunk_h - 1;
+		int top = my - total / 2;
+		fill_rect_blend(fb, w, h, (uint32_t)(mx - (big ? 1 : 0)), (uint32_t)(top + crown_h - 1),
+		                big ? 2u : 1u, (uint32_t)trunk_h, bark);
+		draw_crown(fb, w, h, mx, top, crown_w, crown_h, col);
+	} else if (fam == 't') {
+		/* Tall tree: narrower, taller crown on a long trunk. */
+		int crown_w = big ? (cw * 8) / 10 : (cw * 5) / 10;
+		int crown_h = (crown_w * 14) / 10;
+		int trunk_h = big ? 7 : 5;
+		int total = crown_h + trunk_h - 1;
+		int top = my - total / 2;
+		fill_rect_blend(fb, w, h, (uint32_t)(mx - (big ? 1 : 0)), (uint32_t)(top + crown_h - 1),
+		                big ? 2u : 1u, (uint32_t)trunk_h, bark);
+		draw_crown(fb, w, h, mx, top, crown_w, crown_h, col);
+	} else if (fam == 'a') {
+		/* Fir: stacked, widening tiers on a short trunk. */
+		int tiers = big ? 3 : 2;
+		int tier_h = big ? 4 : 3;
+		int total = tiers * tier_h + 3;
+		int top = my - total / 2;
+		for (int i = 0; i < tiers; i++) {
+			int tw = ((i + 1) * (cw - 1)) / tiers;
+			if (tw < 2) tw = 2;
+			uint32_t tc = shade(col, 100 - (uint32_t)(tiers - 1 - i) * 14, 100); /* top tier darkest, bottom exact */
+			fill_rounded_rect(fb, w, h, mx - tw / 2, top + i * (tier_h - 1), tw, tier_h, 1, tc);
+		}
+		fill_rect_blend(fb, w, h, (uint32_t)(mx - (big ? 1 : 0)),
+		                (uint32_t)(top + tiers * (tier_h - 1) + 1), big ? 2u : 1u, 3u, bark);
+	} else {
+		/* Cactus: a column with two arms. */
+		int body_h = big ? (ch * 5) / 10 : (ch * 4) / 10;
+		int bw = big ? 3 : 2;
+		int top = my - body_h / 2;
+		fill_rounded_rect(fb, w, h, mx - bw / 2, top, bw, body_h, 1, col);
+		fill_rect_blend(fb, w, h, (uint32_t)(mx - bw / 2 - 2), (uint32_t)(top + body_h / 3), 2u, 2u, col);
+		fill_rect_blend(fb, w, h, (uint32_t)(mx - bw / 2 - 2), (uint32_t)(top + body_h / 6), 1u,
+		                (uint32_t)(body_h / 4), col);
+		fill_rect_blend(fb, w, h, (uint32_t)(mx + bw - bw / 2), (uint32_t)(top + body_h / 2), 2u, 2u, col);
+		fill_rect_blend(fb, w, h, (uint32_t)(mx + bw - bw / 2 + 1), (uint32_t)(top + body_h / 4), 1u,
+		                (uint32_t)(body_h / 4), col);
+	}
+}
+
+/* One map cell (left, centre or right third of a tile): a plant sprite or the
+ * glyph the ASCII map shows there, in the colour the ASCII map shows it. */
+static void draw_cell(uint32_t *fb, uint32_t w, uint32_t h,
+                      int cx, int cy, int cw, int ch, int glyph, uint8_t fg)
+{
+	if (glyph <= 0 || glyph == ' ')
+		return;
+	uint32_t col = ansi_rgb(fg);
+	if (is_plant_glyph(glyph)) {
+		draw_plant(fb, w, h, cx, cy, cw, ch, glyph, col);
+		return;
+	}
+	int scale = cw >= 9 ? 2 : 1;
+	draw_glyph_scaled(fb, w, h, cx + (cw - 3 * scale) / 2, cy + (ch - 5 * scale) / 2,
+	                  glyph, col, scale);
+}
 
 /* Thematic profiles */
 static const nd_lamina_theme_t g_themes[] = {
@@ -194,7 +301,7 @@ static const nd_lamina_theme_t g_themes[] = {
 		.entity_color = 0xFFFFD700,
 		.grid_border = 0x22FFFFFF,
 		.rounded_radius = 3,
-		.vignette_strength = 60
+		.vignette_strength = 0 /* tiles keep the ASCII map's exact colours */
 	},
 	{
 		.name = "classic",
@@ -207,7 +314,7 @@ static const nd_lamina_theme_t g_themes[] = {
 		.entity_color = 0xFFFFFF00,
 		.grid_border = 0x11FFFFFF,
 		.rounded_radius = 1,
-		.vignette_strength = 20
+		.vignette_strength = 0
 	},
 	{
 		.name = "cyber",
@@ -294,7 +401,10 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
 
 	uint32_t amb = tod_brightness(tod);
 
-	/* 2. Render each room tile */
+	/* 2. Render each tile the way the ASCII map does: the biome's background
+	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
+	 * (left / centre / right) showing plants, stairs, shops, ponds and entities
+	 * in their own colours, and walls in the wall-paint colour around rooms. */
 	for (uint32_t y = 0; y < rows; y++) {
 		for (uint32_t x = 0; x < cols; x++) {
 			const nd_map_tile_t *tile = &map->tiles[y * cols + x];
@@ -303,135 +413,67 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
 
 			int is_room = (tile->flags & ND_MAP_FLAG_ROOM);
 			int is_player = (tile->flags & ND_MAP_FLAG_PLAYER);
-			int is_entity = (tile->flags & ND_MAP_FLAG_ENTITY);
 
-			/* Biome floor tint */
-			uint8_t bio = tile->bio_idx % 16;
-			uint32_t bio_col = g_biome_palette[bio];
+			/* Biome background (ANSI 0..7), dimmed by time of day. */
+			uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
+			fill_rect(fb, w, h, tx, ty, tile_sz, tile_sz, tile_col);
 
-			uint32_t tile_col;
-			if (is_room) {
-				/* Blend theme floor color with biome tint */
-				uint32_t r = (((theme->floor_color & 0xFF) * 3) + ((bio_col & 0xFF) * 5)) / 8;
-				uint32_t g = ((((theme->floor_color >> 8) & 0xFF) * 3) + (((bio_col >> 8) & 0xFF) * 5)) / 8;
-				uint32_t b = ((((theme->floor_color >> 16) & 0xFF) * 3) + (((bio_col >> 16) & 0xFF) * 5)) / 8;
-
-				/* Apply time-of-day ambient multiplier */
-				r = (r * amb) / 255;
-				g = (g * amb) / 255;
-				b = (b * amb) / 255;
-				tile_col = 0xFF000000 | (b << 16) | (g << 8) | r;
-			} else {
-				/* Unexplored / cosmic void */
-				tile_col = 0xFF0A0C10;
-			}
-
-			/* Draw rounded room tile */
-			fill_rounded_rect(fb, w, h, (int)tx + 1, (int)ty + 1,
-			                  (int)tile_sz - 2, (int)tile_sz - 2,
-			                  is_room ? theme->rounded_radius : 1,
-			                  tile_col);
-
-			/* Subtle cell border */
+			/* Rooms get a soft outline; wilderness stays seamless. */
 			if (is_room && theme->grid_border) {
-				fill_rect_blend(fb, w, h, tx + 1, ty + 1, tile_sz - 2, 1, theme->grid_border);
-				fill_rect_blend(fb, w, h, tx + 1, ty + 1, 1, tile_sz - 2, theme->grid_border);
+				fill_rect_blend(fb, w, h, tx, ty, tile_sz, 1, theme->grid_border);
+				fill_rect_blend(fb, w, h, tx, ty, 1, tile_sz, theme->grid_border);
 			}
 
-			/* Walls / Door Portals */
+			/* Walls / doors, drawn only around room tiles (as the ASCII map does). */
 			if (is_room) {
-				uint32_t wall_col = theme->wall_color;
+				uint32_t wall_col = tile->wall_fg ? ansi_rgb(tile->wall_fg) : theme->wall_color;
 				uint32_t door_col = theme->door_color;
+				uint32_t t3 = tile_sz / 3;
 
-				/* North Wall / Door */
-				if (!(tile->exits & 2)) {
-					fill_rect_blend(fb, w, h, tx + 1, ty + 1, tile_sz - 2, 2, wall_col);
-				} else if (tile->doors & 2) {
-					fill_rect_blend(fb, w, h, tx + tile_sz / 3, ty + 1, tile_sz / 3, 2, door_col);
-				}
-
-				/* South Wall / Door */
-				if (!(tile->exits & 16)) {
-					fill_rect_blend(fb, w, h, tx + 1, ty + tile_sz - 3, tile_sz - 2, 2, wall_col);
-				} else if (tile->doors & 16) {
-					fill_rect_blend(fb, w, h, tx + tile_sz / 3, ty + tile_sz - 3, tile_sz / 3, 2, door_col);
-				}
-
-				/* West Wall / Door */
-				if (!(tile->exits & 1)) {
-					fill_rect_blend(fb, w, h, tx + 1, ty + 1, 2, tile_sz - 2, wall_col);
-				} else if (tile->doors & 1) {
-					fill_rect_blend(fb, w, h, tx + 1, ty + tile_sz / 3, 2, tile_sz / 3, door_col);
-				}
-
-				/* East Wall / Door */
-				if (!(tile->exits & 8)) {
-					fill_rect_blend(fb, w, h, tx + tile_sz - 3, ty + 1, 2, tile_sz - 2, wall_col);
-				} else if (tile->doors & 8) {
-					fill_rect_blend(fb, w, h, tx + tile_sz - 3, ty + tile_sz / 3, 2, tile_sz / 3, door_col);
-				}
+				/* North */
+				if (!(tile->exits & 2))
+					fill_rect_blend(fb, w, h, tx, ty, tile_sz, 2, wall_col);
+				else if (tile->doors & 2)
+					fill_rect_blend(fb, w, h, tx + t3, ty, t3, 2, door_col);
+				/* South */
+				if (!(tile->exits & 16))
+					fill_rect_blend(fb, w, h, tx, ty + tile_sz - 2, tile_sz, 2, wall_col);
+				else if (tile->doors & 16)
+					fill_rect_blend(fb, w, h, tx + t3, ty + tile_sz - 2, t3, 2, door_col);
+				/* West */
+				if (!(tile->exits & 1))
+					fill_rect_blend(fb, w, h, tx, ty, 2, tile_sz, wall_col);
+				else if (tile->doors & 1)
+					fill_rect_blend(fb, w, h, tx, ty + t3, 2, t3, door_col);
+				/* East */
+				if (!(tile->exits & 8))
+					fill_rect_blend(fb, w, h, tx + tile_sz - 2, ty, 2, tile_sz, wall_col);
+				else if (tile->doors & 8)
+					fill_rect_blend(fb, w, h, tx + tile_sz - 2, ty + t3, 2, t3, door_col);
 			}
 
-			/* Up / Down stairs glyphs */
-			if (tile->exits & 4) {
-				draw_glyph_3x5(fb, w, h, (int)(tx + tile_sz / 2 - 1), (int)(ty + tile_sz / 2 - 2), '>', 0xFFFFFFFF);
-			} else if (tile->exits & 32) {
-				draw_glyph_3x5(fb, w, h, (int)(tx + tile_sz / 2 - 1), (int)(ty + tile_sz / 2 - 2), '<', 0xFFAAAAAA);
-			}
-
-			/* Entity pip */
-			if (is_entity && !is_player) {
-				uint32_t ec = theme->entity_color;
-				fill_rounded_rect(fb, w, h, (int)(tx + tile_sz / 2 - 2), (int)(ty + tile_sz / 2 - 2), 5, 5, 2, ec);
-			}
-
-			/* Tree / Plant nature rendering matching ASCII map information */
-			if (is_room && !is_player && !is_entity && tile->symbol) {
-				char s = (char)tile->symbol;
-				if (s == 't' || s == 'T' || s == 'x' || s == 'X' || s == 'a' || s == 'A' || s == 'i' || s == 'I') {
-					int cx = (int)(tx + tile_sz / 2);
-					int cy = (int)(ty + tile_sz / 2);
-
-					if (s == 't' || s == 'T') {
-						/* Tree: lush green canopy circle + trunk */
-						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy + 1), 2, 4, 0xFF4A3525); /* Bark */
-						fill_rounded_rect(fb, w, h, cx - 4, cy - 5, 8, 7, 3, (s == 'T') ? 0xFF2D8A3E : 0xFF3DA652); /* Canopy */
-						fill_rounded_rect(fb, w, h, cx - 2, cy - 4, 4, 3, 1, 0xFF54C46B); /* Highlight */
-					} else if (s == 'a' || s == 'A') {
-						/* Pine / Fir: conical tiered pine */
-						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy + 2), 2, 3, 0xFF3A2818);
-						fill_rounded_rect(fb, w, h, cx - 2, cy - 4, 4, 3, 1, 0xFF1D6632);
-						fill_rounded_rect(fb, w, h, cx - 4, cy - 1, 8, 4, 2, 0xFF287A40);
-					} else if (s == 'i' || s == 'I') {
-						/* Cactus: desert saguaro arms */
-						fill_rect_blend(fb, w, h, (uint32_t)(cx - 1), (uint32_t)(cy - 4), 2, 9, 0xFF2E854B);
-						fill_rect_blend(fb, w, h, (uint32_t)(cx - 4), (uint32_t)(cy - 2), 2, 4, 0xFF2E854B);
-						fill_rect_blend(fb, w, h, (uint32_t)(cx + 2), (uint32_t)(cy - 1), 2, 4, 0xFF2E854B);
-						fill_rect_blend(fb, w, h, (uint32_t)(cx - 3), (uint32_t)(cy + 1), 6, 2, 0xFF2E854B);
-					} else {
-						/* Shrub / crop / bush */
-						fill_rounded_rect(fb, w, h, cx - 3, cy - 3, 6, 5, 2, 0xFF4E9E3B);
-						fill_rounded_rect(fb, w, h, cx - 1, cy - 2, 3, 2, 1, 0xFF72C758);
-					}
-				} else if (s != '.' && s != ' ') {
-					/* Other feature glyph (e.g. shrine, altar) */
-					draw_glyph_3x5(fb, w, h, (int)(tx + tile_sz / 2 - 1), (int)(ty + tile_sz / 2 - 2), s, 0xFFE0E0E0);
-				}
-			}
+			/* The three cells: left, centre, right. */
+			int cw = (int)(tile_sz / 3);
+			int ch = (int)tile_sz;
+			int cx0 = (int)tx + ((int)tile_sz - 3 * cw) / 2;
+			draw_cell(fb, w, h, cx0, (int)ty, cw, ch, tile->side_l, tile->fg_l);
+			if (!is_player)
+				draw_cell(fb, w, h, cx0 + cw, (int)ty, cw, ch, tile->symbol, tile->fg);
+			draw_cell(fb, w, h, cx0 + 2 * cw, (int)ty, cw, ch, tile->side_r, tile->fg_r);
 
 			/* Player avatar with breathing radial glow */
 			if (is_player) {
 				int cx = (int)(tx + tile_sz / 2);
 				int cy = (int)(ty + tile_sz / 2);
 
-				/* Breathing radius based on frame counter (e.g. 0..60 cycle) */
+				/* Breathing radius based on frame counter (0..60 cycle) */
 				int pulse = (int)(frame % 60);
 				if (pulse > 30) pulse = 60 - pulse;
 				int glow_radius = (int)(tile_sz / 2) + (pulse / 6);
 
 				draw_radial_glow(fb, w, h, cx, cy, glow_radius, theme->player_glow);
 
-				/* Inner diamond/circle player marker */
+				/* Inner player marker */
 				fill_rounded_rect(fb, w, h, cx - 3, cy - 3, 7, 7, 3, theme->player_color);
 				fill_rounded_rect(fb, w, h, cx - 1, cy - 1, 3, 3, 1, 0xFFFFFFFF);
 			}

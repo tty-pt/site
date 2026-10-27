@@ -60,7 +60,7 @@ PY
 check_case() {
 	local seeder="$1" label="$2" db="$TMP/$2.db" log="$TMP/$2.log" port
 	port=$((29100 + RANDOM % 800))
-	rm -f "$db" "$db.seed-v2"
+	rm -f "$db" "$db.seed-v3"
 	bash "$seeder" "$db" 1 > "$TMP/$label.seed.log" 2>&1 \
 		|| { echo "[$label] seeding failed"; tail -5 "$TMP/$label.seed.log"; return 2; }
 	(cd "$REPO_ROOT" && AXIL_ND_DB="$db" exec "$AXIL_BIN" -A -C "$REPO_ROOT" -p "$port" -d \

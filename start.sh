@@ -16,19 +16,21 @@ export AXIL_ND_HTDOCS="${AXIL_ND_HTDOCS:-$SCRIPT_DIR/htdocs}"
 if [ ! -f "$AXIL_ND_DB" ]; then
     echo "NeverDark universe database not found at $AXIL_ND_DB. Auto-seeding default star sector..."
     bash "$SCRIPT_DIR/scripts/seed-nd-universe.sh" "$AXIL_ND_DB" 1
-elif [ ! -f "$AXIL_ND_DB.seed-v2" ]; then
-    # Seeded before content modules moved to the root region: they sat in
-    # plen=11 where their kernel calls silently fail, so /nd shows no biome
-    # colours and no trees. Reseed; the old DB is kept, but its players and
-    # progress are NOT carried over into the new universe.
-    echo "NeverDark universe at $AXIL_ND_DB predates root-loaded content modules; reseeding."
-    echo "Players and progress in the old universe are not carried over; it is kept as $AXIL_ND_DB.pre-v2.bak"
+elif [ ! -f "$AXIL_ND_DB.seed-v3" ]; then
+    # v2: content modules moved to the root region (plen=11 made their kernel
+    #     calls silently fail: no biome colours, no trees).
+    # v3: the map driver is chosen by location (ASCII baseline, Lamina in the
+    #     northern half of world 0); older universes resolve every region to Lamina.
+    # Reseed; the old DB is kept, but its players and progress are NOT carried
+    # over into the new universe.
+    echo "NeverDark universe at $AXIL_ND_DB predates location-based map drivers; reseeding."
+    echo "Players and progress in the old universe are not carried over; it is kept as $AXIL_ND_DB.pre-v3.bak"
     NEW_DB="$AXIL_ND_DB.reseed.$$"
-    rm -f "$NEW_DB" "$NEW_DB.seed-v2"
+    rm -f "$NEW_DB" "$NEW_DB.seed-v3"
     bash "$SCRIPT_DIR/scripts/seed-nd-universe.sh" "$NEW_DB" 1
-    mv -f "$AXIL_ND_DB" "$AXIL_ND_DB.pre-v2.bak"
+    mv -f "$AXIL_ND_DB" "$AXIL_ND_DB.pre-v3.bak"
     mv -f "$NEW_DB" "$AXIL_ND_DB"
-    mv -f "$NEW_DB.seed-v2" "$AXIL_ND_DB.seed-v2"
+    mv -f "$NEW_DB.seed-v3" "$AXIL_ND_DB.seed-v3"
 fi
 
 if [ -n "$DEBUG" ]; then

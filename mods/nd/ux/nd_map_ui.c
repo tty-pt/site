@@ -107,7 +107,7 @@ static bud_node *raw_escaped(const char *text)
 	return node;
 }
 
-static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st)
+static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st, int visible)
 {
 	if (st && st->map_buf[0]) {
 		size_t cap = strlen(st->map_buf) * 12 + 256;
@@ -115,7 +115,7 @@ static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st)
 		if (html) {
 			nd_ansi_to_html(st->map_buf, html, cap);
 			bud_append(parent, lx_n("div",
-				lx_attr("class", "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight"),
+				lx_attr("class", visible ? "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight" : "nd-map-fallback hidden font-mono whitespace-pre text-[10px] leading-tight"),
 				lx_node(bud_raw(html))));
 			free(html);
 		}
@@ -187,21 +187,26 @@ static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st)
 		out[pos] = '\0';
 
 		bud_append(parent, lx_n("div",
-			lx_attr("class", "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight"),
+			lx_attr("class", visible ? "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight" : "nd-map-fallback hidden font-mono whitespace-pre text-[10px] leading-tight"),
 			lx_node(raw_escaped(out))));
 		return;
 	}
 
 	if (st && st->room.desc[0]) {
 		bud_append(parent, lx_n("div",
-			lx_attr("class", "nd-map-fallback font-mono text-xs text-neutral-400 p-1"),
+			lx_attr("class", visible ? "nd-map-fallback font-mono text-xs text-neutral-400 p-1" : "nd-map-fallback hidden font-mono text-xs text-neutral-400 p-1"),
 			lx_node(raw_escaped(st->room.desc))));
 	}
 }
 
+#define MAP_STR_(x) #x
+#define MAP_STR(x) MAP_STR_(x)
+#define MAP_CANVAS_PX MAP_STR(ND_MAP_CANVAS_W)
+#define MAP_CANVAS_STYLE "width:" MAP_CANVAS_PX "px;height:" MAP_CANVAS_PX "px"
+
 bud_node *render_room_map(const nd_client_state_t *st)
 {
-	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "lamina";
+	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
 
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
@@ -211,26 +216,28 @@ bud_node *render_room_map(const nd_client_state_t *st)
 		bud_node *ascii_map = lx_n("nd-map",
 			lx_attr("id", "room-map"),
 			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
-		append_fallback_ascii(ascii_map, st);
+		append_fallback_ascii(ascii_map, st, 1);
 		return ascii_map;
 	}
 
 	/* Container wrapping canvas and progressive SSR/No-JS fallback */
 	bud_node *map = lx_n("nd-map",
 		lx_attr("id", "room-map"),
-		lx_attr("class", "relative w-[160px] h-[160px] bg-black/90 p-0 rounded border border-neutral-700/60 overflow-hidden select-none block mx-auto shadow-inner"));
+		lx_attr("class", "relative bg-black/90 p-0 rounded border border-neutral-700/60 overflow-hidden select-none block mx-auto shadow-inner"),
+		lx_attr("style", MAP_CANVAS_STYLE));
 
 	/* The canvas rendered by liblamina */
 	bud_node *cv = lx_n("canvas",
 		lx_attr("id", "room-map-canvas"),
 		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "160"),
-		lx_attr("height", "160"),
-		lx_attr("class", "w-[160px] h-[160px] block"));
+		lx_attr("width", MAP_CANVAS_PX),
+		lx_attr("height", MAP_CANVAS_PX),
+		lx_attr("class", "block"),
+		lx_attr("style", MAP_CANVAS_STYLE));
 	bud_append(map, cv);
 
 	/* Progressive fallback map text for SSR / No-JS */
-	append_fallback_ascii(map, st);
+	append_fallback_ascii(map, st, 0);
 
 	return map;
 }
@@ -241,7 +248,7 @@ static uint32_t s_map_frame = 0;
 void nd_map_canvas_redraw(const nd_client_state_t *st)
 {
 	if (!st) return;
-	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "lamina";
+	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud";
 	if (strcmp(theme, "none") == 0) return;
 
 	/* If legacy name "canvas" or "canvas-lamina" is passed, use default lamina theme */

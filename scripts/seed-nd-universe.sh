@@ -235,14 +235,36 @@ cmd "drop Leather Tunic"
 cmd "create Iron Helm"
 cmd "drop Iron Helm"
 
+# Map presentation is chosen by LOCATION. World 0 holds the root spawn (woodland,
+# (0,0,0,0)): its baseline is the ASCII map, and its northern half renders with
+# the Lamina canvas map. Morton layout is world | z y x interleaved from the MSB,
+# so the 18-bit prefix "z-MSB=0, y-MSB=1" is every ground-level cell with y >= 1,
+# i.e. the room north of the spawn and everything beyond it.
+# A player's region is the deepest CLAIMED region (xy_region_at), and presentation
+# policy is only resolved up to that region -- so both regions must be claimed,
+# not merely given a policy row, or the policy under the claim is never seen.
+cmd "region 16 world 0"
+cmd "region 18 0 1 0 0"
+cmd "driver map ascii-bud 16 world 0"
+cmd "driver map lamina 18 0 1 0 0"
+
+# Seed spawn room at (0, 0, 0, 0) with initial ground item fixtures
+cmd "room 0 0 0 0"
+cmd "create Steel Broadsword"
+cmd "drop Steel Broadsword"
+cmd "create Leather Tunic"
+cmd "drop Leather Tunic"
+cmd "create Iron Helm"
+cmd "drop Iron Helm"
+
 # Planet 1 (world 1):
-# Base planet policy: southern half / default renders with ascii
+# Base planet policy: terminal + ASCII map (the default policy), layout hybrid.
 cmd "region 16 world 1"
 cmd "driver stage choice 16 world 1"
-cmd "driver map ascii 16 world 1"
+cmd "driver map ascii-bud 16 world 1"
 cmd "driver layout hybrid 16 world 1"
 
-# Specific rooms / northern half: Room (0, 1, 0, 1) and (0, 2, 0, 1)
+# Specific rooms / northern half of planet 1: Room (0, 1, 0, 1) and (0, 2, 0, 1)
 # When the player is in or walks north into these rooms, map renders with lamina!
 cmd "room 0 1 0 1"
 cmd "driver map lamina 64 here"
@@ -287,6 +309,23 @@ if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "drop Obsidian Sentinel"
 fi
 
+# Ask the server which map driver each place resolves to: the room north of the
+# spawn must be Lamina; the spawn and the room south of it must be the ASCII map.
+# (`driver` with no argument prints the policy for the admin's current location.)
+cmd "room 0 1 0 0"
+cmd "driver"
+cmd "room 0 -1 0 0"
+cmd "driver"
+cmd "room 0 0 0 0"
+cmd "driver"
+sleep 1.5
+GOT_DRIVERS="$(grep -a 'Map driver:' "$SEED_TXT" | sed 's/.*Map driver: *//; s/[^a-z-].*//' | tr '\n' ' ')"
+if [ "$GOT_DRIVERS" != "lamina ascii-bud ascii-bud " ]; then
+	echo "Error: map driver by location is wrong. Wanted 'lamina ascii-bud ascii-bud' (north, south, spawn), got '$GOT_DRIVERS'" >&2
+	exit 1
+fi
+echo "Map driver by location OK: north=lamina south=ascii-bud spawn=ascii-bud"
+
 # Finish at the ROOT SPAWN (0,0,0,0) whatever the planet count: it is where the
 # admin and any new player first looks, and the one place with plants. Planet 1's
 # origin (the Citadel) is ocean by the world generator, so ending there parks the
@@ -318,6 +357,6 @@ SEED_PID=""
 # Marker start.sh reads: this DB holds content modules in the ROOT region (v2).
 # A DB seeded earlier loaded them into plen=11, where they cannot reach the
 # kernel, and renders a black mapless world.
-date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET_DB.seed-v2"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET_DB.seed-v3"
 
 echo "Successfully seeded $NUM_PLANETS planet(s) in $TARGET_DB."
