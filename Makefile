@@ -174,7 +174,8 @@ run:
 MODS != cat mods.load
 
 test-data-dirs:
-	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors var/nd
+	mkdir -p var/poem var/song var/gig var/grp var/software var/chat/sessions var/song.types var/song.authors var/nd
+	@sh scripts/seed-software.sh >/dev/null 2>&1 || true
 
 unit-tests: all test-data-dirs
 	@./scripts/run-with-server.sh sh -c '\
@@ -225,9 +226,15 @@ standalone-unit-tests:
 	@sh tests/unit/run-test-bcp-meta.sh
 	@sh tests/unit/run-test-scene-sync.sh
 	@sh tests/unit/run-test-ssr-hydration.sh
+	@sh tests/unit/run-test-seven-room.sh
+	@sh tests/unit/run-test-seven-render.sh
+	@sh tests/unit/run-test-viewport-registry.sh
+	@sh tests/unit/run-test-seven-stage-html.sh
+	@sh tests/unit/run-test-lamina-bridge.sh
 	@sh tests/unit/run-test-axil-ws-multiplex.sh
 	@sh tests/unit/run-xylem-wasm.sh
 	@sh tests/unit/run-nd-ui-slot.sh
+	@sh tests/unit/run-markdown-test.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"

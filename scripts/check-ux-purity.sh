@@ -50,6 +50,7 @@ is_allowed() {
         "$root/mods/index/ux/list_layout.c:1") return 0 ;;
         "$root/mods/index/ux/list_query.c:1") return 0 ;;
         "$root/mods/index/ux/list_render.c:1") return 0 ;;
+        "$root/mods/chat/ux/chat_ui.c:1") return 0 ;;
         # Specific allowed preprocessor uses
         "$root/mods/common/ux/site_ui.c:"*) return 0 ;;
         "$root/mods/gig/ux/detail.c:"*) return 0 ;;
