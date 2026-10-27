@@ -128,11 +128,12 @@ bud_node *chat_ui_render_view(
 	}
 
 	bud_node *input_form = bud_tpl(
-	        "<form method='POST' action='%s' class='chat-input-row'>"
+	        "<form method='POST' action='%s' class='chat-input-row' data-ws-session='%s'>"
 	        "  <input type='text' name='prompt' placeholder='Ask anything...' required autofocus class='chat-input-field' autocomplete='off'/>"
 	        "  <button type='submit' class='btn'>Send</button>"
 	        "</form>",
-	        post_action);
+	        post_action,
+	        session && session->id[0] ? session->id : "");
 
 	/* 4. Combine into full chat layout */
 	const char *current_title = (session && session->title[0]) ? session->title : "Conversation";
@@ -160,12 +161,13 @@ bud_node *chat_ui_render_view(
 	        input_form);
 
 	return bud_tpl(
-	        "<div class='chat-wrapper'>"
+	        "<div class='chat-wrapper' data-axil-ws='/chat/%s'>"
 	        "  <div class='chat-panel'>"
 	        "    %node"
 	        "    %node"
 	        "  </div>"
 	        "</div>",
+	        session && session->id[0] ? session->id : "",
 	        sidebar,
 	        main_chat);
 }

@@ -29,6 +29,7 @@
 #define GENERATING_SENTINEL "[generating...]"
 
 static pthread_mutex_t g_chat_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t g_ws_session_map = 0;  /* corm handle: fd (u32) -> session_id (str) */
 
 static void ensure_storage_dir(void)
 {
@@ -487,6 +488,192 @@ static void url_decode_inplace(char *str)
 	*q = '\0';
 }
 
+/* WebSocket streaming worker — sends tokens from auren back to client */
+static void *ws_worker_thread(void *arg)
+{
+	typedef struct {
+		socket_t ws_fd;
+		char session_id[CHAT_ID_MAX];
+	} ws_worker_arg_t;
+
+	ws_worker_arg_t *warg = (ws_worker_arg_t *)arg;
+	if (!warg)
+		return NULL;
+
+	chat_session_t s;
+	if (chat_get_session(warg->session_id, &s) != 0) {
+		free(warg);
+		return NULL;
+	}
+
+	const char *host = AUREN_DEFAULT_HOST;
+	int port = AUREN_DEFAULT_PORT;
+	const char *env_port = getenv("AUREN_PORT");
+	if (env_port && *env_port)
+		port = atoi(env_port);
+
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		free(warg);
+		return NULL;
+	}
+
+	struct timeval tv;
+	tv.tv_sec = 60;
+	tv.tv_usec = 0;
+	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+	struct sockaddr_in sin;
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons((uint16_t)port);
+	inet_pton(AF_INET, host, &sin.sin_addr);
+
+	if (connect(sock, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		close(sock);
+		free(warg);
+		return NULL;
+	}
+
+	/* Build auren request (same as auren_chat_completion) */
+	struct json_object *root = json_object_new_object();
+	const char *model = (s.model[0] && strcmp(s.model, "qwen") != 0) ? s.model : "olmoe";
+	json_object_object_add(root, "model", json_object_new_string(model));
+	json_object_object_add(root, "stream", json_object_new_boolean(1));
+	json_object_object_add(root, "temperature", json_object_new_double(0.7));
+
+	struct json_object *msgs_arr = json_object_new_array();
+
+	/* System message */
+	struct json_object *sys_obj = json_object_new_object();
+	json_object_object_add(sys_obj, "role", json_object_new_string("system"));
+	json_object_object_add(sys_obj, "content", json_object_new_string(
+	        "You are an intelligent, helpful AI assistant. Format your responses cleanly using Markdown."));
+	json_object_array_add(msgs_arr, sys_obj);
+
+	/* Add session messages (exclude placeholder messages) */
+	for (size_t i = 0; i < s.msg_count; i++) {
+		const chat_msg_t *m = &s.messages[i];
+		if (strcmp(m->content, "[generating...]") == 0)
+			continue;
+
+		const char *rstr = "user";
+		if (m->role == CHAT_ROLE_ASSISTANT) rstr = "assistant";
+		else if (m->role == CHAT_ROLE_SYSTEM) rstr = "system";
+
+		struct json_object *m_obj = json_object_new_object();
+		json_object_object_add(m_obj, "role", json_object_new_string(rstr));
+		json_object_object_add(m_obj, "content", json_object_new_string(m->content));
+		json_object_array_add(msgs_arr, m_obj);
+	}
+	json_object_object_add(root, "messages", msgs_arr);
+
+	const char *payload_str = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
+	size_t payload_len = strlen(payload_str);
+
+	char req_header[1024];
+	snprintf(req_header, sizeof(req_header),
+	         "POST /v1/chat/completions HTTP/1.1\r\n"
+	         "Host: %s:%d\r\n"
+	         "User-Agent: axil-chat/1.0\r\n"
+	         "Content-Type: application/json\r\n"
+	         "Content-Length: %zu\r\n"
+	         "Connection: close\r\n\r\n",
+	         host, port, payload_len);
+
+	if (send(sock, req_header, strlen(req_header), 0) < 0 ||
+	    send(sock, payload_str, payload_len, 0) < 0)
+	{
+		json_object_put(root);
+		close(sock);
+		free(warg);
+		return NULL;
+	}
+	json_object_put(root);
+
+	/* Stream tokens back to WS client */
+	FILE *stream = fdopen(sock, "r");
+	if (!stream) {
+		close(sock);
+		free(warg);
+		return NULL;
+	}
+
+	char line[4096];
+	char accumulated[CHAT_MSG_CONTENT_MAX] = {0};
+
+	while (fgets(line, sizeof(line), stream)) {
+		if (strncmp(line, "data: [DONE]", 12) == 0) {
+			break;
+		}
+		if (strncmp(line, "data: ", 6) == 0) {
+			struct json_object *obj = json_tokener_parse(line + 6);
+			if (obj) {
+				struct json_object *choices;
+				if (json_object_object_get_ex(obj, "choices", &choices) &&
+				    json_object_array_length(choices) > 0)
+				{
+					struct json_object *c0 = json_object_array_get_idx(choices, 0);
+					struct json_object *delta;
+					if (json_object_object_get_ex(c0, "delta", &delta)) {
+						struct json_object *content;
+						if (json_object_object_get_ex(delta, "content", &content)) {
+							const char *token = json_object_get_string(content);
+							if (token) {
+								/* Send token back to WS client */
+								struct json_object *msg = json_object_new_object();
+								json_object_object_add(msg, "token", json_object_new_string(token));
+								json_object_object_add(msg, "done", json_object_new_boolean(0));
+								const char *msg_str = json_object_to_json_string_ext(msg, JSON_C_TO_STRING_PLAIN);
+								axil_ws_write(warg->ws_fd, (const void *)msg_str, strlen(msg_str));
+								json_object_put(msg);
+
+								/* Also accumulate for session save */
+								size_t acc_len = strlen(accumulated);
+								size_t token_len = strlen(token);
+								if (acc_len + token_len < sizeof(accumulated) - 1) {
+									memcpy(accumulated + acc_len, token, token_len);
+									accumulated[acc_len + token_len] = '\0';
+								}
+							}
+						}
+					}
+				}
+				json_object_put(obj);
+			}
+		}
+	}
+	fclose(stream);
+
+	/* Send completion message */
+	struct json_object *done_msg = json_object_new_object();
+	json_object_object_add(done_msg, "done", json_object_new_boolean(1));
+	const char *done_str = json_object_to_json_string_ext(done_msg, JSON_C_TO_STRING_PLAIN);
+	axil_ws_write(warg->ws_fd, (const void *)done_str, strlen(done_str));
+	json_object_put(done_msg);
+
+	/* Update session with final response */
+	if (chat_get_session(warg->session_id, &s) == 0) {
+		for (size_t i = s.msg_count; i > 0; i--) {
+			if (s.messages[i - 1].role == CHAT_ROLE_ASSISTANT &&
+			    strcmp(s.messages[i - 1].content, "[generating...]") == 0)
+			{
+				if (accumulated[0]) {
+					snprintf(s.messages[i - 1].content, sizeof(s.messages[i - 1].content), "%s", accumulated);
+				}
+				s.messages[i - 1].timestamp = time(NULL);
+				break;
+			}
+		}
+		s.updated_at = time(NULL);
+		chat_save_session(&s);
+	}
+
+	free(warg);
+	return NULL;
+}
+
 static int render_chat_page(int fd, const chat_session_t *s, const char *err)
 {
 	char user[ENV_VALUE_LEN] = {0};
@@ -495,28 +682,11 @@ static int render_chat_page(int fd, const chat_session_t *s, const char *err)
 	chat_session_summary_t summaries[32];
 	size_t summary_count = list_sessions(summaries, 32);
 
-	/* Check if this session is generating */
-	int is_generating = 0;
-	if (s) {
-		for (size_t i = 0; i < s->msg_count; i++) {
-			if (strcmp(s->messages[i].content, GENERATING_SENTINEL) == 0) {
-				is_generating = 1;
-				break;
-			}
-		}
-	}
-
 	bud_node *chat_view = chat_ui_render_view(s, summaries, summary_count, user, err);
 
 	char extra_head[512];
-	if (is_generating) {
-		snprintf(extra_head, sizeof(extra_head),
-		         "<link rel=\"stylesheet\" href=\"/chat.css\">\n"
-		         "<meta http-equiv=\"refresh\" content=\"1\">\n");
-	} else {
-		snprintf(extra_head, sizeof(extra_head),
-		         "<link rel=\"stylesheet\" href=\"/chat.css\">\n");
-	}
+	snprintf(extra_head, sizeof(extra_head),
+	         "<link rel=\"stylesheet\" href=\"/chat.css\">\n");
 
 	return site_ui_respond_page(
 	        fd, "Chat", "/chat", "💬", user, extra_head, "chat", chat_view);
@@ -595,6 +765,24 @@ static int chat_route_handler(int fd, char *body)
 	if (parse_chat_route(uri, sess_id, sizeof(sess_id), action, sizeof(action)) != 0 || !sess_id[0]) {
 		axil_respond(fd, 404, "Not Found");
 		return 1;
+	}
+
+	/* WebSocket upgrade: GET /chat/:id with Sec-WebSocket-Key */
+	if (!is_post && action[0] == '\0') {
+		char ws_key[ENV_VALUE_LEN] = {0};
+		if (axil_env_get(fd, ws_key, sizeof(ws_key), "HTTP_SEC_WEBSOCKET_KEY") == 0) {
+			/* WebSocket upgrade requested — register session for this fd */
+			if (g_ws_session_map) {
+				corm_put(g_ws_session_map, &fd, (void *)sess_id);
+			}
+			/* WebSocket upgrade */
+			if (axil_ws_upgrade(fd) < 0) {
+				axil_respond(fd, 400, "WebSocket upgrade failed");
+				return 1;
+			}
+			/* axil now routes frames through on_axil_parse */
+			return 0;
+		}
 	}
 
 	/* POST /chat/:id/delete */
@@ -734,10 +922,126 @@ static int chat_api_sessions_handler(int fd, char *body)
 	return 0;
 }
 
+/* Handler for WebSocket frames from chat clients */
+XY_IMPL(int, on_axil_parse, socket_t, fd, unsigned char *, input, int, nread)
+{
+	/* Check if this is a WebSocket connection we own (not HTTP) */
+	if (!(axil_flags(fd) & DF_WEBSOCKET))
+		return nread;  /* Not our WS, let HTTP routing handle it */
+
+	if (!input || nread <= 0)
+		return 0;
+
+	/* Try to parse as JSON command from client */
+	char *frame_str = strndup((const char *)input, nread);
+	if (!frame_str)
+		return 0;
+
+	struct json_object *cmd = json_tokener_parse(frame_str);
+	free(frame_str);
+
+	if (!cmd) {
+		/* Silently ignore malformed JSON on WebSocket */
+		return 0;
+	}
+
+	struct json_object *prompt_obj = NULL;
+	const char *prompt = NULL;
+	if (json_object_object_get_ex(cmd, "prompt", &prompt_obj)) {
+		prompt = json_object_get_string(prompt_obj);
+	}
+
+	if (!prompt || !prompt[0]) {
+		json_object_put(cmd);
+		return 0;
+	}
+
+	/* Find or create session for this WS fd */
+	char sess_id[CHAT_ID_MAX] = {0};
+	void *sess_id_ptr = corm_get(g_ws_session_map, &fd);
+	if (sess_id_ptr) {
+		strncpy(sess_id, (const char *)sess_id_ptr, CHAT_ID_MAX - 1);
+	}
+
+	if (!sess_id[0]) {
+		/* No session mapped to this WS yet — reject or create new */
+		json_object_put(cmd);
+		return 0;
+	}
+
+	/* Load or create session */
+	chat_session_t s;
+	if (chat_get_session(sess_id, &s) != 0) {
+		memset(&s, 0, sizeof(s));
+		strncpy(s.id, sess_id, sizeof(s.id) - 1);
+		strncpy(s.title, "WebSocket Conversation", sizeof(s.title) - 1);
+		strncpy(s.model, "olmoe", sizeof(s.model) - 1);
+		s.created_at = time(NULL);
+		s.updated_at = s.created_at;
+	}
+
+	/* Update title if first message */
+	if (s.msg_count == 0 || strcmp(s.title, "WebSocket Conversation") == 0) {
+		snprintf(s.title, sizeof(s.title), "%.*s", 32, prompt);
+	}
+
+	/* Append user message */
+	if (s.msg_count < CHAT_MAX_MESSAGES) {
+		chat_msg_t *um = &s.messages[s.msg_count++];
+		um->role = CHAT_ROLE_USER;
+		um->timestamp = time(NULL);
+		snprintf(um->content, sizeof(um->content), "%s", prompt);
+	}
+
+	/* Append assistant placeholder (empty, will be filled by streaming) */
+	if (s.msg_count < CHAT_MAX_MESSAGES) {
+		chat_msg_t *am = &s.messages[s.msg_count++];
+		am->role = CHAT_ROLE_ASSISTANT;
+		am->timestamp = time(NULL);
+		am->content[0] = '\0';
+	}
+
+	s.updated_at = time(NULL);
+	chat_save_session(&s);
+
+	json_object_put(cmd);
+
+	/* Send acknowledgment back to client */
+	struct json_object *ack = json_object_new_object();
+	json_object_object_add(ack, "status", json_object_new_string("processing"));
+	const char *ack_str = json_object_to_json_string_ext(ack, JSON_C_TO_STRING_PLAIN);
+	axil_ws_write(fd, (const void *)ack_str, strlen(ack_str));
+	json_object_put(ack);
+
+	/* Launch streaming worker */
+	typedef struct {
+		socket_t ws_fd;
+		char session_id[CHAT_ID_MAX];
+	} ws_worker_arg_t;
+
+	ws_worker_arg_t *warg = malloc(sizeof(*warg));
+	if (warg) {
+		warg->ws_fd = fd;
+		strncpy(warg->session_id, s.id, sizeof(warg->session_id) - 1);
+		/* Create streaming worker thread */
+		pthread_t tid;
+		if (pthread_create(&tid, NULL, ws_worker_thread, warg) == 0) {
+			pthread_detach(tid);
+		} else {
+			free(warg);
+		}
+	}
+
+	return 0;  /* Frame handled */
+}
+
 XY_MODULE_API void xy_install(void)
 {
 	xy_load("./mods/common/common");
 	ensure_storage_dir();
+
+	/* Initialize WebSocket session mapping (fd -> session_id) */
+	g_ws_session_map = corm_open(NULL, NULL, CM_U32, CM_STR, 0x1F, 0);
 
 	axil_register_handler("/chat", chat_route_handler);
 	axil_register_handler("/chat/*", chat_route_handler);
