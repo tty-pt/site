@@ -1,100 +1,83 @@
 # axil-resume-search
 
-A pure-C [Axil](https://github.com/tty-pt/axil) service module for PDF resume ingestion and semantic candidate-to-job matching.
-
-Upload PDF resumes, automatically extract clean text via `pdftotext` under the hood, persist the physical PDF file to disk, compute dense vector embeddings with `axil-auren` (port 4242), and semantically match and rank candidates against job opportunity descriptions with `libsepal` and `liblemma`.
+A high-performance pure-C [Axil](https://github.com/tty-pt/axil) service module for PDF resume ingestion, automatic text extraction via `pdftotext`, physical file storage, and semantic candidate-to-job matching powered by local neural embeddings (`axil-auren`), vector search (`libsepal`), and lexical indexing (`liblemma`).
 
 ---
 
-## Architecture
+## ⚡ 60-Second Quickstart
 
-- **HTTP & File Server**: Pure-C Axil daemon request dispatch via `axil_register_handler` and `axil_respond_file`.
-- **Intake Pipeline**: Multi-format ingestion supporting `multipart/form-data` (browser file uploads), raw binary `application/pdf`, and base64 JSON payloads.
-- **PDF Extraction**: Invokes `pdftotext -layout <file> -` under the hood via `popen()`, capturing full text into memory with error detection and validation.
-- **Persistent File Storage**: Stores physical PDF files in `uploads/resume_<ref>_<filename>.pdf` with path sanitization and directory creation.
-- **Vector Search Engine**: [libsepal](https://github.com/tty-pt/libsepal) two-stage ANN pipeline (Hamming sketch prefilter + exact cosine rerank).
-- **Lexical Search Engine**: [liblemma](https://github.com/tty-pt/liblemma) inverted index with accent-preserving token folding (`pão ≠ pao`).
-- **Metadata & Text Storage**: [libcorm](https://github.com/tty-pt/libcorm) persistent string maps storing candidate metadata (file path, file size, snippet, timestamp) and full extracted text.
-- **Embeddings Backend**: Interoperates with `axil-auren` (`http://127.0.0.1:4242/v1/embeddings`) using OpenAI-compatible JSON payloads (`bge-small` 384-dimensional or `bge-base` 768-dimensional dense vectors).
-
----
-
-## Prerequisites
-
-1. Ensure the `axil-auren` embedding daemon is running on port `4242`:
-   ```bash
-   curl -s http://127.0.0.1:4242/v1/embeddings \
-     -H "Content-Type: application/json" \
-     -d '{"model":"bge-small","input":"ping"}'
-   ```
-   *(Expected response contains: `"embedding": [...]`)*
-
-2. `pdftotext` CLI utility (part of `poppler-utils`):
-   ```bash
-   pdftotext -v
-   ```
-
-3. Runtime libraries: `libaxil.so`, `libxylem.so`, `libcorm.so`, `libsepal.so`, `liblemma.so`, `libjson-c.so`.
-
----
-
-## Build & Run
-
-### 1. Turnkey Launcher (Recommended)
-Launch the service directly (auto-builds if needed and runs on port 8092 by default):
+### 1. Launch the Server
 ```bash
 ./external/axil-resume-search/run.sh
 ```
-Or customize the port:
+*(Starts on `http://localhost:8092`. Auto-builds the `.so` module if needed).*
+
+### 2. Upload a Resume
 ```bash
-PORT=8095 ./external/axil-resume-search/run.sh
+curl -s -X POST http://localhost:8092/resume \
+  -F "file=@external/axil-resume-search/test_resumes/paulo_lead_frontend_systems_architect.pdf;type=application/pdf" | jq
 ```
 
-### 2. Manual Build & Run
-Compile the shared library:
+### 3. Match Candidates to a Job Opportunity
 ```bash
-make -C external/axil-resume-search
-```
-This produces `lib/libaxil-resume-search.so`.
-
-Run the Axil server with the module loaded:
-```bash
-axil -d -p 8092 -m /home/quirinpa/site/external/axil-resume-search/lib/libaxil-resume-search
+curl -s "http://localhost:8092/candidates?job=Lead+Frontend+Engineer+with+WASM+and+C+experience&mode=hybrid" | jq .candidates[0]
 ```
 
-### 3. Run the Test Suite & Semantic Evaluation
-Execute the unit tests and the 6-profile semantic evaluation:
-```bash
-make -C external/axil-resume-search test
-```
-Or run the semantic matching evaluation directly:
-```bash
-./external/axil-resume-search/eval_matches.sh
-```
-
-For complete documentation on the test candidate dataset, job opportunity prompts, and benchmark results, see [`TESTING.md`](TESTING.md).
+### 4. Open the Web Dashboard
+Open **`http://localhost:8092/`** in your browser to upload PDFs and search candidates visually.
 
 ---
 
-## REST Endpoints & `curl` Usage
+## 🌐 Interactive Web Dashboard
 
-### 1. Upload a PDF Resume (`POST /resume` or `POST /api/resume`)
+When running `run.sh`, navigate to **`http://localhost:8092/`** in any web browser:
 
-#### A. Multipart Form Upload (Standard Web / Form):
+1. **📤 Upload Resume (PDF)**:
+   - Click the file picker and select any PDF (e.g. from `test_resumes/` or your own PDF).
+   - Enter an optional Candidate Name (if omitted, the system extracts the name from the PDF text automatically).
+   - Click **Upload & Ingest Resume**. The engine extracts text via `pdftotext`, saves the physical file in `uploads/`, computes dense vectors via `axil-auren`, and displays success stats.
+2. **🎯 Match Job Opportunity**:
+   - Paste a natural language job description or requirements list into the textarea.
+   - Choose a matching mode: **Hybrid** (recommended), **Semantic (Sepal)**, or **Lexical (Lemma)**.
+   - Click **Find Matching Candidates**.
+3. **🏆 Matched Candidates**:
+   - Displays ranked candidate cards with similarity scores (e.g. `Score: 78.5%`), resume excerpt snippets, and direct buttons to **👁 View PDF** or **⬇ Download PDF**.
+
+---
+
+## 📡 REST API Reference
+
+| Method | Endpoint | Description | Content-Type | Parameters / Body |
+|---|---|---|---|---|
+| `POST` | `/resume` (or `/api/resume`, `/upload`) | Ingest PDF resume, extract text, embed & store | `multipart/form-data`, `application/pdf`, `application/json` | File binary or `file=@...`, optional `candidate`, `filename` |
+| `GET` | `/candidates` (or `/search`, `/api/candidates`) | Semantically match candidates to job opportunity | `application/json` | `?job=...` (or `?q=`), `?mode=hybrid\|sepal\|lemma`, `?k=10` |
+| `GET` | `/resume/file` | Stream / download original stored PDF file | `application/pdf` | `?ref=<id>` or `?path=<filepath>` |
+| `GET` | `/candidates/list` (or `/resumes`) | List all currently ingested candidate records | `application/json` | None |
+| `GET` | `/` (or `/ui`) | Interactive browser dashboard | `text/html` | None |
+
+---
+
+## 📥 Detailed API Endpoints & `curl` Usage
+
+### 1. Ingest a PDF Resume (`POST /resume`)
+
+Supports three upload formats:
+
+#### A. Standard Multipart Form Upload (`multipart/form-data`)
 ```bash
 curl -s -X POST http://localhost:8092/resume \
   -F "candidate=Alice Smith - Systems Engineer" \
   -F "file=@alice_resume.pdf;type=application/pdf"
 ```
 
-#### B. Raw Binary Upload:
+#### B. Direct Binary Stream (`application/pdf`)
 ```bash
 curl -s -X POST "http://localhost:8092/resume?candidate=Bob+Jones&filename=bob_resume.pdf" \
   -H "Content-Type: application/pdf" \
   --data-binary "@bob_resume.pdf"
 ```
 
-#### C. Base64 JSON Upload:
+#### C. Base64 JSON Payload (`application/json`)
 ```bash
 B64=$(base64 -w 0 resume.pdf)
 curl -s -X POST http://localhost:8092/resume \
@@ -102,40 +85,38 @@ curl -s -X POST http://localhost:8092/resume \
   -d "{\"candidate\":\"Carol White\",\"filename\":\"carol.pdf\",\"pdf_base64\":\"$B64\"}"
 ```
 
-#### Example Response:
+#### Successful JSON Response:
 ```json
 {
   "ok": true,
   "ref": 1,
-  "candidate": "Alice Smith - Systems Engineer",
-  "file_name": "alice_resume.pdf",
-  "file_path": "uploads/resume_1_alice_resume.pdf",
-  "file_size": 24510,
-  "text_len": 3412,
+  "candidate": "Paulo Quirino",
+  "file_name": "paulo_lead_frontend_systems_architect.pdf",
+  "file_path": "uploads/resume_1_paulo_lead_frontend_systems_architect.pdf",
+  "file_size": 9746,
+  "text_len": 4120,
   "dim": 384,
-  "snippet": "Alice Smith - Senior Systems Engineer. 10 years experience developing high-performance Linux network daemons in pure C...",
+  "snippet": "Paulo Quirino - Lead Frontend Engineer & Systems Architect...",
   "file_url": "/resume/file?ref=1"
 }
 ```
 
 ---
 
-### 2. Match Candidates to Job Opportunities (`GET /candidates` or `GET /search`)
-
-Search candidate resumes using a natural language job opportunity description.
+### 2. Search Candidates with a Job Opportunity (`GET /candidates`)
 
 ```bash
-curl -s "http://localhost:8092/candidates?job=Senior+C+systems+programmer+with+Linux+sockets+and+networking&mode=hybrid"
+curl -s "http://localhost:8092/candidates?job=Senior+C+systems+programmer+with+Linux+sockets+and+networking&mode=hybrid" | jq
 ```
 
 #### Query Parameters:
-- `job` or `q`: The job description or role requirements.
-- `mode`: Search mode:
-  - `sepal` (default): Pure semantic vector similarity.
-  - `hybrid`: Semantic vector similarity boosted by keyword overlap.
-  - `lemma`: Lexical keyword matching.
-- `k` or `limit`: Maximum candidates to return (default: 10).
-- `min_sim`: Minimum similarity threshold (default: 0.0).
+- `job` (or `q` / `opportunity`): Natural language job posting, responsibilities, or skills.
+- `mode`: Search algorithm:
+  - `hybrid` *(default / recommended)*: Vector cosine similarity + keyword match boost (+0.15).
+  - `sepal`: Pure dense vector cosine similarity.
+  - `lemma`: Strict lexical keyword matching.
+- `k` (or `limit`): Maximum candidate results to return (default: 10, max: 100).
+- `min_sim`: Minimum similarity score threshold (default: 0.0).
 
 #### Example Response:
 ```json
@@ -149,8 +130,8 @@ curl -s "http://localhost:8092/candidates?job=Senior+C+systems+programmer+with+L
       "ref": 1,
       "score": 0.8851,
       "candidate": "Alice Smith - Systems Engineer",
-      "file_name": "alice_resume.pdf",
-      "file_path": "uploads/resume_1_alice_resume.pdf",
+      "file_name": "alice_systems_engineer.pdf",
+      "file_path": "uploads/resume_1_alice_systems_engineer.pdf",
       "file_size": 24510,
       "snippet": "Alice Smith - Senior Systems Engineer Summary: 10 years experience developing high-performance Linux network daemons in pure C...",
       "file_url": "/resume/file?ref=1",
@@ -162,7 +143,25 @@ curl -s "http://localhost:8092/candidates?job=Senior+C+systems+programmer+with+L
 
 ---
 
-## Example Job Opportunities for Testing (Copy & Paste)
+### 3. Download or View Stored PDF (`GET /resume/file?ref=<id>`)
+
+Streams the physical PDF directly with `Content-Type: application/pdf`:
+```bash
+curl -O -J "http://localhost:8092/resume/file?ref=1"
+```
+
+---
+
+### 4. List All Candidates (`GET /candidates/list`)
+
+Returns all currently indexed candidate records:
+```bash
+curl -s http://localhost:8092/candidates/list | jq
+```
+
+---
+
+## 📋 Example Job Opportunities for Testing (Copy & Paste)
 
 These sample job postings are tuned to test semantic matching against the candidate resumes in `test_resumes/`. Paste any of them into the browser dashboard at `http://localhost:8092/` or use with `curl`:
 
@@ -209,26 +208,71 @@ These sample job postings are tuned to test semantic matching against the candid
 
 ---
 
-### 3. Download / View Original Stored PDF (`GET /resume/file?ref=<id>`)
+## ⚙️ Configuration & Environment Variables
 
-Stream the stored PDF file directly to the browser or client with `Content-Type: application/pdf`:
-```bash
-curl -O -J "http://localhost:8092/resume/file?ref=1"
+All settings can be overridden via shell environment variables:
+
+| Environment Variable | Default Value | Description |
+|---|---|---|
+| `PORT` | `8092` | HTTP listen port for the server |
+| `AUREN_EMBED_URL` | `http://127.0.0.1:4242/v1/embeddings` | URL of the `axil-auren` neural embedding endpoint |
+| `AUREN_EMBED_MODEL` | `bge-small` | Embedding model name (`bge-small` 384-d or `bge-base` 768-d) |
+| `RESUME_UPLOAD_DIR` | `uploads` | Directory on disk where physical PDF files are saved |
+| `RESUME_SEARCH_DB` | `NULL` (in-memory) | Optional persistent file path for Sepal vector store |
+
+---
+
+## 📁 Directory Structure & File Map
+
+```text
+external/axil-resume-search/
+├── run.sh                     # Turnkey launcher script (builds & starts on port 8092)
+├── test.sh                    # 10-test unit and API test suite
+├── eval_matches.sh            # Automated 6-profile semantic matching evaluation harness
+├── Makefile                   # Build rules (targets: all, test, eval, clean)
+├── objects-set.mk             # Compiler flags (-fPIC)
+├── README.md                  # This complete documentation guide
+├── TESTING.md                 # Detailed testing dataset and benchmark results
+├── test_prompts.json          # 6 curated job opportunity prompts with metadata
+├── include/ttypt/
+│   └── axil-resume-search.h   # C API header and state definitions
+├── src/
+│   └── libaxil-resume-search.c # Pure-C implementation (upload, pdftotext, sepal, UI)
+├── test_resumes/              # Canonical full 1-page A4 test resumes (styled after ~/cv)
+│   ├── paulo_lead_frontend_systems_architect.pdf
+│   ├── elena_rust_distributed_storage_engineer.pdf
+│   ├── marcus_ml_nlp_infra_engineer.pdf
+│   ├── sophia_lead_product_designer.pdf
+│   ├── david_devops_site_reliability_engineer.pdf
+│   └── clara_embedded_firmware_iot_engineer.pdf
+├── tests/
+│   └── generate_test_resumes.py # Re-usable Python generator for test PDFs
+└── uploads/                   # Runtime directory where uploaded PDFs are stored
 ```
 
 ---
 
-### 4. List All Ingested Candidates (`GET /candidates/list` or `GET /resumes`)
+## 🧪 Testing & Automated Evaluation
 
+### Run Full Test Suite
+Executes unit tests, error handling, upload formats, and the semantic evaluation harness:
 ```bash
-curl -s http://localhost:8092/candidates/list
+make -C external/axil-resume-search test
+```
+
+### Run Evaluation Benchmark Only
+Spawns an ephemeral Axil instance, uploads all 6 test resumes, queries all 6 job prompts, and verifies 100% top-rank accuracy:
+```bash
+./external/axil-resume-search/eval_matches.sh
 ```
 
 ---
 
-### 5. Interactive Browser UI (`GET /` and `GET /ui`)
+## 🏛️ Architecture & C Internals
 
-Open `http://localhost:8092/` in your browser for an interactive web dashboard:
-- **Resume Upload Card**: File picker / drag-and-drop for PDF resumes and candidate names.
-- **Job Opportunity Matcher**: Job description input with instant semantic and hybrid matching.
-- **Ranked Candidate Cards**: Live similarity percentages, snippets, and direct PDF view/download links.
+- **Event Loop & HTTP Dispatch**: Pure-C Axil daemon request dispatch via `axil_register_handler`. Zero external HTTP frameworks.
+- **Under-the-Hood Extraction**: Executes `pdftotext -layout <file> -` via `popen()`, reading stdout into a dynamically growing memory buffer with pipe status validation.
+- **Static File Streaming**: Uses `axil_respond_file(cfd, path, "pdf")` for streaming stored PDFs.
+- **Dense Vector Embeddings**: Calls `axil-auren` on port 4242 using `sepal_embed_fetch()`, writing dense float vectors into `libsepal` vector store.
+- **Lexical Indexing**: Uses `liblemma` to index full-text tokens with accent preservation (`pão ≠ pao`).
+- **Metadata Management**: Uses `libcorm` string key-value maps linking `ref` ID to candidate JSON records and extracted text.
