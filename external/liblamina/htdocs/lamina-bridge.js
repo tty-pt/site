@@ -106,9 +106,10 @@ export function createLaminaBridge(root, getWasm) {
 
 		if (!canvasEl) return;
 
-		// Try WebGL / WebGL2 context first
+		// Try WebGL / WebGL2 context first with preserveDrawingBuffer enabled
 		try {
-			gl = canvasEl.getContext('webgl2') || canvasEl.getContext('webgl');
+			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: true };
+			gl = canvasEl.getContext('webgl2', glOpts) || canvasEl.getContext('webgl', glOpts);
 			if (gl) {
 				glPipe = initGlPipeline(gl);
 			}
