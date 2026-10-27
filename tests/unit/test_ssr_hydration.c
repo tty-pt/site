@@ -227,25 +227,26 @@ int main(void)
 	assert(gov_rehydrated->layout_mode == ND_LAYOUT_STANDARD_HYBRID);
 	printf("PASS: presentation governance state rehydrated from JSON\n");
 
-	/* In an ALLOW_CHOICE region, Switch Viewport button must be rendered */
+	/* In an ALLOW_CHOICE region, the viewport is the unified terminal, no switch button */
 	html = bud_render_html(nd_ui_render(gov_rehydrated));
-	assert(html && strstr(html, "data-bud-action=\"cycle-viewport\""));
-	assert(strstr(html, "Switch Viewport"));
+	assert(html && !strstr(html, "data-bud-action=\"cycle-viewport\""));
+	assert(!strstr(html, "Switch Viewport"));
 	assert(strstr(html, "<nd-map id=\"room-map\""));
+	assert(strstr(html, "<canvas id=\"room-map-canvas\""));
 	assert(strstr(html, "id=\"right-panel\""));
 	bud_free_string(html);
-	printf("PASS: ALLOW_CHOICE region renders Switch Viewport button and ascii map\n");
+	printf("PASS: ALLOW_CHOICE region renders terminal stage and lamina room-map canvas (no switch button)\n");
 
-	/* In a LOCKED region, Switch Viewport button MUST NOT be rendered */
+	/* In a LOCKED region, Switch Viewport button is also NOT rendered */
 	gov.pres_flags = ND_REGION_LOCKED;
-	strncpy(gov.preferred_driver, "lamina-2d", sizeof(gov.preferred_driver) - 1);
+	strncpy(gov.preferred_driver, "tty", sizeof(gov.preferred_driver) - 1);
 	strncpy(gov.preferred_map_driver, "canvas-lamina", sizeof(gov.preferred_map_driver) - 1);
 	html = bud_render_html(nd_ui_render(&gov));
 	assert(html && !strstr(html, "Switch Viewport"));
 	assert(!strstr(html, "data-bud-action=\"cycle-viewport\""));
 	assert(strstr(html, "<canvas id=\"room-map-canvas\""));
 	bud_free_string(html);
-	printf("PASS: LOCKED region strictly omits Switch Viewport button and renders canvas-lamina map\n");
+	printf("PASS: LOCKED region strictly omits Switch Viewport button and renders room-map-canvas\n");
 
 	/* Test map driver 'none' */
 	strncpy(gov.preferred_map_driver, "none", sizeof(gov.preferred_map_driver) - 1);

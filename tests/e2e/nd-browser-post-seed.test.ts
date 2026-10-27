@@ -565,46 +565,56 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     }
 
     // =========================================================================
-    // STEP 7: Viewport Hardware Drivers Sequential Cycle
+    // STEP 7: Liblamina Room Map Render & Per-Location North Walk
     // =========================================================================
-    const cycleBtn = await page.waitForSelector('button[title="Switch Viewport"]', { timeout: 3000 });
+    // Verify that the old multi-system "Switch Viewport" button is gone
+    const oldCycleBtn = await page.$('button[title="Switch Viewport"]');
+    if (oldCycleBtn) {
+      throw new Error("Found obsolete 'Switch Viewport' button; multi-system button must be removed");
+    }
 
-    // Shared state: the HP gauge must read the same in every viewport
-    const hpText = async () =>
-      await page.$eval('[data-gauge="hp"]', (el) => (el.textContent || "").trim());
-    const hpTty = await hpText();
+    // Verify room map canvas is mounted
+    const mapCanvas = await page.waitForSelector("canvas#room-map-canvas", { timeout: 5000 });
+    if (!mapCanvas) throw new Error("canvas#room-map-canvas not mounted");
 
-    // Cycle 1: TTY -> 2D Lamina
-    await cycleBtn.click();
-    await page.waitForTimeout(500);
+    const getMapCanvasPixels = async () => {
+      return await page.evaluate(() => {
+        const canvas = document.querySelector("canvas#room-map-canvas") as HTMLCanvasElement;
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return { nonZero: 0, hash: "" };
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return { nonZero: 0, hash: "" };
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let nonZero = 0;
+        let sum = 0;
+        for (let i = 0; i < imgData.data.length; i += 4) {
+          if (imgData.data[i] > 0 || imgData.data[i + 1] > 0 || imgData.data[i + 2] > 0) {
+            nonZero++;
+            sum = (sum + imgData.data[i] + imgData.data[i+1]*3 + imgData.data[i+2]*7) % 1000000007;
+          }
+        }
+        return { nonZero, hash: `${nonZero}:${sum}` };
+      });
+    };
 
-    const canvas2d = await page.waitForSelector("canvas#viewport", { timeout: 5000 });
-    if (!canvas2d) throw new Error("canvas#viewport not mounted after switching to lamina-2d");
-    await page.waitForTimeout(500);
+    const initialPixels = await getMapCanvasPixels();
+    if (initialPixels.nonZero < 100) {
+      throw new Error(`Room map canvas has insufficient rendered pixels: ${initialPixels.nonZero}`);
+    }
 
-    const hasPixels = await page.evaluate(() => {
-      const canvas = document.querySelector("canvas#viewport") as HTMLCanvasElement;
-      if (!canvas || canvas.width === 0 || canvas.height === 0) return false;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return false;
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < imgData.data.length; i += 4) {
-        if (imgData.data[i] > 0 || imgData.data[i + 1] > 0 || imgData.data[i + 2] > 0) return true;
-      }
-      return false;
-    });
-    if (!hasPixels) throw new Error("Lamina 2D canvas is blank; room geometry not rendered");
+    // Walk north ('k') to navigate to the adjacent room
+    const northBtn = await page.waitForSelector('button[title*="North"]', { timeout: 3000 });
+    if (northBtn) {
+      await northBtn.click();
+    } else {
+      await page.keyboard.press("k");
+    }
+    await page.waitForTimeout(600);
 
-    // Cycle 2: 2D Lamina -> Bud DOM
-    await cycleBtn.click();
-    await page.waitForTimeout(500);
-    const budViewport = await page.waitForSelector("#bud-viewport", { timeout: 5000 });
-    if (!budViewport) throw new Error("#bud-viewport not mounted after switching to bud");
-
-    // Cycle 3: Bud DOM -> back to TTY
-    await cycleBtn.click();
-    await page.waitForSelector("#term", { timeout: 5000 });
-    if ((await hpText()) !== hpTty) throw new Error("HP gauge diverged after returning to TTY");
+    // After walking north, the map canvas should be redrawn for the new room
+    const afterWalkPixels = await getMapCanvasPixels();
+    if (afterWalkPixels.nonZero < 100) {
+      throw new Error("Room map canvas blank after moving north");
+    }
 
     console.log("ALL SEQUENTIAL CHECKS PASSED SUCCESSFULLY!");
   } finally {
