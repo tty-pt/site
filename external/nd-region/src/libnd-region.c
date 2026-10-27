@@ -643,7 +643,7 @@ XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
 	if (out_stage && stage_len > 0)
 		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
 	if (out_map && map_len > 0)
-		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "lamina");
 	if (out_layout)
 		*out_layout = res_layout;
 	if (out_flags)
@@ -664,7 +664,7 @@ XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
 		if (out_stage && stage_len > 0)
 			snprintf(out_stage, stage_len, "tty");
 		if (out_map && map_len > 0)
-			snprintf(out_map, map_len, "ascii-bud");
+			snprintf(out_map, map_len, "lamina");
 		if (out_layout)
 			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
 		if (out_flags)

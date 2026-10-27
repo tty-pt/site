@@ -1028,22 +1028,25 @@ do_driver(int fd, int argc, char *argv[])
 
 	if (strcmp(argv[1], "map") == 0) {
 		if (argc < 3 || !argv[2] || !*argv[2]) {
-			nd_printf(player_ref, "Usage: driver map <ascii|canvas|none> [region]\n");
+			nd_printf(player_ref, "Usage: driver map <lamina|classic|cyber|dungeon|none> [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
 		const char *mname = argv[2];
-		char map_drv[16] = "ascii-bud";
-		if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina"))
-			snprintf(map_drv, sizeof(map_drv), "canvas-lamina");
-		else if (!strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud"))
-			snprintf(map_drv, sizeof(map_drv), "ascii-bud");
+		char map_drv[16] = "lamina";
+		if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina") || !strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud") || !strcmp(mname, "lamina"))
+			snprintf(map_drv, sizeof(map_drv), "lamina");
+		else if (!strcmp(mname, "classic"))
+			snprintf(map_drv, sizeof(map_drv), "classic");
+		else if (!strcmp(mname, "cyber"))
+			snprintf(map_drv, sizeof(map_drv), "cyber");
+		else if (!strcmp(mname, "dungeon"))
+			snprintf(map_drv, sizeof(map_drv), "dungeon");
 		else if (!strcmp(mname, "none"))
 			snprintf(map_drv, sizeof(map_drv), "none");
 		else {
-			nd_printf(player_ref, "Unknown map driver (use ascii, canvas, or none)\n");
-			nd_flush(player_ref);
-			return;
+			/* Accept any custom theme name or map style string */
+			snprintf(map_drv, sizeof(map_drv), "%s", mname);
 		}
 
 		if (st_cmd_region(player_ref, argc, argv, 3, &id, &plen) != XY_OK) {
