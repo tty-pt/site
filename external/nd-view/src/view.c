@@ -491,8 +491,16 @@ eng_view(unsigned player_ref)
 			mt->symbol = '<';
 			mt->fg = 15;
 		} else if (flags & ND_MAP_FLAG_ROOM) {
-			mt->symbol = '.';
-			mt->fg = 7;
+			/* Check if empty tile callback produces plant/tree symbols */
+			sic_str_t ss = { .str = {0} };
+			ss = nd_evt_empty_tile(*vt, 1, ss);
+			if (ss.str[0] && ss.str[0] != ' ') {
+				mt->symbol = ss.str[0];
+				mt->fg = 10; /* Green tree / plant */
+			} else {
+				mt->symbol = '.';
+				mt->fg = 7;
+			}
 		} else {
 			mt->symbol = ' ';
 			mt->fg = 0;
