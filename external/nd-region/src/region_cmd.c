@@ -947,7 +947,8 @@ do_driver(int fd, int argc, char *argv[])
 		st_player_resolve_presentation(player_ref, stage, sizeof(stage),
 			map, sizeof(map), &layout, &flags);
 		const char *lstr = (layout == ND_LAYOUT_STAGE_FULLSCREEN) ? "fullscreen" :
-		                   (layout == ND_LAYOUT_STAGE_EXPANDED) ? "expanded" : "hybrid";
+		                   (layout == ND_LAYOUT_STAGE_EXPANDED) ? "expanded" :
+		                   (layout == ND_LAYOUT_GAME_2D) ? "game-2d" : "hybrid";
 		const char *fstr = (flags & ND_REGION_LOCKED) ? "locked" : "choice allowed";
 		nd_printf(player_ref, "Active presentation policy:\n"
 		                      "  Stage driver: %s (%s)\n"
@@ -1082,7 +1083,7 @@ do_driver(int fd, int argc, char *argv[])
 
 	if (strcmp(argv[1], "layout") == 0) {
 		if (argc < 3 || !argv[2] || !*argv[2]) {
-			nd_printf(player_ref, "Usage: driver layout <hybrid|expanded|fullscreen> [region]\n");
+			nd_printf(player_ref, "Usage: driver layout <hybrid|expanded|fullscreen|game-2d> [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
@@ -1094,8 +1095,10 @@ do_driver(int fd, int argc, char *argv[])
 			mode = ND_LAYOUT_STAGE_EXPANDED;
 		else if (!strcmp(lmode, "hybrid"))
 			mode = ND_LAYOUT_STANDARD_HYBRID;
+		else if (!strcmp(lmode, "game-2d") || !strcmp(lmode, "2d"))
+			mode = ND_LAYOUT_GAME_2D;
 		else {
-			nd_printf(player_ref, "Unknown layout mode (use hybrid, expanded, or fullscreen)\n");
+			nd_printf(player_ref, "Unknown layout mode (use hybrid, expanded, fullscreen, or game-2d)\n");
 			nd_flush(player_ref);
 			return;
 		}

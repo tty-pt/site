@@ -58,11 +58,69 @@ static bud_node *mount_tty(void)
 		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
 }
 
+nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS] = {0};
+size_t g_driver_count = 0;
+int g_active_driver_idx = 0;
+
+int nd_register_viewport_driver(const nd_viewport_driver_t *drv)
+{
+	if (!drv || !drv->id || g_driver_count >= ND_VIEWPORT_MAX_DRIVERS)
+		return -1;
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, drv->id) == 0) {
+			g_viewport_drivers[i] = *drv;
+			return (int)i;
+		}
+	}
+	int idx = (int)g_driver_count;
+	g_viewport_drivers[g_driver_count++] = *drv;
+	return idx;
+}
+
+const nd_viewport_driver_t *nd_get_active_viewport_driver(void)
+{
+	if (g_driver_count == 0) return NULL;
+	if (g_active_driver_idx >= 0 && (size_t)g_active_driver_idx < g_driver_count)
+		return &g_viewport_drivers[g_active_driver_idx];
+	return &g_viewport_drivers[0];
+}
+
+int nd_set_active_viewport_driver(const char *id)
+{
+	if (!id) return -1;
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, id) == 0) {
+			g_active_driver_idx = (int)i;
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
+int nd_viewport_driver_count(void)
+{
+	return (int)g_driver_count;
+}
+
+const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
+{
+	if (idx < 0 || (size_t)idx >= g_driver_count) return NULL;
+	return &g_viewport_drivers[idx];
+}
+
+static const nd_viewport_driver_t s_tty_driver = {
+	.id = "tty",
+	.label = "📺 Terminal",
+	.required_capability = "axil-tty",
+	.mount = mount_tty,
+};
+
 void nd_ui_init_defaults(void)
 {
 	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
 	nd_scene_init(&g_scene);
+	nd_register_viewport_driver(&s_tty_driver);
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -198,7 +256,18 @@ static int on_btn_action(bud_event *ev)
 
 static bud_node *render_viewport_slot(const nd_client_state_t *st)
 {
-	bud_node *vport = mount_tty();
+	const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
+	bud_node *vport = NULL;
+
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, req_drv) == 0 && g_viewport_drivers[i].mount) {
+			vport = g_viewport_drivers[i].mount();
+			break;
+		}
+	}
+	if (!vport) {
+		vport = mount_tty();
+	}
 
 	bud_node *overlay = nd_ui_glue_render_slot(ND_UI_SLOT_HUD_OVERLAYS, st);
 	if (overlay) {
@@ -476,13 +545,42 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	nd_ui_init_defaults();
 
 	bud_node *vport = render_viewport_slot(st);
+	bud_node *map = render_room_map(st);
+	bud_node *modals = render_modals_slot(st);
+
+	if (st && st->layout_mode == ND_LAYOUT_GAME_2D) {
+		/* Clean 2D Game Layout: render ONLY vport (game canvas) and map (minimap) */
+		bud_node *holder = bud_element("div");
+		bud_set_attr(holder, "id", "holder");
+		bud_set_attr(holder, "class", "nd game-2d-mode flex flex-row gap-4 p-3 min-h-0 h-full overflow-hidden justify-center items-center");
+		bud_append(holder, vport);
+		if (map)
+			bud_append(holder, map);
+
+		bud_node *main_box = bud_element("div");
+		bud_set_attr(main_box, "id", "main");
+		bud_set_attr(main_box, "class", "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100");
+		bud_append(main_box, holder);
+		bud_append(main_box, modals);
+
+		const char *user = (st && st->user[0]) ? st->user : client_state.user;
+		bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
+
+		bud_node *root = bud_tpl(
+			"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+			"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
+			layout);
+
+		bud_bind(root, "cmd", 1, on_cmd_action);
+		bud_bind(root, "keydown@window", 0, on_key_down);
+		return root;
+	}
+
 	bud_node *room_hdr = render_room_header(st);
 	bud_node *keypad = render_direction_keypad();
-	bud_node *map = render_room_map(st);
 	bud_node *contents = render_room_contents(st);
 	bud_node *gauges = render_gauges_slot(st);
 	bud_node *actions = render_action_bar(st);
-	bud_node *modals = render_modals_slot(st);
 	bud_node *target_card = render_target_card(st);
 
 	bud_node *cb = bud_element("div");
