@@ -162,7 +162,7 @@ done
 # no biome colours and no plants. Root-loaded modules still apply to every
 # nested planet. Order matters: biome before plant, attr/equip before fight.
 for mod in libnd-core libnd-vanilla libnd-other libnd-level libnd-shop \
-	libnd-attr libnd-equip libnd-fight libnd-spell libnd-race libnd-class \
+	libnd-attr libnd-mortal libnd-equip libnd-fight libnd-spell libnd-race libnd-class \
 	libnd-mob libnd-biome libnd-plant libnd-drink libnd-seat libnd-stone libnd-wts; do
 	cmd "loadmod $mod"
 done

@@ -288,6 +288,59 @@ Deno.test({
 });
 
 Deno.test({
+  name: "nd: status command returns valid character attributes and statistics",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const cookie = await sessionCookie();
+    const conn = await Deno.connect({ hostname: HOST, port: PORT });
+    const decoder = new TextDecoder();
+    try {
+      let buf = await upgrade(conn, cookie);
+
+      await conn.write(clientFrame("status\n"));
+
+      const texts: string[] = [];
+      const scratch = new Uint8Array(16384);
+      const until = Date.now() + 5000;
+      while (Date.now() < until && !texts.some((t) => t.includes("Class\t"))) {
+        const remain = until - Date.now();
+        const chunk = await readSomeDeadline(conn, scratch, remain, "status command response");
+        if (chunk === null) break;
+        buf = concat(buf, chunk);
+        const { frames, rest } = takeFrames(buf);
+        buf = rest;
+        for (const f of frames) {
+          if (f.opcode === 0x8) throw new Error("nd-ws: server closed the WS (close frame)");
+          if (f.opcode !== 0x1 && f.opcode !== 0x2) continue;
+          const text = decoder.decode(f.payload);
+          if (bcpIden(text) === null) texts.push(text);
+        }
+      }
+
+      const all = texts.join("\n");
+      if (!all.includes("Level\t1")) {
+        throw new Error(`nd-ws status: expected Level 1, got:\n${all}`);
+      }
+      if (!all.includes("Attr\t   (base) str")) {
+        throw new Error(`nd-ws status: expected Attr base str, got:\n${all}`);
+      }
+      if (!all.includes("Mortal\thp") || !all.includes("mhp   10")) {
+        throw new Error(`nd-ws status: expected Mortal hp/mhp 10, got:\n${all}`);
+      }
+      if (!all.includes("Race\t   human")) {
+        throw new Error(`nd-ws status: expected Race human, got:\n${all}`);
+      }
+      if (!all.includes("Class\t fighter")) {
+        throw new Error(`nd-ws status: expected Class fighter, got:\n${all}`);
+      }
+    } finally {
+      conn.close();
+    }
+  },
+});
+
+Deno.test({
   name: "nd: an unauthenticated /nd upgrade is told AUTH_FAILURE and closed, not left hanging",
   sanitizeResources: false,
   sanitizeOps: false,

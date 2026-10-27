@@ -8,6 +8,7 @@ PORT=${PORT:-8080}
 # runs. `make install-libs` publishes a rebuilt library there.
 
 . "$SCRIPT_DIR/scripts/nd-kernel-mods.sh"
+export LD_LIBRARY_PATH="$(nd_local_ld_path "$SCRIPT_DIR")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 mkdir -p "$SCRIPT_DIR/var/nd"
 export AXIL_ND_DB="${AXIL_ND_DB:-$SCRIPT_DIR/var/nd/universe.db}"
 export AXIL_ND_HTDOCS="${AXIL_ND_HTDOCS:-$SCRIPT_DIR/htdocs}"
