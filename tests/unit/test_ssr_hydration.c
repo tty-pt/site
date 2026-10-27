@@ -358,15 +358,19 @@ int main(void)
 		assert(html && strstr(html, "id=\"target-card\""));
 		assert(strstr(html, "/nd/art/entity/avatar/42.jpeg"));
 		assert(strstr(html, "quirinpa"));
-		assert(strstr(html, "(You - Inventory)"));
+		assert(strstr(html, "class=\"target-art\""));
+		assert(strstr(html, "class=\"target-title\""));
+		assert(strstr(html, "(You - Inventory)")); /* kept as the card's title tooltip */
 		assert(strstr(html, "stick"));
+		assert(!strstr(html, "Room Contents") && !strstr(html, "Inventory</"));
 		bud_free_string(html);
 
 		/* When target is 0 (room): target card is empty, contents shows tree in room */
 		inv_st.target_ref = 0;
 		html = bud_render_html(nd_ui_render(&inv_st));
 		assert(html && strstr(html, "pinus sylvestris"));
-		assert(strstr(html, "Room Contents"));
+		assert(!strstr(html, "Room Contents")); /* the original had no list label */
+		assert(strstr(html, "<nd-avatar"));       /* rows carry an avatar thumbnail */
 		bud_free_string(html);
 
 		/* Test BCP item decoding: room item (dynflags=1, type=0) clears target and sets room */

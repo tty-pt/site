@@ -73,6 +73,43 @@ try {
     .catch(() => fails.push("target card did not appear after inventory"));
   if (!(await vis("#target-card"))) fails.push("target card not visible when targeting");
   if (await vis("nd-map#room-map")) fails.push("map still visible together with the target card");
+  // Look-at image is roughly map-sized (not a chip, not a poster), titled by overlay.
+  const art = await page.evaluate(() => {
+    const r = (q) => { const e = document.querySelector(q); if (!e) return null; const b = e.getBoundingClientRect(); return { w: b.width, h: b.height }; };
+    return { art: r("#target-card .target-art"), title: !!document.querySelector("#target-card .target-title") };
+  });
+  if (!art.art || Math.abs(art.art.w - art.art.h) > 2) fails.push("target art is not square: " + JSON.stringify(art.art));
+  else if (art.art.w < 200 || art.art.w > 330) fails.push("target art is not map-sized: " + art.art.w);
+  if (!art.title) fails.push("target name not overlaid on the art");
+  await page.click("#target-card .target-close");
+  await page.waitForFunction(() => !document.querySelector("#target-card"), null, { timeout: 5000 })
+    .catch(() => fails.push("dismiss did not clear the target card"));
+  // Panel layout parity: centered global actions, unlabelled roomy contents rows.
+  const lay = await page.evaluate(() => {
+    const a = document.querySelector("#g-actions").getBoundingClientRect();
+    const p = document.querySelector("#g-actions").parentElement.getBoundingClientRect();
+    const m = document.querySelector("nd-map#room-map").getBoundingClientRect();
+    const c = document.querySelector("#contents");
+    const row = c.querySelector("nd-item");
+    const cs = row && getComputedStyle(row);
+    return {
+      offcenter: Math.abs((a.left + a.width / 2) - (p.left + p.width / 2)),
+      mapW: m.width,
+      label: /room contents|inventory/i.test(c.textContent),
+      avatar: !!(row && row.querySelector("nd-avatar")),
+      border: cs ? parseFloat(cs.borderBottomWidth) : 0,
+      radius: cs ? parseFloat(cs.borderTopLeftRadius) : 0,
+      cbottom: c.getBoundingClientRect().bottom,
+      abottom: a.top,
+    };
+  });
+  if (lay.offcenter > 4) fails.push("global actions not centered: off by " + lay.offcenter);
+  if (lay.label) fails.push("contents list still has a label");
+  if (!lay.avatar) fails.push("contents rows have no avatar");
+  if (lay.border > 0) fails.push("contents rows still have borders");
+  if (lay.radius < 6) fails.push("contents rows are not rounded");
+  if (lay.cbottom > lay.abottom) fails.push("contents list overlaps the action bar");
+  if (art.art && Math.abs(art.art.w - lay.mapW) > lay.mapW * 0.35) fails.push(`target art ${art.art.w} vs map ${lay.mapW} differ too much`);
   const small = await browser.newPage({ viewport: { width: 390, height: 800 } });
   await small.goto(url, { waitUntil: "domcontentloaded" });
   await small.waitForSelector("#directions", { state: "attached", timeout: 8000 });

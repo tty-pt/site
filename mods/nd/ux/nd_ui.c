@@ -356,21 +356,10 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 {
 	bud_node *wrap = bud_element("nd-contents");
 	bud_set_attr(wrap, "id", "contents");
-	bud_set_attr(wrap, "class", "nd-contents w-full min-h-0 overflow-y-auto max-h-36");
+	bud_set_attr(wrap, "class", "nd-contents w-full");
 
 	uint32_t active_loc = (st && st->target_ref) ? st->target_ref : (st ? st->room.ref : 0);
 	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
-
-	bud_node *sec_hdr = bud_element("div");
-	bud_set_attr(sec_hdr, "class", "text-[10px] font-mono text-neutral-400 uppercase tracking-wider px-1 py-0.5 border-b border-neutral-800 select-none flex items-center justify-between");
-	if (is_inventory) {
-		bud_append(sec_hdr, bud_text("📦 Inventory"));
-	} else if (st && st->target_ref) {
-		bud_append(sec_hdr, bud_text("Items"));
-	} else {
-		bud_append(sec_hdr, bud_text("Room Contents"));
-	}
-	bud_append(wrap, sec_hdr);
 
 	int any = 0;
 	if (st) {
@@ -392,24 +381,34 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			int is_selected = (st && st->selected_item_ref == e->ref);
 			char rcls[160];
 			snprintf(rcls, sizeof(rcls),
-				"flex items-center gap-2 p-1 border-b border-neutral-800 text-xs cursor-pointer select-none %s",
-				is_selected ? "ctb bg-neutral-800/80 border-[#9589c5]/60" : "hover:bg-neutral-900/60");
+				"nd-row cursor-pointer select-none %s",
+				is_selected ? "ctb" : "");
 			bud_set_attr(row, "class", rcls);
 			bud_bind(row, "click", 1, on_item_select);
 
-			/* ANSI Glyph */
-			char glyph[8] = {0};
-			snprintf(glyph, sizeof(glyph), "%c", e->ch ? e->ch : '?');
+			/* Avatar thumbnail: the colored glyph underneath, art image on
+			 * top, so a missing image still leaves the glyph visible. */
+			bud_node *av = bud_element("nd-avatar");
+			char glyph[2] = { e->ch ? e->ch : '?', '\0' };
+			char gclass[48];
+			snprintf(gclass, sizeof(gclass), "nd-glyph cf%u", e->fg < 8 ? e->fg + 8 : e->fg);
 			bud_node *g = bud_element("span");
-			char gclass[64];
-			snprintf(gclass, sizeof(gclass), "font-mono font-bold w-4 text-center select-none text-[%u]", e->fg);
 			bud_set_attr(g, "class", gclass);
 			bud_append(g, bud_text(glyph));
-			bud_append(row, g);
+			bud_append(av, g);
+			if (e->art[0]) {
+				char art_url[128];
+				snprintf(art_url, sizeof(art_url), "/nd/art/%s", e->art);
+				bud_node *img = bud_element("img");
+				bud_set_attr(img, "src", art_url);
+				bud_set_attr(img, "alt", "");
+				bud_append(av, img);
+			}
+			bud_append(row, av);
 
 			/* Name */
 			bud_node *name_span = bud_element("span");
-			bud_set_attr(name_span, "class", "grow truncate pointer-events-none");
+			bud_set_attr(name_span, "class", "nd-name grow pointer-events-none");
 			bud_append(name_span, bud_text(e->name));
 			bud_append(row, name_span);
 
@@ -463,7 +462,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 
 	if (!any) {
 		bud_node *empty = bud_element("div");
-		bud_set_attr(empty, "class", "text-neutral-500 text-xs px-2 py-1 italic select-none");
+		bud_set_attr(empty, "class", "nd-empty italic select-none");
 		bud_append(empty, bud_text(is_inventory ? "Inventory is empty." : "Nothing here."));
 		bud_append(wrap, empty);
 	}
@@ -489,54 +488,47 @@ static bud_node *render_target_card(const nd_client_state_t *st)
 
 	bud_node *card = bud_element("div");
 	bud_set_attr(card, "id", "target-card");
-	bud_set_attr(card, "class", "target-card p-2 rounded border border-neutral-700 bg-neutral-900/90 mb-2 flex items-center gap-2 text-xs w-full shadow-lg");
+	bud_set_attr(card, "class", "target-card");
+	char tip[96];
+	if (st && st->me && target->ref == st->me)
+		snprintf(tip, sizeof(tip), "%s #%u (You - Inventory)", target->name, target->ref);
+	else
+		snprintf(tip, sizeof(tip), "%s #%u", target->name, target->ref);
+	bud_set_attr(card, "title", tip);
 
-	/* Avatar image or glyph */
+	/* Map-sized square: art as full-cover background, name overlaid. */
+	bud_node *art = bud_element("div");
+	bud_set_attr(art, "class", "target-art");
+	bud_node *badge = bud_element("div");
+	char gclass[48];
+	snprintf(gclass, sizeof(gclass), "target-glyph cf%u", target->fg < 8 ? target->fg + 8 : target->fg);
+	bud_set_attr(badge, "class", gclass);
+	char ch_str[2] = { target->ch ? target->ch : '?', '\0' };
+	bud_append(badge, bud_text(ch_str));
+	bud_append(art, badge);
 	if (target->art[0]) {
 		char art_url[128];
 		snprintf(art_url, sizeof(art_url), "/nd/art/%s", target->art);
 		bud_node *img = bud_element("img");
 		bud_set_attr(img, "src", art_url);
-		bud_set_attr(img, "alt", target->name);
-		bud_set_attr(img, "class", "w-12 h-12 rounded object-cover border border-neutral-700/80 flex-shrink-0");
-		bud_append(card, img);
-	} else {
-		bud_node *badge = bud_element("div");
-		char gclass[192];
-		snprintf(gclass, sizeof(gclass), "w-12 h-12 rounded bg-neutral-800/80 border border-neutral-700/80 flex items-center justify-center font-mono font-bold text-lg text-[%u] flex-shrink-0", target->fg);
-		bud_set_attr(badge, "class", gclass);
-		char ch_str[2] = { target->ch ? target->ch : '?', '\0' };
-		bud_append(badge, bud_text(ch_str));
-		bud_append(card, badge);
+		bud_set_attr(img, "alt", "");
+		bud_append(art, img);
 	}
 
-	/* Target Details */
-	bud_node *info = bud_element("div");
-	bud_set_attr(info, "class", "flex flex-col flex-1 min-w-0");
 	bud_node *name_row = bud_element("div");
-	bud_set_attr(name_row, "class", "font-bold text-neutral-100 truncate");
+	bud_set_attr(name_row, "class", "target-title");
 	bud_append(name_row, bud_text(target->name));
-	bud_append(info, name_row);
+	bud_append(art, name_row);
 
-	bud_node *ref_row = bud_element("div");
-	bud_set_attr(ref_row, "class", "text-neutral-500 font-mono text-[10px]");
-	char ref_text[48];
-	if (st && st->me && target->ref == st->me)
-		snprintf(ref_text, sizeof(ref_text), "#%u (You - Inventory)", target->ref);
-	else
-		snprintf(ref_text, sizeof(ref_text), "#%u", target->ref);
-	bud_append(ref_row, bud_text(ref_text));
-	bud_append(info, ref_row);
-	bud_append(card, info);
-
-	/* Dismiss Button */
 	bud_node *close_btn = bud_element("button");
 	bud_set_attr(close_btn, "type", "button");
-	bud_set_attr(close_btn, "class", "text-neutral-400 hover:text-neutral-200 text-sm px-1.5 py-0.5 rounded hover:bg-neutral-800/80 select-none flex-shrink-0");
+	bud_set_attr(close_btn, "class", "target-close");
 	bud_set_attr(close_btn, "title", "Clear Target");
 	bud_append(close_btn, bud_text("✕"));
 	bud_bind(close_btn, "click", 1, on_dismiss_target);
-	bud_append(card, close_btn);
+	bud_append(art, close_btn);
+
+	bud_append(card, art);
 
 	return card;
 }

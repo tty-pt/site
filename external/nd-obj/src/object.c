@@ -257,9 +257,13 @@ eng_object_art(unsigned thing_ref)
 	default:
 		 /* "room" is id 1 in the transient type_hd — the host seeds it
 		  * first, before any module loads. See world.c. */
-		 const void *__v2 = corm_get(nd_table_handle(HD_RTYPE), &thing.type);
-		 if (__v2)
-			 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
+		 /* HD_TYPE maps id -> name (HD_RTYPE is the name -> id index), and
+		  * its key is a u32 while OBJ.type is a single byte. */
+		 unsigned type_key = thing.type;
+		 const void *__v2 = corm_get(nd_table_handle(HD_TYPE), &type_key);
+		 if (!__v2)
+			 return void_art;
+		 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
 		 type = typestr; break;
 	}
 
