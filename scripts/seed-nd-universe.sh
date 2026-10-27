@@ -235,26 +235,18 @@ cmd "drop Leather Tunic"
 cmd "create Iron Helm"
 cmd "drop Iron Helm"
 
-# Map presentation is chosen by LOCATION. World 0 holds the root spawn (woodland,
-# (0,0,0,0)): its baseline is the ASCII map, and the room north of the spawn renders
-# with the Lamina canvas map.
+# Map presentation is chosen by LOCATION using regional programming.
+# World 0 holds the root spawn (woodland, (0,0,0,0)): its baseline (region 16)
+# is the ASCII map, and the entire northern half (region 18 0 1 0 0, all cells
+# with y >= 1 from the starting position upwards) renders with the Lamina canvas map.
 cmd "region 16 world 0"
 cmd "driver map ascii-bud 16 world 0"
 
-# Northern room (-1, 0, 0, 0) renders with lamina canvas map
-cmd "room -1 0 0 0"
-cmd "region 64 here"
-cmd "driver map lamina 64 here"
-
-# Southern room (1, 0, 0, 0) explicitly stays ascii-bud
-cmd "room 1 0 0 0"
-cmd "region 64 here"
-cmd "driver map ascii-bud 64 here"
+cmd "region 18 0 1 0 0"
+cmd "driver map lamina 18 0 1 0 0"
 
 # Seed spawn room at (0, 0, 0, 0) with initial ground item fixtures
 cmd "room 0 0 0 0"
-cmd "region 64 here"
-cmd "driver map ascii-bud 64 here"
 cmd "create Steel Broadsword"
 cmd "drop Steel Broadsword"
 cmd "create Leather Tunic"
@@ -269,12 +261,9 @@ cmd "driver stage choice 16 world 1"
 cmd "driver map ascii-bud 16 world 1"
 cmd "driver layout hybrid 16 world 1"
 
-# Specific rooms / northern half of planet 1: Room (-1, 0, 0, 1) and (-2, 0, 0, 1)
-# When the player is in or walks north into these rooms, map renders with lamina!
-cmd "room -1 0 0 1"
-cmd "driver map lamina 64 here"
-cmd "room -2 0 0 1"
-cmd "driver map lamina 64 here"
+# Northern half of planet 1: regional programming with lamina map!
+cmd "region 18 0 1 0 1"
+cmd "driver map lamina 18 0 1 0 1"
 
 # Return player to Central Spawn Hall
 cmd "room 0 0 0 1"
@@ -295,20 +284,20 @@ if [ "$NUM_PLANETS" -ge 2 ]; then
 	cmd "create Floating Prism Relic"
 	cmd "drop Floating Prism Relic"
 
-	# Room 2: The Observatory Terrace at (0, 1, 0, 2) (East exit)
-	cmd "room 0 1 0 2"
+	# Room 2: The Observatory Terrace at (1, 0, 0, 2) (East exit)
+	cmd "room 1 0 0 2"
 	cmd "name The Observatory Terrace"
 	cmd "create Star Tracker"
 	cmd "drop Star Tracker"
 
-	# Room 3: The Luminescent Spire at (-1, 0, 0, 2) (North exit)
-	cmd "room -1 0 0 2"
+	# Room 3: The Luminescent Spire at (0, 1, 0, 2) (North exit)
+	cmd "room 0 1 0 2"
 	cmd "name The Luminescent Spire"
 	cmd "create Sun Prism"
 	cmd "drop Sun Prism"
 
-	# Room 4: The Shadow Vault at (1, 0, 0, 2) (South exit)
-	cmd "room 1 0 0 2"
+	# Room 4: The Shadow Vault at (0, -1, 0, 2) (South exit)
+	cmd "room 0 -1 0 2"
 	cmd "name The Shadow Vault"
 	cmd "create Obsidian Sentinel"
 	cmd "drop Obsidian Sentinel"
@@ -317,9 +306,9 @@ fi
 # Ask the server which map driver each place resolves to: the room north of the
 # spawn must be Lamina; the spawn and the room south of it must be the ASCII map.
 # (`driver` with no argument prints the policy for the admin's current location.)
-cmd "room -1 0 0 0"
+cmd "room 0 1 0 0"
 cmd "driver"
-cmd "room 1 0 0 0"
+cmd "room 0 -1 0 0"
 cmd "driver"
 cmd "room 0 0 0 0"
 cmd "driver"

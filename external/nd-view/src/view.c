@@ -479,13 +479,17 @@ eng_view(unsigned player_ref)
 	map_search(o, pos, VIEW_AROUND);
 	memset(view, 0, sizeof(view));
 
-	for (; n_p < n_max;) {
-		_view_build(n_p, o_p, p, pos);
-		p += VIEW_SIZE;
-		o_p += VIEW_SIZE;
-		n_p += VIEW_SIZE;
-		pos[0]++;
-		pos[1] = opos[1];
+	for (int row = 0; row < VIEW_SIZE; row++) {
+		for (int col = 0; col < VIEW_SIZE; col++) {
+			int i = row * VIEW_SIZE + col;
+			pos_t p = {
+				opos[0] - VIEW_AROUND + col,
+				opos[1] + VIEW_AROUND - row,
+				opos[2],
+				opos[3]
+			};
+			view_build_tile(&bd[i], o[i], &view[i], p);
+		}
 	}
 
 	char *view_buf = view_draw(view);

@@ -147,21 +147,16 @@ view_idx(point_t pos)
 static inline void
 view_print(struct bio *to, point_t pos)
 {
-	point_t vprs = {
-		pos[0] - VIEW_AROUND,
-		pos[1] - VIEW_AROUND,
-	};
-	register struct bio
-		*bo = bio + view_idx(vprs),
-		*bd = to;
-	register int y, x;
-	ucoord_t ol;
-
-	ol = chunks_r.l[WDIM];
-
-	for (y = 0; y < VIEW_SIZE; y++, bo += ol - VIEW_SIZE)
-		for (x = 0; x < VIEW_SIZE; x++, bd++, bo++)
-			*bd = *bo;
+	register int row, col;
+	for (row = 0; row < VIEW_SIZE; row++) {
+		for (col = 0; col < VIEW_SIZE; col++) {
+			point_t p = {
+				pos[0] - VIEW_AROUND + col,
+				pos[1] + VIEW_AROUND - row,
+			};
+			to[row * VIEW_SIZE + col] = bio[view_idx(p)];
+		}
+	}
 }
 
 static inline void __attribute__((hot))

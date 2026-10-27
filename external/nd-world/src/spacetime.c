@@ -101,25 +101,25 @@ exit_t exit_map[] = {
 		.simm = E_WEST,
 		.name = "east",
 		.other = "wnsud",
-		.dim = 1, .dis = 1,
+		.dim = 0, .dis = 1,
 	},
 	[E_SOUTH] = {
 		.simm = E_NORTH,
 		.name = "south",
 		.other = "ewudn",
-		.dim = 0, .dis = 1,
+		.dim = 1, .dis = -1,
 	},
 	[E_WEST] = {
 		.simm = E_EAST,
 		.name = "west",
 		.other = "nsude",
-		.dim = 1, .dis = -1,
+		.dim = 0, .dis = -1,
 	}, 
 	[E_NORTH] = {
 		.simm = E_SOUTH,
 		.name = "north",
 		.other = "sewud",
-		.dim = 0, .dis = -1,
+		.dim = 1, .dis = 1,
 	},
 	[E_UP] = {
 		.simm = E_DOWN,
@@ -265,13 +265,19 @@ e_other(enum exit e) {
 morton_t
 point_rel_idx(point_t p, point_t s, smorton_t w)
 {
-	smorton_t s0 = s[Y_COORD],
-		s1 = s[X_COORD];
-	if (s0 > p[Y_COORD])
-		s0 -= UCOORD_MAX;
-	if (s1 > p[X_COORD])
-		s1 -= UCOORD_MAX;
-	return (p[Y_COORD] - s0) * w + (p[X_COORD] - s1);
+	smorton_t sx = s[0];
+	smorton_t sy = s[1];
+	if (sx > p[0])
+		sx -= UCOORD_MAX;
+	if (sy > p[1])
+		sy -= UCOORD_MAX;
+	smorton_t col = p[0] - sx;
+	smorton_t row = (sy + w - 1) - p[1];
+	if (col < 0) col = 0;
+	if (col >= w) col = w - 1;
+	if (row < 0) row = 0;
+	if (row >= w) row = w - 1;
+	return row * w + col;
 }
 
 void
