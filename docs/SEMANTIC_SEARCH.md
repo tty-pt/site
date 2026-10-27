@@ -268,3 +268,23 @@ PORT=8090 ./external/axil-embed-search/run.sh
 - **`GET /search` (and `/api/search`)**: Query stored documents with semantic similarity (`mode=sepal`), lexical prefix matching (`mode=lemma`), or hybrid ranking (`mode=hybrid`).
 
 For complete documentation, curl cheat sheets, and JSON schemas, see [`external/axil-embed-search/README.md`](../external/axil-embed-search/README.md).
+
+---
+
+## 7. PDF Resume Ingestion & Job Opportunity Search: axil-resume-search Module
+
+For PDF document ingestion and job candidate semantic matching, use the `axil-resume-search` module located at `external/axil-resume-search`.
+
+### Build & Run
+```bash
+./external/axil-resume-search/run.sh
+```
+
+### Endpoints
+- **`GET /` or `GET /ui`**: Interactive web UI for uploading resumes, entering job opportunities, and viewing ranked candidate matches with PDF download links.
+- **`POST /resume` (and `/api/resume`)**: Upload a PDF resume (`multipart/form-data`, raw binary, or base64 JSON). The module saves the PDF to disk (`uploads/`), invokes `pdftotext` under the hood to extract text, generates embeddings via `axil-auren`, and stores vectors in `libsepal` and metadata in `libcorm`.
+- **`GET /candidates` (and `/search`)**: Search and rank candidates by passing a job opportunity description query (`job="Senior C developer..."`). Supports semantic (`mode=sepal`), lexical (`mode=lemma`), and hybrid ranking (`mode=hybrid`).
+- **`GET /resume/file?ref=<id>`**: Stream and download the stored PDF resume with `Content-Type: application/pdf`.
+- **`GET /candidates/list`**: List all currently ingested candidate records.
+
+For complete documentation and curl examples, see [`external/axil-resume-search/README.md`](../external/axil-resume-search/README.md).

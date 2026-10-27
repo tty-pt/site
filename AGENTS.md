@@ -149,6 +149,20 @@ make -C external/axil-embed-search test
 
 Full documentation and curl examples in `external/axil-embed-search/README.md`.
 
+## axil-resume-search (PDF resume ingestion & job semantic search HTTP service) — build, run & test
+
+Pure-C Axil service module providing `POST /resume` (PDF upload via multipart/raw/JSON, `pdftotext` extraction, file persistence in `uploads/`, vector generation via `axil-auren` on port 4242, persistent vector storage in `libsepal`, lexical indexing in `liblemma`, metadata in `libcorm`), `GET /candidates` (candidate semantic and hybrid matching against job opportunity descriptions), `GET /resume/file` (PDF file download), and an interactive browser UI form at `GET /`.
+
+```sh
+# Turnkey launcher (runs on :8092 by default):
+./external/axil-resume-search/run.sh
+
+# Run end-to-end integration test suite:
+make -C external/axil-resume-search test
+```
+
+Full documentation and curl examples in `external/axil-resume-search/README.md`.
+
 ## Topic index
 
 | Topic | Read |
@@ -170,3 +184,4 @@ Full documentation and curl examples in `external/axil-embed-search/README.md`.
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
 | Axil embedding & hybrid search HTTP service (`axil-embed-search`) | `external/axil-embed-search/README.md` |
+| Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |

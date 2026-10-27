@@ -1,0 +1,464 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 7095 >>
+stream
+BT
+0.090 0.149 0.235 rg
+/F2 18 Tf
+42.00 812.00 Td
+(Elena Rostova) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F2 10 Tf
+42.00 797.50 Td
+(Senior Distributed Systems & Storage Engine Engineer) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 8.5 Tf
+42.00 786.00 Td
+(Specialist in Asynchronous Rust, Raft Consensus, LSM-Tree Internals & io_uring) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.8 Tf
+42.00 775.00 Td
+(Stockholm, Sweden   |   +46 8 555 3120   |   elena.rostova@bytescale.io   |   github.com/erostova) Tj
+ET
+0.051 0.580 0.533 RG
+1.20 w
+42.00 769.00 m 553.28 769.00 l S
+0.922 0.957 0.953 rg
+0.051 0.580 0.533 RG
+0.60 w
+42.00 711.60 511.28 47.40 re B
+BT
+0.090 0.149 0.235 rg
+/F2 8.5 Tf
+51.00 749.00 Td
+(PROFILE) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 739.00 Td
+(Distributed systems engineer with 8+ years specializing in high-throughput transactional storage engines, write-ahead) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 729.20 Td
+(logging \(WAL\), and LSM-tree architectures. Deep expertise in asynchronous Rust \(Tokio\), Raft consensus protocols, lock-free) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 719.40 Td
+(concurrency, and zero-copy Linux asynchronous I/O using io_uring.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+42.00 699.60 Td
+(EXPERIENCE) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+42.00 697.10 m 324.00 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 687.60 Td
+(Principal Storage Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 687.60 Td
+(03/2021 - Present) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 678.40 Td
+(ByteScale Systems   -   Stockholm) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 669.20 Td
+(Architected distributed key-value storage engine in Rust with multi-Raft) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 660.40 Td
+(partition groups. Integrated Linux io_uring for non-blocking disk writes,) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 651.60 Td
+(sustaining 2.5 million sustained IOPS per storage node with p99 tail latency) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 642.80 Td
+(under 0.8ms.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 634.00 Td
+(Stack: Rust, Tokio, io_uring, Raft, RocksDB, gRPC, Protobuf, eBPF) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 620.50 Td
+(Senior Distributed Systems Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 620.50 Td
+(06/2018 - 02/2021) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 611.30 Td
+(CloudData Labs   -   Stockholm) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 602.10 Td
+(Engineered multi-group Raft partition coordinator for distributed database.) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 593.30 Td
+(Optimized LSM compaction pipelines and block cache eviction policies,) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 584.50 Td
+(reducing write amplification factor from 18x to 5.2x.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 575.70 Td
+(Stack: Rust, C++, LSM-Trees, Write-Ahead Logging, Paxos, Zookeeper) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 562.20 Td
+(Systems Programmer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 562.20 Td
+(09/2016 - 05/2018) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 553.00 Td
+(Nordic Infrastructure   -   Gothenburg) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 543.80 Td
+(Authored high-performance network file storage servers in C and Rust with) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 535.00 Td
+(custom slab memory allocators and zero-copy sendfile transfers.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 526.20 Td
+(Stack: C99, Rust, POSIX Sockets, Epoll, Linux Kernel, GDB) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 512.70 Td
+(Database Intern) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 512.70 Td
+(06/2015 - 08/2016) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 503.50 Td
+(Ericsson Research   -   Kista) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 494.30 Td
+(Benchmarked lock-free B-tree concurrent indexing algorithms under high write) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 485.50 Td
+(contention workloads in C++.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 476.70 Td
+(Stack: C++, Multithreading, Atomics, Valgrind, Perf) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 699.60 Td
+(CORE SKILLS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 697.10 m 553.28 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 687.60 Td
+(Distributed Systems) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 678.10 Td
+([Raft Consensus] [Paxos] [Multi-Raft]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 669.90 Td
+([Distributed Locking] [Failure Detectors]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 661.70 Td
+([Split-Brain Prevention]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 651.70 Td
+(Storage & Linux I/O) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 642.20 Td
+([LSM-Trees] [Write-Ahead Logging] [io_uring]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 634.00 Td
+([Direct I/O] [mmap] [eBPF] [RocksDB] [SSTables]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 624.00 Td
+(Languages & Frameworks) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 614.50 Td
+([Rust] [Tokio] [C \(C99\)] [C++17/20] [gRPC]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 606.30 Td
+([Protobuf] [Flamegraphs]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 596.30 Td
+(Databases & Tooling) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 586.80 Td
+([PostgreSQL] [Redis] [DuckDB] [Linux Kernel]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 578.60 Td
+([Docker] [Cargo] [GDB] [Perf]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 564.60 Td
+(SYSTEMS ARCHITECTURE & PROJECTS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 562.10 m 553.28 562.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 552.60 Td
+(raft-rs Distributed Consensus) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 544.10 Td
+(Pure-Rust implementation of Raft with pipelined leader append) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 536.10 Td
+(entries and dynamic cluster membership.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 524.60 Td
+(lsm-uring Storage Engine) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 516.10 Td
+(Embedded LSM-tree database engine utilizing io_uring) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 508.10 Td
+(submission queues for NVMe direct I/O.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 492.60 Td
+(EDUCATION) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 490.10 m 553.28 490.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 480.60 Td
+(M.Sc. Distributed Computing) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.2 Tf
+338.00 472.10 Td
+(KTH Royal Institute of Technology) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 459.60 Td
+(LANGUAGES) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 457.10 m 553.28 457.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 447.60 Td
+(Swedish) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 447.60 Td
+(Native) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 439.10 Td
+(English) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 439.10 Td
+(Fluent / C2) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 430.60 Td
+(German) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 430.60 Td
+(Professional) Tj
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000267 00000 n 
+0000007414 00000 n 
+0000007484 00000 n 
+0000007559 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+7637
+%%EOF
