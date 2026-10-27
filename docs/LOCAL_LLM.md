@@ -22,11 +22,19 @@ LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 axil -A -d -p 4242 -m /home/quirinpa/axil-auren/lib/libaxil-auren
 ```
 
-### Models & Sizing
+### Models & Hardware Scaling Tiers
+
+| Tier | Hardware Target | Chat / Judge Model | Embeddings Model | Total RAM | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: Ultra-Lightweight** | <4 GB RAM / Shared VPS | `qwen2.5-0.5b-instruct.gguf` (398 MB) | `bge-small-en-v1.5.gguf` (37 MB, 384-d) | ~500 MB | Sub-second CPU latency on any machine. |
+| **Tier 2: Balanced MoE (Default)** | 8–16 GB RAM / Standard Laptop | `olmoe-1b-7b-instruct-q3_k_m.gguf` (3.34 GB) | `bge-base-en-v1.5.gguf` (118 MB, 768-d) | ~3.8 GB | **Recommended Default**: 7B reasoning with 1.3B active compute speed. |
+| **Tier 3: Aiming Higher / High-Fidelity** | 16–32 GB+ RAM or Dedicated GPU | `qwen2.5-7b-instruct-q4_k_m.gguf` (~4.7 GB) or `14B` | `bge-large-en-v1.5.gguf` (330 MB, 1024-d) | ~6–12 GB | Maximum reasoning nuance; best paired with GPU acceleration (`n_gpu_layers`). |
+
 Models are stored in `~/.models/`:
-- **Generative Chat & System One**: `~/.models/qwen2.5-0.5b-instruct.gguf` (398 MB, Q4_K_M)
+- **Default MoE Generative Chat & Judge**: `~/.models/olmoe-1b-7b-instruct-q3_k_m.gguf` (3.34 GB, Q3_K_M, 64 experts with 8 active, ~1.3B active compute, 7B reasoning)
+- **Ultra-Lightweight Chat & Judge**: `~/.models/qwen2.5-0.5b-instruct.gguf` (398 MB, Q4_K_M)
+- **Dense Vector Embeddings (More Accurate, Default)**: `~/.models/bge-base-en-v1.5.gguf` (118 MB, Q8_0, 768-dimensional)
 - **Dense Vector Embeddings (Fast & Lightweight)**: `~/.models/bge-small-en-v1.5.gguf` (37 MB, Q8_0, 384-dimensional)
-- **Dense Vector Embeddings (More Accurate)**: `~/.models/bge-base-en-v1.5.gguf` (118 MB, Q8_0, 768-dimensional)
 
 ---
 
@@ -38,10 +46,26 @@ The active multi-model configuration lives in `/home/quirinpa/auren.json` (and `
 {
   "models": [
     {
+      "id": "olmoe",
+      "path": "~/.models/olmoe-1b-7b-instruct-q3_k_m.gguf",
+      "capabilities": ["chat", "judge"],
+      "n_ctx": 4096,
+      "n_gpu_layers": 0,
+      "temperature": 0.7
+    },
+    {
       "id": "qwen",
       "path": "~/.models/qwen2.5-0.5b-instruct.gguf",
       "capabilities": ["chat", "judge"],
       "n_ctx": 131072,
+      "n_gpu_layers": 0,
+      "temperature": 0.7
+    },
+    {
+      "id": "bge-base",
+      "path": "~/.models/bge-base-en-v1.5.gguf",
+      "capabilities": ["embed"],
+      "n_ctx": 512,
       "n_gpu_layers": 0
     },
     {
@@ -50,19 +74,12 @@ The active multi-model configuration lives in `/home/quirinpa/auren.json` (and `
       "capabilities": ["embed"],
       "n_ctx": 512,
       "n_gpu_layers": 0
-    },
-    {
-      "id": "bge-base",
-      "path": "~/.models/bge-base-en-v1.5.gguf",
-      "capabilities": ["embed"],
-      "n_ctx": 512,
-      "n_gpu_layers": 0
     }
   ],
   "defaults": {
-    "chat": "qwen",
-    "judge": "qwen",
-    "embed": "bge-small"
+    "chat": "olmoe",
+    "judge": "olmoe",
+    "embed": "bge-base"
   },
   "max_resident": 3
 }
@@ -89,6 +106,23 @@ The `auren` provider definition:
       "api": "openai-completions",
       "apiKey": "local",
       "models": [
+        {
+          "id": "olmoe",
+          "name": "OLMoE 1B-7B Instruct (Sparse MoE)",
+          "contextWindow": 4096,
+          "maxTokens": 2048,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsUsageInStreaming": false,
+            "maxTokensField": "max_tokens"
+          }
+        },
         {
           "id": "qwen",
           "name": "Qwen 2.5 0.5B Instruct",
