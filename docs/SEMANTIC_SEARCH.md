@@ -1,6 +1,6 @@
 # Semantic & Hybrid Search: Complete Guide
 
-This guide explains how semantic and hybrid search work in this pure-C stack, and how to use them either via **base command-line tools** (`corm`, `libsepal`, `liblemma`, `axil-auren`) or via **turnkey HTTP services** (`axil-embed-search` for text prompts, and `axil-resume-search` for PDF documents).
+This guide explains how semantic and hybrid search work in this pure-C stack, and how to use them either via **base command-line tools** (`corm`, `libsepal`, `liblemma`, `axil-auren`), via **persistent multi-tenant collections** (`/v1/collections/*` in `axil-auren`), or via **turnkey HTTP services** (`axil-resume-search` for PDF documents).
 
 ---
 
@@ -81,7 +81,7 @@ The search pipeline consists of four pure-C layers:
 | Need | Recommended Tool | Interface |
 |---|---|---|
 | Shell scripts, batch pipelines, direct file indexing | **Base CLI Tools (`corm`)** | Command-line (`corm -p`, `corm -X`) |
-| Web API or browser UI for text queries, prompts, FAQs | **`axil-embed-search`** | REST (`POST /embeddings`, `GET /search`) + UI on `:8090` |
+| Multi-tenant collections, raw text docs, and persistent vector search | **Axil-Auren Collections** | REST (`/v1/collections/{name}/...`) on `:4242` |
 | PDF document intake, resume parsing, job candidate matching | **`axil-resume-search`** | REST (`POST /resume`, `GET /candidates`) + UI on `:8092` |
 | Custom daemon or embedded application in C | **C API (`sepal.h`, `lemma.h`, `corm.h`)** | Pure C library functions |
 
@@ -169,34 +169,25 @@ Output:
 
 ---
 
-## 6. Approach B: HTTP Service Modules
+## 6. Approach B: Multi-Tenant Collections & Resume Search
 
-For web applications, browser dashboards, or microservices, use the pre-built Axil modules.
+For persistent web APIs and document services, use `axil-auren`'s native collections or the `axil-resume-search` module.
 
-### 1. `axil-embed-search` (Text Prompts & Knowledge Base)
+### 1. `axil-auren` Multi-Tenant Collections (`/v1/collections/*`)
 
-Located in `external/axil-embed-search/`. Ideal for raw text, documentation search, and chat prompt retrieval.
-
-#### Run the Service
-```bash
-./external/axil-embed-search/run.sh
-```
-*Starts on `http://localhost:8090` (custom port via `PORT=8099`).*
+Built directly into `axil-auren` (port 4242). Ideal for raw text, documentation search, and isolated tenant vector spaces.
 
 #### Ingest a Text Document
 ```bash
-curl -s -X POST http://localhost:8090/embeddings \
+curl -s -X POST http://localhost:4242/v1/collections/tech_docs/documents \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "High-throughput asynchronous I/O using Linux io_uring"}'
+  -d '{"text": "High-throughput asynchronous I/O using Linux io_uring"}'
 ```
 
 #### Query Documents
 ```bash
-curl -s "http://localhost:8090/search?q=fast+disk+storage+techniques&mode=hybrid" | jq
+curl -s "http://localhost:4242/v1/collections/tech_docs/search?q=fast+disk+storage+techniques&limit=5" | jq
 ```
-
-#### Interactive Browser UI
-Open **`http://localhost:8090/`** in your browser for the search dashboard.
 
 ---
 

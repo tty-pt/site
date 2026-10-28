@@ -273,6 +273,7 @@ Spawns an ephemeral Axil instance, uploads all 6 test resumes, queries all 6 job
 - **Event Loop & HTTP Dispatch**: Pure-C Axil daemon request dispatch via `axil_register_handler`. Zero external HTTP frameworks.
 - **Under-the-Hood Extraction**: Executes `pdftotext -layout <file> -` via `popen()`, reading stdout into a dynamically growing memory buffer with pipe status validation.
 - **Static File Streaming**: Uses `axil_respond_file(cfd, path, "pdf")` for streaming stored PDFs.
-- **Dense Vector Embeddings**: Calls `axil-auren` on port 4242 using `sepal_embed_fetch()`, writing dense float vectors into `libsepal` vector store.
+- **Dense Vector Embeddings & Multi-Tenant Collections**: Calls `axil-auren` on port 4242 using `sepal_embed_fetch()`, writing dense float vectors into `libsepal` vector store (compatible with `axil-auren` multi-tenant persistent collections architecture `/v1/collections/{name}`).
+- **Fast Similarity & Classification**: Can leverage `axil-auren`'s in-memory `POST /v1/classify` for ultra-fast candidate screening without float payload serialization over TCP.
 - **Lexical Indexing**: Uses `liblemma` to index full-text tokens with accent preservation (`pão ≠ pao`).
 - **Metadata Management**: Uses `libcorm` string key-value maps linking `ref` ID to candidate JSON records and extracted text.
