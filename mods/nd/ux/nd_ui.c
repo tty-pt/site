@@ -762,11 +762,15 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 			char m[2] = { (char)mv, '\n' };
 			ws_send(m, 2);
 		}
-		if ((s_tick_counter % 2) == 0)
+		if ((s_tick_counter % 2) == 0) {
 			seven_stage_redraw();
-	}
-	if ((s_tick_counter % 3) == 0)
+			/* Same cadence as the stage: the minimap follows the lamb in
+			 * lockstep instead of lagging a frame behind. */
+			nd_map_canvas_redraw(&client_state);
+		}
+	} else if ((s_tick_counter % 3) == 0) {
 		nd_map_canvas_redraw(&client_state);
+	}
 }
 
 ISO_EXPORT(bud_node *, bud_app_render, void)

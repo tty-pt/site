@@ -38,6 +38,10 @@ void nd_seven_forget(void);
 int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t out[NDW_MAX_OBJ]);
 
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
+
+/* Lamb feet relative to the map's player tile, after adopting the state's
+ * current origin (so a map update and the lamb never disagree by a tile). */
+void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy);
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);
 
 #endif /* ND_SEVEN_H */

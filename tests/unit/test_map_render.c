@@ -274,32 +274,70 @@ int main(void)
 		printf("PASS: minerals are placed like Seven, stones are small grey dots, rocks bigger\n");
 	}
 
-	/* 13. Live player: with Seven running the marker follows the lamb's
-	 * sub-tile position, otherwise it sits at the tile centre. */
+	/* 13. Live player & circular viewport:
+	 * With Seven running (live == 1), the map is rounded/circular and dynamically
+	 * centered on the player so the player marker core stays exactly at the canvas
+	 * center (W/2, H/2), tiles translate oppositely, and pixels outside the circular
+	 * radius are masked out. Idle / non-live it sits at the tile centre. */
 	{
-		uint32_t c0[W * H];
+		uint32_t c0[W * H], c1[W * H], c2[W * H];
 		nd_map_data_t ml;
 		const int pcx = TX(3) + TILE / 2, pcy = TY(3) + TILE / 2;
+		const int center_x = W / 2, center_y = H / 2;
 
 		init_sample_map(&ml);
+
+		/* Non-live mode: rectangular map, player at tile center */
 		memset(fb, 0, sizeof(fb));
 		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 0, 0, 0);
 		memcpy(c0, fb, sizeof(c0));
-		assert(fb[pcy * W + pcx] == 0xFFFFFFFF);           /* white core at the centre */
+		assert(fb[pcy * W + pcx] == 0xFFFFFFFF);           /* white core at the tile centre */
 
+		/* Live centered mode: lamb at tile center (NDW_CENTER_X, NDW_CENTER_Y).
+		 * Player marker core must be pinned at canvas center (center_x, center_y). */
 		memset(fb, 0, sizeof(fb));
 		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y);
-		assert(memcmp(c0, fb, sizeof(c0)) == 0);            /* lamb at centre == not live */
+		memcpy(c1, fb, sizeof(c1));
+		assert(fb[center_y * W + center_x] == 0xFFFFFFFF); /* white core pinned at canvas center */
 
+		/* Corners and points outside the reduced circle radius (R = 112 - 30 - 2 = 80)
+		 * are fully transparent (alpha 0) */
+		assert(fb[2 * W + 2] == 0x00000000);
+		assert(fb[2 * W + (W - 3)] == 0x00000000);
+		assert(fb[(H - 3) * W + 2] == 0x00000000);
+		assert(fb[(H - 3) * W + (W - 3)] == 0x00000000);
+		/* At y = 20, center_x = 112 (distance 92 from center > 80): transparent */
+		assert(fb[20 * W + center_x] == 0x00000000);
+		/* At y = center_y, x = 20 (distance 92 from center > 80): transparent */
+		assert(fb[center_y * W + 20] == 0x00000000);
+
+		/* As lamb moves right (+40), the player core stays at canvas center,
+		 * but the rendered tiles translate left, so the pixel buffer changes. */
 		memset(fb, 0, sizeof(fb));
-		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X + 40, NDW_CENTER_Y);
-		assert(fb[pcy * W + pcx + 40 * TILE / NDW_TILE_W] == 0xFFFFFFFF);
-		assert(fb[pcy * W + pcx] != 0xFFFFFFFF);
+		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X + 40, NDW_CENTER_Y + 20);
+		memcpy(c2, fb, sizeof(c2));
+		assert(fb[center_y * W + center_x] == 0xFFFFFFFF); /* still centered */
+		assert(memcmp(c1, c2, sizeof(c1)) != 0);           /* tiles shifted */
 
+		/* As lamb moves down (+30), player core stays at canvas center */
 		memset(fb, 0, sizeof(fb));
 		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y + 30);
-		assert(fb[(pcy + 30 * TILE / NDW_TILE_H) * W + pcx] == 0xFFFFFFFF);
-		printf("PASS: the live player marker follows the lamb; idle it stays centred\n");
+		assert(fb[center_y * W + center_x] == 0xFFFFFFFF); /* still centered */
+
+		/* Seams: every pixel inside the circle is opaque (no gaps between
+		 * rooms), for a sweep of sub-tile lamb positions. */
+		for (int off = 0; off < NDW_TILE_W; off += 7) {
+			memset(fb, 0, sizeof(fb));
+			nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X + off - 40, NDW_CENTER_Y + off / 2 - 20);
+			for (int y = 0; y < H; y++)
+				for (int x = 0; x < W; x++) {
+					int dx = x - center_x, dy = y - center_y;
+					if (dx * dx + dy * dy < 76 * 76)
+						assert((fb[y * W + x] >> 24) == 0xFF);
+				}
+		}
+
+		printf("PASS: live player marker stays centered in circular map and tiles translate smoothly\n");
 	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");

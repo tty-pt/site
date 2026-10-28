@@ -394,6 +394,15 @@ void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking)
 	if (walking) *walking = s_walking;
 }
 
+void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy)
+{
+	/* Adopt the server's current origin first, so the lamb is expressed
+	 * relative to the same tile the map's player marker sits on. */
+	sync_origin(st);
+	if (fx) *fx = s_lx;
+	if (fy) *fy = s_ly;
+}
+
 int nd_seven_key(const char *key, int down)
 {
 	int bit = 0;

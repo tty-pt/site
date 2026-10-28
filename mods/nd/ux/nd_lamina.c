@@ -41,19 +41,31 @@ static inline void blend_pixel_at(uint32_t *fb, uint32_t w, uint32_t h, uint32_t
 	}
 }
 
-static void fill_rect(uint32_t *fb, uint32_t w, uint32_t h, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh, uint32_t color)
+static void fill_rect(uint32_t *fb, uint32_t w, uint32_t h, int rx, int ry, int rw, int rh, uint32_t color)
 {
-	for (uint32_t y = ry; y < ry + rh && y < h; y++) {
-		for (uint32_t x = rx; x < rx + rw && x < w; x++) {
+	int x0 = rx < 0 ? 0 : rx;
+	int y0 = ry < 0 ? 0 : ry;
+	int x1 = rx + rw;
+	int y1 = ry + rh;
+	if (x1 > (int)w) x1 = (int)w;
+	if (y1 > (int)h) y1 = (int)h;
+	for (int y = y0; y < y1; y++) {
+		for (int x = x0; x < x1; x++) {
 			fb[y * w + x] = color;
 		}
 	}
 }
 
-static void fill_rect_blend(uint32_t *fb, uint32_t w, uint32_t h, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh, uint32_t color)
+static void fill_rect_blend(uint32_t *fb, uint32_t w, uint32_t h, int rx, int ry, int rw, int rh, uint32_t color)
 {
-	for (uint32_t y = ry; y < ry + rh && y < h; y++) {
-		for (uint32_t x = rx; x < rx + rw && x < w; x++) {
+	int x0 = rx < 0 ? 0 : rx;
+	int y0 = ry < 0 ? 0 : ry;
+	int x1 = rx + rw;
+	int y1 = ry + rh;
+	if (x1 > (int)w) x1 = (int)w;
+	if (y1 > (int)h) y1 = (int)h;
+	for (int y = y0; y < y1; y++) {
+		for (int x = x0; x < x1; x++) {
 			fb[y * w + x] = blend_pixel(fb[y * w + x], color);
 		}
 	}
@@ -474,7 +486,43 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 
 	uint32_t amb = tod_brightness(tod);
 
-	int have_player = 0, pcx = 0, pcy = 0;
+	/* Check if player tile exists in map */
+	int have_player = 0, ptx = 0, pty = 0;
+	for (uint32_t y = 0; y < rows; y++) {
+		for (uint32_t x = 0; x < cols; x++) {
+			if (map->tiles[y * cols + x].flags & ND_MAP_FLAG_PLAYER) {
+				have_player = 1;
+				ptx = (int)x;
+				pty = (int)y;
+				break;
+			}
+		}
+		if (have_player) break;
+	}
+
+	/* Live continuous mode is only active when live is requested AND player exists */
+	int is_live_centered = live && have_player;
+	int pcx = 0, pcy = 0;
+
+	/* Live mode: ONE pixel origin for the whole grid. The player's continuous
+	 * world position is rounded once; every tile then sits at an exact
+	 * multiple of tile_sz from it, so neighbours abut with no 1px gaps and
+	 * never shift relative to each other (no jitter, no seams). */
+	int live_ox = 0, live_oy = 0;
+
+	if (is_live_centered) {
+		pcx = (int)w / 2;
+		pcy = (int)h / 2;
+		int wx = ptx * NDW_TILE_W + lamb_x;
+		int wy = pty * NDW_TILE_H + lamb_y;
+		int px = (wx * (int)tile_sz + (wx >= 0 ? NDW_TILE_W / 2 : -NDW_TILE_W / 2)) / NDW_TILE_W;
+		int py = (wy * (int)tile_sz + (wy >= 0 ? NDW_TILE_H / 2 : -NDW_TILE_H / 2)) / NDW_TILE_H;
+		live_ox = pcx - px;
+		live_oy = pcy - py;
+	} else {
+		pcx = (int)(start_x + (uint32_t)ptx * tile_sz + tile_sz / 2);
+		pcy = (int)(start_y + (uint32_t)pty * tile_sz + tile_sz / 2);
+	}
 
 	/* 2. Render each tile the way the ASCII map does: the biome's background
 	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
@@ -483,82 +531,86 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 	for (uint32_t y = 0; y < rows; y++) {
 		for (uint32_t x = 0; x < cols; x++) {
 			const nd_map_tile_t *tile = &map->tiles[y * cols + x];
-			uint32_t tx = start_x + x * tile_sz;
-			uint32_t ty = start_y + y * tile_sz;
+			int tx, ty;
+			if (is_live_centered) {
+				tx = live_ox + (int)x * (int)tile_sz;
+				ty = live_oy + (int)y * (int)tile_sz;
+			} else {
+				tx = (int)(start_x + x * tile_sz);
+				ty = (int)(start_y + y * tile_sz);
+			}
 
 			int is_room = (tile->flags & ND_MAP_FLAG_ROOM);
 			int is_player = (tile->flags & ND_MAP_FLAG_PLAYER);
 
 			/* Biome background (ANSI 0..7), dimmed by time of day. */
 			uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
-			fill_rect(fb, w, h, tx, ty, tile_sz, tile_sz, tile_col);
+			fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
 
 			/* Rooms get a soft outline; wilderness stays seamless. */
-			if (is_room && theme->grid_border) {
-				fill_rect_blend(fb, w, h, tx, ty, tile_sz, 1, theme->grid_border);
-				fill_rect_blend(fb, w, h, tx, ty, 1, tile_sz, theme->grid_border);
+			if (is_room && theme->grid_border && !is_live_centered) {
+				fill_rect_blend(fb, w, h, tx, ty, (int)tile_sz, 1, theme->grid_border);
+				fill_rect_blend(fb, w, h, tx, ty, 1, (int)tile_sz, theme->grid_border);
 			}
 
 			/* Walls / doors, drawn only around room tiles (as the ASCII map does). */
 			if (is_room) {
 				uint32_t wall_col = tile->wall_fg ? ansi_rgb(tile->wall_fg) : theme->wall_color;
 				uint32_t door_col = theme->door_color;
-				uint32_t t3 = tile_sz / 3;
+				int t3 = (int)tile_sz / 3;
 
 				/* North */
 				if (!(tile->exits & 2))
-					fill_rect_blend(fb, w, h, tx, ty, tile_sz, 2, wall_col);
+					fill_rect_blend(fb, w, h, tx, ty, (int)tile_sz, 2, wall_col);
 				else if (tile->doors & 2)
 					fill_rect_blend(fb, w, h, tx + t3, ty, t3, 2, door_col);
 				/* South */
 				if (!(tile->exits & 16))
-					fill_rect_blend(fb, w, h, tx, ty + tile_sz - 2, tile_sz, 2, wall_col);
+					fill_rect_blend(fb, w, h, tx, ty + (int)tile_sz - 2, (int)tile_sz, 2, wall_col);
 				else if (tile->doors & 16)
-					fill_rect_blend(fb, w, h, tx + t3, ty + tile_sz - 2, t3, 2, door_col);
+					fill_rect_blend(fb, w, h, tx + t3, ty + (int)tile_sz - 2, t3, 2, door_col);
 				/* West */
 				if (!(tile->exits & 1))
-					fill_rect_blend(fb, w, h, tx, ty, 2, tile_sz, wall_col);
+					fill_rect_blend(fb, w, h, tx, ty, 2, (int)tile_sz, wall_col);
 				else if (tile->doors & 1)
 					fill_rect_blend(fb, w, h, tx, ty + t3, 2, t3, door_col);
 				/* East */
 				if (!(tile->exits & 8))
-					fill_rect_blend(fb, w, h, tx + tile_sz - 2, ty, 2, tile_sz, wall_col);
+					fill_rect_blend(fb, w, h, tx + (int)tile_sz - 2, ty, 2, (int)tile_sz, wall_col);
 				else if (tile->doors & 8)
-					fill_rect_blend(fb, w, h, tx + tile_sz - 2, ty + t3, 2, t3, door_col);
+					fill_rect_blend(fb, w, h, tx + (int)tile_sz - 2, ty + t3, 2, t3, door_col);
 			}
 
 			/* The three cells: left, centre, right. */
 			int cw = (int)(tile_sz / 3);
 			int ch = (int)tile_sz;
-			int cx0 = (int)tx + ((int)tile_sz - 3 * cw) / 2;
-			draw_cell(fb, w, h, cx0, (int)ty, cw, ch, tile->side_l, tile->fg_l);
+			int cx0 = tx + ((int)tile_sz - 3 * cw) / 2;
+			draw_cell(fb, w, h, cx0, ty, cw, ch, tile->side_l, tile->fg_l);
 			if (!is_player)
-				draw_cell(fb, w, h, cx0 + cw, (int)ty, cw, ch, tile->symbol, tile->fg);
-			draw_cell(fb, w, h, cx0 + 2 * cw, (int)ty, cw, ch, tile->side_r, tile->fg_r);
-
-			draw_tile_objects(fb, w, h, map, (int)x, (int)y, tx, ty, tile_sz);
-
-			if (is_player) {
-				have_player = 1;
-				pcx = (int)(tx + tile_sz / 2);
-				pcy = (int)(ty + tile_sz / 2);
-			}
+				draw_cell(fb, w, h, cx0 + cw, ty, cw, ch, tile->symbol, tile->fg);
+			draw_cell(fb, w, h, cx0 + 2 * cw, ty, cw, ch, tile->side_r, tile->fg_r);
 		}
 	}
 
-	/* Player avatar with breathing radial glow. Drawn last so no tree hides it.
-	 * With Seven live it follows the lamb's sub-tile position. */
+	/* Objects in a second pass: a crown or rock that overhangs its tile is
+	 * never overpainted by a neighbour's ground drawn later. */
+	for (uint32_t y = 0; y < rows; y++) {
+		for (uint32_t x = 0; x < cols; x++) {
+			int tx, ty;
+			if (is_live_centered) {
+				tx = live_ox + (int)x * (int)tile_sz;
+				ty = live_oy + (int)y * (int)tile_sz;
+			} else {
+				tx = (int)(start_x + x * tile_sz);
+				ty = (int)(start_y + y * tile_sz);
+			}
+			draw_tile_objects(fb, w, h, map, (int)x, (int)y, (uint32_t)tx, (uint32_t)ty, tile_sz);
+		}
+	}
+
+	/* Player avatar with breathing radial glow. Drawn last so no tree hides it. */
 	if (have_player) {
 		int cx = pcx, cy = pcy;
-
-		if (live) {
-			cx += (lamb_x - NDW_CENTER_X) * (int)tile_sz / NDW_TILE_W;
-			cy += (lamb_y - NDW_CENTER_Y) * (int)tile_sz / NDW_TILE_H;
-			if (cx < 3) cx = 3;
-			if (cy < 3) cy = 3;
-			if (cx > (int)w - 4) cx = (int)w - 4;
-			if (cy > (int)h - 4) cy = (int)h - 4;
-		}
 
 		/* Breathing radius based on frame counter (0..60 cycle) */
 		int pulse = (int)(frame % 60);
@@ -586,6 +638,47 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 					uint32_t vig = (uint32_t)(((dist2 - max_dist2 / 3) * theme->vignette_strength) / (max_dist2 - max_dist2 / 3));
 					if (vig > 180) vig = 180;
 					blend_pixel_at(fb, w, h, x, y, (vig << 24) | 0x000000);
+				}
+			}
+		}
+	}
+
+	/* 4. Circular / rounded masking when live smooth movement is active.
+	 * Radius is one room/tile smaller than the viewport half-dimension so edge
+	 * rooms never pop in/out as the player moves continuously. */
+	if (is_live_centered) {
+		int cx = (int)w / 2;
+		int cy = (int)h / 2;
+		int max_dim = (int)(w < h ? w : h);
+		int r = (max_dim / 2) - (int)tile_sz - 2;
+		if (r < (int)tile_sz) r = (int)tile_sz;
+		int r2 = r * r;
+		int rim_r2 = (r - 1) * (r - 1);
+		uint32_t border_col = theme->grid_border ? theme->grid_border : 0x55FFFFFF;
+
+		for (int y = 0; y < (int)h; y++) {
+			int dy = y - cy;
+			for (int x = 0; x < (int)w; x++) {
+				int dx = x - cx;
+				int dist2 = dx * dx + dy * dy;
+				if (dist2 > r2 + r) {
+					/* Fully outside circular mask: transparent */
+					fb[y * w + x] = 0x00000000u;
+				} else if (dist2 > r2 - r) {
+					/* Antialiased rim: fade to transparent. Colour is
+					 * premultiplied (the canvas composites premultiplied). */
+					int factor = dist2 - (r2 - r);
+					uint32_t pixel = fb[y * w + x];
+					uint32_t fade = (uint32_t)((factor * 255) / (2 * r));
+					if (fade > 255) fade = 255;
+					uint32_t keep = 255 - fade;
+					uint32_t cr = (((pixel >> 16) & 0xFF) * keep) / 255;
+					uint32_t cg = (((pixel >> 8) & 0xFF) * keep) / 255;
+					uint32_t cb = ((pixel & 0xFF) * keep) / 255;
+					fb[y * w + x] = (keep << 24) | (cr << 16) | (cg << 8) | cb;
+				} else if (dist2 >= rim_r2) {
+					/* Subtle aesthetic outer ring border */
+					blend_pixel_at(fb, w, h, (uint32_t)x, (uint32_t)y, border_col);
 				}
 			}
 		}

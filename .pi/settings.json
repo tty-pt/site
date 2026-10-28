@@ -98,19 +98,24 @@
       "confirm",
       "continua",
       "vai em frente",
-      "avan\u00e7a",
-      "pode avan\u00e7ar"
-    ]
+      "avança",
+      "pode avançar"
+    ],
+    "judgeProtocol": "systemone",
+    "judgeUrl": "http://127.0.0.1:4242",
+    "judgeModel": "olmoe",
+    "judgeTimeoutMs": 15000
   },
   "pi-mm": {
     "judgeMode": "auto",
     "judgeUrl": "http://127.0.0.1:4242",
-    "judgeModel": "qwen",
+    "judgeModel": "olmoe",
     "judgeTimeoutMs": 15000,
     "embedUrl": "http://127.0.0.1:4242/v1/embeddings",
     "embedModel": "bge-small",
     "semanticSearch": true,
-    "ephemeralSepal": true
+    "ephemeralSepal": true,
+    "judgeProtocol": "systemone"
   },
   "pi-early-compact": {
     "tiers": [

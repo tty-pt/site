@@ -224,7 +224,7 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	/* Container wrapping canvas and progressive SSR/No-JS fallback */
 	bud_node *map = lx_n("nd-map",
 		lx_attr("id", "room-map"),
-		lx_attr("class", "relative bg-black/90 p-0 rounded border border-neutral-700/60 overflow-hidden select-none block mx-auto shadow-inner"),
+		lx_attr("class", "relative p-0 overflow-hidden select-none block mx-auto"),
 		lx_attr("style", MAP_CANVAS_STYLE));
 
 	/* The canvas rendered by liblamina */
@@ -262,7 +262,7 @@ void nd_map_canvas_redraw(const nd_client_state_t *st)
 	if (strcmp(st->preferred_driver, "lamina-seven") == 0) {
 		nd_seven_debug(NULL, NULL, NULL, &have_room);
 		if (have_room) {
-			nd_seven_lamb(&lx, &ly, NULL, NULL);
+			nd_seven_lamb_world(st, &lx, &ly);
 			live = 1;
 		}
 	}
