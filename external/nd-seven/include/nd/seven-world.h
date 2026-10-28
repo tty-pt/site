@@ -298,8 +298,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 		int cx = (third_lo + third_hi) / 2;
 		int pk;
 
-		if (s == 1 && (t->flags & NDW_F_PLAYER))
-			continue;                      /* the lamb stands here */
+		if (s == 1 && g == '!')
+			continue;   /* the server's player marker; the client restores the real glyph underneath */
 		if (g == 0 || g == ' ')
 			continue;
 		pk = ndw_plant_kind(g);

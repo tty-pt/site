@@ -14,8 +14,8 @@ static uint32_t fb[MAXW * MAXH], fb2[MAXW * MAXH];
 static nd_client_state_t st;
 
 /* A 7x7 map of identical tiles centred on the world tile (x, y). */
-static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
-                    int gl, int gc, int gr)
+static void set_map_keep(int x, int y, int biome, uint8_t exits, uint8_t flags,
+                         int gl, int gc, int gr)
 {
 	memset(&st, 0, sizeof(st));
 	strcpy(st.preferred_driver, "lamina-seven");
@@ -33,6 +33,31 @@ static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
 	st.map_data.tiles[3 * 7 + 3].exits = exits;
 	st.map_data.tiles[3 * 7 + 3].flags = (uint8_t)(flags | ND_MAP_FLAG_PLAYER);
 	st.map_data.tiles[3 * 7 + 3].symbol = '!';
+}
+
+static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
+                    int gl, int gc, int gr)
+{
+	nd_seven_forget();
+	set_map_keep(x, y, biome, exits, flags, gl, gc, gr);
+}
+
+/* The packed sprite atlas as palette indices, decoded once. */
+static const uint8_t *atlas_px(void)
+{
+	static uint8_t atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
+	static int ready;
+
+	if (!ready) {
+		size_t o = 0;
+		for (size_t i = 0; i + 1 < ND_SEVEN_RLE_LEN && o < sizeof(atlas); i += 2) {
+			size_t run = (size_t)nd_seven_rle[i] + 1;
+			while (run-- && o < sizeof(atlas))
+				atlas[o++] = nd_seven_rle[i + 1];
+		}
+		ready = 1;
+	}
+	return atlas;
 }
 
 static void dump(const char *name, const uint32_t *p, int w, int h)
@@ -172,6 +197,163 @@ int main(void)
 	nd_seven_render(fb2, 1280, 720, &st);
 	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
 	printf("PASS: map cactus glyphs appear as cacti in their cell, on sand in desert\n");
+
+	/* A tree seen from outside stays when the player steps into its tile: the
+	 * server's '!' marker must not erase it (cache by absolute tile position). */
+	{
+		set_map(5, -3, 10, 0x1B, 0, 0, 'x', 0);
+		nd_seven_render(fb, 1280, 720, &st);          /* (6,-3) seen as 'x' */
+		set_map_keep(6, -3, 10, 0x1B, 0, 0, 'x', 0);   /* now we stand in it */
+		nd_seven_render(fb, 1280, 720, &st);
+		set_map(6, -3, 10, 0x1B, 0, 0, 'x', 0);        /* control: never seen */
+		nd_seven_render(fb2, 1280, 720, &st);
+		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);   /* the restored tree is drawn */
+		printf("PASS: a tree survives the player entering its tile\n");
+	}
+
+	/* The cache holds far more than one 7x7 view: after seeing ~300 distinct
+	 * tiles, stepping into tiles seen long ago still restores their tree. */
+	{
+		static const int origin[] = { 5, 12, 19, 26, 33, 40 };
+		static const int enter[] = { 3, 10, 17, 24, 31, 38 };
+
+		set_map(origin[0], -3, 10, 0x1B, 0, 0, 'x', 0);
+		nd_seven_render(fb, 1280, 720, &st);
+		for (int i = 1; i < 6; i++) {
+			set_map_keep(origin[i], -3, 10, 0x1B, 0, 0, 'x', 0);
+			nd_seven_render(fb, 1280, 720, &st);
+		}
+		for (int i = 0; i < 6; i++) {
+			set_map_keep(enter[i], -3, 10, 0x1B, 0, 0, 'x', 0);
+			nd_seven_render(fb, 1280, 720, &st);
+			nd_seven_forget();
+			set_map_keep(enter[i], -3, 10, 0x1B, 0, 0, 'x', 0);
+			nd_seven_render(fb2, 1280, 720, &st);          /* control: nothing remembered */
+			assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+			/* re-seed the cache for the next entry tile */
+			for (int j = 0; j < 6; j++) {
+				set_map_keep(origin[j], -3, 10, 0x1B, 0, 0, 'x', 0);
+				nd_seven_render(fb2, 1280, 720, &st);
+			}
+		}
+		printf("PASS: tree glyphs survive cache pressure\n");
+	}
+
+	/* Rock and stone sprites are cropped whole: trimmed to their opaque bounds
+	 * (opaque pixels touch all four edges), the medium tan rock is not clipped,
+	 * and no stone sprite holds the mushroom art that once sat next to it. */
+	{
+		static const int ids[] = {
+			NDS_ROCK_TAN_BIG, NDS_ROCK_WHITE_BIG, NDS_ROCK_TAN, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY,
+			NDS_ROCK_WHITE, NDS_ROCK_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_GREY,
+			NDS_STONE_FLAT, NDS_STONE_TINY
+		};
+		const uint8_t *atlas = atlas_px();
+
+		for (size_t k = 0; k < sizeof(ids) / sizeof(ids[0]); k++) {
+			const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[ids[k]];
+			int top = 0, bot = 0, lef = 0, rig = 0, mushroom = 0;
+
+			assert(r->w > 0 && r->h > 0);
+			for (int y = 0; y < r->h; y++)
+				for (int x = 0; x < r->w; x++) {
+					uint32_t c = nd_seven_palette[atlas[(r->y + y) * ND_SEVEN_ATLAS_W + r->x + x]];
+					int cr = (int)(c & 0xFF), cg = (int)((c >> 8) & 0xFF), cb = (int)((c >> 16) & 0xFF); /* ABGR */
+
+					if (!(c >> 24)) continue;
+					top |= y == 0; bot |= y == r->h - 1;
+					lef |= x == 0; rig |= x == r->w - 1;
+					/* toadstool red: far more red than green and blue */
+					mushroom |= cr - cg > 75 && cr - cb > 75;
+				}
+			assert(top && bot && lef && rig);
+			assert(!mushroom);
+		}
+		/* the medium tan rock is ~48x41 px plus shadow: a cut at 350 would give < 40 */
+		assert(nd_seven_sprite_rects[NDS_ROCK_TAN].w >= 44 && nd_seven_sprite_rects[NDS_ROCK_TAN].w <= 49);
+		assert(nd_seven_sprite_rects[NDS_ROCK_TAN].h >= 40);
+		printf("PASS: atlas rock sprites are whole\n");
+	}
+
+	/* Room contents: an entity named "stone" is a stone sprite at its spot, a
+	 * "goblin" is still a pawn; and no stone is ever scattered as terrain. */
+	{
+		static const uint8_t mineral[] = {
+			NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
+			NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
+		};
+		const uint32_t ref = 100;
+		const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[mineral[ndw_mix(ref) % 8]];
+		const uint8_t *atlas = atlas_px();
+		uint32_t sprite_colour = 0;
+		int none, with_stone, with_goblin;
+
+		/* the sprite's centre-most opaque pixel gives a colour only it paints */
+		for (int y = sr->h / 2; y < sr->h && !sprite_colour; y++)
+			for (int x = sr->w / 2; x < sr->w && !sprite_colour; x++) {
+				uint32_t c = nd_seven_palette[atlas[(sr->y + y) * ND_SEVEN_ATLAS_W + sr->x + x]];
+				if ((c >> 24) == 0xFF)
+					sprite_colour = c;
+			}
+		assert(sprite_colour);
+
+		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+		st.room.ref = 7;
+		nd_seven_render(fb, 1280, 720, &st);
+		none = count_color(fb, 1280 * 720, sprite_colour);
+
+		st.entity_count = 1;
+		st.entities[0].ref = ref; st.entities[0].location = 7;
+		st.entities[0].ch = '*'; st.entities[0].fg = 7;
+		strcpy(st.entities[0].name, "stone");
+		nd_seven_render(fb, 1280, 720, &st);
+		with_stone = count_color(fb, 1280 * 720, sprite_colour);
+		assert(with_stone > none);                    /* the stone sprite is on screen */
+
+		st.entities[0].ch = 'g';
+		strcpy(st.entities[0].name, "goblin");
+		nd_seven_render(fb2, 1280, 720, &st);
+		with_goblin = count_color(fb2, 1280 * 720, sprite_colour);
+		assert(with_goblin == none);                  /* a goblin is a pawn, not a stone */
+		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+
+		st.entities[0].location = 8;                  /* an item of another room is not shown */
+		strcpy(st.entities[0].name, "stone");
+		nd_seven_render(fb2, 1280, 720, &st);
+		assert(count_color(fb2, 1280 * 720, sprite_colour) == none);
+		printf("PASS: a stone entity draws as a stone sprite at its spot, a goblin as a pawn\n");
+	}
+
+	/* Terrain carries no rocks, stones or mushrooms: the empty map draws only
+	 * grass, the two yellow decor sprites and the lamb (no entity, no glyph). */
+	{
+		static const int ids[] = {
+			NDS_ROCK_TAN_BIG, NDS_ROCK_WHITE_BIG, NDS_ROCK_TAN, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY,
+			NDS_ROCK_WHITE, NDS_ROCK_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_GREY,
+			NDS_STONE_FLAT, NDS_STONE_TINY, NDS_DECOR_ORG, NDS_DECOR_PINK
+		};
+		const uint8_t *atlas = atlas_px();
+
+		for (int bio = 10; bio <= 14; bio += 4) {      /* grassland and desert */
+			set_map(5, -3, bio, 0x1B, 0, 0, 0, 0);
+			nd_seven_render(fb, 1280, 720, &st);
+			for (size_t k = 0; k < sizeof(ids) / sizeof(ids[0]); k++) {
+				const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[ids[k]];
+				int found = 0;
+				/* a colour of this sprite that no other kind of ground paints */
+				for (int y = 0; y < r->h; y++)
+					for (int x = 0; x < r->w; x++) {
+						uint32_t c = nd_seven_palette[atlas[(r->y + y) * ND_SEVEN_ATLAS_W + r->x + x]];
+						int cr = (int)(c & 0xFF), cg = (int)((c >> 8) & 0xFF), cb = (int)((c >> 16) & 0xFF);
+						if ((c >> 24) != 0xFF || cr - cg < 60 || cr - cb < 60)
+							continue;     /* only the toadstool reds are checked per pixel */
+						found |= count_color(fb, 1280 * 720, c) > 0;
+					}
+				assert(!found);
+			}
+		}
+		printf("PASS: terrain draws no rocks, stones or mushrooms\n");
+	}
 
 	/* Other plant families and map features show up too. */
 	{

@@ -57,13 +57,17 @@ SPRITES = [
     # --- rocks ---
     ("ROCK_TAN_BIG",   "tiles", (340, 320, 400, 380), True),
     ("ROCK_WHITE_BIG", "tiles", (536, 334, 590, 396), True),
-    ("ROCK_TAN",       "tiles", (400, 318, 448, 372), True),
+    ("ROCK_TAN",       "tiles", (400, 316, 449, 366), True),
     ("ROCK_TAN_SM",    "tiles", (448, 318, 482, 350), True),
     ("ROCK_TAN_TINY",  "tiles", (484, 318, 512, 350), True),
     ("ROCK_WHITE",     "tiles", (486, 350, 522, 398), True),
     ("ROCK_GREY",      "tiles", (448, 352, 482, 384), True),
+    # --- stones (small loose minerals / ground stones) ---
     ("STONE_BLUE",     "tiles", (368, 384, 402, 416), True),
     ("STONE_BLUE_SM",  "tiles", (436, 380, 462, 402), True),
+    ("STONE_GREY",     "tiles", (402, 372, 430, 400), True),
+    ("STONE_FLAT",     "tiles", (528, 318, 546, 338), True),
+    ("STONE_TINY",     "tiles", (464, 380, 484, 402), True),
     # --- the lamb: whole 192x256 sheet, 6 cols x 8 rows of 32x32 ---
     ("LAMB",        "lamb",  (0, 0, 192, 256), False),
 ]

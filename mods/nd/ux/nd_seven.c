@@ -106,7 +106,8 @@ static void fill_px(uint32_t *fb, int w, int h, int x0, int y0, int x1, int y1, 
  */
 static void blit(uint32_t *fb, int w, int h, int id,
                  int sx, int sy, int sw, int sh,
-                 int ax, int ay, int dx, int dy, int scale, const tint_t *tint)
+                 int ax, int ay, int dx, int dy, int scale, const tint_t *tint,
+                 int flip)
 {
 	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
 	int ox = dx - ax * scale, oy = dy - ay * scale;
@@ -119,7 +120,8 @@ static void blit(uint32_t *fb, int w, int h, int id,
 		if (yy0 >= h || yy0 + scale <= 0)
 			continue;
 		for (int x = 0; x < sw; x++) {
-			uint32_t c = nd_seven_palette[row[x]];
+			uint8_t srcx = (uint8_t)(flip ? (sw - 1 - x) : x);
+			uint32_t c = nd_seven_palette[row[srcx]];
 			int xx0 = ox + x * scale;
 			if (!(c >> 24) || xx0 >= w || xx0 + scale <= 0)
 				continue;
@@ -139,7 +141,14 @@ static void blit_all(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx,
                      const tint_t *tint)
 {
 	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
-	blit(fb, w, h, id, 0, 0, r->w, r->h, ax, ay, dx, dy, scale, tint);
+	blit(fb, w, h, id, 0, 0, r->w, r->h, ax, ay, dx, dy, scale, tint, 0);
+}
+
+static void blit_all_f(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx, int dy,
+                       int scale, const tint_t *tint, int flip)
+{
+	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
+	blit(fb, w, h, id, 0, 0, r->w, r->h, ax, ay, dx, dy, scale, tint, flip);
 }
 
 /* --- state -------------------------------------------------------------- */
@@ -240,6 +249,71 @@ static ndw_tile_t convert_tile(const nd_map_tile_t *m)
 }
 
 /*
+ * The server paints '!' over the centre cell of the tile the player stands in,
+ * erasing that tile's plant. Remember each tile's last non-player centre glyph
+ * by absolute position (seen from outside) and restore it under the player.
+ */
+#define CENTRE_SETS 256
+#define CENTRE_WAYS 4
+typedef struct { int16_t pos[4]; uint8_t glyph, fg, used; } centre_ent_t;
+static centre_ent_t s_centre[CENTRE_SETS][CENTRE_WAYS];
+static uint8_t s_centre_next[CENTRE_SETS];     /* round-robin victim per set */
+
+static unsigned centre_set(const int16_t pos[4])
+{
+	uint32_t h = (uint32_t)(uint16_t)pos[0] * 73856093u ^ (uint32_t)(uint16_t)pos[1] * 19349663u ^
+	             (uint32_t)(uint16_t)pos[2] * 83492791u ^ (uint32_t)(uint16_t)pos[3] * 2654435761u;
+	return (h ^ (h >> 15)) % CENTRE_SETS;
+}
+
+/* The way holding exactly this position (full pos[4] key), or NULL. */
+static centre_ent_t *centre_find(unsigned set, const int16_t pos[4])
+{
+	for (int w = 0; w < CENTRE_WAYS; w++) {
+		centre_ent_t *e = &s_centre[set][w];
+		if (e->used && !memcmp(e->pos, pos, sizeof(e->pos)))
+			return e;
+	}
+	return NULL;
+}
+
+void nd_seven_forget(void)
+{
+	memset(s_centre, 0, sizeof(s_centre));
+	memset(s_centre_next, 0, sizeof(s_centre_next));
+}
+
+static void centre_remember(const int16_t pos[4], ndw_tile_t *t)
+{
+	unsigned set = centre_set(pos);
+	centre_ent_t *e = centre_find(set, pos);
+
+	if (t->glyph[1] == '!') {
+		if (e) {
+			t->glyph[1] = e->glyph;
+			t->fg[1] = e->fg;
+		} else {
+			t->glyph[1] = 0;     /* never seen from outside: nothing known */
+			t->fg[1] = 0;
+		}
+		return;
+	}
+	if (!e) {
+		for (int w = 0; w < CENTRE_WAYS && !e; w++)
+			if (!s_centre[set][w].used)
+				e = &s_centre[set][w];
+		if (!e) {                /* set full: evict round-robin */
+			e = &s_centre[set][s_centre_next[set]];
+			s_centre_next[set] = (uint8_t)((s_centre_next[set] + 1) % CENTRE_WAYS);
+		}
+		memcpy(e->pos, pos, sizeof(e->pos));
+	}
+	e->glyph = t->glyph[1];
+	e->fg = t->fg[1];
+	e->used = 1;
+}
+
+/*
  * Tile at offset (ti, tj) from the origin tile. 1: a tile the map describes;
  * 2: beyond the map, the nearest edge tile's biome and flora carry on; the
  * pos is the tile's absolute coordinates either way.
@@ -268,10 +342,18 @@ static int tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, i
 		if (col >= w) col = w - 1;
 		if (row >= h) row = h - 1;
 		*t = convert_tile(&md->tiles[row * md->width + col]);
-		if (known)
+		if (known) {
+			centre_remember(pos, t);
 			return 1;
+		}
+		/* Beyond the described map: keep the biome so the ground continues,
+		 * but drop the clamped neighbour's glyphs. They belong to a tile at
+		 * a different coordinate; mirroring them (a room-centre tree, shop,
+		 * stairs) leaves stray objects floating in void space (R1). */
 		t->flags &= (uint8_t)~(NDW_F_ROOM | NDW_F_PLAYER);
 		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
+		memset(t->glyph, 0, sizeof(t->glyph));
+		memset(t->fg, 0, sizeof(t->fg));
 		return 2;
 	}
 }
@@ -597,7 +679,7 @@ static void ground_cell(uint32_t *fb, int w, int h, const ndw_ground_t *g,
 		tint_t t = { g->r, g->g, g->b, 0 };
 		blit_all(fb, w, h, NDS_GRASS, 0, 0, px, py, SCALE, &t);
 		if ((hash % 100) < 6) {
-			int id = NDS_DECOR_YEL + (int)((hash >> 8) & 3);
+			int id = NDS_DECOR_YEL + (int)((hash >> 8) & 1);
 			const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[id];
 			blit_all(fb, w, h, id, sr->w / 2, sr->h - 1,
 			         px + (4 + (int)((hash >> 12) & 7)) * SCALE, py + 14 * SCALE, SCALE, NULL);
@@ -714,7 +796,7 @@ static void draw_lamb(uint32_t *fb, int w, int h, int sx, int sy)
 		col = (int)((s_anim / 24) % 4);
 	}
 	blit(fb, w, h, NDS_LAMB, col * LAMB_SIZE, row * LAMB_SIZE, LAMB_SIZE, LAMB_SIZE,
-	     LAMB_AX, LAMB_AY, sx, sy, SCALE, NULL);
+	     LAMB_AX, LAMB_AY, sx, sy, SCALE, NULL, 0);
 }
 
 /* One thing to paint in a row of tiles, sorted back to front by its feet. */
@@ -725,6 +807,8 @@ typedef struct {
 	ndw_obj_t obj;         /* D_OBJ */
 	char ch;               /* D_ENTITY */
 	uint8_t fg;
+	uint8_t sprite_id;     /* if non-zero, drawn as rock/stone sprite instead of pawn */
+	uint8_t flip;
 } drawable_t;
 
 #define MAX_DRAW 192
@@ -734,6 +818,34 @@ static const int8_t s_spots[16][2] = {
 	{ -34, -8 }, { 34, -8 }, { -22, 16 }, { 22, 16 }, { 0, 24 }, { -12, -20 }, { 12, -20 }, { 0, -30 },
 	{ -52, 0 }, { 52, 0 }, { -46, 24 }, { 46, 24 }, { -30, 34 }, { 30, 34 }, { -46, -22 }, { 46, -22 }
 };
+
+static int str_has_ci(const char *hay, const char *needle)
+{
+	if (!hay || !needle || !*needle) return 0;
+	size_t nlen = strlen(needle);
+	for (const char *h = hay; *h; h++) {
+		size_t i = 0;
+		while (i < nlen && h[i]) {
+			char c1 = h[i], c2 = needle[i];
+			if (c1 >= 'A' && c1 <= 'Z') c1 = (char)(c1 + 32);
+			if (c2 >= 'A' && c2 <= 'Z') c2 = (char)(c2 + 32);
+			if (c1 != c2) break;
+			i++;
+		}
+		if (i == nlen) return 1;
+	}
+	return 0;
+}
+
+static int is_mineral_or_rock(const nd_entity_desc_t *e)
+{
+	if (!e) return 0;
+	if (e->ch == '*')
+		return 1;
+	return str_has_ci(e->name, "stone") || str_has_ci(e->name, "rock") ||
+	       str_has_ci(e->name, "mineral") || str_has_ci(e->name, "quartz") ||
+	       str_has_ci(e->name, "flint");
+}
 
 static int add_entities(const nd_client_state_t *st, int camx, int camy, drawable_t *out, int n)
 {
@@ -765,6 +877,17 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 		out[n].fg = (uint8_t)(e->fg < 8 ? e->fg + 8 : e->fg);
 		out[n].sx = (NDW_CENTER_X + s_spots[spot][0]) * SCALE - camx;
 		out[n].sy = (NDW_CENTER_Y + s_spots[spot][1]) * SCALE - camy;
+		out[n].flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
+		if (is_mineral_or_rock(e)) {
+			/* Mineral entity drawn as rock/stone sprite, NOT tree or generic pawn */
+			static const uint8_t mineral_sprites[] = {
+				NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
+				NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
+			};
+			out[n].sprite_id = mineral_sprites[ndw_mix(e->ref) % (sizeof(mineral_sprites)/sizeof(mineral_sprites[0]))];
+		} else {
+			out[n].sprite_id = 0;
+		}
 		n++;
 	}
 	return n;
@@ -858,8 +981,14 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			if (dr[a].what == D_LAMB) {
 				draw_lamb(fb, w, h, dr[a].sx, dr[a].sy);
 			} else if (dr[a].what == D_ENTITY) {
-				ctx_t c = { fb, w, h, dr[a].sx, dr[a].sy };
-				draw_pawn(&c, dr[a].ch, dr[a].fg);
+				if (dr[a].sprite_id) {
+					const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[dr[a].sprite_id];
+					blit_all_f(fb, w, h, dr[a].sprite_id, sr->w / 2, sr->h - 1,
+					           dr[a].sx, dr[a].sy, SCALE, NULL, dr[a].flip);
+				} else {
+					ctx_t c = { fb, w, h, dr[a].sx, dr[a].sy };
+					draw_pawn(&c, dr[a].ch, dr[a].fg);
+				}
 			} else {
 				draw_world_obj(fb, w, h, &dr[a].obj, dr[a].sx, dr[a].sy, s_anim);
 			}

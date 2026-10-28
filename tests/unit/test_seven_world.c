@@ -163,6 +163,34 @@ int main(void)
 	}
 	printf("PASS: collision: cacti and room walls block, seams and open ground do not\n");
 
+	/* The void rule that stops stray trees: a tile with no plant glyphs draws
+	 * nothing, so a tile the map does not describe cannot paint a neighbour's
+	 * tree in empty space (R1). A tile that does carry a plant glyph still
+	 * draws an object of that same kind (D1: kind matches the real object). */
+	{
+		ndw_tile_t blank = tile(10, 0x1B, 0, 0, 0, 0);
+		assert(ndw_tile_objects(&blank, pos, 1, a) == 0);
+		assert(ndw_tile_objects(&blank, pos, 0, a) == 0);
+		ndw_tile_t dec = tile(10, 0x1B, 0, 'x', 0, 0);
+		na = ndw_tile_objects(&dec, pos, 1, a);
+		assert(na == 1 && a[0].kind == NDW_K_DECID && a[0].fg == 10 && a[0].glyph == 'x');
+		/* a non-plant centre glyph is dropped on an unknown tile */
+		ndw_tile_t mark = tile(10, 0x1B, 0, 0, '!', 0);
+		assert(ndw_tile_objects(&mark, pos, 1, a) == 0);
+		printf("PASS: void tiles draw no objects; plant glyphs keep their kind\n");
+	}
+
+	/* The player marker '!' is not an object, but the player flag alone does not
+	 * hide a plant glyph (the client restores the glyph under the marker). */
+	{
+		ndw_tile_t occ = tile(10, 0x1B, NDW_F_PLAYER, 0, 'x', 0);
+		na = ndw_tile_objects(&occ, pos, 0, a);
+		assert(na >= 1 && a[0].kind == NDW_K_DECID);
+		ndw_tile_t mk = tile(10, 0x1B, NDW_F_PLAYER, 0, '!', 0);
+		assert(ndw_tile_objects(&mk, pos, 0, a) == 0);
+		printf("PASS: plant under the player flag still draws; '!' marker does not\n");
+	}
+
 	printf("ALL SEVEN WORLD TESTS PASSED\n");
 	return 0;
 }

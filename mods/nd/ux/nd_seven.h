@@ -26,6 +26,9 @@ int nd_seven_tick(const nd_client_state_t *st, float dt);
 void nd_seven_render(uint32_t *fb, uint32_t w, uint32_t h, const nd_client_state_t *st);
 
 /* Lamb state, exposed for tests and the HUD. */
+/* Forget remembered tile glyphs (new session or world). */
+void nd_seven_forget(void);
+
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);
 
