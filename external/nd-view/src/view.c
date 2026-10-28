@@ -74,7 +74,7 @@ void base_vtf_init(void) {
 static inline char *
 empty_tile(char *b, view_tile_t *t, unsigned side) {
 	sic_str_t ss = { .str = "" };
-	ss = nd_evt_empty_tile(*t, side, ss);
+	ss = nd_evt_empty_tile(*t, side | CORE_ET_ASCII, ss);
 	b += sprintf(b, "%s", ss.str);
 	return b;
 }

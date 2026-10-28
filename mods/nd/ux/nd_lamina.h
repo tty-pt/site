@@ -52,6 +52,19 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
                                  uint32_t frame);
 
 /*
+ * As nd_lamina_render_map_themed, plus the live player: when `live` is set
+ * (the Seven stage is running) the marker sits at the lamb's feet
+ * (lamb_x, lamb_y), in origin-tile units (NDW_TILE_W x NDW_TILE_H), instead
+ * of the tile centre, so it moves gradually.
+ */
+void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
+                               const nd_map_data_t *map,
+                               const char *theme_name,
+                               uint32_t tod,
+                               uint32_t frame,
+                               int live, int lamb_x, int lamb_y);
+
+/*
  * Backward-compatible helper that defaults to "lamina" theme at noon.
  */
 void nd_lamina_render_map(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map);

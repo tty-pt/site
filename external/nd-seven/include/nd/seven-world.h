@@ -165,6 +165,9 @@ enum {
 	NDW_K_SHOP,         /* $ */
 	NDW_K_STAIRS_DOWN,  /* < */
 	NDW_K_STAIRS_UP,    /* > */
+	NDW_K_STONE,        /* * (small stone) */
+	NDW_K_ROCK,         /* o (medium rock) */
+	NDW_K_BOULDER,      /* O (big boulder) */
 	NDW_K_MARK          /* anything else (entities ...) */
 };
 
@@ -178,16 +181,44 @@ typedef struct {
 	int16_t x, y;       /* foot point, tile local units */
 } ndw_obj_t;
 
+typedef struct {
+	char glyph;
+	uint8_t kind;
+	uint8_t is_plant;
+	uint8_t is_big;
+	uint8_t hw, hh;
+} ndw_content_entry_t;
+
+static inline const ndw_content_entry_t *
+ndw_find_content(int glyph)
+{
+	static const ndw_content_entry_t table[] = {
+		{ 'x', NDW_K_DECID, 1, 0, 5, 6 },
+		{ 'X', NDW_K_DECID, 1, 1, 6, 6 },
+		{ 't', NDW_K_TALL,  1, 0, 5, 6 },
+		{ 'T', NDW_K_TALL,  1, 1, 6, 6 },
+		{ 'a', NDW_K_FIR,   1, 0, 5, 6 },
+		{ 'A', NDW_K_FIR,   1, 1, 6, 6 },
+		{ 'i', NDW_K_CACTUS,1, 0, 4, 6 },
+		{ 'I', NDW_K_CACTUS,1, 1, 5, 6 },
+		{ '*', NDW_K_STONE, 0, 0, 4, 3 },
+		{ 'o', NDW_K_ROCK,  0, 0, 6, 4 },
+		{ 'O', NDW_K_BOULDER, 0, 1, 8, 6 },
+	};
+	for (size_t i = 0; i < sizeof(table)/sizeof(table[0]); i++) {
+		if (table[i].glyph == (char)glyph)
+			return &table[i];
+	}
+	return NULL;
+}
+
 /* Plant family of a map glyph: an NDW_K_* plant kind, else 0. */
 static inline int
 ndw_plant_kind(int glyph)
 {
-	switch (glyph | 0x20) {
-	case 'x': return NDW_K_DECID;
-	case 't': return NDW_K_TALL;
-	case 'a': return NDW_K_FIR;
-	case 'i': return NDW_K_CACTUS;
-	}
+	const ndw_content_entry_t *ce = ndw_find_content(glyph);
+	if (ce && ce->is_plant)
+		return ce->kind;
 	return 0;
 }
 
@@ -296,18 +327,18 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 		int g = t->glyph[s];
 		int third_lo = s * NDW_TILE_W / 3, third_hi = (s + 1) * NDW_TILE_W / 3;
 		int cx = (third_lo + third_hi) / 2;
-		int pk;
+		const ndw_content_entry_t *ce;
 
 		if (s == 1 && g == '!')
 			continue;   /* the server's player marker; the client restores the real glyph underneath */
 		if (g == 0 || g == ' ')
 			continue;
-		pk = ndw_plant_kind(g);
-		if (!pk && unknown)
+		ce = ndw_find_content(g);
+		if (!ce && unknown)
 			continue;
 
-		if (pk) {
-			int big = ndw_is_big(g);
+		if (ce && ce->is_plant) {
+			int big = ce->is_big;
 			int count = big ? 2 + (int)(ndw_next(&rng) & 1) : 1;
 			ndw_obj_t placed[3];
 			int np = 0;
@@ -319,9 +350,9 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 					ndw_rect_t r;
 
 					memset(&o, 0, sizeof(o));
-					o.kind = (uint8_t)pk; o.big = (uint8_t)big;
+					o.kind = ce->kind; o.big = (uint8_t)big;
 					o.fg = t->fg[s]; o.glyph = (uint8_t)g;
-					ndw_plant_box(pk, big, &o.hw, &o.hh);
+					ndw_plant_box(ce->kind, big, &o.hw, &o.hh);
 					xlo = third_lo + 6; xhi = third_hi - 6;
 					if (xlo < margin + o.hw) xlo = margin + o.hw;
 					if (xhi > NDW_TILE_W - margin - o.hw) xhi = NDW_TILE_W - margin - o.hw;
@@ -345,6 +376,56 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 						if (dx < 0) dx = -dx;
 						if (dy < 0) dy = -dy;
 						if (dx < 22 && dy < 12)
+							ok = 0;
+					}
+					if (!ok)
+						continue;
+					placed[np++] = o;
+					out[n++] = o;
+					break;
+				}
+			}
+			continue;
+		}
+
+		if (ce && !ce->is_plant) {
+			int count = ce->is_big ? 1 + (int)(ndw_next(&rng) & 1) : 1;
+			ndw_obj_t placed[2];
+			int np = 0;
+
+			for (int c = 0; c < count && n < NDW_MAX_OBJ; c++) {
+				for (int attempt = 0; attempt < 14; attempt++) {
+					ndw_obj_t o;
+					int xlo, xhi, ylo, yhi, ok = 1;
+					ndw_rect_t r;
+
+					memset(&o, 0, sizeof(o));
+					o.kind = ce->kind; o.big = ce->is_big;
+					o.fg = t->fg[s]; o.glyph = (uint8_t)g;
+					o.hw = ce->hw; o.hh = ce->hh;
+					xlo = third_lo + 4; xhi = third_hi - 4;
+					if (xlo < margin + o.hw) xlo = margin + o.hw;
+					if (xhi > NDW_TILE_W - margin - o.hw) xhi = NDW_TILE_W - margin - o.hw;
+					if (xhi <= xlo) xhi = xlo + 1;
+					ylo = margin + o.hh; yhi = NDW_TILE_H - margin;
+					o.x = (int16_t)(xlo + (int)ndw_below(&rng, (uint32_t)(xhi - xlo)));
+					o.y = (int16_t)(ylo + (int)ndw_below(&rng, (uint32_t)(yhi - ylo)));
+					o.variant = (uint8_t)(ndw_next(&rng) & 0xFF);
+
+					r = ndw_obj_rect(&o);
+					{
+						ndw_rect_t clear = { NDW_CLEAR_X0, NDW_CLEAR_Y0, NDW_CLEAR_X1, NDW_CLEAR_Y1 };
+						if (ndw_rect_hit(&r, &clear))
+							ok = 0;
+					}
+					for (int w = 0; ok && w < nwall; w++)
+						if (ndw_rect_hit(&r, &walls[w]))
+							ok = 0;
+					for (int p = 0; ok && p < np; p++) {
+						int dx = o.x - placed[p].x, dy = o.y - placed[p].y;
+						if (dx < 0) dx = -dx;
+						if (dy < 0) dy = -dy;
+						if (dx < 18 && dy < 10)
 							ok = 0;
 					}
 					if (!ok)

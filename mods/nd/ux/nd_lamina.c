@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "nd_lamina.h"
 #include "nd_scene.h"
+#include "nd_seven.h"
 
 /* Helper to blend / write 32-bit RGBA pixel (0xAABBGGRR in LE format) */
 static inline void set_pixel(uint32_t *fb, uint32_t w, uint32_t h, uint32_t x, uint32_t y, uint32_t color)
@@ -201,6 +202,11 @@ static int is_plant_glyph(int g)
 	       g == 'a' || g == 'A' || g == 'i' || g == 'I';
 }
 
+static int is_mineral_glyph(int g)
+{
+	return g == '*' || g == 'o' || g == 'O';
+}
+
 static void draw_crown(uint32_t *fb, uint32_t w, uint32_t h, int mx, int top,
                        int cw_, int ch_, uint32_t col)
 {
@@ -271,6 +277,63 @@ static void draw_plant(uint32_t *fb, uint32_t w, uint32_t h,
 	}
 }
 
+/* Pixels for n/30 of a tile, at least 1. */
+static int tile_px(uint32_t tile_sz, int n)
+{
+	int v = (int)tile_sz * n / 30;
+	return v < 1 ? 1 : v;
+}
+
+/* One stone, rock or boulder with its foot at (fx, fy): stones are small grey
+ * dots, rocks bigger shaded tan/grey blobs, boulders bigger still. */
+static void draw_mineral(uint32_t *fb, uint32_t w, uint32_t h, uint32_t tile_sz,
+                         int fx, int fy, int kind, int variant)
+{
+	if (kind == NDW_K_STONE) {
+		int d = tile_px(tile_sz, 2);
+		uint32_t g = 0xFF8E8E8E - (uint32_t)(variant & 3) * 0x00080808u;
+		fill_rect_blend(fb, w, h, (uint32_t)(fx - d / 2), (uint32_t)(fy - d), (uint32_t)d, (uint32_t)d, g);
+		return;
+	}
+	{
+		int boulder = kind == NDW_K_BOULDER;
+		int rw = tile_px(tile_sz, boulder ? 7 : 4) + 1;
+		int rh = rw * 3 / 4 + 1;
+		uint32_t base = (variant & 1) ? 0xFF6E8CB0 : 0xFF959AA4;   /* tan / cold grey */
+		int x = fx - rw / 2, y = fy - rh;
+
+		fill_rect_blend(fb, w, h, (uint32_t)(x - 1), (uint32_t)(fy - 1), (uint32_t)(rw + 2), 2u, 0x55000000);
+		fill_rounded_rect(fb, w, h, x, y, rw, rh, rh / 2 + 1, shade(base, 62, 100));
+		fill_rounded_rect(fb, w, h, x, y, rw - 1, rh - 1, (rh - 1) / 2 + 1, base);
+		fill_rect_blend(fb, w, h, (uint32_t)(x + 1), (uint32_t)(y + 1), (uint32_t)(rw / 3 > 0 ? rw / 3 : 1), 1u,
+		                shade(base, 140, 100));
+	}
+}
+
+/* The plants and minerals of tile (col,row), exactly where Seven puts them,
+ * scaled from the 160x128 world tile to the map tile. */
+static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map,
+                              int col, int row, uint32_t tx, uint32_t ty, uint32_t tile_sz)
+{
+	ndw_obj_t objs[NDW_MAX_OBJ];
+	int n = nd_seven_tile_objects(map, col, row, objs);
+
+	for (int i = 0; i < n; i++) {
+		const ndw_obj_t *o = &objs[i];
+		int fx = (int)tx + o->x * (int)tile_sz / NDW_TILE_W;
+		int fy = (int)ty + o->y * (int)tile_sz / NDW_TILE_H;
+
+		if (o->kind >= NDW_K_DECID && o->kind <= NDW_K_CACTUS) {
+			int cw = tile_px(tile_sz, o->big ? 12 : 10);
+			int ch = cw * 14 / 10 + 2;
+			if (cw < 5) cw = 5;
+			draw_plant(fb, w, h, fx - cw / 2, fy - ch, cw, ch, o->glyph, ansi_rgb(o->fg));
+		} else if (o->kind >= NDW_K_STONE && o->kind <= NDW_K_BOULDER) {
+			draw_mineral(fb, w, h, tile_sz, fx, fy, o->kind, o->variant);
+		}
+	}
+}
+
 /* One map cell (left, centre or right third of a tile): a plant sprite or the
  * glyph the ASCII map shows there, in the colour the ASCII map shows it. */
 static void draw_cell(uint32_t *fb, uint32_t w, uint32_t h,
@@ -279,10 +342,10 @@ static void draw_cell(uint32_t *fb, uint32_t w, uint32_t h,
 	if (glyph <= 0 || glyph == ' ')
 		return;
 	uint32_t col = ansi_rgb(fg);
-	if (is_plant_glyph(glyph)) {
-		draw_plant(fb, w, h, cx, cy, cw, ch, glyph, col);
+	/* Flora and minerals are laid out by draw_tile_objects, at the positions
+	 * Seven places them; every other glyph keeps its cell. */
+	if (is_plant_glyph(glyph) || is_mineral_glyph(glyph))
 		return;
-	}
 	int scale = cw >= 9 ? 2 : 1;
 	draw_glyph_scaled(fb, w, h, cx + (cw - 3 * scale) / 2, cy + (ch - 5 * scale) / 2,
 	                  glyph, col, scale);
@@ -372,6 +435,16 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
                                  uint32_t tod,
                                  uint32_t frame)
 {
+	nd_lamina_render_map_live(fb, w, h, map, theme_name, tod, frame, 0, 0, 0);
+}
+
+void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
+                               const nd_map_data_t *map,
+                               const char *theme_name,
+                               uint32_t tod,
+                               uint32_t frame,
+                               int live, int lamb_x, int lamb_y)
+{
 	if (!fb || w == 0 || h == 0)
 		return;
 
@@ -400,6 +473,8 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
 	uint32_t start_y = (h - (rows * tile_sz)) / 2;
 
 	uint32_t amb = tod_brightness(tod);
+
+	int have_player = 0, pcx = 0, pcy = 0;
 
 	/* 2. Render each tile the way the ASCII map does: the biome's background
 	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
@@ -461,23 +536,40 @@ void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
 				draw_cell(fb, w, h, cx0 + cw, (int)ty, cw, ch, tile->symbol, tile->fg);
 			draw_cell(fb, w, h, cx0 + 2 * cw, (int)ty, cw, ch, tile->side_r, tile->fg_r);
 
-			/* Player avatar with breathing radial glow */
+			draw_tile_objects(fb, w, h, map, (int)x, (int)y, tx, ty, tile_sz);
+
 			if (is_player) {
-				int cx = (int)(tx + tile_sz / 2);
-				int cy = (int)(ty + tile_sz / 2);
-
-				/* Breathing radius based on frame counter (0..60 cycle) */
-				int pulse = (int)(frame % 60);
-				if (pulse > 30) pulse = 60 - pulse;
-				int glow_radius = (int)(tile_sz / 2) + (pulse / 6);
-
-				draw_radial_glow(fb, w, h, cx, cy, glow_radius, theme->player_glow);
-
-				/* Inner player marker */
-				fill_rounded_rect(fb, w, h, cx - 3, cy - 3, 7, 7, 3, theme->player_color);
-				fill_rounded_rect(fb, w, h, cx - 1, cy - 1, 3, 3, 1, 0xFFFFFFFF);
+				have_player = 1;
+				pcx = (int)(tx + tile_sz / 2);
+				pcy = (int)(ty + tile_sz / 2);
 			}
 		}
+	}
+
+	/* Player avatar with breathing radial glow. Drawn last so no tree hides it.
+	 * With Seven live it follows the lamb's sub-tile position. */
+	if (have_player) {
+		int cx = pcx, cy = pcy;
+
+		if (live) {
+			cx += (lamb_x - NDW_CENTER_X) * (int)tile_sz / NDW_TILE_W;
+			cy += (lamb_y - NDW_CENTER_Y) * (int)tile_sz / NDW_TILE_H;
+			if (cx < 3) cx = 3;
+			if (cy < 3) cy = 3;
+			if (cx > (int)w - 4) cx = (int)w - 4;
+			if (cy > (int)h - 4) cy = (int)h - 4;
+		}
+
+		/* Breathing radius based on frame counter (0..60 cycle) */
+		int pulse = (int)(frame % 60);
+		if (pulse > 30) pulse = 60 - pulse;
+		int glow_radius = (int)(tile_sz / 2) + (pulse / 6);
+
+		draw_radial_glow(fb, w, h, cx, cy, glow_radius, theme->player_glow);
+
+		/* Inner player marker */
+		fill_rounded_rect(fb, w, h, cx - 3, cy - 3, 7, 7, 3, theme->player_color);
+		fill_rounded_rect(fb, w, h, cx - 1, cy - 1, 3, 3, 1, 0xFFFFFFFF);
 	}
 
 	/* 3. Soft atmospheric vignette around map edges */

@@ -357,7 +357,7 @@ int main(void)
 
 	/* Other plant families and map features show up too. */
 	{
-		const int gl[][3] = { { 'x', 0, 0 }, { 0, 'T', 0 }, { 0, 0, 'a' }, { 0, '~', 0 }, { 0, '$', 0 }, { '<', 0, '>' } };
+		const int gl[][3] = { { 'x', 0, 0 }, { 0, 'T', 0 }, { 0, 0, 'a' }, { 0, '~', 0 }, { 0, '$', 0 }, { '<', 0, '>' }, { '*', 0, 0 }, { 0, 'o', 0 }, { 0, 0, 'O' } };
 		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
 		nd_seven_render(fb, 1280, 720, &st);
 		for (unsigned k = 0; k < sizeof(gl) / sizeof(gl[0]); k++) {
@@ -366,7 +366,75 @@ int main(void)
 			assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
 		}
 	}
-	printf("PASS: deciduous, tall, fir, pond, shop and stairs glyphs are drawn\n");
+	printf("PASS: deciduous, tall, fir, pond, shop, stairs, stone and rock glyphs are drawn\n");
+
+	/* Stones are drawn pebbles, rocks bigger, boulders bigger still: the
+	 * pixels each adds over the bare map grow with the glyph, and a stone
+	 * stays well under the old 25x24 atlas sprite per object. */
+	{
+		static const int glyph[3] = { '*', 'o', 'O' };
+		int area[3], objs[3];
+
+		for (int k = 0; k < 3; k++) {
+			int diff = 0;
+
+			set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+			nd_seven_render(fb2, 1280, 720, &st);
+			set_map(5, -3, 10, 0x1B, 0, 0, glyph[k], 0);
+			nd_seven_render(fb, 1280, 720, &st);
+			for (int i = 0; i < 1280 * 720; i++)
+				diff += fb[i] != fb2[i];
+			area[k] = diff;
+			/* objects Seven laid out in the 7x7 map that can be on screen */
+			objs[k] = 0;
+			for (int r = 0; r < 7; r++)
+				for (int c = 0; c < 7; c++) {
+					ndw_obj_t o[NDW_MAX_OBJ];
+					objs[k] += nd_seven_tile_objects(&st.map_data, c, r, o);
+				}
+			assert(diff > 0);
+		}
+		assert(area[0] < area[1] && area[1] < area[2]);
+		assert(objs[0] > 0 && area[0] / objs[0] < 25 * 24 * 4);
+		printf("PASS: stones, rocks and boulders draw as distinct, growing shapes\n");
+	}
+
+	/* The minimap reuses Seven's layout: nd_seven_tile_objects is the same
+	 * list ndw_tile_objects gives for the tile's absolute position. */
+	{
+		ndw_obj_t a[NDW_MAX_OBJ], b[NDW_MAX_OBJ];
+		ndw_tile_t t;
+		int16_t pos[4] = { (int16_t)(5 + 1 - 3), (int16_t)(-3 - (1 - 3)), 0, 0 };
+		int na, nb;
+
+		set_map(5, -3, 10, 0x1B, 0, 0, 'o', 'a');
+		nd_seven_forget();
+		na = nd_seven_tile_objects(&st.map_data, 1, 1, a);
+		memset(&t, 0, sizeof(t));
+		t.biome = st.map_data.tiles[1 * 7 + 1].bio_idx;
+		t.exits = st.map_data.tiles[1 * 7 + 1].exits & 0x1B;
+		t.glyph[1] = 'o'; t.glyph[2] = 'a';
+		t.fg[1] = t.fg[2] = 10;
+		nb = ndw_tile_objects(&t, pos, 0, b);
+		assert(na == nb && na > 0);
+		assert(memcmp(a, b, (size_t)na * sizeof(a[0])) == 0);
+		assert(nd_seven_tile_objects(&st.map_data, -1, 0, a) == 0);
+		assert(nd_seven_tile_objects(NULL, 0, 0, a) == 0);
+		printf("PASS: nd_seven_tile_objects mirrors the world layout and rejects off-map tiles\n");
+	}
+
+
+	/* A rock seen from outside survives the player entering its tile, just like a tree. */
+	{
+		set_map(5, -3, 10, 0x1B, 0, 0, 'o', 0);
+		nd_seven_render(fb, 1280, 720, &st);          /* (6,-3) seen as 'o' */
+		set_map_keep(6, -3, 10, 0x1B, 0, 0, 'o', 0);   /* now we stand in it */
+		nd_seven_render(fb, 1280, 720, &st);
+		set_map(6, -3, 10, 0x1B, 0, 0, 'o', 0);        /* control: never seen */
+		nd_seven_render(fb2, 1280, 720, &st);
+		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);   /* the restored rock is drawn */
+		printf("PASS: a rock survives the player entering its tile without popping\n");
+	}
 
 	/* The room contents list is drawn in the lamb's tile. */
 	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);

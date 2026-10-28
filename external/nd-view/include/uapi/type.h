@@ -47,6 +47,14 @@ int nd_evt_move(unsigned ref);
 int nd_evt_vim(unsigned ref, sic_str_t ss);
 struct bio nd_evt_noise(struct bio bio, uint32_t he, uint32_t w, uint32_t tm,
 	uint32_t cl);
+/* OR'd into `side` by the ASCII map path (view.c) only. Decorators strip it
+ * with `side & CORE_ET_SIDE_MASK` and may draw less (or differently) there;
+ * the structured map_data path never sets it. */
+#ifndef CORE_ET_ASCII
+#define CORE_ET_ASCII 0x80u
+#define CORE_ET_SIDE_MASK 0x03u
+#endif
+
 sic_str_t nd_evt_empty_tile(view_tile_t t, unsigned side, sic_str_t ss);
 
 int nd_evt_new_player(unsigned player_ref);

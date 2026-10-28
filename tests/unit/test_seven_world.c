@@ -191,6 +191,34 @@ int main(void)
 		printf("PASS: plant under the player flag still draws; '!' marker does not\n");
 	}
 
+	/* Ahead-of-Time (AOT) rocks and stones: mineral glyphs '*', 'o', 'O'
+	 * produce persistent world objects of kinds NDW_K_STONE, NDW_K_ROCK, NDW_K_BOULDER. */
+	{
+		ndw_tile_t stn = tile(10, 0x1B, 0, '*', 0, 0);
+		na = ndw_tile_objects(&stn, pos, 0, a);
+		assert(na == 1 && a[0].kind == NDW_K_STONE && a[0].glyph == '*');
+
+		ndw_tile_t rck = tile(10, 0x1B, 0, 0, 'o', 0);
+		na = ndw_tile_objects(&rck, pos, 0, a);
+		assert(na == 1 && a[0].kind == NDW_K_ROCK && a[0].glyph == 'o');
+
+		ndw_tile_t bld = tile(10, 0x1B, 0, 0, 0, 'O');
+		na = ndw_tile_objects(&bld, pos, 0, a);
+		assert(na >= 1 && a[0].kind == NDW_K_BOULDER && a[0].glyph == 'O' && a[0].big);
+
+		/* Multi-content tile: both flora and mineral can coexist in separate cells */
+		ndw_tile_t multi = tile(10, 0x1B, 0, 'x', 0, 'o');
+		na = ndw_tile_objects(&multi, pos, 0, a);
+		assert(na >= 2);
+		int has_tree = 0, has_rock = 0;
+		for (int i = 0; i < na; i++) {
+			if (a[i].kind == NDW_K_DECID) has_tree = 1;
+			if (a[i].kind == NDW_K_ROCK) has_rock = 1;
+		}
+		assert(has_tree && has_rock);
+		printf("PASS: AOT rocks and stones map to world objects and coexist with flora\n");
+	}
+
 	printf("ALL SEVEN WORLD TESTS PASSED\n");
 	return 0;
 }

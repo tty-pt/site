@@ -4,6 +4,7 @@
 #include <assert.h>
 #include "nd/bcp-types.h"
 #include "nd_lamina.h"
+#include <nd/seven-world.h>
 
 /* Frame geometry for a 224x224 buffer and a 7x7 grid (as nd_lamina.c lays it
  * out): 4px pad, tile 30px, three 10px cells per tile, map centred. */
@@ -123,16 +124,19 @@ int main(void)
 	init_sample_map(&m);
 	wild(&m, 1, 1, 2, 'T', 10, 'x', 10, 'a', 10);
 	render(&m, "lamina", 0);
+	/* Trees stand where Seven puts them: somewhere in their third, not at its
+	 * centre, so each third's box is widened by the crown radius. */
 	for (int c = 0; c < 3; c++)
-		assert(count_in(TX(1) + c * CELL, TY(1), CELL, TILE, C_BRIGHT_GRN) > 6);
-	printf("PASS: left, centre and right cells each draw a tree in the species colour\n");
+		assert(count_in(TX(1) + c * CELL - 3, TY(1) - 16, CELL + 6, TILE + 16, C_BRIGHT_GRN) > 0);
+	assert(count_in(TX(1) - 3, TY(1) - 16, TILE + 6, TILE + 16, C_BRIGHT_GRN) > 12);
+	printf("PASS: left, centre and right thirds each draw a tree in the species colour\n");
 
 	/* 6. The colour comes from the species, not from the glyph. */
 	init_sample_map(&m);
 	wild(&m, 1, 1, 2, 'x', 3, 0, 0, 0, 0); /* yellow birch-like */
 	render(&m, "lamina", 0);
-	assert(count_in(TX(1), TY(1), CELL, TILE, C_YELLOW) > 4);
-	assert(count_in(TX(1), TY(1), CELL, TILE, C_BRIGHT_GRN) == 0);
+	assert(count_in(TX(1) - 3, TY(1) - 16, CELL + 6, TILE + 16, C_YELLOW) > 4);
+	assert(count_in(TX(1) - 3, TY(1) - 16, CELL + 6, TILE + 16, C_BRIGHT_GRN) == 0);
 	printf("PASS: a yellow plant is drawn yellow, not green\n");
 
 	/* 7. Plant families and growth sizes are visually distinct. */
@@ -190,6 +194,113 @@ int main(void)
 	nd_lamina_render_map(fb, W, H, &map);
 	assert(memcmp(again, fb, sizeof(again)) == 0);
 	printf("PASS: player pulse animates; compat wrapper matches the default render\n");
+
+	/* 12. Minerals sit where Seven puts them: not at a cell centre, different
+	 * per absolute position, identical for the same position. Stones are small
+	 * grey dots, rocks bigger and tan or grey. */
+	{
+		const uint32_t c_stone_lo = 0xFF808080, c_stone_hi = 0xFF8E8E8E;
+		uint32_t a[W * H], b[W * H];
+		int stone_px, rock_px;
+		nd_map_data_t ma;
+
+		init_sample_map(&ma);
+		wild(&ma, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		wild(&ma, 4, 1, 2, 0, 0, 0, 0, 0, 0);
+		ma.tiles[1 * 7 + 1].symbol = '*';
+		ma.tiles[1 * 7 + 4].symbol = '*';
+		ma.pos[0] = 10; ma.pos[1] = 20;
+		render(&ma, "lamina", 0);
+		memcpy(a, fb, sizeof(a));
+		render(&ma, "lamina", 0);
+		assert(memcmp(a, fb, sizeof(a)) == 0);
+
+		/* same tile glyphs, different absolute position: stones move */
+		ma.pos[0] = 11;
+		render(&ma, "lamina", 0);
+		memcpy(b, fb, sizeof(b));
+		assert(memcmp(a, b, sizeof(a)) != 0);
+
+		/* a stone is a small grey dot (1..6 px), nowhere near a glyph "*" */
+		memcpy(fb, a, sizeof(fb));
+		stone_px = 0;
+		for (int dy = -16; dy < TILE; dy++)
+			for (int dx = 0; dx < TILE; dx++) {
+				uint32_t px = fb[(TY(1) + dy) * W + TX(1) + dx];
+				if (px >= c_stone_lo - 0x00182018 && px <= c_stone_hi &&
+				    ((px >> 16) & 0xFF) == ((px >> 8) & 0xFF) && ((px >> 8) & 0xFF) == (px & 0xFF))
+					stone_px++;
+			}
+		assert(stone_px >= 1 && stone_px <= 6);
+
+		/* two tiles with the same glyphs at different positions put the dot
+		 * at different offsets inside their tiles (not one fixed spot) */
+		{
+			int off[2] = { -1, -1 };
+			for (int t = 0; t < 2; t++)
+				for (int dy = -16; dy < TILE && off[t] < 0; dy++)
+					for (int dx = 0; dx < TILE; dx++) {
+						uint32_t px = a[(TY(1) + dy) * W + (t ? TX(4) : TX(1)) + dx];
+						if (px >= c_stone_lo - 0x00182018 && px <= c_stone_hi &&
+						    ((px >> 16) & 0xFF) == ((px >> 8) & 0xFF) &&
+						    ((px >> 8) & 0xFF) == (px & 0xFF)) {
+							off[t] = (dy + 16) * TILE + dx;
+							break;
+						}
+					}
+			assert(off[0] >= 0 && off[1] >= 0 && off[0] != off[1]);
+		}
+
+		/* a rock covers more pixels than a stone; a boulder more than a rock */
+		{
+			nd_map_data_t mr;
+			int cnt[2];
+			for (int kind = 0; kind < 2; kind++) {
+				init_sample_map(&mr);
+				wild(&mr, 1, 1, 2, 0, 0, kind ? 'O' : 'o', 7, 0, 0);
+				mr.pos[0] = 10; mr.pos[1] = 20;
+				render(&mr, "lamina", 0);
+				cnt[kind] = 0;
+				for (int dy = -16; dy < TILE; dy++)
+					for (int dx = -4; dx < TILE + 4; dx++) {
+						uint32_t px = fb[(TY(1) + dy) * W + TX(1) + dx];
+						if (px != C_GREEN_BG && px != 0 && px != 0xFF08090C && (px & 0xFF000000))
+							cnt[kind]++;
+					}
+			}
+			rock_px = cnt[0];
+			assert(cnt[1] > cnt[0] && rock_px > stone_px);
+		}
+		printf("PASS: minerals are placed like Seven, stones are small grey dots, rocks bigger\n");
+	}
+
+	/* 13. Live player: with Seven running the marker follows the lamb's
+	 * sub-tile position, otherwise it sits at the tile centre. */
+	{
+		uint32_t c0[W * H];
+		nd_map_data_t ml;
+		const int pcx = TX(3) + TILE / 2, pcy = TY(3) + TILE / 2;
+
+		init_sample_map(&ml);
+		memset(fb, 0, sizeof(fb));
+		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 0, 0, 0);
+		memcpy(c0, fb, sizeof(c0));
+		assert(fb[pcy * W + pcx] == 0xFFFFFFFF);           /* white core at the centre */
+
+		memset(fb, 0, sizeof(fb));
+		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y);
+		assert(memcmp(c0, fb, sizeof(c0)) == 0);            /* lamb at centre == not live */
+
+		memset(fb, 0, sizeof(fb));
+		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X + 40, NDW_CENTER_Y);
+		assert(fb[pcy * W + pcx + 40 * TILE / NDW_TILE_W] == 0xFFFFFFFF);
+		assert(fb[pcy * W + pcx] != 0xFFFFFFFF);
+
+		memset(fb, 0, sizeof(fb));
+		nd_lamina_render_map_live(fb, W, H, &ml, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y + 30);
+		assert(fb[(pcy + 30 * TILE / NDW_TILE_H) * W + pcx] == 0xFFFFFFFF);
+		printf("PASS: the live player marker follows the lamb; idle it stays centred\n");
+	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");
 	return 0;

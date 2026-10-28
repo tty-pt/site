@@ -58,7 +58,49 @@
         "implementing": "antigravity/gemini-3.8-flash",
         "validating": "antigravity/gemini-3.8-flash"
       }
-    }
+    },
+    "lintRules": [
+      {
+        "id": "no-ux-compile-branch",
+        "filePattern": "/ux/[^/]*\\.c$",
+        "excludeFilePattern": "site_ui\\.c$",
+        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
+        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+[A-Za-z0-9_]+_C\\b",
+        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
+      },
+      {
+        "id": "no-ux-compile-branch",
+        "filePattern": "site_ui\\.c$",
+        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
+        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+(?:[A-Za-z0-9_]+_C|__wasm__)\\b",
+        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
+      },
+      {
+        "id": "no-ux-engine-symbols",
+        "filePattern": "/ux/[^/]*\\.c$",
+        "linePattern": "\\b(?:corm_|source_|axil_|lemma_|hyle_source|XY_)",
+        "message": "Forbidden engine symbol in isomorphic UX: {file} cannot reference XY_/corm_/source_/axil_/lemma_/hyle_source."
+      },
+      {
+        "id": "no-cross-module-c-include",
+        "excludeFilePattern": "(?:site_ui|list)\\.c$",
+        "linePattern": "^\\s*#\\s*include\\s+[\"<].*?\\.c[\">]",
+        "message": "Forbidden #include '*.c' in {file}. Cross-module calls must use XY boundaries."
+      }
+    ],
+    "steeringPhrases": [
+      "go on",
+      "carry on",
+      "keep going",
+      "proceed",
+      "ship it",
+      "looks good",
+      "confirm",
+      "continua",
+      "vai em frente",
+      "avan\u00e7a",
+      "pode avan\u00e7ar"
+    ]
   },
   "pi-mm": {
     "judgeMode": "auto",

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "nd/bcp.h"
+#include <nd/seven-world.h>
 
 /*
  * The 2D "seven" stage: the NeverDark map as one continuous, scrolling world
@@ -28,6 +29,13 @@ void nd_seven_render(uint32_t *fb, uint32_t w, uint32_t h, const nd_client_state
 /* Lamb state, exposed for tests and the HUD. */
 /* Forget remembered tile glyphs (new session or world). */
 void nd_seven_forget(void);
+
+/*
+ * The objects Seven places in map tile (col, row) of md, in tile-local units
+ * (NDW_TILE_W x NDW_TILE_H), back to front. Same layout the stage draws, so
+ * other views (the lamina minimap) can mirror it. Returns the count.
+ */
+int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t out[NDW_MAX_OBJ]);
 
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);

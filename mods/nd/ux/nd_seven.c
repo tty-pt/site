@@ -368,6 +368,24 @@ static int lookup(void *ctx, int ti, int tj, ndw_tile_t *t, int16_t pos[4])
 	return tile_at(wd->st, ti, tj, t, pos) == 1 ? 1 : 0;
 }
 
+int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t out[NDW_MAX_OBJ])
+{
+	ndw_tile_t t;
+	int16_t pos[4];
+
+	if (!md || md->width == 0 || md->height == 0 ||
+	    col < 0 || row < 0 || col >= md->width || row >= md->height ||
+	    col >= ND_MAP_GRID_WIDTH || row >= ND_MAP_GRID_HEIGHT)
+		return 0;
+	pos[0] = (int16_t)(md->pos[0] + col - md->player_x);
+	pos[1] = (int16_t)(md->pos[1] - (row - md->player_y));
+	pos[2] = md->pos[2];
+	pos[3] = md->pos[3];
+	t = convert_tile(&md->tiles[row * md->width + col]);
+	centre_remember(pos, &t);
+	return ndw_tile_objects(&t, pos, 0, out);
+}
+
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking)
 {
 	if (fx) *fx = s_lx;
@@ -590,6 +608,48 @@ static void draw_cactus(const ctx_t *c, int big, int fg, int variant)
 	urect(c, -1, -bh - 1, 2, 1, RGB(230, 120, 150));   /* the flower on top */
 }
 
+/* A small flat pebble, deliberately unlike a rock: low, smooth, grey. A
+ * second tiny pebble sometimes sits beside it. */
+static void draw_stone(const ctx_t *c, int variant)
+{
+	static const uint32_t pal[3] = { RGB(142, 146, 154), RGB(120, 128, 142), RGB(156, 150, 140) };
+	uint32_t base = pal[(variant >> 2) % 3];
+	int rx = 3 + (variant & 1), ry = 2;
+
+	shadow(c, rx + 1);
+	uellipse(c, 0, -ry, rx, ry, shade(base, 55));
+	uellipse(c, 0, -ry, rx - 1, ry, base);
+	urect(c, -rx / 2, -ry - 1, rx - 1, 1, shade(base, 128));
+	if (variant & 8) {
+		uellipse(c, rx + 2, -1, 1, 1, shade(base, 55));
+		urect(c, rx + 2, -2, 1, 1, shade(base, 120));
+	}
+}
+
+/* A medium, angular rock: faceted (lit left face, shaded right face, dark
+ * base), in cold grey or warm ochre. */
+static void draw_rock(const ctx_t *c, int variant)
+{
+	static const uint8_t prof[8] = { 40, 70, 90, 100, 100, 100, 94, 80 };
+	uint32_t base = (variant & 16) ? RGB(168, 140, 100) : RGB(132, 136, 146);
+	int rx = 6 + (variant & 1), rows = 8;
+
+	shadow(c, rx + 2);
+	for (int r = 0; r < rows; r++) {
+		int hw = rx * prof[r] / 100;
+		int y = -rows + r;
+		uint32_t left = shade(base, r < 2 ? 135 : 112);
+		uint32_t right = shade(base, r >= rows - 2 ? 58 : 82);
+
+		urect(c, -hw, y, hw, 1, left);
+		urect(c, 0, y, hw, 1, right);
+		urect(c, -hw - 1, y, 1, 1, shade(base, 45));
+		urect(c, hw, y, 1, 1, shade(base, 45));
+	}
+	urect(c, -rx / 2, -rows + 1, rx / 2, 1, shade(base, 150));
+	urect(c, 1, -rows + 3, 1, 3, shade(base, 50));   /* a crack */
+}
+
 static void draw_fir(const ctx_t *c, int big, int fg)
 {
 	uint32_t base = shade(s_ansi[fg & 15], 80);
@@ -781,6 +841,26 @@ static void draw_world_obj(uint32_t *fb, int w, int h, const ndw_obj_t *o, int s
 	case NDW_K_SHOP:     draw_shop(&c, o->fg); break;
 	case NDW_K_STAIRS_DOWN: draw_stairs(&c, 0); break;
 	case NDW_K_STAIRS_UP:   draw_stairs(&c, 1); break;
+	case NDW_K_STONE:
+		draw_stone(&c, o->variant);
+		break;
+	case NDW_K_ROCK: {
+		static const uint8_t med_rocks[] = { NDS_ROCK_TAN, NDS_ROCK_GREY };
+		if ((o->variant & 3) < 2) {
+			draw_rock(&c, o->variant >> 2);
+			break;
+		}
+		id = med_rocks[o->variant & 1];
+		r = &nd_seven_sprite_rects[id];
+		blit_all_f(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL, (o->variant >> 4) & 1);
+		break;
+	}
+	case NDW_K_BOULDER: {
+		id = (o->variant & 1) ? NDS_ROCK_WHITE_BIG : NDS_ROCK_TAN_BIG;
+		r = &nd_seven_sprite_rects[id];
+		blit_all_f(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL, (o->variant >> 4) & 1);
+		break;
+	}
 	default:             draw_pawn(&c, o->glyph, o->fg); break;
 	}
 }
@@ -854,6 +934,15 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 
 	if (!st)
 		return n;
+	ndw_tile_t cur_tile;
+	int16_t cur_pos[4];
+	int has_map_stone = 0;
+	if (tile_at(st, 0, 0, &cur_tile, cur_pos)) {
+		for (int s = 0; s < 3; s++) {
+			if (cur_tile.glyph[s] == '*' || cur_tile.glyph[s] == 'o' || cur_tile.glyph[s] == 'O')
+				has_map_stone = 1;
+		}
+	}
 	for (size_t i = 0; i < st->entity_count && n < MAX_DRAW; i++) {
 		const nd_entity_desc_t *e = &st->entities[i];
 		uint32_t spot;
@@ -863,6 +952,8 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 			continue;
 		if (room && e->location != room)
 			continue;
+		if (is_mineral_or_rock(e) && has_map_stone)
+			continue; /* already rendered as an AOT world object from map data */
 		spot = ndw_mix(e->ref) % 16;
 		while ((used >> spot) & 1) {
 			spot = (spot + 1) % 16;

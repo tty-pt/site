@@ -1,5 +1,6 @@
 #include "nd_ui_internal.h"
 #include "nd_lamina.h"
+#include "nd_seven.h"
 #include <ttypt/lam.h>
 
 static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
@@ -256,7 +257,18 @@ void nd_map_canvas_redraw(const nd_client_state_t *st)
 		theme = "lamina";
 	}
 
-	nd_lamina_render_map_themed(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
-	                            &st->map_data, theme, st->tod, s_map_frame++);
+	/* With the Seven stage running, the player marker follows the lamb. */
+	int live = 0, lx = 0, ly = 0, have_room = 0;
+	if (strcmp(st->preferred_driver, "lamina-seven") == 0) {
+		nd_seven_debug(NULL, NULL, NULL, &have_room);
+		if (have_room) {
+			nd_seven_lamb(&lx, &ly, NULL, NULL);
+			live = 1;
+		}
+	}
+
+	nd_lamina_render_map_live(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
+	                          &st->map_data, theme, st->tod, s_map_frame++,
+	                          live, lx, ly);
 	lam_canvas_flush(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H);
 }
