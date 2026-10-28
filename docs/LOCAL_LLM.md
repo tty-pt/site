@@ -232,23 +232,20 @@ curl -s http://localhost:4242/api/v1/systemzero/ \
 - **`POST /api/v1/systemone/`**: Full Jev-compatible structured question evaluation over conversational state.
 
 ### Client Configuration (`judgeProtocol`)
-In `.pi/settings.json`:
+The defaults work with no settings at all (local server on `:4242`). Override in `.pi/settings.json` only to deviate:
 ```json
 {
-  "pi-quest": {
-    "judgeUrl": "http://127.0.0.1:4242",
-    "judgeProtocol": "auto"
-  },
-  "pi-mm": {
-    "judgeUrl": "http://127.0.0.1:4242",
-    "judgeProtocol": "auto"
-  }
+  "pi-quest": { "judgeUrl": "http://127.0.0.1:4242", "judgeProtocol": "systemone", "judgeModel": "olmoe" },
+  "pi-mm":    { "judgeUrl": "http://127.0.0.1:4242", "judgeProtocol": "systemone", "judgeModel": "olmoe" }
 }
 ```
 Protocol options:
-- `"systemzero"`: Uses axil-auren's fast binary endpoint (`/api/v1/systemzero/`).
-- `"systemone"`: Uses standard Jev choice question payload (`/api/v1/systemone/`).
-- `"auto"` (default): Attempts System Zero first for maximum speed; seamlessly falls back to System One on any server that lacks System Zero.
+- `"systemone"` (default): standard Jev choice question payload (`/api/v1/systemone/`). A single closed choice question is answered from option-letter logits in one forward pass with real softmax probabilities; generation is capped (64 tokens) so one request can never wedge the single engine worker; a reply that is not exactly one declared option is returned as `"choice": null`, which clients treat as "judge unavailable" (there is no silent first-option fallback).
+- `"systemzero"`: axil-auren's fast binary endpoint (`/api/v1/systemzero/`). Measured weaker on small models (3/8 with `qwen`, 6/8 with `olmoe` on a quest-vs-chat check), so it is opt-in.
+- `"auto"`: attempts System Zero first, falls back to System One.
+
+### Classifying operator steering: embeddings, not the judge
+Small local judges are position-biased on multi-option questions (reordering the options changes the answer), so `pi-quest` does **not** use the judge to read "go on" / "cancel" / "must never ...". It embeds the message with `POST /v1/embeddings` (`bge-base`, ~15 ms) and picks the nearest labelled exemplar sentence per intent, accepting state-changing verdicts only with a similarity floor and a margin over the runner-up. See `.pi/extensions/pi-quest/docs/OPERATOR_GUIDE.md` (*Embedding-first understanding*) for the settings (`embedMode`, `embedModel`, `intentMinMargin`, `intentMinSimilarity`, `intentExemplars`) and the opt-in live evaluation. The `bge-*` models are English-only; add exemplars in your language or use a multilingual embedding model for non-English steering.
 
 ### Independent Status Indicators in Pi
 Each extension manages its own dedicated footer status slot without collision:

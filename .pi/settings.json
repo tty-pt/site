@@ -100,22 +100,13 @@
       "vai em frente",
       "avança",
       "pode avançar"
-    ],
-    "judgeProtocol": "systemone",
-    "judgeUrl": "http://127.0.0.1:4242",
-    "judgeModel": "olmoe",
-    "judgeTimeoutMs": 15000
+    ]
   },
   "pi-mm": {
-    "judgeMode": "auto",
-    "judgeUrl": "http://127.0.0.1:4242",
-    "judgeModel": "olmoe",
-    "judgeTimeoutMs": 15000,
     "embedUrl": "http://127.0.0.1:4242/v1/embeddings",
     "embedModel": "bge-small",
     "semanticSearch": true,
-    "ephemeralSepal": true,
-    "judgeProtocol": "systemone"
+    "ephemeralSepal": true
   },
   "pi-early-compact": {
     "tiers": [

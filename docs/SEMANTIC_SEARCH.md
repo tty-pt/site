@@ -313,5 +313,8 @@ corm_close(text_map);
 - `liblemma` preserves diacritics strictly: `pão ≠ pao`.
 - `libsepal` converts text into semantic vector embeddings, capturing language meaning regardless of spelling variations.
 
-### 4. Where are uploaded PDFs stored?
+### 4. Can embeddings classify short commands (intent detection)?
+- Yes: embed a small set of labelled example sentences once, embed each incoming message, and take the nearest example's label by cosine similarity (vectors from `axil-auren` are unit length, so a dot product is the cosine). Require a minimum similarity and a margin over the runner-up label before acting. This is deterministic, order-free and ~15 ms per message, which beats asking a small generative judge to choose between options. `pi-quest` uses exactly this for operator steering (`.pi/extensions/pi-quest/src/judge/embed.ts`, `src/domain/intent.ts`). The `bge-*` models are English-only; add exemplars in your own language for better recall.
+
+### 5. Where are uploaded PDFs stored?
 - In `axil-resume-search`, uploaded files are stored physically under `uploads/` (`uploads/resume_<id>_<filename>.pdf`). Stored PDFs can be directly downloaded or viewed via `GET /resume/file?ref=<id>`.
