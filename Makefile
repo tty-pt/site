@@ -226,7 +226,7 @@ standalone-unit-tests:
 	@sh tests/unit/run-test-bcp-meta.sh
 	@sh tests/unit/run-test-scene-sync.sh
 	@sh tests/unit/run-test-ssr-hydration.sh
-	@sh tests/unit/run-test-seven-room.sh
+	@sh tests/unit/run-test-seven-world.sh
 	@sh tests/unit/run-test-seven-render.sh
 	@sh tests/unit/run-test-viewport-registry.sh
 	@sh tests/unit/run-test-seven-stage-html.sh

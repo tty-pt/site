@@ -5,7 +5,15 @@
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
-uint32_t g_lamina_fb[ND_CANVAS_W * ND_CANVAS_H];
+/* The seven stage fills the page: its framebuffer follows the viewport size
+ * (wasm_tick) and is allocated on demand. ND_CANVAS_W/H is only the size the
+ * canvas carries before the first frame. */
+uint32_t *g_lamina_fb;
+int g_stage_w = ND_CANVAS_W, g_stage_h = ND_CANVAS_H;
+#define ND_STAGE_MIN_W 320
+#define ND_STAGE_MIN_H 240
+#define ND_STAGE_MAX_W 2560
+#define ND_STAGE_MAX_H 1440
 int g_ui_initialized = 0;
 
 char g_active_modal[32] = {0};
@@ -113,16 +121,21 @@ static bud_node *mount_seven_stage(void)
 	/* A different tag than the terminal's <div>: swapping stages must replace
 	 * the element (patch-replace). Patching the terminal's div in place would
 	 * keep its data-bud-terminal attribute, and with it the live xterm, which
-	 * then swallows every key press. */
+	 * then swallows every key press.
+	 *
+	 * The stage fills its holder: the canvas is resized by the lamina bridge
+	 * to whatever frame size the stage draws (data-bud-canvas-fit), 1:1 with
+	 * the screen, so the sprite scale never changes. */
 	return lx_n("nd-stage",
 		lx_attr("id", "game-stage"),
-		lx_attr("class", "relative flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden"),
+		lx_attr("class", "absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950"),
 		lx_node(lx_n("canvas",
 			lx_attr("id", "seven-stage-canvas"),
 			lx_attr("data-bud-canvas", "1"),
+			lx_attr("data-bud-canvas-fit", "1"),
 			lx_attr("width", "640"),
 			lx_attr("height", "480"),
-			lx_attr("class", "w-[640px] h-[480px] rounded-lg border-2 border-amber-900/60 shadow-2xl block select-none bg-neutral-950"))));
+			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))));
 }
 
 static const nd_viewport_driver_t s_seven_driver = {
@@ -603,10 +616,17 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		/* Clean 2D Game Layout: render ONLY vport (game canvas) and map (minimap) */
 		bud_node *holder = bud_element("div");
 		bud_set_attr(holder, "id", "holder");
-		bud_set_attr(holder, "class", "nd game-2d-mode flex flex-row gap-4 p-3 min-h-0 h-full overflow-hidden justify-center items-center");
+		bud_set_attr(holder, "class", "nd game-2d-mode relative flex flex-col flex-1 min-h-0 w-full overflow-hidden");
 		bud_append(holder, vport);
-		if (map)
-			bud_append(holder, map);
+		if (map) {
+			/* The mini-map floats on top of the full-screen stage. */
+			bud_node *overlay = bud_element("div");
+			bud_set_attr(overlay, "id", "map-overlay");
+			bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none");
+			bud_set_attr(overlay, "style", "top:12px;right:12px");
+			bud_append(overlay, map);
+			bud_append(holder, overlay);
+		}
 
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
@@ -697,10 +717,30 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	return root;
 }
 
+/* Follow the viewport: (re)allocate the stage framebuffer when its size
+ * changes. Returns 0 when no buffer could be had. */
+static int seven_stage_fit(int width, int height)
+{
+	int w = width < ND_STAGE_MIN_W ? ND_STAGE_MIN_W : width > ND_STAGE_MAX_W ? ND_STAGE_MAX_W : width;
+	int h = height < ND_STAGE_MIN_H ? ND_STAGE_MIN_H : height > ND_STAGE_MAX_H ? ND_STAGE_MAX_H : height;
+
+	if (g_lamina_fb && w == g_stage_w && h == g_stage_h)
+		return 1;
+	uint32_t *nb = realloc(g_lamina_fb, (size_t)w * (size_t)h * sizeof(uint32_t));
+	if (!nb)
+		return g_lamina_fb != NULL;
+	g_lamina_fb = nb;
+	g_stage_w = w;
+	g_stage_h = h;
+	return 1;
+}
+
 static void seven_stage_redraw(void)
 {
-	nd_seven_render(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H, &client_state);
-	lam_canvas_flush(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H);
+	if (!seven_stage_fit(g_stage_w, g_stage_h))
+		return;
+	nd_seven_render(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
+	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
 }
 
 ISO_EXPORT(void, wasm_canvas_render, void)
@@ -712,9 +752,9 @@ ISO_EXPORT(void, wasm_canvas_render, void)
 
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 {
-	(void)width;
-	(void)height;
 	static uint32_t s_tick_counter = 0;
+	if (nd_ui_seven_active(&client_state) && width > 0 && height > 0)
+		seven_stage_fit(width, height);
 	s_tick_counter++;
 	if (nd_ui_seven_active(&client_state)) {
 		int mv = nd_seven_tick(&client_state, dt);

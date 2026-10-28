@@ -32,12 +32,30 @@ int main(void)
 	const char *tag_end = strchr(stage, '>');
 	char *s_tag = strndup(stage, (size_t)(tag_end - stage));
 	assert(strstr(s_tag, "data-bud-canvas") && strstr(s_tag, want_stage));
+	/* the stage follows the page: the bridge resizes it, CSS fills the holder */
+	assert(strstr(s_tag, "data-bud-canvas-fit"));
+	assert(strstr(s_tag, "w-full") && strstr(s_tag, "h-full"));
+	assert(strstr(s_tag, "w-[640px]") == NULL && strstr(s_tag, "border-2") == NULL);
 	free(s_tag);
 	tag_end = strchr(map, '>');
 	char *m_tag = strndup(map, (size_t)(tag_end - map));
 	assert(strstr(m_tag, "data-bud-canvas") && strstr(m_tag, want_map));
+	assert(strstr(m_tag, "data-bud-canvas-fit") == NULL);   /* the mini-map keeps its own size */
 	free(m_tag);
 	assert(ND_CANVAS_W != ND_MAP_CANVAS_W && ND_CANVAS_H != ND_MAP_CANVAS_H);
+	/* the mini-map is an overlay on top of the stage, not beside it */
+	{
+		const char *ov = strstr(html, "id=\"map-overlay\"");
+		assert(ov && ov > stage);
+		const char *ov_end = strchr(ov, '>');
+		char *ov_tag = strndup(ov, (size_t)(ov_end - ov));
+		assert(strstr(ov_tag, "absolute") && strstr(ov_tag, "z-10"));
+		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px"));
+		free(ov_tag);
+		assert(map > ov);
+		assert(strstr(html, "game-2d-mode relative"));
+	}
+
 	bud_free_string(html);
 
 	/* A non-seven stage keeps the terminal. */

@@ -103,11 +103,22 @@ export function createLaminaBridge(root, getWasm) {
 	}
 
 	function pickCanvas(width, height) {
+		// 1. a canvas whose intrinsic size is exactly w x h (fixed-size canvases
+		//    such as a mini-map keep their own frames);
+		// 2. a canvas marked data-bud-canvas-fit: it follows the frame size, so
+		//    it is resized to w x h and painted 1:1;
+		// 3. the first canvas.
 		const list = allCanvases();
-		let first = null;
+		let first = null, fit = null;
 		for (const c of list) {
 			if (!first) first = c;
 			if (c.width === width && c.height === height) return c;
+			if (!fit && c.hasAttribute && c.hasAttribute('data-bud-canvas-fit')) fit = c;
+		}
+		if (fit) {
+			fit.width = width;
+			fit.height = height;
+			return fit;
 		}
 		return first;
 	}

@@ -5,11 +5,11 @@
 XY_MODULE_API void
 xy_install(void)
 {
-	printf("nd-seven: 2D Zelda-like room action module loaded into region\n");
+	printf("nd-seven: 2D continuous world module loaded into region\n");
 }
 
 XY_MODULE_API void
 xy_uninstall(void)
 {
-	printf("nd-seven: 2D Zelda-like room action module unloaded from region\n");
+	printf("nd-seven: 2D continuous world module unloaded from region\n");
 }

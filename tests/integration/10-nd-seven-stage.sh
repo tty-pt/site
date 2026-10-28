@@ -1,5 +1,5 @@
 #!/bin/bash
-# 10-nd-seven-stage.sh -- real-browser check of the deterministic Zelda-like 2D stage
+# 10-nd-seven-stage.sh -- real-browser check of the continuous 2D stage
 # north-west of the spawn: sprite art, lamb, gates, deterministic rooms, and a
 # mini-map canvas that keeps its own frames. Skips when Playwright is missing.
 set -u

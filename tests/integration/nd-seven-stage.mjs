@@ -1,7 +1,9 @@
 // Real-browser check of the 2D "seven" stage: walking north of the spawn
-// enters the north-west region, where /nd swaps the terminal for the Zelda-like
-// canvas. The room must draw from the sprite atlas, differ from its neighbours,
-// come back identical, and the mini-map canvas must keep its own frames.
+// enters the north-west region, where /nd swaps the terminal for the
+// continuous canvas world. The stage must fill the page, draw from the sprite
+// atlas, carry the mini-map on top of it, scroll as the lamb walks across
+// tile borders (one move key per border, no gates) and give the terminal back
+// at the spawn.
 import { chromium } from "playwright";
 
 const port = process.argv[2];
@@ -40,18 +42,20 @@ const diff = (a, b) => page.evaluate(([a, b]) => {
   return n / (x.length / 4);
 }, [a, b]);
 
-// Hold an arrow until the stage asks the server to move (a gate was crossed).
-const walkThroughGate = async (key) => {
+// Hold an arrow until the stage asks the server to move (a tile border was
+// crossed); keep it down for `extra` ms more and report every key it sent.
+const walkAcross = async (key, extra = 0) => {
   const before = sent.length;
   await page.keyboard.down(key);
   const t0 = Date.now();
   let hit = null;
-  while (Date.now() - t0 < 7000 && !hit) {
+  while (Date.now() - t0 < 9000 && !hit) {
     hit = sent.slice(before).find((p) => /^[hjkl]\n$/.test(p)) || null;
     await sleep(100);
   }
+  if (hit && extra) await sleep(extra);
   await page.keyboard.up(key);
-  return hit;
+  return { hit, keys: sent.slice(before).filter((p) => /^[hjkl]\n$/.test(p)) };
 };
 
 try {
@@ -73,48 +77,59 @@ try {
   console.log("stage:", JSON.stringify(first));
   if (!first) fails.push("no stage canvas");
   else {
-    if (first.w !== 640 || first.h !== 480) fails.push("stage canvas size " + first.w + "x" + first.h);
+    const vp = page.viewportSize();
+    if (first.w < vp.width * 0.7 || first.h < vp.height * 0.6)
+      fails.push("stage canvas " + first.w + "x" + first.h + " does not fill the " + vp.width + "x" + vp.height + " page");
     if (first.distinct < 40) fails.push("stage is not sprite art (distinct colours " + first.distinct + ")");
-    if (first.green < 0.2) fails.push("stage shows no grass (green " + first.green + ")");
+  }
+  const geo = await page.evaluate(() => {
+    const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, z: getComputedStyle(e).zIndex }; };
+    return { stage: r("#seven-stage-canvas"), mini: r("#room-map-canvas"), overlay: r("#map-overlay") };
+  });
+  console.log("geometry:", JSON.stringify(geo));
+  if (geo.stage && geo.mini) {
+    const inside = geo.mini.x >= geo.stage.x && geo.mini.y >= geo.stage.y &&
+      geo.mini.x + geo.mini.w <= geo.stage.x + geo.stage.w + 1 && geo.mini.y + geo.mini.h <= geo.stage.y + geo.stage.h + 1;
+    if (!inside) fails.push("mini-map is not on top of the stage");
+    if (!geo.overlay || geo.overlay.z !== "10") fails.push("mini-map overlay is not stacked above the stage");
+    if (geo.mini.x + geo.mini.w < geo.stage.x + geo.stage.w * 0.5) fails.push("mini-map is not in the stage's right corner");
   }
   const mini = await stats("#room-map-canvas", "mini");
   console.log("mini :", JSON.stringify(mini));
   if (!mini || mini.distinct < 4) fails.push("mini-map canvas is blank (its frames went to the stage?)");
   else if (mini.w !== 224) fails.push("mini-map size " + mini.w);
 
-  // Walk out through whichever gate exists, look at the next room, walk back.
+  // Walk across a tile border in whichever direction exists: ONE move key per
+  // border, the stage stays mounted and keeps scrolling, and the way back
+  // works the same.
   const opposite = { ArrowUp: "ArrowDown", ArrowDown: "ArrowUp", ArrowLeft: "ArrowRight", ArrowRight: "ArrowLeft" };
   let crossed = null;
   for (const key of ["ArrowUp", "ArrowLeft", "ArrowRight", "ArrowDown"]) {
-    const hit = await walkThroughGate(key);
-    if (hit) { crossed = key; break; }
-  }
-  if (!crossed) fails.push("lamb could not leave through any gate");
-  else {
-    await sleep(2000);
-    const next = await stats("#seven-stage-canvas", "next");
-    const d1 = await diff("first", "next");
-    console.log("next room differs from first by", d1.toFixed(3), "via", crossed);
-    if (!next) fails.push("stage vanished after crossing a gate");
-    else if (d1 < 0.25) fails.push("next room looks like the first (diff " + d1 + ")");
-    const back = await walkThroughGate(opposite[crossed]);
-    if (!back) fails.push("lamb could not walk back through the gate it came in by");
-    else {
-      await sleep(2000);
-      await stats("#seven-stage-canvas", "again");
-      const d2 = await diff("first", "again");
-      console.log("revisited room differs from first by", d2.toFixed(3));
-      if (d2 > 0.12) fails.push("revisiting the room gave a different layout (diff " + d2 + ")");
+    const r = await walkAcross(key, 1200);
+    if (r.hit) {
+      crossed = key;
+      if (r.keys.length !== 1) fails.push("crossing one border sent " + r.keys.length + " keys: " + JSON.stringify(r.keys));
+      break;
     }
   }
-  // Out through the south gate of (0,1) back to the spawn: the terminal returns.
-  const home = await walkThroughGate("ArrowDown");
-  if (!home) fails.push("lamb could not walk back south to the spawn");
+  if (!crossed) fails.push("lamb could not walk across any tile border");
   else {
+    await sleep(1500);
+    const next = await stats("#seven-stage-canvas", "next");
+    const d1 = await diff("first", "next");
+    console.log("world scrolled by", d1.toFixed(3), "via", crossed);
+    if (!next) fails.push("stage vanished after crossing a tile border");
+    else if (d1 < 0.05) fails.push("the world did not scroll (diff " + d1 + ")");
+    const back = await walkAcross(opposite[crossed], 0);
+    if (!back.hit) fails.push("lamb could not walk back across the border");
+  }
+  // South until the spawn: the terminal returns when the stage region ends.
+  for (let i = 0; i < 4 && !(await page.$("#term")); i++)
+    await walkAcross("ArrowDown", 0);
+  if (!(await page.$("#term")))
     await page.waitForSelector("#term textarea", { state: "attached", timeout: 8000 })
       .catch(() => fails.push("terminal did not return at the spawn"));
-    if (await page.$("#seven-stage-canvas")) fails.push("seven stage still mounted at the spawn");
-  }
+  if (await page.$("#seven-stage-canvas")) fails.push("seven stage still mounted at the spawn");
   if (errors.length) fails.push("page errors: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   fails.push("exception: " + e.message);

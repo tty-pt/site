@@ -3,16 +3,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <nd/bcp-types.h>
+#include <nd/seven-world.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas.h"
 
-#define W 640
-#define H 480
-static uint32_t fb[W * H], fb2[W * H];
+#define MAXW 1920
+#define MAXH 1080
+static uint32_t fb[MAXW * MAXH], fb2[MAXW * MAXH];
 
 static nd_client_state_t st;
 
-static void set_cell(int x, int y, uint8_t exits)
+/* A 7x7 map of identical tiles centred on the world tile (x, y). */
+static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
+                    int gl, int gc, int gr)
 {
 	memset(&st, 0, sizeof(st));
 	strcpy(st.preferred_driver, "lamina-seven");
@@ -20,125 +23,299 @@ static void set_cell(int x, int y, uint8_t exits)
 	st.map_data.player_x = st.map_data.player_y = 3;
 	st.map_data.pos[0] = (int16_t)x;
 	st.map_data.pos[1] = (int16_t)y;
+	for (int i = 0; i < 49; i++) {
+		nd_map_tile_t *t = &st.map_data.tiles[i];
+		t->bio_idx = (uint8_t)biome;
+		t->exits = 0x1B;
+		t->side_l = (uint8_t)gl; t->symbol = (uint8_t)gc; t->side_r = (uint8_t)gr;
+		t->fg_l = t->fg = t->fg_r = 10;
+	}
 	st.map_data.tiles[3 * 7 + 3].exits = exits;
+	st.map_data.tiles[3 * 7 + 3].flags = (uint8_t)(flags | ND_MAP_FLAG_PLAYER);
+	st.map_data.tiles[3 * 7 + 3].symbol = '!';
 }
 
-static void dump(const char *name, const uint32_t *p)
+static void dump(const char *name, const uint32_t *p, int w, int h)
 {
 	const char *dir = getenv("SEVEN_DUMP");
 	if (!dir) return;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/%s.ppm", dir, name);
 	FILE *f = fopen(path, "wb");
-	fprintf(f, "P6\n%d %d\n255\n", W, H);
-	for (int i = 0; i < W * H; i++) {
+	fprintf(f, "P6\n%d %d\n255\n", w, h);
+	for (int i = 0; i < w * h; i++) {
 		fputc(p[i] & 0xFF, f); fputc((p[i] >> 8) & 0xFF, f); fputc((p[i] >> 16) & 0xFF, f);
 	}
 	fclose(f);
 }
 
-static int count_color(const uint32_t *p, uint32_t c)
+static int count_color(const uint32_t *p, int n, uint32_t c)
 {
-	int n = 0;
-	for (int i = 0; i < W * H; i++) n += p[i] == c;
-	return n;
+	int k = 0;
+	for (int i = 0; i < n; i++) k += p[i] == c;
+	return k;
+}
+
+/* green-dominant pixels (plants, grass) */
+static int count_green(const uint32_t *p, int n)
+{
+	int k = 0;
+	for (int i = 0; i < n; i++) {
+		int r = (int)(p[i] & 0xFF), g = (int)((p[i] >> 8) & 0xFF), b = (int)((p[i] >> 16) & 0xFF);
+		k += g > r + 8 && g > b + 25;
+	}
+	return k;
+}
+
+/* sand-like pixels: warm, light, r >= g >= b */
+static int count_sand(const uint32_t *p, int n)
+{
+	int k = 0;
+	for (int i = 0; i < n; i++) {
+		int r = (int)(p[i] & 0xFF), g = (int)((p[i] >> 8) & 0xFF), b = (int)((p[i] >> 16) & 0xFF);
+		k += r > 170 && r >= g && g >= b && r - b > 40;
+	}
+	return k;
+}
+
+static void hold(const char *key, int ticks, int *keyret)
+{
+	nd_seven_key(key, 1);
+	for (int i = 0; i < ticks; i++) {
+		int mv = nd_seven_tick(&st, 1.0f / 60);
+		if (mv && keyret) { *keyret = mv; break; }
+	}
+	nd_seven_key(key, 0);
 }
 
 int main(void)
 {
-	printf("=== ND seven stage: sprites, lamb, gates ===\n");
+	const int sizes[3][2] = { { 640, 480 }, { 1280, 720 }, { 1920, 1080 } };
+	int fx, fy, dir, walking, key;
 
-	/* The atlas decodes to the real art: the grass tile's top-left pixel is a
-	 * palette colour from tiles.png, not a flat procedural colour. */
-	set_cell(-1, 1, 0x1B);
-	nd_seven_render(fb, W, H, &st);
-	const nd_seven_sprite_rect_t *g = &nd_seven_sprite_rects[NDS_GRASS];
-	assert(g->w == 16 && g->h == 16);
-	assert(count_color(fb, 0xFF08080C) == 0);       /* room covers the whole canvas */
-	dump("room_-1_1", fb);
+	printf("=== ND seven stage: continuous world ===\n");
 
-	/* Deterministic: same cell, same frame -> same pixels. */
-	nd_seven_render(fb2, W, H, &st);
-	assert(memcmp(fb, fb2, sizeof(fb)) == 0);
-	printf("PASS: room renders from the sprite atlas and is deterministic\n");
+	/* The world fills any framebuffer, at the unchanged 2x scale. */
+	for (int s = 0; s < 3; s++) {
+		int w = sizes[s][0], h = sizes[s][1];
+		set_map(5, -3, 10, 0x1B, 0, 'x', 0, 'i');
+		nd_seven_render(fb, (uint32_t)w, (uint32_t)h, &st);
+		assert(count_color(fb, w * h, 0xFF08080C) == 0);
+		set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
+		nd_seven_render(fb, (uint32_t)w, (uint32_t)h, &st);
+		assert(count_color(fb, w * h, 0xFF08080C) == 0);
+	}
+	assert(NDW_TILE_W * 2 <= 320 && NDW_TILE_H * 2 <= 256);
+	printf("PASS: 640x480, 1280x720 and 1920x1080 are fully covered by small tiles\n");
 
-	/* Another cell looks different; the same cell again is identical. */
-	set_cell(-2, 1, 0x1B);
-	nd_seven_render(fb2, W, H, &st);
-	dump("room_-2_1", fb2);
-	assert(memcmp(fb, fb2, sizeof(fb)) != 0);
-	set_cell(-1, 1, 0x1B);
-	nd_seven_render(fb2, W, H, &st);
-	assert(memcmp(fb, fb2, sizeof(fb)) == 0);
-	printf("PASS: neighbouring cells differ, revisiting restores the layout\n");
+	/* Deterministic. */
+	set_map(5, -3, 10, 0x1B, 0, 'x', 'T', 'i');
+	nd_seven_render(fb, 1280, 720, &st);
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(!memcmp(fb, fb2, 1280 * 720 * 4));
+	set_map(6, -3, 10, 0x1B, 0, 'x', 'T', 'i');
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+	printf("PASS: same map and frame give the same pixels, other tiles differ\n");
 
-	/* The lamb sprite is on screen, and it is the sheet's art. */
-	int fx, fy, dir, walking;
+	/* Biome decides the ground: desert is sand, grassland is grass. */
+	set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 1280, 720, &st);
+	int sand = count_sand(fb, 1280 * 720), grass_in_desert = count_green(fb, 1280 * 720);
+	dump("desert", fb, 1280, 720);
+	assert(sand > 1280 * 720 / 2);
+	assert(grass_in_desert < 1280 * 720 / 50);
+	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 1280, 720, &st);
+	dump("grass", fb, 1280, 720);
+	assert(count_green(fb, 1280 * 720) > 1280 * 720 / 2);
+	assert(count_sand(fb, 1280 * 720) < 1280 * 720 / 20);
+	set_map(5, -3, 1, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 1280, 720, &st);
+	dump("ice", fb, 1280, 720);
+	assert(count_sand(fb, 1280 * 720) < 1280 * 720 / 20 && count_green(fb, 1280 * 720) < 1280 * 720 / 20);
+	set_map(5, -3, 0, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 1280, 720, &st);
+	dump("water", fb, 1280, 720);
+	printf("PASS: desert draws sand, grassland grass, ice neither\n");
+
+	/* A cactus on the map is a cactus in the view. */
+	set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 1280, 720, &st);
+	int g0 = count_green(fb, 1280 * 720);
+	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'I');
+	nd_seven_render(fb2, 1280, 720, &st);
+	dump("desert_cactus", fb2, 1280, 720);
+	int g1 = count_green(fb2, 1280 * 720);
+	assert(g1 > g0 + 400);                     /* green cacti stand on the sand */
+	assert(count_sand(fb2, 1280 * 720) > 1280 * 720 / 3);
+	/* the cactus of the right map cell is on the right of its tile, ie the
+	 * right third of the lamb's tile gained the green */
+	{
+		int tx = 1280 / 2 - NDW_CENTER_X * 2, ty = 720 / 2 - NDW_CENTER_Y * 2;
+		int added = 0;
+		for (int y = ty; y < ty + NDW_TILE_H * 2; y++)
+			for (int x = tx + NDW_TILE_W * 2 * 2 / 3; x < tx + NDW_TILE_W * 2; x++) {
+				uint32_t a = fb[y * 1280 + x], b = fb2[y * 1280 + x];
+				added += a != b;
+			}
+		assert(added > 200);
+	}
+	/* the same cactus tile on grass biome has no sand */
+	set_map(5, -3, 10, 0x1B, 0, 0, 0, 'I');
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(count_sand(fb2, 1280 * 720) < 1280 * 720 / 20);
+	/* small and big cacti differ */
+	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'i');
+	nd_seven_render(fb, 1280, 720, &st);
+	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'I');
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+	printf("PASS: map cactus glyphs appear as cacti in their cell, on sand in desert\n");
+
+	/* Other plant families and map features show up too. */
+	{
+		const int gl[][3] = { { 'x', 0, 0 }, { 0, 'T', 0 }, { 0, 0, 'a' }, { 0, '~', 0 }, { 0, '$', 0 }, { '<', 0, '>' } };
+		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_render(fb, 1280, 720, &st);
+		for (unsigned k = 0; k < sizeof(gl) / sizeof(gl[0]); k++) {
+			set_map(5, -3, 10, 0x1B, 0, gl[k][0], gl[k][1], gl[k][2]);
+			nd_seven_render(fb2, 1280, 720, &st);
+			assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+		}
+	}
+	printf("PASS: deciduous, tall, fir, pond, shop and stairs glyphs are drawn\n");
+
+	/* The room contents list is drawn in the lamb's tile. */
+	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+	st.room.ref = 9; st.me = 1;
+	nd_seven_render(fb, 1280, 720, &st);
+	st.entity_count = 2;
+	st.entities[0].ref = 5; st.entities[0].location = 9; st.entities[0].ch = 'g'; st.entities[0].fg = 9;
+	st.entities[1].ref = 1; st.entities[1].location = 9; st.entities[1].ch = '@'; st.entities[1].fg = 11;   /* me */
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+	dump("entity", fb2, 1280, 720);
+	st.entities[0].location = 77;                      /* another room */
+	nd_seven_render(fb, 1280, 720, &st);
+	st.entity_count = 0;
+	nd_seven_render(fb2, 1280, 720, &st);
+	assert(!memcmp(fb, fb2, 1280 * 720 * 4));          /* not here, not drawn; me never drawn */
+	printf("PASS: room contents are drawn, the player and other rooms' items are not\n");
+
+	/* The lamb walks and faces its way. */
+	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb, 640, 480, &st);
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
-	assert(fx == 160 && fy > 120 && fy < 140);
-	const nd_seven_sprite_rect_t *l = &nd_seven_sprite_rects[NDS_LAMB];
-	assert(l->w == 192 && l->h == 256);
-	uint32_t before[W * H];
-	memcpy(before, fb, sizeof(before));
-	/* walking right changes the facing frame and moves the lamb */
-	assert(nd_seven_key("ArrowRight", 1));
+	assert(fx == NDW_CENTER_X && fy == NDW_CENTER_Y);
+	nd_seven_key("ArrowRight", 1);
 	for (int i = 0; i < 20; i++) assert(nd_seven_tick(&st, 1.0f / 60) == 0);
 	int fx2, fy2;
 	nd_seven_lamb(&fx2, &fy2, &dir, &walking);
 	assert(fx2 > fx && fy2 == fy && dir == 3 && walking);
-	nd_seven_render(fb2, W, H, &st);
-	dump("lamb_walk_right", fb2);
-	assert(memcmp(before, fb2, sizeof(fb)) != 0);
 	nd_seven_key("ArrowRight", 0);
 	nd_seven_tick(&st, 1.0f / 60);
 	nd_seven_lamb(&fx2, &fy2, &dir, &walking);
 	assert(!walking);
 	printf("PASS: lamb walks right, faces right, idles when released\n");
 
-	/* Trees, bushes and rocks block the lamb: no path of free movement goes
-	 * through a solid cell (collision comes from the same room mask). */
-	set_cell(-1, 1, 0x1B);
-	nd_seven_render(fb, W, H, &st);
-	nd_seven_key("ArrowUp", 1);
-	for (int i = 0; i < 400; i++) {
-		int mv = nd_seven_tick(&st, 1.0f / 60);
-		if (mv) break;
-	}
-	nd_seven_key("ArrowUp", 0);
-	printf("PASS: walking up stops at a gate or an obstacle\n");
-
-	set_cell(-9, 4, 0x1B);
-	nd_seven_tick(&st, 0);                              /* settle in another room first */
-	/* Gate crossing: walk north through the open north gate; the stage
-	 * asks the server for 'k', then the new cell puts the lamb at the south. */
-	set_cell(-1, 1, 0x1B);
-	nd_seven_render(fb, W, H, &st);
+	/* Continuity: crossing a tile border sends ONE move key and the lamb keeps
+	 * walking; when the new map arrives the world does not jump. */
+	set_map(5, -3, 10, 0x1B, 0, 'x', 0, 0);
+	nd_seven_tick(&st, 0);                         /* settle */
+	set_map(40, 40, 10, 0x1B, 0, 0, 0, 0);
+	nd_seven_tick(&st, 0);                         /* teleport: recentre */
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
-	assert(fx == 160);   /* gate columns 9..10: straight up the road */
-	nd_seven_key("w", 1);
-	int key = 0;
-	for (int i = 0; i < 600 && !key; i++) key = nd_seven_tick(&st, 1.0f / 60);
-	assert(key == 'k');
-	/* waiting for the server: no repeated key, lamb parked */
-	assert(nd_seven_tick(&st, 1.0f / 60) == 0);
-	nd_seven_key("w", 0);
-	set_cell(-1, 2, 0x1B);                              /* server moved us north */
-	nd_seven_tick(&st, 1.0f / 60);
-	nd_seven_lamb(&fx, &fy, &dir, &walking);
-	assert(fy > 200 && fx == 160);                      /* entered at the south gate */
-	nd_seven_render(fb, W, H, &st);
-	dump("room_-1_2_entered", fb);
-	printf("PASS: gate sends 'k'; the next cell places the lamb at the south gate\n");
-
-	/* A closed gate never lets the lamb out. */
-	set_cell(-1, 1, 0x1A);                              /* no west exit */
-	nd_seven_render(fb, W, H, &st);
-	nd_seven_key("a", 1);
+	assert(fx == NDW_CENTER_X && fy == NDW_CENTER_Y);
 	key = 0;
-	for (int i = 0; i < 900; i++) { int m = nd_seven_tick(&st, 1.0f / 60); if (m) key = m; }
-	nd_seven_key("a", 0);
-	assert(key == 0);
-	printf("PASS: closed gates stay closed\n");
+	hold("ArrowRight", 600, &key);
+	assert(key == 'l');
+	nd_seven_lamb(&fx, &fy, &dir, &walking);
+	assert(fx >= NDW_TILE_W);
+	/* waiting for the server: no repeated key */
+	nd_seven_key("ArrowRight", 1);
+	for (int i = 0; i < 30; i++) assert(nd_seven_tick(&st, 1.0f / 60) == 0);
+	nd_seven_key("ArrowRight", 0);
+	nd_seven_lamb(&fx, &fy, &dir, &walking);
+	nd_seven_render(fb, 1280, 720, &st);
+	/* the server moved us east: same world, shifted origin, same pixels */
+	set_map(41, 40, 10, 0x1B, 0, 0, 0, 0);
+	nd_seven_render(fb2, 1280, 720, &st);
+	{
+		int nfx, nfy;
+		nd_seven_lamb(&nfx, &nfy, &dir, &walking);
+		assert(nfx == fx - NDW_TILE_W && nfy == fy);
+	}
+	assert(!memcmp(fb, fb2, 1280 * 720 * 4));
+	{
+		int pending, px, py, have;
+		nd_seven_debug(&pending, &px, &py, &have);
+		assert(pending == 0 && px == 41 && py == 40 && have);
+	}
+	printf("PASS: crossing a border sends one key; the new map shifts the origin without a jump\n");
+
+	/* Every direction maps to its key (pos.y is north-up, rows run south). */
+	{
+		const struct { const char *k; int ch; int dx, dy; } d[] = {
+			{ "ArrowUp", 'k', 0, 1 }, { "ArrowDown", 'j', 0, -1 }, { "ArrowLeft", 'h', -1, 0 }, { "ArrowRight", 'l', 1, 0 }
+		};
+		for (int i = 0; i < 4; i++) {
+			set_map(40, 40, 10, 0x1B, 0, 0, 0, 0);
+			nd_seven_tick(&st, 0);
+			nd_seven_lamb(&fx, &fy, &dir, &walking);
+			key = 0;
+			hold(d[i].k, 600, &key);
+			assert(key == d[i].ch);
+			nd_seven_lamb(&fx2, &fy2, &dir, &walking);
+			set_map(40 + d[i].dx, 40 + d[i].dy, 10, 0x1B, 0, 0, 0, 0);
+			nd_seven_tick(&st, 0);
+			int sx, sy;
+			nd_seven_lamb(&sx, &sy, &dir, &walking);
+			/* back inside the origin tile after the server confirmed */
+			assert(sx >= -NDW_FOOT_HW && sx <= NDW_TILE_W + NDW_FOOT_HW);
+			assert(sy >= -NDW_FOOT_H && sy <= NDW_TILE_H + NDW_FOOT_H);
+		}
+	}
+	printf("PASS: up/down/left/right ask for k/j/h/l and the origin follows\n");
+
+	/* A server that does not move us rolls the lamb back. */
+	set_map(40, 40, 10, 0x1B, 0, 0, 0, 0);
+	nd_seven_tick(&st, 0);
+	key = 0;
+	hold("ArrowRight", 600, &key);
+	assert(key == 'l');
+	for (int i = 0; i < 150; i++) nd_seven_tick(&st, 1.0f / 60);
+	nd_seven_lamb(&fx, &fy, &dir, &walking);
+	assert(fx == NDW_CENTER_X && fy == NDW_CENTER_Y);
+	{
+		int pending, px, py, have;
+		nd_seven_debug(&pending, &px, &py, &have);
+		assert(pending == 0);
+	}
+	printf("PASS: an unanswered move rolls the lamb back\n");
+
+	/* A room's closed edge stops the lamb; an open one lets it out. */
+	set_map(40, 40, 10, 0x1B & ~NDW_EXIT_W, ND_MAP_FLAG_ROOM, 0, 0, 0);
+	nd_seven_tick(&st, 0);
+	nd_seven_lamb(&fx, &fy, &dir, &walking);
+	key = 0;
+	hold("a", 600, &key);
+	nd_seven_lamb(&fx2, &fy2, &dir, &walking);
+	assert(key == 0 && fx2 >= NDW_WALL_T + NDW_FOOT_HW && fx2 < fx);
+	nd_seven_render(fb, 640, 480, &st);
+	dump("room_walls", fb, 640, 480);
+	set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+	nd_seven_tick(&st, 0);
+	key = 0;
+	hold("a", 600, &key);
+	assert(key == 'h');
+	/* open country has no walls anywhere */
+	set_map(40, 40, 10, 0x1B & ~NDW_EXIT_W, 0, 0, 0, 0);
+	nd_seven_tick(&st, 0);
+	key = 0;
+	hold("a", 600, &key);
+	assert(key == 'h');
+	printf("PASS: room walls block where an exit is missing; open country never does\n");
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;

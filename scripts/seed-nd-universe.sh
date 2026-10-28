@@ -246,7 +246,7 @@ cmd "drop Iron Helm"
 #   region 18 0 1 0 0   = every cell with y >= 1 (north half): Lamina map.
 #   region 19 -1 1 0 0  = y >= 1 AND x <= 0 (north-west quadrant, which
 #                         includes the x=0 column due north of the start).
-#                         This is the deterministic Zelda-like 2D game stage.
+#                         This is the continuous 2D game stage.
 #   x >= 1, y >= 1      = north-east quadrant: Lamina map, classic terminal.
 cmd "region 16 world 0"
 cmd "driver stage tty 16 world 0"
@@ -322,7 +322,7 @@ fi
 
 # Ask the server which presentation (stage, map, layout) each place resolves
 # to. `driver` with no argument prints the policy for the admin's location.
-# Probe order (see PROBES): x<=0,y>=1 is the 2D Zelda-like stage; x>=1,y>=1 is
+# Probe order (see PROBES): x<=0,y>=1 is the continuous 2D stage; x>=1,y>=1 is
 # the Lamina map under the classic terminal; everything else is ASCII + tty.
 PROBES="0,1 -1,1 -5,3 1,1 4,2 0,0 0,-1 -2,-1"
 for p in $PROBES; do

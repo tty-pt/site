@@ -175,8 +175,13 @@ async function loadModule(spec) {
 				if (!lastTime) lastTime = now;
 				const dt = Math.min((now - lastTime) / 1000, 0.1);
 				lastTime = now;
-				const w = (spec.root && spec.root.clientWidth) || window.innerWidth || 640;
-				const h = (spec.root && spec.root.clientHeight) || window.innerHeight || 480;
+				// A canvas that asked to fit (data-bud-canvas-fit) is drawn at its
+				// own on-screen size; otherwise the root's box is the frame size.
+				const fit = spec.root && spec.root.querySelector
+					? spec.root.querySelector('[data-bud-canvas-fit]') : null;
+				const box = (fit && fit.clientWidth && fit.clientHeight) ? fit : spec.root;
+				const w = (box && box.clientWidth) || window.innerWidth || 640;
+				const h = (box && box.clientHeight) || window.innerHeight || 480;
 				try {
 					instance.exports.wasm_tick(dt, w, h);
 				} catch (e) {
