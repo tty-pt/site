@@ -42,13 +42,20 @@ fi
 
 # Clean up any stale process holding port before starting
 pkill -f "axil.*-p ${PORT}" 2>/dev/null || true
+# The daemonised predecessor can still be shutting down (and holding the
+# listen socket) when the previous run's cleanup returns; wait it out so the
+# new bind does not silently fail.
+for _ in $(seq 1 100); do
+  pgrep -f "axil.*-p ${PORT}" >/dev/null 2>&1 || break
+  sleep 0.1
+done
 sleep 0.1
 
 "$AXIL_BIN" -C "$REPO_ROOT" -p "$PORT" -d -m mods/core/core > /tmp/axil_transient.log 2>&1 &
 SERVER_PID=$!
 
-# Wait for server readiness (up to 5 seconds)
-for _ in $(seq 1 50); do
+# Wait for server readiness (up to 30 seconds; startup scales with var/ data)
+for _ in $(seq 1 300); do
   if is_server_up; then
     break
   fi

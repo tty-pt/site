@@ -48,7 +48,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		"\"pres_flags\":%u,"
 		"\"tod\":%u,"
 		"\"room\":{\"ref\":%u,\"name\":\"%s\",\"desc\":\"%s\",\"exits\":%u},"
-		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,"
+		"\"room_ref\":%u,\"room_name\":\"%s\",\"room_desc\":\"%s\",\"room_exits\":%u,\"room_art\":\"%s\","
 		"\"gauges\":[",
 		st->me, st->auth_failed, st->user, esc_map,
 		map_hex,
@@ -61,7 +61,7 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		(unsigned)st->pres_flags,
 		st->tod,
 		st->room.ref, st->room.name, st->room.desc, st->room.exits,
-		st->room.ref, st->room.name, st->room.desc, st->room.exits);
+		st->room.ref, st->room.name, st->room.desc, st->room.exits, st->room.art);
 	free(esc_map);
 
 	if (offset > 0 && (size_t)offset < cap) {
@@ -313,6 +313,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		client_state.room.exits = (uint32_t)bud_json_int(json, "room_exits", 0);
 		bud_json_str(json, "room_name", client_state.room.name, sizeof(client_state.room.name));
 		bud_json_str(json, "room_desc", client_state.room.desc, sizeof(client_state.room.desc));
+		bud_json_str(json, "room_art", client_state.room.art, sizeof(client_state.room.art));
 
 		/* Rehydrate generic gauges, then let each module restore its own state */
 		bud_json_array_for_each_key_len(json, (size_t)len, "gauges", parse_gauge_elem, &client_state);

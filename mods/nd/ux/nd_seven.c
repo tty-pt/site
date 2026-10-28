@@ -89,6 +89,7 @@ static int s_have_room;
 static int s_fx, s_fy;
 static int s_dir = DIR_DOWN;
 static int s_held;
+static int s_last;           /* most recently pressed held direction bit */
 static int s_walking;
 static int s_pending_key;     /* gate key sent, waiting for the new room */
 static float s_acc;
@@ -118,7 +119,8 @@ static void sync_room(const nd_client_state_t *st)
 	if (moved) {
 		nds_entry_point(s_pending_key, &s_fx, &s_fy);
 		s_pending_key = 0;
-		s_held = 0;  /* Clear held keys on room change to prevent stuck movement */
+		s_held = 0;
+		s_last = 0;
 	}
 }
 
@@ -149,8 +151,11 @@ int nd_seven_key(const char *key, int down)
 		return 0;
 	if (down) {
 		s_held |= bit;
+		s_last = bit;          /* newest key wins, like seven-ways */
 	} else {
 		s_held &= ~bit;
+		if (s_last == bit)
+			s_last = 0;
 	}
 	return 1;
 }
@@ -176,10 +181,15 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 
 	s_anim++;
 	sync_room(st);
-	if (s_held & HELD_L) dx -= 1;
-	if (s_held & HELD_R) dx += 1;
-	if (s_held & HELD_U) dy -= 1;
-	if (s_held & HELD_D) dy += 1;
+	/* One cardinal direction at a time (seven-ways): the newest held key,
+	 * else any key still held, so direction can be changed freely. */
+	{
+		int b = (s_last && (s_held & s_last)) ? s_last : (s_held & -s_held);
+		if (b == HELD_L) { dx = -1; s_dir = DIR_LEFT; }
+		else if (b == HELD_R) { dx = 1; s_dir = DIR_RIGHT; }
+		else if (b == HELD_U) { dy = -1; s_dir = DIR_UP; }
+		else if (b == HELD_D) { dy = 1; s_dir = DIR_DOWN; }
+	}
 
 	s_walking = 0;
 	if (!(dx || dy) || s_pending_key) {
@@ -200,17 +210,6 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 		if (dy) {
 			int k = move_axis(0, dy);
 			if (k) key = k;
-		}
-		/* Detect actual movement by position change */
-		int moved_dx = (ox != s_fx) && (dx != 0);
-		int moved_dy = (oy != s_fy) && (dy != 0);
-		
-		/* Update direction based on actual movement this frame */
-		if (moved_dx || moved_dy) {
-			if (moved_dy)
-				s_dir = (dy > 0) ? DIR_DOWN : DIR_UP;      /* Y-axis priority */
-			else if (moved_dx)
-				s_dir = (dx > 0) ? DIR_RIGHT : DIR_LEFT;    /* X-axis fallback */
 		}
 		if (ox != s_fx || oy != s_fy)
 			s_walking = 1;

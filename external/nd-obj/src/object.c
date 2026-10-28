@@ -252,8 +252,20 @@ eng_object_art(unsigned thing_ref)
 			if (!map_has(thing_ref))
 				return void_art;
 
-			type = "biome";
-			break;
+			/* Biome art dirs are per base biome: "tundra2".."tundra4"
+			 * share tundra's, "permanent ice" has none of its own. */
+			{
+				char rname[sizeof(thing.name)];
+				size_t n;
+				strlcpy(rname, thing.name, sizeof(rname));
+				n = strlen(rname);
+				while (n > 1 && rname[n - 1] >= '0' && rname[n - 1] <= '9')
+					rname[--n] = '\0';
+				if (!strcmp(rname, "permanent ice"))
+					strlcpy(rname, "tundra", sizeof(rname));
+				snprintf(art, sizeof(art), "biome/%s/%u.jpeg", rname, thing.art_id);
+				return art;
+			}
 	default:
 		 /* "room" is id 1 in the transient type_hd — the host seeds it
 		  * first, before any module loads. See world.c. */

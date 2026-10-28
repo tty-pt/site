@@ -562,6 +562,17 @@ static int on_key_down(bud_event *e)
 	return 0;
 }
 
+/* Per-biome backdrop: the current room's art, falling back to the CSS void. */
+static void apply_room_backdrop(bud_node *main_box, const nd_client_state_t *st)
+{
+	if (!st || !st->room.art[0])
+		return;
+	char style[160];
+	snprintf(style, sizeof(style),
+		"background: url('/nd/art/%s') center/cover no-repeat;", st->room.art);
+	bud_set_attr(main_box, "style", style);
+}
+
 static bud_node *render_room_header(const nd_client_state_t *st)
 {
 	if (!st || (!st->room.name[0] && !st->room.ref))
@@ -600,6 +611,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
 		bud_set_attr(main_box, "class", "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100");
+		apply_room_backdrop(main_box, st);
 		bud_append(main_box, holder);
 		bud_append(main_box, modals);
 
@@ -613,6 +625,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 		bud_bind(root, "cmd", 1, on_cmd_action);
 		bud_bind(root, "keydown@window", 0, on_key_down);
+		bud_bind(root, "keyup@window", 0, on_key_up);
 		return root;
 	}
 
@@ -662,6 +675,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *main_box = bud_element("div");
 	bud_set_attr(main_box, "id", "main");
+	apply_room_backdrop(main_box, st);
 	char mcls[128];
 	snprintf(mcls, sizeof(mcls), "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 %s",
 		(st && st->target_ref) ? "targetting" : "");
