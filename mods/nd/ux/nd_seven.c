@@ -813,6 +813,167 @@ static void ground_cell(uint32_t *fb, int w, int h, const ndw_ground_t *g,
 		urect(&c, 3 + (int)((hash >> 8) & 7), 3 + (int)((hash >> 12) & 7), 2, 1, RGB(255, 255, 255));
 }
 
+/*
+ * Organic biome borders. A tile's ground is drawn whole above; where the
+ * border contour (ndw_ground_weights: a noise warp of the absolute world
+ * position and tiles with rounded corners) hands a pixel to a neighbouring
+ * tile of another ground, the pixel is repainted with that ground. Crisp: each
+ * pixel shows exactly one ground, nothing is mixed. The cell's own hash drives
+ * the neighbour's texture, so the picture is the same from every origin. Rooms
+ * never blend (walled, square).
+ *
+ * The warp grid of a tile and the list of cells that hold any repainted pixel
+ * are pure functions of the tile, so they are memoised.
+ */
+#define BORDER_CACHE 64
+typedef struct {
+	int16_t pos[4];
+	uint8_t used;
+	uint8_t act_valid;
+	uint64_t act_mask;                   /* the ground groups and no_blend mask act[] was computed for */
+	uint8_t act[NDW_ROWS * NDW_COLS];
+	ndw_warp_grid_t grid;
+} border_ent_t;
+static border_ent_t s_border[BORDER_CACHE];
+static unsigned s_border_next;
+
+static border_ent_t *border_find(const int16_t pos[4])
+{
+	border_ent_t *e;
+
+	for (int i = 0; i < BORDER_CACHE; i++)
+		if (s_border[i].used && !memcmp(s_border[i].pos, pos, sizeof(s_border[i].pos)))
+			return &s_border[i];
+	e = &s_border[s_border_next++ % BORDER_CACHE];
+	memcpy(e->pos, pos, sizeof(e->pos));
+	e->used = 1;
+	e->act_valid = 0;
+	ndw_warp_grid_fill(&e->grid, pos);
+	return e;
+}
+
+const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4])
+{
+	return &border_find(pos)->grid;
+}
+
+/* q position of output pixel (sx, sy) of cell (cx, cy): its centre. */
+static int border_q(int cell, int s)
+{
+	return cell * NDW_CELL_PX * NDW_SUB + (s * 2 + 1) * NDW_SUB / (2 * SCALE);
+}
+
+/* Which cells hold a pixel that is not the tile's own ground. */
+static const uint8_t *border_active(border_ent_t *e, const uint8_t grp[9], unsigned no_blend)
+{
+	uint64_t key = (uint64_t)no_blend << 40;
+
+	for (int k = 0; k < 9; k++)
+		key |= (uint64_t)(grp[k] & 15) << (4 * k);
+	if (e->act_valid && e->act_mask == key)
+		return e->act;
+	for (int cy = 0; cy < NDW_ROWS; cy++)
+		for (int cx = 0; cx < NDW_COLS; cx++) {
+			int any = 0;
+
+			for (int sy = 0; sy < NDW_CELL_PX * SCALE && !any; sy++)
+				for (int sx = 0; sx < NDW_CELL_PX * SCALE && !any; sx++) {
+					uint16_t w[9];
+					any = ndw_ground_weights(&e->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, w);
+				}
+			e->act[cy * NDW_COLS + cx] = (uint8_t)any;
+		}
+	e->act_mask = key;
+	e->act_valid = 1;
+	return e->act;
+}
+
+static int same_ground(const ndw_ground_t *a, const ndw_ground_t *b)
+{
+	return a->kind == b->kind && a->r == b->r && a->g == b->g && a->b == b->b;
+}
+
+static void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st,
+                         int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
+                         int tx, int ty)
+{
+	static uint32_t scratch[9][NDW_CELL_PX * SCALE * NDW_CELL_PX * SCALE];
+	const int cpx = NDW_CELL_PX * SCALE;
+	ndw_ground_t style[9];
+	unsigned no_blend = 0;
+	uint8_t grp[9];
+	const uint8_t *act;
+	border_ent_t *ent;
+	int differs = 0;
+
+	if (own->flags & NDW_F_ROOM)
+		return;
+	style[4] = ndw_biome_style(own->biome);
+	for (int dj = -1; dj <= 1; dj++)
+		for (int di = -1; di <= 1; di++) {
+			ndw_tile_t nt;
+			int16_t np[4];
+			int k = (dj + 1) * 3 + (di + 1);
+
+			if (!di && !dj) {
+				nt = *own;
+			} else {
+				tile_at(st, ti + di, tj + dj, &nt, np);
+				if (nt.flags & NDW_F_ROOM)
+					no_blend |= NDW_OWN_BIT(di, dj);
+			}
+			style[k] = ndw_biome_style(nt.biome);
+			differs |= !same_ground(&style[k], &style[4]);
+		}
+	for (int k = 0; k < 9; k++) {            /* ground ids: equal = same ground */
+		grp[k] = (uint8_t)k;
+		for (int j = 0; j < k; j++)
+			if (same_ground(&style[j], &style[k])) {
+				grp[k] = grp[j];
+				break;
+			}
+	}
+	if (!differs)
+		return;
+	ent = border_find(pos);
+	act = border_active(ent, grp, no_blend);
+
+	for (int cy = 0; cy < NDW_ROWS; cy++)
+		for (int cx = 0; cx < NDW_COLS; cx++) {
+			int px = tx + cx * cpx, py = ty + cy * cpx;
+			int have[9] = { 0 };
+
+			if (!act[cy * NDW_COLS + cx])
+				continue;
+			if (px >= w || py >= h || px + cpx <= 0 || py + cpx <= 0)
+				continue;
+			for (int sy = 0; sy < cpx; sy++) {
+				int y = py + sy;
+
+				if (y < 0 || y >= h)
+					continue;
+				for (int sx = 0; sx < cpx; sx++) {
+					int x = px + sx;
+					uint16_t wt[9];
+					int own_k = 4;
+
+					if (x < 0 || x >= w)
+						continue;
+					if (!ndw_ground_weights(&ent->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, wt))
+						continue;
+					for (int k = 0; k < 9; k++)
+						if (wt[k])
+							own_k = k;
+					if (!have[own_k]) {
+						ground_cell(scratch[own_k], cpx, cpx, &style[own_k], ndw_cell_hash(pos, cx, cy), 0, 0, s_anim);
+						have[own_k] = 1;
+					}
+					fb[y * w + x] = scratch[own_k][sy * cpx + sx];
+				}
+			}
+		}
+}
+
 /* --- drawing ------------------------------------------------------------ */
 
 static void plant_tint(int fg, tint_t *t)
@@ -1032,6 +1193,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				for (int cx = 0; cx < NDW_COLS; cx++)
 					ground_cell(fb, w, h, &g, ndw_cell_hash(pos, cx, cy),
 					            tx + cx * NDW_CELL_PX * SCALE, ty + cy * NDW_CELL_PX * SCALE, s_anim);
+			ground_blend(fb, w, h, st, ti, tj, pos, &t, tx, ty);
 			for (int k = ndw_walls(&t, walls) - 1; k >= 0; k--)
 				for (int cy = walls[k].y0 / NDW_CELL_PX; cy * NDW_CELL_PX < walls[k].y1; cy++)
 					for (int cx = walls[k].x0 / NDW_CELL_PX; cx * NDW_CELL_PX < walls[k].x1; cx++)

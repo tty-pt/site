@@ -103,6 +103,40 @@ static int count_sand(const uint32_t *p, int n)
 	return k;
 }
 
+/* Grassland west of tile column `split`, desert from it east. The border is
+ * the same ABSOLUTE world line for any origin: abs x = x + col - 3. */
+static void set_split(int x, int y, int split, int room_east)
+{
+	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
+	for (int r = 0; r < 7; r++)
+		for (int c = split; c < 7; c++) {
+			nd_map_tile_t *t = &st.map_data.tiles[r * 7 + c];
+			t->bio_idx = 14;
+			if (room_east)
+				t->flags |= ND_MAP_FLAG_ROOM;
+		}
+}
+
+static int is_sand_px(uint32_t c)
+{
+	int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
+	return r > 170 && r >= g && g >= b && r - b > 40;
+}
+
+/* First x in [x0, x1) that starts a run of 16 sand pixels on row y, else -1
+ * (long enough that a yellow flower decor sprite never counts). */
+static int first_sand_run(const uint32_t *p, int w, int y, int x0, int x1)
+{
+	for (int x = x0; x + 16 <= x1 + 15; x++) {
+		int run = 1;
+		for (int k = 0; k < 16; k++)
+			run &= is_sand_px(p[y * w + x + k]);
+		if (run)
+			return x;
+	}
+	return -1;
+}
+
 static void hold(const char *key, int ticks, int *keyret)
 {
 	nd_seven_key(key, 1);
@@ -566,6 +600,83 @@ int main(void)
 	hold("a", 600, &key);
 	assert(key == 'h');
 	printf("PASS: room walls block where an exit is missing; open country never does\n");
+
+	/* Organic biome borders: the grass|desert border is not the tile edge. The
+	 * lamb stands in the first desert tile at 1280x720, so the tile edge is at
+	 * screen x = 640 - NDW_CENTER_X * 2 = 480; the warp reaches 11 units = 22 px. */
+	{
+		const int W = 1280, H = 720, EDGE = 640 - NDW_CENTER_X * 2;
+		int lo = 9999, hi = -9999, bulge_west = 0, bulge_east = 0, rows = 0;
+
+		set_split(5, -3, 3, 0);
+		nd_seven_render(fb, W, H, &st);
+		nd_seven_render(fb2, W, H, &st);
+		assert(!memcmp(fb, fb2, W * H * 4));             /* deterministic */
+		dump("border", fb, W, H);
+		for (int y = 8; y < H - 8; y++) {
+			int x = first_sand_run(fb, W, y, EDGE - 60, EDGE + 60);
+			assert(x >= 0);                               /* desert starts near the edge */
+			assert(x >= EDGE - 2 * NDW_BLEND_AMP - 2 && x <= EDGE + 2 * NDW_BLEND_AMP + 2);
+			if (x < lo) lo = x;
+			if (x > hi) hi = x;
+			bulge_west += x < EDGE - 2;
+			bulge_east += x > EDGE + 2;
+			rows++;
+		}
+		assert(hi - lo >= 10);                            /* wavy, not a straight line */
+		assert(bulge_west > 10 && bulge_east > 10);       /* both biomes reach across the old edge */
+		/* well inside each biome the ground is its own: no sand far west, no grass far east */
+		for (int y = 8; y < H - 8; y += 7) {
+			assert(first_sand_run(fb, W, y, 0, EDGE - 60) < 0);
+			for (int x = EDGE + 60; x < EDGE + 200; x++) {
+				uint32_t c = fb[y * W + x];
+				int g = (int)((c >> 8) & 0xFF), r = (int)(c & 0xFF), b = (int)((c >> 16) & 0xFF);
+				assert(!(g > r + 8 && g > b + 25));
+			}
+		}
+
+		/* Zero color blur: every pixel across the border zone has an RGB value matching
+		 * either pure unblurred sand or pure unblurred grass, with no linear color blend. */
+		for (int y = 8; y < H - 8; y += 4) {
+			for (int x = EDGE - 20; x < EDGE + 20; x++) {
+				uint32_t c = fb[y * W + x];
+				int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
+				int is_grass = (g > r + 8 && g > b + 25);
+				int is_sand = (r > 170 && r >= g && g >= b && r - b > 40);
+				assert(is_grass || is_sand); /* crisp: strictly one ground, never a blended blur */
+			}
+		}
+		printf("PASS: zero color blur across the border zone (100%% crisp pixel art)\n");
+		printf("PASS: the grass|desert border wanders instead of following the tile edge (%d rows)\n", rows);
+
+		/* Seamless: seen from another origin tile, the same world pixels are identical. */
+		set_split(6, -3, 2, 0);
+		nd_seven_render(fb2, W, H, &st);
+		for (int y = 8; y < H - 8; y++)
+			for (int x = EDGE - 70; x < EDGE + 70; x++)
+				assert(fb[y * W + x] == fb2[y * W + x - NDW_TILE_W * 2]);
+		printf("PASS: the border is identical after re-centring the view\n");
+
+		/* A different z changes the shape: the border follows the world, not the tile. */
+		set_split(5, -3, 3, 0);
+		st.map_data.pos[2] = 7;
+		nd_seven_render(fb2, W, H, &st);
+		assert(memcmp(fb, fb2, W * H * 4) != 0);
+		printf("PASS: another level has another border\n");
+	}
+
+	/* A room stays square: grass never gets desert ground inside a room's edge. */
+	{
+		const int W = 1280, H = 720, EDGE = 640 - NDW_CENTER_X * 2;
+		int west_sand = 0;
+
+		set_split(5, -3, 3, 1);                           /* the desert side is rooms */
+		nd_seven_render(fb, W, H, &st);
+		for (int y = 8; y < H - 8; y++)
+			west_sand += first_sand_run(fb, W, y, EDGE - 60, EDGE - 1) >= 0;
+		assert(west_sand == 0);
+		printf("PASS: a room's edge stays square against wilderness\n");
+	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;

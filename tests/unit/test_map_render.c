@@ -4,6 +4,7 @@
 #include <assert.h>
 #include "nd/bcp-types.h"
 #include "nd_lamina.h"
+#include "nd_seven.h"
 #include <nd/seven-world.h>
 
 /* Frame geometry for a 224x224 buffer and a 7x7 grid (as nd_lamina.c lays it
@@ -338,6 +339,117 @@ int main(void)
 		}
 
 		printf("PASS: live player marker stays centered in circular map and tiles translate smoothly\n");
+	}
+
+	/* 13. Organic biome borders: where two wilderness biomes meet, the border is
+	 * the shared noise warp (ndw_ground_owner), not the straight tile edge, and
+	 * every band pixel shows the biome the owner function gives it. Rooms stay
+	 * square. West of tile column 3 is green (ANSI 2), east is yellow (ANSI 3). */
+	{
+		nd_map_data_t ms;
+		uint32_t a[W * H];
+		int lo = 9999, hi = -9999, west_yellow = 0, east_green = 0, mismatch = 0, checked = 0;
+		const int edge = TX(3);
+
+		init_sample_map(&ms);
+		for (int y = 0; y < 7; y++)
+			for (int x = 0; x < 7; x++) {
+				nd_map_tile_t *t = &ms.tiles[y * 7 + x];
+				t->flags = 0;
+				t->exits = 0;
+				t->bg = (uint8_t)(x >= 3 ? 3 : 2);
+			}
+		ms.tiles[3 * 7 + 3].flags = ND_MAP_FLAG_PLAYER;
+		ms.pos[0] = 20; ms.pos[1] = -5; ms.pos[2] = 2; ms.pos[3] = 1;
+		render(&ms, "lamina", 0);
+		memcpy(a, fb, sizeof(a));
+		render(&ms, "lamina", 0);
+		assert(memcmp(a, fb, sizeof(a)) == 0);              /* deterministic */
+
+		for (int ty = 0; ty < 7; ty++) {
+			if (ty == 3)
+				continue;                                   /* the player's glow sits here */
+			for (int py = TY(ty); py < TY(ty) + TILE; py++) {
+				int yellow = 0;
+
+				for (int px = edge - 6; px < edge + 6; px++) {
+					uint32_t c = fb[py * W + px];
+					yellow += (c == C_YELLOW);
+				}
+				if (yellow < lo) lo = yellow;
+				if (yellow > hi) hi = yellow;
+				for (int px = edge - 4; px < edge; px++) {
+					uint32_t c = fb[py * W + px];
+					west_yellow += (c == C_YELLOW);
+				}
+				for (int px = edge; px < edge + 4; px++) {
+					uint32_t c = fb[py * W + px];
+					east_green += (c == C_GREEN_BG);
+				}
+				/* far from the border each biome keeps its own colour */
+				assert(fb[py * W + edge - 8] == C_GREEN_BG);
+				assert(fb[py * W + edge + 8] == C_YELLOW);
+				/* band pixels follow the shared weights and blend function exactly */
+				for (int tx_col = 2; tx_col <= 3; tx_col++) {
+					int tx = TX(tx_col);
+					int16_t pos[4] = { (int16_t)(ms.pos[0] + tx_col - 3), (int16_t)(ms.pos[1] - (ty - 3)),
+					                   ms.pos[2], ms.pos[3] };
+					const ndw_warp_grid_t *grid = nd_seven_warp_grid(pos);
+
+					for (int px = tx; px < tx + TILE; px++) {
+						int qx = ((px - tx) * 2 + 1) * (NDW_TILE_W * NDW_SUB) / (2 * TILE);
+						int qy = ((py - TY(ty)) * 2 + 1) * (NDW_TILE_H * NDW_SUB) / (2 * TILE);
+						uint16_t wt[9];
+						uint32_t want, cols_c[9];
+						uint8_t grp[9];
+						unsigned mask = 0;
+
+						if (ty == 0) mask |= NDW_OWN_BIT(-1, -1) | NDW_OWN_BIT(0, -1) | NDW_OWN_BIT(1, -1);
+						if (ty == 6) mask |= NDW_OWN_BIT(-1, 1) | NDW_OWN_BIT(0, 1) | NDW_OWN_BIT(1, 1);
+						for (int dj = -1; dj <= 1; dj++)
+							for (int di = -1; di <= 1; di++) {
+								int k = (dj + 1) * 3 + (di + 1);
+
+								grp[k] = (tx_col + di >= 3) ? 3 : 2;
+								cols_c[k] = (tx_col + di >= 3) ? C_YELLOW : C_GREEN_BG;
+							}
+						want = (tx_col >= 3) ? C_YELLOW : C_GREEN_BG;
+						if (ndw_ground_weights(grid, qx, qy, grp, mask, wt)) {
+							int own_k = 4;
+
+							for (int k = 0; k < 9; k++)
+								if (wt[k] == 256)
+									own_k = k;
+							assert(wt[own_k] == 256);          /* crisp: one owner, never a mix */
+							want = cols_c[own_k];
+						}
+						checked++;
+						mismatch += (fb[py * W + px] != want);
+					}
+				}
+			}
+		}
+		assert(checked > 3000);
+		assert(mismatch == 0);
+		assert(hi - lo >= 2);                               /* wavy, not a straight line */
+		assert(west_yellow > 0 && east_green > 0);          /* both reach across the old edge */
+		printf("PASS: wilderness biome borders follow the shared noise warp\n");
+
+		/* another level, another border */
+		ms.pos[2] = 3;
+		render(&ms, "lamina", 0);
+		assert(memcmp(a, fb, sizeof(a)) != 0);
+		printf("PASS: the minimap border depends on the world position\n");
+
+		/* a room on the yellow side keeps the border square against the green tile */
+		ms.pos[2] = 2;
+		ms.tiles[1 * 7 + 3].flags = ND_MAP_FLAG_ROOM;
+		ms.tiles[1 * 7 + 3].exits = 0x0F;
+		render(&ms, "lamina", 0);
+		for (int py = TY(1); py < TY(1) + TILE; py++)
+			for (int px = edge - 6; px < edge; px++)
+				assert(fb[py * W + px] != C_YELLOW);
+		printf("PASS: a room's edge stays square on the minimap\n");
 	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");

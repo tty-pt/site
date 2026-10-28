@@ -37,6 +37,14 @@ void nd_seven_forget(void);
  */
 int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t out[NDW_MAX_OBJ]);
 
+/*
+ * The border warp grid of the tile at absolute pos (x, y, z, world), memoised
+ * (it is a pure function of pos): Seven's ground and the lamina minimap share
+ * it, so the biome borders have one shape in both. Never NULL; valid until a
+ * later call may evict it.
+ */
+const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4]);
+
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
 
 /* Lamb feet relative to the map's player tile, after adopting the state's

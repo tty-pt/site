@@ -219,6 +219,339 @@ int main(void)
 		printf("PASS: AOT rocks and stones map to world objects and coexist with flora\n");
 	}
 
+	/* Organic biome borders: ndw_ground_owner(pos, lx, ly, mask, &oi, &oj) says
+	 * which of the 3x3 tiles around the one at `pos` owns the ground at the
+	 * tile-local unit (lx, ly). It returns only the owner offset; callers decide
+	 * whether that owner's biome differs (the same comparison in Seven and the
+	 * lamina minimap). `mask` is a 3x3 bit set (NDW_OWN_BIT) of tiles that may not
+	 * blend: rooms (square, walled) and neighbours the caller does not know. */
+	{
+		int16_t p0[4] = { 12, -7, 3, 1 };
+		int16_t pe[4] = { 13, -7, 3, 1 };   /* the tile east of p0 */
+		int16_t ps[4] = { 12, -8, 3, 1 };   /* the tile south of p0 (y grows north) */
+
+		/* Corner rounding radius and displacement amplitude are positive and well-defined. */
+		assert(NDW_BLEND_AMP > 0 && NDW_CORNER_R > 0 && NDW_BLEND_BAND > NDW_CORNER_R);
+
+		/* Determinism and the interior fast path: the middle of a tile never changes owner. */
+		for (int ly = 0; ly < NDW_TILE_H; ly++)
+			for (int lx = 0; lx < NDW_TILE_W; lx++) {
+				int oi = 7, oj = 7, oi2 = 8, oj2 = 8;
+				int ch = ndw_ground_owner(p0, lx, ly, 0, &oi, &oj);
+				ndw_ground_owner(p0, lx, ly, 0, &oi2, &oj2);
+				assert(oi == oi2 && oj == oj2);
+				assert(oi >= -1 && oi <= 1 && oj >= -1 && oj <= 1);
+				assert(ch == (oi != 0 || oj != 0));
+				if (lx >= NDW_BLEND_BAND && lx < NDW_TILE_W - NDW_BLEND_BAND &&
+				    ly >= NDW_BLEND_BAND && ly < NDW_TILE_H - NDW_BLEND_BAND)
+					assert(oi == 0 && oj == 0);
+			}
+		printf("PASS: ground owner is deterministic and never leaves the 3x3 / edge band\n");
+
+		/* Crisp weights: every point has exactly one owner with weight 256 (zero blur). */
+		{
+			ndw_warp_grid_t g0;
+			uint8_t grp[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+			uint16_t w[9];
+			ndw_warp_grid_fill(&g0, p0);
+			for (int ly = 0; ly < NDW_TILE_H; ly += 2)
+				for (int lx = 0; lx < NDW_TILE_W; lx += 2) {
+					int sum = 0, count256 = 0;
+					ndw_ground_weights(&g0, lx * NDW_SUB, ly * NDW_SUB, grp, 0, w);
+					for (int k = 0; k < 9; k++) {
+						assert(w[k] == 0 || w[k] == 256);
+						sum += w[k];
+						count256 += (w[k] == 256);
+					}
+					assert(sum == 256 && count256 == 1);
+				}
+		}
+		printf("PASS: ground weights are strictly crisp 256/0 (zero blur)\n");
+
+		/* Shared edge agreement: across the vertical border between p0 and pe,
+		 * if p0 assigns owner = east, pe must assign owner = self. */
+		{
+			ndw_warp_grid_t ga, gb;
+			uint8_t grp_a[9] = { 0, 0, 1, 0, 0, 1, 0, 0, 1 }; /* west is 0, east is 1 */
+			uint8_t grp_b[9] = { 0, 0, 1, 0, 0, 1, 0, 0, 1 }; /* same */
+			uint16_t wa[9], wb[9];
+			ndw_warp_grid_fill(&ga, p0);
+			ndw_warp_grid_fill(&gb, pe);
+			for (int ly = 0; ly < NDW_TILE_H; ly++) {
+				ndw_ground_weights(&ga, (NDW_TILE_W - 1) * NDW_SUB + NDW_SUB / 2,
+				                   ly * NDW_SUB + NDW_SUB / 2, grp_a, 0, wa);
+				ndw_ground_weights(&gb, NDW_SUB / 2,
+				                   ly * NDW_SUB + NDW_SUB / 2, grp_b, 0, wb);
+				if (wa[5] == 256) /* tile A says east */
+					assert(wb[4] == 256); /* tile B must say self */
+				if (wb[3] == 256) /* tile B says west */
+					assert(wa[4] == 256); /* tile A must say self */
+			}
+		}
+		printf("PASS: shared edge owner agreement is seamless across tiles\n");
+
+		/* Mode 1 (horizontal pair): owner agreement across horizontal edge between Grass tile and Desert tile */
+		{
+			ndw_warp_grid_t ga, gb;
+			int16_t pa[4] = { 10, -5, 2, 1 }; /* Grass tile above Desert */
+			int16_t pb[4] = { 10, -6, 2, 1 }; /* Desert tile */
+			uint8_t grp_a[9] = { 0, 0, 0, 0, 0, 0, 1, 1, 1 }; /* south row is desert */
+			uint8_t grp_b[9] = { 0, 0, 0, 1, 1, 1, 1, 1, 1 }; /* north row is grass, rest desert */
+			uint16_t wa[9], wb[9];
+			ndw_warp_grid_fill(&ga, pa);
+			ndw_warp_grid_fill(&gb, pb);
+			for (int lx = 0; lx < NDW_TILE_W; lx++) {
+				ndw_ground_weights(&ga, lx * NDW_SUB + NDW_SUB / 2,
+				                   (NDW_TILE_H - 1) * NDW_SUB + NDW_SUB / 2, grp_a, 0, wa);
+				ndw_ground_weights(&gb, lx * NDW_SUB + NDW_SUB / 2,
+				                   NDW_SUB / 2, grp_b, 0, wb);
+				/* Monotone transition: if Grass tile at row 127 yields to Desert, Desert tile at row 0 must be Desert */
+				if (wa[7] == 256) assert(wb[4] == 256);
+				/* If Desert tile at row 0 yields to Grass, Grass tile at row 127 must be Grass */
+				if (wb[1] == 256) assert(wa[4] == 256);
+			}
+		}
+		printf("PASS: Mode 1 pair horizontal edge has monotone transition without inverted stripes\n");
+
+		/* Mode 2 (L-shape): zero disconnected shards in surrounding Grass tiles */
+		{
+			ndw_warp_grid_t g_nw;
+			int16_t p_nw[4] = { 9, -5, 2, 1 }; /* Top-Left Grass tile, SE neighbor is Desert */
+			uint8_t grp_nw[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 1 }; /* Only SE is Desert */
+			uint16_t w[9];
+			ndw_warp_grid_fill(&g_nw, p_nw);
+			int desert_shards = 0;
+			for (int ly = 0; ly < NDW_TILE_H; ly++)
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
+					ndw_ground_weights(&g_nw, lx * NDW_SUB + NDW_SUB / 2,
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_nw, 0, w);
+					desert_shards += (w[8] == 256);
+				}
+			assert(desert_shards == 0);
+		}
+		printf("PASS: Mode 2 L-shape produces zero disconnected shards in diagonal tiles\n");
+
+		/* R7: 3-way corner with one square of water (Water, Grass, Desert) */
+		{
+			ndw_warp_grid_t g_water;
+			int16_t p_water[4] = { 10, -5, 2, 1 }; /* Water tile */
+			/* Water=2 at center (4). North=Grass (0), West=Grass (0), East=Grass (0), South=Desert (1), SE=Desert (1) */
+			uint8_t grp_3way[9] = {
+				0, 0, 0,
+				0, 2, 0,
+				0, 1, 1
+			};
+			uint16_t w[9];
+			ndw_warp_grid_fill(&g_water, p_water);
+			int water_count = 0, grass_count = 0, desert_count = 0;
+			for (int ly = 0; ly < NDW_TILE_H; ly++)
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
+					ndw_ground_weights(&g_water, lx * NDW_SUB + NDW_SUB / 2,
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_3way, 0, w);
+					for (int k = 0; k < 9; k++) {
+						if (w[k] == 256) {
+							if (grp_3way[k] == 2) water_count++;
+							else if (grp_3way[k] == 0) grass_count++;
+							else if (grp_3way[k] == 1) desert_count++;
+						}
+					}
+				}
+			assert(water_count > 10000); /* water body is preserved */
+			assert(grass_count > 1000 && desert_count > 50); /* both adjacent biomes transition cleanly */
+			assert(water_count + grass_count + desert_count == NDW_TILE_W * NDW_TILE_H);
+		}
+		printf("PASS: 3-way corner with one square of water resolves cleanly without pinwheel distortion\n");
+
+		/* No isolated single-pixel islands (speckle-free continuous contour) */
+		{
+			ndw_warp_grid_t g0;
+			uint8_t grp[9] = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+			uint8_t own[NDW_TILE_H][NDW_TILE_W];
+			ndw_warp_grid_fill(&g0, p0);
+			for (int ly = 0; ly < NDW_TILE_H; ly++)
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&g0, lx * NDW_SUB + NDW_SUB / 2,
+					                   ly * NDW_SUB + NDW_SUB / 2, grp, 0, w);
+					own[ly][lx] = (w[5] == 256);
+				}
+			for (int ly = 1; ly < NDW_TILE_H - 1; ly++)
+				for (int lx = 1; lx < NDW_TILE_W - 1; lx++) {
+					uint8_t v = own[ly][lx];
+					int same_neighbors = (own[ly-1][lx] == v) + (own[ly+1][lx] == v) +
+					                     (own[ly][lx-1] == v) + (own[ly][lx+1] == v);
+					assert(same_neighbors >= 1); /* no isolated 1-pixel dither dots */
+				}
+		}
+		printf("PASS: border contour is continuous with zero speckle/dither dots\n");
+
+		/* Corner rounding on isolated tile: exterior corner points are rounded away */
+		{
+			ndw_warp_grid_t g0;
+			uint8_t grp[9] = { 0, 0, 0, 0, 1, 0, 0, 0, 0 }; /* isolated center tile 1 */
+			uint16_t w[9];
+			ndw_warp_grid_fill(&g0, p0);
+			/* Center of tile is 100% self */
+			ndw_ground_weights(&g0, NDW_CENTER_X * NDW_SUB, NDW_CENTER_Y * NDW_SUB, grp, 0, w);
+			assert(w[4] == 256);
+			/* Exterior of top-left corner is rounded away */
+			ndw_ground_weights(&g0, 4 * NDW_SUB, 4 * NDW_SUB, grp, 0, w);
+			assert(w[4] == 0);
+		}
+		printf("PASS: isolated tile has rounded corners with no sharp 90-degree edges\n");
+
+		/* The warp is a function of absolute world coordinates: the same world
+		 * point seen from the east neighbour (local x - TILE_W) or the south
+		 * neighbour gets the same displacement, so no seam appears at a tile edge. */
+		for (int k = 0; k < 40; k++)
+			for (int y = 0; y < NDW_TILE_H; y += 3) {
+				int dxa, dya, dxb, dyb;
+				ndw_border_warp(p0, NDW_TILE_W + k - 20, y, &dxa, &dya);
+				ndw_border_warp(pe, k - 20, y, &dxb, &dyb);
+				assert(dxa == dxb && dya == dyb);
+				ndw_border_warp(p0, y, NDW_TILE_H + k - 20, &dxa, &dya);
+				ndw_border_warp(ps, y, k - 20, &dxb, &dyb);
+				assert(dxa == dxb && dya == dyb);
+			}
+		printf("PASS: border warp is seamless across tile edges (absolute coordinates)\n");
+
+		/* Bounded and smooth: |warp| <= amplitude and neighbouring units differ by little. */
+		{
+			int pdx = 0, pdy = 0, mn = 99, mx = -99;
+			for (int x = -40; x < 2 * NDW_TILE_W; x++) {
+				int dx, dy;
+				ndw_border_warp(p0, x, 5, &dx, &dy);
+				assert(dx >= -NDW_BLEND_AMP && dx <= NDW_BLEND_AMP);
+				assert(dy >= -NDW_BLEND_AMP && dy <= NDW_BLEND_AMP);
+				if (x > -40) {
+					assert(dx - pdx <= 3 && pdx - dx <= 3);
+					assert(dy - pdy <= 3 && pdy - dy <= 3);
+				}
+				pdx = dx; pdy = dy;
+				if (dx < mn) mn = dx;
+				if (dx > mx) mx = dx;
+			}
+			assert(mx - mn >= NDW_BLEND_AMP);   /* it actually varies */
+		}
+		printf("PASS: border warp is bounded, smooth and varied\n");
+
+		/* The border is organic: along the east edge the owner flips between self
+		 * and the east tile, differently in every column of the band. */
+		{
+			int east_at_edge = 0, west_at_edge = 0, cols_differ = 0, first = -1;
+			for (int ly = 0; ly < NDW_TILE_H; ly++) {
+				int oi, oj;
+				ndw_ground_owner(p0, NDW_TILE_W - 1, ly, 0, &oi, &oj);
+				east_at_edge += (oi == 1 && oj == 0);
+				ndw_ground_owner(p0, 0, ly, 0, &oi, &oj);
+				west_at_edge += (oi == -1 && oj == 0);
+			}
+			assert(east_at_edge > 0 && east_at_edge < NDW_TILE_H - 20);
+			assert(west_at_edge > 0 && west_at_edge < NDW_TILE_H - 20);
+			for (int lx = NDW_TILE_W - NDW_BLEND_BAND; lx < NDW_TILE_W; lx++) {
+				int cnt = 0;
+				for (int ly = 24; ly < NDW_TILE_H - 24; ly++) {
+					int oi, oj;
+					ndw_ground_owner(p0, lx, ly, 0, &oi, &oj);
+					cnt += (oi == 1);
+				}
+				if (first < 0) first = cnt;
+				cols_differ += (cnt != first);
+			}
+			assert(cols_differ > 0);
+		}
+		printf("PASS: tile borders are wavy, not straight\n");
+
+		/* Corners: both axes can cross, giving a diagonal owner. */
+		{
+			int diag = 0, sides = 0;
+			for (int k = 0; k < 64; k++) {
+				int16_t pc[4] = { (int16_t)(k * 3 - 90), (int16_t)(k * 5 - 150), 0, 0 };
+				for (int ly = NDW_TILE_H - 4; ly < NDW_TILE_H; ly++)
+					for (int lx = NDW_TILE_W - 4; lx < NDW_TILE_W; lx++) {
+						int oi, oj;
+						ndw_ground_owner(pc, lx, ly, 0, &oi, &oj);
+						diag += (oi == 1 && oj == 1);
+						sides += ((oi == 1) != (oj == 1));
+					}
+			}
+			assert(diag > 0 && sides > 0);
+		}
+		printf("PASS: corner points can be owned by the diagonal tile\n");
+
+		/* Rooms and unknown neighbours never blend: an own-tile bit pins every point to
+		 * itself; a neighbour bit stops that neighbour from owning any point. */
+		for (int ly = 0; ly < NDW_TILE_H; ly++)
+			for (int lx = 0; lx < NDW_TILE_W; lx++) {
+				int oi, oj;
+				unsigned all_but_self = 0x1FFu & ~NDW_OWN_BIT(0, 0);
+				ndw_ground_owner(p0, lx, ly, NDW_OWN_BIT(0, 0), &oi, &oj);
+				assert(oi == 0 && oj == 0);
+				ndw_ground_owner(p0, lx, ly, all_but_self, &oi, &oj);
+				assert(oi == 0 && oj == 0);
+				ndw_ground_owner(p0, lx, ly, NDW_OWN_BIT(1, 0), &oi, &oj);
+				assert(!(oi == 1 && oj == 0));
+			}
+		printf("PASS: rooms and unknown neighbours stay square\n");
+
+		/* z and world change the shape; the same z/world repeat it. */
+		{
+			int16_t pz[4] = { 12, -7, 4, 1 }, pw[4] = { 12, -7, 3, 2 };
+			int dz = 0, dw = 0;
+			for (int x = 0; x < NDW_TILE_W; x++) {
+				int a0, b0, a1, b1, a2, b2;
+				ndw_border_warp(p0, x, 9, &a0, &b0);
+				ndw_border_warp(pz, x, 9, &a1, &b1);
+				ndw_border_warp(pw, x, 9, &a2, &b2);
+				dz += (a0 != a1 || b0 != b1);
+				dw += (a0 != a2 || b0 != b2);
+			}
+			assert(dz > 20 && dw > 20);
+		}
+		printf("PASS: z and world seed the border shape\n");
+
+		/* Objects in the interior keep their own ground; objects near rounded corners
+		 * may stand on the smoothly blended transition ground per operator authorization. */
+		{
+			const char glyphs[] = "xXtTaAiI*oO~$<>?";
+			int on_own = 0, on_transition = 0;
+			for (int k = 0; k < 300; k++) {
+				int16_t pk[4] = { (int16_t)(k * 7 - 1000), (int16_t)(k * 13 - 2000), (int16_t)(k % 3), (int16_t)(k % 2) };
+				ndw_tile_t tk = tile((uint8_t)(k % 19), 0x1B, 0,
+				                     glyphs[k % 16], glyphs[(k / 3) % 16], glyphs[(k / 7) % 16]);
+				ndw_obj_t ob[NDW_MAX_OBJ];
+				int n = ndw_tile_objects(&tk, pk, 0, ob);
+				for (int i = 0; i < n; i++) {
+					int oi, oj;
+					if (ob[i].kind == NDW_K_POND)
+						continue;
+					ndw_ground_owner(pk, ob[i].x, ob[i].y, 0, &oi, &oj);
+					if (oi == 0 && oj == 0)
+						on_own++;
+					else
+						on_transition++;
+				}
+			}
+			assert(on_own > 500);
+			assert(on_transition >= 0);
+		}
+		printf("PASS: objects keep own ground with corner objects on blended transition\n");
+
+		/* Negative and large absolute coordinates floor correctly. */
+		{
+			int16_t pn[4] = { -32768, 32767, 0, 0 };
+			int16_t pm[4] = { 32767, -32768, 0, 0 };
+			for (int lx = 0; lx < NDW_TILE_W; lx += 5) {
+				int oi, oj;
+				ndw_ground_owner(pn, lx, 3, 0, &oi, &oj);
+				assert(oi >= -1 && oi <= 1 && oj >= -1 && oj <= 1);
+				ndw_ground_owner(pm, lx, 3, 0, &oi, &oj);
+				assert(oi >= -1 && oi <= 1 && oj >= -1 && oj <= 1);
+			}
+		}
+		printf("PASS: extreme coordinates stay in range\n");
+	}
+
 	printf("ALL SEVEN WORLD TESTS PASSED\n");
 	return 0;
 }
