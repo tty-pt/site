@@ -244,8 +244,18 @@ Protocol options:
 - `"systemzero"`: axil-auren's fast binary endpoint (`/api/v1/systemzero/`). Measured weaker on small models (3/8 with `qwen`, 6/8 with `olmoe` on a quest-vs-chat check), so it is opt-in.
 - `"auto"`: attempts System Zero first, falls back to System One.
 
-### Classifying operator steering: embeddings, not the judge
-Small local judges are position-biased on multi-option questions (reordering the options changes the answer), so `pi-quest` does **not** use the judge to read "go on" / "cancel" / "must never ...". It embeds the message with `POST /v1/embeddings` (`bge-base`, ~15 ms) and picks the nearest labelled exemplar sentence per intent, accepting state-changing verdicts only with a similarity floor and a margin over the runner-up. See `.pi/extensions/pi-quest/docs/OPERATOR_GUIDE.md` (*Embedding-first understanding*) for the settings (`embedMode`, `embedModel`, `intentMinMargin`, `intentMinSimilarity`, `intentExemplars`) and the opt-in live evaluation. The `bge-*` models are English-only; add exemplars in your language or use a multilingual embedding model for non-English steering.
+### Classifying with embeddings, not the judge (where it was measured to win)
+Small local judges are biased on closed questions: reordering the options changes the answer, and on `olmoe` three of the questions collapse to one answer (difficulty never says "standard", memory capture always says "remember", plan verification always says "yes") while quest-vs-conversation answers both ways but opens many false quests. So `pi-quest` and `pi-mm` decide the following with `POST /v1/embeddings` (`bge-base`, ~15 ms) and the nearest labelled example sentence, accepting a state-changing verdict only with a similarity floor and a margin over the runner-up. Each move was measured on held-out English/Portuguese corpora and adopted only with zero wrong state-changing verdicts:
+
+| Decision | Decided by | Held-out result (embeddings vs judge) |
+| :--- | :--- | :--- |
+| Operator steering ("go on", cancel, a constraint) | embeddings | 43/48, 0 false actions (judge: 1 of 7 approvals) |
+| Quest or conversation (`pi-quest`) | embeddings, judge as fallback | 0 false quests vs 11 (same 73% accuracy) |
+| Difficulty (`pi-quest`) | embeddings, judge as fallback | 0 wrong "trivial" vs 52 over 135 requests |
+| Store this turn? (`pi-mm`, `captureMode: "judge"`) | embeddings, judge as fallback | 0 false "remember" vs 20; recall of real memories is low (4/22) |
+| Does the plan have a verification step? (`pi-quest`) | **the judge** (embeddings not adopted) | embeddings would wrongly block 8 of 22 good plans; the judge answers "yes" to every plan |
+
+Embeddings are high-precision and low-recall on purpose: a miss costs one `go`, `/quest` or `@remember`, a wrong state change costs more. See `.pi/extensions/pi-quest/docs/OPERATOR_GUIDE.md` (*What Decides What*) and `.pi/extensions/pi-mm/README.md` (*Automatic Capture*) for the settings, the offline fallbacks and the opt-in live evaluations. The `bge-*` models are English-only; add exemplars in your language or use a multilingual embedding model.
 
 ### Independent Status Indicators in Pi
 Each extension manages its own dedicated footer status slot without collision:
