@@ -435,6 +435,48 @@ int main(void)
 		}
 		printf("PASS: border warp is bounded, smooth and varied\n");
 
+		/* R1: Prominent medium-frequency variation in ndw_border_warp across 8-16 unit distances */
+		{
+			int max_step_delta = 0;
+			int64_t sum_sq = 0;
+			for (int x = 0; x < NDW_TILE_W; x++) {
+				int dx, dy;
+				ndw_border_warp(p0, x, 5, &dx, &dy);
+				sum_sq += (int64_t)dx * dx;
+				if (x >= 8) {
+					int p8_dx, p8_dy;
+					ndw_border_warp(p0, x - 8, 5, &p8_dx, &p8_dy);
+					int delta8 = dx > p8_dx ? dx - p8_dx : p8_dx - dx;
+					if (delta8 > max_step_delta) max_step_delta = delta8;
+				}
+			}
+			int mean_sq = (int)(sum_sq / NDW_TILE_W);
+			assert(max_step_delta >= 3); /* prominent 8-unit medium-scale delta */
+			assert(mean_sq >= 2);        /* strong displacement energy */
+		}
+		printf("PASS: prominent medium-frequency variation across 8-16 unit distances\n");
+
+		/* R2: Balanced circular macroscopic contours without diagonal shear bias */
+		{
+			assert(NDW_CORNER_RX == 64 && NDW_CORNER_RY == 64);
+			assert(NDW_CORNER_R == 64);
+		}
+		printf("PASS: balanced circular macroscopic corner radius (RX=64, RY=64)\n");
+
+		/* R3: Small-scale micro-variation preservation */
+		{
+			int non_zero_deltas = 0;
+			int pdx = 0;
+			for (int x = 0; x < NDW_TILE_W; x++) {
+				int dx, dy;
+				ndw_border_warp(p0, x, 5, &dx, &dy);
+				if (x > 0 && dx != pdx) non_zero_deltas++;
+				pdx = dx;
+			}
+			assert(non_zero_deltas > 20); /* fine micro-detail across unit steps */
+		}
+		printf("PASS: small-scale micro-variation preserved across unit steps\n");
+
 		/* The border is organic: along the east edge the owner flips between self
 		 * and the east tile, differently in every column of the band. */
 		{

@@ -500,8 +500,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
  */
 #define NDW_SUB            4      /* q steps per unit */
 #define NDW_BLEND_AMP      8      /* max border displacement per axis, units */
-#define NDW_CORNER_RX      80     /* corner horizontal rounding radius, units (= hx) */
-#define NDW_CORNER_RY      64     /* corner vertical rounding radius, units (= hy) */
+#define NDW_CORNER_RX      64     /* corner horizontal rounding radius, units */
+#define NDW_CORNER_RY      64     /* corner vertical rounding radius, units */
 #define NDW_CORNER_R       NDW_CORNER_RX
 #define NDW_EDGE_BAND      (NDW_BLEND_AMP + 4)                  /* the border lies this close to a straight edge */
 #define NDW_BLEND_BAND     (NDW_CORNER_RX + NDW_BLEND_AMP + 2)  /* points within this distance of an edge may not be the tile's own */
@@ -562,13 +562,13 @@ ndw_warp_axis(const int16_t pos[4], int wx, int wy, uint32_t salt)
 	                        ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
 	                        ^ ((uint32_t)(uint16_t)pos[3] * 0x85EBCA6Bu));
 	int x = wx * NDW_SUB, y = wy * NDW_SUB;
-	int n0 = ndw_vnoise(seed, x + y / 3, y - x / 5, 8);
-	int n1 = ndw_vnoise(seed ^ 0x68E31DA4u, x - y / 4, y + x / 3, 7);
+	int n0 = ndw_vnoise(seed, x + y / 4, y - x / 4, 8);
+	int n1 = ndw_vnoise(seed ^ 0x68E31DA4u, x - y / 4, y + x / 4, 7);
 	int n2 = ndw_vnoise(seed ^ 0xB5297A4Du, x + y / 5, y - x / 4, 6);
 	int n3 = ndw_vnoise(seed ^ 0x1B56C4E9u, x - y / 3, y + x / 5, 5);
 	int n4 = ndw_vnoise(seed ^ 0x9C4E2B18u, x + y / 2, y - x / 3, 4);
 	int n5 = ndw_vnoise(seed ^ 0x3F8A65D1u, x - y / 2, y + x / 2, 3);
-	int n = (n0 * 4 + n1 * 3 + n2 * 3 + n3 * 2 + n4 * 2 + n5) / 15;
+	int n = (n0 * 4 + n1 * 3 + n2 * 5 + n3 * 4 + n4 * 2 + n5) / 19;
 	int v = (n - 128) * 3 / 2;                   /* reach full amplitude */
 
 	if (v < -128) v = -128;
@@ -816,14 +816,18 @@ ndw_ground_owner(const int16_t pos[4], int lx, int ly, unsigned no_blend, int *o
 
 	for (int k = 0; k < 9; k++)
 		grp[k] = 4;
-	if (lx < NDW_EDGE_BAND) grp[3] = 0;
-	if (lx >= NDW_TILE_W - NDW_EDGE_BAND) grp[5] = 1;
-	if (ly < NDW_EDGE_BAND) grp[1] = 2;
-	if (ly >= NDW_TILE_H - NDW_EDGE_BAND) grp[7] = 3;
-	if (grp[3] == 0 && grp[1] == 2) grp[0] = 5;
-	if (grp[5] == 1 && grp[1] == 2) grp[2] = 6;
-	if (grp[3] == 0 && grp[7] == 3) grp[6] = 7;
-	if (grp[5] == 1 && grp[7] == 3) grp[8] = 8;
+	if (lx >= NDW_TILE_W - NDW_BLEND_BAND) {
+		grp[2] = 1; grp[5] = 1; grp[8] = 1;
+	}
+	if (lx < NDW_BLEND_BAND) {
+		grp[0] = 0; grp[3] = 0; grp[6] = 0;
+	}
+	if (ly < NDW_BLEND_BAND) {
+		grp[0] = 2; grp[1] = 2; grp[2] = 2;
+	}
+	if (ly >= NDW_TILE_H - NDW_BLEND_BAND) {
+		grp[6] = 3; grp[7] = 3; grp[8] = 3;
+	}
 
 	ndw_warp_grid_fill(&g, pos);
 	any = ndw_ground_weights(&g, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp, no_blend, w);
