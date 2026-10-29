@@ -33,7 +33,8 @@
     "roles": {
       "reviewer": [
         "anthropic/claude-sonnet-5-5:low",
-        "antigravity/claude-sonnet-5-5"
+        "antigravity/claude-sonnet-5-5",
+        "antigravity/gemini-3.8-flash"
       ],
       "validator": [
         "antigravity/gemini-3.8-flash",
