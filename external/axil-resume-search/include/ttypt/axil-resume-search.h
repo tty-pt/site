@@ -24,7 +24,8 @@ extern "C" {
 typedef enum {
     SEARCH_MODE_SEPAL  = 0, /**< Pure semantic vector similarity */
     SEARCH_MODE_LEMMA  = 1, /**< Pure lexical keyword match */
-    SEARCH_MODE_HYBRID = 2  /**< Hybrid (semantic similarity + lexical boost) */
+    SEARCH_MODE_HYBRID = 2, /**< Hybrid (semantic similarity + lexical boost) */
+    SEARCH_MODE_COLLECTIONS = 3 /**< Axil-Auren Multi-Tenant Collections search */
 } search_mode_t;
 
 /** Module state and resource handles */

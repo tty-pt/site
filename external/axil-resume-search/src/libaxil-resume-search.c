@@ -20,7 +20,190 @@
 
 #include "ttypt/axil-resume-search.h"
 
+#define RS_CURLOPT_URL            10002
+#define RS_CURLOPT_POSTFIELDS     10015
+#define RS_CURLOPT_HTTPHEADER     10023
+#define RS_CURLOPT_WRITEFUNCTION  20011
+#define RS_CURLOPT_WRITEDATA      10001
+#define RS_CURLOPT_POST           47
+#define RS_CURLOPT_HTTPGET        80
+#define RS_CURLOPT_TIMEOUT        13
+
+struct rs_curl_syms {
+	int   loaded;
+	void *(*easy_init)(void);
+	int   (*easy_setopt)(void *, int, ...);
+	int   (*easy_perform)(void *);
+	void  (*easy_cleanup)(void *);
+	char *(*easy_escape)(void *, const char *, int);
+	void  (*free)(void *);
+	void *(*slist_append)(void *, const char *);
+	void  (*slist_free_all)(void *);
+};
+
+static struct rs_curl_syms rs_curl;
+static void                *rs_curl_dl;
+
+static int
+rs_curl_ensure(void)
+{
+	const char *names[] = { "libcurl.so.4", "libcurl.so", NULL };
+	size_t i;
+	void *sym;
+
+	if (rs_curl.loaded)
+		return 0;
+	for (i = 0; names[i]; i++) {
+		rs_curl_dl = qsys_dlopen(names[i], 0);
+		if (rs_curl_dl)
+			break;
+	}
+	if (!rs_curl_dl)
+		return -1;
+	sym = qsys_dlsym(rs_curl_dl, "curl_easy_init");
+	memcpy(&rs_curl.easy_init, &sym, sizeof(rs_curl.easy_init));
+	sym = qsys_dlsym(rs_curl_dl, "curl_easy_setopt");
+	memcpy(&rs_curl.easy_setopt, &sym, sizeof(rs_curl.easy_setopt));
+	sym = qsys_dlsym(rs_curl_dl, "curl_easy_perform");
+	memcpy(&rs_curl.easy_perform, &sym, sizeof(rs_curl.easy_perform));
+	sym = qsys_dlsym(rs_curl_dl, "curl_easy_cleanup");
+	memcpy(&rs_curl.easy_cleanup, &sym, sizeof(rs_curl.easy_cleanup));
+	sym = qsys_dlsym(rs_curl_dl, "curl_easy_escape");
+	memcpy(&rs_curl.easy_escape, &sym, sizeof(rs_curl.easy_escape));
+	sym = qsys_dlsym(rs_curl_dl, "curl_free");
+	memcpy(&rs_curl.free, &sym, sizeof(rs_curl.free));
+	sym = qsys_dlsym(rs_curl_dl, "curl_slist_append");
+	memcpy(&rs_curl.slist_append, &sym, sizeof(rs_curl.slist_append));
+	sym = qsys_dlsym(rs_curl_dl, "curl_slist_free_all");
+	memcpy(&rs_curl.slist_free_all, &sym, sizeof(rs_curl.slist_free_all));
+
+	if (!rs_curl.easy_init || !rs_curl.easy_setopt || !rs_curl.easy_perform ||
+	    !rs_curl.easy_cleanup || !rs_curl.easy_escape || !rs_curl.free ||
+	    !rs_curl.slist_append || !rs_curl.slist_free_all)
+		return -1;
+	rs_curl.loaded = 1;
+	return 0;
+}
+
 static resume_search_state_t g_state;
+
+struct resume_curl_resp {
+	char *data;
+	size_t len;
+	size_t cap;
+};
+
+static size_t
+resume_curl_write(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	struct resume_curl_resp *r = (struct resume_curl_resp *)userdata;
+	size_t bytes = size * nmemb;
+	if (r->len + bytes + 1 > r->cap) {
+		size_t ncap = r->cap ? r->cap * 2 : 4096;
+		while (ncap < r->len + bytes + 1) ncap *= 2;
+		char *grown = realloc(r->data, ncap);
+		if (!grown) return 0;
+		r->data = grown;
+		r->cap = ncap;
+	}
+	memcpy(r->data + r->len, ptr, bytes);
+	r->len += bytes;
+	r->data[r->len] = '\0';
+	return bytes;
+}
+
+static int
+collections_post_document(const char *base_url, const char *collection, uint32_t ref, const char *text)
+{
+	if (rs_curl_ensure() != 0) return -1;
+
+	char clean_base[512];
+	snprintf(clean_base, sizeof(clean_base), "%s", base_url);
+	char *slash = strstr(clean_base, "/v1");
+	if (slash) *slash = '\0';
+	slash = strstr(clean_base, "/api");
+	if (slash) *slash = '\0';
+	size_t cblen = strlen(clean_base);
+	while (cblen > 0 && clean_base[cblen - 1] == '/') clean_base[--cblen] = '\0';
+
+	char url[768];
+	snprintf(url, sizeof(url), "%s/v1/collections/%s/documents", clean_base, collection);
+
+	struct json_object *obj = json_object_new_object();
+	if (!obj) return -1;
+	char id_str[64];
+	snprintf(id_str, sizeof(id_str), "%u", ref);
+	json_object_object_add(obj, "id", json_object_new_string(id_str));
+	json_object_object_add(obj, "text", json_object_new_string(text));
+
+	const char *body_json = json_object_to_json_string(obj);
+	void *curl = rs_curl.easy_init();
+	if (!curl) {
+		json_object_put(obj);
+		return -1;
+	}
+
+	void *hdrs = rs_curl.slist_append(NULL, "Content-Type: application/json");
+	rs_curl.easy_setopt(curl, RS_CURLOPT_URL, url);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_POST, 1L);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_POSTFIELDS, body_json);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_HTTPHEADER, hdrs);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_TIMEOUT, 10L);
+
+	int res = rs_curl.easy_perform(curl);
+	rs_curl.slist_free_all(hdrs);
+	rs_curl.easy_cleanup(curl);
+	json_object_put(obj);
+	return (res == 0) ? 0 : -1;
+}
+
+static struct json_object *
+collections_query_search(const char *base_url, const char *collection, const char *query, size_t limit)
+{
+	if (rs_curl_ensure() != 0) return NULL;
+
+	char clean_base[512];
+	snprintf(clean_base, sizeof(clean_base), "%s", base_url);
+	char *slash = strstr(clean_base, "/v1");
+	if (slash) *slash = '\0';
+	slash = strstr(clean_base, "/api");
+	if (slash) *slash = '\0';
+	size_t cblen = strlen(clean_base);
+	while (cblen > 0 && clean_base[cblen - 1] == '/') clean_base[--cblen] = '\0';
+
+	void *curl = rs_curl.easy_init();
+	if (!curl) return NULL;
+
+	char *escaped = rs_curl.easy_escape(curl, query, (int)strlen(query));
+	if (!escaped) {
+		rs_curl.easy_cleanup(curl);
+		return NULL;
+	}
+
+	char url[1024];
+	snprintf(url, sizeof(url), "%s/v1/collections/%s/search?q=%s&limit=%zu",
+	         clean_base, collection, escaped, limit);
+	rs_curl.free(escaped);
+
+	struct resume_curl_resp resp = { NULL, 0, 0 };
+	rs_curl.easy_setopt(curl, RS_CURLOPT_URL, url);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_HTTPGET, 1L);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_WRITEFUNCTION, resume_curl_write);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_WRITEDATA, &resp);
+	rs_curl.easy_setopt(curl, RS_CURLOPT_TIMEOUT, 10L);
+
+	int res = rs_curl.easy_perform(curl);
+	rs_curl.easy_cleanup(curl);
+
+	if (res != 0 || !resp.data) {
+		if (resp.data) free(resp.data);
+		return NULL;
+	}
+
+	struct json_object *parsed = json_tokener_parse(resp.data);
+	free(resp.data);
+	return parsed;
+}
 
 static void
 respond_error_json(socket_t fd, int code, const char *msg)
@@ -695,6 +878,9 @@ handle_post_resume(socket_t cfd, char *body)
 		return 0;
 	}
 
+	/* Also index in axil-auren Collections API under 'resumes' collection */
+	(void)collections_post_document(g_state.url, "resumes", ref, embed_input);
+
 	/* Lexical indexing in Lemma */
 	lemma_unindex_ref(g_state.ldb, "text", ref);
 	lemma_index_ref(g_state.ldb, "text", ref, extracted_text);
@@ -801,6 +987,8 @@ handle_get_candidates(socket_t cfd, char *body)
 			mode = SEARCH_MODE_LEMMA;
 		else if (strcasecmp(mbuf, "hybrid") == 0)
 			mode = SEARCH_MODE_HYBRID;
+		else if (strcasecmp(mbuf, "collections") == 0)
+			mode = SEARCH_MODE_COLLECTIONS;
 		else
 			mode = SEARCH_MODE_SEPAL;
 	}
@@ -822,7 +1010,54 @@ handle_get_candidates(socket_t cfd, char *body)
 		return 0;
 	}
 
-	if (mode == SEARCH_MODE_SEPAL || mode == SEARCH_MODE_HYBRID) {
+	if (mode == SEARCH_MODE_COLLECTIONS) {
+		struct json_object *coll_res = collections_query_search(g_state.url, "resumes", job_query, limit);
+		if (coll_res) {
+			struct json_object *res_arr = json_object_object_get(coll_res, "results");
+			if (res_arr && json_object_is_type(res_arr, json_type_array)) {
+				size_t rlen = json_object_array_length(res_arr);
+				for (size_t i = 0; i < rlen; i++) {
+					struct json_object *item = json_object_array_get_idx(res_arr, i);
+					if (!item) continue;
+					struct json_object *id_obj = json_object_object_get(item, "id");
+					struct json_object *sc_obj = json_object_object_get(item, "score");
+					const char *id_str = id_obj ? json_object_get_string(id_obj) : NULL;
+					double score = sc_obj ? json_object_get_double(sc_obj) : 0.0;
+					if (score < (double)min_sim) continue;
+
+					uint32_t r = id_str ? (uint32_t)strtoul(id_str, NULL, 10) : 0;
+					char r_key[32];
+					snprintf(r_key, sizeof(r_key), "%u", r);
+					const char *meta_str = (const char *)corm_get(g_state.meta_hd, r_key);
+					if (!meta_str) continue;
+					struct json_object *stored_meta = json_tokener_parse(meta_str);
+					if (!stored_meta) continue;
+
+					struct json_object *hit_obj = json_object_new_object();
+					json_object_object_add(hit_obj, "ref", json_object_new_int64(r));
+					json_object_object_add(hit_obj, "score", json_object_new_double(score));
+					json_object_object_add(hit_obj, "candidate",
+					                       json_object_get(json_object_object_get(stored_meta, "candidate")));
+					json_object_object_add(hit_obj, "file_name",
+					                       json_object_get(json_object_object_get(stored_meta, "file_name")));
+					json_object_object_add(hit_obj, "file_path",
+					                       json_object_get(json_object_object_get(stored_meta, "file_path")));
+					json_object_object_add(hit_obj, "file_size",
+					                       json_object_get(json_object_object_get(stored_meta, "file_size")));
+					json_object_object_add(hit_obj, "snippet",
+					                       json_object_get(json_object_object_get(stored_meta, "snippet")));
+
+					char furl[128];
+					snprintf(furl, sizeof(furl), "/resume/file?ref=%u", r);
+					json_object_object_add(hit_obj, "file_url", json_object_new_string(furl));
+
+					json_object_array_add(candidates_arr, hit_obj);
+					json_object_put(stored_meta);
+				}
+			}
+			json_object_put(coll_res);
+		}
+	} else if (mode == SEARCH_MODE_SEPAL || mode == SEARCH_MODE_HYBRID) {
 		float *qvec = NULL;
 		size_t qdim = 0;
 		int fetch_rc = sepal_embed_fetch(job_query, &qvec, &qdim);
