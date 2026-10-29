@@ -462,8 +462,6 @@ static void blend_tile_border(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 	int band = (NDW_BLEND_BAND * tile_sz + NDW_TILE_W - 1) / NDW_TILE_W + 1;
 	const ndw_warp_grid_t *grid;
 
-	if (own->flags & ND_MAP_FLAG_ROOM)
-		return;
 	for (int dj = -1; dj <= 1; dj++)
 		for (int di = -1; di <= 1; di++) {
 			int nx = gx + di, ny = gy + dj, k = (dj + 1) * 3 + (di + 1);
@@ -474,8 +472,6 @@ static void blend_tile_border(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 					no_blend |= NDW_OWN_BIT(di, dj);
 				} else {
 					nt = &map->tiles[ny * (int)cols + nx];
-					if (nt->flags & ND_MAP_FLAG_ROOM)
-						no_blend |= NDW_OWN_BIT(di, dj);
 				}
 			}
 			col[k] = shade(ansi_rgb(nt->bg & 7), amb, 255);

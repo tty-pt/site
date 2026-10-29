@@ -115,10 +115,10 @@ int main(void)
 	init_sample_map(&m);
 	wild(&m, 1, 1, 2, 0, 0, 0, 0, 0, 0);
 	render(&m, "lamina", 0);
-	assert(fb[(TY(1) + 1) * W + TX(1) + 1] == C_GREEN_BG);
+	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == C_GREEN_BG);
 	wild(&m, 1, 1, 4, 0, 0, 0, 0, 0, 0); /* ANSI 4 = blue */
 	render(&m, "lamina", 0);
-	assert(fb[(TY(1) + 1) * W + TX(1) + 1] == 0xFFBD8973);
+	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == 0xFFBD8973);
 	printf("PASS: wilderness tiles show their biome background colour\n");
 
 	/* 5. TREES in their own colour on ALL THREE cells of a wilderness tile. */
@@ -167,6 +167,7 @@ int main(void)
 	/* 9. Walls use the tile's wall paint colour: a room tile with no north
 	 * exit has a wall line on its top edge. */
 	init_sample_map(&m);
+	m.tiles[1 * 7 + 1].flags = ND_MAP_FLAG_ROOM;
 	m.tiles[1 * 7 + 1].exits = 0x0F & ~2;
 	render(&m, "lamina", 0);
 	assert(fb[TY(1) * W + TX(1) + TILE / 2] == C_YELLOW);
@@ -180,7 +181,7 @@ int main(void)
 	wild(&m, 1, 1, 2, 0, 0, 0, 0, 0, 0);
 	memset(fb, 0, sizeof(fb));
 	nd_lamina_render_map_themed(fb, W, H, &m, "lamina", 100, 0); /* night */
-	assert(fb[(TY(1) + 1) * W + TX(1) + 1] != C_GREEN_BG);
+	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] != C_GREEN_BG);
 	printf("PASS: night dims the biome background\n");
 
 	/* 11. Player pulse and backward-compatible wrapper */
@@ -287,6 +288,7 @@ int main(void)
 		const int center_x = W / 2, center_y = H / 2;
 
 		init_sample_map(&ml);
+		ml.tiles[2 * 7 + 2].bg = 4; /* distinct tile to verify shifting */
 
 		/* Non-live mode: rectangular map, player at tile center */
 		memset(fb, 0, sizeof(fb));
@@ -441,15 +443,17 @@ int main(void)
 		assert(memcmp(a, fb, sizeof(a)) != 0);
 		printf("PASS: the minimap border depends on the world position\n");
 
-		/* a room on the yellow side keeps the border square against the green tile */
+		/* a room on the yellow side blends organically with the green tile */
 		ms.pos[2] = 2;
 		ms.tiles[1 * 7 + 3].flags = ND_MAP_FLAG_ROOM;
 		ms.tiles[1 * 7 + 3].exits = 0x0F;
 		render(&ms, "lamina", 0);
+		int west_yellow_room = 0;
 		for (int py = TY(1); py < TY(1) + TILE; py++)
 			for (int px = edge - 6; px < edge; px++)
-				assert(fb[py * W + px] != C_YELLOW);
-		printf("PASS: a room's edge stays square on the minimap\n");
+				west_yellow_room += (fb[py * W + px] == C_YELLOW);
+		assert(west_yellow_room > 0);
+		printf("PASS: a room's edge blends organically on the minimap\n");
 	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");

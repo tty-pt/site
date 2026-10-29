@@ -362,6 +362,80 @@ int main(void)
 		}
 		printf("PASS: 3-way corner with one square of water resolves cleanly without pinwheel distortion\n");
 
+		/* "XY" vertically on top of "WY" (X=non-water, Y=other biome, W=water):
+		 * Verifies that the T-junction has no inverted land/water stripes, no pinwheel distortion,
+		 * and no deep intrusion of biome X into water or water into biome X. */
+		{
+			int16_t pos_origin[4] = { 10, -5, 2, 1 };
+			/* Tile W is at (1, 2); Tile X is at (1, 1); Tile Y is at (2, 1) and (2, 2). */
+			int16_t pw[4] = { (int16_t)(pos_origin[0] + 1), (int16_t)(pos_origin[1] - 2), pos_origin[2], pos_origin[3] };
+			int16_t px[4] = { (int16_t)(pos_origin[0] + 1), (int16_t)(pos_origin[1] - 1), pos_origin[2], pos_origin[3] };
+			ndw_warp_grid_t gw, gx;
+			ndw_warp_grid_fill(&gw, pw);
+			ndw_warp_grid_fill(&gx, px);
+
+			/* In tile W (water=2, North=Grass=0, East=Desert=1, NE=Desert=1, rest Water=2) */
+			uint8_t grp_w[9] = {
+				0, 0, 1,
+				2, 2, 1,
+				2, 2, 1
+			};
+			/* In tile X (Grass=0, South=Water=2, East=Desert=1, SE=Desert=1, rest Grass=0) */
+			uint8_t grp_x[9] = {
+				0, 0, 1,
+				0, 0, 1,
+				2, 2, 1
+			};
+
+			int grass_deep_in_water = 0;
+			for (int ly = 16; ly < NDW_TILE_H; ly++) {
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2,
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_w, 0, w);
+					for (int k = 0; k < 9; k++) {
+						if (w[k] == 256 && grp_w[k] == 0)
+							grass_deep_in_water++;
+					}
+				}
+			}
+			assert(grass_deep_in_water == 0);
+
+			int water_deep_in_grass = 0;
+			for (int ly = 0; ly < NDW_TILE_H - 16; ly++) {
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2,
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_x, 0, w);
+					for (int k = 0; k < 9; k++) {
+						if (w[k] == 256 && grp_x[k] == 2)
+							water_deep_in_grass++;
+					}
+				}
+			}
+			assert(water_deep_in_grass == 0);
+
+			/* Verify that the corners round smoothly into biome Y rather than remaining sharp 90-degree corners */
+			int desert_in_w = 0;
+			for (int ly = 0; ly < 16; ly++) {
+				for (int lx = NDW_TILE_W - 20; lx < NDW_TILE_W; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_w, 0, w);
+					if (w[5] == 256 || w[2] == 256 || w[8] == 256) desert_in_w++;
+				}
+			}
+			int desert_in_x = 0;
+			for (int ly = NDW_TILE_H - 16; ly < NDW_TILE_H; ly++) {
+				for (int lx = NDW_TILE_W - 20; lx < NDW_TILE_W; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_x, 0, w);
+					if (w[5] == 256 || w[2] == 256 || w[8] == 256) desert_in_x++;
+				}
+			}
+			assert(desert_in_w > 50 && desert_in_x > 20);
+		}
+		printf("PASS: XY vertically on top of WY resolves smoothly rounded into Y without inverted stripes or water/land intrusion\n");
+
 		/* No isolated single-pixel islands (speckle-free continuous contour) */
 		{
 			ndw_warp_grid_t g0;
@@ -456,12 +530,12 @@ int main(void)
 		}
 		printf("PASS: prominent medium-frequency variation across 8-16 unit distances\n");
 
-		/* R2: Balanced circular macroscopic contours without diagonal shear bias */
+		/* R2: Full macroscopic coverage without flat horizontal/vertical shelves */
 		{
-			assert(NDW_CORNER_RX == 64 && NDW_CORNER_RY == 64);
-			assert(NDW_CORNER_R == 64);
+			assert(NDW_CORNER_RX == 80 && NDW_CORNER_RY == 64);
+			assert(NDW_CORNER_R == 80);
 		}
-		printf("PASS: balanced circular macroscopic corner radius (RX=64, RY=64)\n");
+		printf("PASS: full macroscopic corner coverage (RX=80, RY=64)\n");
 
 		/* R3: Small-scale micro-variation preservation */
 		{

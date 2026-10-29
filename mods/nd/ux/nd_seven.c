@@ -906,8 +906,6 @@ static void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st
 	border_ent_t *ent;
 	int differs = 0;
 
-	if (own->flags & NDW_F_ROOM)
-		return;
 	style[4] = ndw_biome_style(own->biome);
 	for (int dj = -1; dj <= 1; dj++)
 		for (int di = -1; di <= 1; di++) {
@@ -919,8 +917,6 @@ static void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st
 				nt = *own;
 			} else {
 				tile_at(st, ti + di, tj + dj, &nt, np);
-				if (nt.flags & NDW_F_ROOM)
-					no_blend |= NDW_OWN_BIT(di, dj);
 			}
 			style[k] = ndw_biome_style(nt.biome);
 			differs |= !same_ground(&style[k], &style[4]);

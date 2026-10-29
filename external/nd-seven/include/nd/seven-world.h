@@ -20,8 +20,7 @@
  *     block: a plant glyph is that plant family (x deciduous, t tall tree,
  *     a fir, i cactus; lower case is small, upper case is big), '~' a pond,
  *     '$' a shop, '<' '>' stairs, anything else a mark;
- *   - only tiles flagged as a room get walls, and only where an exit is
- *     missing (a gate gap where it is open).
+ *   - rooms have no walls, gates or barriers: all terrain is open and seamless.
  * Placement is a pure function of the tile's absolute world coordinates
  * (x, y, z, world), so the same tile looks the same from every neighbour and
  * after every re-centring of the view.
@@ -500,8 +499,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
  */
 #define NDW_SUB            4      /* q steps per unit */
 #define NDW_BLEND_AMP      8      /* max border displacement per axis, units */
-#define NDW_CORNER_RX      64     /* corner horizontal rounding radius, units */
-#define NDW_CORNER_RY      64     /* corner vertical rounding radius, units */
+#define NDW_CORNER_RX      80     /* corner horizontal rounding radius, units (= hx) */
+#define NDW_CORNER_RY      64     /* corner vertical rounding radius, units (= hy) */
 #define NDW_CORNER_R       NDW_CORNER_RX
 #define NDW_EDGE_BAND      (NDW_BLEND_AMP + 4)                  /* the border lies this close to a straight edge */
 #define NDW_BLEND_BAND     (NDW_CORNER_RX + NDW_BLEND_AMP + 2)  /* points within this distance of an edge may not be the tile's own */
@@ -681,7 +680,7 @@ ndw_differs_at(const uint8_t grp[9], unsigned no_blend, int i, int j, int di, in
 	if (ni < -1 || ni > 1 || nj < -1 || nj > 1)
 		return 0;   /* unknown (far from the tile): square */
 	if (no_blend & NDW_OWN_BIT(ni, nj))
-		return 0;   /* rooms stay square, so nothing rounds against them */
+		return 0;   /* unblendable boundary */
 	return grp[(nj + 1) * 3 + (ni + 1)] != grp[(j + 1) * 3 + (i + 1)];
 }
 
@@ -769,23 +768,48 @@ ndw_ground_weights(const ndw_warp_grid_t *g, int qx, int qy, const uint8_t grp[9
 		int diff_y = ndw_differs_at(grp, no_blend, cell_i, cell_j, 0, sy);
 		int k_x = (cell_j + 1) * 3 + (cell_i + sx + 1);
 		int k_y = (cell_j + sy + 1) * 3 + (cell_i + 1);
+		int k_diag = (cell_j + sy + 1) * 3 + (cell_i + sx + 1);
 
-		/* A corner rounds into a surrounding biome ONLY IF both orthogonal neighbours
-		 * belong to the SAME surrounding biome (grp[k_x] == grp[k_y]).
-		 * If grp[k_x] != grp[k_y], it is a 3-way biome intersection (e.g. water meeting
-		 * two different land biomes): no pinwheel corner distortion! */
-		if (diff_x && diff_y && grp[k_x] == grp[k_y]) {
-			int rx = NDW_CORNER_RX * NDW_FINE;
-			int ry = NDW_CORNER_RY * NDW_FINE;
-			int qx_c = (ax < 0 ? -ax : ax) - (hx - rx);
-			int qy_c = (ay < 0 ? -ay : ay) - (hy - ry);
-			if (qx_c > 0 && qy_c > 0) {
-				int a = qx_c / 16;
-				int b = (int)(((int64_t)qy_c * rx / ry) / 16);
-				int dist = ndw_isqrt(a * a + b * b) * 16;
-				if (dist > rx) {
-					/* Point was rounded away from cell cand_k: yields cleanly to the surrounding biome */
-					winning_k = k_x;
+		/* A corner rounds into a surrounding biome:
+		 * - In a standard corner (grp[k_x] == grp[k_y]), both orthogonal neighbours
+		 *   belong to the same biome, rounding with the full corner radius (RX, RY).
+		 * - In a 3-way biome junction (e.g. T-junction where non-water biome X is
+		 *   vertically on top of water W, adjacent to biome Y), one orthogonal neighbour
+		 *   matches the diagonal neighbour (grp[k_diag] == grp[k_x] or grp[k_y]).
+		 *   The corner rounds into that continuous biome with a natural junction radius
+		 *   (RX/4, RY/4), never yielding across the flat boundary to the sibling biome,
+		 *   preventing inverted stripes/shards while eliminating unnatural sharp corners. */
+		if (diff_x && diff_y) {
+			int target_k = -1;
+			int rx, ry;
+
+			if (grp[k_x] == grp[k_y]) {
+				target_k = k_x;
+				rx = NDW_CORNER_RX * NDW_FINE;
+				ry = NDW_CORNER_RY * NDW_FINE;
+			} else if (k_diag >= 0 && k_diag < 9) {
+				if (grp[k_diag] == grp[k_x]) {
+					target_k = k_x;
+					rx = (NDW_CORNER_RX / 4) * NDW_FINE;
+					ry = (NDW_CORNER_RY / 4) * NDW_FINE;
+				} else if (grp[k_diag] == grp[k_y]) {
+					target_k = k_y;
+					rx = (NDW_CORNER_RX / 4) * NDW_FINE;
+					ry = (NDW_CORNER_RY / 4) * NDW_FINE;
+				}
+			}
+
+			if (target_k >= 0) {
+				int qx_c = (ax < 0 ? -ax : ax) - (hx - rx);
+				int qy_c = (ay < 0 ? -ay : ay) - (hy - ry);
+				if (qx_c > 0 && qy_c > 0) {
+					int a = qx_c / 16;
+					int b = (int)(((int64_t)qy_c * rx / ry) / 16);
+					int dist = ndw_isqrt(a * a + b * b) * 16;
+					if (dist > rx) {
+						/* Point was rounded away from cell cand_k: yields cleanly to the surrounding biome */
+						winning_k = target_k;
+					}
 				}
 			}
 		}
@@ -883,7 +907,6 @@ ndw_blocked(ndw_lookup_fn lookup, void *ctx, int fx, int fy)
 			ndw_tile_t t;
 			int16_t pos[4];
 			ndw_obj_t obj[NDW_MAX_OBJ];
-			ndw_rect_t walls[NDW_MAX_WALL];
 			int kind = lookup(ctx, ti, tj, &t, pos);
 			int ox = ti * NDW_TILE_W, oy = tj * NDW_TILE_H;
 			ndw_rect_t foot = { (int16_t)(x0 - ox), (int16_t)(y0 - oy),
@@ -891,6 +914,7 @@ ndw_blocked(ndw_lookup_fn lookup, void *ctx, int fx, int fy)
 
 			if (!kind)
 				return 1;
+			ndw_rect_t walls[NDW_MAX_WALL];
 			for (int w = ndw_walls(&t, walls) - 1; w >= 0; w--)
 				if (ndw_rect_hit(&foot, &walls[w]))
 					return 1;

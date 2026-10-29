@@ -665,7 +665,7 @@ int main(void)
 		printf("PASS: another level has another border\n");
 	}
 
-	/* A room stays square: grass never gets desert ground inside a room's edge. */
+	/* A room blends seamlessly with wilderness */
 	{
 		const int W = 1280, H = 720, EDGE = 640 - NDW_CENTER_X * 2;
 		int west_sand = 0;
@@ -674,8 +674,8 @@ int main(void)
 		nd_seven_render(fb, W, H, &st);
 		for (int y = 8; y < H - 8; y++)
 			west_sand += first_sand_run(fb, W, y, EDGE - 60, EDGE - 1) >= 0;
-		assert(west_sand == 0);
-		printf("PASS: a room's edge stays square against wilderness\n");
+		assert(west_sand > 10);
+		printf("PASS: a room's edge blends organically against wilderness\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
