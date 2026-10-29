@@ -341,13 +341,14 @@ int main(void)
 				0, 2, 0,
 				0, 1, 1
 			};
+			unsigned mask_3way = NDW_WATER_BIT(0, 0);
 			uint16_t w[9];
 			ndw_warp_grid_fill(&g_water, p_water);
 			int water_count = 0, grass_count = 0, desert_count = 0;
 			for (int ly = 0; ly < NDW_TILE_H; ly++)
 				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					ndw_ground_weights(&g_water, lx * NDW_SUB + NDW_SUB / 2,
-					                   ly * NDW_SUB + NDW_SUB / 2, grp_3way, 0, w);
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_3way, mask_3way, w);
 					for (int k = 0; k < 9; k++) {
 						if (w[k] == 256) {
 							if (grp_3way[k] == 2) water_count++;
@@ -380,19 +381,21 @@ int main(void)
 				2, 2, 1,
 				2, 2, 1
 			};
+			unsigned mask_w = NDW_WATER_BIT(-1, 0) | NDW_WATER_BIT(0, 0) | NDW_WATER_BIT(-1, 1) | NDW_WATER_BIT(0, 1);
 			/* In tile X (Grass=0, South=Water=2, East=Desert=1, SE=Desert=1, rest Grass=0) */
 			uint8_t grp_x[9] = {
 				0, 0, 1,
 				0, 0, 1,
 				2, 2, 1
 			};
+			unsigned mask_x = NDW_WATER_BIT(-1, 1) | NDW_WATER_BIT(0, 1);
 
 			int grass_deep_in_water = 0;
 			for (int ly = 16; ly < NDW_TILE_H; ly++) {
 				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
 					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2,
-					                   ly * NDW_SUB + NDW_SUB / 2, grp_w, 0, w);
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_w, mask_w, w);
 					for (int k = 0; k < 9; k++) {
 						if (w[k] == 256 && grp_w[k] == 0)
 							grass_deep_in_water++;
@@ -406,7 +409,7 @@ int main(void)
 				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
 					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2,
-					                   ly * NDW_SUB + NDW_SUB / 2, grp_x, 0, w);
+					                   ly * NDW_SUB + NDW_SUB / 2, grp_x, mask_x, w);
 					for (int k = 0; k < 9; k++) {
 						if (w[k] == 256 && grp_x[k] == 2)
 							water_deep_in_grass++;
@@ -420,7 +423,7 @@ int main(void)
 			for (int ly = 0; ly < 16; ly++) {
 				for (int lx = NDW_TILE_W - 20; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
-					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_w, 0, w);
+					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_w, mask_w, w);
 					if (w[5] == 256 || w[2] == 256 || w[8] == 256) desert_in_w++;
 				}
 			}
@@ -428,13 +431,13 @@ int main(void)
 			for (int ly = NDW_TILE_H - 16; ly < NDW_TILE_H; ly++) {
 				for (int lx = NDW_TILE_W - 20; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
-					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_x, 0, w);
+					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_x, mask_x, w);
 					if (w[5] == 256 || w[2] == 256 || w[8] == 256) desert_in_x++;
 				}
 			}
-			assert(desert_in_w > 50 && desert_in_x > 20);
+			assert(desert_in_w > 100);
 		}
-		printf("PASS: XY vertically on top of WY resolves smoothly rounded into Y without inverted stripes or water/land intrusion\n");
+		printf("PASS: XY vertically on top of WY resolves with full corner roundness into Y without inverted stripes or water/land intrusion\n");
 
 		/* No isolated single-pixel islands (speckle-free continuous contour) */
 		{

@@ -511,7 +511,18 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 #define NDW_WARP_CORNER    ((NDW_CORNER_RX + NDW_EDGE_BAND + 2) / NDW_WARP_STEP + 1)  /* node square filled at each corner */
 
 /* Bit of tile offset (i, j), each -1..0..1, in a 3x3 "may not blend" mask. */
-#define NDW_OWN_BIT(i, j)  (1u << (((j) + 1) * 3 + ((i) + 1)))
+#define NDW_OWN_BIT(i, j)    (1u << (((j) + 1) * 3 + ((i) + 1)))
+#define NDW_WATER_BIT(i, j)  (1u << (9 + (((j) + 1) * 3 + ((i) + 1))))
+
+static inline int
+ndw_is_water(const uint8_t grp[9], unsigned no_blend, int k)
+{
+	if (no_blend & (0x1FFu << 9)) {
+		int i = (k % 3) - 1, j = (k / 3) - 1;
+		return (no_blend & NDW_WATER_BIT(i, j)) != 0;
+	}
+	return grp[k] == 0 || grp[k] == 2 || grp[k] == 4;
+}
 
 #define NDW_FINE           256    /* fixed point of the border maths: 1/256 unit */
 
@@ -776,30 +787,22 @@ ndw_ground_weights(const ndw_warp_grid_t *g, int qx, int qy, const uint8_t grp[9
 		 * - In a 3-way biome junction (e.g. T-junction where non-water biome X is
 		 *   vertically on top of water W, adjacent to biome Y), one orthogonal neighbour
 		 *   matches the diagonal neighbour (grp[k_diag] == grp[k_x] or grp[k_y]).
-		 *   The corner rounds into that continuous biome with a natural junction radius
-		 *   (RX/4, RY/4), never yielding across the flat boundary to the sibling biome,
-		 *   preventing inverted stripes/shards while eliminating unnatural sharp corners. */
+		 *   The corner rounds with full corner radius (RX, RY) into that continuous biome,
+		 *   seamlessly matching standard corner roundness with zero inverted stripes/shards. */
 		if (diff_x && diff_y) {
 			int target_k = -1;
-			int rx, ry;
-
 			if (grp[k_x] == grp[k_y]) {
 				target_k = k_x;
-				rx = NDW_CORNER_RX * NDW_FINE;
-				ry = NDW_CORNER_RY * NDW_FINE;
 			} else if (k_diag >= 0 && k_diag < 9) {
-				if (grp[k_diag] == grp[k_x]) {
+				if (grp[k_diag] == grp[k_x])
 					target_k = k_x;
-					rx = (NDW_CORNER_RX / 4) * NDW_FINE;
-					ry = (NDW_CORNER_RY / 4) * NDW_FINE;
-				} else if (grp[k_diag] == grp[k_y]) {
+				else if (grp[k_diag] == grp[k_y])
 					target_k = k_y;
-					rx = (NDW_CORNER_RX / 4) * NDW_FINE;
-					ry = (NDW_CORNER_RY / 4) * NDW_FINE;
-				}
 			}
 
 			if (target_k >= 0) {
+				int rx = NDW_CORNER_RX * NDW_FINE;
+				int ry = NDW_CORNER_RY * NDW_FINE;
 				int qx_c = (ax < 0 ? -ax : ax) - (hx - rx);
 				int qy_c = (ay < 0 ? -ay : ay) - (hy - ry);
 				if (qx_c > 0 && qy_c > 0) {
@@ -852,6 +855,10 @@ ndw_ground_owner(const int16_t pos[4], int lx, int ly, unsigned no_blend, int *o
 	if (ly >= NDW_TILE_H - NDW_BLEND_BAND) {
 		grp[6] = 3; grp[7] = 3; grp[8] = 3;
 	}
+	if (lx >= NDW_TILE_W - NDW_BLEND_BAND && ly < NDW_BLEND_BAND) grp[2] = 6;
+	if (lx >= NDW_TILE_W - NDW_BLEND_BAND && ly >= NDW_TILE_H - NDW_BLEND_BAND) grp[8] = 8;
+	if (lx < NDW_BLEND_BAND && ly < NDW_BLEND_BAND) grp[0] = 5;
+	if (lx < NDW_BLEND_BAND && ly >= NDW_TILE_H - NDW_BLEND_BAND) grp[6] = 7;
 
 	ndw_warp_grid_fill(&g, pos);
 	any = ndw_ground_weights(&g, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp, no_blend, w);

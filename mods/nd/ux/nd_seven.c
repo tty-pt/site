@@ -920,6 +920,8 @@ static void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st
 			}
 			style[k] = ndw_biome_style(nt.biome);
 			differs |= !same_ground(&style[k], &style[4]);
+			if (style[k].kind == NDW_G_WATER)
+				no_blend |= NDW_WATER_BIT(di, dj);
 		}
 	for (int k = 0; k < 9; k++) {            /* ground ids: equal = same ground */
 		grp[k] = (uint8_t)k;

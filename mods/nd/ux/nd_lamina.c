@@ -477,6 +477,8 @@ static void blend_tile_border(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 			col[k] = shade(ansi_rgb(nt->bg & 7), amb, 255);
 			differs |= ((nt->bg & 7) != (own->bg & 7));
 			grp[k] = (uint8_t)(nt->bg & 7);
+			if (nt->bio_idx == 0 || (nt->bg & 7) == 4)
+				no_blend |= NDW_WATER_BIT(di, dj);
 		}
 	if (!differs)
 		return;
