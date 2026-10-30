@@ -116,6 +116,27 @@ int is_contained_in_tree(const nd_client_state_t *st, const nd_entity_desc_t *e)
 {
 	if (!st || !e)
 		return 0;
+
+	if (str_has_ci(e->name, "stick")) {
+		/* A stick not directly in the room is inside a container/tree */
+		if (e->location != st->room.ref)
+			return 1;
+		/* If the stick is in the room and the room has trees, it belongs inside the tree */
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		if (tr) {
+			for (int k = 0; k < tr->count; k++) {
+				uint8_t kind = tr->objs[k].kind;
+				if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR)
+					return 1;
+			}
+		}
+		for (size_t i = 0; i < st->entity_count; i++) {
+			const nd_entity_desc_t *other = &st->entities[i];
+			if (other->location == st->room.ref && is_landscape_element(other) && !is_stone_or_rock(other))
+				return 1;
+		}
+	}
+
 	for (size_t i = 0; i < st->entity_count; i++) {
 		const nd_entity_desc_t *other = &st->entities[i];
 		if (other->ref == e->location && is_landscape_element(other) && !is_stone_or_rock(other))
@@ -508,9 +529,9 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 				} else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR) {
 					uint32_t tree_ref = s_tracker.objs[k].entity_ref;
 					uint32_t stick_ref = 0;
-					if (tree_ref && !s_tracker.objs[k].stick_harvested) {
+					if (!s_tracker.objs[k].stick_harvested) {
 						for (size_t si = 0; si < st->entity_count; si++) {
-							if (st->entities[si].location == tree_ref &&
+							if ((st->entities[si].location == tree_ref || (st->entities[si].location == st->room.ref && !tree_ref)) &&
 							    str_has_ci(st->entities[si].name, "stick") &&
 							    !nd_seven_is_picked(st->entities[si].ref)) {
 								stick_ref = st->entities[si].ref;
@@ -519,7 +540,10 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 						}
 					}
 					if (stick_ref) {
-						snprintf(best_cmd, sizeof(best_cmd), "get #%u #%u\n", tree_ref, stick_ref);
+						if (tree_ref)
+							snprintf(best_cmd, sizeof(best_cmd), "get #%u #%u\n", tree_ref, stick_ref);
+						else
+							snprintf(best_cmd, sizeof(best_cmd), "get #%u\n", stick_ref);
 						best_dist = d2;
 						best_tracker_k = k;
 						best_picked_ref = stick_ref;

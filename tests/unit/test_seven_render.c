@@ -913,6 +913,53 @@ int main(void)
 		assert(nd_seven_is_picked(200) == 1);
 		assert(nd_seven_is_picked(190) == 1);
 		printf("PASS: picked items tracker operates as a bounded collection\n");
+
+		/* 7. Sticks are contained inside trees and never drawn on ground */
+		set_map(14, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, 0); /* Tree on tile */
+		st.room.ref = 50;
+		st.me = 1;
+		st.entity_count = 2;
+		/* Tree entity */
+		st.entities[0].ref = 501;
+		st.entities[0].location = 50;
+		st.entities[0].ch = 'x';
+		strcpy(st.entities[0].name, "pinus sylvestris");
+		/* Stick contained inside tree */
+		st.entities[1].ref = 502;
+		st.entities[1].location = 501; /* tree ref! */
+		st.entities[1].ch = '!';
+		strcpy(st.entities[1].name, "stick");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+
+		/* is_contained_in_tree MUST return 1 for the stick */
+		assert(is_contained_in_tree(&st, &st.entities[1]) == 1);
+
+		/* Render Seven stage: stick MUST NOT be drawn as a ground entity */
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Approach the tree: action balloon MUST offer to harvest stick from tree */
+		nd_seven_set_lamb(tr->objs[0].x, tr->objs[0].y);
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #501 #502\n") == 0);
+
+		/* Execute stick harvest from tree */
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(502) == 1);
+
+		/* After harvesting, tree no longer offers the stick */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+
+		/* Even if stick has location == room in a room with trees, is_contained_in_tree MUST return 1 */
+		st.entities[1].location = 50;
+		assert(is_contained_in_tree(&st, &st.entities[1]) == 1);
+		printf("PASS: sticks are contained inside trees and never drawn on ground\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
