@@ -13,6 +13,45 @@ static const int8_t s_spots[16][2] = {
 
 static room_tracker_t s_tracker = { 0 };
 
+#define MAX_PICKED_REFS 128
+static uint32_t s_picked_refs[MAX_PICKED_REFS] = { 0 };
+static size_t s_picked_count = 0;
+static size_t s_picked_head = 0;
+
+void nd_seven_mark_picked(uint32_t entity_ref)
+{
+	if (!entity_ref)
+		return;
+	for (size_t i = 0; i < s_picked_count; i++) {
+		if (s_picked_refs[i] == entity_ref)
+			return;
+	}
+	if (s_picked_count < MAX_PICKED_REFS) {
+		s_picked_refs[s_picked_count++] = entity_ref;
+	} else {
+		s_picked_refs[s_picked_head] = entity_ref;
+		s_picked_head = (s_picked_head + 1) % MAX_PICKED_REFS;
+	}
+}
+
+int nd_seven_is_picked(uint32_t entity_ref)
+{
+	if (!entity_ref)
+		return 0;
+	for (size_t i = 0; i < s_picked_count; i++) {
+		if (s_picked_refs[i] == entity_ref)
+			return 1;
+	}
+	return 0;
+}
+
+void nd_seven_forget_picked(void)
+{
+	s_picked_count = 0;
+	s_picked_head = 0;
+	memset(s_picked_refs, 0, sizeof(s_picked_refs));
+}
+
 const room_tracker_t *nd_seven_get_tracker(void)
 {
 	return &s_tracker;
@@ -21,6 +60,7 @@ const room_tracker_t *nd_seven_get_tracker(void)
 void nd_seven_objects_forget(void)
 {
 	memset(&s_tracker, 0, sizeof(s_tracker));
+	nd_seven_forget_picked();
 }
 
 int str_has_ci(const char *hay, const char *needle)
@@ -91,6 +131,7 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 			for (size_t i = 0; i < st->entity_count; i++) {
 				if (st->entities[i].ref != st->me &&
 				    st->entities[i].location == st->room.ref &&
+				    !nd_seven_is_picked(st->entities[i].ref) &&
 				    is_stone_or_rock(&st->entities[i])) {
 					if (st->entities[i].name[0])
 						return st->entities[i].name;
@@ -199,6 +240,8 @@ void sync_room_objects(const nd_client_state_t *st)
 					         e->name[0] ? e->name : "stone");
 					used_entity[ei] = 1;
 					s_tracker.bound_entities++;
+					if (nd_seven_is_picked(e->ref))
+						s_tracker.objs[k].harvested = 1;
 					break;
 				}
 			}
@@ -240,7 +283,17 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	if (s_tracker.objs[k].harvested)
 		return 0;
 
+	uint8_t kind = s_tracker.objs[k].kind;
+	int is_scenery = (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR || kind == NDW_K_CACTUS ||
+	                  kind == NDW_K_POND || kind == NDW_K_SHOP || kind == NDW_K_STAIRS_DOWN || kind == NDW_K_STAIRS_UP);
+
+	/* Permanent landscape and world features from the map tile must never be suppressed by entity counts */
+	if (is_scenery)
+		return 1;
+
 	if (s_tracker.objs[k].entity_ref != 0) {
+		if (nd_seven_is_picked(s_tracker.objs[k].entity_ref))
+			return 0;
 		for (size_t ei = 0; ei < st->entity_count; ei++) {
 			if (st->entities[ei].ref == s_tracker.objs[k].entity_ref &&
 			    st->entities[ei].location == st->room.ref)
@@ -248,9 +301,6 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 		}
 		return 0;
 	}
-
-	if (st->entity_count > 0)
-		return 0;
 
 	return 1;
 }
@@ -422,6 +472,7 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 {
 	int best_dist = 999999;
 	int best_tracker_k = -1;
+	uint32_t best_picked_ref = 0;
 	char best_cmd[64] = { 0 };
 
 	if (!st)
@@ -448,10 +499,11 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 			if (d2 < best_dist) {
 				uint8_t kind = s_tracker.objs[k].kind;
 				if (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER) {
-					if (s_tracker.objs[k].entity_ref) {
+					if (s_tracker.objs[k].entity_ref && !nd_seven_is_picked(s_tracker.objs[k].entity_ref)) {
 						snprintf(best_cmd, sizeof(best_cmd), "get #%u\n", s_tracker.objs[k].entity_ref);
 						best_dist = d2;
 						best_tracker_k = k;
+						best_picked_ref = s_tracker.objs[k].entity_ref;
 					}
 				} else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR) {
 					uint32_t tree_ref = s_tracker.objs[k].entity_ref;
@@ -459,7 +511,8 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 					if (tree_ref && !s_tracker.objs[k].stick_harvested) {
 						for (size_t si = 0; si < st->entity_count; si++) {
 							if (st->entities[si].location == tree_ref &&
-							    str_has_ci(st->entities[si].name, "stick")) {
+							    str_has_ci(st->entities[si].name, "stick") &&
+							    !nd_seven_is_picked(st->entities[si].ref)) {
 								stick_ref = st->entities[si].ref;
 								break;
 							}
@@ -469,6 +522,7 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 						snprintf(best_cmd, sizeof(best_cmd), "get #%u #%u\n", tree_ref, stick_ref);
 						best_dist = d2;
 						best_tracker_k = k;
+						best_picked_ref = stick_ref;
 					}
 				} else if (kind == NDW_K_STAIRS_DOWN) {
 					snprintf(best_cmd, sizeof(best_cmd), ">\n");
@@ -492,8 +546,21 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 				continue;
 			if (e->location != room || is_contained_in_tree(st, e))
 				continue;
-			if (is_landscape_element(e))
+			if (nd_seven_is_picked(e->ref))
 				continue;
+
+			int already_tracked = 0;
+			for (int k = 0; k < s_tracker.count; k++) {
+				if (s_tracker.objs[k].entity_ref == e->ref) {
+					already_tracked = 1;
+					break;
+				}
+			}
+			if (already_tracked)
+				continue;
+			if (is_landscape_element(e) && !is_stone_or_rock(e))
+				continue;
+
 			uint32_t spot = ndw_mix(e->ref) % 16;
 			int ex = NDW_CENTER_X + s_spots[spot][0];
 			int ey = NDW_CENTER_Y + s_spots[spot][1];
@@ -505,10 +572,12 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 				int d2 = dx * dx + dy * dy;
 				if (d2 < best_dist) {
 					char c[64];
-					if ((e->actions & 4) || (e->actions == 0 && e->type != 1)) {
+					if ((e->actions & 4) || (e->actions == 0 && e->type != 1) || is_stone_or_rock(e) || str_has_ci(e->name, "stick")) {
 						snprintf(c, sizeof(c), "get #%u\n", e->ref);
+						best_picked_ref = e->ref;
 					} else {
 						snprintf(c, sizeof(c), "look #%u\n", e->ref);
+						best_picked_ref = 0;
 					}
 					best_dist = d2;
 					best_tracker_k = -1;
@@ -519,12 +588,16 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 	}
 
 	if (best_dist < 999999 && best_cmd[0]) {
-		if (execute && best_tracker_k >= 0 && best_tracker_k < s_tracker.count) {
-			uint8_t kind = s_tracker.objs[best_tracker_k].kind;
-			if (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER)
-				s_tracker.objs[best_tracker_k].harvested = 1;
-			else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR)
-				s_tracker.objs[best_tracker_k].stick_harvested = 1;
+		if (execute) {
+			if (best_tracker_k >= 0 && best_tracker_k < s_tracker.count) {
+				uint8_t kind = s_tracker.objs[best_tracker_k].kind;
+				if (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER)
+					s_tracker.objs[best_tracker_k].harvested = 1;
+				else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR)
+					s_tracker.objs[best_tracker_k].stick_harvested = 1;
+			}
+			if (best_picked_ref && strncmp(best_cmd, "get ", 4) == 0)
+				nd_seven_mark_picked(best_picked_ref);
 		}
 		if (out && sz > 0)
 			snprintf(out, sz, "%s", best_cmd);

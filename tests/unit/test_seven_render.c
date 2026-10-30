@@ -798,6 +798,123 @@ int main(void)
 		printf("PASS: a room's edge blends organically against wilderness\n");
 	}
 
+	/* Persistent picked object tracking, cross-room stability, and database entities */
+	{
+		nd_seven_forget();
+		nd_seven_forget_picked();
+
+		/* 1. Picked tracker basic properties */
+		assert(nd_seven_is_picked(100) == 0);
+		nd_seven_mark_picked(100);
+		assert(nd_seven_is_picked(100) == 1);
+		assert(nd_seven_is_picked(101) == 0);
+
+		/* 2. Room 10: has a stone entity #100 */
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		nd_seven_mark_picked(100);
+		assert(nd_seven_is_picked(100) == 1);
+		st.room.ref = 10;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 100;
+		st.entities[0].location = 10;
+		st.entities[0].ch = '*';
+		strcpy(st.entities[0].name, "granite pebble");
+
+		sync_room_objects(&st);
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		/* Since #100 was marked picked, is_tracked_obj_present MUST be 0 */
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* 3. Cross-room scenery stability: move to Room 20 with picked stone in inventory */
+		set_map_keep(11, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, '~'); /* Tree and pond */
+		assert(nd_seven_is_picked(100) == 1);
+		st.room.ref = 20;
+		st.me = 1;
+		/* st.entities now has player and the picked stone in inventory (location == me) */
+		st.entity_count = 2;
+		st.entities[0].ref = 1;
+		st.entities[0].location = 20;
+		strcpy(st.entities[0].name, "quirinpa");
+		st.entities[1].ref = 100;
+		st.entities[1].location = 1; /* inventory */
+		strcpy(st.entities[1].name, "granite pebble");
+
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count >= 2);
+		/* For all procedural scenery objects (tree and pond), they MUST be present! */
+		for (int k = 0; k < tr->count; k++) {
+			assert(is_tracked_obj_present(&st, k) == 1);
+		}
+		printf("PASS: picking a stone in one room does not suppress scenery in another room\n");
+
+		/* 4. Action execution marks entity picked and suppresses it */
+		set_map(12, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.room.ref = 30;
+		st.entity_count = 1;
+		st.entities[0].ref = 301;
+		st.entities[0].location = 30;
+		st.entities[0].ch = '*';
+		strcpy(st.entities[0].name, "obsidian shard");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+		assert(strcmp(tr->objs[0].name, "obsidian shard") == 0);
+
+		/* Move lamb close to the stone */
+		nd_seven_set_lamb(tr->objs[0].x, tr->objs[0].y);
+		char act[64] = { 0 };
+		int act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #301\n") == 0);
+
+		/* Execute the get action */
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(301) == 1);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* 5. Picking ground items (dropped items like sword) */
+		set_map(13, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.room.ref = 40;
+		st.entity_count = 1;
+		st.entities[0].ref = 401;
+		st.entities[0].location = 40;
+		st.entities[0].ch = '/';
+		st.entities[0].actions = 4;
+		strcpy(st.entities[0].name, "Steel Broadsword");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		int sx, sy;
+		nd_seven_spot(401, &sx, &sy);
+		nd_seven_set_lamb(sx, sy);
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #401\n") == 0);
+
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(401) == 1);
+		/* After picking, action balloon disappears */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+		printf("PASS: action execution marks entities picked and suppresses them\n");
+
+		/* 6. Bounded capacity ring buffer */
+		nd_seven_forget_picked();
+		for (uint32_t i = 1; i <= 200; i++)
+			nd_seven_mark_picked(i);
+		/* The most recent item must definitely be present */
+		assert(nd_seven_is_picked(200) == 1);
+		assert(nd_seven_is_picked(190) == 1);
+		printf("PASS: picked items tracker operates as a bounded collection\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

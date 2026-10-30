@@ -132,6 +132,8 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 			continue;
 		if (is_contained_in_tree(st, e))
 			continue;
+		if (nd_seven_is_picked(e->ref))
+			continue;
 
 		int already_drawn = 0;
 		const room_tracker_t *tr = nd_seven_get_tracker();

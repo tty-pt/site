@@ -29,6 +29,10 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k);
 const room_tracker_t *nd_seven_get_tracker(void);
 void nd_seven_objects_forget(void);
 
+void nd_seven_mark_picked(uint32_t entity_ref);
+int nd_seven_is_picked(uint32_t entity_ref);
+void nd_seven_forget_picked(void);
+
 int str_has_ci(const char *hay, const char *needle);
 int is_landscape_element(const nd_entity_desc_t *e);
 int is_stone_or_rock(const nd_entity_desc_t *e);
