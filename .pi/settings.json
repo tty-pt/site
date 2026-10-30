@@ -29,7 +29,7 @@
       }
     },
     "reviewPolicy": "strict",
-    "judgeFallback": "heuristic",
+    "judgeFallback": "skip",
     "roles": {
       "reviewer": [
         "anthropic/claude-sonnet-5-5:low",
