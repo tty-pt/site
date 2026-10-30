@@ -3,6 +3,7 @@
 #include "nd_lamina.h"
 #include "nd_scene.h"
 #include "nd_seven.h"
+#include "nd_seven_objects.h"
 
 /* Helper to blend / write 32-bit RGBA pixel (0xAABBGGRR in LE format) */
 static inline void set_pixel(uint32_t *fb, uint32_t w, uint32_t h, uint32_t x, uint32_t y, uint32_t color)
@@ -329,6 +330,8 @@ static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 {
 	ndw_obj_t objs[NDW_MAX_OBJ];
 	int n = nd_seven_tile_objects(map, col, row, objs);
+	int is_player_tile = (map && col == map->player_x && row == map->player_y);
+	const room_tracker_t *tr = is_player_tile ? nd_seven_get_tracker() : NULL;
 
 	for (int i = 0; i < n; i++) {
 		const ndw_obj_t *o = &objs[i];
@@ -341,6 +344,11 @@ static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 			if (cw < 5) cw = 5;
 			draw_plant(fb, w, h, fx - cw / 2, fy - ch, cw, ch, o->glyph, ansi_rgb(o->fg));
 		} else if (o->kind >= NDW_K_STONE && o->kind <= NDW_K_BOULDER) {
+			if (tr && i < tr->count) {
+				if (tr->objs[i].harvested ||
+				    (tr->objs[i].entity_ref && nd_seven_is_picked(tr->objs[i].entity_ref)))
+					continue;
+			}
 			draw_mineral(fb, w, h, tile_sz, fx, fy, o->kind, o->variant);
 		}
 	}

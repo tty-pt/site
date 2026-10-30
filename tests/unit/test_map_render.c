@@ -5,6 +5,7 @@
 #include "nd/bcp-types.h"
 #include "nd_lamina.h"
 #include "nd_seven.h"
+#include "nd_seven_objects.h"
 #include <nd/seven-world.h>
 
 /* Frame geometry for a 224x224 buffer and a 7x7 grid (as nd_lamina.c lays it
@@ -454,6 +455,55 @@ int main(void)
 				west_yellow_room += (fb[py * W + px] == C_YELLOW);
 		assert(west_yellow_room > 0);
 		printf("PASS: a room's edge blends organically on the minimap\n");
+	}
+
+	/* 17. Synchronous picked mineral suppression on player tile:
+	 * When a stone on the player tile is harvested/picked, draw_tile_objects
+	 * immediately omits it on the minimap, matching the Seven stage. */
+	{
+		nd_client_state_t cst;
+		static uint32_t buf_before[W * H], buf_picked[W * H], buf_clean[W * H];
+
+		memset(&cst, 0, sizeof(cst));
+		init_sample_map(&cst.map_data);
+		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		wild(&cst.map_data, 1, 1, 2, 0, 0, '*', 10, 0, 0);
+		cst.map_data.pos[0] = 50; cst.map_data.pos[1] = 50;
+		cst.room.ref = 100;
+		cst.me = 1;
+		cst.entity_count = 1;
+		cst.entities[0].ref = 999;
+		cst.entities[0].location = 100;
+		cst.entities[0].ch = '*';
+		strcpy(cst.entities[0].name, "obsidian stone");
+
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
+
+		/* Render before picking */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_before, fb, sizeof(buf_before));
+
+		/* Pick the stone */
+		nd_seven_mark_picked(999);
+		sync_room_objects(&cst);
+
+		/* Render after picking */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_picked, fb, sizeof(buf_picked));
+
+		/* Picked buffer MUST differ from before-picking buffer (stone was omitted) */
+		assert(memcmp(buf_before, buf_picked, sizeof(buf_before)) != 0);
+
+		/* Render a map with no stone glyph at all on (1, 1) */
+		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_clean, fb, sizeof(buf_clean));
+
+		/* The buffer after picking MUST match the clean map with no stone glyph! */
+		assert(memcmp(buf_picked, buf_clean, sizeof(buf_clean)) == 0);
+		printf("PASS: picked minerals are immediately omitted on the minimap\n");
 	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");
