@@ -103,12 +103,6 @@
       "pode avançar"
     ]
   },
-  "pi-mm": {
-    "embedUrl": "http://127.0.0.1:4242/v1/embeddings",
-    "embedModel": "bge-small",
-    "semanticSearch": true,
-    "ephemeralSepal": true
-  },
   "pi-early-compact": {
     "tiers": [
       {
