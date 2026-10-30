@@ -13,6 +13,10 @@ ND_UX_MODULES = \
 ND_UX_PARTS = \
 	ux/nd_map_ui.c \
 	ux/nd_seven.c \
+	ux/nd_seven_atlas_draw.c \
+	ux/nd_seven_ground.c \
+	ux/nd_seven_motion.c \
+	ux/nd_seven_objects.c \
 	ux/nd_dock_ui.c \
 	ux/nd_state_io.c
 
@@ -33,4 +37,4 @@ include ../../build.mk
 
 $(TARGET): ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/ux/site_page.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h
 
-$(WASM_PATH)/nd.wasm: ux/nd_ui.h ux/nd_lamina.h ux/nd_seven.h ux/nd_seven_atlas.h $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/viewer_zoom.h
+$(WASM_PATH)/nd.wasm: $(nd-src) ux/nd_ui.h ux/nd_lamina.h ux/nd_seven.h ux/nd_seven_atlas.h $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/viewer_zoom.h

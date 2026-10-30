@@ -1,7 +1,10 @@
 #include <string.h>
 #include <nd/seven-world.h>
 #include "nd_seven.h"
-#include "nd_seven_atlas.h"
+#include "nd_seven_atlas_draw.h"
+#include "nd_seven_ground.h"
+#include "nd_seven_motion.h"
+#include "nd_seven_objects.h"
 
 /*
  * The seven stage: a continuous world drawn from the NeverDark map.
@@ -13,360 +16,7 @@
  * arrives the origin tile shifts under the lamb without it moving on screen.
  */
 
-/* --- sprite atlas ------------------------------------------------------- */
-
-static uint8_t s_atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
-static int s_atlas_ready;
-
-static void atlas_load(void)
-{
-	size_t o = 0;
-	if (s_atlas_ready)
-		return;
-	for (size_t i = 0; i + 1 < ND_SEVEN_RLE_LEN && o < sizeof(s_atlas); i += 2) {
-		size_t run = (size_t)nd_seven_rle[i] + 1;
-		uint8_t v = nd_seven_rle[i + 1];
-		while (run-- && o < sizeof(s_atlas))
-			s_atlas[o++] = v;
-	}
-	s_atlas_ready = 1;
-}
-
-#define SCALE      2
-#define LAMB_SIZE  32
-#define LAMB_AX    16   /* feet, inside a 32x32 frame */
-#define LAMB_AY    28
-#define SPEED      72.0f /* world units per second */
-#define PENDING_S  2.0f  /* wait this long for the server to confirm a move */
-
-#define RGB(r, g, b) (0xFF000000u | ((uint32_t)(b) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(r))
-
-/* The ASCII map's colours (nd.css --c0..--c15), 0xAABBGGRR: a map glyph reads
- * the same colour here as it does on the map. */
-static const uint32_t s_ansi[16] = {
-	0xFF2C2C2C, 0xFF6A4ABD, 0xFF465E3A, 0xFF5A97A3,
-	0xFFBD8973, 0xFFAC778A, 0xFF5F5C41, 0xFFA5858B,
-	0xFFC1AAB4, 0xFF874ABD, 0xFF8AD353, 0xFF2ECDB8,
-	0xFFBD9C73, 0xFFC58995, 0xFFBAD016, 0xFFF5F5F5
-};
-
-typedef struct { uint8_t r, g, b, leaf; } tint_t;   /* 128 = unchanged */
-
-static uint32_t tint_col(uint32_t c, int r, int g, int b)
-{
-	uint32_t cr = (uint32_t)((int)(c & 0xFF) * r / 128);
-	uint32_t cg = (uint32_t)((int)((c >> 8) & 0xFF) * g / 128);
-	uint32_t cb = (uint32_t)((int)((c >> 16) & 0xFF) * b / 128);
-	if (cr > 255) cr = 255;
-	if (cg > 255) cg = 255;
-	if (cb > 255) cb = 255;
-	return (c & 0xFF000000u) | (cb << 16) | (cg << 8) | cr;
-}
-
-static uint32_t shade(uint32_t c, int num)   /* num/100 */
-{
-	return tint_col(c, num * 128 / 100, num * 128 / 100, num * 128 / 100);
-}
-
-static void put_px(uint32_t *fb, int w, int h, int x, int y, uint32_t c)
-{
-	uint32_t a = c >> 24;
-	uint32_t *d;
-	if (x < 0 || y < 0 || x >= w || y >= h || !a)
-		return;
-	d = &fb[y * w + x];
-	if (a == 255) {
-		*d = c;
-	} else {
-		uint32_t dr = *d & 0xFF, dg = (*d >> 8) & 0xFF, db = (*d >> 16) & 0xFF;
-		uint32_t sr = c & 0xFF, sg = (c >> 8) & 0xFF, sb = (c >> 16) & 0xFF;
-		dr = (sr * a + dr * (255 - a)) / 255;
-		dg = (sg * a + dg * (255 - a)) / 255;
-		db = (sb * a + db * (255 - a)) / 255;
-		*d = 0xFF000000u | (db << 16) | (dg << 8) | dr;
-	}
-}
-
-static void fill_px(uint32_t *fb, int w, int h, int x0, int y0, int x1, int y1, uint32_t c)
-{
-	if (x0 < 0) x0 = 0;
-	if (y0 < 0) y0 = 0;
-	if (x1 > w) x1 = w;
-	if (y1 > h) y1 = h;
-	for (int y = y0; y < y1; y++)
-		for (int x = x0; x < x1; x++)
-			put_px(fb, w, h, x, y, c);
-}
-
-/*
- * Draw the (sx,sy,sw,sh) part of sprite `id` with its anchor (ax,ay) -- a
- * point inside that part -- at screen (dx,dy), magnified `scale` times.
- * Transparent pixels are skipped, translucent ones (shadows) are blended.
- * `tint` recolours the sprite (leaf-only: just its green pixels).
- */
-static void blit(uint32_t *fb, int w, int h, int id,
-                 int sx, int sy, int sw, int sh,
-                 int ax, int ay, int dx, int dy, int scale, const tint_t *tint,
-                 int flip)
-{
-	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
-	int ox = dx - ax * scale, oy = dy - ay * scale;
-
-	if (ox >= w || oy >= h || ox + sw * scale <= 0 || oy + sh * scale <= 0)
-		return;
-	for (int y = 0; y < sh; y++) {
-		const uint8_t *row = &s_atlas[(r->y + sy + y) * ND_SEVEN_ATLAS_W + r->x + sx];
-		int yy0 = oy + y * scale;
-		if (yy0 >= h || yy0 + scale <= 0)
-			continue;
-		for (int x = 0; x < sw; x++) {
-			uint8_t srcx = (uint8_t)(flip ? (sw - 1 - x) : x);
-			uint32_t c = nd_seven_palette[row[srcx]];
-			int xx0 = ox + x * scale;
-			if (!(c >> 24) || xx0 >= w || xx0 + scale <= 0)
-				continue;
-			if (tint) {
-				int pr = (int)(c & 0xFF), pg = (int)((c >> 8) & 0xFF), pb = (int)((c >> 16) & 0xFF);
-				if (!tint->leaf || (pg > pr + 8 && pg > pb + 8))
-					c = tint_col(c, tint->r, tint->g, tint->b);
-			}
-			for (int py = 0; py < scale; py++)
-				for (int px = 0; px < scale; px++)
-					put_px(fb, w, h, xx0 + px, yy0 + py, c);
-		}
-	}
-}
-
-static void blit_all(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx, int dy, int scale,
-                     const tint_t *tint)
-{
-	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
-	blit(fb, w, h, id, 0, 0, r->w, r->h, ax, ay, dx, dy, scale, tint, 0);
-}
-
-static void blit_all_f(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx, int dy,
-                       int scale, const tint_t *tint, int flip)
-{
-	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
-	blit(fb, w, h, id, 0, 0, r->w, r->h, ax, ay, dx, dy, scale, tint, flip);
-}
-
-/* --- state -------------------------------------------------------------- */
-
-enum { DIR_DOWN, DIR_UP, DIR_LEFT, DIR_RIGHT };
-enum { HELD_U = 1, HELD_D = 2, HELD_L = 4, HELD_R = 8 };
-
-static int16_t s_pos[4];       /* absolute (x, y, z, world) of the origin tile */
-static int s_have;
-static int s_lx, s_ly;         /* lamb feet, in origin tile units (may leave 0..TILE) */
-static int s_dir = DIR_DOWN;
-static int s_held;
-static int s_last;             /* most recently pressed held direction bit */
-static int s_walking;
-static int s_pending_key;      /* move key sent, waiting for the new map */
-static float s_pending_t;
-static float s_acc;
-static uint32_t s_anim;
-
-static void recentre(int drop_keys)
-{
-	s_lx = NDW_CENTER_X;
-	s_ly = NDW_CENTER_Y;
-	s_pending_key = 0;
-	s_pending_t = 0;
-	if (drop_keys) {
-		s_held = 0;
-		s_last = 0;
-	}
-}
-
-/* Expected origin shift (columns east, rows south) of a move key. */
-static void key_delta(int key, int *dx, int *dj)
-{
-	*dx = key == 'l' ? 1 : key == 'h' ? -1 : 0;
-	*dj = key == 'j' ? 1 : key == 'k' ? -1 : 0;
-}
-
-/*
- * Keep the lamb on the map. The origin tile is the one the server says we
- * are in. When it moved exactly as the pending key predicted, the lamb stays
- * where it is in the world (its origin-relative position shifts by a tile);
- * any other change (teleport, command, other level) recentres it.
- */
-static void sync_origin(const nd_client_state_t *st)
-{
-	const int16_t *pos;
-
-	if (!st || st->map_data.width == 0) {
-		if (!s_have) {
-			recentre(1);
-			s_have = 1;
-		}
-		return;
-	}
-	pos = st->map_data.pos;
-	if (!s_have) {
-		memcpy(s_pos, pos, sizeof(s_pos));
-		recentre(1);
-		s_have = 1;
-		return;
-	}
-	if (!memcmp(pos, s_pos, sizeof(s_pos)))
-		return;
-	{
-		int dx = pos[0] - s_pos[0], dj = -(pos[1] - s_pos[1]);
-		int ex = 0, ej = 0;
-		if (s_pending_key)
-			key_delta(s_pending_key, &ex, &ej);
-		if (s_pending_key && pos[2] == s_pos[2] && pos[3] == s_pos[3] && dx == ex && dj == ej) {
-			s_lx -= dx * NDW_TILE_W;
-			s_ly -= dj * NDW_TILE_H;
-			s_pending_key = 0;
-			s_pending_t = 0;
-		} else {
-			recentre(1);
-		}
-		memcpy(s_pos, pos, sizeof(s_pos));
-	}
-}
-
-/* --- the tiles ---------------------------------------------------------- */
-
-typedef struct { const nd_client_state_t *st; } world_t;
-
-static ndw_tile_t convert_tile(const nd_map_tile_t *m)
-{
-	ndw_tile_t t;
-	memset(&t, 0, sizeof(t));
-	t.biome = m->bio_idx;
-	t.exits = m->exits & (NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S);
-	if (m->flags & ND_MAP_FLAG_ROOM)   t.flags |= NDW_F_ROOM;
-	if (m->flags & ND_MAP_FLAG_PLAYER) t.flags |= NDW_F_PLAYER;
-	if (m->flags & ND_MAP_FLAG_ENTITY) t.flags |= NDW_F_ENTITY;
-	t.glyph[0] = m->side_l; t.glyph[1] = m->symbol; t.glyph[2] = m->side_r;
-	t.fg[0] = m->fg_l & 15; t.fg[1] = m->fg & 15; t.fg[2] = m->fg_r & 15;
-	return t;
-}
-
-/*
- * The server paints '!' over the centre cell of the tile the player stands in,
- * erasing that tile's plant. Remember each tile's last non-player centre glyph
- * by absolute position (seen from outside) and restore it under the player.
- */
-#define CENTRE_SETS 256
-#define CENTRE_WAYS 4
-typedef struct { int16_t pos[4]; uint8_t glyph, fg, used; } centre_ent_t;
-static centre_ent_t s_centre[CENTRE_SETS][CENTRE_WAYS];
-static uint8_t s_centre_next[CENTRE_SETS];     /* round-robin victim per set */
-
-static unsigned centre_set(const int16_t pos[4])
-{
-	uint32_t h = (uint32_t)(uint16_t)pos[0] * 73856093u ^ (uint32_t)(uint16_t)pos[1] * 19349663u ^
-	             (uint32_t)(uint16_t)pos[2] * 83492791u ^ (uint32_t)(uint16_t)pos[3] * 2654435761u;
-	return (h ^ (h >> 15)) % CENTRE_SETS;
-}
-
-/* The way holding exactly this position (full pos[4] key), or NULL. */
-static centre_ent_t *centre_find(unsigned set, const int16_t pos[4])
-{
-	for (int w = 0; w < CENTRE_WAYS; w++) {
-		centre_ent_t *e = &s_centre[set][w];
-		if (e->used && !memcmp(e->pos, pos, sizeof(e->pos)))
-			return e;
-	}
-	return NULL;
-}
-
-void nd_seven_forget(void)
-{
-	memset(s_centre, 0, sizeof(s_centre));
-	memset(s_centre_next, 0, sizeof(s_centre_next));
-}
-
-static void centre_remember(const int16_t pos[4], ndw_tile_t *t)
-{
-	unsigned set = centre_set(pos);
-	centre_ent_t *e = centre_find(set, pos);
-
-	if (t->glyph[1] == '!') {
-		if (e) {
-			t->glyph[1] = e->glyph;
-			t->fg[1] = e->fg;
-		} else {
-			t->glyph[1] = 0;     /* never seen from outside: nothing known */
-			t->fg[1] = 0;
-		}
-		return;
-	}
-	if (!e) {
-		for (int w = 0; w < CENTRE_WAYS && !e; w++)
-			if (!s_centre[set][w].used)
-				e = &s_centre[set][w];
-		if (!e) {                /* set full: evict round-robin */
-			e = &s_centre[set][s_centre_next[set]];
-			s_centre_next[set] = (uint8_t)((s_centre_next[set] + 1) % CENTRE_WAYS);
-		}
-		memcpy(e->pos, pos, sizeof(e->pos));
-	}
-	e->glyph = t->glyph[1];
-	e->fg = t->fg[1];
-	e->used = 1;
-}
-
-/*
- * Tile at offset (ti, tj) from the origin tile. 1: a tile the map describes;
- * 2: beyond the map, the nearest edge tile's biome and flora carry on; the
- * pos is the tile's absolute coordinates either way.
- */
-static int tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, int16_t pos[4])
-{
-	const nd_map_data_t *md = st ? &st->map_data : NULL;
-
-	pos[0] = (int16_t)(s_pos[0] + ti);
-	pos[1] = (int16_t)(s_pos[1] - tj);
-	pos[2] = s_pos[2];
-	pos[3] = s_pos[3];
-	if (!md || md->width == 0 || md->height == 0) {
-		memset(t, 0, sizeof(*t));
-		t->biome = 10;                         /* grassland until a map arrives */
-		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
-		return 2;
-	}
-	{
-		int w = md->width > ND_MAP_GRID_WIDTH ? ND_MAP_GRID_WIDTH : md->width;
-		int h = md->height > ND_MAP_GRID_HEIGHT ? ND_MAP_GRID_HEIGHT : md->height;
-		int col = md->player_x + ti, row = md->player_y + tj;
-		int known = col >= 0 && row >= 0 && col < w && row < h;
-		if (col < 0) col = 0;
-		if (row < 0) row = 0;
-		if (col >= w) col = w - 1;
-		if (row >= h) row = h - 1;
-		*t = convert_tile(&md->tiles[row * md->width + col]);
-		if (known) {
-			centre_remember(pos, t);
-			return 1;
-		}
-		/* Beyond the described map: keep the biome so the ground continues,
-		 * but drop the clamped neighbour's glyphs. They belong to a tile at
-		 * a different coordinate; mirroring them (a room-centre tree, shop,
-		 * stairs) leaves stray objects floating in void space (R1). */
-		t->flags &= (uint8_t)~(NDW_F_ROOM | NDW_F_PLAYER);
-		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
-		memset(t->glyph, 0, sizeof(t->glyph));
-		memset(t->fg, 0, sizeof(t->fg));
-		return 2;
-	}
-}
-
-/* Collision lookup: the lamb may only enter the origin tile and its eight
- * neighbours (the ones the server can confirm one step at a time). */
-static int lookup(void *ctx, int ti, int tj, ndw_tile_t *t, int16_t pos[4])
-{
-	const world_t *wd = (const world_t *)ctx;
-	if (ti < -1 || ti > 1 || tj < -1 || tj > 1)
-		return 0;
-	return tile_at(wd->st, ti, tj, t, pos) == 1 ? 1 : 0;
-}
+/* --- tile objects -------------------------------------------------------- */
 
 int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t out[NDW_MAX_OBJ])
 {
@@ -381,673 +31,12 @@ int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t o
 	pos[1] = (int16_t)(md->pos[1] - (row - md->player_y));
 	pos[2] = md->pos[2];
 	pos[3] = md->pos[3];
-	t = convert_tile(&md->tiles[row * md->width + col]);
-	centre_remember(pos, &t);
+	t = nd_seven_convert_tile(&md->tiles[row * md->width + col]);
 	return ndw_tile_objects(&t, pos, 0, out);
-}
-
-void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking)
-{
-	if (fx) *fx = s_lx;
-	if (fy) *fy = s_ly;
-	if (dir) *dir = s_dir;
-	if (walking) *walking = s_walking;
-}
-
-void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy)
-{
-	/* Adopt the server's current origin first, so the lamb is expressed
-	 * relative to the same tile the map's player marker sits on. */
-	sync_origin(st);
-	if (fx) *fx = s_lx;
-	if (fy) *fy = s_ly;
-}
-
-int nd_seven_key(const char *key, int down)
-{
-	int bit = 0;
-
-	if (!key)
-		return 0;
-	if (!strcmp(key, "k") || !strcmp(key, "ArrowUp") || !strcmp(key, "w")) bit = HELD_U;
-	else if (!strcmp(key, "j") || !strcmp(key, "ArrowDown") || !strcmp(key, "s")) bit = HELD_D;
-	else if (!strcmp(key, "h") || !strcmp(key, "ArrowLeft") || !strcmp(key, "a")) bit = HELD_L;
-	else if (!strcmp(key, "l") || !strcmp(key, "ArrowRight") || !strcmp(key, "d")) bit = HELD_R;
-	if (!bit)
-		return 0;
-	if (down) {
-		s_held |= bit;
-		s_last = bit;          /* newest key wins, like seven-ways */
-	} else {
-		s_held &= ~bit;
-		if (s_last == bit)
-			s_last = 0;
-	}
-	return 1;
-}
-
-/* Try to move one unit along an axis; blocked moves leave the lamb alone. */
-static void move_axis(world_t *wd, int dx, int dy)
-{
-	int nx = s_lx + dx, ny = s_ly + dy;
-	if (ndw_blocked(lookup, wd, nx, ny))
-		return;
-	s_lx = nx;
-	s_ly = ny;
-}
-
-int nd_seven_tick(const nd_client_state_t *st, float dt)
-{
-	world_t wd = { st };
-	int key = 0, dx = 0, dy = 0, steps;
-
-	s_anim++;
-	sync_origin(st);
-	if (dt > 0.1f)
-		dt = 0.1f;
-
-	if (s_pending_key) {
-		s_pending_t -= dt;
-		if (s_pending_t <= 0) {
-			/* The server never moved us (a wall it knows and we do not):
-			 * the world did not change, so put the lamb back in it. */
-			recentre(0);
-		}
-	}
-
-	/* One cardinal direction at a time (seven-ways): the newest held key,
-	 * else any key still held, so direction can be changed freely. */
-	{
-		int b = (s_last && (s_held & s_last)) ? s_last : (s_held & -s_held);
-		if (b == HELD_L) { dx = -1; s_dir = DIR_LEFT; }
-		else if (b == HELD_R) { dx = 1; s_dir = DIR_RIGHT; }
-		else if (b == HELD_U) { dy = -1; s_dir = DIR_UP; }
-		else if (b == HELD_D) { dy = 1; s_dir = DIR_DOWN; }
-	}
-
-	s_walking = 0;
-	if (!(dx || dy)) {
-		s_acc = 0;
-		return 0;
-	}
-	s_acc += dt * SPEED;
-	steps = (int)s_acc;
-	s_acc -= (float)steps;
-	while (steps-- > 0) {
-		int ox = s_lx, oy = s_ly;
-		move_axis(&wd, dx, dy);
-		if (ox != s_lx || oy != s_ly)
-			s_walking = 1;
-	}
-
-	/* Walked into a neighbouring tile: ask the server to follow. */
-	if (!s_pending_key) {
-		int ti = ndw_fdiv(s_lx, NDW_TILE_W), tj = ndw_fdiv(s_ly, NDW_TILE_H);
-		if (ti || tj) {
-			key = ti > 0 ? 'l' : ti < 0 ? 'h' : tj > 0 ? 'j' : 'k';
-			s_pending_key = key;
-			s_pending_t = PENDING_S;
-		}
-	}
-	return key;
-}
-
-/* --- procedural pixel art ---------------------------------------------- */
-
-typedef struct {
-	uint32_t *fb;
-	int w, h;
-	int ox, oy;      /* screen pixel of unit (0,0) */
-} ctx_t;
-
-static void urect(const ctx_t *c, int ux, int uy, int uw, int uh, uint32_t col)
-{
-	fill_px(c->fb, c->w, c->h,
-	        c->ox + ux * SCALE, c->oy + uy * SCALE,
-	        c->ox + (ux + uw) * SCALE, c->oy + (uy + uh) * SCALE, col);
-}
-
-/* Filled ellipse centred on (ux, uy), radii in units. */
-static void uellipse(const ctx_t *c, int ux, int uy, int rx, int ry, uint32_t col)
-{
-	for (int dy = -ry; dy <= ry; dy++) {
-		int hw = rx;
-		while (hw > 0 && hw * hw * ry * ry + dy * dy * rx * rx > rx * rx * ry * ry)
-			hw--;
-		urect(c, ux - hw, uy + dy, 2 * hw + 1, 1, col);
-	}
-}
-
-static void shadow(const ctx_t *c, int rx)
-{
-	uellipse(c, 0, -1, rx, 3, 0x55000000u);
-}
-
-/* 3x5 pixel font for the glyphs map cells carry. */
-static const uint8_t *font_rows(int ch)
-{
-	static const uint8_t f[128][5] = {
-		['0'] = {7,5,5,5,7}, ['1'] = {2,6,2,2,7}, ['2'] = {7,1,7,4,7}, ['3'] = {7,1,7,1,7},
-		['4'] = {5,5,7,1,1}, ['5'] = {7,4,7,1,7}, ['6'] = {7,4,7,5,7}, ['7'] = {7,1,1,1,1},
-		['8'] = {7,5,7,5,7}, ['9'] = {7,5,7,1,7},
-		['A'] = {2,5,7,5,5}, ['B'] = {6,5,6,5,6}, ['C'] = {3,4,4,4,3}, ['D'] = {6,5,5,5,6},
-		['E'] = {7,4,6,4,7}, ['F'] = {7,4,6,4,4}, ['G'] = {3,4,5,5,3}, ['H'] = {5,5,7,5,5},
-		['I'] = {7,2,2,2,7}, ['J'] = {1,1,1,5,2}, ['K'] = {5,5,6,5,5}, ['L'] = {4,4,4,4,7},
-		['M'] = {5,7,7,5,5}, ['N'] = {6,5,5,5,5}, ['O'] = {2,5,5,5,2}, ['P'] = {6,5,6,4,4},
-		['Q'] = {2,5,5,6,3}, ['R'] = {6,5,6,5,5}, ['S'] = {3,4,2,1,6}, ['T'] = {7,2,2,2,2},
-		['U'] = {5,5,5,5,7}, ['V'] = {5,5,5,5,2}, ['W'] = {5,5,7,7,5}, ['X'] = {5,5,2,5,5},
-		['Y'] = {5,5,2,2,2}, ['Z'] = {7,1,2,4,7},
-		['!'] = {2,2,2,0,2}, ['$'] = {3,6,2,3,6}, ['~'] = {0,3,6,0,0}, ['*'] = {5,2,7,2,5},
-		['>'] = {4,2,1,2,4}, ['<'] = {1,2,4,2,1}, ['.'] = {0,0,0,0,2}, ['#'] = {5,7,5,7,5},
-		['+'] = {0,2,7,2,0}, ['@'] = {7,5,7,4,7}, ['?'] = {7,1,2,0,2},
-	};
-	if (ch >= 'a' && ch <= 'z')
-		ch -= 32;
-	if (ch <= 0 || ch >= 128)
-		return NULL;
-	for (int i = 0; i < 5; i++)
-		if (f[ch][i])
-			return f[ch];
-	return NULL;
-}
-
-static void draw_glyph(const ctx_t *c, int ux, int uy, int ch, uint32_t col)
-{
-	const uint8_t *rows = font_rows(ch);
-	if (!rows)
-		return;
-	for (int r = 0; r < 5; r++)
-		for (int k = 0; k < 3; k++)
-			if (rows[r] & (4 >> k))
-				urect(c, ux + k, uy + r, 1, 1, col);
-}
-
-/* A small standing figure for whatever lives in a map cell or the room list:
- * coloured like the ASCII map glyph, carrying that glyph above its head. */
-static void draw_pawn(const ctx_t *c, int glyph, int fg)
-{
-	uint32_t col = s_ansi[fg & 15];
-	uint32_t dark = shade(col, 50), light = shade(col, 135);
-	shadow(c, 7);
-	urect(c, -5, -11, 10, 11, dark);
-	urect(c, -4, -10, 8, 9, col);
-	urect(c, -4, -10, 2, 9, light);
-	urect(c, -3, -17, 6, 6, RGB(40, 30, 30));
-	urect(c, -2, -16, 4, 4, RGB(232, 196, 160));
-	urect(c, -1, -15, 1, 1, RGB(30, 30, 40));
-	urect(c, 1, -15, 1, 1, RGB(30, 30, 40));
-	if (font_rows(glyph)) {
-		urect(c, -3, -25, 7, 7, 0xAA101018u);
-		draw_glyph(c, -1, -24, glyph, col);
-	}
-}
-
-static void draw_cactus(const ctx_t *c, int big, int fg, int variant)
-{
-	uint32_t body = shade(s_ansi[fg & 15], 85);
-	uint32_t dark = shade(body, 52), light = shade(body, 130);
-	int bw = big ? 8 : 6, bh = big ? 36 : 25, aw = big ? 5 : 4, ah = big ? 10 : 8;
-	int a1 = bh * 55 / 100, a2 = bh * 38 / 100;
-	int flip = variant & 1;
-	int lx = -bw / 2 - aw, rx = bw / 2 + (bw & 1);
-	int lh = a1, rh = a2;
-
-	if (flip) { lh = a2; rh = a1; }
-	shadow(c, bw + 4);
-
-	/* outline pass, then fill pass: the arms read as one plant */
-	for (int pass = 0; pass < 2; pass++) {
-		int g = pass == 0 ? 1 : 0;
-		uint32_t col = pass == 0 ? dark : body;
-		urect(c, -bw / 2 - g, -bh - g, bw + 2 * g, bh + g, col);
-		urect(c, lx - g, -lh - g, aw + bw / 2 + 2 * g, 3 + 2 * g, col);
-		urect(c, lx - g, -lh - ah - g, 3 + 2 * g, ah + 3 + 2 * g, col);
-		urect(c, -bw / 2 - g + bw, -rh - g, aw + 2 * g, 3 + 2 * g, col);
-		urect(c, rx + aw - 3 - g, -rh - ah - g, 3 + 2 * g, ah + 3 + 2 * g, col);
-	}
-	/* lit side, ribs, spines */
-	urect(c, -bw / 2, -bh, 2, bh, light);
-	urect(c, lx, -lh - ah, 1, ah + 3, light);
-	urect(c, rx + aw - 3, -rh - ah, 1, ah + 3, light);
-	urect(c, 0, -bh + 2, 1, bh - 3, dark);
-	for (int y = 4; y < bh - 2; y += 5) {
-		urect(c, -bw / 2 - 1, -y, 1, 1, RGB(236, 226, 160));
-		urect(c, bw / 2 + (bw & 1), -y - 2, 1, 1, RGB(236, 226, 160));
-	}
-	urect(c, -1, -bh - 1, 2, 1, RGB(230, 120, 150));   /* the flower on top */
-}
-
-/* A small flat pebble, deliberately unlike a rock: low, smooth, grey. A
- * second tiny pebble sometimes sits beside it. */
-static void draw_stone(const ctx_t *c, int variant)
-{
-	static const uint32_t pal[3] = { RGB(142, 146, 154), RGB(120, 128, 142), RGB(156, 150, 140) };
-	uint32_t base = pal[(variant >> 2) % 3];
-	int rx = 3 + (variant & 1), ry = 2;
-
-	shadow(c, rx + 1);
-	uellipse(c, 0, -ry, rx, ry, shade(base, 55));
-	uellipse(c, 0, -ry, rx - 1, ry, base);
-	urect(c, -rx / 2, -ry - 1, rx - 1, 1, shade(base, 128));
-	if (variant & 8) {
-		uellipse(c, rx + 2, -1, 1, 1, shade(base, 55));
-		urect(c, rx + 2, -2, 1, 1, shade(base, 120));
-	}
-}
-
-/* A medium, angular rock: faceted (lit left face, shaded right face, dark
- * base), in cold grey or warm ochre. */
-static void draw_rock(const ctx_t *c, int variant)
-{
-	static const uint8_t prof[8] = { 40, 70, 90, 100, 100, 100, 94, 80 };
-	uint32_t base = (variant & 16) ? RGB(168, 140, 100) : RGB(132, 136, 146);
-	int rx = 6 + (variant & 1), rows = 8;
-
-	shadow(c, rx + 2);
-	for (int r = 0; r < rows; r++) {
-		int hw = rx * prof[r] / 100;
-		int y = -rows + r;
-		uint32_t left = shade(base, r < 2 ? 135 : 112);
-		uint32_t right = shade(base, r >= rows - 2 ? 58 : 82);
-
-		urect(c, -hw, y, hw, 1, left);
-		urect(c, 0, y, hw, 1, right);
-		urect(c, -hw - 1, y, 1, 1, shade(base, 45));
-		urect(c, hw, y, 1, 1, shade(base, 45));
-	}
-	urect(c, -rx / 2, -rows + 1, rx / 2, 1, shade(base, 150));
-	urect(c, 1, -rows + 3, 1, 3, shade(base, 50));   /* a crack */
-}
-
-static void draw_fir(const ctx_t *c, int big, int fg)
-{
-	uint32_t base = shade(s_ansi[fg & 15], 80);
-	int tiers = big ? 4 : 3, tierh = big ? 10 : 9, maxhw = big ? 15 : 11;
-	int top = -(tiers * (tierh - 3) + 9);
-
-	shadow(c, maxhw);
-	urect(c, -2, -7, 4, 7, RGB(60, 40, 24));
-	urect(c, -1, -7, 2, 7, RGB(110, 76, 44));
-	for (int t = 0; t < tiers; t++) {
-		int y0 = top + t * (tierh - 3);
-		int span = (maxhw - 2) / tiers;
-		for (int r = 0; r < tierh; r++) {
-			int hw = 2 + t * span + (r + 1) * span / tierh + (r > 0 ? 1 : 0);
-			uint32_t col = shade(base, 128 - t * 8);
-			urect(c, -hw - 1, y0 + r, 2 * hw + 2, 1, shade(base, 48));
-			urect(c, -hw, y0 + r, hw, 1, shade(col, 118));
-			urect(c, 0, y0 + r, hw, 1, shade(col, 84));
-		}
-		urect(c, -(2 + t * span + span + 1), y0 + tierh - 1, 2 * (2 + t * span + span + 1), 1, shade(base, 52));
-	}
-}
-
-static void draw_pond(const ctx_t *c, int anim)
-{
-	uellipse(c, 0, -7, 24, 12, RGB(86, 98, 80));
-	uellipse(c, 0, -7, 22, 10, RGB(44, 96, 170));
-	uellipse(c, 0, -7, 15, 6, RGB(60, 120, 196));
-	for (int i = 0; i < 4; i++) {
-		int ux = -12 + i * 7 + ((anim / 14 + i) & 3);
-		urect(c, ux, -11 + (i & 1) * 6, 4, 1, RGB(170, 210, 240));
-	}
-}
-
-static void draw_shop(const ctx_t *c, int fg)
-{
-	uint32_t roof = shade(s_ansi[fg & 15] ? s_ansi[fg & 15] : RGB(170, 60, 50), 100);
-	shadow(c, 20);
-	urect(c, -17, -23, 34, 23, RGB(70, 50, 36));
-	urect(c, -16, -22, 32, 22, RGB(206, 176, 126));
-	urect(c, -16, -22, 32, 2, RGB(226, 198, 150));
-	for (int k = 0; k < 9; k++) {
-		int hw = 11 + k * 2;
-		urect(c, -hw - 1, -32 + k, 2 * hw + 2, 1, shade(roof, 55));
-		urect(c, -hw, -32 + k, 2 * hw, 1, shade(roof, 90 + (k & 1) * 14));
-	}
-	urect(c, -4, -14, 8, 14, RGB(86, 52, 30));
-	urect(c, -3, -13, 6, 13, RGB(120, 76, 42));
-	urect(c, 8, -16, 6, 6, RGB(150, 200, 230));
-	urect(c, -14, -16, 6, 6, RGB(150, 200, 230));
-	draw_glyph(c, -1, -30, '$', RGB(250, 230, 120));
-}
-
-static void draw_stairs(const ctx_t *c, int up)
-{
-	if (up) {
-		for (int k = 0; k < 4; k++) {
-			urect(c, -12 + k * 2, -3 * (k + 1), 24 - k * 4, 3, RGB(110, 110, 124));
-			urect(c, -12 + k * 2, -3 * (k + 1), 24 - k * 4, 1, RGB(170, 170, 186));
-		}
-	} else {
-		urect(c, -13, -11, 26, 11, RGB(20, 18, 24));
-		for (int k = 0; k < 4; k++)
-			urect(c, -11 + k * 2, -9 + k * 2, 22 - k * 4, 1, RGB(90, 90, 104));
-	}
-}
-
-/* --- ground ------------------------------------------------------------- */
-
-static uint32_t unit_noise(uint32_t h, int ux, int uy)
-{
-	return ndw_mix(h ^ (uint32_t)(uy * 16 + ux + 1) * 0x9E3779B1u);
-}
-
-/* One 16x16 unit ground cell with its top-left corner at screen (px, py). */
-static void ground_cell(uint32_t *fb, int w, int h, const ndw_ground_t *g,
-                        uint32_t hash, int px, int py, uint32_t anim)
-{
-	ctx_t c = { fb, w, h, px, py };
-	uint32_t base, alt1, alt2;
-	int r = g->r, gg = g->g, b = g->b;
-
-	if (px >= w || py >= h || px + NDW_CELL_PX * SCALE <= 0 || py + NDW_CELL_PX * SCALE <= 0)
-		return;
-
-	if (g->kind == NDW_G_GRASS) {
-		tint_t t = { g->r, g->g, g->b, 0 };
-		blit_all(fb, w, h, NDS_GRASS, 0, 0, px, py, SCALE, &t);
-		if ((hash % 100) < 6) {
-			int id = NDS_DECOR_YEL + (int)((hash >> 8) & 1);
-			const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[id];
-			blit_all(fb, w, h, id, sr->w / 2, sr->h - 1,
-			         px + (4 + (int)((hash >> 12) & 7)) * SCALE, py + 14 * SCALE, SCALE, NULL);
-		}
-		return;
-	}
-
-	switch (g->kind) {
-	case NDW_G_SAND:
-		base = RGB(226, 200, 140); alt1 = RGB(210, 182, 122); alt2 = RGB(238, 214, 160);
-		break;
-	case NDW_G_SNOW:
-		base = RGB(234, 240, 250); alt1 = RGB(210, 222, 240); alt2 = RGB(252, 252, 255);
-		break;
-	case NDW_G_TUNDRA:
-		base = RGB(150, 166, 148); alt1 = RGB(128, 148, 126); alt2 = RGB(180, 190, 176);
-		break;
-	case NDW_G_WATER:
-		base = RGB(46, 100, 172); alt1 = RGB(36, 84, 152); alt2 = RGB(98, 154, 214);
-		break;
-	default: /* ash */
-		base = RGB(54, 48, 52); alt1 = RGB(40, 36, 40); alt2 = RGB(76, 66, 68);
-		break;
-	}
-	base = tint_col(base, r, gg, b);
-	alt1 = tint_col(alt1, r, gg, b);
-	alt2 = tint_col(alt2, r, gg, b);
-
-	urect(&c, 0, 0, NDW_CELL_PX, NDW_CELL_PX, base);
-	for (int uy = 0; uy < NDW_CELL_PX; uy++)
-		for (int ux = 0; ux < NDW_CELL_PX; ux++) {
-			uint32_t n = unit_noise(hash, ux, uy) & 31;
-			if (g->kind == NDW_G_WATER) {
-				/* drifting wave crests */
-				if (((ux + 3 * uy + (int)(anim / 12) + (int)(hash & 7)) % 11) == 0)
-					urect(&c, ux, uy, 1, 1, alt2);
-				else if (n == 0)
-					urect(&c, ux, uy, 1, 1, alt1);
-			} else if (n < 2) {
-				urect(&c, ux, uy, 1, 1, alt1);
-			} else if (n == 2) {
-				urect(&c, ux, uy, 1, 1, alt2);
-			}
-		}
-
-	if (g->kind == NDW_G_SAND && (((hash >> 8) & 3) == 0)) {
-		/* a dune ripple */
-		static const int8_t arc[8] = { 1, 0, 0, -1, -1, 0, 0, 1 };
-		int ux0 = 2 + (int)((hash >> 12) & 3), uy0 = 5 + (int)((hash >> 15) & 7);
-		for (int k = 0; k < 8; k++) {
-			urect(&c, ux0 + k, uy0 + arc[k], 1, 1, shade(alt1, 92));
-			urect(&c, ux0 + k, uy0 + arc[k] - 1, 1, 1, alt2);
-		}
-	}
-	if (g->kind == NDW_G_ASH && (hash % 23) == 0) {
-		/* a glowing crack */
-		int ux0 = 3 + (int)((hash >> 8) & 3), uy0 = 4 + (int)((hash >> 12) & 7);
-		for (int k = 0; k < 8; k++)
-			urect(&c, ux0 + k, uy0 + ((k >> 1) & 1), 1, 1, RGB(226, 96, 28));
-	}
-	if (g->kind == NDW_G_SNOW && (hash % 17) == 0)
-		urect(&c, 3 + (int)((hash >> 8) & 7), 3 + (int)((hash >> 12) & 7), 2, 1, RGB(255, 255, 255));
-}
-
-/*
- * Organic biome borders. A tile's ground is drawn whole above; where the
- * border contour (ndw_ground_weights: a noise warp of the absolute world
- * position and tiles with rounded corners) hands a pixel to a neighbouring
- * tile of another ground, the pixel is repainted with that ground. Crisp: each
- * pixel shows exactly one ground, nothing is mixed. The cell's own hash drives
- * the neighbour's texture, so the picture is the same from every origin. Rooms
- * never blend (walled, square).
- *
- * The warp grid of a tile and the list of cells that hold any repainted pixel
- * are pure functions of the tile, so they are memoised.
- */
-#define BORDER_CACHE 64
-typedef struct {
-	int16_t pos[4];
-	uint8_t used;
-	uint8_t act_valid;
-	uint64_t act_mask;                   /* the ground groups and no_blend mask act[] was computed for */
-	uint8_t act[NDW_ROWS * NDW_COLS];
-	ndw_warp_grid_t grid;
-} border_ent_t;
-static border_ent_t s_border[BORDER_CACHE];
-static unsigned s_border_next;
-
-static border_ent_t *border_find(const int16_t pos[4])
-{
-	border_ent_t *e;
-
-	for (int i = 0; i < BORDER_CACHE; i++)
-		if (s_border[i].used && !memcmp(s_border[i].pos, pos, sizeof(s_border[i].pos)))
-			return &s_border[i];
-	e = &s_border[s_border_next++ % BORDER_CACHE];
-	memcpy(e->pos, pos, sizeof(e->pos));
-	e->used = 1;
-	e->act_valid = 0;
-	ndw_warp_grid_fill(&e->grid, pos);
-	return e;
-}
-
-const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4])
-{
-	return &border_find(pos)->grid;
-}
-
-/* q position of output pixel (sx, sy) of cell (cx, cy): its centre. */
-static int border_q(int cell, int s)
-{
-	return cell * NDW_CELL_PX * NDW_SUB + (s * 2 + 1) * NDW_SUB / (2 * SCALE);
-}
-
-/* Which cells hold a pixel that is not the tile's own ground. */
-static const uint8_t *border_active(border_ent_t *e, const uint8_t grp[9], unsigned no_blend)
-{
-	uint64_t key = (uint64_t)no_blend << 40;
-
-	for (int k = 0; k < 9; k++)
-		key |= (uint64_t)(grp[k] & 15) << (4 * k);
-	if (e->act_valid && e->act_mask == key)
-		return e->act;
-	for (int cy = 0; cy < NDW_ROWS; cy++)
-		for (int cx = 0; cx < NDW_COLS; cx++) {
-			int any = 0;
-
-			for (int sy = 0; sy < NDW_CELL_PX * SCALE && !any; sy++)
-				for (int sx = 0; sx < NDW_CELL_PX * SCALE && !any; sx++) {
-					uint16_t w[9];
-					any = ndw_ground_weights(&e->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, w);
-				}
-			e->act[cy * NDW_COLS + cx] = (uint8_t)any;
-		}
-	e->act_mask = key;
-	e->act_valid = 1;
-	return e->act;
-}
-
-static int same_ground(const ndw_ground_t *a, const ndw_ground_t *b)
-{
-	return a->kind == b->kind && a->r == b->r && a->g == b->g && a->b == b->b;
-}
-
-static void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st,
-                         int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
-                         int tx, int ty)
-{
-	static uint32_t scratch[9][NDW_CELL_PX * SCALE * NDW_CELL_PX * SCALE];
-	const int cpx = NDW_CELL_PX * SCALE;
-	ndw_ground_t style[9];
-	unsigned no_blend = 0;
-	uint8_t grp[9];
-	const uint8_t *act;
-	border_ent_t *ent;
-	int differs = 0;
-
-	style[4] = ndw_biome_style(own->biome);
-	for (int dj = -1; dj <= 1; dj++)
-		for (int di = -1; di <= 1; di++) {
-			ndw_tile_t nt;
-			int16_t np[4];
-			int k = (dj + 1) * 3 + (di + 1);
-
-			if (!di && !dj) {
-				nt = *own;
-			} else {
-				tile_at(st, ti + di, tj + dj, &nt, np);
-			}
-			style[k] = ndw_biome_style(nt.biome);
-			differs |= !same_ground(&style[k], &style[4]);
-			if (style[k].kind == NDW_G_WATER)
-				no_blend |= NDW_WATER_BIT(di, dj);
-		}
-	for (int k = 0; k < 9; k++) {            /* ground ids: equal = same ground */
-		grp[k] = (uint8_t)k;
-		for (int j = 0; j < k; j++)
-			if (same_ground(&style[j], &style[k])) {
-				grp[k] = grp[j];
-				break;
-			}
-	}
-	if (!differs)
-		return;
-	ent = border_find(pos);
-	act = border_active(ent, grp, no_blend);
-
-	for (int cy = 0; cy < NDW_ROWS; cy++)
-		for (int cx = 0; cx < NDW_COLS; cx++) {
-			int px = tx + cx * cpx, py = ty + cy * cpx;
-			int have[9] = { 0 };
-
-			if (!act[cy * NDW_COLS + cx])
-				continue;
-			if (px >= w || py >= h || px + cpx <= 0 || py + cpx <= 0)
-				continue;
-			for (int sy = 0; sy < cpx; sy++) {
-				int y = py + sy;
-
-				if (y < 0 || y >= h)
-					continue;
-				for (int sx = 0; sx < cpx; sx++) {
-					int x = px + sx;
-					uint16_t wt[9];
-					int own_k = 4;
-
-					if (x < 0 || x >= w)
-						continue;
-					if (!ndw_ground_weights(&ent->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, wt))
-						continue;
-					for (int k = 0; k < 9; k++)
-						if (wt[k])
-							own_k = k;
-					if (!have[own_k]) {
-						ground_cell(scratch[own_k], cpx, cpx, &style[own_k], ndw_cell_hash(pos, cx, cy), 0, 0, s_anim);
-						have[own_k] = 1;
-					}
-					fb[y * w + x] = scratch[own_k][sy * cpx + sx];
-				}
-			}
-		}
 }
 
 /* --- drawing ------------------------------------------------------------ */
 
-static void plant_tint(int fg, tint_t *t)
-{
-	t->leaf = 1;
-	switch (fg & 15) {
-	case 3: case 11: t->r = 230; t->g = 118; t->b = 60; break;   /* yellow: autumn */
-	case 1: case 9:  t->r = 255; t->g = 70;  t->b = 64; break;   /* red */
-	case 7: case 15: t->r = 200; t->g = 150; t->b = 190; break;  /* white: pale */
-	default:         t->r = t->g = t->b = 128; break;
-	}
-}
-
-static void draw_world_obj(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim)
-{
-	ctx_t c = { fb, w, h, sx, sy };
-	const nd_seven_sprite_rect_t *r;
-	tint_t t;
-	int id;
-
-	switch (o->kind) {
-	case NDW_K_DECID:
-		id = o->big ? ((o->variant & 1) ? NDS_TREE_OAK : NDS_TREE_APPLE) : NDS_TREE_ROUND;
-		goto tree;
-	case NDW_K_TALL:
-		id = o->big ? NDS_TREE_BIG : NDS_TREE_APPLE2;
-	tree:
-		plant_tint(o->fg, &t);
-		r = &nd_seven_sprite_rects[id];
-		blit_all(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, &t);
-		break;
-	case NDW_K_FIR:      draw_fir(&c, o->big, o->fg); break;
-	case NDW_K_CACTUS:   draw_cactus(&c, o->big, o->fg, o->variant); break;
-	case NDW_K_POND:     draw_pond(&c, (int)anim); break;
-	case NDW_K_SHOP:     draw_shop(&c, o->fg); break;
-	case NDW_K_STAIRS_DOWN: draw_stairs(&c, 0); break;
-	case NDW_K_STAIRS_UP:   draw_stairs(&c, 1); break;
-	case NDW_K_STONE:
-		draw_stone(&c, o->variant);
-		break;
-	case NDW_K_ROCK: {
-		static const uint8_t med_rocks[] = { NDS_ROCK_TAN, NDS_ROCK_GREY };
-		if ((o->variant & 3) < 2) {
-			draw_rock(&c, o->variant >> 2);
-			break;
-		}
-		id = med_rocks[o->variant & 1];
-		r = &nd_seven_sprite_rects[id];
-		blit_all_f(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL, (o->variant >> 4) & 1);
-		break;
-	}
-	case NDW_K_BOULDER: {
-		id = (o->variant & 1) ? NDS_ROCK_WHITE_BIG : NDS_ROCK_TAN_BIG;
-		r = &nd_seven_sprite_rects[id];
-		blit_all_f(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL, (o->variant >> 4) & 1);
-		break;
-	}
-	default:             draw_pawn(&c, o->glyph, o->fg); break;
-	}
-}
-
-static void draw_lamb(uint32_t *fb, int w, int h, int sx, int sy)
-{
-	int row, col;
-	if (s_walking || s_held) {
-		row = s_dir;
-		col = (int)((s_anim / 4) % 6);
-	} else {
-		row = 4 + s_dir;
-		col = (int)((s_anim / 24) % 4);
-	}
-	blit(fb, w, h, NDS_LAMB, col * LAMB_SIZE, row * LAMB_SIZE, LAMB_SIZE, LAMB_SIZE,
-	     LAMB_AX, LAMB_AY, sx, sy, SCALE, NULL, 0);
-}
-
-/* One thing to paint in a row of tiles, sorted back to front by its feet. */
 enum { D_OBJ, D_ENTITY, D_LAMB };
 typedef struct {
 	int sx, sy;            /* screen position of the feet */
@@ -1057,42 +46,71 @@ typedef struct {
 	uint8_t fg;
 	uint8_t sprite_id;     /* if non-zero, drawn as rock/stone sprite instead of pawn */
 	uint8_t flip;
+	char name[32];         /* name rendered on top of the object */
 } drawable_t;
 
 #define MAX_DRAW 192
 
-/* Entity figures stand on fixed spots around the arrival point. */
 static const int8_t s_spots[16][2] = {
-	{ -34, -8 }, { 34, -8 }, { -22, 16 }, { 22, 16 }, { 0, 24 }, { -12, -20 }, { 12, -20 }, { 0, -30 },
+	{ -16, 26 }, { 16, 26 }, { -28, 12 }, { 28, 12 }, { -38, -6 }, { 38, -6 }, { -22, -18 }, { 22, -18 },
 	{ -52, 0 }, { 52, 0 }, { -46, 24 }, { 46, 24 }, { -30, 34 }, { 30, 34 }, { -46, -22 }, { 46, -22 }
 };
 
-static int str_has_ci(const char *hay, const char *needle)
+void nd_seven_spot(uint32_t ref, int *sx, int *sy)
 {
-	if (!hay || !needle || !*needle) return 0;
-	size_t nlen = strlen(needle);
-	for (const char *h = hay; *h; h++) {
-		size_t i = 0;
-		while (i < nlen && h[i]) {
-			char c1 = h[i], c2 = needle[i];
-			if (c1 >= 'A' && c1 <= 'Z') c1 = (char)(c1 + 32);
-			if (c2 >= 'A' && c2 <= 'Z') c2 = (char)(c2 + 32);
-			if (c1 != c2) break;
-			i++;
-		}
-		if (i == nlen) return 1;
-	}
-	return 0;
+	uint32_t spot = ndw_mix(ref) % 16;
+	if (sx) *sx = NDW_CENTER_X + s_spots[spot][0];
+	if (sy) *sy = NDW_CENTER_Y + s_spots[spot][1];
 }
 
-static int is_mineral_or_rock(const nd_entity_desc_t *e)
+static int drawable_top_y(const drawable_t *d)
 {
-	if (!e) return 0;
-	if (e->ch == '*')
-		return 1;
-	return str_has_ci(e->name, "stone") || str_has_ci(e->name, "rock") ||
-	       str_has_ci(e->name, "mineral") || str_has_ci(e->name, "quartz") ||
-	       str_has_ci(e->name, "flint");
+	if (d->what == D_ENTITY) {
+		if (d->sprite_id) {
+			const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[d->sprite_id];
+			return d->sy - sr->h * SCALE;
+		}
+		return d->sy - 28 * SCALE;
+	}
+	if (d->what == D_OBJ) {
+		switch (d->obj.kind) {
+		case NDW_K_DECID: {
+			int id = d->obj.big ? ((d->obj.variant & 1) ? NDS_TREE_OAK : NDS_TREE_APPLE) : NDS_TREE_ROUND;
+			return d->sy - nd_seven_sprite_rects[id].h * SCALE;
+		}
+		case NDW_K_TALL: {
+			int id = d->obj.big ? NDS_TREE_BIG : NDS_TREE_APPLE2;
+			return d->sy - nd_seven_sprite_rects[id].h * SCALE;
+		}
+		case NDW_K_FIR:
+			return d->sy - (d->obj.big ? 38 : 28) * SCALE;
+		case NDW_K_CACTUS:
+			return d->sy - (d->obj.big ? 38 : 27) * SCALE;
+		case NDW_K_STONE:
+			return d->sy - 4 * SCALE;
+		case NDW_K_ROCK:
+			if ((d->obj.variant & 3) < 2)
+				return d->sy - 9 * SCALE;
+			else {
+				int id = (d->obj.variant & 1) ? NDS_ROCK_GREY : NDS_ROCK_TAN;
+				return d->sy - nd_seven_sprite_rects[id].h * SCALE;
+			}
+		case NDW_K_BOULDER: {
+			int id = (d->obj.variant & 1) ? NDS_ROCK_WHITE_BIG : NDS_ROCK_TAN_BIG;
+			return d->sy - nd_seven_sprite_rects[id].h * SCALE;
+		}
+		case NDW_K_SHOP:
+			return d->sy - 22 * SCALE;
+		case NDW_K_STAIRS_DOWN:
+		case NDW_K_STAIRS_UP:
+			return d->sy - 8 * SCALE;
+		case NDW_K_POND:
+			return d->sy - 4 * SCALE;
+		default:
+			return d->sy - 16 * SCALE;
+		}
+	}
+	return d->sy - 16 * SCALE;
 }
 
 static int add_entities(const nd_client_state_t *st, int camx, int camy, drawable_t *out, int n)
@@ -1100,17 +118,9 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 	uint32_t used = 0;
 	uint32_t room = st ? st->room.ref : 0;
 
-	if (!st)
+	if (!st || !room)
 		return n;
-	ndw_tile_t cur_tile;
-	int16_t cur_pos[4];
-	int has_map_stone = 0;
-	if (tile_at(st, 0, 0, &cur_tile, cur_pos)) {
-		for (int s = 0; s < 3; s++) {
-			if (cur_tile.glyph[s] == '*' || cur_tile.glyph[s] == 'o' || cur_tile.glyph[s] == 'O')
-				has_map_stone = 1;
-		}
-	}
+
 	for (size_t i = 0; i < st->entity_count && n < MAX_DRAW; i++) {
 		const nd_entity_desc_t *e = &st->entities[i];
 		uint32_t spot;
@@ -1118,10 +128,24 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 
 		if (st->me && e->ref == st->me)
 			continue;
-		if (room && e->location != room)
+		if (e->location != room)
 			continue;
-		if (is_mineral_or_rock(e) && has_map_stone)
-			continue; /* already rendered as an AOT world object from map data */
+		if (is_contained_in_tree(st, e))
+			continue;
+
+		int already_drawn = 0;
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		for (int k = 0; k < tr->count; k++) {
+			if (tr->objs[k].entity_ref == e->ref && is_tracked_obj_present(st, k)) {
+				already_drawn = 1;
+				break;
+			}
+		}
+		if (already_drawn)
+			continue;
+		if (e->type == 1 || (is_landscape_element(e) && !is_stone_or_rock(e)))
+			continue;
+
 		spot = ndw_mix(e->ref) % 16;
 		while ((used >> spot) & 1) {
 			spot = (spot + 1) % 16;
@@ -1129,7 +153,7 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 				break;
 		}
 		if (tries >= 16)
-			break;             /* the room list is longer than the room */
+			break;
 		used |= 1u << spot;
 		out[n].what = D_ENTITY;
 		out[n].ch = e->ch ? e->ch : '?';
@@ -1137,8 +161,7 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 		out[n].sx = (NDW_CENTER_X + s_spots[spot][0]) * SCALE - camx;
 		out[n].sy = (NDW_CENTER_Y + s_spots[spot][1]) * SCALE - camy;
 		out[n].flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
-		if (is_mineral_or_rock(e)) {
-			/* Mineral entity drawn as rock/stone sprite, NOT tree or generic pawn */
+		if (is_stone_or_rock(e)) {
 			static const uint8_t mineral_sprites[] = {
 				NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
 				NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
@@ -1147,6 +170,7 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 		} else {
 			out[n].sprite_id = 0;
 		}
+		snprintf(out[n].name, sizeof(out[n].name), "%s", e->name);
 		n++;
 	}
 	return n;
@@ -1162,21 +186,19 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 	if (!fb || w <= 0 || h <= 0)
 		return;
 	atlas_load();
-	sync_origin(st);
+	nd_seven_sync_origin(st);
 
 	for (int i = 0; i < w * h; i++)
 		fb[i] = 0xFF08080C;
 
-	/* The lamb's feet are the centre of the screen; the world moves. */
-	camx = s_lx * SCALE - w / 2;
-	camy = s_ly * SCALE - h / 2;
+	camx = nd_seven_get_lx() * SCALE - w / 2;
+	camy = nd_seven_get_ly() * SCALE - h / 2;
 	i0 = ndw_fdiv(camx, NDW_TILE_W * SCALE);
 	i1 = ndw_fdiv(camx + w - 1, NDW_TILE_W * SCALE);
 	j0 = ndw_fdiv(camy, NDW_TILE_H * SCALE);
 	j1 = ndw_fdiv(camy + h - 1, NDW_TILE_H * SCALE);
-	lamb_row = ndw_fdiv(s_ly, NDW_TILE_H);
+	lamb_row = ndw_fdiv(nd_seven_get_ly(), NDW_TILE_H);
 
-	/* ground, then walls, over every visible tile */
 	for (int tj = j0; tj <= j1; tj++)
 		for (int ti = i0; ti <= i1; ti++) {
 			ndw_tile_t t;
@@ -1185,12 +207,12 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			ndw_rect_t walls[NDW_MAX_WALL];
 			int tx = ti * NDW_TILE_W * SCALE - camx, ty = tj * NDW_TILE_H * SCALE - camy;
 
-			tile_at(st, ti, tj, &t, pos);
+			nd_seven_tile_at(st, ti, tj, &t, pos);
 			g = ndw_biome_style(t.biome);
 			for (int cy = 0; cy < NDW_ROWS; cy++)
 				for (int cx = 0; cx < NDW_COLS; cx++)
-					ground_cell(fb, w, h, &g, ndw_cell_hash(pos, cx, cy),
-					            tx + cx * NDW_CELL_PX * SCALE, ty + cy * NDW_CELL_PX * SCALE, s_anim);
+					ground_cell(fb, w, h, &g, pos, cx, cy,
+					            tx + cx * NDW_CELL_PX * SCALE, ty + cy * NDW_CELL_PX * SCALE, nd_seven_get_anim());
 			ground_blend(fb, w, h, st, ti, tj, pos, &t, tx, ty);
 			for (int k = ndw_walls(&t, walls) - 1; k >= 0; k--)
 				for (int cy = walls[k].y0 / NDW_CELL_PX; cy * NDW_CELL_PX < walls[k].y1; cy++)
@@ -1199,8 +221,6 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 						         tx + cx * NDW_CELL_PX * SCALE, ty + cy * NDW_CELL_PX * SCALE, SCALE, NULL);
 		}
 
-	/* objects, entities and the lamb, row of tiles by row, back to front.
-	 * A tile row below the screen still paints (trees reach up into it). */
 	for (int tj = j0; tj <= j1 + 1; tj++) {
 		int n = 0;
 
@@ -1208,15 +228,30 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			ndw_tile_t t;
 			int16_t pos[4];
 			ndw_obj_t objs[NDW_MAX_OBJ];
-			int kind = tile_at(st, ti, tj, &t, pos);
+			int kind = nd_seven_tile_at(st, ti, tj, &t, pos);
 			int cnt = ndw_tile_objects(&t, pos, kind == 2, objs);
 			int tx = ti * NDW_TILE_W * SCALE - camx, ty = tj * NDW_TILE_H * SCALE - camy;
 
+			if (ti == 0 && tj == 0)
+				sync_room_objects(st);
+
+			const room_tracker_t *tr = nd_seven_get_tracker();
 			for (int k = 0; k < cnt; k++) {
+				if (ti == 0 && tj == 0) {
+					if (!is_tracked_obj_present(st, k))
+						continue;
+				}
 				dr[n].what = D_OBJ;
 				dr[n].obj = objs[k];
 				dr[n].sx = tx + objs[k].x * SCALE;
 				dr[n].sy = ty + objs[k].y * SCALE;
+				const char *wn = (ti == 0 && tj == 0 && k < tr->count)
+				                 ? tr->objs[k].name
+				                 : world_obj_name(&objs[k], st, ti, tj);
+				if (wn)
+					snprintf(dr[n].name, sizeof(dr[n].name), "%s", wn);
+				else
+					dr[n].name[0] = '\0';
 				n++;
 			}
 		}
@@ -1226,6 +261,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			dr[n].what = D_LAMB;
 			dr[n].sx = w / 2;
 			dr[n].sy = h / 2;
+			dr[n].name[0] = '\0';
 			n++;
 		}
 		for (int a = 1; a < n; a++) {
@@ -1250,16 +286,27 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 					draw_pawn(&c, dr[a].ch, dr[a].fg);
 				}
 			} else {
-				draw_world_obj(fb, w, h, &dr[a].obj, dr[a].sx, dr[a].sy, s_anim);
+				draw_world_obj(fb, w, h, &dr[a].obj, dr[a].sx, dr[a].sy, nd_seven_get_anim());
+			}
+			if (dr[a].name[0] && dr[a].what != D_LAMB) {
+				int dx = dr[a].sx - w / 2;
+				int dy = dr[a].sy - h / 2;
+				if (dx < 0) dx = -dx;
+				if (dy < 0) dy = -dy;
+				if (dx <= 48 * SCALE && dy <= 36 * SCALE) {
+					int top_y = drawable_top_y(&dr[a]);
+					draw_object_name(fb, w, h, dr[a].sx, top_y, dr[a].name);
+				}
 			}
 		}
 	}
-}
 
-void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room)
-{
-	if (pending) *pending = s_pending_key;
-	if (pos_x) *pos_x = (int)s_pos[0];
-	if (pos_y) *pos_y = (int)s_pos[1];
-	if (have_room) *have_room = s_have;
+	{
+		char act[64];
+		if (nd_seven_action(st, act, sizeof(act)) > 0) {
+			int hx = w / 2;
+			int hy = h / 2 - (LAMB_AY - 4) * SCALE;
+			draw_thinking_balloon(fb, w, h, hx, hy, act);
+		}
+	}
 }

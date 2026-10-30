@@ -432,8 +432,6 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 		view_build_exit_z(t, rloc, E_DOWN);
 		t->flags = view_build_flags(loc_ref);
 		t->bio_idx = floor_get(loc_ref);
-		if (rloc->flags & RF_TEMP)
-			t->room = NOTHING;
 	} else {
 		view_build_exit_s(t, p, E_EAST);
 		view_build_exit_s(t, p, E_NORTH);
@@ -519,8 +517,14 @@ eng_view(unsigned player_ref)
 		mt->wall_fg = wall_paint_ansi(vt->bio_idx);
 
 		uint8_t flags = 0;
-		if (vt->room != NOTHING && vt->room != 0)
-			flags |= ND_MAP_FLAG_ROOM;
+		if (vt->room != NOTHING && vt->room != 0) {
+			OBJ r_obj;
+			if (nd_get(HD_OBJ, &r_obj, (unsigned *)&vt->room) == 0) {
+				ROO *r = (ROO *)&r_obj.data;
+				if (!(r->flags & RF_TEMP))
+					flags |= ND_MAP_FLAG_ROOM;
+			}
+		}
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;
 		if (vt->flags & vtf_entity)

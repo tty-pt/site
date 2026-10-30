@@ -428,12 +428,43 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 		mcp_content_out(last_loc, what_ref);
 		corm_del(obj_hd, &what_ref);
 
+		if (what.type != TYPE_ENTITY && last_loc != NOTHING) {
+			OBJ r_obj;
+			if (corm_read(obj_hd, &last_loc, &r_obj, sizeof(r_obj)) == 0 &&
+			    r_obj.type == TYPE_ROOM) {
+				ROO *r = (ROO *)&r_obj.data;
+				r->flags |= RF_MODIFIED;
+				corm_put(obj_hd, &last_loc, &r_obj);
+			}
+		}
+
 		on_del(what_ref, what.type);
 		return;
 	}
 
 	what.location = where_ref;
 	corm_put(obj_hd, &what_ref, &what);
+
+	if (what.type != TYPE_ENTITY) {
+		if (last_loc != NOTHING) {
+			OBJ r_obj;
+			if (corm_read(obj_hd, &last_loc, &r_obj, sizeof(r_obj)) == 0 &&
+			    r_obj.type == TYPE_ROOM) {
+				ROO *r = (ROO *)&r_obj.data;
+				r->flags |= RF_MODIFIED;
+				corm_put(obj_hd, &last_loc, &r_obj);
+			}
+		}
+		if (where_ref != NOTHING) {
+			OBJ r_obj;
+			if (corm_read(obj_hd, &where_ref, &r_obj, sizeof(r_obj)) == 0 &&
+			    r_obj.type == TYPE_ROOM) {
+				ROO *r = (ROO *)&r_obj.data;
+				r->flags |= RF_MODIFIED;
+				corm_put(obj_hd, &where_ref, &r_obj);
+			}
+		}
+	}
 
 	if (what.type == TYPE_ENTITY) {
 		ENT ewhat = ent_get(what_ref);
@@ -782,10 +813,35 @@ do_get(int fd, int argc __attribute__((unused)), char *argv[])
 	char *what = argv[1];
 	char *obj = argv[2];
 
-	if (
-			(thing_ref = ematch_near(player_ref, what)) == NOTHING
-			&& (thing_ref = ematch_mine(player_ref, what)) == NOTHING
-	   )
+	if (!what || !*what) {
+		nd_printf(player_ref, NOMATCH_MESSAGE);
+		return;
+	}
+
+	thing_ref = ematch_near(player_ref, what);
+	if (thing_ref == NOTHING)
+		thing_ref = ematch_mine(player_ref, what);
+
+	/* Plural and alias fallback matching (without mutating argv[1]) */
+	if (thing_ref == NOTHING) {
+		if (!strcmp(what, "sticks")) {
+			thing_ref = ematch_near(player_ref, "stick");
+		} else if (!strcmp(what, "rocks")) {
+			thing_ref = ematch_near(player_ref, "rock");
+			if (thing_ref == NOTHING)
+				thing_ref = ematch_near(player_ref, "stone");
+		} else if (!strcmp(what, "stones")) {
+			thing_ref = ematch_near(player_ref, "stone");
+			if (thing_ref == NOTHING)
+				thing_ref = ematch_near(player_ref, "rock");
+		} else if (!strcmp(what, "rock")) {
+			thing_ref = ematch_near(player_ref, "stone");
+		} else if (!strcmp(what, "stone")) {
+			thing_ref = ematch_near(player_ref, "rock");
+		}
+	}
+
+	if (thing_ref == NOTHING)
 	{
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		return;

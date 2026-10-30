@@ -46,6 +46,13 @@ int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t o
 const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4]);
 
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
+void nd_seven_set_lamb(int fx, int fy);
+void nd_seven_spot(uint32_t ref, int *sx, int *sy);
+
+/* Interaction: detects if the lamb is near an interactable object or entity,
+ * returns 1 and formats the command string (e.g. "get stick\n") into out. */
+int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
+int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 
 /* Lamb feet relative to the map's player tile, after adopting the state's
  * current origin (so a map update and the lamb never disagree by a tile). */

@@ -539,8 +539,17 @@ static int on_key_down(bud_event *e)
 	if (!key || !*key)
 		return 0;
 
-	if (nd_ui_seven_active(&client_state) && nd_seven_key(key, 1))
-		return 1;
+	if (nd_ui_seven_active(&client_state)) {
+		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
+			char act[64];
+			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0) {
+				ws_send(act, strlen(act));
+				return 1;
+			}
+		}
+		if (nd_seven_key(key, 1))
+			return 1;
+	}
 	if (strcmp(key, "k") == 0 || strcmp(key, "ArrowUp") == 0) {
 		ws_send("k\n", 2);
 		return 1;
