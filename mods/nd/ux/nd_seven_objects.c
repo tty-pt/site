@@ -211,22 +211,31 @@ void sync_room_objects(const nd_client_state_t *st)
 	int need_sync = 0;
 	if (s_tracker.room_ref != st->room.ref ||
 	    memcmp(s_tracker.pos, pos, sizeof(pos)) != 0 ||
-	    memcmp(s_tracker.glyphs, t.glyph, 3) != 0)
-		need_sync = 1;
-	else if (s_tracker.bound_entities == 0 && st->entity_count > 0)
+	    memcmp(s_tracker.glyphs, t.glyph, 3) != 0 ||
+	    s_tracker.last_entity_count != st->entity_count)
 		need_sync = 1;
 
 	if (!need_sync)
 		return;
 
-	if (s_tracker.room_ref != st->room.ref ||
-	    memcmp(s_tracker.pos, pos, sizeof(pos)) != 0) {
+	int is_same_room = (s_tracker.room_ref == st->room.ref &&
+	                    memcmp(s_tracker.pos, pos, sizeof(pos)) == 0);
+
+	uint8_t prev_harvested[NDW_MAX_OBJ] = { 0 };
+	uint8_t prev_stick_harvested[NDW_MAX_OBJ] = { 0 };
+	if (is_same_room) {
+		for (int k = 0; k < s_tracker.count && k < NDW_MAX_OBJ; k++) {
+			prev_harvested[k] = s_tracker.objs[k].harvested;
+			prev_stick_harvested[k] = s_tracker.objs[k].stick_harvested;
+		}
+	} else {
 		memset(&s_tracker, 0, sizeof(s_tracker));
 	}
 
 	s_tracker.room_ref = st->room.ref;
 	memcpy(s_tracker.pos, pos, sizeof(pos));
 	memcpy(s_tracker.glyphs, t.glyph, 3);
+	s_tracker.last_entity_count = st->entity_count;
 	s_tracker.count = 0;
 	s_tracker.bound_entities = 0;
 
@@ -243,8 +252,8 @@ void sync_room_objects(const nd_client_state_t *st)
 		s_tracker.objs[k].y = objs[k].y;
 		s_tracker.objs[k].kind = objs[k].kind;
 		s_tracker.objs[k].entity_ref = 0;
-		s_tracker.objs[k].harvested = 0;
-		s_tracker.objs[k].stick_harvested = 0;
+		s_tracker.objs[k].harvested = is_same_room ? prev_harvested[k] : 0;
+		s_tracker.objs[k].stick_harvested = is_same_room ? prev_stick_harvested[k] : 0;
 		s_tracker.objs[k].name[0] = '\0';
 
 		int is_stone = (objs[k].kind == NDW_K_STONE || objs[k].kind == NDW_K_ROCK || objs[k].kind == NDW_K_BOULDER);
@@ -322,6 +331,12 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 		}
 		return 0;
 	}
+
+	/* Unbound mineral: if room entities are loaded in an instantiated room,
+	 * any mineral that does not exist in Corm DB has been harvested/cleared */
+	int is_mineral = (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER);
+	if (is_mineral && st->room.ref != 0 && st->entity_count > 0)
+		return 0;
 
 	return 1;
 }
@@ -503,6 +518,12 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 
 	int lx = nd_seven_get_lx();
 	int ly = nd_seven_get_ly();
+
+	/* Seam boundary check: only target current room's objects if lamb is inside the tile */
+	int in_bounds = (lx >= -NDW_FOOT_HW && lx <= NDW_TILE_W + NDW_FOOT_HW &&
+	                 ly >= -NDW_FOOT_H && ly <= NDW_TILE_H + NDW_FOOT_H);
+	if (!in_bounds)
+		return 0;
 
 	for (int k = 0; k < s_tracker.count; k++) {
 		if (!is_tracked_obj_present(st, k))

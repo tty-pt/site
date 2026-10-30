@@ -960,6 +960,45 @@ int main(void)
 		st.entities[1].location = 50;
 		assert(is_contained_in_tree(&st, &st.entities[1]) == 1);
 		printf("PASS: sticks are contained inside trees and never drawn on ground\n");
+
+		/* 8. Multi-packet entity arrival dynamic binding */
+		set_map(15, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, '*'); /* 2 stones */
+		st.room.ref = 60;
+		st.me = 1;
+		st.entity_count = 0; /* Packet 0: no entities arrived yet */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count >= 2);
+		assert(tr->bound_entities == 0);
+
+		/* Packet 1 arrives: first stone entity #601 */
+		st.entity_count = 1;
+		st.entities[0].ref = 601;
+		st.entities[0].location = 60;
+		st.entities[0].ch = '*';
+		strcpy(st.entities[0].name, "first stone");
+		sync_room_objects(&st);
+		assert(tr->bound_entities == 1);
+		assert(tr->objs[0].entity_ref == 601);
+
+		/* Packet 2 arrives: second stone entity #602 */
+		st.entity_count = 2;
+		st.entities[1].ref = 602;
+		st.entities[1].location = 60;
+		st.entities[1].ch = '*';
+		strcpy(st.entities[1].name, "second stone");
+		sync_room_objects(&st);
+		/* Must dynamically re-sync and bind the second stone! */
+		assert(tr->bound_entities == 2);
+		assert(tr->objs[1].entity_ref == 602);
+		printf("PASS: multi-packet entity arrival dynamically binds all stones\n");
+
+		/* 9. Seam boundary protection: cannot target room objects when outside the tile */
+		nd_seven_set_lamb(NDW_TILE_W + 50, NDW_TILE_H / 2); /* outside tile */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+		printf("PASS: seam boundary protection prevents targeting out-of-bounds objects\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

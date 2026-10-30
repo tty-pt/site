@@ -21,6 +21,7 @@ typedef struct {
 	uint8_t glyphs[3];
 	int count;
 	int bound_entities;
+	size_t last_entity_count;
 	tracked_obj_t objs[NDW_MAX_OBJ];
 } room_tracker_t;
 
