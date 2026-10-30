@@ -506,6 +506,68 @@ int main(void)
 		printf("PASS: picked minerals are immediately omitted on the minimap\n");
 	}
 
+	/* 18. Per-side stone removal on multi-stone tile:
+	 * A tile with 2 stones (side 0 and side 2) removes only the picked stone's
+	 * glyph, leaving the second stone rendered on the minimap. */
+	{
+		nd_client_state_t cst;
+		static uint32_t buf_both[W * H], buf_one_picked[W * H], buf_clean[W * H];
+
+		memset(&cst, 0, sizeof(cst));
+		init_sample_map(&cst.map_data);
+		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		/* 0 stones: clean baseline */
+		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_clean, fb, sizeof(buf_clean));
+
+		/* 2 stone glyphs: side_l ('*') and side_r ('*') */
+		wild(&cst.map_data, 1, 1, 2, '*', 10, 0, 0, '*', 10);
+		cst.map_data.pos[0] = 60; cst.map_data.pos[1] = 60;
+		cst.room.ref = 200;
+		cst.me = 1;
+		cst.entity_count = 2;
+		cst.entities[0].ref = 1001;
+		cst.entities[0].location = 200;
+		cst.entities[0].ch = '*';
+		strcpy(cst.entities[0].name, "stone left");
+		cst.entities[1].ref = 1002;
+		cst.entities[1].location = 200;
+		cst.entities[1].ch = '*';
+		strcpy(cst.entities[1].name, "stone right");
+
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
+
+		/* Render both stones */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_both, fb, sizeof(buf_both));
+
+		/* Pick stone 1 (#1001) */
+		nd_seven_mark_picked(1001);
+		sync_room_objects(&cst);
+
+		/* Render with 1 stone picked */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_one_picked, fb, sizeof(buf_one_picked));
+
+		/* Buffer with 1 picked must differ from both present (picked stone was removed) */
+		assert(memcmp(buf_both, buf_one_picked, sizeof(buf_both)) != 0);
+
+		/* Buffer with 1 picked must ALSO differ from clean map (second stone is still present!) */
+		assert(memcmp(buf_one_picked, buf_clean, sizeof(buf_clean)) != 0);
+
+		/* Now pick the remaining second stone (#1002) */
+		nd_seven_mark_picked(1002);
+		sync_room_objects(&cst);
+		render(&cst.map_data, "lamina", 0);
+
+		/* With both stones picked, output must now match clean map with no stones! */
+		assert(memcmp(fb, buf_clean, sizeof(buf_clean)) == 0);
+		printf("PASS: picking 1 stone of 2 removes only that stone on the minimap while keeping the second\n");
+	}
+
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");
 	return 0;
 }

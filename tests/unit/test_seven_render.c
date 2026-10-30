@@ -994,6 +994,13 @@ int main(void)
 		assert(tr->objs[1].entity_ref == 602);
 		printf("PASS: multi-packet entity arrival dynamically binds all stones\n");
 
+		/* Pick stone 1 (#601): object 0 must become absent, object 1 must remain present */
+		nd_seven_mark_picked(601);
+		sync_room_objects(&st);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+		assert(is_tracked_obj_present(&st, 1) == 1);
+		printf("PASS: picking 1 stone of 2 removes only that stone while keeping the second\n");
+
 		/* 9. Seam boundary protection: cannot target room objects when outside the tile */
 		nd_seven_set_lamb(NDW_TILE_W + 50, NDW_TILE_H / 2); /* outside tile */
 		act_len = nd_seven_action(&st, act, sizeof(act));
