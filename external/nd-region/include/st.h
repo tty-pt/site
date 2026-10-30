@@ -14,8 +14,8 @@
 #define DAYTICK_Y	10
 #define NIGHT_IS	(day_n == 1)
 
-#define Y_COORD 0
-#define X_COORD 1
+#define Y_COORD 1
+#define X_COORD 0
 
 #define COORD_MIN SHRT_MIN
 #define COORD_MAX SHRT_MAX
@@ -116,10 +116,10 @@ pos_move(pos_t d, pos_t o, enum exit e)
 {
 	memcpy(d, o, sizeof(pos_t));
 	switch (e) {
-	case E_EAST:  d[1] += 1;  break;
-	case E_WEST:  d[1] -= 1;  break;
-	case E_SOUTH: d[0] += 1;  break;
-	case E_NORTH: d[0] -= 1;  break;
+	case E_EAST:  d[0] += 1;  break;
+	case E_WEST:  d[0] -= 1;  break;
+	case E_SOUTH: d[1] -= 1;  break;
+	case E_NORTH: d[1] += 1;  break;
 	case E_UP:    d[2] += 1;  break;
 	case E_DOWN:  d[2] -= 1;  break;
 	default: break;

@@ -124,6 +124,7 @@ usage findings + Locked decisions).
 
 Local LLM inference, OpenAI-compatible streaming chat, and dense vector embeddings engine
 running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `docs/LOCAL_LLM.md`.
+To build custom semantic and hybrid search engines with `axil-auren`, `libsepal`, and `liblemma`, see `docs/SEMANTIC_SEARCH.md`.
 
 ```sh
 # Turnkey server launcher:
@@ -133,6 +134,20 @@ running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `doc
 LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 /home/quirinpa/axil-auren/bin/engine-test ~/.models/qwen2.5-0.5b-instruct.gguf
 ```
+
+## axil-resume-search (PDF resume ingestion & job semantic search HTTP service) — build, run & test
+
+Pure-C Axil service module providing `POST /resume` (PDF upload via multipart/raw/JSON, `pdftotext` extraction, file persistence in `uploads/`, vector generation via `axil-auren` on port 4242, persistent vector storage in `libsepal`, lexical indexing in `liblemma`, metadata in `libcorm`), `GET /candidates` (candidate semantic and hybrid matching against job opportunity descriptions), `GET /resume/file` (PDF file download), and an interactive browser UI form at `GET /`.
+
+```sh
+# Turnkey launcher (runs on :8092 by default):
+./external/axil-resume-search/run.sh
+
+# Run end-to-end integration test suite:
+make -C external/axil-resume-search test
+```
+
+Full documentation and curl examples in `external/axil-resume-search/README.md`.
 
 ## Topic index
 
@@ -153,3 +168,5 @@ LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
 | Advanced Git Recovery | `docs/ADVANCED_GIT_RECOVERY.md` |
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
+| Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |

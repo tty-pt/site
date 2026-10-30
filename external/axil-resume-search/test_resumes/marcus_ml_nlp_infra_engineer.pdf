@@ -1,0 +1,446 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 6782 >>
+stream
+BT
+0.090 0.149 0.235 rg
+/F2 18 Tf
+42.00 812.00 Td
+(Marcus Vance) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F2 10 Tf
+42.00 797.50 Td
+(Staff Machine Learning Infrastructure Engineer) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 8.5 Tf
+42.00 786.00 Td
+(Specialist in Large-Scale GPU Serving, CUDA Kernel Optimization & vLLM) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.8 Tf
+42.00 775.00 Td
+(San Francisco, CA   |   +1 415 889 4210   |   marcus.vance@hyperscale.ai   |   github.com/mvance-ai) Tj
+ET
+0.051 0.580 0.533 RG
+1.20 w
+42.00 769.00 m 553.28 769.00 l S
+0.922 0.957 0.953 rg
+0.051 0.580 0.533 RG
+0.60 w
+42.00 711.60 511.28 47.40 re B
+BT
+0.090 0.149 0.235 rg
+/F2 8.5 Tf
+51.00 749.00 Td
+(PROFILE) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 739.00 Td
+(Staff ML infrastructure specialist with 9+ years architecting high-throughput GPU serving clusters, distributed model) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 729.20 Td
+(parallel training, and low-latency LLM inference pipelines. Deep expertise in CUDA kernel acceleration, vLLM continuous) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 719.40 Td
+(batching, FlashAttention, and high-dimensional vector search.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+42.00 699.60 Td
+(EXPERIENCE) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+42.00 697.10 m 324.00 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 687.60 Td
+(Staff ML Infrastructure Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 687.60 Td
+(04/2022 - Present) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 678.40 Td
+(HyperScale AI   -   San Francisco) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 669.20 Td
+(Architected GPU serving infrastructure for 70B+ parameter generative LLMs) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 660.40 Td
+(across 500+ H100 GPUs. Integrated vLLM PagedAttention and custom Triton CUDA) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 651.60 Td
+(kernels, cutting time-to-first-token by 55% while doubling sustained token) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 642.80 Td
+(throughput.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 634.00 Td
+(Stack: PyTorch, CUDA, vLLM, TensorRT-LLM, Triton, Slurm, NCCL, RDMA) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 620.50 Td
+(Senior ML Platform Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 620.50 Td
+(02/2018 - 03/2022) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 611.30 Td
+(NeuralStack   -   Palo Alto) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 602.10 Td
+(Built real-time dense vector embedding search platform processing 40,000) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 593.30 Td
+(queries per second over 500M document vectors using HNSW approximate nearest) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 584.50 Td
+(neighbors and Libsepal indexing.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 575.70 Td
+(Stack: Python, C++, Vector DBs, HNSW, FAISS, PyTorch, Kubernetes) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 562.20 Td
+(Machine Learning Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 562.20 Td
+(07/2015 - 01/2018) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 553.00 Td
+(VisionCore   -   San Jose) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 543.80 Td
+(Trained computer vision convolutional models and optimized TensorRT) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 535.00 Td
+(inference pipelines on edge hardware for autonomous drones.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 526.20 Td
+(Stack: C++, CUDA, OpenCV, Python, TensorFlow, ONNX) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 512.70 Td
+(Research Assistant) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 512.70 Td
+(09/2013 - 06/2015) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 503.50 Td
+(Stanford AI Lab   -   Stanford) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 494.30 Td
+(Co-authored papers on distributed stochastic gradient descent algorithms and) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 485.50 Td
+(asynchronous model parallel parameter servers.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 476.70 Td
+(Stack: Python, C++, CUDA, MPI, OpenMP) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 699.60 Td
+(CORE SKILLS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 697.10 m 553.28 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 687.60 Td
+(Deep Learning & LLMs) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 678.10 Td
+([PyTorch] [vLLM] [PagedAttention] [TensorRT-LLM]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 669.90 Td
+([Triton Server] [Transformers] [FlashAttention]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 659.90 Td
+(GPU Systems & Parallelism) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 650.40 Td
+([CUDA] [C++] [Triton Lang] [NCCL] [Slurm]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 642.20 Td
+([Megatron-LM] [FSDP] [DeepSpeed ZeRO-3]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 632.20 Td
+(Vector & Retrieval Search) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 622.70 Td
+([Dense Embeddings] [HNSW] [FAISS] [Libsepal]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 614.50 Td
+([ANN Search] [Quantization FP8/INT4]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 604.50 Td
+(Cloud & Infrastructure) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 595.00 Td
+([Kubernetes] [Docker] [AWS EC2/EKS] [Prometheus]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 586.80 Td
+([Linux Kernel] [WandB]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 572.80 Td
+(SYSTEMS ARCHITECTURE & PROJECTS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 570.30 m 553.28 570.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 560.80 Td
+(paged-kernel-ext) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 552.30 Td
+(High-performance custom CUDA FlashDecoding kernel for) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 544.30 Td
+(long-context KV cache management.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 532.80 Td
+(vector-mesh) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 524.30 Td
+(Low-latency distributed vector indexing daemon in C++) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 516.30 Td
+(handling billions of embedding vectors.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 500.80 Td
+(EDUCATION) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 498.30 m 553.28 498.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 488.80 Td
+(M.Sc. Computer Science \(AI\)) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.2 Tf
+338.00 480.30 Td
+(Stanford University) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 467.80 Td
+(LANGUAGES) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 465.30 m 553.28 465.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 455.80 Td
+(English) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 455.80 Td
+(Native) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 447.30 Td
+(French) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 447.30 Td
+(Working) Tj
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000267 00000 n 
+0000007101 00000 n 
+0000007171 00000 n 
+0000007246 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+7324
+%%EOF

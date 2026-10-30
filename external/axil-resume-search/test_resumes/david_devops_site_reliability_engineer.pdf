@@ -1,0 +1,440 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 6653 >>
+stream
+BT
+0.090 0.149 0.235 rg
+/F2 18 Tf
+42.00 812.00 Td
+(David Chen) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F2 10 Tf
+42.00 797.50 Td
+(Principal Site Reliability Engineer & Cloud Platform Architect) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 8.5 Tf
+42.00 786.00 Td
+(Specialist in Multi-Region Kubernetes, eBPF Cilium Networking & Linux Tuning) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.8 Tf
+42.00 775.00 Td
+(Seattle, WA   |   +1 206 743 9102   |   david.chen@fincloud.net   |   github.com/dchen-sre) Tj
+ET
+0.051 0.580 0.533 RG
+1.20 w
+42.00 769.00 m 553.28 769.00 l S
+0.922 0.957 0.953 rg
+0.051 0.580 0.533 RG
+0.60 w
+42.00 711.60 511.28 47.40 re B
+BT
+0.090 0.149 0.235 rg
+/F2 8.5 Tf
+51.00 749.00 Td
+(PROFILE) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 739.00 Td
+(Principal SRE with 10+ years engineering mission-critical cloud platforms, high-availability multi-region Kubernetes) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 729.20 Td
+(clusters, and automated chaos engineering frameworks. Specializes in low-level Linux performance tuning, eBPF network) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 719.40 Td
+(observability, and zero-downtime infrastructure automation.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+42.00 699.60 Td
+(EXPERIENCE) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+42.00 697.10 m 324.00 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 687.60 Td
+(Principal SRE) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 687.60 Td
+(01/2020 - Present) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 678.40 Td
+(FinCloud Payments   -   Seattle) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 669.20 Td
+(Architected automated multi-region Kubernetes failover handling $10B+ annual) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 660.40 Td
+(payment transactions with 99.999% availability. Tuned Linux kernel TCP/IP) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 651.60 Td
+(congestion control \(BBR\) and sysctl parameters.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 642.80 Td
+(Stack: Kubernetes, Terraform, AWS, eBPF, Cilium, Linux Kernel, BBR) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 629.30 Td
+(Senior Cloud Infrastructure Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 629.30 Td
+(03/2016 - 12/2019) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 620.10 Td
+(DataMesh   -   Seattle) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 610.90 Td
+(Spearheaded migration to Cilium eBPF networking, cutting cross-AZ latency by) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 602.10 Td
+(35%. Deployed Prometheus, Grafana, and Thanos observability platform) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 593.30 Td
+(collecting 15M metrics/sec.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 584.50 Td
+(Stack: Docker, Kubernetes, Prometheus, Grafana, Thanos, Terraform) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 571.00 Td
+(Linux Systems Administrator) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 571.00 Td
+(06/2013 - 02/2016) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 561.80 Td
+(Pacific Hosting   -   Bellevue) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 552.60 Td
+(Automated configuration management and high-availability PostgreSQL and) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 543.80 Td
+(Nginx clustering across 500+ physical Linux servers.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 535.00 Td
+(Stack: Linux \(Debian/RHEL\), Bash, Python, Nginx, PostgreSQL) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 521.50 Td
+(NOC Engineer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 521.50 Td
+(08/2011 - 05/2013) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 512.30 Td
+(Northwest Telco   -   Seattle) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 503.10 Td
+(Monitored nationwide backbone fiber routing, resolved BGP route flap) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 494.30 Td
+(anomalies, and managed 24/7 incident response.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 485.50 Td
+(Stack: BGP, OSPF, Cisco IOS, Wireshark, SNMP, Nagios) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 699.60 Td
+(CORE SKILLS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 697.10 m 553.28 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 687.60 Td
+(Cloud & Orchestration) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 678.10 Td
+([Kubernetes] [Docker] [Terraform] [AWS]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 669.90 Td
+([Google Cloud] [ArgoCD] [Helm] [Kustomize]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 659.90 Td
+(Observability & Networking) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 650.40 Td
+([eBPF] [Cilium CNI] [Prometheus] [Grafana]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 642.20 Td
+([Thanos] [OpenTelemetry] [Service Mesh]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 632.20 Td
+(Systems & Reliability) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 622.70 Td
+([Kernel sysctl tuning] [BBR] [Chaos Engineering]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 614.50 Td
+([Incident Response] [SLI/SLO]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 604.50 Td
+(Scripting & Tooling) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 595.00 Td
+([Go] [Python] [Bash] [Linux Internals] [GitOps]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 586.80 Td
+([GitHub Actions]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 572.80 Td
+(SYSTEMS ARCHITECTURE & PROJECTS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 570.30 m 553.28 570.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 560.80 Td
+(k8s-chaos-operator) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 552.30 Td
+(Custom Kubernetes CRD operator injecting network partition) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 544.30 Td
+(latency via Linux tc/netem.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 532.80 Td
+(ebpf-flow-tracer) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 524.30 Td
+(Zero-overhead TCP connection lifecycle and packet drop) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 516.30 Td
+(analyzer written in C and Go.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 500.80 Td
+(EDUCATION) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 498.30 m 553.28 498.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 488.80 Td
+(B.Sc. Computer Engineering) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.2 Tf
+338.00 480.30 Td
+(University of Washington) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 467.80 Td
+(LANGUAGES) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 465.30 m 553.28 465.30 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 455.80 Td
+(English) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 455.80 Td
+(Native) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 447.30 Td
+(Mandarin) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 447.30 Td
+(Fluent) Tj
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000267 00000 n 
+0000006972 00000 n 
+0000007042 00000 n 
+0000007117 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+7195
+%%EOF

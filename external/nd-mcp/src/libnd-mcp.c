@@ -15,6 +15,7 @@ void eng_mcp_tod(unsigned player_ref, unsigned tod);
 void eng_fbcp_view(unsigned player_ref, const nd_map_data_t *map);
 void eng_fbcp_view_buf(unsigned player_ref, char *view);
 void eng_mcp_action(unsigned player_ref, unsigned id, char *label, char *icon);
+void eng_fbcp_region(unsigned player_ref, const char *stage, const char *map, uint8_t layout, uint8_t flags);
 
 XY_IMPL(int, fbcp_item, unsigned, player_ref, unsigned, obj_ref, unsigned char, dynflags)
 {
@@ -79,6 +80,12 @@ XY_IMPL(int, fbcp_view_buf, unsigned, player_ref, char *, view)
 XY_IMPL(int, mcp_action, unsigned, player_ref, unsigned, id, char *, label, char *, icon)
 {
 	eng_mcp_action(player_ref, id, label, icon);
+	return 0;
+}
+
+XY_IMPL(int, fbcp_region, unsigned, player_ref, const char *, stage, const char *, map, uint8_t, layout, uint8_t, flags)
+{
+	eng_fbcp_region(player_ref, stage, map, layout, flags);
 	return 0;
 }
 

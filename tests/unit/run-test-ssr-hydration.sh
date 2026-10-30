@@ -7,6 +7,7 @@ gcc -g -O0 \
 	-I"$REPO_ROOT/include" \
 	-I"$REPO_ROOT/external/libbud/include" \
 	-I"$REPO_ROOT/external/axil-nd/include" \
+	-I"$REPO_ROOT/external/nd-seven/include" \
 	-I"$REPO_ROOT/external/axil-tty/include" \
 	-I"$REPO_ROOT/external/liblamina/include" \
 	-I"$REPO_ROOT/external/nd-attr/include" \
@@ -24,6 +25,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_state_io.c \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
+	mods/nd/ux/nd_seven.c \
 	mods/nd/ux/glue/equip_ui.c \
 	mods/nd/ux/glue/attr_ui.c \
 	mods/nd/ux/glue/spell_ui.c \

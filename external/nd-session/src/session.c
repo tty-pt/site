@@ -31,6 +31,7 @@
 
 #include <nd/config.h>
 #include <nd/mcp.h>
+#include <nd/regions.h>
 #include <nd/player.h>
 #include <nd/st.h>
 #include <nd/entity.h>
@@ -71,9 +72,6 @@ int euid = 0;
 double tick = 0;
 unsigned short day_n = 0;
 unsigned me = 1;
-
-int presence_refresh(unsigned ref);
-int presence_forget(unsigned ref);
 
 void do_avatar(int fd, int argc, char *argv[]);
 /* do_ban, do_unban moved to external/nd-region */
@@ -213,7 +211,7 @@ void
 shared_init(void)
 {
 	nd_table_handle_set(HD_FD, hd_resolve(HD_FD));
-	nd_table_handle_set(HD_RTYPE, type_hd + 2);
+	nd_table_handle_set(HD_RTYPE, type_hd + 1);
 	nd_table_handle_set(HD_RWTS, wts_hd + 2);
 }
 
@@ -261,7 +259,7 @@ nd_world_init(int argc __attribute__((unused)), char **argv __attribute__((unuse
 	 * vtf_hd/bcp_hd just above: transient, and repopulated
 	 * unconditionally below. */
 	nd_table_handle_set(HD_ACTION, corm_open(NULL, "action", CM_U32, ai_type, 0xFFFF, CM_AINDEX));
-	nd_table_handle_set(HD_TYPE, corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX));
+	nd_table_handle_set(HD_TYPE, corm_open(NULL, "ndt", CM_U32, CM_STR, 0xFFFF, CM_AINDEX | CM_MIRROR));
 	nd_table_handle_set(HD_ENTITY, corm_open(db, "entity", CM_U32, ent_type, 0xFFFF, 0));
 	nd_table_handle_set(HD_PLAYER, corm_open(db, "player", CM_STR, CM_U32, 0xFF, 0));
 	nd_table_handle_set(HD_OBJ, corm_open(db, "obj", CM_U32, obj_type, 0xFFFF, CM_AINDEX));
@@ -606,9 +604,7 @@ do_save(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((un
 static inline void
 avatar(OBJ *player)
 {
-	const SKEL *skel = corm_get(skel_hd, &player->skid);
-
-	player->art_id = 1 + (random() % (skel && skel->max_art ? skel->max_art : 1));
+	player->art_id = 1 + (random() % 300);
 }
 
 void
@@ -720,6 +716,8 @@ nd_player_login(int fd, char *user)
 
 	if (player_ref == NOTHING) {
 		player_ref = eng_object_add(&player, 0, NOTHING, 0, OF_PLAYER);
+		player.type = TYPE_ENTITY;
+		player.flags |= OF_PLAYER;
 		strlcpy(player.name, user, sizeof(player.name));
 		player.value = 150;
 		player_put(user, player_ref);
@@ -736,6 +734,16 @@ nd_player_login(int fd, char *user)
 		 * void, and a login refusal would turn a cosmos-wide ban into a
 		 * permanent lockout. */
 		nd_io_attach(fd, player_ref);
+		OBJ pl;
+		if (corm_read(obj_hd, &player_ref, &pl, sizeof(pl)) == 0) {
+			if (!(pl.flags & OF_PLAYER) || pl.type != TYPE_ENTITY || pl.art_id == 0) {
+				pl.flags |= OF_PLAYER;
+				pl.type = TYPE_ENTITY;
+				if (pl.art_id == 0)
+					avatar(&pl);
+				corm_put(obj_hd, &player_ref, &pl);
+			}
+		}
 	}
 
 	/* axil_auth() is called for what it DOES, not for what it returns: it
@@ -761,10 +769,31 @@ nd_player_login(int fd, char *user)
 	if (axil_auth(fd, user))
 		WARN("'%s': no passwd entry; authenticated by session only\n", user);
 
+	OBJ pobj;
+	if (nd_get(HD_OBJ, &pobj, &player_ref) == 0 && (pobj.location == 0 || pobj.location == NOTHING)) {
+		coord_t p_spawn1[4] = { 0, 0, 0, 1 };
+		unsigned spawn_ref = map_get(p_spawn1);
+		if (spawn_ref == NOTHING) {
+			coord_t p_spawn0[4] = { 0, 0, 0, 0 };
+			spawn_ref = map_get(p_spawn0);
+		}
+		if (spawn_ref != NOTHING) {
+			enter(player_ref, spawn_ref, E_NULL);
+		}
+	}
+
 	mcp_auth_success(player_ref);
 	mcp_actions(player_ref);
 	eng_look_at(player_ref, NOTHING);
 	presence_refresh(player_ref);
+	char stage[16] = {0};
+	char map_drv[16] = {0};
+	uint8_t layout = 0;
+	uint8_t flags = 0;
+	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                   map_drv, sizeof(map_drv), &layout, &flags) == 0) {
+		fbcp_region(player_ref, stage, map_drv, layout, flags);
+	}
 	nd_view(player_ref ? player_ref : fd_player(fd));
 	if (day_n)
 		mcp_tod(player_ref, 1);

@@ -99,6 +99,14 @@ st_here_cell(unsigned player_ref, uint64_t *cell)
 static int
 st_argc_trim(int argc, char *argv[])
 {
+	for (int i = 0; i < argc; i++) {
+		if (argv[i]) {
+			size_t l = strlen(argv[i]);
+			while (l > 0 && ((unsigned char)argv[i][l - 1] <= 32)) {
+				argv[i][--l] = '\0';
+			}
+		}
+	}
 	while (argc > 1 && (!argv[argc - 1] || !*argv[argc - 1]))
 		argc--;
 	return argc;
@@ -176,6 +184,7 @@ static int
 st_cmd_region(unsigned player_ref, int argc, char *argv[], int region_arg,
 	uint64_t *id, uint8_t *plen)
 {
+	argc = st_argc_trim(argc, argv);
 	if (argc > region_arg && argv[region_arg] && *argv[region_arg]) {
 		char *end = NULL;
 		unsigned long w = strtoul(argv[region_arg], &end, 10);
@@ -675,11 +684,14 @@ static void
 do_loadmod(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
+	char *name;
 	uint64_t id = 0;
 	uint8_t plen = ST_PLEN_ROOT;
 	char namebuf[ND_ST_MOD_NAME + 1];
 	int rc;
+
+	argc = st_argc_trim(argc, argv);
+	name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (!*name || strchr(name, '/')) {
 		nd_printf(player_ref, "Usage: loadmod <module> [world]\n");
@@ -724,11 +736,14 @@ static void
 do_unloadmod(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
-	char *name = (argc > 1 && argv[1]) ? argv[1] : "";
+	char *name;
 	uint64_t id = 0;
 	uint8_t plen = ST_PLEN_ROOT;
 	char namebuf[ND_ST_MOD_NAME + 1];
 	int rc;
+
+	argc = st_argc_trim(argc, argv);
+	name = (argc > 1 && argv[1]) ? argv[1] : "";
 
 	if (!*name || strchr(name, '/')) {
 		nd_printf(player_ref, "Usage: unloadmod <module> [world]\n");
@@ -773,6 +788,7 @@ do_modlist(int fd, int argc, char *argv[])
 	struct st_rec rec;
 	uint32_t i;
 
+	argc = st_argc_trim(argc, argv);
 	if (st_cmd_region(player_ref, argc, argv, 1, &id, &plen) != XY_OK) {
 		nd_printf(player_ref, "Invalid world\n");
 		nd_flush(player_ref);
@@ -931,7 +947,8 @@ do_driver(int fd, int argc, char *argv[])
 		st_player_resolve_presentation(player_ref, stage, sizeof(stage),
 			map, sizeof(map), &layout, &flags);
 		const char *lstr = (layout == ND_LAYOUT_STAGE_FULLSCREEN) ? "fullscreen" :
-		                   (layout == ND_LAYOUT_STAGE_EXPANDED) ? "expanded" : "hybrid";
+		                   (layout == ND_LAYOUT_STAGE_EXPANDED) ? "expanded" :
+		                   (layout == ND_LAYOUT_GAME_2D) ? "game-2d" : "hybrid";
 		const char *fstr = (flags & ND_REGION_LOCKED) ? "locked" : "choice allowed";
 		nd_printf(player_ref, "Active presentation policy:\n"
 		                      "  Stage driver: %s (%s)\n"
@@ -1020,22 +1037,27 @@ do_driver(int fd, int argc, char *argv[])
 
 	if (strcmp(argv[1], "map") == 0) {
 		if (argc < 3 || !argv[2] || !*argv[2]) {
-			nd_printf(player_ref, "Usage: driver map <ascii|canvas|none> [region]\n");
+			nd_printf(player_ref, "Usage: driver map <ascii-bud|lamina|classic|cyber|dungeon|none> [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
 		const char *mname = argv[2];
-		char map_drv[16] = "ascii-bud";
-		if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina"))
-			snprintf(map_drv, sizeof(map_drv), "canvas-lamina");
-		else if (!strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud"))
+		char map_drv[16] = "lamina";
+		if (!strcmp(mname, "ascii") || !strcmp(mname, "ascii-bud"))
 			snprintf(map_drv, sizeof(map_drv), "ascii-bud");
+		else if (!strcmp(mname, "canvas") || !strcmp(mname, "canvas-lamina") || !strcmp(mname, "lamina"))
+			snprintf(map_drv, sizeof(map_drv), "lamina");
+		else if (!strcmp(mname, "classic"))
+			snprintf(map_drv, sizeof(map_drv), "classic");
+		else if (!strcmp(mname, "cyber"))
+			snprintf(map_drv, sizeof(map_drv), "cyber");
+		else if (!strcmp(mname, "dungeon"))
+			snprintf(map_drv, sizeof(map_drv), "dungeon");
 		else if (!strcmp(mname, "none"))
 			snprintf(map_drv, sizeof(map_drv), "none");
 		else {
-			nd_printf(player_ref, "Unknown map driver (use ascii, canvas, or none)\n");
-			nd_flush(player_ref);
-			return;
+			/* Accept any custom theme name or map style string */
+			snprintf(map_drv, sizeof(map_drv), "%s", mname);
 		}
 
 		if (st_cmd_region(player_ref, argc, argv, 3, &id, &plen) != XY_OK) {
@@ -1061,7 +1083,7 @@ do_driver(int fd, int argc, char *argv[])
 
 	if (strcmp(argv[1], "layout") == 0) {
 		if (argc < 3 || !argv[2] || !*argv[2]) {
-			nd_printf(player_ref, "Usage: driver layout <hybrid|expanded|fullscreen> [region]\n");
+			nd_printf(player_ref, "Usage: driver layout <hybrid|expanded|fullscreen|game-2d> [region]\n");
 			nd_flush(player_ref);
 			return;
 		}
@@ -1073,8 +1095,10 @@ do_driver(int fd, int argc, char *argv[])
 			mode = ND_LAYOUT_STAGE_EXPANDED;
 		else if (!strcmp(lmode, "hybrid"))
 			mode = ND_LAYOUT_STANDARD_HYBRID;
+		else if (!strcmp(lmode, "game-2d") || !strcmp(lmode, "2d"))
+			mode = ND_LAYOUT_GAME_2D;
 		else {
-			nd_printf(player_ref, "Unknown layout mode (use hybrid, expanded, or fullscreen)\n");
+			nd_printf(player_ref, "Unknown layout mode (use hybrid, expanded, fullscreen, or game-2d)\n");
 			nd_flush(player_ref);
 			return;
 		}

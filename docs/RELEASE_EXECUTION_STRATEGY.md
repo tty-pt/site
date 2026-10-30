@@ -28,6 +28,11 @@ This document formalizes the reproducible, battle-tested release methodology use
 3. **Zero Tolerance for Unchecked Releases**:
    Every release must be verified to have completed all packaging and publishing steps before releasing its direct dependents.
 
+4. **Semantic Versioning & Bumping Rule**:
+   **Bump minor only if public API changes. Otherwise bump patch.**
+   - Minor increments are strictly required when public headers (`include/ttypt/*.h`), ABI structures, exported symbol tables, or public CLI options are added or modified.
+   - Patch increments are reserved for internal refactorings, performance optimizations, bug fixes, documentation updates, and implementation improvements that leave public API signatures and header contracts unchanged.
+
 ---
 
 ## 2. Topological Dependency Layers
@@ -179,7 +184,7 @@ Every release job runs through:
 | **5** | `axil-auth` | `v1.2.1` | **PUBLISHED** | Port-qualified cookie auth |
 | **5** | `axil-tty` | `v1.4.1` | **PUBLISHED** | Pure TTY capability bridge |
 | **6** | `axil-hyle` | `v1.0.2` | **PUBLISHED** | Dynamic REST/FTS dataset HTTP handler |
-| **6** | `axil-auren` | `v1.2.0` | **PUBLISHED** | Model registry, SystemOne classifier, block KV reuse |
+| **6** | `axil-auren` | `v1.3.0` | **PUBLISHED** | Session continuity, prefix KV reuse, System One CPU thread clamping |
 | **6** | `axil-nd` | `v1.3.0` | Pending ND update | Decoupled UI presentation, MUCK core |
 | **7** | `pi-quest` | `v1.2.0` | **PUBLISHED** | Autonomous quest journal & evidence gate |
 | **7** | `pi-mm` | `v0.3.1` | **PUBLISHED** | Latent mipmap recall & cormd daemon |

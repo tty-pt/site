@@ -126,7 +126,7 @@ Rather than maintaining a central allowlist of every symbol needed by every modu
 `htdocs/bud-client.js` acts as an open, generic capability orchestrator. It contains zero domain-specific code and dynamically loads declared capability bridges via `data-capabilities`:
 
 ```javascript
-import { createBudWasmBridge } from './bud-hydrate.js?v=1';
+import { createBudWasmBridge } from './bud-hydrate.js?v=2';
 
 // Open capability registry
 window.__wasm_capability_registry = window.__wasm_capability_registry || {};

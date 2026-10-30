@@ -5,7 +5,15 @@
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
-uint32_t g_lamina_fb[ND_CANVAS_W * ND_CANVAS_H];
+/* The seven stage fills the page: its framebuffer follows the viewport size
+ * (wasm_tick) and is allocated on demand. ND_CANVAS_W/H is only the size the
+ * canvas carries before the first frame. */
+uint32_t *g_lamina_fb;
+int g_stage_w = ND_CANVAS_W, g_stage_h = ND_CANVAS_H;
+#define ND_STAGE_MIN_W 320
+#define ND_STAGE_MIN_H 240
+#define ND_STAGE_MAX_W 2560
+#define ND_STAGE_MAX_H 1440
 int g_ui_initialized = 0;
 
 char g_active_modal[32] = {0};
@@ -46,54 +54,8 @@ const nd_client_state_t *nd_ui_get_client_state(void)
 	return &client_state;
 }
 
-/* --- Pluggable Viewport Registry & Drivers --- */
+/* --- Unified Viewport & Terminal Stage --- */
 
-nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS];
-size_t g_driver_count = 0;
-int g_active_driver_idx = 0;
-
-int nd_register_viewport_driver(const nd_viewport_driver_t *drv)
-{
-	if (!drv || g_driver_count >= ND_VIEWPORT_MAX_DRIVERS)
-		return -1;
-
-	for (size_t i = 0; i < g_driver_count; i++) {
-		if (strcmp(g_viewport_drivers[i].id, drv->id) == 0) {
-			g_viewport_drivers[i] = *drv;
-			return 0;
-		}
-	}
-
-	g_viewport_drivers[g_driver_count++] = *drv;
-	return 0;
-}
-
-const nd_viewport_driver_t *nd_get_active_viewport_driver(void)
-{
-	if (g_driver_count == 0) return NULL;
-	if (g_active_driver_idx < 0 || (size_t)g_active_driver_idx >= g_driver_count)
-		return &g_viewport_drivers[0];
-	return &g_viewport_drivers[g_active_driver_idx];
-}
-
-int nd_set_active_viewport_driver(const char *driver_id)
-{
-	if (!driver_id) return -1;
-	for (size_t i = 0; i < g_driver_count; i++) {
-		if (strcmp(g_viewport_drivers[i].id, driver_id) == 0) {
-			if (g_active_driver_idx != (int)i) {
-				g_active_driver_idx = (int)i;
-#ifdef __wasm__
-				bud_app_set_state();
-#endif
-			}
-			return 0;
-		}
-	}
-	return -1;
-}
-
-/* TTY Viewport Driver */
 static bud_node *mount_tty(void)
 {
 	return lx_n("div",
@@ -104,83 +66,90 @@ static bud_node *mount_tty(void)
 		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
 }
 
-static const nd_viewport_driver_t g_driver_tty = {
+nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS] = {0};
+size_t g_driver_count = 0;
+int g_active_driver_idx = 0;
+
+int nd_register_viewport_driver(const nd_viewport_driver_t *drv)
+{
+	if (!drv || !drv->id || g_driver_count >= ND_VIEWPORT_MAX_DRIVERS)
+		return -1;
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, drv->id) == 0) {
+			g_viewport_drivers[i] = *drv;
+			return (int)i;
+		}
+	}
+	int idx = (int)g_driver_count;
+	g_viewport_drivers[g_driver_count++] = *drv;
+	return idx;
+}
+
+const nd_viewport_driver_t *nd_get_active_viewport_driver(void)
+{
+	if (g_driver_count == 0) return NULL;
+	if (g_active_driver_idx >= 0 && (size_t)g_active_driver_idx < g_driver_count)
+		return &g_viewport_drivers[g_active_driver_idx];
+	return &g_viewport_drivers[0];
+}
+
+int nd_set_active_viewport_driver(const char *id)
+{
+	if (!id) return -1;
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, id) == 0) {
+			g_active_driver_idx = (int)i;
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
+int nd_viewport_driver_count(void)
+{
+	return (int)g_driver_count;
+}
+
+const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
+{
+	if (idx < 0 || (size_t)idx >= g_driver_count) return NULL;
+	return &g_viewport_drivers[idx];
+}
+
+static bud_node *mount_seven_stage(void)
+{
+	/* A different tag than the terminal's <div>: swapping stages must replace
+	 * the element (patch-replace). Patching the terminal's div in place would
+	 * keep its data-bud-terminal attribute, and with it the live xterm, which
+	 * then swallows every key press.
+	 *
+	 * The stage fills its holder: the canvas is resized by the lamina bridge
+	 * to whatever frame size the stage draws (data-bud-canvas-fit), 1:1 with
+	 * the screen, so the sprite scale never changes. */
+	return lx_n("nd-stage",
+		lx_attr("id", "game-stage"),
+		lx_attr("class", "absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950"),
+		lx_node(lx_n("canvas",
+			lx_attr("id", "seven-stage-canvas"),
+			lx_attr("data-bud-canvas", "1"),
+			lx_attr("data-bud-canvas-fit", "1"),
+			lx_attr("width", "640"),
+			lx_attr("height", "480"),
+			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))));
+}
+
+static const nd_viewport_driver_t s_seven_driver = {
+	.id = "lamina-seven",
+	.label = "🐑 Seven Ways",
+	.required_capability = "lamina",
+	.mount = mount_seven_stage,
+};
+
+static const nd_viewport_driver_t s_tty_driver = {
 	.id = "tty",
-	.label = "📺 TTY",
+	.label = "📺 Terminal",
 	.required_capability = "axil-tty",
 	.mount = mount_tty,
-	.init = NULL,
-	.on_frame = NULL,
-	.on_resize = NULL,
-	.destroy = NULL
-};
-
-/* Lamina 2D Canvas Driver */
-static bud_node *mount_lamina(void)
-{
-	return lx_n("canvas",
-		lx_attr("id", "viewport"),
-		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "640"),
-		lx_attr("height", "480"),
-		lx_attr("class", "flex-1 min-h-[400px] bg-black rounded border border-neutral-800 shadow-inner"));
-}
-
-static void on_frame_lamina(const uint8_t *buf, size_t len)
-{
-	(void)buf; (void)len;
-	nd_scene_sync(&g_scene, &client_state);
-	nd_lamina_render_scene(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H, &g_scene);
-	lam_canvas_flush(g_lamina_fb, ND_CANVAS_W, ND_CANVAS_H);
-}
-
-static const nd_viewport_driver_t g_driver_lamina = {
-	.id = "lamina-2d",
-	.label = "🎮 Lamina (2D)",
-	.required_capability = "lamina",
-	.mount = mount_lamina,
-	.init = NULL,
-	.on_frame = on_frame_lamina,
-	.on_resize = NULL,
-	.destroy = NULL
-};
-
-/* Bud DOM Viewport Driver (nd-driver-bud) */
-static bud_node *mount_bud(void)
-{
-	bud_node *panel = lx_n("div",
-		lx_attr("id", "bud-viewport"),
-		lx_attr("data-bud-viewport", "bud"),
-		lx_attr("class", "flex-1 h-full min-h-[400px] bg-neutral-900 border border-emerald-800 rounded p-4 font-mono text-neutral-200 overflow-y-auto relative flex flex-col gap-3"),
-		lx_node(lx_n("div",
-			lx_attr("class", "text-xl font-bold text-emerald-400 border-b border-emerald-900/50 pb-2"),
-			lx_text(client_state.room.name[0] ? client_state.room.name : "NeverDark World"))),
-		lx_node(lx_n("p",
-			lx_attr("class", "text-sm text-neutral-300 leading-relaxed"),
-			lx_text(client_state.room.desc[0] ? client_state.room.desc : "Exploring spacetime coordinates..."))));
-
-	if (client_state.entity_count > 0) {
-		bud_node *ents = lx_n("div", lx_attr("class", "flex flex-wrap gap-2 mt-2"));
-		for (size_t i = 0; i < client_state.entity_count; i++) {
-			const nd_entity_desc_t *e = &client_state.entities[i];
-			bud_append(ents, lx_n("span",
-				lx_attr("class", "px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200"),
-				lx_text(e->name[0] ? e->name : "entity")));
-		}
-		bud_append(panel, ents);
-	}
-	return panel;
-}
-
-static const nd_viewport_driver_t g_driver_bud = {
-	.id = "bud",
-	.label = "🌿 Bud (DOM)",
-	.required_capability = "bud",
-	.mount = mount_bud,
-	.init = NULL,
-	.on_frame = NULL,
-	.on_resize = NULL,
-	.destroy = NULL
 };
 
 void nd_ui_init_defaults(void)
@@ -188,11 +157,8 @@ void nd_ui_init_defaults(void)
 	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
 	nd_scene_init(&g_scene);
-
-	nd_register_viewport_driver(&g_driver_tty);
-	nd_register_viewport_driver(&g_driver_lamina);
-	nd_register_viewport_driver(&g_driver_bud);
-	g_active_driver_idx = 0;
+	nd_register_viewport_driver(&s_tty_driver);
+	nd_register_viewport_driver(&s_seven_driver);
 }
 
 /* --- UI glue registry (tenant modules register via ND_UI_GLUE) --- */
@@ -328,8 +294,18 @@ static int on_btn_action(bud_event *ev)
 
 static bud_node *render_viewport_slot(const nd_client_state_t *st)
 {
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	bud_node *vport = (drv && drv->mount) ? drv->mount() : mount_tty();
+	const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
+	bud_node *vport = NULL;
+
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, req_drv) == 0 && g_viewport_drivers[i].mount) {
+			vport = g_viewport_drivers[i].mount();
+			break;
+		}
+	}
+	if (!vport) {
+		vport = mount_tty();
+	}
 
 	bud_node *overlay = nd_ui_glue_render_slot(ND_UI_SLOT_HUD_OVERLAYS, st);
 	if (overlay) {
@@ -342,19 +318,32 @@ static bud_node *render_viewport_slot(const nd_client_state_t *st)
 	return vport;
 }
 
+static int on_dismiss_target(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	client_state.target_ref = 0;
+#ifdef __wasm__
+	bud_app_set_state();
+#endif
+	return 0;
+}
+
 static bud_node *render_room_contents(const nd_client_state_t *st)
 {
 	bud_node *wrap = bud_element("nd-contents");
 	bud_set_attr(wrap, "id", "contents");
-	bud_set_attr(wrap, "class", "nd-contents w-full min-h-0 overflow-y-auto max-h-36");
+	bud_set_attr(wrap, "class", "nd-contents w-full");
+
+	uint32_t active_loc = (st && st->target_ref) ? st->target_ref : (st ? st->room.ref : 0);
+	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
 
 	int any = 0;
 	if (st) {
 		for (size_t i = 0; i < st->entity_count; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
-			if (st->me && e->ref == st->me)
+			if (!is_inventory && st->me && e->ref == st->me)
 				continue;
-			if (st->room.ref && e->location != st->room.ref)
+			if (active_loc && e->location != active_loc)
 				continue;
 			any = 1;
 
@@ -368,59 +357,77 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			int is_selected = (st && st->selected_item_ref == e->ref);
 			char rcls[160];
 			snprintf(rcls, sizeof(rcls),
-				"flex items-center gap-2 p-1 border-b border-neutral-800 text-xs cursor-pointer select-none %s",
-				is_selected ? "ctb bg-neutral-800/80 border-[#9589c5]/60" : "hover:bg-neutral-900/60");
+				"nd-row cursor-pointer select-none %s",
+				is_selected ? "ctb" : "");
 			bud_set_attr(row, "class", rcls);
 			bud_bind(row, "click", 1, on_item_select);
 
-			/* ANSI Glyph */
-			char glyph[8] = {0};
-			snprintf(glyph, sizeof(glyph), "%c", e->ch ? e->ch : '?');
+			/* Avatar thumbnail: the colored glyph underneath, art image on
+			 * top, so a missing image still leaves the glyph visible. */
+			bud_node *av = bud_element("nd-avatar");
+			char glyph[2] = { e->ch ? e->ch : '?', '\0' };
+			char gclass[48];
+			snprintf(gclass, sizeof(gclass), "nd-glyph cf%u", e->fg < 8 ? e->fg + 8 : e->fg);
 			bud_node *g = bud_element("span");
-			char gclass[64];
-			snprintf(gclass, sizeof(gclass), "font-mono font-bold w-4 text-center select-none text-[%u]", e->fg);
 			bud_set_attr(g, "class", gclass);
 			bud_append(g, bud_text(glyph));
-			bud_append(row, g);
+			bud_append(av, g);
+			if (e->art[0]) {
+				char art_url[128];
+				snprintf(art_url, sizeof(art_url), "/nd/art/%s", e->art);
+				bud_node *img = bud_element("img");
+				bud_set_attr(img, "src", art_url);
+				bud_set_attr(img, "alt", "");
+				bud_append(av, img);
+			}
+			bud_append(row, av);
 
 			/* Name */
 			bud_node *name_span = bud_element("span");
-			bud_set_attr(name_span, "class", "grow truncate pointer-events-none");
+			bud_set_attr(name_span, "class", "nd-name grow pointer-events-none");
 			bud_append(name_span, bud_text(e->name));
 			bud_append(row, name_span);
 
-			/* Action Dock */
+			/* Action Dock: floating popup capsule when selected */
 			bud_node *act_dock = bud_element("div");
-			bud_set_attr(act_dock, "class", is_selected ? "flex items-center gap-1 flex-shrink-0" : "hidden");
+			bud_set_attr(act_dock, "class", is_selected ? "nd-item-popup flex items-center gap-1" : "hidden");
 
+			char look_cmd[48], get_cmd[48], drop_cmd[48];
+			snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
+			snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
+			snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
+
+			/* Look button */
 			bud_node *look = bud_element("button");
 			bud_set_attr(look, "type", "button");
 			bud_set_attr(look, "data-action", "look");
-			bud_set_attr(look, "data-cmd", ref_buf);
-			bud_set_attr(look, "class", "nd-pad btn round text-xs");
+			bud_set_attr(look, "data-cmd", look_cmd);
+			bud_set_attr(look, "class", "nd-pad btn text-xs");
 			bud_set_attr(look, "title", "Look");
 			bud_append(look, bud_text("👁"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
 
-			if (e->type != 1 && !(e->flags & 0x01)) {
+			/* Get button: shown if ACT_GET (4) is set or item is gettable */
+			if ((e->actions & 4) || (e->location != st->me && e->type != 1 && e->actions == 0)) {
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
-				bud_set_attr(get, "data-cmd", ref_buf);
-				bud_set_attr(get, "class", "nd-pad btn round text-xs");
+				bud_set_attr(get, "data-cmd", get_cmd);
+				bud_set_attr(get, "class", "nd-pad btn text-xs");
 				bud_set_attr(get, "title", "Get");
 				bud_append(get, bud_text("🖐"));
 				bud_bind(get, "click", 1, on_data_cmd);
 				bud_append(act_dock, get);
 			}
 
-			if (e->location == st->me) {
+			/* Drop button: shown if ACT_DROP (8) is set or item is in inventory */
+			if ((e->actions & 8) || (e->location == st->me)) {
 				bud_node *drop = bud_element("button");
 				bud_set_attr(drop, "type", "button");
 				bud_set_attr(drop, "data-action", "drop");
-				bud_set_attr(drop, "data-cmd", ref_buf);
-				bud_set_attr(drop, "class", "nd-pad btn round text-xs");
+				bud_set_attr(drop, "data-cmd", drop_cmd);
+				bud_set_attr(drop, "class", "nd-pad btn text-xs");
 				bud_set_attr(drop, "title", "Drop");
 				bud_append(drop, bud_text("🪣"));
 				bud_bind(drop, "click", 1, on_data_cmd);
@@ -434,8 +441,8 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 
 	if (!any) {
 		bud_node *empty = bud_element("div");
-		bud_set_attr(empty, "class", "text-neutral-500 text-xs px-2 py-1 italic select-none");
-		bud_append(empty, bud_text("Nothing here."));
+		bud_set_attr(empty, "class", "nd-empty italic select-none");
+		bud_append(empty, bud_text(is_inventory ? "Inventory is empty." : "Nothing here."));
 		bud_append(wrap, empty);
 	}
 
@@ -458,13 +465,50 @@ static bud_node *render_target_card(const nd_client_state_t *st)
 	}
 	if (!target) return bud_element("div");
 
-	char tcls[128];
-	snprintf(tcls, sizeof(tcls), "target-card p-2 rounded border border-red-500/40 bg-neutral-900/80 mb-2 flex items-center justify-between text-xs w-full");
-	bud_node *card = lx_n("div",
-		lx_attr("id", "target-card"),
-		lx_attr("class", tcls),
-		lx_node(lx_n("span", lx_attr("class", "font-bold text-red-400 truncate"), lx_text(target->name))),
-		lx_node(lx_n("span", lx_attr("class", "text-neutral-500 font-mono text-[10px]"), lx_textf("#%u", target->ref))));
+	bud_node *card = bud_element("div");
+	bud_set_attr(card, "id", "target-card");
+	bud_set_attr(card, "class", "target-card");
+	char tip[96];
+	if (st && st->me && target->ref == st->me)
+		snprintf(tip, sizeof(tip), "%s #%u (You - Inventory)", target->name, target->ref);
+	else
+		snprintf(tip, sizeof(tip), "%s #%u", target->name, target->ref);
+	bud_set_attr(card, "title", tip);
+
+	/* Map-sized square: art as full-cover background, name overlaid. */
+	bud_node *art = bud_element("div");
+	bud_set_attr(art, "class", "target-art");
+	bud_node *badge = bud_element("div");
+	char gclass[48];
+	snprintf(gclass, sizeof(gclass), "target-glyph cf%u", target->fg < 8 ? target->fg + 8 : target->fg);
+	bud_set_attr(badge, "class", gclass);
+	char ch_str[2] = { target->ch ? target->ch : '?', '\0' };
+	bud_append(badge, bud_text(ch_str));
+	bud_append(art, badge);
+	if (target->art[0]) {
+		char art_url[128];
+		snprintf(art_url, sizeof(art_url), "/nd/art/%s", target->art);
+		bud_node *img = bud_element("img");
+		bud_set_attr(img, "src", art_url);
+		bud_set_attr(img, "alt", "");
+		bud_append(art, img);
+	}
+
+	bud_node *name_row = bud_element("div");
+	bud_set_attr(name_row, "class", "target-title");
+	bud_append(name_row, bud_text(target->name));
+	bud_append(art, name_row);
+
+	bud_node *close_btn = bud_element("button");
+	bud_set_attr(close_btn, "type", "button");
+	bud_set_attr(close_btn, "class", "target-close");
+	bud_set_attr(close_btn, "title", "Clear Target");
+	bud_append(close_btn, bud_text("✕"));
+	bud_bind(close_btn, "click", 1, on_dismiss_target);
+	bud_append(art, close_btn);
+
+	bud_append(card, art);
+
 	return card;
 }
 
@@ -476,23 +520,147 @@ static bud_node *render_modals_slot(const nd_client_state_t *st)
 	return slot;
 }
 
+static int nd_ui_seven_active(const nd_client_state_t *st)
+{
+	return st && strcmp(st->preferred_driver, "lamina-seven") == 0;
+}
+
+static int on_key_up(bud_event *e)
+{
+	const char *key = (const char *)e->user;
+	if (!key || !*key || !nd_ui_seven_active(&client_state))
+		return 0;
+	return nd_seven_key(key, 0);
+}
+
+static int on_key_down(bud_event *e)
+{
+	const char *key = (const char *)e->user;
+	if (!key || !*key)
+		return 0;
+
+	if (nd_ui_seven_active(&client_state) && nd_seven_key(key, 1))
+		return 1;
+	if (strcmp(key, "k") == 0 || strcmp(key, "ArrowUp") == 0) {
+		ws_send("k\n", 2);
+		return 1;
+	} else if (strcmp(key, "K") == 0) {
+		ws_send("K\n", 2);
+		return 1;
+	} else if (strcmp(key, "j") == 0 || strcmp(key, "ArrowDown") == 0) {
+		ws_send("j\n", 2);
+		return 1;
+	} else if (strcmp(key, "J") == 0) {
+		ws_send("J\n", 2);
+		return 1;
+	} else if (strcmp(key, "h") == 0 || strcmp(key, "ArrowLeft") == 0) {
+		ws_send("h\n", 2);
+		return 1;
+	} else if (strcmp(key, "l") == 0 || strcmp(key, "ArrowRight") == 0) {
+		ws_send("l\n", 2);
+		return 1;
+	} else if (strcmp(key, "x") == 0) {
+		ws_send("x\n", 2);
+		return 1;
+	} else if (strcmp(key, "X") == 0) {
+		ws_send("X0\n", 3);
+		return 1;
+	} else if (strcmp(key, "o") == 0) {
+		ws_send("look\n", 5);
+		return 1;
+	} else if (strcmp(key, "i") == 0) {
+		ws_send("inventory\n", 10);
+		return 1;
+	}
+	return 0;
+}
+
+/* Per-biome backdrop: the current room's art, falling back to the CSS void. */
+static void apply_room_backdrop(bud_node *main_box, const nd_client_state_t *st)
+{
+	if (!st || !st->room.art[0])
+		return;
+	char style[160];
+	snprintf(style, sizeof(style),
+		"background: url('/nd/art/%s') center/cover no-repeat;", st->room.art);
+	bud_set_attr(main_box, "style", style);
+}
+
+static bud_node *render_room_header(const nd_client_state_t *st)
+{
+	if (!st || (!st->room.name[0] && !st->room.ref))
+		return bud_element("div");
+
+	char text[128];
+	if (st->room.name[0]) {
+		snprintf(text, sizeof(text), "📍 %s (#%u)", st->room.name, st->room.ref);
+	} else {
+		snprintf(text, sizeof(text), "📍 Room #%u", st->room.ref);
+	}
+
+	return lx_n("div",
+		lx_attr("id", "room-header"),
+		lx_attr("class", "text-center font-mono text-xs text-neutral-300 font-bold px-2 py-0.5 bg-neutral-900/60 rounded border border-neutral-800/60 truncate max-w-full"),
+		lx_text(text));
+}
+
 bud_node *nd_ui_render(const nd_client_state_t *st)
 {
 	nd_ui_init_defaults();
 
 	bud_node *vport = render_viewport_slot(st);
-	bud_node *keypad = render_direction_keypad();
 	bud_node *map = render_room_map(st);
+	bud_node *modals = render_modals_slot(st);
+
+	if (st && st->layout_mode == ND_LAYOUT_GAME_2D) {
+		/* Clean 2D Game Layout: render ONLY vport (game canvas) and map (minimap) */
+		bud_node *holder = bud_element("div");
+		bud_set_attr(holder, "id", "holder");
+		bud_set_attr(holder, "class", "nd game-2d-mode relative flex flex-col flex-1 min-h-0 w-full overflow-hidden");
+		bud_append(holder, vport);
+		if (map) {
+			/* The mini-map floats on top of the full-screen stage. */
+			bud_node *overlay = bud_element("div");
+			bud_set_attr(overlay, "id", "map-overlay");
+			bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none");
+			bud_set_attr(overlay, "style", "top:12px;right:12px");
+			bud_append(overlay, map);
+			bud_append(holder, overlay);
+		}
+
+		bud_node *main_box = bud_element("div");
+		bud_set_attr(main_box, "id", "main");
+		bud_set_attr(main_box, "class", "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100");
+		apply_room_backdrop(main_box, st);
+		bud_append(main_box, holder);
+		bud_append(main_box, modals);
+
+		const char *user = (st && st->user[0]) ? st->user : client_state.user;
+		bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
+
+		bud_node *root = bud_tpl(
+			"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+			"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
+			layout);
+
+		bud_bind(root, "cmd", 1, on_cmd_action);
+		bud_bind(root, "keydown@window", 0, on_key_down);
+		bud_bind(root, "keyup@window", 0, on_key_up);
+		return root;
+	}
+
+	bud_node *room_hdr = render_room_header(st);
+	bud_node *keypad = render_direction_keypad();
 	bud_node *contents = render_room_contents(st);
 	bud_node *gauges = render_gauges_slot(st);
 	bud_node *actions = render_action_bar(st);
-	bud_node *modals = render_modals_slot(st);
 	bud_node *target_card = render_target_card(st);
 
 	bud_node *cb = bud_element("div");
 	bud_set_attr(cb, "id", "cb");
 	bud_set_attr(cb, "class", "flex flex-col gap-2 items-center w-full flex-1 min-h-0 overflow-y-auto");
 	bud_append(cb, target_card);
+	bud_append(cb, room_hdr);
 	if (map)
 		bud_append(cb, map);
 	bud_append(cb, keypad);
@@ -527,6 +695,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *main_box = bud_element("div");
 	bud_set_attr(main_box, "id", "main");
+	apply_room_backdrop(main_box, st);
 	char mcls[128];
 	snprintf(mcls, sizeof(mcls), "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 %s",
 		(st && st->target_ref) ? "targetting" : "");
@@ -543,25 +712,64 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		layout);
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
+	bud_bind(root, "keydown@window", 0, on_key_down);
+	bud_bind(root, "keyup@window", 0, on_key_up);
 	return root;
+}
+
+/* Follow the viewport: (re)allocate the stage framebuffer when its size
+ * changes. Returns 0 when no buffer could be had. */
+static int seven_stage_fit(int width, int height)
+{
+	int w = width < ND_STAGE_MIN_W ? ND_STAGE_MIN_W : width > ND_STAGE_MAX_W ? ND_STAGE_MAX_W : width;
+	int h = height < ND_STAGE_MIN_H ? ND_STAGE_MIN_H : height > ND_STAGE_MAX_H ? ND_STAGE_MAX_H : height;
+
+	if (g_lamina_fb && w == g_stage_w && h == g_stage_h)
+		return 1;
+	uint32_t *nb = realloc(g_lamina_fb, (size_t)w * (size_t)h * sizeof(uint32_t));
+	if (!nb)
+		return g_lamina_fb != NULL;
+	g_lamina_fb = nb;
+	g_stage_w = w;
+	g_stage_h = h;
+	return 1;
+}
+
+static void seven_stage_redraw(void)
+{
+	if (!seven_stage_fit(g_stage_w, g_stage_h))
+		return;
+	nd_seven_render(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
+	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
 }
 
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	if (drv && drv->on_frame) {
-		drv->on_frame(NULL, 0);
-	}
+	if (nd_ui_seven_active(&client_state))
+		seven_stage_redraw();
+	nd_map_canvas_redraw(&client_state);
 }
 
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 {
-	(void)dt;
-	(void)width;
-	(void)height;
-	const nd_viewport_driver_t *drv = nd_get_active_viewport_driver();
-	if (drv && drv->on_frame) {
-		drv->on_frame(NULL, 0);
+	static uint32_t s_tick_counter = 0;
+	if (nd_ui_seven_active(&client_state) && width > 0 && height > 0)
+		seven_stage_fit(width, height);
+	s_tick_counter++;
+	if (nd_ui_seven_active(&client_state)) {
+		int mv = nd_seven_tick(&client_state, dt);
+		if (mv) {
+			char m[2] = { (char)mv, '\n' };
+			ws_send(m, 2);
+		}
+		if ((s_tick_counter % 2) == 0) {
+			seven_stage_redraw();
+			/* Same cadence as the stage: the minimap follows the lamb in
+			 * lockstep instead of lagging a frame behind. */
+			nd_map_canvas_redraw(&client_state);
+		}
+	} else if ((s_tick_counter % 3) == 0) {
+		nd_map_canvas_redraw(&client_state);
 	}
 }
 

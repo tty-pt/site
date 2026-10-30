@@ -1,0 +1,50 @@
+[
+  {
+    "id": "job_systems_frontend_architect",
+    "title": "Lead Systems Frontend Architect (React, WASM, Pure C)",
+    "target_candidate": "Paulo Quirino",
+    "target_file": "paulo_lead_frontend_systems_architect.pdf",
+    "prompt": "We are seeking a Lead Frontend Engineer and Systems Architect who bridges modern reactive web ergonomics (React 18, TypeScript, Valtio, Zod) with low-level mechanical sympathy in pure C, WebAssembly (WASM), and POSIX event loops. Experience in building real-time robotics telemetry tables, 3D interactive scene manipulation (BabylonJS), autonomous mobile robot interfaces, and datatype-driven component systems is required.",
+    "expected_domains": ["React", "TypeScript", "WASM", "C99", "Robotics telemetry", "BabylonJS", "Component reuse"]
+  },
+  {
+    "id": "job_distributed_storage_rust",
+    "title": "Senior Distributed Storage Systems Engineer (Rust, Raft, LSM-trees)",
+    "target_candidate": "Elena Rostova",
+    "target_file": "elena_rust_distributed_storage_engineer.pdf",
+    "prompt": "High-throughput database infrastructure company is hiring a Senior Distributed Systems Engineer. You will design and implement a fault-tolerant key-value storage engine in asynchronous Rust with Tokio. Deep expertise in the Raft consensus algorithm, LSM-tree internals (SSTables, MemTables, Bloom filters), write-ahead logging (WAL), and zero-copy Linux asynchronous I/O using io_uring is required.",
+    "expected_domains": ["Rust", "Tokio", "Raft consensus", "LSM-tree", "RocksDB", "io_uring", "Key-value storage"]
+  },
+  {
+    "id": "job_ml_infra_gpu_serving",
+    "title": "Staff ML Infrastructure Engineer (LLM Serving, PyTorch, CUDA, vLLM)",
+    "target_candidate": "Marcus Vance",
+    "target_file": "marcus_ml_nlp_infra_engineer.pdf",
+    "prompt": "Leading AI research laboratory is looking for a Staff Machine Learning Infrastructure Engineer to scale our large language model inference clusters. Candidates must have extensive experience with PyTorch, CUDA kernel optimization, vLLM PagedAttention, TensorRT-LLM, Triton Inference Server, continuous batching, and high-throughput dense vector embedding search architectures.",
+    "expected_domains": ["PyTorch", "CUDA", "vLLM", "TensorRT-LLM", "Triton", "Dense vector embeddings", "LLM inference"]
+  },
+  {
+    "id": "job_lead_product_designer",
+    "title": "Lead Product & Design Systems Designer (Figma, Design Tokens, WCAG)",
+    "target_candidate": "Sophia Lindqvist",
+    "target_file": "sophia_lead_product_designer.pdf",
+    "prompt": "We are looking for a Lead Product Designer to own and govern our company-wide design system across web and mobile applications. The role requires deep mastery of Figma variables and design tokens, atomic design component libraries, visual typography hierarchies, user journey research, and ensuring strict WCAG 2.2 AAA accessibility compliance.",
+    "expected_domains": ["Figma", "Design tokens", "Design systems", "Typography", "WCAG AAA", "User research"]
+  },
+  {
+    "id": "job_principal_sre_cloud_platform",
+    "title": "Principal Site Reliability Engineer (Kubernetes, eBPF, Cilium, Terraform)",
+    "target_candidate": "David Chen",
+    "target_file": "david_devops_site_reliability_engineer.pdf",
+    "prompt": "Global fintech infrastructure provider seeks a Principal Site Reliability Engineer (SRE). Must have extensive hands-on experience operating mission-critical multi-region Kubernetes clusters, writing Terraform infrastructure as code, deploying eBPF networking with Cilium, managing Prometheus/Grafana observability, Linux kernel sysctl tuning, and automated chaos engineering.",
+    "expected_domains": ["Kubernetes", "eBPF", "Cilium", "Terraform", "Prometheus", "Linux kernel tuning", "Chaos engineering"]
+  },
+  {
+    "id": "job_embedded_firmware_iot",
+    "title": "Senior Embedded Systems & IoT Firmware Engineer (Bare-Metal C, FreeRTOS, BLE)",
+    "target_candidate": "Clara Mendes",
+    "target_file": "clara_embedded_firmware_iot_engineer.pdf",
+    "prompt": "Industrial IoT manufacturer is hiring an Embedded Systems and Firmware Engineer for battery-powered sensor nodes. Requirements include bare-metal C programming on ARM Cortex-M and ESP32 microcontrollers, FreeRTOS task synchronization, low-level hardware peripheral buses (I2C, SPI, UART, CAN), Bluetooth Low Energy (BLE 5.2) stacks, and ultra-low-power sleep optimization.",
+    "expected_domains": ["Bare-metal C", "FreeRTOS", "ARM Cortex-M", "ESP32", "SPI/I2C/UART", "BLE", "Low-power"]
+  }
+]

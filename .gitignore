@@ -25,6 +25,7 @@
 !/htdocs/bud-fragments.js
 !/htdocs/styles.css
 !/htdocs/hyle.css
+!/htdocs/chat.css
 /external/*/bin
 /external/*/lib
 tests/unit/mpfd_contract_test

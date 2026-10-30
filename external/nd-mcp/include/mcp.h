@@ -25,5 +25,6 @@ XY_DECL(int, fbcp_view_buf, unsigned, player_ref, char *, view);
 void eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags);
 
 XY_DECL(int, mcp_action, unsigned, player_ref, unsigned, id, char *, label, char *, icon);
+XY_DECL(int, fbcp_region, unsigned, player_ref, const char *, stage, const char *, map, uint8_t, layout, uint8_t, flags);
 
 #endif							/* MCP_H */

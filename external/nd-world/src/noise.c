@@ -71,15 +71,14 @@ sun_dist(ucoord_t obits)
 static inline coord_t
 temp(ucoord_t obits, uint32_t he, uint32_t tm, coord_t pos_y) // fahrenheit * 10
 {
-	int32_t x = 0;
-	x = he - water_level(obits) + (tm - NOISE_MAX) / 3;
+	int64_t x = (int64_t)he - (int64_t)water_level(obits) + ((int64_t)tm - (int64_t)NOISE_MAX) / 3;
 	// change 200 to affect how
 	// terrain height decreases temperature
-	x /= 4 * UCOORD_MAX * 260;
+	x /= 4 * (int64_t)UCOORD_MAX * 260;
 	x += (tmp_max<<1) - tmp_min // min temp of hot planet
 		- (tmp_max - tmp_min) * sun_dist(obits);
 	x += (pos_y * tmp_min) / 6300;
-	return tmp_min + x;
+	return (coord_t)(tmp_min + x);
 }
 
 /* }}} */
@@ -116,9 +115,10 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 
 	int j;
 
-	NOISE_OCT(n_he, x1, 55 + obits);
-	NOISE_OCT(n_cl, x4, 1 + obits);
-	NOISE_OCT(n_tm, x3, 53 + obits);
+	point_t s_yx = { s[Y_COORD], s[X_COORD] };
+	noise_oct(n_he, s_yx, sizeof(x1) / sizeof(octave_t), x1, 55 + obits, CHUNK_Y, 2);
+	noise_oct(n_cl, s_yx, sizeof(x4) / sizeof(octave_t), x4, 1 + obits, CHUNK_Y, 2);
+	noise_oct(n_tm, s_yx, sizeof(x3) / sizeof(octave_t), x3, 53 + obits, CHUNK_Y, 2);
 
 	/* syslog_err(LOG_ERR, "noise max: %u, rain max: %u", NOISE_MAX, rn_max); */
 
@@ -147,21 +147,16 @@ view_idx(point_t pos)
 static inline void
 view_print(struct bio *to, point_t pos)
 {
-	point_t vprs = {
-		pos[0] - VIEW_AROUND,
-		pos[1] - VIEW_AROUND,
-	};
-	register struct bio
-		*bo = bio + view_idx(vprs),
-		*bd = to;
-	register int y, x;
-	ucoord_t ol;
-
-	ol = chunks_r.l[WDIM];
-
-	for (y = 0; y < VIEW_SIZE; y++, bo += ol - VIEW_SIZE)
-		for (x = 0; x < VIEW_SIZE; x++, bd++, bo++)
-			*bd = *bo;
+	register int row, col;
+	for (row = 0; row < VIEW_SIZE; row++) {
+		for (col = 0; col < VIEW_SIZE; col++) {
+			point_t p = {
+				pos[0] - VIEW_AROUND + col,
+				pos[1] + VIEW_AROUND - row,
+			};
+			to[row * VIEW_SIZE + col] = bio[view_idx(p)];
+		}
+	}
 }
 
 static inline void __attribute__((hot))
@@ -237,6 +232,7 @@ noise_chunks(point_t pos)
 		bio = chunks_bio;
 	}
 
+	chunks_obits = pos[3];
 	memcpy(&chunks_r, &r, sizeof(r));
 }
 

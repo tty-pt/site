@@ -1,0 +1,566 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 8980 >>
+stream
+BT
+0.090 0.149 0.235 rg
+/F2 18 Tf
+42.00 812.00 Td
+(Paulo Quirino) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F2 10 Tf
+42.00 797.50 Td
+(Lead Frontend Engineer & Systems Architect) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 8.5 Tf
+42.00 786.00 Td
+(Specialist in React, TypeScript, Component Systems & High-Performance Web Engines) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.8 Tf
+42.00 775.00 Td
+(Lisbon, Portugal   |   +351 966211859   |   quirinpa@gmail.com   |   github.com/tty-pt) Tj
+ET
+0.051 0.580 0.533 RG
+1.20 w
+42.00 769.00 m 553.28 769.00 l S
+0.922 0.957 0.953 rg
+0.051 0.580 0.533 RG
+0.60 w
+42.00 711.60 511.28 47.40 re B
+BT
+0.090 0.149 0.235 rg
+/F2 8.5 Tf
+51.00 749.00 Td
+(PROFILE) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 739.00 Td
+(Bridges low-level mechanical sympathy \(C99, WASM, POSIX event loops\) with modern reactive UI ergonomics \(React, TypeScript,) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 729.20 Td
+(state orchestration\). 8+ years delivering high-scale web platforms, real-time robotics telemetry interfaces, and) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 8.0 Tf
+51.00 719.40 Td
+(datatype-driven component systems with deterministic performance and minimal operational overhead.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+42.00 699.60 Td
+(EXPERIENCE) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+42.00 697.10 m 324.00 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 687.60 Td
+(Front-end & Architecture Specialist) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 687.60 Td
+(11/2025 - 08/2026) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 678.40 Td
+(Loomtech   -   Lisbon) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 669.20 Td
+(Architected frontend and data model for a block-based document editor engine) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 660.40 Td
+(supporting drag-and-drop layouts, dynamic formatting, and PDF export.) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 651.60 Td
+(Engineered datatype-driven UI framework automating component reuse across 4) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 642.80 Td
+(core entities.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 634.00 Td
+(Stack: React, TypeScript, Valtio, React-Query, Zod, TailwindCSS, Vite) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 620.50 Td
+(Lead Frontend Developer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 620.50 Td
+(11/2022 - 02/2025) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 611.30 Td
+(Mov.ai   -   Lisbon) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 602.10 Td
+(Primary frontend engineer for autonomous robotics solution. Built 3D) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 593.30 Td
+(interactive scenes in BabylonJS, a visual node flow behavior editor, and) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 584.50 Td
+(multi-type code editor for robotics coordination. Developed real-time) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 575.70 Td
+(telemetry tables and centralized log controller.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 566.90 Td
+(Stack: React 18, TypeScript, BabylonJS, Material-UI 6, Remix, Vite, esbuild) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 553.40 Td
+(Front-end Developer / Tech Lead) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 553.40 Td
+(12/2021 - 07/2022) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 544.20 Td
+(PrimeIT   -   Lisbon) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 535.00 Td
+(Tech lead and frontend engineer architecting micro-frontends for enterprise) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 526.20 Td
+(GDPR compliance platform. Pioneered datatype-driven UI architecture and) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 517.40 Td
+(pure-stack design principles, formalizing data models.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 508.60 Td
+(Stack: React, Micro-Frontends, React-Router, TypeScript, SCRUM) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 495.10 Td
+(Full-stack Developer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 495.10 Td
+(10/2020 - 11/2021) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 485.90 Td
+(UNPARALLEL   -   Lisbon) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 476.70 Td
+(Delivered full-stack applications in Next.js. Integrated IoT telemetry with) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 467.90 Td
+(a custom C++ Arduino library for acoustic sensors and authored JavaScript) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 459.10 Td
+(utility libraries.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 450.30 Td
+(Stack: Next.js, React, TypeScript, C++, WordPress, Node.js) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 436.80 Td
+(Full-stack Developer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 436.80 Td
+(11/2019 - 05/2020) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 427.60 Td
+(Mobinteg   -   Lisbon) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 418.40 Td
+(Architected an interoperable runtime launcher executing seamlessly across) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 409.60 Td
+(Angular and Mithril. Engineered an early utility-first CSS compilation engine) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 400.80 Td
+(predating modern Tailwind paradigms.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 392.00 Td
+(Stack: Angular, Mithril, TypeScript, Webpack, Babel, PHP, MySQL) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.4 Tf
+42.00 378.50 Td
+(Web & Mobile Developer) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.4 Tf
+254.00 378.50 Td
+(08/2017 - 08/2018) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F3 7.6 Tf
+42.00 369.30 Td
+(Exictos   -   Funchal) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 360.10 Td
+(Maintained core banking employee portals and engineered cross-platform) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 351.30 Td
+(mobile clients with React Native and Ionic. Authored C tool for deduplicating) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.4 Tf
+42.00 342.50 Td
+(localization assets.) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F2 7.0 Tf
+42.00 333.70 Td
+(Stack: React Native, Ionic, JavaScript, C, Spring Boot) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 699.60 Td
+(CORE SKILLS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 697.10 m 553.28 697.10 l S
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 687.60 Td
+(Frontend Architecture & UI) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 678.10 Td
+([React] [TypeScript] [Next.js] [Micro-Frontends]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 669.90 Td
+([React-Query] [Zod] [Valtio] [TailwindCSS]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 661.70 Td
+([Material-UI] [Redux] [BabylonJS \(3D\)]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 653.50 Td
+([Component Reuse] [Vite]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 643.50 Td
+(Systems, C & Architecture) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 634.00 Td
+([C \(C99/C11\)] [C++] [Systems Architecture]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 625.80 Td
+([POSIX/Unix] [Isomorphic WASM] [In-Memory DBs]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 617.60 Td
+([Full-Text Search] [Data Modelling]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 607.60 Td
+(Backend & Databases) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 598.10 Td
+([Node.js] [PostgreSQL] [Redis] [MongoDB]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 589.90 Td
+([BerkeleyDB] [MySQL] [PHP]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 8.2 Tf
+338.00 579.90 Td
+(AI, Tooling & DevOps) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 570.40 Td
+([Python] [Vulkan/Local LLMs] [AI Workflows]) Tj
+ET
+BT
+0.051 0.580 0.533 rg
+/F1 7.0 Tf
+338.00 562.20 Td
+([Linux & DevOps] [Docker] [Github CI]) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 548.20 Td
+(SYSTEMS ARCHITECTURE & PROJECTS) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 545.70 m 553.28 545.70 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 536.20 Td
+(axil HTTP/WS Server) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 527.70 Td
+(Event-driven HTTP\(S\) and WebSocket daemon in C99.) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 519.70 Td
+(Non-blocking I/O loop, zero dependencies.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 508.20 Td
+(libxylem Dynamic Module System) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 499.70 Td
+(Hook-based plugin kernel with shared library DAG loading,) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.0 Tf
+338.00 491.70 Td
+(lifecycle hooks, and ABI boundaries.) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 476.20 Td
+(EDUCATION) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 473.70 m 553.28 473.70 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.8 Tf
+338.00 464.20 Td
+(Computer Science & Systems Engineering) Tj
+ET
+BT
+0.118 0.161 0.231 rg
+/F1 7.2 Tf
+338.00 455.70 Td
+(University of Madeira) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 9.5 Tf
+338.00 443.20 Td
+(LANGUAGES) Tj
+ET
+0.051 0.580 0.533 RG
+0.80 w
+338.00 440.70 m 553.28 440.70 l S
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 431.20 Td
+(Portuguese) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 431.20 Td
+(Native / C2) Tj
+ET
+BT
+0.090 0.149 0.235 rg
+/F2 7.5 Tf
+338.00 422.70 Td
+(English) Tj
+ET
+BT
+0.392 0.455 0.545 rg
+/F1 7.2 Tf
+403.00 422.70 Td
+(Fluent / C1/C2) Tj
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000267 00000 n 
+0000009299 00000 n 
+0000009369 00000 n 
+0000009444 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+9522
+%%EOF

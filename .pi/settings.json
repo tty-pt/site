@@ -1,9 +1,14 @@
 {
+  "defaultProvider": "quest",
+  "defaultModel": "auto",
   "retry": {
     "enabled": true,
     "maxRetries": 5,
     "baseDelayMs": 2000,
-    "provider": { "maxRetries": 5, "maxRetryDelayMs": 30000 }
+    "provider": {
+      "maxRetries": 5,
+      "maxRetryDelayMs": 30000
+    }
   },
   "compaction": {
     "enabled": true,
@@ -13,21 +18,92 @@
   "pi-quest": {
     "askTimeoutMs": 60000,
     "depthCap": 3,
-    "draftThresholds": { "requirements": 2, "evidence": 7 },
+    "strictMode": true,
+    "draftThresholds": {
+      "requirements": 2,
+      "evidence": 7
+    },
     "bindings": {
-      "reviewRunner": { "tool": "subagent" }
+      "reviewRunner": {
+        "tool": "subagent"
+      }
     },
     "reviewPolicy": "strict",
+    "judgeFallback": "heuristic",
     "roles": {
-      "reviewer": "antigravity/gemini-3.8-flash",
-      "validator": "antigravity/gemini-3.8-flash"
-    }
+      "reviewer": [
+        "anthropic/claude-sonnet-5-5:low",
+        "antigravity/claude-sonnet-5-5",
+        "antigravity/gemini-3.8-flash"
+      ],
+      "validator": [
+        "antigravity/gemini-3.8-flash",
+        "antigravity/claude-sonnet-5-5"
+      ]
+    },
+    "router": {
+      "enabled": true,
+      "provider": "quest",
+      "id": "auto",
+      "default": "antigravity/gemini-3.8-flash",
+      "direct": "antigravity/gemini-3.8-flash:low",
+      "cooldownMs": 900000,
+      "matrix": {
+        "drafting": {
+          "complex": [
+            "anthropic/claude-sonnet-5-5:high",
+            "antigravity/gemini-3.8-flash"
+          ],
+          "*": "antigravity/gemini-3.8-flash"
+        },
+        "implementing": "antigravity/gemini-3.8-flash",
+        "validating": "antigravity/gemini-3.8-flash"
+      }
+    },
+    "lintRules": [
+      {
+        "id": "no-ux-compile-branch",
+        "filePattern": "/ux/[^/]*\\.c$",
+        "excludeFilePattern": "site_ui\\.c$",
+        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
+        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+[A-Za-z0-9_]+_C\\b",
+        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
+      },
+      {
+        "id": "no-ux-compile-branch",
+        "filePattern": "site_ui\\.c$",
+        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
+        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+(?:[A-Za-z0-9_]+_C|__wasm__)\\b",
+        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
+      },
+      {
+        "id": "no-ux-engine-symbols",
+        "filePattern": "/ux/[^/]*\\.c$",
+        "linePattern": "\\b(?:corm_|source_|axil_|lemma_|hyle_source|XY_)",
+        "message": "Forbidden engine symbol in isomorphic UX: {file} cannot reference XY_/corm_/source_/axil_/lemma_/hyle_source."
+      },
+      {
+        "id": "no-cross-module-c-include",
+        "excludeFilePattern": "(?:site_ui|list)\\.c$",
+        "linePattern": "^\\s*#\\s*include\\s+[\"<].*?\\.c[\">]",
+        "message": "Forbidden #include '*.c' in {file}. Cross-module calls must use XY boundaries."
+      }
+    ],
+    "steeringPhrases": [
+      "go on",
+      "carry on",
+      "keep going",
+      "proceed",
+      "ship it",
+      "looks good",
+      "confirm",
+      "continua",
+      "vai em frente",
+      "avança",
+      "pode avançar"
+    ]
   },
   "pi-mm": {
-    "judgeMode": "auto",
-    "judgeUrl": "http://127.0.0.1:4242",
-    "judgeModel": "qwen",
-    "judgeTimeoutMs": 15000,
     "embedUrl": "http://127.0.0.1:4242/v1/embeddings",
     "embedModel": "bge-small",
     "semanticSearch": true,
@@ -35,8 +111,14 @@
   },
   "pi-early-compact": {
     "tiers": [
-      { "upTo": 200000, "pct": 80 },
-      { "upTo": 1000000, "pct": 50 }
+      {
+        "upTo": 200000,
+        "pct": 80
+      },
+      {
+        "upTo": 1000000,
+        "pct": 50
+      }
     ]
   }
 }

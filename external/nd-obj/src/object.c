@@ -169,19 +169,27 @@ eng_object_add(OBJ *nu, unsigned skel_id, unsigned where_ref, uint64_t v, unsign
 		where_ref = nu_ref;
 	nu->location = where_ref;
 	nu->owner = ROOT;
-	nu->type = skel.type;
+	nu->type = (flags & OF_PLAYER) ? TYPE_ENTITY : skel.type;
+	if (flags & OF_PLAYER)
+		nu->flags |= OF_PLAYER;
 	if (where_ref != NOTHING)
 		corm_put(contents_hd, &nu->location, &nu_ref);
 	fprintf(stderr, "eng_object_add %u -> %u\n", nu_ref, where_ref);
 
-	switch (skel.type) {
+	if (flags & OF_PLAYER) {
+		ENT ent;
+		memset(&ent, 0, sizeof(ent));
+		ent.select = 0;
+		ent.target_plen = ST_SEL_UNSET;
+		ent.home = 1;
+		ent_set(nu_ref, &ent);
+		nu->art_id = art_idx(nu);
+	} else switch (skel.type) {
 	case TYPE_ENTITY:
 		{
 			ENT ent;
 			memset(&ent, 0, sizeof(ent));
 			ent.flags = ((SENT *) &skel.data)->flags;
-			if (flags & OF_PLAYER)
-				nu->flags |= OF_PLAYER;
 			ent.select = 0;
 			/* No default target region: (0,0) names the cosmos, a
 			 * real region, so a zeroed row would hand every new
@@ -238,20 +246,36 @@ eng_object_art(unsigned thing_ref)
 	switch (thing.type) {
 	case TYPE_ENTITY:
 		type = "entity";
-		snprintf(art, sizeof(art), "%s/%s/%u.jpeg", type, thing.art_id && thing.flags & OF_PLAYER ? "avatar" : thing.name, thing.art_id);
+		snprintf(art, sizeof(art), "%s/%s/%u.jpeg", type, (thing.art_id && (thing.flags & OF_PLAYER)) ? "avatar" : thing.name, thing.art_id);
 		return art;
 	case TYPE_ROOM:
 			if (!map_has(thing_ref))
 				return void_art;
 
-			type = "biome";
-			break;
+			/* Biome art dirs are per base biome: "tundra2".."tundra4"
+			 * share tundra's, "permanent ice" has none of its own. */
+			{
+				char rname[sizeof(thing.name)];
+				size_t n;
+				strlcpy(rname, thing.name, sizeof(rname));
+				n = strlen(rname);
+				while (n > 1 && rname[n - 1] >= '0' && rname[n - 1] <= '9')
+					rname[--n] = '\0';
+				if (!strcmp(rname, "permanent ice"))
+					strlcpy(rname, "tundra", sizeof(rname));
+				snprintf(art, sizeof(art), "biome/%s/%u.jpeg", rname, thing.art_id);
+				return art;
+			}
 	default:
 		 /* "room" is id 1 in the transient type_hd — the host seeds it
 		  * first, before any module loads. See world.c. */
-		 const void *__v2 = corm_get(nd_table_handle(HD_RTYPE), &thing.type);
-		 if (__v2)
-			 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
+		 /* HD_TYPE maps id -> name (HD_RTYPE is the name -> id index), and
+		  * its key is a u32 while OBJ.type is a single byte. */
+		 unsigned type_key = thing.type;
+		 const void *__v2 = corm_get(nd_table_handle(HD_TYPE), &type_key);
+		 if (!__v2)
+			 return void_art;
+		 strlcpy(typestr, (const char *)__v2, sizeof(typestr));
 		 type = typestr; break;
 	}
 

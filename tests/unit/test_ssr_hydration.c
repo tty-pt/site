@@ -63,7 +63,9 @@ int main(void)
 		ssr_st.map_data.tiles[i].exits = 0x0F; /* N, S, E, W */
 		ssr_st.map_data.tiles[i].fg = 7;
 	}
-	ssr_st.map_data.tiles[24].symbol = '@';
+	ssr_st.map_data.pos[0] = -7; ssr_st.map_data.pos[1] = 12;
+	ssr_st.map_data.pos[2] = 0;  ssr_st.map_data.pos[3] = 3;
+	ssr_st.map_data.tiles[24].symbol = '!';
 	ssr_st.map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
 	ssr_st.map_data.tiles[24].fg = 15;
 
@@ -89,7 +91,9 @@ int main(void)
 	assert(rehydrated->map_data.width == 7);
 	assert(rehydrated->map_data.height == 7);
 	assert(rehydrated->map_data.room_ref == 1234);
-	assert(rehydrated->map_data.tiles[24].symbol == '@');
+	assert(rehydrated->map_data.pos[0] == -7 && rehydrated->map_data.pos[1] == 12);
+	assert(rehydrated->map_data.pos[2] == 0 && rehydrated->map_data.pos[3] == 3);
+	assert(rehydrated->map_data.tiles[24].symbol == '!');
 	assert(rehydrated->map_data.tiles[24].flags & ND_MAP_FLAG_PLAYER);
 	assert(memcmp(&ssr_st.map_data, &rehydrated->map_data, sizeof(nd_map_data_t)) == 0);
 	printf("PASS: binary nd_map_data_t rehydrated byte-for-byte with zero loss\n");
@@ -227,25 +231,26 @@ int main(void)
 	assert(gov_rehydrated->layout_mode == ND_LAYOUT_STANDARD_HYBRID);
 	printf("PASS: presentation governance state rehydrated from JSON\n");
 
-	/* In an ALLOW_CHOICE region, Switch Viewport button must be rendered */
+	/* In an ascii-bud region, the viewport renders the pure ASCII map (no canvas) */
 	html = bud_render_html(nd_ui_render(gov_rehydrated));
-	assert(html && strstr(html, "data-bud-action=\"cycle-viewport\""));
-	assert(strstr(html, "Switch Viewport"));
+	assert(html && !strstr(html, "data-bud-action=\"cycle-viewport\""));
+	assert(!strstr(html, "Switch Viewport"));
 	assert(strstr(html, "<nd-map id=\"room-map\""));
+	assert(!strstr(html, "<canvas id=\"room-map-canvas\""));
 	assert(strstr(html, "id=\"right-panel\""));
 	bud_free_string(html);
-	printf("PASS: ALLOW_CHOICE region renders Switch Viewport button and ascii map\n");
+	printf("PASS: ascii-bud region renders terminal stage and pure ascii map (no canvas, no switch button)\n");
 
-	/* In a LOCKED region, Switch Viewport button MUST NOT be rendered */
+	/* In a lamina region, Switch Viewport button is NOT rendered and room-map-canvas IS rendered */
 	gov.pres_flags = ND_REGION_LOCKED;
-	strncpy(gov.preferred_driver, "lamina-2d", sizeof(gov.preferred_driver) - 1);
-	strncpy(gov.preferred_map_driver, "canvas-lamina", sizeof(gov.preferred_map_driver) - 1);
+	strncpy(gov.preferred_driver, "tty", sizeof(gov.preferred_driver) - 1);
+	strncpy(gov.preferred_map_driver, "lamina", sizeof(gov.preferred_map_driver) - 1);
 	html = bud_render_html(nd_ui_render(&gov));
 	assert(html && !strstr(html, "Switch Viewport"));
 	assert(!strstr(html, "data-bud-action=\"cycle-viewport\""));
 	assert(strstr(html, "<canvas id=\"room-map-canvas\""));
 	bud_free_string(html);
-	printf("PASS: LOCKED region strictly omits Switch Viewport button and renders canvas-lamina map\n");
+	printf("PASS: lamina region strictly omits Switch Viewport button and renders room-map-canvas\n");
 
 	/* Test map driver 'none' */
 	strncpy(gov.preferred_map_driver, "none", sizeof(gov.preferred_map_driver) - 1);
@@ -264,16 +269,150 @@ int main(void)
 	printf("PASS: FULLSCREEN layout mode occupies full canvas and omits right panel\n");
 
 	/* 7. Test Pure-C Binary Map Rendering */
-	html = bud_render_html(nd_ui_render(rehydrated));
+	/* Render the state that actually carries the binary grid. The shared
+	 * client state was replaced by the governance renders above, and an empty
+	 * state used to pass this check only because it drew a fake "+---#" box
+	 * containing an '@'. */
+	html = bud_render_html(nd_ui_render(&ssr_st));
 	assert(html && strstr(html, "<nd-map id=\"room-map\""));
-	assert(strstr(html, "@"));
+	assert(strstr(html, "!"));
+	assert(strstr(html, "id=\"room-header\""));
+	assert(strstr(html, "Grand Cathedral"));
+	assert(strstr(html, "#1234"));
 	bud_free_string(html);
-	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph\n");
+	printf("PASS: pure-C render_room_map_ascii renders binary grid with player glyph and room header\n");
+
+	/* A state with no map yet must not show a fabricated one. */
+	nd_client_state_t blank;
+	memset(&blank, 0, sizeof(blank));
+	html = bud_render_html(nd_ui_render(&blank));
+	assert(html && strstr(html, "<nd-map id=\"room-map\""));
+	assert(!strstr(html, "+---#"));
+	bud_free_string(html);
+	printf("PASS: empty map state renders no placeholder grid\n");
+
+	/* A real 7x7 view buffer is ~2.2 KB of ANSI. map_buf used to be 1 KB, which
+	 * cut it to its first tile row: the browser drew a single coloured cell. */
+	{
+		static uint8_t frame[3 + 4096];
+		static nd_client_state_t big;
+		size_t n = 0;
+		const char *tile = "\033[42m \033[0m\033[43m  \033[0m";
+		frame[n++] = ND_BCP_MAGIC_0;
+		frame[n++] = ND_BCP_MAGIC_1;
+		frame[n++] = ND_BCP_VIEW_BUFFER;
+		for (int row = 0; row < 13; row++) {
+			for (int col = 0; col < 7; col++) {
+				size_t l = strlen(tile);
+				memcpy(frame + n, tile, l);
+				n += l;
+			}
+			frame[n++] = '\n';
+		}
+		memcpy(frame + n, "\033[42mLASTROW\033[0m", 17);
+		n += 17;
+		assert(n - 3 > 1023);
+		memset(&big, 0, sizeof(big));
+		assert(nd_bcp_decode(frame, n, &big) == 1);
+		assert(strstr(big.map_buf, "LASTROW") != NULL);
+		html = bud_render_html(nd_ui_render(&big));
+		assert(html && strstr(html, "LASTROW"));
+		bud_free_string(html);
+		printf("PASS: >1 KB view buffer survives BCP decode and renders to its last row\n");
+	}
 
 	uint32_t map_fb[160 * 160] = {0};
-	nd_lamina_render_map(map_fb, 160, 160, &rehydrated->map_data);
+	nd_lamina_render_map(map_fb, 160, 160, &ssr_st.map_data);
 	assert(map_fb[0] != 0);
 	printf("PASS: nd_lamina_render_map renders 2D mini-map pixels\n");
+
+	/* Test: Target card with avatar image and inventory contents rendering */
+	{
+		nd_client_state_t inv_st;
+		memset(&inv_st, 0, sizeof(inv_st));
+		inv_st.me = 100;
+		inv_st.target_ref = 100;
+		inv_st.room.ref = 2;
+		snprintf(inv_st.room.name, sizeof(inv_st.room.name), "woodland");
+		inv_st.entity_count = 3;
+
+		/* Entity 0: Player with avatar art */
+		inv_st.entities[0].ref = 100;
+		inv_st.entities[0].location = 2;
+		inv_st.entities[0].type = 3; /* TYPE_ENTITY */
+		snprintf(inv_st.entities[0].name, sizeof(inv_st.entities[0].name), "quirinpa");
+		snprintf(inv_st.entities[0].art, sizeof(inv_st.entities[0].art), "entity/avatar/42.jpeg");
+
+		/* Entity 1: Tree in room */
+		inv_st.entities[1].ref = 101;
+		inv_st.entities[1].location = 2;
+		inv_st.entities[1].type = 5;
+		inv_st.entities[1].ch = 'T';
+		inv_st.entities[1].fg = 2; /* GREEN */
+		snprintf(inv_st.entities[1].name, sizeof(inv_st.entities[1].name), "pinus sylvestris");
+
+		/* Entity 2: Stick in player inventory */
+		inv_st.entities[2].ref = 102;
+		inv_st.entities[2].location = 100; /* carried by player */
+		inv_st.entities[2].type = 4;
+		inv_st.entities[2].ch = '/';
+		snprintf(inv_st.entities[2].name, sizeof(inv_st.entities[2].name), "stick");
+
+		/* When target is me (inventory): target card shows avatar and contents shows stick */
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "id=\"target-card\""));
+		assert(strstr(html, "/nd/art/entity/avatar/42.jpeg"));
+		assert(strstr(html, "quirinpa"));
+		assert(strstr(html, "class=\"target-art\""));
+		assert(strstr(html, "class=\"target-title\""));
+		assert(strstr(html, "(You - Inventory)")); /* kept as the card's title tooltip */
+		assert(strstr(html, "stick"));
+		assert(!strstr(html, "Room Contents") && !strstr(html, "Inventory</"));
+		bud_free_string(html);
+
+		/* When target is 0 (room): target card is empty, contents shows tree in room */
+		inv_st.target_ref = 0;
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "pinus sylvestris"));
+		assert(!strstr(html, "Room Contents")); /* the original had no list label */
+		assert(strstr(html, "<nd-avatar"));       /* rows carry an avatar thumbnail */
+		bud_free_string(html);
+
+		/* When an item is selected: renders floating action popup with look button */
+		inv_st.selected_item_ref = 101; /* tree */
+		html = bud_render_html(nd_ui_render(&inv_st));
+		assert(html && strstr(html, "nd-item-popup"));
+		assert(strstr(html, "data-action=\"look\""));
+		bud_free_string(html);
+		inv_st.selected_item_ref = 0;
+
+		/* Test BCP item decoding: room item (dynflags=1, type=0) clears target and sets room */
+		uint8_t room_frame[131];
+		memset(room_frame, 0, sizeof(room_frame));
+		room_frame[0] = ND_BCP_MAGIC_0;
+		room_frame[1] = ND_BCP_MAGIC_1;
+		room_frame[2] = ND_BCP_ITEM;
+		nd_entity_packet_t *rpkt = (nd_entity_packet_t *)(room_frame + 3);
+		rpkt->ref = 55;
+		rpkt->type = 0; /* TYPE_ROOM */
+		rpkt->dynflags = 1;
+		snprintf(rpkt->name, sizeof(rpkt->name), "The Whispering Woods");
+		inv_st.target_ref = 100;
+		assert(nd_bcp_decode(room_frame, sizeof(room_frame), &inv_st) == 1);
+		assert(inv_st.target_ref == 0);
+		assert(inv_st.room.ref == 55);
+		assert(strcmp(inv_st.room.name, "The Whispering Woods") == 0);
+
+		/* Test BCP item decoding: player entity (dynflags=1, type=3) sets target */
+		rpkt->ref = 100;
+		rpkt->type = 3; /* TYPE_ENTITY */
+		rpkt->dynflags = 1;
+		snprintf(rpkt->name, sizeof(rpkt->name), "quirinpa");
+		assert(nd_bcp_decode(room_frame, sizeof(room_frame), &inv_st) == 1);
+		assert(inv_st.target_ref == 100);
+
+		printf("PASS: target card renders avatar, room contents renders trees and inventory, BCP item updates target and room\n");
+	}
 
 	printf("ALL SSR HYDRATION TESTS PASSED\n");
 	return 0;

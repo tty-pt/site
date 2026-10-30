@@ -1,45 +1,67 @@
 #include "nd_ui_internal.h"
+#include "nd_lamina.h"
+#include "nd_seven.h"
+#include <ttypt/lam.h>
 
 static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 {
 	if (!src || !dst || cap == 0) return;
 	size_t r = 0, w = 0;
+	int fg = 7, bg = 0, bold = 0;
+	int cur_fg = 7, cur_bg = 0;
 	int span_open = 0;
 
 	while (src[r] && w + 64 < cap) {
 		if (src[r] == '\033' && src[r + 1] == '[') {
 			r += 2;
-			int code = 0;
-			while (src[r] >= '0' && src[r] <= '9') {
-				code = code * 10 + (src[r] - '0');
-				r++;
+			while (src[r] && src[r] != 'm') {
+				int code = 0;
+				while (src[r] >= '0' && src[r] <= '9') {
+					code = code * 10 + (src[r] - '0');
+					r++;
+				}
+				if (code == 0) {
+					fg = 7;
+					bg = 0;
+					bold = 0;
+				} else if (code == 1) {
+					bold = 1;
+				} else if (code == 2 || code == 22) {
+					bold = 0;
+				} else if (code >= 30 && code <= 37) {
+					fg = code - 30;
+				} else if (code == 39) {
+					fg = 7;
+				} else if (code >= 40 && code <= 47) {
+					bg = code - 40;
+				} else if (code == 49) {
+					bg = 0;
+				}
+				if (src[r] == ';') r++;
 			}
 			if (src[r] == 'm') r++;
 
-			if (span_open) {
+			int eff_fg = (bold && fg < 8) ? (fg + 8) : fg;
+			if (span_open && (eff_fg != cur_fg || bg != cur_bg)) {
 				memcpy(dst + w, "</span>", 7);
 				w += 7;
 				span_open = 0;
 			}
 
-			const char *cls = NULL;
-			switch (code) {
-			case 0: cls = NULL; break;
-			case 31: cls = "text-red-500"; break;
-			case 32: cls = "text-green-500"; break;
-			case 33: cls = "text-yellow-500"; break;
-			case 34: cls = "text-blue-500"; break;
-			case 35: cls = "text-magenta-500"; break;
-			case 36: cls = "text-cyan-500"; break;
-			case 37: cls = "text-neutral-200"; break;
-			default: break;
-			}
+			if (!span_open && (eff_fg != 7 || bg != 0)) {
+				char cls[64] = {0};
+				size_t clen = 0;
+				if (eff_fg != 7)
+					clen += snprintf(cls + clen, sizeof(cls) - clen, "cf%d", eff_fg);
+				if (bg != 0)
+					clen += snprintf(cls + clen, sizeof(cls) - clen, "%sc%d", clen ? " " : "", bg);
 
-			if (cls) {
 				int n = snprintf(dst + w, cap - w, "<span class=\"%s\">", cls);
 				if (n > 0) {
 					w += (size_t)n;
 					span_open = 1;
+					cur_fg = eff_fg;
+					cur_bg = bg;
 				}
 			}
 		} else if (src[r] == '<') {
@@ -63,11 +85,43 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 	dst[w < cap ? w : cap - 1] = '\0';
 }
 
-static bud_node *render_room_map_ascii(const nd_client_state_t *st)
+static bud_node *raw_escaped(const char *text)
 {
-	bud_node *map = lx_n("nd-map",
-		lx_attr("id", "room-map"),
-		lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight text-green-400 bg-black/60 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner"));
+	size_t n = text ? strlen(text) : 0;
+	char *esc = malloc(n * 5 + 1);
+	size_t w = 0;
+	bud_node *node;
+
+	if (!esc)
+		return bud_raw("");
+	for (size_t i = 0; i < n; i++) {
+		switch (text[i]) {
+		case '<': memcpy(esc + w, "&lt;", 4); w += 4; break;
+		case '>': memcpy(esc + w, "&gt;", 4); w += 4; break;
+		case '&': memcpy(esc + w, "&amp;", 5); w += 5; break;
+		default: esc[w++] = text[i]; break;
+		}
+	}
+	esc[w] = '\0';
+	node = bud_raw(esc);
+	free(esc);
+	return node;
+}
+
+static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st, int visible)
+{
+	if (st && st->map_buf[0]) {
+		size_t cap = strlen(st->map_buf) * 12 + 256;
+		char *html = malloc(cap);
+		if (html) {
+			nd_ansi_to_html(st->map_buf, html, cap);
+			bud_append(parent, lx_n("div",
+				lx_attr("class", visible ? "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight" : "nd-map-fallback hidden font-mono whitespace-pre text-[10px] leading-tight"),
+				lx_node(bud_raw(html))));
+			free(html);
+		}
+		return;
+	}
 
 	if (st && st->map_data.width > 0 && st->map_data.height > 0) {
 		char out[2048];
@@ -78,10 +132,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 		if (h > 7) h = 7;
 
 		for (uint8_t y = 0; y < h; y++) {
-			/* Top boundary of row y */
 			for (uint8_t x = 0; x < w; x++) {
 				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int n_open = (t->exits & 2); /* E_NORTH */
+				int n_open = (t->exits & 2);
 				int n_door = (t->doors & 2);
 				if (x == 0) out[pos++] = '+';
 				if (n_door) {
@@ -95,10 +148,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 			}
 			out[pos++] = '\n';
 
-			/* Room interior of row y */
 			for (uint8_t x = 0; x < w; x++) {
 				const nd_map_tile_t *t = &st->map_data.tiles[y * w + x];
-				int w_open = (t->exits & 1); /* E_WEST */
+				int w_open = (t->exits & 1);
 				int w_door = (t->doors & 1);
 				if (w_door) out[pos++] = '#';
 				else if (w_open) out[pos++] = ' ';
@@ -109,7 +161,7 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 				out[pos++] = ' ';
 
 				if (x == w - 1) {
-					int e_open = (t->exits & 8); /* E_EAST */
+					int e_open = (t->exits & 8);
 					int e_door = (t->doors & 8);
 					if (e_door) out[pos++] = '#';
 					else if (e_open) out[pos++] = ' ';
@@ -119,10 +171,9 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 			out[pos++] = '\n';
 		}
 
-		/* Bottom boundary of last row */
 		for (uint8_t x = 0; x < w; x++) {
 			const nd_map_tile_t *t = &st->map_data.tiles[(h - 1) * w + x];
-			int s_open = (t->exits & 16); /* E_SOUTH */
+			int s_open = (t->exits & 16);
 			int s_door = (t->doors & 16);
 			if (x == 0) out[pos++] = '+';
 			if (s_door) {
@@ -136,32 +187,23 @@ static bud_node *render_room_map_ascii(const nd_client_state_t *st)
 		}
 		out[pos] = '\0';
 
-		bud_append(map, bud_text(out));
-		return map;
+		bud_append(parent, lx_n("div",
+			lx_attr("class", visible ? "nd-map-fallback font-mono whitespace-pre text-[10px] leading-tight" : "nd-map-fallback hidden font-mono whitespace-pre text-[10px] leading-tight"),
+			lx_node(raw_escaped(out))));
+		return;
 	}
 
-	if (st && st->map_buf[0]) {
-		char html[8192];
-		nd_ansi_to_html(st->map_buf, html, sizeof(html));
-		bud_append(map, bud_raw(html));
-	} else if (st && st->room.desc[0]) {
-		bud_append(map, bud_text(st->room.desc));
-	} else {
-		bud_append(map, bud_text("+---+---+---+\n|   |   |   |\n+---#   #---+\n|   # @ #   |\n+---#   #---+\n|   |   |   |\n+---+---+---+"));
+	if (st && st->room.desc[0]) {
+		bud_append(parent, lx_n("div",
+			lx_attr("class", visible ? "nd-map-fallback font-mono text-xs text-neutral-400 p-1" : "nd-map-fallback hidden font-mono text-xs text-neutral-400 p-1"),
+			lx_node(raw_escaped(st->room.desc))));
 	}
-	return map;
 }
 
-static bud_node *render_room_map_canvas(const nd_client_state_t *st)
-{
-	(void)st;
-	return lx_n("canvas",
-		lx_attr("id", "room-map-canvas"),
-		lx_attr("data-bud-canvas", "1"),
-		lx_attr("width", "160"),
-		lx_attr("height", "160"),
-		lx_attr("class", "w-[160px] h-[160px] bg-black/80 rounded border border-neutral-700/60 shadow-inner block mx-auto"));
-}
+#define MAP_STR_(x) #x
+#define MAP_STR(x) MAP_STR_(x)
+#define MAP_CANVAS_PX MAP_STR(ND_MAP_CANVAS_W)
+#define MAP_CANVAS_STYLE "width:" MAP_CANVAS_PX "px;height:" MAP_CANVAS_PX "px"
 
 bud_node *render_room_map(const nd_client_state_t *st)
 {
@@ -170,8 +212,63 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
 
-	if (strcmp(map_drv, "canvas-lamina") == 0 || strcmp(map_drv, "canvas") == 0)
-		return render_room_map_canvas(st);
+	/* If explicitly configured as ascii-bud / ascii, render the pure ASCII map */
+	if (strcmp(map_drv, "ascii-bud") == 0 || strcmp(map_drv, "ascii") == 0) {
+		bud_node *ascii_map = lx_n("nd-map",
+			lx_attr("id", "room-map"),
+			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
+		append_fallback_ascii(ascii_map, st, 1);
+		return ascii_map;
+	}
 
-	return render_room_map_ascii(st);
+	/* Container wrapping canvas and progressive SSR/No-JS fallback */
+	bud_node *map = lx_n("nd-map",
+		lx_attr("id", "room-map"),
+		lx_attr("class", "relative p-0 overflow-hidden select-none block mx-auto"),
+		lx_attr("style", MAP_CANVAS_STYLE));
+
+	/* The canvas rendered by liblamina */
+	bud_node *cv = lx_n("canvas",
+		lx_attr("id", "room-map-canvas"),
+		lx_attr("data-bud-canvas", "1"),
+		lx_attr("width", MAP_CANVAS_PX),
+		lx_attr("height", MAP_CANVAS_PX),
+		lx_attr("class", "block"),
+		lx_attr("style", MAP_CANVAS_STYLE));
+	bud_append(map, cv);
+
+	/* Progressive fallback map text for SSR / No-JS */
+	append_fallback_ascii(map, st, 0);
+
+	return map;
+}
+
+static uint32_t s_map_fb[ND_MAP_CANVAS_W * ND_MAP_CANVAS_H];
+static uint32_t s_map_frame = 0;
+
+void nd_map_canvas_redraw(const nd_client_state_t *st)
+{
+	if (!st) return;
+	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud";
+	if (strcmp(theme, "none") == 0) return;
+
+	/* If legacy name "canvas" or "canvas-lamina" is passed, use default lamina theme */
+	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0 || strcmp(theme, "ascii-bud") == 0) {
+		theme = "lamina";
+	}
+
+	/* With the Seven stage running, the player marker follows the lamb. */
+	int live = 0, lx = 0, ly = 0, have_room = 0;
+	if (strcmp(st->preferred_driver, "lamina-seven") == 0) {
+		nd_seven_debug(NULL, NULL, NULL, &have_room);
+		if (have_room) {
+			nd_seven_lamb_world(st, &lx, &ly);
+			live = 1;
+		}
+	}
+
+	nd_lamina_render_map_live(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
+	                          &st->map_data, theme, st->tod, s_map_frame++,
+	                          live, lx, ly);
+	lam_canvas_flush(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H);
 }

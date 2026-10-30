@@ -174,7 +174,8 @@ run:
 MODS != cat mods.load
 
 test-data-dirs:
-	mkdir -p var/poem var/song var/gig var/grp var/song.types var/song.authors var/nd
+	mkdir -p var/poem var/song var/gig var/grp var/software var/chat/sessions var/song.types var/song.authors var/nd
+	@sh scripts/seed-software.sh >/dev/null 2>&1 || true
 
 unit-tests: all test-data-dirs
 	@./scripts/run-with-server.sh sh -c '\
@@ -225,9 +226,17 @@ standalone-unit-tests:
 	@sh tests/unit/run-test-bcp-meta.sh
 	@sh tests/unit/run-test-scene-sync.sh
 	@sh tests/unit/run-test-ssr-hydration.sh
+	@sh tests/unit/run-test-seven-world.sh
+	@sh tests/unit/run-test-stone-roll.sh
+	@sh tests/unit/run-test-map-render.sh
+	@sh tests/unit/run-test-seven-render.sh
+	@sh tests/unit/run-test-viewport-registry.sh
+	@sh tests/unit/run-test-seven-stage-html.sh
+	@sh tests/unit/run-test-lamina-bridge.sh
 	@sh tests/unit/run-test-axil-ws-multiplex.sh
 	@sh tests/unit/run-xylem-wasm.sh
 	@sh tests/unit/run-nd-ui-slot.sh
+	@sh tests/unit/run-markdown-test.sh
 
 pages-test: all
 	@echo "Running pages smoke tests"
@@ -280,7 +289,7 @@ test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e
 # depends on mods: check-no-tree-rpath inspects built artifacts, which must not
 # be mid-relink when the check runs under -j
 boundary-check: mods
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh
 
 watch:
 	./scripts/watch.sh
@@ -402,7 +411,8 @@ run-universe:
 	@export PATH="$$PWD/external/axil/bin:$$PATH"; \
 	export AXIL_ND_DB="$$PWD/$(ND_DB)"; \
 	export AXIL_ND_HTDOCS="$$PWD/htdocs"; \
-	cd external/axil-nd && axil -d -A -p $(ND_PORT) -m "./lib/axil-nd"
+	. "$$PWD/scripts/nd-kernel-mods.sh"; \
+	cd external/axil-nd && axil -d -A -p $(ND_PORT) -m "./lib/axil-nd:$$ND_KERNEL_MODS"
 
 run-sector32:
 	@$(MAKE) run-universe ND_PLANETS=32 ND_DB=var/nd/sector32.db

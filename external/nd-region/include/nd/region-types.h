@@ -24,6 +24,7 @@
 #define ND_LAYOUT_STANDARD_HYBRID   0
 #define ND_LAYOUT_STAGE_EXPANDED    1
 #define ND_LAYOUT_STAGE_FULLSCREEN  2
+#define ND_LAYOUT_GAME_2D           3
 
 struct st_rec {
 	uint32_t owner;

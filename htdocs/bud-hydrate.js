@@ -164,6 +164,14 @@ function buildEventPayload(info, event) {
 		const view = doc && doc.defaultView;
 		return String(view ? view.scrollY || view.pageYOffset || 0 : 0);
 	}
+	if (event && (info.event === 'keydown' || info.event === 'keyup')) {
+		const t = event.target;
+		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable ||
+		    (typeof t.closest === 'function' && t.closest('[data-bud-terminal]')))) {
+			return '';
+		}
+		return event.key || '';
+	}
 	return buildControlValue(event && event.target);
 }
 
@@ -517,6 +525,14 @@ class BudHostBase {
 		return true;
 	}
 
+	/* A patch that inserts a node names the live element it goes into (op.c);
+	 * without it the node would land wherever the previous patch left its
+	 * open-element cursor. */
+	_parentFromOp(op) {
+		const pid = parseIntOrNull(op.c);
+		return pid === null ? null : this.getNode(pid);
+	}
+
 	applyPatchRecord(op) {
 		const current = this.getNode(parseIntOrNull(op.b));
 		let node;
@@ -545,7 +561,7 @@ class BudHostBase {
 			if (id === null) {
 				throw new Error('bud: missing patch node id');
 			}
-			parent = this._currentParent || this.root;
+			parent = this._parentFromOp(op) || this._currentParent || this.root;
 			node = current;
 			if (!node || node.nodeType !== Node.ELEMENT_NODE || node.tagName.toLowerCase() !== tag) {
 				node = getDocumentForNode(parent).createElement(tag);
@@ -605,7 +621,7 @@ class BudHostBase {
 				if (id === null) {
 					throw new Error('bud: missing patch text id');
 				}
-				parent = this._currentParent || this.root;
+				parent = this._parentFromOp(op) || this._currentParent || this.root;
 				node = this.getNode(id);
 				if (!node || node.nodeType !== Node.TEXT_NODE) {
 					this.createWrappedText(id, op.a || '', parent);
@@ -618,7 +634,7 @@ class BudHostBase {
 		if (id === null) {
 			return true;
 		}
-		parent = this._currentParent || this.root;
+		parent = this._parentFromOp(op) || this._currentParent || this.root;
 		if (parent && parent.nodeType === Node.ELEMENT_NODE) {
 			const existing = this.getNode(id);
 			const doc = getDocumentForNode(parent);
@@ -899,7 +915,7 @@ export class BudWasmBridge {
 	resolveListener(info) {
 		if (this.wasm && typeof this.wasm.bud_app_dispatch === 'function') {
 			return (evt) => {
-				if (!info.bubbles && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
+				if (!info.bubbles && info.target !== 'window' && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
 					return;
 				}
 				const malloc = getWasmExport(this.wasm, ['malloc']);
@@ -932,7 +948,7 @@ export class BudWasmBridge {
 		}
 
 		return (evt) => {
-			if (!info.bubbles && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
+			if (!info.bubbles && info.target !== 'window' && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
 				return;
 			}
 			const value = buildEventPayload(info, evt);

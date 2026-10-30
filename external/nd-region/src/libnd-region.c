@@ -274,18 +274,10 @@ XY_IMPL(int, st_region_of_player, unsigned, player_ref, uint64_t *, id,
 
 XY_IMPL(unsigned, st_owner, uint64_t, id, uint8_t, plen)
 {
-	char key[ST_ROW_KEY_LEN + 1];
-	char q[ST_ROW_KEY_LEN + 1 + sizeof(":owner")];
-	const uint32_t *o;
-
-	if (!st_have_hd())
+	struct st_rec rec;
+	if (!st_row_get(id, plen, &rec))
 		return NOTHING;
-	st_row_key(key, sizeof(key), id, plen);
-	snprintf(q, sizeof(q), "%s:owner", key);
-	o = corm_get(owner_hd, q);
-	if (!o)
-		return NOTHING;
-	return *o;
+	return rec.owner;
 }
 
 int
@@ -651,7 +643,7 @@ XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
 	if (out_stage && stage_len > 0)
 		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
 	if (out_map && map_len > 0)
-		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "lamina");
 	if (out_layout)
 		*out_layout = res_layout;
 	if (out_flags)
@@ -672,7 +664,7 @@ XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
 		if (out_stage && stage_len > 0)
 			snprintf(out_stage, stage_len, "tty");
 		if (out_map && map_len > 0)
-			snprintf(out_map, map_len, "ascii-bud");
+			snprintf(out_map, map_len, "lamina");
 		if (out_layout)
 			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
 		if (out_flags)

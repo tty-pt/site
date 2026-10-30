@@ -1,4 +1,4 @@
-import { createBudWasmBridge } from './bud-hydrate.js?v=1';
+import { createBudWasmBridge } from './bud-hydrate.js?v=2';
 
 window.bud_data = {};
 window.hydrate_queue = [];
@@ -93,6 +93,34 @@ async function loadModule(spec) {
 			}
 		}
 
+		const origEmitPatch = budImports.bud_host_emit_patch;
+		if (typeof origEmitPatch === 'function') {
+			const hookedEmitPatch = function(...args) {
+				const res = origEmitPatch.apply(this, args);
+				for (const cap of activeBridges) {
+					if (typeof cap.mount === 'function') cap.mount();
+				}
+				return res;
+			};
+			budImports.bud_host_emit_patch = hookedEmitPatch;
+			if (imports.env) imports.env.bud_host_emit_patch = hookedEmitPatch;
+			if (imports.bud) imports.bud.bud_host_emit_patch = hookedEmitPatch;
+		}
+
+		const origFlush = budImports.bud_host_flush;
+		if (typeof origFlush === 'function') {
+			const hookedFlush = function(...args) {
+				const res = origFlush.apply(this, args);
+				for (const cap of activeBridges) {
+					if (typeof cap.mount === 'function') cap.mount();
+				}
+				return res;
+			};
+			budImports.bud_host_flush = hookedFlush;
+			if (imports.env) imports.env.bud_host_flush = hookedFlush;
+			if (imports.bud) imports.bud.bud_host_flush = hookedFlush;
+		}
+
 		for (const imp of declaredImports) {
 			if (!imports[imp.module]) {
 				imports[imp.module] = {};
@@ -147,8 +175,13 @@ async function loadModule(spec) {
 				if (!lastTime) lastTime = now;
 				const dt = Math.min((now - lastTime) / 1000, 0.1);
 				lastTime = now;
-				const w = (spec.root && spec.root.clientWidth) || window.innerWidth || 640;
-				const h = (spec.root && spec.root.clientHeight) || window.innerHeight || 480;
+				// A canvas that asked to fit (data-bud-canvas-fit) is drawn at its
+				// own on-screen size; otherwise the root's box is the frame size.
+				const fit = spec.root && spec.root.querySelector
+					? spec.root.querySelector('[data-bud-canvas-fit]') : null;
+				const box = (fit && fit.clientWidth && fit.clientHeight) ? fit : spec.root;
+				const w = (box && box.clientWidth) || window.innerWidth || 640;
+				const h = (box && box.clientHeight) || window.innerHeight || 480;
 				try {
 					instance.exports.wasm_tick(dt, w, h);
 				} catch (e) {

@@ -112,32 +112,10 @@ nd_seed_state_from_data(nd_client_state_t *st)
 		strncpy(st->room.name, "The Citadel Common Hall", sizeof(st->room.name) - 1);
 		strncpy(st->room.desc, "A grand hall with towering stone arches and banners.", sizeof(st->room.desc) - 1);
 	}
-	if (!st->map_buf[0]) {
-		strncpy(st->map_buf,
-			"+---+---+---+\n"
-			"|   |   |   |\n"
-			"+---#   #---+\n"
-			"|   # @ #   |\n"
-			"+---#   #---+\n"
-			"|   |   |   |\n"
-			"+---+---+---+",
-			sizeof(st->map_buf) - 1);
-	}
-	if (st->map_data.width == 0) {
-		st->map_data.width = 7;
-		st->map_data.height = 7;
-		st->map_data.player_x = 3;
-		st->map_data.player_y = 3;
-		st->map_data.room_ref = st->room.ref;
-		for (int i = 0; i < 49; i++) {
-			st->map_data.tiles[i].symbol = '.';
-			st->map_data.tiles[i].flags = ND_MAP_FLAG_ROOM;
-			st->map_data.tiles[i].fg = 7;
-		}
-		st->map_data.tiles[24].symbol = '@';
-		st->map_data.tiles[24].flags |= ND_MAP_FLAG_PLAYER;
-		st->map_data.tiles[24].fg = 15;
-	}
+	/* No placeholder map: map_buf and map_data stay empty until the first BCP
+	 * VIEW_BUFFER / VIEW frame arrives, so first paint never shows a fake grid
+	 * as if it were the real world. render_room_map_ascii falls back to the
+	 * room description meanwhile. */
 	if (st->action_count == 0) {
 		st->action_count = 3;
 		st->actions[0].id = 0;
@@ -157,12 +135,22 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	char user[ENV_VALUE_LEN] = {0};
 	axil_env_get(fd, user, sizeof(user), "REMOTE_USER");
 
+	/* Under -A (AXIL_AUTOAUTH) or DF_AUTH_AUTO, enable turnkey terminal and game access without prior login */
+	if (!user[0] && ((axil_config.flags & AXIL_AUTOAUTH) || (axil_flags(fd) & DF_AUTH_AUTO))) {
+		const char *auto_user = getenv("USER");
+		if (!auto_user || !*auto_user)
+			auto_user = "guest";
+		strncpy(user, auto_user, sizeof(user) - 1);
+	}
+
 	nd_client_state_t st;
 	memset(&st, 0, sizeof(st));
 	/* Modules seed their own defaults (vitals, attributes, ...). */
 	nd_ui_glue_state_default(&st);
 	if (user[0]) {
 		strncpy(st.user, user, sizeof(st.user) - 1);
+		if (!st.me)
+			st.me = 1;
 	}
 	nd_seed_state_from_data(&st);
 
