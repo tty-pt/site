@@ -74,6 +74,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 			s_lx -= dx * NDW_TILE_W;
 			s_ly -= dj * NDW_TILE_H;
 			s_pending_key = 0;
+			s_pending_t = 0;
 		} else {
 			recentre(0);
 		}
@@ -169,10 +170,10 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 		return 0;
 
 	col = md->player_x + ti;
-	row = md->player_y - tj;
+	row = md->player_y + tj;
 
 	pos[0] = (int16_t)(md->pos[0] + ti);
-	pos[1] = (int16_t)(md->pos[1] + tj);
+	pos[1] = (int16_t)(md->pos[1] - tj);
 	pos[2] = md->pos[2];
 	pos[3] = md->pos[3];
 

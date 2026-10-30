@@ -44,7 +44,7 @@ int str_has_ci(const char *hay, const char *needle)
 int is_landscape_element(const nd_entity_desc_t *e)
 {
 	if (!e) return 0;
-	if (e->type == 1 /* plant */ || e->ch == '*' || e->ch == 'o' || e->ch == 'O' ||
+	if (e->ch == '*' || e->ch == 'o' || e->ch == 'O' ||
 	    e->ch == 'x' || e->ch == 'X' || e->ch == 't' || e->ch == 'T' ||
 	    e->ch == 'a' || e->ch == 'A' || e->ch == 'i' || e->ch == 'I')
 		return 1;
@@ -78,7 +78,7 @@ int is_contained_in_tree(const nd_client_state_t *st, const nd_entity_desc_t *e)
 		return 0;
 	for (size_t i = 0; i < st->entity_count; i++) {
 		const nd_entity_desc_t *other = &st->entities[i];
-		if (other->ref == e->location && (other->type == 1 || is_landscape_element(other)))
+		if (other->ref == e->location && is_landscape_element(other) && !is_stone_or_rock(other))
 			return 1;
 	}
 	return 0;
@@ -101,7 +101,7 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 			for (size_t i = 0; i < st->entity_count; i++) {
 				if (st->entities[i].ref != st->me &&
 				    st->entities[i].location == st->room.ref &&
-				    (st->entities[i].type == 1 || is_landscape_element(&st->entities[i])) &&
+				    is_landscape_element(&st->entities[i]) &&
 				    !is_stone_or_rock(&st->entities[i])) {
 					if (st->entities[i].name[0])
 						return st->entities[i].name;
@@ -157,7 +157,8 @@ void sync_room_objects(const nd_client_state_t *st)
 	if (!need_sync)
 		return;
 
-	if (s_tracker.room_ref != st->room.ref) {
+	if (s_tracker.room_ref != st->room.ref ||
+	    memcmp(s_tracker.pos, pos, sizeof(pos)) != 0) {
 		memset(&s_tracker, 0, sizeof(s_tracker));
 	}
 
@@ -209,7 +210,7 @@ void sync_room_objects(const nd_client_state_t *st)
 					continue;
 				const nd_entity_desc_t *e = &st->entities[ei];
 				if (e->location == st->room.ref && e->ref != st->me &&
-				    (e->type == 1 || is_landscape_element(e)) && !is_stone_or_rock(e)) {
+				    is_landscape_element(e) && !is_stone_or_rock(e)) {
 					s_tracker.objs[k].entity_ref = e->ref;
 					snprintf(s_tracker.objs[k].name, sizeof(s_tracker.objs[k].name), "%s",
 					         e->name[0] ? e->name : world_obj_name(&objs[k], st, 0, 0));

@@ -143,7 +143,7 @@ static int add_entities(const nd_client_state_t *st, int camx, int camy, drawabl
 		}
 		if (already_drawn)
 			continue;
-		if (e->type == 1 || (is_landscape_element(e) && !is_stone_or_rock(e)))
+		if (is_landscape_element(e) && !is_stone_or_rock(e))
 			continue;
 
 		spot = ndw_mix(e->ref) % 16;

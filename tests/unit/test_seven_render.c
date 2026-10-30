@@ -6,6 +6,8 @@
 #include <nd/seven-world.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas.h"
+#include "nd_seven_objects.h"
+#include "nd_seven_motion.h"
 
 #define MAXW 1920
 #define MAXH 1080
@@ -358,6 +360,26 @@ int main(void)
 		printf("PASS: a stone entity draws as a stone sprite at its spot, a goblin as a pawn\n");
 	}
 
+	/* Player named entities and non-landscape entities are never bound to trees */
+	{
+		set_map(5, -3, 10, 0x1B, 0, 'x', 0, 0); /* an oak tree glyph */
+		st.room.ref = 15;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 2; /* other player or entity */
+		st.entities[0].location = 15;
+		st.entities[0].type = 1; /* TYPE_ENTITY */
+		strcpy(st.entities[0].name, "quirinpa");
+		sync_room_objects(&st);
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		for (int k = 0; k < tr->count; k++) {
+			assert(tr->objs[k].entity_ref != 2);
+			assert(strcmp(tr->objs[k].name, "quirinpa") != 0);
+		}
+		printf("PASS: player entities are never bound as trees or landscape elements\n");
+	}
+
 	/* Terrain carries no rocks, stones or mushrooms: the empty map draws only
 	 * grass, the two yellow decor sprites and the lamb (no entity, no glyph). */
 	{
@@ -600,6 +622,104 @@ int main(void)
 	hold("a", 600, &key);
 	assert(key == 'h');
 	printf("PASS: room walls block where an exit is missing; open country never does\n");
+
+	/* Walking out of a room transitions seamlessly without teleportation or snapping */
+	{
+		/* 1. Walk East ('d' -> 'l') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("d", 600, &key);
+		assert(key == 'l');
+		int out_x, out_y;
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_x >= NDW_TILE_W);
+		/* Server adopts the move to adjacent wilderness tile East (41, 40) */
+		set_map_keep(41, 40, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		int new_x, new_y;
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x - NDW_TILE_W && new_y == out_y);
+		assert(new_x >= 0 && new_x < NDW_TILE_W);
+
+		/* 2. Walk North ('w' -> 'k') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("w", 600, &key);
+		assert(key == 'k');
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_y < 0);
+		/* Server adopts the move to adjacent wilderness tile North (40, 41) */
+		set_map_keep(40, 41, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x && new_y == out_y + NDW_TILE_H);
+		assert(new_y >= 0 && new_y < NDW_TILE_H);
+
+		/* 3. Walk South ('s' -> 'j') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("s", 600, &key);
+		assert(key == 'j');
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_y >= NDW_TILE_H);
+		/* Server adopts the move to adjacent wilderness tile South (40, 39) */
+		set_map_keep(40, 39, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x && new_y == out_y - NDW_TILE_H);
+		assert(new_y >= 0 && new_y < NDW_TILE_H);
+
+		printf("PASS: walking out of a room (East, North, South) shifts origin smoothly without teleportation\n");
+	}
+
+	/* North/South/East/West tile indexing and world coords in nd_seven_tile_at */
+	{
+		set_map(50, 60, 10, 0x1B, 0, 0, 0, 0);
+		/* Mark North tile (row 2, col 3) with biome 2 */
+		st.map_data.tiles[2 * 7 + 3].bio_idx = 2;
+		st.map_data.tiles[2 * 7 + 3].symbol = 'N';
+		/* Mark South tile (row 4, col 3) with biome 4 */
+		st.map_data.tiles[4 * 7 + 3].bio_idx = 4;
+		st.map_data.tiles[4 * 7 + 3].symbol = 'S';
+		/* Mark East tile (row 3, col 4) with biome 6 */
+		st.map_data.tiles[3 * 7 + 4].bio_idx = 6;
+		st.map_data.tiles[3 * 7 + 4].symbol = 'E';
+		/* Mark West tile (row 3, col 2) with biome 8 */
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 8;
+		st.map_data.tiles[3 * 7 + 2].symbol = 'W';
+
+		ndw_tile_t t;
+		int16_t pos[4];
+
+		/* Center: ti=0, tj=0 -> row 3, col 3, world (50, 60) */
+		assert(nd_seven_tile_at(&st, 0, 0, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 60);
+
+		/* North: ti=0, tj=-1 -> row 2, col 3, world (50, 61), symbol 'N', biome 2 */
+		assert(nd_seven_tile_at(&st, 0, -1, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 61);
+		assert(t.biome == 2 && t.glyph[1] == 'N');
+
+		/* South: ti=0, tj=1 -> row 4, col 3, world (50, 59), symbol 'S', biome 4 */
+		assert(nd_seven_tile_at(&st, 0, 1, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 59);
+		assert(t.biome == 4 && t.glyph[1] == 'S');
+
+		/* East: ti=1, tj=0 -> row 3, col 4, world (51, 60), symbol 'E', biome 6 */
+		assert(nd_seven_tile_at(&st, 1, 0, &t, pos) == 1);
+		assert(pos[0] == 51 && pos[1] == 60);
+		assert(t.biome == 6 && t.glyph[1] == 'E');
+
+		/* West: ti=-1, tj=0 -> row 3, col 2, world (49, 60), symbol 'W', biome 8 */
+		assert(nd_seven_tile_at(&st, -1, 0, &t, pos) == 1);
+		assert(pos[0] == 49 && pos[1] == 60);
+		assert(t.biome == 8 && t.glyph[1] == 'W');
+
+		printf("PASS: nd_seven_tile_at maps North/South/East/West tile rows and world coordinates correctly\n");
+	}
 
 	/* Organic biome borders: the grass|desert border is not the tile edge. The
 	 * lamb stands in the first desert tile at 1280x720, so the tile edge is at
