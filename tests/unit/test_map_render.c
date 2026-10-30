@@ -530,10 +530,12 @@ int main(void)
 		cst.entities[0].ref = 1001;
 		cst.entities[0].location = 200;
 		cst.entities[0].ch = '*';
+		cst.entities[0].side = 0;
 		strcpy(cst.entities[0].name, "stone left");
 		cst.entities[1].ref = 1002;
 		cst.entities[1].location = 200;
 		cst.entities[1].ch = '*';
+		cst.entities[1].side = 2;
 		strcpy(cst.entities[1].name, "stone right");
 
 		nd_seven_forget();

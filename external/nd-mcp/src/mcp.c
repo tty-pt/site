@@ -168,6 +168,7 @@ eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 	pkt.flags = (uint16_t)ico.pi.flags;
 	pkt.dynflags = dynflags;
 	pkt.ch = ico.ch;
+	pkt.side = (uint8_t)obj.data[0];
 	snprintf(pkt.name, sizeof(pkt.name), "%s", obj.name);
 	char *u = (char *)unparse(obj_ref);
 	if (u)

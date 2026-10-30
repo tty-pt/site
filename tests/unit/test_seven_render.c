@@ -972,33 +972,39 @@ int main(void)
 		assert(tr->count >= 2);
 		assert(tr->bound_entities == 0);
 
-		/* Packet 1 arrives: first stone entity #601 */
+		/* Packet 1 arrives: first stone entity #601 (side 0) */
 		st.entity_count = 1;
 		st.entities[0].ref = 601;
 		st.entities[0].location = 60;
 		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
 		strcpy(st.entities[0].name, "first stone");
 		sync_room_objects(&st);
+		int idx_s0 = (tr->objs[0].x < 53) ? 0 : 1;
+		int idx_s2 = 1 - idx_s0;
 		assert(tr->bound_entities == 1);
-		assert(tr->objs[0].entity_ref == 601);
+		assert(tr->objs[idx_s0].entity_ref == 601);
+		assert(tr->objs[idx_s2].entity_ref == 0);
 
-		/* Packet 2 arrives: second stone entity #602 */
+		/* Packet 2 arrives: second stone entity #602 (side 2) */
 		st.entity_count = 2;
 		st.entities[1].ref = 602;
 		st.entities[1].location = 60;
 		st.entities[1].ch = '*';
+		st.entities[1].side = 2;
 		strcpy(st.entities[1].name, "second stone");
 		sync_room_objects(&st);
-		/* Must dynamically re-sync and bind the second stone! */
+		/* Must dynamically re-sync and bind the second stone to its side! */
 		assert(tr->bound_entities == 2);
-		assert(tr->objs[1].entity_ref == 602);
+		assert(tr->objs[idx_s0].entity_ref == 601);
+		assert(tr->objs[idx_s2].entity_ref == 602);
 		printf("PASS: multi-packet entity arrival dynamically binds all stones\n");
 
-		/* Pick stone 1 (#601): object 0 must become absent, object 1 must remain present */
+		/* Pick stone 1 (#601): side 0 object must become absent, side 2 object must remain present */
 		nd_seven_mark_picked(601);
 		sync_room_objects(&st);
-		assert(is_tracked_obj_present(&st, 0) == 0);
-		assert(is_tracked_obj_present(&st, 1) == 1);
+		assert(is_tracked_obj_present(&st, idx_s0) == 0);
+		assert(is_tracked_obj_present(&st, idx_s2) == 1);
 		printf("PASS: picking 1 stone of 2 removes only that stone while keeping the second\n");
 
 		/* 9. Seam boundary protection: cannot target room objects when outside the tile */

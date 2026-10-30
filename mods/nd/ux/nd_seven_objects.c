@@ -218,20 +218,6 @@ void sync_room_objects(const nd_client_state_t *st)
 	if (!need_sync)
 		return;
 
-	int is_same_room = (s_tracker.room_ref == st->room.ref &&
-	                    memcmp(s_tracker.pos, pos, sizeof(pos)) == 0);
-
-	uint8_t prev_harvested[NDW_MAX_OBJ] = { 0 };
-	uint8_t prev_stick_harvested[NDW_MAX_OBJ] = { 0 };
-	if (is_same_room) {
-		for (int k = 0; k < s_tracker.count && k < NDW_MAX_OBJ; k++) {
-			prev_harvested[k] = s_tracker.objs[k].harvested;
-			prev_stick_harvested[k] = s_tracker.objs[k].stick_harvested;
-		}
-	} else {
-		memset(&s_tracker, 0, sizeof(s_tracker));
-	}
-
 	s_tracker.room_ref = st->room.ref;
 	memcpy(s_tracker.pos, pos, sizeof(pos));
 	memcpy(s_tracker.glyphs, t.glyph, 3);
@@ -247,15 +233,60 @@ void sync_room_objects(const nd_client_state_t *st)
 
 	uint8_t used_entity[ND_MAX_ENTITIES] = { 0 };
 
+	/* Pass 1: exact match by side for all objects */
 	for (int k = 0; k < cnt; k++) {
 		s_tracker.objs[k].x = objs[k].x;
 		s_tracker.objs[k].y = objs[k].y;
 		s_tracker.objs[k].kind = objs[k].kind;
 		s_tracker.objs[k].entity_ref = 0;
-		s_tracker.objs[k].harvested = is_same_room ? prev_harvested[k] : 0;
-		s_tracker.objs[k].stick_harvested = is_same_room ? prev_stick_harvested[k] : 0;
+		s_tracker.objs[k].harvested = 0;
+		s_tracker.objs[k].stick_harvested = 0;
 		s_tracker.objs[k].name[0] = '\0';
 
+		int is_stone = (objs[k].kind == NDW_K_STONE || objs[k].kind == NDW_K_ROCK || objs[k].kind == NDW_K_BOULDER);
+		int is_plant = (objs[k].kind == NDW_K_DECID || objs[k].kind == NDW_K_TALL || objs[k].kind == NDW_K_FIR || objs[k].kind == NDW_K_CACTUS);
+		int obj_side = (objs[k].x < NDW_TILE_W / 3) ? 0 : ((objs[k].x < 2 * NDW_TILE_W / 3) ? 1 : 2);
+
+		if (is_stone) {
+			for (size_t ei = 0; ei < st->entity_count; ei++) {
+				if (used_entity[ei])
+					continue;
+				const nd_entity_desc_t *e = &st->entities[ei];
+				if (e->location == st->room.ref && e->ref != st->me && is_stone_or_rock(e) &&
+				    e->side == obj_side) {
+					s_tracker.objs[k].entity_ref = e->ref;
+					snprintf(s_tracker.objs[k].name, sizeof(s_tracker.objs[k].name), "%s",
+					         e->name[0] ? e->name : "stone");
+					used_entity[ei] = 1;
+					s_tracker.bound_entities++;
+					if (nd_seven_is_picked(e->ref))
+						s_tracker.objs[k].harvested = 1;
+					break;
+				}
+			}
+		} else if (is_plant) {
+			for (size_t ei = 0; ei < st->entity_count; ei++) {
+				if (used_entity[ei])
+					continue;
+				const nd_entity_desc_t *e = &st->entities[ei];
+				if (e->location == st->room.ref && e->ref != st->me &&
+				    is_landscape_element(e) && !is_stone_or_rock(e) &&
+				    e->side == obj_side) {
+					s_tracker.objs[k].entity_ref = e->ref;
+					snprintf(s_tracker.objs[k].name, sizeof(s_tracker.objs[k].name), "%s",
+					         e->name[0] ? e->name : world_obj_name(&objs[k], st, 0, 0));
+					used_entity[ei] = 1;
+					s_tracker.bound_entities++;
+					break;
+				}
+			}
+		}
+	}
+
+	/* Pass 2: fallback match for any remaining unbound objects */
+	for (int k = 0; k < cnt; k++) {
+		if (s_tracker.objs[k].entity_ref)
+			continue;
 		int is_stone = (objs[k].kind == NDW_K_STONE || objs[k].kind == NDW_K_ROCK || objs[k].kind == NDW_K_BOULDER);
 		int is_plant = (objs[k].kind == NDW_K_DECID || objs[k].kind == NDW_K_TALL || objs[k].kind == NDW_K_FIR || objs[k].kind == NDW_K_CACTUS);
 
@@ -275,8 +306,6 @@ void sync_room_objects(const nd_client_state_t *st)
 					break;
 				}
 			}
-			if (!s_tracker.objs[k].name[0])
-				snprintf(s_tracker.objs[k].name, sizeof(s_tracker.objs[k].name), "stone");
 		} else if (is_plant) {
 			for (size_t ei = 0; ei < st->entity_count; ei++) {
 				if (used_entity[ei])
@@ -290,6 +319,27 @@ void sync_room_objects(const nd_client_state_t *st)
 					used_entity[ei] = 1;
 					s_tracker.bound_entities++;
 					break;
+				}
+			}
+		}
+	}
+
+	/* Finalize names and stick harvest */
+	for (int k = 0; k < cnt; k++) {
+		int is_stone = (objs[k].kind == NDW_K_STONE || objs[k].kind == NDW_K_ROCK || objs[k].kind == NDW_K_BOULDER);
+		int is_plant = (objs[k].kind == NDW_K_DECID || objs[k].kind == NDW_K_TALL || objs[k].kind == NDW_K_FIR || objs[k].kind == NDW_K_CACTUS);
+		if (is_stone) {
+			if (!s_tracker.objs[k].name[0])
+				snprintf(s_tracker.objs[k].name, sizeof(s_tracker.objs[k].name), "stone");
+		} else if (is_plant) {
+			if (s_tracker.objs[k].entity_ref) {
+				for (size_t si = 0; si < st->entity_count; si++) {
+					if (st->entities[si].location == s_tracker.objs[k].entity_ref &&
+					    str_has_ci(st->entities[si].name, "stick") &&
+					    nd_seven_is_picked(st->entities[si].ref)) {
+						s_tracker.objs[k].stick_harvested = 1;
+						break;
+					}
 				}
 			}
 			if (!s_tracker.objs[k].name[0]) {
