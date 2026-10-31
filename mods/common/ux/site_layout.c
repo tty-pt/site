@@ -91,8 +91,8 @@ bud_node *site_ui_layout(
 
 	return bud_tpl(
 	        "<main class='main'>%node</main>"
-	        "<nav class='menu'>%node</nav>",
-	        children, panel);
+	        "<nav class='menu' aria-label='%s'>%node</nav>",
+	        children, ui_t("Site Navigation"), panel);
 }
 
 bud_node *site_ui_form_page(

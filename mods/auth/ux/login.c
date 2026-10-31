@@ -8,13 +8,13 @@ auth_render_login(const char *user, const char *ret, const char *error)
 
 	bud_node *frag = bud_tpl(
 	        "%node"
-	        "<form action='/auth/login' method='POST' class='flex flex-col "
+	        "<form action='/auth/login' method='POST' class='auth-form flex flex-col "
 	        "gap-4'>"
 	        "  <label>%s"
-	        "    <input required name='username'/>"
+	        "    <input required name='username' autocomplete='username' autofocus/>"
 	        "  </label>"
 	        "  <label>%s"
-	        "    <input required name='password' type='password'/>"
+	        "    <input required name='password' type='password' autocomplete='current-password'/>"
 	        "  </label>"
 	        "  %node"
 	        "  <button type='submit'>%s</button>"
