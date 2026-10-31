@@ -979,6 +979,20 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 	ndw_obj_t raw_objs[NDW_MAX_OBJ];
 	int n = ndw_tile_objects(&t, pos, kind == 2, raw_objs);
 
+	/* Unbound room entities */
+	const nd_entity_desc_t *ents = NULL;
+	size_t ent_count = 0;
+	uint32_t room_ref = 0;
+	if (ti == 0 && tj == 0) {
+		ents = st->entities;
+		ent_count = st->entity_count;
+		room_ref = st->room.ref;
+	} else {
+		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);
+	}
+
+	uint8_t used_entity[ND_MAX_ENTITIES] = { 0 };
+
 	for (int i = 0; i < n && out->obj_count < ND_SPATIAL_MAX_OBJS; i++) {
 		nd_spatial_obj_t *so = &out->objs[out->obj_count];
 		so->x = raw_objs[i].x;
@@ -1011,23 +1025,59 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 		} else {
 			if (nd_seven_is_tile_obj_picked(pos, raw_objs[i].slot_id))
 				so->harvested = 1;
-			const char *wn = world_obj_name(&raw_objs[i], st, ti, tj);
-			if (wn)
-				snprintf(so->name, sizeof(so->name), "%s", wn);
+
+			int is_mineral = nd_seven_has_scenery_trait(raw_objs[i].kind, ND_SCENERY_TRAIT_MINERAL);
+			if (ents && room_ref && is_mineral) {
+				/* If room entities are known, check if mineral entity exists */
+				int bound = 0;
+				for (size_t ei = 0; ei < ent_count; ei++) {
+					if (used_entity[ei])
+						continue;
+					const nd_entity_desc_t *e = &ents[ei];
+					if (e->location == room_ref && e->ref != (st ? st->me : 0) &&
+					    is_stone_or_rock(e) && e->side == raw_objs[i].slot_id) {
+						so->entity_ref = e->ref;
+						if (nd_seven_is_picked(e->ref))
+							so->harvested = 1;
+						snprintf(so->name, sizeof(so->name), "%s",
+						         e->name[0] ? e->name : "stone");
+						used_entity[ei] = 1;
+						bound = 1;
+						break;
+					}
+				}
+				if (!bound) {
+					/* Fallback match for mineral */
+					for (size_t ei = 0; ei < ent_count; ei++) {
+						if (used_entity[ei])
+							continue;
+						const nd_entity_desc_t *e = &ents[ei];
+						if (e->location == room_ref && e->ref != (st ? st->me : 0) &&
+						    is_stone_or_rock(e)) {
+							so->entity_ref = e->ref;
+							if (nd_seven_is_picked(e->ref))
+								so->harvested = 1;
+							snprintf(so->name, sizeof(so->name), "%s",
+							         e->name[0] ? e->name : "stone");
+							used_entity[ei] = 1;
+							bound = 1;
+							break;
+						}
+					}
+				}
+				if (!bound) {
+					/* In an instantiated/known room, an unbound mineral is harvested/cleared */
+					so->harvested = 1;
+				}
+			}
+
+			if (!so->name[0]) {
+				const char *wn = world_obj_name(&raw_objs[i], st, ti, tj);
+				if (wn)
+					snprintf(so->name, sizeof(so->name), "%s", wn);
+			}
 		}
 		out->obj_count++;
-	}
-
-	/* Unbound room entities */
-	const nd_entity_desc_t *ents = NULL;
-	size_t ent_count = 0;
-	uint32_t room_ref = 0;
-	if (ti == 0 && tj == 0) {
-		ents = st->entities;
-		ent_count = st->entity_count;
-		room_ref = st->room.ref;
-	} else {
-		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);
 	}
 
 	if (ents && room_ref && ent_count > 0) {
@@ -1043,20 +1093,17 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 			if (nd_seven_is_picked(e->ref))
 				continue;
 
-			if (ti == 0 && tj == 0) {
-				int already_bound = 0;
-				const room_tracker_t *tr = nd_seven_get_tracker();
-				if (tr) {
-					for (int k = 0; k < tr->count; k++) {
-						if (tr->objs[k].entity_ref == e->ref && is_tracked_obj_present(st, k)) {
-							already_bound = 1;
-							break;
-						}
-					}
+			/* Check if already bound to one of out->objs across ALL tiles (ti == 0 or ti != 0) */
+			int already_bound = 0;
+			for (int k = 0; k < out->obj_count; k++) {
+				if (out->objs[k].entity_ref == e->ref) {
+					already_bound = 1;
+					break;
 				}
-				if (already_bound)
-					continue;
 			}
+			if (already_bound)
+				continue;
+
 			if (is_landscape_element(e) && !is_stone_or_rock(e))
 				continue;
 

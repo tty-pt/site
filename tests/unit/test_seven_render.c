@@ -1382,6 +1382,153 @@ int main(void)
 		printf("PASS: nd_seven_reset_input clears held keys, walking state and pending moves\n");
 	}
 
+	/* 22. Symmetric spatial resolution invariant between active and adjacent perspectives (R1, R2) */
+	{
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 'O');
+		st.room.ref = 300;
+		st.me = 1;
+		st.entity_count = 2;
+		st.entities[0].ref = 701;
+		st.entities[0].location = 300;
+		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "granite pebble");
+
+		st.entities[1].ref = 702;
+		st.entities[1].location = 300;
+		st.entities[1].ch = 'O';
+		st.entities[1].side = 2;
+		strcpy(st.entities[1].name, "granite boulder");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		nd_spatial_tile_t sp_inside;
+		assert(nd_spatial_tile_resolve(&st, 0, 0, &sp_inside) == 1);
+		assert(sp_inside.obj_count >= 2);
+
+		/* Step player East into adjacent room (11, 10) */
+		set_map_keep(11, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		/* Preserve West neighbour (10, 10) at tile col=2, row=3 */
+		st.map_data.tiles[3 * 7 + 2].side_l = '*';
+		st.map_data.tiles[3 * 7 + 2].symbol = 0;
+		st.map_data.tiles[3 * 7 + 2].side_r = 'O';
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+
+		st.room.ref = 301;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+
+		/* Look back at room (10, 10) via ti = -1, tj = 0 */
+		nd_spatial_tile_t sp_outside;
+		assert(nd_spatial_tile_resolve(&st, -1, 0, &sp_outside) == 1);
+
+		/* Assert symmetric parity: object count, coordinates, kind and harvest state match */
+		assert(sp_inside.obj_count == sp_outside.obj_count);
+		for (int k = 0; k < sp_inside.obj_count; k++) {
+			assert(sp_inside.objs[k].x == sp_outside.objs[k].x);
+			assert(sp_inside.objs[k].y == sp_outside.objs[k].y);
+			assert(sp_inside.objs[k].kind == sp_outside.objs[k].kind);
+			assert(sp_inside.objs[k].slot_id == sp_outside.objs[k].slot_id);
+			assert(sp_inside.objs[k].harvested == sp_outside.objs[k].harvested);
+			assert(sp_inside.objs[k].entity_ref == sp_outside.objs[k].entity_ref);
+		}
+		printf("PASS: symmetric spatial resolution parity between active and adjacent tiles verified\n");
+	}
+
+	/* 23. Continuous multi-room traversal and zero pop-in / zero duplicate rocks (R1, R2, R3) */
+	{
+		/* Setup Room A (20, 20) with a stone */
+		set_map(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0);
+		st.room.ref = 400;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 801;
+		st.entities[0].location = 400;
+		st.entities[0].ch = 'o';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "limestone rock");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Walk to Room B (21, 20) */
+		set_map_keep(21, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = 'o';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 401;
+		st.entity_count = 1;
+		st.entities[0].ref = 802;
+		st.entities[0].location = 401;
+		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "river stone");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Pick stone 802 in Room B */
+		nd_seven_mark_picked(802);
+		nd_spatial_tile_t sp_b;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_b);
+		assert(sp_b.objs[0].harvested == 1);
+
+		/* Walk to Room C (22, 20) */
+		set_map_keep(22, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = '*';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 402;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+
+		/* Inspect Room B from outside (ti = -1, tj = 0): stone 802 must stay harvested */
+		nd_spatial_tile_t sp_b_outside;
+		nd_spatial_tile_resolve(&st, -1, 0, &sp_b_outside);
+		assert(sp_b_outside.objs[0].harvested == 1);
+
+		/* Re-enter Room B (21, 20): stone 802 must stay harvested */
+		set_map_keep(21, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = 'o';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 401;
+		st.entity_count = 0; /* picked on server */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		nd_spatial_tile_t sp_b_reenter;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_b_reenter);
+		assert(sp_b_reenter.objs[0].harvested == 1);
+
+		/* Re-enter Room A (20, 20): unpicked limestone rock 801 remains visible without duplication */
+		set_map_keep(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0);
+		st.room.ref = 400;
+		st.entity_count = 1;
+		st.entities[0].ref = 801;
+		st.entities[0].location = 400;
+		st.entities[0].ch = 'o';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "limestone rock");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		nd_spatial_tile_t sp_a_reenter;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_a_reenter);
+		assert(sp_a_reenter.objs[0].harvested == 0);
+		assert(sp_a_reenter.objs[0].entity_ref == 801);
+		/* Exactly 1 rock object, no duplicate in s_spots */
+		int rock_count = 0;
+		for (int k = 0; k < sp_a_reenter.obj_count; k++) {
+			if (sp_a_reenter.objs[k].kind == NDW_K_ROCK || sp_a_reenter.objs[k].entity_ref == 801)
+				rock_count++;
+		}
+		assert(rock_count == 1);
+		printf("PASS: continuous multi-room traversal and zero pop-in / zero duplicate rocks verified\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

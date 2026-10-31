@@ -176,7 +176,7 @@ static centre_ent_t *centre_find(unsigned set, const int16_t pos[4])
 	return NULL;
 }
 
-static void centre_remember(const int16_t pos[4], ndw_tile_t *t)
+static void centre_remember(const nd_client_state_t *st, const int16_t pos[4], ndw_tile_t *t)
 {
 	unsigned set = centre_set(pos);
 	centre_ent_t *e = centre_find(set, pos);
@@ -186,8 +186,36 @@ static void centre_remember(const int16_t pos[4], ndw_tile_t *t)
 			t->glyph[1] = e->glyph;
 			t->fg[1] = e->fg;
 		} else {
+			/* First time seeing player on this tile: inspect active or cached entities */
 			t->glyph[1] = 0;
 			t->fg[1] = 0;
+			if (st && st->room.ref && memcmp(st->map_data.pos, pos, sizeof(int16_t) * 4) == 0) {
+				for (size_t i = 0; i < st->entity_count; i++) {
+					const nd_entity_desc_t *ent = &st->entities[i];
+					if (ent->location == st->room.ref && ent->ref != st->me && ent->side == 1) {
+						if (is_stone_or_rock(ent)) {
+							t->glyph[1] = ent->ch ? (uint8_t)ent->ch : (uint8_t)'o';
+							t->fg[1] = ent->fg ? (uint8_t)(ent->fg & 15) : 10;
+							break;
+						} else if (is_landscape_element(ent)) {
+							t->glyph[1] = ent->ch ? (uint8_t)ent->ch : (uint8_t)'t';
+							t->fg[1] = ent->fg ? (uint8_t)(ent->fg & 15) : 10;
+							break;
+						}
+					}
+				}
+			}
+			for (int w = 0; w < CENTRE_WAYS && !e; w++)
+				if (!s_centre[set][w].used)
+					e = &s_centre[set][w];
+			if (!e) {
+				e = &s_centre[set][s_centre_next[set]];
+				s_centre_next[set] = (uint8_t)((s_centre_next[set] + 1) % CENTRE_WAYS);
+			}
+			memcpy(e->pos, pos, sizeof(e->pos));
+			e->glyph = t->glyph[1];
+			e->fg = t->fg[1];
+			e->used = 1;
 		}
 		return;
 	}
@@ -244,7 +272,7 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 
 	if (known) {
 		*t = nd_seven_convert_tile(&md->tiles[row * w + col]);
-		centre_remember(pos, t);
+		centre_remember(st, pos, t);
 		return 1;
 	} else {
 		if (col < 0) col = 0;
