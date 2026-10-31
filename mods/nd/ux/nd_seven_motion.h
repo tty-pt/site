@@ -20,6 +20,7 @@ void nd_seven_step_anim(uint32_t delta);
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
 void nd_seven_set_lamb(int fx, int fy);
 void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy);
+void nd_seven_world_pos(const nd_client_state_t *st, int64_t *wx, int64_t *wy);
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);
 void nd_seven_forget(void);
 
@@ -33,5 +34,6 @@ int nd_seven_key(const char *key, int down);
 int nd_seven_move(const nd_client_state_t *st, int key, int down);
 int nd_seven_tick(const nd_client_state_t *st, float dt);
 int nd_seven_collision(const nd_client_state_t *st, int x, int y);
+void nd_seven_collision_invalidate(void);
 
 #endif /* ND_SEVEN_MOTION_H */

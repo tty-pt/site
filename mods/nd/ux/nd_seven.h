@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "nd/bcp.h"
 #include <nd/seven-world.h>
+#include "nd_seven_motion.h"
+#include "nd_seven_objects.h"
 
 /*
  * The 2D "seven" stage: the NeverDark map as one continuous, scrolling world

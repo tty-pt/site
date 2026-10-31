@@ -48,6 +48,8 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		if (!s_have) {
 			recentre(1);
 			s_have = 1;
+			nd_seven_collision_invalidate();
+			nd_spatial_resolver_invalidate();
 		}
 		return;
 	}
@@ -56,6 +58,8 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		memcpy(s_pos, pos, sizeof(s_pos));
 		recentre(1);
 		s_have = 1;
+		nd_seven_collision_invalidate();
+		nd_spatial_resolver_invalidate();
 		return;
 	}
 	if (!memcmp(pos, s_pos, sizeof(s_pos)))
@@ -69,17 +73,17 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 			s_lx -= dx * NDW_TILE_W;
 			s_ly -= dj * NDW_TILE_H;
 
-			/* Clamp to valid tile walk boundaries */
+			/* Clamp smoothly to valid walk bounds without artificial teleport hops */
 			int min_x = -NDW_FOOT_HW;
 			int max_x = NDW_TILE_W + NDW_FOOT_HW;
 			int min_y = -NDW_FOOT_H;
 			int max_y = NDW_TILE_H + NDW_FOOT_H;
 
-			if (s_lx < min_x) s_lx = NDW_FOOT_HW + 2;
-			else if (s_lx > max_x) s_lx = NDW_TILE_W - NDW_FOOT_HW - 2;
+			if (s_lx < min_x) s_lx = min_x;
+			else if (s_lx > max_x) s_lx = max_x;
 
-			if (s_ly < min_y) s_ly = NDW_FOOT_H + 2;
-			else if (s_ly > max_y) s_ly = NDW_TILE_H - NDW_FOOT_H - 2;
+			if (s_ly < min_y) s_ly = min_y;
+			else if (s_ly > max_y) s_ly = max_y;
 
 			s_pending_key = 0;
 			s_pending_t = 0;
@@ -87,6 +91,8 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 			recentre(0);
 		}
 		memcpy(s_pos, pos, sizeof(s_pos));
+		nd_seven_collision_invalidate();
+		nd_spatial_resolver_invalidate();
 	}
 }
 
@@ -163,6 +169,8 @@ void nd_seven_forget(void)
 	memset(s_centre_next, 0, sizeof(s_centre_next));
 	nd_seven_objects_forget();
 	nd_seven_ground_cache_forget();
+	nd_seven_collision_invalidate();
+	nd_spatial_resolver_invalidate();
 	s_have = 0;
 	recentre(1);
 }
@@ -208,16 +216,6 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 	}
 }
 
-typedef struct { const nd_client_state_t *st; } world_t;
-
-static int lookup(void *ctx, int ti, int tj, ndw_tile_t *t, int16_t pos[4])
-{
-	const world_t *wd = (const world_t *)ctx;
-	if (ti < -1 || ti > 1 || tj < -1 || tj > 1)
-		return 0;
-	return nd_seven_tile_at(wd->st, ti, tj, t, pos) == 1 ? 1 : 0;
-}
-
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking)
 {
 	if (fx) *fx = s_lx;
@@ -237,6 +235,13 @@ void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy)
 	nd_seven_sync_origin(st);
 	if (fx) *fx = s_lx;
 	if (fy) *fy = s_ly;
+}
+
+void nd_seven_world_pos(const nd_client_state_t *st, int64_t *wx, int64_t *wy)
+{
+	nd_seven_sync_origin(st);
+	if (wx) *wx = (int64_t)s_pos[0] * NDW_TILE_W + s_lx;
+	if (wy) *wy = (int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly;
 }
 
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room)
@@ -271,43 +276,149 @@ int nd_seven_key(const char *key, int down)
 	return 1;
 }
 
-static int is_motion_obj_picked(void *ctx, const int16_t pos[4], const ndw_obj_t *o)
+/* Pre-computed 3x3 Tile Collision Hull Cache */
+typedef struct {
+	uint8_t valid;
+	int16_t pos[4];
+	uint8_t wall_count;
+	uint8_t obj_count;
+	ndw_rect_t walls[NDW_MAX_WALL];
+	struct {
+		ndw_rect_t rect;
+		uint8_t slot_id;
+		uint8_t kind;
+		uint8_t picked;
+	} objs[NDW_MAX_OBJ];
+} nd_tile_collision_t;
+
+static nd_tile_collision_t s_col_cache[3][3];
+
+void nd_seven_collision_invalidate(void)
 {
-	const world_t *wd = (const world_t *)ctx;
-	if (!wd || !wd->st || !o || !pos)
-		return 0;
-
-	/* Current origin tile */
-	if (pos[0] == s_pos[0] && pos[1] == s_pos[1] &&
-	    pos[2] == s_pos[2] && pos[3] == s_pos[3]) {
-		const room_tracker_t *tr = nd_seven_get_tracker();
-		if (tr && tr->count > 0) {
-			for (int k = 0; k < tr->count; k++) {
-				if (tr->objs[k].x == o->x && tr->objs[k].y == o->y &&
-				    tr->objs[k].kind == o->kind && tr->objs[k].slot_id == o->slot_id) {
-					return !is_tracked_obj_present(wd->st, k);
-				}
-			}
-		}
-		return nd_seven_is_tile_obj_picked(pos, o->slot_id);
-	}
-
-	/* Surrounding / adjacent tile */
-	return nd_seven_is_tile_obj_picked(pos, o->slot_id);
+	memset(s_col_cache, 0, sizeof(s_col_cache));
 }
 
-static void move_axis(world_t *wd, int dx, int dy)
+static void update_tile_collision(const nd_client_state_t *st, int ti, int tj,
+                                  nd_tile_collision_t *tc, const ndw_tile_t *t,
+                                  const int16_t pos[4], int kind)
+{
+	tc->valid = 1;
+	memcpy(tc->pos, pos, sizeof(tc->pos));
+	tc->wall_count = (uint8_t)ndw_walls(t, tc->walls);
+
+	ndw_obj_t raw_objs[NDW_MAX_OBJ];
+	int n = ndw_tile_objects(t, pos, kind == 2, raw_objs);
+	tc->obj_count = 0;
+
+	for (int i = 0; i < n; i++) {
+		if (!raw_objs[i].hw)
+			continue;
+		tc->objs[tc->obj_count].rect = ndw_obj_rect(&raw_objs[i]);
+		tc->objs[tc->obj_count].slot_id = raw_objs[i].slot_id;
+		tc->objs[tc->obj_count].kind = raw_objs[i].kind;
+
+		int picked = 0;
+		if (ti == 0 && tj == 0) {
+			const room_tracker_t *tr = nd_seven_get_tracker();
+			if (tr && tr->count > 0) {
+				for (int k = 0; k < tr->count; k++) {
+					if (tr->objs[k].slot_id == raw_objs[i].slot_id &&
+					    tr->objs[k].kind == raw_objs[i].kind) {
+						if (!is_tracked_obj_present(st, k))
+							picked = 1;
+						break;
+					}
+				}
+			}
+			if (!picked && nd_seven_is_tile_obj_picked(pos, raw_objs[i].slot_id))
+				picked = 1;
+		} else {
+			if (nd_seven_is_tile_obj_picked(pos, raw_objs[i].slot_id))
+				picked = 1;
+		}
+		tc->objs[tc->obj_count].picked = (uint8_t)picked;
+		tc->obj_count++;
+	}
+}
+
+static int is_motion_blocked(const nd_client_state_t *st, int fx, int fy)
+{
+	int x0 = fx - NDW_FOOT_HW, x1 = fx + NDW_FOOT_HW;
+	int y0 = fy - NDW_FOOT_H,  y1 = fy;
+	int ti0 = ndw_fdiv(x0, NDW_TILE_W), ti1 = ndw_fdiv(x1 - 1, NDW_TILE_W);
+	int tj0 = ndw_fdiv(y0, NDW_TILE_H), tj1 = ndw_fdiv(y1 - 1, NDW_TILE_H);
+
+	for (int tj = tj0; tj <= tj1; tj++) {
+		for (int ti = ti0; ti <= ti1; ti++) {
+			if (ti < -1 || ti > 1 || tj < -1 || tj > 1)
+				return 1;
+			int ci = ti + 1, cj = tj + 1;
+			nd_tile_collision_t *tc = &s_col_cache[cj][ci];
+			int16_t cur_pos[4];
+			ndw_tile_t t;
+			int kind = nd_seven_tile_at(st, ti, tj, &t, cur_pos);
+			if (!kind)
+				return 1;
+			if (!tc->valid || memcmp(tc->pos, cur_pos, sizeof(cur_pos)) != 0) {
+				update_tile_collision(st, ti, tj, tc, &t, cur_pos, kind);
+			}
+
+			int ox = ti * NDW_TILE_W, oy = tj * NDW_TILE_H;
+			ndw_rect_t foot = { (int16_t)(x0 - ox), (int16_t)(y0 - oy),
+			                    (int16_t)(x1 - ox), (int16_t)(y1 - oy) };
+
+			for (int w = 0; w < tc->wall_count; w++) {
+				if (ndw_rect_hit(&foot, &tc->walls[w]))
+					return 1;
+			}
+
+			for (int i = 0; i < tc->obj_count; i++) {
+				if (tc->objs[i].picked)
+					continue;
+				if (ti == 0 && tj == 0) {
+					const room_tracker_t *tr = nd_seven_get_tracker();
+					if (tr && tr->count > 0) {
+						for (int k = 0; k < tr->count; k++) {
+							if (tr->objs[k].slot_id == tc->objs[i].slot_id &&
+							    tr->objs[k].kind == tc->objs[i].kind) {
+								if (!is_tracked_obj_present(st, k))
+									tc->objs[i].picked = 1;
+								break;
+							}
+						}
+					}
+					if (!tc->objs[i].picked && nd_seven_is_tile_obj_picked(cur_pos, tc->objs[i].slot_id))
+						tc->objs[i].picked = 1;
+				} else {
+					if (nd_seven_is_tile_obj_picked(cur_pos, tc->objs[i].slot_id))
+						tc->objs[i].picked = 1;
+				}
+				if (tc->objs[i].picked)
+					continue;
+				if (ndw_rect_hit(&foot, &tc->objs[i].rect))
+					return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static void move_axis(const nd_client_state_t *st, int dx, int dy)
 {
 	int nx = s_lx + dx, ny = s_ly + dy;
-	if (ndw_blocked_filter(lookup, wd, nx, ny, is_motion_obj_picked))
+	if (is_motion_blocked(st, nx, ny))
 		return;
 	s_lx = nx;
 	s_ly = ny;
 }
 
+int nd_seven_collision(const nd_client_state_t *st, int x, int y)
+{
+	return is_motion_blocked(st, x, y);
+}
+
 int nd_seven_tick(const nd_client_state_t *st, float dt)
 {
-	world_t wd = { st };
 	int key = 0, dx = 0, dy = 0, steps;
 
 	s_anim++;
@@ -340,7 +451,7 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 	s_acc -= (float)steps;
 	while (steps-- > 0) {
 		int ox = s_lx, oy = s_ly;
-		move_axis(&wd, dx, dy);
+		move_axis(st, dx, dy);
 		if (ox != s_lx || oy != s_ly)
 			s_walking = 1;
 	}

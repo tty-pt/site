@@ -13,28 +13,95 @@ static const int8_t s_spots[16][2] = {
 
 static room_tracker_t s_tracker = { 0 };
 
-static const nd_scenery_trait_t s_scenery_traits[] = {
-	{ NDW_K_DECID,       ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tree" },
-	{ NDW_K_TALL,        ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tall tree" },
-	{ NDW_K_FIR,         ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "fir tree" },
-	{ NDW_K_CACTUS,      ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_BLOCKING,  1, "forage", "cactus",  "cactus" },
-	{ NDW_K_STONE,       ND_SCENERY_TRAIT_MINERAL,                               0, "get",    "stone",   "stone" },
-	{ NDW_K_ROCK,        ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "rock",    "rock" },
-	{ NDW_K_BOULDER,     ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "boulder", "boulder" },
-	{ NDW_K_POND,        ND_SCENERY_TRAIT_WATER,                                 1, "fill",   "pond",    "pond" },
-	{ NDW_K_SHOP,        ND_SCENERY_TRAIT_CONTAINER,                             1, "look",   "shop",    "shop" },
-	{ NDW_K_STAIRS_DOWN, 0,                                                      1, "down",   "stairs",  "stairs down" },
-	{ NDW_K_STAIRS_UP,   0,                                                      1, "up",     "stairs",  "stairs up" },
-	{ 0, 0, 0, NULL, NULL, NULL }
+static int interact_mineral(const nd_client_state_t *st, const tracked_obj_t *obj,
+                            char *cmd_out, size_t sz, uint32_t *out_picked_ref)
+{
+	(void)st;
+	if (obj->entity_ref && !nd_seven_is_picked(obj->entity_ref)) {
+		snprintf(cmd_out, sz, "get #%u\n", obj->entity_ref);
+		if (out_picked_ref) *out_picked_ref = obj->entity_ref;
+		return 1;
+	}
+	return 0;
+}
+
+static int interact_foliage(const nd_client_state_t *st, const tracked_obj_t *obj,
+                            char *cmd_out, size_t sz, uint32_t *out_picked_ref)
+{
+	uint32_t tree_ref = obj->entity_ref;
+	uint32_t stick_ref = 0;
+	if (!obj->stick_harvested) {
+		for (size_t si = 0; si < st->entity_count; si++) {
+			if ((st->entities[si].location == tree_ref || (st->entities[si].location == st->room.ref && !tree_ref)) &&
+			    str_has_ci(st->entities[si].name, "stick") &&
+			    !nd_seven_is_picked(st->entities[si].ref)) {
+				stick_ref = st->entities[si].ref;
+				break;
+			}
+		}
+	}
+	if (stick_ref) {
+		if (tree_ref)
+			snprintf(cmd_out, sz, "get #%u #%u\n", tree_ref, stick_ref);
+		else
+			snprintf(cmd_out, sz, "get #%u\n", stick_ref);
+		if (out_picked_ref) *out_picked_ref = stick_ref;
+		return 1;
+	}
+	return 0;
+}
+
+static int interact_stairs_down(const nd_client_state_t *st, const tracked_obj_t *obj,
+                                char *cmd_out, size_t sz, uint32_t *out_picked_ref)
+{
+	(void)st; (void)obj; (void)out_picked_ref;
+	snprintf(cmd_out, sz, ">\n");
+	return 1;
+}
+
+static int interact_stairs_up(const nd_client_state_t *st, const tracked_obj_t *obj,
+                              char *cmd_out, size_t sz, uint32_t *out_picked_ref)
+{
+	(void)st; (void)obj; (void)out_picked_ref;
+	snprintf(cmd_out, sz, "<\n");
+	return 1;
+}
+
+static int interact_shop(const nd_client_state_t *st, const tracked_obj_t *obj,
+                         char *cmd_out, size_t sz, uint32_t *out_picked_ref)
+{
+	(void)st; (void)obj; (void)out_picked_ref;
+	snprintf(cmd_out, sz, "shop\n");
+	return 1;
+}
+
+static const nd_scenery_def_t s_scenery_defs[] = {
+	{ NDW_K_DECID,       ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tree",        interact_foliage },
+	{ NDW_K_TALL,        ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tall tree",   interact_foliage },
+	{ NDW_K_FIR,         ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "fir tree",    interact_foliage },
+	{ NDW_K_CACTUS,      ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_BLOCKING,  1, "forage", "cactus",  "cactus",      interact_foliage },
+	{ NDW_K_STONE,       ND_SCENERY_TRAIT_MINERAL,                               0, "get",    "stone",   "stone",       interact_mineral },
+	{ NDW_K_ROCK,        ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "rock",    "rock",        interact_mineral },
+	{ NDW_K_BOULDER,     ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "boulder", "boulder",     interact_mineral },
+	{ NDW_K_POND,        ND_SCENERY_TRAIT_WATER,                                 1, "fill",   "pond",    "pond",        NULL },
+	{ NDW_K_SHOP,        ND_SCENERY_TRAIT_CONTAINER,                             1, "look",   "shop",    "shop",        interact_shop },
+	{ NDW_K_STAIRS_DOWN, 0,                                                      1, "down",   "stairs",  "stairs down", interact_stairs_down },
+	{ NDW_K_STAIRS_UP,   0,                                                      1, "up",     "stairs",  "stairs up",   interact_stairs_up },
+	{ 0, 0, 0, NULL, NULL, NULL, NULL }
 };
+
+const nd_scenery_def_t *nd_seven_get_scenery_def(uint8_t kind)
+{
+	for (size_t i = 0; s_scenery_defs[i].default_name != NULL; i++) {
+		if (s_scenery_defs[i].kind == kind)
+			return &s_scenery_defs[i];
+	}
+	return NULL;
+}
 
 const nd_scenery_trait_t *nd_seven_get_scenery_trait(uint8_t kind)
 {
-	for (size_t i = 0; s_scenery_traits[i].default_name != NULL; i++) {
-		if (s_scenery_traits[i].kind == kind)
-			return &s_scenery_traits[i];
-	}
-	return NULL;
+	return nd_seven_get_scenery_def(kind);
 }
 
 int nd_seven_has_scenery_trait(uint8_t kind, uint8_t trait)
@@ -70,6 +137,8 @@ void nd_seven_mark_picked(uint32_t entity_ref)
 				nd_seven_mark_tile_slot_harvested(s_tracker.pos, s_tracker.objs[k].slot_id);
 		}
 	}
+	nd_spatial_resolver_invalidate();
+	nd_seven_collision_invalidate();
 }
 
 int nd_seven_is_picked(uint32_t entity_ref)
@@ -88,6 +157,8 @@ void nd_seven_forget_picked(void)
 	s_picked_count = 0;
 	s_picked_head = 0;
 	memset(s_picked_refs, 0, sizeof(s_picked_refs));
+	nd_spatial_resolver_invalidate();
+	nd_seven_collision_invalidate();
 }
 
 const room_tracker_t *nd_seven_get_tracker(void)
@@ -129,6 +200,8 @@ void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
 		entry->valid = 1;
 	}
 	entry->slot_harvested[slot_id] = 1;
+	nd_spatial_resolver_invalidate();
+	nd_seven_collision_invalidate();
 }
 
 void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
@@ -214,6 +287,8 @@ void nd_seven_objects_forget(void)
 	nd_seven_forget_picked();
 	memset(s_room_cache, 0, sizeof(s_room_cache));
 	s_room_cache_next = 0;
+	nd_spatial_resolver_invalidate();
+	nd_seven_collision_invalidate();
 }
 
 int str_has_ci(const char *hay, const char *needle)
@@ -361,11 +436,19 @@ void sync_room_objects(const nd_client_state_t *st)
 	if (!kind)
 		return;
 
+	uint32_t ent_hash = 0;
+	for (size_t i = 0; i < st->entity_count; i++) {
+		ent_hash ^= (uint32_t)st->entities[i].ref * 31u + (uint32_t)st->entities[i].ch + (uint32_t)st->entities[i].location;
+		for (const char *p = st->entities[i].name; *p; p++)
+			ent_hash = ent_hash * 33u + (uint8_t)*p;
+	}
+
 	int need_sync = 0;
 	if (s_tracker.room_ref != st->room.ref ||
 	    memcmp(s_tracker.pos, pos, sizeof(pos)) != 0 ||
 	    memcmp(s_tracker.glyphs, t.glyph, 3) != 0 ||
-	    s_tracker.last_entity_count != st->entity_count)
+	    s_tracker.last_entity_count != st->entity_count ||
+	    s_tracker.last_entity_hash != ent_hash)
 		need_sync = 1;
 
 	if (!need_sync)
@@ -377,6 +460,7 @@ void sync_room_objects(const nd_client_state_t *st)
 	memcpy(s_tracker.pos, pos, sizeof(pos));
 	memcpy(s_tracker.glyphs, t.glyph, 3);
 	s_tracker.last_entity_count = st->entity_count;
+	s_tracker.last_entity_hash = ent_hash;
 	s_tracker.count = 0;
 	s_tracker.bound_entities = 0;
 
@@ -754,45 +838,16 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 		if (dx <= 40 && dy <= 32) {
 			int d2 = dx * dx + dy * dy;
 			if (d2 < best_dist) {
-				uint8_t kind = s_tracker.objs[k].kind;
-				if (nd_seven_has_scenery_trait(kind, ND_SCENERY_TRAIT_MINERAL)) {
-					if (s_tracker.objs[k].entity_ref && !nd_seven_is_picked(s_tracker.objs[k].entity_ref)) {
-						snprintf(best_cmd, sizeof(best_cmd), "get #%u\n", s_tracker.objs[k].entity_ref);
+				const nd_scenery_def_t *def = nd_seven_get_scenery_def(s_tracker.objs[k].kind);
+				if (def && def->interact) {
+					char cmd[64];
+					uint32_t picked_ref = 0;
+					if (def->interact(st, &s_tracker.objs[k], cmd, sizeof(cmd), &picked_ref)) {
+						snprintf(best_cmd, sizeof(best_cmd), "%s", cmd);
 						best_dist = d2;
 						best_tracker_k = k;
-						best_picked_ref = s_tracker.objs[k].entity_ref;
+						best_picked_ref = picked_ref;
 					}
-				} else if (nd_seven_has_scenery_trait(kind, ND_SCENERY_TRAIT_FOLIAGE)) {
-					uint32_t tree_ref = s_tracker.objs[k].entity_ref;
-					uint32_t stick_ref = 0;
-					if (!s_tracker.objs[k].stick_harvested) {
-						for (size_t si = 0; si < st->entity_count; si++) {
-							if ((st->entities[si].location == tree_ref || (st->entities[si].location == st->room.ref && !tree_ref)) &&
-							    str_has_ci(st->entities[si].name, "stick") &&
-							    !nd_seven_is_picked(st->entities[si].ref)) {
-								stick_ref = st->entities[si].ref;
-								break;
-							}
-						}
-					}
-					if (stick_ref) {
-						if (tree_ref)
-							snprintf(best_cmd, sizeof(best_cmd), "get #%u #%u\n", tree_ref, stick_ref);
-						else
-							snprintf(best_cmd, sizeof(best_cmd), "get #%u\n", stick_ref);
-						best_dist = d2;
-						best_tracker_k = k;
-						best_picked_ref = stick_ref;
-					}
-				} else if (kind == NDW_K_STAIRS_DOWN) {
-					snprintf(best_cmd, sizeof(best_cmd), ">\n");
-					best_dist = d2;
-				} else if (kind == NDW_K_STAIRS_UP) {
-					snprintf(best_cmd, sizeof(best_cmd), "<\n");
-					best_dist = d2;
-				} else if (kind == NDW_K_SHOP) {
-					snprintf(best_cmd, sizeof(best_cmd), "shop\n");
-					best_dist = d2;
 				}
 			}
 		}
@@ -876,4 +931,227 @@ int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz)
 int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz)
 {
 	return seven_action_impl(st, out, sz, 1);
+}
+
+/* --- Shared Spatial Entity Resolver -------------------------------------- */
+
+static nd_spatial_tile_t s_spatial_cache[3][3];
+
+void nd_spatial_resolver_invalidate(void)
+{
+	memset(s_spatial_cache, 0, sizeof(s_spatial_cache));
+}
+
+int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spatial_tile_t *out)
+{
+	if (!st || !out)
+		return 0;
+
+	if (ti == 0 && tj == 0) {
+		sync_room_objects(st);
+	}
+
+	ndw_tile_t t;
+	int16_t pos[4];
+	int kind = nd_seven_tile_at(st, ti, tj, &t, pos);
+	if (!kind)
+		return 0;
+
+	int ci = ti + 1, cj = tj + 1;
+	if (ci >= 0 && ci < 3 && cj >= 0 && cj < 3 && (ti != 0 || tj != 0)) {
+		if (s_spatial_cache[cj][ci].valid &&
+		    memcmp(s_spatial_cache[cj][ci].pos, pos, sizeof(pos)) == 0) {
+			*out = s_spatial_cache[cj][ci];
+			return 1;
+		}
+	}
+
+	memset(out, 0, sizeof(*out));
+	out->valid = 1;
+	memcpy(out->pos, pos, sizeof(pos));
+	out->room_ref = (ti == 0 && tj == 0) ? st->room.ref : 0;
+	out->entity_count = (ti == 0 && tj == 0) ? st->entity_count : 0;
+	out->biome = t.biome;
+	out->exits = t.exits;
+	out->flags = t.flags;
+	out->obj_count = 0;
+
+	ndw_obj_t raw_objs[NDW_MAX_OBJ];
+	int n = ndw_tile_objects(&t, pos, kind == 2, raw_objs);
+
+	for (int i = 0; i < n && out->obj_count < ND_SPATIAL_MAX_OBJS; i++) {
+		nd_spatial_obj_t *so = &out->objs[out->obj_count];
+		so->x = raw_objs[i].x;
+		so->y = raw_objs[i].y;
+		so->kind = raw_objs[i].kind;
+		so->slot_id = raw_objs[i].slot_id;
+		so->variant = raw_objs[i].variant;
+		so->glyph = raw_objs[i].glyph;
+		so->fg = raw_objs[i].fg;
+		so->big = raw_objs[i].big;
+		so->is_entity = 0;
+		so->harvested = 0;
+		so->entity_ref = 0;
+		so->flip = 0;
+		so->sprite_id = 0;
+		so->name[0] = '\0';
+
+		if (ti == 0 && tj == 0) {
+			const room_tracker_t *tr = nd_seven_get_tracker();
+			if (tr && i < tr->count) {
+				so->entity_ref = tr->objs[i].entity_ref;
+				if (!is_tracked_obj_present(st, i))
+					so->harvested = 1;
+				if (tr->objs[i].name[0])
+					snprintf(so->name, sizeof(so->name), "%s", tr->objs[i].name);
+			} else {
+				if (!is_tracked_obj_present(st, i))
+					so->harvested = 1;
+			}
+		} else {
+			if (nd_seven_is_tile_obj_picked(pos, raw_objs[i].slot_id))
+				so->harvested = 1;
+			const char *wn = world_obj_name(&raw_objs[i], st, ti, tj);
+			if (wn)
+				snprintf(so->name, sizeof(so->name), "%s", wn);
+		}
+		out->obj_count++;
+	}
+
+	/* Unbound room entities */
+	const nd_entity_desc_t *ents = NULL;
+	size_t ent_count = 0;
+	uint32_t room_ref = 0;
+	if (ti == 0 && tj == 0) {
+		ents = st->entities;
+		ent_count = st->entity_count;
+		room_ref = st->room.ref;
+	} else {
+		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);
+	}
+
+	if (ents && room_ref && ent_count > 0) {
+		uint16_t used = 0;
+		for (size_t ei = 0; ei < ent_count && out->obj_count < ND_SPATIAL_MAX_OBJS; ei++) {
+			const nd_entity_desc_t *e = &ents[ei];
+			if (st && st->me && e->ref == st->me)
+				continue;
+			if (e->location != room_ref)
+				continue;
+			if (is_contained_in_tree(st, e))
+				continue;
+			if (nd_seven_is_picked(e->ref))
+				continue;
+
+			if (ti == 0 && tj == 0) {
+				int already_bound = 0;
+				const room_tracker_t *tr = nd_seven_get_tracker();
+				if (tr) {
+					for (int k = 0; k < tr->count; k++) {
+						if (tr->objs[k].entity_ref == e->ref && is_tracked_obj_present(st, k)) {
+							already_bound = 1;
+							break;
+						}
+					}
+				}
+				if (already_bound)
+					continue;
+			}
+			if (is_landscape_element(e) && !is_stone_or_rock(e))
+				continue;
+
+			uint32_t spot = ndw_mix(e->ref) % 16;
+			int tries = 0;
+			while ((used >> spot) & 1) {
+				spot = (spot + 1) % 16;
+				if (++tries >= 16) break;
+			}
+			if (tries >= 16) break;
+			used |= (uint16_t)(1u << spot);
+
+			nd_spatial_obj_t *so = &out->objs[out->obj_count];
+			so->x = (int16_t)(NDW_CENTER_X + s_spots[spot][0]);
+			so->y = (int16_t)(NDW_CENTER_Y + s_spots[spot][1]);
+			so->kind = 0;
+			so->slot_id = 0;
+			so->variant = 0;
+			so->glyph = e->ch ? (uint8_t)e->ch : (uint8_t)'?';
+			so->fg = (uint8_t)(e->fg < 8 ? e->fg + 8 : e->fg);
+			so->big = 0;
+			so->is_entity = 1;
+			so->harvested = 0;
+			so->entity_ref = e->ref;
+			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
+			if (is_stone_or_rock(e)) {
+				so->sprite_id = (uint8_t)((ndw_mix(e->ref) % 8) + 1);
+			} else {
+				so->sprite_id = 0;
+			}
+			snprintf(so->name, sizeof(so->name), "%s", e->name);
+			out->obj_count++;
+		}
+	}
+
+	if (ci >= 0 && ci < 3 && cj >= 0 && cj < 3 && (ti != 0 || tj != 0)) {
+		s_spatial_cache[cj][ci] = *out;
+	}
+	return 1;
+}
+
+int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_spatial_tile_t *out)
+{
+	if (!map || !out || map->width == 0 || map->height == 0 ||
+	    col < 0 || row < 0 || col >= (int)map->width || row >= (int)map->height)
+		return 0;
+
+	memset(out, 0, sizeof(*out));
+	out->valid = 1;
+	out->pos[0] = (int16_t)(map->pos[0] + col - (int)map->player_x);
+	out->pos[1] = (int16_t)(map->pos[1] - (row - (int)map->player_y));
+	out->pos[2] = map->pos[2];
+	out->pos[3] = map->pos[3];
+
+	ndw_tile_t t = nd_seven_convert_tile(&map->tiles[row * map->width + col]);
+	out->biome = t.biome;
+	out->exits = t.exits;
+	out->flags = t.flags;
+	out->obj_count = 0;
+
+	ndw_obj_t raw_objs[NDW_MAX_OBJ];
+	int n = ndw_tile_objects(&t, out->pos, 0, raw_objs);
+
+	int is_player_tile = (col == (int)map->player_x && row == (int)map->player_y);
+	const room_tracker_t *tr = is_player_tile ? nd_seven_get_tracker() : NULL;
+
+	for (int i = 0; i < n && out->obj_count < ND_SPATIAL_MAX_OBJS; i++) {
+		nd_spatial_obj_t *so = &out->objs[out->obj_count];
+		so->x = raw_objs[i].x;
+		so->y = raw_objs[i].y;
+		so->kind = raw_objs[i].kind;
+		so->slot_id = raw_objs[i].slot_id;
+		so->variant = raw_objs[i].variant;
+		so->glyph = raw_objs[i].glyph;
+		so->fg = raw_objs[i].fg;
+		so->big = raw_objs[i].big;
+		so->is_entity = 0;
+		so->harvested = 0;
+		so->entity_ref = 0;
+		so->flip = 0;
+		so->sprite_id = 0;
+		so->name[0] = '\0';
+
+		if (is_player_tile && tr && i < tr->count) {
+			if (tr->objs[i].harvested ||
+			    (tr->objs[i].entity_ref && nd_seven_is_picked(tr->objs[i].entity_ref))) {
+				so->harvested = 1;
+			}
+			if (tr->objs[i].name[0])
+				snprintf(so->name, sizeof(so->name), "%s", tr->objs[i].name);
+		}
+		if (nd_seven_is_tile_obj_picked(out->pos, raw_objs[i].slot_id))
+			so->harvested = 1;
+
+		out->obj_count++;
+	}
+	return 1;
 }

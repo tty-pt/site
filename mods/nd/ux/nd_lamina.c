@@ -328,13 +328,15 @@ static void draw_mineral(uint32_t *fb, uint32_t w, uint32_t h, uint32_t tile_sz,
 static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map,
                               int col, int row, uint32_t tx, uint32_t ty, uint32_t tile_sz)
 {
-	ndw_obj_t objs[NDW_MAX_OBJ];
-	int n = nd_seven_tile_objects(map, col, row, objs);
-	int is_player_tile = (map && col == map->player_x && row == map->player_y);
-	const room_tracker_t *tr = is_player_tile ? nd_seven_get_tracker() : NULL;
+	nd_spatial_tile_t sp;
+	if (!nd_spatial_tile_resolve_map(map, col, row, &sp))
+		return;
 
-	for (int i = 0; i < n; i++) {
-		const ndw_obj_t *o = &objs[i];
+	for (int i = 0; i < sp.obj_count; i++) {
+		const nd_spatial_obj_t *o = &sp.objs[i];
+		if (o->harvested)
+			continue;
+
 		int fx = (int)tx + o->x * (int)tile_sz / NDW_TILE_W;
 		int fy = (int)ty + o->y * (int)tile_sz / NDW_TILE_H;
 
@@ -344,21 +346,6 @@ static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 			if (cw < 5) cw = 5;
 			draw_plant(fb, w, h, fx - cw / 2, fy - ch, cw, ch, o->glyph, ansi_rgb(o->fg));
 		} else if (o->kind >= NDW_K_STONE && o->kind <= NDW_K_BOULDER) {
-			if (map) {
-				int16_t tile_pos[4] = {
-					(int16_t)(map->pos[0] + (col - (int)map->player_x)),
-					(int16_t)(map->pos[1] - (row - (int)map->player_y)),
-					map->pos[2],
-					map->pos[3]
-				};
-				if (nd_seven_is_tile_obj_picked(tile_pos, o->slot_id))
-					continue;
-			}
-			if (tr && i < tr->count) {
-				if (tr->objs[i].harvested ||
-				    (tr->objs[i].entity_ref && nd_seven_is_picked(tr->objs[i].entity_ref)))
-					continue;
-			}
 			draw_mineral(fb, w, h, tile_sz, fx, fy, o->kind, o->variant);
 		}
 	}

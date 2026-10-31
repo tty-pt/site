@@ -765,12 +765,19 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	if (nd_ui_seven_active(&client_state) && width > 0 && height > 0)
 		seven_stage_fit(width, height);
 	s_tick_counter++;
+
+	/* Phase 2: Reconciliation (Ingest completed in wasm_ws_msg) */
+	nd_seven_sync_origin(&client_state);
+	sync_room_objects(&client_state);
+
+	/* Phase 3: Simulation */
 	if (nd_ui_seven_active(&client_state)) {
 		int mv = nd_seven_tick(&client_state, dt);
 		if (mv) {
 			char m[2] = { (char)mv, '\n' };
 			ws_send(m, 2);
 		}
+		/* Phase 4: Presentation (Pure drawing without state mutation) */
 		if ((s_tick_counter % 2) == 0) {
 			seven_stage_redraw();
 			/* Same cadence as the stage: the minimap follows the lamb in

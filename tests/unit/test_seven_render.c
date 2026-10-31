@@ -1216,6 +1216,111 @@ int main(void)
 		printf("PASS: multi-room mineral persistence across room leave and re-entry verified\n");
 	}
 
+	/* 16. Continuous world coordinates parity between Seven and Lamina (R1) */
+	{
+		set_map(12, -8, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(42, 68);
+		int64_t wx = 0, wy = 0;
+		nd_seven_world_pos(&st, &wx, &wy);
+		/* In Lamina reference model:
+		 * world_x = player_x_world * NDW_TILE_W + lamb_x
+		 * world_y = -player_y_world * NDW_TILE_H + lamb_y */
+		int64_t expected_wx = (int64_t)12 * NDW_TILE_W + 42;
+		int64_t expected_wy = (int64_t)(-(-8)) * NDW_TILE_H + 68;
+		assert(wx == expected_wx);
+		assert(wy == expected_wy);
+		printf("PASS: continuous world coordinates parity between Seven and Lamina verified\n");
+	}
+
+	/* 17. Pre-computed tile collision hull cache and O(1) hit testing (R2) */
+	{
+		set_map(100, 100, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0); /* boulder in room */
+		st.room.ref = 500;
+		st.entity_count = 1;
+		st.entities[0].ref = 888;
+		st.entities[0].location = 500;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'O';
+		strcpy(st.entities[0].name, "boulder");
+		nd_seven_forget();
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Retrieve boulder position */
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		int bx = tr->objs[0].x, by = tr->objs[0].y;
+
+		/* Collision check at boulder coordinates reports blocked */
+		int blocked = nd_seven_collision(&st, bx, by);
+		assert(blocked == 1);
+
+		/* Clear collision via slot harvest */
+		nd_seven_mark_tile_slot_harvested(st.map_data.pos, tr->objs[0].slot_id);
+		int cleared = nd_seven_collision(&st, bx, by);
+		assert(cleared == 0);
+		printf("PASS: pre-computed tile collision hull cache O(1) hit testing and harvest invalidation verified\n");
+	}
+
+	/* 18. Shared spatial entity resolver unification between Seven and Lamina (R3) */
+	{
+		set_map(20, -10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, 'o');
+		st.room.ref = 300;
+		st.entity_count = 1;
+		st.entities[0].ref = 301;
+		st.entities[0].location = 300;
+		st.entities[0].ch = 'g';
+		st.entities[0].fg = 2;
+		strcpy(st.entities[0].name, "goblin guard");
+
+		nd_spatial_tile_t sp_seven;
+		int res_seven = nd_spatial_tile_resolve(&st, 0, 0, &sp_seven);
+		assert(res_seven == 1);
+		assert(sp_seven.obj_count >= 3); /* 2 procedural + 1 entity */
+
+		nd_spatial_tile_t sp_lamina;
+		int res_lamina = nd_spatial_tile_resolve_map(&st.map_data, st.map_data.player_x, st.map_data.player_y, &sp_lamina);
+		assert(res_lamina == 1);
+		assert(sp_lamina.obj_count >= 2); /* 2 procedural */
+
+		/* Both spatial queries must agree on procedural objects count and properties */
+		assert(sp_seven.objs[0].kind == sp_lamina.objs[0].kind);
+		assert(sp_seven.objs[0].x == sp_lamina.objs[0].x);
+		assert(sp_seven.objs[0].y == sp_lamina.objs[0].y);
+		assert(sp_seven.objs[0].slot_id == sp_lamina.objs[0].slot_id);
+		printf("PASS: shared spatial entity resolver unification between Seven and Lamina verified\n");
+	}
+
+	/* 19. Declarative scenery component registry and modular interact dispatch (R5) */
+	{
+		const nd_scenery_def_t *def_rock = nd_seven_get_scenery_def(NDW_K_ROCK);
+		assert(def_rock != NULL);
+		assert(def_rock->traits & ND_SCENERY_TRAIT_MINERAL);
+		assert(def_rock->traits & ND_SCENERY_TRAIT_BLOCKING);
+		assert(def_rock->interact != NULL);
+
+		/* Test modular interact callback on mineral object */
+		tracked_obj_t mock_obj = { 0 };
+		mock_obj.kind = NDW_K_ROCK;
+		mock_obj.entity_ref = 777;
+		char cmd[64] = { 0 };
+		uint32_t picked_ref = 0;
+		int handled = def_rock->interact(&st, &mock_obj, cmd, sizeof(cmd), &picked_ref);
+		assert(handled == 1);
+		assert(strcmp(cmd, "get #777\n") == 0);
+		assert(picked_ref == 777);
+
+		/* Test stairs component handler */
+		const nd_scenery_def_t *def_stairs = nd_seven_get_scenery_def(NDW_K_STAIRS_DOWN);
+		assert(def_stairs != NULL);
+		assert(def_stairs->interact != NULL);
+		handled = def_stairs->interact(&st, &mock_obj, cmd, sizeof(cmd), &picked_ref);
+		assert(handled == 1);
+		assert(strcmp(cmd, ">\n") == 0);
+		printf("PASS: declarative scenery component registry and modular interact dispatch verified\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

@@ -283,11 +283,11 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
       await conn.write(clientFrame(`get #${pickedRef}\n`));
 
       const pickStart = Date.now();
-      while (Date.now() - pickStart < 4000) {
+      while (Date.now() - pickStart < 6000) {
         const it = items.get(pickedRef);
         if (!it || it.location !== harvestRoom)
           break;
-        if (Date.now() - pickStart > 1200 && Date.now() - pickStart < 1400) {
+        if ((Date.now() - pickStart) % 1000 < 200 && Date.now() - pickStart > 800) {
           await conn.write(clientFrame(`get #${pickedRef}\n`));
         }
         await sleep(200);

@@ -113,91 +113,6 @@ static int drawable_top_y(const drawable_t *d)
 	return d->sy - 16 * SCALE;
 }
 
-static int add_entities_tile(const nd_client_state_t *st, int ti, int tj, int camx, int camy, drawable_t *out, int n)
-{
-	uint32_t used = 0;
-	size_t ent_count = 0;
-	uint32_t room_ref = 0;
-	const nd_entity_desc_t *ents = NULL;
-
-	if (ti == 0 && tj == 0) {
-		if (!st || !st->room.ref)
-			return n;
-		room_ref = st->room.ref;
-		ents = st->entities;
-		ent_count = st->entity_count;
-	} else {
-		ndw_tile_t t;
-		int16_t pos[4];
-		nd_seven_tile_at(st, ti, tj, &t, pos);
-		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);
-	}
-
-	if (!ents || !room_ref || ent_count == 0)
-		return n;
-
-	int base_x = ti * NDW_TILE_W * SCALE - camx;
-	int base_y = tj * NDW_TILE_H * SCALE - camy;
-
-	for (size_t i = 0; i < ent_count && n < MAX_DRAW; i++) {
-		const nd_entity_desc_t *e = &ents[i];
-		uint32_t spot;
-		int tries = 0;
-
-		if (st && st->me && e->ref == st->me)
-			continue;
-		if (e->location != room_ref)
-			continue;
-		if (is_contained_in_tree(st, e))
-			continue;
-		if (nd_seven_is_picked(e->ref))
-			continue;
-
-		if (ti == 0 && tj == 0) {
-			int already_drawn = 0;
-			const room_tracker_t *tr = nd_seven_get_tracker();
-			for (int k = 0; k < tr->count; k++) {
-				if (tr->objs[k].entity_ref == e->ref && is_tracked_obj_present(st, k)) {
-					already_drawn = 1;
-					break;
-				}
-			}
-			if (already_drawn)
-				continue;
-		}
-		if (is_landscape_element(e) && !is_stone_or_rock(e))
-			continue;
-
-		spot = ndw_mix(e->ref) % 16;
-		while ((used >> spot) & 1) {
-			spot = (spot + 1) % 16;
-			if (++tries >= 16)
-				break;
-		}
-		if (tries >= 16)
-			break;
-		used |= 1u << spot;
-		out[n].what = D_ENTITY;
-		out[n].ch = e->ch ? e->ch : '?';
-		out[n].fg = (uint8_t)(e->fg < 8 ? e->fg + 8 : e->fg);
-		out[n].sx = base_x + (NDW_CENTER_X + s_spots[spot][0]) * SCALE;
-		out[n].sy = base_y + (NDW_CENTER_Y + s_spots[spot][1]) * SCALE;
-		out[n].flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
-		if (is_stone_or_rock(e)) {
-			static const uint8_t mineral_sprites[] = {
-				NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
-				NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
-			};
-			out[n].sprite_id = mineral_sprites[ndw_mix(e->ref) % (sizeof(mineral_sprites)/sizeof(mineral_sprites[0]))];
-		} else {
-			out[n].sprite_id = 0;
-		}
-		snprintf(out[n].name, sizeof(out[n].name), "%s", e->name);
-		n++;
-	}
-	return n;
-}
-
 void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
 	int w = (int)wu, h = (int)hu;
@@ -241,39 +156,52 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		int n = 0;
 
 		for (int ti = i0 - 1; ti <= i1 + 1 && n < MAX_DRAW - NDW_MAX_OBJ; ti++) {
-			ndw_tile_t t;
-			int16_t pos[4];
-			ndw_obj_t objs[NDW_MAX_OBJ];
-			int kind = nd_seven_tile_at(st, ti, tj, &t, pos);
-			int cnt = ndw_tile_objects(&t, pos, kind == 2, objs);
+			nd_spatial_tile_t sp;
+			if (!nd_spatial_tile_resolve(st, ti, tj, &sp))
+				continue;
 			int tx = ti * NDW_TILE_W * SCALE - camx, ty = tj * NDW_TILE_H * SCALE - camy;
 
-			if (ti == 0 && tj == 0)
-				sync_room_objects(st);
+			for (int k = 0; k < sp.obj_count && n < MAX_DRAW; k++) {
+				if (sp.objs[k].harvested)
+					continue;
 
-			const room_tracker_t *tr = nd_seven_get_tracker();
-			for (int k = 0; k < cnt; k++) {
-				if (ti == 0 && tj == 0) {
-					if (!is_tracked_obj_present(st, k))
-						continue;
+				if (sp.objs[k].is_entity) {
+					dr[n].what = D_ENTITY;
+					dr[n].ch = (char)sp.objs[k].glyph;
+					dr[n].fg = sp.objs[k].fg;
+					dr[n].sx = tx + sp.objs[k].x * SCALE;
+					dr[n].sy = ty + sp.objs[k].y * SCALE;
+					dr[n].flip = sp.objs[k].flip;
+					if (sp.objs[k].sprite_id > 0 && sp.objs[k].sprite_id <= 8) {
+						static const uint8_t mineral_sprites[] = {
+							NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
+							NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
+						};
+						dr[n].sprite_id = mineral_sprites[sp.objs[k].sprite_id - 1];
+					} else {
+						dr[n].sprite_id = 0;
+					}
+					snprintf(dr[n].name, sizeof(dr[n].name), "%s", sp.objs[k].name);
+					n++;
 				} else {
-					if (nd_seven_is_tile_obj_picked(pos, objs[k].slot_id))
-						continue;
+					dr[n].what = D_OBJ;
+					dr[n].obj.x = sp.objs[k].x;
+					dr[n].obj.y = sp.objs[k].y;
+					dr[n].obj.kind = sp.objs[k].kind;
+					dr[n].obj.variant = sp.objs[k].variant;
+					dr[n].obj.slot_id = sp.objs[k].slot_id;
+					dr[n].obj.hw = (uint8_t)(sp.objs[k].kind == NDW_K_ROCK ? 6 : sp.objs[k].kind == NDW_K_BOULDER ? 10 : 0);
+					dr[n].obj.glyph = sp.objs[k].glyph;
+					dr[n].obj.fg = sp.objs[k].fg;
+					dr[n].obj.big = sp.objs[k].big;
+					dr[n].sx = tx + sp.objs[k].x * SCALE;
+					dr[n].sy = ty + sp.objs[k].y * SCALE;
+					dr[n].sprite_id = 0;
+					dr[n].flip = 0;
+					snprintf(dr[n].name, sizeof(dr[n].name), "%s", sp.objs[k].name);
+					n++;
 				}
-				dr[n].what = D_OBJ;
-				dr[n].obj = objs[k];
-				dr[n].sx = tx + objs[k].x * SCALE;
-				dr[n].sy = ty + objs[k].y * SCALE;
-				const char *wn = (ti == 0 && tj == 0 && k < tr->count)
-				                 ? tr->objs[k].name
-				                 : world_obj_name(&objs[k], st, ti, tj);
-				if (wn)
-					snprintf(dr[n].name, sizeof(dr[n].name), "%s", wn);
-				else
-					dr[n].name[0] = '\0';
-				n++;
 			}
-			n = add_entities_tile(st, ti, tj, camx, camy, dr, n);
 		}
 		if (tj == lamb_row && n < MAX_DRAW) {
 			dr[n].what = D_LAMB;

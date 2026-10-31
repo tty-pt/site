@@ -14,16 +14,24 @@ enum {
 	ND_SCENERY_TRAIT_BLOCKING  = (1 << 4),
 };
 
-typedef struct {
+typedef struct tracked_obj tracked_obj_t;
+
+typedef struct nd_scenery_def {
 	uint8_t kind;            /* NDW_K_* */
 	uint8_t traits;          /* ND_SCENERY_TRAIT_* */
 	uint8_t default_slot;    /* 0=side 0, 1=side 1, 2=side 2 */
 	const char *harvest_cmd; /* "get", "forage", "fill", etc. */
 	const char *alias_stem;  /* "stone", "acacia", "stick", "pond", etc. */
 	const char *default_name;/* "stone", "tree", "rock", "pond" */
-} nd_scenery_trait_t;
 
-typedef struct {
+	/* Declarative interaction handler */
+	int (*interact)(const nd_client_state_t *st, const tracked_obj_t *obj,
+	                char *cmd_out, size_t sz, uint32_t *out_picked_ref);
+} nd_scenery_def_t;
+
+typedef nd_scenery_def_t nd_scenery_trait_t;
+
+struct tracked_obj {
 	int16_t x, y;
 	uint8_t kind;
 	uint8_t slot_id;
@@ -31,7 +39,7 @@ typedef struct {
 	uint8_t harvested;
 	uint8_t stick_harvested;
 	char name[32];
-} tracked_obj_t;
+};
 
 typedef struct {
 	uint32_t room_ref;
@@ -40,11 +48,48 @@ typedef struct {
 	int count;
 	int bound_entities;
 	size_t last_entity_count;
+	uint32_t last_entity_hash;
 	tracked_obj_t objs[NDW_MAX_OBJ];
 } room_tracker_t;
 
+/* Shared spatial entity resolver structures */
+typedef struct {
+	int16_t x, y;             /* 0..160, 0..128 tile local px */
+	uint8_t kind;             /* NDW_K_* */
+	uint8_t slot_id;          /* 0, 1, 2 */
+	uint8_t variant;          /* variant index */
+	uint8_t glyph;            /* visual symbol or plant glyph */
+	uint8_t fg;               /* ansi color */
+	uint8_t big;              /* 1 if large foliage */
+	uint8_t is_entity;        /* 1 if server entity, 0 if procedural */
+	uint8_t flip;             /* flip sprite horizontal */
+	uint8_t sprite_id;        /* mineral sprite id (1..8) */
+	uint8_t harvested;        /* 1 if picked/harvested */
+	uint32_t entity_ref;      /* Corm DB entity ref if known */
+	char name[32];            /* display name */
+} nd_spatial_obj_t;
+
+#define ND_SPATIAL_MAX_OBJS (NDW_MAX_OBJ + 16)
+
+typedef struct {
+	uint8_t valid;
+	int16_t pos[4];
+	uint32_t room_ref;
+	size_t entity_count;
+	uint8_t biome;
+	uint8_t exits;
+	uint8_t flags;
+	uint8_t obj_count;
+	nd_spatial_obj_t objs[ND_SPATIAL_MAX_OBJS];
+} nd_spatial_tile_t;
+
+const nd_scenery_def_t *nd_seven_get_scenery_def(uint8_t kind);
 const nd_scenery_trait_t *nd_seven_get_scenery_trait(uint8_t kind);
 int nd_seven_has_scenery_trait(uint8_t kind, uint8_t trait);
+
+void nd_spatial_resolver_invalidate(void);
+int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spatial_tile_t *out);
+int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_spatial_tile_t *out);
 
 void sync_room_objects(const nd_client_state_t *st);
 int is_tracked_obj_present(const nd_client_state_t *st, int k);
