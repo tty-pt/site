@@ -1,0 +1,36 @@
+{
+  "name": "@ttypt/corm",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Universal Node.js native bindings and query engine for libcorm and Corm Recall Kernel (cormr) axes (joint, sepal, lemma)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "postinstall": "npm run build:native",
+    "build:native": "mkdir -p build/Release && gcc -O3 -fPIC -shared -I/usr/include/node -I/usr/include/ttypt -I${HOME}/.local/include -I/usr/local/include src/corm_node.c -L${HOME}/.local/lib -L/usr/local/lib -Wl,-rpath,${HOME}/.local/lib -Wl,-rpath,/usr/local/lib -lcorm -ljoint -o build/Release/corm_node.node",
+
+
+    "build:ts": "tsc",
+    "build": "npm run build:native && npm run build:ts",
+    "test": "node --test tests/corm.test.mjs"
+  },
+  "keywords": [
+    "corm",
+    "libcorm",
+    "cormr",
+    "joint",
+    "sepal",
+    "lemma",
+    "axes",
+    "multi-axis",
+    "temporal",
+    "spatial",
+    "vector",
+    "napi"
+  ],
+  "author": "Paulo Quirino",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
