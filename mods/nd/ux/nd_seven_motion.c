@@ -40,12 +40,6 @@ static void recentre(int drop_keys)
 	}
 }
 
-static void key_delta(int key, int *dx, int *dj)
-{
-	*dx = key == 'l' ? 1 : key == 'h' ? -1 : 0;
-	*dj = key == 'j' ? 1 : key == 'k' ? -1 : 0;
-}
-
 void nd_seven_sync_origin(const nd_client_state_t *st)
 {
 	const int16_t *pos;
@@ -68,13 +62,25 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		return;
 	{
 		int dx = pos[0] - s_pos[0], dj = -(pos[1] - s_pos[1]);
-		int ex = 0, ej = 0;
-		if (s_pending_key)
-			key_delta(s_pending_key, &ex, &ej);
+		int is_adjacent = (pos[2] == s_pos[2] && pos[3] == s_pos[3] &&
+		                   dx >= -1 && dx <= 1 && dj >= -1 && dj <= 1);
 
-		if (s_pending_key && pos[2] == s_pos[2] && pos[3] == s_pos[3] && dx == ex && dj == ej) {
+		if (is_adjacent && (dx != 0 || dj != 0)) {
 			s_lx -= dx * NDW_TILE_W;
 			s_ly -= dj * NDW_TILE_H;
+
+			/* Clamp to valid tile walk boundaries */
+			int min_x = -NDW_FOOT_HW;
+			int max_x = NDW_TILE_W + NDW_FOOT_HW;
+			int min_y = -NDW_FOOT_H;
+			int max_y = NDW_TILE_H + NDW_FOOT_H;
+
+			if (s_lx < min_x) s_lx = NDW_FOOT_HW + 2;
+			else if (s_lx > max_x) s_lx = NDW_TILE_W - NDW_FOOT_HW - 2;
+
+			if (s_ly < min_y) s_ly = NDW_FOOT_H + 2;
+			else if (s_ly > max_y) s_ly = NDW_TILE_H - NDW_FOOT_H - 2;
+
 			s_pending_key = 0;
 			s_pending_t = 0;
 		} else {
@@ -157,6 +163,8 @@ void nd_seven_forget(void)
 	memset(s_centre_next, 0, sizeof(s_centre_next));
 	nd_seven_objects_forget();
 	nd_seven_ground_cache_forget();
+	s_have = 0;
+	recentre(1);
 }
 
 int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, int16_t pos[4])

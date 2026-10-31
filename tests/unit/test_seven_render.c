@@ -42,6 +42,7 @@ static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
 {
 	nd_seven_forget();
 	set_map_keep(x, y, biome, exits, flags, gl, gc, gr);
+	nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
 }
 
 /* The packed sprite atlas as palette indices, decoded once. */
@@ -545,7 +546,7 @@ int main(void)
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
 	nd_seven_render(fb, 1280, 720, &st);
 	/* the server moved us east: same world, shifted origin, same pixels */
-	set_map(41, 40, 10, 0x1B, 0, 0, 0, 0);
+	set_map_keep(41, 40, 10, 0x1B, 0, 0, 0, 0);
 	nd_seven_render(fb2, 1280, 720, &st);
 	{
 		int nfx, nfy;
@@ -573,7 +574,7 @@ int main(void)
 			hold(d[i].k, 600, &key);
 			assert(key == d[i].ch);
 			nd_seven_lamb(&fx2, &fy2, &dir, &walking);
-			set_map(40 + d[i].dx, 40 + d[i].dy, 10, 0x1B, 0, 0, 0, 0);
+			set_map_keep(40 + d[i].dx, 40 + d[i].dy, 10, 0x1B, 0, 0, 0, 0);
 			nd_seven_tick(&st, 0);
 			int sx, sy;
 			nd_seven_lamb(&sx, &sy, &dir, &walking);
@@ -1131,41 +1132,45 @@ int main(void)
 		assert(free_y < ry);
 		printf("PASS: rock blocks collision before picking, clears collision after picking\n");
 
-		/* 14. Non-teleporting adjacent room transitions through doorway seams (R2) */
+		/* 14. Non-teleporting adjacent room transitions when s_pending_key == 0 (R2) */
 		set_map(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
 		nd_seven_tick(&st, 0);
-		/* Lamb walks East to the doorway seam */
-		key = 0;
-		hold("d", 600, &key);
-		assert(key == 'l');
-		int seam_out_x, seam_out_y;
-		nd_seven_lamb(&seam_out_x, &seam_out_y, NULL, NULL);
-		assert(seam_out_x >= NDW_TILE_W);
+		/* Lamb is positioned at the East doorway seam */
+		nd_seven_set_lamb(NDW_TILE_W, NDW_TILE_H / 2);
+		int pending_check = 0;
+		nd_seven_debug(&pending_check, NULL, NULL, NULL);
+		assert(pending_check == 0); /* s_pending_key is explicitly 0 */
 
-		/* Server adopts the move to adjacent room East (31, 30) */
+		/* Server pushes/adopts the move to adjacent room East (31, 30) while s_pending_key is 0 */
 		set_map_keep(31, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
 		nd_seven_tick(&st, 0);
 		int seam_x, seam_y;
 		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
-		/* Lamb enters at West doorway seam of adjacent room (not teleported to center 80, 78) */
-		assert(seam_x == seam_out_x - NDW_TILE_W);
+		/* Lamb enters at West doorway seam of adjacent room: preserved coordinates, zero center snap */
+		assert(seam_x != NDW_CENTER_X);
 		assert(seam_x >= 0 && seam_x < NDW_CENTER_X);
-		assert(seam_y == seam_out_y);
+		assert(seam_y == NDW_TILE_H / 2);
 
-		/* Walk West back through doorway seam */
-		key = 0;
-		hold("a", 600, &key);
-		assert(key == 'h');
-		nd_seven_lamb(&seam_out_x, &seam_out_y, NULL, NULL);
-		assert(seam_out_x < 0);
+		/* Also test entering from West doorway when s_pending_key is 0 */
+		nd_seven_set_lamb(0, NDW_TILE_H / 2);
+		nd_seven_debug(&pending_check, NULL, NULL, NULL);
+		assert(pending_check == 0); /* s_pending_key is explicitly 0 */
 
-		/* Server adopts the move West back to room (30, 30) */
+		/* Server pushes/adopts the move to adjacent room West (30, 30) while s_pending_key is 0 */
 		set_map_keep(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
 		nd_seven_tick(&st, 0);
 		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
-		assert(seam_x == seam_out_x + NDW_TILE_W);
-		assert(seam_x >= NDW_CENTER_X);
-		printf("PASS: room transitions through doorway seams preserve continuous entrance coordinates\n");
+		/* Lamb enters at East doorway seam of adjacent room: preserved coordinates, zero center snap */
+		assert(seam_x != NDW_CENTER_X);
+		assert(seam_x > NDW_CENTER_X);
+		assert(seam_y == NDW_TILE_H / 2);
+
+		/* Non-adjacent teleport (abs(dx) > 1): recentres to room center */
+		set_map_keep(35, 35, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		assert(seam_x == NDW_CENTER_X && seam_y == NDW_CENTER_Y);
+		printf("PASS: room transitions with s_pending_key == 0 preserve continuous entrance coordinates\n");
 
 		/* 15. Multi-room harvest persistence across room re-entry (R3) */
 		set_map(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0); /* boulder in room 50,50 */

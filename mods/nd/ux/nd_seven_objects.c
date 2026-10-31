@@ -547,15 +547,11 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 		return 0;
 	}
 
-	/* Unbound mineral: if room entities are loaded in an instantiated room,
-	 * any mineral that does not exist in Corm DB has been harvested/cleared */
+	/* Unbound mineral: in an instantiated room, any mineral that does not
+	 * exist as an active entity in Corm DB has been harvested/cleared */
 	int is_mineral = (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER);
-	if (is_mineral && st->room.ref != 0) {
-		if (st->entity_count > 0)
-			return 0;
-		if (slot_id < 3 && nd_seven_is_tile_obj_picked(st->map_data.pos, slot_id))
-			return 0;
-	}
+	if (is_mineral && st->room.ref != 0)
+		return 0;
 
 	return 1;
 }
