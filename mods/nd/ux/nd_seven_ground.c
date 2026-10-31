@@ -257,3 +257,109 @@ void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st,
 			}
 		}
 }
+
+#define TILE_GROUND_CACHE_SIZE 16
+#define TILE_PX_W (NDW_TILE_W * SCALE)
+#define TILE_PX_H (NDW_TILE_H * SCALE)
+
+typedef struct {
+	int16_t pos[4];
+	uint8_t nbiomes[9];
+	uint32_t anim_key;
+	uint8_t valid;
+	uint32_t pixels[TILE_PX_W * TILE_PX_H];
+} tile_ground_cache_entry_t;
+
+static tile_ground_cache_entry_t s_tile_cache[TILE_GROUND_CACHE_SIZE];
+static unsigned s_tile_cache_next = 0;
+
+void nd_seven_ground_cache_forget(void)
+{
+	memset(s_tile_cache, 0, sizeof(s_tile_cache));
+	s_tile_cache_next = 0;
+}
+
+void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_state_t *st,
+                                 int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
+                                 int tx, int ty)
+{
+	if (tx + TILE_PX_W <= 0 || tx >= w || ty + TILE_PX_H <= 0 || ty >= h)
+		return;
+
+	uint8_t nbiomes[9];
+	int has_water = (ndw_biome_style(own->biome).kind == NDW_G_WATER);
+	nbiomes[4] = own->biome;
+
+	for (int dj = -1; dj <= 1; dj++) {
+		for (int di = -1; di <= 1; di++) {
+			int k = (dj + 1) * 3 + (di + 1);
+			if (di == 0 && dj == 0) continue;
+			ndw_tile_t nt;
+			int16_t np[4];
+			nd_seven_tile_at(st, ti + di, tj + dj, &nt, np);
+			nbiomes[k] = nt.biome;
+			if (ndw_biome_style(nt.biome).kind == NDW_G_WATER)
+				has_water = 1;
+		}
+	}
+
+	uint32_t anim_key = has_water ? ((nd_seven_get_anim() / 6) % 12 + 1) : 0;
+	tile_ground_cache_entry_t *entry = NULL;
+
+	for (int i = 0; i < TILE_GROUND_CACHE_SIZE; i++) {
+		if (s_tile_cache[i].valid &&
+		    memcmp(s_tile_cache[i].pos, pos, sizeof(s_tile_cache[i].pos)) == 0 &&
+		    memcmp(s_tile_cache[i].nbiomes, nbiomes, sizeof(nbiomes)) == 0 &&
+		    s_tile_cache[i].anim_key == anim_key) {
+			entry = &s_tile_cache[i];
+			break;
+		}
+	}
+
+	if (!entry) {
+		entry = &s_tile_cache[s_tile_cache_next++ % TILE_GROUND_CACHE_SIZE];
+		memcpy(entry->pos, pos, sizeof(entry->pos));
+		memcpy(entry->nbiomes, nbiomes, sizeof(entry->nbiomes));
+		entry->anim_key = anim_key;
+		entry->valid = 1;
+
+		ndw_ground_t g = ndw_biome_style(own->biome);
+		for (int cy = 0; cy < NDW_ROWS; cy++) {
+			for (int cx = 0; cx < NDW_COLS; cx++) {
+				ground_cell(entry->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
+				            cx * NDW_CELL_PX * SCALE, cy * NDW_CELL_PX * SCALE,
+				            nd_seven_get_anim());
+			}
+		}
+		ground_blend(entry->pixels, TILE_PX_W, TILE_PX_H, st, ti, tj, pos, own, 0, 0);
+	}
+
+	int src_x0 = 0, src_y0 = 0;
+	int dst_x0 = tx, dst_y0 = ty;
+	int bw = TILE_PX_W;
+	int bh = TILE_PX_H;
+
+	if (dst_x0 < 0) {
+		src_x0 -= dst_x0;
+		bw += dst_x0;
+		dst_x0 = 0;
+	}
+	if (dst_y0 < 0) {
+		src_y0 -= dst_y0;
+		bh += dst_y0;
+		dst_y0 = 0;
+	}
+	if (dst_x0 + bw > w)
+		bw = w - dst_x0;
+	if (dst_y0 + bh > h)
+		bh = h - dst_y0;
+
+	if (bw <= 0 || bh <= 0)
+		return;
+
+	for (int r = 0; r < bh; r++) {
+		const uint32_t *src_row = &entry->pixels[(src_y0 + r) * TILE_PX_W + src_x0];
+		uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
+		memcpy(dst_row, src_row, (size_t)bw * sizeof(uint32_t));
+	}
+}

@@ -13,6 +13,11 @@ void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st,
                   int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
                   int tx, int ty);
 
+void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_state_t *st,
+                                 int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
+                                 int tx, int ty);
+void nd_seven_ground_cache_forget(void);
+
 const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4]);
 
 #endif /* ND_SEVEN_GROUND_H */

@@ -1,5 +1,6 @@
 #include "nd_seven_motion.h"
 #include "nd_seven_objects.h"
+#include "nd_seven_ground.h"
 #include <string.h>
 
 #define SCALE 2
@@ -154,6 +155,7 @@ void nd_seven_forget(void)
 	memset(s_centre, 0, sizeof(s_centre));
 	memset(s_centre_next, 0, sizeof(s_centre_next));
 	nd_seven_objects_forget();
+	nd_seven_ground_cache_forget();
 }
 
 int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, int16_t pos[4])

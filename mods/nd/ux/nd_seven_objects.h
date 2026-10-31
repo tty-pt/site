@@ -6,9 +6,25 @@
 #include "nd/bcp.h"
 #include <nd/seven-world.h>
 
+enum {
+	ND_SCENERY_TRAIT_FOLIAGE   = (1 << 0),
+	ND_SCENERY_TRAIT_MINERAL   = (1 << 1),
+	ND_SCENERY_TRAIT_WATER     = (1 << 2),
+	ND_SCENERY_TRAIT_CONTAINER = (1 << 3),
+	ND_SCENERY_TRAIT_BLOCKING  = (1 << 4),
+};
+
+typedef struct {
+	uint8_t kind;            /* NDW_K_* */
+	uint8_t traits;          /* ND_SCENERY_TRAIT_* */
+	const char *harvest_cmd; /* "get", "fill", etc. */
+	const char *default_name;/* "stone", "tree", "rock", "pond" */
+} nd_scenery_trait_t;
+
 typedef struct {
 	int16_t x, y;
 	uint8_t kind;
+	uint8_t slot_id;
 	uint32_t entity_ref;
 	uint8_t harvested;
 	uint8_t stick_harvested;
@@ -25,10 +41,18 @@ typedef struct {
 	tracked_obj_t objs[NDW_MAX_OBJ];
 } room_tracker_t;
 
+const nd_scenery_trait_t *nd_seven_get_scenery_trait(uint8_t kind);
+int nd_seven_has_scenery_trait(uint8_t kind, uint8_t trait);
+
 void sync_room_objects(const nd_client_state_t *st);
 int is_tracked_obj_present(const nd_client_state_t *st, int k);
 const room_tracker_t *nd_seven_get_tracker(void);
 void nd_seven_objects_forget(void);
+
+void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
+                                  const nd_entity_desc_t *entities, size_t count);
+const nd_entity_desc_t *nd_seven_get_cached_entities(const int16_t pos[4], size_t *out_count, uint32_t *out_room_ref);
+int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id);
 
 void nd_seven_mark_picked(uint32_t entity_ref);
 int nd_seven_is_picked(uint32_t entity_ref);

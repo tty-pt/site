@@ -1012,6 +1012,67 @@ int main(void)
 		act_len = nd_seven_action(&st, act, sizeof(act));
 		assert(act_len == 0);
 		printf("PASS: seam boundary protection prevents targeting out-of-bounds objects\n");
+
+		/* 10. Table-driven scenery trait registry and deterministic slot identity */
+		const nd_scenery_trait_t *t_stone = nd_seven_get_scenery_trait(NDW_K_STONE);
+		assert(t_stone != NULL);
+		assert(t_stone->traits & ND_SCENERY_TRAIT_MINERAL);
+		assert(strcmp(t_stone->harvest_cmd, "get") == 0);
+
+		const nd_scenery_trait_t *t_tree = nd_seven_get_scenery_trait(NDW_K_DECID);
+		assert(t_tree != NULL);
+		assert(t_tree->traits & ND_SCENERY_TRAIT_FOLIAGE);
+		assert(t_tree->traits & ND_SCENERY_TRAIT_CONTAINER);
+
+		assert(nd_seven_has_scenery_trait(NDW_K_ROCK, ND_SCENERY_TRAIT_MINERAL));
+		assert(nd_seven_has_scenery_trait(NDW_K_BOULDER, ND_SCENERY_TRAIT_BLOCKING));
+		assert(!nd_seven_has_scenery_trait(NDW_K_STONE, ND_SCENERY_TRAIT_FOLIAGE));
+
+		assert(tr->objs[idx_s0].slot_id == 0);
+		assert(tr->objs[idx_s2].slot_id == 2);
+		printf("PASS: table-driven scenery traits and deterministic slot identity verified\n");
+
+		/* 11. Ground surface cache consistency */
+		static uint32_t g_fb1[640 * 480], g_fb2[640 * 480];
+		nd_seven_forget();
+		nd_seven_render(g_fb1, 640, 480, &st);
+		/* Second render should hit the ground tile cache */
+		nd_seven_render(g_fb2, 640, 480, &st);
+		assert(memcmp(g_fb1, g_fb2, sizeof(g_fb1)) == 0);
+		printf("PASS: ground surface cache hit produces pixel-identical rendering\n");
+
+		/* 12. Multi-room surrounding entity cache and cross-room picked suppression */
+		int16_t pos_east[4] = { 61, 60, 0, 1 };
+		nd_entity_desc_t east_ents[2];
+		memset(east_ents, 0, sizeof(east_ents));
+		east_ents[0].ref = 777;
+		east_ents[0].location = 301;
+		east_ents[0].side = 0;
+		strcpy(east_ents[0].name, "east stone");
+		east_ents[1].ref = 778;
+		east_ents[1].location = 301;
+		east_ents[1].side = 2;
+		strcpy(east_ents[1].name, "east rock");
+
+		nd_seven_cache_room_entities(301, pos_east, east_ents, 2);
+
+		size_t check_count = 0;
+		uint32_t check_room = 0;
+		const nd_entity_desc_t *retrieved = nd_seven_get_cached_entities(pos_east, &check_count, &check_room);
+		assert(retrieved != NULL);
+		assert(check_count == 2);
+		assert(check_room == 301);
+		assert(retrieved[0].ref == 777);
+
+		/* Before picking 777: neither side is picked */
+		assert(nd_seven_is_tile_obj_picked(pos_east, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 2) == 0);
+
+		/* Mark 777 picked: side 0 must report picked, side 2 must remain unpicked */
+		nd_seven_mark_picked(777);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 0) == 1);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 2) == 0);
+		printf("PASS: multi-room surrounding entity cache and cross-room picked suppression verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

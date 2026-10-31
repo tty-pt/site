@@ -176,6 +176,7 @@ typedef struct {
 	uint8_t fg;         /* ANSI colour of the map glyph */
 	uint8_t variant;    /* hash byte; the renderer picks the picture from it */
 	uint8_t glyph;      /* the map glyph */
+	uint8_t slot_id;    /* deterministic sub-cell spatial slot: 0=side 0, 1=side 1, 2=side 2 */
 	uint8_t hw, hh;     /* blocking box half width / height (0 = walkable) */
 	int16_t x, y;       /* foot point, tile local units */
 } ndw_obj_t;
@@ -349,6 +350,7 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 					memset(&o, 0, sizeof(o));
 					o.kind = ce->kind; o.big = (uint8_t)big;
 					o.fg = t->fg[s]; o.glyph = (uint8_t)g;
+					o.slot_id = (uint8_t)s;
 					ndw_plant_box(ce->kind, big, &o.hw, &o.hh);
 					xlo = third_lo + 6; xhi = third_hi - 6;
 					if (xlo < margin + o.hw) xlo = margin + o.hw;
@@ -413,6 +415,7 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 					memset(&o, 0, sizeof(o));
 					o.kind = ce->kind; o.big = ce->is_big;
 					o.fg = t->fg[s]; o.glyph = (uint8_t)g;
+					o.slot_id = (uint8_t)s;
 					o.hw = ce->hw; o.hh = ce->hh;
 					int obj_m = o.hw > 0 ? o.hw : 4;
 					xlo = third_lo + 4; xhi = third_hi - 4;
@@ -468,6 +471,7 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 			ndw_obj_t o;
 			memset(&o, 0, sizeof(o));
 			o.fg = t->fg[s]; o.glyph = (uint8_t)g;
+			o.slot_id = (uint8_t)s;
 			o.variant = (uint8_t)(ndw_next(&rng) & 0xFF);
 			o.x = (int16_t)cx;
 			o.y = (int16_t)(NDW_CENTER_Y + 14);
