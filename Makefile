@@ -263,7 +263,10 @@ test-mod: all test-data-dirs
 	@./scripts/run-with-server.sh sh -c '\
 		if [ -f "mods/$(MOD)/test.sh" ]; then (cd mods/$(MOD) && ./test.sh); fi'
 
-test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test
+test-nd-harvest: test-data-dirs
+	@AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all tests/e2e/nd-multi-room-harvest.test.ts
+
+test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test test-nd-harvest
 	@echo "Fast test suite passed!"
 
 test-e2e: test-data-dirs
