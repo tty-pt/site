@@ -1321,6 +1321,43 @@ int main(void)
 		printf("PASS: declarative scenery component registry and modular interact dispatch verified\n");
 	}
 
+	/* 20. Entering Seven tile North from non-Seven center (R1, R2, R3) */
+	{
+		/* Origin in non-seven tile: lamb at room center (80, 78) */
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+
+		/* Player steps North into adjacent Seven room (10, 11) via command or non-seven transition */
+		set_map_keep(10, 11, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+
+		int lx, ly, dir;
+		nd_seven_lamb(&lx, &ly, &dir, NULL);
+		/* Must be positioned at the South entrance threshold inside tile bounds */
+		assert(lx == NDW_CENTER_X);
+		assert(ly == NDW_TILE_H - NDW_FOOT_H - 4);
+		assert(dir == DIR_UP);
+		assert(lx >= 0 && lx < NDW_TILE_W);
+		assert(ly >= 0 && ly < NDW_TILE_H);
+
+		/* On the arrival frame, nd_seven_tick must NOT emit an automatic reverse move 'j' */
+		int mv = nd_seven_tick(&st, 0);
+		assert(mv == 0);
+
+		/* Also test entering South (10, 10) from center of (10, 11) */
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		set_map_keep(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_lamb(&lx, &ly, &dir, NULL);
+		assert(lx == NDW_CENTER_X);
+		assert(ly == NDW_FOOT_H + 4);
+		assert(dir == DIR_DOWN);
+		mv = nd_seven_tick(&st, 0);
+		assert(mv == 0);
+		printf("PASS: non-seven to seven entrance boundary positioning and zero auto-return verified\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

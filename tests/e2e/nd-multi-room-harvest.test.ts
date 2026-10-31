@@ -244,25 +244,27 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
     }
 
     // Search adjacent rooms for a room with mineral entities
-    const walkDirs = [
-      "k", "k", "k", "l", "l", "l", "j", "j", "j", "j",
-      "h", "h", "h", "h", "k", "k", "k", "k", "l", "l", "l", "l", "j", "j"
-    ];
+    const dirs = ["k", "l", "j", "h"];
     let stepIdx = 0;
 
-    while (!stoneToPick && stepIdx < walkDirs.length) {
+    while (!stoneToPick && stepIdx < 40) {
       for (const [_, item] of items) {
-        if (item.location === currentRoom && (item.name.includes("stone") || item.name.includes("rock"))) {
+        if (item.location === currentRoom && (item.name.includes("stone") || item.name.includes("rock") || item.name.includes("boulder"))) {
           stoneToPick = item;
           break;
         }
       }
       if (stoneToPick) break;
 
-      const dir = walkDirs[stepIdx++];
-      console.log(`[E2E] Searching for minerals: step ${stepIdx} ('${dir}')...`);
-      await conn.write(clientFrame(`${dir}\n`));
-      await sleep(800);
+      stepIdx++;
+      const prevRoom = currentRoom;
+      for (const dir of dirs) {
+        console.log(`[E2E] Searching for minerals: step ${stepIdx} ('${dir}')...`);
+        await conn.write(clientFrame(`${dir}\n`));
+        await sleep(600);
+        if (currentRoom !== prevRoom)
+          break;
+      }
     }
 
     console.log(`[E2E] Candidate stone to pick:`, stoneToPick ? `#${stoneToPick.ref} ("${stoneToPick.name}", side ${stoneToPick.side}) in room #${stoneToPick.location}` : "none found in search path");

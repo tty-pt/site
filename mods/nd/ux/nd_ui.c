@@ -762,16 +762,25 @@ ISO_EXPORT(void, wasm_canvas_render, void)
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 {
 	static uint32_t s_tick_counter = 0;
-	if (nd_ui_seven_active(&client_state) && width > 0 && height > 0)
+	static int s_prev_seven_active = 0;
+	int now_seven = nd_ui_seven_active(&client_state);
+
+	if (now_seven && width > 0 && height > 0)
 		seven_stage_fit(width, height);
 	s_tick_counter++;
 
 	/* Phase 2: Reconciliation (Ingest completed in wasm_ws_msg) */
+	if (now_seven && !s_prev_seven_active) {
+		/* Driver handshake: transitioning into seven from non-seven driver */
+		nd_seven_sync_origin(&client_state);
+	}
+	s_prev_seven_active = now_seven;
+
 	nd_seven_sync_origin(&client_state);
 	sync_room_objects(&client_state);
 
 	/* Phase 3: Simulation */
-	if (nd_ui_seven_active(&client_state)) {
+	if (now_seven) {
 		int mv = nd_seven_tick(&client_state, dt);
 		if (mv) {
 			char m[2] = { (char)mv, '\n' };

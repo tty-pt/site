@@ -70,20 +70,53 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		                   dx >= -1 && dx <= 1 && dj >= -1 && dj <= 1);
 
 		if (is_adjacent && (dx != 0 || dj != 0)) {
-			s_lx -= dx * NDW_TILE_W;
-			s_ly -= dj * NDW_TILE_H;
+			/* Check if lamb was physically stepping across the boundary seam */
+			if (dj == -1) { /* Stepping North into new tile */
+				if (s_pending_key == 'k' || s_ly <= NDW_FOOT_H) {
+					s_ly -= dj * NDW_TILE_H; /* +128 */
+				} else {
+					/* Entered from South doorway threshold */
+					s_lx = NDW_CENTER_X;
+					s_ly = NDW_TILE_H - NDW_FOOT_H - 4;
+					s_dir = DIR_UP;
+				}
+			} else if (dj == 1) { /* Stepping South into new tile */
+				if (s_pending_key == 'j' || s_ly >= NDW_TILE_H - NDW_FOOT_H) {
+					s_ly -= dj * NDW_TILE_H; /* -128 */
+				} else {
+					/* Entered from North doorway threshold */
+					s_lx = NDW_CENTER_X;
+					s_ly = NDW_FOOT_H + 4;
+					s_dir = DIR_DOWN;
+				}
+			}
 
-			/* Clamp smoothly to valid walk bounds without artificial teleport hops */
-			int min_x = -NDW_FOOT_HW;
-			int max_x = NDW_TILE_W + NDW_FOOT_HW;
-			int min_y = -NDW_FOOT_H;
-			int max_y = NDW_TILE_H + NDW_FOOT_H;
+			if (dx == 1) { /* Stepping East into new tile */
+				if (s_pending_key == 'l' || s_lx >= NDW_TILE_W - NDW_FOOT_HW) {
+					s_lx -= dx * NDW_TILE_W; /* -160 */
+				} else {
+					/* Entered from West doorway threshold */
+					s_lx = NDW_FOOT_HW + 4;
+					if (!dj) s_ly = NDW_CENTER_Y;
+					s_dir = DIR_RIGHT;
+				}
+			} else if (dx == -1) { /* Stepping West into new tile */
+				if (s_pending_key == 'h' || s_lx <= NDW_FOOT_HW) {
+					s_lx -= dx * NDW_TILE_W; /* +160 */
+				} else {
+					/* Entered from East doorway threshold */
+					s_lx = NDW_TILE_W - NDW_FOOT_HW - 4;
+					if (!dj) s_ly = NDW_CENTER_Y;
+					s_dir = DIR_LEFT;
+				}
+			}
 
-			if (s_lx < min_x) s_lx = min_x;
-			else if (s_lx > max_x) s_lx = max_x;
+			/* In-tile clamping: must strictly lie within [0, TILE-1] so ndw_fdiv is always 0 */
+			if (s_lx < 0) s_lx = 0;
+			else if (s_lx >= NDW_TILE_W) s_lx = NDW_TILE_W - 1;
 
-			if (s_ly < min_y) s_ly = min_y;
-			else if (s_ly > max_y) s_ly = max_y;
+			if (s_ly < 0) s_ly = 0;
+			else if (s_ly >= NDW_TILE_H) s_ly = NDW_TILE_H - 1;
 
 			s_pending_key = 0;
 			s_pending_t = 0;
