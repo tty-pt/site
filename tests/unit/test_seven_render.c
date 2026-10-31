@@ -1017,12 +1017,17 @@ int main(void)
 		const nd_scenery_trait_t *t_stone = nd_seven_get_scenery_trait(NDW_K_STONE);
 		assert(t_stone != NULL);
 		assert(t_stone->traits & ND_SCENERY_TRAIT_MINERAL);
+		assert(t_stone->default_slot == 0);
 		assert(strcmp(t_stone->harvest_cmd, "get") == 0);
+		assert(strcmp(t_stone->alias_stem, "stone") == 0);
 
 		const nd_scenery_trait_t *t_tree = nd_seven_get_scenery_trait(NDW_K_DECID);
 		assert(t_tree != NULL);
 		assert(t_tree->traits & ND_SCENERY_TRAIT_FOLIAGE);
 		assert(t_tree->traits & ND_SCENERY_TRAIT_CONTAINER);
+		assert(t_tree->default_slot == 1);
+		assert(strcmp(t_tree->harvest_cmd, "forage") == 0);
+		assert(strcmp(t_tree->alias_stem, "tree") == 0);
 
 		assert(nd_seven_has_scenery_trait(NDW_K_ROCK, ND_SCENERY_TRAIT_MINERAL));
 		assert(nd_seven_has_scenery_trait(NDW_K_BOULDER, ND_SCENERY_TRAIT_BLOCKING));

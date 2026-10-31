@@ -14,18 +14,18 @@ static const int8_t s_spots[16][2] = {
 static room_tracker_t s_tracker = { 0 };
 
 static const nd_scenery_trait_t s_scenery_traits[] = {
-	{ NDW_K_DECID,       ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, "get",  "tree" },
-	{ NDW_K_TALL,        ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, "get",  "tall tree" },
-	{ NDW_K_FIR,         ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, "get",  "fir tree" },
-	{ NDW_K_CACTUS,      ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_BLOCKING,  "get",  "cactus" },
-	{ NDW_K_STONE,       ND_SCENERY_TRAIT_MINERAL,                               "get",  "stone" },
-	{ NDW_K_ROCK,        ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  "get",  "rock" },
-	{ NDW_K_BOULDER,     ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  "get",  "boulder" },
-	{ NDW_K_POND,        ND_SCENERY_TRAIT_WATER,                                 "fill", "pond" },
-	{ NDW_K_SHOP,        ND_SCENERY_TRAIT_CONTAINER,                             "look", "shop" },
-	{ NDW_K_STAIRS_DOWN, 0,                                                      "down", "stairs down" },
-	{ NDW_K_STAIRS_UP,   0,                                                      "up",   "stairs up" },
-	{ 0, 0, NULL, NULL }
+	{ NDW_K_DECID,       ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tree" },
+	{ NDW_K_TALL,        ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "tall tree" },
+	{ NDW_K_FIR,         ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_CONTAINER, 1, "forage", "tree",    "fir tree" },
+	{ NDW_K_CACTUS,      ND_SCENERY_TRAIT_FOLIAGE | ND_SCENERY_TRAIT_BLOCKING,  1, "forage", "cactus",  "cactus" },
+	{ NDW_K_STONE,       ND_SCENERY_TRAIT_MINERAL,                               0, "get",    "stone",   "stone" },
+	{ NDW_K_ROCK,        ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "rock",    "rock" },
+	{ NDW_K_BOULDER,     ND_SCENERY_TRAIT_MINERAL | ND_SCENERY_TRAIT_BLOCKING,  0, "get",    "boulder", "boulder" },
+	{ NDW_K_POND,        ND_SCENERY_TRAIT_WATER,                                 1, "fill",   "pond",    "pond" },
+	{ NDW_K_SHOP,        ND_SCENERY_TRAIT_CONTAINER,                             1, "look",   "shop",    "shop" },
+	{ NDW_K_STAIRS_DOWN, 0,                                                      1, "down",   "stairs",  "stairs down" },
+	{ NDW_K_STAIRS_UP,   0,                                                      1, "up",     "stairs",  "stairs up" },
+	{ 0, 0, 0, NULL, NULL, NULL }
 };
 
 const nd_scenery_trait_t *nd_seven_get_scenery_trait(uint8_t kind)

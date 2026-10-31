@@ -17,7 +17,9 @@ enum {
 typedef struct {
 	uint8_t kind;            /* NDW_K_* */
 	uint8_t traits;          /* ND_SCENERY_TRAIT_* */
-	const char *harvest_cmd; /* "get", "fill", etc. */
+	uint8_t default_slot;    /* 0=side 0, 1=side 1, 2=side 2 */
+	const char *harvest_cmd; /* "get", "forage", "fill", etc. */
+	const char *alias_stem;  /* "stone", "acacia", "stick", "pond", etc. */
 	const char *default_name;/* "stone", "tree", "rock", "pond" */
 } nd_scenery_trait_t;
 
