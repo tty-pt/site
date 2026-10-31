@@ -221,9 +221,33 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
     await sleep(1500);
     console.log(`[E2E] Spawn room = #${currentRoom}, entities known = ${items.size}`);
 
-    // Search adjacent rooms for a room with mineral entities
+    // Look for mineral entities in current room or player inventory
     let stoneToPick: BcpItem | null = null;
-    const walkDirs = ["k", "k", "l", "l", "j", "j", "h", "h", "k", "l"];
+    let inventoryStone: BcpItem | null = null;
+
+    for (const [_, item] of items) {
+      if (item.location === currentRoom && (item.name.includes("stone") || item.name.includes("rock"))) {
+        stoneToPick = item;
+        break;
+      }
+      if (item.location === playerRef && (item.name.includes("stone") || item.name.includes("rock"))) {
+        inventoryStone = item;
+      }
+    }
+
+    if (!stoneToPick && inventoryStone) {
+      console.log(`[E2E] Dropping inventory stone #${inventoryStone.ref} into room #${currentRoom}...`);
+      await conn.write(clientFrame(`drop #${inventoryStone.ref}\n`));
+      await sleep(1000);
+      stoneToPick = items.get(inventoryStone.ref) || null;
+      if (stoneToPick) stoneToPick.location = currentRoom;
+    }
+
+    // Search adjacent rooms for a room with mineral entities
+    const walkDirs = [
+      "k", "k", "k", "l", "l", "l", "j", "j", "j", "j",
+      "h", "h", "h", "h", "k", "k", "k", "k", "l", "l", "l", "l", "j", "j"
+    ];
     let stepIdx = 0;
 
     while (!stoneToPick && stepIdx < walkDirs.length) {
@@ -238,7 +262,7 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
       const dir = walkDirs[stepIdx++];
       console.log(`[E2E] Searching for minerals: step ${stepIdx} ('${dir}')...`);
       await conn.write(clientFrame(`${dir}\n`));
-      await sleep(1000);
+      await sleep(800);
     }
 
     console.log(`[E2E] Candidate stone to pick:`, stoneToPick ? `#${stoneToPick.ref} ("${stoneToPick.name}", side ${stoneToPick.side}) in room #${stoneToPick.location}` : "none found in search path");
