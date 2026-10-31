@@ -1358,6 +1358,30 @@ int main(void)
 		printf("PASS: non-seven to seven entrance boundary positioning and zero auto-return verified\n");
 	}
 
+	/* 21. nd_seven_reset_input clears held keys, walking state and pending moves (R1) */
+	{
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+
+		/* Press and hold right key 'd' */
+		nd_seven_key("d", 1);
+		nd_seven_tick(&st, 1.0f / 60);
+		assert(nd_seven_get_walking() == 1);
+		int lx1, ly1;
+		nd_seven_lamb(&lx1, &ly1, NULL, NULL);
+		assert(lx1 > NDW_CENTER_X);
+
+		/* Reset input atomically */
+		nd_seven_reset_input();
+		nd_seven_tick(&st, 1.0f / 60);
+		assert(nd_seven_get_walking() == 0);
+		int lx2, ly2;
+		nd_seven_lamb(&lx2, &ly2, NULL, NULL);
+		assert(lx2 == lx1); /* Zero velocity applied after reset */
+		printf("PASS: nd_seven_reset_input clears held keys, walking state and pending moves\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

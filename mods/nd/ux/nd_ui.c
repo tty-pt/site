@@ -528,7 +528,7 @@ static int nd_ui_seven_active(const nd_client_state_t *st)
 static int on_key_up(bud_event *e)
 {
 	const char *key = (const char *)e->user;
-	if (!key || !*key || !nd_ui_seven_active(&client_state))
+	if (!key || !*key)
 		return 0;
 	return nd_seven_key(key, 0);
 }
@@ -770,11 +770,13 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	s_tick_counter++;
 
 	/* Phase 2: Reconciliation (Ingest completed in wasm_ws_msg) */
-	if (now_seven && !s_prev_seven_active) {
-		/* Driver handshake: transitioning into seven from non-seven driver */
-		nd_seven_sync_origin(&client_state);
+	if (now_seven != s_prev_seven_active) {
+		/* Driver handshake: entering or exiting Seven stage */
+		nd_seven_reset_input();
+		if (now_seven)
+			nd_seven_sync_origin(&client_state);
+		s_prev_seven_active = now_seven;
 	}
-	s_prev_seven_active = now_seven;
 
 	nd_seven_sync_origin(&client_state);
 	sync_room_objects(&client_state);

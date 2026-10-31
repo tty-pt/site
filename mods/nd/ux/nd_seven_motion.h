@@ -32,6 +32,7 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 /* Movement and collision */
 int nd_seven_key(const char *key, int down);
 int nd_seven_move(const nd_client_state_t *st, int key, int down);
+void nd_seven_reset_input(void);
 int nd_seven_tick(const nd_client_state_t *st, float dt);
 int nd_seven_collision(const nd_client_state_t *st, int x, int y);
 void nd_seven_collision_invalidate(void);

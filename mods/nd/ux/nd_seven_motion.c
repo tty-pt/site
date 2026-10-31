@@ -28,6 +28,15 @@ int nd_seven_get_walking(void) { return s_walking; }
 uint32_t nd_seven_get_anim(void) { return s_anim; }
 void nd_seven_step_anim(uint32_t delta) { s_anim += delta; }
 
+void nd_seven_reset_input(void)
+{
+	s_held = 0;
+	s_last = 0;
+	s_walking = 0;
+	s_pending_key = 0;
+	s_pending_t = 0;
+}
+
 static void recentre(int drop_keys)
 {
 	s_lx = NDW_CENTER_X;
@@ -37,6 +46,7 @@ static void recentre(int drop_keys)
 	if (drop_keys) {
 		s_held = 0;
 		s_last = 0;
+		s_walking = 0;
 	}
 }
 
@@ -204,6 +214,7 @@ void nd_seven_forget(void)
 	nd_seven_ground_cache_forget();
 	nd_seven_collision_invalidate();
 	nd_spatial_resolver_invalidate();
+	nd_seven_reset_input();
 	s_have = 0;
 	recentre(1);
 }

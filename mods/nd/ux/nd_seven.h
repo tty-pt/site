@@ -18,6 +18,7 @@
 
 /* Feed a key event. Returns 1 if the key drives the lamb (and was consumed). */
 int nd_seven_key(const char *key, int down);
+void nd_seven_reset_input(void);
 
 /*
  * Advance the lamb by dt seconds. Returns the NeverDark move key ('h','j','k',
