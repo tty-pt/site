@@ -55,6 +55,7 @@ void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
                                   const nd_entity_desc_t *entities, size_t count);
 const nd_entity_desc_t *nd_seven_get_cached_entities(const int16_t pos[4], size_t *out_count, uint32_t *out_room_ref);
 int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id);
+void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id);
 
 void nd_seven_mark_picked(uint32_t entity_ref);
 int nd_seven_is_picked(uint32_t entity_ref);

@@ -62,6 +62,14 @@ void nd_seven_mark_picked(uint32_t entity_ref)
 		s_picked_refs[s_picked_head] = entity_ref;
 		s_picked_head = (s_picked_head + 1) % MAX_PICKED_REFS;
 	}
+
+	for (int k = 0; k < s_tracker.count; k++) {
+		if (s_tracker.objs[k].entity_ref == entity_ref) {
+			s_tracker.objs[k].harvested = 1;
+			if (nd_seven_has_scenery_trait(s_tracker.objs[k].kind, ND_SCENERY_TRAIT_MINERAL))
+				nd_seven_mark_tile_slot_harvested(s_tracker.pos, s_tracker.objs[k].slot_id);
+		}
+	}
 }
 
 int nd_seven_is_picked(uint32_t entity_ref)
@@ -94,11 +102,34 @@ typedef struct {
 	int16_t pos[4];
 	size_t entity_count;
 	uint8_t valid;
+	uint8_t slot_harvested[3];
 	nd_entity_desc_t entities[ND_MAX_ENTITIES];
 } room_entity_cache_entry_t;
 
 static room_entity_cache_entry_t s_room_cache[MULTI_ROOM_CACHE_SIZE];
 static unsigned s_room_cache_next = 0;
+
+void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
+{
+	if (!pos || slot_id >= 3)
+		return;
+
+	room_entity_cache_entry_t *entry = NULL;
+	for (size_t i = 0; i < MULTI_ROOM_CACHE_SIZE; i++) {
+		if (s_room_cache[i].valid &&
+		    memcmp(s_room_cache[i].pos, pos, sizeof(s_room_cache[i].pos)) == 0) {
+			entry = &s_room_cache[i];
+			break;
+		}
+	}
+	if (!entry) {
+		entry = &s_room_cache[s_room_cache_next++ % MULTI_ROOM_CACHE_SIZE];
+		memset(entry, 0, sizeof(*entry));
+		memcpy(entry->pos, pos, sizeof(entry->pos));
+		entry->valid = 1;
+	}
+	entry->slot_harvested[slot_id] = 1;
+}
 
 void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
                                   const nd_entity_desc_t *entities, size_t count)
@@ -117,12 +148,22 @@ void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
 	}
 	if (!entry) {
 		entry = &s_room_cache[s_room_cache_next++ % MULTI_ROOM_CACHE_SIZE];
+		memset(entry->slot_harvested, 0, sizeof(entry->slot_harvested));
 	}
 	entry->room_ref = room_ref;
 	memcpy(entry->pos, pos, sizeof(entry->pos));
 	entry->entity_count = (count > ND_MAX_ENTITIES) ? ND_MAX_ENTITIES : count;
-	if (entities && count > 0)
+	if (entities && count > 0) {
 		memcpy(entry->entities, entities, entry->entity_count * sizeof(nd_entity_desc_t));
+		for (size_t i = 0; i < entry->entity_count; i++) {
+			if (entry->entities[i].location == room_ref &&
+			    is_stone_or_rock(&entry->entities[i]) &&
+			    entry->entities[i].side < 3 &&
+			    nd_seven_is_picked(entry->entities[i].ref)) {
+				entry->slot_harvested[entry->entities[i].side] = 1;
+			}
+		}
+	}
 	entry->valid = 1;
 }
 
@@ -151,15 +192,18 @@ int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id)
 {
 	if (!pos)
 		return 0;
-	size_t count = 0;
-	uint32_t room_ref = 0;
-	const nd_entity_desc_t *ents = nd_seven_get_cached_entities(pos, &count, &room_ref);
-	if (!ents || count == 0)
-		return 0;
-	for (size_t i = 0; i < count; i++) {
-		if (ents[i].location == room_ref && ents[i].side == slot_id &&
-		    nd_seven_is_picked(ents[i].ref))
-			return 1;
+	for (size_t i = 0; i < MULTI_ROOM_CACHE_SIZE; i++) {
+		if (s_room_cache[i].valid &&
+		    memcmp(s_room_cache[i].pos, pos, sizeof(s_room_cache[i].pos)) == 0) {
+			if (slot_id < 3 && s_room_cache[i].slot_harvested[slot_id])
+				return 1;
+			for (size_t j = 0; j < s_room_cache[i].entity_count; j++) {
+				if (s_room_cache[i].entities[j].side == slot_id &&
+				    nd_seven_is_picked(s_room_cache[i].entities[j].ref))
+					return 1;
+			}
+			return 0;
+		}
 	}
 	return 0;
 }
@@ -359,6 +403,9 @@ void sync_room_objects(const nd_client_state_t *st)
 		int is_foliage = nd_seven_has_scenery_trait(objs[k].kind, ND_SCENERY_TRAIT_FOLIAGE);
 		uint8_t obj_slot = objs[k].slot_id;
 
+		if (is_mineral && nd_seven_is_tile_obj_picked(pos, obj_slot))
+			s_tracker.objs[k].harvested = 1;
+
 		if (is_mineral) {
 			for (size_t ei = 0; ei < st->entity_count; ei++) {
 				if (used_entity[ei])
@@ -474,9 +521,6 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	if (!st || !st->room.ref || k < 0 || k >= s_tracker.count)
 		return 1;
 
-	if (s_tracker.objs[k].harvested)
-		return 0;
-
 	uint8_t kind = s_tracker.objs[k].kind;
 	int is_scenery = (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR || kind == NDW_K_CACTUS ||
 	                  kind == NDW_K_POND || kind == NDW_K_SHOP || kind == NDW_K_STAIRS_DOWN || kind == NDW_K_STAIRS_UP);
@@ -484,6 +528,13 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	/* Permanent landscape and world features from the map tile must never be suppressed by entity counts */
 	if (is_scenery)
 		return 1;
+
+	if (s_tracker.objs[k].harvested)
+		return 0;
+
+	uint8_t slot_id = s_tracker.objs[k].slot_id;
+	if (slot_id < 3 && nd_seven_is_tile_obj_picked(st->map_data.pos, slot_id))
+		return 0;
 
 	if (s_tracker.objs[k].entity_ref != 0) {
 		if (nd_seven_is_picked(s_tracker.objs[k].entity_ref))
@@ -499,8 +550,12 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	/* Unbound mineral: if room entities are loaded in an instantiated room,
 	 * any mineral that does not exist in Corm DB has been harvested/cleared */
 	int is_mineral = (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER);
-	if (is_mineral && st->room.ref != 0 && st->entity_count > 0)
-		return 0;
+	if (is_mineral && st->room.ref != 0) {
+		if (st->entity_count > 0)
+			return 0;
+		if (slot_id < 3 && nd_seven_is_tile_obj_picked(st->map_data.pos, slot_id))
+			return 0;
+	}
 
 	return 1;
 }
@@ -800,10 +855,12 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 		if (execute) {
 			if (best_tracker_k >= 0 && best_tracker_k < s_tracker.count) {
 				uint8_t kind = s_tracker.objs[best_tracker_k].kind;
-				if (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER)
+				if (kind == NDW_K_STONE || kind == NDW_K_ROCK || kind == NDW_K_BOULDER) {
 					s_tracker.objs[best_tracker_k].harvested = 1;
-				else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR)
+					nd_seven_mark_tile_slot_harvested(st->map_data.pos, s_tracker.objs[best_tracker_k].slot_id);
+				} else if (kind == NDW_K_DECID || kind == NDW_K_TALL || kind == NDW_K_FIR) {
 					s_tracker.objs[best_tracker_k].stick_harvested = 1;
+				}
 			}
 			if (best_picked_ref && strncmp(best_cmd, "get ", 4) == 0)
 				nd_seven_mark_picked(best_picked_ref);

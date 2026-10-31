@@ -931,9 +931,11 @@ ndw_blend_px(const uint32_t c[9], const uint16_t w[9])
  */
 typedef int (*ndw_lookup_fn)(void *ctx, int ti, int tj, ndw_tile_t *t, int16_t pos[4]);
 
-/* 1 if the foot box ending on (fx, fy), in origin tile units, is blocked. */
+/* 1 if the foot box ending on (fx, fy), in origin tile units, is blocked.
+ * If filter_obj is non-NULL, any object where filter_obj returns non-zero is ignored for collision. */
 static inline int
-ndw_blocked(ndw_lookup_fn lookup, void *ctx, int fx, int fy)
+ndw_blocked_filter(ndw_lookup_fn lookup, void *ctx, int fx, int fy,
+                   int (*filter_obj)(void *ctx, const int16_t pos[4], const ndw_obj_t *obj))
 {
 	int x0 = fx - NDW_FOOT_HW, x1 = fx + NDW_FOOT_HW;   /* half open */
 	int y0 = fy - NDW_FOOT_H,  y1 = fy;
@@ -961,12 +963,21 @@ ndw_blocked(ndw_lookup_fn lookup, void *ctx, int fx, int fy)
 				ndw_rect_t r;
 				if (!obj[i].hw)
 					continue;
+				if (filter_obj && filter_obj(ctx, pos, &obj[i]))
+					continue;
 				r = ndw_obj_rect(&obj[i]);
 				if (ndw_rect_hit(&foot, &r))
 					return 1;
 			}
 		}
 	return 0;
+}
+
+/* 1 if the foot box ending on (fx, fy), in origin tile units, is blocked. */
+static inline int
+ndw_blocked(ndw_lookup_fn lookup, void *ctx, int fx, int fy)
+{
+	return ndw_blocked_filter(lookup, ctx, fx, fy, NULL);
 }
 
 #endif /* ND_SEVEN_WORLD_H */

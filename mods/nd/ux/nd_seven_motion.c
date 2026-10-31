@@ -71,6 +71,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		int ex = 0, ej = 0;
 		if (s_pending_key)
 			key_delta(s_pending_key, &ex, &ej);
+
 		if (s_pending_key && pos[2] == s_pos[2] && pos[3] == s_pos[3] && dx == ex && dj == ej) {
 			s_lx -= dx * NDW_TILE_W;
 			s_ly -= dj * NDW_TILE_H;
@@ -262,10 +263,35 @@ int nd_seven_key(const char *key, int down)
 	return 1;
 }
 
+static int is_motion_obj_picked(void *ctx, const int16_t pos[4], const ndw_obj_t *o)
+{
+	const world_t *wd = (const world_t *)ctx;
+	if (!wd || !wd->st || !o || !pos)
+		return 0;
+
+	/* Current origin tile */
+	if (pos[0] == s_pos[0] && pos[1] == s_pos[1] &&
+	    pos[2] == s_pos[2] && pos[3] == s_pos[3]) {
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		if (tr && tr->count > 0) {
+			for (int k = 0; k < tr->count; k++) {
+				if (tr->objs[k].x == o->x && tr->objs[k].y == o->y &&
+				    tr->objs[k].kind == o->kind && tr->objs[k].slot_id == o->slot_id) {
+					return !is_tracked_obj_present(wd->st, k);
+				}
+			}
+		}
+		return nd_seven_is_tile_obj_picked(pos, o->slot_id);
+	}
+
+	/* Surrounding / adjacent tile */
+	return nd_seven_is_tile_obj_picked(pos, o->slot_id);
+}
+
 static void move_axis(world_t *wd, int dx, int dy)
 {
 	int nx = s_lx + dx, ny = s_ly + dy;
-	if (ndw_blocked(lookup, wd, nx, ny))
+	if (ndw_blocked_filter(lookup, wd, nx, ny, is_motion_obj_picked))
 		return;
 	s_lx = nx;
 	s_ly = ny;

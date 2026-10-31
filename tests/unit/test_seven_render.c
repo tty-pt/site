@@ -1078,6 +1078,137 @@ int main(void)
 		assert(nd_seven_is_tile_obj_picked(pos_east, 0) == 1);
 		assert(nd_seven_is_tile_obj_picked(pos_east, 2) == 0);
 		printf("PASS: multi-room surrounding entity cache and cross-room picked suppression verified\n");
+
+		/* 13. Rock collision before vs after picking (R1) */
+		set_map(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0); /* rock at side 0 */
+		st.room.ref = 120;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 888;
+		st.entities[0].location = 120;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'o';
+		strcpy(st.entities[0].name, "granite rock");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		assert(tr->objs[0].kind == NDW_K_ROCK);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+		int rx = tr->objs[0].x, ry = tr->objs[0].y;
+
+		/* Position lamb directly south of rock base (outside South wall which starts at y=112) */
+		nd_seven_set_lamb(rx, ry + 4);
+		/* Attempt to walk North into rock body */
+		nd_seven_key("w", 1);
+		for (int i = 0; i < 40; i++) nd_seven_tick(&st, 1.0f / 60);
+		nd_seven_key("w", 0);
+		int blocked_x, blocked_y;
+		nd_seven_lamb(&blocked_x, &blocked_y, NULL, NULL);
+		/* Lamb must be blocked by the rock collision box (cannot walk through rock) */
+		assert(blocked_y >= ry);
+
+		/* Approach rock and pick it */
+		char rock_act[64] = { 0 };
+		int r_act_len = nd_seven_action(&st, rock_act, sizeof(rock_act));
+		assert(r_act_len > 0);
+		assert(strcmp(rock_act, "get #888\n") == 0);
+
+		r_act_len = nd_seven_action_execute(&st, rock_act, sizeof(rock_act));
+		assert(r_act_len > 0);
+		assert(nd_seven_is_picked(888) == 1);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* Now walk North directly through the picked rock position */
+		nd_seven_set_lamb(rx, ry + 4);
+		nd_seven_key("w", 1);
+		for (int i = 0; i < 40; i++) nd_seven_tick(&st, 1.0f / 60);
+		nd_seven_key("w", 0);
+		int free_x, free_y;
+		nd_seven_lamb(&free_x, &free_y, NULL, NULL);
+		/* Lamb successfully walked past the rock (free_y reached or passed the rock) */
+		assert(free_y < ry);
+		printf("PASS: rock blocks collision before picking, clears collision after picking\n");
+
+		/* 14. Non-teleporting adjacent room transitions through doorway seams (R2) */
+		set_map(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		/* Lamb walks East to the doorway seam */
+		key = 0;
+		hold("d", 600, &key);
+		assert(key == 'l');
+		int seam_out_x, seam_out_y;
+		nd_seven_lamb(&seam_out_x, &seam_out_y, NULL, NULL);
+		assert(seam_out_x >= NDW_TILE_W);
+
+		/* Server adopts the move to adjacent room East (31, 30) */
+		set_map_keep(31, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		int seam_x, seam_y;
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		/* Lamb enters at West doorway seam of adjacent room (not teleported to center 80, 78) */
+		assert(seam_x == seam_out_x - NDW_TILE_W);
+		assert(seam_x >= 0 && seam_x < NDW_CENTER_X);
+		assert(seam_y == seam_out_y);
+
+		/* Walk West back through doorway seam */
+		key = 0;
+		hold("a", 600, &key);
+		assert(key == 'h');
+		nd_seven_lamb(&seam_out_x, &seam_out_y, NULL, NULL);
+		assert(seam_out_x < 0);
+
+		/* Server adopts the move West back to room (30, 30) */
+		set_map_keep(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		assert(seam_x == seam_out_x + NDW_TILE_W);
+		assert(seam_x >= NDW_CENTER_X);
+		printf("PASS: room transitions through doorway seams preserve continuous entrance coordinates\n");
+
+		/* 15. Multi-room harvest persistence across room re-entry (R3) */
+		set_map(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0); /* boulder in room 50,50 */
+		st.room.ref = 250;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 999;
+		st.entities[0].location = 250;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'O';
+		strcpy(st.entities[0].name, "ancient boulder");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+
+		/* Pick the boulder in room 250 */
+		nd_seven_mark_picked(999);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(st.map_data.pos, 0) == 1);
+
+		/* Leave to adjacent room (51, 50) */
+		set_map_keep(51, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.room.ref = 251;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Looking back at previous room (50, 50): boulder slot 0 remains picked */
+		int16_t prev_room_pos[4] = { 50, 50, 0, 0 };
+		assert(nd_seven_is_tile_obj_picked(prev_room_pos, 0) == 1);
+
+		/* Re-enter room 250 at (50, 50) with 0 entities loaded */
+		set_map_keep(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0);
+		st.room.ref = 250;
+		st.entity_count = 0; /* Server entity list is now empty */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Boulder must remain suppressed upon re-entry */
+		assert(is_tracked_obj_present(&st, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(st.map_data.pos, 0) == 1);
+		printf("PASS: multi-room mineral persistence across room leave and re-entry verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

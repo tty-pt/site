@@ -344,6 +344,16 @@ static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 			if (cw < 5) cw = 5;
 			draw_plant(fb, w, h, fx - cw / 2, fy - ch, cw, ch, o->glyph, ansi_rgb(o->fg));
 		} else if (o->kind >= NDW_K_STONE && o->kind <= NDW_K_BOULDER) {
+			if (map) {
+				int16_t tile_pos[4] = {
+					(int16_t)(map->pos[0] + (col - (int)map->player_x)),
+					(int16_t)(map->pos[1] - (row - (int)map->player_y)),
+					map->pos[2],
+					map->pos[3]
+				};
+				if (nd_seven_is_tile_obj_picked(tile_pos, o->slot_id))
+					continue;
+			}
 			if (tr && i < tr->count) {
 				if (tr->objs[i].harvested ||
 				    (tr->objs[i].entity_ref && nd_seven_is_picked(tr->objs[i].entity_ref)))
