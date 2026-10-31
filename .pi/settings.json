@@ -32,9 +32,9 @@
     "judgeFallback": "skip",
     "roles": {
       "reviewer": [
-        "anthropic/claude-sonnet-5-5:low",
+        "antigravity/gemini-3.8-flash",
         "antigravity/claude-sonnet-5-5",
-        "antigravity/gemini-3.8-flash"
+        "anthropic/claude-sonnet-5-5:low"
       ],
       "validator": [
         "antigravity/gemini-3.8-flash",
