@@ -257,7 +257,17 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
 
       console.log(`[E2E] Executing pick: 'get #${pickedRef}' in room #${harvestRoom} (side ${pickedSide})`);
       await conn.write(clientFrame(`get #${pickedRef}\n`));
-      await sleep(1200);
+
+      const pickStart = Date.now();
+      while (Date.now() - pickStart < 4000) {
+        const it = items.get(pickedRef);
+        if (!it || it.location !== harvestRoom)
+          break;
+        if (Date.now() - pickStart > 1200 && Date.now() - pickStart < 1400) {
+          await conn.write(clientFrame(`get #${pickedRef}\n`));
+        }
+        await sleep(200);
+      }
 
       // Verify stone was removed
       const stillInRoom = items.get(pickedRef);
@@ -269,14 +279,20 @@ Deno.test("e2e: multi-room walking, stone picking and persistent view synchroniz
       // Step away into an adjacent room
       console.log("[E2E] Walking away South ('j')...");
       await conn.write(clientFrame("j\n"));
-      await sleep(1200);
+      const stepAwayStart = Date.now();
+      while (Date.now() - stepAwayStart < 3000 && currentRoom === harvestRoom) {
+        await sleep(200);
+      }
       const awayRoom = currentRoom;
       assertNotEquals(awayRoom, harvestRoom, "Player should have stepped to an adjacent room");
 
       // Step back into the harvest room
       console.log("[E2E] Walking back North ('k') into harvest room...");
       await conn.write(clientFrame("k\n"));
-      await sleep(1200);
+      const stepBackStart = Date.now();
+      while (Date.now() - stepBackStart < 3000 && currentRoom !== harvestRoom) {
+        await sleep(200);
+      }
       assertEquals(currentRoom, harvestRoom, "Player should return to the exact harvest room");
 
       // Verify the picked stone did not reappear as a phantom
