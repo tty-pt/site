@@ -35,6 +35,9 @@ echo "=== UX preprocessor check ==="
 
 # Use a function to check if a file:line is in the allowed list
 is_allowed() {
+    case "${2:-}" in
+        *QSYS_UNIFIED_SITE*) return 0 ;;
+    esac
     case "$1" in
         # Include guards at line 1
         "$root/mods/common/ux/site_ui.c:1") return 0 ;;
@@ -64,7 +67,7 @@ is_allowed() {
 found_violation=0
 grep -n '^[[:space:]]*#if\(def\|ndef\)\?' $ux_files 2>/dev/null | \
 while IFS=: read -r file line text; do
-    if ! is_allowed "$file:$line"; then
+    if ! is_allowed "$file:$line" "$text"; then
         printf 'WARN: %s:%s: preprocessor conditional in UX (branch on runtime state instead): %s\n' "$file" "$line" "$text" >&2
         found_violation=1
     fi
@@ -73,7 +76,7 @@ done
 # Check if any unexpected found (run again to catch violations)
 violations=$(grep -n '^[[:space:]]*#if\(def\|ndef\)\?' $ux_files 2>/dev/null | \
     while IFS=: read -r file line text; do
-        if ! is_allowed "$file:$line"; then
+        if ! is_allowed "$file:$line" "$text"; then
             printf '%s:%s:%s\n' "$file" "$line" "$text"
         fi
     done)

@@ -6,6 +6,8 @@
 #include <nd/seven-world.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas.h"
+#include "nd_seven_objects.h"
+#include "nd_seven_motion.h"
 
 #define MAXW 1920
 #define MAXH 1080
@@ -40,6 +42,7 @@ static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
 {
 	nd_seven_forget();
 	set_map_keep(x, y, biome, exits, flags, gl, gc, gr);
+	nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
 }
 
 /* The packed sprite atlas as palette indices, decoded once. */
@@ -358,6 +361,26 @@ int main(void)
 		printf("PASS: a stone entity draws as a stone sprite at its spot, a goblin as a pawn\n");
 	}
 
+	/* Player named entities and non-landscape entities are never bound to trees */
+	{
+		set_map(5, -3, 10, 0x1B, 0, 'x', 0, 0); /* an oak tree glyph */
+		st.room.ref = 15;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 2; /* other player or entity */
+		st.entities[0].location = 15;
+		st.entities[0].type = 1; /* TYPE_ENTITY */
+		strcpy(st.entities[0].name, "quirinpa");
+		sync_room_objects(&st);
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		for (int k = 0; k < tr->count; k++) {
+			assert(tr->objs[k].entity_ref != 2);
+			assert(strcmp(tr->objs[k].name, "quirinpa") != 0);
+		}
+		printf("PASS: player entities are never bound as trees or landscape elements\n");
+	}
+
 	/* Terrain carries no rocks, stones or mushrooms: the empty map draws only
 	 * grass, the two yellow decor sprites and the lamb (no entity, no glyph). */
 	{
@@ -523,7 +546,7 @@ int main(void)
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
 	nd_seven_render(fb, 1280, 720, &st);
 	/* the server moved us east: same world, shifted origin, same pixels */
-	set_map(41, 40, 10, 0x1B, 0, 0, 0, 0);
+	set_map_keep(41, 40, 10, 0x1B, 0, 0, 0, 0);
 	nd_seven_render(fb2, 1280, 720, &st);
 	{
 		int nfx, nfy;
@@ -551,7 +574,7 @@ int main(void)
 			hold(d[i].k, 600, &key);
 			assert(key == d[i].ch);
 			nd_seven_lamb(&fx2, &fy2, &dir, &walking);
-			set_map(40 + d[i].dx, 40 + d[i].dy, 10, 0x1B, 0, 0, 0, 0);
+			set_map_keep(40 + d[i].dx, 40 + d[i].dy, 10, 0x1B, 0, 0, 0, 0);
 			nd_seven_tick(&st, 0);
 			int sx, sy;
 			nd_seven_lamb(&sx, &sy, &dir, &walking);
@@ -600,6 +623,104 @@ int main(void)
 	hold("a", 600, &key);
 	assert(key == 'h');
 	printf("PASS: room walls block where an exit is missing; open country never does\n");
+
+	/* Walking out of a room transitions seamlessly without teleportation or snapping */
+	{
+		/* 1. Walk East ('d' -> 'l') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("d", 600, &key);
+		assert(key == 'l');
+		int out_x, out_y;
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_x >= NDW_TILE_W);
+		/* Server adopts the move to adjacent wilderness tile East (41, 40) */
+		set_map_keep(41, 40, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		int new_x, new_y;
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x - NDW_TILE_W && new_y == out_y);
+		assert(new_x >= 0 && new_x < NDW_TILE_W);
+
+		/* 2. Walk North ('w' -> 'k') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("w", 600, &key);
+		assert(key == 'k');
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_y < 0);
+		/* Server adopts the move to adjacent wilderness tile North (40, 41) */
+		set_map_keep(40, 41, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x && new_y == out_y + NDW_TILE_H);
+		assert(new_y >= 0 && new_y < NDW_TILE_H);
+
+		/* 3. Walk South ('s' -> 'j') */
+		set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		key = 0;
+		hold("s", 600, &key);
+		assert(key == 'j');
+		nd_seven_lamb(&out_x, &out_y, NULL, NULL);
+		assert(out_y >= NDW_TILE_H);
+		/* Server adopts the move to adjacent wilderness tile South (40, 39) */
+		set_map_keep(40, 39, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&new_x, &new_y, NULL, NULL);
+		assert(new_x == out_x && new_y == out_y - NDW_TILE_H);
+		assert(new_y >= 0 && new_y < NDW_TILE_H);
+
+		printf("PASS: walking out of a room (East, North, South) shifts origin smoothly without teleportation\n");
+	}
+
+	/* North/South/East/West tile indexing and world coords in nd_seven_tile_at */
+	{
+		set_map(50, 60, 10, 0x1B, 0, 0, 0, 0);
+		/* Mark North tile (row 2, col 3) with biome 2 */
+		st.map_data.tiles[2 * 7 + 3].bio_idx = 2;
+		st.map_data.tiles[2 * 7 + 3].symbol = 'N';
+		/* Mark South tile (row 4, col 3) with biome 4 */
+		st.map_data.tiles[4 * 7 + 3].bio_idx = 4;
+		st.map_data.tiles[4 * 7 + 3].symbol = 'S';
+		/* Mark East tile (row 3, col 4) with biome 6 */
+		st.map_data.tiles[3 * 7 + 4].bio_idx = 6;
+		st.map_data.tiles[3 * 7 + 4].symbol = 'E';
+		/* Mark West tile (row 3, col 2) with biome 8 */
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 8;
+		st.map_data.tiles[3 * 7 + 2].symbol = 'W';
+
+		ndw_tile_t t;
+		int16_t pos[4];
+
+		/* Center: ti=0, tj=0 -> row 3, col 3, world (50, 60) */
+		assert(nd_seven_tile_at(&st, 0, 0, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 60);
+
+		/* North: ti=0, tj=-1 -> row 2, col 3, world (50, 61), symbol 'N', biome 2 */
+		assert(nd_seven_tile_at(&st, 0, -1, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 61);
+		assert(t.biome == 2 && t.glyph[1] == 'N');
+
+		/* South: ti=0, tj=1 -> row 4, col 3, world (50, 59), symbol 'S', biome 4 */
+		assert(nd_seven_tile_at(&st, 0, 1, &t, pos) == 1);
+		assert(pos[0] == 50 && pos[1] == 59);
+		assert(t.biome == 4 && t.glyph[1] == 'S');
+
+		/* East: ti=1, tj=0 -> row 3, col 4, world (51, 60), symbol 'E', biome 6 */
+		assert(nd_seven_tile_at(&st, 1, 0, &t, pos) == 1);
+		assert(pos[0] == 51 && pos[1] == 60);
+		assert(t.biome == 6 && t.glyph[1] == 'E');
+
+		/* West: ti=-1, tj=0 -> row 3, col 2, world (49, 60), symbol 'W', biome 8 */
+		assert(nd_seven_tile_at(&st, -1, 0, &t, pos) == 1);
+		assert(pos[0] == 49 && pos[1] == 60);
+		assert(t.biome == 8 && t.glyph[1] == 'W');
+
+		printf("PASS: nd_seven_tile_at maps North/South/East/West tile rows and world coordinates correctly\n");
+	}
 
 	/* Organic biome borders: the grass|desert border is not the tile edge. The
 	 * lamb stands in the first desert tile at 1280x720, so the tile edge is at
@@ -676,6 +797,919 @@ int main(void)
 			west_sand += first_sand_run(fb, W, y, EDGE - 60, EDGE - 1) >= 0;
 		assert(west_sand > 10);
 		printf("PASS: a room's edge blends organically against wilderness\n");
+	}
+
+	/* Persistent picked object tracking, cross-room stability, and database entities */
+	{
+		nd_seven_forget();
+		nd_seven_forget_picked();
+
+		/* 1. Picked tracker basic properties */
+		assert(nd_seven_is_picked(100) == 0);
+		nd_seven_mark_picked(100);
+		assert(nd_seven_is_picked(100) == 1);
+		assert(nd_seven_is_picked(101) == 0);
+
+		/* 2. Room 10: has a stone entity #100 */
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		nd_seven_mark_picked(100);
+		assert(nd_seven_is_picked(100) == 1);
+		st.room.ref = 10;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 100;
+		st.entities[0].location = 10;
+		st.entities[0].ch = '*';
+		strcpy(st.entities[0].name, "granite pebble");
+
+		sync_room_objects(&st);
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		/* Since #100 was marked picked, is_tracked_obj_present MUST be 0 */
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* 3. Cross-room scenery stability: move to Room 20 with picked stone in inventory */
+		set_map_keep(11, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, '~'); /* Tree and pond */
+		assert(nd_seven_is_picked(100) == 1);
+		st.room.ref = 20;
+		st.me = 1;
+		/* st.entities now has player and the picked stone in inventory (location == me) */
+		st.entity_count = 2;
+		st.entities[0].ref = 1;
+		st.entities[0].location = 20;
+		strcpy(st.entities[0].name, "quirinpa");
+		st.entities[1].ref = 100;
+		st.entities[1].location = 1; /* inventory */
+		strcpy(st.entities[1].name, "granite pebble");
+
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count >= 2);
+		/* For all procedural scenery objects (tree and pond), they MUST be present! */
+		for (int k = 0; k < tr->count; k++) {
+			assert(is_tracked_obj_present(&st, k) == 1);
+		}
+		printf("PASS: picking a stone in one room does not suppress scenery in another room\n");
+
+		/* 4. Action execution marks entity picked and suppresses it */
+		set_map(12, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.room.ref = 30;
+		st.entity_count = 1;
+		st.entities[0].ref = 301;
+		st.entities[0].location = 30;
+		st.entities[0].ch = '*';
+		strcpy(st.entities[0].name, "obsidian shard");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+		assert(strcmp(tr->objs[0].name, "obsidian shard") == 0);
+
+		/* Move lamb close to the stone */
+		nd_seven_set_lamb(tr->objs[0].x, tr->objs[0].y);
+		char act[64] = { 0 };
+		int act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #301\n") == 0);
+
+		/* Execute the get action */
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(301) == 1);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* 5. Picking ground items (dropped items like sword) */
+		set_map(13, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.room.ref = 40;
+		st.entity_count = 1;
+		st.entities[0].ref = 401;
+		st.entities[0].location = 40;
+		st.entities[0].ch = '/';
+		st.entities[0].actions = 4;
+		strcpy(st.entities[0].name, "Steel Broadsword");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		int sx, sy;
+		nd_seven_spot(401, &sx, &sy);
+		nd_seven_set_lamb(sx, sy);
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #401\n") == 0);
+
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(401) == 1);
+		/* After picking, action balloon disappears */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+		printf("PASS: action execution marks entities picked and suppresses them\n");
+
+		/* 6. Bounded capacity ring buffer */
+		nd_seven_forget_picked();
+		for (uint32_t i = 1; i <= 200; i++)
+			nd_seven_mark_picked(i);
+		/* The most recent item must definitely be present */
+		assert(nd_seven_is_picked(200) == 1);
+		assert(nd_seven_is_picked(190) == 1);
+		printf("PASS: picked items tracker operates as a bounded collection\n");
+
+		/* 7. Sticks are contained inside trees and never drawn on ground */
+		set_map(14, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, 0); /* Tree on tile */
+		st.room.ref = 50;
+		st.me = 1;
+		st.entity_count = 2;
+		/* Tree entity */
+		st.entities[0].ref = 501;
+		st.entities[0].location = 50;
+		st.entities[0].ch = 'x';
+		strcpy(st.entities[0].name, "pinus sylvestris");
+		/* Stick contained inside tree */
+		st.entities[1].ref = 502;
+		st.entities[1].location = 501; /* tree ref! */
+		st.entities[1].ch = '!';
+		strcpy(st.entities[1].name, "stick");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+
+		/* is_entity_nested MUST return 1 for child entity inside tree container */
+		assert(is_entity_nested(&st, &st.entities[1]) == 1);
+
+		/* Render Seven stage: child entity MUST NOT be drawn as a ground entity */
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Approach the tree: action balloon MUST offer to harvest stick from tree */
+		nd_seven_set_lamb(tr->objs[0].x, tr->objs[0].y);
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #501 #502\n") == 0);
+
+		/* Execute stick harvest from tree */
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(502) == 1);
+
+		/* After harvesting, tree no longer offers the stick */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+		printf("PASS: sticks are contained inside trees and never drawn on ground\n");
+
+		/* 8. Multi-packet entity arrival dynamic binding */
+		set_map(15, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, '*'); /* 2 stones */
+		st.room.ref = 60;
+		st.me = 1;
+		st.entity_count = 0; /* Packet 0: no entities arrived yet */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count >= 2);
+		assert(tr->bound_entities == 0);
+
+		/* Packet 1 arrives: first stone entity #601 (side 0) */
+		st.entity_count = 1;
+		st.entities[0].ref = 601;
+		st.entities[0].location = 60;
+		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "first stone");
+		sync_room_objects(&st);
+		int idx_s0 = (tr->objs[0].x < 53) ? 0 : 1;
+		int idx_s2 = 1 - idx_s0;
+		assert(tr->bound_entities == 1);
+		assert(tr->objs[idx_s0].entity_ref == 601);
+		assert(tr->objs[idx_s2].entity_ref == 0);
+
+		/* Packet 2 arrives: second stone entity #602 (side 2) */
+		st.entity_count = 2;
+		st.entities[1].ref = 602;
+		st.entities[1].location = 60;
+		st.entities[1].ch = '*';
+		st.entities[1].side = 2;
+		strcpy(st.entities[1].name, "second stone");
+		sync_room_objects(&st);
+		/* Must dynamically re-sync and bind the second stone to its side! */
+		assert(tr->bound_entities == 2);
+		assert(tr->objs[idx_s0].entity_ref == 601);
+		assert(tr->objs[idx_s2].entity_ref == 602);
+		printf("PASS: multi-packet entity arrival dynamically binds all stones\n");
+
+		/* Pick stone 1 (#601): side 0 object must become absent, side 2 object must remain present */
+		nd_seven_mark_picked(601);
+		sync_room_objects(&st);
+		assert(is_tracked_obj_present(&st, idx_s0) == 0);
+		assert(is_tracked_obj_present(&st, idx_s2) == 1);
+		printf("PASS: picking 1 stone of 2 removes only that stone while keeping the second\n");
+
+		/* 9. Seam boundary protection: cannot target room objects when outside the tile */
+		nd_seven_set_lamb(NDW_TILE_W + 50, NDW_TILE_H / 2); /* outside tile */
+		act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len == 0);
+		printf("PASS: seam boundary protection prevents targeting out-of-bounds objects\n");
+
+		/* 10. Table-driven scenery trait registry and deterministic slot identity */
+		const nd_scenery_trait_t *t_stone = nd_seven_get_scenery_trait(NDW_K_STONE);
+		assert(t_stone != NULL);
+		assert(t_stone->traits & ND_SCENERY_TRAIT_MINERAL);
+		assert(t_stone->default_slot == 0);
+		assert(strcmp(t_stone->default_name, "stone") == 0);
+
+		const nd_scenery_trait_t *t_tree = nd_seven_get_scenery_trait(NDW_K_DECID);
+		assert(t_tree != NULL);
+		assert(t_tree->traits & ND_SCENERY_TRAIT_FOLIAGE);
+		assert(t_tree->default_slot == 1);
+		assert(strcmp(t_tree->default_name, "tree") == 0);
+
+		assert(nd_seven_has_scenery_trait(NDW_K_ROCK, ND_SCENERY_TRAIT_MINERAL));
+		assert(nd_seven_has_scenery_trait(NDW_K_BOULDER, ND_SCENERY_TRAIT_BLOCKING));
+		assert(!nd_seven_has_scenery_trait(NDW_K_STONE, ND_SCENERY_TRAIT_FOLIAGE));
+
+		assert(tr->objs[idx_s0].slot_id == 0);
+		assert(tr->objs[idx_s2].slot_id == 2);
+		printf("PASS: table-driven scenery traits and deterministic slot identity verified\n");
+
+		/* 11. Ground surface cache consistency */
+		static uint32_t g_fb1[640 * 480], g_fb2[640 * 480];
+		nd_seven_forget();
+		nd_seven_render(g_fb1, 640, 480, &st);
+		/* Second render should hit the ground tile cache */
+		nd_seven_render(g_fb2, 640, 480, &st);
+		assert(memcmp(g_fb1, g_fb2, sizeof(g_fb1)) == 0);
+		printf("PASS: ground surface cache hit produces pixel-identical rendering\n");
+
+		/* 12. Multi-room surrounding entity cache and cross-room picked suppression */
+		int16_t pos_east[4] = { 61, 60, 0, 1 };
+		nd_entity_desc_t east_ents[2];
+		memset(east_ents, 0, sizeof(east_ents));
+		east_ents[0].ref = 777;
+		east_ents[0].location = 301;
+		east_ents[0].side = 0;
+		strcpy(east_ents[0].name, "east stone");
+		east_ents[1].ref = 778;
+		east_ents[1].location = 301;
+		east_ents[1].side = 2;
+		strcpy(east_ents[1].name, "east rock");
+
+		nd_seven_cache_room_entities(301, pos_east, east_ents, 2);
+
+		size_t check_count = 0;
+		uint32_t check_room = 0;
+		const nd_entity_desc_t *retrieved = nd_seven_get_cached_entities(pos_east, &check_count, &check_room);
+		assert(retrieved != NULL);
+		assert(check_count == 2);
+		assert(check_room == 301);
+		assert(retrieved[0].ref == 777);
+
+		/* Before picking 777: neither side is picked */
+		assert(nd_seven_is_tile_obj_picked(pos_east, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 2) == 0);
+
+		/* Mark 777 picked: side 0 must report picked, side 2 must remain unpicked */
+		nd_seven_mark_picked(777);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 0) == 1);
+		assert(nd_seven_is_tile_obj_picked(pos_east, 2) == 0);
+		printf("PASS: multi-room surrounding entity cache and cross-room picked suppression verified\n");
+
+		/* 13. Rock collision before vs after picking (R1) */
+		set_map(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0); /* rock at side 0 */
+		st.room.ref = 120;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 888;
+		st.entities[0].location = 120;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'o';
+		strcpy(st.entities[0].name, "granite rock");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		assert(tr->objs[0].kind == NDW_K_ROCK);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+		int rx = tr->objs[0].x, ry = tr->objs[0].y;
+
+		/* Position lamb directly south of rock base (outside South wall which starts at y=112) */
+		nd_seven_set_lamb(rx, ry + 4);
+		/* Attempt to walk North into rock body */
+		nd_seven_key("w", 1);
+		for (int i = 0; i < 40; i++) nd_seven_tick(&st, 1.0f / 60);
+		nd_seven_key("w", 0);
+		int blocked_x, blocked_y;
+		nd_seven_lamb(&blocked_x, &blocked_y, NULL, NULL);
+		/* Lamb must be blocked by the rock collision box (cannot walk through rock) */
+		assert(blocked_y >= ry);
+
+		/* Approach rock and pick it */
+		char rock_act[64] = { 0 };
+		int r_act_len = nd_seven_action(&st, rock_act, sizeof(rock_act));
+		assert(r_act_len > 0);
+		assert(strcmp(rock_act, "get #888\n") == 0);
+
+		r_act_len = nd_seven_action_execute(&st, rock_act, sizeof(rock_act));
+		assert(r_act_len > 0);
+		assert(nd_seven_is_picked(888) == 1);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+
+		/* Now walk North directly through the picked rock position */
+		nd_seven_set_lamb(rx, ry + 4);
+		nd_seven_key("w", 1);
+		for (int i = 0; i < 40; i++) nd_seven_tick(&st, 1.0f / 60);
+		nd_seven_key("w", 0);
+		int free_x, free_y;
+		nd_seven_lamb(&free_x, &free_y, NULL, NULL);
+		/* Lamb successfully walked past the rock (free_y reached or passed the rock) */
+		assert(free_y < ry);
+		printf("PASS: rock blocks collision before picking, clears collision after picking\n");
+
+		/* 14. Non-teleporting adjacent room transitions when s_pending_key == 0 (R2) */
+		set_map(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		/* Lamb is positioned at the East doorway seam */
+		nd_seven_set_lamb(NDW_TILE_W, NDW_TILE_H / 2);
+		int pending_check = 0;
+		nd_seven_debug(&pending_check, NULL, NULL, NULL);
+		assert(pending_check == 0); /* s_pending_key is explicitly 0 */
+
+		/* Server pushes/adopts the move to adjacent room East (31, 30) while s_pending_key is 0 */
+		set_map_keep(31, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		int seam_x, seam_y;
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		/* Lamb enters at West doorway seam of adjacent room: preserved coordinates, zero center snap */
+		assert(seam_x != NDW_CENTER_X);
+		assert(seam_x >= 0 && seam_x < NDW_CENTER_X);
+		assert(seam_y == NDW_TILE_H / 2);
+
+		/* Also test entering from West doorway when s_pending_key is 0 */
+		nd_seven_set_lamb(0, NDW_TILE_H / 2);
+		nd_seven_debug(&pending_check, NULL, NULL, NULL);
+		assert(pending_check == 0); /* s_pending_key is explicitly 0 */
+
+		/* Server pushes/adopts the move to adjacent room West (30, 30) while s_pending_key is 0 */
+		set_map_keep(30, 30, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		/* Lamb enters at East doorway seam of adjacent room: preserved coordinates, zero center snap */
+		assert(seam_x != NDW_CENTER_X);
+		assert(seam_x > NDW_CENTER_X);
+		assert(seam_y == NDW_TILE_H / 2);
+
+		/* Non-adjacent teleport (abs(dx) > 1): recentres to room center */
+		set_map_keep(35, 35, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_tick(&st, 0);
+		nd_seven_lamb(&seam_x, &seam_y, NULL, NULL);
+		assert(seam_x == NDW_CENTER_X && seam_y == NDW_CENTER_Y);
+		printf("PASS: room transitions with s_pending_key == 0 preserve continuous entrance coordinates\n");
+
+		/* 15. Multi-room harvest persistence across room re-entry (R3) */
+		set_map(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0); /* boulder in room 50,50 */
+		st.room.ref = 250;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 999;
+		st.entities[0].location = 250;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'O';
+		strcpy(st.entities[0].name, "ancient boulder");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		assert(is_tracked_obj_present(&st, 0) == 1);
+
+		/* Pick the boulder in room 250 */
+		nd_seven_mark_picked(999);
+		assert(is_tracked_obj_present(&st, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(st.map_data.pos, 0) == 1);
+
+		/* Leave to adjacent room (51, 50) */
+		set_map_keep(51, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.room.ref = 251;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Looking back at previous room (50, 50): boulder slot 0 remains picked */
+		int16_t prev_room_pos[4] = { 50, 50, 0, 0 };
+		assert(nd_seven_is_tile_obj_picked(prev_room_pos, 0) == 1);
+
+		/* Re-enter room 250 at (50, 50) with 0 entities loaded */
+		set_map_keep(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0);
+		st.room.ref = 250;
+		st.entity_count = 0; /* Server entity list is now empty */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Boulder must remain suppressed upon re-entry */
+		assert(is_tracked_obj_present(&st, 0) == 0);
+		assert(nd_seven_is_tile_obj_picked(st.map_data.pos, 0) == 1);
+		printf("PASS: multi-room mineral persistence across room leave and re-entry verified\n");
+	}
+
+	/* 16. Continuous world coordinates parity between Seven and Lamina (R1) */
+	{
+		set_map(12, -8, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(42, 68);
+		int64_t wx = 0, wy = 0;
+		nd_seven_world_pos(&st, &wx, &wy);
+		/* In Lamina reference model:
+		 * world_x = player_x_world * NDW_TILE_W + lamb_x
+		 * world_y = -player_y_world * NDW_TILE_H + lamb_y */
+		int64_t expected_wx = (int64_t)12 * NDW_TILE_W + 42;
+		int64_t expected_wy = (int64_t)(-(-8)) * NDW_TILE_H + 68;
+		assert(wx == expected_wx);
+		assert(wy == expected_wy);
+		printf("PASS: continuous world coordinates parity between Seven and Lamina verified\n");
+	}
+
+	/* 17. Pre-computed tile collision hull cache and O(1) hit testing (R2) */
+	{
+		set_map(100, 100, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 0); /* boulder in room */
+		st.room.ref = 500;
+		st.entity_count = 1;
+		st.entities[0].ref = 888;
+		st.entities[0].location = 500;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'O';
+		strcpy(st.entities[0].name, "boulder");
+		nd_seven_forget();
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Retrieve boulder position */
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr->count > 0);
+		int bx = tr->objs[0].x, by = tr->objs[0].y;
+
+		/* Collision check at boulder coordinates reports blocked */
+		int blocked = nd_seven_collision(&st, bx, by);
+		assert(blocked == 1);
+
+		/* Clear collision via slot harvest */
+		nd_seven_mark_tile_slot_harvested(st.map_data.pos, tr->objs[0].slot_id);
+		int cleared = nd_seven_collision(&st, bx, by);
+		assert(cleared == 0);
+		printf("PASS: pre-computed tile collision hull cache O(1) hit testing and harvest invalidation verified\n");
+	}
+
+	/* 18. Shared spatial entity resolver unification between Seven and Lamina (R3) */
+	{
+		set_map(20, -10, 10, 0x1B, ND_MAP_FLAG_ROOM, 'x', 0, 'o');
+		st.room.ref = 300;
+		st.entity_count = 1;
+		st.entities[0].ref = 301;
+		st.entities[0].location = 300;
+		st.entities[0].ch = 'g';
+		st.entities[0].fg = 2;
+		strcpy(st.entities[0].name, "goblin guard");
+
+		nd_spatial_tile_t sp_seven;
+		int res_seven = nd_spatial_tile_resolve(&st, 0, 0, &sp_seven);
+		assert(res_seven == 1);
+		assert(sp_seven.obj_count >= 3); /* 2 procedural + 1 entity */
+
+		nd_spatial_tile_t sp_lamina;
+		int res_lamina = nd_spatial_tile_resolve_map(&st.map_data, st.map_data.player_x, st.map_data.player_y, &sp_lamina);
+		assert(res_lamina == 1);
+		assert(sp_lamina.obj_count >= 2); /* 2 procedural */
+
+		/* Both spatial queries must agree on procedural objects count and properties */
+		assert(sp_seven.objs[0].kind == sp_lamina.objs[0].kind);
+		assert(sp_seven.objs[0].x == sp_lamina.objs[0].x);
+		assert(sp_seven.objs[0].y == sp_lamina.objs[0].y);
+		assert(sp_seven.objs[0].slot_id == sp_lamina.objs[0].slot_id);
+		printf("PASS: shared spatial entity resolver unification between Seven and Lamina verified\n");
+	}
+
+	/* 19. Declarative scenery component registry and modular interact dispatch (R5) */
+	{
+		const nd_scenery_def_t *def_rock = nd_seven_get_scenery_def(NDW_K_ROCK);
+		assert(def_rock != NULL);
+		assert(def_rock->traits & ND_SCENERY_TRAIT_MINERAL);
+		assert(def_rock->traits & ND_SCENERY_TRAIT_BLOCKING);
+		assert(def_rock->interact != NULL);
+
+		/* Test modular interact callback on mineral object */
+		tracked_obj_t mock_obj = { 0 };
+		mock_obj.kind = NDW_K_ROCK;
+		mock_obj.entity_ref = 777;
+		char cmd[64] = { 0 };
+		uint32_t picked_ref = 0;
+		int handled = def_rock->interact(&st, &mock_obj, cmd, sizeof(cmd), &picked_ref);
+		assert(handled == 1);
+		assert(strcmp(cmd, "get #777\n") == 0);
+		assert(picked_ref == 777);
+
+		/* Test stairs component handler */
+		const nd_scenery_def_t *def_stairs = nd_seven_get_scenery_def(NDW_K_STAIRS_DOWN);
+		assert(def_stairs != NULL);
+		assert(def_stairs->interact != NULL);
+		handled = def_stairs->interact(&st, &mock_obj, cmd, sizeof(cmd), &picked_ref);
+		assert(handled == 1);
+		assert(strcmp(cmd, ">\n") == 0);
+		printf("PASS: declarative scenery component registry and modular interact dispatch verified\n");
+	}
+
+	/* 20. Entering Seven tile North from non-Seven center (R1, R2, R3) */
+	{
+		/* Origin in non-seven tile: lamb at room center (80, 78) */
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+
+		/* Player steps North into adjacent Seven room (10, 11) via command or non-seven transition */
+		set_map_keep(10, 11, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+
+		int lx, ly, dir;
+		nd_seven_lamb(&lx, &ly, &dir, NULL);
+		/* Must be positioned at the South entrance threshold inside tile bounds */
+		assert(lx == NDW_CENTER_X);
+		assert(ly == NDW_TILE_H - NDW_FOOT_H - 4);
+		assert(dir == DIR_UP);
+		assert(lx >= 0 && lx < NDW_TILE_W);
+		assert(ly >= 0 && ly < NDW_TILE_H);
+
+		/* On the arrival frame, nd_seven_tick must NOT emit an automatic reverse move 'j' */
+		int mv = nd_seven_tick(&st, 0);
+		assert(mv == 0);
+
+		/* Also test entering South (10, 10) from center of (10, 11) */
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		set_map_keep(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_lamb(&lx, &ly, &dir, NULL);
+		assert(lx == NDW_CENTER_X);
+		assert(ly == NDW_FOOT_H + 4);
+		assert(dir == DIR_DOWN);
+		mv = nd_seven_tick(&st, 0);
+		assert(mv == 0);
+		printf("PASS: non-seven to seven entrance boundary positioning and zero auto-return verified\n");
+	}
+
+	/* 21. nd_seven_reset_input clears held keys, walking state and pending moves (R1) */
+	{
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+
+		/* Press and hold right key 'd' */
+		nd_seven_key("d", 1);
+		nd_seven_tick(&st, 1.0f / 60);
+		assert(nd_seven_get_walking() == 1);
+		int lx1, ly1;
+		nd_seven_lamb(&lx1, &ly1, NULL, NULL);
+		assert(lx1 > NDW_CENTER_X);
+
+		/* Reset input atomically */
+		nd_seven_reset_input();
+		nd_seven_tick(&st, 1.0f / 60);
+		assert(nd_seven_get_walking() == 0);
+		int lx2, ly2;
+		nd_seven_lamb(&lx2, &ly2, NULL, NULL);
+		assert(lx2 == lx1); /* Zero velocity applied after reset */
+		printf("PASS: nd_seven_reset_input clears held keys, walking state and pending moves\n");
+	}
+
+	/* 22. Symmetric spatial resolution invariant between active and adjacent perspectives (R1, R2) */
+	{
+		set_map(10, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 'O');
+		st.room.ref = 300;
+		st.me = 1;
+		st.entity_count = 2;
+		st.entities[0].ref = 701;
+		st.entities[0].location = 300;
+		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "granite pebble");
+
+		st.entities[1].ref = 702;
+		st.entities[1].location = 300;
+		st.entities[1].ch = 'O';
+		st.entities[1].side = 2;
+		strcpy(st.entities[1].name, "granite boulder");
+
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		nd_spatial_tile_t sp_inside;
+		assert(nd_spatial_tile_resolve(&st, 0, 0, &sp_inside) == 1);
+		assert(sp_inside.obj_count >= 2);
+
+		/* Step player East into adjacent room (11, 10) */
+		set_map_keep(11, 10, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		/* Preserve West neighbour (10, 10) at tile col=2, row=3 */
+		st.map_data.tiles[3 * 7 + 2].side_l = '*';
+		st.map_data.tiles[3 * 7 + 2].symbol = 0;
+		st.map_data.tiles[3 * 7 + 2].side_r = 'O';
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+
+		st.room.ref = 301;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+
+		/* Look back at room (10, 10) via ti = -1, tj = 0 */
+		nd_spatial_tile_t sp_outside;
+		assert(nd_spatial_tile_resolve(&st, -1, 0, &sp_outside) == 1);
+
+		/* Assert symmetric parity: object count, coordinates, kind and harvest state match */
+		assert(sp_inside.obj_count == sp_outside.obj_count);
+		for (int k = 0; k < sp_inside.obj_count; k++) {
+			assert(sp_inside.objs[k].x == sp_outside.objs[k].x);
+			assert(sp_inside.objs[k].y == sp_outside.objs[k].y);
+			assert(sp_inside.objs[k].kind == sp_outside.objs[k].kind);
+			assert(sp_inside.objs[k].slot_id == sp_outside.objs[k].slot_id);
+			assert(sp_inside.objs[k].harvested == sp_outside.objs[k].harvested);
+			assert(sp_inside.objs[k].entity_ref == sp_outside.objs[k].entity_ref);
+		}
+		printf("PASS: symmetric spatial resolution parity between active and adjacent tiles verified\n");
+	}
+
+	/* 23. Continuous multi-room traversal and zero pop-in / zero duplicate rocks (R1, R2, R3) */
+	{
+		/* Setup Room A (20, 20) with a stone */
+		set_map(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0);
+		st.room.ref = 400;
+		st.me = 1;
+		st.entity_count = 1;
+		st.entities[0].ref = 801;
+		st.entities[0].location = 400;
+		st.entities[0].ch = 'o';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "limestone rock");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Walk to Room B (21, 20) */
+		set_map_keep(21, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = 'o';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 401;
+		st.entity_count = 1;
+		st.entities[0].ref = 802;
+		st.entities[0].location = 401;
+		st.entities[0].ch = '*';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "river stone");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		/* Pick stone 802 in Room B */
+		nd_seven_mark_picked(802);
+		nd_spatial_tile_t sp_b;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_b);
+		assert(sp_b.objs[0].harvested == 1);
+
+		/* Walk to Room C (22, 20) */
+		set_map_keep(22, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = '*';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 402;
+		st.entity_count = 0;
+		nd_seven_sync_origin(&st);
+
+		/* Inspect Room B from outside (ti = -1, tj = 0): stone 802 must stay harvested */
+		nd_spatial_tile_t sp_b_outside;
+		nd_spatial_tile_resolve(&st, -1, 0, &sp_b_outside);
+		assert(sp_b_outside.objs[0].harvested == 1);
+
+		/* Re-enter Room B (21, 20): stone 802 must stay harvested */
+		set_map_keep(21, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, '*', 0, 0);
+		st.map_data.tiles[3 * 7 + 2].side_l = 'o';
+		st.map_data.tiles[3 * 7 + 2].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 2].exits = 0x1B;
+		st.map_data.tiles[3 * 7 + 2].bio_idx = 10;
+		st.room.ref = 401;
+		st.entity_count = 0; /* picked on server */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		nd_spatial_tile_t sp_b_reenter;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_b_reenter);
+		assert(sp_b_reenter.objs[0].harvested == 1);
+
+		/* Re-enter Room A (20, 20): unpicked limestone rock 801 remains visible without duplication */
+		set_map_keep(20, 20, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0);
+		st.room.ref = 400;
+		st.entity_count = 1;
+		st.entities[0].ref = 801;
+		st.entities[0].location = 400;
+		st.entities[0].ch = 'o';
+		st.entities[0].side = 0;
+		strcpy(st.entities[0].name, "limestone rock");
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+		nd_spatial_tile_t sp_a_reenter;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_a_reenter);
+		assert(sp_a_reenter.objs[0].harvested == 0);
+		assert(sp_a_reenter.objs[0].entity_ref == 801);
+		/* Exactly 1 rock object, no duplicate in s_spots */
+		int rock_count = 0;
+		for (int k = 0; k < sp_a_reenter.obj_count; k++) {
+			if (sp_a_reenter.objs[k].kind == NDW_K_ROCK || sp_a_reenter.objs[k].entity_ref == 801)
+				rock_count++;
+		}
+		assert(rock_count == 1);
+		printf("PASS: continuous multi-room traversal and zero pop-in / zero duplicate rocks verified\n");
+	}
+
+	/* 23. Asynchronous BCP packet interleaving across room entry: zero displacement and zero popping */
+	{
+		/* Frame 1: View from adjacent tile (49, 50). Room (50, 50) has rock at side 0 */
+		set_map(49, 50, 10, 0x1B, 0, 0, 0, 0);
+		st.room.ref = 899;
+		st.me = 1;
+		st.entity_count = 0;
+		/* Put rock glyph 'o' on tile (50, 50) which is col=4, row=3 */
+		st.map_data.tiles[3 * 7 + 4].flags = ND_MAP_FLAG_ROOM;
+		st.map_data.tiles[3 * 7 + 4].side_l = 'o';
+		st.map_data.tiles[3 * 7 + 4].fg_l = 10;
+		nd_seven_sync_origin(&st);
+
+		nd_spatial_tile_t sp_adj;
+		int res_adj = nd_spatial_tile_resolve(&st, 1, 0, &sp_adj);
+		assert(res_adj == 1);
+		assert(sp_adj.obj_count > 0);
+		assert(sp_adj.objs[0].kind == NDW_K_ROCK);
+		assert(sp_adj.objs[0].harvested == 0);
+		int16_t fixed_x = sp_adj.objs[0].x;
+		int16_t fixed_y = sp_adj.objs[0].y;
+
+		/* Frame 2: Transient room entry. Player moves into (50, 50).
+		 * BCP ROOM packet has arrived (room.ref = 900), but BCP ITEM packets
+		 * are still traveling over the network (entity_count == 0).
+		 * The rock MUST NOT pop out or be speculatively marked harvested! */
+		set_map_keep(50, 50, 10, 0x1B, ND_MAP_FLAG_ROOM, 'o', 0, 0);
+		st.room.ref = 900;
+		st.entity_count = 0; /* Transient: 0 room entities arrived yet */
+		nd_seven_sync_origin(&st);
+		sync_room_objects(&st);
+
+		nd_spatial_tile_t sp_entry;
+		int res_entry = nd_spatial_tile_resolve(&st, 0, 0, &sp_entry);
+		assert(res_entry == 1);
+		assert(sp_entry.obj_count > 0);
+		assert(sp_entry.objs[0].kind == NDW_K_ROCK);
+		assert(sp_entry.objs[0].harvested == 0); /* Zero pop-out on room entry! */
+		assert(sp_entry.objs[0].x == fixed_x);    /* Zero coordinate drift! */
+		assert(sp_entry.objs[0].y == fixed_y);
+
+		/* Render Seven stage: rock must be drawn on screen */
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Frame 3: Subsequent frame. BCP ITEM packet arrives with rock entity #901 */
+		st.entity_count = 1;
+		st.entities[0].ref = 901;
+		st.entities[0].location = 900;
+		st.entities[0].side = 0;
+		st.entities[0].ch = 'o';
+		strcpy(st.entities[0].name, "obsidian rock");
+		sync_room_objects(&st);
+
+		nd_spatial_tile_t sp_bound;
+		int res_bound = nd_spatial_tile_resolve(&st, 0, 0, &sp_bound);
+		assert(res_bound == 1);
+		assert(sp_bound.objs[0].kind == NDW_K_ROCK);
+		assert(sp_bound.objs[0].harvested == 0);
+		assert(sp_bound.objs[0].entity_ref == 901);
+		assert(sp_bound.objs[0].x == fixed_x);    /* In-place binding: coordinate never jumps */
+		assert(sp_bound.objs[0].y == fixed_y);
+		/* Exactly 1 rock on the tile, zero duplicates at s_spots */
+		int rock_count = 0;
+		for (int k = 0; k < sp_bound.obj_count; k++) {
+			if (sp_bound.objs[k].kind == NDW_K_ROCK || sp_bound.objs[k].entity_ref == 901)
+				rock_count++;
+		}
+		assert(rock_count == 1);
+
+		/* Frame 4: Harvest the rock */
+		nd_seven_set_lamb(fixed_x, fixed_y);
+		char act[64] = { 0 };
+		int act_len = nd_seven_action(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(strcmp(act, "get #901\n") == 0);
+
+		act_len = nd_seven_action_execute(&st, act, sizeof(act));
+		assert(act_len > 0);
+		assert(nd_seven_is_picked(901) == 1);
+
+		nd_spatial_tile_t sp_harvested;
+		nd_spatial_tile_resolve(&st, 0, 0, &sp_harvested);
+		assert(sp_harvested.objs[0].harvested == 1);
+
+		/* Frame 5: Step back outside to (49, 50). Harvested rock remains absent */
+		set_map_keep(49, 50, 10, 0x1B, 0, 0, 0, 0);
+		st.room.ref = 899;
+		st.entity_count = 0;
+		st.map_data.tiles[3 * 7 + 4].side_l = 'o'; /* Tile still has glyph, but locally picked */
+		nd_seven_sync_origin(&st);
+
+		nd_spatial_tile_t sp_outside;
+		nd_spatial_tile_resolve(&st, 1, 0, &sp_outside);
+		assert(sp_outside.objs[0].harvested == 1); /* Remains suppressed from outside */
+		printf("PASS: async BCP packet interleaving across room entry: zero displacement and zero popping verified\n");
+	}
+
+	/* Test 24: Isomorphic entity flags: binary bitflags drive scenery matching & sprite resolution with zero string checks */
+	{
+		const nd_scenery_def_t *min_def = nd_seven_get_scenery_def(NDW_K_STONE);
+		const nd_scenery_def_t *tree_def = nd_seven_get_scenery_def(NDW_K_DECID);
+		assert(min_def && tree_def);
+
+		nd_entity_desc_t e;
+		memset(&e, 0, sizeof(e));
+		e.ref = 777;
+		/* Arbitrary name and art string that do NOT contain mineral or plant */
+		strcpy(e.name, "mysterious-deposit");
+		strcpy(e.art, "custom/unusual_art/1.jpeg");
+
+		/* Without flags or recognized mineral glyph, no match */
+		assert(nd_scenery_matches_entity(min_def, &e) == 0);
+		assert(nd_seven_resolve_entity_sprite(&e) == 0);
+
+		/* With ND_EF_MINERAL, instant match and mineral sprite resolution */
+		e.flags = ND_EF_MINERAL;
+		assert(nd_scenery_matches_entity(min_def, &e) == 1);
+		assert(nd_seven_resolve_entity_sprite(&e) != 0);
+
+		/* With ND_EF_FLORA, matches permanent tree scenery */
+		e.flags = ND_EF_FLORA;
+		assert(nd_scenery_matches_entity(tree_def, &e) == 1);
+		assert(nd_seven_resolve_entity_sprite(&e) == NDS_TREE_ROUND);
+
+		/* With ND_EF_PLAYER or ND_EF_CREATURE, strictly rejected even if mineral/flora bit set */
+		e.flags = ND_EF_MINERAL | ND_EF_PLAYER;
+		assert(nd_scenery_matches_entity(min_def, &e) == 0);
+		assert(nd_seven_resolve_entity_sprite(&e) == 0);
+
+		e.flags = ND_EF_MINERAL | ND_EF_CREATURE;
+		assert(nd_scenery_matches_entity(min_def, &e) == 0);
+		assert(nd_seven_resolve_entity_sprite(&e) == 0);
+
+		printf("PASS: isomorphic entity classification flags drive scenery matching and sprite resolution with zero string checks\n");
+	}
+
+	/* Test 25: Action debouncing cooldown latch and strict ID command formatting */
+	{
+		nd_seven_action_cooldown_reset();
+		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
+		st.room.ref = 88;
+		st.me = 1;
+		st.entity_count = 2;
+		st.entities[0].ref = 1;
+		st.entities[0].location = 88;
+		st.entities[0].flags = ND_EF_PLAYER;
+		strcpy(st.entities[0].name, "quirinpa");
+
+		st.entities[1].ref = 555;
+		st.entities[1].location = 88;
+		st.entities[1].ch = '*';
+		st.entities[1].flags = ND_EF_MINERAL;
+		st.entities[1].actions = 4;
+		strcpy(st.entities[1].name, "gem");
+
+		/* Step anim to establish a baseline animation frame */
+		nd_seven_step_anim(100);
+
+		char act1[64] = {0};
+		int rc1 = nd_seven_action_execute(&st, act1, sizeof(act1));
+		assert(rc1 > 0);
+		assert(strcmp(act1, "get #555\n") == 0);
+
+		/* Burst repeat execution on next frame must be debounced (returns 0) */
+		nd_seven_step_anim(2);
+		char act2[64] = {0};
+		int rc2 = nd_seven_action_execute(&st, act2, sizeof(act2));
+		assert(rc2 == 0);
+
+		/* After cooldown window passes (>= 18 frames), execution is re-enabled */
+		nd_seven_step_anim(20);
+		char act3[64] = {0};
+		/* Since 555 was already marked picked by act1 execution, next execution targets nothing */
+		int rc3 = nd_seven_action_execute(&st, act3, sizeof(act3));
+		assert(rc3 == 0);
+
+		/* Multi-packet interleaving: stone must NOT pop out when entity_count > 0 during transit */
+		nd_seven_forget_picked();
+		set_map(5, -3, 10, 0x1B, 0, '*', 0, 0);
+		st.room.ref = 99;
+		st.entity_count = 1; /* Only player entity arrived so far */
+		sync_room_objects(&st);
+		const room_tracker_t *tr = nd_seven_get_tracker();
+		assert(tr && tr->count > 0);
+		/* Must remain present even though stone entity packet is still in flight */
+		assert(is_tracked_obj_present(&st, 0) == 1);
+
+		printf("PASS: action debouncing prevents burst double-picks and strict ID commands verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

@@ -31,6 +31,11 @@ export AUTH_SKIP_CONFIRM=1
 export AXIL_ND_DB="${REPO_ROOT}/var/nd/universe.db"
 export AXIL_ND_HTDOCS="${REPO_ROOT}/htdocs"
 
+if [ -f "$REPO_ROOT/scripts/nd-kernel-mods.sh" ]; then
+  . "$REPO_ROOT/scripts/nd-kernel-mods.sh"
+  export LD_LIBRARY_PATH="$(nd_local_ld_path "$REPO_ROOT")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 if [ ! -f "$AXIL_ND_DB" ]; then
   bash "${REPO_ROOT}/scripts/seed-nd-universe.sh" "$AXIL_ND_DB" 1
 fi
@@ -51,7 +56,7 @@ for _ in $(seq 1 100); do
 done
 sleep 0.1
 
-"$AXIL_BIN" -C "$REPO_ROOT" -p "$PORT" -d -m mods/core/core > /tmp/axil_transient.log 2>&1 &
+"$AXIL_BIN" -A -C "$REPO_ROOT" -p "$PORT" -d -m "mods/core/core${ND_KERNEL_MODS:+:$ND_KERNEL_MODS}" > /tmp/axil_transient.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server readiness (up to 30 seconds; startup scales with var/ data)

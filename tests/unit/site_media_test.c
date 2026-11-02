@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <bud/bud.h>
+#include "../../mods/common/ux/site_ui.h"
 
 const char *site_ui_get_locale(void) { return "en"; }
 void site_ui_set_locale(const char *lang) { (void)lang; }

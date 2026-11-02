@@ -4,3 +4,7 @@ bud.bud_host_flush
 bud.bud_host_fetch
 bud.bud_host_set_location
 bud.bud_host_emit_patch
+qsys.qsys_host_emit_patch
+qsys.qsys_host_log
+qsys.qsys_host_fetch
+qsys.qsys_host_set_location

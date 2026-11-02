@@ -1,0 +1,25 @@
+The biggest problem with AI coding agents isn't intelligence — it's chronic amnesia and token waste.
+
+You solve a tricky race condition on Tuesday, and by Thursday the agent repeats the exact same blunder because the context was wiped.
+
+I wanted an agent whose knowledge actually compounds over weeks. So I built an open-source, pure-C memory and planning harness for Pi Coding Agent:
+
+🧠 Persistent Memory Over Weeks (pi-mm)
+Hierarchical memory in compiled C (libcorm + libsepal). An invariant learned weeks ago is recalled automatically before your prompt hits the model. Best part: the agent hints itself to remember when it discovers key insights—no manual nagging needed.
+
+⚡ Sub-5ms Reflex Decisions (axil-auren)
+Instead of burning tokens asking an LLM "should I remember this?", a local C daemon runs System 1 decisions via SIMD dot products in ~5ms. 0 decode tokens, $0 cost.
+
+🛡️ Epistemic Plan Gating (pi-quest)
+No more blind edits. Write tools stay locked until the agent cites file-backed evidence and passes an adversarial review. Diffs must pass real tests before shipping.
+
+⚙️ Pure-C Efficiency
+Algorithmic zero-LLM compaction (pi-vcc) and non-blocking background builds (bg_run) in a ~250 MB footprint.
+
+The result is an agent that gets measurably smarter the longer you work with it.
+
+Zero-config setup in 60 seconds:
+👉 https://github.com/tty-pt/pi-instruct
+(or https://lnkd.in/eWbChu_5)
+
+#SoftwareEngineering #AI #CodingAgents #OpenSource #DevTools

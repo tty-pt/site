@@ -397,7 +397,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	bud_state_apply(
 	        &app_state, song_app_fields, json_object_to_json_string(jo));
 
-	bud_node *layout = bud_app_render();
+	bud_node *layout = qsys_mod_song_detail.render();
 	state.state_json = strdup(json_object_to_json_string(jo));
 	free(trans);
 	int rc = detail_respond_page(fd, &state, layout);

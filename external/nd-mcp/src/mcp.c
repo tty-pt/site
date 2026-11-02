@@ -98,6 +98,42 @@ eng_mcp_action(unsigned player_ref, unsigned id,
 	eng_nd_wwrite(player_ref, bcp_buf, pos);
 }
 
+static uint16_t
+compute_entity_flags(const OBJ *obj)
+{
+	uint16_t flags = 0;
+	if (obj->flags & OF_PLAYER) {
+		flags |= ND_EF_PLAYER;
+	} else if (obj->type == TYPE_ENTITY) {
+		flags |= ND_EF_CREATURE;
+	}
+
+	unsigned type_mineral_id = 0, type_plant_id = 0;
+	(void)nd_get(HD_RTYPE, &type_mineral_id, "mineral");
+	(void)nd_get(HD_RTYPE, &type_plant_id, "plant");
+
+	if (type_mineral_id && obj->type == type_mineral_id) {
+		flags |= (ND_EF_SCENERY | ND_EF_MINERAL);
+	} else if (type_plant_id && obj->type == type_plant_id) {
+		flags |= (ND_EF_SCENERY | ND_EF_FLORA);
+	} else if (obj->type != TYPE_ROOM && obj->type != TYPE_ENTITY) {
+		unsigned type_key = obj->type;
+		const void *tname = corm_get(nd_table_handle(HD_TYPE), &type_key);
+		if (tname) {
+			if (strcmp((const char *)tname, "mineral") == 0)
+				flags |= (ND_EF_SCENERY | ND_EF_MINERAL);
+			else if (strcmp((const char *)tname, "plant") == 0)
+				flags |= (ND_EF_SCENERY | ND_EF_FLORA);
+		}
+	}
+
+	if (!(flags & (ND_EF_PLAYER | ND_EF_CREATURE | ND_EF_SCENERY)) && obj->type != TYPE_ROOM) {
+		flags |= ND_EF_ITEM;
+	}
+
+	return flags;
+}
+
 typedef int _fbcp_item_t(char *, unsigned, unsigned, unsigned char);
 
 int
@@ -110,6 +146,7 @@ _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char d
 	};
 	nd_get(HD_OBJ, &obj, &obj_ref);
 	struct icon ico = object_icon(player_ref, obj_ref);
+	ico.pi.flags = compute_entity_flags(&obj);
 	unsigned char iden = BCP_ITEM;
 	char *p = bcp_buf, *aux2;
 	memcpy(p, "#b", 2);
@@ -165,9 +202,10 @@ eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 	pkt.type = obj.type;
 	pkt.actions = ico.actions;
 	pkt.fg = (uint16_t)ico.pi.fg;
-	pkt.flags = (uint16_t)ico.pi.flags;
+	pkt.flags = compute_entity_flags(&obj);
 	pkt.dynflags = dynflags;
 	pkt.ch = ico.ch;
+	pkt.side = (uint8_t)obj.data[0];
 	snprintf(pkt.name, sizeof(pkt.name), "%s", obj.name);
 	char *u = (char *)unparse(obj_ref);
 	if (u)

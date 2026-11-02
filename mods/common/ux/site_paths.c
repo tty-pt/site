@@ -32,7 +32,7 @@ static void url_encode(const char *src, char *dst, size_t dst_len)
 	*dst = '\0';
 }
 
-void parent_path(const char *path, char *buf, size_t len)
+SITE_UI_WEAK void parent_path(const char *path, char *buf, size_t len)
 {
 	const char *slash;
 	if (!path || !buf || len == 0)
@@ -61,7 +61,7 @@ void parent_path(const char *path, char *buf, size_t len)
 	buf[n] = '\0';
 }
 
-const char *site_ui_module_icon(const char *module)
+SITE_UI_WEAK const char *site_ui_module_icon(const char *module)
 {
 	if (!module || !module[0])
 		return "\xf0\x9f\x8f\xa0";
@@ -76,37 +76,37 @@ const char *site_ui_module_icon(const char *module)
 	return "\xf0\x9f\x8f\xa0";
 }
 
-const char *site_ui_module_display(const char *module)
+SITE_UI_WEAK const char *site_ui_module_display(const char *module)
 {
 	if (module && strcmp(module, "grp") == 0)
 		return "group";
 	return module;
 }
 
-void site_ui_item_path(
+SITE_UI_WEAK void site_ui_item_path(
         const char *module, const char *id, char *buf, size_t len)
 {
 	snprintf(buf, len, "/%s/%s", module, id);
 }
 
-void item_action_path(
+SITE_UI_WEAK void item_action_path(
         const char *module, const char *id, const char *action, char *buf,
         size_t len)
 {
 	snprintf(buf, len, "/%s/%s/%s", module, id, action);
 }
 
-void site_ui_collection_path(const char *module, char *buf, size_t len)
+SITE_UI_WEAK void site_ui_collection_path(const char *module, char *buf, size_t len)
 {
 	snprintf(buf, len, "/%s/", module);
 }
 
-void auth_path(const char *action, char *buf, size_t len)
+SITE_UI_WEAK void auth_path(const char *action, char *buf, size_t len)
 {
 	snprintf(buf, len, "/auth/%s", action);
 }
 
-void login_href(const char *ret, char *buf, size_t len)
+SITE_UI_WEAK void login_href(const char *ret, char *buf, size_t len)
 {
 	char encoded[1024];
 	if (!ret || !*ret) {

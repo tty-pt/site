@@ -791,7 +791,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	sb_collect_detail_pickers(fd, state.is_owner);
 	sb_populate_detail_state(ctx, &state, &prefs, owner_buf, grp_id);
 
-	bud_node *layout = bud_app_render();
+	bud_node *layout = qsys_mod_gig_detail.render();
 	state.state_json = sb_emit_state_json();
 	detail_respond_page(fd, &state, layout);
 	free(state.state_json);

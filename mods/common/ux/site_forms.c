@@ -353,7 +353,7 @@ void site_ui_picker_state_from_json(
 	        (hyle_bud_picker_view_t *)pv_out);
 }
 
-void site_ui_picker_state_to_json(
+SITE_UI_WEAK void site_ui_picker_state_to_json(
         const pick_view_t *pv, struct json_object *j_root)
 {
 	hyle_bud_picker_state_to_json(

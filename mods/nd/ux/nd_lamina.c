@@ -3,6 +3,8 @@
 #include "nd_lamina.h"
 #include "nd_scene.h"
 #include "nd_seven.h"
+#include "nd_seven_objects.h"
+#include "nd_seven_motion.h"
 
 /* Helper to blend / write 32-bit RGBA pixel (0xAABBGGRR in LE format) */
 static inline void set_pixel(uint32_t *fb, uint32_t w, uint32_t h, uint32_t x, uint32_t y, uint32_t color)
@@ -327,11 +329,15 @@ static void draw_mineral(uint32_t *fb, uint32_t w, uint32_t h, uint32_t tile_sz,
 static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map,
                               int col, int row, uint32_t tx, uint32_t ty, uint32_t tile_sz)
 {
-	ndw_obj_t objs[NDW_MAX_OBJ];
-	int n = nd_seven_tile_objects(map, col, row, objs);
+	nd_spatial_tile_t sp;
+	if (!nd_spatial_tile_resolve_map(map, col, row, &sp))
+		return;
 
-	for (int i = 0; i < n; i++) {
-		const ndw_obj_t *o = &objs[i];
+	for (int i = 0; i < sp.obj_count; i++) {
+		const nd_spatial_obj_t *o = &sp.objs[i];
+		if (o->harvested)
+			continue;
+
 		int fx = (int)tx + o->x * (int)tile_sz / NDW_TILE_W;
 		int fy = (int)ty + o->y * (int)tile_sz / NDW_TILE_H;
 
@@ -342,6 +348,10 @@ static void draw_tile_objects(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 			draw_plant(fb, w, h, fx - cw / 2, fy - ch, cw, ch, o->glyph, ansi_rgb(o->fg));
 		} else if (o->kind >= NDW_K_STONE && o->kind <= NDW_K_BOULDER) {
 			draw_mineral(fb, w, h, tile_sz, fx, fy, o->kind, o->variant);
+		} else if (o->is_entity) {
+			uint32_t col = ansi_rgb(o->fg);
+			fill_rounded_rect(fb, w, h, fx - 2, fy - 2, 5, 5, 2, col);
+			fill_rounded_rect(fb, w, h, fx - 1, fy - 1, 3, 3, 1, 0xFFFFFFFF);
 		}
 	}
 }
@@ -657,8 +667,18 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 			int ch = (int)tile_sz;
 			int cx0 = tx + ((int)tile_sz - 3 * cw) / 2;
 			draw_cell(fb, w, h, cx0, ty, cw, ch, tile->side_l, tile->fg_l);
-			if (!is_player)
+			if (!is_player) {
 				draw_cell(fb, w, h, cx0 + cw, ty, cw, ch, tile->symbol, tile->fg);
+			} else {
+				int16_t cur_pos[4] = {
+					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
+					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
+					map->pos[2], map->pos[3]
+				};
+				uint8_t cg = 0, cfg = 0;
+				if (nd_seven_centre_restore(cur_pos, &cg, &cfg))
+					draw_cell(fb, w, h, cx0 + cw, ty, cw, ch, cg, cfg);
+			}
 			draw_cell(fb, w, h, cx0 + 2 * cw, ty, cw, ch, tile->side_r, tile->fg_r);
 		}
 	}

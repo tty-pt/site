@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "nd/bcp.h"
 #include <nd/seven-world.h>
+#include "nd_seven_motion.h"
+#include "nd_seven_objects.h"
 
 /*
  * The 2D "seven" stage: the NeverDark map as one continuous, scrolling world
@@ -16,6 +18,8 @@
 
 /* Feed a key event. Returns 1 if the key drives the lamb (and was consumed). */
 int nd_seven_key(const char *key, int down);
+void nd_seven_reset_input(void);
+void nd_spatial_resolver_invalidate(void);
 
 /*
  * Advance the lamb by dt seconds. Returns the NeverDark move key ('h','j','k',
@@ -46,6 +50,13 @@ int nd_seven_tile_objects(const nd_map_data_t *md, int col, int row, ndw_obj_t o
 const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4]);
 
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);
+void nd_seven_set_lamb(int fx, int fy);
+void nd_seven_spot(uint32_t ref, int *sx, int *sy);
+
+/* Interaction: detects if the lamb is near an interactable object or entity,
+ * returns 1 and formats the command string (e.g. "get stick\n") into out. */
+int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
+int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 
 /* Lamb feet relative to the map's player tile, after adopting the state's
  * current origin (so a map update and the lamb never disagree by a tile). */

@@ -32,6 +32,12 @@
 #include <nd/type.h>
 #include <nd/entity.h>
 #include <nd/match.h>
+#include <nd/stone.h>
+#include <nd/plant.h>
+
+#ifndef PLANT_N
+#define PLANT_N(pln, i) (((pln) >> ((i) * 2)) & 3)
+#endif
 
 unsigned fd_player(unsigned fd);
 
@@ -542,6 +548,112 @@ e_move(unsigned player_ref, enum exit e) {
 	return dest_ref;
 }
 
+static int
+is_room_observed(unsigned room_ref)
+{
+	pos_t room_pos;
+	eng_map_where(room_pos, room_ref);
+
+	unsigned fds_hd = nd_table_handle(HD_FD);
+	if (!fds_hd)
+		return 0;
+
+	unsigned c = corm_iter(fds_hd, NULL, 0);
+	const void *kp, *vp;
+	int observed = 0;
+
+	while (corm_next(&kp, &vp, c)) {
+		unsigned player_ref = *(const unsigned *)kp;
+		OBJ player;
+		if (corm_read(obj_hd, &player_ref, &player, sizeof(player)) != 0)
+			continue;
+		pos_t player_pos;
+		eng_map_where(player_pos, player.location);
+
+		if (player_pos[3] != room_pos[3] || player_pos[2] != room_pos[2])
+			continue;
+
+		int dx = (int)room_pos[0] - (int)player_pos[0];
+		int dy = (int)room_pos[1] - (int)player_pos[1];
+		if (dx < 0) dx = -dx;
+		if (dy < 0) dy = -dy;
+
+		if (dx <= 3 && dy <= 3) {
+			observed = 1;
+			break;
+		}
+	}
+	corm_fin(c);
+	return observed;
+}
+
+static int
+check_deterministic_recovery(unsigned here_ref, OBJ *here, ROO *rhere)
+{
+	pos_t pos;
+	eng_map_where(pos, here_ref);
+	struct bio bio = eng_noise_point(pos);
+
+	const stone_tile_t *sd = (const stone_tile_t *)&bio.raw[4];
+	int expected_stones = 0;
+	for (int s = 0; s < 3; s++) {
+		if ((sd->n >> (s * 2)) & 3)
+			expected_stones++;
+	}
+
+	plant_tile_t pd = *(plant_tile_t *)bio.raw;
+	int expected_trees = 0;
+	for (int i = 0; i < 3; i++) {
+		if (PLANT_N(pd.n, i))
+			expected_trees++;
+	}
+
+	unsigned type_mineral_id = 0, type_plant_id = 0;
+	(void)nd_get(HD_RTYPE, &type_mineral_id, "mineral");
+	(void)nd_get(HD_RTYPE, &type_plant_id, "plant");
+
+	int actual_stones = 0;
+	int actual_trees = 0;
+	int has_foreign_items = 0;
+
+	unsigned c = corm_iter(nd_table_handle(HD_CONTENTS), &here_ref, CM_RANGE);
+	const void *kp, *vp;
+	while (corm_next(&kp, &vp, c)) {
+		unsigned tmp_ref = *(const unsigned *)vp;
+		OBJ tmp;
+		if (corm_read(obj_hd, &tmp_ref, &tmp, sizeof(tmp)) != 0)
+			continue;
+
+		if (tmp.type == TYPE_ENTITY) {
+			if (tmp.flags & OF_PLAYER) {
+				corm_fin(c);
+				return 0; /* Player inside */
+			}
+			continue;
+		}
+
+		if (type_mineral_id && tmp.type == type_mineral_id) {
+			actual_stones++;
+		} else if (type_plant_id && tmp.type == type_plant_id) {
+			actual_trees++;
+		} else if (!strcmp(tmp.name, "stick") || !strcmp(tmp.name, "stone") || !strcmp(tmp.name, "rock")) {
+			/* Natural item drop */
+		} else {
+			/* Foreign item (dropped weapon, gear, player item) */
+			has_foreign_items = 1;
+		}
+	}
+
+	if (!has_foreign_items && actual_stones >= expected_stones && actual_trees >= expected_trees) {
+		/* Recovered initial deterministic state! */
+		rhere->flags &= ~RF_MODIFIED;
+		corm_put(obj_hd, &here_ref, here);
+		return 1;
+	}
+
+	return 0;
+}
+
 unsigned
 eng_room_clean(unsigned here_ref)
 {
@@ -551,8 +663,19 @@ eng_room_clean(unsigned here_ref)
 	if (corm_read(obj_hd, &here_ref, &(here), sizeof(here)) != 0)
 		return here_ref;
 
-	if (!(((ROO *) here.data)->flags & RF_TEMP))
+	ROO *rhere = (ROO *) &here.data;
+	if (!(rhere->flags & RF_TEMP))
 		return here_ref;
+
+	/* If room is currently observed by any player, keep it in memory */
+	if (is_room_observed(here_ref))
+		return here_ref;
+
+	/* If room was modified, check if it has recovered its deterministic initial state */
+	if (rhere->flags & RF_MODIFIED) {
+		if (!check_deterministic_recovery(here_ref, &here, rhere))
+			return here_ref;
+	}
 
 	unsigned c = corm_iter(nd_table_handle(HD_CONTENTS), &here_ref, CM_RANGE);
 	const void *kp, *vp;

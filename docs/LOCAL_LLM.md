@@ -53,16 +53,23 @@ Instead of streaming 500 KB float vector arrays across loopback TCP and computin
 
 ---
 
-## 4. Deprecated Decision Endpoints (`systemone` & `systemzero`)
+## 4. Unified System 1 Decision Endpoint (`POST /v1/systemone`)
 
-> **DEPRECATION NOTICE**: Heavyweight generative LLM judging (`systemone` and `systemzero` via `olmoe`/`qwen`) is deprecated in favor of `POST /v1/classify`. The compiler warns when linking against these functions, and client extensions rely on fast embedding classification with deterministic local fallbacks (exact commands, `/quest`, `@remember`, structural heuristics).
+`axil-auren` serves **`POST /v1/systemone`** (and `/api/v1/systemone/`) as the default System 1 decision engine across the pure-C stack. Unlike generative chat completions, `systemone` operates in a **single forward pass with 0 generated decode tokens** (~5–15 ms latency, 0% JSON parse errors).
+
+It unifies:
+1. **Choice Gating**: direct logit evaluation for binary / categorical choices (e.g. `["yes", "no"]`).
+2. **Nearest-Exemplar Matching**: in-memory SIMD cosine similarity over cached vector embeddings.
+3. **Structured Question Evaluation**: Jev-compatible question schema for conversational memory classification.
+
+Legacy endpoints (`/v1/classify` and `/v1/systemzero`) have been completely purged in favor of this single, clean cognitive endpoint.
 
 ---
 
 ## 5. Semantic Classification Decision Surfaces & Audit (pi-mm & pi-quest)
 
 ### Active Classification Surfaces
-Both `pi-mm` and `pi-quest` leverage `POST /v1/classify` via `bge-base` for fast, zero-disk, SIMD-accelerated decisions:
+Both `pi-mm` and `pi-quest` leverage `POST /v1/systemone` for fast, zero-disk, SIMD-accelerated decisions:
 
 | Surface | Extension | Role | Kinds / Labels | Measured Latency |
 | :--- | :--- | :--- | :--- | :--- |
@@ -76,7 +83,7 @@ Both `pi-mm` and `pi-quest` leverage `POST /v1/classify` via `bge-base` for fast
 
 ### Audited Candidate Surfaces (Implementation Roadmap & Live Metrics)
 
-The following decision points currently rely on rigid regexes or generative prompts and represent prime candidates for `POST /v1/classify`:
+The following decision points currently rely on rigid regexes or generative prompts and represent prime candidates for `POST /v1/systemone`:
 
 1. **Standing Directives & Operational Invariants (`isStandingDirective`)** — *`pi-mm` (Tier 1, Highest ROI)*:
    - Replaces English-only regex `/(?:always\s+remember|never\s+use|our\s+rule\s+is|standing\s+rule|invariant:)/i` with `["standing_directive", "transient_task"]`.

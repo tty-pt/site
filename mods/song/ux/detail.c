@@ -3,6 +3,7 @@
 #include "bud/bud_app.h"
 #include "bud/bud_slot.h"
 #include "bud/bud_state.h"
+#include <ttypt/qsys_wasm.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -50,7 +51,7 @@ static int on_zoom_change(bud_event *event)
 	return bud_api_action_handler(event);
 }
 
-ISO_EXPORT(void, wasm_fetch_callback, int request_id, const char *data, int data_len)
+static void song_fetch_callback(int request_id, const char *data, int data_len)
 {
 	(void)request_id;
 	hyle_bud_state_apply_len(
@@ -64,12 +65,13 @@ ISO_EXPORT(void, wasm_fetch_callback, int request_id, const char *data, int data
 	bud_app_set_state();
 }
 
-ISO_EXPORT(void, wasm_init, const char *json, int len)
+static int song_qsys_init(const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 	wasm_state_init(json, len, song_app_fields, &app_state);
 	hyle_bud_state_apply_len(&app_state.cache, song_fields, json, jlen);
 	site_ui_set_locale(app_state.lang);
+	return 0;
 }
 
 /* ── Page builder helpers ──────────────────────────── */
@@ -200,7 +202,7 @@ static int song_slot_fill_actions(int slot_id, bud_node *parent, const void *sta
 BUD_SLOT_CONTRIBUTE(song_primary, .slot_id = BUD_SLOT_PRIMARY_VIEW, .name = "song_chords", .render = song_slot_render_primary);
 BUD_SLOT_CONTRIBUTE(song_actions, .slot_id = BUD_SLOT_ACTIONS_DOCK, .name = "song_transpose", .fill = song_slot_fill_actions);
 
-ISO_EXPORT(bud_node *, bud_app_render, void)
+static bud_node *song_qsys_render(void)
 {
 	bud_node *main_node = bud_slot_render(BUD_SLOT_PRIMARY_VIEW, &app_state);
 	if (!main_node)
@@ -226,3 +228,12 @@ ISO_EXPORT(bud_node *, bud_app_render, void)
 	                main_node));
 	return bud_tpl("<div id='bud-root'>%node</div>", inner);
 }
+
+static void song_qsys_cleanup(void)
+{
+	memset(&app_state, 0, sizeof(app_state));
+	g_main = NULL;
+}
+
+QSYS_WASM_MODULE_EXT(song_detail, song_qsys_init, song_qsys_render, NULL, NULL, song_qsys_cleanup, song_fetch_callback);
+

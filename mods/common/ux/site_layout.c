@@ -18,7 +18,7 @@ static bud_node *menu_btn(const char *href, const char *icon, const char *label)
 	        href ? href : "", icon ? icon : "", label ? label : "");
 }
 
-bud_node *site_ui_menu(const char *user, const char *path)
+SITE_UI_WEAK bud_node *site_ui_menu(const char *user, const char *path)
 {
 	char me_href[PATH_MAX] = "";
 	char login_buf[1024] = "";
@@ -42,7 +42,7 @@ bud_node *site_ui_menu(const char *user, const char *path)
 	}
 }
 
-bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
+SITE_UI_WEAK bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
 {
 	if (!is_owner)
 		return NULL;
@@ -59,12 +59,12 @@ bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
 	        menu_btn(del_href, "🗑️", ui_t("Delete")));
 }
 
-bud_node *site_ui_empty_state(const char *message)
+SITE_UI_WEAK bud_node *site_ui_empty_state(const char *message)
 {
 	return bud_tpl("<p class='text-muted'>%s</p>", message ? message : "");
 }
 
-bud_node *site_ui_layout(
+SITE_UI_WEAK bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children)
 {
@@ -91,11 +91,11 @@ bud_node *site_ui_layout(
 
 	return bud_tpl(
 	        "<main class='main'>%node</main>"
-	        "<nav class='menu'>%node</nav>",
-	        children, panel);
+	        "<nav class='menu' aria-label='%s'>%node</nav>",
+	        children, ui_t("Site Navigation"), panel);
 }
 
-bud_node *site_ui_form_page(
+SITE_UI_WEAK bud_node *site_ui_form_page(
         const char *user, const char *title, const char *path, const char *icon,
         const char *heading, const char *extra_head, bud_node *children)
 {

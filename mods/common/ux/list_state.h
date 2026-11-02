@@ -57,9 +57,18 @@ typedef struct {
 	const char *values[LIST_MAX_ROWS * LIST_MAX_COLS];
 } list_state_t;
 
-int list_state_to_json(const list_state_t *state, char *out, size_t out_sz);
-void list_state_from_json(list_state_t *state, const char *json);
-void list_state_from_json_len(
+#ifndef LIST_WEAK
+#define LIST_WEAK __attribute__((weak))
+#endif
+
+/* Forward declaration for Bud node */
+struct bud_node;
+
+LIST_WEAK int list_state_to_json(const list_state_t *state, char *out, size_t out_sz);
+LIST_WEAK void list_state_from_json(list_state_t *state, const char *json);
+LIST_WEAK void list_state_from_json_len(
         list_state_t *state, const char *json, size_t len);
+LIST_WEAK int list_has_query(const list_state_t *st);
+LIST_WEAK struct bud_node *list_render(const list_state_t *state);
 
 #endif

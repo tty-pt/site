@@ -10,6 +10,7 @@
 
 #include "bud/bud.h"
 #include "bud/bud_app.h"
+#include <ttypt/qsys_wasm.h>
 
 #include "chat_ui.h"
 #include "../chat-types.h"
@@ -28,10 +29,10 @@ static int g_streaming = 0;
  *   Initializes chat state from SSR-provided JSON blob.
  *   Format: JSON object with "session", "summaries", "user", "error" fields.
  */
-ISO_EXPORT(void, wasm_init, const char *json, int len)
+static int chat_qsys_init(const char *json, int len)
 {
 	if (!json || len <= 0)
-		return;
+		return 0;
 
 	memset(&g_session, 0, sizeof(g_session));
 	memset(g_summaries, 0, sizeof(g_summaries));
@@ -48,7 +49,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 		len);
 
 	if (!root)
-		return;
+		return 0;
 
 	/* Extract session object */
 	struct json_object *session_obj = NULL;
@@ -79,14 +80,10 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 	}
 
 	json_object_put(root);
+	return 0;
 }
 
-/*
- * bud_app_render()
- *   Primary WASM render function called by bud hydration.
- *   Returns the chat UI tree with current state.
- */
-ISO_EXPORT(bud_node *, bud_app_render, void)
+static bud_node *chat_qsys_render(void)
 {
 	return chat_ui_render_view(&g_session, g_summaries, g_summary_count, g_user, g_error_msg);
 }
@@ -165,3 +162,17 @@ ISO_EXPORT(void, wasm_ws_on_close, void)
 	g_streaming = 0;
 	memset(g_pending_tokens, 0, sizeof(g_pending_tokens));
 }
+
+static void chat_qsys_cleanup(void)
+{
+	memset(&g_session, 0, sizeof(g_session));
+	memset(g_summaries, 0, sizeof(g_summaries));
+	memset(g_user, 0, sizeof(g_user));
+	memset(g_error_msg, 0, sizeof(g_error_msg));
+	memset(g_pending_tokens, 0, sizeof(g_pending_tokens));
+	g_summary_count = 0;
+	g_streaming = 0;
+}
+
+QSYS_WASM_MODULE_EXT(chat_fe, chat_qsys_init, chat_qsys_render, NULL, NULL, chat_qsys_cleanup, NULL);
+

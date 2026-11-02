@@ -163,6 +163,58 @@ int main(void)
 	}
 	printf("PASS: collision: cacti and room walls block, seams and open ground do not\n");
 
+	/* Small stones/pebbles are walkable and do not block the lamb */
+	g_grid_tile = tile(10, 0x1B, 0, '*', 0, 0);
+	{
+		int16_t p[4] = { 10, 20, 0, 0 };
+		na = ndw_tile_objects(&g_grid_tile, p, 0, a);
+		assert(na >= 1);
+		for (int i = 0; i < na; i++) {
+			assert(a[i].hw == 0 && a[i].hh == 0);
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x, a[i].y));
+		}
+	}
+	/* Huge rocks ('o') and big boulders ('O') block at their physical ground base across all directions */
+	g_grid_tile = tile(10, 0x1B, 0, 'o', 'O', 0);
+	{
+		int16_t p[4] = { 10, 20, 0, 0 };
+		na = ndw_tile_objects(&g_grid_tile, p, 0, a);
+		assert(na >= 2);
+		for (int i = 0; i < na; i++) {
+			assert(a[i].hw >= 7 && a[i].hh >= 7);
+			if (a[i].kind == NDW_K_BOULDER) {
+				assert(a[i].hw == 13 && a[i].hh == 22);
+				/* Player cannot walk inside/under the boulder body */
+				assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - 8));
+				assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - 12));
+			} else if (a[i].kind == NDW_K_ROCK) {
+				assert((a[i].hw == 10 && a[i].hh == 14) || (a[i].hw == 7 && a[i].hh == 7));
+				if (a[i].hh >= 14)
+					assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - 8));
+			}
+			/* 1. Center base blocks */
+			assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y));
+
+			/* 2. South approach (walking North into rock base): blocks when hitting base, clear when outside */
+			assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y + 2));
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x, a[i].y + 12));
+
+			/* 3. North approach (walking South into rock base): upper dome allows walking behind, blocks at mass */
+			assert(ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - a[i].hh + 1));
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - a[i].hh - 6));
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x, a[i].y - a[i].hh - 12));
+
+			/* 4. West approach (walking East into rock base): blocks at base, clear outside */
+			assert(ndw_blocked(lookup_open, NULL, a[i].x - a[i].hw + 1, a[i].y - a[i].hh / 2));
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x - a[i].hw - 10, a[i].y - a[i].hh / 2));
+
+			/* 5. East approach (walking West into rock base): blocks at base, clear over side shadow */
+			assert(ndw_blocked(lookup_open, NULL, a[i].x + a[i].hw - 1, a[i].y - a[i].hh / 2));
+			assert(!ndw_blocked(lookup_open, NULL, a[i].x + a[i].hw + 10, a[i].y - a[i].hh / 2));
+		}
+	}
+	printf("PASS: collision: pebbles are walkable; huge rocks and boulders block at base across all 4 directions while shadows/upper body allow walking\n");
+
 	/* The void rule that stops stray trees: a tile with no plant glyphs draws
 	 * nothing, so a tile the map does not describe cannot paint a neighbour's
 	 * tree in empty space (R1). A tile that does carry a plant glyph still
@@ -214,9 +266,15 @@ int main(void)
 		for (int i = 0; i < na; i++) {
 			if (a[i].kind == NDW_K_DECID) has_tree = 1;
 			if (a[i].kind == NDW_K_ROCK) has_rock = 1;
+			ndw_rect_t ri = ndw_obj_rect(&a[i]);
+			for (int j = i + 1; j < na; j++) {
+				ndw_rect_t rj = ndw_obj_rect(&a[j]);
+				if (a[i].hw && a[j].hw)
+					assert(!ndw_rect_hit(&ri, &rj));
+			}
 		}
 		assert(has_tree && has_rock);
-		printf("PASS: AOT rocks and stones map to world objects and coexist with flora\n");
+		printf("PASS: AOT rocks and stones map to world objects and coexist with flora (non-overlapping footprints)\n");
 	}
 
 	/* Organic biome borders: ndw_ground_owner(pos, lx, ly, mask, &oi, &oj) says

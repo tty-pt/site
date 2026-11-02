@@ -15,3 +15,20 @@ $(VERSION_GEN): ../../htdocs/styles.css ../../htdocs/hyle.css ../../htdocs/bud-c
 	sh ../../scripts/gen-asset-version.sh
 
 $(TARGET): $(VERSION_GEN) ux/site_ui.c ux/site_ui.h ux/site_paths.c ux/site_layout.c ux/site_forms.c ux/site_media.c ux/site_page.c ux/site_chrome.c ux/site_chrome.h viewer_zoom.h common_encoding.c common_response.c common_storage.c common_strlist.c
+
+# Optional Node.js bindings
+NPM ?= npm
+
+npm-build:
+	@if command -v $(NPM) >/dev/null 2>&1; then \
+		(cd npm && $(NPM) run build); \
+	else \
+		echo "Skipping npm build — $(NPM) not found"; \
+	fi
+
+npm-test: npm-build
+	@if command -v $(NPM) >/dev/null 2>&1; then \
+		(cd npm && $(NPM) test); \
+	fi
+
+.PHONY: npm-build npm-test

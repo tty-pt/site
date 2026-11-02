@@ -1,11 +1,20 @@
 CC  ?= clang
 DEV ?= 0
 PROFILE ?= dev
+WASI_CC ?= clang
+WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
+WASM_COMMON_CFLAGS ?= -Iexternal/libqsys/include -Iexternal/libbud/include
+WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
+	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
+	-Wl,--export=qsys_kernel_boot -Wl,--export=qsys_kernel_mount -Wl,--export=qsys_kernel_unmount \
+	-Wl,--export=qsys_kernel_update -Wl,--export=qsys_kernel_action -Wl,--export=qsys_kernel_tick \
+	-Wl,--export=qsys_kernel_version -Wl,--export=wasm_fetch_callback \
+	-Wl,--allow-undefined -Wl,--allow-undefined-file=scripts/wasm-allowed-imports.lst
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients boundary-check
+all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -13,11 +22,39 @@ mods:
 clients:
 	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d; done
 
+site-wasm: htdocs/site.wasm
+
+htdocs/site.wasm: external/libqsys/src/qsys_wasm_kernel.c external/libbud/src/libbud.c external/libxylem/src/libxylem-wasm.c mods/common/ux/site_modules.c mods/common/ux/site_chrome.c mods/site_chrome/ux/chrome.c mods/song/ux/detail.c mods/gig/ux/detail.c mods/index/ux/list_fe.c mods/chat/ux/chat_fe.c mods/chat/ux/chat_ui.c external/libtransp/src/music.c external/libhyle-bud/src/libhyle-bud.c external/libhyle-bud/src/filter.c external/libhyle-bud/src/table.c external/libhyle-bud/src/picker.c external/libhyle-bud/src/form.c external/libhyle/src/url.c
+	@mkdir -p htdocs /tmp/site_wasm_build
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libqsys/src/qsys_wasm_kernel.c -o /tmp/site_wasm_build/kernel.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libbud/src/libbud.c -o /tmp/site_wasm_build/bud.o
+	@$(WASI_CC) $(WASM_CFLAGS) -Iexternal/libxylem/include -O2 -c external/libxylem/src/libxylem-wasm.c -o /tmp/site_wasm_build/xylem.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_modules.c -o /tmp/site_wasm_build/modules.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_chrome.c -o /tmp/site_wasm_build/site_chrome.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/site_chrome/ux/chrome.c -o /tmp/site_wasm_build/chrome.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Imods/common -Imods/common/ux -Imods/song/include -O2 -c mods/song/ux/detail.c -o /tmp/site_wasm_build/song.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Iexternal/axil-hyle/include -Imods/common -Imods/common/ux -Imods/gig/include -O2 -c mods/gig/ux/detail.c -o /tmp/site_wasm_build/gig.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Imods/common -Imods/common/ux -Imods/index/include -O2 -c mods/index/ux/list_fe.c -o /tmp/site_wasm_build/list.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -I/usr/include/json-c -Imods/common -Imods/common/ux -O2 -c mods/chat/ux/chat_fe.c -o /tmp/site_wasm_build/chat.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/chat/ux/chat_ui.c -o /tmp/site_wasm_build/chat_ui.o
+	@$(WASI_CC) $(WASM_CFLAGS) -Iexternal/libtransp/include -O2 -c external/libtransp/src/music.c -o /tmp/site_wasm_build/music.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/libhyle-bud.c -o /tmp/site_wasm_build/hyle_bud.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/filter.c -o /tmp/site_wasm_build/filter.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/table.c -o /tmp/site_wasm_build/table.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/picker.c -o /tmp/site_wasm_build/picker.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/form.c -o /tmp/site_wasm_build/form.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle/include -O2 -c external/libhyle/src/url.c -o /tmp/site_wasm_build/url.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ /tmp/site_wasm_build/*.o
+	@sh external/mk/scripts/wasm-audit.sh $@
+
 # Sync gitignored htdocs deploy assets. hyle.css is copied from external/libhyle/assets/hyle.css;
 # the remaining hashed assets are checked for presence so `make` fails clearly instead of
 # aborting silently on a missing prerequisite of mods/common/ux/version.gen.h.
-DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js
+DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js qsys-client.js
 assets-sync:
+	@if [ -f external/libqsys/npm/dist/client.js ]; then \
+		cp external/libqsys/npm/dist/client.js htdocs/qsys-client.js; \
+	fi
 	@if [ -f external/libhyle/assets/hyle.css ]; then \
 		cp external/libhyle/assets/hyle.css htdocs/hyle.css; \
 	else \
@@ -143,6 +180,38 @@ install-libs:
 	done
 	@echo "runtime libraries + axil installed under $(PREFIX)"
 
+# --- Monorepo Turnkey Node.js & WebAssembly Targets ---
+NPM_PACKAGES = external/libqsys external/libcorm external/libjoint external/libislet \
+               external/libhyle external/liblemma external/libsepal external/libtransp \
+               external/libbud external/libxylem external/liblamina external/libhyle-bud \
+               mods/common
+
+npm-build-all:
+	@for p in $(NPM_PACKAGES); do \
+		echo "=== Building npm package in $$p ==="; \
+		$(MAKE) -C $$p npm-build || exit 1; \
+	done
+
+npm-test-all: npm-build-all
+	@for p in $(NPM_PACKAGES); do \
+		echo "=== Testing npm package in $$p ==="; \
+		$(MAKE) -C $$p npm-test || exit 1; \
+	done
+	@echo "=== Testing Single-Instantiation WASM Invariant ==="
+	@node --test tests/unit/run-wasm-single-instantiation.mjs || exit 1
+	@echo "=== Testing Unified site.wasm Kernel Multi-Slot Invariant ==="
+	@node --test tests/unit/test_site_wasm_kernel.mjs || exit 1
+	@if [ -d /home/quirinpa/duna ]; then \
+		echo "=== Testing consumer: ~/duna ==="; \
+		npm --prefix /home/quirinpa/duna run test:unit || exit 1; \
+	elif [ -d ../duna ]; then \
+		echo "=== Testing consumer: ../duna ==="; \
+		npm --prefix ../duna run test:unit || exit 1; \
+	else \
+		echo "=== Skipping ~/duna (not present in environment) ==="; \
+	fi
+
+
 # The `axil -C` chroot jail: seed what the engine resolves AFTER the chroot
 # (it fires on_axil_post_chroot between init_pre_bind() and the first bind),
 # then gate the restart on the result. JAIL is normally the site root itself
@@ -263,7 +332,10 @@ test-mod: all test-data-dirs
 	@./scripts/run-with-server.sh sh -c '\
 		if [ -f "mods/$(MOD)/test.sh" ]; then (cd mods/$(MOD) && ./test.sh); fi'
 
-test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test
+test-nd-harvest: test-data-dirs
+	@AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all tests/e2e/nd-multi-room-harvest.test.ts
+
+test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test test-nd-harvest
 	@echo "Fast test suite passed!"
 
 test-e2e: test-data-dirs
@@ -384,7 +456,7 @@ new-mod:
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
-PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js list.wasm song_detail.wasm gig_detail.wasm site_chrome.wasm
+PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js qsys-client.js site.wasm
 
 deploy-wasm: clients
 	scp $(PROD_ASSETS:%=htdocs/%) \

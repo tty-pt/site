@@ -5,6 +5,7 @@
 #include "nd/bcp-types.h"
 #include "nd_lamina.h"
 #include "nd_seven.h"
+#include "nd_seven_objects.h"
 #include <nd/seven-world.h>
 
 /* Frame geometry for a 224x224 buffer and a 7x7 grid (as nd_lamina.c lays it
@@ -454,6 +455,187 @@ int main(void)
 				west_yellow_room += (fb[py * W + px] == C_YELLOW);
 		assert(west_yellow_room > 0);
 		printf("PASS: a room's edge blends organically on the minimap\n");
+	}
+
+	/* 17. Synchronous picked mineral suppression on player tile:
+	 * When a stone on the player tile is harvested/picked, draw_tile_objects
+	 * immediately omits it on the minimap, matching the Seven stage. */
+	{
+		nd_client_state_t cst;
+		static uint32_t buf_before[W * H], buf_picked[W * H], buf_clean[W * H];
+
+		memset(&cst, 0, sizeof(cst));
+		init_sample_map(&cst.map_data);
+		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		wild(&cst.map_data, 1, 1, 2, 0, 0, '*', 10, 0, 0);
+		cst.map_data.pos[0] = 50; cst.map_data.pos[1] = 50;
+		cst.room.ref = 100;
+		cst.me = 1;
+		cst.entity_count = 1;
+		cst.entities[0].ref = 999;
+		cst.entities[0].location = 100;
+		cst.entities[0].ch = '*';
+		strcpy(cst.entities[0].name, "obsidian stone");
+
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
+
+		/* Render before picking */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_before, fb, sizeof(buf_before));
+
+		/* Pick the stone */
+		nd_seven_mark_picked(999);
+		sync_room_objects(&cst);
+
+		/* Render after picking */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_picked, fb, sizeof(buf_picked));
+
+		/* Picked buffer MUST differ from before-picking buffer (stone was omitted) */
+		assert(memcmp(buf_before, buf_picked, sizeof(buf_before)) != 0);
+
+		/* Render a map with no stone glyph at all on (1, 1) */
+		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_clean, fb, sizeof(buf_clean));
+
+		/* The buffer after picking MUST match the clean map with no stone glyph! */
+		assert(memcmp(buf_picked, buf_clean, sizeof(buf_clean)) == 0);
+		printf("PASS: picked minerals are immediately omitted on the minimap\n");
+	}
+
+	/* 18. Per-side stone removal on multi-stone tile:
+	 * A tile with 2 stones (side 0 and side 2) removes only the picked stone's
+	 * glyph, leaving the second stone rendered on the minimap. */
+	{
+		nd_client_state_t cst;
+		static uint32_t buf_both[W * H], buf_one_picked[W * H], buf_clean[W * H];
+
+		memset(&cst, 0, sizeof(cst));
+		init_sample_map(&cst.map_data);
+		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		/* 0 stones: clean baseline */
+		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_clean, fb, sizeof(buf_clean));
+
+		/* 2 stone glyphs: side_l ('*') and side_r ('*') */
+		wild(&cst.map_data, 1, 1, 2, '*', 10, 0, 0, '*', 10);
+		cst.map_data.pos[0] = 60; cst.map_data.pos[1] = 60;
+		cst.room.ref = 200;
+		cst.me = 1;
+		cst.entity_count = 2;
+		cst.entities[0].ref = 1001;
+		cst.entities[0].location = 200;
+		cst.entities[0].ch = '*';
+		cst.entities[0].side = 0;
+		strcpy(cst.entities[0].name, "stone left");
+		cst.entities[1].ref = 1002;
+		cst.entities[1].location = 200;
+		cst.entities[1].ch = '*';
+		cst.entities[1].side = 2;
+		strcpy(cst.entities[1].name, "stone right");
+
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
+
+		/* Render both stones */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_both, fb, sizeof(buf_both));
+
+		/* Pick stone 1 (#1001) */
+		nd_seven_mark_picked(1001);
+		sync_room_objects(&cst);
+
+		/* Render with 1 stone picked */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_one_picked, fb, sizeof(buf_one_picked));
+
+		/* Buffer with 1 picked must differ from both present (picked stone was removed) */
+		assert(memcmp(buf_both, buf_one_picked, sizeof(buf_both)) != 0);
+
+		/* Buffer with 1 picked must ALSO differ from clean map (second stone is still present!) */
+		assert(memcmp(buf_one_picked, buf_clean, sizeof(buf_clean)) != 0);
+
+		/* Now pick the remaining second stone (#1002) */
+		nd_seven_mark_picked(1002);
+		sync_room_objects(&cst);
+		render(&cst.map_data, "lamina", 0);
+
+		/* With both stones picked, output must now match clean map with no stones! */
+		assert(memcmp(fb, buf_clean, sizeof(buf_clean)) == 0);
+		printf("PASS: picking 1 stone of 2 removes only that stone on the minimap while keeping the second\n");
+	}
+
+	/* 19. Room contents and live entities rendered on the minimap inside a room:
+	 * When the player enters a room containing entities (e.g. monster 'g', item '/'),
+	 * those entities are rendered on the minimap, and picking an item removes it. */
+	{
+		nd_client_state_t cst;
+		static uint32_t buf_with_ent[W * H], buf_clean_room[W * H];
+
+		memset(&cst, 0, sizeof(cst));
+		init_sample_map(&cst.map_data);
+		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		cst.map_data.pos[0] = 40; cst.map_data.pos[1] = 40;
+		cst.room.ref = 300;
+		cst.me = 1;
+
+		/* Setup room tile at (1, 1) */
+		cst.map_data.tiles[1 * 7 + 1].flags = ND_MAP_FLAG_ROOM | ND_MAP_FLAG_PLAYER;
+		cst.map_data.tiles[1 * 7 + 1].bio_idx = 10;
+		cst.map_data.tiles[1 * 7 + 1].exits = 0x1B;
+		cst.map_data.tiles[1 * 7 + 1].symbol = '!';
+
+		/* Baseline without entities */
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_clean_room, fb, sizeof(buf_clean_room));
+
+		/* Add a monster 'g' and a sword '/' to the room */
+		cst.entity_count = 3;
+		cst.entities[0].ref = 1; /* me */
+		cst.entities[0].location = 300;
+		cst.entities[0].flags = ND_EF_PLAYER;
+
+		cst.entities[1].ref = 2001;
+		cst.entities[1].location = 300;
+		cst.entities[1].ch = 'g';
+		cst.entities[1].fg = 9;
+		cst.entities[1].flags = ND_EF_CREATURE;
+		strcpy(cst.entities[1].name, "goblin");
+
+		cst.entities[2].ref = 2002;
+		cst.entities[2].location = 300;
+		cst.entities[2].ch = '/';
+		cst.entities[2].fg = 15;
+		cst.entities[2].flags = ND_EF_ITEM;
+		strcpy(cst.entities[2].name, "sword");
+
+		sync_room_objects(&cst);
+
+		/* Render with entities present */
+		render(&cst.map_data, "lamina", 0);
+		memcpy(buf_with_ent, fb, sizeof(buf_with_ent));
+
+		/* Minimap with entities present MUST differ from empty room baseline */
+		assert(memcmp(buf_clean_room, buf_with_ent, sizeof(buf_clean_room)) != 0);
+
+		/* Now pick the sword (#2002) */
+		nd_seven_mark_picked(2002);
+		sync_room_objects(&cst);
+		render(&cst.map_data, "lamina", 0);
+
+		/* Buffer after picking sword must differ from both previous states */
+		assert(memcmp(fb, buf_with_ent, sizeof(buf_with_ent)) != 0);
+		assert(memcmp(fb, buf_clean_room, sizeof(buf_clean_room)) != 0);
+
+		printf("PASS: room entities and live contents are rendered on the minimap inside a room\n");
 	}
 
 	printf("ALL LAMINA MAP RENDER TESTS PASSED\n");

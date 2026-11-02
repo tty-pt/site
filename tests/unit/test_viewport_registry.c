@@ -5,6 +5,8 @@
 #include "nd/bcp-types.h"
 #include "nd/region-types.h"
 #include "nd_viewport.h"
+#include "nd_seven_motion.h"
+#include "nd_seven.h"
 #include "nd_ui.h"
 
 static bud_node *mock_stage_mount(void)
@@ -88,6 +90,33 @@ int main(void)
 	assert(strstr(html, "id=\"directions\"") != NULL);
 	bud_free_string(html);
 	printf("PASS: ND_LAYOUT_STANDARD_HYBRID renders standard terminal and controls\n");
+
+	/* 7. Driver transition handshake and input reset (R2, R3) */
+	extern nd_client_state_t client_state;
+	void wasm_tick(float dt, int width, int height);
+
+	/* Set client to non-seven mode */
+	strncpy(client_state.preferred_driver, "tty", sizeof(client_state.preferred_driver) - 1);
+	wasm_tick(0.016f, 640, 480);
+
+	/* Simulate key press held */
+	nd_seven_key("d", 1);
+
+	/* Transition into Seven stage */
+	strncpy(client_state.preferred_driver, "lamina-seven", sizeof(client_state.preferred_driver) - 1);
+	wasm_tick(0.016f, 640, 480);
+
+	/* The driver transition handshake must have reset the held keys so lamb does not auto-walk */
+	assert(nd_seven_get_walking() == 0);
+
+	/* Transition back to tty and verify reset */
+	nd_seven_key("d", 1);
+	strncpy(client_state.preferred_driver, "tty", sizeof(client_state.preferred_driver) - 1);
+	wasm_tick(0.016f, 640, 480);
+	strncpy(client_state.preferred_driver, "lamina-seven", sizeof(client_state.preferred_driver) - 1);
+	wasm_tick(0.016f, 640, 480);
+	assert(nd_seven_get_walking() == 0);
+	printf("PASS: driver transition handshake into seven stage resets button and key input state\n");
 
 	printf("ALL VIEWPORT REGISTRY & CLEAN UI TESTS PASSED\n");
 	return 0;

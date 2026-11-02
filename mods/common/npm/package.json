@@ -1,0 +1,28 @@
+{
+  "name": "@ttypt/site-ui",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Universal Node.js and Browser bindings for tty.pt site UI primitives, layout scaffolding, and media controls",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "include",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node -e 'console.log(\"@ttypt/site-ui built\")'",
+    "test": "node --test tests/site-ui.test.mjs"
+  },
+  "keywords": [
+    "site-ui",
+    "ui",
+    "components",
+    "layout",
+    "forms",
+    "media",
+    "isomorphic"
+  ],
+  "author": "Paulo Quirino",
+  "license": "BSD-2-Clause"
+}

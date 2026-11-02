@@ -1,0 +1,29 @@
+{
+  "name": "@ttypt/lamina",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Universal Node.js and Browser bindings for liblamina 2D/3D immediate-mode canvas and WebGL graphics engine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "include",
+    "README.md"
+  ],
+  "scripts": {
+    "build:wasm": "clang --target=wasm32-wasi -mexec-model=reactor -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=malloc -Wl,--export=free -Wl,--export=lamina_wasm_world_to_screen -Wl,--export=lamina_wasm_screen_to_world -O3 -o dist/lamina.wasm wasm/lamina_wasm.c",
+    "build": "npm run build:wasm",
+    "test": "node --test tests/lamina.test.mjs"
+  },
+  "keywords": [
+    "lamina",
+    "liblamina",
+    "graphics",
+    "canvas",
+    "webgl",
+    "2d",
+    "tilemap"
+  ],
+  "author": "Paulo Quirino",
+  "license": "BSD-2-Clause"
+}

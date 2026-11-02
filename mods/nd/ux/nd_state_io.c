@@ -353,6 +353,7 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
 		int ret = nd_bcp_decode(buf, len, &client_state);
 		if (ret > 0) {
+			nd_spatial_resolver_invalidate();
 			nd_scene_sync(&g_scene, &client_state);
 			bud_app_set_state();
 			nd_map_canvas_redraw(&client_state);

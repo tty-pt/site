@@ -1,6 +1,7 @@
 #include "bud/bud.h"
 #include "bud/bud_jsx.h"
 #include "bud/bud_app.h"
+#include <ttypt/qsys_wasm.h>
 #include <hyle-bud/hyle-bud.h>
 #include "../fields.h"
 #include <stdio.h>
@@ -107,7 +108,7 @@ BUD_STATE_FIELDS(sb_song_row_data_t, sb_song_row_fields, SB_SONG_ROW_SCHEMA)
 
 /* ── WASM state init (called by JS bridge before bud_app_mount) ── */
 
-ISO_EXPORT(void, wasm_init, const char *json, int len)
+static int gig_qsys_init(const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 
@@ -131,6 +132,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 	        json, jlen, "format", "song.types", 0, sb_app_state.pick_fmt_q,
 	        sb_app_state.pick_fmt_page, &g_sb_fmt_pick_buf,
 	        &g_sb_fmt_pick_state);
+	return 0;
 }
 
 /* ── Zoom slider event handler ──────────────────────────── */
@@ -151,7 +153,7 @@ static void fetch_sb_transpose(int song_index, int semitones)
 extern void wasm_mark_dirty(void);
 extern void wasm_flush(void);
 
-ISO_EXPORT(void, wasm_fetch_callback, int request_id, const char *data, int data_len)
+static void gig_fetch_callback(int request_id, const char *data, int data_len)
 {
 	(void)request_id;
 	char chord_html[65536];
@@ -265,7 +267,7 @@ static bud_node *sb_build_body_content(void);
 
 /* ── WASM app entry point (isomorphic: server .so + WASM .wasm) ── */
 
-ISO_EXPORT(bud_node *, bud_app_render, void)
+static bud_node *gig_qsys_render(void)
 {
 	g_sb_root = NULL;
 	g_sb_main = NULL;
@@ -730,3 +732,16 @@ static bud_node *sb_build_body_content(void)
 
 	return frag;
 }
+
+#include <ttypt/qsys_wasm.h>
+
+static void gig_qsys_cleanup(void)
+{
+	memset(&sb_app_state, 0, sizeof(sb_app_state));
+	g_sb_root = NULL;
+	g_sb_main = NULL;
+	g_sb_n_chord_nodes = 0;
+}
+
+QSYS_WASM_MODULE_EXT(gig_detail, gig_qsys_init, gig_qsys_render, NULL, NULL, gig_qsys_cleanup, gig_fetch_callback);
+

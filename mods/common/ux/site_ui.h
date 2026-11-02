@@ -7,8 +7,12 @@
 #include <stddef.h>
 #include <hyle-bud/hyle-bud.h>
 
-const char *site_ui_get_locale(void);
-void site_ui_set_locale(const char *lang);
+#ifndef SITE_UI_WEAK
+#define SITE_UI_WEAK __attribute__((weak))
+#endif
+
+SITE_UI_WEAK const char *site_ui_get_locale(void);
+SITE_UI_WEAK void site_ui_set_locale(const char *lang);
 
 static inline const char *ui_t(const char *msgid)
 {
@@ -28,44 +32,44 @@ static inline const char *ui_t(const char *msgid)
 	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V "\"></"      \
 	"script>"
 
-char *site_ui_page(
+SITE_UI_WEAK char *site_ui_page(
         const char *title, const char *path, const char *icon, const char *user,
         const char *extra_head, const char *module, bud_node *body);
-char *site_ui_page_lang(
+SITE_UI_WEAK char *site_ui_page_lang(
         const char *title, const char *path, const char *icon, const char *user,
         const char *extra_head, const char *module, bud_node *body,
         const char *lang);
-bud_node *site_ui_layout(
+SITE_UI_WEAK bud_node *site_ui_layout(
         const char *title, const char *path, const char *icon, const char *user,
         bud_node *menu_items, bud_node *children);
-const char *site_ui_module_icon(const char *module);
-const char *site_ui_module_display(const char *module);
-bud_node *site_ui_menu(const char *user, const char *path);
-bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner);
-bud_node *site_ui_form_actions(
+SITE_UI_WEAK const char *site_ui_module_icon(const char *module);
+SITE_UI_WEAK const char *site_ui_module_display(const char *module);
+SITE_UI_WEAK bud_node *site_ui_menu(const char *user, const char *path);
+SITE_UI_WEAK bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner);
+SITE_UI_WEAK bud_node *site_ui_form_actions(
         const char *cancel_href, const char *submit_label, bud_node *extra);
-bud_node *site_ui_form_page(
+SITE_UI_WEAK bud_node *site_ui_form_page(
         const char *user, const char *title, const char *path, const char *icon,
         const char *heading, const char *extra_head, bud_node *children);
-bud_node *site_ui_empty_state(const char *message);
-bud_node *site_ui_viewer_controls(
+SITE_UI_WEAK bud_node *site_ui_empty_state(const char *message);
+SITE_UI_WEAK bud_node *site_ui_viewer_controls(
         const char *module, int zoom, const char *save_url,
         bud_event_handler_fn on_zoom_change, bud_node **zoom_text_out);
-bud_node *site_ui_delete_confirm(
+SITE_UI_WEAK bud_node *site_ui_delete_confirm(
         const char *module, const char *id, const char *title,
         const char *csrf_token);
-bud_node *site_ui_add_form(
+SITE_UI_WEAK bud_node *site_ui_add_form(
         const char *module, const char *csrf_token, int has_error,
         const char *error_msg);
-void parent_path(const char *path, char *buf, size_t len);
-void site_ui_item_path(
+SITE_UI_WEAK void parent_path(const char *path, char *buf, size_t len);
+SITE_UI_WEAK void site_ui_item_path(
         const char *module, const char *id, char *buf, size_t len);
-void item_action_path(
+SITE_UI_WEAK void item_action_path(
         const char *module, const char *id, const char *action, char *buf,
         size_t len);
-void site_ui_collection_path(const char *module, char *buf, size_t len);
-void auth_path(const char *action, char *buf, size_t len);
-void login_href(const char *ret, char *buf, size_t len);
+SITE_UI_WEAK void site_ui_collection_path(const char *module, char *buf, size_t len);
+SITE_UI_WEAK void auth_path(const char *action, char *buf, size_t len);
+SITE_UI_WEAK void login_href(const char *ret, char *buf, size_t len);
 
 /* ── Form field descriptor for generic form builder ── */
 #ifndef BUD_RECORD
@@ -86,41 +90,41 @@ typedef hyle_bud_picker_entry_t pick_entry_t;
 typedef hyle_bud_picker_view_t pick_view_t;
 
 /* ── Zoom helpers ─────────────────────────────────── */
-void site_ui_zoom_style(int zoom, char *buf, size_t len);
-void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom);
-int ui_on_zoom_change(
+SITE_UI_WEAK void site_ui_zoom_style(int zoom, char *buf, size_t len);
+SITE_UI_WEAK void ui_apply_zoom(bud_node *main_node, bud_node *zoom_label, int zoom);
+SITE_UI_WEAK int ui_on_zoom_change(
         bud_event *event, int *zoom_out, bud_node *main_node,
         bud_node *zoom_label);
 
 /* ── String-First Action & Replace Picker Components ──────── */
-bud_node *site_ui_picker(
+SITE_UI_WEAK bud_node *site_ui_picker(
         const char *target, const char *post_action, const char *get_action,
         const char *csrf_token, const pick_view_t *pv, int auto_submit);
 
-bud_node *site_ui_row_replace_picker(
+SITE_UI_WEAK bud_node *site_ui_row_replace_picker(
         const char *target, int row_idx, const char *cur_id,
         const char *cur_title, const char *post_action, const char *back_href,
         const char *csrf_token, const pick_view_t *pv);
 
 /* ── Reusable Action Form & Item Row Primitives ─────────── */
-bud_node *site_ui_action_form(
+SITE_UI_WEAK bud_node *site_ui_action_form(
         const char *action, const char *csrf_token, const char *method,
         bud_node *inputs, const char *btn_label, const char *btn_class);
 
-bud_node *site_ui_item_row(
+SITE_UI_WEAK bud_node *site_ui_item_row(
         const char *title, const char *href, const char *subtitle,
         bud_node *action_controls);
 
 /* ── Declarative Schema-Driven Form Builder ─────────── */
 /* Builds a complete POST form (and sibling GET form if ref fields exist)
  * directly from hyle_schema_desc_t schema table and struct data. */
-bud_node *site_ui_form_from_desc(
+SITE_UI_WEAK bud_node *site_ui_form_from_desc(
         const char *action, const char *cancel_href, const char *submit_label,
         const hyle_schema_desc_t *desc, const void *struct_ptr,
         const char *csrf_token, const pick_view_t *pv, const char *vstr_val);
 
 /* ── Generic Row / Cell Picker Primitives ─────────────────── */
-bud_node *site_ui_cell_picker(
+SITE_UI_WEAK bud_node *site_ui_cell_picker(
         const char *target, const char *key, int row_idx, const char *cur_id,
         const char *cur_title, const char *get_action, const char *post_action,
         const char *csrf_token, const pick_view_t *pv, int is_active,
@@ -143,7 +147,7 @@ typedef struct {
 	int collapsible;
 } site_ui_filter_spec_t;
 
-bud_node *site_ui_filter_bar(
+SITE_UI_WEAK bud_node *site_ui_filter_bar(
         const site_ui_filter_spec_t *specs, int n_specs, const char *action,
         const char *current_q, const pick_view_t *pv);
 
@@ -152,42 +156,40 @@ bud_node *site_ui_filter_bar(
 
 typedef hyle_bud_picker_buffer_t site_ui_picker_buffer_t;
 
-void site_ui_picker_state_from_json(
+SITE_UI_WEAK void site_ui_picker_state_from_json(
         const char *json, size_t jlen, const char *key, const char *target,
         int multi, const char *q, int page, site_ui_picker_buffer_t *buf,
         pick_view_t *pv_out);
 
-#ifndef __wasm__
 struct json_object;
-void site_ui_picker_state_to_json(
+SITE_UI_WEAK void site_ui_picker_state_to_json(
         const pick_view_t *pv, struct json_object *j_root);
-#endif
 
 /* ── Shared checkbox builder ────────────────────── */
-bud_node *site_ui_checkbox(
+SITE_UI_WEAK bud_node *site_ui_checkbox(
         const char *name, const char *label, int checked,
         bud_event_handler_fn on_change);
 
 /* ── Shared media slot renderer ──────────────────── */
-bud_node *
+SITE_UI_WEAK bud_node *
 site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf);
 
 /* ── Shared media HTML string builder (for WASM innerHTML patching) ─── */
-int site_ui_build_media_html(
+SITE_UI_WEAK int site_ui_build_media_html(
         const char *yt, const char *audio, const char *pdf, char *out,
         size_t out_sz);
 
 /* ── HTML sanitization for safe user markup ──────────────────── */
-char *site_ui_sanitize_html(const char *raw);
+SITE_UI_WEAK char *site_ui_sanitize_html(const char *raw);
 
 /* ── WASM state helpers (D01) ─────────────────────────────────── */
-char *site_ui_state_head(const char *json);
-int site_ui_respond_with_state(
+SITE_UI_WEAK char *site_ui_state_head(const char *json);
+SITE_UI_WEAK int site_ui_respond_with_state(
         int fd, const char *title, const char *path, const char *icon,
         const char *user, const char *state_json, const char *module,
         bud_node *body);
 
 /* ── WASM detail init helpers ───────────────────────────────────── */
-void wasm_state_init(const char *json, int len, const bud_field_desc_t *fields, void *state);
+SITE_UI_WEAK void wasm_state_init(const char *json, int len, const bud_field_desc_t *fields, void *state);
 
 #endif

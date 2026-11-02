@@ -409,7 +409,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_append(act_dock, look);
 
 			/* Get button: shown if ACT_GET (4) is set or item is gettable */
-			if ((e->actions & 4) || (e->location != st->me && e->type != 1 && e->actions == 0)) {
+			if ((e->actions & 4) || (e->location != st->me && !(e->flags & (ND_EF_PLAYER | ND_EF_CREATURE)) && e->type != 1 && e->actions == 0)) {
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
@@ -528,7 +528,7 @@ static int nd_ui_seven_active(const nd_client_state_t *st)
 static int on_key_up(bud_event *e)
 {
 	const char *key = (const char *)e->user;
-	if (!key || !*key || !nd_ui_seven_active(&client_state))
+	if (!key || !*key)
 		return 0;
 	return nd_seven_key(key, 0);
 }
@@ -539,8 +539,17 @@ static int on_key_down(bud_event *e)
 	if (!key || !*key)
 		return 0;
 
-	if (nd_ui_seven_active(&client_state) && nd_seven_key(key, 1))
-		return 1;
+	if (nd_ui_seven_active(&client_state)) {
+		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
+			char act[64];
+			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0) {
+				ws_send(act, strlen(act));
+				return 1;
+			}
+		}
+		if (nd_seven_key(key, 1))
+			return 1;
+	}
 	if (strcmp(key, "k") == 0 || strcmp(key, "ArrowUp") == 0) {
 		ws_send("k\n", 2);
 		return 1;
@@ -753,15 +762,33 @@ ISO_EXPORT(void, wasm_canvas_render, void)
 ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 {
 	static uint32_t s_tick_counter = 0;
-	if (nd_ui_seven_active(&client_state) && width > 0 && height > 0)
+	static int s_prev_seven_active = 0;
+	int now_seven = nd_ui_seven_active(&client_state);
+
+	if (now_seven && width > 0 && height > 0)
 		seven_stage_fit(width, height);
 	s_tick_counter++;
-	if (nd_ui_seven_active(&client_state)) {
+
+	/* Phase 2: Reconciliation (Ingest completed in wasm_ws_msg) */
+	if (now_seven != s_prev_seven_active) {
+		/* Driver handshake: entering or exiting Seven stage */
+		nd_seven_reset_input();
+		if (now_seven)
+			nd_seven_sync_origin(&client_state);
+		s_prev_seven_active = now_seven;
+	}
+
+	nd_seven_sync_origin(&client_state);
+	sync_room_objects(&client_state);
+
+	/* Phase 3: Simulation */
+	if (now_seven) {
 		int mv = nd_seven_tick(&client_state, dt);
 		if (mv) {
 			char m[2] = { (char)mv, '\n' };
 			ws_send(m, 2);
 		}
+		/* Phase 4: Presentation (Pure drawing without state mutation) */
 		if ((s_tick_counter % 2) == 0) {
 			seven_stage_redraw();
 			/* Same cadence as the stage: the minimap follows the lamb in
