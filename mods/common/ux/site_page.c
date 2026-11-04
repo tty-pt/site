@@ -10,13 +10,11 @@
 #include "bud/bud_app.h"
 #include "bud/bud_slot.h"
 
-#ifndef __wasm__
 #include <ttypt/axil.h>
 #ifdef COMMON_INTERNAL_H
 int respond_html(int fd, const char *html);
 #else
 #include "../common.h"
-#endif
 #endif
 
 static size_t escape_html_into(const char *src, char *dst, size_t dstsize)
@@ -180,7 +178,7 @@ char *site_ui_page_lang(
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
 	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
-	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
+	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,
 	        state_icon, state_user, state_lang, chrome_html, body_html);
@@ -206,7 +204,7 @@ char *site_ui_page_lang(
 	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
 	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
-	        "<script type=\"module\" src=\"/bud-client.js" SITE_CLIENT_V
+	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,
 	        state_icon, state_user, state_lang, chrome_html, body_html);

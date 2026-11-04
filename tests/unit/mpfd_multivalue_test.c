@@ -17,7 +17,7 @@ static void discard_log(int type, const char *fmt, ...)
 	(void)fmt;
 }
 
-qsyslog_t qsyslog = discard_log;
+stllog_t stllog = discard_log;
 
 int axil_header_get(socket_t fd, const char *key, char *buf, size_t buf_len)
 {

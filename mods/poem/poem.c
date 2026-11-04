@@ -67,6 +67,21 @@ static int poem_detail_handler(int fd, char *body)
 	        fd, body, "poem", 0, NULL, NULL, poem_detail_auth, NULL);
 }
 
+static const source_list_field_t poem_list_fields[] = {
+	{ "title", "Title" },
+	{ "owner", "Owner" },
+};
+
+static const source_list_view_t poem_list_view = {
+	"poem",
+	poem_list_fields,
+	sizeof(poem_list_fields) / sizeof(poem_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
 void xy_install(void)
 {
 	xy_load("./mods/index/index");

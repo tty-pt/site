@@ -154,6 +154,13 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	}
 	nd_seed_state_from_data(&st);
 
+	char qs[1024] = {0};
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	if (strstr(qs, "layout=hybrid"))
+		st.layout_mode = ND_LAYOUT_STANDARD_HYBRID;
+	if (strstr(qs, "stage=tty"))
+		strncpy(st.preferred_driver, "tty", sizeof(st.preferred_driver) - 1);
+
 	size_t json_cap = 16384;
 	char *state_json = malloc(json_cap);
 	if (!state_json)

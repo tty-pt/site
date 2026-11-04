@@ -1,4 +1,4 @@
-# @ttypt/lamina
+# @tty-pt/lamina
 
 [![npm version](https://img.shields.io/badge/npm-v0.1.0-CB3837?logo=npm)](#)
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue)](#)
@@ -12,11 +12,11 @@
 ## 1. Quickstart
 
 ```bash
-npm install @ttypt/lamina
+npm install @tty-pt/lamina
 ```
 
 ```typescript
-import { ViewportController } from "@ttypt/lamina";
+import { ViewportController } from "@tty-pt/lamina";
 
 const viewport = new ViewportController(1280, 720);
 viewport.setCamera(100, 200, 1.5 /* zoom */);
@@ -28,10 +28,27 @@ console.log(screen); // { x: 640, y: 360 }
 
 ---
 
-## 2. C Development Headers via NPM
+## 2. JavaScript / TypeScript API Reference
+
+### `ViewportController`
+2D tilemap and canvas camera viewport controller:
+* `constructor(width?: number, height?: number)`: Initializes viewport with dimensions (default: 640x480).
+* `.setCamera(x: number, y: number, zoom?: number): void`: Updates camera center position and zoom factor.
+* `.worldToScreen(worldX: number, worldY: number): { x: number, y: number }`: Projects continuous world coordinates to screen canvas pixels. **Executes strictly in compiled WebAssembly / C** via `lamina_wasm_world_to_screen()`.
+* `.screenToWorld(screenX: number, screenY: number): { x: number, y: number }`: Unprojects screen canvas pixel coordinates back to continuous world coordinates strictly via WebAssembly.
+
+### `getLaminaWasm(): WebAssembly.Instance`
+Returns the WebAssembly instance loaded on the Stele shared-memory substrate.
+
+### `version(): string`
+Returns the library semantic version string.
+
+---
+
+## 3. C Development Headers via NPM
 
 ```makefile
-CFLAGS += -I./node_modules/@ttypt/lamina/include
+CFLAGS += -I./node_modules/@tty-pt/lamina/include
 ```
 
 ## License

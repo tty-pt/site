@@ -7,8 +7,8 @@ echo "========================================================"
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== Wave 1: libqsys ==="
-make -C "$ROOT_DIR/external/libqsys" test
+echo "=== Wave 1: libstele ==="
+make -C "$ROOT_DIR/external/libstele" test
 
 echo "=== Wave 1: libbud ==="
 make -C "$ROOT_DIR/external/libbud" test

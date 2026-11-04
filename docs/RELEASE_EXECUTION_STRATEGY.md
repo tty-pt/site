@@ -38,8 +38,8 @@ This document formalizes the reproducible, battle-tested release methodology use
 ## 2. Topological Dependency Layers
 
 ```
-Layer 0: System Fundamentals
-         └── libqsys (cross-platform OS, dlopen, memory, timer)
+Layer 0: System Fundamentals & Substrate
+         └── libstele (cross-platform OS, dlopen, memory, timer, WASM reactor substrate)
 
 Layer 1: Storage Engine & UI Kernels
          ├── libcorm (memory-mapped columnar storage, arenas)
@@ -85,7 +85,7 @@ Before creating a Git tag and triggering the remote CI workflow, every repositor
 
 ### 3.1 Header & Portability Hygiene
 - **Windows / MinGW (`winget`) Compatibility**:
-  - **No unconditional `<dlfcn.h>`**: Windows lacks `<dlfcn.h>`. Dynamic symbols must be loaded through `<ttypt/qsys.h>` (`qsys_dlopen`, `qsys_dlsym`, `qsys_dlclose`) or guarded behind `#ifndef _WIN32`.
+  - **No unconditional `<dlfcn.h>`**: Windows lacks `<dlfcn.h>`. Dynamic symbols must be loaded through `<ttypt/stele.h>` (`stl_dlopen`, `stl_dlsym`, `stl_dlclose`) or guarded behind `#ifndef _WIN32`.
   - **GNU Extensions**: Define `#ifndef _GNU_SOURCE \n #define _GNU_SOURCE \n #endif` when using `dlsym(RTLD_DEFAULT, ...)`.
 - **OpenBSD Portability**:
   - Ensure iconv, math (`-lm`), and socket libraries are conditionally linked per `Makefile` conventions.
@@ -169,9 +169,9 @@ Every release job runs through:
 
 | Layer | Repository | Target Version | Status | Notes |
 |:---:|:---|:---:|:---:|:---|
-| **0** | `libqsys` | `v1.3.1` | **PUBLISHED** | `<ttypt/iso.h>` isomorphic C contract |
+| **0** | `libstele` | `v1.4.1` | **PUBLISHED** | `<ttypt/iso.h>` isomorphic C contract + `<ttypt/stele_wasm.h>` substrate |
 | **1** | `libcorm` | `v2.0.1` | **PUBLISHED** | WASM linear memory arena shims, Windows dl cleanup |
-| **1** | `libbud` | `v1.0.2` | **PUBLISHED** | Namespaced imports, 60fps frame loop, universal slot |
+| **1** | `libbud` | `v1.1.1` | **PUBLISHED** | Decoupled pure VDOM diff engine (`bud_vdom_diff`) and 5-field UI binder |
 | **2** | `libxylem` | `v1.6.0` | **PUBLISHED** | In-WASM core dispatcher, `XY_LISTENER_TAG` |
 | **2** | `libjoint` | `v1.5.0` | **PUBLISHED** | Time axis: `rec_axis_store_typed` ISO date ingestion |
 | **2** | `libislet` | `v1.2.1` | **PUBLISHED** | Space axis: 4D Morton encoding, portable build |
@@ -189,7 +189,7 @@ Every release job runs through:
 | **7** | `pi-quest` | `v1.2.0` | **PUBLISHED** | Autonomous quest journal & evidence gate |
 | **7** | `pi-mm` | `v0.3.1` | **PUBLISHED** | Latent mipmap recall & cormd daemon |
 | **7** | `nd-*` modules | `v1.0.2+` | Pending ND update | 16 NeverDark gameplay and domain modules |
-| **8** | `site` | `Wave 2026.11` | Final Stage | Platform deployment and aggregator |
+| **8** | `site` | `Wave 2026.12` | **PUBLISHED** | Unified single-instantiation WASM kernel substrate (`v2026.12`) |
 
 ---
 

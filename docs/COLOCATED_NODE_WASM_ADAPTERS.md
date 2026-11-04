@@ -18,14 +18,18 @@ This architecture codifies the **Colocated Dual-Engine Model**:
 
 | Library | Core C Capabilities | Node.js Backend Role (Native N-API) | Browser Frontend Role (Isomorphic WASM) | Package Name |
 | :--- | :--- | :--- | :--- | :--- |
-| **`libcorm`** (`corm` + `cormr`) | Memory-mapped persistent KV, auto-indexing, candidate set algebra (`cormr_set_t`), streaming min-heap ranker (`cormr_rank_t`). | **High**: Embedded persistent store for Next.js, Express, Fastify, and CLI tools. Direct $O(1)$ lookups, binary serialization. | **High**: Client-side candidate set algebra (intersection/union of 100k records in <1ms) and min-heap ranking. RAM storage with OPFS/IndexedDB snapshots via `corm_host_persist/restore`. | `@ttypt/corm` |
-| **`libjoint`** | Interval-tree temporal presence, interval intersection (`joint_intersect`), conflict resolution, schedule recording. | **High**: Booking engines, reservation conflicts, room availability, temporal scheduling backend. | **High**: Interactive calendar UI, instant client-side date/slot conflict detection, drag-and-drop booking preview with zero server roundtrips. | `@ttypt/joint` |
-| **`libsepal`** | Dense vector similarity, bitwise Hamming sketches ($O(1)$ popcount pre-filtering), cosine & dot-product ranking. | **High**: Local semantic search, embedding cache retrieval, document deduplication, agent memory ranking (`axil-auren`, `pi-mm`). | **Medium-High**: Client-side vector search over pre-embedded datasets (e.g. offline documentation search, client-side autocomplete). | `@ttypt/sepal` |
-| **`liblemma`** | Unicode accent folding (`lemma_fold`), text tokenization, Porter stemming, BM25 lexical inverted indexing. | **High**: Full-text search backend, multilingual search indexing, accent-insensitive query normalization. | **High**: Instant client-side search-as-you-type in browser inputs, offline document search, client-side accent folding (`pão` $\leftrightarrow$ `pao`) with zero bundle bloat. | `@ttypt/lemma` |
-| **`libhyle`** | Canonical schema descriptors (`hyle_schema_desc_t`), row purification (`hyle_purify_row`), blueprint schemas, query AST. | **High**: Request payload & server action validation. Single Source of Truth for schema definitions across C and Node. | **High**: Client-side form validation before submission (React Hook Form / native forms). Instant field error markers sharing identical validation rules with backend. | `@ttypt/hyle` |
-| **`libbud`** | Declarative 5-field UI binder, virtual DOM diffing (`bud_vdom_diff`), patch operations (`bud_render_patch_ops`), SSR hydration. | **Medium**: Fast headless SSR HTML rendering from JSON state. | **Active**: Core client-side DOM hydration and patching (`htdocs/*.wasm`). | `@ttypt/bud` |
-| **`libislet`** | 2D/3D spatial quadtree/grid engine, bounding box intersections, spatial entity clustering. | **Medium**: Spatial entity queries, coworking floorplan coordinate indexing, geofencing. | **Medium**: Interactive SVG/Canvas spatial selection, seat map panning, viewport entity culling. | `@ttypt/islet` |
-| **`libxylem`** | Dynamic hook/event dispatch bus (`xy_areg`, `xy_call`), decoupled lifecycle management. | **Low-Medium**: Plugin architecture in Node servers. | **Active**: `libxylem-wasm.c` provides hook dispatching in WASM. | `@ttypt/xylem` |
+| **`libcorm`** (`corm` + `cormr`) | Memory-mapped persistent KV, auto-indexing, candidate set algebra (`cormr_set_t`), streaming min-heap ranker (`cormr_rank_t`). | **High**: Embedded persistent store for Next.js, Express, Fastify, and CLI tools. Direct $O(1)$ lookups, binary serialization. | **High**: Client-side candidate set algebra (intersection/union of 100k records in <1ms) and min-heap ranking. RAM storage with OPFS/IndexedDB snapshots via `corm_host_persist/restore`. | `@tty-pt/corm` |
+| **`libjoint`** | Interval-tree temporal presence, interval intersection (`joint_intersect`), conflict resolution, schedule recording. | **High**: Booking engines, reservation conflicts, room availability, temporal scheduling backend. | **High**: Interactive calendar UI, instant client-side date/slot conflict detection, drag-and-drop booking preview with zero server roundtrips. | `@tty-pt/joint` |
+| **`libsepal`** | Dense vector similarity, bitwise Hamming sketches ($O(1)$ popcount pre-filtering), cosine & dot-product ranking. | **High**: Local semantic search, embedding cache retrieval, document deduplication, agent memory ranking (`axil-auren`, `pi-mm`). | **Medium-High**: Client-side vector search over pre-embedded datasets (e.g. offline documentation search, client-side autocomplete). | `@tty-pt/sepal` |
+| **`liblemma`** | Unicode accent folding (`lemma_fold`), text tokenization, Porter stemming, BM25 lexical inverted indexing. | **High**: Full-text search backend, multilingual search indexing, accent-insensitive query normalization. | **High**: Instant client-side search-as-you-type in browser inputs, offline document search, client-side accent folding (`pão` $\leftrightarrow$ `pao`) with zero bundle bloat. | `@tty-pt/lemma` |
+| **`libhyle`** | Canonical schema descriptors (`hyle_schema_desc_t`), row purification (`hyle_purify_row`), blueprint schemas, query AST. | **High**: Request payload & server action validation. Single Source of Truth for schema definitions across C and Node. | **High**: Client-side form validation before submission (React Hook Form / native forms). Instant field error markers sharing identical validation rules with backend. | `@tty-pt/hyle` |
+| **`libbud`** | Declarative 5-field UI binder, virtual DOM diffing (`bud_vdom_diff`), patch operations (`bud_render_patch_ops`), SSR hydration. | **Medium**: Fast headless SSR HTML rendering from JSON state. | **Active**: Core client-side DOM hydration and patching (`htdocs/*.wasm`). | `@tty-pt/bud` |
+| **`libislet`** | 2D/3D spatial quadtree/grid engine, bounding box intersections, spatial entity clustering. | **Medium**: Spatial entity queries, coworking floorplan coordinate indexing, geofencing. | **Medium**: Interactive SVG/Canvas spatial selection, seat map panning, viewport entity culling. | `@tty-pt/islet` |
+| **`libxylem`** | Dynamic hook/event dispatch bus (`xy_areg`, `xy_call`), decoupled lifecycle management. | **Low-Medium**: Plugin architecture in Node servers. | **Active**: `libxylem-wasm.c` provides hook dispatching in WASM. | `@tty-pt/xylem` |
+| **`libstele`** | Universal single-instantiation WASM reactor substrate, slot orchestration (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), Web HAL capability host imports. | **Medium**: Headless simulation and test harness for WASM modules. | **Active**: Core application reactor kernel and slot manager (`<ttypt/stele_wasm.h>`). | `@tty-pt/stele` |
+| **`libhyle-bud`** | Data-to-UI bridge mapping Hyle schemas to Bud UI components (filters, tables, pickers). | **Medium**: Headless SSR filter and table HTML generation. | **Active**: Reactive data table and filter DOM updates. | `@tty-pt/hyle-bud` |
+| **`liblamina`** | 2D/3D immediate-mode canvas, tilemap, and WebGL graphics engine. | **Medium**: Headless map rendering and geometry calculations. | **Active**: Interactive canvas drawing, sprite blitting, and map viewport rendering. | `@tty-pt/lamina` |
+| **`libtransp`** | Chord transposition, musical key modulation, and scale calculation engine. | **High**: Server-side chord chart transposition and key detection. | **Active**: Client-side instant zero-latency chord transposition and display. | `@tty-pt/transp` |
 
 ---
 
@@ -41,7 +45,7 @@ libcorm/
 ├── Makefile                  # Pure C build (untouched by Node)
 ├── rust-bindings/            # Rust crate (existing)
 └── npm/                      # Colocated JS/WASM adapter package
-    ├── package.json          # "@ttypt/corm" package manifest
+    ├── package.json          # "@tty-pt/corm" package manifest
     ├── tsconfig.json         # TypeScript configuration
     ├── native/
     │   └── corm_napi.c       # Generic Node-API C addon
@@ -58,16 +62,16 @@ libcorm/
 - **Local Monorepo / Relative Path**:
   ```json
   "dependencies": {
-    "@ttypt/corm": "file:../site/external/libcorm/npm",
-    "@ttypt/joint": "file:../site/external/libjoint/npm",
-    "@ttypt/hyle": "file:../site/external/libhyle/npm"
+    "@tty-pt/corm": "file:../site/external/libcorm/npm",
+    "@tty-pt/joint": "file:../site/external/libjoint/npm",
+    "@tty-pt/hyle": "file:../site/external/libhyle/npm"
   }
   ```
 - **Public NPM Registry**:
   ```bash
   cd external/libcorm/npm && npm publish --access public
   ```
-  Consumers install directly: `npm install @ttypt/corm`.
+  Consumers install directly: `npm install @tty-pt/corm`.
 
 ---
 
@@ -131,13 +135,13 @@ export class CormDb {
 
 1. **Configurable Database Identifiers**: Database names are explicit parameters, never hardcoded.
 2. **Dynamic Value Buffers**: Replace fixed static buffers (e.g. 4096 bytes) with dynamically probed string and binary lengths via `napi_get_value_string_utf8(env, val, NULL, 0, &len)`.
-3. **Decoupled Packages**: `@ttypt/corm` manages storage and set algebra; `@ttypt/joint` manages interval trees; `@ttypt/hyle` manages schema validation. No cross-library monolithic coupling.
+3. **Decoupled Packages**: `@tty-pt/corm` manages storage and set algebra; `@tty-pt/joint` manages interval trees; `@tty-pt/hyle` manages schema validation. No cross-library monolithic coupling.
 
 ---
 
 ## 7. How New Modules Plug Into the System (Plug-and-Play Contract)
 
-To add a new module to the `tty.pt` stack (e.g. `nd-*` game modules, `liblamina`, or third-party extensions) without modifying `@ttypt/qsys` or any sibling libraries:
+To add a new module to the `tty.pt` stack (e.g. `nd-*` game modules, `liblamina`, or third-party extensions) without modifying `@tty-pt/stele` or any sibling libraries:
 
 ### Step 1: C Source Interface
 Include `<ttypt/iso.h>` for portable export/import attributes:
@@ -157,7 +161,7 @@ my-lib/
 ├── src/my_lib.c
 ├── Makefile
 └── npm/
-    ├── package.json          # "@ttypt/my-lib"
+    ├── package.json          # "@tty-pt/my-lib"
     ├── native/my_lib_napi.c  # Node-API addon (build/Release/)
     ├── wasm/my_lib_wasm.c    # Standalone WASM reactor (dist/)
     └── dist/
@@ -166,9 +170,9 @@ my-lib/
 ```
 
 ### Step 3: Connecting to the Substrate
-In `dist/index.js`, register your module with `@ttypt/qsys` on the shared substrate:
+In `dist/index.js`, register your module with `@tty-pt/stele` on the shared substrate:
 ```typescript
-import { getSubstrate } from "@ttypt/qsys";
+import { getSubstrate } from "@tty-pt/stele";
 
 export class MyModule {
   constructor() {
@@ -200,6 +204,6 @@ db.registerAxis(new MyCustomAxis());
 ```
 
 **Zero Modifications Required**:
-- `libqsys` is never touched.
+- `libstele` is never touched.
 - No sibling libraries need updating.
 - The new module is 100% independent, plug-and-play, and immediately usable.

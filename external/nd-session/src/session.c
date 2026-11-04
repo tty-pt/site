@@ -27,7 +27,7 @@
 #include <ttypt/axil.h>
 #include <ttypt/axil-tty.h>
 #include <ttypt/corm.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 
 #include <nd/config.h>
 #include <nd/mcp.h>

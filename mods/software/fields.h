@@ -36,24 +36,4 @@ static const hyle_schema_desc_t software_fields[] = {
 
 #define SOFTWARE_FIELD_COUNT (sizeof(software_fields) / sizeof(software_fields[0]) - 1)
 
-#ifndef __wasm__
-static const source_list_field_t software_list_fields[] = {
-	{ "title", "Software" },
-	{ "category", "Category" },
-	{ "version", "Version" },
-	{ "summary", "Summary" },
-	{ "owner", "Maintainer" },
-};
-
-static const source_list_view_t software_list_view = {
-	"software",
-	software_list_fields,
-	sizeof(software_list_fields) / sizeof(software_list_fields[0]),
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
-#endif
-
 #endif /* SOFTWARE_FIELDS_H */

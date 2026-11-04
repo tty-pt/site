@@ -152,13 +152,13 @@ Six Makefiles in `external/nd-*` link directly against sibling build trees:
    Update `LDLIBS` across all 6 Makefiles to:
    ```makefile
    # Before:
-   LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed
+   LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lstele -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed
    # After:
-   LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lqsys
+   LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lstele
    ```
    Repeat for `nd-session`, `nd-view`, `nd-world`, `nd-mcp`, and `nd-speech`.
 3. **Result:**
-   Domain modules become true XY plugins that link only against fundamental runtime libraries (`-lxylem -lcorm -lqsys`), with zero forced sibling `-L` paths.
+   Domain modules become true XY plugins that link only against fundamental runtime libraries (`-lxylem -lcorm -lstele`), with zero forced sibling `-L` paths.
 
 ---
 

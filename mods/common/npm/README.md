@@ -1,4 +1,4 @@
-# @ttypt/site-ui
+# @tty-pt/site-ui
 
 [![npm version](https://img.shields.io/badge/npm-v0.1.0-CB3837?logo=npm)](#)
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue)](#)
@@ -12,11 +12,11 @@
 ## 1. Quickstart
 
 ```bash
-npm install @ttypt/site-ui
+npm install @tty-pt/site-ui
 ```
 
 ```typescript
-import { createPageLayout, createMediaControls } from "@ttypt/site-ui";
+import { createPageLayout, createMediaControls } from "@tty-pt/site-ui";
 
 // 1. Generate standard dual-root page layout
 const layout = createPageLayout({ title: "My Song Portal", activeNav: "song" });
@@ -32,7 +32,7 @@ player.play();
 ## 2. C Development Headers via NPM
 
 ```makefile
-CFLAGS += -I./node_modules/@ttypt/site-ui/include
+CFLAGS += -I./node_modules/@tty-pt/site-ui/include
 ```
 
 ## License

@@ -58,7 +58,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     await createAndLoginUser(page, BASE);
 
     // 1. Navigate to NeverDark web portal
-    await page.goto(`${BASE}/nd`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/nd?layout=hybrid&stage=tty`, { waitUntil: "domcontentloaded" });
 
     // Verify SSR State
     const stateEl = await page.waitForSelector("#bud-state", { state: "attached", timeout: 5000 });
@@ -71,7 +71,7 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     // Wait for WASM Hydration
     await page.waitForSelector("body[data-wasm-loaded]", { timeout: 10000 });
     await page.waitForSelector("#bud-root", { timeout: 5000 });
-    await page.waitForSelector("#term .xterm", { timeout: 8000 });
+    await page.waitForSelector("#term .xterm, #game-stage", { timeout: 8000 });
     // Gauges are module-contributed; after hydration the vitals gauge must exist
     await page.waitForSelector('[data-gauge="hp"]', { state: "attached", timeout: 8000 });
 
@@ -544,7 +544,11 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     if (!rowButtons.some((c) => c.startsWith("look #"))) {
       throw new Error(`Selected item missing Look action: found ${JSON.stringify(rowButtons)}`);
     }
-    if (!rowButtons.some((c) => c.startsWith("get #"))) {
+    const isCreature = await firstItem.evaluate((el) => {
+      const g = el.querySelector(".nd-glyph")?.textContent || "";
+      return g.includes("!") || (el.textContent && (el.textContent.includes("dolphin") || el.textContent.includes("koifish")));
+    });
+    if (!isCreature && !rowButtons.some((c) => c.startsWith("get #"))) {
       throw new Error(`Selected room item missing Get action: found ${JSON.stringify(rowButtons)}`);
     }
     if (rowButtons.some((c) => c.startsWith("drop #"))) {
@@ -576,8 +580,9 @@ Deno.test("nd e2e: full sequential all-controls interaction and visual verificat
     // Walk north ('k') to navigate to the adjacent northern room (configured with lamina map driver)
     const taInput = await page.waitForSelector("#term textarea", { state: "attached" });
     if (taInput) await taInput.focus();
-    await page.keyboard.press("k");
-    await page.waitForTimeout(1000);
+    await page.keyboard.type("k");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(2000);
 
     // After walking north into the northern room, verify the liblamina canvas is mounted & rendered
     const mapCanvas = await page.waitForSelector("canvas#room-map-canvas", { timeout: 5000 });

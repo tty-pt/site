@@ -19,17 +19,17 @@ test("Universal WebAssembly runtime executes across all 6 libraries with strictl
   delete globalThis.__ttypt_shared_wasm__;
 
   // 3. Boot shared WASM kernel
-  const { getSubstrate, getSharedWasm } = await import("../../external/libqsys/npm/dist/index.js");
+  const { getSubstrate, getSharedWasm } = await import("../../external/libstele/npm/dist/index.js");
   const kernel = getSharedWasm();
   const substrate = getSubstrate();
   assert.ok(kernel, "Kernel should boot and return exports");
   assert.equal(instantiationCount, 1, "First boot should trigger exactly 1 instantiation");
 
-  // Verify pure-C qsys WASM kernel exports and slot operations
-  assert.ok(typeof kernel.qsys_kernel_boot === "function", "qsys_kernel_boot export must exist");
-  assert.ok(typeof kernel.qsys_kernel_mount === "function", "qsys_kernel_mount export must exist");
-  assert.ok(typeof kernel.qsys_kernel_action === "function", "qsys_kernel_action export must exist");
-  assert.ok(typeof kernel.qsys_kernel_unmount === "function", "qsys_kernel_unmount export must exist");
+  // Verify pure-C stele (stl_) WASM kernel exports and slot operations
+  assert.ok(typeof (kernel.stl_kernel_boot || kernel.stele_kernel_boot) === "function", "stl_kernel_boot export must exist");
+  assert.ok(typeof (kernel.stl_kernel_mount || kernel.stele_kernel_mount) === "function", "stl_kernel_mount export must exist");
+  assert.ok(typeof (kernel.stl_kernel_action || kernel.stele_kernel_action) === "function", "stl_kernel_action export must exist");
+  assert.ok(typeof (kernel.stl_kernel_unmount || kernel.stele_kernel_unmount) === "function", "stl_kernel_unmount export must exist");
   assert.equal(substrate.kernelBoot(), 0);
   assert.equal(substrate.kernelVersion(), 2);
   assert.equal(substrate.kernelMount(0, "nonexistent", "{}"), -2);

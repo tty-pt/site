@@ -85,8 +85,8 @@ hyle           → lemma+corm (canonical schema, query, FTS)
 libhyle-source → hyle+corm+lemma+json-c (persistence, store drivers, DSV, JSON)
 hyle-bud       → hyle+bud+corm   ONLY bridge that may depend on bud
 bud                     pure DOM/JSX/WASM, 5-field UI binder, depends on nothing
-libxylem       → corm+qsys
-axil           → xylem+corm+qsys+ssl
+libxylem       → corm+stele
+axil           → xylem+corm+stele+ssl
 site mods      → assemble axil+XY+hyle(+libhyle-source+libhyle-bud)+bud
 ```
 

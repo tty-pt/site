@@ -71,7 +71,7 @@ stabilizing our isomorphic C-WASM web runtime, and introducing modular interacti
 
 | Repository | Baseline Tag | Proposed Version | SemVer Justification | Key Deltas & Breaking Changes |
 | :--- | :--- | :--- | :--- | :--- |
-| **`libqsys`** | `v1.2.1` | **`v1.3.1`** | Minor | Added universal isomorphic C export contract `<ttypt/iso.h>` (`ISO_EXPORT`, `ISO_EXPORT_AS`, `ISO_IMPORT`), packaging in `/usr/include/ttypt/iso.h`. Updated `qsys.pc` to 1.3.1. |
+| **`libstele`** | `v1.2.1` | **`v1.4.1`** | Minor | Rebranded and modernized substrate: universal isomorphic C export contract `<ttypt/iso.h>`, single-instantiation WASM reactor substrate `<ttypt/stele_wasm.h>`, and `stl_` prefix. Updated `stele.pc` to 1.4.1. |
 | **`libcorm`** | `v1.4.0` | **`v2.0.1`** | Major | **Breaking**: deleted `rec.h`; unified under `corm.h` and `cormr.h`. Added `cormd` resident daemon, linear memory arena shims for WASM, and multi-axis query engine (`cormr_query_run`). Updated `corm.pc` to 2.0.1. |
 | **`libxylem`** | `v1.4.0` | **`v1.6.0`** | Minor | In-WASM Xylem core dispatcher (`libxylem-wasm.c`), `XY_LISTENER_TAG`, dynamic loader bridge, and `LD_LIBRARY_PATH` soname resolution. Updated `xylem.pc` to 1.6.0. |
 | **`libjoint`** | `v1.3.0` | **`v1.5.0`** | Minor | Exported `rec_axis_store_typed` for HTOK binary date ingestion. Adopted modern `cormr.h` / `corm.h`. Updated `joint.pc` to 1.5.0. |
@@ -99,8 +99,8 @@ To prevent broken downstream builds, releases must be executed in strict topolog
 
 ```
 [Wave 1: Foundations]
-   libqsys (1.3.1) ──┬────────────────────────────────────────────────────────┐
-   libbud  (1.0.2) ──┼───────────────────────────────────────┐                │
+   libstele (1.4.1) ──┬────────────────────────────────────────────────────────┐
+   libbud  (1.1.1) ──┼───────────────────────────────────────┐                │
    mk      (0.2.0)   │                                       │                │
    libtransp (sync)  │                                       │                │
                      ▼                                       │                │
@@ -138,8 +138,8 @@ To prevent broken downstream builds, releases must be executed in strict topolog
 ### Detailed Wave Sequence
 
 1. **Wave 1: Foundational Zero-Dependency Libraries**
-   - Step 1: `libqsys` (`v1.3.1`)
-   - Step 2: `libbud` (`v1.0.2`)
+   - Step 1: `libstele` (`v1.4.1`)
+   - Step 2: `libbud` (`v1.1.1`)
    - Step 3: `mk` (`v0.2.0`)
    - Step 4: `libtransp`
 
@@ -179,11 +179,11 @@ To prevent broken downstream builds, releases must be executed in strict topolog
 
 For each repository, the following checklist must be satisfied before creating git tags and publishing releases:
 
-### 1. `libqsys` (Target: `v1.2.2`)
-- [ ] Verify `CHANGELOG.md` entry for `1.2.2`.
-- [ ] Update `qsys.pc`: set `Version: 1.2.2` (currently `0.0.1`).
-- [ ] Rebuild and run test suite: `make clean && make test`.
-- [ ] Tag: `git tag -s v1.2.2 -m "Release v1.2.2"`.
+### 1. `libstele` (Target: `v1.4.1`)
+- [x] Verify `CHANGELOG.md` entry for `1.4.1`.
+- [x] Update `stele.pc`: set `Version: 1.4.1`.
+- [x] Provide `<ttypt/iso.h>` and `<ttypt/stele_wasm.h>`.
+- [x] Export unified `stl_` symbols and colocated `@tty-pt/stele` npm adapter.
 
 ### 2. `libbud` (Target: `v1.0.1`)
 - [ ] Add `1.0.1` entry in `CHANGELOG.md` documenting logo, asset, and documentation updates.
@@ -310,7 +310,7 @@ To execute these releases smoothly, follow this operational checklist:
    - Update `.pc` file `Version:` fields across all 18 repositories to match the targeted release versions.
    - Finalize `CHANGELOG.md` entries in each repo according to Section 4.
 2. **Step 2: Tagging and Publishing per Wave**
-   - Execute Wave 1 (`libqsys`, `libbud`), tag, and verify packaging.
+   - Execute Wave 1 (`libstele`, `libbud`), tag, and verify packaging.
    - Execute Wave 2 (`libcorm`), tag, and install system headers/libs if required.
    - Execute Wave 3 (`libxylem`, `libjoint`, `libislet`, `libsepal`, `liblemma`, `libqgl`), tag, and test.
    - Execute Wave 4 (`libhyle`, `axil`), tag, and test.

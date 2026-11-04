@@ -47,39 +47,53 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
       bud_host_mark_dirty: () => {},
       bud_host_flush: () => {},
     },
-    qsys: {
-      qsys_host_emit_patch: (slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
+    stele: {
+      stl_host_emit_patch: (slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
         const op = decodeString(memoryRef, opPtr, opLen);
         const a = decodeString(memoryRef, aPtr, aLen);
         const b = decodeString(memoryRef, bPtr, bLen);
         const c = decodeString(memoryRef, cPtr, cLen);
         emittedPatches.push({ slot, op, a, b, c });
       },
-      qsys_host_log: (ptr, len) => {
+      stl_host_log: (ptr, len) => {
         logMessages.push(decodeString(memoryRef, ptr, len));
       },
-      qsys_host_fetch: () => {},
-      qsys_host_set_location: () => {},
+      stl_host_fetch: () => {},
+      stl_host_set_location: () => {},
+      stl_host_invalidate: () => {},
+      stele_host_emit_patch: (slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
+        const op = decodeString(memoryRef, opPtr, opLen);
+        const a = decodeString(memoryRef, aPtr, aLen);
+        const b = decodeString(memoryRef, bPtr, bLen);
+        const c = decodeString(memoryRef, cPtr, cLen);
+        emittedPatches.push({ slot, op, a, b, c });
+      },
+      stele_host_log: (ptr, len) => {
+        logMessages.push(decodeString(memoryRef, ptr, len));
+      },
+      stele_host_fetch: () => {},
+      stele_host_set_location: () => {},
+      stele_host_invalidate: () => {},
     },
     xylem: {
       wasm_xy_load_module: () => 0,
       wasm_xy_unload_module: () => 0,
     },
     audio: {
-      qsys_audio_play: () => 0,
-      qsys_audio_pause: () => 0,
-      qsys_audio_seek: () => 0,
-      qsys_audio_get_time: () => 0,
+      stl_audio_play: () => 0,
+      stl_audio_pause: () => 0,
+      stl_audio_seek: () => 0,
+      stl_audio_get_time: () => 0,
     },
     storage: {
-      qsys_storage_get: () => 0,
-      qsys_storage_set: () => 0,
+      stl_storage_get: () => 0,
+      stl_storage_set: () => 0,
     },
     canvas: {
-      qsys_canvas_blit: () => 0,
+      stl_canvas_blit: () => 0,
     },
     clipboard: {
-      qsys_clipboard_copy: () => 0,
+      stl_clipboard_copy: () => 0,
     },
     wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 }),
   };
@@ -90,20 +104,26 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
   memoryRef = instance.exports.memory;
 
   // 1. Verify kernel ABI export surface
-  assert.ok(typeof instance.exports.qsys_kernel_boot === "function", "qsys_kernel_boot must be exported");
-  assert.ok(typeof instance.exports.qsys_kernel_mount === "function", "qsys_kernel_mount must be exported");
-  assert.ok(typeof instance.exports.qsys_kernel_unmount === "function", "qsys_kernel_unmount must be exported");
-  assert.ok(typeof instance.exports.qsys_kernel_action === "function", "qsys_kernel_action must be exported");
-  assert.ok(typeof instance.exports.qsys_kernel_version === "function", "qsys_kernel_version must be exported");
+  const kernelBoot = instance.exports.stl_kernel_boot || instance.exports.stele_kernel_boot;
+  const kernelMount = instance.exports.stl_kernel_mount || instance.exports.stele_kernel_mount;
+  const kernelUnmount = instance.exports.stl_kernel_unmount || instance.exports.stele_kernel_unmount;
+  const kernelAction = instance.exports.stl_kernel_action || instance.exports.stele_kernel_action;
+  const kernelVersion = instance.exports.stl_kernel_version || instance.exports.stele_kernel_version;
 
-  assert.equal(instance.exports.qsys_kernel_version(), 2n);
-  assert.equal(instance.exports.qsys_kernel_boot(), 0);
+  assert.ok(typeof kernelBoot === "function", "stl_kernel_boot must be exported");
+  assert.ok(typeof kernelMount === "function", "stl_kernel_mount must be exported");
+  assert.ok(typeof kernelUnmount === "function", "stl_kernel_unmount must be exported");
+  assert.ok(typeof kernelAction === "function", "stl_kernel_action must be exported");
+  assert.ok(typeof kernelVersion === "function", "stl_kernel_version must be exported");
+
+  assert.equal(kernelVersion(), 2n);
+  assert.equal(kernelBoot(), 0);
 
   // Helper mount function
   function mount(slot, moduleName, jsonStr) {
     const [namePtr] = encodeString(instance, memoryRef, moduleName);
     const [jsonPtr, jsonLen] = encodeString(instance, memoryRef, jsonStr);
-    const rc = instance.exports.qsys_kernel_mount(slot, namePtr, jsonPtr, jsonLen);
+    const rc = kernelMount(slot, namePtr, jsonPtr, jsonLen);
     instance.exports.free(namePtr);
     instance.exports.free(jsonPtr);
     return rc;
@@ -158,11 +178,11 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
 
   // 7. Verify Slot 0 (site_chrome) remains active and receives actions
   const [dataPtr] = encodeString(instance, memoryRef, "test");
-  const actionRc = instance.exports.qsys_kernel_action(0, 1, dataPtr);
+  const actionRc = kernelAction(0, 1, dataPtr);
   instance.exports.free(dataPtr);
   assert.equal(actionRc, 0, "site_chrome in slot 0 must receive action cleanly");
 
   // 8. Test clean unmounting
-  assert.equal(instance.exports.qsys_kernel_unmount(1), 0, "Slot 1 unmount succeeds");
-  assert.equal(instance.exports.qsys_kernel_unmount(0), 0, "Slot 0 unmount succeeds");
+  assert.equal(kernelUnmount(1), 0, "Slot 1 unmount succeeds");
+  assert.equal(kernelUnmount(0), 0, "Slot 0 unmount succeeds");
 });

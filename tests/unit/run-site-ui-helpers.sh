@@ -17,9 +17,13 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-o "$bin" \
 	"$repo/tests/unit/site_ui_helpers_test.c" \
 	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
+	-L"$repo/external/axil/lib" -Wl,-rpath,"$repo/external/axil/lib" \
+	-L"$repo/external/libstele/lib" -Wl,-rpath,"$repo/external/libstele/lib" \
+	-L"$repo/external/libcorm/lib" -Wl,-rpath,"$repo/external/libcorm/lib" \
+	-L"$repo/external/libxylem/lib" -Wl,-rpath,"$repo/external/libxylem/lib" \
 	-L"$repo/external/liblemma/lib" -Wl,-rpath,"$repo/external/liblemma/lib" \
 	-lhyle-bud \
 	-lbud \
 	-lxylem \
 
-LD_LIBRARY_PATH="$repo/external/liblemma/lib:${LD_LIBRARY_PATH:-}" "$bin"
+LD_LIBRARY_PATH="$repo/external/axil/lib:$repo/external/libstele/lib:$repo/external/libcorm/lib:$repo/external/libxylem/lib:$repo/external/liblemma/lib:${LD_LIBRARY_PATH:-}" "$bin"

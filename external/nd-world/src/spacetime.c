@@ -11,7 +11,7 @@
 #include <syslog.h>
 #include <time.h>
 #include <ttypt/corm.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 /* Host-side region API. NOT xy-mod.h: that header redefines xy_load and
  * friends as macros through a module-local `static struct xy_ctx xy`, and
  * this TU is engine code with no injected context -- including it here would

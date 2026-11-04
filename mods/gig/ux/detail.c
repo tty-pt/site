@@ -1,7 +1,8 @@
 #include "bud/bud.h"
 #include "bud/bud_jsx.h"
 #include "bud/bud_app.h"
-#include <ttypt/qsys_wasm.h>
+#include "../../common/site_wasm_app.h"
+#include <ttypt/stele_wasm.h>
 #include <hyle-bud/hyle-bud.h>
 #include "../fields.h"
 #include <stdio.h>
@@ -19,11 +20,6 @@
 
 /* List machinery for the song picker (site_ui.c must come first). */
 #include "../../index/ux/list.c"
-
-#ifdef __wasm__
-__attribute__((import_module("env"), import_name("bud_host_log"))) void
-bud_host_log(const char *msg, size_t len);
-#endif
 
 #define MAX_SB_SONGS 128
 
@@ -108,7 +104,7 @@ BUD_STATE_FIELDS(sb_song_row_data_t, sb_song_row_fields, SB_SONG_ROW_SCHEMA)
 
 /* ── WASM state init (called by JS bridge before bud_app_mount) ── */
 
-static int gig_qsys_init(const char *json, int len)
+static int gig_stl_init(const char *json, int len)
 {
 	size_t jlen = len >= 0 ? (size_t)len : 0;
 
@@ -267,7 +263,7 @@ static bud_node *sb_build_body_content(void);
 
 /* ── WASM app entry point (isomorphic: server .so + WASM .wasm) ── */
 
-static bud_node *gig_qsys_render(void)
+static bud_node *gig_stl_render(void)
 {
 	g_sb_root = NULL;
 	g_sb_main = NULL;
@@ -733,9 +729,7 @@ static bud_node *sb_build_body_content(void)
 	return frag;
 }
 
-#include <ttypt/qsys_wasm.h>
-
-static void gig_qsys_cleanup(void)
+static void gig_stl_cleanup(void)
 {
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 	g_sb_root = NULL;
@@ -743,5 +737,5 @@ static void gig_qsys_cleanup(void)
 	g_sb_n_chord_nodes = 0;
 }
 
-QSYS_WASM_MODULE_EXT(gig_detail, gig_qsys_init, gig_qsys_render, NULL, NULL, gig_qsys_cleanup, gig_fetch_callback);
+BUD_WASM_MODULE_EXT(gig_detail, gig_stl_init, gig_stl_render, NULL, NULL, gig_stl_cleanup, gig_fetch_callback);
 

@@ -2,7 +2,7 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/mods/common/ux/version.gen.h"
-CSS_CKSUM="$( (cksum "$ROOT/htdocs/styles.css" 2>/dev/null; cksum "$ROOT/htdocs/hyle.css" 2>/dev/null; cksum "$ROOT/htdocs/bud-client.js" 2>/dev/null; cksum "$ROOT/htdocs/bud-hydrate.js" 2>/dev/null) | cksum | awk '{print $1}')"
+CSS_CKSUM="$( (cksum "$ROOT/htdocs/styles.css" 2>/dev/null; cksum "$ROOT/htdocs/hyle.css" 2>/dev/null; cksum "$ROOT/htdocs/stele-client.js" 2>/dev/null) | cksum | awk '{print $1}')"
 FRAG_CKSUM="$(cksum "$ROOT/htdocs/hyle-fragments.js" 2>/dev/null | awk '{print $1}')"
 # fallback if cksum missing
 if [ -z "$CSS_CKSUM" ]; then

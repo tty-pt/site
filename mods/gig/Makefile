@@ -7,6 +7,13 @@ EXTRA_LDLIBS += -lhyle
 EXTRA_LDLIBS += -lhyle-bud
 EXTRA_LDLIBS += -laxil-hyle
 
+include ../../external/libhyle-bud/hyle-bud-wasm.mk
+WASM_TARGETS = $(WASM_PATH)/gig.wasm $(WASM_PATH)/gig_detail.wasm
+gig-src = ux/detail.c $(HYLE_BUD_WASM_SRC) $(REPO_ROOT)/mods/common/site_wasm_app.c
+gig-cflags = $(HYLE_BUD_WASM_CFLAGS) -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/mods/gig/include -I$(REPO_ROOT)/external/libtransp/include
+gig_detail-src = $(gig-src)
+gig_detail-cflags = $(gig-cflags)
+
 LIST_UX_DEPS = ../index/ux/list.c ../index/ux/list_state.h \
 	../index/ux/list_query.c ../index/ux/list_filters.c \
 	../index/ux/list_layout.c ../index/ux/list_json.c \

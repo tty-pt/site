@@ -58,21 +58,4 @@ static const hyle_schema_desc_t gig_fields[] = {
 
 #define SB_FIELD_COUNT (sizeof(gig_fields) / sizeof(gig_fields[0]) - 1)
 
-#ifndef __wasm__
-static const source_list_field_t gig_list_fields[] = {
-	{ "title", "Title" },
-	{ "grp", "Group" },
-};
-
-static const source_list_view_t gig_list_view = {
-	"gig",
-	gig_list_fields,
-	sizeof(gig_list_fields) / sizeof(gig_list_fields[0]),
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
-#endif
-
 #endif

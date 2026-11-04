@@ -23,7 +23,8 @@ to wasm32-wasi for browser-side polish.
 | `external/libhyle-source` | standalone persistence engine: dataset metadata, DSV, JSON state overlays, pluggable drivers (`hyle_source_store_ops_t`), plus the picker DTOs (`hyle-source/picker.h`) |
 | `external/libhyle-bud` | the bud component binding — the ONLY code that may depend on bud; bridges Hyle schemas to Bud UI components (`index`/`gig`/`grp` and the `/pick/:id/options` fragment route hosted by `mods/source`) |
 | `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
-| `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and WASM bridge (`bud-client.js`, `bud-hydrate.js`) |
+| `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and pure VDOM diff engine (`bud_vdom_diff`) |
+| `external/libstele` | universal single-instantiation WASM reactor substrate, UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module lifecycle (`stl_module_ops_t`), and Web HAL host imports (`<ttypt/stele_wasm.h>`) |
 | `external/axil-tty` | WebSocket-to-PTY terminal streaming bridge |
 | `external/axil-nd` | modular NeverDark MUCK engine running in-process behind Axil |
 | `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `source`, `index`, `auth`, `mpfd`, `song`, `poem`, `gig`, `grp`, `nd`) |
@@ -52,6 +53,7 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 
 - **No-JS must always work.** Client enhancement is optional and additive.
 - **hyle stays neutral.** `external/libhyle` has 0 DOM symbols; `external/libbud` has 0 database/storage symbols. Only `external/libhyle-bud` and `mods/common` may bridge the two.
+- **Pure isomorphic WASM boundary.** Interactive frontend UX modules (`mods/*/ux/*.c`) compile to native `.so` for SSR and WASM for the browser, interfacing via `<ttypt/stele_wasm.h>`. Core libraries (`libbud`, `libtransp`, etc.) include only `<ttypt/iso.h>` for pure `ISO_EXPORT` / `ISO_IMPORT` macros without UI substrate dependencies.
 - **All row writes go through hyle `put`/`del`** (`source_update_item` /
   `source_delete_item`) — writing corms directly freezes the FTS index. Storage drivers (`store_fs`, `store_mem`) handle file and field persistence automatically.
 - **Search is accent-sensitive by design** (`pão` ≠ `pao`); no iconv

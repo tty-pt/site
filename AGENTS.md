@@ -18,7 +18,11 @@ make watch          # auto-rebuild + restart on :8080
 1. **UX is pure & isomorphic.** `mods/*/ux` compiles twice: native `.so`
    for SSR and `htdocs/*.wasm` for the browser. One `bud_app_render(state)`
    + `bud-state` JSON + `#bud-root` / `#chrome-root` wrapper. Allowed:
-   `bud.h` / `bud_jsx.h` / `bud_app.h` + `hyle-bud/hyle-bud.h` + pure C.
+   `bud.h` / `bud_jsx.h` / `bud_app.h` + `hyle-bud/hyle-bud.h` + `<ttypt/stele_wasm.h>` + pure C.
+   The isomorphic WASM boundary is governed by `<ttypt/stele_wasm.h>` (which transitively
+   includes `<ttypt/iso.h>` for `ISO_EXPORT` / `ISO_IMPORT`). Interactive UX modules register
+   via `STL_WASM_MODULE(...)` and invalidate slots via `stl_slot_invalidate()`. Standalone libraries
+   (`libbud`, `libtransp`) include only `<ttypt/iso.h>` with zero UI substrate dependencies.
    Forbidden in UX: `XY_`/`xy_`/`corm_`/`source_`/`axil_`/`lemma_`/
    `hyle_source_`/`var/` literals. Sanctioned `#include "*.c"` only
    `site_ui.c|list.c` (`scripts/check-module-boundaries.sh`).
@@ -44,8 +48,9 @@ make watch          # auto-rebuild + restart on :8080
 
 4. **hyle stays neutral; SSR is the contract.** `external/libhyle` owns
    canonical data schemas (`hyle_schema_desc_t`) without any DOM concepts;
-   `external/libbud` is a pure 5-field UI binder (`bud_field_desc_t`) without
-   any database/storage concepts. `external/libhyle-source` owns
+   `external/libbud` is a pure 5-field UI binder (`bud_field_desc_t`) and VDOM
+   diff engine (`bud_vdom_diff`) without any database, storage, or runtime reactor
+   concepts. `external/libhyle-source` owns
    persistence and storage drivers (`hyle_source_store_ops_t`). `libhyle-bud`
    is the ONLY bud-dependent bridge and **is** used in UX for filters/tables
    (`index`/`gig`/`grp`). SSR emits plain HTML + `data-*` hooks;

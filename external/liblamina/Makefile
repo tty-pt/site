@@ -1,3 +1,7 @@
+WASM_SRCS := npm/wasm/lamina_wasm.c
+
+include ../mk/include.mk
+
 NPM ?= npm
 
 npm-build:

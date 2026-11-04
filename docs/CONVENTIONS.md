@@ -170,11 +170,11 @@ outside `source_list_view_t` registration (`source.h:50`,
 and labels beside its `fields.h`; `list_fill_state` consumes that registration.
 Grandfathered `site_paths.c:68` icon table is the only allowed enumeration.
 
-## WASM purity — UX is `bud` + `hyle-bud` + pure C
+## WASM purity — UX is `bud` + `hyle-bud` + `stele_wasm` + pure C
 
 A dual-compiled UX TU (`mods/*/ux/*.c` + `mods/common/ux/*`) may only include
 `bud.h`/`bud_jsx.h`/`bud_app.h` + `hyle-bud/hyle-bud.h` (for filters/tables in
-`index`/`gig`/`grp`) + pure C (`string.h`, etc.). It must **not**
+`index`/`gig`/`grp`) + `<ttypt/stele_wasm.h>` + pure C (`string.h`, etc.). It must **not**
 reference `corm_`, `source_`, `axil_`, `lemma_`, `hyle_source_`, `XY_`/`xy_`,
 or `var/` literals. Per-module WASM that needs `hyle-bud` declares
 `EXTRA_CFLAGS += -I…/hyle-bud/include` + `EXTRA_LDLIBS += -lhyle-bud` and
@@ -185,6 +185,14 @@ or `var/` literals. Per-module WASM that needs `hyle-bud` declares
   empty (native-only `site_page.c` behind `site_ui.c:#ifndef __wasm__` is not a
   WASM TU and is excluded); `sh scripts/check-wasm-imports.sh` must pass
   (`wasm-allowed-imports.lst` allowlists only `env.bud_host_*`).
+
+### The Two-Header Rule for Isomorphic C
+1. **Standalone Libraries (`libbud`, `libtransp`, etc.)**:
+   Include **only `<ttypt/iso.h>`**.
+   Provides `ISO_EXPORT`, `ISO_EXPORT_AS`, and `ISO_IMPORT`. Zero runtime dependencies, no UI substrate concepts.
+2. **Interactive UX Modules (`mods/*/ux/*.c`)**:
+   Include **only `<ttypt/stele_wasm.h>`**.
+   `<ttypt/stele_wasm.h>` transitively includes `<ttypt/iso.h>`, plus provides UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module registration (`STL_WASM_MODULE(...)`), `stl_slot_invalidate()`, and Web HAL host imports. Never manually include both headers in UX modules.
 
 ## UX avoids preprocessor conditions
 

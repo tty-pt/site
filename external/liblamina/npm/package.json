@@ -1,19 +1,36 @@
 {
-  "name": "@ttypt/lamina",
-  "version": "0.1.0",
+  "name": "@tty-pt/lamina",
+  "version": "1.0.1",
   "type": "module",
   "description": "Universal Node.js and Browser bindings for liblamina 2D/3D immediate-mode canvas and WebGL graphics engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./bridge": {
+      "types": "./dist/bridge.d.ts",
+      "default": "./dist/bridge.js"
+    }
+  },
   "files": [
     "dist",
     "include",
     "README.md"
   ],
   "scripts": {
-    "build:wasm": "clang --target=wasm32-wasi -mexec-model=reactor -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=malloc -Wl,--export=free -Wl,--export=lamina_wasm_world_to_screen -Wl,--export=lamina_wasm_screen_to_world -O3 -o dist/lamina.wasm wasm/lamina_wasm.c",
-    "build": "npm run build:wasm",
+    "build:native": "mkdir -p build/Release && gcc -O3 -fPIC -shared -I/usr/include/node native/lamina_napi.c -lm -o build/Release/lamina_node.node 2>/dev/null || true",
+    "build:wasm": "make -C .. wasm",
+    "build": "npm run build:native && npm run build:wasm",
     "test": "node --test tests/lamina.test.mjs"
+  },
+  "peerDependencies": {
+    "@tty-pt/stele": ">=1.5.0"
+  },
+  "devDependencies": {
+    "@tty-pt/stele": "^1.5.1"
   },
   "keywords": [
     "lamina",

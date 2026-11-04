@@ -74,7 +74,8 @@ Rules derived from the model:
 Core repositories:
 - [axil](https://github.com/tty-pt/axil) — HTTP(S), WebSocket, and network daemon library
 - [libxylem](https://github.com/tty-pt/libxylem) — Dynamic module loader and hook isolation
-- [libbud](https://github.com/tty-pt/libbud) — Isomorphic C DOM scaffold for SSR + WASM
+- [libbud](https://github.com/tty-pt/libbud) — Pure C DOM scaffold for SSR + pure VDOM diff engine
+- [libstele](https://github.com/tty-pt/libstele) — Universal single-instantiation WASM kernel substrate and slot orchestration ABI
 - [libhyle](https://github.com/tty-pt/hyle) — Data schema and query kernel
 - [libcorm](https://github.com/tty-pt/libcorm) — In-memory map store and recall kernel
 - [libjoint](https://github.com/tty-pt/libit) — Temporal presence interval tree (Time axis)
@@ -102,7 +103,10 @@ hyle-bud (external/libhyle-bud) ── the bud binding; ONLY place that
         link `HYLE_BUD_WASM_SRC` and include `<hyle-bud/hyle-bud.h>`) and by
         `mods/source` for the picker fragment route (`/pick/:id/options`).
 bud   ── pure C DOM scaffold, 5-field UI state binder (bud_field_desc_t),
-        and WASM bridge. deps: none of the above
+        and pure VDOM diff engine (bud_vdom_diff). deps: none of the above
+stele ── universal single-instantiation WASM reactor substrate, slot
+        orchestration (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module lifecycle,
+        and Web HAL host imports (<ttypt/stele_wasm.h>).
 axil-hyle (external/axil-hyle) ── framework-neutral Axil↔Hyle REST connector:
         `GET|POST|PUT|DELETE /api/dataset/...` (JSON CRUD) + partition
         sub-resource routes. deps: axil, axil-auth, corm, hyle, libhyle-source,
@@ -247,6 +251,27 @@ restarting the server.
 - Precedent for framework-agnostic enhancement: `data-detail-viewer-*`
   (`site_ui_viewer_controls`, plain JS) and `data-menu-toggle`
   (`site_ui_layout`).
+
+### 7.1 The Two-Header Rule for Isomorphic C & WASM
+- **`<ttypt/iso.h>`**: Compiler export/import attributes (`ISO_EXPORT`, `ISO_EXPORT_AS`, `ISO_IMPORT`). Zero runtime dependencies. Standalone libraries (`libbud`, `libtransp`, etc.) include only `iso.h`.
+- **`<ttypt/stele_wasm.h>`**: Single-instantiation WASM reactor substrate, UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module registration (`STL_WASM_MODULE`), and Web HAL host imports. Transitively includes `<ttypt/iso.h>`. Interactive UX modules (`mods/*/ux/*.c`) include only `stele_wasm.h`.
+
+### 7.2 Zero-Copy Shared Memory Chaining Across Packages
+- **Unified Address Space**: Modules linking with `-Wl,--import-memory` (`@tty-pt/corm`, `@tty-pt/joint`, `@tty-pt/sepal`) share `@tty-pt/stele`'s linear memory space.
+- **Zero-Copy Accessors**:
+  - `CandidateSet` (`@tty-pt/corm`): `.rawPointer()`, `.count()`, `.toUint32Array()`, and `.addFromRaw(ptr, count)`.
+  - `JointTimeline` (`@tty-pt/joint`): `.rawPointer(start, end)` returning `{ ptr, count, free }`, `.count(start, end)`, and `.withOverlaps(start, end, fn)`.
+- **Pointer Handoff**: Intersecting intervals directly seed candidate sets or rankers without unpacking into intermediate JavaScript arrays.
+
+### 7.3 Parallel Streaming Hydration
+- **Streaming First with Fallback**: `htdocs/stele-client.js` and `@tty-pt/stele/client.js` instantiate WASM binaries via `WebAssembly.instantiateStreaming(fetch(url))`, with automated fallback to `fetch().then(r => r.arrayBuffer()).then(b => WebAssembly.instantiate(b))` when streaming is unsupported or MIME types differ.
+- **Concurrent Mounting**: Slot 0 (`site_chrome`), Slot 1 (`pageModule`), and substrate kernel boot execute concurrently via `Promise.all`.
+
+### 7.4 Centralized WASM Build Pipeline & wasm-opt
+- **Standardized Rules**: `external/mk/include.mk` centralizes `make wasm` with `-ffreestanding -flto -O3 -D__wasm__ -fvisibility=hidden`.
+- **Macro Extraction**: Auto-extracts exports from `ISO_EXPORT` and `ISO_EXPORT_AS` with dual GNU Make and BSD Make portability.
+- **Binaryen Optimization**: Post-link `wasm-opt -O3` reduces binary footprints by 15% to 30%.
+- **Single Allocator Invariant**: Only `@tty-pt/stele` exports `malloc` and `free`; downstream modules import allocator routines via `env` or use Stele substrate memory helpers. Non-colliding global bases (`-Wl,--global-base=1048576`) isolate static data segments.
 
 ## 8. Build / test / debug quick reference
 

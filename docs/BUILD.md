@@ -16,6 +16,7 @@ make compile_commands.json# generate LSP compilation database for clangd / IDEs
 make new-mod NAME=xyz DISPLAY="Xyz" # scaffold complete CRUD module in 1 second
 make test-mod MOD=song    # run targeted test suite for a specific module
 make test-fast            # run standalone unit + matrix + pages smoke tests
+make test-wasm            # run all 12 @tty-pt/* npm packages and ~/duna test suite
 make test-e2e FILE=...    # run targeted e2e test with auto-server
 make install-libs         # install libs + axil into $PREFIX (SUDO=doas/sudo)
 make lint                 # clang-tidy (max 4 indent levels enforced)
@@ -52,6 +53,11 @@ initializers than the system `bud_field_desc_t`.
 each module `Makefile` as explicit fallback. The `$(WASM_PATH)/%.wasm` rule depends on
 `$($*-src)` + `$(WASM_COMMON_SRC)` via `.d` includes, so editing `filter.c`/`site_ui.c`
 rebuilds dependent WASMs automatically.
+
+For external standalone libraries (`external/*/`), `external/mk/include.mk` provides the
+centralized `make wasm` rule. It automatically applies standardized flags (`-ffreestanding -flto -O3 -D__wasm__ -fvisibility=hidden`),
+extracts symbols marked with `ISO_EXPORT` or `ISO_EXPORT_AS` from C sources, and runs `wasm-opt -O3`
+post-link optimization (reducing binary sizes by 15%–30%).
 
 The `make` probe still skips wasm silently if no WASI clang is available
 (silent 404 → pure SSR; harmless).

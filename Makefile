@@ -3,18 +3,22 @@ DEV ?= 0
 PROFILE ?= dev
 WASI_CC ?= clang
 WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
-WASM_COMMON_CFLAGS ?= -Iexternal/libqsys/include -Iexternal/libbud/include
+WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
 	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
-	-Wl,--export=qsys_kernel_boot -Wl,--export=qsys_kernel_mount -Wl,--export=qsys_kernel_unmount \
-	-Wl,--export=qsys_kernel_update -Wl,--export=qsys_kernel_action -Wl,--export=qsys_kernel_tick \
-	-Wl,--export=qsys_kernel_version -Wl,--export=wasm_fetch_callback \
+	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_unmount \
+	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_tick \
+	-Wl,--export=stl_kernel_version -Wl,--export=stl_kernel_register_module \
+	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_unmount \
+	-Wl,--export=stele_kernel_update -Wl,--export=stele_kernel_action -Wl,--export=stele_kernel_tick \
+	-Wl,--export=stele_kernel_version -Wl,--export=stele_kernel_register_module \
+	-Wl,--export=wasm_fetch_callback \
 	-Wl,--allow-undefined -Wl,--allow-undefined-file=scripts/wasm-allowed-imports.lst
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: assets-sync qsys-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm boundary-check
+all: assets-sync stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib sepal-lib hyle-lib transp-lib bud-lib hyle-bud hyle-source axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm boundary-check
 
 mods:
 	@for d in $(MOD_DIRS); do $(MAKE) -C $$d; done
@@ -24,10 +28,11 @@ clients:
 
 site-wasm: htdocs/site.wasm
 
-htdocs/site.wasm: external/libqsys/src/qsys_wasm_kernel.c external/libbud/src/libbud.c external/libxylem/src/libxylem-wasm.c mods/common/ux/site_modules.c mods/common/ux/site_chrome.c mods/site_chrome/ux/chrome.c mods/song/ux/detail.c mods/gig/ux/detail.c mods/index/ux/list_fe.c mods/chat/ux/chat_fe.c mods/chat/ux/chat_ui.c external/libtransp/src/music.c external/libhyle-bud/src/libhyle-bud.c external/libhyle-bud/src/filter.c external/libhyle-bud/src/table.c external/libhyle-bud/src/picker.c external/libhyle-bud/src/form.c external/libhyle/src/url.c
-	@mkdir -p htdocs /tmp/site_wasm_build
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libqsys/src/qsys_wasm_kernel.c -o /tmp/site_wasm_build/kernel.o
+htdocs/site.wasm: external/libstele/src/stele_wasm_kernel.c external/libbud/src/libbud.c mods/common/site_wasm_app.c external/libxylem/src/libxylem-wasm.c mods/common/ux/site_modules.c mods/common/ux/site_chrome.c mods/site_chrome/ux/chrome.c mods/song/ux/detail.c mods/gig/ux/detail.c mods/index/ux/list_fe.c mods/chat/ux/chat_fe.c mods/chat/ux/chat_ui.c external/libtransp/src/music.c external/libhyle-bud/src/libhyle-bud.c external/libhyle-bud/src/filter.c external/libhyle-bud/src/table.c external/libhyle-bud/src/picker.c external/libhyle-bud/src/form.c external/libhyle/src/url.c
+	@rm -rf /tmp/site_wasm_build && mkdir -p htdocs /tmp/site_wasm_build
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libstele/src/stele_wasm_kernel.c -o /tmp/site_wasm_build/kernel.o
 	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libbud/src/libbud.c -o /tmp/site_wasm_build/bud.o
+	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c mods/common/site_wasm_app.c -o /tmp/site_wasm_build/site_wasm_app.o
 	@$(WASI_CC) $(WASM_CFLAGS) -Iexternal/libxylem/include -O2 -c external/libxylem/src/libxylem-wasm.c -o /tmp/site_wasm_build/xylem.o
 	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_modules.c -o /tmp/site_wasm_build/modules.o
 	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_chrome.c -o /tmp/site_wasm_build/site_chrome.o
@@ -50,11 +55,28 @@ htdocs/site.wasm: external/libqsys/src/qsys_wasm_kernel.c external/libbud/src/li
 # Sync gitignored htdocs deploy assets. hyle.css is copied from external/libhyle/assets/hyle.css;
 # the remaining hashed assets are checked for presence so `make` fails clearly instead of
 # aborting silently on a missing prerequisite of mods/common/ux/version.gen.h.
-DEPLOY_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js qsys-client.js
+DEPLOY_ASSETS = styles.css hyle.css bud-hydrate.js hyle-fragments.js stele-client.js stele.wasm
 assets-sync:
-	@if [ -f external/libqsys/npm/dist/client.js ]; then \
-		cp external/libqsys/npm/dist/client.js htdocs/qsys-client.js; \
+	@if [ -f external/libstele/npm/dist/client.js ]; then \
+		cp external/libstele/npm/dist/client.js htdocs/stele-client.js; \
 	fi
+	@if [ -f external/libstele/npm/dist/stele.wasm ]; then \
+		cp external/libstele/npm/dist/stele.wasm htdocs/stele.wasm; \
+	fi
+	@rm -rf node_modules/@ttypt
+	@mkdir -p node_modules/@tty-pt
+	@ln -sfn ../../external/libstele/npm node_modules/@tty-pt/stele
+	@ln -sfn ../../external/libcorm/npm node_modules/@tty-pt/corm
+	@ln -sfn ../../external/libjoint/npm node_modules/@tty-pt/joint
+	@ln -sfn ../../external/libislet/npm node_modules/@tty-pt/islet
+	@ln -sfn ../../external/liblemma/npm node_modules/@tty-pt/lemma
+	@ln -sfn ../../external/libsepal/npm node_modules/@tty-pt/sepal
+	@ln -sfn ../../external/libhyle/npm node_modules/@tty-pt/hyle
+	@ln -sfn ../../external/libbud/npm node_modules/@tty-pt/bud
+	@ln -sfn ../../external/libxylem/npm node_modules/@tty-pt/xylem
+	@ln -sfn ../../external/libhyle-bud/npm node_modules/@tty-pt/hyle-bud
+	@ln -sfn ../../external/liblamina/npm node_modules/@tty-pt/lamina
+	@ln -sfn ../../external/libtransp/npm node_modules/@tty-pt/transp
 	@if [ -f external/libhyle/assets/hyle.css ]; then \
 		cp external/libhyle/assets/hyle.css htdocs/hyle.css; \
 	else \
@@ -62,6 +84,9 @@ assets-sync:
 	fi
 	@if [ -f external/axil-tty/htdocs/axil-tty-bridge.js ]; then \
 		cp external/axil-tty/htdocs/axil-tty-bridge.js htdocs/axil-tty-bridge.js; \
+	fi
+	@if [ -f external/axil/htdocs/axil-bridge.js ]; then \
+		cp external/axil/htdocs/axil-bridge.js htdocs/axil-bridge.js; \
 	fi
 	@if [ -f external/axil-tty/node_modules/@xterm/xterm/lib/xterm.js ]; then \
 		mkdir -p htdocs/vendor && cp external/axil-tty/node_modules/@xterm/xterm/lib/xterm.js htdocs/vendor/xterm.js; \
@@ -127,10 +152,12 @@ hyle-bud: hyle-lib bud-lib hyle-source
 hyle-source: hyle-lib corm-lib lemma-lib
 	$(MAKE) -C external/libhyle-source
 
-qsys-lib:
-	$(MAKE) -C external/libqsys
+stele-lib:
+	$(MAKE) -C external/libstele
 
-axil-lib: qsys-lib corm-lib xylem-lib
+qsys-lib: stele-lib
+
+axil-lib: stele-lib corm-lib xylem-lib
 	$(MAKE) -C external/axil
 
 axil-auth-lib: axil-lib corm-lib xylem-lib
@@ -142,12 +169,12 @@ axil-hyle: axil-lib hyle-source axil-auth-lib
 axil-tty-lib: axil-lib corm-lib xylem-lib
 	$(MAKE) -C external/axil-tty
 
-axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib qsys-lib
+axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib
 	$(MAKE) -C external/axil-nd
 
 nd-libs: axil-nd-lib
 	@for d in external/nd-*; do \
-		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" || exit 1; fi; \
+		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" add-prefix-glob="../nd-*" || exit 1; fi; \
 	done
 
 corm-lib:
@@ -169,7 +196,7 @@ PREFIX ?= $(if $(filter Linux,$(UNAME_S)),/usr, \
 	/usr/local)))
 SUDO ?=
 
-INSTALL_PKGS = libqsys libcorm libxylem liblemma libjoint libislet libsepal \
+INSTALL_PKGS = libstele libcorm libxylem liblemma libjoint libislet libsepal \
 	libhyle libtransp libbud libhyle-bud libhyle-source \
 	axil axil-auth axil-hyle axil-tty axil-nd \
 	$(patsubst external/%,%,$(wildcard external/nd-*))
@@ -181,7 +208,7 @@ install-libs:
 	@echo "runtime libraries + axil installed under $(PREFIX)"
 
 # --- Monorepo Turnkey Node.js & WebAssembly Targets ---
-NPM_PACKAGES = external/libqsys external/libcorm external/libjoint external/libislet \
+NPM_PACKAGES = external/libstele external/libcorm external/libjoint external/libislet \
                external/libhyle external/liblemma external/libsepal external/libtransp \
                external/libbud external/libxylem external/liblamina external/libhyle-bud \
                mods/common
@@ -335,18 +362,32 @@ test-mod: all test-data-dirs
 test-nd-harvest: test-data-dirs
 	@AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all tests/e2e/nd-multi-room-harvest.test.ts
 
-test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test test-nd-harvest
+test-fast: boundary-check unit-c-tests standalone-unit-tests pages-test test-nd-harvest test-wasm
 	@echo "Fast test suite passed!"
+
+test-wasm:
+	@echo "=== Running WebAssembly and NPM test suites across external/ ==="
+	@for d in stele bud corm joint islet lamina lemma sepal transp hyle hyle-bud xylem; do \
+		if [ -d "external/lib$$d/npm" ]; then \
+			echo "--> Testing @tty-pt/$$d..."; \
+			npm --prefix "external/lib$$d/npm" test || exit 1; \
+		fi; \
+	done
+	@if [ -d "$$HOME/duna" ]; then \
+		echo "--> Verifying duna C99 & WASM unit tests..."; \
+		(cd "$$HOME/duna" && node --test scripts/unit.test.mjs) || exit 1; \
+	fi
+	@echo "All external WebAssembly packages and duna verified successfully!"
 
 test-e2e: test-data-dirs
 	@if [ -n "$(FILE)" ]; then \
 		AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all "tests/e2e/$(FILE)"; \
 	else \
-		AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} ./scripts/run-with-server.sh deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/; \
+		AUTH_SKIP_CONFIRM=1 ./scripts/run-with-server.sh deno test --allow-all $(E2E_ARGS) tests/e2e/; \
 	fi
 
 e2e-tests: test-data-dirs
-	AUTH_SKIP_CONFIRM=1 DENO_JOBS=$${DENO_JOBS:-4} deno test --allow-all --parallel $(E2E_ARGS) tests/e2e/
+	AUTH_SKIP_CONFIRM=1 deno test --allow-all $(E2E_ARGS) tests/e2e/
 
 restart:
 	@pkill -f 'axil -C .* mods/core/core' || true
@@ -361,7 +402,7 @@ test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e
 # depends on mods: check-no-tree-rpath inspects built artifacts, which must not
 # be mid-relink when the check runs under -j
 boundary-check: mods
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh && sh scripts/check-pkgconfig-versions.sh
 
 watch:
 	./scripts/watch.sh
@@ -456,7 +497,7 @@ new-mod:
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
-PROD_ASSETS = styles.css hyle.css bud-client.js bud-hydrate.js hyle-fragments.js qsys-client.js site.wasm
+PROD_ASSETS = styles.css hyle.css bud-hydrate.js hyle-fragments.js stele-client.js stele.wasm site.wasm
 
 deploy-wasm: clients
 	scp $(PROD_ASSETS:%=htdocs/%) \

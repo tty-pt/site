@@ -1,4 +1,4 @@
-# @ttypt/transp
+# @tty-pt/transp
 
 [![npm version](https://img.shields.io/badge/npm-v0.1.0-CB3837?logo=npm)](#)
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue)](#)
@@ -13,11 +13,11 @@
 ## 1. Quickstart
 
 ```bash
-npm install @ttypt/transp
+npm install @tty-pt/transp
 ```
 
 ```typescript
-import { transposeText, TRANSP_HTML, TRANSP_BEMOL } from "@ttypt/transp";
+import { transposeText, TRANSP_HTML, TRANSP_BEMOL } from "@tty-pt/transp";
 
 // 1. Transpose chords up 2 semitones: C -> D, G -> A, Am -> Bm, F -> G
 const input = "C G Am F\nSinging in the morning sun";
@@ -42,10 +42,32 @@ console.log(html);
 
 ---
 
-## 3. C Development Headers via NPM
+## 3. JavaScript / TypeScript API Reference
+
+### `transposeText(text: string, semitones: number, flags?: number): string`
+Parses, transposes, and renders text with musical chords while preserving character column alignment. **Executes strictly in compiled WebAssembly / C** via `transp_wasm_transpose()`.
+* `text`: Multi-line lyrics/chord string.
+* `semitones`: Pitch shift from `-11` to `+11`.
+* `flags`: Optional bitwise combination of transposition flags (`TRANSP_HTML`, `TRANSP_BEMOL`, etc.).
+
+### `getTranspWasm(): WebAssembly.Instance`
+Returns the WebAssembly instance loaded on the Stele shared-memory substrate.
+
+### Transposition Flags
+* `TRANSP_HIDE_CHORDS = 0x01`
+* `TRANSP_HIDE_LYRICS = 0x02`
+* `TRANSP_HTML = 0x04`
+* `TRANSP_BEMOL = 0x08`
+* `TRANSP_REMOVE_COMMENTS = 0x10`
+* `TRANSP_BREAK_SLASH = 0x20`
+* `TRANSP_LATIN = 0x80`
+
+---
+
+## 4. C Development Headers via NPM
 
 ```makefile
-CFLAGS += -I./node_modules/@ttypt/transp/include
+CFLAGS += -I./node_modules/@tty-pt/transp/include
 LDLIBS += -ltransp
 ```
 

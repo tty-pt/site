@@ -69,36 +69,46 @@ recv(1.0) # drain login
 send("look\n")
 look_out = recv(0.6).decode('latin1', errors='replace')
 
-# Verify room has stones and broadsword
-if "stone" not in look_out.lower() and "broadsword" not in look_out.lower():
+# If spawn room has no items/trees, walk north to harvest grounds
+steps = 0
+while ("stone" not in look_out.lower() and "rock" not in look_out.lower() and "broadsword" not in look_out.lower()) and steps < 6:
+    send("k\n")
+    look_out += recv(0.6).decode('latin1', errors='replace')
+    steps += 1
+
+# Verify room has stones, rocks or broadsword
+if "stone" not in look_out.lower() and "rock" not in look_out.lower() and "broadsword" not in look_out.lower():
     fails.append("initial room missing expected items (stone or broadsword)")
 
 # Test GET command: must NOT output "You go east"
-send("get stone\n")
+item_name = "rock" if "rock" in look_out.lower() else "stone" if "stone" in look_out.lower() else "broadsword"
+send(f"get {item_name}\n")
 get_out = recv(0.6).decode('latin1', errors='replace')
 if "You go east" in get_out:
-    fails.append("get stone fell back to movement ('You go east')")
+    fails.append(f"get {item_name} fell back to movement ('You go east')")
 
 # Check inventory now holds the item
 send("inventory\n")
 inv_out = recv(0.6).decode('latin1', errors='replace')
-if "stone" not in inv_out.lower() and "broadsword" not in inv_out.lower():
+if "stone" not in inv_out.lower() and "rock" not in inv_out.lower() and "broadsword" not in inv_out.lower():
     # If stone wasn't got, try getting broadsword
     send("get Steel Broadsword\n")
     recv(0.4)
     send("inventory\n")
     inv_out = recv(0.6).decode('latin1', errors='replace')
-    if "broadsword" not in inv_out.lower() and "stone" not in inv_out.lower():
+    if "broadsword" not in inv_out.lower() and "stone" not in inv_out.lower() and "rock" not in inv_out.lower():
         fails.append("item was not added to inventory after get")
 
 # Test tree stick drops: looking at the tree must reveal sticks
-tree_match = re.search(r'([a-zA-Z0-9_ ]*(?:acacia|pine|fir|tree)[a-zA-Z0-9_ ]*)\(#(\d+)\)', look_out, re.I)
+send("look\n")
+cur_look = recv(0.6).decode('latin1', errors='replace')
+tree_match = re.search(r'([a-zA-Z0-9_ ]*(?:acacia|pine|fir|tree)[a-zA-Z0-9_ ]*)\(#(\d+)\)', cur_look, re.I)
 if not tree_match:
-    fails.append("no tree found in spawn room to test stick drops")
+    fails.append("no tree found in room to test stick drops")
 else:
     tree_ref = tree_match.group(2)
     send(f"look #{tree_ref}\n")
-    tree_look = recv(0.6).decode('latin1', errors='replace')
+    tree_look = recv(0.6).decode("latin1", errors="replace")
     if "stick" not in tree_look.lower():
         fails.append(f"tree #{tree_ref} contents has no sticks: {tree_look[:200]}")
     else:

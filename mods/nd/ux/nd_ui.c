@@ -44,9 +44,7 @@ void nd_ui_toggle_modal(const char *modal_id)
 		nd_ui_set_active_modal("");
 	else
 		nd_ui_set_active_modal(modal_id);
-#ifdef __wasm__
 	bud_app_set_state();
-#endif
 }
 
 const nd_client_state_t *nd_ui_get_client_state(void)
@@ -258,9 +256,7 @@ static int on_item_select(bud_event *ev)
 
 	uint32_t ref = (uint32_t)strtoul(ref_str, NULL, 10);
 	client_state.selected_item_ref = (client_state.selected_item_ref == ref) ? 0 : ref;
-#ifdef __wasm__
 	bud_app_set_state();
-#endif
 	return 0;
 }
 
@@ -272,9 +268,7 @@ static int on_item_click(bud_event *ev)
 
 	uint32_t ref = (uint32_t)strtoul(ref_str, NULL, 10);
 	client_state.target_ref = (client_state.target_ref == ref) ? 0 : ref;
-#ifdef __wasm__
 	bud_app_set_state();
-#endif
 	return 0;
 }
 
@@ -322,9 +316,7 @@ static int on_dismiss_target(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
 	client_state.target_ref = 0;
-#ifdef __wasm__
 	bud_app_set_state();
-#endif
 	return 0;
 }
 
@@ -631,8 +623,10 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			/* The mini-map floats on top of the full-screen stage. */
 			bud_node *overlay = bud_element("div");
 			bud_set_attr(overlay, "id", "map-overlay");
-			bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none");
+			bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end");
 			bud_set_attr(overlay, "style", "top:12px;right:12px");
+			bud_node *room_hdr = render_room_header(st);
+			if (room_hdr) bud_append(overlay, room_hdr);
 			bud_append(overlay, map);
 			bud_append(holder, overlay);
 		}

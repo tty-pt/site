@@ -1,7 +1,12 @@
 #ifndef SITE_UI_H
 #define SITE_UI_H
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 #include "bud/bud.h"
+#include "../site_wasm_app.h"
 #include "site_chrome.h"
 #include "../../i18n/i18n_dict.h"
 #include <stddef.h>

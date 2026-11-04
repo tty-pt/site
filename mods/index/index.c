@@ -162,7 +162,6 @@ XY_IMPL(int, index_add_item,
 	return 0;
 }
 
-#ifndef __wasm__
 XY_IMPL(int, list_respond_page,
 	int, fd,
 	list_state_t *, state,
@@ -214,8 +213,6 @@ cleanup:
 	list_fill_free(state);
 	return rc;
 }
-#endif
-
 
 static int idx_render_list_bud(
         int fd, const char *module, const char *query_str, const char *username)

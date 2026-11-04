@@ -25,6 +25,22 @@
 static transp_ctx_t *g_transp_ctx = NULL;
 static char g_doc_root[256] = ".";
 
+static const source_list_field_t song_list_fields[] = {
+	{ "title", "Title" },
+	{ "type", "Type" },
+	{ "author", "Author" },
+};
+
+static const source_list_view_t song_list_view = {
+	"song",
+	song_list_fields,
+	sizeof(song_list_fields) / sizeof(song_list_fields[0]),
+	NULL,
+	"lyrics",
+	"Lyrics",
+	"e.g. \"a quiet place\"",
+};
+
 static void song_meta_read(const char *path, song_cache_t *m)
 {
 	source_meta_read(path, song_fields, SONG_FIELD_COUNT, m, sizeof(*m));
@@ -397,7 +413,7 @@ song_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user_data)
 	bud_state_apply(
 	        &app_state, song_app_fields, json_object_to_json_string(jo));
 
-	bud_node *layout = qsys_mod_song_detail.render();
+	bud_node *layout = stl_mod_song_detail.render();
 	state.state_json = strdup(json_object_to_json_string(jo));
 	free(trans);
 	int rc = detail_respond_page(fd, &state, layout);

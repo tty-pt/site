@@ -1,17 +1,12 @@
-import { createRequire } from "node:module";
-import path from "node:path";
+import { loadWasmModule, loadNativeAddon, getSubstrate } from "@tty-pt/stele";
 
-let nativeBinding = null;
-try {
-  const req = createRequire(import.meta.url);
-  nativeBinding = req("../build/Release/transp_node.node");
-} catch {
-  try {
-    const req = createRequire(import.meta.url);
-    nativeBinding = req(path.join(process.cwd(), "build/Release/transp_node.node"));
-  } catch {
-    // Fallback
-  }
+const nativeBinding = loadNativeAddon(import.meta.url, "transp");
+let wasmInstance = null;
+
+export function getTranspWasm() {
+  if (wasmInstance) return wasmInstance;
+  wasmInstance = loadWasmModule(new URL("./transp.wasm", import.meta.url));
+  return wasmInstance;
 }
 
 export const TRANSP_HIDE_CHORDS = 0x01;
@@ -23,13 +18,50 @@ export const TRANSP_BREAK_SLASH = 0x20;
 export const TRANSP_LATIN = 0x80;
 
 /**
- * Transpose chord sheet or chord line by semitones (-11 to +11)
+ * Transpose chord sheet or chord line by semitones (-11 to +11) strictly via WebAssembly
  */
 export function transposeText(text, semitones, flags = 0) {
   if (!text) return "";
   if (nativeBinding && nativeBinding.transpose) {
     return nativeBinding.transpose(text, semitones, flags);
   }
-  // If native addon is unavailable, return text unchanged
-  return text;
+
+  const wasm = getTranspWasm();
+  const substrate = getSubstrate();
+  return substrate.withString(text, (inPtr) => {
+    const outPtr = wasm.exports.transp_wasm_transpose(inPtr, semitones, flags);
+    if (!outPtr) return text;
+    const result = substrate.readString(outPtr);
+    wasm.exports.free(outPtr);
+    return result;
+  });
+}
+
+/**
+ * Returns chromatic index (0-11) of the detected musical key, or -1
+ */
+export function getDetectedKey() {
+  const wasm = getTranspWasm();
+  return wasm.exports.transp_wasm_get_key();
+}
+
+/**
+ * Clears detected key for subsequent transposition operations
+ */
+export function resetKey() {
+  const wasm = getTranspWasm();
+  wasm.exports.transp_wasm_reset_key();
+}
+
+/**
+ * Generates transposition shift table across all 12 musical keys
+ */
+export function getShiftTable(latin = 0) {
+  const wasm = getTranspWasm();
+  const substrate = getSubstrate();
+  const outPtr = wasm.exports.transp_wasm_shift_table(latin ? 1 : 0);
+  if (!outPtr) return "";
+  const result = substrate.readString(outPtr);
+  wasm.exports.free(outPtr);
+  return result;
 }

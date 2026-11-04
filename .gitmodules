@@ -16,9 +16,9 @@
 [submodule "external/axil-auth"]
 	path = external/axil-auth
 	url = git@github.com:tty-pt/axil-auth.git
-[submodule "external/libqsys"]
-	path = external/libqsys
-	url = git@github.com:tty-pt/libqsys.git
+[submodule "external/libstele"]
+	path = external/libstele
+	url = git@github.com:tty-pt/libstele.git
 [submodule "external/liblemma"]
 	path = external/liblemma
 	url = git@github.com:tty-pt/liblemma.git

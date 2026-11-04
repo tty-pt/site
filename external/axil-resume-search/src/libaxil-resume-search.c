@@ -54,27 +54,27 @@ rs_curl_ensure(void)
 	if (rs_curl.loaded)
 		return 0;
 	for (i = 0; names[i]; i++) {
-		rs_curl_dl = qsys_dlopen(names[i], 0);
+		rs_curl_dl = stl_dlopen(names[i], 0);
 		if (rs_curl_dl)
 			break;
 	}
 	if (!rs_curl_dl)
 		return -1;
-	sym = qsys_dlsym(rs_curl_dl, "curl_easy_init");
+	sym = stl_dlsym(rs_curl_dl, "curl_easy_init");
 	memcpy(&rs_curl.easy_init, &sym, sizeof(rs_curl.easy_init));
-	sym = qsys_dlsym(rs_curl_dl, "curl_easy_setopt");
+	sym = stl_dlsym(rs_curl_dl, "curl_easy_setopt");
 	memcpy(&rs_curl.easy_setopt, &sym, sizeof(rs_curl.easy_setopt));
-	sym = qsys_dlsym(rs_curl_dl, "curl_easy_perform");
+	sym = stl_dlsym(rs_curl_dl, "curl_easy_perform");
 	memcpy(&rs_curl.easy_perform, &sym, sizeof(rs_curl.easy_perform));
-	sym = qsys_dlsym(rs_curl_dl, "curl_easy_cleanup");
+	sym = stl_dlsym(rs_curl_dl, "curl_easy_cleanup");
 	memcpy(&rs_curl.easy_cleanup, &sym, sizeof(rs_curl.easy_cleanup));
-	sym = qsys_dlsym(rs_curl_dl, "curl_easy_escape");
+	sym = stl_dlsym(rs_curl_dl, "curl_easy_escape");
 	memcpy(&rs_curl.easy_escape, &sym, sizeof(rs_curl.easy_escape));
-	sym = qsys_dlsym(rs_curl_dl, "curl_free");
+	sym = stl_dlsym(rs_curl_dl, "curl_free");
 	memcpy(&rs_curl.free, &sym, sizeof(rs_curl.free));
-	sym = qsys_dlsym(rs_curl_dl, "curl_slist_append");
+	sym = stl_dlsym(rs_curl_dl, "curl_slist_append");
 	memcpy(&rs_curl.slist_append, &sym, sizeof(rs_curl.slist_append));
-	sym = qsys_dlsym(rs_curl_dl, "curl_slist_free_all");
+	sym = stl_dlsym(rs_curl_dl, "curl_slist_free_all");
 	memcpy(&rs_curl.slist_free_all, &sym, sizeof(rs_curl.slist_free_all));
 
 	if (!rs_curl.easy_init || !rs_curl.easy_setopt || !rs_curl.easy_perform ||

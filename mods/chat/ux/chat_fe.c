@@ -10,7 +10,8 @@
 
 #include "bud/bud.h"
 #include "bud/bud_app.h"
-#include <ttypt/qsys_wasm.h>
+#include <ttypt/stele_wasm.h>
+#include "../../common/site_wasm_app.h"
 
 #include "chat_ui.h"
 #include "../chat-types.h"
@@ -29,7 +30,7 @@ static int g_streaming = 0;
  *   Initializes chat state from SSR-provided JSON blob.
  *   Format: JSON object with "session", "summaries", "user", "error" fields.
  */
-static int chat_qsys_init(const char *json, int len)
+static int chat_stl_init(const char *json, int len)
 {
 	if (!json || len <= 0)
 		return 0;
@@ -83,7 +84,7 @@ static int chat_qsys_init(const char *json, int len)
 	return 0;
 }
 
-static bud_node *chat_qsys_render(void)
+static bud_node *chat_stl_render(void)
 {
 	return chat_ui_render_view(&g_session, g_summaries, g_summary_count, g_user, g_error_msg);
 }
@@ -163,7 +164,7 @@ ISO_EXPORT(void, wasm_ws_on_close, void)
 	memset(g_pending_tokens, 0, sizeof(g_pending_tokens));
 }
 
-static void chat_qsys_cleanup(void)
+static void chat_stl_cleanup(void)
 {
 	memset(&g_session, 0, sizeof(g_session));
 	memset(g_summaries, 0, sizeof(g_summaries));
@@ -174,5 +175,5 @@ static void chat_qsys_cleanup(void)
 	g_streaming = 0;
 }
 
-QSYS_WASM_MODULE_EXT(chat_fe, chat_qsys_init, chat_qsys_render, NULL, NULL, chat_qsys_cleanup, NULL);
+BUD_WASM_MODULE_EXT(chat_fe, chat_stl_init, chat_stl_render, NULL, NULL, chat_stl_cleanup, NULL);
 

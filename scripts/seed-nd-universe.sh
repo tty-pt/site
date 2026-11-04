@@ -329,7 +329,7 @@ for p in $PROBES; do
 	cmd "room ${p%,*} ${p#*,} 0 0"
 	cmd "driver"
 done
-sleep 1.5
+sleep 3.0
 GOT_POLICY="$(grep -a -E 'Stage driver:|Map driver:|Layout mode:' "$SEED_TXT" | tail -n 24 \
 	| sed -E 's/\x1b\[[0-9;]*m//g; s/.*(Stage driver|Map driver|Layout mode): *//; s/[^a-z0-9-].*//' | paste -sd' ' -)"
 WANT_POLICY="lamina-seven lamina game-2d lamina-seven lamina game-2d lamina-seven lamina game-2d tty lamina hybrid tty lamina hybrid tty ascii-bud hybrid tty ascii-bud hybrid tty ascii-bud hybrid"

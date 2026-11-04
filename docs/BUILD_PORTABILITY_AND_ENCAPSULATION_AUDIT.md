@@ -131,17 +131,17 @@ Submodules cannot be built standalone outside `/home/quirinpa/site`. A clone on 
 Six domain module Makefiles contain hardcoded relative library search paths:
 
 - `external/nd-obj/Makefile:6`:
-  `LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
+  `LDLIBS-libnd-obj := -lxylem -lcorm -lislet -lstele -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
 - `external/nd-session/Makefile:6`:
-  `LDLIBS-libnd-session := -lxylem -lcorm -lqsys -laxil-tty -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
+  `LDLIBS-libnd-session := -lxylem -lcorm -lstele -laxil-tty -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
 - `external/nd-view/Makefile:5`:
-  `LDLIBS-libnd-view := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
+  `LDLIBS-libnd-view := -lxylem -lcorm -lislet -lstele -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
 - `external/nd-world/Makefile:6`:
-  `LDLIBS-libnd-world := -lxylem -lcorm -lislet -lqsys -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
+  `LDLIBS-libnd-world := -lxylem -lcorm -lislet -lstele -L../axil-nd/lib -laxil-nd -Wl,--no-as-needed -L../nd-bus/lib -lnd-bus -Wl,--as-needed`
 - `external/nd-mcp/Makefile:6`:
-  `LDLIBS-libnd-mcp := -lxylem -lcorm -lqsys -L../axil-nd/lib -laxil-nd`
+  `LDLIBS-libnd-mcp := -lxylem -lcorm -lstele -L../axil-nd/lib -laxil-nd`
 - `external/nd-speech/Makefile:5`:
-  `LDLIBS-libnd-speech := -lxylem -lcorm -lqsys -L../axil-nd/lib -laxil-nd`
+  `LDLIBS-libnd-speech := -lxylem -lcorm -lstele -L../axil-nd/lib -laxil-nd`
 
 **Impact:**
 `check-no-tree-rpath.sh` forbids `-L` flags in build inputs because forced `-L` overrides system authority. These modules cannot be built against system-installed `/usr/lib/libaxil-nd.so`.

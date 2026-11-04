@@ -81,7 +81,8 @@ pass "repertoire created"
 
 # ── 5. Create gig linked to grp ──
 echo -n "5. Create gig with grp... "
-csrf=$(csrf_for "$COOKIE")
+csrf=$(api "$BASE/api/csrf")
+[ -z "$csrf" ] && csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/gig/add" \
 	-F "title=${USER}" -F "grp=$GRP_ID" -F "csrf_token=$csrf")
@@ -120,7 +121,8 @@ done < "$DATAFILE"
 
 # ── 9. Edit gig — replace with sb_sg2 + sb_sg3 ──
 echo -n "9. Edit gig (remove first, add song3)... "
-csrf=$(csrf_for "$COOKIE")
+csrf=$(api "$BASE/api/csrf")
+[ -z "$csrf" ] && csrf=$(csrf_for "$COOKIE")
 code=$(curl -sw "%{http_code}" -o /dev/null -b "$COOKIE" \
 	-X POST "$BASE/gig/$SB_ID/edit" \
 	-F "amount=2" \

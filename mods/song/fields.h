@@ -114,22 +114,4 @@ static const hyle_schema_desc_t song_fields[] = {
 
 BUD_STATE_FIELDS(app_state_t, song_app_fields, SONG_APP_SCHEMA)
 
-#ifndef __wasm__
-static const source_list_field_t song_list_fields[] = {
-	{ "title", "Title" },
-	{ "type", "Type" },
-	{ "author", "Author" },
-};
-
-static const source_list_view_t song_list_view = {
-	"song",
-	song_list_fields,
-	sizeof(song_list_fields) / sizeof(song_list_fields[0]),
-	NULL,
-	"lyrics",
-	"Lyrics",
-	"e.g. \"a quiet place\"",
-};
-#endif
-
 #endif

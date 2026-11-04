@@ -18,8 +18,8 @@ gcc -O2 -DND_WORLD_PROVIDER \
     "$ROOT/tests/unit/test_map_noise.c" \
     "$ROOT/external/nd-world/src/noise.c" \
     -L"$ROOT/external/libcorm/lib" \
-    -L"$ROOT/external/libqsys/lib" \
-    -lcorm -lqsys -lxxhash \
+    -L"$ROOT/external/libstele/lib" \
+    -lcorm -lstele -lxxhash \
     -o "$BIN"
 
 "$BIN"

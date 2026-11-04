@@ -1,6 +1,6 @@
 {
-  "name": "@ttypt/transp",
-  "version": "0.1.0",
+  "name": "@tty-pt/transp",
+  "version": "1.0.0",
   "type": "module",
   "description": "Universal Node.js and Browser bindings for libtransp Musical Chord Transposition Engine",
   "main": "dist/index.js",
@@ -13,8 +13,15 @@
   ],
   "scripts": {
     "build:native": "mkdir -p build/Release && gcc -O3 -fPIC -shared -I/usr/include/node -I../include native/transp_napi.c -L../lib -Wl,-rpath,../lib -L/usr/lib -ltransp -o build/Release/transp_node.node 2>/dev/null || true",
-    "build": "npm run build:native",
+    "build:wasm": "make -C .. wasm",
+    "build": "npm run build:native && npm run build:wasm",
     "test": "node --test tests/transp.test.mjs"
+  },
+  "peerDependencies": {
+    "@tty-pt/stele": ">=1.5.0"
+  },
+  "devDependencies": {
+    "@tty-pt/stele": "^1.5.1"
   },
   "keywords": [
     "transp",

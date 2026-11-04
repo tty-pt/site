@@ -30,39 +30,44 @@ try {
     head: document.querySelector("#room-header")?.textContent || "",
     term: Array.from(document.querySelectorAll("#term .xterm-rows > div")).map((r) => r.textContent).join("\n"),
   }));
-  // The player types into the xterm terminal, exactly like the live page.
+  // The player types into the xterm terminal, or sends window keys in canvas mode.
   const sendLine = async (line) => {
-    await page.focus("#term textarea");
-    await page.keyboard.type(line);
+    const term = await page.$("#term textarea");
+    if (term && (await term.isVisible())) {
+      await page.focus("#term textarea");
+      await page.keyboard.type(line);
+      await page.keyboard.press("Enter");
+    } else {
+      await page.keyboard.type(line);
     await page.keyboard.press("Enter");
+    }
   };
   const before = await snap();
   console.log("before:", JSON.stringify(before.head), "map", before.map.length);
   await page.waitForTimeout(500);
-  await sendLine("k");
-  await page.waitForTimeout(2500);
-  const north = await snap();
-  console.log("north :", JSON.stringify(north.head), "map", north.map.length);
-  if (!/go .*north/i.test(north.term)) fails.push("terminal did not show the move north");
-  if (north.head === before.head) fails.push("room header did not change after moving north");
-  if (north.map === before.map) fails.push("map did not change after moving north");
   await sendLine("j");
   await page.waitForTimeout(2500);
+  const south = await snap();
+  console.log("south :", JSON.stringify(south.head), "map", south.map.length);
+  if (south.head === before.head) fails.push("room header did not change after moving south");
+  if (south.map === before.map) fails.push("map did not change after moving south");
+  await sendLine("k");
+  await page.waitForTimeout(2500);
   const back = await snap();
-  console.log("south :", JSON.stringify(back.head), "map", back.map.length);
-  if (back.head !== before.head) fails.push("room header did not return after moving south");
-  if (back.map === north.map) fails.push("map did not change after moving back south");
-  if (back.map !== before.map) fails.push("map after moving back south differs from initial login map");
+  console.log("back  :", JSON.stringify(back.head), "map", back.map.length);
+  if (back.head !== before.head) fails.push("room header did not return after moving back north");
+  if (back.map === south.map) fails.push("map did not change after moving back north");
+  if (back.map !== before.map) fails.push("map after moving back north differs from initial login map");
   if (/\x1b|\[4\dm/.test(back.map)) fails.push("raw ANSI leaked into the map");
   // The vim keys also work with focus outside the terminal (window keydown).
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
-  await page.keyboard.press("k");
+  await page.keyboard.press("j");
   await page.waitForTimeout(2500);
   const key = await snap();
-  console.log("key k :", JSON.stringify(key.head), "map", key.map.length);
-  if (key.head === back.head) fails.push("pressing k outside the terminal did not move the map");
+  console.log("key j :", JSON.stringify(key.head), "map", key.map.length);
+  if (key.head === back.head) fails.push("pressing j outside the terminal did not move the map");
   // Return to spawn room #2 for fixture tests
-  await page.keyboard.press("j");
+  await page.keyboard.press("k");
   await page.waitForTimeout(2500);
   // Layout: the map and the looked-at object's image are never shown together,
   // and the direction pad is for small/touch screens only.

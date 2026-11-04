@@ -791,7 +791,7 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	sb_collect_detail_pickers(fd, state.is_owner);
 	sb_populate_detail_state(ctx, &state, &prefs, owner_buf, grp_id);
 
-	bud_node *layout = qsys_mod_gig_detail.render();
+	bud_node *layout = stl_mod_gig_detail.render();
 	state.state_json = sb_emit_state_json();
 	detail_respond_page(fd, &state, layout);
 	free(state.state_json);
@@ -1055,6 +1055,21 @@ static int gig_edit_post_handler(int fd, char *body)
 	        "Gig not found", "You don't own this gig",
 	        gig_edit_post_authorized, NULL);
 }
+
+static const source_list_field_t gig_list_fields[] = {
+	{ "title", "Title" },
+	{ "grp", "Group" },
+};
+
+static const source_list_view_t gig_list_view = {
+	"gig",
+	gig_list_fields,
+	sizeof(gig_list_fields) / sizeof(gig_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
 
 void xy_install(void)
 {

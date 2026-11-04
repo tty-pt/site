@@ -5,6 +5,26 @@ All notable changes to the site and NeverDark platform will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-11-04
+
+- **Release Wave 2026.12.1 — Universal Substrate & Package Ecosystem Synchronization**:
+  - Published and verified ecosystem packages under canonical `@tty-pt/*` scope across NPM and native OS package distributions (`@tty-pt/stele@1.5.2`, `@tty-pt/bud@1.2.2`, `@tty-pt/corm@2.2.4`, `@tty-pt/joint@1.6.3`, `@tty-pt/islet@1.3.2`, `@tty-pt/lemma@1.2.2`, `@tty-pt/sepal@1.3.2`, `@tty-pt/xylem@1.7.2`, `@tty-pt/hyle@1.6.1`).
+  - Aligned `@tty-pt/lamina` and `@tty-pt/transp` versions to `0.1.0` and package definitions.
+  - Migrated `libhyle-source` (`1.3.1`), `seven-ways`, `neverdark`, and `axil-auren` to link and depend on `libstele` rather than legacy `libqsys`.
+  - Enforced pkg-config version parity validation in local `make boundary-check` (`scripts/check-pkgconfig-versions.sh`) and CI test phase.
+
+## [1.2.0] - 2026-11-02
+
+- **Universal WebAssembly Substrate & Pure Isomorphic UX Architecture (`libstele` & `ISO_EXPORT`)**:
+  - Renamed `libqsys` to `libstele` across submodules (`external/libstele`), C headers (`<ttypt/stele.h>`, `<ttypt/stele_wasm.h>`), kernel symbols (`stele_kernel_*`), pkg-config (`stele.pc`), and npm packages (`@tty-pt/stele`), retaining full backward compatibility shims.
+  - Canonized `ISO_EXPORT`, `ISO_EXPORT_AS`, and `ISO_IMPORT` in `<ttypt/iso.h>` as the canonical isomorphic export contract across native shared objects (SSR) and WebAssembly reactors (browser), deprecating `WASM_EXPORT` aliases.
+  - Eliminated brittle relative filesystem traversal hacks (`../../libstele/npm/...`) across all ecosystem libraries (`@tty-pt/islet`, `@tty-pt/corm`, `@tty-pt/joint`, `@tty-pt/lemma`, `@tty-pt/sepal`, `@tty-pt/hyle`), resolving substrate through canonical package imports (`@tty-pt/stele`) and `node_modules/@tty-pt/*` monorepo links.
+  - Restored `external/libbud` to pure C UI tree building and VDOM diffing (`bud_vdom_diff`), eliminating runtime slot mounting, host patch imports, and `#if defined(__wasm__)` preprocessor guards.
+  - Relocated application-level WASM slot orchestration, patch emission, and DOM event dispatching to `mods/common/site_wasm_app.c` and `mods/common/site_wasm_app.h`.
+  - Implemented dynamic on-demand component WASM instantiation with isolated linear memory instances per component in `htdocs/stele-client.js`, eliminating allocator heap collisions at fixed base offsets (`--global-base=1024`).
+  - Purged all clever `#ifdef __wasm__` / `#ifndef __wasm__` preprocessor branching from feature C code in `mods/*/ux/*.c` and schema definitions in `fields.h`.
+  - Stabilized and verified all 123 E2E and integration tests (`make test`), including song key transposition, gig zoom, and browser vim movement.
+
 ## [1.1.0] - 2026-10-25
 
 - **Ecosystem Wide Synchronized Release Wave 2026.11**:

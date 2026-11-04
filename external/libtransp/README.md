@@ -1,6 +1,6 @@
 # libtransp
 
-[![npm](https://img.shields.io/badge/npm-@ttypt/transp-CB3837?logo=npm)](npm/README.md)
+[![npm](https://img.shields.io/badge/npm-@tty--pt/transp-CB3837?logo=npm)](npm/README.md)
 [![C99](https://img.shields.io/badge/C-C99-555?logo=c)](#)
 [![BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue)](#)
 [![chord-transpose](https://img.shields.io/badge/chord-transpose-C4841A)](#)
@@ -175,12 +175,12 @@ clean under ASan/UBSan. The transp tests are wired into the root build via
 
 ---
 
-## JavaScript & WebAssembly Bindings (@ttypt/transp)
+## JavaScript & WebAssembly Bindings (@tty-pt/transp)
 
 Official Node.js and Browser WebAssembly bindings are colocated in [`npm/`](npm/README.md):
 - **Universal Engine**: Transpose chord charts, lead sheets, and lyrics alignment in Node.js and browser web viewers.
 - **HTML & Custom Output**: Output clean HTML with bold chord blocks or plain text with accidental preferences (`Db` vs `C#`).
-- **C Development Headers**: Install via `npm install @ttypt/transp` and consume headers from `node_modules/@ttypt/transp/include`.
+- **C Development Headers**: Install via `npm install @tty-pt/transp` and consume headers from `node_modules/@tty-pt/transp/include`.
 
 👉 *For complete TypeScript usage, output flags, and API reference, see [npm/README.md](npm/README.md).*
 

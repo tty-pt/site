@@ -97,7 +97,7 @@ void on_transpose_button_clicked(int delta) {
                │  └──────────────────────────────────┘  │
                │  Shared Engines:                       │
                │  [bud] [xylem] [hyle-bud] [transp]     │
-               │  [lemma] [cormr] [qsys]                │
+               │  [lemma] [cormr] [stele]               │
                └──────────────────┬─────────────────────┘
                                   │
          ┌────────────────────────┴────────────────────────┐

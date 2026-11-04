@@ -11,3 +11,9 @@ export declare function transposeText(
   semitones: number,
   flags?: number
 ): string;
+
+export declare function getDetectedKey(): number;
+export declare function resetKey(): void;
+export declare function getShiftTable(latin?: number): string;
+
+export declare function getTranspWasm(): WebAssembly.Instance;

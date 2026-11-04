@@ -69,6 +69,24 @@ static int software_detail_handler(int fd, char *body)
 	        fd, body, "software", 0, NULL, NULL, software_detail_auth, NULL);
 }
 
+static const source_list_field_t software_list_fields[] = {
+	{ "title", "Software" },
+	{ "category", "Category" },
+	{ "version", "Version" },
+	{ "summary", "Summary" },
+	{ "owner", "Maintainer" },
+};
+
+static const source_list_view_t software_list_view = {
+	"software",
+	software_list_fields,
+	sizeof(software_list_fields) / sizeof(software_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
 void xy_install(void)
 {
 	xy_load("./mods/index/index");

@@ -15,11 +15,12 @@
 #include "../../common/ux/site_ui.c" /* site_ui_layout, site_ui_empty_state, ... */
 #include "list.c"                    /* list_state_t + list_render + ... */
 
-#include <ttypt/qsys_wasm.h>
+#include <ttypt/stele_wasm.h>
+#include "../../common/site_wasm_app.h"
 
 static list_state_t g_state = { 0 };
 
-static int list_qsys_init(const char *json, int len)
+static int list_stl_init(const char *json, int len)
 {
 	list_state_from_json_len(&g_state, json, len >= 0 ? (size_t)len : 0);
 	site_ui_set_locale(g_state.lang);
@@ -27,15 +28,15 @@ static int list_qsys_init(const char *json, int len)
 	return 0;
 }
 
-static bud_node *list_qsys_render(void)
+static bud_node *list_stl_render(void)
 {
 	return list_render(&g_state);
 }
 
-static void list_qsys_cleanup(void)
+static void list_stl_cleanup(void)
 {
 	memset(&g_state, 0, sizeof(g_state));
 }
 
-QSYS_WASM_MODULE_EXT(list_fe, list_qsys_init, list_qsys_render, NULL, NULL, list_qsys_cleanup, NULL);
+BUD_WASM_MODULE_EXT(list_fe, list_stl_init, list_stl_render, NULL, NULL, list_stl_cleanup, NULL);
 

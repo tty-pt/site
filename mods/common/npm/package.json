@@ -1,5 +1,5 @@
 {
-  "name": "@ttypt/site-ui",
+  "name": "@tty-pt/site-ui",
   "version": "0.1.0",
   "type": "module",
   "description": "Universal Node.js and Browser bindings for tty.pt site UI primitives, layout scaffolding, and media controls",
@@ -11,7 +11,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node -e 'console.log(\"@ttypt/site-ui built\")'",
+    "build": "node -e 'console.log(\"@tty-pt/site-ui built\")'",
     "test": "node --test tests/site-ui.test.mjs"
   },
   "keywords": [

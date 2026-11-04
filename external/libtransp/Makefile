@@ -4,6 +4,9 @@ all := libtransp test_transp
 libtransp-obj-y := src/token.o src/parse.o src/render.o src/music.o
 LDLIBS-test_transp := -L./lib -ltransp
 
+WASM_SRCS := src/token.c src/parse.c src/render.c src/music.c src/libtransp.c npm/wasm/transp_wasm.c
+WASM_EXTRA_CFLAGS := -Iinclude/transp -Iinclude -Isrc
+
 include ../mk/include.mk
 
 CFLAGS += -I./include/transp -I./include -I./src $(EXTRA_CFLAGS)

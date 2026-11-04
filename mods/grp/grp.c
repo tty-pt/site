@@ -578,6 +578,20 @@ static int grp_detail_handler(int fd, char *body)
 	        fd, body, "grp", 0, NULL, NULL, grp_detail_auth, NULL);
 }
 
+static const source_list_field_t grp_list_fields[] = {
+	{ "title", "Title" },
+};
+
+static const source_list_view_t grp_list_view = {
+	"group",
+	grp_list_fields,
+	sizeof(grp_list_fields) / sizeof(grp_list_fields[0]),
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
 void xy_install(void)
 {
 	xy_load("./mods/index/index");

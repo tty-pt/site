@@ -36,9 +36,10 @@ if [ -f "$REPO_ROOT/scripts/nd-kernel-mods.sh" ]; then
   export LD_LIBRARY_PATH="$(nd_local_ld_path "$REPO_ROOT")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
-if [ ! -f "$AXIL_ND_DB" ]; then
-  bash "${REPO_ROOT}/scripts/seed-nd-universe.sh" "$AXIL_ND_DB" 1
+if [ ! -f "${AXIL_ND_DB}.pristine" ]; then
+  bash "${REPO_ROOT}/scripts/seed-nd-universe.sh" "${AXIL_ND_DB}.pristine" 1
 fi
+cp -f "${AXIL_ND_DB}.pristine" "$AXIL_ND_DB"
 
 AXIL_BIN="${REPO_ROOT}/external/axil/bin/axil"
 if [ ! -x "$AXIL_BIN" ]; then

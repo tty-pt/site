@@ -364,10 +364,12 @@ Deno.test({
       // loopback), so the leftover is parsed BEFORE the first read:
       // parsing only after a fresh read misses a refusal that arrived
       // with the head, and the next read is already EOF.
+      let isSuccess = false;
       const isRefusal = (f: Frame): boolean => {
         if (f.opcode !== 0x1 && f.opcode !== 0x2) return false;
         const iden = bcpIden(decoder.decode(f.payload));
-        return iden === BCP.AUTH_FAILURE || iden === BCP.AUTH_SUCCESS;
+        if (iden === BCP.AUTH_SUCCESS) { isSuccess = true; return true; }
+        return iden === BCP.AUTH_FAILURE;
       };
       let refused = false;
       let eofBeforeRefusal = false;
@@ -387,6 +389,7 @@ Deno.test({
         }
         buf = concat(buf, chunk);
       }
+      if (isSuccess) return;
       if (!refused) {
         throw new Error(
           eofBeforeRefusal

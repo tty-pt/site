@@ -114,7 +114,8 @@ When running Situation A (`make run-sector32`), **Planet 2 ("Aethelgard")** is p
 ## Architecture & Core Invariants
 
 - **Single-Port Unified Service**: HTTP GET, SSR HTML, static assets (`/nd.wasm`, `/bud-client.js`, `/styles.css`), and full-duplex WebSocket upgrades are multiplexed on port `:8080` in a single process.
-- **SSR-First Isomorphic Architecture**: Pure-C UX components (`mods/*/ux`) compile twice — as native `.so` shared modules for instant Server-Side Rendering (SSR) and into WebAssembly (`htdocs/*.wasm`) for browser enhancement.
+- **SSR-First Isomorphic Architecture**: Pure-C UX components (`mods/*/ux`) compile twice — as native `.so` shared modules for instant Server-Side Rendering (SSR) and into WebAssembly (`htdocs/*.wasm`) for browser enhancement. Zero platform preprocessor branching (`#ifdef __wasm__`) in feature code.
+- **Universal WASM Substrate & Clean Library Decoupling**: `external/libbud` serves as a pure C UI tree and VDOM diff engine without runtime slot or browser assumptions; `external/libstele` acts as the domain-agnostic WASM substrate; `htdocs/stele-client.js` provisions dynamic on-demand component loading with isolated linear memory instances per component.
 - **Zero Foreign Runtime in the Request Path**: Pure C on the server and pure C in WASM. No Rust, Dioxus, Deno, or Node in the request pipeline.
 - **Strict Module Encapsulation**: Strict two-header separation (`*-types.h` and `*.h`), zero `*_IMPL` guards, and cross-module communication solely via `libxylem` XY dispatch.
 - **Declarative Zero-Arithmetic BCP**: Dual-tier wire protocol ([`external/axil-nd/include/nd/bcp-meta.h`](./external/axil-nd/include/nd/bcp-meta.h)) with zero-copy packed memory-mapped structs and X-macro schema descriptors.

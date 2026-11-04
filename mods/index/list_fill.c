@@ -4,8 +4,6 @@
  * song pickers). Compiled once into index and exposed through XY.
  * NEVER include from a WASM TU (axil/corm/source calls). */
 
-#ifndef __wasm__
-
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -576,5 +574,3 @@ XY_IMPL(int, list_fill_free, list_state_t *, state)
 	state->nids = 0;
 	return 0;
 }
-
-#endif /* !__wasm__ */
