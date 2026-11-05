@@ -16,6 +16,7 @@ gcc -g -O0 \
 	-I"$REPO_ROOT/external/nd-fight/include" \
 	-I"$REPO_ROOT/external/nd-mortal/include" \
 	-I"$REPO_ROOT/external/libxylem/include" \
+	-I"$REPO_ROOT/external/libnoise/include" \
 	-I"$REPO_ROOT/mods/nd/ux" \
 	-o tests/unit/test_seven_stage_html \
 	tests/unit/test_seven_stage_html.c \
@@ -37,7 +38,7 @@ gcc -g -O0 \
 	mods/nd/ux/glue/mortal_ui.c \
 	-L"$REPO_ROOT/external/axil/lib" \
 	-L"$REPO_ROOT/external/libstele/lib" \
-	-lbud -laxil -lxylem -lhyle-bud -lstele -lm
+	-lbud -laxil -lxylem -lhyle-bud -lstele -lxxhash -lm
 
 LD_LIBRARY_PATH="$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/libstele/lib:${LD_LIBRARY_PATH:-}" ./tests/unit/test_seven_stage_html
 rm -f tests/unit/test_seven_stage_html

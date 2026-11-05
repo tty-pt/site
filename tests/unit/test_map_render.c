@@ -119,7 +119,7 @@ int main(void)
 	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == C_GREEN_BG);
 	wild(&m, 1, 1, 4, 0, 0, 0, 0, 0, 0); /* ANSI 4 = blue */
 	render(&m, "lamina", 0);
-	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == 0xFFBD8973);
+	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == 0xFF94A696);
 	printf("PASS: wilderness tiles show their biome background colour\n");
 
 	/* 5. TREES in their own colour on ALL THREE cells of a wilderness tile. */
@@ -361,6 +361,7 @@ int main(void)
 				t->flags = 0;
 				t->exits = 0;
 				t->bg = (uint8_t)(x >= 3 ? 3 : 2);
+				t->bio_idx = (uint8_t)(x >= 3 ? 3 : 2);
 			}
 		ms.tiles[3 * 7 + 3].flags = ND_MAP_FLAG_PLAYER;
 		ms.pos[0] = 20; ms.pos[1] = -5; ms.pos[2] = 2; ms.pos[3] = 1;
@@ -516,6 +517,10 @@ int main(void)
 		memset(&cst, 0, sizeof(cst));
 		init_sample_map(&cst.map_data);
 		cst.map_data.player_x = 1; cst.map_data.player_y = 1;
+		cst.map_data.pos[0] = 60; cst.map_data.pos[1] = 60;
+		cst.room.ref = 200;
+		cst.me = 1;
+
 		/* 0 stones: clean baseline */
 		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
 		render(&cst.map_data, "lamina", 0);
@@ -523,9 +528,6 @@ int main(void)
 
 		/* 2 stone glyphs: side_l ('*') and side_r ('*') */
 		wild(&cst.map_data, 1, 1, 2, '*', 10, 0, 0, '*', 10);
-		cst.map_data.pos[0] = 60; cst.map_data.pos[1] = 60;
-		cst.room.ref = 200;
-		cst.me = 1;
 		cst.entity_count = 2;
 		cst.entities[0].ref = 1001;
 		cst.entities[0].location = 200;

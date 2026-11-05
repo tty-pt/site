@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 #include "list.c"
 #include "home.c"

@@ -31,6 +31,8 @@ struct bio {
 	ucoord_t rn;
 	uint32_t ty;
 	unsigned bio_idx;
+	coord_t elevation;
+	coord_t water_level;
 	unsigned raw[16];
 };
 
@@ -38,6 +40,8 @@ typedef struct view_tile {
 	unsigned bio_idx;
 	unsigned room;
 	ucoord_t flags, exits, doors;
+	coord_t elevation;
+	coord_t water_level;
 	unsigned raw[16];
 } view_tile_t;
 #endif

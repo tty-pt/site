@@ -136,6 +136,25 @@ int main(void)
 		CHECK("site_ui_state_head empty string returns NULL", empty_head == NULL);
 	}
 
+	/* 7. site_ui_state_head_bin wraps binary data as base64 in application/octet-stream script */
+	{
+		const char raw_data[] = "BINARY_STATE_PAYLOAD_12345";
+		char *bin_head = site_ui_state_head_bin(raw_data, sizeof(raw_data));
+		CHECK("site_ui_state_head_bin returns non-NULL", bin_head != NULL);
+		if (bin_head) {
+			CHECK("site_ui_state_head_bin contains id=\"bud-state\"",
+			      strstr(bin_head, "id=\"bud-state\"") != NULL);
+			CHECK("site_ui_state_head_bin contains application/octet-stream",
+			      strstr(bin_head, "type=\"application/octet-stream\"") != NULL);
+			CHECK("site_ui_state_head_bin contains data-encoding=\"base64\"",
+			      strstr(bin_head, "data-encoding=\"base64\"") != NULL);
+			free(bin_head);
+		}
+
+		char *null_bin_head = site_ui_state_head_bin(NULL, 0);
+		CHECK("site_ui_state_head_bin NULL returns NULL", null_bin_head == NULL);
+	}
+
 	printf("\nTotal failures: %d\n", failures);
 	return failures > 0 ? 1 : 0;
 }

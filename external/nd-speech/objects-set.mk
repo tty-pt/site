@@ -1,5 +1,5 @@
-CFLAGS-libnd-speech-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-speech-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-match-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-look-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-wiz-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
+CFLAGS-libnd-speech-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-region/include -I../nd-obj/include -I../nd-session/include -I../nd-view/include -I../nd-world/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-speech-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-region/include -I../nd-obj/include -I../nd-session/include -I../nd-view/include -I../nd-world/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-match-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-region/include -I../nd-obj/include -I../nd-session/include -I../nd-view/include -I../nd-world/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-look-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-region/include -I../nd-obj/include -I../nd-session/include -I../nd-view/include -I../nd-world/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-wiz-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-region/include -I../nd-obj/include -I../nd-session/include -I../nd-view/include -I../nd-world/include -I../libnoise/include -D_GNU_SOURCE

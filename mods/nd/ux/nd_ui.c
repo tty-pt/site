@@ -1,7 +1,7 @@
 #include "nd_ui_internal.h"
 #include <ttypt/axil-ws.h>
 #include <ttypt/lam.h>
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
@@ -326,17 +326,25 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 	bud_set_attr(wrap, "id", "contents");
 	bud_set_attr(wrap, "class", "nd-contents w-full");
 
-	uint32_t active_loc = (st && st->target_ref) ? st->target_ref : (st ? st->room.ref : 0);
 	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
+	uint32_t container_target = (st && st->target_ref && !is_inventory) ? st->target_ref : 0;
 
 	int any = 0;
 	if (st) {
 		for (size_t i = 0; i < st->entity_count; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
-			if (!is_inventory && st->me && e->ref == st->me)
+			if (st->me && e->ref == st->me)
 				continue;
-			if (active_loc && e->location != active_loc)
-				continue;
+			if (is_inventory) {
+				if (!st->me || e->location != st->me)
+					continue;
+			} else if (container_target) {
+				if (e->location != container_target)
+					continue;
+			} else {
+				if (st->me && e->location == st->me)
+					continue;
+			}
 			any = 1;
 
 			bud_node *row = bud_element("nd-item");
@@ -395,7 +403,9 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_set_attr(look, "data-action", "look");
 			bud_set_attr(look, "data-cmd", look_cmd);
 			bud_set_attr(look, "class", "nd-pad btn text-xs");
-			bud_set_attr(look, "title", "Look");
+			char look_title[64];
+			snprintf(look_title, sizeof(look_title), "Look %s", e->name);
+			bud_set_attr(look, "title", look_title);
 			bud_append(look, bud_text("👁"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
@@ -642,7 +652,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 		bud_node *root = bud_tpl(
-			"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+			"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
 			"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 			layout);
 
@@ -710,7 +720,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 	bud_node *root = bud_tpl(
-		"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+		"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
 		"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 		layout);
 

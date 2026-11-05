@@ -245,12 +245,10 @@ int
 e_ground(unsigned room, enum exit e)
 {
 	pos_t pos;
-
-	if (e & (E_UP | E_DOWN))
-		return 0;
+	(void) e;
 
 	eng_map_where(pos, room);
-	return pos[2] == 0;
+	return 1;
 }
 
 enum exit
@@ -462,11 +460,6 @@ st_room_at(unsigned player_ref, pos_t pos)
 	exits_infer(there_ref, rthere);
 
 	fprintf(stderr, "st_room_at %u\n", player_ref);
-
-	if (pos[2] != 0) {
-		corm_put(obj_hd, &there_ref, &there);
-		return there_ref;
-	}
 
 	rthere->floor = bio.bio_idx;
 	corm_put(obj_hd, &there_ref, &there);

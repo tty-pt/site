@@ -29,7 +29,7 @@ CFLAGS-PROFILE-dev = -g -O0 $(PICFLAGS)
 CFLAGS-PROFILE- = -g -O0 $(PICFLAGS)
 CFLAGS += ${CFLAGS-PROFILE-${PROFILE}}
 
-CFLAGS += -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/libcorm/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/libbud/include -I$(REPO_ROOT)/external/libhyle/include -I$(REPO_ROOT)/external/libhyle-source/include
+CFLAGS += -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-auth/include -I$(REPO_ROOT)/external/libcorm/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/external/libbud/include -I$(REPO_ROOT)/external/libhyle/include -I$(REPO_ROOT)/external/libhyle-source/include
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
@@ -37,6 +37,10 @@ LDFLAGS += -shared
 LDLIBS += -laxil -lcorm
 LDLIBS += $(EXTRA_LDLIBS)
 LDLIBS += $(EXTRA_LDLIBS-$(uname))
+
+ifneq ($(filter auth gig grp index nd poem software song,$(MOD_NAME)),)
+MODULE_EXTRA_SRC ?= $(REPO_ROOT)/mods/common/ux/site_ui.c
+endif
 
 .DEFAULT_GOAL := all
 
@@ -57,8 +61,8 @@ WASM_LDFLAGS := -mexec-model=reactor \
                 -Wl,--export=_initialize \
                 -Wl,--allow-undefined \
                 -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
-WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c
-WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
+WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/mods/common/ux/site_ui.c
+WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
 
 # BSD/GNU portable: keep `all` as first target
 all: dirs $(TARGET) $(WASM_TARGETS)
@@ -103,7 +107,7 @@ $(TARGET): $(SRC) $(MAKEFILE_DEPS)
 	@rm -f $@.d; for src in $(SRC); do \
 		$(CC) $(CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
 	done
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(MODULE_EXTRA_SRC) $(LDLIBS)
 
 MOD_DEPS != for f in $(TARGET) $(WASM_TARGETS); do [ -n "$$f" ] && [ -f "$$f.d" ] && printf '%s.d ' "$$f"; done; printf '/dev/null'
 -include $(MOD_DEPS)

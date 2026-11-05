@@ -13,3 +13,5 @@ stele.stele_host_log
 stele.stele_host_fetch
 stele.stele_host_set_location
 stele.stele_host_invalidate
+stele.stl_host_event_emit
+stele.stele_host_event_emit

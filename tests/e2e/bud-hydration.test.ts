@@ -32,7 +32,7 @@ Deno.test("bud hydration: verify SSR #main element with chord data", async () =>
   }
 });
 
-Deno.test("bud hydration: verify WASM module loads (bud-client.js)", async () => {
+Deno.test("bud hydration: verify client WASM runtime loads", async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
@@ -41,7 +41,7 @@ Deno.test("bud hydration: verify WASM module loads (bud-client.js)", async () =>
 
     const wasmRequests: string[] = [];
     page.on("request", (req) => {
-      if (req.url().includes("bud-client")) {
+      if (req.url().includes("stele-client") || req.url().includes("bud-client")) {
         wasmRequests.push(req.url());
       }
     });
@@ -51,7 +51,7 @@ Deno.test("bud hydration: verify WASM module loads (bud-client.js)", async () =>
     await page.waitForTimeout(3000);
 
     if (wasmRequests.length === 0) {
-      throw new Error("bud-client.js WASM module was not requested");
+      throw new Error("Client WASM runtime module was not requested");
     }
   } finally {
     await browser.close();

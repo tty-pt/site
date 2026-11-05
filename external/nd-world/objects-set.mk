@@ -1,5 +1,5 @@
-CFLAGS-libnd-world-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-map-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-noise-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-spacetime-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-teleport-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
+CFLAGS-libnd-world-o := -fPIC -I../axil-nd/include -I../nd-region/include -I../nd-obj/include -I../nd-speech/include -I../nd-view/include -I../nd-session/include -I../nd-bus/include -I../nd-mcp/include -I../nd-stone/include -I../nd-plant/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-map-o := -fPIC -I../axil-nd/include -I../nd-region/include -I../nd-obj/include -I../nd-speech/include -I../nd-view/include -I../nd-session/include -I../nd-bus/include -I../nd-mcp/include -I../nd-stone/include -I../nd-plant/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-noise-o := -fPIC -I../axil-nd/include -I../nd-region/include -I../nd-obj/include -I../nd-speech/include -I../nd-view/include -I../nd-session/include -I../nd-bus/include -I../nd-mcp/include -I../nd-stone/include -I../nd-plant/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-spacetime-o := -fPIC -I../axil-nd/include -I../nd-region/include -I../nd-obj/include -I../nd-speech/include -I../nd-view/include -I../nd-session/include -I../nd-bus/include -I../nd-mcp/include -I../nd-stone/include -I../nd-plant/include -I../libnoise/include -D_GNU_SOURCE
+CFLAGS-teleport-o := -fPIC -I../axil-nd/include -I../nd-region/include -I../nd-obj/include -I../nd-speech/include -I../nd-view/include -I../nd-session/include -I../nd-bus/include -I../nd-mcp/include -I../nd-stone/include -I../nd-plant/include -I../libnoise/include -D_GNU_SOURCE

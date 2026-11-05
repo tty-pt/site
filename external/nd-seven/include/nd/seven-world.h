@@ -68,7 +68,37 @@ typedef struct {
 /* --- ground ------------------------------------------------------------- */
 
 /* There is deliberately no path/road ground: only terrain. */
-enum { NDW_G_GRASS = 0, NDW_G_SAND, NDW_G_SNOW, NDW_G_TUNDRA, NDW_G_WATER, NDW_G_ASH };
+enum {
+	NDW_G_GRASS = 0,
+	NDW_G_SAND,
+	NDW_G_SNOW,
+	NDW_G_TUNDRA,
+	NDW_G_WATER,
+	NDW_G_SHALLOW_WATER,
+	NDW_G_ASH
+};
+
+static inline int
+ndw_is_water_ground(int kind)
+{
+	return kind == NDW_G_WATER || kind == NDW_G_SHALLOW_WATER;
+}
+
+enum {
+	NDW_WATER_DEPTH_SHORE = 0,    /* Shoreline / intertidal wash (depth <= 3) */
+	NDW_WATER_DEPTH_SHALLOW = 1,  /* Lagoon / coral reef shallows (depth 4..10) */
+	NDW_WATER_DEPTH_MID = 2,      /* Coastal shelf / mid azure (depth 11..24) */
+	NDW_WATER_DEPTH_DEEP = 3,     /* Pelagic abyss / deep sapphire (depth > 24) */
+};
+
+static inline int
+ndw_water_depth_tier(int depth)
+{
+	if (depth <= 3) return NDW_WATER_DEPTH_SHORE;
+	if (depth <= 10) return NDW_WATER_DEPTH_SHALLOW;
+	if (depth <= 24) return NDW_WATER_DEPTH_MID;
+	return NDW_WATER_DEPTH_DEEP;
+}
 
 typedef struct {
 	uint8_t kind;       /* NDW_G_* */
@@ -488,7 +518,29 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
  * tile are fixed point: NDW_SUB steps per unit ("q").
  */
 #define NDW_SUB            4      /* q steps per unit */
-#define NDW_BLEND_AMP      8      /* max border displacement per axis, units */
+
+/* One noise octave descriptor: lattice shift and displacement amplitude in world units. */
+typedef struct {
+	uint8_t shift;   /* lattice spacing: (1 << shift) / NDW_SUB world units */
+	uint8_t amp;     /* displacement amplitude in world units */
+} ndw_octave_t;
+
+/*
+ * Declarative octave table for terrain border contour.
+ * User-tunable: change any .shift or .amp to reshape features with zero code changes.
+ * Large octaves (shift 10 = 256u, shift 9 = 128u, shift 8 = 64u) govern the half-to-3/4
+ * room macro features; small octaves govern edge crinkle.
+ */
+static const ndw_octave_t NDW_OCTAVES[] = {
+	{ .shift = 10, .amp = 24 },  /* 256 units (~2 rooms): macro continental sweep */
+	{ .shift =  9, .amp = 20 },  /* 128 units (~1 room):  room-scale bays and capes */
+	{ .shift =  8, .amp = 14 },  /*  64 units (half room): secondary peninsulas */
+	{ .shift =  7, .amp =  6 },  /*  32 units (quarter room): coves */
+	{ .shift =  5, .amp =  2 },  /*   8 units: fine edge roughness */
+};
+#define NDW_OCTAVE_COUNT   (sizeof(NDW_OCTAVES) / sizeof(NDW_OCTAVES[0]))
+#define NDW_WARP_CONTRAST  256  /* 2.0x contrast multiplier to expand smoothstep variance */
+#define NDW_BLEND_AMP      66   /* sum of octave amplitudes: max total warp in units */
 #define NDW_CORNER_RX      80     /* corner horizontal rounding radius, units (= hx) */
 #define NDW_CORNER_RY      64     /* corner vertical rounding radius, units (= hy) */
 #define NDW_CORNER_R       NDW_CORNER_RX
@@ -518,8 +570,8 @@ ndw_is_water(const uint8_t grp[9], unsigned no_blend, int k)
 
 /* Warp of the nodes of one tile, in q (1/NDW_SUB unit), x and y. */
 typedef struct {
-	int8_t dx[NDW_WARP_NY][NDW_WARP_NX];
-	int8_t dy[NDW_WARP_NY][NDW_WARP_NX];
+	int16_t dx[NDW_WARP_NY][NDW_WARP_NX];
+	int16_t dy[NDW_WARP_NY][NDW_WARP_NX];
 	int32_t bx, by;      /* world unit of the tile's top-left corner */
 	uint32_t seed;       /* (z, world) seed of the edge detail */
 } ndw_warp_grid_t;
@@ -551,32 +603,33 @@ ndw_vnoise(uint32_t seed, int x, int y, int shift)
 }
 
 /*
- * Warp along one axis (salt picks x or y) at the world unit point (wx, wy), in q.
- * Four octaves, 64 / 32 / 16 / 8 units; each octave sheared a little differently
- * so the lattice never shows.
+ * Generic multi-octave warp along one axis (salt picks x or y) at world unit point (wx, wy).
+ * Iterates declaratively over NDW_OCTAVES[] with programmatic decorrelation and contrast gain.
  */
 static inline int
 ndw_warp_axis(const int16_t pos[4], int wx, int wy, uint32_t salt)
 {
-	uint32_t seed = ndw_mix(0x424F5244u ^ salt
-	                        ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
-	                        ^ ((uint32_t)(uint16_t)pos[3] * 0x85EBCA6Bu));
+	uint32_t base_seed = ndw_mix(0x424F5244u ^ salt
+	                            ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
+	                            ^ ((uint32_t)(uint16_t)pos[3] * 0x85EBCA6Bu));
 	int x = wx * NDW_SUB, y = wy * NDW_SUB;
-	int n0 = ndw_vnoise(seed, x + y / 4, y - x / 4, 8);
-	int n1 = ndw_vnoise(seed ^ 0x68E31DA4u, x - y / 4, y + x / 4, 7);
-	int n2 = ndw_vnoise(seed ^ 0xB5297A4Du, x + y / 5, y - x / 4, 6);
-	int n3 = ndw_vnoise(seed ^ 0x1B56C4E9u, x - y / 3, y + x / 5, 5);
-	int n4 = ndw_vnoise(seed ^ 0x9C4E2B18u, x + y / 2, y - x / 3, 4);
-	int n5 = ndw_vnoise(seed ^ 0x3F8A65D1u, x - y / 2, y + x / 2, 3);
-	int n = (n0 * 4 + n1 * 3 + n2 * 5 + n3 * 4 + n4 * 2 + n5) / 19;
-	int v = (n - 128) * 3 / 2;                   /* reach full amplitude */
+	int total_disp = 0;
 
-	if (v < -128) v = -128;
-	if (v > 127) v = 127;
-	return v * (NDW_BLEND_AMP * NDW_SUB) / 128;
+	for (size_t i = 0; i < NDW_OCTAVE_COUNT; i++) {
+		uint32_t octave_seed = ndw_mix(base_seed ^ (uint32_t)(i * 0x9E3779B1u + 1));
+		int sx = (int)(i + 4);
+		int sy = (int)(i + 3);
+		int n = ndw_vnoise(octave_seed, x + y / sx, y - x / sy, NDW_OCTAVES[i].shift);
+		int v = ((n - 128) * NDW_WARP_CONTRAST) / 128;
+		if (v < -128) v = -128;
+		if (v > 127)  v = 127;
+		total_disp += v * NDW_OCTAVES[i].amp;
+	}
+
+	return (total_disp / 128) * NDW_SUB;
 }
 
-/* Fill the nodes the border can read (a strip along each edge, a square at each corner); others are 0. */
+/* Fill all nodes across the tile for full macro displacement coverage. */
 static inline void
 ndw_warp_grid_fill(ndw_warp_grid_t *g, const int16_t pos[4])
 {
@@ -589,20 +642,12 @@ ndw_warp_grid_fill(ndw_warp_grid_t *g, const int16_t pos[4])
 	g->seed = ndw_mix(0x45444745u ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
 	                  ^ ((uint32_t)(uint16_t)pos[3] * 0x85EBCA6Bu));
 	for (int ny = 0; ny < NDW_WARP_NY; ny++) {
-		int ey = ny < NDW_WARP_EDGE || ny >= NDW_WARP_NY - NDW_WARP_EDGE;
-		int cy = ny < NDW_WARP_CORNER || ny >= NDW_WARP_NY - NDW_WARP_CORNER;
 		int wy = by + ny * NDW_WARP_STEP;
 
 		for (int nx = 0; nx < NDW_WARP_NX; nx++) {
-			int ex = nx < NDW_WARP_EDGE || nx >= NDW_WARP_NX - NDW_WARP_EDGE;
-			int cx = nx < NDW_WARP_CORNER || nx >= NDW_WARP_NX - NDW_WARP_CORNER;
-			int wx;
-
-			if (!(ex || ey || (cx && cy)))
-				continue;
-			wx = bx + nx * NDW_WARP_STEP;
-			g->dx[ny][nx] = (int8_t)ndw_warp_axis(pos, wx, wy, 0x1u);
-			g->dy[ny][nx] = (int8_t)ndw_warp_axis(pos, wx, wy, 0x2u);
+			int wx = bx + nx * NDW_WARP_STEP;
+			g->dx[ny][nx] = (int16_t)ndw_warp_axis(pos, wx, wy, 0x1u);
+			g->dy[ny][nx] = (int16_t)ndw_warp_axis(pos, wx, wy, 0x2u);
 		}
 	}
 }
@@ -826,7 +871,16 @@ ndw_ground_weights(const ndw_warp_grid_t *g, int qx, int qy, const uint8_t grp[9
 static inline int
 ndw_ground_owner(const int16_t pos[4], int lx, int ly, unsigned no_blend, int *oi, int *oj)
 {
-	ndw_warp_grid_t g;
+	static __thread int16_t s_cached_pos[4];
+	static __thread ndw_warp_grid_t s_cached_grid;
+	static __thread int s_cached_valid;
+
+	if (!s_cached_valid || memcmp(s_cached_pos, pos, sizeof(s_cached_pos)) != 0) {
+		ndw_warp_grid_fill(&s_cached_grid, pos);
+		memcpy(s_cached_pos, pos, sizeof(s_cached_pos));
+		s_cached_valid = 1;
+	}
+
 	uint16_t w[9];
 	int max_k = 4, max_w, any;
 	uint8_t grp[9];
@@ -850,8 +904,7 @@ ndw_ground_owner(const int16_t pos[4], int lx, int ly, unsigned no_blend, int *o
 	if (lx < NDW_BLEND_BAND && ly < NDW_BLEND_BAND) grp[0] = 5;
 	if (lx < NDW_BLEND_BAND && ly >= NDW_TILE_H - NDW_BLEND_BAND) grp[6] = 7;
 
-	ndw_warp_grid_fill(&g, pos);
-	any = ndw_ground_weights(&g, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp, no_blend, w);
+	any = ndw_ground_weights(&s_cached_grid, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp, no_blend, w);
 	max_w = w[4];
 	for (int k = 0; k < 9; k++) {
 		if (w[k] > max_w) {

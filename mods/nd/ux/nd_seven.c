@@ -132,6 +132,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		return;
 	atlas_load();
 	nd_seven_sync_origin(st);
+	nd_seven_ground_frame_begin();
 
 	for (int i = 0; i < w * h; i++)
 		fb[i] = 0xFF08080C;
@@ -255,4 +256,5 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			draw_thinking_balloon(fb, w, h, hx, hy, act);
 		}
 	}
+	nd_seven_ground_frame_end(st ? &st->map_data : NULL);
 }

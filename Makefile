@@ -6,10 +6,10 @@ WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
 WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
 	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
-	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_unmount \
+	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_mount_bin -Wl,--export=stl_kernel_unmount \
 	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_tick \
 	-Wl,--export=stl_kernel_version -Wl,--export=stl_kernel_register_module \
-	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_unmount \
+	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_mount_bin -Wl,--export=stele_kernel_unmount \
 	-Wl,--export=stele_kernel_update -Wl,--export=stele_kernel_action -Wl,--export=stele_kernel_tick \
 	-Wl,--export=stele_kernel_version -Wl,--export=stele_kernel_register_module \
 	-Wl,--export=wasm_fetch_callback \
@@ -28,28 +28,65 @@ clients:
 
 site-wasm: htdocs/site.wasm
 
-htdocs/site.wasm: external/libstele/src/stele_wasm_kernel.c external/libbud/src/libbud.c mods/common/site_wasm_app.c external/libxylem/src/libxylem-wasm.c mods/common/ux/site_modules.c mods/common/ux/site_chrome.c mods/site_chrome/ux/chrome.c mods/song/ux/detail.c mods/gig/ux/detail.c mods/index/ux/list_fe.c mods/chat/ux/chat_fe.c mods/chat/ux/chat_ui.c external/libtransp/src/music.c external/libhyle-bud/src/libhyle-bud.c external/libhyle-bud/src/filter.c external/libhyle-bud/src/table.c external/libhyle-bud/src/picker.c external/libhyle-bud/src/form.c external/libhyle/src/url.c
-	@rm -rf /tmp/site_wasm_build && mkdir -p htdocs /tmp/site_wasm_build
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libstele/src/stele_wasm_kernel.c -o /tmp/site_wasm_build/kernel.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c external/libbud/src/libbud.c -o /tmp/site_wasm_build/bud.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -O2 -c mods/common/site_wasm_app.c -o /tmp/site_wasm_build/site_wasm_app.o
-	@$(WASI_CC) $(WASM_CFLAGS) -Iexternal/libxylem/include -O2 -c external/libxylem/src/libxylem-wasm.c -o /tmp/site_wasm_build/xylem.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_modules.c -o /tmp/site_wasm_build/modules.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/common/ux/site_chrome.c -o /tmp/site_wasm_build/site_chrome.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/site_chrome/ux/chrome.c -o /tmp/site_wasm_build/chrome.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Imods/common -Imods/common/ux -Imods/song/include -O2 -c mods/song/ux/detail.c -o /tmp/site_wasm_build/song.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Iexternal/axil-hyle/include -Imods/common -Imods/common/ux -Imods/gig/include -O2 -c mods/gig/ux/detail.c -o /tmp/site_wasm_build/gig.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -Imods/common -Imods/common/ux -Imods/index/include -O2 -c mods/index/ux/list_fe.c -o /tmp/site_wasm_build/list.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libxylem/include -Iexternal/libtransp/include -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -Iexternal/libcorm/include -Iexternal/axil/include -I/usr/include/json-c -Imods/common -Imods/common/ux -O2 -c mods/chat/ux/chat_fe.c -o /tmp/site_wasm_build/chat.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Imods/common/ux -O2 -c mods/chat/ux/chat_ui.c -o /tmp/site_wasm_build/chat_ui.o
-	@$(WASI_CC) $(WASM_CFLAGS) -Iexternal/libtransp/include -O2 -c external/libtransp/src/music.c -o /tmp/site_wasm_build/music.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/libhyle-bud.c -o /tmp/site_wasm_build/hyle_bud.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/filter.c -o /tmp/site_wasm_build/filter.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/table.c -o /tmp/site_wasm_build/table.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/picker.c -o /tmp/site_wasm_build/picker.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle-bud/include -Iexternal/libhyle/include -Iexternal/libhyle-source/include -O2 -c external/libhyle-bud/src/form.c -o /tmp/site_wasm_build/form.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_COMMON_CFLAGS) -Iexternal/libhyle/include -O2 -c external/libhyle/src/url.c -o /tmp/site_wasm_build/url.o
-	@$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ /tmp/site_wasm_build/*.o
+SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
+                     -Iexternal/libxylem/include -Iexternal/libtransp/include \
+                     -Iexternal/libhyle-bud/include -Iexternal/libhyle/include \
+                     -Iexternal/libhyle-source/include -Iexternal/libcorm/include \
+                     -Iexternal/axil/include -Iexternal/axil-hyle/include \
+                     -I/usr/include/json-c -Imods/common -Imods/common/ux \
+                     -Imods/song/include -Imods/gig/include -Imods/index/include -Imods/chat/include
+
+SITE_WASM_OBJS = kernel.o stele_event.o bud.o site_wasm_app.o xylem.o \
+                 modules.o site_chrome.o chrome.o song.o gig.o list.o \
+                 chat.o chat_ui.o music.o hyle_bud.o filter.o table.o \
+                 picker.o form.o hyle_bud_cache.o url.o
+
+/tmp/site_wasm_build/kernel.o: external/libstele/src/stele_wasm_kernel.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/stele_event.o: external/libstele/src/stele_event.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/bud.o: external/libbud/src/libbud.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/site_wasm_app.o: mods/common/site_wasm_app.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/xylem.o: external/libxylem/src/libxylem-wasm.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/modules.o: mods/common/ux/site_modules.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/site_chrome.o: mods/common/ux/site_chrome.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/chrome.o: mods/site_chrome/ux/chrome.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/song.o: mods/song/ux/detail.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/gig.o: mods/gig/ux/detail.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/list.o: mods/index/ux/list_fe.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/chat.o: mods/chat/ux/chat_fe.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/chat_ui.o: mods/chat/ux/chat_ui.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/music.o: external/libtransp/src/music.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/filter.o: external/libhyle-bud/src/filter.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/table.o: external/libhyle-bud/src/table.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/picker.o: external/libhyle-bud/src/picker.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/form.o: external/libhyle-bud/src/form.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+/tmp/site_wasm_build/url.o: external/libhyle/src/url.c
+	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+
+htdocs/site.wasm: $(addprefix /tmp/site_wasm_build/,$(SITE_WASM_OBJS))
+	@mkdir -p htdocs
+	$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
 	@sh external/mk/scripts/wasm-audit.sh $@
 
 # Sync gitignored htdocs deploy assets. hyle.css is copied from external/libhyle/assets/hyle.css;
@@ -75,6 +112,7 @@ assets-sync:
 	@ln -sfn ../../external/libbud/npm node_modules/@tty-pt/bud
 	@ln -sfn ../../external/libxylem/npm node_modules/@tty-pt/xylem
 	@ln -sfn ../../external/libhyle-bud/npm node_modules/@tty-pt/hyle-bud
+	@ln -sfn ../../external/libhyle-source/npm node_modules/@tty-pt/hyle-source
 	@ln -sfn ../../external/liblamina/npm node_modules/@tty-pt/lamina
 	@ln -sfn ../../external/libtransp/npm node_modules/@tty-pt/transp
 	@if [ -f external/libhyle/assets/hyle.css ]; then \
@@ -93,6 +131,14 @@ assets-sync:
 	fi
 	@if [ -f external/axil-tty/node_modules/@xterm/xterm/css/xterm.css ]; then \
 		mkdir -p htdocs/vendor && cp external/axil-tty/node_modules/@xterm/xterm/css/xterm.css htdocs/vendor/xterm.css; \
+	fi
+	@if [ -f external/libbud/npm/dist/bud-hydrate.js ]; then \
+		cp external/libbud/npm/dist/bud-hydrate.js htdocs/bud-hydrate.js; \
+	elif [ -f external/libbud/htdocs/bud-hydrate.js ]; then \
+		cp external/libbud/htdocs/bud-hydrate.js htdocs/bud-hydrate.js; \
+	fi
+	@if [ -f external/libhyle-bud/npm/dist/hyle-fragments.js ]; then \
+		cp external/libhyle-bud/npm/dist/hyle-fragments.js htdocs/hyle-fragments.js; \
 	fi
 	@if [ -f external/liblamina/htdocs/lamina-bridge.js ]; then \
 		cp external/liblamina/htdocs/lamina-bridge.js htdocs/lamina-bridge.js; \
@@ -211,7 +257,7 @@ install-libs:
 NPM_PACKAGES = external/libstele external/libcorm external/libjoint external/libislet \
                external/libhyle external/liblemma external/libsepal external/libtransp \
                external/libbud external/libxylem external/liblamina external/libhyle-bud \
-               mods/common
+               external/libhyle-source external/libhyle-react external/libnoise external/axil-auren mods/common
 
 npm-build-all:
 	@for p in $(NPM_PACKAGES); do \
@@ -228,6 +274,14 @@ npm-test-all: npm-build-all
 	@node --test tests/unit/run-wasm-single-instantiation.mjs || exit 1
 	@echo "=== Testing Unified site.wasm Kernel Multi-Slot Invariant ==="
 	@node --test tests/unit/test_site_wasm_kernel.mjs || exit 1
+	@echo "=== Testing In-WASM Event Bus and Cross-Slot Bridge Invariants ==="
+	@node --test tests/unit/test_wasm_event_bus.mjs || exit 1
+	@echo "=== Testing Optimistic Mutations & Rollback Invariants ==="
+	@node --test tests/unit/test_wasm_optimistic.mjs || exit 1
+	@echo "=== Testing On-Demand Lazy WASM Module Streaming Invariant ==="
+	@node --test tests/unit/test_wasm_lazy.mjs || exit 1
+	@echo "=== Testing Bud Binary State Hand-Off Invariant ==="
+	@node --test tests/unit/test_bud_binary_state.mjs || exit 1
 	@if [ -d /home/quirinpa/duna ]; then \
 		echo "=== Testing consumer: ~/duna ==="; \
 		npm --prefix /home/quirinpa/duna run test:unit || exit 1; \
@@ -313,6 +367,7 @@ standalone-unit-tests:
 	@sh tests/unit/run-externals-abstractions.sh
 	@sh tests/unit/run-ordered-sync.sh
 	@sh tests/unit/run-source-dataset-options.sh
+	@sh tests/unit/run-hyle-source-cache.sh
 	@sh tests/unit/run-viewer-prefs.sh
 	@sh tests/unit/run-slugify.sh
 	@sh tests/unit/run-i18n.sh
@@ -331,6 +386,7 @@ standalone-unit-tests:
 	@sh tests/unit/run-test-lamina-bridge.sh
 	@sh tests/unit/run-test-axil-ws-multiplex.sh
 	@sh tests/unit/run-xylem-wasm.sh
+	@sh tests/unit/run-test-hyle-table-bin.sh
 	@sh tests/unit/run-nd-ui-slot.sh
 	@sh tests/unit/run-markdown-test.sh
 
@@ -340,6 +396,8 @@ pages-test: all
 		sh tests/pages/10-pages-render.sh && \
 		sh tests/pages/20-song-search.sh && \
 		sh tests/pages/25-list-metadata.sh && \
+		sh tests/pages/26-binary-table-streaming.sh && \
+		sh tests/pages/27-column-sorting.sh && \
 		sh tests/pages/30-song-multiselect.sh && \
 		sh tests/pages/40-traversal.sh && \
 		sh tests/pages/50-pickers.sh'

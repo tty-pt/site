@@ -562,6 +562,12 @@ class BudHostBase {
 				throw new Error('bud: missing patch node id');
 			}
 			parent = this._parentFromOp(op) || this._currentParent || this.root;
+			while (parent && parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+				parent = parent.parentNode || this.root;
+			}
+			if (!parent || (parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) {
+				parent = this.root;
+			}
 			node = current;
 			if (!node || node.nodeType !== Node.ELEMENT_NODE || node.tagName.toLowerCase() !== tag) {
 				node = getDocumentForNode(parent).createElement(tag);
@@ -572,7 +578,7 @@ class BudHostBase {
 				if (node.getAttribute('data-bud-id') !== String(id)) {
 					node.setAttribute('data-bud-id', String(id));
 				}
-				if (node.parentNode !== parent) {
+				if (node.parentNode !== parent && node !== parent && !node.contains(parent)) {
 					parent.appendChild(node);
 				}
 				this.setNode(id, node);
@@ -588,8 +594,22 @@ class BudHostBase {
 			id = parseIntOrNull(op.a);
 			node = this.getNode(id);
 			if (node && node.nodeType === Node.ELEMENT_NODE) {
-				if (node.getAttribute(op.b) !== op.c) {
-					node.setAttribute(op.b, op.c || '');
+				const attrName = op.b;
+				const attrVal = op.c || '';
+				const isBoolProp = (attrName in node && typeof node[attrName] === 'boolean') ||
+				                   ['disabled', 'checked', 'selected', 'readonly', 'hidden', 'required', 'open'].includes(attrName);
+				if (isBoolProp) {
+					if (!attrVal || attrVal === 'false') {
+						node.removeAttribute(attrName);
+						try { node[attrName] = false; } catch (_) {}
+					} else {
+						node.setAttribute(attrName, attrVal);
+						try { node[attrName] = true; } catch (_) {}
+					}
+				} else {
+					if (node.getAttribute(attrName) !== attrVal) {
+						node.setAttribute(attrName, attrVal);
+					}
 				}
 			}
 			return true;
@@ -616,26 +636,38 @@ class BudHostBase {
 				this.bind(id, op.b, handler, bubbles);
 			}
 			return true;
-			case 'patch-text':
-				id = parseIntOrNull(op.b);
-				if (id === null) {
-					throw new Error('bud: missing patch text id');
-				}
-				parent = this._parentFromOp(op) || this._currentParent || this.root;
-				node = this.getNode(id);
-				if (!node || node.nodeType !== Node.TEXT_NODE) {
-					this.createWrappedText(id, op.a || '', parent);
-				} else if (node.textContent !== op.a) {
-					node.textContent = op.a || '';
-				}
+		case 'patch-text':
+			id = parseIntOrNull(op.b);
+			if (id === null) {
+				throw new Error('bud: missing patch text id');
+			}
+			parent = this._parentFromOp(op) || this._currentParent || this.root;
+			while (parent && parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+				parent = parent.parentNode || this.root;
+			}
+			if (!parent || (parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) {
+				parent = this.root;
+			}
+			node = this.getNode(id);
+			if (!node || node.nodeType !== Node.TEXT_NODE) {
+				this.createWrappedText(id, op.a || '', parent);
+			} else if (node.textContent !== op.a) {
+				node.textContent = op.a || '';
+			}
 			return true;
-	case 'patch-raw':
-		id = parseIntOrNull(op.b);
-		if (id === null) {
-			return true;
-		}
-		parent = this._parentFromOp(op) || this._currentParent || this.root;
-		if (parent && parent.nodeType === Node.ELEMENT_NODE) {
+		case 'patch-raw':
+			id = parseIntOrNull(op.b);
+			if (id === null) {
+				return true;
+			}
+			parent = this._parentFromOp(op) || this._currentParent || this.root;
+			while (parent && parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+				parent = parent.parentNode || this.root;
+			}
+			if (!parent || (parent.nodeType !== Node.ELEMENT_NODE && parent.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) {
+				parent = this.root;
+			}
+			if (parent && parent.nodeType === Node.ELEMENT_NODE) {
 			const existing = this.getNode(id);
 			const doc = getDocumentForNode(parent);
 
@@ -837,6 +869,8 @@ function readWasmString(memory, ptr, len) {
 
 export class BudWasmBridge {
 	constructor(root, wasm = null, listenerResolver = null) {
+		this.root = root;
+		this.namespace = 'bud';
 		this.wasm = wasm || null;
 		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
 		this.listenerResolver = listenerResolver;
@@ -844,6 +878,30 @@ export class BudWasmBridge {
 		this._debugged = false;
 		this._ws = null;
 		this._term = null;
+	}
+
+	mount(instance, state) {
+		this.wasm = instance;
+		this.memory = instance.exports?.memory || instance.memory || this.memory;
+		if (this.wasm) {
+			this.rescan();
+		}
+		return this;
+	}
+
+	update(slot) {
+		this.flush();
+		return this;
+	}
+
+	unmount(slot) {
+		return this;
+	}
+
+	emitPatch(op, a, b, c) {
+		if (this.host && typeof this.host.replay === 'function') {
+			this.host.replay([{ op, a, b, c }]);
+		}
 	}
 
 	setWasm(wasm) {
@@ -999,21 +1057,20 @@ export class BudWasmBridge {
 			bud_host_fetch(url_ptr, url_len, request_id) {
 				const url = readWasmString(bridge.memory, url_ptr, url_len);
 				fetch(url)
-					.then(res => {
+					.then(async (res) => {
 						if (!res.ok) return;
-						return res.text();
-					})
-					.then(text => {
 						const malloc = getWasmExport(bridge.wasm, ['malloc']);
-						if (!malloc) return;
-						const bytes = new TextEncoder().encode(text + '\0');
-						const data_ptr = malloc(bytes.length);
+						const fn = getWasmExport(bridge.wasm, ['wasm_fetch_callback']);
+						if (!malloc || !fn) return;
+
+						const ab = await res.arrayBuffer();
+						const bytes = new Uint8Array(ab);
+						const data_ptr = malloc(bytes.length + 1);
 						if (!data_ptr) return;
 						new Uint8Array(bridge.memory.buffer, data_ptr, bytes.length).set(bytes);
-						const fn = getWasmExport(bridge.wasm, ['wasm_fetch_callback']);
-						if (fn) {
-							fn(request_id, data_ptr, bytes.length - 1);
-						}
+						new Uint8Array(bridge.memory.buffer, data_ptr + bytes.length, 1)[0] = 0;
+
+						fn(request_id, data_ptr, bytes.length);
 						const freeFn = getWasmExport(bridge.wasm, ['free']);
 						if (freeFn) freeFn(data_ptr);
 					})
@@ -1569,6 +1626,20 @@ export function applyBudPatch(root, patchOps, listenerResolver = null) {
 
 export function createBudWasmBridge(root, wasm = null, listenerResolver = null) {
 	return new BudWasmBridge(root, wasm, listenerResolver);
+}
+
+export function createSlotBridge(root, wasm = null, listenerResolver = null) {
+	return createBudWasmBridge(root, wasm, listenerResolver);
+}
+
+if (typeof window !== 'undefined') {
+	const factory = (root) => createBudWasmBridge(root);
+	window.__wasm_slot_bridge_factory = factory;
+	if (typeof window.registerSlotBridge === 'function') {
+		window.registerSlotBridge(factory);
+	} else if (window.SteleWasmClient && typeof window.SteleWasmClient.registerBridgeFactory === 'function') {
+		window.SteleWasmClient.registerBridgeFactory(factory);
+	}
 }
 
 export { buildHydrationMap, parseListenerList };

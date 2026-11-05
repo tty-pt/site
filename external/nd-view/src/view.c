@@ -442,6 +442,9 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 		t->bio_idx = n->bio_idx;
 	}
 
+	t->elevation = n->elevation;
+	t->water_level = n->water_level;
+
 	memcpy(&t->raw, &n->raw, sizeof(n->raw));
 }
 

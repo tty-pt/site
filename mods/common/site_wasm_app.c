@@ -92,6 +92,9 @@ void bud_patch_text(bud_node *node, const char *value)
 
 int bud_slot_mount(int slot, bud_node *(*render_fn)(void))
 {
+	bud_host_fetch_fn = (void (*)(const char *, size_t, int))stl_host_fetch;
+	bud_host_log_fn = (void (*)(const char *, size_t))stl_host_log;
+	bud_host_set_location_fn = (void (*)(const char *, size_t))stl_host_set_location;
 	if (slot < 0 || slot >= BUD_MAX_SLOTS || !render_fn)
 		return -1;
 	s_render_fns[slot] = render_fn;
@@ -148,6 +151,9 @@ void bud_app_set_state(void)
 
 ISO_EXPORT_AS(void, wasm_mount, bud_app_mount)
 {
+	bud_host_fetch_fn = (void (*)(const char *, size_t, int))stl_host_fetch;
+	bud_host_log_fn = (void (*)(const char *, size_t))stl_host_log;
+	bud_host_set_location_fn = (void (*)(const char *, size_t))stl_host_set_location;
 	if (&bud_app_render) {
 		bud_slot_mount(0, bud_app_render);
 	}
@@ -215,4 +221,21 @@ ISO_EXPORT(const char *, wasm_get_tree_text, void)
 	bud_sprint_tree(root, s_wasm_dbg_buf, sizeof(s_wasm_dbg_buf));
 	return s_wasm_dbg_buf;
 }
+
+ISO_EXPORT(int, stl_optimistic_update, const char *dataset, const char *id, const char *patch_json)
+{
+	(void)dataset; (void)id; (void)patch_json;
+	bud_app_set_state();
+	return 0;
+}
+
+ISO_EXPORT(int, stl_optimistic_rollback, const char *dataset, const char *id)
+{
+	(void)dataset; (void)id;
+	bud_app_set_state();
+	return 0;
+}
+
+ISO_EXPORT_AS(int, stele_optimistic_update, stl_optimistic_update, const char *dataset, const char *id, const char *patch_json);
+ISO_EXPORT_AS(int, stele_optimistic_rollback, stl_optimistic_rollback, const char *dataset, const char *id);
 #endif

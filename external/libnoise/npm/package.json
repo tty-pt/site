@@ -1,0 +1,40 @@
+{
+  "name": "@tty-pt/noise",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Universal Node.js and Browser WebAssembly bindings for libnoise N-dimensional procedural noise",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "include",
+    "*.pc",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:native": "mkdir -p build/Release && gcc -O3 -fPIC -shared -I/usr/include/node -I../include native/noise_napi.c -L/usr/lib -lxxhash -o build/Release/noise_node.node 2>/dev/null || true",
+    "build:wasm": "make -C .. wasm",
+    "build": "npm run build:native && npm run build:wasm",
+    "test": "node --test tests/noise.test.mjs"
+  },
+  "peerDependencies": {
+    "@tty-pt/stele": ">=1.5.0"
+  },
+  "devDependencies": {
+    "@tty-pt/stele": "^1.5.2"
+  },
+  "keywords": [
+    "noise",
+    "procedural",
+    "perlin",
+    "simplex",
+    "fractal",
+    "terrain",
+    "wasm",
+    "webassembly",
+    "n-dimensional"
+  ],
+  "author": "Paulo Quirino <q@qnixsoft.com>",
+  "license": "CC-BY-NC-SA-4.0"
+}

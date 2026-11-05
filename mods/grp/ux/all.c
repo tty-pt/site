@@ -8,7 +8,7 @@
 
 #include "../../common/viewer_zoom.h"
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 #include "../../index/ux/list.c"
 

@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnoise
+Description: Standalone Generic N-Dimensional Procedural Noise Library
+Version: 1.0.0
+Libs: -L${libdir} -lnoise
+Cflags: -I${includedir}

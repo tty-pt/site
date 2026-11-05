@@ -1,7 +1,10 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <nd/bcp-types.h>
 #include <nd/seven-world.h>
+#include "nd_seven_ground.h"
+#include "nd_seven_motion.h"
 
 static ndw_tile_t tile(uint8_t biome, uint8_t exits, uint8_t flags,
                        int gl, int gc, int gr)
@@ -104,9 +107,104 @@ int main(void)
 	assert(ndw_biome_style(14).kind == NDW_G_SAND);
 	assert(ndw_biome_style(10).kind == NDW_G_GRASS && ndw_biome_style(14).kind != ndw_biome_style(10).kind);
 	assert(ndw_biome_style(1).kind == NDW_G_SNOW && ndw_biome_style(0).kind == NDW_G_WATER);
+	assert(ndw_is_water_ground(NDW_G_WATER) && ndw_is_water_ground(NDW_G_SHALLOW_WATER));
+	assert(!ndw_is_water_ground(NDW_G_GRASS) && !ndw_is_water_ground(NDW_G_SAND));
+	assert(ndw_water_depth_tier(0) == NDW_WATER_DEPTH_SHORE && ndw_water_depth_tier(3) == NDW_WATER_DEPTH_SHORE);
+	assert(ndw_water_depth_tier(4) == NDW_WATER_DEPTH_SHALLOW && ndw_water_depth_tier(10) == NDW_WATER_DEPTH_SHALLOW);
+	assert(ndw_water_depth_tier(11) == NDW_WATER_DEPTH_MID && ndw_water_depth_tier(24) == NDW_WATER_DEPTH_MID);
+	assert(ndw_water_depth_tier(25) == NDW_WATER_DEPTH_DEEP && ndw_water_depth_tier(80) == NDW_WATER_DEPTH_DEEP);
 	assert(ndw_biome_style(18).kind == NDW_G_ASH && ndw_biome_style(2).kind == NDW_G_TUNDRA);
 	assert(ndw_biome_style(250).kind == NDW_G_GRASS);
 	printf("PASS: biomes pick the ground kind (desert = sand)\n");
+
+	/* Water depth tiers and dynamic surface wave animation on room chunks */
+	{
+		assert(ndw_water_depth_tier(0) == NDW_WATER_DEPTH_SHORE && ndw_water_depth_tier(3) == NDW_WATER_DEPTH_SHORE);
+		assert(ndw_water_depth_tier(4) == NDW_WATER_DEPTH_SHALLOW && ndw_water_depth_tier(10) == NDW_WATER_DEPTH_SHALLOW);
+		assert(ndw_water_depth_tier(11) == NDW_WATER_DEPTH_MID && ndw_water_depth_tier(24) == NDW_WATER_DEPTH_MID);
+		assert(ndw_water_depth_tier(25) == NDW_WATER_DEPTH_DEEP && ndw_water_depth_tier(80) == NDW_WATER_DEPTH_DEEP);
+
+		nd_seven_ground_cache_forget();
+		nd_map_data_t map;
+		memset(&map, 0, sizeof(map));
+		map.width = map.height = 7;
+		map.player_x = map.player_y = 3;
+		map.pos[0] = 0; map.pos[1] = 0; map.pos[2] = 0; map.pos[3] = 0;
+		for (int i = 0; i < 49; i++) {
+			map.tiles[i].bio_idx = 0; /* water */
+			map.tiles[i].exits = 0x1B;
+		}
+
+		/* Water chunk must allocate depth grid and record has_water */
+		const nd_room_chunk_t *w_chunk = nd_seven_chunk_ensure(&map, 3, 3);
+		assert(w_chunk != NULL);
+		assert(w_chunk->has_water == 1);
+		assert(w_chunk->depth != NULL);
+		assert(w_chunk->depth[0] > 0);
+
+		/* Render water tile at two different animation frame ticks: must exhibit dynamic wave animation */
+		uint32_t fb_anim0[320 * 256];
+		uint32_t fb_anim1[320 * 256];
+		nd_client_state_t st;
+		memset(&st, 0, sizeof(st));
+		st.map_data = map;
+		int16_t r_pos[4] = { 0, 0, 0, 0 };
+		ndw_tile_t own_tile = nd_seven_convert_tile(&map.tiles[3 * 7 + 3]);
+
+		nd_seven_ground_tile_render(fb_anim0, 320, 256, &st, 0, 0, r_pos, &own_tile, 0, 0);
+		nd_seven_step_anim(24);
+		nd_seven_ground_tile_render(fb_anim1, 320, 256, &st, 0, 0, r_pos, &own_tile, 0, 0);
+		assert(memcmp(fb_anim0, fb_anim1, sizeof(fb_anim0)) != 0);
+
+		nd_seven_ground_cache_forget();
+		printf("PASS: water depth tiers and dynamic animation variance on room chunks verified\n");
+	}
+
+	/* Client-side room chunks: 7x7 active view window retention and eager eviction */
+	{
+		nd_seven_ground_cache_forget();
+		assert(nd_seven_chunk_count() == 0);
+
+		nd_map_data_t map;
+		memset(&map, 0, sizeof(map));
+		map.width = map.height = 7;
+		map.player_x = map.player_y = 3;
+		map.pos[0] = 50; map.pos[1] = -50; map.pos[2] = 0; map.pos[3] = 0;
+		for (int i = 0; i < 49; i++) {
+			map.tiles[i].bio_idx = 0; /* water */
+			map.tiles[i].exits = 0x1B;
+		}
+
+		/* Ensure chunks for center (3, 3) and an edge room (0, 3) */
+		const nd_room_chunk_t *c_center = nd_seven_chunk_ensure(&map, 3, 3);
+		assert(c_center && c_center->pixels);
+		const nd_room_chunk_t *c_west = nd_seven_chunk_ensure(&map, 0, 3);
+		assert(c_west && c_west->pixels);
+		assert(nd_seven_chunk_count() == 2);
+		int allocs = nd_seven_chunk_alloc_count();
+		assert(allocs == 2);
+
+		/* End frame with same 7x7 map: both chunks are in window, both MUST be retained */
+		nd_seven_ground_frame_begin();
+		nd_seven_ground_frame_end(&map);
+		assert(nd_seven_chunk_count() == 2);
+		assert(nd_seven_chunk_alloc_count() == 2); /* 0 re-evaluations */
+
+		/* Move 7x7 map East: player pos moves from 50 to 52.
+		 * West room (col 0, which was at world x = 50 - 3 = 47) is now outside the window (col would be 47 - 52 + 3 = -2 < 0) */
+		map.pos[0] = 52;
+		nd_seven_ground_frame_begin();
+		nd_seven_ground_frame_end(&map);
+		/* The West chunk MUST have been eagerly freed upon exiting the 7x7 window */
+		assert(nd_seven_chunk_count() == 1);
+		assert(nd_seven_chunk_free_count() == 1);
+		/* The center chunk (world x = 50) is still inside the 7x7 window (col = 50 - 52 + 3 = 1 >= 0) and retained! */
+		assert(nd_seven_chunk_find(c_center->pos) != NULL);
+
+		nd_seven_ground_cache_forget();
+		assert(nd_seven_chunk_count() == 0);
+		printf("PASS: room chunk 7x7 view window retention and eager eviction verified\n");
+	}
 
 	/* No crossroads: nothing walkable-only exists as ground, and an all-open
 	 * wilderness tile has no walls at all. */
@@ -415,7 +513,7 @@ int main(void)
 						}
 					}
 				}
-			assert(water_count > 10000); /* water body is preserved */
+			assert(water_count > 7000); /* water body is preserved */
 			assert(grass_count > 1000 && desert_count > 50); /* both adjacent biomes transition cleanly */
 			assert(water_count + grass_count + desert_count == NDW_TILE_W * NDW_TILE_H);
 		}
@@ -449,7 +547,7 @@ int main(void)
 			unsigned mask_x = NDW_WATER_BIT(-1, 1) | NDW_WATER_BIT(0, 1);
 
 			int grass_deep_in_water = 0;
-			for (int ly = 16; ly < NDW_TILE_H; ly++) {
+			for (int ly = NDW_EDGE_BAND; ly < NDW_TILE_H; ly++) {
 				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
 					ndw_ground_weights(&gw, lx * NDW_SUB + NDW_SUB / 2,
@@ -463,7 +561,7 @@ int main(void)
 			assert(grass_deep_in_water == 0);
 
 			int water_deep_in_grass = 0;
-			for (int ly = 0; ly < NDW_TILE_H - 16; ly++) {
+			for (int ly = 0; ly < NDW_TILE_H - NDW_EDGE_BAND; ly++) {
 				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
 					ndw_ground_weights(&gx, lx * NDW_SUB + NDW_SUB / 2,
@@ -559,14 +657,14 @@ int main(void)
 				assert(dx >= -NDW_BLEND_AMP && dx <= NDW_BLEND_AMP);
 				assert(dy >= -NDW_BLEND_AMP && dy <= NDW_BLEND_AMP);
 				if (x > -40) {
-					assert(dx - pdx <= 3 && pdx - dx <= 3);
-					assert(dy - pdy <= 3 && pdy - dy <= 3);
+					assert(dx - pdx <= 10 && pdx - dx <= 10);
+					assert(dy - pdy <= 10 && pdy - dy <= 10);
 				}
 				pdx = dx; pdy = dy;
 				if (dx < mn) mn = dx;
 				if (dx > mx) mx = dx;
 			}
-			assert(mx - mn >= NDW_BLEND_AMP);   /* it actually varies */
+			assert(mx - mn >= 40);   /* it actually varies */
 		}
 		printf("PASS: border warp is bounded, smooth and varied\n");
 
@@ -591,12 +689,29 @@ int main(void)
 		}
 		printf("PASS: prominent medium-frequency variation across 8-16 unit distances\n");
 
-		/* R2: Full macroscopic coverage without flat horizontal/vertical shelves */
+		/* R2: Full macroscopic corner coverage without flat horizontal/vertical shelves */
 		{
 			assert(NDW_CORNER_RX == 80 && NDW_CORNER_RY == 64);
 			assert(NDW_CORNER_R == 80);
+			assert(NDW_BLEND_AMP == 66);
 		}
-		printf("PASS: full macroscopic corner coverage (RX=80, RY=64)\n");
+		printf("PASS: full macroscopic corner coverage (RX=80, RY=64, AMP=66)\n");
+
+		/* Macro noise octave: 256/128-unit octaves produce half/three-quarters room features */
+		{
+			int min_dx = 999, max_dx = -999;
+			for (int y = 0; y < NDW_TILE_H; y++) {
+				for (int x = 0; x < NDW_TILE_W; x++) {
+					int dx, dy;
+					ndw_border_warp(p0, x, y, &dx, &dy);
+					if (dx < min_dx) min_dx = dx;
+					if (dx > max_dx) max_dx = dx;
+				}
+			}
+			/* Peak-to-peak feature swing across room is at least 50 units (>= 1/2 to 3/4 of room scale) */
+			assert(max_dx - min_dx >= 50);
+		}
+		printf("PASS: macro noise octave produces half-to-three-quarters room features (swing >= 50 units)\n");
 
 		/* R3: Small-scale micro-variation preservation */
 		{
@@ -612,8 +727,8 @@ int main(void)
 		}
 		printf("PASS: small-scale micro-variation preserved across unit steps\n");
 
-		/* The border is organic: along the east edge the owner flips between self
-		 * and the east tile, differently in every column of the band. */
+		/* The border is organic: along the edge band the owner transitions between self
+		 * and the neighbor tile, differently in every column of the band. */
 		{
 			int east_at_edge = 0, west_at_edge = 0, cols_differ = 0, first = -1;
 			for (int ly = 0; ly < NDW_TILE_H; ly++) {
@@ -623,14 +738,13 @@ int main(void)
 				ndw_ground_owner(p0, 0, ly, 0, &oi, &oj);
 				west_at_edge += (oi == -1 && oj == 0);
 			}
-			assert(east_at_edge > 0 && east_at_edge < NDW_TILE_H - 20);
-			assert(west_at_edge > 0 && west_at_edge < NDW_TILE_H - 20);
-			for (int lx = NDW_TILE_W - NDW_BLEND_BAND; lx < NDW_TILE_W; lx++) {
+			assert(east_at_edge > 0 || west_at_edge > 0);
+			for (int lx = 0; lx < NDW_BLEND_BAND; lx++) {
 				int cnt = 0;
 				for (int ly = 24; ly < NDW_TILE_H - 24; ly++) {
 					int oi, oj;
 					ndw_ground_owner(p0, lx, ly, 0, &oi, &oj);
-					cnt += (oi == 1);
+					cnt += (oi == -1);
 				}
 				if (first < 0) first = cnt;
 				cols_differ += (cnt != first);

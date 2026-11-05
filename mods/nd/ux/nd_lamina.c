@@ -3,6 +3,7 @@
 #include "nd_lamina.h"
 #include "nd_scene.h"
 #include "nd_seven.h"
+#include "nd_seven_ground.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_motion.h"
 
@@ -451,6 +452,18 @@ static inline uint32_t tod_brightness(uint32_t tod)
 	return 255 - (uint32_t)((diff * 115) / 43200);
 }
 
+static inline uint32_t lamina_alpha_blend(uint32_t bg, uint32_t fg, int alpha)
+{
+	if (alpha <= 0) return bg;
+	if (alpha >= 255) return fg;
+	int r_bg = (int)(bg & 0xFF), g_bg = (int)((bg >> 8) & 0xFF), b_bg = (int)((bg >> 16) & 0xFF);
+	int r_fg = (int)(fg & 0xFF), g_fg = (int)((fg >> 8) & 0xFF), b_fg = (int)((fg >> 16) & 0xFF);
+	int r = r_bg + ((r_fg - r_bg) * alpha) / 255;
+	int g = g_bg + ((g_fg - g_bg) * alpha) / 255;
+	int b = b_bg + ((b_fg - b_bg) * alpha) / 255;
+	return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
 /*
  * Organic biome borders. The tile at grid (gx, gy) was filled with its own
  * biome colour; where a neighbouring tile has another one, the pixels near
@@ -515,7 +528,12 @@ static void blend_tile_border(uint32_t *fb, uint32_t w, uint32_t h, const nd_map
 				for (int k = 0; k < 9; k++)
 					if (wt[k])
 						own_k = k;
-				fill_rect(fb, w, h, tx + px, ty + py, 1, 1, col[own_k]);
+				if (own_k != 4 && (own->bio_idx == 0 || (own->bg & 7) == 4)) {
+					uint32_t bg_c = fb[(ty + py) * w + (tx + px)];
+					fill_rect(fb, w, h, tx + px, ty + py, 1, 1, lamina_alpha_blend(bg_c, col[own_k], 180));
+				} else {
+					fill_rect(fb, w, h, tx + px, ty + py, 1, 1, col[own_k]);
+				}
 			}
 		}
 	}
@@ -625,7 +643,26 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 
 			/* Biome background (ANSI 0..7), dimmed by time of day. */
 			uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
-			fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+			int is_water = (tile->bio_idx == 0 || (tile->bg & 7) == 4);
+
+			if (is_water) {
+				/* Sample from shared client room chunk, maintaining unified depth contours and zero duplicate noise */
+				const nd_room_chunk_t *chunk = nd_seven_chunk_ensure(map, (int)x, (int)y);
+				if (chunk && chunk->pixels) {
+					for (uint32_t py = 0; py < tile_sz; py++) {
+						int cy = ((int)py * TILE_PX_H) / (int)tile_sz;
+						for (uint32_t px = 0; px < tile_sz; px++) {
+							int cx = ((int)px * TILE_PX_W) / (int)tile_sz;
+							uint32_t pcol = chunk->pixels[cy * TILE_PX_W + cx];
+							fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(pcol, amb, 255));
+						}
+					}
+				} else {
+					fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+				}
+			} else {
+				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+			}
 			blend_tile_border(fb, w, h, map, cols, rows, (int)x, (int)y, tx, ty, (int)tile_sz, amb);
 
 			/* Rooms get a soft outline; wilderness stays seamless. */

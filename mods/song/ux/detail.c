@@ -15,7 +15,7 @@
 #include <transp/spelling.h>
 #include "../../common/ux/site_music.h"
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 #include "../fields.h"
 
@@ -127,22 +127,7 @@ static bud_node *render_chord_viewer(void)
 	bud_node *media_slot = site_ui_render_media_slot(
 	        app_state.cache.yt, app_state.cache.audio, app_state.cache.pdf);
 
-	char meta_html[1024] = { 0 };
-	if (app_state.cache.type[0]) {
-		snprintf(
-		        meta_html + strlen(meta_html),
-		        sizeof(meta_html) - strlen(meta_html),
-		        "<div class='italic whitespace-pre-wrap text-xs "
-		        "text-muted'>%s</div>",
-		        app_state.cache.type);
-	}
-	if (app_state.cache.author[0]) {
-		snprintf(
-		        meta_html + strlen(meta_html),
-		        sizeof(meta_html) - strlen(meta_html),
-		        "<div class='text-xs text-muted'>%s</div>",
-		        app_state.cache.author);
-	}
+	bud_node *meta_card = bind_schema_summary(song_fields, &app_state.cache);
 
 	return bud_tpl(
 	        "<div id='main' data-song-id='%s' data-use-latin='%d' "
@@ -157,7 +142,7 @@ static bud_node *render_chord_viewer(void)
 	        "    <div id='song-detail-body' class='flex justify-between "
 	        "items-center w-full max-w-xl text-xs text-muted gap-2' "
 	        "data-detail-viewer-scope='1'>"
-	        "      <div class='flex flex-col gap-1 min-w-0'>%raw</div>"
+	        "      %node"
 	        "      <div class='flex justify-end items-center gap-2 "
 	        "flex-shrink-0 ml-auto' data-song-media='1'>%node</div>"
 	        "    </div>"
@@ -175,7 +160,7 @@ static bud_node *render_chord_viewer(void)
 	        app_state.original_key, app_state.save_url,
 	        app_state.is_owner ? 1 : 0, app_state.transpose, app_state.zoom,
 	        zoom_style, app_state.cache.type, app_state.cache.author,
-	        meta_html, media_slot, app_state.chord_html);
+	        meta_card, media_slot, app_state.chord_html);
 }
 
 static bud_node *song_slot_render_primary(int slot_id, const void *state)
@@ -227,7 +212,7 @@ static bud_node *song_stl_render(void)
 	        site_ui_module_icon("song"), app_state.page_user, menu_items,
 	        bud_tpl("<div class='center flex flex-col gap-4'>%node</div>",
 	                main_node));
-	return bud_tpl("<div id='bud-root'>%node</div>", inner);
+	return bud_tpl("<div id='bud-root' data-slot='1'>%node</div>", inner);
 }
 
 static void song_stl_cleanup(void)

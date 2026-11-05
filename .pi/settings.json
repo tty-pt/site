@@ -16,6 +16,7 @@
     "keepRecentTokens": 20000
   },
   "pi-quest": {
+    "approvalGate": true,
     "askTimeoutMs": 60000,
     "depthCap": 3,
     "strictMode": true,

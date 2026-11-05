@@ -61,6 +61,7 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
       stl_host_fetch: () => {},
       stl_host_set_location: () => {},
       stl_host_invalidate: () => {},
+      stl_host_event_emit: () => {},
       stele_host_emit_patch: (slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
         const op = decodeString(memoryRef, opPtr, opLen);
         const a = decodeString(memoryRef, aPtr, aLen);
@@ -74,6 +75,7 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
       stele_host_fetch: () => {},
       stele_host_set_location: () => {},
       stele_host_invalidate: () => {},
+      stele_host_event_emit: () => {},
     },
     xylem: {
       wasm_xy_load_module: () => 0,

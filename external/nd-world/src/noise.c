@@ -130,6 +130,8 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 		r.tmp = temp(obits, _he, _tm, s[Y_COORD] + (j >> CHUNK_Y));
 		r.rn = rain(obits, w, _he, _cl, r.tmp);
 		r.bio_idx = _he < w ? 0 : bio_idx(r.rn, r.tmp);
+		r.elevation = (coord_t)((int64_t)_he * 200 / NOISE_MAX - 100);
+		r.water_level = (coord_t)((int64_t)w * 200 / NOISE_MAX - 100);
 		r = nd_evt_noise(r, _he, w, _tm, _cl);
 		chunks_bio_raw[i + j] = r;
 	}
@@ -243,11 +245,8 @@ struct bio empty[VIEW_M] = {
 void
 noise_view(struct bio to[VIEW_M], pos_t pos)
 {
-	if (pos[2] == 0) {
-		noise_chunks(pos);
-		view_print(to, pos);
-	} else
-		memcpy(to, &empty, sizeof(empty));
+	noise_chunks(pos);
+	view_print(to, pos);
 }
 
 struct bio

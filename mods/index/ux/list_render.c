@@ -10,7 +10,7 @@ bud_node *list_render(const list_state_t *state)
 	inner = idx_list_layout(state);
 	if (!inner)
 		return NULL;
-	return bud_tpl("<div id='bud-root'>%node</div>", inner);
+	return bud_tpl("<div id='bud-root' data-slot='1'>%node</div>", inner);
 }
 
 #endif
