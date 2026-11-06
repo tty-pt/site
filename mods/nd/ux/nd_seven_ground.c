@@ -1015,7 +1015,7 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 				int drift = (int)(anim / 3);
 
-				if (d <= 2) {
+				if (d <= 3) {
 					/* Dynamic animated caustic shoreline shimmer & breathing surf surge */
 					uint32_t c1 = unit_noise(0x43415553u, (gx + drift) / 2, (gy + drift / 2) / 2) & 31;
 					uint32_t c2 = unit_noise(0x54494353u, (gx - drift / 2) / 2, (gy + drift) / 2) & 31;
@@ -1027,43 +1027,46 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					int surge = (surf_cycle < 60) ? (int)(surf_cycle / 2) : (surf_cycle < 84 ? 30 : (int)((144 - surf_cycle) * 30 / 60));
 
 					if (d == 1) {
-						int foam_alpha = 95 + surge * 2 + (caustic > 38 ? (caustic - 38) * 3 : 0);
-						if (foam_alpha > 185) foam_alpha = 185;
-						uint32_t light_col = (caustic > 40 || surge > 20) ? RGB(250, 255, 254) : RGB(225, 248, 252);
-						col = alpha_blend_rgb(col, light_col, foam_alpha);
+						int foam_alpha = 110 + surge * 2 + (caustic > 38 ? (caustic - 38) * 3 : 0);
+						if (foam_alpha > 195) foam_alpha = 195;
+						col = alpha_blend_rgb(col, RGB(250, 255, 254), foam_alpha);
 					} else if (d == 2) {
 						int c_alpha = (caustic > 36 ? (caustic - 36) * 3 : 0) + (surge > 12 ? (surge - 12) * 2 : 0);
 						if (c_alpha > 85) c_alpha = 85;
 						if (c_alpha > 0) {
-							uint32_t light_col = (surge > 22) ? RGB(235, 252, 255) : RGB(210, 245, 252);
-							col = alpha_blend_rgb(col, light_col, c_alpha);
+							col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
 						}
+					} else if (d == 3 && caustic > 42) {
+						int c_alpha = (caustic - 42) * 2;
+						col = alpha_blend_rgb(col, RGB(200, 245, 255), c_alpha);
 					}
 				}
-				if (d >= 3) {
-					/* 2D organic horizontal ocean swells */
-					int w1 = bnoise(0x4F434541u, gx + drift, gy, 28, 14);
-					int w2 = bnoise(0x5357454Cu, gx + drift * 2, gy - drift / 2, 18, 8);
+				if (d >= 8) {
+					/* 2D organic ocean swells in deep water (shallows remain crystal clear) */
+					int w1 = bnoise(0x4F434541u, gx + drift, gy, 22, 16);
+					int w2 = bnoise(0x5357454Cu, gx + drift * 2, gy - drift / 2, 16, 12);
 					int h = (w1 * 6 + w2 * 4) / 10;
 
 					/* Vertical wave slope for directional sunlight */
-					int w1_up = bnoise(0x4F434541u, gx + drift, gy - 1, 28, 14);
-					int w2_up = bnoise(0x5357454Cu, gx + drift * 2, gy - 1 - drift / 2, 18, 8);
+					int w1_up = bnoise(0x4F434541u, gx + drift, gy - 1, 22, 16);
+					int w2_up = bnoise(0x5357454Cu, gx + drift * 2, gy - 1 - drift / 2, 16, 12);
 					int h_up = (w1_up * 6 + w2_up * 4) / 10;
-					int slope_y = h - h_up; /* -20..+20 */
+					int slope_y = h - h_up; /* -18..+18 */
+
+					int swell_scale = (d <= 16) ? (d - 8) * 255 / 8 : 255;
 
 					/* Wave crest highlights */
 					if (slope_y > 4) {
-						int spec = (slope_y - 4) * 8;
-						if (spec > 140) spec = 140;
-						uint32_t highlight = (d <= 6) ? RGB(215, 245, 255) : (d <= 16 ? RGB(120, 195, 250) : RGB(80, 160, 230));
+						int spec = ((slope_y - 4) * 8 * swell_scale) / 255;
+						if (spec > 130) spec = 130;
+						uint32_t highlight = (d <= 16) ? RGB(115, 195, 250) : RGB(85, 165, 240);
 						col = alpha_blend_rgb(col, highlight, spec);
 					}
 					/* Wave trough shadows */
 					else if (slope_y < -4) {
-						int shadow = (-slope_y - 4) * 6;
-						if (shadow > 100) shadow = 100;
-						col = alpha_blend_rgb(col, RGB(6, 18, 55), shadow);
+						int shadow = ((-slope_y - 4) * 6 * swell_scale) / 255;
+						if (shadow > 90) shadow = 90;
+						col = alpha_blend_rgb(col, RGB(8, 22, 65), shadow);
 					}
 				}
 				dst_row[c] = col;
