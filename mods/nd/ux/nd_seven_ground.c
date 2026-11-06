@@ -38,13 +38,46 @@ static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 	return RGB(r, g, b);
 }
 
+static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
+{
+	static const uint32_t C_SHORE = RGB(64, 180, 224);  /* vibrant tropical cerulean shallows */
+	static const uint32_t C_AQUA  = RGB(42, 136, 205);  /* coastal shelf azure */
+	static const uint32_t C_AZURE = RGB(28, 92, 175);   /* coastal deep blue */
+	static const uint32_t C_DEEP  = RGB(18, 52, 130);   /* deep sapphire ocean */
+
+	uint32_t water_col;
+	if (depth <= 6) {
+		water_col = lerp_rgb(C_SHORE, C_AQUA, depth - 1, 5);
+	} else if (depth <= 16) {
+		water_col = lerp_rgb(C_AQUA, C_AZURE, depth - 6, 10);
+	} else {
+		int t = depth - 16;
+		if (t > 16) t = 16;
+		water_col = lerp_rgb(C_AZURE, C_DEEP, t, 16);
+	}
+	return tint_col(water_col, r, gg, b);
+}
+
+static inline int water_alpha_at_depth(int depth)
+{
+	if (depth <= 6) {
+		return 90 + (depth * 50) / 6;
+	} else if (depth <= 16) {
+		return 140 + ((depth - 6) * 55) / 10;
+	} else {
+		int t = depth - 16;
+		if (t > 16) t = 16;
+		return 195 + (t * 50) / 16;
+	}
+}
+
 static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos[4],
                               int cx, int cy, uint32_t hash, uint32_t anim,
                               int r, int gg, int b)
 {
 	(void)anim;
-	uint16_t world = (uint16_t)pos[3];
-	int16_t w_level = nd_terrain_water_level(world);
+	(void)hash;
+	(void)pos;
 	int land_di[9], land_dj[9], n_land = 0;
 	const ndw_warp_grid_t *wg = NULL;
 
@@ -66,8 +99,6 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 		for (int ux = 0; ux < NDW_CELL_PX; ux++) {
 			int px_in_tile = cx * NDW_CELL_PX + ux;
 			int py_in_tile = cy * NDW_CELL_PX + uy;
-			int32_t wx = (int32_t)pos[0] * NDW_TILE_W + px_in_tile;
-			int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + py_in_tile;
 
 			int depth;
 			if (g->kind == NDW_G_SHALLOW_WATER) {
@@ -87,58 +118,31 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 					if (d > max_land_d) max_land_d = d;
 				}
 
-				if (max_land_d > -NDW_FINE * 32) {
-					int dist_units = (-max_land_d) / NDW_FINE;
-					if (dist_units < 0) dist_units = 0;
-					depth = 1 + dist_units;
-					if (depth > 32) depth = 32;
+				int dist_units = (-max_land_d) / NDW_FINE;
+				if (dist_units < 0) dist_units = 0;
+
+				if (dist_units >= 32) {
+					depth = 28;
 				} else {
-					int16_t elev = nd_terrain_height_hd(wx, wy, world);
-					depth = (int)(w_level - elev);
+					depth = 1 + (27 * dist_units) / 32;
 				}
 			} else {
-				int16_t elev = nd_terrain_height_hd(wx, wy, world);
-				depth = (int)(w_level - elev);
+				depth = 28;
 			}
 			if (depth < 1) depth = 1;
 
-			/* Underlying sandy seabed with subtle micro-grain texture */
-			uint32_t n = unit_noise(hash, ux, uy) & 31;
-			uint32_t sand_base  = RGB(226, 200, 140);
-			uint32_t sand_dark  = RGB(214, 188, 126);
-			uint32_t sand_light = RGB(236, 212, 155);
-			uint32_t seabed = (n < 2) ? sand_dark : (n == 2 ? sand_light : sand_base);
-			seabed = tint_col(seabed, r, gg, b);
+			/* Composite volumetric optical extinction directly over authentic substrate */
+			int sx0 = c->ox + ux * SCALE;
+			int sy0 = c->oy + uy * SCALE;
+			uint32_t seabed = c->fb[sy0 * c->w + sx0];
 
-			/* Volumetric Optical Extinction: water color shifts smoothly from clear tropical cerulean shallows to deep sapphire ocean */
-			static const uint32_t C_SHORE = RGB(64, 180, 224);  /* vibrant tropical cerulean shallows */
-			static const uint32_t C_AQUA  = RGB(42, 136, 205);  /* coastal shelf azure */
-			static const uint32_t C_AZURE = RGB(28, 92, 175);   /* coastal deep blue */
-			static const uint32_t C_DEEP  = RGB(18, 52, 130);   /* deep sapphire ocean */
-
-			uint32_t water_col;
-			int alpha;
-
-			if (depth <= 6) {
-				water_col = lerp_rgb(C_SHORE, C_AQUA, depth - 1, 5);
-				alpha = 100 + (depth * 50) / 6;
-			} else if (depth <= 16) {
-				water_col = lerp_rgb(C_AQUA, C_AZURE, depth - 6, 10);
-				alpha = 150 + ((depth - 6) * 50) / 10;
-			} else {
-				int t = depth - 16;
-				if (t > 16) t = 16;
-				water_col = lerp_rgb(C_AZURE, C_DEEP, t, 16);
-				alpha = 200 + (t * 45) / 16;
-			}
-			water_col = tint_col(water_col, r, gg, b);
+			uint32_t water_col = water_color_at_depth(depth, r, gg, b);
+			int alpha = water_alpha_at_depth(depth);
 
 			uint32_t final_pixel = alpha_blend_rgb(seabed, water_col, alpha);
 			urect(c, ux, uy, 1, 1, final_pixel);
 
 			if (s_active_chunk_depth) {
-				int sx0 = c->ox + ux * SCALE;
-				int sy0 = c->oy + uy * SCALE;
 				uint8_t d_byte = (depth > 255) ? 255 : (uint8_t)depth;
 				for (int dy = 0; dy < SCALE; dy++) {
 					for (int dx = 0; dx < SCALE; dx++) {
@@ -355,12 +359,31 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 						ground_cell(scratch[own_k], cpx, cpx, &style[own_k], pos, cx, cy, 0, 0, nd_seven_get_anim());
 						have[own_k] = 1;
 					}
-					fb[y * w + x] = scratch[own_k][sy * cpx + sx];
-					if (depth_grid) {
-						if (!ndw_is_water_ground(style[own_k].kind)) {
-							depth_grid[y * w + x] = 0; /* Dry land encroaching */
-						} else {
-							depth_grid[y * w + x] = 2; /* Beach shallows encroaching */
+					if (ndw_is_water_ground(style[own_k].kind) && !ndw_is_water_ground(style[4].kind)) {
+						/* Water encroaching onto dry land: translucent optical wash over existing terrain */
+						uint32_t land_px = fb[y * w + x];
+						int qx = border_q(cx, sx);
+						int qy = border_q(cy, sy);
+						int dx = 0, dy = 0;
+						ndw_warp_at(&ent->grid, qx, qy, &dx, &dy);
+						int px_w = qx * (NDW_FINE / NDW_SUB) + dx;
+						int py_w = qy * (NDW_FINE / NDW_SUB) + dy;
+						int land_d = ndw_tile_depth(grp, no_blend, 0, 0, px_w, py_w);
+						int d_units = (-land_d) / NDW_FINE;
+						if (d_units < 1) d_units = 1;
+						if (d_units > 8) d_units = 8;
+						uint32_t w_col = water_color_at_depth(d_units, style[own_k].r, style[own_k].g, style[own_k].b);
+						int alpha = water_alpha_at_depth(d_units);
+						fb[y * w + x] = alpha_blend_rgb(land_px, w_col, alpha);
+						if (depth_grid) depth_grid[y * w + x] = (uint8_t)d_units;
+					} else {
+						fb[y * w + x] = scratch[own_k][sy * cpx + sx];
+						if (depth_grid) {
+							if (!ndw_is_water_ground(style[own_k].kind)) {
+								depth_grid[y * w + x] = 0; /* Dry land encroaching */
+							} else {
+								depth_grid[y * w + x] = 2; /* Beach shallows encroaching */
+							}
 						}
 					}
 				}
@@ -578,7 +601,8 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	uint8_t cgrp[9];
 	for (int k = 0; k < 9; k++) {
 		uint8_t b = nbiomes ? nbiomes[k] : own_biome;
-		int is_water = ndw_is_water_ground(ndw_biome_style(b).kind);
+		ndw_ground_t st_b = ndw_biome_style(b);
+		int is_water = ndw_is_water_ground(st_b.kind);
 		cgrp[k] = is_water ? 0 : 1;
 		if (!is_water)
 			land_mask |= (1 << k);
@@ -587,11 +611,43 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	memcpy(s_active_chunk_grp, cgrp, sizeof(s_active_chunk_grp));
 
 	ndw_ground_t g = ndw_biome_style(own_biome);
+	int is_water_tile = ndw_is_water_ground(g.kind);
+
 	for (int cy = 0; cy < NDW_ROWS; cy++) {
 		for (int cx = 0; cx < NDW_COLS; cx++) {
-			ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
-			            cx * NDW_CELL_PX * SCALE, cy * NDW_CELL_PX * SCALE,
-			            nd_seven_get_anim());
+			int cell_px = cx * NDW_CELL_PX * SCALE;
+			int cell_py = cy * NDW_CELL_PX * SCALE;
+
+			if (is_water_tile) {
+				/* 1. Render authentic ground substrate first */
+				ndw_ground_t substrate_style = { NDW_G_SAND, 128, 128, 128 };
+				if (land_mask && nbiomes) {
+					/* Find nearest land neighbor for authentic local substrate */
+					int px_w = (cx * NDW_CELL_PX + NDW_CELL_PX / 2) * NDW_FINE;
+					int py_w = (cy * NDW_CELL_PX + NDW_CELL_PX / 2) * NDW_FINE;
+					int max_d = -999999;
+					int best_k = 4;
+					for (int dj = -1; dj <= 1; dj++) {
+						for (int di = -1; di <= 1; di++) {
+							int k = (dj + 1) * 3 + (di + 1);
+							if (land_mask & (1 << k)) {
+								int d = ndw_tile_depth(cgrp, 0, di, dj, px_w, py_w);
+								if (d > max_d) { max_d = d; best_k = k; }
+							}
+						}
+					}
+					substrate_style = ndw_biome_style(nbiomes[best_k]);
+				}
+				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &substrate_style, pos, cx, cy,
+				            cell_px, cell_py, nd_seven_get_anim());
+
+				/* 2. Composite volumetric water layer over authentic substrate */
+				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
+				            cell_px, cell_py, nd_seven_get_anim());
+			} else {
+				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
+				            cell_px, cell_py, nd_seven_get_anim());
+			}
 		}
 	}
 	s_active_chunk_depth = NULL;
@@ -721,17 +777,21 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				uint32_t col = src_row[c];
 
 				if (d <= 2) {
-					/* Delicate shoreline froth line at the edge */
-					int froth = ((gx * 3 + gy * 5 + drift) % 8);
-					if (froth < 2)
-						col = alpha_blend_rgb(col, RGB(245, 255, 252), 110);
+					/* Continuous, rhythmic intertidal surf ribbon along shoreline */
+					uint32_t wave_phase = (uint32_t)(gx * 2 + gy * 3 + drift * 3);
+					if (d == 1) {
+						if ((wave_phase & 31) < 14)
+							col = alpha_blend_rgb(col, RGB(242, 252, 255), 130);
+					} else if (d == 2) {
+						if (((wave_phase + 8) & 31) < 12)
+							col = alpha_blend_rgb(col, RGB(215, 242, 252), 75);
+					}
 				}
-				if (d >= 2) {
-					/* Elegant horizontal arched wave crests */
+				if (d >= 3) {
+					/* Continuous bell envelope wave crests */
 					int band_spacing = 28;
-					int band = gy / band_spacing;
-					int y_in_band = gy % band_spacing;
-					if (y_in_band < 0) y_in_band += band_spacing;
+					int band = (gy >= 0) ? (gy / band_spacing) : ((gy - band_spacing + 1) / band_spacing);
+					int y_in_band = gy - band * band_spacing;
 
 					int row_dir = (band & 1) ? 1 : -1;
 					int x_offset = band * 43 + drift * 2 * row_dir;
@@ -740,25 +800,39 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					if (x_wave < 0) x_wave += 80;
 
 					int wave_len = (d <= 10) ? 22 : 36;
-					int is_in_wave = (x_wave < wave_len);
-					int wave_arch = 0;
-					if (is_in_wave) {
+					int wave_half = wave_len / 2;
+					int dx = x_wave - wave_half;
+					if (dx < 0) dx = -dx;
+
+					if (dx < wave_half) {
+						/* Smooth horizontal bell envelope across wave width */
+						int h_env = 256 - (256 * dx * dx) / (wave_half * wave_half);
+						int wave_arch = 0;
 						if (x_wave >= 6 && x_wave < wave_len - 6) wave_arch = 1;
 						if (x_wave >= 12 && x_wave < wave_len - 12) wave_arch = 2;
-					}
+						int crest_y = 14 - wave_arch;
+						int dy = y_in_band - crest_y;
+						int fade = (d >= 6) ? 255 : (d - 2) * 64;
 
-					int crest_y = 14 - wave_arch;
-
-					if (is_in_wave) {
-						if (y_in_band == crest_y) {
-							if (x_wave >= 10 && x_wave < wave_len - 10 && d > 8)
-								col = alpha_blend_rgb(col, RGB(225, 250, 255), 180); /* whitecap foam */
-							else
-								col = alpha_blend_rgb(col, (d <= 16) ? RGB(95, 195, 245) : RGB(75, 165, 235), 140); /* crest */
-						} else if (y_in_band == crest_y + 1) {
-							col = alpha_blend_rgb(col, (d <= 16) ? RGB(45, 130, 205) : RGB(30, 95, 175), 90); /* wave body */
-						} else if (y_in_band == crest_y - 1) {
-							col = alpha_blend_rgb(col, RGB(14, 38, 92), 60); /* wave shadow */
+						if (dy == 0) {
+							uint32_t crest_col;
+							int alpha_val;
+							if (x_wave >= 8 && x_wave < wave_len - 8 && d > 8) {
+								crest_col = RGB(225, 250, 255); /* whitecap foam */
+								alpha_val = (180 * h_env * fade) / (256 * 255);
+							} else {
+								crest_col = (d <= 16) ? RGB(95, 195, 245) : RGB(75, 165, 235); /* crest */
+								alpha_val = (140 * h_env * fade) / (256 * 255);
+							}
+							col = alpha_blend_rgb(col, crest_col, alpha_val);
+						} else if (dy == 1 || dy == 2) {
+							int v_env = (dy == 1) ? 180 : 80;
+							int alpha_val = (90 * h_env * v_env * fade) / (256 * 255 * 255);
+							uint32_t body_col = (d <= 16) ? RGB(45, 130, 205) : RGB(30, 95, 175); /* wave body */
+							col = alpha_blend_rgb(col, body_col, alpha_val);
+						} else if (dy == -1) {
+							int alpha_val = (60 * h_env * fade) / (256 * 255);
+							col = alpha_blend_rgb(col, RGB(14, 38, 92), alpha_val); /* wave shadow */
 						}
 					}
 				}

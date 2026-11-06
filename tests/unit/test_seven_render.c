@@ -209,19 +209,17 @@ int main(void)
 	}
 	/* Test depth-dependent water rendering across different elevations with gradual transparency */
 	{
-		/* Shoreline shallows at (-50, -20) in world 0: elevation near water table (depth ~ 2) */
-		set_map(-50, -20, 0, 0x1B, 0, 0, 0, 0);
+		/* Shoreline shallows at the coast: depth ~ 2 */
+		set_split(-2, 0, 4, 0);
 		nd_seven_render(fb2, 1280, 720, &st);
 		dump("water_shallow", fb2, 1280, 720);
-		uint32_t c_shallow = fb2[360 * 1280 + 640];
+		uint32_t c_shallow = fb2[360 * 1280 + 840];
 		int sr = (int)(c_shallow & 0xFF), sg = (int)((c_shallow >> 8) & 0xFF), sb = (int)((c_shallow >> 16) & 0xFF);
 		assert(sr > 120 && sg > 140 && sb >= 140);
 		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
 
-		/* Mid-depth shelf at (-50, 9) in world 0: depth ~ 10 */
-		set_map(-50, 9, 0, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb2, 1280, 720, &st);
-		uint32_t c_mid = fb2[360 * 1280 + 640];
+		/* Mid-depth shelf at distance ~ 10 from coast */
+		uint32_t c_mid = fb2[360 * 1280 + 850];
 		int mr = (int)(c_mid & 0xFF), mg = (int)((c_mid >> 8) & 0xFF), mb = (int)((c_mid >> 16) & 0xFF);
 		/* Intermediate transparency: red drops as depth increases into azure water */
 		assert(mr < sr && mr > 40 && mg > 100 && mb > 100);
@@ -233,7 +231,7 @@ int main(void)
 		ground_cell(cell_fb, 32, 32, &sg_style, test_pos, 0, 0, 0, 0, 0);
 		uint32_t c_forced = cell_fb[0];
 		int fr = (int)(c_forced & 0xFF), fg = (int)((c_forced >> 8) & 0xFF), fb_b = (int)((c_forced >> 16) & 0xFF);
-		assert(fr > 100 && fg > 150 && fb_b >= 140); /* tropical aquamarine wash over sand */
+		assert(fr > 100 && fg > 140 && fb_b >= 140); /* tropical aquamarine wash over sand */
 
 		/* Pure physical depth-based red light extinction: shallow shallows > mid-depth > deep abyss */
 		int r_abyss = (int)(fb[360 * 1280 + 640] & 0xFF);
