@@ -10,26 +10,6 @@ static inline uint32_t unit_noise(uint32_t h, int ux, int uy)
 	return ndw_mix(h ^ (uint32_t)(uy * 16 + ux + 1) * 0x9E3779B1u);
 }
 
-static inline int bnoise(uint32_t seed, int x, int y, int freq_x, int freq_y)
-{
-	int gx = x / freq_x;
-	int gy = y / freq_y;
-	int fx = x % freq_x; if (fx < 0) { fx += freq_x; gx--; }
-	int fy = y % freq_y; if (fy < 0) { fy += freq_y; gy--; }
-
-	int u = (fx * fx * (3 * freq_x - 2 * fx)) / (freq_x * freq_x);
-	int v = (fy * fy * (3 * freq_y - 2 * fy)) / (freq_y * freq_y);
-
-	int n00 = (int)(unit_noise(seed, gx, gy) & 255);
-	int n10 = (int)(unit_noise(seed, gx + 1, gy) & 255);
-	int n01 = (int)(unit_noise(seed, gx, gy + 1) & 255);
-	int n11 = (int)(unit_noise(seed, gx + 1, gy + 1) & 255);
-
-	int a = n00 + ((n10 - n00) * u) / freq_x;
-	int b = n01 + ((n11 - n01) * u) / freq_x;
-	return a + ((b - a) * v) / freq_y;
-}
-
 static uint8_t *s_active_chunk_depth = NULL;
 static uint8_t s_active_chunk_land_mask = 0;
 static uint8_t s_active_chunk_grp[9];
@@ -1041,32 +1021,13 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 						col = alpha_blend_rgb(col, RGB(200, 245, 255), c_alpha);
 					}
 				}
-				if (d >= 8) {
-					/* 2D organic ocean swells in deep water (shallows remain crystal clear) */
-					int w1 = bnoise(0x4F434541u, gx + drift, gy, 22, 16);
-					int w2 = bnoise(0x5357454Cu, gx + drift * 2, gy - drift / 2, 16, 12);
-					int h = (w1 * 6 + w2 * 4) / 10;
-
-					/* Vertical wave slope for directional sunlight */
-					int w1_up = bnoise(0x4F434541u, gx + drift, gy - 1, 22, 16);
-					int w2_up = bnoise(0x5357454Cu, gx + drift * 2, gy - 1 - drift / 2, 16, 12);
-					int h_up = (w1_up * 6 + w2_up * 4) / 10;
-					int slope_y = h - h_up; /* -18..+18 */
-
-					int swell_scale = (d <= 16) ? (d - 8) * 255 / 8 : 255;
-
-					/* Wave crest highlights */
-					if (slope_y > 4) {
-						int spec = ((slope_y - 4) * 8 * swell_scale) / 255;
-						if (spec > 130) spec = 130;
-						uint32_t highlight = (d <= 16) ? RGB(115, 195, 250) : RGB(85, 165, 240);
-						col = alpha_blend_rgb(col, highlight, spec);
-					}
-					/* Wave trough shadows */
-					else if (slope_y < -4) {
-						int shadow = ((-slope_y - 4) * 6 * swell_scale) / 255;
-						if (shadow > 90) shadow = 90;
-						col = alpha_blend_rgb(col, RGB(8, 22, 65), shadow);
+				if (d >= 4) {
+					/* Subtle isotropic fluid shimmer without directional lines */
+					uint32_t w_noise = unit_noise(0x57415445u, (gx + drift) / 4, (gy + drift / 2) / 4) & 31;
+					if (w_noise < 2) {
+						col = alpha_blend_rgb(col, RGB(28, 76, 175), 25);
+					} else if (w_noise == 2) {
+						col = alpha_blend_rgb(col, RGB(12, 38, 105), 25);
 					}
 				}
 				dst_row[c] = col;
