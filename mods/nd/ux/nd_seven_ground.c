@@ -746,6 +746,7 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 {
 	(void)ti;
 	(void)tj;
+	atlas_load();
 	nd_room_chunk_t *chunk = chunk_find(pos, nbiomes);
 	if (chunk) {
 		chunk->last_frame = s_current_frame;

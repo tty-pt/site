@@ -11,7 +11,6 @@
 #include "../common/common.h"
 #include "auren-types.h"
 #include "ux/auren_ui.h"
-#include "ux/auren_ui.c"
 
 static int render_auren_page(int fd, const auren_demo_state_t *st)
 {
