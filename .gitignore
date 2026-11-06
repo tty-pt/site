@@ -28,6 +28,10 @@
 !/htdocs/styles.css
 !/htdocs/hyle.css
 !/htdocs/chat.css
+!/htdocs/auren.css
+!/htdocs/auren-client.js
+!/htdocs/vendor/
+!/htdocs/vendor/**
 /external/*/bin
 /external/*/lib
 tests/unit/mpfd_contract_test

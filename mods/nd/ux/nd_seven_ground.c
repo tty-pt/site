@@ -979,14 +979,11 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 	if (chunk->depth) {
 		uint32_t anim = nd_seven_get_anim();
-		int base_gx = (int)pos[0] * NDW_TILE_W;
-		int base_gy = -(int)pos[1] * NDW_TILE_H;
-		int16_t tz_fine = (int16_t)(anim / 3);
-		int16_t tz_deep = (int16_t)(anim / 6);
-
-		/* Intertidal surf breathing cycle (period = 144 ticks ~ 2.4s) */
-		int32_t surf_cycle = (int32_t)(((anim % 144) + 144) % 144);
-		int surge = (surf_cycle < 60) ? (surf_cycle / 2) : (surf_cycle < 84 ? 30 : ((144 - surf_cycle) * 30 / 60));
+		int base_gx = ti * NDW_TILE_W;
+		int base_gy = tj * NDW_TILE_H;
+		/* Z iterates continuously frame-by-frame across all number boundaries */
+		int16_t z_time = (int16_t)anim;
+		int16_t z_time_fast = (int16_t)(anim * 2);
 
 		for (int r = 0; r < bh; r++) {
 			int y_in_tile = (src_y0 + r);
@@ -998,7 +995,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			int last_gx = -999999;
 			int last_c1 = 0;
 			int last_c2 = 0;
-			int last_deep_n = 0;
+			int last_surf = 0;
+			int last_swell = 0;
 			int last_ripple = 0;
 
 			for (int c = 0; c < bw; c++) {
@@ -1012,23 +1010,24 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				int gx = base_gx + x_in_tile / SCALE;
 				if (gx != last_gx) {
 					last_gx = gx;
-					/* Evaluate continuous 3D space-time noise N(x, y, t): morphs in place, zero 2D panning */
-					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, tz_fine, 0x43415553u, 2);
-					last_c2 = noise_point_3d((int16_t)(gx + 13), (int16_t)(gy - 19), tz_fine, 0x54494353u, 2);
-					last_deep_n = noise_point_3d((int16_t)gx, (int16_t)gy, tz_deep, 0x4F434541u, 4);
-					last_ripple = noise_point_3d((int16_t)gx, (int16_t)gy, tz_fine, 0x57415645u, 2);
+					/* Continuous 3D space-time noise across all number boundaries without modulo wrap */
+					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x43415553u, 3);
+					last_c2 = noise_point_3d((int16_t)(gx + 13), (int16_t)(gy - 19), (int16_t)(z_time + 29), 0x54494353u, 3);
+					last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
+					last_swell = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
+					last_ripple = noise_point_3d((int16_t)gx, (int16_t)gy, z_time_fast, 0x57415645u, 3);
 				}
 				uint32_t col = src_row[c];
 
-				/* 1. Shoreline breaking foam & wash */
+				/* 1. Continuous 3D shoreline breaking foam & swash */
 				if (d == 1) {
-					int foam_alpha = 110 + surge * 2 + (last_c1 > 150 ? (last_c1 - 150) : 0);
-					if (foam_alpha > 210) foam_alpha = 210;
+					int foam_alpha = 110 + (last_surf > 140 ? (last_surf - 140) / 2 : 0);
+					if (foam_alpha > 180) foam_alpha = 180;
 					col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
 				} else if (d == 2) {
-					int c_alpha = (last_c1 > 140 ? (last_c1 - 140) / 2 : 0) + (surge > 10 ? (surge - 10) * 2 : 0);
-					if (c_alpha > 85) c_alpha = 85;
-					if (c_alpha > 0) {
+					if (last_surf > 145) {
+						int c_alpha = (last_surf - 145) / 2;
+						if (c_alpha > 50) c_alpha = 50;
 						col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
 					}
 				}
@@ -1036,23 +1035,28 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				/* 2. Caustic light webbing dancing on shallow seabed */
 				if (d >= 2 && d <= 6) {
 					int caustic_diff = abs(last_c1 - last_c2);
-					if (caustic_diff < 26) {
-						int c_bright = ((26 - caustic_diff) * (7 - d)) / 7;
-						col = alpha_blend_rgb(col, RGB(225, 252, 255), c_bright * 3);
+					if (caustic_diff < 20) {
+						int c_bright = ((20 - caustic_diff) * 35) / 20;
+						col = alpha_blend_rgb(col, RGB(245, 254, 255), c_bright);
 					}
 				}
 
 				/* 3. Surface wave relief: paired sunlit highlight crests & shadow troughs */
 				if (d >= 3) {
-					int wave_h = (last_deep_n * 5 + last_ripple * 3) / 8;
-					if (wave_h > 150) {
-						int crest_int = (wave_h - 150) * 2;
-						if (crest_int > 75) crest_int = 75;
-						col = alpha_blend_rgb(col, RGB(160, 225, 255), crest_int);
-					} else if (wave_h < 105) {
-						int trough_int = (105 - wave_h) * 2;
+					int wave_h = (last_swell * 3 + last_ripple * 2) / 5;
+					if (wave_h > 145) {
+						int crest_int = (wave_h - 145) * 2;
+						if (crest_int > 80) crest_int = 80;
+						col = alpha_blend_rgb(col, RGB(180, 235, 255), crest_int);
+					} else if (wave_h < 110) {
+						int trough_int = (110 - wave_h) * 2;
 						if (trough_int > 60) trough_int = 60;
-						col = alpha_blend_rgb(col, RGB(8, 32, 90), trough_int);
+						col = alpha_blend_rgb(col, RGB(8, 30, 85), trough_int);
+					}
+
+					/* 4. Specular sun sparkle glints */
+					if (wave_h > 170 && last_ripple > 175) {
+						col = alpha_blend_rgb(col, RGB(255, 255, 255), 180);
 					}
 				}
 

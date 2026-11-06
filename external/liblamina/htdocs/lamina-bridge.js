@@ -53,42 +53,82 @@ void main() {
 
 	if (is_water && u_time > 0.0) {
 		vec2 p = v_uv * u_res * 0.5;
-		float t = u_time * 0.7;
+		float t = u_time * 0.8;
 
-		// 1. 3D continuous fluid refraction (evolving in place, zero 2D panning)
-		vec3 coord = vec3(p * 0.035, t * 0.6);
-		float nx = noise3d(coord + vec3(0.5, 0.0, 0.0)) - 0.5;
-		float ny = noise3d(coord + vec3(0.0, 0.5, 0.0)) - 0.5;
-		vec2 disp = vec2(nx, ny) * 2.8;
+		// 1. Multi-component Trochoidal Gerstner Wave Field
+		// Wave 1: Primary coastal ocean swell
+		vec2 d1 = vec2(0.7071, 0.7071);
+		float k1 = 0.065, a1 = 1.4, q1 = 0.70, w1 = 1.6;
+		float phi1 = dot(d1, p) * k1 - w1 * t;
 
-		vec2 refr_uv = v_uv + (disp / u_res);
+		// Wave 2: Secondary cross swell
+		vec2 d2 = vec2(-0.5547, 0.8321);
+		float k2 = 0.115, a2 = 0.85, q2 = 0.60, w2 = 2.1;
+		float phi2 = dot(d2, p) * k2 - w2 * t;
+
+		// Wave 3: Capillary wind chop
+		vec2 d3 = vec2(0.8944, -0.4472);
+		float k3 = 0.190, a3 = 0.45, q3 = 0.50, w3 = 2.9;
+		float phi3 = dot(d3, p) * k3 - w3 * t;
+
+		// Exact analytical Gerstner surface normals & steepness
+		float c1 = cos(phi1), s1 = sin(phi1);
+		float c2 = cos(phi2), s2 = sin(phi2);
+		float c3 = cos(phi3), s3 = sin(phi3);
+
+		float nx = -(d1.x * (k1 * a1) * c1 + d2.x * (k2 * a2) * c2 + d3.x * (k3 * a3) * c3);
+		float ny = -(d1.y * (k1 * a1) * c1 + d2.y * (k2 * a2) * c2 + d3.y * (k3 * a3) * c3);
+		float nz = 1.0 - (q1 * k1 * a1 * s1 + q2 * k2 * a2 * s2 + q3 * k3 * a3 * s3);
+		vec3 N = normalize(vec3(nx * 3.5, ny * 3.5, nz));
+
+		// Wave height & pinched crest steepness
+		float wave_h = a1 * c1 + a2 * c2 + a3 * c3;
+		float steepness = q1 * k1 * a1 * s1 + q2 * k2 * a2 * s2 + q3 * k3 * a3 * s3;
+
+		// 2. Subsurface normal-driven seabed refraction
+		vec2 refr_uv = v_uv + (N.xy * 0.0035);
 		vec4 refr = texture2D(u_tex, refr_uv);
 		if (refr.b > refr.r * 1.15 && refr.b > 0.25) {
 			base = refr;
 		}
 
-		// 2. 3D organic caustic light filaments: contour of intersecting 3D noise fields
-		float n1 = noise3d(vec3(p * 0.065, t * 0.85));
-		float n2 = noise3d(vec3(p * 0.095 + 13.7, t * 1.15));
-		float caustic = abs(n1 - n2);
+		// 3. Curvature-focused caustics on shallow seabed
+		float n_caust1 = noise3d(vec3(p * 0.065, t * 0.85));
+		float n_caust2 = noise3d(vec3(p * 0.095 + 13.7, t * 1.15));
+		float caustic = abs(n_caust1 - n_caust2);
 
-		if (caustic < 0.14) {
-			float intensity = (0.14 - caustic) / 0.14;
-			base.rgb += vec3(intensity * 0.22, intensity * 0.28, intensity * 0.30);
-		} else if (caustic > 0.42) {
-			float trough = (caustic - 0.42) / 0.58;
-			base.rgb -= vec3(trough * 0.12, trough * 0.08, trough * 0.04);
+		if (caustic < 0.13) {
+			float intensity = (0.13 - caustic) / 0.13;
+			base.rgb += vec3(intensity * 0.24, intensity * 0.29, intensity * 0.31);
+		} else if (caustic > 0.44) {
+			float trough = (caustic - 0.44) / 0.56;
+			base.rgb -= vec3(trough * 0.10, trough * 0.07, trough * 0.03);
 		}
 
-		// 3. Directional Fresnel specular glints
-		vec3 N = normalize(vec3(-nx * 4.0, -ny * 4.0, 1.0));
+		// 4. Wave relief: crest illumination & trough shading
+		if (wave_h > 0.6) {
+			float crest = (wave_h - 0.6) * 0.15;
+			base.rgb += vec3(crest * 0.7, crest * 0.9, crest);
+		} else if (wave_h < -0.6) {
+			float trough = (-wave_h - 0.6) * 0.12;
+			base.rgb -= vec3(trough * 0.4, trough * 0.25, trough * 0.05);
+		}
+
+		// 5. Stokes breaking seafoam on pinched wave crests & shallows
+		if (steepness > 0.14) {
+			float foam = (steepness - 0.14) * 3.5;
+			if (foam > 0.75) foam = 0.75;
+			base.rgb = mix(base.rgb, vec3(1.0, 1.0, 1.0), foam);
+		}
+
+		// 6. Directional Fresnel specular sun glints
 		vec3 L = normalize(vec3(-0.45, -0.55, 0.70));
 		vec3 V = vec3(0.0, 0.0, 1.0);
 		vec3 H = normalize(L + V);
-		float spec = pow(max(dot(N, H), 0.0), 24.0);
-		if (spec > 0.45) {
-			float glint = (spec - 0.45) * 0.35;
-			base.rgb += vec3(glint * 0.85, glint * 0.95, glint);
+		float spec = pow(max(dot(N, H), 0.0), 32.0);
+		if (spec > 0.40) {
+			float glint = (spec - 0.40) * 0.40;
+			base.rgb += vec3(glint * 0.9, glint * 0.96, glint);
 		}
 	}
 	gl_FragColor = base;
