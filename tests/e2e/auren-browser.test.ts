@@ -54,7 +54,13 @@ Deno.test("auren browser demo: verify SSR, WebAssembly client hydration, and pro
 
     /* 7. Verify assistant message streams response tokens */
     await page.waitForSelector(".auren-msg.msg-assistant", { timeout: 5000 });
-    await page.waitForTimeout(500); // Allow streaming chunks to accumulate
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector(".auren-msg.msg-assistant .auren-msg-body");
+        return el && el.textContent && el.textContent.trim().length > 0;
+      },
+      { timeout: 8000 }
+    );
 
     const assistantMsg = await page.$(".auren-msg.msg-assistant .auren-msg-body");
     const assistantText = await assistantMsg?.textContent();

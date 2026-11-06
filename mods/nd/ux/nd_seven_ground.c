@@ -995,21 +995,27 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				uint32_t col = src_row[c];
 
 				if (d <= 2) {
-					/* Dynamic animated caustic shoreline shimmer along the natural water edge */
+					/* Dynamic animated caustic shoreline shimmer & breathing surf surge */
 					uint32_t drift = anim / 4;
 					int c1 = (int)(unit_noise(0x43415553u, (gx + drift) / 2, (gy + drift / 2) / 2) & 31);
 					int c2 = (int)(unit_noise(0x54494353u, (gx - drift / 2) / 2, (gy + drift) / 2) & 31);
 					int caustic = c1 + c2; /* 0..62 */
+
+					/* Intertidal surf breathing cycle (period = 144 ticks ~ 2.4s) */
+					uint32_t surf_cycle = (anim + (uint32_t)(gx * 3 + gy * 2) / 8) % 144;
+					int surge = (surf_cycle < 60) ? (int)(surf_cycle / 2) : (surf_cycle < 84 ? 30 : (int)((144 - surf_cycle) * 30 / 60));
+
 					if (d == 1) {
-						int foam_alpha = 80 + (caustic > 40 ? (caustic - 40) * 4 : 0);
-						if (foam_alpha > 160) foam_alpha = 160;
-						uint32_t light_col = (caustic > 44) ? RGB(248, 255, 254) : RGB(225, 248, 252);
+						int foam_alpha = 75 + surge * 2 + (caustic > 40 ? (caustic - 40) * 3 : 0);
+						if (foam_alpha > 185) foam_alpha = 185;
+						uint32_t light_col = (caustic > 42 || surge > 20) ? RGB(250, 255, 254) : RGB(225, 248, 252);
 						col = alpha_blend_rgb(col, light_col, foam_alpha);
 					} else if (d == 2) {
-						if (caustic > 38) {
-							int c_alpha = (caustic - 38) * 3;
-							if (c_alpha > 75) c_alpha = 75;
-							col = alpha_blend_rgb(col, RGB(210, 245, 252), c_alpha);
+						int c_alpha = (caustic > 38 ? (caustic - 38) * 3 : 0) + (surge > 12 ? (surge - 12) * 2 : 0);
+						if (c_alpha > 90) c_alpha = 90;
+						if (c_alpha > 0) {
+							uint32_t light_col = (surge > 22) ? RGB(235, 252, 255) : RGB(210, 245, 252);
+							col = alpha_blend_rgb(col, light_col, c_alpha);
 						}
 					}
 				}
@@ -1036,7 +1042,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 						int wave_arch = 0;
 						if (x_wave >= 6 && x_wave < wave_len - 6) wave_arch = 1;
 						if (x_wave >= 12 && x_wave < wave_len - 12) wave_arch = 2;
-						int crest_y = 14 - wave_arch;
+						int undulate = (int)((unit_noise(0x57415645u, (gx + x_offset) / 32, band) & 3) - 1);
+						int crest_y = 14 - wave_arch + undulate;
 						int dy = y_in_band - crest_y;
 						int fade = (d >= 6) ? 255 : (d - 2) * 64;
 
@@ -1059,6 +1066,19 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 						} else if (dy == -1) {
 							int alpha_val = (60 * h_env * fade) / (256 * 255);
 							col = alpha_blend_rgb(col, RGB(14, 38, 92), alpha_val); /* wave shadow */
+						}
+					}
+				}
+
+				/* Sparse 16-bit specular sunlight glints dancing on water surface */
+				if (d >= 1) {
+					uint32_t glint_tick = anim / 6;
+					uint32_t h_glint = unit_noise(0x474C494Eu, gx, gy ^ (glint_tick * 0x9E3779B1u));
+					if ((h_glint % 900) == 0) {
+						if ((h_glint % 1800) == 0) {
+							col = alpha_blend_rgb(col, RGB(255, 255, 252), 230);
+						} else {
+							col = alpha_blend_rgb(col, RGB(215, 250, 255), 160);
 						}
 					}
 				}
