@@ -267,7 +267,8 @@ int main(void)
 				for (int dy = -16; dy < TILE; dy++)
 					for (int dx = -4; dx < TILE + 4; dx++) {
 						uint32_t px = fb[(TY(1) + dy) * W + TX(1) + dx];
-						if (px != 0xFF94A696 && px != 0 && px != 0xFF08090C && (px & 0xFF000000))
+						int r = px & 0xFF, g = (px >> 8) & 0xFF, b = (px >> 16) & 0xFF;
+						if (abs(r - g) <= 6 && abs(g - b) <= 6 && px != 0 && px != 0xFF08090C && (px & 0xFF000000))
 							cnt[kind]++;
 					}
 			}
