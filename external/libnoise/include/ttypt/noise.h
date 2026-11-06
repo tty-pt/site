@@ -19,6 +19,11 @@
  * Provides:
  *   1. Dense Matrix Stepper (noise_oct, noise_m, noise_quad): bulk hypercube generation.
  *   2. Generic Point Sampler (noise_point_n, noise_point_2d, noise_point_3d): O(1) zero-allocation point queries.
+ *   3. Wrapping Original-Algorithm Sampler (noise_wpoint_n, noise_wpoint_c,
+ *      noise_wrow): point / cached / row-stepped queries that reproduce the
+ *      matrix stepper exactly, so coordinates (e.g. an ever-increasing time
+ *      counter cast to int16_t) may keep incrementing across the data-type
+ *      boundary without a seam.
  */
 
 #include <stdint.h>
@@ -299,6 +304,244 @@ noise_point_n(const int16_t *p, uint32_t seed, uint8_t shift, uint8_t dim)
 	}
 
 	return v[0];
+}
+
+/* --- Wrapping Original-Algorithm Sampler --------------------------------- */
+
+/* Point queries that follow the ORIGINAL lattice algorithm of noise_m:
+ *   - lattice keys are the masked int16 coordinates themselves
+ *     (s = p & COORDMASK_LSHIFT(x)), hashed with noise_r;
+ *   - the far vertex of a quad is s + 2^x computed in int16_t, so it wraps
+ *     exactly like the coordinate does (32767 + 1 == -32768): no seam at
+ *     the data-type boundary on any axis;
+ *   - interpolation is the matrix stepper's: axis 0 first, step = (v1 - v0)
+ *     >> x, value = v0 + f * step (see calc_steps / step / noise_quad).
+ * Results are therefore value-equal to noise_m over lattice-aligned
+ * matrices. Values are on noise_m's scale: (hash >> w), interpolated.
+ * With NOISE_FADE, f is remapped by a Hermite smoothstep onto [0, 2^x)
+ * (lattice values are unchanged, derivatives vanish at cell borders).
+ * Requires 1 <= dim <= 4 and 1 <= x <= 15. */
+
+#define NOISE_FADE 1u
+
+/* Hermite smoothstep of f in [0, 2^x), mapped onto [0, 2^x) */
+static inline uint32_t
+noise_wfade(uint32_t f, unsigned x)
+{
+	return (uint32_t) (((uint64_t) f * f * ((3ull << x) - 2ull * f)) >> (2 * x));
+}
+
+/* Matrix-stepper step between two vertex values (calc_steps, y = 0) */
+static inline int32_t
+noise_wstep(uint32_t v0, uint32_t v1, unsigned x)
+{
+	return (int32_t) (((int64_t) v1 - (int64_t) v0) >> x);
+}
+
+/* Collapse the first `levels` axes of the 2^dim vertex values in v,
+ * axis 0 first, at in-quad offsets f[] (already faded if requested). */
+static inline void
+noise_wreduce(uint32_t *v, const uint32_t *f, unsigned x, unsigned levels, uint8_t dim)
+{
+	unsigned half = 1u << dim;
+	for (unsigned j = 0; j < levels; j++) {
+		half >>= 1;
+		for (unsigned n = 0; n < half; n++)
+			v[n] = v[n] + (uint32_t) ((int64_t) noise_wstep(v[n], v[n + half], x) * f[j]);
+	}
+}
+
+/* Lattice cell origin and in-quad offsets of p */
+static inline void
+noise_wcell(int16_t *s, uint32_t *f, const int16_t *p, unsigned x, unsigned flags, uint8_t dim)
+{
+	const uint16_t mask = COORDMASK_LSHIFT(x);
+	for (unsigned j = 0; j < dim; j++) {
+		s[j] = (int16_t) (p[j] & mask);
+		f[j] = (uint16_t) p[j] & (uint16_t) ~mask;
+		if (flags & NOISE_FADE)
+			f[j] = noise_wfade(f[j], x);
+	}
+}
+
+/* Uncached point query (2^dim hashes) */
+static inline uint32_t
+noise_wpoint_n(const int16_t *p, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags)
+{
+	int16_t s[4];
+	uint32_t f[4], v[16];
+	noise_wcell(s, f, p, x, flags, dim);
+	noise_get_v(v, s, x, w, seed, dim);
+	noise_wreduce(v, f, x, dim, dim);
+	return v[0];
+}
+
+static inline uint32_t
+noise_wpoint_2d(int16_t x0, int16_t x1, unsigned x, unsigned w, unsigned seed, unsigned flags)
+{
+	int16_t p[2] = { x0, x1 };
+	return noise_wpoint_n(p, x, w, seed, 2, flags);
+}
+
+static inline uint32_t
+noise_wpoint_3d(int16_t x0, int16_t x1, int16_t x2, unsigned x, unsigned w, unsigned seed, unsigned flags)
+{
+	int16_t p[3] = { x0, x1, x2 };
+	return noise_wpoint_n(p, x, w, seed, 3, flags);
+}
+
+/* Corner-reuse cache: remembers the vertex values of the last lattice
+ * cell, so slowly-varying (e.g. domain-warped) coordinates hash only when
+ * they enter a new cell. `fetches` counts corner-set fetches (each one is
+ * 2^dim hashes) for profiling; callers may reset it at will. */
+typedef struct {
+	int16_t s[4];
+	uint32_t v[16];
+	unsigned x, w, seed;
+	uint8_t dim, valid;
+	uint32_t fetches;
+} noise_wcache_t;
+
+static inline void
+noise_wcache_init(noise_wcache_t *c)
+{
+	memset(c, 0, sizeof(*c));
+}
+
+/* Vertex values of the cell at s, from the cache when it matches */
+static inline const uint32_t *
+noise_wcorners(noise_wcache_t *c, int16_t *s, unsigned x, unsigned w, unsigned seed, uint8_t dim)
+{
+	int hit = c->valid && c->x == x && c->w == w && c->seed == seed && c->dim == dim;
+	for (unsigned j = 0; hit && j < dim; j++)
+		hit = c->s[j] == s[j];
+	if (!hit) {
+		noise_get_v(c->v, s, x, w, seed, dim);
+		memcpy(c->s, s, sizeof(int16_t) * dim);
+		c->x = x; c->w = w; c->seed = seed; c->dim = dim; c->valid = 1;
+		c->fetches++;
+	}
+	return c->v;
+}
+
+/* Cached point query: value-equal to noise_wpoint_n */
+static inline uint32_t
+noise_wpoint_c(noise_wcache_t *c, const int16_t *p, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags)
+{
+	int16_t s[4];
+	uint32_t f[4], v[16];
+	noise_wcell(s, f, p, x, flags, dim);
+	memcpy(v, noise_wcorners(c, s, x, w, seed, dim), sizeof(uint32_t) << dim);
+	noise_wreduce(v, f, x, dim, dim);
+	return v[0];
+}
+
+/* Row stepper: out[k] = noise_wpoint_n(p0 + k * dstep along the LAST axis),
+ * k < n, the coordinate wrapping in int16_t. Like noise_get_v + noise_quad,
+ * it fetches the 2^dim corners once per lattice cell and collapses the
+ * other axes once per cell; each sample is then one multiply-add on the
+ * innermost axis. `c` may be NULL. */
+static inline void
+noise_wrow(uint32_t *out, unsigned n, const int16_t *p0, int16_t dstep, unsigned x,
+           unsigned w, unsigned seed, uint8_t dim, unsigned flags, noise_wcache_t *c)
+{
+	const unsigned L = dim - 1u;
+	const uint16_t mask = COORDMASK_LSHIFT(x), lo = (uint16_t) ~mask;
+	noise_wcache_t local;
+	int16_t p[4], s[4];
+	uint32_t f[4], v[16], b0 = 0;
+	int32_t st = 0;
+	int have = 0;
+
+	if (!c) {
+		noise_wcache_init(&local);
+		c = &local;
+	}
+	memcpy(p, p0, sizeof(int16_t) * dim);
+
+	for (unsigned k = 0; k < n; k++, p[L] = (int16_t) (p[L] + dstep)) {
+		int16_t sl = (int16_t) (p[L] & mask);
+		uint32_t fl = (uint16_t) p[L] & lo;
+
+		if (!have || sl != s[L]) {
+			noise_wcell(s, f, p, x, flags, dim);
+			memcpy(v, noise_wcorners(c, s, x, w, seed, dim), sizeof(uint32_t) << dim);
+			noise_wreduce(v, f, x, L, dim);
+			b0 = v[0];
+			st = noise_wstep(v[0], v[1], x);
+			have = 1;
+		}
+		if (flags & NOISE_FADE)
+			fl = noise_wfade(fl, x);
+		out[k] = b0 + (uint32_t) ((int64_t) st * fl);
+	}
+}
+
+/* Plane stepper: out[r * stride + k] = noise_wpoint_n(p0 with the last two
+ * axes advanced by r (rows, axis dim-2) and k (columns, axis dim-1)), for
+ * r < rows, k < n; both coordinates wrap in int16_t. In noise_quad order it
+ * fetches the 2^dim corners ONCE per 2D lattice cell (rows x cols / 4^x
+ * fetches), collapses the fixed outer axes once per cell, the row axis once
+ * per row, and spends one multiply-add per sample. Requires dim >= 2.
+ * `c` may be NULL. */
+static inline void
+noise_wplane(uint32_t *out, unsigned n, unsigned rows, size_t stride, const int16_t *p0,
+             unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags, noise_wcache_t *c)
+{
+	const unsigned R = dim - 2u, C = dim - 1u, side = 1u << x;
+	const uint16_t lo = (uint16_t) (side - 1u);
+	noise_wcache_t local;
+	int16_t p[4], s[4];
+	uint32_t f[4], v[16];
+
+	if (!c) {
+		noise_wcache_init(&local);
+		c = &local;
+	}
+	memcpy(p, p0, sizeof(int16_t) * dim);
+
+	for (unsigned r = 0; r < rows; ) {
+		int16_t pr = (int16_t) (p0[R] + (int) r);
+		unsigned rlen = side - ((uint16_t) pr & lo);
+		if (rlen > rows - r)
+			rlen = rows - r;
+		p[R] = pr;
+
+		for (unsigned k = 0; k < n; ) {
+			int16_t pc = (int16_t) (p0[C] + (int) k);
+			unsigned klen = side - ((uint16_t) pc & lo);
+			if (klen > n - k)
+				klen = n - k;
+			p[C] = pc;
+
+			/* one corner fetch per 2D cell; collapse outer axes */
+			noise_wcell(s, f, p, x, flags, dim);
+			memcpy(v, noise_wcorners(c, s, x, w, seed, dim), sizeof(uint32_t) << dim);
+			noise_wreduce(v, f, x, R, dim);
+			{
+				const uint32_t a00 = v[0], a01 = v[1], a10 = v[2], a11 = v[3];
+				const int32_t s0 = noise_wstep(a00, a10, x), s1 = noise_wstep(a01, a11, x);
+				uint32_t fr0 = (uint16_t) pr & lo, fc0 = (uint16_t) pc & lo;
+
+				for (unsigned i = 0; i < rlen; i++) {
+					uint32_t fr = fr0 + i, *o = out + (size_t) (r + i) * stride + k;
+					if (flags & NOISE_FADE)
+						fr = noise_wfade(fr, x);
+					const uint32_t b0 = a00 + (uint32_t) ((int64_t) s0 * fr);
+					const uint32_t b1 = a01 + (uint32_t) ((int64_t) s1 * fr);
+					const int32_t st = noise_wstep(b0, b1, x);
+					for (unsigned j = 0; j < klen; j++) {
+						uint32_t fc = fc0 + j;
+						if (flags & NOISE_FADE)
+							fc = noise_wfade(fc, x);
+						o[j] = b0 + (uint32_t) ((int64_t) st * fc);
+					}
+				}
+			}
+			k += klen;
+		}
+		r += rlen;
+	}
 }
 
 /* Point-evaluation ergonomic helpers */

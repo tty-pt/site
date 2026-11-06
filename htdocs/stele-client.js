@@ -338,18 +338,16 @@ export class SteleWasmClient {
 			stele_host_event_emit: hostEventEmit
 		};
 
+		// No catch-all stub for env: an unresolved import used to become a
+		// silent `() => 0`, which hid missing code (e.g. a hash function left
+		// out of the module returned 0 forever). Unresolved imports are now
+		// reported and trap when called; see reportUnresolvedImports.
 		const imports = {
-			env: new Proxy({
+			env: {
 				memory: this.sharedMemory,
 				...steleImports,
 				__main_argc_argv: () => 0
-			}, {
-				get: (target, prop) => {
-					if (prop in target) return target[prop];
-					if (prop === 'memory') return this.sharedMemory;
-					return () => 0;
-				}
-			}),
+			},
 			stele: steleImports,
 			stl: steleImports,
 			wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 })
@@ -429,8 +427,36 @@ export class SteleWasmClient {
 				console.error(`Failed to init capability bridge for ${ns}:`, e);
 			}
 		}
+		if (wasmModule) this.reportUnresolvedImports(slot, wasmModule, imports);
 		imports.__candidateBridges = candidateBridges;
 		return imports;
+	}
+
+	/**
+	 * Fail loudly on imports no host or capability bridge provides: log them
+	 * once per instantiation and bind each to a stub that throws when called,
+	 * so the module still instantiates (No-JS-style progressive enhancement)
+	 * but a missing symbol can never masquerade as a successful zero result.
+	 * WASI is left to its shim namespace.
+	 */
+	reportUnresolvedImports(slot, wasmModule, imports) {
+		if (typeof WebAssembly.Module.imports !== 'function') return [];
+		const unresolved = [];
+		for (const imp of WebAssembly.Module.imports(wasmModule)) {
+			if (imp.module === 'wasi_snapshot_preview1') continue;
+			const ns = imports[imp.module] || (imports[imp.module] = {});
+			if (imp.name in ns) continue;
+			if (imp.kind !== 'function') continue; // missing memory/table/global: LinkError
+			const id = `${imp.module}.${imp.name}`;
+			unresolved.push(id);
+			ns[imp.name] = () => {
+				throw new Error(`[stele-client] unresolved WASM import ${id} called (slot ${slot})`);
+			};
+		}
+		if (unresolved.length) {
+			console.error(`[stele-client] slot ${slot}: unresolved WASM imports: ${unresolved.join(', ')}`);
+		}
+		return unresolved;
 	}
 
 	async boot(wasmUrl = null) {

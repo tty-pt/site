@@ -58,9 +58,10 @@ WASM_LDFLAGS := -mexec-model=reactor \
                 -Wl,--no-entry \
                 -Wl,--export=malloc \
                 -Wl,--export=free \
-                -Wl,--export=_initialize \
-                -Wl,--allow-undefined \
-                -Wl,--allow-undefined-file=$(REPO_ROOT)/scripts/wasm-allowed-imports.lst
+                -Wl,--export=_initialize
+# No --allow-undefined: host imports must be declared with an explicit
+# import_module (ISO_IMPORT); anything else is a link error instead of a
+# silent `env.*` import the browser host would have to stub.
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/mods/common/ux/site_ui.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
 

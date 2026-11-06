@@ -9,11 +9,10 @@ WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
 	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_mount_bin -Wl,--export=stl_kernel_unmount \
 	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_tick \
 	-Wl,--export=stl_kernel_version -Wl,--export=stl_kernel_register_module \
-	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_mount_bin -Wl,--export=stele_kernel_unmount \
+	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_unmount \
 	-Wl,--export=stele_kernel_update -Wl,--export=stele_kernel_action -Wl,--export=stele_kernel_tick \
 	-Wl,--export=stele_kernel_version -Wl,--export=stele_kernel_register_module \
-	-Wl,--export=wasm_fetch_callback \
-	-Wl,--allow-undefined -Wl,--allow-undefined-file=scripts/wasm-allowed-imports.lst
+	-Wl,--export=wasm_fetch_callback
 
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
