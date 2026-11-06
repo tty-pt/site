@@ -14,7 +14,7 @@ Deno.test("auren browser demo: verify SSR, WebAssembly client hydration, and pro
 
   try {
     /* 1. Navigate to /auren */
-    const res = await page.goto(`${BASE}/auren`, { waitUntil: "networkidle" });
+    const res = await page.goto(`${BASE}/auren`, { waitUntil: "domcontentloaded" });
     if (!res || res.status() !== 200) {
       throw new Error(`/auren navigation failed with status ${res?.status()}`);
     }
