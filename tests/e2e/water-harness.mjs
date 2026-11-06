@@ -40,9 +40,16 @@ const WASM = opt('--wasm', path.join(ROOT, 'htdocs/nd.wasm'));
 /* Biome indices used by the ND map tiles (see tests/unit/test_seven_world.c):
  * 0 = water, 10 = land (grass). */
 const SCENES = {
-	land:  () => 10,
-	coast: i => ((i % 7) <= 2 ? 10 : 0), /* land west, sea east */
-	deep:  () => 0,
+	land:        () => 10,
+	coast:       i => ((i % 7) <= 2 ? 10 : 0), /* land west, sea east */
+	island:      i => { const c = i % 7, r = Math.floor(i / 7); return (c >= 2 && c <= 4 && r >= 2 && r <= 4) ? 14 : 0; }, /* tropical sand island */
+	bay:         i => { const c = i % 7, r = Math.floor(i / 7); return (c >= 3 && r >= 2 && r <= 4) ? 0 : 10; }, /* coastal bay */
+	deep:        () => 0,
+	peninsula:   i => { const c = i % 7, r = Math.floor(i / 7); return (c === 3 && r >= 1 && r <= 4) ? 10 : 0; }, /* narrow finger of land */
+	channel:     i => { const c = i % 7, r = Math.floor(i / 7); return (c >= 2 && c <= 3) ? 0 : 10; }, /* narrow strait between continents */
+	diagonal:    i => { const c = i % 7, r = Math.floor(i / 7); return (c + r <= 6) ? 10 : 0; }, /* diagonal 45-degree coast */
+	lake:        i => { const c = i % 7, r = Math.floor(i / 7); return (c >= 2 && c <= 4 && r >= 2 && r <= 4) ? 0 : 10; }, /* inland lake */
+	archipelago: i => { const c = i % 7, r = Math.floor(i / 7); return ((c === 2 && r === 2) || (c === 4 && r === 3) || (c === 3 && r === 5)) ? 14 : 0; }, /* scattered islands */
 };
 
 function mapHex(scene, pos) {

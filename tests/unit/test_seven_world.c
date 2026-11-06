@@ -203,6 +203,7 @@ int main(void)
 				(*c)++;
 		}
 		printf("INFO: visibly changed after 8 ticks: shallow %d/%d, deep %d/%d\n", sh_c, sh_n, dp_c, dp_n);
+		fflush(stdout);
 		assert(sh_n > 0 && dp_n > 0);
 		assert(sh_c * 10 >= sh_n);
 		assert(dp_c * 10 >= dp_n);

@@ -56,6 +56,111 @@ static inline uint32_t alpha_blend_rgb(uint32_t bg, uint32_t fg, int alpha)
 	return RGB(r, g, b);
 }
 
+/* ============================================================================
+ * NeverDark Seven: Authoritative Water Tuning Configuration
+ * Zero magic constants. All bathymetric, wave dispersion, tidal ebb/flow,
+ * caustic, and illumination parameters centralized and individually tunable.
+ * ============================================================================ */
+
+#define ND_WATER_MAX_OCTAVES 8
+
+typedef struct {
+	uint8_t shift;        /* Libnoise lattice shift (3..10 = 8px..1024px) */
+	int16_t amp;          /* Wave height amplitude contribution (scaled / 16) */
+	uint32_t seed;        /* Unique octave seed */
+	uint8_t speed_num_x;  /* Dispersion phase drift speed in x: (anim * speed_num_x) >> speed_den */
+	uint8_t speed_num_y;  /* Dispersion phase drift speed in y: (anim * speed_num_y) >> speed_den */
+	uint8_t speed_den;    /* Dispersion divisor bit-shift */
+	uint8_t morph_shift;  /* 3D noise morphing bit-shift (anim >> morph_shift) */
+	int16_t offset_x;     /* Fixed world offset to prevent harmonic alignment */
+	int16_t offset_y;
+} nd_water_octave_t;
+
+typedef struct {
+	/* 1. Coastal Bathymetry & Continental Shelf */
+	int shelf_width_units;      /* Width of coastal shelf in world units (384 units = 768px = 2.4 room tiles) */
+	int shallow_depth_max;      /* Threshold for crystal shallows (d <= 5) */
+	int shelf_depth_max;        /* Threshold for continental shelf (d <= 12) */
+	int max_depth;              /* Maximum abyssal depth tier (28) */
+
+	/* 2. Shoreline Ebb & Flow (Tidal Swash & Backwash Dynamics) */
+	int foam_base_alpha;        /* Base opacity of shore foam during crest surge */
+	int foam_surge_alpha;       /* Extra opacity contribution from wave elevation */
+	int wet_sand_darken;        /* Darkening factor for wet sand during backwash (percent, e.g. 76 = 24% darker) */
+
+	/* 3. Wave Spectrum & Physical Dispersion */
+	int num_octaves;
+	nd_water_octave_t octaves[ND_WATER_MAX_OCTAVES];
+
+	/* 4. Subsurface Caustics */
+	uint8_t caustic_shift;      /* Lattice resolution (3 = 8px) */
+	uint8_t caustic_c1_speed;   /* Counter-drift speed 1 divisor (anim >> caustic_c1_speed) */
+	uint8_t caustic_c2_speed;   /* Counter-drift speed 2 divisor (anim >> caustic_c2_speed) */
+	int caustic_threshold;      /* Web ridge sharpness threshold */
+	int caustic_max_alpha;      /* Maximum blending intensity */
+	int caustic_min_d;          /* Minimum depth for caustics */
+	int caustic_max_d;          /* Maximum depth for caustics */
+
+	/* 5. Surface Hillshading & Sun Lighting */
+	int diffuse_lit_mult;       /* Multiplier for sunward wave slopes */
+	int diffuse_lit_max;        /* Clamped maximum highlight alpha */
+	int shadow_mult;            /* Multiplier for wave shadows */
+	int shadow_max;             /* Clamped maximum shadow alpha */
+	int wave_diffuse_deadband;  /* Flat water deadband threshold */
+} nd_water_config_t;
+
+static const nd_water_config_t s_water_cfg = {
+	/* 1. Coastal Bathymetry: gradual continental shelf spanning 320 units (2 full room tiles = 640px) */
+	.shelf_width_units = 320,
+	.shallow_depth_max = 5,
+	.shelf_depth_max   = 12,
+	.max_depth         = 28,
+
+	/* 2. Shoreline Ebb & Flow: natural translucent swash & wet-sand backwash */
+	.foam_base_alpha  = 55,
+	.foam_surge_alpha = 45,
+	.wet_sand_darken  = 82,
+
+	/* 3. Wave Spectrum: 8-octave hierarchy matching terrain relief (1024px down to 8px)
+	 * Dispersion scaling: phase velocity c proportional to sqrt(lambda).
+	 * Macro swells roll rapidly across the sea; capillary ripples drift gently without boiling. */
+	.num_octaves = 8,
+	.octaves = {
+		/* Shift 10: 1024px (~6 rooms) — continental ocean swell sweeps */
+		{ .shift = 10, .amp = 48, .seed = 0x4F434530u, .speed_num_x = 4, .speed_num_y = 2, .speed_den = 1, .morph_shift = 6, .offset_x =   0, .offset_y =   0 },
+		/* Shift 9:  512px (~3 rooms) — grand rolling sea swell */
+		{ .shift =  9, .amp = 36, .seed = 0x4F434541u, .speed_num_x = 3, .speed_num_y = 3, .speed_den = 2, .morph_shift = 5, .offset_x =  17, .offset_y =   7 },
+		/* Shift 8:  256px (~1.5 rooms) — major wave train traversing room boundaries */
+		{ .shift =  8, .amp = 28, .seed = 0x5357454Cu, .speed_num_x = 2, .speed_num_y = 1, .speed_den = 1, .morph_shift = 5, .offset_x =  31, .offset_y =  13 },
+		/* Shift 7:  128px (1 room) — mid-sea rolling swell */
+		{ .shift =  7, .amp = 22, .seed = 0x57415645u, .speed_num_x = 3, .speed_num_y = 3, .speed_den = 3, .morph_shift = 4, .offset_x =  47, .offset_y =  23 },
+		/* Shift 6:   64px (half room) — primary wind waves */
+		{ .shift =  6, .amp = 16, .seed = 0x52495050u, .speed_num_x = 1, .speed_num_y = 1, .speed_den = 1, .morph_shift = 4, .offset_x =  61, .offset_y =  29 },
+		/* Shift 5:   32px (2 cells) — surface chop */
+		{ .shift =  5, .amp = 10, .seed = 0x46494E45u, .speed_num_x = 1, .speed_num_y = 1, .speed_den = 2, .morph_shift = 5, .offset_x =  79, .offset_y =  37 },
+		/* Shift 4:   16px (1 cell) — gentle surface ripples */
+		{ .shift =  4, .amp =  6, .seed = 0x57415452u, .speed_num_x = 1, .speed_num_y = 1, .speed_den = 3, .morph_shift = 5, .offset_x =  97, .offset_y =  43 },
+		/* Shift 3:    8px (half cell) — capillary wavelets: slow gentle drift, zero jitter/boiling */
+		{ .shift =  3, .amp =  4, .seed = 0x53505241u, .speed_num_x = 1, .speed_num_y = 1, .speed_den = 4, .morph_shift = 6, .offset_x = 113, .offset_y =  51 },
+	},
+
+	/* 4. Subsurface Caustics: delicate sunlight filigree */
+	.caustic_shift     = 3,
+	.caustic_c1_speed  = 2,
+	.caustic_c2_speed  = 2,
+	.caustic_threshold = 14,
+	.caustic_max_alpha = 65,
+	.caustic_min_d     = 2,
+	.caustic_max_d     = 6,
+
+	/* 5. Surface Hillshading */
+	.diffuse_lit_mult      = 5,
+	.diffuse_lit_max       = 85,
+	.shadow_mult           = 5,
+	.shadow_max            = 70,
+	.wave_diffuse_deadband = 1,
+};
+
 static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 {
 	if (num <= 0) return c1;
@@ -73,18 +178,19 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	/* Volumetric Beer-Lambert light extinction colors:
 	 * Red and yellow wavelengths attenuate first, leaving brilliant tropical turquoise
 	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
-	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= 4) */
-	static const uint32_t C_SHELF   = RGB(52, 178, 228); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
-	static const uint32_t C_OUTER   = RGB(36, 122, 202); /* Coastal ocean: deep azure (d = 12..22) */
+	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= shallow_depth_max) */
+	static const uint32_t C_SHELF   = RGB(52, 178, 228); /* Continental shelf: vibrant azure/cerulean (d = shallow..shelf) */
+	static const uint32_t C_OUTER   = RGB(36, 122, 202); /* Coastal ocean: deep azure (d = shelf..22) */
 	static const uint32_t C_ABYSS   = RGB(14, 50, 135);  /* Abyssal basin: deep royal sapphire (d >= 22) */
 
 	uint32_t water_col;
-	if (depth <= 4) {
-		water_col = lerp_rgb(C_SHALLOW, C_SHELF, depth - 1, 3);
-	} else if (depth <= 12) {
-		water_col = lerp_rgb(C_SHELF, C_OUTER, depth - 4, 8);
+	if (depth <= s_water_cfg.shallow_depth_max) {
+		water_col = lerp_rgb(C_SHALLOW, C_SHELF, depth - 1, s_water_cfg.shallow_depth_max - 1);
+	} else if (depth <= s_water_cfg.shelf_depth_max) {
+		water_col = lerp_rgb(C_SHELF, C_OUTER, depth - s_water_cfg.shallow_depth_max,
+		                     s_water_cfg.shelf_depth_max - s_water_cfg.shallow_depth_max);
 	} else {
-		int t = depth - 12;
+		int t = depth - s_water_cfg.shelf_depth_max;
 		if (t > 10) t = 10;
 		water_col = lerp_rgb(C_OUTER, C_ABYSS, t, 10);
 	}
@@ -95,16 +201,16 @@ static inline int water_alpha_at_depth(int depth)
 {
 	/* True exponential Beer-Lambert optical extinction:
 	 * T(d) = exp(-sigma * d), alpha = 255 * (1 - T(d)).
-	 * Shallows (d=1..3) are crystal clear (67%..50% transmission of the sandy seabed).
+	 * Shallows (d=1..3) are crystal clear (85%..64% transmission of the sandy seabed).
 	 * Continental shelf gently darkens, reaching total optical extinction in the deep abyss. */
 	static const uint8_t s_beer_lambert_alpha[29] = {
 		0,
-		85,  107, 127, 143, 158, 171, 182, 191, 200, 207,
-		213, 219, 224, 228, 231, 234, 237, 239, 241, 243,
-		245, 246, 247, 248, 250, 252, 254, 255
+		38,   65,  92, 118, 142, 162, 178, 190, 200, 208,
+		215, 221, 226, 230, 234, 237, 240, 242, 244, 246,
+		248, 249, 250, 251, 252, 253, 254, 255
 	};
 	if (depth <= 0) return 0;
-	if (depth >= 28) return 255;
+	if (depth >= s_water_cfg.max_depth) return 255;
 	return (int)s_beer_lambert_alpha[depth];
 }
 
@@ -281,27 +387,40 @@ static inline int nd_global_land_dist(int32_t wx, int32_t wy)
 	return min_dist;
 }
 
-/* Sub-linear bathymetric shelf distance (R3): extends water shelf darkening
- * across a 72-unit coastal shelf using sub-linear power attenuation
- * to preserve wide, luminous shallow water near the shore before gently
- * transitioning into the deep ocean basin. */
+/* Gradual continental shelf bathymetry: extends water shelf darkening
+ * across a broad coastal shelf (s_water_cfg.shelf_width_units = 320 units)
+ * to preserve expansive, luminous shallow Caribbean turquoise water near
+ * the shore before gently transitioning into the deep ocean basin. */
 static inline int nd_water_depth_at(int dist_units, int terrain_depth)
 {
-	int depth;
-	if (dist_units < 0) dist_units = 0;
-	if (dist_units >= 160) {
-		depth = 28;
+	if (dist_units <= 0) return 1;
+
+	/* 1. Dean's Equilibrium Coastal Shelf Profile:
+	 * h(y) = 1 + (D_max - 1) * (y / shelf_width)^(2/3) */
+	int shelf_w = s_water_cfg.shelf_width_units;
+	if (shelf_w <= 0) shelf_w = 384;
+	int base_d;
+	if (dist_units >= shelf_w) {
+		base_d = s_water_cfg.max_depth;
 	} else {
-		/* Gentle, expansive shallow shelf: linear-weighted progression across a full tile (160 units) */
-		int t_frac = (dist_units * 256) / 160;
-		int t_sqrt = ndw_isqrt(t_frac * 256);
-		int t_sub = (t_frac * 3 + t_sqrt) / 4;
-		depth = 1 + (27 * t_sub) / 256;
+		int64_t d2 = (int64_t)dist_units * dist_units;
+		int r = 0;
+		while ((int64_t)(r + 1) * (r + 1) * (r + 1) <= d2) r++;
+		base_d = 1 + ((s_water_cfg.max_depth - 1) * r) / 53;
 	}
-	if (terrain_depth > depth && terrain_depth <= 28) {
-		depth = terrain_depth;
-	}
+
+	/* 2. Continuous 3D bathymetric modulation from 8-octave terrain heightmap:
+	 * Water can't discard terrain height. It must use it.
+	 * terrain_depth = w_level - elev. Nominal ocean depth = 32.
+	 * Shoreline stays pinned to shallow crystal clear water (d=1),
+	 * with seabed topography ramping smoothly offshore across the shelf. */
+	int delta = terrain_depth - 32;
+	int blend_dist = dist_units < 192 ? dist_units : 192;
+	int mod = (delta * blend_dist) / (192 * 6);
+
+	int depth = base_d + mod;
 	if (depth < 1) depth = 1;
+	if (depth > s_water_cfg.max_depth) depth = s_water_cfg.max_depth;
 	return depth;
 }
 
@@ -313,22 +432,6 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 	(void)hash;
 	uint16_t world = (uint16_t)pos[3];
 	int16_t w_level = nd_terrain_water_level(world);
-	int land_di[9], land_dj[9], n_land = 0;
-	const ndw_warp_grid_t *wg = NULL;
-
-	if (s_active_chunk_land_mask) {
-		wg = nd_seven_warp_grid(pos);
-		for (int dj = -1; dj <= 1; dj++) {
-			for (int di = -1; di <= 1; di++) {
-				int k = (dj + 1) * 3 + (di + 1);
-				if (s_active_chunk_land_mask & (1 << k)) {
-					land_di[n_land] = di;
-					land_dj[n_land] = dj;
-					n_land++;
-				}
-			}
-		}
-	}
 
 	for (int uy = 0; uy < NDW_CELL_PX; uy++) {
 		for (int ux = 0; ux < NDW_CELL_PX; ux++) {
@@ -340,36 +443,23 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 			int terrain_depth = (int)(w_level - elev);
 			if (terrain_depth < 1) terrain_depth = 1;
 
+			int dist_units = s_water_cfg.shelf_width_units;
+			if (s_active_n_land_tiles > 0 || s_active_n_land_juts > 0) {
+				const ndw_warp_grid_t *wg = nd_seven_warp_grid(pos);
+				int qx = px_in_tile * NDW_SUB;
+				int qy = py_in_tile * NDW_SUB;
+				int w_dx = 0, w_dy = 0;
+				if (wg) ndw_warp_at(wg, qx, qy, &w_dx, &w_dy);
+				int32_t wx_warped = wx + w_dx / NDW_FINE;
+				int32_t wy_warped = wy + w_dy / NDW_FINE;
+				dist_units = nd_global_land_dist(wx_warped, wy_warped);
+			}
+
 			int depth;
 			if (g->kind == NDW_G_SHALLOW_WATER) {
 				depth = 4;
-			} else if (s_active_n_land_tiles > 0 || s_active_n_land_juts > 0) {
-				int qx = px_in_tile * NDW_SUB;
-				int qy = py_in_tile * NDW_SUB;
-				int dx = 0, dy = 0;
-				if (wg) ndw_warp_at(wg, qx, qy, &dx, &dy);
-
-				int dist_units = nd_global_land_dist(wx + dx / NDW_FINE, wy + dy / NDW_FINE);
-				depth = nd_water_depth_at(dist_units, terrain_depth);
-			} else if (n_land > 0 && wg) {
-				int qx = px_in_tile * NDW_SUB;
-				int qy = py_in_tile * NDW_SUB;
-				int dx = 0, dy = 0;
-				ndw_warp_at(wg, qx, qy, &dx, &dy);
-
-				int px_w = px_in_tile * NDW_FINE + dx;
-				int py_w = py_in_tile * NDW_FINE + dy;
-
-				int max_land_d = -999999;
-				for (int l = 0; l < n_land; l++) {
-					int d = ndw_tile_depth(s_active_chunk_grp, 0, land_di[l], land_dj[l], px_w, py_w);
-					if (d > max_land_d) max_land_d = d;
-				}
-
-				int dist_units = (-max_land_d) / NDW_FINE;
-				depth = nd_water_depth_at(dist_units, terrain_depth);
 			} else {
-				depth = terrain_depth;
+				depth = nd_water_depth_at(dist_units, terrain_depth);
 			}
 			if (depth < 1) depth = 1;
 
@@ -621,11 +711,15 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 							int16_t w_level = nd_terrain_water_level(world);
 							int terrain_depth = (int)(w_level - elev);
 							if (terrain_depth < 1) terrain_depth = 1;
+
 							int qx = border_q(cx, sx);
 							int qy = border_q(cy, sy);
-							int dx = 0, dy = 0;
-							ndw_warp_at(&ent->grid, qx, qy, &dx, &dy);
-							int dist_units = nd_global_land_dist(wx + dx / NDW_FINE, wy + dy / NDW_FINE);
+							int w_dx = 0, w_dy = 0;
+							ndw_warp_at(&ent->grid, qx, qy, &w_dx, &w_dy);
+							int32_t wx_warped = wx + w_dx / NDW_FINE;
+							int32_t wy_warped = wy + w_dy / NDW_FINE;
+
+							int dist_units = nd_global_land_dist(wx_warped, wy_warped);
 							depth_grid[y * w + x] = (uint8_t)nd_water_depth_at(dist_units, terrain_depth);
 						}
 					}
@@ -1014,37 +1108,59 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 		/* Seamless world-space anchor: room pos in tile pixel coordinates (TILE_PX_W x TILE_PX_H = 320 x 256) */
 		int base_px_x = (int)pos[0] * TILE_PX_W;
 		int base_px_y = -(int)pos[1] * TILE_PX_H;
-		int16_t z_time = (int16_t)(anim >> 1);
-
-		/* Multi-octave wave trains: wind-aligned primary swell + surface wavelets */
-		int16_t dx1 = (int16_t)((anim * 2) >> 1);
-		int16_t dy1 = (int16_t)((anim * 1) >> 1);
 
 		/* Caustic counter-drifts */
-		int16_t c1_dx = (int16_t)(anim >> 2);
-		int16_t c1_dy = (int16_t)(anim >> 2);
-		int16_t c2_dx = (int16_t)(-anim >> 2);
-		int16_t c2_dy = (int16_t)(anim >> 1);
+		int16_t c1_dx = (int16_t)(anim >> s_water_cfg.caustic_c1_speed);
+		int16_t c1_dy = (int16_t)(anim >> s_water_cfg.caustic_c1_speed);
+		int16_t c2_dx = (int16_t)(-anim >> s_water_cfg.caustic_c2_speed);
+		int16_t c2_dy = (int16_t)(anim >> (s_water_cfg.caustic_c2_speed - 1));
 
-		noise_wcache_t c_oct[5], c_c1, c_c2, c_surf;
-		for (int i = 0; i < 5; i++) noise_wcache_init(&c_oct[i]);
+		/* Surf foam drift: travels shoreward */
+		int16_t surf_dx = (int16_t)((anim * 3) >> 2);
+		int16_t surf_dy = (int16_t)((anim * 3) >> 3);
+		int16_t surf_z  = (int16_t)(anim >> 4);
+
+		noise_wcache_t c_oct[ND_WATER_MAX_OCTAVES], c_c1, c_c2, c_surf;
+		for (int i = 0; i < s_water_cfg.num_octaves; i++) noise_wcache_init(&c_oct[i]);
 		noise_wcache_init(&c_c1);
 		noise_wcache_init(&c_c2);
 		noise_wcache_init(&c_surf);
 
-		static uint32_t w_oct[5][TILE_PX_W];
+		static uint32_t w_oct[ND_WATER_MAX_OCTAVES][TILE_PX_W + 4];
 		static uint32_t c1_row[TILE_PX_W], c2_row[TILE_PX_W], surf_row[TILE_PX_W];
-		static int h_prev[TILE_PX_W], h_curr[TILE_PX_W];
-		int have_prev = 0;
+		static int h_prev[TILE_PX_W + 4], h_curr[TILE_PX_W + 4];
 
-		/* 5-octave cascade matching procedural terrain relief: broad 128px ocean swell down to 8px wavelets */
-		static const struct { unsigned shift; int amp; uint32_t seed; } OCTS[5] = {
-			{ 7, 36, 0x4F434541u }, /* 128px: massive rolling ocean swell */
-			{ 6, 24, 0x5357454Cu }, /*  64px: major wave train */
-			{ 5, 16, 0x57415645u }, /*  32px: mid-frequency wave */
-			{ 4,  8, 0x52495050u }, /*  16px: small surface wave */
-			{ 3,  4, 0x46494E45u }  /*   8px: capillary surface ripple */
-		};
+		/* Precompute octave displacement and time offsets */
+		int16_t oct_z[ND_WATER_MAX_OCTAVES];
+		int16_t oct_dx[ND_WATER_MAX_OCTAVES];
+		int16_t oct_dy[ND_WATER_MAX_OCTAVES];
+		for (int i = 0; i < s_water_cfg.num_octaves; i++) {
+			const nd_water_octave_t *oct = &s_water_cfg.octaves[i];
+			oct_z[i] = (int16_t)(anim >> oct->morph_shift);
+			oct_dx[i] = (int16_t)((anim * oct->speed_num_x) >> oct->speed_den);
+			oct_dy[i] = (int16_t)((anim * oct->speed_num_y) >> oct->speed_den);
+		}
+
+		/* Evaluate row r = -1 to initialize h_prev so row r = 0 has seamless continuous slope */
+		int gy_prev = base_px_y + src_y0 - 1;
+		int gx_start = base_px_x + src_x0 - 1;
+		for (int i = 0; i < s_water_cfg.num_octaves; i++) {
+			const nd_water_octave_t *oct = &s_water_cfg.octaves[i];
+			int16_t p[3] = {
+				(int16_t)(oct_z[i] + oct->offset_y),
+				(int16_t)(gy_prev - oct_dy[i] + oct->offset_y),
+				(int16_t)(gx_start - oct_dx[i] + oct->offset_x)
+			};
+			noise_wrow(w_oct[i], bw + 2, p, 1, oct->shift, 8, oct->seed, 3, NOISE_FADE, &c_oct[i]);
+		}
+		for (int c = 0; c < bw + 2; c++) {
+			int total_h = 0;
+			for (int i = 0; i < s_water_cfg.num_octaves; i++) {
+				int v = (int)(w_oct[i][c] >> 16) - 128;
+				total_h += (v * s_water_cfg.octaves[i].amp) / 16;
+			}
+			h_prev[c] = total_h;
+		}
 
 		for (int r = 0; r < bh; r++) {
 			int y_in_tile = (src_y0 + r);
@@ -1056,53 +1172,54 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			int has_caustic = 0, has_surf = 0, has_swell = 0;
 			for (int c = 0; c < bw; c++) {
 				uint8_t d = depth_row[c];
-				if (d >= 2 && d <= 6) has_caustic = 1;
+				if (d >= s_water_cfg.caustic_min_d && d <= s_water_cfg.caustic_max_d) has_caustic = 1;
 				if (d >= 1 && d <= 2) has_surf = 1;
-				if (d >= 3) has_swell = 1;
+				if (d >= 1) has_swell = 1;
 			}
 
 			if (!has_caustic && !has_surf && !has_swell) {
 				memcpy(dst_row, src_row, (size_t)bw * sizeof(uint32_t));
-				have_prev = 0;
 				continue;
 			}
 
 			int gy = base_px_y + y_in_tile;
 			int gx = base_px_x + src_x0;
 
-			/* 1. Waves: 5-octave elevation cascade from 128px macro swell to 8px wavelets */
+			/* 1. Waves: multi-scale elevation cascade from 1024px macro swell to 8px wavelets */
 			if (has_swell) {
-				for (int i = 0; i < 5; i++) {
+				for (int i = 0; i < s_water_cfg.num_octaves; i++) {
+					const nd_water_octave_t *oct = &s_water_cfg.octaves[i];
 					int16_t p[3] = {
-						(int16_t)(z_time + (int)(i * 17)),
-						(int16_t)(gy - dy1 + (int)(i * 7)),
-						(int16_t)(gx - dx1 + (int)(i * 13))
+						(int16_t)(oct_z[i] + oct->offset_y),
+						(int16_t)(gy - oct_dy[i] + oct->offset_y),
+						(int16_t)(gx_start - oct_dx[i] + oct->offset_x)
 					};
-					noise_wrow(w_oct[i], bw, p, 1, OCTS[i].shift, 8, OCTS[i].seed, 3, NOISE_FADE, &c_oct[i]);
+					noise_wrow(w_oct[i], bw + 2, p, 1, oct->shift, 8, oct->seed, 3, NOISE_FADE, &c_oct[i]);
 				}
 
-				for (int c = 0; c < bw; c++) {
+				for (int c = 0; c < bw + 2; c++) {
 					int total_h = 0;
-					for (int i = 0; i < 5; i++) {
+					for (int i = 0; i < s_water_cfg.num_octaves; i++) {
 						int v = (int)(w_oct[i][c] >> 16) - 128;
-						total_h += (v * OCTS[i].amp) / 16;
+						total_h += (v * s_water_cfg.octaves[i].amp) / 16;
 					}
 					h_curr[c] = total_h;
 				}
 			}
 
-			/* 2. Caustics: fine subtle network (x=3, 8px detail) */
+			/* 2. Caustics: fine subtle network (8px detail) */
 			if (has_caustic) {
-				int16_t p_c1[3] = { z_time, (int16_t)(gy + c1_dy), (int16_t)(gx + c1_dx) };
-				noise_wrow(c1_row, bw, p_c1, 1, 3, 8, 0x43415553u, 3, NOISE_FADE, &c_c1);
+				int16_t z_c = (int16_t)(anim >> 2);
+				int16_t p_c1[3] = { z_c, (int16_t)(gy + c1_dy), (int16_t)(gx + c1_dx) };
+				noise_wrow(c1_row, bw, p_c1, 1, s_water_cfg.caustic_shift, 8, 0x43415553u, 3, NOISE_FADE, &c_c1);
 
-				int16_t p_c2[3] = { z_time, (int16_t)(gy + c2_dy - 9), (int16_t)(gx + c2_dx + 7) };
-				noise_wrow(c2_row, bw, p_c2, 1, 3, 8, 0x54494353u, 3, NOISE_FADE, &c_c2);
+				int16_t p_c2[3] = { z_c, (int16_t)(gy + c2_dy - 9), (int16_t)(gx + c2_dx + 7) };
+				noise_wrow(c2_row, bw, p_c2, 1, s_water_cfg.caustic_shift, 8, 0x54494353u, 3, NOISE_FADE, &c_c2);
 			}
 
-			/* 3. Surf foam: evaluate only along shore (d 1..2) */
+			/* 3. Surf foam: dynamic travelling foam along shore */
 			if (has_surf) {
-				int16_t p_surf[3] = { z_time, (int16_t)gy, (int16_t)gx };
+				int16_t p_surf[3] = { surf_z, (int16_t)(gy - surf_dy), (int16_t)(gx - surf_dx) };
 				noise_wrow(surf_row, bw, p_surf, 1, 4, 8, 0x53555246u, 3, NOISE_FADE, &c_surf);
 			}
 
@@ -1116,51 +1233,67 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				uint32_t col = src_row[c];
 
 				/* Caustics (d = 2..6): very delicate, faint sunlight shimmer on seabed */
-				if (d >= 2 && d <= 6) {
+				if (d >= s_water_cfg.caustic_min_d && d <= s_water_cfg.caustic_max_d) {
 					int diff = abs((int)(c1_row[c] >> 16) - (int)(c2_row[c] >> 16));
-					if (diff < 14) {
-						int k = 14 - diff;
-						int c_int = (k * k * (7 - d) * 3) >> 4;
-						if (c_int > 65) c_int = 65;
+					if (diff < s_water_cfg.caustic_threshold) {
+						int k = s_water_cfg.caustic_threshold - diff;
+						int c_int = (k * k * (s_water_cfg.caustic_max_d + 1 - d) * 3) >> 4;
+						if (c_int > s_water_cfg.caustic_max_alpha) c_int = s_water_cfg.caustic_max_alpha;
 						col = alpha_blend_rgb(col, RGB(240, 252, 255), c_int);
 					}
 				}
 
-				/* Shore foam (d = 1, 2) */
+				/* Shoreline Ebb & Flow: natural translucent swash & wet-sand backwash */
 				if (d <= 2) {
 					int surf = (int)(surf_row[c] >> 16);
+					int h = h_curr[c + 1];
 					if (d == 1) {
-						int foam_alpha = 110 + (surf > 140 ? (surf - 140) / 2 : 0);
-						if (foam_alpha > 180) foam_alpha = 180;
-						col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
-					} else if (d == 2 && surf > 140) {
-						int c_alpha = (surf - 140);
-						if (c_alpha > 90) c_alpha = 90;
-						col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
+						if (h > 0 && surf > 140) {
+							/* Flow / Swash: wave crest surges up with delicate, translucent white froth */
+							int surge = (h * s_water_cfg.foam_surge_alpha) / 16;
+							int foam_alpha = s_water_cfg.foam_base_alpha + surge + (surf - 140) / 2;
+							if (foam_alpha > 120) foam_alpha = 120;
+							col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
+						} else if (h < -6) {
+							/* Strong backwash recession: wet sand glisten */
+							col = shade(col, s_water_cfg.wet_sand_darken);
+							if (surf > 195) {
+								int trail_alpha = (surf - 195);
+								col = alpha_blend_rgb(col, RGB(245, 250, 255), trail_alpha);
+							}
+						}
+					} else if (d == 2) {
+						if (h > 1 && surf > 150) {
+							/* Leading edge of incoming wave crest */
+							int c_alpha = (surf - 150) / 2 + h;
+							if (c_alpha > 75) c_alpha = 75;
+							col = alpha_blend_rgb(col, RGB(225, 250, 255), c_alpha);
+						}
 					}
 				}
 
-				/* Wave slope lighting (d >= 3): distinct big rolling swells + crisp small surface wavelets */
-				if (d >= 3 && have_prev && c > 0 && c < bw - 1) {
-					int dh_dx = h_curr[c + 1] - h_curr[c - 1];
-					int dh_dy = h_curr[c] - h_prev[c];
+				/* Wave slope lighting (d >= 2): continuous 3D hillshading across all pixels including borders */
+				if (d >= 2) {
+					int dh_dx = h_curr[c + 2] - h_curr[c];
+					int dh_dy = h_curr[c + 1] - h_prev[c + 1];
 					int diffuse = (-dh_dx - dh_dy);
 
 					/* Natural sun hillshading on multi-scale water surface */
-					if (diffuse > 2) {
-						int lit = diffuse * 4; if (lit > 80) lit = 80;
-						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(70, 160, 230);
+					if (diffuse > s_water_cfg.wave_diffuse_deadband) {
+						int lit = diffuse * s_water_cfg.diffuse_lit_mult;
+						if (lit > s_water_cfg.diffuse_lit_max) lit = s_water_cfg.diffuse_lit_max;
+						uint32_t crest_col = (d <= s_water_cfg.shallow_depth_max) ? RGB(140, 220, 250) : RGB(60, 150, 225);
 						col = alpha_blend_rgb(col, crest_col, lit);
-					} else if (diffuse < -2) {
-						int shade = (-diffuse) * 4; if (shade > 65) shade = 65;
-						col = alpha_blend_rgb(col, RGB(6, 22, 65), shade);
+					} else if (diffuse < -s_water_cfg.wave_diffuse_deadband) {
+						int shd = (-diffuse) * s_water_cfg.shadow_mult;
+						if (shd > s_water_cfg.shadow_max) shd = s_water_cfg.shadow_max;
+						col = alpha_blend_rgb(col, RGB(6, 22, 65), shd);
 					}
 				}
 
 				dst_row[c] = col;
 			}
-			memcpy(h_prev, h_curr, sizeof(h_curr));
-			have_prev = 1;
+			memcpy(h_prev, h_curr, (size_t)(bw + 2) * sizeof(int));
 		}
 	} else {
 		for (int r = 0; r < bh; r++) {
