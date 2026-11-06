@@ -74,8 +74,8 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	 * Red and yellow wavelengths attenuate first, leaving brilliant tropical turquoise
 	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
 	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= 4) */
-	static const uint32_t C_SHELF   = RGB(36, 160, 224); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
-	static const uint32_t C_OUTER   = RGB(24, 108, 195); /* Coastal ocean: deep azure (d = 12..22) */
+	static const uint32_t C_SHELF   = RGB(52, 178, 228); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
+	static const uint32_t C_OUTER   = RGB(36, 122, 202); /* Coastal ocean: deep azure (d = 12..22) */
 	static const uint32_t C_ABYSS   = RGB(14, 50, 135);  /* Abyssal basin: deep royal sapphire (d >= 22) */
 
 	uint32_t water_col;
@@ -289,12 +289,13 @@ static inline int nd_water_depth_at(int dist_units, int terrain_depth)
 {
 	int depth;
 	if (dist_units < 0) dist_units = 0;
-	if (dist_units >= 72) {
+	if (dist_units >= 160) {
 		depth = 28;
 	} else {
-		int t_frac = (dist_units * 256) / 72;
+		/* Gentle, expansive shallow shelf: linear-weighted progression across a full tile (160 units) */
+		int t_frac = (dist_units * 256) / 160;
 		int t_sqrt = ndw_isqrt(t_frac * 256);
-		int t_sub = (t_frac + t_sqrt) / 2;
+		int t_sub = (t_frac * 3 + t_sqrt) / 4;
 		depth = 1 + (27 * t_sub) / 256;
 	}
 	if (terrain_depth > depth && terrain_depth <= 28) {
@@ -1013,46 +1014,37 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 		/* Seamless world-space anchor: room pos in tile pixel coordinates (TILE_PX_W x TILE_PX_H = 320 x 256) */
 		int base_px_x = (int)pos[0] * TILE_PX_W;
 		int base_px_y = -(int)pos[1] * TILE_PX_H;
-		/* Gentle, natural clock progression (tranquil, non-frantic cadence) */
 		int16_t z_time = (int16_t)(anim >> 1);
 
-		/* Tile-level noise planes using original-algorithm noise_wplane (O(1) corner fetches per lattice cell) */
-		static uint32_t caust1[TILE_PX_W * TILE_PX_H];
-		static uint32_t caust2[TILE_PX_W * TILE_PX_H];
-		static uint32_t swell_plane[TILE_PX_W * TILE_PX_H];
-		static uint32_t surf_plane[TILE_PX_W * TILE_PX_H];
+		/* Multi-octave wave trains: wind-aligned primary swell + surface wavelets */
+		int16_t dx1 = (int16_t)((anim * 2) >> 1);
+		int16_t dy1 = (int16_t)((anim * 1) >> 1);
 
-		static uint32_t s_last_rendered_anim = 0xFFFFFFFF;
-		static int16_t s_last_rendered_pos[4] = { -32768, -32768, -32768, -32768 };
+		/* Caustic counter-drifts */
+		int16_t c1_dx = (int16_t)(anim >> 2);
+		int16_t c1_dy = (int16_t)(anim >> 2);
+		int16_t c2_dx = (int16_t)(-anim >> 2);
+		int16_t c2_dy = (int16_t)(anim >> 1);
 
-		if (anim != s_last_rendered_anim || memcmp(pos, s_last_rendered_pos, sizeof(s_last_rendered_pos)) != 0) {
-			s_last_rendered_anim = anim;
-			memcpy(s_last_rendered_pos, pos, sizeof(s_last_rendered_pos));
+		noise_wcache_t c_oct[5], c_c1, c_c2, c_surf;
+		for (int i = 0; i < 5; i++) noise_wcache_init(&c_oct[i]);
+		noise_wcache_init(&c_c1);
+		noise_wcache_init(&c_c2);
+		noise_wcache_init(&c_surf);
 
-			noise_wcache_t cache;
-			noise_wcache_init(&cache);
+		static uint32_t w_oct[5][TILE_PX_W];
+		static uint32_t c1_row[TILE_PX_W], c2_row[TILE_PX_W], surf_row[TILE_PX_W];
+		static int h_prev[TILE_PX_W], h_curr[TILE_PX_W];
+		int have_prev = 0;
 
-			/* 1. Swell: gentle, realistic translational drift along wind (2, 1) */
-			int16_t swell_dx = (int16_t)((anim * 2) >> 2);
-			int16_t swell_dy = (int16_t)((anim * 1) >> 2);
-			int16_t p_swell[3] = { z_time, (int16_t)(base_px_y - swell_dy), (int16_t)(base_px_x - swell_dx) };
-			noise_wplane(swell_plane, TILE_PX_W, TILE_PX_H, TILE_PX_W, p_swell, 5, 24, 0x4F434541u, 3, NOISE_FADE, &cache);
-
-			/* 2. Caustics: two high-frequency counter-drifting layers producing sharp interference ridges */
-			int16_t c1_dx = (int16_t)(anim >> 2);
-			int16_t c1_dy = (int16_t)(anim >> 2);
-			int16_t p_c1[3] = { z_time, (int16_t)(base_px_y + c1_dy), (int16_t)(base_px_x + c1_dx) };
-			noise_wplane(caust1, TILE_PX_W, TILE_PX_H, TILE_PX_W, p_c1, 3, 24, 0x43415553u, 3, NOISE_FADE, &cache);
-
-			int16_t c2_dx = (int16_t)(-anim >> 2);
-			int16_t c2_dy = (int16_t)(anim >> 1);
-			int16_t p_c2[3] = { z_time, (int16_t)(base_px_y + c2_dy - 9), (int16_t)(base_px_x + c2_dx + 7) };
-			noise_wplane(caust2, TILE_PX_W, TILE_PX_H, TILE_PX_W, p_c2, 3, 24, 0x54494353u, 3, NOISE_FADE, &cache);
-
-			/* 3. Surf foam */
-			int16_t p_surf[3] = { z_time, (int16_t)(base_px_y), (int16_t)(base_px_x) };
-			noise_wplane(surf_plane, TILE_PX_W, TILE_PX_H, TILE_PX_W, p_surf, 4, 24, 0x53555246u, 3, NOISE_FADE, &cache);
-		}
+		/* 5-octave cascade matching procedural terrain relief: broad 128px ocean swell down to 8px wavelets */
+		static const struct { unsigned shift; int amp; uint32_t seed; } OCTS[5] = {
+			{ 7, 36, 0x4F434541u }, /* 128px: massive rolling ocean swell */
+			{ 6, 24, 0x5357454Cu }, /*  64px: major wave train */
+			{ 5, 16, 0x57415645u }, /*  32px: mid-frequency wave */
+			{ 4,  8, 0x52495050u }, /*  16px: small surface wave */
+			{ 3,  4, 0x46494E45u }  /*   8px: capillary surface ripple */
+		};
 
 		for (int r = 0; r < bh; r++) {
 			int y_in_tile = (src_y0 + r);
@@ -1060,10 +1052,59 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			const uint8_t *depth_row = &chunk->depth[y_in_tile * TILE_PX_W + src_x0];
 			uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
 
-			const uint32_t *c1_row = &caust1[y_in_tile * TILE_PX_W + src_x0];
-			const uint32_t *c2_row = &caust2[y_in_tile * TILE_PX_W + src_x0];
-			const uint32_t *swell_row = &swell_plane[y_in_tile * TILE_PX_W + src_x0];
-			const uint32_t *surf_row = &surf_plane[y_in_tile * TILE_PX_W + src_x0];
+			/* Scan row depth occupancy to skip idle noise layers */
+			int has_caustic = 0, has_surf = 0, has_swell = 0;
+			for (int c = 0; c < bw; c++) {
+				uint8_t d = depth_row[c];
+				if (d >= 2 && d <= 6) has_caustic = 1;
+				if (d >= 1 && d <= 2) has_surf = 1;
+				if (d >= 3) has_swell = 1;
+			}
+
+			if (!has_caustic && !has_surf && !has_swell) {
+				memcpy(dst_row, src_row, (size_t)bw * sizeof(uint32_t));
+				have_prev = 0;
+				continue;
+			}
+
+			int gy = base_px_y + y_in_tile;
+			int gx = base_px_x + src_x0;
+
+			/* 1. Waves: 5-octave elevation cascade from 128px macro swell to 8px wavelets */
+			if (has_swell) {
+				for (int i = 0; i < 5; i++) {
+					int16_t p[3] = {
+						(int16_t)(z_time + (int)(i * 17)),
+						(int16_t)(gy - dy1 + (int)(i * 7)),
+						(int16_t)(gx - dx1 + (int)(i * 13))
+					};
+					noise_wrow(w_oct[i], bw, p, 1, OCTS[i].shift, 8, OCTS[i].seed, 3, NOISE_FADE, &c_oct[i]);
+				}
+
+				for (int c = 0; c < bw; c++) {
+					int total_h = 0;
+					for (int i = 0; i < 5; i++) {
+						int v = (int)(w_oct[i][c] >> 16) - 128;
+						total_h += (v * OCTS[i].amp) / 16;
+					}
+					h_curr[c] = total_h;
+				}
+			}
+
+			/* 2. Caustics: fine subtle network (x=3, 8px detail) */
+			if (has_caustic) {
+				int16_t p_c1[3] = { z_time, (int16_t)(gy + c1_dy), (int16_t)(gx + c1_dx) };
+				noise_wrow(c1_row, bw, p_c1, 1, 3, 8, 0x43415553u, 3, NOISE_FADE, &c_c1);
+
+				int16_t p_c2[3] = { z_time, (int16_t)(gy + c2_dy - 9), (int16_t)(gx + c2_dx + 7) };
+				noise_wrow(c2_row, bw, p_c2, 1, 3, 8, 0x54494353u, 3, NOISE_FADE, &c_c2);
+			}
+
+			/* 3. Surf foam: evaluate only along shore (d 1..2) */
+			if (has_surf) {
+				int16_t p_surf[3] = { z_time, (int16_t)gy, (int16_t)gx };
+				noise_wrow(surf_row, bw, p_surf, 1, 4, 8, 0x53555246u, 3, NOISE_FADE, &c_surf);
+			}
 
 			for (int c = 0; c < bw; c++) {
 				uint8_t d = depth_row[c];
@@ -1074,22 +1115,20 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 				uint32_t col = src_row[c];
 
-				/* 1. Thin caustic ridges (d = 2..6) */
+				/* Caustics (d = 2..6): very delicate, faint sunlight shimmer on seabed */
 				if (d >= 2 && d <= 6) {
-					int v1 = c1_row[c] & 0xFF;
-					int v2 = c2_row[c] & 0xFF;
-					int diff = abs(v1 - v2);
-					if (diff < 15) {
-						int k = 15 - diff;
-						int c_int = (k * k * (7 - d) * 12) >> 4;
-						if (c_int > 255) c_int = 255;
-						col = alpha_blend_rgb(col, RGB(245, 255, 255), c_int);
+					int diff = abs((int)(c1_row[c] >> 16) - (int)(c2_row[c] >> 16));
+					if (diff < 14) {
+						int k = 14 - diff;
+						int c_int = (k * k * (7 - d) * 3) >> 4;
+						if (c_int > 65) c_int = 65;
+						col = alpha_blend_rgb(col, RGB(240, 252, 255), c_int);
 					}
 				}
 
-				/* 2. Shoreline Breaking Foam (d = 1, 2) */
+				/* Shore foam (d = 1, 2) */
 				if (d <= 2) {
-					int surf = surf_row[c] & 0xFF;
+					int surf = (int)(surf_row[c] >> 16);
 					if (d == 1) {
 						int foam_alpha = 110 + (surf > 140 ? (surf - 140) / 2 : 0);
 						if (foam_alpha > 180) foam_alpha = 180;
@@ -1101,23 +1140,27 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					}
 				}
 
-				/* 3. Fluid Absorption Depth Swell (d >= 3): lit crests, darker troughs drifting along (2, 1) */
-				if (d >= 3) {
-					int ocean = swell_row[c] & 0xFF;
-					if (ocean > 136) {
-						int crest_int = (ocean - 136) * 3;
-						if (crest_int > 80) crest_int = 80;
-						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(80, 150, 225);
-						col = alpha_blend_rgb(col, crest_col, crest_int);
-					} else if (ocean < 120) {
-						int trough_int = (120 - ocean) * 3;
-						if (trough_int > 70) trough_int = 70;
-						col = alpha_blend_rgb(col, RGB(8, 28, 85), trough_int);
+				/* Wave slope lighting (d >= 3): distinct big rolling swells + crisp small surface wavelets */
+				if (d >= 3 && have_prev && c > 0 && c < bw - 1) {
+					int dh_dx = h_curr[c + 1] - h_curr[c - 1];
+					int dh_dy = h_curr[c] - h_prev[c];
+					int diffuse = (-dh_dx - dh_dy);
+
+					/* Natural sun hillshading on multi-scale water surface */
+					if (diffuse > 2) {
+						int lit = diffuse * 4; if (lit > 80) lit = 80;
+						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(70, 160, 230);
+						col = alpha_blend_rgb(col, crest_col, lit);
+					} else if (diffuse < -2) {
+						int shade = (-diffuse) * 4; if (shade > 65) shade = 65;
+						col = alpha_blend_rgb(col, RGB(6, 22, 65), shade);
 					}
 				}
 
 				dst_row[c] = col;
 			}
+			memcpy(h_prev, h_curr, sizeof(h_curr));
+			have_prev = 1;
 		}
 	} else {
 		for (int r = 0; r < bh; r++) {
