@@ -174,4 +174,5 @@ Full documentation and curl examples in `external/axil-resume-search/README.md`.
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Realistic pure-C water for the NeverDark Seven stage (handoff) | `docs/handoff-water-realism.md` |
 | Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |
