@@ -119,6 +119,29 @@ int main(void)
 		printf("PASS: noise_view matches eng_noise_point exactly across all cells\n");
 	}
 
+	/* Phase 2 Gate: Submerged points preserve authentic substrate biome and valid depth */
+	{
+		int submerged_count = 0;
+		for (int y = -32; y <= 32; y += 4) {
+			for (int x = -32; x <= 32; x += 4) {
+				pos_t pt = { (coord_t)x, (coord_t)y, 0, 0 };
+				struct bio b = eng_noise_point(pt);
+				if (b.elevation < b.water_level) {
+					assert(b.bio_idx != 0); /* Authentic ground substrate preserved (never erased to 0) */
+					assert(b.is_water == 1);
+					assert(b.water_depth == (b.water_level - b.elevation));
+					submerged_count++;
+				} else {
+					assert(b.is_water == 0);
+					assert(b.water_depth == 0);
+				}
+			}
+		}
+		assert(submerged_count > 0);
+		printf("PASS: authentic substrate biome preserved on all %d submerged sample points (bio_idx != 0)\n",
+		       submerged_count);
+	}
+
 	printf("ALL MAP NOISE CONTINUITY TESTS PASSED\n");
 	return 0;
 }

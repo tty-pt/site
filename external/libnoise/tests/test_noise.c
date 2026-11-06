@@ -269,6 +269,70 @@ int main(void)
 		       c.fetches);
 	}
 
+	/* 12. Declarative cascade sparse point samplers (noise_sample_2d & 3d) */
+	{
+		static const noise_octave_t octs[] = {
+			{ .shift = 6, .amp = 100, .skew_x = 4, .skew_y = 3, .contrast = 256 },
+			{ .shift = 4, .amp = 50,  .skew_x = 0, .skew_y = 0, .contrast = 256 },
+		};
+		noise_cascade_t cfg = {
+			.seed = 0x12345678,
+			.count = 2,
+			.octaves = octs,
+		};
+		int32_t s1 = noise_sample_2d(&cfg, 10, 20);
+		int32_t s2 = noise_sample_2d(&cfg, 10, 20);
+		assert(s1 == s2);
+
+		int32_t s3d_1 = noise_sample_3d(&cfg, 10, 20, 30);
+		int32_t s3d_2 = noise_sample_3d(&cfg, 10, 20, 30);
+		assert(s3d_1 == s3d_2);
+		printf("PASS: declarative point sampling (2D & 3D) deterministic\n");
+	}
+
+	/* 13. Declarative bulk matrix fill 2D (noise_matrix_fill_2d) */
+	{
+		static const noise_octave_t octs[] = {
+			{ .shift = 5, .amp = 80, .skew_x = 0, .skew_y = 0, .contrast = 256 },
+		};
+		noise_cascade_t cfg = {
+			.seed = 0x87654321,
+			.count = 1,
+			.octaves = octs,
+		};
+		int32_t mat[1024]; /* 32x32 for size_shift = 5 */
+		noise_matrix_fill_2d(&cfg, 0, 0, 5, mat);
+		int non_zero = 0;
+		for (int i = 0; i < 1024; i++) {
+			if (mat[i] != 0) non_zero++;
+		}
+		assert(non_zero > 100);
+		printf("PASS: declarative bulk matrix fill 2D evaluated (%d/1024 non-zero)\n", non_zero);
+	}
+
+	/* 14. Declarative scanline stepper (noise_scanline_eval_row) */
+	{
+		static const noise_octave_t octs[] = {
+			{ .shift = 4, .amp = 60, .skew_x = 0, .skew_y = 0, .contrast = 256 },
+		};
+		noise_cascade_t cfg = {
+			.seed = 0xCAFE1234,
+			.count = 1,
+			.octaves = octs,
+		};
+		noise_scanline_t scan;
+		noise_scanline_init(&scan, &cfg, 3);
+		int32_t row[256];
+		noise_scanline_eval_row(&scan, 0, 10, 5, 256, row);
+		int non_zero = 0;
+		for (int i = 0; i < 256; i++) {
+			if (row[i] != 0) non_zero++;
+		}
+		assert(non_zero > 50);
+		assert(scan.caches[0].fetches > 0);
+		printf("PASS: scanline stepper evaluated row with %u corner fetches\n", scan.caches[0].fetches);
+	}
+
 	printf("=== ALL LIBNOISE TESTS PASSED ===\n");
 	return 0;
 }

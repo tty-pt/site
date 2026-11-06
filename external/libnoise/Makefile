@@ -7,6 +7,8 @@ WASM_CC ?= clang
 WASM_CFLAGS ?= --target=wasm32-wasi -ffreestanding -flto -O3 -D__wasm__ -fvisibility=hidden -I./include -I./npm/include -I../mk/include -I/usr/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=malloc -Wl,--export=free -Wl,--export=noise_wasm_point_1d -Wl,--export=noise_wasm_point_2d -Wl,--export=noise_wasm_point_3d -Wl,--export=noise_wasm_point_4d -Wl,--export=noise_wasm_point_n -Wl,--export=noise_wasm_octaves
 
+SO_CFLAGS ?= -mgeneral-regs-only
+
 all: test lib/libnoise.so wasm
 
 test: bin/test_noise
@@ -16,9 +18,10 @@ bin/test_noise: tests/test_noise.c include/ttypt/noise.h
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o $@ tests/test_noise.c $(LDLIBS)
 
-lib/libnoise.so: src/libnoise.c include/ttypt/noise.h
+lib/libnoise.so: src/libnoise.c include/ttypt/noise.h include/ttypt/chaff.h
 	@mkdir -p lib
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ src/libnoise.c $(LDLIBS)
+	$(CC) $(CFLAGS) $(SO_CFLAGS) -fPIC -shared -o $@ src/libnoise.c $(LDLIBS)
+	@ln -sf libnoise.so lib/libchaff.so
 
 wasm: npm/dist/noise.wasm
 

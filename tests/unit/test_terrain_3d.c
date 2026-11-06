@@ -219,6 +219,28 @@ int main(void)
 		printf("PASS: query throughput satisfies real-time core performance requirements\n");
 	}
 
+	/* Phase 3 Gate: Continuous planetary H(wx, wy) and level-set shorelines via nd_terrain_eval */
+	{
+		/* Verify zero vertical jump across continuous tile/room borders */
+		for (int32_t wy = -512; wy <= 512; wy += 64) {
+			for (int32_t wx = -512; wx <= 512; wx += 64) {
+				nd_terrain_query_t q0 = nd_terrain_eval(w0, wx, wy, 0);
+				nd_terrain_query_t q1 = nd_terrain_eval(w0, wx + 1, wy, 0);
+				int dh_x = abs(q1.elevation - q0.elevation);
+				assert(dh_x <= 3); /* Continuous sub-pixel slope, 0 vertical jumps */
+
+				nd_terrain_query_t q2 = nd_terrain_eval(w0, wx, wy + 1, 0);
+				int dh_y = abs(q2.elevation - q0.elevation);
+				assert(dh_y <= 3);
+
+				/* Depth identity W - H */
+				assert(q0.depth == (q0.water_level - q0.elevation));
+				assert(q0.is_water == (q0.depth > 0));
+			}
+		}
+		printf("PASS: nd_terrain_eval continuous H(wx, wy) and level-set shorelines verified (0 vertical jumps)\n");
+	}
+
 	printf("=== ALL TERRAIN 3D TESTS PASSED ===\n");
 	return 0;
 }

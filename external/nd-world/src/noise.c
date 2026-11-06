@@ -129,9 +129,23 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 		register uint32_t _he = n_he[j], w = water_level(obits);
 		r.tmp = temp(obits, _he, _tm, s[Y_COORD] + (j >> CHUNK_Y));
 		r.rn = rain(obits, w, _he, _cl, r.tmp);
-		r.bio_idx = _he < w ? 0 : bio_idx(r.rn, r.tmp);
+
+		/* FIX: Preserve authentic substrate ALWAYS */
+		r.bio_idx = (uint8_t)bio_idx(r.rn, r.tmp);
+
+		/* Physical signed elevation and water table in world units */
 		r.elevation = (coord_t)((int64_t)_he * 200 / NOISE_MAX - 100);
 		r.water_level = (coord_t)((int64_t)w * 200 / NOISE_MAX - 100);
+
+		/* Submersion is physical depth, not an eraser */
+		if (r.elevation < r.water_level) {
+			r.is_water = 1;
+			r.water_depth = (coord_t)(r.water_level - r.elevation);
+		} else {
+			r.is_water = 0;
+			r.water_depth = 0;
+		}
+
 		r = nd_evt_noise(r, _he, w, _tm, _cl);
 		chunks_bio_raw[i + j] = r;
 	}

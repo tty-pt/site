@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef __has_include
@@ -571,6 +572,263 @@ noise_point_4d(int16_t x, int16_t y, int16_t z, int16_t w, uint32_t seed, uint8_
 {
 	int16_t p[4] = { x, y, z, w };
 	return noise_point_n(p, seed, shift, 4);
+}
+
+/* --- Canonical libchaff aliases (chaff_ prefix) --------------------------- */
+#define CHAFF_MAX NOISE_MAX
+#define CHAFF_FADE NOISE_FADE
+
+typedef octave_t         chaff_oct_t;
+typedef noise_wcache_t   chaff_wcache_t;
+
+static inline int chaff_point_1d(int16_t x, uint32_t seed, uint8_t shift) {
+	return noise_point_1d(x, seed, shift);
+}
+static inline int chaff_point_2d(int16_t x, int16_t y, uint32_t seed, uint8_t shift) {
+	return noise_point_2d(x, y, seed, shift);
+}
+static inline int chaff_point_3d(int16_t x, int16_t y, int16_t z, uint32_t seed, uint8_t shift) {
+	return noise_point_3d(x, y, z, seed, shift);
+}
+static inline int chaff_point_4d(int16_t x, int16_t y, int16_t z, int16_t w, uint32_t seed, uint8_t shift) {
+	return noise_point_4d(x, y, z, w, seed, shift);
+}
+static inline int chaff_point_n(const int16_t *p, uint32_t seed, uint8_t shift, uint8_t dim) {
+	return noise_point_n(p, seed, shift, dim);
+}
+static inline void chaff_oct(uint32_t *m, int16_t *s, size_t oct_n, octave_t *oct, unsigned seed, unsigned cy, uint8_t dim) {
+	noise_oct(m, s, oct_n, oct, seed, cy, dim);
+}
+static inline uint32_t chaff_wpoint_n(const int16_t *p, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags) {
+	return noise_wpoint_n(p, x, w, seed, dim, flags);
+}
+static inline uint32_t chaff_wpoint_c(noise_wcache_t *c, const int16_t *p, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags) {
+	return noise_wpoint_c(c, p, x, w, seed, dim, flags);
+}
+static inline void chaff_wrow(uint32_t *out, unsigned n, const int16_t *p0, int16_t dstep, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags, noise_wcache_t *c) {
+	noise_wrow(out, n, p0, dstep, x, w, seed, dim, flags, c);
+}
+static inline void chaff_wplane(uint32_t *out, unsigned n, unsigned rows, size_t stride, const int16_t *p0, unsigned x, unsigned w, unsigned seed, uint8_t dim, unsigned flags, noise_wcache_t *c) {
+	noise_wplane(out, n, rows, stride, p0, x, w, seed, dim, flags, c);
+}
+
+/* --- Declarative Multi-Scale Cascades & Universal Accessors -------------- */
+
+/* Single noise octave specification */
+typedef struct {
+	uint8_t  shift;     /* Lattice size 2^shift (e.g. 10 = 1024, 3 = 8) */
+	uint16_t amp;       /* Amplitude weight in fixed-point world units */
+	int8_t   skew_x;    /* Domain skew: px = x + y / skew_x (0 = disabled) */
+	int8_t   skew_y;    /* Domain skew: py = y - x / skew_y (0 = disabled) */
+	uint16_t contrast;  /* Fixed-point contrast multiplier (256 = 1.0x, 512 = 2.0x) */
+} noise_octave_t;
+
+/* Multi-scale composite cascade */
+typedef struct {
+	uint32_t seed;
+	uint8_t  count;
+	const noise_octave_t *octaves;
+} noise_cascade_t;
+
+/* Corner cache for scanline row stepping */
+typedef struct {
+	int16_t  s[4];
+	uint32_t v[16];
+	uint32_t fetches;
+	uint8_t  valid;
+	unsigned x, w, seed;
+	uint8_t  dim;
+} noise_cache_t;
+
+typedef struct {
+	noise_cache_t caches[16];
+	const noise_cascade_t *cfg;
+	uint8_t dim;
+} noise_scanline_t;
+
+/* 1. Bulk Matrix Stepper (Server Worldgen: fills 2^cy x 2^cy chunk in bulk)
+ * Amortized ~0 hashes per tile; uses pure integer additions. */
+static inline void
+noise_matrix_fill_2d(const noise_cascade_t *cfg,
+                     int16_t origin_x, int16_t origin_y,
+                     uint8_t size_shift, int32_t *out_matrix)
+{
+	if (!cfg || cfg->count == 0 || !out_matrix) return;
+	size_t total = (size_t)1 << (2 * size_shift);
+	memset(out_matrix, 0, total * sizeof(int32_t));
+
+	uint32_t scratch_buf[4096];
+	uint32_t *mat = scratch_buf;
+	int must_free = 0;
+	if (total > 4096) {
+		mat = (uint32_t *)malloc(total * sizeof(uint32_t));
+		if (!mat) return;
+		must_free = 1;
+	}
+
+	int16_t ms[2] = { origin_y, origin_x };
+	for (uint8_t o = 0; o < cfg->count; o++) {
+		const noise_octave_t *oct = &cfg->octaves[o];
+		uint32_t oct_seed = cfg->seed ^ (uint32_t)(o * 0x85EBCA77u + 1);
+		int16_t msc[2] = { ms[0], ms[1] };
+		noise_m(mat, msc, oct->shift, 8, oct_seed, size_shift, 2);
+
+		for (size_t i = 0; i < total; i++) {
+			int32_t val = (int32_t)(mat[i] >> 16) - 128;
+			if (oct->contrast != 0 && oct->contrast != 256)
+				val = (val * (int32_t)oct->contrast) >> 8;
+			out_matrix[i] += (val * (int32_t)oct->amp) >> 7;
+		}
+	}
+
+	if (must_free) free(mat);
+}
+
+/* 2. Scanline Stepper with Corner Cache (Seven Water & Ground Rasterizer)
+ * Fetches corners once per 3D lattice cell; steps rows in registers. */
+static inline void
+noise_scanline_init(noise_scanline_t *scan, const noise_cascade_t *cfg, uint8_t dim)
+{
+	if (!scan) return;
+	memset(scan, 0, sizeof(*scan));
+	scan->cfg = cfg;
+	scan->dim = dim;
+}
+
+static inline void
+noise_scanline_eval_row(noise_scanline_t *scan,
+                        int16_t start_x, int16_t y, int16_t z,
+                        size_t count, int32_t *out_row)
+{
+	if (!scan || !scan->cfg || count == 0 || !out_row) return;
+	memset(out_row, 0, count * sizeof(int32_t));
+
+	uint32_t row_buf[1024];
+	uint32_t *r_buf = row_buf;
+	int must_free = 0;
+	if (count > 1024) {
+		r_buf = (uint32_t *)malloc(count * sizeof(uint32_t));
+		if (!r_buf) return;
+		must_free = 1;
+	}
+
+	const noise_cascade_t *cfg = scan->cfg;
+	uint8_t count_oct = cfg->count > 16 ? 16 : cfg->count;
+
+	for (uint8_t o = 0; o < count_oct; o++) {
+		const noise_octave_t *oct = &cfg->octaves[o];
+		uint32_t oct_seed = cfg->seed ^ (uint32_t)(o * 0x85EBCA77u + 1);
+
+		int16_t p0[4];
+		if (scan->dim == 2) {
+			int16_t px = start_x, py = y;
+			if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
+			if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
+			p0[0] = py;
+			p0[1] = px;
+		} else {
+			int16_t px = start_x, py = y, pz = z;
+			if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
+			if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
+			p0[0] = pz;
+			p0[1] = py;
+			p0[2] = px;
+		}
+
+		noise_wrow(r_buf, (unsigned)count, p0, 1, oct->shift, 8, oct_seed, scan->dim, NOISE_FADE, (noise_wcache_t *)&scan->caches[o]);
+
+		for (size_t i = 0; i < count; i++) {
+			int32_t val = (int32_t)(r_buf[i] >> 16) - 128;
+			if (oct->contrast != 0 && oct->contrast != 256)
+				val = (val * (int32_t)oct->contrast) >> 8;
+			out_row[i] += (val * (int32_t)oct->amp) >> 7;
+		}
+	}
+
+	if (must_free) free(r_buf);
+}
+
+/* 3. Sparse Point Sampler (Collision, Entrances, Caverns) */
+static inline int32_t
+noise_sample_2d(const noise_cascade_t *cfg, int16_t x, int16_t y)
+{
+	if (!cfg || cfg->count == 0) return 0;
+	int32_t total = 0;
+	for (uint8_t i = 0; i < cfg->count; i++) {
+		const noise_octave_t *oct = &cfg->octaves[i];
+		uint32_t oct_seed = cfg->seed ^ (uint32_t)(i * 0x85EBCA77u + 1);
+		int16_t px = x, py = y;
+		if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
+		if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
+		int16_t p[2] = { py, px };
+		uint32_t raw = noise_wpoint_n(p, oct->shift, 8, oct_seed, 2, NOISE_FADE);
+		int32_t val = (int32_t)(raw >> 16) - 128;
+		if (oct->contrast != 0 && oct->contrast != 256)
+			val = (val * (int32_t)oct->contrast) >> 8;
+		total += (val * (int32_t)oct->amp) >> 7;
+	}
+	return total;
+}
+
+static inline int32_t
+noise_sample_3d(const noise_cascade_t *cfg, int16_t x, int16_t y, int16_t z)
+{
+	if (!cfg || cfg->count == 0) return 0;
+	int32_t total = 0;
+	for (uint8_t i = 0; i < cfg->count; i++) {
+		const noise_octave_t *oct = &cfg->octaves[i];
+		uint32_t oct_seed = cfg->seed ^ (uint32_t)(i * 0x85EBCA77u + 1);
+		int16_t px = x, py = y, pz = z;
+		if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
+		if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
+		int16_t p[3] = { pz, py, px };
+		uint32_t raw = noise_wpoint_n(p, oct->shift, 8, oct_seed, 3, NOISE_FADE);
+		int32_t val = (int32_t)(raw >> 16) - 128;
+		if (oct->contrast != 0 && oct->contrast != 256)
+			val = (val * (int32_t)oct->contrast) >> 8;
+		total += (val * (int32_t)oct->amp) >> 7;
+	}
+	return total;
+}
+
+/* Canonical declarative libchaff aliases */
+typedef noise_octave_t   chaff_octave_t;
+typedef noise_cascade_t  chaff_cascade_t;
+typedef noise_cache_t    chaff_cache_t;
+typedef noise_scanline_t chaff_scanline_t;
+
+static inline void
+chaff_matrix_fill_2d(const chaff_cascade_t *cfg,
+                     int16_t origin_x, int16_t origin_y,
+                     uint8_t size_shift, int32_t *out_matrix)
+{
+	noise_matrix_fill_2d(cfg, origin_x, origin_y, size_shift, out_matrix);
+}
+
+static inline void
+chaff_scanline_init(chaff_scanline_t *scan, const chaff_cascade_t *cfg, uint8_t dim)
+{
+	noise_scanline_init(scan, cfg, dim);
+}
+
+static inline void
+chaff_scanline_eval_row(chaff_scanline_t *scan,
+                        int16_t start_x, int16_t y, int16_t z,
+                        size_t count, int32_t *out_row)
+{
+	noise_scanline_eval_row(scan, start_x, y, z, count, out_row);
+}
+
+static inline int32_t
+chaff_sample_2d(const chaff_cascade_t *cfg, int16_t x, int16_t y)
+{
+	return noise_sample_2d(cfg, x, y);
+}
+
+static inline int32_t
+chaff_sample_3d(const chaff_cascade_t *cfg, int16_t x, int16_t y, int16_t z)
+{
+	return noise_sample_3d(cfg, x, y, z);
 }
 
 #endif /* TTYPT_NOISE_H */

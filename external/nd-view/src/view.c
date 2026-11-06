@@ -444,6 +444,8 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 
 	t->elevation = n->elevation;
 	t->water_level = n->water_level;
+	t->is_water = n->is_water;
+	t->water_depth = n->water_depth;
 
 	memcpy(&t->raw, &n->raw, sizeof(n->raw));
 }
@@ -530,7 +532,7 @@ eng_view(unsigned player_ref)
 					flags |= ND_MAP_FLAG_WATER;
 			}
 		}
-		if (vt->elevation < vt->water_level || vt->bio_idx == 0)
+		if (vt->elevation < vt->water_level || vt->is_water || vt->bio_idx == 0)
 			flags |= ND_MAP_FLAG_WATER;
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;

@@ -486,6 +486,10 @@ int main(void)
 
 		/* 0 stones: clean baseline */
 		wild(&cst.map_data, 1, 1, 2, 0, 0, 0, 0, 0, 0);
+		cst.entity_count = 0;
+		nd_seven_forget();
+		nd_seven_forget_picked();
+		sync_room_objects(&cst);
 		render(&cst.map_data, "lamina", 0);
 		memcpy(buf_clean, fb, sizeof(buf_clean));
 

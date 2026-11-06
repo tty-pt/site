@@ -64,6 +64,43 @@ static const nd_terrain_octave_t ND_TERRAIN_HEIGHT_OCTAVES[] = {
 #define ND_TERRAIN_HEIGHT_OCTAVE_COUNT \
 	(sizeof(ND_TERRAIN_HEIGHT_OCTAVES) / sizeof(ND_TERRAIN_HEIGHT_OCTAVES[0]))
 
+/* The 8-octave planetary cascade */
+static const noise_octave_t ND_PLANETARY_OCTAVES[] = {
+	{ .shift = 10, .amp = 95, .skew_x = 4, .skew_y = 3, .contrast = 256 }, /* Continental */
+	{ .shift =  9, .amp = 48, .skew_x = 5, .skew_y = 4, .contrast = 256 }, /* Sub-continental */
+	{ .shift =  8, .amp = 26, .skew_x = 6, .skew_y = 5, .contrast = 256 }, /* Room-scale bays */
+	{ .shift =  7, .amp = 14, .skew_x = 7, .skew_y = 6, .contrast = 256 }, /* Coves & hills */
+	{ .shift =  6, .amp =  8, .skew_x = 8, .skew_y = 7, .contrast = 256 }, /* Lagoons */
+	{ .shift =  5, .amp =  4, .skew_x = 0, .skew_y = 0, .contrast = 256 }, /* Sandbars */
+	{ .shift =  4, .amp =  2, .skew_x = 0, .skew_y = 0, .contrast = 256 }, /* Dune crests */
+	{ .shift =  3, .amp =  1, .skew_x = 0, .skew_y = 0, .contrast = 256 }, /* Micro-relief */
+};
+#define ND_PLANETARY_OCTAVE_COUNT \
+	(sizeof(ND_PLANETARY_OCTAVES) / sizeof(ND_PLANETARY_OCTAVES[0]))
+
+typedef struct {
+	int16_t elevation;      /* Surface ground height H(wx, wy) */
+	int16_t water_level;    /* Planetary water surface W(wx, wy, time) */
+	int16_t depth;          /* Water depth = W - H (depth <= 0 is dry land) */
+	int16_t slope_dx;       /* Terrain gradient dH/dx */
+	int16_t slope_dy;       /* Terrain gradient dH/dy */
+	uint8_t is_water;       /* Convenience flag: depth > 0 */
+} nd_terrain_query_t;
+
+/* Sea level elevation in world units */
+static inline int16_t
+nd_terrain_water_level(uint16_t world)
+{
+	uint32_t h = (0x57415452u ^ (uint32_t)world * 0x9E3779B1u);
+	return (int16_t)((int)(h % 21) - 10);
+}
+
+static inline int16_t
+nd_terrain_sea_level(uint16_t world)
+{
+	return nd_terrain_water_level(world);
+}
+
 /* High-definition 8-octave cascade spanning continental scales down to sub-tile relief */
 static const nd_terrain_octave_t ND_TERRAIN_HD_OCTAVES[] = {
 	{ .shift = 10, .amp = 95 }, /* 1024 units (~6 rooms): continental ocean basins and mountain massifs */
@@ -77,14 +114,6 @@ static const nd_terrain_octave_t ND_TERRAIN_HD_OCTAVES[] = {
 };
 #define ND_TERRAIN_HD_OCTAVE_COUNT \
 	(sizeof(ND_TERRAIN_HD_OCTAVES) / sizeof(ND_TERRAIN_HD_OCTAVES[0]))
-
-/* Sea level elevation in world units */
-static inline int16_t
-nd_terrain_water_level(uint16_t world)
-{
-	uint32_t h = (0x57415452u ^ (uint32_t)world * 0x9E3779B1u);
-	return (int16_t)((int)(h % 21) - 10);
-}
 
 /* High-definition continuous surface elevation H_HD(wx, wy, world) in altitude units.
  * Evaluates the full 8-octave cascade at continuous world pixel/unit coordinates (wx, wy). */
@@ -129,6 +158,27 @@ nd_terrain_hillshade(int32_t wx, int32_t wy, uint16_t world)
 	if (shade_val < 160) shade_val = 160;
 	if (shade_val > 360) shade_val = 360;
 	return (uint16_t)shade_val;
+}
+
+/* Single authoritative query for any continuous point on the planet */
+static inline nd_terrain_query_t
+nd_terrain_eval(uint16_t world, int32_t wx, int32_t wy, uint32_t anim)
+{
+	(void)anim;
+	nd_terrain_query_t q;
+	q.elevation = nd_terrain_height_hd(wx, wy, world);
+	q.water_level = nd_terrain_sea_level(world);
+	q.depth = (int16_t)(q.water_level - q.elevation);
+	q.is_water = q.depth > 0 ? 1 : 0;
+
+	int16_t h_e = nd_terrain_height_hd(wx + 2, wy, world);
+	int16_t h_w = nd_terrain_height_hd(wx - 2, wy, world);
+	int16_t h_s = nd_terrain_height_hd(wx, wy + 2, world);
+	int16_t h_n = nd_terrain_height_hd(wx, wy - 2, world);
+	q.slope_dx = (int16_t)(h_e - h_w);
+	q.slope_dy = (int16_t)(h_s - h_n);
+
+	return q;
 }
 
 /* Surface elevation H(x, y, w) in altitude units.

@@ -20,6 +20,7 @@ typedef struct nd_room_chunk {
 	uint32_t last_frame;
 	uint32_t *pixels;
 	uint8_t *depth;
+	int16_t *height;
 	struct nd_room_chunk *next;
 } nd_room_chunk_t;
 
