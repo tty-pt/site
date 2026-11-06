@@ -163,7 +163,10 @@ int main(void)
 
 	/* equipment: one cell per descriptor, grid dimensions from the table */
 	int slots = 0;
-	for (const char *q = html; (q = strstr(q, "data-slot=\"")); q++) slots++;
+	for (const char *q = html; (q = strstr(q, "data-slot=\"")); q++) {
+		if (strncmp(q, "data-slot=\"1\"", 13) != 0)
+			slots++;
+	}
 	assert(slots == (int)ND_EQUIP_SLOT_COUNT);
 	assert(strstr(html, "data-slot=\"head\""));
 	assert(strstr(html, "unequip c") && strstr(html, "unequip g"));

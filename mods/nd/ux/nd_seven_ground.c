@@ -48,12 +48,12 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	uint32_t water_col;
 	if (depth <= 6) {
 		water_col = lerp_rgb(C_SHORE, C_AQUA, depth - 1, 5);
-	} else if (depth <= 16) {
-		water_col = lerp_rgb(C_AQUA, C_AZURE, depth - 6, 10);
+	} else if (depth <= 18) {
+		water_col = lerp_rgb(C_AQUA, C_AZURE, depth - 6, 12);
 	} else {
-		int t = depth - 16;
-		if (t > 16) t = 16;
-		water_col = lerp_rgb(C_AZURE, C_DEEP, t, 16);
+		int t = depth - 18;
+		if (t > 14) t = 14;
+		water_col = lerp_rgb(C_AZURE, C_DEEP, t, 14);
 	}
 	return tint_col(water_col, r, gg, b);
 }
@@ -61,13 +61,13 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 static inline int water_alpha_at_depth(int depth)
 {
 	if (depth <= 6) {
-		return 90 + (depth * 50) / 6;
-	} else if (depth <= 16) {
-		return 140 + ((depth - 6) * 55) / 10;
+		return 80 + (depth * 45) / 6;
+	} else if (depth <= 18) {
+		return 125 + ((depth - 6) * 55) / 12;
 	} else {
-		int t = depth - 16;
-		if (t > 16) t = 16;
-		return 195 + (t * 50) / 16;
+		int t = depth - 18;
+		if (t > 14) t = 14;
+		return 180 + (t * 55) / 14;
 	}
 }
 
@@ -77,7 +77,8 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 {
 	(void)anim;
 	(void)hash;
-	(void)pos;
+	uint16_t world = (uint16_t)pos[3];
+	int16_t w_level = nd_terrain_water_level(world);
 	int land_di[9], land_dj[9], n_land = 0;
 	const ndw_warp_grid_t *wg = NULL;
 
@@ -99,6 +100,11 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 		for (int ux = 0; ux < NDW_CELL_PX; ux++) {
 			int px_in_tile = cx * NDW_CELL_PX + ux;
 			int py_in_tile = cy * NDW_CELL_PX + uy;
+			int32_t wx = (int32_t)pos[0] * NDW_TILE_W + px_in_tile;
+			int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + py_in_tile;
+			int16_t elev = nd_terrain_height_hd(wx, wy, world);
+			int terrain_depth = (int)(w_level - elev);
+			if (terrain_depth < 1) terrain_depth = 1;
 
 			int depth;
 			if (g->kind == NDW_G_SHALLOW_WATER) {
@@ -121,13 +127,14 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 				int dist_units = (-max_land_d) / NDW_FINE;
 				if (dist_units < 0) dist_units = 0;
 
-				if (dist_units >= 32) {
-					depth = 28;
+				if (dist_units >= 64) {
+					depth = terrain_depth > 28 ? terrain_depth : 28;
 				} else {
-					depth = 1 + (27 * dist_units) / 32;
+					int coast_depth = 1 + (27 * dist_units) / 64;
+					depth = (terrain_depth < coast_depth) ? terrain_depth : coast_depth;
 				}
 			} else {
-				depth = 28;
+				depth = terrain_depth;
 			}
 			if (depth < 1) depth = 1;
 
@@ -313,6 +320,9 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 	for (int k = 0; k < 9; k++) {
 		style[k] = ndw_biome_style(nbiomes ? nbiomes[k] : own->biome);
 		differs |= !same_ground(&style[k], &style[4]);
+		int di = (k % 3) - 1, dj = (k / 3) - 1;
+		if (ndw_is_water_ground(style[k].kind))
+			no_blend |= NDW_WATER_BIT(di, dj);
 	}
 	for (int k = 0; k < 9; k++) {
 		grp[k] = (uint8_t)k;
@@ -368,7 +378,7 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 						ndw_warp_at(&ent->grid, qx, qy, &dx, &dy);
 						int px_w = qx * (NDW_FINE / NDW_SUB) + dx;
 						int py_w = qy * (NDW_FINE / NDW_SUB) + dy;
-						int land_d = ndw_tile_depth(grp, no_blend, 0, 0, px_w, py_w);
+						int land_d = ndw_tile_depth(s_active_chunk_grp, no_blend, 0, 0, px_w, py_w);
 						int d_units = (-land_d) / NDW_FINE;
 						if (d_units < 1) d_units = 1;
 						if (d_units > 8) d_units = 8;
@@ -777,14 +787,11 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				uint32_t col = src_row[c];
 
 				if (d <= 2) {
-					/* Continuous, rhythmic intertidal surf ribbon along shoreline */
-					uint32_t wave_phase = (uint32_t)(gx * 2 + gy * 3 + drift * 3);
+					/* Continuous, organic intertidal surf foam ribbon following shoreline contour */
 					if (d == 1) {
-						if ((wave_phase & 31) < 14)
-							col = alpha_blend_rgb(col, RGB(242, 252, 255), 130);
+						col = alpha_blend_rgb(col, RGB(242, 252, 255), 90);
 					} else if (d == 2) {
-						if (((wave_phase + 8) & 31) < 12)
-							col = alpha_blend_rgb(col, RGB(215, 242, 252), 75);
+						col = alpha_blend_rgb(col, RGB(215, 242, 252), 45);
 					}
 				}
 				if (d >= 3) {

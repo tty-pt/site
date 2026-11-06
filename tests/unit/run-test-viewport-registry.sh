@@ -17,9 +17,11 @@ gcc -g -O0 \
 	-I"$REPO_ROOT/external/nd-mortal/include" \
 	-I"$REPO_ROOT/external/libxylem/include" \
 	-I"$REPO_ROOT/external/libnoise/include" \
+	-I"$REPO_ROOT/mods/common/ux" \
 	-I"$REPO_ROOT/mods/nd/ux" \
 	-o tests/unit/test_viewport_registry \
 	tests/unit/test_viewport_registry.c \
+	mods/common/ux/site_ui.c \
 	mods/nd/ux/nd_ui.c \
 	mods/nd/ux/nd_map_ui.c \
 	mods/nd/ux/nd_dock_ui.c \

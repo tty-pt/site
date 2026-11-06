@@ -223,15 +223,20 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
 
-	int is_pure_ascii = (strcmp(map_drv, "ascii") == 0);
+	/* If explicitly configured as ascii-bud / ascii, render the pure ASCII map */
+	if (strcmp(map_drv, "ascii-bud") == 0 || strcmp(map_drv, "ascii") == 0) {
+		bud_node *ascii_map = lx_n("nd-map",
+			lx_attr("id", "room-map"),
+			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
+		append_fallback_ascii(ascii_map, st, 1);
+		return ascii_map;
+	}
 
 	/* Container wrapping canvas and progressive SSR/No-JS fallback */
 	bud_node *map = lx_n("nd-map",
 		lx_attr("id", "room-map"),
-		lx_attr("class", is_pure_ascii
-			? "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"
-			: "relative p-0 overflow-hidden select-none block mx-auto"),
-		lx_attr("style", is_pure_ascii ? "" : MAP_CANVAS_STYLE));
+		lx_attr("class", "relative p-0 overflow-hidden select-none block mx-auto"),
+		lx_attr("style", MAP_CANVAS_STYLE));
 
 	/* The canvas rendered by liblamina */
 	bud_node *cv = lx_n("canvas",
@@ -239,12 +244,12 @@ bud_node *render_room_map(const nd_client_state_t *st)
 		lx_attr("data-bud-canvas", "1"),
 		lx_attr("width", MAP_CANVAS_PX),
 		lx_attr("height", MAP_CANVAS_PX),
-		lx_attr("class", is_pure_ascii ? "hidden" : "block"),
+		lx_attr("class", "block"),
 		lx_attr("style", MAP_CANVAS_STYLE));
 	bud_append(map, cv);
 
 	/* Progressive fallback map text for SSR / No-JS */
-	append_fallback_ascii(map, st, is_pure_ascii ? 1 : 0);
+	append_fallback_ascii(map, st, 0);
 
 	return map;
 }

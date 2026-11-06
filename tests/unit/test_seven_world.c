@@ -595,6 +595,59 @@ int main(void)
 		}
 		printf("PASS: XY vertically on top of WY resolves with full corner roundness into Y without inverted stripes or water/land intrusion\n");
 
+		/* Multi-biome vertical coastline (Grass A above Grass B adjacent to Water):
+		 * Verifies that land never rounds into water at the boundary between Grass A and Grass B,
+		 * preserving a continuous coastline without rectangular chunk seams or bites. */
+		{
+			int16_t pos_origin[4] = { 10, -5, 2, 1 };
+			int16_t p_ga[4] = { (int16_t)(pos_origin[0]), (int16_t)(pos_origin[1] - 1), pos_origin[2], pos_origin[3] };
+			int16_t p_gb[4] = { (int16_t)(pos_origin[0]), (int16_t)(pos_origin[1] - 2), pos_origin[2], pos_origin[3] };
+			ndw_warp_grid_t g_ga, g_gb;
+			ndw_warp_grid_fill(&g_ga, p_ga);
+			ndw_warp_grid_fill(&g_gb, p_gb);
+
+			/* In tile GA (Grass A = 0; South = Grass B = 1; East = Water = 2; SE = Water = 2) */
+			uint8_t grp_ga[9] = {
+				0, 0, 2,
+				0, 0, 2,
+				1, 1, 2
+			};
+			unsigned mask_ga = NDW_WATER_BIT(1, -1) | NDW_WATER_BIT(1, 0) | NDW_WATER_BIT(1, 1);
+
+			/* In tile GB (Grass B = 1; North = Grass A = 0; East = Water = 2; NE = Water = 2) */
+			uint8_t grp_gb[9] = {
+				0, 0, 2,
+				1, 1, 2,
+				1, 1, 2
+			};
+			unsigned mask_gb = NDW_WATER_BIT(1, -1) | NDW_WATER_BIT(1, 0) | NDW_WATER_BIT(1, 1);
+
+			/* Assert that in the land region (beyond edge band) near the SE corner of GA, water NEVER intrudes */
+			int water_in_ga_corner = 0;
+			for (int ly = NDW_TILE_H - 24; ly < NDW_TILE_H; ly++) {
+				for (int lx = 0; lx < NDW_TILE_W - NDW_EDGE_BAND; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&g_ga, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_ga, mask_ga, w);
+					if (w[2] == 256 || w[5] == 256 || w[8] == 256)
+						water_in_ga_corner++;
+				}
+			}
+			/* Water must NOT carve a big bite into the land corner */
+			assert(water_in_ga_corner == 0);
+
+			int water_in_gb_corner = 0;
+			for (int ly = 0; ly < 24; ly++) {
+				for (int lx = 0; lx < NDW_TILE_W - NDW_EDGE_BAND; lx++) {
+					uint16_t w[9];
+					ndw_ground_weights(&g_gb, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_gb, mask_gb, w);
+					if (w[2] == 256 || w[5] == 256 || w[8] == 256)
+						water_in_gb_corner++;
+				}
+			}
+			assert(water_in_gb_corner == 0);
+		}
+		printf("PASS: multi-biome coastline boundary invariant prevents water intrusion and chunk seams\n");
+
 		/* No isolated single-pixel islands (speckle-free continuous contour) */
 		{
 			ndw_warp_grid_t g0;

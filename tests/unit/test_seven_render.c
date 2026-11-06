@@ -110,6 +110,16 @@ static int count_sand(const uint32_t *p, int n)
 
 /* Grassland west of tile column `split`, desert from it east. The border is
  * the same ABSOLUTE world line for any origin: abs x = x + col - 3. */
+static void set_water_split(int x, int y, int split)
+{
+	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
+	for (int r = 0; r < 7; r++)
+		for (int c = split; c < 7; c++) {
+			nd_map_tile_t *t = &st.map_data.tiles[r * 7 + c];
+			t->bio_idx = 0;
+		}
+}
+
 static void set_split(int x, int y, int split, int room_east)
 {
 	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
@@ -210,24 +220,26 @@ int main(void)
 	/* Test depth-dependent water rendering across different elevations with gradual transparency */
 	{
 		/* Shoreline shallows at the coast: depth ~ 2 */
-		set_split(-2, 0, 4, 0);
+		set_water_split(-2, 0, 4);
 		nd_seven_render(fb2, 1280, 720, &st);
 		dump("water_shallow", fb2, 1280, 720);
-		uint32_t c_shallow = fb2[360 * 1280 + 840];
+		uint32_t c_shallow = fb2[360 * 1280 + 800];
 		int sr = (int)(c_shallow & 0xFF), sg = (int)((c_shallow >> 8) & 0xFF), sb = (int)((c_shallow >> 16) & 0xFF);
 		assert(sr > 120 && sg > 140 && sb >= 140);
 		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
 
 		/* Mid-depth shelf at distance ~ 10 from coast */
-		uint32_t c_mid = fb2[360 * 1280 + 850];
+		uint32_t c_mid = fb2[360 * 1280 + 840];
 		int mr = (int)(c_mid & 0xFF), mg = (int)((c_mid >> 8) & 0xFF), mb = (int)((c_mid >> 16) & 0xFF);
 		/* Intermediate transparency: red drops as depth increases into azure water */
 		assert(mr < sr && mr > 40 && mg > 100 && mb > 100);
 
-		/* Forced shallow water ground kind (NDW_G_SHALLOW_WATER) */
+		/* Forced shallow water ground kind (NDW_G_SHALLOW_WATER) over sand substrate */
+		ndw_ground_t sand_style = { NDW_G_SAND, 128, 128, 128 };
 		ndw_ground_t sg_style = { NDW_G_SHALLOW_WATER, 128, 128, 128 };
 		uint32_t cell_fb[32 * 32];
 		int16_t test_pos[4] = { 0, 0, 0, 0 };
+		ground_cell(cell_fb, 32, 32, &sand_style, test_pos, 0, 0, 0, 0, 0);
 		ground_cell(cell_fb, 32, 32, &sg_style, test_pos, 0, 0, 0, 0, 0);
 		uint32_t c_forced = cell_fb[0];
 		int fr = (int)(c_forced & 0xFF), fg = (int)((c_forced >> 8) & 0xFF), fb_b = (int)((c_forced >> 16) & 0xFF);

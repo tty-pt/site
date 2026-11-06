@@ -559,6 +559,7 @@ static const ndw_octave_t NDW_OCTAVES[] = {
 static inline int
 ndw_is_water(const uint8_t grp[9], unsigned no_blend, int k)
 {
+	if (k < 0 || k >= 9) return 0;
 	if (no_blend & (0x1FFu << 9)) {
 		int i = (k % 3) - 1, j = (k / 3) - 1;
 		return (no_blend & NDW_WATER_BIT(i, j)) != 0;
@@ -833,6 +834,24 @@ ndw_ground_weights(const ndw_warp_grid_t *g, int qx, int qy, const uint8_t grp[9
 					target_k = k_x;
 				else if (grp[k_diag] == grp[k_y])
 					target_k = k_y;
+			}
+
+			if (target_k >= 0) {
+				int c_is_w = ndw_is_water(grp, no_blend, cand_k);
+				int t_is_w = ndw_is_water(grp, no_blend, target_k);
+				if (!c_is_w && t_is_w) {
+					/* Land rounding into water: permitted ONLY if BOTH orthogonal neighbors are water */
+					int x_is_w = ndw_is_water(grp, no_blend, k_x);
+					int y_is_w = ndw_is_water(grp, no_blend, k_y);
+					if (!x_is_w || !y_is_w)
+						target_k = -1;
+				} else if (c_is_w && !t_is_w) {
+					/* Water rounding into land: permitted ONLY if BOTH orthogonal neighbors are land */
+					int x_is_w = ndw_is_water(grp, no_blend, k_x);
+					int y_is_w = ndw_is_water(grp, no_blend, k_y);
+					if (x_is_w || y_is_w)
+						target_k = -1;
+				}
 			}
 
 			if (target_k >= 0) {

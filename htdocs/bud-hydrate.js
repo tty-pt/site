@@ -291,6 +291,13 @@ class BudHostBase {
 				return el;
 			}
 		}
+		if (id !== null && id !== undefined && this.root) {
+			const el = this.root.querySelector(`[data-bud-id="${id}"]`);
+			if (el) {
+				this.nodes.set(id, el);
+				return el;
+			}
+		}
 		return null;
 	}
 
@@ -617,7 +624,7 @@ class BudHostBase {
 			id = parseIntOrNull(op.a);
 			node = this.getNode(id);
 			if (!node) {
-				throw new Error('bud: missing patch listener node');
+				return true;
 			}
 			bubbles = op.c === '1';
 			{

@@ -143,7 +143,19 @@ export class SteleWasmClient {
 		if (!cap || cap === 'stele' || cap === 'stl' || cap === 'env' || cap === 'wasi_snapshot_preview1') return;
 		if (globalScope.__wasm_capability_registry[cap]) return;
 
-		const candidates = [
+		const capabilityMap = {
+			'axil': '/axil-bridge.js',
+			'axil-ws': '/axil-bridge.js',
+			'axil-tty': '/axil-tty-bridge.js',
+			'tty': '/axil-tty-bridge.js',
+			'bud': '/bud-hydrate.js',
+			'hyle': '/hyle-fragments.js',
+			'lamina': '/lamina-bridge.js',
+			'xylem': '/xylem-bridge.js',
+			'webgl': '/webgl-bridge.js'
+		};
+		const knownUrl = capabilityMap[cap];
+		const candidates = knownUrl ? [knownUrl] : [
 			`/${cap}-bridge.js`,
 			cap.includes('-') ? `/${cap.split('-')[0]}-bridge.js` : null,
 			cap === 'tty' ? '/axil-tty-bridge.js' : null,
