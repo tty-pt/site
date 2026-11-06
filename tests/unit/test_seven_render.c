@@ -1803,6 +1803,18 @@ int main(void)
 		/* Assert 0 new chunk allocations occurred because Seven reused Lamina's room chunks! */
 		assert(nd_seven_chunk_alloc_count() == lamina_allocs);
 
+		/* Lamina minimap shared chunk sampling on land: live minimap renders grassland via shared chunk */
+		nd_seven_ground_cache_forget();
+		set_map_keep(15, 15, 10, 0x1B, 0, 0, 0, 0); /* 10 = grassland */
+		nd_lamina_render_map_live(map_fb, 224, 224, &st.map_data, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y);
+		int land_chunks = nd_seven_chunk_count();
+		assert(land_chunks > 0);
+		int land_allocs = nd_seven_chunk_alloc_count();
+
+		/* Seven stage renders the same grassland map: hits the exact same room chunks */
+		nd_seven_render(fb, 640, 480, &st);
+		assert(nd_seven_chunk_alloc_count() == land_allocs);
+
 		/* Explicit forget clears everything */
 		nd_seven_ground_cache_forget();
 		assert(nd_seven_chunk_count() == 0);

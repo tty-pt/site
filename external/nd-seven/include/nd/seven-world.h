@@ -840,13 +840,17 @@ ndw_ground_weights(const ndw_warp_grid_t *g, int qx, int qy, const uint8_t grp[9
 				int c_is_w = ndw_is_water(grp, no_blend, cand_k);
 				int t_is_w = ndw_is_water(grp, no_blend, target_k);
 				if (!c_is_w && t_is_w) {
-					/* Land rounding into water: permitted ONLY if BOTH orthogonal neighbors are water */
+					/* Topological Invariant (R2): Land rounding into water is permitted ONLY
+					 * if BOTH orthogonal neighbors (k_x and k_y) are water. If any orthogonal neighbor
+					 * is land, the land mass is continuous along that axis and must never round away into
+					 * water, preventing triangular bite seams along room-chunk borders. */
 					int x_is_w = ndw_is_water(grp, no_blend, k_x);
 					int y_is_w = ndw_is_water(grp, no_blend, k_y);
 					if (!x_is_w || !y_is_w)
 						target_k = -1;
 				} else if (c_is_w && !t_is_w) {
-					/* Water rounding into land: permitted ONLY if BOTH orthogonal neighbors are land */
+					/* Topological Invariant (R2): Water rounding into land is permitted ONLY
+					 * if BOTH orthogonal neighbors are land. */
 					int x_is_w = ndw_is_water(grp, no_blend, k_x);
 					int y_is_w = ndw_is_water(grp, no_blend, k_y);
 					if (x_is_w || y_is_w)
