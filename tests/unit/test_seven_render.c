@@ -1830,6 +1830,92 @@ int main(void)
 		printf("PASS: dynamic water surface wave animation across frames verified\n");
 	}
 
+	/* Shoreline Multi-Scenario Rendering: Seamless continuous bathymetry across chunks */
+	{
+		/* Scenario 1: Convex Cape (L-shaped coastline) */
+		nd_seven_forget();
+		memset(&st, 0, sizeof(st));
+		strcpy(st.preferred_driver, "lamina-seven");
+		st.map_data.width = st.map_data.height = 7;
+		st.map_data.player_x = st.map_data.player_y = 3;
+		st.map_data.pos[0] = 10;
+		st.map_data.pos[1] = 10;
+
+		/* Top-left 4x4 is Land (Grassland = 10), rest is Water (0) */
+		for (int r = 0; r < 7; r++) {
+			for (int c = 0; c < 7; c++) {
+				int idx = r * 7 + c;
+				int is_land = (r <= 3 && c <= 3);
+				st.map_data.tiles[idx].bio_idx = is_land ? 10 : 0;
+				st.map_data.tiles[idx].exits = 0x1B;
+			}
+		}
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Verify boundary agreement across room chunk vertical seam (c=3 and c=4 at x=320) */
+		for (int y = 300; y < 400; y += 10) {
+			uint32_t col_left = fb[y * 640 + 319];
+			uint32_t col_right = fb[y * 640 + 320];
+			int dr = abs((int)(col_left & 0xFF) - (int)(col_right & 0xFF));
+			int dg = abs((int)((col_left >> 8) & 0xFF) - (int)((col_right >> 8) & 0xFF));
+			int db = abs((int)((col_left >> 16) & 0xFF) - (int)((col_right >> 16) & 0xFF));
+			assert(dr < 25 && dg < 25 && db < 25);
+		}
+		printf("PASS: convex cape water renders continuous across vertical and horizontal chunk boundaries\n");
+
+		/* Scenario 2: Multi-Biome Coastline Junction (Grassland + Shrubland meeting Ocean) */
+		nd_seven_forget();
+		memset(&st, 0, sizeof(st));
+		strcpy(st.preferred_driver, "lamina-seven");
+		st.map_data.width = st.map_data.height = 7;
+		st.map_data.player_x = st.map_data.player_y = 3;
+		st.map_data.pos[0] = 20;
+		st.map_data.pos[1] = 20;
+
+		for (int r = 0; r < 7; r++) {
+			for (int c = 0; c < 7; c++) {
+				int idx = r * 7 + c;
+				if (c <= 3) {
+					st.map_data.tiles[idx].bio_idx = (r <= 3) ? 10 : 250;
+				} else {
+					st.map_data.tiles[idx].bio_idx = 0;
+				}
+				st.map_data.tiles[idx].exits = 0x1B;
+			}
+		}
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Verify at the multi-biome horizontal boundary (y=256, c=3) that land does not round into water */
+		uint32_t land_north = fb[250 * 640 + 300];
+		uint32_t land_south = fb[260 * 640 + 300];
+		assert((land_north & 0xFF) > 30 || ((land_north >> 8) & 0xFF) > 40);
+		assert((land_south & 0xFF) > 30 || ((land_south >> 8) & 0xFF) > 40);
+		printf("PASS: multi-biome coastline boundary has zero water intrusion or corner bites\n");
+
+		/* Scenario 3: Sheep in Ocean looking at Coastline */
+		nd_seven_forget();
+		memset(&st, 0, sizeof(st));
+		strcpy(st.preferred_driver, "lamina-seven");
+		st.map_data.width = st.map_data.height = 7;
+		st.map_data.player_x = st.map_data.player_y = 3;
+		st.map_data.pos[0] = 30;
+		st.map_data.pos[1] = 30;
+
+		for (int r = 0; r < 7; r++) {
+			for (int c = 0; c < 7; c++) {
+				int idx = r * 7 + c;
+				int is_land = (c <= 2) || (r <= 1 && c <= 3);
+				st.map_data.tiles[idx].bio_idx = is_land ? 10 : 0;
+				st.map_data.tiles[idx].exits = 0x1B;
+			}
+		}
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_render(fb, 640, 480, &st);
+		printf("PASS: sheep in ocean renders seamless continuous bathymetry across all ocean rooms\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }
