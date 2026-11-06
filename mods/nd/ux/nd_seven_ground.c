@@ -1020,7 +1020,10 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				}
 				if (d >= 3 && gx != last_gx_ocean) {
 					last_gx_ocean = gx;
-					last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 5);
+					/* Broad slow swell plus a finer ripple octave, same forward clock */
+					int swell = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 5);
+					int ripple = noise_point_3d((int16_t)(gx + 31), (int16_t)(gy + 17), z_time, 0x57415645u, 3);
+					last_ocean = (swell * 3 + ripple * 2) / 5;
 				}
 
 				uint32_t col = src_row[c];
