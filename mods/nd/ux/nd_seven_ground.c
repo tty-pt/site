@@ -991,8 +991,12 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			const uint8_t *depth_row = &chunk->depth[y_in_tile * TILE_PX_W + src_x0];
 			uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
 
-			int last_gx = -999999;
+			int last_gx_surf = -999999;
+			int last_gx_caustic = -999999;
+			int last_gx_ocean = -999999;
 			int last_surf = 0;
+			int last_c1 = 0;
+			int last_c2 = 0;
 			int last_ocean = 0;
 
 			for (int c = 0; c < bw; c++) {
@@ -1004,30 +1008,45 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 				int x_in_tile = (src_x0 + c);
 				int gx = base_gx + x_in_tile / SCALE;
-				if (gx != last_gx) {
-					last_gx = gx;
-					/* Continuous 3D space-time noise: single sample per column based on depth */
-					if (d <= 2) {
-						last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
-					} else {
-						last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
-					}
+
+				if (d <= 2 && gx != last_gx_surf) {
+					last_gx_surf = gx;
+					last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
 				}
+				if (d >= 2 && d <= 6 && gx != last_gx_caustic) {
+					last_gx_caustic = gx;
+					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x43415553u, 2);
+					last_c2 = noise_point_3d((int16_t)(gx + 7), (int16_t)(gy - 9), z_time, 0x54494353u, 2);
+				}
+				if (d >= 3 && gx != last_gx_ocean) {
+					last_gx_ocean = gx;
+					last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
+				}
+
 				uint32_t col = src_row[c];
 
-				/* 1. Continuous 3D shoreline breaking foam on the beach contour (d=1, 2) */
+				/* Subsurface Seabed Caustics (d = 2 … 6): Multi-octave 3D space-time interference */
+				if (d >= 2 && d <= 6) {
+					int caustic_diff = abs(last_c1 - last_c2);
+					if (caustic_diff < 18) {
+						int intensity = ((18 - caustic_diff) * (7 - d)) / 7;
+						col = alpha_blend_rgb(col, RGB(235, 252, 255), intensity * 2);
+					}
+				}
+
+				/* Shoreline Breaking Foam (d = 1, 2) */
 				if (d == 1) {
 					int foam_alpha = 110 + (last_surf > 140 ? (last_surf - 140) / 2 : 0);
 					if (foam_alpha > 180) foam_alpha = 180;
 					col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
-				} else if (d == 2) {
-					if (last_surf > 145) {
-						int c_alpha = (last_surf - 145) / 2;
-						if (c_alpha > 50) c_alpha = 50;
-						col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
-					}
-				} else {
-					/* 2. Fluid wave swell relief: diffuse sky reflection on crests, deep absorption in troughs */
+				} else if (d == 2 && last_surf > 145) {
+					int c_alpha = (last_surf - 145) / 2;
+					if (c_alpha > 50) c_alpha = 50;
+					col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
+				}
+
+				/* Fluid Absorption Depth Swell (d >= 3) */
+				if (d >= 3) {
 					if (last_ocean > 145) {
 						int crest_int = (last_ocean - 145);
 						if (crest_int > 35) crest_int = 35;
