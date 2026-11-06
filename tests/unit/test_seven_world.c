@@ -160,6 +160,60 @@ int main(void)
 		printf("PASS: water depth tiers and dynamic animation variance on room chunks verified\n");
 	}
 
+	/* Water animation must be VISIBLE, not merely non-identical: across 8 ticks
+	 * (4 redraws) a real share of shallow and of deep water pixels changes by a
+	 * perceptible amount, and the pattern is anchored to the world, not the
+	 * screen. */
+	{
+		static uint32_t fa[320 * 256], fb2[320 * 256], fs[320 * 256];
+		nd_seven_ground_cache_forget();
+		nd_client_state_t st;
+		memset(&st, 0, sizeof(st));
+		st.map_data.width = st.map_data.height = 7;
+		st.map_data.player_x = st.map_data.player_y = 3;
+		for (int i = 0; i < 49; i++) {
+			st.map_data.tiles[i].bio_idx = (i % 7) <= 2 ? 10 : 0; /* land west, sea east */
+			st.map_data.tiles[i].exits = 0x1B;
+		}
+		int16_t r_pos[4] = { 0, 0, 0, 0 };
+		ndw_tile_t own = nd_seven_convert_tile(&st.map_data.tiles[3 * 7 + 3]);
+
+		nd_seven_ground_tile_render(fa, 320, 256, &st, 0, 0, r_pos, &own, 0, 0);
+		nd_seven_step_anim(8);
+		nd_seven_ground_tile_render(fb2, 320, 256, &st, 0, 0, r_pos, &own, 0, 0);
+		/* same frame, camera moved 2 px (1 world unit) */
+		nd_seven_ground_tile_render(fs, 320, 256, &st, 0, 0, r_pos, &own, -2, 0);
+
+		const nd_room_chunk_t *ch = nd_seven_chunk_find(r_pos);
+		assert(ch && ch->depth);
+		int sh_n = 0, sh_c = 0, dp_n = 0, dp_c = 0;
+		for (int i = 0; i < 320 * 256; i++) {
+			int d = ch->depth[i];
+			if (d < 2)
+				continue;
+			int m = 0;
+			for (int s = 0; s < 24; s += 8) {
+				int a = (int)((fa[i] >> s) & 0xFF), b = (int)((fb2[i] >> s) & 0xFF);
+				int df = a > b ? a - b : b - a;
+				if (df > m) m = df;
+			}
+			int *n = d <= 6 ? &sh_n : &dp_n, *c = d <= 6 ? &sh_c : &dp_c;
+			(*n)++;
+			if (m >= 12)
+				(*c)++;
+		}
+		printf("INFO: visibly changed after 8 ticks: shallow %d/%d, deep %d/%d\n", sh_c, sh_n, dp_c, dp_n);
+		assert(sh_n > 0 && dp_n > 0);
+		assert(sh_c * 10 >= sh_n);
+		assert(dp_c * 10 >= dp_n);
+
+		for (int y = 0; y < 256; y++)
+			for (int x = 0; x < 318; x++)
+				assert(fs[y * 320 + x] == fb2[y * 320 + x + 2]);
+		nd_seven_ground_cache_forget();
+		printf("PASS: water animation is visible in shallows and deep sea and anchored to the world\n");
+	}
+
 	/* Client-side room chunks: 7x7 active view window retention and eager eviction */
 	{
 		nd_seven_ground_cache_forget();
