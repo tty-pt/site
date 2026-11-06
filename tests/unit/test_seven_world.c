@@ -652,16 +652,16 @@ int main(void)
 		{
 			ndw_warp_grid_t g_h;
 			uint8_t grp_h[9] = {
-				1, 1, 1,   /* Water, Water, Water */
-				0, 2, 2,   /* Land A, Land B, Land B */
-				0, 2, 2    /* Land A, Land B, Land B */
+				2, 2, 2,   /* Water, Water, Water */
+				0, 0, 1,   /* Land A, Land A, Land B */
+				0, 0, 1    /* Land A, Land A, Land B */
 			};
-			uint8_t mask_h = 0;
-			int16_t pos_h[4] = { 0, 0, 0, 0 };
+			unsigned mask_h = NDW_WATER_BIT(-1, -1) | NDW_WATER_BIT(0, -1) | NDW_WATER_BIT(1, -1);
+			int16_t pos_h[4] = { 10, -5, 2, 1 };
 			ndw_warp_grid_fill(&g_h, pos_h);
 			int water_in_h_corner = 0;
 			for (int ly = NDW_EDGE_BAND; ly < NDW_EDGE_BAND + 24; ly++) {
-				for (int lx = 0; lx < 24; lx++) {
+				for (int lx = 0; lx < NDW_TILE_W; lx++) {
 					uint16_t w[9];
 					ndw_ground_weights(&g_h, lx * NDW_SUB + NDW_SUB / 2, ly * NDW_SUB + NDW_SUB / 2, grp_h, mask_h, w);
 					if (w[0] == 256 || w[1] == 256 || w[2] == 256)

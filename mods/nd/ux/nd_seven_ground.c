@@ -40,20 +40,20 @@ static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 
 static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 {
-	static const uint32_t C_SHORE = RGB(64, 180, 224);  /* vibrant tropical cerulean shallows */
-	static const uint32_t C_AQUA  = RGB(42, 136, 205);  /* coastal shelf azure */
-	static const uint32_t C_AZURE = RGB(28, 92, 175);   /* coastal deep blue */
-	static const uint32_t C_DEEP  = RGB(18, 52, 130);   /* deep sapphire ocean */
+	static const uint32_t C_SHORE = RGB(64, 195, 230);  /* vibrant translucent cerulean shallows (0-12 units) */
+	static const uint32_t C_INNER = RGB(48, 160, 215);  /* luminous inner shelf aquamarine (12-36 units) */
+	static const uint32_t C_OUTER = RGB(32, 115, 190);  /* coastal outer shelf azure (36-72 units) */
+	static const uint32_t C_DEEP  = RGB(18, 52, 130);   /* deep sapphire ocean basin (72+ units) */
 
 	uint32_t water_col;
 	if (depth <= 6) {
-		water_col = lerp_rgb(C_SHORE, C_AQUA, depth - 1, 5);
+		water_col = lerp_rgb(C_SHORE, C_INNER, depth - 1, 5);
 	} else if (depth <= 18) {
-		water_col = lerp_rgb(C_AQUA, C_AZURE, depth - 6, 12);
+		water_col = lerp_rgb(C_INNER, C_OUTER, depth - 6, 12);
 	} else {
 		int t = depth - 18;
-		if (t > 14) t = 14;
-		water_col = lerp_rgb(C_AZURE, C_DEEP, t, 14);
+		if (t > 10) t = 10;
+		water_col = lerp_rgb(C_OUTER, C_DEEP, t, 10);
 	}
 	return tint_col(water_col, r, gg, b);
 }
@@ -61,13 +61,13 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 static inline int water_alpha_at_depth(int depth)
 {
 	if (depth <= 6) {
-		return 80 + (depth * 45) / 6;
+		return 75 + (depth * 45) / 6;
 	} else if (depth <= 18) {
-		return 125 + ((depth - 6) * 55) / 12;
+		return 120 + ((depth - 6) * 55) / 12;
 	} else {
 		int t = depth - 18;
-		if (t > 14) t = 14;
-		return 180 + (t * 55) / 14;
+		if (t > 10) t = 10;
+		return 175 + (t * 65) / 10;
 	}
 }
 
@@ -245,15 +245,20 @@ static inline int nd_global_land_dist(int32_t wx, int32_t wy)
 }
 
 /* Sub-linear bathymetric shelf distance (R3): extends water shelf darkening
- * to 64 units with smooth optical transition into deep water basin. */
+ * across a 72-unit coastal shelf using sub-linear power attenuation
+ * to preserve wide, luminous shallow water near the shore before gently
+ * transitioning into the deep ocean basin. */
 static inline int nd_water_depth_at(int dist_units, int terrain_depth)
 {
 	int depth;
 	if (dist_units < 0) dist_units = 0;
-	if (dist_units >= 64) {
+	if (dist_units >= 72) {
 		depth = 28;
 	} else {
-		depth = 1 + (27 * dist_units) / 64;
+		int t_frac = (dist_units * 256) / 72;
+		int t_sqrt = ndw_isqrt(t_frac * 256);
+		int t_sub = (t_frac + t_sqrt) / 2;
+		depth = 1 + (27 * t_sub) / 256;
 	}
 	if (terrain_depth > depth && terrain_depth <= 28) {
 		depth = terrain_depth;
