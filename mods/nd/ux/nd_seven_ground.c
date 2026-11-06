@@ -45,8 +45,8 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
 	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= 4) */
 	static const uint32_t C_SHELF   = RGB(36, 160, 224); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
-	static const uint32_t C_OUTER   = RGB(22, 108, 195); /* Coastal ocean: rich Mediterranean deep azure (d = 12..22) */
-	static const uint32_t C_ABYSS   = RGB(12, 54, 145);  /* Abyssal basin: deep royal sapphire (d >= 22) */
+	static const uint32_t C_OUTER   = RGB(24, 96, 185);  /* Coastal ocean: deep azure (d = 12..22) */
+	static const uint32_t C_ABYSS   = RGB(14, 44, 125);  /* Abyssal basin: deep royal sapphire (d >= 22) */
 
 	uint32_t water_col;
 	if (depth <= 4) {
@@ -979,8 +979,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 	if (chunk->depth) {
 		uint32_t anim = nd_seven_get_anim();
-		int base_gx = ti * NDW_TILE_W;
-		int base_gy = tj * NDW_TILE_H;
+		int base_gx = (int)pos[0] * NDW_TILE_W;
+		int base_gy = -(int)pos[1] * NDW_TILE_H;
 		/* Z iterates continuously frame-by-frame across all number boundaries */
 		int16_t z_time = (int16_t)anim;
 		int16_t z_time_fast = (int16_t)(anim * 2);
@@ -1045,13 +1045,14 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				if (d >= 3) {
 					int wave_h = (last_swell * 3 + last_ripple * 2) / 5;
 					if (wave_h > 145) {
-						int crest_int = (wave_h - 145) * 2;
-						if (crest_int > 80) crest_int = 80;
-						col = alpha_blend_rgb(col, RGB(180, 235, 255), crest_int);
+						int crest_int = (wave_h - 145);
+						if (crest_int > 35) crest_int = 35;
+						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(36, 92, 190);
+						col = alpha_blend_rgb(col, crest_col, crest_int);
 					} else if (wave_h < 110) {
-						int trough_int = (110 - wave_h) * 2;
-						if (trough_int > 60) trough_int = 60;
-						col = alpha_blend_rgb(col, RGB(8, 30, 85), trough_int);
+						int trough_int = (110 - wave_h);
+						if (trough_int > 30) trough_int = 30;
+						col = alpha_blend_rgb(col, RGB(8, 28, 85), trough_int);
 					}
 
 					/* 4. Specular sun sparkle glints */
