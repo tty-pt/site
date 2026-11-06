@@ -10,7 +10,7 @@ Deno.test("auren browser demo: verify SSR, WebAssembly client hydration, and pro
   const page = await context.newPage();
 
   const consoleLogs: string[] = [];
-  page.on("console", (msg) => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on("console", (msg) => console.log(`[BROWSER ${msg.type()}] ${msg.text()}`));
 
   try {
     /* 1. Navigate to /auren */
@@ -39,6 +39,12 @@ Deno.test("auren browser demo: verify SSR, WebAssembly client hydration, and pro
     if (!formEl || !inputEl || !submitBtn) {
       throw new Error("Input bar elements missing");
     }
+
+    /* Wait for WebAssembly llama.cpp model to finish loading into memory */
+    await page.waitForFunction(() => {
+      const badge = document.querySelector(".auren-badge");
+      return badge && badge.textContent.includes("Active");
+    }, { timeout: 30000 });
 
     /* 5. Submit a prompt and verify streaming in the browser */
     await inputEl.fill("Explain pointers in C in 5 words.");

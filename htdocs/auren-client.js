@@ -76,7 +76,9 @@ import { AurenBrowserEngine } from '/vendor/auren/index.js';
     (async () => {
       try {
         engine = new AurenBrowserEngine({
-          modelName: 'smollm2-135m-instruct',
+          modelKey: 'smollm2',
+          modelName: 'smollm2-135m-instruct-q4_k_m.gguf',
+          modelUrl: '/models/smollm2-135m-instruct-q4_k_m.gguf',
           workerPath: '/vendor/auren/auren-worker.js'
         });
 
@@ -89,12 +91,12 @@ import { AurenBrowserEngine } from '/vendor/auren/index.js';
             fill.style.width = `${progress.percent}%`;
           }
           if (label) {
-            if (progress.status === 'cached') {
-              label.textContent = 'Model loaded from browser cache (0 bytes transferred)';
+            if (progress.status === 'cached' || progress.percent >= 100) {
+              label.textContent = 'Model loaded and ready (WebAssembly llama.cpp)';
             } else if (progress.status === 'downloading') {
               label.textContent = `Downloading model weights: ${progress.percent}%`;
-            } else if (progress.status === 'initializing_webgpu') {
-              label.textContent = 'Initializing WebGPU compute pipeline...';
+            } else if (progress.status === 'initializing_wasm') {
+              label.textContent = 'Initializing WebAssembly llama.cpp runtime...';
             }
           }
         });
@@ -102,13 +104,21 @@ import { AurenBrowserEngine } from '/vendor/auren/index.js';
         dispatchToWasm(5, '1');
         if (badge) {
           badge.className = 'auren-badge badge-gpu-on';
-          badge.textContent = 'WebGPU Active (Local Hardware)';
+          badge.textContent = 'WebAssembly Active (Local Hardware)';
+        }
+        const label = document.querySelector('.auren-progress-label');
+        if (label) {
+          label.textContent = 'Model loaded and ready (WebAssembly llama.cpp)';
         }
       } catch (err) {
-        console.warn('[auren-client] Local WebGPU init note:', err.message);
+        console.warn('[auren-client] Engine initialization note:', err.message);
         if (badge) {
-          badge.className = 'auren-badge badge-gpu-on';
-          badge.textContent = 'Local Engine Ready';
+          badge.className = 'auren-badge badge-gpu-wait';
+          badge.textContent = 'Model Init Failed';
+        }
+        const label = document.querySelector('.auren-progress-label');
+        if (label) {
+          label.textContent = `Error loading model: ${err.message}`;
         }
       }
     })();
