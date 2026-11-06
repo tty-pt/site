@@ -29,21 +29,66 @@ varying vec2 v_uv;
 uniform sampler2D u_tex;
 uniform float u_time;
 uniform vec2 u_res;
+
+float hash3(vec3 p) {
+	p = fract(p * 0.3183099 + vec3(0.1, 0.1, 0.1));
+	p *= 17.0;
+	return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float noise3d(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(mix(hash3(i + vec3(0.0, 0.0, 0.0)), hash3(i + vec3(1.0, 0.0, 0.0)), f.x),
+		    mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+		mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x),
+		    mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+
 void main() {
 	vec4 base = texture2D(u_tex, v_uv);
-	bool is_water = (base.b > base.r * 1.25 && base.b > 0.30 && base.g > base.r * 0.9);
+	bool is_water = (base.b > base.r * 1.25 && base.b > 0.28 && base.g > base.r * 0.85);
+
 	if (is_water && u_time > 0.0) {
 		vec2 p = v_uv * u_res * 0.5;
-		float t = u_time * 2.0;
-		float w1 = sin(p.x * 0.12 + p.y * 0.06 + t);
-		float w2 = cos(p.x * 0.09 - p.y * 0.08 + t * 0.8);
-		float caustic = w1 * 0.5 + w2 * 0.5;
-		if (caustic > 0.35) {
-			float highlight = (caustic - 0.35) * 0.25;
-			base.rgb += vec3(highlight * 0.8, highlight * 0.95, highlight);
-		} else if (caustic < -0.35) {
-			float shadow = (-caustic - 0.35) * 0.20;
-			base.rgb -= vec3(shadow * 0.5, shadow * 0.3, shadow * 0.1);
+		float t = u_time * 0.7;
+
+		// 1. 3D continuous fluid refraction (evolving in place, zero 2D panning)
+		vec3 coord = vec3(p * 0.035, t * 0.6);
+		float nx = noise3d(coord + vec3(0.5, 0.0, 0.0)) - 0.5;
+		float ny = noise3d(coord + vec3(0.0, 0.5, 0.0)) - 0.5;
+		vec2 disp = vec2(nx, ny) * 2.8;
+
+		vec2 refr_uv = v_uv + (disp / u_res);
+		vec4 refr = texture2D(u_tex, refr_uv);
+		if (refr.b > refr.r * 1.15 && refr.b > 0.25) {
+			base = refr;
+		}
+
+		// 2. 3D organic caustic light filaments: contour of intersecting 3D noise fields
+		float n1 = noise3d(vec3(p * 0.065, t * 0.85));
+		float n2 = noise3d(vec3(p * 0.095 + 13.7, t * 1.15));
+		float caustic = abs(n1 - n2);
+
+		if (caustic < 0.14) {
+			float intensity = (0.14 - caustic) / 0.14;
+			base.rgb += vec3(intensity * 0.22, intensity * 0.28, intensity * 0.30);
+		} else if (caustic > 0.42) {
+			float trough = (caustic - 0.42) / 0.58;
+			base.rgb -= vec3(trough * 0.12, trough * 0.08, trough * 0.04);
+		}
+
+		// 3. Directional Fresnel specular glints
+		vec3 N = normalize(vec3(-nx * 4.0, -ny * 4.0, 1.0));
+		vec3 L = normalize(vec3(-0.45, -0.55, 0.70));
+		vec3 V = vec3(0.0, 0.0, 1.0);
+		vec3 H = normalize(L + V);
+		float spec = pow(max(dot(N, H), 0.0), 24.0);
+		if (spec > 0.45) {
+			float glint = (spec - 0.45) * 0.35;
+			base.rgb += vec3(glint * 0.85, glint * 0.95, glint);
 		}
 	}
 	gl_FragColor = base;

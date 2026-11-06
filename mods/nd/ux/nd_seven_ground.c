@@ -40,35 +40,42 @@ static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 
 static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 {
-	static const uint32_t C_SHORE = RGB(64, 195, 230);  /* vibrant translucent cerulean shallows (0-12 units) */
-	static const uint32_t C_INNER = RGB(48, 160, 215);  /* luminous inner shelf aquamarine (12-36 units) */
-	static const uint32_t C_OUTER = RGB(32, 115, 190);  /* coastal outer shelf azure (36-72 units) */
-	static const uint32_t C_DEEP  = RGB(18, 52, 130);   /* deep sapphire ocean basin (72+ units) */
+	/* Volumetric Beer-Lambert light extinction colors:
+	 * Red and yellow wavelengths attenuate first, leaving brilliant tropical turquoise
+	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
+	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= 4) */
+	static const uint32_t C_SHELF   = RGB(36, 160, 224); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
+	static const uint32_t C_OUTER   = RGB(22, 108, 195); /* Coastal ocean: rich Mediterranean deep azure (d = 12..22) */
+	static const uint32_t C_ABYSS   = RGB(12, 54, 145);  /* Abyssal basin: deep royal sapphire (d >= 22) */
 
 	uint32_t water_col;
-	if (depth <= 6) {
-		water_col = lerp_rgb(C_SHORE, C_INNER, depth - 1, 5);
-	} else if (depth <= 18) {
-		water_col = lerp_rgb(C_INNER, C_OUTER, depth - 6, 12);
+	if (depth <= 4) {
+		water_col = lerp_rgb(C_SHALLOW, C_SHELF, depth - 1, 3);
+	} else if (depth <= 12) {
+		water_col = lerp_rgb(C_SHELF, C_OUTER, depth - 4, 8);
 	} else {
-		int t = depth - 18;
+		int t = depth - 12;
 		if (t > 10) t = 10;
-		water_col = lerp_rgb(C_OUTER, C_DEEP, t, 10);
+		water_col = lerp_rgb(C_OUTER, C_ABYSS, t, 10);
 	}
 	return tint_col(water_col, r, gg, b);
 }
 
 static inline int water_alpha_at_depth(int depth)
 {
-	if (depth <= 6) {
-		return 75 + (depth * 45) / 6;
-	} else if (depth <= 18) {
-		return 120 + ((depth - 6) * 55) / 12;
-	} else {
-		int t = depth - 18;
-		if (t > 10) t = 10;
-		return 175 + (t * 65) / 10;
-	}
+	/* True exponential Beer-Lambert optical extinction:
+	 * T(d) = exp(-sigma * d), alpha = 255 * (1 - T(d)).
+	 * Shallows (d=1..3) are crystal clear (67%..50% transmission of the sandy seabed).
+	 * Continental shelf gently darkens, reaching total optical extinction in the deep abyss. */
+	static const uint8_t s_beer_lambert_alpha[29] = {
+		0,
+		85,  107, 127, 143, 158, 171, 182, 191, 200, 207,
+		213, 219, 224, 228, 231, 234, 237, 239, 241, 243,
+		245, 246, 247, 248, 250, 252, 254, 255
+	};
+	if (depth <= 0) return 0;
+	if (depth >= 28) return 255;
+	return (int)s_beer_lambert_alpha[depth];
 }
 
 typedef struct {
@@ -974,6 +981,12 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 		uint32_t anim = nd_seven_get_anim();
 		int base_gx = (int)pos[0] * NDW_TILE_W;
 		int base_gy = -(int)pos[1] * NDW_TILE_H;
+		int16_t tz_fine = (int16_t)(anim / 3);
+		int16_t tz_deep = (int16_t)(anim / 6);
+
+		/* Intertidal surf breathing cycle (period = 144 ticks ~ 2.4s) */
+		int32_t surf_cycle = (int32_t)(((anim % 144) + 144) % 144);
+		int surge = (surf_cycle < 60) ? (surf_cycle / 2) : (surf_cycle < 84 ? 30 : ((144 - surf_cycle) * 30 / 60));
 
 		for (int r = 0; r < bh; r++) {
 			int y_in_tile = (src_y0 + r);
@@ -981,6 +994,12 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			const uint32_t *src_row = &chunk->pixels[y_in_tile * TILE_PX_W + src_x0];
 			const uint8_t *depth_row = &chunk->depth[y_in_tile * TILE_PX_W + src_x0];
 			uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
+
+			int last_gx = -999999;
+			int last_c1 = 0;
+			int last_c2 = 0;
+			int last_deep_n = 0;
+			int last_ripple = 0;
 
 			for (int c = 0; c < bw; c++) {
 				uint8_t d = depth_row[c];
@@ -991,45 +1010,52 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 				int x_in_tile = (src_x0 + c);
 				int gx = base_gx + x_in_tile / SCALE;
+				if (gx != last_gx) {
+					last_gx = gx;
+					/* Evaluate continuous 3D space-time noise N(x, y, t): morphs in place, zero 2D panning */
+					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, tz_fine, 0x43415553u, 2);
+					last_c2 = noise_point_3d((int16_t)(gx + 13), (int16_t)(gy - 19), tz_fine, 0x54494353u, 2);
+					last_deep_n = noise_point_3d((int16_t)gx, (int16_t)gy, tz_deep, 0x4F434541u, 4);
+					last_ripple = noise_point_3d((int16_t)gx, (int16_t)gy, tz_fine, 0x57415645u, 2);
+				}
 				uint32_t col = src_row[c];
 
-				int drift = (int)(anim / 3);
-
-				if (d <= 3) {
-					/* Dynamic animated caustic shoreline shimmer & breathing surf surge */
-					uint32_t c1 = unit_noise(0x43415553u, (gx + drift) / 2, (gy + drift / 2) / 2) & 31;
-					uint32_t c2 = unit_noise(0x54494353u, (gx - drift / 2) / 2, (gy + drift) / 2) & 31;
-					int caustic = (int)(c1 + c2); /* 0..62 */
-
-					/* Intertidal surf breathing cycle (period = 144 ticks ~ 2.4s) */
-					int32_t surf_phase = (int32_t)anim + (int32_t)(gx * 3 + gy * 2) / 8;
-					uint32_t surf_cycle = (uint32_t)(((surf_phase % 144) + 144) % 144);
-					int surge = (surf_cycle < 60) ? (int)(surf_cycle / 2) : (surf_cycle < 84 ? 30 : (int)((144 - surf_cycle) * 30 / 60));
-
-					if (d == 1) {
-						int foam_alpha = 110 + surge * 2 + (caustic > 38 ? (caustic - 38) * 3 : 0);
-						if (foam_alpha > 195) foam_alpha = 195;
-						col = alpha_blend_rgb(col, RGB(250, 255, 254), foam_alpha);
-					} else if (d == 2) {
-						int c_alpha = (caustic > 36 ? (caustic - 36) * 3 : 0) + (surge > 12 ? (surge - 12) * 2 : 0);
-						if (c_alpha > 85) c_alpha = 85;
-						if (c_alpha > 0) {
-							col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
-						}
-					} else if (d == 3 && caustic > 42) {
-						int c_alpha = (caustic - 42) * 2;
-						col = alpha_blend_rgb(col, RGB(200, 245, 255), c_alpha);
+				/* 1. Shoreline breaking foam & wash */
+				if (d == 1) {
+					int foam_alpha = 110 + surge * 2 + (last_c1 > 150 ? (last_c1 - 150) : 0);
+					if (foam_alpha > 210) foam_alpha = 210;
+					col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
+				} else if (d == 2) {
+					int c_alpha = (last_c1 > 140 ? (last_c1 - 140) / 2 : 0) + (surge > 10 ? (surge - 10) * 2 : 0);
+					if (c_alpha > 85) c_alpha = 85;
+					if (c_alpha > 0) {
+						col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
 					}
 				}
-				if (d >= 4) {
-					/* Subtle isotropic fluid shimmer without directional lines */
-					uint32_t w_noise = unit_noise(0x57415445u, (gx + drift) / 4, (gy + drift / 2) / 4) & 31;
-					if (w_noise < 2) {
-						col = alpha_blend_rgb(col, RGB(28, 76, 175), 25);
-					} else if (w_noise == 2) {
-						col = alpha_blend_rgb(col, RGB(12, 38, 105), 25);
+
+				/* 2. Caustic light webbing dancing on shallow seabed */
+				if (d >= 2 && d <= 6) {
+					int caustic_diff = abs(last_c1 - last_c2);
+					if (caustic_diff < 26) {
+						int c_bright = ((26 - caustic_diff) * (7 - d)) / 7;
+						col = alpha_blend_rgb(col, RGB(225, 252, 255), c_bright * 3);
 					}
 				}
+
+				/* 3. Surface wave relief: paired sunlit highlight crests & shadow troughs */
+				if (d >= 3) {
+					int wave_h = (last_deep_n * 5 + last_ripple * 3) / 8;
+					if (wave_h > 150) {
+						int crest_int = (wave_h - 150) * 2;
+						if (crest_int > 75) crest_int = 75;
+						col = alpha_blend_rgb(col, RGB(160, 225, 255), crest_int);
+					} else if (wave_h < 105) {
+						int trough_int = (105 - wave_h) * 2;
+						if (trough_int > 60) trough_int = 60;
+						col = alpha_blend_rgb(col, RGB(8, 32, 90), trough_int);
+					}
+				}
+
 				dst_row[c] = col;
 			}
 		}
