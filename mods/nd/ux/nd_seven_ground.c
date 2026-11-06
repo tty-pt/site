@@ -1011,26 +1011,28 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 				if (d <= 2 && gx != last_gx_surf) {
 					last_gx_surf = gx;
-					last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
+					last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 4);
 				}
 				if (d >= 2 && d <= 6 && gx != last_gx_caustic) {
 					last_gx_caustic = gx;
-					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x43415553u, 2);
-					last_c2 = noise_point_3d((int16_t)(gx + 7), (int16_t)(gy - 9), z_time, 0x54494353u, 2);
+					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x43415553u, 4);
+					last_c2 = noise_point_3d((int16_t)(gx + 7), (int16_t)(gy - 9), z_time, 0x54494353u, 4);
 				}
 				if (d >= 3 && gx != last_gx_ocean) {
 					last_gx_ocean = gx;
-					last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
+					last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 5);
 				}
 
 				uint32_t col = src_row[c];
 
-				/* Subsurface Seabed Caustics (d = 2 … 6): Multi-octave 3D space-time interference */
+				/* Subsurface seabed caustics (d = 2 … 6): sunlight focused by the
+				 * surface onto the seabed, dimmed by the water column above it. */
 				if (d >= 2 && d <= 6) {
 					int caustic_diff = abs(last_c1 - last_c2);
-					if (caustic_diff < 18) {
-						int intensity = ((18 - caustic_diff) * (7 - d)) / 7;
-						col = alpha_blend_rgb(col, RGB(235, 252, 255), intensity * 2);
+					if (caustic_diff < 22) {
+						int transmit = 255 - water_alpha_at_depth(d);
+						int intensity = ((22 - caustic_diff) * 160 / 22) * transmit / 255;
+						col = alpha_blend_rgb(col, RGB(235, 252, 255), intensity);
 					}
 				}
 
@@ -1039,22 +1041,22 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					int foam_alpha = 110 + (last_surf > 140 ? (last_surf - 140) / 2 : 0);
 					if (foam_alpha > 180) foam_alpha = 180;
 					col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
-				} else if (d == 2 && last_surf > 145) {
-					int c_alpha = (last_surf - 145) / 2;
-					if (c_alpha > 50) c_alpha = 50;
+				} else if (d == 2 && last_surf > 140) {
+					int c_alpha = (last_surf - 140);
+					if (c_alpha > 90) c_alpha = 90;
 					col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
 				}
 
-				/* Fluid Absorption Depth Swell (d >= 3) */
+				/* Fluid Absorption Depth Swell (d >= 3): lit crests, darker troughs */
 				if (d >= 3) {
-					if (last_ocean > 145) {
-						int crest_int = (last_ocean - 145);
-						if (crest_int > 35) crest_int = 35;
-						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(36, 92, 190);
+					if (last_ocean > 140) {
+						int crest_int = (last_ocean - 140) * 2;
+						if (crest_int > 70) crest_int = 70;
+						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(80, 150, 225);
 						col = alpha_blend_rgb(col, crest_col, crest_int);
-					} else if (last_ocean < 110) {
-						int trough_int = (110 - last_ocean);
-						if (trough_int > 30) trough_int = 30;
+					} else if (last_ocean < 116) {
+						int trough_int = (116 - last_ocean) * 2;
+						if (trough_int > 60) trough_int = 60;
 						col = alpha_blend_rgb(col, RGB(8, 28, 85), trough_int);
 					}
 				}
