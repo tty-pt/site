@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdint.h>
+#include <nd/field.h>
 #include "nd_lamina.h"
 #include "nd_scene.h"
 #include "nd_seven.h"
@@ -314,7 +315,7 @@ static void draw_mineral(uint32_t *fb, uint32_t w, uint32_t h, uint32_t tile_sz,
 		int boulder = kind == NDW_K_BOULDER;
 		int rw = tile_px(tile_sz, boulder ? 7 : 4) + 1;
 		int rh = rw * 3 / 4 + 1;
-		uint32_t base = (variant & 1) ? 0xFF6E8CB0 : 0xFF959AA4;   /* tan / cold grey */
+		uint32_t base = (variant & 1) ? 0xFF96989A : 0xFF9A9896;   /* warm grey / cold grey */
 		int x = fx - rw / 2, y = fy - rh;
 
 		fill_rect_blend(fb, w, h, (uint32_t)(x - 1), (uint32_t)(fy - 1), (uint32_t)(rw + 2), 2u, 0x55000000);
@@ -568,20 +569,41 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 			int is_room = (tile->flags & ND_MAP_FLAG_ROOM);
 			int is_player = (tile->flags & ND_MAP_FLAG_PLAYER);
 
-			/* Sample from shared client room chunk, maintaining unified depth contours, authentic ground biomes, and zero duplicate noise */
-			const nd_room_chunk_t *chunk = nd_seven_chunk_ensure(map, (int)x, (int)y);
-			if (chunk && chunk->pixels) {
-				for (uint32_t py = 0; py < tile_sz; py++) {
-					int cy = ((int)py * TILE_PX_H) / (int)tile_sz;
-					for (uint32_t px = 0; px < tile_sz; px++) {
-						int cx = ((int)px * TILE_PX_W) / (int)tile_sz;
-						uint32_t pcol = chunk->pixels[cy * TILE_PX_W + cx];
-						fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(pcol, amb, 255));
-					}
-				}
-			} else {
+			if (is_room) {
 				uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
 				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+			} else {
+				/* Wilderness: render directly from the continuous high-resolution field (lod 1) */
+				int16_t room_pos[4] = {
+					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
+					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
+					map->pos[2],
+					map->pos[3]
+				};
+				int32_t ox = (int32_t)room_pos[0] * 160;
+				int32_t oy = -(int32_t)room_pos[1] * 128;
+				uint16_t world = (uint16_t)room_pos[3];
+
+				uint32_t blk = (tile_sz >= 24) ? 4 : (tile_sz >= 16 ? 2 : 1);
+				for (uint32_t py = 0; py < tile_sz; py += blk) {
+					uint32_t bh = (py + blk <= tile_sz) ? blk : (tile_sz - py);
+					int32_t wy = oy + ((int)(py + bh / 2) * 128) / (int)tile_sz;
+					for (uint32_t px = 0; px < tile_sz; px += blk) {
+						uint32_t bw = (px + blk <= tile_sz) ? blk : (tile_sz - px);
+						int32_t wx = ox + ((int)(px + bw / 2) * 160) / (int)tile_sz;
+						nd_field_sample_t s = nd_field_sample(world, 1, wx, wy);
+						uint32_t col;
+						if (s.depth > 0) {
+							col = water_color_at_depth(s.depth > 28 ? 28 : s.depth, 128, 128, 128);
+						} else {
+							uint32_t col1 = ndw_biome_base_rgb(s.bio);
+							uint32_t col2 = ndw_biome_base_rgb(s.bio2 ? s.bio2 : s.bio);
+							col = (s.blend > 0 && s.bio2 != s.bio) ?
+							      alpha_blend_rgb(col1, col2, (s.blend * 255) / 128) : col1;
+						}
+						fill_rect(fb, w, h, tx + (int)px, ty + (int)py, (int)bw, (int)bh, shade(col, amb, 255));
+					}
+				}
 			}
 
 			/* Rooms get a soft outline; wilderness stays seamless. */

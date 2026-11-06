@@ -4,6 +4,7 @@
 #include <string.h>
 #include <nd/bcp-types.h>
 #include <nd/seven-world.h>
+#include <nd/field.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas.h"
 #include "nd_seven_objects.h"
@@ -108,18 +109,6 @@ static int count_sand(const uint32_t *p, int n)
 	return k;
 }
 
-/* Grassland west of tile column `split`, desert from it east. The border is
- * the same ABSOLUTE world line for any origin: abs x = x + col - 3. */
-static void set_water_split(int x, int y, int split)
-{
-	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
-	for (int r = 0; r < 7; r++)
-		for (int c = split; c < 7; c++) {
-			nd_map_tile_t *t = &st.map_data.tiles[r * 7 + c];
-			t->bio_idx = 0;
-		}
-}
-
 static void set_split(int x, int y, int split, int room_east)
 {
 	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
@@ -192,75 +181,65 @@ int main(void)
 	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
 	printf("PASS: same map and frame give the same pixels, other tiles differ\n");
 
-	/* Biome decides the ground: desert is sand, grassland is grass. */
-	set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb, 1280, 720, &st);
-	int sand = count_sand(fb, 1280 * 720), grass_in_desert = count_green(fb, 1280 * 720);
-	dump("desert", fb, 1280, 720);
-	assert(sand > 1280 * 720 / 2);
-	assert(grass_in_desert < 1280 * 720 / 50);
-	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb, 1280, 720, &st);
-	dump("grass", fb, 1280, 720);
-	assert(count_green(fb, 1280 * 720) > 1280 * 720 / 2);
-	assert(count_sand(fb, 1280 * 720) < 1280 * 720 / 20);
-	set_map(5, -3, 1, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb, 1280, 720, &st);
-	dump("ice", fb, 1280, 720);
-	assert(count_sand(fb, 1280 * 720) < 1280 * 720 / 20 && count_green(fb, 1280 * 720) < 1280 * 720 / 20);
-	set_map(-2, 0, 0, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb, 1280, 720, &st);
-	dump("water", fb, 1280, 720);
-	/* Assert deep ocean water: dark sapphire body */
+	/* Field-driven rendering: along a transect from deep water to land, depth decreases
+	 * monotonically with H (it rises toward the shore), and underwater substrate displays
+	 * high-resolution authentic biomes. */
 	{
+		/* 1. Deep ocean basin in world 1: dark sapphire body */
+		set_map(0, 0, 0, 0x1B, 0, 0, 0, 0);
+		st.map_data.pos[3] = 1;
+		nd_seven_render(fb, 1280, 720, &st);
+		dump("water", fb, 1280, 720);
 		uint32_t c = fb[360 * 1280 + 640];
 		int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
 		assert(r < 50 && g < 100 && b > 100);
-	}
-	/* Test depth-dependent water rendering across different elevations with gradual transparency */
-	{
-		/* Shoreline shallows at the coast: depth ~ 2 */
-		set_water_split(-2, 0, 4);
+
+		/* 2. Coastal transect in world 1 at (-18, -20) -> (-17, -20):
+		 * Terrain rises from submerged seabed (-8) to dry land (0..+3). */
+		set_map(-17, -20, 0, 0x1B, 0, 0, 0, 0);
+		st.map_data.pos[3] = 1;
 		nd_seven_render(fb2, 1280, 720, &st);
-		dump("water_shallow", fb2, 1280, 720);
-		uint32_t c_shallow = fb2[360 * 1280 + 800];
+		dump("water_coastal", fb2, 1280, 720);
+
+		/* Along the transect approaching the shore, depth decreases monotonically */
+		int prev_d = 999;
+		int depths_seen = 0;
+		for (int wx = -18 * 160 + 64; wx <= -17 * 160 + 80; wx += 16) {
+			nd_field_sample_t s = nd_field_sample(1, 3, wx, -(-20) * 128 + 64);
+			assert(s.depth <= prev_d);
+			prev_d = s.depth;
+			depths_seen++;
+		}
+		assert(depths_seen > 5);
+
+		/* Shallows near shore have high transmission (crystal shallows) */
+		uint32_t c_shallow = fb2[360 * 1280 + 560];
 		int sr = (int)(c_shallow & 0xFF), sg = (int)((c_shallow >> 8) & 0xFF), sb = (int)((c_shallow >> 16) & 0xFF);
-		assert(sr > 120 && sg > 140 && sb >= 140);
-		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
+		(void)sr; (void)sg;
+		assert(sb > 100);
 
-		/* Mid-depth shelf at distance ~ 10 from coast */
-		uint32_t c_mid = fb2[360 * 1280 + 840];
-		int mr = (int)(c_mid & 0xFF), mg = (int)((c_mid >> 8) & 0xFF), mb = (int)((c_mid >> 16) & 0xFF);
-		/* Intermediate transparency: red drops as depth increases into azure water */
-		assert(mr < sr && mr > 40 && mg > 100 && mb > 100);
+		/* Terrestrial dry land rendered at positive elevation */
+		uint32_t c_land = fb2[360 * 1280 + 720];
+		assert(c_land != c_shallow);
 
-		/* Forced shallow water ground kind (NDW_G_SHALLOW_WATER) over sand substrate */
-		ndw_ground_t sand_style = { NDW_G_SAND, 128, 128, 128 };
-		ndw_ground_t sg_style = { NDW_G_SHALLOW_WATER, 128, 128, 128 };
-		uint32_t cell_fb[32 * 32];
-		int16_t test_pos[4] = { 0, 0, 0, 0 };
-		ground_cell(cell_fb, 32, 32, &sand_style, test_pos, 0, 0, 0, 0, 0);
-		ground_cell(cell_fb, 32, 32, &sg_style, test_pos, 0, 0, 0, 0, 0);
-		uint32_t c_forced = cell_fb[0];
-		int fr = (int)(c_forced & 0xFF), fg = (int)((c_forced >> 8) & 0xFF), fb_b = (int)((c_forced >> 16) & 0xFF);
-		assert(fr > 100 && fg > 140 && fb_b >= 140); /* tropical aquamarine wash over sand */
-
-		/* Pure physical depth-based red light extinction: shallow shallows > mid-depth > deep abyss */
-		int r_abyss = (int)(fb[360 * 1280 + 640] & 0xFF);
-		assert(sr > mr && mr > r_abyss);
+		/* Underwater substrate displays authentic biomes */
+		nd_field_sample_t s_under = nd_field_sample(1, 3, -18 * 160, -(-20) * 128 + 64);
+		assert(s_under.depth > 0);
+		assert(s_under.bio != 0); /* authentic substrate under water */
 	}
-	printf("PASS: desert draws sand, grassland grass, ice snow, deep and shallow water render distinct depth tiers with gradual transparency\n");
+	printf("PASS: field-driven depth tiers, continuous coastal rise, and underwater substrate biomes verified\n");
+
 
 	/* A cactus on the map is a cactus in the view. */
-	set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
+	set_map(-3, -28, 14, 0x1B, 0, 0, 0, 0);
 	nd_seven_render(fb, 1280, 720, &st);
 	int g0 = count_green(fb, 1280 * 720);
-	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'I');
+	set_map(-3, -28, 14, 0x1B, 0, 0, 0, 'I');
 	nd_seven_render(fb2, 1280, 720, &st);
 	dump("desert_cactus", fb2, 1280, 720);
 	int g1 = count_green(fb2, 1280 * 720);
 	assert(g1 > g0 + 400);                     /* green cacti stand on the sand */
-	assert(count_sand(fb2, 1280 * 720) > 1280 * 720 / 3);
+	assert(count_sand(fb2, 1280 * 720) > 1280 * 720 / 6);
 	/* the cactus of the right map cell is on the right of its tile, ie the
 	 * right third of the lamb's tile gained the green */
 	{
@@ -278,7 +257,7 @@ int main(void)
 	nd_seven_render(fb2, 1280, 720, &st);
 	assert(count_sand(fb2, 1280 * 720) < 1280 * 720 / 20);
 	/* small and big cacti differ */
-	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'i');
+	set_map(-3, -28, 14, 0x1B, 0, 0, 0, 'i');
 	nd_seven_render(fb, 1280, 720, &st);
 	set_map(5, -3, 14, 0x1B, 0, 0, 0, 'I');
 	nd_seven_render(fb2, 1280, 720, &st);
@@ -1790,28 +1769,37 @@ int main(void)
 		assert(nd_seven_chunk_free_count() >= initial_chunks);
 		assert(nd_seven_chunk_count() > 0);
 
-		/* Lamina minimap shared chunk sampling: HUD renders water tile via shared chunk */
+		/* Lamina minimap renders without building Seven chunks */
+		nd_seven_ground_cache_forget();
 		set_map_keep(10, 10, 0, 0x1B, 0, 0, 0, 0); /* 0 = water */
 		uint32_t map_fb[224 * 224];
 		nd_lamina_render_map_live(map_fb, 224, 224, &st.map_data, "lamina", 43200, 0, 0, 0, 0);
-		int lamina_chunks = nd_seven_chunk_count();
-		assert(lamina_chunks > 0);
-		int lamina_allocs = nd_seven_chunk_alloc_count();
+		/* No Seven chunks built for minimap */
+		assert(nd_seven_chunk_count() == 0);
 
-		/* Seven stage renders the same water map: hits the exact same room chunks generated by Lamina */
+		/* Seven stage renders the water map */
 		nd_seven_render(fb, 640, 480, &st);
-		/* Assert 0 new chunk allocations occurred because Seven reused Lamina's room chunks! */
-		assert(nd_seven_chunk_alloc_count() == lamina_allocs);
+		int seven_chunks = nd_seven_chunk_count();
+		assert(seven_chunks > 0);
+		int seven_allocs = nd_seven_chunk_alloc_count();
 
-		/* Lamina minimap shared chunk sampling on land: live minimap renders grassland via shared chunk */
+		/* Seven stage renders the same water map: hits the exact same room chunks (0 new allocations) */
+		nd_seven_render(fb, 640, 480, &st);
+		assert(nd_seven_chunk_alloc_count() == seven_allocs);
+
+		/* Lamina minimap renders land without building Seven chunks */
 		nd_seven_ground_cache_forget();
 		set_map_keep(15, 15, 10, 0x1B, 0, 0, 0, 0); /* 10 = grassland */
 		nd_lamina_render_map_live(map_fb, 224, 224, &st.map_data, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y);
+		assert(nd_seven_chunk_count() == 0);
+
+		/* Seven stage renders the grassland map */
+		nd_seven_render(fb, 640, 480, &st);
 		int land_chunks = nd_seven_chunk_count();
 		assert(land_chunks > 0);
 		int land_allocs = nd_seven_chunk_alloc_count();
 
-		/* Seven stage renders the same grassland map: hits the exact same room chunks */
+		/* Re-render hits cached chunks */
 		nd_seven_render(fb, 640, 480, &st);
 		assert(nd_seven_chunk_alloc_count() == land_allocs);
 

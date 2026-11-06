@@ -8,6 +8,8 @@ While Seven introduced detailed, organic terrain by applying multi-octave value 
 
 This document establishes the architectural roadmap to **evolve NeverDark's terrain system into a centralized, true 3D procedural engine**. The core will preserve its blazing-fast $O(1)$ microsecond response times for traditional ASCII/MUD clients, while simultaneously delivering continuous terrain elevation, slopes, cliffs, underground cavern systems, and sub-tile organic geometry to visual renderers (Seven 2D and future 3D engines).
 
+> **Architecture Status Update**: The unified procedural field (`<nd/field.h>`) now unifies coarse server worldgen octaves and fine client terrain octaves on the same lattice. Surface height and underwater biomes are preserved, and bathymetry in Seven and Lamina is computed strictly from $W - H$ ($H < W$) with zero rectangular room distance heuristics.
+
 ---
 
 ## 2. Codebase Reality & Architectural Deficiencies Today

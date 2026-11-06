@@ -612,6 +612,208 @@ static inline void chaff_wplane(uint32_t *out, unsigned n, unsigned rows, size_t
 	noise_wplane(out, n, rows, stride, p0, x, w, seed, dim, flags, c);
 }
 
+/* --- Unified Chaff Fixed-Point API & Declarative Cascades -------------- */
+
+/* Fixed-point coordinate: cell (lattice/room units) + frac (1/65536 of a unit) */
+typedef struct {
+	int16_t  cell;
+	uint16_t frac;
+} chaff_coord_t;
+
+#define CHAFF_MODE_SET 0u
+#define CHAFF_MODE_ADD 1u
+
+#define CHAFF_SEED_SHARED    0u /* One seed for all layers (server worldgen convention) */
+#define CHAFF_SEED_PER_LAYER 1u /* Seed derived per layer: seed ^ (l * 0x85EBCA77u + 1) */
+
+#define CHAFF_FLAG_FADE 1u
+
+/* Universal layer descriptor */
+typedef struct {
+	uint8_t  shift;     /* Lattice size 2^shift (e.g. 7 = 128, 2 = 4) */
+	uint8_t  vshift;    /* Value right shift: hash >> vshift (default 8; server octave_t.w) */
+	int16_t  amp;       /* Signed amplitude multiplier (0 = raw unsigned hash >> vshift) */
+	uint8_t  seed_mode; /* CHAFF_SEED_SHARED or CHAFF_SEED_PER_LAYER */
+	int8_t   skew[2];   /* Affine domain skew: skew[0]=x, skew[1]=y */
+	uint16_t contrast;  /* Contrast multiplier: 256 = 1.0x (0 or 256 = identity) */
+} chaff_layer_t;
+
+/* Universal field descriptor */
+typedef struct {
+	uint32_t seed;
+	uint8_t  dim;
+	uint8_t  flags;
+	uint8_t  nlayers;
+	const chaff_layer_t *layers;
+} chaff_field_t;
+
+/* Fractional fade helper: Hermite smoothstep across cell in 16.16 */
+static inline uint32_t
+chaff_fade_frac(uint32_t fi, uint16_t frac, unsigned x)
+{
+	if (frac == 0)
+		return noise_wfade(fi, x) << 16;
+	uint64_t t = (((uint64_t)fi << 16) | frac) >> x;
+	if (t > 65536ull) t = 65536ull;
+	uint64_t faded_t = (t * t * (3ull * 65536ull - 2ull * t)) >> 32;
+	return (uint32_t)(faded_t << x);
+}
+
+/* Primary multi-layer region generator (point, row, plane, volume).
+ * Evaluates field layers [layer_lo, layer_hi) over a grid of size n[dim]
+ * starting at origin[dim] with step_q16[dim] (rational 16.16 fixed-point steps).
+ * Zero heap allocations; callers supply `out`. */
+static inline void
+chaff_fill(const chaff_field_t *field,
+           uint8_t layer_lo, uint8_t layer_hi,
+           const chaff_coord_t origin[],
+           const int32_t step_q16[],
+           const uint16_t n[],
+           int32_t *out, size_t stride, unsigned mode)
+{
+	if (!field || !out || field->dim == 0 || field->dim > 3) return;
+	if (layer_hi > field->nlayers) layer_hi = field->nlayers;
+
+	size_t slices = (field->dim == 3) ? n[0] : 1;
+	size_t rows   = (field->dim >= 2) ? n[field->dim - 2] : 1;
+	size_t cols   = n[field->dim - 1];
+	if (stride < cols) stride = cols;
+	size_t slice_stride = rows * stride;
+
+	if (mode == CHAFF_MODE_SET) {
+		for (size_t s = 0; s < slices; s++) {
+			for (size_t r = 0; r < rows; r++) {
+				memset(out + s * slice_stride + r * stride, 0, cols * sizeof(int32_t));
+			}
+		}
+	}
+	if (layer_lo >= layer_hi) return;
+
+	noise_wcache_t cache;
+
+	for (uint8_t l = layer_lo; l < layer_hi; l++) {
+		const chaff_layer_t *lay = &field->layers[l];
+		uint32_t seed = (lay->seed_mode == CHAFF_SEED_SHARED) ?
+		                field->seed :
+		                (field->seed ^ (uint32_t)(l * 0x85EBCA77u + 1));
+		unsigned x = lay->shift;
+		unsigned vshift = lay->vshift ? lay->vshift : 8;
+		uint16_t mask = COORDMASK_LSHIFT(x);
+		noise_wcache_init(&cache);
+
+		int32_t base_z_q16 = (field->dim == 3) ?
+		                     (((int32_t)origin[0].cell << 16) | (uint32_t)origin[0].frac) : 0;
+		int32_t dz_q16     = (field->dim == 3) ? step_q16[0] : 0;
+
+		int32_t base_y_q16 = (field->dim >= 2) ?
+		                     (((int32_t)origin[field->dim - 2].cell << 16) | (uint32_t)origin[field->dim - 2].frac) : 0;
+		int32_t dy_q16     = (field->dim >= 2) ? step_q16[field->dim - 2] : 0;
+
+		int32_t base_x_q16 = (((int32_t)origin[field->dim - 1].cell << 16) | (uint32_t)origin[field->dim - 1].frac);
+		int32_t dx_q16     = step_q16[field->dim - 1];
+
+		for (size_t s = 0; s < slices; s++) {
+			int32_t raw_z_q16 = base_z_q16 + (int32_t)s * dz_q16;
+			int32_t *slice_out = out + s * slice_stride;
+
+			for (size_t r = 0; r < rows; r++) {
+				int32_t raw_y_q16 = base_y_q16 + (int32_t)r * dy_q16;
+				int32_t *row_out = slice_out + r * stride;
+
+				for (size_t c = 0; c < cols; c++) {
+					int32_t raw_x_q16 = base_x_q16 + (int32_t)c * dx_q16;
+					int16_t cell_x, cell_y, cell_z = 0;
+					uint16_t frac_x = 0, frac_y = 0, frac_z = 0;
+
+					if ((raw_x_q16 & 0xffff) == 0 && (raw_y_q16 & 0xffff) == 0 && (raw_z_q16 & 0xffff) == 0) {
+						cell_x = (int16_t)(raw_x_q16 >> 16);
+						cell_y = (int16_t)(raw_y_q16 >> 16);
+						cell_z = (int16_t)(raw_z_q16 >> 16);
+						if (lay->skew[0]) cell_x = (int16_t)(cell_x + cell_y / lay->skew[0]);
+						if (lay->skew[1]) cell_y = (int16_t)(cell_y - cell_x / lay->skew[1]);
+					} else {
+						int32_t qx = raw_x_q16, qy = raw_y_q16;
+						if (lay->skew[0]) qx += qy / lay->skew[0];
+						if (lay->skew[1]) qy -= qx / lay->skew[1];
+						cell_x = (int16_t)(qx >> 16);
+						frac_x = (uint16_t)(qx & 0xffff);
+						cell_y = (int16_t)(qy >> 16);
+						frac_y = (uint16_t)(qy & 0xffff);
+						cell_z = (int16_t)(raw_z_q16 >> 16);
+						frac_z = (uint16_t)(raw_z_q16 & 0xffff);
+					}
+
+					uint32_t raw = 0;
+					if (field->dim == 1) {
+						int16_t pt_s[1] = { (int16_t)(cell_x & mask) };
+						uint32_t fix = (uint16_t)cell_x & (uint16_t)~mask;
+						uint32_t ux = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fix, frac_x, x) :
+						              (((uint32_t)fix << 16) | frac_x);
+						const uint32_t *v = noise_wcorners(&cache, pt_s, x, vshift, seed, 1);
+						int32_t st = noise_wstep(v[0], v[1], x);
+						raw = v[0] + (uint32_t)(((int64_t)st * ux) >> 16);
+					} else if (field->dim == 2) {
+						int16_t pt_s[2] = { (int16_t)(cell_y & mask), (int16_t)(cell_x & mask) };
+						uint32_t fiy = (uint16_t)cell_y & (uint16_t)~mask;
+						uint32_t fix = (uint16_t)cell_x & (uint16_t)~mask;
+						uint32_t uy = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fiy, frac_y, x) :
+						              (((uint32_t)fiy << 16) | frac_y);
+						uint32_t ux = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fix, frac_x, x) :
+						              (((uint32_t)fix << 16) | frac_x);
+						const uint32_t *v = noise_wcorners(&cache, pt_s, x, vshift, seed, 2);
+						int32_t s0 = noise_wstep(v[0], v[2], x);
+						int32_t s1 = noise_wstep(v[1], v[3], x);
+						uint32_t b0 = v[0] + (uint32_t)(((int64_t)s0 * uy) >> 16);
+						uint32_t b1 = v[1] + (uint32_t)(((int64_t)s1 * uy) >> 16);
+						int32_t st = noise_wstep(b0, b1, x);
+						raw = b0 + (uint32_t)(((int64_t)st * ux) >> 16);
+					} else if (field->dim == 3) {
+						int16_t pt_s[3] = { (int16_t)(cell_z & mask), (int16_t)(cell_y & mask), (int16_t)(cell_x & mask) };
+						uint32_t fiz = (uint16_t)cell_z & (uint16_t)~mask;
+						uint32_t fiy = (uint16_t)cell_y & (uint16_t)~mask;
+						uint32_t fix = (uint16_t)cell_x & (uint16_t)~mask;
+						uint32_t uz = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fiz, frac_z, x) :
+						              (((uint32_t)fiz << 16) | frac_z);
+						uint32_t uy = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fiy, frac_y, x) :
+						              (((uint32_t)fiy << 16) | frac_y);
+						uint32_t ux = (field->flags & CHAFF_FLAG_FADE) ?
+						              chaff_fade_frac(fix, frac_x, x) :
+						              (((uint32_t)fix << 16) | frac_x);
+						const uint32_t *v = noise_wcorners(&cache, pt_s, x, vshift, seed, 3);
+						uint32_t c_mid[4];
+						for (int i = 0; i < 4; i++) {
+							int32_t st_z = noise_wstep(v[i], v[i + 4], x);
+							c_mid[i] = v[i] + (uint32_t)(((int64_t)st_z * uz) >> 16);
+						}
+						int32_t s0 = noise_wstep(c_mid[0], c_mid[2], x);
+						int32_t s1 = noise_wstep(c_mid[1], c_mid[3], x);
+						uint32_t b0 = c_mid[0] + (uint32_t)(((int64_t)s0 * uy) >> 16);
+						uint32_t b1 = c_mid[1] + (uint32_t)(((int64_t)s1 * uy) >> 16);
+						int32_t st = noise_wstep(b0, b1, x);
+						raw = b0 + (uint32_t)(((int64_t)st * ux) >> 16);
+					}
+
+					int32_t sample;
+					if (lay->amp == 0) {
+						sample = (int32_t)raw;
+					} else {
+						int32_t val = (int32_t)(raw >> 16) - 128;
+						if (lay->contrast != 0 && lay->contrast != 256)
+							val = (val * (int32_t)lay->contrast) >> 8;
+						sample = (val * (int32_t)lay->amp) >> 7;
+					}
+					row_out[c] += sample;
+				}
+			}
+		}
+	}
+}
+
 /* --- Declarative Multi-Scale Cascades & Universal Accessors -------------- */
 
 /* Single noise octave specification */
@@ -630,62 +832,15 @@ typedef struct {
 	const noise_octave_t *octaves;
 } noise_cascade_t;
 
-/* Corner cache for scanline row stepping */
-typedef struct {
-	int16_t  s[4];
-	uint32_t v[16];
-	uint32_t fetches;
-	uint8_t  valid;
-	unsigned x, w, seed;
-	uint8_t  dim;
-} noise_cache_t;
+/* Corner cache: aliased to noise_wcache_t to eliminate layout drift and type punning */
+typedef noise_wcache_t noise_cache_t;
 
 typedef struct {
-	noise_cache_t caches[16];
+	noise_wcache_t caches[16];
 	const noise_cascade_t *cfg;
 	uint8_t dim;
 } noise_scanline_t;
 
-/* 1. Bulk Matrix Stepper (Server Worldgen: fills 2^cy x 2^cy chunk in bulk)
- * Amortized ~0 hashes per tile; uses pure integer additions. */
-static inline void
-noise_matrix_fill_2d(const noise_cascade_t *cfg,
-                     int16_t origin_x, int16_t origin_y,
-                     uint8_t size_shift, int32_t *out_matrix)
-{
-	if (!cfg || cfg->count == 0 || !out_matrix) return;
-	size_t total = (size_t)1 << (2 * size_shift);
-	memset(out_matrix, 0, total * sizeof(int32_t));
-
-	uint32_t scratch_buf[4096];
-	uint32_t *mat = scratch_buf;
-	int must_free = 0;
-	if (total > 4096) {
-		mat = (uint32_t *)malloc(total * sizeof(uint32_t));
-		if (!mat) return;
-		must_free = 1;
-	}
-
-	int16_t ms[2] = { origin_y, origin_x };
-	for (uint8_t o = 0; o < cfg->count; o++) {
-		const noise_octave_t *oct = &cfg->octaves[o];
-		uint32_t oct_seed = cfg->seed ^ (uint32_t)(o * 0x85EBCA77u + 1);
-		int16_t msc[2] = { ms[0], ms[1] };
-		noise_m(mat, msc, oct->shift, 8, oct_seed, size_shift, 2);
-
-		for (size_t i = 0; i < total; i++) {
-			int32_t val = (int32_t)(mat[i] >> 16) - 128;
-			if (oct->contrast != 0 && oct->contrast != 256)
-				val = (val * (int32_t)oct->contrast) >> 8;
-			out_matrix[i] += (val * (int32_t)oct->amp) >> 7;
-		}
-	}
-
-	if (must_free) free(mat);
-}
-
-/* 2. Scanline Stepper with Corner Cache (Seven Water & Ground Rasterizer)
- * Fetches corners once per 3D lattice cell; steps rows in registers. */
 static inline void
 noise_scanline_init(noise_scanline_t *scan, const noise_cascade_t *cfg, uint8_t dim)
 {
@@ -693,8 +848,13 @@ noise_scanline_init(noise_scanline_t *scan, const noise_cascade_t *cfg, uint8_t 
 	memset(scan, 0, sizeof(*scan));
 	scan->cfg = cfg;
 	scan->dim = dim;
+	for (int i = 0; i < 16; i++)
+		noise_wcache_init(&scan->caches[i]);
 }
 
+/* 1. Universal Scanline Stepper with Corner Cache
+ * Evaluates rows in-register, applying skew per sample so values match the point sampler.
+ * Zero heap allocations. */
 static inline void
 noise_scanline_eval_row(noise_scanline_t *scan,
                         int16_t start_x, int16_t y, int16_t z,
@@ -703,49 +863,53 @@ noise_scanline_eval_row(noise_scanline_t *scan,
 	if (!scan || !scan->cfg || count == 0 || !out_row) return;
 	memset(out_row, 0, count * sizeof(int32_t));
 
-	uint32_t row_buf[1024];
-	uint32_t *r_buf = row_buf;
-	int must_free = 0;
-	if (count > 1024) {
-		r_buf = (uint32_t *)malloc(count * sizeof(uint32_t));
-		if (!r_buf) return;
-		must_free = 1;
-	}
-
 	const noise_cascade_t *cfg = scan->cfg;
 	uint8_t count_oct = cfg->count > 16 ? 16 : cfg->count;
 
 	for (uint8_t o = 0; o < count_oct; o++) {
 		const noise_octave_t *oct = &cfg->octaves[o];
 		uint32_t oct_seed = cfg->seed ^ (uint32_t)(o * 0x85EBCA77u + 1);
-
-		int16_t p0[4];
-		if (scan->dim == 2) {
-			int16_t px = start_x, py = y;
-			if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
-			if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
-			p0[0] = py;
-			p0[1] = px;
-		} else {
-			int16_t px = start_x, py = y, pz = z;
-			if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
-			if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
-			p0[0] = pz;
-			p0[1] = py;
-			p0[2] = px;
-		}
-
-		noise_wrow(r_buf, (unsigned)count, p0, 1, oct->shift, 8, oct_seed, scan->dim, NOISE_FADE, (noise_wcache_t *)&scan->caches[o]);
+		noise_wcache_t *c = &scan->caches[o];
 
 		for (size_t i = 0; i < count; i++) {
-			int32_t val = (int32_t)(r_buf[i] >> 16) - 128;
+			int16_t x = (int16_t)(start_x + (int)i);
+			int16_t px = x, py = y;
+			if (oct->skew_x) px = (int16_t)(px + py / oct->skew_x);
+			if (oct->skew_y) py = (int16_t)(py - px / oct->skew_y);
+
+			uint32_t raw;
+			if (scan->dim == 2) {
+				int16_t p[2] = { py, px };
+				raw = noise_wpoint_c(c, p, oct->shift, 8, oct_seed, 2, NOISE_FADE);
+			} else {
+				int16_t p[3] = { z, py, px };
+				raw = noise_wpoint_c(c, p, oct->shift, 8, oct_seed, 3, NOISE_FADE);
+			}
+			int32_t val = (int32_t)(raw >> 16) - 128;
 			if (oct->contrast != 0 && oct->contrast != 256)
 				val = (val * (int32_t)oct->contrast) >> 8;
 			out_row[i] += (val * (int32_t)oct->amp) >> 7;
 		}
 	}
+}
 
-	if (must_free) free(r_buf);
+/* 2. Universal Bulk Matrix Stepper
+ * Fills 2^size_shift x 2^size_shift chunk by scanline rows.
+ * Guarantees out_matrix[r * side + c] == noise_sample_2d(origin_x + c, origin_y + r).
+ * Zero heap allocations. */
+static inline void
+noise_matrix_fill_2d(const noise_cascade_t *cfg,
+                     int16_t origin_x, int16_t origin_y,
+                     uint8_t size_shift, int32_t *out_matrix)
+{
+	if (!cfg || cfg->count == 0 || !out_matrix) return;
+	size_t side = (size_t)1 << size_shift;
+	noise_scanline_t scan;
+	noise_scanline_init(&scan, cfg, 2);
+	for (size_t r = 0; r < side; r++) {
+		noise_scanline_eval_row(&scan, origin_x, (int16_t)(origin_y + (int)r), 0,
+		                        side, out_matrix + r * side);
+	}
 }
 
 /* 3. Sparse Point Sampler (Collision, Entrances, Caverns) */
@@ -832,3 +996,4 @@ chaff_sample_3d(const chaff_cascade_t *cfg, int16_t x, int16_t y, int16_t z)
 }
 
 #endif /* TTYPT_NOISE_H */
+

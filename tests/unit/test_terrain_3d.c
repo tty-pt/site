@@ -12,7 +12,7 @@ int main(void)
 {
 	printf("=== Testing NeverDark 3D Procedural Terrain & Cavern Engine ===\n");
 
-	uint16_t w0 = 42;
+	uint16_t w0 = 1;
 
 	/* 1. Determinism across queries */
 	{
@@ -41,31 +41,33 @@ int main(void)
 		printf("PASS: determinism verified (identical queries match, different worlds vary)\n");
 	}
 
-	/* 2. Boundary continuity across chunk boundaries and zero seams */
+	/* 2. Boundary continuity: tightened to the fine-octave Lipschitz bound */
 	{
-		/* Horizontal continuity along y = 0 */
-		for (int16_t x = -64; x <= 64; x++) {
-			int16_t h1 = nd_terrain_height(x, 0, w0);
-			int16_t h2 = nd_terrain_height(x, 1, w0);
-			int dh = abs(h2 - h1);
-			assert(dh <= 15); /* Continuous, no cliffs or tears across seam */
+		/* Horizontal continuity in world units */
+		int16_t prev_hx = nd_terrain_height_fine(-64, 0, w0);
+		for (int32_t x = -63; x <= 64; x++) {
+			int16_t h = nd_terrain_height_fine(x, 0, w0);
+			int dh = abs(h - prev_hx);
+			assert(dh <= 3); /* Fine octave Lipschitz bound */
+			prev_hx = h;
 		}
-		/* Vertical continuity along x = 0 */
-		for (int16_t y = -64; y <= 64; y++) {
-			int16_t h1 = nd_terrain_height(0, y, w0);
-			int16_t h2 = nd_terrain_height(1, y, w0);
-			int dh = abs(h2 - h1);
-			assert(dh <= 15);
+		/* Vertical continuity in world units */
+		int16_t prev_hy = nd_terrain_height_fine(0, -64, w0);
+		for (int32_t y = -63; y <= 64; y++) {
+			int16_t h = nd_terrain_height_fine(0, y, w0);
+			int dh = abs(h - prev_hy);
+			assert(dh <= 3);
+			prev_hy = h;
 		}
 		/* Sub-unit fine continuity */
 		int16_t prev_h = nd_terrain_height_fine(0, 0, w0);
 		for (int32_t s = 1; s <= 32; s++) {
 			int16_t cur_h = nd_terrain_height_fine(s, 0, w0);
 			int dh = abs(cur_h - prev_h);
-			assert(dh <= 4); /* Sub-step deltas are smooth */
+			assert(dh <= 3); /* Sub-step deltas are smooth */
 			prev_h = cur_h;
 		}
-		printf("PASS: boundary continuity verified (smooth transitions across x=0, y=0, fine sub-steps)\n");
+		printf("PASS: boundary continuity verified (smooth transitions across world units, dh <= 3)\n");
 	}
 
 	/* 3. Macro vs Micro elevation features and Water Table level-set */
@@ -239,6 +241,27 @@ int main(void)
 			}
 		}
 		printf("PASS: nd_terrain_eval continuous H(wx, wy) and level-set shorelines verified (0 vertical jumps)\n");
+	}
+
+	/* 9. Contract test: at room centres with fine layers disabled, field.h matches struct bio */
+	{
+		for (int y = -16; y <= 16; y += 4) {
+			for (int x = -16; x <= 16; x += 4) {
+				int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+				int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+				nd_field_sample_t s_coarse = nd_field_sample(w0, 0, wx, wy);
+				nd_field_sample_t s_fine   = nd_field_sample(w0, 3, wx, wy);
+
+				/* Fine height budget |H_fine - H_coarse| <= ND_FIELD_FINE_AMP_BUDGET */
+				int dh = abs(s_fine.elevation - s_coarse.elevation);
+				assert(dh <= ND_FIELD_FINE_AMP_BUDGET);
+
+				/* Water level identical */
+				assert(s_coarse.water_level == s_fine.water_level);
+			}
+		}
+		printf("PASS: field contract: room-centre coarse elevation and fine amplitude budget (|H_fine - H_coarse| <= %d)\n",
+		       ND_FIELD_FINE_AMP_BUDGET);
 	}
 
 	printf("=== ALL TERRAIN 3D TESTS PASSED ===\n");

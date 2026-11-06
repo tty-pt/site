@@ -333,6 +333,118 @@ int main(void)
 		printf("PASS: scanline stepper evaluated row with %u corner fetches\n", scan.caches[0].fetches);
 	}
 
+	/* 15. Strict agreement between point sampler, scanline row, and matrix fill (2D & 3D) */
+	{
+		static const noise_octave_t octs_skew[] = {
+			{ .shift = 6, .amp = 100, .skew_x = 3,  .skew_y = -5, .contrast = 256 },
+			{ .shift = 4, .amp =  50, .skew_x = 0,  .skew_y =  0, .contrast = 512 },
+			{ .shift = 3, .amp =  25, .skew_x = -2, .skew_y =  4, .contrast = 256 },
+		};
+		static const noise_cascade_t cfg_skew = {
+			.seed = 0x55AA1234,
+			.count = 3,
+			.octaves = octs_skew,
+		};
+
+		/* Origins: near 0, negative, and straddling int16 wrap boundary (32767 -> -32768) */
+		static const int16_t test_origins[][2] = {
+			{ 0, 0 },
+			{ -120, 85 },
+			{ 32750, 32750 }
+		};
+
+		for (size_t oi = 0; oi < sizeof(test_origins) / sizeof(test_origins[0]); oi++) {
+			int16_t ox = test_origins[oi][0];
+			int16_t oy = test_origins[oi][1];
+
+			int32_t mat[32 * 32];
+			noise_matrix_fill_2d(&cfg_skew, ox, oy, 5, mat);
+
+			noise_scanline_t scan;
+			noise_scanline_init(&scan, &cfg_skew, 2);
+
+			for (int r = 0; r < 32; r++) {
+				int32_t row[32];
+				int16_t cur_y = (int16_t)(oy + r);
+				noise_scanline_eval_row(&scan, ox, cur_y, 0, 32, row);
+
+				for (int c = 0; c < 32; c++) {
+					int16_t cur_x = (int16_t)(ox + c);
+					int32_t pt = noise_sample_2d(&cfg_skew, cur_x, cur_y);
+					assert(row[c] == pt);
+					assert(mat[r * 32 + c] == pt);
+				}
+			}
+		}
+
+		/* 3D row vs point sampler across wrap boundary */
+		noise_scanline_t scan3d;
+		noise_scanline_init(&scan3d, &cfg_skew, 3);
+		int16_t ox = 32760, oy = -10, oz = 15;
+		int32_t row3d[32];
+		noise_scanline_eval_row(&scan3d, ox, oy, oz, 32, row3d);
+		for (int c = 0; c < 32; c++) {
+			int16_t cur_x = (int16_t)(ox + c);
+			int32_t pt3d = noise_sample_3d(&cfg_skew, cur_x, oy, oz);
+			assert(row3d[c] == pt3d);
+		}
+		printf("PASS: point == row[k] == matrix[r][k] across 2D & 3D and int16 wrap boundary\n");
+	}
+
+	/* 16. chaff_fill at frac==0 matches noise_oct bit for bit */
+	{
+		static const chaff_layer_t lay = {
+			.shift = 4, .vshift = 1, .amp = 0, .seed_mode = CHAFF_SEED_SHARED,
+			.skew = { 0, 0 }, .contrast = 0
+		};
+		static const chaff_field_t field = {
+			.seed = 55, .dim = 2, .flags = 0, .nlayers = 1, .layers = &lay
+		};
+		int16_t oy = -64, ox = 32;
+		int32_t c_out[16 * 16];
+		chaff_coord_t origin[2] = { { oy, 0 }, { ox, 0 } };
+		int32_t step_q16[2] = { 65536, 65536 };
+		uint16_t n[2] = { 16, 16 };
+		chaff_fill(&field, 0, 1, origin, step_q16, n, c_out, 16, CHAFF_MODE_SET);
+
+		uint32_t oct_out[16 * 16];
+		int16_t s[2] = { oy, ox };
+		octave_t oct[] = { { 4, 1 } };
+		noise_oct(oct_out, s, 1, oct, 55, 4, 2);
+
+		for (int i = 0; i < 256; i++) {
+			assert((uint32_t)c_out[i] == oct_out[i]);
+		}
+		printf("PASS: chaff_fill at frac==0 equals noise_oct bit-for-bit\n");
+	}
+
+	/* 17. Multi-layer nesting: sum(layers 0..k) + sum(layers k..n) == sum(layers 0..n) */
+	{
+		static const chaff_layer_t layers[] = {
+			{ 7, 8, 100, CHAFF_SEED_PER_LAYER, { 3, -5 }, 256 },
+			{ 5, 8,  50, CHAFF_SEED_PER_LAYER, { 0,  0 }, 512 },
+			{ 3, 8,  20, CHAFF_SEED_PER_LAYER, { 2,  4 }, 256 }
+		};
+		static const chaff_field_t field = {
+			.seed = 0xFEEDFACE, .dim = 2, .flags = CHAFF_FLAG_FADE, .nlayers = 3, .layers = layers
+		};
+		chaff_coord_t origin[2] = { { -20, 12345 }, { 45, 6789 } };
+		int32_t step_q16[2] = { 409, 409 }; /* fractional step: 1/160th of a room */
+		uint16_t n[2] = { 16, 16 };
+
+		int32_t full[256], split[256];
+		chaff_fill(&field, 0, 3, origin, step_q16, n, full, 16, CHAFF_MODE_SET);
+
+		chaff_fill(&field, 0, 1, origin, step_q16, n, split, 16, CHAFF_MODE_SET);
+		chaff_fill(&field, 1, 3, origin, step_q16, n, split, 16, CHAFF_MODE_ADD);
+
+		for (int i = 0; i < 256; i++) {
+			assert(full[i] == split[i]);
+		}
+		printf("PASS: layer nesting sum(0..1) + sum(1..3) == sum(0..3) verified with fractional coordinates\n");
+	}
+
 	printf("=== ALL LIBNOISE TESTS PASSED ===\n");
+
 	return 0;
 }

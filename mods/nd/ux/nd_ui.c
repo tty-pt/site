@@ -771,8 +771,11 @@ static void seven_stage_redraw(void)
 	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
 }
 
+int g_map_dirty = 0;
+
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
+	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
 	if (nd_ui_seven_active(&client_state))
 		seven_stage_redraw();
 	nd_map_canvas_redraw(&client_state);
@@ -800,6 +803,11 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	nd_seven_sync_origin(&client_state);
 	sync_room_objects(&client_state);
 
+	/* Chunk construction is expensive: cap the number of new chunks this
+	 * tick. Tiles without a chunk draw a flat placeholder until built. */
+	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
+	int map_on = nd_map_canvas_enabled(&client_state);
+
 	/* Phase 3: Simulation */
 	if (now_seven) {
 		int mv = nd_seven_tick(&client_state, dt);
@@ -812,10 +820,27 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 			seven_stage_redraw();
 			/* Same cadence as the stage: the minimap follows the lamb in
 			 * lockstep instead of lagging a frame behind. */
-			nd_map_canvas_redraw(&client_state);
+			if (map_on) {
+				nd_map_canvas_redraw(&client_state);
+				g_map_dirty = 0;
+			}
 		}
-	} else if ((s_tick_counter % 3) == 0) {
+	} else if (map_on && (g_map_dirty || (s_tick_counter % 3) == 0)) {
+		/* Server frames only mark the map dirty (nd_state_io.c); the
+		 * redraw happens here, never inside the websocket handler. */
 		nd_map_canvas_redraw(&client_state);
+		g_map_dirty = 0;
+	}
+
+	/* Renderer-independent chunk lifetime: with neither the Seven stage
+	 * nor a canvas map enabled nothing may stay cached; otherwise free
+	 * every chunk that left the 7x7 view window. */
+	if (!now_seven && !map_on) {
+		g_map_dirty = 0;
+		if (nd_seven_chunk_count() > 0)
+			nd_seven_ground_cache_forget();
+	} else {
+		nd_seven_ground_frame_end(&client_state.map_data);
 	}
 }
 

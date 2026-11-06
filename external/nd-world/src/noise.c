@@ -1,11 +1,8 @@
 #include "noise.h"
-#include "noise_impl.h"
 #include <string.h>
-#include "xxhash.h"
 #include <nd/st.h>
 #include <nd/type.h>
-
-#define HASH XXH32
+#include <nd/field.h>
 
 #define CHUNK_Y 5
 #define CHUNK_SIZE (1 << CHUNK_Y)
@@ -24,85 +21,35 @@ static struct bio chunks_bio_raw[CHUNK_M * 4],
 		  *bio;
 static struct rect chunks_r;
 static coord_t chunks_obits = -1;
-static const uint32_t noise_fourth = (NOISE_MAX >> 2);
 static uint32_t n_he[CHUNK_M],
 	       n_cl[CHUNK_M],
 	       n_tm[CHUNK_M];
 
-/* REGARDING DRAWABLE THINGS THAT DEPEND ON NOISE {{{ */
-
-/* WORLD GEN STATIC VARS {{{ */
-
-static coord_t tmp_max = 170,
-	       tmp_min = -41;
-
-#define RAIN_DIV (NOISE_MAX >> 9)
-static uint32_t rn_max = NOISE_MAX / RAIN_DIV;
-
-/* }}} */
-
-/* WORLD GEN PRIMITIVES {{{ */
-static inline uint32_t
-water_level(ucoord_t obits)
-{
-	// returns (0-3) * (NOISE_MAX / 4)
-	return (((obits >> 2) + 2) & 3) * noise_fourth;
+/* Canonical field primitives forwarded from <nd/field.h> */
+static inline uint32_t water_level(ucoord_t obits) {
+	return nd_field_water_noise(obits);
 }
 
-static inline unsigned
-rain(
-		ucoord_t obits __attribute__((unused)),
-		uint32_t w __attribute__((unused)),
-		uint32_t he __attribute__((unused)),
-		uint32_t cl,
-		uint32_t tmp __attribute__((unused)) )
-{
-	uint32_t x = cl / RAIN_DIV;
-	return x;
+static inline unsigned rain(ucoord_t obits __attribute__((unused)),
+                           uint32_t w __attribute__((unused)),
+                           uint32_t he __attribute__((unused)),
+                           uint32_t cl,
+                           uint32_t tmp __attribute__((unused))) {
+	return nd_field_rain(cl);
 }
 
-static inline uint32_t
-sun_dist(ucoord_t obits)
-{
-	// returns (1-4)
-	return ((obits + 1) & 3);
+static inline uint32_t sun_dist(ucoord_t obits) {
+	return nd_field_sun_dist(obits);
 }
 
-static inline coord_t
-temp(ucoord_t obits, uint32_t he, uint32_t tm, coord_t pos_y) // fahrenheit * 10
-{
-	int64_t x = (int64_t)he - (int64_t)water_level(obits) + ((int64_t)tm - (int64_t)NOISE_MAX) / 3;
-	// change 200 to affect how
-	// terrain height decreases temperature
-	x /= 4 * (int64_t)UCOORD_MAX * 260;
-	x += (tmp_max<<1) - tmp_min // min temp of hot planet
-		- (tmp_max - tmp_min) * sun_dist(obits);
-	x += (pos_y * tmp_min) / 6300;
-	return (coord_t)(tmp_min + x);
+static inline coord_t temp(ucoord_t obits, uint32_t he, uint32_t tm, coord_t pos_y) {
+	return nd_field_temp(obits, he, tm, pos_y);
 }
 
-/* }}} */
-/* }}} */
-
-/**
- * gives you an index from 0 to 15 that maps in 2D:
- *
- * 	  cold
- *      0  1  2  3
- *      4  5  6  7
- * dry  8  9 10 11 wet
- *     12 13 14 15
- * 	   hot
- */
-static inline unsigned
-bio_idx(ucoord_t rn, coord_t tmp)
-{
-	if (tmp < tmp_min)
-		return BIOME_PERMANENT_ICE;
-	else if (tmp >= tmp_max)
-		return BIOME_VOLCANIC;
-	return 2 + _bio_idx(tmp_min, tmp_max, 0, rn_max, tmp, rn);
+static inline unsigned bio_idx(ucoord_t rn, coord_t tmp) {
+	return nd_field_bio_idx(rn, tmp);
 }
+
 
 static inline void
 noise_full(size_t i, point_t s, ucoord_t obits)
@@ -154,8 +101,10 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 static inline uint32_t
 view_idx(point_t pos)
 {
-	return (pos[Y_COORD] - chunks_r.s[Y_COORD]) * chunks_r.l[X_COORD]
-		+ pos[X_COORD] - chunks_r.s[X_COORD];
+	/* Offsets are taken in uint16_t so the cache window may straddle
+	 * the int16 wrap boundary (32767 + 1 == -32768) like the noise. */
+	return (uint32_t)(uint16_t)(pos[Y_COORD] - chunks_r.s[Y_COORD]) * chunks_r.l[X_COORD]
+		+ (uint16_t)(pos[X_COORD] - chunks_r.s[X_COORD]);
 }
 
 /* im pretty sures squares must be involved */
@@ -202,10 +151,10 @@ spread(unsigned ny)
 }
 
 static inline void
-noise_chunks(point_t pos)
+noise_chunks(pos_t pos)
 {
 	struct rect r;
-	size_t n[DIM], i;
+	size_t n[DIM], i, cx, cy;
 	point_t s, vprs = {
 		pos[0] - VIEW_AROUND,
 		pos[1] - VIEW_AROUND
@@ -219,27 +168,25 @@ noise_chunks(point_t pos)
 	n[1] = ((VIEW_SIZE + vprs[1] - r.s[1]) >> CHUNK_Y) + 1;
 	r.l[1] = n[1] << CHUNK_Y;
 
+	/* Containment and the chunk loops use wrapped (uint16_t) offsets
+	 * and chunk counts, not int16 coordinate comparisons: at the int16
+	 * wrap boundary s += CHUNK_SIZE wraps to -32768, which never reached
+	 * the (int-promoted) end bound and overran chunks_bio_raw. */
 	if (pos[3] == chunks_obits
-            && r.s[0] >= chunks_r.s[0]
-	    && r.s[1] >= chunks_r.s[1]
-	    && r.s[0] + r.l[0] <= chunks_r.s[0] + chunks_r.l[0]
-	    && r.s[1] + r.l[1] <= chunks_r.s[1] + chunks_r.l[1])
+	    && (uint16_t)(r.s[0] - chunks_r.s[0]) + r.l[0] <= chunks_r.l[0]
+	    && (uint16_t)(r.s[1] - chunks_r.s[1]) + r.l[1] <= chunks_r.l[1])
 		return;
 
 	i = 0;
 
-	for (s[Y_COORD] = r.s[Y_COORD];
-	     s[Y_COORD] < r.s[Y_COORD] + r.l[Y_COORD];
-	     s[Y_COORD] += CHUNK_SIZE)
-
-		for (s[X_COORD] = r.s[X_COORD];
-		     s[X_COORD] < r.s[X_COORD] + r.l[X_COORD];
-		     s[X_COORD] += CHUNK_SIZE)
-
-		{
+	for (cy = 0; cy < n[Y_COORD]; cy++) {
+		s[Y_COORD] = (coord_t)(r.s[Y_COORD] + (cy << CHUNK_Y));
+		for (cx = 0; cx < n[X_COORD]; cx++) {
+			s[X_COORD] = (coord_t)(r.s[X_COORD] + (cx << CHUNK_Y));
 			noise_full(i, s, pos[3]);
 			i += CHUNK_M;
 		}
+	}
 
 	bio = chunks_bio_raw;
 

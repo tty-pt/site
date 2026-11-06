@@ -1,6 +1,6 @@
  PART I: The Recurring & Recursive Nature of the Noise Algorithm
 
- The genius of libnoise (external/libnoise/include/ttypt/noise.h and external/nd-world/src/noise_impl.h) is that
+ The genius of libnoise (external/libnoise/include/ttypt/noise.h; canonical noise engine, eliminating legacy noise_impl.h) is that
  recursion is built into every layer of its mathematics:
  1. Recursive Spatial Subdivision (cy < x): Sub-matrices recursively pre-step parent quad vertices (noise_fix_v).
  2. Recursive Dimensional Collapse (noise_quad): Hypercubes of dimension N are recursively collapsed down to
@@ -16,9 +16,9 @@
  The core dilemma of procedural world generation has always been: How does a client render a high-definition,
  sub-pixel view of a room without drifting away from the server’s low-resolution macroscopic world evaluation?
 
- In libnoise, this is solved by analytical sub-quad derivation.
+ In libnoise, this is solved by analytical sub-quad derivation and the unified procedural field (<nd/field.h>).
 
- Look at noise_m in noise_impl.h:218:
+ Look at noise_m in <ttypt/noise.h>:
 
  ```c
    /* ms = matrix origin in world; x = feature quad size (2^x); cy = matrix size (2^cy) */
@@ -102,7 +102,7 @@
  ```
 
  ```c
-   /* In external/nd-world/src/noise_impl.h:60 */
+   /* In external/libnoise/include/ttypt/noise.h (formerly noise_impl.h) */
    static inline void noise_quad(uint32_t *c, uint32_t *vc, unsigned z, unsigned cy, uint8_t dim) {
        uint16_t ndim = dim - 1;
        uint16_t tvl = 1 << ndim;

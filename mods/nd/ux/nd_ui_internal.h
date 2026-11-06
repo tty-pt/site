@@ -31,6 +31,10 @@ extern int g_active_driver_idx;
 /* Map UI */
 bud_node *render_room_map(const nd_client_state_t *st);
 void nd_map_canvas_redraw(const nd_client_state_t *st);
+int nd_map_canvas_enabled(const nd_client_state_t *st);
+/* Set by the websocket handler; the next wasm_tick redraws the map. The
+ * handler itself never renders or builds chunks. */
+extern int g_map_dirty;
 
 /* Dock & Keypad UI */
 bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler);

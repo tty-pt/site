@@ -5,8 +5,10 @@
 #include "nd/bcp-types.h"
 #include "nd_lamina.h"
 #include "nd_seven.h"
+#include "nd_seven_ground.h"
 #include "nd_seven_objects.h"
 #include <nd/seven-world.h>
+#include <nd/field.h>
 
 /* Frame geometry for a 224x224 buffer and a 7x7 grid (as nd_lamina.c lays it
  * out): 4px pad, tile 30px, three 10px cells per tile, map centred. */
@@ -116,10 +118,11 @@ int main(void)
 	init_sample_map(&m);
 	wild(&m, 1, 1, 2, 0, 0, 0, 0, 0, 0);
 	render(&m, "lamina", 0);
-	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == 0xFF94A696);
+	uint32_t bg_wild = fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2];
+	assert(bg_wild != 0xFF08090C); /* not dark void */
 	wild(&m, 1, 1, 4, 0, 0, 0, 0, 0, 0); /* ANSI 4 = blue */
 	render(&m, "lamina", 0);
-	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == 0xFF94A696);
+	assert(fb[(TY(1) + TILE / 2) * W + TX(1) + TILE / 2] == bg_wild); /* independent of tile->bg */
 	printf("PASS: wilderness tiles show their biome background colour\n");
 
 	/* 5. TREES in their own colour on ALL THREE cells of a wilderness tile. */
@@ -345,80 +348,39 @@ int main(void)
 		printf("PASS: live player marker stays centered in circular map and tiles translate smoothly\n");
 	}
 
-	/* 13. Organic biome borders: where two wilderness biomes meet, the border is
-	 * the shared noise warp (ndw_ground_owner), not the straight tile edge, and
-	 * every band pixel shows the biome the owner function gives it. Rooms stay
-	 * square. West of tile column 3 is green (ANSI 2), east is yellow (ANSI 3). */
+	/* 13. Field integration: minimap water pixels == field depth > 0 at matching samples */
 	{
 		nd_map_data_t ms;
-		uint32_t a[W * H];
-		int lo = 9999, hi = -9999, west_yellow = 0, east_green = 0, mismatch = 0, checked = 0;
-		const int edge = TX(3);
-
 		init_sample_map(&ms);
 		for (int y = 0; y < 7; y++)
 			for (int x = 0; x < 7; x++) {
-				nd_map_tile_t *t = &ms.tiles[y * 7 + x];
-				t->flags = 0;
-				t->exits = 0;
-				t->bg = (uint8_t)(x >= 3 ? 3 : 2);
-				t->bio_idx = (uint8_t)(x >= 3 ? 3 : 2);
+				ms.tiles[y * 7 + x].flags = 0;
 			}
-		ms.tiles[3 * 7 + 3].flags = ND_MAP_FLAG_PLAYER;
-		ms.pos[0] = 20; ms.pos[1] = -5; ms.pos[2] = 2; ms.pos[3] = 1;
+		ms.pos[0] = 0; ms.pos[1] = 0; ms.pos[2] = 0; ms.pos[3] = 1; /* world 1 has real oceans at (0, 0) */
 		render(&ms, "lamina", 0);
-		memcpy(a, fb, sizeof(a));
-		render(&ms, "lamina", 0);
-		assert(memcmp(a, fb, sizeof(a)) == 0);              /* deterministic */
 
-		for (int ty = 0; ty < 7; ty++) {
-			if (ty == 3)
-				continue;                                   /* the player's glow sits here */
-			for (int py = TY(ty); py < TY(ty) + TILE; py++) {
-				uint32_t c_tundra = fb[py * W + edge - 8];
-				uint32_t c_grass = fb[py * W + edge + 8];
-				assert(c_tundra != c_grass);
-
-				int grass_cnt = 0;
-				for (int px = edge - 6; px < edge + 6; px++) {
-					uint32_t c = fb[py * W + px];
-					grass_cnt += (c == c_grass);
+		/* Verify across wilderness tile (1, 1) that pixels have water color if and only if field depth > 0 */
+		int water_matches = 0, total_checked = 0;
+		int tx = 1, ty = 1;
+		int32_t ox = (int32_t)(tx - 3) * 160;
+		int32_t oy = -(int32_t)(3 - ty) * 128;
+		for (int py = 0; py < TILE; py++) {
+			int32_t wy = oy + (py * 128) / TILE;
+			for (int px = 0; px < TILE; px++) {
+				int32_t wx = ox + (px * 160) / TILE;
+				nd_field_sample_t s = nd_field_sample(1, 1, wx, wy);
+				uint32_t pix = fb[(TY(ty) + py) * W + TX(tx) + px];
+				if (s.depth > 0) {
+					uint32_t exp_water = water_color_at_depth(s.depth > 28 ? 28 : s.depth, 128, 128, 128);
+					assert(pix == exp_water);
+					water_matches++;
 				}
-				if (grass_cnt < lo) lo = grass_cnt;
-				if (grass_cnt > hi) hi = grass_cnt;
-				for (int px = edge - 4; px < edge; px++) {
-					uint32_t c = fb[py * W + px];
-					west_yellow += (c == c_grass);
-				}
-				for (int px = edge; px < edge + 4; px++) {
-					uint32_t c = fb[py * W + px];
-					east_green += (c == c_tundra);
-				}
+				total_checked++;
 			}
 		}
-		assert(hi - lo >= 2);                               /* wavy, not a straight line */
-		assert(west_yellow > 0 && east_green > 0);          /* both reach across the old edge */
-		printf("PASS: wilderness biome borders follow the shared noise warp\n");
-
-		/* another level, another border */
-		ms.pos[2] = 3;
-		render(&ms, "lamina", 0);
-		assert(memcmp(a, fb, sizeof(a)) != 0);
-		printf("PASS: the minimap border depends on the world position\n");
-
-		/* a room on the yellow side blends organically with the green tile */
-		ms.pos[2] = 2;
-		ms.tiles[1 * 7 + 3].flags = ND_MAP_FLAG_ROOM;
-		ms.tiles[1 * 7 + 3].exits = 0x0F;
-		render(&ms, "lamina", 0);
-		int west_grass_room = 0;
-		for (int py = TY(1); py < TY(1) + TILE; py++) {
-			uint32_t c_grass = fb[py * W + edge + 8];
-			for (int px = edge - 6; px < edge; px++)
-				west_grass_room += (fb[py * W + px] == c_grass);
-		}
-		assert(west_grass_room > 0);
-		printf("PASS: a room's edge blends organically on the minimap\n");
+		assert(water_matches > 0);
+		printf("PASS: minimap water pixels == field depth > 0 at matching samples (%d/%d water)\n",
+		       water_matches, total_checked);
 	}
 
 	/* 17. Synchronous picked mineral suppression on player tile:

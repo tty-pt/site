@@ -217,6 +217,19 @@ static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st,
 #define MAP_CANVAS_PX MAP_STR(ND_MAP_CANVAS_W)
 #define MAP_CANVAS_STYLE "width:" MAP_CANVAS_PX "px;height:" MAP_CANVAS_PX "px"
 
+/* The one predicate deciding whether the region enables the canvas map.
+ * render_room_map emits #room-map-canvas exactly when this is true, and the
+ * client builds terrain chunks for the minimap only when it is true. Unset,
+ * "none", "ascii" and "ascii-bud" all mean: no canvas, no chunk work. */
+int nd_map_canvas_enabled(const nd_client_state_t *st)
+{
+	if (!st || !st->preferred_map_driver[0])
+		return 0;
+	const char *d = st->preferred_map_driver;
+	return strcmp(d, "none") != 0 && strcmp(d, "ascii") != 0 &&
+	       strcmp(d, "ascii-bud") != 0;
+}
+
 bud_node *render_room_map(const nd_client_state_t *st)
 {
 	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
@@ -224,8 +237,8 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
 
-	/* If explicitly configured as ascii-bud / ascii, render the pure ASCII map */
-	if (strcmp(map_drv, "ascii-bud") == 0 || strcmp(map_drv, "ascii") == 0) {
+	/* Regions that do not enable a canvas map get the pure ASCII map */
+	if (!nd_map_canvas_enabled(st)) {
 		bud_node *ascii_map = lx_n("nd-map",
 			lx_attr("id", "room-map"),
 			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
@@ -260,14 +273,13 @@ static uint32_t s_map_frame = 0;
 
 void nd_map_canvas_redraw(const nd_client_state_t *st)
 {
-	if (!st) return;
-	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud";
-	if (strcmp(theme, "none") == 0) return;
+	if (!nd_map_canvas_enabled(st))
+		return;
+	const char *theme = st->preferred_map_driver;
 
-	/* If legacy name "canvas" or "canvas-lamina" is passed, use default lamina theme */
-	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0 || strcmp(theme, "ascii-bud") == 0) {
+	/* Legacy names "canvas" / "canvas-lamina" mean the default lamina theme */
+	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0)
 		theme = "lamina";
-	}
 
 	/* With the Seven stage running, the player marker follows the lamb. */
 	int live = 0, lx = 0, ly = 0, have_room = 0;

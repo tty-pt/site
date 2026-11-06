@@ -98,4 +98,23 @@ int32_t chaff_sample_3d_sym(const noise_cascade_t *cfg, int16_t x, int16_t y, in
     return noise_sample_3d(cfg, x, y, z);
 }
 
+/* Universal chaff_fill entry points */
+void ttypt_chaff_fill(const chaff_field_t *field,
+                      uint8_t layer_lo, uint8_t layer_hi,
+                      const chaff_coord_t origin[],
+                      const int32_t step_q16[],
+                      const uint16_t n[],
+                      int32_t *out, size_t stride, unsigned mode) {
+    chaff_fill(field, layer_lo, layer_hi, origin, step_q16, n, out, stride, mode);
+}
+
+void chaff_fill_sym(const chaff_field_t *field,
+                    uint8_t layer_lo, uint8_t layer_hi,
+                    const chaff_coord_t origin[],
+                    const int32_t step_q16[],
+                    const uint16_t n[],
+                    int32_t *out, size_t stride, unsigned mode) {
+    chaff_fill(field, layer_lo, layer_hi, origin, step_q16, n, out, stride, mode);
+}
+
 

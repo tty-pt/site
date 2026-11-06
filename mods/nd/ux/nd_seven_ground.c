@@ -3,6 +3,7 @@
 #include "nd_seven_motion.h"
 #include <stdlib.h>
 #include <string.h>
+#include <nd/field.h>
 #include <nd/terrain.h>
 
 /* Generated color and optical LUTs for NeverDark Seven water */
@@ -40,9 +41,7 @@ static inline uint32_t unit_noise(uint32_t h, int ux, int uy)
 	return ndw_mix(h ^ (uint32_t)(uy * 16 + ux + 1) * 0x9E3779B1u);
 }
 
-static uint8_t *s_active_chunk_depth = NULL;
-
-static inline uint32_t alpha_blend_rgb(uint32_t bg, uint32_t fg, int alpha)
+uint32_t alpha_blend_rgb(uint32_t bg, uint32_t fg, int alpha)
 {
 	if (alpha <= 0) return bg;
 	if (alpha >= 255) return fg;
@@ -171,7 +170,7 @@ static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 	return RGB(r, g, b);
 }
 
-static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
+uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 {
 	/* Volumetric Beer-Lambert light extinction colors:
 	 * Red and yellow wavelengths attenuate first, leaving brilliant tropical turquoise
@@ -195,7 +194,7 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	return tint_col(water_col, r, gg, b);
 }
 
-static inline uint32_t shade_rgb(uint32_t col, int shade256)
+uint32_t shade_rgb(uint32_t col, int shade256)
 {
 	if (shade256 == 256) return col;
 	int r = (int)(col & 0xFF) * shade256 / 256;
@@ -224,215 +223,29 @@ static inline int water_alpha_at_depth(int depth)
 	return (int)s_beer_lambert_alpha[depth];
 }
 
-typedef struct {
-	int32_t xc, yc;          /* Center in world units */
-	int32_t x0, y0, x1, y1;  /* Bounding box */
-	uint8_t round_corners;   /* Bitmask: bit 0=NW, 1=NE, 2=SW, 3=SE round into water */
-} nd_land_tile_t;
-
-typedef struct {
-	int32_t tile_xc, tile_yc;   /* Water tile center */
-	int8_t sx, sy;              /* Direction towards the corner (+-1) */
-} nd_land_jut_t;
-
-static nd_land_tile_t s_active_land_tiles[64];
-static int s_active_n_land_tiles = 0;
-
-static nd_land_jut_t s_active_land_juts[64];
-static int s_active_n_land_juts = 0;
-
-static uint32_t s_last_coast_map_room = 0xFFFFFFFF;
-static int16_t s_last_coast_map_pos[4] = { -32768, -32768, -32768, -32768 };
-
-static void nd_coast_map_build(const nd_map_data_t *map)
+uint32_t ndw_ground_base_rgb(const ndw_ground_t *g)
 {
-	s_active_n_land_tiles = 0;
-	s_active_n_land_juts = 0;
-	if (!map || map->width == 0 || map->height == 0) return;
-
-	int w = (int)map->width;
-	int h = (int)map->height;
-	int px = (int)map->player_x;
-	int py = (int)map->player_y;
-
-	for (int r = 0; r < h; r++) {
-		for (int c = 0; c < w; c++) {
-			int idx = r * w + c;
-			uint8_t bio = map->tiles[idx].bio_idx;
-			int is_w = (map->tiles[idx].flags & ND_MAP_FLAG_WATER) ||
-			           ndw_is_water_ground(ndw_biome_style(bio).kind);
-
-			int dcol = c - px;
-			int drow = r - py;
-			int32_t bx = (int32_t)(map->pos[0] + dcol) * NDW_TILE_W;
-			int32_t by = -(int32_t)(map->pos[1] - drow) * NDW_TILE_H;
-			int32_t xc = bx + NDW_TILE_W / 2;
-			int32_t yc = by + NDW_TILE_H / 2;
-
-			/* Check orthogonal neighbors: North (r-1), South (r+1), West (c-1), East (c+1) */
-			int w_west = (c > 0) ? ndw_is_water_ground(ndw_biome_style(map->tiles[r * w + (c - 1)].bio_idx).kind) : is_w;
-			int w_east = (c + 1 < w) ? ndw_is_water_ground(ndw_biome_style(map->tiles[r * w + (c + 1)].bio_idx).kind) : is_w;
-			int w_north = (r > 0) ? ndw_is_water_ground(ndw_biome_style(map->tiles[(r - 1) * w + c].bio_idx).kind) : is_w;
-			int w_south = (r + 1 < h) ? ndw_is_water_ground(ndw_biome_style(map->tiles[(r + 1) * w + c].bio_idx).kind) : is_w;
-
-			if (!is_w) {
-				/* Land tile: check which corners round into water */
-				if (s_active_n_land_tiles < 64) {
-					nd_land_tile_t *lt = &s_active_land_tiles[s_active_n_land_tiles++];
-					lt->xc = xc; lt->yc = yc;
-					lt->x0 = bx; lt->y0 = by;
-					lt->x1 = bx + NDW_TILE_W; lt->y1 = by + NDW_TILE_H;
-					uint8_t rc = 0;
-					if (w_west && w_north) rc |= (1 << 0); /* NW */
-					if (w_east && w_north) rc |= (1 << 1); /* NE */
-					if (w_west && w_south) rc |= (1 << 2); /* SW */
-					if (w_east && w_south) rc |= (1 << 3); /* SE */
-					lt->round_corners = rc;
-				}
-			} else {
-				/* Water tile: check if land juts into concave corners */
-				if (!w_west && !w_north && s_active_n_land_juts < 64) {
-					nd_land_jut_t *lj = &s_active_land_juts[s_active_n_land_juts++];
-					lj->tile_xc = xc; lj->tile_yc = yc;
-					lj->sx = -1; lj->sy = -1;
-				}
-				if (!w_east && !w_north && s_active_n_land_juts < 64) {
-					nd_land_jut_t *lj = &s_active_land_juts[s_active_n_land_juts++];
-					lj->tile_xc = xc; lj->tile_yc = yc;
-					lj->sx = 1; lj->sy = -1;
-				}
-				if (!w_west && !w_south && s_active_n_land_juts < 64) {
-					nd_land_jut_t *lj = &s_active_land_juts[s_active_n_land_juts++];
-					lj->tile_xc = xc; lj->tile_yc = yc;
-					lj->sx = -1; lj->sy = 1;
-				}
-				if (!w_east && !w_south && s_active_n_land_juts < 64) {
-					nd_land_jut_t *lj = &s_active_land_juts[s_active_n_land_juts++];
-					lj->tile_xc = xc; lj->tile_yc = yc;
-					lj->sx = 1; lj->sy = 1;
-				}
-			}
-		}
+	int r, gg, b;
+	switch (g->kind) {
+	case NDW_G_WATER:
+	case NDW_G_SHALLOW_WATER:
+	case NDW_G_SAND:   r = 226; gg = 200; b = 140; break;
+	case NDW_G_SNOW:   r = 234; gg = 240; b = 250; break;
+	case NDW_G_TUNDRA: r = 150; gg = 166; b = 148; break;
+	case NDW_G_ASH:    r = 54;  gg = 48;  b = 52;  break;
+	default:           r = 78;  gg = 128; b = 60;  break;
 	}
+	r = r * g->r / 128; gg = gg * g->g / 128; b = b * g->b / 128;
+	if (r > 255) r = 255;
+	if (gg > 255) gg = 255;
+	if (b > 255) b = 255;
+	return RGB(r, gg, b);
 }
 
-static inline void nd_coast_map_build_if_needed(const nd_map_data_t *map)
+uint32_t ndw_biome_base_rgb(unsigned biome)
 {
-	if (!map || map->width == 0 || map->height == 0) {
-		s_active_n_land_tiles = 0;
-		s_active_n_land_juts = 0;
-		s_last_coast_map_room = 0xFFFFFFFF;
-		return;
-	}
-	if (map->room_ref == s_last_coast_map_room &&
-	    memcmp(map->pos, s_last_coast_map_pos, sizeof(s_last_coast_map_pos)) == 0) {
-		return;
-	}
-	s_last_coast_map_room = map->room_ref;
-	memcpy(s_last_coast_map_pos, map->pos, sizeof(s_last_coast_map_pos));
-	nd_coast_map_build(map);
-}
-
-static inline int nd_global_land_dist(int32_t wx, int32_t wy)
-{
-	if (s_active_n_land_tiles == 0 && s_active_n_land_juts == 0) return 99999;
-	int min_dist = 99999;
-
-	/* 1. Distance to land tiles */
-	for (int i = 0; i < s_active_n_land_tiles; i++) {
-		const nd_land_tile_t *lt = &s_active_land_tiles[i];
-
-		/* Quick bounding box cull with current min_dist */
-		if (wx < lt->x0 - min_dist || wx > lt->x1 + min_dist ||
-		    wy < lt->y0 - min_dist || wy > lt->y1 + min_dist)
-			continue;
-
-		int sx = (wx >= lt->xc) ? 1 : -1;
-		int sy = (wy >= lt->yc) ? 1 : -1;
-		int q_idx = (sy > 0 ? 2 : 0) | (sx > 0 ? 1 : 0);
-		int rounds = (lt->round_corners >> q_idx) & 1;
-
-		int px = (wx - lt->xc) * sx; /* >= 0 */
-		int py = (wy - lt->yc) * sy; /* >= 0 */
-
-		if (!rounds) {
-			int dx = (px > 80) ? (px - 80) : 0;
-			int dy = (py > 64) ? (py - 64) : 0;
-			int d = ndw_isqrt(dx * dx + dy * dy);
-			if (d < min_dist) {
-				min_dist = d;
-				if (min_dist == 0) return 0;
-			}
-		} else {
-			/* Ellipse centered at (xc, yc) with rx=80, ry=64 */
-			int py_scaled = (py * 5) / 4;
-			int r = ndw_isqrt(px * px + py_scaled * py_scaled);
-			if (r <= 80) {
-				return 0; /* Inside land! */
-			}
-			int d = r - 80;
-			if (d < min_dist) {
-				min_dist = d;
-			}
-		}
-	}
-
-	/* 2. Distance to land juts (concave water corners where land juts in) */
-	for (int i = 0; i < s_active_n_land_juts; i++) {
-		const nd_land_jut_t *lj = &s_active_land_juts[i];
-		int px = (wx - lj->tile_xc) * lj->sx;
-		int py = (wy - lj->tile_yc) * lj->sy;
-		if (px > 0 && py > 0) {
-			int py_scaled = (py * 5) / 4;
-			int r = ndw_isqrt(px * px + py_scaled * py_scaled);
-			if (r >= 80) {
-				return 0; /* Inside jutting land! */
-			}
-			int d = 80 - r;
-			if (d < min_dist) {
-				min_dist = d;
-			}
-		}
-	}
-
-	return min_dist;
-}
-
-/* Gradual continental shelf bathymetry: extends water shelf darkening
- * across a broad coastal shelf (s_water_cfg.shelf_width_units = 320 units)
- * to preserve expansive, luminous shallow Caribbean turquoise water near
- * the shore before gently transitioning into the deep ocean basin. */
-static inline int nd_water_depth_at(int dist_units, int terrain_depth)
-{
-	if (dist_units <= 0) return 1;
-
-	/* 1. Dean's Equilibrium Coastal Shelf Profile:
-	 * h(y) = 1 + (D_max - 1) * (y / shelf_width)^(2/3) */
-	int shelf_w = s_water_cfg.shelf_width_units;
-	if (shelf_w <= 0) shelf_w = 384;
-	int base_d;
-	if (dist_units >= shelf_w) {
-		base_d = s_water_cfg.max_depth;
-	} else {
-		int64_t d2 = (int64_t)dist_units * dist_units;
-		int r = 0;
-		while ((int64_t)(r + 1) * (r + 1) * (r + 1) <= d2) r++;
-		base_d = 1 + ((s_water_cfg.max_depth - 1) * r) / 53;
-	}
-
-	/* 2. Continuous 3D bathymetric modulation from 8-octave terrain heightmap:
-	 * Water can't discard terrain height. It must use it.
-	 * terrain_depth = w_level - elev. Nominal ocean depth = 32.
-	 * Shoreline stays pinned to shallow crystal clear water (d=1),
-	 * with seabed topography ramping smoothly offshore across the shelf. */
-	int delta = terrain_depth - 32;
-	int blend_dist = dist_units < 192 ? dist_units : 192;
-	int mod = (delta * blend_dist) / (192 * 6);
-
-	int depth = base_d + mod;
-	if (depth < 1) depth = 1;
-	if (depth > s_water_cfg.max_depth) depth = s_water_cfg.max_depth;
-	return depth;
+	ndw_ground_t g = ndw_biome_style(biome);
+	return ndw_ground_base_rgb(&g);
 }
 
 void ground_cell(uint32_t *fb, int w, int h, const ndw_ground_t *g,
@@ -695,6 +508,33 @@ static uint32_t s_current_frame = 1;
 static int s_chunk_count = 0;
 static int s_chunk_alloc_count = 0;
 static int s_chunk_free_count = 0;
+static int s_build_budget = -1;
+
+void nd_seven_ground_build_budget(int n)
+{
+	s_build_budget = n;
+}
+
+/* Flat stand-in colour for a tile whose chunk is not built yet. */
+static uint32_t placeholder_rgb(unsigned biome)
+{
+	ndw_ground_t g = ndw_biome_style(biome);
+	int r, gg, b;
+	switch (g.kind) {
+	case NDW_G_WATER:
+	case NDW_G_SHALLOW_WATER: r = 40;  gg = 84;  b = 140; break;
+	case NDW_G_SAND:          r = 194; gg = 176; b = 128; break;
+	case NDW_G_SNOW:          r = 228; gg = 234; b = 240; break;
+	case NDW_G_TUNDRA:        r = 128; gg = 138; b = 118; break;
+	case NDW_G_ASH:           r = 90;  gg = 88;  b = 86;  break;
+	default:                  r = 78;  gg = 128; b = 60;  break;
+	}
+	r = r * g.r / 128; gg = gg * g.g / 128; b = b * g.b / 128;
+	if (r > 255) r = 255;
+	if (gg > 255) gg = 255;
+	if (b > 255) b = 255;
+	return RGB(r, gg, b);
+}
 
 static inline unsigned chunk_hash(const int16_t pos[4])
 {
@@ -707,12 +547,10 @@ static inline unsigned chunk_hash(const int16_t pos[4])
 
 static nd_room_chunk_t *chunk_find(const int16_t pos[4], const uint8_t nbiomes[9])
 {
+	(void)nbiomes;
 	unsigned bucket = chunk_hash(pos);
 	for (nd_room_chunk_t *c = s_chunk_buckets[bucket]; c; c = c->next) {
 		if (memcmp(c->pos, pos, sizeof(c->pos)) == 0) {
-			if (nbiomes && memcmp(c->nbiomes, nbiomes, sizeof(c->nbiomes)) != 0) {
-				return NULL; /* biomes changed, needs regeneration */
-			}
 			return c;
 		}
 	}
@@ -779,10 +617,6 @@ void nd_seven_ground_frame_end(const nd_map_data_t *map)
 
 void nd_seven_ground_cache_forget(void)
 {
-	s_active_n_land_tiles = 0;
-	s_active_n_land_juts = 0;
-	s_last_coast_map_room = 0xFFFFFFFF;
-	memset(s_last_coast_map_pos, 0xFF, sizeof(s_last_coast_map_pos));
 	memset(s_border, 0, sizeof(s_border));
 	s_border_next = 0;
 	for (int b = 0; b < CHUNK_HASH_BUCKETS; b++) {
@@ -825,14 +659,22 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 {
 	(void)ti;
 	(void)tj;
+	(void)nbiomes;
+	(void)map;
 	atlas_load();
-	nd_room_chunk_t *chunk = chunk_find(pos, nbiomes);
+	nd_room_chunk_t *chunk = chunk_find(pos, NULL);
 	if (chunk) {
 		chunk->last_frame = s_current_frame;
 		return chunk;
 	}
 
-	/* Evict any old chunk at this pos (e.g. stale biomes) */
+	/* Out of build budget this tick: the caller draws a placeholder. */
+	if (s_build_budget == 0)
+		return NULL;
+	if (s_build_budget > 0)
+		s_build_budget--;
+
+	/* Evict any old chunk at this pos */
 	unsigned bucket = chunk_hash(pos);
 	nd_room_chunk_t **pp = &s_chunk_buckets[bucket];
 	while (*pp) {
@@ -865,110 +707,164 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 		return NULL;
 	}
 	memcpy(chunk->pos, pos, sizeof(chunk->pos));
-	if (nbiomes) {
-		memcpy(chunk->nbiomes, nbiomes, sizeof(chunk->nbiomes));
-	} else if (own) {
-		memset(chunk->nbiomes, own->biome, sizeof(chunk->nbiomes));
-	}
 	chunk->last_frame = s_current_frame;
 
-	uint8_t own_biome = own ? own->biome : (nbiomes ? nbiomes[4] : 0);
-	int is_water_tile = (own && (own->flags & NDW_F_WATER)) || (own_biome == 0) || ndw_is_water_ground(ndw_biome_style(own_biome).kind);
-	int has_water = is_water_tile;
-	if (nbiomes) {
-		for (int k = 0; k < 9; k++) {
-			if (nbiomes[k] == 0 || ndw_is_water_ground(ndw_biome_style(nbiomes[k]).kind))
-				has_water = 1;
-		}
-	}
-	chunk->has_water = (uint8_t)has_water;
-	if (has_water) {
-		chunk->depth = (uint8_t *)calloc(TILE_PX_W * TILE_PX_H, sizeof(uint8_t));
-	}
-	s_active_chunk_depth = chunk->depth;
+	int is_room = (own && (own->flags & ND_MAP_FLAG_ROOM));
 
-	nd_coast_map_build_if_needed(map);
-
-	/* 1. Base authentic terrestrial substrate */
-	ndw_ground_t substrate_style = (own_biome != 0) ? ndw_biome_style(own_biome) : (ndw_ground_t){ NDW_G_SAND, 128, 128, 128 };
-	if (ndw_is_water_ground(substrate_style.kind)) {
-		substrate_style = (ndw_ground_t){ NDW_G_SAND, 128, 128, 128 };
-	}
-
-	for (int cy = 0; cy < NDW_ROWS; cy++) {
-		for (int cx = 0; cx < NDW_COLS; cx++) {
-			int cell_px = cx * NDW_CELL_PX * SCALE;
-			int cell_py = cy * NDW_CELL_PX * SCALE;
-			ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &substrate_style, pos, cx, cy,
-			            cell_px, cell_py, nd_seven_get_anim());
-		}
-	}
-
-	/* 2. Blend neighboring authentic substrate biomes across boundaries */
-	if (own) {
-		ground_blend_nbiomes(chunk->pixels, TILE_PX_W, TILE_PX_H, nbiomes, pos, own, 0, 0, chunk->depth);
-	}
-
-	/* 3. Continuous Heightfield, Slope Hillshading & Single-Pass Water Layer */
-	uint16_t world = (uint16_t)pos[3];
-	int16_t w_level = nd_terrain_water_level(world);
-	const ndw_warp_grid_t *wg = (has_water && (s_active_n_land_tiles > 0 || s_active_n_land_juts > 0)) ? nd_seven_warp_grid(pos) : NULL;
-
-	for (int y = 0; y < TILE_PX_H; y++) {
-		for (int x = 0; x < TILE_PX_W; x++) {
-			int px_in_tile = x / SCALE;
-			int py_in_tile = y / SCALE;
-			int32_t wx = (int32_t)pos[0] * NDW_TILE_W + px_in_tile;
-			int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + py_in_tile;
-
-			nd_terrain_query_t q = nd_terrain_eval(world, wx, wy, 0);
-			chunk->height[y * TILE_PX_W + x] = q.elevation;
-
-			/* Bathymetry and water optical transmission */
-			int depth = 0;
-			if (has_water) {
-				int terrain_depth = (int)(w_level - q.elevation);
-				if (terrain_depth < 1) terrain_depth = 1;
-
-				int dist_units = s_water_cfg.shelf_width_units;
-				if (s_active_n_land_tiles > 0 || s_active_n_land_juts > 0) {
-					int qx = px_in_tile * NDW_SUB;
-					int qy = py_in_tile * NDW_SUB;
-					int w_dx = 0, w_dy = 0;
-					if (wg) ndw_warp_at(wg, qx, qy, &w_dx, &w_dy);
-					int32_t wx_warped = wx + w_dx / NDW_FINE;
-					int32_t wy_warped = wy + w_dy / NDW_FINE;
-					dist_units = nd_global_land_dist(wx_warped, wy_warped);
-				}
-
-				if (is_water_tile) {
-					depth = nd_water_depth_at(dist_units, terrain_depth);
-				} else if (dist_units > 0 && dist_units < 16) {
-					/* Shoreline level set: water encroaching edge */
-					depth = nd_water_depth_at(dist_units, terrain_depth);
-				}
-				if (depth < 0) depth = 0;
+	if (is_room) {
+		uint8_t own_biome = own ? own->biome : 0;
+		ndw_ground_t substrate_style = (own_biome != 0) ? ndw_biome_style(own_biome) : (ndw_ground_t){ NDW_G_SAND, 128, 128, 128 };
+		for (int cy = 0; cy < NDW_ROWS; cy++) {
+			for (int cx = 0; cx < NDW_COLS; cx++) {
+				int cell_px = cx * NDW_CELL_PX * SCALE;
+				int cell_py = cy * NDW_CELL_PX * SCALE;
+				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &substrate_style, pos, cx, cy,
+				            cell_px, cell_py, nd_seven_get_anim());
 			}
-
+		}
+		memset(chunk->height, 0, TILE_PX_W * TILE_PX_H * sizeof(int16_t));
+		if (own->flags & NDW_F_WATER) {
+			chunk->depth = (uint8_t *)calloc(TILE_PX_W * TILE_PX_H, sizeof(uint8_t));
 			if (chunk->depth) {
-				chunk->depth[y * TILE_PX_W + x] = (uint8_t)(depth > 28 ? 28 : depth);
+				memset(chunk->depth, 2, TILE_PX_W * TILE_PX_H);
+				chunk->has_water = 1;
 			}
+		}
+	} else {
+		/* Wilderness: render authentic continuous field */
+		int32_t ox = (int32_t)pos[0] * NDW_TILE_W;
+		int32_t oy = -(int32_t)pos[1] * NDW_TILE_H;
+		uint16_t world = (uint16_t)pos[3];
+		int16_t w_level = nd_field_water_level(world);
+		int is_water_tile = (own && ((own->flags & NDW_F_WATER) || own->biome == 0 || ndw_is_water_ground(ndw_biome_style(own->biome).kind)));
 
-			/* Single-pass optical water overlay over illuminated seabed */
-			if (depth > 0) {
-				int shade_delta = (-q.slope_dx - q.slope_dy) * 12;
+		int16_t s_h[160 * 128];
+		uint8_t s_bio[160 * 128];
+		uint8_t s_bio2[160 * 128];
+		uint8_t s_blend[160 * 128];
+		uint8_t s_depth[160 * 128];
+		int any_water = 0;
+
+		for (int sy = 0; sy < 128; sy++) {
+			int32_t wy = oy + sy;
+			for (int sx = 0; sx < 160; sx++) {
+				int32_t wx = ox + sx;
+				nd_field_sample_t fs = nd_field_sample(world, 3, wx, wy);
+				size_t idx = (size_t)sy * 160 + sx;
+				s_h[idx] = fs.elevation;
+				s_bio[idx] = fs.bio;
+				s_bio2[idx] = fs.bio2;
+				s_blend[idx] = fs.blend;
+
+				/* Water depth determined strictly by W - H (H < W) when submerged;
+				 * on explicitly flagged water tiles, ramps from coastal shallows into deep sea */
+				int d = (fs.elevation < w_level) ? (int)(w_level - fs.elevation) : 0;
+				if (is_water_tile && d == 0) {
+					int d_land = 999;
+					if (nbiomes) {
+						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[3]).kind) && sx < d_land) d_land = sx;
+						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[5]).kind) && (159 - sx) < d_land) d_land = 159 - sx;
+						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[1]).kind) && sy < d_land) d_land = sy;
+						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[7]).kind) && (127 - sy) < d_land) d_land = 127 - sy;
+					}
+					if (d_land < 20) d = 2 + (d_land * 4) / 20;
+					else if (d_land < 60) d = 6 + ((d_land - 20) * 10) / 40;
+					else d = 28;
+				}
+				if (d > 28) d = 28;
+				s_depth[idx] = (uint8_t)d;
+				if (d > 0) any_water = 1;
+			}
+		}
+
+		chunk->has_water = (uint8_t)any_water;
+		if (any_water) {
+			chunk->depth = (uint8_t *)calloc(TILE_PX_W * TILE_PX_H, sizeof(uint8_t));
+		}
+
+		/* Render 320x256 pixels from continuous field samples */
+		for (int sy = 0; sy < 128; sy++) {
+			int py0 = sy * SCALE;
+			int sy_prev = (sy > 0) ? (sy - 1) : 0;
+			int sy_next = (sy < 127) ? (sy + 1) : 127;
+
+			for (int sx = 0; sx < 160; sx++) {
+				int px0 = sx * SCALE;
+				int sx_prev = (sx > 0) ? (sx - 1) : 0;
+				int sx_next = (sx < 159) ? (sx + 1) : 159;
+
+				size_t idx = (size_t)sy * 160 + sx;
+				int16_t H = s_h[idx];
+				uint8_t depth = s_depth[idx];
+				uint8_t bio = (depth == 0 && own && own->biome) ? own->biome : s_bio[idx];
+				uint8_t bio2 = (depth == 0 && own && own->biome) ? s_bio2[idx] : s_bio2[idx];
+				uint8_t blend = (depth == 0 && own && own->biome) ? 0 : s_blend[idx];
+
+				/* Wavy border blending across adjacent biomes on dry land */
+				if (depth == 0 && own && own->biome && nbiomes) {
+					int dx = ndw_warp_axis(pos, ox + sx, oy + sy, 0x1u) / NDW_SUB;
+					int dy = ndw_warp_axis(pos, ox + sx, oy + sy, 0x2u) / NDW_SUB;
+					int wx_sample = sx + dx;
+					int wy_sample = sy + dy;
+					if (wx_sample < 0 && nbiomes[3] != 0) {
+						bio = nbiomes[3];
+					} else if (wx_sample >= 160 && nbiomes[5] != 0) {
+						bio = nbiomes[5];
+					}
+					if (wy_sample < 0 && nbiomes[1] != 0) {
+						bio = nbiomes[1];
+					} else if (wy_sample >= 128 && nbiomes[7] != 0) {
+						bio = nbiomes[7];
+					}
+				}
+
+				int16_t h_e = s_h[(size_t)sy * 160 + sx_next];
+				int16_t h_w = s_h[(size_t)sy * 160 + sx_prev];
+				int16_t h_s = s_h[(size_t)sy_next * 160 + sx];
+				int16_t h_n = s_h[(size_t)sy_prev * 160 + sx];
+
+				int dh_dx = (h_e - h_w);
+				int dh_dy = (h_s - h_n);
+				int shade_delta = (-dh_dx - dh_dy) * 12;
 				int shade_val = 256 + shade_delta;
 				if (shade_val < 160) shade_val = 160;
 				if (shade_val > 360) shade_val = 360;
-				uint32_t seabed = shade_rgb(chunk->pixels[y * TILE_PX_W + x], shade_val);
 
-				uint32_t water_col = water_color_at_depth(depth, 128, 128, 128);
-				int alpha = water_alpha_at_depth(depth);
-				chunk->pixels[y * TILE_PX_W + x] = alpha_blend_rgb(seabed, water_col, alpha);
+				/* Continuous substrate color from fs.bio, fs.bio2, fs.blend */
+				uint32_t col1 = ndw_biome_base_rgb(bio);
+				uint32_t col2 = ndw_biome_base_rgb(bio2);
+				uint32_t substrate = (blend > 0 && bio2 != bio) ?
+				                     alpha_blend_rgb(col1, col2, (blend * 255) / 128) : col1;
+
+				uint32_t illuminated_substrate = shade_rgb(substrate, shade_val);
+
+				uint32_t pixel_col = illuminated_substrate;
+				if (depth > 0) {
+					uint32_t water_col = water_color_at_depth(depth, 128, 128, 128);
+					int alpha = water_alpha_at_depth(depth);
+					pixel_col = alpha_blend_rgb(illuminated_substrate, water_col, alpha);
+				}
+
+				uint32_t h_cell = ndw_cell_hash(pos, sx / 16, sy / 16);
+				for (int dy = 0; dy < SCALE; dy++) {
+					int y = py0 + dy;
+					for (int dx = 0; dx < SCALE; dx++) {
+						int x = px0 + dx;
+						size_t px_idx = (size_t)y * TILE_PX_W + x;
+						chunk->height[px_idx] = H;
+						if (chunk->depth) chunk->depth[px_idx] = depth;
+
+						uint32_t final_px = pixel_col;
+						uint32_t n = unit_noise(h_cell, x, y) & 31;
+						if (n < 2) final_px = shade_rgb(final_px, 246);
+						else if (n == 2) final_px = shade_rgb(final_px, 266);
+						chunk->pixels[px_idx] = final_px;
+					}
+				}
 			}
 		}
 	}
-	s_active_chunk_depth = NULL;
+
 
 	chunk->next = s_chunk_buckets[bucket];
 	s_chunk_buckets[bucket] = chunk;
@@ -977,12 +873,11 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	return chunk;
 }
 
+
 const nd_room_chunk_t *nd_seven_chunk_ensure(const nd_map_data_t *map, int col, int row)
 {
 	if (!map || col < 0 || col >= (int)map->width || row < 0 || row >= (int)map->height)
 		return NULL;
-
-	nd_coast_map_build_if_needed(map);
 
 	int16_t pos[4];
 	pos[0] = (int16_t)(map->pos[0] + (col - (int)map->player_x));
@@ -1028,10 +923,6 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 	if (tx + TILE_PX_W <= 0 || tx >= w || ty + TILE_PX_H <= 0 || ty >= h)
 		return;
 
-	if (st) {
-		nd_coast_map_build_if_needed(&st->map_data);
-	}
-
 	uint8_t nbiomes[9];
 	nbiomes[4] = own ? own->biome : 0;
 
@@ -1047,8 +938,16 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 	}
 
 	nd_room_chunk_t *chunk = chunk_get_or_create(pos, own, nbiomes, st ? &st->map_data : NULL, ti, tj);
-	if (!chunk || !chunk->pixels)
+	if (!chunk || !chunk->pixels) {
+		uint32_t col = placeholder_rgb(own ? own->biome : 0);
+		int x0 = tx < 0 ? 0 : tx, y0 = ty < 0 ? 0 : ty;
+		int x1 = tx + TILE_PX_W > w ? w : tx + TILE_PX_W;
+		int y1 = ty + TILE_PX_H > h ? h : ty + TILE_PX_H;
+		for (int y = y0; y < y1; y++)
+			for (int x = x0; x < x1; x++)
+				fb[y * w + x] = col;
 		return;
+	}
 
 	int src_x0 = 0, src_y0 = 0;
 	int dst_x0 = tx, dst_y0 = ty;

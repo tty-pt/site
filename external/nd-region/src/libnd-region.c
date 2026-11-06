@@ -643,7 +643,9 @@ XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
 	if (out_stage && stage_len > 0)
 		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
 	if (out_map && map_len > 0)
-		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "lamina");
+		/* No region opted in to a canvas map: plain ASCII. Lamina (and its
+		 * terrain chunk work on the client) must be enabled explicitly. */
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
 	if (out_layout)
 		*out_layout = res_layout;
 	if (out_flags)
@@ -664,7 +666,7 @@ XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
 		if (out_stage && stage_len > 0)
 			snprintf(out_stage, stage_len, "tty");
 		if (out_map && map_len > 0)
-			snprintf(out_map, map_len, "lamina");
+			snprintf(out_map, map_len, "ascii-bud");
 		if (out_layout)
 			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
 		if (out_flags)

@@ -10,18 +10,128 @@
 
 void noise_view(struct bio to[VIEW_M], pos_t pos);
 
-/* Mock event handler for standalone test */
+/* Mock event handler for standalone test. It records the raw noise
+ * samples in bio.raw[] so the worldgen golden pins the noise values
+ * themselves, not only the derived climate/biome fields. */
 struct bio nd_evt_noise(struct bio bio, uint32_t he, uint32_t w, uint32_t tm, uint32_t cl)
 {
-	(void)he; (void)w; (void)tm; (void)cl;
+	bio.raw[0] = he;
+	bio.raw[1] = w;
+	bio.raw[2] = tm;
+	bio.raw[3] = cl;
 	return bio;
+}
+
+/* ---- Worldgen golden (keeps existing worlds bit-identical) ----------
+ *
+ * For worlds (pos[3]) 0..3 the golden pins every derived field of
+ * struct bio plus the raw height/water/temperature/rain noise samples
+ * over a 256x256-room area centred on the origin and a 64x64-room area
+ * that straddles the int16 wrap boundary (x and y in 32736..-32737).
+ * One FNV-1a-64 digest per world row is stored (text, diffable) in
+ * tests/unit/data/worldgen_golden.txt, so a mismatch names the row.
+ * WORLDGEN_GOLDEN_WRITE=1 regenerates the file; only do that for an
+ * intentional worldgen change. */
+
+#ifndef WORLDGEN_GOLDEN
+#define WORLDGEN_GOLDEN "tests/unit/data/worldgen_golden.txt"
+#endif
+
+static uint64_t
+fnv_u32(uint64_t h, uint32_t v)
+{
+	for (int i = 0; i < 4; i++) {
+		h ^= (v >> (8 * i)) & 0xffu;
+		h *= 0x100000001b3ull;
+	}
+	return h;
+}
+
+static uint64_t
+bio_row_digest(int obits, int y, int x0, int n)
+{
+	uint64_t h = 0xcbf29ce484222325ull;
+	for (int k = 0; k < n; k++) {
+		pos_t pt = { (coord_t)(x0 + k), (coord_t)y, 0, (coord_t)obits };
+		struct bio b = eng_noise_point(pt);
+		h = fnv_u32(h, (uint32_t)(uint16_t)b.tmp);
+		h = fnv_u32(h, (uint32_t)b.rn);
+		h = fnv_u32(h, b.bio_idx);
+		h = fnv_u32(h, b.is_water);
+		h = fnv_u32(h, (uint32_t)(uint16_t)b.elevation);
+		h = fnv_u32(h, (uint32_t)(uint16_t)b.water_level);
+		h = fnv_u32(h, (uint32_t)(uint16_t)b.water_depth);
+		for (int r = 0; r < 4; r++)
+			h = fnv_u32(h, b.raw[r]);
+	}
+	return h;
+}
+
+struct golden_area { int x0, y0, n; };
+static const struct golden_area golden_areas[] = {
+	{ -128, -128, 256 },
+#ifndef GOLDEN_NO_WRAP
+	{ 32736, 32736, 64 }, /* wraps: 32736..32767, -32768..-32737 */
+#endif
+};
+
+static int
+worldgen_golden(void)
+{
+	const char *path = getenv("WORLDGEN_GOLDEN_PATH");
+	int write = getenv("WORLDGEN_GOLDEN_WRITE") != NULL;
+	FILE *f;
+	int rows = 0, bad = 0;
+
+	if (!path)
+		path = WORLDGEN_GOLDEN;
+	f = fopen(path, write ? "w" : "r");
+	if (!f) {
+		fprintf(stderr, "FAIL: cannot open worldgen golden %s\n", path);
+		return 1;
+	}
+	for (int w = 0; w < 4; w++)
+		for (size_t a = 0; a < sizeof(golden_areas) / sizeof(golden_areas[0]); a++)
+			for (int i = 0; i < golden_areas[a].n; i++) {
+				int y = (int16_t)(golden_areas[a].y0 + i);
+				uint64_t h = bio_row_digest(w, y, golden_areas[a].x0, golden_areas[a].n);
+				if (write) {
+					fprintf(f, "%d %zu %d %016llx\n", w, a, y, (unsigned long long)h);
+				} else {
+					int gw, gy; size_t ga; unsigned long long gh;
+					if (fscanf(f, "%d %zu %d %llx", &gw, &ga, &gy, &gh) != 4
+					    || gw != w || ga != a || gy != y) {
+						fprintf(stderr, "FAIL: worldgen golden malformed at w=%d a=%zu y=%d\n", w, a, y);
+						fclose(f);
+						return 1;
+					}
+					if (gh != h) {
+						if (bad < 8)
+							fprintf(stderr, "FAIL: worldgen differs: world %d area %zu row y=%d\n", w, a, y);
+						bad++;
+					}
+				}
+				rows++;
+			}
+	fclose(f);
+	if (write) {
+		printf("WROTE: worldgen golden %s (%d rows)\n", path, rows);
+		return 0;
+	}
+	if (bad) {
+		fprintf(stderr, "FAIL: %d of %d worldgen golden rows differ\n", bad, rows);
+		return 1;
+	}
+	printf("PASS: worldgen bit-identical to golden (%d rows, worlds 0..3)\n", rows);
+	return 0;
 }
 
 int main(void)
 {
 	printf("=== Testing NeverDark World Map Procedural Noise Continuity ===\n");
 
-	pos_t p = { 0, 0, 0, 0 };
+	if (worldgen_golden())
+		return 1;
 
 	/* R1 & R3: Continuous smooth transitions across horizontal chunk boundary y=0 */
 	{
