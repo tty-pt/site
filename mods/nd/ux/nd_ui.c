@@ -3,6 +3,7 @@
 #include <ttypt/lam.h>
 #include "site_ui.h"
 #include "nd_seven_shader.h"
+#include "nd_seven_ground.h"
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
@@ -754,7 +755,19 @@ static void seven_stage_redraw(void)
 	if (!seven_stage_fit(g_stage_w, g_stage_h))
 		return;
 	nd_seven_render(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
+
+	int64_t wx = 0, wy = 0;
+	nd_seven_world_pos(&client_state, &wx, &wy);
+	float cam_wx = (float)wx - ((float)g_stage_w / (2.0f * (float)SCALE));
+	float cam_wy = (float)wy - ((float)g_stage_h / (2.0f * (float)SCALE));
+	float uniforms[4] = {
+		cam_wx,
+		cam_wy,
+		(float)SCALE,
+		(float)nd_seven_get_anim() * 0.05f
+	};
 	lam_shader_bind(nd_water_shader_id());
+	lam_shader_uniforms(nd_water_shader_id(), uniforms, 4);
 	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
 }
 

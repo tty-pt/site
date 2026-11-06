@@ -282,6 +282,19 @@ void nd_map_canvas_redraw(const nd_client_state_t *st)
 	nd_lamina_render_map_live(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
 	                          &st->map_data, theme, st->tod, s_map_frame++,
 	                          live, lx, ly);
+
+	float map_cam_x = 0.0f, map_cam_y = 0.0f;
+	if (st->map_data.room_ref != 0) {
+		map_cam_x = (float)((int64_t)st->map_data.pos[0] * NDW_TILE_W + lx) - (float)ND_MAP_CANVAS_W / 2.0f;
+		map_cam_y = (float)((int64_t)(-st->map_data.pos[1]) * NDW_TILE_H + ly) - (float)ND_MAP_CANVAS_H / 2.0f;
+	}
+	float map_uniforms[4] = {
+		map_cam_x,
+		map_cam_y,
+		1.0f,
+		(float)s_map_frame * 0.05f
+	};
 	lam_shader_bind(nd_water_shader_id());
+	lam_shader_uniforms(nd_water_shader_id(), map_uniforms, 4);
 	lam_canvas_flush(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H);
 }
