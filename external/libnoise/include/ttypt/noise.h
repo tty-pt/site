@@ -27,6 +27,19 @@
 
 #ifdef __has_include
   #if __has_include(<xxhash.h>)
+    /* Inline the implementation: a bare XXH32 reference becomes an
+     * unresolved env import in WASM builds, which hosts stub to 0 and
+     * flatten every noise sample to a constant. */
+    #ifndef XXH_INLINE_ALL
+      #define XXH_INLINE_ALL
+    #endif
+    /* Byte-wise reads: the default packed-union reader type-puns the
+     * int16_t lattice key as uint32 and clang -O3 -flto (WASM) drops the
+     * key stores under strict aliasing, so every sample read 0. Method 3
+     * is alias-safe, libc-free, and yields the identical hash. */
+    #ifndef XXH_FORCE_MEMORY_ACCESS
+      #define XXH_FORCE_MEMORY_ACCESS 3
+    #endif
     #include <xxhash.h>
     #define TTYPT_NOISE_HASH XXH32
   #endif

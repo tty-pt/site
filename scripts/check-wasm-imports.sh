@@ -15,6 +15,13 @@ for wasm in $targets; do
 			echo "$out" | grep -E '<(corm_|source_|axil_|xy_|hyle_source|XY_)|<- env\.(corm_|source_|axil_|xy_|hyle_source|XY_)' || true
 			FAIL=1
 		fi
+		# Pure-C helpers must be compiled in, not left as host imports: hosts
+		# stub unknown env imports to 0 (e.g. XXH32 froze libnoise in nd.wasm).
+		if echo "$out" | grep -Eq '<- env\.XXH'; then
+			echo "FAIL: $wasm imports xxhash from the host (define XXH_INLINE_ALL):"
+			echo "$out" | grep -E '<- env\.XXH' || true
+			FAIL=1
+		fi
 	elif command -v llvm-objdump >/dev/null 2>&1; then
 		out="$(llvm-objdump --syms "$wasm" 2>/dev/null || true)"
 		if echo "$out" | grep -Eq 'corm_|source_|axil_|xy_'; then
