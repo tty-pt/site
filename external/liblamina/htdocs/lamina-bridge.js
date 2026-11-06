@@ -27,8 +27,26 @@ void main() {
 const FS_QUAD = `precision mediump float;
 varying vec2 v_uv;
 uniform sampler2D u_tex;
+uniform float u_time;
+uniform vec2 u_res;
 void main() {
-	gl_FragColor = texture2D(u_tex, v_uv);
+	vec4 base = texture2D(u_tex, v_uv);
+	bool is_water = (base.b > base.r * 1.25 && base.b > 0.30 && base.g > base.r * 0.9);
+	if (is_water && u_time > 0.0) {
+		vec2 p = v_uv * u_res * 0.5;
+		float t = u_time * 2.0;
+		float w1 = sin(p.x * 0.12 + p.y * 0.06 + t);
+		float w2 = cos(p.x * 0.09 - p.y * 0.08 + t * 0.8);
+		float caustic = w1 * 0.5 + w2 * 0.5;
+		if (caustic > 0.35) {
+			float highlight = (caustic - 0.35) * 0.25;
+			base.rgb += vec3(highlight * 0.8, highlight * 0.95, highlight);
+		} else if (caustic < -0.35) {
+			float shadow = (-caustic - 0.35) * 0.20;
+			base.rgb -= vec3(shadow * 0.5, shadow * 0.3, shadow * 0.1);
+		}
+	}
+	gl_FragColor = base;
 }`;
 
 function initGlPipeline(gl) {
@@ -80,7 +98,9 @@ function initGlPipeline(gl) {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-		return { prog, tex, vbo };
+		const uTime = gl.getUniformLocation(prog, 'u_time');
+		const uRes = gl.getUniformLocation(prog, 'u_res');
+		return { prog, tex, vbo, uTime, uRes };
 	} catch (e) {
 		return null;
 	}
@@ -190,6 +210,8 @@ export function createLaminaBridge(root, getWasm) {
 						const gl = t.gl;
 						gl.viewport(0, 0, canvasEl.width || width, canvasEl.height || height);
 						gl.useProgram(t.glPipe.prog);
+						if (t.glPipe.uTime) gl.uniform1f(t.glPipe.uTime, performance.now() * 0.001);
+						if (t.glPipe.uRes) gl.uniform2f(t.glPipe.uRes, width, height);
 						gl.bindTexture(gl.TEXTURE_2D, t.glPipe.tex);
 						gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
 						gl.drawArrays(gl.TRIANGLES, 0, 6);
