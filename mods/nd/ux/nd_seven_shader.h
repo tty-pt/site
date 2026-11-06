@@ -1,0 +1,128 @@
+#ifndef ND_SEVEN_SHADER_H
+#define ND_SEVEN_SHADER_H
+
+/*
+ * nd_seven_shader.h — Portable fluid water fragment shader definition.
+ * Registered dynamically with liblamina via lam_shader_register().
+ */
+
+#include <ttypt/lam.h>
+
+static const char * const ND_WATER_FRAG_GLSL =
+	"precision mediump float;\n"
+	"varying vec2 v_uv;\n"
+	"uniform sampler2D u_tex;\n"
+	"uniform float u_time;\n"
+	"uniform vec2 u_res;\n"
+	"\n"
+	"float hash3(vec3 p) {\n"
+	"	p = fract(p * 0.3183099 + vec3(0.1, 0.1, 0.1));\n"
+	"	p *= 17.0;\n"
+	"	return fract(p.x * p.y * p.z * (p.x + p.y + p.z));\n"
+	"}\n"
+	"\n"
+	"float noise3d(vec3 p) {\n"
+	"	vec3 i = floor(p);\n"
+	"	vec3 f = fract(p);\n"
+	"	f = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(\n"
+	"		mix(mix(hash3(i + vec3(0.0, 0.0, 0.0)), hash3(i + vec3(1.0, 0.0, 0.0)), f.x),\n"
+	"		    mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),\n"
+	"		mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x),\n"
+	"		    mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);\n"
+	"}\n"
+	"\n"
+	"void main() {\n"
+	"	vec4 base = texture2D(u_tex, v_uv);\n"
+	"	bool is_water = (base.b > base.r * 1.25 && base.b > 0.28 && base.g > base.r * 0.85);\n"
+	"\n"
+	"	if (is_water && u_time > 0.0) {\n"
+	"		vec2 p = v_uv * u_res * 0.5;\n"
+	"		float t = u_time * 0.8;\n"
+	"\n"
+	"		// 1. Trochoidal Gerstner Wave Field\n"
+	"		vec2 d1 = vec2(0.7071, 0.7071);\n"
+	"		float k1 = 0.065, a1 = 1.4, q1 = 0.70, w1 = 1.6;\n"
+	"		float phi1 = dot(d1, p) * k1 - w1 * t;\n"
+	"\n"
+	"		vec2 d2 = vec2(-0.5547, 0.8321);\n"
+	"		float k2 = 0.115, a2 = 0.85, q2 = 0.60, w2 = 2.1;\n"
+	"		float phi2 = dot(d2, p) * k2 - w2 * t;\n"
+	"\n"
+	"		vec2 d3 = vec2(0.8944, -0.4472);\n"
+	"		float k3 = 0.190, a3 = 0.45, q3 = 0.50, w3 = 2.9;\n"
+	"		float phi3 = dot(d3, p) * k3 - w3 * t;\n"
+	"\n"
+	"		float c1 = cos(phi1), s1 = sin(phi1);\n"
+	"		float c2 = cos(phi2), s2 = sin(phi2);\n"
+	"		float c3 = cos(phi3), s3 = sin(phi3);\n"
+	"\n"
+	"		float nx = -(d1.x * (k1 * a1) * c1 + d2.x * (k2 * a2) * c2 + d3.x * (k3 * a3) * c3);\n"
+	"		float ny = -(d1.y * (k1 * a1) * c1 + d2.y * (k2 * a2) * c2 + d3.y * (k3 * a3) * c3);\n"
+	"		float nz = 1.0 - (q1 * k1 * a1 * s1 + q2 * k2 * a2 * s2 + q3 * k3 * a3 * s3);\n"
+	"		vec3 N = normalize(vec3(nx * 3.5, ny * 3.5, nz));\n"
+	"\n"
+	"		float wave_h = a1 * c1 + a2 * c2 + a3 * c3;\n"
+	"		float steepness = q1 * k1 * a1 * s1 + q2 * k2 * a2 * s2 + q3 * k3 * a3 * s3;\n"
+	"\n"
+	"		// 2. Subsurface normal refraction\n"
+	"		vec2 refr_uv = v_uv + (N.xy * 0.0035);\n"
+	"		vec4 refr = texture2D(u_tex, refr_uv);\n"
+	"		if (refr.b > refr.r * 1.15 && refr.b > 0.25) {\n"
+	"			base = refr;\n"
+	"		}\n"
+	"\n"
+	"		// 3. Curvature caustics in shallows\n"
+	"		float n_caust1 = noise3d(vec3(p * 0.065, t * 0.85));\n"
+	"		float n_caust2 = noise3d(vec3(p * 0.095 + 13.7, t * 1.15));\n"
+	"		float caustic = abs(n_caust1 - n_caust2);\n"
+	"		if (caustic < 0.13) {\n"
+	"			float intensity = (0.13 - caustic) / 0.13;\n"
+	"			base.rgb += vec3(intensity * 0.24, intensity * 0.29, intensity * 0.31);\n"
+	"		}\n"
+	"\n"
+	"		// 4. Wave relief (absorption depth variation)\n"
+	"		if (wave_h > 0.6) {\n"
+	"			float crest = (wave_h - 0.6) * 0.12;\n"
+	"			base.rgb += vec3(crest * 0.15, crest * 0.35, crest * 0.50);\n"
+	"		} else if (wave_h < -0.6) {\n"
+	"			float trough = (-wave_h - 0.6) * 0.10;\n"
+	"			base.rgb -= vec3(trough * 0.40, trough * 0.25, trough * 0.05);\n"
+	"		}\n"
+	"\n"
+	"		// 5. Fresnel sky reflection on tilted wave facets (diffuse sky blue, NOT specular)\n"
+	"		float fresnel = pow(1.0 - max(N.z, 0.0), 3.0) * 0.30;\n"
+	"		base.rgb = mix(base.rgb, vec3(0.22, 0.58, 0.88), fresnel);\n"
+	"\n"
+	"		// 6. Breaking surf foam on pinched crests\n"
+	"		if (steepness > 0.15) {\n"
+	"			float foam = (steepness - 0.15) * 3.0;\n"
+	"			if (foam > 0.70) foam = 0.70;\n"
+	"			base.rgb = mix(base.rgb, vec3(1.0, 1.0, 1.0), foam);\n"
+	"		}\n"
+	"\n"
+	"		// 7. Localized sun glitter path (specular only in narrow sun lobe)\n"
+	"		vec3 L = normalize(vec3(-0.45, -0.55, 0.70));\n"
+	"		vec3 V = vec3(0.0, 0.0, 1.0);\n"
+	"		vec3 H = normalize(L + V);\n"
+	"		float spec = pow(max(dot(N, H), 0.0), 64.0);\n"
+	"		if (spec > 0.60) {\n"
+	"			float glint = (spec - 0.60) * 0.35;\n"
+	"			base.rgb += vec3(glint * 0.90, glint * 0.96, glint);\n"
+	"		}\n"
+	"	}\n"
+	"	gl_FragColor = base;\n"
+	"}\n";
+
+static inline uint32_t nd_water_shader_id(void)
+{
+	static uint32_t s_id = 0;
+#ifdef __wasm__
+	if (!s_id) {
+		s_id = lam_shader_register("nd_water", ND_WATER_FRAG_GLSL);
+	}
+#endif
+	return s_id;
+}
+
+#endif /* ND_SEVEN_SHADER_H */

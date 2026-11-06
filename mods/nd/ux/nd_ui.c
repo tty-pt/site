@@ -2,6 +2,7 @@
 #include <ttypt/axil-ws.h>
 #include <ttypt/lam.h>
 #include "site_ui.h"
+#include "nd_seven_shader.h"
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
@@ -753,6 +754,7 @@ static void seven_stage_redraw(void)
 	if (!seven_stage_fit(g_stage_w, g_stage_h))
 		return;
 	nd_seven_render(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
+	lam_shader_bind(nd_water_shader_id());
 	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
 }
 

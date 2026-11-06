@@ -45,8 +45,8 @@ static inline uint32_t water_color_at_depth(int depth, int r, int gg, int b)
 	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
 	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= 4) */
 	static const uint32_t C_SHELF   = RGB(36, 160, 224); /* Continental shelf: vibrant azure/cerulean (d = 4..12) */
-	static const uint32_t C_OUTER   = RGB(24, 96, 185);  /* Coastal ocean: deep azure (d = 12..22) */
-	static const uint32_t C_ABYSS   = RGB(14, 44, 125);  /* Abyssal basin: deep royal sapphire (d >= 22) */
+	static const uint32_t C_OUTER   = RGB(24, 108, 195); /* Coastal ocean: deep azure (d = 12..22) */
+	static const uint32_t C_ABYSS   = RGB(14, 50, 135);  /* Abyssal basin: deep royal sapphire (d >= 22) */
 
 	uint32_t water_col;
 	if (depth <= 4) {
@@ -983,7 +983,6 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 		int base_gy = -(int)pos[1] * NDW_TILE_H;
 		/* Z iterates continuously frame-by-frame across all number boundaries */
 		int16_t z_time = (int16_t)anim;
-		int16_t z_time_fast = (int16_t)(anim * 2);
 
 		for (int r = 0; r < bh; r++) {
 			int y_in_tile = (src_y0 + r);
@@ -993,11 +992,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
 
 			int last_gx = -999999;
-			int last_c1 = 0;
-			int last_c2 = 0;
 			int last_surf = 0;
-			int last_swell = 0;
-			int last_ripple = 0;
+			int last_ocean = 0;
 
 			for (int c = 0; c < bw; c++) {
 				uint8_t d = depth_row[c];
@@ -1010,16 +1006,16 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 				int gx = base_gx + x_in_tile / SCALE;
 				if (gx != last_gx) {
 					last_gx = gx;
-					/* Continuous 3D space-time noise across all number boundaries without modulo wrap */
-					last_c1 = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x43415553u, 3);
-					last_c2 = noise_point_3d((int16_t)(gx + 13), (int16_t)(gy - 19), (int16_t)(z_time + 29), 0x54494353u, 3);
-					last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
-					last_swell = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
-					last_ripple = noise_point_3d((int16_t)gx, (int16_t)gy, z_time_fast, 0x57415645u, 3);
+					/* Continuous 3D space-time noise: single sample per column based on depth */
+					if (d <= 2) {
+						last_surf = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x53555246u, 3);
+					} else {
+						last_ocean = noise_point_3d((int16_t)gx, (int16_t)gy, z_time, 0x4F434541u, 4);
+					}
 				}
 				uint32_t col = src_row[c];
 
-				/* 1. Continuous 3D shoreline breaking foam & swash */
+				/* 1. Continuous 3D shoreline breaking foam on the beach contour (d=1, 2) */
 				if (d == 1) {
 					int foam_alpha = 110 + (last_surf > 140 ? (last_surf - 140) / 2 : 0);
 					if (foam_alpha > 180) foam_alpha = 180;
@@ -1030,34 +1026,17 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 						if (c_alpha > 50) c_alpha = 50;
 						col = alpha_blend_rgb(col, RGB(215, 248, 255), c_alpha);
 					}
-				}
-
-				/* 2. Caustic light webbing dancing on shallow seabed */
-				if (d >= 2 && d <= 6) {
-					int caustic_diff = abs(last_c1 - last_c2);
-					if (caustic_diff < 20) {
-						int c_bright = ((20 - caustic_diff) * 35) / 20;
-						col = alpha_blend_rgb(col, RGB(245, 254, 255), c_bright);
-					}
-				}
-
-				/* 3. Surface wave relief: paired sunlit highlight crests & shadow troughs */
-				if (d >= 3) {
-					int wave_h = (last_swell * 3 + last_ripple * 2) / 5;
-					if (wave_h > 145) {
-						int crest_int = (wave_h - 145);
+				} else {
+					/* 2. Fluid wave swell relief: diffuse sky reflection on crests, deep absorption in troughs */
+					if (last_ocean > 145) {
+						int crest_int = (last_ocean - 145);
 						if (crest_int > 35) crest_int = 35;
 						uint32_t crest_col = (d <= 6) ? RGB(160, 225, 255) : RGB(36, 92, 190);
 						col = alpha_blend_rgb(col, crest_col, crest_int);
-					} else if (wave_h < 110) {
-						int trough_int = (110 - wave_h);
+					} else if (last_ocean < 110) {
+						int trough_int = (110 - last_ocean);
 						if (trough_int > 30) trough_int = 30;
 						col = alpha_blend_rgb(col, RGB(8, 28, 85), trough_int);
-					}
-
-					/* 4. Specular sun sparkle glints */
-					if (wave_h > 170 && last_ripple > 175) {
-						col = alpha_blend_rgb(col, RGB(255, 255, 255), 180);
 					}
 				}
 
