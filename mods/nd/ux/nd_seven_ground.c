@@ -244,6 +244,8 @@ static inline int nd_global_land_dist(int32_t wx, int32_t wy)
 	return min_dist;
 }
 
+/* Sub-linear bathymetric shelf distance (R3): extends water shelf darkening
+ * to 64 units with smooth optical transition into deep water basin. */
 static inline int nd_water_depth_at(int dist_units, int terrain_depth)
 {
 	int depth;
