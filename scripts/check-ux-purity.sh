@@ -56,6 +56,7 @@ is_allowed() {
         "$root/mods/index/ux/list_render.c:1") return 0 ;;
         "$root/mods/index/ux/list_sort.c:1") return 0 ;;
         "$root/mods/chat/ux/chat_ui.c:1") return 0 ;;
+        "$root/mods/auren/ux/auren_ui.c:1") return 0 ;;
         # Specific allowed preprocessor uses
         "$root/mods/common/ux/site_ui.c:"*)
             case "${2:-}" in

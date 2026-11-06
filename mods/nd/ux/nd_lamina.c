@@ -645,8 +645,9 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 			uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
 			int is_water = (tile->bio_idx == 0 || (tile->bg & 7) == 4);
 
-			if (is_water) {
-				/* Sample from shared client room chunk, maintaining unified depth contours and zero duplicate noise */
+			/* Sample from shared client room chunk, maintaining unified depth contours, authentic ground biomes, and zero duplicate noise */
+			int sampled_from_chunk = 0;
+			if (is_live_centered || is_water) {
 				const nd_room_chunk_t *chunk = nd_seven_chunk_ensure(map, (int)x, (int)y);
 				if (chunk && chunk->pixels) {
 					for (uint32_t py = 0; py < tile_sz; py++) {
@@ -657,13 +658,13 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 							fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(pcol, amb, 255));
 						}
 					}
-				} else {
-					fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+					sampled_from_chunk = 1;
 				}
-			} else {
-				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
 			}
-			blend_tile_border(fb, w, h, map, cols, rows, (int)x, (int)y, tx, ty, (int)tile_sz, amb);
+			if (!sampled_from_chunk) {
+				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+				blend_tile_border(fb, w, h, map, cols, rows, (int)x, (int)y, tx, ty, (int)tile_sz, amb);
+			}
 
 			/* Rooms get a soft outline; wilderness stays seamless. */
 			if (is_room && theme->grid_border && !is_live_centered) {
