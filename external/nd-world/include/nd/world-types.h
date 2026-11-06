@@ -146,6 +146,7 @@ enum room_flags {
 	RF_TEMP = 1,
 	RF_HAVEN = 2,
 	RF_MODIFIED = 4,
+	RF_WATER = 8,
 };
 
 enum exit {

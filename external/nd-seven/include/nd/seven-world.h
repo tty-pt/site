@@ -47,6 +47,7 @@
 #define NDW_F_ROOM    0x01
 #define NDW_F_PLAYER  0x02
 #define NDW_F_ENTITY  0x04
+#define NDW_F_WATER   0x20
 
 /* Where the lamb arrives when the world is (re)centred on a tile. */
 #define NDW_CENTER_X  (NDW_TILE_W / 2)

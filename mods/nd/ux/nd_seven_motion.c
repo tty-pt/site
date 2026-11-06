@@ -148,6 +148,7 @@ ndw_tile_t nd_seven_convert_tile(const nd_map_tile_t *m)
 	if (m->flags & ND_MAP_FLAG_ROOM)   t.flags |= NDW_F_ROOM;
 	if (m->flags & ND_MAP_FLAG_PLAYER) t.flags |= NDW_F_PLAYER;
 	if (m->flags & ND_MAP_FLAG_ENTITY) t.flags |= NDW_F_ENTITY;
+	if ((m->flags & ND_MAP_FLAG_WATER) || m->bio_idx == 0) t.flags |= NDW_F_WATER;
 	t.glyph[0] = m->side_l; t.glyph[1] = m->symbol; t.glyph[2] = m->side_r;
 	t.fg[0] = m->fg_l & 15; t.fg[1] = m->fg & 15; t.fg[2] = m->fg_r & 15;
 	return t;

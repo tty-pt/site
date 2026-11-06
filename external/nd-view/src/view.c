@@ -526,8 +526,12 @@ eng_view(unsigned player_ref)
 				ROO *r = (ROO *)&r_obj.data;
 				if (!(r->flags & RF_TEMP))
 					flags |= ND_MAP_FLAG_ROOM;
+				if ((r->flags & RF_WATER) || !strcmp(r_obj.name, "water"))
+					flags |= ND_MAP_FLAG_WATER;
 			}
 		}
+		if (vt->elevation < vt->water_level || vt->bio_idx == 0)
+			flags |= ND_MAP_FLAG_WATER;
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;
 		if (vt->flags & vtf_entity)

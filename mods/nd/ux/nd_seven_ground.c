@@ -205,7 +205,7 @@ static inline int water_alpha_at_depth(int depth)
 	 * Continental shelf gently darkens, reaching total optical extinction in the deep abyss. */
 	static const uint8_t s_beer_lambert_alpha[29] = {
 		0,
-		38,   65,  92, 118, 142, 162, 178, 190, 200, 208,
+		75,  100, 122, 140, 156, 170, 182, 192, 200, 208,
 		215, 221, 226, 230, 234, 237, 240, 242, 244, 246,
 		248, 249, 250, 251, 252, 253, 254, 255
 	};
@@ -249,7 +249,8 @@ static void nd_coast_map_build(const nd_map_data_t *map)
 		for (int c = 0; c < w; c++) {
 			int idx = r * w + c;
 			uint8_t bio = map->tiles[idx].bio_idx;
-			int is_w = ndw_is_water_ground(ndw_biome_style(bio).kind);
+			int is_w = (map->tiles[idx].flags & ND_MAP_FLAG_WATER) ||
+			           ndw_is_water_ground(ndw_biome_style(bio).kind);
 
 			int dcol = c - px;
 			int drow = r - py;
@@ -463,15 +464,10 @@ static void render_water_cell(ctx_t *c, const ndw_ground_t *g, const int16_t pos
 			}
 			if (depth < 1) depth = 1;
 
-			/* Underlying sandy seabed with subtle micro-grain texture */
+			/* Read authentic seabed already composited into chunk substrate */
 			int sx0 = c->ox + ux * SCALE;
 			int sy0 = c->oy + uy * SCALE;
-			uint32_t n = unit_noise(hash, ux, uy) & 31;
-			uint32_t sand_base  = RGB(226, 200, 140);
-			uint32_t sand_dark  = RGB(214, 188, 126);
-			uint32_t sand_light = RGB(236, 212, 155);
-			uint32_t seabed = (n < 2) ? sand_dark : (n == 2 ? sand_light : sand_base);
-			seabed = tint_col(seabed, r, gg, b);
+			uint32_t seabed = c->fb[sy0 * c->w + sx0];
 
 			uint32_t water_col = water_color_at_depth(depth, r, gg, b);
 			int alpha = water_alpha_at_depth(depth);
@@ -646,9 +642,20 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 	border_ent_t *ent;
 	int differs = 0;
 
-	style[4] = ndw_biome_style(own->biome);
+	if ((own && (own->flags & NDW_F_WATER)) || own->biome == 0) {
+		style[4] = (ndw_ground_t){ NDW_G_WATER, 128, 128, 128 };
+	} else {
+		style[4] = ndw_biome_style(own->biome);
+	}
+	int own_has_water = ndw_is_water_ground(style[4].kind);
+
 	for (int k = 0; k < 9; k++) {
-		style[k] = ndw_biome_style(nbiomes ? nbiomes[k] : own->biome);
+		uint8_t b = nbiomes ? nbiomes[k] : own->biome;
+		if (b == 0 || (k == 4 && own_has_water)) {
+			style[k] = (ndw_ground_t){ NDW_G_WATER, 128, 128, 128 };
+		} else {
+			style[k] = ndw_biome_style(b);
+		}
 		differs |= !same_ground(&style[k], &style[4]);
 		int di = (k % 3) - 1, dj = (k / 3) - 1;
 		if (ndw_is_water_ground(style[k].kind))
@@ -699,29 +706,39 @@ void ground_blend_nbiomes(uint32_t *fb, int w, int h, const uint8_t nbiomes[9],
 						ground_cell(scratch[own_k], cpx, cpx, &style[own_k], pos, cx, cy, 0, 0, nd_seven_get_anim());
 						have[own_k] = 1;
 					}
-					fb[y * w + x] = scratch[own_k][sy * cpx + sx];
-					if (depth_grid) {
-						if (!ndw_is_water_ground(style[own_k].kind)) {
-							depth_grid[y * w + x] = 0; /* Dry land encroaching */
-						} else {
-							int32_t wx = (int32_t)pos[0] * NDW_TILE_W + (cx * NDW_CELL_PX + sx / SCALE);
-							int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + (cy * NDW_CELL_PX + sy / SCALE);
-							uint16_t world = (uint16_t)pos[3];
-							int16_t elev = nd_terrain_height_hd(wx, wy, world);
-							int16_t w_level = nd_terrain_water_level(world);
-							int terrain_depth = (int)(w_level - elev);
-							if (terrain_depth < 1) terrain_depth = 1;
 
-							int qx = border_q(cx, sx);
-							int qy = border_q(cy, sy);
-							int w_dx = 0, w_dy = 0;
-							ndw_warp_at(&ent->grid, qx, qy, &w_dx, &w_dy);
-							int32_t wx_warped = wx + w_dx / NDW_FINE;
-							int32_t wy_warped = wy + w_dy / NDW_FINE;
+					int32_t wx = (int32_t)pos[0] * NDW_TILE_W + (cx * NDW_CELL_PX + sx / SCALE);
+					int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + (cy * NDW_CELL_PX + sy / SCALE);
+					uint16_t world = (uint16_t)pos[3];
+					int16_t elev = nd_terrain_height_hd(wx, wy, world);
+					int16_t w_level = nd_terrain_water_level(world);
+					int terrain_depth = (int)(w_level - elev);
+					if (terrain_depth < 1) terrain_depth = 1;
 
-							int dist_units = nd_global_land_dist(wx_warped, wy_warped);
-							depth_grid[y * w + x] = (uint8_t)nd_water_depth_at(dist_units, terrain_depth);
-						}
+					int qx = border_q(cx, sx);
+					int qy = border_q(cy, sy);
+					int w_dx = 0, w_dy = 0;
+					ndw_warp_at(&ent->grid, qx, qy, &w_dx, &w_dy);
+					int32_t wx_warped = wx + w_dx / NDW_FINE;
+					int32_t wy_warped = wy + w_dy / NDW_FINE;
+
+					int dist_units = nd_global_land_dist(wx_warped, wy_warped);
+
+					int is_water_pixel = (nbiomes && nbiomes[own_k] == 0) || ndw_is_water_ground(style[own_k].kind);
+					if (!is_water_pixel && own_has_water && dist_units > 0) {
+						/* Submerged substrate in a water tile: authentic seabed under water */
+						is_water_pixel = 1;
+					}
+
+					if (is_water_pixel) {
+						int depth = nd_water_depth_at(dist_units, terrain_depth);
+						uint32_t water_col = water_color_at_depth(depth, 128, 128, 128);
+						int alpha = water_alpha_at_depth(depth);
+						fb[y * w + x] = alpha_blend_rgb(scratch[own_k][sy * cpx + sx], water_col, alpha);
+						if (depth_grid) depth_grid[y * w + x] = (uint8_t)depth;
+					} else {
+						fb[y * w + x] = scratch[own_k][sy * cpx + sx];
+						if (depth_grid) depth_grid[y * w + x] = 0;
 					}
 				}
 			}
@@ -926,7 +943,8 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	chunk->last_frame = s_current_frame;
 
 	uint8_t own_biome = own ? own->biome : (nbiomes ? nbiomes[4] : 0);
-	int has_water = ndw_is_water_ground(ndw_biome_style(own_biome).kind);
+	int is_water_tile = (own && (own->flags & NDW_F_WATER)) || ndw_is_water_ground(ndw_biome_style(own_biome).kind);
+	int has_water = is_water_tile;
 	if (nbiomes) {
 		for (int k = 0; k < 9; k++) {
 			if (ndw_is_water_ground(ndw_biome_style(nbiomes[k]).kind))
@@ -945,7 +963,7 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	for (int k = 0; k < 9; k++) {
 		uint8_t b = nbiomes ? nbiomes[k] : own_biome;
 		ndw_ground_t st_b = ndw_biome_style(b);
-		int is_water = ndw_is_water_ground(st_b.kind);
+		int is_water = (k == 4 && is_water_tile) || ndw_is_water_ground(st_b.kind);
 		cgrp[k] = is_water ? 0 : 1;
 		if (!is_water)
 			land_mask |= (1 << k);
@@ -954,7 +972,6 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	memcpy(s_active_chunk_grp, cgrp, sizeof(s_active_chunk_grp));
 
 	ndw_ground_t g = ndw_biome_style(own_biome);
-	int is_water_tile = ndw_is_water_ground(g.kind);
 
 	for (int cy = 0; cy < NDW_ROWS; cy++) {
 		for (int cx = 0; cx < NDW_COLS; cx++) {
@@ -962,9 +979,11 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 			int cell_py = cy * NDW_CELL_PX * SCALE;
 
 			if (is_water_tile) {
-				/* 1. Render authentic ground substrate first */
-				ndw_ground_t substrate_style = { NDW_G_SAND, 128, 128, 128 };
-				if (land_mask && nbiomes) {
+				/* 1. Render authentic ground substrate first:
+				 * If own_biome is authentic substrate (e.g. tundra, desert), preserve it.
+				 * Otherwise default to sand substrate or blend from nearest land neighbor. */
+				ndw_ground_t substrate_style = (own_biome != 0) ? ndw_biome_style(own_biome) : (ndw_ground_t){ NDW_G_SAND, 128, 128, 128 };
+				if (own_biome == 0 && land_mask && nbiomes) {
 					/* Find nearest land neighbor for authentic local substrate */
 					int px_w = (cx * NDW_CELL_PX + NDW_CELL_PX / 2) * NDW_FINE;
 					int py_w = (cy * NDW_CELL_PX + NDW_CELL_PX / 2) * NDW_FINE;
@@ -987,7 +1006,8 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 				            cell_px, cell_py, nd_seven_get_anim());
 
 				/* 2. Composite volumetric water layer over authentic substrate */
-				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
+				ndw_ground_t water_g = { NDW_G_WATER, 128, 128, 128 };
+				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &water_g, pos, cx, cy,
 				            cell_px, cell_py, nd_seven_get_anim());
 			} else {
 				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
@@ -1031,7 +1051,7 @@ const nd_room_chunk_t *nd_seven_chunk_ensure(const nd_map_data_t *map, int col, 
 	ndw_tile_t own = nd_seven_convert_tile(&map->tiles[idx]);
 
 	uint8_t nbiomes[9];
-	nbiomes[4] = own.biome;
+	nbiomes[4] = (own.flags & NDW_F_WATER) ? 0 : own.biome;
 	for (int dj = -1; dj <= 1; dj++) {
 		for (int di = -1; di <= 1; di++) {
 			int k = (dj + 1) * 3 + (di + 1);
@@ -1039,9 +1059,10 @@ const nd_room_chunk_t *nd_seven_chunk_ensure(const nd_map_data_t *map, int col, 
 			int nc = col + di;
 			int nr = row + dj;
 			if (nc >= 0 && nc < (int)map->width && nr >= 0 && nr < (int)map->height) {
-				nbiomes[k] = map->tiles[nr * (int)map->width + nc].bio_idx;
+				const nd_map_tile_t *mt = &map->tiles[nr * (int)map->width + nc];
+				nbiomes[k] = ((mt->flags & ND_MAP_FLAG_WATER) || mt->bio_idx == 0) ? 0 : mt->bio_idx;
 			} else {
-				nbiomes[k] = own.biome;
+				nbiomes[k] = nbiomes[4];
 			}
 		}
 	}
@@ -1063,7 +1084,7 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 	}
 
 	uint8_t nbiomes[9];
-	nbiomes[4] = own->biome;
+	nbiomes[4] = (own && (own->flags & NDW_F_WATER)) ? 0 : own->biome;
 
 	for (int dj = -1; dj <= 1; dj++) {
 		for (int di = -1; di <= 1; di++) {
@@ -1072,7 +1093,7 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			ndw_tile_t nt;
 			int16_t np[4];
 			nd_seven_tile_at(st, ti + di, tj + dj, &nt, np);
-			nbiomes[k] = nt.biome;
+			nbiomes[k] = (nt.flags & NDW_F_WATER) ? 0 : nt.biome;
 		}
 	}
 
@@ -1272,8 +1293,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					}
 				}
 
-				/* Wave slope lighting (d >= 2): continuous 3D hillshading across all pixels including borders */
-				if (d >= 2) {
+				/* Wave slope lighting (d >= 1): continuous 3D hillshading across all water pixels */
+				if (d >= 1) {
 					int dh_dx = h_curr[c + 2] - h_curr[c];
 					int dh_dy = h_curr[c + 1] - h_prev[c + 1];
 					int diffuse = (-dh_dx - dh_dy);
