@@ -1002,7 +1002,8 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					int caustic = c1 + c2; /* 0..62 */
 
 					/* Intertidal surf breathing cycle (period = 144 ticks ~ 2.4s) */
-					uint32_t surf_cycle = (anim + (uint32_t)(gx * 3 + gy * 2) / 8) % 144;
+					int32_t surf_phase = (int32_t)anim + (int32_t)(gx * 3 + gy * 2) / 8;
+					uint32_t surf_cycle = (uint32_t)(((surf_phase % 144) + 144) % 144);
 					int surge = (surf_cycle < 60) ? (int)(surf_cycle / 2) : (surf_cycle < 84 ? 30 : (int)((144 - surf_cycle) * 30 / 60));
 
 					if (d == 1) {
