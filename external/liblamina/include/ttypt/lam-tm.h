@@ -111,6 +111,36 @@ void lam_tile_map_draw(uint32_t ref,
                        int32_t start_y,
                        uint32_t scale);
 
+/**
+ * @brief Draw a single tile lying flat on the 3D ground plane (Z = elevation).
+ *
+ * @param[in] ref Tilemap handle.
+ * @param[in] idx Tile index (0-based).
+ * @param[in] x,y World coordinates of top-left corner on ground plane.
+ * @param[in] z   Elevation (Z coordinate).
+ * @param[in] w,h Width and height of tile in world units.
+ */
+void lam_tile_draw_ground_3d(uint32_t ref,
+                             uint32_t idx,
+                             float x, float y, float z,
+                             float w, float h);
+
+/**
+ * @brief Draw a billboard sprite standing upright in 3D world space.
+ *
+ * @param[in] ref      Tilemap handle.
+ * @param[in] idx      Tile index (0-based).
+ * @param[in] x,y,z    Anchor position in world coordinates (e.g. feet position).
+ * @param[in] w,h      Sprite width and height in world units.
+ * @param[in] anchor_x Horizontal anchor (0.0 = left, 0.5 = center, 1.0 = right).
+ * @param[in] anchor_y Vertical anchor (0.0 = bottom/feet, 0.5 = center, 1.0 = top).
+ */
+void lam_tile_draw_billboard_3d(uint32_t ref,
+                                uint32_t idx,
+                                float x, float y, float z,
+                                float w, float h,
+                                float anchor_x, float anchor_y);
+
 #ifdef __cplusplus
 }
 #endif
