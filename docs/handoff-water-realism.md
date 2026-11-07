@@ -19,12 +19,9 @@ the user's live character. Work in a Quest Journal quest and commit when done.
 
 ## 1. Rules you must not break
 
-1. **Same code on server and browser.** `mods/nd/ux/*` builds twice:
-   - a native `.so` for server rendering on a headless OpenBSD VM (no GPU, no
-     WebGL, no GLSL);
-   - `htdocs/nd.wasm` for the browser.
-
-   All water rendering is pure C in `mods/nd/ux/nd_seven_ground.c`.
+1. **Server vs Client Architecture.** `mods/nd/ux/*` builds for two environments:
+   - a native `.so` for server-side rendering (strictly pure software, zero GPU/GL dependencies for headless server environments);
+   - `htdocs/nd.wasm` for the browser client, which can and should take full advantage of client hardware acceleration (WebGL / GPU pipelines via Web HAL).
 2. **Noise comes from libnoise.** Use `external/libnoise/include/ttypt/noise.h`
    (`noise_point_2d/3d`: value noise, `int16_t` coordinates, results 0–255).
    The user insists on libnoise. If you need a new primitive, such as
