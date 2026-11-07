@@ -170,28 +170,44 @@ static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
 	return RGB(r, g, b);
 }
 
-uint32_t water_color_at_depth(int depth, int r, int gg, int b)
+uint32_t water_color_at_depth_mode(int depth, int r, int gg, int b, int is_lake)
 {
 	/* Volumetric Beer-Lambert light extinction colors:
-	 * Red and yellow wavelengths attenuate first, leaving brilliant tropical turquoise
-	 * in the shallows, transitioning smoothly into coastal cerulean and deep sapphire. */
-	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Crystal shallows: brilliant Caribbean turquoise (d <= shallow_depth_max) */
-	static const uint32_t C_SHELF   = RGB(52, 178, 228); /* Continental shelf: vibrant azure/cerulean (d = shallow..shelf) */
-	static const uint32_t C_OUTER   = RGB(36, 122, 202); /* Coastal ocean: deep azure (d = shelf..22) */
-	static const uint32_t C_ABYSS   = RGB(14, 50, 135);  /* Abyssal basin: deep royal sapphire (d >= 22) */
+	 * Red and yellow wavelengths attenuate first.
+	 * Ocean: brilliant tropical turquoise transitioning to coastal cerulean and abyssal sapphire.
+	 * Freshwater Lake: translucent murky olive/amber shallows transitioning to forest pine and slate peat. */
+	static const uint32_t C_SHALLOW = RGB(64, 218, 235); /* Ocean shallows: brilliant Caribbean turquoise */
+	static const uint32_t C_SHELF   = RGB(52, 178, 228); /* Ocean shelf: vibrant azure/cerulean */
+	static const uint32_t C_OUTER   = RGB(36, 122, 202); /* Coastal ocean: deep azure */
+	static const uint32_t C_ABYSS   = RGB(14, 50, 135);  /* Abyssal basin: deep royal sapphire */
+
+	static const uint32_t L_SHALLOW = RGB(62, 92, 54);   /* Freshwater Lake: translucent murky olive/amber shallows */
+	static const uint32_t L_SHELF   = RGB(42, 74, 50);   /* Freshwater Lake: rich forest green mid-depth */
+	static const uint32_t L_OUTER   = RGB(28, 54, 46);   /* Freshwater Lake: deep calm lake green */
+	static const uint32_t L_ABYSS   = RGB(18, 36, 42);   /* Freshwater Lake: deep cold slate/peat abyss */
+
+	uint32_t c_sh = is_lake ? L_SHALLOW : C_SHALLOW;
+	uint32_t c_md = is_lake ? L_SHELF : C_SHELF;
+	uint32_t c_ot = is_lake ? L_OUTER : C_OUTER;
+	uint32_t c_ab = is_lake ? L_ABYSS : C_ABYSS;
 
 	uint32_t water_col;
 	if (depth <= s_water_cfg.shallow_depth_max) {
-		water_col = lerp_rgb(C_SHALLOW, C_SHELF, depth - 1, s_water_cfg.shallow_depth_max - 1);
+		water_col = lerp_rgb(c_sh, c_md, depth - 1, s_water_cfg.shallow_depth_max - 1);
 	} else if (depth <= s_water_cfg.shelf_depth_max) {
-		water_col = lerp_rgb(C_SHELF, C_OUTER, depth - s_water_cfg.shallow_depth_max,
+		water_col = lerp_rgb(c_md, c_ot, depth - s_water_cfg.shallow_depth_max,
 		                     s_water_cfg.shelf_depth_max - s_water_cfg.shallow_depth_max);
 	} else {
 		int t = depth - s_water_cfg.shelf_depth_max;
 		if (t > 10) t = 10;
-		water_col = lerp_rgb(C_OUTER, C_ABYSS, t, 10);
+		water_col = lerp_rgb(c_ot, c_ab, t, 10);
 	}
 	return tint_col(water_col, r, gg, b);
+}
+
+uint32_t water_color_at_depth(int depth, int r, int gg, int b)
+{
+	return water_color_at_depth_mode(depth, r, gg, b, 0);
 }
 
 uint32_t shade_rgb(uint32_t col, int shade256)
@@ -625,6 +641,7 @@ void nd_seven_ground_frame_end(const nd_map_data_t *map)
 			if (!keep) {
 				*pp = c->next;
 				if (c->pixels) free(c->pixels);
+				if (c->substrate) free(c->substrate);
 				if (c->depth) free(c->depth);
 				if (c->height) free(c->height);
 				free(c);
@@ -650,6 +667,7 @@ void nd_seven_ground_cache_forget(void)
 		while (c) {
 			nd_room_chunk_t *next = c->next;
 			if (c->pixels) free(c->pixels);
+			if (c->substrate) free(c->substrate);
 			if (c->depth) free(c->depth);
 			if (c->height) free(c->height);
 			free(c);
@@ -708,6 +726,7 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 		if (memcmp(c->pos, pos, sizeof(c->pos)) == 0) {
 			*pp = c->next;
 			if (c->pixels) free(c->pixels);
+			if (c->substrate) free(c->substrate);
 			if (c->depth) free(c->depth);
 			if (c->height) free(c->height);
 			free(c);
@@ -726,14 +745,39 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 		free(chunk);
 		return NULL;
 	}
+	chunk->substrate = (uint32_t *)malloc(TILE_PX_W * TILE_PX_H * sizeof(uint32_t));
+	if (!chunk->substrate) {
+		free(chunk->pixels);
+		free(chunk);
+		return NULL;
+	}
 	chunk->height = (int16_t *)malloc(TILE_PX_W * TILE_PX_H * sizeof(int16_t));
 	if (!chunk->height) {
+		free(chunk->substrate);
 		free(chunk->pixels);
 		free(chunk);
 		return NULL;
 	}
 	memcpy(chunk->pos, pos, sizeof(chunk->pos));
 	chunk->last_frame = s_current_frame;
+
+	/* Classify water body: Ocean vs Inland Lake/Pond */
+	int land_neighbors = 0;
+	if (nbiomes) {
+		for (int k = 0; k < 9; k++) {
+			if (nbiomes[k] != 0 && !ndw_is_water_ground(ndw_biome_style(nbiomes[k]).kind))
+				land_neighbors++;
+		}
+	}
+	int is_enclosed = (land_neighbors >= 5);
+	if (!is_enclosed && map && map->width == 7 && map->height == 7) {
+		int total_water_tiles = 0;
+		for (int i = 0; i < 49; i++) {
+			if (map->tiles[i].bio_idx == 0) total_water_tiles++;
+		}
+		if (total_water_tiles <= 20) is_enclosed = 1;
+	}
+	chunk->is_lake = (uint8_t)is_enclosed;
 
 	/* Render authentic continuous field */
 	int32_t ox = (int32_t)pos[0] * NDW_TILE_W;
@@ -838,7 +882,7 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 
 				uint32_t pixel_col = illuminated_substrate;
 				if (depth > 0) {
-					uint32_t water_col = water_color_at_depth(depth, 128, 128, 128);
+					uint32_t water_col = water_color_at_depth_mode(depth, 128, 128, 128, chunk->is_lake);
 					int alpha = water_alpha_at_depth(depth);
 					pixel_col = alpha_blend_rgb(illuminated_substrate, water_col, alpha);
 				}
@@ -852,8 +896,13 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 						chunk->height[px_idx] = H;
 						if (chunk->depth) chunk->depth[px_idx] = depth;
 
-						uint32_t final_px = pixel_col;
+						uint32_t final_sub = illuminated_substrate;
 						uint32_t n = unit_noise(h_cell, x, y) & 31;
+						if (n < 2) final_sub = shade_rgb(final_sub, 246);
+						else if (n == 2) final_sub = shade_rgb(final_sub, 266);
+						chunk->substrate[px_idx] = final_sub;
+
+						uint32_t final_px = pixel_col;
 						if (n < 2) final_px = shade_rgb(final_px, 246);
 						else if (n == 2) final_px = shade_rgb(final_px, 266);
 						chunk->pixels[px_idx] = final_px;
@@ -970,6 +1019,7 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 
 	if (chunk->depth) {
 		uint32_t anim = nd_seven_get_anim();
+		int16_t w_level = nd_field_water_level((uint16_t)pos[3]);
 		/* Seamless world-space anchor: room pos in tile pixel coordinates (TILE_PX_W x TILE_PX_H = 320 x 256) */
 		int base_px_x = (int)pos[0] * TILE_PX_W;
 		int base_px_y = -(int)pos[1] * TILE_PX_H;
@@ -1022,7 +1072,13 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			int total_h = 0;
 			for (int i = 0; i < s_water_cfg.num_octaves; i++) {
 				int v = (int)(w_oct[i][c] >> 16) - 128;
-				total_h += (v * s_water_cfg.octaves[i].amp) / 16;
+				int amp = s_water_cfg.octaves[i].amp;
+				if (chunk->is_lake) {
+					if (s_water_cfg.octaves[i].shift >= 7) amp = 0;
+					else if (s_water_cfg.octaves[i].shift == 6) amp = 5;
+					else amp = amp / 2;
+				}
+				total_h += (v * amp) / 16;
 			}
 			h_prev[c] = total_h;
 		}
@@ -1038,7 +1094,7 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			for (int c = 0; c < bw; c++) {
 				uint8_t d = depth_row[c];
 				if (d >= s_water_cfg.caustic_min_d && d <= s_water_cfg.caustic_max_d) has_caustic = 1;
-				if (d >= 1 && d <= 2) has_surf = 1;
+				if (d >= 1 && d <= 2 && !chunk->is_lake) has_surf = 1;
 				if (d >= 1) has_swell = 1;
 			}
 
@@ -1066,7 +1122,13 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					int total_h = 0;
 					for (int i = 0; i < s_water_cfg.num_octaves; i++) {
 						int v = (int)(w_oct[i][c] >> 16) - 128;
-						total_h += (v * s_water_cfg.octaves[i].amp) / 16;
+						int amp = s_water_cfg.octaves[i].amp;
+						if (chunk->is_lake) {
+							if (s_water_cfg.octaves[i].shift >= 7) amp = 0;
+							else if (s_water_cfg.octaves[i].shift == 6) amp = 5;
+							else amp = amp / 2;
+						}
+						total_h += (v * amp) / 16;
 					}
 					h_curr[c] = total_h;
 				}
@@ -1089,56 +1151,83 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 			}
 
 			for (int c = 0; c < bw; c++) {
+				int x_in_tile = src_x0 + c;
+				size_t px_idx = (size_t)y_in_tile * TILE_PX_W + x_in_tile;
 				uint8_t d = depth_row[c];
-				if (d == 0) {
+				int16_t H = chunk->height ? chunk->height[px_idx] : (int16_t)(w_level - d);
+				int h = h_curr[c + 1];
+
+				/* Dynamic physical water elevation: Z_water = w_level + wave_height */
+				int z_eff = (int)w_level + (h / 4);
+				int d_eff = z_eff - (int)H;
+				if (d_eff < 0) d_eff = 0;
+				if (d_eff > 28) d_eff = 28;
+
+				if (d == 0 && d_eff == 0) {
 					dst_row[c] = src_row[c];
 					continue;
 				}
 
-				uint32_t col = src_row[c];
+				uint32_t col;
+				uint32_t substrate = chunk->substrate ? chunk->substrate[px_idx] : src_row[c];
 
-				/* Caustics (d = 2..6): very delicate, faint sunlight shimmer on seabed */
+				if (d <= 2) {
+					/* Shoreline Ebb & Flow: natural translucent swash & wet-sand backwash */
+					if (d_eff == 0) {
+						/* Ebb / Backwash: receding water exposes the bare seabed, leaving wet, dark glistening sand */
+						col = shade_rgb(substrate, s_water_cfg.wet_sand_darken * 256 / 100);
+						if (!chunk->is_lake && has_surf) {
+							int surf = (int)(surf_row[c] >> 16);
+							if (surf > 190) {
+								int trail_alpha = (surf - 190);
+								col = alpha_blend_rgb(col, RGB(245, 250, 255), trail_alpha);
+							}
+						}
+					} else {
+						/* Flow / Swash: wave surges up, inundating the beach with translucent water */
+						uint32_t water_col = water_color_at_depth_mode(d_eff, 128, 128, 128, chunk->is_lake);
+						int alpha = water_alpha_at_depth(d_eff);
+						col = alpha_blend_rgb(substrate, water_col, alpha);
+
+						if (!chunk->is_lake && has_surf) {
+							int surf = (int)(surf_row[c] >> 16);
+							if (h > 0 && surf > 135) {
+								int surge = (h * s_water_cfg.foam_surge_alpha) / 16;
+								int foam_alpha = s_water_cfg.foam_base_alpha + surge + (surf - 135) / 2;
+								if (foam_alpha > 120) foam_alpha = 120;
+								col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
+							}
+						} else if (chunk->is_lake) {
+							/* Gentle lapping rim on calm freshwater shore */
+							if (d_eff == 1 && h > 0) {
+								col = alpha_blend_rgb(col, RGB(220, 235, 230), 25);
+							}
+						}
+					}
+				} else {
+					/* Deep water (d >= 3) */
+					col = src_row[c];
+				}
+
+				/* Caustics (d = 2..6): subtle sunlight shimmer on seabed */
 				if (d >= s_water_cfg.caustic_min_d && d <= s_water_cfg.caustic_max_d) {
 					int diff = abs((int)(c1_row[c] >> 16) - (int)(c2_row[c] >> 16));
 					if (diff < s_water_cfg.caustic_threshold) {
 						int k = s_water_cfg.caustic_threshold - diff;
 						int c_int = (k * k * (s_water_cfg.caustic_max_d + 1 - d) * 3) >> 4;
-						if (c_int > s_water_cfg.caustic_max_alpha) c_int = s_water_cfg.caustic_max_alpha;
-						col = alpha_blend_rgb(col, RGB(240, 252, 255), c_int);
-					}
-				}
-
-				/* Shoreline Ebb & Flow: natural translucent swash & wet-sand backwash */
-				if (d <= 2) {
-					int surf = (int)(surf_row[c] >> 16);
-					int h = h_curr[c + 1];
-					if (d == 1) {
-						if (h > 0 && surf > 140) {
-							/* Flow / Swash: wave crest surges up with delicate, translucent white froth */
-							int surge = (h * s_water_cfg.foam_surge_alpha) / 16;
-							int foam_alpha = s_water_cfg.foam_base_alpha + surge + (surf - 140) / 2;
-							if (foam_alpha > 120) foam_alpha = 120;
-							col = alpha_blend_rgb(col, RGB(255, 255, 255), foam_alpha);
-						} else if (h < -6) {
-							/* Strong backwash recession: wet sand glisten */
-							col = shade(col, s_water_cfg.wet_sand_darken);
-							if (surf > 195) {
-								int trail_alpha = (surf - 195);
-								col = alpha_blend_rgb(col, RGB(245, 250, 255), trail_alpha);
-							}
-						}
-					} else if (d == 2) {
-						if (h > 1 && surf > 150) {
-							/* Leading edge of incoming wave crest */
-							int c_alpha = (surf - 150) / 2 + h;
-							if (c_alpha > 75) c_alpha = 75;
-							col = alpha_blend_rgb(col, RGB(225, 250, 255), c_alpha);
+						if (chunk->is_lake) {
+							c_int = c_int / 3;
+							if (c_int > 20) c_int = 20;
+							col = alpha_blend_rgb(col, RGB(225, 220, 195), c_int);
+						} else {
+							if (c_int > s_water_cfg.caustic_max_alpha) c_int = s_water_cfg.caustic_max_alpha;
+							col = alpha_blend_rgb(col, RGB(240, 252, 255), c_int);
 						}
 					}
 				}
 
-				/* Wave slope lighting (d >= 1): continuous 3D hillshading across all water pixels */
-				if (d >= 1) {
+				/* Wave slope lighting (d >= 1): continuous 3D hillshading across water surface */
+				if (d >= 1 || d_eff >= 1) {
 					int dh_dx = h_curr[c + 2] - h_curr[c];
 					int dh_dy = h_curr[c + 1] - h_prev[c + 1];
 					int diffuse = (-dh_dx - dh_dy);
@@ -1147,7 +1236,12 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 					if (diffuse > s_water_cfg.wave_diffuse_deadband) {
 						int lit = diffuse * s_water_cfg.diffuse_lit_mult;
 						if (lit > s_water_cfg.diffuse_lit_max) lit = s_water_cfg.diffuse_lit_max;
-						uint32_t crest_col = (d <= s_water_cfg.shallow_depth_max) ? RGB(140, 220, 250) : RGB(60, 150, 225);
+						uint32_t crest_col;
+						if (chunk->is_lake) {
+							crest_col = (d <= s_water_cfg.shallow_depth_max) ? RGB(160, 195, 175) : RGB(95, 145, 130);
+						} else {
+							crest_col = (d <= s_water_cfg.shallow_depth_max) ? RGB(140, 220, 250) : RGB(60, 150, 225);
+						}
 						col = alpha_blend_rgb(col, crest_col, lit);
 					} else if (diffuse < -s_water_cfg.wave_diffuse_deadband) {
 						int shd = (-diffuse) * s_water_cfg.shadow_mult;

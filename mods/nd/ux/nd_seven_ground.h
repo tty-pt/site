@@ -18,8 +18,10 @@ typedef struct nd_room_chunk {
 	int16_t pos[4];
 	uint8_t nbiomes[9];
 	uint8_t has_water;
+	uint8_t is_lake;
 	uint32_t last_frame;
 	uint32_t *pixels;
+	uint32_t *substrate;
 	uint8_t *depth;
 	int16_t *height;
 	struct nd_room_chunk *next;
@@ -55,6 +57,7 @@ const nd_room_chunk_t *nd_seven_chunk_ensure(const nd_map_data_t *map, int col, 
 const nd_field_chunk_t *nd_seven_field_chunk_get(uint16_t world, int32_t ox, int32_t oy);
 
 uint32_t water_color_at_depth(int depth, int r, int gg, int b);
+uint32_t water_color_at_depth_mode(int depth, int r, int gg, int b, int is_lake);
 uint32_t ndw_biome_base_rgb(unsigned biome);
 uint32_t alpha_blend_rgb(uint32_t bg, uint32_t fg, int alpha);
 uint32_t shade_rgb(uint32_t col, int shade256);

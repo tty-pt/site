@@ -1,5 +1,6 @@
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_motion.h"
+#include <ttypt/noise.h>
 #include <string.h>
 
 static uint8_t s_atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
@@ -286,14 +287,95 @@ static void draw_fir(const ctx_t *c, int big, int fg)
 	}
 }
 
+static inline uint32_t pond_blend_rgb(uint32_t bg, uint32_t fg, int alpha)
+{
+	if (alpha <= 0) return bg;
+	if (alpha >= 255) return fg;
+	int r_bg = (int)(bg & 0xFF), g_bg = (int)((bg >> 8) & 0xFF), b_bg = (int)((bg >> 16) & 0xFF);
+	int r_fg = (int)(fg & 0xFF), g_fg = (int)((fg >> 8) & 0xFF), b_fg = (int)((fg >> 16) & 0xFF);
+	int r = r_bg + ((r_fg - r_bg) * alpha) / 255;
+	int g = g_bg + ((g_fg - g_bg) * alpha) / 255;
+	int b = b_bg + ((b_fg - b_bg) * alpha) / 255;
+	return RGB(r, g, b);
+}
+
 static void draw_pond(const ctx_t *c, int anim)
 {
-	uellipse(c, 0, -7, 24, 12, RGB(86, 98, 80));
-	uellipse(c, 0, -7, 22, 10, RGB(44, 96, 170));
-	uellipse(c, 0, -7, 15, 6, RGB(60, 120, 196));
-	for (int i = 0; i < 4; i++) {
-		int ux = -12 + i * 7 + ((anim / 14 + i) & 3);
-		urect(c, ux, -11 + (i & 1) * 6, 4, 1, RGB(170, 210, 240));
+	const int cx = 0, cy = -7;
+	const int rx = 24, ry = 12;
+
+	/* 1. Organic water body with soft earthen shoreline */
+	for (int dy = -ry - 2; dy <= ry + 2; dy++) {
+		for (int dx = -rx - 3; dx <= rx + 3; dx++) {
+			/* Normalized elliptical radius squared: 1024 at nominal shore */
+			int dist_sq = (dx * dx * 1024) / (rx * rx) + (dy * dy * 1024) / (ry * ry);
+			if (dist_sq > 1200)
+				continue;
+
+			int wx = c->ox + (cx + dx) * SCALE;
+			int wy = c->oy + (cy + dy) * SCALE;
+
+			/* High-frequency noise perturbation for natural organic pond shoreline */
+			int n = noise_point_2d((int16_t)wx, (int16_t)wy, 0x504F4E44u, 3);
+			int pert = (n - 128) / 3; /* -42..+42 */
+			int p_dist = dist_sq + pert;
+
+			if (p_dist > 1150)
+				continue;
+
+			if (p_dist > 1000) {
+				/* Moist muddy/earthen bank fringe */
+				int bank_alpha = ((1150 - p_dist) * 140) / 150;
+				if (bank_alpha > 0)
+					urect(c, cx + dx, cy + dy, 1, 1, RGBA(54, 46, 32, bank_alpha));
+				continue;
+			}
+
+			/* Depth factor: 0 at shoreline, 1024 at deepest center */
+			int d = 1024 - p_dist;
+			if (d < 0) d = 0;
+
+			/* Translucent freshwater pond palette:
+			 * Shallows show ground substrate underneath (translucent tea/olive).
+			 * Center deepens into dark calm freshwater green/slate. */
+			uint32_t col;
+			if (d < 300) {
+				/* Shallows: translucent olive/amber (alpha 120..180) */
+				int a = 120 + (d * 60) / 300;
+				col = RGBA(56, 78, 48, a);
+			} else if (d < 700) {
+				/* Mid depth: freshwater forest olive (alpha 180..225) */
+				int a = 180 + ((d - 300) * 45) / 400;
+				col = RGBA(34, 62, 44, a);
+			} else {
+				/* Deep center: dark calm pond abyss (alpha 225..248) */
+				int a = 225 + ((d - 700) * 23) / 324;
+				col = RGBA(20, 42, 38, a);
+			}
+
+			/* Gentle traveling micro-ripples reflecting ambient skylight */
+			int16_t rz = (int16_t)(anim >> 3);
+			int16_t r_dx = (int16_t)(anim >> 2);
+			int rip = noise_point_3d((int16_t)(wx - r_dx), (int16_t)(wy + (anim >> 3)), rz, 0x52495050u, 3);
+			if (rip > 185 && d > 120) {
+				int rip_alpha = (rip - 185) * 2 / 3;
+				if (rip_alpha > 65) rip_alpha = 65;
+				col = pond_blend_rgb(col, RGB(190, 220, 235), rip_alpha);
+			}
+
+			urect(c, cx + dx, cy + dy, 1, 1, col);
+		}
+	}
+
+	/* 2. Floating lily pads (natural pond flora) */
+	static const struct { int x, y; } pads[] = {
+		{ -11, -5 }, { -7, -3 }, { 10, -9 }, { 13, -7 }
+	};
+	for (size_t p = 0; p < sizeof(pads) / sizeof(pads[0]); p++) {
+		int px = cx + pads[p].x, py = cy + pads[p].y;
+		urect(c, px - 1, py, 3, 1, RGB(46, 88, 38));
+		urect(c, px, py - 1, 2, 1, RGB(56, 102, 44));
+		urect(c, px, py + 1, 2, 1, RGB(38, 76, 32));
 	}
 }
 
