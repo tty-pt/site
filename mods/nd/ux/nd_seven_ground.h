@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <nd/seven-world.h>
+#include <nd/field.h>
 #include "nd/bcp.h"
 
 #ifndef SCALE
@@ -50,6 +51,8 @@ int nd_seven_chunk_free_count(void);
 int nd_seven_pos_in_map(const int16_t pos[4], const nd_map_data_t *map);
 const nd_room_chunk_t *nd_seven_chunk_find(const int16_t pos[4]);
 const nd_room_chunk_t *nd_seven_chunk_ensure(const nd_map_data_t *map, int col, int row);
+
+const nd_field_chunk_t *nd_seven_field_chunk_get(uint16_t world, int32_t ox, int32_t oy);
 
 uint32_t water_color_at_depth(int depth, int r, int gg, int b);
 uint32_t ndw_biome_base_rgb(unsigned biome);

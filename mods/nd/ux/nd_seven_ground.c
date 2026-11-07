@@ -577,10 +577,32 @@ int nd_seven_pos_in_map(const int16_t pos[4], const nd_map_data_t *map)
 	return (col >= 0 && col < (int)map->width && row >= 0 && row < (int)map->height);
 }
 
+static nd_field_cache_t s_field_cache;
+static int s_field_cache_inited = 0;
+
+const nd_field_chunk_t *nd_seven_field_chunk_get(uint16_t world, int32_t ox, int32_t oy)
+{
+	if (!s_field_cache_inited) {
+		nd_field_cache_init(&s_field_cache, 64, malloc, free);
+		s_field_cache_inited = 1;
+	}
+	const nd_field_chunk_t *c = nd_field_get(&s_field_cache, world, 1, ox, oy);
+	if (c) return c;
+
+	int slot = nd_field_request(&s_field_cache, world, 1, ox, oy, 10, 8);
+	if (slot >= 0) {
+		nd_field_pump(&s_field_cache, 1);
+		return nd_field_get(&s_field_cache, world, 1, ox, oy);
+	}
+	return NULL;
+}
+
 void nd_seven_ground_frame_begin(void)
 {
 	s_current_frame++;
 	if (s_current_frame == 0) s_current_frame = 1;
+	if (s_field_cache_inited)
+		nd_field_tick(&s_field_cache);
 }
 
 void nd_seven_ground_frame_end(const nd_map_data_t *map)
@@ -617,6 +639,10 @@ void nd_seven_ground_frame_end(const nd_map_data_t *map)
 
 void nd_seven_ground_cache_forget(void)
 {
+	if (s_field_cache_inited) {
+		nd_field_cache_destroy(&s_field_cache);
+		s_field_cache_inited = 0;
+	}
 	memset(s_border, 0, sizeof(s_border));
 	s_border_next = 0;
 	for (int b = 0; b < CHUNK_HASH_BUCKETS; b++) {
@@ -735,6 +761,8 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 		int32_t ox = (int32_t)pos[0] * NDW_TILE_W;
 		int32_t oy = -(int32_t)pos[1] * NDW_TILE_H;
 		uint16_t world = (uint16_t)pos[3];
+		const nd_field_chunk_t *fchunk = nd_seven_field_chunk_get(world, ox, oy);
+		(void)fchunk;
 		int16_t w_level = nd_field_water_level(world);
 		int is_water_tile = (own && ((own->flags & NDW_F_WATER) || own->biome == 0 || ndw_is_water_ground(ndw_biome_style(own->biome).kind)));
 
@@ -825,10 +853,10 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 
 				int dh_dx = (h_e - h_w);
 				int dh_dy = (h_s - h_n);
-				int shade_delta = (-dh_dx - dh_dy) * 12;
+				int shade_delta = (-dh_dx - dh_dy) * 4;
 				int shade_val = 256 + shade_delta;
-				if (shade_val < 160) shade_val = 160;
-				if (shade_val > 360) shade_val = 360;
+				if (shade_val < 208) shade_val = 208;
+				if (shade_val > 304) shade_val = 304;
 
 				/* Continuous substrate color from fs.bio, fs.bio2, fs.blend */
 				uint32_t col1 = ndw_biome_base_rgb(bio);

@@ -573,7 +573,7 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
 				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
 			} else {
-				/* Wilderness: render directly from the continuous high-resolution field (lod 1) */
+				/* Wilderness: render directly from shared field chunk cache (lod 1) */
 				int16_t room_pos[4] = {
 					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
 					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
@@ -584,22 +584,31 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				int32_t oy = -(int32_t)room_pos[1] * 128;
 				uint16_t world = (uint16_t)room_pos[3];
 
+				const nd_field_chunk_t *fchunk = nd_seven_field_chunk_get(world, ox, oy);
 				uint32_t blk = (tile_sz >= 24) ? 4 : (tile_sz >= 16 ? 2 : 1);
+
 				for (uint32_t py = 0; py < tile_sz; py += blk) {
 					uint32_t bh = (py + blk <= tile_sz) ? blk : (tile_sz - py);
-					int32_t wy = oy + ((int)(py + bh / 2) * 128) / (int)tile_sz;
+					int sc_y = ((int)(py + bh / 2) * 8) / (int)tile_sz;
+					if (sc_y > 7) sc_y = 7;
 					for (uint32_t px = 0; px < tile_sz; px += blk) {
 						uint32_t bw = (px + blk <= tile_sz) ? blk : (tile_sz - px);
-						int32_t wx = ox + ((int)(px + bw / 2) * 160) / (int)tile_sz;
-						nd_field_sample_t s = nd_field_sample(world, 1, wx, wy);
+						int sc_x = ((int)(px + bw / 2) * 10) / (int)tile_sz;
+						if (sc_x > 9) sc_x = 9;
+
+						size_t sidx = (size_t)sc_y * 10 + sc_x;
+						uint8_t d = (fchunk && fchunk->depth) ? fchunk->depth[sidx] : 0;
 						uint32_t col;
-						if (s.depth > 0) {
-							col = water_color_at_depth(s.depth > 28 ? 28 : s.depth, 128, 128, 128);
+						if (d > 0) {
+							col = water_color_at_depth(d > 28 ? 28 : d, 128, 128, 128);
 						} else {
-							uint32_t col1 = ndw_biome_base_rgb(s.bio);
-							uint32_t col2 = ndw_biome_base_rgb(s.bio2 ? s.bio2 : s.bio);
-							col = (s.blend > 0 && s.bio2 != s.bio) ?
-							      alpha_blend_rgb(col1, col2, (s.blend * 255) / 128) : col1;
+							uint8_t bio = (fchunk && fchunk->bio) ? fchunk->bio[sidx] : 0;
+							uint8_t bio2 = (fchunk && fchunk->bio2) ? fchunk->bio2[sidx] : bio;
+							uint8_t blend = (fchunk && fchunk->blend) ? fchunk->blend[sidx] : 0;
+							uint32_t col1 = ndw_biome_base_rgb(bio);
+							uint32_t col2 = ndw_biome_base_rgb(bio2);
+							col = (blend > 0 && bio2 != bio) ?
+							      alpha_blend_rgb(col1, col2, (blend * 255) / 128) : col1;
 						}
 						fill_rect(fb, w, h, tx + (int)px, ty + (int)py, (int)bw, (int)bh, shade(col, amb, 255));
 					}

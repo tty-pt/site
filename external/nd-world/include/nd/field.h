@@ -73,18 +73,18 @@ static const octave_t ND_FIELD_COARSE_TM_OCTAVES[] = {
 };
 #define ND_FIELD_COARSE_TM_COUNT (sizeof(ND_FIELD_COARSE_TM_OCTAVES)/sizeof(ND_FIELD_COARSE_TM_OCTAVES[0]))
 
-/* Fine client octave specifications (shifts in world units: 128, 64, 32, 16, 8) */
+/* Fine client octave specifications (shifts in world units: 256, 128, 64, 32, 16) */
 typedef struct {
 	uint8_t shift;
 	int16_t amp;
 } nd_field_fine_octave_t;
 
 static const nd_field_fine_octave_t ND_FIELD_FINE_OCTAVES[] = {
-	{ 7, 14 },
-	{ 6,  8 },
-	{ 5,  4 },
-	{ 4,  2 },
-	{ 3,  1 },
+	{ 8, 14 },
+	{ 7,  8 },
+	{ 6,  4 },
+	{ 5,  2 },
+	{ 4,  1 },
 };
 #define ND_FIELD_FINE_COUNT (sizeof(ND_FIELD_FINE_OCTAVES)/sizeof(ND_FIELD_FINE_OCTAVES[0]))
 #define ND_FIELD_FINE_AMP_BUDGET 29
