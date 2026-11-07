@@ -106,7 +106,35 @@ The quest template automatically includes a `## Build & Run Commands` section an
 
 ---
 
-## 3. Standing Project Notes (`.pi/context.md`)
+## 3. Persistent Memory Mipmaps (`.pi/extensions/pi-mm/`)
+
+### Purpose
+Provides multi-resolution, hierarchical episodic memory (L0 raw tool events $\rightarrow$ L1 task episodes $\rightarrow$ L2 project invariants $\rightarrow$ L3 system principles) powered by `libcorm`, `libsepal`, `liblemma`, and `axil-auren`. Automatically captures engineering breakthroughs and standing directives across sessions, reinforces active constraints in prompt context, and enables fast semantic and keyword recall.
+
+### Commands
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `/mm doctor` | `/mm doctor` | Displays live status for decision judge, vector endpoints, storage footprint, and consolidation pipeline health (L2/L3 synthesis status, L0/L1 queue depths, drain rate, and backlog alerts). |
+| `/mm overview` | `/mm overview` | Synthesizes an all-time structured timeline across active principles (L3), invariants (L2), and milestones (L1). |
+| `/mm timeline` | `/mm timeline` | Chronological grouping of memory capture epochs and historical activity. |
+
+### Tools
+
+- **`memory_recall`**: Multi-resolution retrieval (`query`, `overview`, `zoomRef`, `project`, `level`, `includeEvidence`). Searches semantically via `libsepal` and lexically via `liblemma`, supports all-time timeline overviews (`overview: true`), and zooms into full evidence trees (`zoomRef: 42`).
+- **`memory_record`**: Record structured task episodes (`problem`, `approaches`, `diffs`, `findings`, `outcome`, `verification`). Automatically elevates standing operational rules (`standing: true`) to persistent L2 invariants.
+- **`memory_review`**: Inspect memory evidence hierarchy (`action: "inspect"`) or transition factual lifecycle status (`action: "update_lifecycle"`: tested, supported, contradicted, superseded).
+
+### Key Architectural Invariants & Mechanics
+
+1. **Continuous Directive Reinforcement**: Mid-quest developer corrections and standing negative constraints are detected via `POST /v1/systemone`, elevated to L2 invariants, and reinforced newest-first in the agent's prompt across every turn.
+2. **Unwedged Consolidation & Idle Backlog Drain**: Fresh turn events are prioritized first, with remaining backlogs ordered newest-first (`orderPendingL0Refs`). Idle turns drain backlogged L0 records within a configurable wall-clock budget (`consolidateDrainMs`, default 250ms).
+3. **Zero-Config Local Chat Synthesis**: Automatically hooks local `axil-auren` OpenAI-compatible chat endpoints (`/v1/chat/completions`) using `smollm` for L2/L3 abstraction synthesis.
+4. **Targeted Recall & Episode Exemption**: Hybrid recall surfaces relevant L0 memories when requested (`level: "L0"` or untiered searches) while strictly exempting structured technical episodes from code artifact pruning.
+
+---
+
+## 4. Standing Project Notes (`.pi/context.md`)
 
 You can create or edit `.pi/context.md` at any time to give Pi standing facts or rules that should be injected into every request payload (e.g., "Always test with `make watch` after editing UX modules").
 
@@ -118,15 +146,16 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 ---
 
-## 4. Summary Table
+## 5. Summary Table
 
 | Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
 |----------------|---------------|----------------------|----------------|
-| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `quest_update_state`, `quest_mark_saved`, `quest_subquest`, `quest_archive` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
+| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `/quest-handoff`, `/quest-garden`, `quest_update_state`, `quest_mark_saved`, `quest_subquest`, `quest_archive`, `quest_handoff` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
+| `.pi/extensions/pi-mm/` | `before_agent_start`, `turn_end`, `agent_settled`, `session_start`, `session_shutdown`, `message_end`, `tool_result` | `/mm doctor`, `/mm overview`, `/mm timeline`, `memory_recall`, `memory_record`, `memory_review` | Hierarchical memory mipmaps, epistemic lifecycle verification, standing directive reinforcement, automated L0-L3 consolidation |
 
 ---
 
-## 5. Adding New Extensions
+## 6. Adding New Extensions
 
 To create a new project-local extension:
 1. Add a TypeScript file in `.pi/extensions/my-extension.ts`.

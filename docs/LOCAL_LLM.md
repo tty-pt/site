@@ -80,6 +80,7 @@ Both `pi-mm` and `pi-quest` leverage `POST /v1/systemone` for fast, zero-disk, S
 | **Quest Kind Gating** | `pi-quest` | Distinguishes analytical research tasks from code implementation tasks | `standard` vs `analysis` | ~16 ms |
 | **Operator Steering Triage** | `pi-quest` | Classifies mid-flight user steering during quest execution | `advance`, `abort`, `constraint`, `subquest_*`, `handoff`, `refinement` | ~15 ms |
 | **Plan Step Quality** | `pi-quest` | Verifies implementation plan steps against verification exemplars | `verify`, `edit`, `investigate`, etc. | ~16 ms |
+| **Local Abstraction Synthesis** | `pi-mm` | Zero-config chat synthesis for L2 invariants and L3 principles (`/v1/chat/completions`) | `smollm` chat completion | ~300 ms |
 
 ### Audited Candidate Surfaces (Implementation Roadmap & Live Metrics)
 
