@@ -29,6 +29,8 @@ Maintains long-lived quest state on disk (`.pi/quest/current/<qid>/quest.md`), a
 | `/quest-del` | `/quest-del [name]` | Archives the active or named quest. Moves runtime artifacts to `.pi/quest/archive/<qid>.zip`. |
 | `/quest-draft` | `/quest-draft <description>` | Creates a proposal draft with name inferred from description without making it active. |
 | `/quest-status` | `/quest-status` | Displays the active quest name, ID (`qid`), file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
+| `/quest-handoff` | `/quest-handoff [qid]` | Generates a deterministic, honest handoff document to `.pi/quest/handoffs/<qid>-<stamp>.md` and prints it. Auto-runs on compaction. |
+| `/quest-garden` | `/quest-garden [list\|prune\|dedupe]` | Triage `.pi/quest/future` (active/fresh/stale/orphan/empty-shell), deduplicate redundant bullets, and cleanly prune abandoned drafts. |
 | `/quests` | `/quests` | Displays active quests in `.pi/quest/current/` in a widget panel. |
 
 ### Custom Tools
@@ -36,6 +38,8 @@ Maintains long-lived quest state on disk (`.pi/quest/current/<qid>/quest.md`), a
 - **`quest_update_state`**: Update the active quest state on disk with structured fields (`status`, `findings`, `decisions`, `remaining`, `nextStep`, `plan`, `planConfidence`, `openQuestions`, `assumptions`, `exactNextAction`, etc.). Automatically formats, validates epistemic consistency, and deterministically writes `.pi/quest/current/<qid>/quest.md`.
 - **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `.pi/quest/current/<qid>/quest.md`.
 - **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Inherits parent's `<qid>`, links it into the parent quest, and manages LIFO sub-quest stack activation.
+- **`quest_recover`**: Rebuild quest state from the transcript after context resets or compaction.
+- **`quest_handoff`**: Write a deterministic, honest handoff for the next agent into `.pi/quest/handoffs/` including verbatim operator requests, deduped directives, Asked-vs-Accomplished checklist with UNVERIFIED markers, approved plan, git diffstat, last verification, blockers, and agent notes.
 - **`quest_archive`**: Archive the active (or specified) quest from `.pi/quest/current/<qid>/` to `.pi/quest/archive/<qid>.zip` and optionally trigger session context compaction.
 
 ### Autonomous Quest Management & Epistemic Memory
