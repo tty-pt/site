@@ -584,17 +584,47 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				int32_t oy = -(int32_t)room_pos[1] * 128;
 				uint16_t world = (uint16_t)room_pos[3];
 
+			const nd_room_chunk_t *chunk = nd_seven_chunk_find(room_pos);
+			if (chunk && chunk->pixels) {
+				for (uint32_t py = 0; py < tile_sz; py++) {
+					int cy = ((int)py * TILE_PX_H) / (int)tile_sz;
+					for (uint32_t px = 0; px < tile_sz; px++) {
+						int cx = ((int)px * TILE_PX_W) / (int)tile_sz;
+						uint32_t pcol = chunk->pixels[cy * TILE_PX_W + cx];
+						fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(pcol, amb, 255));
+					}
+				}
+			} else {
+				/* Wilderness: render directly from shared field chunk cache (lod 1) */
 				const nd_field_chunk_t *fchunk = nd_seven_field_chunk_get(world, ox, oy);
-				uint32_t blk = (tile_sz >= 24) ? 4 : (tile_sz >= 16 ? 2 : 1);
+				uint8_t own_biome = tile->bio_idx;
+				uint8_t nbiomes[9];
+				nbiomes[4] = own_biome;
+				for (int dj = -1; dj <= 1; dj++) {
+					for (int di = -1; di <= 1; di++) {
+						int k = (dj + 1) * 3 + (di + 1);
+						if (di == 0 && dj == 0) continue;
+						int nc = (int)x + di;
+						int nr = (int)y + dj;
+						if (nc >= 0 && nc < (int)cols && nr >= 0 && nr < (int)rows) {
+							nbiomes[k] = map->tiles[nr * cols + nc].bio_idx;
+						} else {
+							nbiomes[k] = own_biome;
+						}
+					}
+				}
 
+				uint32_t blk = (tile_sz >= 24) ? 4 : (tile_sz >= 16 ? 2 : 1);
 				for (uint32_t py = 0; py < tile_sz; py += blk) {
 					uint32_t bh = (py + blk <= tile_sz) ? blk : (tile_sz - py);
 					int sc_y = ((int)(py + bh / 2) * 8) / (int)tile_sz;
 					if (sc_y > 7) sc_y = 7;
+					int sy = ((int)(py + bh / 2) * 128) / (int)tile_sz;
 					for (uint32_t px = 0; px < tile_sz; px += blk) {
 						uint32_t bw = (px + blk <= tile_sz) ? blk : (tile_sz - px);
 						int sc_x = ((int)(px + bw / 2) * 10) / (int)tile_sz;
 						if (sc_x > 9) sc_x = 9;
+						int sx = ((int)(px + bw / 2) * 160) / (int)tile_sz;
 
 						size_t sidx = (size_t)sc_y * 10 + sc_x;
 						uint8_t d = (fchunk && fchunk->depth) ? fchunk->depth[sidx] : 0;
@@ -602,17 +632,29 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 						if (d > 0) {
 							col = water_color_at_depth(d > 28 ? 28 : d, 128, 128, 128);
 						} else {
-							uint8_t bio = (fchunk && fchunk->bio) ? fchunk->bio[sidx] : 0;
-							uint8_t bio2 = (fchunk && fchunk->bio2) ? fchunk->bio2[sidx] : bio;
-							uint8_t blend = (fchunk && fchunk->blend) ? fchunk->blend[sidx] : 0;
-							uint32_t col1 = ndw_biome_base_rgb(bio);
-							uint32_t col2 = ndw_biome_base_rgb(bio2);
-							col = (blend > 0 && bio2 != bio) ?
-							      alpha_blend_rgb(col1, col2, (blend * 255) / 128) : col1;
+							uint8_t bio = own_biome ? own_biome : (fchunk && fchunk->bio ? fchunk->bio[sidx] : 0);
+							if (own_biome) {
+								int dx = ndw_warp_axis(room_pos, ox + sx, oy + sy, 0x1u) / NDW_SUB;
+								int dy = ndw_warp_axis(room_pos, ox + sx, oy + sy, 0x2u) / NDW_SUB;
+								int wx_sample = sx + dx;
+								int wy_sample = sy + dy;
+								if (wx_sample < 0 && nbiomes[3] != 0) {
+									bio = nbiomes[3];
+								} else if (wx_sample >= 160 && nbiomes[5] != 0) {
+									bio = nbiomes[5];
+								}
+								if (wy_sample < 0 && nbiomes[1] != 0) {
+									bio = nbiomes[1];
+								} else if (wy_sample >= 128 && nbiomes[7] != 0) {
+									bio = nbiomes[7];
+								}
+							}
+							col = ndw_biome_base_rgb(bio);
 						}
 						fill_rect(fb, w, h, tx + (int)px, ty + (int)py, (int)bw, (int)bh, shade(col, amb, 255));
 					}
 				}
+			}
 			}
 
 			/* Rooms get a soft outline; wilderness stays seamless. */
