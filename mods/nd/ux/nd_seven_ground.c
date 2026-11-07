@@ -816,12 +816,17 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 				int16_t h_s = s_h[(size_t)sy_next * 160 + sx];
 				int16_t h_n = s_h[(size_t)sy_prev * 160 + sx];
 
-				int dh_dx = (h_e - h_w);
-				int dh_dy = (h_s - h_n);
-				int shade_delta = (-dh_dx - dh_dy) * 4;
-				int shade_val = 256 + shade_delta;
-				if (shade_val < 208) shade_val = 208;
-				if (shade_val > 304) shade_val = 304;
+				int dx_step = sx_next - sx_prev;
+				int dy_step = sy_next - sy_prev;
+				int grad_x = (dx_step > 0) ? ((int)(h_e - h_w) * 2 / dx_step) : 0;
+				int grad_y = (dy_step > 0) ? ((int)(h_s - h_n) * 2 / dy_step) : 0;
+				int slope = grad_x + grad_y;
+
+				/* Diffuse hillshading: directional slope facing Northwest sun normalized by stencil span & budget */
+				int shade_delta = (slope * ND_SHADE_NEUTRAL) / (ND_FIELD_STENCIL_SPAN * ND_FIELD_FINE_AMP_BUDGET);
+				int shade_val = ND_SHADE_NEUTRAL + shade_delta;
+				if (shade_val < ND_SHADE_MIN) shade_val = ND_SHADE_MIN;
+				if (shade_val > ND_SHADE_MAX) shade_val = ND_SHADE_MAX;
 
 				/* Continuous substrate color from fs.bio, fs.bio2, fs.blend */
 				uint32_t col1 = ndw_biome_base_rgb(bio);

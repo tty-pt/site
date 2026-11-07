@@ -73,11 +73,12 @@ nd_terrain_hillshade(int32_t wx, int32_t wy, uint16_t world)
 
 	int dh_dx = (h_e - h_w);
 	int dh_dy = (h_s - h_n);
+	int slope = dh_dx + dh_dy;
 
-	int shade_delta = (-dh_dx - dh_dy) * 12;
-	int shade_val = 256 + shade_delta;
-	if (shade_val < 160) shade_val = 160;
-	if (shade_val > 360) shade_val = 360;
+	int shade_delta = (slope * ND_SHADE_NEUTRAL) / (ND_FIELD_STENCIL_SPAN * ND_FIELD_FINE_AMP_BUDGET);
+	int shade_val = ND_SHADE_NEUTRAL + shade_delta;
+	if (shade_val < ND_SHADE_MIN) shade_val = ND_SHADE_MIN;
+	if (shade_val > ND_SHADE_MAX) shade_val = ND_SHADE_MAX;
 	return (uint16_t)shade_val;
 }
 

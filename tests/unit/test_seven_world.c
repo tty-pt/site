@@ -129,7 +129,7 @@ int main(void)
 		memset(&map, 0, sizeof(map));
 		map.width = map.height = 7;
 		map.player_x = map.player_y = 3;
-		map.pos[0] = 0; map.pos[1] = 0; map.pos[2] = 0; map.pos[3] = 0;
+		map.pos[0] = -19; map.pos[1] = -20; map.pos[2] = 0; map.pos[3] = 1;
 		for (int i = 0; i < 49; i++) {
 			map.tiles[i].bio_idx = 0; /* water */
 			map.tiles[i].exits = 0x1B;
@@ -148,7 +148,7 @@ int main(void)
 		nd_client_state_t st;
 		memset(&st, 0, sizeof(st));
 		st.map_data = map;
-		int16_t r_pos[4] = { 0, 0, 0, 0 };
+		int16_t r_pos[4] = { -19, -20, 0, 1 };
 		ndw_tile_t own_tile = nd_seven_convert_tile(&map.tiles[3 * 7 + 3]);
 
 		nd_seven_ground_tile_render(fb_anim0, 320, 256, &st, 0, 0, r_pos, &own_tile, 0, 0);
@@ -171,11 +171,12 @@ int main(void)
 		memset(&st, 0, sizeof(st));
 		st.map_data.width = st.map_data.height = 7;
 		st.map_data.player_x = st.map_data.player_y = 3;
+		st.map_data.pos[0] = -19; st.map_data.pos[1] = -20; st.map_data.pos[2] = 0; st.map_data.pos[3] = 1;
 		for (int i = 0; i < 49; i++) {
 			st.map_data.tiles[i].bio_idx = (i % 7) <= 2 ? 10 : 0; /* land west, sea east */
 			st.map_data.tiles[i].exits = 0x1B;
 		}
-		int16_t r_pos[4] = { 0, 0, 0, 0 };
+		int16_t r_pos[4] = { -19, -20, 0, 1 };
 		ndw_tile_t own = nd_seven_convert_tile(&st.map_data.tiles[3 * 7 + 3]);
 
 		nd_seven_ground_tile_render(fa, 320, 256, &st, 0, 0, r_pos, &own, 0, 0);

@@ -194,9 +194,9 @@ int main(void)
 		int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
 		assert(r < 50 && g < 100 && b > 100);
 
-		/* 2. Coastal transect in world 1 at (-17, -20) -> (-16, -20):
-		 * Terrain rises from submerged seabed (-7) to dry land (0..+4). */
-		set_map(-16, -20, 0, 0x1B, 0, 0, 0, 0);
+		/* 2. Coastal transect in world 1 at (-19, -20) -> (-18, -20):
+		 * Terrain rises from submerged seabed (-18) to dry land (0). */
+		set_map(-18, -20, 0, 0x1B, 0, 0, 0, 0);
 		st.map_data.pos[3] = 1;
 		nd_seven_render(fb2, 1280, 720, &st);
 		dump("water_coastal", fb2, 1280, 720);
@@ -204,7 +204,7 @@ int main(void)
 		/* Along the transect approaching the shore, depth decreases monotonically */
 		int prev_d = 999;
 		int depths_seen = 0;
-		for (int wx = -17 * 160 + 64; wx <= -16 * 160 + 80; wx += 16) {
+		for (int wx = -19 * 160; wx <= -18 * 160; wx += 16) {
 			nd_field_sample_t s = nd_field_sample(1, 3, wx, -(-20) * 128 + 64);
 			assert(s.depth <= prev_d);
 			prev_d = s.depth;
@@ -223,7 +223,7 @@ int main(void)
 		assert(c_land != c_shallow);
 
 		/* Underwater substrate displays authentic biomes */
-		nd_field_sample_t s_under = nd_field_sample(1, 3, -17 * 160, -(-20) * 128 + 64);
+		nd_field_sample_t s_under = nd_field_sample(1, 3, -19 * 160, -(-20) * 128 + 64);
 		assert(s_under.depth > 0);
 		assert(s_under.bio != 0); /* authentic substrate under water */
 	}

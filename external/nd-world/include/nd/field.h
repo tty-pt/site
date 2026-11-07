@@ -73,21 +73,41 @@ static const octave_t ND_FIELD_COARSE_TM_OCTAVES[] = {
 };
 #define ND_FIELD_COARSE_TM_COUNT (sizeof(ND_FIELD_COARSE_TM_OCTAVES)/sizeof(ND_FIELD_COARSE_TM_OCTAVES[0]))
 
-/* Fine client octave specifications (shifts in world units: 256, 128, 64, 32, 16) */
+/*
+ * 1/f Fractal terrain octave specifications.
+ * Governed by two clean declarative parameters:
+ *   - ND_FIELD_1F_SCALE: single base amplitude constant.
+ *   - ND_FIELD_OCTAVE_COUNT: number of intermediate octaves.
+ *
+ * Under 1/f pink noise, octave amplitude scales strictly with wavelength (A ~ lambda ~ 2^shift),
+ * ensuring that every octave across the continuum—from room-scale rolling hills down to
+ * fine surface slope—has an identical characteristic surface gradient (A / lambda = constant).
+ *
+ * Adding more octaves (e.g. changing 6 to 7 or 8) smoothly introduces higher macro features
+ * (shift = MIN_SHIFT + k) without altering lower octaves or static tables.
+ */
+#define ND_FIELD_1F_SCALE        1
+#define ND_FIELD_FINE_MIN_SHIFT  4
+#define ND_FIELD_OCTAVE_COUNT    6
+
+#define ND_FIELD_FINE_COUNT      ND_FIELD_OCTAVE_COUNT
+#define ND_FIELD_FINE_AMP_BUDGET (((1 << ND_FIELD_OCTAVE_COUNT) - 1) * ND_FIELD_1F_SCALE)
+
+#define ND_FIELD_NOISE_DIM       2
+#define ND_FIELD_NOISE_PRECISION 8
+#define ND_FIELD_NOISE_MID       128
+#define ND_FIELD_NOISE_SHIFT     16
+
+#define ND_FIELD_STENCIL_SPAN    4
+
+#define ND_SHADE_NEUTRAL         256
+#define ND_SHADE_MIN             0
+#define ND_SHADE_MAX             ((ND_SHADE_NEUTRAL * 2) - 1)
+
 typedef struct {
 	uint8_t shift;
 	int16_t amp;
 } nd_field_fine_octave_t;
-
-static const nd_field_fine_octave_t ND_FIELD_FINE_OCTAVES[] = {
-	{ 8, 14 },
-	{ 7,  8 },
-	{ 6,  4 },
-	{ 5,  2 },
-	{ 4,  1 },
-};
-#define ND_FIELD_FINE_COUNT (sizeof(ND_FIELD_FINE_OCTAVES)/sizeof(ND_FIELD_FINE_OCTAVES[0]))
-#define ND_FIELD_FINE_AMP_BUDGET 29
 
 /* Climate primitives matching noise.c */
 static inline uint32_t
@@ -317,12 +337,14 @@ nd_field_sample(uint16_t world, uint8_t lod, int32_t wx, int32_t wy)
 	int16_t fine_h = 0;
 	if (lod > 0) {
 		uint32_t fine_seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
-		for (size_t i = 0; i < ND_FIELD_FINE_COUNT; i++) {
-			uint32_t oct_seed = fine_seed ^ (uint32_t)(i * 0x85EBCA77u + 1);
-			int16_t p[2] = { (int16_t)wy, (int16_t)wx };
-			uint32_t raw = noise_wpoint_n(p, ND_FIELD_FINE_OCTAVES[i].shift, 8, oct_seed, 2, NOISE_FADE);
-			int32_t val = (int32_t)(raw >> 16) - 128;
-			fine_h += (int16_t)((val * ND_FIELD_FINE_OCTAVES[i].amp) / 128);
+		for (uint8_t k = 0; k < ND_FIELD_OCTAVE_COUNT; k++) {
+			uint8_t shift = (uint8_t)(ND_FIELD_FINE_MIN_SHIFT + (ND_FIELD_OCTAVE_COUNT - 1 - k));
+			int16_t amp = (int16_t)(ND_FIELD_1F_SCALE << (shift - ND_FIELD_FINE_MIN_SHIFT));
+			uint32_t oct_seed = fine_seed ^ (uint32_t)(k * 0x85EBCA77u + 1);
+			int16_t p[ND_FIELD_NOISE_DIM] = { (int16_t)wy, (int16_t)wx };
+			uint32_t raw = noise_wpoint_n(p, shift, ND_FIELD_NOISE_PRECISION, oct_seed, ND_FIELD_NOISE_DIM, NOISE_FADE);
+			int32_t val = (int32_t)(raw >> ND_FIELD_NOISE_SHIFT) - ND_FIELD_NOISE_MID;
+			fine_h += (int16_t)((val * amp) / ND_FIELD_NOISE_MID);
 		}
 	}
 	s.fine_elev = fine_h;
