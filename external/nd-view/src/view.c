@@ -13,6 +13,7 @@
 #include <nd/view-types.h>
 #include <nd/map.h>
 #include <nd/world-types.h>
+#include <nd/field.h>
 unsigned nd_get(unsigned hd, void *value, void *key);
 ENT ent_get(unsigned ref);
 #include <nd/type.h>
@@ -532,8 +533,24 @@ eng_view(unsigned player_ref)
 					flags |= ND_MAP_FLAG_WATER;
 			}
 		}
-		if (vt->elevation < vt->water_level || vt->is_water || vt->bio_idx == 0)
+
+		/* Compute 2D projected water coverage: >50% surface area submerged */
+		int rx = opos[0] - VIEW_AROUND + (i % VIEW_SIZE);
+		int ry = opos[1] + VIEW_AROUND - (i / VIEW_SIZE);
+		uint16_t rworld = (uint16_t)opos[3];
+		int32_t ox = (int32_t)rx * 160;
+		int32_t oy = -(int32_t)ry * 128;
+		int submerged_count = 0;
+		for (int sy = 16; sy < 128; sy += 32) {
+			for (int sx = 20; sx < 160; sx += 40) {
+				nd_field_sample_t s = nd_field_sample(rworld, 0, ox + sx, oy + sy);
+				if (s.elevation < s.water_level)
+					submerged_count++;
+			}
+		}
+		if (submerged_count > 8)
 			flags |= ND_MAP_FLAG_WATER;
+
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;
 		if (vt->flags & vtf_entity)

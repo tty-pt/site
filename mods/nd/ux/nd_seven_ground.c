@@ -735,75 +735,40 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 	memcpy(chunk->pos, pos, sizeof(chunk->pos));
 	chunk->last_frame = s_current_frame;
 
-	int is_room = (own && (own->flags & ND_MAP_FLAG_ROOM));
+	/* Render authentic continuous field */
+	int32_t ox = (int32_t)pos[0] * NDW_TILE_W;
+	int32_t oy = -(int32_t)pos[1] * NDW_TILE_H;
+	uint16_t world = (uint16_t)pos[3];
+	const nd_field_chunk_t *fchunk = nd_seven_field_chunk_get(world, ox, oy);
+	(void)fchunk;
+	int16_t w_level = nd_field_water_level(world);
 
-	if (is_room) {
-		uint8_t own_biome = own ? own->biome : 0;
-		ndw_ground_t substrate_style = (own_biome != 0) ? ndw_biome_style(own_biome) : (ndw_ground_t){ NDW_G_SAND, 128, 128, 128 };
-		for (int cy = 0; cy < NDW_ROWS; cy++) {
-			for (int cx = 0; cx < NDW_COLS; cx++) {
-				int cell_px = cx * NDW_CELL_PX * SCALE;
-				int cell_py = cy * NDW_CELL_PX * SCALE;
-				ground_cell(chunk->pixels, TILE_PX_W, TILE_PX_H, &substrate_style, pos, cx, cy,
-				            cell_px, cell_py, nd_seven_get_anim());
-			}
+	int16_t s_h[160 * 128];
+	uint8_t s_bio[160 * 128];
+	uint8_t s_bio2[160 * 128];
+	uint8_t s_blend[160 * 128];
+	uint8_t s_depth[160 * 128];
+	int any_water = 0;
+
+	for (int sy = 0; sy < 128; sy++) {
+		int32_t wy = oy + sy;
+		for (int sx = 0; sx < 160; sx++) {
+			int32_t wx = ox + sx;
+			nd_field_sample_t fs = nd_field_sample(world, 3, wx, wy);
+			size_t idx = (size_t)sy * 160 + sx;
+			s_h[idx] = fs.elevation;
+			s_bio[idx] = fs.bio;
+			s_bio2[idx] = fs.bio2;
+			s_blend[idx] = fs.blend;
+
+			/* Water depth determined strictly by continuous elevation W - H (H < W).
+			 * Water flags do not override physical terrain or carve artificial trenches. */
+			int d = (fs.elevation < w_level) ? (int)(w_level - fs.elevation) : 0;
+			if (d > 28) d = 28;
+			s_depth[idx] = (uint8_t)d;
+			if (d > 0) any_water = 1;
 		}
-		memset(chunk->height, 0, TILE_PX_W * TILE_PX_H * sizeof(int16_t));
-		if (own->flags & NDW_F_WATER) {
-			chunk->depth = (uint8_t *)calloc(TILE_PX_W * TILE_PX_H, sizeof(uint8_t));
-			if (chunk->depth) {
-				memset(chunk->depth, 2, TILE_PX_W * TILE_PX_H);
-				chunk->has_water = 1;
-			}
-		}
-	} else {
-		/* Wilderness: render authentic continuous field */
-		int32_t ox = (int32_t)pos[0] * NDW_TILE_W;
-		int32_t oy = -(int32_t)pos[1] * NDW_TILE_H;
-		uint16_t world = (uint16_t)pos[3];
-		const nd_field_chunk_t *fchunk = nd_seven_field_chunk_get(world, ox, oy);
-		(void)fchunk;
-		int16_t w_level = nd_field_water_level(world);
-		int is_water_tile = (own && ((own->flags & NDW_F_WATER) || own->biome == 0 || ndw_is_water_ground(ndw_biome_style(own->biome).kind)));
-
-		int16_t s_h[160 * 128];
-		uint8_t s_bio[160 * 128];
-		uint8_t s_bio2[160 * 128];
-		uint8_t s_blend[160 * 128];
-		uint8_t s_depth[160 * 128];
-		int any_water = 0;
-
-		for (int sy = 0; sy < 128; sy++) {
-			int32_t wy = oy + sy;
-			for (int sx = 0; sx < 160; sx++) {
-				int32_t wx = ox + sx;
-				nd_field_sample_t fs = nd_field_sample(world, 3, wx, wy);
-				size_t idx = (size_t)sy * 160 + sx;
-				s_h[idx] = fs.elevation;
-				s_bio[idx] = fs.bio;
-				s_bio2[idx] = fs.bio2;
-				s_blend[idx] = fs.blend;
-
-				/* Water depth determined strictly by W - H (H < W) when submerged;
-				 * on explicitly flagged water tiles, ramps from coastal shallows into deep sea */
-				int d = (fs.elevation < w_level) ? (int)(w_level - fs.elevation) : 0;
-				if (is_water_tile && d == 0) {
-					int d_land = 999;
-					if (nbiomes) {
-						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[3]).kind) && sx < d_land) d_land = sx;
-						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[5]).kind) && (159 - sx) < d_land) d_land = 159 - sx;
-						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[1]).kind) && sy < d_land) d_land = sy;
-						if (!ndw_is_water_ground(ndw_biome_style(nbiomes[7]).kind) && (127 - sy) < d_land) d_land = 127 - sy;
-					}
-					if (d_land < 20) d = 2 + (d_land * 4) / 20;
-					else if (d_land < 60) d = 6 + ((d_land - 20) * 10) / 40;
-					else d = 28;
-				}
-				if (d > 28) d = 28;
-				s_depth[idx] = (uint8_t)d;
-				if (d > 0) any_water = 1;
-			}
-		}
+	}
 
 		chunk->has_water = (uint8_t)any_water;
 		if (any_water) {
@@ -891,8 +856,6 @@ static nd_room_chunk_t *chunk_get_or_create(const int16_t pos[4],
 				}
 			}
 		}
-	}
-
 
 	chunk->next = s_chunk_buckets[bucket];
 	s_chunk_buckets[bucket] = chunk;

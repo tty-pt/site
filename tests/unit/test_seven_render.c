@@ -213,7 +213,7 @@ int main(void)
 		assert(depths_seen > 5);
 
 		/* Shallows near shore have high transmission (crystal shallows) */
-		uint32_t c_shallow = fb2[360 * 1280 + 560];
+		uint32_t c_shallow = fb2[360 * 1280 + 440];
 		int sr = (int)(c_shallow & 0xFF), sg = (int)((c_shallow >> 8) & 0xFF), sb = (int)((c_shallow >> 16) & 0xFF);
 		(void)sr; (void)sg;
 		assert(sb > 100);
