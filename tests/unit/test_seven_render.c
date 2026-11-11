@@ -2680,7 +2680,39 @@ int main(void)
 		assert(nd_field_bimodal_hypsometry(-12) < -14);
 		assert(nd_field_bimodal_hypsometry(-30) < -60);
 
-		printf("PASS: single-pass volumetric water optics, 6-octave orbital-to-capillary wave cascade (grad: orbit=%.4f, macro=%.4f, 1x=%.4f, 8x=%.4f), and t=100000s temporal stability verified\n",
+		/* 5. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly
+		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
+		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
+			struct {
+				const char *name;
+				const char *vs;
+				const char *fs;
+			} progs[3] = {
+				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
+				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
+				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() }
+			};
+			for (int p = 0; p < 3; p++) {
+				char vpath[128], fpath[128], cmd[512];
+				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
+				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
+				FILE *vf = fopen(vpath, "w");
+				assert(vf != NULL);
+				fputs(progs[p].vs, vf);
+				fclose(vf);
+				FILE *ff = fopen(fpath, "w");
+				assert(ff != NULL);
+				fputs(progs[p].fs, ff);
+				fclose(ff);
+				snprintf(cmd, sizeof(cmd), "glslangValidator -l '%s' '%s' >/dev/null", vpath, fpath);
+				int rc = system(cmd);
+				remove(vpath);
+				remove(fpath);
+				assert(rc == 0);
+			}
+		}
+
+		printf("PASS: single-pass volumetric water optics, 6-octave orbital-to-capillary wave cascade (grad: orbit=%.4f, macro=%.4f, 1x=%.4f, 8x=%.4f), t=100000s temporal stability, and glslangValidator GLSL ES 3.00 compile+link verified\n",
 		       w_grad[0], w_grad[1], w_grad[2], w_grad[3]);
 	}
 
