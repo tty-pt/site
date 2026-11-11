@@ -348,8 +348,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_frame_frustum_valid = 1;
 
 	float r_planet = 0.0f;
-	float z_min_cull = lwz - 80.0f;
-	float z_max_cull = lwz + 80.0f;
+	float z_min_cull = lwz - 180.0f;
+	float z_max_cull = lwz + 180.0f;
 	float cull_margin = 64.0f;
 	if (dist >= 1200.0f) {
 		r_planet = dist * 1.25f;

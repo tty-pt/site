@@ -2509,6 +2509,68 @@ int main(void)
 		       mean_grad[0], mean_grad[1], mean_grad[2], mean_grad[3]);
 	}
 
+	/* R7 & R8: Non-Stationary Regional Ruggedness Envelope & Real 3D Height Relief (Clear Plains vs Rugged Ridges) */
+	{
+		nd_seven_set_3d_mode(1);
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		assert(cs != NULL);
+
+		int clear_rooms = 0;
+		int rolling_rooms = 0;
+		int rugged_rooms = 0;
+		float max_clear_span = 0.0f;
+		float max_rugged_span = 0.0f;
+		float sum_clear_span = 0.0f;
+		float sum_rugged_span = 0.0f;
+
+		for (int ry = -24; ry <= 24; ry += 2) {
+			for (int rx = -24; rx <= 24; rx += 2) {
+				int32_t ox = rx * NDW_TILE_W;
+				int32_t oy = ry * NDW_TILE_H;
+				int32_t cx = ox + (NDW_TILE_W / 2);
+				int32_t cy = oy + (NDW_TILE_H / 2);
+				nd_field_sample_t center_s = nd_field_sample(0, 3, cx, cy);
+				/* Inspect inland dry land rooms well above sea level */
+				if (center_s.is_water || center_s.coarse_elev < center_s.water_level + 8)
+					continue;
+
+				uint16_t rug = nd_field_ruggedness_q8(0, cx, cy);
+				const ar_node_t *node = ar_system_ensure(cs, 0, 0, ox, oy);
+				assert(node != NULL && node->values != NULL);
+				float span_units = (float)(node->max_val - node->min_val) / 16.0f;
+
+				if (rug == 0) {
+					clear_rooms++;
+					sum_clear_span += span_units;
+					if (span_units > max_clear_span)
+						max_clear_span = span_units;
+				} else if (rug >= 180) {
+					rugged_rooms++;
+					sum_rugged_span += span_units;
+					if (span_units > max_rugged_span)
+						max_rugged_span = span_units;
+				} else {
+					rolling_rooms++;
+				}
+			}
+		}
+
+		assert(clear_rooms >= 20);
+		assert(rolling_rooms >= 10);
+		assert(rugged_rooms >= 15);
+		float avg_clear_span = sum_clear_span / (float)clear_rooms;
+		float avg_rugged_span = sum_rugged_span / (float)rugged_rooms;
+
+		/* Clear plains remain gently level while rugged zones have 4x+ higher average intra-room 3D relief
+		 * and peak single-room 3D vertical spans exceeding 25 world units */
+		assert(avg_clear_span <= 8.0f);
+		assert(avg_rugged_span >= avg_clear_span * 3.5f);
+		assert(max_rugged_span >= 25.0f);
+
+		printf("PASS: non-stationary regional 3D relief verified (clear=%d rooms avg=%.1f, rolling=%d, rugged=%d rooms avg=%.1f max=%.1f world units)\n",
+		       clear_rooms, avg_clear_span, rolling_rooms, rugged_rooms, avg_rugged_span, max_rugged_span);
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

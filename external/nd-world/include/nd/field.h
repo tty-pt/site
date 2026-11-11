@@ -498,6 +498,36 @@ nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int16_t rx, int32_t ry_unwrapp
 	return nd_field_eval_coarse_unwrapped_q12_4(seed, (int32_t)rx, ry_unwrapped);
 }
 
+/* Continuous regional ruggedness envelope R(wx, wy) in Q8 fixed-point [0..256].
+ * Combines a macro tectonic province octave (shift 10 = 1,024 world units, ~6.4x8 rooms)
+ * and a rotated meso ridge-belt octave (shift 8 = 256 world units, ~1.6x2 rooms),
+ * followed by a smooth threshold ramp so ~45% of land forms open clear plains (R = 0),
+ * ~30% forms rolling hills, and ~25% forms craggy rugged ridges and highlands (R -> 256). */
+static inline uint16_t
+nd_field_ruggedness_q8(uint16_t world, int32_t wx, int32_t wy)
+{
+	uint32_t rug_seed = 0x52554747u ^ ((uint32_t)world * 0x9E3779B1u);
+	int16_t p0[2] = { (int16_t)wy, (int16_t)wx };
+	uint32_t raw_macro = noise_wpoint_n(p0, 10, 8, rug_seed ^ 0xA531u, 2, NOISE_FADE5) >> 16;
+
+	int16_t rx = (int16_t)wx;
+	int16_t ry = (int16_t)wy;
+	chaff_rot2d_q15(&rx, &ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	int16_t p1[2] = { ry, rx };
+	uint32_t raw_meso = noise_wpoint_n(p1, 8, 8, rug_seed ^ 0x5CA9u, 2, NOISE_FADE5) >> 16;
+
+	int32_t raw = (int32_t)((raw_macro * 5u + raw_meso * 3u) >> 3);
+	if (raw <= 120)
+		return 0;
+	if (raw >= 168)
+		return 256;
+	int32_t t = ((raw - 120) * 256) / 48;
+	int32_t smooth = (t * t * (3 * 256 - 2 * t)) >> 16;
+	if (smooth < 0) smooth = 0;
+	if (smooth > 256) smooth = 256;
+	return (uint16_t)smooth;
+}
+
 static inline int32_t
 nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
                          int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4)
@@ -542,12 +572,27 @@ nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 		else               min_shift = (uint8_t)(ND_FIELD_SHIFT_FINE_MIN + (lod - 3));
 		if (min_shift > ND_FIELD_SHIFT_FINE_MAX) min_shift = ND_FIELD_SHIFT_FINE_MAX;
 
-		fine_q12_4 = chaff_fbm_rotated_2d_q12_4(
+		int32_t base_fine_q12_4 = chaff_fbm_rotated_2d_q12_4(
 			(int16_t)wx, (int16_t)wy,
 			min_shift, ND_FIELD_SHIFT_FINE_MAX,
 			7, ND_FIELD_FINE_MIN_SHIFT, 1,
 			seed, 0xBEEFu,
 			CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+
+		uint16_t rug_q8 = nd_field_ruggedness_q8(world, wx, wy);
+		if (rug_q8 > 0) {
+			uint8_t meso_min = (min_shift > 5) ? min_shift : 5;
+			int32_t meso_ridge_q12_4 = chaff_fbm_rotated_2d_q12_4(
+				(int16_t)wx, (int16_t)wy,
+				meso_min, ND_FIELD_SHIFT_FINE_MAX,
+				6, 5, 10,
+				seed ^ 0x7F4A7C15u, 0xCAFEu,
+				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+			int32_t scaled_base = base_fine_q12_4 + (int32_t)(((int64_t)base_fine_q12_4 * (int32_t)rug_q8) >> 7);
+			fine_q12_4 = scaled_base + (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
+		} else {
+			fine_q12_4 = base_fine_q12_4;
+		}
 	}
 
 	if (out_coarse_q12_4) *out_coarse_q12_4 = coarse_q12_4;
@@ -651,9 +696,21 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int16_t room_y = (int16_t)(ry_q16 >> 16);
 
 	int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
+	s.water_level = nd_field_water_level(world);
 	int32_t fine_q12_4 = 0;
 	if (lod > 0) {
 		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
+
+		/* Smooth coastal/bathymetric transition: keep underwater shelves and the
+		 * immediate beach strip (0..4 world units above water_level) gently sloped
+		 * while ramping to 100% regional rugged relief inland. */
+		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
+		if (rel_water_q12_4 <= 0) {
+			fine_q12_4 >>= 2;
+		} else if (rel_water_q12_4 < (4 << 4)) {
+			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) >> 6);
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
+		}
 
 		/* Fine elevation budget bound: |fine_elev| <= ND_FIELD_FINE_AMP_BUDGET */
 		int32_t max_fine_q12_4 = (int32_t)ND_FIELD_FINE_AMP_BUDGET << 4;
@@ -663,7 +720,6 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 
 	s.coarse_elev = (int16_t)(coarse_q12_4 >> 4);
 	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
-	s.water_level = nd_field_water_level(world);
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
 	if (s.coarse_elev > s.water_level && (total_q12_4 >> 4) <= s.water_level) {

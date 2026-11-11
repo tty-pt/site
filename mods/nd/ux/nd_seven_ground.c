@@ -826,7 +826,12 @@ static float s_cam_zoom = 1.0f;
 
 void nd_seven_set_3d_mode(int enable)
 {
-	s_is_3d_mode = enable ? 1 : 0;
+	int next = enable ? 1 : 0;
+	if (s_is_3d_mode != next) {
+		s_is_3d_mode = next;
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		if (cs) ar_clear(cs);
+	}
 }
 
 int nd_seven_get_3d_mode(void)
@@ -1236,11 +1241,11 @@ __attribute__((unused)) static void chunk_populate_buffers(nd_room_chunk_t *chun
 				int grad_y = (dy_step > 0) ? ((int)(h_s - h_n) * 2 / dy_step) : 0;
 				int slope_q12_4 = grad_x + grad_y;
 
-				/* Very prominent directional diffuse hillshading: Northwest sun illuminates positive slopes, shadows negative slopes */
-				int shade_delta = slope_q12_4 * 5;
+				/* Directional diffuse hillshading in 2D software pixel-art mode, scaled for high-relief 3D elevation */
+				int shade_delta = slope_q12_4;
+				if (shade_delta < -28) shade_delta = -28;
+				if (shade_delta > 28) shade_delta = 28;
 				int shade_val = ND_SHADE_NEUTRAL + shade_delta;
-				if (shade_val < 140) shade_val = 140;
-				if (shade_val > 380) shade_val = 380;
 
 				/* Continuous substrate color from bio, bio2, blend */
 				uint32_t col1 = ndw_biome_base_rgb(bio);
@@ -1252,10 +1257,10 @@ __attribute__((unused)) static void chunk_populate_buffers(nd_room_chunk_t *chun
 					/* Seabed substrate is golden sand sediment under water */
 					substrate = RGB(226, 200, 140);
 				} else {
-					/* Steep slope bedrock exposure: ridges shed soil and reveal weathered rock */
+					/* Steep slope bedrock exposure on extreme alpine cliffs */
 					int abs_slope = abs(grad_x) + abs(grad_y);
-					if (abs_slope > 18) {
-						int rock_mix = (abs_slope - 18) * 12;
+					if (abs_slope > 96) {
+						int rock_mix = (abs_slope - 96) * 4;
 						if (rock_mix > 200) rock_mix = 200;
 						uint32_t rock_col = RGB(132, 128, 118);
 						substrate = alpha_blend_rgb(substrate, rock_col, rock_mix);
