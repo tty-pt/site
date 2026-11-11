@@ -154,6 +154,7 @@ nd-stage,
     top: 12px;
     right: 12px;
     bottom: 76px;
+    padding-top: 16px !important;
     max-height: calc(100% - 88px) !important;
     overflow: visible !important;
 }
@@ -161,7 +162,7 @@ nd-stage,
 #map-overlay [data-bud-key="contents"] {
     flex: 0 1 auto !important;
     max-height: 22vh;
-    overflow-y: auto !important;
+    overflow: visible !important;
 }
 
 #map-overlay .hud-win[style*="left:"] {
@@ -176,18 +177,19 @@ nd-stage,
     display: flex !important;
     flex-direction: column !important;
     box-sizing: border-box !important;
+    overflow: visible !important;
     transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .hud-win:hover,
 .hud-win.hud-win-dragging {
-    border-color: rgba(194, 179, 255, 0.72) !important;
-    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.7) !important;
+    border-color: rgba(194, 179, 255, 0.65) !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45) !important;
 }
 
 .hud-win-toolbar {
     position: absolute !important;
-    top: 0 !important;
+    top: -24px !important;
     left: 0 !important;
     right: 0 !important;
     height: 24px !important;
@@ -199,51 +201,29 @@ nd-stage,
     opacity: 0;
     overflow: hidden !important;
     pointer-events: none;
-    background: rgba(18, 20, 28, 0.92) !important;
-    border-bottom: 1px solid rgba(149, 137, 197, 0.28) !important;
+    background: rgba(14, 16, 24, 0.72) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.32) !important;
+    border-bottom: none !important;
+    border-radius: 6px 6px 0 0 !important;
     font-size: 11px !important;
     user-select: none !important;
     cursor: move !important;
     transition: opacity 0.14s ease !important;
     box-sizing: border-box !important;
-    z-index: 38 !important;
+    z-index: 45 !important;
 }
 
 .hud-win:hover > .hud-win-toolbar,
-.hud-win.hud-win-dragging > .hud-win-toolbar,
-.hud-win.hud-win-minimized > .hud-win-toolbar,
-.hud-win.chat-minimized > .hud-win-toolbar {
+.hud-win.hud-win-dragging > .hud-win-toolbar {
     opacity: 1 !important;
     pointer-events: auto !important;
 }
 
 .hud-win.hud-win-minimized,
 .hud-win.chat-minimized {
-    height: auto !important;
-    min-height: 0 !important;
-    width: auto !important;
-    min-width: 170px !important;
-    max-width: 280px !important;
-    padding: 0 !important;
-    border-radius: 8px !important;
-    resize: none !important;
-}
-
-.hud-win.hud-win-minimized > .hud-win-body,
-.hud-win.hud-win-minimized > #term,
-.hud-win.hud-win-minimized > .chat-resize-handle,
-.hud-win.chat-minimized > .hud-win-body,
-.hud-win.chat-minimized > #term,
-.hud-win.chat-minimized > .chat-resize-handle {
     display: none !important;
-}
-
-.hud-win.hud-win-minimized > .hud-win-toolbar,
-.hud-win.chat-minimized > .hud-win-toolbar {
-    position: relative !important;
-    height: 26px !important;
-    padding: 2px 8px !important;
-    border-bottom: none !important;
 }
 
 /* Floating RPG Chat Terminal */
@@ -255,13 +235,13 @@ nd-stage,
     display: flex !important;
     flex-direction: column !important;
     pointer-events: auto !important;
-    background: rgba(10, 12, 18, 0.45) !important;
-    backdrop-filter: blur(4px) !important;
-    -webkit-backdrop-filter: blur(4px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.38) !important;
+    background: rgba(10, 12, 18, 0.22) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.24) !important;
     border-radius: 8px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
-    overflow: hidden !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    overflow: visible !important;
     resize: both;
     width: 50vw;
     min-width: 260px !important;
@@ -412,6 +392,12 @@ nd-stage,
     height: 100% !important;
     position: relative !important;
     background: transparent !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+
+#rpg-chat .xterm-viewport {
+    background-color: transparent !important;
 }
 
 #rpg-chat .xterm-rows {
@@ -421,7 +407,7 @@ nd-stage,
 /* Top-Center High-Contrast Room Header Window (Seven Mode) */
 #room-header.seven-room-header {
     position: absolute !important;
-    top: 14px;
+    top: 26px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 25 !important;
@@ -432,14 +418,14 @@ nd-stage,
     letter-spacing: 0.03em !important;
     color: #f8fafc !important;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.85), 0 1px 2px #000000 !important;
-    background: rgba(10, 12, 18, 0.35) !important;
-    backdrop-filter: blur(4px) !important;
-    -webkit-backdrop-filter: blur(4px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.28) !important;
+    background: rgba(10, 12, 18, 0.16) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.20) !important;
     border-radius: 14px !important;
     padding: 0 !important;
     white-space: nowrap !important;
-    overflow: hidden !important;
+    overflow: visible !important;
 }
 
 .seven-room-title-body {
@@ -447,15 +433,37 @@ nd-stage,
     text-align: center !important;
 }
 
-/* Floating RPG HUD Panels (Minimap & Room Contents) */
+/* Floating RPG HUD Panels (Look-At, Room Contents, Gauges) */
 .rpg-hud-panel {
-    background: rgba(10, 10, 15, 0.65) !important;
-    backdrop-filter: blur(6px) !important;
-    -webkit-backdrop-filter: blur(6px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    background: rgba(10, 12, 18, 0.20) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
     border-radius: 6px !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
     box-sizing: border-box !important;
+}
+
+/* Minimap Window: Transparent background */
+#hud-win-map,
+#hud-win-map.rpg-hud-panel {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+}
+
+#hud-win-map:hover,
+#hud-win-map.hud-win-dragging {
+    border-color: rgba(194, 179, 255, 0.45) !important;
+    box-shadow: none !important;
+}
+
+#hud-win-map #room-map {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 #hud-win-map #room-map,
@@ -467,7 +475,35 @@ nd-stage,
     object-fit: contain !important;
 }
 
-/* Floating Bottom-Right Actions Dock Window */
+#hud-win-map #room-map-canvas {
+    opacity: 0.78 !important;
+    border-radius: 6px !important;
+}
+
+/* Floating Look-At Target Window */
+#hud-win-target {
+    width: 220px;
+    height: 220px;
+    min-width: 140px !important;
+    min-height: 140px !important;
+}
+
+#hud-win-target > .hud-win-body,
+#hud-win-target #target-card,
+#hud-win-target #target-card .target-art {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+    border-radius: 6px !important;
+}
+
+#hud-win-target #target-card .target-close {
+    display: none !important;
+}
+
+/* Floating Bottom-Right Actions Dock Window & Bottom-Left Closed-Windows Launcher Dock */
 #bottom-right-actions {
     position: absolute !important;
     bottom: 16px;
@@ -477,14 +513,42 @@ nd-stage,
     flex-direction: column !important;
     align-items: stretch !important;
     padding: 0 !important;
-    background: rgba(10, 12, 18, 0.45) !important;
-    border: 1px solid rgba(149, 137, 197, 0.32) !important;
+    background: rgba(10, 12, 18, 0.18) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
     border-radius: 16px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
-    backdrop-filter: blur(6px) !important;
-    -webkit-backdrop-filter: blur(6px) !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
     pointer-events: auto !important;
-    overflow: hidden !important;
+    overflow: visible !important;
+}
+
+#bottom-left-windows {
+    position: absolute !important;
+    bottom: 16px;
+    left: 16px;
+    z-index: 26 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 6px 10px !important;
+    background: rgba(10, 12, 18, 0.18) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    pointer-events: auto !important;
+}
+
+#bottom-left-windows.hidden {
+    display: none !important;
+}
+
+#holder:has(#bottom-left-windows:not(.hidden)) .rpg-chat:not([style*="top:"]) {
+    bottom: 72px;
 }
 
 #bottom-right-actions > .hud-win-body {
@@ -502,10 +566,12 @@ nd-stage,
 
 #bottom-right-actions .btn,
 #bottom-right-actions button.nd-pad,
-#bottom-right-actions nd-button {
-    background: linear-gradient(135deg, rgba(35, 38, 55, 0.95), rgba(20, 22, 32, 0.95)) !important;
+#bottom-right-actions nd-button,
+#bottom-left-windows .btn,
+#bottom-left-windows button.nd-pad {
+    background: linear-gradient(135deg, rgba(35, 38, 55, 0.85), rgba(20, 22, 32, 0.85)) !important;
     color: #f3f4f6 !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    border: 1px solid rgba(149, 137, 197, 0.36) !important;
     width: 38px !important;
     height: 38px !important;
     min-width: 38px !important;
@@ -516,15 +582,17 @@ nd-stage,
     justify-content: center !important;
     font-size: 18px !important;
     cursor: pointer !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
     transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
     user-select: none !important;
 }
 
 #bottom-right-actions .btn:hover,
 #bottom-right-actions button.nd-pad:hover,
-#bottom-right-actions nd-button:hover {
-    background: linear-gradient(135deg, rgba(58, 62, 90, 1), rgba(30, 34, 52, 1)) !important;
+#bottom-right-actions nd-button:hover,
+#bottom-left-windows .btn:hover,
+#bottom-left-windows button.nd-pad:hover {
+    background: linear-gradient(135deg, rgba(58, 62, 90, 0.98), rgba(30, 34, 52, 0.98)) !important;
     border-color: rgba(194, 179, 255, 0.85) !important;
     transform: translateY(-2px) scale(1.05) !important;
     box-shadow: 0 4px 14px rgba(149, 137, 197, 0.45) !important;
@@ -533,7 +601,9 @@ nd-stage,
 
 #bottom-right-actions .btn:active,
 #bottom-right-actions button.nd-pad:active,
-#bottom-right-actions nd-button:active {
+#bottom-right-actions nd-button:active,
+#bottom-left-windows .btn:active,
+#bottom-left-windows button.nd-pad:active {
     transform: translateY(0) scale(0.96) !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
@@ -547,7 +617,7 @@ nd-stage,
     max-height: 136px;
     padding: 4px 6px !important;
     flex: 0 1 auto !important;
-    overflow: hidden !important;
+    overflow: visible !important;
 }
 
 #hud-win-contents[style*="height:"] {
@@ -580,26 +650,11 @@ nd-stage,
     border-radius: 4px !important;
     font-size: 12px !important;
     line-height: 1.25 !important;
-    min-height: 24px !important;
+    min-height: 22px !important;
 }
 
 #hud-win-contents nd-avatar {
-    width: 22px !important;
-    height: 22px !important;
-    min-width: 22px !important;
-    min-height: 22px !important;
-    font-size: 13px !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    overflow: hidden !important;
-    border-radius: 3px !important;
-}
-
-#hud-win-contents nd-avatar img {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover !important;
+    display: none !important;
 }
 
 #hud-win-contents .nd-empty {

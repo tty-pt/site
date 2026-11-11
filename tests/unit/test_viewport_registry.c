@@ -89,23 +89,28 @@ int main(void)
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "chat-compact") != NULL);
 	assert(strstr(html, "hud-win-toolbar") != NULL);
-	assert(strstr(html, "—") != NULL);
+	assert(strstr(html, "✕") != NULL);
 	assert(strstr(html, "⤢") != NULL);
 	assert(strstr(html, "↺") != NULL);
 
-	/* All 5 HUD elements (chat, title, map, contents, actions) must be movable/resizable HUD windows with persist keys */
+	/* All 6 HUD elements (chat, title, map, target, contents, actions) must be movable/resizable HUD windows with persist keys */
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-title\"") != NULL);
 	assert(strstr(html, "id=\"title-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"title-resize-se\"") != NULL);
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-map\"") != NULL);
 	assert(strstr(html, "id=\"map-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"map-resize-se\"") != NULL);
+	assert(strstr(html, "id=\"hud-win-target\"") != NULL);
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-target\"") != NULL);
+	assert(strstr(html, "id=\"target-toolbar\"") != NULL);
+	assert(strstr(html, "id=\"target-resize-se\"") != NULL);
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\"") != NULL);
 	assert(strstr(html, "id=\"contents-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"contents-resize-se\"") != NULL);
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\"") != NULL);
 	assert(strstr(html, "id=\"actions-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"actions-resize-se\"") != NULL);
+	assert(strstr(html, "id=\"bottom-left-windows\"") != NULL);
 
 	/* Test Windows-style drag resize dimensions on #rpg-chat */
 	nd_ui_set_chat_size(640, 300);
@@ -143,7 +148,7 @@ int main(void)
 	assert(strstr(html, "⤡") != NULL);
 	nd_ui_set_chat_expanded(0);
 
-	/* Test chat minimize mutation into slim bottom-left bar while preserving #term */
+	/* Test closing chat window: renders bottom-left restore button while preserving #term */
 	nd_ui_set_chat_minimized(1);
 	assert(nd_ui_get_chat_minimized() == 1);
 	bud_free_string(html);
@@ -151,7 +156,7 @@ int main(void)
 	html = bud_render_html(root);
 	assert(html != NULL);
 	assert(strstr(html, "chat-minimized") != NULL);
-	assert(strstr(html, "□") != NULL);
+	assert(strstr(html, "id=\"restore-win-chat\"") != NULL);
 	assert(strstr(html, "id=\"term\"") != NULL);
 	nd_ui_set_chat_minimized(0);
 

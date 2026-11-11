@@ -52,7 +52,8 @@ typedef enum {
 	ND_WIN_MAP = 2,
 	ND_WIN_CONTENTS = 3,
 	ND_WIN_ACTIONS = 4,
-	ND_WIN_COUNT = 5
+	ND_WIN_TARGET = 5,
+	ND_WIN_COUNT = 6
 } nd_hud_win_id_t;
 
 void nd_ui_set_win_rect(int win_id, int x, int y, int w, int h);

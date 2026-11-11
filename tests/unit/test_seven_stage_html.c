@@ -60,11 +60,14 @@ int main(void)
 		assert(strstr(html, "max-h-[22vh]"));
 		assert(strstr(html, "id=\"chat-resize-ne\""));
 		assert(strstr(html, "id=\"hud-win-map\""));
+		assert(strstr(html, "id=\"hud-win-target\""));
 		assert(strstr(html, "id=\"hud-win-contents\""));
+		assert(strstr(html, "id=\"bottom-left-windows\""));
 		assert(strstr(html, "hud-win-toolbar"));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-chat\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-title\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-map\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-target\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\""));
 		assert(strstr(html, "game-2d-mode relative"));
