@@ -2402,21 +2402,58 @@ int main(void)
 		assert(nd_seven_gl_grid_quads_for_level(1) == 32);
 		assert(nd_seven_gl_grid_quads_for_level(2) == 32);
 
-		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values */
-		const ar_node_t *n00 = ar_system_ensure(cs, 1, 0, 0, 0);
-		const ar_node_t *n10 = ar_system_ensure(cs, 1, 0, NDW_TILE_W, 0);
-		const ar_node_t *n01 = ar_system_ensure(cs, 1, 0, 0, NDW_TILE_H);
-		assert(n00 != NULL && n10 != NULL && n01 != NULL);
-		assert(n00->grid_dim == 48 && n00->vert_dim == 49 && n00->vert_count == 2401);
+		/* Close-up zoom polygon scaling: normal zoom stays at 48x48 (4,608 tris),
+		 * close zoom scales to 96x96 (18,432 tris), ultra-close zoom scales to 144x144 (41,472 tris) */
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f) == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 180.0f) == 96);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 80.0f)  == 144);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)  == 32);
 
-		for (uint32_t r = 0; r < n00->vert_dim; r++) {
-			assert(n00->values[r * n00->vert_dim + 48] == n10->values[r * n10->vert_dim + 0]);
-			assert(n00->rgba[r * n00->vert_dim + 48] == n10->rgba[r * n10->vert_dim + 0]);
+		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values,
+		 * including across large world coordinates where 16-bit signed rotation would wrap */
+		const int32_t test_origins[3][2] = {
+			{ 0, 0 },
+			{ 32640, -16384 },
+			{ -32800, 24576 }
+		};
+		for (int t = 0; t < 3; t++) {
+			int32_t bx = test_origins[t][0];
+			int32_t by = test_origins[t][1];
+			const ar_node_t *m00 = ar_system_ensure(cs, 1, 0, bx, by);
+			const ar_node_t *m10 = ar_system_ensure(cs, 1, 0, bx + NDW_TILE_W, by);
+			const ar_node_t *m01 = ar_system_ensure(cs, 1, 0, bx, by + NDW_TILE_H);
+			assert(m00 != NULL && m10 != NULL && m01 != NULL);
+			assert(m00->grid_dim == 48 && m00->vert_dim == 49 && m00->vert_count == 2401);
+
+			for (uint32_t r = 0; r < m00->vert_dim; r++) {
+				assert(m00->values[r * m00->vert_dim + 48] == m10->values[r * m10->vert_dim + 0]);
+				assert(m00->rgba[r * m00->vert_dim + 48] == m10->rgba[r * m10->vert_dim + 0]);
+			}
+			for (uint32_t c = 0; c < m00->vert_dim; c++) {
+				assert(m00->values[48 * m00->vert_dim + c] == m01->values[0 * m01->vert_dim + c]);
+				assert(m00->rgba[48 * m00->vert_dim + c] == m01->rgba[0 * m01->vert_dim + c]);
+			}
+
+			/* Verify watertight perimeter height welding across 48x48, 96x96, and 144x144 mesh subdivisions */
+			for (int k = 0; k <= 144; k++) {
+				float v = (float)k / 144.0f;
+				float h_left = nd_seven_gl_sample_height_smooth(m00->values, m00->vert_dim, m00->vert_dim,
+				                                                1.0f, v, (float)m00->w, (float)m00->h, NULL, NULL);
+				float h_right = nd_seven_gl_sample_height_smooth(m10->values, m10->vert_dim, m10->vert_dim,
+				                                                 0.0f, v, (float)m10->w, (float)m10->h, NULL, NULL);
+				assert(fabsf(h_left - h_right) < 1e-5f);
+
+				float u = (float)k / 144.0f;
+				float h_top = nd_seven_gl_sample_height_smooth(m00->values, m00->vert_dim, m00->vert_dim,
+				                                               u, 1.0f, (float)m00->w, (float)m00->h, NULL, NULL);
+				float h_bot = nd_seven_gl_sample_height_smooth(m01->values, m01->vert_dim, m01->vert_dim,
+				                                               u, 0.0f, (float)m01->w, (float)m01->h, NULL, NULL);
+				assert(fabsf(h_top - h_bot) < 1e-5f);
+			}
 		}
-		for (uint32_t c = 0; c < n00->vert_dim; c++) {
-			assert(n00->values[48 * n00->vert_dim + c] == n01->values[0 * n01->vert_dim + c]);
-			assert(n00->rgba[48 * n00->vert_dim + c] == n01->rgba[0 * n01->vert_dim + c]);
-		}
+
+		const ar_node_t *n00 = ar_system_ensure(cs, 1, 0, 0, 0);
+		assert(n00 != NULL);
 
 		/* Verify organic substrate variation on dry land (non-flat RGBA across chunk vertices) */
 		uint32_t first_rgba = n00->rgba[0];
@@ -2426,7 +2463,7 @@ int main(void)
 				distinct_rgba++;
 		}
 		assert(distinct_rgba > 100);
-		printf("PASS: 48x48 Level 0 chunk grid (49x49 vertices, 4,608 triangles) and 32x32 Level 1+ LOD grid verified with seamless boundaries\n");
+		printf("PASS: 48x48 normal-zoom, 96x96 close-zoom, and 144x144 ultra-close-zoom meshes verified with watertight inter-chunk height continuity\n");
 	}
 
 	/* R5 & R6: Zoom-Progressive 4-Octave Rotated Gradient Terrain Detail, Per-Fragment Quintic Reconstruction & Anti-Zigzag Filtering */

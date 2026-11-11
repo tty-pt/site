@@ -510,10 +510,10 @@ nd_field_ruggedness_q8(uint16_t world, int32_t wx, int32_t wy)
 	int16_t p0[2] = { (int16_t)wy, (int16_t)wx };
 	uint32_t raw_macro = noise_wpoint_n(p0, 10, 8, rug_seed ^ 0xA531u, 2, NOISE_FADE5) >> 16;
 
-	int16_t rx = (int16_t)wx;
-	int16_t ry = (int16_t)wy;
-	chaff_rot2d_q15(&rx, &ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
-	int16_t p1[2] = { ry, rx };
+	int32_t rx = wx;
+	int32_t ry = wy;
+	chaff_rot2d_i32_q15(&rx, &ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	int16_t p1[2] = { (int16_t)ry, (int16_t)rx };
 	uint32_t raw_meso = noise_wpoint_n(p1, 8, 8, rug_seed ^ 0x5CA9u, 2, NOISE_FADE5) >> 16;
 
 	int32_t raw = (int32_t)((raw_macro * 5u + raw_meso * 3u) >> 3);
@@ -573,7 +573,7 @@ nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 		if (min_shift > ND_FIELD_SHIFT_FINE_MAX) min_shift = ND_FIELD_SHIFT_FINE_MAX;
 
 		int32_t base_fine_q12_4 = chaff_fbm_rotated_2d_q12_4(
-			(int16_t)wx, (int16_t)wy,
+			wx, wy,
 			min_shift, ND_FIELD_SHIFT_FINE_MAX,
 			7, ND_FIELD_FINE_MIN_SHIFT, 1,
 			seed, 0xBEEFu,
@@ -583,15 +583,16 @@ nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 		if (rug_q8 > 0) {
 			uint8_t meso_min = (min_shift > 5) ? min_shift : 5;
 			int32_t meso_ridge_q12_4 = chaff_fbm_rotated_2d_q12_4(
-				(int16_t)wx, (int16_t)wy,
+				wx, wy,
 				meso_min, ND_FIELD_SHIFT_FINE_MAX,
 				6, 5, 10,
 				seed ^ 0x7F4A7C15u, 0xCAFEu,
 				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
-			int32_t scaled_base = base_fine_q12_4 + (int32_t)(((int64_t)base_fine_q12_4 * (int32_t)rug_q8) >> 7);
+			int32_t base_scale_q8 = 128 + ((int32_t)rug_q8 * 3 >> 1);
+			int32_t scaled_base = (int32_t)(((int64_t)base_fine_q12_4 * base_scale_q8) >> 8);
 			fine_q12_4 = scaled_base + (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
 		} else {
-			fine_q12_4 = base_fine_q12_4;
+			fine_q12_4 = base_fine_q12_4 >> 1;
 		}
 	}
 
@@ -722,8 +723,12 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	if (s.coarse_elev > s.water_level && (total_q12_4 >> 4) <= s.water_level) {
-		total_q12_4 = (int32_t)(s.water_level + 1) << 4;
+	int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
+	if (rel_water_q12_4 > (1 << 4)) {
+		int32_t land_floor_q12_4 = ((int32_t)s.water_level << 4) +
+		                           ((rel_water_q12_4 >= (3 << 4)) ? 16 : ((rel_water_q12_4 - 16) >> 1));
+		if (total_q12_4 < land_floor_q12_4)
+			total_q12_4 = land_floor_q12_4;
 	}
 	if (total_q12_4 > 32000) total_q12_4 = 32000;
 	if (total_q12_4 < -32000) total_q12_4 = -32000;

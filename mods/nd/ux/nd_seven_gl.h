@@ -120,9 +120,12 @@ const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
 
-/* Query active GPU mesh quad resolution for a given LOD level:
- * Level 0 returns 48 (48x48 quads = 4,608 triangles, 2.25x density);
+/* Query active GPU mesh quad resolution for a given LOD level and camera distance:
+ * Level 0 at normal zoom (cam_dist > 230) returns 48 (48x48 quads = 4,608 triangles);
+ * Level 0 at close zoom (125 < cam_dist <= 230) returns 96 (96x96 quads = 18,432 triangles);
+ * Level 0 at ultra-close zoom (cam_dist <= 125) returns 144 (144x144 quads = 41,472 triangles);
  * Level 1+ returns 32 (32x32 quads = 2,048 triangles). */
+uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist);
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level);
 
 /* Pure-C reference mirror of the 7-octave zoom-progressive & Nyquist-filtered

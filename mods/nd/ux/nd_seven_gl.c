@@ -24,14 +24,26 @@
 #define GL_TOTAL_VERTS (GL_GRID_VERTS * GL_GRID_VERTS)
 #define GL_TOTAL_INDICES (GL_GRID_QUADS * GL_GRID_QUADS * 6)
 
-/* Level 0 high-detail grid: 48x48 quads = 49x49 vertices = 2,401 vertices (4,608 triangles, 2.25x density) */
+/* Level 0 normal-zoom high-detail grid: 48x48 quads = 49x49 vertices = 2,401 vertices (4,608 triangles, 2.25x density) */
 #define GL_GRID_QUADS_HI 48
 #define GL_GRID_VERTS_HI (GL_GRID_QUADS_HI + 1)
 #define GL_TOTAL_VERTS_HI (GL_GRID_VERTS_HI * GL_GRID_VERTS_HI)
 #define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
-#define MAX_CHUNK_TEXTURES 128
-#define MAX_WATER_QUEUE 128
+/* Level 0 close-zoom 2x subdivision grid: 96x96 quads = 97x97 vertices = 9,409 vertices (18,432 triangles, 4x normal zoom) */
+#define GL_GRID_QUADS_Z2 96
+#define GL_GRID_VERTS_Z2 (GL_GRID_QUADS_Z2 + 1)
+#define GL_TOTAL_VERTS_Z2 (GL_GRID_VERTS_Z2 * GL_GRID_VERTS_Z2)
+#define GL_TOTAL_INDICES_Z2 (GL_GRID_QUADS_Z2 * GL_GRID_QUADS_Z2 * 6)
+
+/* Level 0 ultra-close-zoom 3x subdivision grid: 144x144 quads = 145x145 vertices = 21,025 vertices (41,472 triangles, 9x normal zoom) */
+#define GL_GRID_QUADS_Z3 144
+#define GL_GRID_VERTS_Z3 (GL_GRID_QUADS_Z3 + 1)
+#define GL_TOTAL_VERTS_Z3 (GL_GRID_VERTS_Z3 * GL_GRID_VERTS_Z3)
+#define GL_TOTAL_INDICES_Z3 (GL_GRID_QUADS_Z3 * GL_GRID_QUADS_Z3 * 6)
+
+#define MAX_CHUNK_TEXTURES 192
+#define MAX_WATER_QUEUE 192
 #define MAX_BB_VERTS 12288
 
 /* --- GLSL 300 es Shaders --- */
@@ -69,13 +81,61 @@ static const char *s_vs_terrain =
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
 	"}\n"
+	"uint chaff_rotl32(uint x, int r) {\n"
+	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
+	"}\n"
+	"uint chaff_hash3(ivec3 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu);\n"
+	"    uint h = seed + 0x165667B1u + 6u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0x85EBCA77u;\n"
+	"    h = chaff_rotl32(h, 13) * 0xC2B2AE3Du;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"vec2 chaff_grad_dir(int cx, int cy, uint seed) {\n"
+	"    uint h = chaff_hash3(ivec3(cx, cy, 0), seed);\n"
+	"    float gx = float(int(h & 0xFFFFu) - 32768) * (1.0 / 32768.0);\n"
+	"    float gy = float(int(h >> 16u) - 32768) * (1.0 / 32768.0);\n"
+	"    vec2 g = vec2(gx, gy);\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
+	"vec3 chaff_grad_noise2d(vec2 p, uint seed) {\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    vec2 du = 30.0 * fp * fp * (fp * (fp - 2.0) + 1.0);\n"
+	"    ivec2 c = ivec2(ip);\n"
+	"    vec2 g00 = chaff_grad_dir(c.x,     c.y,     seed);\n"
+	"    vec2 g10 = chaff_grad_dir(c.x + 1, c.y,     seed);\n"
+	"    vec2 g01 = chaff_grad_dir(c.x,     c.y + 1, seed);\n"
+	"    vec2 g11 = chaff_grad_dir(c.x + 1, c.y + 1, seed);\n"
+	"    float v00 = dot(g00, fp);\n"
+	"    float v10 = dot(g10, fp - vec2(1.0, 0.0));\n"
+	"    float v01 = dot(g01, fp - vec2(0.0, 1.0));\n"
+	"    float v11 = dot(g11, fp - vec2(1.0, 1.0));\n"
+	"    float k0 = v10 - v00;\n"
+	"    float k1 = v01 - v00;\n"
+	"    float k2 = v11 - v01 - k0;\n"
+	"    float val = 0.5 + 0.70710678 * (v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y);\n"
+	"    vec2 gInterp = g00 + (g10 - g00) * u.x + (g01 - g00) * u.y + (g11 - g01 - g10 + g00) * (u.x * u.y);\n"
+	"    vec2 grad = 0.70710678 * (gInterp + du * vec2(k0 + k2 * u.y, k1 + k2 * u.x));\n"
+	"    return vec3(clamp(val, 0.0, 1.0), grad.x, grad.y);\n"
+	"}\n"
 	"float sampleHeightSmooth(vec2 uv, out vec2 out_grad) {\n"
 	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
-	"    vec2 pixelCoord = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    vec2 uvc = clamp(uv, 0.0, 1.0);\n"
+	"    vec2 pixelCoord = uvc * maxCoordF;\n"
 	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
 	"    vec2 f = pixelCoord - vec2(iCoord);\n"
 	"    vec2 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
+	"    if (uvc.x <= 0.0001 || uvc.x >= 0.9999) w.y = f.y;\n"
+	"    if (uvc.y <= 0.0001 || uvc.y >= 0.9999) w.x = f.x;\n"
 	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
 	"    float h00 = getH(iCoord, maxCoord);\n"
 	"    float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
@@ -114,9 +174,21 @@ static const char *s_vs_terrain =
 	"    vec2 grad;\n"
 	"    float raw_h = sampleHeightSmooth(a_grid_uv, grad);\n"
 	"    float wz = raw_h * effectiveScale;\n"
-	"    vZ = wz;\n"
 	"    vec2 worldXY = vec2(uChunkOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
 	"    vec2 relXY = vec2(uChunkRelOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkRelOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
+	"    float edgeFade = clamp(min(min(a_grid_uv.x, 1.0 - a_grid_uv.x), min(a_grid_uv.y, 1.0 - a_grid_uv.y)) * 12.0, 0.0, 1.0);\n"
+	"    if (uChunkSpan.x <= 160.5 && edgeFade > 0.001) {\n"
+	"        float camHoriz = length(relXY);\n"
+	"        float closeW = clamp((220.0 - camHoriz) / 140.0, 0.0, 1.0) * edgeFade;\n"
+	"        if (closeW > 0.001 && (uSeaLevel <= -900.0 || wz > uSeaLevel + 0.35)) {\n"
+	"            vec3 g1 = chaff_grad_noise2d(worldXY * 0.22, 0xA341316Cu);\n"
+	"            vec3 g2 = chaff_grad_noise2d(worldXY * 0.68, 0xC8013EA4u);\n"
+	"            float disp = ((g1.x - 0.5) * 1.15 + (g2.x - 0.5) * 0.45) * closeW;\n"
+	"            wz += disp;\n"
+	"            grad += (g1.yz * (0.22 * 1.15) + g2.yz * (0.68 * 0.45)) * (closeW / effectiveScale);\n"
+	"        }\n"
+	"    }\n"
+	"    vZ = wz;\n"
 	"    const float TWO_PI = 6.28318530718;\n"
 	"    float R = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
 	"    float r0 = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
@@ -187,10 +259,13 @@ static const char *s_fs_terrain =
 	"float sampleHeightSmooth(vec2 uv, out vec2 out_grad) {\n"
 	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
-	"    vec2 pixelCoord = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    vec2 uvc = clamp(uv, 0.0, 1.0);\n"
+	"    vec2 pixelCoord = uvc * maxCoordF;\n"
 	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
 	"    vec2 f = pixelCoord - vec2(iCoord);\n"
 	"    vec2 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
+	"    if (uvc.x <= 0.0001 || uvc.x >= 0.9999) w.y = f.y;\n"
+	"    if (uvc.y <= 0.0001 || uvc.y >= 0.9999) w.x = f.x;\n"
 	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
 	"    float h00 = getH(iCoord, maxCoord);\n"
 	"    float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
@@ -1203,8 +1278,11 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 	float max_xf = (float)(tex_w - 1);
 	float max_yf = (float)(tex_h - 1);
 
-	float px = u * max_xf;
-	float py = v * max_yf;
+	float uc = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
+	float vc = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+
+	float px = uc * max_xf;
+	float py = vc * max_yf;
 
 	int ix = (int)floorf(px);
 	int iy = (int)floorf(py);
@@ -1212,8 +1290,10 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 	float fx = px - (float)ix;
 	float fy = py - (float)iy;
 
-	float wx = fx * fx * (3.0f - 2.0f * fx);
-	float wy = fy * fy * (3.0f - 2.0f * fy);
+	float wx = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+	float wy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+	if (uc <= 0.0001f || uc >= 0.9999f) wy = fy;
+	if (vc <= 0.0001f || vc >= 0.9999f) wx = fx;
 
 	int w = (int)tex_w;
 	int h = (int)tex_h;
@@ -1354,6 +1434,10 @@ static struct {
 	GLuint grid_ibo;
 	GLuint grid_vbo_hi;
 	GLuint grid_ibo_hi;
+	GLuint grid_vbo_z2;
+	GLuint grid_ibo_z2;
+	GLuint grid_vbo_z3;
+	GLuint grid_ibo_z3;
 
 	GLuint bb_vbo;
 	GLuint atlas_tex;
@@ -1422,95 +1506,62 @@ static GLuint create_program(const char *vs_src, const char *fs_src)
 	return prog;
 }
 
+static void create_static_grid(int quads, float *uv_buf, uint16_t *idx_buf,
+                               GLuint *out_vbo, GLuint *out_ibo)
+{
+	int verts = quads + 1;
+	for (int y = 0; y < verts; y++) {
+		for (int x = 0; x < verts; x++) {
+			int idx = (y * verts + x) * 2;
+			uv_buf[idx]     = (float)x / (float)quads;
+			uv_buf[idx + 1] = (float)y / (float)quads;
+		}
+	}
+
+	int i_idx = 0;
+	for (int y = 0; y < quads; y++) {
+		for (int x = 0; x < quads; x++) {
+			uint16_t i0 = (uint16_t)(y * verts + x);
+			uint16_t i1 = (uint16_t)(i0 + 1);
+			uint16_t i2 = (uint16_t)((y + 1) * verts + x);
+			uint16_t i3 = (uint16_t)(i2 + 1);
+
+			if ((x + y) & 1) {
+				idx_buf[i_idx++] = i0;
+				idx_buf[i_idx++] = i1;
+				idx_buf[i_idx++] = i3;
+				idx_buf[i_idx++] = i0;
+				idx_buf[i_idx++] = i3;
+				idx_buf[i_idx++] = i2;
+			} else {
+				idx_buf[i_idx++] = i0;
+				idx_buf[i_idx++] = i1;
+				idx_buf[i_idx++] = i2;
+				idx_buf[i_idx++] = i1;
+				idx_buf[i_idx++] = i3;
+				idx_buf[i_idx++] = i2;
+			}
+		}
+	}
+
+	*out_vbo = glCreateBuffer();
+	glBindBuffer(GL_ARRAY_BUFFER, *out_vbo);
+	glBufferData(GL_ARRAY_BUFFER, uv_buf, (GLsizei)((size_t)verts * (size_t)verts * 2 * sizeof(float)), GL_STATIC_DRAW);
+
+	*out_ibo = glCreateBuffer();
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *out_ibo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_buf, (GLsizei)((size_t)quads * (size_t)quads * 6 * sizeof(uint16_t)), GL_STATIC_DRAW);
+}
+
 static void init_grid_buffers(void)
 {
-	float grid_uv[GL_TOTAL_VERTS * 2];
-	for (int y = 0; y < GL_GRID_VERTS; y++) {
-		for (int x = 0; x < GL_GRID_VERTS; x++) {
-			int idx = (y * GL_GRID_VERTS + x) * 2;
-			grid_uv[idx]     = (float)x / (float)GL_GRID_QUADS;
-			grid_uv[idx + 1] = (float)y / (float)GL_GRID_QUADS;
-		}
-	}
+	static float grid_uv_scratch[GL_TOTAL_VERTS_Z3 * 2];
+	static uint16_t indices_scratch[GL_TOTAL_INDICES_Z3];
 
-	uint16_t indices[GL_TOTAL_INDICES];
-	int i_idx = 0;
-	for (int y = 0; y < GL_GRID_QUADS; y++) {
-		for (int x = 0; x < GL_GRID_QUADS; x++) {
-			uint16_t i0 = (uint16_t)(y * GL_GRID_VERTS + x);
-			uint16_t i1 = (uint16_t)(i0 + 1);
-			uint16_t i2 = (uint16_t)((y + 1) * GL_GRID_VERTS + x);
-			uint16_t i3 = (uint16_t)(i2 + 1);
-
-			if ((x + y) & 1) {
-				indices[i_idx++] = i0;
-				indices[i_idx++] = i1;
-				indices[i_idx++] = i3;
-				indices[i_idx++] = i0;
-				indices[i_idx++] = i3;
-				indices[i_idx++] = i2;
-			} else {
-				indices[i_idx++] = i0;
-				indices[i_idx++] = i1;
-				indices[i_idx++] = i2;
-				indices[i_idx++] = i1;
-				indices[i_idx++] = i3;
-				indices[i_idx++] = i2;
-			}
-		}
-	}
-
-	s_gl.grid_vbo = glCreateBuffer();
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo);
-	glBufferData(GL_ARRAY_BUFFER, grid_uv, sizeof(grid_uv), GL_STATIC_DRAW);
-
-	s_gl.grid_ibo = glCreateBuffer();
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices, sizeof(indices), GL_STATIC_DRAW);
-
-	float grid_uv_hi[GL_TOTAL_VERTS_HI * 2];
-	for (int y = 0; y < GL_GRID_VERTS_HI; y++) {
-		for (int x = 0; x < GL_GRID_VERTS_HI; x++) {
-			int idx = (y * GL_GRID_VERTS_HI + x) * 2;
-			grid_uv_hi[idx]     = (float)x / (float)GL_GRID_QUADS_HI;
-			grid_uv_hi[idx + 1] = (float)y / (float)GL_GRID_QUADS_HI;
-		}
-	}
-
-	uint16_t indices_hi[GL_TOTAL_INDICES_HI];
-	int i_idx_hi = 0;
-	for (int y = 0; y < GL_GRID_QUADS_HI; y++) {
-		for (int x = 0; x < GL_GRID_QUADS_HI; x++) {
-			uint16_t i0 = (uint16_t)(y * GL_GRID_VERTS_HI + x);
-			uint16_t i1 = (uint16_t)(i0 + 1);
-			uint16_t i2 = (uint16_t)((y + 1) * GL_GRID_VERTS_HI + x);
-			uint16_t i3 = (uint16_t)(i2 + 1);
-
-			if ((x + y) & 1) {
-				indices_hi[i_idx_hi++] = i0;
-				indices_hi[i_idx_hi++] = i1;
-				indices_hi[i_idx_hi++] = i3;
-				indices_hi[i_idx_hi++] = i0;
-				indices_hi[i_idx_hi++] = i3;
-				indices_hi[i_idx_hi++] = i2;
-			} else {
-				indices_hi[i_idx_hi++] = i0;
-				indices_hi[i_idx_hi++] = i1;
-				indices_hi[i_idx_hi++] = i2;
-				indices_hi[i_idx_hi++] = i1;
-				indices_hi[i_idx_hi++] = i3;
-				indices_hi[i_idx_hi++] = i2;
-			}
-		}
-	}
-
-	s_gl.grid_vbo_hi = glCreateBuffer();
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_hi);
-	glBufferData(GL_ARRAY_BUFFER, grid_uv_hi, sizeof(grid_uv_hi), GL_STATIC_DRAW);
-
-	s_gl.grid_ibo_hi = glCreateBuffer();
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_hi);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices_hi, sizeof(indices_hi), GL_STATIC_DRAW);
+	create_static_grid(GL_GRID_QUADS_LO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo, &s_gl.grid_ibo);
+	create_static_grid(GL_GRID_QUADS_HI, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_hi, &s_gl.grid_ibo_hi);
+	create_static_grid(GL_GRID_QUADS_Z2, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_z2, &s_gl.grid_ibo_z2);
+	create_static_grid(GL_GRID_QUADS_Z3, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_z3, &s_gl.grid_ibo_z3);
 
 	s_gl.bb_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
@@ -1661,6 +1712,42 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                GLuint *out_vbo, GLuint *out_ibo, GLsizei *out_indices)
+{
+	if (level != 0) {
+		*out_vbo = s_gl.grid_vbo;
+		*out_ibo = s_gl.grid_ibo;
+		*out_indices = GL_TOTAL_INDICES;
+		return;
+	}
+
+	/* Compute distance from camera focal point to nearest point on chunk box */
+	float min_x = (float)ox, max_x = (float)(ox + span_w);
+	float min_y = (float)oy, max_y = (float)(oy + span_h);
+	float dx = 0.0f, dy = 0.0f;
+	if (s_gl.cur_tx < min_x) dx = min_x - s_gl.cur_tx;
+	else if (s_gl.cur_tx > max_x) dx = s_gl.cur_tx - max_x;
+	if (s_gl.cur_ty < min_y) dy = min_y - s_gl.cur_ty;
+	else if (s_gl.cur_ty > max_y) dy = s_gl.cur_ty - max_y;
+	float eff_dist = sqrtf(s_gl.cur_dist * s_gl.cur_dist + dx * dx + dy * dy);
+
+	uint32_t quads = nd_seven_gl_grid_quads_for_zoom(level, eff_dist);
+	if (quads >= GL_GRID_QUADS_Z3) {
+		*out_vbo = s_gl.grid_vbo_z3;
+		*out_ibo = s_gl.grid_ibo_z3;
+		*out_indices = GL_TOTAL_INDICES_Z3;
+	} else if (quads >= GL_GRID_QUADS_Z2) {
+		*out_vbo = s_gl.grid_vbo_z2;
+		*out_ibo = s_gl.grid_ibo_z2;
+		*out_indices = GL_TOTAL_INDICES_Z2;
+	} else {
+		*out_vbo = s_gl.grid_vbo_hi;
+		*out_ibo = s_gl.grid_ibo_hi;
+		*out_indices = GL_TOTAL_INDICES_HI;
+	}
+}
+
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,
                                      int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                      const uint32_t *color_rgba, const int16_t *height_i16,
@@ -1796,9 +1883,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 
-	GLuint active_vbo = (level == 0) ? s_gl.grid_vbo_hi : s_gl.grid_vbo;
-	GLuint active_ibo = (level == 0) ? s_gl.grid_ibo_hi : s_gl.grid_ibo;
-	GLsizei active_indices = (level == 0) ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES;
+	GLuint active_vbo = 0, active_ibo = 0;
+	GLsizei active_indices = 0;
+	select_grid_buffers(level, ox, oy, span_w, span_h, &active_vbo, &active_ibo, &active_indices);
 
 	glBindBuffer(GL_ARRAY_BUFFER, active_vbo);
 	glEnableVertexAttribArray(0);
@@ -1860,9 +1947,9 @@ void nd_seven_gl_flush_water(void)
 
 	for (uint32_t i = 0; i < s_gl.water_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.water_queue[i];
-		GLuint w_vbo = (chk->level == 0) ? s_gl.grid_vbo_hi : s_gl.grid_vbo;
-		GLuint w_ibo = (chk->level == 0) ? s_gl.grid_ibo_hi : s_gl.grid_ibo;
-		GLsizei w_indices = (chk->level == 0) ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES;
+		GLuint w_vbo = 0, w_ibo = 0;
+		GLsizei w_indices = 0;
+		select_grid_buffers(chk->level, chk->ox, chk->oy, chk->span_w, chk->span_h, &w_vbo, &w_ibo, &w_indices);
 
 		glBindBuffer(GL_ARRAY_BUFFER, w_vbo);
 		glEnableVertexAttribArray(0);
@@ -1966,9 +2053,20 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glDepthMask(GL_TRUE);
 }
 
+uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist)
+{
+	if (level > 0)
+		return GL_GRID_QUADS_LO;
+	if (cam_dist > 0.0f && cam_dist <= 125.0f)
+		return GL_GRID_QUADS_Z3; /* 144x144 quads = 41,472 triangles (9x normal zoom) */
+	if (cam_dist > 0.0f && cam_dist <= 230.0f)
+		return GL_GRID_QUADS_Z2; /* 96x96 quads = 18,432 triangles (4x normal zoom) */
+	return GL_GRID_QUADS_HI;         /* 48x48 quads = 4,608 triangles (normal 1.0x zoom) */
+}
+
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level)
 {
-	return (level == 0) ? GL_GRID_QUADS_HI : GL_GRID_QUADS_LO;
+	return nd_seven_gl_grid_quads_for_zoom(level, ND_SEVEN_CAM_DIST);
 }
 
 static inline uint32_t gl_chaff_rotl32(uint32_t x, int r)

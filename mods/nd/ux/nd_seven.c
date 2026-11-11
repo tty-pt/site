@@ -101,8 +101,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.base_h = NDW_TILE_H;
 		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
-		cfg.max_active = 96;
-		cfg.pool_capacity = 256;
+		cfg.max_active = 160;
+		cfg.pool_capacity = 384;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
@@ -262,7 +262,7 @@ const nd_planet_def_t *nd_seven_get_planet(uint16_t world)
 	return &s_planets[0];
 }
 
-#define SEVEN_MAX_VISIBLE_LEAVES 96
+#define SEVEN_MAX_VISIBLE_LEAVES 160
 static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_visible_leaf_count = 0;
 static ar_frustum_t s_frame_frustum;
@@ -348,9 +348,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_frame_frustum_valid = 1;
 
 	float r_planet = 0.0f;
-	float z_min_cull = lwz - 180.0f;
-	float z_max_cull = lwz + 180.0f;
-	float cull_margin = 64.0f;
+	float z_min_cull = lwz - 96.0f;
+	float z_max_cull = lwz + 96.0f;
+	float cull_margin = 48.0f;
 	if (dist >= 1200.0f) {
 		r_planet = dist * 1.25f;
 		if (r_planet < 16000.0f) r_planet = 16000.0f;
