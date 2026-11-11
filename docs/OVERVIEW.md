@@ -25,13 +25,17 @@ to wasm32-wasi for browser-side polish.
 | `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
 | `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and pure VDOM diff engine (`bud_vdom_diff`) |
 | `external/libstele` | universal single-instantiation WASM reactor substrate, UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module lifecycle (`stl_module_ops_t`), and Web HAL host imports (`<ttypt/stele_wasm.h>`) |
-| `external/libnoise` | continuous multi-scale 1/f procedural noise engine (`libchaff`) with GLSL parity and toroidal periodic domain wrapping |
-| `external/libchunk` | multi-scale spatial hierarchy engine: 16-level LOD quadtree, analytic unprojection, frustum culling, and priority refinement |
+| `external/libchaff` | continuous multi-scale 1/f procedural noise engine with GLSL parity and toroidal periodic domain wrapping |
+| `external/libareole` | multi-scale spatial hierarchy engine: 16-level LOD quadtree, analytic unprojection, 6-plane frustum culling, and priority refinement |
+| `external/liblamina` | 2D software tile blitter and 2.5D/3D WebGL continuous heightfield & Beer-Lambert water optics bridge |
+| `external/libpitch` | pure-C musical chord parser and key transposer |
+| `external/libjoint` / `libislet` / `libsepal` | temporal interval-tree (Time), Morton spatial index (Space), and 2-stage ANN vector store (Meaning) axes for `libcorm` |
 | `external/libhyle-react` | React/Next.js client bindings for Hyle schema and Bud state reconciliation |
 | `external/axil-tty` | WebSocket-to-PTY terminal streaming bridge |
 | `external/axil-nd` | modular NeverDark MUCK engine running in-process behind Axil |
-| `external/axil-auren` | local LLM inference engine running in-browser WebAssembly models (Wllama/Qwen/Llama) |
-| `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `source`, `index`, `auth`, `mpfd`, `song`, `poem`, `gig`, `grp`, `nd`, `auren`, `chat`) |
+| `external/axil-auren` | local LLM inference, embedding, and classification engine |
+| `external/axil-resume-search` | PDF resume ingestion, vector embedding, and job candidate matching service |
+| `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `i18n`, `source`, `index`, `auth`, `mpfd`, `redir`, `site_chrome`, `song`, `poem`, `gig`, `grp`, `software`, `nd`, `auren`, `chat`) |
 
 ## Framework-pair model (the governing design rule)
 
@@ -50,14 +54,14 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
    (or calls a shared C renderer), and responds through the common page
    helpers (`site_ui_respond_page`, …).
 4. If the page opts in (`data-modules="list"` etc.), the browser fetches
-   `/{module}.wasm`, hydrates via the bud bridge, and enhances. No-JS pages
+   `/{module}.wasm`, hydrates via the Stele/Bud bridge, and enhances. No-JS pages
    work identically minus the polish.
 
 ## The unbreakable rules
 
 - **No-JS must always work.** Client enhancement is optional and additive.
 - **hyle stays neutral.** `external/libhyle` has 0 DOM symbols; `external/libbud` has 0 database/storage symbols. Only `external/libhyle-bud` and `mods/common` may bridge the two.
-- **Pure isomorphic WASM boundary.** Interactive frontend UX modules (`mods/*/ux/*.c`) compile to native `.so` for SSR and WASM for the browser, interfacing via `<ttypt/stele_wasm.h>`. Core libraries (`libbud`, `libtransp`, etc.) include only `<ttypt/iso.h>` for pure `ISO_EXPORT` / `ISO_IMPORT` macros without UI substrate dependencies.
+- **Pure isomorphic WASM boundary.** Interactive frontend UX modules (`mods/*/ux/*.c`) compile to native `.so` for SSR and WASM for the browser, interfacing via `<ttypt/stele_wasm.h>`. Core libraries (`libbud`, `libpitch`, etc.) include only `<ttypt/iso.h>` for pure `ISO_EXPORT` / `ISO_IMPORT` macros without UI substrate dependencies.
 - **All row writes go through hyle `put`/`del`** (`source_update_item` /
   `source_delete_item`) — writing corms directly freezes the FTS index. Storage drivers (`store_fs`, `store_mem`) handle file and field persistence automatically.
 - **Search is accent-sensitive by design** (`pão` ≠ `pao`); no iconv
@@ -69,14 +73,16 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
 
 ```
 AGENTS.md          doc index — route from here (read this first)
- docs/              the docs (OVERVIEW, GOALS, VIOLATIONS, ARCHITECTURE,
-                    DESIGN, BUILD, TESTING, CONVENTIONS, STYLING,
-                    SSR-CONTRACT, C-ISOMORPHIC-BUD, WASM-BRIDGE, FILTERS,
-                    SCHEMA, AUDIT)
-external/          axil, libxylem, libcorm, lemma, hyle (submodule), bud
-mods/              core, common, source, index, auth, mpfd, song, poem,
-                   gig, grp, nd (pure-C isomorphic Bud UI)
-htdocs/            static web root: styles.css, hyle.css, *.wasm, bud-client.js
+docs/              architectural specs & manuals (OVERVIEW, GOALS, ARCHITECTURE,
+                   DESIGN, BUILD, TESTING, CONVENTIONS, STYLING, FILTERS,
+                   SCHEMA, PICKERS, WEB_HAL_SPECIFICATION, 25D, RECUR_NOISE,
+                   WATER_REQUIREMENTS, SHORE, SEMANTIC_SEARCH, LOCAL_LLM, …)
+external/          axil, libxylem, libcorm, libjoint, libislet, liblemma,
+                   libsepal, libhyle, libhyle-source, libhyle-bud, libbud,
+                   libstele, libchaff, libareole, liblamina, libpitch, axil-nd
+mods/              core, common, i18n, source, index, auth, mpfd, redir,
+                   site_chrome, song, poem, gig, grp, software, nd, auren, chat
+htdocs/            static web root: styles.css, hyle.css, *.wasm, stele-client.js
 var/<source>       data directories (server chroots at the repo root)
 tests/             unit (per-module test.sh), pages, e2e (Deno+Playwright)
 debug/             captured build/runtime/test logs (gitignored)
@@ -105,6 +111,13 @@ the repo root (prereqs in `docs/BUILD.md`).
 | Change styling or CSS assets | `docs/STYLING.md` |
 | Understand the Web HAL C/WASM systems architecture | `docs/WEB_HAL_SPECIFICATION.md` |
 | Follow the Web HAL implementation roadmap | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
+| Understand unified client WASM kernel & colocated adapters | `docs/MONOREPO_UNIFIED_WASM_KERNEL.md` / `docs/NEXT_GEN_WASM_ARCHITECTURAL_PLAN.md` / `docs/COLOCATED_NODE_WASM_ADAPTERS.md` |
 | Touch filtering / multi-ref semantics | `docs/FILTERS.md` |
 | Touch schema strings / UI hints | `docs/SCHEMA.md` |
+| Touch omni-dropdown pickers | `docs/PICKERS.md` |
 | Build custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Configure local LLM inference & multi-axis memory fusion | `docs/LOCAL_LLM.md` / `docs/MULTI_AXIS_MEMORY_FUSION.md` |
+| Understand NeverDark 2.5D Seven terrain, noise & LOD hierarchy | `docs/25D.md` / `docs/TERRAIN_ROADMAP.md` / `docs/RECUR_NOISE.md` / `docs/LOD_ELEVATION_RECURSIVE_NOISE_ANALYSIS.md` / `docs/ANALYSIS_TERRAIN_CHUNKS_LOD_STRATOSPHERE.md` / `docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md` |
+| Understand physical water optics, shorelines & billboard submergence | `docs/WATER_REQUIREMENTS.md` / `docs/SHORE.md` / `docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md` / `docs/handoff-water-realism.md` |
+| Understand NeverDark viewports, collision, persistence, BCP & deployment | `docs/ND-VIEWPORTS.md` / `docs/NEXT_GEN_ND_ARCHITECTURE.md` / `docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md` / `docs/SEVEN_WAYS_COLLISION_ANALYSIS.md` / `docs/AOT_GAME_CONTENTS_ANALYSIS.md` / `docs/ND-PERSISTENCE-LIFECYCLE.md` / `docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md` |
+| Work with sibling repos, CI/NPM distribution, extensions & git recovery | `docs/SIBLING_REPOS.md` / `docs/CI_NPM_DISTRIBUTION.md` / `docs/RELEASE_EXECUTION_STRATEGY.md` / `docs/EXTENSIONS.md` / `docs/ADVANCED_GIT_RECOVERY.md` |

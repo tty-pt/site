@@ -79,11 +79,13 @@
 
 /* One map tile, reduced to what the world needs. */
 typedef struct {
-	uint8_t biome;      /* enum biome, 0..18 */
-	uint8_t exits;      /* NDW_EXIT_* */
-	uint8_t flags;      /* NDW_F_* */
-	uint8_t glyph[3];   /* left, centre, right map cell glyph; 0 = blank */
-	uint8_t fg[3];      /* ANSI colour (0..15) of each glyph */
+	uint8_t biome;        /* enum biome, 0..18 */
+	uint8_t exits;        /* NDW_EXIT_* */
+	uint8_t flags;        /* NDW_F_* */
+	uint8_t glyph[3];     /* left, centre, right map cell glyph; 0 = blank */
+	uint8_t fg[3];        /* ANSI colour (0..15) of each glyph */
+	uint8_t plant_id[3];  /* Packed flora species (1..16), big stage bit, variant bit */
+	uint8_t col_mask[3];  /* Ground-plane collision footprint (0=walkable, 1=std, 2=wide) */
 } ndw_tile_t;
 
 /* --- ground ------------------------------------------------------------- */
@@ -229,6 +231,8 @@ typedef struct {
 	uint8_t glyph;      /* the map glyph */
 	uint8_t slot_id;    /* deterministic sub-cell spatial slot: 0=side 0, 1=side 1, 2=side 2 */
 	uint8_t hw, hh;     /* blocking box half width / height (0 = walkable) */
+	uint8_t plant_id;   /* packed flora species/stage/variant (0 = generic/non-plant) */
+	uint8_t col_mask;   /* programmer-defined collision footprint tier */
 	int16_t x, y;       /* foot point, tile local units */
 } ndw_obj_t;
 
@@ -321,8 +325,12 @@ ndw_synth_virgin_tile(const int16_t pos[4], ndw_tile_t *out)
 
 	plant_tile_t pd;
 	nd_plant_noise_eval(&pd, he, w, fs.is_water, tm, fs.temp, (uint16_t)fs.rain, NULL);
-	for (unsigned side = 0; side < 3; side++)
-		nd_plant_slot_glyph(&pd, side, &out->glyph[side], &out->fg[side]);
+	for (unsigned side = 0; side < 3; side++) {
+		if (nd_plant_slot_glyph(&pd, side, &out->glyph[side], &out->fg[side])) {
+			nd_plant_slot_meta(&pd, side, rx, ry, -1,
+			                   &out->plant_id[side], &out->col_mask[side]);
+		}
+	}
 
 	stone_tile_t sd;
 	nd_stone_noise_eval(&sd, he, w, fs.bio, tm, NULL);
@@ -410,6 +418,24 @@ ndw_plant_box(int kind, int big, uint8_t *hw, uint8_t *hh)
 	default:           *hw = (uint8_t)(big ? 6 : 5); break;
 	}
 	*hh = 6;
+}
+
+static inline void
+ndw_plant_col_box(uint8_t plant_id, uint8_t col_mask, int kind, int big, uint8_t *hw, uint8_t *hh)
+{
+	if (plant_id == 0 && col_mask == 0) {
+		ndw_plant_box(kind, big, hw, hh);
+		return;
+	}
+	if (col_mask == 0) {
+		*hw = 0;
+		*hh = 0;
+	} else if (col_mask >= 2) {
+		*hw = 8;
+		*hh = 7;
+	} else {
+		ndw_plant_box(kind, big, hw, hh);
+	}
 }
 
 static const int8_t s_scatter_dir8[8][2] = {
@@ -596,6 +622,35 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 
 					if (!ok)
 						continue;
+					if (ce->scatter_mode == NDW_SCATTER_CLUSTER &&
+					    (t->plant_id[s] != 0 || t->col_mask[s] != 0)) {
+						unsigned base_var0 = ((unsigned)t->plant_id[s] >> 6) & 1u;
+						unsigned c_var0 = (base_var0 + (unsigned)c) & 1u;
+						o.plant_id = (uint8_t)((t->plant_id[s] & 0x3Fu) | (c_var0 << 6));
+						o.col_mask = t->col_mask[s];
+						uint8_t nhw = o.hw, nhh = o.hh;
+						ndw_plant_col_box(o.plant_id, o.col_mask, ce->kind, big, &nhw, &nhh);
+						if (nhw <= o.hw && nhh <= o.hh) {
+							o.hw = nhw;
+							o.hh = nhh;
+						} else {
+							ndw_obj_t wide_o = o;
+							wide_o.hw = nhw;
+							wide_o.hh = nhh;
+							ndw_rect_t wr = ndw_obj_rect(&wide_o);
+							ndw_rect_t clear = { NDW_CLEAR_X0, NDW_CLEAR_Y0, NDW_CLEAR_X1, NDW_CLEAR_Y1 };
+							int wide_ok = (wr.x0 >= margin && wr.y0 >= margin &&
+							               wr.x1 <= NDW_TILE_W - margin && wr.y1 <= NDW_TILE_H - margin &&
+							               !ndw_rect_hit(&wr, &clear));
+							for (int w = 0; wide_ok && w < nwall; w++)
+								if (ndw_rect_hit(&wr, &walls[w]))
+									wide_ok = 0;
+							if (wide_ok) {
+								o.hw = nhw;
+								o.hh = nhh;
+							}
+						}
+					}
 					if (!have_anchor) {
 						anchor_x = o.x;
 						anchor_y = o.y;

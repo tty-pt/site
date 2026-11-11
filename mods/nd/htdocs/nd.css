@@ -1055,3 +1055,10 @@ nd-stage,
     font-size: 11px !important;
 }
 
+nd-avatar img,
+#target-card img {
+    image-rendering: pixelated;
+    object-fit: contain;
+}
+
+

@@ -8,6 +8,7 @@
 
 #include "nd_seven_gl.h"
 #include "nd_seven_atlas.h"
+#include "nd_seven_atlas_draw.h"
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
 #include <math.h>
@@ -1185,6 +1186,7 @@ static struct {
 
 	GLuint bb_vbo;
 	GLuint atlas_tex;
+	uint32_t atlas_ver;
 
 	gl_chunk_tex_t chunk_cache[MAX_CHUNK_TEXTURES];
 	uint32_t frame_count;
@@ -1659,16 +1661,19 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	if (!batch || count == 0) return;
 	if (!s_gl.initialized || !s_gl.bb_pipe.prog) return;
 
-	if (!s_gl.atlas_tex && atlas_rgba) {
-		s_gl.atlas_tex = glCreateTexture();
+	uint32_t cur_ver = atlas_rgba_version();
+	if ((!s_gl.atlas_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {
+		if (!s_gl.atlas_tex)
+			s_gl.atlas_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ND_SEVEN_ATLAS_W, ND_SEVEN_ATLAS_H_PX, 0,
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ND_SEVEN_ATLAS_W, ND_SEVEN_RUNTIME_ATLAS_H, 0,
 		             GL_RGBA, GL_UNSIGNED_BYTE, atlas_rgba);
+		s_gl.atlas_ver = cur_ver;
 	}
 
 	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];

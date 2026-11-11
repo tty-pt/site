@@ -29,7 +29,7 @@
   "pi-quest": {
     "askTimeoutMs": 60000,
     "depthCap": 3,
-    "reviewPolicy": "balanced",
+    "reviewPolicy": "strict",
     "strictMode": false,
     "draftThresholds": {
       "requirements": 2,
@@ -69,10 +69,21 @@
       "direct": "antigravity-acp/gemini-3.8-flash:low",
       "cooldownMs": 900000,
       "matrix": {
+        "idle": [
+          "antigravity-acp/gemini-4-argon:high",
+          "antigravity-acp/gemini-3.8-flash:high"
+        ],
+        "provisional": [
+          "antigravity-acp/gemini-4-argon:high",
+          "antigravity-acp/gemini-3.8-flash:high"
+        ],
         "drafting": {
           "trivial": "antigravity-acp/gemini-3.8-flash:low",
           "minor": "antigravity-acp/gemini-3.8-flash:low",
-          "standard": "antigravity-acp/gemini-3.8-flash:medium",
+          "standard": [
+            "antigravity-acp/gemini-4-argon:high",
+            "antigravity-acp/gemini-3.8-flash:medium"
+          ],
           "major": [
             "antigravity-acp/gemini-4-argon:high",
             "antigravity-acp/gemini-3.8-flash:high"
@@ -81,7 +92,10 @@
             "antigravity-acp/gemini-4-argon:high",
             "antigravity-acp/gemini-3.8-flash:high"
           ],
-          "*": "antigravity-acp/gemini-3.8-flash:low"
+          "*": [
+            "antigravity-acp/gemini-4-argon:high",
+            "antigravity-acp/gemini-3.8-flash:medium"
+          ]
         },
         "implementing": {
           "trivial": "antigravity-acp/gemini-3.8-flash:low",

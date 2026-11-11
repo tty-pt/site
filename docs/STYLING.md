@@ -36,7 +36,7 @@ styles must use these tokens** so dark mode keeps working.
 
 Asset versioning is fully automated via `scripts/gen-asset-version.sh`.
 On every build, `mods/common/ux/version.gen.h` is generated from sha256 content
-hashes of `htdocs/styles.css`, `hyle.css`, `bud-client.js`, `bud-hydrate.js`,
+hashes of `htdocs/styles.css`, `hyle.css`, `stele-client.js`, `bud-hydrate.js`,
 and `hyle-fragments.js`.
 
 `mods/common/ux/site_page.c` includes `version.gen.h` via `__has_include` fallback
@@ -80,5 +80,5 @@ classes unless the widget rules out-specify them:
 
 ## Related docs
 
-- `docs/SSR-CONTRACT.md` — the widget markup these classes style.
+- `docs/FILTERS.md` — the widget markup these classes style.
 - `docs/BUILD.md` — rebuild + cache-bust flow.

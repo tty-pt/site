@@ -14,6 +14,7 @@
 #include <nd/map.h>
 #include <nd/world-types.h>
 #include <nd/field.h>
+#include <nd/plant.h>
 unsigned nd_get(unsigned hd, void *value, void *key);
 ENT ent_get(unsigned ref);
 #include <nd/type.h>
@@ -566,10 +567,11 @@ eng_view(unsigned player_ref)
 
 		/* centre cell: the player, then a registered flag glyph, else plants (suppressed on water) */
 		vtf_t vtf;
+		int has_vtf = vtf_find(vt, &vtf);
 		if (is_player) {
 			mt->symbol = '!';
 			mt->fg = 11; /* bold yellow */
-		} else if (vtf_find(vt, &vtf)) {
+		} else if (has_vtf) {
 			mt->symbol = (uint8_t)vtf.emp;
 			mt->fg = (uint8_t)(nd_color_to_ansi(vtf.pi.fg) +
 				((vtf.pi.flags & BOLD) ? 8 : 0));
@@ -589,6 +591,30 @@ eng_view(unsigned player_ref)
 		} else {
 			mt->side_r = 0;
 			mt->fg_r = 0;
+		}
+
+		/* Per-slot flora species, stage, variant & ground-plane collision metadata */
+		if (!(flags & ND_MAP_FLAG_WATER)) {
+			plant_tile_t pd;
+			memcpy(&pd, vt->raw, sizeof(pd));
+			int32_t rx = (int32_t)opos[0] - VIEW_AROUND + (i % VIEW_SIZE);
+			int32_t ry = (int32_t)opos[1] + VIEW_AROUND - (i / VIEW_SIZE);
+			for (unsigned side = 0; side < 3; side++) {
+				if (side == 0 && (vt->exits & E_DOWN))
+					continue;
+				if (side == 1 && has_vtf)
+					continue;
+				if (side == 2 && (vt->exits & E_UP))
+					continue;
+				if (!ND_PLANT_N(pd.n, side))
+					continue;
+				int spec_idx = -1;
+				SKEL skel;
+				if (nd_get(HD_SKEL, &skel, &pd.id[side]) == 0)
+					spec_idx = nd_plant_find_spec(skel.name);
+				nd_plant_slot_meta(&pd, side, rx, ry, spec_idx,
+				                   &mt->plant_id[side], &mt->col_mask[side]);
+			}
 		}
 	}
 

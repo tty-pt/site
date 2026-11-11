@@ -267,8 +267,8 @@ static inline float seven_billboard_lod_scale(float d_cam, int is_landmark)
 	if (d_cam <= 360.0f)
 		return 1.0f;
 	float ratio = d_cam / 360.0f;
-	float s = 1.0f + 0.38f * sqrtf(ratio - 1.0f);
-	float max_s = is_landmark ? 14.0f : 8.0f;
+	float s = 1.0f + 0.44f * sqrtf(ratio - 1.0f);
+	float max_s = is_landmark ? 15.0f : 8.5f;
 	return (s > max_s) ? max_s : s;
 }
 
@@ -404,7 +404,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	nd_seven_gl_flush_water();
 }
 
-#define MID_MAX_DRAW 65536
+#define MID_MAX_DRAW 262144
 #define MID_STREAM_CHUNK 2048
 static lam_billboard_gpu_t s_mid_gpu_batch[MID_MAX_DRAW];
 static lam_billboard_gpu_t s_mid_stream_batch[MID_STREAM_CHUNK];
@@ -443,9 +443,10 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 	/* Homogeneous 1:1 room emission: every room emits its objects with the exact
 	 * same rule and uniform altitude alpha across the entire visible screen. */
 	for (int k = 0; k < n_raw; k++) {
-		int sprite = nd_seven_obj_sprite(&raw_objs[k]);
-		if (sprite <= 0 || sprite >= NDS_COUNT)
+		nd_seven_sprite_rect_t sr_val;
+		if (!nd_seven_obj_rect(&raw_objs[k], &sr_val))
 			continue;
+		const nd_seven_sprite_rect_t *sr = &sr_val;
 
 		int32_t wx = base_wx + raw_objs[k].x;
 		int32_t wy = base_wy + raw_objs[k].y;
@@ -477,7 +478,6 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 			s_mid_batch_len = 0;
 		}
 
-		const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
 		int flip = (raw_objs[k].variant >> 2) & 1;
 		lam_billboard_gpu_t bb;
 		bb.x = (float)wx;
@@ -492,8 +492,8 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 			bb.u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
 			bb.u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
 		}
-		bb.v0 = (float)sr->y / (float)ND_SEVEN_ATLAS_H_PX;
-		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_ATLAS_H_PX;
+		bb.v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		bb.tint_rgba = tint;
 
 		s_mid_stream_batch[s_mid_batch_len++] = bb;
@@ -503,18 +503,6 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		emitted++;
 	}
 	return emitted;
-}
-
-static float seven_node_dist2(const ar_node_t *node, float fx, float fy)
-{
-	if (!node) return 1e30f;
-	float x0 = (float)node->ox;
-	float y0 = (float)node->oy;
-	float x1 = x0 + (float)node->w;
-	float y1 = y0 + (float)node->h;
-	float dx = (fx < x0) ? (x0 - fx) : ((fx > x1) ? (fx - x1) : 0.0f);
-	float dy = (fy < y0) ? (y0 - fy) : ((fy > y1) ? (fy - y1) : 0.0f);
-	return dx * dx + dy * dy;
 }
 
 void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_state_t *st)
@@ -651,7 +639,10 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 					dr[n].obj.kind = sp.objs[k].kind;
 					dr[n].obj.variant = sp.objs[k].variant;
 					dr[n].obj.slot_id = sp.objs[k].slot_id;
-					dr[n].obj.hw = (uint8_t)(sp.objs[k].kind == NDW_K_ROCK ? 6 : sp.objs[k].kind == NDW_K_BOULDER ? 10 : 0);
+					dr[n].obj.hw = sp.objs[k].hw ? sp.objs[k].hw : (uint8_t)(sp.objs[k].kind == NDW_K_ROCK ? 6 : sp.objs[k].kind == NDW_K_BOULDER ? 10 : 0);
+					dr[n].obj.hh = sp.objs[k].hh;
+					dr[n].obj.plant_id = sp.objs[k].plant_id;
+					dr[n].obj.col_mask = sp.objs[k].col_mask;
 					dr[n].obj.glyph = sp.objs[k].glyph;
 					dr[n].obj.fg = sp.objs[k].fg;
 					dr[n].obj.big = sp.objs[k].big;
@@ -738,7 +729,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		}
 
 		for (int a = 0; a < n && all_gpu_count < ALL_GPU_MAX_DRAW; a++) {
-			int sprite = 0;
+			int has_sprite = 0;
 			float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
 			float bw = 0.0f, bh = 0.0f;
 
@@ -754,11 +745,12 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				bw = (float)LAMB_SIZE;
 				bh = (float)LAMB_SIZE;
 				u0 = (float)(col * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
-				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_H_PX;
+				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)((col + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
-				v1 = (float)((row + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_H_PX;
-				sprite = NDS_LAMB;
+				v1 = (float)((row + 1) * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				has_sprite = 1;
 			} else if (dr[a].what == D_ENTITY) {
+				int sprite = 0;
 				if (dr[a].sprite_id) {
 					sprite = dr[a].sprite_id;
 				} else if (strstr(dr[a].name, "stone") || strstr(dr[a].name, "Stone") ||
@@ -771,9 +763,10 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				bw = (float)sr->w;
 				bh = (float)sr->h;
 				u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
-				v0 = (float)sr->y / (float)ND_SEVEN_ATLAS_H_PX;
+				v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
-				v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_ATLAS_H_PX;
+				v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				has_sprite = 1;
 			} else if (dr[a].what == D_OBJ) {
 				if (dr[a].obj.kind >= NDW_K_DECID && dr[a].obj.kind <= NDW_K_CACTUS) {
 					uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
@@ -787,31 +780,37 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 							continue; /* Anti-submersion: omit trees/flora in 3D WebGL mode */
 					}
 				}
-				sprite = nd_seven_obj_sprite(&dr[a].obj);
-				if (!sprite) {
+				nd_seven_sprite_rect_t sr_val;
+				if (nd_seven_obj_rect(&dr[a].obj, &sr_val)) {
+					has_sprite = 1;
+				} else {
+					int sprite = 0;
 					if (strstr(dr[a].name, "stone") || strstr(dr[a].name, "Stone") || dr[a].obj.kind == NDW_K_STONE)
 						sprite = NDS_STONE_FLAT;
 					else if (dr[a].obj.glyph)
 						sprite = NDS_STONE_TINY;
+					if (sprite > 0 && sprite < NDS_COUNT) {
+						sr_val = nd_seven_sprite_rects[sprite];
+						has_sprite = 1;
+					}
 				}
-				if (sprite > 0 && sprite < NDS_COUNT) {
-					const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
-					bw = (float)sr->w;
-					bh = (float)sr->h;
+				if (has_sprite) {
+					bw = (float)sr_val.w;
+					bh = (float)sr_val.h;
 					int flip = (dr[a].obj.variant >> 2) & 1;
 					if (flip) {
-						u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
-						u1 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
+						u0 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
+						u1 = (float)sr_val.x / (float)ND_SEVEN_ATLAS_W;
 					} else {
-						u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
-						u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
+						u0 = (float)sr_val.x / (float)ND_SEVEN_ATLAS_W;
+						u1 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
 					}
-					v0 = (float)sr->y / (float)ND_SEVEN_ATLAS_H_PX;
-					v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_ATLAS_H_PX;
+					v0 = (float)sr_val.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+					v1 = (float)(sr_val.y + sr_val.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				}
 			}
 
-			if (sprite > 0 && sprite < NDS_COUNT) {
+			if (has_sprite) {
 				int64_t lwx_b = 0, lwy_b = 0;
 				nd_seven_world_pos(st, &lwx_b, &lwy_b);
 				float lwz_b = nd_seven_ground_elevation_f((int32_t)lwx_b, (int32_t)lwy_b);
@@ -848,8 +847,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		}
 	}
 
-	/* Sort near-field 3D billboards globally back-to-front by world wy ascending (tie-break by wx ascending)
-	 * and flush via pure-C WebGL2 pipeline with glDepthMask(GL_FALSE) */
+	/* Sort near-field 3D billboards globally back-to-front by world wy ascending (tie-break by wx ascending) */
 	if (is_3d && all_gpu_count > 0) {
 		for (uint32_t a = 1; a < all_gpu_count; a++) {
 			lam_billboard_gpu_t k = s_all_gpu_batch[a];
@@ -861,7 +859,6 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			}
 			s_all_gpu_batch[b + 1] = k;
 		}
-		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
 
 	/* Unified Homogeneous Scenery Pass:
@@ -871,6 +868,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 	 * smoothly by altitude before planetary views with zero square boundaries. */
 	s_mid_batch_len = 0;
 	s_last_mid_gpu_count = 0;
+	int near_flushed = 0;
 	float dist_scenery = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
 	float alt_fade = seven_smooth_fade(dist_scenery, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
 	uint32_t tint_scenery = seven_pack_white_alpha(alt_fade);
@@ -891,16 +889,20 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		float eye_y = (float)lwy + dist * cosf(pitch);
 		float eye_z = lwz + dist * sinf(pitch);
 
-		/* Sort visible leaves front-to-back by distance to focal position (lwx, lwy) */
+		/* Sort visible leaves back-to-front (North-to-South: oy ascending, tie-break by ox ascending)
+		 * so distant northern tree crowns render before nearer southern crowns. */
 		for (size_t a = 1; a < s_visible_leaf_count; a++) {
 			const ar_node_t *key_node = s_visible_leaves[a];
-			float key_d2 = seven_node_dist2(key_node, (float)lwx, (float)lwy);
+			int32_t key_oy = key_node ? key_node->oy : 0;
+			int32_t key_ox = key_node ? key_node->ox : 0;
 			size_t b = a;
 			while (b > 0) {
-				float prev_d2 = seven_node_dist2(s_visible_leaves[b - 1], (float)lwx, (float)lwy);
-				if (prev_d2 <= key_d2)
+				const ar_node_t *prev = s_visible_leaves[b - 1];
+				int32_t prev_oy = prev ? prev->oy : 0;
+				int32_t prev_ox = prev ? prev->ox : 0;
+				if (prev_oy < key_oy || (prev_oy == key_oy && prev_ox <= key_ox))
 					break;
-				s_visible_leaves[b] = s_visible_leaves[b - 1];
+				s_visible_leaves[b] = prev;
 				b--;
 			}
 			s_visible_leaves[b] = key_node;
@@ -925,6 +927,16 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			int32_t rx1 = rx0 + span_x;
 			int32_t ry1 = ry0 + span_y;
 
+			if (!near_flushed && ry0 > center_ry_grid + obj_j1) {
+				if (s_mid_batch_len > 0) {
+					nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+					s_mid_batch_len = 0;
+				}
+				if (all_gpu_count > 0)
+					nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+				near_flushed = 1;
+			}
+
 			float nz_min = (float)node->min_val / 16.0f;
 			float nz_max = (float)node->max_val / 16.0f;
 
@@ -946,6 +958,15 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 							continue;
 					}
 					for (int32_t ry_grid = by0; ry_grid < by1; ry_grid++) {
+						if (!near_flushed && ry_grid > center_ry_grid + obj_j1) {
+							if (s_mid_batch_len > 0) {
+								nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+								s_mid_batch_len = 0;
+							}
+							if (all_gpu_count > 0)
+								nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+							near_flushed = 1;
+						}
 						for (int32_t rx_grid = bx0; rx_grid < bx1; rx_grid++) {
 							int16_t pos[4] = {
 								(int16_t)rx_grid,
@@ -975,6 +996,9 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		}
 		if (s_mid_batch_len > 0)
 			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+	}
+	if (is_3d && !near_flushed && all_gpu_count > 0) {
+		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
 
 	{
