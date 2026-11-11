@@ -161,7 +161,7 @@ nd-stage,
 
 #map-overlay [data-bud-key="contents"] {
     flex: 0 1 auto !important;
-    max-height: 22vh;
+    max-height: 36vh;
     overflow: visible !important;
 }
 
@@ -444,9 +444,13 @@ nd-stage,
     box-sizing: border-box !important;
 }
 
-/* Minimap Window: Transparent background */
+/* Unified Minimap / Look-At Window: Transparent background by default, swaps to Look-At target card */
 #hud-win-map,
 #hud-win-map.rpg-hud-panel {
+    width: 220px;
+    height: 220px;
+    min-width: 140px !important;
+    min-height: 140px !important;
     background: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -458,6 +462,13 @@ nd-stage,
 #hud-win-map.hud-win-dragging {
     border-color: rgba(194, 179, 255, 0.45) !important;
     box-shadow: none !important;
+}
+
+#hud-win-map > .hud-win-body {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    border-radius: 6px !important;
 }
 
 #hud-win-map #room-map {
@@ -480,27 +491,39 @@ nd-stage,
     border-radius: 6px !important;
 }
 
-/* Floating Look-At Target Window */
-#hud-win-target {
-    width: 220px;
-    height: 220px;
-    min-width: 140px !important;
-    min-height: 140px !important;
-}
-
-#hud-win-target > .hud-win-body,
-#hud-win-target #target-card,
-#hud-win-target #target-card .target-art {
+#hud-win-map #target-card,
+#hud-win-map #target-card .target-art {
     width: 100% !important;
     height: 100% !important;
     max-width: none !important;
     max-height: none !important;
     aspect-ratio: auto !important;
     border-radius: 6px !important;
+    overflow: hidden !important;
 }
 
-#hud-win-target #target-card .target-close {
-    display: none !important;
+#hud-win-map #target-card .target-close {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 6px !important;
+    right: 6px !important;
+    width: 24px !important;
+    height: 24px !important;
+    border-radius: 9999px !important;
+    background: rgba(12, 14, 22, 0.78) !important;
+    border: 1px solid rgba(194, 179, 255, 0.55) !important;
+    color: #f8fafc !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    z-index: 5 !important;
+    cursor: pointer !important;
+}
+
+#hud-win-map #target-card .target-close:hover {
+    background: rgba(189, 74, 106, 0.85) !important;
+    border-color: #ffffff !important;
 }
 
 /* Permanent Toolbar-Free Bottom-Right Actions Dock & Bottom-Left Closed-Windows Launcher Dock */
@@ -581,6 +604,8 @@ nd-stage,
     align-items: center !important;
     justify-content: center !important;
     font-size: 18px !important;
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Lucida Console", Monaco, monospace !important;
+    font-variant-emoji: emoji !important;
     cursor: pointer !important;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
     transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
@@ -608,15 +633,25 @@ nd-stage,
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Room Contents HUD Window: Bigger Round Avatars & Popper-Style Action Dropdown */
+/* Room Contents HUD Window: Larger Default Size, Round Avatars & Unclipped Popper-Style Action Dropdown */
 #hud-win-contents {
-    width: 248px;
-    min-width: 160px !important;
+    width: 300px;
+    min-width: 200px !important;
     max-width: 90vw !important;
-    min-height: 28px !important;
-    max-height: 200px;
-    padding: 5px 6px !important;
+    min-height: 120px !important;
+    max-height: 36vh;
+    padding: 8px 10px !important;
     flex: 0 1 auto !important;
+    overflow: visible !important;
+    z-index: 32 !important;
+}
+
+#hud-win-contents:hover,
+#hud-win-contents:has(.nd-item-popper) {
+    z-index: 48 !important;
+}
+
+#hud-win-contents > .hud-win-body {
     overflow: visible !important;
 }
 
@@ -629,20 +664,15 @@ nd-stage,
 .rpg-hud-panel nd-contents,
 .rpg-hud-panel .nd-contents,
 #holder.game-2d-mode nd-contents,
-#holder.game-2d-mode .nd-contents {
+#holder.game-2d-mode .nd-contents,
+#hud-win-contents nd-contents,
+#hud-win-contents .nd-contents {
     min-height: 0 !important;
-    max-height: 184px;
-    flex: 0 1 auto !important;
-    height: auto !important;
-    overflow-y: auto !important;
-    overflow-x: visible !important;
-    gap: 4px !important;
-}
-
-#hud-win-contents[style*="height:"] nd-contents,
-#hud-win-contents[style*="height:"] .nd-contents {
     max-height: none !important;
     flex: 1 1 auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    gap: 5px !important;
 }
 
 #contents nd-item,
@@ -650,11 +680,11 @@ nd-stage,
     display: flex !important;
     align-items: center !important;
     gap: 10px !important;
-    padding: 5px 8px !important;
+    padding: 6px 8px !important;
     border-radius: 8px !important;
     font-size: 12px !important;
     line-height: 1.3 !important;
-    min-height: 52px !important;
+    min-height: 54px !important;
     position: relative !important;
     overflow: visible !important;
     transition: background-color 0.15s ease, border-color 0.15s ease !important;
@@ -671,7 +701,7 @@ nd-stage,
 #hud-win-contents nd-item.ctb {
     background-color: rgba(35, 38, 58, 0.72) !important;
     border-color: rgba(194, 179, 255, 0.65) !important;
-    z-index: 30 !important;
+    z-index: 40 !important;
 }
 
 #contents nd-avatar,
@@ -719,12 +749,12 @@ nd-stage,
     padding-left: 4px !important;
 }
 
-/* Popper-style Floating Per-Item Action Dropdown Menu */
+/* Popper-style Floating Per-Item Action Dropdown Menu (Unclipped Over Contents Box) */
 .nd-item-popup.nd-item-popper {
     position: absolute !important;
     top: calc(100% + 6px) !important;
     right: 6px !important;
-    min-width: 118px !important;
+    min-width: 124px !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: stretch !important;
@@ -735,8 +765,8 @@ nd-stage,
     -webkit-backdrop-filter: blur(8px) !important;
     border: 1px solid rgba(168, 155, 224, 0.65) !important;
     border-radius: 8px !important;
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.78), 0 0 0 1px rgba(0, 0, 0, 0.5) !important;
-    z-index: 60 !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.82), 0 0 0 1px rgba(0, 0, 0, 0.55) !important;
+    z-index: 80 !important;
 }
 
 .nd-item-popup.nd-item-popper::before {
@@ -764,7 +794,8 @@ nd-stage,
     background: transparent !important;
     color: #f1f5f9 !important;
     border: 1px solid transparent !important;
-    font-family: "Lucida Console", Monaco, monospace !important;
+    font-family: "Lucida Console", Monaco, monospace, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji" !important;
+    font-variant-emoji: emoji !important;
     font-size: 11px !important;
     font-weight: 600 !important;
     text-align: left !important;
@@ -781,9 +812,9 @@ nd-stage,
 }
 
 #hud-win-contents .nd-empty {
-    padding: 4px 6px !important;
+    padding: 8px 10px !important;
     font-size: 11px !important;
-    line-height: 1.3 !important;
+    line-height: 1.4 !important;
     opacity: 0.78 !important;
 }
 
@@ -800,6 +831,7 @@ nd-stage,
     border: 1px solid #9589c5 !important;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 24px rgba(149, 137, 197, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
     color: #f1f5f9 !important;
+    box-sizing: border-box !important;
 }
 
 #spell {
@@ -811,27 +843,62 @@ nd-stage,
 #equipment,
 #stats {
     border-radius: 10px !important;
-    padding: 16px 18px !important;
+    padding: 16px 20px !important;
+    width: max-content !important;
+    height: auto !important;
+}
+
+#equipment {
+    min-width: 230px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+}
+
+/* Override legacy #equipment>*>* { width: 24px; height: 24px; padding: 8px } rule from line 1 */
+#equipment > *,
+#equipment > * > *,
+#equipment .rpg-modal-header,
+#equipment .rpg-modal-header > * {
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+#equipment .rpg-modal-header {
+    width: 100% !important;
+    padding-bottom: 8px !important;
 }
 
 /* Equipment Paper-Doll: Round Recessed Black-Hole Sockets */
 #equipment .equip-doll-grid {
     display: flex !important;
     flex-direction: column !important;
-    gap: 10px !important;
+    gap: 12px !important;
     align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 4px 0 !important;
 }
 
 #equipment .equip-doll-row {
     display: flex !important;
     flex-direction: row !important;
-    gap: 10px !important;
+    gap: 12px !important;
     align-items: center !important;
     justify-content: center !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 52px !important;
+    padding: 0 !important;
 }
 
 #equipment .equip-socket,
 #equipment [data-slot] {
+    flex: 0 0 52px !important;
     width: 52px !important;
     height: 52px !important;
     min-width: 52px !important;
@@ -878,6 +945,7 @@ nd-stage,
 }
 
 #equipment .equip-socket-spacer {
+    flex: 0 0 52px !important;
     width: 52px !important;
     height: 52px !important;
     min-width: 52px !important;

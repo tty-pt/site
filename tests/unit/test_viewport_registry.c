@@ -93,17 +93,14 @@ int main(void)
 	assert(strstr(html, "⤢") != NULL);
 	assert(strstr(html, "↺") != NULL);
 
-	/* 5 HUD windows (chat, title, map, target, contents) must be movable/resizable HUD windows with persist keys, while #bottom-right-actions is a permanent toolbar-free dock */
+	/* 4 HUD windows (chat, title, map, contents) must be movable/resizable HUD windows with persist keys, while #bottom-right-actions is a permanent toolbar-free dock without viewport switcher */
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-title\"") != NULL);
 	assert(strstr(html, "id=\"title-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"title-resize-se\"") != NULL);
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-map\"") != NULL);
 	assert(strstr(html, "id=\"map-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"map-resize-se\"") != NULL);
-	assert(strstr(html, "id=\"hud-win-target\"") != NULL);
-	assert(strstr(html, "data-bud-persist-key=\"nd-win-target\"") != NULL);
-	assert(strstr(html, "id=\"target-toolbar\"") != NULL);
-	assert(strstr(html, "id=\"target-resize-se\"") != NULL);
+	assert(strstr(html, "id=\"hud-win-target\"") == NULL);
 	assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\"") != NULL);
 	assert(strstr(html, "id=\"contents-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"contents-resize-se\"") != NULL);
@@ -112,6 +109,9 @@ int main(void)
 	assert(strstr(html, "id=\"actions-toolbar\"") == NULL);
 	assert(strstr(html, "id=\"actions-resize-se\"") == NULL);
 	assert(strstr(html, "id=\"toggle-3d-btn\"") == NULL);
+	assert(strstr(html, "data-bud-action=\"cycle-viewport\"") == NULL);
+	assert(strstr(html, "Switch Viewport") == NULL);
+	assert(strstr(html, "👁️") != NULL);
 	assert(strstr(html, "id=\"bottom-left-windows\"") != NULL);
 
 	/* Test Windows-style drag resize dimensions on #rpg-chat */
@@ -162,7 +162,7 @@ int main(void)
 	assert(strstr(html, "id=\"term\"") != NULL);
 	nd_ui_set_chat_minimized(0);
 
-	/* Test Room Contents round avatar and Popper-style per-item dropdown menu */
+	/* Test Room Contents round avatar, Popper-style per-item dropdown menu, and unified #hud-win-map Look-At swap */
 	st.entity_count = 1;
 	st.entities[0].ref = 77;
 	st.entities[0].location = st.room.ref;
@@ -171,6 +171,7 @@ int main(void)
 	strncpy(st.entities[0].name, "Emerald Potion", sizeof(st.entities[0].name) - 1);
 	strncpy(st.entities[0].art, "items/potion.png", sizeof(st.entities[0].art) - 1);
 	st.selected_item_ref = 77;
+	st.target_ref = 77;
 	bud_free_string(html);
 	root = nd_ui_render(&st);
 	html = bud_render_html(root);
@@ -178,9 +179,13 @@ int main(void)
 	assert(strstr(html, "<nd-avatar><span class=\"nd-glyph cf10\">!</span><img src=\"/nd/art/items/potion.png\"") != NULL);
 	assert(strstr(html, "nd-item-popup nd-item-popper") != NULL);
 	assert(strstr(html, "nd-popper-item") != NULL);
-	assert(strstr(html, "👁 Look") != NULL);
+	assert(strstr(html, "👁️ Look") != NULL);
 	assert(strstr(html, "🖐 Get") != NULL);
+	assert(strstr(html, "hud-win-map-target") != NULL);
+	assert(strstr(html, "👁️ Look-At") != NULL);
+	assert(strstr(html, "id=\"target-card\"") != NULL);
 	st.selected_item_ref = 0;
+	st.target_ref = 0;
 	st.entity_count = 0;
 
 	/* Must contain room contents, top-center room header, and bottom-right actions dock */
@@ -201,10 +206,10 @@ int main(void)
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "id=\"right-panel\"") != NULL);
 	assert(strstr(html, "id=\"directions\"") != NULL);
-	assert(strstr(html, "data-bud-action=\"cycle-viewport\"") != NULL);
-	assert(strstr(html, "Switch Viewport") != NULL);
+	assert(strstr(html, "data-bud-action=\"cycle-viewport\"") == NULL);
+	assert(strstr(html, "Switch Viewport") == NULL);
 	bud_free_string(html);
-	printf("PASS: ND_LAYOUT_STANDARD_HYBRID renders standard terminal, controls, and viewport switch button\n");
+	printf("PASS: ND_LAYOUT_STANDARD_HYBRID renders standard terminal and controls\n");
 
 	/* Test viewport cycling handler */
 	int on_cycle_viewport(bud_event *e);

@@ -158,10 +158,10 @@ static void get_win_limits(int win_id, int *min_w, int *min_h, int *def_w, int *
 		*def_h = 220;
 		break;
 	case ND_WIN_CONTENTS:
-		*min_w = 140;
-		*min_h = 60;
-		*def_w = 228;
-		*def_h = 136;
+		*min_w = 200;
+		*min_h = 120;
+		*def_w = 300;
+		*def_h = 260;
 		break;
 	case ND_WIN_TARGET:
 		*min_w = 140;
@@ -985,7 +985,6 @@ static int on_dismiss_target(bud_event *ev)
 		s_last_target_ref = client_state.target_ref;
 	client_state.target_ref = 0;
 	s_target_win_pinned = 0;
-	s_win[ND_WIN_TARGET].minimized = 1;
 	bud_app_set_state();
 	return 0;
 }
@@ -1085,7 +1084,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			char look_title[64];
 			snprintf(look_title, sizeof(look_title), "Look %s", e->name);
 			bud_set_attr(look, "title", look_title);
-			bud_append(look, bud_text("👁 Look"));
+			bud_append(look, bud_text("👁️ Look"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
 
@@ -1194,51 +1193,6 @@ static bud_node *render_target_card(const nd_client_state_t *st)
 	return card;
 }
 
-static bud_node *render_target_card_seven(const nd_client_state_t *st)
-{
-	if (st && st->target_ref)
-		return render_target_card(st);
-	if (s_target_win_pinned && st && (st->room.name[0] || st->room.art[0] || st->room.ref)) {
-		bud_node *card = bud_element("div");
-		bud_set_attr(card, "id", "target-card");
-		bud_set_attr(card, "class", "target-card");
-		char tip[96];
-		snprintf(tip, sizeof(tip), "%s #%u", st->room.name[0] ? st->room.name : "Room", st->room.ref);
-		bud_set_attr(card, "title", tip);
-
-		bud_node *art = bud_element("div");
-		bud_set_attr(art, "class", "target-art");
-		bud_node *badge = bud_element("div");
-		bud_set_attr(badge, "class", "target-glyph cf10");
-		bud_append(badge, bud_text("#"));
-		bud_append(art, badge);
-		if (st->room.art[0]) {
-			char art_url[128];
-			snprintf(art_url, sizeof(art_url), "/nd/art/%s", st->room.art);
-			bud_node *img = bud_element("img");
-			bud_set_attr(img, "src", art_url);
-			bud_set_attr(img, "alt", "");
-			bud_append(art, img);
-		}
-		bud_node *name_row = bud_element("div");
-		bud_set_attr(name_row, "class", "target-title");
-		bud_append(name_row, bud_text(st->room.name[0] ? st->room.name : "Room"));
-		bud_append(art, name_row);
-
-		bud_node *close_btn = bud_element("button");
-		bud_set_attr(close_btn, "type", "button");
-		bud_set_attr(close_btn, "class", "target-close");
-		bud_set_attr(close_btn, "title", "Clear Target");
-		bud_append(close_btn, bud_text("✕"));
-		bud_bind(close_btn, "click", 1, on_dismiss_target);
-		bud_append(art, close_btn);
-
-		bud_append(card, art);
-		return card;
-	}
-	return bud_element("div");
-}
-
 static bud_node *render_closed_windows_dock(void)
 {
 	bud_node *dock = bud_element("div");
@@ -1247,7 +1201,7 @@ static bud_node *render_closed_windows_dock(void)
 
 	int any_closed = 0;
 	for (int w = 0; w < ND_WIN_COUNT; w++) {
-		if (w == ND_WIN_ACTIONS || !s_win[w].minimized)
+		if (w == ND_WIN_ACTIONS || w == ND_WIN_TARGET || !s_win[w].minimized)
 			continue;
 		any_closed = 1;
 		bud_node *btn = bud_element("button");
@@ -1404,7 +1358,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	if (is_seven) {
 		if (st && st->target_ref) {
 			if (st->target_ref != s_prev_target_ref)
-				s_win[ND_WIN_TARGET].minimized = 0;
+				s_win[ND_WIN_MAP].minimized = 0;
 			s_last_target_ref = st->target_ref;
 		}
 		s_prev_target_ref = st ? st->target_ref : 0;
@@ -1450,59 +1404,46 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			bud_append(holder, title_win);
 		}
 
-		/* Right-hand HUD container (#map-overlay) with independent movable/resizable Map, Look-At & Contents windows */
+		/* Right-hand HUD container (#map-overlay) with independent movable/resizable Map/Look-At & Contents windows */
 		bud_node *overlay = bud_element("div");
 		bud_set_attr(overlay, "id", "map-overlay");
 		bud_set_attr(overlay, "data-bud-key", "map-overlay");
-		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-2 items-end max-w-[340px] overflow-y-auto");
+		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-2 items-end max-w-[360px] overflow-visible");
 		bud_set_attr(overlay, "style", "top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)");
 
-		/* 3. Floating Minimap Window (top-right default, movable & resizable) */
+		/* 3. Unified Minimap / Look-At Window (top-right default, swaps to Look-At card when st->target_ref != 0) */
 		if (map) {
+			bud_node *tc = (st && st->target_ref) ? render_target_card(st) : NULL;
+			int has_target_card = (tc && bud_get_attr(tc, "id") != NULL);
 			bud_node *map_box = bud_element("div");
 			bud_set_attr(map_box, "id", "hud-win-map");
 			bud_set_attr(map_box, "data-bud-key", "minimap");
 			int is_min = s_win[ND_WIN_MAP].minimized;
 			int is_drag = (s_drag_win == ND_WIN_MAP && s_drag_mode != 0);
-			char mcls[160];
-			snprintf(mcls, sizeof(mcls), "hud-win hud-win-map rpg-hud-panel pointer-events-auto shadow-lg rounded flex-shrink-0%s%s",
+			char mcls[192];
+			snprintf(mcls, sizeof(mcls), "hud-win hud-win-map rpg-hud-panel pointer-events-auto shadow-lg rounded flex-shrink-0%s%s%s",
+				has_target_card ? " hud-win-map-target" : "",
 				is_min ? " hud-win-minimized" : "",
 				is_drag ? " hud-win-dragging" : "");
 			bud_set_attr(map_box, "class", mcls);
-			append_win_chrome(map_box, ND_WIN_MAP, "map", "🗺️ Minimap", 0);
+			append_win_chrome(map_box, ND_WIN_MAP, "map", has_target_card ? "👁️ Look-At" : "🗺️ Minimap", 0);
 
 			bud_node *map_body = bud_element("div");
 			bud_set_attr(map_body, "class", "hud-win-body flex flex-col items-center justify-center w-full h-full min-h-0 overflow-hidden");
-			bud_append(map_body, map);
+			if (has_target_card) {
+				bud_set_attr(map, "class", "hidden");
+				bud_append(map_body, map);
+				bud_append(map_body, tc);
+			} else {
+				if (tc)
+					bud_free(tc);
+				bud_append(map_body, map);
+			}
 			bud_append(map_box, map_body);
 			bud_append(overlay, map_box);
 		}
 
-		/* 4. Floating Look-At Target Image Window (movable & resizable) */
-		{
-			bud_node *tc = render_target_card_seven(st);
-			bud_node *tc_box = bud_element("div");
-			bud_set_attr(tc_box, "id", "hud-win-target");
-			bud_set_attr(tc_box, "data-bud-key", "target-card");
-			int has_target = (st && st->target_ref != 0) || s_target_win_pinned;
-			int is_min = s_win[ND_WIN_TARGET].minimized;
-			int is_drag = (s_drag_win == ND_WIN_TARGET && s_drag_mode != 0);
-			char tc_cls[192];
-			snprintf(tc_cls, sizeof(tc_cls), "hud-win hud-win-target rpg-hud-panel pointer-events-auto shadow-lg rounded flex-shrink-0%s%s%s",
-				has_target ? "" : " hidden",
-				is_min ? " hud-win-minimized" : "",
-				is_drag ? " hud-win-dragging" : "");
-			bud_set_attr(tc_box, "class", tc_cls);
-			append_win_chrome(tc_box, ND_WIN_TARGET, "target", "🖼 Look-At", 0);
-
-			bud_node *tc_body = bud_element("div");
-			bud_set_attr(tc_body, "class", "hud-win-body flex items-center justify-center w-full h-full min-h-0 overflow-hidden");
-			bud_append(tc_body, tc);
-			bud_append(tc_box, tc_body);
-			bud_append(overlay, tc_box);
-		}
-
-		/* 5. Floating Room Contents Window (mid-right default, movable & resizable) */
+		/* 4. Floating Room Contents Window (mid-right default, movable & resizable, larger default size, unclipped Popper menu) */
 		bud_node *contents = render_room_contents(st);
 		if (contents) {
 			bud_node *cnt_box = bud_element("div");
@@ -1511,14 +1452,14 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			int is_min = s_win[ND_WIN_CONTENTS].minimized;
 			int is_drag = (s_drag_win == ND_WIN_CONTENTS && s_drag_mode != 0);
 			char ccls[192];
-			snprintf(ccls, sizeof(ccls), "hud-win hud-win-contents rpg-hud-panel pointer-events-auto p-1.5 w-full flex flex-col flex-initial min-h-[28px] max-h-[22vh]%s%s",
+			snprintf(ccls, sizeof(ccls), "hud-win hud-win-contents rpg-hud-panel pointer-events-auto p-2 w-full flex flex-col flex-initial min-h-[120px] max-h-[36vh]%s%s",
 				is_min ? " hud-win-minimized" : "",
 				is_drag ? " hud-win-dragging" : "");
 			bud_set_attr(cnt_box, "class", ccls);
 			append_win_chrome(cnt_box, ND_WIN_CONTENTS, "contents", "📦 Room Contents", 0);
 
 			bud_node *cnt_body = bud_element("div");
-			bud_set_attr(cnt_body, "class", "hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-y-auto");
+			bud_set_attr(cnt_body, "class", "hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-visible");
 			bud_append(cnt_body, contents);
 			bud_append(cnt_box, cnt_body);
 			bud_append(overlay, cnt_box);
