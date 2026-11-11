@@ -2391,6 +2391,32 @@ int main(void)
 		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, deep_horizon_30_cnt, max_cheb_seen);
 	}
 
+	/* High-Resolution 48x48 Level 0 Terrain Grid & Exact Seam Continuity Verification */
+	{
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		assert(cs != NULL);
+
+		/* Level 0 uses 48x48 quads (4,608 triangles, 2.25x density); Level 1+ uses 32x32 quads (2,048 triangles) */
+		assert(nd_seven_gl_grid_quads_for_level(0) == 48);
+		assert(nd_seven_gl_grid_quads_for_level(1) == 32);
+		assert(nd_seven_gl_grid_quads_for_level(2) == 32);
+
+		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values */
+		const ar_node_t *n00 = ar_system_ensure(cs, 1, 0, 0, 0);
+		const ar_node_t *n10 = ar_system_ensure(cs, 1, 0, NDW_TILE_W, 0);
+		const ar_node_t *n01 = ar_system_ensure(cs, 1, 0, 0, NDW_TILE_H);
+		assert(n00 != NULL && n10 != NULL && n01 != NULL);
+		assert(n00->grid_dim == 48 && n00->vert_dim == 49 && n00->vert_count == 2401);
+
+		for (uint32_t r = 0; r < n00->vert_dim; r++) {
+			assert(n00->values[r * n00->vert_dim + 48] == n10->values[r * n10->vert_dim + 0]);
+		}
+		for (uint32_t c = 0; c < n00->vert_dim; c++) {
+			assert(n00->values[48 * n00->vert_dim + c] == n01->values[0 * n01->vert_dim + c]);
+		}
+		printf("PASS: 48x48 Level 0 chunk grid (49x49 vertices, 4,608 triangles) and 32x32 Level 1+ LOD grid verified with seamless boundaries\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

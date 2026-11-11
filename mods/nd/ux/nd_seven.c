@@ -77,6 +77,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.base_w = NDW_TILE_W;
 		cfg.base_h = NDW_TILE_H;
+		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.max_active = 96;
 		cfg.pool_capacity = 256;
@@ -345,7 +346,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
 		.margin = cull_margin,
-		.target_quad_px = 2.0f,
+		.target_quad_px = 2.0f * (32.0f / 48.0f),
 		.viewport_w = (float)w,
 		.viewport_h = (float)h,
 		.min_level = 0,
@@ -368,11 +369,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		bool has_water = (node->flags & 1) != 0;
 		float sea_lvl = has_water ? (float)nd_field_water_level(world) : ND_SEVEN_SEA_LEVEL_NONE;
+		uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 		nd_seven_gl_flush_terrain_chunk(world, node->level, node->rev,
 		                                node->ox, node->oy, node->w, node->h,
 		                                node->rgba, node->values,
-		                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+		                                vdim, vdim,
 		                                (uint32_t)w, (uint32_t)h,
 		                                sea_lvl, pdef);
 	}
@@ -389,11 +391,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				if (!node) continue;
 				bool has_water = (node->flags & 1) != 0;
 				float sea_lvl = has_water ? (float)nd_field_water_level(alt_world) : ND_SEVEN_SEA_LEVEL_NONE;
+				uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,
 				                                node->ox, node->oy, node->w, node->h,
 				                                node->rgba, node->values,
-				                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+				                                vdim, vdim,
 				                                (uint32_t)w, (uint32_t)h,
 				                                sea_lvl, alt_pdef);
 			}
