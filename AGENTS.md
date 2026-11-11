@@ -68,10 +68,10 @@ make watch          # auto-rebuild + restart on :8080
    WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
 
 7. **Autonomous Quest Management.** All work MUST use the Quest Journal workflow.
-   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/future/<qid>.md`) from user requests. The user does not need to invoke quest commands manually.
+   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/future/<qid>.md`) from user requests (or when activated via `/quest on`, `"quest: Go for it."`, or `/quest new` after conversational planning with Argon).
    - The quest file is your single source of truth for goals, status, and decisions. Update it proactively as you make progress and before context is compacted.
    - Sub-quests are created automatically via `quest_subquest` when tangent remarks or follow-ups arise.
-   - Completed work is archived to `.pi/quest/archive/<qid>.zip` via `quest_archive`.
+   - Completed work is finalized via `quest_archive` (or `/quest finish`), integrating the scratch worktree into `main` (or retaining `.pi/scratch/slot-N` via `keep-slot` / `squash-keep-slot` for manual testing) and cleaning up `.pi/quest/future/<qid>.md` directly without `.zip` files.
    - Never use ad-hoc scratchpads, `.todo` files, or try to keep the entire plan in your head.
    - **Unified Bundle Packaging**:
      ```text
