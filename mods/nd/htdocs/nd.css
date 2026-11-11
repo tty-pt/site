@@ -162,24 +162,44 @@ nd-stage,
     display: flex !important;
     flex-direction: column !important;
     pointer-events: auto !important;
-    background: rgba(12, 14, 20, 0.75) !important;
-    backdrop-filter: blur(8px) !important;
-    -webkit-backdrop-filter: blur(8px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    background: rgba(10, 12, 18, 0.45) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.38) !important;
     border-radius: 8px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
     overflow: hidden !important;
-    width: 480px !important;
-    max-width: calc(100vw - 32px) !important;
+    resize: both !important;
+    width: 50vw !important;
+    min-width: 360px !important;
+    max-width: 85vw !important;
 }
 
 .rpg-chat.chat-compact {
     height: 180px !important;
+    min-height: 110px !important;
 }
 
 .rpg-chat.chat-expanded {
     height: 420px !important;
+    min-height: 160px !important;
     max-height: calc(100vh - 100px) !important;
+}
+
+.rpg-chat.chat-minimized {
+    height: auto !important;
+    min-height: 0 !important;
+    width: 240px !important;
+    min-width: 200px !important;
+    resize: none !important;
+}
+
+.rpg-chat.chat-minimized #term {
+    display: none !important;
+}
+
+.rpg-chat.chat-minimized .chat-header {
+    border-bottom: none !important;
 }
 
 .chat-header {
@@ -187,11 +207,39 @@ nd-stage,
     align-items: center !important;
     justify-content: space-between !important;
     padding: 4px 8px !important;
-    background: rgba(25, 27, 36, 0.85) !important;
-    border-bottom: 1px solid rgba(149, 137, 197, 0.3) !important;
+    background: rgba(18, 20, 28, 0.72) !important;
+    border-bottom: 1px solid rgba(149, 137, 197, 0.28) !important;
     font-size: 11px !important;
-    cursor: pointer !important;
     user-select: none !important;
+}
+
+.chat-controls {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
+
+.chat-ctrl-btn {
+    width: 22px !important;
+    height: 22px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 4px !important;
+    background: rgba(35, 38, 55, 0.75) !important;
+    color: #e2e8f0 !important;
+    border: 1px solid rgba(149, 137, 197, 0.35) !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    padding: 0 !important;
+}
+
+.chat-ctrl-btn:hover {
+    background: rgba(58, 62, 90, 0.95) !important;
+    border-color: rgba(194, 179, 255, 0.85) !important;
+    color: #ffffff !important;
 }
 
 #rpg-chat #term {
@@ -201,6 +249,33 @@ nd-stage,
     height: 100% !important;
     position: relative !important;
     background: transparent !important;
+}
+
+#rpg-chat .xterm-rows {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 4px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* Top-Center High-Contrast Room Header (Seven Mode) */
+#room-header.seven-room-header {
+    position: absolute !important;
+    top: 14px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 25 !important;
+    pointer-events: none !important;
+    font-family: "Lucida Console", Monaco, monospace !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em !important;
+    color: #f8fafc !important;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.85), 0 1px 2px #000000 !important;
+    background: rgba(10, 12, 18, 0.35) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.28) !important;
+    border-radius: 9999px !important;
+    padding: 4px 14px !important;
+    white-space: nowrap !important;
 }
 
 /* Floating RPG HUD Panels */
@@ -224,12 +299,13 @@ nd-stage,
     flex-direction: row !important;
     align-items: center !important;
     gap: 8px !important;
-    padding: 0 !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+    padding: 6px 10px !important;
+    background: rgba(10, 12, 18, 0.45) !important;
+    border: 1px solid rgba(149, 137, 197, 0.32) !important;
+    border-radius: 9999px !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
     pointer-events: auto !important;
 }
 

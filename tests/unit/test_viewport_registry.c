@@ -71,12 +71,14 @@ int main(void)
 	assert(strstr(html, "id=\"room-map\"") != NULL);
 	assert(strstr(html, "game-2d-mode") != NULL);
 
-	/* Must contain RPG chat console with toggle button and terminal */
+	/* Must contain RPG chat console with micro-icon controls and terminal */
 	assert(strstr(html, "id=\"rpg-chat\"") != NULL);
+	assert(strstr(html, "id=\"chat-min-btn\"") != NULL);
 	assert(strstr(html, "id=\"chat-toggle-btn\"") != NULL);
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "chat-compact") != NULL);
-	assert(strstr(html, "▲ Expand") != NULL);
+	assert(strstr(html, "—") != NULL);
+	assert(strstr(html, "⤢") != NULL);
 
 	/* Test chat toggle mutation into expanded state */
 	nd_ui_set_chat_expanded(1);
@@ -86,12 +88,26 @@ int main(void)
 	html = bud_render_html(root);
 	assert(html != NULL);
 	assert(strstr(html, "chat-expanded") != NULL);
-	assert(strstr(html, "▼ Minimize") != NULL);
+	assert(strstr(html, "⤡") != NULL);
 	nd_ui_set_chat_expanded(0);
 
-	/* Must contain room contents and room header in HUD */
+	/* Test chat minimize mutation into slim bottom-left bar while preserving #term */
+	nd_ui_set_chat_minimized(1);
+	assert(nd_ui_get_chat_minimized() == 1);
+	bud_free_string(html);
+	root = nd_ui_render(&st);
+	html = bud_render_html(root);
+	assert(html != NULL);
+	assert(strstr(html, "chat-minimized") != NULL);
+	assert(strstr(html, "□") != NULL);
+	assert(strstr(html, "id=\"term\"") != NULL);
+	nd_ui_set_chat_minimized(0);
+
+	/* Must contain room contents, top-center room header, and bottom-right actions dock */
 	assert(strstr(html, "id=\"contents\"") != NULL);
 	assert(strstr(html, "id=\"room-header\"") != NULL);
+	assert(strstr(html, "seven-room-header") != NULL);
+	assert(strstr(html, "id=\"bottom-right-actions\"") != NULL);
 
 	bud_free_string(html);
 	printf("PASS: Seven mode cleanly renders game canvas, RPG chat terminal, and HUD elements\n");

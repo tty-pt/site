@@ -53,6 +53,10 @@ int main(void)
 		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px"));
 		free(ov_tag);
 		assert(map > ov);
+		const char *rh = strstr(html, "id=\"room-header\"");
+		const char *bra = strstr(html, "id=\"bottom-right-actions\"");
+		assert(rh != NULL && rh < ov);
+		assert(bra != NULL && bra > ov);
 		assert(strstr(html, "game-2d-mode relative"));
 	}
 

@@ -37,6 +37,8 @@ const nd_client_state_t *nd_ui_get_client_state(void);
  */
 int nd_ui_get_chat_expanded(void);
 void nd_ui_set_chat_expanded(int expanded);
+int nd_ui_get_chat_minimized(void);
+void nd_ui_set_chat_minimized(int minimized);
 
 /*
  * Client WASM entrypoint rehydrating JSON state from SSR.

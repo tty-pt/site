@@ -70,6 +70,7 @@ static bud_node *mount_tty(void)
 }
 
 static int s_chat_expanded = 0;
+static int s_chat_minimized = 0;
 
 int nd_ui_get_chat_expanded(void)
 {
@@ -81,10 +82,33 @@ void nd_ui_set_chat_expanded(int expanded)
 	s_chat_expanded = expanded ? 1 : 0;
 }
 
+int nd_ui_get_chat_minimized(void)
+{
+	return s_chat_minimized;
+}
+
+void nd_ui_set_chat_minimized(int minimized)
+{
+	s_chat_minimized = minimized ? 1 : 0;
+}
+
+static int on_minimize_chat(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	s_chat_minimized = !s_chat_minimized;
+	bud_app_set_state();
+	return 0;
+}
+
 static int on_toggle_chat(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
-	s_chat_expanded = !s_chat_expanded;
+	if (s_chat_minimized) {
+		s_chat_minimized = 0;
+		s_chat_expanded = 1;
+	} else {
+		s_chat_expanded = !s_chat_expanded;
+	}
 	bud_app_set_state();
 	return 0;
 }
@@ -94,11 +118,14 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 	(void)st;
 	bud_node *chat = bud_element("div");
 	bud_set_attr(chat, "id", "rpg-chat");
-	bud_set_attr(chat, "class", s_chat_expanded
-		? "rpg-chat chat-expanded pointer-events-auto"
-		: "rpg-chat chat-compact pointer-events-auto");
+	const char *chat_cls = s_chat_minimized
+		? "rpg-chat chat-minimized pointer-events-auto"
+		: (s_chat_expanded
+			? "rpg-chat chat-expanded pointer-events-auto"
+			: "rpg-chat chat-compact pointer-events-auto");
+	bud_set_attr(chat, "class", chat_cls);
 
-	/* Header bar with title and toggle button */
+	/* Header bar with title and micro-icon window controls */
 	bud_node *hdr = bud_element("div");
 	bud_set_attr(hdr, "class", "chat-header select-none");
 
@@ -107,13 +134,28 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 	bud_append(title, bud_text("💬 Chat & Console"));
 	bud_append(hdr, title);
 
+	bud_node *ctrls = bud_element("div");
+	bud_set_attr(ctrls, "class", "chat-controls flex items-center gap-1");
+
+	bud_node *min_btn = bud_element("button");
+	bud_set_attr(min_btn, "type", "button");
+	bud_set_attr(min_btn, "id", "chat-min-btn");
+	bud_set_attr(min_btn, "class", "chat-ctrl-btn");
+	bud_set_attr(min_btn, "title", s_chat_minimized ? "Restore" : "Minimize");
+	bud_append(min_btn, bud_text(s_chat_minimized ? "□" : "—"));
+	bud_bind(min_btn, "click", 1, on_minimize_chat);
+	bud_append(ctrls, min_btn);
+
 	bud_node *btn = bud_element("button");
 	bud_set_attr(btn, "type", "button");
 	bud_set_attr(btn, "id", "chat-toggle-btn");
-	bud_set_attr(btn, "class", "px-1.5 py-0.5 rounded text-[11px] font-bold bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 border border-neutral-600/50 cursor-pointer");
-	bud_append(btn, bud_text(s_chat_expanded ? "▼ Minimize" : "▲ Expand"));
+	bud_set_attr(btn, "class", "chat-ctrl-btn");
+	bud_set_attr(btn, "title", s_chat_expanded ? "Compact" : "Expand");
+	bud_append(btn, bud_text(s_chat_expanded ? "⤡" : "⤢"));
 	bud_bind(btn, "click", 1, on_toggle_chat);
-	bud_append(hdr, btn);
+	bud_append(ctrls, btn);
+
+	bud_append(hdr, ctrls);
 	bud_append(chat, hdr);
 
 	/* Embedded xterm container */
@@ -749,17 +791,22 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *chat = render_rpg_chat_terminal(st);
 		bud_append(holder, chat);
 
-		/* Floating HUD Overlay on top-right: room header, minimap, target card, room contents, gauges */
+		/* Top-center room header with high contrast and minimal occlusion */
+		bud_node *room_hdr = render_room_header(st);
+		if (room_hdr) {
+			bud_set_attr(room_hdr, "data-bud-key", "room-header");
+			if (st && (st->room.name[0] || st->room.ref))
+				bud_set_attr(room_hdr, "class", "seven-room-header");
+			else
+				bud_set_attr(room_hdr, "class", "seven-room-header hidden");
+			bud_append(holder, room_hdr);
+		}
+
+		/* Floating HUD Overlay on top-right: minimap, target card, room contents, gauges */
 		bud_node *overlay = bud_element("div");
 		bud_set_attr(overlay, "id", "map-overlay");
 		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end max-w-[340px] max-h-[calc(100vh-100px)] overflow-y-auto");
 		bud_set_attr(overlay, "style", "top:12px;right:12px");
-
-		bud_node *room_hdr = render_room_header(st);
-		if (room_hdr) {
-			bud_set_attr(room_hdr, "data-bud-key", "room-header");
-			bud_append(overlay, room_hdr);
-		}
 
 		if (map) {
 			bud_node *map_box = bud_element("div");
@@ -788,17 +835,26 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		}
 
 		bud_node *gauges = render_gauges_slot(st);
-		bud_node *actions = render_action_bar(st);
-		if (gauges || actions) {
+		if (gauges) {
 			bud_node *stat_box = bud_element("div");
-			bud_set_attr(stat_box, "data-bud-key", "action-dock");
+			bud_set_attr(stat_box, "data-bud-key", "gauges-dock");
 			bud_set_attr(stat_box, "class", "rpg-hud-panel pointer-events-auto flex flex-col gap-1 items-end p-1.5 w-full");
-			if (gauges) bud_append(stat_box, gauges);
-			if (actions) bud_append(stat_box, actions);
+			bud_append(stat_box, gauges);
 			bud_append(overlay, stat_box);
 		}
 
 		bud_append(holder, overlay);
+
+		/* Floating Bottom-Right Actions Dock */
+		bud_node *actions = render_action_bar(st);
+		if (actions) {
+			bud_node *act_dock = bud_element("div");
+			bud_set_attr(act_dock, "id", "bottom-right-actions");
+			bud_set_attr(act_dock, "data-bud-key", "bottom-right-actions");
+			bud_set_attr(act_dock, "class", "pointer-events-auto");
+			bud_append(act_dock, actions);
+			bud_append(holder, act_dock);
+		}
 
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
