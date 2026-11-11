@@ -24,6 +24,16 @@ export function createAxilTtyBridge(root, getWasm) {
 	let line_buf = "";
 	const LINE_MAX = 1024;
 	let resizeRaf = 0;
+	let resizeObs = null;
+	let pendingWriteBuf = [];
+
+	function flushPendingWrites() {
+		if (!term || pendingWriteBuf.length === 0) return;
+		for (const chunk of pendingWriteBuf) {
+			try { term.write(chunk); } catch (_) {}
+		}
+		pendingWriteBuf = [];
+	}
 
 	function attachTerm(termEl, TerminalClass) {
 		if (term) return;
@@ -78,23 +88,37 @@ export function createAxilTtyBridge(root, getWasm) {
 		}
 
 		term.open(termEl);
+		flushPendingWrites();
 		if (fit && typeof requestAnimationFrame === 'function') {
 			requestAnimationFrame(() => {
 				try { fit.fit(); } catch (_) {}
 			});
 		}
 
+		function scheduleFit() {
+			if (resizeRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(resizeRaf);
+			if (typeof requestAnimationFrame === 'function') {
+				resizeRaf = requestAnimationFrame(() => {
+					resizeRaf = 0;
+					if (fit) {
+						try { fit.fit(); } catch (_) {}
+					}
+				});
+			}
+		}
+
 		if (typeof window !== 'undefined' && window.addEventListener) {
-			window.addEventListener('resize', () => {
-				if (resizeRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(resizeRaf);
-				if (typeof requestAnimationFrame === 'function') {
-					resizeRaf = requestAnimationFrame(() => {
-						if (fit) {
-							try { fit.fit(); } catch (_) {}
-						}
-					});
-				}
-			});
+			window.addEventListener('resize', scheduleFit);
+		}
+
+		if (typeof ResizeObserver !== 'undefined') {
+			try {
+				resizeObs = new ResizeObserver(() => scheduleFit());
+				resizeObs.observe(termEl);
+				if (termEl.parentElement) resizeObs.observe(termEl.parentElement);
+			} catch (_) {
+				resizeObs = null;
+			}
 		}
 
 		term.onResize(() => sendNaws());
@@ -171,6 +195,10 @@ export function createAxilTtyBridge(root, getWasm) {
 	}
 
 	function destroyInternal() {
+		if (resizeObs) {
+			try { resizeObs.disconnect(); } catch (_) {}
+			resizeObs = null;
+		}
 		if (resizeRaf) {
 			cancelAnimationFrame(resizeRaf);
 			resizeRaf = 0;
@@ -185,12 +213,16 @@ export function createAxilTtyBridge(root, getWasm) {
 		}
 		fit = null;
 		line_buf = "";
+		pendingWriteBuf = [];
 		will_echo = true;
 	}
 
 	return {
 		mount() {
-			const termEl = (root && root.querySelector('[data-bud-terminal]')) || document.querySelector('[data-bud-terminal]');
+			const termEl = (root && root.matches && root.matches('[data-bud-terminal]'))
+				? root
+				: ((root && root.querySelector && root.querySelector('[data-bud-terminal]')) ||
+				   (typeof document !== 'undefined' && document.querySelector && document.querySelector('[data-bud-terminal]')));
 			if (!termEl) {
 				if (term && term.element && (!document.contains || !document.contains(term.element))) {
 					destroyInternal();
@@ -199,14 +231,13 @@ export function createAxilTtyBridge(root, getWasm) {
 			}
 
 			if (term) {
-				const isSame = (term.element === termEl) || (term.element && term.element.parentElement === termEl);
-				if (isSame && (!document.contains || document.contains(termEl))) {
+				if (term.element === termEl && (!document.contains || document.contains(termEl))) {
 					return;
 				}
 				destroyInternal();
 			}
 
-			if (term && termEl.__attached && termEl.querySelector && termEl.querySelector('.xterm')) return;
+			if (termEl.__attached && termEl.querySelector && termEl.querySelector('.xterm')) return;
 			termEl.__attached = true;
 
 			function loadScript(src, fallbackSrc, cb) {
@@ -267,11 +298,14 @@ export function createAxilTtyBridge(root, getWasm) {
 		makeImports() {
 			return {
 				term_write(str_ptr, str_len) {
-					if (!term) return;
 					const exports = getWasm();
 					if (!exports || !exports.memory) return;
 					const text = readWasmStr(exports.memory, str_ptr, str_len);
-					term.write(text);
+					if (term) {
+						term.write(text);
+					} else if (pendingWriteBuf.length < 50) {
+						pendingWriteBuf.push(text);
+					}
 				}
 			};
 		},

@@ -71,6 +71,13 @@ static bud_node *mount_tty(void)
 
 static int s_chat_expanded = 0;
 static int s_chat_minimized = 0;
+static int s_chat_w = 0;
+static int s_chat_h = 0;
+static int s_chat_resize_mode = 0;
+static int s_resize_start_x = 0;
+static int s_resize_start_y = 0;
+static int s_resize_start_w = 0;
+static int s_resize_start_h = 0;
 
 int nd_ui_get_chat_expanded(void)
 {
@@ -92,9 +99,105 @@ void nd_ui_set_chat_minimized(int minimized)
 	s_chat_minimized = minimized ? 1 : 0;
 }
 
+int nd_ui_get_chat_width(void)
+{
+	return s_chat_w;
+}
+
+int nd_ui_get_chat_height(void)
+{
+	return s_chat_h;
+}
+
+void nd_ui_set_chat_size(int width, int height)
+{
+	s_chat_w = width > 0 ? width : 0;
+	s_chat_h = height > 0 ? height : 0;
+}
+
+static void parse_mouse_coords(bud_event *ev, int *cx, int *cy, int *vw, int *vh)
+{
+	*cx = 0;
+	*cy = 0;
+	*vw = 0;
+	*vh = 0;
+	const char *s = ev ? (const char *)ev->user : NULL;
+	if (!s || !*s)
+		return;
+	sscanf(s, "%d,%d,%d,%d", cx, cy, vw, vh);
+}
+
+static int start_chat_resize(bud_event *ev, int mode)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	if (s_chat_minimized) return 0;
+	int cx = 0, cy = 0, vw = 0, vh = 0;
+	parse_mouse_coords(ev, &cx, &cy, &vw, &vh);
+	s_chat_resize_mode = mode;
+	s_resize_start_x = cx;
+	s_resize_start_y = cy;
+	int def_w = (vw > 0) ? (vw / 2) : 540;
+	if (def_w < 360) def_w = 360;
+	s_resize_start_w = (s_chat_w > 0) ? s_chat_w : def_w;
+	s_resize_start_h = (s_chat_h > 0) ? s_chat_h : (s_chat_expanded ? 420 : 180);
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_chat_resize_n_down(bud_event *ev)
+{
+	return start_chat_resize(ev, 1);
+}
+
+static int on_chat_resize_e_down(bud_event *ev)
+{
+	return start_chat_resize(ev, 2);
+}
+
+static int on_chat_resize_ne_down(bud_event *ev)
+{
+	return start_chat_resize(ev, 3);
+}
+
+static int on_chat_resize_move(bud_event *ev)
+{
+	if (!s_chat_resize_mode || s_chat_minimized) return 0;
+	int cx = 0, cy = 0, vw = 0, vh = 0;
+	parse_mouse_coords(ev, &cx, &cy, &vw, &vh);
+	if (cx == 0 && cy == 0 && vw == 0 && vh == 0) return 0;
+	if (s_chat_resize_mode & 2) {
+		int nw = s_resize_start_w + (cx - s_resize_start_x);
+		int max_w = (vw > 0) ? (vw * 85 / 100) : 1600;
+		if (max_w < 360) max_w = 360;
+		if (nw < 360) nw = 360;
+		if (nw > max_w) nw = max_w;
+		s_chat_w = nw;
+	}
+	if (s_chat_resize_mode & 1) {
+		int nh = s_resize_start_h + (s_resize_start_y - cy);
+		int max_h = (vh > 140) ? (vh - 110) : 800;
+		if (max_h < 110) max_h = 110;
+		if (nh < 110) nh = 110;
+		if (nh > max_h) nh = max_h;
+		s_chat_h = nh;
+	}
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_chat_resize_up(bud_event *ev)
+{
+	(void)ev;
+	if (!s_chat_resize_mode) return 0;
+	s_chat_resize_mode = 0;
+	bud_app_set_state();
+	return 0;
+}
+
 static int on_minimize_chat(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
+	s_chat_resize_mode = 0;
 	s_chat_minimized = !s_chat_minimized;
 	bud_app_set_state();
 	return 0;
@@ -103,6 +206,8 @@ static int on_minimize_chat(bud_event *ev)
 static int on_toggle_chat(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
+	s_chat_resize_mode = 0;
+	s_chat_h = 0;
 	if (s_chat_minimized) {
 		s_chat_minimized = 0;
 		s_chat_expanded = 1;
@@ -118,12 +223,43 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 	(void)st;
 	bud_node *chat = bud_element("div");
 	bud_set_attr(chat, "id", "rpg-chat");
-	const char *chat_cls = s_chat_minimized
-		? "rpg-chat chat-minimized pointer-events-auto"
-		: (s_chat_expanded
-			? "rpg-chat chat-expanded pointer-events-auto"
-			: "rpg-chat chat-compact pointer-events-auto");
+	char chat_cls[128];
+	snprintf(chat_cls, sizeof(chat_cls), "rpg-chat %s%s pointer-events-auto",
+		s_chat_minimized
+			? "chat-minimized"
+			: (s_chat_expanded ? "chat-expanded" : "chat-compact"),
+		s_chat_resize_mode ? " chat-resizing" : "");
 	bud_set_attr(chat, "class", chat_cls);
+
+	if (!s_chat_minimized && (s_chat_w > 0 || s_chat_h > 0)) {
+		char style_buf[96];
+		if (s_chat_w > 0 && s_chat_h > 0)
+			snprintf(style_buf, sizeof(style_buf), "width:%dpx;height:%dpx;", s_chat_w, s_chat_h);
+		else if (s_chat_w > 0)
+			snprintf(style_buf, sizeof(style_buf), "width:%dpx;", s_chat_w);
+		else
+			snprintf(style_buf, sizeof(style_buf), "height:%dpx;", s_chat_h);
+		bud_set_attr(chat, "style", style_buf);
+	}
+
+	/* Windows-style click-and-drag edge & corner resize handles */
+	bud_node *res_n = bud_element("div");
+	bud_set_attr(res_n, "id", "chat-resize-n");
+	bud_set_attr(res_n, "class", "chat-resize-handle chat-resize-n");
+	bud_bind(res_n, "mousedown", 0, on_chat_resize_n_down);
+	bud_append(chat, res_n);
+
+	bud_node *res_e = bud_element("div");
+	bud_set_attr(res_e, "id", "chat-resize-e");
+	bud_set_attr(res_e, "class", "chat-resize-handle chat-resize-e");
+	bud_bind(res_e, "mousedown", 0, on_chat_resize_e_down);
+	bud_append(chat, res_e);
+
+	bud_node *res_ne = bud_element("div");
+	bud_set_attr(res_ne, "id", "chat-resize-ne");
+	bud_set_attr(res_ne, "class", "chat-resize-handle chat-resize-ne");
+	bud_bind(res_ne, "mousedown", 0, on_chat_resize_ne_down);
+	bud_append(chat, res_ne);
 
 	/* Header bar with title and micro-icon window controls */
 	bud_node *hdr = bud_element("div");
@@ -805,13 +941,13 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		/* Floating HUD Overlay on top-right: minimap, target card, room contents, gauges */
 		bud_node *overlay = bud_element("div");
 		bud_set_attr(overlay, "id", "map-overlay");
-		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end max-w-[340px] max-h-[calc(100vh-100px)] overflow-y-auto");
-		bud_set_attr(overlay, "style", "top:12px;right:12px");
+		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end max-w-[340px] overflow-y-auto");
+		bud_set_attr(overlay, "style", "top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)");
 
 		if (map) {
 			bud_node *map_box = bud_element("div");
 			bud_set_attr(map_box, "data-bud-key", "minimap");
-			bud_set_attr(map_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden");
+			bud_set_attr(map_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden flex-shrink-0");
 			bud_append(map_box, map);
 			bud_append(overlay, map_box);
 		}
@@ -820,7 +956,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			bud_node *tc = render_target_card(st);
 			bud_node *tc_box = bud_element("div");
 			bud_set_attr(tc_box, "data-bud-key", "target-card");
-			bud_set_attr(tc_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden");
+			bud_set_attr(tc_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden flex-shrink-0");
 			bud_append(tc_box, tc);
 			bud_append(overlay, tc_box);
 		}
@@ -829,7 +965,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		if (contents) {
 			bud_node *cnt_box = bud_element("div");
 			bud_set_attr(cnt_box, "data-bud-key", "contents");
-			bud_set_attr(cnt_box, "class", "rpg-hud-panel pointer-events-auto p-1.5 w-full flex flex-col flex-1 min-h-[60px] max-h-[50vh] overflow-y-auto");
+			bud_set_attr(cnt_box, "class", "rpg-hud-panel pointer-events-auto p-1.5 w-full flex flex-col flex-initial min-h-[48px] max-h-[22vh] overflow-y-auto");
 			bud_append(cnt_box, contents);
 			bud_append(overlay, cnt_box);
 		}
@@ -838,7 +974,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		if (gauges) {
 			bud_node *stat_box = bud_element("div");
 			bud_set_attr(stat_box, "data-bud-key", "gauges-dock");
-			bud_set_attr(stat_box, "class", "rpg-hud-panel pointer-events-auto flex flex-col gap-1 items-end p-1.5 w-full");
+			bud_set_attr(stat_box, "class", "rpg-hud-panel pointer-events-auto flex flex-col gap-1 items-end p-1.5 w-full flex-shrink-0");
 			bud_append(stat_box, gauges);
 			bud_append(overlay, stat_box);
 		}
@@ -875,6 +1011,8 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
 		bud_bind(root, "keydown@window", 0, on_key_down);
 		bud_bind(root, "keyup@window", 0, on_key_up);
+		bud_bind(root, "mousemove@window", 0, on_chat_resize_move);
+		bud_bind(root, "mouseup@window", 0, on_chat_resize_up);
 		return root;
 	}
 

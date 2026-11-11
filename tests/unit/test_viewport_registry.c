@@ -71,14 +71,28 @@ int main(void)
 	assert(strstr(html, "id=\"room-map\"") != NULL);
 	assert(strstr(html, "game-2d-mode") != NULL);
 
-	/* Must contain RPG chat console with micro-icon controls and terminal */
+	/* Must contain RPG chat console with micro-icon controls, resize handles, and terminal */
 	assert(strstr(html, "id=\"rpg-chat\"") != NULL);
 	assert(strstr(html, "id=\"chat-min-btn\"") != NULL);
 	assert(strstr(html, "id=\"chat-toggle-btn\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-n\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-e\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-ne\"") != NULL);
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "chat-compact") != NULL);
 	assert(strstr(html, "—") != NULL);
 	assert(strstr(html, "⤢") != NULL);
+
+	/* Test Windows-style drag resize dimensions on #rpg-chat */
+	nd_ui_set_chat_size(640, 300);
+	assert(nd_ui_get_chat_width() == 640);
+	assert(nd_ui_get_chat_height() == 300);
+	bud_free_string(html);
+	root = nd_ui_render(&st);
+	html = bud_render_html(root);
+	assert(html != NULL);
+	assert(strstr(html, "style=\"width:640px;height:300px;\"") != NULL);
+	nd_ui_set_chat_size(0, 0);
 
 	/* Test chat toggle mutation into expanded state */
 	nd_ui_set_chat_expanded(1);

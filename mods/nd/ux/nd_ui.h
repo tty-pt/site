@@ -39,6 +39,9 @@ int nd_ui_get_chat_expanded(void);
 void nd_ui_set_chat_expanded(int expanded);
 int nd_ui_get_chat_minimized(void);
 void nd_ui_set_chat_minimized(int minimized);
+int nd_ui_get_chat_width(void);
+int nd_ui_get_chat_height(void);
+void nd_ui_set_chat_size(int width, int height);
 
 /*
  * Client WASM entrypoint rehydrating JSON state from SSR.

@@ -172,6 +172,17 @@ function buildEventPayload(info, event) {
 		}
 		return event.key || '';
 	}
+	if (event && (info.event === 'mousedown' || info.event === 'mousemove' || info.event === 'mouseup' ||
+	    info.event === 'pointerdown' || info.event === 'pointermove' || info.event === 'pointerup')) {
+		if (info.event === 'mousedown' && !info.bubbles && typeof event.preventDefault === 'function') {
+			event.preventDefault();
+		}
+		const doc = getDocumentForNode(info.node);
+		const view = doc && doc.defaultView;
+		const vw = view && view.innerWidth ? view.innerWidth : 0;
+		const vh = view && view.innerHeight ? view.innerHeight : 0;
+		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh}`;
+	}
 	return buildControlValue(event && event.target);
 }
 
@@ -365,7 +376,7 @@ class BudHostBase {
 				options: spec.event === 'scroll' ? { passive: true } : false,
 				frameId: 0, lastEvent: null };
 			boundHandler = handler;
-			if (spec.event === 'scroll') {
+			if (spec.event === 'scroll' || spec.event === 'mousemove' || spec.event === 'pointermove') {
 				boundHandler = (event) => {
 					record.lastEvent = event;
 					if (record.frameId) return;
@@ -901,17 +912,54 @@ export class BudWasmBridge {
 	}
 
 	mount(instance, state) {
-		if (instance) {
-			this.wasm = instance;
-			this.memory = instance.exports?.memory || instance.memory || this.memory;
+		this.wasm = instance;
+		this.memory = instance.exports?.memory || instance.memory || this.memory;
+		if (this.wasm) {
 			this.rescan();
 		}
-		if (!this._mounted) {
-			this._mounted = true;
-			const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
-			if (fn) {
-				fn();
-			}
+		return this;
+	}
+
+	update(slot) {
+		this.flush();
+		return this;
+	}
+
+	unmount(slot) {
+		return this;
+	}
+
+	emitPatch(op, a, b, c) {
+		if (this.host && typeof this.host.replay === 'function') {
+			this.host.replay([{ op, a, b, c }]);
+		}
+	}
+
+	setWasm(wasm) {
+		this.wasm = wasm || null;
+		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
+		if (this.wasm) {
+			this.rescan();
+		}
+		return this;
+	}
+
+	rescan() {
+		if (this.host) {
+			this.host.autoBindListeners();
+		}
+		return this;
+	}
+
+	setMemory(memory) {
+		this.memory = memory || null;
+		return this;
+	}
+
+	mount() {
+		const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
+		if (fn) {
+			fn();
 		}
 		if (typeof document !== 'undefined') {
 			if (this._docClickListener) {
@@ -950,43 +998,6 @@ export class BudWasmBridge {
 			};
 			document.addEventListener('click', this._docClickListener);
 		}
-		return this;
-	}
-
-	update(slot) {
-		this.flush();
-		return this;
-	}
-
-	unmount(slot) {
-		this._mounted = false;
-		return this;
-	}
-
-	emitPatch(op, a, b, c) {
-		if (this.host && typeof this.host.replay === 'function') {
-			this.host.replay([{ op, a, b, c }]);
-		}
-	}
-
-	setWasm(wasm) {
-		this.wasm = wasm || null;
-		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
-		if (this.wasm) {
-			this.rescan();
-		}
-		return this;
-	}
-
-	rescan() {
-		if (this.host) {
-			this.host.autoBindListeners();
-		}
-		return this;
-	}
-
-	setMemory(memory) {
-		this.memory = memory || null;
 		return this;
 	}
 

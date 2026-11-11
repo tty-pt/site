@@ -151,6 +151,17 @@ nd-stage,
 
 #map-overlay {
     z-index: 30 !important;
+    top: 12px !important;
+    right: 12px !important;
+    bottom: 76px !important;
+    max-height: calc(100% - 88px) !important;
+    overflow-y: auto !important;
+}
+
+#map-overlay [data-bud-key="contents"] {
+    flex: 0 1 auto !important;
+    max-height: 22vh !important;
+    overflow-y: auto !important;
 }
 
 /* Floating RPG Chat Terminal */
@@ -169,19 +180,20 @@ nd-stage,
     border-radius: 8px !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
     overflow: hidden !important;
-    resize: both !important;
-    width: 50vw !important;
+    resize: both;
+    width: 50vw;
     min-width: 360px !important;
     max-width: 85vw !important;
 }
 
 .rpg-chat.chat-compact {
-    height: 180px !important;
+    height: 180px;
     min-height: 110px !important;
+    max-height: calc(100vh - 100px) !important;
 }
 
 .rpg-chat.chat-expanded {
-    height: 420px !important;
+    height: 420px;
     min-height: 160px !important;
     max-height: calc(100vh - 100px) !important;
 }
@@ -194,7 +206,8 @@ nd-stage,
     resize: none !important;
 }
 
-.rpg-chat.chat-minimized #term {
+.rpg-chat.chat-minimized #term,
+.rpg-chat.chat-minimized .chat-resize-handle {
     display: none !important;
 }
 
@@ -202,11 +215,52 @@ nd-stage,
     border-bottom: none !important;
 }
 
+.chat-resize-handle {
+    position: absolute !important;
+    z-index: 30 !important;
+    user-select: none !important;
+    pointer-events: auto !important;
+}
+
+.chat-resize-n {
+    top: 0 !important;
+    left: 0 !important;
+    right: 10px !important;
+    height: 6px !important;
+    cursor: ns-resize !important;
+}
+
+.chat-resize-e {
+    top: 10px !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 6px !important;
+    cursor: ew-resize !important;
+}
+
+.chat-resize-ne {
+    top: 0 !important;
+    right: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 35 !important;
+    cursor: nesw-resize !important;
+}
+
+.rpg-chat.chat-resizing,
+.rpg-chat.chat-resizing * {
+    user-select: none !important;
+}
+
+.rpg-chat.chat-resizing #term {
+    pointer-events: none !important;
+}
+
 .chat-header {
     display: flex !important;
     align-items: center !important;
     justify-content: space-between !important;
-    padding: 4px 8px !important;
+    padding: 6px 10px 4px 10px !important;
     background: rgba(18, 20, 28, 0.72) !important;
     border-bottom: 1px solid rgba(149, 137, 197, 0.28) !important;
     font-size: 11px !important;
@@ -355,16 +409,16 @@ nd-stage,
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Allow room contents to grow vertically in 2D mode and in RPG HUD panels */
+/* Cap room contents vertically in 2D mode and in RPG HUD panels so it scrolls and never overlaps action buttons */
 .game-2d-mode nd-contents,
 .game-2d-mode .nd-contents,
 .rpg-hud-panel nd-contents,
 .rpg-hud-panel .nd-contents,
 #holder.game-2d-mode nd-contents,
 #holder.game-2d-mode .nd-contents {
-    max-height: none !important;
-    flex: 1 1 auto !important;
+    max-height: 20vh !important;
+    flex: 0 1 auto !important;
     height: auto !important;
-    overflow-y: visible !important;
+    overflow-y: auto !important;
 }
 

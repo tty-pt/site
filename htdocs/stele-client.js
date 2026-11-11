@@ -82,6 +82,9 @@ export class SteleWasmClient {
 		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName }
 		this.slotBridges = new Map();
 		this.activeBridges = [];
+		if (typeof window !== 'undefined') {
+			window.__active_bridges = this.activeBridges;
+		}
 		this.eventListeners = new Map();
 	}
 
@@ -215,6 +218,7 @@ export class SteleWasmClient {
 			} else if (typeof bridge.host?.replay === 'function') {
 				bridge.host.replay([{ op, a, b, c }]);
 			}
+			this._scheduleBatchRemount();
 		};
 
 		const hostLog = (msgPtr, len) => {
@@ -646,6 +650,9 @@ export class SteleWasmClient {
 
 					if (compImports.__candidateBridges) {
 						this.activeBridges.push(...compImports.__candidateBridges);
+						if (typeof window !== 'undefined') {
+							window.__active_bridges = this.activeBridges;
+						}
 					}
 
 					if (instance.exports._initialize) instance.exports._initialize();
@@ -772,22 +779,49 @@ export class SteleWasmClient {
 		if (comp?.instance) {
 			if (comp.instance.exports.wasm_update) {
 				comp.instance.exports.wasm_update(slot);
+				this._scheduleBatchRemount();
 				return;
 			}
 			const updateFn = comp.instance.exports.stl_kernel_update || comp.instance.exports.stele_kernel_update;
 			if (updateFn) {
 				updateFn(slot);
+				this._scheduleBatchRemount();
 				return;
 			}
 		}
 		const instUpdateFn = this.instance?.exports.stl_kernel_update || this.instance?.exports.stele_kernel_update;
 		if (instUpdateFn) {
 			instUpdateFn(slot);
+			this._scheduleBatchRemount();
 			return;
 		}
 		const bridge = this.slotBridges.get(slot);
 		if (bridge && typeof bridge.update === 'function') {
 			bridge.update(slot);
+		}
+		this._scheduleBatchRemount();
+	}
+
+	_scheduleBatchRemount() {
+		if (this._remountScheduled) return;
+		this._remountScheduled = true;
+		const scheduleFn = (typeof queueMicrotask === 'function')
+			? queueMicrotask
+			: (fn) => setTimeout(fn, 0);
+		scheduleFn(() => {
+			this._remountScheduled = false;
+			this._remountActiveBridges();
+		});
+	}
+
+	_remountActiveBridges() {
+		if (typeof window !== 'undefined') {
+			window.__active_bridges = this.activeBridges;
+		}
+		for (const cap of this.activeBridges) {
+			if (typeof cap.mount === 'function') {
+				try { cap.mount(); } catch (err) { console.error('cap.mount error:', err); }
+			}
 		}
 	}
 

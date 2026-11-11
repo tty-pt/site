@@ -50,13 +50,15 @@ int main(void)
 		const char *ov_end = strchr(ov, '>');
 		char *ov_tag = strndup(ov, (size_t)(ov_end - ov));
 		assert(strstr(ov_tag, "absolute") && strstr(ov_tag, "z-10"));
-		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px"));
+		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px") && strstr(ov_tag, "bottom:76px"));
 		free(ov_tag);
 		assert(map > ov);
 		const char *rh = strstr(html, "id=\"room-header\"");
 		const char *bra = strstr(html, "id=\"bottom-right-actions\"");
 		assert(rh != NULL && rh < ov);
 		assert(bra != NULL && bra > ov);
+		assert(strstr(html, "max-h-[22vh]"));
+		assert(strstr(html, "id=\"chat-resize-ne\""));
 		assert(strstr(html, "game-2d-mode relative"));
 	}
 
