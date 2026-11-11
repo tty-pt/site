@@ -673,6 +673,52 @@ nd_field_sample(uint16_t world, uint8_t lod, int32_t wx, int32_t wy)
 	return nd_field_sample_at_azimuth(world, lod, wx, wy, nd_field_get_sun_azimuth());
 }
 
+#ifndef ND_XXH32_U32_DEFINED
+#define ND_XXH32_U32_DEFINED 1
+static inline uint32_t
+nd_xxh32_u32(uint32_t val, uint32_t seed)
+{
+	uint32_t h32 = seed + 0x165667B1u + 4u;
+	h32 += val * 0xC2B2AE3Du;
+	h32 = ((h32 << 17) | (h32 >> 15)) * 0x27D4EB2Fu;
+	h32 ^= h32 >> 15;
+	h32 *= 0x85EBCA77u;
+	h32 ^= h32 >> 13;
+	h32 *= 0xC2B2AE3Du;
+	h32 ^= h32 >> 16;
+	return h32;
+}
+#endif
+
+static inline void
+nd_field_normalize_noise(const nd_field_sample_t *fs, uint16_t obits,
+                         int32_t rx, int32_t ry,
+                         uint32_t *out_he, uint32_t *out_w,
+                         uint32_t *out_tm, uint32_t *out_cl)
+{
+	uint32_t w = nd_field_water_noise(obits);
+	uint32_t rhash = nd_xxh32_u32((uint32_t)rx * 73856093u ^ (uint32_t)ry * 19349663u,
+	                              (uint32_t)obits ^ 0x9E3779B9u);
+	int64_t norm_he;
+	if (fs->elevation <= 0) {
+		norm_he = (int64_t)w + ((int64_t)fs->elevation * (int64_t)w) / 2000;
+		if (norm_he < 0) norm_he = 0;
+		if (norm_he > (int64_t)w) norm_he = (int64_t)w;
+	} else {
+		norm_he = (int64_t)w + ((int64_t)fs->elevation * (int64_t)(NOISE_MAX - w)) / 1854;
+		norm_he ^= (int64_t)(rhash & 0xFFFu);
+		if (norm_he <= (int64_t)w) norm_he = (int64_t)w + 1 + (int64_t)(rhash & 0xFFu);
+		if (norm_he > NOISE_MAX) norm_he = NOISE_MAX;
+	}
+	uint32_t tm = (uint32_t)(((int64_t)(fs->temp - ND_FIELD_TEMP_MIN) * NOISE_MAX) /
+	                         (ND_FIELD_TEMP_MAX - ND_FIELD_TEMP_MIN));
+	tm ^= (rhash >> 12) & 0xFFFu;
+	if (out_he) *out_he = (uint32_t)norm_he;
+	if (out_w)  *out_w  = w;
+	if (out_tm) *out_tm = tm;
+	if (out_cl) *out_cl = fs->rain * ND_FIELD_RAIN_DIV;
+}
+
 
 /* Shared multi-resolution field chunk type */
 typedef struct {

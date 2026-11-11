@@ -227,6 +227,8 @@ INSTALL_PKGS = libstele libcorm libxylem liblemma libjoint libislet libsepal \
 	axil axil-auth axil-hyle axil-tty axil-nd \
 	$(INSTALL_ND_CORE) $(INSTALL_ND_OTHER)
 
+install: install-libs
+
 install-libs:
 	@for p in $(INSTALL_PKGS); do \
 		$(SUDO) $(MAKE) -C external/$$p PREFIX="$(PREFIX)" install || exit 1; \
@@ -577,4 +579,4 @@ run-universe:
 run-sector32:
 	@$(MAKE) run-universe ND_PLANETS=32 ND_DB=var/nd/sector32.db
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib pitch-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib areole-lib chunk-lib chaff-lib noise-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs corm-lib xylem-lib install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e stage-assets assets-sync seed-universe test-universe run-universe run-sector32
+.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib pitch-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib areole-lib chunk-lib chaff-lib noise-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs corm-lib xylem-lib install install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e stage-assets assets-sync seed-universe test-universe run-universe run-sector32

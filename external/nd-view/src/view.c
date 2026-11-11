@@ -291,10 +291,7 @@ dr_hs_n(char *b, view_tile_t *t)
 	int toggle;
 
 	for (wp = "",
-	     bg = biome_bg(
-		     t->room == NOTHING
-		     ? t->bio_idx
-		     : floor_get(t->room)) ;
+	     bg = biome_bg(t->bio_idx) ;
 	     t < t_max ;
 	     bg = biome_bg(floor),
 	     b = dr_h(b, bg, wp, w, toggle),
@@ -368,11 +365,7 @@ view_build_exit_z(view_tile_t *t, ROO *rloc, enum exit e) {
 }
 
 static inline void
-view_build_exit_s(view_tile_t *t, pos_t p, enum exit e) {
-	pos_t pa;
-	pos_move(pa, p, e);
-	unsigned tmp_ref = map_get(pa);
-
+view_build_exit_s_ref(view_tile_t *t, unsigned tmp_ref, enum exit e) {
 	if (tmp_ref == NOTHING) {
 		t->exits |= e;
 		return;
@@ -418,7 +411,9 @@ view_build_flags(unsigned loc_ref) {
 }
 
 static void
-view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
+view_build_tile(struct bio *n, unsigned loc_ref,
+                unsigned e_ref, unsigned n_ref, unsigned w_ref, unsigned s_ref,
+                view_tile_t *t)
 {
 	t->room = loc_ref;
 	if (loc_ref != NOTHING) {
@@ -432,14 +427,12 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 		view_build_exit_z(t, rloc, E_UP);
 		view_build_exit_z(t, rloc, E_DOWN);
 		t->flags = view_build_flags(loc_ref);
-		t->bio_idx = floor_get(loc_ref);
+		t->bio_idx = (rloc->floor > BIOME_VOLCANIC) ? BIOME_VOLCANIC : rloc->floor;
 	} else {
-		view_build_exit_s(t, p, E_EAST);
-		view_build_exit_s(t, p, E_NORTH);
-		view_build_exit_s(t, p, E_WEST);
-		view_build_exit_s(t, p, E_SOUTH);
-		/* view_build_exit_sz(t, descr, player, loc, E_UP); */
-		/* view_build_exit_sz(t, descr, player, loc, E_DOWN); */
+		view_build_exit_s_ref(t, e_ref, E_EAST);
+		view_build_exit_s_ref(t, n_ref, E_NORTH);
+		view_build_exit_s_ref(t, w_ref, E_WEST);
+		view_build_exit_s_ref(t, s_ref, E_SOUTH);
 		t->bio_idx = n->bio_idx;
 	}
 
@@ -451,48 +444,41 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 	memcpy(&t->raw, &n->raw, sizeof(n->raw));
 }
 
-static inline view_tile_t *
-_view_build(struct bio *n, unsigned *g, view_tile_t *b, pos_t p)
-{
-	unsigned *g_max = g + VIEW_SIZE;
-
-	// TODO vary p vertically and horizontally
-	for (; g < g_max ; n++, g++, b++, p[1]++)
-		view_build_tile(n, *g, b, p);
-
-        return b;
-}
+#define VIEW_PAD_AROUND (VIEW_AROUND + 1)
+#define VIEW_PAD_SIZE   ((VIEW_PAD_AROUND << 1) + 1)
+#define VIEW_PAD_M      (VIEW_PAD_SIZE * VIEW_PAD_SIZE)
 
 void
 eng_view(unsigned player_ref)
 {
-	struct bio bd[VIEW_M], *n_p = bd,
-		   *n_max = &bd[VIEW_BDI + 1];
+	struct bio bd[VIEW_M];
 	pos_t pos, opos;
 	OBJ player;
 	nd_get(HD_OBJ, &(player), &player_ref);
 	map_where(opos, player.location);
 	view_t view;
-        view_tile_t *p = view;
-	unsigned o[VIEW_M], *o_p = o;
+	unsigned o_pad[VIEW_PAD_M];
 	uint64_t position = map_mwhere(player.location);
 	biome_map = biome_map_get(position);
 
 	memcpy(pos, opos, sizeof(pos));
 	nd_noise_view(bd, pos);
-	map_search(o, pos, VIEW_AROUND);
+	/* Single padded Morton range query covers all VIEW_SIZE x VIEW_SIZE tiles
+	 * plus their 4 cardinal neighbors with zero extra map_get() point queries. */
+	map_search(o_pad, pos, VIEW_PAD_AROUND);
 	memset(view, 0, sizeof(view));
 
 	for (int row = 0; row < VIEW_SIZE; row++) {
+		int prow = row + 1;
 		for (int col = 0; col < VIEW_SIZE; col++) {
+			int pcol = col + 1;
 			int i = row * VIEW_SIZE + col;
-			pos_t p = {
-				opos[0] - VIEW_AROUND + col,
-				opos[1] + VIEW_AROUND - row,
-				opos[2],
-				opos[3]
-			};
-			view_build_tile(&bd[i], o[i], &view[i], p);
+			unsigned loc_ref = o_pad[prow * VIEW_PAD_SIZE + pcol];
+			unsigned e_ref   = o_pad[prow * VIEW_PAD_SIZE + (pcol + 1)];
+			unsigned n_ref   = o_pad[(prow - 1) * VIEW_PAD_SIZE + pcol];
+			unsigned w_ref   = o_pad[prow * VIEW_PAD_SIZE + (pcol - 1)];
+			unsigned s_ref   = o_pad[(prow + 1) * VIEW_PAD_SIZE + pcol];
+			view_build_tile(&bd[i], loc_ref, e_ref, n_ref, w_ref, s_ref, &view[i]);
 		}
 	}
 
@@ -534,22 +520,32 @@ eng_view(unsigned player_ref)
 			}
 		}
 
-		/* Compute 2D projected water coverage: >50% surface area submerged */
-		int rx = opos[0] - VIEW_AROUND + (i % VIEW_SIZE);
-		int ry = opos[1] + VIEW_AROUND - (i / VIEW_SIZE);
-		uint16_t rworld = (uint16_t)opos[3];
-		int32_t ox = (int32_t)rx * 160;
-		int32_t oy = -(int32_t)ry * 128;
-		int submerged_count = 0;
-		for (int sy = 16; sy < 128; sy += 32) {
-			for (int sx = 20; sx < 160; sx += 40) {
-				nd_field_sample_t s = nd_field_sample(rworld, 0, ox + sx, oy + sy);
-				if (s.elevation < s.water_level)
-					submerged_count++;
+		/* Compute 2D projected water coverage: >50% surface area submerged.
+		 * Fast path: when the tile center elevation in vt is clearly above or
+		 * below water_level (> 12 block units), the 4x4 sub-grid cannot cross
+		 * the shoreline threshold, avoiding 16 redundant noise evaluations. */
+		if (vt->water_level > 0) {
+			int32_t elev_diff = (int32_t)vt->elevation - (int32_t)vt->water_level;
+			if (elev_diff < -12) {
+				flags |= ND_MAP_FLAG_WATER;
+			} else if (elev_diff <= 12) {
+				int rx = opos[0] - VIEW_AROUND + (i % VIEW_SIZE);
+				int ry = opos[1] + VIEW_AROUND - (i / VIEW_SIZE);
+				uint16_t rworld = (uint16_t)opos[3];
+				int32_t ox = (int32_t)rx * 160;
+				int32_t oy = -(int32_t)ry * 128;
+				int submerged_count = 0;
+				for (int sy = 16; sy < 128; sy += 32) {
+					for (int sx = 20; sx < 160; sx += 40) {
+						nd_field_sample_t s = nd_field_sample(rworld, 0, ox + sx, oy + sy);
+						if (s.elevation < s.water_level)
+							submerged_count++;
+					}
+				}
+				if (submerged_count > 8)
+					flags |= ND_MAP_FLAG_WATER;
 			}
 		}
-		if (submerged_count > 8)
-			flags |= ND_MAP_FLAG_WATER;
 
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;

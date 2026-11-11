@@ -121,8 +121,8 @@ fi
 
 echo "Connecting admin session to seed $NUM_PLANETS planet(s)..."
 KEY=$(head -c 16 /dev/urandom | base64 | tr -d '\n')
-WS_REQ=$(printf 'GET /nd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n' \
-	"$SEED_PORT" "$KEY")
+printf -v WS_REQ 'GET /nd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n' \
+	"$SEED_PORT" "$KEY"
 
 exec 8<>/dev/tcp/127.0.0.1/$SEED_PORT
 printf '%s' "$WS_REQ" >&8

@@ -70,18 +70,8 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 		r.is_water = fs.is_water;
 		r.water_depth = fs.depth;
 
-		uint32_t w = water_level(obits);
-		int64_t norm_he;
-		if (fs.elevation < 0) {
-			norm_he = (int64_t)w + ((int64_t)fs.elevation * (int64_t)w) / 2000;
-		} else {
-			norm_he = (int64_t)w + ((int64_t)fs.elevation * (int64_t)(NOISE_MAX - w)) / 1854;
-		}
-		if (norm_he < 0) norm_he = 0;
-		if (norm_he > NOISE_MAX) norm_he = NOISE_MAX;
-		uint32_t _he = (uint32_t)norm_he;
-		uint32_t _tm = (uint32_t)(((int64_t)(fs.temp - ND_FIELD_TEMP_MIN) * NOISE_MAX) / (ND_FIELD_TEMP_MAX - ND_FIELD_TEMP_MIN));
-		uint32_t _cl = fs.rain * ND_FIELD_RAIN_DIV;
+		uint32_t w = 0, _he = 0, _tm = 0, _cl = 0;
+		nd_field_normalize_noise(&fs, (uint16_t)obits, rx, ry, &_he, &w, &_tm, &_cl);
 
 		r = nd_evt_noise(r, _he, w, _tm, _cl);
 		chunks_bio_raw[i + j] = r;

@@ -187,6 +187,16 @@ typedef struct {
 
 static room_entity_cache_entry_t s_room_cache[MULTI_ROOM_CACHE_SIZE];
 static unsigned s_room_cache_next = 0;
+static int16_t s_rc_min_x = 32767, s_rc_max_x = -32768;
+static int16_t s_rc_min_y = 32767, s_rc_max_y = -32768;
+
+static inline void rc_update_bounds(const int16_t pos[4])
+{
+	if (pos[0] < s_rc_min_x) s_rc_min_x = pos[0];
+	if (pos[0] > s_rc_max_x) s_rc_max_x = pos[0];
+	if (pos[1] < s_rc_min_y) s_rc_min_y = pos[1];
+	if (pos[1] > s_rc_max_y) s_rc_max_y = pos[1];
+}
 
 void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
 {
@@ -207,6 +217,7 @@ void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
 		memcpy(entry->pos, pos, sizeof(entry->pos));
 		entry->valid = 1;
 	}
+	rc_update_bounds(pos);
 	entry->slot_harvested[slot_id] = 1;
 	nd_spatial_resolver_invalidate();
 	nd_seven_collision_invalidate();
@@ -233,6 +244,7 @@ void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
 	}
 	entry->room_ref = room_ref;
 	memcpy(entry->pos, pos, sizeof(entry->pos));
+	rc_update_bounds(pos);
 	entry->entity_count = (count > ND_MAX_ENTITIES) ? ND_MAX_ENTITIES : count;
 	if (entities && count > 0) {
 		memcpy(entry->entities, entities, entry->entity_count * sizeof(nd_entity_desc_t));
@@ -270,7 +282,9 @@ const nd_entity_desc_t *nd_seven_get_cached_entities(const int16_t pos[4], size_
 
 int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id)
 {
-	if (!pos)
+	if (!pos || s_room_cache_next == 0 ||
+	    pos[0] < s_rc_min_x || pos[0] > s_rc_max_x ||
+	    pos[1] < s_rc_min_y || pos[1] > s_rc_max_y)
 		return 0;
 	for (size_t i = 0; i < MULTI_ROOM_CACHE_SIZE; i++) {
 		if (s_room_cache[i].valid &&
@@ -295,6 +309,10 @@ void nd_seven_objects_forget(void)
 	nd_seven_action_cooldown_reset();
 	memset(s_room_cache, 0, sizeof(s_room_cache));
 	s_room_cache_next = 0;
+	s_rc_min_x = 32767;
+	s_rc_max_x = -32768;
+	s_rc_min_y = 32767;
+	s_rc_max_y = -32768;
 	nd_spatial_resolver_invalidate();
 	nd_seven_collision_invalidate();
 }

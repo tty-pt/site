@@ -29,9 +29,24 @@
 #include <stdint.h>
 #include <string.h>
 
-#if __has_include(<nd/field.h>)
+#if __has_include("../../../nd-world/include/nd/field.h")
+#include "../../../nd-world/include/nd/field.h"
+#define NDW_HAVE_FIELD 1
+#elif __has_include(<nd/field.h>)
 #include <nd/field.h>
 #define NDW_HAVE_FIELD 1
+#endif
+#ifdef NDW_HAVE_FIELD
+#if __has_include("../../../nd-plant/include/nd/plant.h")
+#include "../../../nd-plant/include/nd/plant.h"
+#else
+#include <nd/plant.h>
+#endif
+#if __has_include("../../../nd-stone/include/nd/stone.h")
+#include "../../../nd-stone/include/nd/stone.h"
+#else
+#include <nd/stone.h>
+#endif
 #endif
 
 #define NDW_COLS      10
@@ -239,8 +254,16 @@ ndw_find_content(int glyph)
 	static const ndw_content_entry_t table[] = {
 		{ 'x', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
 		{ 'X', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
+		{ 'w', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
+		{ 'W', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
+		{ 'v', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
+		{ 'V', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
+		{ 'f', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  4,  5, 1, 0, 6 },
+		{ 'F', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  5,  6, 2, 1, 6 },
 		{ 't', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
 		{ 'T', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
+		{ 'r', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  4,  6, 1, 0, 6 },
+		{ 'R', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  5,  6, 2, 1, 6 },
 		{ 'a', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
 		{ 'A', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
 		{ 'i', NDW_K_CACTUS,  NDW_SCATTER_CLUSTER, 0,  4,  6, 1, 0, 6 },
@@ -271,6 +294,44 @@ ndw_is_big(int glyph)
 {
 	return glyph >= 'A' && glyph <= 'Z';
 }
+
+/* --- canonical server-identical virgin room synthesis ------------------- */
+
+#ifdef NDW_HAVE_FIELD
+static inline void
+ndw_synth_virgin_tile(const int16_t pos[4], ndw_tile_t *out)
+{
+	if (!pos || !out)
+		return;
+	memset(out, 0, sizeof(*out));
+
+	int32_t rx = (int32_t)pos[0];
+	int32_t ry = (int32_t)pos[1];
+	int32_t wx = rx * NDW_TILE_W + (NDW_TILE_W / 2);
+	int32_t wy = (NDW_TILE_H / 2) - ry * NDW_TILE_H;
+	uint16_t obits = (uint16_t)pos[3];
+
+	nd_field_sample_t fs = nd_field_sample(obits, 0, wx, wy);
+	out->biome = fs.bio;
+	out->flags = (fs.is_water || fs.bio == 0) ? NDW_F_WATER : 0;
+	out->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
+
+	uint32_t he = 0, w = 0, tm = 0, cl = 0;
+	nd_field_normalize_noise(&fs, obits, rx, ry, &he, &w, &tm, &cl);
+
+	plant_tile_t pd;
+	nd_plant_noise_eval(&pd, he, w, fs.is_water, tm, fs.temp, (uint16_t)fs.rain, NULL);
+	for (unsigned side = 0; side < 3; side++)
+		nd_plant_slot_glyph(&pd, side, &out->glyph[side], &out->fg[side]);
+
+	stone_tile_t sd;
+	nd_stone_noise_eval(&sd, he, w, fs.bio, tm, NULL);
+	for (unsigned side = 0; side < 3; side++) {
+		if (out->glyph[side] == 0)
+			nd_stone_slot_glyph(&sd, side, &out->glyph[side], &out->fg[side]);
+	}
+}
+#endif /* NDW_HAVE_FIELD */
 
 typedef struct { int16_t x0, y0, x1, y1; } ndw_rect_t;   /* half open */
 

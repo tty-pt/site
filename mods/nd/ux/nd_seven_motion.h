@@ -29,6 +29,12 @@ void nd_seven_forget(void);
 void nd_seven_sync_origin(const nd_client_state_t *st);
 ndw_tile_t nd_seven_convert_tile(const nd_map_tile_t *m);
 int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, int16_t pos[4]);
+int nd_seven_resolve_tile_at_pos(const nd_client_state_t *st, const int16_t pos[4], ndw_tile_t *out);
+int nd_seven_resolve_room_objects(const nd_client_state_t *st, const int16_t pos[4],
+                                  ndw_tile_t *out_tile, ndw_obj_t out_objs[NDW_MAX_OBJ]);
+const ndw_obj_t *nd_seven_resolve_room_objects_fast(const nd_client_state_t *st, const int16_t pos[4],
+                                                    ndw_obj_t scratch_objs[NDW_MAX_OBJ], int *out_count);
+int nd_seven_lookup_known_tile(const int16_t pos[4], ndw_tile_t *out);
 int nd_seven_centre_restore(const int16_t pos[4], uint8_t *glyph, uint8_t *fg);
 
 /* Movement and collision */

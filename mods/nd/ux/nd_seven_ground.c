@@ -744,11 +744,14 @@ const nd_room_chunk_t *nd_seven_chunk_find(const int16_t pos[4])
 		uint16_t world = (uint16_t)pos[3];
 
 		uint64_t key = morton_quad_key(world, 0, ox, oy, NDW_TILE_W, NDW_TILE_H);
-		const ar_node_t *node = NULL;
-		for (uint8_t lvl = 0; lvl <= 6; lvl++) {
-			node = ar_system_find_by_key(cs, key);
-			if (node) break;
-			key = morton_quad_parent(key);
+		const ar_node_t *node = ar_system_find_by_key(cs, key);
+		if (!node && nd_seven_get_zoom() < 0.25f) {
+			uint64_t pkey = key;
+			for (uint8_t lvl = 1; lvl <= 6; lvl++) {
+				pkey = morton_quad_parent(pkey);
+				node = ar_system_find_by_key(cs, pkey);
+				if (node) break;
+			}
 		}
 		if (!node) {
 			node = ar_system_ensure(cs, world, 0, ox, oy);
@@ -885,9 +888,6 @@ void nd_seven_ground_frame_end(const nd_map_data_t *map)
 
 void nd_seven_ground_cache_forget(void)
 {
-	ar_system_t *cs = nd_seven_get_chunk_sys();
-	if (cs) ar_clear(cs);
-
 	s_adapter_count = 0;
 	s_alloc_count = 0;
 	s_free_count = 0;
@@ -897,6 +897,8 @@ void nd_seven_ground_cache_forget(void)
 	memset(s_pixel_pool, 0, sizeof(s_pixel_pool));
 	memset(s_border, 0, sizeof(s_border));
 	s_border_next = 0;
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	if (cs) ar_clear(cs);
 }
 
 int nd_seven_chunk_count(void)
@@ -1712,30 +1714,62 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 	}
 }
 
-int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy)
-{
-	ar_system_t *cs = nd_seven_get_chunk_sys();
-	uint16_t world = (uint16_t)nd_seven_get_world();
-	if (cs) {
-		ar_sample_t probe_s;
-		if (ar_probe(cs, world, wx, wy, &probe_s)) {
-			return nd_field_elevation_to_block(probe_s.val);
-		}
-	}
-	return nd_field_sample(world, 3, wx, wy).elevation;
-}
-
 int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 {
-	ar_system_t *cs = nd_seven_get_chunk_sys();
 	uint16_t world = (uint16_t)nd_seven_get_world();
+	int32_t cx = morton_fdiv(wx, NDW_TILE_W);
+	int32_t cy = morton_fdiv(wy, NDW_TILE_H);
+	int32_t ox = cx * NDW_TILE_W;
+	int32_t oy = cy * NDW_TILE_H;
+	int gdim = AR_DEFAULT_GRID_DIM;
+	int vdim = AR_DEFAULT_VERT_DIM;
+
+	float fx = ((float)(wx - ox) / (float)NDW_TILE_W) * (float)gdim;
+	float fy = ((float)(wy - oy) / (float)NDW_TILE_H) * (float)gdim;
+	int col0 = (int)fx;
+	int row0 = (int)fy;
+	if (col0 < 0) col0 = 0;
+	if (col0 >= gdim) col0 = gdim - 1;
+	if (row0 < 0) row0 = 0;
+	if (row0 >= gdim) row0 = gdim - 1;
+	int col1 = col0 + 1;
+	int row1 = row0 + 1;
+
+	float u = fx - (float)col0;
+	float v = fy - (float)row0;
+	float wu = u * u * (3.0f - 2.0f * u);
+	float wv = v * v * (3.0f - 2.0f * v);
+
+	float v00, v10, v01, v11;
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	const ar_node_t *node0 = NULL;
 	if (cs) {
-		ar_sample_t probe_s;
-		if (ar_probe(cs, world, wx, wy, &probe_s)) {
-			return probe_s.val;
-		}
+		uint64_t key0 = morton_quad_pack(world, 0, cx, cy);
+		node0 = ar_system_find_by_key(cs, key0);
 	}
-	return nd_field_sample(world, 3, wx, wy).elevation_q12_4;
+	if (node0 && node0->values) {
+		v00 = (float)node0->values[row0 * vdim + col0];
+		v10 = (float)node0->values[row0 * vdim + col1];
+		v01 = (float)node0->values[row1 * vdim + col0];
+		v11 = (float)node0->values[row1 * vdim + col1];
+	} else {
+		int32_t step_x = NDW_TILE_W / gdim;
+		int32_t step_y = NDW_TILE_H / gdim;
+		v00 = (float)nd_field_sample(world, 3, ox + col0 * step_x, oy + row0 * step_y).elevation_q12_4;
+		v10 = (float)nd_field_sample(world, 3, ox + col1 * step_x, oy + row0 * step_y).elevation_q12_4;
+		v01 = (float)nd_field_sample(world, 3, ox + col0 * step_x, oy + row1 * step_y).elevation_q12_4;
+		v11 = (float)nd_field_sample(world, 3, ox + col1 * step_x, oy + row1 * step_y).elevation_q12_4;
+	}
+
+	float h0 = v00 * (1.0f - wu) + v10 * wu;
+	float h1 = v01 * (1.0f - wu) + v11 * wu;
+	float h  = h0 * (1.0f - wv) + h1 * wv;
+	return (int16_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
+}
+
+int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy)
+{
+	return nd_field_elevation_to_block(nd_seven_ground_elevation_q12_4(wx, wy));
 }
 
 float nd_seven_ground_elevation_f(int32_t wx, int32_t wy)

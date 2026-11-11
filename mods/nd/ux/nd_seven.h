@@ -112,6 +112,10 @@ typedef struct {
 
 const nd_planet_def_t *nd_seven_get_planet(uint16_t world);
 
+/* Multi-scale scenery billboard batch diagnostics (for unit verification) */
+uint32_t nd_seven_last_mid_billboard_count(void);
+int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h);
+
 /* Viewport LOD & Macro Chunk Thresholds (zero magic numbers) */
 #define ND_SEVEN_STRATOSPHERE_ZOOM_THRESHOLD 0.25f  /* Camera zoom threshold below which macro quadtree LOD activates */
 #define ND_SEVEN_FOCAL_WINDOW_RADIUS_ROOMS   3      /* 7x7 focal room grid radius around the player (-3..+3) */

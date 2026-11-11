@@ -20,33 +20,50 @@ Maintains long-lived quest state on disk (`.pi/quest/future/<qid>.md`), auto-inj
 
 ### Commands
 
+All operator commands are unified under `/quest` (with interactive tab-completion for subcommands and quest names) plus the `Alt+Q` session toggle shortcut:
+
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/quest` | `/quest [description|name]` | Sets the active quest. When initializing a new quest, the name is automatically inferred from the description without asking separately. When called without arguments, opens an interactive selector where selecting "New quest…" prompts directly for the description. |
-| `/subquest` | `/subquest <description...>` | Creates a child sub-quest linked to the active quest with name inferred from description, updates parent's `## Sub-Quests` list, sets `## Parent Quest`, and activates the sub-quest. (Alias: `/sub-quest`) |
-| `/quest-refine` | `/quest-refine <instructions...>` | Refines the active quest mid-workflow or after initial implementation. Appends instructions to prompt history and instructs agent to update quest file goals, checklist, and `## Quest Refinements & User Feedback Loops`. |
-| `/quest-save` | `/quest-save` | Forces an immediate refresh prompt asking the agent to write a complete state snapshot to the active quest file. |
-| `/quest-del` | `/quest-del [name]` | Archives the active or named quest. Moves runtime artifacts to `.pi/quest/archive/<qid>.zip`. |
-| `/quest-draft` | `/quest-draft <description>` | Creates a proposal draft with name inferred from description without making it active. |
-| `/quest-status` | `/quest-status` | Displays the active quest name, ID (`qid`), file freshness status (fresh vs. `SAVE PENDING`), context usage percentage, and prompt count. |
-| `/quest-handoff` | `/quest-handoff [qid]` | Generates a deterministic, honest handoff document to `.pi/quest/handoffs/<qid>-<stamp>.md` and prints it. Auto-runs on compaction. |
-| `/quest-garden` | `/quest-garden [list\|prune\|dedupe]` | Triage `.pi/quest/future` (active/fresh/stale/orphan/empty-shell), deduplicate redundant bullets, and cleanly prune abandoned drafts. |
-| `/quests` | `/quests` | Displays active quests in `.pi/quest/future/` and archive status. |
-| `/quest-scratches` | `/quest-scratches` | Inspect active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, process health, and current activity. (Alias: `/quest scratches`, `/quest slots`) |
-| `/quest-cancel-review` | `/quest-cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
-| `/quest-router` | `/quest-router` | Inspect phase×difficulty virtual model router status, matrix, and cooldowns. |
-| `/quest-policy` | `/quest-policy` | Show review policy in force for the active model, draft quality bar, and config warnings. |
-| `/quest-ratings` | `/quest-ratings` | Inspect model accuracy ratings, learned Beta distributions, and autonomy levels. |
-| `/quest doctor` | `/quest doctor` | Check judge endpoint health, latency, models, and trigger word families. |
+| `/quest` | `/quest` | Shows the self-explaining quest status card (active quest, phase, plan path, next action, and subcommand reference), or auto-resumes a lone draft when idle. |
+| `/quest <name\|qid>` | `/quest [resume] <name\|qid>` | Switches to or resumes a quest by its readable draft name or QID. |
+| `/quest new` | `/quest new [goal]` (or `/quest chain\|next`) | Retires the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enables `pi-quest`, and starts a new quest on top of that slot's work. |
+| `/quest edit` | `/quest edit` (or `/quest plan`) | Opens the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
+| `/quest list` | `/quest list` (or `/quest ls`) | Lists active & draft quests in `.pi/quest/future/` with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
+| `/quest pick` | `/quest pick` (or `/quest switch`) | Interactively selects a quest to resume. |
+| `/quest pause` / `/quest on` | `/quest pause\|off\|on\|toggle` (`Alt+Q`) | Pauses, re-enables, or toggles `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest cancel` | `/quest cancel` (or `/quest cancel-review`) | Cancels any currently running in-flight review or validation and unblocks tool execution. |
+| `/quest del` | `/quest del [qid\|flags]` (or `/quest drop`) | Deletes/abandons the active quest (`--keep-slot` / `-s` to keep slot work intact, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prunes drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) without creating `.zip` files. |
+| `/quest handoff` | `/quest handoff [qid]` | Generates a deterministic, honest handoff document to `.pi/quest/handoffs/<qid>-<stamp>.md` and displays it. Auto-runs on compaction. |
+| `/quest slots` | `/quest slots` (or `/quest scratches`) | Inspects active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, process health, and working tree state. |
+| `/quest doctor` | `/quest doctor` | Checks judge endpoint health, latency, models, core C engine versions, and trigger word families. |
+| `/quest policy` | `/quest policy` | Shows the effective review policy for the active model, draft quality bar, and config warnings. |
+| `/quest router` | `/quest router` | Inspects phase × difficulty virtual model router status, matrix, and cooldowns. |
+| `/quest ratings` | `/quest ratings` | Inspects model accuracy ratings, learned Beta distributions, and autonomy levels. |
+
+### Common Operator Workflows
+
+1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
+   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest.
+2. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
+   - When an active or paused quest is getting in the way and you want to plan a new quest on top of the current `.pi/scratch/slot-N` worktree without merging or resetting the slot:
+     ```text
+     /quest new <new objective>
+     ```
+   - Or run bare `/quest new` (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then describe your next task in chat.
+3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+   - Run `/quest del --keep-slot` (or `/quest del -s`, or select `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest record while keeping `.pi/scratch/slot-N` and its uncommitted/committed changes intact.
+   - Run `/quest del --discard` while idle to release and reset a retained slot.
+4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+   - Reply **`decline`** (or give corrective feedback) during `validating`, or select **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the branch integration prompt to demote back to `implementing` with tools unlocked.
 
 ### Custom Tools
 
-- **`quest_update_state`**: Update the active quest state on disk with structured fields (`status`, `findings`, `decisions`, `remaining`, `nextStep`, `plan`, `planConfidence`, `openQuestions`, `assumptions`, `exactNextAction`, etc.). Automatically formats, validates epistemic consistency, and deterministically writes `.pi/quest/future/<qid>.md`.
-- **`quest_mark_saved`**: Record that the active quest file has been written to disk. Automatically triggered whenever the model uses `write` or `edit` on `.pi/quest/future/<qid>.md`.
-- **`quest_subquest`**: Create a sub-quest for mid-quest remarks, tangents, or follow-ups. Inherits parent's `<qid>`, links it into the parent quest, and manages LIFO sub-quest stack activation.
+- **`quest_update_state`**: Primary write path (`objective`, `draftName`, `difficulty`, `plan`, `analysis`, `planRevision`, `claimComplete`, `findings`, `decisions`, `remaining`, `nextStep`, `exactNextAction`, etc.). Supports atomic single-call quest creation, plan authoring, mid-flight plan revision, and completion claims, writing `.pi/quest/future/<qid>.md`.
+- **`quest_subquest`**: Create a sequential child sub-quest (`goal`, `brief`, `allowedPaths`, `requiredTestCommands`) on the LIFO stack, inheriting the parent's worktree slot.
 - **`quest_recover`**: Rebuild quest state from the transcript after context resets or compaction.
 - **`quest_handoff`**: Write a deterministic, honest handoff for the next agent into `.pi/quest/handoffs/` including verbatim operator requests, deduped directives, Asked-vs-Accomplished checklist with UNVERIFIED markers, approved plan, git diffstat, last verification, blockers, and agent notes.
-- **`quest_archive`**: Archive the active (or specified) quest from `.pi/quest/future/<qid>.md` to `.pi/quest/archive/<qid>.zip` and optionally trigger session context compaction.
+- **`quest_archive`**: Conclude and archive the active quest (`outcome: "completed"` requires validation PASS), integrating the worktree branch (or staying in-quest if cancelled) and cleaning up `.pi/quest/future/<qid>.md` directly without `.zip` files.
 - **`quest_scratches`**: Inspect scratch workspace slots (`.pi/scratch/slot-N`): view lease status, assigned quests, process health, git status, and what each quest is currently doing.
 - **`quest_run_test`**: Safely execute a verification test command inside the active worktree (or primary repository root). Records the verification test receipt.
 - **`quest_rebut`**: Answer an adversarial review with file:line evidence; a successful rebuttal reopens the question and boots a fresh review.
@@ -160,7 +177,7 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 | Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
 |----------------|---------------|----------------------|----------------|
-| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest`, `/subquest`, `/quest-refine`, `/quest-save`, `/quest-del`, `/quest-draft`, `/quest-status`, `/quests`, `/quest-handoff`, `/quest-garden`, `quest_update_state`, `quest_mark_saved`, `quest_subquest`, `quest_archive`, `quest_handoff` | Unified quest persistence, session awareness, prompt capture, compaction protection, TDD workflow enforcement |
+| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest [edit\|list\|pick\|pause\|on\|toggle\|cancel\|del\|handoff\|slots\|doctor\|policy\|router\|ratings]`, `quest_update_state`, `quest_subquest`, `quest_archive`, `quest_handoff`, `quest_scratches`, `quest_run_test`, `quest_rebut`, `quest_ask_human`, `quest_recover` | Unified quest persistence, worktree slot isolation, session awareness, prompt capture, compaction handoffs, TDD workflow enforcement |
 | `.pi/extensions/pi-mm/` | `before_agent_start`, `turn_end`, `agent_settled`, `session_start`, `session_shutdown`, `message_end`, `tool_result` | `/mm doctor`, `/mm overview`, `/mm timeline`, `memory_recall`, `memory_record`, `memory_review` | Hierarchical memory mipmaps, epistemic lifecycle verification, standing directive reinforcement, automated L0-L3 consolidation |
 
 ---

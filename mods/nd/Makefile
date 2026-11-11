@@ -18,15 +18,16 @@ ND_UX_PARTS = \
 	ux/nd_seven_motion.c \
 	ux/nd_seven_objects.c \
 	ux/nd_dock_ui.c \
-	ux/nd_state_io.c
+	ux/nd_state_io.c \
+	ux/nd_seven_gl.c
 
 SRC = nd.c ux/nd_ui.c $(ND_UX_PARTS) ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES) $(REPO_ROOT)/external/libareole/src/areole.c
-EXTRA_CFLAGS += -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/nd-seven/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux -I$(REPO_ROOT)/external/nd-world/include -I$(REPO_ROOT)/external/libchaff/include -I$(REPO_ROOT)/external/libislet/include -I$(REPO_ROOT)/external/libareole/include
+EXTRA_CFLAGS += -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/nd-seven/include -I$(REPO_ROOT)/external/nd-plant/include -I$(REPO_ROOT)/external/nd-stone/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux -I$(REPO_ROOT)/external/nd-world/include -I$(REPO_ROOT)/external/libchaff/include -I$(REPO_ROOT)/external/libislet/include -I$(REPO_ROOT)/external/libareole/include
 EXTRA_LDLIBS += -lbud -laxil -lxylem -lhyle-bud -lm
 
 WASM_TARGETS = $(WASM_PATH)/nd.wasm
 nd-src = ux/nd_ui.c $(ND_UX_PARTS) ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES) $(REPO_ROOT)/external/libxylem/src/libxylem-wasm.c $(REPO_ROOT)/mods/common/site_wasm_app.c $(REPO_ROOT)/external/libareole/src/areole.c
-nd-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/nd-seven/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux -I$(REPO_ROOT)/external/nd-world/include -I$(REPO_ROOT)/external/libchaff/include -I$(REPO_ROOT)/external/libislet/include -I$(REPO_ROOT)/external/libareole/include
+nd-cflags = -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/include -I$(REPO_ROOT)/external/axil/include -I$(REPO_ROOT)/external/axil-nd/include -I$(REPO_ROOT)/external/nd-seven/include -I$(REPO_ROOT)/external/nd-plant/include -I$(REPO_ROOT)/external/nd-stone/include -I$(REPO_ROOT)/external/axil-tty/include -I$(REPO_ROOT)/external/liblamina/include -I$(REPO_ROOT)/external/nd-attr/include -I$(REPO_ROOT)/external/nd-equip/include -I$(REPO_ROOT)/external/nd-spell/include -I$(REPO_ROOT)/external/nd-fight/include -I$(REPO_ROOT)/external/nd-mortal/include -I$(REPO_ROOT)/external/libxylem/include -I$(REPO_ROOT)/mods/nd/ux -I$(REPO_ROOT)/external/nd-world/include -I$(REPO_ROOT)/external/libchaff/include -I$(REPO_ROOT)/external/libislet/include -I$(REPO_ROOT)/external/libareole/include
 nd-wasm-allowed = $(REPO_ROOT)/external/axil/wasm-allowed-imports.lst $(REPO_ROOT)/external/axil-tty/wasm-allowed-imports.lst $(REPO_ROOT)/external/liblamina/wasm-allowed-imports.lst
 
 include ../../external/libhyle-bud/hyle-bud-wasm.mk

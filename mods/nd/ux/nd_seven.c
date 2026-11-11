@@ -9,6 +9,7 @@
 #include "nd_seven_ground.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_objects.h"
+#include "nd_seven_gl.h"
 
 /*
  * The seven stage: a continuous world drawn from the NeverDark map.
@@ -37,56 +38,12 @@ static inline uint32_t macro_blend_rgb(uint32_t c1, uint32_t c2, int alpha)
 	return rb | g;
 }
 
-typedef struct {
-	uint8_t threshold; /* libchaff [0..255] threshold to spawn flora (255 = barren) */
-	char    glyph_sm;  /* small plant glyph ('x', 't', 'a', 'i') */
-	char    glyph_big; /* big plant glyph ('X', 'T', 'A', 'I') */
-	uint8_t canopy_r;  /* far-field canopy crown R */
-	uint8_t canopy_g;  /* far-field canopy crown G */
-	uint8_t canopy_b;  /* far-field canopy crown B */
-} seven_biome_flora_t;
-
-static const seven_biome_flora_t s_biome_flora[19] = {
-	/* 0  water               */ { 255,   0,   0,   0,   0,   0 },
-	/* 1  permanent ice       */ { 255,   0,   0,   0,   0,   0 },
-	/* 2  tundra              */ { 196, 'a', 'a',  54,  84,  68 },
-	/* 3  tundra2             */ { 196, 'a', 'a',  52,  82,  70 },
-	/* 4  tundra3             */ { 198, 'a', 'a',  56,  80,  64 },
-	/* 5  tundra4             */ { 196, 'a', 'a',  50,  82,  68 },
-	/* 6  cold desert         */ { 192, 'i', 'I',  76, 104,  72 },
-	/* 7  shrubland           */ { 164, 'x', 'X',  68,  96,  48 },
-	/* 8  coniferous forest   */ {  96, 'a', 'A',  30,  74,  46 },
-	/* 9  boreal forest       */ {  98, 'a', 'A',  32,  78,  52 },
-	/* 10 temperate grassland */ { 172, 'x', 'X',  54,  98,  44 },
-	/* 11 woodland            */ { 104, 'x', 'X',  44,  92,  42 },
-	/* 12 temperate seasonal  */ { 102, 'x', 'X',  48,  94,  40 },
-	/* 13 temperate rainforest*/ {  84, 't', 'T',  32,  86,  46 },
-	/* 14 desert              */ { 188, 'i', 'I',  72, 110,  58 },
-	/* 15 savannah            */ { 168, 't', 'T',  78,  98,  42 },
-	/* 16 tropical seasonal   */ {  88, 't', 'T',  38,  96,  42 },
-	/* 17 tropical rainforest */ {  76, 't', 'T',  26,  84,  38 },
-	/* 18 volcanic            */ { 255,   0,   0,   0,   0,   0 },
-};
-
-static inline uint8_t seven_eval_flora_mask(uint16_t world, int32_t wx, int32_t wy)
-{
-	uint32_t seed = 0x464C4F52u ^ ((uint32_t)world * 0x9E3779B1u);
-	int16_t p_macro[2] = { (int16_t)wy, (int16_t)wx };
-	int16_t rx = (int16_t)wx, ry = (int16_t)wy;
-	chaff_rotate_q15(&rx, &ry);
-	int16_t p_micro[2] = { ry, rx };
-	uint32_t m0 = noise_wpoint_n(p_macro, 6, 8, seed, 2, NOISE_FADE5) >> 16;
-	uint32_t m1 = noise_wpoint_n(p_micro, 4, 8, seed ^ 0x85EBCA77u, 2, NOISE_FADE5) >> 16;
-	uint32_t combined = (m0 * 3u + m1) >> 2;
-	return (uint8_t)(combined > 255u ? 255u : combined);
-}
-
 static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t level,
                                      int32_t wx, int32_t wy, ar_sample_t *out)
 {
 	(void)user_ctx;
-	/* Preserve continuous multi-octave gradients across zoom levels so LODs do not drop abruptly into squares */
-	uint8_t lod = (level >= 8) ? 0 : ((level >= 4) ? 1 : (uint8_t)(3 - (level > 2 ? 2 : level)));
+	/* Keep lod=3 for levels 0..3 so near/mid chunks evaluate the exact same heightmap function */
+	uint8_t lod = (level >= 8) ? 0 : ((level >= 6) ? 1 : ((level >= 4) ? 2 : 3));
 	nd_field_sample_t fs = nd_field_sample(world, lod, wx, wy);
 	uint8_t water_depth = fs.is_water ? (uint8_t)(fs.depth > 255 ? 255 : fs.depth) : 0;
 
@@ -107,46 +64,8 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	uint32_t col = (blend > 0 && fs.bio != fs.bio2)
 		? macro_blend_rgb(c1, c2, (blend * 255) / 128) : c1;
 
-	if (water_depth > 0) {
+	if (water_depth > 0 && !nd_seven_get_3d_mode()) {
 		col = water_color_at_depth((int)water_depth, 128, 128, 128);
-	} else if (fs.bio < 19 && s_biome_flora[fs.bio].threshold < 255) {
-		const seven_biome_flora_t *bf = &s_biome_flora[fs.bio];
-		uint8_t mask = seven_eval_flora_mask(world, wx, wy);
-		if (mask > bf->threshold) {
-			int span = 255 - (int)bf->threshold;
-			int cover = ((int)(mask - bf->threshold) * 210) / (span > 0 ? span : 1);
-			if (cover > 210) cover = 210;
-			out->attr[4] = (uint8_t)cover;
-			out->attr[5] = bf->canopy_r;
-			out->attr[6] = bf->canopy_g;
-			out->attr[7] = bf->canopy_b;
-			out->flags |= 2u;
-			if (cover > 0) {
-				uint32_t h = (uint32_t)(wx * 0x85EBCA77u) ^ (uint32_t)(wy * 0xC2B2AE3Du) ^ ((uint32_t)level * 0x27D4EB2Fu);
-				h ^= h >> 15;
-				h *= 0x85EBCA6Bu;
-				h ^= h >> 13;
-				int shade = 224 + (int)(h & 63);
-				int cr = ((int)bf->canopy_r * shade) >> 8;
-				int cg = ((int)bf->canopy_g * shade) >> 8;
-				int cb = ((int)bf->canopy_b * shade) >> 8;
-				if (cr > 255) cr = 255;
-				if (cg > 255) cg = 255;
-				if (cb > 255) cb = 255;
-				uint32_t base = col ? col : 0xFF303030u;
-				int r0 = (int)(base & 0xFF);
-				int g0 = (int)((base >> 8) & 0xFF);
-				int b0 = (int)((base >> 16) & 0xFF);
-				int r_out = r0 + (((cr - r0) * cover) >> 8);
-				int g_out = g0 + (((cg - g0) * cover) >> 8);
-				int b_out = b0 + (((cb - b0) * cover) >> 8);
-				col = 0xFF000000u | (uint32_t)r_out | ((uint32_t)g_out << 8) | ((uint32_t)b_out << 16);
-				if (level >= 1) {
-					int16_t bump = (int16_t)((((int)((h >> 8) & 7) - 2) * cover) >> 5);
-					out->val = (int16_t)(out->val + bump);
-				}
-			}
-		}
 	}
 	out->rgba = col;
 }
@@ -154,7 +73,14 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
-		s_seven_chunk_sys = ar_create(NDW_TILE_W, NDW_TILE_H, seven_macro_chunk_sampler, NULL);
+		ar_config_t cfg;
+		memset(&cfg, 0, sizeof(cfg));
+		cfg.base_w = NDW_TILE_W;
+		cfg.base_h = NDW_TILE_H;
+		cfg.sampler = seven_macro_chunk_sampler;
+		cfg.max_active = 96;
+		cfg.pool_capacity = 256;
+		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
 }
@@ -194,13 +120,6 @@ typedef struct {
 	uint8_t flip;
 	char name[32];         /* name rendered on top of the object */
 } drawable_t;
-
-typedef struct {
-	float x, y, z;
-	float width, height;
-	float u0, v0, u1, v1;
-	uint32_t tint_rgba;
-} lam_billboard_gpu_t;
 
 #define MAX_DRAW 192
 
@@ -320,11 +239,75 @@ const nd_planet_def_t *nd_seven_get_planet(uint16_t world)
 	return &s_planets[0];
 }
 
+#define SEVEN_MAX_VISIBLE_LEAVES 96
+static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
+static size_t s_visible_leaf_count = 0;
+static ar_frustum_t s_frame_frustum;
+static float s_frame_sag_radius = 16000.0f;
+static int s_frame_frustum_valid = 0;
+
+static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, float max_y,
+                                         float fx, float fy, float base_z_min, float base_z_max)
+{
+	if (!s_frame_frustum_valid)
+		return true;
+	float dx0 = min_x - fx, dx1 = max_x - fx;
+	float dy0 = min_y - fy, dy1 = max_y - fy;
+	float mx = (dx0 * dx0 > dx1 * dx1) ? (dx0 * dx0) : (dx1 * dx1);
+	float my = (dy0 * dy0 > dy1 * dy1) ? (dy0 * dy0) : (dy1 * dy1);
+	float r2_max = mx + my;
+	float sag = r2_max * (1.0f / 2000000.0f);
+	return ar_frustum_test_box(&s_frame_frustum,
+	                           min_x, min_y, base_z_min - sag - 256.0f,
+	                           max_x, max_y, base_z_max + 256.0f);
+}
+
+static inline float seven_billboard_lod_scale(float d_cam, int is_landmark)
+{
+	if (d_cam <= 360.0f)
+		return 1.0f;
+	float ratio = d_cam / 360.0f;
+	float s = 1.0f + 0.38f * sqrtf(ratio - 1.0f);
+	float max_s = is_landmark ? 14.0f : 8.0f;
+	return (s > max_s) ? max_s : s;
+}
+
+/* Uniform altitude fade: all scenery fades out simultaneously across the screen
+ * starting around -20x (24,000), remaining visible at -22x (~37,947), and fully
+ * dissolving before -23x (44,000) with zero radial distance rings. */
+#define SCENERY_ALT_FADE_START 24000.0f
+#define SCENERY_ALT_FADE_END   44000.0f
+#define SCENERY_RAD_MAX_ROOMS   250
+
+static inline float seven_smooth_fade(float val, float start, float end)
+{
+	if (val <= start)
+		return 1.0f;
+	if (val >= end)
+		return 0.0f;
+	float t = (val - start) / (end - start);
+	return 1.0f - t * t * (3.0f - 2.0f * t);
+}
+
+static inline uint32_t seven_pack_white_alpha(float alpha)
+{
+	int a = (int)(alpha * 255.0f + 0.5f);
+	if (a <= 0)
+		return 0;
+	if (a >= 255)
+		return 0xFFFFFFFFu;
+	return 0xFFFFFF00u | (uint32_t)a;
+}
+
 static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t *st,
                                          float zoom, float eff_cam_dist)
 {
 	ar_system_t *cs = nd_seven_get_chunk_sys();
-	if (!cs) return;
+	if (!cs) {
+		s_visible_leaf_count = 0;
+		s_frame_frustum_valid = 0;
+		return;
+	}
 
 	int64_t lwx = 0, lwy = 0;
 	nd_seven_world_pos(st, &lwx, &lwy);
@@ -332,41 +315,36 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	uint16_t world = (uint16_t)(st ? st->map_data.pos[3] : 0);
 	const nd_planet_def_t *pdef = nd_seven_get_planet(world);
 
-	/* Compute exact camera MVP matrix matching WebGL lamina-bridge.js computeMVP */
-	float pitch = ND_SEVEN_DIORAMA_PITCH * (3.14159265358979323846f / 180.0f);
-	float cos_p = cosf(pitch);
-	float sin_p = sinf(pitch);
 	float dist = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
 
-	float eye[3] = {
-		(float)lwx,
-		(float)lwy + dist * cos_p,
-		lwz + dist * sin_p
-	};
-	float target[3] = { (float)lwx, (float)lwy, lwz };
-	float up[3] = { 0.0f, -sin_p, cos_p };
+	/* Compute canonical left-handed flat tangent-space MVP for libareole culling */
+	float mvp[16];
+	nd_seven_gl_compute_flat_mvp((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
+	                             dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, mvp);
+	ar_frustum_from_matrix(&s_frame_frustum, mvp);
+	s_frame_frustum_valid = 1;
 
-	float modelview[16], proj[16], mvp[16];
-	ar_mat4_lookat(modelview, eye, target, up);
-
-	float fov_rad = ND_SEVEN_CAM_FOV * (3.14159265358979323846f / 180.0f);
-	float aspect = (h > 0) ? ((float)w / (float)h) : 1.333333f;
-	float near_z = (eff_cam_dist * 0.005f > 2.0f) ? (eff_cam_dist * 0.005f) : 2.0f;
-	float far_z = (eff_cam_dist * 20.0f > 200000.0f) ? (eff_cam_dist * 20.0f) : 200000.0f;
-	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
-	ar_mat4_multiply(mvp, proj, modelview);
-
-	float r_planet = dist * 1.25f;
-	if (r_planet < 16000.0f) r_planet = 16000.0f;
-	if (r_planet > 80000.0f) r_planet = 80000.0f;
+	float r_planet = 0.0f;
+	float z_min_cull = lwz - 80.0f;
+	float z_max_cull = lwz + 80.0f;
+	float cull_margin = 64.0f;
+	if (dist >= 1200.0f) {
+		r_planet = dist * 1.25f;
+		if (r_planet < 16000.0f) r_planet = 16000.0f;
+		if (r_planet > 80000.0f) r_planet = 80000.0f;
+		z_min_cull = -2000.0f;
+		z_max_cull = 2000.0f;
+		cull_margin = 150.0f;
+	}
+	s_frame_sag_radius = r_planet;
 
 	ar_cull_opts_t opts = {
-		.z_min = -2000.0f,
-		.z_max = 2000.0f,
+		.z_min = z_min_cull,
+		.z_max = z_max_cull,
 		.sag_radius = r_planet,
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
-		.margin = 150.0f,
+		.margin = cull_margin,
 		.target_quad_px = 2.0f,
 		.viewport_w = (float)w,
 		.viewport_h = (float)h,
@@ -374,42 +352,29 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.max_level = 16
 	};
 
-	const ar_node_t *visible[AR_DEFAULT_MAX_ACTIVE];
-	size_t macro_count = ar_system_query_matrix(cs, world, mvp, &opts, visible, AR_DEFAULT_MAX_ACTIVE);
+	s_visible_leaf_count = ar_system_query_matrix(cs, world, mvp, &opts, s_visible_leaves, SEVEN_MAX_VISIBLE_LEAVES);
+	size_t macro_count = s_visible_leaf_count;
+
+	/* Begin 3D WebGL frame in pure C */
+	nd_seven_gl_begin_frame((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
+	                        dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
+	                        (float)nd_seven_get_anim() * ND_SEVEN_ANIM_TIME_FACTOR, pdef);
 
 	for (size_t m = 0; m < macro_count; m++) {
-		const ar_node_t *node = visible[m];
+		const ar_node_t *node = s_visible_leaves[m];
 		if (!node) continue;
 		((ar_node_t *)node)->active_view_mask |= 1;
 		((ar_node_t *)node)->last_touch_frame = nd_seven_get_anim();
 
 		bool has_water = (node->flags & 1) != 0;
 		float sea_lvl = has_water ? (float)nd_field_water_level(world) : ND_SEVEN_SEA_LEVEL_NONE;
-		float cam_params[22] = {
-			(float)lwx, (float)lwy, lwz,
-			eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV,
-			(float)nd_seven_get_anim() * ND_SEVEN_ANIM_TIME_FACTOR,
-			(float)node->ox,
-			(float)node->oy,
-			(float)node->w,
-			(float)node->h,
-			(float)node->level,
-			(float)node->rev,
-			pdef->major_r,
-			pdef->minor_r,
-			pdef->center[0],
-			pdef->center[1],
-			pdef->center[2],
-			ND_SEVEN_WORLD_DIM_W,
-			ND_SEVEN_WORLD_DIM_H,
-			(float)world
-		};
 
-		const void *water_col = has_water ? node->rgba : NULL;
-		lam_terrain_mesh_flush(node->rgba, node->values,
-		                       AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
-		                       (uint32_t)w, (uint32_t)h,
-		                       sea_lvl, cam_params, water_col);
+		nd_seven_gl_flush_terrain_chunk(world, node->level, node->rev,
+		                                node->ox, node->oy, node->w, node->h,
+		                                node->rgba, node->values,
+		                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+		                                (uint32_t)w, (uint32_t)h,
+		                                sea_lvl, pdef);
 	}
 
 	/* Multi-Planet Rendering: When in high-altitude/orbit space view, dispatch secondary celestial bodies */
@@ -424,33 +389,132 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				if (!node) continue;
 				bool has_water = (node->flags & 1) != 0;
 				float sea_lvl = has_water ? (float)nd_field_water_level(alt_world) : ND_SEVEN_SEA_LEVEL_NONE;
-				float alt_cam_params[22] = {
-					(float)lwx, (float)lwy, lwz,
-					eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV,
-					(float)nd_seven_get_anim() * ND_SEVEN_ANIM_TIME_FACTOR,
-					(float)node->ox,
-					(float)node->oy,
-					(float)node->w,
-					(float)node->h,
-					(float)node->level,
-					(float)node->rev,
-					alt_pdef->major_r,
-					alt_pdef->minor_r,
-					alt_pdef->center[0],
-					alt_pdef->center[1],
-					alt_pdef->center[2],
-					ND_SEVEN_WORLD_DIM_W,
-					ND_SEVEN_WORLD_DIM_H,
-					(float)alt_world
-				};
-				const void *water_col = has_water ? node->rgba : NULL;
-				lam_terrain_mesh_flush(node->rgba, node->values,
-				                       AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
-				                       (uint32_t)w, (uint32_t)h,
-				                       sea_lvl, alt_cam_params, water_col);
+
+				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,
+				                                node->ox, node->oy, node->w, node->h,
+				                                node->rgba, node->values,
+				                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+				                                (uint32_t)w, (uint32_t)h,
+				                                sea_lvl, alt_pdef);
 			}
 		}
 	}
+
+	/* Flush deferred water queue across all active chunks in pure C */
+	nd_seven_gl_flush_water();
+}
+
+#define MID_MAX_DRAW 65536
+#define MID_STREAM_CHUNK 2048
+static lam_billboard_gpu_t s_mid_gpu_batch[MID_MAX_DRAW];
+static lam_billboard_gpu_t s_mid_stream_batch[MID_STREAM_CHUNK];
+static uint32_t s_mid_batch_len = 0;
+static uint32_t s_last_mid_gpu_count = 0;
+
+static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node_t *node,
+                                      const int16_t pos[4], int16_t w_level,
+                                      float eye_x, float eye_y, float eye_z,
+                                      uint32_t tint)
+{
+	if (tint == 0)
+		return 0;
+
+	ndw_obj_t scratch_objs[NDW_MAX_OBJ];
+	int n_raw = 0;
+	const ndw_obj_t *raw_objs = nd_seven_resolve_room_objects_fast(st, pos, scratch_objs, &n_raw);
+	if (n_raw <= 0 || !raw_objs)
+		return 0;
+
+	int32_t base_wx = (int32_t)pos[0] * NDW_TILE_W;
+	int32_t base_wy = -(int32_t)pos[1] * NDW_TILE_H;
+	int emitted = 0;
+
+	/* Hoist camera distance and LOD scale once per room center */
+	float room_cx = (float)(base_wx + (NDW_TILE_W / 2));
+	float room_cy = (float)(base_wy + (NDW_TILE_H / 2));
+	float room_cz = (float)(node->min_val + node->max_val) * (0.5f / 16.0f);
+	float rex = eye_x - room_cx;
+	float rey = eye_y - room_cy;
+	float rez = eye_z - room_cz;
+	float d_cam = sqrtf(rex * rex + rey * rey + rez * rez);
+	float lod_s_landmark = seven_billboard_lod_scale(d_cam, 1);
+	float lod_s_small = seven_billboard_lod_scale(d_cam, 0);
+
+	/* Homogeneous 1:1 room emission: every room emits its objects with the exact
+	 * same rule and uniform altitude alpha across the entire visible screen. */
+	for (int k = 0; k < n_raw; k++) {
+		int sprite = nd_seven_obj_sprite(&raw_objs[k]);
+		if (sprite <= 0 || sprite >= NDS_COUNT)
+			continue;
+
+		int32_t wx = base_wx + raw_objs[k].x;
+		int32_t wy = base_wy + raw_objs[k].y;
+
+		int32_t gx_v = (int32_t)(((int64_t)(wx - node->ox) * (int64_t)node->grid_dim) / node->w);
+		int32_t gy_v = (int32_t)(((int64_t)(wy - node->oy) * (int64_t)node->grid_dim) / node->h);
+		if (gx_v < 0) gx_v = 0;
+		else if (gx_v > (int32_t)node->grid_dim) gx_v = (int32_t)node->grid_dim;
+		if (gy_v < 0) gy_v = 0;
+		else if (gy_v > (int32_t)node->grid_dim) gy_v = (int32_t)node->grid_dim;
+
+		int16_t elev_q = node->values[gy_v * node->vert_dim + gx_v];
+		int16_t wz = nd_field_elevation_to_block(elev_q);
+		if (w_level > 0 && wz <= w_level &&
+		    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS)
+			continue; /* Anti-submersion for flora */
+
+		int is_landmark = raw_objs[k].big ||
+		                  raw_objs[k].kind == NDW_K_BOULDER || raw_objs[k].kind == NDW_K_ROCK ||
+		                  raw_objs[k].kind == NDW_K_FIR || raw_objs[k].kind == NDW_K_DECID ||
+		                  raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_CACTUS ||
+		                  raw_objs[k].kind == NDW_K_SHOP;
+
+		float z_f = (float)elev_q / 16.0f;
+		float lod_s = is_landmark ? lod_s_landmark : lod_s_small;
+
+		if (s_mid_batch_len == MID_STREAM_CHUNK) {
+			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+			s_mid_batch_len = 0;
+		}
+
+		const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
+		int flip = (raw_objs[k].variant >> 2) & 1;
+		lam_billboard_gpu_t bb;
+		bb.x = (float)wx;
+		bb.y = (float)wy;
+		bb.z = z_f;
+		bb.width = (float)sr->w * lod_s;
+		bb.height = (float)sr->h * lod_s;
+		if (flip) {
+			bb.u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
+			bb.u1 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
+		} else {
+			bb.u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
+			bb.u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
+		}
+		bb.v0 = (float)sr->y / (float)ND_SEVEN_ATLAS_H_PX;
+		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_ATLAS_H_PX;
+		bb.tint_rgba = tint;
+
+		s_mid_stream_batch[s_mid_batch_len++] = bb;
+		if (s_last_mid_gpu_count < MID_MAX_DRAW)
+			s_mid_gpu_batch[s_last_mid_gpu_count] = bb;
+		s_last_mid_gpu_count++;
+		emitted++;
+	}
+	return emitted;
+}
+
+static float seven_node_dist2(const ar_node_t *node, float fx, float fy)
+{
+	if (!node) return 1e30f;
+	float x0 = (float)node->ox;
+	float y0 = (float)node->oy;
+	float x1 = x0 + (float)node->w;
+	float y1 = y0 + (float)node->h;
+	float dx = (fx < x0) ? (x0 - fx) : ((fx > x1) ? (fx - x1) : 0.0f);
+	float dy = (fy < y0) ? (y0 - fy) : ((fy > y1) ? (fy - y1) : 0.0f);
+	return dx * dx + dy * dy;
 }
 
 void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_state_t *st)
@@ -492,6 +556,10 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 	i1 = ndw_fdiv(camx + w - 1, tile_w_eff) + 2;
 	j0 = ndw_fdiv(camy, tile_h_eff) - 2;
 	j1 = ndw_fdiv(camy + h - 1, tile_h_eff) + 2;
+	if (i0 < -45) i0 = -45;
+	if (i1 >  45) i1 =  45;
+	if (j0 < -35) j0 = -35;
+	if (j1 >  35) j1 =  35;
 	lamb_row = ndw_fdiv(nd_seven_get_ly(), NDW_TILE_H);
 
 	/* Continuous Terrain: Dispatch multi-scale leaf chunks from libchunk with zero overdraw */
@@ -532,6 +600,14 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 	int obj_i1 = map_w - 1 - px;
 	int obj_j0 = -py;
 	int obj_j1 = map_h - 1 - py;
+
+	int eff_lamb_row = lamb_row;
+	if (eff_lamb_row < obj_j0) eff_lamb_row = obj_j0;
+	if (eff_lamb_row > obj_j1) eff_lamb_row = obj_j1;
+
+	#define ALL_GPU_MAX_DRAW 2048
+	static lam_billboard_gpu_t s_all_gpu_batch[ALL_GPU_MAX_DRAW];
+	uint32_t all_gpu_count = 0;
 
 	for (int tj = obj_j0; tj <= obj_j1; tj++) {
 		int n = 0;
@@ -593,7 +669,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				}
 			}
 		}
-		if (tj == lamb_row && n < MAX_DRAW) {
+		if (tj == eff_lamb_row && n < MAX_DRAW) {
 			int64_t lwx = 0, lwy = 0;
 			nd_seven_world_pos(st, &lwx, &lwy);
 			dr[n].what = D_LAMB;
@@ -661,9 +737,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			}
 		}
 
-		static lam_billboard_gpu_t s_gpu_batch[MAX_DRAW];
-		uint32_t gpu_count = 0;
-		for (int a = 0; a < n && gpu_count < MAX_DRAW; a++) {
+		for (int a = 0; a < n && all_gpu_count < ALL_GPU_MAX_DRAW; a++) {
 			int sprite = 0;
 			float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
 			float bw = 0.0f, bh = 0.0f;
@@ -738,118 +812,169 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			}
 
 			if (sprite > 0 && sprite < NDS_COUNT) {
-				s_gpu_batch[gpu_count].x = (float)dr[a].wx;
-				s_gpu_batch[gpu_count].y = (float)dr[a].wy;
-				s_gpu_batch[gpu_count].z = dr[a].z_f;
-				s_gpu_batch[gpu_count].width = bw;
-				s_gpu_batch[gpu_count].height = bh;
-				s_gpu_batch[gpu_count].u0 = u0;
-				s_gpu_batch[gpu_count].v0 = v0;
-				s_gpu_batch[gpu_count].u1 = u1;
-				s_gpu_batch[gpu_count].v1 = v1;
-				s_gpu_batch[gpu_count].tint_rgba = 0xFFFFFFFFu;
-				gpu_count++;
+				int64_t lwx_b = 0, lwy_b = 0;
+				nd_seven_world_pos(st, &lwx_b, &lwy_b);
+				float lwz_b = nd_seven_ground_elevation_f((int32_t)lwx_b, (int32_t)lwy_b);
+				float pitch_b = ND_SEVEN_DIORAMA_PITCH * (3.14159265358979323846f / 180.0f);
+				float dist_b = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
+				float ex = (float)lwx_b - (float)dr[a].wx;
+				float ey = ((float)lwy_b + dist_b * cosf(pitch_b)) - (float)dr[a].wy;
+				float ez = (lwz_b + dist_b * sinf(pitch_b)) - dr[a].z_f;
+				float d_cam = sqrtf(ex * ex + ey * ey + ez * ez);
+				int is_landmark = (dr[a].what != D_OBJ) || dr[a].obj.big ||
+				                  dr[a].obj.kind == NDW_K_BOULDER || dr[a].obj.kind == NDW_K_ROCK ||
+				                  dr[a].obj.kind == NDW_K_FIR || dr[a].obj.kind == NDW_K_DECID ||
+				                  dr[a].obj.kind == NDW_K_TALL || dr[a].obj.kind == NDW_K_CACTUS ||
+				                  dr[a].obj.kind == NDW_K_SHOP;
+				float lod_s = seven_billboard_lod_scale(d_cam, is_landmark);
+				float alt_fade_b = (dr[a].what == D_LAMB) ? 1.0f : seven_smooth_fade(dist_b, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
+				uint32_t tint_b = seven_pack_white_alpha(alt_fade_b);
+				if (tint_b == 0)
+					continue;
+
+				s_all_gpu_batch[all_gpu_count].x = (float)dr[a].wx;
+				/* Give the lamb a microscopic +0.01f wy bias so it always wins exact row ties */
+				s_all_gpu_batch[all_gpu_count].y = (float)dr[a].wy + (dr[a].what == D_LAMB ? 0.01f : 0.0f);
+				s_all_gpu_batch[all_gpu_count].z = dr[a].z_f;
+				s_all_gpu_batch[all_gpu_count].width = bw * lod_s;
+				s_all_gpu_batch[all_gpu_count].height = bh * lod_s;
+				s_all_gpu_batch[all_gpu_count].u0 = u0;
+				s_all_gpu_batch[all_gpu_count].v0 = v0;
+				s_all_gpu_batch[all_gpu_count].u1 = u1;
+				s_all_gpu_batch[all_gpu_count].v1 = v1;
+				s_all_gpu_batch[all_gpu_count].tint_rgba = tint_b;
+				all_gpu_count++;
 			}
 		}
-		if (is_3d && gpu_count > 0)
-			lam_billboard_batch_flush(s_gpu_batch, gpu_count, atlas_rgba());
 	}
 
-	/* Tier 2 Mid-Field Procedural Tree Scatter:
-	 * Beyond the 7x7 server room window, sample deterministic libchaff vegetation masks
-	 * across macro terrain tiles into a dedicated instanced batch buffer. */
-	if (is_3d && zoom >= 0.03f) {
-		#define MID_MAX_DRAW 1024
-		static lam_billboard_gpu_t s_mid_gpu_batch[MID_MAX_DRAW];
-		uint32_t mid_gpu_count = 0;
+	/* Sort near-field 3D billboards globally back-to-front by world wy ascending (tie-break by wx ascending)
+	 * and flush via pure-C WebGL2 pipeline with glDepthMask(GL_FALSE) */
+	if (is_3d && all_gpu_count > 0) {
+		for (uint32_t a = 1; a < all_gpu_count; a++) {
+			lam_billboard_gpu_t k = s_all_gpu_batch[a];
+			int32_t b = (int32_t)a - 1;
+			while (b >= 0 && (s_all_gpu_batch[b].y > k.y ||
+			                 (s_all_gpu_batch[b].y == k.y && s_all_gpu_batch[b].x > k.x))) {
+				s_all_gpu_batch[b + 1] = s_all_gpu_batch[b];
+				b--;
+			}
+			s_all_gpu_batch[b + 1] = k;
+		}
+		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+	}
+
+	/* Unified Homogeneous Scenery Pass:
+	 * Beyond the 7x7 server room window, resolve remembered tiles and isomorphic
+	 * virgin tiles (flora + stones/rocks/boulders) at 100% homogeneous 1:1 room
+	 * resolution across all visible terrain leaves in the camera frustum, fading
+	 * smoothly by altitude before planetary views with zero square boundaries. */
+	s_mid_batch_len = 0;
+	s_last_mid_gpu_count = 0;
+	float dist_scenery = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
+	float alt_fade = seven_smooth_fade(dist_scenery, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
+	uint32_t tint_scenery = seven_pack_white_alpha(alt_fade);
+	if (is_3d && tint_scenery != 0) {
 		uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t w_level = nd_field_water_level(world);
 		int16_t base_rx = st ? st->map_data.pos[0] : 0;
 		int16_t base_ry = st ? st->map_data.pos[1] : 0;
 		int16_t base_rz = st ? st->map_data.pos[2] : 0;
+		int32_t center_ry_grid = -(int32_t)base_ry;
 
-		int mid_rad = (int)(12.0f / (zoom > 0.15f ? zoom : 0.15f));
-		if (mid_rad < 6) mid_rad = 6;
-		if (mid_rad > 14) mid_rad = 14;
-		int mid_i0 = i0 < -mid_rad ? -mid_rad : i0;
-		int mid_i1 = i1 >  mid_rad ?  mid_rad : i1;
-		int mid_j0 = j0 < -mid_rad ? -mid_rad : j0;
-		int mid_j1 = j1 >  mid_rad ?  mid_rad : j1;
+		int64_t lwx = 0, lwy = 0;
+		nd_seven_world_pos(st, &lwx, &lwy);
+		float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
+		float pitch = ND_SEVEN_DIORAMA_PITCH * (3.14159265358979323846f / 180.0f);
+		float dist = dist_scenery;
+		float eye_x = (float)lwx;
+		float eye_y = (float)lwy + dist * cosf(pitch);
+		float eye_z = lwz + dist * sinf(pitch);
 
-		for (int tj = mid_j0; tj <= mid_j1 && mid_gpu_count < MID_MAX_DRAW; tj++) {
-			for (int ti = mid_i0; ti <= mid_i1 && mid_gpu_count < MID_MAX_DRAW; ti++) {
-				if (ti >= obj_i0 && ti <= obj_i1 && tj >= obj_j0 && tj <= obj_j1)
-					continue; /* Covered by Tier 1 near-field server window */
+		/* Sort visible leaves front-to-back by distance to focal position (lwx, lwy) */
+		for (size_t a = 1; a < s_visible_leaf_count; a++) {
+			const ar_node_t *key_node = s_visible_leaves[a];
+			float key_d2 = seven_node_dist2(key_node, (float)lwx, (float)lwy);
+			size_t b = a;
+			while (b > 0) {
+				float prev_d2 = seven_node_dist2(s_visible_leaves[b - 1], (float)lwx, (float)lwy);
+				if (prev_d2 <= key_d2)
+					break;
+				s_visible_leaves[b] = s_visible_leaves[b - 1];
+				b--;
+			}
+			s_visible_leaves[b] = key_node;
+		}
 
-				int16_t pos[4] = {
-					(int16_t)(base_rx + ti),
-					(int16_t)(base_ry - tj),
-					base_rz,
-					(int16_t)world
-				};
-				int32_t base_wx = (int32_t)pos[0] * NDW_TILE_W;
-				int32_t base_wy = -(int32_t)pos[1] * NDW_TILE_H;
-				nd_field_sample_t fs = nd_field_sample(world, 0, base_wx + NDW_CENTER_X, base_wy + NDW_CENTER_Y);
-				if (fs.is_water || fs.bio >= 19)
-					continue;
-				const seven_biome_flora_t *bf = &s_biome_flora[fs.bio];
-				if (bf->threshold == 255)
-					continue;
+		int32_t full_x0 = (int32_t)base_rx - SCENERY_RAD_MAX_ROOMS;
+		int32_t full_x1 = (int32_t)base_rx + SCENERY_RAD_MAX_ROOMS;
+		int32_t full_y0 = center_ry_grid - SCENERY_RAD_MAX_ROOMS;
+		int32_t full_y1 = center_ry_grid + SCENERY_RAD_MAX_ROOMS;
 
-				ndw_tile_t synth;
-				memset(&synth, 0, sizeof(synth));
-				synth.biome = fs.bio;
-				synth.exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
-				int any_slot = 0;
-				for (int s = 0; s < 3; s++) {
-					int32_t swx = base_wx + (s * 2 + 1) * (NDW_TILE_W / 6);
-					int32_t swy = base_wy + NDW_CENTER_Y;
-					uint8_t m = seven_eval_flora_mask(world, swx, swy);
-					if (m > bf->threshold) {
-						synth.glyph[s] = (uint8_t)((m > (uint8_t)(bf->threshold + 36)) ? bf->glyph_big : bf->glyph_sm);
-						synth.fg[s] = 10;
-						any_slot = 1;
+		for (size_t m = 0; m < s_visible_leaf_count; m++) {
+			const ar_node_t *node = s_visible_leaves[m];
+			if (!node || !node->values || node->w <= 0 || node->h <= 0)
+				continue;
+
+			int32_t rx0 = ndw_fdiv(node->ox, NDW_TILE_W);
+			int32_t ry0 = ndw_fdiv(node->oy, NDW_TILE_H);
+			int32_t span_x = node->w / NDW_TILE_W;
+			int32_t span_y = node->h / NDW_TILE_H;
+			if (span_x < 1) span_x = 1;
+			if (span_y < 1) span_y = 1;
+			int32_t rx1 = rx0 + span_x;
+			int32_t ry1 = ry0 + span_y;
+
+			float nz_min = (float)node->min_val / 16.0f;
+			float nz_max = (float)node->max_val / 16.0f;
+
+			int32_t cx0 = (rx0 > full_x0) ? rx0 : full_x0;
+			int32_t cx1 = (rx1 < full_x1 + 1) ? rx1 : (full_x1 + 1);
+			int32_t cy0 = (ry0 > full_y0) ? ry0 : full_y0;
+			int32_t cy1 = (ry1 < full_y1 + 1) ? ry1 : (full_y1 + 1);
+
+			for (int32_t by0 = cy0; by0 < cy1; by0 += 8) {
+				int32_t by1 = (by0 + 8 < cy1) ? (by0 + 8) : cy1;
+				for (int32_t bx0 = cx0; bx0 < cx1; bx0 += 8) {
+					int32_t bx1 = (bx0 + 8 < cx1) ? (bx0 + 8) : cx1;
+					if (s_frame_frustum_valid) {
+						float bmin_x = (float)(bx0 * NDW_TILE_W) - 384.0f;
+						float bmax_x = (float)(bx1 * NDW_TILE_W) + 384.0f;
+						float bmin_y = (float)(by0 * NDW_TILE_H) - 384.0f;
+						float bmax_y = (float)(by1 * NDW_TILE_H) + 384.0f;
+						if (!seven_test_frustum_xy(bmin_x, bmin_y, bmax_x, bmax_y, (float)lwx, (float)lwy, nz_min, nz_max))
+							continue;
 					}
-				}
-				if (!any_slot)
-					continue;
+					for (int32_t ry_grid = by0; ry_grid < by1; ry_grid++) {
+						for (int32_t rx_grid = bx0; rx_grid < bx1; rx_grid++) {
+							int16_t pos[4] = {
+								(int16_t)rx_grid,
+								(int16_t)(-ry_grid),
+								base_rz,
+								(int16_t)world
+							};
+							int ti = (int)pos[0] - (int)base_rx;
+							int tj = (int)base_ry - (int)pos[1];
+							if (ti >= obj_i0 && ti <= obj_i1 && tj >= obj_j0 && tj <= obj_j1)
+								continue; /* Covered by near-field server window */
 
-				ndw_obj_t raw_objs[NDW_MAX_OBJ];
-				int n_raw = ndw_tile_objects(&synth, pos, 1, raw_objs);
-				for (int k = 0; k < n_raw && mid_gpu_count < MID_MAX_DRAW; k++) {
-					int sprite = nd_seven_obj_sprite(&raw_objs[k]);
-					if (sprite <= 0 || sprite >= NDS_COUNT)
-						continue;
-					int32_t wx = base_wx + raw_objs[k].x;
-					int32_t wy = base_wy + raw_objs[k].y;
-					int16_t elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-					int16_t wz = nd_field_elevation_to_block(elev_q);
-					if (w_level > 0 && wz <= w_level)
-						continue; /* Anti-submersion */
+							if (s_frame_frustum_valid) {
+								float rmin_x = (float)(rx_grid * NDW_TILE_W) - 320.0f;
+								float rmax_x = (float)((rx_grid + 1) * NDW_TILE_W) + 320.0f;
+								float rmin_y = (float)(ry_grid * NDW_TILE_H) - 320.0f;
+								float rmax_y = (float)((ry_grid + 1) * NDW_TILE_H) + 320.0f;
+								if (!seven_test_frustum_xy(rmin_x, rmin_y, rmax_x, rmax_y, (float)lwx, (float)lwy, nz_min, nz_max))
+									continue;
+							}
 
-					const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
-					int flip = (raw_objs[k].variant >> 2) & 1;
-					s_mid_gpu_batch[mid_gpu_count].x = (float)wx;
-					s_mid_gpu_batch[mid_gpu_count].y = (float)wy;
-					s_mid_gpu_batch[mid_gpu_count].z = (float)elev_q / 16.0f;
-					s_mid_gpu_batch[mid_gpu_count].width = (float)sr->w;
-					s_mid_gpu_batch[mid_gpu_count].height = (float)sr->h;
-					if (flip) {
-						s_mid_gpu_batch[mid_gpu_count].u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
-						s_mid_gpu_batch[mid_gpu_count].u1 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
-					} else {
-						s_mid_gpu_batch[mid_gpu_count].u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
-						s_mid_gpu_batch[mid_gpu_count].u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
+							seven_emit_room_billboards(st, node, pos, w_level, eye_x, eye_y, eye_z, tint_scenery);
+						}
 					}
-					s_mid_gpu_batch[mid_gpu_count].v0 = (float)sr->y / (float)ND_SEVEN_ATLAS_H_PX;
-					s_mid_gpu_batch[mid_gpu_count].v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_ATLAS_H_PX;
-					s_mid_gpu_batch[mid_gpu_count].tint_rgba = 0xFFFFFFFFu;
-					mid_gpu_count++;
 				}
 			}
 		}
-		if (mid_gpu_count > 0)
-			lam_billboard_batch_flush(s_mid_gpu_batch, mid_gpu_count, atlas_rgba());
+		if (s_mid_batch_len > 0)
+			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
 	}
 
 	{
@@ -861,4 +986,21 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 		}
 	}
 	nd_seven_ground_frame_end(st ? &st->map_data : NULL);
+}
+
+uint32_t nd_seven_last_mid_billboard_count(void)
+{
+	return s_last_mid_gpu_count;
+}
+
+int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h)
+{
+	if (idx >= s_last_mid_gpu_count || idx >= MID_MAX_DRAW)
+		return 0;
+	if (x) *x = s_mid_gpu_batch[idx].x;
+	if (y) *y = s_mid_gpu_batch[idx].y;
+	if (z) *z = s_mid_gpu_batch[idx].z;
+	if (w) *w = s_mid_gpu_batch[idx].width;
+	if (h) *h = s_mid_gpu_batch[idx].height;
+	return 1;
 }

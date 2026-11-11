@@ -51,6 +51,8 @@ static void recentre(int drop_keys)
 	}
 }
 
+static void known_tile_ingest_map(const nd_client_state_t *st);
+
 void nd_seven_sync_origin(const nd_client_state_t *st)
 {
 	const int16_t *pos;
@@ -64,6 +66,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		}
 		return;
 	}
+	known_tile_ingest_map(st);
 	pos = st->map_data.pos;
 	if (!s_have) {
 		memcpy(s_pos, pos, sizeof(s_pos));
@@ -244,10 +247,287 @@ int nd_seven_centre_restore(const int16_t pos[4], uint8_t *glyph, uint8_t *fg)
 	return 0;
 }
 
+#define KNOWN_SETS 256
+#define KNOWN_WAYS 4
+typedef struct {
+	int16_t    pos[4];
+	ndw_tile_t tile;
+	uint32_t   seq;
+	uint8_t    valid;
+} known_tile_ent_t;
+
+static known_tile_ent_t s_known_tiles[KNOWN_SETS][KNOWN_WAYS];
+static uint32_t s_known_seq = 0;
+static int16_t s_known_min_x = 32767, s_known_max_x = -32768;
+static int16_t s_known_min_y = 32767, s_known_max_y = -32768;
+
+static unsigned known_tile_set(const int16_t pos[4])
+{
+	uint32_t h = (uint32_t)(uint16_t)pos[0] * 73856093u ^ (uint32_t)(uint16_t)pos[1] * 19349663u ^
+	             (uint32_t)(uint16_t)pos[2] * 83492791u ^ (uint32_t)(uint16_t)pos[3] * 2654435761u;
+	return (h ^ (h >> 15)) % KNOWN_SETS;
+}
+
+static void known_tile_apply_harvested(const int16_t pos[4], ndw_tile_t *t)
+{
+	for (uint8_t s = 0; s < 3; s++) {
+		if (t->glyph[s] && nd_seven_is_tile_obj_picked(pos, s)) {
+			t->glyph[s] = 0;
+			t->fg[s] = 0;
+		}
+	}
+}
+
+static void known_tile_remember(const int16_t pos[4], const ndw_tile_t *t)
+{
+	unsigned set = known_tile_set(pos);
+	known_tile_ent_t *target = NULL;
+	uint32_t oldest_seq = 0xFFFFFFFFu;
+	int oldest_w = 0;
+
+	for (int w = 0; w < KNOWN_WAYS; w++) {
+		known_tile_ent_t *e = &s_known_tiles[set][w];
+		if (e->valid && !memcmp(e->pos, pos, sizeof(e->pos))) {
+			target = e;
+			break;
+		}
+		if (!e->valid && !target)
+			target = e;
+		if (e->valid && e->seq < oldest_seq) {
+			oldest_seq = e->seq;
+			oldest_w = w;
+		}
+	}
+	if (!target)
+		target = &s_known_tiles[set][oldest_w];
+
+	memcpy(target->pos, pos, sizeof(target->pos));
+	if (pos[0] < s_known_min_x) s_known_min_x = pos[0];
+	if (pos[0] > s_known_max_x) s_known_max_x = pos[0];
+	if (pos[1] < s_known_min_y) s_known_min_y = pos[1];
+	if (pos[1] > s_known_max_y) s_known_max_y = pos[1];
+
+	target->tile = *t;
+	target->tile.flags &= (uint8_t)~(NDW_F_PLAYER | NDW_F_ENTITY);
+	for (int s = 0; s < 3; s++) {
+		if (target->tile.glyph[s] == ' ' || target->tile.glyph[s] == '!') {
+			target->tile.glyph[s] = 0;
+			target->tile.fg[s] = 0;
+		}
+	}
+	known_tile_apply_harvested(pos, &target->tile);
+	target->seq = ++s_known_seq;
+	target->valid = 1;
+}
+
+static void known_tile_ingest_map(const nd_client_state_t *st)
+{
+	if (!st || st->map_data.width == 0 || st->map_data.height == 0)
+		return;
+	int w = (int)st->map_data.width;
+	int h = (int)st->map_data.height;
+	for (int row = 0; row < h; row++) {
+		for (int col = 0; col < w; col++) {
+			int ti = col - (int)st->map_data.player_x;
+			int tj = row - (int)st->map_data.player_y;
+			int16_t tpos[4] = {
+				(int16_t)(st->map_data.pos[0] + ti),
+				(int16_t)(st->map_data.pos[1] - tj),
+				st->map_data.pos[2],
+				st->map_data.pos[3],
+			};
+			ndw_tile_t t = nd_seven_convert_tile(&st->map_data.tiles[row * w + col]);
+			centre_remember(st, tpos, &t);
+			known_tile_remember(tpos, &t);
+		}
+	}
+}
+
+int nd_seven_lookup_known_tile(const int16_t pos[4], ndw_tile_t *out)
+{
+	if (!pos || s_known_seq == 0 ||
+	    pos[0] < s_known_min_x || pos[0] > s_known_max_x ||
+	    pos[1] < s_known_min_y || pos[1] > s_known_max_y)
+		return 0;
+	unsigned set = known_tile_set(pos);
+	for (int w = 0; w < KNOWN_WAYS; w++) {
+		known_tile_ent_t *e = &s_known_tiles[set][w];
+		if (e->valid && !memcmp(e->pos, pos, sizeof(e->pos))) {
+			if (out) {
+				*out = e->tile;
+				known_tile_apply_harvested(pos, out);
+			}
+			return 1;
+		}
+	}
+	return 0;
+}
+
+#define VIRGIN_MEMO_SIZE   262144
+#define VIRGIN_MEMO_MAX_OBJ 9
+typedef struct {
+	int16_t    pos[4];
+	ndw_tile_t tile;
+	uint8_t    valid;
+	uint8_t    objs_valid;
+	uint8_t    obj_count;
+	ndw_obj_t  objs[VIRGIN_MEMO_MAX_OBJ];
+} virgin_memo_ent_t;
+
+static virgin_memo_ent_t s_virgin_memo[VIRGIN_MEMO_SIZE];
+
+static inline virgin_memo_ent_t *synth_virgin_entry(const int16_t pos[4])
+{
+	/* Collision-free 512x512 2D spatial torus index across full-screen frustums */
+	unsigned idx = (((unsigned)(uint16_t)pos[0] & 511u) |
+	                (((unsigned)(uint16_t)pos[1] & 511u) << 9)) ^
+	               (((unsigned)(uint16_t)pos[3] & 3u) << 16);
+	virgin_memo_ent_t *m = &s_virgin_memo[idx];
+	if (m->valid &&
+	    m->pos[0] == pos[0] && m->pos[1] == pos[1] &&
+	    m->pos[2] == pos[2] && m->pos[3] == pos[3])
+		return m;
+	ndw_synth_virgin_tile(pos, &m->tile);
+	memcpy(m->pos, pos, sizeof(m->pos));
+	m->valid = 1;
+	m->objs_valid = 0;
+	m->obj_count = 0;
+	return m;
+}
+
+static void synth_virgin_cached(const int16_t pos[4], ndw_tile_t *out)
+{
+	virgin_memo_ent_t *m = synth_virgin_entry(pos);
+	*out = m->tile;
+}
+
+int nd_seven_resolve_tile_at_pos(const nd_client_state_t *st, const int16_t pos[4], ndw_tile_t *out)
+{
+	if (!pos || !out)
+		return 0;
+
+	if (st && st->map_data.width > 0 && st->map_data.height > 0 &&
+	    pos[2] == st->map_data.pos[2] && pos[3] == st->map_data.pos[3]) {
+		int ti = (int)pos[0] - (int)st->map_data.pos[0];
+		int tj = (int)st->map_data.pos[1] - (int)pos[1];
+		int col = (int)st->map_data.player_x + ti;
+		int row = (int)st->map_data.player_y + tj;
+		if (col >= 0 && col < (int)st->map_data.width &&
+		    row >= 0 && row < (int)st->map_data.height) {
+			*out = nd_seven_convert_tile(&st->map_data.tiles[row * st->map_data.width + col]);
+			centre_remember(st, pos, out);
+			known_tile_remember(pos, out);
+			known_tile_apply_harvested(pos, out);
+			return 1;
+		}
+	}
+
+	if (nd_seven_lookup_known_tile(pos, out))
+		return 1;
+
+	synth_virgin_cached(pos, out);
+	known_tile_apply_harvested(pos, out);
+	return 2;
+}
+
+const ndw_obj_t *nd_seven_resolve_room_objects_fast(const nd_client_state_t *st, const int16_t pos[4],
+                                                    ndw_obj_t scratch_objs[NDW_MAX_OBJ], int *out_count)
+{
+	if (!pos || !out_count) {
+		if (out_count) *out_count = 0;
+		return NULL;
+	}
+
+	ndw_tile_t t;
+	if (st && st->map_data.width > 0 && st->map_data.height > 0 &&
+	    pos[2] == st->map_data.pos[2] && pos[3] == st->map_data.pos[3]) {
+		int ti = (int)pos[0] - (int)st->map_data.pos[0];
+		int tj = (int)st->map_data.pos[1] - (int)pos[1];
+		int col = (int)st->map_data.player_x + ti;
+		int row = (int)st->map_data.player_y + tj;
+		if (col >= 0 && col < (int)st->map_data.width &&
+		    row >= 0 && row < (int)st->map_data.height) {
+			t = nd_seven_convert_tile(&st->map_data.tiles[row * st->map_data.width + col]);
+			centre_remember(st, pos, &t);
+			known_tile_remember(pos, &t);
+			known_tile_apply_harvested(pos, &t);
+			if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+				*out_count = 0;
+				return NULL;
+			}
+			*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+			return scratch_objs;
+		}
+	}
+
+	if (nd_seven_lookup_known_tile(pos, &t)) {
+		if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+			*out_count = 0;
+			return NULL;
+		}
+		*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+		return scratch_objs;
+	}
+
+	virgin_memo_ent_t *m = synth_virgin_entry(pos);
+	if (nd_seven_is_tile_obj_picked(pos, 0) ||
+	    nd_seven_is_tile_obj_picked(pos, 1) ||
+	    nd_seven_is_tile_obj_picked(pos, 2)) {
+		t = m->tile;
+		for (uint8_t s = 0; s < 3; s++) {
+			if (t.glyph[s] && nd_seven_is_tile_obj_picked(pos, s)) {
+				t.glyph[s] = 0;
+				t.fg[s] = 0;
+			}
+		}
+		if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+			*out_count = 0;
+			return NULL;
+		}
+		*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+		return scratch_objs;
+	}
+
+	if (!m->objs_valid) {
+		if (m->tile.glyph[0] || m->tile.glyph[1] || m->tile.glyph[2]) {
+			ndw_obj_t tmp[NDW_MAX_OBJ];
+			int n = ndw_tile_objects(&m->tile, pos, 0, tmp);
+			if (n > VIRGIN_MEMO_MAX_OBJ) n = VIRGIN_MEMO_MAX_OBJ;
+			if (n > 0) memcpy(m->objs, tmp, (size_t)n * sizeof(ndw_obj_t));
+			m->obj_count = (uint8_t)n;
+		} else {
+			m->obj_count = 0;
+		}
+		m->objs_valid = 1;
+	}
+	*out_count = (int)m->obj_count;
+	return m->objs;
+}
+
+int nd_seven_resolve_room_objects(const nd_client_state_t *st, const int16_t pos[4],
+                                  ndw_tile_t *out_tile, ndw_obj_t out_objs[NDW_MAX_OBJ])
+{
+	if (!pos || !out_objs)
+		return 0;
+	if (out_tile)
+		nd_seven_resolve_tile_at_pos(st, pos, out_tile);
+	int count = 0;
+	const ndw_obj_t *ptr = nd_seven_resolve_room_objects_fast(st, pos, out_objs, &count);
+	if (ptr && ptr != out_objs && count > 0)
+		memcpy(out_objs, ptr, (size_t)count * sizeof(ndw_obj_t));
+	return count;
+}
+
 void nd_seven_forget(void)
 {
 	memset(s_centre, 0, sizeof(s_centre));
 	memset(s_centre_next, 0, sizeof(s_centre_next));
+	memset(s_known_tiles, 0, sizeof(s_known_tiles));
+	s_known_seq = 0;
+	s_known_min_x = 32767;
+	s_known_max_x = -32768;
+	s_known_min_y = 32767;
+	s_known_max_y = -32768;
 	nd_seven_objects_forget();
 	nd_seven_ground_cache_forget();
 	nd_seven_collision_invalidate();
@@ -283,16 +563,13 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 	if (known) {
 		*t = nd_seven_convert_tile(&md->tiles[row * w + col]);
 		centre_remember(st, pos, t);
+		known_tile_remember(pos, t);
 		return 1;
 	} else {
-		memset(t, 0, sizeof(*t));
-		int32_t wx = (int32_t)pos[0] * NDW_TILE_W + (NDW_TILE_W / 2);
-		int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + (NDW_TILE_H / 2);
-		uint16_t world = (uint16_t)pos[3];
-		nd_field_sample_t fs = nd_field_sample(world, 0, wx, wy);
-		t->biome = fs.bio;
-		t->flags = fs.is_water ? NDW_F_WATER : 0;
-		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
+		if (nd_seven_lookup_known_tile(pos, t))
+			return 1;
+		synth_virgin_cached(pos, t);
+		known_tile_apply_harvested(pos, t);
 		return 2;
 	}
 }

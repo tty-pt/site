@@ -550,31 +550,6 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 		pcy = (int)(start_y + (uint32_t)pty * tile_sz + tile_sz / 2);
 	}
 
-	/* Pre-populate minimap chunks in unified libchunk spatial database (VIEW_LAMINA = 1) */
-	ar_system_t *cs = nd_seven_get_chunk_sys();
-	if (cs && map && cols > 0 && rows > 0) {
-		int32_t center_ox = (int32_t)map->pos[0] * 160;
-		int32_t center_oy = -(int32_t)map->pos[1] * 128;
-		uint16_t world = (uint16_t)map->pos[3];
-
-		ar_view_t mini_view = {
-			.cam_x = (float)center_ox,
-			.cam_y = (float)center_oy,
-			.cam_z = 0.0f,
-			.pitch = 0.0f,
-			.yaw = 0.0f,
-			.fov = 0.0f,
-			.zoom = 1.0f,
-			.viewport_w = (float)(cols * 160),
-			.viewport_h = (float)(rows * 128),
-			.eff_cam_dist = 0.0f,
-			.min_level = 0,
-			.max_level = 2
-		};
-		ar_draw_item_t mini_items[AR_DEFAULT_MAX_ACTIVE];
-		ar_eval_view(cs, 1, world, &mini_view, mini_items, AR_DEFAULT_MAX_ACTIVE);
-	}
-
 	/* 2. Render each tile the way the ASCII map does: the biome's background
 	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
 	 * (left / centre / right) showing plants, stairs, shops, ponds and entities
@@ -598,7 +573,7 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
 				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
 			} else {
-				/* Wilderness: render directly from unified libchunk multi-scale spatial index */
+				/* Wilderness: render directly from unified libchunk level-0 spatial index */
 				int16_t room_pos[4] = {
 					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
 					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
@@ -613,11 +588,7 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				const ar_node_t *chk = NULL;
 				if (cs) {
 					uint64_t key = morton_quad_key(world, 0, ox, oy, 160, 128);
-					for (uint8_t lvl = 0; lvl <= 6; lvl++) {
-						chk = ar_system_find_by_key(cs, key);
-						if (chk) break;
-						key = morton_quad_parent(key);
-					}
+					chk = ar_system_find_by_key(cs, key);
 					if (!chk) {
 						chk = ar_node_find(cs, world, 0, ox, oy);
 					}

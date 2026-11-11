@@ -10,7 +10,9 @@
 #include "nd_seven_objects.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_ground.h"
+#include "nd_seven_gl.h"
 #include "nd_lamina.h"
+#include <math.h>
 
 #define MAXW 1920
 #define MAXH 1080
@@ -2188,6 +2190,205 @@ int main(void)
 		nd_seven_set_3d_mode(0);
 		nd_seven_ground_cache_forget();
 		printf("PASS: stratospheric LOD threshold at zoom < 0.25f bypasses room explosion and bounds chunk count to <= 64\n");
+	}
+
+	/* Pure-C 3D Shaders, Pitch-Rotated Billboards, Water Depression, and Temporal Stability (R1-R4) */
+	{
+		/* 1. Verify all 6 3D shaders are exported from pure C and include required optics */
+		const char *vs_t = nd_seven_gl_vs_terrain();
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		const char *vs_w = nd_seven_gl_vs_water();
+		const char *fs_w = nd_seven_gl_fs_water();
+		const char *vs_b = nd_seven_gl_vs_billboard();
+		const char *fs_b = nd_seven_gl_fs_billboard();
+		assert(vs_t && strstr(vs_t, "sampleHeightSmooth"));
+		assert(fs_t && strstr(fs_t, "seabedAbsorption"));
+		assert(vs_w && strstr(vs_w, "sampleHeightSmooth"));
+		assert(fs_w && strstr(fs_w, "if (vWaterDepth <= 0.0)"));
+		assert(vs_b && strstr(vs_b, "a_local_pos"));
+		assert(fs_b && strstr(fs_b, "waterAbsorption"));
+
+		/* 2. Verify pitch-rotated billboard basis orthogonality and 1:1 projected aspect ratio at 55 deg */
+		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
+		float base_pos[3], right[3], up[3], view_dir[3];
+		nd_seven_gl_billboard_basis(1600.0f, 1280.0f, 10.0f, ND_SEVEN_DIORAMA_PITCH, pdef,
+		                            base_pos, right, up, view_dir);
+
+		float dot_ru = right[0] * up[0] + right[1] * up[1] + right[2] * up[2];
+		float dot_uv = up[0] * view_dir[0] + up[1] * view_dir[1] + up[2] * view_dir[2];
+		float len_r = sqrtf(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+		float len_u = sqrtf(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+		assert(fabsf(dot_ru) < 1e-5f);
+		assert(fabsf(dot_uv) < 1e-5f);
+		assert(fabsf(len_r - 1.0f) < 1e-5f);
+		assert(fabsf(len_u - 1.0f) < 1e-5f);
+
+		/* Project a 32x32 square billboard through the 3D camera MVP and verify 1:1 screen aspect ratio */
+		float mvp[16];
+		nd_seven_gl_compute_mvp(1000, 1000, 1600.0f, 1280.0f, 10.0f,
+		                        ND_SEVEN_CAM_DIST, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
+		                        pdef, mvp, NULL, NULL, NULL);
+		lam_billboard_gpu_t bb = {
+			.x = 1600.0f, .y = 1280.0f, .z = 10.0f,
+			.width = 32.0f, .height = 32.0f,
+			.u0 = 0.0f, .v0 = 0.0f, .u1 = 1.0f, .v1 = 1.0f,
+			.tint_rgba = 0xFFFFFFFFu
+		};
+		nd_seven_gl_bb_vert_t qv[6];
+		nd_seven_gl_eval_billboard_quad(&bb, ND_SEVEN_DIORAMA_PITCH, pdef, qv);
+		assert(fabsf(qv[0].local_pos[2] - 10.0f) < 1e-5f);
+		assert(fabsf(qv[2].local_pos[2] - 42.0f) < 1e-5f);
+
+		/* Transform BL (qv[0]), BR (qv[1]), TL (qv[2]) to NDC */
+		float ndc_x[3], ndc_y[3];
+		for (int k = 0; k < 3; k++) {
+			float x = qv[k].world_pos[0], y = qv[k].world_pos[1], z = qv[k].world_pos[2];
+			float cx = mvp[0] * x + mvp[4] * y + mvp[8]  * z + mvp[12];
+			float cy = mvp[1] * x + mvp[5] * y + mvp[9]  * z + mvp[13];
+			float cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+			assert(cw > 1.0f);
+			ndc_x[k] = cx / cw;
+			ndc_y[k] = cy / cw;
+		}
+		float proj_w = fabsf(ndc_x[1] - ndc_x[0]);
+		float proj_h = fabsf(ndc_y[2] - ndc_y[0]);
+		assert(proj_w > 0.01f && proj_h > 0.01f);
+		assert(fabsf((proj_h / proj_w) - 1.0f) < 0.06f);
+
+		/* 3. Verify smooth height parity and dry-land water vertex depression */
+		int16_t hgrid[4] = { 320, 320, 320, 320 }; /* 320 * 0.0625 = 20.0 units elevation */
+		float wz_out = 0.0f, depth_out = 0.0f;
+		float r_water_dry = nd_seven_gl_eval_water_radius(hgrid, 2, 2, 0.5f, 0.5f, 160.0f, 128.0f,
+		                                                  pdef->minor_r, 0.0f, &wz_out, &depth_out);
+		assert(fabsf(wz_out - 20.0f) < 1e-4f);
+		assert(depth_out < 0.0f);
+		assert(r_water_dry < pdef->minor_r + wz_out);
+
+		printf("PASS: Pure-C 3D shaders, 55-deg pitch-aligned billboard aspect ratio, and dry-land water depression verified\n");
+	}
+
+	/* R1: Deterministic Virgin Tile Synthesis (Flora + Stones/Rocks/Boulders Parity) */
+	{
+		int flora_seen = 0;
+		int stone_seen = 0, rock_seen = 0, boulder_seen = 0;
+		for (int ry = -40; ry <= 40; ry++) {
+			for (int rx = -40; rx <= 40; rx++) {
+				int16_t pos[4] = { (int16_t)rx, (int16_t)ry, 0, 0 };
+				ndw_tile_t vt1, vt2;
+				ndw_synth_virgin_tile(pos, &vt1);
+				ndw_synth_virgin_tile(pos, &vt2);
+				assert(memcmp(&vt1, &vt2, sizeof(vt1)) == 0);
+				for (int s = 0; s < 3; s++) {
+					uint8_t g = vt1.glyph[s];
+					if (g == '*') stone_seen++;
+					else if (g == 'o') rock_seen++;
+					else if (g == 'O') boulder_seen++;
+					else if (g != 0) flora_seen++;
+				}
+			}
+		}
+		assert(flora_seen > 100);
+		assert(stone_seen > 50);
+		assert(rock_seen > 20);
+		assert(boulder_seen > 5);
+		printf("PASS: ndw_synth_virgin_tile deterministically synthesizes both flora (%d) and minerals (*=%d, o=%d, O=%d)\n",
+		       flora_seen, stone_seen, rock_seen, boulder_seen);
+	}
+
+	/* R2: Client-Side Remembered Tile Cache Persistence (> 10 Rooms Away) */
+	{
+		nd_seven_forget();
+		/* Stand at (100, 100) where room (100, 100) has a boulder 'O' and a built room flag */
+		set_map(100, 100, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 'T');
+		nd_seven_render(fb, 640, 480, &st);
+
+		/* Walk 12 rooms East to (112, 100) so (100, 100) is well outside the 7x7 window */
+		set_map_keep(112, 100, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_render(fb, 640, 480, &st);
+
+		int16_t old_pos[4] = { 100, 100, 0, 0 };
+		ndw_tile_t resolved;
+		int src = nd_seven_resolve_tile_at_pos(&st, old_pos, &resolved);
+		assert(src == 1); /* Resolved from remembered tile cache, not virgin fallback */
+		assert((resolved.flags & NDW_F_ROOM) != 0);
+		assert(resolved.glyph[0] == 'O' && resolved.glyph[2] == 'T');
+		printf("PASS: remembered tile cache preserves visited server rooms and objects > 10 rooms outside 7x7 window\n");
+	}
+
+	/* R3 & R4: Unified 1:1 Room Scenery Placement Across Zoom Levels (Zero 7x7 Density Cliff) */
+	{
+		nd_seven_forget();
+		nd_seven_set_3d_mode(1);
+		set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');
+
+		/* First measure billboards in ring [4..12] rooms outside 7x7 at mid zoom (0.15f) */
+		nd_seven_set_zoom(0.15f);
+		nd_seven_render(fb, 1280, 720, &st);
+		uint32_t cnt_mid_zoom = nd_seven_last_mid_billboard_count();
+		int ring_4_12_mid_zoom = 0;
+		for (uint32_t i = 0; i < cnt_mid_zoom; i++) {
+			float bx = 0, by = 0, bz = 0, bw = 0, bh = 0;
+			if (nd_seven_last_mid_billboard(i, &bx, &by, &bz, &bw, &bh)) {
+				int rx = ndw_fdiv((int)bx, NDW_TILE_W) - 10;
+				int ry = (-ndw_fdiv((int)by, NDW_TILE_H)) - 10;
+				int arx = rx < 0 ? -rx : rx;
+				int ary = ry < 0 ? -ry : ry;
+				int cheb = arx > ary ? arx : ary;
+				if (cheb >= 4 && cheb <= 12)
+					ring_4_12_mid_zoom++;
+			}
+		}
+		assert(ring_4_12_mid_zoom > 100);
+
+		/* Now zoom all the way out to -22x (0.00738f): ring [4..12] must NOT thin out,
+		 * and scenery must be emitted homogeneously across visible rooms! */
+		nd_seven_set_zoom(0.00738f);
+		nd_seven_render(fb, 1280, 720, &st);
+
+		uint32_t mid_cnt = nd_seven_last_mid_billboard_count();
+		assert(mid_cnt > 1000);
+
+		int ring_4_12_far_zoom = 0;
+		int far_horizon_cnt = 0;
+		int deep_horizon_30_cnt = 0;
+		int max_cheb_seen = 0;
+		int scaled_landmark_cnt = 0;
+		for (uint32_t i = 0; i < mid_cnt; i++) {
+			float bx = 0, by = 0, bz = 0, bw = 0, bh = 0;
+			if (nd_seven_last_mid_billboard(i, &bx, &by, &bz, &bw, &bh)) {
+				int rx = ndw_fdiv((int)bx, NDW_TILE_W) - 10;
+				int ry = (-ndw_fdiv((int)by, NDW_TILE_H)) - 10;
+				int arx = rx < 0 ? -rx : rx;
+				int ary = ry < 0 ? -ry : ry;
+				int cheb = arx > ary ? arx : ary;
+				if (cheb > max_cheb_seen)
+					max_cheb_seen = cheb;
+				if (cheb >= 4 && cheb <= 12)
+					ring_4_12_far_zoom++;
+				if (cheb > 14)
+					far_horizon_cnt++;
+				if (cheb > 30)
+					deep_horizon_30_cnt++;
+				if (bh > 46.0f) /* Scaled above tallest base sprite height (46px) by seven_billboard_lod_scale */
+					scaled_landmark_cnt++;
+			}
+		}
+		assert(ring_4_12_far_zoom >= ring_4_12_mid_zoom);
+		assert(far_horizon_cnt > 1000);
+		assert(deep_horizon_30_cnt > 1000);
+		assert(max_cheb_seen > 100 && max_cheb_seen <= 255);
+		assert(scaled_landmark_cnt > 500);
+
+		/* By -23x zoom (0.0059f, eff_cam_dist ~47,457 > 44,000), all scenery has uniformly faded out together */
+		nd_seven_set_zoom(0.0059f);
+		nd_seven_render(fb, 1280, 720, &st);
+		assert(nd_seven_last_mid_billboard_count() == 0);
+
+		nd_seven_set_zoom(1.0f);
+		nd_seven_set_3d_mode(0);
+		nd_seven_forget();
+		printf("PASS: -22x zoom (0.00738) emits %u homogeneous billboards with zero zoom-out thinning (ring[4..12]: %d vs %d at 0.15x, >14: %d, >30: %d, max_cheb=%d) and fades out uniformly by -23x zoom\n",
+		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, deep_horizon_30_cnt, max_cheb_seen);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
