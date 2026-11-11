@@ -822,14 +822,19 @@ class BudHostBase {
 			if (id !== null) {
 				node = this.getNode(id);
 				if (node && node.nodeType === Node.ELEMENT_NODE) {
-					walkNodes(node, (child) => {
-						if (child === node || child.nodeType !== Node.ELEMENT_NODE)
-							return;
-						const childId = parseNodeId(child.getAttribute('data-bud-id'));
-						if (childId !== null) this.unbindNode(childId);
-					});
-					node.innerHTML = op.b || '';
-					this.refreshTrackedSubtree(node);
+					if (node.querySelector && node.querySelector('[data-bud-id]')) {
+						walkNodes(node, (child) => {
+							if (child === node || child.nodeType !== Node.ELEMENT_NODE)
+								return;
+							const childId = parseNodeId(child.getAttribute('data-bud-id'));
+							if (childId !== null) this.unbindNode(childId);
+						});
+					}
+					const htmlStr = op.b || '';
+					node.innerHTML = htmlStr;
+					if (htmlStr.includes('data-bud-') || htmlStr.includes('bud-text:') || htmlStr.includes('bud-fragment:')) {
+						this.refreshTrackedSubtree(node);
+					}
 				}
 			}
 			return true;

@@ -638,6 +638,7 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 	(void)st;
 	bud_node *chat = bud_element("div");
 	bud_set_attr(chat, "id", "rpg-chat");
+	bud_set_attr(chat, "data-bud-key", "rpg-chat");
 	int is_min = s_win[ND_WIN_CHAT].minimized;
 	int is_dragging = (s_drag_win == ND_WIN_CHAT && s_drag_mode != 0);
 	char chat_cls[160];
@@ -653,6 +654,7 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 	/* Embedded xterm container */
 	bud_node *term = lx_n("div",
 		lx_attr("id", "term"),
+		lx_attr("data-bud-key", "term"),
 		lx_attr("data-bud-terminal", "1"),
 		lx_attr("data-line-mode", "true"),
 		lx_attr("class", "hud-win-body flex-1 w-full h-full min-h-0 font-mono text-neutral-200 overflow-hidden relative bg-transparent"));
@@ -1317,6 +1319,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		/* Right-hand HUD container (#map-overlay) with independent movable/resizable Map & Contents windows */
 		bud_node *overlay = bud_element("div");
 		bud_set_attr(overlay, "id", "map-overlay");
+		bud_set_attr(overlay, "data-bud-key", "map-overlay");
 		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end max-w-[340px] overflow-y-auto");
 		bud_set_attr(overlay, "style", "top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)");
 
@@ -1341,11 +1344,13 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			bud_append(overlay, map_box);
 		}
 
-		if (st && st->target_ref) {
+		{
 			bud_node *tc = render_target_card(st);
 			bud_node *tc_box = bud_element("div");
 			bud_set_attr(tc_box, "data-bud-key", "target-card");
-			bud_set_attr(tc_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden flex-shrink-0");
+			bud_set_attr(tc_box, "class", (st && st->target_ref)
+				? "pointer-events-auto shadow-lg rounded overflow-hidden flex-shrink-0"
+				: "hidden");
 			bud_append(tc_box, tc);
 			bud_append(overlay, tc_box);
 		}
@@ -1408,7 +1413,6 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
 		bud_set_attr(main_box, "class", "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100");
-		apply_room_backdrop(main_box, st);
 		bud_append(main_box, holder);
 		bud_append(main_box, modals);
 

@@ -85,12 +85,13 @@ void nd_state_serialize(const nd_client_state_t *st, char *buf, size_t cap)
 		return;
 
 	size_t cur = (size_t)offset;
-	for (size_t i = 0; i < st->entity_count && cur + 160 < cap; i++) {
+	for (size_t i = 0; i < st->entity_count && cur + 200 < cap; i++) {
 		const nd_entity_desc_t *e = &st->entities[i];
 		int n = snprintf(buf + cur, cap - cur,
-			"%s{\"ref\":%u,\"name\":\"%s\",\"ch\":\"%c\",\"fg\":%u,\"loc\":%u,\"art\":\"%s\"}",
+			"%s{\"ref\":%u,\"name\":\"%s\",\"ch\":\"%c\",\"fg\":%u,\"loc\":%u,\"type\":%u,\"flags\":%u,\"actions\":%u,\"art\":\"%s\"}",
 			(i > 0) ? "," : "",
-			e->ref, e->name, e->ch ? e->ch : '?', e->fg, e->location, e->art);
+			e->ref, e->name, e->ch ? e->ch : '?', e->fg, e->location,
+			e->type, (unsigned)e->flags, e->actions, e->art);
 		if (n > 0) cur += (size_t)n;
 	}
 
@@ -180,6 +181,21 @@ void parse_json_entities(const char *json, nd_client_state_t *st)
 		p = strstr(obj, "\"loc\":");
 		if (p && p < obj_end) {
 			st->entities[count].location = (uint32_t)strtoul(p + 6, NULL, 10);
+		}
+		/* Extract type */
+		p = strstr(obj, "\"type\":");
+		if (p && p < obj_end) {
+			st->entities[count].type = (uint32_t)strtoul(p + 7, NULL, 10);
+		}
+		/* Extract flags */
+		p = strstr(obj, "\"flags\":");
+		if (p && p < obj_end) {
+			st->entities[count].flags = (uint16_t)strtoul(p + 8, NULL, 10);
+		}
+		/* Extract actions */
+		p = strstr(obj, "\"actions\":");
+		if (p && p < obj_end) {
+			st->entities[count].actions = (uint32_t)strtoul(p + 10, NULL, 10);
 		}
 		/* Extract art */
 		p = strstr(obj, "\"art\":\"");
@@ -351,12 +367,19 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 		return;
 
 	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
+		uint8_t opcode = (len >= 3) ? buf[2] : 0xFF;
 		int ret = nd_bcp_decode(buf, len, &client_state);
 		if (ret > 0) {
 			nd_spatial_resolver_invalidate();
 			nd_scene_sync(&g_scene, &client_state);
-			bud_app_set_state();
 			g_map_dirty = 1;
+			if (opcode != ND_BCP_TOD &&
+			    opcode != ND_BCP_SPARSITY &&
+			    opcode != ND_BCP_MACRO_VIEW &&
+			    !((opcode == ND_BCP_VIEW || opcode == ND_BCP_VIEW_BUFFER) &&
+			      nd_map_canvas_enabled(&client_state))) {
+				bud_app_set_state();
+			}
 		}
 		return;
 	}
