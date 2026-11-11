@@ -316,10 +316,19 @@ void nd_ui_restore_persist(const char *key, const char *val)
 	if (!key || !val) return;
 	for (int i = 0; i < ND_WIN_COUNT; i++) {
 		if (strcmp(key, s_win_persist_keys[i]) == 0) {
-			s_win[i].x = parse_style_px(val, "left:", -1);
-			s_win[i].y = parse_style_px(val, "top:", -1);
-			s_win[i].w = parse_style_px(val, "width:", 0);
-			s_win[i].h = parse_style_px(val, "height:", 0);
+			int min_w, min_h, def_w, def_h;
+			get_win_limits(i, &min_w, &min_h, &def_w, &def_h, 0, 0);
+			int rx = parse_style_px(val, "left:", -1);
+			int ry = parse_style_px(val, "top:", -1);
+			int rw = parse_style_px(val, "width:", 0);
+			int rh = parse_style_px(val, "height:", 0);
+			if (rx >= 0 && ry >= 0 && ry < 24) ry = 24;
+			if (rw > 0 && rw < min_w) rw = min_w;
+			if (rh > 0 && rh < min_h) rh = min_h;
+			s_win[i].x = rx;
+			s_win[i].y = ry;
+			s_win[i].w = rw;
+			s_win[i].h = rh;
 			if (strstr(val, "hud-win-minimized") || strstr(val, "chat-minimized"))
 				s_win[i].minimized = 1;
 			if (i == ND_WIN_CHAT && strstr(val, "chat-expanded"))
@@ -403,15 +412,19 @@ static int start_win_drag(bud_event *ev, int win_id, int mode)
 	get_win_limits(win_id, &min_w, &min_h, &def_w, &def_h, vw, vh);
 	int cur_w = (ww > 0) ? ww : ((s_win[win_id].w > 0) ? s_win[win_id].w : def_w);
 	int cur_h = (wh > 0) ? wh : ((s_win[win_id].h > 0) ? s_win[win_id].h : def_h);
+	if (cur_w < min_w) cur_w = min_w;
+	if (cur_h < min_h) cur_h = min_h;
 	int dx = 0, dy = 0;
 	get_win_default_pos(win_id, vw, vh, cur_w, cur_h, &dx, &dy);
 	int cur_x = (wx >= 0) ? wx : ((s_win[win_id].x >= 0) ? s_win[win_id].x : dx);
 	int cur_y = (wy >= 0) ? wy : ((s_win[win_id].y >= 0) ? s_win[win_id].y : dy);
+	if (cur_x < 0) cur_x = 0;
+	if (cur_y < 24) cur_y = 24;
 
 	/* Lock live coordinates & dimensions immediately so dragging/resizing never snaps */
 	s_win[win_id].x = cur_x;
 	s_win[win_id].y = cur_y;
-	if (win_id != ND_WIN_TITLE) {
+	if (win_id != ND_WIN_TITLE || mode != ND_DRAG_MOVE) {
 		s_win[win_id].w = cur_w;
 		s_win[win_id].h = cur_h;
 	}
@@ -490,23 +503,31 @@ static int on_win_drag_move(bud_event *ev)
 			s_win[win_id].h = nh;
 		}
 		if (s_drag_mode & ND_DRAG_W) {
+			int right_edge = s_drag_start_x + s_drag_start_w;
 			nw = s_drag_start_w - dx;
 			if (nw < min_w) nw = min_w;
 			if (nw > max_w) nw = max_w;
-			nx = s_drag_start_x + (s_drag_start_w - nw);
-			if (nx < 0) nx = 0;
+			nx = right_edge - nw;
+			if (nx < 0) {
+				nx = 0;
+				nw = right_edge;
+				if (nw < min_w) nw = min_w;
+			}
 			s_win[win_id].x = nx;
 			s_win[win_id].w = nw;
 		}
 		if (s_drag_mode & ND_DRAG_N) {
+			int bottom_edge = s_drag_start_y + s_drag_start_h;
 			nh = s_drag_start_h - dy;
 			if (nh < min_h) nh = min_h;
 			if (nh > max_h) nh = max_h;
-			if (s_win[win_id].y >= 0 || win_id != ND_WIN_CHAT) {
-				ny = s_drag_start_y + (s_drag_start_h - nh);
-				if (ny < 24) ny = 24;
-				s_win[win_id].y = ny;
+			ny = bottom_edge - nh;
+			if (ny < 24) {
+				ny = 24;
+				nh = bottom_edge - 24;
+				if (nh < min_h) nh = min_h;
 			}
+			s_win[win_id].y = ny;
 			s_win[win_id].h = nh;
 		}
 	}
@@ -639,8 +660,8 @@ static void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, 
 		char hid[64];
 		snprintf(hid, sizeof(hid), "%s-%s", id_prefix, handles[i].suf);
 		bud_set_attr(h, "id", hid);
+		bud_set_attr(h, "data-bud-key", hid);
 		bud_set_attr(h, "class", handles[i].cls);
-		bud_set_attr(h, "data-win-id", wid_str);
 		bud_set_attr(h, "data-win-drag", handles[i].mode);
 		bud_bind(h, "mousedown", 0, on_win_drag_down);
 		bud_append(win, h);
@@ -651,8 +672,8 @@ static void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, 
 	char hdr_id[64];
 	snprintf(hdr_id, sizeof(hdr_id), "%s-toolbar", id_prefix);
 	bud_set_attr(hdr, "id", hdr_id);
+	bud_set_attr(hdr, "data-bud-key", hdr_id);
 	bud_set_attr(hdr, "class", "hud-win-toolbar chat-header select-none");
-	bud_set_attr(hdr, "data-win-id", wid_str);
 	bud_set_attr(hdr, "data-win-drag", "16");
 	bud_bind(hdr, "mousedown", 0, on_win_drag_down);
 
@@ -674,7 +695,6 @@ static void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, 
 		snprintf(exp_id, sizeof(exp_id), "%s-toggle-btn", id_prefix);
 		bud_set_attr(exp_btn, "id", exp_id);
 		bud_set_attr(exp_btn, "class", "chat-ctrl-btn");
-		bud_set_attr(exp_btn, "data-win-id", wid_str);
 		bud_set_attr(exp_btn, "title", s_chat_expanded ? "Compact" : "Expand");
 		bud_append(exp_btn, bud_text(s_chat_expanded ? "⤡" : "⤢"));
 		bud_bind(exp_btn, "click", 1, on_toggle_chat);
@@ -687,7 +707,6 @@ static void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, 
 	snprintf(rst_id, sizeof(rst_id), "%s-reset-btn", id_prefix);
 	bud_set_attr(rst_btn, "id", rst_id);
 	bud_set_attr(rst_btn, "class", "chat-ctrl-btn");
-	bud_set_attr(rst_btn, "data-win-id", wid_str);
 	bud_set_attr(rst_btn, "title", "Reset Position & Size");
 	bud_append(rst_btn, bud_text("↺"));
 	bud_bind(rst_btn, "click", 1, on_win_reset);
@@ -699,7 +718,6 @@ static void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, 
 	snprintf(min_id, sizeof(min_id), "%s-min-btn", id_prefix);
 	bud_set_attr(min_btn, "id", min_id);
 	bud_set_attr(min_btn, "class", "chat-ctrl-btn");
-	bud_set_attr(min_btn, "data-win-id", wid_str);
 	bud_set_attr(min_btn, "title", "Close");
 	bud_append(min_btn, bud_text("✕"));
 	bud_bind(min_btn, "click", 1, on_win_minimize);
@@ -1473,6 +1491,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			}
 			bud_node *title_body = bud_element("div");
 			bud_set_attr(title_body, "id", "room-header-text");
+			bud_set_attr(title_body, "data-bud-key", "title-body");
 			bud_set_attr(title_body, "class", "hud-win-body seven-room-title-body truncate");
 			bud_append(title_body, bud_text(text));
 			bud_append(title_win, title_body);
@@ -1483,8 +1502,8 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *overlay = bud_element("div");
 		bud_set_attr(overlay, "id", "map-overlay");
 		bud_set_attr(overlay, "data-bud-key", "map-overlay");
-		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-2 items-end max-w-[360px] overflow-visible");
-		bud_set_attr(overlay, "style", "top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)");
+		bud_set_attr(overlay, "class", "absolute inset-0 z-10 opacity-90 pointer-events-none overflow-visible");
+		bud_set_attr(overlay, "style", "inset:0;top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)");
 
 		/* 3. Unified Minimap / Look-At Window (top-right default, swaps to Look-At card when st->target_ref != 0) */
 		if (map) {
@@ -1504,6 +1523,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			append_win_chrome(map_box, ND_WIN_MAP, "map", has_target_card ? "👁️ Look-At" : "🗺️ Minimap", 0);
 
 			bud_node *map_body = bud_element("div");
+			bud_set_attr(map_body, "data-bud-key", "map-body");
 			bud_set_attr(map_body, "class", "hud-win-body flex flex-col items-center justify-center w-full h-full min-h-0 overflow-hidden");
 			if (has_target_card) {
 				bud_set_attr(map, "class", "hidden");
@@ -1534,6 +1554,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			append_win_chrome(cnt_box, ND_WIN_CONTENTS, "contents", "📦 Room Contents", 0);
 
 			bud_node *cnt_body = bud_element("div");
+			bud_set_attr(cnt_body, "data-bud-key", "contents-body");
 			bud_set_attr(cnt_body, "class", "hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-hidden");
 			bud_append(cnt_body, contents);
 			bud_append(cnt_box, cnt_body);

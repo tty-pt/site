@@ -189,13 +189,15 @@ function buildEventPayload(info, event) {
 		}
 		let wx = -1, wy = -1, ww = 0, wh = 0;
 		if ((info.event === 'mousedown' || info.event === 'pointerdown') && info.node && typeof info.node.closest === 'function') {
-			const winEl = info.node.closest('[data-win-id]');
+			const winEl = info.node.closest('[data-bud-persist-key]') || info.node.closest('[data-win-id]:not([data-win-drag])');
 			if (winEl && typeof winEl.getBoundingClientRect === 'function') {
 				const r = winEl.getBoundingClientRect();
-				const hRect = holder && typeof holder.getBoundingClientRect === 'function' ? holder.getBoundingClientRect() : { left: 0, top: 0 };
+				const isFixed = view && typeof view.getComputedStyle === 'function' && view.getComputedStyle(winEl).position === 'fixed';
+				const cEl = isFixed ? null : ((winEl.offsetParent && (!holder || holder.contains(winEl.offsetParent))) ? winEl.offsetParent : holder);
+				const cRect = cEl && typeof cEl.getBoundingClientRect === 'function' ? cEl.getBoundingClientRect() : { left: 0, top: 0 };
 				if (r && r.width > 0 && r.height > 0) {
-					wx = Math.round(r.left - (hRect.left || 0));
-					wy = Math.round(r.top - (hRect.top || 0));
+					wx = Math.round(r.left - (cRect.left || 0) - (cEl && cEl.clientLeft ? cEl.clientLeft : 0));
+					wy = Math.round(r.top - (cRect.top || 0) - (cEl && cEl.clientTop ? cEl.clientTop : 0));
 					ww = Math.round(r.width);
 					wh = Math.round(r.height);
 				}
@@ -204,7 +206,9 @@ function buildEventPayload(info, event) {
 		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh},${wx},${wy},${ww},${wh}`;
 	}
 	if (event && info.event === 'click' && info.node && typeof info.node.getAttribute === 'function' && info.node.getAttribute('data-item-ref')) {
-		const winEl = typeof info.node.closest === 'function' ? info.node.closest('[data-win-id]') : null;
+		const winEl = typeof info.node.closest === 'function'
+			? (info.node.closest('[data-bud-persist-key]') || info.node.closest('[data-win-id]:not([data-win-drag])'))
+			: null;
 		if (winEl && typeof winEl.getBoundingClientRect === 'function' && typeof info.node.getBoundingClientRect === 'function') {
 			const rowRect = info.node.getBoundingClientRect();
 			const winRect = winEl.getBoundingClientRect();

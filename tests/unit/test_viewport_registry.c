@@ -16,6 +16,20 @@ static bud_node *mock_stage_mount(void)
 	return cv;
 }
 
+static bud_node *find_by_attr(bud_node *n, const char *attr, const char *val)
+{
+	if (!n) return NULL;
+	const char *v = bud_get_attr(n, attr);
+	if (v && strcmp(v, val) == 0)
+		return n;
+	size_t cnt = bud_node_child_count(n);
+	for (size_t i = 0; i < cnt; i++) {
+		bud_node *found = find_by_attr((bud_node *)bud_node_child(n, i), attr, val);
+		if (found) return found;
+	}
+	return NULL;
+}
+
 int main(void)
 {
 	printf("=== Testing Viewport Driver Registry and Clean 2D UI Mode ===\n");
@@ -130,11 +144,60 @@ int main(void)
 	int cx = 0, cy = 0, cw = 0, ch = 0;
 	nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
 	assert(cx == 40 && cy == 50 && cw == 300 && ch == 180);
+	/* Verify corrupted undersized persist values (e.g. 6px width or 24px toolbar height) are clamped to window limits */
+	nd_ui_restore_persist("nd-win-contents", "left:40px;top:4px;width:6px;height:24px;|hud-win hud-win-contents");
+	nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+	assert(cx == 40 && cy == 24 && cw == 200 && ch == 120);
+	nd_ui_restore_persist("nd-win-contents", "left:40px;top:50px;right:auto;bottom:auto;transform:none;width:300px;height:180px;|hud-win hud-win-contents");
 	bud_free_string(html);
 	root = nd_ui_render(&st);
 	html = bud_render_html(root);
 	assert(html != NULL);
 	assert(strstr(html, "style=\"left:40px;top:50px;right:auto;bottom:auto;transform:none;width:300px;height:180px;\"") != NULL);
+
+	/* Test live event dispatch for right-border resize (#contents-resize-e), bottom-right corner resize (#contents-resize-se), and titlebar drag (#contents-toolbar) */
+	{
+		bud_runtime *rt = bud_runtime_new(root);
+		assert(rt != NULL);
+		bud_node *resize_e = find_by_attr(root, "id", "contents-resize-e");
+		bud_node *resize_se = find_by_attr(root, "id", "contents-resize-se");
+		bud_node *toolbar = find_by_attr(root, "id", "contents-toolbar");
+		assert(resize_e != NULL && resize_se != NULL && toolbar != NULL);
+		/* Child resize handles and toolbars must NOT carry data-win-id so closest('[data-win-id]') never matches a handle/toolbar */
+		assert(bud_get_attr(resize_e, "data-win-id") == NULL);
+		assert(bud_get_attr(resize_se, "data-win-id") == NULL);
+		assert(bud_get_attr(toolbar, "data-win-id") == NULL);
+
+		/* 1. Mousedown on right border (#contents-resize-e) with window rect (768, 256, 300, 240): window must NOT teleport to mouse X (1068) */
+		bud_runtime_dispatch(rt, resize_e, "mousedown", "1068,350,1080,720,768,256,300,240");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 768 && cy == 256 && cw == 300 && ch == 240);
+		bud_runtime_dispatch(rt, root, "mousemove@window", "1118,350,1080,720,-1,-1,0,0");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 768 && cy == 256 && cw == 350 && ch == 240);
+		bud_runtime_dispatch(rt, root, "mouseup@window", "1118,350,1080,720,-1,-1,0,0");
+
+		/* 2. Mousedown on bottom-right corner (#contents-resize-se): window must NOT teleport to corner */
+		bud_runtime_dispatch(rt, resize_se, "mousedown", "1118,496,1080,720,768,256,350,240");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 768 && cy == 256 && cw == 350 && ch == 240);
+		bud_runtime_dispatch(rt, root, "mousemove@window", "1148,536,1080,720,-1,-1,0,0");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 768 && cy == 256 && cw == 380 && ch == 280);
+		bud_runtime_dispatch(rt, root, "mouseup@window", "1148,536,1080,720,-1,-1,0,0");
+
+		/* 3. Mousedown on titlebar (#contents-toolbar): window must lock exact window rect (768, 256, 380, 280) with zero jump */
+		bud_runtime_dispatch(rt, toolbar, "mousedown", "900,244,1080,720,768,256,380,280");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 768 && cy == 256 && cw == 380 && ch == 280);
+		bud_runtime_dispatch(rt, root, "mousemove@window", "800,264,1080,720,-1,-1,0,0");
+		nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
+		assert(cx == 668 && cy == 276 && cw == 380 && ch == 280);
+		bud_runtime_dispatch(rt, root, "mouseup@window", "800,264,1080,720,-1,-1,0,0");
+
+		free(rt);
+	}
+
 	nd_ui_reset_win(ND_WIN_CONTENTS);
 	nd_ui_get_win_rect(ND_WIN_CONTENTS, &cx, &cy, &cw, &ch);
 	assert(cx == -1 && cy == -1 && cw == 0 && ch == 0);
