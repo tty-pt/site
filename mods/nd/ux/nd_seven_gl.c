@@ -69,38 +69,37 @@ static const char *s_vs_terrain =
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
 	"}\n"
-	"vec2 getGrad(ivec2 p, ivec2 maxC) {\n"
-	"    float hL = getH(p - ivec2(1, 0), maxC);\n"
-	"    float hR = getH(p + ivec2(1, 0), maxC);\n"
-	"    float hD = getH(p - ivec2(0, 1), maxC);\n"
-	"    float hU = getH(p + ivec2(0, 1), maxC);\n"
-	"    float dx = (p.x <= 0) ? (hR - getH(p, maxC)) : ((p.x >= maxC.x) ? (getH(p, maxC) - hL) : (hR - hL) * 0.5);\n"
-	"    float dy = (p.y <= 0) ? (hU - getH(p, maxC)) : ((p.y >= maxC.y) ? (getH(p, maxC) - hD) : (hU - hD) * 0.5);\n"
-	"    return vec2(dx, dy);\n"
-	"}\n"
 	"float sampleHeightSmooth(vec2 uv, out vec2 out_grad) {\n"
 	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
-	"    vec2 pixelCoord = uv * maxCoordF;\n"
+	"    vec2 pixelCoord = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
 	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
-	"    vec2 f = fract(pixelCoord);\n"
-	"    vec2 w = f * f * (3.0 - 2.0 * f);\n"
+	"    vec2 f = pixelCoord - vec2(iCoord);\n"
+	"    vec2 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
 	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
-	"    ivec2 c00 = clamp(iCoord, ivec2(0), maxCoord);\n"
-	"    ivec2 c10 = clamp(iCoord + ivec2(1, 0), ivec2(0), maxCoord);\n"
-	"    ivec2 c01 = clamp(iCoord + ivec2(0, 1), ivec2(0), maxCoord);\n"
-	"    ivec2 c11 = clamp(iCoord + ivec2(1, 1), ivec2(0), maxCoord);\n"
-	"    float h00 = getH(c00, maxCoord);\n"
-	"    float h10 = getH(c10, maxCoord);\n"
-	"    float h01 = getH(c01, maxCoord);\n"
-	"    float h11 = getH(c11, maxCoord);\n"
+	"    float h00 = getH(iCoord, maxCoord);\n"
+	"    float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
+	"    float h01 = getH(iCoord + ivec2(0, 1), maxCoord);\n"
+	"    float h11 = getH(iCoord + ivec2(1, 1), maxCoord);\n"
+	"    float hM0 = getH(iCoord + ivec2(-1, 0), maxCoord);\n"
+	"    float h20 = getH(iCoord + ivec2(2, 0), maxCoord);\n"
+	"    float hM1 = getH(iCoord + ivec2(-1, 1), maxCoord);\n"
+	"    float h21 = getH(iCoord + ivec2(2, 1), maxCoord);\n"
+	"    float h0M = getH(iCoord + ivec2(0, -1), maxCoord);\n"
+	"    float h1M = getH(iCoord + ivec2(1, -1), maxCoord);\n"
+	"    float h02 = getH(iCoord + ivec2(0, 2), maxCoord);\n"
+	"    float h12 = getH(iCoord + ivec2(1, 2), maxCoord);\n"
 	"    float b0 = mix(h00, h10, w.x);\n"
 	"    float b1 = mix(h01, h11, w.x);\n"
 	"    float height = mix(b0, b1, w.y);\n"
-	"    vec2 g00 = getGrad(c00, maxCoord);\n"
-	"    vec2 g10 = getGrad(c10, maxCoord);\n"
-	"    vec2 g01 = getGrad(c01, maxCoord);\n"
-	"    vec2 g11 = getGrad(c11, maxCoord);\n"
+	"    float cx0 = (iCoord.x <= 0) ? 1.0 : 0.5;\n"
+	"    float cx1 = (iCoord.x + 1 >= maxCoord.x) ? 1.0 : 0.5;\n"
+	"    float cy0 = (iCoord.y <= 0) ? 1.0 : 0.5;\n"
+	"    float cy1 = (iCoord.y + 1 >= maxCoord.y) ? 1.0 : 0.5;\n"
+	"    vec2 g00 = vec2((h10 - hM0) * cx0, (h01 - h0M) * cy0);\n"
+	"    vec2 g10 = vec2((h20 - h00) * cx1, (h11 - h1M) * cy0);\n"
+	"    vec2 g01 = vec2((h11 - hM1) * cx0, (h02 - h00) * cy1);\n"
+	"    vec2 g11 = vec2((h21 - h01) * cx1, (h12 - h10) * cy1);\n"
 	"    vec2 gx0 = mix(g00, g10, w.x);\n"
 	"    vec2 gx1 = mix(g01, g11, w.x);\n"
 	"    vec2 smoothGrad = mix(gx0, gx1, w.y);\n"
@@ -144,7 +143,7 @@ static const char *s_vs_terrain =
 	"    float diff = max(0.0, dot(N, L));\n"
 	"    vLighting = 0.45 + 0.55 * diff;\n"
 	"    vWorldPos = worldXY;\n"
-	"    vWaterDepth = (uSeaLevel > -900.0) ? max(0.0, uSeaLevel - wz) : 0.0;\n"
+	"    vWaterDepth = (uSeaLevel > -900.0) ? (uSeaLevel - wz) : -999.0;\n"
 	"    vDistance = length(worldPos - uCameraPos);\n"
 	"    vViewDir = uCameraPos - worldPos;\n"
 	"    vNormal = N;\n"
@@ -158,6 +157,7 @@ static const char *s_fs_terrain =
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"precision highp int;\n"
+	"precision highp isampler2D;\n"
 	"precision highp sampler2D;\n"
 	"in vec2 vUV;\n"
 	"in float vZ;\n"
@@ -170,7 +170,10 @@ static const char *s_fs_terrain =
 	"in vec3 vTorusNormal;\n"
 	"in vec3 vTangentU;\n"
 	"in vec3 vTangentV;\n"
+	"uniform isampler2D uHeightTex;\n"
 	"uniform sampler2D uSubstrateTex;\n"
+	"uniform vec2 uChunkSpan;\n"
+	"uniform float uHeightScale;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform float uFogStart;\n"
 	"uniform float uFogEnd;\n"
@@ -178,6 +181,47 @@ static const char *s_fs_terrain =
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
 	"out vec4 FragColor;\n"
+	"float getH(ivec2 p, ivec2 maxC) {\n"
+	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
+	"}\n"
+	"float sampleHeightSmooth(vec2 uv, out vec2 out_grad) {\n"
+	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    vec2 pixelCoord = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
+	"    vec2 f = pixelCoord - vec2(iCoord);\n"
+	"    vec2 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
+	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
+	"    float h00 = getH(iCoord, maxCoord);\n"
+	"    float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
+	"    float h01 = getH(iCoord + ivec2(0, 1), maxCoord);\n"
+	"    float h11 = getH(iCoord + ivec2(1, 1), maxCoord);\n"
+	"    float hM0 = getH(iCoord + ivec2(-1, 0), maxCoord);\n"
+	"    float h20 = getH(iCoord + ivec2(2, 0), maxCoord);\n"
+	"    float hM1 = getH(iCoord + ivec2(-1, 1), maxCoord);\n"
+	"    float h21 = getH(iCoord + ivec2(2, 1), maxCoord);\n"
+	"    float h0M = getH(iCoord + ivec2(0, -1), maxCoord);\n"
+	"    float h1M = getH(iCoord + ivec2(1, -1), maxCoord);\n"
+	"    float h02 = getH(iCoord + ivec2(0, 2), maxCoord);\n"
+	"    float h12 = getH(iCoord + ivec2(1, 2), maxCoord);\n"
+	"    float b0 = mix(h00, h10, w.x);\n"
+	"    float b1 = mix(h01, h11, w.x);\n"
+	"    float height = mix(b0, b1, w.y);\n"
+	"    float cx0 = (iCoord.x <= 0) ? 1.0 : 0.5;\n"
+	"    float cx1 = (iCoord.x + 1 >= maxCoord.x) ? 1.0 : 0.5;\n"
+	"    float cy0 = (iCoord.y <= 0) ? 1.0 : 0.5;\n"
+	"    float cy1 = (iCoord.y + 1 >= maxCoord.y) ? 1.0 : 0.5;\n"
+	"    vec2 g00 = vec2((h10 - hM0) * cx0, (h01 - h0M) * cy0);\n"
+	"    vec2 g10 = vec2((h20 - h00) * cx1, (h11 - h1M) * cy0);\n"
+	"    vec2 g01 = vec2((h11 - hM1) * cx0, (h02 - h00) * cy1);\n"
+	"    vec2 g11 = vec2((h21 - h01) * cx1, (h12 - h10) * cy1);\n"
+	"    vec2 gx0 = mix(g00, g10, w.x);\n"
+	"    vec2 gx1 = mix(g01, g11, w.x);\n"
+	"    vec2 smoothGrad = mix(gx0, gx1, w.y);\n"
+	"    out_grad.x = smoothGrad.x * (maxCoordF.x / max(1.0, uChunkSpan.x));\n"
+	"    out_grad.y = smoothGrad.y * (maxCoordF.y / max(1.0, uChunkSpan.y));\n"
+	"    return height;\n"
+	"}\n"
 	"uint chaff_rotl32(uint x, int r) {\n"
 	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
 	"}\n"
@@ -219,64 +263,103 @@ static const char *s_fs_terrain =
 	"    float b1 = mix(b01, b11, u.y);\n"
 	"    return mix(b0, b1, uz) / 255.0;\n"
 	"}\n"
-	"float chaff_fast_noise2d(vec2 p) {\n"
-	"    vec2 ip = floor(p);\n"
-	"    vec2 fp = fract(p);\n"
-	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
-	"    ivec2 c = ivec2(ip);\n"
-	"    float n00 = float(chaff_hash3(ivec3(c.x, c.y, 0), 0xA341316Cu) >> 24u);\n"
-	"    float n10 = float(chaff_hash3(ivec3(c.x + 1, c.y, 0), 0xA341316Cu) >> 24u);\n"
-	"    float n01 = float(chaff_hash3(ivec3(c.x, c.y + 1, 0), 0xA341316Cu) >> 24u);\n"
-	"    float n11 = float(chaff_hash3(ivec3(c.x + 1, c.y + 1, 0), 0xA341316Cu) >> 24u);\n"
-	"    return mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y) * (1.0 / 255.0);\n"
+	"vec2 chaff_grad_dir(int cx, int cy, uint seed) {\n"
+	"    uint h = chaff_hash3(ivec3(cx, cy, 0), seed);\n"
+	"    float gx = float(int(h & 0xFFFFu) - 32768) * (1.0 / 32768.0);\n"
+	"    float gy = float(int(h >> 16u) - 32768) * (1.0 / 32768.0);\n"
+	"    vec2 g = vec2(gx, gy);\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
 	"}\n"
 	"vec3 chaff_grad_noise2d(vec2 p, uint seed) {\n"
 	"    vec2 ip = floor(p);\n"
-	"    vec2 fp = fract(p);\n"
+	"    vec2 fp = p - ip;\n"
 	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
 	"    vec2 du = 30.0 * fp * fp * (fp * (fp - 2.0) + 1.0);\n"
 	"    ivec2 c = ivec2(ip);\n"
-	"    float n00 = float(chaff_hash3(ivec3(c.x, c.y, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"    float n10 = float(chaff_hash3(ivec3(c.x + 1, c.y, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"    float n01 = float(chaff_hash3(ivec3(c.x, c.y + 1, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"    float n11 = float(chaff_hash3(ivec3(c.x + 1, c.y + 1, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"    float k0 = n10 - n00;\n"
-	"    float k1 = n01 - n00;\n"
-	"    float k2 = n11 - n01 - k0;\n"
-	"    float val = n00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n"
-	"    vec2 grad = du * vec2(k0 + k2 * u.y, k1 + k2 * u.x);\n"
-	"    return vec3(val, grad.x, grad.y);\n"
+	"    vec2 g00 = chaff_grad_dir(c.x,     c.y,     seed);\n"
+	"    vec2 g10 = chaff_grad_dir(c.x + 1, c.y,     seed);\n"
+	"    vec2 g01 = chaff_grad_dir(c.x,     c.y + 1, seed);\n"
+	"    vec2 g11 = chaff_grad_dir(c.x + 1, c.y + 1, seed);\n"
+	"    float v00 = dot(g00, fp);\n"
+	"    float v10 = dot(g10, fp - vec2(1.0, 0.0));\n"
+	"    float v01 = dot(g01, fp - vec2(0.0, 1.0));\n"
+	"    float v11 = dot(g11, fp - vec2(1.0, 1.0));\n"
+	"    float k0 = v10 - v00;\n"
+	"    float k1 = v01 - v00;\n"
+	"    float k2 = v11 - v01 - k0;\n"
+	"    float val = 0.5 + 0.70710678 * (v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y);\n"
+	"    vec2 gInterp = g00 + (g10 - g00) * u.x + (g01 - g00) * u.y + (g11 - g01 - g10 + g00) * (u.x * u.y);\n"
+	"    vec2 grad = 0.70710678 * (gInterp + du * vec2(k0 + k2 * u.y, k1 + k2 * u.x));\n"
+	"    return vec3(clamp(val, 0.0, 1.0), grad.x, grad.y);\n"
 	"}\n"
-	"vec4 eval_zoom_terrain_detail(vec2 pos, float dist, float fw) {\n"
-	"    const float freqs[7] = float[7](0.045, 0.14, 0.38, 1.25, 4.20, 12.50, 36.00);\n"
-	"    const float amps[7]  = float[7](0.20,  0.18, 0.20, 0.17, 0.13, 0.09,  0.06);\n"
-	"    const float dFar[7]  = float[7](9000.0, 4200.0, 2400.0, 1400.0, 750.0, 360.0, 160.0);\n"
-	"    const float dNear[7] = float[7](2400.0, 1400.0,  700.0,  380.0, 220.0, 105.0,  36.0);\n"
-	"    const uint  seeds[7] = uint[7](0xA341316Cu, 0xC8013EA4u, 0xAD90777Du, 0x7E95761Eu, 0x3891053Bu, 0x9E3779B9u, 0x85EBCA6Bu);\n"
+	"vec4 eval_zoom_terrain_detail(vec2 pos, float dist, float fw, out vec4 out_octaves) {\n"
+	"    const float freqs[4] = float[4](0.16, 0.85, 4.20, 18.00);\n"
+	"    const float amps[4]  = float[4](0.28, 0.24, 0.18, 0.12);\n"
+	"    const float dFar[4]  = float[4](6500.0, 2200.0, 780.0, 240.0);\n"
+	"    const float dNear[4] = float[4](1600.0,  550.0, 180.0,  38.0);\n"
+	"    const uint  seeds[4] = uint[4](0xA341316Cu, 0xC8013EA4u, 0x3891053Bu, 0x85EBCA6Bu);\n"
+	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
 	"    float h = 0.0;\n"
 	"    vec2 grad = vec2(0.0);\n"
 	"    float cavity = 0.0;\n"
-	"    vec2 pWarp = pos;\n"
-	"    for (int i = 0; i < 7; i++) {\n"
+	"    vec2 pRot = pos;\n"
+	"    mat2 curInvRot = mat2(1.0, 0.0, 0.0, 1.0);\n"
+	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 4; i++) {\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
 	"        float wNyq  = smoothstep(0.55, 0.18, freqs[i] * fw);\n"
 	"        float w = wDist * wNyq;\n"
-	"        if (w <= 0.001) continue;\n"
-	"        vec3 g = chaff_grad_noise2d(pWarp * freqs[i], seeds[i]);\n"
-	"        float signedVal = g.x - 0.5;\n"
-	"        h += signedVal * amps[i] * w;\n"
-	"        grad += g.yz * (freqs[i] * amps[i] * w);\n"
-	"        if (i >= 3) {\n"
-	"            cavity += max(0.0, 0.48 - g.x) * (amps[i] * 2.2 * w);\n"
+	"        if (w > 0.001) {\n"
+	"            vec3 g = chaff_grad_noise2d(pRot * freqs[i], seeds[i]);\n"
+	"            oct[i] = mix(0.5, g.x, w);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            vec2 worldG = curInvRot * g.yz;\n"
+	"            h += signedVal * amps[i] * w;\n"
+	"            grad += worldG * (freqs[i] * amps[i] * w);\n"
+	"            if (i >= 1) {\n"
+	"                cavity += max(0.0, 0.48 - g.x) * (amps[i] * 2.4 * w);\n"
+	"            }\n"
+	"            pRot += g.yz * (0.08 * w);\n"
 	"        }\n"
-	"        pWarp += g.yz * (0.06 * w);\n"
+	"        pRot = rot * pRot;\n"
+	"        curInvRot = curInvRot * irot;\n"
 	"    }\n"
+	"    out_octaves = vec4(oct[0], oct[1], oct[2], oct[3]);\n"
 	"    return vec4(h, grad.x, grad.y, clamp(cavity, 0.0, 0.45));\n"
 	"}\n"
+	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
+	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    vec2 p = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    return texture(uSubstrateTex, (ip + u + 0.5) / texSize);\n"
+	"}\n"
 	"void main() {\n"
-	"    vec2 sampleUV = vUV;\n"
-	"    if (vWaterDepth > 0.0) {\n"
-	"        float depthFactor = clamp(vWaterDepth / 16.0, 0.0, 1.0);\n"
+	"    float fragZ = vZ;\n"
+	"    vec3 fragNormal = normalize(vNormal);\n"
+	"    vec3 torusN = normalize(vTorusNormal);\n"
+	"    vec3 tangentU = normalize(vTangentU);\n"
+	"    vec3 tangentV = normalize(vTangentV);\n"
+	"    float fragWaterDepth = vWaterDepth;\n"
+	"    if (vDistance < 2400.0) {\n"
+	"        float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
+	"        float effectiveScale = scale * 0.0625;\n"
+	"        vec2 fragGrad;\n"
+	"        float raw_h = sampleHeightSmooth(vUV, fragGrad);\n"
+	"        fragZ = raw_h * effectiveScale;\n"
+	"        fragWaterDepth = (uSeaLevel > -900.0) ? (uSeaLevel - fragZ) : -999.0;\n"
+	"        fragNormal = normalize(torusN - fragGrad.x * effectiveScale * tangentU - fragGrad.y * effectiveScale * tangentV);\n"
+	"    }\n"
+	"    float fw = max(1e-4, max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos))));\n"
+	"    vec4 octaves = vec4(0.5);\n"
+	"    vec4 detail = (fragWaterDepth <= 0.25) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, octaves) : vec4(0.0);\n"
+	"    vec2 edgeMask = 4.0 * vUV * (1.0 - vUV);\n"
+	"    vec2 sampleUV = vUV + detail.yz * (0.010 * edgeMask);\n"
+	"    if (fragWaterDepth > 0.0) {\n"
+	"        float depthFactor = clamp(fragWaterDepth / 16.0, 0.0, 1.0);\n"
 	"        vec2 pWave1 = vWorldPos * 0.18 + vec2(uAnimTime * 0.8, -uAnimTime * 0.6);\n"
 	"        vec2 pWave2 = vWorldPos * 0.38 + vec2(-uAnimTime * 1.1, uAnimTime * 0.9);\n"
 	"        vec2 refractOffset = vec2(\n"
@@ -285,104 +368,93 @@ static const char *s_fs_terrain =
 	"        ) * (0.012 * depthFactor);\n"
 	"        sampleUV = clamp(vUV + refractOffset, 0.0, 1.0);\n"
 	"    }\n"
-	"    vec4 baseCol = texture(uSubstrateTex, sampleUV);\n"
-	"    float effLighting = vLighting;\n"
-	"    if (vWaterDepth <= 0.0) {\n"
-	"        float slope = 1.0 - max(0.0, dot(normalize(vNormal), normalize(vTorusNormal)));\n"
-	"        float elevAboveWater = (uSeaLevel > -900.0) ? max(0.0, vZ - uSeaLevel) : max(0.0, vZ);\n"
-	"        float fw = max(1e-4, max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos))));\n"
-	"        vec4 detail = eval_zoom_terrain_detail(vWorldPos, vDistance, fw);\n"
+	"    vec4 baseCol = sampleSubstrateSmooth(sampleUV);\n"
+	"    vec3 L_frag = normalize(vec3(-0.577, -0.577, 0.816));\n"
+	"    float baseDiff = max(0.0, dot(fragNormal, L_frag));\n"
+	"    float effLighting = (vDistance < 2400.0) ? (0.45 + 0.55 * baseDiff) : vLighting;\n"
+	"    if (fragWaterDepth <= 0.25) {\n"
+	"        float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
+	"        float elevAboveWater = (uSeaLevel > -900.0) ? max(0.0, fragZ - uSeaLevel) : max(0.0, fragZ);\n"
 	"        float h0 = detail.x;\n"
 	"        vec2 microGrad = detail.yz;\n"
 	"        float microCavity = detail.w;\n"
+	"        float nMeso  = octaves.x;\n"
+	"        float nStd   = octaves.y;\n"
+	"        float nClose = octaves.z;\n"
+	"        float nUltra = octaves.w;\n"
 	"        float macroFade = clamp((7500.0 - vDistance) / 5000.0, 0.0, 1.0);\n"
 	"        float distFade  = clamp(1.0 - (vDistance - 600.0) / 1800.0, 0.0, 1.0);\n"
-	"        float closeZoom = clamp((340.0 - vDistance) / 240.0, 0.0, 1.0);\n"
-	"        float ultraZoom = clamp((150.0 - vDistance) / 110.0, 0.0, 1.0);\n"
-	"        float rockFactor  = smoothstep(0.17, 0.38, slope);\n"
-	"        float talusFactor = smoothstep(0.10, 0.22, slope) * (1.0 - smoothstep(0.28, 0.42, slope));\n"
+	"        float closeZoom = clamp((380.0 - vDistance) / 260.0, 0.0, 1.0);\n"
+	"        float ultraZoom = clamp((160.0 - vDistance) / 120.0, 0.0, 1.0);\n"
+	"        float rockFactor  = smoothstep(0.16, 0.37, slope);\n"
+	"        float talusFactor = smoothstep(0.09, 0.21, slope) * (1.0 - smoothstep(0.27, 0.41, slope));\n"
 	"        float rockCrevice = 0.0;\n"
 	"        if (rockFactor > 0.0 || talusFactor > 0.0) {\n"
-	"            float warpedZ = vZ + h0 * 2.6 + (chaff_fast_noise2d(vWorldPos * 0.11) - 0.5) * 3.2;\n"
-	"            float strata = sin(warpedZ * 1.85) * 0.14 + cos(warpedZ * 0.72 + vWorldPos.x * 0.035) * 0.09;\n"
-	"            vec3 fracG = chaff_grad_noise2d(vec2(vWorldPos.x * 1.9 + vZ * 0.85, vWorldPos.y * 1.9 - vZ * 0.65), 0x524F434Bu);\n"
-	"            rockCrevice = smoothstep(0.14, 0.015, abs(fracG.x - 0.5)) * distFade;\n"
-	"            float fineGrain = (closeZoom > 0.0) ? (chaff_fast_noise2d(vWorldPos * 16.0) - 0.5) * 0.16 * closeZoom : 0.0;\n"
+	"            float warpedZ = fragZ + h0 * 2.8 + (nMeso - 0.5) * 3.4;\n"
+	"            float strata = sin(warpedZ * 1.85) * 0.13 + (nStd - 0.5) * 0.18;\n"
+	"            vec3 fracG = (distFade > 0.01) ? chaff_grad_noise2d(vec2(vWorldPos.x * 1.65 + fragZ * 0.75, vWorldPos.y * 1.65 - fragZ * 0.55) + microGrad * 0.12, 0x524F434Bu) : vec3(0.5, 0.0, 0.0);\n"
+	"            rockCrevice = smoothstep(0.13, 0.015, abs(fracG.x - 0.5)) * distFade;\n"
+	"            float fineGrain = (nClose - 0.5) * 0.18 * closeZoom + (nUltra - 0.5) * 0.12 * ultraZoom;\n"
 	"            vec3 slateWarm = vec3(0.41, 0.38, 0.35);\n"
 	"            vec3 graniteCool = vec3(0.33, 0.35, 0.37);\n"
-	"            vec3 rockCol = mix(slateWarm, graniteCool, clamp(fracG.x, 0.0, 1.0)) * (0.86 + strata + fineGrain);\n"
-	"            rockCol *= (1.0 - rockCrevice * 0.48);\n"
-	"            float mossLedge = smoothstep(0.32, 0.18, slope) * smoothstep(0.45, 0.75, chaff_fast_noise2d(vWorldPos * 0.65)) * distFade;\n"
+	"            vec3 rockCol = mix(slateWarm, graniteCool, clamp(fracG.x, 0.0, 1.0)) * (0.88 + strata + fineGrain);\n"
+	"            rockCol *= (1.0 - rockCrevice * 0.46);\n"
+	"            float mossLedge = smoothstep(0.32, 0.18, slope) * smoothstep(0.45, 0.75, nMeso * 0.6 + nStd * 0.4) * distFade;\n"
 	"            rockCol = mix(rockCol, vec3(0.22, 0.34, 0.16), mossLedge * 0.55);\n"
 	"            if (talusFactor > 0.0) {\n"
-	"                float scree = chaff_fast_noise2d(vWorldPos * 6.5) * 0.65 + chaff_fast_noise2d(vWorldPos * 18.0) * 0.35;\n"
-	"                vec3 screeCol = vec3(0.36, 0.33, 0.29) * (0.76 + 0.44 * scree);\n"
+	"                float scree = nStd * 0.5 + nClose * 0.35 + nUltra * 0.15;\n"
+	"                vec3 screeCol = vec3(0.36, 0.33, 0.29) * (0.78 + 0.42 * scree);\n"
 	"                baseCol.rgb = mix(baseCol.rgb, screeCol, talusFactor * 0.65 * distFade);\n"
 	"            }\n"
 	"            baseCol.rgb = mix(baseCol.rgb, rockCol, rockFactor);\n"
-	"            microGrad += fracG.yz * (rockFactor * 0.85 * distFade);\n"
+	"            microGrad += fracG.yz * (rockFactor * 0.75 * distFade);\n"
 	"        }\n"
 	"        if (macroFade > 0.0) {\n"
-	"            float soilFactor = smoothstep(0.07, 0.23, slope) * (1.0 - rockFactor);\n"
+	"            float soilFactor = smoothstep(0.07, 0.22, slope) * (1.0 - rockFactor);\n"
 	"            if (soilFactor > 0.0 && distFade > 0.0) {\n"
-	"                float clod = chaff_fast_noise2d(vWorldPos * 2.2);\n"
-	"                float crumb = (closeZoom > 0.0) ? chaff_fast_noise2d(vWorldPos * 11.0) : 0.5;\n"
-	"                float pebble = (ultraZoom > 0.0) ? smoothstep(0.72, 0.88, chaff_fast_noise2d(vWorldPos * 24.0)) : 0.0;\n"
 	"                float soilMoisture = clamp(1.0 - elevAboveWater / 12.0, 0.0, 1.0);\n"
-	"                vec3 loamCol = vec3(0.39, 0.29, 0.19) * (0.78 + 0.34 * clod + 0.18 * (crumb - 0.5) * closeZoom);\n"
-	"                loamCol = mix(loamCol, vec3(0.46, 0.43, 0.39), pebble * 0.55 * ultraZoom);\n"
-	"                loamCol *= (1.0 - soilMoisture * 0.36);\n"
+	"                float pebble = smoothstep(0.68, 0.86, nClose * 0.45 + nUltra * 0.55) * ultraZoom;\n"
+	"                vec3 loamCol = vec3(0.39, 0.29, 0.19) * (0.80 + 0.32 * nStd + 0.20 * (nClose - 0.5) * closeZoom);\n"
+	"                loamCol = mix(loamCol, vec3(0.46, 0.43, 0.39), pebble * 0.50);\n"
+	"                loamCol *= (1.0 - soilMoisture * 0.35);\n"
 	"                baseCol.rgb = mix(baseCol.rgb, loamCol, soilFactor * distFade);\n"
 	"            }\n"
 	"            bool isSandBiome = (baseCol.r > 0.55 && baseCol.g > 0.45 && baseCol.b < 0.45);\n"
-	"            float shoreFactor = smoothstep(6.0, 0.5, elevAboveWater) * (1.0 - rockFactor);\n"
+	"            float shoreFactor = smoothstep(6.0, 0.4, elevAboveWater) * (1.0 - rockFactor);\n"
 	"            float sandSparkle = 0.0;\n"
 	"            float wetSand = 0.0;\n"
 	"            float sandBlend = 0.0;\n"
 	"            if ((isSandBiome || shoreFactor > 0.0) && distFade > 0.0) {\n"
-	"                float rPhase = vWorldPos.x * 2.2 + sin(vWorldPos.y * 1.1) * 1.5 + h0 * 1.8;\n"
-	"                float sandRipple = sin(rPhase) * 0.5 + 0.5;\n"
-	"                vec2 rippleGrad = vec2(cos(rPhase) * 2.2, cos(rPhase) * cos(vWorldPos.y * 1.1) * 1.65) * 0.08;\n"
-	"                float sandGrain = chaff_fast_noise2d(vWorldPos * 5.5);\n"
-	"                float fineQuartz = (closeZoom > 0.0) ? chaff_fast_noise2d(vWorldPos * 22.0) : 0.5;\n"
-	"                float microQuartz = (ultraZoom > 0.0) ? chaff_fast_noise2d(vWorldPos * 44.0) : 0.5;\n"
+	"                float duneWave = nMeso * 0.45 + nStd * 0.55;\n"
 	"                wetSand = smoothstep(2.6, 0.0, elevAboveWater);\n"
-	"                vec3 drySandCol = vec3(0.75, 0.67, 0.49) * (0.88 + 0.20 * sandRipple + 0.14 * (fineQuartz - 0.5) * closeZoom);\n"
-	"                vec3 wetSandCol = vec3(0.50, 0.42, 0.30) * (0.90 + 0.18 * sandGrain + 0.10 * (fineQuartz - 0.5) * closeZoom);\n"
+	"                vec3 drySandCol = vec3(0.75, 0.67, 0.49) * (0.88 + 0.22 * duneWave + 0.16 * (nClose - 0.5) * closeZoom + 0.10 * (nUltra - 0.5) * ultraZoom);\n"
+	"                vec3 wetSandCol = vec3(0.50, 0.42, 0.30) * (0.90 + 0.18 * nStd + 0.12 * (nClose - 0.5) * closeZoom);\n"
 	"                vec3 sandCol = mix(drySandCol, wetSandCol, wetSand);\n"
 	"                sandBlend = isSandBiome ? 1.0 : shoreFactor;\n"
 	"                baseCol.rgb = mix(baseCol.rgb, sandCol, sandBlend * distFade);\n"
-	"                microGrad += rippleGrad * (sandBlend * (1.0 - wetSand * 0.5) * distFade);\n"
-	"                sandSparkle = smoothstep(0.74, 0.94, fineQuartz * 0.6 + microQuartz * 0.4) * closeZoom;\n"
+	"                sandSparkle = smoothstep(0.68, 0.88, nClose * 0.45 + nUltra * 0.55) * closeZoom;\n"
 	"            }\n"
 	"            if (rockFactor < 0.65 && !isSandBiome && shoreFactor < 0.7 && baseCol.g > baseCol.r * 1.02) {\n"
-	"                float meadowMacro = chaff_fast_noise2d(vWorldPos * 0.085);\n"
-	"                float thatchMeso  = chaff_fast_noise2d(vWorldPos * 0.24);\n"
-	"                vec2 bladeCoord = vec2(vWorldPos.x * 1.35 + vWorldPos.y * 0.45, vWorldPos.y * 0.60 - vWorldPos.x * 0.25) + microGrad * 0.06;\n"
-	"                float tuftFine   = (distFade > 0.0) ? chaff_fast_noise2d(bladeCoord * 3.8) : 0.5;\n"
-	"                float bladeMicro = (closeZoom > 0.0) ? chaff_fast_noise2d(bladeCoord * 14.5) : 0.5;\n"
-	"                float fiberUltra = (ultraZoom > 0.0) ? chaff_fast_noise2d(bladeCoord * 34.0) : 0.5;\n"
 	"                vec3 deepMoss = baseCol.rgb * vec3(0.78, 0.96, 0.76);\n"
 	"                vec3 lushTurf = baseCol.rgb * vec3(0.92, 1.09, 0.88);\n"
 	"                vec3 warmClover = baseCol.rgb * vec3(1.12, 1.04, 0.74);\n"
-	"                vec3 vegCol = mix(deepMoss, lushTurf, smoothstep(0.25, 0.68, meadowMacro));\n"
-	"                vegCol = mix(vegCol, warmClover, smoothstep(0.40, 0.74, thatchMeso) * 0.75);\n"
-	"                float bladeRelief = (tuftFine - 0.5) * 0.16 * distFade\n"
-	"                                  + (bladeMicro - 0.5) * 0.18 * closeZoom\n"
-	"                                  + (fiberUltra - 0.5) * 0.12 * ultraZoom;\n"
+	"                vec3 vegCol = mix(deepMoss, lushTurf, smoothstep(0.25, 0.72, nMeso));\n"
+	"                vegCol = mix(vegCol, warmClover, smoothstep(0.38, 0.76, nStd) * 0.70);\n"
+	"                float bladeRelief = (nStd - 0.5) * 0.16 * distFade\n"
+	"                                  + (nClose - 0.5) * 0.20 * closeZoom\n"
+	"                                  + (nUltra - 0.5) * 0.14 * ultraZoom;\n"
 	"                vegCol *= clamp(1.0 + bladeRelief, 0.76, 1.26);\n"
 	"                baseCol.rgb = mix(baseCol.rgb, vegCol, macroFade);\n"
 	"            }\n"
-	"            float normStrength = 0.28 + 0.24 * distFade + 0.18 * closeZoom;\n"
-	"            vec3 N_frag = normalize(vNormal - microGrad.x * normStrength * vTangentU - microGrad.y * normStrength * vTangentV);\n"
-	"            vec3 L_frag = normalize(vec3(-0.577, -0.577, 0.816));\n"
+	"            float normStrength = 0.24 + 0.22 * distFade + 0.16 * closeZoom;\n"
+	"            vec3 N_frag = normalize(fragNormal - microGrad.x * normStrength * tangentU - microGrad.y * normStrength * tangentV);\n"
 	"            vec3 viewDir = normalize(vViewDir);\n"
 	"            vec3 H_half = normalize(L_frag + viewDir);\n"
 	"            float perFragDiff = max(0.0, dot(N_frag, L_frag));\n"
-	"            float cavityAO = clamp(1.0 - slope * 0.28 + h0 * 0.28 - microCavity * 0.45 - rockCrevice * 0.35, 0.52, 1.05);\n"
-	"            float fragLit = (vLighting > 0.32) ? (0.38 * cavityAO + 0.62 * perFragDiff * cavityAO) : (vLighting * cavityAO);\n"
-	"            effLighting = mix(vLighting, fragLit, macroFade);\n"
-	"            float microShade = clamp(1.0 + h0 * (0.32 + 0.16 * closeZoom) * macroFade, 0.70, 1.30);\n"
+	"            float cavityAO = clamp(1.0 - slope * 0.26 + h0 * 0.26 - microCavity * 0.42 - rockCrevice * 0.34, 0.54, 1.05);\n"
+	"            float fragLit = 0.40 * cavityAO + 0.60 * perFragDiff * cavityAO;\n"
+	"            effLighting = mix(effLighting, fragLit, macroFade);\n"
+	"            float microShade = clamp(1.0 + h0 * (0.30 + 0.16 * closeZoom) * macroFade, 0.72, 1.28);\n"
 	"            baseCol.rgb *= microShade;\n"
 	"            if (sandBlend > 0.0 && distFade > 0.0) {\n"
 	"                float sandSpecAngle = max(0.0, dot(N_frag, H_half));\n"
@@ -399,8 +471,9 @@ static const char *s_fs_terrain =
 	"        }\n"
 	"    }\n"
 	"    vec3 lit = baseCol.rgb * effLighting;\n"
-	"    if (vWaterDepth > 0.0) {\n"
-	"        float d = clamp(vWaterDepth, 0.0, 32.0);\n"
+	"    if (fragWaterDepth > 0.0) {\n"
+	"        float d = clamp(fragWaterDepth, 0.0, 32.0);\n"
+	"        float wetBlend = smoothstep(0.0, 0.20, fragWaterDepth);\n"
 	"        float distFade = clamp(1.0 - (vDistance - 600.0) / 1800.0, 0.0, 1.0);\n"
 	"        float caustic = 0.0;\n"
 	"        if (distFade > 0.01) {\n"
@@ -417,7 +490,7 @@ static const char *s_fs_terrain =
 	"        vec3 seabedAbsorption = exp(-vec3(0.065, 0.020, 0.005) * opticalPath);\n"
 	"        vec3 seabedColor = (lit + seabedCaustic) * seabedAbsorption;\n"
 	"        vec3 deepOceanScattered = vec3(0.012, 0.08, 0.30) * (1.0 - exp(-vec3(0.018, 0.030, 0.055) * opticalPath));\n"
-	"        lit = seabedColor + deepOceanScattered;\n"
+	"        lit = mix(lit, seabedColor + deepOceanScattered, wetBlend);\n"
 	"    }\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
@@ -1369,12 +1442,21 @@ static void init_grid_buffers(void)
 			uint16_t i2 = (uint16_t)((y + 1) * GL_GRID_VERTS + x);
 			uint16_t i3 = (uint16_t)(i2 + 1);
 
-			indices[i_idx++] = i0;
-			indices[i_idx++] = i1;
-			indices[i_idx++] = i2;
-			indices[i_idx++] = i1;
-			indices[i_idx++] = i3;
-			indices[i_idx++] = i2;
+			if ((x + y) & 1) {
+				indices[i_idx++] = i0;
+				indices[i_idx++] = i1;
+				indices[i_idx++] = i3;
+				indices[i_idx++] = i0;
+				indices[i_idx++] = i3;
+				indices[i_idx++] = i2;
+			} else {
+				indices[i_idx++] = i0;
+				indices[i_idx++] = i1;
+				indices[i_idx++] = i2;
+				indices[i_idx++] = i1;
+				indices[i_idx++] = i3;
+				indices[i_idx++] = i2;
+			}
 		}
 	}
 
@@ -1404,12 +1486,21 @@ static void init_grid_buffers(void)
 			uint16_t i2 = (uint16_t)((y + 1) * GL_GRID_VERTS_HI + x);
 			uint16_t i3 = (uint16_t)(i2 + 1);
 
-			indices_hi[i_idx_hi++] = i0;
-			indices_hi[i_idx_hi++] = i1;
-			indices_hi[i_idx_hi++] = i2;
-			indices_hi[i_idx_hi++] = i1;
-			indices_hi[i_idx_hi++] = i3;
-			indices_hi[i_idx_hi++] = i2;
+			if ((x + y) & 1) {
+				indices_hi[i_idx_hi++] = i0;
+				indices_hi[i_idx_hi++] = i1;
+				indices_hi[i_idx_hi++] = i3;
+				indices_hi[i_idx_hi++] = i0;
+				indices_hi[i_idx_hi++] = i3;
+				indices_hi[i_idx_hi++] = i2;
+			} else {
+				indices_hi[i_idx_hi++] = i0;
+				indices_hi[i_idx_hi++] = i1;
+				indices_hi[i_idx_hi++] = i2;
+				indices_hi[i_idx_hi++] = i1;
+				indices_hi[i_idx_hi++] = i3;
+				indices_hi[i_idx_hi++] = i2;
+			}
 		}
 	}
 
@@ -1900,6 +1991,17 @@ static inline uint32_t gl_chaff_hash3(int32_t px, int32_t py, int32_t pz, uint32
 	return h;
 }
 
+static inline void gl_chaff_grad_dir(int32_t cx, int32_t cy, uint32_t seed,
+                                     float *out_gx, float *out_gy)
+{
+	uint32_t h = gl_chaff_hash3(cx, cy, 0, seed);
+	float gx = (float)((int32_t)(h & 0xFFFFu) - 32768) * (1.0f / 32768.0f);
+	float gy = (float)((int32_t)(h >> 16u) - 32768) * (1.0f / 32768.0f);
+	float inv_len = 1.0f / sqrtf(gx * gx + gy * gy + 1e-6f);
+	*out_gx = gx * inv_len;
+	*out_gy = gy * inv_len;
+}
+
 static inline void gl_chaff_grad_noise2d(float px, float py, uint32_t seed,
                                          float *out_val, float *out_gx, float *out_gy)
 {
@@ -1914,17 +2016,30 @@ static inline void gl_chaff_grad_noise2d(float px, float py, uint32_t seed,
 	int32_t cx = (int32_t)ipx;
 	int32_t cy = (int32_t)ipy;
 
-	float n00 = (float)(gl_chaff_hash3(cx,     cy,     0, seed) >> 24u) * (1.0f / 255.0f);
-	float n10 = (float)(gl_chaff_hash3(cx + 1, cy,     0, seed) >> 24u) * (1.0f / 255.0f);
-	float n01 = (float)(gl_chaff_hash3(cx,     cy + 1, 0, seed) >> 24u) * (1.0f / 255.0f);
-	float n11 = (float)(gl_chaff_hash3(cx + 1, cy + 1, 0, seed) >> 24u) * (1.0f / 255.0f);
+	float g00x, g00y, g10x, g10y, g01x, g01y, g11x, g11y;
+	gl_chaff_grad_dir(cx,     cy,     seed, &g00x, &g00y);
+	gl_chaff_grad_dir(cx + 1, cy,     seed, &g10x, &g10y);
+	gl_chaff_grad_dir(cx,     cy + 1, seed, &g01x, &g01y);
+	gl_chaff_grad_dir(cx + 1, cy + 1, seed, &g11x, &g11y);
 
-	float k0 = n10 - n00;
-	float k1 = n01 - n00;
-	float k2 = n11 - n01 - k0;
-	*out_val = n00 + k0 * ux + k1 * uy + k2 * ux * uy;
-	*out_gx  = dux * (k0 + k2 * uy);
-	*out_gy  = duy * (k1 + k2 * ux);
+	float v00 = g00x * fpx + g00y * fpy;
+	float v10 = g10x * (fpx - 1.0f) + g10y * fpy;
+	float v01 = g01x * fpx + g01y * (fpy - 1.0f);
+	float v11 = g11x * (fpx - 1.0f) + g11y * (fpy - 1.0f);
+
+	float k0 = v10 - v00;
+	float k1 = v01 - v00;
+	float k2 = v11 - v01 - k0;
+	float val = 0.5f + 0.70710678f * (v00 + k0 * ux + k1 * uy + k2 * ux * uy);
+	if (val < 0.0f) val = 0.0f;
+	if (val > 1.0f) val = 1.0f;
+
+	float gix = g00x + (g10x - g00x) * ux + (g01x - g00x) * uy + (g11x - g01x - g10x + g00x) * (ux * uy);
+	float giy = g00y + (g10y - g00y) * ux + (g01y - g00y) * uy + (g11y - g01y - g10y + g00y) * (ux * uy);
+
+	*out_val = val;
+	*out_gx  = 0.70710678f * (gix + dux * (k0 + k2 * uy));
+	*out_gy  = 0.70710678f * (giy + duy * (k1 + k2 * ux));
 }
 
 static inline float gl_smoothstep(float edge0, float edge1, float x)
@@ -1940,22 +2055,23 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
                                       float *out_grad_x, float *out_grad_y,
                                       float *out_cavity_ao)
 {
-	static const float freqs[7] = { 0.045f, 0.14f, 0.38f, 1.25f, 4.20f, 12.50f, 36.00f };
-	static const float amps[7]  = { 0.20f,  0.18f, 0.20f, 0.17f, 0.13f, 0.09f,  0.06f  };
-	static const float dFar[7]  = { 9000.0f, 4200.0f, 2400.0f, 1400.0f, 750.0f, 360.0f, 160.0f };
-	static const float dNear[7] = { 2400.0f, 1400.0f,  700.0f,  380.0f, 220.0f, 105.0f,  36.0f };
-	static const uint32_t seeds[7] = {
-		0xA341316Cu, 0xC8013EA4u, 0xAD90777Du, 0x7E95761Eu,
-		0x3891053Bu, 0x9E3779B9u, 0x85EBCA6Bu
+	static const float freqs[4] = { 0.16f, 0.85f, 4.20f, 18.00f };
+	static const float amps[4]  = { 0.28f, 0.24f, 0.18f, 0.12f  };
+	static const float dFar[4]  = { 6500.0f, 2200.0f, 780.0f, 240.0f };
+	static const float dNear[4] = { 1600.0f,  550.0f, 180.0f,  38.0f };
+	static const uint32_t seeds[4] = {
+		0xA341316Cu, 0xC8013EA4u, 0x3891053Bu, 0x85EBCA6Bu
 	};
 
 	float fw = (pixel_footprint > 1e-4f) ? pixel_footprint : 1e-4f;
 	float h = 0.0f;
 	float gx = 0.0f, gy = 0.0f;
 	float cavity = 0.0f;
-	float pwx = wx, pwy = wy;
+	float prx = wx, pry = wy;
+	/* curInvRot column-major 2x2: initially identity */
+	float ir00 = 1.0f, ir01 = 0.0f, ir10 = 0.0f, ir11 = 1.0f;
 
-	for (int i = 0; i < 7; i++) {
+	for (int i = 0; i < 4; i++) {
 		float span = dFar[i] - dNear[i];
 		float wDist = (dFar[i] - cam_dist) / (span > 1.0f ? span : 1.0f);
 		if (wDist < 0.0f) wDist = 0.0f;
@@ -1963,19 +2079,32 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
 
 		float wNyq = gl_smoothstep(0.55f, 0.18f, freqs[i] * fw);
 		float w = wDist * wNyq;
-		if (w <= 0.001f) continue;
-
-		float val = 0.0f, ogx = 0.0f, ogy = 0.0f;
-		gl_chaff_grad_noise2d(pwx * freqs[i], pwy * freqs[i], seeds[i], &val, &ogx, &ogy);
-		float signedVal = val - 0.5f;
-		h  += signedVal * amps[i] * w;
-		gx += ogx * (freqs[i] * amps[i] * w);
-		gy += ogy * (freqs[i] * amps[i] * w);
-		if (i >= 3 && val < 0.48f) {
-			cavity += (0.48f - val) * (amps[i] * 2.2f * w);
+		if (w > 0.001f) {
+			float val = 0.0f, ogx = 0.0f, ogy = 0.0f;
+			gl_chaff_grad_noise2d(prx * freqs[i], pry * freqs[i], seeds[i], &val, &ogx, &ogy);
+			float signedVal = val - 0.5f;
+			float wgx = ir00 * ogx + ir10 * ogy;
+			float wgy = ir01 * ogx + ir11 * ogy;
+			h  += signedVal * amps[i] * w;
+			gx += wgx * (freqs[i] * amps[i] * w);
+			gy += wgy * (freqs[i] * amps[i] * w);
+			if (i >= 1 && val < 0.48f) {
+				cavity += (0.48f - val) * (amps[i] * 2.4f * w);
+			}
+			prx += ogx * (0.08f * w);
+			pry += ogy * (0.08f * w);
 		}
-		pwx += ogx * (0.06f * w);
-		pwy += ogy * (0.06f * w);
+		/* Rotate pRot by mat2(0.8, -0.6, 0.6, 0.8) */
+		float n_prx =  0.8f * prx + 0.6f * pry;
+		float n_pry = -0.6f * prx + 0.8f * pry;
+		prx = n_prx;
+		pry = n_pry;
+		/* Update curInvRot = curInvRot * mat2(0.8, 0.6, -0.6, 0.8) */
+		float nir00 = ir00 * 0.8f + ir10 * 0.6f;
+		float nir01 = ir01 * 0.8f + ir11 * 0.6f;
+		float nir10 = ir00 * (-0.6f) + ir10 * 0.8f;
+		float nir11 = ir01 * (-0.6f) + ir11 * 0.8f;
+		ir00 = nir00; ir01 = nir01; ir10 = nir10; ir11 = nir11;
 	}
 
 	if (cavity > 0.45f) cavity = 0.45f;

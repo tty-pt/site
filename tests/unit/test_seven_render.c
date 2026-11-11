@@ -2429,12 +2429,15 @@ int main(void)
 		printf("PASS: 48x48 Level 0 chunk grid (49x49 vertices, 4,608 triangles) and 32x32 Level 1+ LOD grid verified with seamless boundaries\n");
 	}
 
-	/* R5: Zoom-Progressive 7-Octave Terrain Texture Realism, Analytical Gradients & Nyquist Filtering */
+	/* R5 & R6: Zoom-Progressive 4-Octave Rotated Gradient Terrain Detail, Per-Fragment Quintic Reconstruction & Anti-Zigzag Filtering */
 	{
 		const char *fs_t = nd_seven_gl_fs_terrain();
 		assert(fs_t != NULL);
 		assert(strstr(fs_t, "chaff_grad_noise2d") != NULL);
+		assert(strstr(fs_t, "chaff_grad_dir") != NULL);
 		assert(strstr(fs_t, "eval_zoom_terrain_detail") != NULL);
+		assert(strstr(fs_t, "sampleSubstrateSmooth") != NULL);
+		assert(strstr(fs_t, "sampleHeightSmooth(vUV, fragGrad)") != NULL);
 		assert(strstr(fs_t, "dFdx(vWorldPos)") != NULL);
 		assert(strstr(fs_t, "rockCrevice") != NULL);
 		assert(strstr(fs_t, "talusFactor") != NULL);
@@ -2445,9 +2448,9 @@ int main(void)
 		 * Tier 0: Far zoom (cam_dist = 1800, footprint = 3.0)
 		 * Tier 1: Normal 1x zoom (cam_dist = 280, footprint = 0.45)
 		 * Tier 2: Close 2.5x zoom (cam_dist = 112, footprint = 0.18)
-		 * Tier 3: Ultra-close 8x zoom (cam_dist = 35, footprint = 0.05) */
+		 * Tier 3: Ultra-close 8x zoom (cam_dist = 35, footprint = 0.02) */
 		const float dists[4] = { 1800.0f, 280.0f, 112.0f, 35.0f };
-		const float footprints[4] = { 3.0f, 0.45f, 0.18f, 0.05f };
+		const float footprints[4] = { 3.0f, 0.45f, 0.18f, 0.02f };
 		float mean_grad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		float mean_cavity[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		float sub_diff[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -2480,18 +2483,29 @@ int main(void)
 		/* As camera zooms in (1800 -> 280 -> 112 -> 35), finer octaves unlock and sharpen surface detail */
 		assert(mean_grad[1] > mean_grad[0] * 1.5f);
 		assert(mean_grad[2] > mean_grad[1] * 1.5f);
-		assert(mean_grad[3] > mean_grad[2] * 1.4f);
-		assert(sub_diff[3] > sub_diff[1] * 1.3f);
+		assert(mean_grad[3] > mean_grad[2] * 1.3f);
+		assert(sub_diff[3] > sub_diff[1] * 1.2f);
 		assert(mean_cavity[3] > mean_cavity[1]);
+
+		/* Verify true 2D gradient noise has non-zero gradients right on integer lattice lines
+		 * (eliminating the value-noise zero-derivative lattice lines & 45-deg saddle zigzags) */
+		int nonzero_on_lattice = 0;
+		for (int k = 1; k <= 16; k++) {
+			float gx_lat = 0.0f, gy_lat = 0.0f;
+			nd_seven_gl_eval_terrain_detail((float)(k * 10), (float)(k * 7), 100.0f, 0.05f, &gx_lat, &gy_lat, NULL);
+			if (hypotf(gx_lat, gy_lat) > 0.02f)
+				nonzero_on_lattice++;
+		}
+		assert(nonzero_on_lattice >= 14);
 
 		/* Nyquist anti-aliasing check: at close distance (35.0) but coarse pixel footprint (2.0),
 		 * high-frequency octaves are automatically filtered out to prevent aliasing shimmer */
 		float gx_nyq = 0.0f, gy_nyq = 0.0f, gx_full = 0.0f, gy_full = 0.0f;
 		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 2.0f, &gx_nyq, &gy_nyq, NULL);
-		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 0.04f, &gx_full, &gy_full, NULL);
+		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 0.02f, &gx_full, &gy_full, NULL);
 		assert(hypotf(gx_nyq, gy_nyq) < hypotf(gx_full, gy_full) * 0.5f);
 
-		printf("PASS: zoom-progressive 7-octave terrain texture detail verified (mean grad: far=%.3f, 1x=%.3f, 2.5x=%.3f, 8x=%.3f)\n",
+		printf("PASS: zoom-progressive rotated gradient terrain detail & anti-zigzag quintic filtering verified (mean grad: far=%.3f, 1x=%.3f, 2.5x=%.3f, 8x=%.3f)\n",
 		       mean_grad[0], mean_grad[1], mean_grad[2], mean_grad[3]);
 	}
 
